@@ -1,4 +1,4 @@
-// Package main implements the todo/sync_to_provider skill.
+// Package main implements the todo/sync_to_provider skill for syncing tasks from agentctl to external providers.
 //
 // This skill syncs todos TO a provider (e.g., Claude Code) FROM agentctl's
 // task management system. It is the outbound sync direction.
@@ -20,6 +20,7 @@ import (
 
 const command = "todo/sync_to_provider"
 
+// input defines the skill input parameters for outbound todo synchronization with comprehensive configuration options.
 type input struct {
 	// Provider is the target provider ("claude" is currently the only supported value)
 	Provider string `json:"provider" validate:"required,oneof=claude"`
@@ -46,6 +47,7 @@ type input struct {
 	DryRun bool `json:"dry_run"`
 }
 
+// output contains the skill result data with synchronization statistics and file operation details.
 type output struct {
 	Written   int                   `json:"written"`
 	Updated   int                   `json:"updated"`
@@ -57,10 +59,21 @@ type output struct {
 	DryRun    bool                  `json:"dry_run,omitempty"`
 }
 
+// main is the skill entry point for todo/sync_to_provider with comprehensive outbound sync capabilities.
 func main() {
 	skillmain.Main(command, run)
 }
 
+// run orchestrates outbound todo synchronization with permission checks, task projection, and provider file writing.
+//
+// Index:
+// - Purpose: Sync tasks from agentctl to external providers (Claude Code) with configurable formatting and ordering
+// - Flow: check permissions → open task store → resolve session → build projection config → sync tasks → write provider file → emit results
+// - SideEffects: writes to provider state files outside workspace; modifies external todo systems; handles file conflicts
+// - FailureModes: permission denied, task store errors, provider file write failures, sync conflicts, invalid configurations
+// - Observability: emits sync statistics, file operation results, warning messages, dry-run outputs, and comprehensive sync tracking
+// - Related: todosync.NewService, todos.NewStore, sessionkit.OpenTasks
+// - Keywords: todo/sync_to_provider, outbound_sync, provider_integration, task_projection, claude_code_sync
 func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	// Check write permission
 	allowProviderState := os.Getenv("AGENTCTL_ALLOW_PROVIDER_STATE") == "1"

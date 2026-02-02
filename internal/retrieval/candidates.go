@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/jkatigb/agentctl/internal/indexing/semantic"
+	"github.com/jkatigb/agentctl/internal/platform/config"
 	"github.com/jkatigb/agentctl/internal/storage"
 	"github.com/jkatigb/agentctl/internal/storage/memory"
 	"github.com/rs/zerolog"
@@ -68,6 +69,7 @@ type Generator struct {
 	store           storage.MemoryStore
 	searchableStore *memory.SearchableStore    // Optional, for vector search
 	embedProvider   semantic.EmbeddingProvider // nil = skip semantic search
+	embedQueryMode  config.EmbedQueryMode
 	workspaceRoot   string
 	logger          zerolog.Logger
 }
@@ -100,6 +102,12 @@ func (g *Generator) WithSearchableStore(ss *memory.SearchableStore) *Generator {
 	return g
 }
 
+// WithEmbedQueryMode sets the embedding query mode used for semantic search.
+func (g *Generator) WithEmbedQueryMode(mode config.EmbedQueryMode) *Generator {
+	g.embedQueryMode = mode
+	return g
+}
+
 // Generate produces ranked candidates for a question.
 //
 // The generation process:
@@ -108,6 +116,14 @@ func (g *Generator) WithSearchableStore(ss *memory.SearchableStore) *Generator {
 //  3. Fall back to ripgrep if results are sparse
 //  4. Merge, deduplicate, and rank all candidates
 //  5. Apply final limit and return
+//
+// Index:
+// - Purpose: Merge symbol, semantic, and ripgrep sources into ranked candidates
+// - Flow: search symbols → search semantic → optional ripgrep → merge scores → trim limit
+// - SideEffects: may call embedding providers; runs ripgrep subprocess
+// - FailureModes: search errors, embedding errors, ripgrep failures
+// - Related: searchSymbolIndex, searchSemanticIndex, ripgrepFallback, mergeCandidates
+// - Keywords: candidates, semantic, symbols, ripgrep, max_total_candidates
 func (g *Generator) Generate(ctx context.Context, workspaceID, question string, opts Options) (*GenerateResult, error) {
 	if opts.MaxTotalCandidates == 0 {
 		opts = DefaultOptions()

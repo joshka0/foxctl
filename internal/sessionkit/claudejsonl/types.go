@@ -1,9 +1,3 @@
-// Package claudejsonl provides types and parsing for Claude Code's JSONL session format.
-//
-// Claude Code stores conversation history in JSONL files located at:
-// ~/.claude/projects/<workspace-hash>/<session-id>.jsonl
-//
-// Each line contains a JSON message with nested content structures.
 package claudejsonl
 
 import "encoding/json"

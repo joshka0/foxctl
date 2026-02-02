@@ -1,7 +1,3 @@
-// Package daemon provides a persistent agentctl service for fast skill execution.
-//
-// The daemon pre-loads configuration, opens database connections, and maintains
-// warm resources to reduce hook latency from ~300ms to <50ms.
 package daemon
 
 import (
@@ -105,6 +101,14 @@ type Service struct {
 }
 
 // NewService creates a new daemon service.
+//
+// Index:
+// - Purpose: Initialize daemon service state and shared resources
+// - Flow: load env → init DB pool → build resolver → optionally warm workspace
+// - SideEffects: reads env; initializes sqlite pool; starts warm goroutine
+// - FailureModes: none (initialization uses defaults)
+// - Related: Service.Run, Service.warmWorkspace
+// - Keywords: daemon_service, warm_workspace, sqlite_pool, skill_resolver
 func NewService(cfg config.Config, opts ServiceOptions) (*Service, error) {
 	// Load environment variables from .env files
 	config.LoadDotEnv()
@@ -133,6 +137,14 @@ func NewService(cfg config.Config, opts ServiceOptions) (*Service, error) {
 }
 
 // Run starts the daemon service and blocks until shutdown.
+//
+// Index:
+// - Purpose: Start daemon listener and background workers
+// - Flow: create socket → start workers → accept connections → wait for shutdown
+// - SideEffects: listens on socket; starts goroutines; writes PID file
+// - FailureModes: socket errors, PID file errors, worker start errors
+// - Related: Service.Shutdown, Service.acceptLoop
+// - Keywords: daemon_run, unix_socket, shutdown, summary_worker, context_updater
 func (s *Service) Run(ctx context.Context) error {
 	// Remove stale socket
 	socketPath := SocketPath()
@@ -200,6 +212,14 @@ func (s *Service) Run(ctx context.Context) error {
 }
 
 // Shutdown gracefully shuts down the daemon.
+//
+// Index:
+// - Purpose: Stop daemon workers and release resources
+// - Flow: signal shutdown → wait for requests → stop workers → close stores → remove socket
+// - SideEffects: stops goroutines; closes databases; removes socket/PID
+// - FailureModes: context timeout while waiting for in-flight requests
+// - Related: Service.Run, Service.acceptLoop
+// - Keywords: daemon_shutdown, stop_workers, close_stores, socket_path
 func (s *Service) Shutdown(ctx context.Context) error {
 	s.shutdownOnce.Do(func() {
 		s.shutdownMu.Lock()
@@ -305,6 +325,14 @@ func (s *Service) Shutdown(ctx context.Context) error {
 }
 
 // acceptLoop accepts connections and handles them.
+//
+// Index:
+// - Purpose: Accept daemon connections and dispatch handlers
+// - Flow: accept conn → guard shutdown → spawn handler goroutine
+// - SideEffects: spawns goroutines; reads socket
+// - FailureModes: accept errors ignored unless shutting down
+// - Related: Service.handleConnection
+// - Keywords: accept_loop, unix_socket, goroutine, shutdown
 func (s *Service) acceptLoop(ctx context.Context) {
 	for {
 		conn, err := s.listener.Accept()
@@ -356,6 +384,14 @@ type Error struct {
 }
 
 // handleConnection handles a single client connection.
+//
+// Index:
+// - Purpose: Decode daemon request and route to handler
+// - Flow: decode request → switch method → build response → write response
+// - SideEffects: reads/writes socket; updates request count
+// - FailureModes: parse errors, handler errors
+// - Related: Service.handleRun, Service.handleStatus
+// - Keywords: daemon_request, json_rpc, handle_run, handle_status
 func (s *Service) handleConnection(ctx context.Context, conn net.Conn) {
 	defer conn.Close()
 
@@ -490,6 +526,15 @@ type RunResult struct {
 	Duration float64         `json:"duration_ms"`
 }
 
+// handleRun executes a skill through the runner and returns its output.
+//
+// Index:
+// - Purpose: Execute a skill in the daemon process
+// - Flow: parse params → resolve skill → build env → run skill → build result
+// - SideEffects: executes skill binary; reads/writes env; uses CAS
+// - FailureModes: invalid params, resolve failures, runner errors
+// - Related: SkillResolver.Resolve, runner.RunWithOptions
+// - Keywords: daemon_run, skill, runner, output, stderr
 func (s *Service) handleRun(ctx context.Context, params json.RawMessage) (*RunResult, error) {
 	start := time.Now()
 
@@ -599,6 +644,14 @@ func (s *Service) handleWarm(params json.RawMessage) (map[string]any, error) {
 }
 
 // warmWorkspace pre-warms resources for a workspace.
+//
+// Index:
+// - Purpose: Warm LSP and caches for faster future requests
+// - Flow: check warm map → start gopls daemon → mark warm
+// - SideEffects: starts gopls daemon; updates warm set
+// - FailureModes: gopls startup failures ignored
+// - Related: Service.Run, Service.handleWarm
+// - Keywords: warm_workspace, gopls, lsp, warm_cache
 func (s *Service) warmWorkspace(workspace string) {
 	defer s.wg.Done()
 
@@ -673,6 +726,14 @@ func (s *Service) getCacheStore(ctx context.Context) (*cache.Store, error) { //n
 }
 
 // Daemonize forks the current process to run in background.
+//
+// Index:
+// - Purpose: Spawn daemon child process and detach from terminal
+// - Flow: check env → resolve executable → start child → detach IO
+// - SideEffects: starts child process
+// - FailureModes: executable lookup errors, process start errors
+// - Related: exec.Start, Client.EnsureRunningContext
+// - Keywords: daemonize, background, socket, child_process
 func Daemonize() error {
 	// Check if we're already daemonized
 	if os.Getenv("AGENTCTL_DAEMON_CHILD") == "1" {
@@ -720,6 +781,14 @@ func Daemonize() error {
 }
 
 // startSummaryWorker initializes and starts the background summary worker.
+//
+// Index:
+// - Purpose: Start background session summarization worker
+// - Flow: check providers → open stores → create worker → start worker
+// - SideEffects: opens stores; starts worker goroutine
+// - FailureModes: store open errors, worker start errors
+// - Related: summary.NewWorker
+// - Keywords: summary_worker, sessions, queue, llm_provider
 func (s *Service) startSummaryWorker(ctx context.Context) error {
 	// Check if LLM providers are available
 	providers := llmproviders.SummarizationProviders()
@@ -769,6 +838,14 @@ func (s *Service) startSummaryWorker(ctx context.Context) error {
 }
 
 // startContextUpdater initializes and starts the background context updater worker.
+//
+// Index:
+// - Purpose: Start context updater for proactive context surfacing
+// - Flow: open stores → build finder/injector → start worker
+// - SideEffects: opens stores; starts worker goroutine; logs to stderr
+// - FailureModes: store open errors, worker creation errors
+// - Related: updater.NewWorkerFromConfig
+// - Keywords: context_updater, memory_store, session_store, injector
 func (s *Service) startContextUpdater(ctx context.Context) error {
 	// Check if cheap LLM providers are available
 	if !updater.Available(s.cfg) {
@@ -874,6 +951,14 @@ func (s *Service) startContextUpdater(ctx context.Context) error {
 }
 
 // startFileSummaryWorker initializes and starts the background file summary worker.
+//
+// Index:
+// - Purpose: Start background file summary worker for workspace
+// - Flow: resolve workspace → open memory store → configure providers → start worker
+// - SideEffects: opens memory store; starts worker goroutine
+// - FailureModes: missing workspace, provider errors, worker start errors
+// - Related: filesummary.NewWorker
+// - Keywords: file_summary, memory_store, workspace, llm_provider
 func (s *Service) startFileSummaryWorker(ctx context.Context) error {
 	// Check if we have a workspace
 	workspace := s.opts.Workspace
@@ -953,6 +1038,14 @@ func (s *Service) startFileSummaryWorker(ctx context.Context) error {
 }
 
 // startAgentOrchestration initializes the agent runtime and overseer.
+//
+// Index:
+// - Purpose: Start agent runtime, overseer, and hook infrastructure
+// - Flow: resolve LLM config → open stores → create runtime/overseer → recover sessions
+// - SideEffects: opens stores; starts agent runtime
+// - FailureModes: missing LLM keys, store open errors
+// - Related: runtime.NewRuntime, runtime.NewOverseer
+// - Keywords: agent_orchestration, runtime, overseer, hook_dispatcher
 func (s *Service) startAgentOrchestration(ctx context.Context) error {
 	// Determine LLM configuration from centralized config
 	// Priority: configured provider > CEREBRAS > OPENROUTER > GROQ > GEMINI
@@ -1092,6 +1185,15 @@ type AgentSpawnResult struct {
 	NS        string `json:"ns,omitempty"` // Namespace for mailbox routing
 }
 
+// handleAgentSpawn spawns a new agent session via the runtime.
+//
+// Index:
+// - Purpose: Create and start an agent session with provided configuration
+// - Flow: parse params → validate role → build config → spawn session → return result
+// - SideEffects: spawns agent session; may allocate runtime resources
+// - FailureModes: invalid params, runtime spawn errors
+// - Related: runtime.Runtime.Spawn
+// - Keywords: agent.spawn, agent_session, runtime, actor_id, exec_mode
 func (s *Service) handleAgentSpawn(ctx context.Context, params json.RawMessage) (*AgentSpawnResult, error) {
 	if s.agentRuntime == nil {
 		return nil, errors.New("agent orchestration not initialized")
@@ -1182,6 +1284,15 @@ type AgentResumeResult struct {
 	FromSession string `json:"from_session"`
 }
 
+// handleAgentResume resumes a prior agent session with a new prompt.
+//
+// Index:
+// - Purpose: Resume an existing agent session
+// - Flow: parse params → validate → resume session → return result
+// - SideEffects: triggers agent execution
+// - FailureModes: invalid params, runtime resume errors
+// - Related: runtime.Runtime.Resume
+// - Keywords: agent.resume, session_id, prompt, runtime
 func (s *Service) handleAgentResume(ctx context.Context, params json.RawMessage) (*AgentResumeResult, error) {
 	if s.agentRuntime == nil {
 		return nil, errors.New("agent orchestration not initialized")
@@ -1212,6 +1323,15 @@ func (s *Service) handleAgentResume(ctx context.Context, params json.RawMessage)
 	}, nil
 }
 
+// handleAgentHierarchy returns the current agent hierarchy.
+//
+// Index:
+// - Purpose: Provide hierarchy tree for agent sessions
+// - Flow: parse params → fetch overseer → build hierarchy → return nodes
+// - SideEffects: reads runtime state
+// - FailureModes: invalid params, orchestration not initialized
+// - Related: runtime.Overseer.GetHierarchy
+// - Keywords: agent.hierarchy, overseer, sessions, depth
 func (s *Service) handleAgentHierarchy(params json.RawMessage) (*AgentHierarchyResult, error) {
 	if s.agentRuntime == nil {
 		return nil, errors.New("agent orchestration not initialized")
@@ -1298,6 +1418,14 @@ type AgentSessionInfo struct {
 	Iterations int       `json:"iterations"`
 }
 
+// handleAgentList lists active agent sessions.
+//
+// Index:
+// - Purpose: Summarize active agent sessions
+// - Flow: list runtime sessions → build summary → return result
+// - SideEffects: reads runtime state
+// - Related: runtime.Runtime.List
+// - Keywords: agent.list, sessions, runtime, count
 func (s *Service) handleAgentList() *AgentListResult {
 	if s.agentRuntime == nil {
 		return &AgentListResult{Sessions: []AgentSessionInfo{}, Count: 0}
@@ -1343,6 +1471,15 @@ type AgentStatusResult struct {
 	Children   []string   `json:"children,omitempty"`
 }
 
+// handleAgentStatus returns detailed status for a session.
+//
+// Index:
+// - Purpose: Provide detailed agent session status
+// - Flow: parse params → lookup session → map status → return result
+// - SideEffects: reads runtime state
+// - FailureModes: missing session, invalid params
+// - Related: runtime.Runtime.Get
+// - Keywords: agent.status, session_id, runtime, status
 func (s *Service) handleAgentStatus(params json.RawMessage) (*AgentStatusResult, error) {
 	if s.agentRuntime == nil {
 		return nil, errors.New("agent orchestration not initialized")
@@ -1387,6 +1524,15 @@ type AgentKillResult struct {
 	Status    string `json:"status"`
 }
 
+// handleAgentKill terminates a running agent session.
+//
+// Index:
+// - Purpose: Stop an agent session by ID
+// - Flow: parse params → validate → kill session → return status
+// - SideEffects: terminates agent session
+// - FailureModes: missing session, runtime kill errors
+// - Related: runtime.Runtime.Kill
+// - Keywords: agent.kill, session_id, runtime, stop
 func (s *Service) handleAgentKill(params json.RawMessage) (*AgentKillResult, error) {
 	if s.agentRuntime == nil {
 		return nil, errors.New("agent orchestration not initialized")
@@ -1449,6 +1595,13 @@ func (e *exec) Start() error {
 
 // resolveLLMConfig returns the LLM provider, API key, and model from centralized config.
 // Priority: configured provider > cerebras > openrouter > groq > gemini
+//
+// Index:
+// - Purpose: Select provider credentials and model for agent orchestration
+// - Flow: check configured provider → auto-detect by API key → return defaults
+// - SideEffects: reads config
+// - Related: llmproviders.DefaultModelForProvider
+// - Keywords: llm_provider, api_key, model, config, auto_detect
 func (s *Service) resolveLLMConfig() (provider, apiKey, model string) {
 	llm := s.cfg.LLM
 

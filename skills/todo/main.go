@@ -1,4 +1,4 @@
-// Package main implements the todo/manage skill.
+// Package main implements the todo/manage skill for comprehensive task management with dependencies and reviews.
 package main
 
 import (
@@ -73,6 +73,7 @@ func isReviewGateEnabled() bool {
 	}
 }
 
+// input defines the skill input parameters for comprehensive task management operations with multiple action types.
 type input struct {
 	Operation     string            `json:"operation"`
 	WorkspaceID   string            `json:"workspace_id"`
@@ -95,7 +96,7 @@ type input struct {
 	CorrelationID string `json:"correlation_id,omitempty"`
 }
 
-// listReq defines the input for the list operation.
+// listReq defines the input for the list operation with filtering, sorting, and metrics options.
 type listReq struct {
 	Ranked         bool   `json:"ranked"`          // Include PageRank scores (default: false)
 	Status         string `json:"status"`          // Filter by status: pending, in_progress, completed, blocked
@@ -106,19 +107,21 @@ type listReq struct {
 	Limit          int    `json:"limit"` // Limit number of results after sorting
 }
 
+// dedupeReq defines the input for task deduplication with keep strategy and limit options.
 type dedupeReq struct {
 	Apply bool   `json:"apply"`
 	Keep  string `json:"keep"`
 	Limit int    `json:"limit"`
 }
 
-// searchReq defines the input for semantic task search.
+// searchReq defines the input for semantic task search with similarity thresholds and result limiting.
 type searchReq struct {
 	Query         string  `json:"query"`          // Natural language search query
 	Limit         int     `json:"limit"`          // Max results to return (default: 10)
 	MinSimilarity float64 `json:"min_similarity"` // Minimum similarity threshold (default: 0.3)
 }
 
+// addRequest defines the input for adding new tasks with dependencies and atomic processing options.
 type addRequest struct {
 	Title       string   `json:"title"`
 	Description string   `json:"description"`
@@ -129,6 +132,7 @@ type addRequest struct {
 	Atomic      bool     `json:"atomic,omitempty"`     // Enable atomic fact processing (SimpleMem-style)
 }
 
+// completeRequest defines the input for completing tasks with notes and gotchas tracking.
 type completeRequest struct {
 	ID        string `json:"id"`
 	Notes     string `json:"notes"`
@@ -136,6 +140,7 @@ type completeRequest struct {
 	SessionID string `json:"session_id,omitempty"` // Optional: scope to specific session
 }
 
+// updateRequest defines the input for updating task properties with selective field updates.
 type updateRequest struct {
 	ID          string `json:"id"`
 	Title       string `json:"title,omitempty"`
@@ -152,31 +157,35 @@ type reviewRequestReq struct {
 	Kind   string `json:"kind"`    // Optional: "auto", "human", or "mixed" (default: "auto")
 }
 
-// reviewStatusReq defines the input for the review_status operation.
+// reviewStatusReq defines the input for the review_status operation with task ID requirement.
 type reviewStatusReq struct {
 	TaskID string `json:"task_id"` // Required
 }
 
+// setActiveReq defines the input for setting the active task with optional session scoping.
 type setActiveReq struct {
 	TaskID    string `json:"task_id"`
 	SessionID string `json:"session_id,omitempty"` // Optional: scope to specific session
 }
 
+// ensureActiveReq defines the input for ensuring an active task exists with default creation options.
 type ensureActiveReq struct {
 	DefaultTitle string `json:"default_title"`
 	ScopePath    string `json:"scope_path"`
 }
 
+// graphInsightsReq defines the input for graph analysis with completion filtering and result limiting.
 type graphInsightsReq struct {
 	IncludeCompleted bool `json:"include_completed"`
 	Limit            int  `json:"limit"`
 }
 
+// recommendReq defines the input for task recommendations with result limiting.
 type recommendReq struct {
 	Limit int `json:"limit"` // Max recommendations to return (default: 10)
 }
 
-// planReq defines the input for the plan operation.
+// planReq defines the input for the plan operation with comprehensive planning strategies and task creation.
 type planReq struct {
 	Goal           string     `json:"goal"`              // One-sentence description of desired outcome
 	Description    string     `json:"description"`       // Longer context for planning
@@ -189,7 +198,7 @@ type planReq struct {
 	Tasks          []planTask `json:"tasks"`             // Optional: explicit task list to create
 }
 
-// planTask defines a task to create as part of a plan.
+// planTask defines a task to create as part of a plan with dependency relationships.
 type planTask struct {
 	Title       string   `json:"title"`
 	Description string   `json:"description"`
@@ -197,7 +206,7 @@ type planTask struct {
 	DependsOn   []string `json:"depends_on"` // Titles of other tasks in this plan
 }
 
-// planOutput is the JSON representation of a plan result.
+// planOutput is the JSON representation of a plan result with task metadata and graph analysis.
 type planOutput struct {
 	RootTaskID string           `json:"root_task_id"`
 	Applied    bool             `json:"applied"`
@@ -206,24 +215,27 @@ type planOutput struct {
 	Diff       *planDiffOutput  `json:"diff"`
 }
 
+// planGraphOutput represents the graph structure of a plan with nodes, edges, and cycle detection.
 type planGraphOutput struct {
 	Nodes  []tasksgraph.NodeMetrics `json:"nodes"`
 	Edges  []planEdge               `json:"edges"`
 	Cycles [][]string               `json:"cycles"`
 }
 
+// planEdge represents a directed edge in the task dependency graph.
 type planEdge struct {
 	From string `json:"from"`
 	To   string `json:"to"`
 }
 
+// planDiffOutput represents the changes made during plan application with task tracking.
 type planDiffOutput struct {
 	AddedTaskIDs   []string `json:"added_task_ids"`
 	UpdatedTaskIDs []string `json:"updated_task_ids"`
 	RemovedTaskIDs []string `json:"removed_task_ids"`
 }
 
-// taskOutput is the JSON representation of a task for envelope output.
+// taskOutput is the JSON representation of a task for envelope output with comprehensive metadata.
 type taskOutput struct {
 	ID          string   `json:"id"`
 	Title       string   `json:"title"`
@@ -251,10 +263,21 @@ type taskOutput struct {
 	OutDegree         int     `json:"out_degree,omitempty"`
 }
 
+// main is the skill entry point for todo/manage with comprehensive task management capabilities.
 func main() {
 	skillmain.Main(command, run)
 }
 
+// run orchestrates comprehensive task management operations with validation, graph analysis, and review gate enforcement.
+//
+// Index:
+// - Purpose: Manage tasks with CRUD operations, dependency tracking, graph analysis, semantic search, and review workflows
+// - Flow: validate operation → open task store → route to handler → perform operation → update graph metrics → emit results
+// - SideEffects: updates task store; modifies dependency graphs; triggers atomic processing; manages review states; updates PageRank scores
+// - FailureModes: invalid operations, task store failures, dependency cycles, review gate violations, embedding provider errors
+// - Observability: emits operation results, task counts, graph metrics, search results, and comprehensive status tracking
+// - Related: handleAdd, handleUpdate, handleComplete, handleSearch, handlePlan, persistPageRanks
+// - Keywords: todo/manage, task_management, dependency_graph, review_gate, semantic_search, atomic_processing
 func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	cfg := rc.Config
 	// Open SQLite-backed task store

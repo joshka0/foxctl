@@ -2,6 +2,7 @@ package symbol
 
 import (
 	"github.com/jkatigb/agentctl/internal/indexing"
+	"github.com/jkatigb/agentctl/internal/platform/config"
 	"github.com/jkatigb/agentctl/internal/storage"
 	"github.com/rs/zerolog"
 )
@@ -60,7 +61,21 @@ func (f *Factory) Create(cfg indexing.IndexerConfig) *Indexer {
 				}
 			}
 		}
+
+		if enabled, ok := cfg.Extra["embedding_enabled"].(bool); ok {
+			symConfig.EmbeddingEnabled = enabled
+		}
+		if root, ok := cfg.Extra["embedding_store_root"].(string); ok {
+			symConfig.EmbeddingStoreRoot = root
+		}
+		if model, ok := cfg.Extra["embedding_model"].(string); ok {
+			symConfig.EmbeddingModel = model
+		}
+		if mode, ok := cfg.Extra["embedding_text_mode"].(string); ok {
+			symConfig.EmbeddingTextMode = config.EmbedSymbolTextMode(mode)
+		}
 	}
+	symConfig.EmbeddingTextMode = config.ResolveEmbedSymbolTextMode(symConfig.EmbeddingTextMode)
 
 	return NewIndexer(symConfig, f.memoryStore, f.registry, f.workspaceRoot, f.logger)
 }

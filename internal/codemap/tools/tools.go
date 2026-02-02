@@ -1,6 +1,3 @@
-// Package tools provides tool handlers for the codemap agent.
-// These tools wrap existing skills and infrastructure to enable
-// the agent to explore and understand the codebase.
 package tools
 
 import (
@@ -55,6 +52,15 @@ func WithSkillResolver(resolver *skill.Resolver) RegistryOption {
 }
 
 // NewRegistry creates a new codemap tool registry.
+// NewRegistry creates a codemap tool registry with configured dependencies.
+//
+// Index:
+// - Purpose: Initialize codemap tools for exploration and finish capture
+// - Flow: apply options → register tools → return registry
+// - SideEffects: registers dspy-go tool definitions
+// - FailureModes: tool registration errors
+// - Related: Registry.registerTools
+// - Keywords: codemap_tools, tool_registry, read_file, search_pattern, finish_codemap
 func NewRegistry(opts ...RegistryOption) (*Registry, error) {
 	r := &Registry{
 		skillResolver: skill.NewResolver(),

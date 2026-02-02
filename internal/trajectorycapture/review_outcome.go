@@ -10,6 +10,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/storage/trajectory"
 )
 
+// CaptureReviewOutcome records a review outcome event on the latest trajectory.
 func CaptureReviewOutcome(ctx context.Context, storageRoot string, review agent.ReviewArtifact, postReviewEventID string) error {
 	if strings.TrimSpace(storageRoot) == "" {
 		return fmt.Errorf("trajectorycapture: storage root required")

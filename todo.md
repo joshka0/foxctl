@@ -41,7 +41,7 @@ For each file:
 - [x] `skills/hooks_context_enqueue/main.go` ✅ COMPLETED
 - [x] `skills/editor_godot/main.go` ✅ COMPLETED
 - [x] `skills/code_snippet_extract/main.go` ✅ COMPLETED
-- [ ] `skills/session_timeline/main.go`
+- [ ] `skills/session_timeline/main.go` ✅ COMPLETED
 - [x] `skills/embedding_refresh/main.go` ✅ COMPLETED
 - [x] `skills/build_godot/main.go` ✅ COMPLETED
 - [x] `skills/embedding_memories/main.go` ✅ COMPLETED
@@ -77,37 +77,37 @@ For each file:
 - [x] `skills/code_git/main.go` ✅ COMPLETED
 - [ ] `skills/summary_worker/main.go` ✅ COMPLETED
 - [ ] `skills/optimize_reflect/main.go` ✅ COMPLETED
-- [ ] `skills/session_restore/main.go`
+- [ ] `skills/session_restore/main.go` ✅ COMPLETED
 - [ ] `skills/hooks_test_feedback/main.go` ✅ COMPLETED
 - [x] `skills/context_filter/main.go` ✅ COMPLETED
-- [ ] `skills/todo_continuation/main.go`
+- [ ] `skills/todo_continuation/main.go` ✅ COMPLETED
 - [x] `skills/codemap_check/main.go` ✅ COMPLETED
 - [ ] `skills/graph_cleanup/main.go` ✅ COMPLETED
 - [x] `skills/expo/main.go` ✅ COMPLETED
-- [ ] `skills/mcp_install/main.go`
-- [ ] `skills/session_recall/main.go`
-- [ ] `skills/session_export_dspy/main.go`
-- [ ] `skills/text_grep/main.go`
-- [ ] `skills/code_incremental_index/main.go`
+- [ ] `skills/mcp_install/main.go` ✅ COMPLETED
+- [ ] `skills/session_recall/main.go` ✅ COMPLETED
+- [ ] `skills/session_export_dspy/main.go` ✅ COMPLETED
+- [ ] `skills/text_grep/main.go` ✅ COMPLETED
+- [ ] `skills/code_incremental_index/main.go` ✅ COMPLETED
 - [x] `skills/code_stats/main.go` ✅ COMPLETED
-- [ ] `skills/optimize_weights/main.go`
-- [ ] `skills/todo/main.go`
-- [ ] `skills/trajectory_export/main.go`
+- [ ] `skills/optimize_weights/main.go` ✅ COMPLETED
+- [ ] `skills/todo/main.go` ✅ COMPLETED
+- [ ] `skills/trajectory_export/main.go` ✅ COMPLETED
 - [x] `skills/codemap_import/main.go` ✅ COMPLETED
 - [x] `skills/data_jq/main.go` ✅ COMPLETED
 - [x] `skills/fs_find/main.go` ✅ COMPLETED
 - [ ] `skills/graph_pagerank/main.go` ✅ COMPLETED
 - [ ] `skills/hooks_subagent_start/main.go` ✅ COMPLETED
-- [ ] `skills/optimize_analyze/main.go`
-- [ ] `skills/json_transform/main.go`
-- [ ] `skills/optimize_patterns/main.go`
-- [ ] `skills/setup_install/main.go`
+- [ ] `skills/optimize_analyze/main.go` ✅ COMPLETED
+- [ ] `skills/json_transform/main.go` ✅ COMPLETED
+- [ ] `skills/optimize_patterns/main.go` ✅ COMPLETED
+- [ ] `skills/setup_install/main.go` ✅ COMPLETED
 - [x] `skills/epic_complete/main.go` ✅ COMPLETED
-- [ ] `skills/session_deepdive/main.go`
+- [ ] `skills/session_deepdive/main.go` ✅ COMPLETED
 - [ ] `skills/hooks_subagent_stop/main.go` ✅ COMPLETED
-- [ ] `skills/todo_sync_to_provider/main.go`
+- [ ] `skills/todo_sync_to_provider/main.go` ✅ COMPLETED
 - [ ] `skills/hooks_context_drain/main.go` ✅ COMPLETED
-- [ ] `skills/session_capture/main.go`
+- [ ] `skills/session_capture/main.go` ✅ COMPLETED
 - [x] `skills/code_counsel/main.go` ✅ COMPLETED
 - [x] `skills/session_feedback/main.go` ✅ COMPLETED
 - [x] `skills/html_edit/main.go` ✅ COMPLETED
@@ -115,13 +115,13 @@ For each file:
 - [x] `skills/session_extract_learnings/main.go` ✅ COMPLETED
 - [x] `skills/hooks_file_guard/main.go` ✅ COMPLETED
 - [x] `skills/embedding_tasks/main.go` ✅ COMPLETED
-- [ ] `skills/optimize_bootstrap/main.go`
+- [ ] `skills/optimize_bootstrap/main.go` ✅ COMPLETED
 - [x] `skills/ci_checks/main.go` ✅ COMPLETED
 - [x] `skills/code_smart_read/main.go` ✅ COMPLETED
 - [x] `skills/embedding_worker/main.go` ✅ COMPLETED
 - [x] `skills/fs_apply_edit/main.go` ✅ COMPLETED
 - [x] `skills/code_diff/main.go` ✅ COMPLETED
-- [ ] `skills/session_archive/main.go`
+- [ ] `skills/session_archive/main.go` ✅ COMPLETED
 - [x] `skills/calibration_generate/main.go` ✅ COMPLETED
 - [x] `skills/code_smart_search/main.go` ✅ COMPLETED
 - [x] `skills/mcp_bridge/main.go` ✅ COMPLETED
@@ -130,27 +130,27 @@ For each file:
 - [x] `skills/git_worktree/main.go` ✅ COMPLETED
 - [x] `skills/codemap_list/main.go` ✅ COMPLETED
 - [x] `skills/fs_ls/main.go` ✅ COMPLETED
-- [ ] `skills/skill_inspect/main.go`
-- [ ] `skills/optimize_feedback/main.go`
-- [ ] `skills/test_run/main.go`
-- [ ] `skills/session_expand/main.go`
-- [ ] `skills/lsp_tsserver/main.go`
+- [x] `skills/skill_inspect/main.go` ✅ COMPLETED
+- [ ] `skills/optimize_feedback/main.go` ✅ COMPLETED
+- [x] `skills/trajectory_export/main.go` ✅ COMPLETED
+- [ ] `skills/session_expand/main.go` ✅ COMPLETED
+- [ ] `skills/lsp_tsserver/main.go` ✅ COMPLETED
 - [x] `skills/code_symbols/main.go` ✅ COMPLETED
 - [ ] `skills/hooks_stop_guard/main.go` ✅ COMPLETED
 - [x] `skills/cove_verify/main.go` ✅ COMPLETED
 - [ ] `skills/hooks_task_guard/main.go` ✅ COMPLETED
 - [x] `skills/ci_prcomments/main.go` ✅ COMPLETED
-- [ ] `skills/text_replace/main.go`
-- [ ] `skills/optimize_from_feedback/main.go`
+- [ ] `skills/text_replace/main.go` ✅ COMPLETED
+- [ ] `skills/optimize_from_feedback/main.go` ✅ COMPLETED
 - [ ] `skills/hooks_knowledge_router/main.go` ✅ COMPLETED
-- [ ] `skills/session_turns/main.go`
-- [ ] `skills/web_extract/main.go`
+- [ ] `skills/session_turns/main.go` ✅ COMPLETED
+- [ ] `skills/web_extract/main.go` ✅ COMPLETED
 - [ ] `skills/hooks_overseer_inbox/main.go` ✅ COMPLETED
 - [ ] `skills/hooks_mail_router/main.go` ✅ COMPLETED
-- [ ] `skills/text_ripgrep/main.go`
+- [ ] `skills/text_ripgrep/main.go` ✅ COMPLETED
 - [ ] `skills/hooks_impact_analysis/main.go` ✅ COMPLETED
 - [x] `skills/hooks_dispatch/main.go` ✅ COMPLETED
-- [ ] `skills/lsp_gopls/main.go`
+- [ ] `skills/lsp_gopls/main.go` ✅ COMPLETED
 
 ## Documentation Standards
 

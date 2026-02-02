@@ -31,6 +31,9 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+
+	"github.com/jkatigb/agentctl/internal/indexing/embeddingtext"
+	"github.com/jkatigb/agentctl/internal/platform/config"
 )
 
 // SymbolType is the memory entry type for symbol entries.
@@ -217,14 +220,28 @@ type Config struct {
 
 	// Languages lists the languages to index (empty = all supported).
 	Languages []string `json:"languages,omitempty"`
+
+	// EmbeddingEnabled controls whether symbol embeddings are enqueued.
+	EmbeddingEnabled bool `json:"embedding_enabled,omitempty"`
+
+	// EmbeddingStoreRoot is the filesystem root for the embedding queue store.
+	EmbeddingStoreRoot string `json:"embedding_store_root,omitempty"`
+
+	// EmbeddingModel overrides the embedding model for symbol jobs.
+	EmbeddingModel string `json:"embedding_model,omitempty"`
+
+	// EmbeddingTextMode controls how symbol text is prepared for embedding.
+	EmbeddingTextMode config.EmbedSymbolTextMode `json:"embedding_text_mode,omitempty"`
 }
 
 // DefaultConfig returns sensible defaults for symbol indexing.
 func DefaultConfig() Config {
 	return Config{
-		Enabled:    false,
-		MaxFileLOC: 500,
-		MaxFileKB:  512,
+		Enabled:           false,
+		MaxFileLOC:        500,
+		MaxFileKB:         512,
+		EmbeddingEnabled:  false,
+		EmbeddingTextMode: config.EmbedSymbolTextModeRaw,
 	}
 }
 
@@ -366,9 +383,44 @@ type FileSummaryInput struct {
 	TopSymbols []string `json:"top_symbols,omitempty"`
 }
 
+// NormalizeFileSummaryInput applies deterministic normalization for digesting and prompting.
+func NormalizeFileSummaryInput(input FileSummaryInput) FileSummaryInput {
+	normalized := input
+	normalized.Package = strings.TrimSpace(input.Package)
+	normalized.PackageDoc = embeddingtext.NormalizeDoc(input.PackageDoc)
+	normalized.FirstComment = embeddingtext.NormalizeFirstComment(input.FirstComment)
+	normalized.TopSymbols = normalizeSummarySymbols(input.TopSymbols)
+	return normalized
+}
+
+func normalizeSummarySymbols(symbols []string) []string {
+	if len(symbols) == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(symbols))
+	cleaned := make([]string, 0, len(symbols))
+	for _, symbol := range symbols {
+		clean := strings.TrimSpace(symbol)
+		if clean == "" {
+			continue
+		}
+		if _, ok := seen[clean]; ok {
+			continue
+		}
+		seen[clean] = struct{}{}
+		cleaned = append(cleaned, clean)
+	}
+	sort.Strings(cleaned)
+	if len(cleaned) == 0 {
+		return nil
+	}
+	return cleaned
+}
+
 // ComputeFileSummaryDigest computes a digest of the summary inputs for caching.
 func ComputeFileSummaryDigest(input FileSummaryInput) string {
-	data, _ := json.Marshal(input)
+	normalized := NormalizeFileSummaryInput(input)
+	data, _ := json.Marshal(normalized)
 	return ComputeDigest(data)
 }
 

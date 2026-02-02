@@ -1,4 +1,4 @@
-// Package main implements the session/timeline skill for timeline retrieval.
+// Package main implements the session/timeline skill for timeline retrieval with comprehensive session analysis and learning extraction.
 package main
 
 import (
@@ -22,7 +22,7 @@ const commandName = "session/timeline"
 
 var defaultLearningTypes = []string{"decision", "gotcha", "preference", "anti_pattern", "learning"}
 
-// Input defines the skill input parameters.
+// Input defines the skill input parameters for timeline retrieval with flexible anchoring and filtering options.
 type Input struct {
 	SessionID             string   `json:"session_id"`
 	SummaryID             string   `json:"summary_id,omitempty"`
@@ -40,7 +40,7 @@ type Input struct {
 	Until                 string   `json:"until,omitempty"`       // End of time range: duration or timestamp (default: now)
 }
 
-// Output defines the skill output.
+// Output defines the skill output with timeline data, anchor information, and comprehensive analysis results.
 type Output struct {
 	SessionID      string             `json:"session_id"`
 	Anchor         Anchor             `json:"anchor"`
@@ -52,7 +52,7 @@ type Output struct {
 	Message        string             `json:"message,omitempty"`
 }
 
-// Anchor identifies the matched summary boundary.
+// Anchor identifies the matched summary boundary with detailed positioning and metadata.
 type Anchor struct {
 	SummaryID     string `json:"summary_id"`
 	WindowIndex   int    `json:"window_index"`
@@ -65,7 +65,7 @@ type Anchor struct {
 	SummaryModel  string `json:"summary_model,omitempty"`
 }
 
-// ChunkSummaryItem represents a timeline summary entry.
+// ChunkSummaryItem represents a timeline summary entry with tools, files, and error tracking.
 type ChunkSummaryItem struct {
 	SummaryID     string   `json:"summary_id"`
 	WindowIndex   int      `json:"window_index"`
@@ -80,7 +80,7 @@ type ChunkSummaryItem struct {
 	Errors        []string `json:"errors,omitempty"`
 }
 
-// LearningItem represents extracted learnings within the timeline.
+// LearningItem represents extracted learnings within the timeline with type classification and metadata.
 type LearningItem struct {
 	Type        string         `json:"type"`
 	Summary     string         `json:"summary"`
@@ -89,7 +89,7 @@ type LearningItem struct {
 	Metadata    map[string]any `json:"metadata,omitempty"`
 }
 
-// TimelineRollup aggregates metadata up to the anchor.
+// TimelineRollup aggregates metadata up to the anchor with comprehensive categorization and deduplication.
 type TimelineRollup struct {
 	SummaryLines []string `json:"summary_lines,omitempty"`
 	Tools        []string `json:"tools,omitempty"`
@@ -102,7 +102,7 @@ type TimelineRollup struct {
 	Learnings    []string `json:"learnings,omitempty"`
 }
 
-// parseSince parses a since string into a time.Time.
+// parseSince parses a since string into a time.Time with flexible format support.
 // Accepts durations ("30m", "2h", "7d") or RFC3339 timestamps.
 // Returns zero time if empty or unparseable.
 func parseSince(s string) time.Time {
@@ -133,10 +133,21 @@ func parseSince(s string) time.Time {
 	return time.Time{}
 }
 
+// main is the skill entry point for session/timeline with comprehensive timeline retrieval capabilities.
 func main() {
 	skillmain.Main(commandName, run)
 }
 
+// run orchestrates timeline retrieval with anchor resolution, chunk collection, and learning aggregation.
+//
+// Index:
+// - Purpose: Retrieve session timeline with flexible anchoring, chunk summaries, learnings, and rollup analysis
+// - Flow: validate input → open session store → resolve anchor → collect chunk summaries → fetch learnings → build rollup → emit results
+// - SideEffects: reads session metadata; accesses chunk summaries; queries memory store; aggregates timeline data
+// - FailureModes: session not found, anchor resolution errors, store access failures, time parsing errors
+// - Observability: emits timeline anchor, chunk summaries, learning items, rollup data, and truncation status
+// - Related: resolveAnchor, collectChunkSummariesUpTo, fetchLearningItems, buildRollup
+// - Keywords: session/timeline, anchor_resolution, chunk_summaries, learning_extraction, timeline_rollup
 func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	if strings.TrimSpace(in.SessionID) == "" {
 		return skillerr.Arg("session_id is required")
@@ -247,6 +258,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	return skillout.Emit(rc, commandName, output)
 }
 
+// resolveAnchor finds the appropriate summary anchor based on input parameters with multiple resolution strategies.
 func resolveAnchor(ctx context.Context, store *sessions.Store, in Input, sessionID string) (sessions.SessionChunkSummary, int, error) {
 	if summaryID := strings.TrimSpace(in.SummaryID); summaryID != "" {
 		summary, err := store.GetChunkSummary(ctx, summaryID)
@@ -283,6 +295,7 @@ func resolveAnchor(ctx context.Context, store *sessions.Store, in Input, session
 	return latest, latest.ChunkIndexMax, nil
 }
 
+// latestSummaryInWindow finds the latest summary by chunk index within a specific window.
 func latestSummaryInWindow(summaries []sessions.SessionChunkSummary) sessions.SessionChunkSummary {
 	latest := summaries[0]
 	for _, summary := range summaries[1:] {
@@ -293,6 +306,7 @@ func latestSummaryInWindow(summaries []sessions.SessionChunkSummary) sessions.Se
 	return latest
 }
 
+// latestSummaryInSession finds the latest summary across all windows in a session with fallback handling.
 func latestSummaryInSession(ctx context.Context, store *sessions.Store, sessionID string) (sessions.SessionChunkSummary, error) {
 	windows, err := store.GetContextWindows(ctx, sessionID)
 	if err != nil {
@@ -317,6 +331,7 @@ func latestSummaryInSession(ctx context.Context, store *sessions.Store, sessionI
 	return sessions.SessionChunkSummary{}, skillerr.Arg("no chunk summaries for session")
 }
 
+// collectChunkSummariesUpTo collects chunk summaries up to the anchor with time filtering and window limits.
 func collectChunkSummariesUpTo(ctx context.Context, store *sessions.Store, sessionID string, anchor sessions.SessionChunkSummary, maxWindows int, sinceTime, untilTime time.Time) ([]sessions.SessionChunkSummary, error) {
 	windows, err := store.GetContextWindows(ctx, sessionID)
 	if err != nil {
@@ -385,6 +400,7 @@ func collectChunkSummariesUpTo(ctx context.Context, store *sessions.Store, sessi
 	return out, nil
 }
 
+// chunkSummaryItem converts internal summary format to output format with field mapping.
 func chunkSummaryItem(summary sessions.SessionChunkSummary) ChunkSummaryItem {
 	return ChunkSummaryItem{
 		SummaryID:     summary.ID,
@@ -401,6 +417,7 @@ func chunkSummaryItem(summary sessions.SessionChunkSummary) ChunkSummaryItem {
 	}
 }
 
+// findSummaryForChunk finds a summary that covers a specific chunk index with range and index checking.
 func findSummaryForChunk(summaries []sessions.SessionChunkSummary, chunkIndex int) (sessions.SessionChunkSummary, bool) {
 	for _, summary := range summaries {
 		if summary.ChunkIndexMin <= chunkIndex && summary.ChunkIndexMax >= chunkIndex {
@@ -417,6 +434,7 @@ func findSummaryForChunk(summaries []sessions.SessionChunkSummary, chunkIndex in
 	return sessions.SessionChunkSummary{}, false
 }
 
+// fetchLearningItems retrieves learning items from memory store with filtering and sorting.
 func fetchLearningItems(ctx context.Context, store *memory.Store, workspace, sessionID string, types []string, maxWindow int) ([]LearningItem, error) {
 	filter := memory.ListFilter{Types: types, SessionID: sessionID}
 	const pageSize = 200
@@ -454,6 +472,7 @@ func fetchLearningItems(ctx context.Context, store *memory.Store, workspace, ses
 	return out, nil
 }
 
+// learningItemFromEntry converts memory store entry to learning item with payload parsing.
 func learningItemFromEntry(entry memory.NamedEntry) (LearningItem, bool) {
 	if len(entry.Result) == 0 {
 		return LearningItem{}, false
@@ -481,6 +500,7 @@ func learningItemFromEntry(entry memory.NamedEntry) (LearningItem, bool) {
 	}, true
 }
 
+// intFromPayload extracts integer value from payload with type conversion support.
 func intFromPayload(value any) (int, bool) {
 	switch v := value.(type) {
 	case int:
@@ -497,6 +517,7 @@ func intFromPayload(value any) (int, bool) {
 	return 0, false
 }
 
+// stringFromPayload extracts string value from payload with type conversion and trimming.
 func stringFromPayload(value any) string {
 	switch v := value.(type) {
 	case string:
@@ -507,6 +528,7 @@ func stringFromPayload(value any) string {
 	return ""
 }
 
+// normalizeTypes normalizes and deduplicates learning types with default fallback.
 func normalizeTypes(types []string) []string {
 	if len(types) == 0 {
 		return defaultLearningTypes
@@ -530,6 +552,7 @@ func normalizeTypes(types []string) []string {
 	return out
 }
 
+// buildRollup creates aggregated timeline summary from chunks and learnings with deduplication.
 func buildRollup(summaries []sessions.SessionChunkSummary, learnings []LearningItem) *TimelineRollup {
 	rollup := &TimelineRollup{}
 
@@ -576,6 +599,7 @@ func buildRollup(summaries []sessions.SessionChunkSummary, learnings []LearningI
 	return rollup
 }
 
+// appendUnique adds value to slice if not already present with trimming and validation.
 func appendUnique(values []string, value string) []string {
 	value = strings.TrimSpace(value)
 	if value == "" {
@@ -589,6 +613,7 @@ func appendUnique(values []string, value string) []string {
 	return append(values, value)
 }
 
+// sortedKeys converts map keys to sorted slice with trimming and empty value filtering.
 func sortedKeys(values map[string]struct{}) []string {
 	if len(values) == 0 {
 		return nil
@@ -605,6 +630,7 @@ func sortedKeys(values map[string]struct{}) []string {
 	return out
 }
 
+// formatChunkRange formats chunk index range for display with single and range support.
 func formatChunkRange(minIndex, maxIndex int) string {
 	if minIndex == maxIndex {
 		return fmt.Sprintf("C%d", minIndex)

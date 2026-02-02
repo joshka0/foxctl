@@ -1,4 +1,3 @@
-// Package hooks provides the executor for processing hook actions.
 package hooks
 
 import (
@@ -58,6 +57,13 @@ type DefaultExecutor struct {
 }
 
 // NewExecutor creates a new action executor with the given configuration.
+// NewExecutor creates a new hook action executor.
+//
+// Index:
+// - Purpose: Initialize a default action executor with configured stores
+// - Flow: select logger → store config → return executor
+// - Related: DefaultExecutor.Execute
+// - Keywords: hook_executor, action_executor, fail_open, logger
 func NewExecutor(cfg ExecutorConfig) *DefaultExecutor {
 	logger := cfg.Logger
 	if logger == nil {
@@ -70,6 +76,15 @@ func NewExecutor(cfg ExecutorConfig) *DefaultExecutor {
 }
 
 // Execute processes all actions and returns any injected context.
+// Execute processes actions from hook outputs.
+//
+// Index:
+// - Purpose: Execute hook actions and return injected context
+// - Flow: iterate actions → dispatch handlers → collect injected text → return
+// - SideEffects: runs skills; writes context buffer; sends mailbox; posts to blackboard
+// - FailureModes: action errors (fail-open or fail-closed depending on config)
+// - Related: executeRunSkill, executeEnqueueContext, executeSendMailbox, executeBBPost
+// - Keywords: hook_action, run_skill, enqueue_context, send_mailbox, bb_post
 func (e *DefaultExecutor) Execute(ctx context.Context, actions []Action, input Input) (string, error) {
 	if len(actions) == 0 {
 		return "", nil

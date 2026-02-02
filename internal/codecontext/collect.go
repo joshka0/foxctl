@@ -50,6 +50,15 @@ type CollectOpts struct {
 //
 // Skills should use this function rather than implementing their own
 // file reading and extraction logic.
+// Collect gathers evidence snippets from candidate files.
+//
+// Index:
+// - Purpose: Extract prioritized snippets from candidate files
+// - Flow: apply defaults → validate path validator → read files → extract snippets → return evidence
+// - SideEffects: reads files within workspace boundaries
+// - FailureModes: path validation errors, file read errors
+// - Related: files.NewSafeReader, Render
+// - Keywords: code_context, evidence, snippets, candidates, path_validator
 func Collect(ctx context.Context, opts CollectOpts) (*Evidence, error) {
 	// Apply defaults
 	if opts.MaxFiles <= 0 {

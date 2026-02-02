@@ -54,6 +54,14 @@ type ToolCallStreamDelta struct {
 }
 
 // RunStreaming executes with streaming output.
+//
+// Index:
+// - Purpose: Execute a streaming agent turn with tool calls and callbacks
+// - Flow: build messages → stream LLM → execute tools → append results → finalize output
+// - SideEffects: network calls to LLM; tool execution; invokes callbacks
+// - FailureModes: iteration limit, context cancellation, LLM errors, tool execution errors
+// - Related: callLLMStreaming, parseSSEStream, ToolRunner.Execute
+// - Keywords: run_streaming, tool_calls, callbacks, sse, stop_reason
 func (e *LLMChatEngine) RunStreaming(ctx context.Context, input EngineInput, streamCfg StreamConfig) (EngineOutput, error) {
 	// Build initial messages
 	messages := e.buildMessages(input)
@@ -183,6 +191,14 @@ type accumulatedToolCall struct {
 }
 
 // callLLMStreaming makes a streaming API request.
+//
+// Index:
+// - Purpose: Execute a streaming chat completion request
+// - Flow: build request → set headers → perform HTTP call → parse SSE stream
+// - SideEffects: network calls to LLM
+// - FailureModes: request creation errors, HTTP errors, non-200 responses
+// - Related: parseSSEStream
+// - Keywords: stream_request, http, sse, llm, provider
 func (e *LLMChatEngine) callLLMStreaming(ctx context.Context, messages []oaiMessage, tools []oaiTool, streamCfg StreamConfig) (*streamResponse, error) {
 	reqBody := oaiRequest{
 		Model:       e.config.Model,
@@ -242,6 +258,14 @@ func (e *LLMChatEngine) callLLMStreaming(ctx context.Context, messages []oaiMess
 }
 
 // parseSSEStream parses the SSE response stream.
+//
+// Index:
+// - Purpose: Decode SSE chunks into accumulated content and tool calls
+// - Flow: scan lines → decode chunks → accumulate content/tool calls → build response
+// - SideEffects: invokes stream callbacks
+// - FailureModes: JSON decode errors, scanner errors
+// - Related: callLLMStreaming
+// - Keywords: sse, stream_delta, tool_call_delta, finish_reason, scanner
 func (e *LLMChatEngine) parseSSEStream(reader io.Reader, streamCfg StreamConfig) (*streamResponse, error) {
 	scanner := bufio.NewScanner(reader)
 

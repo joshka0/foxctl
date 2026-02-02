@@ -1,5 +1,4 @@
-// Package main implements the optimize/patterns skill.
-// This skill manages learned tool usage patterns for agent optimization.
+// Package main implements the optimize/patterns skill for managing learned tool usage patterns in agent optimization.
 package main
 
 import (
@@ -16,6 +15,7 @@ import (
 
 const command = "optimize/patterns"
 
+// input defines the skill input parameters for pattern management operations with action selection and filtering.
 type input struct {
 	Action    string `json:"action"`
 	Workspace string `json:"workspace"`
@@ -24,10 +24,21 @@ type input struct {
 	Limit     int    `json:"limit"`
 }
 
+// main is the skill entry point for optimize/patterns with pattern management capabilities.
 func main() {
 	skillmain.Main(command, run)
 }
 
+// run orchestrates pattern management operations with workspace resolution and store initialization.
+//
+// Index:
+// - Purpose: Manage learned tool usage patterns for agent optimization with list, clear, and hints operations
+// - Flow: resolve workspace → open pattern store → dispatch action → execute operation → emit results
+// - SideEffects: reads and writes pattern store; manages tool usage patterns; provides optimization hints
+// - FailureModes: workspace resolution errors, pattern store access failures, invalid actions, missing required parameters
+// - Observability: emits pattern lists, operation confirmations, optimization hints, and comprehensive pattern statistics
+// - Related: listPatterns, clearPatterns, getHints, optimization.OpenPatternStore
+// - Keywords: optimize/patterns, tool_usage_patterns, agent_optimization, pattern_management, learning_system
 func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	// Resolve workspace
 	workspace := in.Workspace
@@ -61,6 +72,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	}
 }
 
+// listPatterns retrieves and formats stored tool usage patterns with success rate calculations and statistics.
 func listPatterns(ctx context.Context, rc *skillmain.RunContext, store optimization.PatternStore, in input) error {
 	limit := in.Limit
 	if limit <= 0 {
@@ -95,6 +107,7 @@ func listPatterns(ctx context.Context, rc *skillmain.RunContext, store optimizat
 	})
 }
 
+// clearPatterns removes stored patterns with optional role filtering and confirmation messaging.
 func clearPatterns(ctx context.Context, rc *skillmain.RunContext, store optimization.PatternStore, in input) error {
 	if err := store.Clear(ctx, in.Role); err != nil {
 		return skillerr.WrapRuntime("clear patterns", err)
@@ -111,6 +124,7 @@ func clearPatterns(ctx context.Context, rc *skillmain.RunContext, store optimiza
 	})
 }
 
+// getHints generates optimization hints based on learned patterns and current context with confidence scoring.
 func getHints(ctx context.Context, rc *skillmain.RunContext, patternStore optimization.PatternStore, workspace string, in input) error {
 	if in.Role == "" {
 		return skillerr.Arg("role is required for hints")

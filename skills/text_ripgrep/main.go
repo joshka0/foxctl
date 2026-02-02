@@ -1,4 +1,4 @@
-// Package main implements the text/ripgrep skill.
+// Package main implements the text/ripgrep skill for fast text searching using ripgrep with comprehensive pattern matching.
 package main
 
 import (
@@ -14,6 +14,7 @@ import (
 
 const command = "text/ripgrep"
 
+// input defines the skill input parameters for ripgrep-based text search with advanced filtering options.
 type input struct {
 	Path            string   `json:"path"`
 	Pattern         string   `json:"pattern"`
@@ -27,10 +28,21 @@ type input struct {
 
 type match = textmatch.Match
 
+// main is the skill entry point for text/ripgrep with comprehensive pattern matching capabilities.
 func main() {
 	skillmain.Main(command, run)
 }
 
+// run orchestrates ripgrep-based text search with pattern validation, path resolution, and comprehensive result formatting.
+//
+// Index:
+// - Purpose: Perform fast text searches using ripgrep with pattern matching, file filtering, and result preview
+// - Flow: validate pattern → normalize input → check ripgrep availability → resolve path → build options → execute search → format results → emit with preview
+// - SideEffects: executes ripgrep process; reads file contents; generates match previews; manages result limits
+// - FailureModes: invalid patterns, ripgrep not available, path resolution errors, search execution failures
+// - Observability: emits match counts, file statistics, preview data, top files summary, and comprehensive search metrics
+// - Related: emitEmptyResult, convertMatches, rgutil.Normalize, ripgrep.SearchJSON
+// - Keywords: text/ripgrep, pattern_search, ripgrep, file_search, text_matching, result_preview
 func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	// Validate pattern
 	if err := textmatch.RequirePattern(in.Pattern); err != nil {
@@ -88,12 +100,14 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	return skillout.Emit(rc, command, data)
 }
 
+// emitEmptyResult emits a standardized empty search result when no matches are found.
 func emitEmptyResult(rc *skillmain.RunContext, in input) error {
 	data := textmatch.EmptySearchResult(in.Pattern, in.CaseInsensitive, []match{})
 	data["max_matches"] = in.MaxMatches
 	return skillout.Emit(rc, command, data)
 }
 
+// convertMatches converts ripgrep matches to standardized format with snippet generation and file hit counting.
 func convertMatches(rgMatches []ripgrep.Match) ([]match, map[string]int) {
 	matches := make([]match, 0, len(rgMatches))
 	fileHits := make(map[string]int)

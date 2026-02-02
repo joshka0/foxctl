@@ -16,6 +16,13 @@ func NewQueryEngine(store *Store) *QueryEngine {
 }
 
 // Search performs an FTS search over nodes.
+//
+// Index:
+// - Purpose: Find repo graph nodes using FTS with syntax fallback
+// - Flow: run FTS → on syntax error retry with quoted query
+// - FailureModes: FTS query errors, store errors
+// - Related: Store.SearchFTS, quoteFTSQuery
+// - Keywords: repo.index.search, fts5, query, nodes, SearchFTS
 func (q *QueryEngine) Search(ctx context.Context, query string, limit int) ([]Node, error) {
 	if q == nil || q.store == nil {
 		return nil, ErrNotFound
@@ -64,6 +71,13 @@ func (q *QueryEngine) Open(ctx context.Context, id string) (Node, error) {
 }
 
 // Expand traverses the graph starting from seed node IDs.
+//
+// Index:
+// - Purpose: Expand the repo graph from seeds with depth/budget limits
+// - Flow: normalize options → BFS by depth → fetch edges → collect nodes/edges
+// - FailureModes: edge fetch errors, store errors
+// - Related: GetOutgoingEdges, GetIncomingEdges, Store.GetNodes
+// - Keywords: repo.index.expand, seeds, depth, budget, edges, nodes
 func (q *QueryEngine) Expand(ctx context.Context, seeds []string, opts ExpandOptions) (ExpandResult, error) {
 	if q == nil || q.store == nil {
 		return ExpandResult{}, ErrNotFound

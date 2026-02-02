@@ -1,4 +1,3 @@
-// Package persist provides SQLite-backed persistence for job metadata and lifecycle management.
 package persist
 
 import (
@@ -324,6 +323,15 @@ func (s *sqlStore) FindDuplicateJob(ctx context.Context, argsHash string) (types
 	return job, nil
 }
 
+// FindOrInsertJob returns an existing job by args hash or inserts a new job.
+//
+// Index:
+// - Purpose: Deduplicate jobs by args hash while inserting atomically
+// - Flow: begin tx → lookup by args_hash → return existing or insert new → commit
+// - SideEffects: database transaction; job table insert
+// - FailureModes: tx errors, scan errors, insert errors
+// - Related: FindDuplicateJob, types.Job
+// - Keywords: jobs_find_or_insert, args_hash, transaction, dedupe
 func (s *sqlStore) FindOrInsertJob(ctx context.Context, job types.Job) (types.Job, bool, error) {
 	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{})
 	if err != nil {

@@ -1,5 +1,3 @@
-// Package observability provides wide event observability following loggingsucks.com principles.
-// Wide events capture comprehensive per-operation context instead of narrow per-component events.
 package observability
 
 import (

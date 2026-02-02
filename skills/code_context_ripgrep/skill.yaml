@@ -89,6 +89,9 @@ signature:
       - Python: def, async def, class (indentation-based)
       - JavaScript/TypeScript: function, arrow functions, class, interface, type
       - GDScript: func, class_name, inner class (indentation-based)
+      - Elixir: def, defmodule, fn (do/end)
+      - Ruby: def, class, module, lambda (do/end)
+      - Lua: function, local function, assignment (function/end)
       
       For unsupported languages, falls back to blank-line delimited blocks.
       

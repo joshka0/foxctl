@@ -1,7 +1,3 @@
-// Package engine defines the AgentEngine interface for LLM-driven agent execution.
-//
-// The engine abstraction enables swapping LLM backends (DSPy, Claude API, etc.)
-// while providing canonical hook integration points and tool execution.
 package engine
 
 import (
@@ -246,6 +242,12 @@ type EngineConfig struct {
 }
 
 // DefaultEngineConfig returns sensible defaults.
+//
+// Index:
+// - Purpose: Provide baseline engine configuration values
+// - Flow: populate defaults → return config
+// - Related: EngineConfig, WithMaxIterations, WithMaxResultBytes
+// - Keywords: engine_config, max_iterations, max_result_bytes, temperature, max_tokens
 func DefaultEngineConfig() EngineConfig {
 	return EngineConfig{
 		MaxIterations:  50,

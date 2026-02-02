@@ -186,6 +186,65 @@ func TestStore_CompleteAndGetEmbedding(t *testing.T) {
 	_ = result // avoid unused warning
 }
 
+func TestStore_GetContentDigest(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+
+	store, err := OpenStore(ctx, root)
+	if err != nil {
+		t.Fatalf("failed to open store: %v", err)
+	}
+	defer store.Close()
+
+	digest, model, ok, err := store.GetContentDigest(ctx, "test-ws", "main.go:Digest")
+	if err != nil {
+		t.Fatalf("get content digest failed: %v", err)
+	}
+	if ok {
+		t.Fatalf("expected ok=false for missing symbol, got digest=%s model=%s", digest, model)
+	}
+
+	symbol := SymbolInput{
+		SymbolID:   "main.go:Digest",
+		FilePath:   "main.go",
+		SymbolName: "Digest",
+		Content:    "func Digest() {}",
+	}
+
+	_, err = store.Enqueue(ctx, EnqueueRequest{
+		WorkspaceID: "test-ws",
+		Symbols:     []SymbolInput{symbol},
+	})
+	if err != nil {
+		t.Fatalf("enqueue failed: %v", err)
+	}
+
+	job, err := store.ClaimNext(ctx)
+	if err != nil {
+		t.Fatalf("claim failed: %v", err)
+	}
+
+	err = store.Complete(ctx, job.ID, []float32{0.1, 0.2}, "test-model")
+	if err != nil {
+		t.Fatalf("complete failed: %v", err)
+	}
+
+	digest, model, ok, err = store.GetContentDigest(ctx, "test-ws", "main.go:Digest")
+	if err != nil {
+		t.Fatalf("get content digest failed: %v", err)
+	}
+	if !ok {
+		t.Fatal("expected ok=true for existing symbol")
+	}
+	if model != "test-model" {
+		t.Errorf("expected model test-model, got %s", model)
+	}
+	expectedDigest := computeDigest(symbol.Content)
+	if digest != expectedDigest {
+		t.Errorf("expected digest %s, got %s", expectedDigest, digest)
+	}
+}
+
 func TestStore_FailAndRetry(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()

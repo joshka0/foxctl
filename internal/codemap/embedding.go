@@ -37,6 +37,7 @@ type codemapChunkResult struct {
 }
 
 // BuildEmbeddingPlan builds embedding text for the internal codemap format.
+// BuildEmbeddingPlan converts a codemap into embedding chunks.
 func BuildEmbeddingPlan(cm *Codemap) EmbeddingPlan {
 	if cm == nil {
 		return EmbeddingPlan{}
@@ -112,6 +113,7 @@ func BuildEmbeddingPlan(cm *Codemap) EmbeddingPlan {
 }
 
 // BuildEmbeddingPlanFromWindsurf builds embedding text for Windsurf codemaps.
+// BuildEmbeddingPlanFromWindsurf converts a Windsurf codemap into embedding chunks.
 func BuildEmbeddingPlanFromWindsurf(cm *WindsurfCodemap) EmbeddingPlan {
 	if cm == nil {
 		return EmbeddingPlan{}

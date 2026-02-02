@@ -23,16 +23,17 @@ func TestStoreReplaceAllAndSearch(t *testing.T) {
 	}
 	defer store.Close()
 
+	key := repoKey(repoRoot)
 	pkg := "go:example"
 	pkgNode := Node{
-		ID:        PackageID(pkg),
+		ID:        PackageID(key, pkg),
 		Kind:      NodePackage,
 		Pkg:       pkg,
 		Name:      "example",
 		UpdatedAt: time.Now().UTC(),
 	}
 	fileNode := Node{
-		ID:        FileID(pkg, "main.go"),
+		ID:        FileID(key, pkg, "main.go"),
 		Kind:      NodeFile,
 		Pkg:       pkg,
 		File:      "main.go",

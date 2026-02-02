@@ -1,4 +1,3 @@
-// Package sessions implements storage for captured Claude Code conversation sessions.
 package sessions
 
 import (
@@ -1136,6 +1135,14 @@ ON CONFLICT(id) DO UPDATE SET
 }
 
 // SaveChunks inserts multiple chunks in a batch.
+//
+// Index:
+// - Purpose: Persist session chunk batches in a single transaction
+// - Flow: begin tx → prepare statement → upsert chunks → commit
+// - SideEffects: database transaction; session_chunks writes
+// - FailureModes: tx errors, prepare errors, exec errors
+// - Related: SaveChunk
+// - Keywords: session_chunks, batch, upsert, transaction
 func (s *Store) SaveChunks(ctx context.Context, chunks []SessionChunk) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -1351,6 +1358,14 @@ ON CONFLICT(id) DO UPDATE SET
 }
 
 // SaveChunkSummaries upserts multiple chunk-level summaries in a transaction.
+//
+// Index:
+// - Purpose: Persist chunk summary batches in a single transaction
+// - Flow: begin tx → prepare statement → upsert summaries → commit
+// - SideEffects: database transaction; session_chunk_summaries writes
+// - FailureModes: tx errors, prepare errors, exec errors
+// - Related: SaveChunkSummary
+// - Keywords: chunk_summary, batch, upsert, transaction
 func (s *Store) SaveChunkSummaries(ctx context.Context, summaries []SessionChunkSummary) error {
 	if len(summaries) == 0 {
 		return nil
@@ -1519,6 +1534,14 @@ ON CONFLICT(session_id, window_index) DO UPDATE SET
 }
 
 // SaveContextWindows inserts multiple context windows in a batch.
+//
+// Index:
+// - Purpose: Persist context window batches in a single transaction
+// - Flow: begin tx → prepare statement → upsert windows → commit
+// - SideEffects: database transaction; session_context_windows writes
+// - FailureModes: tx errors, prepare errors, exec errors
+// - Related: SaveContextWindow
+// - Keywords: context_window, batch, upsert, transaction
 func (s *Store) SaveContextWindows(ctx context.Context, windows []ContextWindow) error {
 	if len(windows) == 0 {
 		return nil

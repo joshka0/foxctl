@@ -1,6 +1,3 @@
-// Package ripgrep provides a unified interface for ripgrep (rg) operations.
-// This package consolidates common ripgrep patterns used across skills
-// and the retrieval system.
 package ripgrep
 
 import (
@@ -111,8 +108,15 @@ type SearchResult struct {
 	Truncated bool `json:"truncated,omitempty"`
 }
 
-// SearchJSON runs ripgrep with JSON output and parses the results.
-// Returns parsed matches or error if ripgrep fails.
+// SearchJSON runs ripgrep with JSON output and parses matches.
+//
+// Index:
+// - Purpose: Execute rg search and parse JSON matches
+// - Flow: validate pattern -> build args -> run rg -> parse JSON output
+// - SideEffects: spawns rg process
+// - FailureModes: missing pattern, rg exec errors, JSON parse errors
+// - Related: runRipgrep, parseJSONOutput
+// - Keywords: ripgrep, rg, json, matches, max_matches, runRipgrep
 func SearchJSON(ctx context.Context, opts SearchOpts) (*SearchResult, error) {
 	if opts.Pattern == "" {
 		return nil, fmt.Errorf("ripgrep: pattern required")
@@ -127,7 +131,7 @@ func SearchJSON(ctx context.Context, opts SearchOpts) (*SearchResult, error) {
 	return parseJSONOutput(result.Stdout, opts.WorkingDir, opts.MaxMatches)
 }
 
-// FilesWithMatches returns only the file paths containing matches.
+// FilesWithMatches returns file paths containing matches.
 // This is faster than SearchJSON when you only need file paths.
 func FilesWithMatches(ctx context.Context, opts SearchOpts) ([]string, error) {
 	if opts.Pattern == "" {

@@ -18,6 +18,15 @@ type ShellRunner struct {
 }
 
 // Run executes a shell script hook.
+// Run executes the configured shell hook and parses its output.
+//
+// Index:
+// - Purpose: Execute shell-based hook script and parse output
+// - Flow: resolve script path → marshal input → run command → parse output
+// - SideEffects: executes shell script; sets environment variables
+// - FailureModes: missing script path, command errors, output parse errors
+// - Related: parseShellOutput, buildHookEnv
+// - Keywords: shell_hook, hook_output, AGENTCTL_HOOK_EVENT, script_path, shell_runner
 func (r *ShellRunner) Run(ctx context.Context, hookDef HookDef, input Input) (Output, error) {
 	// Determine script path - either from runner config or from hook definition
 	scriptPath := r.ScriptPath

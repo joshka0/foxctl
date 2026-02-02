@@ -1,4 +1,4 @@
-// Package main implements the session/expand skill for retrieving session turns.
+// Package main implements the session/expand skill for retrieving and analyzing session turns with comprehensive metadata.
 package main
 
 import (
@@ -13,14 +13,14 @@ import (
 	"github.com/jkatigb/agentctl/internal/storage"
 )
 
-// Input defines the skill input parameters.
+// Input defines the skill input parameters for session expansion with filtering and limiting options.
 type Input struct {
 	SessionID  string `json:"session_id" validate:"required"`
 	ErrorsOnly bool   `json:"errors_only,omitempty"`
 	Limit      int    `json:"limit,omitempty"`
 }
 
-// Output defines the skill output.
+// Output defines the skill output with session metadata, turn details, and error statistics.
 type Output struct {
 	SessionID  string       `json:"session_id"`
 	Session    *SessionInfo `json:"session,omitempty"`
@@ -31,7 +31,7 @@ type Output struct {
 	Message    string       `json:"message"`
 }
 
-// SessionInfo provides summary info about the session.
+// SessionInfo provides summary info about the session with project details and accomplishments.
 type SessionInfo struct {
 	ProjectName  string   `json:"project_name"`
 	GitBranch    string   `json:"git_branch,omitempty"`
@@ -45,7 +45,7 @@ type SessionInfo struct {
 	UserTurns    int      `json:"user_turns"`
 }
 
-// TurnInfo represents a turn in the conversation.
+// TurnInfo represents a turn in the conversation with tool calls, errors, and metadata.
 type TurnInfo struct {
 	TurnIndex      int        `json:"turn_index"`
 	Role           string     `json:"role"`
@@ -60,7 +60,7 @@ type TurnInfo struct {
 	Timestamp      string     `json:"timestamp,omitempty"`
 }
 
-// ToolCall represents a tool invocation.
+// ToolCall represents a tool invocation with success status tracking.
 type ToolCall struct {
 	Name    string `json:"name"`
 	Success bool   `json:"success"`
@@ -71,10 +71,21 @@ const (
 	defaultLimit = 100
 )
 
+// main is the skill entry point for session/expand with comprehensive turn retrieval capabilities.
 func main() {
 	skillmain.Main(command, run)
 }
 
+// run orchestrates session expansion with metadata retrieval, turn filtering, and comprehensive output formatting.
+//
+// Index:
+// - Purpose: Retrieve and analyze session turns with optional error filtering, tool call tracking, and session metadata
+// - Flow: validate input → open sessions store → get session metadata → retrieve turns (filtered or all) → format output → emit results
+// - SideEffects: reads session metadata; accesses turn records; processes tool call information; aggregates error statistics
+// - FailureModes: missing session IDs, store access errors, turn retrieval failures, invalid filtering options
+// - Observability: emits session metadata, turn details, tool call information, error counts, and comprehensive turn analytics
+// - Related: sessionkit.OpenSessions, storage.SessionStore, storage.SessionTurn
+// - Keywords: session/expand, turn_retrieval, session_analysis, error_tracking, tool_call_analysis
 func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	if in.Limit <= 0 {
 		in.Limit = defaultLimit

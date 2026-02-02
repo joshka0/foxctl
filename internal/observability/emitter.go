@@ -41,13 +41,16 @@ func Emit(ctx context.Context, event *WideEvent) {
 	EmitWithConfig(ctx, event, nil)
 }
 
-// EmitWithConfig writes a WideEvent with custom persistence configuration.
-// EmitWithConfig emits a WideEvent by streaming it to SSE and optionally persisting it to disk.
-// 
-// EmitWithConfig does nothing if event is nil. It always publishes the event to SSE for real‑time
-// streaming. If no observability directory is configured, persistence is skipped. When persistence is
-// enabled, the active sampler (if any) is consulted and a Drop decision prevents file persistence.
-// If config is nil, the event is persisted using the default NDJSON format.
+// EmitWithConfig emits a WideEvent with custom persistence configuration.
+//
+// Index:
+// - Purpose: Stream an event to SSE and optionally persist it to disk
+// - Flow: publish to SSE → resolve observability dir → apply sampling → persist event
+// - SideEffects: writes SSE output; optional NDJSON file writes
+// - FailureModes: persistence failures are logged; nil event returns early
+// - Observability: emits WideEvent to SSE and wide_events NDJSON persistence
+// - Related: Emit, EmitSync, persistEvent, publishToSSE
+// - Keywords: wide_events, observability_dir, sampler, sse, persist_event
 func EmitWithConfig(ctx context.Context, event *WideEvent, config *persistConfig) {
 	if event == nil {
 		return
@@ -77,8 +80,15 @@ func EmitWithConfig(ctx context.Context, event *WideEvent, config *persistConfig
 }
 
 // EmitSync writes a WideEvent synchronously, bypassing sampling.
-// EmitSync emits a WideEvent immediately. It always publishes the event to the server-sent events (SSE) stream and, if file-based observability is enabled, appends the event to the wide_events NDJSON file.
-// EmitSync bypasses any sampling; calling it with a nil event is a no-op. It returns any error encountered while writing the event to persistent storage.
+//
+// Index:
+// - Purpose: Persist a WideEvent immediately without sampling
+// - Flow: publish to SSE → resolve observability dir → append NDJSON
+// - SideEffects: writes SSE output; appends to wide_events NDJSON
+// - FailureModes: file write errors returned; nil event returns nil
+// - Observability: emits WideEvent to SSE and wide_events NDJSON persistence
+// - Related: EmitWithConfig, WriteEvent, publishToSSE
+// - Keywords: wide_events, emit_sync, sse, write_event, observability_dir
 func EmitSync(ctx context.Context, event *WideEvent) error {
 	if event == nil {
 		return nil
@@ -95,9 +105,16 @@ func EmitSync(ctx context.Context, event *WideEvent) error {
 	return WriteEvent(ctx, WideEventFileName, event)
 }
 
-// EmitBuilder is a convenience function that builds and emits an event.
-// It applies sampling based on the configured sampler.
-// Persist config from the builder (via WithPersistence/WithPersistenceFile) is honored.
+// EmitBuilder builds and emits an event using builder persistence settings.
+//
+// Index:
+// - Purpose: Build a WideEvent and emit it with builder-specified persistence
+// - Flow: build event → set status/duration → delegate to EmitWithConfig
+// - SideEffects: publishes SSE; optional NDJSON persistence
+// - FailureModes: nil builder returns early; persistence failures logged downstream
+// - Observability: emits WideEvent to SSE and optional persistence
+// - Related: EventBuilder.Build, EmitWithConfig
+// - Keywords: event_builder, emit, status, duration_ms, persist_config
 func EmitBuilder(ctx context.Context, builder *EventBuilder, status Status, duration int64) {
 	if builder == nil {
 		return
@@ -122,7 +139,14 @@ type WideEventWriter struct {
 }
 
 // NewWideEventWriter creates a new writer for wide events.
-// If sampler is nil, DefaultSampler() is used.
+//
+// Index:
+// - Purpose: Initialize a cached NDJSON writer for WideEvents
+// - Flow: resolve observability dir → ensure events dir → open file → select sampler
+// - SideEffects: creates directories; opens file handles
+// - FailureModes: directory creation errors, file open errors
+// - Related: WideEventWriter.Write, DefaultSampler
+// - Keywords: wide_events, ndjson, sampler, observability_dir, file_handle
 func NewWideEventWriter(sampler Sampler) (*WideEventWriter, error) {
 	dir := getObsDir()
 	if dir == "" {

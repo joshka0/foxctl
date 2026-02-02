@@ -1,7 +1,4 @@
 //nolint:forbidigo // This IS the logging infrastructure - zerolog/stderr usage is intentional
-// Package observability provides helpers for emitting observability events.
-// Events are written as NDJSON to $AGENTCTL_OBS_DIR/events/<name>.ndjson.
-// See docs/observability/events.md for the full spec.
 package observability
 
 import (
@@ -66,8 +63,21 @@ func SetObsDirForTesting(dir string) {
 // If AGENTCTL_OBS_DIR is unset or empty, this is a no-op.
 // Errors are logged and returned to the caller; callers may choose to ignore them
 // since observability is typically best-effort.
-// The function ignores context cancellation to avoid dropping terminal events.
-func WriteEvent(_ context.Context, name string, v any) error {
+// The function respects context cancellation and will return ctx.Err() if canceled.
+//
+// Index:
+// - Purpose: Persist a structured observability event as NDJSON
+// - Flow: validate ctx → resolve observability dir → validate name → ensure dir → append JSON line
+// - SideEffects: creates directories; appends to NDJSON file
+// - FailureModes: invalid name ignored, mkdir errors, file open/encode errors, context cancellation
+// - Observability: emits stderr logs on write failures
+// - Related: getObsDir, logWriteError
+// - Keywords: ndjson, observability_dir, events, write_event, context_cancel
+func WriteEvent(ctx context.Context, name string, v any) error {
+	// Check for cancellation before starting
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	dir := getObsDir()
 	if dir == "" {
 		return nil // observability disabled
@@ -197,6 +207,7 @@ type RepoIndexEvent struct {
 	Error       string    `json:"error,omitempty"`
 }
 
+// NewRepoIndexEvent initializes a repo index observability event.
 func NewRepoIndexEvent(command, workspaceID, source string) RepoIndexEvent {
 	return RepoIndexEvent{
 		Ts:          time.Now().UTC(),

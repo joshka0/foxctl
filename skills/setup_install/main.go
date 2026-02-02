@@ -19,6 +19,7 @@ import (
 
 const command = "setup/install"
 
+// input defines the skill input parameters for agentctl installation with provider selection and installation options.
 type input struct {
 	Provider     string `json:"provider"`
 	SkipHooks    bool   `json:"skip_hooks"`
@@ -27,6 +28,7 @@ type input struct {
 	ValidateOnly bool   `json:"validate_only"`
 }
 
+// output contains the skill result data with installation status, directory information, and configuration details.
 type output struct {
 	Status       string            `json:"status"`
 	Provider     string            `json:"provider,omitempty"`
@@ -39,12 +41,14 @@ type output struct {
 	Instructions []string          `json:"instructions,omitempty"`
 }
 
+// directoryStatus represents the status of a directory with existence and creation tracking.
 type directoryStatus struct {
 	Path    string `json:"path"`
 	Exists  bool   `json:"exists"`
 	Created bool   `json:"created,omitempty"`
 }
 
+// hooksStatus represents the installation status of provider hooks with hook enumeration.
 type hooksStatus struct {
 	Provider  string   `json:"provider"`
 	Installed bool     `json:"installed"`
@@ -52,22 +56,35 @@ type hooksStatus struct {
 	Hooks     []string `json:"hooks,omitempty"`
 }
 
+// binaryStatus represents the status of the agentctl binary with path and version information.
 type binaryStatus struct {
 	Path    string `json:"path"`
 	Exists  bool   `json:"exists"`
 	Version string `json:"version,omitempty"`
 }
 
+// envStatus represents the status of an environment variable with requirement tracking.
 type envStatus struct {
 	Name     string `json:"name"`
 	Set      bool   `json:"set"`
 	Required bool   `json:"required"`
 }
 
+// main is the skill entry point for setup/install with comprehensive agentctl installation capabilities.
 func main() {
 	skillmain.Main(command, run)
 }
 
+// run orchestrates agentctl installation with validation and setup operations for multiple providers.
+//
+// Index:
+// - Purpose: Install and validate agentctl setup with directory creation, hook installation, and environment configuration
+// - Flow: validate input → execute validation or installation → check directories → install hooks → verify binary → check environment → emit results
+// - SideEffects: creates directories; installs provider hooks; validates environment; manages configuration files; performs system checks
+// - FailureModes: permission errors, missing directories, hook installation failures, environment issues, binary access problems
+// - Observability: emits installation status, directory creation results, hook installation details, environment status, and comprehensive setup information
+// - Related: validate, install, checkHooks, installHooks, checkEnvironment
+// - Keywords: setup/install, agentctl_installation, provider_hooks, environment_setup, directory_management
 func run(_ context.Context, rc *skillmain.RunContext, in input) error {
 	if in.Provider == "" {
 		in.Provider = "claude-code"
@@ -83,6 +100,7 @@ func run(_ context.Context, rc *skillmain.RunContext, in input) error {
 	return skillout.Emit(rc, command, out)
 }
 
+// validate performs comprehensive validation of agentctl setup without making changes.
 func validate(in input) output {
 	out := output{Status: "ok", Provider: in.Provider}
 
@@ -150,6 +168,7 @@ func validate(in input) output {
 	return out
 }
 
+// install performs complete agentctl setup with directory creation, hook installation, and configuration.
 func install(in input) output {
 	out := output{Status: "ok", Provider: in.Provider}
 
@@ -222,6 +241,7 @@ func install(in input) output {
 	return out
 }
 
+// checkHooks validates the installation status of provider hooks with detailed enumeration.
 func checkHooks(homeDir, provider string) hooksStatus {
 	status := hooksStatus{Provider: provider}
 
@@ -262,6 +282,7 @@ func checkHooks(homeDir, provider string) hooksStatus {
 	return status
 }
 
+// installHooks installs provider-specific hooks with support for multiple IDE providers.
 func installHooks(homeDir, provider, repoRoot string) hooksStatus {
 	status := hooksStatus{Provider: provider}
 
@@ -287,6 +308,7 @@ func installHooks(homeDir, provider, repoRoot string) hooksStatus {
 	return status
 }
 
+// findRepoRoot attempts to locate the agentctl repository root using multiple search strategies.
 func findRepoRoot(homeDir string) string {
 	if exePath, err := os.Executable(); err == nil {
 		dir := filepath.Dir(exePath)
@@ -314,6 +336,7 @@ func findRepoRoot(homeDir string) string {
 	return ""
 }
 
+// installClaudeCodeHooks installs Claude Code provider hooks with symlink creation and settings merging.
 func installClaudeCodeHooks(homeDir, repoRoot string) hooksStatus {
 	status := hooksStatus{Provider: "claude-code"}
 
@@ -380,6 +403,7 @@ func installClaudeCodeHooks(homeDir, repoRoot string) hooksStatus {
 	return status
 }
 
+// installOpenCodeHooks installs OpenCode provider hooks with build process and plugin linking.
 func installOpenCodeHooks(homeDir, repoRoot string) hooksStatus {
 	status := hooksStatus{Provider: "opencode"}
 
@@ -433,6 +457,7 @@ func installOpenCodeHooks(homeDir, repoRoot string) hooksStatus {
 	return status
 }
 
+// installCodexHooks installs Codex provider hooks with AGENTS.md file copying.
 func installCodexHooks(homeDir, repoRoot string) hooksStatus {
 	status := hooksStatus{Provider: "codex"}
 
@@ -466,6 +491,7 @@ func installCodexHooks(homeDir, repoRoot string) hooksStatus {
 	return status
 }
 
+// mergeSettings merges Claude Code settings files with hook configuration preservation.
 func mergeSettings(sourceFile, targetFile string) error {
 	sourceData, err := os.ReadFile(sourceFile)
 	if err != nil {
@@ -520,6 +546,7 @@ func mergeSettings(sourceFile, targetFile string) error {
 	return os.WriteFile(targetFile, merged, 0o600)
 }
 
+// checkEnvironment validates required and optional environment variables for agentctl operation.
 func checkEnvironment() []envStatus {
 	envVars := []struct {
 		name     string

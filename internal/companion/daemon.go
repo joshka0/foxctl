@@ -48,6 +48,13 @@ type DaemonConfig struct {
 }
 
 // NewCompressionDaemon creates a new compression daemon.
+// NewCompressionDaemon creates a compression daemon with default intervals.
+//
+// Index:
+// - Purpose: Configure periodic conversation compression
+// - Flow: apply defaults → construct daemon → return
+// - Related: CompressionDaemon.Start, CompressionDaemon.Stop
+// - Keywords: compression_daemon, daily_interval, weekly_interval, summaries
 func NewCompressionDaemon(cfg DaemonConfig) *CompressionDaemon {
 	if cfg.DailyInterval <= 0 {
 		cfg.DailyInterval = 1 * time.Hour
@@ -68,6 +75,15 @@ func NewCompressionDaemon(cfg DaemonConfig) *CompressionDaemon {
 }
 
 // Start begins the daemon loops.
+// Start begins daily and weekly compression loops.
+//
+// Index:
+// - Purpose: Run periodic compression loops for conversation memory
+// - Flow: validate deps → spawn daily/weekly loops → return
+// - SideEffects: starts goroutines; runs compression jobs
+// - FailureModes: missing dependencies prevents start
+// - Related: runDailyLoop, runWeeklyLoop
+// - Keywords: compression_start, daily_loop, weekly_loop, conversation_memory
 func (d *CompressionDaemon) Start(ctx context.Context) {
 	if d.memory == nil || d.db == nil {
 		d.logger.Error().
@@ -83,6 +99,13 @@ func (d *CompressionDaemon) Start(ctx context.Context) {
 }
 
 // Stop stops the daemon and waits for it to finish.
+// Stop signals compression loops to stop and waits for completion.
+//
+// Index:
+// - Purpose: Stop compression daemon loops
+// - Flow: close stop channel → wait for workers → close done channel
+// - Related: CompressionDaemon.Start
+// - Keywords: compression_stop, stop_channel, waitgroup, done
 func (d *CompressionDaemon) Stop() {
 	close(d.stopCh)
 	d.wg.Wait()

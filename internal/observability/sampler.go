@@ -61,6 +61,13 @@ var (
 )
 
 // DefaultSampler returns a shared TailSampler configured from environment variables.
+//
+// Index:
+// - Purpose: Provide a singleton sampler configured from environment values
+// - Flow: sync.Once init → read env → build TailSampler
+// - SideEffects: reads environment variables
+// - Related: NewTailSamplerFromEnv, TailSampler.ShouldSample
+// - Keywords: sampler, tail_sampler, env, singleton, observability
 func DefaultSampler() *TailSampler {
 	defaultSamplerOnce.Do(func() {
 		defaultSampler = NewTailSamplerFromEnv()
@@ -69,6 +76,12 @@ func DefaultSampler() *TailSampler {
 }
 
 // NewTailSampler creates a TailSampler with explicit configuration.
+//
+// Index:
+// - Purpose: Construct a TailSampler with validated configuration
+// - Flow: clamp rate → populate struct → return sampler
+// - Related: TailSampler.ShouldSample
+// - Keywords: tail_sampler, sample_errors, slow_threshold_ms, sample_rate
 func NewTailSampler(sampleErrors bool, slowThresholdMS int64, randomRate float64) *TailSampler {
 	if randomRate < 0 {
 		randomRate = 0
@@ -84,6 +97,14 @@ func NewTailSampler(sampleErrors bool, slowThresholdMS int64, randomRate float64
 }
 
 // NewTailSamplerFromEnv creates a TailSampler from environment variables.
+//
+// Index:
+// - Purpose: Build a TailSampler from environment configuration
+// - Flow: read env → parse values → apply defaults → construct sampler
+// - SideEffects: reads environment variables
+// - FailureModes: invalid env values fall back to defaults
+// - Related: DefaultSampler, NewTailSampler
+// - Keywords: tail_sampler, env, sample_rate, slow_threshold_ms, sample_errors
 func NewTailSamplerFromEnv() *TailSampler {
 	sampleErrors := DefaultSampleErrors
 	if v := os.Getenv(EnvSampleErrors); v != "" {
@@ -114,6 +135,12 @@ func NewTailSamplerFromEnv() *TailSampler {
 }
 
 // ShouldSample implements Sampler interface.
+//
+// Index:
+// - Purpose: Decide whether to sample a WideEvent based on tail-sampling rules
+// - Flow: check nil → evaluate error/canceled → evaluate slow → random sample → drop
+// - Related: TailSampler, SampleDecision
+// - Keywords: should_sample, status, duration_ms, random_rate, tail_sampling
 func (s *TailSampler) ShouldSample(event *WideEvent) SampleDecision {
 	if event == nil {
 		return Drop

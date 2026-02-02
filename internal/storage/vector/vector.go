@@ -1,6 +1,3 @@
-// Package vector provides optional sqlite-vector integration for semantic search.
-// This package requires CGO and is only available when built with the "vector" build tag.
-// Build with: CGO_ENABLED=1 go build -tags vector
 package vector
 
 import (

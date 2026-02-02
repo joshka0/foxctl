@@ -1,4 +1,3 @@
-// Package overseer provides task scoring and post-review event coordination.
 package overseer
 
 import (
@@ -45,7 +44,13 @@ type PostReviewHandlerConfig struct {
 	Logger zerolog.Logger
 }
 
-// NewPostReviewHandler creates a new handler with the given configuration.
+// NewPostReviewHandler creates a post-review handler with configured dependencies.
+//
+// Index:
+// - Purpose: Initialize post-review processing pipeline
+// - Flow: create producer -> capture indexer handler/config -> return handler
+// - Related: PostReviewHandler.HandleReviewApproved
+// - Keywords: post_review, producer, indexer_handler, review_event
 func NewPostReviewHandler(cfg PostReviewHandlerConfig) *PostReviewHandler {
 	return &PostReviewHandler{
 		producer:       postreview.NewProducer(cfg.EventStore),
@@ -56,16 +61,17 @@ func NewPostReviewHandler(cfg PostReviewHandlerConfig) *PostReviewHandler {
 	}
 }
 
-// HandleReviewApproved is called when a review transitions to "ok" and the
-// diff is applied. It:
-//  1. Builds and persists a PostReviewEvent (idempotent).
-//  2. Delegates to the indexer handler for fanout.
+// HandleReviewApproved persists an approved review event and triggers indexer fanout.
+// It optionally captures review outcomes to trajectory storage before delegating.
+// If files is nil/empty, indexer fanout is skipped (see deferred.md D1).
 //
-// The files parameter contains the list of changed files. If nil/empty,
-// indexers will be skipped (see deferred.md D1).
-//
-// This method is idempotent: calling it multiple times for the same
-// (workspace, task, review) tuple will not create duplicate events.
+// Index:
+// - Purpose: Persist an approved review event and trigger indexer fanout
+// - Flow: validate artifact status -> produce event -> capture trajectory (optional) -> test hook -> fanout (optional) -> return result
+// - SideEffects: persists post-review event; optional trajectory capture; indexer writes
+// - FailureModes: invalid artifact status, event production errors, indexer handler errors
+// - Related: postreview.Producer.Produce, trajectorycapture.CaptureReviewOutcome, indexing.PostReviewHandler.Handle
+// - Keywords: post_review, review_id, workspace_id, task_id, postreview.Producer.Produce, indexing.PostReviewHandler.Handle
 func (h *PostReviewHandler) HandleReviewApproved(
 	ctx context.Context,
 	artifact agent.ReviewArtifact,

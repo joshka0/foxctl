@@ -135,6 +135,14 @@ type ProcessResult struct {
 // Process transforms raw text into atomic facts.
 // It may return multiple facts if the input contains multiple distinct pieces of information.
 // Returns token usage for cost tracking via observability.
+//
+// Index:
+// - Purpose: Convert raw text into disambiguated atomic facts using LLM
+// - Flow: build prompt → call LLM → parse facts → fallback to single fact on parse error
+// - SideEffects: network call to LLM
+// - FailureModes: missing input, LLM errors, parse errors (fallback)
+// - Related: buildAtomicPrompt, parseAtomicResponse, Processor.callLLM
+// - Keywords: atomic_facts, llm, entities, timestamp, disambiguation
 func (p *Processor) Process(ctx context.Context, raw string, pctx ProcessContext) ([]AtomicFact, *obs.TokenUsage, error) {
 	if strings.TrimSpace(raw) == "" {
 		return nil, nil, fmt.Errorf("empty input")

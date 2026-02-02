@@ -1,5 +1,3 @@
-// Package sqlutil provides reusable utilities for database operations,
-// including scanning helpers and custom SQL types.
 package sqlutil
 
 import (

@@ -1,4 +1,4 @@
-// Package main implements the optimize/feedback skill for analyzing session feedback patterns.
+// Package main implements the optimize/from_feedback skill for analyzing session feedback patterns and generating optimization recommendations.
 package main
 
 import (
@@ -16,7 +16,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/storage/memory"
 )
 
-// Input defines the skill input parameters.
+// Input defines the skill input parameters for feedback analysis with filtering options.
 type Input struct {
 	Workspace string `json:"workspace,omitempty"`
 	Since     string `json:"since,omitempty"`
@@ -25,7 +25,7 @@ type Input struct {
 	Outcome   string `json:"outcome,omitempty"`
 }
 
-// SessionFeedback mirrors the structure from session_feedback skill.
+// SessionFeedback mirrors the structure from session_feedback skill with comprehensive session evaluation data.
 type SessionFeedback struct {
 	FeedbackID      string    `json:"feedback_id"`
 	SessionID       string    `json:"session_id,omitempty"`
@@ -43,13 +43,13 @@ type SessionFeedback struct {
 	Timestamp       time.Time `json:"timestamp"`
 }
 
-// PatternCount tracks frequency of patterns.
+// PatternCount tracks frequency of patterns with count statistics.
 type PatternCount struct {
 	Pattern string `json:"pattern"`
 	Count   int    `json:"count"`
 }
 
-// Recommendation represents an optimization recommendation.
+// Recommendation represents an optimization recommendation with priority and evidence.
 type Recommendation struct {
 	Priority    string `json:"priority"` // high, medium, low
 	Category    string `json:"category"` // workflow, tooling, process
@@ -57,7 +57,7 @@ type Recommendation struct {
 	Evidence    string `json:"evidence"`
 }
 
-// Output defines the skill output.
+// Output defines the skill output with comprehensive feedback analysis and recommendations.
 type Output struct {
 	FeedbackCount       int              `json:"feedback_count"`
 	AvgRating           float64          `json:"avg_rating"`
@@ -73,10 +73,21 @@ type Output struct {
 
 const command = "optimize/from_feedback"
 
+// main is the skill entry point for optimize/from_feedback with comprehensive feedback analysis capabilities.
 func main() {
 	skillmain.Main(command, run)
 }
 
+// run orchestrates feedback analysis with filtering, pattern detection, and recommendation generation.
+//
+// Index:
+// - Purpose: Analyze session feedback patterns to identify trends, issues, and generate optimization recommendations
+// - Flow: validate input → parse date filters → open memory store → collect feedback entries → apply filters → analyze patterns → generate recommendations → emit results
+// - SideEffects: reads memory store entries; processes feedback data; calculates statistics; generates analytical insights
+// - FailureModes: invalid date formats, memory store access errors, JSON parsing failures, insufficient data
+// - Observability: emits feedback statistics, pattern frequencies, outcome distributions, tool usage, and prioritized recommendations
+// - Related: analyzeFeedback, topPatterns, generateRecommendations, memory.OpenWithConfig
+// - Keywords: optimize/from_feedback, feedback_analysis, pattern_detection, optimization_recommendations, session_analytics
 func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	// Set defaults
 	if in.MinRating == 0 {
@@ -149,6 +160,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	return skillout.Emit(rc, command, output)
 }
 
+// analyzeFeedback processes feedback data to calculate statistics, identify patterns, and generate insights.
 func analyzeFeedback(feedbacks []SessionFeedback) Output {
 	output := Output{
 		FeedbackCount:       len(feedbacks),
@@ -214,6 +226,7 @@ func analyzeFeedback(feedbacks []SessionFeedback) Output {
 	return output
 }
 
+// topPatterns sorts pattern counts by frequency and returns the top N patterns.
 func topPatterns(counts map[string]int, limit int) []PatternCount {
 	patterns := make([]PatternCount, 0, len(counts))
 	for pattern, count := range counts {
@@ -231,6 +244,7 @@ func topPatterns(counts map[string]int, limit int) []PatternCount {
 	return patterns
 }
 
+// generateRecommendations creates prioritized optimization recommendations based on feedback analysis patterns.
 func generateRecommendations(output Output) []Recommendation {
 	recommendations := make([]Recommendation, 0)
 

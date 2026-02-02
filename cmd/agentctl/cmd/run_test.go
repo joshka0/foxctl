@@ -62,9 +62,19 @@ func installTextGrepSkill(t *testing.T) config.Config {
 			Cache:  filepath.Join(agentHome, "cache"),
 			Skills: filepath.Join(agentHome, "skills"),
 		},
+		Storage: config.StorageSettings{
+			Root: filepath.Join(agentHome, "storage"),
+		},
 	}
 
-	for _, dir := range []string{cfg.Home, cfg.Paths.CAS, cfg.Paths.Jobs, cfg.Paths.Cache, cfg.Paths.Skills} {
+	for _, dir := range []string{
+		cfg.Home,
+		cfg.Paths.CAS,
+		cfg.Paths.Jobs,
+		cfg.Paths.Cache,
+		cfg.Paths.Skills,
+		cfg.Storage.Root,
+	} {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			t.Fatalf("mkdir %s: %v", dir, err)
 		}
@@ -132,9 +142,19 @@ func installTodoSkill(t *testing.T) config.Config {
 			Cache:  filepath.Join(agentHome, "cache"),
 			Skills: filepath.Join(agentHome, "skills"),
 		},
+		Storage: config.StorageSettings{
+			Root: filepath.Join(agentHome, "storage"),
+		},
 	}
 
-	for _, dir := range []string{cfg.Home, cfg.Paths.CAS, cfg.Paths.Jobs, cfg.Paths.Cache, cfg.Paths.Skills} {
+	for _, dir := range []string{
+		cfg.Home,
+		cfg.Paths.CAS,
+		cfg.Paths.Jobs,
+		cfg.Paths.Cache,
+		cfg.Paths.Skills,
+		cfg.Storage.Root,
+	} {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			t.Fatalf("mkdir %s: %v", dir, err)
 		}

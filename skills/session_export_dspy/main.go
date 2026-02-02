@@ -15,7 +15,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/storage/sessions"
 )
 
-// Input defines the skill input parameters.
+// Input defines the skill input parameters for DSPy training data export with flexible filtering options.
 type Input struct {
 	SessionIDs   []string `json:"session_ids,omitempty"`
 	Project      string   `json:"project,omitempty"`
@@ -26,7 +26,7 @@ type Input struct {
 	Limit        int      `json:"limit,omitempty"`
 }
 
-// Output defines the skill output.
+// Output defines the skill output with comprehensive export statistics and data.
 type Output struct {
 	ExamplesCount int           `json:"examples_count"`
 	SessionsUsed  int           `json:"sessions_used"`
@@ -36,28 +36,28 @@ type Output struct {
 	Message       string        `json:"message"`
 }
 
-// DSPyExample represents a training example in DSPy format.
+// DSPyExample represents a training example in DSPy format with input/output pairs and metadata.
 type DSPyExample struct {
 	Input    ExampleInput  `json:"input"`
 	Output   ExampleOutput `json:"output"`
 	Metadata ExampleMeta   `json:"metadata,omitempty"`
 }
 
-// ExampleInput is the input portion of an example.
+// ExampleInput is the input portion of an example with user request and contextual information.
 type ExampleInput struct {
 	UserRequest string   `json:"user_request"`
 	Context     string   `json:"context,omitempty"`
 	Files       []string `json:"files,omitempty"`
 }
 
-// ExampleOutput is the output portion of an example.
+// ExampleOutput is the output portion of an example with response and tool usage tracking.
 type ExampleOutput struct {
 	Response    string   `json:"response"`
 	ToolsUsed   []string `json:"tools_used,omitempty"`
 	FilesEdited []string `json:"files_edited,omitempty"`
 }
 
-// ExampleMeta provides metadata about the example.
+// ExampleMeta provides metadata about the example for training context and analysis.
 type ExampleMeta struct {
 	SessionID   string `json:"session_id"`
 	ProjectName string `json:"project_name,omitempty"`
@@ -70,10 +70,21 @@ const (
 	defaultLimit = 1000
 )
 
+// main is the skill entry point for session/export-dspy with training data generation capabilities.
 func main() {
 	skillmain.Main(command, run)
 }
 
+// run orchestrates DSPy training data export from sessions with multiple output formats and filtering options.
+//
+// Index:
+// - Purpose: Export session data as DSPy training examples with user-assistant pairing and tool usage tracking
+// - Flow: validate input → open sessions store → gather sessions → extract examples → write output → emit results
+// - SideEffects: reads session store; processes session turns; writes output files; generates training data
+// - FailureModes: missing session IDs/project, session store access failures, file I/O errors, format conversion errors
+// - Observability: emits export statistics, example counts, session usage, file paths, and comprehensive status information
+// - Related: extractExamples, writeExamples, unique, escapeCSV
+// - Keywords: session/export-dspy, dspy_training, data_export, machine_learning, session_processing
 func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	if len(in.SessionIDs) == 0 && in.Project == "" {
 		return skillerr.Arg("either session_ids or project is required")
@@ -169,7 +180,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	return skillout.Emit(rc, command, output)
 }
 
-// extractExamples extracts DSPy examples from session turns.
+// extractExamples extracts DSPy examples from session turns with user-assistant pairing and tool tracking.
 func extractExamples(sess sessions.Session, turns []sessions.SessionTurn, input Input) []DSPyExample {
 	examples := []DSPyExample{}
 
@@ -234,7 +245,7 @@ func extractExamples(sess sessions.Session, turns []sessions.SessionTurn, input 
 	return examples
 }
 
-// writeExamples writes examples to a file in the specified format.
+// writeExamples writes examples to a file in the specified format with proper encoding and validation.
 func writeExamples(path string, examples []DSPyExample, format string) error {
 	file, err := os.Create(path)
 	if err != nil {
@@ -273,7 +284,7 @@ func writeExamples(path string, examples []DSPyExample, format string) error {
 	return nil
 }
 
-// escapeCSV escapes a string for CSV output.
+// escapeCSV escapes a string for CSV output with proper quoting and character handling.
 func escapeCSV(s string) string {
 	s = strings.ReplaceAll(s, "\"", "\"\"")
 	s = strings.ReplaceAll(s, "\n", " ")
@@ -284,7 +295,7 @@ func escapeCSV(s string) string {
 	return s
 }
 
-// unique returns unique values from a slice.
+// unique returns unique values from a slice with deduplication and empty string filtering.
 func unique(items []string) []string {
 	seen := make(map[string]bool)
 	var result []string

@@ -25,13 +25,20 @@ type Server struct {
 	consoleHub *consolews.Hub
 }
 
-// NewServer creates a new web server.
 // NewServer creates and returns a configured Server for the web layer.
 // It initializes the SSE hub and the console websocket hub, configures console
 // session persistence and the console runner factory, and wires observability
 // events to the SSE publisher.
 // The provided ctx is used for console hub persistence goroutines and should be
 // tied to the application's lifecycle.
+//
+// Index:
+// - Purpose: Initialize the web server and real-time hubs
+// - Flow: create hubs → wire persistence/runner factory → connect SSE publisher → return server
+// - SideEffects: sets global SSE publisher; starts hub dependencies
+// - FailureModes: NewServer does not fail on createConsoleRunnerFactory; runner errors surface when the console hub invokes the per-session factory
+// - Related: createConsoleRunnerFactory, sse.NewHub, consolews.NewHub
+// - Keywords: web_server, sse_hub, consolews, runner_factory
 func NewServer(ctx context.Context, opts Options, cfg config.Config, log zerolog.Logger) (*Server, error) {
 	sseHub := sse.NewHub()
 	consoleHub := consolews.NewHub(ctx)
@@ -59,6 +66,15 @@ func NewServer(ctx context.Context, opts Options, cfg config.Config, log zerolog
 }
 
 // createConsoleRunnerFactory creates a factory function that creates LLM runners for console sessions.
+//
+// Index:
+// - Purpose: Build console runner factory with LLMChat engine defaults
+// - Flow: load env → build engine config → construct engine → wrap runner
+// - SideEffects: reads env vars; may emit failure events
+// - FailureModes: missing API keys, engine construction errors
+// - Observability: emits web.console_engine_failed
+// - Related: engine.NewLLMChatEngine, consoleapp.NewRunner
+// - Keywords: console_runner, llmchat, api_key, web.console_engine_failed
 func createConsoleRunnerFactory(cfg config.Config) consolews.RunnerFactory {
 	// Load .env file to get API keys
 	config.LoadDotEnv()
@@ -107,6 +123,14 @@ func (s *Server) ConsoleHub() *consolews.Hub {
 }
 
 // Handler returns the HTTP handler for the server.
+//
+// Index:
+// - Purpose: Build the HTTP mux and wire API routes
+// - Flow: register routes → return mux
+// - SideEffects: registers handlers
+// - FailureModes: none (handler construction)
+// - Related: api.* handlers, sse.Handler
+// - Keywords: api_routes, http_mux, handlers
 func (s *Server) Handler() http.Handler {
 	apiMux := http.NewServeMux()
 

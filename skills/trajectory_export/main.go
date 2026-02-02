@@ -1,3 +1,4 @@
+// Package main implements the trajectory.export skill for exporting agent execution trajectories with filtering and CAS storage.
 package main
 
 import (
@@ -16,6 +17,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/storage/trajectory"
 )
 
+// input defines the skill input parameters for trajectory export with comprehensive filtering and output options.
 type input struct {
 	WorkspaceID      string `json:"workspace_id"`
 	TaskID           string `json:"task_id,omitempty"`
@@ -32,6 +34,7 @@ type input struct {
 	CLICommand       string `json:"cli_command,omitempty"`
 }
 
+// trajectoryEpisode represents a single trajectory episode with input/output metadata and execution metrics.
 type trajectoryEpisode struct {
 	EpisodeID   string         `json:"episode_id"`
 	WorkspaceID string         `json:"workspace_id"`
@@ -43,11 +46,13 @@ type trajectoryEpisode struct {
 	Meta        map[string]any `json:"meta,omitempty"`
 }
 
+// exporter provides trajectory data export functionality with episode building and raw trace inclusion.
 type exporter struct {
 	store            trajectory.Store
 	includeRawTraces bool
 }
 
+// forEachEpisode iterates over trajectories matching the filter and applies the provided function to each episode.
 func (e exporter) forEachEpisode(ctx context.Context, filter trajectory.ListFilter, fn func(trajectoryEpisode) error) (int, error) {
 	if e.store == nil {
 		return 0, fmt.Errorf("trajectory export: store required")
@@ -78,6 +83,7 @@ func (e exporter) forEachEpisode(ctx context.Context, filter trajectory.ListFilt
 	return count, nil
 }
 
+// buildEpisode constructs a trajectory episode from trajectory data with event processing and metric calculation.
 func (e exporter) buildEpisode(ctx context.Context, t trajectory.Trajectory) (trajectoryEpisode, error) {
 	var ur trajectory.UserRequestCapture
 	var err error
@@ -142,6 +148,7 @@ func (e exporter) buildEpisode(ctx context.Context, t trajectory.Trajectory) (tr
 	return ep, nil
 }
 
+// mapTrajectoryStatus converts internal trajectory status to human-readable string format.
 func mapTrajectoryStatus(s trajectory.Status) string {
 	switch s {
 	case trajectory.StatusOK:
@@ -157,6 +164,7 @@ func mapTrajectoryStatus(s trajectory.Status) string {
 	}
 }
 
+// eventBounds determines the first and last timestamps from a slice of trajectory events.
 func eventBounds(events []trajectory.Event) (time.Time, time.Time) {
 	if len(events) == 0 {
 		return time.Time{}, time.Time{}
@@ -174,6 +182,7 @@ func eventBounds(events []trajectory.Event) (time.Time, time.Time) {
 	return first, last
 }
 
+// countKind counts the number of events of a specific kind in the trajectory events slice.
 func countKind(events []trajectory.Event, kind trajectory.EventKind) int {
 	count := 0
 	for _, e := range events {
@@ -184,6 +193,7 @@ func countKind(events []trajectory.Event, kind trajectory.EventKind) int {
 	return count
 }
 
+// collectArtifacts gathers all artifact digests from trajectory and events into a deduplicated slice.
 func collectArtifacts(t trajectory.Trajectory, events []trajectory.Event) []string {
 	set := map[string]struct{}{}
 	if t.ArtifactDigest != "" {
@@ -205,6 +215,7 @@ func collectArtifacts(t trajectory.Trajectory, events []trajectory.Event) []stri
 	return out
 }
 
+// sortStrings sorts a string slice in-place using a simple bubble sort algorithm.
 func sortStrings(v []string) {
 	if len(v) < 2 {
 		return
@@ -220,10 +231,21 @@ func sortStrings(v []string) {
 
 const command = "trajectory.export"
 
+// main is the skill entry point for trajectory.export with comprehensive data export capabilities.
 func main() {
 	skillmain.Main(command, run)
 }
 
+// run orchestrates trajectory export with filtering, validation, and CAS storage with optional pinning.
+//
+// Index:
+// - Purpose: Export agent execution trajectories with filtering, metrics, and CAS storage for analysis and backup
+// - Flow: validate input → parse parameters → open trajectory store → apply filters → export episodes → store in CAS → emit results
+// - SideEffects: reads trajectory store; writes to CAS storage; optionally pins artifacts; processes large datasets
+// - FailureModes: invalid input parameters, trajectory store access failures, CAS storage errors, time parsing errors
+// - Observability: emits export statistics, episode counts, artifact digests, dry-run estimates, and comprehensive status tracking
+// - Related: forEachEpisode, buildEpisode, writeEpisodesToCAS, estimateEpisodesBytes
+// - Keywords: trajectory/export, data_export, cas_storage, trajectory_analysis, agent_execution
 func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	// Normalize input
 	in.WorkspaceID = strings.TrimSpace(in.WorkspaceID)
@@ -311,6 +333,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	return skillout.Emit(rc, command, secrets.RedactMap(data))
 }
 
+// parseExportTime parses a timestamp string into UTC time with RFC3339Nano format validation.
 func parseExportTime(v string) (time.Time, error) {
 	v = strings.TrimSpace(v)
 	if v == "" {
@@ -323,6 +346,7 @@ func parseExportTime(v string) (time.Time, error) {
 	return t.UTC(), nil
 }
 
+// parseTrajectoryStatus converts a string status to internal trajectory.Status enum with validation.
 func parseTrajectoryStatus(v string) (trajectory.Status, error) {
 	switch strings.ToLower(strings.TrimSpace(v)) {
 	case "":
@@ -340,6 +364,7 @@ func parseTrajectoryStatus(v string) (trajectory.Status, error) {
 	}
 }
 
+// countingWriter is a writer that counts bytes written for size estimation without actual storage.
 type countingWriter struct{ n int64 }
 
 func (w *countingWriter) Write(p []byte) (int, error) {
@@ -347,6 +372,7 @@ func (w *countingWriter) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
+// estimateEpisodesBytes estimates the total byte size of episodes that would be exported without writing to storage.
 func estimateEpisodesBytes(ctx context.Context, exp exporter, filter trajectory.ListFilter) (int, int64, error) {
 	cw := &countingWriter{}
 	enc := json.NewEncoder(cw)
@@ -360,6 +386,7 @@ func estimateEpisodesBytes(ctx context.Context, exp exporter, filter trajectory.
 	return count, cw.n, nil
 }
 
+// writeEpisodesToCAS writes trajectory episodes to CAS storage as NDJSON with concurrent streaming.
 func writeEpisodesToCAS(ctx context.Context, exp exporter, filter trajectory.ListFilter, store interface {
 	Put(ctx context.Context, r io.Reader, kind string, tags []string) (storage.CASObject, error)
 },

@@ -1,6 +1,3 @@
-// Package snapshot provides types and utilities for session snapshot management.
-// Snapshots capture the state of a session (active task, plan, pending todos, etc.)
-// to enable restoration after context compaction.
 package snapshot
 
 import (

@@ -1,4 +1,3 @@
-// Package queue provides a reusable SQLite-backed job queue.
 package queue
 
 import (
@@ -33,10 +32,15 @@ type Store struct {
 }
 
 
-// Open opens a SQLite-backed queue store at dbPath and applies migrations for the specified table.
-// It validates and normalizes opts.Table, opens (or creates) a shared SQLite database, runs the
-// queue table migrations, and returns a Store that owns the database handle and its close function.
-// An error is returned if the table name is invalid or the database cannot be opened or migrated.
+// Open opens a SQLite-backed queue store and applies table migrations.
+//
+// Index:
+// - Purpose: Initialize queue storage for a named table
+// - Flow: normalize table -> open shared db -> migrate -> return store
+// - SideEffects: opens/creates SQLite DB; runs DDL migrations
+// - FailureModes: invalid table name, open errors, migration errors
+// - Related: sqliteutil.OpenDBShared, Migrate
+// - Keywords: queue, migrate, table, sqliteutil.OpenDBShared, Migrate
 func Open(ctx context.Context, dbPath string, opts Options) (*Store, error) {
 	table, err := normalizeTableName(opts.Table)
 	if err != nil {
@@ -130,6 +134,14 @@ func (s *Store) Enqueue(ctx context.Context, req EnqueueRequest) (*EnqueueResult
 }
 
 // EnqueueBatch adds multiple jobs to the queue in one transaction.
+//
+// Index:
+// - Purpose: Insert queued jobs with dedupe protection
+// - Flow: begin tx -> prepare insert -> validate fields -> insert jobs -> commit
+// - SideEffects: writes queue table
+// - FailureModes: invalid inputs, tx/prepare/insert/commit errors
+// - Related: sqlutil.FormatTimestamp, ulid.Make
+// - Keywords: enqueue, group_id, dedupe_key, priority, max_attempts, ulid.Make
 func (s *Store) EnqueueBatch(ctx context.Context, reqs []EnqueueRequest) (*EnqueueResult, error) {
 	result := &EnqueueResult{}
 	if len(reqs) == 0 {

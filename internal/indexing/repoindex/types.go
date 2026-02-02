@@ -4,6 +4,7 @@ package repoindex
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"time"
 )
 
@@ -28,6 +29,22 @@ const (
 	EdgeImplements EdgeType = "IMPLEMENTS"
 	EdgeEmbeds     EdgeType = "EMBEDS"
 	EdgeTests      EdgeType = "TESTS"
+
+	// Comment-derived edges (soft edges, weight < 1.0)
+	EdgeHasKeyword      EdgeType = "HAS_KEYWORD"
+	EdgeHasOutputField  EdgeType = "HAS_OUTPUT_FIELD"
+	EdgeTouchesResource EdgeType = "TOUCHES_RESOURCE"
+	EdgeEmitsEvent      EdgeType = "EMITS_EVENT"
+	EdgeDocRelated      EdgeType = "DOC_RELATED"
+	EdgeDocFlow         EdgeType = "DOC_FLOW"
+)
+
+// Concept node prefixes (repo-key namespacing added at ID creation).
+const (
+	ConceptKeyword  = "kw:"
+	ConceptField    = "field:"
+	ConceptResource = "res:"
+	ConceptEvent    = "event:"
 )
 
 const (
@@ -47,19 +64,20 @@ const (
 // Node represents a repo graph node.
 // SpanStart and SpanEnd are 1-based line numbers (0 when unknown).
 type Node struct {
-	ID        string    `json:"id"`
-	Kind      NodeKind  `json:"kind"`
-	Pkg       string    `json:"pkg,omitempty"`
-	File      string    `json:"file,omitempty"`
-	Name      string    `json:"name,omitempty"`
-	Signature string    `json:"signature,omitempty"`
-	SpanStart int       `json:"span_start,omitempty"`
-	SpanEnd   int       `json:"span_end,omitempty"`
-	Exported  bool      `json:"exported,omitempty"`
-	Doc       string    `json:"doc,omitempty"`
-	Summary   string    `json:"summary,omitempty"`
-	Hash      string    `json:"hash,omitempty"`
-	UpdatedAt time.Time `json:"updated_at"`
+	ID        string          `json:"id"`
+	Kind      NodeKind        `json:"kind"`
+	Pkg       string          `json:"pkg,omitempty"`
+	File      string          `json:"file,omitempty"`
+	Name      string          `json:"name,omitempty"`
+	Signature string          `json:"signature,omitempty"`
+	SpanStart int             `json:"span_start,omitempty"`
+	SpanEnd   int             `json:"span_end,omitempty"`
+	Exported  bool            `json:"exported,omitempty"`
+	Doc       string          `json:"doc,omitempty"`
+	Summary   string          `json:"summary,omitempty"`
+	Meta      json.RawMessage `json:"meta,omitempty"`
+	Hash      string          `json:"hash,omitempty"`
+	UpdatedAt time.Time       `json:"updated_at"`
 }
 
 // Edge represents a directed relationship between nodes.
@@ -99,6 +117,7 @@ type SymbolSummaryProvider interface {
 // BuildOptions configure repoindex build behavior.
 type BuildOptions struct {
 	RepoRoot              string
+	RepoKey               string
 	Patterns              []string
 	IncludeTests          bool
 	IncludeGo             bool
@@ -134,17 +153,40 @@ type ExpandResult struct {
 	Trail []string `json:"trail,omitempty"`
 }
 
+// NamespacedID prefixes a raw node ID with the repo key namespace.
+// It panics if repoKey is empty to enforce repo-scoped identifiers.
+func NamespacedID(repoKey, raw string) string {
+	repoKey = strings.TrimSpace(repoKey)
+	if repoKey == "" {
+		panic("repoindex: repoKey is required")
+	}
+	if raw == "" {
+		return ""
+	}
+	return repoKey + "::" + raw
+}
+
+// SplitNamespacedID splits a repo-key namespaced ID into repoKey and raw ID.
+// If the delimiter is missing, the repoKey is empty and the raw ID is returned.
+func SplitNamespacedID(id string) (string, string) {
+	parts := strings.SplitN(id, "::", 2)
+	if len(parts) != 2 {
+		return "", id
+	}
+	return parts[0], parts[1]
+}
+
 // PackageID returns the stable node ID for a package.
-func PackageID(pkg string) string {
-	return "pkg:" + pkg
+func PackageID(repoKey, pkg string) string {
+	return NamespacedID(repoKey, "pkg:"+pkg)
 }
 
 // FileID returns the stable node ID for a file.
-func FileID(pkg, file string) string {
-	return "file:" + pkg + ":" + file
+func FileID(repoKey, pkg, file string) string {
+	return NamespacedID(repoKey, "file:"+pkg+":"+file)
 }
 
 // SymbolID returns the stable node ID for a symbol.
-func SymbolID(pkg, symbolID string) string {
-	return "sym:" + pkg + ":" + symbolID
+func SymbolID(repoKey, pkg, symbolID string) string {
+	return NamespacedID(repoKey, "sym:"+pkg+":"+symbolID)
 }

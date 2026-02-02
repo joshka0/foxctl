@@ -1,4 +1,3 @@
-// Package companion provides memory management for long-form conversational agents.
 package companion
 
 import (
@@ -133,6 +132,15 @@ type ConversationSummarizer interface {
 }
 
 // NewConversationMemory creates a new conversation memory store.
+// NewConversationMemory initializes conversation memory storage and schema.
+//
+// Index:
+// - Purpose: Create a conversation memory store with configured options
+// - Flow: apply options → ensure schema → return memory
+// - SideEffects: creates/updates SQLite schema
+// - FailureModes: schema creation errors
+// - Related: DefaultMemoryConfig, ConversationMemory.ensureSchema
+// - Keywords: conversation_memory, schema, options, sqlite, summaries
 func NewConversationMemory(db *sql.DB, opts ...MemoryOption) (*ConversationMemory, error) {
 	m := &ConversationMemory{
 		db:     db,
@@ -354,6 +362,15 @@ func (m *ConversationMemory) ensureSchema(ctx context.Context) error {
 }
 
 // AppendTurn adds a new turn to the conversation.
+// AppendTurn stores a conversation turn and updates memory state.
+//
+// Index:
+// - Purpose: Persist a conversation turn and update totals
+// - Flow: normalize turn → insert turn → update memory state
+// - SideEffects: writes to companion_turns and companion_memory_state
+// - FailureModes: insert errors, state update errors
+// - Related: ConversationMemory.GetContext
+// - Keywords: append_turn, conversation_id, token_count, memory_state, tool_calls
 func (m *ConversationMemory) AppendTurn(ctx context.Context, turn ConversationTurn) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -390,6 +407,15 @@ func (m *ConversationMemory) AppendTurn(ctx context.Context, turn ConversationTu
 
 // GetContext builds the memory context for an LLM prompt.
 // Returns formatted text combining L0 (vivid) + L1 (recent) + L2 (history).
+// GetContext builds layered context for a conversation.
+//
+// Index:
+// - Purpose: Assemble vivid turns, summaries, and distilled history into context
+// - Flow: load history → load summaries → load turns → apply budgets → format sections
+// - SideEffects: reads conversation data
+// - FailureModes: query errors yield partial context
+// - Related: getDistilledHistory, getRecentSummaries, getVividTurns
+// - Keywords: conversation_context, vivid_turns, summaries, history, token_budget
 func (m *ConversationMemory) GetContext(ctx context.Context, conversationID string) (string, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()

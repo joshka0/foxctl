@@ -122,6 +122,14 @@ func (e *Executor) SubmitAsync(job jobs.Job) error {
 }
 
 // ExecuteSync runs the skill synchronously and applies persistence side effects.
+//
+// Index:
+// - Purpose: Execute a job synchronously and persist results
+// - Flow: ensure env → execute prepared skill → fetch job → handle result
+// - SideEffects: executes skill; updates job store; may write envelopes
+// - FailureModes: execution errors, job store errors, result handling errors
+// - Related: Executor.HandleResult, jobs.Store.ExecutePreparedSkill
+// - Keywords: execute_sync, jobs_store, result_path, correlation_id
 func (e *Executor) ExecuteSync(job jobs.Job) error {
 	// Set no-CAS mode in environment if requested (disables output truncation)
 	//

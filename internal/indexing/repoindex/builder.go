@@ -15,6 +15,7 @@ import (
 
 	"golang.org/x/tools/go/packages"
 
+	docparser "github.com/jkatigb/agentctl/internal/indexing/repoindex/parser"
 	"github.com/jkatigb/agentctl/internal/indexing/symbol"
 	"github.com/jkatigb/agentctl/internal/platform/fsutil"
 )
@@ -47,6 +48,14 @@ func NewBuilder(store *Store, repoRoot string) *Builder {
 }
 
 // Build builds and replaces the repo graph index.
+//
+// Index:
+// - Purpose: Build repo graph nodes/edges for enabled languages and persist to store
+// - Flow: validate opts → buildGo/TS/Elixir → rollups → comment edges → replace store → set meta
+// - SideEffects: reads workspace files; runs language tooling; writes repoindex SQLite
+// - FailureModes: package load errors, file read errors, store write errors
+// - Related: buildGo, buildTS, buildElixir, applyCommentEdges, Store.ReplaceAll
+// - Keywords: repo.index.build, repoindex, nodes, edges, repo_key, schema_version, buildGo, buildTS, buildElixir, ReplaceAll
 func (b *Builder) Build(ctx context.Context, opts BuildOptions) (BuildResult, error) {
 	result := BuildResult{}
 	if opts.RepoRoot == "" {
@@ -54,6 +63,9 @@ func (b *Builder) Build(ctx context.Context, opts BuildOptions) (BuildResult, er
 	}
 	if opts.RepoRoot == "" {
 		return result, fmt.Errorf("repoindex: repo root is required")
+	}
+	if opts.RepoKey == "" {
+		opts.RepoKey = repoKey(opts.RepoRoot)
 	}
 	if len(opts.Patterns) == 0 {
 		opts.Patterns = []string{"./..."}
@@ -81,9 +93,10 @@ func (b *Builder) Build(ctx context.Context, opts BuildOptions) (BuildResult, er
 		}
 	}
 
-	localPackages := collectLocalPackages(nodes)
+	localPackages := collectLocalPackages(nodes, opts.RepoKey)
 	applyPackageRollups(nodes, localPackages)
-	applyRepoRollup(nodes, edges, opts.RepoRoot, localPackages)
+	applyRepoRollup(nodes, edges, opts.RepoKey, opts.RepoRoot, localPackages)
+	applyCommentEdges(nodes, edges, opts.RepoKey)
 
 	result.Nodes = len(nodes)
 	result.Edges = len(edges)
@@ -136,7 +149,7 @@ func (b *Builder) buildGo(ctx context.Context, opts BuildOptions, nodes map[stri
 	for _, pkg := range pkgs {
 		pkgID := goPackageID(pkg.PkgPath)
 		addNode(nodes, Node{
-			ID:        PackageID(pkgID),
+			ID:        PackageID(opts.RepoKey, pkgID),
 			Kind:      NodePackage,
 			Pkg:       pkgID,
 			Name:      pkg.PkgPath,
@@ -147,15 +160,15 @@ func (b *Builder) buildGo(ctx context.Context, opts BuildOptions, nodes map[stri
 		for _, imp := range pkg.Imports {
 			impID := goPackageID(imp.PkgPath)
 			addNode(nodes, Node{
-				ID:        PackageID(impID),
+				ID:        PackageID(opts.RepoKey, impID),
 				Kind:      NodePackage,
 				Pkg:       impID,
 				Name:      imp.PkgPath,
 				UpdatedAt: time.Now().UTC(),
 			})
 			addEdge(edges, Edge{
-				Src:    PackageID(pkgID),
-				Dst:    PackageID(impID),
+				Src:    PackageID(opts.RepoKey, pkgID),
+				Dst:    PackageID(opts.RepoKey, impID),
 				Type:   EdgeImports,
 				Weight: 1.0,
 				Meta:   importMeta(imp.PkgPath),
@@ -176,7 +189,7 @@ func (b *Builder) buildGo(ctx context.Context, opts BuildOptions, nodes map[stri
 			}
 			lineCount := countLines(content)
 			fileNode := Node{
-				ID:        FileID(pkgID, fileRelPath),
+				ID:        FileID(opts.RepoKey, pkgID, fileRelPath),
 				Kind:      NodeFile,
 				Pkg:       pkgID,
 				File:      fileRelPath,
@@ -189,7 +202,7 @@ func (b *Builder) buildGo(ctx context.Context, opts BuildOptions, nodes map[stri
 			applyFileSummary(ctx, opts, &fileNode, fileRelPath)
 			addNode(nodes, fileNode)
 			addEdge(edges, Edge{
-				Src:    PackageID(pkgID),
+				Src:    PackageID(opts.RepoKey, pkgID),
 				Dst:    fileNode.ID,
 				Type:   EdgeContains,
 				Weight: 1.0,
@@ -272,7 +285,7 @@ func (b *Builder) buildTS(ctx context.Context, opts BuildOptions, nodes map[stri
 		pkgID := tsLocalPrefix + moduleRelPath
 
 		addNode(nodes, Node{
-			ID:        PackageID(pkgID),
+			ID:        PackageID(opts.RepoKey, pkgID),
 			Kind:      NodePackage,
 			Pkg:       pkgID,
 			Name:      moduleRelPath,
@@ -281,7 +294,7 @@ func (b *Builder) buildTS(ctx context.Context, opts BuildOptions, nodes map[stri
 
 		lineCount := countLines(content)
 		fileNode := Node{
-			ID:        FileID(pkgID, fileRelPath),
+			ID:        FileID(opts.RepoKey, pkgID, fileRelPath),
 			Kind:      NodeFile,
 			Pkg:       pkgID,
 			File:      fileRelPath,
@@ -294,7 +307,7 @@ func (b *Builder) buildTS(ctx context.Context, opts BuildOptions, nodes map[stri
 		applyFileSummary(ctx, opts, &fileNode, fileRelPath)
 		addNode(nodes, fileNode)
 		addEdge(edges, Edge{
-			Src:    PackageID(pkgID),
+			Src:    PackageID(opts.RepoKey, pkgID),
 			Dst:    fileNode.ID,
 			Type:   EdgeContains,
 			Weight: 1.0,
@@ -318,15 +331,15 @@ func (b *Builder) buildTS(ctx context.Context, opts BuildOptions, nodes map[stri
 				continue
 			}
 			addNode(nodes, Node{
-				ID:        PackageID(impPkg),
+				ID:        PackageID(opts.RepoKey, impPkg),
 				Kind:      NodePackage,
 				Pkg:       impPkg,
 				Name:      strings.TrimPrefix(strings.TrimPrefix(impPkg, tsLocalPrefix), tsNpmPrefix),
 				UpdatedAt: time.Now().UTC(),
 			})
 			addEdge(edges, Edge{
-				Src:    PackageID(pkgID),
-				Dst:    PackageID(impPkg),
+				Src:    PackageID(opts.RepoKey, pkgID),
+				Dst:    PackageID(opts.RepoKey, impPkg),
 				Type:   EdgeImports,
 				Weight: 0.7,
 				Meta:   importMeta(imp),
@@ -386,7 +399,7 @@ func (b *Builder) buildElixir(ctx context.Context, opts BuildOptions, nodes map[
 		pkgID := elixirPackageID(fileRelPath)
 
 		addNode(nodes, Node{
-			ID:        PackageID(pkgID),
+			ID:        PackageID(opts.RepoKey, pkgID),
 			Kind:      NodePackage,
 			Pkg:       pkgID,
 			Name:      strings.TrimPrefix(pkgID, elixirPkgPrefix),
@@ -399,7 +412,7 @@ func (b *Builder) buildElixir(ctx context.Context, opts BuildOptions, nodes map[
 
 		lineCount := countLines(content)
 		fileNode := Node{
-			ID:        FileID(pkgID, fileRelPath),
+			ID:        FileID(opts.RepoKey, pkgID, fileRelPath),
 			Kind:      NodeFile,
 			Pkg:       pkgID,
 			File:      fileRelPath,
@@ -412,7 +425,7 @@ func (b *Builder) buildElixir(ctx context.Context, opts BuildOptions, nodes map[
 		applyFileSummary(ctx, opts, &fileNode, fileRelPath)
 		addNode(nodes, fileNode)
 		addEdge(edges, Edge{
-			Src:    PackageID(pkgID),
+			Src:    PackageID(opts.RepoKey, pkgID),
 			Dst:    fileNode.ID,
 			Type:   EdgeContains,
 			Weight: 1.0,
@@ -472,7 +485,7 @@ func (b *Builder) addGoReferenceEdges(opts BuildOptions, pkgs []*packages.Packag
 				if name == "" {
 					continue
 				}
-				srcID := SymbolID(pkgID, symbol.ID(fileRelPath, name))
+				srcID := SymbolID(opts.RepoKey, pkgID, symbol.ID(fileRelPath, name))
 				if _, ok := nodes[srcID]; !ok {
 					continue
 				}
@@ -597,7 +610,7 @@ func goObjectNodeID(opts BuildOptions, pkg *packages.Package, obj types.Object, 
 	if pkgPath == "" {
 		return ""
 	}
-	nodeID := SymbolID(goPackageID(pkgPath), symbol.ID(fileRelPath, name))
+	nodeID := SymbolID(opts.RepoKey, goPackageID(pkgPath), symbol.ID(fileRelPath, name))
 	if _, ok := nodes[nodeID]; !ok {
 		return ""
 	}
@@ -666,7 +679,7 @@ func addSymbol(ctx context.Context, opts BuildOptions, nodes map[string]Node, ed
 	}
 
 	node := Node{
-		ID:        SymbolID(pkgID, sym.ID),
+		ID:        SymbolID(opts.RepoKey, pkgID, sym.ID),
 		Kind:      NodeSymbol,
 		Pkg:       pkgID,
 		File:      sym.FilePath,
@@ -675,9 +688,19 @@ func addSymbol(ctx context.Context, opts BuildOptions, nodes map[string]Node, ed
 		SpanStart: spanStart,
 		SpanEnd:   spanEnd,
 		Exported:  isExportedSymbol(sym),
-		Doc:       sym.Documentation,
 		Hash:      sym.BodyDigest,
 		UpdatedAt: time.Now().UTC(),
+	}
+	parsed := docparser.Parse(sym.Documentation)
+	node.Doc = parsed.Doc
+	if parsed.Index.Purpose != "" && node.Summary == "" {
+		node.Summary = parsed.Index.Purpose
+	}
+	if !parsed.Index.Empty() {
+		meta, err := json.Marshal(parsed.Index)
+		if err == nil {
+			node.Meta = meta
+		}
 	}
 	applySymbolSummary(ctx, opts, &node, sym.ID)
 	addNode(nodes, node)
@@ -728,7 +751,7 @@ func applySymbolSummary(ctx context.Context, opts BuildOptions, node *Node, symb
 	node.Summary = summary
 }
 
-func collectLocalPackages(nodes map[string]Node) []string {
+func collectLocalPackages(nodes map[string]Node, repoKey string) []string {
 	set := make(map[string]struct{})
 	for _, node := range nodes {
 		if node.Kind != NodeFile {
@@ -737,7 +760,7 @@ func collectLocalPackages(nodes map[string]Node) []string {
 		if node.Pkg == "" {
 			continue
 		}
-		set[PackageID(node.Pkg)] = struct{}{}
+		set[PackageID(repoKey, node.Pkg)] = struct{}{}
 	}
 	if len(set) == 0 {
 		return nil
@@ -786,7 +809,7 @@ func applyPackageRollups(nodes map[string]Node, packageIDs []string) {
 	}
 }
 
-func applyRepoRollup(nodes map[string]Node, edges map[string]Edge, repoRoot string, packageIDs []string) {
+func applyRepoRollup(nodes map[string]Node, edges map[string]Edge, repoKey, repoRoot string, packageIDs []string) {
 	if len(packageIDs) == 0 {
 		return
 	}
@@ -813,7 +836,7 @@ func applyRepoRollup(nodes map[string]Node, edges map[string]Edge, repoRoot stri
 	}
 
 	repoNode := Node{
-		ID:        repoNodeID(repoRoot),
+		ID:        repoNodeID(repoKey),
 		Kind:      NodeConcept,
 		Name:      repoName,
 		Summary:   summary,
@@ -927,12 +950,8 @@ type rollupEntry struct {
 	summary string
 }
 
-func repoNodeID(repoRoot string) string {
-	repoRoot = filepath.Clean(strings.TrimSpace(repoRoot))
-	if repoRoot == "" {
-		return "repo:unknown"
-	}
-	return "repo:" + repoRoot
+func repoNodeID(repoKey string) string {
+	return NamespacedID(repoKey, "repo:root")
 }
 
 func addNode(nodes map[string]Node, node Node) {
@@ -994,6 +1013,9 @@ func mergeNode(a, b Node) Node {
 	}
 	if a.Summary == "" {
 		a.Summary = b.Summary
+	}
+	if len(a.Meta) == 0 {
+		a.Meta = b.Meta
 	}
 	if a.Hash == "" {
 		a.Hash = b.Hash

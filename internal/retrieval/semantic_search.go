@@ -2,9 +2,12 @@ package retrieval
 
 import (
 	"context"
+	"fmt"
 	"path/filepath"
 	"strings"
 
+	"github.com/jkatigb/agentctl/internal/indexing/semantic"
+	"github.com/jkatigb/agentctl/internal/platform/config"
 	"github.com/jkatigb/agentctl/internal/storage/dbdriver"
 	"github.com/jkatigb/agentctl/internal/storage/memory"
 )
@@ -25,8 +28,8 @@ func (g *Generator) searchSemanticIndex(ctx context.Context, workspaceID, questi
 
 	searchable := g.searchableStore
 
-	// Get embedding for the question
-	vec, err := g.embedProvider.Embed(ctx, question)
+	// Get embedding for the question - use query-optimized if available
+	vec, err := g.embedForQuery(ctx, question)
 	if err != nil {
 		g.logger.Warn().Err(err).Msg("embedding failed, falling back to BM25")
 		return g.semanticBM25Fallback(ctx, workspaceID, question, limit)
@@ -48,6 +51,38 @@ func (g *Generator) searchSemanticIndex(ctx context.Context, workspaceID, questi
 
 	// Convert to candidates
 	return g.memoryResultsToCandidates(results, limit)
+}
+
+// embedForQuery generates an embedding for a search query.
+// Uses EmbedQuery when the provider supports it unless overridden.
+func (g *Generator) embedForQuery(ctx context.Context, question string) ([]float32, error) {
+	if g.embedProvider == nil {
+		return nil, fmt.Errorf("embed provider not configured")
+	}
+
+	queryMode := config.ResolveEmbedQueryMode(g.embedQueryMode)
+
+	switch queryMode {
+	case config.EmbedQueryModeEmbed:
+		g.logger.Debug().Msg("using Embed (forced by query_mode=embed)")
+		return g.embedProvider.Embed(ctx, question)
+	case config.EmbedQueryModeEmbedQuery:
+		if qp, ok := g.embedProvider.(semantic.QueryEmbeddingProvider); ok {
+			g.logger.Debug().Msg("using EmbedQuery (forced by query_mode=embed_query)")
+			return qp.EmbedQuery(ctx, question)
+		}
+		g.logger.Warn().Msg("EmbedQuery forced but provider does not support it, falling back to Embed")
+		return g.embedProvider.Embed(ctx, question)
+	case config.EmbedQueryModeAuto:
+		fallthrough
+	default:
+		if qp, ok := g.embedProvider.(semantic.QueryEmbeddingProvider); ok {
+			g.logger.Debug().Str("provider", g.embedProvider.Model()).Msg("using EmbedQuery (auto-detected)")
+			return qp.EmbedQuery(ctx, question)
+		}
+		g.logger.Debug().Str("provider", g.embedProvider.Model()).Msg("using Embed (provider does not support EmbedQuery)")
+		return g.embedProvider.Embed(ctx, question)
+	}
 }
 
 // semanticBM25Fallback uses BM25 search when vector search is unavailable.

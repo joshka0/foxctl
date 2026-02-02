@@ -1,8 +1,3 @@
-// Package contextbuffer implements a SQLite-backed queue for hook context injection.
-//
-// Hooks can enqueue context at any time, and inject-capable events drain and render it.
-// This replaces the temp-file "pending context" approach with proper TTL, deduplication,
-// priority ordering, and multi-agent safety.
 package contextbuffer
 
 import (
@@ -234,6 +229,15 @@ func (s *sqlStore) Peek(ctx context.Context, params DrainParams) (*DrainResult, 
 	return s.drainInternal(ctx, params)
 }
 
+// drainInternal retrieves entries, optionally marks them consumed, and renders markdown.
+//
+// Index:
+// - Purpose: Drain buffered context with optional consumption and markdown rendering
+// - Flow: begin tx → query entries → optionally mark consumed → count pending → commit → render markdown
+// - SideEffects: database transaction; optional updates to consumed_at_ms
+// - FailureModes: query errors, update errors, commit errors
+// - Related: renderMarkdown, scanEntry
+// - Keywords: contextbuffer_drain, mark_consumed, priority, total_pending, markdown
 func (s *sqlStore) drainInternal(ctx context.Context, params DrainParams) (*DrainResult, error) {
 	if params.WorkspaceID == "" {
 		return nil, errors.New("contextbuffer: workspace_id required")

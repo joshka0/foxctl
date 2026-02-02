@@ -1,4 +1,4 @@
-// Package main implements the session/turns skill for querying turn patterns across sessions.
+// Package main implements the session/turns skill for querying turn patterns across sessions with comprehensive filtering.
 package main
 
 import (
@@ -14,7 +14,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/storage/sessions"
 )
 
-// Input defines the skill input parameters.
+// Input defines the skill input parameters for turn pattern querying with multiple filter options.
 type Input struct {
 	Query       string `json:"query,omitempty"`
 	ErrorType   string `json:"error_type,omitempty"`
@@ -24,7 +24,7 @@ type Input struct {
 	Limit       int    `json:"limit,omitempty"`
 }
 
-// Output defines the skill output.
+// Output defines the skill output with turn results and comprehensive metadata.
 type Output struct {
 	Query      string       `json:"query,omitempty"`
 	Turns      []TurnResult `json:"turns"`
@@ -33,7 +33,7 @@ type Output struct {
 	Message    string       `json:"message"`
 }
 
-// TurnResult represents a turn found across sessions.
+// TurnResult represents a turn found across sessions with detailed context and metadata.
 type TurnResult struct {
 	SessionID      string     `json:"session_id"`
 	ProjectName    string     `json:"project_name,omitempty"`
@@ -50,7 +50,7 @@ type TurnResult struct {
 	Timestamp      string     `json:"timestamp,omitempty"`
 }
 
-// ToolCall represents a tool invocation.
+// ToolCall represents a tool invocation with success status tracking.
 type ToolCall struct {
 	Name    string `json:"name"`
 	Success bool   `json:"success"`
@@ -61,10 +61,21 @@ const (
 	defaultLimit = 50
 )
 
+// main is the skill entry point for session/turns with comprehensive turn pattern querying capabilities.
 func main() {
 	skillmain.Main(command, run)
 }
 
+// run orchestrates turn pattern querying across sessions with multiple filter strategies and comprehensive result formatting.
+//
+// Index:
+// - Purpose: Query turn patterns across sessions using text search, error filtering, tool pattern matching, and role filtering
+// - Flow: validate filters → open sessions store → search or scan sessions → apply filters → collect results → format output → emit results
+// - SideEffects: reads session metadata; accesses turn records; performs text searches; filters by multiple criteria; manages session cache
+// - FailureModes: missing filters, store access errors, search failures, session retrieval errors, invalid filter combinations
+// - Observability: emits turn results with session context, tool call information, error details, and comprehensive match statistics
+// - Related: sessionkit.OpenSessions, sessions.SessionStore, matchesToolPattern
+// - Keywords: session/turns, turn_pattern_query, session_search, error_filtering, tool_pattern_matching
 func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	// At least one filter must be provided
 	if in.Query == "" && in.ErrorType == "" && in.ToolPattern == "" && !in.ErrorsOnly {
@@ -247,7 +258,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	return skillout.Emit(rc, command, output)
 }
 
-// matchesToolPattern checks if any tool call matches the pattern.
+// matchesToolPattern checks if any tool call matches the pattern with case-insensitive matching.
 func matchesToolPattern(toolCalls []sessions.ToolCall, pattern string) bool {
 	pattern = strings.ToLower(pattern)
 	for _, tc := range toolCalls {

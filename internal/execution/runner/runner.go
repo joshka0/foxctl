@@ -108,6 +108,14 @@ func RunWithOptions(ctx context.Context, opts RunOptions) ([]byte, []byte, error
 
 // Run executes the appropriate runtime for a manifest.
 // Deprecated: Use RunWithOptions for better clarity and extensibility.
+//
+// Index:
+// - Purpose: Execute a skill using exec or WASI runtime
+// - Flow: select runner → prepare env/workdir → run → return output
+// - SideEffects: launches subprocess or WASI module
+// - FailureModes: unsupported distribution, runner errors
+// - Related: RunWithOptions
+// - Keywords: runner, exec, wasi, manifest
 func Run(ctx context.Context, manifest skill.Manifest, artifactPath string, input []byte) ([]byte, []byte, error) {
 	return RunWithOptions(ctx, RunOptions{
 		Manifest:     manifest,

@@ -1,6 +1,3 @@
-// Package context provides context gatherers for semantic codemap generation.
-// It gathers rich context from multiple sources (graph, symbols, patterns)
-// to provide comprehensive codebase understanding for the codemap agent.
 package context
 
 import (
@@ -126,6 +123,13 @@ func WithWorkspace(workspace string) GathererOption {
 }
 
 // NewGatherer creates a new context gatherer.
+// NewGatherer creates a context gatherer with optional dependencies.
+//
+// Index:
+// - Purpose: Initialize a codemap context gatherer
+// - Flow: apply options → return gatherer
+// - Related: Gatherer.GatherAll
+// - Keywords: codemap_context, gatherer, graph_store, skill_resolver, workspace
 func NewGatherer(opts ...GathererOption) *Gatherer {
 	g := &Gatherer{
 		skillResolver: skill.NewResolver(),
@@ -137,6 +141,15 @@ func NewGatherer(opts ...GathererOption) *Gatherer {
 }
 
 // GatherAll gathers context from all sources in parallel.
+// GatherAll collects graph, symbol, and pattern context in parallel.
+//
+// Index:
+// - Purpose: Gather codemap context from multiple sources
+// - Flow: extract terms → run graph/symbol/pattern gatherers → merge context
+// - SideEffects: queries graph store; runs skills; writes warnings to stderr
+// - FailureModes: gather errors return partial context where possible
+// - Related: gatherGraphContext, gatherSymbolContext, gatherPatternContext
+// - Keywords: codemap_context, graph, symbols, patterns, errgroup
 func (g *Gatherer) GatherAll(ctx context.Context, query, workspace string) (*Context, error) {
 	if workspace == "" {
 		workspace = g.workspace

@@ -19,6 +19,7 @@ type WindsurfCodemap struct {
 	MermaidDiagram string           `json:"mermaidDiagram"`
 }
 
+// WindsurfMetadata captures codemap generation metadata.
 type WindsurfMetadata struct {
 	CascadeID           string `json:"cascadeId"`
 	GenerationSource    string `json:"generationSource"`
@@ -27,6 +28,7 @@ type WindsurfMetadata struct {
 	OriginalPrompt      string `json:"originalPrompt"`
 }
 
+// WindsurfTrace represents a single trace in a Windsurf codemap.
 type WindsurfTrace struct {
 	ID               string             `json:"id"`
 	Title            string             `json:"title"`
@@ -36,6 +38,7 @@ type WindsurfTrace struct {
 	TraceGuide       string             `json:"traceGuide"`
 }
 
+// WindsurfLocation points to a specific source location within a trace.
 type WindsurfLocation struct {
 	ID          string `json:"id"`
 	Path        string `json:"path"`

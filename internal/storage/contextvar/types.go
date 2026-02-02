@@ -1,8 +1,3 @@
-// Package contextvar implements a SQLite-backed store for RLM context variables.
-//
-// In RLM (Recursive Language Model) architecture, context is stored externally
-// and queried on-demand via tools, rather than accumulated in the LLM context window.
-// This enables stateless per-turn operation with active context navigation.
 package contextvar
 
 import (

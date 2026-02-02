@@ -1,7 +1,3 @@
-// Package companion provides the RLM-based companion service for mobile apps.
-//
-// The companion service operates in stateless mode where each turn is independent,
-// with context queried via tools rather than accumulated in the conversation.
 package companion
 
 import (
@@ -173,6 +169,15 @@ func DefaultServiceConfig() ServiceConfig {
 }
 
 // NewService creates a new companion service.
+// NewService initializes the companion service with optional memory and embeddings.
+//
+// Index:
+// - Purpose: Configure companion service defaults and optional conversation memory
+// - Flow: normalize config → init memory/summarizer → return service
+// - SideEffects: initializes memory store; may create embedder
+// - FailureModes: memory initialization errors logged as warnings
+// - Related: NewConversationMemory, NewLLMSummarizer
+// - Keywords: companion_service, memory, summarizer, embedder, config
 func NewService(store contextvar.Store, cfg ServiceConfig) *Service {
 	if cfg.MaxIterations <= 0 {
 		cfg.MaxIterations = 20
@@ -273,13 +278,14 @@ type ChatRequest struct {
 	StoryDialogueModel string `json:"story_dialogue_model,omitempty"`
 }
 
-// ChatResponse is the response from the companion.
+// ChatTone captures structured emotion metadata for responses.
 type ChatTone struct {
 	Emotion   string  `json:"emotion,omitempty"`   // neutral|joy|sadness|anger|fear|surprise|disgust|playful
 	Intensity float64 `json:"intensity,omitempty"` // 0..1
 	Voice     string  `json:"voice,omitempty"`     // optional: warm, witty, calm, etc.
 }
 
+// ChatAction captures structured UI/scene directives for clients.
 type ChatAction struct {
 	BackgroundKey string `json:"background_key,omitempty"`
 	ImagePrompt   string `json:"image_prompt,omitempty"`
@@ -361,6 +367,7 @@ type InjectedContextDetail struct {
 	Content string `json:"content"`
 }
 
+// ChatResponse is the response from the companion.
 type ChatResponse struct {
 	// Response is the assistant's response text.
 	Response string `json:"response"`
@@ -408,6 +415,23 @@ type TokenUsage struct {
 }
 
 // Chat handles a chat request.
+//
+// Index:
+// - Purpose: Process a companion chat request with the configured engine
+// - Flow: validate input → resolve exec mode/engine → build prompt → run engine → persist/augment response
+// - SideEffects: LLM calls; memory store reads/writes; conversation persistence
+// - FailureModes: validation errors, engine failures, persistence errors
+// - Related: chatWithLLMChat, chatWithStoryLoop, chatWithDSPy
+// - Keywords: companion_chat, exec_mode, engine_type, conversation_id, tools_used
+// Chat executes a single companion chat request.
+//
+// Index:
+// - Purpose: Execute a companion chat turn and return structured response
+// - Flow: validate request → build prompt → select engine → run → store turns → generate presence
+// - SideEffects: LLM calls; memory writes; optional presence generation
+// - FailureModes: validation errors, engine errors, memory errors
+// - Related: chatWithLLMChat, chatWithDSPy, storeConversationTurns
+// - Keywords: companion_chat, conversation_id, exec_mode, engine_type, presence
 func (s *Service) Chat(ctx context.Context, req ChatRequest) (*ChatResponse, error) {
 	start := time.Now()
 

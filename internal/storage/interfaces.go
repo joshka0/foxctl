@@ -1,4 +1,3 @@
-// Package storage defines shared interfaces and data structures for agentctl stores.
 package storage
 
 import (
@@ -443,6 +442,7 @@ type SessionChunk struct {
 	CreatedAt          time.Time `json:"created_at"`
 }
 
+// SessionChunkSummary captures a persisted summary over a chunk window.
 type SessionChunkSummary struct {
 	ID            string    `json:"id"`
 	SessionID     string    `json:"session_id"`

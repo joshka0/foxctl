@@ -1,3 +1,4 @@
+// Package filesummary runs background file summary indexing for retrieval.
 package filesummary
 
 import (
@@ -114,6 +115,14 @@ func NewWorker(
 }
 
 // Start begins processing files in the background.
+//
+// Index:
+// - Purpose: Start the file summary worker loop
+// - Flow: validate state → spawn worker goroutine → return
+// - SideEffects: starts background processing
+// - FailureModes: already running, missing dependencies
+// - Related: Worker.run, Worker.Stop
+// - Keywords: file_summary_worker, start, background, poll_interval
 func (w *Worker) Start(ctx context.Context) error {
 	w.mu.Lock()
 	if w.running {
@@ -253,6 +262,15 @@ func (w *Worker) Stats() (processed, errors int64) {
 	return w.processed, w.errors
 }
 
+// run polls for files and generates/stores summaries until shutdown.
+//
+// Index:
+// - Purpose: Drive the periodic file summary ingestion loop
+// - Flow: poll work → generate summaries → store results → sleep/backoff
+// - SideEffects: LLM calls; memory store writes
+// - FailureModes: summary generation errors, store errors
+// - Related: Worker.processBatch, retrieval.FileSummaryGenerator
+// - Keywords: file_summary, batch, poll, store, llm
 func (w *Worker) run(ctx context.Context) {
 	defer close(w.doneCh)
 	defer func() {
@@ -463,7 +481,7 @@ func (w *Worker) buildInput(relPath string) (symbol.FileSummaryInput, error) {
 	// Extract top symbol names (simplified)
 	input.TopSymbols = extractTopSymbols(string(content), relPath)
 
-	return input, nil
+	return symbol.NormalizeFileSummaryInput(input), nil
 }
 
 // extractFirstComment extracts the first comment block from the file.

@@ -1,4 +1,4 @@
-// Package main implements the session/archive skill for JSONL archival and chunking.
+// Package main implements the session/archive skill for JSONL archival, chunking, and embedding generation with comprehensive metadata.
 package main
 
 import (
@@ -22,7 +22,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/storage/vector"
 )
 
-// Input defines the skill input parameters.
+// Input defines the skill input parameters for session archival with chunking and embedding options.
 type Input struct {
 	SessionID    string `json:"session_id"`
 	JSONLPath    string `json:"jsonl_path,omitempty"`
@@ -34,7 +34,7 @@ type Input struct {
 	DryRun       bool   `json:"dry_run,omitempty"`
 }
 
-// Output defines the skill output.
+// Output defines the skill output with comprehensive archival statistics and processing results.
 type Output struct {
 	SessionID       string               `json:"session_id"`
 	ArchivePath     string               `json:"archive_path,omitempty"`
@@ -52,10 +52,21 @@ type Output struct {
 
 const command = "session/archive"
 
+// main is the skill entry point for session/archive with comprehensive archival and chunking capabilities.
 func main() {
 	skillmain.Main(command, run)
 }
 
+// run orchestrates session archival with JSONL parsing, chunking, compression, and optional embedding generation.
+//
+// Index:
+// - Purpose: Archive session JSONL files with chunking, context window generation, compression, and optional embedding generation
+// - Flow: validate input → resolve session → locate JSONL → parse and chunk → compress → save chunks/windows → generate embeddings → update metadata
+// - SideEffects: reads JSONL files; writes compressed archives; saves chunk metadata; generates embeddings; updates session records
+// - FailureModes: missing session IDs, file access errors, parsing failures, storage errors, embedding generation failures
+// - Observability: emits archival statistics, compression ratios, chunk counts, embedding results, and comprehensive processing metrics
+// - Related: embedContextWindows, buildWindowEmbeddingText, filterEmbeddingContent, archive.ChunkFile
+// - Keywords: session/archive, jsonl_processing, chunking, compression, embedding_generation, context_windows
 func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	if in.SessionID == "" {
 		return skillerr.Arg("session_id is required")
@@ -265,7 +276,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	return skillout.Emit(rc, command, output)
 }
 
-// embedContextWindows generates embeddings for each context window.
+// embedContextWindows generates embeddings for each context window with semantic content processing.
 // Returns the count of successfully embedded windows and the model used.
 func embedContextWindows(
 	ctx context.Context,
@@ -312,7 +323,7 @@ func embedContextWindows(
 	return embeddedCount, embedder.Model()
 }
 
-// buildWindowEmbeddingText creates text to embed from a window's chunks.
+// buildWindowEmbeddingText creates text to embed from a window's chunks with high-signal content filtering.
 // Applies filtering similar to session_summarize to focus on high-signal content:
 // - User requests (what was asked)
 // - Assistant responses (what was answered/decided)
@@ -383,7 +394,7 @@ func buildWindowEmbeddingText(window storage.ContextWindow, chunkMap map[int]sto
 	return result
 }
 
-// filterEmbeddingContent removes low-signal content from text before embedding.
+// filterEmbeddingContent removes low-signal content from text before embedding with pattern-based noise detection.
 // Filters out: file contents, code blocks, command output, paths, raw data.
 func filterEmbeddingContent(content string) string {
 	if content == "" {

@@ -959,6 +959,7 @@ func searchSymbolsWithRetrieval(
 	// Create generator with embedding provider
 	// The Generator handles hybrid search internally (BM25 + semantic when embedProvider is set)
 	gen := retrieval.NewGenerator(memStore, embedProvider, workspacePath, logger)
+	gen = gen.WithEmbedQueryMode(cfg.Embedding.Flags.QueryMode)
 
 	// Wire up SearchableStore for vector search when embeddings are available
 	if embedProvider != nil && queryEmbedding != nil {
@@ -2401,7 +2402,7 @@ func extractGoFileMetadata(workspace, filePath string) symbol.FileSummaryInput {
 	}
 	input.TopSymbols = symbols
 
-	return input
+	return symbol.NormalizeFileSummaryInput(input)
 }
 
 // enrichEntriesWithSummaries fetches or generates summaries for file entries.

@@ -105,6 +105,7 @@ type EmbeddingSettings struct {
 	Model      string            `mapstructure:"model" json:"model"`
 	Dimensions int               `mapstructure:"dimensions" json:"dimensions"`
 	Models     map[string]string `mapstructure:"models" json:"models"`
+	Flags      EmbeddingFlags    `mapstructure:"flags" json:"flags"`
 
 	// VoyageAPIKey is the Voyage AI API key (from VOYAGE_API_KEY)
 	// Required for embeddings with voyage-code-3, voyage-3-large, etc.

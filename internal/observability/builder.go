@@ -13,7 +13,7 @@ var version = "dev"
 
 // EventBuilder provides a fluent API for constructing WideEvents.
 // It accumulates context throughout an operation's lifecycle and
-// emits a single comprehensive event on completion.
+// produces a single comprehensive event on completion.
 //
 // Usage:
 //
@@ -38,6 +38,13 @@ type EventBuilder struct {
 
 // NewEvent creates a new EventBuilder for the specified operation.
 // It initializes the event with a new SpanID and current timestamp.
+//
+// Index:
+// - Purpose: Initialize a WideEvent builder with base metadata and timing
+// - Flow: allocate event → set identifiers → initialize data map → start timer
+// - SideEffects: reads clock for timestamps
+// - Related: EventBuilder.Success, EventBuilder.Error, EventBuilder.Build
+// - Keywords: wide_event, span_id, trace_id, event_builder, observability
 func NewEvent(operation string) *EventBuilder {
 	return &EventBuilder{
 		event: &WideEvent{

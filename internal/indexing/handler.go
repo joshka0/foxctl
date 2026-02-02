@@ -48,6 +48,14 @@ func (h *PostReviewHandler) RegisterIndexer(indexer Indexer) error {
 // Handle processes a post-review event by invoking all enabled indexers.
 // If the handler is configured for async operation, this returns immediately
 // after dispatching the work; otherwise it blocks until all indexers complete.
+//
+// Index:
+// - Purpose: Dispatch post-review events to enabled indexers
+// - Flow: validate config/event → resolve enabled indexers → select mode → run indexers or spawn async
+// - SideEffects: may spawn goroutine; indexers may read files or write indexes
+// - FailureModes: invalid configuration, indexer execution errors
+// - Related: PostReviewHandler.runIndexers, Indexer.Index
+// - Keywords: post_review, indexers, fanout_mode, workspace_id, review_id
 func (h *PostReviewHandler) Handle(ctx context.Context, event PostReviewEvent) (*PostReviewResult, error) {
 	if !h.config.Enabled {
 		h.logger.Debug().Msg("post-review indexing disabled, skipping")
@@ -135,6 +143,14 @@ type indexerWithConfig struct {
 }
 
 // runIndexers executes all active indexers and collects results.
+//
+// Index:
+// - Purpose: Execute each enabled indexer and aggregate results
+// - Flow: filter files per indexer → run indexer → record result → continue
+// - SideEffects: indexer-specific IO (file reads, index writes)
+// - FailureModes: indexer errors returned per result
+// - Related: PostReviewHandler.filterEvent, Indexer.Index
+// - Keywords: indexer_results, files_indexed, files_skipped, files_failed
 func (h *PostReviewHandler) runIndexers(ctx context.Context, event PostReviewEvent, indexers []indexerWithConfig) *PostReviewResult {
 	result := &PostReviewResult{
 		IndexerResults: make([]IndexerResult, 0, len(indexers)),

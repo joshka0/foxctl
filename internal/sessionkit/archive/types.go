@@ -1,6 +1,3 @@
-// Package archive provides session archival and chunking logic.
-// It handles parsing Claude Code JSONL files into chunks and context windows,
-// compressing archives, and extracting metadata.
 package archive
 
 import (

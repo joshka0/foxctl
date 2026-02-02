@@ -16,8 +16,6 @@ var (
 	ssePublisherMu sync.RWMutex
 )
 
-// SetSSEPublisher sets the SSE publisher for real-time event streaming.
-// Call this from the web server after creating the SSE hub.
 // SetSSEPublisher sets the global SSE publisher used to publish activity events.
 // It is safe to call multiple times; the most recently provided publisher replaces any previous one.
 func SetSSEPublisher(pub SSEPublisher) {
@@ -115,8 +113,7 @@ var sseActivityPrefixes = []string{
 	"web.",
 }
 
-// shouldPublishToSSE reports whether the given WideEvent's Operation has a prefix that indicates it should be forwarded to SSE clients.
-// If the event is nil, it reports false.
+// shouldPublishToSSE reports whether a WideEvent should be forwarded to SSE clients.
 func shouldPublishToSSE(event *WideEvent) bool {
 	if event == nil {
 		return false
@@ -132,10 +129,14 @@ func shouldPublishToSSE(event *WideEvent) bool {
 }
 
 // publishToSSE publishes a WideEvent to the configured SSE publisher as an ActivityEvent.
-// 
-// It maps the WideEvent's observable fields into a compact ActivityEvent payload and sends
-// it as an "activity" event. If no SSE publisher is configured or the event is not eligible
-// for activity streaming, the function returns without side effects.
+//
+// Index:
+// - Purpose: Stream eligible WideEvents to SSE clients as activity updates
+// - Flow: resolve publisher → filter by operation prefix → map to ActivityEvent → publish
+// - SideEffects: publishes SSE activity events
+// - FailureModes: no-op when publisher is nil or event is ineligible
+// - Related: shouldPublishToSSE, extractActivityData
+// - Keywords: sse, activity, wide_event, publish, operation_prefix
 func publishToSSE(event *WideEvent) {
 	pub := getSSEPublisher()
 	if pub == nil {
@@ -148,35 +149,34 @@ func publishToSSE(event *WideEvent) {
 
 	// Convert WideEvent to ActivityEvent (smaller, focused payload)
 	activity := ActivityEvent{
-		Operation:   event.Operation,
-		Command:     event.Command,
-		Status:      string(event.Status),
-		Component:   event.Component,
-		TraceID:     event.TraceID,
-		SpanID:      event.SpanID,
-		ParentID:    event.ParentID,
-		Service:     event.Service,
-		Version:     event.Version,
-		Subtype:     event.Subtype,
-		SessionID:   event.SessionID,
-		AgentID:     event.AgentID,
-		WorkspaceID: event.WorkspaceID,
-		JobID:       event.JobID,
-		DurationMS:  event.DurationMS,
-		ErrorType:   event.ErrorType,
-		ErrorCode:   event.ErrorCode,
+		Operation:    event.Operation,
+		Command:      event.Command,
+		Status:       string(event.Status),
+		Component:    event.Component,
+		TraceID:      event.TraceID,
+		SpanID:       event.SpanID,
+		ParentID:     event.ParentID,
+		Service:      event.Service,
+		Version:      event.Version,
+		Subtype:      event.Subtype,
+		SessionID:    event.SessionID,
+		AgentID:      event.AgentID,
+		WorkspaceID:  event.WorkspaceID,
+		JobID:        event.JobID,
+		DurationMS:   event.DurationMS,
+		ErrorType:    event.ErrorType,
+		ErrorCode:    event.ErrorCode,
 		ErrorMessage: event.ErrorMessage,
-		Retriable:   event.Retriable,
-		Timestamp:   event.Ts.Format("2006-01-02T15:04:05.000Z07:00"),
-		Data:        extractActivityData(event),
+		Retriable:    event.Retriable,
+		Timestamp:    event.Ts.Format("2006-01-02T15:04:05.000Z07:00"),
+		Data:         extractActivityData(event),
 	}
 
 	pub.Publish("activity", activity)
 }
 
-// extractActivityData extracts relevant data from the event for SSE.
 // extractActivityData builds a filtered map of user-facing fields from a WideEvent's Data.
-// It selects a curated set of keys (agent/LLM, hooks, skill, index/embedding, input, caller, and error/result fields) and returns nil if the event has no Data or none of the selected keys are present.
+// It selects a curated set of keys and returns nil if no relevant fields are present.
 // If event.ErrorMessage is non-empty it sets or overrides the "error" key with that message.
 func extractActivityData(event *WideEvent) map[string]any {
 	if event.Data == nil {

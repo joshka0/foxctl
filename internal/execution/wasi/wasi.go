@@ -49,6 +49,14 @@ type Options struct {
 }
 
 // Run executes the WASI module and captures stdout/stderr.
+//
+// Index:
+// - Purpose: Run a WASI skill module with sandboxed runtime
+// - Flow: validate manifest → load module → prepare workdir/runtime → execute → capture output
+// - SideEffects: creates temp workdir; initializes wazero runtime
+// - FailureModes: manifest errors, module load/compile errors, execution errors
+// - Related: Runner.validateManifest, Runner.prepareRuntime
+// - Keywords: wasi_runner, module_path, stdout, stderr, timeout
 func (r Runner) Run(ctx context.Context, input []byte) ([]byte, []byte, error) {
 	if err := r.validateManifest(); err != nil {
 		return nil, nil, err

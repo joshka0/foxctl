@@ -2234,7 +2234,7 @@ func buildFileSummaryInput(workspace, relPath string) (symbol.FileSummaryInput, 
 	// Extract top symbols (simplified)
 	input.TopSymbols = extractTopSymbolsForSummary(string(content), relPath)
 
-	return input, nil
+	return symbol.NormalizeFileSummaryInput(input), nil
 }
 
 func buildSymbolSummaryInput(sym symbol.Symbol) (symbol.SymbolSummaryInput, error) {

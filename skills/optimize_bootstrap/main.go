@@ -1,5 +1,4 @@
-// Package main implements the optimize/bootstrap skill.
-// This skill generates few-shot examples from successful trajectories.
+// Package main implements the optimize/bootstrap skill for generating few-shot examples from successful trajectories.
 package main
 
 import (
@@ -15,6 +14,7 @@ import (
 
 const command = "optimize/bootstrap"
 
+// input defines the skill input parameters for trajectory bootstrapping with filtering and formatting options.
 type input struct {
 	Workspace      string  `json:"workspace"`
 	Role           string  `json:"role"`
@@ -23,10 +23,21 @@ type input struct {
 	Format         string  `json:"format"`
 }
 
+// main is the skill entry point for optimize/bootstrap with trajectory bootstrapping capabilities.
 func main() {
 	skillmain.Main(command, run)
 }
 
+// run orchestrates trajectory bootstrapping with pattern analysis, example generation, and formatting.
+//
+// Index:
+// - Purpose: Generate few-shot examples from successful trajectories for agent optimization and prompt engineering
+// - Flow: validate input → resolve workspace → open stores → build config → get statistics → generate examples → format output
+// - SideEffects: reads trajectory store; accesses pattern store; processes successful trajectories; generates training examples
+// - FailureModes: missing role parameter, workspace resolution errors, store access failures, example generation errors
+// - Observability: emits example statistics, generated examples, formatted prompts, and comprehensive bootstrapping metrics
+// - Related: optimization.NewBootstrapOptimizer, optimization.DefaultBootstrapConfig
+// - Keywords: optimize/bootstrap, trajectory_analysis, few_shot_learning, example_generation, agent_optimization
 func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	// Validate required fields
 	if in.Role == "" {

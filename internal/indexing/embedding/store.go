@@ -2,15 +2,15 @@ package embedding
 
 import (
 	"context"
-	"crypto/sha256"
 	"database/sql"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"path/filepath"
+	"strings"
 	"time"
 
+	"github.com/jkatigb/agentctl/internal/indexing/embeddingtext"
 	"github.com/jkatigb/agentctl/internal/platform/config"
 	"github.com/jkatigb/agentctl/internal/queue"
 	"github.com/jkatigb/agentctl/internal/storage/sqliteutil"
@@ -185,7 +185,7 @@ func migrateLegacyJobs(ctx context.Context, db *sql.DB) error {
 			return err
 		}
 
-		dedupeKey := dedupeKeyForSymbol(workspaceID, symbolID, contentDigest)
+		dedupeKey := dedupeKeyForSymbol(workspaceID, symbolID, contentDigest, "")
 
 		if _, err := stmt.ExecContext(ctx,
 			id, workspaceID, payloadBytes, dedupeKey, state, priority, attempts, maxAttempts,
@@ -199,6 +199,14 @@ func migrateLegacyJobs(ctx context.Context, db *sql.DB) error {
 }
 
 // Enqueue adds symbols to the embedding queue.
+//
+// Index:
+// - Purpose: Queue embedding jobs with optional deduplication
+// - Flow: compute digest → check existing embeddings → enqueue jobs → return counts
+// - SideEffects: database reads; queue writes
+// - FailureModes: marshal errors, queue errors, database errors
+// - Related: queue.Store.EnqueueBatch, dedupeKeyForSymbol
+// - Keywords: embedding_queue, dedupe, content_digest, workspace_id
 func (s *Store) Enqueue(ctx context.Context, req EnqueueRequest) (*EnqueueResult, error) {
 	result := &EnqueueResult{}
 	if len(req.Symbols) == 0 {
@@ -206,18 +214,32 @@ func (s *Store) Enqueue(ctx context.Context, req EnqueueRequest) (*EnqueueResult
 	}
 
 	queueReqs := make([]queue.EnqueueRequest, 0, len(req.Symbols))
+	model := req.Model
 	for _, sym := range req.Symbols {
-		contentDigest := computeDigest(sym.Content)
+		contentDigest := strings.TrimSpace(sym.ContentDigest)
+		if contentDigest == "" {
+			contentDigest = computeDigest(sym.Content)
+		}
 
 		// Check if embedding already exists with same digest (deduplication)
 		if req.Deduplicate {
 			var exists bool
-			err := s.db.QueryRowContext(ctx, `
-				SELECT EXISTS(
-					SELECT 1 FROM symbol_embeddings
-					WHERE workspace_id = ? AND symbol_id = ? AND content_digest = ?
-				)
-			`, req.WorkspaceID, sym.SymbolID, contentDigest).Scan(&exists)
+			var err error
+			if model != "" {
+				err = s.db.QueryRowContext(ctx, `
+					SELECT EXISTS(
+						SELECT 1 FROM symbol_embeddings
+						WHERE workspace_id = ? AND symbol_id = ? AND content_digest = ? AND model = ?
+					)
+				`, req.WorkspaceID, sym.SymbolID, contentDigest, model).Scan(&exists)
+			} else {
+				err = s.db.QueryRowContext(ctx, `
+					SELECT EXISTS(
+						SELECT 1 FROM symbol_embeddings
+						WHERE workspace_id = ? AND symbol_id = ? AND content_digest = ?
+					)
+				`, req.WorkspaceID, sym.SymbolID, contentDigest).Scan(&exists)
+			}
 			if err == nil && exists {
 				result.Skipped++
 				continue
@@ -239,7 +261,7 @@ func (s *Store) Enqueue(ctx context.Context, req EnqueueRequest) (*EnqueueResult
 		queueReqs = append(queueReqs, queue.EnqueueRequest{
 			GroupID:   req.WorkspaceID,
 			Payload:   payloadBytes,
-			DedupeKey: dedupeKeyForSymbol(req.WorkspaceID, sym.SymbolID, contentDigest),
+			DedupeKey: dedupeKeyForSymbol(req.WorkspaceID, sym.SymbolID, contentDigest, model),
 			Priority:  req.Priority,
 		})
 	}
@@ -387,6 +409,23 @@ func (s *Store) GetEmbedding(ctx context.Context, workspaceID, symbolID string) 
 
 	result.CreatedAt, _ = time.Parse(time.RFC3339Nano, createdStr)
 	return &result, nil
+}
+
+// GetContentDigest returns the latest content digest and model for a symbol, if present.
+func (s *Store) GetContentDigest(ctx context.Context, workspaceID, symbolID string) (string, string, bool, error) {
+	var digest string
+	var model string
+	err := s.db.QueryRowContext(ctx, `
+		SELECT content_digest, model
+		FROM symbol_embeddings WHERE workspace_id = ? AND symbol_id = ?
+	`, workspaceID, symbolID).Scan(&digest, &model)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", "", false, nil
+	}
+	if err != nil {
+		return "", "", false, fmt.Errorf("query: %w", err)
+	}
+	return digest, model, true, nil
 }
 
 // GetEmbeddingsByFile retrieves embeddings for a given file.
@@ -538,8 +577,11 @@ func decodeEmbeddingPayload(data []byte) (embeddingPayload, error) {
 	return payload, nil
 }
 
-func dedupeKeyForSymbol(workspaceID, symbolID, contentDigest string) string {
-	return computeDigest(fmt.Sprintf("%s:%s:%s", workspaceID, symbolID, contentDigest))
+func dedupeKeyForSymbol(workspaceID, symbolID, contentDigest, model string) string {
+	if model == "" {
+		return computeDigest(fmt.Sprintf("%s:%s:%s", workspaceID, symbolID, contentDigest))
+	}
+	return computeDigest(fmt.Sprintf("%s:%s:%s:%s", workspaceID, symbolID, model, contentDigest))
 }
 
 func nullStringValue(value sql.NullString) any {
@@ -550,6 +592,5 @@ func nullStringValue(value sql.NullString) any {
 }
 
 func computeDigest(content string) string {
-	h := sha256.Sum256([]byte(content))
-	return "sha256:" + hex.EncodeToString(h[:])
+	return embeddingtext.DigestSHA256(content)
 }

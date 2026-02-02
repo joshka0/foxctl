@@ -26,6 +26,13 @@ type RenderOpts struct {
 //   - ModeMasked: Full file with irrelevant sections marked as [...] (TODO: Phase 2)
 //   - ModeStructure: Only signatures and imports (TODO: Phase 2)
 //   - ModeFlow: Control-flow excerpts (TODO: Phase 2)
+// Render formats evidence according to the selected render mode.
+//
+// Index:
+// - Purpose: Render collected evidence into a user-facing format
+// - Flow: apply defaults → switch on mode → render snippets
+// - Related: RenderNDJSON, RenderJSON
+// - Keywords: render, evidence, snippets, mode, output
 func Render(evidence *Evidence, opts RenderOpts) string {
 	if evidence == nil {
 		return ""
@@ -97,6 +104,7 @@ func renderSnippets(evidence *Evidence, opts RenderOpts) string {
 
 // RenderNDJSON formats evidence as newline-delimited JSON for CAS artifacts.
 // Each snippet is serialized as a separate JSON line.
+// RenderNDJSON renders evidence snippets as newline-delimited JSON.
 func RenderNDJSON(evidence *Evidence) ([]byte, error) {
 	var buf bytes.Buffer
 
@@ -113,6 +121,7 @@ func RenderNDJSON(evidence *Evidence) ([]byte, error) {
 }
 
 // RenderJSON formats evidence as a single JSON object.
+// RenderJSON renders evidence as a JSON object.
 func RenderJSON(evidence *Evidence) ([]byte, error) {
 	return json.Marshal(evidence)
 }

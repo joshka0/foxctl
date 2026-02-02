@@ -1,5 +1,4 @@
-// Package main implements the optimize/analyze skill.
-// This skill analyzes trajectory data for optimization insights.
+// Package main implements the optimize/analyze skill for analyzing trajectory data and generating optimization insights.
 package main
 
 import (
@@ -16,16 +15,19 @@ import (
 
 const command = "optimize/analyze"
 
+// input defines the skill input parameters for trajectory analysis with workspace, role, and time range filtering.
 type input struct {
 	Workspace string `json:"workspace"`
 	Role      string `json:"role"`
 	Days      int    `json:"days"`
 }
 
+// main is the skill entry point for optimize/analyze with trajectory analysis capabilities.
 func main() {
 	skillmain.Main(command, run)
 }
 
+// agentStats represents computed performance metrics for agent trajectory analysis.
 type agentStats struct {
 	TotalTrajectories int
 	SuccessRate       float64
@@ -33,6 +35,16 @@ type agentStats struct {
 	AvgDuration       time.Duration
 }
 
+// run orchestrates trajectory analysis with performance metrics computation and optimization recommendations.
+//
+// Index:
+// - Purpose: Analyze agent trajectory data to compute performance metrics and generate optimization recommendations
+// - Flow: validate input → resolve workspace → open trajectory store → filter trajectories → compute stats → analyze tools → generate recommendations
+// - SideEffects: reads trajectory store; processes large datasets; computes statistical metrics; analyzes performance patterns
+// - FailureModes: missing role parameter, workspace resolution errors, trajectory store access failures, data processing errors
+// - Observability: emits performance statistics, tool usage analysis, optimization recommendations, and comprehensive metrics tracking
+// - Related: computeStats, analyzeToolUsage, generateRecommendations
+// - Keywords: optimize/analyze, trajectory_analysis, performance_metrics, optimization_recommendations, agent_performance
 func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	// Validate required fields
 	if in.Role == "" {
@@ -96,6 +108,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	})
 }
 
+// computeStats calculates performance statistics from trajectory data with success rates and timing metrics.
 func computeStats(trajs []trajectory.Trajectory) agentStats {
 	if len(trajs) == 0 {
 		return agentStats{}
@@ -123,6 +136,7 @@ func computeStats(trajs []trajectory.Trajectory) agentStats {
 	}
 }
 
+// analyzeToolUsage analyzes tool usage patterns across trajectories with success rate calculations.
 func analyzeToolUsage(trajs []trajectory.Trajectory) []map[string]any {
 	// Count tool usage from trajectories
 	toolCounts := make(map[string]int)
@@ -157,6 +171,7 @@ func analyzeToolUsage(trajs []trajectory.Trajectory) []map[string]any {
 	return result
 }
 
+// generateRecommendations creates optimization recommendations based on performance metrics and tool usage analysis.
 func generateRecommendations(stats agentStats, toolUsage []map[string]any) []string {
 	var recommendations []string
 

@@ -1,4 +1,3 @@
-// Package jobs exposes high-level job APIs that wrap the internal types layer.
 package jobs
 
 import "github.com/jkatigb/agentctl/internal/storage/jobs/types"

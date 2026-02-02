@@ -1,5 +1,3 @@
-// Package plans provides types and utilities for parsing plan files.
-// This file adds support for OpenCode's storage (SQLite sessions + JSON todos).
 package plans
 
 import (

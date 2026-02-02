@@ -11,6 +11,10 @@ import (
 	"strings"
 
 	"github.com/jkatigb/agentctl/internal/indexing"
+	"github.com/jkatigb/agentctl/internal/indexing/embedding"
+	"github.com/jkatigb/agentctl/internal/indexing/embeddingtext"
+	"github.com/jkatigb/agentctl/internal/indexing/semantic"
+	"github.com/jkatigb/agentctl/internal/platform/config"
 	"github.com/jkatigb/agentctl/internal/storage"
 	"github.com/jkatigb/agentctl/internal/storage/memory"
 	"github.com/rs/zerolog"
@@ -57,6 +61,14 @@ func (idx *Indexer) ID() string {
 }
 
 // Index processes a post-review event and updates symbol index.
+//
+// Index:
+// - Purpose: Update symbol and call indexes for post-review file changes
+// - Flow: validate config → loop files → delete removed → detect language/extractor → indexFile → update counts → log summary
+// - SideEffects: reads files; writes named memory entries; enqueues embedding jobs
+// - FailureModes: file I/O errors, extractor errors, store save errors, embedding enqueue errors
+// - Related: indexFile, deleteFileSymbols, enqueueEmbeddings, Extractor.Extract
+// - Keywords: code_symbol_dag, post_review, files_indexed, files_skipped, files_failed, failures, embeddings, IndexerResult
 func (idx *Indexer) Index(ctx context.Context, event indexing.PostReviewEvent) (*indexing.IndexerResult, error) {
 	if !idx.config.Enabled {
 		return &indexing.IndexerResult{
@@ -204,6 +216,12 @@ func (idx *Indexer) indexFile(ctx context.Context, event indexing.PostReviewEven
 	if oldMeta != nil && oldMeta.SymbolDigests != nil {
 		oldDigests = oldMeta.SymbolDigests
 	}
+	embedMode := config.ResolveEmbedSymbolTextMode(idx.config.EmbeddingTextMode)
+	useDocAwareDigest := embedMode == config.EmbedSymbolTextModeDocEnriched
+	embedModel := ""
+	if idx.config.EmbeddingEnabled {
+		embedModel = idx.resolveEmbeddingModel(ctx)
+	}
 
 	// Track new symbol digests and IDs
 	newDigests := make(map[string]string)
@@ -214,18 +232,31 @@ func (idx *Indexer) indexFile(ctx context.Context, event indexing.PostReviewEven
 	}
 
 	var savedCount, skippedCount int
+	var embedInputs []embedding.SymbolInput
 
 	// Index each symbol with per-symbol incrementality
 	for _, sym := range symbols {
 		sym.FileDigest = fileDigest
 		sym.Language = lang
 
-		newDigests[sym.ID] = sym.BodyDigest
+		skipDigest := sym.BodyDigest
+		if useDocAwareDigest {
+			skipDigest = embeddingtext.BuildSymbolContentDigest(embeddingtext.SymbolDigestInput{
+				Model:      embedModel,
+				Kind:       string(sym.Kind),
+				Name:       sym.Name,
+				FilePath:   sym.FilePath,
+				Signature:  sym.Signature,
+				Doc:        sym.Documentation,
+				BodyDigest: sym.BodyDigest,
+			})
+		}
+		newDigests[sym.ID] = skipDigest
 		newSymbolIDs[sym.ID] = true
 
 		// Per-symbol incremental check per spec §4.3:
 		// If existing symbol has identical body_digest, skip save (reuse embedding)
-		if oldDigest, exists := oldDigests[sym.ID]; exists && oldDigest == sym.BodyDigest {
+		if oldDigest, exists := oldDigests[sym.ID]; exists && oldDigest == skipDigest {
 			skippedCount++
 			continue
 		}
@@ -246,6 +277,19 @@ func (idx *Indexer) indexFile(ctx context.Context, event indexing.PostReviewEven
 			return fmt.Errorf("save symbol %s: %w", sym.Name, err)
 		}
 		savedCount++
+
+		if idx.config.EmbeddingEnabled {
+			content, digest := idx.buildEmbeddingPayload(sym, calls, content, embedMode, embedModel)
+			if strings.TrimSpace(content) != "" {
+				embedInputs = append(embedInputs, embedding.SymbolInput{
+					SymbolID:      sym.ID,
+					FilePath:      sym.FilePath,
+					SymbolName:    sym.Name,
+					Content:       content,
+					ContentDigest: digest,
+				})
+			}
+		}
 	}
 
 	// Delete symbols that no longer exist in the file per spec §4.3
@@ -270,6 +314,16 @@ func (idx *Indexer) indexFile(ctx context.Context, event indexing.PostReviewEven
 		return fmt.Errorf("update file meta: %w", err)
 	}
 
+	if idx.config.EmbeddingEnabled && len(embedInputs) > 0 {
+		if err := idx.enqueueEmbeddings(ctx, event.WorkspaceID, embedInputs, embedModel); err != nil {
+			idx.logger.Warn().
+				Err(err).
+				Str("path", file.Path).
+				Int("queued", len(embedInputs)).
+				Msg("failed to enqueue symbol embeddings")
+		}
+	}
+
 	idx.logger.Debug().
 		Str("path", file.Path).
 		Int("total", len(symbols)).
@@ -279,6 +333,119 @@ func (idx *Indexer) indexFile(ctx context.Context, event indexing.PostReviewEven
 		Msg("indexed file symbols")
 
 	return nil
+}
+
+func (idx *Indexer) buildEmbeddingPayload(sym Symbol, calls []string, fileContent []byte, mode config.EmbedSymbolTextMode, model string) (string, string) {
+	body := extractSymbolBody(fileContent, sym)
+	if strings.TrimSpace(body) == "" {
+		return "", ""
+	}
+
+	switch mode {
+	case config.EmbedSymbolTextModeDocEnriched:
+		info := embeddingtext.SymbolInfo{
+			Name:      sym.Name,
+			Kind:      string(sym.Kind),
+			FilePath:  sym.FilePath,
+			Signature: sym.Signature,
+			Doc:       sym.Documentation,
+			Code:      body,
+			Calls:     calls,
+		}
+		content := embeddingtext.BuildSymbolEmbeddingText(info, embeddingtext.DefaultSymbolTextOptionsDocEnriched())
+		digest := embeddingtext.BuildSymbolContentDigest(embeddingtext.SymbolDigestInput{
+			Model:      model,
+			Kind:       string(sym.Kind),
+			Name:       sym.Name,
+			FilePath:   sym.FilePath,
+			Signature:  sym.Signature,
+			Doc:        sym.Documentation,
+			BodyDigest: sym.BodyDigest,
+			Calls:      calls,
+		})
+		return content, digest
+	default:
+		content := body
+		return content, embeddingtext.DigestSHA256(content)
+	}
+}
+
+func (idx *Indexer) enqueueEmbeddings(ctx context.Context, workspaceID string, inputs []embedding.SymbolInput, model string) error {
+	root, err := idx.resolveEmbeddingStoreRoot(ctx)
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(root) == "" {
+		return nil
+	}
+
+	store, err := embedding.OpenStore(ctx, root)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if closeErr := store.Close(); closeErr != nil {
+			idx.logger.Warn().Err(closeErr).Msg("failed to close embedding store")
+		}
+	}()
+
+	_, err = store.Enqueue(ctx, embedding.EnqueueRequest{
+		WorkspaceID: workspaceID,
+		Symbols:     inputs,
+		Priority:    embedding.PriorityNormal,
+		Model:       model,
+		Deduplicate: true,
+	})
+	return err
+}
+
+func (idx *Indexer) resolveEmbeddingStoreRoot(ctx context.Context) (string, error) {
+	root := strings.TrimSpace(idx.config.EmbeddingStoreRoot)
+	if root != "" {
+		return root, nil
+	}
+	cfg, err := config.LoadCached(ctx)
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(cfg.Paths.Cache), nil
+}
+
+func (idx *Indexer) resolveEmbeddingModel(ctx context.Context) string {
+	model := strings.TrimSpace(idx.config.EmbeddingModel)
+	if model != "" {
+		return model
+	}
+	cfg, err := config.LoadCached(ctx)
+	if err != nil {
+		recommended, _ := semantic.ScopeModelRecommendation(semantic.ScopeSymbols)
+		return strings.TrimSpace(recommended)
+	}
+	return semantic.ResolveModelForScope(semantic.ScopeSymbols, cfg)
+}
+
+func extractSymbolBody(content []byte, sym Symbol) string {
+	if len(content) == 0 {
+		return ""
+	}
+
+	start := sym.StartByte
+	end := sym.EndByte
+	if start >= 0 && end > start && end <= len(content) {
+		return string(content[start:end])
+	}
+
+	lines := strings.Split(string(content), "\n")
+	startLine := sym.StartLine
+	endLine := sym.EndLine
+	if startLine < 1 || startLine > len(lines) {
+		return ""
+	}
+	if endLine < startLine || endLine > len(lines) {
+		endLine = startLine
+	}
+
+	return strings.Join(lines[startLine-1:endLine], "\n")
 }
 
 func (idx *Indexer) resolveCallTargets(ctx context.Context, workspace string, callNames []string, nameToID map[string]string) []string {

@@ -21,6 +21,7 @@ var DefaultExcludeGlobs = []string{
 type SearchInput struct {
 	Pattern         string
 	CaseInsensitive bool
+	FixedStrings    bool
 	Glob            []string
 	GlobNot         []string
 	MaxMatches      int
@@ -55,6 +56,7 @@ func BuildSearchOpts(in SearchInput, workspace, searchPath string, defaultExclud
 		Path:              searchPath,
 		WorkingDir:        workspace,
 		CaseInsensitive:   in.CaseInsensitive,
+		FixedStrings:      in.FixedStrings,
 		ContextLines:      in.ContextLines,
 		MaxMatches:        in.MaxMatches,
 		MaxMatchesPerFile: in.MaxMatches,

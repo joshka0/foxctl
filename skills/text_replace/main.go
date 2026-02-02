@@ -1,4 +1,4 @@
-// Package main implements the text/replace skill - an advanced search and replace tool more powerful than sed.
+// Package main implements the text/replace skill - an advanced search and replace tool more powerful than sed with regex and literal support.
 package main
 
 import (
@@ -28,12 +28,14 @@ type (
 	replacer   = textreplace.Replacer
 )
 
+// operation defines a single search and replace operation with pattern and replacement text.
 type operation struct {
 	Pattern     string `json:"pattern"`
 	Replacement string `json:"replacement"`
 	Literal     bool   `json:"literal"`
 }
 
+// input defines the skill input parameters for advanced text replacement with multiple options and validation.
 type input struct {
 	Pattern             string      `json:"pattern"`
 	Replacement         string      `json:"replacement"`
@@ -57,39 +59,56 @@ type input struct {
 	ShowDiff            bool        `json:"show_diff"`
 }
 
+// literalReplacer performs literal string replacement without regex interpretation.
 type literalReplacer struct {
 	pattern     string
 	replacement string
 }
 
+// Match checks if the content contains the literal pattern.
 func (r *literalReplacer) Match(content string) bool {
 	return strings.Contains(content, r.pattern)
 }
 
+// Replace performs literal string replacement and returns the modified content with replacement count.
 func (r *literalReplacer) Replace(content string) (string, int) {
 	count := strings.Count(content, r.pattern)
 	return strings.ReplaceAll(content, r.pattern, r.replacement), count
 }
 
+// regexReplacer performs regex-based pattern replacement with advanced matching capabilities.
 type regexReplacer struct {
 	pattern     *regexp.Regexp
 	replacement string
 }
 
+// Match checks if the content matches the regex pattern.
 func (r *regexReplacer) Match(content string) bool {
 	return r.pattern.MatchString(content)
 }
 
+// Replace performs regex pattern replacement and returns the modified content with replacement count.
 func (r *regexReplacer) Replace(content string) (string, int) {
 	matches := r.pattern.FindAllStringIndex(content, -1)
 	count := len(matches)
 	return r.pattern.ReplaceAllString(content, r.replacement), count
 }
 
+// main is the skill entry point for text/replace with comprehensive search and replace capabilities.
 func main() {
 	skillmain.Main(command, run)
 }
 
+// run orchestrates advanced text replacement with multiple operations, file filtering, and comprehensive validation.
+//
+// Index:
+// - Purpose: Perform advanced search and replace operations across multiple files with regex/literal support, backup, and validation
+// - Flow: validate input → build operations → create replacers → collect files → process each file → validate syntax → emit results
+// - SideEffects: modifies files; creates backups; validates syntax; processes large file sets; handles binary files
+// - FailureModes: invalid regex patterns, file access errors, syntax validation failures, backup creation errors
+// - Observability: emits replacement statistics, file change details, validation results, and comprehensive operation metrics
+// - Related: buildOperations, buildReplacer, validateFileSyntax, textreplace.ProcessFile
+// - Keywords: text/replace, search_replace, regex, literal_replacement, file_processing, syntax_validation
 func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	// Apply defaults
 	if in.MaxFiles <= 0 {
@@ -290,6 +309,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	return skillout.Emit(rc, command, data)
 }
 
+// buildOperations creates a list of operations from input, handling both single and multi-operation modes.
 func buildOperations(in input) []operation {
 	if len(in.Operations) > 0 {
 		return in.Operations
@@ -301,6 +321,7 @@ func buildOperations(in input) []operation {
 	}}
 }
 
+// buildReplacer creates a replacer instance based on operation type and regex options.
 func buildReplacer(op operation, caseInsensitive, wordBoundary, multiline bool) (replacer, error) {
 	if op.Literal {
 		return &literalReplacer{
@@ -324,6 +345,7 @@ func buildReplacer(op operation, caseInsensitive, wordBoundary, multiline bool) 
 	}, nil
 }
 
+// validateFileSyntax validates file syntax for supported formats (Go, JSON, YAML) after replacement.
 func validateFileSyntax(path string) (bool, error) {
 	ext := filepath.Ext(path)
 

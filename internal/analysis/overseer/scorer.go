@@ -1,6 +1,3 @@
-// Package overseer provides task scoring for prioritization recommendations.
-// It combines graph insights (PageRank, critical path) with mailbox state
-// (unread messages from admin/overseer) per the spec.
 package overseer
 
 import (
@@ -54,7 +51,7 @@ type Scorer struct {
 	clock      func() time.Time
 }
 
-// NewScorer creates a new overseer scorer.
+// NewScorer constructs a task recommendation scorer.
 func NewScorer(taskStore tasks.Store, boardStore blackboard.BoardStore) *Scorer {
 	return &Scorer{
 		taskStore:  taskStore,
@@ -73,7 +70,15 @@ func WithClock(clock func() time.Time) ScorerOption {
 	}
 }
 
-// Recommend computes scored recommendations for pending tasks.
+// Recommend scores pending tasks and returns a ranked recommendation list.
+//
+// Index:
+// - Purpose: Rank pending tasks using graph insights and mailbox signals
+// - Flow: list tasks -> filter pending -> analyze graph -> count mail -> score/normalize -> sort -> limit -> return
+// - SideEffects: reads task store and mailbox
+// - FailureModes: task listing errors, graph analysis errors
+// - Related: tasks.Store.ListByWorkspace, tasksgraph.NewAnalyzer, blackboard.BoardStore
+// - Keywords: recommend, critical_path_score, pagerank, unread_admin, unread_overseer, tasksgraph.NewAnalyzer
 func (s *Scorer) Recommend(ctx context.Context, workspaceID string, limit int) (*Recommendation, error) {
 	// Get all tasks
 	allTasks, err := s.taskStore.ListByWorkspace(ctx, workspaceID)

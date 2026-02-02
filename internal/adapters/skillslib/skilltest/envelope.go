@@ -1,4 +1,3 @@
-// Package skilltest provides test utilities for skill tests.
 package skilltest
 
 import (
@@ -171,7 +170,7 @@ func (v *EnvelopeValidator) Envelope() envelope.Envelope {
 	return v.env
 }
 
-// Data extracts and returns typed data from the envelope.
+// ExtractData extracts and returns typed data from the envelope.
 func ExtractData[T any](t *testing.T, env envelope.Envelope) T {
 	t.Helper()
 	var result T

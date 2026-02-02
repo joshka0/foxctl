@@ -1,10 +1,3 @@
-// Package hooks defines the v1 hook contract for agentctl's actor runtime.
-//
-// Hooks are skills invoked at canonical events during actor execution.
-// They can observe, block, mutate, or enqueue actions.
-//
-// The types in this file are CANONICAL and STABLE for v1.
-// Changes here affect all hook skills and the dispatcher.
 package hooks
 
 import "encoding/json"

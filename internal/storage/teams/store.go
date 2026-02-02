@@ -14,6 +14,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/storage/sqliteutil"
 )
 
+// Store defines persistence operations for teams and members.
 type Store interface {
 	Close() error
 	UpsertTeam(ctx context.Context, team Team) (Team, error)
@@ -24,6 +25,7 @@ type Store interface {
 	ListMembers(ctx context.Context, workspaceID, teamID string, limit int) ([]TeamMember, error)
 }
 
+// Team describes a workspace team and its metadata.
 type Team struct {
 	WorkspaceID  string
 	TeamID       string
@@ -35,6 +37,7 @@ type Team struct {
 	UpdatedAt    time.Time
 }
 
+// TeamMember associates an actor with a team and role.
 type TeamMember struct {
 	WorkspaceID string
 	TeamID      string

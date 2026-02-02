@@ -1,3 +1,4 @@
+// Package main implements the todo/continuation skill for analyzing task dependencies and generating continuation prompts.
 package main
 
 import (
@@ -23,6 +24,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/storage/tasks"
 )
 
+// input defines the skill input parameters for todo continuation analysis with workspace and session targeting.
 type input struct {
 	WorkspaceID           string `json:"workspace_id"`
 	SessionID             string `json:"session_id"`
@@ -33,6 +35,7 @@ type input struct {
 	IncludeExecutionOrder *bool  `json:"include_execution_order"`
 }
 
+// output defines the skill output with comprehensive task analysis and continuation guidance.
 type output struct {
 	ShouldContinue          bool       `json:"should_continue"`
 	Prompt                  string     `json:"prompt"`
@@ -48,11 +51,13 @@ type output struct {
 	Summary                 string     `json:"summary"`
 }
 
+// blocked represents a task with its blocking dependencies for analysis and reporting.
 type blocked struct {
 	Task     tasks.Task
 	Blockers []string
 }
 
+// cachedInsights represents cached task graph insights with hash validation for performance optimization.
 type cachedInsights struct {
 	Hash     string              `json:"hash"`
 	Insights tasksgraph.Insights `json:"insights"`
@@ -60,10 +65,21 @@ type cachedInsights struct {
 
 const command = "todo/continuation"
 
+// main is the skill entry point for todo/continuation with task dependency analysis capabilities.
 func main() {
 	skillmain.Main(command, run)
 }
 
+// run orchestrates todo continuation analysis with dependency graph computation and prompt generation.
+//
+// Index:
+// - Purpose: Analyze task dependencies and generate continuation prompts with cycle detection and execution ordering
+// - Flow: validate input → open task store → analyze incomplete tasks → compute insights → generate prompt → emit results
+// - SideEffects: reads task store; computes dependency graphs; caches insights; generates continuation prompts
+// - FailureModes: task store access failures, dependency analysis errors, cache I/O failures, prompt generation errors
+// - Observability: emits task counts, dependency cycles, execution order, ready tasks, and comprehensive continuation guidance
+// - Related: runContinuation, buildPrompt, loadOrComputeInsights, computeTasksHash
+// - Keywords: todo/continuation, task_dependencies, cycle_detection, execution_order, continuation_prompt
 func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	// Default workspace
 	in.WorkspaceID = workspaceutil.Resolve(in.WorkspaceID, "", rc.Workspace)
@@ -101,6 +117,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	return skillout.Emit(rc, command, out)
 }
 
+// runContinuation performs detailed task analysis with dependency resolution and prompt generation.
 func runContinuation(ctx context.Context, cachePath string, store tasks.Store, in input, includeExecutionOrder bool) (output, error) {
 	allTasks, err := store.ListByWorkspace(ctx, in.WorkspaceID)
 	if err != nil {
@@ -283,6 +300,7 @@ func runContinuation(ctx context.Context, cachePath string, store tasks.Store, i
 	return out, nil
 }
 
+// promptInput encapsulates all data needed for building the continuation prompt with task metrics.
 type promptInput struct {
 	AnchorGoal              string
 	AnchorPending           string
@@ -299,6 +317,7 @@ type promptInput struct {
 	IncludeExecutionOrd     bool
 }
 
+// buildPrompt generates a comprehensive continuation prompt with task prioritization and dependency information.
 func buildPrompt(in promptInput) string {
 	type taskGroup struct {
 		Task     tasks.Task
@@ -510,6 +529,7 @@ func buildPrompt(in promptInput) string {
 	return prompt
 }
 
+// ensure2D ensures a 2D string slice is properly initialized with defensive copying.
 func ensure2D(in [][]string) [][]string {
 	if in == nil {
 		return [][]string{}
@@ -521,6 +541,7 @@ func ensure2D(in [][]string) [][]string {
 	return out
 }
 
+// loadOrComputeInsights loads cached task graph insights or computes them fresh with hash validation.
 func loadOrComputeInsights(cacheDir string, workspaceID, sessionID string, taskList []tasks.Task) (tasksgraph.Insights, error) {
 	if len(taskList) == 0 {
 		return tasksgraph.NewAnalyzer().Analyze(taskList, workspaceID)
@@ -550,6 +571,7 @@ func loadOrComputeInsights(cacheDir string, workspaceID, sessionID string, taskL
 	return insights, nil
 }
 
+// cacheInsightsPath generates the cache file path for task insights based on workspace and session.
 func cacheInsightsPath(cacheDir string, workspaceID, sessionID string) string {
 	if strings.TrimSpace(cacheDir) == "" {
 		return ""
@@ -562,6 +584,9 @@ func cacheInsightsPath(cacheDir string, workspaceID, sessionID string) string {
 	return filepath.Join(dir, hex.EncodeToString(sum[:])+".json")
 }
 
+// readInsightsCache reads and validates cached task insights with hash verification.
+// It returns the cached insights and a boolean indicating whether the cache was valid.
+// If the cache file does not exist or the hash does not match, it returns an empty insights object and false.
 func readInsightsCache(path, hash string) (tasksgraph.Insights, bool) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -577,6 +602,9 @@ func readInsightsCache(path, hash string) (tasksgraph.Insights, bool) {
 	return cached.Insights, true
 }
 
+// writeInsightsCache writes task insights to cache with hash validation for future retrieval.
+// It writes the insights to the cache file and returns without error.
+// If the cache directory does not exist, it creates it with the correct permissions.
 func writeInsightsCache(path, hash string, insights tasksgraph.Insights) {
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -590,6 +618,7 @@ func writeInsightsCache(path, hash string, insights tasksgraph.Insights) {
 	_ = os.WriteFile(path, data, 0o644)
 }
 
+// computeTasksHash generates a deterministic hash of task list for cache validation and change detection.
 func computeTasksHash(taskList []tasks.Task) string {
 	if len(taskList) == 0 {
 		return ""

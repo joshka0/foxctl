@@ -1,4 +1,4 @@
-// Package main implements the session/deep-dive skill for retrieving raw content from archives.
+// Package main implements the session/deep-dive skill for retrieving raw content from session archives with detailed chunk analysis.
 package main
 
 import (
@@ -14,7 +14,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/storage/sessions"
 )
 
-// Input defines the skill input parameters.
+// Input defines the skill input parameters for session deep-dive with flexible chunk selection and querying options.
 type Input struct {
 	SessionID    string `json:"session_id"`
 	ChunkIndex   int    `json:"chunk_index,omitempty"`
@@ -23,7 +23,7 @@ type Input struct {
 	Limit        int    `json:"limit,omitempty"`
 }
 
-// Output defines the skill output.
+// Output defines the skill output with comprehensive chunk details and archive information.
 type Output struct {
 	SessionID   string        `json:"session_id"`
 	ArchivePath string        `json:"archive_path,omitempty"`
@@ -33,7 +33,7 @@ type Output struct {
 	Message     string        `json:"message"`
 }
 
-// ChunkDetail provides full details about a chunk.
+// ChunkDetail provides full details about a session chunk with content, metadata, and error tracking.
 type ChunkDetail struct {
 	Index          int             `json:"index"`
 	Type           string          `json:"type"`
@@ -52,10 +52,21 @@ const (
 	defaultLimit = 10
 )
 
+// main is the skill entry point for session/deep-dive with comprehensive archive retrieval capabilities.
 func main() {
 	skillmain.Main(command, run)
 }
 
+// run orchestrates session deep-dive operations with archive validation, chunk retrieval, and detailed metadata assembly.
+//
+// Index:
+// - Purpose: Retrieve raw content and detailed metadata from session archives with flexible chunk selection
+// - Flow: validate input → open sessions store → get archive path → determine target chunks → read archive → assemble details → emit results
+// - SideEffects: reads session archives; accesses session metadata; processes large data files; handles archive format variations
+// - FailureModes: missing session IDs, non-existent archives, file access errors, chunk retrieval failures, archive corruption
+// - Observability: emits chunk details, content previews, error tracking, file usage statistics, and comprehensive archive analysis
+// - Related: archive.ReadChunksFromArchive, sessionkit.OpenSessions, sessions.SessionChunk
+// - Keywords: session/deep-dive, archive_retrieval, chunk_analysis, session_metadata, raw_content_access
 func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	if in.SessionID == "" {
 		return skillerr.Arg("session_id is required")

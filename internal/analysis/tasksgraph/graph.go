@@ -1,6 +1,3 @@
-// Package tasksgraph provides graph analysis for agentctl tasks.
-// It computes PageRank, critical-path scores, in/out-degree, topological order,
-// and cycle detection over a workspace's task dependency graph.
 package tasksgraph
 
 import (
@@ -44,9 +41,16 @@ func NewAnalyzer() Analyzer {
 	return &analyzer{}
 }
 
-// Analyze builds a directed graph from tasks and computes metrics.
-// Edge direction: if task A depends on task B, edge goes A -> B
-// (A points to its dependency B).
+// Analyze computes task-graph metrics for a workspace.
+// Edge direction: if task A depends on task B, edge goes A -> B (A points to B).
+//
+// Index:
+// - Purpose: Compute graph insights for task scoring and prioritization
+// - Flow: build graph -> compute pagerank/degree -> detect cycles -> compute critical paths -> topo order -> assemble metrics
+// - SideEffects: none
+// - FailureModes: none (empty input yields empty insights)
+// - Related: network.PageRank, topo.Sort, detectCycles, computeCriticalPaths
+// - Keywords: pagerank, critical_path_score, topological_order, cycles, in_degree, out_degree
 func (a *analyzer) Analyze(taskList []tasks.Task, workspaceID string) (Insights, error) {
 	insights := Insights{
 		WorkspaceID: workspaceID,

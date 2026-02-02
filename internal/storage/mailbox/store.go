@@ -1,4 +1,3 @@
-// Package mailbox implements SQLite-backed persistence for inter-agent messaging.
 package mailbox
 
 import (
@@ -41,7 +40,7 @@ type sqlStore struct {
 }
 
 
-// an error if the database cannot be opened or migrated.
+// Open opens the mailbox store rooted at the given workspace path.
 func Open(ctx context.Context, root string) (Store, error) {
 	dbPath := filepath.Join(root, "mailbox.db")
 	db, closeFn, err := sqliteutil.OpenDBShared(ctx, dbPath, migrate)
@@ -89,6 +88,15 @@ func (s *sqlStore) PollByTypes(ctx context.Context, agentNS string, leaseDuratio
 	return s.poll(ctx, agentNS, leaseDuration, maxMessages, types)
 }
 
+// poll retrieves visible messages and leases them for delivery in one transaction.
+//
+// Index:
+// - Purpose: Atomically fetch and lease mailbox messages for an agent
+// - Flow: begin tx → query visible messages → update visibility → commit → return
+// - SideEffects: database transaction; updates visible_at/attempt
+// - FailureModes: tx errors, query errors, lease update errors
+// - Related: scanMessage
+// - Keywords: mailbox_poll, visible_at, lease_duration, attempt, to_ns
 func (s *sqlStore) poll(ctx context.Context, agentNS string, leaseDuration time.Duration, maxMessages int, types []agent.MessageType) ([]agent.Message, error) {
 	if maxMessages <= 0 {
 		maxMessages = 1

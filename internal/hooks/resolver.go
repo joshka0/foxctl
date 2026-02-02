@@ -18,12 +18,20 @@ type SkillResolver interface {
 }
 
 // DefaultResolver implements SkillResolver using the standard skills directory.
+// DefaultResolver resolves skills from a local skills directory.
 type DefaultResolver struct {
 	// SkillsDir is the root directory for installed skills (e.g., ~/.agentctl/skills).
 	SkillsDir string
 }
 
 // NewDefaultResolver creates a resolver using the given skills directory.
+// NewDefaultResolver creates a resolver rooted at a skills directory.
+//
+// Index:
+// - Purpose: Build a resolver for installed hook skills
+// - Flow: capture skillsDir → return resolver
+// - Related: DefaultResolver.Resolve
+// - Keywords: skill_resolver, skills_dir, skill.yaml, artifact
 func NewDefaultResolver(skillsDir string) *DefaultResolver {
 	return &DefaultResolver{SkillsDir: skillsDir}
 }
@@ -66,11 +74,19 @@ func (f ResolverFunc) Resolve(skillName string) (skill.Manifest, string, error) 
 }
 
 // ChainResolver tries multiple resolvers in order until one succeeds.
+// ChainResolver tries multiple resolvers in order.
 type ChainResolver struct {
 	Resolvers []SkillResolver
 }
 
 // NewChainResolver creates a resolver that tries each resolver in order.
+// NewChainResolver builds a resolver that tries each resolver in order.
+//
+// Index:
+// - Purpose: Compose multiple resolvers for fallback resolution
+// - Flow: collect resolvers → return chain
+// - Related: ChainResolver.Resolve
+// - Keywords: chain_resolver, skill_resolver, fallback, resolve
 func NewChainResolver(resolvers ...SkillResolver) *ChainResolver {
 	return &ChainResolver{Resolvers: resolvers}
 }

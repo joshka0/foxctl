@@ -14,6 +14,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/workspaceutil"
 	"github.com/jkatigb/agentctl/internal/indexing/embedding"
+	"github.com/jkatigb/agentctl/internal/indexing/semantic"
 )
 
 var allowedOps = []string{"enqueue", "stats", "get", "get_by_file", "job_status", "cleanup"}
@@ -122,7 +123,8 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 
 	switch op {
 	case "enqueue":
-		if err := handleEnqueue(ctx, store, &in, &output); err != nil {
+		model := semantic.ResolveModelForScope(semantic.ScopeSymbols, rc.Config)
+		if err := handleEnqueue(ctx, store, &in, &output, model); err != nil {
 			return err
 		}
 
@@ -156,7 +158,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 }
 
 // handleEnqueue processes symbol enqueue requests with deduplication and priority support.
-func handleEnqueue(ctx context.Context, store *embedding.Store, input *Input, output *Output) error {
+func handleEnqueue(ctx context.Context, store *embedding.Store, input *Input, output *Output, model string) error {
 	if len(input.Symbols) == 0 {
 		return skillerr.Arg("symbols is required for enqueue")
 	}
@@ -181,6 +183,7 @@ func handleEnqueue(ctx context.Context, store *embedding.Store, input *Input, ou
 		WorkspaceID: input.WorkspaceID,
 		Symbols:     symbols,
 		Priority:    priority,
+		Model:       model,
 		Deduplicate: input.Deduplicate,
 	})
 	if err != nil {

@@ -39,11 +39,22 @@ func TestDetectLanguage(t *testing.T) {
 		{"player.gd", codeblocks.LangGDScript},
 		{"scripts/enemy.gd", codeblocks.LangGDScript},
 
+		// Elixir
+		{"lib/app.ex", codeblocks.LangElixir},
+		{"script.exs", codeblocks.LangElixir},
+
+		// Ruby
+		{"lib/app.rb", codeblocks.LangRuby},
+		{"script.rb", codeblocks.LangRuby},
+
+		// Lua
+		{"script.lua", codeblocks.LangLua},
+		{"scripts/init.lua", codeblocks.LangLua},
+
 		// Generic fallback
 		{"readme.md", codeblocks.LangGeneric},
 		{"config.yaml", codeblocks.LangGeneric},
 		{"data.json", codeblocks.LangGeneric},
-		{"script.rb", codeblocks.LangGeneric},
 		{"noext", codeblocks.LangGeneric},
 	}
 
@@ -99,21 +110,21 @@ func main() {
 			matchLine:  7, // return x * 2
 			wantSymbol: "helper",
 			wantKind:   "function",
-			wantStart:  6,
+			wantStart:  5,
 		},
 		{
 			name:       "match in type declaration",
 			matchLine:  12, // Name string
 			wantSymbol: "User",
 			wantKind:   "type",
-			wantStart:  11,
+			wantStart:  10,
 		},
 		{
 			name:       "match in method",
 			matchLine:  18, // return fmt.Sprintf...
 			wantSymbol: "Greet",
 			wantKind:   "method",
-			wantStart:  17,
+			wantStart:  16,
 		},
 		{
 			name:       "match in main",
@@ -150,6 +161,39 @@ func main() {
 				t.Errorf("Source does not contain match line")
 			}
 		})
+	}
+}
+
+func TestExpandGoClosure(t *testing.T) {
+	source := `package main
+
+func outer() {
+	dfs := func(n int) int {
+		if n == 0 { return 1 }
+		return dfs(n-1)
+	}
+	_ = dfs(2)
+}
+`
+	lines := strings.Split(source, "\n")
+	exp := codeblocks.NewExpander(codeblocks.LangGo, 400)
+
+	matches := []rawMatch{{File: "test.go", Line: 5, Text: lines[4]}}
+	blocks := exp.ExpandMatches("test.go", lines, matches)
+
+	if len(blocks) != 1 {
+		t.Fatalf("expected 1 block, got %d", len(blocks))
+	}
+
+	b := blocks[0]
+	if b.SymbolName != "dfs" {
+		t.Errorf("SymbolName = %q, want %q", b.SymbolName, "dfs")
+	}
+	if b.SymbolKind != "closure" {
+		t.Errorf("SymbolKind = %q, want %q", b.SymbolKind, "closure")
+	}
+	if b.StartLine != 4 {
+		t.Errorf("StartLine = %d, want %d", b.StartLine, 4)
 	}
 }
 
@@ -231,6 +275,65 @@ if __name__ == "__main__":
 			wantSymbol: "main",
 			wantKind:   "function",
 			wantStart:  26, // 0-indexed + 1 = line 27 is "def main():"
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			matches := []rawMatch{{File: "test.py", Line: tt.matchLine, Text: lines[tt.matchLine-1]}}
+			blocks := exp.ExpandMatches("test.py", lines, matches)
+
+			if len(blocks) != 1 {
+				t.Fatalf("expected 1 block, got %d", len(blocks))
+			}
+
+			b := blocks[0]
+			if b.SymbolName != tt.wantSymbol {
+				t.Errorf("SymbolName = %q, want %q", b.SymbolName, tt.wantSymbol)
+			}
+			if b.SymbolKind != tt.wantKind {
+				t.Errorf("SymbolKind = %q, want %q", b.SymbolKind, tt.wantKind)
+			}
+			if b.StartLine != tt.wantStart {
+				t.Errorf("StartLine = %d, want %d", b.StartLine, tt.wantStart)
+			}
+		})
+	}
+}
+
+func TestExpandPythonDecorators(t *testing.T) {
+	source := `@decorator
+def decorated():
+    return 1
+
+class Service:
+    @classmethod
+    def build(cls):
+        return cls()
+`
+	lines := strings.Split(source, "\n")
+	exp := codeblocks.NewExpander(codeblocks.LangPython, 400)
+
+	tests := []struct {
+		name       string
+		matchLine  int
+		wantSymbol string
+		wantKind   string
+		wantStart  int
+	}{
+		{
+			name:       "match in decorated function",
+			matchLine:  3,
+			wantSymbol: "decorated",
+			wantKind:   "function",
+			wantStart:  1,
+		},
+		{
+			name:       "match in decorated method",
+			matchLine:  8,
+			wantSymbol: "build",
+			wantKind:   "function",
+			wantStart:  6,
 		},
 	}
 
@@ -375,6 +478,302 @@ export async function main() {
 	}
 }
 
+func TestExpandJSTSArrowExpressions(t *testing.T) {
+	source := `const inline = (x) => x + 1
+const single = x => x + 2
+
+class Store {
+    handler = (evt) => {
+        return evt.type
+    }
+}
+`
+	lines := strings.Split(source, "\n")
+	exp := codeblocks.NewExpander(codeblocks.LangTS, 400)
+
+	tests := []struct {
+		name       string
+		matchLine  int
+		wantSymbol string
+		wantKind   string
+		wantStart  int
+		wantEnd    int
+	}{
+		{
+			name:       "match in inline arrow",
+			matchLine:  1,
+			wantSymbol: "inline",
+			wantKind:   "function",
+			wantStart:  1,
+			wantEnd:    1,
+		},
+		{
+			name:       "match in no-paren arrow",
+			matchLine:  2,
+			wantSymbol: "single",
+			wantKind:   "function",
+			wantStart:  2,
+			wantEnd:    2,
+		},
+		{
+			name:       "match in class field arrow",
+			matchLine:  6,
+			wantSymbol: "handler",
+			wantKind:   "method",
+			wantStart:  5,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			matches := []rawMatch{{File: "test.ts", Line: tt.matchLine, Text: lines[tt.matchLine-1]}}
+			blocks := exp.ExpandMatches("test.ts", lines, matches)
+
+			if len(blocks) != 1 {
+				t.Fatalf("expected 1 block, got %d", len(blocks))
+			}
+
+			b := blocks[0]
+			if b.SymbolName != tt.wantSymbol {
+				t.Errorf("SymbolName = %q, want %q", b.SymbolName, tt.wantSymbol)
+			}
+			if b.SymbolKind != tt.wantKind {
+				t.Errorf("SymbolKind = %q, want %q", b.SymbolKind, tt.wantKind)
+			}
+			if b.StartLine != tt.wantStart {
+				t.Errorf("StartLine = %d, want %d", b.StartLine, tt.wantStart)
+			}
+			if tt.wantEnd > 0 && b.EndLine != tt.wantEnd {
+				t.Errorf("EndLine = %d, want %d", b.EndLine, tt.wantEnd)
+			}
+		})
+	}
+}
+
+func TestExpandElixir(t *testing.T) {
+	source := `defmodule MyApp.Service do
+  @moduledoc false
+
+  def greet(name) do
+    IO.puts(name)
+  end
+
+  defp helper() do
+    :ok
+  end
+end
+
+handler = fn value ->
+  value + 1
+end
+`
+	lines := strings.Split(source, "\n")
+	exp := codeblocks.NewExpander(codeblocks.LangElixir, 400)
+
+	tests := []struct {
+		name       string
+		matchLine  int
+		wantSymbol string
+		wantKind   string
+		wantStart  int
+	}{
+		{
+			name:       "match in module",
+			matchLine:  2,
+			wantSymbol: "MyApp.Service",
+			wantKind:   "module",
+			wantStart:  1,
+		},
+		{
+			name:       "match in function",
+			matchLine:  5,
+			wantSymbol: "greet",
+			wantKind:   "function",
+			wantStart:  4,
+		},
+		{
+			name:       "match in closure",
+			matchLine:  14,
+			wantSymbol: "handler",
+			wantKind:   "closure",
+			wantStart:  13,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			matches := []rawMatch{{File: "test.ex", Line: tt.matchLine, Text: lines[tt.matchLine-1]}}
+			blocks := exp.ExpandMatches("test.ex", lines, matches)
+
+			if len(blocks) != 1 {
+				t.Fatalf("expected 1 block, got %d", len(blocks))
+			}
+
+			b := blocks[0]
+			if b.SymbolName != tt.wantSymbol {
+				t.Errorf("SymbolName = %q, want %q", b.SymbolName, tt.wantSymbol)
+			}
+			if b.SymbolKind != tt.wantKind {
+				t.Errorf("SymbolKind = %q, want %q", b.SymbolKind, tt.wantKind)
+			}
+			if b.StartLine != tt.wantStart {
+				t.Errorf("StartLine = %d, want %d", b.StartLine, tt.wantStart)
+			}
+		})
+	}
+}
+
+
+func TestExpandRuby(t *testing.T) {
+	source := `class Store
+  def add(item)
+    @items << item
+  end
+end
+
+module Helpers
+  def self.format(x)
+    x.to_s
+  end
+end
+
+handler = ->(x) do
+  x + 1
+end
+`
+	lines := strings.Split(source, "\n")
+	exp := codeblocks.NewExpander(codeblocks.LangRuby, 400)
+
+	tests := []struct {
+		name       string
+		matchLine  int
+		wantSymbol string
+		wantKind   string
+		wantStart  int
+	}{
+		{
+			name:       "match in class",
+			matchLine:  1,
+			wantSymbol: "Store",
+			wantKind:   "class",
+			wantStart:  1,
+		},
+		{
+			name:       "match in method",
+			matchLine:  3,
+			wantSymbol: "add",
+			wantKind:   "function",
+			wantStart:  2,
+		},
+		{
+			name:       "match in module method",
+			matchLine:  9,
+			wantSymbol: "format",
+			wantKind:   "function",
+			wantStart:  8,
+		},
+		{
+			name:       "match in closure",
+			matchLine:  14,
+			wantSymbol: "handler",
+			wantKind:   "closure",
+			wantStart:  13,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			matches := []rawMatch{{File: "test.rb", Line: tt.matchLine, Text: lines[tt.matchLine-1]}}
+			blocks := exp.ExpandMatches("test.rb", lines, matches)
+
+			if len(blocks) != 1 {
+				t.Fatalf("expected 1 block, got %d", len(blocks))
+			}
+
+			b := blocks[0]
+			if b.SymbolName != tt.wantSymbol {
+				t.Errorf("SymbolName = %q, want %q", b.SymbolName, tt.wantSymbol)
+			}
+			if b.SymbolKind != tt.wantKind {
+				t.Errorf("SymbolKind = %q, want %q", b.SymbolKind, tt.wantKind)
+			}
+			if b.StartLine != tt.wantStart {
+				t.Errorf("StartLine = %d, want %d", b.StartLine, tt.wantStart)
+			}
+		})
+	}
+}
+
+func TestExpandLua(t *testing.T) {
+	source := `local function helper(x)
+  return x * 2
+end
+
+function Store:add(item)
+  self.items = self.items or {}
+  table.insert(self.items, item)
+end
+
+handler = function(value)
+  return value + 1
+end
+`
+	lines := strings.Split(source, "\n")
+	exp := codeblocks.NewExpander(codeblocks.LangLua, 400)
+
+	tests := []struct {
+		name       string
+		matchLine  int
+		wantSymbol string
+		wantKind   string
+		wantStart  int
+	}{
+		{
+			name:       "match in local function",
+			matchLine:  2,
+			wantSymbol: "helper",
+			wantKind:   "function",
+			wantStart:  1,
+		},
+		{
+			name:       "match in method",
+			matchLine:  6,
+			wantSymbol: "Store:add",
+			wantKind:   "function",
+			wantStart:  5,
+		},
+		{
+			name:       "match in closure",
+			matchLine:  11,
+			wantSymbol: "handler",
+			wantKind:   "closure",
+			wantStart:  10,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			matches := []rawMatch{{File: "test.lua", Line: tt.matchLine, Text: lines[tt.matchLine-1]}}
+			blocks := exp.ExpandMatches("test.lua", lines, matches)
+
+			if len(blocks) != 1 {
+				t.Fatalf("expected 1 block, got %d", len(blocks))
+			}
+
+			b := blocks[0]
+			if b.SymbolName != tt.wantSymbol {
+				t.Errorf("SymbolName = %q, want %q", b.SymbolName, tt.wantSymbol)
+			}
+			if b.SymbolKind != tt.wantKind {
+				t.Errorf("SymbolKind = %q, want %q", b.SymbolKind, tt.wantKind)
+			}
+			if b.StartLine != tt.wantStart {
+				t.Errorf("StartLine = %d, want %d", b.StartLine, tt.wantStart)
+			}
+		})
+	}
+}
+
 func TestExpandGDScript(t *testing.T) {
 	source := `extends CharacterBody2D
 class_name Player
@@ -475,6 +874,106 @@ class InnerHelper:
 			}
 			if b.StartLine != tt.wantStart {
 				t.Errorf("StartLine = %d, want %d", b.StartLine, tt.wantStart)
+			}
+		})
+	}
+}
+
+func TestExpandTopLevelFallback(t *testing.T) {
+	tests := []struct {
+		name      string
+		lang      codeblocks.Language
+		file      string
+		source    string
+		matchLine int
+		wantStart int
+		wantEnd   int
+	}{
+		{
+			name: "go top-level",
+			lang: codeblocks.LangGo,
+			file: "test.go",
+			source: `package main
+
+func helper() {
+    println("hi")
+}
+
+var topLevel = 42
+`,
+			matchLine: 7,
+			wantStart: 7,
+			wantEnd:   7,
+		},
+		{
+			name: "python top-level",
+			lang: codeblocks.LangPython,
+			file: "test.py",
+			source: `def helper():
+    return 1
+
+top_level = 2
+`,
+			matchLine: 4,
+			wantStart: 4,
+			wantEnd:   4,
+		},
+		{
+			name: "ts top-level",
+			lang: codeblocks.LangTS,
+			file: "test.ts",
+			source: `function helper() {
+  return 1;
+}
+
+const topLevel = 2;
+`,
+			matchLine: 5,
+			wantStart: 5,
+			wantEnd:   5,
+		},
+		{
+			name: "gdscript top-level",
+			lang: codeblocks.LangGDScript,
+			file: "test.gd",
+			source: `func helper():
+    return 1
+
+var top_level = 2
+`,
+			matchLine: 4,
+			wantStart: 4,
+			wantEnd:   4,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			lines := strings.Split(tt.source, "\n")
+			exp := codeblocks.NewExpander(tt.lang, 400)
+
+			matches := []rawMatch{{File: tt.file, Line: tt.matchLine, Text: lines[tt.matchLine-1]}}
+			blocks := exp.ExpandMatches(tt.file, lines, matches)
+
+			if len(blocks) != 1 {
+				t.Fatalf("expected 1 block, got %d", len(blocks))
+			}
+
+			b := blocks[0]
+			if b.SymbolName != "" {
+				t.Errorf("SymbolName = %q, want empty", b.SymbolName)
+			}
+			if b.SymbolKind != "" {
+				t.Errorf("SymbolKind = %q, want empty", b.SymbolKind)
+			}
+			if b.StartLine != tt.wantStart {
+				t.Errorf("StartLine = %d, want %d", b.StartLine, tt.wantStart)
+			}
+			if b.EndLine != tt.wantEnd {
+				t.Errorf("EndLine = %d, want %d", b.EndLine, tt.wantEnd)
+			}
+			if !strings.Contains(b.Source, lines[tt.matchLine-1]) {
+				t.Errorf("Source does not contain match line")
 			}
 		})
 	}
@@ -633,6 +1132,9 @@ func TestExpandMaxBlockLines(t *testing.T) {
 	}
 
 	b := blocks[0]
+	if b.StartLine > 250 || b.EndLine < 250 {
+		t.Fatalf("expected block to include match line 250, got %d-%d", b.StartLine, b.EndLine)
+	}
 	blockLines := b.EndLine - b.StartLine + 1
 	if blockLines > 51 { // Allow some margin for clamping
 		t.Errorf("block has %d lines, expected <= 51", blockLines)

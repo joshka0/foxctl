@@ -8,13 +8,13 @@ import (
 // NormalizeDoc cleans documentation text for embedding/search.
 //
 // Goals:
-// - Strip common comment markers (//, /* */, leading "*", "#", "--") when present
-// - Normalize newlines to "\n"
-// - Preserve paragraph boundaries (blank lines), but "unwrap" line-wrapped paragraphs
-//   by joining consecutive non-empty lines with spaces.
-// - Preserve fenced code blocks (``` or ~~~) verbatim (no line-joining inside fences)
-// - Collapse runs of spaces/tabs (outside fenced blocks)
-// - Collapse repeated blank lines and trim leading/trailing blanks
+//   - Strip common comment markers (//, /* */, leading "*", "#", "--") when present
+//   - Normalize newlines to "\n"
+//   - Preserve paragraph boundaries (blank lines), but "unwrap" line-wrapped paragraphs
+//     by joining consecutive non-empty lines with spaces.
+//   - Preserve fenced code blocks (``` or ~~~) verbatim (no line-joining inside fences)
+//   - Collapse runs of spaces/tabs (outside fenced blocks)
+//   - Collapse repeated blank lines and trim leading/trailing blanks
 //
 // This is safe to run on raw comment strings OR on ast.CommentGroup.Text() output.
 // It should be stable across formatting-only edits.

@@ -21,6 +21,14 @@ func NewManager(config Config) *Manager {
 }
 
 // Execute runs a function through the circuit breaker for the given operation name.
+//
+// Index:
+// - Purpose: Execute guarded work via a named circuit breaker
+// - Flow: get/create breaker → execute fn → return error
+// - SideEffects: breaker state updates
+// - FailureModes: breaker open, fn errors
+// - Related: Manager.GetOrCreate, Breaker.Execute
+// - Keywords: circuit_breaker, execute, operation_name
 func (m *Manager) Execute(ctx context.Context, name string, fn func(context.Context) error) error {
 	breaker := m.GetOrCreate(name)
 	return breaker.Execute(ctx, fn)

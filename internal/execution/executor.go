@@ -59,6 +59,14 @@ type Result struct {
 type ExecutorFunc func(ctx context.Context, opts ExecuteOptions) (*Result, error)
 
 // Execute implements the SkillExecutor interface.
+//
+// Index:
+// - Purpose: Invoke a functional executor with standard options
+// - Flow: call wrapped function → return result
+// - SideEffects: depends on wrapped executor
+// - FailureModes: wrapped executor errors
+// - Related: SkillExecutor
+// - Keywords: skill_execute, executor_func
 func (f ExecutorFunc) Execute(ctx context.Context, opts ExecuteOptions) (*Result, error) {
 	return f(ctx, opts)
 }

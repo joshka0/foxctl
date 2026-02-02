@@ -1,4 +1,4 @@
-// Package main implements the web/extract skill for extracting content from URLs.
+// Package main implements the web/extract skill for extracting content from URLs with HTML parsing and query-based snippet extraction.
 package main
 
 import (
@@ -15,7 +15,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
 )
 
-// Input defines the extraction parameters.
+// Input defines the extraction parameters with URL list, query filtering, and content options.
 type Input struct {
 	URLs         []string `json:"urls"`
 	Query        string   `json:"query"`
@@ -23,7 +23,7 @@ type Input struct {
 	IncludeLinks bool     `json:"include_links"`
 }
 
-// Extraction represents extracted content from a URL.
+// Extraction represents extracted content from a URL with title, content, snippets, and links.
 type Extraction struct {
 	URL      string   `json:"url"`
 	Title    string   `json:"title"`
@@ -33,7 +33,7 @@ type Extraction struct {
 	Error    string   `json:"error,omitempty"`
 }
 
-// Output defines the skill output.
+// Output defines the skill output with extraction results, query information, and artifact handling.
 type Output struct {
 	Extractions []Extraction `json:"extractions"`
 	Query       string       `json:"query,omitempty"`
@@ -43,10 +43,21 @@ type Output struct {
 
 const command = "web/extract"
 
+// main is the skill entry point for web/extract with comprehensive URL content extraction capabilities.
 func main() {
 	skillmain.Main(command, run)
 }
 
+// run orchestrates web content extraction with validation, HTTP requests, HTML parsing, and query-based snippet generation.
+//
+// Index:
+// - Purpose: Extract content from multiple URLs with HTML-to-markdown conversion, query-based snippet extraction, and link harvesting
+// - Flow: validate URLs → configure limits → create HTTP client → extract each URL → parse HTML → generate snippets → emit with CAS
+// - SideEffects: makes HTTP requests; parses HTML content; extracts links; generates snippets; manages content limits
+// - FailureModes: invalid URLs, HTTP errors, content size limits, HTML parsing failures, network timeouts
+// - Observability: emits extraction results with titles, content, snippets, links, error information, and artifact references
+// - Related: extractURL, extractTitle, extractLinks, htmlToMarkdown, extractRelevantSnippets
+// - Keywords: web/extract, html_parsing, content_extraction, snippet_generation, link_extraction, markdown_conversion
 func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	// Validate input
 	if len(in.URLs) == 0 {
@@ -87,7 +98,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	return skillout.EmitWithCAS(ctx, rc, command, output)
 }
 
-// extractURL fetches and extracts content from a single URL.
+// extractURL fetches and extracts content from a single URL with HTML parsing and snippet generation.
 func extractURL(ctx context.Context, client *http.Client, url string, maxBytes int, query string, includeLinks bool) Extraction {
 	extraction := Extraction{URL: url}
 
@@ -147,7 +158,7 @@ func extractURL(ctx context.Context, client *http.Client, url string, maxBytes i
 	return extraction
 }
 
-// extractTitle extracts the page title from HTML.
+// extractTitle extracts the page title from HTML using regex pattern matching.
 func extractTitle(html string) string {
 	re := regexp.MustCompile(`(?i)<title[^>]*>([^<]+)</title>`)
 	matches := re.FindStringSubmatch(html)
@@ -157,7 +168,7 @@ func extractTitle(html string) string {
 	return ""
 }
 
-// extractLinks extracts links from HTML.
+// extractLinks extracts links from HTML with URL normalization and duplicate removal.
 func extractLinks(html, baseURL string) []string {
 	re := regexp.MustCompile(`(?i)<a[^>]+href=["']([^"']+)["']`)
 	matches := re.FindAllStringSubmatch(html, -1)
@@ -196,7 +207,7 @@ func extractLinks(html, baseURL string) []string {
 	return links
 }
 
-// htmlToMarkdown converts HTML to markdown-like text.
+// htmlToMarkdown converts HTML to markdown-like text with tag removal and entity decoding.
 func htmlToMarkdown(html string) string {
 	// Remove script, style, nav, footer tags
 	html = removeTagContent(html, "script")
@@ -270,13 +281,13 @@ func htmlToMarkdown(html string) string {
 	return strings.Join(cleaned, "\n")
 }
 
-// removeTagContent removes a tag and its content from HTML.
+// removeTagContent removes a tag and its content from HTML using regex pattern matching.
 func removeTagContent(html, tag string) string {
 	re := regexp.MustCompile(fmt.Sprintf(`(?is)<%s[^>]*>.*?</%s>`, tag, tag))
 	return re.ReplaceAllString(html, "")
 }
 
-// extractRelevantSnippets finds paragraphs/sections relevant to the query.
+// extractRelevantSnippets finds paragraphs/sections relevant to the query with scoring and ranking.
 func extractRelevantSnippets(content, query string, maxSnippets int) []string {
 	queryLower := strings.ToLower(query)
 	queryWords := strings.Fields(queryLower)

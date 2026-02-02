@@ -1,4 +1,3 @@
-// Package agents implements SQLite-backed persistence for agent metadata and lifecycle.
 package agents
 
 import (
@@ -39,7 +38,7 @@ type sqlStore struct {
 	close func() error
 }
 
-// backed by that database or an error if the database could not be opened.
+// Open opens the agents store rooted at the given workspace path.
 func Open(ctx context.Context, root string) (Store, error) {
 	dbPath := filepath.Join(root, "agents.db")
 	db, closeFn, err := sqliteutil.OpenDBShared(ctx, dbPath, migrate)

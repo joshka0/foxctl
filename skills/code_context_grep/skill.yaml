@@ -41,6 +41,11 @@ signature:
       type: string
       required: false
       description: "Regex pattern to search for (ripgrep mode)"
+    - name: pattern_mode
+      type: string
+      required: false
+      enum: ["regex", "literal"]
+      description: "Interpretation for pattern: regex (default) or literal (fixed string)"
     - name: case_insensitive
       type: boolean
       required: false
@@ -108,6 +113,8 @@ signature:
       description: "Search mode used (ripgrep, ast, or line)"
     - name: pattern
       type: string
+    - name: pattern_mode
+      type: string
     - name: ast_pattern
       type: string
     - name: match_count
@@ -155,6 +162,9 @@ signature:
       - Python: def, async def, class (indentation-based)
       - JavaScript/TypeScript: function, arrow functions, class, interface, type
       - GDScript: func, class_name, inner class (indentation-based)
+      - Elixir: def, defmodule, fn (do/end)
+      - Ruby: def, class, module, lambda (do/end)
+      - Lua: function, local function, assignment (function/end)
 
       For unsupported languages, falls back to blank-line delimited blocks.
     workflows:

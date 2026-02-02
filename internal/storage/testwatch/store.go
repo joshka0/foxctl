@@ -1,5 +1,3 @@
-// Package testwatch implements SQLite-backed persistence for test watcher status.
-// This stores the latest test run status per (workspace, watcher_id).
 package testwatch
 
 import (

@@ -1,5 +1,3 @@
-// Package vector provides utilities for serializing, deserializing, and comparing
-// float32 embedding vectors stored as binary blobs in SQLite.
 package vector
 
 import (

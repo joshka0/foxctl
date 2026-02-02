@@ -1,4 +1,4 @@
-// Package main implements the session/capture skill for extracting Claude Code conversations.
+// Package main implements the session/capture skill for extracting Claude Code and Codex conversations with comprehensive metadata.
 package main
 
 import (
@@ -24,7 +24,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/storage/sessions"
 )
 
-// Input defines the skill input parameters.
+// Input defines the skill input parameters for session capture with source selection and scanning options.
 type Input struct {
 	Workspace  string `json:"workspace"`
 	SessionID  string `json:"session_id,omitempty"`
@@ -37,7 +37,7 @@ type Input struct {
 	Force      bool   `json:"force,omitempty"`
 }
 
-// Output defines the skill output.
+// Output defines the skill output with comprehensive session statistics and capture results.
 type Output struct {
 	SessionID        string   `json:"session_id"`
 	WorkspacePath    string   `json:"workspace_path"`
@@ -59,10 +59,21 @@ type Output struct {
 
 const command = "session/capture"
 
+// main is the skill entry point for session/capture with comprehensive conversation extraction capabilities.
 func main() {
 	skillmain.Main(command, run)
 }
 
+// run orchestrates session capture from Claude Code and Codex with metadata extraction and storage.
+//
+// Index:
+// - Purpose: Extract and store conversation sessions from Claude Code and Codex with metadata, statistics, and high-signal content
+// - Flow: resolve workspace → detect source → locate session files → parse messages → extract metadata → save to store → emit results
+// - SideEffects: reads provider session files; writes to session store; processes large JSONL files; extracts conversation metadata
+// - FailureModes: missing session files, parse errors, storage failures, workspace detection issues, file access problems
+// - Observability: emits capture statistics, session metadata, message counts, tool usage, token counts, and high-signal content previews
+// - Related: findSessionFile, extractSession, extractHighSignal, scanCodexSessions, claudejsonl.OpenReader
+// - Keywords: session/capture, conversation_extraction, claude_code, codex, metadata_extraction, session_storage
 func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	// Default workspace
 	in.Workspace = workspaceutil.Resolve(in.Workspace, "", rc.Workspace)
@@ -215,7 +226,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	return skillout.Emit(rc, command, output)
 }
 
-// findSessionFile finds the session JSONL file to capture.
+// findSessionFile finds the session JSONL file to capture with session ID matching and modification time sorting.
 func findSessionFile(projectDir, sessionID string) (string, string) {
 	entries, err := os.ReadDir(projectDir)
 	if err != nil {
@@ -278,7 +289,7 @@ func findSessionFile(projectDir, sessionID string) (string, string) {
 	return sessions[0].path, sessions[0].id
 }
 
-// extractSession creates a Session from parsed messages.
+// extractSession creates a Session from parsed Claude Code messages with comprehensive metadata extraction.
 func extractSession(sessionID, rawPath, workspace string, messages []*claudejsonl.ReadMessage) storage.Session {
 	session := storage.Session{
 		ID:            sessionID,
@@ -361,7 +372,7 @@ func extractSession(sessionID, rawPath, workspace string, messages []*claudejson
 	return session
 }
 
-// extractHighSignal extracts high-signal content preview.
+// extractHighSignal extracts high-signal content preview from Claude Code messages with user requests and summaries.
 func extractHighSignal(messages []*claudejsonl.ReadMessage, limit int) []string {
 	var signals []string
 
@@ -390,6 +401,7 @@ func extractHighSignal(messages []*claudejsonl.ReadMessage, limit int) []string 
 	return signals
 }
 
+// readCodexMessages reads and parses Codex session messages from JSONL files with error handling.
 func readCodexMessages(path string) ([]*codexjsonl.ReadMessage, error) {
 	reader, err := codexjsonl.OpenReader(path)
 	if err != nil {
@@ -400,6 +412,7 @@ func readCodexMessages(path string) ([]*codexjsonl.ReadMessage, error) {
 	return reader.ReadAll()
 }
 
+// extractCodexSession creates a Session from parsed Codex messages with metadata and tool usage tracking.
 func extractCodexSession(sessionID, rawPath, workspace string, messages []*codexjsonl.ReadMessage) storage.Session {
 	session := storage.Session{
 		ID:            sessionID,
@@ -466,6 +479,7 @@ func extractCodexSession(sessionID, rawPath, workspace string, messages []*codex
 	return session
 }
 
+// extractCodexHighSignal extracts high-signal content preview from Codex messages with user request focus.
 func extractCodexHighSignal(messages []*codexjsonl.ReadMessage, limit int) []string {
 	var signals []string
 
@@ -492,6 +506,7 @@ func extractCodexHighSignal(messages []*codexjsonl.ReadMessage, limit int) []str
 	return signals
 }
 
+// scanCodexSessions scans and captures multiple Codex sessions with workspace matching and batch processing.
 func scanCodexSessions(ctx context.Context, rc *skillmain.RunContext, in Input, sessionStore *sessions.Store) error {
 	files, err := codexjsonl.ListSessionFiles(in.CodexHome)
 	if err != nil {
@@ -563,6 +578,7 @@ func scanCodexSessions(ctx context.Context, rc *skillmain.RunContext, in Input, 
 	return skillout.Emit(rc, command, output)
 }
 
+// resolveWorkspaceCandidates generates workspace path candidates with symlink resolution and normalization.
 func resolveWorkspaceCandidates(path string) []string {
 	cleaned := filepath.Clean(path)
 	if cleaned == "" {
@@ -576,6 +592,7 @@ func resolveWorkspaceCandidates(path string) []string {
 	return candidates
 }
 
+// matchesCodexWorkspace determines if a Codex session matches the target workspace using path and repository URL comparison.
 func matchesCodexWorkspace(meta codexjsonl.SessionMetadata, workspacePaths []string, repoURL string) bool {
 	if meta.CWD != "" {
 		cleaned := filepath.Clean(meta.CWD)
@@ -596,6 +613,7 @@ func matchesCodexWorkspace(meta codexjsonl.SessionMetadata, workspacePaths []str
 	return false
 }
 
+// gitRemoteURL retrieves the git remote URL for a workspace with timeout and error handling.
 func gitRemoteURL(ctx context.Context, workspace string) string {
 	if strings.TrimSpace(workspace) == "" {
 		return ""
@@ -614,6 +632,7 @@ func gitRemoteURL(ctx context.Context, workspace string) string {
 	return strings.TrimSpace(string(out))
 }
 
+// normalizeGitURL normalizes git URLs by removing protocols, .git suffix, and converting SSH to HTTPS format.
 func normalizeGitURL(url string) string {
 	url = strings.TrimSpace(url)
 	if url == "" {

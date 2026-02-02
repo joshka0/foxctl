@@ -80,6 +80,14 @@ func DefaultDSPyAdapterConfig() DSPyAdapterConfig {
 }
 
 // NewDSPyAdapter creates a new DSPy adapter.
+//
+// Index:
+// - Purpose: Initialize a DSPy-backed AgentEngine with tool registry
+// - Flow: ensure factory → create LLM → init adapter → initialize agent
+// - SideEffects: reads LLM provider config; initializes dspy-go agent
+// - FailureModes: missing API key, LLM creation failures, agent init errors
+// - Related: createLLM, DSPyAdapter.initializeAgent
+// - Keywords: dspy_adapter, llm_provider, tool_registry, react_agent, engine
 func NewDSPyAdapter(cfg DSPyAdapterConfig) (*DSPyAdapter, error) {
 	// Ensure LLM factory is initialized
 	llms.EnsureFactory()
@@ -132,6 +140,14 @@ func createLLM(cfg DSPyAdapterConfig) (core.LLM, error) {
 }
 
 // initializeAgent creates and initializes the dspy-go agent.
+//
+// Index:
+// - Purpose: Construct and configure the underlying ReAct agent
+// - Flow: resolve iterations/timeout → build signature → initialize agent → store reference
+// - SideEffects: initializes dspy-go agent
+// - FailureModes: signature initialization errors
+// - Related: NewDSPyAdapter, react.NewReActAgent
+// - Keywords: initialize_agent, react_agent, signature, max_iterations, timeout
 func (a *DSPyAdapter) initializeAgent() error {
 	maxIterations := a.config.MaxIterations
 	if maxIterations <= 0 {
@@ -194,6 +210,14 @@ func (a *DSPyAdapter) RegisterFuncTool(name, description string, schema models.I
 }
 
 // Run implements AgentEngine.
+//
+// Index:
+// - Purpose: Execute a DSPy ReAct turn and map results to EngineOutput
+// - Flow: apply timeout → build prompt → execute agent → handle errors → build output
+// - SideEffects: executes dspy-go agent; may invoke tools
+// - FailureModes: context cancellation, agent execution errors
+// - Related: DSPyAdapter.buildPrompt, DSPyAdapter.initializeAgent
+// - Keywords: dspy_run, react_agent, stop_reason, timeout, engine_output
 func (a *DSPyAdapter) Run(ctx context.Context, input EngineInput) (EngineOutput, error) {
 	// Apply timeout if specified
 	timeout := a.config.Timeout

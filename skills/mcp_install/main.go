@@ -29,6 +29,7 @@ const command = "mcp/install"
 
 var logger = zerolog.New(os.Stderr).With().Timestamp().Str("skill", command).Logger()
 
+// input defines the skill input parameters for MCP server installation with multiple connection modes.
 type input struct {
 	ServerCmd string `json:"server_cmd"`
 
@@ -51,6 +52,7 @@ func main() {
 	}
 }
 
+// runMain is the main entry point with bootstrap and error handling for MCP installation.
 func runMain() error {
 	ctx := context.Background()
 	rc, err := skillmain.Bootstrap(ctx, os.Stdout)
@@ -81,6 +83,16 @@ func runMain() error {
 	return nil
 }
 
+// run orchestrates MCP server installation with client creation, tool discovery, and skill generation.
+//
+// Index:
+// - Purpose: Install MCP server configurations by discovering tools and generating agentctl skills
+// - Flow: validate input → create MCP client → initialize connection → list tools → generate skills → emit results
+// - SideEffects: creates skill directories; generates wrapper scripts; writes skill manifests; validates paths
+// - FailureModes: missing server configuration, MCP client failures, tool discovery errors, file system errors
+// - Observability: emits installation results, tool counts, generated paths, and comprehensive error tracking
+// - Related: generateSkill, parseInput, mcputil.NewClient, mcputil.Initialize
+// - Keywords: mcp/install, mcp_server, skill_generation, tool_discovery, bridge_client
 func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	var mcpClient *client.Client
 	var err error
@@ -158,6 +170,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	})
 }
 
+// generateSkill creates an agentctl skill wrapper for an MCP tool with script generation and manifest creation.
 func generateSkill(baseDir string, tool mcp.Tool, in input) error {
 	// Sanitize tool name to prevent path traversal
 	sanitized := filepath.Base(tool.Name)
@@ -328,6 +341,7 @@ func generateSkill(baseDir string, tool mcp.Tool, in input) error {
 	return nil
 }
 
+// parseInput validates and processes input parameters with bridge binary validation and defaults.
 func parseInput(r io.Reader) (input, error) {
 	var in input
 

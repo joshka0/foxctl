@@ -5,11 +5,14 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/memoryutil"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillerr"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
+	"github.com/jkatigb/agentctl/internal/indexing/symbol"
 	"github.com/jkatigb/agentctl/internal/indexing/embedding"
 	"github.com/jkatigb/agentctl/internal/indexing/semantic"
 )
@@ -149,6 +152,14 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	}
 	defer store.Close()
 
+	var memoryStore memoryutil.Store
+	if ms, memErr := memoryutil.OpenFromConfig(ctx, rc.Config); memErr != nil {
+		log.Warn().Err(memErr).Msg("failed to open memory store for embedding updates")
+	} else {
+		memoryStore = ms
+		defer memoryStore.Close()
+	}
+
 	// Set up timeout
 	deadline := time.Now().Add(time.Duration(in.MaxDuration) * time.Second)
 	ctx, cancel := context.WithDeadline(ctx, deadline)
@@ -258,6 +269,22 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 					output.LastError = err.Error()
 					output.Errors++
 					continue
+				}
+				if memoryStore != nil {
+					workspaceID := strings.TrimSpace(job.WorkspaceID)
+					filePath := strings.TrimSpace(job.FilePath)
+					symbolName := strings.TrimSpace(job.SymbolName)
+					if workspaceID == "" || filePath == "" || symbolName == "" {
+						log.Warn().
+							Str("job_id", job.ID).
+							Str("symbol_id", job.SymbolID).
+							Msg("skipping embedding update due to missing workspace/file/symbol")
+					} else {
+						entryName := symbol.EntryName(workspaceID, filePath, symbolName)
+						if err := memoryStore.UpdateEmbedding(ctx, entryName, workspaceID, embed); err != nil {
+							log.Warn().Err(err).Str("job_id", job.ID).Str("symbol_id", job.SymbolID).Msg("failed to update symbol embedding")
+						}
+					}
 				}
 				log.Info().Str("job_id", job.ID).Str("status", "completed").Str("model", model).Msg("job completed")
 			}

@@ -148,6 +148,14 @@ func (s *WFQScheduler) Enqueue(job *Job) error {
 }
 
 // Start begins the scheduler workers.
+//
+// Index:
+// - Purpose: Start worker pool and WFQ dispatch loop
+// - Flow: spawn workers → start scheduler loop → return
+// - SideEffects: starts goroutines
+// - FailureModes: none (best-effort start)
+// - Related: WFQScheduler.schedulerLoop, WFQScheduler.worker
+// - Keywords: wfq_start, workers, scheduler_loop
 func (s *WFQScheduler) Start(ctx context.Context) {
 	s.mu.Lock()
 	if s.running {
@@ -182,6 +190,14 @@ func (s *WFQScheduler) Stop() {
 }
 
 // schedulerLoop continuously dispatches jobs to workers.
+//
+// Index:
+// - Purpose: Dispatch jobs based on virtual finish time
+// - Flow: tick → select next job → send to worker queue
+// - SideEffects: sends jobs to work channel
+// - FailureModes: none (drops if scheduler stopped)
+// - Related: WFQScheduler.dispatchNext
+// - Keywords: wfq_dispatch, virtual_time, priority_queue
 func (s *WFQScheduler) schedulerLoop(ctx context.Context) {
 	ticker := time.NewTicker(10 * time.Millisecond)
 	defer ticker.Stop()
@@ -199,6 +215,14 @@ func (s *WFQScheduler) schedulerLoop(ctx context.Context) {
 }
 
 // dispatchNext sends the next job with smallest virtual finish time to workers.
+//
+// Index:
+// - Purpose: Select next job and enqueue for execution
+// - Flow: pop heap → update virtual times → send to work channel
+// - SideEffects: updates queue state; sends job to workers
+// - FailureModes: none
+// - Related: WFQScheduler.schedulerLoop
+// - Keywords: dispatch_next, virtual_finish, namespace_queue
 func (s *WFQScheduler) dispatchNext() {
 	s.mu.Lock()
 	defer s.mu.Unlock()

@@ -487,6 +487,14 @@ func (s *SQLiteStore) GetNeighbors(ctx context.Context, workspace, nodeID string
 }
 
 // UpsertNodes bulk inserts or updates nodes.
+//
+// Index:
+// - Purpose: Persist node batches in a single transaction
+// - Flow: begin tx → prepare statement → upsert rows → commit
+// - SideEffects: database transaction; node table writes
+// - FailureModes: tx errors, statement errors, execution errors
+// - Related: Node, SQLiteStore.UpsertEdges
+// - Keywords: graph_nodes, upsert, transaction, workspace_id
 func (s *SQLiteStore) UpsertNodes(ctx context.Context, nodes []Node) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -540,6 +548,14 @@ func (s *SQLiteStore) UpsertNodes(ctx context.Context, nodes []Node) error {
 }
 
 // UpsertEdges bulk inserts or updates edges.
+//
+// Index:
+// - Purpose: Persist edge batches in a single transaction
+// - Flow: begin tx → prepare statement → upsert rows → commit
+// - SideEffects: database transaction; edge table writes
+// - FailureModes: tx errors, statement errors, execution errors
+// - Related: Edge, SQLiteStore.UpsertNodes
+// - Keywords: graph_edges, upsert, transaction, workspace_id
 func (s *SQLiteStore) UpsertEdges(ctx context.Context, edges []Edge) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -732,6 +748,14 @@ func (s *SQLiteStore) GetAllNodes(ctx context.Context, workspace string) ([]Node
 }
 
 // BulkUpdatePageRank updates PageRank for multiple nodes efficiently.
+//
+// Index:
+// - Purpose: Update PageRank scores for a workspace in a single transaction
+// - Flow: begin tx → prepare statement → apply rank updates → commit
+// - SideEffects: database transaction; pagerank updates
+// - FailureModes: tx errors, statement errors, execution errors
+// - Related: SQLiteStore.UpsertNodes
+// - Keywords: pagerank, bulk_update, transaction, workspace_id
 func (s *SQLiteStore) BulkUpdatePageRank(ctx context.Context, workspace string, ranks map[string]float64) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {

@@ -21,7 +21,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/storage/tasks"
 )
 
-// Input defines the skill input parameters.
+// Input defines the skill input parameters for session restoration with workspace and trigger options.
 type Input struct {
 	Trigger             string `json:"trigger"`                        // "compact", "resume", "startup"
 	Workspace           string `json:"workspace"`                      // Project path
@@ -32,7 +32,7 @@ type Input struct {
 	CheckPending        bool   `json:"check_pending,omitempty"`        // If true, only restore if pending_restore_at is set
 }
 
-// SessionSnapshot represents the captured session state (must match session_save).
+// SessionSnapshot represents the captured session state (must match session_save) with comprehensive context.
 type SessionSnapshot struct {
 	SnapshotID   string            `json:"snapshot_id"`
 	SessionID    string            `json:"session_id,omitempty"`
@@ -48,7 +48,7 @@ type SessionSnapshot struct {
 	Metadata     map[string]string `json:"metadata,omitempty"`
 }
 
-// PlanInfo represents a simplified plan for the snapshot.
+// PlanInfo represents a simplified plan for the snapshot with file metadata and linkage.
 type PlanInfo struct {
 	FilePath    string   `json:"file_path"`
 	FileName    string   `json:"file_name"`
@@ -59,7 +59,7 @@ type PlanInfo struct {
 	ModTime     string   `json:"mod_time,omitempty"`
 }
 
-// TaskInfo represents a simplified task.
+// TaskInfo represents a simplified task with status and notes for snapshot storage.
 type TaskInfo struct {
 	ID          string `json:"id"`
 	Title       string `json:"title"`
@@ -69,7 +69,7 @@ type TaskInfo struct {
 	Gotchas     string `json:"gotchas,omitempty"`
 }
 
-// HookOutput is the Claude Code hook output format.
+// HookOutput is the Claude Code hook output format with decision and context injection.
 type HookOutput struct {
 	Decision string            `json:"decision"` // "approve", "block", "none"
 	Reason   string            `json:"reason,omitempty"`
@@ -77,14 +77,14 @@ type HookOutput struct {
 	Env      map[string]string `json:"env,omitempty"`     // Environment variables
 }
 
-// SemanticSearchResult represents results from a key question search.
+// SemanticSearchResult represents results from a key question search with formatted output.
 type SemanticSearchResult struct {
 	Question string   `json:"question"`
 	Results  []string `json:"results"` // Tree-formatted file paths with context
 }
 
 // SimilarContextWindow represents a similar past context window found via embedding search.
-// Used for searching CURRENT session's context windows.
+// Used for searching CURRENT session's context windows with similarity scoring.
 type SimilarContextWindow struct {
 	WindowID    string    `json:"window_id"`    // UUID for direct lookup
 	SessionID   string    `json:"session_id"`   // Parent session
@@ -96,7 +96,7 @@ type SimilarContextWindow struct {
 }
 
 // SimilarSession represents a similar past session found via embedding search.
-// Used for searching OTHER sessions' summaries.
+// Used for searching OTHER sessions' summaries with accomplishment tracking.
 type SimilarSession struct {
 	SessionID    string    `json:"session_id"`
 	Summary      string    `json:"summary"`
@@ -106,13 +106,13 @@ type SimilarSession struct {
 	EndedAt      time.Time `json:"ended_at,omitempty"`
 }
 
-// MemoryResult represents a relevant memory entry.
+// MemoryResult represents a relevant memory entry with type and summary information.
 type MemoryResult struct {
 	Type    string `json:"type"`    // gotcha, decision, user_pref, time_sink
 	Summary string `json:"summary"` // The memory content
 }
 
-// AnchorInfo represents a session anchor (epic/goal).
+// AnchorInfo represents a session anchor (epic/goal) with prompt and learning tracking.
 type AnchorInfo struct {
 	AnchorID        string   `json:"anchor_id"`
 	MainPrompt      string   `json:"main_prompt"`
@@ -120,7 +120,7 @@ type AnchorInfo struct {
 	Learnings       []string `json:"recent_learnings,omitempty"`
 }
 
-// Output defines the skill output.
+// Output defines the skill output with comprehensive restoration data and context injection.
 type Output struct {
 	HookOutput         HookOutput             `json:"hook_output"`
 	SnapshotID         string                 `json:"snapshot_id,omitempty"`
@@ -135,10 +135,22 @@ type Output struct {
 
 const command = "session/restore"
 
+// main is the skill entry point for session/restore with context reconstruction capabilities.
 func main() {
+	config.LoadDotEnv()
 	skillmain.Main(command, run)
 }
 
+// run orchestrates session restoration with semantic search, memory retrieval, and context injection.
+//
+// Index:
+// - Purpose: Restore session state after compaction with semantic search, memory retrieval, and comprehensive context injection
+// - Flow: validate input → open stores → find snapshot → search for context → format restoration → emit results
+// - SideEffects: reads memory and session stores; performs semantic searches; injects context; clears pending restore flags
+// - FailureModes: missing stores, invalid snapshots, search failures, context formatting errors
+// - Observability: emits restoration context, search results, memory data, and comprehensive session state
+// - Related: runSemanticSearches, searchRelevantMemories, formatContextWithSearch, searchSimilarSessions
+// - Keywords: session/restore, context_restoration, semantic_search, memory_retrieval, session_continuity
 func run(ctx context.Context, rc *skillmain.RunContext, input Input) error {
 	// Default workspace
 	input.Workspace = workspaceutil.Resolve(input.Workspace, "", rc.Workspace)

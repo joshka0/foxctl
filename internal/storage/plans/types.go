@@ -1,5 +1,3 @@
-// Package plans provides types and utilities for parsing and managing
-// Claude Code plan files stored in ~/.claude/plans/.
 package plans
 
 import (

@@ -1,4 +1,3 @@
-// Package obs provides LLM token and cost tracking for observability.
 package obs
 
 import (

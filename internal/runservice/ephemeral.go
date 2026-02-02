@@ -22,6 +22,14 @@ import (
 //   - Cache writes are skipped (ephemeral results not persisted)
 //   - Trajectory capture is skipped
 //   - Job store is never opened
+//
+// Index:
+// - Purpose: Execute a skill without job persistence or history
+// - Flow: try cache → run runner directly → handle stdout/stderr → emit envelope
+// - SideEffects: executes skill; may write envelope to stdout
+// - FailureModes: execution errors, envelope write errors
+// - Related: Executor.TryServeCache, Executor.handleEphemeralSuccess
+// - Keywords: execute_ephemeral, cache, runner, envelope
 func (e *Executor) ExecuteEphemeral(input []byte) error {
 	// Step 1: Try cache for deduplication (read-only)
 	if done, err := e.TryServeCache(input); err != nil {

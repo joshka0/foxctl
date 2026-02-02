@@ -1,5 +1,3 @@
-// Package companion provides a CompanionActor that bridges the actor mailbox system
-// with the RLM companion service for long-lived agent conversations.
 package companion
 
 import (
@@ -51,6 +49,14 @@ type CompanionActorConfig struct {
 }
 
 // NewCompanionActor creates a new companion actor.
+// NewCompanionActor creates a companion actor with mailbox configuration.
+//
+// Index:
+// - Purpose: Build a companion actor backed by a companion service
+// - Flow: validate config → build actor config → return actor
+// - FailureModes: missing namespace/service/board store
+// - Related: CompanionActor.OnMailReceived, CompanionActor.Start
+// - Keywords: companion_actor, mailbox, namespace, service, board_store
 func NewCompanionActor(cfg CompanionActorConfig) (*CompanionActor, error) {
 	if cfg.Namespace == "" {
 		return nil, fmt.Errorf("namespace is required")
@@ -147,6 +153,15 @@ type MailboxMessage struct {
 
 // OnMailReceived handles incoming mailbox messages.
 // It routes the message through the companion service and posts the response.
+// OnMailReceived handles mailbox messages and replies with companion output.
+//
+// Index:
+// - Purpose: Process mailbox messages and respond via blackboard
+// - Flow: parse payload → build chat request → call service → post response
+// - SideEffects: calls companion service; posts to blackboard
+// - FailureModes: parse errors, chat errors, response post errors
+// - Related: Service.Chat, CompanionActor.postResponse
+// - Keywords: companion_mail, mailbox, chat_request, blackboard, response
 func (a *CompanionActor) OnMailReceived(ctx context.Context, msg *actor.Message) error {
 	a.SetState(actor.StateProcessing)
 	defer a.SetState(actor.StateIdle)

@@ -1,4 +1,3 @@
-// Package companion provides the Executor for managing long-lived companion agents.
 package companion
 
 import (
@@ -43,6 +42,14 @@ type ExecutorConfig struct {
 }
 
 // NewExecutor creates a new companion executor.
+// NewExecutor initializes a companion executor with shared stores.
+//
+// Index:
+// - Purpose: Create a companion executor for managing companion actors
+// - Flow: validate stores → allocate maps → return executor
+// - FailureModes: missing context store, missing board store
+// - Related: Executor.Spawn, Executor.Stop
+// - Keywords: companion_executor, context_store, board_store, actors
 func NewExecutor(cfg ExecutorConfig) (*Executor, error) {
 	if cfg.ContextStore == nil {
 		return nil, fmt.Errorf("context store is required")
@@ -85,6 +92,15 @@ type SpawnConfig struct {
 
 // Spawn creates and starts a new companion actor.
 // The actor will listen on namespace "companion:<name>".
+// Spawn creates and starts a companion actor for the given config.
+//
+// Index:
+// - Purpose: Create and start a companion actor and service
+// - Flow: validate name → build service config → create service → create actor → start actor → store
+// - SideEffects: starts actor; allocates service
+// - FailureModes: invalid name, actor creation errors, start errors
+// - Related: NewCompanionActor, NewService, CompanionActor.Start
+// - Keywords: companion_spawn, namespace, actor, service, workspace_id
 func (e *Executor) Spawn(ctx context.Context, cfg SpawnConfig) (*CompanionActor, error) {
 	name := strings.TrimSpace(cfg.Name)
 	if name == "" {
@@ -185,6 +201,15 @@ func (e *Executor) List() []*CompanionActor {
 }
 
 // Stop stops a companion actor by namespace.
+// Stop terminates a companion actor and removes it from the registry.
+//
+// Index:
+// - Purpose: Stop a running companion actor by namespace
+// - Flow: lookup actor → stop actor → remove actor/service → return
+// - SideEffects: stops actor; logs event
+// - FailureModes: actor not found, stop errors
+// - Related: Executor.Spawn, CompanionActor.Stop
+// - Keywords: companion_stop, namespace, actor, service, remove
 func (e *Executor) Stop(ctx context.Context, namespace string) error {
 	e.mu.Lock()
 	defer e.mu.Unlock()

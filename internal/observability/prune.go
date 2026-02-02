@@ -52,6 +52,14 @@ func DefaultPruneOptions() PruneOptions {
 
 // Prune removes old events from the observability directory.
 // Events are pruned based on their timestamp field, not file modification time.
+//
+// Index:
+// - Purpose: Remove events older than a cutoff across NDJSON files
+// - Flow: validate obs dir → scan event files → prune each file → aggregate results
+// - SideEffects: reads event files; rewrites NDJSON files; deletes temp files
+// - FailureModes: directory read errors, prune failures, context cancellation
+// - Related: pruneEventFile, PruneBySize
+// - Keywords: prune, ndjson, events_dir, older_than, dry_run
 func Prune(ctx context.Context, obsDir string, opts PruneOptions) (*PruneResult, error) {
 	if obsDir == "" {
 		return nil, fmt.Errorf("observability directory not specified")
@@ -101,6 +109,14 @@ func Prune(ctx context.Context, obsDir string, opts PruneOptions) (*PruneResult,
 
 // pruneEventFile removes old events from a single NDJSON file.
 // Returns (eventsPruned, eventsKept, bytesFreed, error).
+//
+// Index:
+// - Purpose: Filter NDJSON events by timestamp and rewrite a single file
+// - Flow: scan file → parse timestamps → retain/prune → rewrite temp → rename
+// - SideEffects: reads file; writes temp file; renames files; deletes temp file
+// - FailureModes: scan errors, JSON parse errors, write/rename errors, context cancellation
+// - Related: Prune
+// - Keywords: prune_file, ndjson, cutoff, rename, temp_file
 func pruneEventFile(ctx context.Context, filePath string, cutoff time.Time, dryRun bool) (int64, int64, int64, error) {
 	// Read the file
 	f, err := os.Open(filePath)
@@ -199,6 +215,14 @@ func pruneEventFile(ctx context.Context, filePath string, cutoff time.Time, dryR
 
 // PruneBySize removes the oldest events until total size is under maxBytes.
 // This is useful for keeping disk usage bounded regardless of event age.
+//
+// Index:
+// - Purpose: Prune events by total size regardless of age
+// - Flow: scan files → build event index → sort oldest first → rewrite affected files
+// - SideEffects: reads event files; rewrites NDJSON files; deletes temp files
+// - FailureModes: directory read errors, file I/O errors, JSON parse errors, context cancellation
+// - Related: Prune, pruneEventFile
+// - Keywords: prune_size, ndjson, max_bytes, rewrite, dry_run
 func PruneBySize(ctx context.Context, obsDir string, maxBytes int64, dryRun bool) (*PruneResult, error) {
 	if obsDir == "" {
 		return nil, fmt.Errorf("observability directory not specified")

@@ -114,6 +114,7 @@ func (b BatchVerificationResult) Summary() string {
 	return ""
 }
 
+// CoVeMode controls the Chain of Verification execution mode.
 type CoVeMode string
 
 const (

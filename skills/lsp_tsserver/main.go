@@ -1,5 +1,4 @@
-// Package main implements the lsp/tsserver skill.
-// It provides TypeScript/JavaScript language server operations via typescript-language-server.
+// Package main implements the lsp/tsserver skill for TypeScript/JavaScript language server operations via typescript-language-server.
 //
 // Unlike gopls which has a convenient CLI mode, typescript-language-server uses
 // JSON-RPC over stdio, requiring us to manage the LSP lifecycle.
@@ -33,7 +32,7 @@ const command = "lsp/tsserver"
 
 var allowedOps = []string{"definition", "references", "symbols", "workspace_symbol"}
 
-// input defines the skill input parameters for TypeScript/JavaScript language server operations.
+// input defines the skill input parameters for TypeScript/JavaScript language server operations with location and filtering.
 type input struct {
 	Operation  string `json:"operation"`
 	File       string `json:"file"`
@@ -44,7 +43,7 @@ type input struct {
 	Timeout    int    `json:"timeout"` // timeout in seconds, defaults to 30
 }
 
-// Symbol represents a code symbol with name, kind, and location information for TypeScript/JavaScript code.
+// Symbol represents a code symbol with name, kind, and location information for TypeScript/JavaScript code analysis.
 type Symbol struct {
 	Name   string `json:"name"`
 	Kind   string `json:"kind"`
@@ -53,14 +52,14 @@ type Symbol struct {
 	Column int    `json:"column"`
 }
 
-// Reference represents a symbol reference with file location for TypeScript/JavaScript code.
+// Reference represents a symbol reference with file location for TypeScript/JavaScript code navigation.
 type Reference struct {
 	File   string `json:"file"`
 	Line   int    `json:"line"`
 	Column int    `json:"column"`
 }
 
-// Definition represents a symbol definition with location and optional text for TypeScript/JavaScript code.
+// Definition represents a symbol definition with location and optional text for TypeScript/JavaScript code lookup.
 type Definition struct {
 	File   string `json:"file"`
 	Line   int    `json:"line"`
@@ -84,7 +83,7 @@ type LSPClient struct {
 	rpc *jsonrpc.Client
 }
 
-// main is the skill entry point for lsp/tsserver.
+// main is the skill entry point for lsp/tsserver with comprehensive TypeScript/JavaScript language server capabilities.
 func main() {
 	skillmain.Main(command, run)
 }
@@ -452,10 +451,6 @@ func (c *LSPClient) documentSymbols(ctx context.Context, workspace string, in in
 }
 
 // workspaceSymbols searches workspace symbols using LSP workspace/symbol request with query matching.
-//
-// Index:
-//   - LSPClient
-//   - workspaceSymbols
 func (c *LSPClient) workspaceSymbols(ctx context.Context, workspace string, in input) ([]Symbol, error) {
 	if in.Query == "" {
 		return nil, skillerr.Arg("workspace_symbol requires query")

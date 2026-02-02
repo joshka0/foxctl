@@ -51,6 +51,14 @@ type Options struct {
 }
 
 // Run executes the skill and returns stdout/stderr bytes.
+//
+// Index:
+// - Purpose: Execute an exec-distributed skill with policy checks
+// - Flow: validate manifest → setup temp workdir → run command → capture stdout/stderr → cleanup
+// - SideEffects: spawns subprocess; creates temp directory
+// - FailureModes: manifest mismatch, process errors, timeout, IO errors
+// - Related: Runner.Options, bufferPool
+// - Keywords: exec_runner, subprocess, stdout, stderr, timeout
 func (r Runner) Run(ctx context.Context, input []byte) ([]byte, []byte, error) {
 	if r.Manifest.Distribution.Type != "exec" {
 		return nil, nil, fmt.Errorf("runner: manifest distribution %s not exec", r.Manifest.Distribution.Type)

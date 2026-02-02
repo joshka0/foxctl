@@ -1,6 +1,3 @@
-// Package trajectory implements SQLite-backed persistence for trajectory capture.
-// Trajectories record user requests, agent runs, tool calls, and review outcomes
-// for training/evaluation of dspy-go agents.
 package trajectory
 
 import (

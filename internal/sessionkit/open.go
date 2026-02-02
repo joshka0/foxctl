@@ -1,6 +1,3 @@
-// Package sessionkit provides shared utilities for session-related skills.
-// It consolidates common patterns like store opening, session ID resolution,
-// and JSONL parsing to eliminate duplication across session_* skills.
 package sessionkit
 
 import (

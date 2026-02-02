@@ -53,6 +53,7 @@ func newTSResolver(repoRoot string) *tsResolver {
 	}
 }
 
+// ModuleRoot resolves the TypeScript module root for a file path.
 func (r *tsResolver) ModuleRoot(filePath string) (string, error) {
 	absPath, err := r.absPath(filePath)
 	if err != nil {
@@ -76,6 +77,7 @@ func (r *tsResolver) ModuleRoot(filePath string) (string, error) {
 	return root, nil
 }
 
+// ResolveImportPackage resolves a TypeScript import to a repoindex package ID.
 func (r *tsResolver) ResolveImportPackage(filePath, importPath string) string {
 	if importPath == "" {
 		return ""
@@ -281,6 +283,7 @@ func (c *tsConfigResolved) merge(other *tsConfigResolved) {
 	}
 }
 
+// ResolveImport resolves a TypeScript import path to a concrete file path.
 func (c *tsConfigResolved) ResolveImport(importPath string) string {
 	if importPath == "" {
 		return ""

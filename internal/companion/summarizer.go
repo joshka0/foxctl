@@ -28,6 +28,13 @@ type LLMSummarizerConfig struct {
 }
 
 // NewLLMSummarizer creates a new LLM-based summarizer.
+// NewLLMSummarizer creates an LLM-based summarizer.
+//
+// Index:
+// - Purpose: Build a summarizer configured with provider credentials
+// - Flow: store config → return summarizer
+// - Related: LLMSummarizer.SummarizeDay, LLMSummarizer.DistillHistory
+// - Keywords: llm_summarizer, provider, model, api_key, summaries
 func NewLLMSummarizer(cfg LLMSummarizerConfig) *LLMSummarizer {
 	return &LLMSummarizer{
 		provider: cfg.Provider,
@@ -38,6 +45,15 @@ func NewLLMSummarizer(cfg LLMSummarizerConfig) *LLMSummarizer {
 }
 
 // SummarizeDay creates a day summary from conversation turns.
+// SummarizeDay creates a day summary from conversation turns.
+//
+// Index:
+// - Purpose: Summarize a day's conversation into structured metadata
+// - Flow: format turns → prompt LLM → parse JSON → build summary
+// - SideEffects: LLM API call
+// - FailureModes: missing turns, engine errors, parse errors (falls back to raw)
+// - Related: LLMSummarizer.DistillHistory
+// - Keywords: summarize_day, day_summary, mood, topics, key_moments
 func (s *LLMSummarizer) SummarizeDay(ctx context.Context, turns []ConversationTurn) (*DaySummary, error) {
 	if len(turns) == 0 {
 		return nil, fmt.Errorf("no turns to summarize")
@@ -139,6 +155,15 @@ Keep the summary warm and personal - this is for the companion to remember the c
 }
 
 // DistillHistory compresses multiple day summaries into distilled history.
+// DistillHistory compresses multiple summaries into long-term memory.
+//
+// Index:
+// - Purpose: Distill recent summaries into relationship history
+// - Flow: format summaries → prompt LLM → parse JSON → build distilled history
+// - SideEffects: LLM API call
+// - FailureModes: engine errors, parse errors (returns existing/empty)
+// - Related: LLMSummarizer.SummarizeDay
+// - Keywords: distill_history, relationship_note, recurring_topics, user_preferences, shared_memories
 func (s *LLMSummarizer) DistillHistory(ctx context.Context, existing *DistilledHistory, summaries []DaySummary) (*DistilledHistory, error) {
 	if len(summaries) == 0 {
 		return existing, nil

@@ -1,5 +1,4 @@
-// Package main implements the optimize/feedback skill.
-// This skill collects and analyzes human feedback for optimization.
+// Package main implements the optimize/feedback skill for collecting and analyzing human feedback for agent optimization.
 package main
 
 import (
@@ -17,6 +16,7 @@ import (
 
 const command = "optimize/feedback"
 
+// input defines the skill input parameters for feedback collection and analysis with action selection.
 type input struct {
 	Action       string `json:"action"`
 	Workspace    string `json:"workspace"`
@@ -26,10 +26,21 @@ type input struct {
 	Role         string `json:"role"`
 }
 
+// main is the skill entry point for optimize/feedback with comprehensive feedback management capabilities.
 func main() {
 	skillmain.Main(command, run)
 }
 
+// run orchestrates feedback operations with workspace resolution, store management, and action dispatch.
+//
+// Index:
+// - Purpose: Collect and analyze human feedback for agent optimization with rating and comment tracking
+// - Flow: resolve workspace → open trajectory store → create feedback collector → dispatch action (add/stats) → emit results
+// - SideEffects: writes feedback records to trajectory store; reads feedback statistics; manages optimization data
+// - FailureModes: missing trajectory IDs, invalid ratings, store access failures, workspace resolution errors
+// - Observability: emits feedback records, statistics, rating distributions, and comprehensive feedback analytics
+// - Related: addFeedback, getFeedbackStats, optimization.NewFeedbackCollector
+// - Keywords: optimize/feedback, human_feedback, optimization, rating_collection, feedback_analytics
 func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	// Resolve workspace
 	workspace := in.Workspace
@@ -64,6 +75,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	}
 }
 
+// addFeedback records human feedback for a trajectory with validation and timestamp tracking.
 func addFeedback(ctx context.Context, rc *skillmain.RunContext, collector *optimization.FeedbackCollector, workspace string, in input) error {
 	if in.TrajectoryID == "" {
 		return skillerr.Arg("trajectory_id is required for add action")
@@ -95,6 +107,7 @@ func addFeedback(ctx context.Context, rc *skillmain.RunContext, collector *optim
 	})
 }
 
+// getFeedbackStats retrieves and analyzes feedback statistics for a workspace and role with rating distribution.
 func getFeedbackStats(ctx context.Context, rc *skillmain.RunContext, collector *optimization.FeedbackCollector, workspace string, in input) error {
 	if in.Role == "" {
 		return skillerr.Arg("role is required for stats action")

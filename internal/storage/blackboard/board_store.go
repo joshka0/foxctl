@@ -1,6 +1,3 @@
-// Package blackboard implements SQLite-backed persistence for workspace coordination.
-// This file contains the BoardStore for BoardMessage and FileReservation types
-// per mailbox_blackboard.md spec.
 package blackboard
 
 import (

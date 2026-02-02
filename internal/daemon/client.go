@@ -17,6 +17,12 @@ type Client struct {
 }
 
 // NewClient creates a new daemon client.
+//
+// Index:
+// - Purpose: Initialize a daemon client with resolved socket path
+// - Flow: resolve socket path → return client
+// - Related: SocketPath, Client.call
+// - Keywords: daemon_client, socket_path, unix_socket
 func NewClient() *Client {
 	return &Client{
 		socketPath: SocketPath(),
@@ -295,6 +301,14 @@ func (c *Client) connect() (net.Conn, error) {
 }
 
 // call makes a request to the daemon and returns the response.
+//
+// Index:
+// - Purpose: Send a JSON request over the daemon socket and decode response
+// - Flow: connect → set deadline → encode request → decode response → return
+// - SideEffects: unix socket I/O
+// - FailureModes: connect errors, encode/decode errors, deadline errors
+// - Related: Client.connect, Client.EnsureRunningContext
+// - Keywords: daemon_call, json_rpc, socket, request, response
 func (c *Client) call(method string, params any) (*Response, error) {
 	conn, err := c.connect()
 	if err != nil {
@@ -372,6 +386,14 @@ func (c *Client) EnsureRunning() error {
 
 // EnsureRunningContext starts the daemon if it's not already running, with context support.
 // It returns nil if the daemon is now running, or an error if it couldn't be started.
+//
+// Index:
+// - Purpose: Ensure a daemon process is running before issuing requests
+// - Flow: check context → probe socket → daemonize → poll until ready
+// - SideEffects: starts daemon process; polls socket
+// - FailureModes: context timeout, daemonize errors, socket not ready
+// - Related: Client.isRunningWithTimeout, Daemonize
+// - Keywords: ensure_running, daemonize, socket, poll_interval, timeout
 func (c *Client) EnsureRunningContext(ctx context.Context) error {
 	// Check context before starting
 	if ctx.Err() != nil {

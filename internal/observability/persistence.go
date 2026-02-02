@@ -1,33 +1,4 @@
 //nolint:forbidigo // This IS the logging infrastructure - zerolog/stderr usage is intentional
-// Package observability provides wide event observability with configurable persistence.
-//
-// Persistence Options:
-//
-// Events can be persisted in multiple ways:
-//   - NDJSON file (default): Fast append-only writes to $AGENTCTL_OBS_DIR/events/wide_events.ndjson
-//   - SQLite: Direct writes to $AGENTCTL_OBS_DIR/events.db for queryability
-//   - Hybrid: NDJSON + background SQLite sync (recommended for high-value events)
-//
-// The hybrid approach provides the best of both worlds:
-//   - Fast NDJSON writes on the hot path (no blocking)
-//   - Background goroutine syncs NDJSON to SQLite for querying
-//   - Full replay capability from NDJSON files
-//   - Rich querying via SQLite
-//
-// Usage:
-//
-//	// Use default persistence (NDJSON only)
-//	obs.Emit(ctx, event.Success(duration))
-//
-//	// Enable SQL persistence for high-value events
-//	obs.Emit(ctx, event.
-//	    WithPersistence(obs.PersistSQL).
-//	    Success(duration))
-//
-//	// Write to a custom NDJSON file
-//	obs.Emit(ctx, event.
-//	    WithPersistenceFile("skill_runs").
-//	    Success(duration))
 package observability
 
 import (
@@ -131,6 +102,14 @@ type EventStore struct {
 }
 
 // OpenEventStore opens or creates the events SQLite database.
+//
+// Index:
+// - Purpose: Initialize SQLite-backed persistence for wide events
+// - Flow: resolve db path → open database → ensure schema → return store
+// - SideEffects: opens database connection; creates tables/indexes
+// - FailureModes: database open errors, schema creation errors
+// - Related: createEventSchema, EventStore.Insert
+// - Keywords: events_db, sqlite, wide_events, schema, persistence
 func OpenEventStore(ctx context.Context, obsDir string) (*EventStore, error) {
 	dbPath := filepath.Join(obsDir, "events.db")
 
@@ -189,6 +168,14 @@ func createEventSchema(ctx context.Context, db *sql.DB) error {
 }
 
 // Insert writes a WideEvent to the database.
+//
+// Index:
+// - Purpose: Persist a WideEvent row to SQLite
+// - Flow: marshal data → lock store → validate state → insert/replace row
+// - SideEffects: database writes
+// - FailureModes: marshal errors, database execution errors
+// - Related: EventStore.Close, OpenEventStore
+// - Keywords: wide_events, insert, sqlite, span_id, trace_id
 func (s *EventStore) Insert(ctx context.Context, event *WideEvent) error {
 	if s == nil || event == nil {
 		return nil
@@ -286,6 +273,14 @@ func NewSyncer(store *EventStore, config SyncConfig) *Syncer {
 }
 
 // Start begins background synchronization.
+//
+// Index:
+// - Purpose: Start the NDJSON-to-SQLite sync worker
+// - Flow: acquire lock → guard running → init channels → launch goroutine
+// - SideEffects: spawns goroutine
+// - FailureModes: no-op when already running
+// - Related: Syncer.Stop, Syncer.run
+// - Keywords: syncer, ndjson, sqlite, background, goroutine
 func (s *Syncer) Start() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -302,6 +297,14 @@ func (s *Syncer) Start() {
 }
 
 // Stop stops the background syncer and waits for it to finish.
+//
+// Index:
+// - Purpose: Stop the NDJSON-to-SQLite sync worker gracefully
+// - Flow: acquire lock → close stop channel → wait for done → reset running flag
+// - SideEffects: stops goroutine; blocks until completion
+// - FailureModes: no-op when not running
+// - Related: Syncer.Start, Syncer.run
+// - Keywords: syncer, stop, ndjson, sqlite, goroutine
 func (s *Syncer) Stop() {
 	s.mu.Lock()
 	if !s.running {
@@ -319,6 +322,17 @@ func (s *Syncer) Stop() {
 	s.mu.Unlock()
 }
 
+// run drives periodic synchronization until stopped.
+//
+// Index:
+// - Purpose: Periodically sync NDJSON events into SQLite
+// - Flow: start ticker → on tick syncOnce → on stop syncOnce and exit
+// - SideEffects: reads NDJSON files; writes to SQLite; logs warnings
+// - Concurrency: runs in background goroutine
+// - FailureModes: sync failures logged; stop signal triggers final sync
+// - Observability: emits zerolog warnings for sync failures
+// - Related: Syncer.syncOnce, Syncer.syncFile
+// - Keywords: syncer, ticker, ndjson, sqlite, sync_once
 func (s *Syncer) run() {
 	defer close(s.doneCh)
 
@@ -337,6 +351,16 @@ func (s *Syncer) run() {
 	}
 }
 
+// syncOnce performs a single NDJSON-to-SQLite sync cycle.
+//
+// Index:
+// - Purpose: Sync a batch of wide events from NDJSON to SQLite
+// - Flow: create timeout ctx → resolve obs dir → sync file → log results
+// - SideEffects: reads NDJSON file; writes SQLite; logs warnings
+// - FailureModes: missing obs dir, sync file errors
+// - Observability: emits zerolog warnings and debug logs
+// - Related: Syncer.syncFile, getObsDir
+// - Keywords: sync_once, ndjson, sqlite, batch_size, timeout
 func (s *Syncer) syncOnce() {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -359,6 +383,16 @@ func (s *Syncer) syncOnce() {
 	s.lastSync = time.Now()
 }
 
+// syncFile streams NDJSON events from a file into SQLite.
+//
+// Index:
+// - Purpose: Read NDJSON events incrementally and persist them to SQLite
+// - Flow: open file → seek offset → decode entries → insert rows → update offset
+// - SideEffects: reads file; writes SQLite; logs warnings
+// - FailureModes: file open/seek errors, decode errors, insert errors
+// - Observability: emits zerolog warnings on decode/insert failures
+// - Related: EventStore.Insert, Syncer.syncOnce
+// - Keywords: ndjson, sqlite, offset, decode, insert
 func (s *Syncer) syncFile(ctx context.Context, path string) (int, error) {
 	f, err := os.Open(path)
 	if err != nil {
@@ -436,6 +470,14 @@ var (
 
 // InitPersistence initializes the global persistence layer.
 // Call this once at startup if you want SQLite persistence.
+//
+// Index:
+// - Purpose: Initialize global SQLite persistence and background sync
+// - Flow: resolve obs dir → open event store → start syncer → cache globals
+// - SideEffects: opens database; starts goroutine
+// - FailureModes: missing obs dir (no-op), database open errors
+// - Related: OpenEventStore, NewSyncer, ClosePersistence
+// - Keywords: init_persistence, sqlite, syncer, observability_dir, wide_events
 func InitPersistence(ctx context.Context) error {
 	var initErr error
 	globalInit.Do(func() {
@@ -460,6 +502,14 @@ func InitPersistence(ctx context.Context) error {
 
 // ClosePersistence shuts down the global persistence layer.
 // After calling this, InitPersistence can be called again to re-initialize.
+//
+// Index:
+// - Purpose: Stop global persistence and release resources
+// - Flow: lock globals → stop syncer → close store → reset init guard
+// - SideEffects: stops goroutine; closes database
+// - FailureModes: close errors returned
+// - Related: InitPersistence, EventStore.Close
+// - Keywords: close_persistence, syncer, sqlite, observability_dir
 func ClosePersistence() error {
 	globalMu.Lock()
 	defer globalMu.Unlock()
@@ -481,6 +531,15 @@ func ClosePersistence() error {
 }
 
 // persistEvent handles the persistence based on event configuration.
+//
+// Index:
+// - Purpose: Persist a WideEvent according to configured mode
+// - Flow: resolve mode → select destination → write NDJSON and/or SQLite
+// - SideEffects: NDJSON writes; SQLite inserts; logs warnings
+// - FailureModes: insert/write errors logged; nil event returns early
+// - Observability: emits zerolog warnings for persistence failures
+// - Related: WriteEvent, EventStore.Insert
+// - Keywords: wide_events, persist_mode, ndjson, sqlite, hybrid
 func persistEvent(ctx context.Context, event *WideEvent, config *persistConfig) {
 	if event == nil {
 		return

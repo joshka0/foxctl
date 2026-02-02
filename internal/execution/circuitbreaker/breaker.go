@@ -69,6 +69,14 @@ func New(name string, config Config) *Breaker {
 
 // Execute runs the given function through the circuit breaker.
 // Returns ErrCircuitOpen if the breaker is open.
+//
+// Index:
+// - Purpose: Guard a function with circuit breaker state transitions
+// - Flow: check Allow → execute fn → record success/failure → return
+// - SideEffects: updates breaker state counters
+// - FailureModes: ErrCircuitOpen, fn errors
+// - Related: Breaker.Allow, Breaker.RecordFailure
+// - Keywords: circuit_breaker, execute, state_machine
 func (b *Breaker) Execute(ctx context.Context, fn func(context.Context) error) error {
 	if !b.Allow() {
 		return ErrCircuitOpen

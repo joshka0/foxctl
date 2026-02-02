@@ -17,6 +17,15 @@ import (
 	"github.com/jkatigb/agentctl/internal/storage/mailbox"
 )
 
+// handleAsk processes agent.ask messages and sends agent.reply results.
+//
+// Index:
+// - Purpose: Execute an ask request via companion service or DSPy and reply
+// - Flow: parse payload → resolve conversation → execute engine → build reply → send mailbox response
+// - SideEffects: LLM calls; memory reads/writes; mailbox send
+// - FailureModes: payload decode errors, execution errors, reply marshal/send errors
+// - Related: handleCmd, handleConsoleAsk
+// - Keywords: agent.ask, agent.reply, mailbox, companion, dspy
 func handleAsk(ctx context.Context, logger zerolog.Logger, msg agent.Message, dspyAgent agents.Agent, companionSvc *companion.Service, mailboxStore mailbox.Store, policy agent.Policy, optCtx *OptimizationContext, companionMemory *companion.ConversationMemory, agentID string) error {
 	// 1. Parse payload envelope
 	var env struct {
@@ -181,6 +190,15 @@ func handleAsk(ctx context.Context, logger zerolog.Logger, msg agent.Message, ds
 	return mailboxStore.Send(ctx, replyMsg)
 }
 
+// handleCmd processes agent.cmd messages and executes requested actions.
+//
+// Index:
+// - Purpose: Execute command requests via companion service or DSPy
+// - Flow: parse payload → build prompt → inject hints → execute engine → record patterns
+// - SideEffects: LLM calls; optimization pattern recording
+// - FailureModes: payload decode errors, unknown actions, execution errors
+// - Related: handleAsk, handleConsoleCmd
+// - Keywords: agent.cmd, run_turn, do_work, companion, dspy
 func handleCmd(ctx context.Context, logger zerolog.Logger, msg agent.Message, dspyAgent agents.Agent, companionSvc *companion.Service, policy agent.Policy, optCtx *OptimizationContext, agentID string) error {
 	var env struct {
 		Data agent.CmdData `json:"data"`
@@ -297,6 +315,14 @@ func backoffDuration(attempt int) time.Duration {
 
 // handleConsoleAsk handles console.ask messages from interactive console sessions.
 // It executes the prompt via companion service or DSPy and sends console.reply with the response.
+//
+// Index:
+// - Purpose: Execute console ask prompts with cancellation support
+// - Flow: parse payload → setup cancel context → execute engine → build reply → send mailbox response
+// - SideEffects: LLM calls; memory reads/writes; mailbox send; cancel registry updates
+// - FailureModes: payload decode errors, execution errors, reply marshal/send errors
+// - Related: handleConsoleCmd, handleAsk
+// - Keywords: console.ask, console.reply, cancellation, companion, dspy
 func handleConsoleAsk(ctx context.Context, logger zerolog.Logger, msg agent.Message, dspyAgent agents.Agent, companionSvc *companion.Service, mailboxStore mailbox.Store, policy agent.Policy, optCtx *OptimizationContext, cancelCtx *CancelContext, companionMemory *companion.ConversationMemory, agentID string) error {
 	// 1. Parse payload envelope
 	var env struct {
@@ -489,6 +515,14 @@ func handleConsoleAsk(ctx context.Context, logger zerolog.Logger, msg agent.Mess
 }
 
 // handleConsoleCmd handles console.cmd messages (cancel, pause, etc.).
+//
+// Index:
+// - Purpose: Apply console command actions such as cancel
+// - Flow: parse payload → select action → cancel request if applicable
+// - SideEffects: cancels in-flight requests; logs warnings
+// - FailureModes: payload decode errors, missing cancel target
+// - Related: CancelContext.Cancel, handleConsoleAsk
+// - Keywords: console.cmd, cancel, pause, resume, cancel_context
 func handleConsoleCmd(_ context.Context, logger zerolog.Logger, msg agent.Message, cancelCtx *CancelContext) error {
 	var env struct {
 		Data agent.ConsoleCmdData `json:"data"`
@@ -563,6 +597,12 @@ type CancelContext struct {
 }
 
 // NewCancelContext creates a new CancelContext.
+//
+// Index:
+// - Purpose: Initialize cancellation registry for console requests
+// - Flow: allocate map → return context
+// - Related: CancelContext.Register, CancelContext.Cancel
+// - Keywords: cancel_context, console, cancel_registry
 func NewCancelContext() *CancelContext {
 	return &CancelContext{
 		cancels: make(map[string]context.CancelFunc),

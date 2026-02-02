@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -15,7 +16,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/storage/sqliteutil"
 )
 
-const schemaVersion = 1
+const schemaVersion = 2
 
 // ErrNotFound indicates the requested node or edge was not found.
 var ErrNotFound = errors.New("not found")
@@ -25,6 +26,7 @@ type Store struct {
 	db       *sql.DB
 	path     string
 	repoRoot string
+	repoKey  string
 	close    func() error
 }
 
@@ -34,6 +36,14 @@ type Store struct {
 // (renamed) to the new path. Open ensures the schema is migrated and configures
 // recommended PRAGMA options before returning a Store representing the opened
 // repository index, or an error if opening, migration, or setup fails.
+//
+// Index:
+// - Purpose: Open a repoindex store for a repo root with schema migration and pragmas
+// - Flow: resolve repo root → compute key → migrate legacy path → open db → set pragmas
+// - SideEffects: filesystem access; SQLite schema migrations; PRAGMA writes
+// - FailureModes: path resolution errors, open/migrate errors, pragma errors
+// - Related: repoKey, migrate, sqliteutil.OpenDBShared
+// - Keywords: repoindex, repo_key, sqlite, schema_version, OpenDBShared, PRAGMA, repo_root
 func Open(ctx context.Context, storageRoot, repoRoot string) (*Store, error) {
 	if repoRoot == "" {
 		return nil, fmt.Errorf("repoindex: repo root is required")
@@ -74,7 +84,7 @@ func Open(ctx context.Context, storageRoot, repoRoot string) (*Store, error) {
 		return nil, fmt.Errorf("repoindex: set temp_store: %w", err)
 	}
 
-	return &Store{db: db, path: dbPath, repoRoot: absoluteRoot, close: closeFn}, nil
+	return &Store{db: db, path: dbPath, repoRoot: absoluteRoot, repoKey: key, close: closeFn}, nil
 }
 
 // Close closes the underlying database.
@@ -162,6 +172,14 @@ func (s *Store) GetMeta(ctx context.Context) (IndexMeta, error) {
 }
 
 // ReplaceAll replaces the entire graph with the provided nodes and edges.
+//
+// Index:
+// - Purpose: Replace the full repo graph atomically in SQLite
+// - Flow: begin tx → delete existing nodes/edges → insert nodes → insert edges → commit
+// - SideEffects: SQLite writes within a transaction
+// - FailureModes: insert failures, transaction errors
+// - Related: Store.SetMeta, Store.Stats
+// - Keywords: repoindex, ReplaceAll, nodes, edges, transaction, sqlite
 func (s *Store) ReplaceAll(ctx context.Context, nodes []Node, edges []Edge) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -180,9 +198,9 @@ func (s *Store) ReplaceAll(ctx context.Context, nodes []Node, edges []Edge) erro
 
 	stmtNode, err := tx.PrepareContext(ctx, `
 		INSERT INTO nodes (
-			id, kind, pkg, file, name, signature, span_start, span_end,
-			exported, doc, summary, hash, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			id, repo_key, kind, pkg, file, name, signature, span_start, span_end,
+			exported, doc, summary, meta_json, hash, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`)
 	if err != nil {
 		return err
@@ -196,7 +214,9 @@ func (s *Store) ReplaceAll(ctx context.Context, nodes []Node, edges []Edge) erro
 			updated = now
 		}
 		if _, err := stmtNode.ExecContext(ctx,
-			node.ID, string(node.Kind),
+			node.ID,
+			s.repoKey,
+			string(node.Kind),
 			nullIfEmpty(node.Pkg),
 			nullIfEmpty(node.File),
 			nullIfEmpty(node.Name),
@@ -206,6 +226,7 @@ func (s *Store) ReplaceAll(ctx context.Context, nodes []Node, edges []Edge) erro
 			boolToInt(node.Exported),
 			nullIfEmpty(node.Doc),
 			nullIfEmpty(node.Summary),
+			nullIfEmpty(string(node.Meta)),
 			nullIfEmpty(node.Hash),
 			updated.Unix(),
 		); err != nil {
@@ -214,11 +235,11 @@ func (s *Store) ReplaceAll(ctx context.Context, nodes []Node, edges []Edge) erro
 	}
 
 	stmtEdge, err := tx.PrepareContext(ctx, `
-		INSERT INTO edges (src, dst, type, weight, meta)
-		VALUES (?, ?, ?, ?, ?)
-		ON CONFLICT(src, dst, type) DO UPDATE SET
+		INSERT INTO edges (src, dst, type, weight, meta_json, repo_key)
+		VALUES (?, ?, ?, ?, ?, ?)
+		ON CONFLICT(src, dst, type, repo_key) DO UPDATE SET
 			weight=excluded.weight,
-			meta=excluded.meta
+			meta_json=excluded.meta_json
 	`)
 	if err != nil {
 		return err
@@ -226,7 +247,7 @@ func (s *Store) ReplaceAll(ctx context.Context, nodes []Node, edges []Edge) erro
 	defer stmtEdge.Close()
 
 	for _, edge := range edges {
-		if _, err := stmtEdge.ExecContext(ctx, edge.Src, edge.Dst, string(edge.Type), edge.Weight, nullIfEmpty(string(edge.Meta))); err != nil {
+		if _, err := stmtEdge.ExecContext(ctx, edge.Src, edge.Dst, string(edge.Type), edge.Weight, nullIfEmpty(string(edge.Meta)), s.repoKey); err != nil {
 			return err
 		}
 	}
@@ -242,13 +263,13 @@ func (s *Store) SearchFTS(ctx context.Context, query string, limit int) ([]Node,
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT nodes.id, nodes.kind, nodes.pkg, nodes.file, nodes.name, nodes.signature,
 		       nodes.span_start, nodes.span_end, nodes.exported, nodes.doc, nodes.summary,
-		       nodes.hash, nodes.updated_at
+		       nodes.meta_json, nodes.hash, nodes.updated_at
 		FROM node_fts
 		JOIN nodes ON nodes.rowid = node_fts.rowid
-		WHERE node_fts MATCH ?
+		WHERE node_fts MATCH ? AND nodes.repo_key = ?
 		ORDER BY bm25(node_fts)
 		LIMIT ?
-	`, query, limit)
+	`, query, s.repoKey, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -260,10 +281,10 @@ func (s *Store) SearchFTS(ctx context.Context, query string, limit int) ([]Node,
 // GetNode returns a node by ID.
 func (s *Store) GetNode(ctx context.Context, id string) (Node, error) {
 	row := s.db.QueryRowContext(ctx, `
-		SELECT id, kind, pkg, file, name, signature, span_start, span_end, exported, doc, summary, hash, updated_at
+		SELECT id, kind, pkg, file, name, signature, span_start, span_end, exported, doc, summary, meta_json, hash, updated_at
 		FROM nodes
-		WHERE id = ?
-	`, id)
+		WHERE id = ? AND repo_key = ?
+	`, id, s.repoKey)
 
 	node, err := scanNode(row)
 	if err != nil {
@@ -282,10 +303,11 @@ func (s *Store) GetNodes(ctx context.Context, ids []string) ([]Node, error) {
 	}
 	clause, args := buildInClause(ids)
 	query := fmt.Sprintf(`
-		SELECT id, kind, pkg, file, name, signature, span_start, span_end, exported, doc, summary, hash, updated_at
+		SELECT id, kind, pkg, file, name, signature, span_start, span_end, exported, doc, summary, meta_json, hash, updated_at
 		FROM nodes
-		WHERE id IN (%s)
+		WHERE id IN (%s) AND repo_key = ?
 	`, clause)
+	args = append(args, s.repoKey)
 	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
@@ -297,26 +319,26 @@ func (s *Store) GetNodes(ctx context.Context, ids []string) ([]Node, error) {
 
 // GetOutgoingEdges returns outgoing edges for a node.
 func (s *Store) GetOutgoingEdges(ctx context.Context, srcID string, types []EdgeType, limit int) ([]Edge, error) {
-	return getEdges(ctx, s.db, "src", srcID, types, limit)
+	return getEdges(ctx, s.db, s.repoKey, "src", srcID, types, limit)
 }
 
 // GetIncomingEdges returns incoming edges for a node.
 func (s *Store) GetIncomingEdges(ctx context.Context, dstID string, types []EdgeType, limit int) ([]Edge, error) {
-	return getEdges(ctx, s.db, "dst", dstID, types, limit)
+	return getEdges(ctx, s.db, s.repoKey, "dst", dstID, types, limit)
 }
 
 // Stats returns aggregate node and edge counts.
 func (s *Store) Stats(ctx context.Context) (Stats, error) {
 	stats := Stats{NodesByKind: make(map[NodeKind]int)}
 
-	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM nodes`).Scan(&stats.NodesTotal); err != nil {
+	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM nodes WHERE repo_key = ?`, s.repoKey).Scan(&stats.NodesTotal); err != nil {
 		return Stats{}, err
 	}
-	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM edges`).Scan(&stats.EdgesTotal); err != nil {
+	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM edges WHERE repo_key = ?`, s.repoKey).Scan(&stats.EdgesTotal); err != nil {
 		return Stats{}, err
 	}
 
-	rows, err := s.db.QueryContext(ctx, `SELECT kind, COUNT(*) FROM nodes GROUP BY kind`)
+	rows, err := s.db.QueryContext(ctx, `SELECT kind, COUNT(*) FROM nodes WHERE repo_key = ? GROUP BY kind`, s.repoKey)
 	if err != nil {
 		return Stats{}, err
 	}
@@ -337,6 +359,25 @@ func (s *Store) Stats(ctx context.Context) (Stats, error) {
 }
 
 func migrate(ctx context.Context, db *sql.DB) error {
+	if _, err := db.ExecContext(ctx, `
+		CREATE TABLE IF NOT EXISTS index_meta (
+			key TEXT PRIMARY KEY,
+			value TEXT NOT NULL
+		);
+	`); err != nil {
+		return err
+	}
+	currentVersion, err := loadSchemaVersion(ctx, db)
+	if err != nil {
+		return err
+	}
+	if currentVersion != 0 && currentVersion != schemaVersion {
+		log.Printf("repoindex: schema version change %d -> %d; resetting index", currentVersion, schemaVersion)
+		if err := resetSchema(ctx, db); err != nil {
+			return err
+		}
+	}
+
 	schema := `
 	PRAGMA foreign_keys = ON;
 
@@ -347,6 +388,7 @@ func migrate(ctx context.Context, db *sql.DB) error {
 
 	CREATE TABLE IF NOT EXISTS nodes (
 		id TEXT PRIMARY KEY,
+		repo_key TEXT NOT NULL,
 		kind TEXT NOT NULL,
 		pkg TEXT,
 		file TEXT,
@@ -357,16 +399,20 @@ func migrate(ctx context.Context, db *sql.DB) error {
 		exported INTEGER NOT NULL DEFAULT 0,
 		doc TEXT,
 		summary TEXT,
+		meta_json TEXT,
 		hash TEXT,
-		updated_at INTEGER NOT NULL
+		updated_at INTEGER NOT NULL,
+		CHECK (substr(id, 1, length(repo_key)+2) = repo_key || '::')
 	);
 
 	CREATE INDEX IF NOT EXISTS idx_nodes_kind ON nodes(kind);
 	CREATE INDEX IF NOT EXISTS idx_nodes_pkg ON nodes(pkg);
 	CREATE INDEX IF NOT EXISTS idx_nodes_file ON nodes(file);
 	CREATE INDEX IF NOT EXISTS idx_nodes_name ON nodes(name);
+	CREATE INDEX IF NOT EXISTS idx_nodes_repo_key ON nodes(repo_key);
 
 	CREATE VIRTUAL TABLE IF NOT EXISTS node_fts USING fts5(
+		id UNINDEXED,
 		name,
 		signature,
 		doc,
@@ -376,20 +422,20 @@ func migrate(ctx context.Context, db *sql.DB) error {
 	);
 
 	CREATE TRIGGER IF NOT EXISTS nodes_ai AFTER INSERT ON nodes BEGIN
-		INSERT INTO node_fts(rowid, name, signature, doc, summary)
-		VALUES (new.rowid, new.name, new.signature, new.doc, new.summary);
+		INSERT INTO node_fts(rowid, id, name, signature, doc, summary)
+		VALUES (new.rowid, new.id, new.name, new.signature, new.doc, new.summary);
 	END;
 
 	CREATE TRIGGER IF NOT EXISTS nodes_ad AFTER DELETE ON nodes BEGIN
-		INSERT INTO node_fts(node_fts, rowid, name, signature, doc, summary)
-		VALUES('delete', old.rowid, old.name, old.signature, old.doc, old.summary);
+		INSERT INTO node_fts(node_fts, rowid, id, name, signature, doc, summary)
+		VALUES('delete', old.rowid, old.id, old.name, old.signature, old.doc, old.summary);
 	END;
 
 	CREATE TRIGGER IF NOT EXISTS nodes_au AFTER UPDATE ON nodes BEGIN
-		INSERT INTO node_fts(node_fts, rowid, name, signature, doc, summary)
-		VALUES('delete', old.rowid, old.name, old.signature, old.doc, old.summary);
-		INSERT INTO node_fts(rowid, name, signature, doc, summary)
-		VALUES (new.rowid, new.name, new.signature, new.doc, new.summary);
+		INSERT INTO node_fts(node_fts, rowid, id, name, signature, doc, summary)
+		VALUES('delete', old.rowid, old.id, old.name, old.signature, old.doc, old.summary);
+		INSERT INTO node_fts(rowid, id, name, signature, doc, summary)
+		VALUES (new.rowid, new.id, new.name, new.signature, new.doc, new.summary);
 	END;
 
 	CREATE TABLE IF NOT EXISTS edges (
@@ -397,15 +443,18 @@ func migrate(ctx context.Context, db *sql.DB) error {
 		dst TEXT NOT NULL,
 		type TEXT NOT NULL,
 		weight REAL NOT NULL,
-		meta TEXT,
-		PRIMARY KEY (src, dst, type),
+		meta_json TEXT,
+		repo_key TEXT NOT NULL,
+		PRIMARY KEY (src, dst, type, repo_key),
+		CHECK (substr(src, 1, length(repo_key)+2) = repo_key || '::'),
+		CHECK (substr(dst, 1, length(repo_key)+2) = repo_key || '::'),
 		FOREIGN KEY (src) REFERENCES nodes(id) ON DELETE CASCADE,
 		FOREIGN KEY (dst) REFERENCES nodes(id) ON DELETE CASCADE
 	);
 
-	CREATE INDEX IF NOT EXISTS idx_edges_src_type ON edges(src, type);
-	CREATE INDEX IF NOT EXISTS idx_edges_dst_type ON edges(dst, type);
-	CREATE INDEX IF NOT EXISTS idx_edges_type ON edges(type);
+	CREATE INDEX IF NOT EXISTS idx_edges_src_type ON edges(src, type, repo_key);
+	CREATE INDEX IF NOT EXISTS idx_edges_dst_type ON edges(dst, type, repo_key);
+	CREATE INDEX IF NOT EXISTS idx_edges_type ON edges(type, repo_key);
 
 	CREATE TABLE IF NOT EXISTS pkg_state (
 		pkg TEXT PRIMARY KEY,
@@ -414,7 +463,44 @@ func migrate(ctx context.Context, db *sql.DB) error {
 	);
 	`
 
-	_, err := db.ExecContext(ctx, schema)
+	if _, err := db.ExecContext(ctx, schema); err != nil {
+		return err
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO index_meta (key, value) VALUES ('schema_version', ?)
+		ON CONFLICT(key) DO UPDATE SET value=excluded.value
+	`, fmt.Sprintf("%d", schemaVersion)); err != nil {
+		return err
+	}
+	return nil
+}
+
+func loadSchemaVersion(ctx context.Context, db *sql.DB) (int, error) {
+	row := db.QueryRowContext(ctx, `SELECT value FROM index_meta WHERE key = 'schema_version'`)
+	var value string
+	if err := row.Scan(&value); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return 0, nil
+		}
+		return 0, err
+	}
+	parsed, err := parseInt(value)
+	if err != nil {
+		return 0, nil
+	}
+	return parsed, nil
+}
+
+func resetSchema(ctx context.Context, db *sql.DB) error {
+	_, err := db.ExecContext(ctx, `
+		DROP TRIGGER IF EXISTS nodes_ai;
+		DROP TRIGGER IF EXISTS nodes_ad;
+		DROP TRIGGER IF EXISTS nodes_au;
+		DROP TABLE IF EXISTS node_fts;
+		DROP TABLE IF EXISTS edges;
+		DROP TABLE IF EXISTS nodes;
+		DROP TABLE IF EXISTS pkg_state;
+	`)
 	return err
 }
 
@@ -530,6 +616,7 @@ func scanNode(scanner interface{ Scan(...any) error }) (Node, error) {
 		exported  int
 		doc       sql.NullString
 		summary   sql.NullString
+		meta      sql.NullString
 		hash      sql.NullString
 		updated   int64
 	)
@@ -545,6 +632,7 @@ func scanNode(scanner interface{ Scan(...any) error }) (Node, error) {
 		&exported,
 		&doc,
 		&summary,
+		&meta,
 		&hash,
 		&updated,
 	); err != nil {
@@ -575,6 +663,9 @@ func scanNode(scanner interface{ Scan(...any) error }) (Node, error) {
 	if summary.Valid {
 		node.Summary = summary.String
 	}
+	if meta.Valid {
+		node.Meta = []byte(meta.String)
+	}
 	if hash.Valid {
 		node.Hash = hash.String
 	}
@@ -583,7 +674,7 @@ func scanNode(scanner interface{ Scan(...any) error }) (Node, error) {
 	return node, nil
 }
 
-func getEdges(ctx context.Context, db *sql.DB, field, id string, types []EdgeType, limit int) ([]Edge, error) {
+func getEdges(ctx context.Context, db *sql.DB, repoKey, field, id string, types []EdgeType, limit int) ([]Edge, error) {
 	if limit <= 0 {
 		limit = 100
 	}
@@ -592,18 +683,18 @@ func getEdges(ctx context.Context, db *sql.DB, field, id string, types []EdgeTyp
 		args  []any
 	)
 	if len(types) == 0 {
-		query = fmt.Sprintf(`SELECT src, dst, type, weight, meta FROM edges WHERE %s = ? LIMIT ?`, field)
-		args = []any{id, limit}
+		query = fmt.Sprintf(`SELECT src, dst, type, weight, meta_json FROM edges WHERE %s = ? AND repo_key = ? LIMIT ?`, field)
+		args = []any{id, repoKey, limit}
 	} else {
 		placeholders := make([]string, len(types))
-		args = make([]any, 0, len(types)+2)
+		args = make([]any, 0, len(types)+3)
 		args = append(args, id)
 		for i, edgeType := range types {
 			placeholders[i] = "?"
 			args = append(args, string(edgeType))
 		}
-		args = append(args, limit)
-		query = fmt.Sprintf(`SELECT src, dst, type, weight, meta FROM edges WHERE %s = ? AND type IN (%s) LIMIT ?`, field, strings.Join(placeholders, ","))
+		args = append(args, repoKey, limit)
+		query = fmt.Sprintf(`SELECT src, dst, type, weight, meta_json FROM edges WHERE %s = ? AND type IN (%s) AND repo_key = ? LIMIT ?`, field, strings.Join(placeholders, ","))
 	}
 
 	rows, err := db.QueryContext(ctx, query, args...)

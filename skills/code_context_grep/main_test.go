@@ -3,6 +3,7 @@ package main
 import (
 	"testing"
 
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/codeblocks"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -56,6 +57,12 @@ func TestDetectMode_LineAutoDetect_Both(t *testing.T) {
 	assert.Equal(t, ModeLine, result)
 }
 
+func TestDetectMode_LineAutoDetect_Path(t *testing.T) {
+	in := input{Path: "main.go", LineStart: 1}
+	result := detectMode(in)
+	assert.Equal(t, ModeLine, result)
+}
+
 func TestDetectMode_DefaultRipgrep(t *testing.T) {
 	in := input{Pattern: "func.*Test"}
 	result := detectMode(in)
@@ -69,6 +76,82 @@ func TestDetectMode_EmptyInput(t *testing.T) {
 }
 
 // Tests for parseASTGrepOutput helper
+
+func TestValidateForMode_RipgrepRequiresPattern(t *testing.T) {
+	err := validateForMode(input{}, ModeRipgrep)
+	assert.Error(t, err)
+}
+
+func TestValidateForMode_ASTRequiresPatternOrRule(t *testing.T) {
+	err := validateForMode(input{}, ModeASTGrep)
+	assert.Error(t, err)
+}
+
+func TestValidateForMode_LineRequiresFile(t *testing.T) {
+	err := validateForMode(input{LineStart: 1}, ModeLine)
+	assert.Error(t, err)
+}
+
+func TestValidateForMode_LineRequiresRange(t *testing.T) {
+	err := validateForMode(input{FilePath: "main.go"}, ModeLine)
+	assert.Error(t, err)
+}
+
+func TestValidateForMode_LineAllowsPath(t *testing.T) {
+	err := validateForMode(input{Path: "main.go", LineStart: 1}, ModeLine)
+	assert.NoError(t, err)
+}
+
+func TestParseExpandTarget(t *testing.T) {
+	tests := []struct {
+		input   string
+		want    codeblocks.Target
+		wantErr bool
+	}{
+		{input: "", want: codeblocks.TargetAny},
+		{input: "any", want: codeblocks.TargetAny},
+		{input: "block", want: codeblocks.TargetBlock},
+		{input: "function", want: codeblocks.TargetFunction},
+		{input: "class", want: codeblocks.TargetClass},
+		{input: "nope", want: codeblocks.TargetAny, wantErr: true},
+	}
+
+	for _, tt := range tests {
+		got, err := parseExpandTarget(tt.input)
+		if tt.wantErr {
+			assert.Error(t, err)
+			continue
+		}
+		assert.NoError(t, err)
+		assert.Equal(t, tt.want, got)
+	}
+}
+
+func TestParsePatternMode(t *testing.T) {
+	tests := []struct {
+		input     string
+		wantMode  string
+		wantFixed bool
+		wantErr   bool
+	}{
+		{input: "", wantMode: "regex", wantFixed: false},
+		{input: "regex", wantMode: "regex", wantFixed: false},
+		{input: "literal", wantMode: "literal", wantFixed: true},
+		{input: "fixed", wantMode: "literal", wantFixed: true},
+		{input: "nope", wantMode: "regex", wantFixed: false, wantErr: true},
+	}
+
+	for _, tt := range tests {
+		mode, fixed, err := parsePatternMode(tt.input)
+		if tt.wantErr {
+			assert.Error(t, err)
+			continue
+		}
+		assert.NoError(t, err)
+		assert.Equal(t, tt.wantMode, mode)
+		assert.Equal(t, tt.wantFixed, fixed)
+	}
+}
 
 func TestParseASTGrepOutput_Empty(t *testing.T) {
 	matches, err := parseASTGrepOutput([]byte{}, "/workspace", 100)
@@ -84,6 +167,7 @@ func TestParseASTGrepOutput_SingleMatch(t *testing.T) {
 	assert.Len(t, matches, 1)
 	assert.Equal(t, "main.go", matches[0].File)
 	assert.Equal(t, 10, matches[0].Line) // 0-indexed + 1
+	assert.Equal(t, 13, matches[0].EndLine)
 	assert.Equal(t, "func main() {}", matches[0].Text)
 }
 
@@ -96,6 +180,8 @@ func TestParseASTGrepOutput_MultipleMatches(t *testing.T) {
 	assert.Len(t, matches, 2)
 	assert.Equal(t, "main.go", matches[0].File)
 	assert.Equal(t, "util.go", matches[1].File)
+	assert.Equal(t, matches[0].Line, matches[0].EndLine)
+	assert.Equal(t, matches[1].Line, matches[1].EndLine)
 }
 
 func TestParseASTGrepOutput_MaxMatches(t *testing.T) {
@@ -140,13 +226,13 @@ func TestParseASTGrepOutput_RelativePath(t *testing.T) {
 // Tests for mergeOverlappingBlocks helper
 
 func TestMergeOverlappingBlocks_Empty(t *testing.T) {
-	result := mergeOverlappingBlocks(nil)
+	result := mergeOverlappingBlocks(nil, nil)
 	assert.Nil(t, result)
 }
 
 func TestMergeOverlappingBlocks_Single(t *testing.T) {
 	blocks := []Block{{StartLine: 1, EndLine: 10}}
-	result := mergeOverlappingBlocks(blocks)
+	result := mergeOverlappingBlocks(blocks, nil)
 	assert.Len(t, result, 1)
 	assert.Equal(t, 1, result[0].StartLine)
 	assert.Equal(t, 10, result[0].EndLine)
@@ -157,7 +243,7 @@ func TestMergeOverlappingBlocks_NoOverlap(t *testing.T) {
 		{StartLine: 1, EndLine: 10},
 		{StartLine: 20, EndLine: 30},
 	}
-	result := mergeOverlappingBlocks(blocks)
+	result := mergeOverlappingBlocks(blocks, nil)
 	assert.Len(t, result, 2)
 }
 
@@ -166,7 +252,7 @@ func TestMergeOverlappingBlocks_Overlapping(t *testing.T) {
 		{StartLine: 1, EndLine: 15},
 		{StartLine: 10, EndLine: 20},
 	}
-	result := mergeOverlappingBlocks(blocks)
+	result := mergeOverlappingBlocks(blocks, nil)
 	assert.Len(t, result, 1)
 	assert.Equal(t, 1, result[0].StartLine)
 	assert.Equal(t, 20, result[0].EndLine)
@@ -177,7 +263,7 @@ func TestMergeOverlappingBlocks_Adjacent(t *testing.T) {
 		{StartLine: 1, EndLine: 10},
 		{StartLine: 11, EndLine: 20},
 	}
-	result := mergeOverlappingBlocks(blocks)
+	result := mergeOverlappingBlocks(blocks, nil)
 	assert.Len(t, result, 1)
 	assert.Equal(t, 1, result[0].StartLine)
 	assert.Equal(t, 20, result[0].EndLine)
@@ -189,7 +275,7 @@ func TestMergeOverlappingBlocks_MultipleOverlaps(t *testing.T) {
 		{StartLine: 8, EndLine: 15},
 		{StartLine: 14, EndLine: 25},
 	}
-	result := mergeOverlappingBlocks(blocks)
+	result := mergeOverlappingBlocks(blocks, nil)
 	assert.Len(t, result, 1)
 	assert.Equal(t, 1, result[0].StartLine)
 	assert.Equal(t, 25, result[0].EndLine)
@@ -202,7 +288,7 @@ func TestMergeOverlappingBlocks_MixedOverlapAndSeparate(t *testing.T) {
 		{StartLine: 30, EndLine: 40},
 		{StartLine: 38, EndLine: 50},
 	}
-	result := mergeOverlappingBlocks(blocks)
+	result := mergeOverlappingBlocks(blocks, nil)
 	assert.Len(t, result, 2)
 	assert.Equal(t, 1, result[0].StartLine)
 	assert.Equal(t, 15, result[0].EndLine)
@@ -216,7 +302,7 @@ func TestMergeOverlappingBlocks_UnsortedInput(t *testing.T) {
 		{StartLine: 1, EndLine: 10},
 		{StartLine: 25, EndLine: 35},
 	}
-	result := mergeOverlappingBlocks(blocks)
+	result := mergeOverlappingBlocks(blocks, nil)
 	assert.Len(t, result, 2)
 	assert.Equal(t, 1, result[0].StartLine)
 	assert.Equal(t, 10, result[0].EndLine)
@@ -229,7 +315,7 @@ func TestMergeOverlappingBlocks_MergesMatchLines(t *testing.T) {
 		{StartLine: 1, EndLine: 10, MatchLines: []int{5}, MatchCount: 1},
 		{StartLine: 8, EndLine: 20, MatchLines: []int{12}, MatchCount: 1},
 	}
-	result := mergeOverlappingBlocks(blocks)
+	result := mergeOverlappingBlocks(blocks, nil)
 	assert.Len(t, result, 1)
 	assert.Equal(t, []int{5, 12}, result[0].MatchLines)
 	assert.Equal(t, 2, result[0].MatchCount)
@@ -240,13 +326,33 @@ func TestMergeOverlappingBlocks_ContainedBlock(t *testing.T) {
 		{StartLine: 1, EndLine: 50},
 		{StartLine: 10, EndLine: 20},
 	}
-	result := mergeOverlappingBlocks(blocks)
+	result := mergeOverlappingBlocks(blocks, nil)
 	assert.Len(t, result, 1)
 	assert.Equal(t, 1, result[0].StartLine)
 	assert.Equal(t, 50, result[0].EndLine)
 }
 
 // Tests for mode constants
+
+func TestMergeOverlappingBlocks_DifferentSymbols(t *testing.T) {
+	blocks := []Block{
+		{StartLine: 1, EndLine: 10, SymbolName: "alpha", SymbolKind: "function", HeaderLine: "func alpha()"},
+		{StartLine: 5, EndLine: 12, SymbolName: "beta", SymbolKind: "function", HeaderLine: "func beta()"},
+	}
+	result := mergeOverlappingBlocks(blocks, nil)
+	assert.Len(t, result, 2)
+}
+
+func TestMergeOverlappingBlocks_RebuildsSource(t *testing.T) {
+	lines := []string{"a", "b", "c", "d", "e"}
+	blocks := []Block{
+		{StartLine: 2, EndLine: 3, MatchLines: []int{2}},
+		{StartLine: 3, EndLine: 4, MatchLines: []int{3}},
+	}
+	result := mergeOverlappingBlocks(blocks, lines)
+	assert.Len(t, result, 1)
+	assert.Equal(t, "b\nc\nd", result[0].Source)
+}
 
 func TestModeConstants(t *testing.T) {
 	assert.Equal(t, Mode("ripgrep"), ModeRipgrep)
@@ -283,11 +389,41 @@ func TestInput_DefaultMaxBlockLines(t *testing.T) {
 	assert.Equal(t, 400, in.MaxBlockLines)
 }
 
+func TestInput_DefaultMaxBlocksPerFile(t *testing.T) {
+	in := input{}
+	// Default applied in run() when <= 0
+	if in.MaxBlocksPerFile <= 0 {
+		in.MaxBlocksPerFile = 5
+	}
+	assert.Equal(t, 5, in.MaxBlocksPerFile)
+}
+
+func TestInput_DefaultMaxBytesPerFile(t *testing.T) {
+	in := input{}
+	// Default applied in run() when <= 0
+	if in.MaxBytesPerFile <= 0 {
+		in.MaxBytesPerFile = 1_000_000
+	}
+	assert.Equal(t, 1_000_000, in.MaxBytesPerFile)
+}
+
+func TestInput_DefaultMaxDefinitionBlocks(t *testing.T) {
+	in := input{}
+	// Default applied in run() when <= 0
+	if in.MaxDefinitionBlocks <= 0 {
+		in.MaxDefinitionBlocks = 5
+	}
+	assert.Equal(t, 5, in.MaxDefinitionBlocks)
+}
+
 func TestInput_PreservesCustomValues(t *testing.T) {
 	in := input{
-		MaxMatches:    100,
-		MaxBlocks:     10,
-		MaxBlockLines: 200,
+		MaxMatches:          100,
+		MaxBlocks:           10,
+		MaxBlockLines:       200,
+		MaxBlocksPerFile:    3,
+		MaxBytesPerFile:     1234,
+		MaxDefinitionBlocks: 2,
 	}
 
 	// Only apply defaults if <= 0
@@ -300,10 +436,28 @@ func TestInput_PreservesCustomValues(t *testing.T) {
 	if in.MaxBlockLines <= 0 {
 		in.MaxBlockLines = 400
 	}
+	if in.MaxBlocksPerFile <= 0 {
+		in.MaxBlocksPerFile = 5
+	}
+	if in.MaxBlocksPerFile > in.MaxBlocks {
+		in.MaxBlocksPerFile = in.MaxBlocks
+	}
+	if in.MaxBytesPerFile <= 0 {
+		in.MaxBytesPerFile = 1_000_000
+	}
+	if in.MaxDefinitionBlocks <= 0 {
+		in.MaxDefinitionBlocks = 5
+	}
+	if in.MaxDefinitionBlocks > in.MaxBlocks {
+		in.MaxDefinitionBlocks = in.MaxBlocks
+	}
 
 	assert.Equal(t, 100, in.MaxMatches)
 	assert.Equal(t, 10, in.MaxBlocks)
 	assert.Equal(t, 200, in.MaxBlockLines)
+	assert.Equal(t, 3, in.MaxBlocksPerFile)
+	assert.Equal(t, 1234, in.MaxBytesPerFile)
+	assert.Equal(t, 2, in.MaxDefinitionBlocks)
 }
 
 // Tests for input structure

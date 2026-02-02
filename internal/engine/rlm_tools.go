@@ -26,6 +26,12 @@ type RLMToolExecutor struct {
 }
 
 // NewRLMToolExecutor creates a new RLM tool executor.
+//
+// Index:
+// - Purpose: Initialize RLM context tool execution with per-conversation state
+// - Flow: store context store and conversation ID → return executor
+// - Related: RLMToolExecutor.Execute, RLMToolDefs
+// - Keywords: rlm_context, tool_executor, conversation_id, context_store
 func NewRLMToolExecutor(store contextvar.Store, conversationID string) *RLMToolExecutor {
 	return &RLMToolExecutor{
 		store:          store,
@@ -57,6 +63,14 @@ func (e *RLMToolExecutor) QueryCount() int {
 }
 
 // Execute implements ToolExecutor.
+//
+// Index:
+// - Purpose: Dispatch RLM context tool calls by name
+// - Flow: switch on tool name → execute handler → return JSON output
+// - SideEffects: context store reads/writes; query count increments
+// - FailureModes: unknown tool, handler errors
+// - Related: executePut, executeQuery, executeList, executePersonalityAdjust
+// - Keywords: rlm_context_put, rlm_context_query, rlm_context_list, rlm_personality_adjust
 func (e *RLMToolExecutor) Execute(ctx context.Context, name string, args json.RawMessage) (string, error) {
 	switch name {
 	case "rlm_context_put":
@@ -78,6 +92,12 @@ func (e *RLMToolExecutor) List() []ToolDef {
 }
 
 // RLMToolDefs returns the tool definitions for RLM context operations.
+//
+// Index:
+// - Purpose: Describe available RLM context tools and schemas
+// - Flow: build tool definitions → return list
+// - Related: RLMToolExecutor.Execute
+// - Keywords: rlm_context_put, rlm_context_query, rlm_context_list, rlm_personality_adjust
 func RLMToolDefs() []ToolDef {
 	return []ToolDef{
 		{
@@ -231,6 +251,15 @@ type PersonalityProfile struct {
 	LearnedTraits []string               `json:"learned_traits"`
 }
 
+// executePut stores a context variable via rlm_context_put.
+//
+// Index:
+// - Purpose: Persist a context variable with scope and optional TTL
+// - Flow: parse input → map scope → build params → store → marshal result
+// - SideEffects: writes to context store
+// - FailureModes: invalid input, invalid scope, store errors
+// - Related: contextvar.Store.Put
+// - Keywords: rlm_context_put, scope, ttl_seconds, context_store, upsert
 func (e *RLMToolExecutor) executePut(ctx context.Context, args json.RawMessage) (string, error) {
 	var input ContextPutInput
 	if err := json.Unmarshal(args, &input); err != nil {
@@ -284,6 +313,15 @@ func (e *RLMToolExecutor) executePut(ctx context.Context, args json.RawMessage) 
 	return string(b), nil
 }
 
+// executeQuery retrieves context variables via rlm_context_query.
+//
+// Index:
+// - Purpose: Query context variables by key, pattern, or semantic search
+// - Flow: parse input → increment count → run semantic or store query → format result
+// - SideEffects: reads context store; increments access counts
+// - FailureModes: invalid input, store errors
+// - Related: executeSemanticQuery, contextvar.Store.Query
+// - Keywords: rlm_context_query, key_pattern, semantic_query, access_count, context_store
 func (e *RLMToolExecutor) executeQuery(ctx context.Context, args json.RawMessage) (string, error) {
 	var input ContextQueryInput
 	if err := json.Unmarshal(args, &input); err != nil {
@@ -368,6 +406,14 @@ func (e *RLMToolExecutor) executeQuery(ctx context.Context, args json.RawMessage
 
 // executeSemanticQuery searches named memories using semantic similarity.
 // Falls back to text search if embeddings are not available.
+//
+// Index:
+// - Purpose: Search companion memories by semantic similarity or text
+// - Flow: validate memory store → run vector search → fallback text search → format results
+// - SideEffects: reads memory store; may call embedding provider
+// - FailureModes: memory store errors, embedding errors
+// - Related: storage.MemoryStore.SearchSimilar, storage.MemoryStore.Search
+// - Keywords: semantic_query, memory_store, embeddings, companion_history, scored_entry
 func (e *RLMToolExecutor) executeSemanticQuery(ctx context.Context, input ContextQueryInput) (string, error) {
 	// Check if memory store is configured
 	if e.memoryStore == nil {
@@ -470,6 +516,15 @@ func (e *RLMToolExecutor) executeSemanticQuery(ctx context.Context, input Contex
 	return string(b), nil
 }
 
+// executeList lists context keys via rlm_context_list.
+//
+// Index:
+// - Purpose: List context keys filtered by scope
+// - Flow: parse input → map scope → list keys → marshal response
+// - SideEffects: reads context store
+// - FailureModes: invalid input, store errors
+// - Related: contextvar.Store.ListKeys
+// - Keywords: rlm_context_list, scope, keys, context_store
 func (e *RLMToolExecutor) executeList(ctx context.Context, args json.RawMessage) (string, error) {
 	var input ContextListInput
 	if err := json.Unmarshal(args, &input); err != nil {
@@ -502,6 +557,15 @@ func (e *RLMToolExecutor) executeList(ctx context.Context, args json.RawMessage)
 	return string(b), nil
 }
 
+// executePersonalityAdjust updates the personality profile via rlm_personality_adjust.
+//
+// Index:
+// - Purpose: Adjust stored personality dimensions and learned traits
+// - Flow: parse input → load profile → apply adjustment → save profile → marshal response
+// - SideEffects: reads/writes context store
+// - FailureModes: invalid input, load/save errors
+// - Related: loadPersonalityProfile, savePersonalityProfile
+// - Keywords: rlm_personality_adjust, personality_profile, dimensions, learned_traits
 func (e *RLMToolExecutor) executePersonalityAdjust(ctx context.Context, args json.RawMessage) (string, error) {
 	var input PersonalityAdjustInput
 	if err := json.Unmarshal(args, &input); err != nil {
@@ -756,6 +820,12 @@ type CompositeToolExecutor struct {
 }
 
 // NewCompositeToolExecutor creates a composite executor.
+//
+// Index:
+// - Purpose: Merge multiple tool executors into a single dispatcher
+// - Flow: store executors → build tool index → return composite
+// - Related: CompositeToolExecutor.Execute, ToolExecutor.List
+// - Keywords: composite_executor, tool_index, tool_defs, dispatcher
 func NewCompositeToolExecutor(executors ...ToolExecutor) *CompositeToolExecutor {
 	c := &CompositeToolExecutor{
 		executors: executors,

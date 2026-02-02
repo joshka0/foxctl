@@ -56,6 +56,14 @@ func BuildPostReviewEvent(artifact agent.ReviewArtifact, files []indexing.FileCh
 // The files parameter is currently expected to be nil/empty until the diff
 // application layer is implemented. Indexers should handle empty file lists
 // gracefully.
+//
+// Index:
+// - Purpose: Build and persist post-review events for indexing
+// - Flow: build event → store Put → return event
+// - SideEffects: writes postreview store
+// - FailureModes: store write errors
+// - Related: BuildPostReviewEvent, Store.Put
+// - Keywords: post_review_event, workspace_id, review_id, files
 func (p *Producer) Produce(ctx context.Context, artifact agent.ReviewArtifact, files []indexing.FileChange) (indexing.PostReviewEvent, error) {
 	event := BuildPostReviewEvent(artifact, files)
 	return p.store.Put(ctx, event)

@@ -49,7 +49,7 @@ type systemConfig struct {
 	trajectoryStore     trajectory.Store
 }
 
-// WithSupervisionStrategy sets the supervision strategy for the system.
+// WithSystemSupervisionStrategy sets the supervision strategy for the system.
 func WithSystemSupervisionStrategy(s SupervisionStrategy) SystemOption {
 	return func(c *systemConfig) {
 		c.supervisionStrategy = s

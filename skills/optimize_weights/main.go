@@ -1,5 +1,4 @@
-// Package main implements the optimize/weights skill.
-// This skill manages learnable scorer weights for task prioritization.
+// Package main implements the optimize/weights skill for managing learnable scorer weights in task prioritization.
 package main
 
 import (
@@ -16,15 +15,27 @@ import (
 
 const command = "optimize/weights"
 
+// input defines the skill input parameters for weight management operations with action selection.
 type input struct {
 	Action    string `json:"action"`
 	Workspace string `json:"workspace"`
 }
 
+// main is the skill entry point for optimize/weights with weight management capabilities.
 func main() {
 	skillmain.Main(command, run)
 }
 
+// run orchestrates weight management operations with workspace resolution and scorer initialization.
+//
+// Index:
+// - Purpose: Manage learnable scorer weights for task prioritization with show and learn actions
+// - Flow: resolve workspace → open trajectory store → create weight store and scorer → execute action → emit results
+// - SideEffects: reads trajectory data; updates weight store; performs machine learning optimization
+// - FailureModes: workspace resolution errors, trajectory store access failures, invalid actions, learning failures
+// - Observability: emits current weights, learning updates, sample sizes, and comprehensive weight change tracking
+// - Related: showWeights, learnWeights, optimization.NewLearnableScorer, optimization.NewInMemoryWeightStore
+// - Keywords: optimize/weights, task_prioritization, machine_learning, weight_optimization, learnable_scorer
 func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	// Resolve workspace
 	workspace := in.Workspace
@@ -60,6 +71,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	}
 }
 
+// showWeights displays current learnable scorer weights with detailed breakdown by factor type.
 func showWeights(ctx context.Context, rc *skillmain.RunContext, scorer *optimization.LearnableScorer, workspace string) error {
 	weights, err := scorer.GetCurrentWeights(ctx, workspace)
 	if err != nil {
@@ -78,6 +90,7 @@ func showWeights(ctx context.Context, rc *skillmain.RunContext, scorer *optimiza
 	})
 }
 
+// learnWeights performs machine learning optimization on scorer weights using trajectory outcome data.
 func learnWeights(ctx context.Context, rc *skillmain.RunContext, scorer *optimization.LearnableScorer, workspace string) error {
 	update, err := scorer.LearnFromOutcomes(ctx, workspace)
 	if err != nil {

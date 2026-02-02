@@ -16,7 +16,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/storage/sessions"
 )
 
-// Input defines the skill input parameters.
+// Input defines the skill input parameters for semantic session retrieval with multiple granularity options.
 type Input struct {
 	Query             string  `json:"query" validate:"required"`
 	Limit             int     `json:"limit,omitempty"`
@@ -27,7 +27,7 @@ type Input struct {
 	ChunkGranularity  bool    `json:"chunk_granularity,omitempty"`  // Search at chunk level (requires embeddings)
 }
 
-// Output defines the skill output.
+// Output defines the skill output with comprehensive search results and match statistics.
 type Output struct {
 	Query               string         `json:"query"`
 	Matches             []SessionMatch `json:"matches,omitempty"`
@@ -38,7 +38,7 @@ type Output struct {
 	Message             string         `json:"message"`
 }
 
-// SessionMatch represents a matched session with similarity score.
+// SessionMatch represents a matched session with similarity score and comprehensive session metadata.
 type SessionMatch struct {
 	SessionID    string   `json:"session_id"`
 	ProjectName  string   `json:"project_name"`
@@ -54,7 +54,7 @@ type SessionMatch struct {
 	StartedAt    string   `json:"started_at,omitempty"`
 }
 
-// WindowMatch represents a matched context window with similarity score.
+// WindowMatch represents a matched context window with similarity score and window metadata.
 type WindowMatch struct {
 	SessionID        string  `json:"session_id"`
 	WindowIndex      int     `json:"window_index"`
@@ -67,7 +67,7 @@ type WindowMatch struct {
 	Similarity       float64 `json:"similarity"`
 }
 
-// ChunkMatch represents a matched chunk with similarity score.
+// ChunkMatch represents a matched chunk with similarity score and detailed chunk information.
 type ChunkMatch struct {
 	SessionID      string  `json:"session_id"`
 	WindowIndex    int     `json:"window_index"`
@@ -87,10 +87,21 @@ const (
 	defaultMinSim = 0.3
 )
 
+// main is the skill entry point for session/recall with semantic search capabilities.
 func main() {
 	skillmain.Main("session/recall", run)
 }
 
+// run orchestrates semantic session retrieval with multiple granularity levels and fallback strategies.
+//
+// Index:
+// - Purpose: Search and retrieve sessions, context windows, or chunks using semantic similarity with fallback to full-text search
+// - Flow: validate input → detect embedding providers → generate query embedding → search at target granularity → format results → emit output
+// - SideEffects: reads session store; performs embedding generation; searches multiple granularity levels; caches session data
+// - FailureModes: missing embedding providers, session store access failures, embedding generation errors, search failures
+// - Observability: emits search results, similarity scores, match counts, provider information, and comprehensive search statistics
+// - Related: normalizeInput, semantic.NewProviderForScope, semantic.EnrichQuery
+// - Keywords: session/recall, semantic_search, session_retrieval, embedding_search, full_text_search
 func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	// Apply defaults
 	normalizeInput(&in, rc)
@@ -424,6 +435,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	return skillout.Emit(rc, "session/recall", output)
 }
 
+// normalizeInput applies default values and validation to input parameters with bounds checking.
 func normalizeInput(in *Input, rc *skillmain.RunContext) {
 	in.Limit = mathutil.DefaultPositiveInt(in.Limit, defaultLimit)
 	in.MinSimilarity = mathutil.DefaultPositiveFloat(in.MinSimilarity, defaultMinSim)

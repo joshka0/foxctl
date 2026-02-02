@@ -1,4 +1,4 @@
-// Package main implements the text/grep skill.
+// Package main implements the text/grep skill for pattern searching across files with regex support.
 package main
 
 import (
@@ -19,6 +19,7 @@ import (
 
 const command = "text/grep"
 
+// input defines the skill input parameters for text pattern searching with filtering and matching options.
 type input struct {
 	Path       string   `json:"path"`
 	Pattern    string   `json:"pattern"`
@@ -28,12 +29,24 @@ type input struct {
 	MaxMatches int      `json:"max_matches"`
 }
 
+// match represents a text pattern match with file location and content information.
 type match = textmatch.Match
 
+// main is the skill entry point for text/grep with pattern searching capabilities.
 func main() {
 	skillmain.Main(command, run)
 }
 
+// run orchestrates text pattern searching across files with regex compilation and result aggregation.
+//
+// Index:
+// - Purpose: Search for text patterns across files using regex with filtering, case sensitivity, and match limiting
+// - Flow: validate pattern → compile regex → collect files → search files → aggregate results → emit output
+// - SideEffects: reads file system; scans file contents; generates match previews; persists search results
+// - FailureModes: invalid regex patterns, file access errors, scanner errors, path resolution failures
+// - Observability: emits match counts, file statistics, top files, search previews, and comprehensive result metrics
+// - Related: grepFile, textmatch.CompileRegex, fsutil.CollectEntries, skillout.PreviewAndPersistNDJSON
+// - Keywords: text/grep, pattern_search, regex, file_search, text_matching
 func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	// Validate pattern
 	if err := textmatch.RequirePattern(in.Pattern); err != nil {
@@ -109,6 +122,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	return skillout.Emit(rc, command, data)
 }
 
+// grepFile searches a single file for regex pattern matches with line numbering and snippet generation.
 func grepFile(path, workspace string, re *regexp.Regexp, remaining int) ([]match, error) {
 	if remaining <= 0 {
 		return nil, nil

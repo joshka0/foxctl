@@ -19,6 +19,13 @@ type RepoIndexToolExecutor struct {
 }
 
 // NewRepoIndexToolExecutor creates a new repo index tool executor.
+//
+// Index:
+// - Purpose: Initialize repo index tool execution with workspace context
+// - Flow: create query engine → capture workspace ID → return executor
+// - SideEffects: constructs query engine
+// - Related: RepoIndexToolExecutor.Execute, repoindex.NewQueryEngine
+// - Keywords: repo_index, tool_executor, workspace_id, query_engine
 func NewRepoIndexToolExecutor(store *repoindex.Store) *RepoIndexToolExecutor {
 	var engine *repoindex.QueryEngine
 	workspaceID := ""
@@ -79,6 +86,16 @@ type repoIndexOpenInput struct {
 	ID string `json:"id"`
 }
 
+// executeSearch runs repo.index.search with validation and observability.
+//
+// Index:
+// - Purpose: Execute repo index search and format tool output
+// - Flow: parse args → validate query → search engine → emit event → marshal output
+// - SideEffects: repo index queries; observability events
+// - FailureModes: parse errors, missing query, engine errors
+// - Observability: emits repo_index events
+// - Related: observability.WriteRepoIndexEvent, repoindex.QueryEngine.Search
+// - Keywords: repo.index.search, query, result_count, repo_index, observability
 func (e *RepoIndexToolExecutor) executeSearch(ctx context.Context, args json.RawMessage) (string, error) {
 	start := time.Now()
 	var input repoIndexSearchInput
@@ -130,6 +147,16 @@ func (e *RepoIndexToolExecutor) executeSearch(ctx context.Context, args json.Raw
 	return marshalToolOutput(output)
 }
 
+// executeExpand runs repo.index.expand with validation and observability.
+//
+// Index:
+// - Purpose: Expand repo index graph from seed nodes
+// - Flow: parse args → validate seeds/edges → expand graph → emit event → marshal output
+// - SideEffects: repo index queries; observability events
+// - FailureModes: parse errors, invalid edges, engine errors
+// - Observability: emits repo_index events
+// - Related: repoindex.QueryEngine.Expand, parseRepoIndexEdgeTypes
+// - Keywords: repo.index.expand, seeds, edge_types, direction, repo_index
 func (e *RepoIndexToolExecutor) executeExpand(ctx context.Context, args json.RawMessage) (string, error) {
 	start := time.Now()
 	var input repoIndexExpandInput
@@ -232,6 +259,16 @@ func (e *RepoIndexToolExecutor) executeExpand(ctx context.Context, args json.Raw
 	return marshalToolOutput(output)
 }
 
+// executeOpen runs repo.index.open with validation and observability.
+//
+// Index:
+// - Purpose: Open a repo index node by ID
+// - Flow: parse args → validate ID → fetch node → emit event → marshal output
+// - SideEffects: repo index queries; observability events
+// - FailureModes: parse errors, missing ID, engine errors
+// - Observability: emits repo_index events
+// - Related: repoindex.QueryEngine.Open
+// - Keywords: repo.index.open, node_id, repo_index, observability
 func (e *RepoIndexToolExecutor) executeOpen(ctx context.Context, args json.RawMessage) (string, error) {
 	start := time.Now()
 	var input repoIndexOpenInput
@@ -392,6 +429,15 @@ type RepoIndexAskResult struct {
 	Output EngineOutput
 }
 
+// RunRepoIndexAsk runs a single-turn repo index query with a stateless LLM engine.
+//
+// Index:
+// - Purpose: Execute a stateless repo index query workflow
+// - Flow: validate config → build tool runner → configure engine → run LLM → return output
+// - SideEffects: LLM API calls; repo index queries
+// - FailureModes: invalid config, engine init errors, LLM/tool errors
+// - Related: NewLLMChatEngine, NewRepoIndexToolExecutor, ToolRunner.Execute
+// - Keywords: repo_index_ask, stateless, tool_runner, llm_chat, repo.index.search
 func RunRepoIndexAsk(ctx context.Context, cfg RepoIndexAskConfig) (RepoIndexAskResult, error) {
 	question := strings.TrimSpace(cfg.Question)
 	if question == "" {

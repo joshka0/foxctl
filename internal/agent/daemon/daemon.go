@@ -64,6 +64,14 @@ type daemonStores struct {
 // compression daemon. The returned daemonStores includes any cleanup callback for the companion DB.
 //
 // On any error the function closes any already-opened resources before returning the error.
+//
+// Index:
+// - Purpose: Initialize daemon storage dependencies and optional companion services
+// - Flow: open stores → configure companion memory → start compression daemon → return handles
+// - SideEffects: opens databases; starts compression daemon
+// - FailureModes: store open errors, companion initialization failures
+// - Related: daemonStores.Close, initOptimization
+// - Keywords: daemon_stores, companion_memory, contextvar, mailbox, blackboard
 func openDaemonStores(ctx context.Context, root string, opts Options) (*daemonStores, error) {
 	stores := &daemonStores{}
 
@@ -218,6 +226,14 @@ func (s *daemonStores) Close() {
 }
 
 // Run starts the agent daemon.
+//
+// Index:
+// - Purpose: Initialize daemon dependencies and run the polling loop
+// - Flow: resolve workspace → open stores → init optimization → load agent → init engine → start heartbeat → poll loop
+// - SideEffects: opens databases; starts goroutines; makes LLM calls; processes mailbox messages
+// - FailureModes: config errors, store errors, engine init failures, polling errors
+// - Related: openDaemonStores, runPollLoop, initOptimization
+// - Keywords: agent_daemon, poll_loop, heartbeat, mailbox, companion
 func Run(ctx context.Context, opts Options) error {
 	workspaceRoot := strings.TrimSpace(opts.WorkspaceRoot)
 	if workspaceRoot == "" {
@@ -400,6 +416,15 @@ type pollDeps struct {
 	companionMemory *companion.ConversationMemory
 }
 
+// initOptimization initializes optimization stores and pattern collector if enabled.
+//
+// Index:
+// - Purpose: Enable pattern learning for tool selection hints
+// - Flow: open trajectory store → open pattern store → create collector → return context
+// - SideEffects: opens stores; logs warnings on failures
+// - FailureModes: store open errors disable optimization
+// - Related: optimization.NewMCPPatternCollector
+// - Keywords: optimization, pattern_store, trajectory_store, collector
 func initOptimization(ctx context.Context, opts Options) (*OptimizationContext, func()) {
 	if !opts.EnableOptimization {
 		return nil, func() {}
@@ -563,6 +588,16 @@ func initDedupeStore(ctx context.Context, opts Options) (DedupeStore, func(), er
 	return sqliteStore, cleanup, nil
 }
 
+// runPollLoop polls mailbox messages and dispatches processing based on agent mode.
+//
+// Index:
+// - Purpose: Drive daemon message processing with polling and proactive ticks
+// - Flow: start poll ticker → optional think ticker → process poll ticks → handle proactive think
+// - SideEffects: polls mailbox; updates agent state; invokes message handlers
+// - Concurrency: runs ticker loop with non-blocking think checks
+// - FailureModes: poll errors, agent stop signals, message processing errors
+// - Related: processPollTick, runProactiveThink
+// - Keywords: poll_loop, mailbox, proactive, poll_interval, think_interval
 func runPollLoop(ctx context.Context, deps pollDeps) error {
 	pollTicker := time.NewTicker(deps.opts.PollInterval)
 	defer pollTicker.Stop()
@@ -617,6 +652,15 @@ func runPollLoop(ctx context.Context, deps pollDeps) error {
 
 var errAgentStopped = errors.New("agent stopped")
 
+// processPollTick handles a single poll tick by fetching and processing messages.
+//
+// Index:
+// - Purpose: Fetch mailbox messages and process them with dedupe handling
+// - Flow: load agent state → poll messages → dedupe check → process message → ack/nack
+// - SideEffects: mailbox ack/nack; dedupe store writes; message processing
+// - FailureModes: poll errors, dedupe errors, processing failures
+// - Related: processMessage, runAutonomousContinuation
+// - Keywords: poll_tick, mailbox, dedupe, ack, nack
 func processPollTick(ctx context.Context, deps pollDeps) error {
 	currentAgent, err := deps.agentStore.Get(ctx, deps.opts.AgentID)
 	if err != nil {
@@ -688,6 +732,14 @@ func processPollTick(ctx context.Context, deps pollDeps) error {
 
 // runAutonomousContinuation allows the agent to continue working across multiple turns
 // without needing a new external message. Used for autonomous and proactive modes.
+//
+// Index:
+// - Purpose: Execute follow-on DSPy turns for autonomous/proactive agents
+// - Flow: check max turns → run continuation prompt loop → stop on completion signal
+// - SideEffects: LLM calls via DSPy agent
+// - FailureModes: execution errors stop continuation
+// - Related: runProactiveThink
+// - Keywords: autonomous, continuation, max_auto_turns, dspy_agent
 func runAutonomousContinuation(ctx context.Context, deps pollDeps, lastMsg agent.Message) {
 	maxTurns := deps.agentRecord.MaxAutoTurns
 	if maxTurns <= 1 {
@@ -728,6 +780,14 @@ func runAutonomousContinuation(ctx context.Context, deps pollDeps, lastMsg agent
 
 // runProactiveThink runs a periodic "think" cycle for proactive agents.
 // This allows the agent to check if there's work to do and initiate it.
+//
+// Index:
+// - Purpose: Execute proactive think cycle to initiate work
+// - Flow: build prompt → execute DSPy agent → evaluate result → run continuation
+// - SideEffects: LLM calls via DSPy agent; logs activity
+// - FailureModes: execution errors propagated
+// - Related: runAutonomousContinuation
+// - Keywords: proactive_think, dspy_agent, think_prompt, continuation
 func runProactiveThink(ctx context.Context, deps pollDeps) error {
 	deps.logger.Debug().Msg("running proactive think cycle")
 
@@ -833,6 +893,15 @@ type noopRecorder struct{}
 
 func (r *noopRecorder) RecordToolCall(call types.ToolCall) {}
 
+// createAgent builds and initializes a DSPy ReAct agent with tool registry.
+//
+// Index:
+// - Purpose: Configure and initialize a DSPy agent for autonomous execution
+// - Flow: resolve config → create LLM → register tools → build signature → initialize agent
+// - SideEffects: LLM initialization; tool registration
+// - FailureModes: missing API key, LLM creation errors, tool registration errors
+// - Related: buildSignature, tools.Registry.List
+// - Keywords: create_agent, dspy, react_agent, llm_provider, register_tool
 func createAgent(ctx context.Context, agentRecord agent.Agent, registry *tools.Registry, daemonOpts Options) (agents.Agent, error) {
 	// Resolve max iterations: agent record takes precedence, else default to 10
 	maxIterations := agentRecord.MaxIterations

@@ -1,4 +1,3 @@
-// Package blackboard implements SQLite-backed persistence for shared coordination.
 package blackboard
 
 import (
@@ -151,6 +150,15 @@ func (s *sqlStore) Search(ctx context.Context, ns, topic string, limit int) ([]a
 	return records, nil
 }
 
+// Claim acquires a lease for a blackboard record if unleased.
+//
+// Index:
+// - Purpose: Atomically lease a blackboard record for an agent
+// - Flow: begin tx → fetch record → build lease → conditional update → commit → return
+// - SideEffects: database transaction; lease update
+// - FailureModes: record not found, already leased, database errors
+// - Related: scanRecord, agent.Lease
+// - Keywords: blackboard_claim, lease, agent_id, lease_duration, ErrAlreadyLeased
 func (s *sqlStore) Claim(ctx context.Context, id, agentID string, leaseDuration time.Duration) (agent.BlackboardRecord, error) {
 	// Begin transaction
 	tx, err := s.db.BeginTx(ctx, nil)

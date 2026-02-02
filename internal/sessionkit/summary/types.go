@@ -1,4 +1,3 @@
-// Package summary provides background worker for session window summarization.
 package summary
 
 import "time"

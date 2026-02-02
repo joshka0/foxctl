@@ -1,4 +1,3 @@
-// Package skillout provides shared output helpers for skills.
 package skillout
 
 import "sort"

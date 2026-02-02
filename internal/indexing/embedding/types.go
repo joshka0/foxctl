@@ -131,6 +131,9 @@ type EnqueueRequest struct {
 	// Priority sets the job priority.
 	Priority JobPriority `json:"priority,omitempty"`
 
+	// Model is the embedding model used for deduplication checks.
+	Model string `json:"model,omitempty"`
+
 	// Deduplicate skips symbols with unchanged content.
 	Deduplicate bool `json:"deduplicate,omitempty"`
 }
@@ -148,6 +151,10 @@ type SymbolInput struct {
 
 	// Content is the text to embed.
 	Content string `json:"content"`
+
+	// ContentDigest is the SHA256 digest of the content for deduplication.
+	// When empty, the queue will compute a digest from Content.
+	ContentDigest string `json:"content_digest,omitempty"`
 }
 
 // EnqueueResult is the output after enqueuing symbols.

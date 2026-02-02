@@ -25,7 +25,7 @@ type OptimizationContext struct {
 	WorkspaceID string
 }
 
-// Options configures the agent daemon.
+// Options configures the agent daemon runtime and companion services.
 type Options struct {
 	AgentID     string
 	StorageRoot string

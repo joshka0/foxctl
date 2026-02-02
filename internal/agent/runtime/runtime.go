@@ -182,6 +182,14 @@ func NewRuntime(cfg Config) *Runtime {
 }
 
 // Spawn creates and starts a new agent session.
+//
+// Index:
+// - Purpose: Initialize a session and launch the agent loop
+// - Flow: apply defaults → create engine/tools → create session → store session → spawn runSession
+// - SideEffects: starts goroutine; may open memory store; engine initialization
+// - FailureModes: engine/tool init errors, resource limits exceeded
+// - Related: Runtime.runSession, Runtime.createEngine
+// - Keywords: agent_spawn, session_id, max_iterations, tools
 func (r *Runtime) Spawn(ctx context.Context, cfg types.AgentConfig) (*Session, error) {
 	// Generate session ID
 	sessionID := ulid.Make().String()
@@ -1517,6 +1525,15 @@ func filterToolDefs(toolDefs []engine.ToolDef, allowlist []string) []engine.Tool
 }
 
 // runSession executes the agent session using LLMChatEngine.
+//
+// Index:
+// - Purpose: Drive the agent loop for a session
+// - Flow: build prompts → run engine → record tool calls → persist turns → emit events
+// - SideEffects: LLM calls; mailbox sends; turn persistence; observability emits
+// - FailureModes: engine errors, context cancellation, persistence errors
+// - Observability: emits agent iteration/complete events
+// - Related: Runtime.runAutonomousContinuation, Runtime.processMailboxMessages
+// - Keywords: agent_session, iterations, tool_calls, tokens_used
 func (r *Runtime) runSession(ctx context.Context, session *Session) {
 	sessionStart := time.Now()
 
@@ -2380,6 +2397,15 @@ func containsNoWork(result string) bool {
 
 // runAutonomousContinuation allows the agent to continue working across multiple turns
 // without needing a new external message. Used for autonomous mode.
+//
+// Index:
+// - Purpose: Continue autonomous turns until completion or max turns
+// - Flow: emit turn event → check completion → run engine → persist turns → repeat
+// - SideEffects: LLM calls; turn persistence; observability emits
+// - FailureModes: engine errors, context cancellation
+// - Observability: emits agent.autonomous_turn and iteration events
+// - Related: containsTaskComplete, Runtime.runSession
+// - Keywords: autonomous_turn, max_auto_turns, continuation
 func (r *Runtime) runAutonomousContinuation(ctx context.Context, session *Session, lastResult string) string {
 	maxTurns := session.Config.MaxAutoTurns
 	if maxTurns <= 1 {
@@ -2474,6 +2500,14 @@ func (r *Runtime) runAutonomousContinuation(ctx context.Context, session *Sessio
 
 // runMessageLoop polls for mailbox messages and processes them.
 // Used for reactive and proactive modes to keep agents alive.
+//
+// Index:
+// - Purpose: Poll mailbox and trigger proactive think cycles
+// - Flow: poll ticker → process messages → optional think ticker
+// - SideEffects: mailbox reads; engine runs; turn persistence
+// - FailureModes: mailbox errors, engine errors
+// - Related: Runtime.processMailboxMessages, Runtime.runProactiveThink
+// - Keywords: mailbox_poll, proactive, think_interval
 func (r *Runtime) runMessageLoop(ctx context.Context, session *Session, thinkInterval time.Duration) {
 	if r.config.MailboxStore == nil {
 		return
@@ -2508,6 +2542,15 @@ func (r *Runtime) runMessageLoop(ctx context.Context, session *Session, thinkInt
 }
 
 // processMailboxMessages checks and processes pending mailbox messages.
+//
+// Index:
+// - Purpose: Consume mailbox messages and run agent responses
+// - Flow: list messages → build prompt → run engine → record tool calls → emit events
+// - SideEffects: LLM calls; observability emits; turn persistence
+// - FailureModes: mailbox list errors, engine errors
+// - Observability: emits agent.mailbox_error and iteration events
+// - Related: Runtime.runMessageLoop
+// - Keywords: mailbox, agent.mailbox_error, tool_calls
 func (r *Runtime) processMailboxMessages(ctx context.Context, session *Session, actorNS string) {
 	if r.config.MailboxStore == nil {
 		return
@@ -2591,6 +2634,15 @@ func (r *Runtime) processMailboxMessages(ctx context.Context, session *Session, 
 }
 
 // runProactiveThink runs a periodic "think" cycle for proactive agents.
+//
+// Index:
+// - Purpose: Trigger proactive agent cycles when idle
+// - Flow: build think prompt → run engine → persist turns → emit events
+// - SideEffects: LLM calls; turn persistence; observability emits
+// - FailureModes: engine errors
+// - Observability: emits agent proactive iteration events
+// - Related: Runtime.runMessageLoop
+// - Keywords: proactive, think_prompt, iterations
 func (r *Runtime) runProactiveThink(ctx context.Context, session *Session) {
 	thinkPrompt := `You are in proactive mode. Check if there is any work that needs to be done:
 1. Review any pending tasks or todos

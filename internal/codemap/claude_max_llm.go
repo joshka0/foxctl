@@ -1,5 +1,3 @@
-// Package codemap provides Claude Max LLM integration for dspy-go agents.
-// This adapter uses OAuth tokens from Claude Max subscription to call Anthropic API directly.
 package codemap
 
 import (

@@ -73,6 +73,15 @@ type GenerateOptions struct {
 }
 
 // NewAgent creates a new codemap agent.
+// NewAgent initializes a codemap agent with tools and LLM.
+//
+// Index:
+// - Purpose: Configure codemap agent dependencies
+// - Flow: apply options → create LLM → build tool registry → return agent
+// - SideEffects: initializes LLM; registers tools
+// - FailureModes: LLM creation errors, tool registry errors
+// - Related: Agent.Generate, tools.NewRegistry
+// - Keywords: codemap_agent, llm, tools_registry, workspace, graph_store
 func NewAgent(opts ...AgentOption) (*Agent, error) {
 	a := &Agent{
 		skillResolver: skill.NewResolver(),
@@ -110,6 +119,15 @@ func NewAgent(opts ...AgentOption) (*Agent, error) {
 }
 
 // Generate creates a codemap for the given query.
+// Generate runs the codemap agent and returns a codemap.
+//
+// Index:
+// - Purpose: Generate a semantic codemap for a query
+// - Flow: normalize depth → gather context → init agent/tools → execute → parse codemap → add metadata
+// - SideEffects: LLM calls; tool executions; graph queries
+// - FailureModes: context gather errors, tool registration errors, LLM execution errors
+// - Related: context.Gatherer.GatherAll, tools.Registry.FinalCodemap
+// - Keywords: codemap_generate, finish_codemap, depth, tool_calls, query
 func (a *Agent) Generate(ctx context.Context, opts GenerateOptions) (*Codemap, error) {
 	// Normalize depth
 	if opts.Depth < 1 {

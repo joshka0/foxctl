@@ -1,5 +1,3 @@
-// Package knowledge implements SQLite-backed persistence for the knowledge registry.
-// This stores Claude-facing knowledge packs, agents, and commands with their triggers.
 package knowledge
 
 import (

@@ -1,4 +1,4 @@
-// Package main implements the json/transform skill.
+// Package main implements the json/transform skill for comprehensive JSON data manipulation and analysis.
 package main
 
 import (
@@ -20,7 +20,7 @@ const command = "json/transform"
 
 var allowedOps = []string{"extract", "merge", "validate", "format", "keys"}
 
-// input defines the skill input parameters for JSON transformation operations.
+// input defines the skill input parameters for JSON transformation operations with multiple operation types.
 type input struct {
 	Operation string `json:"operation"`
 	Input     string `json:"input"`
@@ -30,7 +30,7 @@ type input struct {
 	Compact   bool   `json:"compact"`
 }
 
-// main is the skill entry point for json/transform.
+// main is the skill entry point for json/transform with comprehensive JSON manipulation capabilities.
 func main() {
 	skillmain.Main(command, run)
 }
@@ -104,7 +104,7 @@ func extractOperation(data any, path string) map[string]any {
 	}
 }
 
-// extractPath navigates through JSON structure using dot notation and array indices.
+// extractPath navigates through JSON structure using dot notation and array indices with proper error handling.
 func extractPath(data any, path string) any {
 	parts := strings.Split(strings.TrimPrefix(path, "."), ".")
 	current := data
@@ -164,7 +164,7 @@ func extractPath(data any, path string) any {
 	return current
 }
 
-// mergeOperation performs deep merging of JSON objects with recursive conflict resolution.
+// mergeOperation performs deep merging of JSON objects with recursive conflict resolution and validation.
 func mergeOperation(data any, mergeWithJSON string) map[string]any {
 	if mergeWithJSON == "" {
 		return map[string]any{
@@ -189,7 +189,7 @@ func mergeOperation(data any, mergeWithJSON string) map[string]any {
 	}
 }
 
-// deepMerge recursively merges two JSON values with maps taking precedence over primitive types.
+// deepMerge recursively merges two JSON values with maps taking precedence over primitive types and nested handling.
 func deepMerge(dst, src any) any {
 	dstMap, dstIsMap := dst.(map[string]any)
 	srcMap, srcIsMap := src.(map[string]any)
@@ -215,7 +215,7 @@ func deepMerge(dst, src any) any {
 	return src
 }
 
-// validateOperation analyzes JSON structure and provides detailed validation information.
+// validateOperation analyzes JSON structure and provides detailed validation information with type detection.
 func validateOperation(data any) map[string]any {
 	result := map[string]any{
 		"operation": "validate",
@@ -248,7 +248,7 @@ func validateOperation(data any) map[string]any {
 	return result
 }
 
-// formatOperation formats JSON data with configurable indentation and compact/pretty modes.
+// formatOperation formats JSON data with configurable indentation and compact/pretty modes with size tracking.
 func formatOperation(data any, indent int, compact bool) map[string]any {
 	var formatted string
 	var err error
@@ -286,7 +286,7 @@ func formatOperation(data any, indent int, compact bool) map[string]any {
 	return result
 }
 
-// keysOperation extracts and enumerates all keys from JSON objects including nested structures.
+// keysOperation extracts and enumerates all keys from JSON objects including nested structures with full path tracking.
 func keysOperation(data any) map[string]any {
 	result := map[string]any{
 		"operation": "keys",
@@ -310,7 +310,7 @@ func keysOperation(data any) map[string]any {
 	return result
 }
 
-// getKeys returns a sorted list of keys from a JSON object map.
+// getKeys returns a sorted list of keys from a JSON object map with deterministic ordering.
 func getKeys(m map[string]any) []string {
 	keys := make([]string, 0, len(m))
 	for k := range m {
@@ -320,6 +320,7 @@ func getKeys(m map[string]any) []string {
 	return keys
 }
 
+// collectAllKeys recursively collects all keys from JSON structures with dot notation and array index formatting.
 func collectAllKeys(data any, prefix string) []string {
 	var keys []string
 
@@ -343,7 +344,7 @@ func collectAllKeys(data any, prefix string) []string {
 	return keys
 }
 
-// getJSONType returns the JSON type name for a given Go value.
+// getJSONType returns the JSON type name for a given Go value with proper type mapping.
 func getJSONType(data any) string {
 	if data == nil {
 		return "null"
@@ -365,7 +366,7 @@ func getJSONType(data any) string {
 	}
 }
 
-// calculateDepth computes the maximum nesting depth of a JSON structure.
+// calculateDepth computes the maximum nesting depth of a JSON structure with recursive traversal.
 func calculateDepth(data any) int {
 	switch v := data.(type) {
 	case map[string]any:

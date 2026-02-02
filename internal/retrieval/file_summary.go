@@ -48,10 +48,20 @@ func NewFileSummaryGenerator(
 
 // GetOrCreateSummary returns an existing summary or creates a new one.
 // Returns the summary text and whether it was cached.
+//
+// Index:
+// - Purpose: Cache and generate file summaries for semantic search
+// - Flow: normalize input → lookup cache → compare digest → generate summary → store summary → return
+// - SideEffects: memory store read/write; optional LLM call; optional embedding write
+// - FailureModes: cache read errors, summary generation errors, store write errors
+// - Observability: emits file_summary.cache_check_failed, file_summary.store_failed
+// - Related: FileSummaryEntryName, ComputeFileSummaryDigest, SummaryLLM.GenerateSummary, memory.Store.Save
+// - Keywords: file_summary, FileSummaryEntryName, ComputeFileSummaryDigest, FileSummaryType, path
 func (g *FileSummaryGenerator) GetOrCreateSummary(
 	ctx context.Context,
 	input symbol.FileSummaryInput,
 ) (string, bool, error) {
+	input = symbol.NormalizeFileSummaryInput(input)
 	entryName := symbol.FileSummaryEntryName(g.workspace, input.FilePath)
 
 	// Try to get existing summary
@@ -553,6 +563,7 @@ func filterFileSummaryEntries(scored []storage.ScoredEntry, limit int) []FileEnt
 	return entries
 }
 
+// SymbolSummaryGenerator produces symbol-level summaries for semantic search.
 type SymbolSummaryGenerator struct {
 	store         storage.MemoryStore
 	llm           SummaryLLM
@@ -560,6 +571,7 @@ type SymbolSummaryGenerator struct {
 	workspace     string
 }
 
+// NewSymbolSummaryGenerator creates a symbol summary generator.
 func NewSymbolSummaryGenerator(
 	store storage.MemoryStore,
 	llm SummaryLLM,
@@ -574,6 +586,17 @@ func NewSymbolSummaryGenerator(
 	}
 }
 
+// GetOrCreateSummary returns an existing symbol summary or creates a new one.
+// Returns the summary text and whether it was cached.
+//
+// Index:
+// - Purpose: Cache and generate symbol summaries for semantic search
+// - Flow: lookup cache → compare digest → generate summary → store summary → return
+// - SideEffects: memory store read/write; optional LLM call; optional embedding write
+// - FailureModes: cache read errors, summary generation errors, store write errors
+// - Observability: emits symbol_summary.cache_check_failed, symbol_summary.store_failed
+// - Related: SymbolSummaryEntryName, ComputeSymbolSummaryDigest, SummaryLLM.GenerateSummary, memory.Store.Save
+// - Keywords: symbol_summary, SymbolSummaryEntryName, ComputeSymbolSummaryDigest, SymbolSummaryType, symbol_id
 func (g *SymbolSummaryGenerator) GetOrCreateSummary(
 	ctx context.Context,
 	input symbol.SymbolSummaryInput,
