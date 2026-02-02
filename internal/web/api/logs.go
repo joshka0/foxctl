@@ -44,18 +44,14 @@ type LogEntry struct {
 }
 
 // LogsHandler returns a handler for GET /api/logs.
-// Query params:
-//   - limit: max entries to return (default 100, max 1000)
-//   - since: only entries after this duration (e.g., "1h", "30m")
-//   - component: filter by component (agent, hook, skill, etc.)
-//   - operation: filter by operation prefix (e.g., "agent.", "hook.")
-// LogsHandler returns an HTTP handler for the GET /api/logs endpoint that serves filtered recent log entries.
-// 
-// The handler accepts query parameters to filter results: `limit` (1–1000, default 100), `since` (duration, e.g. "30m"),
-// `component`, `operation`, `workspace`, and `errors_only` (boolean). It locates the observability directory from the
-// AGENTCTL_OBS_DIR environment variable or defaults to ~/.agentctl/observability, reads events from the `events` subdirectory,
-// and responds with a JSON object containing `entries` (slice of LogEntry) and `count`. Unsupported HTTP methods result in
-// a method-not-allowed response and read failures result in an internal-server-error response.
+//
+// Index:
+// - Purpose: Serve filtered observability events via HTTP
+// - Flow: validate method → parse query → resolve obs dir → read entries → respond
+// - SideEffects: reads NDJSON log files
+// - FailureModes: method not allowed, read errors, missing observability directory
+// - Related: readLogEntries, readLogFileTail, readLogFile
+// - Keywords: logs, limit, since, component, operation, workspace, errors_only
 func LogsHandler(cfg config.Config, log zerolog.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
@@ -124,6 +120,14 @@ func LogsHandler(cfg config.Config, log zerolog.Logger) http.HandlerFunc {
 // Filters applied: events newer than sinceTime, matching componentFilter, operationFilter (prefix match), workspaceFilter (prefix match),
 // and an errorsOnly flag to include only error-status events. Files that cannot be read or parsed are skipped.
 // The returned slice is sorted newest-first by timestamp and truncated to at most limit entries.
+//
+// Index:
+// - Purpose: Read and filter recent log entries from NDJSON files
+// - Flow: list files → read recent entries → apply filters → sort newest-first → truncate
+// - SideEffects: reads log files from disk
+// - FailureModes: glob/read errors (per-file errors skipped)
+// - Related: readLogFileTail, readLogFile
+// - Keywords: log_entries, ndjson, limit, since, component, operation, errors_only
 func readLogEntries(eventsDir string, limit int, sinceTime time.Time, componentFilter, operationFilter, workspaceFilter string, errorsOnly bool) ([]LogEntry, error) {
 	// Find all NDJSON files
 	files, err := filepath.Glob(filepath.Join(eventsDir, "*.ndjson*"))

@@ -1,4 +1,3 @@
-// Package web provides the HTTP server for agentctl GUI/API.
 package web
 
 // Options configures the web server.

@@ -414,24 +414,15 @@ type TokenUsage struct {
 	TotalTokens  int `json:"total_tokens"`
 }
 
-// Chat handles a chat request.
-//
-// Index:
-// - Purpose: Process a companion chat request with the configured engine
-// - Flow: validate input → resolve exec mode/engine → build prompt → run engine → persist/augment response
-// - SideEffects: LLM calls; memory store reads/writes; conversation persistence
-// - FailureModes: validation errors, engine failures, persistence errors
-// - Related: chatWithLLMChat, chatWithStoryLoop, chatWithDSPy
-// - Keywords: companion_chat, exec_mode, engine_type, conversation_id, tools_used
 // Chat executes a single companion chat request.
 //
 // Index:
 // - Purpose: Execute a companion chat turn and return structured response
-// - Flow: validate request → build prompt → select engine → run → store turns → generate presence
-// - SideEffects: LLM calls; memory writes; optional presence generation
+// - Flow: validate request → resolve exec mode/engine → build prompt → run engine → store turns → generate presence
+// - SideEffects: LLM calls; memory reads/writes; optional presence generation
 // - FailureModes: validation errors, engine errors, memory errors
-// - Related: chatWithLLMChat, chatWithDSPy, storeConversationTurns
-// - Keywords: companion_chat, conversation_id, exec_mode, engine_type, presence
+// - Related: chatWithLLMChat, chatWithStoryLoop, chatWithDSPy, storeConversationTurns
+// - Keywords: companion_chat, conversation_id, exec_mode, engine_type, presence, tools_used
 func (s *Service) Chat(ctx context.Context, req ChatRequest) (*ChatResponse, error) {
 	start := time.Now()
 
@@ -521,6 +512,14 @@ func (s *Service) Chat(ctx context.Context, req ChatRequest) (*ChatResponse, err
 
 // chatWithLLMChat executes using the LLMChatEngine.
 // The systemPrompt parameter is the full system prompt for this turn.
+//
+// Index:
+// - Purpose: Execute the LLMChatEngine path for a companion chat turn
+// - Flow: build engine config → set hook/tool context → run engine → assemble response/tool details
+// - SideEffects: LLM calls; tool execution; hook dispatch
+// - FailureModes: engine init errors, engine run errors
+// - Related: engine.NewLLMChatEngine, engine.LLMChatEngine.Run, buildTooling
+// - Keywords: llmchat, provider, model, tool_calls, conversation_id, tools_used
 func (s *Service) chatWithLLMChat(ctx context.Context, req ChatRequest, rlmExecutor *engine.RLMToolExecutor, systemPrompt string, start time.Time) (*ChatResponse, error) {
 	// Create LLM engine in stateless mode
 	engineCfg := engine.LLMChatConfig{
@@ -674,6 +673,15 @@ type dialogueEnvelope struct {
 	Action *ChatAction `json:"action,omitempty"`
 }
 
+// chatWithStoryLoop runs the story-mode gather + dialogue loop.
+//
+// Index:
+// - Purpose: Produce story-mode responses by gathering context then generating dialogue
+// - Flow: resolve models → run gather pass → parse context → run dialogue pass → assemble response
+// - SideEffects: LLM calls; tool execution during gather phase
+// - FailureModes: gather/dialogue errors, response format parsing failures
+// - Related: runLLMChatWithResponseFormatFallback, parseStoryContextBundle, parseDialogueEnvelope
+// - Keywords: story_mode, gather_model, dialogue_model, response_format, tools_used, conversation_id
 func (s *Service) chatWithStoryLoop(ctx context.Context, req ChatRequest, rlmExecutor *engine.RLMToolExecutor, systemPrompt string, start time.Time) (*ChatResponse, error) {
 	gatherModel := s.config.StoryGatherModel
 	if req.StoryGatherModel != "" {

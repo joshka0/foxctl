@@ -148,8 +148,9 @@ func (b *Builder) buildGo(ctx context.Context, opts BuildOptions, nodes map[stri
 
 	for _, pkg := range pkgs {
 		pkgID := goPackageID(pkg.PkgPath)
+		pkgNodeID := PackageID(opts.RepoKey, pkgID)
 		addNode(nodes, Node{
-			ID:        PackageID(opts.RepoKey, pkgID),
+			ID:        pkgNodeID,
 			Kind:      NodePackage,
 			Pkg:       pkgID,
 			Name:      pkg.PkgPath,
@@ -159,16 +160,17 @@ func (b *Builder) buildGo(ctx context.Context, opts BuildOptions, nodes map[stri
 
 		for _, imp := range pkg.Imports {
 			impID := goPackageID(imp.PkgPath)
+			impNodeID := PackageID(opts.RepoKey, impID)
 			addNode(nodes, Node{
-				ID:        PackageID(opts.RepoKey, impID),
+				ID:        impNodeID,
 				Kind:      NodePackage,
 				Pkg:       impID,
 				Name:      imp.PkgPath,
 				UpdatedAt: time.Now().UTC(),
 			})
 			addEdge(edges, Edge{
-				Src:    PackageID(opts.RepoKey, pkgID),
-				Dst:    PackageID(opts.RepoKey, impID),
+				Src:    pkgNodeID,
+				Dst:    impNodeID,
 				Type:   EdgeImports,
 				Weight: 1.0,
 				Meta:   importMeta(imp.PkgPath),
@@ -188,8 +190,9 @@ func (b *Builder) buildGo(ctx context.Context, opts BuildOptions, nodes map[stri
 				return fmt.Errorf("repoindex: read go file %s: %w", filePath, err)
 			}
 			lineCount := countLines(content)
+			fileNodeID := FileID(opts.RepoKey, pkgID, fileRelPath)
 			fileNode := Node{
-				ID:        FileID(opts.RepoKey, pkgID, fileRelPath),
+				ID:        fileNodeID,
 				Kind:      NodeFile,
 				Pkg:       pkgID,
 				File:      fileRelPath,
@@ -202,7 +205,7 @@ func (b *Builder) buildGo(ctx context.Context, opts BuildOptions, nodes map[stri
 			applyFileSummary(ctx, opts, &fileNode, fileRelPath)
 			addNode(nodes, fileNode)
 			addEdge(edges, Edge{
-				Src:    PackageID(opts.RepoKey, pkgID),
+				Src:    pkgNodeID,
 				Dst:    fileNode.ID,
 				Type:   EdgeContains,
 				Weight: 1.0,
@@ -283,9 +286,10 @@ func (b *Builder) buildTS(ctx context.Context, opts BuildOptions, nodes map[stri
 			moduleRelPath = "."
 		}
 		pkgID := tsLocalPrefix + moduleRelPath
+		pkgNodeID := PackageID(opts.RepoKey, pkgID)
 
 		addNode(nodes, Node{
-			ID:        PackageID(opts.RepoKey, pkgID),
+			ID:        pkgNodeID,
 			Kind:      NodePackage,
 			Pkg:       pkgID,
 			Name:      moduleRelPath,
@@ -293,8 +297,9 @@ func (b *Builder) buildTS(ctx context.Context, opts BuildOptions, nodes map[stri
 		})
 
 		lineCount := countLines(content)
+		fileNodeID := FileID(opts.RepoKey, pkgID, fileRelPath)
 		fileNode := Node{
-			ID:        FileID(opts.RepoKey, pkgID, fileRelPath),
+			ID:        fileNodeID,
 			Kind:      NodeFile,
 			Pkg:       pkgID,
 			File:      fileRelPath,
@@ -307,7 +312,7 @@ func (b *Builder) buildTS(ctx context.Context, opts BuildOptions, nodes map[stri
 		applyFileSummary(ctx, opts, &fileNode, fileRelPath)
 		addNode(nodes, fileNode)
 		addEdge(edges, Edge{
-			Src:    PackageID(opts.RepoKey, pkgID),
+			Src:    pkgNodeID,
 			Dst:    fileNode.ID,
 			Type:   EdgeContains,
 			Weight: 1.0,
@@ -330,16 +335,17 @@ func (b *Builder) buildTS(ctx context.Context, opts BuildOptions, nodes map[stri
 			if impPkg == "" {
 				continue
 			}
+			impNodeID := PackageID(opts.RepoKey, impPkg)
 			addNode(nodes, Node{
-				ID:        PackageID(opts.RepoKey, impPkg),
+				ID:        impNodeID,
 				Kind:      NodePackage,
 				Pkg:       impPkg,
 				Name:      strings.TrimPrefix(strings.TrimPrefix(impPkg, tsLocalPrefix), tsNpmPrefix),
 				UpdatedAt: time.Now().UTC(),
 			})
 			addEdge(edges, Edge{
-				Src:    PackageID(opts.RepoKey, pkgID),
-				Dst:    PackageID(opts.RepoKey, impPkg),
+				Src:    pkgNodeID,
+				Dst:    impNodeID,
 				Type:   EdgeImports,
 				Weight: 0.7,
 				Meta:   importMeta(imp),
@@ -397,9 +403,10 @@ func (b *Builder) buildElixir(ctx context.Context, opts BuildOptions, nodes map[
 
 		// Determine package from directory structure or module name
 		pkgID := elixirPackageID(fileRelPath)
+		pkgNodeID := PackageID(opts.RepoKey, pkgID)
 
 		addNode(nodes, Node{
-			ID:        PackageID(opts.RepoKey, pkgID),
+			ID:        pkgNodeID,
 			Kind:      NodePackage,
 			Pkg:       pkgID,
 			Name:      strings.TrimPrefix(pkgID, elixirPkgPrefix),
@@ -411,8 +418,9 @@ func (b *Builder) buildElixir(ctx context.Context, opts BuildOptions, nodes map[
 		}
 
 		lineCount := countLines(content)
+		fileNodeID := FileID(opts.RepoKey, pkgID, fileRelPath)
 		fileNode := Node{
-			ID:        FileID(opts.RepoKey, pkgID, fileRelPath),
+			ID:        fileNodeID,
 			Kind:      NodeFile,
 			Pkg:       pkgID,
 			File:      fileRelPath,
@@ -425,7 +433,7 @@ func (b *Builder) buildElixir(ctx context.Context, opts BuildOptions, nodes map[
 		applyFileSummary(ctx, opts, &fileNode, fileRelPath)
 		addNode(nodes, fileNode)
 		addEdge(edges, Edge{
-			Src:    PackageID(opts.RepoKey, pkgID),
+			Src:    pkgNodeID,
 			Dst:    fileNode.ID,
 			Type:   EdgeContains,
 			Weight: 1.0,
@@ -678,8 +686,9 @@ func addSymbol(ctx context.Context, opts BuildOptions, nodes map[string]Node, ed
 		spanStart = 1
 	}
 
+	nodeID := SymbolID(opts.RepoKey, pkgID, sym.ID)
 	node := Node{
-		ID:        SymbolID(opts.RepoKey, pkgID, sym.ID),
+		ID:        nodeID,
 		Kind:      NodeSymbol,
 		Pkg:       pkgID,
 		File:      sym.FilePath,

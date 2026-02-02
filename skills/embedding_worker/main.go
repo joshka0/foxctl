@@ -12,7 +12,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillerr"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
-	"github.com/jkatigb/agentctl/internal/indexing/symbol"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/symbolutil"
 	"github.com/jkatigb/agentctl/internal/indexing/embedding"
 	"github.com/jkatigb/agentctl/internal/indexing/semantic"
 )
@@ -280,7 +280,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 							Str("symbol_id", job.SymbolID).
 							Msg("skipping embedding update due to missing workspace/file/symbol")
 					} else {
-						entryName := symbol.EntryName(workspaceID, filePath, symbolName)
+						entryName := symbolutil.EntryName(workspaceID, filePath, symbolName)
 						if err := memoryStore.UpdateEmbedding(ctx, entryName, workspaceID, embed); err != nil {
 							log.Warn().Err(err).Str("job_id", job.ID).Str("symbol_id", job.SymbolID).Msg("failed to update symbol embedding")
 						}

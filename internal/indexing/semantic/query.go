@@ -1,4 +1,3 @@
-// Package semantic provides query enrichment for temporal searches.
 package semantic
 
 import (

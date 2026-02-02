@@ -83,7 +83,7 @@ const (
 	OpSessionStart = "session.start"
 	OpSessionEnd   = "session.end"
 
-	// Agent orchestration operations
+	// OpAgentSpawn is the operation name for agent spawn.
 	OpAgentSpawn     = "agent.spawn"
 	OpAgentWait      = "agent.wait"
 	OpAgentComplete  = "agent.complete"

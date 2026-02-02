@@ -187,7 +187,7 @@ func (e *Executor) IsEphemeral() bool {
 	return e.options.Ephemeral
 }
 
-// Close releases any resources held by the executor.
+// CloseEphemeral releases any resources held by the executor.
 // For ephemeral execution, this is typically a no-op since we don't open
 // job stores, cache stores, or trajectory capture.
 func (e *Executor) CloseEphemeral() {

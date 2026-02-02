@@ -1,4 +1,3 @@
-// Package pagination implements pagination logic for OpenAPI HTTP requests.
 package pagination
 
 import (
@@ -107,6 +106,14 @@ func applyDefaults(cfg Config) Config {
 // ShouldContinue processes the provided response and determines whether another
 // page should be fetched. When the returned done flag is true the caller should
 // stop requesting more pages.
+//
+// Index:
+// - Purpose: Decide whether to fetch the next page and build its request
+// - Flow: count items -> enforce page/record limits -> select strategy -> apply strategy
+// - SideEffects: updates paginator state (pages, collected, cursors)
+// - FailureModes: missing response/request, strategy errors
+// - Related: Paginator.selectStrategy, Paginator.applyStrategy
+// - Keywords: pagination, max_pages, max_records, strategy, cursor, offset, has_more
 func (p *Paginator) ShouldContinue(resp *Response) (*http.Request, bool, error) {
 	if resp == nil {
 		return nil, true, errors.New("pagination: response is nil")

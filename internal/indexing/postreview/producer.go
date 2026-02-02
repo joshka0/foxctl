@@ -1,4 +1,3 @@
-// Package postreview provides storage and helpers for post-review events.
 package postreview
 
 import (

@@ -52,6 +52,14 @@ type verificationResult struct {
 
 // SpawnVerifiers verifies multiple claims in parallel using a worker pool.
 // This is the core "Swarm" implementation that enables high-throughput verification.
+//
+// Index:
+// - Purpose: Verify a batch of claims concurrently and aggregate results
+// - Flow: size worker pool → enqueue jobs → collect results → tally verdict counts
+// - SideEffects: spawns goroutines; LLM calls per claim
+// - FailureModes: none (per-claim errors captured in results)
+// - Related: Spawner.worker, Spawner.verifyClaim
+// - Keywords: verification, claims, parallelism, max_workers, queue_size, verdict
 func (s *Spawner) SpawnVerifiers(ctx context.Context, question string, claims []Claim) (*BatchVerificationResult, error) {
 	if len(claims) == 0 {
 		return &BatchVerificationResult{

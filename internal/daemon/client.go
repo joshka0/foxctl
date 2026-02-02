@@ -45,6 +45,14 @@ func (c *Client) isRunningWithTimeout(timeout time.Duration) bool {
 }
 
 // Status returns the daemon status.
+//
+// Index:
+// - Purpose: Fetch daemon status over RPC
+// - Flow: call status -> decode result -> return
+// - SideEffects: RPC call to daemon socket
+// - FailureModes: call errors, daemon error response, decode errors
+// - Related: Client.call, marshalResult
+// - Keywords: daemon_status, status, rpc, socket
 func (c *Client) Status() (*StatusResult, error) {
 	resp, err := c.call("status", nil)
 	if err != nil {
@@ -68,6 +76,14 @@ func (c *Client) Status() (*StatusResult, error) {
 }
 
 // Run executes a skill via the daemon.
+//
+// Index:
+// - Purpose: Execute a skill through the daemon RPC
+// - Flow: build params -> call run -> decode result -> return
+// - SideEffects: RPC call to daemon; may trigger skill execution
+// - FailureModes: call errors, daemon error response, decode errors
+// - Related: Client.call, marshalResult
+// - Keywords: run, skill, workspace, ephemeral, rpc, run_result
 func (c *Client) Run(skill string, input []byte, workspace string, ephemeral bool) (*RunResult, error) {
 	params := RunParams{
 		Skill:     skill,
@@ -131,6 +147,14 @@ func (c *Client) Shutdown() error {
 }
 
 // AgentSpawn spawns a new agent via the daemon.
+//
+// Index:
+// - Purpose: Request a new agent session from daemon
+// - Flow: call agent.spawn -> decode result -> return
+// - SideEffects: RPC call; may spawn agent session
+// - FailureModes: call errors, daemon error response, decode errors
+// - Related: Client.call, marshalResult
+// - Keywords: agent_spawn, agent.spawn, session_id, rpc
 func (c *Client) AgentSpawn(params AgentSpawnParams) (*AgentSpawnResult, error) {
 	resp, err := c.call("agent.spawn", params)
 	if err != nil {
@@ -177,6 +201,14 @@ func (c *Client) AgentList() (*AgentListResult, error) {
 }
 
 // AgentStatus gets the status of an agent session.
+//
+// Index:
+// - Purpose: Fetch agent session status from daemon
+// - Flow: call agent.status -> decode result -> return
+// - SideEffects: RPC call to daemon
+// - FailureModes: call errors, daemon error response, decode errors
+// - Related: Client.call, marshalResult
+// - Keywords: agent_status, agent.status, session_id, rpc
 func (c *Client) AgentStatus(sessionID string) (*AgentStatusResult, error) {
 	params := AgentStatusParams{SessionID: sessionID}
 	resp, err := c.call("agent.status", params)
@@ -201,6 +233,14 @@ func (c *Client) AgentStatus(sessionID string) (*AgentStatusResult, error) {
 }
 
 // AgentKill terminates an agent session.
+//
+// Index:
+// - Purpose: Request termination of an agent session
+// - Flow: call agent.kill -> decode result -> return
+// - SideEffects: RPC call; may terminate agent session
+// - FailureModes: call errors, daemon error response, decode errors
+// - Related: Client.call, marshalResult
+// - Keywords: agent_kill, agent.kill, session_id, rpc
 func (c *Client) AgentKill(sessionID string) (*AgentKillResult, error) {
 	params := AgentKillParams{SessionID: sessionID}
 	resp, err := c.call("agent.kill", params)

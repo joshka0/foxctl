@@ -1,6 +1,5 @@
 //revive:disable:var-naming // "types" is the intended cross-cutting agent types package
 
-// Package types defines core types for dspy-go agent integration.
 package types
 
 import (

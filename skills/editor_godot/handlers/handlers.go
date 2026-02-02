@@ -5,7 +5,6 @@ import "sort"
 
 // Action constants organized by category.
 const (
-	// Core actions
 	ActionPing             = "ping"
 	ActionSceneTree        = "scene_tree"
 	ActionNodeInspect      = "node_inspect"
@@ -26,7 +25,6 @@ const (
 	ActionStopGame         = "stop_game"
 	ActionErrors           = "errors"
 
-	// Resource actions
 	ActionSceneSave          = "scene_save"
 	ActionSceneList          = "scene_list"
 	ActionSceneOpen          = "scene_open"
@@ -38,67 +36,52 @@ const (
 	ActionCameraRestore      = "camera_restore"
 	ActionCameraList         = "camera_list"
 
-	// Script actions
 	ActionScriptCreate = "script_create"
 	ActionScriptRead   = "script_read"
 	ActionScriptEdit   = "script_edit"
 
-	// Group actions
 	ActionGroupAdd    = "group_add"
 	ActionGroupRemove = "group_remove"
 	ActionGroupList   = "group_list"
 
-	// Console actions
 	ActionConsoleOutput = "console_output"
 
-	// Settings actions
 	ActionProjectSettingGet = "project_setting_get"
 	ActionProjectSettingSet = "project_setting_set"
 
-	// Build actions
 	ActionBuild = "build"
 
-	// Animation actions
 	ActionAnimationList = "animation_list"
 	ActionAnimationPlay = "animation_play"
 	ActionAnimationStop = "animation_stop"
 
-	// Audio actions
 	ActionAudioPlay = "audio_play"
 	ActionAudioStop = "audio_stop"
 
-	// Input actions
 	ActionInputActionList   = "input_action_list"
 	ActionInputActionAdd    = "input_action_add"
 	ActionInputActionRemove = "input_action_remove"
 
-	// Autoload actions
 	ActionAutoloadList   = "autoload_list"
 	ActionAutoloadAdd    = "autoload_add"
 	ActionAutoloadRemove = "autoload_remove"
 
-	// Plugin actions
 	ActionPluginList    = "plugin_list"
 	ActionPluginEnable  = "plugin_enable"
 	ActionPluginDisable = "plugin_disable"
 
-	// Theme actions
 	ActionThemeGet = "theme_get"
 	ActionThemeSet = "theme_set"
 
-	// Shader actions
 	ActionShaderCreate = "shader_create"
 	ActionShaderEdit   = "shader_edit"
 
-	// TileMap actions
 	ActionTileMapGetCell = "tilemap_get_cell"
 	ActionTileMapSetCell = "tilemap_set_cell"
 
-	// Physics actions
 	ActionPhysicsLayerGet = "physics_layer_get"
 	ActionPhysicsLayerSet = "physics_layer_set"
 
-	// Debug actions
 	ActionDebugDrawEnable  = "debug_draw_enable"
 	ActionDebugDrawDisable = "debug_draw_disable"
 )

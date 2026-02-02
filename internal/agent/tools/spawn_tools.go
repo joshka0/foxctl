@@ -1,4 +1,3 @@
-// Package tools provides dspy-go tool wrappers for agentctl skills.
 package tools
 
 import (

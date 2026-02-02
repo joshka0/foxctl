@@ -1,4 +1,3 @@
-// Package runtime provides the dspy-go agent runtime wrapper for agentctl.
 package runtime
 
 import (

@@ -63,21 +63,17 @@ func SetObsDirForTesting(dir string) {
 // If AGENTCTL_OBS_DIR is unset or empty, this is a no-op.
 // Errors are logged and returned to the caller; callers may choose to ignore them
 // since observability is typically best-effort.
-// The function respects context cancellation and will return ctx.Err() if canceled.
+// The function ignores context cancellation to avoid dropping terminal events.
 //
 // Index:
 // - Purpose: Persist a structured observability event as NDJSON
-// - Flow: validate ctx → resolve observability dir → validate name → ensure dir → append JSON line
+// - Flow: resolve observability dir → validate name → ensure dir → append JSON line
 // - SideEffects: creates directories; appends to NDJSON file
-// - FailureModes: invalid name ignored, mkdir errors, file open/encode errors, context cancellation
+// - FailureModes: invalid name ignored, mkdir errors, file open/encode errors
 // - Observability: emits stderr logs on write failures
 // - Related: getObsDir, logWriteError
-// - Keywords: ndjson, observability_dir, events, write_event, context_cancel
-func WriteEvent(ctx context.Context, name string, v any) error {
-	// Check for cancellation before starting
-	if err := ctx.Err(); err != nil {
-		return err
-	}
+// - Keywords: ndjson, observability_dir, events, write_event
+func WriteEvent(_ context.Context, name string, v any) error {
 	dir := getObsDir()
 	if dir == "" {
 		return nil // observability disabled

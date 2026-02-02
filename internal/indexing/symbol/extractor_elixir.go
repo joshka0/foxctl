@@ -56,8 +56,22 @@ func (e *ElixirExtractor) Extract(_ context.Context, filePath string, content []
 	lineOffsets := computeLineOffsets(lines)
 
 	var symbols []Symbol
+	var pendingDoc string
+	var pendingTypeDoc string
 
-	for i, line := range lines {
+	for i := 0; i < len(lines); i++ {
+		line := lines[i]
+		if doc, endIdx, ok := parseElixirDocAttribute(lines, i, "@doc"); ok {
+			pendingDoc = doc
+			i = endIdx
+			continue
+		}
+		if doc, endIdx, ok := parseElixirDocAttribute(lines, i, "@typedoc"); ok {
+			pendingTypeDoc = doc
+			i = endIdx
+			continue
+		}
+
 		name, kind, signature, ok := parseElixirDeclaration(line)
 		if !ok {
 			continue
@@ -96,19 +110,31 @@ func (e *ElixirExtractor) Extract(_ context.Context, filePath string, content []
 		}
 
 		body := content[startByte:endByte]
+		doc := ""
+		switch kind {
+		case KindClass:
+			doc = extractElixirModuleDoc(lines, i, endLine-1)
+		case KindType:
+			doc = pendingTypeDoc
+			pendingTypeDoc = ""
+		default:
+			doc = pendingDoc
+			pendingDoc = ""
+		}
 
 		symbols = append(symbols, Symbol{
-			ID:         ID(filePath, name),
-			FilePath:   filePath,
-			Name:       name,
-			Language:   "elixir",
-			Kind:       kind,
-			StartByte:  startByte,
-			EndByte:    endByte,
-			StartLine:  startLine,
-			EndLine:    endLine,
-			Signature:  signature,
-			BodyDigest: ComputeDigest(body),
+			ID:            ID(filePath, name),
+			FilePath:      filePath,
+			Name:          name,
+			Language:      "elixir",
+			Kind:          kind,
+			StartByte:     startByte,
+			EndByte:       endByte,
+			StartLine:     startLine,
+			EndLine:       endLine,
+			Signature:     signature,
+			BodyDigest:    ComputeDigest(body),
+			Documentation: strings.TrimSpace(doc),
 		})
 	}
 
@@ -118,6 +144,70 @@ func (e *ElixirExtractor) Extract(_ context.Context, filePath string, content []
 // ExtractCalls is not supported yet for Elixir.
 func (e *ElixirExtractor) ExtractCalls(_ context.Context, _ Symbol, _ []byte) ([]string, error) {
 	return nil, nil
+}
+
+// extractElixirModuleDoc finds a moduledoc string inside a module block.
+func extractElixirModuleDoc(lines []string, startIdx, endIdx int) string {
+	if startIdx < 0 {
+		return ""
+	}
+	if endIdx >= len(lines) {
+		endIdx = len(lines) - 1
+	}
+	for i := startIdx + 1; i <= endIdx && i < len(lines); i++ {
+		if doc, end, ok := parseElixirDocAttribute(lines, i, "@moduledoc"); ok {
+			_ = end
+			return doc
+		}
+	}
+	return ""
+}
+
+func parseElixirDocAttribute(lines []string, startIdx int, attr string) (string, int, bool) {
+	line := strings.TrimSpace(strings.TrimRight(lines[startIdx], "\r"))
+	if !strings.HasPrefix(line, attr) {
+		return "", startIdx, false
+	}
+	rest := strings.TrimSpace(strings.TrimPrefix(line, attr))
+	if rest == "false" || rest == "nil" {
+		return "", startIdx, true
+	}
+	doc, endIdx, ok := parseElixirDocValue(lines, startIdx, rest)
+	if !ok {
+		return "", startIdx, true
+	}
+	return doc, endIdx, true
+}
+
+func parseElixirDocValue(lines []string, startIdx int, rest string) (string, int, bool) {
+	if strings.HasPrefix(rest, "\"\"\"") {
+		return parseElixirTripleQuoted(lines, startIdx, rest, "\"\"\"")
+	}
+	if strings.HasPrefix(rest, "\"") {
+		trimmed := strings.TrimPrefix(rest, "\"")
+		if idx := strings.LastIndex(trimmed, "\""); idx >= 0 {
+			return strings.TrimSpace(trimmed[:idx]), startIdx, true
+		}
+		return strings.TrimSpace(trimmed), startIdx, true
+	}
+	return "", startIdx, false
+}
+
+func parseElixirTripleQuoted(lines []string, startIdx int, rest, quote string) (string, int, bool) {
+	content := strings.TrimPrefix(rest, quote)
+	if idx := strings.Index(content, quote); idx >= 0 {
+		return strings.TrimSpace(content[:idx]), startIdx, true
+	}
+	parts := []string{content}
+	for i := startIdx + 1; i < len(lines); i++ {
+		line := strings.TrimRight(lines[i], "\r")
+		if idx := strings.Index(line, quote); idx >= 0 {
+			parts = append(parts, line[:idx])
+			return strings.TrimSpace(strings.Join(parts, "\n")), i, true
+		}
+		parts = append(parts, line)
+	}
+	return strings.TrimSpace(strings.Join(parts, "\n")), len(lines) - 1, true
 }
 
 // parseElixirDeclaration parses a line and extracts symbol info if it's a declaration.

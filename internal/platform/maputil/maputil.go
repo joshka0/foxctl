@@ -1,4 +1,3 @@
-// Package maputil provides small helpers for working with map[string]any values.
 package maputil
 
 // AsStringMap returns the map if the value is a map[string]any.

@@ -475,6 +475,45 @@ end`
 	}
 }
 
+func TestElixirExtractorDocs(t *testing.T) {
+	source := `defmodule MyApp.Users do
+  @moduledoc "User management"
+
+  @doc "Creates a user."
+  def create(), do: :ok
+
+  @doc false
+  def hidden(), do: :ok
+
+  @typedoc "User id"
+  @type user_id :: integer()
+end`
+
+	extractor := NewElixirExtractor()
+	syms, err := extractor.Extract(context.Background(), "test.ex", []byte(source))
+	if err != nil {
+		t.Fatalf("extract: %v", err)
+	}
+
+	docs := map[string]string{}
+	for _, sym := range syms {
+		docs[sym.Name] = sym.Documentation
+	}
+
+	if docs["MyApp.Users"] != "User management" {
+		t.Errorf("unexpected doc for module: %q", docs["MyApp.Users"])
+	}
+	if docs["create"] != "Creates a user." {
+		t.Errorf("unexpected doc for create: %q", docs["create"])
+	}
+	if docs["hidden"] != "" {
+		t.Errorf("expected empty doc for hidden, got %q", docs["hidden"])
+	}
+	if docs["user_id"] != "User id" {
+		t.Errorf("unexpected doc for user_id: %q", docs["user_id"])
+	}
+}
+
 func TestElixirExtractorSupportedLanguages(t *testing.T) {
 	extractor := NewElixirExtractor()
 	langs := extractor.SupportedLanguages()

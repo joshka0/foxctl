@@ -9,7 +9,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/platform/workspace"
 )
 
-// Re-export commonly used functions from hooks/pathutil
+// Re-export commonly used functions from internal/platform/pathutil
 var (
 	// ExtractPath extracts the file path from tool input JSON.
 	ExtractPath = platformpath.ExtractPath

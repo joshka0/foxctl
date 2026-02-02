@@ -14,13 +14,13 @@ import (
 	"github.com/rs/zerolog"
 )
 
-// Model configurations
+// ModelDevstral is an OpenRouter free model.
+// ModelTrinityMini is an OpenRouter free model.
+// ModelGLM is a Cerebras model.
 const (
-	// OpenRouter free models
 	ModelDevstral    = "mistralai/devstral-2512:free"
 	ModelTrinityMini = "arcee-ai/trinity-mini:free"
-	// Cerebras
-	ModelGLM = "zai-glm-4.7"
+	ModelGLM         = "zai-glm-4.7"
 )
 
 func main() {

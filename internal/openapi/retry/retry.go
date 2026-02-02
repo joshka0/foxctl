@@ -1,4 +1,3 @@
-// Package retry implements retry logic for OpenAPI HTTP requests.
 package retry
 
 import (
@@ -47,6 +46,14 @@ func New(cfg Config) *Retryer {
 
 // Execute runs fn until it succeeds, the context is canceled, or retries are exhausted.
 // The provided function should return the HTTP response to inspect for retryable status codes.
+//
+// Index:
+// - Purpose: Retry HTTP operations with backoff and Retry-After support
+// - Flow: call fn -> inspect status -> compute delay -> sleep -> retry until max
+// - SideEffects: sleeps between retries; closes response bodies on retry
+// - FailureModes: context cancellation, function errors, nil response
+// - Related: Retryer.nextDelay, parseRetryAfter
+// - Keywords: retry, max_attempts, initial_delay, multiplier, retry_after, status_code
 func (r *Retryer) Execute(ctx context.Context, fn func() (*http.Response, error)) (*http.Response, error) {
 	if fn == nil {
 		return nil, errors.New("retry: nil function")

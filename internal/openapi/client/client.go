@@ -1,4 +1,3 @@
-// Package client provides HTTP client utilities for OpenAPI operations.
 package client
 
 import (
@@ -151,6 +150,14 @@ func (e *Error) Unwrap() error {
 }
 
 // Execute performs the HTTP request and returns a processed response.
+//
+// Index:
+// - Purpose: Execute an OpenAPI HTTP request and normalize response data
+// - Flow: attach traces -> send request -> read body -> build response metadata -> inline or store in CAS
+// - SideEffects: network calls; CAS writes when response stored
+// - FailureModes: network errors, read errors, CAS write errors, HTTP error classification
+// - Related: Client.readBody, shouldInline, inlineValue, previewOnly, storage.CASStore.Put
+// - Keywords: http_execute, status_code, content_type, preview, digest, timing, cas
 func (c *Client) Execute(ctx context.Context, req *http.Request) (*Response, error) {
 	if req == nil {
 		return nil, &Error{Code: "EARG", Message: "request is nil"}

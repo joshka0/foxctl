@@ -13,28 +13,37 @@ import (
 type EventType string
 
 const (
-	// Mail events (PERSISTED to trajectory.db)
+	// EventMailReceived is a persisted mail-received event.
 	EventMailReceived EventType = "mail.received"
-	EventMailSent     EventType = "mail.sent"
-	EventMailAcked    EventType = "mail.acked"
-	EventMailExpired  EventType = "mail.expired"
+	// EventMailSent is a persisted mail-sent event.
+	EventMailSent EventType = "mail.sent"
+	// EventMailAcked is a persisted mail-acked event.
+	EventMailAcked EventType = "mail.acked"
+	// EventMailExpired is a persisted mail-expired event.
+	EventMailExpired EventType = "mail.expired"
 
-	// Task events
-	EventTaskCreated   EventType = "task.created"
-	EventTaskUpdated   EventType = "task.updated"
-	EventTaskCompleted EventType = "task.completed" // PERSISTED
+	// EventTaskCreated is a task-created event.
+	EventTaskCreated EventType = "task.created"
+	// EventTaskUpdated is a task-updated event.
+	EventTaskUpdated EventType = "task.updated"
+	// EventTaskCompleted is a persisted task-completed event.
+	EventTaskCompleted EventType = "task.completed"
 
-	// Agent events (PERSISTED)
+	// EventAgentStarted is a persisted agent-started event.
 	EventAgentStarted EventType = "agent.started"
+	// EventAgentStopped is a persisted agent-stopped event.
 	EventAgentStopped EventType = "agent.stopped"
-	EventAgentError   EventType = "agent.error"
+	// EventAgentError is a persisted agent-error event.
+	EventAgentError EventType = "agent.error"
 
-	// Hook events (ephemeral - too noisy)
+	// EventHookTriggered is an ephemeral hook-triggered event.
 	EventHookTriggered EventType = "hook.triggered"
-	EventHookBlocked   EventType = "hook.blocked"
+	// EventHookBlocked is an ephemeral hook-blocked event.
+	EventHookBlocked EventType = "hook.blocked"
 
-	// File events (ephemeral - reconstruct from git)
+	// EventFileChanged is an ephemeral file-changed event.
 	EventFileChanged EventType = "file.changed"
+	// EventFileCreated is an ephemeral file-created event.
 	EventFileCreated EventType = "file.created"
 )
 

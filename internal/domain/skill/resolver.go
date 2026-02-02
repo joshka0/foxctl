@@ -1,4 +1,3 @@
-// Package skill provides skill discovery and resolution logic.
 package skill
 
 import (

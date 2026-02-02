@@ -1,6 +1,3 @@
-// Package semantic implements the semantic file index as a post-review indexer.
-// This file defines job contracts for semantic_index.init_files and
-// semantic_index.update_files jobs per semantic_file_index.md spec §6.
 package semantic
 
 import (

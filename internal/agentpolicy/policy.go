@@ -1,11 +1,3 @@
-// Package agentpolicy provides agent profile definitions and bash command authorization
-// for Claude Code subagent capability restrictions.
-//
-// Profiles define what agentctl skills a subagent is allowed to run:
-//   - explorer: Read-only code exploration (semantic_search, swe_grep, symbols, etc.)
-//   - reviewer: Explorer + analysis skills (complexity, security, imports)
-//   - implementer: Reviewer + write skills (test/run, smart_write)
-//   - unrestricted: All skills allowed
 package agentpolicy
 
 // Profile represents an agent capability profile.

@@ -1,4 +1,3 @@
-// Package runtime provides the agent runtime using agentctl's LLMChatEngine.
 package runtime
 
 import (

@@ -1,5 +1,4 @@
 //nolint:forbidigo // This IS the logging infrastructure - zerolog/stderr usage is intentional
-// Package logging provides structured logging helpers with automatic secret redaction.
 package logging
 
 import (

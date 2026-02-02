@@ -1,6 +1,3 @@
-// Package symbol implements the code symbol index as a post-review indexer.
-// This file defines job contracts for code_symbol_index.init_files and
-// code_symbol_index.update_files jobs per code_symbol_index_and_swe_grep.md spec.
 package symbol
 
 import (

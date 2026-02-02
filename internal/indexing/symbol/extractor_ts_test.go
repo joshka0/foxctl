@@ -127,3 +127,25 @@ var flag = true
 		t.Errorf("symbol snapshots mismatch\nexpected: %s\nactual: %s", expectedJSON, actualJSON)
 	}
 }
+
+func TestTypeScriptExtractorDocs(t *testing.T) {
+	source := "// Adds numbers\n// and returns the sum.\nexport function add(a: number, b: number) {\n  return a + b\n}\n\n/** Greets a user. */\nexport class Greeter {}\n"
+
+	extractor := NewTypeScriptExtractor()
+	syms, err := extractor.Extract(context.Background(), "src/docs.ts", []byte(source))
+	if err != nil {
+		t.Fatalf("extract: %v", err)
+	}
+
+	docs := map[string]string{}
+	for _, sym := range syms {
+		docs[sym.Name] = sym.Documentation
+	}
+
+	if docs["add"] != "Adds numbers\nand returns the sum." {
+		t.Errorf("unexpected doc for add: %q", docs["add"])
+	}
+	if docs["Greeter"] != "Greets a user." {
+		t.Errorf("unexpected doc for Greeter: %q", docs["Greeter"])
+	}
+}

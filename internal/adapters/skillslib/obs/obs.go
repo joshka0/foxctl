@@ -69,14 +69,14 @@ const (
 
 // Data key constants - standard keys for the data map
 const (
-	// Artifact keys for replay capability
+	// KeyInputArtifact is the data key for input artifact digests.
 	KeyInputArtifact  = observability.ArtifactInput
 	KeyResultArtifact = observability.ArtifactResult
 	KeyStderrArtifact = observability.ArtifactStderr
 	KeyTrajectoryID   = observability.ArtifactTrajectory
 	KeyMailboxMsgID   = observability.ArtifactMailbox
 
-	// Common metric keys
+	// KeyCacheHit reports whether a cache lookup hit.
 	KeyCacheHit      = "cache_hit"
 	KeyFilesCount    = "files"
 	KeyCandidates    = "candidates"

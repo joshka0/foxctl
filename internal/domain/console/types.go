@@ -1,4 +1,3 @@
-// Package console provides types for interactive actor console communication.
 package console
 
 // PayloadType defines the type of console message.

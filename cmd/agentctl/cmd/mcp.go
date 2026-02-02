@@ -1,4 +1,3 @@
-// Package cmd provides the mcp command for running agentctl as an MCP server.
 package cmd
 
 import (

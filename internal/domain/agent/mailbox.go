@@ -17,7 +17,6 @@ const (
 	// MessageTypeEvent represents a notification.
 	MessageTypeEvent MessageType = "agent.event"
 
-	// Console message types for interactive actor consoles.
 	// MessageTypeConsoleAsk is a user request from console.
 	MessageTypeConsoleAsk MessageType = "console.ask"
 	// MessageTypeConsoleReply is the final response to console.

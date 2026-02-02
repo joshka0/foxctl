@@ -34,27 +34,22 @@ const (
 	// maxResponseSize limits HTTP response body reads to prevent memory exhaustion.
 	maxResponseSize = 10 * 1024 * 1024 // 10MB
 
-	// Operations
 	OpWalletInit   = "wallet/init"
 	OpWalletStatus = "wallet/status"
 	OpFetch        = "fetch"
 	OpPay          = "pay"
 
-	// Wallet types
 	WalletTypeCDP   = "cdp"
 	WalletTypeLocal = "local"
 
-	// Networks (CAIP-2 format internally)
 	NetworkBaseMainnet   = "base-mainnet"
 	NetworkBaseSepolia   = "base-sepolia"
 	NetworkSolanaMainnet = "solana-mainnet"
 	NetworkSolanaDevnet  = "solana-devnet"
 
-	// USDC contract addresses
 	USDCBaseMainnet = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"
 	USDCBaseSepolia = "0x036CbD53842c5426634e7929541eC2318f3dCF7e"
 
-	// RPC endpoints
 	RPCBaseMainnet = "https://mainnet.base.org"
 	RPCBaseSepolia = "https://sepolia.base.org"
 )

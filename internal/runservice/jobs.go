@@ -28,6 +28,14 @@ func (e *Executor) ensureJobStore() error {
 }
 
 // PrepareJob finds or creates a job for the given input.
+//
+// Index:
+// - Purpose: Find or create a job and initialize trajectory capture context
+// - Flow: ensure job store -> prepare job -> persist workspace -> set correlation ID -> start capture -> capture hook call
+// - SideEffects: writes job store; starts trajectory capture; may update workspace metadata
+// - FailureModes: job store errors, workspace persistence errors (warned), capture start errors (ignored)
+// - Related: jobs.Store.FindOrPrepareSkillJob, trajectorycapture.Start, Executor.ExecuteSync
+// - Keywords: prepare_job, dedupe, workspace, correlation_id, trajectorycapture, job_store, hooks
 func (e *Executor) PrepareJob(input []byte) (jobs.Job, bool, error) {
 	if err := e.ensureJobStore(); err != nil {
 		return jobs.Job{}, false, err

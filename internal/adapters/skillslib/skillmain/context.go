@@ -79,7 +79,7 @@ func (rc *RunContext) InlineLimit() int {
 	return rc.InlineKB * 1024
 }
 
-// CASStore returns true if CAS storage is enabled.
+// ShouldStoreCAS returns true if CAS storage is enabled.
 func (rc *RunContext) ShouldStoreCAS() bool {
 	return !rc.NoCAS && rc.Config.CAS.Store
 }

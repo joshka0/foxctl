@@ -1,4 +1,3 @@
-// Package runner provides a unified interface for executing skills across different distribution types.
 package runner
 
 import (
@@ -64,6 +63,14 @@ type RunOptions struct {
 }
 
 // RunWithOptions executes the appropriate runtime for a manifest using structured options.
+//
+// Index:
+// - Purpose: Execute a skill using exec or WASI runtime with explicit options
+// - Flow: resolve workspace/workdir -> select runner -> build env -> run -> return output
+// - SideEffects: launches subprocess or WASI module
+// - FailureModes: unsupported distribution, runner errors
+// - Related: Run, buildSkillEnv, execrunner.Runner, wasirunner.Runner
+// - Keywords: run_options, exec, wasi, work_dir, extra_env, manifest, artifact_path, runner
 func RunWithOptions(ctx context.Context, opts RunOptions) ([]byte, []byte, error) {
 	ws, _ := workspace.FromContext(ctx)
 	if strings.TrimSpace(ws) == "" {

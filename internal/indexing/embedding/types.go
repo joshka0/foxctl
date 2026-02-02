@@ -1,4 +1,3 @@
-// Package embedding provides a background queue for generating symbol embeddings.
 package embedding
 
 import (

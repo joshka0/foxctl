@@ -57,7 +57,6 @@ type positionParam struct {
 	Character int `json:"character"`
 }
 
-// Result types for different operations
 // Location represents a file location with line and column coordinates and optional end position for ranges.
 type Location struct {
 	File   string `json:"file"`

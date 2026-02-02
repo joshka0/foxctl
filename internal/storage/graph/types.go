@@ -21,20 +21,20 @@ type EdgeType string
 
 // Edge type constants.
 const (
-	// Session-related edges
+	// EdgeTypeTouched marks a session touching a symbol.
 	EdgeTypeTouched  EdgeType = "touched"   // session → symbol (read/accessed)
 	EdgeTypeModified EdgeType = "modified"  // session/task → symbol (edited)
 	EdgeTypeWorkedOn EdgeType = "worked_on" // session → task
 
-	// Code-related edges
+	// EdgeTypeCalls marks a symbol-to-symbol call edge.
 	EdgeTypeCalls   EdgeType = "calls"   // symbol → symbol (function call)
 	EdgeTypeImports EdgeType = "imports" // symbol/file → symbol/file
 
-	// Task-related edges
+	// EdgeTypeDependsOn marks a task dependency edge.
 	EdgeTypeDependsOn EdgeType = "depends_on" // task → task
 	EdgeTypeParentOf  EdgeType = "parent_of"  // task → task (subtask relationship)
 
-	// General edges
+	// EdgeTypeAbout marks a memory-about-entity edge.
 	EdgeTypeAbout     EdgeType = "about"      // memory → entity (what the memory is about)
 	EdgeTypeRelatesTo EdgeType = "relates_to" // general relationship
 )

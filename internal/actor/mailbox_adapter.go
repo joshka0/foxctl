@@ -1,4 +1,3 @@
-// Package actor provides a reactive actor system for agentctl agents.
 package actor
 
 import (

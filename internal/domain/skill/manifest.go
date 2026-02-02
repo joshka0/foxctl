@@ -1,4 +1,3 @@
-// Package skill parses and validates skill manifests.
 package skill
 
 import (

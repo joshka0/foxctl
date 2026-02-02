@@ -46,7 +46,7 @@ type Diagnostic struct {
 	Source   string           `json:"source,omitempty"`
 }
 
-// Output types
+// Symbol represents a document symbol with name, kind, and location.
 type Symbol struct {
 	Name   string `json:"name"`
 	Kind   string `json:"kind"`

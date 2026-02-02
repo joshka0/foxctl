@@ -2,6 +2,7 @@ package symbol
 
 import (
 	"context"
+	"path/filepath"
 	"regexp"
 	"strings"
 
@@ -16,15 +17,20 @@ func NewTypeScriptExtractor() *TypeScriptExtractor {
 	return &TypeScriptExtractor{}
 }
 
-// SupportedLanguages returns ["typescript"].
+// SupportedLanguages returns ["typescript", "javascript"].
 func (e *TypeScriptExtractor) SupportedLanguages() []string {
-	return []string{"typescript"}
+	return []string{"typescript", "javascript"}
 }
 
 // Extract parses TypeScript source and returns top-level symbols.
 func (e *TypeScriptExtractor) Extract(_ context.Context, filePath string, content []byte) ([]Symbol, error) {
 	lines := strings.Split(string(content), "\n")
 	lineOffsets := computeLineOffsets(lines)
+	lang := "typescript"
+	switch strings.ToLower(filepath.Ext(filePath)) {
+	case ".js", ".jsx", ".mjs", ".cjs":
+		lang = "javascript"
+	}
 
 	var symbols []Symbol
 	for i, line := range lines {
@@ -80,19 +86,21 @@ func (e *TypeScriptExtractor) Extract(_ context.Context, filePath string, conten
 		}
 
 		body := content[startByte:endByte]
+		doc := extractTSLeadingDoc(lines, i)
 
 		symbols = append(symbols, Symbol{
-			ID:         ID(filePath, name),
-			FilePath:   filePath,
-			Name:       name,
-			Language:   "typescript",
-			Kind:       kind,
-			StartByte:  startByte,
-			EndByte:    endByte,
-			StartLine:  startLine,
-			EndLine:    endLine,
-			Signature:  signature,
-			BodyDigest: ComputeDigest(body),
+			ID:            ID(filePath, name),
+			FilePath:      filePath,
+			Name:          name,
+			Language:      lang,
+			Kind:          kind,
+			StartByte:     startByte,
+			EndByte:       endByte,
+			StartLine:     startLine,
+			EndLine:       endLine,
+			Signature:     signature,
+			BodyDigest:    ComputeDigest(body),
+			Documentation: strings.TrimSpace(doc),
 		})
 	}
 
@@ -176,6 +184,78 @@ func extractName(input string) string {
 	input = strings.TrimSpace(input)
 	match := identPattern.FindString(input)
 	return match
+}
+
+func extractTSLeadingDoc(lines []string, declIdx int) string {
+	if declIdx <= 0 {
+		return ""
+	}
+	prev := strings.TrimSpace(strings.TrimRight(lines[declIdx-1], "\r"))
+	if prev == "" {
+		return ""
+	}
+	if strings.HasPrefix(prev, "//") {
+		return extractTSLineCommentBlock(lines, declIdx-1)
+	}
+	if strings.Contains(prev, "*/") {
+		return extractTSBlockComment(lines, declIdx-1)
+	}
+	return ""
+}
+
+func extractTSLineCommentBlock(lines []string, endIdx int) string {
+	start := endIdx
+	for start >= 0 {
+		trimmed := strings.TrimSpace(strings.TrimRight(lines[start], "\r"))
+		if strings.HasPrefix(trimmed, "//") {
+			start--
+			continue
+		}
+		break
+	}
+	start++
+
+	var docLines []string
+	for i := start; i <= endIdx; i++ {
+		trimmed := strings.TrimSpace(strings.TrimRight(lines[i], "\r"))
+		trimmed = strings.TrimPrefix(trimmed, "//")
+		trimmed = strings.TrimSpace(trimmed)
+		docLines = append(docLines, trimmed)
+	}
+	return strings.TrimSpace(strings.Join(docLines, "\n"))
+}
+
+func extractTSBlockComment(lines []string, endIdx int) string {
+	start := -1
+	for i := endIdx; i >= 0; i-- {
+		trimmed := strings.TrimSpace(strings.TrimRight(lines[i], "\r"))
+		if strings.Contains(trimmed, "/**") {
+			start = i
+			break
+		}
+		if strings.Contains(trimmed, "/*") && !strings.Contains(trimmed, "/**") {
+			return ""
+		}
+	}
+	if start == -1 {
+		return ""
+	}
+
+	var docLines []string
+	for i := start; i <= endIdx; i++ {
+		line := strings.TrimSpace(strings.TrimRight(lines[i], "\r"))
+		line = strings.TrimPrefix(line, "/**")
+		line = strings.TrimPrefix(line, "/*")
+		line = strings.TrimSuffix(line, "*/")
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "*") {
+			line = strings.TrimSpace(strings.TrimPrefix(line, "*"))
+		}
+		line = strings.TrimSuffix(line, "*/")
+		line = strings.TrimSpace(line)
+		docLines = append(docLines, line)
+	}
+	return strings.TrimSpace(strings.Join(docLines, "\n"))
 }
 
 func computeLineOffsets(lines []string) []int {
