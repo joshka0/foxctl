@@ -74,11 +74,6 @@ func (s *TursoStore) SearchSimilar(_ context.Context, _ string, _ []float32, _ i
 	return nil, errors.New("turso store not available")
 }
 
-// SearchSimilarByType is a stub.
-func (s *TursoStore) SearchSimilarByType(_ context.Context, _ string, _ string, _ []float32, _ int) ([]ScoredEntry, error) {
-	return nil, errors.New("turso store not available")
-}
-
 // CreateVectorIndex is a stub.
 func (s *TursoStore) CreateVectorIndex(_ context.Context) error {
 	return errors.New("turso store not available")
