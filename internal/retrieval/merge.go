@@ -97,6 +97,11 @@ func (mc *mergedCandidate) merge(other Candidate, weightedScore float64) {
 		mc.candidate.Name = other.Name
 		mc.candidate.Kind = other.Kind
 		mc.candidate.Line = other.Line
+		mc.candidate.Documentation = other.Documentation
+	} else if other.SymbolID != "" && mc.candidate.SymbolID == other.SymbolID {
+		if mc.candidate.Documentation == "" && other.Documentation != "" {
+			mc.candidate.Documentation = other.Documentation
+		}
 	}
 
 	// Keep best raw score for reference

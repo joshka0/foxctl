@@ -8,6 +8,7 @@ import (
 
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skilltest"
+	"github.com/jkatigb/agentctl/internal/platform/workspace"
 	"github.com/jkatigb/agentctl/internal/storage"
 	"github.com/jkatigb/agentctl/internal/storage/memory"
 	"github.com/stretchr/testify/assert"
@@ -53,6 +54,14 @@ func openMemoryStore(t *testing.T, rc *skillmain.RunContext) *memory.Store {
 	require.NoError(t, err)
 	t.Cleanup(func() { store.Close() })
 	return store
+}
+
+func workspaceIDForTest(rc *skillmain.RunContext) string {
+	tid := workspace.ID(rc.Workspace)
+	if tid == "" {
+		return rc.Workspace
+	}
+	return tid
 }
 
 func seedCodemap(t *testing.T, store *memory.Store, workspace string, id, title string, traces int) storage.NamedEntry {
@@ -115,8 +124,9 @@ func TestCodemapList_WithCodemaps(t *testing.T) {
 	defer cleanup()
 
 	store := openMemoryStore(t, rc)
-	seedCodemap(t, store, rc.Workspace, "id-1", "Auth Flow", 2)
-	seedCodemap(t, store, rc.Workspace, "id-2", "Session Handler", 3)
+	workspaceID := workspaceIDForTest(rc)
+	seedCodemap(t, store, workspaceID, "id-1", "Auth Flow", 2)
+	seedCodemap(t, store, workspaceID, "id-2", "Session Handler", 3)
 
 	in := Input{}
 
@@ -143,8 +153,9 @@ func TestCodemapList_Pagination(t *testing.T) {
 
 	store := openMemoryStore(t, rc)
 	// Seed 15 codemaps
+	workspaceID := workspaceIDForTest(rc)
 	for i := 0; i < 15; i++ {
-		seedCodemap(t, store, rc.Workspace, "id-"+string(rune('a'+i)), "Map "+string(rune('A'+i)), 1)
+		seedCodemap(t, store, workspaceID, "id-"+string(rune('a'+i)), "Map "+string(rune('A'+i)), 1)
 	}
 
 	in := Input{
@@ -175,8 +186,9 @@ func TestCodemapList_PaginationOffset(t *testing.T) {
 
 	store := openMemoryStore(t, rc)
 	// Seed 10 codemaps
+	workspaceID := workspaceIDForTest(rc)
 	for i := 0; i < 10; i++ {
-		seedCodemap(t, store, rc.Workspace, "id-"+string(rune('a'+i)), "Map "+string(rune('A'+i)), 1)
+		seedCodemap(t, store, workspaceID, "id-"+string(rune('a'+i)), "Map "+string(rune('A'+i)), 1)
 	}
 
 	in := Input{
@@ -224,13 +236,14 @@ func TestCodemapList_FiltersNonCodemaps(t *testing.T) {
 
 	store := openMemoryStore(t, rc)
 	// Seed a codemap
-	seedCodemap(t, store, rc.Workspace, "real-codemap", "Real Map", 1)
+	workspaceID := workspaceIDForTest(rc)
+	seedCodemap(t, store, workspaceID, "real-codemap", "Real Map", 1)
 
 	// Seed a non-codemap entry
 	entry := storage.NamedEntry{
 		Name:      "gotcha://something",
 		Type:      "gotcha",
-		Workspace: rc.Workspace,
+		Workspace: workspaceID,
 		Summary:   "Not a codemap",
 		Result:    []byte("{}"),
 	}
@@ -258,7 +271,8 @@ func TestCodemapList_IncludesTraceCount(t *testing.T) {
 	defer cleanup()
 
 	store := openMemoryStore(t, rc)
-	seedCodemap(t, store, rc.Workspace, "trace-count-test", "Traced Map", 5)
+	workspaceID := workspaceIDForTest(rc)
+	seedCodemap(t, store, workspaceID, "trace-count-test", "Traced Map", 5)
 
 	in := Input{}
 
@@ -297,7 +311,7 @@ func TestCodemapList_SummaryTruncated(t *testing.T) {
 	entry := storage.NamedEntry{
 		Name:      "codemap://long-summary",
 		Type:      "codemap",
-		Workspace: rc.Workspace,
+		Workspace: workspaceIDForTest(rc),
 		Summary:   longSummary,
 		Result:    resultJSON,
 	}
@@ -331,7 +345,8 @@ func TestCodemapList_StatsIncluded(t *testing.T) {
 	defer cleanup()
 
 	store := openMemoryStore(t, rc)
-	seedCodemap(t, store, rc.Workspace, "stats-test", "Stats", 1)
+	workspaceID := workspaceIDForTest(rc)
+	seedCodemap(t, store, workspaceID, "stats-test", "Stats", 1)
 
 	in := Input{}
 
@@ -402,9 +417,14 @@ func TestCodemapList_WorkspaceScoped(t *testing.T) {
 
 	store := openMemoryStore(t, rc)
 	// Codemap in workspace
-	seedCodemap(t, store, rc.Workspace, "ws-codemap", "Workspace Map", 1)
+	workspaceID := workspaceIDForTest(rc)
+	seedCodemap(t, store, workspaceID, "ws-codemap", "Workspace Map", 1)
 	// Codemap in different workspace
-	seedCodemap(t, store, "/other/workspace", "other-codemap", "Other Map", 1)
+	otherWorkspace := workspace.ID("/other/workspace")
+	if otherWorkspace == "" {
+		otherWorkspace = "/other/workspace"
+	}
+	seedCodemap(t, store, otherWorkspace, "other-codemap", "Other Map", 1)
 
 	in := Input{}
 

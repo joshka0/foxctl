@@ -7,11 +7,12 @@ import (
 	"testing"
 
 	"github.com/jkatigb/agentctl/internal/indexing"
+	"github.com/jkatigb/agentctl/internal/platform/workspace"
 	"github.com/jkatigb/agentctl/internal/storage/memory"
 	"github.com/rs/zerolog"
 )
 
-func setupTestIndexer(t *testing.T, cfg Config) (*Indexer, *memory.Store, string) {
+func setupTestIndexer(t *testing.T, cfg Config) (*Indexer, *memory.Store, string, string) {
 	t.Helper()
 
 	tmpDir := t.TempDir()
@@ -33,7 +34,8 @@ func setupTestIndexer(t *testing.T, cfg Config) (*Indexer, *memory.Store, string
 	logger := zerolog.Nop()
 	idx := NewIndexer(cfg, store, nil, workspaceDir, logger)
 
-	return idx, store, workspaceDir
+	workspaceID := workspace.ID(workspaceDir)
+	return idx, store, workspaceDir, workspaceID
 }
 
 func createTestFile(t *testing.T, dir, path, content string) {
@@ -48,17 +50,17 @@ func createTestFile(t *testing.T, dir, path, content string) {
 }
 
 func TestIndexer_ID(t *testing.T) {
-	idx, _, _ := setupTestIndexer(t, Config{Enabled: true})
+	idx, _, _, _ := setupTestIndexer(t, Config{Enabled: true})
 	if idx.ID() != IndexerID {
 		t.Errorf("expected ID %q, got %q", IndexerID, idx.ID())
 	}
 }
 
 func TestIndexer_Index_Disabled(t *testing.T) {
-	idx, _, _ := setupTestIndexer(t, Config{Enabled: false})
+	idx, _, _, workspaceID := setupTestIndexer(t, Config{Enabled: false})
 
 	event := indexing.PostReviewEvent{
-		WorkspaceID: "ws-1",
+		WorkspaceID: workspaceID,
 		Files: []indexing.FileChange{
 			{Path: "main.go", ChangeKind: indexing.ChangeKindModified},
 		},
@@ -74,7 +76,7 @@ func TestIndexer_Index_Disabled(t *testing.T) {
 }
 
 func TestIndexer_Index_GoFile(t *testing.T) {
-	idx, store, workspaceDir := setupTestIndexer(t, Config{Enabled: true})
+	idx, store, workspaceDir, workspaceID := setupTestIndexer(t, Config{Enabled: true})
 
 	goContent := `package main
 
@@ -104,7 +106,7 @@ func main() {
 	createTestFile(t, workspaceDir, "main.go", goContent)
 
 	event := indexing.PostReviewEvent{
-		WorkspaceID: "ws-go-test",
+		WorkspaceID: workspaceID,
 		TaskID:      "task-123",
 		ReviewID:    "review-456",
 		Reason:      "post_review",
@@ -125,8 +127,8 @@ func main() {
 	ctx := context.Background()
 
 	// Check Greet function
-	greetName := EntryName("ws-go-test", "main.go", "Greet")
-	greetEntry, err := store.Get(ctx, greetName, "ws-go-test")
+	greetName := EntryName(workspaceID, "main.go", "Greet")
+	greetEntry, err := store.Get(ctx, greetName, workspaceID)
 	if err != nil {
 		t.Fatalf("Get Greet entry failed: %v", err)
 	}
@@ -146,8 +148,8 @@ func main() {
 	}
 
 	// Check User struct
-	userName := EntryName("ws-go-test", "main.go", "User")
-	userEntry, err := store.Get(ctx, userName, "ws-go-test")
+	userName := EntryName(workspaceID, "main.go", "User")
+	userEntry, err := store.Get(ctx, userName, workspaceID)
 	if err != nil {
 		t.Fatalf("Get User entry failed: %v", err)
 	}
@@ -161,8 +163,8 @@ func main() {
 	}
 
 	// Check User.GetName method
-	getNameName := EntryName("ws-go-test", "main.go", "User.GetName")
-	getNameEntry, err := store.Get(ctx, getNameName, "ws-go-test")
+	getNameName := EntryName(workspaceID, "main.go", "User.GetName")
+	getNameEntry, err := store.Get(ctx, getNameName, workspaceID)
 	if err != nil {
 		t.Fatalf("Get User.GetName entry failed: %v", err)
 	}
@@ -176,8 +178,8 @@ func main() {
 	}
 
 	// Check file meta
-	metaName := FileMetaEntryName("ws-go-test", "main.go")
-	metaEntry, err := store.Get(ctx, metaName, "ws-go-test")
+	metaName := FileMetaEntryName(workspaceID, "main.go")
+	metaEntry, err := store.Get(ctx, metaName, workspaceID)
 	if err != nil {
 		t.Fatalf("Get file meta failed: %v", err)
 	}
@@ -192,12 +194,12 @@ func main() {
 }
 
 func TestIndexer_Index_UnsupportedLanguage(t *testing.T) {
-	idx, _, workspaceDir := setupTestIndexer(t, Config{Enabled: true})
+	idx, _, workspaceDir, workspaceID := setupTestIndexer(t, Config{Enabled: true})
 
 	createTestFile(t, workspaceDir, "data.json", `{"key": "value"}`)
 
 	event := indexing.PostReviewEvent{
-		WorkspaceID: "ws-unsupported",
+		WorkspaceID: workspaceID,
 		Files: []indexing.FileChange{
 			{Path: "data.json", ChangeKind: indexing.ChangeKindAdded},
 		},
@@ -213,14 +215,14 @@ func TestIndexer_Index_UnsupportedLanguage(t *testing.T) {
 }
 
 func TestIndexer_Index_DeletedFile(t *testing.T) {
-	idx, store, workspaceDir := setupTestIndexer(t, Config{Enabled: true})
+	idx, store, workspaceDir, workspaceID := setupTestIndexer(t, Config{Enabled: true})
 
 	// First, index a file
 	createTestFile(t, workspaceDir, "to_delete.go", "package main\n\nfunc Delete() {}\n")
 
 	ctx := context.Background()
 	addEvent := indexing.PostReviewEvent{
-		WorkspaceID: "ws-delete",
+		WorkspaceID: workspaceID,
 		Files: []indexing.FileChange{
 			{Path: "to_delete.go", ChangeKind: indexing.ChangeKindAdded, Language: "go"},
 		},
@@ -231,15 +233,15 @@ func TestIndexer_Index_DeletedFile(t *testing.T) {
 	}
 
 	// Verify file meta exists
-	metaName := FileMetaEntryName("ws-delete", "to_delete.go")
-	_, err = store.Get(ctx, metaName, "ws-delete")
+	metaName := FileMetaEntryName(workspaceID, "to_delete.go")
+	_, err = store.Get(ctx, metaName, workspaceID)
 	if err != nil {
 		t.Fatalf("File meta should exist: %v", err)
 	}
 
 	// Delete the file
 	deleteEvent := indexing.PostReviewEvent{
-		WorkspaceID: "ws-delete",
+		WorkspaceID: workspaceID,
 		Files: []indexing.FileChange{
 			{Path: "to_delete.go", ChangeKind: indexing.ChangeKindDeleted},
 		},
@@ -254,21 +256,21 @@ func TestIndexer_Index_DeletedFile(t *testing.T) {
 	}
 
 	// Verify file meta is deleted
-	_, err = store.Get(ctx, metaName, "ws-delete")
+	_, err = store.Get(ctx, metaName, workspaceID)
 	if err == nil {
 		t.Error("file meta should be deleted")
 	}
 }
 
 func TestIndexer_Index_IncrementalUpdate(t *testing.T) {
-	idx, store, workspaceDir := setupTestIndexer(t, Config{Enabled: true})
+	idx, store, workspaceDir, workspaceID := setupTestIndexer(t, Config{Enabled: true})
 
 	// Initial content
 	createTestFile(t, workspaceDir, "incremental.go", "package main\n\nfunc First() {}\n")
 
 	ctx := context.Background()
 	event := indexing.PostReviewEvent{
-		WorkspaceID: "ws-incremental",
+		WorkspaceID: workspaceID,
 		Files: []indexing.FileChange{
 			{Path: "incremental.go", ChangeKind: indexing.ChangeKindAdded, Language: "go"},
 		},
@@ -280,8 +282,8 @@ func TestIndexer_Index_IncrementalUpdate(t *testing.T) {
 	}
 
 	// Get initial digest
-	metaName := FileMetaEntryName("ws-incremental", "incremental.go")
-	metaEntry, err := store.Get(ctx, metaName, "ws-incremental")
+	metaName := FileMetaEntryName(workspaceID, "incremental.go")
+	metaEntry, err := store.Get(ctx, metaName, workspaceID)
 	if err != nil {
 		t.Fatalf("Get meta failed: %v", err)
 	}
@@ -306,7 +308,7 @@ func TestIndexer_Index_IncrementalUpdate(t *testing.T) {
 	}
 
 	// Check that meta was updated
-	metaEntry, err = store.Get(ctx, metaName, "ws-incremental")
+	metaEntry, err = store.Get(ctx, metaName, workspaceID)
 	if err != nil {
 		t.Fatalf("Get updated meta failed: %v", err)
 	}
@@ -722,7 +724,7 @@ func hasPrefix(s, prefix string) bool {
 }
 
 func TestIndexer_readFileContent_PathTraversal(t *testing.T) {
-	idx, _, workspaceDir := setupTestIndexer(t, Config{Enabled: true})
+	idx, _, workspaceDir, _ := setupTestIndexer(t, Config{Enabled: true})
 
 	// Create a valid test file
 	createTestFile(t, workspaceDir, "valid.go", "package main")
@@ -773,7 +775,7 @@ func TestIndexer_readFileContent_PathTraversal(t *testing.T) {
 }
 
 func TestIndexer_readFileContent_FileSizeLimit(t *testing.T) {
-	idx, _, workspaceDir := setupTestIndexer(t, Config{Enabled: true})
+	idx, _, workspaceDir, _ := setupTestIndexer(t, Config{Enabled: true})
 
 	// Create a file larger than maxReadFileSize (10MB)
 	largeContent := make([]byte, 11*1024*1024) // 11MB
@@ -788,7 +790,7 @@ func TestIndexer_readFileContent_FileSizeLimit(t *testing.T) {
 }
 
 func TestIndexer_ErrUnchanged(t *testing.T) {
-	idx, _, workspaceDir := setupTestIndexer(t, Config{Enabled: true})
+	idx, _, workspaceDir, workspaceID := setupTestIndexer(t, Config{Enabled: true})
 
 	goContent := `package main
 
@@ -799,7 +801,7 @@ func Greet() string {
 	createTestFile(t, workspaceDir, "greet.go", goContent)
 
 	event := indexing.PostReviewEvent{
-		WorkspaceID: "ws-1",
+		WorkspaceID: workspaceID,
 		Files: []indexing.FileChange{
 			{Path: "greet.go", ChangeKind: indexing.ChangeKindModified, Language: "go"},
 		},
@@ -844,7 +846,7 @@ func containsSubstring(s, substr string) bool {
 // TestIndexer_PerSymbolIncrementality tests that only changed symbols are re-indexed
 // per spec §4.3.
 func TestIndexer_PerSymbolIncrementality(t *testing.T) {
-	idx, store, workspaceDir := setupTestIndexer(t, Config{Enabled: true})
+	idx, store, workspaceDir, workspaceID := setupTestIndexer(t, Config{Enabled: true})
 
 	// Initial content with two functions
 	initialContent := `package main
@@ -861,7 +863,7 @@ func Second() string {
 
 	ctx := context.Background()
 	event := indexing.PostReviewEvent{
-		WorkspaceID: "ws-persymbol",
+		WorkspaceID: workspaceID,
 		Files: []indexing.FileChange{
 			{Path: "funcs.go", ChangeKind: indexing.ChangeKindAdded, Language: "go"},
 		},
@@ -877,8 +879,8 @@ func Second() string {
 	}
 
 	// Get initial digests from file meta
-	metaName := FileMetaEntryName("ws-persymbol", "funcs.go")
-	metaEntry, err := store.Get(ctx, metaName, "ws-persymbol")
+	metaName := FileMetaEntryName(workspaceID, "funcs.go")
+	metaEntry, err := store.Get(ctx, metaName, workspaceID)
 	if err != nil {
 		t.Fatalf("Get meta failed: %v", err)
 	}
@@ -891,7 +893,7 @@ func Second() string {
 	}
 
 	// Get First function's entry
-	firstEntry1, err := store.Get(ctx, EntryName("ws-persymbol", "funcs.go", "First"), "ws-persymbol")
+	firstEntry1, err := store.Get(ctx, EntryName(workspaceID, "funcs.go", "First"), workspaceID)
 	if err != nil {
 		t.Fatalf("Get First failed: %v", err)
 	}
@@ -925,7 +927,7 @@ func Second() string {
 	}
 
 	// Verify First function was NOT re-saved (same body_digest)
-	firstEntry2, err := store.Get(ctx, EntryName("ws-persymbol", "funcs.go", "First"), "ws-persymbol")
+	firstEntry2, err := store.Get(ctx, EntryName(workspaceID, "funcs.go", "First"), workspaceID)
 	if err != nil {
 		t.Fatalf("Get First after update failed: %v", err)
 	}
@@ -940,7 +942,7 @@ func Second() string {
 	}
 
 	// Verify Second function WAS updated
-	secondEntry, err := store.Get(ctx, EntryName("ws-persymbol", "funcs.go", "Second"), "ws-persymbol")
+	secondEntry, err := store.Get(ctx, EntryName(workspaceID, "funcs.go", "Second"), workspaceID)
 	if err != nil {
 		t.Fatalf("Get Second failed: %v", err)
 	}
@@ -958,7 +960,7 @@ func Second() string {
 // TestIndexer_SymbolDeletion tests that removed symbols are deleted from the index
 // per spec §4.3.
 func TestIndexer_SymbolDeletion(t *testing.T) {
-	idx, store, workspaceDir := setupTestIndexer(t, Config{Enabled: true})
+	idx, store, workspaceDir, workspaceID := setupTestIndexer(t, Config{Enabled: true})
 
 	// Initial content with two functions
 	initialContent := `package main
@@ -970,7 +972,7 @@ func DeleteMe() {}
 
 	ctx := context.Background()
 	event := indexing.PostReviewEvent{
-		WorkspaceID: "ws-deletion",
+		WorkspaceID: workspaceID,
 		Files: []indexing.FileChange{
 			{Path: "deletion.go", ChangeKind: indexing.ChangeKindAdded, Language: "go"},
 		},
@@ -983,11 +985,11 @@ func DeleteMe() {}
 	}
 
 	// Verify both symbols exist
-	_, err = store.Get(ctx, EntryName("ws-deletion", "deletion.go", "KeepMe"), "ws-deletion")
+	_, err = store.Get(ctx, EntryName(workspaceID, "deletion.go", "KeepMe"), workspaceID)
 	if err != nil {
 		t.Fatalf("KeepMe should exist: %v", err)
 	}
-	_, err = store.Get(ctx, EntryName("ws-deletion", "deletion.go", "DeleteMe"), "ws-deletion")
+	_, err = store.Get(ctx, EntryName(workspaceID, "deletion.go", "DeleteMe"), workspaceID)
 	if err != nil {
 		t.Fatalf("DeleteMe should exist: %v", err)
 	}
@@ -1007,13 +1009,13 @@ func KeepMe() {}
 	}
 
 	// Verify KeepMe still exists
-	_, err = store.Get(ctx, EntryName("ws-deletion", "deletion.go", "KeepMe"), "ws-deletion")
+	_, err = store.Get(ctx, EntryName(workspaceID, "deletion.go", "KeepMe"), workspaceID)
 	if err != nil {
 		t.Fatalf("KeepMe should still exist: %v", err)
 	}
 
 	// Verify DeleteMe is gone
-	_, err = store.Get(ctx, EntryName("ws-deletion", "deletion.go", "DeleteMe"), "ws-deletion")
+	_, err = store.Get(ctx, EntryName(workspaceID, "deletion.go", "DeleteMe"), workspaceID)
 	if err == nil {
 		t.Error("DeleteMe should have been deleted")
 	}
@@ -1023,7 +1025,7 @@ func KeepMe() {}
 // per spec §4.2.
 func TestIndexer_LargeFileThreshold(t *testing.T) {
 	// Set a small MaxFileKB for testing
-	idx, _, workspaceDir := setupTestIndexer(t, Config{
+	idx, _, workspaceDir, workspaceID := setupTestIndexer(t, Config{
 		Enabled:   true,
 		MaxFileKB: 1, // 1KB limit
 	})
@@ -1033,7 +1035,7 @@ func TestIndexer_LargeFileThreshold(t *testing.T) {
 	createTestFile(t, workspaceDir, "large.go", largeContent)
 
 	event := indexing.PostReviewEvent{
-		WorkspaceID: "ws-large",
+		WorkspaceID: workspaceID,
 		Files: []indexing.FileChange{
 			{Path: "large.go", ChangeKind: indexing.ChangeKindAdded, Language: "go"},
 		},

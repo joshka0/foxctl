@@ -190,9 +190,9 @@ func hashPrompt(prompt string) string {
 
 // geminiImageRequest is the request body for Gemini image generation.
 type geminiImageRequest struct {
-	Contents         []geminiContent         `json:"contents"`
-	GenerationConfig geminiGenerationConfig  `json:"generationConfig,omitempty"`
-	SafetySettings   []geminiSafetySetting   `json:"safetySettings,omitempty"`
+	Contents         []geminiContent        `json:"contents"`
+	GenerationConfig geminiGenerationConfig `json:"generationConfig,omitempty"`
+	SafetySettings   []geminiSafetySetting  `json:"safetySettings,omitempty"`
 }
 
 type geminiContent struct {

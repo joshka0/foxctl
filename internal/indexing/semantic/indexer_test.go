@@ -9,11 +9,12 @@ import (
 
 	"github.com/jkatigb/agentctl/internal/indexing"
 	"github.com/jkatigb/agentctl/internal/platform/fsutil"
+	"github.com/jkatigb/agentctl/internal/platform/workspace"
 	"github.com/jkatigb/agentctl/internal/storage/memory"
 	"github.com/rs/zerolog"
 )
 
-func setupTestIndexer(t *testing.T, cfg Config) (*Indexer, *memory.Store, string) {
+func setupTestIndexer(t *testing.T, cfg Config) (*Indexer, *memory.Store, string, string) {
 	t.Helper()
 
 	// Create temp directories
@@ -40,7 +41,8 @@ func setupTestIndexer(t *testing.T, cfg Config) (*Indexer, *memory.Store, string
 
 	idx := NewIndexer(cfg, store, provider, workspaceDir, logger)
 
-	return idx, store, workspaceDir
+	workspaceID := workspace.ID(workspaceDir)
+	return idx, store, workspaceDir, workspaceID
 }
 
 func createTestFile(t *testing.T, dir, path, content string) {
@@ -55,17 +57,17 @@ func createTestFile(t *testing.T, dir, path, content string) {
 }
 
 func TestIndexer_ID(t *testing.T) {
-	idx, _, _ := setupTestIndexer(t, Config{Enabled: true})
+	idx, _, _, _ := setupTestIndexer(t, Config{Enabled: true})
 	if idx.ID() != IndexerID {
 		t.Errorf("expected ID %q, got %q", IndexerID, idx.ID())
 	}
 }
 
 func TestIndexer_Index_Disabled(t *testing.T) {
-	idx, _, _ := setupTestIndexer(t, Config{Enabled: false})
+	idx, _, _, workspaceID := setupTestIndexer(t, Config{Enabled: false})
 
 	event := indexing.PostReviewEvent{
-		WorkspaceID: "ws-1",
+		WorkspaceID: workspaceID,
 		Files: []indexing.FileChange{
 			{Path: "foo.go", ChangeKind: indexing.ChangeKindModified},
 		},
@@ -84,13 +86,13 @@ func TestIndexer_Index_Disabled(t *testing.T) {
 }
 
 func TestIndexer_Index_SingleFile(t *testing.T) {
-	idx, store, workspaceDir := setupTestIndexer(t, Config{Enabled: true})
+	idx, store, workspaceDir, workspaceID := setupTestIndexer(t, Config{Enabled: true})
 
 	// Create test file
 	createTestFile(t, workspaceDir, "main.go", "package main\n\nfunc main() {}\n")
 
 	event := indexing.PostReviewEvent{
-		WorkspaceID: "ws-test",
+		WorkspaceID: workspaceID,
 		TaskID:      "task-123",
 		ReviewID:    "review-456",
 		Reason:      "post_review",
@@ -112,8 +114,8 @@ func TestIndexer_Index_SingleFile(t *testing.T) {
 
 	// Verify entry was saved
 	ctx := context.Background()
-	name := FileEmbeddingName("ws-test", "main.go")
-	entry, err := store.Get(ctx, name, "ws-test")
+	name := FileEmbeddingName(workspaceID, "main.go")
+	entry, err := store.Get(ctx, name, workspaceID)
 	if err != nil {
 		t.Fatalf("Get entry failed: %v", err)
 	}
@@ -151,14 +153,14 @@ func TestIndexer_Index_ChunkedFile(t *testing.T) {
 		ChunkOverlapBytes: 10,
 		ProviderModel:     "test-model",
 	}
-	idx, store, workspaceDir := setupTestIndexer(t, cfg)
+	idx, store, workspaceDir, workspaceID := setupTestIndexer(t, cfg)
 
 	// Create a file larger than chunk size
 	content := "This is a test file with enough content to trigger chunking behavior in the semantic indexer."
 	createTestFile(t, workspaceDir, "large.txt", content)
 
 	event := indexing.PostReviewEvent{
-		WorkspaceID: "ws-chunked",
+		WorkspaceID: workspaceID,
 		Files: []indexing.FileChange{
 			{Path: "large.txt", ChangeKind: indexing.ChangeKindAdded, SizeBytes: int64(len(content))},
 		},
@@ -174,8 +176,8 @@ func TestIndexer_Index_ChunkedFile(t *testing.T) {
 
 	// Verify parent entry was saved
 	ctx := context.Background()
-	name := FileEmbeddingName("ws-chunked", "large.txt")
-	entry, err := store.Get(ctx, name, "ws-chunked")
+	name := FileEmbeddingName(workspaceID, "large.txt")
+	entry, err := store.Get(ctx, name, workspaceID)
 	if err != nil {
 		t.Fatalf("Get parent entry failed: %v", err)
 	}
@@ -193,8 +195,8 @@ func TestIndexer_Index_ChunkedFile(t *testing.T) {
 
 	// Verify chunk entries were saved
 	configHash := cfg.ChunkingConfigHash()
-	chunkName := ChunkEmbeddingName("ws-chunked", "large.txt", "0", configHash)
-	chunkEntry, err := store.Get(ctx, chunkName, "ws-chunked")
+	chunkName := ChunkEmbeddingName(workspaceID, "large.txt", "0", configHash)
+	chunkEntry, err := store.Get(ctx, chunkName, workspaceID)
 	if err != nil {
 		t.Fatalf("Get chunk entry failed: %v", err)
 	}
@@ -215,14 +217,14 @@ func TestIndexer_Index_ChunkedFile(t *testing.T) {
 }
 
 func TestIndexer_Index_DeletedFile(t *testing.T) {
-	idx, store, workspaceDir := setupTestIndexer(t, Config{Enabled: true})
+	idx, store, workspaceDir, workspaceID := setupTestIndexer(t, Config{Enabled: true})
 
 	// First, create and index a file
 	createTestFile(t, workspaceDir, "to_delete.go", "package main")
 
 	ctx := context.Background()
 	addEvent := indexing.PostReviewEvent{
-		WorkspaceID: "ws-delete",
+		WorkspaceID: workspaceID,
 		Files: []indexing.FileChange{
 			{Path: "to_delete.go", ChangeKind: indexing.ChangeKindAdded},
 		},
@@ -233,15 +235,15 @@ func TestIndexer_Index_DeletedFile(t *testing.T) {
 	}
 
 	// Verify entry exists
-	name := FileEmbeddingName("ws-delete", "to_delete.go")
-	_, err = store.Get(ctx, name, "ws-delete")
+	name := FileEmbeddingName(workspaceID, "to_delete.go")
+	_, err = store.Get(ctx, name, workspaceID)
 	if err != nil {
 		t.Fatalf("Entry should exist after indexing: %v", err)
 	}
 
 	// Now delete the file
 	deleteEvent := indexing.PostReviewEvent{
-		WorkspaceID: "ws-delete",
+		WorkspaceID: workspaceID,
 		Files: []indexing.FileChange{
 			{Path: "to_delete.go", ChangeKind: indexing.ChangeKindDeleted},
 		},
@@ -256,14 +258,14 @@ func TestIndexer_Index_DeletedFile(t *testing.T) {
 	}
 
 	// Verify entry is deleted
-	_, err = store.Get(ctx, name, "ws-delete")
+	_, err = store.Get(ctx, name, workspaceID)
 	if err == nil {
 		t.Error("expected entry to be deleted")
 	}
 }
 
 func TestIndexer_Index_MultipleFiles(t *testing.T) {
-	idx, _, workspaceDir := setupTestIndexer(t, Config{Enabled: true})
+	idx, _, workspaceDir, workspaceID := setupTestIndexer(t, Config{Enabled: true})
 
 	// Create multiple test files
 	createTestFile(t, workspaceDir, "file1.go", "package main")
@@ -271,7 +273,7 @@ func TestIndexer_Index_MultipleFiles(t *testing.T) {
 	createTestFile(t, workspaceDir, "file3.go", "package util")
 
 	event := indexing.PostReviewEvent{
-		WorkspaceID: "ws-multi",
+		WorkspaceID: workspaceID,
 		Files: []indexing.FileChange{
 			{Path: "file1.go", ChangeKind: indexing.ChangeKindModified},
 			{Path: "file2.go", ChangeKind: indexing.ChangeKindAdded},
@@ -289,10 +291,10 @@ func TestIndexer_Index_MultipleFiles(t *testing.T) {
 }
 
 func TestIndexer_Index_FileNotFound(t *testing.T) {
-	idx, _, _ := setupTestIndexer(t, Config{Enabled: true})
+	idx, _, _, workspaceID := setupTestIndexer(t, Config{Enabled: true})
 
 	event := indexing.PostReviewEvent{
-		WorkspaceID: "ws-notfound",
+		WorkspaceID: workspaceID,
 		Files: []indexing.FileChange{
 			{Path: "nonexistent.go", ChangeKind: indexing.ChangeKindModified},
 		},
@@ -401,7 +403,7 @@ func TestNoOpProvider(t *testing.T) {
 }
 
 func TestIndexer_readFileContent_PathTraversal(t *testing.T) {
-	idx, _, workspaceDir := setupTestIndexer(t, Config{Enabled: true})
+	idx, _, workspaceDir, _ := setupTestIndexer(t, Config{Enabled: true})
 
 	// Create a valid test file
 	createTestFile(t, workspaceDir, "valid.txt", "test content")
@@ -452,7 +454,7 @@ func TestIndexer_readFileContent_PathTraversal(t *testing.T) {
 }
 
 func TestIndexer_readFileContent_FileSizeLimit(t *testing.T) {
-	idx, _, workspaceDir := setupTestIndexer(t, Config{Enabled: true})
+	idx, _, workspaceDir, _ := setupTestIndexer(t, Config{Enabled: true})
 
 	// Create a file larger than maxReadFileSize (10MB)
 	largeContent := make([]byte, 11*1024*1024) // 11MB
@@ -467,12 +469,12 @@ func TestIndexer_readFileContent_FileSizeLimit(t *testing.T) {
 }
 
 func TestIndexer_EmbeddingStored(t *testing.T) {
-	idx, store, workspaceDir := setupTestIndexer(t, Config{Enabled: true})
+	idx, store, workspaceDir, workspaceID := setupTestIndexer(t, Config{Enabled: true})
 
 	createTestFile(t, workspaceDir, "embed.txt", "test content for embedding")
 
 	event := indexing.PostReviewEvent{
-		WorkspaceID: "ws-embed",
+		WorkspaceID: workspaceID,
 		Files: []indexing.FileChange{
 			{Path: "embed.txt", ChangeKind: indexing.ChangeKindModified},
 		},
@@ -487,8 +489,8 @@ func TestIndexer_EmbeddingStored(t *testing.T) {
 	}
 
 	// Verify the embedding was stored
-	entryName := FileEmbeddingName("ws-embed", "embed.txt")
-	entry, err := store.Get(context.Background(), entryName, "ws-embed")
+	entryName := FileEmbeddingName(workspaceID, "embed.txt")
+	entry, err := store.Get(context.Background(), entryName, workspaceID)
 	if err != nil {
 		t.Fatalf("failed to get stored entry: %v", err)
 	}
@@ -519,13 +521,13 @@ func containsStr(s, substr string) bool {
 
 func TestRunInitFilesJob_SingleFile(t *testing.T) {
 	cfg := Config{Enabled: true}
-	idx, store, workspaceDir := setupTestIndexer(t, cfg)
+	idx, store, workspaceDir, workspaceID := setupTestIndexer(t, cfg)
 
 	// Create test file
 	createTestFile(t, workspaceDir, "main.go", "package main\n\nfunc main() {}\n")
 
 	args := JobArgs{
-		WorkspaceID: "ws-init",
+		WorkspaceID: workspaceID,
 		Files: []JobFileInput{
 			{Path: "main.go"},
 		},
@@ -549,8 +551,8 @@ func TestRunInitFilesJob_SingleFile(t *testing.T) {
 	}
 
 	// Verify stored entry
-	entryName := FileEmbeddingName("ws-init", "main.go")
-	entry, err := store.Get(context.Background(), entryName, "ws-init")
+	entryName := FileEmbeddingName(workspaceID, "main.go")
+	entry, err := store.Get(context.Background(), entryName, workspaceID)
 	if err != nil {
 		t.Fatalf("failed to get stored entry: %v", err)
 	}
@@ -580,7 +582,7 @@ func TestRunInitFilesJob_ChunkedFile(t *testing.T) {
 		ChunkOverlapBytes: 10,
 		ProviderModel:     "test-model",
 	}
-	idx, _, workspaceDir := setupTestIndexer(t, cfg)
+	idx, _, workspaceDir, workspaceID := setupTestIndexer(t, cfg)
 
 	// Create large file (200 bytes)
 	content := make([]byte, 200)
@@ -590,7 +592,7 @@ func TestRunInitFilesJob_ChunkedFile(t *testing.T) {
 	createTestFile(t, workspaceDir, "large.txt", string(content))
 
 	args := JobArgs{
-		WorkspaceID: "ws-chunk",
+		WorkspaceID: workspaceID,
 		Files: []JobFileInput{
 			{Path: "large.txt"},
 		},
@@ -612,13 +614,13 @@ func TestRunInitFilesJob_ChunkedFile(t *testing.T) {
 
 func TestRunUpdateFilesJob_DeletedFile(t *testing.T) {
 	cfg := Config{Enabled: true}
-	idx, store, workspaceDir := setupTestIndexer(t, cfg)
+	idx, store, workspaceDir, workspaceID := setupTestIndexer(t, cfg)
 
 	// First, create and index a file
 	createTestFile(t, workspaceDir, "todelete.go", "package main")
 
 	initArgs := JobArgs{
-		WorkspaceID: "ws-del",
+		WorkspaceID: workspaceID,
 		Files: []JobFileInput{
 			{Path: "todelete.go"},
 		},
@@ -631,15 +633,15 @@ func TestRunUpdateFilesJob_DeletedFile(t *testing.T) {
 	}
 
 	// Verify it exists
-	entryName := FileEmbeddingName("ws-del", "todelete.go")
-	_, err = store.Get(context.Background(), entryName, "ws-del")
+	entryName := FileEmbeddingName(workspaceID, "todelete.go")
+	_, err = store.Get(context.Background(), entryName, workspaceID)
 	if err != nil {
 		t.Fatalf("entry should exist after init: %v", err)
 	}
 
 	// Now delete it via update job
 	updateArgs := JobArgs{
-		WorkspaceID: "ws-del",
+		WorkspaceID: workspaceID,
 		Files: []JobFileInput{
 			{Path: "todelete.go", ChangeKind: ChangeKindDeleted},
 		},
@@ -656,7 +658,7 @@ func TestRunUpdateFilesJob_DeletedFile(t *testing.T) {
 	}
 
 	// Verify it no longer exists
-	_, err = store.Get(context.Background(), entryName, "ws-del")
+	_, err = store.Get(context.Background(), entryName, workspaceID)
 	if err == nil {
 		t.Error("expected entry to be deleted")
 	}
@@ -664,13 +666,13 @@ func TestRunUpdateFilesJob_DeletedFile(t *testing.T) {
 
 func TestRunUpdateFilesJob_ModifiedFile(t *testing.T) {
 	cfg := Config{Enabled: true}
-	idx, store, workspaceDir := setupTestIndexer(t, cfg)
+	idx, store, workspaceDir, workspaceID := setupTestIndexer(t, cfg)
 
 	// Create and index initial file
 	createTestFile(t, workspaceDir, "mod.go", "package main\n\nfunc old() {}\n")
 
 	initArgs := JobArgs{
-		WorkspaceID: "ws-mod",
+		WorkspaceID: workspaceID,
 		Files: []JobFileInput{
 			{Path: "mod.go"},
 		},
@@ -683,8 +685,8 @@ func TestRunUpdateFilesJob_ModifiedFile(t *testing.T) {
 	}
 
 	// Get initial digest
-	entryName := FileEmbeddingName("ws-mod", "mod.go")
-	entry1, err := store.Get(context.Background(), entryName, "ws-mod")
+	entryName := FileEmbeddingName(workspaceID, "mod.go")
+	entry1, err := store.Get(context.Background(), entryName, workspaceID)
 	if err != nil {
 		t.Fatalf("failed to get initial entry: %v", err)
 	}
@@ -702,7 +704,7 @@ func TestRunUpdateFilesJob_ModifiedFile(t *testing.T) {
 
 	// Update via job
 	updateArgs := JobArgs{
-		WorkspaceID: "ws-mod",
+		WorkspaceID: workspaceID,
 		Files: []JobFileInput{
 			{Path: "mod.go", ChangeKind: ChangeKindModified},
 		},
@@ -719,7 +721,7 @@ func TestRunUpdateFilesJob_ModifiedFile(t *testing.T) {
 	}
 
 	// Verify digest changed
-	entry2, err := store.Get(context.Background(), entryName, "ws-mod")
+	entry2, err := store.Get(context.Background(), entryName, workspaceID)
 	if err != nil {
 		t.Fatalf("failed to get updated entry: %v", err)
 	}
@@ -738,10 +740,10 @@ func TestRunUpdateFilesJob_ModifiedFile(t *testing.T) {
 
 func TestRunInitFilesJob_FileNotFound(t *testing.T) {
 	cfg := Config{Enabled: true}
-	idx, _, _ := setupTestIndexer(t, cfg)
+	idx, _, _, workspaceID := setupTestIndexer(t, cfg)
 
 	args := JobArgs{
-		WorkspaceID: "ws-notfound",
+		WorkspaceID: workspaceID,
 		Files: []JobFileInput{
 			{Path: "nonexistent.go"},
 		},
@@ -766,7 +768,7 @@ func TestRunInitFilesJob_FileNotFound(t *testing.T) {
 
 func TestRunInitFilesJob_ValidationError(t *testing.T) {
 	cfg := Config{Enabled: true}
-	idx, _, _ := setupTestIndexer(t, cfg)
+	idx, _, _, _ := setupTestIndexer(t, cfg)
 
 	// Empty workspace ID
 	args := JobArgs{
@@ -784,7 +786,7 @@ func TestRunInitFilesJob_ValidationError(t *testing.T) {
 
 func TestRunInitFilesJob_MultipleFiles(t *testing.T) {
 	cfg := Config{Enabled: true}
-	idx, store, workspaceDir := setupTestIndexer(t, cfg)
+	idx, store, workspaceDir, workspaceID := setupTestIndexer(t, cfg)
 
 	// Create multiple files
 	createTestFile(t, workspaceDir, "a.go", "package a")
@@ -792,7 +794,7 @@ func TestRunInitFilesJob_MultipleFiles(t *testing.T) {
 	createTestFile(t, workspaceDir, "c.rs", "fn c() {}")
 
 	args := JobArgs{
-		WorkspaceID: "ws-multi",
+		WorkspaceID: workspaceID,
 		Files: []JobFileInput{
 			{Path: "a.go"},
 			{Path: "b.py"},
@@ -821,8 +823,8 @@ func TestRunInitFilesJob_MultipleFiles(t *testing.T) {
 	}
 
 	for _, tc := range cases {
-		entryName := FileEmbeddingName("ws-multi", tc.path)
-		entry, err := store.Get(context.Background(), entryName, "ws-multi")
+		entryName := FileEmbeddingName(workspaceID, tc.path)
+		entry, err := store.Get(context.Background(), entryName, workspaceID)
 		if err != nil {
 			t.Errorf("failed to get entry for %s: %v", tc.path, err)
 			continue

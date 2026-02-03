@@ -35,6 +35,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/indexing/semantic"
 	"github.com/jkatigb/agentctl/internal/indexing/symbol"
 	"github.com/jkatigb/agentctl/internal/platform/config"
+	"github.com/jkatigb/agentctl/internal/platform/workspace"
 	errs "github.com/jkatigb/agentctl/internal/platform/errors"
 	llmproviders "github.com/jkatigb/agentctl/internal/providers/llm"
 	"github.com/jkatigb/agentctl/internal/retrieval"
@@ -335,9 +336,8 @@ func search(ctx context.Context, logger zerolog.Logger, cfg config.Config, in *I
 	}
 	_ = validator // PathValidator available for path validation if needed
 
-	// Use actual workspace path for storage scoping
-	// This ensures consistency with code/incremental_index which indexes under the actual path
-	workspaceID := workspacePath
+	// Use a stable workspace ID derived from repo root (fallback to path hash).
+	workspaceID := workspace.ID(workspacePath)
 
 	// Build scope set first (needed for scoped embeddings)
 	scopeSet := make(map[string]bool)
@@ -507,7 +507,7 @@ func search(ctx context.Context, logger zerolog.Logger, cfg config.Config, in *I
 				return
 			}
 
-			results, hint, err := searchMemories(sourceCtx, cfg, workspacePath, in.Query, memoryEmbedding, in.Limit*2, in)
+			results, hint, err := searchMemories(sourceCtx, cfg, workspaceID, in.Query, memoryEmbedding, in.Limit*2, in)
 			resultsCh <- sourceResults{
 				source:  ScopeMemories,
 				results: results,
@@ -539,7 +539,7 @@ func search(ctx context.Context, logger zerolog.Logger, cfg config.Config, in *I
 				return
 			}
 
-			results, err := searchTasks(sourceCtx, cfg, workspacePath, textEmbedding, in.Limit*2)
+			results, err := searchTasks(sourceCtx, cfg, workspaceID, textEmbedding, in.Limit*2)
 			resultsCh <- sourceResults{
 				source:  ScopeTasks,
 				results: results,
@@ -570,7 +570,7 @@ func search(ctx context.Context, logger zerolog.Logger, cfg config.Config, in *I
 				return
 			}
 
-			results, err := searchCodemaps(sourceCtx, cfg, workspacePath, textEmbedding, in.Limit*2)
+			results, err := searchCodemaps(sourceCtx, cfg, workspaceID, textEmbedding, in.Limit*2)
 			resultsCh <- sourceResults{
 				source:  ScopeCodemaps,
 				results: results,
@@ -1010,6 +1010,10 @@ func searchSymbolsWithRetrieval(
 			result.Name = extractSymbolName(candidate.SymbolID)
 		}
 
+		if candidate.Documentation != "" {
+			result.Summary = candidate.Documentation
+		}
+
 		// Extract code snippet for reranking (reads ~11 lines around the symbol)
 		if candidate.Path != "" && candidate.Line > 0 {
 			fullPath := candidate.Path
@@ -1432,8 +1436,8 @@ func searchTasks(
 	}
 	defer memStore.Close()
 
-	// Search for similar entries
-	scoredEntries, err := memStore.SearchSimilar(ctx, workspaceID, queryEmbedding, limit*2)
+	// Search for similar task entries
+	scoredEntries, err := memStore.SearchSimilarByType(ctx, workspaceID, "task_embedding", queryEmbedding, limit*2)
 	if err != nil {
 		return nil, skillerr.WrapIO("vector search tasks", err)
 	}
@@ -1522,11 +1526,21 @@ func searchCodemaps(
 	}
 	defer memStore.Close()
 
-	// Search for similar entries
-	scoredEntries, err := memStore.SearchSimilar(ctx, workspaceID, queryEmbedding, limit*2)
+	// Search for similar entries (codemaps + codemap chunks)
+	scoredEntries := make([]storage.ScoredEntry, 0, limit*4)
+	codemapEntries, err := memStore.SearchSimilarByType(ctx, workspaceID, "codemap", queryEmbedding, limit*2)
 	if err != nil {
 		return nil, skillerr.WrapIO("vector search codemaps", err)
 	}
+	chunkEntries, err := memStore.SearchSimilarByType(ctx, workspaceID, "codemap_chunk", queryEmbedding, limit*2)
+	if err != nil {
+		return nil, skillerr.WrapIO("vector search codemap chunks", err)
+	}
+	scoredEntries = append(scoredEntries, codemapEntries...)
+	scoredEntries = append(scoredEntries, chunkEntries...)
+	sort.Slice(scoredEntries, func(i, j int) bool {
+		return scoredEntries[i].Score > scoredEntries[j].Score
+	})
 
 	// Filter to only codemap entries (including codemap chunks)
 	results := make([]Result, 0, len(scoredEntries))
@@ -1854,14 +1868,7 @@ func applyReranking(ctx context.Context, logger zerolog.Logger, in Input, result
 	candidates := make([]rerank.Candidate, topK)
 	for i := 0; i < topK; i++ {
 		r := results[i]
-		// Use snippet for symbols, summary for sessions/memories
-		content := r.Snippet
-		if content == "" {
-			content = r.Summary
-		}
-		if content == "" {
-			content = r.Name
-		}
+		content := buildRerankContent(r)
 		candidates[i] = rerank.Candidate{
 			ID:            r.ID,
 			Content:       content,
@@ -1925,6 +1932,32 @@ func applyReranking(ctx context.Context, logger zerolog.Logger, in Input, result
 	stats.count = len(candidates)
 
 	return rerankedResults, stats
+}
+
+const maxRerankContentLen = 2000
+
+func buildRerankContent(r Result) string {
+	summary := strings.TrimSpace(r.Summary)
+	snippet := strings.TrimSpace(r.Snippet)
+	var content string
+	switch {
+	case summary != "" && snippet != "":
+		content = summary + "\n\n" + snippet
+	case summary != "":
+		content = summary
+	case snippet != "":
+		content = snippet
+	default:
+		content = strings.TrimSpace(r.Name)
+	}
+	return truncateForRerank(content, maxRerankContentLen)
+}
+
+func truncateForRerank(content string, maxLen int) string {
+	if maxLen <= 0 || len(content) <= maxLen {
+		return content
+	}
+	return content[:maxLen-3] + "..."
 }
 
 // extractContextHints extracts context hints from session results.

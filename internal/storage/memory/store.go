@@ -43,7 +43,6 @@ type Store struct {
 	close           func() error
 }
 
-
 // Stats aliases the shared memory stats type.
 type Stats = storage.MemoryStats
 
@@ -55,6 +54,17 @@ type SaveOptions = storage.MemorySaveOptions
 
 // EmbeddingMetadata aliases the shared embedding metadata type.
 type EmbeddingMetadata = storage.EmbeddingMetadata
+
+// WorkspaceMigrationSummary reports the results of migrating named memories between workspaces.
+type WorkspaceMigrationSummary struct {
+	From          string `json:"from"`
+	To            string `json:"to"`
+	Total         int    `json:"total"`
+	Conflicts     int    `json:"conflicts"`
+	Migrated      int    `json:"migrated"`
+	MetadataMoved bool   `json:"metadata_moved"`
+	DryRun        bool   `json:"dry_run"`
+}
 
 // Connection pool defaults for SQLite file-based storage
 // These values provide reasonable defaults for typical workloads with moderate concurrency
@@ -101,7 +111,6 @@ func Open(ctx context.Context, root string, casPath string) (store *Store, err e
 	return store, nil
 }
 
-
 // OpenFromConfig opens the memory store using paths from config.
 // OpenFromConfig opens a Store using paths from the provided configuration.
 // It uses cfg.Storage.Root as the storage root and cfg.Paths.CAS as the CAS path.
@@ -118,7 +127,6 @@ func (s *Store) Close() error {
 	return s.close()
 }
 
-
 // DB returns the underlying *sql.DB for advanced operations like search.
 // This allows callers to use WrapSQLDB for creating a dbdriver.DB.
 func (s *Store) DB() *sql.DB {
@@ -132,6 +140,116 @@ func (s *Store) Stats(ctx context.Context) (Stats, error) {
 		return Stats{}, fmt.Errorf("memory: stats: %w", err)
 	}
 	return Stats{Named: count, Path: s.path}, nil
+}
+
+// MigrateWorkspace reassigns named memory entries from one workspace ID to another.
+//
+// Entries that would collide with an existing name in the target workspace are skipped.
+func (s *Store) MigrateWorkspace(ctx context.Context, from, to string, dryRun bool) (WorkspaceMigrationSummary, error) {
+	from = strings.TrimSpace(from)
+	to = strings.TrimSpace(to)
+	summary := WorkspaceMigrationSummary{
+		From:   from,
+		To:     to,
+		DryRun: dryRun,
+	}
+	if from == "" || to == "" {
+		return summary, fmt.Errorf("memory: migrate workspace: from and to must be set")
+	}
+	if from == to {
+		return summary, fmt.Errorf("memory: migrate workspace: from and to must differ")
+	}
+
+	if dryRun {
+		if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM named_memory WHERE workspace = ?`, from).Scan(&summary.Total); err != nil {
+			return summary, fmt.Errorf("memory: migrate workspace count: %w", err)
+		}
+		if err := s.db.QueryRowContext(ctx, `
+			SELECT COUNT(*)
+			FROM named_memory src
+			WHERE src.workspace = ?
+			  AND EXISTS (
+				SELECT 1 FROM named_memory dst
+				WHERE dst.workspace = ? AND dst.name = src.name
+			  )`, from, to).Scan(&summary.Conflicts); err != nil {
+			return summary, fmt.Errorf("memory: migrate workspace conflicts: %w", err)
+		}
+		summary.Migrated = summary.Total - summary.Conflicts
+		if summary.Migrated < 0 {
+			summary.Migrated = 0
+		}
+		var fromMeta, toMeta int
+		if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM embedding_metadata WHERE workspace = ?`, from).Scan(&fromMeta); err != nil {
+			return summary, fmt.Errorf("memory: migrate workspace metadata source: %w", err)
+		}
+		if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM embedding_metadata WHERE workspace = ?`, to).Scan(&toMeta); err != nil {
+			return summary, fmt.Errorf("memory: migrate workspace metadata target: %w", err)
+		}
+		summary.MetadataMoved = fromMeta > 0 && toMeta == 0
+		return summary, nil
+	}
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return summary, fmt.Errorf("memory: migrate workspace begin: %w", err)
+	}
+	defer func() {
+		if tx != nil {
+			errs.Ignore(tx.Rollback(), "rollback memory workspace migration")
+		}
+	}()
+
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM named_memory WHERE workspace = ?`, from).Scan(&summary.Total); err != nil {
+		return summary, fmt.Errorf("memory: migrate workspace count: %w", err)
+	}
+	if err := tx.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM named_memory src
+		WHERE src.workspace = ?
+		  AND EXISTS (
+			SELECT 1 FROM named_memory dst
+			WHERE dst.workspace = ? AND dst.name = src.name
+		  )`, from, to).Scan(&summary.Conflicts); err != nil {
+		return summary, fmt.Errorf("memory: migrate workspace conflicts: %w", err)
+	}
+
+	updateResult, err := tx.ExecContext(ctx, `
+		UPDATE named_memory AS src
+		SET workspace = ?
+		WHERE src.workspace = ?
+		  AND NOT EXISTS (
+			SELECT 1 FROM named_memory dst
+			WHERE dst.workspace = ? AND dst.name = src.name
+		  )`, to, from, to)
+	if err != nil {
+		return summary, fmt.Errorf("memory: migrate workspace update: %w", err)
+	}
+	if rows, err := updateResult.RowsAffected(); err == nil {
+		summary.Migrated = int(rows)
+	}
+
+	var fromMeta, toMeta int
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM embedding_metadata WHERE workspace = ?`, from).Scan(&fromMeta); err != nil {
+		return summary, fmt.Errorf("memory: migrate workspace metadata source: %w", err)
+	}
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM embedding_metadata WHERE workspace = ?`, to).Scan(&toMeta); err != nil {
+		return summary, fmt.Errorf("memory: migrate workspace metadata target: %w", err)
+	}
+	if fromMeta > 0 && toMeta == 0 {
+		metadataResult, err := tx.ExecContext(ctx, `UPDATE embedding_metadata SET workspace = ? WHERE workspace = ?`, to, from)
+		if err != nil {
+			return summary, fmt.Errorf("memory: migrate workspace metadata update: %w", err)
+		}
+		if rows, err := metadataResult.RowsAffected(); err == nil {
+			summary.MetadataMoved = rows > 0
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return summary, fmt.Errorf("memory: migrate workspace commit: %w", err)
+	}
+	tx = nil
+	return summary, nil
 }
 
 // Save inserts or updates a named memory.
@@ -571,9 +689,9 @@ CREATE INDEX IF NOT EXISTS idx_named_memory_ws_updated ON named_memory(workspace
 	// Add atomic processing columns for SimpleMem-style semantic lossless compression.
 	// See: https://github.com/aiming-lab/SimpleMem
 	atomicColumns := []string{
-		`ALTER TABLE named_memory ADD COLUMN atomic_text TEXT`,   // Self-contained, disambiguated rewrite
-		`ALTER TABLE named_memory ADD COLUMN entities TEXT`,      // JSON array of extracted entities
-		`ALTER TABLE named_memory ADD COLUMN keywords TEXT`,      // JSON array of BM25 keywords
+		`ALTER TABLE named_memory ADD COLUMN atomic_text TEXT`, // Self-contained, disambiguated rewrite
+		`ALTER TABLE named_memory ADD COLUMN entities TEXT`,    // JSON array of extracted entities
+		`ALTER TABLE named_memory ADD COLUMN keywords TEXT`,    // JSON array of BM25 keywords
 	}
 	for _, stmt := range atomicColumns {
 		if _, err := db.ExecContext(ctx, stmt); err != nil {
@@ -741,6 +859,94 @@ func (s *Store) UpdateEmbedding(ctx context.Context, name, workspace string, emb
 	}
 
 	return nil
+}
+
+// SyncSymbolEmbeddingsOptions configures sync from symbol_embeddings into named_memory.
+type SyncSymbolEmbeddingsOptions struct {
+	WorkspaceID string
+	SymbolIDs   []string
+	OnlyMissing bool
+}
+
+// SyncSymbolEmbeddings fills named_memory.embedding from symbol_embeddings for a workspace.
+// If SymbolIDs is non-empty, only those symbols are synced.
+func (s *Store) SyncSymbolEmbeddings(ctx context.Context, embeddingDBPath string, opts SyncSymbolEmbeddingsOptions) (int, error) {
+	if s == nil {
+		return 0, fmt.Errorf("memory: sync embeddings: nil store")
+	}
+	embeddingDBPath = strings.TrimSpace(embeddingDBPath)
+	if embeddingDBPath == "" {
+		return 0, fmt.Errorf("memory: sync embeddings: embedding db path required")
+	}
+	workspaceID := strings.TrimSpace(opts.WorkspaceID)
+	if workspaceID == "" {
+		return 0, fmt.Errorf("memory: sync embeddings: workspace required")
+	}
+	conn, err := s.db.Conn(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("memory: sync embeddings: conn: %w", err)
+	}
+	defer conn.Close()
+
+	if _, err := conn.ExecContext(ctx, "ATTACH DATABASE ? AS embeddb", embeddingDBPath); err != nil {
+		return 0, fmt.Errorf("memory: sync embeddings: attach: %w", err)
+	}
+	defer func() {
+		_, _ = conn.ExecContext(ctx, "DETACH DATABASE embeddb")
+	}()
+
+	where := []string{"workspace = ?", "name LIKE ?"}
+	args := []any{workspaceID, fmt.Sprintf("symbol://%s/%%", workspaceID)}
+	if opts.OnlyMissing {
+		where = append(where, "(embedding IS NULL OR LENGTH(embedding) = 0)")
+	}
+	if len(opts.SymbolIDs) > 0 {
+		names := make([]string, 0, len(opts.SymbolIDs))
+		for _, id := range opts.SymbolIDs {
+			id = strings.TrimSpace(id)
+			if id == "" {
+				continue
+			}
+			names = append(names, fmt.Sprintf("symbol://%s/%s", workspaceID, id))
+		}
+		if len(names) > 0 {
+			pl := make([]string, 0, len(names))
+			for range names {
+				pl = append(pl, "?")
+			}
+			where = append(where, fmt.Sprintf("name IN (%s)", strings.Join(pl, ", ") ))
+			for _, name := range names {
+				args = append(args, name)
+			}
+		}
+	}
+
+	stmt := fmt.Sprintf(`
+UPDATE named_memory
+SET embedding = (
+	SELECT e.embedding
+	FROM embeddb.symbol_embeddings e
+	WHERE e.workspace_id = named_memory.workspace
+		AND e.symbol_id = replace(named_memory.name, 'symbol://' || named_memory.workspace || '/', '')
+)
+WHERE %s
+	AND EXISTS (
+		SELECT 1
+		FROM embeddb.symbol_embeddings e
+		WHERE e.workspace_id = named_memory.workspace
+			AND e.symbol_id = replace(named_memory.name, 'symbol://' || named_memory.workspace || '/', '')
+	)
+`, strings.Join(where, " AND "))
+
+	result, err := conn.ExecContext(ctx, stmt, args...)
+	if err != nil {
+		return 0, fmt.Errorf("memory: sync embeddings: %w", err)
+	}
+	updated, err := result.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("memory: sync embeddings: rows affected: %w", err)
+	}
+	return int(updated), nil
 }
 
 // GetEmbedding retrieves the embedding vector for a named memory entry.
@@ -944,6 +1150,110 @@ func (s *Store) SearchSimilar(ctx context.Context, workspace string, queryEmbedd
 
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("memory: search similar rows: %w", err)
+	}
+
+	// Compute cosine similarity for each candidate
+	results := make([]ScoredEntry, 0, len(candidates))
+	for _, c := range candidates {
+		similarity := vector.Cosine(queryEmbedding, c.embedding)
+		if similarity > 0.5 { // Filter low-similarity results
+			results = append(results, ScoredEntry{
+				Entry: c.entry,
+				Score: similarity,
+			})
+		}
+	}
+
+	// Sort by similarity (highest first)
+	sort.Slice(results, func(i, j int) bool {
+		return results[i].Score > results[j].Score
+	})
+
+	// Apply limit
+	if len(results) > limit {
+		results = results[:limit]
+	}
+
+	return results, nil
+}
+
+// SearchSimilarByType finds entries similar to the given embedding within a specific entry type.
+// This avoids scanning unrelated entries when a type-specific search is needed.
+func (s *Store) SearchSimilarByType(ctx context.Context, workspace, entryType string, queryEmbedding []float32, limit int) ([]ScoredEntry, error) {
+	if limit <= 0 {
+		limit = 20
+	}
+	if entryType == "" {
+		return nil, fmt.Errorf("memory: search similar by type: entry type required")
+	}
+
+	// Load entries with embeddings from this workspace and type
+	// Use a wider candidate window to ensure enough same-type matches are considered.
+	candidateLimit := limit * 50
+	if candidateLimit < 1000 {
+		candidateLimit = 1000
+	}
+	if candidateLimit > 5000 {
+		candidateLimit = 5000
+	}
+
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT id, name, type, workspace, summary, result, digests, created_at, updated_at, last_accessed, access_count, session_id, embedding
+		FROM named_memory
+		WHERE workspace = ? AND type = ? AND embedding IS NOT NULL AND LENGTH(embedding) > 0
+		LIMIT ?
+	`, workspace, entryType, candidateLimit)
+	if err != nil {
+		return nil, fmt.Errorf("memory: search similar by type: %w", err)
+	}
+	defer func() { errs.Ignore(rows.Close(), "close search similar by type rows") }()
+
+	type entryWithEmbedding struct {
+		entry     NamedEntry
+		embedding []float32
+	}
+
+	var candidates []entryWithEmbedding
+	for rows.Next() {
+		var entry NamedEntry
+		var digests string
+		var created, updated, last string
+		var sessionID sql.NullString
+		var embeddingJSON []byte
+
+		if err := rows.Scan(
+			&entry.ID, &entry.Name, &entry.Type, &entry.Workspace, &entry.Summary, &entry.Result,
+			&digests, &created, &updated, &last, &entry.AccessCount, &sessionID, &embeddingJSON); err != nil {
+			continue
+		}
+
+		_ = sqlutil.ScanJSON(digests, &entry.Digests)
+		entry.CreatedAt, _ = sqlutil.ScanTimestamp(created)
+		entry.UpdatedAt, _ = sqlutil.ScanTimestamp(updated)
+		entry.LastAccess, _ = sqlutil.ScanTimestamp(last)
+		if sessionID.Valid {
+			entry.SessionID = sessionID.String
+		}
+
+		if len(embeddingJSON) == 0 {
+			continue
+		}
+
+		var embedding []float32
+		if err := json.Unmarshal(embeddingJSON, &embedding); err != nil {
+			continue
+		}
+
+		// Skip entries with mismatched dimensions
+		if len(embedding) != len(queryEmbedding) {
+			continue
+		}
+
+		candidates = append(candidates, entryWithEmbedding{entry: entry, embedding: embedding})
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("memory: search similar by type rows: %w", err)
 	}
 
 	// Compute cosine similarity for each candidate

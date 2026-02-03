@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 	"unicode/utf8"
 
 	errs "github.com/jkatigb/agentctl/internal/platform/errors"
@@ -51,6 +52,48 @@ func runMigrateOnce(ctx context.Context, path string, db *sql.DB, migrate func(c
 // isSQLiteBusy reports whether err indicates that SQLite is busy.
 // It returns false if err is nil, and true when the error message contains
 // "database is locked" or "SQLITE_BUSY".
+func isSQLiteBusy(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "database is locked") || strings.Contains(msg, "sqlite_busy")
+}
+
+func sleepWithContext(ctx context.Context, d time.Duration) bool {
+	if d <= 0 {
+		return ctx.Err() == nil
+	}
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return false
+	case <-timer.C:
+		return true
+	}
+}
+
+func retryBusy(ctx context.Context, attempts int, baseDelay time.Duration, fn func() error) error {
+	if attempts <= 0 {
+		attempts = 1
+	}
+	for i := 0; i < attempts; i++ {
+		err := fn()
+		if err == nil || !isSQLiteBusy(err) {
+			return err
+		}
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		delay := baseDelay * time.Duration(i+1)
+		if !sleepWithContext(ctx, delay) {
+			return ctx.Err()
+		}
+	}
+	return fn()
+}
+
 // validateDBPath reports an error if the provided filesystem path is unsafe or invalid
 // for creating a SQLite database.
 //
@@ -191,12 +234,17 @@ func OpenDB(ctx context.Context, path string, migrate func(context.Context, *sql
 		// Check if WAL is already enabled to avoid acquiring exclusive lock unnecessarily.
 		// This prevents blocking for busy_timeout if the DB is held open by readers.
 		var mode string
-		if err := db.QueryRowContext(ctx, "PRAGMA journal_mode;").Scan(&mode); err != nil {
+		if err := retryBusy(ctx, 6, 25*time.Millisecond, func() error {
+			return db.QueryRowContext(ctx, "PRAGMA journal_mode;").Scan(&mode)
+		}); err != nil {
 			errs.Ignore(db.Close(), "close sqlite db after journal_mode check failure")
 			return nil, fmt.Errorf("sqliteutil: check journal_mode: %w", err)
 		}
 		if !strings.EqualFold(mode, "wal") {
-			if _, err := db.ExecContext(ctx, `PRAGMA journal_mode=WAL;`); err != nil {
+			if err := retryBusy(ctx, 6, 25*time.Millisecond, func() error {
+				_, execErr := db.ExecContext(ctx, `PRAGMA journal_mode=WAL;`)
+				return execErr
+			}); err != nil {
 				errs.Ignore(db.Close(), "close sqlite db after WAL failure")
 				return nil, fmt.Errorf("sqliteutil: enable wal: %w", err)
 			}
@@ -258,7 +306,6 @@ func OpenInMemory(ctx context.Context, migrate func(context.Context, *sql.DB) er
 func OpenDBWithDriver(ctx context.Context, cfg dbdriver.Config, migrate func(context.Context, *sql.DB) error) (*sql.DB, func() error, error) {
 	return dbdriver.OpenDBCompatWithCloser(ctx, cfg, migrate)
 }
-
 
 // OpenDBWithAutoConfig opens a database with automatic configuration detection.
 // It checks environment variables to determine whether to use SQLite or Turso.

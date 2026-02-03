@@ -204,6 +204,8 @@ type MemoryStore interface {
 	UpdateEmbedding(ctx context.Context, name, workspace string, embedding []float32) error
 	// SearchSimilar finds entries similar to the given embedding using vector similarity.
 	SearchSimilar(ctx context.Context, workspace string, embedding []float32, limit int) ([]ScoredEntry, error)
+	// SearchSimilarByType finds entries of a specific type using vector similarity.
+	SearchSimilarByType(ctx context.Context, workspace, entryType string, embedding []float32, limit int) ([]ScoredEntry, error)
 	// SaveResult stores a result envelope using structured options.
 	SaveResult(ctx context.Context, opts MemorySaveOptions) (NamedEntry, error)
 	// ListFiltered returns named memories for a workspace with optional filters and pagination.

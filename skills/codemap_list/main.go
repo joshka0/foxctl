@@ -13,6 +13,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/indexing/semantic"
 	"github.com/jkatigb/agentctl/internal/platform/config"
 	errs "github.com/jkatigb/agentctl/internal/platform/errors"
+	"github.com/jkatigb/agentctl/internal/platform/workspace"
 	"github.com/jkatigb/agentctl/internal/storage"
 	"github.com/jkatigb/agentctl/internal/storage/memory"
 )
@@ -118,55 +119,58 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	}
 	defer func() { errs.Ignore(memStore.Close(), "close memory store") }()
 
-	var allEntries []storage.ScoredEntry
+	workspaceID := workspace.ID(rc.Workspace)
+	if workspaceID == "" {
+		workspaceID = rc.Workspace
+	}
+
+	var codemapEntries []storage.ScoredEntry
+	total := 0
+	paged := false
 
 	if in.Query != "" {
-		allEntries, err = searchCodemaps(ctx, memStore, rc.Config, rc.Workspace, in.Query, in.Limit+in.Offset+10)
+		codemapEntries, err = searchCodemaps(ctx, memStore, rc.Config, workspaceID, in.Query, in.Limit+in.Offset+10)
 		if err != nil {
-			entries, listErr := memStore.List(ctx, rc.Workspace, 500)
+			entries, listTotal, listErr := memStore.ListFiltered(ctx, workspaceID, storage.MemoryListFilter{Types: []string{"codemap"}}, in.Limit, in.Offset)
 			if listErr != nil {
 				return skillerr.WrapIO("list memories", listErr)
 			}
+			total = listTotal
+			paged = true
 			for _, e := range entries {
-				if e.Type == "codemap" {
-					allEntries = append(allEntries, storage.ScoredEntry{Entry: e, Score: 1.0})
-				}
+				codemapEntries = append(codemapEntries, storage.ScoredEntry{Entry: e, Score: 1.0})
 			}
 			out.Stats.SearchMethod = "filter"
 		} else {
 			out.Stats.SearchMethod = "vector"
+			total = len(codemapEntries)
 		}
 	} else {
-		entries, err := memStore.List(ctx, rc.Workspace, 500)
+		entries, listTotal, err := memStore.ListFiltered(ctx, workspaceID, storage.MemoryListFilter{Types: []string{"codemap"}}, in.Limit, in.Offset)
 		if err != nil {
 			return skillerr.WrapIO("list memories", err)
 		}
+		total = listTotal
+		paged = true
 		for _, e := range entries {
-			if e.Type == "codemap" {
-				allEntries = append(allEntries, storage.ScoredEntry{Entry: e, Score: 1.0})
-			}
+			codemapEntries = append(codemapEntries, storage.ScoredEntry{Entry: e, Score: 1.0})
 		}
 		out.Stats.SearchMethod = "filter"
 	}
 
-	codemapEntries := make([]storage.ScoredEntry, 0, len(allEntries))
-	for _, scored := range allEntries {
-		if scored.Entry.Type == "codemap" {
-			codemapEntries = append(codemapEntries, scored)
+	out.Pagination.Total = total
+	out.Pagination.HasMore = in.Offset+in.Limit < total
+
+	if !paged {
+		endIdx := in.Offset + in.Limit
+		if endIdx > len(codemapEntries) {
+			endIdx = len(codemapEntries)
 		}
-	}
-
-	out.Pagination.Total = len(codemapEntries)
-	out.Pagination.HasMore = in.Offset+in.Limit < len(codemapEntries)
-
-	endIdx := in.Offset + in.Limit
-	if endIdx > len(codemapEntries) {
-		endIdx = len(codemapEntries)
-	}
-	if in.Offset < len(codemapEntries) {
-		codemapEntries = codemapEntries[in.Offset:endIdx]
-	} else {
-		codemapEntries = nil
+		if in.Offset < len(codemapEntries) {
+			codemapEntries = codemapEntries[in.Offset:endIdx]
+		} else {
+			codemapEntries = nil
+		}
 	}
 
 	for _, scored := range codemapEntries {
@@ -208,7 +212,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 }
 
 // searchCodemaps performs vector search for codemaps using semantic embeddings.
-func searchCodemaps(ctx context.Context, memStore storage.MemoryStore, cfg config.Config, workspacePath, query string, limit int) ([]storage.ScoredEntry, error) {
+func searchCodemaps(ctx context.Context, memStore storage.MemoryStore, cfg config.Config, workspaceID, query string, limit int) ([]storage.ScoredEntry, error) {
 	embedder, err := semantic.NewEmbedderFromConfig(semantic.ScopeCodemaps, cfg)
 	if err != nil {
 		return nil, skillerr.WrapRuntime("create embedder", err)
@@ -219,7 +223,7 @@ func searchCodemaps(ctx context.Context, memStore storage.MemoryStore, cfg confi
 		return nil, skillerr.WrapRuntime("generate query embedding", err)
 	}
 
-	results, err := memStore.SearchSimilar(ctx, workspacePath, result.Vec, limit)
+	results, err := memStore.SearchSimilar(ctx, workspaceID, result.Vec, limit)
 	if err != nil {
 		return nil, skillerr.WrapIO("vector search", err)
 	}

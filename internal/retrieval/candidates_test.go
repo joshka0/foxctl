@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"sort"
 	"strings"
 	"testing"
 
@@ -139,6 +140,23 @@ func (m *mockMemoryStore) SearchSimilar(ctx context.Context, workspace string, e
 	var scored []storage.ScoredEntry
 	for _, e := range entries {
 		scored = append(scored, storage.ScoredEntry{Entry: e, Score: 1.0})
+	}
+	return scored, nil
+}
+
+func (m *mockMemoryStore) SearchSimilarByType(ctx context.Context, workspace, entryType string, embedding []float32, limit int) ([]storage.ScoredEntry, error) {
+	var scored []storage.ScoredEntry
+	for _, entry := range m.entries {
+		if entry.Workspace != workspace || entry.Type != entryType {
+			continue
+		}
+		scored = append(scored, storage.ScoredEntry{Entry: entry, Score: 1.0})
+	}
+	sort.Slice(scored, func(i, j int) bool {
+		return scored[i].Entry.ID < scored[j].Entry.ID
+	})
+	if limit > 0 && len(scored) > limit {
+		scored = scored[:limit]
 	}
 	return scored, nil
 }

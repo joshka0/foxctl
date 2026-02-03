@@ -20,6 +20,15 @@ const (
 	docEdgeWeight       = 0.75
 )
 
+// applyCommentEdges parses Index blocks and builds comment edges for repoindex nodes.
+//
+// Index:
+// - Purpose: Parse Index blocks and build comment edges for repoindex
+// - Flow: collect symbol name maps -> parse DocIndex meta -> add concept edges -> add Related/Flow edges
+// - SideEffects: mutates nodes/edges maps
+// - FailureModes: malformed meta JSON (skipped), unresolved targets (skipped)
+// - Related: docparser.ParseDoc, addConceptEdges, addDocEdges, resolveSymbolID
+// - Keywords: comment edges, Index block, doc edges, concept edges, related, flow, parse Index, repoindex
 func applyCommentEdges(nodes map[string]Node, edges map[string]Edge, repoKey string) {
 	if len(nodes) == 0 {
 		return
@@ -67,6 +76,7 @@ func applyCommentEdges(nodes map[string]Node, edges map[string]Edge, repoKey str
 	}
 }
 
+// addConceptEdges adds concept nodes and edges for Index block lists.
 func addConceptEdges(nodes map[string]Node, edges map[string]Edge, repoKey string, src Node, items []string, prefix string, edgeType EdgeType, limit int, now time.Time) {
 	items = capList(items, limit)
 	for _, item := range items {
@@ -89,6 +99,7 @@ func addConceptEdges(nodes map[string]Node, edges map[string]Edge, repoKey strin
 	}
 }
 
+// addDocEdges adds doc-related edges for resolved targets.
 func addDocEdges(edges map[string]Edge, repoKey string, src Node, targets []string, edgeType EdgeType, limit int, byPkg map[string]map[string]string, global map[string][]string) {
 	targets = capList(targets, limit)
 	for _, target := range targets {
@@ -112,6 +123,7 @@ func capList(items []string, limit int) []string {
 	return items[:limit]
 }
 
+// resolveSymbolID resolves an Index block target to a repoindex node ID.
 func resolveSymbolID(repoKey, pkg, name string, byPkg map[string]map[string]string, global map[string][]string) string {
 	name = strings.TrimSpace(name)
 	if name == "" {

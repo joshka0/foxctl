@@ -190,7 +190,7 @@ func TestBBWatch_ReturnsNewRecords(t *testing.T) {
 		done <- res
 	}()
 
-	time.Sleep(500 * time.Millisecond) // Give watch time to start in CI environments
+	time.Sleep(500 * time.Millisecond)                                              // Give watch time to start in CI environments
 	postRes, _ := r.bbPost(ctx, map[string]any{"topic": "chat", "payload": "msg1"}) //nolint:errcheck
 	parseResult(t, postRes)
 

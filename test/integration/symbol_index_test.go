@@ -12,6 +12,7 @@ import (
 
 	"github.com/jkatigb/agentctl/internal/indexing"
 	"github.com/jkatigb/agentctl/internal/indexing/symbol"
+	"github.com/jkatigb/agentctl/internal/platform/workspace"
 	"github.com/jkatigb/agentctl/internal/storage/memory"
 	"github.com/rs/zerolog"
 )
@@ -32,11 +33,19 @@ func setupMemoryStore(t *testing.T) *memory.Store {
 	return store
 }
 
+func canonicalWorkspaceID(path string) string {
+	if id := workspace.ID(path); id != "" {
+		return id
+	}
+	return path
+}
+
 // TestSymbolIndex_PostReviewFlow tests the full post-review → symbol index flow.
 // This is a D4 integration test per Phase 4 spec.
 func TestSymbolIndex_PostReviewFlow(t *testing.T) {
 	// Create temp workspace
 	workspaceDir := t.TempDir()
+	workspaceID := canonicalWorkspaceID(workspaceDir)
 
 	// Create test files
 	files := map[string]string{
@@ -110,7 +119,7 @@ func (h *Helper) DoWork() error {
 	// Create post-review event
 	event := indexing.PostReviewEvent{
 		ID:          "evt-001",
-		WorkspaceID: "ws-integration-test",
+		WorkspaceID: workspaceID,
 		TaskID:      "task-123",
 		ReviewID:    "review-456",
 		Reason:      "post_review",
@@ -147,7 +156,7 @@ func (h *Helper) DoWork() error {
 	}
 
 	// Verify symbols were stored by querying memory store
-	entries, err := memStore.List(ctx, "ws-integration-test", 100)
+	entries, err := memStore.List(ctx, workspaceID, 100)
 	if err != nil {
 		t.Fatalf("list entries: %v", err)
 	}
@@ -170,10 +179,10 @@ func (h *Helper) DoWork() error {
 	}
 
 	expectedSymbols := []string{
-		"symbol://ws-integration-test/main.go:main",
-		"symbol://ws-integration-test/main.go:greet",
-		"symbol://ws-integration-test/utils/helper.go:Helper",
-		"symbol://ws-integration-test/utils/helper.go:Helper.DoWork",
+		symbol.EntryName(workspaceID, "main.go", "main"),
+		symbol.EntryName(workspaceID, "main.go", "greet"),
+		symbol.EntryName(workspaceID, "utils/helper.go", "Helper"),
+		symbol.EntryName(workspaceID, "utils/helper.go", "Helper.DoWork"),
 	}
 
 	for _, name := range expectedSymbols {
@@ -186,6 +195,7 @@ func (h *Helper) DoWork() error {
 // TestSymbolIndex_IncrementalUpdate tests that only changed files are re-indexed.
 func TestSymbolIndex_IncrementalUpdate(t *testing.T) {
 	workspaceDir := t.TempDir()
+	workspaceID := canonicalWorkspaceID(workspaceDir)
 
 	// Create initial file
 	initialContent := `package main
@@ -218,7 +228,7 @@ func original() {}
 
 	// First indexing
 	event1 := indexing.PostReviewEvent{
-		WorkspaceID: "ws-incremental",
+		WorkspaceID: workspaceID,
 		Files: []indexing.FileChange{
 			{Path: "app.go", ChangeKind: indexing.ChangeKindAdded, Language: "go"},
 		},
@@ -234,7 +244,7 @@ func original() {}
 
 	// Second indexing with same content - should be skipped
 	event2 := indexing.PostReviewEvent{
-		WorkspaceID: "ws-incremental",
+		WorkspaceID: workspaceID,
 		Files: []indexing.FileChange{
 			{Path: "app.go", ChangeKind: indexing.ChangeKindModified, Language: "go"},
 		},
@@ -261,7 +271,7 @@ func added() {}
 
 	// Third indexing - should detect change and re-index
 	event3 := indexing.PostReviewEvent{
-		WorkspaceID: "ws-incremental",
+		WorkspaceID: workspaceID,
 		Files: []indexing.FileChange{
 			{Path: "app.go", ChangeKind: indexing.ChangeKindModified, Language: "go"},
 		},
@@ -277,7 +287,7 @@ func added() {}
 	}
 
 	// Verify both symbols exist
-	entries, err := memStore.List(ctx, "ws-incremental", 100)
+	entries, err := memStore.List(ctx, workspaceID, 100)
 	if err != nil {
 		t.Fatalf("list entries: %v", err)
 	}
@@ -297,6 +307,7 @@ func added() {}
 // TestSymbolIndex_CallGraph tests that call graph edges are correctly extracted.
 func TestSymbolIndex_CallGraph(t *testing.T) {
 	workspaceDir := t.TempDir()
+	workspaceID := canonicalWorkspaceID(workspaceDir)
 
 	content := `package main
 
@@ -333,7 +344,7 @@ func helper() {}
 
 	ctx := context.Background()
 	event := indexing.PostReviewEvent{
-		WorkspaceID: "ws-callgraph",
+		WorkspaceID: workspaceID,
 		Files: []indexing.FileChange{
 			{Path: "calls.go", ChangeKind: indexing.ChangeKindAdded, Language: "go"},
 		},
@@ -346,7 +357,7 @@ func helper() {}
 
 	// Verify call edges are stored in symbol entries
 	// (calls are embedded in Result.Calls, not separate entries)
-	allEntries, err := memStore.List(ctx, "ws-callgraph", 100)
+	allEntries, err := memStore.List(ctx, workspaceID, 100)
 	if err != nil {
 		t.Fatalf("list entries: %v", err)
 	}
@@ -354,7 +365,7 @@ func helper() {}
 	// Find the caller symbol and verify it has calls
 	var callerEntry *memory.NamedEntry
 	for i := range allEntries {
-		if allEntries[i].Type == symbol.SymbolType && allEntries[i].Name == "symbol://ws-callgraph/calls.go:caller" {
+		if allEntries[i].Type == symbol.SymbolType && allEntries[i].Name == symbol.EntryName(workspaceID, "calls.go", "caller") {
 			callerEntry = &allEntries[i]
 			break
 		}

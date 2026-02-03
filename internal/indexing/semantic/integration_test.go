@@ -8,6 +8,7 @@ import (
 
 	"github.com/jkatigb/agentctl/internal/indexing"
 	"github.com/jkatigb/agentctl/internal/indexing/semantic"
+	"github.com/jkatigb/agentctl/internal/platform/workspace"
 	"github.com/jkatigb/agentctl/internal/storage/memory"
 	"github.com/rs/zerolog"
 )
@@ -33,6 +34,7 @@ func TestSemanticIndexerWithPostReviewHandler(t *testing.T) {
 	defer store.Close()
 
 	logger := zerolog.Nop()
+	workspaceID := workspace.ID(workspaceDir)
 
 	// Create post-review handler with semantic indexer enabled
 	handlerCfg := indexing.PostReviewConfig{
@@ -64,7 +66,7 @@ func TestSemanticIndexerWithPostReviewHandler(t *testing.T) {
 
 	// Simulate post-review event
 	event := indexing.PostReviewEvent{
-		WorkspaceID: "integration-test-ws",
+		WorkspaceID: workspaceID,
 		TaskID:      "task-integration",
 		ReviewID:    "review-integration",
 		Reason:      "post_review",
@@ -99,8 +101,8 @@ func TestSemanticIndexerWithPostReviewHandler(t *testing.T) {
 	}
 
 	// Verify entries were saved
-	goName := semantic.FileEmbeddingName("integration-test-ws", "main.go")
-	goEntry, err := store.Get(ctx, goName, "integration-test-ws")
+	goName := semantic.FileEmbeddingName(workspaceID, "main.go")
+	goEntry, err := store.Get(ctx, goName, workspaceID)
 	if err != nil {
 		t.Fatalf("Get main.go entry failed: %v", err)
 	}
@@ -108,8 +110,8 @@ func TestSemanticIndexerWithPostReviewHandler(t *testing.T) {
 		t.Errorf("expected type %q, got %q", semantic.FileEmbeddingType, goEntry.Type)
 	}
 
-	mdName := semantic.FileEmbeddingName("integration-test-ws", "README.md")
-	mdEntry, err := store.Get(ctx, mdName, "integration-test-ws")
+	mdName := semantic.FileEmbeddingName(workspaceID, "README.md")
+	mdEntry, err := store.Get(ctx, mdName, workspaceID)
 	if err != nil {
 		t.Fatalf("Get README.md entry failed: %v", err)
 	}

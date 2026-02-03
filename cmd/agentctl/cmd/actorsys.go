@@ -353,7 +353,7 @@ func runActorSysSupervisorStatus(cmd *cobra.Command, _ []string) error {
 }
 
 // runActorSysSpawn registers a new actor record in the actor registry for the configured namespace and role.
-// 
+//
 // If the global dry-run option is enabled, the function writes a dry-run envelope describing the would-be
 // registration and returns without mutating the registry. On successful registration it writes a success
 // envelope to stdout indicating the actor is registered (activation requires starting the supervisor).

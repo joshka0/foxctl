@@ -339,7 +339,7 @@ func TestIndexReason_Values(t *testing.T) {
 // =============================================================================
 
 func TestIndexer_RunInitFilesJob(t *testing.T) {
-	idx, _, workspaceDir := setupTestIndexer(t, Config{Enabled: true})
+	idx, _, workspaceDir, workspaceID := setupTestIndexer(t, Config{Enabled: true})
 
 	// Create a test file
 	content := `package main
@@ -351,7 +351,7 @@ func Hello() string {
 	createTestFile(t, workspaceDir, "hello.go", content)
 
 	args := JobArgs{
-		WorkspaceID: "ws-init-job",
+		WorkspaceID: workspaceID,
 		Files: []JobFileInput{
 			{Path: "hello.go", Language: "go"},
 		},
@@ -373,7 +373,7 @@ func Hello() string {
 }
 
 func TestIndexer_RunUpdateFilesJob(t *testing.T) {
-	idx, _, workspaceDir := setupTestIndexer(t, Config{Enabled: true})
+	idx, _, workspaceDir, workspaceID := setupTestIndexer(t, Config{Enabled: true})
 
 	// Create and index a test file
 	content := `package main
@@ -386,7 +386,7 @@ func Greet() string {
 
 	// First, init the file
 	initArgs := JobArgs{
-		WorkspaceID: "ws-update-job",
+		WorkspaceID: workspaceID,
 		Files: []JobFileInput{
 			{Path: "greet.go", Language: "go"},
 		},
@@ -407,7 +407,7 @@ func Greet() string {
 	createTestFile(t, workspaceDir, "greet.go", updateContent)
 
 	updateArgs := JobArgs{
-		WorkspaceID: "ws-update-job",
+		WorkspaceID: workspaceID,
 		Files: []JobFileInput{
 			{Path: "greet.go", Language: "go", ChangeKind: indexing.ChangeKindModified},
 		},
@@ -429,7 +429,7 @@ func Greet() string {
 }
 
 func TestIndexer_RunInitFilesJob_ValidationError(t *testing.T) {
-	idx, _, _ := setupTestIndexer(t, Config{Enabled: true})
+	idx, _, _, _ := setupTestIndexer(t, Config{Enabled: true})
 
 	// Missing workspace_id
 	args := JobArgs{
@@ -446,7 +446,7 @@ func TestIndexer_RunInitFilesJob_ValidationError(t *testing.T) {
 }
 
 func TestIndexer_RunUpdateFilesJob_DeletedFile(t *testing.T) {
-	idx, store, workspaceDir := setupTestIndexer(t, Config{Enabled: true})
+	idx, store, workspaceDir, workspaceID := setupTestIndexer(t, Config{Enabled: true})
 	ctx := context.Background()
 
 	// Create and index a test file
@@ -457,7 +457,7 @@ func ToDelete() {}
 	createTestFile(t, workspaceDir, "delete_me.go", content)
 
 	initArgs := JobArgs{
-		WorkspaceID: "ws-delete-job",
+		WorkspaceID: workspaceID,
 		Files: []JobFileInput{
 			{Path: "delete_me.go", Language: "go"},
 		},
@@ -469,14 +469,14 @@ func ToDelete() {}
 	}
 
 	// Verify symbol exists
-	_, err = store.Get(ctx, EntryName("ws-delete-job", "delete_me.go", "ToDelete"), "ws-delete-job")
+	_, err = store.Get(ctx, EntryName(workspaceID, "delete_me.go", "ToDelete"), workspaceID)
 	if err != nil {
 		t.Fatalf("symbol should exist: %v", err)
 	}
 
 	// Delete the file via update job
 	deleteArgs := JobArgs{
-		WorkspaceID: "ws-delete-job",
+		WorkspaceID: workspaceID,
 		Files: []JobFileInput{
 			{Path: "delete_me.go", ChangeKind: indexing.ChangeKindDeleted},
 		},
@@ -493,7 +493,7 @@ func ToDelete() {}
 	}
 
 	// Verify symbol is gone
-	_, err = store.Get(ctx, EntryName("ws-delete-job", "delete_me.go", "ToDelete"), "ws-delete-job")
+	_, err = store.Get(ctx, EntryName(workspaceID, "delete_me.go", "ToDelete"), workspaceID)
 	if err == nil {
 		t.Error("symbol should have been deleted")
 	}

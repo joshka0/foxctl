@@ -10,6 +10,7 @@ import (
 
 	"github.com/jkatigb/agentctl/internal/domain/envelope"
 	"github.com/jkatigb/agentctl/internal/platform/config"
+	"github.com/jkatigb/agentctl/internal/platform/workspace"
 	"github.com/jkatigb/agentctl/internal/storage/cache"
 	memstore "github.com/jkatigb/agentctl/internal/storage/memory"
 	"github.com/spf13/cobra"
@@ -17,6 +18,7 @@ import (
 
 func TestMemoryRecentAndCacheCommands(t *testing.T) {
 	cfg := setupMemoryTestEnv(t)
+	workspaceID := workspace.ID(cfg.Home)
 	ctx := context.Background()
 
 	cacheStore, err := cache.Open(ctx, cfg.Paths.Cache, cache.Options{
@@ -32,7 +34,7 @@ func TestMemoryRecentAndCacheCommands(t *testing.T) {
 		CacheKey:     "sha256:test",
 		SkillName:    "text/grep",
 		SkillVersion: "0.1.0",
-		Workspace:    cfg.Home,
+		Workspace:    workspaceID,
 		Result:       []byte(`{"version":1,"status":"ok","command":"test","data":{},"meta":{"ts":"2025-01-01T00:00:00Z"},"error":{}}`),
 		CreatedAt:    time.Now().UTC(),
 		ExpiresAt:    time.Now().UTC().Add(24 * time.Hour),
@@ -77,6 +79,7 @@ func TestMemoryRecentAndCacheCommands(t *testing.T) {
 
 func TestMemoryListAndGetCommands(t *testing.T) {
 	cfg := setupMemoryTestEnv(t)
+	workspaceID := workspace.ID(cfg.Home)
 	ctx := context.Background()
 	store, err := memstore.Open(ctx, cfg.Storage.Root, cfg.Paths.CAS)
 	if err != nil {
@@ -84,7 +87,7 @@ func TestMemoryListAndGetCommands(t *testing.T) {
 	}
 	defer requireClose(t, store, "memory store")
 	result := []byte(`{"version":1,"status":"ok","command":"test","data":{},"meta":{"ts":"2025-01-01T00:00:00Z"},"error":{}}`)
-	if _, err := store.SaveFromResult(ctx, "alpha", "result", cfg.Home, "alpha summary", result); err != nil {
+	if _, err := store.SaveFromResult(ctx, "alpha", "result", workspaceID, "alpha summary", result); err != nil {
 		t.Fatalf("save memory: %v", err)
 	}
 
@@ -107,6 +110,7 @@ func TestMemoryListAndGetCommands(t *testing.T) {
 
 func TestMemoryPutCommand(t *testing.T) {
 	cfg := setupMemoryTestEnv(t)
+	workspaceID := workspace.ID(cfg.Home)
 	payload := `{"version":1,"status":"ok","command":"test","data":{"value":1},"meta":{"ts":"2025-01-01T00:00:00Z"},"error":{}}`
 	runMemoryCommand(t, cfg, newMemoryPutCommand(),
 		"--name", "stored",
@@ -118,7 +122,7 @@ func TestMemoryPutCommand(t *testing.T) {
 		t.Fatalf("open memory store: %v", err)
 	}
 	defer requireClose(t, store, "memory store post-put")
-	entry, err := store.Get(context.Background(), "stored", cfg.Home)
+	entry, err := store.Get(context.Background(), "stored", workspaceID)
 	if err != nil {
 		t.Fatalf("memory get stored: %v", err)
 	}
@@ -129,6 +133,7 @@ func TestMemoryPutCommand(t *testing.T) {
 
 func TestMemorySearchAndRelevantCommands(t *testing.T) {
 	cfg := setupMemoryTestEnv(t)
+	workspaceID := workspace.ID(cfg.Home)
 	ctx := context.Background()
 	store, err := memstore.Open(ctx, cfg.Storage.Root, cfg.Paths.CAS)
 	if err != nil {
@@ -136,10 +141,10 @@ func TestMemorySearchAndRelevantCommands(t *testing.T) {
 	}
 	defer requireClose(t, store, "memory store search relevant")
 	result := []byte(`{"version":1,"status":"ok","command":"test","data":{},"meta":{"ts":"2025-01-01T00:00:00Z"},"error":{}}`)
-	if _, err := store.SaveFromResult(ctx, "alpha", "result", cfg.Home, "alpha summary", result); err != nil {
+	if _, err := store.SaveFromResult(ctx, "alpha", "result", workspaceID, "alpha summary", result); err != nil {
 		t.Fatalf("save alpha: %v", err)
 	}
-	if _, err := store.SaveFromResult(ctx, "beta", "result", cfg.Home, "beta summary", result); err != nil {
+	if _, err := store.SaveFromResult(ctx, "beta", "result", workspaceID, "beta summary", result); err != nil {
 		t.Fatalf("save beta: %v", err)
 	}
 
@@ -164,6 +169,7 @@ func TestMemorySearchAndRelevantCommands(t *testing.T) {
 
 func TestMemoryStatsCommand(t *testing.T) {
 	cfg := setupMemoryTestEnv(t)
+	workspaceID := workspace.ID(cfg.Home)
 	ctx := context.Background()
 
 	cacheStore, err := cache.Open(ctx, cfg.Paths.Cache, cache.Options{
@@ -178,7 +184,7 @@ func TestMemoryStatsCommand(t *testing.T) {
 		CacheKey:     "sha256:stats",
 		SkillName:    "text/grep",
 		SkillVersion: "0.1.0",
-		Workspace:    cfg.Home,
+		Workspace:    workspaceID,
 		Result:       []byte(`{"version":1,"status":"ok","command":"test","data":{},"meta":{"ts":"2025-01-01T00:00:00Z"},"error":{}}`),
 		CreatedAt:    time.Now().UTC(),
 		ExpiresAt:    time.Now().UTC().Add(time.Hour),
@@ -191,7 +197,7 @@ func TestMemoryStatsCommand(t *testing.T) {
 		t.Fatalf("open memory store: %v", err)
 	}
 	defer requireClose(t, mStore, "memory store stats")
-	if _, err := mStore.SaveFromResult(ctx, "stats-entry", "result", cfg.Home, "stats", []byte(`{"version":1,"status":"ok","command":"test","data":{},"meta":{"ts":"2025-01-01T00:00:00Z"},"error":{}}`)); err != nil {
+	if _, err := mStore.SaveFromResult(ctx, "stats-entry", "result", workspaceID, "stats", []byte(`{"version":1,"status":"ok","command":"test","data":{},"meta":{"ts":"2025-01-01T00:00:00Z"},"error":{}}`)); err != nil {
 		t.Fatalf("seed memory: %v", err)
 	}
 
@@ -349,6 +355,7 @@ func TestMemoryUpdateMissingArgs(t *testing.T) {
 
 func TestMemoryDeleteSuccess(t *testing.T) {
 	cfg := setupMemoryTestEnv(t)
+	workspaceID := workspace.ID(cfg.Home)
 	ctx := context.Background()
 
 	// Create a memory entry first
@@ -357,7 +364,7 @@ func TestMemoryDeleteSuccess(t *testing.T) {
 		t.Fatalf("open memory store: %v", err)
 	}
 	result := []byte(`{"version":1,"status":"ok","command":"test","data":{},"meta":{"ts":"2025-01-01T00:00:00Z"},"error":{}}`)
-	if _, err := store.SaveFromResult(ctx, "to-delete", "result", cfg.Home, "test", result); err != nil {
+	if _, err := store.SaveFromResult(ctx, "to-delete", "result", workspaceID, "test", result); err != nil {
 		t.Fatalf("save memory: %v", err)
 	}
 	if err := store.Close(); err != nil {
@@ -401,7 +408,7 @@ func TestMemoryDeleteSuccess(t *testing.T) {
 	}
 	defer requireClose(t, store, "memory store delete verify")
 
-	_, err = store.Get(ctx, "to-delete", cfg.Home)
+	_, err = store.Get(ctx, "to-delete", workspaceID)
 	if err == nil {
 		t.Fatal("expected entry to be deleted")
 	}

@@ -10,12 +10,14 @@ import (
 
 	"github.com/jkatigb/agentctl/internal/domain/envelope"
 	"github.com/jkatigb/agentctl/internal/platform/config"
+	"github.com/jkatigb/agentctl/internal/platform/workspace"
 	"github.com/jkatigb/agentctl/internal/storage/cas"
 	memstore "github.com/jkatigb/agentctl/internal/storage/memory"
 )
 
 func TestOpenAPIImportCommandStoresSpec(t *testing.T) {
 	cfg := setupOpenAPITestConfig(t)
+	workspaceID := workspace.ID(cfg.Home)
 	ctx := context.Background()
 
 	// seed directories for cas/memory
@@ -56,7 +58,7 @@ func TestOpenAPIImportCommandStoresSpec(t *testing.T) {
 	if !ok || digest == "" {
 		t.Fatalf("expected digest in response")
 	}
-	if _, err := memStore.Get(ctx, "sample", cfg.Home); err != nil {
+	if _, err := memStore.Get(ctx, "sample", workspaceID); err != nil {
 		t.Fatalf("memory get: %v", err)
 	}
 

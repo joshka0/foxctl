@@ -134,7 +134,7 @@ func listWorkspaces(ctx context.Context, store *sessions.Store, cfg config.Confi
 
 // WorkspaceSwitchHandler returns a handler for POST /api/workspaces/switch.
 // WorkspaceSwitchHandler returns an HTTP handler that switches the server's active workspace.
-// 
+//
 // The handler accepts a POST request and determines the target workspace path from the
 // "workspace" or "path" query parameters, or from a JSON body { "path": "<workspace>" }.
 // It validates that the path is absolute, does not contain `..`, exists on disk, and is a directory.

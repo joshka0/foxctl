@@ -25,12 +25,13 @@ type SkillHandle = runservice.SkillHandle
 
 // loadSkillInput loads skill input from multiple sources and returns it as bytes.
 // It supports the following sources, tried in order:
-//  - file == "-" : read raw bytes from stdin (errors if stdin is a terminal).
-//  - file != ""  : read bytes from the specified file path.
-//  - inline == "stdin" (case-insensitive): read the "data" field from a JSON envelope on stdin (errors if stdin is a terminal).
-//  - inline starting with "sha256:": read the object with that hash from the configured CAS store.
-//  - inline non-empty: use the inline string as the input bytes.
-//  - fallback: return the bytes for an empty JSON object ("{}").
+//   - file == "-" : read raw bytes from stdin (errors if stdin is a terminal).
+//   - file != ""  : read bytes from the specified file path.
+//   - inline == "stdin" (case-insensitive): read the "data" field from a JSON envelope on stdin (errors if stdin is a terminal).
+//   - inline starting with "sha256:": read the object with that hash from the configured CAS store.
+//   - inline non-empty: use the inline string as the input bytes.
+//   - fallback: return the bytes for an empty JSON object ("{}").
+//
 // The function returns an error for I/O failures, CAS access errors, or when stdin is a terminal where piped input is required.
 func loadSkillInput(cmd *cobra.Command, cfg config.Config, inline, file string) ([]byte, error) {
 	trimmed := strings.TrimSpace(inline)
@@ -119,7 +120,7 @@ func isTerminalReader(r io.Reader) bool {
 }
 
 // findSkill locates and loads a skill by name, returning its SkillHandle or an error.
-// 
+//
 // It attempts to resolve the requested skill using the configured skill resolver, load the
 // resolved skill directory, and search alternative candidate locations if the primary
 // resolution is unsuitable. If not found, it will attempt to install an embedded skill

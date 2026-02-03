@@ -26,6 +26,7 @@ type RenderOpts struct {
 //   - ModeMasked: Full file with irrelevant sections marked as [...] (TODO: Phase 2)
 //   - ModeStructure: Only signatures and imports (TODO: Phase 2)
 //   - ModeFlow: Control-flow excerpts (TODO: Phase 2)
+//
 // Render formats evidence according to the selected render mode.
 //
 // Index:

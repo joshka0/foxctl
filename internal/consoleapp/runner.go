@@ -111,8 +111,8 @@ func (r *Runner) Run(ctx context.Context, session *consolews.Session, userMessag
 		// Add tool calls to metadata if present
 		if len(output.ToolCalls) > 0 {
 			const (
-				maxResultSize     = 64 * 1024 // 64KB threshold for truncation
-				truncatedSummary  = 2 * 1024  // 2KB summary for truncated results
+				maxResultSize    = 64 * 1024 // 64KB threshold for truncation
+				truncatedSummary = 2 * 1024  // 2KB summary for truncated results
 			)
 			toolCallsData := make([]map[string]any, 0, len(output.ToolCalls))
 			for i, tc := range output.ToolCalls {

@@ -14,6 +14,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/domain/envelope"
 	"github.com/jkatigb/agentctl/internal/hooks"
 	"github.com/jkatigb/agentctl/internal/platform/config"
+	"github.com/jkatigb/agentctl/internal/platform/workspace"
 	"github.com/jkatigb/agentctl/internal/storage/blackboard"
 	"github.com/jkatigb/agentctl/internal/storage/tasks"
 )
@@ -96,6 +97,7 @@ func (env *fileGuardTestEnv) run(t *testing.T, in hooks.Input) hooks.Output {
 
 func TestFileGuard_ReservesPathForActiveTask(t *testing.T) {
 	env := newFileGuardTestEnv(t)
+	workspaceID := workspace.ID(env.workspaceRoot)
 
 	// Create an active task so the reservation can be associated with it.
 	ctx := context.Background()
@@ -104,7 +106,7 @@ func TestFileGuard_ReservesPathForActiveTask(t *testing.T) {
 		t.Fatal(err)
 	}
 	task, err := store.Add(ctx, tasks.Task{
-		WorkspaceID: env.workspaceRoot,
+		WorkspaceID: workspaceID,
 		Title:       "Guarded Task",
 		Description: "Editing main.go",
 	})
@@ -113,7 +115,7 @@ func TestFileGuard_ReservesPathForActiveTask(t *testing.T) {
 		_ = store.Close() //nolint:errcheck
 		t.Fatal(err)
 	}
-	if _, err := store.SetActive(ctx, env.workspaceRoot, task.ID); err != nil {
+	if _, err := store.SetActive(ctx, workspaceID, task.ID); err != nil {
 		// Cleanup on error; error is not actionable.
 		_ = store.Close() //nolint:errcheck
 		t.Fatal(err)
@@ -167,7 +169,7 @@ func TestFileGuard_ReservesPathForActiveTask(t *testing.T) {
 	}
 	defer board.Close()
 
-	reservations, err := board.ListReservations(env.ctx, env.workspaceRoot)
+	reservations, err := board.ListReservations(env.ctx, workspaceID)
 	if err != nil {
 		t.Fatalf("list reservations: %v", err)
 	}
@@ -189,6 +191,7 @@ func TestFileGuard_ReservesPathForActiveTask(t *testing.T) {
 
 func TestFileGuard_StrictMode_BlocksOnConflict(t *testing.T) {
 	env := newFileGuardTestEnv(t)
+	workspaceID := workspace.ID(env.workspaceRoot)
 
 	// Pre-create a conflicting reservation for the same file by another actor.
 	board, err := blackboard.OpenBoardStore(env.ctx, env.cfg.Storage.Root)
@@ -198,7 +201,7 @@ func TestFileGuard_StrictMode_BlocksOnConflict(t *testing.T) {
 	defer board.Close()
 
 	conflict := &agent.FileReservation{
-		WorkspaceID: env.workspaceRoot,
+		WorkspaceID: workspaceID,
 		Path:        "main.go",
 		Holder:      "actor:other",
 		Mode:        agent.ReservationModeExclusive,

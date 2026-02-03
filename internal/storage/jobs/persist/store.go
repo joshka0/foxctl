@@ -38,7 +38,6 @@ type sqlStore struct {
 	mu    sync.Mutex
 }
 
-
 // Open initializes the persistent store rooted at the provided path.
 // Open opens a SQLite-backed job Store at root/jobs.db and applies migrations.
 // If the on-disk database cannot be opened due to a read-only filesystem, Open writes a brief warning to stderr and falls back to an in-memory store.
@@ -66,7 +65,6 @@ func Open(ctx context.Context, root string) (Store, error) {
 	return &sqlStore{db: db, close: closeFn}, nil
 }
 
-
 // isReadonlyError reports whether err represents a readonly-filesystem or readonly-database condition.
 // It returns true when the error string contains known readonly-related substrings, false otherwise.
 func isReadonlyError(err error) bool {
@@ -85,7 +83,6 @@ func (s *sqlStore) Close() error {
 	}
 	return s.close()
 }
-
 
 func (s *sqlStore) List(ctx context.Context, limit int) ([]types.Job, error) {
 	if limit <= 0 {

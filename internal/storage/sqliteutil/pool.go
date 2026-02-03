@@ -18,7 +18,6 @@ type Pool struct {
 	closed bool
 }
 
-
 // pooledDB wraps a database connection with reference counting.
 type pooledDB struct {
 	db          *sql.DB
@@ -27,14 +26,12 @@ type pooledDB struct {
 	migrateErr  error
 }
 
-
 // NewPool creates a new Pool with its internal database map initialized and ready for use.
 func NewPool() *Pool {
 	return &Pool{
 		dbs: make(map[string]*pooledDB),
 	}
 }
-
 
 // Get returns a database connection for the given path.
 // If a connection doesn't exist, it opens one using OpenDB.
@@ -97,7 +94,6 @@ func (p *Pool) Get(ctx context.Context, path string, migrate func(context.Contex
 	return db, nil
 }
 
-
 // Release decrements the reference count for a database.
 // In daemon mode, this typically doesn't close the connection -
 // use Close to close all connections.
@@ -111,7 +107,6 @@ func (p *Pool) Release(path string) {
 		}
 	}
 }
-
 
 // Close closes all pooled database connections.
 func (p *Pool) Close() error {

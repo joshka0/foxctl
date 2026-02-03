@@ -14,6 +14,7 @@ import (
 
 	"github.com/jkatigb/agentctl/internal/indexing"
 	"github.com/jkatigb/agentctl/internal/platform/fsutil"
+	"github.com/jkatigb/agentctl/internal/platform/workspace"
 	"github.com/jkatigb/agentctl/internal/storage"
 	"github.com/jkatigb/agentctl/internal/storage/memory"
 	"github.com/rs/zerolog"
@@ -70,6 +71,17 @@ func (idx *Indexer) Index(ctx context.Context, event indexing.PostReviewEvent) (
 		}, nil
 	}
 
+	if canonicalWorkspace := workspace.ID(idx.workspaceRoot); canonicalWorkspace != "" {
+		if event.WorkspaceID == "" {
+			event.WorkspaceID = canonicalWorkspace
+		} else if event.WorkspaceID != canonicalWorkspace {
+			idx.logger.Warn().
+				Str("workspace_id", event.WorkspaceID).
+				Str("canonical_workspace_id", canonicalWorkspace).
+				Msg("overriding workspace id for semantic indexing")
+			event.WorkspaceID = canonicalWorkspace
+		}
+	}
 	result := &indexing.IndexerResult{
 		IndexerID: IndexerID,
 	}
@@ -178,6 +190,9 @@ func (idx *Indexer) indexSingleFile(ctx context.Context, event indexing.PostRevi
 
 	if _, err := idx.memoryStore.Save(ctx, entry); err != nil {
 		return fmt.Errorf("save entry: %w", err)
+	}
+	if err := idx.memoryStore.UpdateEmbedding(ctx, name, event.WorkspaceID, embedding); err != nil {
+		return fmt.Errorf("update embedding: %w", err)
 	}
 
 	idx.logger.Debug().
@@ -292,6 +307,10 @@ func (idx *Indexer) indexChunkedFile(ctx context.Context, event indexing.PostRev
 
 		if _, err := idx.memoryStore.Save(ctx, chunkEntry); err != nil {
 			saveErr = fmt.Errorf("save chunk entry %d: %w", i, err)
+			break
+		}
+		if err := idx.memoryStore.UpdateEmbedding(ctx, chunkName, event.WorkspaceID, chunkEmbeddings[i]); err != nil {
+			saveErr = fmt.Errorf("update chunk embedding %d: %w", i, err)
 			break
 		}
 

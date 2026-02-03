@@ -87,7 +87,6 @@ type Store struct {
 	close func() error
 }
 
-
 // Connection pool defaults
 const (
 	defaultMaxOpenConns    = 10
@@ -97,7 +96,7 @@ const (
 )
 
 // Open opens or creates the sessions SQLite database at root and returns a configured Store.
-// 
+//
 // The returned Store is configured with connection pool defaults and retains an internal
 // cleanup function that Close will invoke. Open also performs a non-blocking validation
 // of embedding dimensions and returns an error if the database cannot be opened or migrated.
@@ -126,7 +125,6 @@ func Open(ctx context.Context, root string) (store *Store, err error) {
 	return store, nil
 }
 
-
 // OpenFromConfig opens the sessions store using paths from config.
 // OpenFromConfig opens a Store using the configured storage root from cfg.
 // It is the preferred way to open the store as it ensures correct path handling.
@@ -141,7 +139,6 @@ func (s *Store) Close() error {
 	}
 	return s.close()
 }
-
 
 // Stats returns session count.
 func (s *Store) Stats(ctx context.Context) (Stats, error) {
