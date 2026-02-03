@@ -78,10 +78,12 @@ func Open(ctx context.Context, storageRoot string) (Store, error) {
 	return &sqlStore{db: db, close: closeFn}, nil
 }
 
+
 type sqlStore struct {
 	db    *sql.DB
 	close func() error
 }
+
 
 func (s *sqlStore) Close() error {
 	if s == nil || s.close == nil {
@@ -89,6 +91,7 @@ func (s *sqlStore) Close() error {
 	}
 	return s.close()
 }
+
 
 func (s *sqlStore) DB() *sql.DB {
 	return s.db

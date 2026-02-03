@@ -11,14 +11,14 @@ import (
 
 // Manifest mirrors skill.yaml structure.
 type Manifest struct {
-	APIVersion   string         `yaml:"apiVersion" json:"apiVersion"`
-	Kind         string         `yaml:"kind" json:"kind"`
-	Metadata     Metadata       `yaml:"metadata" json:"metadata"`
-	Distribution Distribution   `yaml:"distribution" json:"distribution"`
-	IO           IOConfig       `yaml:"io" json:"io"`
-	Signature    Signature      `yaml:"signature" json:"signature"`
-	Capabilities Capabilities   `yaml:"capabilities" json:"capabilities"`
-	Memory       MemoryConfig   `yaml:"memory" json:"memory"`
+	APIVersion   string        `yaml:"apiVersion" json:"apiVersion"`
+	Kind         string        `yaml:"kind" json:"kind"`
+	Metadata     Metadata      `yaml:"metadata" json:"metadata"`
+	Distribution Distribution  `yaml:"distribution" json:"distribution"`
+	IO           IOConfig      `yaml:"io" json:"io"`
+	Signature    Signature     `yaml:"signature" json:"signature"`
+	Capabilities Capabilities  `yaml:"capabilities" json:"capabilities"`
+	Memory       MemoryConfig  `yaml:"memory" json:"memory"`
 	OpenAPI      *OpenAPIConfig `yaml:"openapi,omitempty" json:"openapi,omitempty"`
 }
 

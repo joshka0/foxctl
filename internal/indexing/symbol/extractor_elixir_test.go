@@ -131,7 +131,7 @@ end
 	if err != nil {
 		t.Logf("golden file not found, creating: %s", expectedPath)
 		out, _ := json.MarshalIndent(snapshots, "", "  ")
-		if writeErr := os.WriteFile(expectedPath, out, 0o644); writeErr != nil {
+		if writeErr := os.WriteFile(expectedPath, out, 0644); writeErr != nil {
 			t.Fatalf("write golden file: %v", writeErr)
 		}
 		return

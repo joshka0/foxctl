@@ -112,15 +112,14 @@ func (g *Generator) searchSymbolIndex(ctx context.Context, workspaceID, question
 	for _, hit := range hits {
 		sym := hit.result.Symbol
 		candidates = append(candidates, Candidate{
-			Path:          sym.FilePath,
-			SymbolID:      sym.ID,
-			Name:          sym.Name,
-			Kind:          string(sym.Kind),
-			Documentation: sym.Documentation,
-			Score:         hit.score / maxScore, // Normalize to 0-1
-			RawScore:      hit.score,
-			Source:        SourceSymbol,
-			Line:          sym.StartLine,
+			Path:     sym.FilePath,
+			SymbolID: sym.ID,
+			Name:     sym.Name,
+			Kind:     string(sym.Kind),
+			Score:    hit.score / maxScore, // Normalize to 0-1
+			RawScore: hit.score,
+			Source:   SourceSymbol,
+			Line:     sym.StartLine,
 		})
 	}
 

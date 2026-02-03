@@ -138,9 +138,9 @@ type SkillRunner interface {
 
 // SkillRunResult contains the result of a skill execution.
 type SkillRunResult struct {
-	Success bool            `json:"success"`
-	Output  json.RawMessage `json:"output,omitempty"`
-	Error   string          `json:"error,omitempty"`
+	Success  bool            `json:"success"`
+	Output   json.RawMessage `json:"output,omitempty"`
+	Error    string          `json:"error,omitempty"`
 }
 
 // HookContext provides context for hook dispatch in companion sessions.

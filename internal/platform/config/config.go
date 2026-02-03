@@ -480,7 +480,7 @@ func decodeConfig(v *viper.Viper) (Config, error) {
 }
 
 // finalizeConfig finalizes and normalizes a Config using the provided home directory.
-//
+// 
 // It resolves and normalizes configured paths relative to the resolved Home, applies
 // sensible defaults for unset numeric/time/string fields (inline output size, capture
 // limits, memory TTLs, cache/default mode, logging defaults, plugin paths, embedding

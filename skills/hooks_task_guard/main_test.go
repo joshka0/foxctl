@@ -11,7 +11,6 @@ import (
 	"github.com/jkatigb/agentctl/internal/domain/envelope"
 	"github.com/jkatigb/agentctl/internal/hooks"
 	"github.com/jkatigb/agentctl/internal/platform/config"
-	"github.com/jkatigb/agentctl/internal/platform/workspace"
 	"github.com/jkatigb/agentctl/internal/storage/tasks"
 )
 
@@ -56,7 +55,6 @@ func TestTaskGuard_AutoMode_CreatesTask(t *testing.T) {
 
 func TestTaskGuard_AutoMode_UsesExistingTask(t *testing.T) {
 	env := newTestEnv(t)
-	workspaceID := workspace.ID(env.workspaceRoot)
 
 	// Create an active task first
 	ctx := context.Background()
@@ -65,13 +63,13 @@ func TestTaskGuard_AutoMode_UsesExistingTask(t *testing.T) {
 		t.Fatal(err)
 	}
 	task, err := store.Add(ctx, tasks.Task{
-		WorkspaceID: workspaceID,
+		WorkspaceID: env.workspaceRoot,
 		Title:       "Existing Task",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = store.SetActive(ctx, workspaceID, task.ID)
+	_, err = store.SetActive(ctx, env.workspaceRoot, task.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -121,7 +119,6 @@ func TestTaskGuard_StrictMode_BlocksWithoutTask(t *testing.T) {
 
 func TestTaskGuard_StrictMode_ApprovesWithTask(t *testing.T) {
 	env := newTestEnv(t)
-	workspaceID := workspace.ID(env.workspaceRoot)
 
 	// Set strict mode
 	t.Setenv("AGENTCTL_TASK_GUARD_MODE", "strict")
@@ -133,13 +130,13 @@ func TestTaskGuard_StrictMode_ApprovesWithTask(t *testing.T) {
 		t.Fatal(err)
 	}
 	task, err := store.Add(ctx, tasks.Task{
-		WorkspaceID: workspaceID,
+		WorkspaceID: env.workspaceRoot,
 		Title:       "Active Task",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = store.SetActive(ctx, workspaceID, task.ID)
+	_, err = store.SetActive(ctx, env.workspaceRoot, task.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -161,7 +158,6 @@ func TestTaskGuard_StrictMode_ApprovesWithTask(t *testing.T) {
 
 func TestTaskGuard_AutoMode_DirtiesReadyForReviewTask(t *testing.T) {
 	env := newTestEnv(t)
-	workspaceID := workspace.ID(env.workspaceRoot)
 
 	// Create a ready_for_review task with passing review
 	ctx := context.Background()
@@ -170,7 +166,7 @@ func TestTaskGuard_AutoMode_DirtiesReadyForReviewTask(t *testing.T) {
 		t.Fatal(err)
 	}
 	task, err := store.Add(ctx, tasks.Task{
-		WorkspaceID:      workspaceID,
+		WorkspaceID:      env.workspaceRoot,
 		Title:            "Ready for Review Task",
 		Status:           tasks.StatusReadyForReview,
 		LastReviewStatus: tasks.ReviewStatusOK,
@@ -178,7 +174,7 @@ func TestTaskGuard_AutoMode_DirtiesReadyForReviewTask(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = store.SetActive(ctx, workspaceID, task.ID)
+	_, err = store.SetActive(ctx, env.workspaceRoot, task.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -225,7 +221,6 @@ func TestTaskGuard_AutoMode_DirtiesReadyForReviewTask(t *testing.T) {
 
 func TestTaskGuard_StrictMode_DirtiesCompletedTask(t *testing.T) {
 	env := newTestEnv(t)
-	workspaceID := workspace.ID(env.workspaceRoot)
 
 	// Set strict mode
 	t.Setenv("AGENTCTL_TASK_GUARD_MODE", "strict")
@@ -237,7 +232,7 @@ func TestTaskGuard_StrictMode_DirtiesCompletedTask(t *testing.T) {
 		t.Fatal(err)
 	}
 	task, err := store.Add(ctx, tasks.Task{
-		WorkspaceID:      workspaceID,
+		WorkspaceID:      env.workspaceRoot,
 		Title:            "Completed Task",
 		Status:           tasks.StatusCompleted,
 		LastReviewStatus: tasks.ReviewStatusOK,
@@ -245,7 +240,7 @@ func TestTaskGuard_StrictMode_DirtiesCompletedTask(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = store.SetActive(ctx, workspaceID, task.ID)
+	_, err = store.SetActive(ctx, env.workspaceRoot, task.ID)
 	if err != nil {
 		t.Fatal(err)
 	}

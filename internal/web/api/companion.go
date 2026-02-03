@@ -354,7 +354,7 @@ func CompanionConversationsHandler(cfg config.Config, log zerolog.Logger) http.H
 
 // CompanionConversationMessagesHandler returns a handler for GET /api/companion/conversations/:id/messages.
 // CompanionConversationMessagesHandler returns an HTTP handler for GET /api/companion/conversations/:id/messages that retrieves messages for the specified conversation.
-//
+// 
 // The handler accepts an optional `limit` query parameter (default 100) to bound the number of messages returned and responds with a JSON object containing
 // `conversation_id`, `messages`, and `count`. It validates the request path and method and uses the configured context store and companion memory DB.
 func CompanionConversationMessagesHandler(cfg config.Config, log zerolog.Logger) http.HandlerFunc {

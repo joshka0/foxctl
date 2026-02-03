@@ -14,6 +14,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/openapi/loader"
 	"github.com/jkatigb/agentctl/internal/platform/config"
 	errs "github.com/jkatigb/agentctl/internal/platform/errors"
+	"github.com/jkatigb/agentctl/internal/platform/workspace"
 	"github.com/jkatigb/agentctl/internal/protocol"
 	"github.com/jkatigb/agentctl/internal/storage"
 	"github.com/jkatigb/agentctl/internal/storage/cas"
@@ -48,7 +49,7 @@ func newOpenAPIImportCommand() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			specRef := args[0]
 			return memorycmd.WithConfig(cmd, func(ctx context.Context, cfg config.Config) error {
-				workspaceID := resolveWorkspaceID(cfg, workspaceArg)
+				ws := resolveWorkspace(cfg, workspaceArg)
 				return memorycmd.WithMemoryStore(ctx, cfg, func(mem storage.MemoryStore) error {
 					casStore, err := cas.NewStore(cfg.Paths.CAS)
 					if err != nil {
@@ -61,7 +62,7 @@ func newOpenAPIImportCommand() *cobra.Command {
 					httpClient := &http.Client{ //nolint:exhaustruct
 						Timeout: defaultHTTPTimeout,
 					}
-					l := loader.New(casStore, mem, loader.WithWorkspace(workspaceID), loader.WithStrictValidation(strict), loader.WithHTTPClient(httpClient))
+					l := loader.New(casStore, mem, loader.WithWorkspace(ws), loader.WithStrictValidation(strict), loader.WithHTTPClient(httpClient))
 					spec, err := l.Load(ctx, specRef)
 					if err != nil {
 						return err
@@ -79,7 +80,7 @@ func newOpenAPIImportCommand() *cobra.Command {
 
 					var memoryInfo map[string]any
 					if importAs != "" {
-						entry, err := saveSpecMemory(ctx, mem, importAs, workspaceID, spec, digest)
+						entry, err := saveSpecMemory(ctx, mem, importAs, ws, spec, digest)
 						if err != nil {
 							return err
 						}
@@ -105,7 +106,7 @@ func newOpenAPIImportCommand() *cobra.Command {
 
 					return protocol.WriteOK(cmd.OutOrStdout(), "agentctl.openapi.import", data,
 						protocol.WithSource("run"),
-						protocol.WithWorkspace(workspaceID),
+						protocol.WithWorkspace(ws),
 					)
 				})
 			})
@@ -132,7 +133,7 @@ func saveSpecMemory(ctx context.Context, store storage.MemoryStore, name, ws str
 	entry := storage.NamedEntry{ //nolint:exhaustruct
 		Name:      name,
 		Type:      "openapi_spec",
-		Workspace: ws,
+		Workspace: workspace.Normalize(ws),
 		Summary:   summary,
 		Result:    encoded,
 		Digests:   []string{digest},
@@ -212,7 +213,7 @@ func newOpenAPIDescribeCommand() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			specRef := args[0]
 			return memorycmd.WithConfig(cmd, func(ctx context.Context, cfg config.Config) error {
-				workspaceID := resolveWorkspaceID(cfg, workspaceArg)
+				ws := resolveWorkspace(cfg, workspaceArg)
 				return memorycmd.WithMemoryStore(ctx, cfg, func(mem storage.MemoryStore) error {
 					casStore, err := cas.NewStore(cfg.Paths.CAS)
 					if err != nil {
@@ -221,7 +222,7 @@ func newOpenAPIDescribeCommand() *cobra.Command {
 					defer func() { errs.Ignore(casStore.Close(), "close openapi describe cas store") }()
 
 					httpClient := &http.Client{Timeout: defaultHTTPTimeout}
-					l := loader.New(casStore, mem, loader.WithWorkspace(workspaceID), loader.WithHTTPClient(httpClient))
+					l := loader.New(casStore, mem, loader.WithWorkspace(ws), loader.WithHTTPClient(httpClient))
 					spec, err := l.Load(ctx, specRef)
 					if err != nil {
 						return err
@@ -278,7 +279,7 @@ func newOpenAPIDescribeCommand() *cobra.Command {
 
 					return protocol.WriteOK(cmd.OutOrStdout(), "agentctl.openapi.describe", data,
 						protocol.WithSource("run"),
-						protocol.WithWorkspace(workspaceID),
+						protocol.WithWorkspace(ws),
 					)
 				})
 			})
@@ -301,7 +302,7 @@ func newOpenAPIValidateCommand() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			specRef := args[0]
 			return memorycmd.WithConfig(cmd, func(ctx context.Context, cfg config.Config) error {
-				workspaceID := resolveWorkspaceID(cfg, workspaceArg)
+				ws := resolveWorkspace(cfg, workspaceArg)
 				return memorycmd.WithMemoryStore(ctx, cfg, func(mem storage.MemoryStore) error {
 					casStore, err := cas.NewStore(cfg.Paths.CAS)
 					if err != nil {
@@ -310,7 +311,7 @@ func newOpenAPIValidateCommand() *cobra.Command {
 					defer func() { errs.Ignore(casStore.Close(), "close openapi validate cas store") }()
 
 					httpClient := &http.Client{Timeout: defaultHTTPTimeout}
-					l := loader.New(casStore, mem, loader.WithWorkspace(workspaceID), loader.WithStrictValidation(strict), loader.WithHTTPClient(httpClient))
+					l := loader.New(casStore, mem, loader.WithWorkspace(ws), loader.WithStrictValidation(strict), loader.WithHTTPClient(httpClient))
 					spec, err := l.Load(ctx, specRef)
 					if err != nil {
 						return fmt.Errorf("validation failed: %w", err)
@@ -366,7 +367,7 @@ func newOpenAPIValidateCommand() *cobra.Command {
 
 					return protocol.WriteOK(cmd.OutOrStdout(), "agentctl.openapi.validate", data,
 						protocol.WithSource("run"),
-						protocol.WithWorkspace(workspaceID),
+						protocol.WithWorkspace(ws),
 					)
 				})
 			})

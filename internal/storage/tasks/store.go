@@ -197,6 +197,7 @@ type sqlStore struct {
 	close func() error
 }
 
+
 // Open initializes and returns a Store backed by an SQLite database at root/tasks.db.
 // It runs the package migrations, configures the SQLite connection pool for single-writer
 // semantics and optimized task operations, and returns a store whose Close will release
@@ -218,6 +219,7 @@ func Open(ctx context.Context, root string) (Store, error) {
 	return &sqlStore{db: db, close: closeFn}, nil
 }
 
+
 // Close releases database resources.
 func (s *sqlStore) Close() error {
 	if s == nil || s.close == nil {
@@ -225,6 +227,7 @@ func (s *sqlStore) Close() error {
 	}
 	return s.close()
 }
+
 
 // migrate creates and migrates the tasks package database schema to the current version.
 //

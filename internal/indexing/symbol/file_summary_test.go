@@ -4,12 +4,12 @@ import "testing"
 
 func TestNormalizeFileSummaryInput_DedupAndNormalize(t *testing.T) {
 	input := FileSummaryInput{
-		FilePath:     "a.go",
-		SymbolsHash:  "sha256:abc",
-		Package:      "  pkg  ",
-		PackageDoc:   "// Foo\n//  Bar\n",
+		FilePath:    "a.go",
+		SymbolsHash: "sha256:abc",
+		Package:     "  pkg  ",
+		PackageDoc:  "// Foo\n//  Bar\n",
 		FirstComment: "// First\n// Comment\n",
-		TopSymbols:   []string{"Beta", " Alpha ", "Beta"},
+		TopSymbols:  []string{"Beta", " Alpha ", "Beta"},
 	}
 
 	normalized := NormalizeFileSummaryInput(input)

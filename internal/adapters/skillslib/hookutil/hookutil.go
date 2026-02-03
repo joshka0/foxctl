@@ -1,6 +1,8 @@
 package hookutil
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"strings"
@@ -9,10 +11,10 @@ import (
 	"github.com/jkatigb/agentctl/internal/platform/workspace"
 )
 
-// WorkspaceID returns the preferred workspace ID for a path.
-// It uses the repo identity when available, falling back to a path-derived ID.
+// WorkspaceID derives a stable workspace ID from a path string.
 func WorkspaceID(path string) string {
-	return workspace.ID(path)
+	h := sha256.Sum256([]byte(path))
+	return "ws-" + hex.EncodeToString(h[:8])
 }
 
 // ResolveWorkspaceRoot returns the best-effort workspace root for a hook input.
@@ -28,19 +30,16 @@ func ResolveWorkspaceID(in hooks.Input, workspaceRoot string) string {
 	if id := strings.TrimSpace(in.WorkspaceID); id != "" {
 		return id
 	}
-	if root := strings.TrimSpace(workspaceRoot); root != "" {
-		return workspace.ID(root)
-	}
-	return ""
+	return strings.TrimSpace(workspaceRoot)
 }
 
-// ResolveWorkspaceIDHash returns a workspace ID using the workspace root as fallback.
+// ResolveWorkspaceIDHash returns a workspace ID, hashing the workspace root as a fallback.
 func ResolveWorkspaceIDHash(in hooks.Input, workspaceRoot string) string {
 	if id := strings.TrimSpace(in.WorkspaceID); id != "" {
 		return id
 	}
 	if root := strings.TrimSpace(workspaceRoot); root != "" {
-		return workspace.ID(root)
+		return WorkspaceID(root)
 	}
 	return ""
 }

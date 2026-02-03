@@ -623,6 +623,7 @@ end
 	}
 }
 
+
 func TestExpandRuby(t *testing.T) {
 	source := `class Store
   def add(item)

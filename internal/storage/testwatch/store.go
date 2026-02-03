@@ -71,6 +71,7 @@ type sqlStore struct {
 	close func() error
 }
 
+
 // Open opens or creates the SQLite database at root/test_watch.db, applies the package migrations, and returns a Store backed by that database.
 // The returned store uses a shared SQLite connection and will invoke the underlying close function when closed.
 // Any error encountered while opening the database or running migrations is wrapped and returned.
@@ -83,6 +84,7 @@ func Open(ctx context.Context, root string) (Store, error) {
 	return &sqlStore{db: db, close: closeFn}, nil
 }
 
+
 // Close releases database resources.
 func (s *sqlStore) Close() error {
 	if s == nil || s.close == nil {
@@ -90,6 +92,7 @@ func (s *sqlStore) Close() error {
 	}
 	return s.close()
 }
+
 
 // migrate creates the database schema required by the package.
 // It ensures the `test_status` table exists with columns for workspace_id, watcher_id,

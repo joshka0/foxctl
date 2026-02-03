@@ -23,15 +23,10 @@ func resolveWorkspace(cfg config.Config, override string) string {
 	return workspace.Detect("")
 }
 
-func resolveWorkspaceID(cfg config.Config, override string) string {
-	root := resolveWorkspace(cfg, override)
-	return workspace.ID(root)
-}
-
 // readMemoryPayload reads payload bytes from one of three sources: a file path, a direct data string, or standard input.
-//
+// 
 // If `file` is "-" the function reads from stdin; if `file` is a non-empty path it reads from that file. If `data` is non-empty it is returned as the payload. When neither `file` nor `data` is provided the function reads from stdin. If stdin is a terminal in cases where piping is expected, the function returns an error prompting the user to provide a file path, use `--data`, or pipe input into the appropriate stream.
-//
+// 
 // The function returns the payload bytes on success, or an error when reading fails or when stdin is a terminal and cannot be used.
 func readMemoryPayload(cmd *cobra.Command, file, data string) ([]byte, error) {
 	switch {

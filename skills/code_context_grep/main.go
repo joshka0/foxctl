@@ -71,7 +71,7 @@ type input struct {
 	ExpandTo  string `json:"expand_to,omitempty"` // "function", "block", "class"
 
 	// Definition expansion
-	IncludeDefinitions  bool `json:"include_definitions,omitempty"`
+	IncludeDefinitions bool `json:"include_definitions,omitempty"`
 	MaxDefinitionBlocks int  `json:"max_definition_blocks,omitempty"`
 }
 
@@ -531,21 +531,21 @@ func mergeOverlappingBlocks(blocks []Block, lines []string) []Block {
 // emitEmptyResult emits empty search results with mode, pattern information, and structured response format.
 func emitEmptyResult(rc *skillmain.RunContext, in input, mode Mode) error {
 	data := map[string]any{
-		"mode":                string(mode),
-		"pattern":             in.Pattern,
-		"pattern_mode":        in.PatternMode,
-		"ast_pattern":         in.ASTPattern,
-		"match_count":         0,
-		"block_count":         0,
-		"files_touched":       0,
-		"preview":             []BlockPreview{},
-		"blocks":              []Block{},
-		"rendered_context":    "",
-		"render_format":       "markdown",
-		"top_symbols":         []map[string]any{},
+		"mode":              string(mode),
+		"pattern":           in.Pattern,
+		"pattern_mode":      in.PatternMode,
+		"ast_pattern":       in.ASTPattern,
+		"match_count":       0,
+		"block_count":       0,
+		"files_touched":     0,
+		"preview":           []BlockPreview{},
+		"blocks":            []Block{},
+		"rendered_context":  "",
+		"render_format":     "markdown",
+		"top_symbols":       []map[string]any{},
 		"max_blocks_per_file": in.MaxBlocksPerFile,
 		"max_bytes_per_file":  in.MaxBytesPerFile,
-		"expand_to":           in.ExpandTo,
+		"expand_to":          in.ExpandTo,
 		"include_definitions": in.IncludeDefinitions,
 	}
 	return skillout.Emit(rc, "code/context_grep", data)
@@ -897,22 +897,22 @@ func emitResult(ctx context.Context, rc *skillmain.RunContext, in input, blocks 
 	topSymbols := summarizeTopSymbols(blocks, 5)
 
 	data := map[string]any{
-		"mode":                string(mode),
-		"pattern":             in.Pattern,
-		"pattern_mode":        in.PatternMode,
-		"ast_pattern":         in.ASTPattern,
-		"match_count":         totalMatches,
-		"block_count":         len(blocks),
-		"files_touched":       len(fileHits),
-		"preview":             preview,
-		"blocks":              blocks,
-		"rendered_context":    renderedContext,
-		"render_format":       "markdown",
-		"top_files":           skillout.SummarizeTopFiles(fileHits, 5),
-		"top_symbols":         topSymbols,
+		"mode":              string(mode),
+		"pattern":           in.Pattern,
+		"pattern_mode":      in.PatternMode,
+		"ast_pattern":       in.ASTPattern,
+		"match_count":       totalMatches,
+		"block_count":       len(blocks),
+		"files_touched":     len(fileHits),
+		"preview":           preview,
+		"blocks":            blocks,
+		"rendered_context":  renderedContext,
+		"render_format":     "markdown",
+		"top_files":         skillout.SummarizeTopFiles(fileHits, 5),
+		"top_symbols":       topSymbols,
 		"max_blocks_per_file": in.MaxBlocksPerFile,
 		"max_bytes_per_file":  in.MaxBytesPerFile,
-		"expand_to":           in.ExpandTo,
+		"expand_to":          in.ExpandTo,
 		"include_definitions": in.IncludeDefinitions,
 	}
 	skillout.AddArtifact(data, artifact)

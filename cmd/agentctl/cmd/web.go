@@ -72,9 +72,9 @@ func runWebServe(cmd *cobra.Command, _ []string) error {
 	// Setup logger for web server internals
 	// TODO: Migrate web server to use observability instead of zerolog
 	log := zerolog.New(os.Stderr).With(). //nolint:forbidigo // web server requires zerolog internally
-						Timestamp().
-						Str("component", "web").
-						Logger()
+							Timestamp().
+							Str("component", "web").
+							Logger()
 
 	// Create web server
 	opts := web.Options{

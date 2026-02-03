@@ -16,7 +16,6 @@ import (
 	"github.com/jkatigb/agentctl/internal/indexing/atomic"
 	"github.com/jkatigb/agentctl/internal/observability"
 	"github.com/jkatigb/agentctl/internal/platform/config"
-	"github.com/jkatigb/agentctl/internal/platform/workspace"
 	"github.com/jkatigb/agentctl/internal/storage"
 	"github.com/jkatigb/agentctl/internal/storage/cache"
 	memstore "github.com/jkatigb/agentctl/internal/storage/memory"
@@ -31,16 +30,16 @@ func newMemoryListCommand() *cobra.Command {
 		Short: "List named memories",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return memorycmd.WithConfig(cmd, func(ctx context.Context, cfg config.Config) error {
-				workspaceID := resolveWorkspaceID(cfg, workspaceFlag)
+				ws := resolveWorkspace(cfg, workspaceFlag)
 				return memorycmd.WithMemoryStore(ctx, cfg, func(store storage.MemoryStore) error {
-					entries, err := store.List(ctx, workspaceID, limit)
+					entries, err := store.List(ctx, ws, limit)
 					if err != nil {
 						return err
 					}
 					payload := struct {
 						Entries   []map[string]any `json:"entries"`
 						Workspace string           `json:"workspace"`
-					}{Workspace: workspaceID}
+					}{Workspace: ws}
 					for _, e := range entries {
 						payload.Entries = append(payload.Entries, map[string]any{
 							"name":         e.Name,
@@ -74,16 +73,16 @@ func newMemorySearchCommand() *cobra.Command {
 				return fmt.Errorf("--query is required")
 			}
 			return memorycmd.WithConfig(cmd, func(ctx context.Context, cfg config.Config) error {
-				workspaceID := resolveWorkspaceID(cfg, workspaceFlag)
+				ws := resolveWorkspace(cfg, workspaceFlag)
 				return memorycmd.WithMemoryStore(ctx, cfg, func(store storage.MemoryStore) error {
-					entries, err := store.Search(ctx, workspaceID, query, limit)
+					entries, err := store.Search(ctx, ws, query, limit)
 					if err != nil {
 						return err
 					}
 					payload := struct {
 						Entries   []map[string]any `json:"entries"`
 						Workspace string           `json:"workspace"`
-					}{Workspace: workspaceID}
+					}{Workspace: ws}
 					for _, e := range entries {
 						entry := e.Entry
 						payload.Entries = append(payload.Entries, map[string]any{
@@ -114,13 +113,13 @@ func newMemoryGetCommand() *cobra.Command {
 		Args:  cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return memorycmd.WithConfig(cmd, func(ctx context.Context, cfg config.Config) error {
-				workspaceID := resolveWorkspaceID(cfg, workspaceFlag)
+				ws := resolveWorkspace(cfg, workspaceFlag)
 				name := args[0]
 				return memorycmd.WithMemoryStore(ctx, cfg, func(store storage.MemoryStore) error {
-					entry, err := store.Get(ctx, name, workspaceID)
+					entry, err := store.Get(ctx, name, ws)
 					if err != nil {
 						if errors.Is(err, memstore.ErrNotFound) {
-							return memorycmd.WriteNotFound(cmd.OutOrStdout(), "agentctl.memory.get", name, workspaceID)
+							return memorycmd.WriteNotFound(cmd.OutOrStdout(), "agentctl.memory.get", name, ws)
 						}
 						return err
 					}
@@ -157,8 +156,7 @@ func newMemoryPutCommand() *cobra.Command {
 				return fmt.Errorf("--name is required")
 			}
 			return memorycmd.WithConfig(cmd, func(ctx context.Context, cfg config.Config) error {
-				workspaceRoot := resolveWorkspace(cfg, workspaceFlag)
-				workspaceID := resolveWorkspaceID(cfg, workspaceFlag)
+				ws := resolveWorkspace(cfg, workspaceFlag)
 				payload, err := readMemoryPayload(cmd, file, data)
 				if err != nil {
 					return err
@@ -166,12 +164,12 @@ func newMemoryPutCommand() *cobra.Command {
 				if !json.Valid(payload) {
 					return fmt.Errorf("payload must be valid JSON envelope")
 				}
-				payload = injectDefaultFileForGotchaTypes(payload, typ, workspaceRoot)
+				payload = injectDefaultFileForGotchaTypes(payload, typ, ws)
 				if summary == "" {
 					summary = summarizeResult(payload)
 				}
 				return memorycmd.WithMemoryStore(ctx, cfg, func(store storage.MemoryStore) error {
-					entry, err := store.SaveFromResult(ctx, name, typ, workspaceID, summary, payload)
+					entry, err := store.SaveFromResult(ctx, name, typ, ws, summary, payload)
 					if err != nil {
 						return err
 					}
@@ -186,7 +184,7 @@ func newMemoryPutCommand() *cobra.Command {
 								procErr, cfg.LLM.AtomicAPIKey != "")
 						} else {
 							fact, usage, factErr := processor.ProcessSingle(ctx, summary, atomic.ProcessContext{
-								Workspace: workspaceID,
+								Workspace: ws,
 							})
 							if factErr != nil {
 								fmt.Fprintf(cmd.ErrOrStderr(), "atomic: processing failed: %v\n", factErr)
@@ -206,7 +204,7 @@ func newMemoryPutCommand() *cobra.Command {
 									observability.Emit(ctx, event.Success(0))
 								}
 								// Update the memory with atomic fields - only set response fields on success
-								if updateErr := store.UpdateAtomic(ctx, name, workspaceID, fact.Atomic, fact.Entities, fact.Keywords); updateErr != nil {
+								if updateErr := store.UpdateAtomic(ctx, name, ws, fact.Atomic, fact.Entities, fact.Keywords); updateErr != nil {
 									fmt.Fprintf(cmd.ErrOrStderr(), "atomic: store update failed: %v\n", updateErr)
 								} else {
 									// Only populate response fields after successful persistence
@@ -310,7 +308,7 @@ func newMemorySaveCommand() *cobra.Command {
 				return fmt.Errorf("--as is required")
 			}
 			return memorycmd.WithConfig(cmd, func(ctx context.Context, cfg config.Config) error {
-				workspaceID := resolveWorkspaceID(cfg, workspaceFlag)
+				ws := resolveWorkspace(cfg, workspaceFlag)
 				jobStore, cleanup, err := openJobStore(ctx)
 				if err != nil {
 					return err
@@ -324,7 +322,7 @@ func newMemorySaveCommand() *cobra.Command {
 					summary = summarizeResult(result)
 				}
 				return memorycmd.WithMemoryStore(ctx, cfg, func(mem storage.MemoryStore) error {
-					entry, err := mem.SaveFromResult(ctx, name, typ, workspaceID, summary, result)
+					entry, err := mem.SaveFromResult(ctx, name, typ, ws, summary, result)
 					if err != nil {
 						return err
 					}
@@ -369,7 +367,7 @@ func newMemoryUpdateCommand() *cobra.Command {
 					"Use --summary to update the summary or --type to change the memory type.")
 			}
 			return memorycmd.WithConfig(cmd, func(ctx context.Context, cfg config.Config) error {
-				workspaceID := resolveWorkspaceID(cfg, workspaceFlag)
+				ws := resolveWorkspace(cfg, workspaceFlag)
 				name := args[0]
 				return memorycmd.WithMemoryStore(ctx, cfg, func(store storage.MemoryStore) error {
 					var summaryPtr *string
@@ -380,10 +378,10 @@ func newMemoryUpdateCommand() *cobra.Command {
 					if typ != "" {
 						typePtr = &typ
 					}
-					entry, err := store.Update(ctx, name, workspaceID, summaryPtr, typePtr)
+					entry, err := store.Update(ctx, name, ws, summaryPtr, typePtr)
 					if err != nil {
 						if errors.Is(err, memstore.ErrNotFound) {
-							return memorycmd.WriteNotFound(cmd.OutOrStdout(), "agentctl.memory.update", name, workspaceID)
+							return memorycmd.WriteNotFound(cmd.OutOrStdout(), "agentctl.memory.update", name, ws)
 						}
 						return err
 					}
@@ -420,14 +418,14 @@ func newMemoryDeleteCommand() *cobra.Command {
 		Args:  cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return memorycmd.WithConfig(cmd, func(ctx context.Context, cfg config.Config) error {
-				workspaceID := resolveWorkspaceID(cfg, workspaceFlag)
+				ws := resolveWorkspace(cfg, workspaceFlag)
 				name := args[0]
 				return memorycmd.WithMemoryStore(ctx, cfg, func(store storage.MemoryStore) error {
 					// Check if entry exists (for both dry-run and actual delete)
-					_, err := store.Get(ctx, name, workspaceID)
+					_, err := store.Get(ctx, name, ws)
 					if err != nil {
 						if errors.Is(err, memstore.ErrNotFound) {
-							return memorycmd.WriteNotFound(cmd.OutOrStdout(), "agentctl.memory.delete", name, workspaceID)
+							return memorycmd.WriteNotFound(cmd.OutOrStdout(), "agentctl.memory.delete", name, ws)
 						}
 						return err
 					}
@@ -440,14 +438,14 @@ func newMemoryDeleteCommand() *cobra.Command {
 							Message   string `json:"message"`
 						}{
 							Name:      name,
-							Workspace: workspaceID,
+							Workspace: ws,
 							DryRun:    true,
 							Message:   "Would delete memory entry",
 						}
 						return memorycmd.WriteOK(cmd.OutOrStdout(), "agentctl.memory.delete", payload)
 					}
 
-					if err := store.Delete(ctx, name, workspaceID); err != nil {
+					if err := store.Delete(ctx, name, ws); err != nil {
 						return err
 					}
 					payload := struct {
@@ -456,7 +454,7 @@ func newMemoryDeleteCommand() *cobra.Command {
 						DeletedCount int    `json:"deleted_count"`
 					}{
 						Name:         name,
-						Workspace:    workspaceID,
+						Workspace:    ws,
 						DeletedCount: 1,
 					}
 					return memorycmd.WriteOK(cmd.OutOrStdout(), "agentctl.memory.delete", payload)
@@ -477,16 +475,16 @@ func newMemoryRelevantCommand() *cobra.Command {
 		Short: "Rank memories by recency and usage",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return memorycmd.WithConfig(cmd, func(ctx context.Context, cfg config.Config) error {
-				workspaceID := resolveWorkspaceID(cfg, workspaceFlag)
+				ws := resolveWorkspace(cfg, workspaceFlag)
 				return memorycmd.WithMemoryStore(ctx, cfg, func(store storage.MemoryStore) error {
-					entries, err := store.Relevant(ctx, workspaceID, limit)
+					entries, err := store.Relevant(ctx, ws, limit)
 					if err != nil {
 						return err
 					}
 					payload := struct {
 						Entries   []map[string]any `json:"entries"`
 						Workspace string           `json:"workspace"`
-					}{Workspace: workspaceID}
+					}{Workspace: ws}
 					for _, e := range entries {
 						payload.Entries = append(payload.Entries, map[string]any{
 							"name":          e.Entry.Name,
@@ -517,92 +515,4 @@ func summarizeResult(result []byte) string {
 		return env.Command
 	}
 	return ""
-}
-
-func newMemoryMigrateWorkspaceCommand() *cobra.Command {
-	var (
-		workspaceFlag string
-		from          []string
-		to            string
-		apply         bool
-		dryRunFlag    bool
-	)
-	cmd := &cobra.Command{
-		Use:   "migrate-workspace",
-		Short: "Migrate named memory workspace IDs",
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			return memorycmd.WithConfig(cmd, func(ctx context.Context, cfg config.Config) error {
-				workspaceRoot := resolveWorkspace(cfg, workspaceFlag)
-				workspaceID := strings.TrimSpace(to)
-				if workspaceID == "" {
-					workspaceID = workspace.ID(workspaceRoot)
-				}
-				if workspaceID == "" {
-					return memorycmd.WriteArgError(cmd.OutOrStdout(), "agentctl.memory.migrate_workspace", "invalid target workspace", "Provide --to or a valid --workspace path.")
-				}
-
-				fromList := normalizeMigrationSources(from, workspaceRoot, workspaceID)
-				if len(fromList) == 0 {
-					return memorycmd.WriteArgError(cmd.OutOrStdout(), "agentctl.memory.migrate_workspace", "no source workspaces", "Provide --from or ensure the workspace path is available.")
-				}
-
-				return memorycmd.WithMemoryStore(ctx, cfg, func(store storage.MemoryStore) error {
-					memStore, ok := store.(*memstore.Store)
-					if !ok {
-						return fmt.Errorf("memory: migrate workspace requires local store")
-					}
-
-					if apply && dryRunFlag {
-						return memorycmd.WriteArgError(cmd.OutOrStdout(), "agentctl.memory.migrate_workspace", "conflicting flags", "Use --apply or --dry-run, not both.")
-					}
-					dryRun := !apply
-					if dryRunFlag {
-						dryRun = true
-					}
-					summaries := make([]memstore.WorkspaceMigrationSummary, 0, len(fromList))
-					for _, source := range fromList {
-						summary, err := memStore.MigrateWorkspace(ctx, source, workspaceID, dryRun)
-						if err != nil {
-							return err
-						}
-						summaries = append(summaries, summary)
-					}
-
-					data := map[string]any{
-						"workspace_root": workspaceRoot,
-						"workspace_id":   workspaceID,
-						"dry_run":        dryRun,
-						"summaries":      summaries,
-					}
-					return memorycmd.WriteOK(cmd.OutOrStdout(), "agentctl.memory.migrate_workspace", data)
-				})
-			})
-		},
-	}
-	cmd.Flags().StringSliceVar(&from, "from", nil, "Source workspace IDs to migrate (repeatable)")
-	cmd.Flags().StringVar(&to, "to", "", "Target workspace ID (defaults to repo ID)")
-	cmd.Flags().StringVar(&workspaceFlag, "workspace", "", "Workspace path (default: auto-detect)")
-	cmd.Flags().BoolVar(&apply, "apply", false, "Apply changes")
-	cmd.Flags().BoolVar(&dryRunFlag, "dry-run", false, "Force dry-run mode")
-	return cmd
-}
-
-func normalizeMigrationSources(from []string, workspaceRoot, target string) []string {
-	if len(from) == 0 {
-		from = []string{"default", workspaceRoot}
-	}
-	seen := make(map[string]struct{}, len(from))
-	result := make([]string, 0, len(from))
-	for _, source := range from {
-		source = strings.TrimSpace(source)
-		if source == "" || source == target {
-			continue
-		}
-		if _, exists := seen[source]; exists {
-			continue
-		}
-		seen[source] = struct{}{}
-		result = append(result, source)
-	}
-	return result
 }

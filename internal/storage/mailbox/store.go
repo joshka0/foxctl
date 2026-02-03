@@ -39,6 +39,7 @@ type sqlStore struct {
 	close func() error
 }
 
+
 // Open opens the mailbox store rooted at the given workspace path.
 func Open(ctx context.Context, root string) (Store, error) {
 	dbPath := filepath.Join(root, "mailbox.db")
@@ -49,12 +50,14 @@ func Open(ctx context.Context, root string) (Store, error) {
 	return &sqlStore{db: db, close: closeFn}, nil
 }
 
+
 func (s *sqlStore) Close() error {
 	if s == nil || s.close == nil {
 		return nil
 	}
 	return s.close()
 }
+
 
 func (s *sqlStore) DB() *sql.DB {
 	return s.db

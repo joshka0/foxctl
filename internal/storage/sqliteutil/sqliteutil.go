@@ -259,6 +259,7 @@ func OpenDBWithDriver(ctx context.Context, cfg dbdriver.Config, migrate func(con
 	return dbdriver.OpenDBCompatWithCloser(ctx, cfg, migrate)
 }
 
+
 // OpenDBWithAutoConfig opens a database with automatic configuration detection.
 // It checks environment variables to determine whether to use SQLite or Turso.
 // dbType should be one of: "cache", "jobs", or "memory"

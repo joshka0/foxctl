@@ -134,7 +134,6 @@ func BlackboardListHandler(cfg config.Config, log zerolog.Logger) http.HandlerFu
 // BlackboardDetailHandler returns a handler for /api/blackboard/{id} routes.
 // Routes:
 //   - GET /api/blackboard/{id} - Get record details
-//
 // BlackboardDetailHandler returns an HTTP handler that serves GET and DELETE for a single
 // blackboard record identified by the URL path suffix (/api/blackboard/{id} or
 // /api/v1/blackboard/{id}).

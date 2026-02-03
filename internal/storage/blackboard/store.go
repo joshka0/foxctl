@@ -32,6 +32,7 @@ type sqlStore struct {
 	close func() error
 }
 
+
 // Open initializes and returns a SQLite-backed blackboard Store rooted at the
 // provided path. It creates or opens the file "<root>/blackboard.db", applies
 // required schema migrations, and returns a Store whose Close method should be
@@ -45,12 +46,14 @@ func Open(ctx context.Context, root string) (Store, error) {
 	return &sqlStore{db: db, close: closeFn}, nil
 }
 
+
 func (s *sqlStore) Close() error {
 	if s == nil || s.close == nil {
 		return nil
 	}
 	return s.close()
 }
+
 
 func (s *sqlStore) Post(ctx context.Context, record agent.BlackboardRecord) error {
 	leaseJSON := "null"

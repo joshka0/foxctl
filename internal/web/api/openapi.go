@@ -340,7 +340,7 @@ func OpenAPIHandler(cfg config.Config, log zerolog.Logger) http.HandlerFunc {
 			switch fwdProto {
 			case "http", "https":
 				scheme = fwdProto
-				// Ignore invalid values - keep original scheme
+			// Ignore invalid values - keep original scheme
 			}
 		}
 		serverURL := scheme + "://" + r.Host

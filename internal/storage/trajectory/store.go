@@ -74,6 +74,7 @@ type sqlStore struct {
 	close func() error
 }
 
+
 // Open initializes a trajectory Store backed by a SQLite database file at root/trajectory.db.
 // It returns the Store or an error if the database cannot be opened or migrated.
 func Open(ctx context.Context, root string) (Store, error) {
@@ -85,6 +86,7 @@ func Open(ctx context.Context, root string) (Store, error) {
 	return &sqlStore{db: db, close: closeFn}, nil
 }
 
+
 // Close releases database resources.
 func (s *sqlStore) Close() error {
 	if s == nil || s.close == nil {
@@ -92,6 +94,7 @@ func (s *sqlStore) Close() error {
 	}
 	return s.close()
 }
+
 
 // migrate creates the trajectories, user_requests, and trajectory_events schema, associated indexes,
 // and normalizes existing empty JSON/text fields to NULL for the trajectory store.

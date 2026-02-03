@@ -170,6 +170,7 @@ func buildSQLiteDSN(path string, busyTimeoutMs int) (string, error) {
 	return u.String(), nil
 }
 
+
 // Close closes the database connection
 func (s *sqliteDB) Close() error {
 	return s.db.Close()

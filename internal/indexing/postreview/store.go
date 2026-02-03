@@ -59,7 +59,7 @@ func Open(ctx context.Context, root string) (Store, error) {
 }
 
 // migrate creates the post_review_events table and its indexes if they do not already exist.
-//
+// 
 // The table stores post-review events with columns for id, workspace_id, task_id, review_id,
 // review_kind, review_status, diff_applied_at, source, created_at, sequence, files_json and metadata_json.
 // It enforces a UNIQUE constraint on (workspace_id, task_id, review_id) and creates indexes on

@@ -62,29 +62,6 @@ func Normalize(path string) string {
 	return filepath.Clean(path)
 }
 
-// PathIdentity returns a stable identifier derived from a workspace path.
-// This is used when a repo identity is unavailable.
-func PathIdentity(path string) string {
-	if path == "" {
-		return ""
-	}
-	clean := Normalize(path)
-	h := sha256.Sum256([]byte(clean))
-	return "ws-" + hex.EncodeToString(h[:8])
-}
-
-// ID returns the preferred workspace identifier for a path.
-// It uses the repo identity when available, falling back to a path-derived ID.
-func ID(path string) string {
-	if path == "" {
-		return ""
-	}
-	if repo := RepoIdentity(path); repo != "" {
-		return repo
-	}
-	return PathIdentity(path)
-}
-
 func hasMarker(dir, name string) bool {
 	info, err := os.Stat(filepath.Join(dir, name))
 	if err != nil {

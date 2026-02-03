@@ -29,6 +29,7 @@ type sqlStore struct {
 	close func() error
 }
 
+
 // Open initializes the quotas store rooted at the provided path.
 // It opens the SQLite database file at root/quotas.db, applies required schema migrations, and returns a Store backed by that database.
 // On failure it returns a non-nil error describing the problem.
@@ -41,12 +42,14 @@ func Open(ctx context.Context, root string) (Store, error) {
 	return &sqlStore{db: db, close: closeFn}, nil
 }
 
+
 func (s *sqlStore) Close() error {
 	if s == nil || s.close == nil {
 		return nil
 	}
 	return s.close()
 }
+
 
 func (s *sqlStore) Get(ctx context.Context, ns string) (agent.Quotas, error) {
 	row := s.db.QueryRowContext(ctx, `

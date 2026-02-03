@@ -680,16 +680,16 @@ func (e *Expander) findPythonBlock(lines []string, lineIdx int) (int, int, strin
 
 // JS/TS patterns
 var (
-	jsFuncPattern           = regexp.MustCompile(`^(?:export\s+)?(?:async\s+)?function\s+(\w+)`)
-	jsDefaultFuncPattern    = regexp.MustCompile(`^export\s+default\s+(?:async\s+)?function(?:\s+(\w+))?`)
-	jsArrowParenPattern     = regexp.MustCompile(`^(?:export\s+)?(?:const|let|var)\s+(\w+)\s*=\s*(?:async\s+)?\([^)]*\)\s*=>`)
-	jsArrowNoParenPattern   = regexp.MustCompile(`^(?:export\s+)?(?:const|let|var)\s+(\w+)\s*=\s*(?:async\s+)?[A-Za-z_$][\w$]*\s*=>`)
-	jsArrowPattern          = regexp.MustCompile(`^(?:export\s+)?(?:const|let|var)\s+(\w+)\s*=\s*(?:async\s+)?(?:\([^)]*\)|[A-Za-z_$][\w$]*)\s*=>`)
-	jsArrowPropertyPattern  = regexp.MustCompile(`^(\s*)([A-Za-z_$][\w$]*)\s*=\s*(?:async\s+)?(?:\([^)]*\)|[A-Za-z_$][\w$]*)\s*=>`)
-	jsMethodPattern         = regexp.MustCompile(`^(\s*)(?:async\s+)?(\w+)\s*\([^)]*\)\s*{`)
-	jsClassPattern          = regexp.MustCompile(`^(?:export\s+)?class\s+(\w+)`)
-	jsInterfacePattern      = regexp.MustCompile(`^(?:export\s+)?interface\s+(\w+)`)
-	jsTypePattern           = regexp.MustCompile(`^(?:export\s+)?type\s+(\w+)`)
+	jsFuncPattern         = regexp.MustCompile(`^(?:export\s+)?(?:async\s+)?function\s+(\w+)`)
+	jsDefaultFuncPattern  = regexp.MustCompile(`^export\s+default\s+(?:async\s+)?function(?:\s+(\w+))?`)
+	jsArrowParenPattern   = regexp.MustCompile(`^(?:export\s+)?(?:const|let|var)\s+(\w+)\s*=\s*(?:async\s+)?\([^)]*\)\s*=>`)
+	jsArrowNoParenPattern = regexp.MustCompile(`^(?:export\s+)?(?:const|let|var)\s+(\w+)\s*=\s*(?:async\s+)?[A-Za-z_$][\w$]*\s*=>`)
+	jsArrowPattern        = regexp.MustCompile(`^(?:export\s+)?(?:const|let|var)\s+(\w+)\s*=\s*(?:async\s+)?(?:\([^)]*\)|[A-Za-z_$][\w$]*)\s*=>`)
+	jsArrowPropertyPattern = regexp.MustCompile(`^(\s*)([A-Za-z_$][\w$]*)\s*=\s*(?:async\s+)?(?:\([^)]*\)|[A-Za-z_$][\w$]*)\s*=>`)
+	jsMethodPattern        = regexp.MustCompile(`^(\s*)(?:async\s+)?(\w+)\s*\([^)]*\)\s*{`)
+	jsClassPattern         = regexp.MustCompile(`^(?:export\s+)?class\s+(\w+)`)
+	jsInterfacePattern     = regexp.MustCompile(`^(?:export\s+)?interface\s+(\w+)`)
+	jsTypePattern          = regexp.MustCompile(`^(?:export\s+)?type\s+(\w+)`)
 	jsStatementStartPattern = regexp.MustCompile(`^\s*(?:const|let|var|class|function|export|interface|type|import|return|if|for|while|switch|try|catch|else|do|throw|break|continue)\b`)
 )
 
@@ -950,9 +950,9 @@ func (e *Expander) findElixirBlock(lines []string, lineIdx int) (int, int, strin
 }
 
 type elixirScanState struct {
-	inString     bool
-	stringDelim  byte
-	inHeredoc    bool
+	inString    bool
+	stringDelim byte
+	inHeredoc   bool
 	heredocDelim string
 }
 

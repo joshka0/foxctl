@@ -93,7 +93,7 @@ type AgentSpawnResponse struct {
 }
 
 // AgentsListHandler provides an HTTP handler for listing agents at GET /api/agents.
-//
+// 
 // The handler accepts an optional `limit` query parameter (1–500, default 100) to cap
 // the number of returned agents. It opens the agents store, retrieves up to `limit`
 // agents, converts them into API-friendly records (including human-facing Name, Slug,
@@ -171,9 +171,8 @@ func AgentsListHandler(cfg config.Config, log zerolog.Logger) http.HandlerFunc {
 //   - GET /api/agents/{id} - Get agent details
 //   - DELETE /api/agents/{id} - Soft delete (trash) a stopped agent
 //   - POST /api/agents/{id}/daemon/start - Start agent via daemon
-//
 // AgentDetailHandler returns an HTTP handler that routes requests for agent detail and related actions.
-//
+// 
 // The handler supports:
 //   - POST /api/agents/spawn                             : spawn a new agent
 //   - /api/agents/{id}/daemon/{start|sessions|kill}     : daemon actions for a specific agent
@@ -440,7 +439,7 @@ func handleAgentDaemonSessions(w http.ResponseWriter, r *http.Request, log zerol
 }
 
 // handleAgentDaemonKill terminates a running daemon session for the given agent and ensures the agent's stored state is set to stopped.
-//
+// 
 // It handles POST requests and writes JSON HTTP responses describing the outcome. If the daemon is not running or no matching session is found,
 // the handler updates the agent state to "stopped" and returns an OK payload indicating no active session; on successful termination it returns
 // the killed session ID and status. Errors are reported via appropriate HTTP error responses.
@@ -549,7 +548,7 @@ func handleAgentDaemonKill(w http.ResponseWriter, r *http.Request, cfg config.Co
 }
 
 // handleAgentSpawn creates a new agent record, launches it via the daemon, and responds with the spawn result.
-//
+// 
 // It only accepts POST requests with a JSON AgentSpawnRequest containing at minimum `role` and `prompt`.
 // If no name is provided one is generated; a new ULID is assigned as the agent ID. The workspace is normalized
 // (defaults to "default") and the execution mode is validated (must be reactive, autonomous, proactive, or story).
@@ -659,13 +658,13 @@ func handleAgentSpawn(w http.ResponseWriter, r *http.Request, cfg config.Config,
 	// Spawn agent via daemon - use normalized/validated values
 	params := daemon.AgentSpawnParams{
 		Role:             req.Role,
-		AgentID:          agentID,   // Pass agent ID for linking
-		WorkspaceID:      namespace, // Use normalized workspace
+		AgentID:          agentID, // Pass agent ID for linking
+		WorkspaceID:      namespace,                  // Use normalized workspace
 		Prompt:           req.Prompt,
 		SkillsAllow:      req.SkillsAllow,
 		Name:             name,
 		Slug:             req.Slug,
-		ExecMode:         string(execMode), // Use validated exec mode
+		ExecMode:         string(execMode),           // Use validated exec mode
 		MaxIterations:    req.MaxIterations,
 		MaxContextTokens: req.MaxContextTokens,
 		MaxAutoTurns:     req.MaxAutoTurns,
@@ -794,7 +793,7 @@ func handleAgentAsk(w http.ResponseWriter, r *http.Request, cfg config.Config, l
 }
 
 // handleAgentTrash soft-deletes the agent identified by agentID if it is stopped.
-//
+// 
 // On success it responds with HTTP 200 and a JSON payload containing "status":"trashed"
 // and "agent_id". It responds with HTTP 404 if the agent does not exist, HTTP 400
 // if the agent is not stopped, and HTTP 500 for internal errors while accessing

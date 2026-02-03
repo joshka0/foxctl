@@ -63,11 +63,12 @@ type Store struct {
 	evictDone       chan struct{} // signals async eviction completed
 }
 
+
 // Stats aliases the shared cache stats type.
 type Stats = storage.CacheStats
 
 // Open initializes and returns a cache Store rooted at the given filesystem path.
-//
+// 
 // It ensures the cache database and schema exist, applies a default AutoTTL when
 // not provided, and configures optional content-addressable storage if a CASPath
 // is set in opts. The returned Store starts background eviction of expired
@@ -120,6 +121,7 @@ func Open(ctx context.Context, root string, opts Options) (store *Store, err err
 	return store, nil
 }
 
+
 // Close releases resources. It waits for any async eviction to complete before closing.
 func (s *Store) Close() error {
 	// Wait for async eviction to complete before closing DB
@@ -134,6 +136,7 @@ func (s *Store) Close() error {
 	}
 	return s.close()
 }
+
 
 // Stats returns entry counts and configuration metadata for observability commands.
 func (s *Store) Stats(ctx context.Context) (Stats, error) {

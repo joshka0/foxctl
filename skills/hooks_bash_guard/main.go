@@ -146,10 +146,8 @@ func resolveProfile(in hooks.Input) agentpolicy.Profile {
 	return agentpolicy.ProfileUnrestricted
 }
 
-var (
-	sedRangeRe      = regexp.MustCompile(`(?i)sed\s+-n\s+['"]?\s*(\d+)\s*,\s*(\d+)\s*p\s*['"]?`)
-	sedRangeTokenRe = regexp.MustCompile(`(?i)^\s*\d+\s*,\s*\d+\s*p\s*$`)
-)
+var sedRangeRe = regexp.MustCompile(`(?i)sed\s+-n\s+['"]?\s*(\d+)\s*,\s*(\d+)\s*p\s*['"]?`)
+var sedRangeTokenRe = regexp.MustCompile(`(?i)^\s*\d+\s*,\s*\d+\s*p\s*$`)
 
 type sedRange struct {
 	FilePath  string

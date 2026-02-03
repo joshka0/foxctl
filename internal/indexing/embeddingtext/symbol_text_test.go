@@ -1,9 +1,7 @@
 package embeddingtext
 
-import (
-	"strings"
-	"testing"
-)
+import "strings"
+import "testing"
 
 func TestBuildSymbolEmbeddingText(t *testing.T) {
 	info := SymbolInfo{
