@@ -1527,7 +1527,7 @@ func searchCodemaps(
 	defer memStore.Close()
 
 	// Search for similar entries
-	scoredEntries, err := memStore.SearchSimilar(ctx, workspaceID, queryEmbedding, limit*2)
+	scoredEntries, err := memStore.SearchSimilarByType(ctx, workspaceID, "codemap", queryEmbedding, limit*2)
 	if err != nil {
 		return nil, skillerr.WrapIO("vector search codemaps", err)
 	}
