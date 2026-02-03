@@ -19,16 +19,16 @@ func newMemoryRecentCommand() *cobra.Command {
 		Short: "Show recent auto-cache entries",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return memorycmd.WithConfig(cmd, func(ctx context.Context, cfg config.Config) error {
-				ws := resolveWorkspace(cfg, workspaceFlag)
+				workspaceID := resolveWorkspaceID(cfg, workspaceFlag)
 				return memorycmd.WithCacheStore(ctx, cfg, func(store storage.CacheStore) error {
-					entries, err := store.Recent(ctx, ws, limit)
+					entries, err := store.Recent(ctx, workspaceID, limit)
 					if err != nil {
 						return err
 					}
 					payload := struct {
 						Entries   []map[string]any `json:"entries"`
 						Workspace string           `json:"workspace"`
-					}{Workspace: ws}
+					}{Workspace: workspaceID}
 					for _, e := range entries {
 						payload.Entries = append(payload.Entries, map[string]any{
 							"cache_key":     e.CacheKey,

@@ -179,6 +179,9 @@ func (idx *Indexer) indexSingleFile(ctx context.Context, event indexing.PostRevi
 	if _, err := idx.memoryStore.Save(ctx, entry); err != nil {
 		return fmt.Errorf("save entry: %w", err)
 	}
+	if err := idx.memoryStore.UpdateEmbedding(ctx, name, event.WorkspaceID, embedding); err != nil {
+		return fmt.Errorf("update embedding: %w", err)
+	}
 
 	idx.logger.Debug().
 		Str("path", file.Path).
@@ -292,6 +295,10 @@ func (idx *Indexer) indexChunkedFile(ctx context.Context, event indexing.PostRev
 
 		if _, err := idx.memoryStore.Save(ctx, chunkEntry); err != nil {
 			saveErr = fmt.Errorf("save chunk entry %d: %w", i, err)
+			break
+		}
+		if err := idx.memoryStore.UpdateEmbedding(ctx, chunkName, event.WorkspaceID, chunkEmbeddings[i]); err != nil {
+			saveErr = fmt.Errorf("update chunk embedding %d: %w", i, err)
 			break
 		}
 

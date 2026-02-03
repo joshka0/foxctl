@@ -183,7 +183,7 @@ func migrateTursoWithDimensions(ctx context.Context, db *sql.DB, dimensions int)
 	// These columns support UpdateAtomic which stores self-contained rewrites and extracted metadata.
 	// Ignore duplicate-column errors for existing databases.
 	atomicColumns := []string{
-		`ALTER TABLE named_memory ADD COLUMN atomic_text TEXT`,  // Self-contained, disambiguated rewrite
+		`ALTER TABLE named_memory ADD COLUMN atomic_text TEXT`, // Self-contained, disambiguated rewrite
 		`ALTER TABLE named_memory ADD COLUMN entities TEXT`,    // JSON array of extracted entities
 		`ALTER TABLE named_memory ADD COLUMN keywords TEXT`,    // JSON array of BM25 keywords
 	}

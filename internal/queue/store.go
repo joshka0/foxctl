@@ -31,7 +31,6 @@ type Store struct {
 	close  func() error
 }
 
-
 // Open opens a SQLite-backed queue store and applies table migrations.
 //
 // Index:
@@ -54,7 +53,6 @@ func Open(ctx context.Context, dbPath string, opts Options) (*Store, error) {
 	}
 	return &Store{db: db, table: table, ownsDB: true, close: closeFn}, nil
 }
-
 
 // OpenInRoot opens a queue Store located at the filesystem path formed by joining
 // the provided root directory and filename.
@@ -84,7 +82,6 @@ func (s *Store) Close() error {
 	}
 	return nil
 }
-
 
 // Migrate creates the queue table and its supporting indexes in db if they do not exist.
 // It validates and normalizes opts.Table and returns an error if the table name is invalid.

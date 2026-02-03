@@ -32,6 +32,9 @@ type Candidate struct {
 	// Kind is the symbol kind (function, method, class, etc.)
 	Kind string `json:"kind,omitempty"`
 
+	// Documentation is the extracted doc comment for the symbol, if available.
+	Documentation string `json:"documentation,omitempty"`
+
 	// Score is the normalized relevance score (0-1 range after merging)
 	Score float64 `json:"score"`
 

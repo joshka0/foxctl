@@ -10,8 +10,8 @@ import (
 	"time"
 
 	actormemory "github.com/jkatigb/agentctl/internal/actor/memory"
-	"github.com/jkatigb/agentctl/internal/observability"
 	"github.com/jkatigb/agentctl/internal/indexing/semantic"
+	"github.com/jkatigb/agentctl/internal/observability"
 	"github.com/jkatigb/agentctl/internal/storage"
 )
 

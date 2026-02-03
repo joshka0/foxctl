@@ -101,7 +101,6 @@ type sqlStore struct {
 	close func() error
 }
 
-
 // Open initializes the knowledge store rooted at the provided path by opening a
 // SQLite database at root/knowledge.db and applying the package migrations.
 // The returned Store is backed by that database and should be closed when no
@@ -115,7 +114,6 @@ func Open(ctx context.Context, root string) (Store, error) {
 	return &sqlStore{db: db, close: closeFn}, nil
 }
 
-
 // Close releases database resources.
 func (s *sqlStore) Close() error {
 	if s == nil || s.close == nil {
@@ -123,7 +121,6 @@ func (s *sqlStore) Close() error {
 	}
 	return s.close()
 }
-
 
 // migrate applies the schema required by the knowledge registry to the given database.
 // It creates the knowledge_items, knowledge_triggers, and knowledge_documents tables along with their indexes,

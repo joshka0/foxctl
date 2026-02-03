@@ -56,14 +56,14 @@ type VoiceSettings struct {
 
 // emotionVoiceSettings maps emotions to voice settings.
 var emotionVoiceSettings = map[string]VoiceSettings{
-	"neutral": {Stability: 0.5, SimilarityBoost: 0.75, Style: 0.0, UseSpeakerBoost: true},
-	"joy":     {Stability: 0.3, SimilarityBoost: 0.8, Style: 0.3, UseSpeakerBoost: true},
-	"sadness": {Stability: 0.7, SimilarityBoost: 0.6, Style: 0.2, UseSpeakerBoost: true},
-	"anger":   {Stability: 0.2, SimilarityBoost: 0.9, Style: 0.5, UseSpeakerBoost: true},
-	"fear":    {Stability: 0.6, SimilarityBoost: 0.7, Style: 0.1, UseSpeakerBoost: true},
-	"surprise":{Stability: 0.3, SimilarityBoost: 0.8, Style: 0.4, UseSpeakerBoost: true},
-	"disgust": {Stability: 0.6, SimilarityBoost: 0.7, Style: 0.2, UseSpeakerBoost: true},
-	"playful": {Stability: 0.3, SimilarityBoost: 0.8, Style: 0.5, UseSpeakerBoost: true},
+	"neutral":  {Stability: 0.5, SimilarityBoost: 0.75, Style: 0.0, UseSpeakerBoost: true},
+	"joy":      {Stability: 0.3, SimilarityBoost: 0.8, Style: 0.3, UseSpeakerBoost: true},
+	"sadness":  {Stability: 0.7, SimilarityBoost: 0.6, Style: 0.2, UseSpeakerBoost: true},
+	"anger":    {Stability: 0.2, SimilarityBoost: 0.9, Style: 0.5, UseSpeakerBoost: true},
+	"fear":     {Stability: 0.6, SimilarityBoost: 0.7, Style: 0.1, UseSpeakerBoost: true},
+	"surprise": {Stability: 0.3, SimilarityBoost: 0.8, Style: 0.4, UseSpeakerBoost: true},
+	"disgust":  {Stability: 0.6, SimilarityBoost: 0.7, Style: 0.2, UseSpeakerBoost: true},
+	"playful":  {Stability: 0.3, SimilarityBoost: 0.8, Style: 0.5, UseSpeakerBoost: true},
 }
 
 func main() {

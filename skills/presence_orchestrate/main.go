@@ -172,11 +172,11 @@ var markerToEmotion = map[string]string{
 	"surprised": EmotionSurprise,
 
 	// Playful markers
-	"winks":        EmotionPlayful,
-	"teases":       EmotionPlayful,
-	"playfully":    EmotionPlayful,
+	"winks":         EmotionPlayful,
+	"teases":        EmotionPlayful,
+	"playfully":     EmotionPlayful,
 	"mischievously": EmotionPlayful,
-	"smirks":       EmotionPlayful,
+	"smirks":        EmotionPlayful,
 
 	// Neutral/other markers
 	"pause":   "",

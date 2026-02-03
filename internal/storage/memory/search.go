@@ -245,7 +245,7 @@ func (ss *SearchableStore) searchHybrid(
 		query,
 		queryVector,
 		"named_memory",
-		"name || ' ' || COALESCE(summary, '')", // Text column expression
+		"name",                           // Text column expression
 		"embedding",                            // Vector column
 		"idx_memory_vector",                    // Index name
 		limit,

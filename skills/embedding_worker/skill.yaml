@@ -31,6 +31,25 @@ signature:
       required: false
       default: false
       description: Claim jobs but skip actual embedding API calls
+    - name: sync_memory
+      type: boolean
+      required: false
+      default: false
+      description: Sync symbol embeddings into named memory after processing
+    - name: sync_only_missing
+      type: boolean
+      required: false
+      default: true
+      description: Only fill missing embeddings during sync
+    - name: sync_workspace
+      type: string
+      required: false
+      description: Restrict sync to a specific workspace ID
+    - name: sync_all
+      type: boolean
+      required: false
+      default: false
+      description: Force a full workspace sync instead of only touched symbols
   returns:
     - name: processed
       type: integer
@@ -38,6 +57,12 @@ signature:
     - name: errors
       type: integer
       description: Number of jobs that failed
+    - name: synced
+      type: integer
+      description: Number of symbol embeddings synced into named memory
+    - name: sync_errors
+      type: integer
+      description: Number of sync attempts that failed
     - name: remaining
       type: integer
       description: Jobs still in queue after processing

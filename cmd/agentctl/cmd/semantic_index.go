@@ -9,6 +9,7 @@ import (
 
 	"github.com/jkatigb/agentctl/internal/indexing/semantic"
 	"github.com/jkatigb/agentctl/internal/platform/fsutil"
+	workspaceutil "github.com/jkatigb/agentctl/internal/platform/workspace"
 	"github.com/jkatigb/agentctl/internal/protocol"
 	"github.com/jkatigb/agentctl/internal/storage/memory"
 	"github.com/rs/zerolog"
@@ -154,8 +155,9 @@ func runSemanticIndexInit(cmd *cobra.Command, workspace, glob string, exclude []
 	}
 
 	// Build job args
+	workspaceID := workspaceutil.ID(absWorkspace)
 	args := semantic.JobArgs{
-		WorkspaceID: absWorkspace,
+		WorkspaceID: workspaceID,
 		Reason:      semantic.ReasonInitialIndex,
 		TaskID:      taskID,
 	}
@@ -210,8 +212,9 @@ func runSemanticIndexUpdate(cmd *cobra.Command, workspace string, files, deleted
 	}
 
 	// Build job args
+	workspaceID := workspaceutil.ID(absWorkspace)
 	args := semantic.JobArgs{
-		WorkspaceID: absWorkspace,
+		WorkspaceID: workspaceID,
 		Reason:      semantic.ReasonPostReview,
 		TaskID:      taskID,
 		ReviewID:    reviewID,

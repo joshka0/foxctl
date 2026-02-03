@@ -13,11 +13,13 @@ import (
 	"sync"
 	"time"
 
+	"github.com/jkatigb/agentctl/internal/indexing"
 	"github.com/jkatigb/agentctl/internal/indexing/semantic"
 	"github.com/jkatigb/agentctl/internal/indexing/symbol"
 	"github.com/jkatigb/agentctl/internal/observability"
 	"github.com/jkatigb/agentctl/internal/platform/config"
 	"github.com/jkatigb/agentctl/internal/platform/fsutil"
+	workspaceutil "github.com/jkatigb/agentctl/internal/platform/workspace"
 	"github.com/jkatigb/agentctl/internal/protocol"
 	llmproviders "github.com/jkatigb/agentctl/internal/providers/llm"
 	"github.com/jkatigb/agentctl/internal/retrieval"
@@ -26,6 +28,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/storage/sessions"
 	"github.com/jkatigb/agentctl/internal/storage/tasks"
 	"github.com/jkatigb/agentctl/internal/storage/vector"
+	"github.com/oklog/ulid/v2"
 	"github.com/rs/zerolog"
 	"github.com/spf13/cobra"
 )
@@ -193,6 +196,7 @@ Remote sync:
 		newIndexSyncCommand(),
 		newIndexGitDiffCommand(),
 		newIndexFileSummariesCommand(),
+		newIndexSymbolIndexCommand(),
 		newIndexSymbolSummariesCommand(),
 	)
 	return cmd
@@ -246,6 +250,52 @@ Override with AGENTCTL_EMBEDDING_MODEL_<SCOPE> or _CODE/_TEXT env vars.`,
 	cmd.Flags().StringSliceVar(&exclude, "exclude", []string{"*_test.go", "vendor/**"}, "Glob patterns to exclude for symbols")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Show what would be indexed without making changes")
 	cmd.Flags().BoolVar(&parallel, "parallel", false, "Index scopes in parallel (faster but uses more API quota)")
+
+	return cmd
+}
+
+func newIndexSymbolIndexCommand() *cobra.Command {
+	var workspace string
+	var glob string
+	var exclude []string
+	var dryRun bool
+	var maxFileKB int
+	var maxFileLOC int
+	var languages []string
+	var embedding bool
+	var embeddingModel string
+	var embeddingStoreRoot string
+	var embeddingTextMode string
+
+	cmd := &cobra.Command{
+		Use:   "symbol-index",
+		Short: "Run the symbol indexer on a file set",
+		Long: `Run the symbol indexer over a selected file set. This uses the doc-aware
+embedding text pipeline and updates named-memory symbol entries.`,
+		Example: `  # Index symbols for a single file
+  agentctl index symbol-index --glob "internal/indexing/repoindex/comment_edges.go"
+
+  # Index symbols for Go and TS
+  agentctl index symbol-index --glob "**/*.{go,ts,tsx}" --exclude "*_test.go,vendor/**"
+
+  # Dry run to see matched files
+  agentctl index symbol-index --dry-run`,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			return runIndexSymbolIndex(cmd, workspace, glob, exclude, dryRun, maxFileKB, maxFileLOC, languages, embedding, embeddingModel, embeddingStoreRoot, embeddingTextMode)
+		},
+	}
+
+	cmd.Flags().StringVar(&workspace, "workspace", ".", "Workspace root directory")
+	cmd.Flags().StringVar(&glob, "glob", "**/*.{go,ts,tsx,js,jsx,py,ex,exs}", "Glob pattern for symbol files")
+	cmd.Flags().StringSliceVar(&exclude, "exclude", []string{"*_test.go", "vendor/**"}, "Glob patterns to exclude for symbols")
+	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Show what would be indexed without making changes")
+	cmd.Flags().IntVar(&maxFileKB, "max-file-kb", 512, "Skip files larger than this size in KB")
+	cmd.Flags().IntVar(&maxFileLOC, "max-file-loc", 500, "Skip files with more lines than this limit")
+	cmd.Flags().StringSliceVar(&languages, "language", nil, "Optional language filter (e.g. go,ts,tsx,js,py,ex,exs)")
+	cmd.Flags().BoolVar(&embedding, "embedding", true, "Enable symbol embeddings")
+	cmd.Flags().StringVar(&embeddingModel, "embedding-model", "", "Override embedding model (defaults to scope recommendation)")
+	cmd.Flags().StringVar(&embeddingStoreRoot, "embedding-store-root", "", "Override embedding store root (defaults to storage root)")
+	cmd.Flags().StringVar(&embeddingTextMode, "embedding-text-mode", "doc_enriched", "Embedding text mode (doc_enriched, summary_only)")
 
 	return cmd
 }
@@ -535,8 +585,9 @@ func indexSymbols(ctx context.Context, cfg config.Config, workspace, glob string
 	logger := zerolog.New(os.Stderr).With().Timestamp().Logger() //nolint:forbidigo // semantic indexer requires zerolog
 	indexer := semantic.NewIndexer(indexerCfg, store, provider, workspace, logger)
 
+	workspaceID := workspaceutil.ID(workspace)
 	args := semantic.JobArgs{
-		WorkspaceID: workspace,
+		WorkspaceID: workspaceID,
 		Reason:      semantic.ReasonInitialIndex,
 	}
 	for _, f := range files {
@@ -549,6 +600,124 @@ func indexSymbols(ctx context.Context, cfg config.Config, workspace, glob string
 	}
 
 	return result.Summary.FilesIndexed, nil
+}
+
+func runIndexSymbolIndex(cmd *cobra.Command, workspace, glob string, exclude []string, dryRun bool, maxFileKB, maxFileLOC int, languages []string, embedding bool, embeddingModel, embeddingStoreRoot, embeddingTextMode string) error {
+	ctx := cmd.Context()
+	start := time.Now()
+
+	absWorkspace, err := filepath.Abs(workspace)
+	if err != nil {
+		return fmt.Errorf("resolve workspace: %w", err)
+	}
+
+	files, err := fsutil.FindFilesRespectingGitignore(absWorkspace, glob, exclude)
+	if err != nil {
+		return fmt.Errorf("find files: %w", err)
+	}
+
+	if len(files) == 0 {
+		data := map[string]any{
+			"workspace":  absWorkspace,
+			"workspace_id": workspaceutil.ID(absWorkspace),
+			"file_count": 0,
+			"glob":       glob,
+			"exclude":    exclude,
+			"dry_run":    dryRun,
+		}
+		env := protocol.OK("index.symbol_index", data, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+		return protocol.Write(cmd.OutOrStdout(), env)
+	}
+
+	if dryRun {
+		data := map[string]any{
+			"workspace":  absWorkspace,
+			"workspace_id": workspaceutil.ID(absWorkspace),
+			"file_count": len(files),
+			"glob":       glob,
+			"exclude":    exclude,
+			"files":      files,
+			"dry_run":    true,
+		}
+		env := protocol.OK("index.symbol_index", data, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+		return protocol.Write(cmd.OutOrStdout(), env)
+	}
+
+	cfg, err := loadConfig(ctx)
+	if err != nil {
+		return fmt.Errorf("load config: %w", err)
+	}
+
+	storageDir := filepath.Join(cfg.Home, "storage")
+	casDir := cfg.Paths.CAS
+	if casDir == "" {
+		casDir = filepath.Join(cfg.Home, "cas")
+	}
+
+	store, err := memory.Open(ctx, storageDir, casDir)
+	if err != nil {
+		return fmt.Errorf("open memory store: %w", err)
+	}
+	defer store.Close()
+
+	symCfg := symbol.DefaultConfig()
+	symCfg.Enabled = true
+	symCfg.MaxFileKB = maxFileKB
+	symCfg.MaxFileLOC = maxFileLOC
+	symCfg.Languages = languages
+	symCfg.EmbeddingEnabled = embedding
+	if strings.TrimSpace(embeddingModel) != "" {
+		symCfg.EmbeddingModel = strings.TrimSpace(embeddingModel)
+	}
+	if strings.TrimSpace(embeddingStoreRoot) != "" {
+		symCfg.EmbeddingStoreRoot = strings.TrimSpace(embeddingStoreRoot)
+	}
+	if strings.TrimSpace(embeddingTextMode) != "" {
+		symCfg.EmbeddingTextMode = config.ResolveEmbedSymbolTextMode(config.EmbedSymbolTextMode(embeddingTextMode))
+	}
+
+	logger := zerolog.New(os.Stderr).With().Timestamp().Logger() //nolint:forbidigo // symbol indexer requires zerolog
+	indexer := symbol.NewIndexer(symCfg, store, nil, absWorkspace, logger)
+
+	now := time.Now().UTC()
+	filesChanged := make([]indexing.FileChange, 0, len(files))
+	for _, file := range files {
+		filesChanged = append(filesChanged, indexing.FileChange{
+			Path:       file,
+			ChangeKind: indexing.ChangeKindModified,
+		})
+	}
+
+	event := indexing.PostReviewEvent{
+		ID:           ulid.Make().String(),
+		WorkspaceID:  workspaceutil.ID(absWorkspace),
+		ReviewKind:   "manual",
+		ReviewStatus: "ok",
+		DiffAppliedAt: now,
+		Files:        filesChanged,
+		Source:       "cli",
+		CreatedAt:    now,
+		Reason:       "manual",
+	}
+
+	result, err := indexer.Index(ctx, event)
+	if err != nil {
+		return err
+	}
+
+	data := map[string]any{
+		"workspace":   absWorkspace,
+		"workspace_id": event.WorkspaceID,
+		"file_count":  len(files),
+		"indexed":     result.FilesIndexed,
+		"skipped":     result.FilesSkipped,
+		"failed":      result.FilesFailed,
+		"failures":    result.Failures,
+		"duration_ms": time.Since(start).Milliseconds(),
+	}
+
+	env := protocol.OK("index.symbol_index", data, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	return protocol.Write(cmd.OutOrStdout(), env)
 }
 
 func reembedMemories(ctx context.Context, cfg config.Config, workspace, apiKey string) (int, error) {

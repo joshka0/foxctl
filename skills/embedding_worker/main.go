@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -37,12 +38,26 @@ type Input struct {
 
 	// DryRun if true, claims jobs but doesn't call the embedding API.
 	DryRun bool `json:"dry_run,omitempty"`
+
+	// SyncMemory requests syncing symbol embeddings into named memory after processing.
+	SyncMemory bool `json:"sync_memory,omitempty"`
+
+	// SyncOnlyMissing controls whether sync only fills missing embeddings (default true).
+	SyncOnlyMissing *bool `json:"sync_only_missing,omitempty"`
+
+	// SyncWorkspace restricts sync to a specific workspace ID.
+	SyncWorkspace string `json:"sync_workspace,omitempty"`
+
+	// SyncAll forces a full workspace sync instead of only touched symbols.
+	SyncAll bool `json:"sync_all,omitempty"`
 }
 
 // Output is the skill output for embedding/worker operations.
 type Output struct {
 	Processed  int            `json:"processed"`
 	Errors     int            `json:"errors"`
+	Synced     int            `json:"synced,omitempty"`
+	SyncErrors int            `json:"sync_errors,omitempty"`
 	Remaining  int            `json:"remaining"`
 	BatchCount int            `json:"batch_count,omitempty"`
 	Status     string         `json:"status"` // "completed", "timeout", "no_jobs", "error"
@@ -160,6 +175,23 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 		defer memoryStore.Close()
 	}
 
+	embeddingDBPath := filepath.Join(rc.Config.Paths.Cache, "embedding_queue.db")
+	syncTargets := make(map[string]map[string]struct{})
+	processedWorkspaces := make(map[string]struct{})
+	addSyncTarget := func(workspaceID, symbolID string) {
+		workspaceID = strings.TrimSpace(workspaceID)
+		symbolID = strings.TrimSpace(symbolID)
+		if workspaceID == "" || symbolID == "" {
+			return
+		}
+		targets := syncTargets[workspaceID]
+		if targets == nil {
+			targets = make(map[string]struct{})
+			syncTargets[workspaceID] = targets
+		}
+		targets[symbolID] = struct{}{}
+	}
+
 	// Set up timeout
 	deadline := time.Now().Add(time.Duration(in.MaxDuration) * time.Second)
 	ctx, cancel := context.WithDeadline(ctx, deadline)
@@ -209,6 +241,10 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 				Str("job_id", job.ID).
 				Str("content_preview", contentPreview).
 				Msg("claimed job")
+
+			if ws := strings.TrimSpace(job.WorkspaceID); ws != "" {
+				processedWorkspaces[ws] = struct{}{}
+			}
 
 			// Generate embedding
 			if in.DryRun {
@@ -279,10 +315,12 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 							Str("job_id", job.ID).
 							Str("symbol_id", job.SymbolID).
 							Msg("skipping embedding update due to missing workspace/file/symbol")
+						addSyncTarget(workspaceID, job.SymbolID)
 					} else {
 						entryName := symbolutil.EntryName(workspaceID, filePath, symbolName)
 						if err := memoryStore.UpdateEmbedding(ctx, entryName, workspaceID, embed); err != nil {
 							log.Warn().Err(err).Str("job_id", job.ID).Str("symbol_id", job.SymbolID).Msg("failed to update symbol embedding")
+							addSyncTarget(workspaceID, job.SymbolID)
 						}
 					}
 				}
@@ -311,6 +349,80 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 		// Check context
 		if ctx.Err() != nil {
 			break
+		}
+	}
+
+	if memoryStore != nil {
+		syncOnlyMissing := true
+		if in.SyncOnlyMissing != nil {
+			syncOnlyMissing = *in.SyncOnlyMissing
+		}
+
+		if len(syncTargets) > 0 {
+			for ws, symbols := range syncTargets {
+				ids := make([]string, 0, len(symbols))
+				for id := range symbols {
+					ids = append(ids, id)
+				}
+				updated, err := memoryStore.SyncSymbolEmbeddings(ctx, embeddingDBPath, memoryutil.SyncSymbolEmbeddingsOptions{
+					WorkspaceID: ws,
+					SymbolIDs:   ids,
+					OnlyMissing: syncOnlyMissing,
+				})
+				if err != nil {
+					output.SyncErrors++
+					log.Warn().Err(err).Str("workspace", ws).Msg("failed to sync symbol embeddings")
+					continue
+				}
+				if updated > 0 {
+					output.Synced += updated
+					log.Info().Int("synced", updated).Str("workspace", ws).Msg("synced symbol embeddings")
+				}
+			}
+		}
+
+		if in.SyncMemory {
+			syncWorkspaces := make(map[string]struct{})
+			if ws := strings.TrimSpace(in.SyncWorkspace); ws != "" {
+				syncWorkspaces[ws] = struct{}{}
+			} else {
+				for ws := range processedWorkspaces {
+					syncWorkspaces[ws] = struct{}{}
+				}
+			}
+			if len(syncWorkspaces) == 0 {
+				log.Warn().Msg("no workspaces available for sync_memory")
+			} else if in.SyncAll {
+				for ws := range syncWorkspaces {
+					updated, err := memoryStore.SyncSymbolEmbeddings(ctx, embeddingDBPath, memoryutil.SyncSymbolEmbeddingsOptions{
+						WorkspaceID: ws,
+						OnlyMissing: syncOnlyMissing,
+					})
+					if err != nil {
+						output.SyncErrors++
+						log.Warn().Err(err).Str("workspace", ws).Msg("failed to sync workspace embeddings")
+						continue
+					}
+					if updated > 0 {
+						output.Synced += updated
+						log.Info().Int("synced", updated).Str("workspace", ws).Msg("synced workspace embeddings")
+					}
+				}
+			} else if len(syncTargets) == 0 {
+				if ws := strings.TrimSpace(in.SyncWorkspace); ws != "" {
+					updated, err := memoryStore.SyncSymbolEmbeddings(ctx, embeddingDBPath, memoryutil.SyncSymbolEmbeddingsOptions{
+						WorkspaceID: ws,
+						OnlyMissing: syncOnlyMissing,
+					})
+					if err != nil {
+						output.SyncErrors++
+						log.Warn().Err(err).Str("workspace", ws).Msg("failed to sync embeddings for workspace")
+					} else if updated > 0 {
+						output.Synced += updated
+						log.Info().Int("synced", updated).Str("workspace", ws).Msg("synced workspace embeddings")
+					}
+				}
+			}
 		}
 	}
 

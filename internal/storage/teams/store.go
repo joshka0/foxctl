@@ -51,7 +51,6 @@ type sqlStore struct {
 	close func() error
 }
 
-
 // Open opens or creates the teams SQLite database in the provided root directory and returns a Store backed by it.
 // It constructs the path root/teams.db, opens a shared SQLite database (applying migrations), and returns a Store
 // that manages the database connection or an error if opening fails.
@@ -64,7 +63,6 @@ func Open(ctx context.Context, root string) (Store, error) {
 	return &sqlStore{db: db, close: closeFn}, nil
 }
 
-
 func (s *sqlStore) Close() error {
 	if s == nil || s.close == nil {
 		return nil
@@ -72,9 +70,8 @@ func (s *sqlStore) Close() error {
 	return s.close()
 }
 
-
 // migrate creates the database schema for teams and team_members and their indexes.
- // It executes the required DDL against the provided DB and returns an error wrapping the underlying failure if execution does not succeed.
+// It executes the required DDL against the provided DB and returns an error wrapping the underlying failure if execution does not succeed.
 func migrate(ctx context.Context, db *sql.DB) error {
 	ddl := `
 CREATE TABLE IF NOT EXISTS teams (

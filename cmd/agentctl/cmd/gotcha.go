@@ -55,20 +55,21 @@ Examples:
 			}
 
 			return memorycmd.WithConfig(cmd, func(ctx context.Context, cfg config.Config) error {
-				ws := resolveWorkspace(cfg, workspaceFlag)
+				workspaceRoot := resolveWorkspace(cfg, workspaceFlag)
+				workspaceID := resolveWorkspaceID(cfg, workspaceFlag)
 
 				if name == "" {
 					name = generateGotchaName(typ, summary)
 				}
 
-				payload := buildGotchaPayload(summary, detail, file, ws)
+				payload := buildGotchaPayload(summary, detail, file, workspaceRoot)
 				payloadBytes, err := json.Marshal(payload)
 				if err != nil {
 					return fmt.Errorf("marshal payload: %w", err)
 				}
 
 				return memorycmd.WithMemoryStore(ctx, cfg, func(store storage.MemoryStore) error {
-					entry, err := store.SaveFromResult(ctx, name, typ, ws, summary, payloadBytes)
+					entry, err := store.SaveFromResult(ctx, name, typ, workspaceID, summary, payloadBytes)
 					if err != nil {
 						return err
 					}
@@ -111,10 +112,10 @@ func newGotchaListCommand() *cobra.Command {
 		Short: "List gotchas",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return memorycmd.WithConfig(cmd, func(ctx context.Context, cfg config.Config) error {
-				ws := resolveWorkspace(cfg, workspaceFlag)
+				workspaceID := resolveWorkspaceID(cfg, workspaceFlag)
 
 				return memorycmd.WithMemoryStore(ctx, cfg, func(store storage.MemoryStore) error {
-					entries, err := store.List(ctx, ws, limit*3)
+					entries, err := store.List(ctx, workspaceID, limit*3)
 					if err != nil {
 						return err
 					}
@@ -145,7 +146,7 @@ func newGotchaListCommand() *cobra.Command {
 						Count     int              `json:"count"`
 					}{
 						Entries:   filtered,
-						Workspace: ws,
+						Workspace: workspaceID,
 						Count:     len(filtered),
 					}
 					return memorycmd.WriteOK(cmd.OutOrStdout(), "agentctl.gotcha.list", payload)
