@@ -14,6 +14,7 @@ import (
 
 	"github.com/jkatigb/agentctl/internal/indexing"
 	"github.com/jkatigb/agentctl/internal/platform/fsutil"
+	"github.com/jkatigb/agentctl/internal/platform/workspace"
 	"github.com/jkatigb/agentctl/internal/storage"
 	"github.com/jkatigb/agentctl/internal/storage/memory"
 	"github.com/rs/zerolog"
@@ -70,7 +71,7 @@ func (idx *Indexer) Index(ctx context.Context, event indexing.PostReviewEvent) (
 		}, nil
 	}
 
-	if canonicalWorkspace := workspaceutil.ID(idx.workspaceRoot); canonicalWorkspace != "" {
+	if canonicalWorkspace := workspace.ID(idx.workspaceRoot); canonicalWorkspace != "" {
 		if event.WorkspaceID == "" {
 			event.WorkspaceID = canonicalWorkspace
 		} else if event.WorkspaceID != canonicalWorkspace {

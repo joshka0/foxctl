@@ -414,6 +414,95 @@ func (s *TursoStore) SearchSimilar(ctx context.Context, workspace string, embedd
 	return results, rows.Err()
 }
 
+// SearchSimilarByType finds entries of a specific type using native vector search.
+func (s *TursoStore) SearchSimilarByType(ctx context.Context, workspace, entryType string, embedding []float32, limit int) ([]ScoredEntry, error) {
+	if entryType == "" {
+		return s.SearchSimilar(ctx, workspace, embedding, limit)
+	}
+	if limit <= 0 {
+		limit = 10
+	}
+
+	vec := make(dbdriver.Vector, len(embedding))
+	copy(vec, embedding)
+
+	var query string
+	var rows *sql.Rows
+	var err error
+
+	if s.hasIndex {
+		topKExpr := s.vh.VectorTopK("idx_memory_embedding_vec", vec, limit*2)
+		distExpr := s.vh.CosineSimilarity("m.embedding", vec)
+		query = fmt.Sprintf(`
+			SELECT m.id, m.name, m.type, m.workspace, m.summary, m.result, m.digests,
+				m.created_at, m.updated_at, m.last_accessed, m.access_count, m.session_id,
+				%s as distance
+			FROM %s vt
+			JOIN named_memory m ON m.rowid = vt.id
+			WHERE m.workspace = ? AND m.type = ?`, distExpr, topKExpr)
+		rows, err = s.db.QueryContext(ctx, query, workspace, entryType)
+	} else {
+		distExpr := s.vh.CosineSimilarity("embedding", vec)
+		query = fmt.Sprintf(`
+			SELECT id, name, type, workspace, summary, result, digests,
+				created_at, updated_at, last_accessed, access_count, session_id,
+				%s as distance
+			FROM named_memory
+			WHERE embedding IS NOT NULL AND workspace = ? AND type = ?
+			ORDER BY distance ASC
+			LIMIT ?`, distExpr)
+		rows, err = s.db.QueryContext(ctx, query, workspace, entryType, limit)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("memory: search similar by type: %w", err)
+	}
+	defer func() { errs.Ignore(rows.Close(), "close similar rows") }()
+
+	var results []ScoredEntry
+	for rows.Next() {
+		var entry NamedEntry
+		var digestsJSON string
+		var createdAt, updatedAt, lastAccess string
+		var sessionID sql.NullString
+		var distance float64
+
+		err := rows.Scan(
+			&entry.ID, &entry.Name, &entry.Type, &entry.Workspace, &entry.Summary,
+			&entry.Result, &digestsJSON, &createdAt, &updatedAt, &lastAccess,
+			&entry.AccessCount, &sessionID, &distance,
+		)
+		if err != nil {
+			continue
+		}
+
+		_ = sqlutil.ScanJSON(digestsJSON, &entry.Digests)
+
+		entry.CreatedAt, _ = sqlutil.ScanTimestamp(createdAt)
+		entry.UpdatedAt, _ = sqlutil.ScanTimestamp(updatedAt)
+		entry.LastAccess, _ = sqlutil.ScanTimestamp(lastAccess)
+		if sessionID.Valid {
+			entry.SessionID = sessionID.String
+		}
+
+		similarity := 1.0 - distance/2.0
+
+		results = append(results, ScoredEntry{
+			Entry: entry,
+			Score: similarity,
+		})
+	}
+
+	sort.Slice(results, func(i, j int) bool {
+		return results[i].Score > results[j].Score
+	})
+
+	if len(results) > limit {
+		results = results[:limit]
+	}
+
+	return results, rows.Err()
+}
+
 // --- Basic CRUD operations (delegate to underlying store patterns) ---
 
 // Save saves a named memory entry without embedding.

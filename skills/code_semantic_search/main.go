@@ -1436,8 +1436,8 @@ func searchTasks(
 	}
 	defer memStore.Close()
 
-	// Search for similar entries
-	scoredEntries, err := memStore.SearchSimilar(ctx, workspaceID, queryEmbedding, limit*2)
+	// Search for similar task entries
+	scoredEntries, err := memStore.SearchSimilarByType(ctx, workspaceID, "task_embedding", queryEmbedding, limit*2)
 	if err != nil {
 		return nil, skillerr.WrapIO("vector search tasks", err)
 	}

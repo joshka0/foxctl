@@ -852,9 +852,15 @@ func reembedTasks(ctx context.Context, cfg config.Config, defaultWorkspace, apiK
 
 		// Also store in memory.db for semantic search skill compatibility
 		// Use name format: task://<task_id> with type: task_embedding
-		workspace := task.WorkspaceID
-		if workspace == "" {
-			workspace = defaultWorkspace // fallback to current workspace
+		workspacePath := task.WorkspaceID
+		if workspacePath == "" {
+			workspacePath = defaultWorkspace // fallback to current workspace
+		}
+		workspace := workspacePath
+		if strings.ContainsAny(workspacePath, "/\\") {
+			if workspaceID := workspaceutil.ID(workspacePath); workspaceID != "" {
+				workspace = workspaceID
+			}
 		}
 		entryName := "task://" + task.ID
 

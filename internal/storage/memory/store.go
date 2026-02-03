@@ -1177,6 +1177,110 @@ func (s *Store) SearchSimilar(ctx context.Context, workspace string, queryEmbedd
 	return results, nil
 }
 
+// SearchSimilarByType finds entries similar to the given embedding within a specific entry type.
+// This avoids scanning unrelated entries when a type-specific search is needed.
+func (s *Store) SearchSimilarByType(ctx context.Context, workspace, entryType string, queryEmbedding []float32, limit int) ([]ScoredEntry, error) {
+	if limit <= 0 {
+		limit = 20
+	}
+	if entryType == "" {
+		return nil, fmt.Errorf("memory: search similar by type: entry type required")
+	}
+
+	// Load entries with embeddings from this workspace and type
+	// Use a wider candidate window to ensure enough same-type matches are considered.
+	candidateLimit := limit * 50
+	if candidateLimit < 1000 {
+		candidateLimit = 1000
+	}
+	if candidateLimit > 5000 {
+		candidateLimit = 5000
+	}
+
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT id, name, type, workspace, summary, result, digests, created_at, updated_at, last_accessed, access_count, session_id, embedding
+		FROM named_memory
+		WHERE workspace = ? AND type = ? AND embedding IS NOT NULL AND LENGTH(embedding) > 0
+		LIMIT ?
+	`, workspace, entryType, candidateLimit)
+	if err != nil {
+		return nil, fmt.Errorf("memory: search similar by type: %w", err)
+	}
+	defer func() { errs.Ignore(rows.Close(), "close search similar by type rows") }()
+
+	type entryWithEmbedding struct {
+		entry     NamedEntry
+		embedding []float32
+	}
+
+	var candidates []entryWithEmbedding
+	for rows.Next() {
+		var entry NamedEntry
+		var digests string
+		var created, updated, last string
+		var sessionID sql.NullString
+		var embeddingJSON []byte
+
+		if err := rows.Scan(
+			&entry.ID, &entry.Name, &entry.Type, &entry.Workspace, &entry.Summary, &entry.Result,
+			&digests, &created, &updated, &last, &entry.AccessCount, &sessionID, &embeddingJSON); err != nil {
+			continue
+		}
+
+		_ = sqlutil.ScanJSON(digests, &entry.Digests)
+		entry.CreatedAt, _ = sqlutil.ScanTimestamp(created)
+		entry.UpdatedAt, _ = sqlutil.ScanTimestamp(updated)
+		entry.LastAccess, _ = sqlutil.ScanTimestamp(last)
+		if sessionID.Valid {
+			entry.SessionID = sessionID.String
+		}
+
+		if len(embeddingJSON) == 0 {
+			continue
+		}
+
+		var embedding []float32
+		if err := json.Unmarshal(embeddingJSON, &embedding); err != nil {
+			continue
+		}
+
+		// Skip entries with mismatched dimensions
+		if len(embedding) != len(queryEmbedding) {
+			continue
+		}
+
+		candidates = append(candidates, entryWithEmbedding{entry: entry, embedding: embedding})
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("memory: search similar by type rows: %w", err)
+	}
+
+	// Compute cosine similarity for each candidate
+	results := make([]ScoredEntry, 0, len(candidates))
+	for _, c := range candidates {
+		similarity := vector.Cosine(queryEmbedding, c.embedding)
+		if similarity > 0.5 { // Filter low-similarity results
+			results = append(results, ScoredEntry{
+				Entry: c.entry,
+				Score: similarity,
+			})
+		}
+	}
+
+	// Sort by similarity (highest first)
+	sort.Slice(results, func(i, j int) bool {
+		return results[i].Score > results[j].Score
+	})
+
+	// Apply limit
+	if len(results) > limit {
+		results = results[:limit]
+	}
+
+	return results, nil
+}
+
 func scanEntries(rows *sql.Rows) ([]NamedEntry, error) {
 	var out []NamedEntry
 	for rows.Next() {
