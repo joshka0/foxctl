@@ -70,6 +70,18 @@ func (idx *Indexer) Index(ctx context.Context, event indexing.PostReviewEvent) (
 		}, nil
 	}
 
+	if canonicalWorkspace := workspaceutil.ID(idx.workspaceRoot); canonicalWorkspace != "" {
+		if event.WorkspaceID == "" {
+			event.WorkspaceID = canonicalWorkspace
+		} else if event.WorkspaceID != canonicalWorkspace {
+			idx.logger.Warn().
+				Str("workspace_id", event.WorkspaceID).
+				Str("canonical_workspace_id", canonicalWorkspace).
+				Msg("overriding workspace id for semantic indexing")
+			event.WorkspaceID = canonicalWorkspace
+		}
+	}
+
 	result := &indexing.IndexerResult{
 		IndexerID: IndexerID,
 	}

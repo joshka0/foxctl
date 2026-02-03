@@ -15,6 +15,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/indexing/embeddingtext"
 	"github.com/jkatigb/agentctl/internal/indexing/semantic"
 	"github.com/jkatigb/agentctl/internal/platform/config"
+	workspaceutil "github.com/jkatigb/agentctl/internal/platform/workspace"
 	"github.com/jkatigb/agentctl/internal/storage"
 	"github.com/jkatigb/agentctl/internal/storage/memory"
 	"github.com/rs/zerolog"
@@ -75,6 +76,18 @@ func (idx *Indexer) Index(ctx context.Context, event indexing.PostReviewEvent) (
 			IndexerID:    IndexerID,
 			FilesSkipped: len(event.Files),
 		}, nil
+	}
+
+	if canonicalWorkspace := workspaceutil.ID(idx.workspaceRoot); canonicalWorkspace != "" {
+		if event.WorkspaceID == "" {
+			event.WorkspaceID = canonicalWorkspace
+		} else if event.WorkspaceID != canonicalWorkspace {
+			idx.logger.Warn().
+				Str("workspace_id", event.WorkspaceID).
+				Str("canonical_workspace_id", canonicalWorkspace).
+				Msg("overriding workspace id for symbol indexing")
+			event.WorkspaceID = canonicalWorkspace
+		}
 	}
 
 	result := &indexing.IndexerResult{
