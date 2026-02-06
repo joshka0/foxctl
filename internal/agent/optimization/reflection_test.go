@@ -76,6 +76,7 @@ func TestReflectionEngine_ReflectOnTrajectory(t *testing.T) {
 
 	if reflection == nil {
 		t.Fatal("expected reflection, got nil")
+		return
 	}
 
 	if reflection.TrajectoryID != inserted.ID {
@@ -411,6 +412,7 @@ func TestReflectionEngine_GenerateSummary(t *testing.T) {
 
 	if summary == nil {
 		t.Fatal("expected summary, got nil")
+		return
 	}
 
 	if summary.TotalTrajectories == 0 {

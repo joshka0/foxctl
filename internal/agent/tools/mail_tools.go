@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	dstools "github.com/XiaoConstantine/dspy-go/pkg/tools"
+	tooling "github.com/jkatigb/agentctl/internal/tooling"
 	models "github.com/XiaoConstantine/mcp-go/pkg/model"
 	"github.com/jkatigb/agentctl/internal/domain/agent"
 	errspkg "github.com/jkatigb/agentctl/internal/platform/errors"
@@ -14,7 +14,7 @@ import (
 // registerMailTools registers mailbox/communication tools.
 func (r *Registry) registerMailTools() error {
 	// mail.send - send a message to another actor
-	sendTool := dstools.NewFuncTool(
+	sendTool := tooling.NewFuncTool(
 		"mail.send",
 		"Send a message to another actor (agent, overseer, or human) via the mailbox.",
 		models.InputSchema{
@@ -56,7 +56,7 @@ func (r *Registry) registerMailTools() error {
 	}
 
 	// mail.inbox - check inbox for messages
-	inboxTool := dstools.NewFuncTool(
+	inboxTool := tooling.NewFuncTool(
 		"mail.inbox",
 		"Check inbox for messages addressed to this agent.",
 		models.InputSchema{
@@ -87,7 +87,7 @@ func (r *Registry) registerMailTools() error {
 	}
 
 	// mail.ack - acknowledge a message
-	ackTool := dstools.NewFuncTool(
+	ackTool := tooling.NewFuncTool(
 		"mail.ack",
 		"Acknowledge receipt of a message.",
 		models.InputSchema{
@@ -111,7 +111,7 @@ func (r *Registry) registerMailTools() error {
 	}
 
 	// mail.reserve - reserve files
-	reserveTool := dstools.NewFuncTool(
+	reserveTool := tooling.NewFuncTool(
 		"mail.reserve",
 		"Reserve files for exclusive or shared access.",
 		models.InputSchema{
@@ -143,7 +143,7 @@ func (r *Registry) registerMailTools() error {
 	}
 
 	// mail.release - release reservations
-	releaseTool := dstools.NewFuncTool(
+	releaseTool := tooling.NewFuncTool(
 		"mail.release",
 		"Release file reservations.",
 		models.InputSchema{

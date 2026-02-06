@@ -144,7 +144,7 @@ Long-lived agent process specification.
 ### Daemon Responsibilities
 
 - Poll mailbox queue for messages to agent namespace
-- Execute DSPy turns for `agent.ask` and `agent.cmd`
+- Execute LLMChatEngine turns for `agent.ask` and `agent.cmd`
 - Emit `agent.reply` messages back to callers
 - Maintain heartbeats and agent state
 

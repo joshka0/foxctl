@@ -298,6 +298,7 @@ func TestWFQSchedulerStats(t *testing.T) {
 
 	if ns1Stats == nil {
 		t.Fatal("expected ns1 stats")
+		return
 	}
 
 	if ns1Stats.Weight != 5 {

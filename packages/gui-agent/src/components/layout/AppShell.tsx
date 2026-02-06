@@ -7,7 +7,7 @@ import { useActivityStream } from '@/hooks/useActivityStream'
 import { useViewStore } from '@/stores/viewStore'
 import { PanelRightClose, PanelRightOpen } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import type { ViewType } from '@/App'
+import type { ViewType } from '@/stores/viewStore'
 
 interface AppShellProps {
   children: ReactNode
@@ -37,7 +37,7 @@ export function AppShell({ children, activeView, onViewChange }: AppShellProps) 
               variant="ghost"
               size="icon"
               onClick={() => setRightPanelOpen(!rightPanelOpen)}
-              title={rightPanelOpen ? 'Hide communication panel' : 'Show communication panel'}
+              title={rightPanelOpen ? 'Hide agent details panel' : 'Show agent details panel'}
             >
               {rightPanelOpen ? (
                 <PanelRightClose className="h-4 w-4" />
@@ -51,10 +51,7 @@ export function AppShell({ children, activeView, onViewChange }: AppShellProps) 
         {/* Content Area */}
         <div className="flex-1 flex overflow-hidden">
           {/* Main Panel */}
-          <main className={cn(
-            "flex-1 overflow-hidden",
-            rightPanelOpen && "mr-0"
-          )}>
+          <main className="flex-1 overflow-hidden">
             {children}
           </main>
 

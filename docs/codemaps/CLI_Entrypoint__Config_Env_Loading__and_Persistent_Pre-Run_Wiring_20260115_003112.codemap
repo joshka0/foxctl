@@ -18,7 +18,7 @@
       "locations": [
         {
           "id": "1a",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/cmd/agentctl/main.go",
+          "path": "cmd/agentctl/main.go",
           "lineNumber": 15,
           "lineContent": "config.LoadDotEnv()",
           "title": "First action: Load .env files",
@@ -26,7 +26,7 @@
         },
         {
           "id": "1b",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/platform/config/dotenv.go",
+          "path": "internal/platform/config/dotenv.go",
           "lineNumber": 48,
           "lineContent": "_ = godotenv.Load(envFiles[i])",
           "title": "Load .env files in reverse priority order",
@@ -34,7 +34,7 @@
         },
         {
           "id": "1c",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/cmd/agentctl/main.go",
+          "path": "cmd/agentctl/main.go",
           "lineNumber": 17,
           "lineContent": "if err := cmd.Execute(context.Background()); err != nil {",
           "title": "Execute Cobra root command",
@@ -42,7 +42,7 @@
         },
         {
           "id": "1d",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/cmd/agentctl/cmd/root.go",
+          "path": "cmd/agentctl/cmd/root.go",
           "lineNumber": 36,
           "lineContent": "cobra.OnInitialize(initConfig)",
           "title": "Register Cobra initialization callback",
@@ -50,14 +50,14 @@
         },
         {
           "id": "1e",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/cmd/agentctl/cmd/root.go",
+          "path": "cmd/agentctl/cmd/root.go",
           "lineNumber": 38,
           "lineContent": "rootCmd.PersistentPreRunE = func(cmd *cobra.Command, _ []string) error {",
           "title": "Register pre-run hook for all commands",
           "description": "Ensures config and logger are loaded into context before any command runs"
         }
       ],
-      "traceTextDiagram": "Binary Startup to Command Execution\n├── main() entrypoint \u003c-- /Users/jkatigbak/repos/personal/agentctl/cmd/agentctl/main.go:12\n│   ├── config.LoadDotEnv() \u003c-- 1a\n│   │   └── Load .env files (reverse order) \u003c-- 1b\n│   └── cmd.Execute(ctx) \u003c-- 1c\n│       └── Cobra command routing\n│           ├── init() registration \u003c-- /Users/jkatigbak/repos/personal/agentctl/cmd/agentctl/cmd/root.go:35\n│           │   ├── cobra.OnInitialize(initConfig) \u003c-- 1d\n│           │   └── rootCmd.PersistentPreRunE \u003c-- 1e\n│           └── Command execution\n│               ├── initConfig() runs first \u003c-- /Users/jkatigbak/repos/personal/agentctl/cmd/agentctl/cmd/root.go:62\n│               │   └── viper + .env setup \u003c-- /Users/jkatigbak/repos/personal/agentctl/cmd/agentctl/cmd/root.go:63\n│               └── PersistentPreRunE runs second \u003c-- /Users/jkatigbak/repos/personal/agentctl/cmd/agentctl/cmd/root.go:38\n│                   └── config.Load() + context wiring \u003c-- /Users/jkatigbak/repos/personal/agentctl/cmd/agentctl/cmd/root.go:47",
+      "traceTextDiagram": "Binary Startup to Command Execution\n├── main() entrypoint \u003c-- cmd/agentctl/main.go:12\n│   ├── config.LoadDotEnv() \u003c-- 1a\n│   │   └── Load .env files (reverse order) \u003c-- 1b\n│   └── cmd.Execute(ctx) \u003c-- 1c\n│       └── Cobra command routing\n│           ├── init() registration \u003c-- cmd/agentctl/cmd/root.go:35\n│           │   ├── cobra.OnInitialize(initConfig) \u003c-- 1d\n│           │   └── rootCmd.PersistentPreRunE \u003c-- 1e\n│           └── Command execution\n│               ├── initConfig() runs first \u003c-- cmd/agentctl/cmd/root.go:62\n│               │   └── viper + .env setup \u003c-- cmd/agentctl/cmd/root.go:63\n│               └── PersistentPreRunE runs second \u003c-- cmd/agentctl/cmd/root.go:38\n│                   └── config.Load() + context wiring \u003c-- cmd/agentctl/cmd/root.go:47",
       "traceGuide": "## Motivation\n\nThe `agentctl` CLI needs to bootstrap itself efficiently while supporting **layered configuration** from multiple sources. The problem: configuration can come from hardcoded defaults, YAML files, environment variables, and `.env` files—all with different precedence rules. Additionally, the CLI must **wire up shared resources** (config, logger) into context before any command runs, enabling downstream code to access them without explicit passing.\n\nThe bootstrap sequence solves this by establishing a **strict initialization order**: load `.env` files first [1a, 1b], then let Cobra trigger viper setup [1d], then materialize the full config and inject it into context [1e] before any command executes.\n\n## Details\n\n### Startup Sequence\n\nThe binary's `main()` function [1a] immediately calls `config.LoadDotEnv()` to populate environment variables from `.env` files in three locations: `~/.agentctl/.env` (global), git root `.env`, and `$PWD/.env` (highest priority) [1b]. This happens **before Cobra initialization** to ensure env vars are available when viper reads them.\n\nNext, `cmd.Execute()` [1c] hands control to Cobra, which triggers two initialization hooks registered in `init()` [1d, 1e]:\n\n1. **`cobra.OnInitialize(initConfig)`** [1d] runs first, setting up viper with the `AGENTCTL_` prefix and loading additional `.env` files by walking up to find `.git` directories\n2. **`rootCmd.PersistentPreRunE`** [1e] runs before every command, loading the full configuration and wiring it into context\n\n### Configuration Loading\n\nThe `PersistentPreRunE` hook checks if config is already in context (for testing), then calls `config.Load()` which applies configuration in layers: hardcoded defaults → YAML file (`~/.agentctl/config.yaml`) → environment variable overrides. The materialized config and a newly created logger are then stored in the command's context via `config.WithContext()` and `logging.WithContext()`.\n\n### Why This Order Matters\n\nLoading `.env` files **before** Cobra initialization ensures that environment variables like `AGENTCTL_HOME` or `TURSO_DATABASE_URL` are available when viper reads them. The `PersistentPreRunE` hook ensures **every command** gets a fully configured context, enabling lazy initialization of storage backends—they can call `config.MustFromContext()` to retrieve config only when needed, avoiding upfront connection overhead for commands that don't need storage."
     },
     {
@@ -67,7 +67,7 @@
       "locations": [
         {
           "id": "2a",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/cmd/agentctl/cmd/root.go",
+          "path": "cmd/agentctl/cmd/root.go",
           "lineNumber": 63,
           "lineContent": "viper.SetEnvPrefix(\"agentctl\")",
           "title": "Configure viper for AGENTCTL_* env vars",
@@ -75,7 +75,7 @@
         },
         {
           "id": "2b",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/cmd/agentctl/cmd/root.go",
+          "path": "cmd/agentctl/cmd/root.go",
           "lineNumber": 64,
           "lineContent": "viper.AutomaticEnv()",
           "title": "Enable automatic env var reading",
@@ -83,7 +83,7 @@
         },
         {
           "id": "2c",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/cmd/agentctl/cmd/root.go",
+          "path": "cmd/agentctl/cmd/root.go",
           "lineNumber": 71,
           "lineContent": "_ = godotenv.Load(filepath.Join(home, \".agentctl\", \".env\"))",
           "title": "Load global .env file",
@@ -91,7 +91,7 @@
         },
         {
           "id": "2d",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/cmd/agentctl/cmd/root.go",
+          "path": "cmd/agentctl/cmd/root.go",
           "lineNumber": 79,
           "lineContent": "_ = godotenv.Load(filepath.Join(dir, \".env\"))",
           "title": "Load git root .env file",
@@ -99,14 +99,14 @@
         },
         {
           "id": "2e",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/cmd/agentctl/cmd/root.go",
+          "path": "cmd/agentctl/cmd/root.go",
           "lineNumber": 86,
           "lineContent": "_ = godotenv.Load()",
           "title": "Load current directory .env (highest priority)",
           "description": "Loads ./.env which overrides all previous .env files"
         }
       ],
-      "traceTextDiagram": "Cobra Initialization Hooks: Viper + .env Loading\n├── cobra.OnInitialize(initConfig) registration \u003c-- /Users/jkatigbak/repos/personal/agentctl/cmd/agentctl/cmd/root.go:36\n│   └── initConfig() callback execution \u003c-- /Users/jkatigbak/repos/personal/agentctl/cmd/agentctl/cmd/root.go:62\n│       ├── viper.SetEnvPrefix(\"agentctl\") \u003c-- 2a\n│       ├── viper.AutomaticEnv() \u003c-- 2b\n│       ├── Load ~/.agentctl/.env (global) \u003c-- 2c\n│       ├── Walk up to find .git directory \u003c-- /Users/jkatigbak/repos/personal/agentctl/cmd/agentctl/cmd/root.go:77\n│       │   └── Load {git_root}/.env \u003c-- 2d\n│       └── Load ./.env (highest priority) \u003c-- 2e\n└── Result: Environment variables populated\n    └── Available to config.Load() via viper",
+      "traceTextDiagram": "Cobra Initialization Hooks: Viper + .env Loading\n├── cobra.OnInitialize(initConfig) registration \u003c-- cmd/agentctl/cmd/root.go:36\n│   └── initConfig() callback execution \u003c-- cmd/agentctl/cmd/root.go:62\n│       ├── viper.SetEnvPrefix(\"agentctl\") \u003c-- 2a\n│       ├── viper.AutomaticEnv() \u003c-- 2b\n│       ├── Load ~/.agentctl/.env (global) \u003c-- 2c\n│       ├── Walk up to find .git directory \u003c-- cmd/agentctl/cmd/root.go:77\n│       │   └── Load {git_root}/.env \u003c-- 2d\n│       └── Load ./.env (highest priority) \u003c-- 2e\n└── Result: Environment variables populated\n    └── Available to config.Load() via viper",
       "traceGuide": "## Motivation\n\nThe CLI needs configuration from multiple sources with clear precedence: **hardcoded defaults \u003c YAML config file \u003c environment variables \u003c .env files**. The challenge is that .env files themselves have a hierarchy (global → git-root → current-directory), and these must be loaded **before** the main config system runs, since the config system relies on environment variables being present.\n\nAdditionally, the CLI uses both **godotenv** (for .env files) and **viper** (for YAML + env vars), requiring careful orchestration to ensure the right load order and precedence.\n\n## Details\n\n### Two-Phase Environment Loading\n\nThe system loads .env files in **two separate phases**:\n\n1. **Early phase** [1b]: `config.LoadDotEnv()` runs in `main()` before Cobra executes, loading .env files in reverse priority order so later files override earlier ones\n2. **Cobra phase** [2c, 2d, 2e]: `initConfig()` callback loads .env files again using godotenv directly, this time in the correct priority order\n\nThis duplication exists because Cobra's `OnInitialize` hook [2a] runs after command parsing but before command execution, providing a second opportunity to load environment variables.\n\n### Viper Configuration\n\nThe `initConfig()` callback [2a] configures viper to automatically read `AGENTCTL_*` environment variables [2b]. This means any environment variable like `AGENTCTL_DATABASE_DRIVER` will be accessible as `database.driver` in the config system, with dots converted to underscores.\n\n### .env File Precedence\n\nThe system loads three .env files in order [2c, 2d, 2e]:\n\n1. **`~/.agentctl/.env`**: Global defaults for all projects\n2. **`{git_root}/.env`**: Project-specific settings (found by walking up directories [2d] until `.git` is found)\n3. **`./.env`**: Current directory overrides (highest priority)\n\nLater files override earlier ones because `godotenv.Load()` does **not** overwrite existing environment variables—it only sets variables that aren't already present. By loading in reverse order, the highest-priority file's values are set first and protected from being overwritten.\n\n### Why Both godotenv and Viper?\n\n- **godotenv**: Loads `.env` files into `os.Environ()`, making them available to all code\n- **viper**: Reads environment variables (including those set by godotenv) and merges them with YAML config and defaults\n\nThis separation allows the config system to have a clean layered architecture where environment variables (from any source) are just another input to the final configuration."
     },
     {
@@ -116,7 +116,7 @@
       "locations": [
         {
           "id": "3a",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/platform/config/config.go",
+          "path": "internal/platform/config/config.go",
           "lineNumber": 257,
           "lineContent": "v := newConfiguredViper()",
           "title": "Create viper instance with env bindings",
@@ -124,7 +124,7 @@
         },
         {
           "id": "3b",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/platform/config/config.go",
+          "path": "internal/platform/config/config.go",
           "lineNumber": 259,
           "lineContent": "applyDefaults(v, defaultHome)",
           "title": "Apply hardcoded defaults",
@@ -132,7 +132,7 @@
         },
         {
           "id": "3c",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/platform/config/config.go",
+          "path": "internal/platform/config/config.go",
           "lineNumber": 291,
           "lineContent": "v.SetDefault(\"home\", defaultHome)",
           "title": "Set default home directory",
@@ -140,7 +140,7 @@
         },
         {
           "id": "3d",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/platform/config/config.go",
+          "path": "internal/platform/config/config.go",
           "lineNumber": 314,
           "lineContent": "v.SetDefault(\"database.driver\", \"libsql\")",
           "title": "Default to libsql driver",
@@ -148,7 +148,7 @@
         },
         {
           "id": "3e",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/platform/config/config.go",
+          "path": "internal/platform/config/config.go",
           "lineNumber": 334,
           "lineContent": "if err := v.ReadInConfig(); err != nil {",
           "title": "Read YAML config file",
@@ -156,7 +156,7 @@
         },
         {
           "id": "3f",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/platform/config/config.go",
+          "path": "internal/platform/config/config.go",
           "lineNumber": 345,
           "lineContent": "if err := v.Unmarshal(\u0026cfg); err != nil {",
           "title": "Unmarshal into Config struct",
@@ -164,14 +164,14 @@
         },
         {
           "id": "3g",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/platform/config/config.go",
+          "path": "internal/platform/config/config.go",
           "lineNumber": 392,
           "lineContent": "if url := os.Getenv(\"TURSO_DATABASE_URL\"); url != \"\" \u0026\u0026 cfg.Database.Turso.URL == \"\" {",
           "title": "Apply Turso env var overrides",
           "description": "Allows standard TURSO_* env vars to override config file settings"
         }
       ],
-      "traceTextDiagram": "config.Load() - Configuration Materialization \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/platform/config/config.go:249\n├── parseOptions() - handle WithConfigFile \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/platform/config/config.go:250\n├── userHomeDir() - get user home directory \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/platform/config/config.go:252\n├── newConfiguredViper() \u003c-- 3a\n│   ├── viper.New() \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/platform/config/config.go:282\n│   ├── SetEnvPrefix(\"AGENTCTL\") \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/platform/config/config.go:284\n│   └── AutomaticEnv() \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/platform/config/config.go:286\n├── applyDefaults(v, defaultHome) \u003c-- 3b\n│   ├── SetDefault(\"home\", defaultHome) \u003c-- 3c\n│   ├── SetDefault(\"paths.*\", ...) \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/platform/config/config.go:294\n│   ├── SetDefault(\"database.driver\", \"libsql\") \u003c-- 3d\n│   ├── SetDefault(\"logging.*\", ...) \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/platform/config/config.go:304\n│   └── SetDefault(\"cas.*\", ...) \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/platform/config/config.go:320\n├── configureConfigFile() - set config path \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/platform/config/config.go:260\n├── readConfig() - v.ReadInConfig() \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/platform/config/config.go:261\n│   └── if err := v.ReadInConfig() \u003c-- 3e\n├── decodeConfig(v) \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/platform/config/config.go:265\n│   ├── if err := v.Unmarshal(\u0026cfg) \u003c-- 3f\n│   └── parsePluginPathList() \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/platform/config/config.go:348\n└── finalizeConfig(cfg, home) \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/platform/config/config.go:270\n    ├── resolvePath() for all paths \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/platform/config/config.go:354\n    ├── normalize durations/defaults \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/platform/config/config.go:372\n    └── Apply env var overrides\n        └── TURSO_DATABASE_URL override \u003c-- 3g",
+      "traceTextDiagram": "config.Load() - Configuration Materialization \u003c-- internal/platform/config/config.go:249\n├── parseOptions() - handle WithConfigFile \u003c-- internal/platform/config/config.go:250\n├── userHomeDir() - get user home directory \u003c-- internal/platform/config/config.go:252\n├── newConfiguredViper() \u003c-- 3a\n│   ├── viper.New() \u003c-- internal/platform/config/config.go:282\n│   ├── SetEnvPrefix(\"AGENTCTL\") \u003c-- internal/platform/config/config.go:284\n│   └── AutomaticEnv() \u003c-- internal/platform/config/config.go:286\n├── applyDefaults(v, defaultHome) \u003c-- 3b\n│   ├── SetDefault(\"home\", defaultHome) \u003c-- 3c\n│   ├── SetDefault(\"paths.*\", ...) \u003c-- internal/platform/config/config.go:294\n│   ├── SetDefault(\"database.driver\", \"libsql\") \u003c-- 3d\n│   ├── SetDefault(\"logging.*\", ...) \u003c-- internal/platform/config/config.go:304\n│   └── SetDefault(\"cas.*\", ...) \u003c-- internal/platform/config/config.go:320\n├── configureConfigFile() - set config path \u003c-- internal/platform/config/config.go:260\n├── readConfig() - v.ReadInConfig() \u003c-- internal/platform/config/config.go:261\n│   └── if err := v.ReadInConfig() \u003c-- 3e\n├── decodeConfig(v) \u003c-- internal/platform/config/config.go:265\n│   ├── if err := v.Unmarshal(\u0026cfg) \u003c-- 3f\n│   └── parsePluginPathList() \u003c-- internal/platform/config/config.go:348\n└── finalizeConfig(cfg, home) \u003c-- internal/platform/config/config.go:270\n    ├── resolvePath() for all paths \u003c-- internal/platform/config/config.go:354\n    ├── normalize durations/defaults \u003c-- internal/platform/config/config.go:372\n    └── Apply env var overrides\n        └── TURSO_DATABASE_URL override \u003c-- 3g",
       "traceGuide": "## Motivation\n\nThe `agentctl` CLI needs to support **multiple configuration sources** with clear precedence rules: hardcoded defaults, YAML config files, and environment variables. The challenge is that configuration must be **materialized once** at startup, combining all these layers in the correct order, while supporting both explicit config file paths (`--config`) and automatic discovery (`~/.agentctl/config.yaml`). The system must also handle **missing config files gracefully** (falling back to defaults) while still allowing env vars to override any setting [3f].\n\n## Details\n\n### Configuration Loading Pipeline\n\nThe `config.Load()` function [3a] orchestrates a **five-stage pipeline** that builds the final configuration:\n\n1. **Viper Setup** [3a]: Creates a viper instance configured with `AGENTCTL_` prefix and automatic environment variable binding with dot-to-underscore conversion (e.g., `database.driver` → `AGENTCTL_DATABASE_DRIVER`)\n\n2. **Apply Defaults** [3b]: Sets hardcoded defaults for all configuration fields including home directory (`~/.agentctl`) [3c], database driver (`libsql` for local-first) [3d], logging settings, and CAS policies\n\n3. **Read YAML** [3e]: Attempts to read `~/.agentctl/config.yaml` (or path from `--config` flag). If the file doesn't exist, this step is **silently skipped** - the system continues with defaults\n\n4. **Unmarshal to Struct** [3f]: Viper's merged configuration (defaults + YAML + env vars) is unmarshaled into a typed `Config` struct. At this point, **environment variables automatically override** both defaults and YAML values\n\n5. **Finalize** [3g]: Post-processing step that resolves relative paths, normalizes durations, and applies special env var overrides like `TURSO_DATABASE_URL` for compatibility with Turso's standard environment variables\n\n### Key Design Decisions\n\n**Layered precedence**: Environment variables have the **highest priority**, followed by YAML config, then hardcoded defaults. This allows production deployments to override config files via env vars without modifying files.\n\n**Graceful degradation**: Missing config files are not errors - the system falls back to sensible defaults. This makes `agentctl` work out-of-the-box without requiring configuration.\n\n**Path resolution**: All paths support `~` expansion and relative paths (resolved relative to `~/.agentctl`), making configs portable across machines."
     },
     {
@@ -181,7 +181,7 @@
       "locations": [
         {
           "id": "4a",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/cmd/agentctl/cmd/root.go",
+          "path": "cmd/agentctl/cmd/root.go",
           "lineNumber": 39,
           "lineContent": "if _, ok := config.FromContext(cmd.Context()); ok {",
           "title": "Check if config already in context",
@@ -189,7 +189,7 @@
         },
         {
           "id": "4b",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/cmd/agentctl/cmd/root.go",
+          "path": "cmd/agentctl/cmd/root.go",
           "lineNumber": 47,
           "lineContent": "cfg, err := config.Load(cmd.Context(), opts...)",
           "title": "Load configuration",
@@ -197,7 +197,7 @@
         },
         {
           "id": "4c",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/cmd/agentctl/cmd/root.go",
+          "path": "cmd/agentctl/cmd/root.go",
           "lineNumber": 51,
           "lineContent": "logger := logging.New(logging.Config{",
           "title": "Create logger from config",
@@ -205,7 +205,7 @@
         },
         {
           "id": "4d",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/cmd/agentctl/cmd/root.go",
+          "path": "cmd/agentctl/cmd/root.go",
           "lineNumber": 55,
           "lineContent": "ctx := config.WithContext(cmd.Context(), cfg)",
           "title": "Store config in context",
@@ -213,7 +213,7 @@
         },
         {
           "id": "4e",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/cmd/agentctl/cmd/root.go",
+          "path": "cmd/agentctl/cmd/root.go",
           "lineNumber": 56,
           "lineContent": "ctx = logging.WithContext(ctx, logger)",
           "title": "Store logger in context",
@@ -221,14 +221,14 @@
         },
         {
           "id": "4f",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/cmd/agentctl/cmd/root.go",
+          "path": "cmd/agentctl/cmd/root.go",
           "lineNumber": 57,
           "lineContent": "cmd.SetContext(ctx)",
           "title": "Update command context",
           "description": "Replaces command's context with enriched version containing config and logger"
         }
       ],
-      "traceTextDiagram": "Cobra Command Execution Flow\n└── rootCmd.Execute() \u003c-- /Users/jkatigbak/repos/personal/agentctl/cmd/agentctl/cmd/root.go:31\n    └── Cobra framework invokes hooks\n        ├── cobra.OnInitialize callbacks\n        │   └── initConfig() sets up viper \u003c-- /Users/jkatigbak/repos/personal/agentctl/cmd/agentctl/cmd/root.go:62\n        │       └── (loads .env files - trace 2)\n        └── rootCmd.PersistentPreRunE hook \u003c-- /Users/jkatigbak/repos/personal/agentctl/cmd/agentctl/cmd/root.go:38\n            ├── Check if config exists \u003c-- 4a\n            ├── config.Load() \u003c-- 4b\n            │   └── (materializes config - trace 3)\n            ├── logging.New() \u003c-- 4c\n            │   └── Creates zerolog.Logger \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/platform/logging/logging.go:82\n            ├── config.WithContext() \u003c-- 4d\n            │   └── Stores cfg in context.Value \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/platform/config/context.go:9\n            ├── logging.WithContext() \u003c-- 4e\n            │   └── Stores logger in context.Value \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/platform/logging/logging.go:104\n            └── cmd.SetContext(ctx) \u003c-- 4f\n                └── Updates command's context",
+      "traceTextDiagram": "Cobra Command Execution Flow\n└── rootCmd.Execute() \u003c-- cmd/agentctl/cmd/root.go:31\n    └── Cobra framework invokes hooks\n        ├── cobra.OnInitialize callbacks\n        │   └── initConfig() sets up viper \u003c-- cmd/agentctl/cmd/root.go:62\n        │       └── (loads .env files - trace 2)\n        └── rootCmd.PersistentPreRunE hook \u003c-- cmd/agentctl/cmd/root.go:38\n            ├── Check if config exists \u003c-- 4a\n            ├── config.Load() \u003c-- 4b\n            │   └── (materializes config - trace 3)\n            ├── logging.New() \u003c-- 4c\n            │   └── Creates zerolog.Logger \u003c-- internal/platform/logging/logging.go:82\n            ├── config.WithContext() \u003c-- 4d\n            │   └── Stores cfg in context.Value \u003c-- internal/platform/config/context.go:9\n            ├── logging.WithContext() \u003c-- 4e\n            │   └── Stores logger in context.Value \u003c-- internal/platform/logging/logging.go:104\n            └── cmd.SetContext(ctx) \u003c-- 4f\n                └── Updates command's context",
       "traceGuide": "## Motivation\n\nEvery CLI command needs access to **configuration** (database paths, logging settings, API credentials) and a **logger** before it can do useful work. Loading these dependencies naively on every command invocation would be wasteful—you'd parse YAML files, merge environment variables, and construct loggers repeatedly. Instead, agentctl uses **Cobra's lifecycle hooks** to load configuration and logger **exactly once per command execution** and inject them into a shared context that all downstream code can access [4a, 4b, 4c].\n\nThis solves two problems:\n1. **Avoid redundant initialization**: Config is loaded once in `PersistentPreRunE`, not in every subcommand\n2. **Dependency injection without globals**: Config and logger flow through `context.Context` rather than package-level variables\n\n## Details\n\n### The Hook Registration\n\nDuring CLI initialization, `rootCmd.PersistentPreRunE` is registered as a hook that runs **before every command** [4f is called from root.go:38]. This hook is the single chokepoint where configuration and logging are wired up.\n\n### The Execution Flow\n\nWhen a user runs `agentctl run my-skill`:\n\n1. **Check for existing config** [4a]: If config is already in context (e.g., from tests or parent commands), skip loading to avoid redundant work\n2. **Load configuration** [4b]: Call `config.Load()` which merges defaults, YAML files, and environment variables into a typed `Config` struct\n3. **Create logger** [4c]: Construct a `zerolog.Logger` using the log level and format from the loaded config\n4. **Inject into context** [4d, 4e]: Store both config and logger in `context.Context` using type-safe keys\n5. **Update command context** [4f]: Replace the command's context with the enriched version\n\n### Context Retrieval Pattern\n\nDownstream code retrieves dependencies using **context accessor functions**:\n- `config.MustFromContext(ctx)` extracts the config [4d stores it at context.go:9]\n- `logging.FromContext(ctx)` extracts the logger [4e stores it at logging.go:104]\n\nThis pattern ensures **no global state** and makes testing straightforward—tests can inject mock configs by calling `config.WithContext()` before executing commands.\n\n### Why PersistentPreRunE?\n\nThe \"Persistent\" prefix means this hook runs for **all subcommands** (run, daemon, jobs, etc.). The \"E\" suffix means it can return errors, allowing config loading failures to abort command execution cleanly before any business logic runs."
     },
     {
@@ -238,7 +238,7 @@
       "locations": [
         {
           "id": "5a",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/cmd/agentctl/cmd/run.go",
+          "path": "cmd/agentctl/cmd/run.go",
           "lineNumber": 61,
           "lineContent": "cfg := config.MustFromContext(cmd.Context())",
           "title": "Retrieve config from context",
@@ -246,7 +246,7 @@
         },
         {
           "id": "5b",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/cmd/agentctl/cmd/run.go",
+          "path": "cmd/agentctl/cmd/run.go",
           "lineNumber": 105,
           "lineContent": "executor := runservice.NewExecutor(ctx, cfg, handle, stdout, cmd.ErrOrStderr(), opts)",
           "title": "Create executor with config",
@@ -254,7 +254,7 @@
         },
         {
           "id": "5c",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/runservice/jobs.go",
+          "path": "internal/runservice/jobs.go",
           "lineNumber": 18,
           "lineContent": "store, err := jobs.Open(e.ctx, e.cfg.Paths.Jobs)",
           "title": "Lazy-open job store on first use",
@@ -262,7 +262,7 @@
         },
         {
           "id": "5d",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/storage/jobs/store.go",
+          "path": "internal/storage/jobs/store.go",
           "lineNumber": 38,
           "lineContent": "p, err := persist.Open(ctx, root)",
           "title": "Open persistent job storage",
@@ -270,15 +270,15 @@
         },
         {
           "id": "5e",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/storage/jobs/persist/store.go",
+          "path": "internal/storage/jobs/persist/store.go",
           "lineNumber": 45,
           "lineContent": "db, err := sqliteutil.OpenDB(ctx, dbPath, migrate)",
           "title": "Open SQLite database with migrations",
           "description": "Creates parent dirs, opens DB, enables WAL, runs migrations"
         }
       ],
-      "traceTextDiagram": "agentctl run command execution\n├── CLI command handler\n│   └── executeRunCommand() \u003c-- 5a\n│       └── config.MustFromContext() \u003c-- /Users/jkatigbak/repos/personal/agentctl/cmd/agentctl/cmd/run.go:61\n├── Executor creation\n│   └── runservice.NewExecutor() \u003c-- 5b\n│       └── stores executor with cfg reference \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/runservice/executor.go:36\n├── Job preparation (lazy initialization)\n│   └── PrepareJob() \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/runservice/jobs.go:35\n│       └── ensureJobStore() \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/runservice/jobs.go:14\n│           └── jobs.Open() \u003c-- 5c\n├── Storage layer initialization\n│   └── jobs/store.Open()\n│       └── persist.Open() \u003c-- 5d\n├── Database connection\n│   └── persist/store.Open()\n│       └── sqliteutil.OpenDB() \u003c-- 5e\n│           ├── os.MkdirAll(dir) \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/sqliteutil/sqliteutil.go:26\n│           ├── sql.Open(\"sqlite\", path) \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/sqliteutil/sqliteutil.go:29\n│           ├── PRAGMA journal_mode=WAL \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/sqliteutil/sqliteutil.go:46\n│           └── migrate(ctx, db) \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/sqliteutil/sqliteutil.go:56\n└── Ready for skill execution\n    └── jobStore.ExecutePreparedSkill() \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/runservice/jobs.go:151",
-      "traceGuide": "## Motivation\n\nWhen you run `agentctl run \u003cskill\u003e`, the CLI needs to execute the skill and persist its result as a job. However, **opening database connections is expensive** (~5-10ms overhead), and commands should start fast. The solution: **lazy initialization**. The executor is created immediately with just configuration [5b], but the job store database connection isn't opened until the first moment it's actually needed [5c].\n\nThis pattern appears throughout agentctl: configuration is loaded once and stored in context [5a], then storage backends are opened on-demand only when a command requires them. This keeps fast commands (like `agentctl --help`) instant while allowing data-heavy commands to pay the initialization cost only when necessary.\n\n## Details\n\n**Configuration retrieval**: Commands extract the pre-loaded config from context using `config.MustFromContext()` [5a]. This config was already materialized during the `PersistentPreRunE` hook before the command even started.\n\n**Executor construction**: `runservice.NewExecutor()` [5b] creates an executor that holds the config and skill metadata but **doesn't open any databases yet**. The `jobStore` field starts as `nil` [/Users/jkatigbak/repos/personal/agentctl/internal/runservice/executor.go:36].\n\n**Lazy store opening**: When `PrepareJob()` needs to persist a job [/Users/jkatigbak/repos/personal/agentctl/internal/runservice/jobs.go:35], it calls `ensureJobStore()` [/Users/jkatigbak/repos/personal/agentctl/internal/runservice/jobs.go:14] which checks if the store is already open. Only on first access does it call `jobs.Open()` [5c].\n\n**Storage layer delegation**: `jobs.Open()` [5c] delegates to `persist.Open()` [5d], which handles the actual database connection. This separation allows the jobs package to focus on business logic while the persist layer handles storage details.\n\n**Database initialization**: `sqliteutil.OpenDB()` [5e] performs the full database setup sequence: creates parent directories, opens the SQLite connection, enables WAL journaling for concurrency, and runs schema migrations. This happens **once per command execution**, not once per operation.\n\n**Cleanup**: The executor's `Close()` method ensures the job store is properly closed when the command completes, preventing connection leaks."
+      "traceTextDiagram": "agentctl run command execution\n├── CLI command handler\n│   └── executeRunCommand() \u003c-- 5a\n│       └── config.MustFromContext() \u003c-- cmd/agentctl/cmd/run.go:61\n├── Executor creation\n│   └── runservice.NewExecutor() \u003c-- 5b\n│       └── stores executor with cfg reference \u003c-- internal/runservice/executor.go:36\n├── Job preparation (lazy initialization)\n│   └── PrepareJob() \u003c-- internal/runservice/jobs.go:35\n│       └── ensureJobStore() \u003c-- internal/runservice/jobs.go:14\n│           └── jobs.Open() \u003c-- 5c\n├── Storage layer initialization\n│   └── jobs/store.Open()\n│       └── persist.Open() \u003c-- 5d\n├── Database connection\n│   └── persist/store.Open()\n│       └── sqliteutil.OpenDB() \u003c-- 5e\n│           ├── os.MkdirAll(dir) \u003c-- internal/storage/sqliteutil/sqliteutil.go:26\n│           ├── sql.Open(\"sqlite\", path) \u003c-- internal/storage/sqliteutil/sqliteutil.go:29\n│           ├── PRAGMA journal_mode=WAL \u003c-- internal/storage/sqliteutil/sqliteutil.go:46\n│           └── migrate(ctx, db) \u003c-- internal/storage/sqliteutil/sqliteutil.go:56\n└── Ready for skill execution\n    └── jobStore.ExecutePreparedSkill() \u003c-- internal/runservice/jobs.go:151",
+      "traceGuide": "## Motivation\n\nWhen you run `agentctl run \u003cskill\u003e`, the CLI needs to execute the skill and persist its result as a job. However, **opening database connections is expensive** (~5-10ms overhead), and commands should start fast. The solution: **lazy initialization**. The executor is created immediately with just configuration [5b], but the job store database connection isn't opened until the first moment it's actually needed [5c].\n\nThis pattern appears throughout agentctl: configuration is loaded once and stored in context [5a], then storage backends are opened on-demand only when a command requires them. This keeps fast commands (like `agentctl --help`) instant while allowing data-heavy commands to pay the initialization cost only when necessary.\n\n## Details\n\n**Configuration retrieval**: Commands extract the pre-loaded config from context using `config.MustFromContext()` [5a]. This config was already materialized during the `PersistentPreRunE` hook before the command even started.\n\n**Executor construction**: `runservice.NewExecutor()` [5b] creates an executor that holds the config and skill metadata but **doesn't open any databases yet**. The `jobStore` field starts as `nil` [internal/runservice/executor.go:36].\n\n**Lazy store opening**: When `PrepareJob()` needs to persist a job [internal/runservice/jobs.go:35], it calls `ensureJobStore()` [internal/runservice/jobs.go:14] which checks if the store is already open. Only on first access does it call `jobs.Open()` [5c].\n\n**Storage layer delegation**: `jobs.Open()` [5c] delegates to `persist.Open()` [5d], which handles the actual database connection. This separation allows the jobs package to focus on business logic while the persist layer handles storage details.\n\n**Database initialization**: `sqliteutil.OpenDB()` [5e] performs the full database setup sequence: creates parent directories, opens the SQLite connection, enables WAL journaling for concurrency, and runs schema migrations. This happens **once per command execution**, not once per operation.\n\n**Cleanup**: The executor's `Close()` method ensures the job store is properly closed when the command completes, preventing connection leaks."
     },
     {
       "id": "6",
@@ -287,7 +287,7 @@
       "locations": [
         {
           "id": "6a",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/storage/sqliteutil/sqliteutil.go",
+          "path": "internal/storage/sqliteutil/sqliteutil.go",
           "lineNumber": 29,
           "lineContent": "db, err := sql.Open(\"sqlite\", path)",
           "title": "Open SQLite database connection",
@@ -295,7 +295,7 @@
         },
         {
           "id": "6b",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/storage/sqliteutil/sqliteutil.go",
+          "path": "internal/storage/sqliteutil/sqliteutil.go",
           "lineNumber": 46,
           "lineContent": "if _, err := db.ExecContext(ctx, `PRAGMA journal_mode=WAL;`); err != nil {",
           "title": "Enable WAL journaling",
@@ -303,7 +303,7 @@
         },
         {
           "id": "6c",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/storage/sqliteutil/sqliteutil.go",
+          "path": "internal/storage/sqliteutil/sqliteutil.go",
           "lineNumber": 56,
           "lineContent": "if err := migrate(ctx, db); err != nil {",
           "title": "Run database migrations",
@@ -311,7 +311,7 @@
         },
         {
           "id": "6d",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/storage/dbdriver/config_loader.go",
+          "path": "internal/storage/dbdriver/config_loader.go",
           "lineNumber": 46,
           "lineContent": "driver := os.Getenv(driverEnv)",
           "title": "Check for driver override env var",
@@ -319,14 +319,14 @@
         },
         {
           "id": "6e",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/storage/dbdriver/driver.go",
+          "path": "internal/storage/dbdriver/driver.go",
           "lineNumber": 96,
           "lineContent": "switch cfg.Driver {",
           "title": "Route to driver-specific opener",
           "description": "Dispatches to openSQLite, openLibSQL, or openTurso based on config"
         }
       ],
-      "traceTextDiagram": "Database Storage Layer\n├── SQLite Direct Path\n│   ├── sqliteutil.OpenDB() entry \u003c-- 6a\n│   │   ├── Create parent directories \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/sqliteutil/sqliteutil.go:26\n│   │   ├── sql.Open(\"sqlite\", path) \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/sqliteutil/sqliteutil.go:29\n│   │   ├── Set busy_timeout pragma \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/sqliteutil/sqliteutil.go:34\n│   │   ├── Enable WAL if not already on \u003c-- 6b\n│   │   ├── Enable foreign_keys pragma \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/sqliteutil/sqliteutil.go:51\n│   │   └── Run migrations \u003c-- 6c\n│   └── Returns *sql.DB \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/sqliteutil/sqliteutil.go:61\n│\n└── Driver Abstraction Path\n    ├── ConfigLoader.loadConfig() \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/dbdriver/config_loader.go:42\n    │   ├── Read AGENTCTL_*_DB_DRIVER env \u003c-- 6d\n    │   └── Returns Config with driver type\n    │\n    └── dbdriver.OpenDB() \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/dbdriver/driver.go:91\n        └── Switch on cfg.Driver \u003c-- 6e\n            ├── case DriverSQLite → openSQLite() \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/dbdriver/driver.go:98\n            ├── case DriverLibSQL → openLibSQL() \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/dbdriver/driver.go:100\n            └── case DriverTurso → openTurso() \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/dbdriver/driver.go:102",
+      "traceTextDiagram": "Database Storage Layer\n├── SQLite Direct Path\n│   ├── sqliteutil.OpenDB() entry \u003c-- 6a\n│   │   ├── Create parent directories \u003c-- internal/storage/sqliteutil/sqliteutil.go:26\n│   │   ├── sql.Open(\"sqlite\", path) \u003c-- internal/storage/sqliteutil/sqliteutil.go:29\n│   │   ├── Set busy_timeout pragma \u003c-- internal/storage/sqliteutil/sqliteutil.go:34\n│   │   ├── Enable WAL if not already on \u003c-- 6b\n│   │   ├── Enable foreign_keys pragma \u003c-- internal/storage/sqliteutil/sqliteutil.go:51\n│   │   └── Run migrations \u003c-- 6c\n│   └── Returns *sql.DB \u003c-- internal/storage/sqliteutil/sqliteutil.go:61\n│\n└── Driver Abstraction Path\n    ├── ConfigLoader.loadConfig() \u003c-- internal/storage/dbdriver/config_loader.go:42\n    │   ├── Read AGENTCTL_*_DB_DRIVER env \u003c-- 6d\n    │   └── Returns Config with driver type\n    │\n    └── dbdriver.OpenDB() \u003c-- internal/storage/dbdriver/driver.go:91\n        └── Switch on cfg.Driver \u003c-- 6e\n            ├── case DriverSQLite → openSQLite() \u003c-- internal/storage/dbdriver/driver.go:98\n            ├── case DriverLibSQL → openLibSQL() \u003c-- internal/storage/dbdriver/driver.go:100\n            └── case DriverTurso → openTurso() \u003c-- internal/storage/dbdriver/driver.go:102",
       "traceGuide": "## Motivation\n\nagentctl needs to support **three different database backends**: standard SQLite for simple local storage, libSQL for local-first with vector search capabilities, and Turso for cloud-replicated databases. The challenge is that storage layers (jobs, cache, memory) need to open databases without knowing which backend is configured, and users need to switch backends via **environment variables** without code changes [6d].\n\nThe system solves this with a **two-path architecture**: a direct SQLite path for backwards compatibility [6a], and a driver abstraction layer that routes to the appropriate backend based on configuration [6e].\n\n## Details\n\n### Direct SQLite Path\n\nThe `sqliteutil.OpenDB()` function [6a] provides the traditional path for opening SQLite databases. It handles the complete setup sequence: creating parent directories, opening the connection, configuring **WAL mode** for better concurrency [6b], enabling foreign key constraints, and running schema migrations [6c]. This path is used by most storage backends (jobs, agents, trajectory, etc.) that don't need driver abstraction.\n\n### Driver Abstraction Layer\n\nThe `ConfigLoader` reads environment variables like `AGENTCTL_CACHE_DB_DRIVER` [6d] to determine which backend to use. It defaults to SQLite if not specified. The `dbdriver.OpenDB()` function [6e] then dispatches to driver-specific openers: `openSQLite()` for standard SQLite, `openLibSQL()` for local libSQL with optional sync, or `openTurso()` for cloud-replicated databases.\n\n### Configuration Priority\n\nThe system uses a **layered configuration approach**: hardcoded defaults (libsql) → YAML config file → environment variable overrides. This allows users to set `AGENTCTL_MEMORY_DB_DRIVER=turso` to switch the memory database to Turso while keeping other databases on SQLite, without editing any config files.\n\n### WAL Mode\n\nSQLite's Write-Ahead Logging [6b] is critical for agentctl because **multiple concurrent processes** (parallel git hooks, daemon + CLI) need to access the same database. WAL allows readers to proceed without blocking writers, preventing the \"database is locked\" errors that would otherwise occur during concurrent skill execution."
     },
     {
@@ -336,7 +336,7 @@
       "locations": [
         {
           "id": "7a",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/cmd/agentctl/cmd/daemon.go",
+          "path": "cmd/agentctl/cmd/daemon.go",
           "lineNumber": 133,
           "lineContent": "cfg, err = config.Load(ctx)",
           "title": "Load config in daemon start",
@@ -344,7 +344,7 @@
         },
         {
           "id": "7b",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/daemon/service.go",
+          "path": "internal/daemon/service.go",
           "lineNumber": 67,
           "lineContent": "pool := sqliteutil.NewPool()",
           "title": "Create shared connection pool",
@@ -352,7 +352,7 @@
         },
         {
           "id": "7c",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/daemon/service.go",
+          "path": "internal/daemon/service.go",
           "lineNumber": 68,
           "lineContent": "sqliteutil.SetGlobalPool(pool)",
           "title": "Set global pool for reuse",
@@ -360,7 +360,7 @@
         },
         {
           "id": "7d",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/daemon/service.go",
+          "path": "internal/daemon/service.go",
           "lineNumber": 100,
           "lineContent": "listener, err := net.Listen(\"unix\", socketPath)",
           "title": "Create Unix socket listener",
@@ -368,7 +368,7 @@
         },
         {
           "id": "7e",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/daemon/service.go",
+          "path": "internal/daemon/service.go",
           "lineNumber": 120,
           "lineContent": "go s.acceptLoop(ctx)",
           "title": "Start connection accept loop",
@@ -376,14 +376,14 @@
         },
         {
           "id": "7f",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/daemon/service.go",
+          "path": "internal/daemon/service.go",
           "lineNumber": 495,
           "lineContent": "store, err := cache.Open(ctx, s.cfg.Paths.Cache, cache.Options{",
           "title": "Lazy-open cache store on first use",
           "description": "Opens cache database only when first skill execution needs it"
         }
       ],
-      "traceTextDiagram": "Daemon Startup \u0026 Pre-Warming Flow\n├── CLI: daemon start command\n│   └── runDaemonStart() \u003c-- /Users/jkatigbak/repos/personal/agentctl/cmd/agentctl/cmd/daemon.go:126\n│       └── config.Load(ctx) \u003c-- 7a\n│           └── [returns materialized Config]\n├── Daemon Service Construction\n│   └── daemon.NewService(cfg, opts) \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/daemon/service.go:65\n│       ├── sqliteutil.NewPool() \u003c-- 7b\n│       ├── sqliteutil.SetGlobalPool(pool) \u003c-- 7c\n│       └── NewSkillResolver(cfg) \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/daemon/service.go:74\n├── Service.Run() starts listener \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/daemon/service.go:89\n│   ├── net.Listen(\"unix\", socketPath) \u003c-- 7d\n│   ├── os.Chmod(socketPath, 0o600) \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/daemon/service.go:107\n│   ├── writePIDFile() \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/daemon/service.go:113\n│   └── go acceptLoop(ctx) \u003c-- 7e\n│       └── [loops accepting connections]\n└── First Skill Execution Request\n    └── handleRun() processes request \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/daemon/service.go:326\n        └── getCacheStore() lazy init \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/daemon/service.go:487\n            └── cache.Open(ctx, cfg.Paths.Cache) \u003c-- 7f",
+      "traceTextDiagram": "Daemon Startup \u0026 Pre-Warming Flow\n├── CLI: daemon start command\n│   └── runDaemonStart() \u003c-- cmd/agentctl/cmd/daemon.go:126\n│       └── config.Load(ctx) \u003c-- 7a\n│           └── [returns materialized Config]\n├── Daemon Service Construction\n│   └── daemon.NewService(cfg, opts) \u003c-- internal/daemon/service.go:65\n│       ├── sqliteutil.NewPool() \u003c-- 7b\n│       ├── sqliteutil.SetGlobalPool(pool) \u003c-- 7c\n│       └── NewSkillResolver(cfg) \u003c-- internal/daemon/service.go:74\n├── Service.Run() starts listener \u003c-- internal/daemon/service.go:89\n│   ├── net.Listen(\"unix\", socketPath) \u003c-- 7d\n│   ├── os.Chmod(socketPath, 0o600) \u003c-- internal/daemon/service.go:107\n│   ├── writePIDFile() \u003c-- internal/daemon/service.go:113\n│   └── go acceptLoop(ctx) \u003c-- 7e\n│       └── [loops accepting connections]\n└── First Skill Execution Request\n    └── handleRun() processes request \u003c-- internal/daemon/service.go:326\n        └── getCacheStore() lazy init \u003c-- internal/daemon/service.go:487\n            └── cache.Open(ctx, cfg.Paths.Cache) \u003c-- 7f",
       "traceGuide": "## Motivation\n\nGit hooks and CLI tools typically have **~300ms cold start overhead** from loading configuration, opening database connections, and initializing resources. For frequently-invoked operations like pre-commit hooks that run dozens of times during development, this latency compounds into a frustrating user experience.\n\nThe daemon system solves this by running agentctl as a **persistent background service** that pre-loads configuration [7a], maintains a shared database connection pool [7b, 7c], and listens on a Unix socket [7d] for skill execution requests. This reduces hook execution time from 300ms to **sub-50ms** by eliminating repeated initialization overhead.\n\n## Details\n\n### Startup Sequence\n\nWhen `agentctl daemon start` runs, it first loads the full configuration once [7a] rather than on every command invocation. The daemon then constructs a `Service` instance that creates a **shared connection pool** [7b] and registers it globally [7c] so all storage backends can reuse connections across requests.\n\nThe service opens a Unix socket at `/tmp/agentctl-{uid}.sock` [7d], sets restrictive permissions for security, writes a PID file for process management, and launches an accept loop [7e] that handles incoming connections concurrently.\n\n### Lazy Resource Initialization\n\nDespite pre-loading configuration, the daemon uses **lazy initialization** for expensive resources. The cache store is only opened [7f] when the first skill execution actually needs it. This balances fast startup with efficient resource usage—the daemon doesn't pay the cost of opening all possible databases until they're actually required.\n\n### Request Handling\n\nWhen a CLI client connects via the socket, `handleRun()` processes the skill execution request using the pre-warmed resources. The shared connection pool means database operations don't incur connection setup overhead, and the already-loaded configuration means no file I/O or parsing delays.\n\nThis architecture enables **concurrent hook execution** without resource contention—multiple git operations can trigger hooks simultaneously, each getting a connection from the pool and executing in parallel."
     }
   ],

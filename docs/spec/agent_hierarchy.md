@@ -3,7 +3,7 @@
 **Version:** 1.0\
 **Status:** Draft\
 **Related:** [overseer_profile.md](overseer_profile.md),
-[dspy_go_agents.md](dspy_go_agents.md),
+[archive/specs/dspy_go_agents.md](archive/specs/dspy_go_agents.md) (legacy),
 [mailbox_blackboard.md](mailbox_blackboard.md)
 
 ---

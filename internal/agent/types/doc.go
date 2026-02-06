@@ -1,2 +1,2 @@
-// Package types defines core types for dspy-go agent integration.
+// Package types defines core types for agent runtime integration.
 package types

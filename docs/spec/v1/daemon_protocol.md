@@ -19,7 +19,7 @@ It is responsible for:
 
 - Polling the **daemon mailbox queue** (`internal/storage/mailbox`) for messages
   addressed to the agent’s namespace.
-- Executing work (DSPy turns) for `agent.ask` and certain `agent.cmd` messages.
+- Executing work (LLM tool-loop turns) for `agent.ask` and certain `agent.cmd` messages.
 - Emitting `agent.reply` messages back to the caller namespace.
 - Maintaining agent state and heartbeats.
 
@@ -195,7 +195,7 @@ High-level flow:
 agentctl agent ask
   -> mailbox.Send(type=agent.ask, headers.correlation=<ask_id>)
   -> daemon polls + leases message
-  -> daemon executes DSPy turn
+  -> daemon executes LLM tool-loop turn
   -> mailbox.Send(type=agent.reply, headers.correlation=<ask_id>)
   -> (optional) caller polls for agent.reply and acks it
 ```
@@ -203,7 +203,7 @@ agentctl agent ask
 #### Handling `agent.ask`
 
 - Parse `payload.data` as `AskData`.
-- Execute a DSPy agent turn with a timeout derived from the agent policy
+- Execute an LLM tool-loop turn with a timeout derived from the agent policy
   (`policy.timeout`), falling back to 10 minutes.
 - Construct and send an `agent.reply` message:
   - `to_ns = <original from_ns>`
@@ -218,7 +218,7 @@ agentctl agent ask
 
 The daemon supports:
 
-- `action=run_turn` or `action=do_work`: executes a DSPy turn.
+- `action=run_turn` or `action=do_work`: executes an LLM tool-loop turn.
 - `action=run_skill`: currently returns an error and will be retried via
   nack/backoff.
 

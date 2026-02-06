@@ -182,9 +182,9 @@ In `cmd/agentctl/cmd/todo.go`:
 **Types (from spec):**
 
 - `Message` and `Reservation` matching
-  [mailbox_blackboard.md](cci:7://file:///Users/jkatigbak/repos/personal/claude-harness/agentctl/docs/spec/mailbox_blackboard.md:0:0-0:0).
+  [mailbox_blackboard.md](cci:7://file://~/repos/personal/claude-harness/agentctl/docs/spec/mailbox_blackboard.md:0:0-0:0).
 
-- [Store](cci:2://file:///Users/jkatigbak/repos/personal/claude-harness/agentctl/internal/storage/tasks/store.go:18:0-38:1)
+- [Store](cci:2://file://~/repos/personal/claude-harness/agentctl/internal/storage/tasks/store.go:18:0-38:1)
   interface:
 
   ```go
@@ -207,7 +207,7 @@ In `cmd/agentctl/cmd/todo.go`:
   }
   ```
 
-- [sqlStore](cci:2://file:///Users/jkatigbak/repos/personal/claude-harness/agentctl/internal/storage/tasks/store.go:63:0-65:1)
+- [sqlStore](cci:2://file://~/repos/personal/claude-harness/agentctl/internal/storage/tasks/store.go:63:0-65:1)
   implementation:
   - New DB `mailbox.db` under `cfg.Storage.Root`.
   - Schema as in spec:
@@ -245,9 +245,9 @@ Single skill `mailbox/manage` with `operation` field, mirroring todo/manage.
 
   - Use `runner.NewRunnerContext` + `config.Load` identical to todo skill.
   - Open
-    [mailbox.Store](cci:2://file:///Users/jkatigbak/repos/personal/claude-harness/agentctl/internal/storage/tasks/store.go:18:0-38:1)
+    [mailbox.Store](cci:2://file://~/repos/personal/claude-harness/agentctl/internal/storage/tasks/store.go:18:0-38:1)
     via
-    [internal/storage/mailbox.Open](cci:1://file:///Users/jkatigbak/repos/personal/claude-harness/agentctl/internal/storage/tasks/store.go:67:0-75:1).
+    [internal/storage/mailbox.Open](cci:1://file://~/repos/personal/claude-harness/agentctl/internal/storage/tasks/store.go:67:0-75:1).
 
 - **`skill.yaml`**:
 
@@ -273,7 +273,7 @@ Single skill `mailbox/manage` with `operation` field, mirroring todo/manage.
 
 This is mostly about **skills that follow the hook.Input/Output contract**
 described in
-[task_hooks_memory.md](cci:7://file:///Users/jkatigbak/repos/personal/agentctl/docs/spec/task_hooks_memory.md:0:0-0:0) +
+[task_hooks_memory.md](cci:7://file://docs/spec/task_hooks_memory.md:0:0-0:0) +
 your new specs.
 
 ### 3.1 `hooks/mail_router` skill

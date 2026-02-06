@@ -16,7 +16,7 @@ docs/
 │   ├── core_profile_v1.md    # Envelope, CAS, jobs, WASI/exec runners
 │   ├── openapi_skill.md      # http/openapi input/output contract
 │   ├── plugin_protocol.md    # Auth/pagination plugin SPI
-│   └── dspy_go_agents.md     # dspy-go agent runtime & tools
+│   └── agent_hierarchy.md    # Agent runtime hierarchy and coordination
 ├── impl_plan/                # Phased implementation plans
 │   └── universal_swe_grep_and_agents*.md
 ├── changelogs/               # YYYY-MM-DD_<name>.md entries
@@ -44,7 +44,7 @@ docs/
 | **OpenAPI skill**        | `spec/openapi_skill.md`                     |
 | **Plugin protocol**      | `spec/plugin_protocol.md`                   |
 | **Agent orchestration**  | `agent_profile.md`                          |
-| **dspy-go agents**       | `spec/dspy_go_agents.md`                    |
+| **Agent runtime**        | `spec/agent_hierarchy.md`                   |
 | **SWE Grep skill**       | `spec/code_symbol_index_and_swe_grep.md` §5 |
 | **Symbol index**         | `start/symbol_index.md`                     |
 | **Testing & CI**         | `start/testing_and_ci.md`                   |

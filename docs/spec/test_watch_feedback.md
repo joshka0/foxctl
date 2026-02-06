@@ -46,7 +46,7 @@ The design is **language-agnostic** and must support at least:
   `PostToolUse`, keeping Claude’s integration surface consistent with other
   hooks (`task_guard`, `knowledge_router`). Unlike `task_guard`/`file_guard`,
   which may lead to guard errors such as `E_GUARD_VIOLATION` when propagated to
-  tools (see `dspy_go_agents.md` §11.3), `hooks/test_feedback` is
+  tools (see `archive/specs/dspy_go_agents.md` §11.3, legacy runtime), `hooks/test_feedback` is
   **advisory-only** and MUST NOT block writes or change tool error codes.
 
 - **G5: Simple, Queryable Storage**\

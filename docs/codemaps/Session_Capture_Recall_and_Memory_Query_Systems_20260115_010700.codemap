@@ -18,7 +18,7 @@
       "locations": [
         {
           "id": "1a",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/skills/session_save/main.go",
+          "path": "skills/session_save/main.go",
           "lineNumber": 83,
           "lineContent": "func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {",
           "title": "Session save entry point",
@@ -26,7 +26,7 @@
         },
         {
           "id": "1b",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/skills/session_save/main.go",
+          "path": "skills/session_save/main.go",
           "lineNumber": 93,
           "lineContent": "memStore, memCleanup, err := sessionkit.OpenMemoryInCache(ctx, rc.Config)",
           "title": "Open memory store in cache",
@@ -34,7 +34,7 @@
         },
         {
           "id": "1c",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/skills/session_save/main.go",
+          "path": "skills/session_save/main.go",
           "lineNumber": 119,
           "lineContent": "activeTask, found, err := taskStore.GetActive(ctx, in.Workspace)",
           "title": "Capture active task",
@@ -42,7 +42,7 @@
         },
         {
           "id": "1d",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/skills/session_save/main.go",
+          "path": "skills/session_save/main.go",
           "lineNumber": 153,
           "lineContent": "mostRecent, detectErr := detector.DetectMostRecent()",
           "title": "Detect active plan",
@@ -50,14 +50,14 @@
         },
         {
           "id": "1e",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/skills/session_save/main.go",
+          "path": "skills/session_save/main.go",
           "lineNumber": 269,
           "lineContent": "_, err = memStore.SaveResult(ctx, memory.SaveOptions{",
           "title": "Store snapshot",
           "description": "Saves the complete session snapshot to memory store"
         }
       ],
-      "traceTextDiagram": "Session Save Process\n├── run() main entry point \u003c-- 1a\n│   ├── OpenMemoryInCache() for storage \u003c-- 1b\n│   ├── OpenTasks() for task access \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/session_save/main.go:99\n│   │   └── GetActive() retrieves current task \u003c-- 1c\n│   ├── DetectMostRecent() finds plan file \u003c-- 1d\n│   │   └── ParseFile() reads plan content \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/session_save/main.go:146\n│   └── SaveResult() stores snapshot \u003c-- 1e",
+      "traceTextDiagram": "Session Save Process\n├── run() main entry point \u003c-- 1a\n│   ├── OpenMemoryInCache() for storage \u003c-- 1b\n│   ├── OpenTasks() for task access \u003c-- skills/session_save/main.go:99\n│   │   └── GetActive() retrieves current task \u003c-- 1c\n│   ├── DetectMostRecent() finds plan file \u003c-- 1d\n│   │   └── ParseFile() reads plan content \u003c-- skills/session_save/main.go:146\n│   └── SaveResult() stores snapshot \u003c-- 1e",
       "traceGuide": "## Motivation\n\nWhen working on long coding sessions, you often lose context when switching between projects or after system restarts. The **session save** system solves this by automatically capturing the complete state of your work - active tasks, current plans, pending todos, and important decisions - before compaction or cleanup occurs. This creates a **recoverable snapshot** that preserves your work context and enables seamless continuation of complex development tasks.\n\n## Details\n\nThe session save process begins with the main entry point [1a] that orchestrates the entire snapshot creation. It first opens a memory store in the cache directory [1b] to store the snapshot data, then opens the tasks store to access task information. The system retrieves the currently active task [1c] to capture what you're working on right now, and automatically detects the most recently modified plan file [1d] to preserve your project context. It also gathers pending todos with intelligent prioritization using PageRank algorithms to focus on the most important items. Finally, it serializes all this data into a structured snapshot and saves it to the memory store [1e] with metadata for later retrieval. The entire process is designed to be **non-blocking** and includes background archiving for long-term storage when triggered by compaction events."
     },
     {
@@ -67,7 +67,7 @@
       "locations": [
         {
           "id": "2a",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/skills/session_recall/main.go",
+          "path": "skills/session_recall/main.go",
           "lineNumber": 109,
           "lineContent": "func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {",
           "title": "Session recall entry point",
@@ -75,7 +75,7 @@
         },
         {
           "id": "2b",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/skills/session_recall/main.go",
+          "path": "skills/session_recall/main.go",
           "lineNumber": 114,
           "lineContent": "voyageKey := os.Getenv(\"VOYAGE_API_KEY\")",
           "title": "Check embedding API keys",
@@ -83,7 +83,7 @@
         },
         {
           "id": "2c",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/skills/session_recall/main.go",
+          "path": "skills/session_recall/main.go",
           "lineNumber": 141,
           "lineContent": "queryEmbedding, err = vp.EmbedQuery(ctx, enrichedQuery)",
           "title": "Generate query embedding",
@@ -91,7 +91,7 @@
         },
         {
           "id": "2d",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/skills/session_recall/main.go",
+          "path": "skills/session_recall/main.go",
           "lineNumber": 253,
           "lineContent": "results, err := sessionStore.SearchSimilar(ctx, queryEmbedding, in.Limit*2)",
           "title": "Search similar sessions",
@@ -99,14 +99,14 @@
         },
         {
           "id": "2e",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/skills/session_recall/main.go",
+          "path": "skills/session_recall/main.go",
           "lineNumber": 160,
           "lineContent": "windowResults, err := sessionStore.SearchContextWindows(ctx, queryEmbedding, in.Limit*2)",
           "title": "Search context windows",
           "description": "Granular search at context window level"
         }
       ],
-      "traceTextDiagram": "Session Recall Semantic Search\n├── run() entry point \u003c-- 2a\n│   ├── Check API keys (Voyage/Gemini) \u003c-- 2b\n│   ├── Generate query embedding \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/session_recall/main.go:125\n│   │   ├── Voyage provider (preferred) \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/session_recall/main.go:131\n│   │   └── Gemini fallback \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/session_recall/main.go:145\n│   │       └── generateGeminiEmbedding() \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/session_recall/main.go:334\n│   └── Search sessions \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/session_recall/main.go:158\n│       ├── Window granularity enabled \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/session_recall/main.go:158\n│       │   └── SearchContextWindows() \u003c-- 2e\n│       └── Session level search \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/session_recall/main.go:204\n│           ├── Semantic search \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/session_recall/main.go:252\n│           │   └── SearchSimilar() \u003c-- 2d\n│           └── Full-text fallback \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/session_recall/main.go:209\n└── EmbedQuery() with enrichment \u003c-- 2c\n    ├── semantic.EnrichQuery() \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/session_recall/main.go:140\n    └── Vector generation \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/session_recall/main.go:141",
+      "traceTextDiagram": "Session Recall Semantic Search\n├── run() entry point \u003c-- 2a\n│   ├── Check API keys (Voyage/Gemini) \u003c-- 2b\n│   ├── Generate query embedding \u003c-- skills/session_recall/main.go:125\n│   │   ├── Voyage provider (preferred) \u003c-- skills/session_recall/main.go:131\n│   │   └── Gemini fallback \u003c-- skills/session_recall/main.go:145\n│   │       └── generateGeminiEmbedding() \u003c-- skills/session_recall/main.go:334\n│   └── Search sessions \u003c-- skills/session_recall/main.go:158\n│       ├── Window granularity enabled \u003c-- skills/session_recall/main.go:158\n│       │   └── SearchContextWindows() \u003c-- 2e\n│       └── Session level search \u003c-- skills/session_recall/main.go:204\n│           ├── Semantic search \u003c-- skills/session_recall/main.go:252\n│           │   └── SearchSimilar() \u003c-- 2d\n│           └── Full-text fallback \u003c-- skills/session_recall/main.go:209\n└── EmbedQuery() with enrichment \u003c-- 2c\n    ├── semantic.EnrichQuery() \u003c-- skills/session_recall/main.go:140\n    └── Vector generation \u003c-- skills/session_recall/main.go:141",
       "traceGuide": "## Motivation\n\nWhen working across multiple coding sessions, developers need to quickly find relevant past work, decisions, and context. The session recall system solves this by providing **semantic search** over your coding history. Instead of manually digging through old sessions, you can search with natural language queries like \"fix authentication bug\" or \"implement user registration\" and get the most relevant sessions ranked by similarity, not just keyword matching.\n\n## Details\n\nThe system supports multiple embedding providers for optimal performance. It first tries **Voyage AI** for high-quality embeddings [2b], falls back to **Gemini** if unavailable [2b], and finally uses **full-text search** if no API keys are present [2b]. This tiered approach ensures the system works in any environment.\n\nThe search operates at two granularities: **session-level** for broad context and **context window-level** for fine-grained retrieval [2e]. When you search, the system first generates an embedding of your query [2c], enriches it with temporal and type patterns for better matching, then finds the most similar sessions using vector similarity search [2d].\n\nThe key innovation is the **semantic understanding** - the system doesn't just match keywords but understands the meaning and context of your coding sessions, making it far more effective than traditional search for finding relevant past work."
     },
     {
@@ -116,7 +116,7 @@
       "locations": [
         {
           "id": "3a",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/skills/memory_query/main.go",
+          "path": "skills/memory_query/main.go",
           "lineNumber": 119,
           "lineContent": "func query(ctx context.Context, rc *skillmain.RunContext, in *Input) (*Output, error) {",
           "title": "Memory query entry point",
@@ -124,7 +124,7 @@
         },
         {
           "id": "3b",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/skills/memory_query/main.go",
+          "path": "skills/memory_query/main.go",
           "lineNumber": 153,
           "lineContent": "memStore, cleanup, err := sessionkit.OpenMemory(ctx, rc.Config)",
           "title": "Open memory store",
@@ -132,7 +132,7 @@
         },
         {
           "id": "3c",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/skills/memory_query/main.go",
+          "path": "skills/memory_query/main.go",
           "lineNumber": 200,
           "lineContent": "scoredEntries, err = searchWithEmbeddings(ctx, memStore, workspacePath, in, modelOverride)",
           "title": "Vector search attempt",
@@ -140,7 +140,7 @@
         },
         {
           "id": "3d",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/skills/memory_query/main.go",
+          "path": "skills/memory_query/main.go",
           "lineNumber": 203,
           "lineContent": "scoredEntries, err = memStore.Search(ctx, workspacePath, in.Query, in.Limit*3)",
           "title": "BM25 fallback",
@@ -148,14 +148,14 @@
         },
         {
           "id": "3e",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/skills/memory_query/main.go",
+          "path": "skills/memory_query/main.go",
           "lineNumber": 334,
           "lineContent": "results, err := memStore.SearchSimilar(ctx, workspacePath, result.Vec, in.Limit*3)",
           "title": "Vector similarity search",
           "description": "Performs actual vector similarity search"
         }
       ],
-      "traceTextDiagram": "Memory Query Execution Flow\n├── query() entry point \u003c-- 3a\n│   ├── Open memory store via sessionkit\n│   │   └── sessionkit.OpenMemory() \u003c-- 3b\n│   ├── Choose search strategy \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/memory_query/main.go:161\n│   │   ├── Try vector search first \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/memory_query/main.go:198\n│   │   │   ├── Create embedder with model \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/memory_query/main.go:322\n│   │   │   └── SearchSimilar() vector search \u003c-- 3e\n│   │   └── Fallback to BM25 if vector fails \u003c-- 3d\n│   ├── Filter and paginate results \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/memory_query/main.go:225\n│   └── Output formatted memory results \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/memory_query/main.go:98\n└── searchWithEmbeddings() call \u003c-- 3c",
+      "traceTextDiagram": "Memory Query Execution Flow\n├── query() entry point \u003c-- 3a\n│   ├── Open memory store via sessionkit\n│   │   └── sessionkit.OpenMemory() \u003c-- 3b\n│   ├── Choose search strategy \u003c-- skills/memory_query/main.go:161\n│   │   ├── Try vector search first \u003c-- skills/memory_query/main.go:198\n│   │   │   ├── Create embedder with model \u003c-- skills/memory_query/main.go:322\n│   │   │   └── SearchSimilar() vector search \u003c-- 3e\n│   │   └── Fallback to BM25 if vector fails \u003c-- 3d\n│   ├── Filter and paginate results \u003c-- skills/memory_query/main.go:225\n│   └── Output formatted memory results \u003c-- skills/memory_query/main.go:98\n└── searchWithEmbeddings() call \u003c-- 3c",
       "traceGuide": "## Motivation\n\nThe memory query system solves the problem of **finding relevant information** across a growing collection of AI interactions, code changes, and project context. As developers work with AI assistants, they generate thousands of memories - code edits, task completions, insights, and decisions. Without smart retrieval, this knowledge becomes lost in a sea of data. The system provides **semantic search** that understands meaning beyond keyword matching, with **fallback mechanisms** ensuring reliability even when external APIs fail.\n\n## Details\n\nThe query system starts by opening a memory store through sessionkit's standardized store management [3a][3b]. It then chooses between two search strategies: **vector embeddings** for semantic understanding or **BM25 text search** as a reliable fallback [3c]. When vector search is available, it creates an embedder using the configured model and performs similarity search [3e]. If embedding generation fails, it gracefully degrades to BM25 text search [3d]. Results are then filtered by type, session ID, or file associations, with pagination to manage large result sets [3a]. The system prioritizes **relevance** through similarity scoring while maintaining **performance** through intelligent caching and fallback strategies."
     },
     {
@@ -165,7 +165,7 @@
       "locations": [
         {
           "id": "4a",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/sessionkit/identity.go",
+          "path": "internal/sessionkit/identity.go",
           "lineNumber": 24,
           "lineContent": "func ResolveSessionID(ws, explicit string) string {",
           "title": "Session ID resolution",
@@ -173,7 +173,7 @@
         },
         {
           "id": "4b",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/sessionkit/identity.go",
+          "path": "internal/sessionkit/identity.go",
           "lineNumber": 31,
           "lineContent": "envVars := []string{\"AGENTCTL_SESSION_ID\", \"CLAUDE_SESSION_ID\", \"OPENCODE_SESSION_ID\", \"CURSOR_SESSION_ID\"}",
           "title": "Environment variable priority",
@@ -181,7 +181,7 @@
         },
         {
           "id": "4c",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/sessionkit/identity.go",
+          "path": "internal/sessionkit/identity.go",
           "lineNumber": 44,
           "lineContent": "if sid := ResolveSessionIDFromIdentityFile(ws); sid != \"\" {",
           "title": "Identity file fallback",
@@ -189,7 +189,7 @@
         },
         {
           "id": "4d",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/sessionkit/identity.go",
+          "path": "internal/sessionkit/identity.go",
           "lineNumber": 70,
           "lineContent": "hash := sha256.Sum256([]byte(ws))",
           "title": "Workspace hash computation",
@@ -197,14 +197,14 @@
         },
         {
           "id": "4e",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/sessionkit/identity.go",
+          "path": "internal/sessionkit/identity.go",
           "lineNumber": 75,
           "lineContent": "candidates := []string{filepath.Join(identityDir, workspaceHash+\"-claude.json\")",
           "title": "Identity file candidates",
           "description": "Builds list of possible identity file paths"
         }
       ],
-      "traceTextDiagram": "Session ID Resolution System\n├── ResolveSessionID() \u003c-- 4a\n│   ├── Check explicit parameter first \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/sessionkit/identity.go:26\n│   ├── Check environment variables \u003c-- 4b\n│   │   ├── AGENTCTL_SESSION_ID \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/sessionkit/identity.go:32\n│   │   ├── CLAUDE_SESSION_ID \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/sessionkit/identity.go:33\n│   │   ├── OPENCODE_SESSION_ID \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/sessionkit/identity.go:34\n│   │   └── CURSOR_SESSION_ID \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/sessionkit/identity.go:35\n│   ├── Try identity file fallback \u003c-- 4c\n│   │   ├── Compute workspace hash \u003c-- 4d\n│   │   │   └── SHA256(workspace)[:16] \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/sessionkit/identity.go:71\n│   │   └── Check file candidates \u003c-- 4e\n│   │       ├── {hash}-claude.json \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/sessionkit/identity.go:76\n│   │       ├── {hash}-agentctl.json \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/sessionkit/identity.go:77\n│   │       └── {hash}.json \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/sessionkit/identity.go:78\n│   └── Final fallback: TERM_SESSION_ID \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/sessionkit/identity.go:49\n└── Identity file structure\n    ├── session_id \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/sessionkit/identity.go:15\n    ├── agent_id \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/sessionkit/identity.go:16\n    └── workspace \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/sessionkit/identity.go:17",
+      "traceTextDiagram": "Session ID Resolution System\n├── ResolveSessionID() \u003c-- 4a\n│   ├── Check explicit parameter first \u003c-- internal/sessionkit/identity.go:26\n│   ├── Check environment variables \u003c-- 4b\n│   │   ├── AGENTCTL_SESSION_ID \u003c-- internal/sessionkit/identity.go:32\n│   │   ├── CLAUDE_SESSION_ID \u003c-- internal/sessionkit/identity.go:33\n│   │   ├── OPENCODE_SESSION_ID \u003c-- internal/sessionkit/identity.go:34\n│   │   └── CURSOR_SESSION_ID \u003c-- internal/sessionkit/identity.go:35\n│   ├── Try identity file fallback \u003c-- 4c\n│   │   ├── Compute workspace hash \u003c-- 4d\n│   │   │   └── SHA256(workspace)[:16] \u003c-- internal/sessionkit/identity.go:71\n│   │   └── Check file candidates \u003c-- 4e\n│   │       ├── {hash}-claude.json \u003c-- internal/sessionkit/identity.go:76\n│   │       ├── {hash}-agentctl.json \u003c-- internal/sessionkit/identity.go:77\n│   │       └── {hash}.json \u003c-- internal/sessionkit/identity.go:78\n│   └── Final fallback: TERM_SESSION_ID \u003c-- internal/sessionkit/identity.go:49\n└── Identity file structure\n    ├── session_id \u003c-- internal/sessionkit/identity.go:15\n    ├── agent_id \u003c-- internal/sessionkit/identity.go:16\n    └── workspace \u003c-- internal/sessionkit/identity.go:17",
       "traceGuide": "## Motivation\n\nWhen working across multiple development environments (Claude, Cursor, OpenCode, agentctl), each system creates its own session with a unique ID. The challenge is **unifying session identity** so that session capture and recall features work consistently regardless of which IDE or tool you're using. Without this system, session snapshots would be fragmented across different tools, making it impossible to retrieve your complete work context.\n\n## Details\n\nThe session identity resolution system follows a **strict priority hierarchy** to determine the active session ID [4a]. First, it checks for an explicitly provided session ID, then scans environment variables in order of precedence: AGENTCTL_SESSION_ID → CLAUDE_SESSION_ID → OPENCODE_SESSION_ID → CURSOR_SESSION_ID [4b]. \n\nIf no environment variables are set, it falls back to reading **identity files** stored in `~/.agentctl/sessions/active/` [4c]. These files use a naming convention based on the **workspace hash** - the first 16 characters of the SHA256 hash of the workspace path [4d]. The system checks multiple file patterns: `{hash}-claude.json`, `{hash}-agentctl.json`, and `{hash}.json` [4e].\n\nEach identity file contains a simple JSON structure with session_id, agent_id, and workspace fields. This design allows **simultaneous sessions** for different agents in the same workspace while maintaining clear separation. As a final fallback, the system checks TERM_SESSION_ID for generic terminal sessions.\n\nThe entire resolution process is **deterministic and transparent**, ensuring that session capture, recall, and memory operations always reference the correct session context regardless of the development environment being used."
     },
     {
@@ -214,7 +214,7 @@
       "locations": [
         {
           "id": "5a",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/sessionkit/open.go",
+          "path": "internal/sessionkit/open.go",
           "lineNumber": 19,
           "lineContent": "func OpenSessions(ctx context.Context, cfg config.Config) (*sessions.Store, func(), error) {",
           "title": "Open sessions store",
@@ -222,7 +222,7 @@
         },
         {
           "id": "5b",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/sessionkit/open.go",
+          "path": "internal/sessionkit/open.go",
           "lineNumber": 32,
           "lineContent": "func OpenTasks(ctx context.Context, cfg config.Config) (tasks.Store, func(), error) {",
           "title": "Open tasks store",
@@ -230,7 +230,7 @@
         },
         {
           "id": "5c",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/sessionkit/open.go",
+          "path": "internal/sessionkit/open.go",
           "lineNumber": 45,
           "lineContent": "func OpenMemory(ctx context.Context, cfg config.Config) (*memory.Store, func(), error) {",
           "title": "Open memory store",
@@ -238,7 +238,7 @@
         },
         {
           "id": "5d",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/sessionkit/open.go",
+          "path": "internal/sessionkit/open.go",
           "lineNumber": 58,
           "lineContent": "func OpenMemoryInCache(ctx context.Context, cfg config.Config) (*memory.Store, func(), error) {",
           "title": "Open memory in cache",
@@ -246,14 +246,14 @@
         },
         {
           "id": "5e",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/sessionkit/open.go",
+          "path": "internal/sessionkit/open.go",
           "lineNumber": 24,
           "lineContent": "cleanup := func() { _ = store.Close() }",
           "title": "Store cleanup pattern",
           "description": "Provides cleanup function for store resources"
         }
       ],
-      "traceTextDiagram": "Storage Layer Integration\n├── sessionkit package provides utilities\n│   ├── OpenSessions() \u003c-- 5a\n│   │   ├── sessions.Open(ctx, cfg.Storage.Root) \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/sessionkit/open.go:20\n│   │   └── cleanup closure \u003c-- 5e\n│   ├── OpenTasks() \u003c-- 5b\n│   │   ├── tasks.Open(ctx, cfg.Storage.Root) \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/sessionkit/open.go:33\n│   │   └── cleanup closure \u003c-- 5e\n│   ├── OpenMemory() \u003c-- 5c\n│   │   ├── memory.Open(ctx, cfg.Storage.Root, cfg.Paths.CAS) \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/sessionkit/open.go:46\n│   │   └── cleanup closure \u003c-- 5e\n│   └── OpenMemoryInCache() \u003c-- 5d\n│       ├── memory.Open(ctx, cfg.Paths.Cache, cfg.Paths.CAS) \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/sessionkit/open.go:59\n│       └── cleanup closure \u003c-- 5e\n└── Config-based path resolution\n    ├── cfg.Storage.Root for persistent storage \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/sessionkit/open.go:20\n    ├── cfg.Paths.Cache for ephemeral data \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/sessionkit/open.go:59\n    └── cfg.Paths.CAS for content-addressable storage \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/sessionkit/open.go:46",
+      "traceTextDiagram": "Storage Layer Integration\n├── sessionkit package provides utilities\n│   ├── OpenSessions() \u003c-- 5a\n│   │   ├── sessions.Open(ctx, cfg.Storage.Root) \u003c-- internal/sessionkit/open.go:20\n│   │   └── cleanup closure \u003c-- 5e\n│   ├── OpenTasks() \u003c-- 5b\n│   │   ├── tasks.Open(ctx, cfg.Storage.Root) \u003c-- internal/sessionkit/open.go:33\n│   │   └── cleanup closure \u003c-- 5e\n│   ├── OpenMemory() \u003c-- 5c\n│   │   ├── memory.Open(ctx, cfg.Storage.Root, cfg.Paths.CAS) \u003c-- internal/sessionkit/open.go:46\n│   │   └── cleanup closure \u003c-- 5e\n│   └── OpenMemoryInCache() \u003c-- 5d\n│       ├── memory.Open(ctx, cfg.Paths.Cache, cfg.Paths.CAS) \u003c-- internal/sessionkit/open.go:59\n│       └── cleanup closure \u003c-- 5e\n└── Config-based path resolution\n    ├── cfg.Storage.Root for persistent storage \u003c-- internal/sessionkit/open.go:20\n    ├── cfg.Paths.Cache for ephemeral data \u003c-- internal/sessionkit/open.go:59\n    └── cfg.Paths.CAS for content-addressable storage \u003c-- internal/sessionkit/open.go:46",
       "traceGuide": "## Motivation\n\nThe agentctl system needs **consistent storage management** across multiple skills that handle sessions, tasks, and memory. Each skill needs to open database connections, manage cleanup, and resolve paths, but duplicating this logic would create maintenance nightmares and potential resource leaks. The storage layer solves this by providing **centralized store management** with automatic cleanup and consistent path resolution.\n\n## Details\n\nThe sessionkit package provides **five core store opening functions** that handle all storage needs:\n\n- **OpenSessions** [5a] opens the sessions database for storing session metadata and embeddings\n- **OpenTasks** [5b] opens the tasks database for task management and tracking  \n- **OpenMemory** [5c] opens the memory store for semantic search and results\n- **OpenMemoryInCache** [5d] opens memory in the cache directory for **ephemeral data** like session snapshots\n- Each function returns a **cleanup closure** [5e] that ensures proper resource cleanup\n\nThe key pattern is **RAII-style resource management** - every store opening returns both the store and a cleanup function. This prevents resource leaks across the many skills that use storage. The path resolution uses the config system to consistently map between logical storage types (persistent, cache, CAS) and actual filesystem locations.\n\nAll stores use the same underlying database drivers but expose **different interfaces** tailored to their specific use cases - sessions for semantic search, tasks for workflow management, and memory for general-purpose storage with vector capabilities."
     }
   ],

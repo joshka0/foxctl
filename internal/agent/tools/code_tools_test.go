@@ -694,7 +694,7 @@ func TestTelemetry_RecordsNewToolNames(t *testing.T) {
 		"question":     "test query",
 	}
 	// Execute may fail (no memory store); we only care that telemetry was recorded.
-	_, _ = tool.Execute(context.Background(), symbolSearchArgs) //nolint:errcheck
+	_, _ = tool.Call(context.Background(), symbolSearchArgs) //nolint:errcheck
 
 	// Verify telemetry was recorded
 	if len(recorder.calls) == 0 {

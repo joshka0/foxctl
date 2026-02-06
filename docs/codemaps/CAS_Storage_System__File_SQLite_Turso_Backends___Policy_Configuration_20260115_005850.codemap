@@ -18,7 +18,7 @@
       "locations": [
         {
           "id": "1a",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/agent/daemon/daemon.go",
+          "path": "internal/agent/daemon/daemon.go",
           "lineNumber": 135,
           "lineContent": "return cas.OpenDefault(ctx, opts.StorageRoot)",
           "title": "Daemon opens CAS store",
@@ -26,7 +26,7 @@
         },
         {
           "id": "1b",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/storage/cas/factory.go",
+          "path": "internal/storage/cas/factory.go",
           "lineNumber": 52,
           "lineContent": "cfg := LoadConfig(rootDir)",
           "title": "Load CAS configuration",
@@ -34,7 +34,7 @@
         },
         {
           "id": "1c",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/storage/cas/config.go",
+          "path": "internal/storage/cas/config.go",
           "lineNumber": 148,
           "lineContent": "driver := os.Getenv(\"AGENTCTL_CAS_DRIVER\")",
           "title": "Read driver from environment",
@@ -42,7 +42,7 @@
         },
         {
           "id": "1d",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/storage/cas/factory.go",
+          "path": "internal/storage/cas/factory.go",
           "lineNumber": 22,
           "lineContent": "switch cfg.Driver {",
           "title": "Select backend driver",
@@ -50,7 +50,7 @@
         },
         {
           "id": "1e",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/storage/cas/factory.go",
+          "path": "internal/storage/cas/factory.go",
           "lineNumber": 26,
           "lineContent": "store, err = NewSQLiteStore(ctx, cfg.SQLite)",
           "title": "Create SQLite store",
@@ -58,14 +58,14 @@
         },
         {
           "id": "1f",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/storage/cas/factory.go",
+          "path": "internal/storage/cas/factory.go",
           "lineNumber": 40,
           "lineContent": "if err := autoMigrate(ctx, cfg, store); err != nil {",
           "title": "Trigger auto-migration",
           "description": "Automatically migrate legacy file-based CAS if enabled"
         }
       ],
-      "traceTextDiagram": "CAS Store Factory \u0026 Configuration Loading\n├── Agent Daemon Initialization\n│   └── OpenCASStore callback \u003c-- 1a\n│       └── cas.OpenDefault() \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/cas/factory.go:51\n│           ├── LoadConfig(rootDir) \u003c-- 1b\n│           │   ├── Read AGENTCTL_CAS_DRIVER env \u003c-- 1c\n│           │   ├── loadSQLiteConfig() (default) \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/cas/config.go:163\n│           │   └── Return Config struct \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/cas/config.go:220\n│           └── OpenCAS(ctx, cfg) \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/cas/factory.go:14\n│               ├── cfg.Validate() \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/cas/factory.go:15\n│               ├── Driver switch statement \u003c-- 1d\n│               │   ├── DriverFile → NewStore() \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/cas/factory.go:24\n│               │   ├── DriverSQLite → NewSQLiteStore() \u003c-- 1e\n│               │   └── DriverTurso → NewTursoStore() \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/cas/factory.go:28\n│               └── autoMigrate() check \u003c-- 1f\n                    └── MigrateFromFile() if needed \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/cas/migrate.go:148",
+      "traceTextDiagram": "CAS Store Factory \u0026 Configuration Loading\n├── Agent Daemon Initialization\n│   └── OpenCASStore callback \u003c-- 1a\n│       └── cas.OpenDefault() \u003c-- internal/storage/cas/factory.go:51\n│           ├── LoadConfig(rootDir) \u003c-- 1b\n│           │   ├── Read AGENTCTL_CAS_DRIVER env \u003c-- 1c\n│           │   ├── loadSQLiteConfig() (default) \u003c-- internal/storage/cas/config.go:163\n│           │   └── Return Config struct \u003c-- internal/storage/cas/config.go:220\n│           └── OpenCAS(ctx, cfg) \u003c-- internal/storage/cas/factory.go:14\n│               ├── cfg.Validate() \u003c-- internal/storage/cas/factory.go:15\n│               ├── Driver switch statement \u003c-- 1d\n│               │   ├── DriverFile → NewStore() \u003c-- internal/storage/cas/factory.go:24\n│               │   ├── DriverSQLite → NewSQLiteStore() \u003c-- 1e\n│               │   └── DriverTurso → NewTursoStore() \u003c-- internal/storage/cas/factory.go:28\n│               └── autoMigrate() check \u003c-- 1f\n                    └── MigrateFromFile() if needed \u003c-- internal/storage/cas/migrate.go:148",
       "traceGuide": "## Motivation\n\nAgentctl needs to store large outputs (logs, results, artifacts) without bloating envelopes or overwhelming context windows. The **CAS (Content-Addressable Storage) system** solves this by storing content once by its SHA256 digest and returning a reference. The system supports **three storage backends**: legacy file-based storage, SQLite for local databases, and Turso for cloud-replicated storage. Users can switch backends via environment variables without code changes.\n\n## Details\n\n### Factory Pattern and Configuration\n\nThe entry point is `cas.OpenDefault()` [1a], which loads configuration from environment variables [1b]. The **AGENTCTL_CAS_DRIVER** environment variable determines the backend [1c]: `file` for legacy filesystem storage, `sqlite` for local database (default), or `turso` for cloud storage. The factory pattern [1d] switches on the driver type and instantiates the appropriate store implementation [1e].\n\n### Backend Selection\n\n- **File-based**: Legacy implementation storing content in `~/.agentctl/cas/sha256/\u003chex\u003e` with `.json` metadata files\n- **SQLite**: Default backend storing blobs directly in a database table with 1MB inline threshold\n- **Turso**: Cloud-replicated libsql with embedded replica for offline-first operation\n\n### Auto-Migration\n\nWhen switching from file-based to database backends, the system automatically detects legacy CAS directories and migrates objects on first access [1f]. Migration is incremental—only new objects not yet in the destination are copied. This ensures zero-downtime transitions between storage backends.\n\n### Configuration Hierarchy\n\nConfiguration follows a three-layer hierarchy:\n1. **Defaults**: SQLite driver, 1MB blob threshold, WAL mode enabled\n2. **Config file**: `~/.agentctl/config.yaml` settings\n3. **Environment variables**: `AGENTCTL_CAS_*` vars override everything\n\nThe `LoadConfig()` function [1b] merges these layers, with environment variables taking precedence for operational flexibility in different deployment contexts."
     },
     {
@@ -75,7 +75,7 @@
       "locations": [
         {
           "id": "2a",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/storage/cas/file_store.go",
+          "path": "internal/storage/cas/file_store.go",
           "lineNumber": 81,
           "lineContent": "func (s *Store) Put(ctx context.Context, r io.Reader, kind string, tags []string) (Object, error) {",
           "title": "Put entry point",
@@ -83,7 +83,7 @@
         },
         {
           "id": "2b",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/storage/cas/file_store.go",
+          "path": "internal/storage/cas/file_store.go",
           "lineNumber": 86,
           "lineContent": "tmp, err := os.CreateTemp(filepath.Join(s.root, \"tmp\"), \"cas-*\")",
           "title": "Create temp file",
@@ -91,7 +91,7 @@
         },
         {
           "id": "2c",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/storage/cas/file_store.go",
+          "path": "internal/storage/cas/file_store.go",
           "lineNumber": 103,
           "lineContent": "if _, err := h.Write(buf[:n]); err != nil {",
           "title": "Compute SHA256 hash",
@@ -99,7 +99,7 @@
         },
         {
           "id": "2d",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/storage/cas/file_store.go",
+          "path": "internal/storage/cas/file_store.go",
           "lineNumber": 118,
           "lineContent": "digest := \"sha256:\" + hex.EncodeToString(h.Sum(nil))",
           "title": "Generate digest",
@@ -107,7 +107,7 @@
         },
         {
           "id": "2e",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/storage/cas/file_store.go",
+          "path": "internal/storage/cas/file_store.go",
           "lineNumber": 173,
           "lineContent": "if err := os.Rename(tmp.Name(), dest); err != nil {",
           "title": "Atomic rename to final location",
@@ -115,14 +115,14 @@
         },
         {
           "id": "2f",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/storage/cas/file_store.go",
+          "path": "internal/storage/cas/file_store.go",
           "lineNumber": 183,
           "lineContent": "if err := s.writeMetadata(meta); err != nil {",
           "title": "Write metadata JSON",
           "description": "Persist metadata (size, kind, tags, timestamps) to .json file"
         }
       ],
-      "traceTextDiagram": "File-Based CAS Put Operation\n└── Store.Put() entry \u003c-- 2a\n    ├── Create temp file in cas/tmp/ \u003c-- 2b\n    ├── Stream content loop \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/cas/file_store.go:97\n    │   ├── Read chunks from input \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/cas/file_store.go:101\n    │   ├── Write to SHA256 hasher \u003c-- 2c\n    │   └── Write to temp file \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/cas/file_store.go:106\n    ├── Finalize digest string \u003c-- 2d\n    ├── Check for duplicate object \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/cas/file_store.go:121\n    │   └── handleDuplicateObject() \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/cas/file_store.go:130\n    │       └── merge tags if exists \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/cas/file_store.go:148\n    ├── finalizeUpload() \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/cas/file_store.go:127\n    │   ├── Close temp file \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/cas/file_store.go:167\n    │   ├── Atomic rename to sha256/\u003chex\u003e \u003c-- 2e\n    │   └── writeMetadata() \u003c-- 2f\n    │       ├── Marshal metadata to JSON \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/cas/file_store.go:389\n    │       ├── Write to temp file \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/cas/file_store.go:398\n    │       └── Atomic rename to \u003chex\u003e.json \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/cas/file_store.go:407\n    └── Return Object with digest \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/cas/file_store.go:187",
+      "traceTextDiagram": "File-Based CAS Put Operation\n└── Store.Put() entry \u003c-- 2a\n    ├── Create temp file in cas/tmp/ \u003c-- 2b\n    ├── Stream content loop \u003c-- internal/storage/cas/file_store.go:97\n    │   ├── Read chunks from input \u003c-- internal/storage/cas/file_store.go:101\n    │   ├── Write to SHA256 hasher \u003c-- 2c\n    │   └── Write to temp file \u003c-- internal/storage/cas/file_store.go:106\n    ├── Finalize digest string \u003c-- 2d\n    ├── Check for duplicate object \u003c-- internal/storage/cas/file_store.go:121\n    │   └── handleDuplicateObject() \u003c-- internal/storage/cas/file_store.go:130\n    │       └── merge tags if exists \u003c-- internal/storage/cas/file_store.go:148\n    ├── finalizeUpload() \u003c-- internal/storage/cas/file_store.go:127\n    │   ├── Close temp file \u003c-- internal/storage/cas/file_store.go:167\n    │   ├── Atomic rename to sha256/\u003chex\u003e \u003c-- 2e\n    │   └── writeMetadata() \u003c-- 2f\n    │       ├── Marshal metadata to JSON \u003c-- internal/storage/cas/file_store.go:389\n    │       ├── Write to temp file \u003c-- internal/storage/cas/file_store.go:398\n    │       └── Atomic rename to \u003chex\u003e.json \u003c-- internal/storage/cas/file_store.go:407\n    └── Return Object with digest \u003c-- internal/storage/cas/file_store.go:187",
       "traceGuide": "## Motivation\n\nThe file-based CAS (Content-Addressable Storage) solves a fundamental problem: **how to store arbitrary content exactly once, with guaranteed integrity, and retrieve it by its cryptographic fingerprint**. Instead of organizing files by name or path, content is stored by its SHA256 hash digest. This means identical content is automatically deduplicated, and any corruption is immediately detectable. The system is used throughout agentctl to store large outputs, artifacts, and cached results without cluttering the filesystem with duplicate data.\n\n## Details\n\n### Storage Layout\n\nThe file store uses a simple directory structure [2a]:\n- `cas/sha256/` - Content files named by their hex digest\n- `cas/sha256/*.json` - Metadata files (size, kind, tags, timestamps)\n- `cas/tmp/` - Temporary files during upload\n- `cas/pins/` - Pin markers to prevent garbage collection\n\n### Put Operation Flow\n\n**Atomic write-then-rename** ensures integrity [2b]. Content is first written to a temporary file in `cas/tmp/` while simultaneously streaming through a SHA256 hasher [2c]. This dual-write pattern computes the digest without requiring the entire content in memory. Once complete, the digest is formatted as `sha256:\u003chex\u003e` [2d].\n\n**Deduplication happens automatically** [2e]. If an object with the same digest already exists, the temp file is discarded and tags are merged. Otherwise, the temp file is atomically renamed to `cas/sha256/\u003chex\u003e` [2e], making it visible to readers only after the write completes successfully.\n\n**Metadata is persisted separately** [2f]. A JSON file at `cas/sha256/\u003chex\u003e.json` stores size, MIME type, tags, and timestamps. This metadata write also uses atomic temp-then-rename to prevent partial writes [2f].\n\n### Key Properties\n\n- **Content-addressed**: Files are retrieved by digest, not path\n- **Atomic writes**: Rename operations ensure readers never see partial content\n- **Automatic deduplication**: Identical content stored only once\n- **Integrity verification**: Digest mismatches detected on read\n- **Tag merging**: Multiple puts of same content accumulate tags"
     },
     {
@@ -132,7 +132,7 @@
       "locations": [
         {
           "id": "3a",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/storage/cas/sqlite_store.go",
+          "path": "internal/storage/cas/sqlite_store.go",
           "lineNumber": 48,
           "lineContent": "db, err := dbdriver.OpenDB(ctx, dbCfg, migrateSQLiteSchema)",
           "title": "Open SQLite database",
@@ -140,7 +140,7 @@
         },
         {
           "id": "3b",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/storage/cas/sqlite_store.go",
+          "path": "internal/storage/cas/sqlite_store.go",
           "lineNumber": 94,
           "lineContent": "content, err := io.ReadAll(r)",
           "title": "Read all content",
@@ -148,7 +148,7 @@
         },
         {
           "id": "3c",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/storage/cas/sqlite_store.go",
+          "path": "internal/storage/cas/sqlite_store.go",
           "lineNumber": 99,
           "lineContent": "h := sha256.Sum256(content)",
           "title": "Compute digest",
@@ -156,7 +156,7 @@
         },
         {
           "id": "3d",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/storage/cas/sqlite_store.go",
+          "path": "internal/storage/cas/sqlite_store.go",
           "lineNumber": 109,
           "lineContent": "err = s.db.QueryRowContext(ctx, \"SELECT digest FROM cas_objects WHERE digest = ?\", digest).Scan(\u0026existingDigest)",
           "title": "Check for duplicate",
@@ -164,14 +164,14 @@
         },
         {
           "id": "3e",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/storage/cas/sqlite_store.go",
+          "path": "internal/storage/cas/sqlite_store.go",
           "lineNumber": 129,
           "lineContent": "_, err = s.db.ExecContext(ctx, `\n\t\tINSERT INTO cas_objects (digest, size, kind, tags, pinned, content, created_at, updated_at)\n\t\tVALUES (?, ?, ?, ?, 0, ?, ?, ?)\n\t`, digest, size, kind, tagsJSON, content, timeStr, timeStr)",
           "title": "Insert into database",
           "description": "Store blob content and metadata in cas_objects table"
         }
       ],
-      "traceTextDiagram": "SQLite CAS Put Operation\n├── NewSQLiteStore() factory \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/cas/sqlite_store.go:33\n│   ├── dbdriver.OpenDB() \u003c-- 3a\n│   │   ├── Validate config \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/dbdriver/driver.go:92\n│   │   ├── openSQLite() \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/dbdriver/driver.go:98\n│   │   └── migrateSQLiteSchema() \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/cas/sqlite_store.go:60\n│   └── Return SQLiteStore instance \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/cas/sqlite_store.go:53\n└── Put() operation \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/cas/sqlite_store.go:88\n    ├── io.ReadAll(r) \u003c-- 3b\n    ├── sha256.Sum256(content) \u003c-- 3c\n    ├── Check for duplicate \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/cas/sqlite_store.go:107\n    │   └── QueryRowContext(SELECT digest) \u003c-- 3d\n    └── Insert new object \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/cas/sqlite_store.go:128\n        └── ExecContext(INSERT INTO cas_objects) \u003c-- 3e",
+      "traceTextDiagram": "SQLite CAS Put Operation\n├── NewSQLiteStore() factory \u003c-- internal/storage/cas/sqlite_store.go:33\n│   ├── dbdriver.OpenDB() \u003c-- 3a\n│   │   ├── Validate config \u003c-- internal/storage/dbdriver/driver.go:92\n│   │   ├── openSQLite() \u003c-- internal/storage/dbdriver/driver.go:98\n│   │   └── migrateSQLiteSchema() \u003c-- internal/storage/cas/sqlite_store.go:60\n│   └── Return SQLiteStore instance \u003c-- internal/storage/cas/sqlite_store.go:53\n└── Put() operation \u003c-- internal/storage/cas/sqlite_store.go:88\n    ├── io.ReadAll(r) \u003c-- 3b\n    ├── sha256.Sum256(content) \u003c-- 3c\n    ├── Check for duplicate \u003c-- internal/storage/cas/sqlite_store.go:107\n    │   └── QueryRowContext(SELECT digest) \u003c-- 3d\n    └── Insert new object \u003c-- internal/storage/cas/sqlite_store.go:128\n        └── ExecContext(INSERT INTO cas_objects) \u003c-- 3e",
       "traceGuide": "## Motivation\n\nWhen agentctl stores large outputs (like skill results or job outputs), it needs a **content-addressable storage (CAS)** system to avoid bloating JSON envelopes. The SQLite-backed CAS implementation [3a] provides a **database-driven alternative** to the legacy file-based storage, offering better concurrency, atomic operations, and easier querying while storing content blobs directly in the database.\n\nThe core problem: skills and jobs can produce megabytes of output, but the protocol expects compact JSON responses. CAS solves this by storing large content once, referenced by its SHA256 digest, and returning just the digest (or a hint) in the response.\n\n## Details\n\n### Store Initialization\n\nThe `NewSQLiteStore` factory [3a] creates a SQLite database connection using the unified `dbdriver.OpenDB` interface. It configures a **blob threshold** (default 1MB) that determines inline vs external storage, enables WAL mode for concurrency, and runs schema migrations to create the `cas_objects` table with columns for digest, size, kind, tags, pinned status, and the content blob itself.\n\n### Put Operation Flow\n\nWhen storing content [3b], the SQLite implementation **reads the entire input into memory** (unlike the file-based store which streams). This is necessary because SQLite requires the complete blob for insertion. The content is hashed with SHA256 [3c] to generate the digest in format `sha256:\u003chex\u003e`.\n\nBefore inserting, the store **checks for duplicates** [3d] by querying the existing digest. If found, it merges tags and returns the existing object. This deduplication is automatic and ensures identical content is stored only once.\n\nFor new objects, a single SQL INSERT [3e] atomically stores the digest, metadata (size, kind, tags, timestamps), and the content blob. The `pinned` column defaults to 0, allowing garbage collection unless explicitly pinned.\n\n### Key Design Choices\n\n- **In-memory read**: Simplifies implementation but limits to reasonable-sized objects (controlled by blob threshold)\n- **Single table design**: All metadata and content in `cas_objects` for simplicity\n- **Tag merging**: Duplicate puts merge tags rather than error, supporting incremental tagging\n- **Atomic operations**: Database transactions ensure consistency during concurrent access"
     },
     {
@@ -181,7 +181,7 @@
       "locations": [
         {
           "id": "4a",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/runservice/result.go",
+          "path": "internal/runservice/result.go",
           "lineNumber": 23,
           "lineContent": "result = e.enforceOutputLimit(e.ctx, result, jobID)",
           "title": "Enforce output limit",
@@ -189,7 +189,7 @@
         },
         {
           "id": "4b",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/runservice/result.go",
+          "path": "internal/runservice/result.go",
           "lineNumber": 56,
           "lineContent": "if e.options.NoCAS || !e.cfg.CAS.Store {",
           "title": "Check CAS policy",
@@ -197,7 +197,7 @@
         },
         {
           "id": "4c",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/runservice/result.go",
+          "path": "internal/runservice/result.go",
           "lineNumber": 79,
           "lineContent": "obj, err := casStore.Put(ctx, bytes.NewReader(result), \"application/json\", []string{\"truncated-output\"})",
           "title": "Store in CAS",
@@ -205,7 +205,7 @@
         },
         {
           "id": "4d",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/runservice/result.go",
+          "path": "internal/runservice/result.go",
           "lineNumber": 92,
           "lineContent": "wrapper := buildOutputWrapperWithPolicy(result, obj.Digest, len(result), limitKB, e.cfg.CAS.Expose)",
           "title": "Build wrapper with policy",
@@ -213,7 +213,7 @@
         },
         {
           "id": "4e",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/runservice/result.go",
+          "path": "internal/runservice/result.go",
           "lineNumber": 140,
           "lineContent": "switch expose {",
           "title": "Apply expose policy",
@@ -221,7 +221,7 @@
         },
         {
           "id": "4f",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/runservice/result.go",
+          "path": "internal/runservice/result.go",
           "lineNumber": 149,
           "lineContent": "case config.ExposePolicyHint:",
           "title": "Hint policy branch",
@@ -229,14 +229,14 @@
         },
         {
           "id": "4g",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/runservice/result.go",
+          "path": "internal/runservice/result.go",
           "lineNumber": 154,
           "lineContent": "\"read_command\": fmt.Sprintf(\"agentctl cas read %s\", digest),",
           "title": "Generate hint commands",
           "description": "Provide user-friendly CAS retrieval commands in output"
         }
       ],
-      "traceTextDiagram": "Runservice Output Handling\n├── HandleResult() orchestration \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/runservice/result.go:17\n│   └── enforceOutputLimit() \u003c-- 4a\n│       ├── Check CAS policy enabled \u003c-- 4b\n│       ├── Check size \u003e inline limit \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/runservice/result.go:66\n│       ├── Open CAS store \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/runservice/result.go:70\n│       ├── casStore.Put() stores content \u003c-- 4c\n│       ├── buildOutputWrapperWithPolicy() \u003c-- 4d\n│       │   ├── Extract summary from original \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/runservice/result.go:123\n│       │   ├── Switch on expose policy \u003c-- 4e\n│       │   │   ├── case ExposePolicyOff \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/runservice/result.go:141\n│       │   │   │   └── data[\"stored\"] = true \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/runservice/result.go:144\n│       │   │   ├── case ExposePolicyDigest \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/runservice/result.go:145\n│       │   │   │   └── data[\"artifact\"] = digest \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/runservice/result.go:147\n│       │   │   └── case ExposePolicyHint \u003c-- 4f\n│       │   │       ├── data[\"artifact\"] = digest \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/runservice/result.go:151\n│       │   │       └── Build hint commands \u003c-- 4g\n│       │   └── Return wrapper envelope \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/runservice/result.go:163\n│       └── Marshal and return wrapped output \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/runservice/result.go:93\n└── Write envelope to stdout \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/runservice/result.go:52",
+      "traceTextDiagram": "Runservice Output Handling\n├── HandleResult() orchestration \u003c-- internal/runservice/result.go:17\n│   └── enforceOutputLimit() \u003c-- 4a\n│       ├── Check CAS policy enabled \u003c-- 4b\n│       ├── Check size \u003e inline limit \u003c-- internal/runservice/result.go:66\n│       ├── Open CAS store \u003c-- internal/runservice/result.go:70\n│       ├── casStore.Put() stores content \u003c-- 4c\n│       ├── buildOutputWrapperWithPolicy() \u003c-- 4d\n│       │   ├── Extract summary from original \u003c-- internal/runservice/result.go:123\n│       │   ├── Switch on expose policy \u003c-- 4e\n│       │   │   ├── case ExposePolicyOff \u003c-- internal/runservice/result.go:141\n│       │   │   │   └── data[\"stored\"] = true \u003c-- internal/runservice/result.go:144\n│       │   │   ├── case ExposePolicyDigest \u003c-- internal/runservice/result.go:145\n│       │   │   │   └── data[\"artifact\"] = digest \u003c-- internal/runservice/result.go:147\n│       │   │   └── case ExposePolicyHint \u003c-- 4f\n│       │   │       ├── data[\"artifact\"] = digest \u003c-- internal/runservice/result.go:151\n│       │   │       └── Build hint commands \u003c-- 4g\n│       │   └── Return wrapper envelope \u003c-- internal/runservice/result.go:163\n│       └── Marshal and return wrapped output \u003c-- internal/runservice/result.go:93\n└── Write envelope to stdout \u003c-- internal/runservice/result.go:52",
       "traceGuide": "## Motivation\n\nSkills and jobs in agentctl can produce arbitrarily large outputs—megabytes of JSON, logs, or data. Sending these directly to LLMs or storing them inline creates two problems: **context window exhaustion** and **storage bloat**. The output truncation system solves this by automatically storing large outputs in content-addressable storage (CAS) and replacing them with compact summaries, while **policy settings control whether and how users can retrieve the full content**.\n\n## Details\n\n### Size Enforcement\n\nWhen a job completes, `HandleResult()` [4a] calls `enforceOutputLimit()` to check if the output exceeds the configured inline limit (default 32KB). The system first checks two gates: the `NoCAS` flag and the `CAS.Store` config setting [4b]. If either disables CAS, the full output passes through unchanged.\n\nFor oversized outputs, the system stores the complete content in CAS with the tag `\"truncated-output\"` [4c], generating a content-addressable digest like `sha256:abc123...`.\n\n### Policy-Based Exposure\n\nThe **expose policy** determines what users see in the truncated output [4d]. This is critical for different deployment contexts:\n\n- **`off`**: Stores content for debugging but hides the digest entirely—useful for hooks and internal tools where retrieval isn't needed [4e]\n- **`digest`**: Includes the raw `sha256:...` digest in the output—minimal exposure for programmatic access\n- **`hint`**: Includes the digest plus user-friendly retrieval commands like `agentctl cas read \u003cdigest\u003e` [4f, 4g]—best for interactive skills where users may want to inspect full output\n\nThe policy is configured via `AGENTCTL_CAS_EXPOSE` environment variable or the `cas.expose` config field, with `\"off\"` as the default to prevent accidental information leakage.\n\n### Wrapper Construction\n\n`buildOutputWrapperWithPolicy()` [4d] preserves the original envelope structure (status, command, version) while replacing the data section with a truncation summary. It extracts any existing summary or preview field from the original output and includes metadata like `original_size` and `truncate_reason`. The wrapper format ensures downstream consumers can detect truncation and handle it appropriately."
     },
     {
@@ -246,7 +246,7 @@
       "locations": [
         {
           "id": "5a",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/storage/cas/migrate.go",
+          "path": "internal/storage/cas/migrate.go",
           "lineNumber": 88,
           "lineContent": "sha256Dir := filepath.Join(cfg.Migration.SourcePath, \"sha256\")",
           "title": "Check source directory",
@@ -254,7 +254,7 @@
         },
         {
           "id": "5b",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/storage/cas/migrate.go",
+          "path": "internal/storage/cas/migrate.go",
           "lineNumber": 106,
           "lineContent": "if _, err := os.Stat(filepath.Join(sha256Dir, entry.Name()+\".json\")); err != nil {",
           "title": "Verify metadata exists",
@@ -262,7 +262,7 @@
         },
         {
           "id": "5c",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/storage/cas/migrate.go",
+          "path": "internal/storage/cas/migrate.go",
           "lineNumber": 148,
           "lineContent": "result, err := MigrateFromFile(ctx, cfg.Migration.SourcePath, dst)",
           "title": "Execute migration",
@@ -270,7 +270,7 @@
         },
         {
           "id": "5d",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/storage/cas/migrate.go",
+          "path": "internal/storage/cas/migrate.go",
           "lineNumber": 41,
           "lineContent": "reader, meta, err := src.Get(ctx, obj.Digest)",
           "title": "Read from source",
@@ -278,7 +278,7 @@
         },
         {
           "id": "5e",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/storage/cas/migrate.go",
+          "path": "internal/storage/cas/migrate.go",
           "lineNumber": 48,
           "lineContent": "_, err = dst.Put(ctx, reader, meta.Kind, meta.Tags)",
           "title": "Write to destination",
@@ -286,14 +286,14 @@
         },
         {
           "id": "5f",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/storage/cas/migrate.go",
+          "path": "internal/storage/cas/migrate.go",
           "lineNumber": 57,
           "lineContent": "if err := dst.Pin(ctx, obj.Digest); err != nil {",
           "title": "Preserve pin status",
           "description": "Maintain pinned state during migration"
         }
       ],
-      "traceTextDiagram": "Auto-Migration from Legacy File Store\n├── Factory triggers migration check\n│   └── autoMigrate() called after store open \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/cas/factory.go:40\n│       ├── Check source directory exists \u003c-- 5a\n│       ├── Scan sha256/ for content files \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/cas/migrate.go:89\n│       ├── Filter: only files with .json \u003c-- 5b\n│       ├── Build destination digest set \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/cas/migrate.go:124\n│       ├── Count pending migrations \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/cas/migrate.go:130\n│       └── Execute migration \u003c-- 5c\n│           └── MigrateFromFile() \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/cas/migrate.go:71\n│               └── Migrate() core logic \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/cas/migrate.go:21\n│                   └── for each object: \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/cas/migrate.go:29\n│                       ├── src.Get() \u003c-- 5d\n│                       ├── dst.Put() \u003c-- 5e\n│                       └── dst.Pin() if pinned \u003c-- 5f\n└── Result: objects copied to new backend",
+      "traceTextDiagram": "Auto-Migration from Legacy File Store\n├── Factory triggers migration check\n│   └── autoMigrate() called after store open \u003c-- internal/storage/cas/factory.go:40\n│       ├── Check source directory exists \u003c-- 5a\n│       ├── Scan sha256/ for content files \u003c-- internal/storage/cas/migrate.go:89\n│       ├── Filter: only files with .json \u003c-- 5b\n│       ├── Build destination digest set \u003c-- internal/storage/cas/migrate.go:124\n│       ├── Count pending migrations \u003c-- internal/storage/cas/migrate.go:130\n│       └── Execute migration \u003c-- 5c\n│           └── MigrateFromFile() \u003c-- internal/storage/cas/migrate.go:71\n│               └── Migrate() core logic \u003c-- internal/storage/cas/migrate.go:21\n│                   └── for each object: \u003c-- internal/storage/cas/migrate.go:29\n│                       ├── src.Get() \u003c-- 5d\n│                       ├── dst.Put() \u003c-- 5e\n│                       └── dst.Pin() if pinned \u003c-- 5f\n└── Result: objects copied to new backend",
       "traceGuide": "## Motivation\n\nWhen agentctl transitions from **legacy file-based CAS storage** to modern **database-backed storage** (SQLite or Turso), existing content-addressed objects need to be preserved. Without auto-migration, users would lose access to previously stored artifacts, breaking references in cached results, pinned outputs, and historical job data. The auto-migration system [5a-5f] solves this by **automatically detecting and copying legacy objects** to the new backend on first access, ensuring zero data loss during the storage backend transition.\n\n## Details\n\n**Migration trigger**: When a CAS store opens with a non-file driver (SQLite/Turso), the factory checks if `AutoMigrate` is enabled and a legacy file store exists [5a]. The system scans the `sha256/` directory for content files that have corresponding `.json` metadata files [5b]—objects without metadata are skipped as they cannot be reliably migrated.\n\n**Incremental migration**: The system builds a set of digests already present in the destination store and counts how many source objects are missing [5b]. Only **new objects are migrated**, making subsequent runs fast. The actual migration [5c] reads each object from the source file store [5d], writes it to the destination database [5e], and preserves the pinned status [5f].\n\n**Safety guarantees**: Migration is **best-effort and non-blocking**—if it fails, the error is logged to stderr but doesn't prevent the store from opening. Objects are copied, not moved, so the legacy file store remains intact as a backup. The migration runs synchronously during store initialization, ensuring all legacy content is available before any new operations begin."
     },
     {
@@ -303,7 +303,7 @@
       "locations": [
         {
           "id": "6a",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/storage/dbdriver/driver.go",
+          "path": "internal/storage/dbdriver/driver.go",
           "lineNumber": 91,
           "lineContent": "func OpenDB(ctx context.Context, cfg Config, migrate MigrationFunc) (DB, error) {",
           "title": "OpenDB entry point",
@@ -311,7 +311,7 @@
         },
         {
           "id": "6b",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/storage/dbdriver/driver.go",
+          "path": "internal/storage/dbdriver/driver.go",
           "lineNumber": 96,
           "lineContent": "switch cfg.Driver {",
           "title": "Driver type switch",
@@ -319,7 +319,7 @@
         },
         {
           "id": "6c",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/storage/dbdriver/sqlite.go",
+          "path": "internal/storage/dbdriver/sqlite.go",
           "lineNumber": 28,
           "lineContent": "db, err := sql.Open(\"sqlite\", cfg.Path)",
           "title": "Open SQLite connection",
@@ -327,7 +327,7 @@
         },
         {
           "id": "6d",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/storage/dbdriver/libsql.go",
+          "path": "internal/storage/dbdriver/libsql.go",
           "lineNumber": 51,
           "lineContent": "connector, err = libsql.NewEmbeddedReplicaConnector(cfg.Path, cfg.SyncURL, opts...)",
           "title": "Create libsql connector",
@@ -335,7 +335,7 @@
         },
         {
           "id": "6e",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/storage/dbdriver/turso.go",
+          "path": "internal/storage/dbdriver/turso.go",
           "lineNumber": 56,
           "lineContent": "connector, err := libsql.NewEmbeddedReplicaConnector(dbPath, cfg.URL,\n\t\tlibsql.WithAuthToken(cfg.AuthToken),\n\t)",
           "title": "Create Turso connector",
@@ -343,14 +343,14 @@
         },
         {
           "id": "6f",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/storage/dbdriver/turso.go",
+          "path": "internal/storage/dbdriver/turso.go",
           "lineNumber": 96,
           "lineContent": "if err := ensureVectorSupport(ctx, db, vectorDims); err != nil {",
           "title": "Enable vector search",
           "description": "Verify vector functions available in Turso group"
         }
       ],
-      "traceTextDiagram": "Database Driver Selection \u0026 Initialization\n├── CAS SQLite Store Creation\n│   └── NewSQLiteStore() \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/cas/sqlite_store.go:33\n│       └── dbdriver.OpenDB() \u003c-- 6a\n│           ├── cfg.Validate() \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/dbdriver/driver.go:92\n│           └── switch cfg.Driver \u003c-- 6b\n│               ├── case DriverSQLite \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/dbdriver/driver.go:97\n│               │   └── openSQLite() \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/dbdriver/driver.go:98\n│               │       └── sql.Open(\"sqlite\") \u003c-- 6c\n│               ├── case DriverLibSQL \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/dbdriver/driver.go:99\n│               │   └── openLibSQL() \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/dbdriver/driver.go:100\n│               │       ├── libsql.NewEmbedded\n│               │       │   ReplicaConnector() \u003c-- 6d\n│               │       └── sql.OpenDB(connector) \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/dbdriver/libsql.go:64\n│               └── case DriverTurso \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/dbdriver/driver.go:101\n│                   └── openTurso() \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/dbdriver/driver.go:102\n│                       ├── libsql.NewEmbedded\n│                       │   ReplicaConnector() \u003c-- 6e\n│                       ├── sql.OpenDB(connector) \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/dbdriver/turso.go:68\n│                       └── ensureVectorSupport() \u003c-- 6f",
+      "traceTextDiagram": "Database Driver Selection \u0026 Initialization\n├── CAS SQLite Store Creation\n│   └── NewSQLiteStore() \u003c-- internal/storage/cas/sqlite_store.go:33\n│       └── dbdriver.OpenDB() \u003c-- 6a\n│           ├── cfg.Validate() \u003c-- internal/storage/dbdriver/driver.go:92\n│           └── switch cfg.Driver \u003c-- 6b\n│               ├── case DriverSQLite \u003c-- internal/storage/dbdriver/driver.go:97\n│               │   └── openSQLite() \u003c-- internal/storage/dbdriver/driver.go:98\n│               │       └── sql.Open(\"sqlite\") \u003c-- 6c\n│               ├── case DriverLibSQL \u003c-- internal/storage/dbdriver/driver.go:99\n│               │   └── openLibSQL() \u003c-- internal/storage/dbdriver/driver.go:100\n│               │       ├── libsql.NewEmbedded\n│               │       │   ReplicaConnector() \u003c-- 6d\n│               │       └── sql.OpenDB(connector) \u003c-- internal/storage/dbdriver/libsql.go:64\n│               └── case DriverTurso \u003c-- internal/storage/dbdriver/driver.go:101\n│                   └── openTurso() \u003c-- internal/storage/dbdriver/driver.go:102\n│                       ├── libsql.NewEmbedded\n│                       │   ReplicaConnector() \u003c-- 6e\n│                       ├── sql.OpenDB(connector) \u003c-- internal/storage/dbdriver/turso.go:68\n│                       └── ensureVectorSupport() \u003c-- 6f",
       "traceGuide": "## Motivation\n\nagentctl needs to store content-addressable objects (CAS) for large outputs, artifacts, and cached results. The system must support **three different storage backends**: legacy file-based storage, local SQLite databases, and cloud-based Turso databases. Each backend has different characteristics—files are simple but don't scale well, SQLite provides local database features, and Turso enables cloud sync with vector search capabilities. The database driver layer provides a **unified interface** so that higher-level code (like CAS stores) doesn't need to know which backend is being used.\n\n## Details\n\n### Driver Selection\n\nThe `OpenDB` function [6a] is the single entry point for opening any database connection. It validates the configuration and then switches on the driver type [6b] to route to the appropriate implementation. This factory pattern keeps backend selection centralized.\n\n### Three Backend Implementations\n\n**SQLite** [6c] uses the standard `database/sql` driver with no special features—just local file-based storage with WAL mode for concurrency. It's the simplest option with no external dependencies.\n\n**libsql** [6d] creates an embedded replica connector that can optionally sync with a remote sqld server. This enables **local-first operation** with background sync to a remote database. The connector is wrapped with `sql.OpenDB` to provide the standard database interface.\n\n**Turso** [6e] is cloud-based and also uses libsql's embedded replica connector, but always syncs with Turso's cloud infrastructure. It requires authentication tokens and can optionally enable **vector search** [6f] for semantic operations. The `ensureVectorSupport` function verifies that the Turso database group has vector extensions enabled by attempting to create a test table with `F32_BLOB` columns.\n\n### Configuration Flow\n\nThe CAS SQLite store calls `OpenDB` with a `dbdriver.Config` that specifies the driver type and backend-specific settings (paths, URLs, tokens, vector dimensions). Environment variables like `AGENTCTL_CAS_DRIVER` control which backend is selected at runtime, defaulting to SQLite for simplicity."
     },
     {
@@ -360,7 +360,7 @@
       "locations": [
         {
           "id": "7a",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/platform/config/config.go",
+          "path": "internal/platform/config/config.go",
           "lineNumber": 249,
           "lineContent": "func Load(_ context.Context, opts ...Option) (Config, error) {",
           "title": "Config Load entry",
@@ -368,7 +368,7 @@
         },
         {
           "id": "7b",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/platform/config/config.go",
+          "path": "internal/platform/config/config.go",
           "lineNumber": 320,
           "lineContent": "v.SetDefault(\"cas.store\", true)",
           "title": "Default CAS store enabled",
@@ -376,7 +376,7 @@
         },
         {
           "id": "7c",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/platform/config/config.go",
+          "path": "internal/platform/config/config.go",
           "lineNumber": 321,
           "lineContent": "v.SetDefault(\"cas.expose\", \"off\")",
           "title": "Default expose policy off",
@@ -384,7 +384,7 @@
         },
         {
           "id": "7d",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/platform/config/config.go",
+          "path": "internal/platform/config/config.go",
           "lineNumber": 416,
           "lineContent": "if storeEnv := os.Getenv(\"AGENTCTL_CAS_STORE\"); storeEnv != \"\" {",
           "title": "Override from environment",
@@ -392,7 +392,7 @@
         },
         {
           "id": "7e",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/platform/config/config.go",
+          "path": "internal/platform/config/config.go",
           "lineNumber": 420,
           "lineContent": "switch strings.ToLower(exposeEnv) {",
           "title": "Parse expose policy",
@@ -400,7 +400,7 @@
         },
         {
           "id": "7f",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/adapters/skillslib/skillmain/context.go",
+          "path": "internal/adapters/skillslib/skillmain/context.go",
           "lineNumber": 86,
           "lineContent": "return !rc.NoCAS \u0026\u0026 rc.Config.CAS.Store",
           "title": "Check if CAS enabled",
@@ -408,14 +408,14 @@
         },
         {
           "id": "7g",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/adapters/skillslib/skillout/emit.go",
+          "path": "internal/adapters/skillslib/skillout/emit.go",
           "lineNumber": 115,
           "lineContent": "switch expose {",
           "title": "Apply policy in skill output",
           "description": "Skills respect expose policy when building output"
         }
       ],
-      "traceTextDiagram": "Configuration Loading with CAS Policy\n├── Config.Load() entry point \u003c-- 7a\n│   ├── parseOptions() \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/platform/config/config.go:274\n│   ├── newConfiguredViper() \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/platform/config/config.go:282\n│   │   └── SetEnvPrefix(\"AGENTCTL\") \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/platform/config/config.go:284\n│   ├── applyDefaults() \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/platform/config/config.go:290\n│   │   ├── SetDefault(\"cas.store\", true) \u003c-- 7b\n│   │   └── SetDefault(\"cas.expose\", \"off\") \u003c-- 7c\n│   ├── configureConfigFile() \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/platform/config/config.go:324\n│   ├── readConfig() - read YAML \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/platform/config/config.go:334\n│   ├── decodeConfig() - unmarshal \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/platform/config/config.go:345\n│   └── finalizeConfig() \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/platform/config/config.go:352\n│       ├── Check AGENTCTL_CAS_STORE env \u003c-- 7d\n│       └── Parse AGENTCTL_CAS_EXPOSE \u003c-- 7e\n│\nUsage in Skills\n├── RunContext.ShouldStoreCAS() \u003c-- 7f\n│   └── checks !NoCAS \u0026\u0026 Config.CAS.Store \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/adapters/skillslib/skillmain/context.go:86\n└── skillout.BuildCASResult() \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/adapters/skillslib/skillout/emit.go:109\n    └── switch on expose policy \u003c-- 7g\n        ├── ExposePolicyOff → stored:true \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/adapters/skillslib/skillout/emit.go:118\n        ├── ExposePolicyDigest → artifact \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/adapters/skillslib/skillout/emit.go:121\n        └── ExposePolicyHint → artifact+hint \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/adapters/skillslib/skillout/emit.go:125",
+      "traceTextDiagram": "Configuration Loading with CAS Policy\n├── Config.Load() entry point \u003c-- 7a\n│   ├── parseOptions() \u003c-- internal/platform/config/config.go:274\n│   ├── newConfiguredViper() \u003c-- internal/platform/config/config.go:282\n│   │   └── SetEnvPrefix(\"AGENTCTL\") \u003c-- internal/platform/config/config.go:284\n│   ├── applyDefaults() \u003c-- internal/platform/config/config.go:290\n│   │   ├── SetDefault(\"cas.store\", true) \u003c-- 7b\n│   │   └── SetDefault(\"cas.expose\", \"off\") \u003c-- 7c\n│   ├── configureConfigFile() \u003c-- internal/platform/config/config.go:324\n│   ├── readConfig() - read YAML \u003c-- internal/platform/config/config.go:334\n│   ├── decodeConfig() - unmarshal \u003c-- internal/platform/config/config.go:345\n│   └── finalizeConfig() \u003c-- internal/platform/config/config.go:352\n│       ├── Check AGENTCTL_CAS_STORE env \u003c-- 7d\n│       └── Parse AGENTCTL_CAS_EXPOSE \u003c-- 7e\n│\nUsage in Skills\n├── RunContext.ShouldStoreCAS() \u003c-- 7f\n│   └── checks !NoCAS \u0026\u0026 Config.CAS.Store \u003c-- internal/adapters/skillslib/skillmain/context.go:86\n└── skillout.BuildCASResult() \u003c-- internal/adapters/skillslib/skillout/emit.go:109\n    └── switch on expose policy \u003c-- 7g\n        ├── ExposePolicyOff → stored:true \u003c-- internal/adapters/skillslib/skillout/emit.go:118\n        ├── ExposePolicyDigest → artifact \u003c-- internal/adapters/skillslib/skillout/emit.go:121\n        └── ExposePolicyHint → artifact+hint \u003c-- internal/adapters/skillslib/skillout/emit.go:125",
       "traceGuide": "## Motivation\n\nSkills and tools in agentctl can produce arbitrarily large outputs (logs, file contents, analysis results). Sending megabytes of data inline in JSON responses creates two problems: **context window bloat** for LLMs and **slow network transfers**. The CAS (Content-Addressable Storage) policy system solves this by automatically storing large outputs in a digest-addressed store and controlling how those digests appear in responses.\n\nThe key tension: **debugging requires access to full outputs**, but **production workflows need concise responses**. The policy system balances these needs through three modes:\n- **`off`**: Store in CAS but hide digests (debugging only, no user-facing references)\n- **`digest`**: Include raw `sha256:...` digests in output\n- **`hint`**: Include digests plus retrieval commands like `agentctl cas read \u003cdigest\u003e`\n\n## Details\n\n### Configuration Loading\n\nThe system loads CAS policy through a layered approach [7a]: **defaults** → **config file** → **environment variables**. \n\nDefault policy is conservative [7b, 7c]: `cas.store=true` (always persist for debugging) and `cas.expose=off` (hide from output). This means large outputs are captured but not advertised to users by default.\n\nEnvironment variables provide runtime overrides [7d, 7e]: `AGENTCTL_CAS_STORE=true/false` controls storage, while `AGENTCTL_CAS_EXPOSE=off/digest/hint` controls visibility. The config system parses these in `finalizeConfig()` after loading YAML settings, ensuring env vars win.\n\n### Policy Application in Skills\n\nSkills check the policy before truncating outputs [7f]. The `RunContext.ShouldStoreCAS()` method returns `true` only if both conditions hold: CAS is not explicitly disabled (`!NoCAS`) **and** the config enables storage (`Config.CAS.Store`).\n\nWhen building truncated output, `BuildCASResult()` [7g] switches on the expose policy to construct the response payload. The **`off` policy** returns `{\"stored\": true, \"truncated\": true}` with no digest. The **`digest` policy** adds `\"artifact\": \"sha256:...\"`. The **`hint` policy** goes further, embedding a `hint` object with `read_command` and `get_command` fields containing ready-to-run CLI commands [7g].\n\n### Why Three Policies?\n\n- **`off`**: For hooks and internal tools where CAS references would confuse users or leak implementation details\n- **`digest`**: For programmatic consumers that can resolve digests themselves\n- **`hint`**: For interactive AI assistants that benefit from explicit retrieval instructions\n\nThe default `off` policy reflects the design philosophy: **capture everything for debugging, but keep user-facing output clean unless explicitly configured otherwise**."
     }
   ],

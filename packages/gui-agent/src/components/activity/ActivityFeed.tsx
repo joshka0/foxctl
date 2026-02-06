@@ -55,7 +55,7 @@ export function ActivityFeed() {
             </div>
           ) : (
             events.map((event, index) => (
-              <ActivityEventCard key={`${event.ts}-${index}`} event={event} />
+              <ActivityEventCard key={`${event.ts}-${event.operation}-${event.session_id || index}`} event={event} />
             ))
           )}
         </div>

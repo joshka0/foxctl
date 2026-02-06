@@ -53,51 +53,40 @@ export function CompanionChat() {
   const [toolModel, setToolModel] = useState(COMPANION_TOOL_MODELS[0]?.id || '')
   const [responseModel, setResponseModel] = useState(COMPANION_RESPONSE_MODELS[0]?.id || '')
 
-  // Auto-scroll to bottom on new messages
+  // Auto-scroll to bottom on new messages, but only if user is near the bottom
   useEffect(() => {
-    if (scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight
+    const el = scrollRef.current
+    if (!el) return
+    const isNearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 100
+    if (isNearBottom) {
+      el.scrollTop = el.scrollHeight
     }
   }, [messages, inflight])
 
   // Load or create session on mount
   useEffect(() => {
     const initSession = async () => {
-      console.log('[CompanionChat] initSession called, isInitializing:', isInitializing, 'hasInitialized:', hasInitializedRef.current, 'sessionId:', sessionId, 'messages.length:', messages.length)
-
       // Skip if AgentDetailView is initializing a session
-      if (isInitializing) {
-        console.log('[CompanionChat] AgentDetailView is initializing, skipping auto-init')
-        return
-      }
+      if (isInitializing) return
 
       // If we already have a session with messages loaded, don't overwrite
       if (sessionId && messages.length > 0) {
-        console.log('[CompanionChat] Session already loaded with messages, skipping init')
         hasInitializedRef.current = true
         return
       }
 
       // If we already initialized this session, don't do it again
-      if (hasInitializedRef.current && sessionId) {
-        console.log('[CompanionChat] Already initialized this session, skipping')
-        return
-      }
+      if (hasInitializedRef.current && sessionId) return
 
       hasInitializedRef.current = true
 
       // Try to load existing session from localStorage
       const savedSessionId = localStorage.getItem('gui-agent-session-id')
-      console.log('[CompanionChat] savedSessionId from localStorage:', savedSessionId)
       if (savedSessionId) {
         // Don't load if we already have this session ID set (AgentDetailView already set it)
-        if (sessionId === savedSessionId) {
-          console.log('[CompanionChat] Session ID already matches localStorage, skipping load')
-          return
-        }
+        if (sessionId === savedSessionId) return
         try {
           const data = await getConsoleSession(savedSessionId)
-          console.log('[CompanionChat] Loaded session from localStorage, messages:', data.messages.length)
           setSessionId(savedSessionId)
           setSession(data.session)
           setMessages(data.messages)
@@ -105,7 +94,6 @@ export function CompanionChat() {
           return
         } catch {
           // Session expired or invalid, create new one
-          console.log('[CompanionChat] Failed to load session from localStorage, creating new')
           localStorage.removeItem('gui-agent-session-id')
         }
       }
@@ -119,7 +107,6 @@ export function CompanionChat() {
           response_model: responseModel,
         })
         const newSessionId = data.session.id
-        console.log('[CompanionChat] Created new session:', newSessionId)
         setSessionId(newSessionId)
         setSession(data.session)
         setMessages([])
@@ -170,51 +157,68 @@ export function CompanionChat() {
     [addMessage, appendToLastMessage, setInflight]
   )
 
-  // Subscribe to session events via SSE
+  // Subscribe to session events via SSE with reconnection
   useEffect(() => {
     if (!sessionId) return
 
-    const eventSource = new EventSource(
-      `${API_BASE}/console/sessions/${sessionId}/events`
-    )
-    eventSourceRef.current = eventSource
+    let reconnectAttempts = 0
+    const maxReconnectAttempts = 10
+    let reconnectTimer: ReturnType<typeof setTimeout> | null = null
 
-    eventSource.addEventListener('connected', () => {
-      console.log('SSE connected to session', sessionId)
-    })
+    const connectSSE = () => {
+      const eventSource = new EventSource(
+        `${API_BASE}/console/sessions/${sessionId}/events`
+      )
+      eventSourceRef.current = eventSource
 
-    eventSource.addEventListener('message', (event) => {
-      try {
-        handleSSEMessage(JSON.parse(event.data))
-      } catch (e) {
-        console.error('Failed to parse SSE message:', e)
+      eventSource.addEventListener('connected', () => {
+        reconnectAttempts = 0
+      })
+
+      eventSource.addEventListener('message', (event) => {
+        try {
+          handleSSEMessage(JSON.parse(event.data))
+        } catch (e) {
+          console.error('Failed to parse SSE message:', e)
+        }
+      })
+
+      eventSource.addEventListener('chunk', (event) => {
+        try {
+          handleSSEMessage({ type: 'chunk', data: JSON.parse(event.data) })
+        } catch (e) {
+          console.error('Failed to parse SSE chunk:', e)
+        }
+      })
+
+      eventSource.addEventListener('done', () => {
+        handleSSEMessage({ type: 'done', data: undefined })
+      })
+
+      eventSource.addEventListener('error', () => {
+        handleSSEMessage({ type: 'error', data: undefined })
+      })
+
+      eventSource.onerror = () => {
+        console.error('SSE connection error')
+        eventSource.close()
+        eventSourceRef.current = null
+        if (reconnectAttempts < maxReconnectAttempts) {
+          const delay = Math.min(1000 * Math.pow(2, reconnectAttempts), 30000)
+          reconnectAttempts++
+          reconnectTimer = setTimeout(connectSSE, delay)
+        }
       }
-    })
-
-    eventSource.addEventListener('chunk', (event) => {
-      try {
-        handleSSEMessage({ type: 'chunk', data: JSON.parse(event.data) })
-      } catch (e) {
-        console.error('Failed to parse SSE chunk:', e)
-      }
-    })
-
-    eventSource.addEventListener('done', () => {
-      handleSSEMessage({ type: 'done', data: undefined })
-    })
-
-    eventSource.addEventListener('error', () => {
-      handleSSEMessage({ type: 'error', data: undefined })
-    })
-
-    eventSource.onerror = () => {
-      console.error('SSE connection error')
-      // Reconnect logic could go here
     }
 
+    connectSSE()
+
     return () => {
-      eventSource.close()
-      eventSourceRef.current = null
+      if (reconnectTimer) clearTimeout(reconnectTimer)
+      if (eventSourceRef.current) {
+        eventSourceRef.current.close()
+        eventSourceRef.current = null
+      }
     }
   }, [sessionId, handleSSEMessage])
 
@@ -278,6 +282,18 @@ export function CompanionChat() {
 
   const [showSessionInfo, setShowSessionInfo] = useState(false)
   const [showSessionPicker, setShowSessionPicker] = useState(false)
+  const sessionPickerRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!showSessionPicker) return
+    const handleClickOutside = (e: MouseEvent) => {
+      if (sessionPickerRef.current && !sessionPickerRef.current.contains(e.target as Node)) {
+        setShowSessionPicker(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [showSessionPicker])
   const [availableSessions, setAvailableSessions] = useState<ConsoleSession[]>([])
   const [copiedId, setCopiedId] = useState(false)
 
@@ -369,7 +385,7 @@ export function CompanionChat() {
                 {activityCount}
               </Badge>
             )}
-            <div className="relative">
+            <div className="relative" ref={sessionPickerRef}>
               <Button
                 variant="ghost"
                 size="sm"

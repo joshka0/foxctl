@@ -161,6 +161,7 @@ func TestNewGatherer(t *testing.T) {
 		g := NewGatherer()
 		if g == nil {
 			t.Fatal("NewGatherer() returned nil")
+			return
 		}
 		if g.skillResolver == nil {
 			t.Error("expected default skill resolver to be set")

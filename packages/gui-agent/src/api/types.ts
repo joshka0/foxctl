@@ -8,7 +8,7 @@ export interface Agent {
   role?: string
   skills_allow: string[]
   share_bb: string
-  state: string
+  state: 'running' | 'idle' | 'stopped' | 'error' | 'unknown'
   created_at: string
   updated_at?: string
   heartbeat_at?: string
@@ -95,12 +95,6 @@ export interface BlackboardRecord {
 }
 
 // Companion types
-export interface CompanionMessage {
-  role: 'user' | 'assistant'
-  content: string
-  timestamp?: string
-}
-
 export interface CompanionConversation {
   id: string
   title?: string

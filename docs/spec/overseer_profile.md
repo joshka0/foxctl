@@ -163,7 +163,7 @@ job progress/result envelopes. Conceptually, a plan event looks like:
     "MessageType": "plan.created" | "plan.updated" | "plan.review_needed",
     "Subject": "plan.created:<epic-id>",
     "Sender": "actor:system:overseer",
-    "Recipients": ["actor:agent:dspy-planner:main"],
+    "Recipients": ["actor:agent:planner:main"],
     "Timestamp": "2025-11-15T12:34:56Z",
     "Body": {
       /* Plan payload; see overseer_planning.md for exact shape */

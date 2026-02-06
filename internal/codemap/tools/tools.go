@@ -9,8 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	dstools "github.com/XiaoConstantine/dspy-go/pkg/tools"
 	models "github.com/XiaoConstantine/mcp-go/pkg/model"
+	tooling "github.com/jkatigb/agentctl/internal/tooling"
 	"github.com/jkatigb/agentctl/internal/domain/skill"
 	"github.com/jkatigb/agentctl/internal/platform/buildinfo"
 	"github.com/jkatigb/agentctl/internal/protocol"
@@ -23,7 +23,7 @@ type Registry struct {
 	workspace     string
 	graphStore    graph.Store
 	skillResolver *skill.Resolver
-	tools         *dstools.InMemoryToolRegistry
+	tools         *tooling.InMemoryToolRegistry
 	finalCodemap  json.RawMessage // Captured by finish_codemap tool
 }
 
@@ -57,14 +57,14 @@ func WithSkillResolver(resolver *skill.Resolver) RegistryOption {
 // Index:
 // - Purpose: Initialize codemap tools for exploration and finish capture
 // - Flow: apply options → register tools → return registry
-// - SideEffects: registers dspy-go tool definitions
+// - SideEffects: registers codemap tool definitions
 // - FailureModes: tool registration errors
 // - Related: Registry.registerTools
 // - Keywords: codemap_tools, tool_registry, read_file, search_pattern, finish_codemap
 func NewRegistry(opts ...RegistryOption) (*Registry, error) {
 	r := &Registry{
 		skillResolver: skill.NewResolver(),
-		tools:         dstools.NewInMemoryToolRegistry(),
+		tools:         tooling.NewInMemoryToolRegistry(),
 	}
 
 	for _, opt := range opts {
@@ -80,7 +80,7 @@ func NewRegistry(opts ...RegistryOption) (*Registry, error) {
 }
 
 // Tools returns the underlying tool registry.
-func (r *Registry) Tools() *dstools.InMemoryToolRegistry {
+func (r *Registry) Tools() *tooling.InMemoryToolRegistry {
 	return r.tools
 }
 
@@ -126,7 +126,7 @@ func (r *Registry) registerTools() error {
 
 // registerReadFile registers the read_file tool.
 func (r *Registry) registerReadFile() error {
-	tool := dstools.NewFuncTool(
+	tool := tooling.NewFuncTool(
 		"read_file",
 		"Read the contents of a file. Supports optional line range for large files.",
 		models.InputSchema{
@@ -227,7 +227,7 @@ func (r *Registry) readFile(ctx context.Context, args map[string]any) (*models.C
 
 // registerSearchPattern registers the search_pattern tool.
 func (r *Registry) registerSearchPattern() error {
-	tool := dstools.NewFuncTool(
+	tool := tooling.NewFuncTool(
 		"search_pattern",
 		"Search for patterns in code using ripgrep. Returns matching code blocks with context.",
 		models.InputSchema{
@@ -295,7 +295,7 @@ func (r *Registry) searchPattern(ctx context.Context, args map[string]any) (*mod
 
 // registerGetSymbols registers the get_symbols tool.
 func (r *Registry) registerGetSymbols() error {
-	tool := dstools.NewFuncTool(
+	tool := tooling.NewFuncTool(
 		"get_symbols",
 		"Extract code symbols (functions, types, methods) from files.",
 		models.InputSchema{
@@ -362,7 +362,7 @@ func (r *Registry) getSymbols(ctx context.Context, args map[string]any) (*models
 
 // registerGetGraphNeighbors registers the get_graph_neighbors tool.
 func (r *Registry) registerGetGraphNeighbors() error {
-	tool := dstools.NewFuncTool(
+	tool := tooling.NewFuncTool(
 		"get_graph_neighbors",
 		"Get neighboring nodes in the code graph. Useful for understanding relationships between files, symbols, and tasks.",
 		models.InputSchema{
@@ -449,7 +449,7 @@ func (r *Registry) getGraphNeighbors(ctx context.Context, args map[string]any) (
 
 // registerSemanticSearch registers the semantic_search tool.
 func (r *Registry) registerSemanticSearch() error {
-	tool := dstools.NewFuncTool(
+	tool := tooling.NewFuncTool(
 		"semantic_search",
 		"Search for code using natural language. Uses vector embeddings for semantic similarity.",
 		models.InputSchema{
@@ -508,7 +508,7 @@ func (r *Registry) semanticSearch(ctx context.Context, args map[string]any) (*mo
 
 // registerFinishCodemap registers the finish_codemap tool.
 func (r *Registry) registerFinishCodemap() error {
-	tool := dstools.NewFuncTool(
+	tool := tooling.NewFuncTool(
 		"finish_codemap",
 		"Complete the codemap generation by providing the final structured output as a JSON string. Call this when you have gathered enough context.",
 		models.InputSchema{

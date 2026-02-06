@@ -10,9 +10,9 @@
   - See AGENTS.md "Engineering Principles" section for guidance
 - 2026-01-21 [gotcha]: Agent daemon exec_mode routing
   - reactive (default) → LLMChatEngine via companion.Service (cerebras default)
-  - autonomous/proactive → DSPy ReAct (requires: gemini, openai, anthropic, groq, openrouter)
-  - "unsupported LLM provider: cerebras" means agent has exec_mode=autonomous but uses cerebras
-  - Fix: Change to exec_mode=reactive OR use DSPy-supported provider
+  - autonomous/proactive → LLMChatEngine tool loop (tool-capable model recommended)
+  - "unsupported LLM provider" usually means missing or misconfigured API key/model
+  - Fix: Set provider API key and verify model name
   - See docs/general/agent-daemon.md for details
 - 2026-01-21 [fix]: code_search tool grep timeout
   - simpleGrep() in runtime.go now has 30s timeout to prevent hanging on large codebases

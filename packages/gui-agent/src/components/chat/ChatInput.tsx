@@ -71,6 +71,7 @@ export function ChatInput({
             onKeyDown={handleKeyDown}
             placeholder={placeholder}
             disabled={disabled}
+            aria-label="Chat message"
             rows={1}
             className={cn(
               'w-full resize-none rounded-lg border border-input bg-background px-3 py-2 text-sm',
@@ -90,6 +91,7 @@ export function ChatInput({
             variant="destructive"
             size="icon"
             onClick={onCancel}
+            aria-label="Cancel"
             className="h-9 w-9 shrink-0"
           >
             <Square className="h-4 w-4" />
@@ -99,6 +101,7 @@ export function ChatInput({
             onClick={handleSubmit}
             disabled={!value.trim() || disabled}
             size="icon"
+            aria-label="Send message"
             className="h-9 w-9 shrink-0"
           >
             <Send className="h-4 w-4" />

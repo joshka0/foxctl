@@ -2,18 +2,16 @@ package verification
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
-
-	"github.com/XiaoConstantine/dspy-go/pkg/core"
-	"github.com/XiaoConstantine/dspy-go/pkg/modules"
 )
 
 // CoVe implements the Chain of Verification pattern with parallel "Draft" verification.
 // It orchestrates the full verification pipeline: Baseline -> Extract -> Verify -> Refine.
 type CoVe struct {
-	llm     core.LLM
+	llm     LLMClient
 	spawner *Spawner
 	config  CoVeConfig
 }
@@ -39,7 +37,7 @@ func DefaultCoVeConfig() CoVeConfig {
 }
 
 // NewCoVe creates a new Chain of Verification orchestrator.
-func NewCoVe(llm core.LLM, config CoVeConfig) *CoVe {
+func NewCoVe(llm LLMClient, config CoVeConfig) *CoVe {
 	spawnerConfig := SpawnerConfig{
 		MaxWorkers:     config.MaxVerifiers,
 		DefaultTimeout: config.VerificationTimeout,
@@ -194,46 +192,27 @@ func (c *CoVe) generateBaseline(ctx context.Context, req CoVeRequest) (string, e
 	baselineCtx, cancel := context.WithTimeout(ctx, c.config.BaselineTimeout)
 	defer cancel()
 
-	sig := BuildBaselineSignature()
-	predict := modules.NewPredict(*sig).WithTextOutput()
-	predict.SetLLM(c.llm)
-
-	input := map[string]any{
-		"question": req.Question,
-	}
-
-	if req.Context != nil {
-		input["context"] = req.Context
-	}
-
-	result, err := predict.Process(baselineCtx, input)
+	result, err := c.llm.Chat(baselineCtx, baselineSystemPrompt(), baselineUserPrompt(req.Question, req.Context), LLMCallOptions{
+		Temperature: 0.2,
+	})
 	if err != nil {
 		return "", err
 	}
-
-	return extractStringResult(result, "baseline_response"), nil
+	return strings.TrimSpace(result), nil
 }
 
 func (c *CoVe) extractClaims(ctx context.Context, baseline string) ([]Claim, error) {
 	extractCtx, cancel := context.WithTimeout(ctx, c.config.ExtractionTimeout)
 	defer cancel()
 
-	// Use Predict module for pure reasoning without tool calls.
-	// WithTextOutput() ensures raw text extraction works correctly.
-	sig := BuildClaimExtractorSignature()
-	predict := modules.NewPredict(*sig).WithTextOutput()
-	predict.SetLLM(c.llm)
-
-	input := map[string]any{
-		"text": baseline,
-	}
-
-	result, err := predict.Process(extractCtx, input)
+	result, err := c.llm.Chat(extractCtx, claimExtractorSystemPrompt(), claimExtractorUserPrompt(baseline), LLMCallOptions{
+		Temperature: 0.0,
+	})
 	if err != nil {
 		return nil, err
 	}
 
-	claimsJSON := extractStringResult(result, "claims")
+	claimsJSON := strings.TrimSpace(result)
 	return parseClaimsJSON(claimsJSON)
 }
 
@@ -241,46 +220,14 @@ func (c *CoVe) refine(ctx context.Context, question, baseline string, verificati
 	refineCtx, cancel := context.WithTimeout(ctx, c.config.RefinementTimeout)
 	defer cancel()
 
-	sig := BuildRefinerSignature(mode)
-	predict := modules.NewPredict(*sig).WithTextOutput()
-	predict.SetLLM(c.llm)
-
 	verificationNotes := formatVerificationNotes(verification)
-
-	input := map[string]any{
-		"question":           question,
-		"baseline":           baseline,
-		"verification_notes": verificationNotes,
-	}
-
-	result, err := predict.Process(refineCtx, input)
+	result, err := c.llm.Chat(refineCtx, refinerSystemPrompt(mode), refinerUserPrompt(question, baseline, verificationNotes), LLMCallOptions{
+		Temperature: 0.2,
+	})
 	if err != nil {
 		return "", nil, err
 	}
-
-	finalAnswer := extractStringResult(result, "final_answer")
-	correctionsStr := extractStringResult(result, "corrections_made")
-	corrections := parseCorrections(correctionsStr)
-
-	return finalAnswer, corrections, nil
-}
-
-func extractStringResult(result map[string]any, primaryKey string) string {
-	if result == nil {
-		return ""
-	}
-
-	if v, ok := result[primaryKey].(string); ok && v != "" {
-		return v
-	}
-
-	for _, key := range []string{"result", "output", "answer", "thought"} {
-		if v, ok := result[key].(string); ok && v != "" {
-			return v
-		}
-	}
-
-	return fmt.Sprintf("%v", result)
+	return parseRefinerOutput(result, mode)
 }
 
 func formatVerificationNotes(verification *BatchVerificationResult) string {
@@ -331,6 +278,59 @@ func parseCorrections(correctionsStr string) []Correction {
 	}
 
 	return corrections
+}
+
+type refinerOutput struct {
+	FinalAnswer    string      `json:"final_answer"`
+	CorrectionsRaw interface{} `json:"corrections_made"`
+}
+
+func parseRefinerOutput(raw string, mode CoVeMode) (string, []Correction, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "", nil, nil
+	}
+	if mode == CoVeModeGate {
+		return raw, nil, nil
+	}
+
+	var parsed refinerOutput
+	if err := decodeJSONFragment(raw, &parsed); err == nil && strings.TrimSpace(parsed.FinalAnswer) != "" {
+		var corrections []Correction
+		switch v := parsed.CorrectionsRaw.(type) {
+		case string:
+			corrections = parseCorrections(v)
+		case []any:
+			lines := make([]string, 0, len(v))
+			for _, item := range v {
+				lines = append(lines, fmt.Sprintf("%v", item))
+			}
+			corrections = parseCorrections(strings.Join(lines, "\n"))
+		default:
+			if parsed.CorrectionsRaw != nil {
+				corrections = parseCorrections(fmt.Sprintf("%v", parsed.CorrectionsRaw))
+			}
+		}
+		return parsed.FinalAnswer, corrections, nil
+	}
+
+	return raw, nil, nil
+}
+
+func decodeJSONFragment(raw string, dst any) error {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return fmt.Errorf("empty input")
+	}
+	if err := json.Unmarshal([]byte(raw), dst); err == nil {
+		return nil
+	}
+	start := strings.Index(raw, "{")
+	end := strings.LastIndex(raw, "}")
+	if start == -1 || end <= start {
+		return fmt.Errorf("no json object found")
+	}
+	return json.Unmarshal([]byte(raw[start:end+1]), dst)
 }
 
 // RunQuick is a convenience method for quick verification with minimal config.

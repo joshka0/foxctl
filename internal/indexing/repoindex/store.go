@@ -105,6 +105,11 @@ func (s *Store) RepoRoot() string {
 	return s.repoRoot
 }
 
+// RepoKey returns the repo key associated with this store.
+func (s *Store) RepoKey() string {
+	return s.repoKey
+}
+
 // SetMeta stores index metadata.
 func (s *Store) SetMeta(ctx context.Context, meta IndexMeta) error {
 	if meta.IndexedAt.IsZero() {
@@ -276,6 +281,107 @@ func (s *Store) SearchFTS(ctx context.Context, query string, limit int) ([]Node,
 	defer rows.Close()
 
 	return scanNodes(rows)
+}
+
+// SearchFTSScored searches nodes using full-text search and returns BM25 scores.
+// Lower BM25 is better; callers should normalize as needed.
+func (s *Store) SearchFTSScored(ctx context.Context, query string, limit int) ([]ScoredNode, error) {
+	if limit <= 0 {
+		limit = 20
+	}
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT nodes.id, nodes.kind, nodes.pkg, nodes.file, nodes.name, nodes.signature,
+		       nodes.span_start, nodes.span_end, nodes.exported, nodes.doc, nodes.summary,
+		       nodes.meta_json, nodes.hash, nodes.updated_at,
+		       bm25(node_fts) AS score
+		FROM node_fts
+		JOIN nodes ON nodes.rowid = node_fts.rowid
+		WHERE node_fts MATCH ? AND nodes.repo_key = ?
+		ORDER BY score
+		LIMIT ?
+	`, query, s.repoKey, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var scored []ScoredNode
+	for rows.Next() {
+		var (
+			node      Node
+			kind      string
+			pkg       sql.NullString
+			file      sql.NullString
+			name      sql.NullString
+			signature sql.NullString
+			spanStart sql.NullInt64
+			spanEnd   sql.NullInt64
+			exported  int
+			doc       sql.NullString
+			summary   sql.NullString
+			meta      sql.NullString
+			hash      sql.NullString
+			updated   int64
+			score     float64
+		)
+		if err := rows.Scan(
+			&node.ID,
+			&kind,
+			&pkg,
+			&file,
+			&name,
+			&signature,
+			&spanStart,
+			&spanEnd,
+			&exported,
+			&doc,
+			&summary,
+			&meta,
+			&hash,
+			&updated,
+			&score,
+		); err != nil {
+			return nil, err
+		}
+		node.Kind = NodeKind(kind)
+		if pkg.Valid {
+			node.Pkg = pkg.String
+		}
+		if file.Valid {
+			node.File = file.String
+		}
+		if name.Valid {
+			node.Name = name.String
+		}
+		if signature.Valid {
+			node.Signature = signature.String
+		}
+		if spanStart.Valid {
+			node.SpanStart = int(spanStart.Int64)
+		}
+		if spanEnd.Valid {
+			node.SpanEnd = int(spanEnd.Int64)
+		}
+		node.Exported = exported > 0
+		if doc.Valid {
+			node.Doc = doc.String
+		}
+		if summary.Valid {
+			node.Summary = summary.String
+		}
+		if meta.Valid {
+			node.Meta = []byte(meta.String)
+		}
+		if hash.Valid {
+			node.Hash = hash.String
+		}
+		node.UpdatedAt = time.Unix(updated, 0).UTC()
+		scored = append(scored, ScoredNode{Node: node, Score: score})
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return scored, nil
 }
 
 // GetNode returns a node by ID.
@@ -683,7 +789,11 @@ func getEdges(ctx context.Context, db *sql.DB, repoKey, field, id string, types 
 		args  []any
 	)
 	if len(types) == 0 {
-		query = fmt.Sprintf(`SELECT src, dst, type, weight, meta_json FROM edges WHERE %s = ? AND repo_key = ? LIMIT ?`, field)
+		query = fmt.Sprintf(`SELECT src, dst, type, weight, meta_json
+			FROM edges
+			WHERE %s = ? AND repo_key = ?
+			ORDER BY weight DESC, type ASC, dst ASC, src ASC
+			LIMIT ?`, field)
 		args = []any{id, repoKey, limit}
 	} else {
 		placeholders := make([]string, len(types))
@@ -694,7 +804,11 @@ func getEdges(ctx context.Context, db *sql.DB, repoKey, field, id string, types 
 			args = append(args, string(edgeType))
 		}
 		args = append(args, repoKey, limit)
-		query = fmt.Sprintf(`SELECT src, dst, type, weight, meta_json FROM edges WHERE %s = ? AND type IN (%s) AND repo_key = ? LIMIT ?`, field, strings.Join(placeholders, ","))
+		query = fmt.Sprintf(`SELECT src, dst, type, weight, meta_json
+			FROM edges
+			WHERE %s = ? AND type IN (%s) AND repo_key = ?
+			ORDER BY weight DESC, type ASC, dst ASC, src ASC
+			LIMIT ?`, field, strings.Join(placeholders, ","))
 	}
 
 	rows, err := db.QueryContext(ctx, query, args...)

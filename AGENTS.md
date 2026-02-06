@@ -20,7 +20,7 @@ contributors
 ## TL;DR
 
 1. **Start with a tree** — `agentctl run code/semantic_search --input '{"query": "your task", "format": "tree"}'`
-2. **Build the repo graph** — `agentctl index repo build --workspace . --go --typescript` for call/ref navigation
+2. **Build the repo graph** — `agentctl index repo build --dry-run --workspace . --go --typescript --elixir` *(use `--go=false` for non-Go repos)* (then rerun without `--dry-run`) for call/ref navigation
 3. **Envelope contract is sacred** — never change `meta.*` fields without spec
    updates (downstream tooling relies on stable envelope shape; breaking it breaks hooks, GUIs, and golden tests)
 4. **WASI = `network:"none"`** — Core v1 mandates isolation
@@ -98,10 +98,34 @@ agentctl run code/semantic_search --input '{"query": "storage memory", "format":
 Use repoindex when you need relationships (calls, references, imports):
 
 ```bash
-agentctl index repo build --workspace . --go --typescript
+# Build the repo graph index (dry-run first; this writes to the repoindex DB).
+# For TS/Elixir-only repos, add `--go=false` (otherwise Go indexing may fail).
+agentctl index repo build --dry-run --workspace . --go --typescript --elixir
+agentctl index repo build --workspace . --go --typescript --elixir
+
 agentctl index repo search --workspace . --query "repoindex" --limit 10
 agentctl index repo expand --workspace . --seed "<node-id>" --edge CALLS --edge REFERS_TO --depth 2
 ```
+
+#### DAG grep (Explanation Subgraph)
+
+Use `code/dag_grep` when you want a small explanation subgraph in one call (similar to `code/context_grep`, but for the repo graph index):
+
+```bash
+agentctl run code/dag_grep --input '{
+  "query": "buildEvidencePack",
+  "workspace": ".",
+  "render": "tree",
+  "edge_sets": ["structural"],
+  "depth": 2,
+  "budget": 80,
+  "k": 5
+}'
+```
+
+Notes:
+- TypeScript adds heuristic `CALLS` edges; Elixir adds heuristic `REFERS_TO` edges. These are best-effort (no type-checking) and conservative (ambiguous targets are skipped).
+- If you run skills in a restricted filesystem sandbox, set writable paths (CAS + storage + observability), e.g. `AGENTCTL_STORAGE_ROOT=/tmp/agentctl/storage AGENTCTL_PATHS_CAS=/tmp/agentctl/cas AGENTCTL_OBS_DIR=/tmp/agentctl/observability`.
 
 ---
 

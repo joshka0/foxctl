@@ -211,7 +211,7 @@ func TestRepoIndexEvent(t *testing.T) {
 
 	ctx := context.Background()
 
-	ev := NewRepoIndexEvent("repo.index.search", "test-workspace", "tool")
+	ev := NewRepoIndexEvent("repo_index_search", "test-workspace", "tool")
 	ev.QueryHash = HashQuestion("builder")
 	ev.ResultCount = 3
 	ev.DurationMS = 42

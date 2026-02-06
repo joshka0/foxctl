@@ -8,7 +8,7 @@ this feature is done" and marking a task as **completed**. It defines:
 - A canonical task lifecycle with a **reviewable** state.
 - A **review pipeline** that can run automated checks (lint, tests, etc.) and
   record results as review artifacts.
-- Integration points with hooks, mailbox/blackboard, overseer, and dspy-go
+- Integration points with hooks, mailbox/blackboard, overseer, and the agent runtime
   agents so that reviews become first-class, observable events.
 
 This spec is primarily about **behavior and data shapes**, not concrete SQL or
@@ -259,7 +259,7 @@ Overseer behavior for AI/agent reviewers:
   - Owns the top-level review artifact (`created_by` typically set to
     `actor:system:overseer`).
 - Implementations MAY have the overseer:
-  - Perform a holistic `ai_review` itself as part of its own dspy-go program, or
+  - Perform a holistic `ai_review` itself as part of its own agent workflow, or
   - Spawn dedicated reviewer subagents with specific roles (e.g.
     `security_analyst`, `perf_analyst`) that produce their own findings. The
     overseer then aggregates or references those findings in the main review
@@ -289,7 +289,7 @@ support analysis and offline optimizers. Non-normative examples include:
 
 These metrics are derived from existing artifacts (diffs, test logs, lint
 results, and review findings) and SHOULD be exposed in trajectory exports
-(`dspy_trajectory_capture.md`) rather than as new wire-level fields.
+(`archive/specs/dspy_trajectory_capture.md`) rather than as new wire-level fields.
 
 ## APIs / Skills
 
@@ -393,7 +393,7 @@ artifacts.
 
 When `hooks/task_guard` is configured in strict mode and blocks a write, callers
 that surface this as a top-level tool error SHOULD map the block to
-`E_GUARD_VIOLATION` (see `dspy_go_agents.md` §11.3) and treat it as a
+`E_GUARD_VIOLATION` (see `archive/specs/dspy_go_agents.md` §11.3) and treat it as a
 non-retryable, scope/guard violation rather than a transient runtime error.
 
 Dirtying policy is **kernel-owned**: agents and reviewers do not make this
@@ -464,9 +464,9 @@ indexers such as the semantic file index described in `semantic_file_index.md`
 and the code symbol index described in `code_symbol_index_and_swe_grep.md` to
 keep semantic search and related code indexes aligned with accepted changes.
 
-## dspy-go Agents & Trajectories
+## Agent Runtime & Trajectories
 
-For dspy-go agents (`dspy_go_agents.md`, `agent_hierarchy.md`):
+For agent runtime flows (`archive/specs/dspy_go_agents.md` legacy, `agent_hierarchy.md`):
 
 - Coder agents that call `todo/manage.complete` must be prepared for completion
   to be blocked pending review.
@@ -506,7 +506,7 @@ implementation-defined). Examples of policy knobs:
   ```
 
   The overseer uses this configuration to decide which checks to run and which
-  dspy-go roles (if any) to spawn for AI-based reviewers.
+  agent roles (if any) to spawn for AI-based reviewers.
 
 - `review.auto_on_complete` (bool): whether `todo complete` auto-triggers a
   review.

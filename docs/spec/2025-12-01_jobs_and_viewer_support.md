@@ -35,9 +35,9 @@ This makes it hard to build a beads_viewer-style inspector or other tooling.
 
 ## 2. Current State (Reference)
 
-- **Job record**: [internal/storage/jobs/types/types.go](cci:7://file:///Users/jkatigbak/repos/personal/agentctl/internal/storage/jobs/types/types.go:0:0-0:0)
+- **Job record**: [internal/storage/jobs/types/types.go](cci:7://file://internal/storage/jobs/types/types.go:0:0-0:0)
   - `Job { id, command, args_json, args_hash, state, result_path, error, created_at, updated_at }`
-  - SQLite schema in [internal/storage/jobs/persist/store.go](cci:7://file:///Users/jkatigbak/repos/personal/agentctl/internal/storage/jobs/persist/store.go:0:0-0:0) (`jobs` table + indexes).
+  - SQLite schema in [internal/storage/jobs/persist/store.go](cci:7://file://internal/storage/jobs/persist/store.go:0:0-0:0) (`jobs` table + indexes).
 - **Job directories**: `~/.agentctl/jobs/<id>/`
   - `input.json`, `result.json`, `progress.ndjson`, `stderr.log`, `workspace`, optional `artifacts.json`.
 - **Execution**: `internal/storage/jobs/executor`, `internal/runservice`
@@ -45,12 +45,12 @@ This makes it hard to build a beads_viewer-style inspector or other tooling.
   - `meta.workspace`, `meta.skill_version`, `meta.source` set via `protocol.AnnotateRunBytes`.
 - **Progress**:
   - `ProgressEvent { ts, message, percent, meta }` in NDJSON.
-  - [TailProgress](cci:1://file:///Users/jkatigbak/repos/personal/agentctl/internal/storage/jobs/store.go:210:0-221:1) streams it.
+  - [TailProgress](cci:1://file://internal/storage/jobs/store.go:210:0-221:1) streams it.
 - **CAS & artifacts**:
-  - `internal/storage/cas` with verifying [Get](cci:1://file:///Users/jkatigbak/repos/personal/agentctl/internal/storage/jobs/store.go:112:0-115:1).
+  - `internal/storage/cas` with verifying [Get](cci:1://file://internal/storage/jobs/store.go:112:0-115:1).
   - `handleArtifacts` pins `data.artifact` / `data.artifacts[]` digests.
 - **Task graph**:
-  - [internal/analysis/tasksgraph](cci:7://file:///Users/jkatigbak/repos/personal/agentctl/internal/Users/jkatigbak/repos/personal/agentctl/internal/analysis/tasksgraph:0:0-0:0) computes metrics over `internal/storage/tasks.Task`.
+  - [internal/analysis/tasksgraph](cci:7://file://internalinternal/analysis/tasksgraph:0:0-0:0) computes metrics over `internal/storage/tasks.Task`.
   - Mapping between “job” and “task graph” is not yet a documented contract.
 
 ---
@@ -113,9 +113,9 @@ Where filters might include:
 
 All of this must reuse **existing** primitives:
 
-- [jobs.Store.List](cci:1://file:///Users/jkatigbak/repos/personal/agentctl/internal/storage/jobs/store.go:107:0-110:1), [Get](cci:1://file:///Users/jkatigbak/repos/personal/agentctl/internal/storage/jobs/store.go:112:0-115:1), [Result](cci:1://file:///Users/jkatigbak/repos/personal/agentctl/internal/storage/jobs/store.go:117:0-131:1), [TailProgress](cci:1://file:///Users/jkatigbak/repos/personal/agentctl/internal/storage/jobs/store.go:210:0-221:1).
+- [jobs.Store.List](cci:1://file://internal/storage/jobs/store.go:107:0-110:1), [Get](cci:1://file://internal/storage/jobs/store.go:112:0-115:1), [Result](cci:1://file://internal/storage/jobs/store.go:117:0-131:1), [TailProgress](cci:1://file://internal/storage/jobs/store.go:210:0-221:1).
 - `fsutil.JobDir` to find `workspace`, `stderr.log`.
-- CAS [Store](cci:2://file:///Users/jkatigbak/repos/personal/agentctl/internal/storage/jobs/store.go:25:0-29:1) to read artifact metadata.
+- CAS [Store](cci:2://file://internal/storage/jobs/store.go:25:0-29:1) to read artifact metadata.
 
 ### 3.2 JSON CLI Commands
 
@@ -167,7 +167,7 @@ Define **envelope-based** commands that use the read model:
 
 ### 3.3 CAS Preview Rules
 
-- Viewer consumers **must not** bypass [cas.Store.Get](cci:1://file:///Users/jkatigbak/repos/personal/agentctl/internal/storage/jobs/store.go:112:0-115:1)’s verifying reader.
+- Viewer consumers **must not** bypass [cas.Store.Get](cci:1://file://internal/storage/jobs/store.go:112:0-115:1)’s verifying reader.
 - Inline previews are only allowed if:
   - `size_bytes <= inline_preview_kb * 1024` (reuse or align with `inline_output_kb`).
   - `kind` is text-like (`text/*`, `application/json`, etc.).

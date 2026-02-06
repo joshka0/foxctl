@@ -1420,6 +1420,7 @@ func TestExtractSymbolBody(t *testing.T) {
 			}
 			if got == nil {
 				t.Fatal("extractSymbolBody() = nil, want non-nil")
+				return
 			}
 			if got.File != tt.want.File {
 				t.Errorf("File = %q, want %q", got.File, tt.want.File)
@@ -1605,6 +1606,7 @@ type Config struct {
 
 			if got == nil {
 				t.Fatal("extractGoSymbolBody() = nil, want non-nil")
+				return
 			}
 			if got.StartLine != tt.wantStart {
 				t.Errorf("StartLine = %d, want %d", got.StartLine, tt.wantStart)
@@ -1760,6 +1762,7 @@ fn other() {}
 
 			if got == nil {
 				t.Fatal("extractSymbolBody() = nil, want non-nil")
+				return
 			}
 			if got.StartLine != tt.wantStart {
 				t.Errorf("StartLine = %d, want %d", got.StartLine, tt.wantStart)

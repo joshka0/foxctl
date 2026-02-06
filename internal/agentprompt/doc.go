@@ -1,2 +1,2 @@
-// Package agentprompt builds role-specific system instructions and signatures.
+// Package agentprompt builds role-specific system instructions.
 package agentprompt

@@ -20,7 +20,7 @@ return len(rel) > 0 && rel[0] != '.'
 ```
 This incorrectly rejects `.gitignore`, `.env`, and any dotfile even when inside workspace.
 
-**Fix Location:** `/Users/jkatigbak/repos/personal/claude-migration-to-v2/internal/adapters/skillslib/workspace/workspace.go`
+**Fix Location:** `~/repos/personal/claude-migration-to-v2/internal/adapters/skillslib/workspace/workspace.go`
 
 **Correct Logic:**
 ```go
@@ -73,7 +73,7 @@ func IsUnderWorkspace(workspace, path string) bool {
 
 If CAS GC runs, the truncated output reference becomes dangling.
 
-**Fix Location:** `/Users/jkatigbak/repos/personal/claude-migration-to-v2/internal/runservice/result.go`
+**Fix Location:** `~/repos/personal/claude-migration-to-v2/internal/runservice/result.go`
 
 **Solution Options:**
 
@@ -112,8 +112,8 @@ func (e *Executor) enforceOutputLimit(...) ([]byte, []string) {
 **Problem:** Both `skillmain.RunContext.Close()` and `runner.RunnerContext.Close()` are no-ops but CAS stores may need cleanup.
 
 **Fix Locations:**
-- `/Users/jkatigbak/repos/personal/claude-migration-to-v2/internal/adapters/skillslib/skillmain/context.go`
-- `/Users/jkatigbak/repos/personal/claude-migration-to-v2/internal/adapters/skillslib/runner/context.go`
+- `~/repos/personal/claude-migration-to-v2/internal/adapters/skillslib/skillmain/context.go`
+- `~/repos/personal/claude-migration-to-v2/internal/adapters/skillslib/runner/context.go`
 
 **Solution:**
 ```go
@@ -139,8 +139,8 @@ func (rc *RunContext) Close() error {
 - `runner.RunnerContext` (older, used in tests)
 
 **File Locations:**
-- `/Users/jkatigbak/repos/personal/claude-migration-to-v2/internal/adapters/skillslib/skillmain/context.go`
-- `/Users/jkatigbak/repos/personal/claude-migration-to-v2/internal/adapters/skillslib/runner/context.go`
+- `~/repos/personal/claude-migration-to-v2/internal/adapters/skillslib/skillmain/context.go`
+- `~/repos/personal/claude-migration-to-v2/internal/adapters/skillslib/runner/context.go`
 
 **Solution:** Make `runner.RunnerContext` embed or alias `skillmain.RunContext`
 
@@ -180,9 +180,9 @@ func NewRunnerContext(cfg config.Config, stdout io.Writer) (*RunnerContext, erro
 **Solution:** Delete `skillslib/preview.go`, keep only `skillout/preview.go`
 
 **Files to modify:**
-- DELETE: `/Users/jkatigbak/repos/personal/claude-migration-to-v2/internal/adapters/skillslib/preview.go`
-- DELETE: `/Users/jkatigbak/repos/personal/claude-migration-to-v2/internal/adapters/skillslib/preview_test.go`
-- KEEP: `/Users/jkatigbak/repos/personal/claude-migration-to-v2/internal/adapters/skillslib/skillout/preview.go`
+- DELETE: `~/repos/personal/claude-migration-to-v2/internal/adapters/skillslib/preview.go`
+- DELETE: `~/repos/personal/claude-migration-to-v2/internal/adapters/skillslib/preview_test.go`
+- KEEP: `~/repos/personal/claude-migration-to-v2/internal/adapters/skillslib/skillout/preview.go`
 
 **Update imports in skills that use `skillslib.PreparePreview`:**
 ```go
@@ -209,7 +209,7 @@ preview, truncated := skillout.PreparePreview(items, limit)
 
 **Solution:** Keep ONLY in `skillout`, remove from `skillmain` and `runner`
 
-**Canonical Location:** `/Users/jkatigbak/repos/personal/claude-migration-to-v2/internal/adapters/skillslib/skillout/emit.go`
+**Canonical Location:** `~/repos/personal/claude-migration-to-v2/internal/adapters/skillslib/skillout/emit.go`
 
 **Changes:**
 
@@ -255,7 +255,7 @@ hint := skillout.BuildCASHint(artifact, 50)
 
 ### 2.1 Add `skillout.PreviewAndPersistNDJSON` Helper
 
-**Location:** `/Users/jkatigbak/repos/personal/claude-migration-to-v2/internal/adapters/skillslib/skillout/preview.go`
+**Location:** `~/repos/personal/claude-migration-to-v2/internal/adapters/skillslib/skillout/preview.go`
 
 **New Functions:**
 ```go
@@ -335,7 +335,7 @@ func PersistNDJSON[T any](
 
 ### 2.2 Add `skillslib/pathutil` Package
 
-**Location:** `/Users/jkatigbak/repos/personal/claude-migration-to-v2/internal/adapters/skillslib/pathutil/pathutil.go`
+**Location:** `~/repos/personal/claude-migration-to-v2/internal/adapters/skillslib/pathutil/pathutil.go`
 
 **New Package:**
 ```go
@@ -415,7 +415,7 @@ func IsUnderWorkspace(workspace, path string) bool {
 
 ### 2.3 Add `skillslib/executil` Package
 
-**Location:** `/Users/jkatigbak/repos/personal/claude-migration-to-v2/internal/adapters/skillslib/executil/executil.go`
+**Location:** `~/repos/personal/claude-migration-to-v2/internal/adapters/skillslib/executil/executil.go`
 
 **New Package:**
 ```go
@@ -506,7 +506,7 @@ func IsNoMatch(result CmdResult) bool {
 
 ### 2.4 Add `skillslib/diffutil` Package
 
-**Location:** `/Users/jkatigbak/repos/personal/claude-migration-to-v2/internal/adapters/skillslib/diffutil/diffutil.go`
+**Location:** `~/repos/personal/claude-migration-to-v2/internal/adapters/skillslib/diffutil/diffutil.go`
 
 **New Package:**
 ```go
@@ -555,7 +555,7 @@ func UnifiedDiffWithPaths(fromPath, toPath, original, modified string, contextLi
 
 ### 2.5 Add `skillslib/oputil` Package
 
-**Location:** `/Users/jkatigbak/repos/personal/claude-migration-to-v2/internal/adapters/skillslib/oputil/oputil.go`
+**Location:** `~/repos/personal/claude-migration-to-v2/internal/adapters/skillslib/oputil/oputil.go`
 
 **New Package:**
 ```go
@@ -625,7 +625,7 @@ func Dispatch(op string, handlers map[string]Handler) (map[string]any, error) {
 
 ### 3.1 Create `internal/tools/ripgrep` Package
 
-**Location:** `/Users/jkatigbak/repos/personal/claude-migration-to-v2/internal/tools/ripgrep/ripgrep.go`
+**Location:** `~/repos/personal/claude-migration-to-v2/internal/tools/ripgrep/ripgrep.go`
 
 **Problem:** Ripgrep execution logic duplicated in:
 - `internal/retrieval/ripgrep.go` (text output, files-with-matches)
@@ -778,7 +778,7 @@ func buildArgs(pattern string, opts SearchOpts, jsonOutput bool) []string {
 
 ### 3.2 Create `internal/lsp/jsonrpc` Package
 
-**Location:** `/Users/jkatigbak/repos/personal/claude-migration-to-v2/internal/lsp/jsonrpc/client.go`
+**Location:** `~/repos/personal/claude-migration-to-v2/internal/lsp/jsonrpc/client.go`
 
 **Problem:** JSON-RPC transport duplicated in:
 - `internal/lsp/gopls/daemon.go` (lines 281-376) - persistent daemon
@@ -989,7 +989,7 @@ func (c *Client) readContentLength() (int, error) {
 
 ### 4.1 Refactor `code/context_ripgrep`
 
-**File:** `/Users/jkatigbak/repos/personal/claude-migration-to-v2/skills/code_context_ripgrep/main.go`
+**File:** `~/repos/personal/claude-migration-to-v2/skills/code_context_ripgrep/main.go`
 
 **Changes:**
 1. Use `tools/ripgrep.SearchJSON` instead of manual rg execution
@@ -1005,7 +1005,7 @@ func (c *Client) readContentLength() (int, error) {
 
 ### 4.2 Refactor `fs/find`
 
-**File:** `/Users/jkatigbak/repos/personal/claude-migration-to-v2/skills/fs_find/main.go`
+**File:** `~/repos/personal/claude-migration-to-v2/skills/fs_find/main.go`
 
 **Changes:**
 1. Use `skillout.PreviewAndPersistNDJSON` for results
@@ -1020,7 +1020,7 @@ func (c *Client) readContentLength() (int, error) {
 
 ### 4.3 Refactor `fs/apply_edit`
 
-**File:** `/Users/jkatigbak/repos/personal/claude-migration-to-v2/skills/fs_apply_edit/main.go`
+**File:** `~/repos/personal/claude-migration-to-v2/skills/fs_apply_edit/main.go`
 
 **Changes:**
 1. Use `diffutil.UnifiedDiff` instead of massive custom `generateUnifiedDiff` (lines 430-528)
@@ -1033,7 +1033,7 @@ func (c *Client) readContentLength() (int, error) {
 
 ### 4.4 Refactor `html_edit`
 
-**File:** `/Users/jkatigbak/repos/personal/claude-migration-to-v2/skills/html_edit/main.go`
+**File:** `~/repos/personal/claude-migration-to-v2/skills/html_edit/main.go`
 
 **Changes:**
 1. Use `diffutil.UnifiedDiff` instead of local `generateUnifiedDiff`
@@ -1046,7 +1046,7 @@ func (c *Client) readContentLength() (int, error) {
 
 ### 4.5 Refactor `code/smart_write`
 
-**File:** `/Users/jkatigbak/repos/personal/claude-migration-to-v2/skills/code_smart_write/main.go`
+**File:** `~/repos/personal/claude-migration-to-v2/skills/code_smart_write/main.go`
 
 **Changes:**
 1. Use `diffutil.UnifiedDiff` instead of local `generateUnifiedDiff`
@@ -1060,8 +1060,8 @@ func (c *Client) readContentLength() (int, error) {
 ### 4.6 Refactor LSP Skills
 
 **Files:**
-- `/Users/jkatigbak/repos/personal/claude-migration-to-v2/skills/lsp_tsserver/main.go`
-- `/Users/jkatigbak/repos/personal/claude-migration-to-v2/skills/lsp_pylsp/main.go`
+- `~/repos/personal/claude-migration-to-v2/skills/lsp_tsserver/main.go`
+- `~/repos/personal/claude-migration-to-v2/skills/lsp_pylsp/main.go`
 
 **Changes:**
 1. Use `lsp/jsonrpc.Client` for transport
@@ -1076,8 +1076,8 @@ func (c *Client) readContentLength() (int, error) {
 ### 4.7 Refactor Multi-Op Skills with `oputil`
 
 **Files:**
-- `/Users/jkatigbak/repos/personal/claude-migration-to-v2/skills/mailbox/main.go`
-- `/Users/jkatigbak/repos/personal/claude-migration-to-v2/skills/git_worktree/main.go`
+- `~/repos/personal/claude-migration-to-v2/skills/mailbox/main.go`
+- `~/repos/personal/claude-migration-to-v2/skills/git_worktree/main.go`
 
 **Changes:**
 1. Use `oputil.Op` for operation normalization

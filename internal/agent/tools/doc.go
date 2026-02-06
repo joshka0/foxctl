@@ -1,2 +1,2 @@
-// Package tools provides dspy-go tool implementations that wrap agentctl skills.
+// Package tools provides tool implementations that wrap agentctl skills.
 package tools

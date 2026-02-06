@@ -44,6 +44,7 @@ func TestExecuteInlineJSON(t *testing.T) {
 	}
 	if resp == nil {
 		t.Fatal("expected response")
+		return
 	}
 	if resp.Digest != "" {
 		t.Fatalf("expected inline response, got digest %q", resp.Digest)
@@ -95,6 +96,7 @@ func TestExecuteStoresLargeBodyInCAS(t *testing.T) {
 	}
 	if resp == nil {
 		t.Fatal("expected response")
+		return
 	}
 	if resp.Digest == "" {
 		t.Fatalf("expected CAS digest")

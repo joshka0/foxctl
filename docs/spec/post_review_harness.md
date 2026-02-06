@@ -2,7 +2,7 @@
 
 **Status:** Draft\
 **Related impl plan:**
-[docs/impl_plan/universal_swe_grep_and_agents.md](cci:7://file:///Users/jkatigbak/repos/personal/agentctl/docs/impl_plan/universal_swe_grep_and_agents.md:0:0-0:0)
+[docs/impl_plan/universal_swe_grep_and_agents.md](cci:7://file://docs/impl_plan/universal_swe_grep_and_agents.md:0:0-0:0)
 (Phase 2)\
 **Related todo specs:**
 
@@ -14,10 +14,10 @@
 - `docs/spec/review_gate.md`
 - `docs/spec/semantic_file_index.md`
 - `docs/spec/code_symbol_index_and_swe_grep.md`
-- `docs/spec/dspy_go_agents.md`
-- `docs/spec/dspy_trajectory_capture.md`
+- `docs/archive/specs/dspy_go_agents.md` (legacy)
+- `docs/archive/specs/dspy_trajectory_capture.md` (legacy)
 - `docs/spec/core_profile_v1.md`
-- [docs/spec/review_semantic_trajectory_specs.md](cci:7://file:///Users/jkatigbak/repos/personal/agentctl/docs/spec/review_semantic_trajectory_specs.md:0:0-0:0)
+- [docs/spec/review_semantic_trajectory_specs.md](cci:7://file://docs/spec/review_semantic_trajectory_specs.md:0:0-0:0)
 
 ## 1. Problem Statement & Goals
 

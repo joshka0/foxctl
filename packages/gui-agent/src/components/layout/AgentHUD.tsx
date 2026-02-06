@@ -1,3 +1,4 @@
+import { useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { cn, formatRelativeTime } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
@@ -19,6 +20,7 @@ import {
   Users,
 } from 'lucide-react'
 import {
+  listAgents,
   startAgent,
   killAgent,
   trashAgent,
@@ -30,6 +32,22 @@ export function AgentHUD() {
   const selectedAgent = useViewStore((s) => s.selectedAgent)
   const setSelectedAgent = useViewStore((s) => s.setSelectedAgent)
   const queryClient = useQueryClient()
+
+  // Fetch fresh agent list to reconcile stale selectedAgent
+  const { data: agentsData } = useQuery({
+    queryKey: ['agents'],
+    queryFn: () => listAgents(100),
+    refetchInterval: 10000,
+  })
+
+  // Reconcile selected agent with fresh data from the agents query
+  useEffect(() => {
+    if (!selectedAgent || !agentsData?.agents) return
+    const fresh = agentsData.agents.find((a) => a.id === selectedAgent.id)
+    if (fresh && (fresh.state !== selectedAgent.state || fresh.updated_at !== selectedAgent.updated_at)) {
+      setSelectedAgent(fresh)
+    }
+  }, [agentsData, selectedAgent, setSelectedAgent])
 
   // Fetch sessions for selected agent
   const { data: sessionsData } = useQuery({
@@ -117,7 +135,11 @@ export function AgentHUD() {
               variant="destructive"
               size="sm"
               className="flex-1 gap-1"
-              onClick={() => killMutation.mutate(selectedAgent.id)}
+              onClick={() => {
+                if (window.confirm(`Are you sure you want to stop "${selectedAgent.name || selectedAgent.role || 'this agent'}"?`)) {
+                  killMutation.mutate(selectedAgent.id)
+                }
+              }}
               disabled={killMutation.isPending}
             >
               <Square className="h-3 w-3" />
@@ -139,7 +161,11 @@ export function AgentHUD() {
             variant="outline"
             size="sm"
             className="gap-1"
-            onClick={() => trashMutation.mutate(selectedAgent.id)}
+            onClick={() => {
+              if (window.confirm(`Are you sure you want to remove "${selectedAgent.name || selectedAgent.role || 'this agent'}"? This action cannot be undone.`)) {
+                trashMutation.mutate(selectedAgent.id)
+              }
+            }}
             disabled={trashMutation.isPending || isRunning}
             title={isRunning ? 'Stop agent before trashing' : 'Delete agent'}
           >

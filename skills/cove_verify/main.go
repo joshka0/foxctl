@@ -8,13 +8,11 @@ import (
 	"strings"
 	"time"
 
-	dspycore "github.com/XiaoConstantine/dspy-go/pkg/core"
-	"github.com/XiaoConstantine/dspy-go/pkg/llms"
-
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
 	"github.com/jkatigb/agentctl/internal/domain/envelope"
 	"github.com/jkatigb/agentctl/internal/platform/env"
+	llmproviders "github.com/jkatigb/agentctl/internal/providers/llm"
 	"github.com/jkatigb/agentctl/internal/verification"
 )
 
@@ -244,10 +242,8 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	return skillout.Emit(rc, command, out)
 }
 
-// resolveLLM creates and configures the LLM instance based on provider settings.
-func resolveLLM(cfg *llmConfig) (dspycore.LLM, string, string, error) {
-	llms.EnsureFactory()
-
+// resolveLLM creates and configures the LLM client based on provider settings.
+func resolveLLM(cfg *llmConfig) (verification.LLMClient, string, string, error) {
 	provider := ""
 	model := ""
 	if cfg != nil {
@@ -260,16 +256,14 @@ func resolveLLM(cfg *llmConfig) (dspycore.LLM, string, string, error) {
 	}
 	if provider == "" {
 		switch {
+		case env.GetString("CEREBRAS_API_KEY") != "":
+			provider = "cerebras"
 		case env.GetString("GROQ_API_KEY") != "":
 			provider = "groq"
 		case env.GetString("OPENROUTER_API_KEY") != "":
 			provider = "openrouter"
-		case env.GetString("GEMINI_API_KEY") != "":
-			provider = "gemini"
 		case env.GetString("OPENAI_API_KEY") != "":
 			provider = "openai"
-		case env.GetString("ANTHROPIC_API_KEY") != "":
-			provider = "anthropic"
 		default:
 			return nil, "", "", fmt.Errorf("no LLM provider configured (set AGENTCTL_LLM_PROVIDER+AGENTCTL_LLM_API_KEY or provider-specific *_API_KEY)")
 		}
@@ -279,62 +273,36 @@ func resolveLLM(cfg *llmConfig) (dspycore.LLM, string, string, error) {
 		model = env.GetString("AGENTCTL_LLM_MODEL")
 	}
 	if model == "" {
-		switch provider {
-		case "gemini":
-			model = "gemini-2.0-flash"
-		case "groq":
-			model = "llama-3.1-8b-instant"
-		case "openrouter":
-			model = "meta-llama/llama-3.1-8b-instruct:free"
-		case "openai":
-			model = "gpt-4o-mini"
-		case "anthropic":
-			model = "claude-3-5-haiku-20241022"
-		default:
-			model = "llama-3.1-8b-instant"
-		}
+		model = llmproviders.DefaultModelForProvider(provider)
 	}
 
 	apiKey := env.GetString("AGENTCTL_LLM_API_KEY")
 	if apiKey == "" {
 		switch provider {
-		case "gemini":
-			apiKey = env.GetString("GEMINI_API_KEY")
+		case "cerebras":
+			apiKey = env.GetString("CEREBRAS_API_KEY")
 		case "groq":
 			apiKey = env.GetString("GROQ_API_KEY")
 		case "openrouter":
 			apiKey = env.GetString("OPENROUTER_API_KEY")
 		case "openai":
 			apiKey = env.GetString("OPENAI_API_KEY")
-		case "anthropic":
-			apiKey = env.GetString("ANTHROPIC_API_KEY")
 		}
 	}
 	if apiKey == "" {
 		return nil, provider, model, fmt.Errorf("LLM API key not configured for provider %q", provider)
 	}
 
-	var llm dspycore.LLM
-	var err error
-	switch provider {
-	case "gemini":
-		llm, err = llms.NewGeminiLLM(apiKey, dspycore.ModelID(model))
-	case "openai":
-		llm, err = llms.NewOpenAILLM(dspycore.ModelID(model), llms.WithAPIKey(apiKey))
-	case "anthropic":
-		llm, err = llms.NewAnthropicLLMFromConfig(context.Background(), dspycore.ProviderConfig{Name: "anthropic", APIKey: apiKey}, dspycore.ModelID(model))
-	case "groq":
-		llm, err = llms.NewOpenAICompatible("groq", dspycore.ModelID(model), "https://api.groq.com/openai/v1", llms.WithAPIKey(apiKey))
-	case "openrouter":
-		llm, err = llms.NewOpenAICompatible("openrouter", dspycore.ModelID(model), "https://openrouter.ai/api/v1", llms.WithAPIKey(apiKey))
-	default:
-		return nil, provider, model, fmt.Errorf("unsupported LLM provider: %q", provider)
-	}
+	client, err := verification.NewOpenAIClient(verification.OpenAIConfig{
+		Provider: provider,
+		APIKey:   apiKey,
+		Model:    model,
+	})
 	if err != nil {
-		return nil, provider, model, fmt.Errorf("create %s LLM: %w", provider, err)
+		return nil, provider, model, fmt.Errorf("create %s LLM client: %w", provider, err)
 	}
 
-	return llm, provider, model, nil
+	return client, provider, model, nil
 }
 
 // convertResult converts internal verification response to output format.

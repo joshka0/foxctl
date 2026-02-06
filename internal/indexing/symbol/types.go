@@ -187,6 +187,12 @@ type Config struct {
 	// Enabled controls whether symbol indexing is active.
 	Enabled bool `json:"enabled"`
 
+	// Force bypasses incremental checks and rewrites symbol/call entries even when
+	// file and symbol digests appear unchanged. This is useful after indexer
+	// behavior changes (e.g., call extraction tweaks) where content hashes are
+	// insufficient to trigger updates.
+	Force bool `json:"force,omitempty"`
+
 	// MaxFileLOC is the threshold for "large file" handling.
 	// Files above this are indexed per-symbol, not as a whole.
 	MaxFileLOC int `json:"max_file_loc,omitempty"`

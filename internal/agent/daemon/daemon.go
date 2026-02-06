@@ -10,10 +10,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/XiaoConstantine/dspy-go/pkg/agents"
-	"github.com/XiaoConstantine/dspy-go/pkg/agents/react"
-	"github.com/XiaoConstantine/dspy-go/pkg/core"
-	"github.com/XiaoConstantine/dspy-go/pkg/llms"
 	"github.com/oklog/ulid/v2"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
@@ -273,41 +269,15 @@ func Run(ctx context.Context, opts Options) error {
 		return fmt.Errorf("update agent state: %w", err)
 	}
 
-	// 4. Initialize agent engine
-	// - Default (reactive mode): LLMChatEngine via companion.Service
-	// - Autonomous/Proactive modes: DSPy ReAct (needs tool loop)
+	// 4. Initialize agent engine (LLMChatEngine via companion.Service)
 	traceID := ulid.Make().String()
 	recorder := &noopRecorder{}
+	var companionSvc ChatService
+	log.Info().Msg("using LLMChatEngine via companion service")
 
-	var dspyAgent agents.Agent
-	var companionSvc *companion.Service
-
-	useDSPy := agentRecord.ExecMode == agent.ModeAutonomous || agentRecord.ExecMode == agent.ModeProactive
-
-	if useDSPy {
-		// Autonomous/proactive agents use DSPy ReAct for tool calling
-		log.Info().Str("exec_mode", string(agentRecord.ExecMode)).Msg("using DSPy ReAct agent")
-
-		toolsCfg := buildToolsConfig(opts, agentRecord, traceID, stores)
-		toolsCfg.FilesystemPolicy = mapFilesystemPolicy(agentRecord.Policy)
-
-		registry, err := tools.NewRegistry(toolsCfg, recorder)
-		if err != nil {
-			return fmt.Errorf("create tools registry: %w", err)
-		}
-
-		if opts.AgentFactory != nil {
-			dspyAgent, err = opts.AgentFactory(ctx, agentRecord, registry)
-		} else {
-			dspyAgent, err = createAgent(ctx, agentRecord, registry, opts)
-		}
-		if err != nil {
-			return fmt.Errorf("create dspy agent: %w", err)
-		}
+	if opts.CompanionService != nil {
+		companionSvc = opts.CompanionService
 	} else {
-		// Default: use LLMChatEngine via companion.Service
-		log.Info().Msg("using LLMChatEngine via companion service")
-
 		// Resolve LLM configuration - default to cerebras
 		provider := agentRecord.LLMProvider
 		if provider == "" {
@@ -338,15 +308,17 @@ func Run(ctx context.Context, opts Options) error {
 			Str("model", model).
 			Msg("companion service LLM config")
 
-		var extraToolExecutor engine.ToolExecutor
+		toolsCfg := buildToolsConfig(opts, agentRecord, traceID, stores)
+		toolsCfg.FilesystemPolicy = mapFilesystemPolicy(agentRecord.Policy)
+
+		registry, err := tools.NewRegistry(toolsCfg, recorder)
+		if err != nil {
+			return fmt.Errorf("create tools registry: %w", err)
+		}
+
+		extraToolExecutor := engine.ToolExecutor(tools.NewRegistryToolExecutor(registry))
 		extraToolsOnly := false
 		if repoIndexOnlyAllowlist(agentRecord.SkillsAllow) {
-			store, err := repoindex.Open(ctx, opts.StorageRoot, opts.WorkspaceRoot)
-			if err != nil {
-				return fmt.Errorf("open repoindex store: %w", err)
-			}
-			stores.repoIndexStore = store
-			extraToolExecutor = engine.NewRepoIndexToolExecutor(store)
 			extraToolsOnly = true
 			log.Info().Msg("companion service configured for repo index tools only")
 		}
@@ -388,32 +360,28 @@ func Run(ctx context.Context, opts Options) error {
 
 	// 7. Enter poll loop
 	return runPollLoop(ctx, pollDeps{
-		opts:            opts,
-		logger:          logger,
-		agentRecord:     agentRecord,
-		agentStore:      stores.agentStore,
-		mailboxStore:    stores.mailboxStore,
-		dedupeStore:     dedupeStore,
-		dspyAgent:       dspyAgent,
-		companionSvc:    companionSvc,
-		cancelCtx:       cancelCtx,
-		optCtx:          optCtx,
-		companionMemory: stores.companionMemory,
+		opts:         opts,
+		logger:       logger,
+		agentRecord:  agentRecord,
+		agentStore:   stores.agentStore,
+		mailboxStore: stores.mailboxStore,
+		dedupeStore:  dedupeStore,
+		companionSvc: companionSvc,
+		cancelCtx:    cancelCtx,
+		optCtx:       optCtx,
 	})
 }
 
 type pollDeps struct {
-	opts            Options
-	logger          zerolog.Logger
-	agentRecord     agent.Agent
-	agentStore      storagents.Store
-	mailboxStore    mailbox.Store
-	dedupeStore     DedupeStore
-	dspyAgent       agents.Agent       // nil for companion agents
-	companionSvc    *companion.Service // non-nil for companion agents
-	cancelCtx       *CancelContext
-	optCtx          *OptimizationContext
-	companionMemory *companion.ConversationMemory
+	opts         Options
+	logger       zerolog.Logger
+	agentRecord  agent.Agent
+	agentStore   storagents.Store
+	mailboxStore mailbox.Store
+	dedupeStore  DedupeStore
+	companionSvc ChatService // non-nil for companion agents
+	cancelCtx    *CancelContext
+	optCtx       *OptimizationContext
 }
 
 // initOptimization initializes optimization stores and pattern collector if enabled.
@@ -498,6 +466,9 @@ func buildToolsConfig(opts Options, agentRecord agent.Agent, traceID string, sto
 		OpenAgentsStore: func(ctx context.Context) (storagents.Store, error) {
 			return storagents.Open(ctx, opts.StorageRoot)
 		},
+		OpenRepoIndexStore: func(ctx context.Context) (*repoindex.Store, error) {
+			return repoindex.Open(ctx, opts.StorageRoot, workspaceRoot)
+		},
 	}
 }
 
@@ -528,9 +499,14 @@ func repoIndexOnlyAllowlist(allowlist []string) bool {
 	}
 
 	allowed := map[string]struct{}{
-		repoindex.ToolSearch: {},
-		repoindex.ToolExpand: {},
-		repoindex.ToolOpen:   {},
+		repoindex.ToolSearch:        {},
+		repoindex.ToolExpand:        {},
+		repoindex.ToolOpen:          {},
+		repoindex.ToolDAGGrep:       {},
+		repoindex.ToolSearchLegacy:  {},
+		repoindex.ToolExpandLegacy:  {},
+		repoindex.ToolOpenLegacy:    {},
+		repoindex.ToolDAGGrepLegacy: {},
 	}
 
 	validCount := 0
@@ -709,7 +685,7 @@ func processPollTick(ctx context.Context, deps pollDeps) error {
 			continue
 		}
 
-		procErr := processMessage(ctx, deps.logger, msg, deps.dspyAgent, deps.companionSvc, deps.mailboxStore, currentAgent.Policy, deps.optCtx, deps.cancelCtx, deps.companionMemory, deps.opts.AgentID)
+		procErr := processMessage(ctx, deps.logger, msg, deps.companionSvc, deps.mailboxStore, currentAgent.Policy, deps.optCtx, deps.cancelCtx, deps.opts.AgentID)
 		if procErr != nil {
 			deps.logger.Error().Err(procErr).Str("msg_id", msg.ID).Msg("processing failed")
 			_ = deps.mailboxStore.Nack(ctx, msg.ID, backoffDuration(msg.Attempt)) //nolint:errcheck
@@ -734,13 +710,17 @@ func processPollTick(ctx context.Context, deps pollDeps) error {
 // without needing a new external message. Used for autonomous and proactive modes.
 //
 // Index:
-// - Purpose: Execute follow-on DSPy turns for autonomous/proactive agents
+// - Purpose: Execute follow-on LLMChat turns for autonomous/proactive agents
 // - Flow: check max turns → run continuation prompt loop → stop on completion signal
-// - SideEffects: LLM calls via DSPy agent
+// - SideEffects: LLM calls via companion service
 // - FailureModes: execution errors stop continuation
 // - Related: runProactiveThink
-// - Keywords: autonomous, continuation, max_auto_turns, dspy_agent
+// - Keywords: autonomous, continuation, max_auto_turns, llmchat
 func runAutonomousContinuation(ctx context.Context, deps pollDeps, lastMsg agent.Message) {
+	if deps.companionSvc == nil {
+		deps.logger.Warn().Msg("autonomous continuation skipped: companion service not configured")
+		return
+	}
 	maxTurns := deps.agentRecord.MaxAutoTurns
 	if maxTurns <= 1 {
 		return // Autonomous continuation disabled
@@ -755,13 +735,13 @@ func runAutonomousContinuation(ctx context.Context, deps pollDeps, lastMsg agent
 		// For MVP: run a "continue" prompt and let the agent decide if there's more work
 		continuePrompt := "Continue working on the previous task if there is more to do. If the task is complete, respond with 'TASK_COMPLETE'. Do not repeat already completed work."
 
-		input := map[string]any{
-			"task": continuePrompt,
-		}
-
 		timeout := 10 * time.Minute
 		turnCtx, cancel := context.WithTimeout(ctx, timeout)
-		resultMap, err := deps.dspyAgent.Execute(turnCtx, input)
+		resp, err := deps.companionSvc.Chat(turnCtx, companion.ChatRequest{
+			ConversationID: deps.opts.AgentID,
+			Message:        continuePrompt,
+			ExecMode:       deps.agentRecord.ExecMode,
+		})
 		cancel()
 
 		if err != nil {
@@ -770,7 +750,7 @@ func runAutonomousContinuation(ctx context.Context, deps pollDeps, lastMsg agent
 		}
 
 		// Check if agent signaled completion
-		result := extractResult(resultMap)
+		result := resp.Response
 		if containsTaskComplete(result) {
 			deps.logger.Debug().Msg("agent signaled task complete, stopping continuation")
 			break
@@ -783,13 +763,16 @@ func runAutonomousContinuation(ctx context.Context, deps pollDeps, lastMsg agent
 //
 // Index:
 // - Purpose: Execute proactive think cycle to initiate work
-// - Flow: build prompt → execute DSPy agent → evaluate result → run continuation
-// - SideEffects: LLM calls via DSPy agent; logs activity
+// - Flow: build prompt → execute LLMChat → evaluate result → run continuation
+// - SideEffects: LLM calls via companion service; logs activity
 // - FailureModes: execution errors propagated
 // - Related: runAutonomousContinuation
-// - Keywords: proactive_think, dspy_agent, think_prompt, continuation
+// - Keywords: proactive_think, llmchat, think_prompt, continuation
 func runProactiveThink(ctx context.Context, deps pollDeps) error {
 	deps.logger.Debug().Msg("running proactive think cycle")
+	if deps.companionSvc == nil {
+		return fmt.Errorf("companion service not configured")
+	}
 
 	// Proactive prompt: ask agent to check for work
 	thinkPrompt := `You are in proactive mode. Check if there is any work that needs to be done:
@@ -800,20 +783,20 @@ func runProactiveThink(ctx context.Context, deps pollDeps) error {
 If there is work to do, start working on the highest priority item.
 If there is nothing to do, respond with 'NO_WORK_NEEDED'.`
 
-	input := map[string]any{
-		"task": thinkPrompt,
-	}
-
 	timeout := 5 * time.Minute
 	turnCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	resultMap, err := deps.dspyAgent.Execute(turnCtx, input)
+	resp, err := deps.companionSvc.Chat(turnCtx, companion.ChatRequest{
+		ConversationID: deps.opts.AgentID,
+		Message:        thinkPrompt,
+		ExecMode:       deps.agentRecord.ExecMode,
+	})
 	if err != nil {
 		return fmt.Errorf("proactive think execution: %w", err)
 	}
 
-	result := extractResult(resultMap)
+	result := resp.Response
 	if containsNoWork(result) {
 		deps.logger.Debug().Msg("proactive think: no work needed")
 		return nil
@@ -851,26 +834,24 @@ func processMessage(
 	ctx context.Context,
 	logger zerolog.Logger,
 	msg agent.Message,
-	dspyAgent agents.Agent,
-	companionSvc *companion.Service,
+	companionSvc ChatService,
 	mailboxStore mailbox.Store,
 	policy agent.Policy,
 	optCtx *OptimizationContext,
 	cancelCtx *CancelContext,
-	companionMemory *companion.ConversationMemory,
 	agentID string, // needed for conversation scoping
 ) error {
 	switch msg.Type {
 	case agent.MessageTypeAsk:
-		return handleAsk(ctx, logger, msg, dspyAgent, companionSvc, mailboxStore, policy, optCtx, companionMemory, agentID)
+		return handleAsk(ctx, logger, msg, companionSvc, mailboxStore, policy, optCtx, agentID)
 	case agent.MessageTypeCmd:
-		return handleCmd(ctx, logger, msg, dspyAgent, companionSvc, policy, optCtx, agentID)
+		return handleCmd(ctx, logger, msg, companionSvc, policy, optCtx, agentID)
 	case agent.MessageTypeEvent:
 		return handleEvent(ctx, logger, msg)
 	case agent.MessageTypeReply:
 		logger.Info().Str("msg_id", msg.ID).Msg("received reply")
 	case agent.MessageTypeConsoleAsk:
-		return handleConsoleAsk(ctx, logger, msg, dspyAgent, companionSvc, mailboxStore, policy, optCtx, cancelCtx, companionMemory, agentID)
+		return handleConsoleAsk(ctx, logger, msg, companionSvc, mailboxStore, policy, optCtx, cancelCtx, agentID)
 	case agent.MessageTypeConsoleCmd:
 		return handleConsoleCmd(ctx, logger, msg, cancelCtx)
 	case agent.MessageTypeConsoleReply, agent.MessageTypeConsoleEvent:
@@ -892,130 +873,3 @@ func isMessageExpired(msg agent.Message) bool {
 type noopRecorder struct{}
 
 func (r *noopRecorder) RecordToolCall(call types.ToolCall) {}
-
-// createAgent builds and initializes a DSPy ReAct agent with tool registry.
-//
-// Index:
-// - Purpose: Configure and initialize a DSPy agent for autonomous execution
-// - Flow: resolve config → create LLM → register tools → build signature → initialize agent
-// - SideEffects: LLM initialization; tool registration
-// - FailureModes: missing API key, LLM creation errors, tool registration errors
-// - Related: buildSignature, tools.Registry.List
-// - Keywords: create_agent, dspy, react_agent, llm_provider, register_tool
-func createAgent(ctx context.Context, agentRecord agent.Agent, registry *tools.Registry, daemonOpts Options) (agents.Agent, error) {
-	// Resolve max iterations: agent record takes precedence, else default to 10
-	maxIterations := agentRecord.MaxIterations
-	if maxIterations <= 0 {
-		maxIterations = 10
-	}
-
-	// Create options
-	opts := []react.Option{
-		react.WithMaxIterations(maxIterations),
-		react.WithTimeout(10 * time.Minute),
-	}
-
-	agentID := fmt.Sprintf("%s:%s", agentRecord.Role, agentRecord.ID)
-	dspyAgent := react.NewReActAgent(agentID, agentRecord.Role, opts...)
-
-	// Initialize LLM
-	llms.EnsureFactory()
-
-	// Resolve LLM configuration: per-agent settings override daemon config defaults
-	provider := agentRecord.LLMProvider
-	if provider == "" {
-		provider = daemonOpts.LLMProvider
-	}
-	if provider == "" {
-		provider = "gemini"
-	}
-
-	model := agentRecord.LLMModel
-	if model == "" {
-		model = daemonOpts.LLMModel
-	}
-	if model == "" {
-		switch provider {
-		case "groq":
-			model = "qwen/qwen3-32b"
-		case "openrouter":
-			model = "minimax/minimax-m2.1"
-		case "anthropic":
-			model = "claude-haiku-4-5"
-		case "openai":
-			model = "gpt-5.2"
-		default:
-			model = "gemini-3.0-flash"
-		}
-	}
-
-	apiKey := agentRecord.LLMAPIKey
-	if apiKey == "" {
-		apiKey = daemonOpts.LLMAPIKey
-	}
-
-	if apiKey == "" {
-		return nil, fmt.Errorf("LLM API key not set (use --llm-api-key or AGENTCTL_LLM_API_KEY)")
-	}
-
-	var llm core.LLM
-	var err error
-	switch provider {
-	case "gemini":
-		llm, err = llms.NewGeminiLLM(apiKey, core.ModelID(model))
-	case "openai":
-		llm, err = llms.NewOpenAILLM(core.ModelID(model), llms.WithAPIKey(apiKey))
-	case "anthropic":
-		// For Claude models via Anthropic API
-		config := core.ProviderConfig{Name: "anthropic", APIKey: apiKey}
-		llm, err = llms.NewAnthropicLLMFromConfig(ctx, config, core.ModelID(model))
-	case "groq":
-		// GROQ uses OpenAI-compatible API (dspy-go appends /v1/chat/completions)
-		llm, err = llms.NewOpenAICompatible("groq", core.ModelID(model),
-			"https://api.groq.com/openai", llms.WithAPIKey(apiKey))
-	case "openrouter":
-		// OpenRouter provides access to multiple models via OpenAI-compatible API
-		llm, err = llms.NewOpenAICompatible("openrouter", core.ModelID(model),
-			"https://openrouter.ai/api", llms.WithAPIKey(apiKey))
-	case "cerebras":
-		// Cerebras uses OpenAI-compatible API (dspy-go appends /v1/chat/completions)
-		llm, err = llms.NewOpenAICompatible("cerebras", core.ModelID(model),
-			"https://api.cerebras.ai", llms.WithAPIKey(apiKey))
-	default:
-		return nil, fmt.Errorf("unsupported LLM provider: %q (supported: gemini, openai, anthropic, groq, openrouter, cerebras)", provider)
-	}
-	if err != nil {
-		return nil, fmt.Errorf("create LLM: %w", err)
-	}
-
-	// Register tools BEFORE Initialize() so the signature includes tool descriptions.
-	// The ReAct module builds its action description during Initialize(), so tools
-	// must be registered first for the LLM to know they're available.
-	for _, tool := range registry.List() {
-		if err := dspyAgent.RegisterTool(tool); err != nil {
-			return nil, fmt.Errorf("register tool %s: %w", tool.Name(), err)
-		}
-	}
-
-	// Build signature
-	sig := buildSignature(agentRecord)
-
-	if err := dspyAgent.Initialize(llm, *sig); err != nil {
-		return nil, fmt.Errorf("initialize agent: %w", err)
-	}
-
-	return dspyAgent, nil
-}
-
-func buildSignature(a agent.Agent) *core.Signature {
-	instruction := fmt.Sprintf("You are a %s agent. %s", a.Role, a.Prompt)
-	sig := core.NewSignature(
-		[]core.InputField{
-			{Field: core.NewField("task", core.WithDescription("The task to be completed by the agent"))},
-		},
-		[]core.OutputField{
-			{Field: core.NewField("result", core.WithDescription("The final result or answer from completing the task"))},
-		},
-	).WithInstruction(instruction)
-	return &sig
-}

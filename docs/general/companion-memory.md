@@ -125,7 +125,7 @@ User Message
 │     Question: {question}"               │
 │                                         │
 │ 5. LLMChatEngine Execute (reactive)     │
-│    - Or DSPy ReAct (autonomous)         │
+│    - Or LLMChatEngine tool loop (autonomous) │
 │                                         │
 │ 6. Store assistant turn (on success)    │
 └─────────────────────────────────────────┘

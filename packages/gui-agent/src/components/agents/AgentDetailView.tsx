@@ -4,7 +4,7 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardHeader } from '@/components/ui/card'
-import { cn } from '@/lib/utils'
+import { cn, formatRelativeTime } from '@/lib/utils'
 import {
   listPersistedSessions,
   getSessionMessages,
@@ -58,7 +58,6 @@ export function AgentDetailView({ agent, onBack }: AgentDetailViewProps) {
     queryFn: async () => {
       const data = await listPersistedSessions({ limit: 200, workspace: agent.ns || undefined })
       if (data.sessions.length === 0 && agent.ns) {
-        console.log('[AgentDetailView] No sessions for workspace, falling back to global list')
         return listPersistedSessions({ limit: 200 })
       }
       return data
@@ -102,22 +101,14 @@ export function AgentDetailView({ agent, onBack }: AgentDetailViewProps) {
       ? workspaceSessions[0]
       : null
 
-  // Debug logging
-  console.log('[AgentDetailView] Agent ID:', agent.id, 'Agent NS:', agent.ns)
-  console.log('[AgentDetailView] Total sessions:', workspaceSessions.length)
-  console.log('[AgentDetailView] Filtered agentSessions:', agentSessions.length)
-  console.log('[AgentDetailView] Most recent session:', mostRecentSession?.id)
-
   // Handle loading agent into companion chat
   // If no persistedSession provided, will auto-load from most recent session for this agent
   const handleChat = async (persistedSession?: PersistedSession) => {
-    console.log('[AgentDetailView] handleChat called, persistedSession:', persistedSession?.id, 'mostRecentSession:', mostRecentSession?.id)
     setIsChatLoading(true)
     setInitializing(true) // Prevent CompanionChat from auto-initializing
 
     // Determine which persisted session to load from (before creating console session)
     const sessionToLoad = persistedSession || mostRecentSession
-    console.log('[AgentDetailView] sessionToLoad:', sessionToLoad?.id)
 
     try {
       const data = await createConsoleSession({
@@ -138,7 +129,6 @@ Help the user understand and interact with this agent's work.`,
       })
 
       const newSessionId = data.session.id
-      console.log('[AgentDetailView] Created console session:', newSessionId)
       setSessionId(newSessionId)
       setSession(data.session)
       setSourceAgent({
@@ -150,9 +140,7 @@ Help the user understand and interact with this agent's work.`,
 
       // Load messages from persisted session if available
       if (sessionToLoad) {
-        console.log('[AgentDetailView] Loading messages from session:', sessionToLoad.id)
         const messagesData = await getSessionMessages(sessionToLoad.id, { limit: 200 })
-        console.log('[AgentDetailView] Messages data:', messagesData)
         // Convert SessionMessage to ConsoleMessage format (handle legacy 'human' type).
         const consoleMessages: ConsoleMessage[] = messagesData.messages
           .filter((msg) => msg.type === 'user' || msg.type === 'assistant' || msg.type === 'human')
@@ -161,13 +149,9 @@ Help the user understand and interact with this agent's work.`,
             content: msg.summary || msg.error || '[No content]',
             timestamp: msg.timestamp || new Date().toISOString(),
           }))
-        console.log('[AgentDetailView] Converted console messages:', consoleMessages.length)
-        console.log('[AgentDetailView] Setting messages in store')
         setMessages(consoleMessages)
         setPersistedSessionId(sessionToLoad.id)
-        console.log('[AgentDetailView] Messages set, switching to companion view')
       } else {
-        console.log('[AgentDetailView] No session to load, starting fresh')
         setMessages([])
         setPersistedSessionId(null)
       }
@@ -175,7 +159,6 @@ Help the user understand and interact with this agent's work.`,
       setInflight(false)
 
       // Switch to conversations view to show the new chat
-      console.log('[AgentDetailView] Calling setActiveView(conversations)')
       setActiveView('conversations')
 
       // Set localStorage AFTER switching view and loading messages
@@ -189,20 +172,6 @@ Help the user understand and interact with this agent's work.`,
     } finally {
       setIsChatLoading(false)
     }
-  }
-
-  const getTimeSince = (dateStr: string) => {
-    const date = new Date(dateStr)
-    const now = new Date()
-    const diffMs = now.getTime() - date.getTime()
-    const diffMins = Math.floor(diffMs / 60000)
-    const diffHours = Math.floor(diffMins / 60)
-    const diffDays = Math.floor(diffHours / 24)
-
-    if (diffDays > 0) return `${diffDays}d ago`
-    if (diffHours > 0) return `${diffHours}h ago`
-    if (diffMins > 0) return `${diffMins}m ago`
-    return 'just now'
   }
 
   return (
@@ -271,7 +240,7 @@ Help the user understand and interact with this agent's work.`,
           {agent.created_at && (
             <div className="flex items-center gap-2 text-muted-foreground">
               <Clock className="h-4 w-4" />
-              <span>Created {getTimeSince(agent.created_at)}</span>
+              <span>Created {formatRelativeTime(agent.created_at)}</span>
             </div>
           )}
         </div>
@@ -352,7 +321,7 @@ Help the user understand and interact with this agent's work.`,
                       </span>
                       <span className="flex items-center gap-1">
                         <Clock className="h-3 w-3" />
-                        {getTimeSince(session.started_at)}
+                        {formatRelativeTime(session.started_at)}
                       </span>
                     </div>
                     {session.summary && (

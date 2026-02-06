@@ -37,7 +37,7 @@ func TestToolTrajectoryCapture_CodeSymbolSearch_EmitsToolCallAndResult(t *testin
 	}
 
 	// Execute may fail (no memory store); we only care that trajectory events were captured.
-	_, _ = tool.Execute(ctx, map[string]any{ //nolint:errcheck
+	_, _ = tool.Call(ctx, map[string]any{ //nolint:errcheck
 		"workspace_id": "ws-1",
 		"question":     "How does login work?",
 		"max_results":  5,

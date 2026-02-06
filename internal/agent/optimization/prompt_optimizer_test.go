@@ -75,6 +75,7 @@ func TestPromptOptimizer_OptimizeInstruction(t *testing.T) {
 
 	if result == nil {
 		t.Fatal("expected result, got nil")
+		return
 	}
 
 	if result.OriginalPrompt != currentPrompt {

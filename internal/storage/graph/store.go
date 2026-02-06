@@ -12,6 +12,7 @@ import (
 
 	"github.com/oklog/ulid/v2"
 
+	ws "github.com/jkatigb/agentctl/internal/platform/workspace"
 	"github.com/jkatigb/agentctl/internal/storage/sqliteutil"
 )
 
@@ -81,6 +82,7 @@ func Open(ctx context.Context, dataDir string) (*SQLiteStore, error) {
 		_ = closeFn()
 		return nil, fmt.Errorf("migrate graph db: %w", err)
 	}
+	store.repairWorkspaceIDs(ctx)
 
 	return store, nil
 }
@@ -143,6 +145,7 @@ func (s *SQLiteStore) migrate(ctx context.Context) error {
 
 // UpsertNode inserts or updates a node.
 func (s *SQLiteStore) UpsertNode(ctx context.Context, node Node) error {
+	node.Workspace = ws.CanonicalID(node.Workspace)
 	now := time.Now().UTC().Format(time.RFC3339)
 	if node.LastSeen.IsZero() {
 		node.LastSeen = time.Now().UTC()
@@ -187,6 +190,7 @@ func (s *SQLiteStore) UpsertNode(ctx context.Context, node Node) error {
 
 // GetNode retrieves a node by ID.
 func (s *SQLiteStore) GetNode(ctx context.Context, workspace, nodeID string) (Node, error) {
+	workspace = ws.CanonicalID(workspace)
 	query := `
 	SELECT workspace, node_id, node_type, title, current_path, pagerank, in_degree, out_degree, last_seen, metadata, created_at, updated_at
 	FROM graph_nodes
@@ -238,6 +242,7 @@ func (s *SQLiteStore) GetNode(ctx context.Context, workspace, nodeID string) (No
 
 // DeleteNode removes a node and its edges.
 func (s *SQLiteStore) DeleteNode(ctx context.Context, workspace, nodeID string) error {
+	workspace = ws.CanonicalID(workspace)
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -261,6 +266,7 @@ func (s *SQLiteStore) DeleteNode(ctx context.Context, workspace, nodeID string) 
 
 // TopNodes returns the top nodes by PageRank.
 func (s *SQLiteStore) TopNodes(ctx context.Context, opts TopNodesOptions) ([]Node, error) {
+	opts.Workspace = ws.CanonicalID(opts.Workspace)
 	var args []any
 	query := `
 	SELECT workspace, node_id, node_type, title, current_path, pagerank, in_degree, out_degree, last_seen, metadata, created_at, updated_at
@@ -292,6 +298,7 @@ func (s *SQLiteStore) TopNodes(ctx context.Context, opts TopNodesOptions) ([]Nod
 
 // UpdatePageRank updates a node's PageRank score.
 func (s *SQLiteStore) UpdatePageRank(ctx context.Context, workspace, nodeID string, pagerank float64) error {
+	workspace = ws.CanonicalID(workspace)
 	_, err := s.db.ExecContext(ctx,
 		"UPDATE graph_nodes SET pagerank = ?, updated_at = ? WHERE workspace = ? AND node_id = ?",
 		pagerank, time.Now().UTC().Format(time.RFC3339), workspace, nodeID,
@@ -301,6 +308,7 @@ func (s *SQLiteStore) UpdatePageRank(ctx context.Context, workspace, nodeID stri
 
 // UpdateDegrees updates a node's in/out degree counts.
 func (s *SQLiteStore) UpdateDegrees(ctx context.Context, workspace, nodeID string, inDegree, outDegree int) error {
+	workspace = ws.CanonicalID(workspace)
 	_, err := s.db.ExecContext(ctx,
 		"UPDATE graph_nodes SET in_degree = ?, out_degree = ?, updated_at = ? WHERE workspace = ? AND node_id = ?",
 		inDegree, outDegree, time.Now().UTC().Format(time.RFC3339), workspace, nodeID,
@@ -310,6 +318,7 @@ func (s *SQLiteStore) UpdateDegrees(ctx context.Context, workspace, nodeID strin
 
 // UpsertEdge inserts or updates an edge.
 func (s *SQLiteStore) UpsertEdge(ctx context.Context, edge Edge) error {
+	edge.Workspace = ws.CanonicalID(edge.Workspace)
 	if edge.ID == "" {
 		edge.ID = ulid.Make().String()
 	}
@@ -418,6 +427,7 @@ func (s *SQLiteStore) GetEdgesTo(ctx context.Context, workspace, nodeID string, 
 }
 
 func (s *SQLiteStore) getEdges(ctx context.Context, workspace, nodeID, column string, edgeTypes []EdgeType) ([]Edge, error) {
+	workspace = ws.CanonicalID(workspace)
 	var args []any
 	query := fmt.Sprintf(`
 	SELECT id, workspace, from_id, from_type, to_id, to_type, edge_type, weight, created_at, ttl_days, metadata
@@ -446,6 +456,7 @@ func (s *SQLiteStore) getEdges(ctx context.Context, workspace, nodeID, column st
 
 // GetNeighbors returns neighboring nodes.
 func (s *SQLiteStore) GetNeighbors(ctx context.Context, workspace, nodeID string, opts NeighborOptions) ([]Neighbor, error) {
+	workspace = ws.CanonicalID(workspace)
 	var neighbors []Neighbor
 
 	// Get outgoing neighbors
@@ -520,6 +531,7 @@ func (s *SQLiteStore) UpsertNodes(ctx context.Context, nodes []Node) error {
 
 	now := time.Now().UTC().Format(time.RFC3339)
 	for _, node := range nodes {
+		node.Workspace = ws.CanonicalID(node.Workspace)
 		if node.LastSeen.IsZero() {
 			node.LastSeen = time.Now().UTC()
 		}
@@ -581,6 +593,7 @@ func (s *SQLiteStore) UpsertEdges(ctx context.Context, edges []Edge) error {
 	defer stmt.Close()
 
 	for _, edge := range edges {
+		edge.Workspace = ws.CanonicalID(edge.Workspace)
 		if edge.ID == "" {
 			edge.ID = ulid.Make().String()
 		}
@@ -615,6 +628,7 @@ func (s *SQLiteStore) UpsertEdges(ctx context.Context, edges []Edge) error {
 
 // Stats returns graph statistics.
 func (s *SQLiteStore) Stats(ctx context.Context, workspace string) (GraphStats, error) {
+	workspace = ws.CanonicalID(workspace)
 	stats := GraphStats{
 		Path: s.path,
 		Nodes: NodeStats{
@@ -689,10 +703,11 @@ func (s *SQLiteStore) CleanupExpiredEdges(ctx context.Context) (int, error) {
 
 // CleanupDanglingEdges removes edges that reference non-existent nodes.
 func (s *SQLiteStore) CleanupDanglingEdges(ctx context.Context, workspace string) (int, error) {
+	workspace = ws.CanonicalID(workspace)
 	result, err := s.db.ExecContext(ctx, `
-	DELETE FROM graph_edges
-	WHERE workspace = ?
-	  AND (
+		DELETE FROM graph_edges
+		WHERE workspace = ?
+		  AND (
 	    NOT EXISTS (SELECT 1 FROM graph_nodes WHERE workspace = graph_edges.workspace AND node_id = graph_edges.from_id)
 	    OR NOT EXISTS (SELECT 1 FROM graph_nodes WHERE workspace = graph_edges.workspace AND node_id = graph_edges.to_id)
 	  )
@@ -706,10 +721,11 @@ func (s *SQLiteStore) CleanupDanglingEdges(ctx context.Context, workspace string
 
 // RecalculateDegrees recalculates in/out degrees for all nodes.
 func (s *SQLiteStore) RecalculateDegrees(ctx context.Context, workspace string) error {
+	workspace = ws.CanonicalID(workspace)
 	_, err := s.db.ExecContext(ctx, `
-	UPDATE graph_nodes
-	SET
-		in_degree = (SELECT COUNT(*) FROM graph_edges WHERE workspace = graph_nodes.workspace AND to_id = graph_nodes.node_id),
+		UPDATE graph_nodes
+		SET
+			in_degree = (SELECT COUNT(*) FROM graph_edges WHERE workspace = graph_nodes.workspace AND to_id = graph_nodes.node_id),
 		out_degree = (SELECT COUNT(*) FROM graph_edges WHERE workspace = graph_nodes.workspace AND from_id = graph_nodes.node_id),
 		updated_at = ?
 	WHERE workspace = ?
@@ -719,10 +735,11 @@ func (s *SQLiteStore) RecalculateDegrees(ctx context.Context, workspace string) 
 
 // GetAllEdges returns all edges for a workspace (for PageRank computation).
 func (s *SQLiteStore) GetAllEdges(ctx context.Context, workspace string) ([]Edge, error) {
+	workspace = ws.CanonicalID(workspace)
 	rows, err := s.db.QueryContext(ctx, `
-	SELECT id, workspace, from_id, from_type, to_id, to_type, edge_type, weight, created_at, ttl_days, metadata
-	FROM graph_edges
-	WHERE workspace = ?
+		SELECT id, workspace, from_id, from_type, to_id, to_type, edge_type, weight, created_at, ttl_days, metadata
+		FROM graph_edges
+		WHERE workspace = ?
 	`, workspace)
 	if err != nil {
 		return nil, err
@@ -734,10 +751,11 @@ func (s *SQLiteStore) GetAllEdges(ctx context.Context, workspace string) ([]Edge
 
 // GetAllNodes returns all nodes for a workspace.
 func (s *SQLiteStore) GetAllNodes(ctx context.Context, workspace string) ([]Node, error) {
+	workspace = ws.CanonicalID(workspace)
 	rows, err := s.db.QueryContext(ctx, `
-	SELECT workspace, node_id, node_type, title, current_path, pagerank, in_degree, out_degree, last_seen, metadata, created_at, updated_at
-	FROM graph_nodes
-	WHERE workspace = ?
+		SELECT workspace, node_id, node_type, title, current_path, pagerank, in_degree, out_degree, last_seen, metadata, created_at, updated_at
+		FROM graph_nodes
+		WHERE workspace = ?
 	`, workspace)
 	if err != nil {
 		return nil, err
@@ -757,6 +775,7 @@ func (s *SQLiteStore) GetAllNodes(ctx context.Context, workspace string) ([]Node
 // - Related: SQLiteStore.UpsertNodes
 // - Keywords: pagerank, bulk_update, transaction, workspace_id
 func (s *SQLiteStore) BulkUpdatePageRank(ctx context.Context, workspace string, ranks map[string]float64) error {
+	workspace = ws.CanonicalID(workspace)
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -867,6 +886,7 @@ func (s *SQLiteStore) scanEdges(rows *sql.Rows) ([]Edge, error) {
 // SearchNodes finds nodes matching a term in node_id, title, or current_path.
 // Results are ordered by PageRank descending.
 func (s *SQLiteStore) SearchNodes(ctx context.Context, workspace, term string, limit int) ([]Node, error) {
+	workspace = ws.CanonicalID(workspace)
 	if limit <= 0 {
 		limit = 50
 	}
@@ -894,6 +914,7 @@ func (s *SQLiteStore) SearchNodes(ctx context.Context, workspace, term string, l
 
 // GetEdgesBetween returns edges where both from_id and to_id are within the given nodeIDs set.
 func (s *SQLiteStore) GetEdgesBetween(ctx context.Context, workspace string, nodeIDs []string) ([]Edge, error) {
+	workspace = ws.CanonicalID(workspace)
 	if len(nodeIDs) == 0 {
 		return nil, nil
 	}
@@ -935,6 +956,7 @@ func (s *SQLiteStore) GetEdgesBetween(ctx context.Context, workspace string, nod
 // Returns paths as slices of node IDs. maxDepth limits search depth (default 5).
 // Returns nil if no path exists within maxDepth.
 func (s *SQLiteStore) FindShortestPath(ctx context.Context, workspace, fromID, toID string, maxDepth int) ([][]string, error) {
+	workspace = ws.CanonicalID(workspace)
 	if maxDepth <= 0 {
 		maxDepth = 5
 	}

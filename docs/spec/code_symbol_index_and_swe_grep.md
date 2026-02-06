@@ -16,9 +16,9 @@ These components are designed to work with, not replace:
   single-embedding-per-file (and optional chunk) views.
 - The **review gate** (`review_gate.md`), which defines post-review as the
   canonical moment to refresh derived indexes.
-- The **dspy-go agent runtime** (`dspy_go_agents.md`), which exposes tools that
-  call into this index and SWE Grep skill.
-- **Trajectory capture** (`dspy_trajectory_capture.md`), which records how
+- The **agent runtime** (`agent_hierarchy.md`), which exposes tools that call into
+  this index and SWE Grep skill.
+- **Trajectory capture** (`archive/specs/dspy_trajectory_capture.md`, legacy), which records how
   agents and tools interact with code and reviews.
 
 At a high level, the symbol index + SWE Grep implement the **funnel
@@ -27,7 +27,7 @@ architecture** for code retrieval:
 1. **Broad retrieval**: use file and symbol embeddings + call graph to find
    relevant files and symbols.
 2. **SWE Grep**: live-read those files and extract high-density snippets.
-3. **Reasoning**: dspy-go agents consume snippets plus other context (tasks,
+3. **Reasoning**: agents consume snippets plus other context (tasks,
    reviews, trajectories) to synthesize answers and changes.
 
 This spec is **normative** for the symbol index data model and SWE Grep skill
@@ -56,7 +56,7 @@ v1.
     - Uses a small LM to filter candidate files down to high-value snippets.
     - Emits snippets via Protocol v1 envelopes and CAS artifacts when large.
 - **Agent-friendly tools**
-  - Expose retrieval capabilities to dspy-go agents via tools like
+  - Expose retrieval capabilities to agents via tools like
     `code.symbol_search` and `code.swe_grep`, without giving agents direct
     control over embedding/indexing internals.
 
@@ -417,8 +417,8 @@ Rules:
 
 ### 5.4 Error Semantics
 
-The SWE Grep skill reuses Protocol v1 and dspy tool error codes (see
-`protocol_v1.md`, `dspy_go_agents.md` §11.3). Common examples:
+The SWE Grep skill reuses Protocol v1 and legacy tool error codes (see
+`protocol_v1.md`, `archive/specs/dspy_go_agents.md` §11.3). Common examples:
 
 - `E_GUARD_VIOLATION` – path blocked by `task_guard` / `file_guard`.
 - `E_FILE_NOT_FOUND` – candidate path does not exist.
@@ -439,7 +439,7 @@ Error envelopes MUST:
 
 ### 6.1 `code.symbol_search` Tool
 
-The dspy-go tools layer MAY expose a `code.symbol_search` tool that wraps the
+The tools layer MAY expose a `code.symbol_search` tool that wraps the
 symbol index.
 
 Inputs (conceptual):
@@ -497,7 +497,7 @@ Agents typically:
 ### 7.1 Trajectory Events
 
 When SWE Grep and symbol search are used by agents, trajectory capture
-(`dspy_trajectory_capture.md`) SHOULD record these operations as
+(`archive/specs/dspy_trajectory_capture.md`) SHOULD record these operations as
 `TrajectoryEvent`s, typically with kinds such as:
 
 - `"tool_call"` and `"tool_result"` for `code.symbol_search` and
@@ -541,7 +541,7 @@ Potential extensions building on this spec include:
 - Indexing additional relationships (e.g. type references, inheritance edges).
 - Adding named_memory-backed embeddings for:
   - `qa_pair` (question-answer pairs).
-  - `trajectory_episode` (exported episodes from `dspy_trajectory_capture.md`).
+  - `trajectory_episode` (exported episodes from `archive/specs/dspy_trajectory_capture.md`).
   - `doc_embedding` (codemaps and specs).
 - Optimizing rename handling by recognizing identical `content_hash` values and
   remapping symbol IDs instead of re-embedding.

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/jkatigb/agentctl/internal/platform/timeutil"
+	ws "github.com/jkatigb/agentctl/internal/platform/workspace"
 	"github.com/jkatigb/agentctl/internal/storage/dbutil"
 	"github.com/jkatigb/agentctl/internal/storage/sqliteutil"
 	"github.com/jkatigb/agentctl/internal/storage/sqlutil"
@@ -82,7 +83,9 @@ func Open(ctx context.Context, root string) (Store, error) {
 	if err != nil {
 		return nil, fmt.Errorf("trajectory: open db: %w", err)
 	}
-	return &sqlStore{db: db, close: closeFn}, nil
+	store := &sqlStore{db: db, close: closeFn}
+	store.repairWorkspaceIDs(ctx)
+	return store, nil
 }
 
 // Close releases database resources.
@@ -193,6 +196,7 @@ func generateID() string {
 
 // InsertTrajectory creates a new trajectory record.
 func (s *sqlStore) InsertTrajectory(ctx context.Context, t Trajectory) (Trajectory, error) {
+	t.WorkspaceID = ws.CanonicalID(t.WorkspaceID)
 	now := timeutil.NowUTC()
 	if t.ID == "" {
 		t.ID = generateID()
@@ -238,6 +242,7 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 
 // GetTrajectory returns a trajectory by ID.
 func (s *sqlStore) GetTrajectory(ctx context.Context, workspaceID, id string) (Trajectory, error) {
+	workspaceID = ws.CanonicalID(workspaceID)
 	row := s.db.QueryRowContext(ctx, `
 SELECT id, workspace_id, root_request_id, task_ids_json, epic_id, agent_role, job_id, trace_id, status, summary, artifact_digest, outcome_json, created_at, updated_at, session_id
 FROM trajectories
@@ -256,6 +261,7 @@ WHERE workspace_id = ? AND id = ?
 
 // UpdateTrajectory updates an existing trajectory.
 func (s *sqlStore) UpdateTrajectory(ctx context.Context, t Trajectory) error {
+	t.WorkspaceID = ws.CanonicalID(t.WorkspaceID)
 	t.UpdatedAt = timeutil.NowUTC()
 
 	taskIDsJSON, err := sqlutil.FormatJSON(t.TaskIDs)
@@ -303,6 +309,7 @@ WHERE workspace_id = ? AND id = ?
 
 // ListTrajectories returns trajectories matching the filter.
 func (s *sqlStore) ListTrajectories(ctx context.Context, filter ListFilter) ([]Trajectory, error) {
+	filter.WorkspaceID = ws.CanonicalID(filter.WorkspaceID)
 	if filter.WorkspaceID == "" {
 		return nil, fmt.Errorf("trajectory: workspace_id required")
 	}
@@ -377,6 +384,7 @@ WHERE workspace_id = ?`
 
 // DeleteTrajectory removes a trajectory and its events (via CASCADE).
 func (s *sqlStore) DeleteTrajectory(ctx context.Context, workspaceID, id string) error {
+	workspaceID = ws.CanonicalID(workspaceID)
 	result, err := s.db.ExecContext(ctx, `
 DELETE FROM trajectories WHERE workspace_id = ? AND id = ?
 `, workspaceID, id)
@@ -395,6 +403,7 @@ DELETE FROM trajectories WHERE workspace_id = ? AND id = ?
 
 // SetOutcome records the outcome for a trajectory.
 func (s *sqlStore) SetOutcome(ctx context.Context, workspaceID, id string, outcome Outcome) error {
+	workspaceID = ws.CanonicalID(workspaceID)
 	// Set recorded time if not already set
 	if outcome.RecordedAt.IsZero() {
 		outcome.RecordedAt = timeutil.NowUTC()
@@ -424,6 +433,7 @@ WHERE workspace_id = ? AND id = ?
 
 // ListByOutcome returns trajectories filtered by outcome criteria.
 func (s *sqlStore) ListByOutcome(ctx context.Context, filter OutcomeFilter) ([]Trajectory, error) {
+	filter.WorkspaceID = ws.CanonicalID(filter.WorkspaceID)
 	if filter.WorkspaceID == "" {
 		return nil, fmt.Errorf("trajectory: workspace_id required")
 	}
@@ -490,6 +500,7 @@ WHERE workspace_id = ? AND outcome_json IS NOT NULL`
 
 // InsertUserRequest creates a new user request capture.
 func (s *sqlStore) InsertUserRequest(ctx context.Context, ur UserRequestCapture) (UserRequestCapture, error) {
+	ur.WorkspaceID = ws.CanonicalID(ur.WorkspaceID)
 	if ur.ID == "" {
 		ur.ID = generateID()
 	}
@@ -530,6 +541,7 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 
 // GetUserRequest returns a user request by ID.
 func (s *sqlStore) GetUserRequest(ctx context.Context, workspaceID, id string) (UserRequestCapture, error) {
+	workspaceID = ws.CanonicalID(workspaceID)
 	row := s.db.QueryRowContext(ctx, `
 SELECT id, workspace_id, actor, source, ts, text, command_context_json, task_hints_json
 FROM user_requests
@@ -548,6 +560,7 @@ WHERE workspace_id = ? AND id = ?
 
 // ListUserRequests returns user requests for a workspace.
 func (s *sqlStore) ListUserRequests(ctx context.Context, workspaceID string, limit int) ([]UserRequestCapture, error) {
+	workspaceID = ws.CanonicalID(workspaceID)
 	if limit <= 0 {
 		limit = 100
 	}
@@ -769,6 +782,7 @@ WHERE trajectory_id = ?`
 
 // GetEventsByTraceID returns events matching a trace ID across trajectories.
 func (s *sqlStore) GetEventsByTraceID(ctx context.Context, workspaceID, traceID string) ([]Event, error) {
+	workspaceID = ws.CanonicalID(workspaceID)
 	rows, err := s.db.QueryContext(ctx, `
 SELECT id, trajectory_id, ts, kind, actor, command, status, data_inline_json, data_artifact, meta_json
 FROM trajectory_events

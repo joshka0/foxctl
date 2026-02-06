@@ -57,7 +57,7 @@ func callTool(t *testing.T, registry *agenttools.Registry, name string, params m
 	if err != nil {
 		return nil, err
 	}
-	return tool.Execute(context.Background(), params)
+	return tool.Call(context.Background(), params)
 }
 
 // TestToolIntegration_RetrievalFunnelWorkflow tests the full retrieval workflow.

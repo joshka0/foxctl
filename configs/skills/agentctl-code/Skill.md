@@ -74,10 +74,31 @@ agentctl run code/smart_search --input '{"query": "error handling", "files": ["h
 Navigate code by relationships (calls, references, imports):
 
 ```bash
-agentctl index repo build --workspace .
+# For TS/Elixir-only repos, add `--go=false` (otherwise Go indexing may fail).
+agentctl index repo build --dry-run --workspace . --go --typescript --elixir
+agentctl index repo build --workspace . --go --typescript --elixir
 agentctl index repo search --workspace . --query "Supervisor"
 agentctl index repo expand --workspace . --seed "<node-id>" --edge CALLS --edge REFERS_TO
 ```
+
+## DAG Grep (Repo Graph Explanation)
+
+Use `code/dag_grep` when you want a small explanation subgraph in one call (similar to `code/context_grep`, but for repoindex):
+
+```bash
+agentctl run code/dag_grep --input '{
+  "query": "repoindex builder",
+  "workspace": ".",
+  "render": "tree",
+  "edge_sets": ["structural"],
+  "depth": 2,
+  "budget": 80,
+  "k": 5
+}'
+```
+
+Notes:
+- TypeScript adds heuristic `CALLS` edges; Elixir adds heuristic `REFERS_TO` edges. These are best-effort (no type-checking) and conservative (ambiguous targets are skipped).
 
 ## Git Operations
 

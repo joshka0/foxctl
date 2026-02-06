@@ -684,6 +684,7 @@ func TestSession_GetActive(t *testing.T) {
 	}
 	if active == nil {
 		t.Fatal("expected active session, got nil")
+		return
 	}
 	if active.ID != "sess-running" {
 		t.Errorf("active ID: got %q, want %q", active.ID, "sess-running")

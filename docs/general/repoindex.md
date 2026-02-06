@@ -2,7 +2,7 @@
 
 The repo graph index is a local, per-repo SQLite graph for navigating code by
 relationships. It powers `agentctl index repo ...` and the agent tools
-`repo.index.search`, `repo.index.expand`, and `repo.index.open`.
+`repo_index_search`, `repo_index_expand`, and `repo_index_open`.
 
 ---
 
@@ -125,4 +125,3 @@ Use `agentctl index repo status --workspace .` to see the active DB path.
 
 Repoindex queries emit `repo_index` events into the observability stream. See
 `docs/general/storage.md` for the default observability directory.
-

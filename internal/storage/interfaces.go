@@ -228,6 +228,7 @@ type MemoryStore interface {
 // Session represents a captured Claude Code conversation session.
 type Session struct {
 	ID              string    `json:"id"`
+	WorkspaceID     string    `json:"workspace_id,omitempty"`
 	WorkspacePath   string    `json:"workspace_path"`
 	ProjectName     string    `json:"project_name"`
 	GitBranch       string    `json:"git_branch"`
@@ -306,6 +307,7 @@ type SessionStats struct {
 
 // SessionListOptions configures session listing.
 type SessionListOptions struct {
+	WorkspaceID   string
 	WorkspacePath string
 	ProjectName   string
 	Tags          []string

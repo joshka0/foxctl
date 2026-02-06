@@ -31,6 +31,17 @@
   --color-ring: oklch(0.70 0.01 255);
 
   --radius: 0.5rem;
+
+  /* Status colors */
+  --color-status-running: oklch(0.72 0.19 142);
+  --color-status-idle: oklch(0.80 0.18 85);
+  --color-status-error: oklch(0.55 0.22 27);
+  --color-status-stopped: oklch(0.55 0.02 255);
+
+  /* Role colors */
+  --color-role-user: oklch(0.65 0.15 250);
+  --color-role-assistant: oklch(0.65 0.15 300);
+  --color-role-system: oklch(0.55 0.02 255);
 }
 
 body {

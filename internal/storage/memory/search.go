@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 
+	ws "github.com/jkatigb/agentctl/internal/platform/workspace"
 	"github.com/jkatigb/agentctl/internal/storage"
 	"github.com/jkatigb/agentctl/internal/storage/dbdriver"
 )
@@ -30,6 +31,7 @@ type SearchResult struct {
 func (s *Store) EnableSearch(db dbdriver.DB, workspace string) (*SearchableStore, error) {
 	// Build corpus statistics for the workspace
 	ctx := context.Background()
+	workspace = ws.CanonicalID(workspace)
 
 	// Build corpus stats directly using the provided DB connection
 	corpusStats, err := buildCorpusStatsForWorkspace(ctx, db, workspace)
@@ -64,6 +66,7 @@ func (ss *SearchableStore) Search(
 	mode dbdriver.SearchMode,
 	limit int,
 ) ([]SearchResult, error) {
+	workspace = ws.CanonicalID(workspace)
 	switch mode {
 	case dbdriver.SearchModeBM25:
 		return ss.searchBM25(ctx, query, workspace, limit)
@@ -245,9 +248,9 @@ func (ss *SearchableStore) searchHybrid(
 		query,
 		queryVector,
 		"named_memory",
-		"name",                           // Text column expression
-		"embedding",                            // Vector column
-		"idx_memory_vector",                    // Index name
+		"name",              // Text column expression
+		"embedding",         // Vector column
+		"idx_memory_vector", // Index name
 		limit,
 		"workspace = ?", // Additional filter
 		workspace,
@@ -372,6 +375,7 @@ func (ss *SearchableStore) Get(ctx context.Context, id, workspace string) (stora
 
 // RefreshCorpusStats rebuilds corpus statistics (call after bulk updates)
 func (ss *SearchableStore) RefreshCorpusStats(ctx context.Context, workspace string) error {
+	workspace = ws.CanonicalID(workspace)
 	stats, err := buildCorpusStatsForWorkspace(ctx, ss.db, workspace)
 	if err != nil {
 		return err
@@ -398,6 +402,7 @@ func buildCorpusStatsForWorkspace(
 	db dbdriver.DB,
 	workspace string,
 ) (dbdriver.CorpusStats, error) {
+	workspace = ws.CanonicalID(workspace)
 	stats := dbdriver.CorpusStats{
 		DocFreqs: make(map[string]int),
 	}

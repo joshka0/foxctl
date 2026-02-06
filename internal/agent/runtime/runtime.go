@@ -1,6 +1,7 @@
 package runtime
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -16,7 +17,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/XiaoConstantine/dspy-go/pkg/core"
 	"github.com/oklog/ulid/v2"
 
 	"github.com/jkatigb/agentctl/internal/agent/types"
@@ -473,6 +473,8 @@ func (e *agentToolExecutor) Execute(ctx context.Context, name string, args json.
 		return e.executeRepoIndexExpand(ctx, argsMap)
 	case "repo_index_open":
 		return e.executeRepoIndexOpen(ctx, argsMap)
+	case "repo_index_dag_grep":
+		return e.executeRepoIndexDagGrep(ctx, argsMap)
 	// Overseer agent management tools
 	case "agent_spawn":
 		return e.executeAgentSpawn(ctx, argsMap)
@@ -1122,12 +1124,7 @@ func (e *agentToolExecutor) executeContextSearch(ctx context.Context, args map[s
 	cmd := exec.CommandContext(ctx, "agentctl", "run", "code/semantic_search", "--input", input)
 	cmd.Dir = e.workspaceRoot
 
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		return fmt.Sprintf("context_search error: %v\nOutput: %s", err, string(output)), nil
-	}
-
-	return string(output), nil
+	return commandOutput(cmd, "context_search")
 }
 
 // executeSmartSearch calls code/smart_search skill for all-in-one search + extract
@@ -1151,15 +1148,10 @@ func (e *agentToolExecutor) executeSmartSearch(ctx context.Context, args map[str
 	cmd := exec.CommandContext(ctx, "agentctl", "run", "code/smart_search", "--input", input)
 	cmd.Dir = e.workspaceRoot
 
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		return fmt.Sprintf("smart_search error: %v\nOutput: %s", err, string(output)), nil
-	}
-
-	return string(output), nil
+	return commandOutput(cmd, "smart_search")
 }
 
-// executeContextGrep calls code/context_ripgrep for pattern search with full function bodies
+// executeContextGrep calls code/context_grep for pattern search with full function bodies
 func (e *agentToolExecutor) executeContextGrep(ctx context.Context, args map[string]any) (string, error) {
 	pattern, _ := args["pattern"].(string)
 	if pattern == "" {
@@ -1172,15 +1164,10 @@ func (e *agentToolExecutor) executeContextGrep(ctx context.Context, args map[str
 	}
 
 	input := fmt.Sprintf(`{"pattern": %q, "path": %q}`, pattern, path)
-	cmd := exec.CommandContext(ctx, "agentctl", "run", "code/context_ripgrep", "--input", input)
+	cmd := exec.CommandContext(ctx, "agentctl", "run", "code/context_grep", "--input", input)
 	cmd.Dir = e.workspaceRoot
 
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		return fmt.Sprintf("context_grep error: %v\nOutput: %s", err, string(output)), nil
-	}
-
-	return string(output), nil
+	return commandOutput(cmd, "context_grep")
 }
 
 func (e *agentToolExecutor) executeRepoIndexSearch(ctx context.Context, args map[string]any) (string, error) {
@@ -1204,12 +1191,7 @@ func (e *agentToolExecutor) executeRepoIndexSearch(ctx context.Context, args map
 	cmd := exec.CommandContext(ctx, "agentctl", "index", "repo", "search", "--workspace", workspace, "--query", query, "--limit", strconv.Itoa(limit))
 	cmd.Dir = e.workspaceRoot
 
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		return fmt.Sprintf("repo_index_search error: %v\nOutput: %s", err, string(output)), nil
-	}
-
-	return string(output), nil
+	return commandOutput(cmd, "repo_index_search")
 }
 
 func (e *agentToolExecutor) executeRepoIndexExpand(ctx context.Context, args map[string]any) (string, error) {
@@ -1243,12 +1225,7 @@ func (e *agentToolExecutor) executeRepoIndexExpand(ctx context.Context, args map
 	cmd := exec.CommandContext(ctx, "agentctl", argsList...)
 	cmd.Dir = e.workspaceRoot
 
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		return fmt.Sprintf("repo_index_expand error: %v\nOutput: %s", err, string(output)), nil
-	}
-
-	return string(output), nil
+	return commandOutput(cmd, "repo_index_expand")
 }
 
 func (e *agentToolExecutor) executeRepoIndexOpen(ctx context.Context, args map[string]any) (string, error) {
@@ -1265,12 +1242,24 @@ func (e *agentToolExecutor) executeRepoIndexOpen(ctx context.Context, args map[s
 	cmd := exec.CommandContext(ctx, "agentctl", "index", "repo", "open", "--workspace", workspace, "--id", id)
 	cmd.Dir = e.workspaceRoot
 
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		return fmt.Sprintf("repo_index_open error: %v\nOutput: %s", err, string(output)), nil
+	return commandOutput(cmd, "repo_index_open")
+}
+
+func (e *agentToolExecutor) executeRepoIndexDagGrep(ctx context.Context, args map[string]any) (string, error) {
+	query, _ := args["query"].(string)
+	if strings.TrimSpace(query) == "" {
+		return "", fmt.Errorf("query is required")
 	}
 
-	return string(output), nil
+	inputBytes, err := json.Marshal(args)
+	if err != nil {
+		return "", fmt.Errorf("marshal dag_grep args: %w", err)
+	}
+
+	cmd := exec.CommandContext(ctx, "agentctl", "run", "code/dag_grep", "--input", string(inputBytes))
+	cmd.Dir = e.workspaceRoot
+
+	return commandOutput(cmd, "repo_index_dag_grep")
 }
 
 // executeSessionTimeline calls code/semantic_search with sessions scope and timeline format
@@ -1290,12 +1279,28 @@ func (e *agentToolExecutor) executeSessionTimeline(ctx context.Context, args map
 	cmd := exec.CommandContext(ctx, "agentctl", "run", "code/semantic_search", "--input", input)
 	cmd.Dir = e.workspaceRoot
 
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		return fmt.Sprintf("session_timeline error: %v\nOutput: %s", err, string(output)), nil
-	}
+	return commandOutput(cmd, "session_timeline")
+}
 
-	return string(output), nil
+func commandOutput(cmd *exec.Cmd, label string) (string, error) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	err := cmd.Run()
+	out := stdout.String()
+	if err != nil {
+		if strings.TrimSpace(out) != "" {
+			// Preserve tool output for soft-failure paths (e.g., no results).
+			return out, nil
+		}
+		errText := strings.TrimSpace(stderr.String())
+		if errText != "" {
+			return "", fmt.Errorf("%s error: %s", label, errText)
+		}
+		return "", fmt.Errorf("%s error: %w", label, err)
+	}
+	return out, nil
 }
 
 // buildToolDefsForRole returns tool definitions appropriate for the agent role.
@@ -1374,6 +1379,24 @@ func buildToolDefsForRole(role types.AgentRole, hasMailbox, hasBoard bool, allow
 				Name:        "repo_index_open",
 				Description: "Open a repo index node by ID.",
 				Parameters:  json.RawMessage(`{"type":"object","properties":{"id":{"type":"string","description":"Node ID"}},"required":["id"]}`),
+			},
+			engine.ToolDef{
+				Name:        "repo_index_dag_grep",
+				Description: "Search and expand the repo index into a compact explanation subgraph.",
+				Parameters: json.RawMessage(`{"type":"object","properties":{
+					"query":{"type":"string","description":"Search query"},
+					"mode":{"type":"string","enum":["fts","semantic","hybrid"]},
+					"k":{"type":"integer","description":"Number of seed nodes (default 10)"},
+					"node_kinds":{"type":"array","items":{"type":"string","enum":["symbol","file","package","concept"]}},
+					"edge_sets":{"type":"array","items":{"type":"string","enum":["structural","doc","all"]}},
+					"edge_types":{"type":"array","items":{"type":"string"}},
+					"direction":{"type":"string","enum":["out","in"]},
+					"depth":{"type":"integer","description":"Traversal depth"},
+					"budget":{"type":"integer","description":"Max nodes to return"},
+					"per_node_cap":{"type":"integer","description":"Max edges per node"},
+					"include_anchors":{"type":"boolean","description":"Include file/package anchors"},
+					"render":{"type":"string","enum":["none","tree","mermaid"]}
+				},"required":["query"]}`),
 			},
 		)
 	case types.RoleOverseer:
@@ -2118,93 +2141,6 @@ func writeFileSafe(path string, content []byte) error {
 		return fmt.Errorf("create directory: %w", err)
 	}
 	return os.WriteFile(path, content, 0o644)
-}
-
-// buildAgentSignature creates a dspy-go Signature for the agent role.
-// This is used by tests to validate agent configuration.
-func buildAgentSignature(cfg types.AgentConfig) *core.Signature {
-	var instruction string
-
-	switch cfg.Role {
-	case types.RoleCoder:
-		instruction = `You are a coding agent that implements features and fixes bugs.
-
-Code Search & Retrieval Tools:
-- code.symbol_search to find relevant symbols (functions, classes, types)
-- code.swe_grep for fast regex search across the codebase
-- code.search for semantic code search
-
-File Operations:
-- fs.read_file to read file contents
-- fs.list_dir to explore directory structure
-
-Edit Tools:
-- edit.create_file to create new files
-- edit.apply_patch for simple edits
-- edit.apply_structured_diff for complex multi-location edits
-
-Testing:
-- tests.run to verify changes
-
-Workflow:
-1. Use code.symbol_search to find relevant symbols before making changes
-2. Read and understand the code before editing
-3. Make minimal, focused changes
-4. Run tests to verify your changes`
-
-	case types.RolePlanner:
-		instruction = `You are a planning agent that orchestrates tasks and coordinates work.
-
-Task Management:
-- todo.add to create new tasks
-- todo.query to search existing tasks
-- todo.graph_insights to analyze task dependencies
-
-Communication:
-- mail.send to coordinate with other agents
-
-Focus on high-level orchestration rather than implementation details.`
-
-	case types.RoleReviewer:
-		instruction = `You are a code review agent that inspects code quality without modifying it.
-
-Code Search & Retrieval Tools:
-- code.symbol_search for finding definitions and usages
-- code.swe_grep for pattern-based search
-- code.search for semantic search
-
-File Operations:
-- fs.read_file to inspect file contents
-- fs.list_dir to navigate the codebase
-
-Validation:
-- tests.run to verify code behavior
-
-Coordination:
-- mail.send to communicate findings
-- todo.add to create follow-up tasks
-
-Workflow:
-1. Search and inspect relevant code
-2. Identify issues and improvements
-3. Document findings and create tasks
-4. Communicate with the team
-
-IMPORTANT: You do not directly apply edits. Instead, report findings and create tasks for coders.`
-
-	default:
-		instruction = `You are a helpful agent that assists with general tasks.`
-	}
-
-	return &core.Signature{
-		Instruction: instruction,
-		Inputs: []core.InputField{
-			{Field: core.Field{Name: "task", Description: "The task to perform"}},
-		},
-		Outputs: []core.OutputField{
-			{Field: core.Field{Name: "result", Description: "The result of the task"}},
-		},
-	}
 }
 
 // simpleGrep performs a simple grep search using the system grep command.

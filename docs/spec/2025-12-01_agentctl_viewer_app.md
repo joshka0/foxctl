@@ -150,7 +150,7 @@ reach directly into storage or CAS packages.
 - **Behavior**:
   - Node selection (up/down/left/right).
   - Node details (type, status, summary).
-  - Optional metrics (critical path, degree) reusing [tasksgraph](cci:7://file:///Users/jkatigbak/repos/personal/agentctl/internal/Users/jkatigbak/repos/personal/agentctl/internal/analysis/tasksgraph:0:0-0:0).
+  - Optional metrics (critical path, degree) reusing [tasksgraph](cci:7://file://internalinternal/analysis/tasksgraph:0:0-0:0).
 
 
 ### 3.4 Artifacts View

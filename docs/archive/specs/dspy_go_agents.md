@@ -1,8 +1,8 @@
-# dspy-go Agent Runtime for agentctl
+# dspy-go Agent Runtime for agentctl (Legacy)
 
-**Status:** Draft\
-**Scope:** Integrate dspy-go agents as first-class workers in agentctl
-workspaces.\
+**Status:** Legacy (runtime removed; kept for historical reference)\
+**Scope:** Previous DSPy-based runtime design; agentctl now uses LLMChatEngine
+as the primary runtime.\
 **Related specs:** `overseer_profile.md`, `overseer_planning.md`,
 `mailbox_blackboard.md`, `task_graph_insights.md`, `test_watch_feedback.md`,
 `unified_agents.md`, `dspy_trajectory_capture.md`,

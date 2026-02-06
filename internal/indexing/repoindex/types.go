@@ -47,9 +47,37 @@ const (
 )
 
 const (
-	ToolSearch = "repo.index.search"
-	ToolExpand = "repo.index.expand"
-	ToolOpen   = "repo.index.open"
+	ToolSearch  = "repo_index_search"
+	ToolExpand  = "repo_index_expand"
+	ToolOpen    = "repo_index_open"
+	ToolDAGGrep = "repo_index_dag_grep"
+
+	// Legacy tool names (dot-delimited). Kept for backward compatibility.
+	ToolSearchLegacy  = "repo.index.search"
+	ToolExpandLegacy  = "repo.index.expand"
+	ToolOpenLegacy    = "repo.index.open"
+	ToolDAGGrepLegacy = "repo.index.dag_grep"
+)
+
+// Edge sets for ergonomic selection in tools.
+var (
+	EdgeSetStructural = []EdgeType{
+		EdgeContains,
+		EdgeImports,
+		EdgeRefersTo,
+		EdgeCalls,
+		EdgeImplements,
+		EdgeEmbeds,
+		EdgeTests,
+	}
+	EdgeSetDoc = []EdgeType{
+		EdgeHasKeyword,
+		EdgeHasOutputField,
+		EdgeTouchesResource,
+		EdgeEmitsEvent,
+		EdgeDocRelated,
+		EdgeDocFlow,
+	}
 )
 
 // Direction controls edge traversal direction.
@@ -77,6 +105,13 @@ type Node struct {
 	Meta      json.RawMessage `json:"meta,omitempty"`
 	Hash      string          `json:"hash,omitempty"`
 	UpdatedAt time.Time       `json:"updated_at"`
+}
+
+// ScoredNode captures a node plus a relevance score.
+// For FTS/BM25 searches, lower scores are better; callers may normalize as needed.
+type ScoredNode struct {
+	Node  Node    `json:"node"`
+	Score float64 `json:"score"`
 }
 
 // Edge represents a directed relationship between nodes.

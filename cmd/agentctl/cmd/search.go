@@ -52,10 +52,10 @@ Examples:
 			}
 
 			if len(scopes) > 0 {
-				input["scopes"] = scopes
+				input["scope"] = scopes
 			} else {
 				// Default to all scopes
-				input["scopes"] = []string{"symbols", "sessions", "memories", "tasks"}
+				input["scope"] = []string{"symbols", "sessions", "memories", "tasks"}
 			}
 
 			if workspace != "" {

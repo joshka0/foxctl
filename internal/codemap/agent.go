@@ -11,27 +11,24 @@ import (
 	"text/template"
 	"time"
 
-	"github.com/XiaoConstantine/dspy-go/pkg/agents/react"
-	"github.com/XiaoConstantine/dspy-go/pkg/core"
-	"github.com/XiaoConstantine/dspy-go/pkg/interceptors"
-	"github.com/XiaoConstantine/dspy-go/pkg/llms"
-	dstools "github.com/XiaoConstantine/dspy-go/pkg/tools"
+	mcpmodels "github.com/XiaoConstantine/mcp-go/pkg/model"
 	"github.com/oklog/ulid/v2"
 	"golang.org/x/sync/errgroup"
 
 	codemapctx "github.com/jkatigb/agentctl/internal/codemap/context"
 	"github.com/jkatigb/agentctl/internal/codemap/tools"
+	"github.com/jkatigb/agentctl/internal/engine"
 	"github.com/jkatigb/agentctl/internal/domain/skill"
 	"github.com/jkatigb/agentctl/internal/storage/graph"
 )
 
-// Agent generates semantic codemaps using dspy-go.
+// Agent generates semantic codemaps using the LLM chat engine.
 type Agent struct {
 	workspace     string
 	graphStore    graph.Store
 	skillResolver *skill.Resolver
-	llm           core.LLM
 	toolsRegistry *tools.Registry
+	engineConfig  engine.LLMChatConfig
 }
 
 // AgentOption configures the Agent.
@@ -58,10 +55,10 @@ func WithSkillResolver(resolver *skill.Resolver) AgentOption {
 	}
 }
 
-// WithLLM sets the language model.
-func WithLLM(llm core.LLM) AgentOption {
+// WithLLMConfig overrides the LLM chat configuration.
+func WithLLMConfig(cfg engine.LLMChatConfig) AgentOption {
 	return func(a *Agent) {
-		a.llm = llm
+		a.engineConfig = cfg
 	}
 }
 
@@ -91,14 +88,8 @@ func NewAgent(opts ...AgentOption) (*Agent, error) {
 		opt(a)
 	}
 
-	// Initialize LLM if not provided
-	if a.llm == nil {
-		llm, err := createDefaultLLM()
-		if err != nil {
-			return nil, fmt.Errorf("create LLM: %w", err)
-		}
-		a.llm = llm
-	}
+	// Apply environment defaults for LLM configuration
+	a.engineConfig = applyEnvDefaults(a.engineConfig)
 
 	// Initialize tools registry
 	toolsOpts := []tools.RegistryOption{
@@ -154,58 +145,37 @@ func (a *Agent) Generate(ctx context.Context, opts GenerateOptions) (*Codemap, e
 		return nil, fmt.Errorf("gather context: %w", err)
 	}
 
-	// Build dspy-go tool registry for native function calling
-	dspyToolRegistry := dstools.NewInMemoryToolRegistry()
-	for _, tool := range a.toolsRegistry.Tools().List() {
-		if ft, ok := tool.(*dstools.FuncTool); ok {
-			if err := dspyToolRegistry.Register(ft); err != nil {
-				return nil, fmt.Errorf("register tool %s: %w", ft.Name(), err)
-			}
-		}
-	}
+	// Create the LLM chat engine with tool runner
+	toolExecutor := newCodemapToolExecutor(a.toolsRegistry)
+	toolRunner := engine.NewToolRunner(toolExecutor, nil, engine.DefaultToolRunnerConfig())
 
-	// Create the dspy-go ReAct agent with native function calling
-	maxIterations := depthToMaxIterations(opts.Depth)
-	funcCallConfig := interceptors.FunctionCallingConfig{
-		ToolRegistry:      dspyToolRegistry,
-		StrictMode:        false, // Allow LLM to respond with text if needed
-		IncludeFinishTool: false, // We have our own finish_codemap tool
+	engineCfg := applyEnvDefaults(a.engineConfig)
+	if engineCfg.MaxIterations <= 0 {
+		engineCfg.MaxIterations = depthToMaxIterations(opts.Depth)
 	}
-	agent := react.NewReActAgent(
-		"codemap-agent",
-		"Codemap Generation Agent",
-		react.WithMaxIterations(maxIterations),
-		react.WithTimeout(10*time.Minute),
-		react.WithNativeFunctionCalling(funcCallConfig), // Use native tool calling API
-	)
+	maxIterations := engineCfg.MaxIterations
+	if engineCfg.Timeout <= 0 {
+		engineCfg.Timeout = 10 * time.Minute
+	}
+	llmEngine, err := engine.NewLLMChatEngine(engineCfg)
+	if err != nil {
+		return nil, fmt.Errorf("create LLM engine: %w", err)
+	}
+	llmEngine.SetToolRunner(toolRunner)
 
 	// Collect tool infos for prompt template
 	var toolInfos []ToolInfo
 	for _, tool := range a.toolsRegistry.Tools().List() {
-		if ft, ok := tool.(*dstools.FuncTool); ok {
-			toolInfos = append(toolInfos, ToolInfo{
-				Name:        ft.Name(),
-				Description: ft.Description(),
-			})
-		}
+		toolInfos = append(toolInfos, ToolInfo{
+			Name:        tool.Name(),
+			Description: tool.Description(),
+		})
 	}
 
-	// Build signature with templated system prompt
-	signature, err := buildCodemapSignature(toolInfos)
+	// Build system prompt with templated instructions
+	systemPrompt, err := buildCodemapSystemPrompt(toolInfos)
 	if err != nil {
-		return nil, fmt.Errorf("build signature: %w", err)
-	}
-	if err := agent.Initialize(a.llm, *signature); err != nil {
-		return nil, fmt.Errorf("initialize agent: %w", err)
-	}
-
-	// Register tools with agent (also needed for tool execution)
-	for _, tool := range a.toolsRegistry.Tools().List() {
-		if ft, ok := tool.(*dstools.FuncTool); ok {
-			if err := agent.RegisterTool(ft); err != nil {
-				return nil, fmt.Errorf("register tool %s: %w", ft.Name(), err)
-			}
-		}
+		return nil, fmt.Errorf("build system prompt: %w", err)
 	}
 
 	// Build input with initial context
@@ -225,29 +195,40 @@ Initial Context:
 %s
 
 Create a semantic codemap that answers the query:
-1. Use the initial context and exploration tools (max %d exploration calls)
+1. Use the initial context (including semantic hits) and exploration tools (max %d exploration calls)
 2. When you have enough context, IMMEDIATELY call finish_codemap with the complete JSON
 3. The finish_codemap tool is the ONLY way to complete this task - outputting text does NOT work`,
 		opts.Query, opts.Depth, explorationCalls, explorationCalls, string(initialContextJSON), explorationCalls)
 
-	input := map[string]any{
-		"task": taskPrompt,
+	input := engine.EngineInput{
+		SystemPrompt: systemPrompt,
+		Messages: []engine.Message{
+			engine.NewUserMessage(taskPrompt),
+		},
+		Tools: toolExecutor.List(),
 	}
 
-	// Set default LLM for native function calling interceptor
-	// The interceptor uses core.GlobalConfig.DefaultLLM, not the agent's LLM
-	core.GlobalConfig.DefaultLLM = a.llm
-
-	// Execute agent
-	_, err = agent.Execute(ctx, input)
+	output, err := llmEngine.Run(ctx, input)
 	if err != nil {
-		return nil, fmt.Errorf("agent execution: %w", err)
+		return nil, fmt.Errorf("run codemap engine: %w", err)
+	}
+	if output.StopReason == engine.StopReasonError {
+		return nil, fmt.Errorf("codemap engine error: %s", output.Error)
+	}
+	if output.StopReason == engine.StopReasonCancelled {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		return nil, fmt.Errorf("codemap engine cancelled")
+	}
+	if output.StopReason == engine.StopReasonMaxIterations {
+		return nil, fmt.Errorf("codemap engine stopped: %s", output.StopReason)
 	}
 
 	// Get the captured codemap from finish_codemap tool
 	finalCodemap := a.toolsRegistry.FinalCodemap()
 	if finalCodemap == nil {
-		return nil, fmt.Errorf("agent did not produce a codemap (did not call finish_codemap)")
+		return nil, fmt.Errorf("agent did not produce a codemap (stop_reason=%s)", output.StopReason)
 	}
 
 	// Parse and validate codemap
@@ -269,8 +250,6 @@ Create a semantic codemap that answers the query:
 }
 
 // depthToMaxIterations maps depth to max tool calls.
-// Extra buffer added to ensure Claude has time to call finish_codemap.
-// With Claude Haiku, we need extra buffer for XML parsing retries.
 func depthToMaxIterations(depth int) int {
 	switch depth {
 	case 1:
@@ -301,9 +280,8 @@ type PromptData struct {
 	FinishToolName string
 }
 
-// buildCodemapSignature creates the signature for the codemap agent.
-func buildCodemapSignature(toolInfos []ToolInfo) (*core.Signature, error) {
-	// Build prompt data
+// buildCodemapSystemPrompt renders the system prompt for the codemap agent.
+func buildCodemapSystemPrompt(toolInfos []ToolInfo) (string, error) {
 	data := PromptData{
 		Tools:          toolInfos,
 		FinishToolName: "finish_codemap",
@@ -312,70 +290,103 @@ func buildCodemapSignature(toolInfos []ToolInfo) (*core.Signature, error) {
 		data.ToolNames = append(data.ToolNames, t.Name)
 	}
 
-	// Render template
 	tmpl, err := template.New("prompt").Parse(codemapSystemPromptTemplate)
 	if err != nil {
-		return nil, fmt.Errorf("parse prompt template: %w", err)
+		return "", fmt.Errorf("parse prompt template: %w", err)
 	}
 
 	var buf bytes.Buffer
 	if err := tmpl.Execute(&buf, data); err != nil {
-		return nil, fmt.Errorf("execute prompt template: %w", err)
+		return "", fmt.Errorf("execute prompt template: %w", err)
 	}
 
-	sig := core.NewSignature(
-		[]core.InputField{
-			{Field: core.NewField("task", core.WithDescription("The codemap generation task with query, context, and depth"))},
-		},
-		[]core.OutputField{
-			{Field: core.NewField("result", core.WithDescription("The final codemap JSON produced by calling finish_codemap"))},
-		},
-	).WithInstruction(buf.String())
-	return &sig, nil
+	return strings.TrimSpace(buf.String()), nil
 }
 
-// createDefaultLLM creates the default LLM for codemap generation.
-func createDefaultLLM() (core.LLM, error) {
-	llms.EnsureFactory()
+// applyEnvDefaults fills LLM config fields from environment defaults.
+func applyEnvDefaults(cfg engine.LLMChatConfig) engine.LLMChatConfig {
+	if strings.TrimSpace(cfg.Provider) == "" {
+		cfg.Provider = strings.TrimSpace(os.Getenv("AGENTCTL_LLM_PROVIDER"))
+	}
+	if strings.TrimSpace(cfg.APIKey) == "" {
+		cfg.APIKey = strings.TrimSpace(os.Getenv("AGENTCTL_LLM_API_KEY"))
+	}
+	if strings.TrimSpace(cfg.Model) == "" {
+		cfg.Model = strings.TrimSpace(os.Getenv("AGENTCTL_LLM_MODEL"))
+	}
+	return cfg
+}
 
-	// Try providers in order of preference
+// codemapToolExecutor adapts the codemap tools registry to the engine ToolExecutor.
+type codemapToolExecutor struct {
+	registry *tools.Registry
+}
 
-	// 1. Claude Max subscription (OAuth tokens)
-	// Check if CLAUDE_MAX_MODEL is set or tokens exist
-	if os.Getenv("USE_CLAUDE_MAX") == "1" || os.Getenv("CLAUDE_MAX_MODEL") != "" {
-		model := os.Getenv("CLAUDE_MAX_MODEL")
-		if model == "" {
-			model = "claude-haiku-4-5" // Alias for latest Haiku 4.5
+func newCodemapToolExecutor(registry *tools.Registry) *codemapToolExecutor {
+	return &codemapToolExecutor{registry: registry}
+}
+
+// Execute implements engine.ToolExecutor.
+func (e *codemapToolExecutor) Execute(ctx context.Context, name string, args json.RawMessage) (string, error) {
+	if e == nil || e.registry == nil {
+		return "", fmt.Errorf("codemap tool registry not configured")
+	}
+
+	tool, err := e.registry.Tools().Get(name)
+	if err != nil {
+		return "", fmt.Errorf("tool %q not found: %w", name, err)
+	}
+
+	var argsMap map[string]any
+	if len(args) > 0 {
+		if err := json.Unmarshal(args, &argsMap); err != nil {
+			return "", fmt.Errorf("parse tool args: %w", err)
 		}
-		llm, err := NewClaudeMaxLLM(model)
-		if err == nil {
-			return llm, nil
+	}
+
+	result, err := tool.Call(ctx, argsMap)
+	if err != nil {
+		return "", err
+	}
+	if result == nil || len(result.Content) == 0 {
+		return "", nil
+	}
+
+	var textParts []string
+	for _, content := range result.Content {
+		if tc, ok := content.(mcpmodels.TextContent); ok {
+			if tc.Text != "" {
+				textParts = append(textParts, tc.Text)
+			}
 		}
-		// Fall through to other providers if Claude Max fails
+	}
+	if len(textParts) > 0 {
+		return strings.Join(textParts, "\n"), nil
 	}
 
-	// 2. Anthropic API key
-	if apiKey := os.Getenv("ANTHROPIC_API_KEY"); apiKey != "" {
-		config := core.ProviderConfig{Name: "anthropic", APIKey: apiKey}
-		return llms.NewAnthropicLLMFromConfig(context.Background(), config, "claude-haiku-4-5")
+	b, err := json.Marshal(result.Content)
+	if err != nil {
+		return "", fmt.Errorf("marshal result: %w", err)
 	}
+	return string(b), nil
+}
 
-	// 3. Gemini (reliable, good for code)
-	if apiKey := os.Getenv("GEMINI_API_KEY"); apiKey != "" {
-		return llms.NewGeminiLLM(apiKey, "gemini-2.0-flash")
+// List implements engine.ToolExecutor.
+func (e *codemapToolExecutor) List() []engine.ToolDef {
+	if e == nil || e.registry == nil {
+		return nil
 	}
-
-	// 4. OpenRouter (configurable models)
-	if apiKey := os.Getenv("OPENROUTER_API_KEY"); apiKey != "" {
-		model := os.Getenv("OPENROUTER_MODEL")
-		if model == "" {
-			model = "mistralai/devstral-2512:free"
-		}
-		return llms.NewOpenAICompatible("openrouter", core.ModelID(model),
-			"https://openrouter.ai/api/v1", llms.WithAPIKey(apiKey))
+	toolsList := e.registry.Tools().List()
+	defs := make([]engine.ToolDef, 0, len(toolsList))
+	for _, tool := range toolsList {
+		schema, _ := json.Marshal(tool.InputSchema())
+		defs = append(defs, engine.ToolDef{
+			Name:        tool.Name(),
+			Description: tool.Description(),
+			Parameters:  schema,
+		})
 	}
-
-	return nil, fmt.Errorf("no LLM configured. Options:\n  - Set USE_CLAUDE_MAX=1 and run 'agentctl auth claude-login'\n  - Set ANTHROPIC_API_KEY\n  - Set GEMINI_API_KEY\n  - Set OPENROUTER_API_KEY")
+	return defs
 }
 
 // countUniqueFiles counts unique files referenced in the codemap.
@@ -454,7 +465,7 @@ produce a codemap. The codemap should:
 
 ## Initial Context You Receive
 
-You start with three types of pre-gathered context:
+You start with four types of pre-gathered context:
 
 ### graph_context
 - nodes: Files relevant to the query with their PageRank scores
@@ -472,6 +483,10 @@ You start with three types of pre-gathered context:
 - matches_by_term: Code blocks containing each query term
 - cross_references: Where files related to term A mention term B
 - file_blocks: Full function bodies containing matches
+
+### semantic_context
+- hits: Ranked semantic search hits (files/symbols) with scores
+- query: The search query used to retrieve semantic hits
 
 ## Exploration Tools
 

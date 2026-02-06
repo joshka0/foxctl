@@ -55,7 +55,7 @@ func NewBuilder(store *Store, repoRoot string) *Builder {
 // - SideEffects: reads workspace files; runs language tooling; writes repoindex SQLite
 // - FailureModes: package load errors, file read errors, store write errors
 // - Related: buildGo, buildTS, buildElixir, applyCommentEdges, Store.ReplaceAll
-// - Keywords: repo.index.build, repoindex, nodes, edges, repo_key, schema_version, buildGo, buildTS, buildElixir, ReplaceAll
+// - Keywords: repo_index_build, repoindex, nodes, edges, repo_key, schema_version, buildGo, buildTS, buildElixir, ReplaceAll
 func (b *Builder) Build(ctx context.Context, opts BuildOptions) (BuildResult, error) {
 	result := BuildResult{}
 	if opts.RepoRoot == "" {
@@ -76,6 +76,7 @@ func (b *Builder) Build(ctx context.Context, opts BuildOptions) (BuildResult, er
 
 	nodes := make(map[string]Node)
 	edges := make(map[string]Edge)
+	var pending []pendingNameEdge
 
 	if opts.IncludeGo {
 		if err := b.buildGo(ctx, opts, nodes, edges, &result); err != nil {
@@ -83,15 +84,17 @@ func (b *Builder) Build(ctx context.Context, opts BuildOptions) (BuildResult, er
 		}
 	}
 	if opts.IncludeTypescript {
-		if err := b.buildTS(ctx, opts, nodes, edges, &result); err != nil {
+		if err := b.buildTS(ctx, opts, nodes, edges, &result, &pending); err != nil {
 			return result, err
 		}
 	}
 	if opts.IncludeElixir {
-		if err := b.buildElixir(ctx, opts, nodes, edges, &result); err != nil {
+		if err := b.buildElixir(ctx, opts, nodes, edges, &result, &pending); err != nil {
 			return result, err
 		}
 	}
+
+	applyPendingNameEdges(nodes, edges, pending)
 
 	localPackages := collectLocalPackages(nodes, opts.RepoKey)
 	applyPackageRollups(nodes, localPackages)
@@ -234,7 +237,7 @@ func (b *Builder) buildGo(ctx context.Context, opts BuildOptions, nodes map[stri
 	return nil
 }
 
-func (b *Builder) buildTS(ctx context.Context, opts BuildOptions, nodes map[string]Node, edges map[string]Edge, result *BuildResult) error {
+func (b *Builder) buildTS(ctx context.Context, opts BuildOptions, nodes map[string]Node, edges map[string]Edge, result *BuildResult, pending *[]pendingNameEdge) error {
 	extractor := b.registry.Get("typescript")
 	if extractor == nil {
 		return fmt.Errorf("repoindex: no typescript extractor registered")
@@ -324,8 +327,28 @@ func (b *Builder) buildTS(ctx context.Context, opts BuildOptions, nodes map[stri
 			return fmt.Errorf("repoindex: extract typescript symbols %s: %w", fileRelPath, err)
 		}
 		for _, sym := range syms {
+			srcID := SymbolID(opts.RepoKey, pkgID, sym.ID)
 			addSymbol(ctx, opts, nodes, edges, pkgID, fileNode.ID, sym)
 			result.Symbols++
+
+			callNames, err := extractor.ExtractCalls(ctx, sym, content)
+			if err == nil && len(callNames) > 0 && pending != nil {
+				callNames = capList(callNames, 50)
+				for _, callName := range callNames {
+					callName = strings.TrimSpace(callName)
+					if callName == "" {
+						continue
+					}
+					*pending = append(*pending, pendingNameEdge{
+						SrcID:      srcID,
+						SrcPkg:     pkgID,
+						SrcFile:    fileRelPath,
+						TargetName: callName,
+						Type:       EdgeCalls,
+						Weight:     0.9, // heuristic for TS (not type-checked)
+					})
+				}
+			}
 		}
 
 		imports := extractTSImports(string(content))
@@ -356,7 +379,7 @@ func (b *Builder) buildTS(ctx context.Context, opts BuildOptions, nodes map[stri
 	return nil
 }
 
-func (b *Builder) buildElixir(ctx context.Context, opts BuildOptions, nodes map[string]Node, edges map[string]Edge, result *BuildResult) error {
+func (b *Builder) buildElixir(ctx context.Context, opts BuildOptions, nodes map[string]Node, edges map[string]Edge, result *BuildResult, pending *[]pendingNameEdge) error {
 	extractor := b.registry.Get("elixir")
 	if extractor == nil {
 		return fmt.Errorf("repoindex: no elixir extractor registered")
@@ -445,8 +468,29 @@ func (b *Builder) buildElixir(ctx context.Context, opts BuildOptions, nodes map[
 			return fmt.Errorf("repoindex: extract elixir symbols %s: %w", fileRelPath, err)
 		}
 		for _, sym := range syms {
+			srcID := SymbolID(opts.RepoKey, pkgID, sym.ID)
 			addSymbol(ctx, opts, nodes, edges, pkgID, fileNode.ID, sym)
 			result.Symbols++
+
+			// Elixir call graph is mostly "module references" (alias/use/remote calls).
+			refNames, err := extractor.ExtractCalls(ctx, sym, content)
+			if err == nil && len(refNames) > 0 && pending != nil {
+				refNames = capList(refNames, 50)
+				for _, refName := range refNames {
+					refName = strings.TrimSpace(refName)
+					if refName == "" {
+						continue
+					}
+					*pending = append(*pending, pendingNameEdge{
+						SrcID:      srcID,
+						SrcPkg:     pkgID,
+						SrcFile:    fileRelPath,
+						TargetName: refName,
+						Type:       EdgeRefersTo,
+						Weight:     0.85, // heuristic for Elixir refs
+					})
+				}
+			}
 		}
 	}
 

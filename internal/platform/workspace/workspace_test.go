@@ -154,12 +154,20 @@ func TestNormalizeGitURL(t *testing.T) {
 		{"git@github.com:owner/repo.git", "github.com/owner/repo"},
 		{"git@github.com:owner/repo", "github.com/owner/repo"},
 		{"git@gitlab.com:group/subgroup/repo.git", "gitlab.com/group/subgroup/repo"},
+		{"ssh://git@github.com/owner/repo.git", "github.com/owner/repo"},
+		{"ssh://git@github.com:2222/owner/repo.git", "github.com/owner/repo"},
+		{"ssh://github.com/owner/repo.git", "github.com/owner/repo"},
+		{"git://github.com/owner/repo.git", "github.com/owner/repo"},
 		// HTTPS format
 		{"https://github.com/owner/repo.git", "github.com/owner/repo"},
 		{"https://github.com/owner/repo", "github.com/owner/repo"},
 		{"http://github.com/owner/repo.git", "github.com/owner/repo"},
+		{"https://user@github.com/owner/repo.git", "github.com/owner/repo"},
+		{"https://user:pass@github.com/owner/repo.git", "github.com/owner/repo"},
+		{"https://github.com/owner/repo.git/", "github.com/owner/repo"},
 		// Edge cases
 		{"file:///local/repo", "file:///local/repo"},
+		{"file:///local/repo.git", "file:///local/repo"},
 		{"", ""},
 	}
 	for _, tt := range tests {
@@ -185,6 +193,55 @@ func TestNormalizeGitURLConsistency(t *testing.T) {
 	}
 	if httpsNorm != httpsNoSuffixNorm {
 		t.Errorf("HTTPS with/without .git should normalize to same value: %q vs %q", httpsNorm, httpsNoSuffixNorm)
+	}
+}
+
+func TestLooksLikeID(t *testing.T) {
+	tests := []struct {
+		input string
+		want  bool
+	}{
+		{"", false},
+		{"default", true},
+		{" default ", true},
+		{"0123456789abcdef0123456789abcdef", true},
+		{"0123456789ABCDEF0123456789abcdef", true},
+		{"0123456789abcdef0123456789abcdeg", false},
+		{"ws-0123456789abcdef", true},
+		// Opaque custom IDs are accepted as long as they are not filesystem paths.
+		{"ws-0123456789abcdeg", true},
+		{"ws-0123456789abcdef00", true},
+		{"ws-foo/bar", false},
+		{"ws-", false},
+		{"/Users/joshka/repos/personal/agentctl", false},
+	}
+	for _, tt := range tests {
+		got := LooksLikeID(tt.input)
+		if got != tt.want {
+			t.Errorf("LooksLikeID(%q) = %v, want %v", tt.input, got, tt.want)
+		}
+	}
+}
+
+func TestCanonicalIDPassesThroughIDs(t *testing.T) {
+	for _, id := range []string{
+		"default",
+		"0123456789abcdef0123456789abcdef",
+		"ws-0123456789abcdef",
+	} {
+		got := CanonicalID(id)
+		if got != id {
+			t.Errorf("CanonicalID(%q) = %q, want %q", id, got, id)
+		}
+	}
+}
+
+func TestCanonicalIDFromPath(t *testing.T) {
+	root := t.TempDir()
+	want := PathIdentity(root) // temp dir isn't a git repo, so ID falls back to PathIdentity.
+	got := CanonicalID(root)
+	if got != want {
+		t.Errorf("CanonicalID(%q) = %q, want %q", root, got, want)
 	}
 }
 

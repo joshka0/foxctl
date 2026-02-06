@@ -5,21 +5,17 @@ import (
 	"testing"
 
 	"github.com/jkatigb/agentctl/internal/agent/types"
+	"github.com/jkatigb/agentctl/internal/agentprompt"
 )
 
-func TestBuildAgentSignature_CoderRole(t *testing.T) {
+func TestAgentInstruction_CoderRole(t *testing.T) {
 	cfg := types.AgentConfig{
 		Role:        types.RoleCoder,
 		ActorID:     "test-coder",
 		WorkspaceID: "test-ws",
 	}
 
-	sig := buildAgentSignature(cfg)
-	if sig == nil {
-		t.Fatal("expected non-nil signature")
-	}
-
-	instruction := sig.Instruction
+	instruction := agentprompt.Instruction(cfg.Role)
 
 	// Verify Phase 6 code tools are in Coder signature
 	codeTools := []string{
@@ -58,19 +54,14 @@ func TestBuildAgentSignature_CoderRole(t *testing.T) {
 	}
 }
 
-func TestBuildAgentSignature_PlannerRole(t *testing.T) {
+func TestAgentInstruction_PlannerRole(t *testing.T) {
 	cfg := types.AgentConfig{
 		Role:        types.RolePlanner,
 		ActorID:     "test-planner",
 		WorkspaceID: "test-ws",
 	}
 
-	sig := buildAgentSignature(cfg)
-	if sig == nil {
-		t.Fatal("expected non-nil signature")
-	}
-
-	instruction := sig.Instruction
+	instruction := agentprompt.Instruction(cfg.Role)
 
 	// Verify planner has its own tools
 	plannerTools := []string{
@@ -100,19 +91,9 @@ func TestBuildAgentSignature_PlannerRole(t *testing.T) {
 	}
 }
 
-func TestBuildAgentSignature_DefaultRole(t *testing.T) {
-	cfg := types.AgentConfig{
-		Role:        "unknown",
-		ActorID:     "test-agent",
-		WorkspaceID: "test-ws",
-	}
-
-	sig := buildAgentSignature(cfg)
-	if sig == nil {
-		t.Fatal("expected non-nil signature")
-	}
-
-	instruction := sig.Instruction
+func TestAgentInstruction_DefaultRole(t *testing.T) {
+	role := types.AgentRole("unknown")
+	instruction := agentprompt.Instruction(role)
 
 	// Default role should have a generic instruction
 	if !strings.Contains(instruction, "helpful agent") {
@@ -131,49 +112,6 @@ func TestBuildAgentSignature_DefaultRole(t *testing.T) {
 	}
 }
 
-func TestBuildAgentSignature_HasInputAndOutputFields(t *testing.T) {
-	cfg := types.AgentConfig{
-		Role:        types.RoleCoder,
-		ActorID:     "test-coder",
-		WorkspaceID: "test-ws",
-	}
-
-	sig := buildAgentSignature(cfg)
-	if sig == nil {
-		t.Fatal("expected non-nil signature")
-	}
-
-	// Verify input field
-	if len(sig.Inputs) == 0 {
-		t.Error("signature should have input fields")
-	}
-	hasTaskInput := false
-	for _, f := range sig.Inputs {
-		if f.Name == "task" {
-			hasTaskInput = true
-			break
-		}
-	}
-	if !hasTaskInput {
-		t.Error("signature should have 'task' input field")
-	}
-
-	// Verify output field
-	if len(sig.Outputs) == 0 {
-		t.Error("signature should have output fields")
-	}
-	hasResultOutput := false
-	for _, f := range sig.Outputs {
-		if f.Name == "result" {
-			hasResultOutput = true
-			break
-		}
-	}
-	if !hasResultOutput {
-		t.Error("signature should have 'result' output field")
-	}
-}
-
 func TestCoderSignature_ToolCategories(t *testing.T) {
 	cfg := types.AgentConfig{
 		Role:        types.RoleCoder,
@@ -181,8 +119,7 @@ func TestCoderSignature_ToolCategories(t *testing.T) {
 		WorkspaceID: "test-ws",
 	}
 
-	sig := buildAgentSignature(cfg)
-	instruction := sig.Instruction
+	instruction := agentprompt.Instruction(cfg.Role)
 
 	// Verify the instruction has categorized sections
 	categories := []string{
@@ -199,19 +136,14 @@ func TestCoderSignature_ToolCategories(t *testing.T) {
 	}
 }
 
-func TestBuildAgentSignature_ReviewerRole(t *testing.T) {
+func TestAgentInstruction_ReviewerRole(t *testing.T) {
 	cfg := types.AgentConfig{
 		Role:        types.RoleReviewer,
 		ActorID:     "test-reviewer",
 		WorkspaceID: "test-ws",
 	}
 
-	sig := buildAgentSignature(cfg)
-	if sig == nil {
-		t.Fatal("expected non-nil signature")
-	}
-
-	instruction := sig.Instruction
+	instruction := agentprompt.Instruction(cfg.Role)
 
 	// Verify reviewer has retrieval tools (read/inspect)
 	retrievalTools := []string{
@@ -278,8 +210,7 @@ func TestReviewerSignature_ToolCategories(t *testing.T) {
 		WorkspaceID: "test-ws",
 	}
 
-	sig := buildAgentSignature(cfg)
-	instruction := sig.Instruction
+	instruction := agentprompt.Instruction(cfg.Role)
 
 	// Verify the instruction has categorized sections
 	categories := []string{

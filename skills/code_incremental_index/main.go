@@ -28,6 +28,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/indexing/symbol"
 	"github.com/jkatigb/agentctl/internal/platform/config"
 	errs "github.com/jkatigb/agentctl/internal/platform/errors"
+	ws "github.com/jkatigb/agentctl/internal/platform/workspace"
 	"github.com/jkatigb/agentctl/internal/storage"
 	"github.com/jkatigb/agentctl/internal/storage/graph"
 	"github.com/jkatigb/agentctl/internal/storage/memory"
@@ -79,7 +80,7 @@ func main() {
 func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	// Apply defaults not handled by skillmain
 	if in.WorkspaceID == "" {
-		in.WorkspaceID = rc.PathValidator.Workspace()
+		in.WorkspaceID = ws.ID(rc.PathValidator.Workspace())
 	}
 	if in.Symbols == nil {
 		t := true

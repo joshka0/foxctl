@@ -53,6 +53,7 @@ func TestStore_EnqueueAndClaim(t *testing.T) {
 	}
 	if job == nil {
 		t.Fatal("expected a job, got nil")
+		return
 	}
 	if job.State != StateRunning {
 		t.Errorf("expected state running, got %s", job.State)

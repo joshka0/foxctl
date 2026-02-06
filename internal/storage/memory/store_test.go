@@ -535,6 +535,7 @@ func TestEmbeddingMetadata(t *testing.T) {
 	}
 	if got == nil {
 		t.Fatal("expected metadata")
+		return
 	}
 	if got.Provider != newMeta.Provider {
 		t.Errorf("provider = %q, want %q", got.Provider, newMeta.Provider)

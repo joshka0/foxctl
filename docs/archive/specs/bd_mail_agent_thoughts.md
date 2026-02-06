@@ -29,7 +29,7 @@ You can lift the ideas almost directly into agentctl.
 You already store:
 
 - Nodes:
-  [tasks.Task](cci:2://file:///Users/jkatigbak/repos/personal/claude-harness/agentctl/internal/storage/tasks/store.go:41:0-55:1)
+  [tasks.Task](cci:2://file://~/repos/personal/claude-harness/agentctl/internal/storage/tasks/store.go:41:0-55:1)
   (`id`, `workspace_id`, `status`, `DependsOn`, `ParentID`, `Children`)
 - Implicit edges: `DependsOn` (and conceptually parent/child)
 
@@ -38,7 +38,7 @@ From beads + bv graph:
 - They treat issues as **nodes** and `blocks` dependencies as **directed
   edges**.
 - bv’s
-  [Analyzer](cci:2://file:///Users/jkatigbak/repos/personal/claude-harness/beads_viewer/pkg/analysis/graph.go:30:0-35:1)
+  [Analyzer](cci:2://file://~/repos/personal/claude-harness/beads_viewer/pkg/analysis/graph.go:30:0-35:1)
   builds a directed graph and computes:
 
   - `PageRank`, `Betweenness`, `Eigenvector`
@@ -71,7 +71,7 @@ This becomes your **“beads brain”** for tasks.
 - Add a new `operation`, e.g. `graph_insights` (name to bikeshed), that:
   - Inputs: `workspace_id`
   - Outputs JSON mirroring a trimmed-down
-    [GraphStats](cci:2://file:///Users/jkatigbak/repos/personal/claude-harness/beads_viewer/pkg/analysis/graph.go:15:0-27:1):
+    [GraphStats](cci:2://file://~/repos/personal/claude-harness/beads_viewer/pkg/analysis/graph.go:15:0-27:1):
 
     ```jsonc
     {
@@ -97,7 +97,7 @@ This directly answers “PageRank-style algorithm over task_ids”.
 ### 1.3 Connecting memory entries to the task graph
 
 Per
-[task_hooks_memory.md](cci:7://file:///Users/jkatigbak/repos/personal/agentctl/docs/spec/task_hooks_memory.md:0:0-0:0),
+[task_hooks_memory.md](cci:7://file://docs/spec/task_hooks_memory.md:0:0-0:0),
 memory entries should carry:
 
 - `workspace_id`
@@ -114,9 +114,9 @@ To **“better leverage task_ids/memories”**:
     attaching metadata to a node.
   - When retrieving context, you:
     1. Identify the **active task** (via
-       [EnsureActive](cci:1://file:///Users/jkatigbak/repos/personal/claude-harness/agentctl/internal/storage/tasks/store.go:36:1-37:99)
+       [EnsureActive](cci:1://file://~/repos/personal/claude-harness/agentctl/internal/storage/tasks/store.go:36:1-37:99)
        or
-       [GetActive](cci:1://file:///Users/jkatigbak/repos/personal/claude-harness/agentctl/internal/storage/tasks/store.go:30:1-31:71)).
+       [GetActive](cci:1://file://~/repos/personal/claude-harness/agentctl/internal/storage/tasks/store.go:30:1-31:71)).
     2. Pull the **subgraph**: active task + its ancestors/descendants on the
        critical path.
     3. Rank associated memory entries by:
@@ -154,7 +154,7 @@ If you want to piggyback on existing tooling instead of re-implementing metrics:
 
     - Beads `issue.id` → agentctl `task_id` or a parallel “external_task_id”.
     - Graph metrics → the same internal
-      [GraphStats](cci:2://file:///Users/jkatigbak/repos/personal/claude-harness/beads_viewer/pkg/analysis/graph.go:15:0-27:1)
+      [GraphStats](cci:2://file://~/repos/personal/claude-harness/beads_viewer/pkg/analysis/graph.go:15:0-27:1)
       structure.
 
 - For pure-agentctl repos, you keep the internal `tasksgraph` path.
@@ -211,7 +211,7 @@ Instead of trying to “push” into Claude (which you don’t control), you can
     - Create a **memory entry** scoped to `(workspace_id, task_id)` if the mail
       carries `task_id` headers (as recommended in §8.1 of your spec).
     - Or, if no explicit `task_id`, bind to the active task found via
-      [EnsureActive](cci:1://file:///Users/jkatigbak/repos/personal/claude-harness/agentctl/internal/storage/tasks/store.go:36:1-37:99).
+      [EnsureActive](cci:1://file://~/repos/personal/claude-harness/agentctl/internal/storage/tasks/store.go:36:1-37:99).
     - Summarize into a few bullets suitable for `hook.Output.Context`.
 
   - Emit `hook.Output` with:

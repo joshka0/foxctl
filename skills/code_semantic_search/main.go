@@ -35,8 +35,8 @@ import (
 	"github.com/jkatigb/agentctl/internal/indexing/semantic"
 	"github.com/jkatigb/agentctl/internal/indexing/symbol"
 	"github.com/jkatigb/agentctl/internal/platform/config"
-	"github.com/jkatigb/agentctl/internal/platform/workspace"
 	errs "github.com/jkatigb/agentctl/internal/platform/errors"
+	"github.com/jkatigb/agentctl/internal/platform/workspace"
 	llmproviders "github.com/jkatigb/agentctl/internal/providers/llm"
 	"github.com/jkatigb/agentctl/internal/retrieval"
 	"github.com/jkatigb/agentctl/internal/sessionkit"
@@ -616,7 +616,7 @@ func search(ctx context.Context, logger zerolog.Logger, cfg config.Config, in *I
 	fusedResults := reciprocalRankFusion(allResults, in.MinSimilarity)
 
 	// Apply PageRank boost from dependency graph
-	fusedResults = applyPageRankBoost(searchCtx, cfg, workspacePath, fusedResults)
+		fusedResults = applyPageRankBoost(searchCtx, cfg, workspaceID, fusedResults)
 
 	// Apply reranking if enabled
 	fusedResults, rerankStats := applyReranking(searchCtx, logger, *in, fusedResults)
@@ -1729,7 +1729,7 @@ func reciprocalRankFusion(sourceResults map[string][]Result, minSimilarity float
 // the weighted scoring formula: FinalScore = 0.50*RRFScore + 0.30*PageRank + 0.20*Connection
 // Results are re-sorted by FinalScore only if meaningful PageRank data exists.
 // When no PageRank data is available, FinalScore = RRFScore (no reordering).
-func applyPageRankBoost(ctx context.Context, cfg config.Config, workspacePath string, results []Result) []Result {
+func applyPageRankBoost(ctx context.Context, cfg config.Config, workspaceID string, results []Result) []Result {
 	if len(results) == 0 {
 		return results
 	}
@@ -1751,7 +1751,7 @@ func applyPageRankBoost(ctx context.Context, cfg config.Config, workspacePath st
 
 	// Get top nodes to build lookup (covers high-PageRank items)
 	topNodes, err := graphStore.TopNodes(ctx, graph.TopNodesOptions{
-		Workspace: workspacePath,
+		Workspace: workspaceID,
 		Limit:     500, // Get enough to cover likely matches
 	})
 	if err == nil {

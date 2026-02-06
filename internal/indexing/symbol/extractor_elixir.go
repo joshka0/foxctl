@@ -141,9 +141,21 @@ func (e *ElixirExtractor) Extract(_ context.Context, filePath string, content []
 	return symbols, nil
 }
 
-// ExtractCalls is not supported yet for Elixir.
-func (e *ElixirExtractor) ExtractCalls(_ context.Context, _ Symbol, _ []byte) ([]string, error) {
-	return nil, nil
+// ExtractCalls extracts best-effort module references from an Elixir symbol body.
+//
+// In practice, this is more useful than trying to resolve local function calls,
+// because Elixir frequently omits parentheses and functions are not namespaced in
+// the v1 symbol model.
+func (e *ElixirExtractor) ExtractCalls(_ context.Context, symbol Symbol, content []byte) ([]string, error) {
+	if symbol.StartByte < 0 || symbol.EndByte > len(content) || symbol.StartByte >= symbol.EndByte {
+		return nil, nil
+	}
+	body := string(content[symbol.StartByte:symbol.EndByte])
+	refs := extractElixirModuleRefs(body)
+	if len(refs) > 50 {
+		refs = refs[:50]
+	}
+	return refs, nil
 }
 
 // extractElixirModuleDoc finds a moduledoc string inside a module block.
@@ -208,6 +220,112 @@ func parseElixirTripleQuoted(lines []string, startIdx int, rest, quote string) (
 		parts = append(parts, line)
 	}
 	return strings.TrimSpace(strings.Join(parts, "\n")), len(lines) - 1, true
+}
+
+var (
+	elixirDepLinePattern   = regexp.MustCompile(`^\s*(?:alias|import|require|use|@behaviour)\s+(.+)$`)
+	elixirRemoteCallModule = regexp.MustCompile(`\b([A-Z][A-Za-z0-9_]*(?:\.[A-Z][A-Za-z0-9_]*)*)\s*\.`)
+	elixirStructModule     = regexp.MustCompile(`%\s*([A-Z][A-Za-z0-9_]*(?:\.[A-Z][A-Za-z0-9_]*)*)\s*\{`)
+)
+
+func extractElixirModuleRefs(body string) []string {
+	if strings.TrimSpace(body) == "" {
+		return nil
+	}
+
+	seen := make(map[string]bool)
+	out := make([]string, 0, 16)
+
+	emit := func(name string) {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			return
+		}
+		if seen[name] {
+			return
+		}
+		seen[name] = true
+		out = append(out, name)
+	}
+
+	// 1) Line-based dependency declarations (alias/import/require/use/@behaviour).
+	lines := strings.Split(body, "\n")
+	for _, line := range lines {
+		line = stripElixirLineComment(line)
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			continue
+		}
+		match := elixirDepLinePattern.FindStringSubmatch(trimmed)
+		if match == nil {
+			continue
+		}
+		for _, mod := range parseElixirModuleExpr(match[1]) {
+			emit(mod)
+		}
+	}
+
+	// 2) Remote calls / module-qualified accesses: Foo.Bar.baz(...)
+	for _, match := range elixirRemoteCallModule.FindAllStringSubmatch(body, -1) {
+		emit(match[1])
+	}
+
+	// 3) Struct literals: %Foo.Bar{...}
+	for _, match := range elixirStructModule.FindAllStringSubmatch(body, -1) {
+		emit(match[1])
+	}
+
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+func stripElixirLineComment(line string) string {
+	if line == "" {
+		return ""
+	}
+	// Best-effort: ignore # inside quotes (common in doctests). Keep it simple.
+	if idx := strings.Index(line, "#"); idx >= 0 {
+		return line[:idx]
+	}
+	return line
+}
+
+func parseElixirModuleExpr(expr string) []string {
+	expr = strings.TrimSpace(expr)
+	if expr == "" {
+		return nil
+	}
+	// Drop keyword/options, e.g. "Foo.Bar, as: Baz" or "Foo.Bar, warn: false".
+	if idx := strings.Index(expr, ","); idx >= 0 {
+		expr = strings.TrimSpace(expr[:idx])
+	}
+
+	// Handle brace expansion: MyApp.{Foo, Bar}
+	if open := strings.Index(expr, "{"); open >= 0 {
+		close := strings.Index(expr, "}")
+		if close > open {
+			prefix := strings.TrimSpace(strings.TrimSuffix(expr[:open], "."))
+			list := expr[open+1 : close]
+			parts := strings.Split(list, ",")
+			out := make([]string, 0, len(parts))
+			for _, part := range parts {
+				part = strings.TrimSpace(part)
+				if part == "" {
+					continue
+				}
+				if prefix != "" {
+					out = append(out, prefix+"."+part)
+				} else {
+					out = append(out, part)
+				}
+			}
+			return out
+		}
+	}
+
+	return []string{expr}
 }
 
 // parseElixirDeclaration parses a line and extracts symbol info if it's a declaration.

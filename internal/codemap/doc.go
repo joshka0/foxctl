@@ -1,2 +1,2 @@
-// Package codemap provides semantic codemap generation using dspy-go agents.
+// Package codemap provides semantic codemap generation using LLM-backed agents.
 package codemap

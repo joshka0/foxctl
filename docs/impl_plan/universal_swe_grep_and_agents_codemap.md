@@ -83,7 +83,7 @@ You can refer to these as “CM3” etc. in comments, issues, or docs.
 
 - **Task:** Wire minimal static pipeline (lint, fast tests, CI-style checks;
   plug into
-  [tests.run](cci:1://file:///Users/jkatigbak/repos/personal/agentctl/skills/hooks_task_guard/main.go:54:0-155:1))\
+  [tests.run](cci:1://file://skills/hooks_task_guard/main.go:54:0-155:1))\
   **Codemaps:** CM14, CM17, CM3
 
 ---
@@ -91,7 +91,7 @@ You can refer to these as “CM3” etc. in comments, issues, or docs.
 ### Phase 2 – Post-Review Pipeline Harness
 
 - **Task:** Implement overseer post-review handler
-  ([PostReviewHandler](cci:2://file:///Users/jkatigbak/repos/personal/agentctl/internal/indexing/handler.go:14:0-20:1),
+  ([PostReviewHandler](cci:2://file://internal/indexing/handler.go:14:0-20:1),
   events, indexer fanout)\
   **Codemaps:** CM9, CM7, CM8, CM13
 

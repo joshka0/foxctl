@@ -17,10 +17,10 @@ exec_mode = "reactive" (default)
         - Conversation memory (L0/L1/L2)
 
 exec_mode = "autonomous" | "proactive"
-    └── DSPy ReAct Agent
-        - Providers: gemini, openai, anthropic, groq, openrouter
+    └── LLMChatEngine via companion.Service
         - Tool calling loop
         - Multi-step reasoning
+        - Same provider support as reactive
 ```
 
 ## Quick Reference
@@ -28,8 +28,8 @@ exec_mode = "autonomous" | "proactive"
 | Mode | Engine | Default Provider | Tool Loop |
 |------|--------|------------------|-----------|
 | `reactive` | LLMChatEngine | cerebras | No |
-| `autonomous` | DSPy ReAct | openrouter | Yes |
-| `proactive` | DSPy ReAct | openrouter | Yes |
+| `autonomous` | LLMChatEngine | cerebras | Yes |
+| `proactive` | LLMChatEngine | cerebras | Yes |
 
 ## Autonomous vs Proactive: When to Use
 
@@ -105,10 +105,9 @@ agentctl agent ask <agent-id> \
   --wait
 ```
 
-### Autonomous Agent (DSPy)
+### Autonomous Agent
 
 ```bash
-# Uses DSPy ReAct with tool calling
 agentctl agent spawn \
   --name "Coder" \
   --role coder \
@@ -224,9 +223,9 @@ Enable via `--enable-companion-memory` or auto-enabled for `role: companion`.
 
 ## Common Issues
 
-### "unsupported LLM provider: cerebras" with DSPy
+### "unsupported LLM provider" errors
 
-Agent has `exec_mode: autonomous` but uses cerebras (not supported by DSPy).
+The configured LLM provider is not supported or missing its API key.
 
 **Fix:**
 ```bash
@@ -234,8 +233,8 @@ Agent has `exec_mode: autonomous` but uses cerebras (not supported by DSPy).
 sqlite3 ~/.agentctl/storage/agents.db \
   "UPDATE agents SET exec_mode='reactive' WHERE id='$AGENT_ID'"
 
-# Option 2: Use DSPy-supported provider
-agentctl agent spawn --exec-mode autonomous --llm-provider openrouter
+# Option 2: Use a supported OpenAI-compatible provider
+agentctl agent spawn --exec-mode autonomous --llm-provider openrouter --llm-model "anthropic/claude-sonnet-4-20250514"
 ```
 
 ### Memory not injected for companion
@@ -251,7 +250,6 @@ Check daemon logs for `memory_enabled: false`.
 | Engine routing | `internal/agent/daemon/daemon.go:237` |
 | Companion service | `internal/companion/service.go` |
 | LLMChatEngine | `internal/engine/llmchat_engine.go` |
-| DSPy adapter | `internal/providers/llm/dspy_adapter.go` |
 | Message handlers | `internal/agent/daemon/handlers.go` |
 
 ## Related Skills

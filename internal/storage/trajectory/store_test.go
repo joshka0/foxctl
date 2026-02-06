@@ -9,6 +9,8 @@ import (
 	"github.com/jkatigb/agentctl/internal/storage/trajectory"
 )
 
+const testWorkspaceID = "0123456789abcdef0123456789abcdef"
+
 func TestOpenAndClose(t *testing.T) {
 	store := openTestStore(t)
 	if err := store.Close(); err != nil {
@@ -22,7 +24,7 @@ func TestTrajectory_InsertAndGet(t *testing.T) {
 	defer store.Close()
 
 	traj := trajectory.Trajectory{
-		WorkspaceID:   "ws-123",
+		WorkspaceID:   testWorkspaceID,
 		RootRequestID: "req-456",
 		TaskIDs:       []string{"task-1", "task-2"},
 		EpicID:        "epic-789",
@@ -44,12 +46,12 @@ func TestTrajectory_InsertAndGet(t *testing.T) {
 		t.Error("expected CreatedAt to be set")
 	}
 
-	got, err := store.GetTrajectory(ctx, "ws-123", inserted.ID)
+	got, err := store.GetTrajectory(ctx, testWorkspaceID, inserted.ID)
 	if err != nil {
 		t.Fatalf("get: %v", err)
 	}
-	if got.WorkspaceID != "ws-123" {
-		t.Errorf("workspace_id: got %q, want %q", got.WorkspaceID, "ws-123")
+	if got.WorkspaceID != testWorkspaceID {
+		t.Errorf("workspace_id: got %q, want %q", got.WorkspaceID, testWorkspaceID)
 	}
 	if got.RootRequestID != "req-456" {
 		t.Errorf("root_request_id: got %q, want %q", got.RootRequestID, "req-456")
@@ -68,7 +70,7 @@ func TestTrajectory_Update(t *testing.T) {
 	defer store.Close()
 
 	traj := trajectory.Trajectory{
-		WorkspaceID: "ws-123",
+		WorkspaceID: testWorkspaceID,
 		Status:      trajectory.StatusPartial,
 		Summary:     "Initial summary",
 	}
@@ -86,7 +88,7 @@ func TestTrajectory_Update(t *testing.T) {
 		t.Fatalf("update: %v", err)
 	}
 
-	got, err := store.GetTrajectory(ctx, "ws-123", inserted.ID)
+	got, err := store.GetTrajectory(ctx, testWorkspaceID, inserted.ID)
 	if err != nil {
 		t.Fatalf("get: %v", err)
 	}
@@ -109,7 +111,7 @@ func TestTrajectory_List(t *testing.T) {
 	// Insert multiple trajectories.
 	for i := 0; i < 3; i++ {
 		traj := trajectory.Trajectory{
-			WorkspaceID: "ws-list",
+			WorkspaceID: testWorkspaceID,
 			Status:      trajectory.StatusOK,
 			AgentRole:   "coder",
 		}
@@ -120,7 +122,7 @@ func TestTrajectory_List(t *testing.T) {
 
 	// Insert one with different role.
 	traj := trajectory.Trajectory{
-		WorkspaceID: "ws-list",
+		WorkspaceID: testWorkspaceID,
 		Status:      trajectory.StatusOK,
 		AgentRole:   "planner",
 	}
@@ -129,7 +131,7 @@ func TestTrajectory_List(t *testing.T) {
 	}
 
 	// List all.
-	all, err := store.ListTrajectories(ctx, trajectory.ListFilter{WorkspaceID: "ws-list"})
+	all, err := store.ListTrajectories(ctx, trajectory.ListFilter{WorkspaceID: testWorkspaceID})
 	if err != nil {
 		t.Fatalf("list all: %v", err)
 	}
@@ -139,7 +141,7 @@ func TestTrajectory_List(t *testing.T) {
 
 	// List by role.
 	coders, err := store.ListTrajectories(ctx, trajectory.ListFilter{
-		WorkspaceID: "ws-list",
+		WorkspaceID: testWorkspaceID,
 		AgentRole:   "coder",
 	})
 	if err != nil {
@@ -156,7 +158,7 @@ func TestTrajectory_Delete(t *testing.T) {
 	defer store.Close()
 
 	traj := trajectory.Trajectory{
-		WorkspaceID: "ws-delete",
+		WorkspaceID: testWorkspaceID,
 		Status:      trajectory.StatusOK,
 	}
 	inserted, err := store.InsertTrajectory(ctx, traj)
@@ -164,11 +166,11 @@ func TestTrajectory_Delete(t *testing.T) {
 		t.Fatalf("insert: %v", err)
 	}
 
-	if err := store.DeleteTrajectory(ctx, "ws-delete", inserted.ID); err != nil {
+	if err := store.DeleteTrajectory(ctx, testWorkspaceID, inserted.ID); err != nil {
 		t.Fatalf("delete: %v", err)
 	}
 
-	_, err = store.GetTrajectory(ctx, "ws-delete", inserted.ID)
+	_, err = store.GetTrajectory(ctx, testWorkspaceID, inserted.ID)
 	if !errors.Is(err, trajectory.ErrNotFound) {
 		t.Errorf("expected ErrNotFound, got: %v", err)
 	}
@@ -180,7 +182,7 @@ func TestTrajectory_List_TaskIDExactMatch(t *testing.T) {
 	defer store.Close()
 
 	_, err := store.InsertTrajectory(ctx, trajectory.Trajectory{
-		WorkspaceID: "ws-task-filter",
+		WorkspaceID: testWorkspaceID,
 		Status:      trajectory.StatusOK,
 		TaskIDs:     []string{"task1"},
 	})
@@ -188,7 +190,7 @@ func TestTrajectory_List_TaskIDExactMatch(t *testing.T) {
 		t.Fatalf("insert task1: %v", err)
 	}
 	_, err = store.InsertTrajectory(ctx, trajectory.Trajectory{
-		WorkspaceID: "ws-task-filter",
+		WorkspaceID: testWorkspaceID,
 		Status:      trajectory.StatusOK,
 		TaskIDs:     []string{"task10"},
 	})
@@ -197,7 +199,7 @@ func TestTrajectory_List_TaskIDExactMatch(t *testing.T) {
 	}
 
 	results, err := store.ListTrajectories(ctx, trajectory.ListFilter{
-		WorkspaceID: "ws-task-filter",
+		WorkspaceID: testWorkspaceID,
 		TaskID:      "task1",
 	})
 	if err != nil {
@@ -216,7 +218,7 @@ func TestListReturnsEmptySlices(t *testing.T) {
 	store := openTestStore(t)
 	defer store.Close()
 
-	trajectories, err := store.ListTrajectories(ctx, trajectory.ListFilter{WorkspaceID: "ws-empty"})
+	trajectories, err := store.ListTrajectories(ctx, trajectory.ListFilter{WorkspaceID: testWorkspaceID})
 	if err != nil {
 		t.Fatalf("list trajectories: %v", err)
 	}
@@ -227,7 +229,7 @@ func TestListReturnsEmptySlices(t *testing.T) {
 		t.Fatalf("expected 0 trajectories, got %d", len(trajectories))
 	}
 
-	requests, err := store.ListUserRequests(ctx, "ws-empty", 10)
+	requests, err := store.ListUserRequests(ctx, testWorkspaceID, 10)
 	if err != nil {
 		t.Fatalf("list user_requests: %v", err)
 	}
@@ -239,7 +241,7 @@ func TestListReturnsEmptySlices(t *testing.T) {
 	}
 
 	traj, err := store.InsertTrajectory(ctx, trajectory.Trajectory{
-		WorkspaceID: "ws-empty",
+		WorkspaceID: testWorkspaceID,
 		Status:      trajectory.StatusOK,
 	})
 	if err != nil {
@@ -257,7 +259,7 @@ func TestListReturnsEmptySlices(t *testing.T) {
 		t.Fatalf("expected 0 events, got %d", len(events))
 	}
 
-	byTrace, err := store.GetEventsByTraceID(ctx, "ws-empty", "trace-empty")
+	byTrace, err := store.GetEventsByTraceID(ctx, testWorkspaceID, "trace-empty")
 	if err != nil {
 		t.Fatalf("get events by trace_id: %v", err)
 	}
@@ -275,7 +277,7 @@ func TestUserRequest_InsertAndGet(t *testing.T) {
 	defer store.Close()
 
 	ur := trajectory.UserRequestCapture{
-		WorkspaceID: "ws-123",
+		WorkspaceID: testWorkspaceID,
 		Actor:       "actor:human:user1",
 		Source:      trajectory.SourceCLI,
 		Text:        "Fix the bug in auth.go",
@@ -301,7 +303,7 @@ func TestUserRequest_InsertAndGet(t *testing.T) {
 		t.Error("expected TS to be set")
 	}
 
-	got, err := store.GetUserRequest(ctx, "ws-123", inserted.ID)
+	got, err := store.GetUserRequest(ctx, testWorkspaceID, inserted.ID)
 	if err != nil {
 		t.Fatalf("get: %v", err)
 	}
@@ -335,7 +337,7 @@ func TestUserRequest_List(t *testing.T) {
 
 	for i := 0; i < 5; i++ {
 		ur := trajectory.UserRequestCapture{
-			WorkspaceID: "ws-list-ur",
+			WorkspaceID: testWorkspaceID,
 			Actor:       "actor:human:user1",
 			Source:      trajectory.SourceCLI,
 			Text:        "Request " + string(rune('A'+i)),
@@ -345,7 +347,7 @@ func TestUserRequest_List(t *testing.T) {
 		}
 	}
 
-	list, err := store.ListUserRequests(ctx, "ws-list-ur", 10)
+	list, err := store.ListUserRequests(ctx, testWorkspaceID, 10)
 	if err != nil {
 		t.Fatalf("list: %v", err)
 	}
@@ -361,7 +363,7 @@ func TestEvent_InsertAndList(t *testing.T) {
 
 	// Create a trajectory first.
 	traj := trajectory.Trajectory{
-		WorkspaceID: "ws-events",
+		WorkspaceID: testWorkspaceID,
 		Status:      trajectory.StatusOK,
 		TraceID:     "trace-events",
 	}
@@ -434,7 +436,7 @@ func TestEvent_InsertBatch(t *testing.T) {
 
 	// Create trajectory.
 	traj := trajectory.Trajectory{
-		WorkspaceID: "ws-batch",
+		WorkspaceID: testWorkspaceID,
 		Status:      trajectory.StatusOK,
 	}
 	inserted, err := store.InsertTrajectory(ctx, traj)
@@ -469,7 +471,7 @@ func TestEvent_FilterByKind(t *testing.T) {
 
 	// Create trajectory.
 	traj := trajectory.Trajectory{
-		WorkspaceID: "ws-filter-kind",
+		WorkspaceID: testWorkspaceID,
 		Status:      trajectory.StatusOK,
 	}
 	inserted, err := store.InsertTrajectory(ctx, traj)
@@ -508,7 +510,7 @@ func TestTrajectory_CascadeDelete(t *testing.T) {
 
 	// Create trajectory with events.
 	traj := trajectory.Trajectory{
-		WorkspaceID: "ws-cascade",
+		WorkspaceID: testWorkspaceID,
 		Status:      trajectory.StatusOK,
 	}
 	inserted, err := store.InsertTrajectory(ctx, traj)
@@ -525,7 +527,7 @@ func TestTrajectory_CascadeDelete(t *testing.T) {
 	}
 
 	// Delete trajectory.
-	if err := store.DeleteTrajectory(ctx, "ws-cascade", inserted.ID); err != nil {
+	if err := store.DeleteTrajectory(ctx, testWorkspaceID, inserted.ID); err != nil {
 		t.Fatalf("delete: %v", err)
 	}
 
@@ -548,7 +550,7 @@ func TestTrajectory_TimeFilter(t *testing.T) {
 
 	// Insert trajectory with explicit timestamps.
 	traj := trajectory.Trajectory{
-		WorkspaceID: "ws-time-filter",
+		WorkspaceID: testWorkspaceID,
 		Status:      trajectory.StatusOK,
 		CreatedAt:   now.Add(-2 * time.Hour),
 	}
@@ -557,7 +559,7 @@ func TestTrajectory_TimeFilter(t *testing.T) {
 	}
 
 	traj2 := trajectory.Trajectory{
-		WorkspaceID: "ws-time-filter",
+		WorkspaceID: testWorkspaceID,
 		Status:      trajectory.StatusOK,
 		CreatedAt:   now.Add(-30 * time.Minute),
 	}
@@ -567,7 +569,7 @@ func TestTrajectory_TimeFilter(t *testing.T) {
 
 	// Filter since 1 hour ago.
 	recent, err := store.ListTrajectories(ctx, trajectory.ListFilter{
-		WorkspaceID: "ws-time-filter",
+		WorkspaceID: testWorkspaceID,
 		Since:       now.Add(-1 * time.Hour),
 	})
 	if err != nil {

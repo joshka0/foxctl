@@ -235,7 +235,7 @@ UX path for auto-creating tasks.
 
 Hook semantics are limited to `hook.Output` (`DecisionApprove`/`DecisionBlock`).
 Callers that translate a `DecisionBlock` into a top-level tool error SHOULD use
-`E_GUARD_VIOLATION` as the error code (see `dspy_go_agents.md` §11.3),
+`E_GUARD_VIOLATION` as the error code (see `archive/specs/dspy_go_agents.md` §11.3),
 indicating a guard/scope violation rather than a transient runtime failure.
 
 ### 5.2 `hooks/task_update` (optional initial scope)

@@ -35,29 +35,29 @@ Binary Startup to Command Execution
 ### Location Details
 
 - **1a:** First action: Load .env files\
-  **Path:** `/Users/jkatigbak/repos/personal/agentctl/cmd/agentctl/main.go:15`\
+  **Path:** `cmd/agentctl/main.go:15`\
   **Description:** Called before anything else to populate environment variables
   from .env files
 
 - **1b:** Load .env files in reverse priority order\
   **Path:**
-  `/Users/jkatigbak/repos/personal/agentctl/internal/platform/config/dotenv.go:48`\
+  `internal/platform/config/dotenv.go:48`\
   **Description:** Loads ~/.agentctl/.env, $AGENTCTL_HOME/.env, then $PWD/.env
   (later files override)
 
 - **1c:** Execute Cobra root command\
-  **Path:** `/Users/jkatigbak/repos/personal/agentctl/cmd/agentctl/main.go:17`\
+  **Path:** `cmd/agentctl/main.go:17`\
   **Description:** Hands control to Cobra which triggers initialization hooks
   and command routing
 
 - **1d:** Register Cobra initialization callback\
   **Path:**
-  `/Users/jkatigbak/repos/personal/agentctl/cmd/agentctl/cmd/root.go:36`\
+  `cmd/agentctl/cmd/root.go:36`\
   **Description:** Sets up initConfig to run before any command executes
 
 - **1e:** Register pre-run hook for all commands\
   **Path:**
-  `/Users/jkatigbak/repos/personal/agentctl/cmd/agentctl/cmd/root.go:38`\
+  `cmd/agentctl/cmd/root.go:38`\
   **Description:** Ensures config and logger are loaded into context before any
   command runs
 
@@ -86,30 +86,30 @@ Cobra Initialization Hooks: Viper + .env Loading
 
 - **2a:** Configure viper for AGENTCTL_* env vars\
   **Path:**
-  `/Users/jkatigbak/repos/personal/agentctl/cmd/agentctl/cmd/root.go:63`\
+  `cmd/agentctl/cmd/root.go:63`\
   **Description:** Sets up automatic environment variable binding with AGENTCTL
   prefix
 
 - **2b:** Enable automatic env var reading\
   **Path:**
-  `/Users/jkatigbak/repos/personal/agentctl/cmd/agentctl/cmd/root.go:64`\
+  `cmd/agentctl/cmd/root.go:64`\
   **Description:** Allows viper to read AGENTCTL_* environment variables
   automatically
 
 - **2c:** Load global .env file\
   **Path:**
-  `/Users/jkatigbak/repos/personal/agentctl/cmd/agentctl/cmd/root.go:71`\
+  `cmd/agentctl/cmd/root.go:71`\
   **Description:** Loads ~/.agentctl/.env for global defaults
 
 - **2d:** Load git root .env file\
   **Path:**
-  `/Users/jkatigbak/repos/personal/agentctl/cmd/agentctl/cmd/root.go:79`\
+  `cmd/agentctl/cmd/root.go:79`\
   **Description:** Walks up directory tree to find .git and loads .env from git
   root
 
 - **2e:** Load current directory .env (highest priority)\
   **Path:**
-  `/Users/jkatigbak/repos/personal/agentctl/cmd/agentctl/cmd/root.go:86`\
+  `cmd/agentctl/cmd/root.go:86`\
   **Description:** Loads ./.env which overrides all previous .env files
 
 ---
@@ -150,42 +150,42 @@ config.Load() - Configuration Materialization <-- config.go:249
 
 - **3a:** Create viper instance with env bindings\
   **Path:**
-  `/Users/jkatigbak/repos/personal/agentctl/internal/platform/config/config.go:257`\
+  `internal/platform/config/config.go:257`\
   **Description:** Sets up viper with AGENTCTL prefix and dot-to-underscore
   replacement
 
 - **3b:** Apply hardcoded defaults\
   **Path:**
-  `/Users/jkatigbak/repos/personal/agentctl/internal/platform/config/config.go:259`\
+  `internal/platform/config/config.go:259`\
   **Description:** Sets defaults for all config fields (paths, timeouts,
   database driver, etc.)
 
 - **3c:** Set default home directory\
   **Path:**
-  `/Users/jkatigbak/repos/personal/agentctl/internal/platform/config/config.go:291`\
+  `internal/platform/config/config.go:291`\
   **Description:** Defaults to ~/.agentctl for all persistent data
 
 - **3d:** Default to libsql driver\
   **Path:**
-  `/Users/jkatigbak/repos/personal/agentctl/internal/platform/config/config.go:314`\
+  `internal/platform/config/config.go:314`\
   **Description:** Uses libsql for local-first database with optional sync
   capability
 
 - **3e:** Read YAML config file\
   **Path:**
-  `/Users/jkatigbak/repos/personal/agentctl/internal/platform/config/config.go:334`\
+  `internal/platform/config/config.go:334`\
   **Description:** Loads ~/.agentctl/config.yaml if present, merging with
   defaults
 
 - **3f:** Unmarshal into Config struct\
   **Path:**
-  `/Users/jkatigbak/repos/personal/agentctl/internal/platform/config/config.go:345`\
+  `internal/platform/config/config.go:345`\
   **Description:** Converts viper's merged config into typed Config struct with
   env var overrides
 
 - **3g:** Apply Turso env var overrides\
   **Path:**
-  `/Users/jkatigbak/repos/personal/agentctl/internal/platform/config/config.go:392`\
+  `internal/platform/config/config.go:392`\
   **Description:** Allows standard TURSO_* env vars to override config file
   settings
 
@@ -221,34 +221,34 @@ Cobra Command Execution Flow
 
 - **4a:** Check if config already in context\
   **Path:**
-  `/Users/jkatigbak/repos/personal/agentctl/cmd/agentctl/cmd/root.go:39`\
+  `cmd/agentctl/cmd/root.go:39`\
   **Description:** Skip loading if config was already injected (e.g., by tests
   or parent command)
 
 - **4b:** Load configuration\
   **Path:**
-  `/Users/jkatigbak/repos/personal/agentctl/cmd/agentctl/cmd/root.go:47`\
+  `cmd/agentctl/cmd/root.go:47`\
   **Description:** Materializes full config from defaults, YAML, and env vars
 
 - **4c:** Create logger from config\
   **Path:**
-  `/Users/jkatigbak/repos/personal/agentctl/cmd/agentctl/cmd/root.go:51`\
+  `cmd/agentctl/cmd/root.go:51`\
   **Description:** Builds zerolog logger with level and format from
   config.Logging
 
 - **4d:** Store config in context\
   **Path:**
-  `/Users/jkatigbak/repos/personal/agentctl/cmd/agentctl/cmd/root.go:55`\
+  `cmd/agentctl/cmd/root.go:55`\
   **Description:** Makes config available to all downstream code via context
 
 - **4e:** Store logger in context\
   **Path:**
-  `/Users/jkatigbak/repos/personal/agentctl/cmd/agentctl/cmd/root.go:56`\
+  `cmd/agentctl/cmd/root.go:56`\
   **Description:** Makes logger available to all downstream code via context
 
 - **4f:** Update command context\
   **Path:**
-  `/Users/jkatigbak/repos/personal/agentctl/cmd/agentctl/cmd/root.go:57`\
+  `cmd/agentctl/cmd/root.go:57`\
   **Description:** Replaces command's context with enriched version containing
   config and logger
 
@@ -289,28 +289,28 @@ agentctl run command execution
 
 - **5a:** Retrieve config from context\
   **Path:**
-  `/Users/jkatigbak/repos/personal/agentctl/cmd/agentctl/cmd/run.go:61`\
+  `cmd/agentctl/cmd/run.go:61`\
   **Description:** Extracts config that was injected by PersistentPreRunE
 
 - **5b:** Create executor with config\
   **Path:**
-  `/Users/jkatigbak/repos/personal/agentctl/cmd/agentctl/cmd/run.go:105`\
+  `cmd/agentctl/cmd/run.go:105`\
   **Description:** Constructs executor that will lazily open storage when needed
 
 - **5c:** Lazy-open job store on first use\
   **Path:**
-  `/Users/jkatigbak/repos/personal/agentctl/internal/runservice/jobs.go:18`\
+  `internal/runservice/jobs.go:18`\
   **Description:** Opens SQLite database at ~/.agentctl/jobs/jobs.db only when
   needed
 
 - **5d:** Open persistent job storage\
   **Path:**
-  `/Users/jkatigbak/repos/personal/agentctl/internal/storage/jobs/store.go:38`\
+  `internal/storage/jobs/store.go:38`\
   **Description:** Delegates to persist layer which handles database connection
 
 - **5e:** Open SQLite database with migrations\
   **Path:**
-  `/Users/jkatigbak/repos/personal/agentctl/internal/storage/jobs/persist/store.go:45`\
+  `internal/storage/jobs/persist/store.go:45`\
   **Description:** Creates parent dirs, opens DB, enables WAL, runs migrations
 
 ---
@@ -348,27 +348,27 @@ Database Storage Layer
 
 - **6a:** Open SQLite database connection\
   **Path:**
-  `/Users/jkatigbak/repos/personal/agentctl/internal/storage/sqliteutil/sqliteutil.go:29`\
+  `internal/storage/sqliteutil/sqliteutil.go:29`\
   **Description:** Uses modernc.org/sqlite driver for pure-Go SQLite
 
 - **6b:** Enable WAL journaling\
   **Path:**
-  `/Users/jkatigbak/repos/personal/agentctl/internal/storage/sqliteutil/sqliteutil.go:46`\
+  `internal/storage/sqliteutil/sqliteutil.go:46`\
   **Description:** Configures Write-Ahead Logging for better concurrency
 
 - **6c:** Run database migrations\
   **Path:**
-  `/Users/jkatigbak/repos/personal/agentctl/internal/storage/sqliteutil/sqliteutil.go:56`\
+  `internal/storage/sqliteutil/sqliteutil.go:56`\
   **Description:** Applies schema migrations to ensure database is up-to-date
 
 - **6d:** Check for driver override env var\
   **Path:**
-  `/Users/jkatigbak/repos/personal/agentctl/internal/storage/dbdriver/config_loader.go:46`\
+  `internal/storage/dbdriver/config_loader.go:46`\
   **Description:** Reads AGENTCTL_<DB>_DB_DRIVER to select sqlite/libsql/turso
 
 - **6e:** Route to driver-specific opener\
   **Path:**
-  `/Users/jkatigbak/repos/personal/agentctl/internal/storage/dbdriver/driver.go:96`\
+  `internal/storage/dbdriver/driver.go:96`\
   **Description:** Dispatches to openSQLite, openLibSQL, or openTurso based on
   config
 
@@ -406,40 +406,40 @@ Daemon Startup & Pre-Warming Flow
 
 - **7a:** Load config in daemon start\
   **Path:**
-  `/Users/jkatigbak/repos/personal/agentctl/cmd/agentctl/cmd/daemon.go:133`\
+  `cmd/agentctl/cmd/daemon.go:133`\
   **Description:** Daemon loads config once at startup instead of per-request
 
 - **7b:** Create shared connection pool\
   **Path:**
-  `/Users/jkatigbak/repos/personal/agentctl/internal/daemon/service.go:67`\
+  `internal/daemon/service.go:67`\
   **Description:** Pre-allocates database connection pool for reuse across
   requests
 
 - **7c:** Set global pool for reuse\
   **Path:**
-  `/Users/jkatigbak/repos/personal/agentctl/internal/daemon/service.go:68`\
+  `internal/daemon/service.go:68`\
   **Description:** Makes pool available to all storage backends opened by daemon
 
 - **7d:** Create Unix socket listener\
   **Path:**
-  `/Users/jkatigbak/repos/personal/agentctl/internal/daemon/service.go:100`\
+  `internal/daemon/service.go:100`\
   **Description:** Opens /tmp/agentctl-{uid}.sock for IPC with CLI clients
 
 - **7e:** Start connection accept loop\
   **Path:**
-  `/Users/jkatigbak/repos/personal/agentctl/internal/daemon/service.go:120`\
+  `internal/daemon/service.go:120`\
   **Description:** Begins accepting skill execution requests from CLI clients
 
 - **7f:** Lazy-open cache store on first use\
   **Path:**
-  `/Users/jkatigbak/repos/personal/agentctl/internal/daemon/service.go:495`\
+  `internal/daemon/service.go:495`\
   **Description:** Opens cache database only when first skill execution needs it
 
 ---
 
 ## Code Snippets
 
-### File: /Users/jkatigbak/repos/personal/agentctl/internal/daemon/service.go
+### File: internal/daemon/service.go
 
 ```go
 // Lines: 65-70
@@ -476,7 +476,7 @@ func NewService(cfg config.Config, opts ServiceOptions) (*Service, error) {
 		CASPath: s.cfg.Paths.CAS,
 ```
 
-### File: /Users/jkatigbak/repos/personal/agentctl/internal/platform/config/dotenv.go
+### File: internal/platform/config/dotenv.go
 
 ```go
 // Lines: 46-50
@@ -486,7 +486,7 @@ func NewService(cfg config.Config, opts ServiceOptions) (*Service, error) {
 	}
 ```
 
-### File: /Users/jkatigbak/repos/personal/agentctl/cmd/agentctl/cmd/root.go
+### File: cmd/agentctl/cmd/root.go
 
 ```go
 // Lines: 34-41
@@ -552,7 +552,7 @@ func initConfig() {
 }
 ```
 
-### File: /Users/jkatigbak/repos/personal/agentctl/internal/platform/config/config.go
+### File: internal/platform/config/config.go
 
 ```go
 // Lines: 255-261
@@ -607,7 +607,7 @@ func decodeConfig(v *viper.Viper) (Config, error) {
 	}
 ```
 
-### File: /Users/jkatigbak/repos/personal/agentctl/cmd/agentctl/cmd/run.go
+### File: cmd/agentctl/cmd/run.go
 
 ```go
 // Lines: 59-63
@@ -627,7 +627,7 @@ func decodeConfig(v *viper.Viper) (Config, error) {
 	defer executor.Close()
 ```
 
-### File: /Users/jkatigbak/repos/personal/agentctl/internal/runservice/jobs.go
+### File: internal/runservice/jobs.go
 
 ```go
 // Lines: 16-20
@@ -638,7 +638,7 @@ func decodeConfig(v *viper.Viper) (Config, error) {
 		return err
 ```
 
-### File: /Users/jkatigbak/repos/personal/agentctl/internal/storage/jobs/store.go
+### File: internal/storage/jobs/store.go
 
 ```go
 // Lines: 36-40
@@ -649,7 +649,7 @@ func Open(ctx context.Context, root string) (store *Store, err error) {
 		return nil, err
 ```
 
-### File: /Users/jkatigbak/repos/personal/agentctl/cmd/agentctl/main.go
+### File: cmd/agentctl/main.go
 
 ```go
 // Lines: 13-19
@@ -662,7 +662,7 @@ func Open(ctx context.Context, root string) (store *Store, err error) {
 	}
 ```
 
-### File: /Users/jkatigbak/repos/personal/agentctl/internal/storage/jobs/persist/store.go
+### File: internal/storage/jobs/persist/store.go
 
 ```go
 // Lines: 43-47
@@ -673,7 +673,7 @@ func Open(ctx context.Context, root string) (Store, error) {
 		// Check if error is due to readonly filesystem
 ```
 
-### File: /Users/jkatigbak/repos/personal/agentctl/internal/storage/sqliteutil/sqliteutil.go
+### File: internal/storage/sqliteutil/sqliteutil.go
 
 ```go
 // Lines: 27-31
@@ -702,7 +702,7 @@ func Open(ctx context.Context, root string) (Store, error) {
 			return nil, fmt.Errorf("sqliteutil: migrate: %w", err)
 ```
 
-### File: /Users/jkatigbak/repos/personal/agentctl/internal/storage/dbdriver/config_loader.go
+### File: internal/storage/dbdriver/config_loader.go
 
 ```go
 // Lines: 44-48
@@ -713,7 +713,7 @@ func Open(ctx context.Context, root string) (Store, error) {
 	// Default to SQLite if not specified
 ```
 
-### File: /Users/jkatigbak/repos/personal/agentctl/internal/storage/dbdriver/driver.go
+### File: internal/storage/dbdriver/driver.go
 
 ```go
 // Lines: 94-98
@@ -724,7 +724,7 @@ func Open(ctx context.Context, root string) (Store, error) {
 		return openSQLite(ctx, cfg.SQLite, migrate)
 ```
 
-### File: /Users/jkatigbak/repos/personal/agentctl/cmd/agentctl/cmd/daemon.go
+### File: cmd/agentctl/cmd/daemon.go
 
 ```go
 // Lines: 131-135

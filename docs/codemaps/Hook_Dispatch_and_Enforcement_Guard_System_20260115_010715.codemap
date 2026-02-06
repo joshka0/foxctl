@@ -18,7 +18,7 @@
       "locations": [
         {
           "id": "1a",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/skills/hooks_dispatch/main.go",
+          "path": "skills/hooks_dispatch/main.go",
           "lineNumber": 68,
           "lineContent": "hooksCfg, err := hooks.LoadConfigWithDefaults(workspaceRoot)",
           "title": "Load Hook Configuration",
@@ -26,7 +26,7 @@
         },
         {
           "id": "1b",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/skills/hooks_dispatch/main.go",
+          "path": "skills/hooks_dispatch/main.go",
           "lineNumber": 81,
           "lineContent": "dispatcher := hooks.NewDispatcherWithRegistry(hooksCfg, skillsDir)",
           "title": "Create Dispatcher",
@@ -34,7 +34,7 @@
         },
         {
           "id": "1c",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/skills/hooks_dispatch/main.go",
+          "path": "skills/hooks_dispatch/main.go",
           "lineNumber": 84,
           "lineContent": "result, err := dispatcher.Dispatch(ctx, in)",
           "title": "Dispatch Hooks",
@@ -42,7 +42,7 @@
         },
         {
           "id": "1d",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/hooks/dispatcher.go",
+          "path": "internal/hooks/dispatcher.go",
           "lineNumber": 129,
           "lineContent": "hooks := d.config.HooksForEvent(input.Event)",
           "title": "Find Matching Hooks",
@@ -50,7 +50,7 @@
         },
         {
           "id": "1e",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/hooks/dispatcher.go",
+          "path": "internal/hooks/dispatcher.go",
           "lineNumber": 170,
           "lineContent": "output, err := d.runner.Run(hookCtx, entryHook, hookInput)",
           "title": "Execute Hook Skill",
@@ -58,14 +58,14 @@
         },
         {
           "id": "1f",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/hooks/dispatcher.go",
+          "path": "internal/hooks/dispatcher.go",
           "lineNumber": 206,
           "lineContent": "result.Output = Merge(outputs)",
           "title": "Merge Hook Outputs",
           "description": "Combines all hook outputs using deterministic merge rules"
         }
       ],
-      "traceTextDiagram": "Hook Dispatch Processing\n├── hooks_dispatch/main.go entrypoint \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/hooks_dispatch/main.go:25\n│   ├── LoadConfigWithDefaults() \u003c-- 1a\n│   ├── NewDispatcherWithRegistry() \u003c-- 1b\n│   └── dispatcher.Dispatch() \u003c-- 1c\n└── Dispatcher execution flow \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/hooks/dispatcher.go:122\n    ├── HooksForEvent() lookup \u003c-- 1d\n    ├── runner.Run() execution \u003c-- 1e\n    └── Merge() combine results \u003c-- 1f",
+      "traceTextDiagram": "Hook Dispatch Processing\n├── hooks_dispatch/main.go entrypoint \u003c-- skills/hooks_dispatch/main.go:25\n│   ├── LoadConfigWithDefaults() \u003c-- 1a\n│   ├── NewDispatcherWithRegistry() \u003c-- 1b\n│   └── dispatcher.Dispatch() \u003c-- 1c\n└── Dispatcher execution flow \u003c-- internal/hooks/dispatcher.go:122\n    ├── HooksForEvent() lookup \u003c-- 1d\n    ├── runner.Run() execution \u003c-- 1e\n    └── Merge() combine results \u003c-- 1f",
       "traceGuide": "## Motivation\n\nThe hook dispatch system solves the problem of **enforcing organizational policies and coordination** across multi-agent environments. Without this system, agents could modify files without task context, create edit conflicts, or bypass required workflows. The system provides a centralized way to intercept tool usage, validate operations against business rules, and coordinate shared resources through event-driven guards.\n\n## Details\n\nThe system operates through a **central dispatcher** that loads hook configurations from `hooks.yaml` files [1a]. When an agent attempts to use a tool, the dispatcher receives an event (like `PreToolUse`), finds matching hooks based on tool type, file paths, or actor context [1d], and executes them through either shell scripts or Go skills [1e]. \n\nThe dispatcher uses a **registry pattern** to route different hook types to appropriate runners [1b]. Each hook returns a decision (approve/block), optional context to inject, or actions to perform. The results are merged using deterministic rules where blocks override approvals [1f]. This enables use cases like:\n\n- **Task guards** that ensure active tasks exist before write operations\n- **File guards** that prevent edit conflicts through reservation systems  \n- **Context injection** that automatically adds relevant documentation\n- **Policy enforcement** that blocks prohibited operations\n\nThe system is designed to be **extensible and configurable**, allowing workspace-specific hook configurations while maintaining a stable execution contract across all hook skills [1c]."
     },
     {
@@ -75,7 +75,7 @@
       "locations": [
         {
           "id": "2a",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/skills/hooks_task_guard/main.go",
+          "path": "skills/hooks_task_guard/main.go",
           "lineNumber": 41,
           "lineContent": "if !toolutil.IsWriteOperation(in.ToolName, in.ToolCanonical, string(in.ToolKind))",
           "title": "Check Write Operation",
@@ -83,7 +83,7 @@
         },
         {
           "id": "2b",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/skills/hooks_task_guard/main.go",
+          "path": "skills/hooks_task_guard/main.go",
           "lineNumber": 65,
           "lineContent": "store, cleanup, err := sessionkit.OpenTasks(ctx, rc.Config)",
           "title": "Open Task Store",
@@ -91,7 +91,7 @@
         },
         {
           "id": "2c",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/skills/hooks_task_guard/main.go",
+          "path": "skills/hooks_task_guard/main.go",
           "lineNumber": 82,
           "lineContent": "task, created, err := store.EnsureActive(ctx, workspaceID, defaultTitle, scopePath)",
           "title": "Ensure Active Task",
@@ -99,7 +99,7 @@
         },
         {
           "id": "2d",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/skills/hooks_task_guard/main.go",
+          "path": "skills/hooks_task_guard/main.go",
           "lineNumber": 90,
           "lineContent": "task, dirtied, err = store.DirtyIfReviewed(ctx, task.ID)",
           "title": "Dirty Reviewed Task",
@@ -107,14 +107,14 @@
         },
         {
           "id": "2e",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/skills/hooks_task_guard/main.go",
+          "path": "skills/hooks_task_guard/main.go",
           "lineNumber": 105,
           "lineContent": "createModifiedEdge(ctx, paths.StorageRoot, workspaceID, task.ID, scopePath)",
           "title": "Create Graph Edge",
           "description": "Creates task→file relationship in graph database for tracking"
         }
       ],
-      "traceTextDiagram": "Task Guard Enforcement Flow\n├── Check if write operation \u003c-- 2a\n├── Open SQLite task store \u003c-- 2b\n├── Ensure active task exists \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/tasks/store.go:551\n│   ├── Get existing active task \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/tasks/store.go:508\n│   └── Create new task if needed \u003c-- 2c\n├── Dirty task if reviewed \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/hooks_task_guard/main.go:90\n│   └── Demote status to in_progress \u003c-- 2d\n└── Create graph tracking edge \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/hooks_task_guard/main.go:193\n    └── Link task to modified file \u003c-- 2e",
+      "traceTextDiagram": "Task Guard Enforcement Flow\n├── Check if write operation \u003c-- 2a\n├── Open SQLite task store \u003c-- 2b\n├── Ensure active task exists \u003c-- internal/storage/tasks/store.go:551\n│   ├── Get existing active task \u003c-- internal/storage/tasks/store.go:508\n│   └── Create new task if needed \u003c-- 2c\n├── Dirty task if reviewed \u003c-- skills/hooks_task_guard/main.go:90\n│   └── Demote status to in_progress \u003c-- 2d\n└── Create graph tracking edge \u003c-- skills/hooks_task_guard/main.go:193\n    └── Link task to modified file \u003c-- 2e",
       "traceGuide": "## Motivation\n\nIn multi-agent coding environments, **uncoordinated file modifications** create chaos. Without coordination, agents can overwrite each other's work, lose context about what they're working on, and create inconsistent states. The task guard solves this by enforcing a **task-centric model** where every write operation must be associated with an active task, providing traceability and preventing aimless modifications.\n\n## Details\n\nThe task guard intercepts all write operations [2a] and ensures they have proper task context. When a write is attempted, it first opens the SQLite task store [2b] to access workspace task state. The system then ensures an active task exists - either retrieving the current one or creating a new one with a sensible default title derived from the tool and file path [2c]. \n\nIf the task was previously marked as ready for review or completed, the guard automatically \"dirties\" it back to in_progress status [2d], acknowledging that new work is being done. Finally, it creates a graph edge linking the task to the modified file [2e], enabling PageRank-based importance calculations and maintaining a complete audit trail of what work touched which files.\n\nThe system operates in two modes: **auto mode** creates tasks automatically for seamless workflow, while **strict mode** blocks operations without explicit active tasks, enforcing stricter governance."
     },
     {
@@ -124,7 +124,7 @@
       "locations": [
         {
           "id": "3a",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/skills/hooks_file_guard/main.go",
+          "path": "skills/hooks_file_guard/main.go",
           "lineNumber": 49,
           "lineContent": "if !toolutil.IsWriteOperation(in.ToolName, in.ToolCanonical, string(in.ToolKind))",
           "title": "Filter Write Operations",
@@ -132,7 +132,7 @@
         },
         {
           "id": "3b",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/skills/hooks_file_guard/main.go",
+          "path": "skills/hooks_file_guard/main.go",
           "lineNumber": 98,
           "lineContent": "boardStore, err := blackboard.OpenBoardStore(ctx, paths.StorageRoot)",
           "title": "Open Board Store",
@@ -140,7 +140,7 @@
         },
         {
           "id": "3c",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/skills/hooks_file_guard/main.go",
+          "path": "skills/hooks_file_guard/main.go",
           "lineNumber": 110,
           "lineContent": "conflicts, err := boardStore.CheckConflicts(ctx, workspaceID, []string{relPath}, actorID, agent.ReservationModeExclusive)",
           "title": "Check Conflicts",
@@ -148,7 +148,7 @@
         },
         {
           "id": "3d",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/skills/hooks_file_guard/main.go",
+          "path": "skills/hooks_file_guard/main.go",
           "lineNumber": 161,
           "lineContent": "reservation := agent.FileReservation{",
           "title": "Create Reservation",
@@ -156,14 +156,14 @@
         },
         {
           "id": "3e",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/skills/hooks_file_guard/main.go",
+          "path": "skills/hooks_file_guard/main.go",
           "lineNumber": 171,
           "lineContent": "if err := boardStore.Reserve(ctx, \u0026reservation); err != nil",
           "title": "Store Reservation",
           "description": "Persists reservation to prevent other agents from editing"
         }
       ],
-      "traceTextDiagram": "File Guard Reservation System\n├── Filter write operations only \u003c-- 3a\n├── Open SQLite board store\n│   └── OpenBoardStore() for persistence \u003c-- 3b\n├── Check for existing conflicts\n│   └── CheckConflicts() query against DB \u003c-- 3c\n├── Handle conflict response\n│   ├── Block if strict mode \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/hooks_file_guard/main.go:122\n│   └── Warn if advisory mode \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/hooks_file_guard/main.go:137\n└── Create new reservation\n    ├── Build FileReservation struct \u003c-- 3d\n    └── Store in database\n        └── Reserve() insert record \u003c-- 3e",
+      "traceTextDiagram": "File Guard Reservation System\n├── Filter write operations only \u003c-- 3a\n├── Open SQLite board store\n│   └── OpenBoardStore() for persistence \u003c-- 3b\n├── Check for existing conflicts\n│   └── CheckConflicts() query against DB \u003c-- 3c\n├── Handle conflict response\n│   ├── Block if strict mode \u003c-- skills/hooks_file_guard/main.go:122\n│   └── Warn if advisory mode \u003c-- skills/hooks_file_guard/main.go:137\n└── Create new reservation\n    ├── Build FileReservation struct \u003c-- 3d\n    └── Store in database\n        └── Reserve() insert record \u003c-- 3e",
       "traceGuide": "# Motivation\n\nIn multi-agent coding environments, **file conflicts** are a critical problem. When multiple agents work on the same codebase simultaneously, they can overwrite each other's changes, leading to lost work and unpredictable behavior. The File Guard system solves this by implementing an **adversarial file reservation system** that prevents concurrent edits to the same files, similar to how version control systems prevent conflicting commits, but operating in real-time during tool execution.\n\n# Details\n\nThe File Guard operates as a hook skill that intercepts **write operations** before they execute [3a]. When a write tool (like Edit, Write, or fs.write_*) is invoked, the guard first checks if the operation affects files by extracting paths from the tool input. It then opens a SQLite-backed board store for persistence [3b] and queries for existing reservations that would conflict with the requested operation [3c].\n\nThe conflict detection follows clear rules: **exclusive reservations** conflict with any other reservation, while **shared reservations** only conflict with exclusive ones. If conflicts are found, the guard can either **block** the operation entirely in strict mode or **warn** but allow it in advisory mode [3d]. When no conflicts exist, the guard creates a new reservation linked to the current task and actor, with a configurable TTL (default 10 minutes) [3e].\n\nThis system integrates with the broader task management workflow by associating file reservations with active tasks, providing traceability for who modified what and why. The reservation data includes the holder's identity, task context, reason for modification, and expiration time, enabling coordination between agents while maintaining isolation boundaries."
     }
   ],

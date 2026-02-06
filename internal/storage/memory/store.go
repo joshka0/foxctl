@@ -16,6 +16,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/platform/config"
 	errs "github.com/jkatigb/agentctl/internal/platform/errors"
 	"github.com/jkatigb/agentctl/internal/platform/timeutil"
+	ws "github.com/jkatigb/agentctl/internal/platform/workspace"
 	"github.com/jkatigb/agentctl/internal/storage"
 	"github.com/jkatigb/agentctl/internal/storage/cache"
 	"github.com/jkatigb/agentctl/internal/storage/cas"
@@ -108,6 +109,7 @@ func Open(ctx context.Context, root string, casPath string) (store *Store, err e
 		artifactMgr = artifacts.NewManager(casStore)
 	}
 	store = &Store{db: db, cas: casStore, artifactManager: artifactMgr, path: dbPath, close: closeFn}
+	store.repairWorkspaceIDs(ctx)
 	return store, nil
 }
 
@@ -245,6 +247,22 @@ func (s *Store) MigrateWorkspace(ctx context.Context, from, to string, dryRun bo
 		}
 	}
 
+	// Best-effort: migrate indexer state (conflict-safe).
+	// We intentionally don't fail the migration if this table doesn't exist in older DBs.
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE indexer_state AS src
+		SET workspace = ?
+		WHERE src.workspace = ?
+		  AND NOT EXISTS (
+			SELECT 1 FROM indexer_state dst
+			WHERE dst.workspace = ? AND dst.indexer_id = src.indexer_id
+		  )`, to, from, to); err != nil {
+		errMsg := strings.ToLower(err.Error())
+		if !strings.Contains(errMsg, "no such table") && !strings.Contains(errMsg, "does not exist") {
+			return summary, fmt.Errorf("memory: migrate indexer state: %w", err)
+		}
+	}
+
 	if err := tx.Commit(); err != nil {
 		return summary, fmt.Errorf("memory: migrate workspace commit: %w", err)
 	}
@@ -266,6 +284,7 @@ func (s *Store) Save(ctx context.Context, entry NamedEntry) (NamedEntry, error) 
 	if entry.Type == "" {
 		entry.Type = "result"
 	}
+	entry.Workspace = ws.CanonicalID(entry.Workspace)
 
 	// Format digests with proper error handling
 	digestsJSON, err := sqlutil.FormatJSON(entry.Digests)
@@ -296,6 +315,7 @@ ON CONFLICT(name, workspace) DO UPDATE SET
 
 // Get fetches a named memory by name+workspace.
 func (s *Store) Get(ctx context.Context, name, workspace string) (NamedEntry, error) {
+	workspace = ws.CanonicalID(workspace)
 	row := s.db.QueryRowContext(ctx, `
 		SELECT id, name, type, workspace, summary, result, digests, created_at, updated_at, last_accessed, access_count, session_id
 		FROM named_memory
@@ -346,6 +366,7 @@ func (s *Store) Get(ctx context.Context, name, workspace string) (NamedEntry, er
 
 // List returns named memories for a workspace.
 func (s *Store) List(ctx context.Context, workspace string, limit int) ([]NamedEntry, error) {
+	workspace = ws.CanonicalID(workspace)
 	if limit <= 0 {
 		limit = 20
 	}
@@ -404,6 +425,7 @@ func (s *Store) List(ctx context.Context, workspace string, limit int) ([]NamedE
 // This is intended for stable pagination and for session-scoped context injection
 // (e.g., “latest 20 gotchas for this session”).
 func (s *Store) ListFiltered(ctx context.Context, workspace string, filter ListFilter, limit, offset int) ([]NamedEntry, int, error) {
+	workspace = ws.CanonicalID(workspace)
 	if limit <= 0 {
 		limit = 20
 	}
@@ -495,6 +517,7 @@ func (s *Store) ListFiltered(ctx context.Context, workspace string, filter ListF
 
 // Delete removes a named memory and unpins digests.
 func (s *Store) Delete(ctx context.Context, name, workspace string) error {
+	workspace = ws.CanonicalID(workspace)
 	row := s.db.QueryRowContext(ctx, `SELECT digests FROM named_memory WHERE name = ? AND workspace = ?`, name, workspace)
 	var digests string
 	if err := row.Scan(&digests); err != nil {
@@ -518,10 +541,11 @@ func (s *Store) Delete(ctx context.Context, name, workspace string) error {
 // DeleteByNamePrefix deletes all entries whose name starts with the given prefix.
 // Returns the number of entries deleted.
 func (s *Store) DeleteByNamePrefix(ctx context.Context, workspace, namePrefix string) (int, error) {
+	workspace = ws.CanonicalID(workspace)
 	// First collect digests from matching entries to unpin later
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT digests FROM named_memory 
-		WHERE workspace = ? AND name LIKE ? || '%'`,
+			SELECT digests FROM named_memory 
+			WHERE workspace = ? AND name LIKE ? || '%'`,
 		workspace, namePrefix)
 	if err != nil {
 		return 0, fmt.Errorf("memory: query delete prefix: %w", err)
@@ -657,6 +681,25 @@ CREATE INDEX IF NOT EXISTS idx_named_memory_ws_updated ON named_memory(workspace
 		return fmt.Errorf("memory: create embedding metadata: %w", err)
 	}
 
+	if _, err := db.ExecContext(ctx, `
+		CREATE TABLE IF NOT EXISTS indexer_state (
+			workspace TEXT NOT NULL,
+			indexer_id TEXT NOT NULL,
+			last_indexed_head_sha TEXT NOT NULL,
+			created_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL,
+			PRIMARY KEY(workspace, indexer_id)
+		);
+	`); err != nil {
+		return fmt.Errorf("memory: create indexer state: %w", err)
+	}
+
+	if _, err := db.ExecContext(ctx, `
+		CREATE INDEX IF NOT EXISTS idx_indexer_state_ws ON indexer_state(workspace);
+	`); err != nil {
+		return fmt.Errorf("memory: create indexer state index: %w", err)
+	}
+
 	// Add session_id column for pre-migration databases.
 	if _, err := db.ExecContext(ctx, `
 		ALTER TABLE named_memory ADD COLUMN session_id TEXT;
@@ -707,6 +750,7 @@ CREATE INDEX IF NOT EXISTS idx_named_memory_ws_updated ON named_memory(workspace
 
 // Search finds entries whose name or summary contain the query string.
 func (s *Store) Search(ctx context.Context, workspace, query string, limit int) ([]ScoredEntry, error) {
+	workspace = ws.CanonicalID(workspace)
 	if limit <= 0 {
 		limit = 20
 	}
@@ -749,6 +793,7 @@ func (s *Store) Search(ctx context.Context, workspace, query string, limit int) 
 // ExistsByNameSuffix checks if any entry exists with a name ending in the given suffix.
 // Used for content-hash deduplication across sessions (e.g., suffix ":<type>:<digest>").
 func (s *Store) ExistsByNameSuffix(ctx context.Context, workspace, suffix string) (bool, error) {
+	workspace = ws.CanonicalID(workspace)
 	var count int
 	err := s.db.QueryRowContext(ctx, `
 		SELECT COUNT(*) FROM named_memory
@@ -762,6 +807,7 @@ func (s *Store) ExistsByNameSuffix(ctx context.Context, workspace, suffix string
 
 // ListByType returns entries of a specific type for a workspace, ordered by recency.
 func (s *Store) ListByType(ctx context.Context, workspace, entryType string, limit int) ([]ScoredEntry, error) {
+	workspace = ws.CanonicalID(workspace)
 	if limit <= 0 {
 		limit = 20
 	}
@@ -793,6 +839,7 @@ func (s *Store) ListByType(ctx context.Context, workspace, entryType string, lim
 // ListWithoutEmbedding returns memories that don't have an embedding yet.
 // Used for incremental embedding generation.
 func (s *Store) ListWithoutEmbedding(ctx context.Context, workspace string, limit int) ([]NamedEntry, error) {
+	workspace = ws.CanonicalID(workspace)
 	if limit <= 0 {
 		limit = 1000
 	}
@@ -837,6 +884,7 @@ func (s *Store) Update(ctx context.Context, name, workspace string, summary, typ
 // UpdateEmbedding stores an embedding vector for a named memory entry.
 // The embedding is stored as a JSON-encoded float32 array in the embedding BLOB column.
 func (s *Store) UpdateEmbedding(ctx context.Context, name, workspace string, embedding []float32) error {
+	workspace = ws.CanonicalID(workspace)
 	// Verify entry exists
 	_, err := s.Get(ctx, name, workspace)
 	if err != nil {
@@ -914,7 +962,7 @@ func (s *Store) SyncSymbolEmbeddings(ctx context.Context, embeddingDBPath string
 			for range names {
 				pl = append(pl, "?")
 			}
-			where = append(where, fmt.Sprintf("name IN (%s)", strings.Join(pl, ", ") ))
+			where = append(where, fmt.Sprintf("name IN (%s)", strings.Join(pl, ", ")))
 			for _, name := range names {
 				args = append(args, name)
 			}
@@ -952,10 +1000,11 @@ WHERE %s
 // GetEmbedding retrieves the embedding vector for a named memory entry.
 // Returns nil if no embedding is stored.
 func (s *Store) GetEmbedding(ctx context.Context, name, workspace string) ([]float32, error) {
+	workspace = ws.CanonicalID(workspace)
 	var embeddingJSON []byte
 	err := s.db.QueryRowContext(ctx, `
-		SELECT embedding FROM named_memory WHERE name = ? AND workspace = ?
-	`, name, workspace).Scan(&embeddingJSON)
+			SELECT embedding FROM named_memory WHERE name = ? AND workspace = ?
+		`, name, workspace).Scan(&embeddingJSON)
 	if err != nil {
 		if dbutil.IsNoRows(err) {
 			return nil, ErrNotFound
@@ -978,11 +1027,12 @@ func (s *Store) GetEmbedding(ctx context.Context, name, workspace string) ([]flo
 // GetEmbeddingMetadata retrieves embedding metadata for a workspace.
 // Returns nil if no metadata exists.
 func (s *Store) GetEmbeddingMetadata(ctx context.Context, workspace string) (*EmbeddingMetadata, error) {
+	workspace = ws.CanonicalID(workspace)
 	var meta EmbeddingMetadata
 	var createdAt, updatedAt string
 	err := s.db.QueryRowContext(ctx, `
-		SELECT workspace, provider, model, dimensions, created_at, updated_at
-		FROM embedding_metadata WHERE workspace = ?
+			SELECT workspace, provider, model, dimensions, created_at, updated_at
+			FROM embedding_metadata WHERE workspace = ?
 	`, workspace).Scan(&meta.Workspace, &meta.Provider, &meta.Model, &meta.Dimensions, &createdAt, &updatedAt)
 	if err != nil {
 		if dbutil.IsNoRows(err) {
@@ -1003,6 +1053,7 @@ func (s *Store) GetEmbeddingMetadata(ctx context.Context, workspace string) (*Em
 
 // SetEmbeddingMetadata stores or updates embedding metadata for a workspace.
 func (s *Store) SetEmbeddingMetadata(ctx context.Context, meta EmbeddingMetadata) error {
+	meta.Workspace = ws.CanonicalID(meta.Workspace)
 	now := timeutil.NowUTC()
 	if meta.CreatedAt.IsZero() {
 		meta.CreatedAt = now
@@ -1028,6 +1079,7 @@ func (s *Store) SetEmbeddingMetadata(ctx context.Context, meta EmbeddingMetadata
 // ValidateEmbeddingDimensions checks if embedding dimensions match stored metadata.
 // Returns an error if there's a dimension mismatch. Returns nil if no metadata exists.
 func (s *Store) ValidateEmbeddingDimensions(ctx context.Context, workspace string, dimensions int) error {
+	workspace = ws.CanonicalID(workspace)
 	meta, err := s.GetEmbeddingMetadata(ctx, workspace)
 	if err != nil {
 		return err
@@ -1044,6 +1096,7 @@ func (s *Store) ValidateEmbeddingDimensions(ctx context.Context, workspace strin
 
 // Relevant ranks entries by recency/access frequency.
 func (s *Store) Relevant(ctx context.Context, workspace string, limit int) ([]ScoredEntry, error) {
+	workspace = ws.CanonicalID(workspace)
 	if limit <= 0 {
 		limit = 10
 	}
@@ -1092,6 +1145,7 @@ func (s *Store) SearchSimilar(ctx context.Context, workspace string, queryEmbedd
 	if limit <= 0 {
 		limit = 20
 	}
+	workspace = ws.CanonicalID(workspace)
 
 	// Load entries with embeddings from this workspace
 	rows, err := s.db.QueryContext(ctx, `
@@ -1183,6 +1237,7 @@ func (s *Store) SearchSimilarByType(ctx context.Context, workspace, entryType st
 	if limit <= 0 {
 		limit = 20
 	}
+	workspace = ws.CanonicalID(workspace)
 	if entryType == "" {
 		return nil, fmt.Errorf("memory: search similar by type: entry type required")
 	}
@@ -1334,6 +1389,7 @@ func scoreEntry(entry NamedEntry) float64 {
 // atomicText is the self-contained rewrite, entities are extracted identifiers,
 // keywords are BM25-optimized search terms.
 func (s *Store) UpdateAtomic(ctx context.Context, name, workspace, atomicText string, entities, keywords []string) error {
+	workspace = ws.CanonicalID(workspace)
 	entitiesJSON, err := sqlutil.FormatJSON(entities)
 	if err != nil {
 		return fmt.Errorf("memory: marshal entities: %w", err)

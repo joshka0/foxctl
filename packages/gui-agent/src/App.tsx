@@ -16,9 +16,6 @@ const queryClient = new QueryClient({
   },
 })
 
-// Re-export ViewType for backwards compatibility
-export type { ViewType }
-
 /**
  * The root React component for the GUI application.
  *

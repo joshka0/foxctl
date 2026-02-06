@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	dstools "github.com/XiaoConstantine/dspy-go/pkg/tools"
+	tooling "github.com/jkatigb/agentctl/internal/tooling"
 	models "github.com/XiaoConstantine/mcp-go/pkg/model"
 	"github.com/jkatigb/agentctl/internal/platform/maputil"
 )
@@ -45,7 +45,7 @@ type DiffHunk struct {
 // registerEditTools registers file editing tools.
 func (r *Registry) registerEditTools() error {
 	// edit.apply_patch - apply a unified diff patch to a file
-	patchTool := dstools.NewFuncTool(
+	patchTool := tooling.NewFuncTool(
 		"edit.apply_patch",
 		"Apply a text replacement to a file. Replaces old_text with new_text.",
 		models.InputSchema{
@@ -75,7 +75,7 @@ func (r *Registry) registerEditTools() error {
 	}
 
 	// edit.apply_structured_diff - apply a structured diff from code/diff
-	structuredDiffTool := dstools.NewFuncTool(
+	structuredDiffTool := tooling.NewFuncTool(
 		"edit.apply_structured_diff",
 		"Apply a structured diff (from code/diff skill) to transform a file. Accepts diff_json with hunks[] containing line-based changes.",
 		models.InputSchema{
@@ -104,7 +104,7 @@ func (r *Registry) registerEditTools() error {
 	}
 
 	// edit.create_file - create a new file
-	createTool := dstools.NewFuncTool(
+	createTool := tooling.NewFuncTool(
 		"edit.create_file",
 		"Create a new file with the specified content.",
 		models.InputSchema{

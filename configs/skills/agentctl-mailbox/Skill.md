@@ -173,7 +173,7 @@ Agent daemons poll their mailbox for messages via the L1 loop:
 │  │    - ask → handleAsk()                     │    │
 │  │    - cmd → handleCmd()                     │    │
 │  │    - console_ask → handleConsoleAsk()      │    │
-│  │ 4. Execute via engine (LLMChat or DSPy)    │    │
+│  │ 4. Execute via engine (LLMChat)            │    │
 │  │ 5. Reply via mailbox                       │    │
 │  │ 6. Ack original message                    │    │
 │  └─────────────────────────────────────────────┘    │

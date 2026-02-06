@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Card } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
-import { cn } from '@/lib/utils'
+import { cn, formatRelativeTime } from '@/lib/utils'
 import {
   listCompanionConversations,
   getCompanionConversationMessages,
@@ -678,19 +678,6 @@ Help the user understand and interact with this agent's work.`,
     }
   }
 
-  const getTimeSince = (dateStr: string) => {
-    const date = new Date(dateStr)
-    const now = new Date()
-    const diffMs = now.getTime() - date.getTime()
-    const diffMins = Math.floor(diffMs / 60000)
-    const diffHours = Math.floor(diffMins / 60)
-    const diffDays = Math.floor(diffHours / 24)
-
-    if (diffDays > 0) return `${diffDays}d ago`
-    if (diffHours > 0) return `${diffHours}h ago`
-    if (diffMins > 0) return `${diffMins}m ago`
-    return 'just now'
-  }
 
   // Calculate approximate token usage from messages
   // Uses rough estimate: ~4 chars per token
@@ -713,6 +700,10 @@ Help the user understand and interact with this agent's work.`,
   // Handle deleting (soft delete) a conversation
   const handleDeleteConversation = async (e: React.MouseEvent, conversationId: string) => {
     e.stopPropagation() // Prevent selecting the conversation when clicking delete
+
+    if (!window.confirm('Are you sure you want to delete this conversation? This action cannot be undone.')) {
+      return
+    }
 
     try {
       await deleteCompanionConversation(conversationId)
@@ -1118,7 +1109,7 @@ Help the user understand and interact with this agent's work.`,
                                     </Badge>
                                   </div>
                                   <div className="text-[10px] text-muted-foreground">
-                                    {getTimeSince(conversation.updated_at)}
+                                    {formatRelativeTime(conversation.updated_at)}
                                   </div>
                                 </>
                               )}
@@ -1673,7 +1664,7 @@ Help the user understand and interact with this agent's work.`,
                         <span className="text-muted-foreground">Time</span>
                         <span className="flex items-center gap-1">
                           <Clock className="h-3 w-3" />
-                          {getTimeSince(selectedMessage.timestamp)}
+                          {formatRelativeTime(selectedMessage.timestamp)}
                         </span>
                       </div>
                     )}
@@ -1759,7 +1750,7 @@ Help the user understand and interact with this agent's work.`,
                       <span className="text-muted-foreground">Created</span>
                       <span className="text-xs flex items-center gap-1">
                         <Clock className="h-3 w-3" />
-                        {getTimeSince(contextInfo.createdAt)}
+                        {formatRelativeTime(contextInfo.createdAt)}
                       </span>
                     </div>
                   )}
@@ -1827,7 +1818,7 @@ Help the user understand and interact with this agent's work.`,
                   </div>
                   <div className="flex justify-between">
                     <span className="text-muted-foreground">Updated</span>
-                    <span>{getTimeSince(selectedConversation.updated_at)}</span>
+                    <span>{formatRelativeTime(selectedConversation.updated_at)}</span>
                   </div>
                 </Card>
               </div>

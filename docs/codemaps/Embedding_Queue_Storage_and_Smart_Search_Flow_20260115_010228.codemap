@@ -18,7 +18,7 @@
       "locations": [
         {
           "id": "1a",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/skills/code_incremental_index/main.go",
+          "path": "skills/code_incremental_index/main.go",
           "lineNumber": 128,
           "lineContent": "store, err := memory.OpenWithConfig(ctx, rc.Config)",
           "title": "Open Memory Store",
@@ -26,7 +26,7 @@
         },
         {
           "id": "1b",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/skills/code_incremental_index/main.go",
+          "path": "skills/code_incremental_index/main.go",
           "lineNumber": 120,
           "lineContent": "symbols, err = extractSymbols(ctx, lang, relPath, content)",
           "title": "Extract Symbols",
@@ -34,7 +34,7 @@
         },
         {
           "id": "1c",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/skills/code_incremental_index/main.go",
+          "path": "skills/code_incremental_index/main.go",
           "lineNumber": 171,
           "lineContent": "return extractor.Extract(ctx, filePath, content)",
           "title": "Go Symbol Extraction",
@@ -42,7 +42,7 @@
         },
         {
           "id": "1d",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/skills/code_incremental_index/main.go",
+          "path": "skills/code_incremental_index/main.go",
           "lineNumber": 358,
           "lineContent": "resultBytes, err := symbol.MarshalResult(result)",
           "title": "Serialize Symbol",
@@ -50,7 +50,7 @@
         },
         {
           "id": "1e",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/skills/code_incremental_index/main.go",
+          "path": "skills/code_incremental_index/main.go",
           "lineNumber": 374,
           "lineContent": "if _, err := store.Save(ctx, entry); err != nil {",
           "title": "Persist Symbol Entry",
@@ -58,14 +58,14 @@
         },
         {
           "id": "1f",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/storage/memory/store.go",
+          "path": "internal/storage/memory/store.go",
           "lineNumber": 146,
           "lineContent": "_, err = s.db.ExecContext(ctx, `\nINSERT INTO named_memory (id, name, type, workspace, summary, result, digests, session_id, created_at, updated_at, last_accessed, access_count)\nVALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)\nON CONFLICT(name, workspace) DO UPDATE SET",
           "title": "SQL Upsert",
           "description": "Executes SQLite INSERT with conflict resolution to update existing symbols"
         }
       ],
-      "traceTextDiagram": "Symbol Extraction and Memory Store Indexing\n├── code_incremental_index skill entry \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/code_incremental_index/main.go:60\n│   ├── Open memory store \u003c-- 1a\n│   │   └── memory.Open() → SQLite connection \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/memory/store.go:69\n│   ├── Extract symbols from file \u003c-- 1b\n│   │   └── extractSymbols() dispatcher \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/code_incremental_index/main.go:167\n│   │       └── Go AST extraction \u003c-- 1c\n│   │           └── extractor.Extract() \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/code_incremental_index/main.go:171\n│   └── Persist symbols loop \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/code_incremental_index/main.go:353\n│       └── for each symbol \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/code_incremental_index/main.go:353\n│           ├── Serialize to JSON \u003c-- 1d\n│           │   └── symbol.MarshalResult() \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/code_incremental_index/main.go:358\n│           ├── Save to store \u003c-- 1e\n│           │   └── store.Save() \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/code_incremental_index/main.go:374\n│           └── SQL upsert execution \u003c-- 1f\n│               └── INSERT...ON CONFLICT DO UPDATE \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/memory/store.go:147\n└── Result: symbols indexed in memory.db",
+      "traceTextDiagram": "Symbol Extraction and Memory Store Indexing\n├── code_incremental_index skill entry \u003c-- skills/code_incremental_index/main.go:60\n│   ├── Open memory store \u003c-- 1a\n│   │   └── memory.Open() → SQLite connection \u003c-- internal/storage/memory/store.go:69\n│   ├── Extract symbols from file \u003c-- 1b\n│   │   └── extractSymbols() dispatcher \u003c-- skills/code_incremental_index/main.go:167\n│   │       └── Go AST extraction \u003c-- 1c\n│   │           └── extractor.Extract() \u003c-- skills/code_incremental_index/main.go:171\n│   └── Persist symbols loop \u003c-- skills/code_incremental_index/main.go:353\n│       └── for each symbol \u003c-- skills/code_incremental_index/main.go:353\n│           ├── Serialize to JSON \u003c-- 1d\n│           │   └── symbol.MarshalResult() \u003c-- skills/code_incremental_index/main.go:358\n│           ├── Save to store \u003c-- 1e\n│           │   └── store.Save() \u003c-- skills/code_incremental_index/main.go:374\n│           └── SQL upsert execution \u003c-- 1f\n│               └── INSERT...ON CONFLICT DO UPDATE \u003c-- internal/storage/memory/store.go:147\n└── Result: symbols indexed in memory.db",
       "traceGuide": "## Motivation\n\nWhen working with large codebases, developers need to quickly find relevant code without manually searching through thousands of files. The **symbol indexing system** solves this by automatically extracting and indexing code symbols (functions, classes, methods) whenever files are edited, enabling fast semantic code search.\n\nThe problem: Traditional text search (grep) finds keyword matches but doesn't understand code structure. You might search for \"authenticate\" and miss `AuthHandler.verify()` or `validateUser()`. The solution: **extract structured symbol metadata** (name, signature, documentation, location) and store it in a searchable database that understands code semantics.\n\n## Details\n\n### Architecture\n\nThe system uses **three SQLite databases**:\n- `memory.db` - stores indexed symbols [1f]\n- `embedding_queue.db` - queues symbols for vector embedding generation\n- Graph store - tracks code relationships (calls, imports)\n\n### Indexing Flow\n\nWhen a file is edited, the `code/incremental_index` skill triggers [1a]:\n\n1. **Open memory store** - Connects to SQLite database at `~/.agentctl/storage/memory.db` [1a]\n\n2. **Extract symbols** - Language-specific parsers extract code structure [1b]:\n   - Go: Uses AST parser to extract functions, methods, types [1c]\n   - Python/JS/TS: Regex-based extraction for classes and functions\n\n3. **Serialize** - Converts symbol metadata to JSON format [1d]:\n   ```go\n   {\n     \"symbol\": {\n       \"id\": \"file.go:FunctionName\",\n       \"name\": \"FunctionName\",\n       \"kind\": \"function\",\n       \"signature\": \"func FunctionName(arg string) error\",\n       \"file_path\": \"internal/pkg/file.go\",\n       \"start_line\": 42\n     }\n   }\n   ```\n\n4. **Persist** - Upserts into `named_memory` table [1e, 1f]:\n   - Entry name: `symbol://\u003cworkspace\u003e/\u003cfile\u003e:\u003csymbol_name\u003e`\n   - Uses `ON CONFLICT DO UPDATE` for idempotency\n   - Tracks workspace, session, timestamps\n\n### Key Design Decisions\n\n**Incremental indexing**: Only re-indexes changed files, not the entire codebase. This makes indexing fast enough to run on every file save.\n\n**Workspace isolation**: Symbols are scoped by workspace ID, allowing multiple projects to coexist without conflicts.\n\n**Deduplication**: Stale symbols are deleted when files are re-indexed [1e] - if a function is renamed or removed, the old entry is cleaned up.\n\n### Storage Schema\n\nThe `named_memory` table stores symbols with:\n- **name**: Unique identifier (e.g., `symbol://workspace/file.go:Handler`)\n- **type**: Always `\"symbol\"` for code symbols\n- **summary**: Symbol name for quick search\n- **result**: JSON blob with full metadata\n- **workspace**: Isolation boundary\n- **session_id**: Links to editing session\n\nThis indexed data powers the smart search system, which combines symbol search with semantic embeddings and text fallback to find relevant code."
     },
     {
@@ -75,7 +75,7 @@
       "locations": [
         {
           "id": "2a",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/skills/code_incremental_index/main.go",
+          "path": "skills/code_incremental_index/main.go",
           "lineNumber": 143,
           "lineContent": "embeddingQueued, embeddingSkipped = queueEmbeddings(ctx, rc.Config.Paths.Cache, in.WorkspaceID, symbols, content)",
           "title": "Queue Embeddings",
@@ -83,7 +83,7 @@
         },
         {
           "id": "2b",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/skills/code_incremental_index/main.go",
+          "path": "skills/code_incremental_index/main.go",
           "lineNumber": 404,
           "lineContent": "store, err := embedding.OpenStore(ctx, storageRoot)",
           "title": "Open Embedding Store",
@@ -91,7 +91,7 @@
         },
         {
           "id": "2c",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/skills/code_incremental_index/main.go",
+          "path": "skills/code_incremental_index/main.go",
           "lineNumber": 435,
           "lineContent": "result, err := store.Enqueue(ctx, embedding.EnqueueRequest{",
           "title": "Enqueue Request",
@@ -99,7 +99,7 @@
         },
         {
           "id": "2d",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/indexing/embedding/store.go",
+          "path": "internal/indexing/embedding/store.go",
           "lineNumber": 129,
           "lineContent": "contentDigest := computeDigest(sym.Content)",
           "title": "Compute Content Digest",
@@ -107,7 +107,7 @@
         },
         {
           "id": "2e",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/indexing/embedding/store.go",
+          "path": "internal/indexing/embedding/store.go",
           "lineNumber": 134,
           "lineContent": "err := tx.QueryRowContext(ctx, `\n\t\t\t\tSELECT EXISTS(\n\t\t\t\t\tSELECT 1 FROM symbol_embeddings\n\t\t\t\t\tWHERE workspace_id = ? AND symbol_id = ? AND content_digest = ?\n\t\t\t\t)\n\t\t\t`, req.WorkspaceID, sym.SymbolID, contentDigest).Scan(\u0026exists)",
           "title": "Check Existing Embedding",
@@ -115,14 +115,14 @@
         },
         {
           "id": "2f",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/indexing/embedding/store.go",
+          "path": "internal/indexing/embedding/store.go",
           "lineNumber": 149,
           "lineContent": "res, err := stmt.ExecContext(ctx,\n\t\t\tid, req.WorkspaceID, sym.SymbolID, sym.FilePath, sym.SymbolName,\n\t\t\tsym.Content, contentDigest, priority, nowStr, nowStr,\n\t\t)",
           "title": "Insert Job",
           "description": "Inserts embedding job into queue with ON CONFLICT DO NOTHING for idempotency"
         }
       ],
-      "traceTextDiagram": "Embedding Job Queue Enqueue Flow\n├── code_incremental_index skill\n│   ├── queueEmbeddings() invoked \u003c-- 2a\n│   └── embedding.OpenStore() \u003c-- 2b\n│       └── Opens embedding_queue.db \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/indexing/embedding/store.go:29\n├── store.Enqueue() called \u003c-- 2c\n│   ├── Begin transaction \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/indexing/embedding/store.go:110\n│   ├── For each symbol: \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/indexing/embedding/store.go:128\n│   │   ├── computeDigest(content) \u003c-- 2d\n│   │   ├── Check if exists query \u003c-- 2e\n│   │   │   └── SELECT EXISTS from symbol_embeddings\n│   │   └── stmt.ExecContext() insert \u003c-- 2f\n│   │       └── INSERT INTO embedding_jobs\n│   │           └── ON CONFLICT DO NOTHING\n│   └── Commit transaction \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/indexing/embedding/store.go:166\n└── Return EnqueueResult \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/indexing/embedding/store.go:170\n    └── {Queued, Skipped, JobIDs}",
+      "traceTextDiagram": "Embedding Job Queue Enqueue Flow\n├── code_incremental_index skill\n│   ├── queueEmbeddings() invoked \u003c-- 2a\n│   └── embedding.OpenStore() \u003c-- 2b\n│       └── Opens embedding_queue.db \u003c-- internal/indexing/embedding/store.go:29\n├── store.Enqueue() called \u003c-- 2c\n│   ├── Begin transaction \u003c-- internal/indexing/embedding/store.go:110\n│   ├── For each symbol: \u003c-- internal/indexing/embedding/store.go:128\n│   │   ├── computeDigest(content) \u003c-- 2d\n│   │   ├── Check if exists query \u003c-- 2e\n│   │   │   └── SELECT EXISTS from symbol_embeddings\n│   │   └── stmt.ExecContext() insert \u003c-- 2f\n│   │       └── INSERT INTO embedding_jobs\n│   │           └── ON CONFLICT DO NOTHING\n│   └── Commit transaction \u003c-- internal/indexing/embedding/store.go:166\n└── Return EnqueueResult \u003c-- internal/indexing/embedding/store.go:170\n    └── {Queued, Skipped, JobIDs}",
       "traceGuide": "## Motivation\n\nCode symbols (functions, classes, methods) need **semantic embeddings** to enable vector similarity search. Generating embeddings via external APIs (Voyage, Gemini) is slow and expensive, so the system uses a **background job queue** to process them asynchronously without blocking file indexing.\n\nWhen a file is indexed [2a], symbols are immediately stored in the memory database for fast keyword search, but embedding generation is deferred to a worker pool that processes jobs in priority order with automatic retries.\n\n## Details\n\n### Queue Database\n\nThe embedding queue uses a **separate SQLite database** (`embedding_queue.db`) [2b] from the main memory store. This isolation prevents embedding work from interfering with real-time symbol lookups.\n\n### Enqueue Process\n\nWhen symbols are queued [2c], the system:\n\n1. **Computes a SHA256 content digest** [2d] for each symbol's code\n2. **Checks if an embedding already exists** [2e] with the same digest to skip duplicate work\n3. **Inserts jobs into `embedding_jobs` table** [2f] with `ON CONFLICT DO NOTHING` for idempotency\n\nThe entire batch is wrapped in a **transaction** to ensure atomicity - either all symbols are queued or none are.\n\n### Deduplication Strategy\n\nContent digests enable **intelligent deduplication**: if a symbol's code hasn't changed, the system skips re-embedding it. This is critical for cost control since embedding APIs charge per token.\n\n### Job States\n\nJobs flow through states: `queued` → `running` → `ok` (or `error`/`retry`). The worker pool claims jobs atomically using `UPDATE...RETURNING` to prevent race conditions between concurrent workers.\n\n### Result Structure\n\nThe enqueue operation returns counts of **queued vs skipped symbols** [2a], allowing callers to track how much new work was created versus how much was deduplicated."
     },
     {
@@ -132,7 +132,7 @@
       "locations": [
         {
           "id": "3a",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/indexing/embedding/worker.go",
+          "path": "internal/indexing/embedding/worker.go",
           "lineNumber": 163,
           "lineContent": "w.dispatchJobs(ctx, jobCh)",
           "title": "Dispatch Jobs",
@@ -140,7 +140,7 @@
         },
         {
           "id": "3b",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/indexing/embedding/worker.go",
+          "path": "internal/indexing/embedding/worker.go",
           "lineNumber": 172,
           "lineContent": "job, err := w.store.ClaimNext(ctx)",
           "title": "Claim Next Job",
@@ -148,7 +148,7 @@
         },
         {
           "id": "3c",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/indexing/embedding/store.go",
+          "path": "internal/indexing/embedding/store.go",
           "lineNumber": 180,
           "lineContent": "row := s.db.QueryRowContext(ctx, `\n\t\tUPDATE embedding_jobs\n\t\tSET state = 'running', updated_at = ?, attempts = attempts + 1\n\t\tWHERE id = (\n\t\t\tSELECT id FROM embedding_jobs\n\t\t\tWHERE state IN ('queued', 'retry')\n\t\t\tAND (scheduled_at IS NULL OR scheduled_at \u003c= ?)\n\t\t\tORDER BY priority DESC, created_at ASC\n\t\t\tLIMIT 1\n\t\t)\n\t\tRETURNING id, workspace_id, symbol_id, file_path, symbol_name, content,",
           "title": "Atomic Job Claim",
@@ -156,7 +156,7 @@
         },
         {
           "id": "3d",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/indexing/embedding/worker.go",
+          "path": "internal/indexing/embedding/worker.go",
           "lineNumber": 230,
           "lineContent": "embedding, err := w.provider.Embed(ctx, job.Content)",
           "title": "Generate Embedding",
@@ -164,7 +164,7 @@
         },
         {
           "id": "3e",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/indexing/embedding/worker.go",
+          "path": "internal/indexing/embedding/worker.go",
           "lineNumber": 240,
           "lineContent": "if err := w.store.Complete(ctx, job.ID, embedding, w.provider.Model()); err != nil {",
           "title": "Store Embedding Result",
@@ -172,7 +172,7 @@
         },
         {
           "id": "3f",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/indexing/embedding/store.go",
+          "path": "internal/indexing/embedding/store.go",
           "lineNumber": 235,
           "lineContent": "_, err = tx.ExecContext(ctx, `\n\t\tINSERT INTO symbol_embeddings\n\t\t\t(symbol_id, workspace_id, file_path, embedding, content_digest, model, dimensions, created_at)\n\t\tVALUES (?, ?, ?, ?, ?, ?, ?, ?)\n\t\tON CONFLICT(workspace_id, symbol_id) DO UPDATE SET",
           "title": "Insert Embedding",
@@ -180,14 +180,14 @@
         },
         {
           "id": "3g",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/indexing/embedding/store.go",
+          "path": "internal/indexing/embedding/store.go",
           "lineNumber": 251,
           "lineContent": "_, err = tx.ExecContext(ctx, `\n\t\tUPDATE embedding_jobs\n\t\tSET state = 'ok', updated_at = ?, completed_at = ?, error = NULL\n\t\tWHERE id = ?\n\t`, nowStr, nowStr, jobID)",
           "title": "Mark Job Complete",
           "description": "Updates job state to 'ok' and records completion timestamp"
         }
       ],
-      "traceTextDiagram": "Background Embedding Worker System\n├── Worker Run Loop \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/indexing/embedding/worker.go:100\n│   ├── Ticker polls every 5s \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/indexing/embedding/worker.go:149\n│   │   └── dispatchJobs() \u003c-- 3a\n│   │       └── ClaimNext() from queue \u003c-- 3b\n│   │           └── UPDATE...RETURNING (atomic) \u003c-- 3c\n│   └── Worker goroutines (pool of 2) \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/indexing/embedding/worker.go:143\n│       └── processJob() \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/indexing/embedding/worker.go:212\n│           ├── Rate limiter wait \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/indexing/embedding/worker.go:227\n│           ├── provider.Embed() API call \u003c-- 3d\n│           └── store.Complete() \u003c-- 3e\n│               ├── Begin transaction \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/indexing/embedding/store.go:211\n│               ├── INSERT symbol_embeddings \u003c-- 3f\n│               └── UPDATE job state='ok' \u003c-- 3g\n└── Worker lifecycle\n    ├── Start() spawns goroutines \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/indexing/embedding/worker.go:84\n    └── Stop() graceful shutdown \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/indexing/embedding/worker.go:105",
+      "traceTextDiagram": "Background Embedding Worker System\n├── Worker Run Loop \u003c-- internal/indexing/embedding/worker.go:100\n│   ├── Ticker polls every 5s \u003c-- internal/indexing/embedding/worker.go:149\n│   │   └── dispatchJobs() \u003c-- 3a\n│   │       └── ClaimNext() from queue \u003c-- 3b\n│   │           └── UPDATE...RETURNING (atomic) \u003c-- 3c\n│   └── Worker goroutines (pool of 2) \u003c-- internal/indexing/embedding/worker.go:143\n│       └── processJob() \u003c-- internal/indexing/embedding/worker.go:212\n│           ├── Rate limiter wait \u003c-- internal/indexing/embedding/worker.go:227\n│           ├── provider.Embed() API call \u003c-- 3d\n│           └── store.Complete() \u003c-- 3e\n│               ├── Begin transaction \u003c-- internal/indexing/embedding/store.go:211\n│               ├── INSERT symbol_embeddings \u003c-- 3f\n│               └── UPDATE job state='ok' \u003c-- 3g\n└── Worker lifecycle\n    ├── Start() spawns goroutines \u003c-- internal/indexing/embedding/worker.go:84\n    └── Stop() graceful shutdown \u003c-- internal/indexing/embedding/worker.go:105",
       "traceGuide": "## Motivation\n\nGenerating embeddings for code symbols is **expensive and slow**—each API call to services like Voyage or Gemini takes 100-500ms and costs money. When a developer edits a file containing 50 functions, you can't block the indexing process waiting for 50 sequential API calls (25+ seconds). The **background embedding worker system** solves this by decoupling embedding generation from symbol indexing: symbols are indexed immediately [1e], then queued for asynchronous embedding generation [2c], allowing the developer to continue working while embeddings are generated in the background.\n\n## Details\n\n### Architecture\n\nThe system uses a **persistent SQLite job queue** (`embedding_queue.db`) with two tables: `embedding_jobs` tracks work items with states (queued/running/ok/error), and `symbol_embeddings` stores the resulting vectors [3f]. This survives process restarts and provides durability.\n\n### Worker Pool\n\nA configurable pool of worker goroutines (default: 2) continuously polls the queue [3a]. The dispatcher claims jobs atomically using `UPDATE...RETURNING` [3c] to prevent race conditions—multiple workers can safely run concurrently without claiming the same job twice. Jobs are prioritized by priority level then creation time.\n\n### Processing Flow\n\nEach worker [3b]:\n1. **Rate limits** API calls (default: 5 requests/second) using a token bucket algorithm [3d]\n2. **Calls the embedding provider** (Voyage, Gemini, etc.) to generate the vector [3d]\n3. **Stores the result** in a transaction: inserts the embedding [3f] and marks the job complete [3g]\n\n### Retry Logic\n\nFailed jobs are automatically retried with **exponential backoff** (1min, 2min, 4min) up to 3 attempts. After max retries, jobs enter the 'error' state. This handles transient API failures gracefully.\n\n### Deduplication\n\nThe system computes a **SHA256 content digest** [2d] before enqueueing. If an embedding already exists with the same digest [2e], the job is skipped—avoiding redundant API calls when symbol content hasn't changed."
     },
     {
@@ -197,7 +197,7 @@
       "locations": [
         {
           "id": "4a",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/skills/code_smart_search/main.go",
+          "path": "skills/code_smart_search/main.go",
           "lineNumber": 113,
           "lineContent": "candidates, err := generateCandidates(ctx, rc, in)",
           "title": "Generate Candidates",
@@ -205,7 +205,7 @@
         },
         {
           "id": "4b",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/skills/code_smart_search/main.go",
+          "path": "skills/code_smart_search/main.go",
           "lineNumber": 181,
           "lineContent": "store, err := memory.OpenWithConfig(ctx, rc.Config)",
           "title": "Open Memory Store",
@@ -213,7 +213,7 @@
         },
         {
           "id": "4c",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/skills/code_smart_search/main.go",
+          "path": "skills/code_smart_search/main.go",
           "lineNumber": 190,
           "lineContent": "generator := retrieval.NewGenerator(store, nil, workspace, logger)",
           "title": "Create Generator",
@@ -221,7 +221,7 @@
         },
         {
           "id": "4d",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/skills/code_smart_search/main.go",
+          "path": "skills/code_smart_search/main.go",
           "lineNumber": 212,
           "lineContent": "result, err := generator.Generate(ctx, in.WorkspaceID, in.Question, opts)",
           "title": "Execute Generation",
@@ -229,7 +229,7 @@
         },
         {
           "id": "4e",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/retrieval/candidates.go",
+          "path": "internal/retrieval/candidates.go",
           "lineNumber": 121,
           "lineContent": "candidates, err := g.searchSymbolIndex(ctx, workspaceID, question, opts.MaxSymbolCandidates)",
           "title": "Search Symbol Index",
@@ -237,7 +237,7 @@
         },
         {
           "id": "4f",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/retrieval/candidates.go",
+          "path": "internal/retrieval/candidates.go",
           "lineNumber": 133,
           "lineContent": "candidates, err := g.searchSemanticIndex(ctx, workspaceID, question, opts.MaxSemanticCandidates)",
           "title": "Search Semantic Index",
@@ -245,7 +245,7 @@
         },
         {
           "id": "4g",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/retrieval/candidates.go",
+          "path": "internal/retrieval/candidates.go",
           "lineNumber": 150,
           "lineContent": "candidates, err := g.ripgrepFallback(ctx, question, opts.MaxRipgrepCandidates)",
           "title": "Ripgrep Fallback",
@@ -253,14 +253,14 @@
         },
         {
           "id": "4h",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/retrieval/candidates.go",
+          "path": "internal/retrieval/candidates.go",
           "lineNumber": 168,
           "lineContent": "merged := mergeCandidates(allCandidates, weights, opts.MaxTotalCandidates)",
           "title": "Merge and Rank",
           "description": "Deduplicates by path, applies source weights, and ranks by final score"
         }
       ],
-      "traceTextDiagram": "Smart Search Multi-Source Candidate Generation\n├── code_smart_search skill entry \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/code_smart_search/main.go:87\n│   ├── generateCandidates() \u003c-- 4a\n│   │   ├── memory.OpenWithConfig() \u003c-- 4b\n│   │   ├── retrieval.NewGenerator() \u003c-- 4c\n│   │   └── generator.Generate() \u003c-- 4d\n│   │       ├── searchSymbolIndex() \u003c-- 4e\n│   │       │   └── store.Search() queries symbols \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/retrieval/symbol_search.go:39\n│   │       ├── searchSemanticIndex() \u003c-- 4f\n│   │       │   └── embedProvider.Embed() + vector \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/retrieval/semantic_search.go:29\n│   │       ├── ripgrepFallback() \u003c-- 4g\n│   │       │   └── exec rg command for text search \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/retrieval/ripgrep.go:50\n│   │       └── mergeCandidates() \u003c-- 4h\n│   │           ├── apply source weights \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/retrieval/merge.go:35\n│   │           ├── deduplicate by path \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/retrieval/merge.go:22\n│   │           └── sort by final score \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/retrieval/merge.go:61\n│   └── return ranked candidates \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/code_smart_search/main.go:216\n└── invokeSnippetExtract() uses candidates \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/code_smart_search/main.go:143",
+      "traceTextDiagram": "Smart Search Multi-Source Candidate Generation\n├── code_smart_search skill entry \u003c-- skills/code_smart_search/main.go:87\n│   ├── generateCandidates() \u003c-- 4a\n│   │   ├── memory.OpenWithConfig() \u003c-- 4b\n│   │   ├── retrieval.NewGenerator() \u003c-- 4c\n│   │   └── generator.Generate() \u003c-- 4d\n│   │       ├── searchSymbolIndex() \u003c-- 4e\n│   │       │   └── store.Search() queries symbols \u003c-- internal/retrieval/symbol_search.go:39\n│   │       ├── searchSemanticIndex() \u003c-- 4f\n│   │       │   └── embedProvider.Embed() + vector \u003c-- internal/retrieval/semantic_search.go:29\n│   │       ├── ripgrepFallback() \u003c-- 4g\n│   │       │   └── exec rg command for text search \u003c-- internal/retrieval/ripgrep.go:50\n│   │       └── mergeCandidates() \u003c-- 4h\n│   │           ├── apply source weights \u003c-- internal/retrieval/merge.go:35\n│   │           ├── deduplicate by path \u003c-- internal/retrieval/merge.go:22\n│   │           └── sort by final score \u003c-- internal/retrieval/merge.go:61\n│   └── return ranked candidates \u003c-- skills/code_smart_search/main.go:216\n└── invokeSnippetExtract() uses candidates \u003c-- skills/code_smart_search/main.go:143",
       "traceGuide": "## Motivation\n\nWhen developers ask questions like \"where is authentication handled?\" or \"how does the cache work?\", they need **relevant code snippets** from their workspace. The challenge is finding the right files among thousands without knowing exactly where to look.\n\nThe smart search system solves this by **combining three retrieval strategies**: searching an index of code symbols (functions, classes), performing semantic similarity search using embeddings, and falling back to text search with ripgrep. Each strategy has strengths—symbols are precise, embeddings understand meaning, ripgrep catches everything—so the system **merges results with weighted scoring** to surface the most relevant files.\n\n## Details\n\n### Multi-Source Candidate Generation\n\nThe entry point [4a] opens the memory store [4b] where indexed symbols and embeddings are stored, then creates a generator [4c] that orchestrates the search [4d].\n\n**Symbol search** [4e] queries the memory store for functions, classes, and methods whose names, signatures, or documentation match query tokens. This is fast and precise for direct references like \"find the `handleAuth` function.\"\n\n**Semantic search** [4f] generates an embedding vector for the user's question, then performs vector similarity search against stored symbol embeddings. This catches conceptual matches—asking about \"user login\" might find `authenticateUser()` even without exact keyword overlap.\n\n**Ripgrep fallback** [4g] runs when the first two sources return few results. It executes a text search across the workspace to ensure coverage, useful for finding string literals or comments.\n\n### Merging and Ranking\n\nThe merge step [4h] is critical: it **deduplicates candidates by file path** (the same file might appear from multiple sources), applies source-specific weights (symbols weighted 1.0, semantic 0.7, ripgrep 0.5), and adds a **multi-source bonus** when multiple strategies agree on the same file. Results are sorted by final score and limited to the top N candidates.\n\nThe ranked candidates are then passed to `code/snippet_extract` which reads the actual files and extracts relevant code snippets for the LLM to analyze."
     },
     {
@@ -270,7 +270,7 @@
       "locations": [
         {
           "id": "5a",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/retrieval/symbol_search.go",
+          "path": "internal/retrieval/symbol_search.go",
           "lineNumber": 39,
           "lineContent": "results, err := g.store.Search(ctx, workspaceID, term, queryLimit)",
           "title": "Query Memory Store",
@@ -278,7 +278,7 @@
         },
         {
           "id": "5b",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/storage/memory/store.go",
+          "path": "internal/storage/memory/store.go",
           "lineNumber": 566,
           "lineContent": "rows, err := s.db.QueryContext(ctx, `\n\t\tSELECT id, name, type, workspace, summary, result, digests, created_at, updated_at, last_accessed, access_count, session_id\n\t\tFROM named_memory\n\t\tWHERE workspace = ? AND (LOWER(name) LIKE ? OR LOWER(summary) LIKE ?)",
           "title": "SQL LIKE Search",
@@ -286,7 +286,7 @@
         },
         {
           "id": "5c",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/retrieval/symbol_search.go",
+          "path": "internal/retrieval/symbol_search.go",
           "lineNumber": 60,
           "lineContent": "res, err := symbol.UnmarshalResult(entry.Result)",
           "title": "Deserialize Symbol",
@@ -294,7 +294,7 @@
         },
         {
           "id": "5d",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/retrieval/symbol_search.go",
+          "path": "internal/retrieval/symbol_search.go",
           "lineNumber": 80,
           "lineContent": "hits[i].score = scoreSymbol(hits[i].result.Symbol, qTokens)",
           "title": "Score Symbol",
@@ -302,14 +302,14 @@
         },
         {
           "id": "5e",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/retrieval/symbol_search.go",
+          "path": "internal/retrieval/symbol_search.go",
           "lineNumber": 114,
           "lineContent": "candidates = append(candidates, Candidate{\n\t\t\tPath:     sym.FilePath,\n\t\t\tSymbolID: sym.ID,\n\t\t\tName:     sym.Name,\n\t\t\tKind:     string(sym.Kind),\n\t\t\tScore:    hit.score / maxScore,",
           "title": "Build Candidates",
           "description": "Constructs candidate list with normalized scores and symbol metadata"
         }
       ],
-      "traceTextDiagram": "Symbol Index Search Flow\n├── searchSymbolIndex() entry point \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/retrieval/symbol_search.go:14\n│   ├── buildSearchTerms(question) \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/retrieval/symbol_search.go:19\n│   │   └── tokenize() extracts keywords \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/retrieval/symbol_search.go:138\n│   ├── for each search term \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/retrieval/symbol_search.go:34\n│   │   └── store.Search() query \u003c-- 5a\n│   │       └── SQL LIKE on name/summary \u003c-- 5b\n│   ├── for each result entry \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/retrieval/symbol_search.go:45\n│   │   └── symbol.UnmarshalResult() \u003c-- 5c\n│   ├── scoreSymbol() relevance scoring \u003c-- 5d\n│   │   ├── match on symbol name (5.0x) \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/retrieval/symbol_search.go:218\n│   │   ├── match on signature (1.0x) \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/retrieval/symbol_search.go:225\n│   │   ├── match on documentation (0.5x) \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/retrieval/symbol_search.go:230\n│   │   └── match on file path (0.3x) \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/retrieval/symbol_search.go:235\n│   ├── sort by score descending \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/retrieval/symbol_search.go:84\n│   └── build Candidate list \u003c-- 5e\n└── return ranked candidates \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/retrieval/symbol_search.go:126",
+      "traceTextDiagram": "Symbol Index Search Flow\n├── searchSymbolIndex() entry point \u003c-- internal/retrieval/symbol_search.go:14\n│   ├── buildSearchTerms(question) \u003c-- internal/retrieval/symbol_search.go:19\n│   │   └── tokenize() extracts keywords \u003c-- internal/retrieval/symbol_search.go:138\n│   ├── for each search term \u003c-- internal/retrieval/symbol_search.go:34\n│   │   └── store.Search() query \u003c-- 5a\n│   │       └── SQL LIKE on name/summary \u003c-- 5b\n│   ├── for each result entry \u003c-- internal/retrieval/symbol_search.go:45\n│   │   └── symbol.UnmarshalResult() \u003c-- 5c\n│   ├── scoreSymbol() relevance scoring \u003c-- 5d\n│   │   ├── match on symbol name (5.0x) \u003c-- internal/retrieval/symbol_search.go:218\n│   │   ├── match on signature (1.0x) \u003c-- internal/retrieval/symbol_search.go:225\n│   │   ├── match on documentation (0.5x) \u003c-- internal/retrieval/symbol_search.go:230\n│   │   └── match on file path (0.3x) \u003c-- internal/retrieval/symbol_search.go:235\n│   ├── sort by score descending \u003c-- internal/retrieval/symbol_search.go:84\n│   └── build Candidate list \u003c-- 5e\n└── return ranked candidates \u003c-- internal/retrieval/symbol_search.go:126",
       "traceGuide": "## Motivation\n\nWhen developers ask questions like \"where is authentication handled?\" or \"find the database connection logic,\" the system needs to quickly search through thousands of code symbols (functions, classes, methods) to find relevant matches. **Symbol index search** solves this by maintaining a searchable index of all code symbols in the workspace, enabling fast retrieval based on natural language queries.\n\nThe challenge is matching fuzzy natural language questions to precise code symbol names. A query like \"user authentication\" should match symbols named `authenticateUser`, `UserAuth`, or `validateUserCredentials`, even though none contain the exact phrase.\n\n## Details\n\n### Query Processing\n\nThe search starts by **tokenizing the user's question** into keywords [5a], filtering out stop words and short tokens. For example, \"how does user authentication work?\" becomes `[\"user\", \"authentication\", \"work\"]`. These tokens are used to query the memory store using SQL LIKE patterns [5b].\n\n### Symbol Retrieval\n\nThe memory store contains serialized symbol entries stored as JSON blobs in a SQLite database. Each query returns matching entries, which are **deserialized back into symbol objects** [5c] containing metadata like name, signature, documentation, file path, and line numbers.\n\n### Relevance Scoring\n\nEach symbol is scored against the query tokens using a **weighted scoring algorithm** [5d]:\n- **Exact name matches get 5.0x weight** (highest priority)\n- Partial name matches get 2.0x weight\n- Signature matches get 1.0x weight\n- Documentation matches get 0.5x weight\n- File path matches get 0.3x weight\n\nThis ensures that a function named `authenticateUser` scores higher than one that merely mentions \"authentication\" in its documentation.\n\n### Result Ranking\n\nAfter scoring all matches, results are **sorted by score descending** and converted into a standardized `Candidate` structure [5e] containing the file path, symbol ID, name, kind (function/class/method), and normalized score (0-1 range). These candidates are then passed to downstream systems for snippet extraction or further processing."
     },
     {
@@ -319,7 +319,7 @@
       "locations": [
         {
           "id": "6a",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/retrieval/semantic_search.go",
+          "path": "internal/retrieval/semantic_search.go",
           "lineNumber": 29,
           "lineContent": "vec, err := g.embedProvider.Embed(ctx, question)",
           "title": "Embed Query",
@@ -327,7 +327,7 @@
         },
         {
           "id": "6b",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/retrieval/semantic_search.go",
+          "path": "internal/retrieval/semantic_search.go",
           "lineNumber": 39,
           "lineContent": "results, err := searchable.SearchHybrid(ctx, question, queryVec, workspaceID, limit*2)",
           "title": "Hybrid Search",
@@ -335,7 +335,7 @@
         },
         {
           "id": "6c",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/storage/memory/search.go",
+          "path": "internal/storage/memory/search.go",
           "lineNumber": 243,
           "lineContent": "rawResults, err := ss.hybridSearcher.Search(\n\t\tctx,\n\t\tquery,\n\t\tqueryVector,\n\t\t\"named_memory\",\n\t\t\"name || ' ' || COALESCE(summary, '')\",",
           "title": "Execute Hybrid Search",
@@ -343,7 +343,7 @@
         },
         {
           "id": "6d",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/storage/memory/search.go",
+          "path": "internal/storage/memory/search.go",
           "lineNumber": 264,
           "lineContent": "entry, err := ss.Get(ctx, result.DocumentID, workspace)",
           "title": "Fetch Full Entry",
@@ -351,14 +351,14 @@
         },
         {
           "id": "6e",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/retrieval/semantic_search.go",
+          "path": "internal/retrieval/semantic_search.go",
           "lineNumber": 123,
           "lineContent": "candidates = append(candidates, Candidate{\n\t\t\tPath:     filePath,\n\t\t\tScore:    score,\n\t\t\tRawScore: r.Score,\n\t\t\tSource:   SourceSemantic,\n\t\t})",
           "title": "Build Semantic Candidates",
           "description": "Converts search results to candidates with semantic source tag"
         }
       ],
-      "traceTextDiagram": "Semantic Search with Vector Embeddings (Trace 6)\n├── Query Embedding Generation\n│   └── embedProvider.Embed(question) \u003c-- 6a\n│\n├── Hybrid Search Execution\n│   ├── SearchHybrid() entry \u003c-- 6b\n│   │   └── hybridSearcher.Search() \u003c-- 6c\n│   │       ├── BM25 lexical scoring \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/memory/search.go:101\n│   │       ├── Vector cosine similarity \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/memory/store.go:908\n│   │       └── Weighted score combination\n│   │\n│   └── Result Processing\n│       └── ss.Get(documentID) \u003c-- 6d\n│           └── Fetch full NamedEntry from DB \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/memory/search.go:348\n│\n└── Candidate Construction\n    └── Build Candidate list \u003c-- 6e\n        └── Tag with SourceSemantic",
+      "traceTextDiagram": "Semantic Search with Vector Embeddings (Trace 6)\n├── Query Embedding Generation\n│   └── embedProvider.Embed(question) \u003c-- 6a\n│\n├── Hybrid Search Execution\n│   ├── SearchHybrid() entry \u003c-- 6b\n│   │   └── hybridSearcher.Search() \u003c-- 6c\n│   │       ├── BM25 lexical scoring \u003c-- internal/storage/memory/search.go:101\n│   │       ├── Vector cosine similarity \u003c-- internal/storage/memory/store.go:908\n│   │       └── Weighted score combination\n│   │\n│   └── Result Processing\n│       └── ss.Get(documentID) \u003c-- 6d\n│           └── Fetch full NamedEntry from DB \u003c-- internal/storage/memory/search.go:348\n│\n└── Candidate Construction\n    └── Build Candidate list \u003c-- 6e\n        └── Tag with SourceSemantic",
       "traceGuide": "## Motivation\n\nWhen developers search for code using natural language queries like \"authentication middleware\" or \"database connection pooling\", they need results that understand **semantic meaning**, not just keyword matches. A pure text search for \"auth\" might miss files about \"authentication\" or \"authorization\", while a symbol-only search might miss relevant implementation details in documentation or comments.\n\nThe **semantic search system** solves this by generating **vector embeddings** (numerical representations) of code symbols and using **cosine similarity** to find semantically related code, even when exact keywords don't match. This is combined with traditional **BM25 lexical search** in a hybrid approach that gets the best of both worlds: semantic understanding plus exact keyword matching.\n\n## Details\n\n### Query Embedding\nWhen a user asks a question, the system first converts it into a vector embedding by calling an external API (Voyage, Gemini, etc.) [6a]. This embedding captures the semantic meaning of the query in a high-dimensional space (typically 1024 dimensions).\n\n### Hybrid Search Strategy\nThe system performs **hybrid search** that combines two complementary approaches [6b][6c]:\n\n1. **BM25 scoring**: Traditional information retrieval that tokenizes the query and scores documents based on term frequency and inverse document frequency [search.go:101]\n2. **Vector similarity**: Computes cosine similarity between the query embedding and stored symbol embeddings [store.go:908]\n\nThe two scores are weighted and combined to produce a final relevance score. This hybrid approach outperforms either method alone because BM25 catches exact matches while vector search finds semantically similar code.\n\n### Result Retrieval\nFor each high-scoring result, the system fetches the complete `NamedEntry` from the memory store [6d], which contains the full symbol metadata including file path, symbol name, signature, and documentation [search.go:348].\n\n### Candidate Output\nResults are converted into `Candidate` objects tagged with `SourceSemantic` to distinguish them from symbol-index or ripgrep results [6e]. These candidates include normalized scores (0-1 range) and are later merged with candidates from other sources for final ranking.\n\n### Storage Architecture\nThe system stores embeddings as **JSON-encoded float32 arrays** in the `named_memory` table's `embedding` BLOB column. This allows semantic search without requiring a specialized vector database, though performance is limited compared to native vector indexes like those in Turso/LibSQL."
     },
     {
@@ -368,7 +368,7 @@
       "locations": [
         {
           "id": "7a",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/skills/code_smart_search/main.go",
+          "path": "skills/code_smart_search/main.go",
           "lineNumber": 143,
           "lineContent": "extractResult, err := invokeSnippetExtract(ctx, rc, in, candidates)",
           "title": "Invoke Snippet Extract",
@@ -376,7 +376,7 @@
         },
         {
           "id": "7b",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/skills/code_smart_search/main.go",
+          "path": "skills/code_smart_search/main.go",
           "lineNumber": 232,
           "lineContent": "extractCandidates[i] = map[string]any{\n\t\t\t\"path\":     c.Path,\n\t\t\t\"priority\": c.Score,\n\t\t}",
           "title": "Build Extract Input",
@@ -384,7 +384,7 @@
         },
         {
           "id": "7c",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/skills/code_smart_search/main.go",
+          "path": "skills/code_smart_search/main.go",
           "lineNumber": 266,
           "lineContent": "cmd := exec.CommandContext(ctx, agentctlBin, \"run\", \"code/snippet_extract\", \"--input-file\", \"-\")",
           "title": "Execute Subprocess",
@@ -392,7 +392,7 @@
         },
         {
           "id": "7d",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/skills/code_smart_search/main.go",
+          "path": "skills/code_smart_search/main.go",
           "lineNumber": 295,
           "lineContent": "if err := json.Unmarshal(stdout.Bytes(), \u0026env); err != nil {",
           "title": "Parse Envelope",
@@ -400,14 +400,14 @@
         },
         {
           "id": "7e",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/skills/code_smart_search/main.go",
+          "path": "skills/code_smart_search/main.go",
           "lineNumber": 303,
           "lineContent": "return \u0026ExtractResult{\n\t\tFilesRelevant:   env.Data.Summary.FilesRelevant,\n\t\tSnippetsEmitted: env.Data.Summary.SnippetsEmitted,\n\t\tSnippetsInline:  env.Data.SnippetsInline,\n\t\tArtifact:        env.Data.Artifact,\n\t}",
           "title": "Return Snippets",
           "description": "Returns extracted code snippets with file paths, line numbers, and text content"
         }
       ],
-      "traceTextDiagram": "code/smart_search skill execution \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/code_smart_search/main.go:86\n├── generateCandidates() orchestration \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/code_smart_search/main.go:91\n│   └── invokeSnippetExtract() \u003c-- 7a\n│       ├── Build candidate input JSON \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/code_smart_search/main.go:230\n│       │   └── map path + priority \u003c-- 7b\n│       ├── Spawn subprocess \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/code_smart_search/main.go:264\n│       │   └── exec agentctl run \u003c-- 7c\n│       │       └── code/snippet_extract skill \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/code_snippet_extract/main.go:86\n│       │           └── (reads files, extracts snippets)\n│       ├── Parse output envelope \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/code_smart_search/main.go:278\n│       │   └── json.Unmarshal \u003c-- 7d\n│       └── Return ExtractResult \u003c-- 7e\n│           ├── FilesRelevant count \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/code_smart_search/main.go:221\n│           ├── SnippetsEmitted count \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/code_smart_search/main.go:222\n│           ├── SnippetsInline (previews) \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/code_smart_search/main.go:223\n│           └── Artifact (full NDJSON) \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/code_smart_search/main.go:224\n└── Emit final output \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/code_smart_search/main.go:175\n    └── code/smart_search result",
+      "traceTextDiagram": "code/smart_search skill execution \u003c-- skills/code_smart_search/main.go:86\n├── generateCandidates() orchestration \u003c-- skills/code_smart_search/main.go:91\n│   └── invokeSnippetExtract() \u003c-- 7a\n│       ├── Build candidate input JSON \u003c-- skills/code_smart_search/main.go:230\n│       │   └── map path + priority \u003c-- 7b\n│       ├── Spawn subprocess \u003c-- skills/code_smart_search/main.go:264\n│       │   └── exec agentctl run \u003c-- 7c\n│       │       └── code/snippet_extract skill \u003c-- skills/code_snippet_extract/main.go:86\n│       │           └── (reads files, extracts snippets)\n│       ├── Parse output envelope \u003c-- skills/code_smart_search/main.go:278\n│       │   └── json.Unmarshal \u003c-- 7d\n│       └── Return ExtractResult \u003c-- 7e\n│           ├── FilesRelevant count \u003c-- skills/code_smart_search/main.go:221\n│           ├── SnippetsEmitted count \u003c-- skills/code_smart_search/main.go:222\n│           ├── SnippetsInline (previews) \u003c-- skills/code_smart_search/main.go:223\n│           └── Artifact (full NDJSON) \u003c-- skills/code_smart_search/main.go:224\n└── Emit final output \u003c-- skills/code_smart_search/main.go:175\n    └── code/smart_search result",
       "traceGuide": "## Motivation\n\nWhen developers ask questions like \"where is authentication handled?\" or \"how does the payment flow work?\", they need **relevant code snippets** from the right files. The challenge: a codebase might have thousands of files, and traditional text search returns too many false positives. The **code/snippet_extract** subprocess solves this by taking a **ranked list of candidate files** (already filtered by upstream search) and extracting only the most relevant code snippets by reading the actual workspace files and applying intelligent filtering [7a].\n\nThis is the **final stage** of the smart search pipeline—after symbol indexing [1a], embedding generation [3a], and multi-source candidate ranking [4a] have identified promising files, snippet extraction reads those files and pulls out the specific functions, classes, or code blocks that answer the user's question.\n\n## Details\n\n**Input Processing**: The skill receives a JSON payload via stdin containing candidate file paths with priority scores [7b]. This avoids command-line length limits when dealing with many candidates.\n\n**Subprocess Execution**: Rather than being called as a library, code/snippet_extract runs as a **separate agentctl subprocess** [7c]. This provides process isolation and allows the skill to use the full agentctl runtime (path validation, artifact management, observability).\n\n**File Reading and Extraction**: The subprocess reads each candidate file from the workspace, respects size limits (64KB per file by default), and extracts relevant snippets by matching against query keywords. It handles symbol-targeted extraction (when a specific function/class is identified) and whole-file scanning.\n\n**Output Format**: Results are returned as a JSON envelope [7d] containing:\n- **SnippetsInline**: Truncated previews (512 bytes) for immediate display [7e]\n- **Artifact**: Full NDJSON file with complete snippet text, line numbers, and file paths\n- **Summary stats**: Files processed and snippets emitted counts\n\n**Why Subprocess?**: The subprocess architecture allows snippet_extract to be **reusable** across different entry points (smart_search, direct CLI invocation, other skills) while maintaining consistent path validation and security boundaries."
     }
   ],

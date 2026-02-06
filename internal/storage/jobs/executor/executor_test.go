@@ -494,6 +494,7 @@ func TestExecutorWithSkillExecutor(t *testing.T) {
 	// Verify the executor was created successfully
 	if exec == nil {
 		t.Fatal("expected executor to be created")
+		return
 	}
 	if exec.skillExecutor == nil {
 		t.Fatal("expected skillExecutor to be set")
@@ -552,6 +553,7 @@ func TestExecutorEmitsWideEventOnSuccess(t *testing.T) {
 	}
 	if found == nil {
 		t.Fatal("expected skill.run wide event")
+		return
 	}
 
 	if found.Status != observability.StatusOK {
@@ -615,6 +617,7 @@ func TestExecutorEmitsWideEventOnRunnerError(t *testing.T) {
 	}
 	if found == nil {
 		t.Fatal("expected skill.run wide event")
+		return
 	}
 
 	if found.Status != observability.StatusError {
@@ -676,6 +679,7 @@ func TestExecutorEmitsWideEventOnEnvelopeError(t *testing.T) {
 	}
 	if found == nil {
 		t.Fatal("expected skill.run wide event")
+		return
 	}
 
 	if found.Status != observability.StatusError {

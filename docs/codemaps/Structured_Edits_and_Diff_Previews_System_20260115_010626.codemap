@@ -18,7 +18,7 @@
       "locations": [
         {
           "id": "1a",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/skills/code_smart_write/main.go",
+          "path": "skills/code_smart_write/main.go",
           "lineNumber": 48,
           "lineContent": "skillmain.Main(command, run)",
           "title": "Skill Entry Point",
@@ -26,7 +26,7 @@
         },
         {
           "id": "1b",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/skills/code_smart_write/main.go",
+          "path": "skills/code_smart_write/main.go",
           "lineNumber": 58,
           "lineContent": "if in.RestoreDigest != \"\" {\n\t\treturn handleRestore(ctx, rc, in)\n\t}",
           "title": "Undo Mode Check",
@@ -34,7 +34,7 @@
         },
         {
           "id": "1c",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/skills/code_smart_write/main.go",
+          "path": "skills/code_smart_write/main.go",
           "lineNumber": 74,
           "lineContent": "paths, err := resolvePaths(rc, in.Path, in.Paths)",
           "title": "Path Resolution",
@@ -42,7 +42,7 @@
         },
         {
           "id": "1d",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/skills/code_smart_write/main.go",
+          "path": "skills/code_smart_write/main.go",
           "lineNumber": 92,
           "lineContent": "result := processFile(ctx, rc, absPath, in.Edits, in.DryRun, in.ContextLines, in.CreateBackup)",
           "title": "File Processing",
@@ -50,7 +50,7 @@
         },
         {
           "id": "1e",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/skills/code_smart_write/main.go",
+          "path": "skills/code_smart_write/main.go",
           "lineNumber": 202,
           "lineContent": "edited, found, applied, err := codeedit.ApplyEdit(currentLines, lang, e)",
           "title": "Symbol-Aware Edit",
@@ -58,14 +58,14 @@
         },
         {
           "id": "1f",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/skills/code_smart_write/main.go",
+          "path": "skills/code_smart_write/main.go",
           "lineNumber": 216,
           "lineContent": "fileResult, err := editutil.ApplyFile(ctx, rc, absPath, editutil.FileOptions{",
           "title": "Unified File Operation",
           "description": "Handles diff generation, CAS backup, and file writing"
         }
       ],
-      "traceTextDiagram": "Smart Symbol-Aware Edit Processing\n├── skillmain.Main() entry point \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/adapters/skillslib/skillmain/main.go:81\n│   └── run() function \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/code_smart_write/main.go:51\n│       ├── handleRestore() if undo mode \u003c-- 1b\n│       ├── resolvePaths() for file patterns \u003c-- 1c\n│       └── processFile() for each file \u003c-- 1d\n│           ├── codeedit.ApplyEdit() \u003c-- 1e\n│           │   └── Symbol detection \u0026 edit \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/adapters/skillslib/codeedit/codeedit.go:132\n│           └── editutil.ApplyFile() \u003c-- 1f\n│               ├── diffutil.UnifiedDiff() \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/adapters/skillslib/diffutil/diff.go:26\n│               ├── CAS backup if needed \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/adapters/skillslib/editutil/file.go:68\n│               └── skillout.Emit() output \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/adapters/skillslib/skillout/emit.go:18\n└── skillout.Emit() final response \u003c-- 1a",
+      "traceTextDiagram": "Smart Symbol-Aware Edit Processing\n├── skillmain.Main() entry point \u003c-- internal/adapters/skillslib/skillmain/main.go:81\n│   └── run() function \u003c-- skills/code_smart_write/main.go:51\n│       ├── handleRestore() if undo mode \u003c-- 1b\n│       ├── resolvePaths() for file patterns \u003c-- 1c\n│       └── processFile() for each file \u003c-- 1d\n│           ├── codeedit.ApplyEdit() \u003c-- 1e\n│           │   └── Symbol detection \u0026 edit \u003c-- internal/adapters/skillslib/codeedit/codeedit.go:132\n│           └── editutil.ApplyFile() \u003c-- 1f\n│               ├── diffutil.UnifiedDiff() \u003c-- internal/adapters/skillslib/diffutil/diff.go:26\n│               ├── CAS backup if needed \u003c-- internal/adapters/skillslib/editutil/file.go:68\n│               └── skillout.Emit() output \u003c-- internal/adapters/skillslib/skillout/emit.go:18\n└── skillout.Emit() final response \u003c-- 1a",
       "traceGuide": "## Motivation\n\nWhen editing code files, traditional text replacement is brittle - it fails when code moves, gets refactored, or when you only have approximate knowledge of where changes should go. The **smart symbol-aware editing system** solves this by understanding code structure, providing **semantic operations** (edit by function name, line range, or scoped search/replace), and offering **diff previews** before changes are applied. This enables AI agents to make precise edits even with incomplete information, while maintaining safety through **CAS backups** for undo operations.\n\n## Details\n\nThe system processes edits through a unified pipeline [1a]. First, it validates inputs and resolves file paths, supporting both single files and glob patterns [1c]. For each file, it detects symbols using language-specific parsers (functions, classes, methods) and applies edits semantically [1e]. The **editutil.ApplyFile** function handles the heavy lifting: it generates unified diffs for preview, creates CAS backups when requested, and writes changes atomically [1f]. The diff generation uses the go-difflib library to create git-style unified diffs with configurable context lines. All operations emit structured JSON envelopes with metadata including edit counts, found symbols, backup digests for undo, and the actual diff content for review. The system supports **dry-run mode** for preview-only operations and **restore mode** for undoing changes from CAS backups [1b]."
     },
     {
@@ -75,7 +75,7 @@
       "locations": [
         {
           "id": "2a",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/skills/fs_apply_edit/main.go",
+          "path": "skills/fs_apply_edit/main.go",
           "lineNumber": 107,
           "lineContent": "result, newContent, err := applyEdit(modified, edit)",
           "title": "Edit Application",
@@ -83,7 +83,7 @@
         },
         {
           "id": "2b",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/skills/fs_apply_edit/main.go",
+          "path": "skills/fs_apply_edit/main.go",
           "lineNumber": 219,
           "lineContent": "candidates := findFuzzyCandidates(lines, searchNorm, edit.LineHint, edit.ContextBefore, edit.ContextAfter)",
           "title": "Fuzzy Candidate Search",
@@ -91,7 +91,7 @@
         },
         {
           "id": "2c",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/skills/fs_apply_edit/main.go",
+          "path": "skills/fs_apply_edit/main.go",
           "lineNumber": 318,
           "lineContent": "score := fuzzyMatchScore(lineNorm, searchNorm, searchWords)",
           "title": "Match Scoring",
@@ -99,7 +99,7 @@
         },
         {
           "id": "2d",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/skills/fs_apply_edit/main.go",
+          "path": "skills/fs_apply_edit/main.go",
           "lineNumber": 230,
           "lineContent": "if edit.Global {\n\t\t// Replace all candidates\n\t\tfor _, c := range candidates {",
           "title": "Global vs Single Replacement",
@@ -107,14 +107,14 @@
         },
         {
           "id": "2e",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/skills/fs_apply_edit/main.go",
+          "path": "skills/fs_apply_edit/main.go",
           "lineNumber": 120,
           "lineContent": "result, err := editutil.ApplyFile(ctx, rc, targetPath, editutil.FileOptions{",
           "title": "File Operation with Backup",
           "description": "Applies changes with CAS backup and diff generation"
         }
       ],
-      "traceTextDiagram": "Fuzzy Edit Processing Flow\n├── Main edit loop \u003c-- 2a\n│   ├── applyEdit() function \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/fs_apply_edit/main.go:152\n│   │   ├── Switch on match mode \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/fs_apply_edit/main.go:153\n│   │   └── applyFuzzyMatch() \u003c-- 2b\n│   │       ├── findFuzzyCandidates() \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/fs_apply_edit/main.go:309\n│   │       │   ├── Build candidate list \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/fs_apply_edit/main.go:314\n│   │       │   └── Score each candidate \u003c-- 2c\n│   │       └── Apply replacements \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/fs_apply_edit/main.go:230\n│   │           ├── Global mode \u003c-- 2d\n│   │           └── Single best match \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/fs_apply_edit/main.go:244\n│   └── File operation with backup \u003c-- 2e",
+      "traceTextDiagram": "Fuzzy Edit Processing Flow\n├── Main edit loop \u003c-- 2a\n│   ├── applyEdit() function \u003c-- skills/fs_apply_edit/main.go:152\n│   │   ├── Switch on match mode \u003c-- skills/fs_apply_edit/main.go:153\n│   │   └── applyFuzzyMatch() \u003c-- 2b\n│   │       ├── findFuzzyCandidates() \u003c-- skills/fs_apply_edit/main.go:309\n│   │       │   ├── Build candidate list \u003c-- skills/fs_apply_edit/main.go:314\n│   │       │   └── Score each candidate \u003c-- 2c\n│   │       └── Apply replacements \u003c-- skills/fs_apply_edit/main.go:230\n│   │           ├── Global mode \u003c-- 2d\n│   │           └── Single best match \u003c-- skills/fs_apply_edit/main.go:244\n│   └── File operation with backup \u003c-- 2e",
       "traceGuide": "## Motivation\n\nWhen AI agents need to edit code, they often have **approximate knowledge** of where changes should be made. They might know \"around line 45\" or \"near the function that handles requests\" but not the exact text. The fuzzy edit system solves this by using **contextual clues** like line hints, surrounding code, and similarity scoring to find the right location even when the search pattern isn't exact.\n\n## Details\n\nThe system processes edits through a **scoring algorithm** that evaluates potential matches [2c]. Each candidate gets points for word overlap, proximity to the suggested line hint, and matching context before/after the target. The **global vs single** logic determines whether to replace all matches or just the best-scoring one [2d]. Before any changes are applied, the original content is automatically backed up to **CAS storage** for undo capability [2e]. The fuzzy matching handles three modes: exact text match, regex patterns, and the default fuzzy mode that tolerates whitespace and minor variations while still being precise enough to avoid accidental changes."
     },
     {
@@ -124,7 +124,7 @@
       "locations": [
         {
           "id": "3a",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/skills/code_diff/main.go",
+          "path": "skills/code_diff/main.go",
           "lineNumber": 99,
           "lineContent": "hunks := computeDiff(oldLines, newLines, in.ContextLines)",
           "title": "Diff Computation",
@@ -132,7 +132,7 @@
         },
         {
           "id": "3b",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/skills/code_diff/main.go",
+          "path": "skills/code_diff/main.go",
           "lineNumber": 181,
           "lineContent": "lcs := longestCommonSubsequence(oldLines, newLines)",
           "title": "LCS Algorithm",
@@ -140,7 +140,7 @@
         },
         {
           "id": "3c",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/skills/code_diff/main.go",
+          "path": "skills/code_diff/main.go",
           "lineNumber": 224,
           "lineContent": "changes = append(changes, struct{ op, oldPos, newPos int }{1, i, j - 1})",
           "title": "Change Tracking",
@@ -148,7 +148,7 @@
         },
         {
           "id": "3d",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/skills/code_diff/main.go",
+          "path": "skills/code_diff/main.go",
           "lineNumber": 112,
           "lineContent": "result.Unified = generateUnifiedDiff(result.OldFile, result.NewFile, hunks)",
           "title": "Unified Diff Format",
@@ -156,14 +156,14 @@
         },
         {
           "id": "3e",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/skills/code_diff/main.go",
+          "path": "skills/code_diff/main.go",
           "lineNumber": 119,
           "lineContent": "artifact, err = skillmain.PersistBuffer(ctx, rc, buf, \"text/plain\", \"code_diff\")",
           "title": "Large Diff Handling",
           "description": "Stores large diffs in CAS with truncation for display"
         }
       ],
-      "traceTextDiagram": "Diff Generation Pipeline\n├── skill entry point (code/diff) \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/code_diff/main.go:51\n│   ├── run() function \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/code_diff/main.go:55\n│   │   ├── read files \u0026 normalize \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/code_diff/main.go:77\n│   │   │   ├── computeDiff() call \u003c-- 3a\n│   │   │   │   ├── longestCommonSubsequence() \u003c-- 3b\n│   │   │   │   │   └── backtrack \u0026 track changes \u003c-- 3c\n│   │   │   │   └── buildHunks() from changes \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/code_diff/main.go:207\n│   │   │   └── computeStats() from hunks \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/code_diff/main.go:100\n│   │   └── generateUnifiedDiff() output \u003c-- 3d\n│   └── handle large diff artifact \u003c-- 3e\n└── LCS Algorithm Core\n    ├── dynamic programming table \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/code_diff/main.go:187\n    └── backtrack to find changes \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/code_diff/main.go:216",
+      "traceTextDiagram": "Diff Generation Pipeline\n├── skill entry point (code/diff) \u003c-- skills/code_diff/main.go:51\n│   ├── run() function \u003c-- skills/code_diff/main.go:55\n│   │   ├── read files \u0026 normalize \u003c-- skills/code_diff/main.go:77\n│   │   │   ├── computeDiff() call \u003c-- 3a\n│   │   │   │   ├── longestCommonSubsequence() \u003c-- 3b\n│   │   │   │   │   └── backtrack \u0026 track changes \u003c-- 3c\n│   │   │   │   └── buildHunks() from changes \u003c-- skills/code_diff/main.go:207\n│   │   │   └── computeStats() from hunks \u003c-- skills/code_diff/main.go:100\n│   │   └── generateUnifiedDiff() output \u003c-- 3d\n│   └── handle large diff artifact \u003c-- 3e\n└── LCS Algorithm Core\n    ├── dynamic programming table \u003c-- skills/code_diff/main.go:187\n    └── backtrack to find changes \u003c-- skills/code_diff/main.go:216",
       "traceGuide": "# Motivation\n\nThe diff generation system solves the problem of **showing precise changes between file versions** in a structured, machine-readable format. When developers need to understand what changed between two files, they need more than just a visual diff - they need structured data that can be analyzed, processed, and applied programmatically. This system provides **unified diffs with statistics, change tracking, and artifact storage** for large diffs, enabling both human review and automated processing.\n\n# Details\n\nThe diff system uses a **Longest Common Subsequence (LCS) algorithm** to find the minimal set of changes between files [3b]. The process begins by reading both files and normalizing whitespace if requested [3a]. The algorithm builds a dynamic programming table to track common lines, then backtracks through this table to identify additions, deletions, and unchanged sections [3c].\n\nThese changes are organized into **hunks** - contiguous blocks of changes with context lines [3a]. Each hunk contains line-by-line differences with prefixes (`+` for additions, `-` for deletions, ` ` for context). The system also computes statistics like lines added/removed and similarity percentages.\n\nFor large diffs that exceed display limits, the system **automatically stores the full diff in CAS** (Content Addressable Storage) and provides a truncated preview with retrieval hints [3e]. This ensures the output remains manageable while preserving full fidelity for those who need it.\n\nThe final output is a **structured JSON envelope** containing the unified diff text, parsed hunks, statistics, and optional CAS artifact reference [3d]. This structured format enables downstream tools to parse, analyze, and even apply the diffs programmatically."
     },
     {
@@ -173,7 +173,7 @@
       "locations": [
         {
           "id": "4a",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/adapters/skillslib/editutil/file.go",
+          "path": "internal/adapters/skillslib/editutil/file.go",
           "lineNumber": 50,
           "lineContent": "diff, err := diffutil.UnifiedDiff(path, original, modified, opts.DiffContext)",
           "title": "Diff Generation",
@@ -181,7 +181,7 @@
         },
         {
           "id": "4b",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/adapters/skillslib/editutil/file.go",
+          "path": "internal/adapters/skillslib/editutil/file.go",
           "lineNumber": 68,
           "lineContent": "obj, err := rc.CASStore.Put(ctx, bytes.NewReader(originalBytes), \"text/plain\", tags)",
           "title": "CAS Backup",
@@ -189,7 +189,7 @@
         },
         {
           "id": "4c",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/adapters/skillslib/editutil/file.go",
+          "path": "internal/adapters/skillslib/editutil/file.go",
           "lineNumber": 80,
           "lineContent": "if err := os.WriteFile(path, []byte(modified), 0o644); err != nil {",
           "title": "File Writing",
@@ -197,7 +197,7 @@
         },
         {
           "id": "4d",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/adapters/skillslib/codeedit/codeedit.go",
+          "path": "internal/adapters/skillslib/codeedit/codeedit.go",
           "lineNumber": 132,
           "lineContent": "symbols := FindSymbols(lines, lang)",
           "title": "Symbol Detection",
@@ -205,14 +205,14 @@
         },
         {
           "id": "4e",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/skills/code_smart_write/main.go",
+          "path": "skills/code_smart_write/main.go",
           "lineNumber": 141,
           "lineContent": "return skillout.Emit(rc, command, data)",
           "title": "Structured Output",
           "description": "Emits results in canonical JSON envelope format"
         }
       ],
-      "traceTextDiagram": "Core Infrastructure System\n├── Skill Execution Framework\n│   ├── skillmain.Main() entry point \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/adapters/skillslib/skillmain/main.go:81\n│   └── skillout.Emit() output \u003c-- 4e\n├── File Operations Pipeline\n│   ├── editutil.ApplyFile() orchestrator \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/adapters/skillslib/editutil/file.go:34\n│   │   ├── diffutil.UnifiedDiff() generation \u003c-- 4a\n│   │   ├── CAS Store backup system \u003c-- 4b\n│   │   └── os.WriteFile() persistence \u003c-- 4c\n└── Symbol-Aware Editing\n    ├── codeedit.FindSymbols() detection \u003c-- 4d\n    └── Language-specific parsers \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/adapters/skillslib/codeedit/codeedit.go:278\n        ├── Go symbols (func, type, method) \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/adapters/skillslib/codeedit/codeedit.go:302\n        ├── Python symbols (def, class) \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/adapters/skillslib/codeedit/codeedit.go:344\n        └── JS/TS symbols (function, class) \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/adapters/skillslib/codeedit/codeedit.go:393",
+      "traceTextDiagram": "Core Infrastructure System\n├── Skill Execution Framework\n│   ├── skillmain.Main() entry point \u003c-- internal/adapters/skillslib/skillmain/main.go:81\n│   └── skillout.Emit() output \u003c-- 4e\n├── File Operations Pipeline\n│   ├── editutil.ApplyFile() orchestrator \u003c-- internal/adapters/skillslib/editutil/file.go:34\n│   │   ├── diffutil.UnifiedDiff() generation \u003c-- 4a\n│   │   ├── CAS Store backup system \u003c-- 4b\n│   │   └── os.WriteFile() persistence \u003c-- 4c\n└── Symbol-Aware Editing\n    ├── codeedit.FindSymbols() detection \u003c-- 4d\n    └── Language-specific parsers \u003c-- internal/adapters/skillslib/codeedit/codeedit.go:278\n        ├── Go symbols (func, type, method) \u003c-- internal/adapters/skillslib/codeedit/codeedit.go:302\n        ├── Python symbols (def, class) \u003c-- internal/adapters/skillslib/codeedit/codeedit.go:344\n        └── JS/TS symbols (function, class) \u003c-- internal/adapters/skillslib/codeedit/codeedit.go:393",
       "traceGuide": "# Motivation\n\nEditing code files programmatically is hard because simple text replacement breaks easily. You need to understand the **semantic structure** of code (functions, classes, symbols) and provide **safe previews** of changes before applying them. This system solves that by combining language-aware parsing, fuzzy matching for approximate edits, automatic backup/undo via content-addressable storage, and unified diff generation for review.\n\n# Details\n\nThe core infrastructure provides three key capabilities:\n\n**Symbol-aware editing** detects functions, types, and methods in multiple languages [4d]. It uses regex-based parsers for Go (functions, methods, types), Python (defs, classes), and JavaScript/TypeScript (functions, classes, interfaces) to enable semantic edits by symbol name rather than line numbers.\n\n**Unified file operations** handle the complete editing pipeline [4a-4c]. The `editutil.ApplyFile()` function orchestrates reading files, applying transformations, generating unified diffs for preview, backing up original content to CAS for undo, and writing changes atomically.\n\n**Structured output** ensures all skills emit consistent JSON envelopes [4e]. The `skillout.Emit()` function wraps results in canonical format with metadata, enabling tool integration and proper error handling across the entire editing ecosystem.\n\nThe system is designed as **composable libraries** - skills import `codeedit` for semantic operations, `editutil` for file handling, and `diffutil` for change visualization, creating a unified editing experience across different use cases."
     },
     {
@@ -222,7 +222,7 @@
       "locations": [
         {
           "id": "5a",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/agent/tools/edit_tools.go",
+          "path": "internal/agent/tools/edit_tools.go",
           "lineNumber": 255,
           "lineContent": "hunks, err := parseHunksFromJSON(diffJSON)",
           "title": "Diff Parsing",
@@ -230,7 +230,7 @@
         },
         {
           "id": "5b",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/agent/tools/edit_tools.go",
+          "path": "internal/agent/tools/edit_tools.go",
           "lineNumber": 289,
           "lineContent": "newLines, err := applyHunks(lines, hunks)",
           "title": "Hunk Application",
@@ -238,7 +238,7 @@
         },
         {
           "id": "5c",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/agent/tools/edit_tools.go",
+          "path": "internal/agent/tools/edit_tools.go",
           "lineNumber": 447,
           "lineContent": "result, err = applyHunk(result, hunk)",
           "title": "Single Hunk Processing",
@@ -246,7 +246,7 @@
         },
         {
           "id": "5d",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/agent/tools/edit_tools.go",
+          "path": "internal/agent/tools/edit_tools.go",
           "lineNumber": 498,
           "lineContent": "if lines[oldIdx] != content {\n\t\t\treturn nil, fmt.Errorf(\"context mismatch at line %d: expected %q, got %q\", oldIdx+1, content, lines[oldIdx])",
           "title": "Context Validation",
@@ -254,14 +254,14 @@
         },
         {
           "id": "5e",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/agent/tools/edit_tools.go",
+          "path": "internal/agent/tools/edit_tools.go",
           "lineNumber": 321,
           "lineContent": "if _, err := f.WriteString(newContent); err != nil {",
           "title": "Atomic File Update",
           "description": "Writes changes atomically to prevent corruption"
         }
       ],
-      "traceTextDiagram": "Agent Tools Diff Application\n├── applyStructuredDiff() entry point \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/agent/tools/edit_tools.go:233\n│   ├── Parse diff JSON from code/diff \u003c-- 5a\n│   ├── Apply hunks in reverse order \u003c-- 5b\n│   │   └── applyHunk() for each hunk \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/agent/tools/edit_tools.go:456\n│   │       ├── Validate context lines \u003c-- 5d\n│   │       └── Build new file content \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/agent/tools/edit_tools.go:533\n│   └── Atomic file update \u003c-- 5e\n└── Error handling \u0026 validation \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/agent/tools/edit_tools.go:290\n    ├── Context mismatch detection \u003c-- 5d\n    └── File write error handling \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/agent/tools/edit_tools.go:320",
+      "traceTextDiagram": "Agent Tools Diff Application\n├── applyStructuredDiff() entry point \u003c-- internal/agent/tools/edit_tools.go:233\n│   ├── Parse diff JSON from code/diff \u003c-- 5a\n│   ├── Apply hunks in reverse order \u003c-- 5b\n│   │   └── applyHunk() for each hunk \u003c-- internal/agent/tools/edit_tools.go:456\n│   │       ├── Validate context lines \u003c-- 5d\n│   │       └── Build new file content \u003c-- internal/agent/tools/edit_tools.go:533\n│   └── Atomic file update \u003c-- 5e\n└── Error handling \u0026 validation \u003c-- internal/agent/tools/edit_tools.go:290\n    ├── Context mismatch detection \u003c-- 5d\n    └── File write error handling \u003c-- internal/agent/tools/edit_tools.go:320",
       "traceGuide": "## Motivation\n\nWhen AI agents need to edit files, they face a critical challenge: how to apply precise changes without corrupting files or losing work. The **structured diff application system** solves this by providing a reliable way to apply code changes generated by the `code/diff` skill back to actual files. Instead of risky text replacements, agents can generate a structured diff, validate it, and apply it atomically with full rollback capability.\n\n## Details\n\nThe system works by parsing structured JSON diffs from the `code/diff` skill [5a], which contain hunks with line-by-line change instructions. These hunks are applied **in reverse order** [5b] to preserve line numbering accuracy - a crucial detail that prevents cascading offset errors. Each hunk undergoes **context validation** [5d] to ensure the file hasn't changed since the diff was generated, preventing accidental corruption. The system builds the new file content by stitching together unchanged context with additions and deletions [5e], then performs an **atomic file update** using truncate-and-rewrite to prevent partial writes. If any validation fails or context mismatches are detected, the entire operation aborts safely, leaving the original file untouched.\n\nThis approach gives agents the power of sophisticated diff-based editing while maintaining the safety guarantees needed for production code manipulation."
     }
   ],

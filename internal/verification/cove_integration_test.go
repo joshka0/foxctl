@@ -7,9 +7,6 @@ import (
 	"os"
 	"testing"
 	"time"
-
-	"github.com/XiaoConstantine/dspy-go/pkg/core"
-	"github.com/XiaoConstantine/dspy-go/pkg/llms"
 )
 
 func truncate(s string, maxLen int) string {
@@ -19,41 +16,39 @@ func truncate(s string, maxLen int) string {
 	return s[:maxLen] + "..."
 }
 
-func getTestLLM(t *testing.T) core.LLM {
+func getTestLLM(t *testing.T) LLMClient {
 	t.Helper()
-	llms.EnsureFactory()
 
-	if apiKey := os.Getenv("GROQ_API_KEY"); apiKey != "" {
-		llm, err := llms.NewOpenAICompatible("groq", "llama-3.1-8b-instant",
-			"https://api.groq.com/openai", llms.WithAPIKey(apiKey))
-		if err != nil {
-			t.Fatalf("failed to create Groq LLM: %v", err)
-		}
-		t.Log("Using Groq with llama-3.1-8b-instant")
-		return llm
+	var provider string
+	var apiKey string
+
+	switch {
+	case os.Getenv("CEREBRAS_API_KEY") != "":
+		provider = "cerebras"
+		apiKey = os.Getenv("CEREBRAS_API_KEY")
+	case os.Getenv("GROQ_API_KEY") != "":
+		provider = "groq"
+		apiKey = os.Getenv("GROQ_API_KEY")
+	case os.Getenv("OPENROUTER_API_KEY") != "":
+		provider = "openrouter"
+		apiKey = os.Getenv("OPENROUTER_API_KEY")
+	case os.Getenv("OPENAI_API_KEY") != "":
+		provider = "openai"
+		apiKey = os.Getenv("OPENAI_API_KEY")
+	default:
+		t.Skip("No API key found (CEREBRAS_API_KEY, GROQ_API_KEY, OPENROUTER_API_KEY, or OPENAI_API_KEY)")
+		return nil
 	}
 
-	if apiKey := os.Getenv("OPENROUTER_API_KEY"); apiKey != "" {
-		llm, err := llms.NewOpenAICompatible("openrouter", "meta-llama/llama-3.1-8b-instruct:free",
-			"https://openrouter.ai/api", llms.WithAPIKey(apiKey))
-		if err != nil {
-			t.Fatalf("failed to create OpenRouter LLM: %v", err)
-		}
-		t.Log("Using OpenRouter with llama-3.1-8b-instruct:free")
-		return llm
+	client, err := NewOpenAIClient(OpenAIConfig{
+		Provider: provider,
+		APIKey:   apiKey,
+	})
+	if err != nil {
+		t.Fatalf("failed to create LLM client: %v", err)
 	}
-
-	if apiKey := os.Getenv("GEMINI_API_KEY"); apiKey != "" {
-		llm, err := llms.NewGeminiLLM(apiKey, "gemini-2.0-flash")
-		if err != nil {
-			t.Fatalf("failed to create Gemini LLM: %v", err)
-		}
-		t.Log("Using Gemini")
-		return llm
-	}
-
-	t.Skip("No API key found (GROQ_API_KEY, OPENROUTER_API_KEY, or GEMINI_API_KEY)")
-	return nil
+	t.Logf("Using %s provider", provider)
+	return client
 }
 
 func TestCoVeIntegration_FullPipeline(t *testing.T) {

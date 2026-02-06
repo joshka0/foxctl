@@ -11,6 +11,7 @@ import (
 
 	errs "github.com/jkatigb/agentctl/internal/platform/errors"
 	"github.com/jkatigb/agentctl/internal/platform/timeutil"
+	ws "github.com/jkatigb/agentctl/internal/platform/workspace"
 	"github.com/jkatigb/agentctl/internal/storage/dbdriver"
 	"github.com/jkatigb/agentctl/internal/storage/sqlutil"
 )
@@ -93,6 +94,7 @@ func OpenTurso(ctx context.Context, cfg dbdriver.TursoConfig) (*TursoStore, erro
 		}
 	}
 
+	store.repairWorkspaceIDs(ctx)
 	return store, nil
 }
 
@@ -141,6 +143,23 @@ func migrateTursoWithDimensions(ctx context.Context, db *sql.DB, dimensions int)
 	`)
 	if err != nil {
 		return fmt.Errorf("create embedding_metadata table: %w", err)
+	}
+
+	_, err = db.ExecContext(ctx, `
+		CREATE TABLE IF NOT EXISTS indexer_state (
+			workspace TEXT NOT NULL,
+			indexer_id TEXT NOT NULL,
+			last_indexed_head_sha TEXT NOT NULL,
+			created_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL,
+			PRIMARY KEY(workspace, indexer_id)
+		)
+	`)
+	if err != nil {
+		return fmt.Errorf("create indexer_state table: %w", err)
+	}
+	if _, err := db.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS idx_indexer_state_ws ON indexer_state(workspace)`); err != nil {
+		return fmt.Errorf("create indexer_state index: %w", err)
 	}
 
 	// Create named_memory table with F32_BLOB for native vector search
@@ -239,6 +258,7 @@ func (s *TursoStore) Stats(ctx context.Context) (Stats, error) {
 // ExistsByNameSuffix checks if any entry exists with a name ending in the given suffix.
 // Used for content-hash deduplication across sessions (e.g., suffix ":<type>:<digest>").
 func (s *TursoStore) ExistsByNameSuffix(ctx context.Context, workspace, suffix string) (bool, error) {
+	workspace = ws.CanonicalID(workspace)
 	var count int
 	err := s.db.QueryRowContext(ctx, `
 		SELECT COUNT(*) FROM named_memory
@@ -252,6 +272,7 @@ func (s *TursoStore) ExistsByNameSuffix(ctx context.Context, workspace, suffix s
 
 // SaveWithEmbedding saves a named memory entry with its embedding vector.
 func (s *TursoStore) SaveWithEmbedding(ctx context.Context, entry NamedEntry, embedding []float32, model string) (NamedEntry, error) {
+	entry.Workspace = ws.CanonicalID(entry.Workspace)
 	now := timeutil.NowUTC()
 	if entry.ID == "" {
 		entry.ID = fmt.Sprintf("%s:%s", entry.Workspace, entry.Name)
@@ -323,6 +344,7 @@ func (s *TursoStore) SearchSimilar(ctx context.Context, workspace string, embedd
 	if limit <= 0 {
 		limit = 10
 	}
+	workspace = ws.CanonicalID(workspace)
 
 	// Convert query embedding to dbdriver.Vector
 	vec := make(dbdriver.Vector, len(embedding))
@@ -416,6 +438,7 @@ func (s *TursoStore) SearchSimilar(ctx context.Context, workspace string, embedd
 
 // SearchSimilarByType finds entries of a specific type using native vector search.
 func (s *TursoStore) SearchSimilarByType(ctx context.Context, workspace, entryType string, embedding []float32, limit int) ([]ScoredEntry, error) {
+	workspace = ws.CanonicalID(workspace)
 	if entryType == "" {
 		return s.SearchSimilar(ctx, workspace, embedding, limit)
 	}
@@ -507,6 +530,7 @@ func (s *TursoStore) SearchSimilarByType(ctx context.Context, workspace, entryTy
 
 // Save saves a named memory entry without embedding.
 func (s *TursoStore) Save(ctx context.Context, entry NamedEntry) (NamedEntry, error) {
+	entry.Workspace = ws.CanonicalID(entry.Workspace)
 	now := timeutil.NowUTC()
 	if entry.ID == "" {
 		entry.ID = fmt.Sprintf("%s:%s", entry.Workspace, entry.Name)
@@ -551,6 +575,7 @@ func (s *TursoStore) Save(ctx context.Context, entry NamedEntry) (NamedEntry, er
 
 // Get retrieves a named memory by name+workspace.
 func (s *TursoStore) Get(ctx context.Context, name, workspace string) (NamedEntry, error) {
+	workspace = ws.CanonicalID(workspace)
 	row := s.db.QueryRowContext(ctx, `
 		SELECT id, name, type, workspace, summary, result, digests,
 			created_at, updated_at, last_accessed, access_count, session_id
@@ -593,6 +618,7 @@ func (s *TursoStore) Get(ctx context.Context, name, workspace string) (NamedEntr
 // getWithoutTracking retrieves a named memory without updating access metadata.
 // Use this for internal operations (like Update) that shouldn't count as user access.
 func (s *TursoStore) getWithoutTracking(ctx context.Context, name, workspace string) (NamedEntry, error) {
+	workspace = ws.CanonicalID(workspace)
 	row := s.db.QueryRowContext(ctx, `
 		SELECT id, name, type, workspace, summary, result, digests,
 			created_at, updated_at, last_accessed, access_count, session_id
@@ -632,6 +658,7 @@ func (s *TursoStore) List(ctx context.Context, workspace string, limit int) ([]N
 	if limit <= 0 {
 		limit = 20
 	}
+	workspace = ws.CanonicalID(workspace)
 
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT id, name, type, workspace, summary, result, digests,
@@ -675,6 +702,7 @@ func (s *TursoStore) List(ctx context.Context, workspace string, limit int) ([]N
 
 // Delete removes a named memory.
 func (s *TursoStore) Delete(ctx context.Context, name, workspace string) error {
+	workspace = ws.CanonicalID(workspace)
 	result, err := s.db.ExecContext(ctx, `DELETE FROM named_memory WHERE name = ? AND workspace = ?`, name, workspace)
 	if err != nil {
 		return fmt.Errorf("memory: delete: %w", err)
@@ -691,6 +719,7 @@ func (s *TursoStore) Search(ctx context.Context, workspace, query string, limit 
 	if limit <= 0 {
 		limit = 20
 	}
+	workspace = ws.CanonicalID(workspace)
 
 	like := "%" + strings.ToLower(query) + "%"
 	rows, err := s.db.QueryContext(ctx, `
@@ -746,6 +775,7 @@ func (s *TursoStore) UpdateEmbedding(ctx context.Context, name, workspace string
 	if len(embedding) == 0 {
 		return nil
 	}
+	workspace = ws.CanonicalID(workspace)
 
 	// Validate embedding dimensions
 	if len(embedding) != s.vectorDimension {
@@ -874,6 +904,10 @@ func (s *TursoStore) SearchSimilarMultiWorkspace(ctx context.Context, workspaces
 		return nil, nil
 	}
 
+	for i := range workspaces {
+		workspaces[i] = ws.CanonicalID(workspaces[i])
+	}
+
 	// Convert query embedding to dbdriver.Vector
 	vec := make(dbdriver.Vector, len(embedding))
 	copy(vec, embedding)
@@ -967,6 +1001,7 @@ func (s *TursoStore) ListWorkspaces(ctx context.Context) ([]string, error) {
 
 // DeleteByNamePrefix deletes all entries matching the name prefix.
 func (s *TursoStore) DeleteByNamePrefix(ctx context.Context, workspace, namePrefix string) (int, error) {
+	workspace = ws.CanonicalID(workspace)
 	result, err := s.db.ExecContext(ctx, `
 		DELETE FROM named_memory
 		WHERE workspace = ? AND name LIKE ? || '%'`,
@@ -1006,6 +1041,7 @@ func (s *TursoStore) Relevant(ctx context.Context, workspace string, limit int) 
 	if limit <= 0 {
 		limit = 10
 	}
+	workspace = ws.CanonicalID(workspace)
 	const maxWindow = 500
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT id, name, type, workspace, summary, result, digests, created_at, updated_at, last_accessed, access_count, session_id
@@ -1086,6 +1122,7 @@ func (s *TursoStore) ListFiltered(ctx context.Context, workspace string, filter 
 	if offset < 0 {
 		offset = 0
 	}
+	workspace = ws.CanonicalID(workspace)
 
 	where := []string{"workspace = ?"}
 	args := []any{workspace}
@@ -1161,6 +1198,7 @@ func (s *TursoStore) ListWithoutEmbedding(ctx context.Context, workspace string,
 	if limit <= 0 {
 		limit = 100
 	}
+	workspace = ws.CanonicalID(workspace)
 
 	// Check for NULL or zero-length embedding (F32_BLOB comparison)
 	rows, err := s.db.QueryContext(ctx, `
@@ -1210,6 +1248,7 @@ func (s *TursoStore) ValidateEmbeddingDimensions(ctx context.Context, workspace 
 
 // SetEmbeddingMetadata stores embedding configuration for a workspace.
 func (s *TursoStore) SetEmbeddingMetadata(ctx context.Context, meta EmbeddingMetadata) error {
+	meta.Workspace = ws.CanonicalID(meta.Workspace)
 	now := timeutil.NowUTC()
 	if meta.CreatedAt.IsZero() {
 		meta.CreatedAt = now
@@ -1236,6 +1275,7 @@ func (s *TursoStore) SetEmbeddingMetadata(ctx context.Context, meta EmbeddingMet
 // atomicText is the self-contained rewrite, entities are extracted identifiers,
 // keywords are BM25-optimized search terms.
 func (s *TursoStore) UpdateAtomic(ctx context.Context, name, workspace, atomicText string, entities, keywords []string) error {
+	workspace = ws.CanonicalID(workspace)
 	entitiesJSON, err := sqlutil.FormatJSON(entities)
 	if err != nil {
 		return fmt.Errorf("memory: marshal entities: %w", err)

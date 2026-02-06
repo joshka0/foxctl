@@ -69,13 +69,13 @@ Each entry has:
 - **Prompt**:\
   “Map the content-addressable storage (CAS) system in agentctl. Start at
   `internal/storage/cas/store.go` (`NewStore`, `Put`,
-  [Get](cci:1://file:///Users/jkatigbak/repos/personal/claude-harness/agentctl/internal/agent/runtime/runtime.go:425:0-431:1)),
+  [Get](cci:1://file://~/repos/personal/claude-harness/agentctl/internal/agent/runtime/runtime.go:425:0-431:1)),
   showing directory layout (sha256, pins, tmp). Detail how `Put` streams data,
   computes SHA‑256 digests, handles duplicates, and finalizes uploads. Show how
   CAS objects are referenced from envelopes (via `data.artifact` and optional
   `meta.cas_digest`) and from jobs/skills. Include the integrity verification
   step on
-  [Get](cci:1://file:///Users/jkatigbak/repos/personal/claude-harness/agentctl/internal/agent/runtime/runtime.go:425:0-431:1).”
+  [Get](cci:1://file://~/repos/personal/claude-harness/agentctl/internal/agent/runtime/runtime.go:425:0-431:1).”
 
 ---
 
@@ -103,23 +103,23 @@ Each entry has:
 - **Prompt**:\
   “Map the dspy-go agent runtime in `internal/agent/runtime` and its integration
   with tools under `internal/agent/tools`. Start from the CLI entrypoint
-  [cmd/agentctl/cmd/dspy_agent.go](cci:7://file:///Users/jkatigbak/repos/personal/claude-harness/agentctl/cmd/agentctl/cmd/dspy_agent.go:0:0-0:0)
+  [cmd/agentctl/cmd/dspy_agent.go](cci:7://file://~/repos/personal/claude-harness/agentctl/cmd/agentctl/cmd/dspy_agent.go:0:0-0:0)
   (`dspy-agent` commands), through
-  [getOrCreateRuntime](cci:1://file:///Users/jkatigbak/repos/personal/claude-harness/agentctl/cmd/agentctl/cmd/dspy_agent.go:87:0-118:1)
+  [getOrCreateRuntime](cci:1://file://~/repos/personal/claude-harness/agentctl/cmd/agentctl/cmd/dspy_agent.go:87:0-118:1)
   and
-  [runtime.NewRuntime](cci:1://file:///Users/jkatigbak/repos/personal/claude-harness/agentctl/internal/agent/runtime/runtime.go:83:0-99:1),
+  [runtime.NewRuntime](cci:1://file://~/repos/personal/claude-harness/agentctl/internal/agent/runtime/runtime.go:83:0-99:1),
   to
-  [Runtime.Spawn](cci:1://file:///Users/jkatigbak/repos/personal/claude-harness/agentctl/internal/agent/runtime/runtime.go:101:0-207:1),
-  [Session](cci:2://file:///Users/jkatigbak/repos/personal/claude-harness/agentctl/internal/agent/runtime/runtime.go:66:0-81:1)
+  [Runtime.Spawn](cci:1://file://~/repos/personal/claude-harness/agentctl/internal/agent/runtime/runtime.go:101:0-207:1),
+  [Session](cci:2://file://~/repos/personal/claude-harness/agentctl/internal/agent/runtime/runtime.go:66:0-81:1)
   management, and how tools are registered
-  ([agenttools.NewRegistry](cci:1://file:///Users/jkatigbak/repos/personal/claude-harness/agentctl/internal/agent/tools/tools.go:55:0-111:1)).
+  ([agenttools.NewRegistry](cci:1://file://~/repos/personal/claude-harness/agentctl/internal/agent/tools/tools.go:55:0-111:1)).
   Show how dspy-go `ReActAgent` is created
-  ([createAgent](cci:1://file:///Users/jkatigbak/repos/personal/claude-harness/agentctl/internal/agent/runtime/runtime.go:209:0-291:1)),
+  ([createAgent](cci:1://file://~/repos/personal/claude-harness/agentctl/internal/agent/runtime/runtime.go:209:0-291:1)),
   how timeouts and iteration limits are applied, and how tool calls and traces
   are recorded in
-  [types.ToolCall](cci:2://file:///Users/jkatigbak/repos/personal/claude-harness/agentctl/internal/agent/types/types.go:301:0-319:1)
+  [types.ToolCall](cci:2://file://~/repos/personal/claude-harness/agentctl/internal/agent/types/types.go:301:0-319:1)
   /
-  [ExecutionTrace](cci:2://file:///Users/jkatigbak/repos/personal/claude-harness/agentctl/internal/agent/types/types.go:322:0-325:1).”
+  [ExecutionTrace](cci:2://file://~/repos/personal/claude-harness/agentctl/internal/agent/types/types.go:322:0-325:1).”
 
 ---
 
@@ -132,19 +132,19 @@ Each entry has:
 - **Prompt**:\
   “Map the overseer and agent hierarchy model in agentctl. Start with the
   overseer in
-  [internal/agent/runtime/overseer.go](cci:7://file:///Users/jkatigbak/repos/personal/claude-harness/agentctl/internal/agent/runtime/overseer.go:0:0-0:0)
+  [internal/agent/runtime/overseer.go](cci:7://file://~/repos/personal/claude-harness/agentctl/internal/agent/runtime/overseer.go:0:0-0:0)
   and the hierarchy spec in `docs/spec/agent_hierarchy.md` /
   `docs/spec/overseer_profile.md`. Show how
-  [OverseerConfig](cci:2://file:///Users/jkatigbak/repos/personal/claude-harness/agentctl/internal/agent/runtime/overseer.go:27:0-42:1),
-  [HandleSpawnRequest](cci:1://file:///Users/jkatigbak/repos/personal/claude-harness/agentctl/internal/agent/runtime/overseer.go:68:0-201:1),
+  [OverseerConfig](cci:2://file://~/repos/personal/claude-harness/agentctl/internal/agent/runtime/overseer.go:27:0-42:1),
+  [HandleSpawnRequest](cci:1://file://~/repos/personal/claude-harness/agentctl/internal/agent/runtime/overseer.go:68:0-201:1),
   and `ValidateSpawnDepth` work, how
-  [SpawnRequest](cci:2://file:///Users/jkatigbak/repos/personal/claude-harness/agentctl/internal/agent/types/types.go:340:0-369:1)
+  [SpawnRequest](cci:2://file://~/repos/personal/claude-harness/agentctl/internal/agent/types/types.go:340:0-369:1)
   /
-  [SpawnResponse](cci:2://file:///Users/jkatigbak/repos/personal/claude-harness/agentctl/internal/agent/types/types.go:387:0-402:1)
+  [SpawnResponse](cci:2://file://~/repos/personal/claude-harness/agentctl/internal/agent/types/types.go:387:0-402:1)
   and
-  [SpawnedAgent](cci:2://file:///Users/jkatigbak/repos/personal/claude-harness/agentctl/internal/agent/types/types.go:405:0-417:1)
+  [SpawnedAgent](cci:2://file://~/repos/personal/claude-harness/agentctl/internal/agent/types/types.go:405:0-417:1)
   /
-  [DeniedAgent](cci:2://file:///Users/jkatigbak/repos/personal/claude-harness/agentctl/internal/agent/types/types.go:420:0-429:1)
+  [DeniedAgent](cci:2://file://~/repos/personal/claude-harness/agentctl/internal/agent/types/types.go:420:0-429:1)
   types in `internal/agent/types` are used, and how the mailbox/blackboard
   concepts (from `docs/spec/mailbox_blackboard.md`) tie into spawn
   request/response subjects. Include how depth limits (`Depth`, `MaxDepth`,
@@ -162,13 +162,13 @@ Each entry has:
   “Map the planning LLM stack in `internal/planning/llm`. Start with the auto
   planner in `auto.go` and show how it selects providers and models based on
   config/env. Then map the OpenAI-compatible planner
-  ([openai.go](cci:7://file:///Users/jkatigbak/repos/personal/claude-harness/agentctl/internal/planning/llm/openai.go:0:0-0:0)),
+  ([openai.go](cci:7://file://~/repos/personal/claude-harness/agentctl/internal/planning/llm/openai.go:0:0-0:0)),
   including
-  [OpenAIConfig](cci:2://file:///Users/jkatigbak/repos/personal/claude-harness/agentctl/internal/planning/llm/openai.go:14:0-20:1),
-  [NewOpenAIPlanner](cci:1://file:///Users/jkatigbak/repos/personal/claude-harness/agentctl/internal/planning/llm/openai.go:29:0-90:1)
+  [OpenAIConfig](cci:2://file://~/repos/personal/claude-harness/agentctl/internal/planning/llm/openai.go:14:0-20:1),
+  [NewOpenAIPlanner](cci:1://file://~/repos/personal/claude-harness/agentctl/internal/planning/llm/openai.go:29:0-90:1)
   provider detection (OPENROUTER_API_KEY, GROQ_API_KEY, OPENAI_API_KEY), BaseURL
   and model selection, and
-  [Plan](cci:1://file:///Users/jkatigbak/repos/personal/claude-harness/agentctl/internal/planning/llm/openai.go:125:0-195:1).
+  [Plan](cci:1://file://~/repos/personal/claude-harness/agentctl/internal/planning/llm/openai.go:125:0-195:1).
   Include how integration tests in `internal/planning/llm/planner_test.go` are
   structured (e.g., OpenRouter integration) and how CI wires env vars and test
   gating.”
@@ -221,7 +221,7 @@ Each entry has:
   the CLI commands in `cmd/agentctl/cmd/testwatch.go` and `watch.go`. Finally,
   connect to the CI-facing Makefile targets (`test`, `test-short`, `test-race`,
   `check-coverage`) and the coverage thresholds defined in
-  [AGENTS.md](cci:7://file:///Users/jkatigbak/repos/personal/claude-harness/agentctl/AGENTS.md:0:0-0:0)
+  [AGENTS.md](cci:7://file://~/repos/personal/claude-harness/agentctl/AGENTS.md:0:0-0:0)
   (`lines`, `functions`, `branches`). Show how these pieces work together to
   provide developer feedback.”
 

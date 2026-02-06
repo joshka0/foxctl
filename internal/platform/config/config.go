@@ -546,9 +546,16 @@ func finalizeConfig(cfg Config, home string) Config {
 	// Default-enable observability: if AGENTCTL_OBS_DIR is not set but
 	// cfg.Paths.Observability is configured, set the env var so all
 	// downstream code (skills, CLI, daemon) inherits the path.
-	if os.Getenv("AGENTCTL_OBS_DIR") == "" && cfg.Paths.Observability != "" {
-		// Best-effort: ignore errors since observability is non-critical
-		_ = os.Setenv("AGENTCTL_OBS_DIR", cfg.Paths.Observability)
+	if cfg.Paths.Observability != "" {
+		obsEnv := os.Getenv("AGENTCTL_OBS_DIR")
+		// NOTE: We normally respect explicit env overrides. However, it is common to
+		// end up with a stale absolute home directory after a username change (e.g.
+		// AGENTCTL_OBS_DIR="/Users/olduser/..."). When that home no longer exists,
+		// observability becomes noisy (permission errors) and effectively broken.
+		if obsEnv == "" || shouldRepairObsDir(obsEnv, home) {
+			// Best-effort: ignore errors since observability is non-critical
+			_ = os.Setenv("AGENTCTL_OBS_DIR", cfg.Paths.Observability)
+		}
 	}
 
 	// CAS policy env var overrides
@@ -641,6 +648,44 @@ func finalizeConfig(cfg Config, home string) Config {
 	}
 
 	return cfg
+}
+
+func shouldRepairObsDir(obsEnv, userHome string) bool {
+	obsEnv = strings.TrimSpace(obsEnv)
+	userHome = strings.TrimSpace(userHome)
+	if obsEnv == "" || userHome == "" {
+		return false
+	}
+
+	// "~" is never expanded for file paths at runtime, and will cause writes to
+	// target a literal "./~" directory depending on CWD.
+	if strings.HasPrefix(obsEnv, "~") {
+		return true
+	}
+
+	// Repair stale macOS home paths after a username change:
+	//   obsEnv:   /Users/olduser/.agentctl/observability
+	//   userHome: /Users/newuser
+	if strings.HasPrefix(obsEnv, "/Users/") && strings.HasPrefix(userHome, "/Users/") {
+		rest := strings.TrimPrefix(obsEnv, "/Users/")
+		oldUser, _, _ := strings.Cut(rest, "/")
+		if oldUser == "" {
+			return false
+		}
+		homeRest := strings.TrimPrefix(userHome, "/Users/")
+		newUser, _, _ := strings.Cut(homeRest, "/")
+		if newUser == "" {
+			return false
+		}
+		if oldUser == newUser {
+			return false
+		}
+		if _, err := os.Stat(filepath.Join("/Users", oldUser)); os.IsNotExist(err) {
+			return true
+		}
+	}
+
+	return false
 }
 
 func userHomeDir() (string, error) {

@@ -18,7 +18,7 @@
       "locations": [
         {
           "id": "1a",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/cmd/agentctl/cmd/run.go",
+          "path": "cmd/agentctl/cmd/run.go",
           "lineNumber": 129,
           "lineContent": "job, isDuplicate, err := executor.PrepareJob(data)",
           "title": "CLI invokes job preparation",
@@ -26,7 +26,7 @@
         },
         {
           "id": "1b",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/runservice/jobs.go",
+          "path": "internal/runservice/jobs.go",
           "lineNumber": 39,
           "lineContent": "job, dup, err := e.jobStore.FindOrPrepareSkillJob(e.ctx, e.handle.Manifest.Metadata.Name, input, e.options.Dedupe)",
           "title": "Runservice delegates to job store",
@@ -34,7 +34,7 @@
         },
         {
           "id": "1c",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/storage/jobs/store.go",
+          "path": "internal/storage/jobs/store.go",
           "lineNumber": 197,
           "lineContent": "job, isDup, err := e.executor.FindOrPrepareSkillJob(ctx, name, input, dedupe)",
           "title": "Job store forwards to executor",
@@ -42,7 +42,7 @@
         },
         {
           "id": "1d",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/storage/jobs/executor/executor.go",
+          "path": "internal/storage/jobs/executor/executor.go",
           "lineNumber": 144,
           "lineContent": "return e.prepareSkillJob(ctx, name, input, dedupe)",
           "title": "Executor prepares skill job",
@@ -50,7 +50,7 @@
         },
         {
           "id": "1e",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/storage/jobs/executor/executor.go",
+          "path": "internal/storage/jobs/executor/executor.go",
           "lineNumber": 163,
           "lineContent": "job, duplicate, err = e.persist.FindOrInsertJob(ctx, job)",
           "title": "Atomic find-or-insert when dedupe enabled",
@@ -58,7 +58,7 @@
         },
         {
           "id": "1f",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/storage/jobs/persist/store.go",
+          "path": "internal/storage/jobs/persist/store.go",
           "lineNumber": 291,
           "lineContent": "row := tx.QueryRowContext(ctx, `\n        SELECT id, command, args_json, args_hash, state, result_path, error, created_at, updated_at\n        FROM jobs\n        WHERE args_hash = ?\n        ORDER BY created_at DESC\n        LIMIT 1`, job.ArgsHash)",
           "title": "Query for duplicate by args_hash",
@@ -66,14 +66,14 @@
         },
         {
           "id": "1g",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/storage/jobs/persist/store.go",
+          "path": "internal/storage/jobs/persist/store.go",
           "lineNumber": 330,
           "lineContent": "_, err = tx.ExecContext(ctx, `\n        INSERT INTO jobs (id, command, args_json, args_hash, state, result_path, error, created_at, updated_at)\n        VALUES (?, ?, ?, ?, ?, '', '', ?, ?)`,\n\t\tjob.ID, job.Command, job.ArgsJSON, job.ArgsHash, job.State, sqlutil.FormatTimestamp(job.CreatedAt), sqlutil.FormatTimestamp(job.UpdatedAt))",
           "title": "Insert new job if no duplicate found",
           "description": "Creates new job record within same transaction if dedupe check found nothing"
         }
       ],
-      "traceTextDiagram": "CLI Run Command Entry\n└── agentctl run \u003cskill\u003e invocation \u003c-- /Users/jkatigbak/repos/personal/agentctl/cmd/agentctl/cmd/run.go:57\n    ├── executor.PrepareJob(data) \u003c-- 1a\n    │   └── runservice.PrepareJob() \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/runservice/jobs.go:35\n    │       └── jobStore.FindOrPrepareSkillJob() \u003c-- 1b\n    │           └── jobs/store.FindOrPrepareSkillJob() \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/jobs/store.go:196\n    │               └── executor.FindOrPrepareSkillJob() \u003c-- 1c\n    │                   └── executor.prepareSkillJob() \u003c-- 1d\n    │                       ├── compute ArgsHash from input \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/jobs/executor/executor.go:148\n    │                       └── persist.FindOrInsertJob() \u003c-- 1e\n    │                           └── SQLite transaction \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/jobs/persist/store.go:283\n    │                               ├── SELECT by args_hash \u003c-- 1f\n    │                               └── INSERT if not found \u003c-- 1g\n    └── handle duplicate or execute \u003c-- /Users/jkatigbak/repos/personal/agentctl/cmd/agentctl/cmd/run.go:136",
+      "traceTextDiagram": "CLI Run Command Entry\n└── agentctl run \u003cskill\u003e invocation \u003c-- cmd/agentctl/cmd/run.go:57\n    ├── executor.PrepareJob(data) \u003c-- 1a\n    │   └── runservice.PrepareJob() \u003c-- internal/runservice/jobs.go:35\n    │       └── jobStore.FindOrPrepareSkillJob() \u003c-- 1b\n    │           └── jobs/store.FindOrPrepareSkillJob() \u003c-- internal/storage/jobs/store.go:196\n    │               └── executor.FindOrPrepareSkillJob() \u003c-- 1c\n    │                   └── executor.prepareSkillJob() \u003c-- 1d\n    │                       ├── compute ArgsHash from input \u003c-- internal/storage/jobs/executor/executor.go:148\n    │                       └── persist.FindOrInsertJob() \u003c-- 1e\n    │                           └── SQLite transaction \u003c-- internal/storage/jobs/persist/store.go:283\n    │                               ├── SELECT by args_hash \u003c-- 1f\n    │                               └── INSERT if not found \u003c-- 1g\n    └── handle duplicate or execute \u003c-- cmd/agentctl/cmd/run.go:136",
       "traceGuide": "## Motivation\n\nWhen running skills in agentctl, **duplicate executions waste time and resources**. If a user runs the same skill with identical input multiple times (e.g., retrying a failed command, or multiple processes invoking the same hook), the system should recognize this and reuse the previous result instead of re-executing. The **job preparation and deduplication system** solves this by computing a SHA256 hash of the skill name and input, then atomically checking if a job with that hash already exists before creating a new one [1a].\n\n## Details\n\n### Hash-Based Deduplication\n\nThe deduplication mechanism relies on **deterministic hashing** [1d]. When preparing a job, the system:\n\n1. **Marshals the skill arguments** into a canonical JSON format containing the skill name, input size, and SHA256 of the input content\n2. **Computes a SHA256 hash** of this canonical representation to create the `args_hash` field\n3. Uses this hash as the **deduplication key** for database lookups\n\nThis approach avoids storing large input payloads in the database while still enabling exact-match deduplication.\n\n### Atomic Find-or-Insert\n\nThe core deduplication logic uses a **SQLite transaction** to ensure atomicity [1e]. Within a single transaction, the system:\n\n1. **Queries for an existing job** by `args_hash` [1f]\n2. If found, returns the existing job with `isDuplicate=true`\n3. If not found, **inserts a new job record** [1g] and returns it with `isDuplicate=false`\n\nThis transaction-based approach prevents race conditions when multiple concurrent processes attempt to dedupe the same job.\n\n### Integration with CLI\n\nThe CLI run command [1a] invokes job preparation through multiple layers: runservice → job store → executor → persistence [1b, 1c, 1d]. This layered architecture separates concerns:\n\n- **Runservice** handles high-level execution flow and options (including the `--dedupe` flag)\n- **Job store** provides the public API for job operations\n- **Executor** implements the core preparation logic\n- **Persistence** manages SQLite transactions and state\n\nWhen a duplicate is detected, the system takes a **separate code path** that waits for the existing job to complete rather than re-executing the skill."
     },
     {
@@ -83,7 +83,7 @@
       "locations": [
         {
           "id": "2a",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/runservice/jobs.go",
+          "path": "internal/runservice/jobs.go",
           "lineNumber": 58,
           "lineContent": "capture, capErr := trajectorycapture.Start(e.ctx, trajectorycapture.StartOptions{",
           "title": "Start trajectory capture after job prep",
@@ -91,7 +91,7 @@
         },
         {
           "id": "2b",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/trajectorycapture/capture.go",
+          "path": "internal/trajectorycapture/capture.go",
           "lineNumber": 73,
           "lineContent": "store, err := trajectory.Open(ctx, opts.StorageRoot)",
           "title": "Open trajectory SQLite store",
@@ -99,7 +99,7 @@
         },
         {
           "id": "2c",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/trajectorycapture/capture.go",
+          "path": "internal/trajectorycapture/capture.go",
           "lineNumber": 98,
           "lineContent": "ur, err = store.InsertUserRequest(ctx, ur)",
           "title": "Record normalized user request",
@@ -107,7 +107,7 @@
         },
         {
           "id": "2d",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/trajectorycapture/capture.go",
+          "path": "internal/trajectorycapture/capture.go",
           "lineNumber": 127,
           "lineContent": "traj, err = store.InsertTrajectory(ctx, traj)",
           "title": "Create trajectory record",
@@ -115,7 +115,7 @@
         },
         {
           "id": "2e",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/trajectorycapture/capture.go",
+          "path": "internal/trajectorycapture/capture.go",
           "lineNumber": 157,
           "lineContent": "_, err = store.InsertEvent(ctx, trajectory.Event{",
           "title": "Insert initial user_request event",
@@ -123,14 +123,14 @@
         },
         {
           "id": "2f",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/storage/trajectory/store.go",
+          "path": "internal/storage/trajectory/store.go",
           "lineNumber": 213,
           "lineContent": "_, err = s.db.ExecContext(ctx, `\nINSERT INTO trajectories (id, workspace_id, root_request_id, task_ids_json, epic_id, agent_role, job_id, trace_id, status, summary, artifact_digest, outcome_json, created_at, updated_at, session_id)\nVALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,",
           "title": "Persist trajectory to SQLite",
           "description": "Stores trajectory with job_id link for correlation with jobs system"
         }
       ],
-      "traceTextDiagram": "Trajectory Capture Initialization Flow\n├── PrepareJob() in runservice \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/runservice/jobs.go:35\n│   └── trajectorycapture.Start() call \u003c-- 2a\n│       ├── trajectory.Open() \u003c-- 2b\n│       │   └── SQLite DB initialization \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/trajectory/store.go:79\n│       ├── store.InsertUserRequest() \u003c-- 2c\n│       │   └── INSERT INTO user_requests \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/trajectory/store.go:506\n│       ├── store.InsertTrajectory() \u003c-- 2d\n│       │   └── s.db.ExecContext() INSERT \u003c-- 2f\n│       └── store.InsertEvent() \u003c-- 2e\n│           └── INSERT INTO trajectory_events \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/trajectory/store.go:609\n└── RunCapture struct returned \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/trajectorycapture/capture.go:172\n    └── Linked to job via job_id field",
+      "traceTextDiagram": "Trajectory Capture Initialization Flow\n├── PrepareJob() in runservice \u003c-- internal/runservice/jobs.go:35\n│   └── trajectorycapture.Start() call \u003c-- 2a\n│       ├── trajectory.Open() \u003c-- 2b\n│       │   └── SQLite DB initialization \u003c-- internal/storage/trajectory/store.go:79\n│       ├── store.InsertUserRequest() \u003c-- 2c\n│       │   └── INSERT INTO user_requests \u003c-- internal/storage/trajectory/store.go:506\n│       ├── store.InsertTrajectory() \u003c-- 2d\n│       │   └── s.db.ExecContext() INSERT \u003c-- 2f\n│       └── store.InsertEvent() \u003c-- 2e\n│           └── INSERT INTO trajectory_events \u003c-- internal/storage/trajectory/store.go:609\n└── RunCapture struct returned \u003c-- internal/trajectorycapture/capture.go:172\n    └── Linked to job via job_id field",
       "traceGuide": "## Motivation\n\nWhen running skills in agentctl, the system needs to **capture execution traces for training and evaluation** of AI agents. This trajectory capture system records user requests, tool calls, and outcomes in a structured format that can be queried later for optimization purposes. The challenge is initializing this capture **in parallel with job preparation** so that every execution—whether it's a new job or a deduplicated one—has its context properly recorded from the start.\n\n## Details\n\n### Initialization Trigger\n\nTrajectory capture starts during job preparation [2a], immediately after a job ID is assigned. This happens in `PrepareJob()` before the skill actually executes, ensuring the correlation ID and workspace context are captured even if the job fails early.\n\n### Separate Storage Layer\n\nThe trajectory system uses its **own SQLite database** [2b], distinct from the jobs database. This separation allows trajectory data to be queried independently for training purposes without interfering with job execution queries. The store opens at `~/.agentctl/trajectory.db`.\n\n### Three-Record Initialization\n\nTrajectory capture creates three linked records:\n\n1. **UserRequestCapture** [2c] - Normalizes the CLI command and protocol command into a searchable format, extracting task hints like `task_id` and `epic_id` from the input JSON.\n\n2. **Trajectory** [2d] - The main record that links the user request to a job ID, trace ID (correlation ID), and workspace. This record's status gets updated when the job completes [2f].\n\n3. **Initial Event** [2e] - A `user_request` event that marks the start of the trajectory timeline. Subsequent events (tool calls, results) reference this trajectory ID.\n\n### Job Linking\n\nThe trajectory record stores the **job ID** as a foreign key, allowing queries like \"show me all trajectories for jobs that failed\" or \"find trajectories with high human ratings for this skill.\" The correlation ID propagates through the entire execution, linking envelopes, wide events, and trajectory events together.\n\n### Conditional Activation\n\nTrajectory capture only initializes if both `cfg.Storage.Root` and `options.Workspace` are set. If initialization fails, execution continues normally—trajectory capture is best-effort and won't block job execution."
     },
     {
@@ -140,7 +140,7 @@
       "locations": [
         {
           "id": "3a",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/storage/jobs/executor/executor.go",
+          "path": "internal/storage/jobs/executor/executor.go",
           "lineNumber": 154,
           "lineContent": "ArgsHash:  types.HashArgs(name, argsBuf),",
           "title": "Compute args hash during job creation",
@@ -148,7 +148,7 @@
         },
         {
           "id": "3b",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/storage/jobs/types/types.go",
+          "path": "internal/storage/jobs/types/types.go",
           "lineNumber": 81,
           "lineContent": "func ComputeSkillArgsHash(name string, input []byte) string {",
           "title": "Public hash computation entry point",
@@ -156,7 +156,7 @@
         },
         {
           "id": "3c",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/storage/jobs/types/types.go",
+          "path": "internal/storage/jobs/types/types.go",
           "lineNumber": 82,
           "lineContent": "argsBuf := MarshalSkillArgs(name, input)",
           "title": "Marshal skill args to canonical JSON",
@@ -164,7 +164,7 @@
         },
         {
           "id": "3d",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/storage/jobs/types/types.go",
+          "path": "internal/storage/jobs/types/types.go",
           "lineNumber": 69,
           "lineContent": "sum := sha256.Sum256(input)",
           "title": "Hash input bytes for content addressing",
@@ -172,14 +172,14 @@
         },
         {
           "id": "3e",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/storage/jobs/types/types.go",
+          "path": "internal/storage/jobs/types/types.go",
           "lineNumber": 53,
           "lineContent": "h := sha256.New()",
           "title": "Create SHA256 hasher for final digest",
           "description": "Combines command name and canonical args JSON into final args_hash"
         }
       ],
-      "traceTextDiagram": "Job Preparation Flow\n└── executor.prepareSkillJob() \u003c-- 3a\n    ├── types.MarshalSkillArgs(name, input) \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/jobs/executor/executor.go:148\n    │   ├── Create args map with skill name \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/jobs/types/types.go:65\n    │   ├── sha256.Sum256(input) \u003c-- 3d\n    │   └── json.Marshal(args) to canonical JSON \u003c-- 3c\n    └── types.HashArgs(name, argsBuf) \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/jobs/types/types.go:83\n        ├── h := sha256.New() \u003c-- 3e\n        ├── h.Write([]byte(command)) \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/jobs/types/types.go:54\n        ├── h.Write(argsJSON) \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/jobs/types/types.go:57\n        └── hex.EncodeToString(h.Sum(nil)) \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/jobs/types/types.go:60\n\nPublic API Entry Point\n└── types.ComputeSkillArgsHash(name, input) \u003c-- 3b\n    ├── argsBuf := MarshalSkillArgs() \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/jobs/types/types.go:82\n    └── return HashArgs() \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/jobs/types/types.go:83",
+      "traceTextDiagram": "Job Preparation Flow\n└── executor.prepareSkillJob() \u003c-- 3a\n    ├── types.MarshalSkillArgs(name, input) \u003c-- internal/storage/jobs/executor/executor.go:148\n    │   ├── Create args map with skill name \u003c-- internal/storage/jobs/types/types.go:65\n    │   ├── sha256.Sum256(input) \u003c-- 3d\n    │   └── json.Marshal(args) to canonical JSON \u003c-- 3c\n    └── types.HashArgs(name, argsBuf) \u003c-- internal/storage/jobs/types/types.go:83\n        ├── h := sha256.New() \u003c-- 3e\n        ├── h.Write([]byte(command)) \u003c-- internal/storage/jobs/types/types.go:54\n        ├── h.Write(argsJSON) \u003c-- internal/storage/jobs/types/types.go:57\n        └── hex.EncodeToString(h.Sum(nil)) \u003c-- internal/storage/jobs/types/types.go:60\n\nPublic API Entry Point\n└── types.ComputeSkillArgsHash(name, input) \u003c-- 3b\n    ├── argsBuf := MarshalSkillArgs() \u003c-- internal/storage/jobs/types/types.go:82\n    └── return HashArgs() \u003c-- internal/storage/jobs/types/types.go:83",
       "traceGuide": "## Motivation\n\nWhen running skills in agentctl, **deduplication prevents redundant work** by reusing results from identical previous executions. The challenge is determining if two skill invocations are truly identical—same skill name and same input data. A naive string comparison would fail because JSON can be formatted differently while being semantically equivalent. The solution is **deterministic hashing**: compute a SHA256 digest that uniquely identifies each skill invocation, allowing fast database lookups to find duplicate jobs.\n\n## Details\n\n### Hash Computation Pipeline\n\nThe deduplication system uses a two-stage hashing approach [3b]:\n\n1. **Input normalization** [3c]: The skill name and input bytes are marshaled into a canonical JSON structure containing the skill name, input size, and a SHA256 hash of the raw input [3d]. This avoids storing large input payloads in the database while still capturing content identity.\n\n2. **Final hash generation** [3e]: The skill name and canonical JSON are concatenated and hashed with SHA256 to produce the `args_hash` field. This becomes the **deduplication key** stored in the jobs table.\n\n### Why Two Hashes?\n\nThe system hashes the input separately [3d] before hashing again [3e] because:\n- The `args_json` field stores metadata (skill name, input size, input hash) rather than potentially large input payloads\n- The final `args_hash` combines both the skill name and the normalized args for a single lookup key\n- This allows the database index on `args_hash` to efficiently find duplicates without scanning large blobs\n\n### Database Integration\n\nWhen a job is prepared with dedupe enabled [3a], the computed `args_hash` is used in a SQL query to check for existing jobs with the same hash. If found, the existing job is returned; otherwise, a new job is inserted—all within a single transaction to prevent race conditions."
     },
     {
@@ -189,7 +189,7 @@
       "locations": [
         {
           "id": "4a",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/cmd/agentctl/cmd/run.go",
+          "path": "cmd/agentctl/cmd/run.go",
           "lineNumber": 136,
           "lineContent": "if isDuplicate {",
           "title": "CLI detects duplicate job",
@@ -197,7 +197,7 @@
         },
         {
           "id": "4b",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/cmd/agentctl/cmd/run.go",
+          "path": "cmd/agentctl/cmd/run.go",
           "lineNumber": 137,
           "lineContent": "if err := executor.HandleDuplicate(job); err != nil {",
           "title": "Invoke duplicate handler",
@@ -205,7 +205,7 @@
         },
         {
           "id": "4c",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/runservice/jobs.go",
+          "path": "internal/runservice/jobs.go",
           "lineNumber": 102,
           "lineContent": "waited, err := e.jobStore.WaitForCompletion(e.ctx, job.ID, 0)",
           "title": "Wait for duplicate job to complete",
@@ -213,7 +213,7 @@
         },
         {
           "id": "4d",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/storage/jobs/store.go",
+          "path": "internal/storage/jobs/store.go",
           "lineNumber": 243,
           "lineContent": "job, err := s.persist.Get(ctx, jobID)",
           "title": "Poll job state in wait loop",
@@ -221,7 +221,7 @@
         },
         {
           "id": "4e",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/runservice/jobs.go",
+          "path": "internal/runservice/jobs.go",
           "lineNumber": 107,
           "lineContent": "result, err := e.jobStore.Result(e.ctx, job.ID)",
           "title": "Load result from completed job",
@@ -229,14 +229,14 @@
         },
         {
           "id": "4f",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/runservice/jobs.go",
+          "path": "internal/runservice/jobs.go",
           "lineNumber": 111,
           "lineContent": "return e.HandleResult(job.ID, result)",
           "title": "Process and emit cached result",
           "description": "Reuses existing result without re-execution; skips trajectory capture"
         }
       ],
-      "traceTextDiagram": "CLI Run Command Entry\n└── cmd/run.go:executeRunCommand() \u003c-- /Users/jkatigbak/repos/personal/agentctl/cmd/agentctl/cmd/run.go:57\n    └── executor.PrepareJob(data) \u003c-- 4a\n        └── runservice/jobs.go:PrepareJob() \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/runservice/jobs.go:35\n            └── jobStore.FindOrPrepareSkillJob() \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/runservice/jobs.go:39\n                └── jobs/store.go:FindOrPrepareSkillJob() \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/jobs/store.go:196\n                    └── [returns existing job, isDup=true] \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/jobs/store.go:198\n                        └── CLI detects duplicate \u003c-- 4a\n                            └── executor.HandleDuplicate(job) \u003c-- 4b\n                                ├── Print \"using existing job\" \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/runservice/jobs.go:86\n                                └── jobStore.WaitForCompletion() \u003c-- 4c\n                                    └── jobs/store.go:WaitForCompletion() \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/jobs/store.go:226\n                                        └── Poll loop with backoff \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/jobs/store.go:235\n                                            └── persist.Get(jobID) \u003c-- 4d\n                                                └── Check if terminal state \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/jobs/store.go:248\n                                                    └── [job completed] \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/jobs/store.go:250\n                                                        └── jobStore.Result(job.ID) \u003c-- 4e\n                                                            └── Read result.json \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/jobs/store.go:127\n                                                                └── HandleResult() \u003c-- 4f",
+      "traceTextDiagram": "CLI Run Command Entry\n└── cmd/run.go:executeRunCommand() \u003c-- cmd/agentctl/cmd/run.go:57\n    └── executor.PrepareJob(data) \u003c-- 4a\n        └── runservice/jobs.go:PrepareJob() \u003c-- internal/runservice/jobs.go:35\n            └── jobStore.FindOrPrepareSkillJob() \u003c-- internal/runservice/jobs.go:39\n                └── jobs/store.go:FindOrPrepareSkillJob() \u003c-- internal/storage/jobs/store.go:196\n                    └── [returns existing job, isDup=true] \u003c-- internal/storage/jobs/store.go:198\n                        └── CLI detects duplicate \u003c-- 4a\n                            └── executor.HandleDuplicate(job) \u003c-- 4b\n                                ├── Print \"using existing job\" \u003c-- internal/runservice/jobs.go:86\n                                └── jobStore.WaitForCompletion() \u003c-- 4c\n                                    └── jobs/store.go:WaitForCompletion() \u003c-- internal/storage/jobs/store.go:226\n                                        └── Poll loop with backoff \u003c-- internal/storage/jobs/store.go:235\n                                            └── persist.Get(jobID) \u003c-- 4d\n                                                └── Check if terminal state \u003c-- internal/storage/jobs/store.go:248\n                                                    └── [job completed] \u003c-- internal/storage/jobs/store.go:250\n                                                        └── jobStore.Result(job.ID) \u003c-- 4e\n                                                            └── Read result.json \u003c-- internal/storage/jobs/store.go:127\n                                                                └── HandleResult() \u003c-- 4f",
       "traceGuide": "## Motivation\n\nWhen users run the same skill with identical inputs multiple times, **re-executing the skill wastes time and resources**. The dedupe system solves this by detecting duplicate requests using SHA256 hashing and **reusing existing job results** instead of re-running the skill [4a]. This is critical for hooks that may be invoked repeatedly with identical inputs during development workflows.\n\nThe challenge: when a duplicate is detected, the **existing job might still be running** from a previous invocation. The system must wait for that job to complete before returning its result, rather than executing the same work twice concurrently.\n\n## Motivation\n\nWhen users run the same skill with identical inputs multiple times (common in hooks or automated workflows), re-executing is wasteful. The **dedupe system** uses SHA256 hashing of skill name + input to detect duplicates and reuse existing job results [4a]. When a duplicate is found, instead of running the skill again, the system **waits for the original job to complete** and returns its cached result [4b].\n\nThis solves two problems:\n1. **Avoids redundant computation** - If the same skill with identical input is already running or completed, reuse that work\n2. **Prevents race conditions** - Multiple concurrent requests with identical inputs share a single execution rather than spawning duplicate jobs\n\n## Motivation\n\nWhen multiple processes or hooks invoke the same skill with identical inputs (e.g., git hooks running in parallel), **deduplication prevents wasteful re-execution**. The system uses SHA256 hashing of skill name + input to identify duplicates [1a]. When a duplicate is detected [4a], instead of running the skill again, the system waits for the original job to complete [4c] and returns its cached result [4e].\n\nThis is critical for **hook scenarios** where multiple git operations might trigger the same skill invocation concurrently—dedupe ensures only one execution happens while others wait and reuse the result.\n\n## Motivation\n\nWhen multiple processes or requests invoke the same skill with identical inputs (e.g., parallel git hooks running `agentctl run hooks/pre-commit`), executing the skill multiple times wastes resources and creates race conditions. **Job deduplication** solves this by detecting duplicate work via SHA256 hashing [3a] and reusing existing job results [4a].\n\nThe duplicate handling flow ensures that when a job with identical inputs already exists, the system **waits for that job to complete** [4c] rather than re-executing the skill, saving compute time and ensuring consistent results.\n\n## Motivation\n\nWhen multiple processes invoke the same skill with identical inputs (common in git hooks or parallel CI runs), executing redundantly wastes time and resources. The **dedupe system** uses SHA256 hashing of skill name + input to detect duplicates [1f] and reuse existing job results [4f]. This is critical for **hook execution** where multiple concurrent git operations might trigger identical skill invocations.\n\n## Details\n\n**Duplicate detection** happens during job preparation [4a]. When `--dedupe` is enabled, `FindOrPrepareSkillJob` performs an **atomic find-or-insert** using a transaction that queries for existing jobs by `args_hash` [1f]. If a duplicate is found, the boolean flag `isDuplicate=true` is returned [4a].\n\nThe **duplicate handling path** [4b] differs from normal execution: instead of running the skill again, it waits for the existing job to complete [4c]. The wait loop uses **exponential backoff** (500ms → 10s max) to reduce database load [4d]. Once the job reaches a terminal state (ok/error/canceled), the system reads the cached `result.json` file [4e] and returns it directly [4f].\n\nThis **avoids redundant execution** when multiple concurrent processes (like parallel git hooks) invoke the same skill with identical inputs. The dedupe mechanism uses SHA256 hashing of skill name + input to detect duplicates atomically in a SQLite transaction [1f]."
     },
     {
@@ -246,7 +246,7 @@
       "locations": [
         {
           "id": "5a",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/cmd/agentctl/cmd/run.go",
+          "path": "cmd/agentctl/cmd/run.go",
           "lineNumber": 154,
           "lineContent": "if err := executor.ExecuteSync(job); err != nil {",
           "title": "CLI triggers synchronous execution",
@@ -254,7 +254,7 @@
         },
         {
           "id": "5b",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/runservice/jobs.go",
+          "path": "internal/runservice/jobs.go",
           "lineNumber": 151,
           "lineContent": "result, runErr := e.jobStore.ExecutePreparedSkill(e.ctx, job.ID, e.handle.ManifestPath, e.handle.ArtifactPath)",
           "title": "Execute prepared job via store",
@@ -262,7 +262,7 @@
         },
         {
           "id": "5c",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/storage/jobs/store.go",
+          "path": "internal/storage/jobs/store.go",
           "lineNumber": 183,
           "lineContent": "return s.executor.ExecutePrepared(ctx, jobID, manifest, artifactPath, data)",
           "title": "Executor runs skill with state tracking",
@@ -270,7 +270,7 @@
         },
         {
           "id": "5d",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/storage/jobs/executor/executor.go",
+          "path": "internal/storage/jobs/executor/executor.go",
           "lineNumber": 228,
           "lineContent": "stdout, stderr, runErr := e.runSkill(ctx, opts.Manifest, opts.ArtifactPath, opts.Input)",
           "title": "Invoke skill runner",
@@ -278,7 +278,7 @@
         },
         {
           "id": "5e",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/runservice/jobs.go",
+          "path": "internal/runservice/jobs.go",
           "lineNumber": 164,
           "lineContent": "if err := e.HandleResult(job.ID, result); err != nil {",
           "title": "Process execution result",
@@ -286,7 +286,7 @@
         },
         {
           "id": "5f",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/runservice/result.go",
+          "path": "internal/runservice/result.go",
           "lineNumber": 38,
           "lineContent": "if e.trajCapture != nil {",
           "title": "Check if trajectory capture active",
@@ -294,14 +294,14 @@
         },
         {
           "id": "5g",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/runservice/result.go",
+          "path": "internal/runservice/result.go",
           "lineNumber": 39,
           "lineContent": "capErr := e.trajCapture.CaptureResult(e.ctx, annotated, jobID, e.options.CorrelationID)",
           "title": "Capture result in trajectory",
           "description": "Records tool_result or hook_result event with envelope data"
         }
       ],
-      "traceTextDiagram": "Synchronous Execution with Trajectory Capture\n├── CLI Command Entry\n│   └── executor.ExecuteSync(job) \u003c-- 5a\n│       └── Runservice Jobs Layer\n│           ├── jobStore.ExecutePreparedSkill() \u003c-- 5b\n│           │   └── Jobs Store Layer\n│           │       └── executor.ExecutePrepared() \u003c-- 5c\n│           │           └── Jobs Executor Layer\n│           │               ├── persist.UpdateState(running) \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/jobs/executor/executor.go:284\n│           │               ├── runSkill() invocation \u003c-- 5d\n│           │               │   └── skillExecutor.Execute() \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/jobs/executor/executor.go:318\n│           │               │       └── [skill binary runs]\n│           │               └── handleSuccess() \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/jobs/executor/executor.go:251\n│           │                   └── persist.UpdateState(ok) \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/jobs/executor/executor.go:394\n│           └── HandleResult(jobID, result) \u003c-- 5e\n│               └── Runservice Result Handler\n│                   ├── enforceOutputLimit() \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/runservice/result.go:23\n│                   ├── handleArtifacts() \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/runservice/result.go:25\n│                   ├── trajCapture != nil check \u003c-- 5f\n│                   │   └── trajCapture.CaptureResult() \u003c-- 5g\n│                   │       └── [trajectory event insert]\n│                   ├── PersistCache() \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/runservice/result.go:42\n│                   └── writeEnvelope(stdout) \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/runservice/result.go:52",
+      "traceTextDiagram": "Synchronous Execution with Trajectory Capture\n├── CLI Command Entry\n│   └── executor.ExecuteSync(job) \u003c-- 5a\n│       └── Runservice Jobs Layer\n│           ├── jobStore.ExecutePreparedSkill() \u003c-- 5b\n│           │   └── Jobs Store Layer\n│           │       └── executor.ExecutePrepared() \u003c-- 5c\n│           │           └── Jobs Executor Layer\n│           │               ├── persist.UpdateState(running) \u003c-- internal/storage/jobs/executor/executor.go:284\n│           │               ├── runSkill() invocation \u003c-- 5d\n│           │               │   └── skillExecutor.Execute() \u003c-- internal/storage/jobs/executor/executor.go:318\n│           │               │       └── [skill binary runs]\n│           │               └── handleSuccess() \u003c-- internal/storage/jobs/executor/executor.go:251\n│           │                   └── persist.UpdateState(ok) \u003c-- internal/storage/jobs/executor/executor.go:394\n│           └── HandleResult(jobID, result) \u003c-- 5e\n│               └── Runservice Result Handler\n│                   ├── enforceOutputLimit() \u003c-- internal/runservice/result.go:23\n│                   ├── handleArtifacts() \u003c-- internal/runservice/result.go:25\n│                   ├── trajCapture != nil check \u003c-- 5f\n│                   │   └── trajCapture.CaptureResult() \u003c-- 5g\n│                   │       └── [trajectory event insert]\n│                   ├── PersistCache() \u003c-- internal/runservice/result.go:42\n│                   └── writeEnvelope(stdout) \u003c-- internal/runservice/result.go:52",
       "traceGuide": "## Motivation\n\nWhen users run skills (executable tools) in agentctl, the system needs to **avoid redundant work** by detecting when the same skill with identical inputs has already been executed. Additionally, for training AI agents, the system must **capture detailed execution traces** showing what happened during each run—user requests, tool calls, and results—all linked together by correlation IDs.\n\nThe challenge is coordinating two independent systems: the **jobs system** (which handles execution and deduplication) and the **trajectory capture system** (which records training data), ensuring they work together seamlessly without blocking each other.\n\n## Details\n\n### Synchronous Execution Flow\n\nWhen a non-duplicate job executes synchronously [5a], the system follows a layered delegation pattern. The CLI executor calls into the runservice layer [5b], which delegates to the jobs store [5c], which finally invokes the executor that manages the actual skill binary execution [5d].\n\n### State Management During Execution\n\nBefore running the skill, the executor updates the job state to **\"running\"** in the SQLite database to track progress. The actual skill execution happens via `skillExecutor.Execute()`, which spawns the skill binary as a subprocess and captures stdout/stderr. After successful execution, the state transitions to **\"ok\"** with the result path recorded.\n\n### Result Processing Pipeline\n\nOnce execution completes, `HandleResult()` [5e] orchestrates several critical post-processing steps in a **specific order**:\n\n1. **Output limiting** [5f] runs first—if the result exceeds the configured size limit (default 32KB), it's stored in content-addressed storage (CAS) and replaced with a digest reference\n2. **Artifact handling** extracts and pins any CAS digests from the result to prevent garbage collection\n3. **Trajectory capture** [5g] records the result as an event in the trajectory database, but only if trajectory capture was initialized (requires storage root and workspace configuration)\n4. **Cache persistence** stores the result for future deduplication\n5. **Output emission** writes the final envelope to stdout\n\n### Trajectory Capture Integration\n\nTrajectory capture is **optional and non-blocking**—if it fails, execution continues [5g]. The capture system records the result envelope as a `tool_result` or `hook_result` event, extracts summary data and artifact digests, determines the trajectory outcome (ok/error) based on envelope status, and updates the trajectory record with final status and metadata for later optimization queries.\n\n### Key Design Decisions\n\nThe trajectory capture system uses a **separate SQLite database** from the jobs database, allowing independent evolution and preventing job execution from being blocked by trajectory operations. The result processing order is critical: output limiting must happen before artifact handling to ensure truncation digests get pinned and don't become dangling references."
     },
     {
@@ -311,7 +311,7 @@
       "locations": [
         {
           "id": "6a",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/trajectorycapture/capture.go",
+          "path": "internal/trajectorycapture/capture.go",
           "lineNumber": 278,
           "lineContent": "if err := json.Unmarshal(envBytes, \u0026env); err != nil {",
           "title": "Parse result envelope",
@@ -319,7 +319,7 @@
         },
         {
           "id": "6b",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/trajectorycapture/capture.go",
+          "path": "internal/trajectorycapture/capture.go",
           "lineNumber": 282,
           "lineContent": "kind := trajectory.EventKindToolResult",
           "title": "Determine event kind",
@@ -327,7 +327,7 @@
         },
         {
           "id": "6c",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/trajectorycapture/capture.go",
+          "path": "internal/trajectorycapture/capture.go",
           "lineNumber": 331,
           "lineContent": "artifact := extractArtifactDigest(env.Data)",
           "title": "Extract CAS artifact digest",
@@ -335,7 +335,7 @@
         },
         {
           "id": "6d",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/trajectorycapture/capture.go",
+          "path": "internal/trajectorycapture/capture.go",
           "lineNumber": 356,
           "lineContent": "_, err := c.store.InsertEvent(ctx, trajectory.Event{",
           "title": "Insert result event",
@@ -343,7 +343,7 @@
         },
         {
           "id": "6e",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/trajectorycapture/capture.go",
+          "path": "internal/trajectorycapture/capture.go",
           "lineNumber": 370,
           "lineContent": "if env.Status == envelope.StatusOK {",
           "title": "Determine trajectory outcome",
@@ -351,7 +351,7 @@
         },
         {
           "id": "6f",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/trajectorycapture/capture.go",
+          "path": "internal/trajectorycapture/capture.go",
           "lineNumber": 378,
           "lineContent": "return c.store.UpdateTrajectory(ctx, c.traj)",
           "title": "Update trajectory with final status",
@@ -359,14 +359,14 @@
         },
         {
           "id": "6g",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/storage/trajectory/store.go",
+          "path": "internal/storage/trajectory/store.go",
           "lineNumber": 269,
           "lineContent": "result, err := s.db.ExecContext(ctx, `\nUPDATE trajectories SET\n\troot_request_id = ?, task_ids_json = ?, epic_id = ?, agent_role = ?, job_id = ?,\n\ttrace_id = ?, status = ?, summary = ?, artifact_digest = ?, outcome_json = ?, updated_at = ?, session_id = ?\nWHERE workspace_id = ? AND id = ?`,",
           "title": "Persist trajectory update to SQLite",
           "description": "Updates trajectory record with final status and metadata for optimization queries"
         }
       ],
-      "traceTextDiagram": "Trajectory Result Capture Flow\n├── CaptureResult() entry point \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/trajectorycapture/capture.go:273\n│   ├── Parse result envelope \u003c-- 6a\n│   ├── Determine event kind \u003c-- 6b\n│   │   └── (maps command to event type) \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/trajectorycapture/capture.go:283\n│   ├── Extract artifact digest \u003c-- 6c\n│   │   └── (from env.Data or meta.CASDigest) \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/trajectorycapture/capture.go:332\n│   ├── Build event metadata \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/trajectorycapture/capture.go:336\n│   │   └── (TraceID, JobID, TaskID, etc.)\n│   ├── Insert result event \u003c-- 6d\n│   │   └── store.InsertEvent() \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/trajectorycapture/capture.go:356\n│   │       └── s.db.ExecContext(INSERT) \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/trajectory/store.go:609\n│   ├── Determine trajectory outcome \u003c-- 6e\n│   │   └── (StatusOK → ok, else → error) \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/trajectorycapture/capture.go:371\n│   └── Update trajectory status \u003c-- 6f\n│       └── store.UpdateTrajectory() \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/trajectorycapture/capture.go:378\n│           └── Persist to SQLite \u003c-- 6g\n│               └── s.db.ExecContext(UPDATE) \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/trajectory/store.go:269\n└── Returns error or nil",
+      "traceTextDiagram": "Trajectory Result Capture Flow\n├── CaptureResult() entry point \u003c-- internal/trajectorycapture/capture.go:273\n│   ├── Parse result envelope \u003c-- 6a\n│   ├── Determine event kind \u003c-- 6b\n│   │   └── (maps command to event type) \u003c-- internal/trajectorycapture/capture.go:283\n│   ├── Extract artifact digest \u003c-- 6c\n│   │   └── (from env.Data or meta.CASDigest) \u003c-- internal/trajectorycapture/capture.go:332\n│   ├── Build event metadata \u003c-- internal/trajectorycapture/capture.go:336\n│   │   └── (TraceID, JobID, TaskID, etc.)\n│   ├── Insert result event \u003c-- 6d\n│   │   └── store.InsertEvent() \u003c-- internal/trajectorycapture/capture.go:356\n│   │       └── s.db.ExecContext(INSERT) \u003c-- internal/storage/trajectory/store.go:609\n│   ├── Determine trajectory outcome \u003c-- 6e\n│   │   └── (StatusOK → ok, else → error) \u003c-- internal/trajectorycapture/capture.go:371\n│   └── Update trajectory status \u003c-- 6f\n│       └── store.UpdateTrajectory() \u003c-- internal/trajectorycapture/capture.go:378\n│           └── Persist to SQLite \u003c-- 6g\n│               └── s.db.ExecContext(UPDATE) \u003c-- internal/storage/trajectory/store.go:269\n└── Returns error or nil",
       "traceGuide": "## Motivation\n\nWhen running skills in agentctl, the system needs to capture **execution trajectories** for training and evaluating AI agents. A trajectory is a coherent record of what happened during a run: the user's request, the tools called, and the final result. This data feeds into optimization systems that learn from past executions.\n\nThe challenge is **capturing results at the right moment** with the right metadata. When a skill completes execution [5g], the system must record the outcome as a normalized event, extract any CAS artifact references, determine success/failure status, and update the trajectory record—all while maintaining correlation with the original job and user request.\n\n## Details\n\n**Result capture starts after skill execution** [6a]. The system receives the result envelope (JSON output from the skill) and parses it to extract status, command, and data fields. This envelope contains everything needed to understand what the skill produced.\n\n**Event kind mapping** [6b] determines how to classify this result. A `hooks/*` command becomes a `hook_result` event, while `todo/manage` operations map to `task_transition` or `review_request` events depending on the operation. Most skills produce `tool_result` events. This classification enables downstream queries to filter by event type.\n\n**Artifact extraction** [6c] checks if the result references content-addressed storage. Large outputs are stored in CAS and referenced by SHA256 digest rather than inlined. The system looks in `env.Data.artifact` or `env.Meta.CASDigest` to find these references, which get stored in the event's `data_artifact` field.\n\n**Event insertion** [6d] creates a `trajectory_events` record with inline summary data (truncated for preview), the artifact digest if present, and correlation metadata (trace ID, job ID, task ID). This event becomes part of the trajectory's timeline, queryable by kind, timestamp, or correlation IDs.\n\n**Status propagation** [6e] maps the envelope's status field to trajectory status. `StatusOK` becomes `trajectory.StatusOK`, while errors become `trajectory.StatusError`. The system also extracts the summary text from the result data to populate the trajectory's summary field.\n\n**Trajectory update** [6f] persists the final state. The `UpdateTrajectory` call [6g] writes the status, summary, and any newly discovered task IDs back to the `trajectories` table. This makes the trajectory queryable by outcome for optimization purposes—successful runs can be retrieved as training examples.\n\nThe entire flow is **best-effort and non-blocking**. If trajectory capture fails, the skill result still gets returned to the user. Trajectory data enriches the system but doesn't block primary execution paths."
     }
   ],

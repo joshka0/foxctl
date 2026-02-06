@@ -10,14 +10,15 @@ import (
 	"strings"
 	"time"
 
-	dstools "github.com/XiaoConstantine/dspy-go/pkg/tools"
 	models "github.com/XiaoConstantine/mcp-go/pkg/model"
+
+	tooling "github.com/jkatigb/agentctl/internal/tooling"
 )
 
 // registerTestTools registers test execution tools.
 func (r *Registry) registerTestTools() error {
 	// tests.run - run tests in the workspace
-	runTool := dstools.NewFuncTool(
+	runTool := tooling.NewFuncTool(
 		"tests.run",
 		"Run tests in the workspace. Supports Go, Python (pytest), and JavaScript (jest/npm test).",
 		models.InputSchema{

@@ -1,6 +1,7 @@
 package executor
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -18,6 +19,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/platform/logging"
 	"github.com/jkatigb/agentctl/internal/platform/metrics"
 	"github.com/jkatigb/agentctl/internal/platform/workspace"
+	"github.com/jkatigb/agentctl/internal/storage/cas"
 	"github.com/jkatigb/agentctl/internal/storage/jobs/types"
 	"github.com/oklog/ulid/v2"
 	"github.com/rs/zerolog"
@@ -50,6 +52,7 @@ type Executor struct {
 	skillExecutor   execution.SkillExecutor
 	logger          zerolog.Logger
 	progressFactory func(jobDir string) (*progressWriter, error)
+	casPath         string
 }
 
 // Option configures an Executor instance.
@@ -75,6 +78,13 @@ func WithSkillExecutor(executor execution.SkillExecutor) Option {
 func WithLogger(logger zerolog.Logger) Option {
 	return func(e *Executor) {
 		e.logger = logger
+	}
+}
+
+// WithCASPath configures the CAS root path for stderr artifact capture.
+func WithCASPath(path string) Option {
+	return func(e *Executor) {
+		e.casPath = strings.TrimSpace(path)
 	}
 }
 
@@ -229,6 +239,7 @@ func (e *Executor) executeSkill(ctx context.Context, opts executeOptions) ([]byt
 	duration := time.Since(start)
 	metrics.Global().RecordExecutionTime(duration)
 	e.writeStderrLog(opts.JobID, stderr)
+	stderrDigest := e.persistStderrArtifact(opts.JobID, stderr)
 
 	// Wait for enrichment to complete (runs in parallel with skill execution)
 	eventBuilder := baseBuilder
@@ -239,6 +250,9 @@ func (e *Executor) executeSkill(ctx context.Context, opts executeOptions) ([]byt
 		}
 	case <-ctx.Done():
 	case <-time.After(2 * time.Second):
+	}
+	if stderrDigest != "" {
+		eventBuilder = eventBuilder.WithStderrArtifact(stderrDigest)
 	}
 
 	if runErr != nil {
@@ -439,6 +453,32 @@ func (e *Executor) writeStderrLog(jobID string, stderr []byte) {
 			Err(writeErr).
 			Msg("stderr log write failed")
 	}
+}
+
+func (e *Executor) persistStderrArtifact(jobID string, stderr []byte) string {
+	if len(stderr) == 0 {
+		return ""
+	}
+	if strings.TrimSpace(e.casPath) == "" {
+		return ""
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	store, err := cas.NewStore(e.casPath)
+	if err != nil {
+		e.logger.Warn().Err(err).Str("job_id", jobID).Msg("stderr cas open failed")
+		return ""
+	}
+	defer func() { errs.Ignore(store.Close(), "close cas store") }()
+
+	obj, err := store.Put(ctx, bytes.NewReader(stderr), "text/plain", []string{"stderr", "job:" + jobID})
+	if err != nil {
+		e.logger.Warn().Err(err).Str("job_id", jobID).Msg("stderr cas put failed")
+		return ""
+	}
+	return obj.Digest
 }
 
 func (e *Executor) warnProgress(jobID, phase string, err error) {

@@ -6,7 +6,7 @@ import (
 	"errors"
 	"fmt"
 
-	dstools "github.com/XiaoConstantine/dspy-go/pkg/tools"
+	tooling "github.com/jkatigb/agentctl/internal/tooling"
 	models "github.com/XiaoConstantine/mcp-go/pkg/model"
 
 	"github.com/jkatigb/agentctl/internal/domain/skill"
@@ -18,7 +18,7 @@ import (
 // registerMemoryTools registers memory access tools.
 func (r *Registry) registerMemoryTools() error {
 	// memory.query - search named memories
-	queryTool := dstools.NewFuncTool(
+	queryTool := tooling.NewFuncTool(
 		"memory.query",
 		"Query stored memories (gotchas, decisions, learnings, insights) for relevant context. Use this to find previously recorded knowledge about the codebase.",
 		models.InputSchema{
@@ -50,7 +50,7 @@ func (r *Registry) registerMemoryTools() error {
 	}
 
 	// memory.put - store new memory
-	putTool := dstools.NewFuncTool(
+	putTool := tooling.NewFuncTool(
 		"memory.put",
 		"Store a new memory (gotcha, decision, learning, insight) for future reference. Use this to record important findings about the codebase.",
 		models.InputSchema{

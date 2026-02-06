@@ -6,7 +6,6 @@ import (
 	"errors"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/jkatigb/agentctl/internal/hooks"
 )
@@ -226,42 +225,6 @@ func TestToolRunner_List_NilExecutor(t *testing.T) {
 	}
 }
 
-// --- DspyToolExecutorAdapter Tests ---
-
-func TestDspyToolExecutorAdapter_Execute(t *testing.T) {
-	called := false
-	adapter := NewDspyToolExecutorAdapter(
-		func(ctx context.Context, name string, args json.RawMessage) (string, error) {
-			called = true
-			if name != "test.tool" {
-				t.Errorf("expected test.tool, got %s", name)
-			}
-			return "result", nil
-		},
-		nil,
-	)
-
-	result, err := adapter.Execute(context.Background(), "test.tool", json.RawMessage(`{}`))
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if !called {
-		t.Error("execute function was not called")
-	}
-	if result != "result" {
-		t.Errorf("expected result, got %s", result)
-	}
-}
-
-func TestDspyToolExecutorAdapter_Execute_NilFunc(t *testing.T) {
-	adapter := NewDspyToolExecutorAdapter(nil, nil)
-
-	_, err := adapter.Execute(context.Background(), "test.tool", json.RawMessage(`{}`))
-	if err == nil {
-		t.Fatal("expected error for nil execute function")
-	}
-}
-
 // --- Engine Types Tests ---
 
 func TestMessage_Factories(t *testing.T) {
@@ -350,139 +313,6 @@ func TestEngineConfig_Options(t *testing.T) {
 	WithMaxTokens(4096)(&cfg)
 	if cfg.MaxTokens != 4096 {
 		t.Errorf("expected 4096, got %d", cfg.MaxTokens)
-	}
-}
-
-// --- DSPyAdapter Helper Tests ---
-
-func TestExtractResultFromMap(t *testing.T) {
-	tests := []struct {
-		name     string
-		input    map[string]any
-		expected string
-	}{
-		{
-			name:     "result key",
-			input:    map[string]any{"result": "hello"},
-			expected: "hello",
-		},
-		{
-			name:     "response key",
-			input:    map[string]any{"response": "world"},
-			expected: "world",
-		},
-		{
-			name:     "answer key",
-			input:    map[string]any{"answer": "42"},
-			expected: "42",
-		},
-		{
-			name:     "output key",
-			input:    map[string]any{"output": "data"},
-			expected: "data",
-		},
-		{
-			name:     "nested text",
-			input:    map[string]any{"result": map[string]any{"text": "nested"}},
-			expected: "nested",
-		},
-		{
-			name:     "nested content",
-			input:    map[string]any{"result": map[string]any{"content": "content val"}},
-			expected: "content val",
-		},
-		{
-			name:     "nested map as json",
-			input:    map[string]any{"result": map[string]any{"custom": "field"}},
-			expected: `{"custom":"field"}`,
-		},
-		{
-			name:     "non-string value",
-			input:    map[string]any{"result": 123},
-			expected: "123",
-		},
-		{
-			name:     "unknown keys - serialize all",
-			input:    map[string]any{"custom_key": "value"},
-			expected: `{"custom_key":"value"}`,
-		},
-		{
-			name:     "empty map",
-			input:    map[string]any{},
-			expected: "{}",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := extractResultFromMap(tt.input)
-			if result != tt.expected {
-				t.Errorf("expected %q, got %q", tt.expected, result)
-			}
-		})
-	}
-}
-
-// --- DSPyAdapter Config Tests ---
-
-func TestDSPyAdapterConfig_Defaults(t *testing.T) {
-	cfg := DefaultDSPyAdapterConfig()
-
-	if cfg.LLMProvider != "gemini" {
-		t.Errorf("expected gemini, got %s", cfg.LLMProvider)
-	}
-	if cfg.LLMModel != "gemini-2.0-flash" {
-		t.Errorf("expected gemini-2.0-flash, got %s", cfg.LLMModel)
-	}
-	if cfg.MaxIterations != 50 {
-		t.Errorf("expected 50, got %d", cfg.MaxIterations)
-	}
-	if cfg.Timeout != 30*time.Minute {
-		t.Errorf("expected 30m, got %v", cfg.Timeout)
-	}
-}
-
-func TestDSPyAdapterConfig_Options(t *testing.T) {
-	cfg := DefaultDSPyAdapterConfig()
-
-	WithDSPyLLMProvider("openai")(&cfg)
-	if cfg.LLMProvider != "openai" {
-		t.Errorf("expected openai, got %s", cfg.LLMProvider)
-	}
-
-	WithDSPyLLMModel("gpt-4")(&cfg)
-	if cfg.LLMModel != "gpt-4" {
-		t.Errorf("expected gpt-4, got %s", cfg.LLMModel)
-	}
-
-	WithDSPyLLMAPIKey("test-key")(&cfg)
-	if cfg.LLMAPIKey != "test-key" {
-		t.Errorf("expected test-key, got %s", cfg.LLMAPIKey)
-	}
-
-	WithDSPyMaxIterations(100)(&cfg)
-	if cfg.MaxIterations != 100 {
-		t.Errorf("expected 100, got %d", cfg.MaxIterations)
-	}
-
-	WithDSPyTimeout(10 * time.Minute)(&cfg)
-	if cfg.Timeout != 10*time.Minute {
-		t.Errorf("expected 10m, got %v", cfg.Timeout)
-	}
-
-	WithDSPyAgentID("my-agent")(&cfg)
-	if cfg.AgentID != "my-agent" {
-		t.Errorf("expected my-agent, got %s", cfg.AgentID)
-	}
-
-	WithDSPyAgentName("My Agent")(&cfg)
-	if cfg.AgentName != "My Agent" {
-		t.Errorf("expected My Agent, got %s", cfg.AgentName)
-	}
-
-	WithDSPySystemPrompt("Be helpful")(&cfg)
-	if cfg.SystemPrompt != "Be helpful" {
-		t.Errorf("expected Be helpful, got %s", cfg.SystemPrompt)
 	}
 }
 

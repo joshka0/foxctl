@@ -3,12 +3,14 @@ package actor
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/rs/zerolog"
 
 	agenttypes "github.com/jkatigb/agentctl/internal/agent/types"
+	"github.com/jkatigb/agentctl/internal/agentprompt"
 	agentdomain "github.com/jkatigb/agentctl/internal/domain/agent"
 	"github.com/jkatigb/agentctl/internal/domain/envelope"
 	llmproviders "github.com/jkatigb/agentctl/internal/providers/llm"
@@ -64,7 +66,7 @@ func TestDefaultModelForProvider(t *testing.T) {
 	}
 }
 
-func TestBuildAgentSignature(t *testing.T) {
+func TestAgentInstruction(t *testing.T) {
 	tests := []struct {
 		role     agenttypes.AgentRole
 		contains string
@@ -77,90 +79,12 @@ func TestBuildAgentSignature(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(string(tt.role), func(t *testing.T) {
-			sig := buildAgentSignature(tt.role)
-			if sig == nil {
-				t.Fatal("signature is nil")
-			}
-			// The signature should have an instruction
-			if sig.Instruction == "" {
+			instruction := agentprompt.Instruction(tt.role)
+			if instruction == "" {
 				t.Error("instruction is empty")
 			}
-		})
-	}
-}
-
-func TestExtractResult(t *testing.T) {
-	tests := []struct {
-		name      string
-		resultMap map[string]any
-		want      string
-	}{
-		{
-			name:      "nil map",
-			resultMap: nil,
-			want:      "Task completed",
-		},
-		{
-			name: "result field",
-			resultMap: map[string]any{
-				"result": "The answer is 42",
-			},
-			want: "The answer is 42",
-		},
-		{
-			name: "answer field",
-			resultMap: map[string]any{
-				"answer": "Yes, that's correct",
-			},
-			want: "Yes, that's correct",
-		},
-		{
-			name: "output field",
-			resultMap: map[string]any{
-				"output": "Output value",
-			},
-			want: "Output value",
-		},
-		{
-			name: "thought field",
-			resultMap: map[string]any{
-				"thought": "I think therefore I am",
-			},
-			want: "I think therefore I am",
-		},
-		{
-			name: "priority: result over answer",
-			resultMap: map[string]any{
-				"result": "Result value",
-				"answer": "Answer value",
-			},
-			want: "Result value",
-		},
-		{
-			name: "skip internal fields",
-			resultMap: map[string]any{
-				"action":               "search",
-				"observation":          "found something",
-				"conversation_context": "internal state",
-				"custom_field":         "user data",
-			},
-			want: "map[custom_field:user data]",
-		},
-		{
-			name: "empty result uses thought",
-			resultMap: map[string]any{
-				"result":  "",
-				"thought": "My reasoning",
-			},
-			want: "My reasoning",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := extractResult(tt.resultMap)
-			if got != tt.want {
-				t.Errorf("extractResult() = %q, want %q", got, tt.want)
+			if !strings.Contains(instruction, tt.contains) {
+				t.Errorf("instruction should contain %q", tt.contains)
 			}
 		})
 	}

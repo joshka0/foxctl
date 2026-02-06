@@ -22,7 +22,7 @@ func NewQueryEngine(store *Store) *QueryEngine {
 // - Flow: run FTS → on syntax error retry with quoted query
 // - FailureModes: FTS query errors, store errors
 // - Related: Store.SearchFTS, quoteFTSQuery
-// - Keywords: repo.index.search, fts5, query, nodes, SearchFTS
+// - Keywords: repo_index_search, fts5, query, nodes, SearchFTS
 func (q *QueryEngine) Search(ctx context.Context, query string, limit int) ([]Node, error) {
 	if q == nil || q.store == nil {
 		return nil, ErrNotFound
@@ -36,6 +36,27 @@ func (q *QueryEngine) Search(ctx context.Context, query string, limit int) ([]No
 		return nil, err
 	}
 	results, retryErr := q.store.SearchFTS(ctx, fallback, limit)
+	if retryErr != nil {
+		return nil, retryErr
+	}
+	return results, nil
+}
+
+// SearchScored performs an FTS search over nodes and returns BM25 scores.
+// Lower BM25 is better; callers should normalize as needed.
+func (q *QueryEngine) SearchScored(ctx context.Context, query string, limit int) ([]ScoredNode, error) {
+	if q == nil || q.store == nil {
+		return nil, ErrNotFound
+	}
+	results, err := q.store.SearchFTSScored(ctx, query, limit)
+	if err == nil || !isFTSSyntaxError(err) {
+		return results, err
+	}
+	fallback := quoteFTSQuery(query)
+	if fallback == "" || fallback == query {
+		return nil, err
+	}
+	results, retryErr := q.store.SearchFTSScored(ctx, fallback, limit)
 	if retryErr != nil {
 		return nil, retryErr
 	}
@@ -77,7 +98,7 @@ func (q *QueryEngine) Open(ctx context.Context, id string) (Node, error) {
 // - Flow: normalize options → BFS by depth → fetch edges → collect nodes/edges
 // - FailureModes: edge fetch errors, store errors
 // - Related: GetOutgoingEdges, GetIncomingEdges, Store.GetNodes
-// - Keywords: repo.index.expand, seeds, depth, budget, edges, nodes
+// - Keywords: repo_index_expand, seeds, depth, budget, edges, nodes
 func (q *QueryEngine) Expand(ctx context.Context, seeds []string, opts ExpandOptions) (ExpandResult, error) {
 	if q == nil || q.store == nil {
 		return ExpandResult{}, ErrNotFound

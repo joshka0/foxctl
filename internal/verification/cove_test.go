@@ -332,43 +332,6 @@ func TestExtractDraftOutput(t *testing.T) {
 	}
 }
 
-func TestExtractStringResult(t *testing.T) {
-	tests := []struct {
-		name       string
-		result     map[string]any
-		primaryKey string
-		want       string
-	}{
-		{
-			name:       "nil result",
-			result:     nil,
-			primaryKey: "answer",
-			want:       "",
-		},
-		{
-			name:       "primary key exists",
-			result:     map[string]any{"answer": "the answer"},
-			primaryKey: "answer",
-			want:       "the answer",
-		},
-		{
-			name:       "fallback to result",
-			result:     map[string]any{"result": "the result"},
-			primaryKey: "nonexistent",
-			want:       "the result",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := extractStringResult(tt.result, tt.primaryKey)
-			if got != tt.want {
-				t.Errorf("extractStringResult() = %q, want %q", got, tt.want)
-			}
-		})
-	}
-}
-
 func TestParseCorrections(t *testing.T) {
 	input := `Original: wrong claim -> Corrected: right claim
 No corrections needed

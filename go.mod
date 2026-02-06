@@ -5,7 +5,6 @@ go 1.25.0
 require (
 	github.com/BurntSushi/toml v1.5.0
 	github.com/PuerkitoBio/goquery v1.11.0
-	github.com/XiaoConstantine/dspy-go v0.74.0
 	github.com/XiaoConstantine/mcp-go v0.3.1
 	github.com/bmatcuk/doublestar/v4 v4.9.1
 	github.com/charmbracelet/bubbles v0.21.0
@@ -36,6 +35,7 @@ require (
 	golang.org/x/net v0.47.0
 	golang.org/x/sync v0.19.0
 	golang.org/x/text v0.32.0
+	golang.org/x/tools v0.39.0
 	gonum.org/v1/gonum v0.16.0
 	gopkg.in/yaml.v3 v3.0.1
 	modernc.org/sqlite v1.27.0
@@ -61,7 +61,6 @@ require (
 	github.com/alingse/asasalint v0.0.11 // indirect
 	github.com/alingse/nilnesserr v0.2.0 // indirect
 	github.com/andybalholm/cascadia v1.3.3 // indirect
-	github.com/anthropics/anthropic-sdk-go v1.19.0 // indirect
 	github.com/antlr4-go/antlr/v4 v4.13.1 // indirect
 	github.com/ashanbrown/forbidigo v1.6.0 // indirect
 	github.com/ashanbrown/makezero v1.2.0 // indirect
@@ -218,10 +217,6 @@ require (
 	github.com/subosito/gotenv v1.6.0 // indirect
 	github.com/tdakkota/asciicheck v0.4.1 // indirect
 	github.com/tetafro/godot v1.5.0 // indirect
-	github.com/tidwall/gjson v1.18.0 // indirect
-	github.com/tidwall/match v1.2.0 // indirect
-	github.com/tidwall/pretty v1.2.1 // indirect
-	github.com/tidwall/sjson v1.2.5 // indirect
 	github.com/timakin/bodyclose v0.0.0-20241222091800-1db5c5ca4d67 // indirect
 	github.com/timonwong/loggercheck v0.11.0 // indirect
 	github.com/tomarrell/wrapcheck/v2 v2.11.0 // indirect
@@ -250,8 +245,6 @@ require (
 	golang.org/x/exp/typeparams v0.0.0-20250210185358-939b2ce775ac // indirect
 	golang.org/x/mod v0.30.0 // indirect
 	golang.org/x/sys v0.39.0 // indirect
-	golang.org/x/tools v0.39.0 // indirect
-	google.golang.org/genproto/googleapis/rpc v0.0.0-20251222181119-0a764e51fe1b // indirect
 	google.golang.org/protobuf v1.36.11 // indirect
 	gopkg.in/yaml.v2 v2.4.0 // indirect
 	honnef.co/go/tools v0.6.1 // indirect

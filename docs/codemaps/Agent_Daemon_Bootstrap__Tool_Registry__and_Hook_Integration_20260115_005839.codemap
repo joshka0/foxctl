@@ -18,7 +18,7 @@
       "locations": [
         {
           "id": "1a",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/agent/daemon/daemon.go",
+          "path": "internal/agent/daemon/daemon.go",
           "lineNumber": 37,
           "lineContent": "func Run(ctx context.Context, opts Options) error {",
           "title": "Daemon entry point",
@@ -26,7 +26,7 @@
         },
         {
           "id": "1b",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/agent/daemon/daemon.go",
+          "path": "internal/agent/daemon/daemon.go",
           "lineNumber": 115,
           "lineContent": "traceID := ulid.Make().String()",
           "title": "Trace ID generation",
@@ -34,7 +34,7 @@
         },
         {
           "id": "1c",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/agent/daemon/daemon.go",
+          "path": "internal/agent/daemon/daemon.go",
           "lineNumber": 158,
           "lineContent": "registry, err := tools.NewRegistry(toolsCfg, recorder)",
           "title": "Tool registry creation",
@@ -42,7 +42,7 @@
         },
         {
           "id": "1d",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/agent/daemon/daemon.go",
+          "path": "internal/agent/daemon/daemon.go",
           "lineNumber": 168,
           "lineContent": "dspyAgent, err = createAgent(ctx, agentRecord, registry)",
           "title": "DSPy agent creation",
@@ -50,7 +50,7 @@
         },
         {
           "id": "1e",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/agent/daemon/daemon.go",
+          "path": "internal/agent/daemon/daemon.go",
           "lineNumber": 395,
           "lineContent": "for _, tool := range registry.List() {",
           "title": "Tool registration loop",
@@ -58,7 +58,7 @@
         },
         {
           "id": "1f",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/agent/daemon/daemon.go",
+          "path": "internal/agent/daemon/daemon.go",
           "lineNumber": 396,
           "lineContent": "if err := dspyAgent.RegisterTool(tool); err != nil {",
           "title": "Tool registration to DSPy",
@@ -66,14 +66,14 @@
         },
         {
           "id": "1g",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/agent/daemon/daemon.go",
+          "path": "internal/agent/daemon/daemon.go",
           "lineNumber": 246,
           "lineContent": "messages, err := mailboxStore.Poll(ctx, agentRecord.Namespace, messageLeaseDuration, opts.MaxPollMessages)",
           "title": "Message polling",
           "description": "Daemon enters poll loop to receive and process agent messages"
         }
       ],
-      "traceTextDiagram": "Agent Daemon Bootstrap Flow\n├── daemon.Run() entry \u003c-- 1a\n│   ├── Open storage (agents, mailbox, etc.) \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/agent/daemon/daemon.go:39\n│   ├── Load agent record from store \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/agent/daemon/daemon.go:95\n│   ├── Generate trace ID \u003c-- 1b\n│   ├── Build tools.Config with HookDispatcher \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/agent/daemon/daemon.go:118\n│   ├── tools.NewRegistry() \u003c-- 1c\n│   │   └── Register all tools (fs, code, etc.) \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/agent/tools/tools.go:209\n│   ├── createAgent() \u003c-- 1d\n│   │   ├── Create ReActAgent with LLM \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/agent/daemon/daemon.go:324\n│   │   ├── agent.Initialize(llm, signature) \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/agent/daemon/daemon.go:404\n│   │   └── Tool registration loop \u003c-- 1e\n│   │       └── dspyAgent.RegisterTool() \u003c-- 1f\n│   ├── Start heartbeat ticker \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/agent/daemon/daemon.go:175\n│   └── Poll loop \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/agent/daemon/daemon.go:226\n│       └── mailboxStore.Poll() \u003c-- 1g\n│           └── Process messages (handleAsk/Cmd) \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/agent/daemon/daemon.go:280",
+      "traceTextDiagram": "Agent Daemon Bootstrap Flow\n├── daemon.Run() entry \u003c-- 1a\n│   ├── Open storage (agents, mailbox, etc.) \u003c-- internal/agent/daemon/daemon.go:39\n│   ├── Load agent record from store \u003c-- internal/agent/daemon/daemon.go:95\n│   ├── Generate trace ID \u003c-- 1b\n│   ├── Build tools.Config with HookDispatcher \u003c-- internal/agent/daemon/daemon.go:118\n│   ├── tools.NewRegistry() \u003c-- 1c\n│   │   └── Register all tools (fs, code, etc.) \u003c-- internal/agent/tools/tools.go:209\n│   ├── createAgent() \u003c-- 1d\n│   │   ├── Create ReActAgent with LLM \u003c-- internal/agent/daemon/daemon.go:324\n│   │   ├── agent.Initialize(llm, signature) \u003c-- internal/agent/daemon/daemon.go:404\n│   │   └── Tool registration loop \u003c-- 1e\n│   │       └── dspyAgent.RegisterTool() \u003c-- 1f\n│   ├── Start heartbeat ticker \u003c-- internal/agent/daemon/daemon.go:175\n│   └── Poll loop \u003c-- internal/agent/daemon/daemon.go:226\n│       └── mailboxStore.Poll() \u003c-- 1g\n│           └── Process messages (handleAsk/Cmd) \u003c-- internal/agent/daemon/daemon.go:280",
       "traceGuide": "## Motivation\n\nThe agent daemon is a **long-running process** that runs autonomous AI agents powered by DSPy's ReActAgent framework. The problem: agents need to **receive work requests** via a durable message queue, **execute tasks** using LLM-driven tool calls, and **send back results** - all while supporting **hook-based interception** of tool calls for validation, mutation, and observability.\n\nThe daemon solves this by bootstrapping a complete agent runtime: opening persistent stores for messages and state, creating a tool registry with hook integration, initializing a DSPy agent with an LLM, registering all available tools, and entering a poll loop to process incoming messages.\n\n## Details\n\n### Bootstrap Sequence\n\nThe daemon starts at `daemon.Run()` [1a], which orchestrates the entire initialization:\n\n1. **Storage initialization**: Opens multiple SQLite-backed stores (agents, mailbox, tasks, blackboard) to persist agent state and messages\n2. **Agent record loading**: Retrieves the agent's configuration including role, policy, and allowed skills\n3. **Trace ID generation** [1b]: Creates a ULID for correlating all tool calls and trajectory events in this daemon session\n4. **Tool registry creation** [1c]: Instantiates `tools.NewRegistry()` with a config that includes the `HookDispatcher` - this is critical because it enables **PreToolUse and PostToolUse hooks** to intercept every tool call\n\n### Tool Registration\n\nThe registry automatically registers **filesystem tools** (read_file, list_dir), **code tools** (search, symbol_search), **edit tools** (apply_patch), and others. Each tool function is **wrapped with telemetry and hook dispatch** before being exposed to the LLM.\n\n### Agent Creation\n\n`createAgent()` [1d] builds the DSPy ReActAgent:\n- Creates a `react.NewReActAgent` with max iterations and timeout\n- Initializes it with an LLM (Gemini, OpenAI, Anthropic, etc.) based on configuration\n- Builds a signature defining the agent's role and expected input/output format\n- **Registers all tools** from the registry [1e, 1f] by iterating through `registry.List()` and calling `dspyAgent.RegisterTool()` for each one\n\nThis registration step is what makes tools **available to the LLM** - the ReActAgent will include tool descriptions in its prompts and parse tool calls from LLM responses.\n\n### Message Processing Loop\n\nAfter initialization, the daemon enters a **poll loop** [1g] that:\n- Calls `mailboxStore.Poll()` to fetch messages with a lease timeout\n- Routes messages by type: `MessageTypeAsk` for questions, `MessageTypeCmd` for commands, `MessageTypeConsoleAsk` for interactive sessions\n- Invokes `dspyAgent.Execute()` which triggers the **ReAct loop**: the LLM thinks, calls tools (which trigger hooks), observes results, and repeats until it produces a final answer\n- Sends reply messages back through the mailbox\n\nThe **hook dispatcher** configured in the tool registry [1c] intercepts every tool call, allowing skills to validate paths, block dangerous operations, inject context, or record patterns for optimization."
     },
     {
@@ -83,7 +83,7 @@
       "locations": [
         {
           "id": "2a",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/agent/tools/tools.go",
+          "path": "internal/agent/tools/tools.go",
           "lineNumber": 140,
           "lineContent": "func NewRegistry(cfg Config, recorder TelemetryRecorder) (*Registry, error) {",
           "title": "Registry constructor",
@@ -91,7 +91,7 @@
         },
         {
           "id": "2b",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/agent/tools/tools.go",
+          "path": "internal/agent/tools/tools.go",
           "lineNumber": 212,
           "lineContent": "if err := r.registerFSTools(); err != nil {",
           "title": "Filesystem tools registration",
@@ -99,7 +99,7 @@
         },
         {
           "id": "2c",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/agent/tools/fs_tools.go",
+          "path": "internal/agent/tools/fs_tools.go",
           "lineNumber": 36,
           "lineContent": "r.wrapWithTelemetry(\"fs.read_file\", r.readFile),",
           "title": "Tool wrapping",
@@ -107,7 +107,7 @@
         },
         {
           "id": "2d",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/agent/tools/tools.go",
+          "path": "internal/agent/tools/tools.go",
           "lineNumber": 287,
           "lineContent": "return func(ctx context.Context, args map[string]any) (*models.CallToolResult, error) {",
           "title": "Wrapped tool function",
@@ -115,7 +115,7 @@
         },
         {
           "id": "2e",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/agent/tools/tools.go",
+          "path": "internal/agent/tools/tools.go",
           "lineNumber": 334,
           "lineContent": "preOutput, err := r.dispatchPreToolUse(ctx, name, argsForCall)",
           "title": "PreToolUse hook dispatch",
@@ -123,7 +123,7 @@
         },
         {
           "id": "2f",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/agent/tools/tools.go",
+          "path": "internal/agent/tools/tools.go",
           "lineNumber": 363,
           "lineContent": "result, callErr = fn(ctx, argsForCall)",
           "title": "Actual tool execution",
@@ -131,14 +131,14 @@
         },
         {
           "id": "2g",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/agent/tools/tools.go",
+          "path": "internal/agent/tools/tools.go",
           "lineNumber": 328,
           "lineContent": "r.dispatchPostToolUse(ctx, name, argsForCall, result, callErr, duration)",
           "title": "PostToolUse hook dispatch",
           "description": "Dispatches PostToolUse hook after execution for observation and actions"
         }
       ],
-      "traceTextDiagram": "Tool Registry Creation and Registration\n├── NewRegistry() constructor \u003c-- 2a\n│   ├── Initialize PathValidator \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/agent/tools/tools.go:190\n│   ├── Create InMemoryToolRegistry \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/agent/tools/tools.go:196\n│   └── Register tool categories\n│       ├── registerAgentTools() \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/agent/tools/tools.go:209\n│       ├── registerFSTools() \u003c-- 2b\n│       │   └── Create fs.read_file tool \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/agent/tools/fs_tools.go:19\n│       │       ├── Define InputSchema \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/agent/tools/fs_tools.go:22\n│       │       └── wrapWithTelemetry() \u003c-- 2c\n│       │           └── Returns wrapped func \u003c-- 2d\n│       ├── registerCodeTools() \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/agent/tools/tools.go:215\n│       ├── registerEditTools() \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/agent/tools/tools.go:218\n│       ├── registerTestTools() \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/agent/tools/tools.go:221\n│       └── registerMailTools() \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/agent/tools/tools.go:227\n└── Wrapped Tool Execution Flow\n    ├── Tool invoked by DSPy agent\n    ├── dispatchPreToolUse() \u003c-- 2e\n    │   └── HookDispatcher.Dispatch() \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/agent/tools/tools.go:404\n    ├── Execute tool fn(ctx, args) \u003c-- 2f\n    └── dispatchPostToolUse() \u003c-- 2g\n        └── HookDispatcher.Dispatch() \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/agent/tools/tools.go:459",
+      "traceTextDiagram": "Tool Registry Creation and Registration\n├── NewRegistry() constructor \u003c-- 2a\n│   ├── Initialize PathValidator \u003c-- internal/agent/tools/tools.go:190\n│   ├── Create InMemoryToolRegistry \u003c-- internal/agent/tools/tools.go:196\n│   └── Register tool categories\n│       ├── registerAgentTools() \u003c-- internal/agent/tools/tools.go:209\n│       ├── registerFSTools() \u003c-- 2b\n│       │   └── Create fs.read_file tool \u003c-- internal/agent/tools/fs_tools.go:19\n│       │       ├── Define InputSchema \u003c-- internal/agent/tools/fs_tools.go:22\n│       │       └── wrapWithTelemetry() \u003c-- 2c\n│       │           └── Returns wrapped func \u003c-- 2d\n│       ├── registerCodeTools() \u003c-- internal/agent/tools/tools.go:215\n│       ├── registerEditTools() \u003c-- internal/agent/tools/tools.go:218\n│       ├── registerTestTools() \u003c-- internal/agent/tools/tools.go:221\n│       └── registerMailTools() \u003c-- internal/agent/tools/tools.go:227\n└── Wrapped Tool Execution Flow\n    ├── Tool invoked by DSPy agent\n    ├── dispatchPreToolUse() \u003c-- 2e\n    │   └── HookDispatcher.Dispatch() \u003c-- internal/agent/tools/tools.go:404\n    ├── Execute tool fn(ctx, args) \u003c-- 2f\n    └── dispatchPostToolUse() \u003c-- 2g\n        └── HookDispatcher.Dispatch() \u003c-- internal/agent/tools/tools.go:459",
       "traceGuide": "## Motivation\n\nThe agent daemon needs to expose **filesystem, code search, and editing capabilities** to an LLM-driven agent (DSPy ReActAgent). However, these operations require **security validation, observability, and extensibility** through hooks. The tool registry solves this by wrapping each tool function with a **telemetry and hook dispatch layer** [2c] before registering it with the DSPy agent, enabling interception of every tool call for validation, mutation, and observation without modifying the core tool implementations.\n\n## Details\n\n### Registry Construction\n\nThe `NewRegistry` function [2a] creates a tool registry that:\n- Initializes a **PathValidator** to enforce workspace boundaries and prevent path traversal attacks\n- Creates an in-memory tool registry from dspy-go\n- Holds a reference to the **HookDispatcher** passed in via config for tool call interception\n\n### Tool Registration\n\nRegistration happens in phases [2b]:\n1. **registerFSTools** registers `fs.read_file` and `fs.list_dir` [2b]\n2. **registerCodeTools** registers `code.search` and `code.symbol_search`\n3. **registerEditTools** registers `edit.apply_patch` and `edit.apply_structured_diff`\n4. Additional categories: agent tools, test tools, mail tools, blackboard tools\n\nEach tool is created with `dstools.NewFuncTool` which takes a name, description, JSON schema, and the **wrapped function** [2c].\n\n### Tool Wrapping\n\nThe `wrapWithTelemetry` function [2c] returns a **closure** [2d] that intercepts every tool call:\n\n1. **PreToolUse Hook Dispatch** [2e]: Calls `HookDispatcher.Dispatch` with `EventPreToolUse`, allowing hooks to:\n   - Block the tool call entirely\n   - Mutate the tool arguments\n   - Inject context for the LLM\n\n2. **Tool Execution** [2f]: If approved, executes the actual tool implementation (e.g., `r.readFile`)\n\n3. **PostToolUse Hook Dispatch** [2g]: Calls `HookDispatcher.Dispatch` with `EventPostToolUse`, allowing hooks to:\n   - Observe the tool result\n   - Enqueue follow-up actions\n   - Record patterns for optimization\n\n4. **Telemetry Recording**: Records tool call metadata (name, args, duration, result) to the session's tool call history\n\n5. **Trajectory Capture**: Optionally writes tool events to the trajectory store for pattern learning\n\nThis architecture ensures **every tool call flows through the same validation and observation pipeline** without coupling the tool implementations to the hook system."
     },
     {
@@ -148,7 +148,7 @@
       "locations": [
         {
           "id": "3a",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/cmd/agentctl/cmd/dspy_agent.go",
+          "path": "cmd/agentctl/cmd/dspy_agent.go",
           "lineNumber": 157,
           "lineContent": "runtimeCfg.HookDispatcher = hooks.NewDispatcherWithRegistry(hooksCfg, skillsDir)",
           "title": "Dispatcher creation",
@@ -156,7 +156,7 @@
         },
         {
           "id": "3b",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/hooks/registry.go",
+          "path": "internal/hooks/registry.go",
           "lineNumber": 125,
           "lineContent": "func NewDispatcherWithRegistry(cfg *Config, skillsDir string) Dispatcher {",
           "title": "Dispatcher factory",
@@ -164,7 +164,7 @@
         },
         {
           "id": "3c",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/hooks/registry.go",
+          "path": "internal/hooks/registry.go",
           "lineNumber": 126,
           "lineContent": "registry := NewRegistry(cfg, RegistryOptions{",
           "title": "Hook registry creation",
@@ -172,7 +172,7 @@
         },
         {
           "id": "3d",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/hooks/registry.go",
+          "path": "internal/hooks/registry.go",
           "lineNumber": 59,
           "lineContent": "skillRunner = \u0026SkillRunner{",
           "title": "Skill runner initialization",
@@ -180,7 +180,7 @@
         },
         {
           "id": "3e",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/hooks/config.go",
+          "path": "internal/hooks/config.go",
           "lineNumber": 68,
           "lineContent": "func LoadConfig(paths ...string) (*Config, error) {",
           "title": "Config loading",
@@ -188,14 +188,14 @@
         },
         {
           "id": "3f",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/hooks/config.go",
+          "path": "internal/hooks/config.go",
           "lineNumber": 105,
           "lineContent": "merged.buildIndex()",
           "title": "Hook indexing",
           "description": "Builds event-to-hooks index for fast lookup during dispatch"
         }
       ],
-      "traceTextDiagram": "Hook System Initialization Flow\n├── CLI Command Entry\n│   └── dspy_agent.go setup\n│       └── NewDispatcherWithRegistry() call \u003c-- 3a\n│\n├── Dispatcher Factory \u003c-- 3b\n│   └── NewDispatcherWithRegistry() \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/hooks/registry.go:125\n│       ├── LoadConfig() from yaml files \u003c-- 3e\n│       │   └── buildIndex() for event lookup \u003c-- 3f\n│       │\n│       └── NewRegistry() creates hook registry \u003c-- 3c\n│           ├── Set up executor (RunnerExecutor) \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/hooks/registry.go:41\n│           ├── Set up resolver (DefaultResolver) \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/hooks/registry.go:47\n│           └── Create SkillRunner \u003c-- 3d\n│               ├── Executor: runs skill binaries \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/hooks/registry.go:60\n│               └── Resolver: finds skill manifests \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/hooks/registry.go:61\n│\n└── Result: Dispatcher with Registry\n    └── Returns hooks.Dispatcher interface \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/hooks/registry.go:129\n        └── Used in runtime config \u003c-- /Users/jkatigbak/repos/personal/agentctl/cmd/agentctl/cmd/dspy_agent.go:157",
+      "traceTextDiagram": "Hook System Initialization Flow\n├── CLI Command Entry\n│   └── dspy_agent.go setup\n│       └── NewDispatcherWithRegistry() call \u003c-- 3a\n│\n├── Dispatcher Factory \u003c-- 3b\n│   └── NewDispatcherWithRegistry() \u003c-- internal/hooks/registry.go:125\n│       ├── LoadConfig() from yaml files \u003c-- 3e\n│       │   └── buildIndex() for event lookup \u003c-- 3f\n│       │\n│       └── NewRegistry() creates hook registry \u003c-- 3c\n│           ├── Set up executor (RunnerExecutor) \u003c-- internal/hooks/registry.go:41\n│           ├── Set up resolver (DefaultResolver) \u003c-- internal/hooks/registry.go:47\n│           └── Create SkillRunner \u003c-- 3d\n│               ├── Executor: runs skill binaries \u003c-- internal/hooks/registry.go:60\n│               └── Resolver: finds skill manifests \u003c-- internal/hooks/registry.go:61\n│\n└── Result: Dispatcher with Registry\n    └── Returns hooks.Dispatcher interface \u003c-- internal/hooks/registry.go:129\n        └── Used in runtime config \u003c-- cmd/agentctl/cmd/dspy_agent.go:157",
       "traceGuide": "## Motivation\n\nAgent tools need **policy enforcement** before execution. When an LLM-driven agent calls a tool like `fs.read_file` or `edit.apply_patch`, you want to:\n- **Block dangerous operations** (e.g., reading sensitive files)\n- **Inject context** (e.g., add relevant documentation before a tool runs)\n- **Observe and log** tool usage for debugging and pattern learning\n- **Mutate tool inputs** (e.g., sanitize paths, add default parameters)\n\nThe hook system solves this by **intercepting tool calls** at PreToolUse and PostToolUse events, running user-defined **skills** (Go binaries or WASM modules) that return decisions (approve/block/none) and optional actions. This enables declarative policy without modifying tool implementations.\n\n## Details\n\n### Configuration and Loading\n\nHook configuration lives in `hooks.yaml` files (workspace `.agentctl/hooks.yaml` or global `~/.agentctl/hooks.yaml`). Each hook definition specifies:\n- **Event**: PreToolUse, PostToolUse, SessionStart, etc.\n- **Match criteria**: tool_name regex, path_regex, tool_kind (read/write/exec/search)\n- **Skill to run**: e.g., `hooks/path_validator` or `hooks/context_injector`\n- **Fail mode**: fail_open (errors allow operation) or fail_closed (errors block)\n\n`LoadConfig()` [3e] merges these files by hook ID, with workspace config overriding global. `buildIndex()` [3f] creates an event-to-hooks map for O(1) lookup during dispatch.\n\n### Dispatcher Creation\n\n`NewDispatcherWithRegistry()` [3a, 3b] is the factory function called during daemon/runtime initialization. It:\n1. Creates a **Registry** [3c] that manages hook runners\n2. Initializes a **DefaultResolver** [3d] pointing to `~/.agentctl/skills/` to find skill manifests and binaries\n3. Creates a **SkillRunner** [3d] with an executor (runs binaries) and resolver (finds them)\n4. Returns a `Dispatcher` interface that the tool registry uses\n\nThe resolver uses the skills directory structure: `skills/hooks/path_validator/skill.yaml` + `skills/hooks/path_validator/bin` (or `bin-cgo`, `bin.wasm`).\n\n### Integration with Tool Registry\n\nWhen tools are registered [2b], they're wrapped with `wrapWithTelemetry()` which calls `dispatchPreToolUse()` [4b] before execution. The dispatcher:\n1. Looks up hooks for the PreToolUse event\n2. Filters by matchers (e.g., `tool_canonical: \"fs\\\\..*\"` matches all filesystem tools)\n3. Runs each matching skill via `SkillRunner.Run()` [5c]\n4. Merges outputs using **last-wins** for mutations (if multiple hooks set `updated_tool_input`, the last one wins)\n5. Returns block decision if any hook blocked\n\nSkills receive hook input as JSON on stdin (includes `tool_name`, `tool_input`, `session_id`, `workspace_root`) and return hook output as JSON on stdout (includes `decision`, `reason`, `updated_tool_input`, `actions`).\n\n### Execution Path\n\nThe execution chain is:\n- **Dispatcher** → filters and orchestrates\n- **SkillRunner** [3d] → resolves skill name to binary path\n- **RunnerExecutor** → adapts to runner framework\n- **exec/wasi runner** [6d] → actually runs the binary with proper environment (AGENTCTL_SESSION_ID, etc.)\n\nThis layered design allows hooks to be **portable Go binaries or WASM modules** that work identically whether called from the daemon, runtime, or actor system."
     },
     {
@@ -205,7 +205,7 @@
       "locations": [
         {
           "id": "4a",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/agent/tools/tools.go",
+          "path": "internal/agent/tools/tools.go",
           "lineNumber": 288,
           "lineContent": "start := time.Now()",
           "title": "Tool call start",
@@ -213,7 +213,7 @@
         },
         {
           "id": "4b",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/agent/tools/tools.go",
+          "path": "internal/agent/tools/tools.go",
           "lineNumber": 404,
           "lineContent": "result, err := r.config.HookDispatcher.Dispatch(ctx, input)",
           "title": "PreToolUse dispatch",
@@ -221,7 +221,7 @@
         },
         {
           "id": "4c",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/agent/tools/tools.go",
+          "path": "internal/agent/tools/tools.go",
           "lineNumber": 342,
           "lineContent": "if preOutput.Decision.IsBlocking() {",
           "title": "Hook blocking check",
@@ -229,7 +229,7 @@
         },
         {
           "id": "4d",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/agent/tools/tools.go",
+          "path": "internal/agent/tools/tools.go",
           "lineNumber": 350,
           "lineContent": "if len(preOutput.UpdatedToolInput) \u003e 0 {",
           "title": "Tool input mutation",
@@ -237,7 +237,7 @@
         },
         {
           "id": "4e",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/agent/tools/tools.go",
+          "path": "internal/agent/tools/tools.go",
           "lineNumber": 363,
           "lineContent": "result, callErr = fn(ctx, argsForCall)",
           "title": "Tool execution",
@@ -245,7 +245,7 @@
         },
         {
           "id": "4f",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/agent/tools/tools.go",
+          "path": "internal/agent/tools/tools.go",
           "lineNumber": 459,
           "lineContent": "_, _ = r.config.HookDispatcher.Dispatch(ctx, input)",
           "title": "PostToolUse dispatch",
@@ -253,14 +253,14 @@
         },
         {
           "id": "4g",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/agent/tools/tools.go",
+          "path": "internal/agent/tools/tools.go",
           "lineNumber": 325,
           "lineContent": "r.captureToolEvent(ctx, trajectory.EventKindToolResult, name, status, dataInline, artifact)",
           "title": "Trajectory capture",
           "description": "Records tool execution to trajectory store for pattern learning"
         }
       ],
-      "traceTextDiagram": "Tool Execution Flow with Hook Integration\n├── wrapWithTelemetry() wrapper function \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/agent/tools/tools.go:287\n│   ├── Timing start \u003c-- 4a\n│   ├── PreToolUse Hook Phase\n│   │   ├── dispatchPreToolUse() \u003c-- 4b\n│   │   │   └── HookDispatcher.Dispatch() \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/agent/tools/tools.go:404\n│   │   ├── Check if blocked \u003c-- 4c\n│   │   └── Apply input mutations \u003c-- 4d\n│   ├── Tool Execution Phase\n│   │   └── fn(ctx, argsForCall) \u003c-- 4e\n│   ├── PostToolUse Hook Phase\n│   │   └── dispatchPostToolUse() \u003c-- 4f\n│   │       └── HookDispatcher.Dispatch() \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/agent/tools/tools.go:459\n│   └── Trajectory Recording\n│       └── captureToolEvent() \u003c-- 4g\n│           └── trajectory.Store.InsertEvent() \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/agent/tools/tools.go:502\n└── Return result to LLM \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/agent/tools/tools.go:367",
+      "traceTextDiagram": "Tool Execution Flow with Hook Integration\n├── wrapWithTelemetry() wrapper function \u003c-- internal/agent/tools/tools.go:287\n│   ├── Timing start \u003c-- 4a\n│   ├── PreToolUse Hook Phase\n│   │   ├── dispatchPreToolUse() \u003c-- 4b\n│   │   │   └── HookDispatcher.Dispatch() \u003c-- internal/agent/tools/tools.go:404\n│   │   ├── Check if blocked \u003c-- 4c\n│   │   └── Apply input mutations \u003c-- 4d\n│   ├── Tool Execution Phase\n│   │   └── fn(ctx, argsForCall) \u003c-- 4e\n│   ├── PostToolUse Hook Phase\n│   │   └── dispatchPostToolUse() \u003c-- 4f\n│   │       └── HookDispatcher.Dispatch() \u003c-- internal/agent/tools/tools.go:459\n│   └── Trajectory Recording\n│       └── captureToolEvent() \u003c-- 4g\n│           └── trajectory.Store.InsertEvent() \u003c-- internal/agent/tools/tools.go:502\n└── Return result to LLM \u003c-- internal/agent/tools/tools.go:367",
       "traceGuide": "## Motivation\n\nWhen an LLM-driven agent calls a tool like `fs.read_file` or `code.search`, the system needs to **intercept that call** to enforce policies, validate inputs, log telemetry, and allow custom hooks to observe or modify the operation. Without this interception layer, there's no way to:\n\n- **Block dangerous operations** before they execute (e.g., prevent reading sensitive files)\n- **Mutate tool arguments** based on context (e.g., redirect paths, inject additional parameters)\n- **Observe tool results** for pattern learning and optimization\n- **Record execution traces** for debugging and analysis\n\nThe tool execution flow with hook integration solves this by wrapping every tool function in a telemetry and hook dispatch layer [2c].\n\n## Details\n\n### Wrapping Tools\n\nEvery tool registered in the registry is wrapped via `wrapWithTelemetry()` [2c], which returns a new function that intercepts the tool call [2d]. This wrapper function executes **before** and **after** the actual tool implementation.\n\n### PreToolUse Hook Dispatch\n\nWhen a tool is about to execute, the wrapper first dispatches a **PreToolUse** event [4b] to the hook system. The dispatcher:\n\n1. Finds all hooks configured for the `PreToolUse` event\n2. Filters by matchers (tool name, path regex, etc.)\n3. Executes matching hook skills\n4. Merges their outputs\n\nIf any hook returns a **blocking decision** [4c], the tool execution is aborted and an error is returned to the LLM. Hooks can also provide **updated tool input** [4d] to mutate the arguments before execution (e.g., rewriting file paths, adding parameters).\n\n### Tool Execution\n\nAfter hook approval, the **actual tool function executes** [4e] with the potentially-modified arguments. This is the real implementation like `readFile()` or `listDir()`.\n\n### PostToolUse Hook Dispatch\n\nAfter the tool completes (success or failure), a **PostToolUse** event is dispatched [4f]. This allows hooks to:\n\n- Observe the tool result\n- Trigger follow-up actions\n- Enqueue context for the next LLM turn\n- Send notifications or update external systems\n\n### Trajectory Capture\n\nFinally, the tool call and result are **recorded to the trajectory store** [4g] for pattern learning and optimization. This enables the system to learn which tools work well for which tasks and suggest them in future prompts.\n\nThe entire flow is transparent to the DSPy agent - it simply calls tools and receives results, unaware of the hook interception happening underneath."
     },
     {
@@ -270,7 +270,7 @@
       "locations": [
         {
           "id": "5a",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/hooks/dispatcher.go",
+          "path": "internal/hooks/dispatcher.go",
           "lineNumber": 122,
           "lineContent": "func (d *dispatcher) Dispatch(ctx context.Context, input Input) (Result, error) {",
           "title": "Dispatch entry",
@@ -278,7 +278,7 @@
         },
         {
           "id": "5b",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/hooks/dispatcher.go",
+          "path": "internal/hooks/dispatcher.go",
           "lineNumber": 138,
           "lineContent": "if h.Enabled \u0026\u0026 MatchesInput(h, input) {",
           "title": "Hook matching",
@@ -286,7 +286,7 @@
         },
         {
           "id": "5c",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/hooks/dispatcher.go",
+          "path": "internal/hooks/dispatcher.go",
           "lineNumber": 170,
           "lineContent": "output, err := d.runner.Run(hookCtx, entryHook, hookInput)",
           "title": "Hook runner invocation",
@@ -294,7 +294,7 @@
         },
         {
           "id": "5d",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/hooks/skill_runner.go",
+          "path": "internal/hooks/skill_runner.go",
           "lineNumber": 30,
           "lineContent": "manifest, artifactPath, err := r.Resolver.Resolve(entry.Skill)",
           "title": "Skill resolution",
@@ -302,7 +302,7 @@
         },
         {
           "id": "5e",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/hooks/skill_runner.go",
+          "path": "internal/hooks/skill_runner.go",
           "lineNumber": 49,
           "lineContent": "result, err := r.Executor.Execute(ctx, execution.ExecuteOptions{",
           "title": "Skill execution",
@@ -310,7 +310,7 @@
         },
         {
           "id": "5f",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/hooks/skill_runner.go",
+          "path": "internal/hooks/skill_runner.go",
           "lineNumber": 65,
           "lineContent": "output, err := parseSkillOutput(result.Stdout)",
           "title": "Output parsing",
@@ -318,14 +318,14 @@
         },
         {
           "id": "5g",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/hooks/dispatcher.go",
+          "path": "internal/hooks/dispatcher.go",
           "lineNumber": 206,
           "lineContent": "result.Output = Merge(outputs)",
           "title": "Output merging",
           "description": "Merges outputs from all hooks using last-wins for mutations"
         }
       ],
-      "traceTextDiagram": "Hook Dispatch to Skill Execution Pipeline\n├── Dispatcher.Dispatch() entry \u003c-- 5a\n│   ├── Find hooks for event \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/hooks/dispatcher.go:129\n│   ├── Filter by matchers \u003c-- 5b\n│   │   └── MatchesInput(hook, input) \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/hooks/dispatcher.go:230\n│   └── For each matching hook \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/hooks/dispatcher.go:150\n│       ├── Create timeout context \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/hooks/dispatcher.go:167\n│       ├── runner.Run() \u003c-- 5c\n│       │   └── SkillRunner.Run() \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/hooks/skill_runner.go:21\n│       │       ├── Resolver.Resolve(skill) \u003c-- 5d\n│       │       │   └── Find manifest + binary \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/hooks/resolver.go:44\n│       │       ├── Marshal hook input to JSON \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/hooks/skill_runner.go:40\n│       │       ├── Executor.Execute() \u003c-- 5e\n│       │       │   └── RunnerExecutor \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/execution/runner_adapter.go:21\n│       │       │       └── runner.RunWithOptions() \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/execution/runner_adapter.go:28\n│       │       │           └── exec/wasi.Run() \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/execution/runner/runner.go:93\n│       │       └── parseSkillOutput() \u003c-- 5f\n│       │           └── Parse envelope JSON \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/hooks/skill_runner.go:101\n│       └── Collect hook outputs \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/hooks/dispatcher.go:195\n└── Merge(outputs) \u003c-- 5g\n    └── Return merged Result \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/hooks/dispatcher.go:210",
+      "traceTextDiagram": "Hook Dispatch to Skill Execution Pipeline\n├── Dispatcher.Dispatch() entry \u003c-- 5a\n│   ├── Find hooks for event \u003c-- internal/hooks/dispatcher.go:129\n│   ├── Filter by matchers \u003c-- 5b\n│   │   └── MatchesInput(hook, input) \u003c-- internal/hooks/dispatcher.go:230\n│   └── For each matching hook \u003c-- internal/hooks/dispatcher.go:150\n│       ├── Create timeout context \u003c-- internal/hooks/dispatcher.go:167\n│       ├── runner.Run() \u003c-- 5c\n│       │   └── SkillRunner.Run() \u003c-- internal/hooks/skill_runner.go:21\n│       │       ├── Resolver.Resolve(skill) \u003c-- 5d\n│       │       │   └── Find manifest + binary \u003c-- internal/hooks/resolver.go:44\n│       │       ├── Marshal hook input to JSON \u003c-- internal/hooks/skill_runner.go:40\n│       │       ├── Executor.Execute() \u003c-- 5e\n│       │       │   └── RunnerExecutor \u003c-- internal/execution/runner_adapter.go:21\n│       │       │       └── runner.RunWithOptions() \u003c-- internal/execution/runner_adapter.go:28\n│       │       │           └── exec/wasi.Run() \u003c-- internal/execution/runner/runner.go:93\n│       │       └── parseSkillOutput() \u003c-- 5f\n│       │           └── Parse envelope JSON \u003c-- internal/hooks/skill_runner.go:101\n│       └── Collect hook outputs \u003c-- internal/hooks/dispatcher.go:195\n└── Merge(outputs) \u003c-- 5g\n    └── Return merged Result \u003c-- internal/hooks/dispatcher.go:210",
       "traceGuide": "## Motivation\n\nWhen an LLM-driven agent calls a tool (like reading a file or searching code), you need a way to **intercept that call** to enforce policies, inject context, or observe behavior. The hook dispatch system solves this by allowing **skills to run before and after every tool execution** [5a], implementing a middleware pattern where hooks can block, mutate, or observe tool calls without modifying the tools themselves.\n\nFor example, a hook might block file writes to sensitive paths, inject relevant documentation before a code search, or log all tool usage for debugging. These hooks are **configured declaratively in YAML** and executed as separate skill binaries, keeping policy logic decoupled from the agent runtime.\n\n## Details\n\n### Hook Configuration and Indexing\n\nHooks are defined in `hooks.yaml` files that specify which events to listen for (PreToolUse, PostToolUse, etc.) and optional matchers like `tool_name` regex or `path_regex` patterns. At startup, the system loads these configs and **builds an event-to-hooks index** for fast lookup during dispatch [5a].\n\n### Dispatch Flow\n\nWhen a tool is about to execute, the dispatcher:\n\n1. **Looks up matching hooks** for the event (e.g., PreToolUse) using the pre-built index\n2. **Filters by matchers** - checking if the hook's regex patterns match the tool name, file paths in arguments, etc. [5b]\n3. **Executes each matching hook sequentially** with a timeout context [5c]\n\n### Skill Resolution and Execution\n\nEach hook references a skill by name (e.g., `\"hooks/task_guard\"`). The **resolver translates this to a manifest and binary path** in the skills directory [5d], supporting both native executables and WASM modules.\n\nThe **executor runs the skill binary** [5e], passing hook input (event type, tool name, arguments, session context) as JSON on stdin. Skills are isolated processes that can't directly affect the agent - they only return decisions via stdout.\n\n### Output Parsing and Merging\n\nThe skill's stdout is **parsed as an envelope containing a hook Output** [5f] with a decision (`approve`, `block`, or `none`), optional context to inject, and actions to enqueue. \n\nWhen multiple hooks run for the same event, their outputs are **merged using last-wins semantics** [5g] - the final hook's mutations override earlier ones, but all actions are concatenated. A single `block` decision blocks the entire operation.\n\n### Integration Points\n\nThis system integrates at the tool wrapper layer - every tool registered with the agent is wrapped to dispatch PreToolUse before execution and PostToolUse after, making hook interception **transparent to both the LLM and the tool implementations**."
     },
     {
@@ -335,7 +335,7 @@
       "locations": [
         {
           "id": "6a",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/execution/runner_adapter.go",
+          "path": "internal/execution/runner_adapter.go",
           "lineNumber": 21,
           "lineContent": "func (e *RunnerExecutor) Execute(ctx context.Context, opts ExecuteOptions) (*Result, error) {",
           "title": "Executor entry",
@@ -343,7 +343,7 @@
         },
         {
           "id": "6b",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/execution/runner_adapter.go",
+          "path": "internal/execution/runner_adapter.go",
           "lineNumber": 28,
           "lineContent": "stdout, stderr, err := runner.RunWithOptions(ctx, runner.RunOptions{",
           "title": "Runner invocation",
@@ -351,7 +351,7 @@
         },
         {
           "id": "6c",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/execution/runner/runner.go",
+          "path": "internal/execution/runner/runner.go",
           "lineNumber": 33,
           "lineContent": "func buildSkillEnv(baseEnv []string, workspace string, propagateSessionVars bool) []string {",
           "title": "Environment building",
@@ -359,7 +359,7 @@
         },
         {
           "id": "6d",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/execution/runner/runner.go",
+          "path": "internal/execution/runner/runner.go",
           "lineNumber": 84,
           "lineContent": "switch opts.Manifest.Distribution.Type {",
           "title": "Runner selection",
@@ -367,7 +367,7 @@
         },
         {
           "id": "6e",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/execution/runner/runner.go",
+          "path": "internal/execution/runner/runner.go",
           "lineNumber": 93,
           "lineContent": "return r.Run(ctx, opts.Input)",
           "title": "Exec runner execution",
@@ -375,14 +375,14 @@
         },
         {
           "id": "6f",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/execution/runner/runner.go",
+          "path": "internal/execution/runner/runner.go",
           "lineNumber": 102,
           "lineContent": "return r.Run(ctx, opts.Input)",
           "title": "WASI runner execution",
           "description": "Runs WASM module with explicit session var propagation"
         }
       ],
-      "traceTextDiagram": "Skill Execution Pipeline (Trace 6)\n├── Hook System Invokes Executor\n│   └── RunnerExecutor.Execute() \u003c-- 6a\n│       └── runner.RunWithOptions() \u003c-- 6b\n│           ├── Workspace detection \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/execution/runner/runner.go:68\n│           ├── buildSkillEnv() \u003c-- 6c\n│           │   ├── Add AGENTCTL_WORKSPACE \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/execution/runner/runner.go:38\n│           │   └── Propagate session vars \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/execution/runner/runner.go:42\n│           │       ├── AGENTCTL_SESSION_ID \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/execution/runner/runner.go:21\n│           │       ├── AGENTCTL_AGENT_ID \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/execution/runner/runner.go:22\n│           │       └── AGENTCTL_TRACE_ID \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/execution/runner/runner.go:44\n│           └── Distribution type switch \u003c-- 6d\n│               ├── exec runner \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/execution/runner/runner.go:85\n│               │   └── r.Run(ctx, input) \u003c-- 6e\n│               │       └── Native binary execution \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/execution/runner/runner.go:86\n│               └── wasi runner \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/execution/runner/runner.go:94\n│                   └── r.Run(ctx, input) \u003c-- 6f\n│                       └── WASM module execution \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/execution/runner/runner.go:95\n└── Return Result\n    ├── stdout (hook output envelope) \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/execution/runner_adapter.go:42\n    └── stderr (logs) \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/execution/runner_adapter.go:43",
+      "traceTextDiagram": "Skill Execution Pipeline (Trace 6)\n├── Hook System Invokes Executor\n│   └── RunnerExecutor.Execute() \u003c-- 6a\n│       └── runner.RunWithOptions() \u003c-- 6b\n│           ├── Workspace detection \u003c-- internal/execution/runner/runner.go:68\n│           ├── buildSkillEnv() \u003c-- 6c\n│           │   ├── Add AGENTCTL_WORKSPACE \u003c-- internal/execution/runner/runner.go:38\n│           │   └── Propagate session vars \u003c-- internal/execution/runner/runner.go:42\n│           │       ├── AGENTCTL_SESSION_ID \u003c-- internal/execution/runner/runner.go:21\n│           │       ├── AGENTCTL_AGENT_ID \u003c-- internal/execution/runner/runner.go:22\n│           │       └── AGENTCTL_TRACE_ID \u003c-- internal/execution/runner/runner.go:44\n│           └── Distribution type switch \u003c-- 6d\n│               ├── exec runner \u003c-- internal/execution/runner/runner.go:85\n│               │   └── r.Run(ctx, input) \u003c-- 6e\n│               │       └── Native binary execution \u003c-- internal/execution/runner/runner.go:86\n│               └── wasi runner \u003c-- internal/execution/runner/runner.go:94\n│                   └── r.Run(ctx, input) \u003c-- 6f\n│                       └── WASM module execution \u003c-- internal/execution/runner/runner.go:95\n└── Return Result\n    ├── stdout (hook output envelope) \u003c-- internal/execution/runner_adapter.go:42\n    └── stderr (logs) \u003c-- internal/execution/runner_adapter.go:43",
       "traceGuide": "## Motivation\n\nHooks in agentctl are **skills** (compiled binaries) that intercept agent tool calls to validate, mutate, or observe them. When a hook is triggered (e.g., PreToolUse event), the system needs to **execute the hook skill binary** with the event data on stdin and parse its decision from stdout. The skill execution framework [6a-6f] provides this capability, supporting both **native binaries (exec)** and **WebAssembly modules (wasi)** as hook implementations.\n\nThe key problem: hooks need to run in **isolated processes** with proper **environment context** (session IDs, workspace paths) so they can make informed decisions about tool calls while maintaining security boundaries.\n\n## Details\n\n### Execution Entry Point\n\nThe `RunnerExecutor` [6a] implements the `SkillExecutor` interface, serving as the adapter between the hook system and the low-level runner framework. It delegates to `runner.RunWithOptions` [6b], which handles the actual skill execution.\n\n### Environment Construction\n\nBefore execution, `buildSkillEnv` [6c] constructs the skill's environment variables. For **exec runners** (native binaries), it inherits `os.Environ()` so session vars pass through automatically. For **wasi runners** (WASM), it starts with an empty environment and **explicitly propagates** session tracking variables like `AGENTCTL_SESSION_ID` [6c], `AGENTCTL_AGENT_ID`, and workspace context. This ensures hooks can correlate their actions with the agent session that triggered them.\n\n### Runtime Selection\n\nThe framework switches on `manifest.Distribution.Type` [6d] to select the appropriate runner:\n\n- **exec runner** [6e]: Executes native binaries directly via `execrunner.Runner`, passing hook input on stdin and capturing the hook output envelope on stdout\n- **wasi runner** [6f]: Executes WebAssembly modules via `wasirunner.Runner` with the same stdin/stdout protocol but in a sandboxed WASM runtime\n\nBoth runners use the same **envelope protocol**: hook input (JSON) on stdin, hook output (envelope with decision) on stdout [6a].\n\n### Result Handling\n\nThe executor returns a `Result` struct containing stdout (the hook's decision envelope), stderr (logs), and exit code. The hook system parses stdout to extract the `Output` decision (approve/block/none) and any actions the hook wants to trigger."
     },
     {
@@ -392,7 +392,7 @@
       "locations": [
         {
           "id": "7a",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/agent/daemon/daemon.go",
+          "path": "internal/agent/daemon/daemon.go",
           "lineNumber": 252,
           "lineContent": "for _, msg := range messages {",
           "title": "Message iteration",
@@ -400,7 +400,7 @@
         },
         {
           "id": "7b",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/agent/daemon/daemon.go",
+          "path": "internal/agent/daemon/daemon.go",
           "lineNumber": 282,
           "lineContent": "procErr = handleAsk(ctx, logger, msg, dspyAgent, mailboxStore, currentAgent.Policy, optCtx)",
           "title": "Ask message routing",
@@ -408,7 +408,7 @@
         },
         {
           "id": "7c",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/agent/daemon/handlers.go",
+          "path": "internal/agent/daemon/handlers.go",
           "lineNumber": 63,
           "lineContent": "resultMap, err := dspyAgent.Execute(turnCtx, input)",
           "title": "DSPy agent execution",
@@ -416,7 +416,7 @@
         },
         {
           "id": "7d",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/agent/runtime/runtime.go",
+          "path": "internal/agent/runtime/runtime.go",
           "lineNumber": 375,
           "lineContent": "resultMap, err := session.Agent.Execute(ctx, input)",
           "title": "Runtime agent execution",
@@ -424,7 +424,7 @@
         },
         {
           "id": "7e",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/agent/runtime/runtime.go",
+          "path": "internal/agent/runtime/runtime.go",
           "lineNumber": 319,
           "lineContent": "for _, tool := range toolsRegistry.List() {",
           "title": "Tool registration in runtime",
@@ -432,14 +432,14 @@
         },
         {
           "id": "7f",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/agent/daemon/handlers.go",
+          "path": "internal/agent/daemon/handlers.go",
           "lineNumber": 135,
           "lineContent": "return mailboxStore.Send(ctx, replyMsg)",
           "title": "Reply sending",
           "description": "Sends reply message back to asker via mailbox store"
         }
       ],
-      "traceTextDiagram": "Agent Daemon Message Processing\n├── Poll Loop\n│   └── for _, msg := range messages \u003c-- 7a\n│       └── switch msg.Type \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/agent/daemon/daemon.go:280\n│           ├── handleAsk() \u003c-- 7b\n│           │   ├── Build task prompt \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/agent/daemon/handlers.go:30\n│           │   └── dspyAgent.Execute() \u003c-- 7c\n│           │       └── ReActAgent tool call loop\n│           │           └── Tool registry invokes\n│           │               └── wrapWithTelemetry() \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/agent/tools/tools.go:287\n│           │                   ├── dispatchPreToolUse() \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/agent/tools/tools.go:334\n│           │                   ├── tool.Execute() \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/agent/tools/tools.go:363\n│           │                   └── dispatchPostToolUse() \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/agent/tools/tools.go:328\n│           └── handleCmd() \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/agent/daemon/daemon.go:284\n│               └── dspyAgent.Execute() \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/agent/daemon/handlers.go:184\n└── mailboxStore.Send(replyMsg) \u003c-- 7f\n\nRuntime Spawn Path (Alternative)\n└── Runtime.Spawn() \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/agent/runtime/runtime.go:128\n    ├── toolsRegistry.List() \u003c-- 7e\n    │   └── agent.RegisterTool() \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/agent/runtime/runtime.go:320\n    └── runSession() \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/agent/runtime/runtime.go:227\n        └── session.Agent.Execute() \u003c-- 7d",
+      "traceTextDiagram": "Agent Daemon Message Processing\n├── Poll Loop\n│   └── for _, msg := range messages \u003c-- 7a\n│       └── switch msg.Type \u003c-- internal/agent/daemon/daemon.go:280\n│           ├── handleAsk() \u003c-- 7b\n│           │   ├── Build task prompt \u003c-- internal/agent/daemon/handlers.go:30\n│           │   └── dspyAgent.Execute() \u003c-- 7c\n│           │       └── ReActAgent tool call loop\n│           │           └── Tool registry invokes\n│           │               └── wrapWithTelemetry() \u003c-- internal/agent/tools/tools.go:287\n│           │                   ├── dispatchPreToolUse() \u003c-- internal/agent/tools/tools.go:334\n│           │                   ├── tool.Execute() \u003c-- internal/agent/tools/tools.go:363\n│           │                   └── dispatchPostToolUse() \u003c-- internal/agent/tools/tools.go:328\n│           └── handleCmd() \u003c-- internal/agent/daemon/daemon.go:284\n│               └── dspyAgent.Execute() \u003c-- internal/agent/daemon/handlers.go:184\n└── mailboxStore.Send(replyMsg) \u003c-- 7f\n\nRuntime Spawn Path (Alternative)\n└── Runtime.Spawn() \u003c-- internal/agent/runtime/runtime.go:128\n    ├── toolsRegistry.List() \u003c-- 7e\n    │   └── agent.RegisterTool() \u003c-- internal/agent/runtime/runtime.go:320\n    └── runSession() \u003c-- internal/agent/runtime/runtime.go:227\n        └── session.Agent.Execute() \u003c-- 7d",
       "traceGuide": "## Motivation\n\nAgentctl runs **autonomous AI agents** that need to execute tools (like reading files or searching code) in response to messages. The challenge: agents must be **sandboxed and observable** - every tool call needs hook interception for security policies, telemetry, and pattern learning. The daemon bootstrap solves this by creating a **DSPy ReActAgent** with a tool registry that wraps every tool with hook dispatch, then polls a mailbox for work.\n\n## Details\n\n### Daemon Startup\n\nThe daemon entry point [7a] **polls a mailbox store** for messages addressed to the agent. When a message arrives, it's routed by type - `ask` messages go to `handleAsk()` [7b], `cmd` messages to `handleCmd()`. Each handler extracts the payload and builds a task prompt.\n\n### Agent Execution\n\nBoth handlers invoke **`dspyAgent.Execute()`** [7c] with the task prompt. This is a DSPy ReActAgent that runs a **reasoning loop**: it calls the LLM, which may return tool calls, which get executed, results fed back to the LLM, repeat until the agent produces a final answer. The agent was initialized during daemon bootstrap [1d] and had all tools registered [1e, 1f].\n\n### Tool Call Interception\n\nEvery tool in the registry is **wrapped with `wrapWithTelemetry()`** [2c]. When the DSPy agent calls a tool, the wrapper:\n1. **Dispatches PreToolUse hooks** for validation - hooks can block or mutate the tool arguments [4b]\n2. **Executes the actual tool** if approved [4e]\n3. **Dispatches PostToolUse hooks** for observation and side effects [4f]\n\nThis wrapping happens at registry creation [1c], before tools are registered to the agent.\n\n### Hook Execution\n\nHooks are **skills** (compiled binaries) that receive JSON input on stdin and return decisions on stdout. The hook dispatcher [5a] matches hooks by event type and filters (tool name, path regex), then the skill runner [5d] resolves the skill binary and executes it [5e]. The skill's output is parsed [5f] to extract the decision (approve/block) and any actions.\n\n### Reply Flow\n\nAfter `dspyAgent.Execute()` completes, the handler extracts the result from the returned map and **sends a reply message** back through the mailbox [7f], completing the request-response cycle.\n\n### Alternative: Runtime Path\n\nThe runtime provides an alternative spawn mechanism [7d] where agents are created programmatically rather than via daemon. It follows the same pattern: create tool registry [7e], register tools to agent [7e], then execute. This is used for multi-agent hierarchies where one agent spawns subagents."
     }
   ],

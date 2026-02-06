@@ -448,7 +448,7 @@ Callers can choose:
 
 ### 7.2 Agent Usage
 
-Agents (including dspy-go agents) can:
+Agents (including LLMChatEngine-based agents) can:
 
 - Retrieve semantically related files as part of planning or coding:
   - E.g. "files similar to the one I just edited".

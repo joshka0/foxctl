@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"time"
 
-	dstools "github.com/XiaoConstantine/dspy-go/pkg/tools"
+	tooling "github.com/jkatigb/agentctl/internal/tooling"
 	models "github.com/XiaoConstantine/mcp-go/pkg/model"
 	"github.com/oklog/ulid/v2"
 
@@ -39,7 +39,7 @@ func (r *Registry) registerAgentTools() error {
 
 // registerAgentAskTool registers the agent.ask tool for inter-agent messaging.
 func (r *Registry) registerAgentAskTool() error {
-	askTool := dstools.NewFuncTool(
+	askTool := tooling.NewFuncTool(
 		"agent.ask",
 		"Send a question to another agent and optionally wait for their response. "+
 			"Use this for inter-agent collaboration when you need information or assistance from a specialist agent.",

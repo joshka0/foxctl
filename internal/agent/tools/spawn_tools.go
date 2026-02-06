@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"time"
 
-	dstools "github.com/XiaoConstantine/dspy-go/pkg/tools"
+	tooling "github.com/jkatigb/agentctl/internal/tooling"
 	models "github.com/XiaoConstantine/mcp-go/pkg/model"
 	"github.com/oklog/ulid/v2"
 
@@ -42,7 +42,7 @@ type SpawnToolConfig struct {
 
 // RegisterSpawnTool registers the agent.spawn tool with the registry.
 func (r *Registry) RegisterSpawnTool(cfg SpawnToolConfig) error {
-	tool := dstools.NewFuncTool(
+	tool := tooling.NewFuncTool(
 		"agent.spawn",
 		"Request overseer to spawn subagent(s) for parallel or specialized work. "+
 			"Use this when work can be decomposed into cleanly separable subtasks and you have remaining depth budget.",

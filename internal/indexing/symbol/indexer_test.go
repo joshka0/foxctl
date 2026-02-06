@@ -361,6 +361,7 @@ func (c *Calculator) Multiply(x, y float64) float64 {
 
 	if addSym == nil {
 		t.Fatal("Add function not found")
+		return
 	}
 	if addSym.Kind != KindFunction {
 		t.Errorf("expected kind 'function', got %q", addSym.Kind)
@@ -383,6 +384,7 @@ func (c *Calculator) Multiply(x, y float64) float64 {
 
 	if mulSym == nil {
 		t.Fatal("Calculator.Multiply method not found")
+		return
 	}
 	if mulSym.Kind != KindMethod {
 		t.Errorf("expected kind 'method', got %q", mulSym.Kind)
@@ -422,6 +424,7 @@ type Handler interface {
 
 	if configSym == nil {
 		t.Fatal("Config struct not found")
+		return
 	}
 	if configSym.Kind != KindStruct {
 		t.Errorf("expected kind 'struct', got %q", configSym.Kind)
@@ -438,6 +441,7 @@ type Handler interface {
 
 	if handlerSym == nil {
 		t.Fatal("Handler interface not found")
+		return
 	}
 	if handlerSym.Kind != KindInterface {
 		t.Errorf("expected kind 'interface', got %q", handlerSym.Kind)
@@ -484,6 +488,7 @@ func main() {
 	}
 	if mainSym == nil {
 		t.Fatal("main function not found")
+		return
 	}
 
 	// Extract calls from main
@@ -541,6 +546,7 @@ func process(svc *Service) {
 	}
 	if processSym == nil {
 		t.Fatal("process function not found")
+		return
 	}
 
 	// Extract calls from process
@@ -583,6 +589,7 @@ func returnValue() int {
 
 	if len(symbols) == 0 {
 		t.Fatal("expected at least one symbol")
+		return
 	}
 
 	calls, err := extractor.ExtractCalls(ctx, symbols[0], content)
@@ -633,6 +640,7 @@ func complex() {
 	}
 	if complexSym == nil {
 		t.Fatal("complex function not found")
+		return
 	}
 
 	calls, err := extractor.ExtractCalls(ctx, *complexSym, content)

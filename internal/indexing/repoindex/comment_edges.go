@@ -33,7 +33,7 @@ func applyCommentEdges(nodes map[string]Node, edges map[string]Edge, repoKey str
 	if len(nodes) == 0 {
 		return
 	}
-	byPkg := make(map[string]map[string]string)
+	byPkg := make(map[string]map[string][]string)
 	global := make(map[string][]string)
 	symbols := make([]Node, 0, len(nodes))
 	for id, node := range nodes {
@@ -44,13 +44,16 @@ func applyCommentEdges(nodes map[string]Node, edges map[string]Edge, repoKey str
 			continue
 		}
 		if byPkg[node.Pkg] == nil {
-			byPkg[node.Pkg] = make(map[string]string)
+			byPkg[node.Pkg] = make(map[string][]string)
 		}
-		if _, ok := byPkg[node.Pkg][node.Name]; !ok {
-			byPkg[node.Pkg][node.Name] = id
-		}
+		byPkg[node.Pkg][node.Name] = append(byPkg[node.Pkg][node.Name], id)
 		global[node.Name] = append(global[node.Name], id)
 		symbols = append(symbols, node)
+	}
+	for _, byName := range byPkg {
+		for _, ids := range byName {
+			sort.Strings(ids)
+		}
 	}
 	for _, ids := range global {
 		sort.Strings(ids)
@@ -100,7 +103,7 @@ func addConceptEdges(nodes map[string]Node, edges map[string]Edge, repoKey strin
 }
 
 // addDocEdges adds doc-related edges for resolved targets.
-func addDocEdges(edges map[string]Edge, repoKey string, src Node, targets []string, edgeType EdgeType, limit int, byPkg map[string]map[string]string, global map[string][]string) {
+func addDocEdges(edges map[string]Edge, repoKey string, src Node, targets []string, edgeType EdgeType, limit int, byPkg map[string]map[string][]string, global map[string][]string) {
 	targets = capList(targets, limit)
 	for _, target := range targets {
 		resolved := resolveSymbolID(repoKey, src.Pkg, target, byPkg, global)
@@ -124,7 +127,7 @@ func capList(items []string, limit int) []string {
 }
 
 // resolveSymbolID resolves an Index block target to a repoindex node ID.
-func resolveSymbolID(repoKey, pkg, name string, byPkg map[string]map[string]string, global map[string][]string) string {
+func resolveSymbolID(repoKey, pkg, name string, byPkg map[string]map[string][]string, global map[string][]string) string {
 	name = strings.TrimSpace(name)
 	if name == "" {
 		return ""
@@ -139,8 +142,8 @@ func resolveSymbolID(repoKey, pkg, name string, byPkg map[string]map[string]stri
 		return NamespacedID(repoKey, name)
 	}
 	if pkg != "" {
-		if id, ok := byPkg[pkg][name]; ok {
-			return id
+		if ids, ok := byPkg[pkg][name]; ok && len(ids) == 1 {
+			return ids[0]
 		}
 	}
 	if ids, ok := global[name]; ok && len(ids) == 1 {

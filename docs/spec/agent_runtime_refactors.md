@@ -3,13 +3,13 @@
 **Status:** Approved\
 **Scope:** Two focused refactors to improve agent runtime security and
 flexibility\
-**Related:** `dspy_go_agents.md`, `core_profile_v1.md` (§6 Filesystem Skills)
+**Related:** `agent-daemon.md`, `core_profile_v1.md` (§6 Filesystem Skills)
 
 ---
 
 ## Overview
 
-This spec describes two targeted refactors for the dspy-go agent runtime:
+This spec describes two targeted refactors for the LLMChatEngine-based agent runtime:
 
 1. **LLM Provider Switching** - Support multiple LLM providers (Gemini, OpenAI)
    with configurable defaults
@@ -22,14 +22,13 @@ This spec describes two targeted refactors for the dspy-go agent runtime:
 
 ### 1.1 Problem
 
-Currently `createAgent` in `runtime.go` hardcodes Gemini:
+Previously the agent runtime defaulted to a fixed provider:
 
 ```go
 llm, err := llms.NewGeminiLLM(apiKey, core.ModelID(model))
 ```
 
-This violates `dspy_go_agents.md` §2.2 which states the runtime "must work with
-any `core.LLM` implementation".
+The runtime should support multiple providers with a clear selection policy.
 
 ### 1.2 Solution
 
@@ -275,7 +274,7 @@ func TestResolvePath_NullByte(t *testing.T)         // null byte rejection
    - Update `runtime.go` with provider switch
    - Add `defaultModelForProvider` helper
    - Add unit tests
-   - Update `dspy_go_agents.md` with LLM configuration section
+   - Update `agent_hierarchy.md` with LLM configuration section
 
 2. **PathValidator Integration** (security-critical)
    - Extend `ToolsConfig` and `Registry`

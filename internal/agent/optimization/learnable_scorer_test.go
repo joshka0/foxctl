@@ -309,6 +309,7 @@ func TestLearnableScorer_LearnFromOutcomes(t *testing.T) {
 
 	if update == nil {
 		t.Fatal("expected weight update, got nil")
+		return
 	}
 
 	if update.SampleSize < 10 {

@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	dstools "github.com/XiaoConstantine/dspy-go/pkg/tools"
+	tooling "github.com/jkatigb/agentctl/internal/tooling"
 	"github.com/jkatigb/agentctl/internal/domain/agent"
 	"github.com/jkatigb/agentctl/internal/domain/envelope"
 	"github.com/jkatigb/agentctl/internal/storage/mailbox"
@@ -32,7 +32,7 @@ func TestAgentSpawnTool(t *testing.T) {
 	require.NoError(t, err)
 
 	// Call agent.spawn
-	var tool dstools.Tool
+	var tool tooling.Tool
 	for _, t := range registry.List() {
 		if t.Name() == "agent.spawn" {
 			tool = t

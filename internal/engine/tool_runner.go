@@ -10,7 +10,7 @@ import (
 )
 
 // ToolExecutor executes a tool and returns the result.
-// This interface abstracts the underlying tool implementation (dspy-go, MCP, etc.).
+// This interface abstracts the underlying tool implementation (MCP, CLI adapters, etc.).
 type ToolExecutor interface {
 	// Execute runs a tool with the given arguments.
 	Execute(ctx context.Context, name string, args json.RawMessage) (string, error)
@@ -260,40 +260,6 @@ func WithActionExecutor(executor hooks.ActionExecutor) ToolRunnerOption {
 	return func(c *ToolRunnerConfig) {
 		c.ActionExecutor = executor
 	}
-}
-
-// DspyToolExecutorAdapter wraps a dspy-go tool registry as a ToolExecutor.
-type DspyToolExecutorAdapter struct {
-	// executeFunc executes a tool by name. This is typically
-	// obtained from the dspy-go agent's tool execution.
-	executeFunc func(ctx context.Context, name string, args json.RawMessage) (string, error)
-
-	// tools are the available tool definitions.
-	tools []ToolDef
-}
-
-// NewDspyToolExecutorAdapter creates an adapter for dspy-go tools.
-func NewDspyToolExecutorAdapter(
-	executeFunc func(ctx context.Context, name string, args json.RawMessage) (string, error),
-	tools []ToolDef,
-) *DspyToolExecutorAdapter {
-	return &DspyToolExecutorAdapter{
-		executeFunc: executeFunc,
-		tools:       tools,
-	}
-}
-
-// Execute implements ToolExecutor.
-func (a *DspyToolExecutorAdapter) Execute(ctx context.Context, name string, args json.RawMessage) (string, error) {
-	if a.executeFunc == nil {
-		return "", fmt.Errorf("no execute function configured")
-	}
-	return a.executeFunc(ctx, name, args)
-}
-
-// List implements ToolExecutor.
-func (a *DspyToolExecutorAdapter) List() []ToolDef {
-	return a.tools
 }
 
 // MockToolExecutor is a test double for ToolExecutor.

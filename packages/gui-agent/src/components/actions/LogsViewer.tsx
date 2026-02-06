@@ -146,8 +146,14 @@ export function LogsViewer() {
   const [showFilterPanel, setShowFilterPanel] = useState(false)
   const [componentFilter, setComponentFilter] = useState<string>('')
   const [workspaceFilter, setWorkspaceFilter] = useState<string>('')
+  const [searchInput, setSearchInput] = useState('')
   const [searchQuery, setSearchQuery] = useState('')
   const [loading, setLoading] = useState(false)
+
+  useEffect(() => {
+    const timer = setTimeout(() => setSearchQuery(searchInput), 300)
+    return () => clearTimeout(timer)
+  }, [searchInput])
 
   // Use activity store events - includes both API-loaded and SSE events
   const events = useActivityStore((s) => s.events)
@@ -340,8 +346,8 @@ export function LogsViewer() {
             <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
             <Input
               placeholder="Search operations..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
+              value={searchInput}
+              onChange={(e) => setSearchInput(e.target.value)}
               className="pl-9 h-9"
             />
           </div>
@@ -474,7 +480,7 @@ export function LogsViewer() {
             </div>
           ) : (
             filteredLogs.map((log, idx) => (
-              <LogEntryCard key={`${log.ts}-${idx}`} log={log} />
+              <LogEntryCard key={`${log.ts}-${log.operation}-${log.session_id || idx}`} log={log} />
             ))
           )}
         </div>

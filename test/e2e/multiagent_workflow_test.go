@@ -116,6 +116,7 @@ func TestMultiAgentWorkflow_FullCycle(t *testing.T) {
 	}
 	if taskCMetrics == nil {
 		t.Fatal("task C not found in insights")
+		return
 	}
 	t.Logf("  Task C critical path score: %d, PageRank: %.4f", taskCMetrics.CriticalPathScore, taskCMetrics.PageRank)
 
@@ -259,6 +260,7 @@ func TestMultiAgentWorkflow_FullCycle(t *testing.T) {
 	topRec := rec.TopRecommended
 	if topRec == nil {
 		t.Fatal("expected top recommendation")
+		return
 	}
 	t.Logf("  Top recommendation: %s (score: %.4f)", topRec.Title, topRec.Score)
 	t.Logf("    Critical Path: %.4f, PageRank: %.4f", topRec.CriticalPathScore, topRec.PageRank)

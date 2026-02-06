@@ -132,6 +132,7 @@ func TestBuildReplyMessage(t *testing.T) {
 	}
 	if msg == nil {
 		t.Fatal("message is nil")
+		return
 	}
 	if msg.Subject != "agent.reply" {
 		t.Errorf("Subject = %q, want agent.reply", msg.Subject)

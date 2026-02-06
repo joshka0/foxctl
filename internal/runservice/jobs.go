@@ -4,23 +4,55 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
+	"github.com/jkatigb/agentctl/internal/observability"
 	errs "github.com/jkatigb/agentctl/internal/platform/errors"
+	"github.com/jkatigb/agentctl/internal/platform/logging"
 	"github.com/jkatigb/agentctl/internal/storage/jobs"
+	"github.com/jkatigb/agentctl/internal/storage/jobs/executor"
+	"github.com/jkatigb/agentctl/internal/storage/jobs/persist"
+	"github.com/jkatigb/agentctl/internal/storage/jobs/types"
 	"github.com/jkatigb/agentctl/internal/storage/trajectory"
 	"github.com/jkatigb/agentctl/internal/trajectorycapture"
 )
 
-func (e *Executor) ensureJobStore() error {
+func (e *Executor) ensureJobStore() (err error) {
 	if e.jobStore != nil {
 		return nil
 	}
-	store, err := jobs.Open(e.ctx, e.cfg.Paths.Jobs)
+	logger := logging.FromContext(e.ctx)
+	p, err := persist.Open(e.ctx, e.cfg.Paths.Jobs)
 	if err != nil {
 		return err
 	}
+	defer errs.CloseOnErr(p, &err)
+	exec := executor.New(e.cfg.Paths.Jobs, p,
+		executor.WithLogger(logger),
+		executor.WithCASPath(e.cfg.Paths.CAS),
+	)
+	store := jobs.New(e.cfg.Paths.Jobs, p, exec)
+	recoveryStart := time.Now()
+	if recovered, recErr := store.RecoverStaleJobs(e.ctx, types.DefaultMaxJobAge); recErr != nil {
+		event := observability.NewEvent("job.recover").
+			WithComponent(observability.ComponentJob).
+			WithData("max_age_seconds", int64(types.DefaultMaxJobAge.Seconds()))
+		if e.options.Workspace != "" {
+			event.WithWorkspace(e.options.Workspace)
+		}
+		observability.Emit(e.ctx, event.Error(recErr, time.Since(recoveryStart)))
+	} else if recovered > 0 {
+		event := observability.NewEvent("job.recover").
+			WithComponent(observability.ComponentJob).
+			WithData("recovered", recovered).
+			WithData("max_age_seconds", int64(types.DefaultMaxJobAge.Seconds()))
+		if e.options.Workspace != "" {
+			event.WithWorkspace(e.options.Workspace)
+		}
+		observability.Emit(e.ctx, event.Success(time.Since(recoveryStart)))
+	}
 	// NOTE: We avoid full orphan recovery here to prevent races when multiple
-	// agentctl processes run concurrently (e.g., parallel hooks). jobs.Open
+	// agentctl processes run concurrently (e.g., parallel hooks). RecoverStaleJobs
 	// handles stale-job recovery using DefaultMaxJobAge, which is safe for
 	// concurrent runs and avoids erroring active jobs.
 	e.jobStore = store

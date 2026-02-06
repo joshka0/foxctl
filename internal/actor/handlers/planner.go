@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/XiaoConstantine/dspy-go/pkg/agents"
 	"github.com/jkatigb/agentctl/internal/actor"
 )
 
@@ -27,7 +26,7 @@ func NewPlannerHandler() *PlannerHandler {
 }
 
 // HandleAsk processes ask messages for planner role.
-func (h *PlannerHandler) HandleAsk(ctx context.Context, msg *actor.Message, agent agents.Agent, mem *MemoryContext) (*actor.Message, error) {
+func (h *PlannerHandler) HandleAsk(ctx context.Context, msg *actor.Message, agent AgentExecutor, mem *MemoryContext) (*actor.Message, error) {
 	askData, err := parseAskData(msg.Body)
 	if err != nil {
 		return nil, fmt.Errorf("parse ask: %w", err)
@@ -91,7 +90,7 @@ For each subtask:
 }
 
 // HandleCmd processes command messages for planner role.
-func (h *PlannerHandler) HandleCmd(ctx context.Context, msg *actor.Message, agent agents.Agent, mem *MemoryContext) (*actor.Message, error) {
+func (h *PlannerHandler) HandleCmd(ctx context.Context, msg *actor.Message, agent AgentExecutor, mem *MemoryContext) (*actor.Message, error) {
 	cmdData, err := parseCmdData(msg.Body)
 	if err != nil {
 		return nil, fmt.Errorf("parse cmd: %w", err)
@@ -210,7 +209,7 @@ Provide:
 }
 
 // HandleEvent processes event messages for planner role.
-func (h *PlannerHandler) HandleEvent(ctx context.Context, msg *actor.Message, _ agents.Agent, mem *MemoryContext) error {
+func (h *PlannerHandler) HandleEvent(ctx context.Context, msg *actor.Message, _ AgentExecutor, mem *MemoryContext) error {
 	eventData, err := parseEventData(msg.Body)
 	if err != nil {
 		return fmt.Errorf("parse event: %w", err)

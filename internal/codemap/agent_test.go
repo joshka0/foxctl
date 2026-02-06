@@ -1,6 +1,7 @@
 package codemap
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -242,46 +243,24 @@ func TestNewAgent(t *testing.T) {
 	})
 }
 
-func TestBuildCodemapSignature(t *testing.T) {
-	sig, err := buildCodemapSignature(nil)
+func TestBuildCodemapSystemPrompt(t *testing.T) {
+	prompt, err := buildCodemapSystemPrompt([]ToolInfo{
+		{Name: "context_search", Description: "Search codebase for relevant files"},
+		{Name: "context_grep", Description: "Regex search with expanded context"},
+	})
 	if err != nil {
-		t.Fatalf("buildCodemapSignature() returned error: %v", err)
+		t.Fatalf("buildCodemapSystemPrompt() returned error: %v", err)
 	}
-	if sig == nil {
-		t.Fatal("buildCodemapSignature() returned nil")
+	if prompt == "" {
+		t.Fatal("buildCodemapSystemPrompt() returned empty prompt")
 	}
-
-	// Check that input field is defined
-	inputs := sig.Inputs
-	if len(inputs) == 0 {
-		t.Error("expected at least one input field")
-	} else {
-		found := false
-		for _, f := range inputs {
-			if f.Name == "task" {
-				found = true
-				break
-			}
-		}
-		if !found {
-			t.Error("expected 'task' input field")
-		}
+	if !strings.Contains(prompt, "context_search") {
+		t.Error("expected prompt to mention context_search")
 	}
-
-	// Check that output field is defined
-	outputs := sig.Outputs
-	if len(outputs) == 0 {
-		t.Error("expected at least one output field")
-	} else {
-		found := false
-		for _, f := range outputs {
-			if f.Name == "result" {
-				found = true
-				break
-			}
-		}
-		if !found {
-			t.Error("expected 'result' output field")
-		}
+	if !strings.Contains(prompt, "context_grep") {
+		t.Error("expected prompt to mention context_grep")
+	}
+	if !strings.Contains(prompt, "finish_codemap") {
+		t.Error("expected prompt to mention finish_codemap")
 	}
 }

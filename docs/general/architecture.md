@@ -131,7 +131,7 @@ Infrastructure utilities.
 | `fsutil` | File system utilities |
 
 ### `internal/codemap/`
-Codemap generation system using dspy-go.
+Codemap generation system using the LLMChatEngine-based codemap agent.
 
 | File | Purpose |
 |------|---------|

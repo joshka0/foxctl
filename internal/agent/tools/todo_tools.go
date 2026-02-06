@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"time"
 
-	dstools "github.com/XiaoConstantine/dspy-go/pkg/tools"
+	tooling "github.com/jkatigb/agentctl/internal/tooling"
 	models "github.com/XiaoConstantine/mcp-go/pkg/model"
 	"github.com/jkatigb/agentctl/internal/analysis/tasksgraph"
 	errspkg "github.com/jkatigb/agentctl/internal/platform/errors"
@@ -17,7 +17,7 @@ import (
 // registerTodoTools registers task/todo management tools.
 func (r *Registry) registerTodoTools() error {
 	// todo.query - query tasks
-	queryTool := dstools.NewFuncTool(
+	queryTool := tooling.NewFuncTool(
 		"todo.query",
 		"Query tasks in the task database. Returns matching tasks with their status and metadata.",
 		models.InputSchema{
@@ -48,7 +48,7 @@ func (r *Registry) registerTodoTools() error {
 	}
 
 	// todo.graph_insights - get task graph insights
-	insightsTool := dstools.NewFuncTool(
+	insightsTool := tooling.NewFuncTool(
 		"todo.graph_insights",
 		"Get insights about the task graph including critical paths, blocking tasks, and priority recommendations.",
 		models.InputSchema{
@@ -71,7 +71,7 @@ func (r *Registry) registerTodoTools() error {
 	}
 
 	// todo.add - add a new task
-	addTool := dstools.NewFuncTool(
+	addTool := tooling.NewFuncTool(
 		"todo.add",
 		"Add a new task to the task database.",
 		models.InputSchema{
@@ -107,7 +107,7 @@ func (r *Registry) registerTodoTools() error {
 	}
 
 	// todo.complete - mark a task as complete
-	completeTool := dstools.NewFuncTool(
+	completeTool := tooling.NewFuncTool(
 		"todo.complete",
 		"Mark a task as completed.",
 		models.InputSchema{
@@ -131,7 +131,7 @@ func (r *Registry) registerTodoTools() error {
 	}
 
 	// todo.set_active - set active task
-	setActiveTool := dstools.NewFuncTool(
+	setActiveTool := tooling.NewFuncTool(
 		"todo.set_active",
 		"Set the active task for the workspace.",
 		models.InputSchema{
@@ -151,7 +151,7 @@ func (r *Registry) registerTodoTools() error {
 	}
 
 	// todo.ensure_active - ensure an active task exists
-	ensureActiveTool := dstools.NewFuncTool(
+	ensureActiveTool := tooling.NewFuncTool(
 		"todo.ensure_active",
 		"Get the active task, or create one if none exists.",
 		models.InputSchema{

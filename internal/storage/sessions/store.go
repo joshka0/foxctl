@@ -13,6 +13,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/platform/config"
 	errs "github.com/jkatigb/agentctl/internal/platform/errors"
 	"github.com/jkatigb/agentctl/internal/platform/timeutil"
+	ws "github.com/jkatigb/agentctl/internal/platform/workspace"
 	"github.com/jkatigb/agentctl/internal/storage"
 	"github.com/jkatigb/agentctl/internal/storage/dbdriver"
 	"github.com/jkatigb/agentctl/internal/storage/sqliteutil"
@@ -121,6 +122,7 @@ func Open(ctx context.Context, root string) (store *Store, err error) {
 
 	// Validate embedding dimensions against config (non-blocking warning)
 	store.validateDimensionsOnOpen(ctx)
+	store.repairWorkspaceIDs(ctx)
 
 	return store, nil
 }
@@ -168,6 +170,13 @@ func (s *Store) Save(ctx context.Context, session Session) (Session, error) {
 		session.Status = StatusOK
 	}
 
+	// Ensure workspace_id is populated for stable cross-machine lookups.
+	// WorkspacePath remains for display and local tooling.
+	session.WorkspaceID = strings.TrimSpace(session.WorkspaceID)
+	if session.WorkspaceID == "" && session.WorkspacePath != "" {
+		session.WorkspaceID = ws.ID(session.WorkspacePath)
+	}
+
 	// Format JSON arrays
 	accomplishedJSON, err := sqlutil.FormatJSON(session.Accomplished)
 	if err != nil {
@@ -198,14 +207,15 @@ func (s *Store) Save(ctx context.Context, session Session) (Session, error) {
 
 	_, err = s.db.ExecContext(ctx, `
 INSERT INTO sessions (
-	id, workspace_path, project_name, git_branch, claude_version,
+	id, workspace_id, workspace_path, project_name, git_branch, claude_version,
 	started_at, ended_at, summary, accomplished, decisions, gotchas,
 	tags, key_files, tools_pattern, message_count, user_turns,
 	tool_invocations, total_tokens, raw_jsonl_path, content_hash, embedding, embedding_model,
 	created_at, updated_at, parent_session_id, agent_id, agent_type, status,
 	prompt, prompt_hash, llm_provider, llm_model
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(id) DO UPDATE SET
+	workspace_id = excluded.workspace_id,
 	workspace_path = excluded.workspace_path,
 	project_name = excluded.project_name,
 	git_branch = excluded.git_branch,
@@ -237,7 +247,7 @@ ON CONFLICT(id) DO UPDATE SET
 	llm_provider = COALESCE(excluded.llm_provider, sessions.llm_provider),
 	llm_model = COALESCE(excluded.llm_model, sessions.llm_model)
 `,
-		session.ID, session.WorkspacePath, session.ProjectName, session.GitBranch, session.ClaudeVersion,
+		session.ID, session.WorkspaceID, session.WorkspacePath, session.ProjectName, session.GitBranch, session.ClaudeVersion,
 		sqlutil.FormatTimestamp(session.StartedAt), sqlutil.FormatTimestamp(session.EndedAt),
 		session.Summary, accomplishedJSON, decisionsJSON, gotchasJSON,
 		tagsJSON, keyFilesJSON, session.ToolsPattern, session.MessageCount, session.UserTurns,
@@ -255,7 +265,7 @@ ON CONFLICT(id) DO UPDATE SET
 // Get retrieves a session by ID.
 func (s *Store) Get(ctx context.Context, id string) (Session, error) {
 	row := s.db.QueryRowContext(ctx, `
-		SELECT id, workspace_path, project_name, git_branch, claude_version,
+		SELECT id, workspace_id, workspace_path, project_name, git_branch, claude_version,
 			started_at, ended_at, summary, accomplished, decisions, gotchas, user_insights,
 			tags, key_files, tools_pattern, message_count, user_turns,
 			tool_invocations, total_tokens, raw_jsonl_path, content_hash, embedding, embedding_model,
@@ -272,10 +282,26 @@ func (s *Store) List(ctx context.Context, opts ListOptions) ([]Session, error) {
 		opts.Limit = 20
 	}
 
+	opts.WorkspaceID = strings.TrimSpace(opts.WorkspaceID)
+	opts.WorkspacePath = strings.TrimSpace(opts.WorkspacePath)
+	if opts.WorkspaceID == "" && opts.WorkspacePath != "" {
+		opts.WorkspaceID, opts.WorkspacePath = resolveWorkspaceSelector(opts.WorkspacePath)
+	}
+
 	var conditions []string
 	var args []any
 
-	if opts.WorkspacePath != "" {
+	if opts.WorkspaceID != "" {
+		// Prefer stable workspace_id when available.
+		// When WorkspacePath is also provided, include legacy rows without a workspace_id.
+		if opts.WorkspacePath != "" {
+			conditions = append(conditions, "(workspace_id = ? OR (workspace_id = '' AND workspace_path = ?))")
+			args = append(args, opts.WorkspaceID, opts.WorkspacePath)
+		} else {
+			conditions = append(conditions, "workspace_id = ?")
+			args = append(args, opts.WorkspaceID)
+		}
+	} else if opts.WorkspacePath != "" {
 		conditions = append(conditions, "workspace_path = ?")
 		args = append(args, opts.WorkspacePath)
 	}
@@ -310,7 +336,7 @@ func (s *Store) List(ctx context.Context, opts ListOptions) ([]Session, error) {
 	}
 
 	query := `
-		SELECT id, workspace_path, project_name, git_branch, claude_version,
+		SELECT id, workspace_id, workspace_path, project_name, git_branch, claude_version,
 			started_at, ended_at, summary, accomplished, decisions, gotchas, user_insights,
 			tags, key_files, tools_pattern, message_count, user_turns,
 			tool_invocations, total_tokens, raw_jsonl_path, content_hash, embedding, embedding_model,
@@ -358,7 +384,7 @@ func (s *Store) Search(ctx context.Context, query string, limit int) ([]Session,
 	}
 	like := "%" + strings.ToLower(query) + "%"
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, workspace_path, project_name, git_branch, claude_version,
+		SELECT id, workspace_id, workspace_path, project_name, git_branch, claude_version,
 			started_at, ended_at, summary, accomplished, decisions, gotchas, user_insights,
 			tags, key_files, tools_pattern, message_count, user_turns,
 			tool_invocations, total_tokens, raw_jsonl_path, content_hash, embedding, embedding_model,
@@ -478,22 +504,39 @@ func (s *Store) SearchSimilar(ctx context.Context, workspace string, queryEmbedd
 	var rows *sql.Rows
 	var err error
 
-	if workspace != "" {
-		// Filter by workspace for scoped search
-		rows, err = s.db.QueryContext(ctx, `
-			SELECT id, workspace_path, project_name, git_branch, claude_version,
-				started_at, ended_at, summary, accomplished, decisions, gotchas, user_insights,
-				tags, key_files, tools_pattern, message_count, user_turns,
-				tool_invocations, total_tokens, raw_jsonl_path, content_hash, embedding, embedding_model,
-				created_at, updated_at, parent_session_id, agent_id, agent_type, status, key_questions,
-				prompt, prompt_hash, llm_provider, llm_model
-			FROM sessions
-			WHERE workspace_path = ? AND embedding IS NOT NULL AND LENGTH(embedding) > 0
-			ORDER BY started_at DESC`, workspace)
+	workspaceID, workspacePath := resolveWorkspaceSelector(workspace)
+	if workspaceID != "" {
+		// Filter by stable workspace ID for scoped search.
+		// Include legacy rows without workspace_id when a workspace path was provided.
+		if workspacePath != "" {
+			rows, err = s.db.QueryContext(ctx, `
+				SELECT id, workspace_id, workspace_path, project_name, git_branch, claude_version,
+					started_at, ended_at, summary, accomplished, decisions, gotchas, user_insights,
+					tags, key_files, tools_pattern, message_count, user_turns,
+					tool_invocations, total_tokens, raw_jsonl_path, content_hash, embedding, embedding_model,
+					created_at, updated_at, parent_session_id, agent_id, agent_type, status, key_questions,
+					prompt, prompt_hash, llm_provider, llm_model
+				FROM sessions
+				WHERE (workspace_id = ? OR (workspace_id = '' AND workspace_path = ?))
+				  AND embedding IS NOT NULL AND LENGTH(embedding) > 0
+				ORDER BY started_at DESC`, workspaceID, workspacePath)
+		} else {
+			rows, err = s.db.QueryContext(ctx, `
+				SELECT id, workspace_id, workspace_path, project_name, git_branch, claude_version,
+					started_at, ended_at, summary, accomplished, decisions, gotchas, user_insights,
+					tags, key_files, tools_pattern, message_count, user_turns,
+					tool_invocations, total_tokens, raw_jsonl_path, content_hash, embedding, embedding_model,
+					created_at, updated_at, parent_session_id, agent_id, agent_type, status, key_questions,
+					prompt, prompt_hash, llm_provider, llm_model
+				FROM sessions
+				WHERE workspace_id = ?
+				  AND embedding IS NOT NULL AND LENGTH(embedding) > 0
+				ORDER BY started_at DESC`, workspaceID)
+		}
 	} else {
 		// Global search (no workspace filter)
 		rows, err = s.db.QueryContext(ctx, `
-			SELECT id, workspace_path, project_name, git_branch, claude_version,
+			SELECT id, workspace_id, workspace_path, project_name, git_branch, claude_version,
 				started_at, ended_at, summary, accomplished, decisions, gotchas, user_insights,
 				tags, key_files, tools_pattern, message_count, user_turns,
 				tool_invocations, total_tokens, raw_jsonl_path, content_hash, embedding, embedding_model,
@@ -561,7 +604,7 @@ func (s *Store) FindByContentHash(ctx context.Context, contentHash string) (*Ses
 	}
 
 	row := s.db.QueryRowContext(ctx, `
-		SELECT id, workspace_path, project_name, git_branch, claude_version,
+		SELECT id, workspace_id, workspace_path, project_name, git_branch, claude_version,
 			started_at, ended_at, summary, accomplished, decisions, gotchas, user_insights,
 			tags, key_files, tools_pattern, message_count, user_turns,
 			tool_invocations, total_tokens, raw_jsonl_path, content_hash, embedding, embedding_model,
@@ -603,17 +646,39 @@ func (s *Store) GetActive(ctx context.Context, workspace, agentID string) (*Sess
 	if agentID == "" {
 		agentID = "agentctl"
 	}
-	row := s.db.QueryRowContext(ctx, `
-		SELECT id, workspace_path, project_name, git_branch, claude_version,
-			started_at, ended_at, summary, accomplished, decisions, gotchas, user_insights,
-			tags, key_files, tools_pattern, message_count, user_turns,
-			tool_invocations, total_tokens, raw_jsonl_path, content_hash, embedding, embedding_model,
-			created_at, updated_at, parent_session_id, agent_id, agent_type, status, key_questions,
-			prompt, prompt_hash, llm_provider, llm_model
-		FROM sessions
-		WHERE workspace_path = ? AND agent_id = ? AND status = ?
-		ORDER BY started_at DESC
-		LIMIT 1`, workspace, agentID, StatusRunning)
+
+	workspaceID, workspacePath := resolveWorkspaceSelector(workspace)
+	if workspaceID == "" {
+		return nil, nil
+	}
+
+	var row *sql.Row
+	if workspacePath != "" {
+		row = s.db.QueryRowContext(ctx, `
+			SELECT id, workspace_id, workspace_path, project_name, git_branch, claude_version,
+				started_at, ended_at, summary, accomplished, decisions, gotchas, user_insights,
+				tags, key_files, tools_pattern, message_count, user_turns,
+				tool_invocations, total_tokens, raw_jsonl_path, content_hash, embedding, embedding_model,
+				created_at, updated_at, parent_session_id, agent_id, agent_type, status, key_questions,
+				prompt, prompt_hash, llm_provider, llm_model
+			FROM sessions
+			WHERE (workspace_id = ? OR (workspace_id = '' AND workspace_path = ?))
+			  AND agent_id = ? AND status = ?
+			ORDER BY started_at DESC
+			LIMIT 1`, workspaceID, workspacePath, agentID, StatusRunning)
+	} else {
+		row = s.db.QueryRowContext(ctx, `
+			SELECT id, workspace_id, workspace_path, project_name, git_branch, claude_version,
+				started_at, ended_at, summary, accomplished, decisions, gotchas, user_insights,
+				tags, key_files, tools_pattern, message_count, user_turns,
+				tool_invocations, total_tokens, raw_jsonl_path, content_hash, embedding, embedding_model,
+				created_at, updated_at, parent_session_id, agent_id, agent_type, status, key_questions,
+				prompt, prompt_hash, llm_provider, llm_model
+			FROM sessions
+			WHERE workspace_id = ? AND agent_id = ? AND status = ?
+			ORDER BY started_at DESC
+			LIMIT 1`, workspaceID, agentID, StatusRunning)
+	}
 
 	session, err := scanSession(row)
 	if err != nil {
@@ -700,18 +765,40 @@ func (s *Store) GetPendingRestore(ctx context.Context, workspace string) (*Sessi
 	// Calculate 10 minute cutoff
 	cutoff := sqlutil.FormatTimestamp(timeutil.NowUTC().Add(-10 * time.Minute))
 
-	query := `
-		SELECT id, workspace_path, project_name, git_branch, claude_version,
-			started_at, ended_at, summary, accomplished, decisions, gotchas, user_insights,
-			tags, key_files, tools_pattern, message_count, user_turns,
-			tool_invocations, total_tokens, raw_jsonl_path, content_hash, embedding, embedding_model,
-			created_at, updated_at, parent_session_id, agent_id, agent_type, status, key_questions,
-			prompt, prompt_hash, llm_provider, llm_model
-		FROM sessions
-		WHERE workspace_path = ? AND pending_restore_at IS NOT NULL AND pending_restore_at > ?
-		ORDER BY pending_restore_at DESC LIMIT 1`
+	workspaceID, workspacePath := resolveWorkspaceSelector(workspace)
+	if workspaceID == "" {
+		return nil, nil
+	}
 
-	row := s.db.QueryRowContext(ctx, query, workspace, cutoff)
+	var row *sql.Row
+	if workspacePath != "" {
+		row = s.db.QueryRowContext(ctx, `
+			SELECT id, workspace_id, workspace_path, project_name, git_branch, claude_version,
+				started_at, ended_at, summary, accomplished, decisions, gotchas, user_insights,
+				tags, key_files, tools_pattern, message_count, user_turns,
+				tool_invocations, total_tokens, raw_jsonl_path, content_hash, embedding, embedding_model,
+				created_at, updated_at, parent_session_id, agent_id, agent_type, status, key_questions,
+				prompt, prompt_hash, llm_provider, llm_model
+			FROM sessions
+			WHERE (workspace_id = ? OR (workspace_id = '' AND workspace_path = ?))
+			  AND pending_restore_at IS NOT NULL AND pending_restore_at > ?
+			ORDER BY pending_restore_at DESC
+			LIMIT 1`, workspaceID, workspacePath, cutoff)
+	} else {
+		row = s.db.QueryRowContext(ctx, `
+			SELECT id, workspace_id, workspace_path, project_name, git_branch, claude_version,
+				started_at, ended_at, summary, accomplished, decisions, gotchas, user_insights,
+				tags, key_files, tools_pattern, message_count, user_turns,
+				tool_invocations, total_tokens, raw_jsonl_path, content_hash, embedding, embedding_model,
+				created_at, updated_at, parent_session_id, agent_id, agent_type, status, key_questions,
+				prompt, prompt_hash, llm_provider, llm_model
+			FROM sessions
+			WHERE workspace_id = ?
+			  AND pending_restore_at IS NOT NULL AND pending_restore_at > ?
+			ORDER BY pending_restore_at DESC
+			LIMIT 1`, workspaceID, cutoff)
+	}
+
 	session, err := scanSession(row)
 	if err != nil {
 		if err == ErrNotFound {
@@ -729,18 +816,39 @@ func (s *Store) FindLastSession(ctx context.Context, workspace, agentID string, 
 		agentID = "agentctl"
 	}
 
-	var args []any
-	args = append(args, workspace, agentID)
+	workspaceID, workspacePath := resolveWorkspaceSelector(workspace)
+	if workspaceID == "" {
+		return nil, nil
+	}
 
-	query := `
-		SELECT id, workspace_path, project_name, git_branch, claude_version,
-			started_at, ended_at, summary, accomplished, decisions, gotchas, user_insights,
-			tags, key_files, tools_pattern, message_count, user_turns,
-			tool_invocations, total_tokens, raw_jsonl_path, content_hash, embedding, embedding_model,
-			created_at, updated_at, parent_session_id, agent_id, agent_type, status, key_questions,
-			prompt, prompt_hash, llm_provider, llm_model
-		FROM sessions
-		WHERE workspace_path = ? AND agent_id = ?`
+	var (
+		query string
+		args  []any
+	)
+	if workspacePath != "" {
+		query = `
+			SELECT id, workspace_id, workspace_path, project_name, git_branch, claude_version,
+				started_at, ended_at, summary, accomplished, decisions, gotchas, user_insights,
+				tags, key_files, tools_pattern, message_count, user_turns,
+				tool_invocations, total_tokens, raw_jsonl_path, content_hash, embedding, embedding_model,
+				created_at, updated_at, parent_session_id, agent_id, agent_type, status, key_questions,
+				prompt, prompt_hash, llm_provider, llm_model
+			FROM sessions
+			WHERE (workspace_id = ? OR (workspace_id = '' AND workspace_path = ?))
+			  AND agent_id = ?`
+		args = append(args, workspaceID, workspacePath, agentID)
+	} else {
+		query = `
+			SELECT id, workspace_id, workspace_path, project_name, git_branch, claude_version,
+				started_at, ended_at, summary, accomplished, decisions, gotchas, user_insights,
+				tags, key_files, tools_pattern, message_count, user_turns,
+				tool_invocations, total_tokens, raw_jsonl_path, content_hash, embedding, embedding_model,
+				created_at, updated_at, parent_session_id, agent_id, agent_type, status, key_questions,
+				prompt, prompt_hash, llm_provider, llm_model
+			FROM sessions
+			WHERE workspace_id = ? AND agent_id = ?`
+		args = append(args, workspaceID, agentID)
+	}
 
 	if len(statuses) > 0 {
 		placeholders := make([]string, len(statuses))
@@ -765,6 +873,7 @@ func (s *Store) FindLastSession(ctx context.Context, workspace, agentID string, 
 
 // SaveEdge saves a session edge (relationship between sessions).
 func (s *Store) SaveEdge(ctx context.Context, edge SessionEdge) error {
+	edge.Workspace = ws.CanonicalID(edge.Workspace)
 	now := timeutil.NowUTC()
 	if edge.CreatedAt.IsZero() {
 		edge.CreatedAt = now
@@ -809,7 +918,7 @@ func (s *Store) GetAncestorChain(ctx context.Context, sessionID string, maxDepth
 			JOIN ancestors a ON s.id = a.id
 			WHERE s.parent_session_id IS NOT NULL AND a.depth < ?
 		)
-		SELECT s.id, s.workspace_path, s.project_name, s.git_branch, s.claude_version,
+		SELECT s.id, s.workspace_id, s.workspace_path, s.project_name, s.git_branch, s.claude_version,
 			s.started_at, s.ended_at, s.summary, s.accomplished, s.decisions, s.gotchas, s.user_insights,
 			s.tags, s.key_files, s.tools_pattern, s.message_count, s.user_turns,
 			s.tool_invocations, s.total_tokens, s.raw_jsonl_path, s.content_hash, s.embedding, s.embedding_model,
@@ -2179,6 +2288,7 @@ func migrate(ctx context.Context, db *sql.DB) error {
 	ddl := `
 CREATE TABLE IF NOT EXISTS sessions (
 	id TEXT PRIMARY KEY,
+	workspace_id TEXT NOT NULL DEFAULT '',
 	workspace_path TEXT NOT NULL,
 	project_name TEXT,
 	git_branch TEXT,
@@ -2310,9 +2420,20 @@ CREATE INDEX IF NOT EXISTS idx_session_edges_workspace ON session_edges(workspac
 		return fmt.Errorf("sessions: migrate: %w", err)
 	}
 
-	// Add user_insights column if it doesn't exist (for existing databases)
+	// Add workspace_id column for stable cross-machine scoping.
 	var colCount int
-	row := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM pragma_table_info('sessions') WHERE name = 'user_insights'")
+	row := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM pragma_table_info('sessions') WHERE name = 'workspace_id'")
+	if err := row.Scan(&colCount); err == nil && colCount == 0 {
+		if _, err := db.ExecContext(ctx, "ALTER TABLE sessions ADD COLUMN workspace_id TEXT NOT NULL DEFAULT ''"); err != nil {
+			// Ignore error if column already exists
+			if !strings.Contains(err.Error(), "duplicate column") && !strings.Contains(err.Error(), "already exists") {
+				return fmt.Errorf("sessions: add workspace_id column: %w", err)
+			}
+		}
+	}
+
+	// Add user_insights column if it doesn't exist (for existing databases)
+	row = db.QueryRowContext(ctx, "SELECT COUNT(*) FROM pragma_table_info('sessions') WHERE name = 'user_insights'")
 	if err := row.Scan(&colCount); err == nil && colCount == 0 {
 		if _, err := db.ExecContext(ctx, "ALTER TABLE sessions ADD COLUMN user_insights TEXT"); err != nil {
 			// Ignore error if column already exists
@@ -2357,6 +2478,8 @@ CREATE INDEX IF NOT EXISTS idx_session_edges_workspace ON session_edges(workspac
 
 	// Create indexes for lineage columns (after columns are added)
 	lineageIndexes := []string{
+		`CREATE INDEX IF NOT EXISTS idx_sessions_workspace_id ON sessions(workspace_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_sessions_workspace_id_agent ON sessions(workspace_id, agent_id, started_at DESC)`,
 		`CREATE INDEX IF NOT EXISTS idx_sessions_parent ON sessions(parent_session_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_sessions_workspace_agent ON sessions(workspace_path, agent_id, started_at DESC)`,
 		`CREATE INDEX IF NOT EXISTS idx_sessions_status ON sessions(status)`,
@@ -2477,7 +2600,7 @@ CREATE INDEX IF NOT EXISTS idx_context_windows_ended ON session_context_windows(
 			}
 		}
 	}
-	if _, err := db.ExecContext(ctx, "CREATE INDEX IF NOT EXISTS idx_sessions_pending_restore ON sessions(workspace_path, pending_restore_at) WHERE pending_restore_at IS NOT NULL"); err != nil {
+	if _, err := db.ExecContext(ctx, "CREATE INDEX IF NOT EXISTS idx_sessions_pending_restore_ws_id ON sessions(workspace_id, pending_restore_at) WHERE pending_restore_at IS NOT NULL"); err != nil {
 		if !strings.Contains(err.Error(), "already exists") {
 			logger.Warn().Err(err).Msg("failed to create pending_restore index")
 		}
@@ -2515,6 +2638,17 @@ CREATE INDEX IF NOT EXISTS idx_context_windows_ended ON session_context_windows(
 	return nil
 }
 
+func resolveWorkspaceSelector(workspace string) (workspaceID string, workspacePath string) {
+	workspace = strings.TrimSpace(workspace)
+	if workspace == "" {
+		return "", ""
+	}
+	if ws.LooksLikeID(workspace) {
+		return workspace, ""
+	}
+	return ws.ID(workspace), workspace
+}
+
 type scannable interface {
 	Scan(dest ...any) error
 }
@@ -2535,7 +2669,7 @@ func scanSession(row scannable) (Session, error) {
 	var projectName, gitBranch, claudeVersion, rawJSONLPath sql.NullString
 
 	err := row.Scan(
-		&session.ID, &session.WorkspacePath, &projectName, &gitBranch, &claudeVersion,
+		&session.ID, &session.WorkspaceID, &session.WorkspacePath, &projectName, &gitBranch, &claudeVersion,
 		&startedAt, &endedAt, &summary, &accomplished, &decisions, &gotchas, &userInsights,
 		&tags, &keyFiles, &toolsPattern, &session.MessageCount, &session.UserTurns,
 		&session.ToolInvocations, &session.TotalTokens, &rawJSONLPath, &contentHash, &embedding, &embeddingModel,

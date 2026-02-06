@@ -18,7 +18,7 @@
       "locations": [
         {
           "id": "1a",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/skills/mcp_bridge/main.go",
+          "path": "skills/mcp_bridge/main.go",
           "lineNumber": 99,
           "lineContent": "func run(ctx context.Context, rc *skillmain.RunContext, in input) error {",
           "title": "Bridge execution entry point",
@@ -26,7 +26,7 @@
         },
         {
           "id": "1b",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/skills/mcp_bridge/main.go",
+          "path": "skills/mcp_bridge/main.go",
           "lineNumber": 110,
           "lineContent": "mcpClient, err = mcputil.NewClient(ctx, mcputil.Config{",
           "title": "MCP client creation",
@@ -34,7 +34,7 @@
         },
         {
           "id": "1c",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/adapters/skillslib/mcputil/mcputil.go",
+          "path": "internal/adapters/skillslib/mcputil/mcputil.go",
           "lineNumber": 25,
           "lineContent": "if cfg.ServerURL != \"\" {",
           "title": "HTTP/SSE transport selection",
@@ -42,7 +42,7 @@
         },
         {
           "id": "1d",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/adapters/skillslib/mcputil/mcputil.go",
+          "path": "internal/adapters/skillslib/mcputil/mcputil.go",
           "lineNumber": 42,
           "lineContent": "c, err := client.NewStdioMCPClient(cfg.ServerCmd, env, cfg.ServerArgs...)",
           "title": "Stdio transport selection",
@@ -50,14 +50,14 @@
         },
         {
           "id": "1e",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/skills/mcp_bridge/main.go",
+          "path": "skills/mcp_bridge/main.go",
           "lineNumber": 133,
           "lineContent": "toolResult, err := mcpClient.CallTool(ctx, mcp.CallToolRequest{",
           "title": "Tool invocation",
           "description": "Calls the specified tool on the MCP server with arguments"
         }
       ],
-      "traceTextDiagram": "MCP Bridge Execution Flow\n├── run() main entry point \u003c-- 1a\n│   ├── mcputil.NewClient() creation \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/mcp_bridge/main.go:110\n│   │   ├── HTTP/SSE transport path \u003c-- 1c\n│   │   └── Stdio transport path \u003c-- 1d\n│   ├── mcputil.Initialize() handshake \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/mcp_bridge/main.go:128\n│   └── mcpClient.CallTool() invocation \u003c-- 1e\n└── parseInput() argument processing \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/mcp_bridge/main.go:152\n    └── Flag vs stdin mode selection \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/mcp_bridge/main.go:154",
+      "traceTextDiagram": "MCP Bridge Execution Flow\n├── run() main entry point \u003c-- 1a\n│   ├── mcputil.NewClient() creation \u003c-- skills/mcp_bridge/main.go:110\n│   │   ├── HTTP/SSE transport path \u003c-- 1c\n│   │   └── Stdio transport path \u003c-- 1d\n│   ├── mcputil.Initialize() handshake \u003c-- skills/mcp_bridge/main.go:128\n│   └── mcpClient.CallTool() invocation \u003c-- 1e\n└── parseInput() argument processing \u003c-- skills/mcp_bridge/main.go:152\n    └── Flag vs stdin mode selection \u003c-- skills/mcp_bridge/main.go:154",
       "traceGuide": "# Motivation\n\nThe MCP Bridge solves a critical interoperability problem: **AI coding assistants use different ecosystems but can all speak the Model Context Protocol (MCP)**. Instead of building separate integrations for each assistant (Claude, Codex, OpenCode, etc.), agentctl provides a generic bridge that connects to any MCP server and exposes its tools as native agentctl skills. This creates a **universal adapter** that lets you use MCP tools (like GitHub access, filesystem operations, or web search) from any supported AI assistant with a single implementation.\n\n# Details\n\nThe bridge operates in two modes: **stdio** for local MCP servers and **HTTP/SSE** for remote servers [1c][1d]. When you invoke an MCP tool, the bridge first creates a client with the appropriate transport [1a], performs the MCP initialization handshake to establish the protocol connection, then calls the specific tool with your arguments [1e]. The bridge handles all the protocol details - message formatting, transport management, and error handling - so you can interact with MCP tools using simple JSON input/output. The system also includes an installer that automatically generates agentctl skills from MCP server tool definitions, creating persistent skill wrappers that use the bridge under the hood."
     },
     {
@@ -67,7 +67,7 @@
       "locations": [
         {
           "id": "2a",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/skills/providers/main.go",
+          "path": "skills/providers/main.go",
           "lineNumber": 154,
           "lineContent": "func run(_ context.Context, rc *skillmain.RunContext, in input) error {",
           "title": "Provider config entry point",
@@ -75,7 +75,7 @@
         },
         {
           "id": "2b",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/skills/providers/main.go",
+          "path": "skills/providers/main.go",
           "lineNumber": 35,
           "lineContent": "var providers = map[string]Provider{",
           "title": "Provider registry definition",
@@ -83,7 +83,7 @@
         },
         {
           "id": "2c",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/skills/providers/main.go",
+          "path": "skills/providers/main.go",
           "lineNumber": 182,
           "lineContent": "case \"add-mcp\":",
           "title": "MCP server addition",
@@ -91,7 +91,7 @@
         },
         {
           "id": "2d",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/skills/providers/main.go",
+          "path": "skills/providers/main.go",
           "lineNumber": 355,
           "lineContent": "mcpServers[mcp.Name] = serverEntry",
           "title": "MCP entry insertion",
@@ -99,14 +99,14 @@
         },
         {
           "id": "2e",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/skills/providers/main.go",
+          "path": "skills/providers/main.go",
           "lineNumber": 359,
           "lineContent": "if err := writeConfig(path, cfg, p.ConfigType); err != nil {",
           "title": "Configuration persistence",
           "description": "Writes the updated configuration back to the provider's config file"
         }
       ],
-      "traceTextDiagram": "Provider Config Management System\n├── run() entry point \u003c-- 2a\n│   ├── Operation switch statement \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/providers/main.go:172\n│   │   ├── add-mcp operation \u003c-- 2c\n│   │   │   ├── getTargetProviders() \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/providers/main.go:809\n│   │   │   ├── buildMCPEntry() \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/providers/main.go:820\n│   │   │   └── Config manipulation \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/providers/main.go:322\n│   │   │       ├── mcpServers[mcp.Name] = entry \u003c-- 2d\n│   │   │       └── writeConfig() persistence \u003c-- 2e\n│   │   └── Other operations (get, set, sync...) \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/providers/main.go:173\n│   └── Provider registry access \u003c-- 2b\n└── Provider definitions \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/providers/main.go:35\n    ├── Claude: ~/.claude.json \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/providers/main.go:36\n    ├── Codex: ~/.codex/config.toml \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/providers/main.go:45\n    └── OpenCode: ~/.config/opencode/... \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/providers/main.go:52",
+      "traceTextDiagram": "Provider Config Management System\n├── run() entry point \u003c-- 2a\n│   ├── Operation switch statement \u003c-- skills/providers/main.go:172\n│   │   ├── add-mcp operation \u003c-- 2c\n│   │   │   ├── getTargetProviders() \u003c-- skills/providers/main.go:809\n│   │   │   ├── buildMCPEntry() \u003c-- skills/providers/main.go:820\n│   │   │   └── Config manipulation \u003c-- skills/providers/main.go:322\n│   │   │       ├── mcpServers[mcp.Name] = entry \u003c-- 2d\n│   │   │       └── writeConfig() persistence \u003c-- 2e\n│   │   └── Other operations (get, set, sync...) \u003c-- skills/providers/main.go:173\n│   └── Provider registry access \u003c-- 2b\n└── Provider definitions \u003c-- skills/providers/main.go:35\n    ├── Claude: ~/.claude.json \u003c-- skills/providers/main.go:36\n    ├── Codex: ~/.codex/config.toml \u003c-- skills/providers/main.go:45\n    └── OpenCode: ~/.config/opencode/... \u003c-- skills/providers/main.go:52",
       "traceGuide": "## Motivation\n\nDevelopers using multiple AI coding assistants (Claude, Cursor, Factory, etc.) face a **fragmented configuration nightmare**. Each tool stores its MCP servers, skills, and settings in different formats and locations - JSON vs TOML, ~/.claude vs ~/.config, different key names for the same concept. This forces users to manually duplicate configurations and maintain consistency across tools, wasting time and causing errors.\n\n## Details\n\nThe provider config system solves this with a **unified abstraction layer**. It defines a registry of supported providers [2b], each with their specific config paths and formats. When you want to add an MCP server, you call `add-mcp` [2c] once, and the system automatically translates and writes the configuration to all target providers in their native formats.\n\nThe core flow works like this: the main run function [2a] receives your operation, routes it to the appropriate handler, which then loads the target provider's config file, manipulates the data structure (like adding to the mcpServers map [2d]), and persists it back using the correct format [2e]. The system handles all the ugly details - JSON vs TOML serialization, different file locations, varying key names - so you don't have to.\n\nThis enables powerful workflows like syncing MCP servers from Claude to all other tools with a single command, or exporting/importing entire configurations as backups."
     },
     {
@@ -116,7 +116,7 @@
       "locations": [
         {
           "id": "3a",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/skills/mcp_install/main.go",
+          "path": "skills/mcp_install/main.go",
           "lineNumber": 84,
           "lineContent": "func run(ctx context.Context, rc *skillmain.RunContext, in input) error {",
           "title": "MCP install entry point",
@@ -124,7 +124,7 @@
         },
         {
           "id": "3b",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/skills/mcp_install/main.go",
+          "path": "skills/mcp_install/main.go",
           "lineNumber": 118,
           "lineContent": "toolsResult, err := mcpClient.ListTools(ctx, mcp.ListToolsRequest{})",
           "title": "Tool discovery",
@@ -132,7 +132,7 @@
         },
         {
           "id": "3c",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/skills/mcp_install/main.go",
+          "path": "skills/mcp_install/main.go",
           "lineNumber": 144,
           "lineContent": "if err := generateSkill(validDir, tool, in); err != nil {",
           "title": "Skill generation loop",
@@ -140,7 +140,7 @@
         },
         {
           "id": "3d",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/skills/mcp_install/main.go",
+          "path": "skills/mcp_install/main.go",
           "lineNumber": 177,
           "lineContent": "cmdParts := []string{in.BridgePath}",
           "title": "Bridge command construction",
@@ -148,14 +148,14 @@
         },
         {
           "id": "3e",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/skills/mcp_install/main.go",
+          "path": "skills/mcp_install/main.go",
           "lineNumber": 276,
           "lineContent": "manifest := map[string]any{",
           "title": "Skill manifest creation",
           "description": "Creates the skill.yaml manifest with MCP tool schema mapped to agentctl signature"
         }
       ],
-      "traceTextDiagram": "MCP Skill Installation Flow\n├── run() main entry point \u003c-- 3a\n│   ├── Create MCP client connection \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/mcp_install/main.go:95\n│   │   └── ListTools() discovery \u003c-- 3b\n│   └── For each discovered tool: \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/mcp_install/main.go:142\n│       ├── generateSkill() creation \u003c-- 3c\n│       │   ├── Build bridge command\n│       │   │   └── Add bridge path \u003c-- 3d\n│       │   └── Create skill manifest \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/mcp_install/main.go:276\n│       │       └── Build YAML structure \u003c-- 3e\n│       └── Write skill files to disk \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/mcp_install/main.go:325\n└── Error handling \u0026 logging \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/mcp_install/main.go:145\n    └── Return installed skills list \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/mcp_install/main.go:154",
+      "traceTextDiagram": "MCP Skill Installation Flow\n├── run() main entry point \u003c-- 3a\n│   ├── Create MCP client connection \u003c-- skills/mcp_install/main.go:95\n│   │   └── ListTools() discovery \u003c-- 3b\n│   └── For each discovered tool: \u003c-- skills/mcp_install/main.go:142\n│       ├── generateSkill() creation \u003c-- 3c\n│       │   ├── Build bridge command\n│       │   │   └── Add bridge path \u003c-- 3d\n│       │   └── Create skill manifest \u003c-- skills/mcp_install/main.go:276\n│       │       └── Build YAML structure \u003c-- 3e\n│       └── Write skill files to disk \u003c-- skills/mcp_install/main.go:325\n└── Error handling \u0026 logging \u003c-- skills/mcp_install/main.go:145\n    └── Return installed skills list \u003c-- skills/mcp_install/main.go:154",
       "traceGuide": "## Motivation\n\nThe MCP installation system solves the **problem of manually creating agentctl skills for every tool on an MCP server**. Instead of writing individual wrapper code for each MCP tool, this system automatically discovers all available tools on an MCP server and generates corresponding agentctl skills. This creates a **universal bridge** between any MCP server and the agentctl ecosystem, enabling users to instantly access all MCP tools as native agentctl skills without manual coding.\n\n## Details\n\nThe system starts by connecting to an MCP server using either stdio or HTTP/SSE transport [3a]. Once connected, it calls `ListTools()` to discover all available tools on the server [3b]. For each discovered tool, it generates a complete agentctl skill by:\n\n1. **Creating a bridge command** that wraps the MCP bridge binary with the correct server connection parameters and tool name [3d]\n2. **Building a skill manifest** that maps the MCP tool's JSON schema to agentctl's parameter format [3e]\n3. **Writing skill files** including the executable wrapper script and YAML manifest to the specified output directory\n\nThe generated skills act as lightweight proxies that forward calls to the original MCP tools through the bridge, maintaining the original tool's functionality while providing native agentctl integration. This approach enables **instant skill generation** for any MCP server without requiring manual wrapper development."
     },
     {
@@ -165,7 +165,7 @@
       "locations": [
         {
           "id": "4a",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/cmd/agentctl/cmd/skills_run.go",
+          "path": "cmd/agentctl/cmd/skills_run.go",
           "lineNumber": 15,
           "lineContent": "func newSkillsRunCommand() *cobra.Command {",
           "title": "Skill run command creation",
@@ -173,7 +173,7 @@
         },
         {
           "id": "4b",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/cmd/agentctl/cmd/skills_run.go",
+          "path": "cmd/agentctl/cmd/skills_run.go",
           "lineNumber": 54,
           "lineContent": "handle, err := findSkill(cfg, args[0])",
           "title": "Skill discovery",
@@ -181,7 +181,7 @@
         },
         {
           "id": "4c",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/cmd/agentctl/cmd/skills_run.go",
+          "path": "cmd/agentctl/cmd/skills_run.go",
           "lineNumber": 97,
           "lineContent": "stdout, stderr, err := executeSkill(runCtx, handle.Manifest, handle.ArtifactPath, mergedInput)",
           "title": "Skill execution",
@@ -189,7 +189,7 @@
         },
         {
           "id": "4d",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/adapters/skillslib/skillmain/main.go",
+          "path": "internal/adapters/skillslib/skillmain/main.go",
           "lineNumber": 81,
           "lineContent": "func Main[I any](command string, run RunFunc[I]) {",
           "title": "Skill framework entry point",
@@ -197,14 +197,14 @@
         },
         {
           "id": "4e",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/adapters/skillslib/skillmain/main.go",
+          "path": "internal/adapters/skillslib/skillmain/main.go",
           "lineNumber": 167,
           "lineContent": "if err := run(ctx, rc, input); err != nil {",
           "title": "Skill business logic execution",
           "description": "Calls the skill's run function with validated input and context"
         }
       ],
-      "traceTextDiagram": "Skill Execution Framework\n├── CLI Command Entry \u003c-- /Users/jkatigbak/repos/personal/agentctl/cmd/agentctl/cmd/skills_run.go:21\n│   └── newSkillsRunCommand() \u003c-- 4a\n│       └── findSkill() discovery \u003c-- /Users/jkatigbak/repos/personal/agentctl/cmd/agentctl/cmd/skills_run.go:54\n│           └── executeSkill() \u003c-- 4c\n├── Skill Runtime Framework \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/adapters/skillslib/skillmain/main.go:81\n│   └── skillmain.Main() generic entry \u003c-- 4e\n│       ├── Bootstrap context \u0026 config \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/adapters/skillslib/skillmain/main.go:87\n│       ├── Parse \u0026 validate JSON input \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/adapters/skillslib/skillmain/main.go:140\n│       └── Call skill.run() \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/adapters/skillslib/skillmain/main.go:167\n└── Individual Skill Implementation \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/mcp_bridge/main.go:48\n    └── mcp_bridge.run() or providers.run() \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/providers/main.go:150\n        └── Business logic execution \u003c-- 4d",
+      "traceTextDiagram": "Skill Execution Framework\n├── CLI Command Entry \u003c-- cmd/agentctl/cmd/skills_run.go:21\n│   └── newSkillsRunCommand() \u003c-- 4a\n│       └── findSkill() discovery \u003c-- cmd/agentctl/cmd/skills_run.go:54\n│           └── executeSkill() \u003c-- 4c\n├── Skill Runtime Framework \u003c-- internal/adapters/skillslib/skillmain/main.go:81\n│   └── skillmain.Main() generic entry \u003c-- 4e\n│       ├── Bootstrap context \u0026 config \u003c-- internal/adapters/skillslib/skillmain/main.go:87\n│       ├── Parse \u0026 validate JSON input \u003c-- internal/adapters/skillslib/skillmain/main.go:140\n│       └── Call skill.run() \u003c-- internal/adapters/skillslib/skillmain/main.go:167\n└── Individual Skill Implementation \u003c-- skills/mcp_bridge/main.go:48\n    └── mcp_bridge.run() or providers.run() \u003c-- skills/providers/main.go:150\n        └── Business logic execution \u003c-- 4d",
       "traceGuide": "# Motivation\n\nThe agentctl system needed a **unified way to execute skills** while supporting multiple AI coding assistants (Claude, Codex, OpenCode, Factory, Gemini). Each skill is a standalone binary with its own manifest, but they all need consistent input parsing, validation, error handling, and execution context. Without this framework, every skill would need to reimplement boilerplate for JSON parsing, path validation, session management, and error formatting.\n\n# Details\n\nThe skill execution framework provides a **standardized runtime** that all skills inherit. When you run `agentctl skills run mcp/bridge`, the CLI command [4a] discovers the skill binary and manifest, then executes it with merged input parameters [4c]. The skill's main function uses the generic `skillmain.Main()` entry point [4e] which handles the complex bootstrap process: loading configuration, parsing JSON input, validating parameters, and setting up the execution context with workspace and session information.\n\nEach skill only needs to implement a simple `run()` function that receives the validated input and a rich `RunContext` object containing CAS storage, path validation, logging, and other services [4d]. This design lets skills focus on their **core business logic** while the framework handles cross-cutting concerns like security (path validation), observability (structured logging), and integration (session management).\n\nThe framework also supports **multiple execution modes** - ephemeral for fast execution, cached for repeated operations, and daemon-mode for persistent processes. This flexibility allows the same skill code to be used in different scenarios while maintaining consistent behavior and error handling across the entire agentctl ecosystem."
     }
   ],

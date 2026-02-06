@@ -5,7 +5,7 @@
 runtime plan updates.\
 **Related specs:** `overseer_profile.md`, `mailbox_blackboard.md`,
 `task_graph_insights.md`,
-[bd_mail_agent_interface.md](cci:7://file:///Users/jkatigbak/repos/personal/claude-harness/agentctl/docs/spec/bd_mail_agent_interface.md:0:0-0:0),
+[bd_mail_agent_interface.md](cci:7://file://~/repos/personal/claude-harness/agentctl/docs/spec/bd_mail_agent_interface.md:0:0-0:0),
 `unified_agents.md`
 
 ---
@@ -189,7 +189,7 @@ Overseer publishes **plan events** to the mailbox so agents and hooks can react.
 ### 4.1 Event vocabulary
 
 Using
-[BoardMessage](cci:2://file:///Users/jkatigbak/repos/personal/claude-harness/agentctl/internal/domain/agent/board_message.go:25:0-39:1)
+[BoardMessage](cci:2://file://~/repos/personal/claude-harness/agentctl/internal/domain/agent/board_message.go:25:0-39:1)
 `Subject` conventions:
 
 - `plan.created:<epic-id>`
@@ -274,7 +274,7 @@ agent.BoardMessage{
 7. Overseer periodically or on-demand:
    - Runs `task_graph_insights` on the epic subtree.
    - Runs overseer
-     [Recommend](cci:1://file:///Users/jkatigbak/repos/personal/claude-harness/agentctl/internal/analysis/overseer/scorer.go:64:0-198:1)
+     [Recommend](cci:1://file://~/repos/personal/claude-harness/agentctl/internal/analysis/overseer/scorer.go:64:0-198:1)
      to evaluate scores.
    - Decides whether to:
      - Split tasks (finer-grained), or
@@ -396,10 +396,10 @@ graph insights.
   - `task_graph_insights.md` is included in the overseer / Factory spec pack.
 
 - **Overseer scoring**
-  - [[overseer.Scorer](cci:2://file:///Users/jkatigbak/repos/personal/claude-harness/agentctl/internal/analysis/overseer/scorer.go:51:0-54:1)](cci:2://file:///Users/jkatigbak/repos/personal/claude-harness/agentctl/internal/analysis/overseer/scorer.go:51:0-54:1)
+  - [[overseer.Scorer](cci:2://file://~/repos/personal/claude-harness/agentctl/internal/analysis/overseer/scorer.go:51:0-54:1)](cci:2://file://~/repos/personal/claude-harness/agentctl/internal/analysis/overseer/scorer.go:51:0-54:1)
     is built and reachable from `todo/manage.recommend` (or an equivalent
     operation).
-  - [[multiagent_workflow_test.go](cci:7://file:///Users/jkatigbak/repos/personal/claude-harness/agentctl/test/e2e/multiagent_workflow_test.go:0:0-0:0)](cci:7://file:///Users/jkatigbak/repos/personal/claude-harness/agentctl/test/e2e/multiagent_workflow_test.go:0:0-0:0)
+  - [[multiagent_workflow_test.go](cci:7://file://~/repos/personal/claude-harness/agentctl/test/e2e/multiagent_workflow_test.go:0:0-0:0)](cci:7://file://~/repos/personal/claude-harness/agentctl/test/e2e/multiagent_workflow_test.go:0:0-0:0)
     E2E tests are part of the default test suite for this workspace.
 
 ### 9.2 Planning operation
@@ -445,8 +445,8 @@ graph insights.
     - Allowed to call `todo/manage.graph_insights`, `todo/manage.recommend`, and
       `mailbox/manage.*`.
   - Given knowledge of:
-    - [[overseer_planning.md](cci:7://file:///Users/jkatigbak/repos/personal/claude-harness/agentctl/docs/spec/overseer_planning.md:0:0-0:0)](cci:7://file:///Users/jkatigbak/repos/personal/claude-harness/agentctl/docs/spec/overseer_planning.md:0:0-0:0)
-    - [[bd_mail_agent_interface.md](cci:7://file:///Users/jkatigbak/repos/personal/claude-harness/agentctl/docs/spec/bd_mail_agent_interface.md:0:0-0:0)](cci:7://file:///Users/jkatigbak/repos/personal/claude-harness/agentctl/docs/spec/bd_mail_agent_interface.md:0:0-0:0)
+    - [[overseer_planning.md](cci:7://file://~/repos/personal/claude-harness/agentctl/docs/spec/overseer_planning.md:0:0-0:0)](cci:7://file://~/repos/personal/claude-harness/agentctl/docs/spec/overseer_planning.md:0:0-0:0)
+    - [[bd_mail_agent_interface.md](cci:7://file://~/repos/personal/claude-harness/agentctl/docs/spec/bd_mail_agent_interface.md:0:0-0:0)](cci:7://file://~/repos/personal/claude-harness/agentctl/docs/spec/bd_mail_agent_interface.md:0:0-0:0)
     - `mailbox_blackboard.md`
     - `task_graph_insights.md`
     - `unified_agents.md`

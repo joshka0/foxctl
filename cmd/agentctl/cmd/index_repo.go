@@ -424,7 +424,7 @@ func runIndexRepoOpen(cmd *cobra.Command, workspace, id string) error {
 	return protocol.Write(cmd.OutOrStdout(), env)
 }
 
-const repoIndexAskPrompt = "You are a repo index navigator. Use repo.index.search, repo.index.expand, and repo.index.open to answer questions. Prefer search to find seed nodes, expand for relationships, and open nodes for details. Include node IDs and file paths when citing results."
+const repoIndexAskPrompt = "You are a repo index navigator. Use repo_index_search, repo_index_expand, and repo_index_open to answer questions. Prefer search to find seed nodes, expand for relationships, and open nodes for details. Include node IDs and file paths when citing results."
 
 func runIndexRepoAsk(cmd *cobra.Command, workspace, question, provider, model, apiKey string, maxIterations int, timeout time.Duration) error {
 	ctx := cmd.Context()
@@ -590,6 +590,12 @@ func parseRepoEdgeTypes(values []string) ([]repoindex.EdgeType, error) {
 		string(repoindex.EdgeImplements): {},
 		string(repoindex.EdgeEmbeds):     {},
 		string(repoindex.EdgeTests):      {},
+		string(repoindex.EdgeHasKeyword):      {},
+		string(repoindex.EdgeHasOutputField):  {},
+		string(repoindex.EdgeTouchesResource): {},
+		string(repoindex.EdgeEmitsEvent):      {},
+		string(repoindex.EdgeDocRelated):      {},
+		string(repoindex.EdgeDocFlow):         {},
 	}
 
 	var types []repoindex.EdgeType

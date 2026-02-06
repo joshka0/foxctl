@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/jkatigb/agentctl/internal/platform/timeutil"
+	ws "github.com/jkatigb/agentctl/internal/platform/workspace"
 	"github.com/jkatigb/agentctl/internal/storage/dbutil"
 	"github.com/jkatigb/agentctl/internal/storage/sqliteutil"
 	"github.com/oklog/ulid/v2"
@@ -215,7 +216,9 @@ func Open(ctx context.Context, root string) (Store, error) {
 	db.SetConnMaxLifetime(defaultConnMaxLifetime)
 	db.SetConnMaxIdleTime(defaultConnMaxIdleTime)
 
-	return &sqlStore{db: db, close: closeFn}, nil
+	store := &sqlStore{db: db, close: closeFn}
+	store.repairWorkspaceIDs(ctx)
+	return store, nil
 }
 
 // Close releases database resources.
@@ -377,6 +380,7 @@ CREATE TABLE IF NOT EXISTS active_epics (
 
 // Add inserts a new task into the store.
 func (s *sqlStore) Add(ctx context.Context, t Task) (Task, error) {
+	t.WorkspaceID = ws.CanonicalID(t.WorkspaceID)
 	if t.ID == "" {
 		t.ID = ulid.Make().String()
 	}
@@ -489,6 +493,7 @@ FROM tasks WHERE id = ?`, id)
 
 // ListByWorkspace returns tasks scoped to a workspace.
 func (s *sqlStore) ListByWorkspace(ctx context.Context, workspaceID string) ([]Task, error) {
+	workspaceID = ws.CanonicalID(workspaceID)
 	rows, err := s.db.QueryContext(ctx, `
 SELECT id, workspace_id, title, description, scope_path, parent_id, children, depends_on, status, created_at, completed_at, notes, gotchas, last_review_status, last_review_at, last_review_id, plan_file, plan_section, session_id, pagerank, epic_id, atomic_description, entities, keywords
 FROM tasks WHERE workspace_id = ? ORDER BY created_at DESC`, workspaceID)
@@ -513,6 +518,7 @@ FROM tasks WHERE workspace_id = ? ORDER BY created_at DESC`, workspaceID)
 
 // ListWithOptions returns tasks scoped to a workspace with filtering options.
 func (s *sqlStore) ListWithOptions(ctx context.Context, workspaceID string, opts ListOptions) ([]Task, error) {
+	workspaceID = ws.CanonicalID(workspaceID)
 	// Build query with optional filters
 	query := `SELECT id, workspace_id, title, description, scope_path, parent_id, children, depends_on, status, created_at, completed_at, notes, gotchas, last_review_status, last_review_at, last_review_id, plan_file, plan_section, session_id, pagerank, epic_id, atomic_description, entities, keywords FROM tasks WHERE workspace_id = ?`
 	args := []any{workspaceID}
@@ -580,6 +586,7 @@ FROM tasks WHERE plan_file = ? ORDER BY created_at ASC`, planFile)
 
 // GetActive returns the active task for a workspace, if any.
 func (s *sqlStore) GetActive(ctx context.Context, workspaceID string) (Task, bool, error) {
+	workspaceID = ws.CanonicalID(workspaceID)
 	row := s.db.QueryRowContext(ctx, `
 SELECT t.id, t.workspace_id, t.title, t.description, t.scope_path, t.parent_id, t.children, t.depends_on, t.status, t.created_at, t.completed_at, t.notes, t.gotchas, t.last_review_status, t.last_review_at, t.last_review_id, t.plan_file, t.plan_section, t.session_id, t.pagerank, t.epic_id, t.atomic_description, t.entities, t.keywords
 FROM tasks t
@@ -598,6 +605,7 @@ WHERE a.workspace_id = ?`, workspaceID)
 
 // SetActive marks the given task as active for the workspace.
 func (s *sqlStore) SetActive(ctx context.Context, workspaceID, taskID string) (Task, error) {
+	workspaceID = ws.CanonicalID(workspaceID)
 	// Verify task exists
 	t, err := s.Get(ctx, taskID)
 	if err != nil {
@@ -615,6 +623,7 @@ ON CONFLICT(workspace_id) DO UPDATE SET task_id = excluded.task_id`, workspaceID
 
 // ClearActive removes the active task for a workspace.
 func (s *sqlStore) ClearActive(ctx context.Context, workspaceID string) error {
+	workspaceID = ws.CanonicalID(workspaceID)
 	_, err := s.db.ExecContext(ctx, `DELETE FROM active_tasks WHERE workspace_id = ?`, workspaceID)
 	if err != nil {
 		return fmt.Errorf("tasks: clear active: %w", err)
@@ -625,6 +634,7 @@ func (s *sqlStore) ClearActive(ctx context.Context, workspaceID string) error {
 // EnsureActive returns the active task or creates one with the given defaults.
 // Returns (task, created, error) where created is true if a new task was created.
 func (s *sqlStore) EnsureActive(ctx context.Context, workspaceID, defaultTitle, scopePath string) (Task, bool, error) {
+	workspaceID = ws.CanonicalID(workspaceID)
 	// Check for existing active task
 	t, found, err := s.GetActive(ctx, workspaceID)
 	if err != nil {
@@ -825,6 +835,7 @@ func scanTask(row *sql.Row) (Task, error) {
 
 // AddEpic creates a new epic.
 func (s *sqlStore) AddEpic(ctx context.Context, e Epic) (Epic, error) {
+	e.WorkspaceID = ws.CanonicalID(e.WorkspaceID)
 	if e.ID == "" {
 		e.ID = ulid.Make().String()
 	}
@@ -880,6 +891,7 @@ WHERE id = ?`,
 
 // ListEpics returns epics for a workspace.
 func (s *sqlStore) ListEpics(ctx context.Context, workspaceID string) ([]Epic, error) {
+	workspaceID = ws.CanonicalID(workspaceID)
 	rows, err := s.db.QueryContext(ctx, `
 SELECT id, workspace_id, title, goal, status, created_at, completed_at, session_id
 FROM epics WHERE workspace_id = ? ORDER BY created_at DESC`, workspaceID)
@@ -901,6 +913,7 @@ FROM epics WHERE workspace_id = ? ORDER BY created_at DESC`, workspaceID)
 
 // GetActiveEpic returns the active epic for a workspace, if any.
 func (s *sqlStore) GetActiveEpic(ctx context.Context, workspaceID, sessionID string) (Epic, bool, error) {
+	workspaceID = ws.CanonicalID(workspaceID)
 	row := s.db.QueryRowContext(ctx, `
 SELECT e.id, e.workspace_id, e.title, e.goal, e.status, e.created_at, e.completed_at, e.session_id
 FROM epics e
@@ -919,6 +932,7 @@ WHERE a.workspace_id = ? AND a.session_id = ?`, workspaceID, sessionID)
 
 // SetActiveEpic sets the active epic for a workspace.
 func (s *sqlStore) SetActiveEpic(ctx context.Context, workspaceID, sessionID, epicID string) error {
+	workspaceID = ws.CanonicalID(workspaceID)
 	_, err := s.db.ExecContext(ctx, `
 INSERT INTO active_epics (workspace_id, session_id, epic_id) VALUES (?, ?, ?)
 ON CONFLICT(workspace_id, session_id) DO UPDATE SET epic_id = excluded.epic_id`, workspaceID, sessionID, epicID)
@@ -930,6 +944,7 @@ ON CONFLICT(workspace_id, session_id) DO UPDATE SET epic_id = excluded.epic_id`,
 
 // ClearActiveEpic removes the active epic for a workspace.
 func (s *sqlStore) ClearActiveEpic(ctx context.Context, workspaceID, sessionID string) error {
+	workspaceID = ws.CanonicalID(workspaceID)
 	_, err := s.db.ExecContext(ctx, `DELETE FROM active_epics WHERE workspace_id = ? AND session_id = ?`, workspaceID, sessionID)
 	if err != nil {
 		return fmt.Errorf("tasks: clear active epic: %w", err)

@@ -9,10 +9,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/XiaoConstantine/dspy-go/pkg/agents/react"
-	"github.com/XiaoConstantine/dspy-go/pkg/core"
-	"github.com/XiaoConstantine/dspy-go/pkg/llms"
-	models "github.com/XiaoConstantine/mcp-go/pkg/model"
 	"github.com/rs/zerolog"
 
 	"github.com/jkatigb/agentctl/internal/domain/agent"
@@ -30,9 +26,6 @@ type EngineType string
 const (
 	// EngineTypeLLMChat uses LLMChatEngine for OpenAI-compatible execution.
 	EngineTypeLLMChat EngineType = "llmchat"
-
-	// EngineTypeDSPy uses DSPy ReAct agent for structured reasoning.
-	EngineTypeDSPy EngineType = "dspy"
 )
 
 // Service is the companion chat service.
@@ -79,9 +72,8 @@ type ServiceConfig struct {
 	// - story: Two-stage gather + dialogue pipeline with structured outputs
 	ExecMode agent.ExecutionMode
 
-	// EngineType selects the execution engine: "llmchat" (default) or "dspy".
+	// EngineType selects the execution engine (llmchat only).
 	// - llmchat: Uses LLMChatEngine for OpenAI-compatible streaming
-	// - dspy: Uses DSPy ReAct agent for structured reasoning
 	EngineType EngineType
 
 	// MemoryDB is the database for conversation memory (optional).
@@ -267,8 +259,7 @@ type ChatRequest struct {
 	// Use "story" for gather + dialogue with structured outputs.
 	ExecMode agent.ExecutionMode `json:"exec_mode,omitempty"`
 
-	// EngineType overrides the service default engine type.
-	// Use "dspy" for DSPy ReAct agent execution.
+	// EngineType overrides the service default engine type (llmchat only).
 	EngineType EngineType `json:"engine_type,omitempty"`
 
 	// StoryGatherModel overrides ServiceConfig.StoryGatherModel for story mode (optional).
@@ -421,7 +412,7 @@ type TokenUsage struct {
 // - Flow: validate request → resolve exec mode/engine → build prompt → run engine → store turns → generate presence
 // - SideEffects: LLM calls; memory reads/writes; optional presence generation
 // - FailureModes: validation errors, engine errors, memory errors
-// - Related: chatWithLLMChat, chatWithStoryLoop, chatWithDSPy, storeConversationTurns
+// - Related: chatWithLLMChat, chatWithStoryLoop, storeConversationTurns
 // - Keywords: companion_chat, conversation_id, exec_mode, engine_type, presence, tools_used
 func (s *Service) Chat(ctx context.Context, req ChatRequest) (*ChatResponse, error) {
 	start := time.Now()
@@ -449,9 +440,8 @@ func (s *Service) Chat(ctx context.Context, req ChatRequest) (*ChatResponse, err
 	if engineType == "" {
 		engineType = EngineTypeLLMChat
 	}
-
-	if execMode == agent.ModeStory && engineType == EngineTypeDSPy {
-		return nil, fmt.Errorf("story mode requires llmchat engine")
+	if engineType != EngineTypeLLMChat {
+		return nil, fmt.Errorf("unsupported engine_type %q (only %q is supported)", engineType, EngineTypeLLMChat)
 	}
 
 	s.logger.Debug().
@@ -482,15 +472,10 @@ func (s *Service) Chat(ctx context.Context, req ChatRequest) (*ChatResponse, err
 	var resp *ChatResponse
 
 	// Route to appropriate engine
-	switch engineType {
-	case EngineTypeDSPy:
-		resp, err = s.chatWithDSPy(ctx, req, rlmExecutor, systemPrompt, execMode, start)
-	default:
-		if execMode == agent.ModeStory {
-			resp, err = s.chatWithStoryLoop(ctx, req, rlmExecutor, systemPrompt, start)
-		} else {
-			resp, err = s.chatWithLLMChat(ctx, req, rlmExecutor, systemPrompt, start)
-		}
+	if execMode == agent.ModeStory {
+		resp, err = s.chatWithStoryLoop(ctx, req, rlmExecutor, systemPrompt, start)
+	} else {
+		resp, err = s.chatWithLLMChat(ctx, req, rlmExecutor, systemPrompt, start)
 	}
 
 	if err != nil {
@@ -1090,109 +1075,6 @@ func storyDialogueResponseFormat() json.RawMessage {
 	return json.RawMessage(storyDialogueResponseFormatJSON)
 }
 
-// chatWithDSPy executes using the DSPy ReAct agent.
-func (s *Service) chatWithDSPy(ctx context.Context, req ChatRequest, rlmExecutor *engine.RLMToolExecutor, systemPrompt string, execMode agent.ExecutionMode, start time.Time) (*ChatResponse, error) {
-	// Initialize LLM factory
-	llms.EnsureFactory()
-
-	// Create LLM based on provider
-	llm, err := s.createDSPyLLM(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("create dspy llm: %w", err)
-	}
-
-	// Create DSPy ReAct agent
-	agentID := fmt.Sprintf("companion:%s", req.ConversationID)
-	maxIterations := s.config.MaxIterations
-	if maxIterations <= 0 {
-		maxIterations = 10
-	}
-
-	dspyAgent := react.NewReActAgent(agentID, "companion",
-		react.WithMaxIterations(maxIterations),
-		react.WithTimeout(s.config.Timeout),
-	)
-
-	// Convert RLM tools to dspy-go tools
-	for _, toolDef := range rlmExecutor.List() {
-		tool := &dspyRLMTool{
-			def:      toolDef,
-			executor: rlmExecutor,
-		}
-		if err := dspyAgent.RegisterTool(tool); err != nil {
-			s.logger.Warn().Err(err).Str("tool", toolDef.Name).Msg("Failed to register tool")
-		}
-	}
-
-	// Build signature with system prompt as instruction
-	sig := core.NewSignature(
-		[]core.InputField{
-			{Field: core.NewField("task", core.WithDescription("The user's message to respond to"))},
-		},
-		[]core.OutputField{
-			{Field: core.NewField("result", core.WithDescription("Your response to the user"))},
-		},
-	).WithInstruction(systemPrompt)
-
-	if err := dspyAgent.Initialize(llm, sig); err != nil {
-		return nil, fmt.Errorf("initialize dspy agent: %w", err)
-	}
-
-	// Execute
-	input := map[string]any{
-		"task": req.Message,
-	}
-
-	resultMap, err := dspyAgent.Execute(ctx, input)
-	if err != nil {
-		return nil, fmt.Errorf("dspy execute: %w", err)
-	}
-
-	// Extract result
-	result := extractDSPyResult(resultMap)
-
-	// Build response
-	resp := &ChatResponse{
-		ConversationID: req.ConversationID,
-		Response:       result,
-		ContextQueries: rlmExecutor.QueryCount(),
-		DurationMS:     time.Since(start).Milliseconds(),
-	}
-
-	// Note: DSPy doesn't provide detailed token usage, but we could add it later
-	return resp, nil
-}
-
-// createDSPyLLM creates a dspy-go LLM based on the configured provider.
-// Accepts a context for proper cancellation and timeout propagation.
-func (s *Service) createDSPyLLM(ctx context.Context) (core.LLM, error) {
-	provider := s.config.LLMProvider
-	model := s.config.LLMModel
-	apiKey := s.config.LLMAPIKey
-
-	switch provider {
-	case "gemini":
-		return llms.NewGeminiLLM(apiKey, core.ModelID(model))
-	case "openai":
-		return llms.NewOpenAILLM(core.ModelID(model), llms.WithAPIKey(apiKey))
-	case "anthropic":
-		config := core.ProviderConfig{Name: "anthropic", APIKey: apiKey}
-		return llms.NewAnthropicLLMFromConfig(ctx, config, core.ModelID(model))
-	case "groq":
-		return llms.NewOpenAICompatible("groq", core.ModelID(model),
-			"https://api.groq.com/openai", llms.WithAPIKey(apiKey))
-	case "openrouter":
-		return llms.NewOpenAICompatible("openrouter", core.ModelID(model),
-			"https://openrouter.ai/api", llms.WithAPIKey(apiKey))
-	case "cerebras":
-		// Note: Use base URL without /v1 - dspy-go appends /v1/chat/completions
-		return llms.NewOpenAICompatible("cerebras", core.ModelID(model),
-			"https://api.cerebras.ai", llms.WithAPIKey(apiKey))
-	default:
-		return nil, fmt.Errorf("unsupported LLM provider: %q", provider)
-	}
-}
-
 // buildSystemPrompt constructs the system prompt with personality and memory context.
 func (s *Service) buildSystemPrompt(ctx context.Context, req ChatRequest) (string, error) {
 	basePersonality := req.Personality
@@ -1317,122 +1199,6 @@ func (s *Service) storeConversationTurns(ctx context.Context, req ChatRequest, r
 	}
 }
 
-// dspyRLMTool wraps an RLM tool for use with dspy-go.
-// Implements core.Tool interface from dspy-go.
-type dspyRLMTool struct {
-	def      engine.ToolDef
-	executor *engine.RLMToolExecutor
-}
-
-func (t *dspyRLMTool) Name() string {
-	return t.def.Name
-}
-
-func (t *dspyRLMTool) Description() string {
-	return t.def.Description
-}
-
-func (t *dspyRLMTool) Metadata() *core.ToolMetadata {
-	return &core.ToolMetadata{
-		Name:        t.def.Name,
-		Description: t.def.Description,
-		InputSchema: t.InputSchema(),
-	}
-}
-
-func (t *dspyRLMTool) CanHandle(_ context.Context, intent string) bool {
-	// RLM tools can handle any intent that mentions their name
-	return intent == t.def.Name
-}
-
-func (t *dspyRLMTool) Execute(ctx context.Context, params map[string]interface{}) (core.ToolResult, error) {
-	args, err := json.Marshal(params)
-	if err != nil {
-		return core.ToolResult{}, fmt.Errorf("marshal args: %w", err)
-	}
-	result, err := t.executor.Execute(ctx, t.def.Name, args)
-	if err != nil {
-		return core.ToolResult{}, err
-	}
-	return core.ToolResult{
-		Data: result,
-	}, nil
-}
-
-func (t *dspyRLMTool) Validate(_ map[string]interface{}) error {
-	// RLM tools handle validation internally
-	return nil
-}
-
-func (t *dspyRLMTool) InputSchema() models.InputSchema {
-	var schema map[string]interface{}
-	if err := json.Unmarshal(t.def.Parameters, &schema); err != nil {
-		return models.InputSchema{
-			Type: "object",
-		}
-	}
-
-	// Build a set of required field names
-	requiredSet := make(map[string]bool)
-	if req, ok := schema["required"].([]interface{}); ok {
-		for _, r := range req {
-			if s, ok := r.(string); ok {
-				requiredSet[s] = true
-			}
-		}
-	}
-
-	// Extract properties if present
-	properties := make(map[string]models.ParameterSchema)
-	if props, ok := schema["properties"].(map[string]interface{}); ok {
-		for name, prop := range props {
-			if propMap, ok := prop.(map[string]interface{}); ok {
-				param := models.ParameterSchema{
-					Required: requiredSet[name],
-				}
-				if typ, ok := propMap["type"].(string); ok {
-					param.Type = typ
-				}
-				if d, ok := propMap["description"].(string); ok {
-					param.Description = d
-				}
-				properties[name] = param
-			}
-		}
-	}
-
-	return models.InputSchema{
-		Type:       "object",
-		Properties: properties,
-	}
-}
-
-// extractDSPyResult extracts the response from DSPy execution output.
-func extractDSPyResult(resultMap map[string]any) string {
-	if resultMap == nil {
-		return "Task completed"
-	}
-
-	// Priority order: result, answer, output, thought
-	for _, key := range []string{"result", "answer", "output", "thought"} {
-		if r, ok := resultMap[key].(string); ok && r != "" {
-			return r
-		}
-	}
-
-	// Last resort: format the map but exclude internal ReAct fields
-	cleaned := make(map[string]any)
-	for k, v := range resultMap {
-		if k == "action" || k == "observation" || k == "conversation_context" {
-			continue
-		}
-		cleaned[k] = v
-	}
-	if len(cleaned) > 0 {
-		return fmt.Sprintf("%v", cleaned)
-	}
-	return "Task completed"
-}
 
 // SetContext stores a context variable for a conversation.
 func (s *Service) SetContext(ctx context.Context, req ContextSetRequest) (*ContextSetResponse, error) {

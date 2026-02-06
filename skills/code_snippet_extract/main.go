@@ -33,6 +33,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/observability"
 	"github.com/jkatigb/agentctl/internal/platform/config"
 	errs "github.com/jkatigb/agentctl/internal/platform/errors"
+	ws "github.com/jkatigb/agentctl/internal/platform/workspace"
 	"github.com/jkatigb/agentctl/internal/sessionkit"
 )
 
@@ -191,7 +192,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 
 	// Apply workspace default
 	if in.WorkspaceID == "" {
-		in.WorkspaceID = rc.PathValidator.Workspace()
+		in.WorkspaceID = ws.ID(rc.PathValidator.Workspace())
 	}
 
 	// Validate candidates have usable paths

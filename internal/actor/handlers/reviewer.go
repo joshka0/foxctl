@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/XiaoConstantine/dspy-go/pkg/agents"
 	"github.com/jkatigb/agentctl/internal/actor"
 )
 
@@ -29,7 +28,7 @@ func NewReviewerHandler() *ReviewerHandler {
 }
 
 // HandleAsk processes ask messages for reviewer role.
-func (h *ReviewerHandler) HandleAsk(ctx context.Context, msg *actor.Message, agent agents.Agent, mem *MemoryContext) (*actor.Message, error) {
+func (h *ReviewerHandler) HandleAsk(ctx context.Context, msg *actor.Message, agent AgentExecutor, mem *MemoryContext) (*actor.Message, error) {
 	askData, err := parseAskData(msg.Body)
 	if err != nil {
 		return nil, fmt.Errorf("parse ask: %w", err)
@@ -98,7 +97,7 @@ Analyze:
 }
 
 // HandleCmd processes command messages for reviewer role.
-func (h *ReviewerHandler) HandleCmd(ctx context.Context, msg *actor.Message, agent agents.Agent, mem *MemoryContext) (*actor.Message, error) {
+func (h *ReviewerHandler) HandleCmd(ctx context.Context, msg *actor.Message, agent AgentExecutor, mem *MemoryContext) (*actor.Message, error) {
 	cmdData, err := parseCmdData(msg.Body)
 	if err != nil {
 		return nil, fmt.Errorf("parse cmd: %w", err)
@@ -261,7 +260,7 @@ Identify:
 }
 
 // HandleEvent processes event messages for reviewer role.
-func (h *ReviewerHandler) HandleEvent(ctx context.Context, msg *actor.Message, _ agents.Agent, mem *MemoryContext) error {
+func (h *ReviewerHandler) HandleEvent(ctx context.Context, msg *actor.Message, _ AgentExecutor, mem *MemoryContext) error {
 	eventData, err := parseEventData(msg.Body)
 	if err != nil {
 		return fmt.Errorf("parse event: %w", err)

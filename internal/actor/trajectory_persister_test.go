@@ -150,6 +150,7 @@ func TestNewTrajectoryPersister(t *testing.T) {
 
 	if persister == nil {
 		t.Fatal("persister is nil")
+		return
 	}
 	if persister.store != store {
 		t.Error("store not set correctly")

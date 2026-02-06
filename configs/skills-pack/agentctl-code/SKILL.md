@@ -1,6 +1,6 @@
 ---
 name: agentctl-code
-description: "Code intelligence and analysis: symbols, diffs, complexity, imports, security scan, and semantic search."
+description: "Code intelligence and analysis: symbols, diffs, complexity, imports, security scan, semantic search, and repo graph DAG grep."
 ---
 
 ## What I do
@@ -40,7 +40,29 @@ agentctl run code/semantic_search --input '{"query": "repoindex", "format": "tre
 
 ### Repo graph index
 ```bash
-agentctl index repo build --workspace .
+# Build the repo graph index (dry-run first; this writes to the repoindex DB).
+# For TS/Elixir-only repos, add `--go=false` (otherwise Go indexing may fail).
+agentctl index repo build --dry-run --workspace . --go --typescript --elixir
+agentctl index repo build --workspace . --go --typescript --elixir
+
 agentctl index repo search --workspace . --query "repoindex"
 agentctl index repo expand --workspace . --seed "<node-id>" --edge CALLS --edge REFERS_TO
 ```
+
+### DAG grep (repo graph explanation subgraph)
+Use this when you want a small explanation subgraph in one call (similar to `code/context_grep`, but for repoindex).
+
+```bash
+agentctl run code/dag_grep --input '{
+  "query": "repoindex built",
+  "workspace": ".",
+  "render": "tree",
+  "edge_sets": ["structural"],
+  "depth": 2,
+  "budget": 80,
+  "k": 5
+}'
+```
+
+Notes:
+- TypeScript adds heuristic `CALLS` edges; Elixir adds heuristic `REFERS_TO` edges. These are best-effort (no type-checking) and conservative (ambiguous targets are skipped).

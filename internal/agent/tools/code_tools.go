@@ -10,7 +10,7 @@ import (
 	"strings"
 	"unicode"
 
-	dstools "github.com/XiaoConstantine/dspy-go/pkg/tools"
+	tooling "github.com/jkatigb/agentctl/internal/tooling"
 	models "github.com/XiaoConstantine/mcp-go/pkg/model"
 	"github.com/jkatigb/agentctl/internal/domain/skill"
 	"github.com/jkatigb/agentctl/internal/indexing/symbol"
@@ -24,7 +24,7 @@ import (
 // registerCodeTools registers code search and retrieval tools.
 func (r *Registry) registerCodeTools() error {
 	// code.search - uses ripgrep for code search
-	searchTool := dstools.NewFuncTool(
+	searchTool := tooling.NewFuncTool(
 		"code.search",
 		"Search for patterns in code files using ripgrep. Returns matching lines with context.",
 		models.InputSchema{
@@ -60,7 +60,7 @@ func (r *Registry) registerCodeTools() error {
 	}
 
 	// code.symbol_search - searches the symbol index for relevant symbols
-	symbolSearchTool := dstools.NewFuncTool(
+	symbolSearchTool := tooling.NewFuncTool(
 		"code.symbol_search",
 		"Search the code symbol index for functions, methods, and classes relevant to a question. Returns ranked candidates with file paths and symbol metadata.",
 		models.InputSchema{
@@ -97,7 +97,7 @@ func (r *Registry) registerCodeTools() error {
 	}
 
 	// code.snippet_extract - extracts high-signal code snippets from candidate files
-	snippetExtractTool := dstools.NewFuncTool(
+	snippetExtractTool := tooling.NewFuncTool(
 		"code.snippet_extract",
 		"Extract high-signal code snippets from candidate files based on a natural language question. Use this after code.symbol_search to get detailed code context.",
 		models.InputSchema{

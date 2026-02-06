@@ -317,6 +317,7 @@ hooks:
 	}
 	if sharedHook == nil {
 		t.Fatal("shared-hook not found")
+		return
 	}
 	if sharedHook.Run[0].Skill != "workspace/skill" {
 		t.Errorf("expected workspace/skill (workspace override), got %s", sharedHook.Run[0].Skill)

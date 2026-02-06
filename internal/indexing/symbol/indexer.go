@@ -15,6 +15,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/indexing/embeddingtext"
 	"github.com/jkatigb/agentctl/internal/indexing/semantic"
 	"github.com/jkatigb/agentctl/internal/platform/config"
+	"github.com/jkatigb/agentctl/internal/platform/fsutil"
 	workspaceutil "github.com/jkatigb/agentctl/internal/platform/workspace"
 	"github.com/jkatigb/agentctl/internal/storage"
 	"github.com/jkatigb/agentctl/internal/storage/memory"
@@ -189,7 +190,7 @@ func (idx *Indexer) indexFile(ctx context.Context, event indexing.PostReviewEven
 	oldMeta := idx.loadFileMeta(ctx, event.WorkspaceID, file.Path)
 
 	// Check file-level freshness first
-	if oldMeta != nil && oldMeta.ContentHash == fileDigest {
+	if !idx.config.Force && oldMeta != nil && oldMeta.ContentHash == fileDigest {
 		idx.logger.Debug().Str("path", file.Path).Msg("file unchanged, skipping")
 		return ErrUnchanged
 	}
@@ -232,7 +233,7 @@ func (idx *Indexer) indexFile(ctx context.Context, event indexing.PostReviewEven
 	embedMode := config.ResolveEmbedSymbolTextMode(idx.config.EmbeddingTextMode)
 	useDocAwareDigest := embedMode == config.EmbedSymbolTextModeDocEnriched
 	embedModel := ""
-	if idx.config.EmbeddingEnabled {
+	if useDocAwareDigest {
 		embedModel = idx.resolveEmbeddingModel(ctx)
 	}
 
@@ -269,9 +270,11 @@ func (idx *Indexer) indexFile(ctx context.Context, event indexing.PostReviewEven
 
 		// Per-symbol incremental check per spec §4.3:
 		// If existing symbol has identical body_digest, skip save (reuse embedding)
-		if oldDigest, exists := oldDigests[sym.ID]; exists && oldDigest == skipDigest {
-			skippedCount++
-			continue
+		if !idx.config.Force {
+			if oldDigest, exists := oldDigests[sym.ID]; exists && oldDigest == skipDigest {
+				skippedCount++
+				continue
+			}
 		}
 
 		// Extract calls for this symbol
@@ -720,34 +723,66 @@ func (idx *Indexer) deleteFileSymbols(ctx context.Context, workspace, filePath s
 func (idx *Indexer) detectLanguage(file indexing.FileChange) string {
 	// Use provided language if available
 	if file.Language != "" {
-		return strings.ToLower(file.Language)
+		lang := normalizeLanguageHint(strings.ToLower(strings.TrimSpace(file.Language)))
+		if lang == "" {
+			return ""
+		}
+		if !idx.isLanguageAllowed(lang) {
+			return ""
+		}
+		return lang
 	}
 
-	// Detect from extension
-	ext := strings.ToLower(filepath.Ext(file.Path))
-	switch ext {
-	case ".go":
-		return "go"
-	case ".py":
-		return "python"
-	case ".js":
-		return "javascript"
-	case ".ts", ".tsx":
-		return "typescript"
-	case ".rs":
-		return "rust"
-	case ".java":
-		return "java"
-	case ".c", ".h":
-		return "c"
-	case ".cpp", ".cc", ".hpp":
-		return "cpp"
-	case ".rb":
-		return "ruby"
-	case ".gd":
-		return "gdscript"
-	default:
+	// Detect from extension (shared mapping used across the codebase)
+	lang := fsutil.DetectLanguage(file.Path)
+	if lang == "text" {
 		return ""
+	}
+	lang = normalizeLanguageHint(lang)
+	if lang == "" {
+		return ""
+	}
+	if !idx.isLanguageAllowed(lang) {
+		return ""
+	}
+	return lang
+}
+
+func (idx *Indexer) isLanguageAllowed(lang string) bool {
+	if lang == "" {
+		return false
+	}
+	if len(idx.config.Languages) == 0 {
+		return true
+	}
+	for _, raw := range idx.config.Languages {
+		filter := normalizeLanguageHint(strings.ToLower(strings.TrimSpace(raw)))
+		if filter == "" {
+			continue
+		}
+		if filter == lang {
+			return true
+		}
+	}
+	return false
+}
+
+func normalizeLanguageHint(hint string) string {
+	switch strings.ToLower(strings.TrimSpace(hint)) {
+	case "":
+		return ""
+	case "go":
+		return "go"
+	case "python", "py":
+		return "python"
+	case "typescript", "ts", "tsx":
+		return "typescript"
+	case "javascript", "js", "jsx":
+		return "javascript"
+	case "elixir", "ex", "exs":
+		return "elixir"
+	default:
+		return strings.ToLower(strings.TrimSpace(hint))
 	}
 }
 

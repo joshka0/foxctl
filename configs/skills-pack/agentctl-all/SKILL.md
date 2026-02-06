@@ -27,6 +27,7 @@ List: `agentctl skills list`
 | `code/imports` | Dependency graph |
 | `code/security` | Security scan |
 | `code/semantic_search` | Vector search across symbols/codemaps/memories |
+| `code/dag_grep` | Repo graph explanation subgraph (DAG view) |
 | `code/smart_write` | Symbol-based editing with diff preview |
 | `code/diff` | Staged/unstaged/branch diffs |
 | `code/git` | Blame, hotspots, history |
@@ -96,7 +97,7 @@ List: `agentctl skills list`
 | Skill | Purpose |
 |-------|---------|
 | `plan/sync`, `plan/analyze_deps` | Plan file management |
-| `optimize/bootstrap`, `optimize/reflect` | DSPy optimization |
+| `optimize/bootstrap`, `optimize/reflect` | Agent optimization |
 
 ### Agent Orchestration
 | Command | Purpose |

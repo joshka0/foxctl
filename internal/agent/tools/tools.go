@@ -12,12 +12,13 @@ import (
 	"sync"
 	"time"
 
-	dstools "github.com/XiaoConstantine/dspy-go/pkg/tools"
 	models "github.com/XiaoConstantine/mcp-go/pkg/model"
+	"github.com/jkatigb/agentctl/internal/tooling"
 
 	"github.com/jkatigb/agentctl/internal/agent/types"
 	"github.com/jkatigb/agentctl/internal/domain/policy"
 	"github.com/jkatigb/agentctl/internal/hooks"
+	"github.com/jkatigb/agentctl/internal/indexing/repoindex"
 	sysconfig "github.com/jkatigb/agentctl/internal/platform/config"
 	errspkg "github.com/jkatigb/agentctl/internal/platform/errors"
 	"github.com/jkatigb/agentctl/internal/platform/maputil"
@@ -32,7 +33,7 @@ import (
 
 // Registry holds all registered agent tools.
 type Registry struct {
-	tools               *dstools.InMemoryToolRegistry
+	tools               *tooling.InMemoryToolRegistry
 	recorder            TelemetryRecorder
 	config              Config
 	pathValidator       *policy.PathValidator
@@ -43,6 +44,7 @@ type Registry struct {
 	openMailboxStore    func(context.Context) (mailbox.Store, error)
 	openCASStore        func(context.Context) (storage.CASStore, error)
 	openAgentsStore     func(context.Context) (agents.Store, error)
+	openRepoIndexStore  func(context.Context) (*repoindex.Store, error)
 
 	trajMu sync.Mutex
 	trajID string
@@ -129,6 +131,9 @@ type Config struct {
 
 	// OpenAgentsStore provides access to the agents store for resolving agent references.
 	OpenAgentsStore func(context.Context) (agents.Store, error)
+
+	// OpenRepoIndexStore provides access to the repo index store.
+	OpenRepoIndexStore func(context.Context) (*repoindex.Store, error)
 }
 
 // TelemetryRecorder records tool usage for observability.
@@ -198,7 +203,7 @@ func NewRegistry(cfg Config, recorder TelemetryRecorder) (*Registry, error) {
 	}
 
 	r := &Registry{
-		tools:               dstools.NewInMemoryToolRegistry(),
+		tools:               tooling.NewInMemoryToolRegistry(),
 		recorder:            recorder,
 		config:              cfg,
 		pathValidator:       pathValidator,
@@ -209,6 +214,7 @@ func NewRegistry(cfg Config, recorder TelemetryRecorder) (*Registry, error) {
 		openMailboxStore:    cfg.OpenMailboxStore,
 		openCASStore:        cfg.OpenCASStore,
 		openAgentsStore:     cfg.OpenAgentsStore,
+		openRepoIndexStore:  cfg.OpenRepoIndexStore,
 	}
 
 	// Register all V1 tools
@@ -216,6 +222,14 @@ func NewRegistry(cfg Config, recorder TelemetryRecorder) (*Registry, error) {
 		return nil, err
 	}
 	if err := r.registerFSTools(); err != nil {
+		return nil, err
+	}
+	if r.config.OpenRepoIndexStore != nil {
+		if err := r.registerRepoIndexTools(); err != nil {
+			return nil, err
+		}
+	}
+	if err := r.registerContextGrepTool(); err != nil {
 		return nil, err
 	}
 	if err := r.registerCodeTools(); err != nil {
@@ -253,22 +267,17 @@ func NewRegistry(cfg Config, recorder TelemetryRecorder) (*Registry, error) {
 	return r, nil
 }
 
-// GetRegistry returns the underlying dspy-go tool registry.
-func (r *Registry) GetRegistry() *dstools.InMemoryToolRegistry {
+// GetRegistry returns the underlying tool registry.
+func (r *Registry) GetRegistry() *tooling.InMemoryToolRegistry {
 	return r.tools
 }
 
 // List returns all registered tools.
-func (r *Registry) List() []*dstools.FuncTool {
-	// Return tools as FuncTool slice
-	allTools := r.tools.List()
-	result := make([]*dstools.FuncTool, 0, len(allTools))
-	for _, t := range allTools {
-		if ft, ok := t.(*dstools.FuncTool); ok {
-			result = append(result, ft)
-		}
+func (r *Registry) List() []tooling.Tool {
+	if r == nil {
+		return nil
 	}
-	return result
+	return r.tools.List()
 }
 
 // SetSessionID updates the session ID used for hook context.
@@ -296,7 +305,7 @@ func hooksAlreadyDispatched(ctx context.Context) bool {
 func (r *Registry) wrapWithTelemetry(
 	name string,
 	fn func(ctx context.Context, args map[string]any) (*models.CallToolResult, error),
-) dstools.ToolFunc {
+) tooling.ToolFunc {
 	return func(ctx context.Context, args map[string]any) (*models.CallToolResult, error) {
 		start := time.Now()
 		argsForCall := args
@@ -761,10 +770,22 @@ func extractToolError(result *models.CallToolResult) string {
 func (r *Registry) filterByAllowlist(allowlist []string) error {
 	allowed := make(map[string]bool)
 	for _, name := range allowlist {
-		allowed[name] = true
+		trimmed := strings.TrimSpace(name)
+		switch trimmed {
+		case repoindex.ToolSearchLegacy:
+			allowed[repoindex.ToolSearch] = true
+		case repoindex.ToolExpandLegacy:
+			allowed[repoindex.ToolExpand] = true
+		case repoindex.ToolOpenLegacy:
+			allowed[repoindex.ToolOpen] = true
+		case repoindex.ToolDAGGrepLegacy:
+			allowed[repoindex.ToolDAGGrep] = true
+		default:
+			allowed[trimmed] = true
+		}
 	}
 
-	filteredRegistry := dstools.NewInMemoryToolRegistry()
+	filteredRegistry := tooling.NewInMemoryToolRegistry()
 	for _, tool := range r.tools.List() {
 		if allowed[tool.Name()] {
 			if err := filteredRegistry.Register(tool); err != nil {

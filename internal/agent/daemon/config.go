@@ -4,10 +4,8 @@ import (
 	"context"
 	"time"
 
-	"github.com/XiaoConstantine/dspy-go/pkg/agents"
 	"github.com/jkatigb/agentctl/internal/agent/optimization"
-	"github.com/jkatigb/agentctl/internal/agent/tools"
-	"github.com/jkatigb/agentctl/internal/domain/agent"
+	"github.com/jkatigb/agentctl/internal/companion"
 )
 
 // OptimizationContext holds optimization components for handler use.
@@ -23,6 +21,11 @@ type OptimizationContext struct {
 
 	// WorkspaceID scopes patterns to a workspace.
 	WorkspaceID string
+}
+
+// ChatService defines the interface needed for daemon chat execution.
+type ChatService interface {
+	Chat(ctx context.Context, req companion.ChatRequest) (*companion.ChatResponse, error)
 }
 
 // Options configures the agent daemon runtime and companion services.
@@ -51,9 +54,6 @@ type Options struct {
 	// LLMAPIKey is the API key for the LLM provider.
 	LLMAPIKey string
 
-	// AgentFactory allows injecting a custom agent for testing.
-	AgentFactory func(context.Context, agent.Agent, *tools.Registry) (agents.Agent, error)
-
 	// EnableCompanionMemory enables L0/L1/L2 conversation memory for agents.
 	// When enabled, the daemon injects memory context into prompts and stores turns.
 	EnableCompanionMemory bool
@@ -64,4 +64,7 @@ type Options struct {
 	// - "roleplay": Extended memory for roleplay/chat (50K tokens, 48h vivid window)
 	// Only applies when EnableCompanionMemory is true.
 	CompanionMode string
+
+	// CompanionService overrides the default companion service (tests/injections).
+	CompanionService ChatService
 }

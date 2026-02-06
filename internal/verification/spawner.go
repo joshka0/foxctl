@@ -7,15 +7,12 @@ import (
 	"strings"
 	"sync"
 	"time"
-
-	"github.com/XiaoConstantine/dspy-go/pkg/core"
-	"github.com/XiaoConstantine/dspy-go/pkg/modules"
 )
 
 // Spawner manages parallel verification agents using a worker pool pattern.
 // It implements fan-out/fan-in concurrency for high-throughput claim verification.
 type Spawner struct {
-	llm    core.LLM
+	llm    LLMClient
 	config SpawnerConfig
 
 	mu         sync.RWMutex
@@ -23,7 +20,7 @@ type Spawner struct {
 }
 
 // NewSpawner creates a new verification spawner with the given LLM and config.
-func NewSpawner(llm core.LLM, config SpawnerConfig) *Spawner {
+func NewSpawner(llm LLMClient, config SpawnerConfig) *Spawner {
 	if config.MaxWorkers <= 0 {
 		config.MaxWorkers = 10
 	}
@@ -159,17 +156,9 @@ func (s *Spawner) verifyClaim(ctx context.Context, job verificationJob) Verifica
 	verifierCtx, cancel := context.WithTimeout(ctx, s.config.DefaultTimeout)
 	defer cancel()
 
-	sig := BuildDraftVerifierSignature()
-	predict := modules.NewPredict(*sig).WithTextOutput()
-	predict.SetLLM(s.llm)
-
-	// Combine context and claim into single input (dspy-go Predict limitation with multi-input)
-	verificationQuery := fmt.Sprintf("Context: %s\nClaim: %s", job.context, job.claim.Text)
-	input := map[string]any{
-		"verification_query": verificationQuery,
-	}
-
-	resultMap, err := predict.Process(verifierCtx, input)
+	rawOutput, err := s.llm.Chat(verifierCtx, draftVerifierSystemPrompt(), draftVerifierUserPrompt(job.context, job.claim.Text), LLMCallOptions{
+		Temperature: 0.2,
+	})
 	if err != nil {
 		return VerificationResult{
 			ClaimID:  job.claim.ID,
@@ -178,8 +167,6 @@ func (s *Spawner) verifyClaim(ctx context.Context, job verificationJob) Verifica
 			Duration: time.Since(startTime),
 		}
 	}
-
-	rawOutput := extractDraftOutput(resultMap)
 	verdict, evidence := parseDraftOutput(rawOutput)
 
 	return VerificationResult{

@@ -19,8 +19,8 @@ Related specs:
 - `../review_gate.md`
 - `../semantic_file_index.md`
 - `../code_symbol_index_and_swe_grep.md`
-- `../dspy_go_agents.md`
-- `../dspy_trajectory_capture.md`
+- `../archive/specs/dspy_go_agents.md` (legacy runtime reference)
+- `../archive/specs/dspy_trajectory_capture.md` (legacy trajectory format)
 
 ---
 
@@ -58,7 +58,7 @@ These are primarily operations on the existing `todo/manage` and
 - **`mailbox/manage.inbox` / `mailbox/manage.ack`**
   - **Purpose:** Allow reviewers and overseer agents to process review-related
     mail.
-  - **Spec:** `dspy_go_agents.md` §5.5, `mailbox_blackboard.md`.
+  - **Spec:** `archive/specs/dspy_go_agents.md` §5.5 (legacy runtime), `mailbox_blackboard.md`.
 
 These skills already exist conceptually; this spec simply surfaces them in one
 place for planning.
@@ -111,7 +111,7 @@ accepted review (see `review_gate.md` and `semantic_file_index.md` §8.2–8.3).
 
 ## 4. SWE Grep & Retrieval Skills
 
-These are new skills implied by the symbol index and dspy-go specs.
+These are new skills implied by the symbol index and agent runtime specs.
 
 ### 4.1 `code/snippet_extract` (exec skill)
 
@@ -129,19 +129,19 @@ These are new skills implied by the symbol index and dspy-go specs.
   - Optional CAS `artifact` (NDJSON snippets) (with optional `meta.cas_digest`
     matching `data.artifact`).
 
-### 4.2 Agent Tools (dspy-go Layer)
+### 4.2 Agent Tools (Runtime Layer)
 
 While not skills themselves, the following tools wrap skills or internal helpers
 and should be implemented alongside `code/snippet_extract`:
 
 - **`code.symbol_search`**
   - **Backend:** Go helper over the symbol index.
-  - **Spec:** `code_symbol_index_and_swe_grep.md` §6.1, `dspy_go_agents.md`
+  - **Spec:** `code_symbol_index_and_swe_grep.md` §6.1, `archive/specs/dspy_go_agents.md` (legacy runtime)
     §5.1.
 
 - **`code.swe_grep`** (tool)
   - **Backend:** `code/snippet_extract` skill.
-  - **Spec:** `code_symbol_index_and_swe_grep.md` §6.2, `dspy_go_agents.md`
+  - **Spec:** `code_symbol_index_and_swe_grep.md` §6.2, `archive/specs/dspy_go_agents.md` (legacy runtime)
     §5.1.
 
 These tools form the recommended **funnel** for Coding/Review agents:
@@ -157,8 +157,8 @@ These tools form the recommended **funnel** for Coding/Review agents:
 
 ### 5.1 `trajectory.export` (job/skill)
 
-- **Purpose:** Build dspy-ready episodes from stored trajectories for export.
-- **Spec:** `dspy_trajectory_capture.md` §7.
+- **Purpose:** Build training-ready episodes from stored trajectories for export.
+- **Spec:** `archive/specs/dspy_trajectory_capture.md` §7 (legacy).
 - **Inputs (conceptual):**
   - `workspace_id`.
   - Filters: `task_id?`, `epic_id?`, time range, `agent_role?`, `status?`.
@@ -175,12 +175,12 @@ wrapper later.
 
 ## 6. Teams & Routing (Future Skills)
 
-Teams are defined conceptually in `dspy_go_agents.md` >4.3. To support routing,
+Teams are defined conceptually in `archive/specs/dspy_go_agents.md` §4.3 (legacy runtime). To support routing,
 dashboards, and overseer behavior, the following skills are natural follow-ons:
 
 - **`teams/manage.list`**
   - **Purpose:** List teams in a workspace.
-  - **Spec:** `dspy_go_agents.md` >4.3.
+  - **Spec:** `archive/specs/dspy_go_agents.md` §4.3 (legacy runtime).
 
 - **`teams/manage.describe`**
   - **Purpose:** Show details (members, tags, `primary_epics`) for a team.
@@ -193,7 +193,7 @@ dashboards, and overseer behavior, the following skills are natural follow-ons:
 
 Storage expectation:
 
-- Backed by SQLite tables `teams` and `team_members` (see `dspy_go_agents.md`
+- Backed by SQLite tables `teams` and `team_members` (see `archive/specs/dspy_go_agents.md` legacy section)
   >4.3.1).
 - Config files MAY seed initial data, but runtime changes SHOULD go through
   these operations once implemented.

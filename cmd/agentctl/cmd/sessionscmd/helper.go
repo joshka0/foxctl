@@ -202,7 +202,7 @@ func FindUncapturedSessions(projectsDir string, captured map[string]bool, projec
 }
 
 // decodeWorkspacePath converts Claude Code's encoded directory name back to a path.
-// e.g., "-Users-jkatigbak-repos-personal-agentctl" -> "/Users/jkatigbak/repos/personal/agentctl"
+// e.g., "-Users-alice-repos-personal-agentctl" -> "/Users/alice/repos/personal/agentctl"
 func decodeWorkspacePath(encoded string) string {
 	// Replace leading dash with /
 	if strings.HasPrefix(encoded, "-") {

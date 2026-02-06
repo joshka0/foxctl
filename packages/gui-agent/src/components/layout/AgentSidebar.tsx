@@ -20,7 +20,7 @@ import {
   MessagesSquare,
   Bot,
 } from 'lucide-react'
-import type { ViewType } from '@/App'
+import type { ViewType } from '@/stores/viewStore'
 
 interface SidebarItem {
   id: ViewType
@@ -58,6 +58,7 @@ export function AgentSidebar({ activeView, onViewChange }: AgentSidebarProps) {
 
   const handleAgentClick = (agent: Agent) => {
     setSelectedAgent(agent)
+    onViewChange('agents')
   }
 
   return (
@@ -148,7 +149,7 @@ interface SidebarButtonProps {
 
 function SidebarButton({ item, collapsed, active, onClick, connected }: SidebarButtonProps) {
   return (
-    <Button variant={active ? 'secondary' : 'ghost'} className={cn('w-full justify-start mb-1 relative', collapsed ? 'px-2' : 'px-2')} onClick={onClick}>
+    <Button variant={active ? 'secondary' : 'ghost'} className={cn('w-full justify-start mb-1 relative px-2')} onClick={onClick}>
       <span className="relative">
         {item.icon}
         {connected !== undefined && <span className={cn('absolute -top-1 -right-1 h-2 w-2 rounded-full', connected ? 'bg-green-500' : 'bg-red-500')} />}
@@ -175,7 +176,7 @@ function AgentButton({ agent, collapsed, selected, onClick }: AgentButtonProps) 
   const displayName = agent.name || agent.slug || agent.role || 'Agent'
 
   return (
-    <Button variant={selected ? 'secondary' : 'ghost'} className={cn('w-full justify-start mb-1 relative', collapsed ? 'px-2' : 'px-2')} onClick={onClick} title={displayName}>
+    <Button variant={selected ? 'secondary' : 'ghost'} className={cn('w-full justify-start mb-1 relative px-2')} onClick={onClick} title={displayName}>
       <span className="relative">
         <Bot className={cn('h-4 w-4', isRunning ? 'text-green-500' : 'text-muted-foreground')} />
         {isRunning && <span className="absolute -top-1 -right-1 h-2 w-2 rounded-full bg-green-500" />}

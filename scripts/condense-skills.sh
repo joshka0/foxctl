@@ -1,11 +1,12 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # Condense skill documentation for lower token usage
 # Full docs go to docs/skills/, condensed Skill.md stays in ~/.claude/skills/
 
-set -e
+set -euo pipefail
 
-DOCS_DIR="/Users/jkatigbak/repos/personal/agentctl/docs/skills"
-USER_SKILLS="$HOME/.claude/skills"
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+DOCS_DIR="$ROOT_DIR/docs/skills"
+USER_SKILLS="${HOME}/.claude/skills"
 
 mkdir -p "$DOCS_DIR"
 

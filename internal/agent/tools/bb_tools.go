@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"time"
 
-	dstools "github.com/XiaoConstantine/dspy-go/pkg/tools"
+	tooling "github.com/jkatigb/agentctl/internal/tooling"
 	models "github.com/XiaoConstantine/mcp-go/pkg/model"
 	"github.com/jkatigb/agentctl/internal/domain/agent"
 	errspkg "github.com/jkatigb/agentctl/internal/platform/errors"
@@ -24,7 +24,7 @@ const (
 // registerBBTools registers blackboard (topic bus) tools.
 func (r *Registry) registerBBTools() error {
 	// bb.post
-	postTool := dstools.NewFuncTool(
+	postTool := tooling.NewFuncTool(
 		"bb.post",
 		"Post a record to a blackboard topic.",
 		models.InputSchema{
@@ -57,7 +57,7 @@ func (r *Registry) registerBBTools() error {
 	}
 
 	// bb.search
-	searchTool := dstools.NewFuncTool(
+	searchTool := tooling.NewFuncTool(
 		"bb.search",
 		"Search records in a topic.",
 		models.InputSchema{
@@ -85,7 +85,7 @@ func (r *Registry) registerBBTools() error {
 	}
 
 	// bb.claim
-	claimTool := dstools.NewFuncTool(
+	claimTool := tooling.NewFuncTool(
 		"bb.claim",
 		"Claim a record with a lease.",
 		models.InputSchema{
@@ -109,7 +109,7 @@ func (r *Registry) registerBBTools() error {
 	}
 
 	// bb.release
-	releaseTool := dstools.NewFuncTool(
+	releaseTool := tooling.NewFuncTool(
 		"bb.release",
 		"Release a claimed record.",
 		models.InputSchema{
@@ -129,7 +129,7 @@ func (r *Registry) registerBBTools() error {
 	}
 
 	// bb.list (alias to search)
-	listTool := dstools.NewFuncTool(
+	listTool := tooling.NewFuncTool(
 		"bb.list",
 		"List records in a topic (alias for bb.search).",
 		models.InputSchema{
@@ -153,7 +153,7 @@ func (r *Registry) registerBBTools() error {
 	}
 
 	// bb.watch
-	watchTool := dstools.NewFuncTool(
+	watchTool := tooling.NewFuncTool(
 		"bb.watch",
 		"Watch for new records on a topic.",
 		models.InputSchema{

@@ -1,19 +1,21 @@
 // Package main implements the codemap/generate skill.
-// It generates semantic codemaps using a dspy-go agent.
+// It generates semantic codemaps using the LLM chat codemap agent.
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"os"
+	"time"
 
-	"github.com/XiaoConstantine/dspy-go/pkg/logging"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillerr"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
 	"github.com/jkatigb/agentctl/internal/codemap"
 	"github.com/jkatigb/agentctl/internal/domain/skill"
+	"github.com/jkatigb/agentctl/internal/observability"
 	"github.com/jkatigb/agentctl/internal/platform/config"
 	errs "github.com/jkatigb/agentctl/internal/platform/errors"
 	"github.com/jkatigb/agentctl/internal/storage/graph"
@@ -22,16 +24,6 @@ import (
 )
 
 const command = "codemap/generate"
-
-func init() {
-	// Configure dspy-go to log to stderr instead of stdout
-	// This prevents log output from corrupting the JSON envelope
-	logger := logging.NewLogger(logging.Config{
-		Severity: logging.INFO,
-		Outputs:  []logging.Output{logging.NewConsoleOutput(true)}, // true = stderr
-	})
-	logging.SetLogger(logger)
-}
 
 // input is the expected JSON input for codemap/generate operations.
 type input struct {
@@ -45,7 +37,7 @@ func main() {
 	skillmain.Main(command, run)
 }
 
-// run orchestrates codemap generation using dspy-go agent with optional embedding storage.
+// run orchestrates codemap generation using the codemap agent with optional embedding storage.
 //
 // Index:
 // - Purpose: Generate semantic codemaps using AI agent with natural language queries
@@ -54,8 +46,9 @@ func main() {
 // - FailureModes: invalid queries, workspace validation errors, agent creation failures, generation errors, storage errors
 // - Observability: emits generated codemap with traces, files, and metadata
 // - Related: storeCodemapWithEmbedding, buildCodemapSummary
-// - Keywords: codemap/generate, dspy-go, agent, embeddings, semantic, traces
+// - Keywords: codemap/generate, agent, embeddings, semantic, traces
 func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
+	start := time.Now()
 	if in.Query == "" {
 		return skillerr.Arg("query is required", skillerr.WithHint("Provide a natural language query to generate a codemap."))
 	}
@@ -117,6 +110,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 		Depth:     depth,
 	})
 	if err != nil {
+		emitCodemapError(ctx, rc, in.Query, workspace, depth, err, time.Since(start))
 		return skillerr.WrapRuntime("generate codemap", err)
 	}
 
@@ -127,6 +121,45 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	}
 
 	return skillout.Emit(rc, command, result)
+}
+
+func emitCodemapError(ctx context.Context, rc *skillmain.RunContext, query, workspace string, depth int, err error, duration time.Duration) {
+	if rc == nil {
+		return
+	}
+	rc.Logger.Warn().Msg("codemap: emitting error event")
+	if os.Getenv(observability.EnvObsDir) == "" && rc.Config.Paths.Observability != "" {
+		observability.SetObsDirForTesting(rc.Config.Paths.Observability)
+		_ = os.Setenv(observability.EnvObsDir, rc.Config.Paths.Observability)
+	}
+	builder := observability.NewEvent("codemap.generate").
+		WithComponent("skill").
+		WithCommand(command).
+		WithSubtype("generate").
+		WithWorkspace(workspace).
+		WithData("query_hash", observability.HashQuestion(query)).
+		WithData("depth", depth)
+
+	if rc.ShouldStoreCAS() && err != nil {
+		buf := bytes.NewBufferString(err.Error())
+		artifact, _, persistErr := skillout.PersistBufferWithHint(
+			ctx,
+			rc,
+			buf,
+			"text/plain",
+			"codemap_generate_error",
+			skillout.DefaultCASHintLines,
+		)
+		if persistErr == nil {
+			builder = builder.WithStderrArtifact(artifact.Digest)
+		} else {
+			rc.Logger.Warn().Err(persistErr).Msg("codemap: failed to persist error details")
+		}
+	}
+
+	if emitErr := observability.EmitSync(ctx, builder.Error(err, duration)); emitErr != nil {
+		rc.Logger.Warn().Err(emitErr).Msg("codemap: failed to emit error event")
+	}
 }
 
 // storeCodemapWithEmbedding saves the codemap to memory store with chunked embeddings for semantic search.

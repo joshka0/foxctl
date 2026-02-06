@@ -1,6 +1,6 @@
 # Agent Daemon Architecture
 
-> Status: Fully implemented (LLMChatEngine + DSPy routing)
+> Status: Fully implemented (LLMChatEngine tool-loop)
 
 ## Overview
 
@@ -32,10 +32,10 @@ The agent daemon runs companion and autonomous agents via the mailbox polling lo
 │                                                                 │
 │   exec_mode = "autonomous" | "proactive"                       │
 │   ┌─────────────────────────────────────────────────────────┐  │
-│   │  DSPy ReAct Agent                                       │  │
+│   │  LLMChatEngine via companion.Service                    │  │
 │   │  - Tool calling loop                                    │  │
 │   │  - Multi-step reasoning                                 │  │
-│   │  - Requires: gemini, openai, anthropic, groq, openrouter│  │
+│   │  - Same provider support as reactive                    │  │
 │   └─────────────────────────────────────────────────────────┘  │
 │                                                                 │
 └────────────────────────────────────────────────────────────────┘
@@ -47,8 +47,8 @@ The agent daemon runs companion and autonomous agents via the mailbox polling lo
 |------|--------|----------|------------------|
 | `reactive` | LLMChatEngine | Chat companions, simple Q&A | Any (cerebras default) |
 | `story` | LLMChatEngine | Gather + dialogue companions, structured outputs | Any (tool-capable model recommended) |
-| `autonomous` | DSPy ReAct | Tool-using agents, multi-step tasks | gemini, openai, anthropic, groq, openrouter |
-| `proactive` | DSPy ReAct | Background workers, scheduled tasks | gemini, openai, anthropic, groq, openrouter |
+| `autonomous` | LLMChatEngine | Tool-using agents, multi-step tasks | Any (tool-capable model recommended) |
+| `proactive` | LLMChatEngine | Background workers, scheduled tasks | Any (tool-capable model recommended) |
 
 ## Default Configuration
 
@@ -100,10 +100,10 @@ agentctl agent spawn \
 agentctl agent run <agent-id>
 ```
 
-### Autonomous Agent (DSPy)
+### Autonomous Agent (LLMChatEngine)
 
 ```bash
-# Spawn an autonomous agent using DSPy ReAct
+# Spawn an autonomous agent using LLMChatEngine tool loop
 agentctl agent spawn \
   --name "Coder" \
   --role coder \
@@ -159,7 +159,7 @@ Mailbox Message
 └─────────────────────────────────────────┘
 ```
 
-### Autonomous Agent (DSPy)
+### Autonomous Agent (LLMChatEngine)
 
 ```
 Mailbox Message
@@ -168,10 +168,10 @@ Mailbox Message
 ┌─────────────────────────────────────────┐
 │ handleAsk() / handleConsoleAsk()        │
 ├─────────────────────────────────────────┤
-│ 1. Build DSPy task context              │
+│ 1. Build tool-enabled task context      │
 │                                         │
-│ 2. dspyAgent.Execute()                  │
-│    - ReAct reasoning loop               │
+│ 2. companion.Service.Chat()             │
+│    - Tool-call loop                     │
 │    - Tool execution via registry        │
 │    - Multi-step until completion        │
 │                                         │
@@ -209,7 +209,7 @@ When using LLMChatEngine via companion.Service:
 |---------|--------|-------------|
 | Conversation Memory | Yes | L0/L1/L2 progressive decay |
 | Context Variables | Yes | RLM context store |
-| Tool Calling | Optional | Via RLM tools (not DSPy) |
+| Tool Calling | Optional | Via tool runner and registry |
 | Compression Daemon | Yes | Background L0→L1→L2 summarization |
 
 ## Code References
@@ -218,28 +218,17 @@ When using LLMChatEngine via companion.Service:
 |-----------|----------|
 | Engine routing | `internal/agent/daemon/daemon.go:237` |
 | Companion service creation | `internal/agent/daemon/daemon.go:259-301` |
-| DSPy agent creation | `internal/agent/daemon/daemon.go:239-258` |
 | Message handlers | `internal/agent/daemon/handlers.go` |
 | Companion service | `internal/companion/service.go` |
 | LLMChatEngine | `internal/engine/llmchat_engine.go` |
 
 ## Troubleshooting
 
-### "unsupported LLM provider: cerebras" with DSPy
+### "unsupported LLM provider" errors
 
-**Cause:** Agent has `exec_mode: autonomous` or `exec_mode: proactive` but uses cerebras.
+**Cause:** Missing or misconfigured provider credentials for the selected model.
 
-**Fix:** Either:
-1. Change to `exec_mode: reactive` for cerebras
-2. Or use a DSPy-supported provider: gemini, openai, anthropic, groq, openrouter
-
-```bash
-# Check agent exec_mode
-sqlite3 ~/.agentctl/storage/agents.db "SELECT exec_mode FROM agents WHERE id='$AGENT_ID'"
-
-# Update to reactive
-sqlite3 ~/.agentctl/storage/agents.db "UPDATE agents SET exec_mode='reactive' WHERE id='$AGENT_ID'"
-```
+**Fix:** Ensure the provider API key is set and the model name matches the provider.
 
 ### Companion memory not injected
 

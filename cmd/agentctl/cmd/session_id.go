@@ -146,7 +146,7 @@ func detectClaudeSession(workspace string) (string, error) {
 	}
 
 	// Encode workspace path to Claude's directory format
-	// /Users/jkatigbak/repos/personal/agentctl -> -Users-jkatigbak-repos-personal-agentctl
+	// /Users/alice/repos/personal/agentctl -> -Users-alice-repos-personal-agentctl
 	encodedWS := encodeWorkspacePath(workspace)
 	projectDir := filepath.Join(projectsDir, encodedWS)
 
@@ -205,7 +205,7 @@ func detectOpenCodeSession() (string, error) {
 }
 
 // encodeWorkspacePath converts a filesystem path to Claude's encoded directory name
-// e.g., "/Users/jkatigbak/repos/personal/agentctl" -> "-Users-jkatigbak-repos-personal-agentctl"
+// e.g., "/Users/alice/repos/personal/agentctl" -> "-Users-alice-repos-personal-agentctl"
 func encodeWorkspacePath(path string) string {
 	// Remove trailing slash if present
 	path = strings.TrimSuffix(path, "/")

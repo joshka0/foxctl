@@ -1,0 +1,107 @@
+apiVersion: agentctl/v1
+kind: Skill
+metadata:
+  name: code/dag_grep
+  version: 0.1.0
+  description: "Search repo index and return a compact explanation DAG"
+  tags: ["code", "repoindex", "graph", "search"]
+distribution:
+  type: exec
+  exec:
+    entry: skills/code_dag_grep/code_dag_grep
+io:
+  format: JSON
+  inline_output_kb: 64
+signature:
+  command: code/dag_grep
+  parameters:
+    - name: query
+      type: string
+      required: true
+      description: "Search query"
+    - name: workspace
+      type: string
+      required: false
+      description: "Workspace root (default: current workspace)"
+    - name: mode
+      type: string
+      required: false
+      description: "Search mode: fts, semantic, or hybrid"
+      enum: ["fts", "semantic", "hybrid"]
+    - name: k
+      type: integer
+      required: false
+      description: "Number of seed nodes (default 10)"
+    - name: node_kinds
+      type: array
+      required: false
+      description: "Restrict node kinds"
+      items:
+        type: string
+        enum: ["symbol", "file", "package", "concept"]
+    - name: edge_sets
+      type: array
+      required: false
+      description: "Edge sets to include"
+      items:
+        type: string
+        enum: ["structural", "doc", "all"]
+    - name: edge_types
+      type: array
+      required: false
+      description: "Explicit edge types to traverse"
+      items:
+        type: string
+    - name: direction
+      type: string
+      required: false
+      description: "Traversal direction: out or in"
+      enum: ["out", "in"]
+    - name: depth
+      type: integer
+      required: false
+      description: "Traversal depth (default 2)"
+    - name: budget
+      type: integer
+      required: false
+      description: "Max nodes to return (default 80)"
+    - name: per_node_cap
+      type: integer
+      required: false
+      description: "Max edges per node per hop (default 20)"
+    - name: include_anchors
+      type: boolean
+      required: false
+      description: "Include file/package anchors for symbols/files"
+    - name: render
+      type: string
+      required: false
+      description: "Render format: tree or mermaid"
+      enum: ["tree", "mermaid"]
+  returns:
+    - name: result
+      type: object
+      description: "DAG grep result (seeds, graph, dag, stats)"
+    - name: rendered
+      type: string
+      description: "Optional rendered view (tree or mermaid)"
+  help:
+    short: "Repo index DAG grep"
+    long: |
+      Use this skill to retrieve a compact explanation subgraph from the repo index.
+
+      It runs FTS search over repo index nodes, selects seed nodes, expands along
+      structural and/or doc edges, and returns a layered DAG view.
+
+      Example:
+      {"query":"repo index builder","edge_sets":["structural","doc"],"render":"tree"}
+capabilities:
+  network: "none"
+  filesystem:
+    - type: workdir
+  pure: true
+openapi:
+  enabled: true
+  methods:
+    GET: "true"
+    POST: "true"

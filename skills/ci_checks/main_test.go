@@ -14,6 +14,7 @@ func TestFindFailedStep_LastFailureWins(t *testing.T) {
 	step := findFailedStep(job)
 	if step == nil {
 		t.Fatalf("expected a failed step, got nil")
+		return
 	}
 	if step.Name != "test" {
 		t.Fatalf("expected last failing step 'test', got %q", step.Name)

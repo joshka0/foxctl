@@ -15,14 +15,16 @@ import (
 	"github.com/jkatigb/agentctl/internal/platform/buildinfo"
 	"github.com/jkatigb/agentctl/internal/protocol"
 	"github.com/jkatigb/agentctl/internal/storage/graph"
+	"github.com/rs/zerolog"
 )
 
 // Context holds all gathered context for codemap generation.
 type Context struct {
-	Query    string          `json:"query"`
-	Graph    *GraphContext   `json:"graph,omitempty"`
-	Symbols  *SymbolContext  `json:"symbols,omitempty"`
-	Patterns *PatternContext `json:"patterns,omitempty"`
+	Query    string           `json:"query"`
+	Graph    *GraphContext    `json:"graph,omitempty"`
+	Symbols  *SymbolContext   `json:"symbols,omitempty"`
+	Semantic *SemanticContext `json:"semantic,omitempty"`
+	Patterns *PatternContext  `json:"patterns,omitempty"`
 }
 
 // GraphContext contains graph-derived context.
@@ -47,6 +49,24 @@ type SymbolContext struct {
 	SharedImports []string `json:"shared_imports"`
 	// Exported API symbols
 	ExportedAPIs []Symbol `json:"exported_apis"`
+}
+
+// SemanticContext contains semantic search results to seed codemap exploration.
+type SemanticContext struct {
+	Results []SemanticResult `json:"results"`
+}
+
+// SemanticResult represents a semantic search hit.
+type SemanticResult struct {
+	Source     string  `json:"source"`
+	ID         string  `json:"id"`
+	Name       string  `json:"name"`
+	Path       string  `json:"path,omitempty"`
+	Line       int     `json:"line,omitempty"`
+	Snippet    string  `json:"snippet,omitempty"`
+	Summary    string  `json:"summary,omitempty"`
+	Similarity float64 `json:"similarity"`
+	Rank       int     `json:"rank"`
 }
 
 // Symbol represents a code symbol.
@@ -96,6 +116,7 @@ type Gatherer struct {
 	graphStore    graph.Store
 	skillResolver *skill.Resolver
 	workspace     string
+	logger        zerolog.Logger
 }
 
 // GathererOption configures the Gatherer.
@@ -112,6 +133,13 @@ func WithGraphStore(store graph.Store) GathererOption {
 func WithSkillResolver(resolver *skill.Resolver) GathererOption {
 	return func(g *Gatherer) {
 		g.skillResolver = resolver
+	}
+}
+
+// WithLogger sets the logger for the gatherer.
+func WithLogger(logger zerolog.Logger) GathererOption {
+	return func(g *Gatherer) {
+		g.logger = logger
 	}
 }
 
@@ -133,6 +161,7 @@ func WithWorkspace(workspace string) GathererOption {
 func NewGatherer(opts ...GathererOption) *Gatherer {
 	g := &Gatherer{
 		skillResolver: skill.NewResolver(),
+		logger:        zerolog.New(os.Stderr),
 	}
 	for _, opt := range opts {
 		opt(g)
@@ -141,15 +170,15 @@ func NewGatherer(opts ...GathererOption) *Gatherer {
 }
 
 // GatherAll gathers context from all sources in parallel.
-// GatherAll collects graph, symbol, and pattern context in parallel.
+// GatherAll collects graph, symbol, semantic, and pattern context in parallel.
 //
 // Index:
 // - Purpose: Gather codemap context from multiple sources
-// - Flow: extract terms → run graph/symbol/pattern gatherers → merge context
+// - Flow: extract terms → run graph/symbol/semantic/pattern gatherers → merge context
 // - SideEffects: queries graph store; runs skills; writes warnings to stderr
 // - FailureModes: gather errors return partial context where possible
-// - Related: gatherGraphContext, gatherSymbolContext, gatherPatternContext
-// - Keywords: codemap_context, graph, symbols, patterns, errgroup
+// - Related: gatherGraphContext, gatherSymbolContext, gatherSemanticContext, gatherPatternContext
+// - Keywords: codemap_context, graph, symbols, semantic_search, patterns, errgroup
 func (g *Gatherer) GatherAll(ctx context.Context, query, workspace string) (*Context, error) {
 	if workspace == "" {
 		workspace = g.workspace
@@ -190,12 +219,24 @@ func (g *Gatherer) GatherAll(ctx context.Context, query, workspace string) (*Con
 		return nil
 	})
 
+	// Gather semantic search context
+	eg.Go(func() error {
+		semanticCtx, err := g.gatherSemanticContext(egCtx, workspace, query)
+		if err != nil {
+			// Log but don't fail - semantic context is optional
+			g.logger.Warn().Err(err).Msg("gather semantic context failed")
+			return nil
+		}
+		result.Semantic = semanticCtx
+		return nil
+	})
+
 	// Gather pattern context
 	eg.Go(func() error {
 		patternCtx, err := g.gatherPatternContext(egCtx, workspace, terms)
 		if err != nil {
 			// Log but don't fail - pattern context is optional
-			fmt.Fprintf(os.Stderr, "warning: gather pattern context: %v\n", err)
+			g.logger.Warn().Err(err).Msg("gather pattern context failed")
 			return nil
 		}
 		result.Patterns = patternCtx
@@ -338,6 +379,61 @@ func (g *Gatherer) gatherSymbolContext(ctx context.Context, workspace string, te
 	}
 
 	return result, nil
+}
+
+// gatherSemanticContext gathers semantic search results from code/semantic_search.
+func (g *Gatherer) gatherSemanticContext(ctx context.Context, workspace, query string) (*SemanticContext, error) {
+	if g.skillResolver == nil || query == "" {
+		return nil, nil
+	}
+
+	handle, err := g.skillResolver.Resolve("code/semantic_search")
+	if err != nil {
+		return nil, fmt.Errorf("resolve code/semantic_search: %w", err)
+	}
+
+	manifest, artifactPath, err := skill.LoadManifestAndArtifact(handle.ManifestPath, skill.ArtifactOptions{
+		PreferCGO: buildinfo.IsCGO(),
+		EntryRoot: workspace,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("resolve code/semantic_search artifact: %w", err)
+	}
+
+	input := map[string]any{
+		"query":           query,
+		"scope":           []string{"symbols", "codemaps"},
+		"workspace":       workspace,
+		"limit":           15,
+		"min_similarity":  0.2,
+		"include_context": false,
+	}
+
+	inputBytes, err := json.Marshal(input)
+	if err != nil {
+		return nil, fmt.Errorf("marshal input: %w", err)
+	}
+
+	stdout, _, err := runner.RunWithOptions(ctx, runner.RunOptions{
+		Manifest:     manifest,
+		ArtifactPath: artifactPath,
+		Input:        inputBytes,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("run code/semantic_search: %w", err)
+	}
+
+	var payload struct {
+		Results []SemanticResult `json:"results"`
+	}
+	if err := protocol.DecodeEnvelopeInto(stdout, &payload); err != nil {
+		return nil, fmt.Errorf("parse response: %w", err)
+	}
+	if len(payload.Results) == 0 {
+		return nil, nil
+	}
+
+	return &SemanticContext{Results: payload.Results}, nil
 }
 
 // gatherPatternContext gathers context from the code/context_ripgrep skill.

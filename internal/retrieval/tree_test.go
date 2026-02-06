@@ -11,6 +11,7 @@ func TestTreeBuilder_Build_Empty(t *testing.T) {
 
 	if output == nil {
 		t.Fatal("expected non-nil output")
+		return
 	}
 	if len(output.Nodes) != 1 {
 		t.Fatalf("expected 1 root node, got %d", len(output.Nodes))
@@ -324,6 +325,7 @@ func TestTreeBuilder_Build_ChildrenSortedByScore(t *testing.T) {
 
 	if pkgNode == nil {
 		t.Fatal("could not find pkg directory")
+		return
 	}
 
 	// Children should be sorted by score descending

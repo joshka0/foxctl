@@ -18,7 +18,7 @@
       "locations": [
         {
           "id": "1a",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/analysis/overseer/scorer.go",
+          "path": "internal/analysis/overseer/scorer.go",
           "lineNumber": 91,
           "lineContent": "insights, err := analyzer.Analyze(pending, workspaceID)",
           "title": "Scorer invokes graph analyzer",
@@ -26,7 +26,7 @@
         },
         {
           "id": "1b",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/analysis/tasksgraph/graph.go",
+          "path": "internal/analysis/tasksgraph/graph.go",
           "lineNumber": 74,
           "lineContent": "g := simple.NewDirectedGraph()",
           "title": "Initialize directed graph",
@@ -34,7 +34,7 @@
         },
         {
           "id": "1c",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/analysis/tasksgraph/graph.go",
+          "path": "internal/analysis/tasksgraph/graph.go",
           "lineNumber": 92,
           "lineContent": "g.SetEdge(g.NewEdge(simple.Node(fromID), simple.Node(toID)))",
           "title": "Add dependency edges",
@@ -42,7 +42,7 @@
         },
         {
           "id": "1d",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/analysis/tasksgraph/graph.go",
+          "path": "internal/analysis/tasksgraph/graph.go",
           "lineNumber": 98,
           "lineContent": "pageRanks := network.PageRank(g, 0.85, 1e-6)",
           "title": "Compute PageRank scores",
@@ -50,7 +50,7 @@
         },
         {
           "id": "1e",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/analysis/tasksgraph/graph.go",
+          "path": "internal/analysis/tasksgraph/graph.go",
           "lineNumber": 117,
           "lineContent": "criticalPaths := computeCriticalPaths(g, nodeToID)",
           "title": "Calculate critical path scores",
@@ -58,7 +58,7 @@
         },
         {
           "id": "1f",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/analysis/tasksgraph/graph.go",
+          "path": "internal/analysis/tasksgraph/graph.go",
           "lineNumber": 121,
           "lineContent": "sorted, err := topo.Sort(g)",
           "title": "Compute topological order",
@@ -66,14 +66,14 @@
         },
         {
           "id": "1g",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/analysis/tasksgraph/graph.go",
+          "path": "internal/analysis/tasksgraph/graph.go",
           "lineNumber": 154,
           "lineContent": "return insights, nil",
           "title": "Return computed insights",
           "description": "Returns NodeMetrics with PageRank, critical path scores, in/out degrees, and topological order"
         }
       ],
-      "traceTextDiagram": "Task Graph Analysis Flow\n├── Overseer Scorer\n│   └── scorer.Recommend() \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/analysis/overseer/scorer.go:65\n│       └── analyzer.Analyze(pending, wsID) \u003c-- 1a\n│           └── tasksgraph.Analyzer.Analyze() \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/analysis/tasksgraph/graph.go:50\n│               ├── Build directed graph\n│               │   ├── g = NewDirectedGraph() \u003c-- 1b\n│               │   ├── Add all task nodes \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/analysis/tasksgraph/graph.go:79\n│               │   └── Add dependency edges \u003c-- 1c\n│               ├── Compute graph metrics\n│               │   ├── PageRank(g, 0.85, 1e-6) \u003c-- 1d\n│               │   ├── computeCriticalPaths() \u003c-- 1e\n│               │   ├── Calculate in/out degrees \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/analysis/tasksgraph/graph.go:107\n│               │   └── topo.Sort(g) \u003c-- 1f\n│               └── return insights \u003c-- 1g\n└── Result: NodeMetrics with scores",
+      "traceTextDiagram": "Task Graph Analysis Flow\n├── Overseer Scorer\n│   └── scorer.Recommend() \u003c-- internal/analysis/overseer/scorer.go:65\n│       └── analyzer.Analyze(pending, wsID) \u003c-- 1a\n│           └── tasksgraph.Analyzer.Analyze() \u003c-- internal/analysis/tasksgraph/graph.go:50\n│               ├── Build directed graph\n│               │   ├── g = NewDirectedGraph() \u003c-- 1b\n│               │   ├── Add all task nodes \u003c-- internal/analysis/tasksgraph/graph.go:79\n│               │   └── Add dependency edges \u003c-- 1c\n│               ├── Compute graph metrics\n│               │   ├── PageRank(g, 0.85, 1e-6) \u003c-- 1d\n│               │   ├── computeCriticalPaths() \u003c-- 1e\n│               │   ├── Calculate in/out degrees \u003c-- internal/analysis/tasksgraph/graph.go:107\n│               │   └── topo.Sort(g) \u003c-- 1f\n│               └── return insights \u003c-- 1g\n└── Result: NodeMetrics with scores",
       "traceGuide": "## Motivation\n\nIn a multi-agent task management system, **determining which task to work on next** is non-trivial. Tasks have dependencies (Task A blocks Task B), varying importance (some are on critical paths), and receive attention from human admins or system overseers through messages. The graph analysis system solves this by computing **quantitative metrics** that reveal which tasks are most blocking, most central to the dependency network, and most urgent based on human/system input.\n\nWithout this analysis, agents would need to manually traverse dependency chains, guess at task importance, or miss critical messages—leading to inefficient work ordering and blocked workflows.\n\n## Details\n\n### Graph Construction\n\nThe system models tasks as a **directed graph** where an edge from Task A to Task B means \"A depends on B\" [1b, 1c]. This representation enables algorithmic analysis of the dependency structure. Tasks become nodes, and `DependsOn` relationships become edges pointing toward dependencies.\n\n### Core Metrics\n\nThree key metrics are computed [1d, 1e]:\n\n1. **PageRank** (0.85 damping factor): Measures task centrality—tasks that many others depend on score higher. Uses the gonum network library's PageRank implementation.\n\n2. **Critical Path Score**: The longest path from a task to any sink (leaf task with no dependencies). Higher scores indicate tasks that block more downstream work. Computed via memoized depth-first search with cycle detection.\n\n3. **Topological Order** [1f]: When no cycles exist, provides a valid execution sequence where all dependencies come before their dependents.\n\n### Integration with Scoring\n\nThe analyzer returns `Insights` containing `NodeMetrics` for each task [1g]. These metrics feed into the overseer's recommendation scorer [1a], which combines them with mailbox message counts and recency to produce **weighted priority scores**. The graph metrics contribute 50% of the final score (30% critical path + 20% PageRank), ensuring that structurally important tasks rise to the top of recommendations.\n\n### Cycle Handling\n\nThe system gracefully handles **circular dependencies** using Tarjan's strongly connected components algorithm. When cycles exist, topological ordering is skipped, but PageRank and critical path scores are still computed (with cycle detection in the DFS preventing infinite loops)."
     },
     {
@@ -83,7 +83,7 @@
       "locations": [
         {
           "id": "2a",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/skills/todo/main.go",
+          "path": "skills/todo/main.go",
           "lineNumber": 492,
           "lineContent": "rec, err := scorer.Recommend(ctx, workspaceID, limit)",
           "title": "Invoke recommendation scorer",
@@ -91,7 +91,7 @@
         },
         {
           "id": "2b",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/analysis/overseer/scorer.go",
+          "path": "internal/analysis/overseer/scorer.go",
           "lineNumber": 90,
           "lineContent": "analyzer := tasksgraph.NewAnalyzer()",
           "title": "Create graph analyzer instance",
@@ -99,7 +99,7 @@
         },
         {
           "id": "2c",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/analysis/overseer/scorer.go",
+          "path": "internal/analysis/overseer/scorer.go",
           "lineNumber": 103,
           "lineContent": "taskMailCounts := s.getTaskMailCounts(ctx, workspaceID, pending)",
           "title": "Retrieve mailbox message counts",
@@ -107,7 +107,7 @@
         },
         {
           "id": "2d",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/analysis/overseer/scorer.go",
+          "path": "internal/analysis/overseer/scorer.go",
           "lineNumber": 139,
           "lineContent": "normCritPath = float64(node.CriticalPathScore) / maxCritPath",
           "title": "Normalize critical path score",
@@ -115,7 +115,7 @@
         },
         {
           "id": "2e",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/analysis/overseer/scorer.go",
+          "path": "internal/analysis/overseer/scorer.go",
           "lineNumber": 166,
           "lineContent": "score := WeightCriticalPath*normCritPath + WeightPageRank*normPageRank + WeightAdminMail*normAdmin + WeightOverseerMail*normOverseer + WeightRecency*recencyFactor",
           "title": "Compute weighted score",
@@ -123,7 +123,7 @@
         },
         {
           "id": "2f",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/analysis/overseer/scorer.go",
+          "path": "internal/analysis/overseer/scorer.go",
           "lineNumber": 190,
           "lineContent": "sort.Slice(scores, func(i, j int) bool { return scores[i].Score \u003e scores[j].Score })",
           "title": "Sort by score descending",
@@ -131,14 +131,14 @@
         },
         {
           "id": "2g",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/analysis/overseer/scorer.go",
+          "path": "internal/analysis/overseer/scorer.go",
           "lineNumber": 208,
           "lineContent": "rec.TopRecommended = \u0026scores[0]",
           "title": "Set top recommendation",
           "description": "Returns highest-scored task as top recommendation"
         }
       ],
-      "traceTextDiagram": "Overseer Recommendation Scoring Flow\n├── Skills Layer (todo skill)\n│   └── scorer.Recommend() invocation \u003c-- 2a\n│\n└── Overseer Scorer (internal/analysis/overseer)\n    ├── Initialize analyzer \u003c-- 2b\n    │   └── tasksgraph.NewAnalyzer() \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/analysis/overseer/scorer.go:90\n    │\n    ├── Analyze graph\n    │   └── analyzer.Analyze(pending, ws) \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/analysis/overseer/scorer.go:91\n    │       └── [returns NodeMetrics with PageRank,\n    │            critical paths, degrees]\n    │\n    ├── Get mailbox counts \u003c-- 2c\n    │   └── s.getTaskMailCounts() \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/analysis/overseer/scorer.go:103\n    │       └── boardStore.CountMessagesByTask() \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/analysis/overseer/scorer.go:230\n    │           └── [returns admin, overseer, total]\n    │\n    ├── Normalize metrics\n    │   ├── Normalize critical path (0-1) \u003c-- 2d\n    │   ├── Normalize PageRank (0-1) \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/analysis/overseer/scorer.go:145\n    │   ├── Normalize mail counts (0-1) \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/analysis/overseer/scorer.go:159\n    │   └── Compute recency factor \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/analysis/overseer/scorer.go:154\n    │\n    ├── Apply scoring formula \u003c-- 2e\n    │   └── 30% critPath + 20% pageRank +\n    │       25% adminMail + 15% overseerMail +\n    │       10% recency\n    │\n    ├── Sort by score descending \u003c-- 2f\n    │\n    └── Set top recommendation \u003c-- 2g\n        └── return Recommendation \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/analysis/overseer/scorer.go:211",
+      "traceTextDiagram": "Overseer Recommendation Scoring Flow\n├── Skills Layer (todo skill)\n│   └── scorer.Recommend() invocation \u003c-- 2a\n│\n└── Overseer Scorer (internal/analysis/overseer)\n    ├── Initialize analyzer \u003c-- 2b\n    │   └── tasksgraph.NewAnalyzer() \u003c-- internal/analysis/overseer/scorer.go:90\n    │\n    ├── Analyze graph\n    │   └── analyzer.Analyze(pending, ws) \u003c-- internal/analysis/overseer/scorer.go:91\n    │       └── [returns NodeMetrics with PageRank,\n    │            critical paths, degrees]\n    │\n    ├── Get mailbox counts \u003c-- 2c\n    │   └── s.getTaskMailCounts() \u003c-- internal/analysis/overseer/scorer.go:103\n    │       └── boardStore.CountMessagesByTask() \u003c-- internal/analysis/overseer/scorer.go:230\n    │           └── [returns admin, overseer, total]\n    │\n    ├── Normalize metrics\n    │   ├── Normalize critical path (0-1) \u003c-- 2d\n    │   ├── Normalize PageRank (0-1) \u003c-- internal/analysis/overseer/scorer.go:145\n    │   ├── Normalize mail counts (0-1) \u003c-- internal/analysis/overseer/scorer.go:159\n    │   └── Compute recency factor \u003c-- internal/analysis/overseer/scorer.go:154\n    │\n    ├── Apply scoring formula \u003c-- 2e\n    │   └── 30% critPath + 20% pageRank +\n    │       25% adminMail + 15% overseerMail +\n    │       10% recency\n    │\n    ├── Sort by score descending \u003c-- 2f\n    │\n    └── Set top recommendation \u003c-- 2g\n        └── return Recommendation \u003c-- internal/analysis/overseer/scorer.go:211",
       "traceGuide": "## Motivation\n\nIn a multi-agent task management system, agents need to know **which task to work on next**. With dozens of pending tasks that have complex dependency relationships, simply picking the oldest or newest task is insufficient. The system needs to consider:\n\n- **Dependency blocking**: Tasks that block many others should be prioritized\n- **Graph centrality**: Tasks that are central to the dependency graph are more important\n- **Human attention**: When admins or the overseer send messages about a task, it needs urgent attention\n- **Staleness**: Recently updated tasks shouldn't be immediately re-prioritized\n\nThe **overseer scorer** [2a] solves this by computing a weighted score that combines graph analysis with mailbox state to produce ranked task recommendations.\n\n## Details\n\n### Scoring Formula\n\nThe scorer applies a **five-factor weighted formula** [2e]:\n- **30% Critical Path Score**: Longest dependency chain from this task to any leaf\n- **20% PageRank**: Graph centrality (tasks depended upon by many others rank higher)\n- **25% Admin Messages**: Unread messages from human administrators\n- **15% Overseer Messages**: Unread messages from the system overseer\n- **10% Recency Factor**: `1 / (1 + days_since_update)` to avoid stale tasks\n\n### Execution Flow\n\n1. **Graph Analysis** [2b]: The scorer instantiates a `tasksgraph.Analyzer` which builds a directed graph where edges represent dependencies (A→B means \"A depends on B\")\n\n2. **Metric Computation**: The analyzer computes PageRank using gonum's implementation with damping factor 0.85, and critical path scores via memoized DFS\n\n3. **Mailbox Integration** [2c]: The scorer queries the blackboard store to count unread messages per task, categorized by sender type (admin vs overseer)\n\n4. **Normalization** [2d]: All metrics are normalized to 0-1 range by dividing by the maximum value in the current task set, preventing score inflation\n\n5. **Scoring \u0026 Ranking** [2f]: Each task receives a weighted score, tasks are sorted descending, and the top recommendation is returned [2g]\n\n### Key Design Decisions\n\n**Normalization prevents unbounded scores**: Without normalizing mail counts, a task with 100 unread messages would dominate the score regardless of graph importance. By normalizing to the max in the current set, all factors contribute proportionally.\n\n**Separate admin/overseer weights**: Admin messages (25%) carry more weight than overseer messages (15%) because human attention signals are considered more critical than automated system notifications.\n\n**Critical path prioritization**: The 30% weight on critical path ensures that **blocking tasks** (those that prevent other work) naturally rise to the top of recommendations."
     },
     {
@@ -148,7 +148,7 @@
       "locations": [
         {
           "id": "3a",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/analysis/overseer/scorer.go",
+          "path": "internal/analysis/overseer/scorer.go",
           "lineNumber": 230,
           "lineContent": "admin, overseerCnt, total, err := s.boardStore.CountMessagesByTask(ctx, workspaceID, t.ID)",
           "title": "Query message counts per task",
@@ -156,7 +156,7 @@
         },
         {
           "id": "3b",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/storage/blackboard/board_store.go",
+          "path": "internal/storage/blackboard/board_store.go",
           "lineNumber": 486,
           "lineContent": "rows, err := s.db.QueryContext(ctx, `SELECT sender FROM board_messages WHERE workspace_id = ? AND task_id = ? AND status IN (?, ?)`, workspaceID, taskID, agent.BoardMessageStatusUnread, agent.BoardMessageStatusSurfaced)",
           "title": "Execute message count query",
@@ -164,7 +164,7 @@
         },
         {
           "id": "3c",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/storage/blackboard/board_store.go",
+          "path": "internal/storage/blackboard/board_store.go",
           "lineNumber": 503,
           "lineContent": "if agent.IsAdminSender(sender) { admin++ } else if agent.IsOverseerSender(sender) { overseer++ }",
           "title": "Classify sender types",
@@ -172,14 +172,14 @@
         },
         {
           "id": "3d",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/storage/blackboard/board_store.go",
+          "path": "internal/storage/blackboard/board_store.go",
           "lineNumber": 509,
           "lineContent": "return admin, overseer, total, nil",
           "title": "Return categorized counts",
           "description": "Returns separate counts for admin, overseer, and total unread messages"
         }
       ],
-      "traceTextDiagram": "Mailbox Message Counting for Task Scoring\n└── Overseer Scorer (scorer.go)\n    └── getTaskMailCounts() iteration \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/analysis/overseer/scorer.go:229\n        └── CountMessagesByTask() call \u003c-- 3a\n            └── BoardStore (board_store.go)\n                ├── Query board_messages table \u003c-- 3b\n                │   └── Filter: workspace + task + unread\n                └── Process results loop \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/blackboard/board_store.go:497\n                    ├── Classify sender type \u003c-- 3c\n                    │   ├── IsAdminSender() check \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/blackboard/board_store.go:503\n                    │   └── IsOverseerSender() check \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/blackboard/board_store.go:505\n                    └── Return counts \u003c-- 3d\n                        └── (admin, overseer, total)",
+      "traceTextDiagram": "Mailbox Message Counting for Task Scoring\n└── Overseer Scorer (scorer.go)\n    └── getTaskMailCounts() iteration \u003c-- internal/analysis/overseer/scorer.go:229\n        └── CountMessagesByTask() call \u003c-- 3a\n            └── BoardStore (board_store.go)\n                ├── Query board_messages table \u003c-- 3b\n                │   └── Filter: workspace + task + unread\n                └── Process results loop \u003c-- internal/storage/blackboard/board_store.go:497\n                    ├── Classify sender type \u003c-- 3c\n                    │   ├── IsAdminSender() check \u003c-- internal/storage/blackboard/board_store.go:503\n                    │   └── IsOverseerSender() check \u003c-- internal/storage/blackboard/board_store.go:505\n                    └── Return counts \u003c-- 3d\n                        └── (admin, overseer, total)",
       "traceGuide": "## Motivation\n\nThe overseer recommendation system needs to **prioritize tasks based on human attention signals**. When admins or the overseer system send messages about specific tasks, those tasks should be surfaced higher in recommendations. The mailbox message counting system [3a] solves this by **quantifying unread messages per task**, broken down by sender type (admin vs overseer), which then feeds into the weighted scoring formula that determines task priority.\n\n## Details\n\n### Message Query and Classification\n\nThe `CountMessagesByTask` method [3b] queries the `board_messages` table for a specific workspace and task, filtering for messages with status `unread` or `surfaced`. This captures messages that haven't been explicitly acknowledged by agents.\n\nThe query returns sender IDs, which are then **classified into three categories** [3c]:\n- **Admin messages** (weight: 25%) - identified by sender prefix `actor:admin:` or exact match `admin`\n- **Overseer messages** (weight: 15%) - identified by sender `actor:system:overseer`\n- **Other messages** - counted in total but not separately weighted\n\n### Integration with Scoring\n\nThe scorer iterates through all pending tasks [3a], calling `CountMessagesByTask` for each one. The returned counts [3d] are normalized (0-1 range) and multiplied by their respective weights before being combined with graph metrics (PageRank, critical path) and recency factors to produce the final task score.\n\nThis design ensures that **human intervention signals** (admin messages) have the strongest impact on task prioritization, followed by system-level coordination (overseer messages), allowing the recommendation system to respond to real-time communication patterns."
     },
     {
@@ -189,7 +189,7 @@
       "locations": [
         {
           "id": "4a",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/skills/todo/main.go",
+          "path": "skills/todo/main.go",
           "lineNumber": 2024,
           "lineContent": "if err := store.SetPageRanks(ctx, ranks); err != nil {",
           "title": "Persist PageRank scores",
@@ -197,7 +197,7 @@
         },
         {
           "id": "4b",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/storage/tasks/store.go",
+          "path": "internal/storage/tasks/store.go",
           "lineNumber": 665,
           "lineContent": "tx, err := s.db.BeginTx(ctx, nil)",
           "title": "Begin transaction",
@@ -205,7 +205,7 @@
         },
         {
           "id": "4c",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/storage/tasks/store.go",
+          "path": "internal/storage/tasks/store.go",
           "lineNumber": 673,
           "lineContent": "stmt, err := tx.PrepareContext(ctx, `UPDATE tasks SET pagerank = ? WHERE id = ?`)",
           "title": "Prepare update statement",
@@ -213,7 +213,7 @@
         },
         {
           "id": "4d",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/storage/tasks/store.go",
+          "path": "internal/storage/tasks/store.go",
           "lineNumber": 680,
           "lineContent": "if _, err := stmt.ExecContext(ctx, rank, id); err != nil {",
           "title": "Execute update for each task",
@@ -221,14 +221,14 @@
         },
         {
           "id": "4e",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/storage/tasks/store.go",
+          "path": "internal/storage/tasks/store.go",
           "lineNumber": 685,
           "lineContent": "if err := tx.Commit(); err != nil {",
           "title": "Commit transaction",
           "description": "Atomically commits all PageRank updates to database"
         }
       ],
-      "traceTextDiagram": "PageRank Persistence Flow\n├── Todo Skill (skills/todo/main.go)\n│   ├── updatePageRanksInBackground() \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/todo/main.go:2000\n│   │   ├── Compute graph insights \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/todo/main.go:2012\n│   │   ├── Build ranks map \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/todo/main.go:2018\n│   │   └── store.SetPageRanks() \u003c-- 4a\n│   └── Background goroutine trigger\n└── Task Store (internal/storage/tasks/store.go)\n    └── SetPageRanks(ctx, ranks) \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/tasks/store.go:660\n        ├── tx.BeginTx() \u003c-- 4b\n        ├── tx.PrepareContext(UPDATE) \u003c-- 4c\n        ├── Loop over ranks map \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/tasks/store.go:679\n        │   └── stmt.ExecContext(rank, id) \u003c-- 4d\n        └── tx.Commit() \u003c-- 4e",
+      "traceTextDiagram": "PageRank Persistence Flow\n├── Todo Skill (skills/todo/main.go)\n│   ├── updatePageRanksInBackground() \u003c-- skills/todo/main.go:2000\n│   │   ├── Compute graph insights \u003c-- skills/todo/main.go:2012\n│   │   ├── Build ranks map \u003c-- skills/todo/main.go:2018\n│   │   └── store.SetPageRanks() \u003c-- 4a\n│   └── Background goroutine trigger\n└── Task Store (internal/storage/tasks/store.go)\n    └── SetPageRanks(ctx, ranks) \u003c-- internal/storage/tasks/store.go:660\n        ├── tx.BeginTx() \u003c-- 4b\n        ├── tx.PrepareContext(UPDATE) \u003c-- 4c\n        ├── Loop over ranks map \u003c-- internal/storage/tasks/store.go:679\n        │   └── stmt.ExecContext(rank, id) \u003c-- 4d\n        └── tx.Commit() \u003c-- 4e",
       "traceGuide": "## Motivation\n\nTask graphs in agentctl need **PageRank scores** to help prioritize work. When tasks have complex dependency relationships (A depends on B, C depends on A and D, etc.), the system needs to identify which tasks are most \"central\" or \"important\" based on how many other tasks depend on them. PageRank, borrowed from Google's web page ranking algorithm, provides exactly this metric—tasks that many other tasks depend on get higher scores.\n\nHowever, computing PageRank is expensive (it requires building a graph and running iterative algorithms), so the scores must be **persisted to the database** [4a] rather than recomputed on every query. This trace shows how computed PageRank values flow from the graph analysis layer into the SQLite task database.\n\n## Details\n\n### Background Computation\n\nThe `updatePageRanksInBackground()` function in the todo skill runs the PageRank computation asynchronously. It first calls the tasksgraph analyzer to compute metrics for all tasks in the workspace, then extracts just the PageRank scores into a map of `taskID -\u003e score` [4a].\n\n### Transactional Bulk Update\n\nThe `SetPageRanks()` method [4b] performs a **bulk update** using a SQLite transaction to ensure atomicity. It begins a transaction [4b], prepares a single UPDATE statement [4c], then executes it once per task [4d]. This prepared statement approach is more efficient than individual updates because the SQL is parsed only once.\n\nThe transaction ensures that either **all PageRank scores are updated or none are**—there's no partial state where some tasks have fresh scores and others have stale ones [4e].\n\n### Database Schema\n\nThe `tasks` table has a `pagerank` column (type REAL) that stores the computed score. This column is queried later by the overseer scorer to generate task recommendations, where PageRank contributes 20% of the final weighted score."
     },
     {
@@ -238,7 +238,7 @@
       "locations": [
         {
           "id": "5a",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/cmd/agentctl/cmd/todo.go",
+          "path": "cmd/agentctl/cmd/todo.go",
           "lineNumber": 244,
           "lineContent": "cmd := \u0026cobra.Command{ Use: \"recommend\", Short: \"Recommend next tasks based on graph metrics and mailbox state\",",
           "title": "Define CLI command",
@@ -246,7 +246,7 @@
         },
         {
           "id": "5b",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/cmd/agentctl/cmd/todo.go",
+          "path": "cmd/agentctl/cmd/todo.go",
           "lineNumber": 263,
           "lineContent": "return runTodoSkill(cmd, payload)",
           "title": "Execute todo skill",
@@ -254,7 +254,7 @@
         },
         {
           "id": "5c",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/skills/todo/main.go",
+          "path": "skills/todo/main.go",
           "lineNumber": 491,
           "lineContent": "scorer := overseer.NewScorer(store, boardStore)",
           "title": "Instantiate scorer",
@@ -262,7 +262,7 @@
         },
         {
           "id": "5d",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/skills/todo/main.go",
+          "path": "skills/todo/main.go",
           "lineNumber": 492,
           "lineContent": "rec, err := scorer.Recommend(ctx, workspaceID, limit)",
           "title": "Generate recommendations",
@@ -270,14 +270,14 @@
         },
         {
           "id": "5e",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/skills/todo/main.go",
+          "path": "skills/todo/main.go",
           "lineNumber": 496,
           "lineContent": "return skillout.Emit(rc, command, rec)",
           "title": "Emit recommendation output",
           "description": "Returns Recommendation struct with scored tasks to CLI"
         }
       ],
-      "traceTextDiagram": "CLI Command Execution Flow\n├── agentctl todo recommend command \u003c-- 5a\n│   └── RunE handler \u003c-- /Users/jkatigbak/repos/personal/agentctl/cmd/agentctl/cmd/todo.go:253\n│       └── runTodoSkill(cmd, payload) \u003c-- 5b\n│           └── Execute todo skill binary\n│               └── Todo skill main() \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/todo/main.go:72\n│                   ├── Parse operation payload \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/todo/main.go:79\n│                   ├── Open task store \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/todo/main.go:88\n│                   ├── Open board store \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/todo/main.go:485\n│                   └── Handle recommend operation \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/todo/main.go:477\n│                       ├── NewScorer(store, board) \u003c-- 5c\n│                       ├── scorer.Recommend() \u003c-- 5d\n│                       │   └── [See Trace 2]\n│                       └── skillout.Emit(rec) \u003c-- 5e\n│                           └── Return JSON to CLI\n└── CLI displays recommendations",
+      "traceTextDiagram": "CLI Command Execution Flow\n├── agentctl todo recommend command \u003c-- 5a\n│   └── RunE handler \u003c-- cmd/agentctl/cmd/todo.go:253\n│       └── runTodoSkill(cmd, payload) \u003c-- 5b\n│           └── Execute todo skill binary\n│               └── Todo skill main() \u003c-- skills/todo/main.go:72\n│                   ├── Parse operation payload \u003c-- skills/todo/main.go:79\n│                   ├── Open task store \u003c-- skills/todo/main.go:88\n│                   ├── Open board store \u003c-- skills/todo/main.go:485\n│                   └── Handle recommend operation \u003c-- skills/todo/main.go:477\n│                       ├── NewScorer(store, board) \u003c-- 5c\n│                       ├── scorer.Recommend() \u003c-- 5d\n│                       │   └── [See Trace 2]\n│                       └── skillout.Emit(rec) \u003c-- 5e\n│                           └── Return JSON to CLI\n└── CLI displays recommendations",
       "traceGuide": "## Motivation\n\nWhen managing complex projects with many interdependent tasks, users need to know **which task to work on next**. A naive approach (e.g., oldest first, or manual selection) fails to account for:\n\n1. **Dependency blocking**: Some tasks block many others (high critical path score)\n2. **Importance signals**: Admin or overseer messages indicate urgent attention needed\n3. **Graph centrality**: Tasks with many dependents are more important (PageRank)\n4. **Staleness**: Recently updated tasks may need less immediate attention\n\nThe **recommendation system** solves this by computing a weighted priority score that combines graph topology analysis with communication signals, then surfaces the highest-priority tasks to the user.\n\n## Details\n\n### Command Entry Point\n\nThe user invokes `agentctl todo recommend` [5a], which triggers a Cobra command handler [5b] that delegates to the `todo` skill binary with a JSON payload specifying the `recommend` operation.\n\n### Skill Execution\n\nThe todo skill's main function [5c] opens two storage backends:\n- **Task store**: SQLite database containing tasks and their dependencies\n- **Board store**: SQLite database containing mailbox messages [5c]\n\nIt then instantiates an `overseer.Scorer` [5c] and calls `Recommend()` [5d].\n\n### Scoring Algorithm\n\nThe scorer performs these steps:\n\n1. **Graph analysis**: Invokes `tasksgraph.Analyzer` to compute PageRank, critical path scores, and topological ordering from the task dependency graph\n2. **Message counting**: Queries the board store for unread messages per task, categorized by sender (admin vs. overseer)\n3. **Normalization**: Scales all metrics to 0-1 range to prevent any single factor from dominating\n4. **Weighted scoring**: Applies the formula [2e]:\n   - 30% critical path (longest dependency chain)\n   - 20% PageRank (graph centrality)\n   - 25% admin messages (human attention signals)\n   - 15% overseer messages (system coordination signals)\n   - 10% recency (inverse of days since last update)\n5. **Sorting**: Orders tasks by final score descending\n\n### Output\n\nThe skill emits a `Recommendation` struct [5e] containing:\n- **TopRecommended**: The highest-scored task\n- **Tasks**: Array of scored tasks with breakdown showing contribution of each factor\n- **TotalPending**: Count of incomplete tasks\n- **HasCycles**: Whether dependency cycles were detected\n\nThe CLI receives this JSON and displays it to the user, who can then act on the top recommendation with confidence that it accounts for both structural importance and communication urgency."
     },
     {
@@ -287,7 +287,7 @@
       "locations": [
         {
           "id": "6a",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/analysis/tasksgraph/graph.go",
+          "path": "internal/analysis/tasksgraph/graph.go",
           "lineNumber": 117,
           "lineContent": "criticalPaths := computeCriticalPaths(g, nodeToID)",
           "title": "Invoke critical path computation",
@@ -295,7 +295,7 @@
         },
         {
           "id": "6b",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/analysis/tasksgraph/graph.go",
+          "path": "internal/analysis/tasksgraph/graph.go",
           "lineNumber": 165,
           "lineContent": "var dfs func(n int64) int",
           "title": "Define DFS closure",
@@ -303,7 +303,7 @@
         },
         {
           "id": "6c",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/analysis/tasksgraph/graph.go",
+          "path": "internal/analysis/tasksgraph/graph.go",
           "lineNumber": 172,
           "lineContent": "if visiting[n] { return 0 }",
           "title": "Detect cycles",
@@ -311,7 +311,7 @@
         },
         {
           "id": "6d",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/analysis/tasksgraph/graph.go",
+          "path": "internal/analysis/tasksgraph/graph.go",
           "lineNumber": 179,
           "lineContent": "successors := g.From(n)",
           "title": "Get dependency successors",
@@ -319,7 +319,7 @@
         },
         {
           "id": "6e",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/analysis/tasksgraph/graph.go",
+          "path": "internal/analysis/tasksgraph/graph.go",
           "lineNumber": 189,
           "lineContent": "pathLen := dfs(succ.ID()) + 1",
           "title": "Recurse and increment path",
@@ -327,14 +327,14 @@
         },
         {
           "id": "6f",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/analysis/tasksgraph/graph.go",
+          "path": "internal/analysis/tasksgraph/graph.go",
           "lineNumber": 195,
           "lineContent": "memo[n] = maxPath",
           "title": "Memoize result",
           "description": "Caches longest path for this node to avoid recomputation"
         }
       ],
-      "traceTextDiagram": "Critical Path Calculation Flow\n├── Analyzer.Analyze() invokes computation \u003c-- 6a\n│   └── computeCriticalPaths(g, nodeToID) \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/analysis/tasksgraph/graph.go:160\n│       ├── Initialize memo \u0026 visiting maps \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/analysis/tasksgraph/graph.go:161\n│       ├── Define recursive DFS closure \u003c-- 6b\n│       │   ├── Check memo cache (return if found) \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/analysis/tasksgraph/graph.go:167\n│       │   ├── Cycle detection check \u003c-- 6c\n│       │   ├── Get outgoing edges (dependencies) \u003c-- 6d\n│       │   ├── If sink node (no deps): return 0 \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/analysis/tasksgraph/graph.go:180\n│       │   ├── For each successor: \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/analysis/tasksgraph/graph.go:187\n│       │   │   └── Recurse: dfs(succ) + 1 \u003c-- 6e\n│       │   ├── Take max of all paths \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/analysis/tasksgraph/graph.go:190\n│       │   └── Store in memo \u003c-- 6f\n│       └── Call dfs() for each node \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/analysis/tasksgraph/graph.go:199\n│           └── Build result map[taskID]int \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/analysis/tasksgraph/graph.go:203\n└── Return critical path scores \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/analysis/tasksgraph/graph.go:206",
+      "traceTextDiagram": "Critical Path Calculation Flow\n├── Analyzer.Analyze() invokes computation \u003c-- 6a\n│   └── computeCriticalPaths(g, nodeToID) \u003c-- internal/analysis/tasksgraph/graph.go:160\n│       ├── Initialize memo \u0026 visiting maps \u003c-- internal/analysis/tasksgraph/graph.go:161\n│       ├── Define recursive DFS closure \u003c-- 6b\n│       │   ├── Check memo cache (return if found) \u003c-- internal/analysis/tasksgraph/graph.go:167\n│       │   ├── Cycle detection check \u003c-- 6c\n│       │   ├── Get outgoing edges (dependencies) \u003c-- 6d\n│       │   ├── If sink node (no deps): return 0 \u003c-- internal/analysis/tasksgraph/graph.go:180\n│       │   ├── For each successor: \u003c-- internal/analysis/tasksgraph/graph.go:187\n│       │   │   └── Recurse: dfs(succ) + 1 \u003c-- 6e\n│       │   ├── Take max of all paths \u003c-- internal/analysis/tasksgraph/graph.go:190\n│       │   └── Store in memo \u003c-- 6f\n│       └── Call dfs() for each node \u003c-- internal/analysis/tasksgraph/graph.go:199\n│           └── Build result map[taskID]int \u003c-- internal/analysis/tasksgraph/graph.go:203\n└── Return critical path scores \u003c-- internal/analysis/tasksgraph/graph.go:206",
       "traceGuide": "## Motivation\n\nTask management systems need to answer: **\"What should I work on next?\"** When you have dozens of tasks with complex dependencies, this becomes non-trivial. A task blocking many others is more urgent than an isolated task. A task with admin attention is more important than one without feedback.\n\nThe **critical path score** solves this by computing the **longest dependency chain** from each task to completion [6a]. A task with a critical path score of 5 means there are 5 dependent tasks waiting on it—making it a high-priority blocker. This metric, combined with PageRank and message counts, feeds into the overseer's weighted recommendation system [2e].\n\n## Details\n\nThe algorithm uses **memoized depth-first search** to compute critical paths efficiently [6b]. Starting from any task node, it recursively explores all dependencies (outgoing edges in the graph) [6d]. \n\n**Sink nodes** (tasks with no dependencies) have a critical path score of 0 [6f]. For other tasks, the score is `1 + max(critical_path_of_dependencies)` [6e]. This means a task's score reflects the longest chain of work beneath it.\n\n**Cycle detection** is crucial [6c]—if a task depends on itself transitively, the algorithm returns 0 to avoid infinite recursion. The `visiting` map tracks nodes currently in the DFS stack to detect these cycles.\n\n**Memoization** prevents redundant computation [6f]. Once a node's critical path is calculated, it's cached in the `memo` map. This is essential because tasks can have multiple dependents, and without caching, the algorithm would recalculate the same paths exponentially.\n\nThe final result is a map from task ID to critical path score, which the overseer normalizes to 0-1 and weights at 30% in the final recommendation score [2d]."
     },
     {
@@ -344,7 +344,7 @@
       "locations": [
         {
           "id": "7a",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/test/e2e/multiagent_workflow_test.go",
+          "path": "test/e2e/multiagent_workflow_test.go",
           "lineNumber": 96,
           "lineContent": "analyzer := tasksgraph.NewAnalyzer()",
           "title": "Create analyzer in test",
@@ -352,7 +352,7 @@
         },
         {
           "id": "7b",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/test/e2e/multiagent_workflow_test.go",
+          "path": "test/e2e/multiagent_workflow_test.go",
           "lineNumber": 97,
           "lineContent": "insights, err := analyzer.Analyze(allTasks, testWorkspaceID)",
           "title": "Analyze task graph",
@@ -360,7 +360,7 @@
         },
         {
           "id": "7c",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/test/e2e/multiagent_workflow_test.go",
+          "path": "test/e2e/multiagent_workflow_test.go",
           "lineNumber": 148,
           "lineContent": "err = boardStore.SendMessage(ctx, \u0026agent.BoardMessage{ Sender: \"actor:system:overseer\",",
           "title": "Send overseer message",
@@ -368,7 +368,7 @@
         },
         {
           "id": "7d",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/test/e2e/multiagent_workflow_test.go",
+          "path": "test/e2e/multiagent_workflow_test.go",
           "lineNumber": 245,
           "lineContent": "scorer := overseer.NewScorer(taskStore, boardStore)",
           "title": "Create scorer in test",
@@ -376,7 +376,7 @@
         },
         {
           "id": "7e",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/test/e2e/multiagent_workflow_test.go",
+          "path": "test/e2e/multiagent_workflow_test.go",
           "lineNumber": 246,
           "lineContent": "rec, err := scorer.Recommend(ctx, testWorkspaceID, 10)",
           "title": "Generate recommendations",
@@ -384,14 +384,14 @@
         },
         {
           "id": "7f",
-          "path": "/Users/jkatigbak/repos/personal/agentctl/test/e2e/multiagent_workflow_test.go",
+          "path": "test/e2e/multiagent_workflow_test.go",
           "lineNumber": 277,
           "lineContent": "if taskCScore.UnreadAdmin != 1 { t.Errorf(\"expected Task C to have 1 unread admin message, got %d\", taskCScore.UnreadAdmin) }",
           "title": "Validate message impact",
           "description": "Verifies admin message correctly boosts task score in recommendations"
         }
       ],
-      "traceTextDiagram": "E2E Test: Full Workflow Validation \u003c-- /Users/jkatigbak/repos/personal/agentctl/test/e2e/multiagent_workflow_test.go:27\n├── Test Setup Phase\n│   ├── Create test tasks with dependencies \u003c-- /Users/jkatigbak/repos/personal/agentctl/test/e2e/multiagent_workflow_test.go:55\n│   └── Initialize stores (task, board) \u003c-- /Users/jkatigbak/repos/personal/agentctl/test/e2e/multiagent_workflow_test.go:31\n├── Graph Analysis Phase\n│   ├── analyzer.NewAnalyzer() \u003c-- 7a\n│   └── analyzer.Analyze(allTasks) \u003c-- 7b\n│       ├── Build directed graph \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/analysis/tasksgraph/graph.go:74\n│       ├── Compute PageRank \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/analysis/tasksgraph/graph.go:98\n│       └── Calculate critical paths \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/analysis/tasksgraph/graph.go:117\n├── Mailbox Message Phase\n│   └── boardStore.SendMessage() \u003c-- 7c\n│       └── Insert overseer message to DB \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/blackboard/board_store.go:79\n├── Recommendation Generation Phase\n│   ├── overseer.NewScorer() \u003c-- 7d\n│   └── scorer.Recommend() \u003c-- 7e\n│       ├── Get graph insights \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/analysis/overseer/scorer.go:91\n│       ├── Count mailbox messages \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/analysis/overseer/scorer.go:103\n│       ├── Normalize \u0026 weight scores \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/analysis/overseer/scorer.go:166\n│       └── Sort by final score \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/analysis/overseer/scorer.go:190\n└── Validation Phase\n    └── Assert message impact on score \u003c-- 7f",
+      "traceTextDiagram": "E2E Test: Full Workflow Validation \u003c-- test/e2e/multiagent_workflow_test.go:27\n├── Test Setup Phase\n│   ├── Create test tasks with dependencies \u003c-- test/e2e/multiagent_workflow_test.go:55\n│   └── Initialize stores (task, board) \u003c-- test/e2e/multiagent_workflow_test.go:31\n├── Graph Analysis Phase\n│   ├── analyzer.NewAnalyzer() \u003c-- 7a\n│   └── analyzer.Analyze(allTasks) \u003c-- 7b\n│       ├── Build directed graph \u003c-- internal/analysis/tasksgraph/graph.go:74\n│       ├── Compute PageRank \u003c-- internal/analysis/tasksgraph/graph.go:98\n│       └── Calculate critical paths \u003c-- internal/analysis/tasksgraph/graph.go:117\n├── Mailbox Message Phase\n│   └── boardStore.SendMessage() \u003c-- 7c\n│       └── Insert overseer message to DB \u003c-- internal/storage/blackboard/board_store.go:79\n├── Recommendation Generation Phase\n│   ├── overseer.NewScorer() \u003c-- 7d\n│   └── scorer.Recommend() \u003c-- 7e\n│       ├── Get graph insights \u003c-- internal/analysis/overseer/scorer.go:91\n│       ├── Count mailbox messages \u003c-- internal/analysis/overseer/scorer.go:103\n│       ├── Normalize \u0026 weight scores \u003c-- internal/analysis/overseer/scorer.go:166\n│       └── Sort by final score \u003c-- internal/analysis/overseer/scorer.go:190\n└── Validation Phase\n    └── Assert message impact on score \u003c-- 7f",
       "traceGuide": "## Motivation\n\nIn a multi-agent task management system, agents need to know **which task to work on next**. With dozens of pending tasks that have complex dependency relationships, simply picking the oldest or newest task is insufficient. The system needs to consider:\n\n- **Task dependencies**: Some tasks block many others (critical path)\n- **Task importance**: Some tasks are more central to the workflow (PageRank)\n- **Human attention**: Admin and overseer messages signal urgency\n- **Staleness**: Recently updated tasks may need less attention\n\nThe **overseer recommendation scorer** [2e] solves this by combining graph analysis with mailbox state to produce a weighted priority score for each task.\n\n## Details\n\n### Graph Analysis Foundation\n\nThe system builds a **directed dependency graph** where an edge from task A to task B means \"A depends on B\" [1c]. The `tasksgraph.Analyzer` [7a] computes three key metrics:\n\n1. **PageRank** [1d]: Measures task centrality using the standard algorithm with damping factor 0.85\n2. **Critical Path Score** [1e]: Longest path from each task to any sink (tasks with no dependencies), computed via memoized DFS [6e]\n3. **Topological Order** [1f]: Valid execution sequence when no cycles exist\n\n### Mailbox Integration\n\nThe scorer queries the **blackboard message store** [3a] to count unread messages per task, categorized by sender type [3c]:\n- **Admin messages**: Direct human input (highest signal)\n- **Overseer messages**: System coordination signals\n- **Other messages**: General communication\n\n### Weighted Scoring Formula\n\nThe final score [2e] combines five normalized (0-1) components:\n- **30% Critical Path**: Tasks blocking more work score higher\n- **20% PageRank**: Central tasks in the dependency graph\n- **25% Admin Mail**: Human attention signals\n- **15% Overseer Mail**: System coordination signals  \n- **10% Recency**: Inverse of days since last update\n\nAll components are normalized to prevent unbounded score inflation, then sorted descending [2f] to produce the final recommendation list.\n\n### Persistence\n\nComputed PageRank scores are **persisted to the task database** [4c] via bulk transaction [4e], allowing the scores to be retrieved without recomputing the entire graph on every query.\n\n### End-to-End Flow\n\nThe CLI command `agentctl todo recommend` [5a] invokes the todo skill [5b], which instantiates the scorer [5c] with both task and board stores, generates recommendations [5d], and returns the sorted list [5e]. The E2E test [7a-7f] validates that overseer messages correctly boost task scores in the final recommendations."
     }
   ],

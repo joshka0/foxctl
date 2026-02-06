@@ -6,7 +6,7 @@ import (
 	"errors"
 	"fmt"
 
-	dstools "github.com/XiaoConstantine/dspy-go/pkg/tools"
+	tooling "github.com/jkatigb/agentctl/internal/tooling"
 	models "github.com/XiaoConstantine/mcp-go/pkg/model"
 
 	"github.com/jkatigb/agentctl/internal/domain/skill"
@@ -18,7 +18,7 @@ import (
 // registerSessionTools registers session retrieval tools.
 func (r *Registry) registerSessionTools() error {
 	// session.recall - semantic search over past sessions
-	recallTool := dstools.NewFuncTool(
+	recallTool := tooling.NewFuncTool(
 		"session.recall",
 		"Search past coding sessions for relevant context. Returns summaries, learnings, gotchas, and decisions from previous work. Use this to find what was done before on similar tasks.",
 		models.InputSchema{

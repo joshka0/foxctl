@@ -273,6 +273,7 @@ func TestConfig_LoadAndSave(t *testing.T) {
 	goWatcher := loaded.GetWatcher("go")
 	if goWatcher == nil {
 		t.Fatal("expected to find 'go' watcher")
+		return
 	}
 	if goWatcher.Command != "go test ./..." {
 		t.Errorf("Command = %q, want %q", goWatcher.Command, "go test ./...")

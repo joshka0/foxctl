@@ -127,6 +127,7 @@ func TestCursorPaginationNestedPaginationField(t *testing.T) {
 	}
 	if nextReq == nil {
 		t.Fatal("expected next request")
+		return
 	}
 	if got := nextReq.URL.Query().Get("cursor"); got != "nested-token" {
 		t.Fatalf("expected nested token, got %q", got)

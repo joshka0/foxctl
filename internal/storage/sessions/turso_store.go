@@ -16,6 +16,7 @@ import (
 
 	errs "github.com/jkatigb/agentctl/internal/platform/errors"
 	"github.com/jkatigb/agentctl/internal/platform/timeutil"
+	ws "github.com/jkatigb/agentctl/internal/platform/workspace"
 	"github.com/jkatigb/agentctl/internal/storage"
 	"github.com/jkatigb/agentctl/internal/storage/dbdriver"
 	"github.com/jkatigb/agentctl/internal/storage/sqlutil"
@@ -123,6 +124,7 @@ func migrateTursoWithDimensions(ctx context.Context, db *sql.DB, dimensions int)
 	sessionsQuery := fmt.Sprintf(`
 		CREATE TABLE IF NOT EXISTS sessions (
 			id TEXT PRIMARY KEY,
+			workspace_id TEXT NOT NULL DEFAULT '',
 			workspace_path TEXT NOT NULL,
 			project_name TEXT,
 			git_branch TEXT,
@@ -194,6 +196,7 @@ func migrateTursoWithDimensions(ctx context.Context, db *sql.DB, dimensions int)
 		column string
 		alter  string
 	}{
+		{"workspace_id", "ALTER TABLE sessions ADD COLUMN workspace_id TEXT NOT NULL DEFAULT ''"},
 		{"parent_session_id", "ALTER TABLE sessions ADD COLUMN parent_session_id TEXT"},
 		{"agent_id", "ALTER TABLE sessions ADD COLUMN agent_id TEXT NOT NULL DEFAULT 'agentctl'"},
 		{"agent_type", "ALTER TABLE sessions ADD COLUMN agent_type TEXT NOT NULL DEFAULT 'claude'"},
@@ -207,10 +210,12 @@ func migrateTursoWithDimensions(ctx context.Context, db *sql.DB, dimensions int)
 
 	// Create indexes
 	indexes := []string{
+		`CREATE INDEX IF NOT EXISTS idx_sessions_workspace_id ON sessions(workspace_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_sessions_workspace ON sessions(workspace_path)`,
 		`CREATE INDEX IF NOT EXISTS idx_sessions_started ON sessions(started_at DESC)`,
 		`CREATE INDEX IF NOT EXISTS idx_sessions_project ON sessions(project_name)`,
 		`CREATE INDEX IF NOT EXISTS idx_sessions_parent ON sessions(parent_session_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_sessions_workspace_id_agent ON sessions(workspace_id, agent_id, started_at DESC)`,
 		`CREATE INDEX IF NOT EXISTS idx_sessions_workspace_agent ON sessions(workspace_path, agent_id, started_at DESC)`,
 		`CREATE INDEX IF NOT EXISTS idx_sessions_status ON sessions(status)`,
 		`CREATE INDEX IF NOT EXISTS idx_sessions_content_hash ON sessions(content_hash)`,
@@ -393,6 +398,12 @@ func (s *TursoStore) Save(ctx context.Context, session Session) (Session, error)
 		session.Status = storage.SessionStatusOK
 	}
 
+	// Ensure workspace_id is populated for stable cross-machine lookups.
+	session.WorkspaceID = strings.TrimSpace(session.WorkspaceID)
+	if session.WorkspaceID == "" && session.WorkspacePath != "" {
+		session.WorkspaceID = ws.ID(session.WorkspacePath)
+	}
+
 	// Format JSON arrays
 	accomplishedJSON, _ := sqlutil.FormatJSON(session.Accomplished)
 	decisionsJSON, _ := sqlutil.FormatJSON(session.Decisions)
@@ -416,14 +427,15 @@ func (s *TursoStore) Save(ctx context.Context, session Session) (Session, error)
 		// Valid embedding - use vector query
 		query := fmt.Sprintf(`
 			INSERT INTO sessions (
-				id, workspace_path, project_name, git_branch, claude_version,
+				id, workspace_id, workspace_path, project_name, git_branch, claude_version,
 				started_at, ended_at, summary, accomplished, decisions, gotchas, user_insights,
 				tags, key_files, tools_pattern, message_count, user_turns,
 				tool_invocations, total_tokens, raw_jsonl_path, content_hash, embedding, embedding_model,
 				parent_session_id, agent_id, agent_type, status,
 				created_at, updated_at
-			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, vector('%s'), ?, ?, ?, ?, ?, ?, ?)
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, vector('%s'), ?, ?, ?, ?, ?, ?, ?)
 			ON CONFLICT(id) DO UPDATE SET
+				workspace_id = excluded.workspace_id,
 				workspace_path = excluded.workspace_path,
 				project_name = excluded.project_name,
 				git_branch = excluded.git_branch,
@@ -454,7 +466,7 @@ func (s *TursoStore) Save(ctx context.Context, session Session) (Session, error)
 		`, vectorStr)
 
 		_, err := s.db.ExecContext(ctx, query,
-			session.ID, session.WorkspacePath, session.ProjectName, session.GitBranch, session.ClaudeVersion,
+			session.ID, session.WorkspaceID, session.WorkspacePath, session.ProjectName, session.GitBranch, session.ClaudeVersion,
 			sqlutil.FormatTimestamp(session.StartedAt), sqlutil.FormatTimestamp(session.EndedAt),
 			session.Summary, accomplishedJSON, decisionsJSON, gotchasJSON, userInsightsJSON,
 			tagsJSON, keyFilesJSON, session.ToolsPattern, session.MessageCount, session.UserTurns,
@@ -468,14 +480,15 @@ func (s *TursoStore) Save(ctx context.Context, session Session) (Session, error)
 	} else {
 		_, err := s.db.ExecContext(ctx, `
 			INSERT INTO sessions (
-				id, workspace_path, project_name, git_branch, claude_version,
+				id, workspace_id, workspace_path, project_name, git_branch, claude_version,
 				started_at, ended_at, summary, accomplished, decisions, gotchas, user_insights,
 				tags, key_files, tools_pattern, message_count, user_turns,
 				tool_invocations, total_tokens, raw_jsonl_path, content_hash, embedding_model,
 				parent_session_id, agent_id, agent_type, status,
 				created_at, updated_at
-			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 			ON CONFLICT(id) DO UPDATE SET
+				workspace_id = excluded.workspace_id,
 				workspace_path = excluded.workspace_path,
 				project_name = excluded.project_name,
 				git_branch = excluded.git_branch,
@@ -502,7 +515,7 @@ func (s *TursoStore) Save(ctx context.Context, session Session) (Session, error)
 				agent_type = excluded.agent_type,
 				status = excluded.status,
 				updated_at = excluded.updated_at`,
-			session.ID, session.WorkspacePath, session.ProjectName, session.GitBranch, session.ClaudeVersion,
+			session.ID, session.WorkspaceID, session.WorkspacePath, session.ProjectName, session.GitBranch, session.ClaudeVersion,
 			sqlutil.FormatTimestamp(session.StartedAt), sqlutil.FormatTimestamp(session.EndedAt),
 			session.Summary, accomplishedJSON, decisionsJSON, gotchasJSON, userInsightsJSON,
 			tagsJSON, keyFilesJSON, session.ToolsPattern, session.MessageCount, session.UserTurns,
@@ -546,7 +559,7 @@ func float32frombits(b uint32) float32 {
 // Get retrieves a session by ID.
 func (s *TursoStore) Get(ctx context.Context, id string) (Session, error) {
 	row := s.db.QueryRowContext(ctx, `
-		SELECT id, workspace_path, project_name, git_branch, claude_version,
+		SELECT id, workspace_id, workspace_path, project_name, git_branch, claude_version,
 			started_at, ended_at, summary, accomplished, decisions, gotchas, user_insights,
 			tags, key_files, tools_pattern, message_count, user_turns,
 			tool_invocations, total_tokens, raw_jsonl_path, content_hash, embedding_model,
@@ -560,7 +573,7 @@ func (s *TursoStore) Get(ctx context.Context, id string) (Session, error) {
 // List returns sessions matching the filter options.
 func (s *TursoStore) List(ctx context.Context, opts ListOptions) ([]Session, error) {
 	query := `
-		SELECT id, workspace_path, project_name, git_branch, claude_version,
+		SELECT id, workspace_id, workspace_path, project_name, git_branch, claude_version,
 			started_at, ended_at, summary, accomplished, decisions, gotchas, user_insights,
 			tags, key_files, tools_pattern, message_count, user_turns,
 			tool_invocations, total_tokens, raw_jsonl_path, content_hash, embedding_model,
@@ -568,10 +581,24 @@ func (s *TursoStore) List(ctx context.Context, opts ListOptions) ([]Session, err
 			created_at, updated_at
 		FROM sessions WHERE 1=1`
 
+	workspaceID := strings.TrimSpace(opts.WorkspaceID)
+	workspacePath := strings.TrimSpace(opts.WorkspacePath)
+	if workspaceID == "" && workspacePath != "" {
+		workspaceID, workspacePath = resolveWorkspaceSelector(workspacePath)
+	}
+
 	var args []any
-	if opts.WorkspacePath != "" {
+	if workspaceID != "" {
+		if workspacePath != "" {
+			query += ` AND (workspace_id = ? OR (workspace_id = '' AND workspace_path = ?))`
+			args = append(args, workspaceID, workspacePath)
+		} else {
+			query += ` AND workspace_id = ?`
+			args = append(args, workspaceID)
+		}
+	} else if workspacePath != "" {
 		query += ` AND workspace_path = ?`
-		args = append(args, opts.WorkspacePath)
+		args = append(args, workspacePath)
 	}
 	if opts.ProjectName != "" {
 		query += ` AND project_name = ?`
@@ -623,7 +650,7 @@ func (s *TursoStore) Search(ctx context.Context, query string, limit int) ([]Ses
 	}
 
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, workspace_path, project_name, git_branch, claude_version,
+		SELECT id, workspace_id, workspace_path, project_name, git_branch, claude_version,
 			started_at, ended_at, summary, accomplished, decisions, gotchas, user_insights,
 			tags, key_files, tools_pattern, message_count, user_turns,
 			tool_invocations, total_tokens, raw_jsonl_path, content_hash, embedding_model,
@@ -665,32 +692,35 @@ func (s *TursoStore) SearchSimilar(ctx context.Context, workspace string, queryE
 	var rows *sql.Rows
 	var err error
 
+	workspaceID, workspacePath := resolveWorkspaceSelector(workspace)
+
 	if s.hasIndex {
 		// Use vector_top_k for fast indexed search
 		// vector_top_k returns only rowid, we must compute distance ourselves
 		// Note: We fetch more results and filter by workspace in-memory to handle index limitations
 		topKExpr := s.vh.VectorTopK("idx_sessions_embedding_vec", vec, limit*3) // Fetch more to filter
 		distExpr := s.vh.CosineSimilarity("s.embedding", vec)
-		if workspace != "" {
+		if workspaceID != "" {
 			query = fmt.Sprintf(`
-				SELECT s.id, s.workspace_path, s.project_name, s.git_branch, s.claude_version,
+				SELECT s.id, s.workspace_id, s.workspace_path, s.project_name, s.git_branch, s.claude_version,
 					s.started_at, s.ended_at, s.summary, s.accomplished, s.decisions, s.gotchas, s.user_insights,
 					s.tags, s.key_files, s.tools_pattern, s.message_count, s.user_turns,
 					s.tool_invocations, s.total_tokens, s.raw_jsonl_path, s.content_hash, s.embedding_model,
-					s.parent_session_id, s.agent_id, s.status,
+					s.parent_session_id, s.agent_id, s.agent_type, s.status,
 					s.created_at, s.updated_at,
 					%s as distance
 				FROM %s vt
 				JOIN sessions s ON s.rowid = vt.id
-				WHERE s.workspace_path = ?`, distExpr, topKExpr)
-			rows, err = s.db.QueryContext(ctx, query, workspace)
+				WHERE %s`, distExpr, topKExpr, workspaceFilterSQL("s", workspacePath))
+			args := workspaceFilterArgs(workspaceID, workspacePath)
+			rows, err = s.db.QueryContext(ctx, query, args...)
 		} else {
 			query = fmt.Sprintf(`
-				SELECT s.id, s.workspace_path, s.project_name, s.git_branch, s.claude_version,
+				SELECT s.id, s.workspace_id, s.workspace_path, s.project_name, s.git_branch, s.claude_version,
 					s.started_at, s.ended_at, s.summary, s.accomplished, s.decisions, s.gotchas, s.user_insights,
 					s.tags, s.key_files, s.tools_pattern, s.message_count, s.user_turns,
 					s.tool_invocations, s.total_tokens, s.raw_jsonl_path, s.content_hash, s.embedding_model,
-					s.parent_session_id, s.agent_id, s.status,
+					s.parent_session_id, s.agent_id, s.agent_type, s.status,
 					s.created_at, s.updated_at,
 					%s as distance
 				FROM %s vt
@@ -700,9 +730,9 @@ func (s *TursoStore) SearchSimilar(ctx context.Context, workspace string, queryE
 	} else {
 		// Fallback to full table scan with cosine distance
 		distExpr := s.vh.CosineSimilarity("embedding", vec)
-		if workspace != "" {
+		if workspaceID != "" {
 			query = fmt.Sprintf(`
-				SELECT id, workspace_path, project_name, git_branch, claude_version,
+				SELECT id, workspace_id, workspace_path, project_name, git_branch, claude_version,
 					started_at, ended_at, summary, accomplished, decisions, gotchas, user_insights,
 					tags, key_files, tools_pattern, message_count, user_turns,
 					tool_invocations, total_tokens, raw_jsonl_path, content_hash, embedding_model,
@@ -710,13 +740,14 @@ func (s *TursoStore) SearchSimilar(ctx context.Context, workspace string, queryE
 					created_at, updated_at,
 					%s as distance
 				FROM sessions
-				WHERE workspace_path = ? AND embedding IS NOT NULL
+				WHERE %s AND embedding IS NOT NULL
 				ORDER BY distance ASC
-				LIMIT ?`, distExpr)
-			rows, err = s.db.QueryContext(ctx, query, workspace, limit)
+				LIMIT ?`, distExpr, workspaceFilterSQL("", workspacePath))
+			args := append(workspaceFilterArgs(workspaceID, workspacePath), limit)
+			rows, err = s.db.QueryContext(ctx, query, args...)
 		} else {
 			query = fmt.Sprintf(`
-				SELECT id, workspace_path, project_name, git_branch, claude_version,
+				SELECT id, workspace_id, workspace_path, project_name, git_branch, claude_version,
 					started_at, ended_at, summary, accomplished, decisions, gotchas, user_insights,
 					tags, key_files, tools_pattern, message_count, user_turns,
 					tool_invocations, total_tokens, raw_jsonl_path, content_hash, embedding_model,
@@ -740,6 +771,7 @@ func (s *TursoStore) SearchSimilar(ctx context.Context, workspace string, queryE
 		var session Session
 		var projectName, gitBranch, clauveVersion, summary, toolsPattern sql.NullString
 		var endedAt, embeddingModel sql.NullString
+		var contentHash sql.NullString
 		var parentSessionID, agentID, agentType, status sql.NullString
 		var accomplishedJSON, decisionsJSON, gotchasJSON, userInsightsJSON string
 		var tagsJSON, keyFilesJSON string
@@ -747,10 +779,10 @@ func (s *TursoStore) SearchSimilar(ctx context.Context, workspace string, queryE
 		var distance float64
 
 		err := rows.Scan(
-			&session.ID, &session.WorkspacePath, &projectName, &gitBranch, &clauveVersion,
+			&session.ID, &session.WorkspaceID, &session.WorkspacePath, &projectName, &gitBranch, &clauveVersion,
 			&startedAtStr, &endedAt, &summary, &accomplishedJSON, &decisionsJSON, &gotchasJSON, &userInsightsJSON,
 			&tagsJSON, &keyFilesJSON, &toolsPattern, &session.MessageCount, &session.UserTurns,
-			&session.ToolInvocations, &session.TotalTokens, &session.RawJSONLPath, &embeddingModel,
+			&session.ToolInvocations, &session.TotalTokens, &session.RawJSONLPath, &contentHash, &embeddingModel,
 			&parentSessionID, &agentID, &agentType, &status,
 			&createdAtStr, &updatedAtStr, &distance,
 		)
@@ -764,6 +796,9 @@ func (s *TursoStore) SearchSimilar(ctx context.Context, workspace string, queryE
 		session.Summary = summary.String
 		session.ToolsPattern = toolsPattern.String
 		session.EmbeddingModel = embeddingModel.String
+		if contentHash.Valid {
+			session.ContentHash = contentHash.String
+		}
 		session.ParentSessionID = parentSessionID.String
 		session.AgentID = agentID.String
 		if session.AgentID == "" {
@@ -802,6 +837,24 @@ func (s *TursoStore) SearchSimilar(ctx context.Context, workspace string, queryE
 	}
 
 	return results, rows.Err()
+}
+
+func workspaceFilterSQL(alias, workspacePath string) string {
+	prefix := ""
+	if strings.TrimSpace(alias) != "" {
+		prefix = strings.TrimSpace(alias) + "."
+	}
+	if strings.TrimSpace(workspacePath) == "" {
+		return prefix + "workspace_id = ?"
+	}
+	return "(" + prefix + "workspace_id = ? OR (" + prefix + "workspace_id = '' AND " + prefix + "workspace_path = ?))"
+}
+
+func workspaceFilterArgs(workspaceID, workspacePath string) []any {
+	if strings.TrimSpace(workspacePath) == "" {
+		return []any{workspaceID}
+	}
+	return []any{workspaceID, workspacePath}
 }
 
 // UpdateSummary updates session metadata.
@@ -866,7 +919,7 @@ func (s *TursoStore) FindByContentHash(ctx context.Context, contentHash string) 
 	}
 
 	row := s.db.QueryRowContext(ctx, `
-		SELECT id, workspace_path, project_name, git_branch, claude_version,
+		SELECT id, workspace_id, workspace_path, project_name, git_branch, claude_version,
 			started_at, ended_at, summary, accomplished, decisions, gotchas, user_insights,
 			tags, key_files, tools_pattern, message_count, user_turns,
 			tool_invocations, total_tokens, raw_jsonl_path, content_hash, embedding_model,
@@ -1855,7 +1908,7 @@ func scanSessionRow(row *sql.Row) (Session, error) {
 	var messageCount, userTurns, toolInvocations, totalTokens sql.NullInt64
 
 	err := row.Scan(
-		&session.ID, &session.WorkspacePath, &projectName, &gitBranch, &claudeVersion,
+		&session.ID, &session.WorkspaceID, &session.WorkspacePath, &projectName, &gitBranch, &claudeVersion,
 		&startedAt, &endedAt, &summary, &accomplished, &decisions, &gotchas, &userInsights,
 		&tags, &keyFiles, &toolsPattern, &messageCount, &userTurns,
 		&toolInvocations, &totalTokens, &rawJSONLPath, &contentHash, &embeddingModel,
@@ -1981,7 +2034,7 @@ func scanSessionRows(rows *sql.Rows) (Session, error) {
 	var messageCount, userTurns, toolInvocations, totalTokens sql.NullInt64
 
 	err := rows.Scan(
-		&session.ID, &session.WorkspacePath, &projectName, &gitBranch, &claudeVersion,
+		&session.ID, &session.WorkspaceID, &session.WorkspacePath, &projectName, &gitBranch, &claudeVersion,
 		&startedAt, &endedAt, &summary, &accomplished, &decisions, &gotchas, &userInsights,
 		&tags, &keyFiles, &toolsPattern, &messageCount, &userTurns,
 		&toolInvocations, &totalTokens, &rawJSONLPath, &contentHash, &embeddingModel,
@@ -2097,16 +2150,40 @@ func scanSessionRows(rows *sql.Rows) (Session, error) {
 // GetActive returns the active session for a workspace and agent, or nil if none.
 // Uses status-based detection: only sessions with status = 'running' are considered active.
 func (s *TursoStore) GetActive(ctx context.Context, workspace, agentID string) (*Session, error) {
-	row := s.db.QueryRowContext(ctx, `
-		SELECT id, workspace_path, project_name, git_branch, claude_version,
-			started_at, ended_at, summary, accomplished, decisions, gotchas, user_insights,
-			tags, key_files, tools_pattern, message_count, user_turns,
-			tool_invocations, total_tokens, raw_jsonl_path, embedding_model,
-			parent_session_id, agent_id, agent_type, status,
-			created_at, updated_at
-		FROM sessions
-		WHERE workspace_path = ? AND agent_id = ? AND status = 'running'
-		ORDER BY started_at DESC LIMIT 1`, workspace, agentID)
+	if agentID == "" {
+		agentID = "agentctl"
+	}
+
+	workspaceID, workspacePath := resolveWorkspaceSelector(workspace)
+	if workspaceID == "" {
+		return nil, nil
+	}
+
+	var row *sql.Row
+	if workspacePath != "" {
+		row = s.db.QueryRowContext(ctx, `
+			SELECT id, workspace_id, workspace_path, project_name, git_branch, claude_version,
+				started_at, ended_at, summary, accomplished, decisions, gotchas, user_insights,
+				tags, key_files, tools_pattern, message_count, user_turns,
+				tool_invocations, total_tokens, raw_jsonl_path, content_hash, embedding_model,
+				parent_session_id, agent_id, agent_type, status,
+				created_at, updated_at
+			FROM sessions
+			WHERE (workspace_id = ? OR (workspace_id = '' AND workspace_path = ?))
+			  AND agent_id = ? AND status = 'running'
+			ORDER BY started_at DESC LIMIT 1`, workspaceID, workspacePath, agentID)
+	} else {
+		row = s.db.QueryRowContext(ctx, `
+			SELECT id, workspace_id, workspace_path, project_name, git_branch, claude_version,
+				started_at, ended_at, summary, accomplished, decisions, gotchas, user_insights,
+				tags, key_files, tools_pattern, message_count, user_turns,
+				tool_invocations, total_tokens, raw_jsonl_path, content_hash, embedding_model,
+				parent_session_id, agent_id, agent_type, status,
+				created_at, updated_at
+			FROM sessions
+			WHERE workspace_id = ? AND agent_id = ? AND status = 'running'
+			ORDER BY started_at DESC LIMIT 1`, workspaceID, agentID)
+	}
 
 	session, err := scanSessionRow(row)
 	if err == ErrNotFound {
@@ -2178,17 +2255,37 @@ func (s *TursoStore) ClearPendingRestore(ctx context.Context, id string) error {
 // GetPendingRestore finds a session with pending restore for a workspace.
 func (s *TursoStore) GetPendingRestore(ctx context.Context, workspace string) (*Session, error) {
 	cutoff := sqlutil.FormatTimestamp(timeutil.NowUTC().Add(-10 * time.Minute))
-	query := `
-		SELECT id, workspace_path, project_name, git_branch, claude_version,
-			started_at, ended_at, summary, accomplished, decisions, gotchas, user_insights,
-			tags, key_files, tools_pattern, message_count, user_turns,
-			tool_invocations, total_tokens, raw_jsonl_path, embedding_model,
-			parent_session_id, agent_id, agent_type, status,
-			created_at, updated_at
-		FROM sessions
-		WHERE workspace_path = ? AND pending_restore_at IS NOT NULL AND pending_restore_at > ?
-		ORDER BY pending_restore_at DESC LIMIT 1`
-	row := s.db.QueryRowContext(ctx, query, workspace, cutoff)
+
+	workspaceID, workspacePath := resolveWorkspaceSelector(workspace)
+	if workspaceID == "" {
+		return nil, nil
+	}
+
+	var row *sql.Row
+	if workspacePath != "" {
+		row = s.db.QueryRowContext(ctx, `
+			SELECT id, workspace_id, workspace_path, project_name, git_branch, claude_version,
+				started_at, ended_at, summary, accomplished, decisions, gotchas, user_insights,
+				tags, key_files, tools_pattern, message_count, user_turns,
+				tool_invocations, total_tokens, raw_jsonl_path, content_hash, embedding_model,
+				parent_session_id, agent_id, agent_type, status,
+				created_at, updated_at
+			FROM sessions
+			WHERE (workspace_id = ? OR (workspace_id = '' AND workspace_path = ?))
+			  AND pending_restore_at IS NOT NULL AND pending_restore_at > ?
+			ORDER BY pending_restore_at DESC LIMIT 1`, workspaceID, workspacePath, cutoff)
+	} else {
+		row = s.db.QueryRowContext(ctx, `
+			SELECT id, workspace_id, workspace_path, project_name, git_branch, claude_version,
+				started_at, ended_at, summary, accomplished, decisions, gotchas, user_insights,
+				tags, key_files, tools_pattern, message_count, user_turns,
+				tool_invocations, total_tokens, raw_jsonl_path, content_hash, embedding_model,
+				parent_session_id, agent_id, agent_type, status,
+				created_at, updated_at
+			FROM sessions
+			WHERE workspace_id = ? AND pending_restore_at IS NOT NULL AND pending_restore_at > ?
+			ORDER BY pending_restore_at DESC LIMIT 1`, workspaceID, cutoff)
+	}
 	session, err := scanSessionRow(row)
 	if err == ErrNotFound {
 		return nil, nil
@@ -2201,17 +2298,40 @@ func (s *TursoStore) GetPendingRestore(ctx context.Context, workspace string) (*
 
 // FindLastSession returns the most recent session matching the criteria.
 func (s *TursoStore) FindLastSession(ctx context.Context, workspace, agentID string, statuses []string) (*Session, error) {
-	query := `
-		SELECT id, workspace_path, project_name, git_branch, claude_version,
-			started_at, ended_at, summary, accomplished, decisions, gotchas, user_insights,
-			tags, key_files, tools_pattern, message_count, user_turns,
-			tool_invocations, total_tokens, raw_jsonl_path, embedding_model,
-			parent_session_id, agent_id, agent_type, status,
-			created_at, updated_at
-		FROM sessions
-		WHERE workspace_path = ? AND agent_id = ?`
+	workspaceID, workspacePath := resolveWorkspaceSelector(workspace)
+	if workspaceID == "" {
+		return nil, nil
+	}
 
-	args := []any{workspace, agentID}
+	var (
+		query string
+		args  []any
+	)
+	if workspacePath != "" {
+		query = `
+			SELECT id, workspace_id, workspace_path, project_name, git_branch, claude_version,
+				started_at, ended_at, summary, accomplished, decisions, gotchas, user_insights,
+				tags, key_files, tools_pattern, message_count, user_turns,
+				tool_invocations, total_tokens, raw_jsonl_path, content_hash, embedding_model,
+				parent_session_id, agent_id, agent_type, status,
+				created_at, updated_at
+			FROM sessions
+			WHERE (workspace_id = ? OR (workspace_id = '' AND workspace_path = ?))
+			  AND agent_id = ?`
+		args = []any{workspaceID, workspacePath, agentID}
+	} else {
+		query = `
+			SELECT id, workspace_id, workspace_path, project_name, git_branch, claude_version,
+				started_at, ended_at, summary, accomplished, decisions, gotchas, user_insights,
+				tags, key_files, tools_pattern, message_count, user_turns,
+				tool_invocations, total_tokens, raw_jsonl_path, content_hash, embedding_model,
+				parent_session_id, agent_id, agent_type, status,
+				created_at, updated_at
+			FROM sessions
+			WHERE workspace_id = ? AND agent_id = ?`
+		args = []any{workspaceID, agentID}
+	}
+
 	if len(statuses) > 0 {
 		placeholders := make([]string, len(statuses))
 		for i, st := range statuses {
@@ -2277,11 +2397,11 @@ func (s *TursoStore) GetAncestorChain(ctx context.Context, sessionID string, max
 			JOIN ancestors a ON s.id = a.id
 			WHERE a.depth < %d AND s.parent_session_id IS NOT NULL
 		)
-		SELECT s.id, s.workspace_path, s.project_name, s.git_branch, s.claude_version,
+		SELECT s.id, s.workspace_id, s.workspace_path, s.project_name, s.git_branch, s.claude_version,
 			s.started_at, s.ended_at, s.summary, s.accomplished, s.decisions, s.gotchas, s.user_insights,
 			s.tags, s.key_files, s.tools_pattern, s.message_count, s.user_turns,
-			s.tool_invocations, s.total_tokens, s.raw_jsonl_path, s.embedding_model,
-			s.parent_session_id, s.agent_id, s.status,
+			s.tool_invocations, s.total_tokens, s.raw_jsonl_path, s.content_hash, s.embedding_model,
+			s.parent_session_id, s.agent_id, s.agent_type, s.status,
 			s.created_at, s.updated_at
 		FROM ancestors a
 		JOIN sessions s ON s.id = a.id
@@ -2325,11 +2445,11 @@ func (s *TursoStore) SearchSimilarGlobal(ctx context.Context, queryEmbedding []f
 		topKExpr := s.vh.VectorTopK("idx_sessions_embedding_vec", vec, limit*2)
 		distExpr := s.vh.CosineSimilarity("s.embedding", vec)
 		query = fmt.Sprintf(`
-			SELECT s.id, s.workspace_path, s.project_name, s.git_branch, s.claude_version,
+			SELECT s.id, s.workspace_id, s.workspace_path, s.project_name, s.git_branch, s.claude_version,
 				s.started_at, s.ended_at, s.summary, s.accomplished, s.decisions, s.gotchas, s.user_insights,
 				s.tags, s.key_files, s.tools_pattern, s.message_count, s.user_turns,
-				s.tool_invocations, s.total_tokens, s.raw_jsonl_path, s.embedding_model,
-				s.parent_session_id, s.agent_id, s.status,
+				s.tool_invocations, s.total_tokens, s.raw_jsonl_path, s.content_hash, s.embedding_model,
+				s.parent_session_id, s.agent_id, s.agent_type, s.status,
 				s.created_at, s.updated_at,
 				%s as distance
 			FROM %s vt
@@ -2339,11 +2459,11 @@ func (s *TursoStore) SearchSimilarGlobal(ctx context.Context, queryEmbedding []f
 		// Fallback to full table scan with cosine distance (no workspace filter)
 		distExpr := s.vh.CosineSimilarity("embedding", vec)
 		query = fmt.Sprintf(`
-			SELECT id, workspace_path, project_name, git_branch, claude_version,
+			SELECT id, workspace_id, workspace_path, project_name, git_branch, claude_version,
 				started_at, ended_at, summary, accomplished, decisions, gotchas, user_insights,
 				tags, key_files, tools_pattern, message_count, user_turns,
-				tool_invocations, total_tokens, raw_jsonl_path, embedding_model,
-					parent_session_id, agent_id, agent_type, status,
+				tool_invocations, total_tokens, raw_jsonl_path, content_hash, embedding_model,
+				parent_session_id, agent_id, agent_type, status,
 				created_at, updated_at,
 				%s as distance
 			FROM sessions
@@ -2361,19 +2481,19 @@ func (s *TursoStore) SearchSimilarGlobal(ctx context.Context, queryEmbedding []f
 	for rows.Next() {
 		var session Session
 		var projectName, gitBranch, clauveVersion, summary, toolsPattern sql.NullString
-		var endedAt, embeddingModel sql.NullString
-		var parentSessionID, agentID, status sql.NullString
+		var endedAt, contentHash, embeddingModel sql.NullString
+		var parentSessionID, agentID, agentType, status sql.NullString
 		var accomplishedJSON, decisionsJSON, gotchasJSON, userInsightsJSON string
 		var tagsJSON, keyFilesJSON string
 		var startedAtStr, createdAtStr, updatedAtStr string
 		var distance float64
 
 		err := rows.Scan(
-			&session.ID, &session.WorkspacePath, &projectName, &gitBranch, &clauveVersion,
+			&session.ID, &session.WorkspaceID, &session.WorkspacePath, &projectName, &gitBranch, &clauveVersion,
 			&startedAtStr, &endedAt, &summary, &accomplishedJSON, &decisionsJSON, &gotchasJSON, &userInsightsJSON,
 			&tagsJSON, &keyFilesJSON, &toolsPattern, &session.MessageCount, &session.UserTurns,
-			&session.ToolInvocations, &session.TotalTokens, &session.RawJSONLPath, &embeddingModel,
-			&parentSessionID, &agentID, &status,
+			&session.ToolInvocations, &session.TotalTokens, &session.RawJSONLPath, &contentHash, &embeddingModel,
+			&parentSessionID, &agentID, &agentType, &status,
 			&createdAtStr, &updatedAtStr, &distance,
 		)
 		if err != nil {
@@ -2386,10 +2506,17 @@ func (s *TursoStore) SearchSimilarGlobal(ctx context.Context, queryEmbedding []f
 		session.Summary = summary.String
 		session.ToolsPattern = toolsPattern.String
 		session.EmbeddingModel = embeddingModel.String
+		if contentHash.Valid {
+			session.ContentHash = contentHash.String
+		}
 		session.ParentSessionID = parentSessionID.String
 		session.AgentID = agentID.String
 		if session.AgentID == "" {
 			session.AgentID = "agentctl"
+		}
+		session.AgentType = agentType.String
+		if session.AgentType == "" {
+			session.AgentType = "claude"
 		}
 		session.Status = status.String
 		if session.Status == "" {
@@ -2436,15 +2563,62 @@ func (s *TursoStore) SearchSimilarMultiWorkspace(ctx context.Context, workspaces
 	vec := make(dbdriver.Vector, len(queryEmbedding))
 	copy(vec, queryEmbedding)
 
-	// Build workspace IN clause
-	placeholders := make([]string, len(workspaces))
-	args := make([]any, len(workspaces)+1) // workspaces + limit
-	for i, ws := range workspaces {
-		placeholders[i] = "?"
-		args[i] = ws
+	idSet := make(map[string]struct{}, len(workspaces))
+	pathSet := make(map[string]struct{}, len(workspaces))
+	for _, w := range workspaces {
+		wid, wpath := resolveWorkspaceSelector(w)
+		if wid == "" {
+			continue
+		}
+		idSet[wid] = struct{}{}
+		if wpath != "" {
+			pathSet[wpath] = struct{}{}
+		}
 	}
-	args[len(workspaces)] = limit
-	inClause := strings.Join(placeholders, ", ")
+	if len(idSet) == 0 && len(pathSet) == 0 {
+		return nil, nil
+	}
+
+	ids := make([]string, 0, len(idSet))
+	for id := range idSet {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+
+	paths := make([]string, 0, len(pathSet))
+	for p := range pathSet {
+		paths = append(paths, p)
+	}
+	sort.Strings(paths)
+
+	var (
+		where string
+		args  []any
+	)
+	if len(ids) > 0 {
+		placeholders := make([]string, len(ids))
+		for i, id := range ids {
+			placeholders[i] = "?"
+			args = append(args, id)
+		}
+		where = fmt.Sprintf("workspace_id IN (%s)", strings.Join(placeholders, ", "))
+	}
+	if len(paths) > 0 {
+		placeholders := make([]string, len(paths))
+		for i, p := range paths {
+			placeholders[i] = "?"
+			args = append(args, p)
+		}
+		legacy := fmt.Sprintf("(workspace_id = '' AND workspace_path IN (%s))", strings.Join(placeholders, ", "))
+		if where != "" {
+			where = "(" + where + " OR " + legacy + ")"
+		} else {
+			where = legacy
+		}
+	}
+	if where == "" {
+		return nil, nil
+	}
 
 	var rows *sql.Rows
 	var err error
@@ -2452,17 +2626,18 @@ func (s *TursoStore) SearchSimilarMultiWorkspace(ctx context.Context, workspaces
 	// Full table scan with workspace filter (index doesn't filter by workspace)
 	distExpr := s.vh.CosineSimilarity("embedding", vec)
 	query := fmt.Sprintf(`
-		SELECT id, workspace_path, project_name, git_branch, claude_version,
+		SELECT id, workspace_id, workspace_path, project_name, git_branch, claude_version,
 			started_at, ended_at, summary, accomplished, decisions, gotchas, user_insights,
 			tags, key_files, tools_pattern, message_count, user_turns,
-			tool_invocations, total_tokens, raw_jsonl_path, embedding_model,
+			tool_invocations, total_tokens, raw_jsonl_path, content_hash, embedding_model,
 			parent_session_id, agent_id, agent_type, status,
 			created_at, updated_at,
 			%s as distance
 		FROM sessions
-		WHERE embedding IS NOT NULL AND workspace_path IN (%s)
+		WHERE embedding IS NOT NULL AND %s
 		ORDER BY distance ASC
-		LIMIT ?`, distExpr, inClause)
+		LIMIT ?`, distExpr, where)
+	args = append(args, limit)
 	rows, err = s.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("sessions: search similar multi-workspace: %w", err)
@@ -2473,19 +2648,19 @@ func (s *TursoStore) SearchSimilarMultiWorkspace(ctx context.Context, workspaces
 	for rows.Next() {
 		var session Session
 		var projectName, gitBranch, clauveVersion, summary, toolsPattern sql.NullString
-		var endedAt, embeddingModel sql.NullString
-		var parentSessionID, agentID, status sql.NullString
+		var endedAt, contentHash, embeddingModel sql.NullString
+		var parentSessionID, agentID, agentType, status sql.NullString
 		var accomplishedJSON, decisionsJSON, gotchasJSON, userInsightsJSON string
 		var tagsJSON, keyFilesJSON string
 		var startedAtStr, createdAtStr, updatedAtStr string
 		var distance float64
 
 		err := rows.Scan(
-			&session.ID, &session.WorkspacePath, &projectName, &gitBranch, &clauveVersion,
+			&session.ID, &session.WorkspaceID, &session.WorkspacePath, &projectName, &gitBranch, &clauveVersion,
 			&startedAtStr, &endedAt, &summary, &accomplishedJSON, &decisionsJSON, &gotchasJSON, &userInsightsJSON,
 			&tagsJSON, &keyFilesJSON, &toolsPattern, &session.MessageCount, &session.UserTurns,
-			&session.ToolInvocations, &session.TotalTokens, &session.RawJSONLPath, &embeddingModel,
-			&parentSessionID, &agentID, &status,
+			&session.ToolInvocations, &session.TotalTokens, &session.RawJSONLPath, &contentHash, &embeddingModel,
+			&parentSessionID, &agentID, &agentType, &status,
 			&createdAtStr, &updatedAtStr, &distance,
 		)
 		if err != nil {
@@ -2498,10 +2673,17 @@ func (s *TursoStore) SearchSimilarMultiWorkspace(ctx context.Context, workspaces
 		session.Summary = summary.String
 		session.ToolsPattern = toolsPattern.String
 		session.EmbeddingModel = embeddingModel.String
+		if contentHash.Valid {
+			session.ContentHash = contentHash.String
+		}
 		session.ParentSessionID = parentSessionID.String
 		session.AgentID = agentID.String
 		if session.AgentID == "" {
 			session.AgentID = "agentctl"
+		}
+		session.AgentType = agentType.String
+		if session.AgentType == "" {
+			session.AgentType = "claude"
 		}
 		session.Status = status.String
 		if session.Status == "" {

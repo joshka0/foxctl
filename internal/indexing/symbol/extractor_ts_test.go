@@ -149,3 +149,67 @@ func TestTypeScriptExtractorDocs(t *testing.T) {
 		t.Errorf("unexpected doc for Greeter: %q", docs["Greeter"])
 	}
 }
+
+func TestTypeScriptExtractorExtractCalls(t *testing.T) {
+	source := `export function bar() { return 1 }
+export class Zoo {}
+export function foo(
+  x: number,
+): number {
+  bar()
+  baz.qux()
+  new Zoo()
+  function inner() { zap() }
+  inner()
+  if (true) { return 0 }
+  return x
+}`
+
+	extractor := NewTypeScriptExtractor()
+	syms, err := extractor.Extract(context.Background(), "src/calls.ts", []byte(source))
+	if err != nil {
+		t.Fatalf("extract: %v", err)
+	}
+
+	var foo Symbol
+	for _, sym := range syms {
+		if sym.Name == "foo" {
+			foo = sym
+			break
+		}
+	}
+	if foo.Name == "" {
+		t.Fatalf("missing foo symbol")
+	}
+
+	calls, err := extractor.ExtractCalls(context.Background(), foo, []byte(source))
+	if err != nil {
+		t.Fatalf("extract calls: %v", err)
+	}
+
+	// Best-effort heuristics: ensure we capture the obvious ones and ignore keywords.
+	want := map[string]bool{
+		"bar":   true,
+		"Zoo":   true,
+		"qux":   true,
+		"inner": true,
+		"zap":   true,
+	}
+	for name := range want {
+		found := false
+		for _, call := range calls {
+			if call == name {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("expected call %q in %v", name, calls)
+		}
+	}
+	for _, call := range calls {
+		if call == "if" || call == "function" || call == "return" {
+			t.Errorf("unexpected keyword in calls: %q (calls=%v)", call, calls)
+		}
+	}
+}

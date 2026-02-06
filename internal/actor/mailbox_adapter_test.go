@@ -115,6 +115,7 @@ func TestMailboxAdapter_Poll(t *testing.T) {
 
 	if msg == nil {
 		t.Fatal("expected message, got nil")
+		return
 	}
 
 	if msg.ID != "msg-1" {

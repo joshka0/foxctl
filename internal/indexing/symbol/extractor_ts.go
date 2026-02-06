@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"unicode"
 
 	"github.com/jkatigb/agentctl/internal/codecontext/expander"
 )
@@ -42,29 +43,13 @@ func (e *TypeScriptExtractor) Extract(_ context.Context, filePath string, conten
 		startLine := i + 1
 		endLine := startLine
 		if kind == KindFunction || kind == KindClass || kind == KindInterface || kind == KindType {
-			hasBrace := strings.Contains(line, "{")
-			if kind == KindType && !hasBrace {
-				for j := i + 1; j < len(lines); j++ {
-					trimmed := strings.TrimSpace(lines[j])
-					if trimmed == "" {
-						continue
-					}
-					if strings.Contains(trimmed, ";") {
-						break
-					}
-					if strings.HasPrefix(trimmed, "{") {
-						hasBrace = true
-						break
-					}
-					if (strings.HasPrefix(trimmed, "|") || strings.HasPrefix(trimmed, "&")) && strings.Contains(trimmed, "{") {
-						hasBrace = true
-						break
-					}
-				}
+			braceLine := i
+			if !strings.Contains(line, "{") {
+				braceLine = findTSBraceLine(lines, i)
 			}
-			if hasBrace {
-				endIdx := expander.FindBraceEnd(lines, i, expander.JSBraceStyle())
-				if endIdx >= i {
+			if braceLine >= 0 {
+				endIdx := expander.FindBraceEnd(lines, braceLine, expander.JSBraceStyle())
+				if endIdx >= braceLine {
 					endLine = endIdx + 1
 				}
 			}
@@ -107,9 +92,18 @@ func (e *TypeScriptExtractor) Extract(_ context.Context, filePath string, conten
 	return symbols, nil
 }
 
-// ExtractCalls is not supported yet for TypeScript.
-func (e *TypeScriptExtractor) ExtractCalls(_ context.Context, _ Symbol, _ []byte) ([]string, error) {
-	return nil, nil
+// ExtractCalls extracts best-effort call identifiers from a symbol body.
+// This is heuristic and intentionally conservative (no type-checking).
+func (e *TypeScriptExtractor) ExtractCalls(_ context.Context, symbol Symbol, content []byte) ([]string, error) {
+	if symbol.StartByte < 0 || symbol.EndByte > len(content) || symbol.StartByte >= symbol.EndByte {
+		return nil, nil
+	}
+	body := string(content[symbol.StartByte:symbol.EndByte])
+	calls := extractTSCallNames(body)
+	if len(calls) > 50 {
+		calls = calls[:50]
+	}
+	return calls, nil
 }
 
 var identPattern = regexp.MustCompile(`^[A-Za-z_$][A-Za-z0-9_$]*`)
@@ -256,6 +250,207 @@ func extractTSBlockComment(lines []string, endIdx int) string {
 		docLines = append(docLines, line)
 	}
 	return strings.TrimSpace(strings.Join(docLines, "\n"))
+}
+
+var tsCallKeywords = map[string]struct{}{
+	// Statements/keywords that can be followed by "(" but aren't calls.
+	"if": {}, "for": {}, "while": {}, "switch": {}, "catch": {}, "with": {},
+	"return": {}, "throw": {}, "new": {}, "await": {}, "yield": {},
+	"function": {}, "class": {}, "interface": {}, "type": {}, "enum": {},
+	"import": {}, "export": {}, "extends": {}, "implements": {}, "super": {},
+	"try": {}, "finally": {}, "case": {}, "default": {}, "do": {}, "else": {},
+	"in": {}, "of": {},
+}
+
+func findTSBraceLine(lines []string, declIdx int) int {
+	if declIdx < 0 || declIdx >= len(lines) {
+		return -1
+	}
+	// Fast path: decl line already has brace.
+	if strings.Contains(lines[declIdx], "{") {
+		return declIdx
+	}
+
+	const maxLookahead = 32
+	for j := declIdx + 1; j < len(lines) && j <= declIdx+maxLookahead; j++ {
+		raw := lines[j]
+		trimmed := strings.TrimSpace(strings.TrimRight(raw, "\r"))
+		if trimmed == "" || strings.HasPrefix(trimmed, "//") {
+			continue
+		}
+
+		// Stop if we hit another top-level declaration before seeing a brace.
+		if leadingIndentTS(raw) == 0 {
+			if _, _, _, _, ok := parseTSDeclaration(raw); ok {
+				break
+			}
+		}
+
+		if strings.Contains(trimmed, "{") {
+			return j
+		}
+
+		// Stop at statement terminator (declarations without bodies).
+		if strings.HasSuffix(trimmed, ";") {
+			break
+		}
+	}
+	return -1
+}
+
+func extractTSCallNames(body string) []string {
+	if strings.TrimSpace(body) == "" {
+		return nil
+	}
+
+	seen := make(map[string]bool)
+	out := make([]string, 0, 16)
+
+	prevIdentLower := ""
+	for i := 0; i < len(body); {
+		c := body[i]
+
+		// Comments
+		if c == '/' && i+1 < len(body) && body[i+1] == '/' {
+			i += 2
+			for i < len(body) && body[i] != '\n' {
+				i++
+			}
+			prevIdentLower = ""
+			continue
+		}
+		if c == '/' && i+1 < len(body) && body[i+1] == '*' {
+			i += 2
+			for i+1 < len(body) {
+				if body[i] == '*' && body[i+1] == '/' {
+					i += 2
+					break
+				}
+				i++
+			}
+			prevIdentLower = ""
+			continue
+		}
+
+		// Strings
+		if c == '\'' || c == '"' || c == '`' {
+			quote := c
+			i++
+			for i < len(body) {
+				if body[i] == '\\' {
+					i += 2
+					continue
+				}
+				if body[i] == quote {
+					i++
+					break
+				}
+				i++
+			}
+			prevIdentLower = ""
+			continue
+		}
+
+		if !isTSIdentStart(rune(c)) {
+			i++
+			continue
+		}
+
+		// Identifier token
+		start := i
+		i++
+		for i < len(body) && isTSIdentPart(rune(body[i])) {
+			i++
+		}
+		ident := body[start:i]
+		identLower := strings.ToLower(ident)
+
+		// Lookahead for call site: ident [<typeArgs>] "("
+		j := i
+		for j < len(body) && isTSWhitespace(body[j]) {
+			j++
+		}
+		if j < len(body) && body[j] == '<' {
+			if after := skipTSTypeArgs(body, j); after > j {
+				j = after
+				for j < len(body) && isTSWhitespace(body[j]) {
+					j++
+				}
+			}
+		}
+		isCall := j < len(body) && body[j] == '('
+
+		if isCall {
+			// Exclude obvious non-call keywords and function declarations.
+			if _, ok := tsCallKeywords[identLower]; !ok && prevIdentLower != "function" {
+				if !seen[ident] {
+					seen[ident] = true
+					out = append(out, ident)
+				}
+			}
+		}
+
+		prevIdentLower = identLower
+	}
+
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+func isTSIdentStart(r rune) bool {
+	return r == '_' || r == '$' || unicode.IsLetter(r)
+}
+
+func isTSIdentPart(r rune) bool {
+	return r == '_' || r == '$' || unicode.IsLetter(r) || unicode.IsDigit(r)
+}
+
+func isTSWhitespace(b byte) bool {
+	return b == ' ' || b == '\t' || b == '\n' || b == '\r'
+}
+
+// skipTSTypeArgs tries to skip a TypeScript generic type argument list starting at '<'.
+// Returns the first index after the matching '>' if it looks like type args; otherwise 0.
+func skipTSTypeArgs(body string, start int) int {
+	if start < 0 || start >= len(body) || body[start] != '<' {
+		return 0
+	}
+	depth := 0
+	for i := start; i < len(body); i++ {
+		switch body[i] {
+		case '<':
+			depth++
+		case '>':
+			depth--
+			if depth == 0 {
+				return i + 1
+			}
+		case '\n':
+			// Heuristic: if type args span many lines, bail out.
+			if i-start > 200 {
+				return 0
+			}
+		}
+		// Avoid pathological scans.
+		if i-start > 400 {
+			return 0
+		}
+	}
+	return 0
+}
+
+func leadingIndentTS(line string) int {
+	count := 0
+	for i := 0; i < len(line); i++ {
+		if line[i] == ' ' || line[i] == '\t' {
+			count++
+			continue
+		}
+		break
+	}
+	return count
 }
 
 func computeLineOffsets(lines []string) []int {

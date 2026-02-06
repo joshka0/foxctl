@@ -6,17 +6,14 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
-	"github.com/XiaoConstantine/dspy-go/pkg/agents"
-	"github.com/XiaoConstantine/dspy-go/pkg/agents/react"
-	"github.com/XiaoConstantine/dspy-go/pkg/core"
 	"github.com/oklog/ulid/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/jkatigb/agentctl/internal/agent/tools"
 	"github.com/jkatigb/agentctl/internal/companion"
 	"github.com/jkatigb/agentctl/internal/domain/agent"
 	"github.com/jkatigb/agentctl/internal/domain/envelope"
@@ -70,7 +67,53 @@ func TestMemoryDedupeStore(t *testing.T) {
 	assert.False(t, processed)
 }
 
-func setupDaemon(t *testing.T) (context.Context, string, Options, *FakeLLM) {
+type fakeCompanionService struct {
+	mu              sync.Mutex
+	responses       []string
+	errors          map[int]error
+	callIndex       int
+	capturedPrompts []string
+}
+
+func newFakeCompanionService(responses ...string) *fakeCompanionService {
+	return &fakeCompanionService{
+		responses: responses,
+		errors:    make(map[int]error),
+	}
+}
+
+func (f *fakeCompanionService) Chat(ctx context.Context, req companion.ChatRequest) (*companion.ChatResponse, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	f.capturedPrompts = append(f.capturedPrompts, req.Message)
+	idx := f.callIndex
+	f.callIndex++
+
+	if err, ok := f.errors[idx]; ok {
+		return nil, err
+	}
+
+	response := "No more scripted responses"
+	if idx < len(f.responses) {
+		response = f.responses[idx]
+	}
+	return &companion.ChatResponse{Response: response}, nil
+}
+
+func (f *fakeCompanionService) GetCallIndex() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.callIndex
+}
+
+func (f *fakeCompanionService) SetError(index int, err error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.errors[index] = err
+}
+
+func setupDaemon(t *testing.T) (context.Context, string, Options, *fakeCompanionService) {
 	root := t.TempDir()
 	ctx := context.Background()
 
@@ -83,7 +126,7 @@ func setupDaemon(t *testing.T) (context.Context, string, Options, *FakeLLM) {
 		}
 	}()
 
-	// Create agent - use autonomous mode to ensure DSPy path is used (where AgentFactory applies)
+	// Create agent - execution mode does not affect companion path selection
 	agentID := ulid.Make().String()
 	a := agent.Agent{
 		ID:        agentID,
@@ -92,12 +135,12 @@ func setupDaemon(t *testing.T) (context.Context, string, Options, *FakeLLM) {
 		State:     agent.StateStarting, // Run will transition to Running
 		Prompt:    "You are a coder.",
 		ShareBB:   "scoped",
-		ExecMode:  agent.ModeAutonomous, // Use DSPy path so FakeLLM is used
+		ExecMode:  agent.ModeReactive,
 	}
 	err = as.Create(ctx, a)
 	require.NoError(t, err)
 
-	fakeLLM := NewFakeLLM()
+	fakeSvc := newFakeCompanionService()
 
 	opts := Options{
 		AgentID:           agentID,
@@ -106,32 +149,18 @@ func setupDaemon(t *testing.T) (context.Context, string, Options, *FakeLLM) {
 		HeartbeatInterval: 100 * time.Millisecond,
 		MaxPollMessages:   10,
 		UseMemoryDedupe:   true,
-		AgentFactory: func(ctx context.Context, a agent.Agent, r *tools.Registry) (agents.Agent, error) {
-			dspyAgent := react.NewReActAgent(a.ID, a.Role)
-			sig := core.NewSignature(
-				[]core.InputField{
-					{Field: core.NewField("task", core.WithDescription("task"))},
-				},
-				[]core.OutputField{
-					{Field: core.NewField("result", core.WithDescription("result"))},
-				},
-			)
-			if err := dspyAgent.Initialize(fakeLLM, sig); err != nil {
-				return nil, err
-			}
-			return dspyAgent, nil
-		},
+		CompanionService: fakeSvc,
 	}
 
-	return ctx, agentID, opts, fakeLLM
+	return ctx, agentID, opts, fakeSvc
 }
 
 func TestDaemon_TTLExpiry(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping daemon test in short mode (race detector uses too much memory)")
 	}
-	ctx, agentID, opts, fakeLLM := setupDaemon(t)
-	fakeLLM.Responses = []string{"Response"}
+	ctx, agentID, opts, fakeSvc := setupDaemon(t)
+	fakeSvc.responses = []string{"Response"}
 
 	// Send expired message
 	ms, err := mailbox.Open(ctx, opts.StorageRoot)
@@ -179,7 +208,7 @@ func TestDaemon_TTLExpiry(t *testing.T) {
 	}
 
 	// Verify LLM not called
-	assert.Equal(t, 0, fakeLLM.GetCallIndex())
+	assert.Equal(t, 0, fakeSvc.GetCallIndex())
 
 	// Verify message acked (removed from mailbox)
 	msgs, err := ms.List(context.Background(), "actor:agent:"+agentID, 10)
@@ -191,8 +220,8 @@ func TestDaemon_Dedupe(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping daemon test in short mode (race detector uses too much memory)")
 	}
-	ctx, agentID, opts, fakeLLM := setupDaemon(t)
-	fakeLLM.Responses = []string{"Response"}
+	ctx, agentID, opts, fakeSvc := setupDaemon(t)
+	fakeSvc.responses = []string{"Response"}
 
 	ms, err := mailbox.Open(ctx, opts.StorageRoot)
 	require.NoError(t, err)
@@ -249,17 +278,15 @@ func TestDaemon_Dedupe(t *testing.T) {
 	}
 
 	// Verify LLM not called (dedupe skipped processing)
-	assert.Equal(t, 0, fakeLLM.GetCallIndex())
+	assert.Equal(t, 0, fakeSvc.GetCallIndex())
 }
 
 func TestDaemon_AskReplyCorrelation(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping daemon test in short mode (race detector uses too much memory)")
 	}
-	ctx, agentID, opts, fakeLLM := setupDaemon(t)
-	fakeLLM.Responses = []string{
-		"thought: I will answer.\naction: <action><tool_name>Finish</tool_name><arguments><arg key=\"result\">I am fine.</arg></arguments></action>\nanswer: I am fine.",
-	}
+	ctx, agentID, opts, fakeSvc := setupDaemon(t)
+	fakeSvc.responses = []string{"I am fine."}
 
 	ms, err := mailbox.Open(ctx, opts.StorageRoot)
 	require.NoError(t, err)
@@ -350,17 +377,14 @@ func TestDaemon_EndToEnd_SpawnAskReplyStop(t *testing.T) {
 		Role:     "coder",
 		Prompt:   "You are a coder.",
 		ShareBB:  "scoped",
-		ExecMode: agent.ModeAutonomous, // Use DSPy path so FakeLLM is used
+		ExecMode: agent.ModeReactive,
 	})
 	require.NoError(t, err)
 
 	require.NoError(t, agentStore.Close())
 	require.NoError(t, mailStore.Close())
 
-	fakeLLM := NewFakeLLM()
-	fakeLLM.Responses = []string{
-		"thought: I will answer.\naction: <action><tool_name>Finish</tool_name><arguments><arg key=\"result\">It works.</arg></arguments></action>\nanswer: It works.",
-	}
+	fakeSvc := newFakeCompanionService("It works.")
 
 	opts := Options{
 		AgentID:           spawnResp.AgentID,
@@ -369,19 +393,7 @@ func TestDaemon_EndToEnd_SpawnAskReplyStop(t *testing.T) {
 		HeartbeatInterval: 50 * time.Millisecond,
 		MaxPollMessages:   10,
 		UseMemoryDedupe:   true,
-		AgentFactory: func(ctx context.Context, a agent.Agent, r *tools.Registry) (agents.Agent, error) {
-			dspyAgent := react.NewReActAgent(a.ID, a.Role)
-			sig := buildSignature(a)
-			if err := dspyAgent.Initialize(fakeLLM, *sig); err != nil {
-				return nil, err
-			}
-			for _, tool := range r.List() {
-				if err := dspyAgent.RegisterTool(tool); err != nil {
-					return nil, err
-				}
-			}
-			return dspyAgent, nil
-		},
+		CompanionService:  fakeSvc,
 	}
 
 	daemonCtx, cancel := context.WithCancel(ctx)
@@ -474,9 +486,9 @@ func TestDaemon_NackBackoff(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping daemon test in short mode (race detector uses too much memory)")
 	}
-	ctx, agentID, opts, fakeLLM := setupDaemon(t)
+	ctx, agentID, opts, fakeSvc := setupDaemon(t)
 	// Inject error
-	fakeLLM.SetError(0, errors.New("processing failed"))
+	fakeSvc.SetError(0, errors.New("processing failed"))
 
 	ms, err := mailbox.Open(ctx, opts.StorageRoot)
 	require.NoError(t, err)
@@ -500,10 +512,10 @@ func TestDaemon_NackBackoff(t *testing.T) {
 
 	// Wait for LLM to be called (message processed) or timeout
 	deadline := time.Now().Add(5 * time.Second)
-	for fakeLLM.GetCallIndex() == 0 && time.Now().Before(deadline) {
+	for fakeSvc.GetCallIndex() == 0 && time.Now().Before(deadline) {
 		time.Sleep(10 * time.Millisecond)
 	}
-	require.Greater(t, fakeLLM.GetCallIndex(), 0, "LLM should have been called")
+	require.Greater(t, fakeSvc.GetCallIndex(), 0, "LLM should have been called")
 
 	cancel()
 	err = <-errCh
@@ -612,8 +624,11 @@ func TestDaemon_CompanionMemory(t *testing.T) {
 		t.Skip("skipping daemon test in short mode")
 	}
 	// This test requires companion.Service which needs a real LLM API key
-	if os.Getenv("AGENTCTL_LLM_API_KEY") == "" && os.Getenv("CEREBRAS_API_KEY") == "" {
-		t.Skip("skipping companion memory test: requires LLM API key (set AGENTCTL_LLM_API_KEY or CEREBRAS_API_KEY)")
+	if os.Getenv("AGENTCTL_LLM_API_KEY") == "" &&
+		os.Getenv("CEREBRAS_API_KEY") == "" &&
+		os.Getenv("GROQ_API_KEY") == "" &&
+		os.Getenv("OPENROUTER_API_KEY") == "" {
+		t.Skip("skipping companion memory test: requires LLM API key (set AGENTCTL_LLM_API_KEY or provider-specific *_API_KEY)")
 	}
 	root := t.TempDir()
 	ctx := context.Background()
@@ -636,10 +651,20 @@ func TestDaemon_CompanionMemory(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, as.Close())
 
-	// Setup fake LLM with responses
-	fakeLLM := NewFakeLLM()
-	fakeLLM.Responses = []string{
-		"thought: I will greet the user.\naction: <action><tool_name>Finish</tool_name><arguments><arg key=\"result\">Hello! Nice to meet you, John!</arg></arguments></action>\nanswer: Hello! Nice to meet you, John!",
+	provider := os.Getenv("AGENTCTL_LLM_PROVIDER")
+	apiKey := os.Getenv("AGENTCTL_LLM_API_KEY")
+	if provider == "" || apiKey == "" {
+		switch {
+		case os.Getenv("CEREBRAS_API_KEY") != "":
+			provider = "cerebras"
+			apiKey = os.Getenv("CEREBRAS_API_KEY")
+		case os.Getenv("GROQ_API_KEY") != "":
+			provider = "groq"
+			apiKey = os.Getenv("GROQ_API_KEY")
+		case os.Getenv("OPENROUTER_API_KEY") != "":
+			provider = "openrouter"
+			apiKey = os.Getenv("OPENROUTER_API_KEY")
+		}
 	}
 
 	opts := Options{
@@ -650,21 +675,8 @@ func TestDaemon_CompanionMemory(t *testing.T) {
 		MaxPollMessages:       10,
 		UseMemoryDedupe:       true,
 		EnableCompanionMemory: true, // Enable companion memory
-		AgentFactory: func(ctx context.Context, a agent.Agent, r *tools.Registry) (agents.Agent, error) {
-			dspyAgent := react.NewReActAgent(a.ID, a.Role)
-			sig := core.NewSignature(
-				[]core.InputField{
-					{Field: core.NewField("task", core.WithDescription("task"))},
-				},
-				[]core.OutputField{
-					{Field: core.NewField("result", core.WithDescription("result"))},
-				},
-			)
-			if err := dspyAgent.Initialize(fakeLLM, sig); err != nil {
-				return nil, err
-			}
-			return dspyAgent, nil
-		},
+		LLMProvider:           provider,
+		LLMAPIKey:             apiKey,
 	}
 
 	// Open mailbox and send ask message

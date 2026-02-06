@@ -26,7 +26,7 @@ it), without adding new wire fields or changing error semantics.
 
 - **Section B (Input/output + path safety)**
   - B1/B2/B3 line up cleanly with §5.2–5.4 in
-    [code_symbol_index_and_swe_grep.md](cci:7://file:///Users/jkatigbak/repos/personal/agentctl/docs/spec/code_symbol_index_and_swe_grep.md:0:0-0:0):
+    [code_symbol_index_and_swe_grep.md](cci:7://file://docs/spec/code_symbol_index_and_swe_grep.md:0:0-0:0):
     input fields, path validation rules, and output envelope + CAS behavior are
     all consistent.
   - **Nice-to-have clarifications (already implied but worth treating as
@@ -72,7 +72,7 @@ we design Phase 5.
   - A short doc snippet in `docs/start/` (e.g. a one‑liner in an existing index)
     pointing to:
     - Phase 5 todo spec and
-      [code_symbol_index_and_swe_grep.md](cci:7://file:///Users/jkatigbak/repos/personal/agentctl/docs/spec/code_symbol_index_and_swe_grep.md:0:0-0:0)
+      [code_symbol_index_and_swe_grep.md](cci:7://file://docs/spec/code_symbol_index_and_swe_grep.md:0:0-0:0)
       §5.
   - No semantic behavior yet; just argument parsing stub + a simple
     `status:"error"` envelope on empty stdin.

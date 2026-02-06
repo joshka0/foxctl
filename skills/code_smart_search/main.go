@@ -19,6 +19,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
 	errs "github.com/jkatigb/agentctl/internal/platform/errors"
+	ws "github.com/jkatigb/agentctl/internal/platform/workspace"
 	"github.com/jkatigb/agentctl/internal/retrieval"
 	"github.com/jkatigb/agentctl/internal/storage/memory"
 )
@@ -100,7 +101,7 @@ func main() {
 func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	// Apply defaults
 	if in.WorkspaceID == "" {
-		in.WorkspaceID = rc.PathValidator.Workspace()
+		in.WorkspaceID = ws.ID(rc.PathValidator.Workspace())
 	}
 	if len(in.Sources) == 0 {
 		in.Sources = []string{"symbols", "ripgrep"}

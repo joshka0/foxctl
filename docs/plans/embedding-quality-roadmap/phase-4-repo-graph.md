@@ -795,9 +795,9 @@ agentctl repoindex expand "<repo_key>::pkg:github.com/user/repo/internal/auth" \
 ### Future: Agent Tools
 
 Phase 7 will wrap these as agent tools:
-- `repo.index.search` - Find starting points
-- `repo.index.expand` - Navigate relationships
-- `repo.index.open` - Get node details
+- `repo_index_search` - Find starting points
+- `repo_index_expand` - Navigate relationships
+- `repo_index_open` - Get node details
 
 ---
 

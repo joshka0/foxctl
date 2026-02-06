@@ -9,14 +9,14 @@ import (
 	"path/filepath"
 	"strings"
 
-	dstools "github.com/XiaoConstantine/dspy-go/pkg/tools"
+	tooling "github.com/jkatigb/agentctl/internal/tooling"
 	models "github.com/XiaoConstantine/mcp-go/pkg/model"
 )
 
 // registerFSTools registers filesystem tools.
 func (r *Registry) registerFSTools() error {
 	// fs.read_file
-	readFileTool := dstools.NewFuncTool(
+	readFileTool := tooling.NewFuncTool(
 		"fs.read_file",
 		"Read the contents of a file. Returns the text content with size limits.",
 		models.InputSchema{
@@ -40,7 +40,7 @@ func (r *Registry) registerFSTools() error {
 	}
 
 	// fs.list_dir
-	listDirTool := dstools.NewFuncTool(
+	listDirTool := tooling.NewFuncTool(
 		"fs.list_dir",
 		"List contents of a directory. Returns file and directory names with basic metadata.",
 		models.InputSchema{

@@ -5,12 +5,16 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/XiaoConstantine/dspy-go/pkg/agents"
 	"github.com/jkatigb/agentctl/internal/actor"
 	"github.com/jkatigb/agentctl/internal/actor/memory"
 	agentdomain "github.com/jkatigb/agentctl/internal/domain/agent"
 	"github.com/jkatigb/agentctl/internal/domain/envelope"
 )
+
+// AgentExecutor abstracts agent execution for handlers.
+type AgentExecutor interface {
+	Execute(ctx context.Context, input map[string]any) (map[string]any, error)
+}
 
 // Handler defines the interface for role-specific message handlers.
 type Handler interface {
@@ -18,13 +22,13 @@ type Handler interface {
 	Role() string
 
 	// HandleAsk processes an ask message and returns a reply.
-	HandleAsk(ctx context.Context, msg *actor.Message, agent agents.Agent, mem *MemoryContext) (*actor.Message, error)
+	HandleAsk(ctx context.Context, msg *actor.Message, agent AgentExecutor, mem *MemoryContext) (*actor.Message, error)
 
 	// HandleCmd processes a command message.
-	HandleCmd(ctx context.Context, msg *actor.Message, agent agents.Agent, mem *MemoryContext) (*actor.Message, error)
+	HandleCmd(ctx context.Context, msg *actor.Message, agent AgentExecutor, mem *MemoryContext) (*actor.Message, error)
 
 	// HandleEvent processes an event message.
-	HandleEvent(ctx context.Context, msg *actor.Message, agent agents.Agent, mem *MemoryContext) error
+	HandleEvent(ctx context.Context, msg *actor.Message, agent AgentExecutor, mem *MemoryContext) error
 }
 
 // Registry holds registered handlers by role.
@@ -153,7 +157,7 @@ func (m *MemoryContext) AppendTurn(ctx context.Context, role, content string) {
 }
 
 // runAgentTurn executes a single agent turn with the given prompt.
-func runAgentTurn(ctx context.Context, agent agents.Agent, prompt string, mem *MemoryContext) (string, error) {
+func runAgentTurn(ctx context.Context, agent AgentExecutor, prompt string, mem *MemoryContext) (string, error) {
 	// Add memory context if available
 	fullPrompt := prompt
 	if mem != nil {

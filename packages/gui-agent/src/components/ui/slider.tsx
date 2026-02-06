@@ -40,11 +40,11 @@ const Slider = React.forwardRef<HTMLInputElement, SliderProps>(
           step={step}
           value={currentValue}
           onChange={handleChange}
-          className="absolute w-full h-4 opacity-0 cursor-pointer"
+          className="absolute w-full h-4 opacity-0 cursor-pointer peer"
           {...props}
         />
         <div
-          className="absolute h-3.5 w-3.5 rounded-full border-2 border-primary bg-background ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 pointer-events-none"
+          className="absolute h-3.5 w-3.5 rounded-full border-2 border-primary bg-background ring-offset-background transition-colors peer-focus-visible:outline-none peer-focus-visible:ring-2 peer-focus-visible:ring-ring peer-focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 pointer-events-none"
           style={{ left: `calc(${percentage}% - 7px)` }}
         />
       </div>

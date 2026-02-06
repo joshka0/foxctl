@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/XiaoConstantine/dspy-go/pkg/agents"
 	"github.com/jkatigb/agentctl/internal/actor"
 )
 
@@ -27,7 +26,7 @@ func NewCoderHandler() *CoderHandler {
 }
 
 // HandleAsk processes ask messages for coder role.
-func (h *CoderHandler) HandleAsk(ctx context.Context, msg *actor.Message, agent agents.Agent, mem *MemoryContext) (*actor.Message, error) {
+func (h *CoderHandler) HandleAsk(ctx context.Context, msg *actor.Message, agent AgentExecutor, mem *MemoryContext) (*actor.Message, error) {
 	askData, err := parseAskData(msg.Body)
 	if err != nil {
 		return nil, fmt.Errorf("parse ask: %w", err)
@@ -71,7 +70,7 @@ func (h *CoderHandler) HandleAsk(ctx context.Context, msg *actor.Message, agent 
 }
 
 // HandleCmd processes command messages for coder role.
-func (h *CoderHandler) HandleCmd(ctx context.Context, msg *actor.Message, agent agents.Agent, mem *MemoryContext) (*actor.Message, error) {
+func (h *CoderHandler) HandleCmd(ctx context.Context, msg *actor.Message, agent AgentExecutor, mem *MemoryContext) (*actor.Message, error) {
 	cmdData, err := parseCmdData(msg.Body)
 	if err != nil {
 		return nil, fmt.Errorf("parse cmd: %w", err)
@@ -157,7 +156,7 @@ func (h *CoderHandler) HandleCmd(ctx context.Context, msg *actor.Message, agent 
 }
 
 // HandleEvent processes event messages for coder role.
-func (h *CoderHandler) HandleEvent(ctx context.Context, msg *actor.Message, _ agents.Agent, mem *MemoryContext) error {
+func (h *CoderHandler) HandleEvent(ctx context.Context, msg *actor.Message, _ AgentExecutor, mem *MemoryContext) error {
 	eventData, err := parseEventData(msg.Body)
 	if err != nil {
 		return fmt.Errorf("parse event: %w", err)

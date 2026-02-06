@@ -27,6 +27,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/platform/config"
 	"github.com/jkatigb/agentctl/internal/platform/env"
 	errs "github.com/jkatigb/agentctl/internal/platform/errors"
+	"github.com/jkatigb/agentctl/internal/platform/workspace"
 	"github.com/jkatigb/agentctl/internal/sessionkit"
 	"github.com/jkatigb/agentctl/internal/storage/blackboard"
 	"github.com/jkatigb/agentctl/internal/storage/graph"
@@ -301,7 +302,8 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 		return skillerr.Arg(err.Error(), skillerr.WithHint(opHint))
 	}
 
-	workspaceID := workspaceutil.ResolveID(in.WorkspaceID, rc.Workspace)
+	workspaceSelector := workspaceutil.ResolveID(in.WorkspaceID, rc.Workspace)
+	workspaceID := workspace.CanonicalID(workspaceSelector)
 
 	var data map[string]any
 

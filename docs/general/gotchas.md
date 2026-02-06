@@ -305,7 +305,7 @@ AGENTCTL_OBS_DIR=$HOME/.agentctl/observability
 
 **Problem:** Can't use Claude Max subscription with agent daemons.
 
-**Cause:** dspy-go requires API keys, Claude Max uses OAuth.
+**Cause:** LLM providers require API keys, Claude Max uses OAuth.
 
 **Current workaround:** Use OpenRouter:
 

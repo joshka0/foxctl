@@ -5,17 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/XiaoConstantine/dspy-go/pkg/agents"
-	"github.com/XiaoConstantine/dspy-go/pkg/agents/react"
-	"github.com/XiaoConstantine/dspy-go/pkg/core"
-	"github.com/XiaoConstantine/dspy-go/pkg/llms"
-	dstools "github.com/XiaoConstantine/dspy-go/pkg/tools"
-	mcpmodels "github.com/XiaoConstantine/mcp-go/pkg/model"
 	"github.com/oklog/ulid/v2"
 	"github.com/rs/zerolog"
 
@@ -27,37 +20,27 @@ import (
 	"github.com/jkatigb/agentctl/internal/domain/envelope"
 	"github.com/jkatigb/agentctl/internal/engine"
 	"github.com/jkatigb/agentctl/internal/hooks"
-	llmproviders "github.com/jkatigb/agentctl/internal/providers/llm"
 	"github.com/jkatigb/agentctl/internal/storage"
 )
 
-// AgentActor wraps a dspy-go ReActAgent as a reactive actor.
+// AgentActor wraps an LLMChatEngine as a reactive actor.
 //
 // It provides message-driven execution where each agent.ask or agent.cmd
-// message triggers a dspy-go execution turn. The actor integrates with
+// message triggers a single LLMChat turn. The actor integrates with
 // ShortTermMemory for progressive context management.
 //
 // See docs/designs/reactive-actor-system.md for the full design.
 type AgentActor struct {
 	*BaseActor
 
-	// dspyAgent is the underlying dspy-go agent (used when EngineType is "dspy" or empty)
-	dspyAgent agents.Agent
-
-	// agentEngine is the alternative engine (used when EngineType is "llmchat")
+	// agentEngine is the execution engine for this actor.
 	agentEngine engine.AgentEngine
 
 	// toolRunner is the tool runner for the llmchat engine (stored for SessionID updates)
 	toolRunner *engine.ToolRunner
 
-	// engineType determines which engine to use: "dspy" (default) or "llmchat"
-	engineType string
-
 	// toolsRegistry holds available tools
 	toolsRegistry *agenttools.Registry
-
-	// llm is the language model for the agent (used by dspy-go)
-	llm core.LLM
 
 	// agentConfig holds agent-specific configuration
 	agentConfig agenttypes.AgentConfig
@@ -94,12 +77,8 @@ type AgentActorConfig struct {
 	// ActorConfig is the base actor configuration
 	ActorConfig Config
 
-	// AgentConfig is the dspy-go agent configuration
+	// AgentConfig is the agent configuration
 	AgentConfig agenttypes.AgentConfig
-
-	// EngineType selects the execution engine: "dspy" (default) or "llmchat"
-	// When "llmchat", uses the OpenAI-compatible LLMChatEngine instead of dspy-go.
-	EngineType string
 
 	// LLMProvider is the LLM provider (gemini, openai, anthropic, groq, openrouter)
 	LLMProvider string
@@ -152,16 +131,9 @@ func NewAgentActor(cfg AgentActorConfig, opts ...AgentActorOption) (*AgentActor,
 	// Create base actor with lifecycle hooks
 	baseActor := NewBaseActor(cfg.ActorConfig)
 
-	// Default engine type
-	engineType := cfg.EngineType
-	if engineType == "" {
-		engineType = "dspy"
-	}
-
 	actor := &AgentActor{
 		BaseActor:     baseActor,
 		agentConfig:   cfg.AgentConfig,
-		engineType:    engineType,
 		hooks:         cfg.Hooks,
 		workspaceRoot: cfg.WorkspaceRoot,
 		logger:        cfg.Logger,
@@ -183,19 +155,9 @@ func NewAgentActor(cfg AgentActorConfig, opts ...AgentActorOption) (*AgentActor,
 		return nil, fmt.Errorf("initialize tools: %w", err)
 	}
 
-	// Initialize engine based on type
-	switch engineType {
-	case "llmchat":
-		if err := actor.initializeLLMChatEngine(cfg); err != nil {
-			return nil, fmt.Errorf("initialize llmchat engine: %w", err)
-		}
-	default: // "dspy"
-		if err := actor.initializeLLM(cfg); err != nil {
-			return nil, fmt.Errorf("initialize LLM: %w", err)
-		}
-		if err := actor.initializeDspyAgent(cfg); err != nil {
-			return nil, fmt.Errorf("initialize dspy agent: %w", err)
-		}
+	// Initialize engine
+	if err := actor.initializeLLMChatEngine(cfg); err != nil {
+		return nil, fmt.Errorf("initialize llmchat engine: %w", err)
 	}
 
 	// Use pre-constructed short-term memory if provided
@@ -213,65 +175,6 @@ func NewAgentActor(cfg AgentActorConfig, opts ...AgentActorOption) (*AgentActor,
 	actor.RegisterHandler("console.cmd", actor.handleConsoleCmd)
 
 	return actor, nil
-}
-
-// initializeLLM sets up the language model.
-func (a *AgentActor) initializeLLM(cfg AgentActorConfig) error {
-	llms.EnsureFactory()
-
-	// Resolve provider: config → env → default
-	provider := cfg.LLMProvider
-	if provider == "" {
-		provider = os.Getenv("AGENTCTL_LLM_PROVIDER")
-	}
-	if provider == "" {
-		provider = "gemini"
-	}
-
-	// Resolve model: config → env → provider default
-	model := cfg.LLMModel
-	if model == "" {
-		model = os.Getenv("AGENTCTL_LLM_MODEL")
-	}
-	if model == "" {
-		model = llmproviders.DefaultModelForProvider(provider)
-	}
-
-	// Resolve API key: config → env
-	apiKey := cfg.LLMAPIKey
-	if apiKey == "" {
-		apiKey = os.Getenv("AGENTCTL_LLM_API_KEY")
-	}
-	if apiKey == "" {
-		return fmt.Errorf("LLM API key not configured for provider %q", provider)
-	}
-
-	// Create LLM based on provider
-	var llm core.LLM
-	var err error
-	switch provider {
-	case "gemini", "":
-		llm, err = llms.NewGeminiLLM(apiKey, core.ModelID(model))
-	case "openai":
-		llm, err = llms.NewOpenAILLM(core.ModelID(model), llms.WithAPIKey(apiKey))
-	case "anthropic":
-		config := core.ProviderConfig{Name: "anthropic", APIKey: apiKey}
-		llm, err = llms.NewAnthropicLLMFromConfig(context.Background(), config, core.ModelID(model))
-	case "groq":
-		llm, err = llms.NewOpenAICompatible("groq", core.ModelID(model),
-			"https://api.groq.com/openai/v1", llms.WithAPIKey(apiKey))
-	case "openrouter":
-		llm, err = llms.NewOpenAICompatible("openrouter", core.ModelID(model),
-			"https://openrouter.ai/api/v1", llms.WithAPIKey(apiKey))
-	default:
-		return fmt.Errorf("unsupported LLM provider: %q", provider)
-	}
-	if err != nil {
-		return fmt.Errorf("create %s LLM: %w", provider, err)
-	}
-
-	a.llm = llm
-	return nil
 }
 
 // initializeTools sets up the tools registry.
@@ -303,49 +206,7 @@ func (a *AgentActor) initializeTools(cfg AgentActorConfig) error {
 	return nil
 }
 
-// initializeDspyAgent creates the dspy-go ReActAgent.
-func (a *AgentActor) initializeDspyAgent(cfg AgentActorConfig) error {
-	// Create ReActAgent with options
-	maxIterations := cfg.AgentConfig.MaxIterations
-	if maxIterations <= 0 {
-		maxIterations = 10
-	}
-
-	timeout := cfg.AgentConfig.Timeout
-	if timeout <= 0 {
-		timeout = 30 * time.Minute
-	}
-
-	opts := []react.Option{
-		react.WithMaxIterations(maxIterations),
-		react.WithTimeout(timeout),
-	}
-
-	agentID := fmt.Sprintf("%s:%s", cfg.AgentConfig.Role, cfg.AgentConfig.ActorID)
-	agentName := fmt.Sprintf("%s Agent", cfg.AgentConfig.Role)
-
-	agent := react.NewReActAgent(agentID, agentName, opts...)
-
-	// Build signature based on role
-	signature := buildAgentSignature(cfg.AgentConfig.Role)
-
-	// Initialize agent with LLM and signature
-	if err := agent.Initialize(a.llm, *signature); err != nil {
-		return fmt.Errorf("initialize agent: %w", err)
-	}
-
-	// Register tools
-	for _, tool := range a.toolsRegistry.List() {
-		if err := agent.RegisterTool(tool); err != nil {
-			return fmt.Errorf("register tool %s: %w", tool.Name(), err)
-		}
-	}
-
-	a.dspyAgent = agent
-	return nil
-}
-
-// initializeLLMChatEngine sets up the LLMChatEngine as an alternative to dspy-go.
+// initializeLLMChatEngine sets up the LLMChatEngine for agent execution.
 func (a *AgentActor) initializeLLMChatEngine(cfg AgentActorConfig) error {
 	// Create LLMChatEngine config
 	engineCfg := engine.DefaultLLMChatConfig()
@@ -371,7 +232,7 @@ func (a *AgentActor) initializeLLMChatEngine(cfg AgentActorConfig) error {
 	}
 
 	// Create tool executor adapter from registry
-	toolExecutor := newRegistryToolExecutor(a.toolsRegistry)
+	toolExecutor := agenttools.NewRegistryToolExecutor(a.toolsRegistry)
 
 	// Create tool runner with hook integration
 	// SessionID is set in onStart when the session is generated
@@ -390,84 +251,6 @@ func (a *AgentActor) initializeLLMChatEngine(cfg AgentActorConfig) error {
 
 	a.agentEngine = llmEngine
 	return nil
-}
-
-// registryToolExecutor adapts agenttools.Registry to engine.ToolExecutor.
-type registryToolExecutor struct {
-	registry *agenttools.Registry
-}
-
-func newRegistryToolExecutor(registry *agenttools.Registry) *registryToolExecutor {
-	return &registryToolExecutor{registry: registry}
-}
-
-// Execute implements engine.ToolExecutor.
-func (r *registryToolExecutor) Execute(ctx context.Context, name string, args json.RawMessage) (string, error) {
-	// Get tool from underlying registry
-	coreTool, err := r.registry.GetRegistry().Get(name)
-	if err != nil {
-		return "", fmt.Errorf("tool %q not found: %w", name, err)
-	}
-
-	// Type-assert to FuncTool to access Call() method which returns *CallToolResult
-	funcTool, ok := coreTool.(*dstools.FuncTool)
-	if !ok {
-		return "", fmt.Errorf("tool %q is not a FuncTool", name)
-	}
-
-	// Parse args into map
-	var argsMap map[string]any
-	if len(args) > 0 {
-		if err := json.Unmarshal(args, &argsMap); err != nil {
-			return "", fmt.Errorf("parse tool args: %w", err)
-		}
-	}
-
-	// Call tool - returns (*mcpmodels.CallToolResult, error)
-	ctx = agenttools.WithHookDispatch(ctx)
-	result, err := funcTool.Call(ctx, argsMap)
-	if err != nil {
-		return "", err
-	}
-
-	// Extract text from CallToolResult
-	if result == nil || len(result.Content) == 0 {
-		return "", nil
-	}
-
-	// Get text from first content item
-	for _, content := range result.Content {
-		if tc, ok := content.(mcpmodels.TextContent); ok {
-			return tc.Text, nil
-		}
-	}
-
-	// Fallback: marshal the entire content as JSON
-	b, err := json.Marshal(result.Content)
-	if err != nil {
-		return "", fmt.Errorf("marshal result: %w", err)
-	}
-	return string(b), nil
-}
-
-// List implements engine.ToolExecutor.
-func (r *registryToolExecutor) List() []engine.ToolDef {
-	tools := r.registry.List()
-	defs := make([]engine.ToolDef, len(tools))
-	for i, t := range tools {
-		schema, _ := json.Marshal(t.InputSchema())
-		defs[i] = engine.ToolDef{
-			Name:        t.Name(),
-			Description: t.Description(),
-			Parameters:  schema,
-		}
-	}
-	return defs
-}
-
-// buildAgentSignature creates the signature for the agent based on its role.
-func buildAgentSignature(role agenttypes.AgentRole) *core.Signature {
-	return agentprompt.BuildSignature(role)
 }
 
 // onStart is called when the actor starts.
@@ -583,12 +366,13 @@ func (a *AgentActor) handleAsk(ctx context.Context, msg *Message) (*Message, err
 			return nil, fmt.Errorf("blocked by LLMRequest hook: %s", llmReqResult.Output.Reason)
 		}
 
-		// Execute turn using configured engine
+		// Execute turn using the LLMChatEngine
 		var execErr error
 		result = ""
 
-		if a.engineType == "llmchat" && a.agentEngine != nil {
-			// Use LLMChatEngine
+		if a.agentEngine == nil {
+			execErr = fmt.Errorf("agent engine not configured")
+		} else {
 			engineInput := engine.EngineInput{
 				Messages:     []engine.Message{engine.NewUserMessage(prompt)},
 				Tools:        a.getEngineTools(),
@@ -605,17 +389,6 @@ func (a *AgentActor) handleAsk(ctx context.Context, msg *Message) (*Message, err
 				execErr = fmt.Errorf("engine error: %s", output.Error)
 			} else {
 				result = output.AssistantText
-			}
-		} else {
-			// Use dspy-go
-			input := map[string]any{
-				"task": prompt,
-			}
-			resultMap, err := a.dspyAgent.Execute(turnCtx, input)
-			if err != nil {
-				execErr = err
-			} else {
-				result = extractResult(resultMap)
 			}
 		}
 
@@ -704,12 +477,8 @@ func (a *AgentActor) handleCmd(ctx context.Context, msg *Message) (*Message, err
 	case "run_skill":
 		return nil, fmt.Errorf("run_skill not yet implemented")
 	case "run_turn", "do_work":
-		// Execute dspy-go turn with cmdData.Args as context
+		// Execute a single LLMChat turn with cmdData.Args as context
 		prompt := fmt.Sprintf("Command: %s\nArgs: %v", cmdData.Action, cmdData.Args)
-
-		input := map[string]any{
-			"task": prompt,
-		}
 
 		timeout := 10 * time.Minute
 		if a.agentConfig.Timeout > 0 {
@@ -718,9 +487,25 @@ func (a *AgentActor) handleCmd(ctx context.Context, msg *Message) (*Message, err
 		turnCtx, cancel := context.WithTimeout(ctx, timeout)
 		defer cancel()
 
-		_, err := a.dspyAgent.Execute(turnCtx, input)
+		if a.agentEngine == nil {
+			return nil, fmt.Errorf("agent engine not configured")
+		}
+
+		engineInput := engine.EngineInput{
+			Messages:     []engine.Message{engine.NewUserMessage(prompt)},
+			Tools:        a.getEngineTools(),
+			SystemPrompt: buildSystemPromptString(a.agentConfig.Role),
+			Workspace:    a.workspaceRoot,
+			SessionID:    a.sessionID,
+			ActorID:      a.ID(),
+			TurnID:       ulid.Make().String(),
+		}
+		output, err := a.agentEngine.Run(turnCtx, engineInput)
 		if err != nil {
-			return nil, fmt.Errorf("dspy execution failed: %w", err)
+			return nil, fmt.Errorf("engine execution failed: %w", err)
+		}
+		if output.StopReason == engine.StopReasonError {
+			return nil, fmt.Errorf("engine error: %s", output.Error)
 		}
 
 		return nil, nil // Commands are fire-and-forget
@@ -831,8 +616,9 @@ func (a *AgentActor) handleConsoleAsk(ctx context.Context, msg *Message) (*Messa
 	var status string
 	var execErr error
 
-	if a.engineType == "llmchat" && a.agentEngine != nil {
-		// Use LLMChatEngine
+	if a.agentEngine == nil {
+		execErr = fmt.Errorf("agent engine not configured")
+	} else {
 		engineInput := engine.EngineInput{
 			Messages:     []engine.Message{engine.NewUserMessage(prompt)},
 			Tools:        a.getEngineTools(),
@@ -849,16 +635,6 @@ func (a *AgentActor) handleConsoleAsk(ctx context.Context, msg *Message) (*Messa
 			execErr = fmt.Errorf("engine error: %s", output.Error)
 		} else {
 			response = output.AssistantText
-			status = "ok"
-		}
-	} else {
-		// Use dspy-go
-		input := map[string]any{"task": prompt}
-		resultMap, err := a.dspyAgent.Execute(execCtx, input)
-		if err != nil {
-			execErr = err
-		} else {
-			response = extractResult(resultMap)
 			status = "ok"
 		}
 	}
@@ -1007,41 +783,6 @@ func (a *AgentActor) emitConsoleEvent(toNS, askID, correlID string, seq, iterati
 	}
 }
 
-// extractResult extracts the result string from a dspy-go execution result.
-func extractResult(resultMap map[string]any) string {
-	if resultMap == nil {
-		return "Task completed"
-	}
-
-	// Priority order: result, answer, output, thought
-	if r, ok := resultMap["result"].(string); ok && r != "" {
-		return r
-	}
-	if r, ok := resultMap["answer"].(string); ok && r != "" {
-		return r
-	}
-	if r, ok := resultMap["output"].(string); ok && r != "" {
-		return r
-	}
-	if r, ok := resultMap["thought"].(string); ok && r != "" {
-		return r
-	}
-
-	// Last resort: format the map but exclude internal ReAct fields
-	cleaned := make(map[string]any)
-	for k, v := range resultMap {
-		if k == "action" || k == "observation" || k == "conversation_context" {
-			continue
-		}
-		cleaned[k] = v
-	}
-	if len(cleaned) > 0 {
-		return fmt.Sprintf("%v", cleaned)
-	}
-
-	return "Task completed"
-}
-
 func buildStopContinuation(result string, context string) string {
 	result = strings.TrimSpace(result)
 	context = strings.TrimSpace(context)
@@ -1064,11 +805,6 @@ func (a *AgentActor) SetReplySender(fn func(ctx context.Context, msg *Message) e
 	a.sendReply = fn
 	// Also set on base actor
 	a.replySender = fn
-}
-
-// Agent returns the underlying dspy-go agent for testing.
-func (a *AgentActor) Agent() agents.Agent {
-	return a.dspyAgent
 }
 
 // ToolsRegistry returns the tools registry for testing.
@@ -1186,14 +922,9 @@ func buildSystemPromptString(role agenttypes.AgentRole) string {
 	return agentprompt.Instruction(role)
 }
 
-// Engine returns the underlying AgentEngine for testing (nil if using dspy-go).
+// Engine returns the underlying AgentEngine for testing.
 func (a *AgentActor) Engine() engine.AgentEngine {
 	return a.agentEngine
-}
-
-// EngineType returns the configured engine type ("dspy" or "llmchat").
-func (a *AgentActor) EngineType() string {
-	return a.engineType
 }
 
 // Ensure AgentActor implements Actor interface.

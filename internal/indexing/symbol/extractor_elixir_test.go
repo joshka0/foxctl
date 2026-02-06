@@ -532,3 +532,55 @@ func TestElixirExtractorExtractCalls(t *testing.T) {
 		t.Errorf("ExtractCalls should return nil, got %v", calls)
 	}
 }
+
+func TestElixirExtractorExtractCalls_ModuleRefs(t *testing.T) {
+	source := `defmodule MyApp.A do
+  alias MyApp.B
+
+  def foo do
+    MyApp.B.bar()
+    %MyApp.C{}
+  end
+end
+
+defmodule MyApp.B do
+  def bar, do: :ok
+end
+`
+
+	extractor := NewElixirExtractor()
+	syms, err := extractor.Extract(context.Background(), "lib/app.ex", []byte(source))
+	if err != nil {
+		t.Fatalf("extract: %v", err)
+	}
+
+	var modA Symbol
+	for _, sym := range syms {
+		if sym.Name == "MyApp.A" {
+			modA = sym
+			break
+		}
+	}
+	if modA.Name == "" {
+		t.Fatalf("missing MyApp.A module symbol")
+	}
+
+	calls, err := extractor.ExtractCalls(context.Background(), modA, []byte(source))
+	if err != nil {
+		t.Fatalf("extract calls: %v", err)
+	}
+
+	want := map[string]bool{"MyApp.B": true, "MyApp.C": true}
+	for name := range want {
+		found := false
+		for _, call := range calls {
+			if call == name {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("expected module ref %q in %v", name, calls)
+		}
+	}
+}

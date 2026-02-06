@@ -38,7 +38,7 @@ The actor system provides:
 - Supervisor: Manages actor lifecycles and message routing
 - Watcher: Reactive notifications from SQLite triggers
 - EventBus: Cross-actor event distribution
-- AgentActor: dspy-go ReActAgent as reactive actors`,
+- AgentActor: LLMChatEngine-backed reactive actors`,
 }
 
 var actorSysSupervisorCmd = &cobra.Command{

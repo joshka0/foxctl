@@ -1,10 +1,6 @@
 package agentprompt
 
-import (
-	"github.com/XiaoConstantine/dspy-go/pkg/core"
-
-	agenttypes "github.com/jkatigb/agentctl/internal/agent/types"
-)
+import agenttypes "github.com/jkatigb/agentctl/internal/agent/types"
 
 // Instruction returns the agent system instruction for a role.
 func Instruction(role agenttypes.AgentRole) string {
@@ -185,15 +181,5 @@ Always provide: file paths, expected sizes, which tools to use, what to look for
 	}
 }
 
-// BuildSignature creates a dspy-go signature for the agent role.
-func BuildSignature(role agenttypes.AgentRole) *core.Signature {
-	sig := core.NewSignature(
-		[]core.InputField{
-			{Field: core.NewField("task", core.WithDescription("The task to be completed by the agent"))},
-		},
-		[]core.OutputField{
-			{Field: core.NewField("result", core.WithDescription("The final result or answer from completing the task"))},
-		},
-	).WithInstruction(Instruction(role))
-	return &sig
-}
+// BuildSignature was removed with the dspy-go migration. Use Instruction(role)
+// to obtain the system prompt for LLMChatEngine-based agents.

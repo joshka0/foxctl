@@ -1,44 +1,40 @@
 package verification
 
 import (
-	"github.com/XiaoConstantine/dspy-go/pkg/core"
+	"encoding/json"
+	"fmt"
+	"strings"
 )
 
-// BuildBaselineSignature creates the signature for the baseline (drafter) agent.
-// This agent generates an initial detailed response that will be verified.
-func BuildBaselineSignature() *core.Signature {
-	sig := core.NewSignature(
-		[]core.InputField{
-			{Field: core.NewField("question", core.WithDescription("User query to answer"))},
-		},
-		[]core.OutputField{
-			{Field: core.NewField("baseline_response", core.WithDescription("Initial detailed response to the question"))},
-		},
-	).WithInstruction(`You are a knowledgeable assistant. Provide a detailed, comprehensive answer to the question.
+// baselineSystemPrompt returns the system prompt for baseline generation.
+func baselineSystemPrompt() string {
+	return `You are a knowledgeable assistant. Provide a detailed, comprehensive answer to the question.
 Include specific facts, data points, and claims that can be verified.
-Structure your response clearly with distinct, verifiable statements.`)
-
-	return &sig
+Structure your response clearly with distinct, verifiable statements.`
 }
 
-// BuildDraftVerifierSignature creates the signature for verification agents.
-// Uses single combined input due to dspy-go Predict module limitation with multi-input fields.
-func BuildDraftVerifierSignature() *core.Signature {
-	sig := core.NewSignature(
-		[]core.InputField{
-			{Field: core.NewField("verification_query", core.WithDescription("Context and claim to verify"))},
-		},
-		[]core.OutputField{
-			{Field: core.NewField("draft_verdict", core.WithDescription("Source: [reason] -> Verdict: [True/False/Uncertain]"))},
-		},
-	).WithInstruction("Verify the claim. Output: Source: [reason] -> Verdict: [True/False/Uncertain]")
-
-	return &sig
+func baselineUserPrompt(question string, context map[string]any) string {
+	if len(context) == 0 {
+		return fmt.Sprintf("Question: %s", question)
+	}
+	contextJSON, err := json.Marshal(context)
+	if err != nil {
+		return fmt.Sprintf("Question: %s\nContext: unavailable (%v)", question, err)
+	}
+	return fmt.Sprintf("Question: %s\nContext: %s", question, string(contextJSON))
 }
 
-// BuildRefinerSignature creates the signature for the refinement agent.
-// This agent takes the baseline and verification notes to produce a corrected final answer.
-func BuildRefinerSignature(mode CoVeMode) *core.Signature {
+// draftVerifierSystemPrompt returns the system prompt for claim verification.
+func draftVerifierSystemPrompt() string {
+	return "Verify the claim. Output: Source: [reason] -> Verdict: [True/False/Uncertain]"
+}
+
+func draftVerifierUserPrompt(question, claim string) string {
+	return fmt.Sprintf("Context: %s\nClaim: %s", question, claim)
+}
+
+// refinerSystemPrompt returns the system prompt for refinement.
+func refinerSystemPrompt(mode CoVeMode) string {
 	instruction := `You are a Refiner. Your job is to produce an accurate final answer by incorporating verification feedback.
 
 PROCESS:
@@ -52,7 +48,8 @@ OUTPUT:
 - final_answer: The corrected, accurate response
 - corrections_made: List each correction as "Original: [wrong claim] -> Corrected: [fixed claim] (reason: [why])"
 
-If no corrections needed, state "No corrections needed - all claims verified as accurate."`
+If no corrections needed, state "No corrections needed - all claims verified as accurate."
+Return a JSON object with keys "final_answer" and "corrections_made".`
 
 	if mode == CoVeModeGate {
 		instruction = `You are a Refiner acting as a strict completion gate.
@@ -70,38 +67,26 @@ Rules:
 - Treat Uncertain as NOT DONE.
 - BLOCKERS: 0-3 bullets; if DONE, write "- none".
 - EVIDENCE: 0-3 bullets; cite claim IDs and verifier evidence from verification_notes; if none, write "- none".
-- Keep bullets short (<= 120 chars). 
-- Set corrections_made to exactly: "No corrections needed."`
+- Keep bullets short (<= 120 chars).
+- Set corrections_made to exactly: "No corrections needed."
+Return a JSON object with keys "final_answer" and "corrections_made".`
 	}
 
-	sig := core.NewSignature(
-		[]core.InputField{
-			{Field: core.NewField("question", core.WithDescription("The original question"))},
-			{Field: core.NewField("baseline", core.WithDescription("The original response to be refined"))},
-			{Field: core.NewField("verification_notes", core.WithDescription("Aggregated verification results from Draft verifiers"))},
-		},
-		[]core.OutputField{
-			{Field: core.NewField("final_answer", core.WithDescription("Corrected answer incorporating verification feedback"))},
-			{Field: core.NewField("corrections_made", core.WithDescription("List of corrections: 'Original: X -> Corrected: Y (reason)'"))},
-		},
-	).WithInstruction(instruction)
-
-	return &sig
+	return instruction
 }
 
-// BuildClaimExtractorSignature creates the signature for extracting claims from a baseline.
-func BuildClaimExtractorSignature() *core.Signature {
-	sig := core.NewSignature(
-		[]core.InputField{
-			{Field: core.NewField("text", core.WithDescription("Text to extract claims from"))},
-		},
-		[]core.OutputField{
-			{Field: core.NewField("claims", core.WithDescription("JSON array: [{\"id\":\"c1\",\"text\":\"claim\",\"category\":\"factual\"}]"))},
-		},
-	).WithInstruction(`Extract verifiable factual claims as JSON array.
+func refinerUserPrompt(question, baseline, verificationNotes string) string {
+	return fmt.Sprintf("Question: %s\n\nBaseline:\n%s\n\nVerification Notes:\n%s", question, baseline, verificationNotes)
+}
+
+// claimExtractorSystemPrompt returns the system prompt for claim extraction.
+func claimExtractorSystemPrompt() string {
+	return `Extract verifiable factual claims as JSON array.
 Each claim: {"id": "c1", "text": "claim statement", "category": "factual|numerical|temporal"}
 Focus on facts, numbers, dates. Skip opinions.
-Example: [{"id":"c1","text":"Paris is France's capital","category":"factual"}]`)
+Example: [{"id":"c1","text":"Paris is France's capital","category":"factual"}]`
+}
 
-	return &sig
+func claimExtractorUserPrompt(text string) string {
+	return fmt.Sprintf("Text: %s", strings.TrimSpace(text))
 }
