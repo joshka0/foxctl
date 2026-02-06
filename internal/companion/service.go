@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/rs/zerolog"
@@ -28,12 +29,17 @@ const (
 	EngineTypeLLMChat EngineType = "llmchat"
 )
 
+const defaultMaxHistoryTurns = 50
+
 // Service is the companion chat service.
 type Service struct {
 	contextStore contextvar.Store
 	memory       *ConversationMemory
 	config       ServiceConfig
 	logger       zerolog.Logger
+
+	autoCompressMu       sync.Mutex
+	autoCompressInFlight map[string]struct{} // keyed by conversation ID
 }
 
 // ServiceConfig configures the companion service.
@@ -154,7 +160,7 @@ type HookContext struct {
 func DefaultServiceConfig() ServiceConfig {
 	return ServiceConfig{
 		DefaultPersonality:  DefaultRLMPersonality,
-		RequireContextQuery: false,
+		RequireContextQuery: true,
 		MaxIterations:       20,
 		Timeout:             60 * time.Second,
 	}
@@ -185,6 +191,8 @@ func NewService(store contextvar.Store, cfg ServiceConfig) *Service {
 		contextStore: store,
 		config:       cfg,
 		logger:       cfg.Logger,
+
+		autoCompressInFlight: make(map[string]struct{}),
 	}
 
 	// Initialize conversation memory if DB provided
@@ -267,6 +275,15 @@ type ChatRequest struct {
 
 	// StoryDialogueModel overrides ServiceConfig.StoryDialogueModel for story mode (optional).
 	StoryDialogueModel string `json:"story_dialogue_model,omitempty"`
+
+	// MaxHistoryTurns overrides how many prior conversation turns (messages) to include as
+	// message history. This is best-effort: when memory is disabled or empty, no history
+	// is injected.
+	//
+	// Semantics:
+	// - 0: use default (currently 50)
+	// - -1: disable history injection
+	MaxHistoryTurns int `json:"max_history_turns,omitempty"`
 }
 
 // ChatTone captures structured emotion metadata for responses.
@@ -506,6 +523,8 @@ func (s *Service) Chat(ctx context.Context, req ChatRequest) (*ChatResponse, err
 // - Related: engine.NewLLMChatEngine, engine.LLMChatEngine.Run, buildTooling
 // - Keywords: llmchat, provider, model, tool_calls, conversation_id, tools_used
 func (s *Service) chatWithLLMChat(ctx context.Context, req ChatRequest, rlmExecutor *engine.RLMToolExecutor, systemPrompt string, start time.Time) (*ChatResponse, error) {
+	messages, hasHistory := s.buildChatMessages(ctx, req)
+
 	// Create LLM engine in stateless mode
 	engineCfg := engine.LLMChatConfig{
 		Provider:              s.config.LLMProvider,
@@ -527,6 +546,13 @@ func (s *Service) chatWithLLMChat(ctx context.Context, req ChatRequest, rlmExecu
 	if s.config.ExtraToolsOnly && s.config.ExtraToolExecutor != nil {
 		engineCfg.RequireContextQuery = false
 		engineCfg.RLMSystemPromptSuffix = ""
+	}
+
+	// If we have meaningful conversation history, don't force a context query —
+	// the model can see the conversation. Context tools remain available for
+	// long-term memory/preferences but aren't mandatory.
+	if hasHistory && req.RequireContextQuery == nil {
+		engineCfg.RequireContextQuery = false
 	}
 
 	llmEngine, err := engine.NewLLMChatEngine(engineCfg)
@@ -556,10 +582,8 @@ func (s *Service) chatWithLLMChat(ctx context.Context, req ChatRequest, rlmExecu
 
 	input := engine.EngineInput{
 		SystemPrompt: systemPrompt,
-		Messages: []engine.Message{
-			engine.NewUserMessage(req.Message),
-		},
-		Tools: toolDefs,
+		Messages:     messages,
+		Tools:        toolDefs,
 	}
 
 	// Execute
@@ -568,10 +592,13 @@ func (s *Service) chatWithLLMChat(ctx context.Context, req ChatRequest, rlmExecu
 		return nil, fmt.Errorf("engine run: %w", err)
 	}
 
+	// Strip <think>...</think> blocks from reasoning models (e.g., GLM, DeepSeek)
+	responseText := stripThinkTags(output.AssistantText)
+
 	// Build response
 	resp := &ChatResponse{
 		ConversationID: req.ConversationID,
-		Response:       output.AssistantText,
+		Response:       responseText,
 		ContextQueries: rlmExecutor.QueryCount(),
 		DurationMS:     time.Since(start).Milliseconds(),
 		TokenUsage: TokenUsage{
@@ -626,6 +653,57 @@ func (s *Service) chatWithLLMChat(ctx context.Context, req ChatRequest, rlmExecu
 	return resp, nil
 }
 
+// buildChatMessages constructs the message list for a turn by injecting recent conversation
+// history from companion memory (when enabled), followed by the current user message.
+//
+// Index:
+// - Purpose: Provide the LLM with L0 conversation continuity via real message history
+// - Flow: resolve history limit → load turns → map to engine messages → append current user msg
+// - SideEffects: queries the companion memory database
+// - FailureModes: memory query errors or scan issues yield best-effort/no history injection
+// - Related: ConversationMemory.GetConversationMessages
+// - Keywords: history_injection, max_history_turns, companion_turns
+func (s *Service) buildChatMessages(ctx context.Context, req ChatRequest) ([]engine.Message, bool) {
+	historyLimit := req.MaxHistoryTurns
+	switch {
+	case historyLimit == 0:
+		historyLimit = defaultMaxHistoryTurns
+	case historyLimit < 0:
+		historyLimit = 0
+	}
+
+	var messages []engine.Message
+	hasHistory := false
+
+	if s.memory != nil && historyLimit > 0 {
+		turns, err := s.memory.GetConversationMessages(ctx, req.ConversationID, historyLimit)
+		if err != nil {
+			s.logger.Debug().
+				Err(err).
+				Str("conversation_id", req.ConversationID).
+				Msg("Conversation history injection skipped")
+		} else if len(turns) > 0 {
+			for _, t := range turns {
+				switch t.Role {
+				case "user":
+					messages = append(messages, engine.NewUserMessage(t.Content))
+				case "assistant":
+					messages = append(messages, engine.NewAssistantMessage(t.Content))
+				}
+			}
+			hasHistory = len(turns) >= 2
+			s.logger.Debug().
+				Str("conversation_id", req.ConversationID).
+				Int("history_turns", len(turns)).
+				Int("history_limit", historyLimit).
+				Msg("Injected conversation history")
+		}
+	}
+
+	messages = append(messages, engine.NewUserMessage(req.Message))
+	return messages, hasHistory
+}
+
 func (s *Service) buildTooling(rlmExecutor *engine.RLMToolExecutor) (engine.ToolExecutor, []engine.ToolDef, bool) {
 	toolExecutor := engine.ToolExecutor(rlmExecutor)
 	toolDefs := rlmExecutor.List()
@@ -668,6 +746,8 @@ type dialogueEnvelope struct {
 // - Related: runLLMChatWithResponseFormatFallback, parseStoryContextBundle, parseDialogueEnvelope
 // - Keywords: story_mode, gather_model, dialogue_model, response_format, tools_used, conversation_id
 func (s *Service) chatWithStoryLoop(ctx context.Context, req ChatRequest, rlmExecutor *engine.RLMToolExecutor, systemPrompt string, start time.Time) (*ChatResponse, error) {
+	messages, hasHistory := s.buildChatMessages(ctx, req)
+
 	gatherModel := s.config.StoryGatherModel
 	if req.StoryGatherModel != "" {
 		gatherModel = req.StoryGatherModel
@@ -706,12 +786,13 @@ func (s *Service) chatWithStoryLoop(ctx context.Context, req ChatRequest, rlmExe
 		gatherCfg.RequireContextQuery = false
 		gatherCfg.RLMSystemPromptSuffix = ""
 	}
+	if hasHistory && req.RequireContextQuery == nil {
+		gatherCfg.RequireContextQuery = false
+	}
 
 	gatherInput := engine.EngineInput{
 		SystemPrompt: buildStoryGatherPrompt(systemPrompt),
-		Messages: []engine.Message{
-			engine.NewUserMessage(req.Message),
-		},
+		Messages:     messages,
 	}
 
 	gatherOutput, err := s.runLLMChatWithResponseFormatFallback(
@@ -757,9 +838,7 @@ func (s *Service) chatWithStoryLoop(ctx context.Context, req ChatRequest, rlmExe
 
 	dialogueInput := engine.EngineInput{
 		SystemPrompt: buildStoryDialoguePrompt(systemPrompt, storyContextJSON),
-		Messages: []engine.Message{
-			engine.NewUserMessage(req.Message),
-		},
+		Messages:     messages,
 	}
 
 	dialogueOutput, err := s.runLLMChatWithResponseFormatFallback(
@@ -777,7 +856,7 @@ func (s *Service) chatWithStoryLoop(ctx context.Context, req ChatRequest, rlmExe
 	}
 
 	envelope, parsed := parseDialogueEnvelope(dialogueOutput.AssistantText)
-	responseText := dialogueOutput.AssistantText
+	responseText := stripThinkTags(dialogueOutput.AssistantText)
 	var tone *ChatTone
 	var action *ChatAction
 	if parsed && envelope.Text != "" {
@@ -939,6 +1018,35 @@ func parseStoryContextBundle(raw string) (storyContextBundle, bool) {
 		}
 	}
 	return storyContextBundle{}, false
+}
+
+// stripThinkTags removes <think>...</think> blocks from reasoning model output.
+// Handles both closed tags and unclosed tags (truncated reasoning).
+func stripThinkTags(s string) string {
+	// Handle case where model outputs reasoning without opening <think> tag
+	// (common with GLM and some reasoning models via LM Studio).
+	// e.g., "reasoning here</think>actual response"
+	if !strings.Contains(s, "<think>") && strings.Contains(s, "</think>") {
+		idx := strings.Index(s, "</think>")
+		s = strings.TrimSpace(s[idx+len("</think>"):])
+		return s
+	}
+
+	for {
+		start := strings.Index(s, "<think>")
+		if start == -1 {
+			break
+		}
+		end := strings.Index(s[start:], "</think>")
+		if end == -1 {
+			// Unclosed <think> tag — strip from <think> to end of string
+			s = strings.TrimSpace(s[:start])
+			break
+		}
+		// Remove the <think>...</think> block
+		s = s[:start] + s[start+end+len("</think>"):]
+	}
+	return strings.TrimSpace(s)
 }
 
 func parseDialogueEnvelope(raw string) (dialogueEnvelope, bool) {
@@ -1197,8 +1305,69 @@ func (s *Service) storeConversationTurns(ctx context.Context, req ChatRequest, r
 	if err := s.memory.AppendTurn(ctx, assistantTurn); err != nil {
 		s.logger.Warn().Err(err).Msg("Failed to store assistant turn")
 	}
+
+	// Auto-trigger L1/L2 compression in background if needed
+	go s.autoCompress(ctx, req.ConversationID)
 }
 
+// autoCompress checks if L1 (daily summaries) or L2 (weekly distillation) need
+// to run for a conversation and triggers them in-process. This ensures memory
+// layers stay populated without relying on the external compression daemon.
+//
+// Index:
+// - Purpose: Keep L1/L2 memory layers populated after each companion chat turn
+// - Flow: de-dupe per conversation → derive bounded context → run L1 daily compression → run L2 weekly distillation
+// - SideEffects: may invoke summarizer/LLM and write summary rows to SQLite
+// - FailureModes: context cancellation/timeouts; missing summarizer; DB/LLM errors (logged, best-effort)
+// - Related: ConversationMemory.RunDailyCompression, ConversationMemory.RunWeeklyDistillation
+// - Keywords: companion_memory, auto_compress, L1, L2, summaries, distillation
+func (s *Service) autoCompress(ctx context.Context, conversationID string) {
+	if s.memory == nil {
+		return
+	}
+	if conversationID == "" {
+		return
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	s.autoCompressMu.Lock()
+	if _, ok := s.autoCompressInFlight[conversationID]; ok {
+		s.autoCompressMu.Unlock()
+		s.logger.Debug().Str("conversation_id", conversationID).Msg("Auto compression already in flight")
+		return
+	}
+	s.autoCompressInFlight[conversationID] = struct{}{}
+	s.autoCompressMu.Unlock()
+	defer func() {
+		s.autoCompressMu.Lock()
+		delete(s.autoCompressInFlight, conversationID)
+		s.autoCompressMu.Unlock()
+	}()
+
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	defer cancel()
+
+	// L1: summarize any past days that haven't been summarized yet
+	if err := s.memory.RunDailyCompression(ctx, conversationID); err != nil {
+		// "no summarizer configured" is expected when LLM is not set up for summarization
+		if err.Error() != "no summarizer configured" {
+			s.logger.Debug().Err(err).Str("conversation_id", conversationID).Msg("Auto L1 compression skipped")
+		}
+	} else {
+		s.logger.Debug().Str("conversation_id", conversationID).Msg("Auto L1 compression completed")
+	}
+
+	// L2: distill old summaries into history
+	if err := s.memory.RunWeeklyDistillation(ctx, conversationID); err != nil {
+		if err.Error() != "no summarizer configured" {
+			s.logger.Debug().Err(err).Str("conversation_id", conversationID).Msg("Auto L2 distillation skipped")
+		}
+	} else {
+		s.logger.Debug().Str("conversation_id", conversationID).Msg("Auto L2 distillation completed")
+	}
+}
 
 // SetContext stores a context variable for a conversation.
 func (s *Service) SetContext(ctx context.Context, req ContextSetRequest) (*ContextSetResponse, error) {
@@ -1406,6 +1575,14 @@ func (s *Service) GetConversationMessages(ctx context.Context, conversationID st
 		return nil, fmt.Errorf("memory features not enabled")
 	}
 	return s.memory.GetConversationMessages(ctx, conversationID, limit)
+}
+
+// DeleteMessage removes a single message from a conversation.
+func (s *Service) DeleteMessage(ctx context.Context, conversationID, messageID string) error {
+	if s.memory == nil {
+		return fmt.Errorf("memory features not enabled")
+	}
+	return s.memory.DeleteMessage(ctx, conversationID, messageID)
 }
 
 // SoftDeleteConversation marks a conversation as deleted without removing data.

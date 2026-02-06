@@ -1,6 +1,6 @@
 import { cn, formatRelativeTime } from '@/lib/utils'
 import { Badge } from '@/components/ui/badge'
-import { Bot, User, Wrench, ChevronDown, ChevronRight } from 'lucide-react'
+import { Bot, User, Wrench, ChevronDown, ChevronRight, Trash2 } from 'lucide-react'
 import { useState } from 'react'
 import type { ConsoleMessage, ToolCall } from '@/api/client'
 
@@ -9,6 +9,7 @@ interface MessageBubbleProps {
   showTimestamp?: boolean
   isSelected?: boolean
   onSelect?: (message: ConsoleMessage) => void
+  onDelete?: (message: ConsoleMessage) => void
 }
 
 /**
@@ -20,7 +21,7 @@ interface MessageBubbleProps {
  * @param onSelect - Optional callback invoked with the message when a non-user message is clicked.
  * @returns The JSX element representing the styled message bubble.
  */
-export function MessageBubble({ message, showTimestamp = true, isSelected, onSelect }: MessageBubbleProps) {
+export function MessageBubble({ message, showTimestamp = true, isSelected, onSelect, onDelete }: MessageBubbleProps) {
   const isUser = message.role === 'user'
   const hasToolCalls = message.tool_calls && message.tool_calls.length > 0
   const isClickable = !isUser && onSelect
@@ -31,10 +32,17 @@ export function MessageBubble({ message, showTimestamp = true, isSelected, onSel
     }
   }
 
+  const handleDelete = (e: React.MouseEvent) => {
+    e.stopPropagation()
+    if (onDelete) {
+      onDelete(message)
+    }
+  }
+
   return (
     <div
       className={cn(
-        'flex gap-3 p-3',
+        'group relative flex gap-3 p-3',
         isUser ? 'flex-row-reverse' : 'flex-row',
         isClickable && 'cursor-pointer hover:bg-accent/30 transition-colors rounded-lg',
         isSelected && 'bg-accent/50 ring-1 ring-primary/30 rounded-lg'
@@ -97,6 +105,19 @@ export function MessageBubble({ message, showTimestamp = true, isSelected, onSel
           </div>
         )}
       </div>
+
+      {/* Delete button - shown on hover */}
+      {onDelete && message.id && (
+        <button
+          type="button"
+          onClick={handleDelete}
+          className="opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0 self-start mt-1 p-1 rounded hover:bg-destructive/10 text-muted-foreground hover:text-destructive"
+          title="Delete message"
+          aria-label="Delete message"
+        >
+          <Trash2 className="h-3.5 w-3.5" />
+        </button>
+      )}
     </div>
   )
 }

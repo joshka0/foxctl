@@ -1,5 +1,4 @@
 import { type ReactNode, useState } from 'react'
-import { cn } from '@/lib/utils'
 import { AgentSidebar } from './AgentSidebar'
 import { AgentHUD } from './AgentHUD'
 import { SpawnAgentPanel } from './SpawnAgentPanel'

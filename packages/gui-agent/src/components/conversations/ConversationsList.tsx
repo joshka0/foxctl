@@ -18,6 +18,7 @@ import {
   companionChat,
   listAgents,
   deleteCompanionConversation,
+  deleteCompanionMessage,
   renameCompanionConversation,
   patchAgent,
   type ConsoleMessage,
@@ -117,6 +118,7 @@ export function ConversationsList() {
   // Companion 2-stage model configuration
   const [toolModel, setToolModel] = useState(COMPANION_TOOL_MODELS[0]?.id || '')
   const [responseModel, setResponseModel] = useState(COMPANION_RESPONSE_MODELS[0]?.id || '')
+  const [maxHistoryTurns, setMaxHistoryTurns] = useState(50)
 
   const scrollRef = useRef<HTMLDivElement>(null)
   const eventSourceRef = useRef<EventSource | null>(null)
@@ -234,6 +236,7 @@ export function ConversationsList() {
       // Load messages for this conversation from companion memory
       const messagesData = await getCompanionConversationMessages(conversation.id, 200)
       const consoleMessages: ConsoleMessage[] = messagesData.messages.map((msg) => ({
+        id: msg.id,
         role: msg.role as 'user' | 'assistant',
         content: msg.content,
         timestamp: msg.created_at,
@@ -609,6 +612,7 @@ Help the user understand and interact with this agent's work.`,
           conversation_id: selectedConversation.id,
           message: content,
           workspace: linkedAgent?.ns || contextInfo.workspace || '/',
+          max_history_turns: maxHistoryTurns,
         })
 
         // Add the response with attached tool calls (for inline display)
@@ -718,6 +722,24 @@ Help the user understand and interact with this agent's work.`,
       }
     } catch (err) {
       console.error('Failed to delete conversation:', err)
+    }
+  }
+
+  // Handle deleting a single message
+  const handleDeleteMessage = async (message: ConsoleMessage) => {
+    if (!selectedConversation || !message.id) return
+
+    if (!window.confirm('Delete this message?')) return
+
+    try {
+      await deleteCompanionMessage(selectedConversation.id, message.id)
+      // Remove from local state
+      setMessages((prev) => prev.filter((m) => m.id !== message.id))
+      if (selectedMessage?.id === message.id) {
+        setSelectedMessage(null)
+      }
+    } catch (err) {
+      console.error('Failed to delete message:', err)
     }
   }
 
@@ -1248,13 +1270,14 @@ Help the user understand and interact with this agent's work.`,
                 <div className="space-y-4">
                   {messages.map((message, index) => (
                     <MessageBubble
-                      key={index}
+                      key={message.id || index}
                       message={message}
                       isSelected={selectedMessage === message}
                       onSelect={(msg) => {
                         setSelectedMessage(msg)
                         setShowContextPanel(true)
                       }}
+                      onDelete={handleDeleteMessage}
                     />
                   ))}
                   {inflight && messages[messages.length - 1]?.role !== 'assistant' && (
@@ -1423,6 +1446,25 @@ Help the user understand and interact with this agent's work.`,
                         {model.name}
                       </option>
                     ))}
+                  </select>
+                </div>
+
+                {/* Max History Turns */}
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Clock className="h-4 w-4 text-blue-500" />
+                    <span className="text-xs font-medium">History Turns</span>
+                  </div>
+                  <select
+                    value={maxHistoryTurns}
+                    onChange={(e) => setMaxHistoryTurns(Number(e.target.value))}
+                    className="text-xs bg-muted border border-border rounded-md px-2 py-1 font-mono focus:outline-none focus:ring-1 focus:ring-ring max-w-[140px]"
+                  >
+                    <option value={10}>10 turns</option>
+                    <option value={20}>20 turns</option>
+                    <option value={50}>50 turns</option>
+                    <option value={100}>100 turns</option>
+                    <option value={-1}>Disabled</option>
                   </select>
                 </div>
               </div>

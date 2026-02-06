@@ -16,7 +16,6 @@ import (
 	"github.com/jkatigb/agentctl/internal/storage/sqliteutil"
 )
 
-// CompanionChatHandler returns a handler for POST /api/companion/chat.
 // CompanionChatHandler returns an HTTP handler for POST /api/companion/chat that handles chat requests from the companion mobile app.
 // The handler validates the request JSON (requiring conversation_id and message), opens the context store and companion memory DB,
 // constructs a companion service with memory enabled, invokes the chat operation, and writes the chat response as JSON.
@@ -64,10 +63,23 @@ func CompanionChatHandler(cfg config.Config, log zerolog.Logger) http.HandlerFun
 		}
 		defer func() { _ = closeFn() }()
 
-		// Create service with memory enabled
+		// Resolve LLM credentials from config. If no provider is configured, leave
+		// LLM settings empty so the engine can auto-detect from environment.
+		llmProvider := cfg.LLM.Provider
+		llmAPIKey := ""
+		llmModel := ""
+		if llmProvider != "" {
+			llmAPIKey = cfg.LLM.ResolveAPIKey(llmProvider)
+			llmModel = cfg.LLM.ResolveModel(llmProvider)
+		}
+
+		// Create service with memory enabled and LLM credentials.
 		svc := companion.NewService(store, companion.ServiceConfig{
-			Logger:   log,
-			MemoryDB: memoryDB,
+			Logger:      log,
+			MemoryDB:    memoryDB,
+			LLMProvider: llmProvider,
+			LLMAPIKey:   llmAPIKey,
+			LLMModel:    llmModel,
 		})
 
 		// Execute chat
@@ -419,6 +431,69 @@ func CompanionConversationMessagesHandler(cfg config.Config, log zerolog.Logger)
 			"messages":        messages,
 			"count":           len(messages),
 		})
+	}
+}
+
+// CompanionMessageDeleteHandler returns a handler for DELETE /api/companion/conversations/:id/messages/:msgId.
+func CompanionMessageDeleteHandler(cfg config.Config, log zerolog.Logger) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodDelete {
+			httpError(w, http.StatusMethodNotAllowed, "method not allowed")
+			return
+		}
+
+		// Extract conversation_id and message_id from path:
+		// /api/companion/conversations/:id/messages/:msgId
+		path := r.URL.Path
+		parts := strings.Split(strings.TrimPrefix(path, "/api/companion/conversations/"), "/")
+		if len(parts) < 3 || parts[0] == "" || parts[1] != "messages" || parts[2] == "" {
+			httpError(w, http.StatusBadRequest, "invalid path, expected /api/companion/conversations/:id/messages/:msgId")
+			return
+		}
+		conversationID := parts[0]
+		messageID := parts[2]
+
+		// Open companion memory database
+		dbPath := filepath.Join(cfg.Storage.Root, "companion.db")
+		memoryDB, closeFn, err := sqliteutil.OpenDBShared(r.Context(), dbPath, nil)
+		if err != nil {
+			log.Error().Err(err).Msg("failed to open companion memory database")
+			httpError(w, http.StatusInternalServerError, "failed to open companion memory database")
+			return
+		}
+		defer func() { _ = closeFn() }()
+
+		// Open context store (needed by Service constructor)
+		store, err := contextvar.Open(r.Context(), cfg.Storage.Root)
+		if err != nil {
+			log.Error().Err(err).Msg("failed to open context store")
+			httpError(w, http.StatusInternalServerError, "failed to open context store")
+			return
+		}
+		defer store.Close()
+
+		// Create service with memory DB
+		svc := companion.NewService(store, companion.ServiceConfig{
+			Logger:   log,
+			MemoryDB: memoryDB,
+		})
+
+		// Delete message
+		err = svc.DeleteMessage(r.Context(), conversationID, messageID)
+		if err != nil {
+			if strings.Contains(err.Error(), "not found") {
+				httpError(w, http.StatusNotFound, "message not found")
+				return
+			}
+			log.Error().Err(err).
+				Str("conversation_id", conversationID).
+				Str("message_id", messageID).
+				Msg("delete message failed")
+			httpError(w, http.StatusInternalServerError, "delete message failed: "+err.Error())
+			return
+		}
+
+		writeJSON(w, http.StatusOK, SuccessResponse{OK: true, Message: "message deleted"})
 	}
 }
 

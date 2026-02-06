@@ -770,10 +770,27 @@ func handleAgentAsk(w http.ResponseWriter, r *http.Request, cfg config.Config, l
 	}
 	defer func() { _ = closeFn() }()
 
-	// Create companion service with memory enabled
+	// Resolve LLM credentials: prefer agent-specific settings, fall back to global config
+	llmProvider := agent.LLMProvider
+	if llmProvider == "" {
+		llmProvider = cfg.LLM.Provider
+	}
+	llmAPIKey := agent.LLMAPIKey
+	if llmAPIKey == "" {
+		llmAPIKey = cfg.LLM.ResolveAPIKey(llmProvider)
+	}
+	llmModel := agent.LLMModel
+	if llmModel == "" {
+		llmModel = cfg.LLM.ResolveModel(llmProvider)
+	}
+
+	// Create companion service with memory and LLM credentials
 	svc := companion.NewService(store, companion.ServiceConfig{
-		Logger:   log,
-		MemoryDB: memoryDB,
+		Logger:      log,
+		MemoryDB:    memoryDB,
+		LLMProvider: llmProvider,
+		LLMAPIKey:   llmAPIKey,
+		LLMModel:    llmModel,
 	})
 
 	// Use stored conversation_id if set, otherwise agent ID - this is where the daemon agent reads from

@@ -292,6 +292,9 @@ func (l LLMSettings) ResolveAPIKey(provider string) string {
 		if l.ElevenLabsAPIKey != "" {
 			return l.ElevenLabsAPIKey
 		}
+	case "lmstudio":
+		// LM Studio doesn't require a real API key
+		return "lm-studio"
 	}
 	// Fall back to generic API key
 	return l.APIKey

@@ -385,10 +385,12 @@ func (m *ConversationMemory) AppendTurn(ctx context.Context, turn ConversationTu
 		turn.TokenCount = actormemory.EstimateTokens(turn.Content)
 	}
 
+	// Format timestamp consistently for SQLite text comparison
+	createdAtStr := turn.CreatedAt.Format("2006-01-02 15:04:05.000000")
 	_, err := m.db.ExecContext(ctx, `
 		INSERT INTO companion_turns (id, conversation_id, role, content, token_count, created_at, tool_calls)
 		VALUES (?, ?, ?, ?, ?, ?, ?)
-	`, turn.ID, turn.ConversationID, turn.Role, turn.Content, turn.TokenCount, turn.CreatedAt, turn.ToolCalls)
+	`, turn.ID, turn.ConversationID, turn.Role, turn.Content, turn.TokenCount, createdAtStr, turn.ToolCalls)
 	if err != nil {
 		return fmt.Errorf("insert turn: %w", err)
 	}
@@ -466,6 +468,8 @@ func (m *ConversationMemory) GetContext(ctx context.Context, conversationID stri
 // getVividTurns retrieves recent turns within the vivid window.
 func (m *ConversationMemory) getVividTurns(ctx context.Context, conversationID string) ([]ConversationTurn, error) {
 	cutoff := time.Now().Add(-time.Duration(m.config.VividWindowHours) * time.Hour)
+	// Format as string matching the stored Go time.Time format for correct SQLite text comparison
+	cutoffStr := cutoff.Format("2006-01-02 15:04:05")
 
 	rows, err := m.db.QueryContext(ctx, `
 		SELECT id, conversation_id, role, content, token_count, created_at
@@ -473,7 +477,7 @@ func (m *ConversationMemory) getVividTurns(ctx context.Context, conversationID s
 		WHERE conversation_id = ? AND created_at >= ?
 		ORDER BY created_at DESC
 		LIMIT ?
-	`, conversationID, cutoff, m.config.VividMaxTurns)
+	`, conversationID, cutoffStr, m.config.VividMaxTurns)
 	if err != nil {
 		return nil, err
 	}
@@ -689,12 +693,13 @@ func (m *ConversationMemory) RunDailyCompression(ctx context.Context, conversati
 	}
 
 	// Get yesterday's turns (local midnight boundary) - DB query doesn't need lock
+	// Format as strings for correct SQLite text comparison with stored Go time format
 	rows, err := db.QueryContext(ctx, `
 		SELECT id, conversation_id, role, content, token_count, created_at
 		FROM companion_turns
 		WHERE conversation_id = ? AND created_at >= ? AND created_at < ?
 		ORDER BY created_at ASC
-	`, conversationID, startOfYesterday, endOfYesterday)
+	`, conversationID, startOfYesterday.Format("2006-01-02 15:04:05"), endOfYesterday.Format("2006-01-02 15:04:05"))
 	if err != nil {
 		return err
 	}
@@ -1234,7 +1239,7 @@ func (m *ConversationMemory) ListConversations(ctx context.Context, limit int) (
 	return conversations, nil
 }
 
-// GetConversationMessages retrieves all messages for a specific conversation.
+// GetConversationMessages retrieves the most recent messages for a specific conversation.
 // Returns messages in chronological order (oldest first).
 func (m *ConversationMemory) GetConversationMessages(ctx context.Context, conversationID string, limit int) ([]ConversationTurn, error) {
 	m.mu.RLock()
@@ -1244,12 +1249,18 @@ func (m *ConversationMemory) GetConversationMessages(ctx context.Context, conver
 		limit = 100
 	}
 
+	// Fetch the newest N rows, then reorder oldest-first so clients can render
+	// message history naturally.
 	rows, err := m.db.QueryContext(ctx, `
 		SELECT id, conversation_id, role, content, token_count, created_at, tool_calls
-		FROM companion_turns
-		WHERE conversation_id = ?
+		FROM (
+			SELECT id, conversation_id, role, content, token_count, created_at, tool_calls
+			FROM companion_turns
+			WHERE conversation_id = ?
+			ORDER BY created_at DESC
+			LIMIT ?
+		)
 		ORDER BY created_at ASC
-		LIMIT ?
 	`, conversationID, limit)
 	if err != nil {
 		return nil, fmt.Errorf("query messages: %w", err)
@@ -1275,6 +1286,29 @@ func (m *ConversationMemory) GetConversationMessages(ctx context.Context, conver
 	}
 
 	return turns, rows.Err()
+}
+
+// DeleteMessage removes a single message (turn) from a conversation.
+func (m *ConversationMemory) DeleteMessage(ctx context.Context, conversationID, messageID string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	result, err := m.db.ExecContext(ctx, `
+		DELETE FROM companion_turns WHERE id = ? AND conversation_id = ?
+	`, messageID, conversationID)
+	if err != nil {
+		return fmt.Errorf("delete message: %w", err)
+	}
+
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("delete message rows affected: %w", err)
+	}
+	if rows == 0 {
+		return fmt.Errorf("message not found")
+	}
+
+	return nil
 }
 
 // SoftDeleteConversation marks a conversation as deleted without removing the data.

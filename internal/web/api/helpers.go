@@ -2,7 +2,11 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"strings"
+
+	"github.com/jkatigb/agentctl/internal/domain/envelope"
 )
 
 // writeJSON writes v as JSON to w and sets the HTTP status code.
@@ -27,9 +31,56 @@ func readJSON(w http.ResponseWriter, r *http.Request, out any) error {
 	return json.NewDecoder(r.Body).Decode(out)
 }
 
-// httpError writes a JSON error response.
+// httpError writes an error envelope response that matches the canonical wire format.
+//
+// Index:
+// - Purpose: Provide consistent error payloads for HTTP API endpoints
+// - Flow: derive stable error.code + user hint → build envelope.Error → write JSON with HTTP status
+// - SideEffects: writes response headers/body
+// - FailureModes: JSON encoding errors ignored (best-effort)
+// - Related: envelope.Error, writeJSON
+// - Keywords: http, api, error_envelope, status_code, remediation_hint
 func httpError(w http.ResponseWriter, status int, msg string) {
-	writeJSON(w, status, map[string]any{"error": msg})
+	code := fmt.Sprintf("http_%d", status)
+	if text := http.StatusText(status); text != "" {
+		code = fmt.Sprintf("http_%d_%s", status, strings.ToLower(strings.ReplaceAll(text, " ", "_")))
+	}
+	if strings.TrimSpace(msg) == "" {
+		msg = http.StatusText(status)
+		if msg == "" {
+			msg = "request failed"
+		}
+	}
+
+	env := envelope.Error("http.error", code, msg, map[string]any{
+		"hint": httpErrorHint(status),
+	})
+	writeJSON(w, status, env)
+}
+
+// httpErrorHint provides a user-facing remediation hint for common HTTP errors.
+//
+// Index:
+// - Purpose: Give clients actionable remediation guidance without leaking internals
+// - Flow: map HTTP status → hint string
+// - SideEffects: none
+// - FailureModes: none
+// - Related: httpError
+// - Keywords: hint, remediation, http_status
+func httpErrorHint(status int) string {
+	switch status {
+	case http.StatusBadRequest:
+		return "Check the request parameters and try again."
+	case http.StatusUnauthorized, http.StatusForbidden:
+		return "Verify your credentials and permissions, then try again."
+	case http.StatusNotFound:
+		return "Verify the resource exists and the URL is correct."
+	default:
+		if status >= 500 {
+			return "Retry in a moment. If the problem persists, check the server logs."
+		}
+		return "Check the request and try again."
+	}
 }
 
 // ErrorResponse is a standard error response.

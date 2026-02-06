@@ -223,7 +223,11 @@ func (s *Server) Handler() http.Handler {
 		if len(parts) >= 2 && parts[1] != "" {
 			switch parts[1] {
 			case "messages":
-				api.CompanionConversationMessagesHandler(s.cfg, s.log).ServeHTTP(w, r)
+				if r.Method == http.MethodDelete {
+					api.CompanionMessageDeleteHandler(s.cfg, s.log).ServeHTTP(w, r)
+				} else {
+					api.CompanionConversationMessagesHandler(s.cfg, s.log).ServeHTTP(w, r)
+				}
 			case "personality":
 				// Check for sub-path: /api/companion/conversations/:id/personality/dimension
 				if len(parts) >= 3 && parts[2] == "dimension" {

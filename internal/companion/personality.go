@@ -9,23 +9,24 @@ Be conversational and engaging. Remember important details about the user and us
 // RLMContextInstructions are appended to the system prompt in stateless mode.
 // These instructions guide the LLM on how to use the context tools.
 const RLMContextInstructions = `
-## Context Management (RLM Mode)
+## Context Management
 
-You operate in stateless mode - you have no built-in memory of previous messages in this conversation. To recall information, you must actively query context using the available tools.
+You have recent conversation history in the messages above. Use it to maintain continuity and answer questions about what was just discussed.
 
-### Available Context Tools
+For information beyond the visible history (user preferences, long-term facts, older conversations), use the context tools below.
 
-**rlm_context_query** - Retrieve stored context
+### Context Tools
+
+**rlm_context_query** - Retrieve stored context beyond visible history
 - Query by exact key: {"key": "user_name"}
 - Query by pattern: {"key_pattern": "preferences/*"}
 - Natural language search: {"semantic_query": "what does the user like"}
 
-**rlm_context_put** - Store important information for later
+**rlm_context_put** - Store important information for later recall
 - {"key": "current_topic", "value": "discussing travel plans", "scope": "conversation"}
 - {"key": "user_preference_theme", "value": "dark", "scope": "global"}
 
-**rlm_context_list** - See what context is available
-- Lists all stored keys for this conversation
+**rlm_context_list** - See what context keys are available
 
 ### Context Scopes
 
@@ -33,36 +34,21 @@ You operate in stateless mode - you have no built-in memory of previous messages
 - **conversation**: Persists for THIS conversation only (current topic, session-specific info)
 - **turn**: Ephemeral, only for the current turn (temporary calculations)
 
-### Best Practices
+### When to Use Context Tools
 
-1. **Always query before assuming** - If you need information about the user or conversation history, query it first
-2. **Store important details** - When the user shares something significant (name, preferences, goals), save it
-3. **Use appropriate scopes** - User preferences go in "global", conversation topics in "conversation"
-4. **Query patterns for discovery** - Use key_pattern "memories/*" to find related context
-
-### Example Workflow
-
-User: "What did we talk about last time?"
-You: [Query: {"key_pattern": "conversation/*"}] → Retrieve conversation context
-You: [Respond based on what you found]
-
-User: "I prefer dark mode"
-You: [Store: {"key": "preferences/theme", "value": "dark", "scope": "global"}]
-You: "Got it! I'll remember you prefer dark mode."
-
-IMPORTANT: This stateless architecture means you cannot remember anything unless you query it. When uncertain, query first.`
+- **DO use** for: user preferences, long-term facts, cross-conversation memory, information not in the visible messages
+- **DON'T use** for: recalling what was just discussed — that's already in the messages above
+- **Store** important user details (name, preferences, goals) so they persist across conversations`
 
 // CompactRLMInstructions is a shorter version for token-constrained scenarios.
 const CompactRLMInstructions = `
-## RLM Mode
+## Context Mode
 
-You have no memory - query context with rlm_context_query before making assumptions.
+Recent conversation history is in the messages above. For long-term memory and preferences, use context tools.
 
 Tools:
-- rlm_context_query: {"key": "name"} or {"key_pattern": "prefs/*"}
-- rlm_context_put: {"key": "topic", "value": "x", "scope": "conversation"}
+- rlm_context_query: {"key": "name"} or {"key_pattern": "prefs/*"} or {"semantic_query": "..."}
+- rlm_context_put: {"key": "topic", "value": "x", "scope": "conversation"|"global"}
 - rlm_context_list: See available keys
 
-Scopes: global (all convos), conversation (this convo), turn (ephemeral)
-
-Always query before assuming. Store important user info.`
+Use tools for cross-conversation memory and user preferences, not for recalling recent messages.`

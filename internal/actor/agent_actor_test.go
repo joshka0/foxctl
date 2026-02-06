@@ -43,17 +43,26 @@ func TestAgentActorConfig(t *testing.T) {
 }
 
 func TestDefaultModelForProvider(t *testing.T) {
+	// Ensure CI/user env doesn't override defaults and make this test deterministic.
+	t.Setenv("CEREBRAS_MODEL", "")
+	t.Setenv("OPENROUTER_MODEL", "")
+	t.Setenv("GROQ_MODEL", "")
+	t.Setenv("GEMINI_MODEL", "")
+	t.Setenv("OPENAI_MODEL", "")
+	t.Setenv("ANTHROPIC_MODEL", "")
+	t.Setenv("LMSTUDIO_MODEL", "")
+
 	tests := []struct {
 		provider string
 		want     string
 	}{
-		{"gemini", "gemini-2.0-flash"},
-		{"", "gemini-2.0-flash"},
-		{"openai", "gpt-4o-mini"},
-		{"anthropic", "claude-3-5-haiku-20241022"},
-		{"groq", "llama-3.3-70b-versatile"},
+		{"gemini", "gemini-2.5-flash"},
+		{"", "gemini-2.5-flash"},
+		{"openai", "gpt-4.1-mini"},
+		{"anthropic", "claude-haiku-4-5"},
+		{"groq", "llama-4-scout-17b-16e"},
 		{"openrouter", "mistralai/devstral-2512:free"},
-		{"unknown", "gemini-2.0-flash"},
+		{"unknown", "gemini-2.5-flash"},
 	}
 
 	for _, tt := range tests {

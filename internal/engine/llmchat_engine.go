@@ -416,12 +416,17 @@ func (e *LLMChatEngine) Run(ctx context.Context, input EngineInput) (EngineOutpu
 		output.AssistantText = choice.Message.Content
 		output.StopReason = mapFinishReason(choice.FinishReason)
 
-		// In StatelessMode with RequireContextQuery, verify context was queried
+		// In StatelessMode with RequireContextQuery, verify context was queried.
+		// If the model skipped tool calling, nudge it to query context first.
 		if e.config.StatelessMode && e.config.RequireContextQuery {
 			if e.rlmExecutor == nil || e.rlmExecutor.QueryCount() == 0 {
-				output.StopReason = StopReasonError
-				output.Error = "RLM mode requires at least one context query before responding"
-				return output, nil
+				// Add the model's premature response as an assistant message, then
+				// inject a user nudge asking it to query context before responding.
+				messages = append(messages,
+					oaiMessage{Role: "assistant", Content: choice.Message.Content},
+					oaiMessage{Role: "user", Content: "You MUST use the rlm_context_query tool to retrieve conversation context BEFORE responding. Please query context first, then respond."},
+				)
+				continue
 			}
 		}
 
@@ -720,6 +725,12 @@ func apiKeyForProvider(provider string) string {
 		return os.Getenv("GROQ_API_KEY")
 	case "openai":
 		return os.Getenv("OPENAI_API_KEY")
+	case "lmstudio":
+		// LM Studio doesn't require a real API key; use a placeholder
+		if key := os.Getenv("LMSTUDIO_API_KEY"); key != "" {
+			return key
+		}
+		return "lm-studio"
 	default:
 		return ""
 	}
@@ -749,6 +760,11 @@ func baseURLForProvider(provider string) string {
 		return "https://openrouter.ai/api/v1"
 	case "groq":
 		return "https://api.groq.com/openai/v1"
+	case "lmstudio":
+		if url := os.Getenv("LMSTUDIO_BASE_URL"); url != "" {
+			return url
+		}
+		return "http://localhost:1234/v1"
 	default:
 		return "https://api.openai.com/v1"
 	}

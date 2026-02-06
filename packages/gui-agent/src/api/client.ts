@@ -362,6 +362,7 @@ export interface ConsoleSession {
 }
 
 export interface ConsoleMessage {
+  id?: string
   role: 'user' | 'assistant'
   content: string
   timestamp: string
@@ -524,6 +525,7 @@ export async function companionChat(params: {
   conversation_id: string
   message: string
   workspace?: string
+  max_history_turns?: number
 }): Promise<CompanionChatResponse> {
   return request('/companion/chat', {
     method: 'POST',
@@ -576,6 +578,22 @@ export async function getCompanionConversationMessages(
   count: number
 }> {
   return request(`/companion/conversations/${conversationId}/messages?limit=${limit}`)
+}
+
+/**
+ * Delete a single message from a companion conversation.
+ *
+ * @param conversationId - The ID of the conversation containing the message
+ * @param messageId - The ID of the message to delete
+ * @returns An object where `ok` is `true` if the operation succeeded, and `message` contains a status description.
+ */
+export async function deleteCompanionMessage(
+  conversationId: string,
+  messageId: string
+): Promise<{ ok: boolean; message: string }> {
+  return request(`/companion/conversations/${conversationId}/messages/${messageId}`, {
+    method: 'DELETE',
+  })
 }
 
 /**

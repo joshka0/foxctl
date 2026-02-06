@@ -3,6 +3,6 @@
   "references": [
     { "path": "./packages/data" },
     { "path": "./packages/tui" },
-    { "path": "./packages/gui" }
+    { "path": "./packages/gui-agent" }
   ]
 }

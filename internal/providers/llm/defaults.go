@@ -11,7 +11,7 @@ func DefaultModelForProvider(provider string) string {
 		if model := os.Getenv("CEREBRAS_MODEL"); model != "" {
 			return model
 		}
-		return "llama-3.3-70b"
+		return "llama-4-scout-17b-16e"
 	case "openrouter":
 		if model := os.Getenv("OPENROUTER_MODEL"); model != "" {
 			return model
@@ -21,24 +21,29 @@ func DefaultModelForProvider(provider string) string {
 		if model := os.Getenv("GROQ_MODEL"); model != "" {
 			return model
 		}
-		return "llama-3.3-70b-versatile"
+		return "llama-4-scout-17b-16e"
 	case "gemini", "":
 		if model := os.Getenv("GEMINI_MODEL"); model != "" {
 			return model
 		}
-		return "gemini-2.0-flash"
+		return "gemini-2.5-flash"
 	case "openai":
 		if model := os.Getenv("OPENAI_MODEL"); model != "" {
 			return model
 		}
-		return "gpt-4o-mini"
+		return "gpt-4.1-mini"
 	case "anthropic":
 		if model := os.Getenv("ANTHROPIC_MODEL"); model != "" {
 			return model
 		}
-		return "claude-3-5-haiku-20241022"
+		return "claude-haiku-4-5"
+	case "lmstudio":
+		if model := os.Getenv("LMSTUDIO_MODEL"); model != "" {
+			return model
+		}
+		return "zai-org/glm-4.7-flash"
 	default:
 		// Default to gemini for unknown providers
-		return "gemini-2.0-flash"
+		return "gemini-2.5-flash"
 	}
 }
