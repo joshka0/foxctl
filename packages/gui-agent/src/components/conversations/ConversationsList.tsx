@@ -115,6 +115,8 @@ export function ConversationsList() {
   const [systemPromptDraft, setSystemPromptDraft] = useState('')
   const [selectedProvider, setSelectedProvider] = useState('')
   const [selectedModel, setSelectedModel] = useState('')
+  const [customModelEnabled, setCustomModelEnabled] = useState(false)
+  const [customModel, setCustomModel] = useState('')
   // Companion 2-stage model configuration
   const [toolModel, setToolModel] = useState(COMPANION_TOOL_MODELS[0]?.id || '')
   const [responseModel, setResponseModel] = useState(COMPANION_RESPONSE_MODELS[0]?.id || '')
@@ -122,6 +124,7 @@ export function ConversationsList() {
 
   const scrollRef = useRef<HTMLDivElement>(null)
   const eventSourceRef = useRef<EventSource | null>(null)
+  const modelInitKeyRef = useRef<string>('')
 
   // Fetch conversations
   const { data, isLoading, refetch, isFetching } = useQuery({
@@ -185,6 +188,7 @@ export function ConversationsList() {
   useEffect(() => {
     if (!selectedConversation) {
       setLinkedAgent(null)
+      modelInitKeyRef.current = ''
       return
     }
 
@@ -193,6 +197,29 @@ export function ConversationsList() {
       (a) => a.conversation_id === selectedConversation.id || a.id === selectedConversation.id
     )
     setLinkedAgent(agent || null)
+
+    // Initialize model overrides from linked agent once per (conversation, agent) pair.
+    const initKey = `${selectedConversation.id}:${agent?.id || ''}`
+    if (modelInitKeyRef.current !== initKey) {
+      modelInitKeyRef.current = initKey
+
+      const provider = agent?.llm_provider || ''
+      const model = agent?.llm_model || ''
+      const providerCfg = PROVIDERS.find((p) => p.id === provider)
+      const knownModels = getModelsForProvider(provider)
+
+      setSelectedProvider(provider)
+
+      if (providerCfg?.allowCustom && model && !knownModels.some((m) => m.id === model)) {
+        setCustomModelEnabled(true)
+        setCustomModel(model)
+        setSelectedModel('')
+      } else {
+        setCustomModelEnabled(false)
+        setCustomModel('')
+        setSelectedModel(model)
+      }
+    }
   }, [selectedConversation, agents])
 
   // Auto-select conversation when navigating from AgentDetailView
@@ -608,11 +635,16 @@ Help the user understand and interact with this agent's work.`,
       // For existing companion conversations, use companion chat
       // This persists messages to companion memory
       if (selectedConversation) {
+        const llmModelOverride = (customModelEnabled ? customModel : selectedModel).trim()
+        const llmProviderOverride = selectedProvider.trim()
+
         const response = await companionChat({
           conversation_id: selectedConversation.id,
           message: content,
           workspace: linkedAgent?.ns || contextInfo.workspace || '/',
           max_history_turns: maxHistoryTurns,
+          llm_provider: llmProviderOverride || undefined,
+          llm_model: llmModelOverride || undefined,
         })
 
         // Add the response with attached tool calls (for inline display)
@@ -1373,6 +1405,8 @@ Help the user understand and interact with this agent's work.`,
                   onChange={(e) => {
                     setSelectedProvider(e.target.value)
                     setSelectedModel('')
+                    setCustomModelEnabled(false)
+                    setCustomModel('')
                   }}
                   className="text-xs bg-muted border border-border rounded-md px-2 py-1 font-mono focus:outline-none focus:ring-1 focus:ring-ring"
                 >
@@ -1392,19 +1426,54 @@ Help the user understand and interact with this agent's work.`,
                   <Cpu className="h-4 w-4 text-primary" />
                   <span className="text-xs font-medium">Model</span>
                 </div>
-                <select
-                  value={selectedModel}
-                  onChange={(e) => setSelectedModel(e.target.value)}
-                  className="text-xs bg-muted border border-border rounded-md px-2 py-1 font-mono focus:outline-none focus:ring-1 focus:ring-ring max-w-[160px]"
-                >
-                  {getModelsForProvider(selectedProvider).map((model) => (
-                    <option key={model.id} value={model.id}>
-                      {model.id === ''
-                        ? `Default (${linkedAgent?.llm_model || 'gpt-4o-mini'})`
-                        : model.name}
-                    </option>
-                  ))}
-                </select>
+                {PROVIDERS.find((p) => p.id === selectedProvider)?.allowCustom ? (
+                  <div className="space-y-1">
+                    <select
+                      value={customModelEnabled ? '__custom__' : selectedModel}
+                      onChange={(e) => {
+                        if (e.target.value === '__custom__') {
+                          setCustomModelEnabled(true)
+                          setSelectedModel('')
+                          return
+                        }
+                        setCustomModelEnabled(false)
+                        setCustomModel('')
+                        setSelectedModel(e.target.value)
+                      }}
+                      className="text-xs bg-muted border border-border rounded-md px-2 py-1 font-mono focus:outline-none focus:ring-1 focus:ring-ring max-w-[160px]"
+                    >
+                      <option value="">Default</option>
+                      {getModelsForProvider(selectedProvider).map((model) => (
+                        <option key={model.id} value={model.id}>
+                          {model.name}
+                        </option>
+                      ))}
+                      <option value="__custom__">Custom...</option>
+                    </select>
+                    {customModelEnabled && (
+                      <Input
+                        value={customModel}
+                        onChange={(e) => setCustomModel(e.target.value)}
+                        placeholder="e.g., openai/gpt-4o-mini"
+                        className="h-7 text-xs font-mono"
+                      />
+                    )}
+                  </div>
+                ) : (
+                  <select
+                    value={selectedModel}
+                    onChange={(e) => setSelectedModel(e.target.value)}
+                    className="text-xs bg-muted border border-border rounded-md px-2 py-1 font-mono focus:outline-none focus:ring-1 focus:ring-ring max-w-[160px]"
+                  >
+                    {getModelsForProvider(selectedProvider).map((model) => (
+                      <option key={model.id} value={model.id}>
+                        {model.id === ''
+                          ? `Default (${linkedAgent?.llm_model || 'gpt-4o-mini'})`
+                          : model.name}
+                      </option>
+                    ))}
+                  </select>
+                )}
               </div>
 
               {/* Companion 2-Stage Models */}

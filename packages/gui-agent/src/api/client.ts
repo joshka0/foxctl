@@ -526,6 +526,8 @@ export async function companionChat(params: {
   message: string
   workspace?: string
   max_history_turns?: number
+  llm_provider?: string
+  llm_model?: string
 }): Promise<CompanionChatResponse> {
   return request('/companion/chat', {
     method: 'POST',

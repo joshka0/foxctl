@@ -253,6 +253,12 @@ type ChatRequest struct {
 	// Message is the user's message.
 	Message string `json:"message"`
 
+	// LLMProvider overrides the service default LLM provider for this request (optional).
+	LLMProvider string `json:"llm_provider,omitempty"`
+
+	// LLMModel overrides the service default model for this request (optional).
+	LLMModel string `json:"llm_model,omitempty"`
+
 	// Context is additional request context for this turn.
 	Context map[string]any `json:"context,omitempty"`
 

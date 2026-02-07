@@ -63,14 +63,20 @@ func CompanionChatHandler(cfg config.Config, log zerolog.Logger) http.HandlerFun
 		}
 		defer func() { _ = closeFn() }()
 
-		// Resolve LLM credentials from config. If no provider is configured, leave
-		// LLM settings empty so the engine can auto-detect from environment.
-		llmProvider := cfg.LLM.Provider
+		// Resolve LLM credentials. The client may override provider/model for this request
+		// (for example to select an OpenRouter model), but API keys are always resolved
+		// server-side from config/env.
+		llmProvider := strings.TrimSpace(req.LLMProvider)
+		if llmProvider == "" {
+			llmProvider = cfg.LLM.Provider
+		}
 		llmAPIKey := ""
-		llmModel := ""
+		llmModel := strings.TrimSpace(req.LLMModel)
 		if llmProvider != "" {
 			llmAPIKey = cfg.LLM.ResolveAPIKey(llmProvider)
-			llmModel = cfg.LLM.ResolveModel(llmProvider)
+			if llmModel == "" {
+				llmModel = cfg.LLM.ResolveModel(llmProvider)
+			}
 		}
 
 		// Create service with memory enabled and LLM credentials.
