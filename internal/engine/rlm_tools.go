@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/jkatigb/agentctl/internal/indexing/semantic"
@@ -412,7 +413,7 @@ func (e *RLMToolExecutor) executeQuery(ctx context.Context, args json.RawMessage
 // - Flow: validate memory store → run vector search → fallback text search → format results
 // - SideEffects: reads memory store; may call embedding provider
 // - FailureModes: memory store errors, embedding errors
-// - Related: storage.MemoryStore.SearchSimilar, storage.MemoryStore.Search
+// - Related: storage.MemoryStore.SearchSimilarByType, storage.MemoryStore.Search
 // - Keywords: semantic_query, memory_store, embeddings, companion_history, scored_entry
 func (e *RLMToolExecutor) executeSemanticQuery(ctx context.Context, input ContextQueryInput) (string, error) {
 	// Check if memory store is configured
@@ -420,9 +421,19 @@ func (e *RLMToolExecutor) executeSemanticQuery(ctx context.Context, input Contex
 		return `{"memories": [], "message": "Memory store not configured for semantic search"}`, nil
 	}
 
-	limit := 10
+	const (
+		defaultLimit    = 10
+		maxLimit        = 20
+		defaultMaxChars = 6000
+		maxSummaryChars = 1200
+	)
+
+	limit := defaultLimit
 	if input.Limit > 0 {
 		limit = input.Limit
+	}
+	if limit > maxLimit {
+		limit = maxLimit
 	}
 
 	// Filter by conversation (SessionID) to scope to this companion's memories
@@ -431,74 +442,142 @@ func (e *RLMToolExecutor) executeSemanticQuery(ctx context.Context, input Contex
 		Types:     []string{"companion_summary", "companion_history"},
 	}
 
-	var memories []storage.ScoredEntry
+	seen := make(map[string]struct{}, limit)
+	var l2 []storage.ScoredEntry
+	var l1 []storage.ScoredEntry
+	method := "none"
+	truncated := false
 
-	// Try vector search if embedding provider is configured
+	add := func(dst *[]storage.ScoredEntry, m storage.ScoredEntry) {
+		if m.Entry.Name == "" {
+			return
+		}
+		if m.Entry.SessionID != e.conversationID {
+			return
+		}
+		if m.Entry.Type != "companion_summary" && m.Entry.Type != "companion_history" {
+			return
+		}
+		if _, ok := seen[m.Entry.Name]; ok {
+			return
+		}
+		seen[m.Entry.Name] = struct{}{}
+		*dst = append(*dst, m)
+	}
+
+	// L2 fast-path: deterministic lookup for distilled history when conversationID is known.
+	// This avoids missing L2 due to post-filtering on shared workspaces.
+	if strings.TrimSpace(e.conversationID) != "" {
+		if entry, err := e.memoryStore.Get(ctx, fmt.Sprintf("companion:history:%s", e.conversationID), e.workspace); err == nil {
+			add(&l2, storage.ScoredEntry{Entry: entry, Score: 1.0})
+		}
+	}
+
+	// Try vector search if embedding provider is configured.
 	if e.embedProvider != nil {
-		// Generate embedding for query
 		embedding, err := e.embedProvider.Embed(ctx, input.SemanticQuery)
 		if err == nil && len(embedding) > 0 {
-			// Vector similarity search
-			results, err := e.memoryStore.SearchSimilar(ctx, e.workspace, embedding, limit*2)
-			if err == nil {
-				// Filter by conversation ID (SessionID) - only include exact matches
-				for _, r := range results {
-					if r.Entry.SessionID == e.conversationID {
-						memories = append(memories, r)
+			method = "vector_by_type"
+
+			// Prefer returning L2 (history) first, then L1 (day summaries).
+			if len(l2) == 0 {
+				results, err := e.memoryStore.SearchSimilarByType(ctx, e.workspace, "companion_history", embedding, 50)
+				if err == nil {
+					for _, r := range results {
+						add(&l2, r)
+						if len(l2) >= 1 {
+							break
+						}
 					}
-					if len(memories) >= limit {
-						break
+				}
+			}
+
+			targetL1 := limit - len(l2)
+			if targetL1 > 0 {
+				// Over-fetch to compensate for SessionID post-filtering on shared workspaces.
+				overfetch := targetL1 * 200
+				if overfetch < 200 {
+					overfetch = 200
+				}
+				if overfetch > 1000 {
+					overfetch = 1000
+				}
+
+				results, err := e.memoryStore.SearchSimilarByType(ctx, e.workspace, "companion_summary", embedding, overfetch)
+				if err == nil {
+					for _, r := range results {
+						add(&l1, r)
+						if len(l1) >= targetL1 {
+							break
+						}
 					}
 				}
 			}
 		}
 	}
 
-	// Fallback to text search if vector search didn't find results
-	if len(memories) == 0 {
-		results, err := e.memoryStore.Search(ctx, e.workspace, input.SemanticQuery, limit*2)
+	// Fallback to text search if vector search didn't find results.
+	if len(l2)+len(l1) == 0 {
+		method = "text"
+		results, err := e.memoryStore.Search(ctx, e.workspace, input.SemanticQuery, limit*20)
 		if err == nil {
-			// Filter by conversation ID and companion types - only include exact matches
 			for _, r := range results {
-				if r.Entry.SessionID == e.conversationID {
-					memories = append(memories, r)
+				if r.Entry.Type == "companion_history" && len(l2) < 1 {
+					add(&l2, r)
+				} else {
+					add(&l1, r)
 				}
-				if len(memories) >= limit {
+				if len(l2)+len(l1) >= limit {
 					break
 				}
 			}
 		}
 	}
 
-	// Also try listing filtered memories if still no results
-	if len(memories) == 0 {
-		entries, _, err := e.memoryStore.ListFiltered(ctx, e.workspace, filter, limit, 0)
+	// Also try listing filtered memories if we still didn't fill the requested limit.
+	if len(l2)+len(l1) < limit {
+		if method == "none" {
+			method = "list_filtered"
+		}
+		entries, _, err := e.memoryStore.ListFiltered(ctx, e.workspace, filter, limit*2, 0)
 		if err == nil && len(entries) > 0 {
 			for _, entry := range entries {
-				memories = append(memories, storage.ScoredEntry{
-					Entry: entry,
-					Score: 0.5, // Default score for filtered list
-				})
+				if entry.Type == "companion_history" && len(l2) < 1 {
+					add(&l2, storage.ScoredEntry{Entry: entry, Score: 0.5})
+				} else {
+					add(&l1, storage.ScoredEntry{Entry: entry, Score: 0.5})
+				}
+				if len(l2)+len(l1) >= limit {
+					break
+				}
 			}
 		}
 	}
 
-	// Format results for LLM consumption
+	memories := append(append([]storage.ScoredEntry{}, l2...), l1...)
+
+	// Format results for LLM consumption.
 	results := make([]map[string]interface{}, 0, len(memories))
 	for _, m := range memories {
+		summary := strings.TrimSpace(m.Entry.Summary)
+		if len(summary) > maxSummaryChars {
+			summary = summary[:maxSummaryChars] + "..."
+			truncated = true
+		}
+
 		result := map[string]interface{}{
 			"name":       m.Entry.Name,
 			"type":       m.Entry.Type,
-			"summary":    m.Entry.Summary,
+			"layer":      memoryLayer(m.Entry.Type),
+			"summary":    summary,
 			"score":      m.Score,
 			"created_at": m.Entry.CreatedAt.Format(time.RFC3339),
 		}
 
-		// Include parsed result data if available
-		if len(m.Entry.Result) > 0 {
-			var resultData interface{}
-			if json.Unmarshal(m.Entry.Result, &resultData) == nil {
-				result["data"] = resultData
+		// Provide date as a first-class field for L1 summaries when name matches pattern.
+		if m.Entry.Type == "companion_summary" {
+			if date := memoryDateFromName(m.Entry.Name); date != "" {
+				result["date"] = date
 			}
 		}
 
@@ -510,10 +589,58 @@ func (e *RLMToolExecutor) executeSemanticQuery(ctx context.Context, input Contex
 		"found":    len(results) > 0,
 		"count":    len(results),
 		"query":    input.SemanticQuery,
+		"stats": map[string]interface{}{
+			"method":    method,
+			"max_chars": defaultMaxChars,
+			"truncated": truncated,
+		},
 	}
 
 	b, _ := json.Marshal(output)
+	if len(b) > defaultMaxChars {
+		// Best-effort: drop summaries to fit within a predictable bound.
+		for i := range results {
+			results[i]["summary"] = ""
+		}
+		output["stats"].(map[string]interface{})["truncated"] = true
+		b, _ = json.Marshal(output)
+		if len(b) > defaultMaxChars && len(results) > 0 {
+			// Last resort: return the first entry only.
+			output["memories"] = results[:1]
+			output["count"] = 1
+			b, _ = json.Marshal(output)
+		}
+	}
+
 	return string(b), nil
+}
+
+func memoryLayer(entryType string) string {
+	switch entryType {
+	case "companion_history":
+		return "L2"
+	case "companion_summary":
+		return "L1"
+	default:
+		return ""
+	}
+}
+
+func memoryDateFromName(name string) string {
+	// Expected: companion:summary:<conversationID>:<YYYY-MM-DD>
+	parts := strings.Split(name, ":")
+	if len(parts) < 4 {
+		return ""
+	}
+	date := parts[len(parts)-1]
+	if len(date) != len("2006-01-02") {
+		return ""
+	}
+	// Loose validation: ensure it looks like YYYY-MM-DD.
+	if date[4] != '-' || date[7] != '-' {
+		return ""
+	}
+	return date
 }
 
 // executeList lists context keys via rlm_context_list.

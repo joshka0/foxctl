@@ -43,6 +43,16 @@ async function request<T>(
   }
 }
 
+// ApiEnvelope matches the canonical agentctl envelope returned by some API endpoints.
+interface ApiEnvelope<T> {
+  version: number
+  status: 'ok' | 'error' | 'progress'
+  command: string
+  data: T
+  meta: { ts: string; [key: string]: unknown }
+  error: { code?: string; message?: string }
+}
+
 /**
  * Retrieve a list of agents from the server.
  *
@@ -626,6 +636,44 @@ export async function renameCompanionConversation(
     method: 'PATCH',
     body: JSON.stringify({ title }),
   })
+}
+
+export interface CompanionCompressionResult {
+  conversation_id: string
+  processed_dates?: string[]
+  summarized: number
+  skipped: number
+  distilled: boolean
+}
+
+/**
+ * Trigger on-demand memory compression for a companion conversation.
+ *
+ * This generates or updates day summaries (L1) and may run distillation (L2) to keep
+ * long-running conversations queryable even when L0 history injection is truncated.
+ */
+export async function compressCompanionConversation(
+  conversationId: string,
+  params: {
+    include_today?: boolean
+    max_days?: number
+    force?: boolean
+    distill?: boolean
+    llm_provider?: string
+    llm_model?: string
+  } = {}
+): Promise<CompanionCompressionResult> {
+  const env = await request<ApiEnvelope<CompanionCompressionResult>>(
+    `/companion/conversations/${conversationId}/compress`,
+    {
+      method: 'POST',
+      body: JSON.stringify(params),
+    }
+  )
+  if (env.status !== 'ok') {
+    throw new Error(env.error?.message || 'Compression failed')
+  }
+  return env.data
 }
 
 // Personality dimensions (0.0 to 1.0 scale)

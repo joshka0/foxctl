@@ -7,9 +7,11 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	actormemory "github.com/jkatigb/agentctl/internal/actor/memory"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skilltest"
 	"github.com/jkatigb/agentctl/internal/indexing/semantic"
 	"github.com/jkatigb/agentctl/internal/observability"
 	"github.com/jkatigb/agentctl/internal/storage"
@@ -33,6 +35,9 @@ type ConversationMemory struct {
 	workspace   string              // Workspace for semantic search scoping
 	embedder    *semantic.Embedder  // Optional: for generating embeddings on summaries
 	config      MemoryConfig
+	clock       skilltest.Clock
+	idGenerator func() string
+	idSeq       uint64
 	mu          sync.RWMutex
 }
 
@@ -145,10 +150,25 @@ func NewConversationMemory(db *sql.DB, opts ...MemoryOption) (*ConversationMemor
 	m := &ConversationMemory{
 		db:     db,
 		config: DefaultMemoryConfig(),
+		clock:  skilltest.RealClock{},
+	}
+	m.idGenerator = func() string {
+		seq := atomic.AddUint64(&m.idSeq, 1)
+		return fmt.Sprintf("%d-%d", m.clock.Now().UnixNano(), seq)
 	}
 
 	for _, opt := range opts {
 		opt(m)
+	}
+
+	if m.clock == nil {
+		m.clock = skilltest.RealClock{}
+	}
+	if m.idGenerator == nil {
+		m.idGenerator = func() string {
+			seq := atomic.AddUint64(&m.idSeq, 1)
+			return fmt.Sprintf("%d-%d", m.clock.Now().UnixNano(), seq)
+		}
 	}
 
 	if err := m.ensureSchema(context.Background()); err != nil {
@@ -191,6 +211,24 @@ func WithMemoryStore(store storage.MemoryStore, workspace string) MemoryOption {
 func WithEmbedder(embedder *semantic.Embedder) MemoryOption {
 	return func(m *ConversationMemory) {
 		m.embedder = embedder
+	}
+}
+
+// WithClock sets the clock used for time-based behavior (useful for deterministic tests).
+func WithClock(clock skilltest.Clock) MemoryOption {
+	return func(m *ConversationMemory) {
+		if clock != nil {
+			m.clock = clock
+		}
+	}
+}
+
+// WithIDGenerator sets the ID generator used for new memory rows (useful for deterministic tests).
+func WithIDGenerator(gen func() string) MemoryOption {
+	return func(m *ConversationMemory) {
+		if gen != nil {
+			m.idGenerator = gen
+		}
 	}
 }
 
@@ -376,17 +414,18 @@ func (m *ConversationMemory) AppendTurn(ctx context.Context, turn ConversationTu
 	defer m.mu.Unlock()
 
 	if turn.ID == "" {
-		turn.ID = generateID()
+		turn.ID = m.newID()
 	}
 	if turn.CreatedAt.IsZero() {
-		turn.CreatedAt = time.Now()
+		turn.CreatedAt = m.clock.Now().UTC()
 	}
+	turn.CreatedAt = turn.CreatedAt.UTC()
 	if turn.TokenCount == 0 {
 		turn.TokenCount = actormemory.EstimateTokens(turn.Content)
 	}
 
 	// Format timestamp consistently for SQLite text comparison
-	createdAtStr := turn.CreatedAt.Format("2006-01-02 15:04:05.000000")
+	createdAtStr := turn.CreatedAt.UTC().Format("2006-01-02 15:04:05.000000")
 	_, err := m.db.ExecContext(ctx, `
 		INSERT INTO companion_turns (id, conversation_id, role, content, token_count, created_at, tool_calls)
 		VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -467,7 +506,7 @@ func (m *ConversationMemory) GetContext(ctx context.Context, conversationID stri
 
 // getVividTurns retrieves recent turns within the vivid window.
 func (m *ConversationMemory) getVividTurns(ctx context.Context, conversationID string) ([]ConversationTurn, error) {
-	cutoff := time.Now().Add(-time.Duration(m.config.VividWindowHours) * time.Hour)
+	cutoff := m.clock.Now().UTC().Add(-time.Duration(m.config.VividWindowHours) * time.Hour)
 	// Format as string matching the stored Go time.Time format for correct SQLite text comparison
 	cutoffStr := cutoff.Format("2006-01-02 15:04:05")
 
@@ -503,15 +542,16 @@ func (m *ConversationMemory) getVividTurns(ctx context.Context, conversationID s
 
 // getRecentSummaries retrieves day summaries from the recent window.
 func (m *ConversationMemory) getRecentSummaries(ctx context.Context, conversationID string) ([]DaySummary, error) {
-	cutoffDate := time.Now().AddDate(0, 0, -m.config.RecentWindowDays).Format("2006-01-02")
-	todayDate := time.Now().Format("2006-01-02")
+	now := m.clock.Now().UTC()
+	cutoffDate := now.AddDate(0, 0, -m.config.RecentWindowDays).Format("2006-01-02")
+	todayDate := now.Format("2006-01-02")
 
 	rows, err := m.db.QueryContext(ctx, `
 		SELECT id, conversation_id, date, turn_count, summary, topics, mood, key_moments, token_count, created_at
 		FROM companion_day_summaries
-		WHERE conversation_id = ? AND date >= ? AND date < ?
+		WHERE conversation_id = ? AND date >= ? AND date <= ?
 		ORDER BY date DESC
-	`, conversationID, cutoffDate, todayDate) // Exclude today (that's in L0)
+	`, conversationID, cutoffDate, todayDate) // Include today if a rolling summary exists.
 	if err != nil {
 		return nil, err
 	}
@@ -655,53 +695,113 @@ func (m *ConversationMemory) formatHistory(h *DistilledHistory) string {
 	return strings.Join(parts, "\n")
 }
 
-// RunDailyCompression compresses yesterday's turns into a summary.
-// Should be called by a daily cron/daemon.
-func (m *ConversationMemory) RunDailyCompression(ctx context.Context, conversationID string) error {
-	// Check summarizer without holding lock for the whole operation
+// CompressionOptions configures how conversation turns are compressed into summaries and history.
+type CompressionOptions struct {
+	// IncludeToday enables summarization for today's date as well. This is useful
+	// when a conversation grows long within a single day and L0 history injection
+	// is truncated.
+	IncludeToday bool
+
+	// MaxDays bounds how many distinct dates will be processed. 0 means unlimited.
+	MaxDays int
+
+	// Force recomputes summaries even if an up-to-date summary already exists.
+	Force bool
+
+	// Distill triggers L2 distillation after generating/updating day summaries.
+	Distill bool
+}
+
+// CompressionResult reports what a compression run did.
+type CompressionResult struct {
+	ConversationID string   `json:"conversation_id"`
+	ProcessedDates []string `json:"processed_dates,omitempty"`
+	Summarized     int      `json:"summarized"`
+	Skipped        int      `json:"skipped"`
+	Distilled      bool     `json:"distilled"`
+}
+
+// RunDayCompression summarizes all turns for a specific date (YYYY-MM-DD) into a day summary.
+// If a summary already exists, it is recomputed only when the day has new turns or when force is true.
+//
+// Index:
+// - Purpose: Produce an L1 day summary for a specific day of a conversation
+// - Flow: validate → resolve day boundaries → detect if update needed → load turns → (optionally trim) → summarize → upsert summary → update cursor
+// - SideEffects: may invoke LLM summarizer; writes companion_day_summaries and companion_memory_state
+// - FailureModes: missing summarizer, DB errors, LLM errors
+// - Related: ConversationMemory.RunPendingDailyCompression, ConversationMemory.CompressConversation
+// - Keywords: day_summary, L1, compression, backfill, conversation_memory
+func (m *ConversationMemory) RunDayCompression(ctx context.Context, conversationID, date string, force bool) (bool, error) {
+	if strings.TrimSpace(conversationID) == "" {
+		return false, fmt.Errorf("conversation_id is required")
+	}
+	date = strings.TrimSpace(date)
+	if date == "" {
+		return false, fmt.Errorf("date is required")
+	}
+
+	// Check summarizer without holding lock for the whole operation.
 	m.mu.Lock()
 	if m.summarizer == nil {
 		m.mu.Unlock()
-		return fmt.Errorf("no summarizer configured")
+		return false, fmt.Errorf("no summarizer configured")
 	}
 	summarizer := m.summarizer
 	db := m.db
 	memoryStore := m.memoryStore
 	embedder := m.embedder
 	workspace := m.workspace
+	// Reuse RecentTokenBudget as a safe bound for summarizer input size.
+	inputBudget := m.config.RecentTokenBudget
 	m.mu.Unlock()
 
-	now := time.Now()
-	loc := now.Location()
-	startOfToday := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, loc)
-	startOfYesterday := startOfToday.AddDate(0, 0, -1)
-	endOfYesterday := startOfToday
-	// Get yesterday's date in local time
-	yesterday := startOfYesterday.Format("2006-01-02")
-
-	// Check if already summarized (DB query doesn't need lock)
-	var count int
-	err := db.QueryRowContext(ctx, `
-		SELECT COUNT(*) FROM companion_day_summaries
-		WHERE conversation_id = ? AND date = ?
-	`, conversationID, yesterday).Scan(&count)
+	dayStart, err := time.ParseInLocation("2006-01-02", date, time.UTC)
 	if err != nil {
-		return err
+		return false, fmt.Errorf("parse date %q: %w", date, err)
 	}
-	if count > 0 {
-		return nil // Already summarized
+	dayEnd := dayStart.AddDate(0, 0, 1)
+
+	startStr := dayStart.Format("2006-01-02 15:04:05")
+	endStr := dayEnd.Format("2006-01-02 15:04:05")
+
+	// Count turns for the day.
+	var totalTurns int
+	if err := db.QueryRowContext(ctx, `
+		SELECT COUNT(*) FROM companion_turns
+		WHERE conversation_id = ? AND created_at >= ? AND created_at < ?
+	`, conversationID, startStr, endStr).Scan(&totalTurns); err != nil {
+		return false, fmt.Errorf("count turns: %w", err)
+	}
+	if totalTurns == 0 {
+		return false, nil
 	}
 
-	// Get yesterday's turns (local midnight boundary) - DB query doesn't need lock
-	// Format as strings for correct SQLite text comparison with stored Go time format
+	// Check if existing summary is up-to-date.
+	var existingTurnCount int
+	err = db.QueryRowContext(ctx, `
+		SELECT turn_count FROM companion_day_summaries
+		WHERE conversation_id = ? AND date = ?
+	`, conversationID, date).Scan(&existingTurnCount)
+	switch err {
+	case nil:
+		if !force && existingTurnCount >= totalTurns {
+			return false, nil
+		}
+	case sql.ErrNoRows:
+		// No summary yet - proceed.
+	default:
+		return false, fmt.Errorf("get existing summary: %w", err)
+	}
+
+	// Load turns (chronological).
 	rows, err := db.QueryContext(ctx, `
 		SELECT id, conversation_id, role, content, token_count, created_at
 		FROM companion_turns
 		WHERE conversation_id = ? AND created_at >= ? AND created_at < ?
 		ORDER BY created_at ASC
-	`, conversationID, startOfYesterday.Format("2006-01-02 15:04:05"), endOfYesterday.Format("2006-01-02 15:04:05"))
+	`, conversationID, startStr, endStr)
 	if err != nil {
-		return err
+		return false, fmt.Errorf("query turns: %w", err)
 	}
 	defer rows.Close()
 
@@ -713,38 +813,49 @@ func (m *ConversationMemory) RunDailyCompression(ctx context.Context, conversati
 		}
 		turns = append(turns, t)
 	}
-
+	if err := rows.Err(); err != nil {
+		return false, fmt.Errorf("scan turns: %w", err)
+	}
 	if len(turns) == 0 {
-		return nil // No turns to summarize
+		return false, nil
 	}
 
-	// Create summary - this is the slow LLM call, done without holding lock
-	summary, err := summarizer.SummarizeDay(ctx, turns)
+	// Bound summarizer input size for long conversations by selecting a representative subset.
+	turnsForSummary := selectTurnsForSummaryBudget(turns, inputBudget)
+
+	// Create summary - this is the slow LLM call, done without holding lock.
+	summary, err := summarizer.SummarizeDay(ctx, turnsForSummary)
 	if err != nil {
-		return fmt.Errorf("summarize day: %w", err)
+		return false, fmt.Errorf("summarize day: %w", err)
 	}
 
 	summary.ConversationID = conversationID
-	summary.Date = yesterday
-	summary.ID = generateID()
-	summary.TurnCount = len(turns)
+	summary.Date = date
+	summary.ID = m.newID()
+	summary.TurnCount = totalTurns
 
-	// Store summary - DB operations don't need the memory lock
+	// Upsert summary.
 	_, err = db.ExecContext(ctx, `
 		INSERT INTO companion_day_summaries
 		(id, conversation_id, date, turn_count, summary, topics, mood, key_moments, token_count, created_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+		ON CONFLICT(conversation_id, date) DO UPDATE SET
+			turn_count = excluded.turn_count,
+			summary = excluded.summary,
+			topics = excluded.topics,
+			mood = excluded.mood,
+			key_moments = excluded.key_moments,
+			token_count = excluded.token_count
 	`, summary.ID, summary.ConversationID, summary.Date, summary.TurnCount,
 		summary.Summary, joinList(summary.Topics), summary.Mood,
 		joinList(summary.KeyMoments), summary.TokenCount)
 	if err != nil {
-		return fmt.Errorf("store summary: %w", err)
+		return false, fmt.Errorf("store summary: %w", err)
 	}
 
-	// Store in named_memory for semantic search (if memory store configured)
-	// These operations use local copies captured earlier, no lock needed
+	// Store in named_memory for semantic search (if configured).
 	if memoryStore != nil && workspace != "" {
-		// Build rich summary text for embedding
+		// Build rich summary text for embedding.
 		summaryText := summary.Summary
 		if len(summary.Topics) > 0 {
 			summaryText += "\nTopics: " + strings.Join(summary.Topics, ", ")
@@ -756,30 +867,27 @@ func (m *ConversationMemory) RunDailyCompression(ctx context.Context, conversati
 			summaryText += "\nKey moments: " + strings.Join(summary.KeyMoments, "; ")
 		}
 
-		// Create result JSON for full data preservation
+		// Create result JSON for full data preservation.
 		resultData, _ := json.Marshal(summary)
 
-		// Memory name for storage and embedding update
+		// Memory name for storage and embedding update.
 		memoryName := fmt.Sprintf("companion:summary:%s:%s", conversationID, summary.Date)
 
 		_, saveErr := memoryStore.SaveResult(ctx, storage.MemorySaveOptions{
 			Name:      memoryName,
 			Type:      "companion_summary",
 			Workspace: workspace,
-			SessionID: conversationID, // Use conversation_id as session for filtering
+			SessionID: conversationID, // Use conversation_id as session for filtering.
 			Summary:   summaryText,
 			Result:    resultData,
 		})
 		if saveErr != nil {
-			// Log but don't fail - companion memory table is primary
-			// The semantic search is supplementary
+			// Log but don't fail - companion memory table is primary; semantic search is supplementary.
 			_ = saveErr
 		}
 
-		// Generate and store embedding for vector search (if embedder configured)
-		// Use dated summary format for better temporal search context
+		// Generate and store embedding for vector search (if embedder configured).
 		if embedder != nil && saveErr == nil {
-			// Parse date for display (e.g., "[Jan 2, 2006]")
 			dateForDisplay := summary.Date
 			if parsedDate, parseErr := time.Parse("2006-01-02", summary.Date); parseErr == nil {
 				dateForDisplay = parsedDate.Format("Jan 2, 2006")
@@ -792,14 +900,163 @@ func (m *ConversationMemory) RunDailyCompression(ctx context.Context, conversati
 		}
 	}
 
-	// Update cursor - DB operation doesn't need lock
+	// Update cursor.
 	_, err = db.ExecContext(ctx, `
 		UPDATE companion_memory_state
 		SET last_summarized_date = ?, updated_at = CURRENT_TIMESTAMP
 		WHERE conversation_id = ?
-	`, yesterday, conversationID)
+	`, date, conversationID)
+	if err != nil {
+		return true, err
+	}
 
+	return true, nil
+}
+
+// RunDailyCompression summarizes yesterday's turns into a day summary (best-effort).
+// It is safe to call repeatedly; it only recomputes when yesterday has new turns.
+func (m *ConversationMemory) RunDailyCompression(ctx context.Context, conversationID string) error {
+	yesterday := m.clock.Now().UTC().AddDate(0, 0, -1).Format("2006-01-02")
+	_, err := m.RunDayCompression(ctx, conversationID, yesterday, false)
 	return err
+}
+
+// RunPendingDailyCompression summarizes the most recent day prior to today that has turns but
+// no up-to-date day summary. This is useful for catch-up when a conversation spans days
+// without continuous daily compression runs.
+//
+// Index:
+// - Purpose: Backfill L1 day summaries opportunistically without unbounded work
+// - Flow: find most recent unsummarized day (< today) → run day compression
+// - SideEffects: may invoke LLM summarizer; writes day summary rows
+// - FailureModes: missing summarizer, DB errors, LLM errors
+// - Related: ConversationMemory.RunDayCompression, ConversationMemory.RunDailyCompression
+// - Keywords: pending_compression, backfill, day_summary, L1
+func (m *ConversationMemory) RunPendingDailyCompression(ctx context.Context, conversationID string) error {
+	if strings.TrimSpace(conversationID) == "" {
+		return fmt.Errorf("conversation_id is required")
+	}
+
+	// Check summarizer (fast path) without holding lock for the whole operation.
+	m.mu.RLock()
+	hasSummarizer := m.summarizer != nil
+	db := m.db
+	m.mu.RUnlock()
+	if !hasSummarizer {
+		return fmt.Errorf("no summarizer configured")
+	}
+
+	todayDate := m.clock.Now().UTC().Format("2006-01-02")
+	var pendingDate string
+	err := db.QueryRowContext(ctx, `
+		SELECT d.date
+		FROM (
+			SELECT substr(created_at, 1, 10) AS date, COUNT(*) AS turns
+			FROM companion_turns
+			WHERE conversation_id = ? AND substr(created_at, 1, 10) < ?
+			GROUP BY date
+		) d
+		LEFT JOIN companion_day_summaries s
+			ON s.conversation_id = ? AND s.date = d.date
+		WHERE s.id IS NULL OR s.turn_count < d.turns
+		ORDER BY d.date DESC
+		LIMIT 1
+	`, conversationID, todayDate, conversationID).Scan(&pendingDate)
+	if err == sql.ErrNoRows {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("query pending date: %w", err)
+	}
+
+	_, err = m.RunDayCompression(ctx, conversationID, pendingDate, false)
+	return err
+}
+
+// CompressConversation runs multi-day compression for a conversation, optionally including today,
+// and then runs weekly distillation (L2) when requested.
+//
+// Index:
+// - Purpose: Trigger L0→L1→L2 compaction on demand (manual or UI-triggered)
+// - Flow: list distinct turn dates → select up to MaxDays most-recent dates → run day compression per date → optionally distill
+// - SideEffects: may invoke LLM summarizer; writes summaries/history; keeps all rows (no pruning)
+// - FailureModes: missing summarizer, DB errors, LLM errors
+// - Related: ConversationMemory.RunDayCompression, ConversationMemory.RunWeeklyDistillation
+// - Keywords: compress, L0, L1, L2, summaries, distillation
+func (m *ConversationMemory) CompressConversation(ctx context.Context, conversationID string, opts CompressionOptions) (*CompressionResult, error) {
+	if strings.TrimSpace(conversationID) == "" {
+		return nil, fmt.Errorf("conversation_id is required")
+	}
+
+	// Check summarizer (fast path).
+	m.mu.RLock()
+	hasSummarizer := m.summarizer != nil
+	db := m.db
+	m.mu.RUnlock()
+	if !hasSummarizer {
+		return nil, fmt.Errorf("no summarizer configured")
+	}
+
+	today := m.clock.Now().UTC().Format("2006-01-02")
+
+	rows, err := db.QueryContext(ctx, `
+		SELECT DISTINCT substr(created_at, 1, 10) AS date
+		FROM companion_turns
+		WHERE conversation_id = ?
+		ORDER BY date DESC
+	`, conversationID)
+	if err != nil {
+		return nil, fmt.Errorf("list turn dates: %w", err)
+	}
+	defer rows.Close()
+
+	var dates []string
+	for rows.Next() {
+		var d string
+		if err := rows.Scan(&d); err == nil && d != "" {
+			dates = append(dates, d)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("scan dates: %w", err)
+	}
+
+	res := &CompressionResult{ConversationID: conversationID}
+
+	// Select up to MaxDays most-recent distinct dates (optionally excluding today).
+	var selected []string
+	for _, d := range dates {
+		if !opts.IncludeToday && d == today {
+			continue
+		}
+		selected = append(selected, d)
+	}
+	if opts.MaxDays > 0 && len(selected) > opts.MaxDays {
+		selected = selected[:opts.MaxDays]
+	}
+
+	for _, d := range selected {
+
+		ran, err := m.RunDayCompression(ctx, conversationID, d, opts.Force)
+		if err != nil {
+			return res, err
+		}
+		res.ProcessedDates = append(res.ProcessedDates, d)
+		if ran {
+			res.Summarized++
+		} else {
+			res.Skipped++
+		}
+	}
+
+	if opts.Distill {
+		if err := m.RunWeeklyDistillation(ctx, conversationID); err != nil {
+			return res, err
+		}
+		res.Distilled = true
+	}
+
+	return res, nil
 }
 
 // RunWeeklyDistillation distills old summaries into long-term history.
@@ -812,15 +1069,34 @@ func (m *ConversationMemory) RunWeeklyDistillation(ctx context.Context, conversa
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	// Get summaries older than the recent window
-	cutoffDate := time.Now().AddDate(0, 0, -m.config.RecentWindowDays).Format("2006-01-02")
+	nowUTC := m.clock.Now().UTC()
+
+	// Distill day summaries that have moved out of the recent window. We keep all L1 summaries
+	// (and all turns) indefinitely; distillation is additive, so we only distill summaries that
+	// haven't been distilled yet.
+	cutoffDate := nowUTC.AddDate(0, 0, -m.config.RecentWindowDays).Format("2006-01-02")
+
+	// Read last distilled cursor (YYYY-MM-DD). Empty means "never distilled".
+	lastDistilledDate := "0000-00-00"
+	var lastDistilled sql.NullString
+	err := m.db.QueryRowContext(ctx, `
+		SELECT last_distilled_date
+		FROM companion_memory_state
+		WHERE conversation_id = ?
+	`, conversationID).Scan(&lastDistilled)
+	if err != nil && err != sql.ErrNoRows {
+		return fmt.Errorf("get last distilled cursor: %w", err)
+	}
+	if lastDistilled.Valid && strings.TrimSpace(lastDistilled.String) != "" {
+		lastDistilledDate = strings.TrimSpace(lastDistilled.String)
+	}
 
 	rows, err := m.db.QueryContext(ctx, `
 		SELECT id, conversation_id, date, turn_count, summary, topics, mood, key_moments, token_count, created_at
 		FROM companion_day_summaries
-		WHERE conversation_id = ? AND date < ?
+		WHERE conversation_id = ? AND date > ? AND date < ?
 		ORDER BY date ASC
-	`, conversationID, cutoffDate)
+	`, conversationID, lastDistilledDate, cutoffDate)
 	if err != nil {
 		return err
 	}
@@ -850,6 +1126,9 @@ func (m *ConversationMemory) RunWeeklyDistillation(ctx context.Context, conversa
 		return nil // Nothing to distill
 	}
 
+	// Track cursor for incremental distillation (we keep summaries, so we only advance by date).
+	maxDistilledDate := summaries[len(summaries)-1].Date
+
 	// Get existing history
 	existing, _ := m.getDistilledHistory(ctx, conversationID)
 
@@ -861,9 +1140,9 @@ func (m *ConversationMemory) RunWeeklyDistillation(ctx context.Context, conversa
 
 	history.ConversationID = conversationID
 	if history.ID == "" {
-		history.ID = generateID()
+		history.ID = m.newID()
 	}
-	history.LastDistilledAt = time.Now()
+	history.LastDistilledAt = nowUTC
 
 	// Upsert history
 	_, err = m.db.ExecContext(ctx, `
@@ -927,7 +1206,7 @@ func (m *ConversationMemory) RunWeeklyDistillation(ctx context.Context, conversa
 		// Generate and store embedding for vector search (if embedder configured)
 		// Use dated format for temporal context in searches
 		if m.embedder != nil && saveErr == nil {
-			dateStr := time.Now().Format("Jan 2, 2006")
+			dateStr := nowUTC.Format("Jan 2, 2006")
 			datedSummary := fmt.Sprintf("[%s] Distilled history: %s", dateStr, summaryText)
 
 			if embedding, embErr := m.embedder.Embed(ctx, datedSummary); embErr == nil && len(embedding.Vec) > 0 {
@@ -936,28 +1215,14 @@ func (m *ConversationMemory) RunWeeklyDistillation(ctx context.Context, conversa
 		}
 	}
 
-	// Delete distilled summaries (they're now in L2)
-	var oldestDistilledDate string
-	for _, s := range summaries {
-		if oldestDistilledDate == "" || s.Date < oldestDistilledDate {
-			oldestDistilledDate = s.Date
-		}
-	}
-
+	// Update cursor for incremental distillation (keep summaries/turns indefinitely).
 	_, err = m.db.ExecContext(ctx, `
-		DELETE FROM companion_day_summaries
-		WHERE conversation_id = ? AND date < ?
-	`, conversationID, cutoffDate)
-	if err != nil {
-		return fmt.Errorf("cleanup summaries: %w", err)
-	}
-
-	// Update cursor
-	_, err = m.db.ExecContext(ctx, `
-		UPDATE companion_memory_state
-		SET last_distilled_date = ?, updated_at = CURRENT_TIMESTAMP
-		WHERE conversation_id = ?
-	`, cutoffDate, conversationID)
+		INSERT INTO companion_memory_state (conversation_id, last_distilled_date, updated_at)
+		VALUES (?, ?, CURRENT_TIMESTAMP)
+		ON CONFLICT(conversation_id) DO UPDATE SET
+			last_distilled_date = excluded.last_distilled_date,
+			updated_at = CURRENT_TIMESTAMP
+	`, conversationID, maxDistilledDate)
 
 	return err
 }
@@ -1050,8 +1315,8 @@ func (m *ConversationMemory) Clear(ctx context.Context, conversationID string) e
 
 // Helper functions
 
-func generateID() string {
-	return fmt.Sprintf("%d", time.Now().UnixNano())
+func (m *ConversationMemory) newID() string {
+	return m.idGenerator()
 }
 
 func trimTurnsToTokenBudget(turns []ConversationTurn, budget int) []ConversationTurn {
@@ -1078,6 +1343,93 @@ func trimTurnsToTokenBudget(turns []ConversationTurn, budget int) []Conversation
 	}
 
 	return kept
+}
+
+// selectTurnsForSummaryBudget returns a representative subset of turns that fits within a token budget.
+//
+// For long days, we prefer keeping a slice from the beginning and end of the day so the summary
+// can capture both how the conversation started and where it ended.
+func selectTurnsForSummaryBudget(turns []ConversationTurn, budget int) []ConversationTurn {
+	if len(turns) == 0 || budget <= 0 {
+		return turns
+	}
+
+	// Fast path: fits as-is.
+	total := 0
+	for _, t := range turns {
+		tokens := t.TokenCount
+		if tokens == 0 {
+			tokens = actormemory.EstimateTokens(t.Content)
+		}
+		total += tokens
+		if total > budget {
+			break
+		}
+	}
+	if total <= budget {
+		return turns
+	}
+
+	headBudget := budget / 2
+	tailBudget := budget - headBudget
+
+	var head []ConversationTurn
+	headTokens := 0
+	i := 0
+	for i < len(turns) {
+		tokens := turns[i].TokenCount
+		if tokens == 0 {
+			tokens = actormemory.EstimateTokens(turns[i].Content)
+		}
+		if headTokens+tokens > headBudget && headTokens > 0 {
+			break
+		}
+		headTokens += tokens
+		head = append(head, turns[i])
+		i++
+		if headTokens >= headBudget {
+			break
+		}
+	}
+
+	var tail []ConversationTurn
+	tailTokens := 0
+	j := len(turns) - 1
+	for j >= i {
+		tokens := turns[j].TokenCount
+		if tokens == 0 {
+			tokens = actormemory.EstimateTokens(turns[j].Content)
+		}
+		if tailTokens+tokens > tailBudget && tailTokens > 0 {
+			break
+		}
+		tailTokens += tokens
+		tail = append(tail, turns[j])
+		j--
+		if tailTokens >= tailBudget {
+			break
+		}
+	}
+
+	// Restore chronological order for the tail slice.
+	for a, b := 0, len(tail)-1; a < b; a, b = a+1, b-1 {
+		tail[a], tail[b] = tail[b], tail[a]
+	}
+
+	// Fallback: always return something.
+	if len(head) == 0 && len(tail) == 0 {
+		return nil
+	}
+	if len(head) == 0 {
+		return tail
+	}
+	if len(tail) == 0 {
+		return head
+	}
+
+	out := append([]ConversationTurn{}, head...)
+	out = append(out, tail...)
+	return out
 }
 
 func trimToTokenBudget(text string, budget int, keepTail bool) string {

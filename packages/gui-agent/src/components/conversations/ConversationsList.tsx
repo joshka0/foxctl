@@ -20,6 +20,8 @@ import {
   deleteCompanionConversation,
   deleteCompanionMessage,
   renameCompanionConversation,
+  compressCompanionConversation,
+  type CompanionCompressionResult,
   patchAgent,
   type ConsoleMessage,
   type ConsoleSession,
@@ -121,6 +123,8 @@ export function ConversationsList() {
   const [toolModel, setToolModel] = useState(COMPANION_TOOL_MODELS[0]?.id || '')
   const [responseModel, setResponseModel] = useState(COMPANION_RESPONSE_MODELS[0]?.id || '')
   const [maxHistoryTurns, setMaxHistoryTurns] = useState(50)
+  const [isCompressing, setIsCompressing] = useState(false)
+  const [lastCompression, setLastCompression] = useState<CompanionCompressionResult | null>(null)
 
   const scrollRef = useRef<HTMLDivElement>(null)
   const eventSourceRef = useRef<EventSource | null>(null)
@@ -258,6 +262,8 @@ export function ConversationsList() {
     setContextInfo({})
     setPersonalityInfo(null)
     setSelectedMessage(null)
+    setIsCompressing(false)
+    setLastCompression(null)
 
     try {
       // Load messages for this conversation from companion memory
@@ -701,6 +707,39 @@ Help the user understand and interact with this agent's work.`,
           timestamp: new Date().toISOString(),
         },
       ])
+    }
+  }
+
+  const handleCompressMemory = async () => {
+    if (!selectedConversation) return
+    if (isCompressing) return
+
+    setIsCompressing(true)
+    try {
+      const result = await compressCompanionConversation(selectedConversation.id, {
+        include_today: true,
+        max_days: 14,
+        distill: true,
+        llm_provider: selectedProvider || undefined,
+        llm_model: selectedModel || undefined,
+      })
+      setLastCompression(result)
+
+      // Refresh personality/context panel so the user can see updated memory context quickly.
+      try {
+        const personality = await getCompanionPersonality(selectedConversation.id)
+        setPersonalityInfo(personality)
+        setContextInfo((prev) => ({
+          ...prev,
+          systemPrompt: personality.system_prompt,
+        }))
+      } catch (personalityErr) {
+        console.warn('Failed to reload personality info after compression:', personalityErr)
+      }
+    } catch (err) {
+      console.error('Failed to compress conversation memory:', err)
+    } finally {
+      setIsCompressing(false)
     }
   }
 
@@ -1536,6 +1575,30 @@ Help the user understand and interact with this agent's work.`,
                     <option value={-1}>Disabled</option>
                   </select>
                 </div>
+
+                {/* Memory Compression */}
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <RefreshCw className="h-4 w-4 text-green-500" />
+                    <span className="text-xs font-medium">Compress Memory</span>
+                  </div>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="h-7 text-xs"
+                    disabled={isCompressing}
+                    onClick={handleCompressMemory}
+                  >
+                    {isCompressing ? 'Compressing...' : 'Run'}
+                  </Button>
+                </div>
+                {lastCompression && (
+                  <div className="text-[10px] text-muted-foreground">
+                    Last run: {lastCompression.summarized} summarized, {lastCompression.skipped} skipped
+                    {lastCompression.distilled ? ', distilled' : ''}
+                  </div>
+                )}
               </div>
 
               {/* Token Usage */}

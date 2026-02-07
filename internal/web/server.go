@@ -228,6 +228,8 @@ func (s *Server) Handler() http.Handler {
 				} else {
 					api.CompanionConversationMessagesHandler(s.cfg, s.log).ServeHTTP(w, r)
 				}
+			case "compress":
+				api.CompanionConversationCompressHandler(s.cfg, s.log).ServeHTTP(w, r)
 			case "personality":
 				// Check for sub-path: /api/companion/conversations/:id/personality/dimension
 				if len(parts) >= 3 && parts[2] == "dimension" {

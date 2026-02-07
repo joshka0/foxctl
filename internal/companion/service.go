@@ -479,6 +479,16 @@ func (s *Service) Chat(ctx context.Context, req ChatRequest) (*ChatResponse, err
 	// Enable semantic search over companion memories if memory store is configured
 	if s.config.MemoryStore != nil && s.config.MemoryWorkspace != "" {
 		rlmExecutor.SetMemoryStore(s.config.MemoryStore, s.config.MemoryWorkspace)
+
+		// Enable vector search for semantic_query when embedding config is available.
+		if s.config.Config != nil {
+			provider, err := semantic.NewProviderForScope(semantic.ScopeMemory, *s.config.Config)
+			if err != nil {
+				s.logger.Warn().Err(err).Msg("Could not create embedding provider for semantic_query; falling back to text search")
+			} else {
+				rlmExecutor.SetEmbedProvider(provider)
+			}
+		}
 	}
 
 	// Build system prompt
@@ -1322,10 +1332,10 @@ func (s *Service) storeConversationTurns(ctx context.Context, req ChatRequest, r
 //
 // Index:
 // - Purpose: Keep L1/L2 memory layers populated after each companion chat turn
-// - Flow: de-dupe per conversation → derive bounded context → run L1 daily compression → run L2 weekly distillation
+// - Flow: de-dupe per conversation → derive bounded context → run pending L1 compression → run L2 weekly distillation
 // - SideEffects: may invoke summarizer/LLM and write summary rows to SQLite
 // - FailureModes: context cancellation/timeouts; missing summarizer; DB/LLM errors (logged, best-effort)
-// - Related: ConversationMemory.RunDailyCompression, ConversationMemory.RunWeeklyDistillation
+// - Related: ConversationMemory.RunPendingDailyCompression, ConversationMemory.RunWeeklyDistillation
 // - Keywords: companion_memory, auto_compress, L1, L2, summaries, distillation
 func (s *Service) autoCompress(ctx context.Context, conversationID string) {
 	if s.memory == nil {
@@ -1355,8 +1365,8 @@ func (s *Service) autoCompress(ctx context.Context, conversationID string) {
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
 
-	// L1: summarize any past days that haven't been summarized yet
-	if err := s.memory.RunDailyCompression(ctx, conversationID); err != nil {
+	// L1: summarize the next pending day (catch-up/backfill)
+	if err := s.memory.RunPendingDailyCompression(ctx, conversationID); err != nil {
 		// "no summarizer configured" is expected when LLM is not set up for summarization
 		if err.Error() != "no summarizer configured" {
 			s.logger.Debug().Err(err).Str("conversation_id", conversationID).Msg("Auto L1 compression skipped")

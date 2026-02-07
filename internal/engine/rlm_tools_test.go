@@ -3,9 +3,14 @@ package engine
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"strings"
 	"testing"
 
+	"github.com/jkatigb/agentctl/internal/indexing/semantic"
+	"github.com/jkatigb/agentctl/internal/storage"
 	"github.com/jkatigb/agentctl/internal/storage/contextvar"
+	memorystore "github.com/jkatigb/agentctl/internal/storage/memory"
 )
 
 func TestRLMToolExecutor_Put(t *testing.T) {
@@ -389,4 +394,212 @@ func setupTestContextStore(t *testing.T) contextvar.Store {
 	}
 
 	return store
+}
+
+type fakeEmbedProvider struct {
+	vec []float32
+}
+
+func (f fakeEmbedProvider) Embed(_ context.Context, _ string) ([]float32, error) {
+	return append([]float32(nil), f.vec...), nil
+}
+
+func (f fakeEmbedProvider) EmbedBatch(_ context.Context, texts []string) ([][]float32, error) {
+	out := make([][]float32, 0, len(texts))
+	for range texts {
+		out = append(out, append([]float32(nil), f.vec...))
+	}
+	return out, nil
+}
+
+func (f fakeEmbedProvider) Model() string { return "fake-embedder" }
+
+func (f fakeEmbedProvider) Dimensions() int { return len(f.vec) }
+
+var _ semantic.EmbeddingProvider = (*fakeEmbedProvider)(nil)
+
+func setupTestMemoryStore(t *testing.T) *memorystore.Store {
+	t.Helper()
+	dir := t.TempDir()
+	store, err := memorystore.Open(context.Background(), dir, "")
+	if err != nil {
+		t.Fatalf("Failed to open test memory store: %v", err)
+	}
+	return store
+}
+
+func TestRLMToolExecutor_SemanticQuery_VectorByTypeFiltersSessionAndAddsLayer(t *testing.T) {
+	ctx := context.Background()
+	store := setupTestContextStore(t)
+	defer store.Close()
+
+	mem := setupTestMemoryStore(t)
+	defer mem.Close()
+
+	workspace := "test-workspace"
+	convID := "conv-a"
+
+	exec := NewRLMToolExecutor(store, convID)
+	exec.SetMemoryStore(mem, workspace)
+	exec.SetEmbedProvider(fakeEmbedProvider{vec: []float32{1, 0}})
+
+	// Seed this conversation's L2 + L1.
+	l2 := storage.MemorySaveOptions{
+		Name:      fmt.Sprintf("companion:history:%s", convID),
+		Type:      "companion_history",
+		Workspace: workspace,
+		SessionID: convID,
+		Summary:   "We have a long-running relationship with recurring themes.",
+		Result:    []byte(`{"relationship_note":"...","recurring_topics":["x"]}`),
+	}
+	l2Entry, err := mem.SaveResult(ctx, l2)
+	if err != nil {
+		t.Fatalf("SaveResult L2 failed: %v", err)
+	}
+	if err := mem.UpdateEmbedding(ctx, l2Entry.Name, l2Entry.Workspace, []float32{1, 0}); err != nil {
+		t.Fatalf("UpdateEmbedding L2 failed: %v", err)
+	}
+
+	l1 := storage.MemorySaveOptions{
+		Name:      fmt.Sprintf("companion:summary:%s:%s", convID, "2026-02-01"),
+		Type:      "companion_summary",
+		Workspace: workspace,
+		SessionID: convID,
+		Summary:   "On Feb 1 we talked about embracing the unknown.",
+		Result:    []byte(`{"date":"2026-02-01","summary":"..."}`),
+	}
+	l1Entry, err := mem.SaveResult(ctx, l1)
+	if err != nil {
+		t.Fatalf("SaveResult L1 failed: %v", err)
+	}
+	if err := mem.UpdateEmbedding(ctx, l1Entry.Name, l1Entry.Workspace, []float32{0.5, 0.5}); err != nil {
+		t.Fatalf("UpdateEmbedding L1 failed: %v", err)
+	}
+
+	// Add a bunch of other conversations' L1 entries in the same workspace to ensure
+	// we don't accidentally leak cross-session results.
+	for i := 0; i < 50; i++ {
+		otherConvID := fmt.Sprintf("conv-b-%d", i)
+		opts := storage.MemorySaveOptions{
+			Name:      fmt.Sprintf("companion:summary:%s:%s", otherConvID, "2026-02-01"),
+			Type:      "companion_summary",
+			Workspace: workspace,
+			SessionID: otherConvID,
+			Summary:   "Other conversation summary.",
+			Result:    []byte(`{"date":"2026-02-01","summary":"other"}`),
+		}
+		entry, err := mem.SaveResult(ctx, opts)
+		if err != nil {
+			t.Fatalf("SaveResult other L1 failed: %v", err)
+		}
+		// Identical embedding so these dominate the global top-K unless we over-fetch.
+		if err := mem.UpdateEmbedding(ctx, entry.Name, entry.Workspace, []float32{1, 0}); err != nil {
+			t.Fatalf("UpdateEmbedding other L1 failed: %v", err)
+		}
+	}
+
+	out, err := exec.Execute(ctx, "rlm_context_query", json.RawMessage(`{"semantic_query":"remember our themes","limit":5}`))
+	if err != nil {
+		t.Fatalf("Execute semantic query failed: %v", err)
+	}
+
+	var resp struct {
+		Memories []map[string]any `json:"memories"`
+		Found    bool             `json:"found"`
+		Count    int              `json:"count"`
+		Stats    map[string]any   `json:"stats"`
+	}
+	if err := json.Unmarshal([]byte(out), &resp); err != nil {
+		t.Fatalf("Failed to parse semantic query response: %v", err)
+	}
+	if !resp.Found {
+		t.Fatalf("Expected found=true, got false")
+	}
+	if resp.Count == 0 || len(resp.Memories) == 0 {
+		t.Fatalf("Expected memories, got none")
+	}
+
+	for _, m := range resp.Memories {
+		name, _ := m["name"].(string)
+		if name == "" {
+			t.Fatalf("Expected memory name, got empty")
+		}
+		// Must not include other conversations.
+		if strings.Contains(name, "conv-b-") {
+			t.Fatalf("Unexpected cross-session memory: %s", name)
+		}
+
+		typ, _ := m["type"].(string)
+		layer, _ := m["layer"].(string)
+		if typ == "companion_history" && layer != "L2" {
+			t.Fatalf("Expected L2 for companion_history, got %q", layer)
+		}
+		if typ == "companion_summary" && layer != "L1" {
+			t.Fatalf("Expected L1 for companion_summary, got %q", layer)
+		}
+
+		if typ == "companion_summary" {
+			if got, _ := m["date"].(string); got != "2026-02-01" {
+				t.Fatalf("Expected date=2026-02-01, got %q", got)
+			}
+		}
+	}
+
+	if resp.Stats["method"] == "" {
+		t.Fatalf("Expected stats.method to be set")
+	}
+}
+
+func TestRLMToolExecutor_SemanticQuery_TruncatesLongSummaries(t *testing.T) {
+	ctx := context.Background()
+	store := setupTestContextStore(t)
+	defer store.Close()
+
+	mem := setupTestMemoryStore(t)
+	defer mem.Close()
+
+	workspace := "test-workspace"
+	convID := "conv-long"
+
+	exec := NewRLMToolExecutor(store, convID)
+	exec.SetMemoryStore(mem, workspace)
+
+	long := strings.Repeat("x", 2000)
+	entry, err := mem.SaveResult(ctx, storage.MemorySaveOptions{
+		Name:      fmt.Sprintf("companion:summary:%s:%s", convID, "2026-02-01"),
+		Type:      "companion_summary",
+		Workspace: workspace,
+		SessionID: convID,
+		Summary:   long,
+		Result:    []byte(`{"date":"2026-02-01"}`),
+	})
+	if err != nil {
+		t.Fatalf("SaveResult failed: %v", err)
+	}
+	_ = entry
+
+	out, err := exec.Execute(ctx, "rlm_context_query", json.RawMessage(`{"semantic_query":"anything","limit":1}`))
+	if err != nil {
+		t.Fatalf("Execute semantic query failed: %v", err)
+	}
+
+	var resp struct {
+		Memories []map[string]any `json:"memories"`
+		Stats    struct {
+			Truncated bool `json:"truncated"`
+		} `json:"stats"`
+	}
+	if err := json.Unmarshal([]byte(out), &resp); err != nil {
+		t.Fatalf("Failed to parse semantic query response: %v", err)
+	}
+	if len(resp.Memories) != 1 {
+		t.Fatalf("Expected 1 memory, got %d", len(resp.Memories))
+	}
+	summary, _ := resp.Memories[0]["summary"].(string)
+	if len(summary) == 0 || len(summary) > 1300 {
+		t.Fatalf("Expected truncated summary, got len=%d", len(summary))
+	}
+	if !resp.Stats.Truncated {
+		t.Fatalf("Expected stats.truncated=true for long summaries")
+	}
 }

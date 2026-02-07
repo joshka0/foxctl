@@ -11,6 +11,7 @@ import (
 	"github.com/rs/zerolog"
 
 	"github.com/jkatigb/agentctl/internal/companion"
+	"github.com/jkatigb/agentctl/internal/domain/envelope"
 	"github.com/jkatigb/agentctl/internal/platform/config"
 	"github.com/jkatigb/agentctl/internal/storage/contextvar"
 	"github.com/jkatigb/agentctl/internal/storage/sqliteutil"
@@ -437,6 +438,110 @@ func CompanionConversationMessagesHandler(cfg config.Config, log zerolog.Logger)
 			"messages":        messages,
 			"count":           len(messages),
 		})
+	}
+}
+
+// CompanionConversationCompressHandler returns a handler for POST /api/companion/conversations/:id/compress.
+// The handler triggers on-demand L0→L1→L2 compression for the specified conversation by generating/updating
+// day summaries (L1) and optionally running weekly distillation (L2).
+func CompanionConversationCompressHandler(cfg config.Config, log zerolog.Logger) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			httpError(w, http.StatusMethodNotAllowed, "method not allowed")
+			return
+		}
+
+		// Extract conversation_id from path: /api/companion/conversations/:id/compress
+		path := r.URL.Path
+		parts := strings.Split(strings.TrimPrefix(path, "/api/companion/conversations/"), "/")
+		if len(parts) < 2 || parts[0] == "" || parts[1] != "compress" {
+			httpError(w, http.StatusBadRequest, "invalid path, expected /api/companion/conversations/:id/compress")
+			return
+		}
+		conversationID := parts[0]
+
+		var req struct {
+			IncludeToday bool  `json:"include_today,omitempty"`
+			MaxDays      int   `json:"max_days,omitempty"`
+			Force        bool  `json:"force,omitempty"`
+			Distill      *bool `json:"distill,omitempty"`
+
+			// Optional: override which provider/model are used for summarization.
+			LLMProvider string `json:"llm_provider,omitempty"`
+			LLMModel    string `json:"llm_model,omitempty"`
+		}
+		if err := readJSON(w, r, &req); err != nil {
+			httpError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+			return
+		}
+		distill := true
+		if req.Distill != nil {
+			distill = *req.Distill
+		}
+
+		// Resolve LLM credentials. API keys are always resolved server-side from config/env.
+		llmProvider := strings.TrimSpace(req.LLMProvider)
+		if llmProvider == "" {
+			llmProvider = cfg.LLM.Provider
+		}
+		llmAPIKey := ""
+		llmModel := strings.TrimSpace(req.LLMModel)
+		if llmProvider != "" {
+			llmAPIKey = cfg.LLM.ResolveAPIKey(llmProvider)
+			if llmModel == "" {
+				llmModel = cfg.LLM.ResolveModel(llmProvider)
+			}
+		}
+
+		// Open context store (required by Service constructor).
+		store, err := contextvar.Open(r.Context(), cfg.Storage.Root)
+		if err != nil {
+			log.Error().Err(err).Msg("failed to open context store")
+			httpError(w, http.StatusInternalServerError, "failed to open context store")
+			return
+		}
+		defer store.Close()
+
+		// Open companion memory database.
+		dbPath := filepath.Join(cfg.Storage.Root, "companion.db")
+		memoryDB, closeFn, err := sqliteutil.OpenDBShared(r.Context(), dbPath, nil)
+		if err != nil {
+			log.Error().Err(err).Msg("failed to open companion memory database")
+			httpError(w, http.StatusInternalServerError, "failed to open companion memory database")
+			return
+		}
+		defer func() { _ = closeFn() }()
+
+		// Create service with memory + summarizer credentials.
+		svc := companion.NewService(store, companion.ServiceConfig{
+			Logger:      log,
+			MemoryDB:    memoryDB,
+			LLMProvider: llmProvider,
+			LLMAPIKey:   llmAPIKey,
+			LLMModel:    llmModel,
+		})
+		if svc.Memory() == nil {
+			httpError(w, http.StatusInternalServerError, "memory features not enabled")
+			return
+		}
+
+		result, err := svc.Memory().CompressConversation(r.Context(), conversationID, companion.CompressionOptions{
+			IncludeToday: req.IncludeToday,
+			MaxDays:      req.MaxDays,
+			Force:        req.Force,
+			Distill:      distill,
+		})
+		if err != nil {
+			if strings.Contains(err.Error(), "no summarizer configured") {
+				httpError(w, http.StatusBadRequest, "summarization is not configured (missing LLM provider/api key)")
+				return
+			}
+			log.Error().Err(err).Str("conversation_id", conversationID).Msg("compress conversation failed")
+			httpError(w, http.StatusInternalServerError, "compress conversation failed: "+err.Error())
+			return
+		}
+
+		writeJSON(w, http.StatusOK, envelope.OK("companion.compress", result))
 	}
 }
 
