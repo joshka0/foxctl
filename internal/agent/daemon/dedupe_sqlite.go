@@ -4,10 +4,9 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"path/filepath"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/storage/sqliteutil"
+	"github.com/jkatigb/agentctl/internal/storage/dbutil"
 )
 
 // SQLiteDedupeStore implements DedupeStore using SQLite persistence.
@@ -20,8 +19,7 @@ type SQLiteDedupeStore struct {
 // The returned store provides methods to query and update deduplication state and must be closed with Close when no longer needed.
 // If opening or initializing the database fails, an error describing the failure is returned.
 func OpenSQLiteDedupeStore(ctx context.Context, storageRoot string) (*SQLiteDedupeStore, error) {
-	dbPath := filepath.Join(storageRoot, "daemon_dedupe.db")
-	db, closeFn, err := sqliteutil.OpenDBShared(ctx, dbPath, migrateDedupe)
+	db, closeFn, err := dbutil.OpenStoreDB(ctx, storageRoot, "DAEMON_DEDUPE", "daemon_dedupe.db", migrateDedupe)
 	if err != nil {
 		return nil, fmt.Errorf("open dedupe db: %w", err)
 	}

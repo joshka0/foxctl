@@ -9,6 +9,34 @@ import type {
 
 const API_BASE = '/api'
 
+function mergeHeaders(defaults: Record<string, string>, headers: RequestInit['headers']): Headers {
+  const merged = new Headers()
+
+  for (const [k, v] of Object.entries(defaults)) {
+    merged.set(k, v)
+  }
+
+  if (!headers) {
+    return merged
+  }
+  if (headers instanceof Headers) {
+    headers.forEach((v, k) => merged.set(k, v))
+    return merged
+  }
+  if (Array.isArray(headers)) {
+    for (const [k, v] of headers) {
+      merged.set(k, v)
+    }
+    return merged
+  }
+
+  for (const [k, v] of Object.entries(headers)) {
+    if (typeof v === 'undefined') continue
+    merged.set(k, String(v))
+  }
+  return merged
+}
+
 /**
  * Send an HTTP request to the API base URL and parse the JSON response.
  *
@@ -21,12 +49,18 @@ async function request<T>(
   endpoint: string,
   options: RequestInit = {}
 ): Promise<T> {
+  const defaults: Record<string, string> = { Accept: 'application/json' }
+  // Only set JSON Content-Type when sending a JSON body. (Avoid overriding
+  // FormData/multipart or triggering unnecessary CORS preflights.)
+  if (typeof options.body === 'string' && options.body.length > 0) {
+    defaults['Content-Type'] = 'application/json'
+  }
+
+  const headers = mergeHeaders(defaults, options.headers)
+
   const response = await fetch(`${API_BASE}${endpoint}`, {
-    headers: {
-      'Content-Type': 'application/json',
-      ...options.headers,
-    },
     ...options,
+    headers,
   })
 
   const text = await response.text()
@@ -342,6 +376,14 @@ export interface SkillsListResponse {
   count: number
 }
 
+export interface SkillRunResponse {
+  ok: boolean
+  skill: string
+  output?: unknown
+  error?: string
+  duration_ms: number
+}
+
 /**
  * Retrieves the list of available skills from the server.
  *
@@ -352,12 +394,134 @@ export async function listSkills(): Promise<SkillsListResponse> {
 }
 
 /**
+ * Execute a skill via the web API and return the skill runner result.
+ */
+export async function runSkill(skill: string, input: Record<string, unknown>): Promise<SkillRunResponse> {
+  return request<SkillRunResponse>('/skills/run', {
+    method: 'POST',
+    body: JSON.stringify({ skill, input }),
+  })
+}
+
+export interface WorkspaceInfo {
+  path: string
+  name: string
+  session_count: number
+  last_active?: string
+  is_active: boolean
+}
+
+// Conversation / session settings
+export interface ConversationSettings {
+  conversation_id: string
+  tools_allow?: string[]
+  llm_provider?: string
+  llm_model?: string
+  exec_mode?: 'reactive' | 'autonomous' | 'proactive' | 'story' | string
+  story_gather_model?: string
+  story_dialogue_model?: string
+  updated_at?: string
+}
+
+export interface ConversationSettingsPatch {
+  // Pass an empty array to clear. Omit to leave unchanged.
+  tools_allow?: string[]
+  // Pass empty string to clear. Omit to leave unchanged.
+  llm_provider?: string
+  llm_model?: string
+  // Pass empty string to clear. Omit to leave unchanged.
+  exec_mode?: '' | 'reactive' | 'autonomous' | 'proactive' | 'story'
+  story_gather_model?: string
+  story_dialogue_model?: string
+}
+
+export async function listWorkspaces(): Promise<{
+  workspaces: WorkspaceInfo[]
+  count: number
+  current: string
+}> {
+  return request('/workspaces')
+}
+
+/**
  * Retrieves the service health status.
  *
  * @returns An object with `status` containing the current health state (for example, `"ok"`).
  */
 export async function getHealth(): Promise<{ status: string }> {
   return request('/health')
+}
+
+/**
+ * Fetch per-conversation settings for a companion conversation.
+ */
+export async function getCompanionConversationSettings(conversationId: string): Promise<{
+  conversation_id: string
+  settings: ConversationSettings
+}> {
+  return request(`/companion/conversations/${conversationId}/settings`)
+}
+
+/**
+ * Patch per-conversation settings for a companion conversation.
+ *
+ * Note: Passing empty strings clears model/provider overrides. Passing an empty array clears tools allowlist.
+ */
+export async function patchCompanionConversationSettings(
+  conversationId: string,
+  patch: ConversationSettingsPatch
+): Promise<{
+  conversation_id: string
+  settings: ConversationSettings
+}> {
+  return request(`/companion/conversations/${conversationId}/settings`, {
+    method: 'PATCH',
+    body: JSON.stringify(patch),
+  })
+}
+
+/**
+ * Delete all per-conversation settings for a companion conversation (reset to defaults).
+ */
+export async function deleteCompanionConversationSettings(conversationId: string): Promise<{ ok: boolean; message: string }> {
+  return request(`/companion/conversations/${conversationId}/settings`, {
+    method: 'DELETE',
+  })
+}
+
+/**
+ * Fetch per-session settings for a console session.
+ */
+export async function getConsoleSessionSettings(sessionId: string): Promise<{
+  session_id: string
+  settings: ConversationSettings
+}> {
+  return request(`/console/sessions/${sessionId}/settings`)
+}
+
+/**
+ * Patch per-session settings for a console session.
+ */
+export async function patchConsoleSessionSettings(
+  sessionId: string,
+  patch: ConversationSettingsPatch
+): Promise<{
+  session_id: string
+  settings: ConversationSettings
+}> {
+  return request(`/console/sessions/${sessionId}/settings`, {
+    method: 'PATCH',
+    body: JSON.stringify(patch),
+  })
+}
+
+/**
+ * Delete all per-session settings for a console session (reset to defaults).
+ */
+export async function deleteConsoleSessionSettings(sessionId: string): Promise<{ ok: boolean; message: string }> {
+  return request(`/console/sessions/${sessionId}/settings`, {
+    method: 'DELETE',
+  })
 }
 
 // Console Sessions
@@ -375,9 +539,12 @@ export interface ConsoleMessage {
   id?: string
   role: 'user' | 'assistant'
   content: string
-  timestamp: string
+  // Server may return unix millis; UI may construct ISO strings.
+  timestamp: string | number
   correlation_id?: string
   tool_calls?: ToolCall[]
+  // Raw metadata returned by the console session backend (tool calls, injected contexts, etc.)
+  metadata?: Record<string, unknown>
 }
 
 export interface ToolCall {
@@ -385,6 +552,62 @@ export interface ToolCall {
   input?: Record<string, unknown>
   output?: string
   status: 'pending' | 'completed' | 'error'
+}
+
+interface RawConsoleMessage {
+  id?: string
+  role: string
+  content: string
+  timestamp: string | number
+  correlation_id?: string
+  tool_calls?: unknown
+  metadata?: Record<string, unknown>
+}
+
+function normalizeConsoleMessage(msg: RawConsoleMessage): ConsoleMessage {
+  return {
+    id: msg.id,
+    role: msg.role === 'user' ? 'user' : 'assistant',
+    content: msg.content,
+    timestamp: msg.timestamp,
+    correlation_id: msg.correlation_id,
+    tool_calls: extractToolCalls(msg),
+    metadata: msg.metadata,
+  }
+}
+
+function extractToolCalls(msg: RawConsoleMessage): ToolCall[] | undefined {
+  const meta = msg.metadata
+  const metaToolCalls = meta?.['tool_calls']
+  const rawToolCalls = Array.isArray(metaToolCalls) ? metaToolCalls : Array.isArray(msg.tool_calls) ? msg.tool_calls : null
+  if (!rawToolCalls || rawToolCalls.length === 0) return undefined
+
+  const normalized: ToolCall[] = []
+  for (const tc of rawToolCalls) {
+    if (!tc || typeof tc !== 'object') continue
+    const tco = tc as Record<string, unknown>
+
+    const name = typeof tco.name === 'string' ? tco.name : typeof tco.tool === 'string' ? tco.tool : ''
+    if (!name) continue
+
+    const args = tco.arguments ?? tco.input
+    let input: Record<string, unknown> | undefined
+    if (args && typeof args === 'object' && !Array.isArray(args)) {
+      input = args as Record<string, unknown>
+    }
+
+    const output = typeof tco.result === 'string' ? tco.result : typeof tco.output === 'string' ? tco.output : undefined
+    const isError = Boolean(tco.is_error ?? tco.error ?? false)
+
+    normalized.push({
+      name,
+      input,
+      output,
+      status: isError ? 'error' : output ? 'completed' : 'pending',
+    })
+  }
+
+  return normalized.length > 0 ? normalized : undefined
 }
 
 /**
@@ -408,22 +631,69 @@ export async function listConsoleSessions(workspace?: string): Promise<{
  * @param params.workspace - Optional workspace identifier to associate with the session
  * @param params.profile - Optional profile name to use for the session
  * @param params.system_prompt - Optional system prompt to seed the session
- * @param params.conversation_id - Optional existing conversation ID to attach the session to
- * @param params.tool_model - Optional model override for tool execution
- * @param params.response_model - Optional model override for responses
+ * @param params.llm_provider - Optional provider override (also persisted as a session default)
+ * @param params.llm_model - Optional model override (also persisted as a session default)
+ * @param params.tools_allow - Optional allowlist of engine tool names (persisted as a session default)
+ * @param params.exec_mode - Optional exec mode default (persisted)
+ * @param params.story_gather_model - Optional story gather model default (persisted)
+ * @param params.story_dialogue_model - Optional story dialogue model default (persisted)
+ * @param params.tool_model - Deprecated. When set, maps to `story_gather_model` and implies openrouter.
+ * @param params.response_model - Deprecated. When set, maps to `llm_model` and `story_dialogue_model` and implies openrouter.
  * @returns The created `session`
  */
 export async function createConsoleSession(params: {
   workspace?: string
   profile?: string
   system_prompt?: string
+  llm_provider?: string
+  llm_model?: string
+  tools_allow?: string[]
+  exec_mode?: 'reactive' | 'autonomous' | 'proactive' | 'story'
+  story_gather_model?: string
+  story_dialogue_model?: string
+  // Deprecated/back-compat fields
   conversation_id?: string
   tool_model?: string
   response_model?: string
 }): Promise<{ session: ConsoleSession }> {
+  const body: Record<string, unknown> = {
+    workspace: params.workspace,
+    profile: params.profile,
+    system_prompt: params.system_prompt,
+  }
+
+  // Preferred: explicit provider/model.
+  if (params.llm_provider !== undefined) body.llm_provider = params.llm_provider
+  if (params.llm_model !== undefined) body.llm_model = params.llm_model
+
+  // Preferred: tool allowlist + exec mode.
+  if (params.tools_allow !== undefined) body.tools_allow = params.tools_allow
+  if (params.exec_mode !== undefined) body.exec_mode = params.exec_mode
+
+  // Preferred: story defaults.
+  if (params.story_gather_model !== undefined) body.story_gather_model = params.story_gather_model
+  if (params.story_dialogue_model !== undefined) body.story_dialogue_model = params.story_dialogue_model
+
+  // Back-compat: 2-stage model fields. Console sessions currently support a single model;
+  // we map the "response model" to `llm_model` and default provider to openrouter.
+  const legacyToolModel = typeof params.tool_model === 'string' ? params.tool_model.trim() : ''
+  const legacyResponseModel = typeof params.response_model === 'string' ? params.response_model.trim() : ''
+  if (params.llm_provider === undefined && (legacyToolModel || legacyResponseModel)) {
+    body.llm_provider = 'openrouter'
+  }
+  if (params.llm_model === undefined && legacyResponseModel) {
+    body.llm_model = legacyResponseModel
+  }
+  if (params.story_gather_model === undefined && legacyToolModel) {
+    body.story_gather_model = legacyToolModel
+  }
+  if (params.story_dialogue_model === undefined && legacyResponseModel) {
+    body.story_dialogue_model = legacyResponseModel
+  }
+
   return request('/console/sessions', {
     method: 'POST',
-    body: JSON.stringify(params),
+    body: JSON.stringify(body),
   })
 }
 
@@ -438,7 +708,17 @@ export async function getConsoleSession(sessionId: string): Promise<{
   messages: ConsoleMessage[]
   inflight: boolean
 }> {
-  return request(`/console/sessions/${sessionId}`)
+  const data = await request<{
+    session: ConsoleSession
+    messages: RawConsoleMessage[]
+    inflight: string
+  }>(`/console/sessions/${sessionId}`)
+
+  return {
+    session: data.session,
+    messages: (data.messages || []).map(normalizeConsoleMessage),
+    inflight: Boolean(data.inflight),
+  }
 }
 
 /**
@@ -452,18 +732,34 @@ export async function deleteConsoleSession(sessionId: string): Promise<void> {
  * Submits content to a console session for processing.
  *
  * @param correlationId - Optional client-provided correlation identifier to track the message across requests
- * @param models - Optional model overrides; `tool_model` selects the tool model, `response_model` selects the response model
+ * @param overrides - Optional per-turn LLM overrides.
  * @returns `{ ok: boolean; correlation_id: string }` where `ok` indicates the request was accepted and `correlation_id` is the identifier for the submitted message
  */
 export async function askConsoleSession(
   sessionId: string,
   content: string,
   correlationId?: string,
-  models?: { tool_model?: string; response_model?: string }
+  overrides?: { llm_provider?: string; llm_model?: string; tool_model?: string; response_model?: string }
 ): Promise<{ ok: boolean; correlation_id: string }> {
+  const body: Record<string, unknown> = { content, correlation_id: correlationId }
+
+  if (overrides) {
+    if (overrides.llm_provider !== undefined) body.llm_provider = overrides.llm_provider
+    if (overrides.llm_model !== undefined) body.llm_model = overrides.llm_model
+
+    const legacyToolModel = typeof overrides.tool_model === 'string' ? overrides.tool_model.trim() : ''
+    const legacyResponseModel = typeof overrides.response_model === 'string' ? overrides.response_model.trim() : ''
+    if (overrides.llm_provider === undefined && (legacyToolModel || legacyResponseModel)) {
+      body.llm_provider = 'openrouter'
+    }
+    if (overrides.llm_model === undefined && legacyResponseModel) {
+      body.llm_model = legacyResponseModel
+    }
+  }
+
   return request(`/console/sessions/${sessionId}/ask`, {
     method: 'POST',
-    body: JSON.stringify({ content, correlation_id: correlationId, ...models }),
+    body: JSON.stringify(body),
   })
 }
 
@@ -494,7 +790,63 @@ export async function getConsoleMessages(sessionId: string): Promise<{
   messages: ConsoleMessage[]
   count: number
 }> {
-  return request(`/console/sessions/${sessionId}/messages`)
+  const data = await request<{
+    messages: RawConsoleMessage[]
+    count: number
+  }>(`/console/sessions/${sessionId}/messages`)
+
+  return {
+    messages: (data.messages || []).map(normalizeConsoleMessage),
+    count: data.count,
+  }
+}
+
+// Provider Availability
+
+export interface ProviderAvailability {
+  id: string
+  available: boolean
+}
+
+export interface ProvidersResponse {
+  ok: boolean
+  providers: ProviderAvailability[]
+  default_provider: string
+  voyage_available: boolean
+}
+
+/**
+ * Fetches which LLM providers have API keys configured on the server.
+ *
+ * @returns A ProvidersResponse with availability info per provider, the default provider, and Voyage status
+ */
+export async function getProviderAvailability(): Promise<ProvidersResponse> {
+  return request<ProvidersResponse>('/companion/providers')
+}
+
+// Companion Memory
+
+export interface CompanionMemoryStats {
+  conversation_id: string
+  total_turns: number
+  day_summaries: number
+  has_distilled_history: boolean
+  last_summarized_date?: string
+  last_distilled_date?: string
+}
+
+/**
+ * Fetches memory statistics for a companion conversation.
+ */
+export async function getCompanionMemoryStats(conversationId: string): Promise<CompanionMemoryStats> {
+  return request<CompanionMemoryStats>(`/companion/memory/${conversationId}/stats`)
+}
+
+/**
+ * Fetches the formatted memory context for a companion conversation.
+ */
+export async function getCompanionMemoryContext(conversationId: string): Promise<{ context: string }> {
+  return request<{ context: string }>(`/companion/memory/${conversationId}/context`)
 }
 
 // Companion Chat
@@ -538,6 +890,10 @@ export async function companionChat(params: {
   max_history_turns?: number
   llm_provider?: string
   llm_model?: string
+  exec_mode?: 'reactive' | 'autonomous' | 'proactive' | 'story'
+  story_gather_model?: string
+  story_dialogue_model?: string
+  context?: Record<string, unknown>
 }): Promise<CompanionChatResponse> {
   return request('/companion/chat', {
     method: 'POST',
@@ -556,6 +912,7 @@ export async function listCompanionConversations(limit = 50): Promise<{
     id: string
     title?: string
     name?: string  // Custom title from database
+    agent_id?: string // Linked agent ID
     created_at: string
     updated_at: string
     message_count: number
@@ -630,11 +987,16 @@ export async function deleteCompanionConversation(
  */
 export async function renameCompanionConversation(
   conversationId: string,
-  title: string
+  title: string,
+  agentId?: string | null
 ): Promise<{ ok: boolean; message: string }> {
+  const body: Record<string, unknown> = { title }
+  if (agentId !== undefined) {
+    body.agent_id = agentId ?? ''
+  }
   return request(`/companion/conversations/${conversationId}`, {
     method: 'PATCH',
-    body: JSON.stringify({ title }),
+    body: JSON.stringify(body),
   })
 }
 

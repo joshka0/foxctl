@@ -4,12 +4,11 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/jkatigb/agentctl/internal/platform/timeutil"
-	"github.com/jkatigb/agentctl/internal/storage/sqliteutil"
+	"github.com/jkatigb/agentctl/internal/storage/dbutil"
 	"github.com/jkatigb/agentctl/internal/storage/sqlutil"
 	"github.com/oklog/ulid/v2"
 )
@@ -96,8 +95,7 @@ type sqlPatternStore struct {
 // call Close on it when finished. It returns an error if the database cannot be
 // opened or migrated.
 func OpenPatternStore(ctx context.Context, root string) (PatternStore, error) {
-	dbPath := filepath.Join(root, "patterns.db")
-	db, closeFn, err := sqliteutil.OpenDBShared(ctx, dbPath, migratePatterns)
+	db, closeFn, err := dbutil.OpenStoreDB(ctx, root, "PATTERNS", "patterns.db", migratePatterns)
 	if err != nil {
 		return nil, fmt.Errorf("patterns: open db: %w", err)
 	}

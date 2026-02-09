@@ -23,7 +23,6 @@ import (
 	"github.com/jkatigb/agentctl/internal/storage"
 	"github.com/jkatigb/agentctl/internal/storage/cas"
 	"github.com/jkatigb/agentctl/internal/storage/dbutil"
-	"github.com/jkatigb/agentctl/internal/storage/sqliteutil"
 	"github.com/jkatigb/agentctl/internal/storage/sqlutil"
 )
 
@@ -78,7 +77,7 @@ func Open(ctx context.Context, root string, opts Options) (store *Store, err err
 		opts.AutoTTL = 24 * time.Hour
 	}
 	dbPath := filepath.Join(root, "cache.db")
-	db, closeFn, err := sqliteutil.OpenDBShared(ctx, dbPath, migrate)
+	db, closeFn, err := dbutil.OpenStoreDB(ctx, root, "CACHE", "cache.db", migrate)
 	if err != nil {
 		return nil, fmt.Errorf("cache: open db: %w", err)
 	}
@@ -92,7 +91,7 @@ func Open(ctx context.Context, root string, opts Options) (store *Store, err err
 	db.SetMaxIdleConns(5)                   // Keep 5 idle connections ready
 	db.SetConnMaxLifetime(time.Hour)        // Recycle connections after 1 hour
 	db.SetConnMaxIdleTime(15 * time.Minute) // Close idle connections after 15 min
-	// sqliteutil.OpenDB already ensures directory creation, WAL mode, and schema migrations.
+	// dbutil.OpenStoreDB (sqliteutil underneath for sqlite) already ensures directory creation, WAL mode, and schema migrations.
 
 	var casStore *cas.Store
 	var artifactMgr artifacts.Manager

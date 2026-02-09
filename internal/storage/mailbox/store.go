@@ -12,7 +12,7 @@ import (
 
 	"github.com/jkatigb/agentctl/internal/domain/agent"
 	errs "github.com/jkatigb/agentctl/internal/platform/errors"
-	"github.com/jkatigb/agentctl/internal/storage/sqliteutil"
+	"github.com/jkatigb/agentctl/internal/storage/dbutil"
 )
 
 // Store defines the persistence interface for mailbox messages.
@@ -39,10 +39,11 @@ type sqlStore struct {
 	close func() error
 }
 
-// Open opens the mailbox store rooted at the given workspace path.
+// Open opens the mailbox store rooted at the given storage root directory.
+// The database driver is selected via the dbdriver env var conventions (e.g., AGENTCTL_MAILBOX_DB_DRIVER).
 func Open(ctx context.Context, root string) (Store, error) {
 	dbPath := filepath.Join(root, "mailbox.db")
-	db, closeFn, err := sqliteutil.OpenDBShared(ctx, dbPath, migrate)
+	db, closeFn, err := dbutil.OpenStoreDB(ctx, root, "MAILBOX", filepath.Base(dbPath), migrate)
 	if err != nil {
 		return nil, fmt.Errorf("mailbox: open db: %w", err)
 	}

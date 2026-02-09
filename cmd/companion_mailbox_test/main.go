@@ -20,8 +20,8 @@ import (
 	"github.com/jkatigb/agentctl/internal/storage"
 	"github.com/jkatigb/agentctl/internal/storage/blackboard"
 	"github.com/jkatigb/agentctl/internal/storage/contextvar"
+	"github.com/jkatigb/agentctl/internal/storage/dbutil"
 	"github.com/jkatigb/agentctl/internal/storage/memory"
-	"github.com/jkatigb/agentctl/internal/storage/sqliteutil"
 	"github.com/rs/zerolog"
 )
 
@@ -69,7 +69,7 @@ func main() {
 
 	// Create memory database for conversation memory
 	memoryDBPath := filepath.Join(tmpDir, "memory.db")
-	memoryDB, closeFn, err := sqliteutil.OpenDBShared(ctx, memoryDBPath, nil) // Migration handled by companion.ConversationMemory
+	memoryDB, closeFn, err := dbutil.OpenSQLiteDBShared(ctx, memoryDBPath, nil) // Migration handled by companion.ConversationMemory
 	if err != nil {
 		log.Fatal().Err(err).Msg("Failed to create memory database")
 	}

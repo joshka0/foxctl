@@ -8,6 +8,7 @@ export function useActivityStream() {
   const eventSourceRef = useRef<EventSource | null>(null)
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const reconnectAttemptsRef = useRef(0)
+  const connectRef = useRef<(() => void) | null>(null)
   const maxReconnectAttempts = 10
   const { addEvent, setConnected, setError } = useActivityStore()
 
@@ -38,7 +39,9 @@ export function useActivityStream() {
         const delay = Math.min(1000 * Math.pow(2, reconnectAttemptsRef.current), 30000)
         reconnectAttemptsRef.current++
         setError(`Connection lost. Reconnecting in ${Math.round(delay / 1000)}s...`)
-        reconnectTimerRef.current = setTimeout(connect, delay)
+        reconnectTimerRef.current = setTimeout(() => {
+          connectRef.current?.()
+        }, delay)
       } else {
         setError('Connection lost. Max retries reached. Click to retry.')
       }
@@ -64,6 +67,11 @@ export function useActivityStream() {
 
     return eventSource
   }, [addEvent, setConnected, setError])
+
+  // Avoid self-referential useCallback initializers (lint) while keeping stable reconnect behavior.
+  useEffect(() => {
+    connectRef.current = connect
+  }, [connect])
 
   const disconnect = useCallback(() => {
     if (reconnectTimerRef.current) {

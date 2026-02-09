@@ -40,7 +40,6 @@ export function CompanionChat() {
     setSession,
     setMessages,
     addMessage,
-    appendToLastMessage,
     setInflight,
   } = useChatStore()
 
@@ -121,40 +120,68 @@ export function CompanionChat() {
 
 
 
+  type ConsoleSSEPayload = {
+    type?: string
+    content?: string
+    metadata?: Record<string, unknown>
+  }
+
+  const refreshSession = useCallback(async () => {
+    if (!sessionId) return
+    try {
+      const data = await getConsoleSession(sessionId)
+      setSession(data.session)
+      setMessages(data.messages)
+      setInflight(data.inflight)
+      return data
+    } catch (err) {
+      console.error('Failed to refresh console session:', err)
+      return null
+    }
+  }, [sessionId, setInflight, setMessages, setSession])
+
   const handleSSEMessage = useCallback(
-    (event: { type: string; data?: unknown }) => {
-      switch (event.type) {
-        case 'start':
-          // Assistant starting to respond
-          setInflight(true)
-          addMessage({
-            role: 'assistant',
-            content: '',
-            timestamp: new Date().toISOString(),
-          })
+    (payload: ConsoleSSEPayload) => {
+      switch (payload.type) {
+        case 'reply': {
+          setInflight(false)
+          void (async () => {
+            try {
+              const data = await refreshSession()
+              if (!data) {
+                if (typeof payload.content === 'string' && payload.content.trim()) {
+                  addMessage({
+                    role: 'assistant',
+                    content: payload.content,
+                    timestamp: new Date().toISOString(),
+                  })
+                }
+                return
+              }
+              const last = data.messages[data.messages.length - 1]
+              if (last?.role !== 'assistant' && typeof payload.content === 'string' && payload.content.trim()) {
+                addMessage({
+                  role: 'assistant',
+                  content: payload.content,
+                  timestamp: new Date().toISOString(),
+                })
+              }
+            } catch (err) {
+              console.error('[CompanionChat] SSE reply handler error:', err)
+            }
+          })()
           break
-        case 'chunk': {
-          const payload = event.data
-          const content =
-            typeof payload === 'object' && payload !== null
-              ? (payload as { content?: string; data?: { content?: string } }).content ??
-                (payload as { data?: { content?: string } }).data?.content
-              : undefined
-          if (content) {
-            appendToLastMessage(content)
+        }
+        case 'event': {
+          // Cancellation is broadcast as an event with metadata.cancelled=true.
+          if (payload.metadata?.cancelled) {
+            setInflight(false)
           }
           break
         }
-        case 'done':
-        case 'error':
-          setInflight(false)
-          break
-        case 'tool_call':
-          // Tool call received - could update UI to show tool activity
-          break
       }
     },
-    [addMessage, appendToLastMessage, setInflight]
+    [addMessage, refreshSession, setInflight]
   )
 
   // Subscribe to session events via SSE with reconnection
@@ -167,7 +194,7 @@ export function CompanionChat() {
 
     const connectSSE = () => {
       const eventSource = new EventSource(
-        `${API_BASE}/console/sessions/${sessionId}/events`
+        `${API_BASE}/console/sessions/${sessionId}/events?format=payload`
       )
       eventSourceRef.current = eventSource
 
@@ -177,26 +204,10 @@ export function CompanionChat() {
 
       eventSource.addEventListener('message', (event) => {
         try {
-          handleSSEMessage(JSON.parse(event.data))
+          handleSSEMessage(JSON.parse(event.data) as ConsoleSSEPayload)
         } catch (e) {
           console.error('Failed to parse SSE message:', e)
         }
-      })
-
-      eventSource.addEventListener('chunk', (event) => {
-        try {
-          handleSSEMessage({ type: 'chunk', data: JSON.parse(event.data) })
-        } catch (e) {
-          console.error('Failed to parse SSE chunk:', e)
-        }
-      })
-
-      eventSource.addEventListener('done', () => {
-        handleSSEMessage({ type: 'done', data: undefined })
-      })
-
-      eventSource.addEventListener('error', () => {
-        handleSSEMessage({ type: 'error', data: undefined })
       })
 
       eventSource.onerror = () => {

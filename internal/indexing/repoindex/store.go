@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/storage/sqliteutil"
+	"github.com/jkatigb/agentctl/internal/storage/dbutil"
 )
 
 const schemaVersion = 2
@@ -55,8 +55,12 @@ func Open(ctx context.Context, storageRoot, repoRoot string) (*Store, error) {
 	absoluteRoot = filepath.Clean(absoluteRoot)
 
 	key := repoKey(absoluteRoot)
-	dbPath := filepath.Join(storageRoot, "repoindex", key+".db")
-	legacyPath := filepath.Join(storageRoot, "repoindex", legacyRepoKey(absoluteRoot)+".db")
+	dir := strings.TrimSpace(os.Getenv("AGENTCTL_REPOINDEX_DB_DIR"))
+	if dir == "" {
+		dir = filepath.Join(storageRoot, "repoindex")
+	}
+	dbPath := filepath.Join(dir, key+".db")
+	legacyPath := filepath.Join(dir, legacyRepoKey(absoluteRoot)+".db")
 	if dbPath != legacyPath {
 		if _, err := os.Stat(dbPath); err != nil {
 			if os.IsNotExist(err) {
@@ -71,7 +75,7 @@ func Open(ctx context.Context, storageRoot, repoRoot string) (*Store, error) {
 		}
 	}
 
-	db, closeFn, err := sqliteutil.OpenDBShared(ctx, dbPath, migrate)
+	db, closeFn, err := dbutil.OpenSQLiteDBShared(ctx, dbPath, migrate)
 	if err != nil {
 		return nil, fmt.Errorf("repoindex: open db: %w", err)
 	}

@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/jkatigb/agentctl/internal/indexing"
-	"github.com/jkatigb/agentctl/internal/storage/sqliteutil"
+	"github.com/jkatigb/agentctl/internal/storage/dbutil"
 	"github.com/oklog/ulid/v2"
 )
 
@@ -51,7 +51,7 @@ type sqlStore struct {
 
 // Open opens or creates a SQLite-backed Store at root+"/post_review_events.db" and applies the package's schema migrations.
 func Open(ctx context.Context, root string) (Store, error) {
-	db, closeFn, err := sqliteutil.OpenDBShared(ctx, root+"/post_review_events.db", migrate)
+	db, closeFn, err := dbutil.OpenStoreDB(ctx, root, "POST_REVIEW", "post_review_events.db", migrate)
 	if err != nil {
 		return nil, fmt.Errorf("postreview: open db: %w", err)
 	}

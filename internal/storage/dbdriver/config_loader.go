@@ -36,6 +36,20 @@ func (cl *ConfigLoader) LoadMemoryConfig() Config {
 	return cl.loadConfig("MEMORY", "memory.db")
 }
 
+// LoadConfig loads configuration for an arbitrary store database.
+// This is a generalization of the named helpers (CACHE/JOBS/MEMORY).
+//
+// Index:
+// - Purpose: Allow non-core stores to use the same driver selection and env-var configuration model
+// - Flow: normalize store name → select driver from env → build driver-specific config → return
+// - SideEffects: none
+// - FailureModes: none (invalid/missing required fields surface during OpenDB via cfg.Validate)
+// - Related: LoadCacheConfig, LoadJobsConfig, LoadMemoryConfig
+// - Keywords: dbdriver, config_loader, store_config
+func (cl *ConfigLoader) LoadConfig(storeName, defaultPath string) Config {
+	return cl.loadConfig(storeName, defaultPath)
+}
+
 // loadConfig loads configuration for a specific database
 // prefix is the environment variable prefix (e.g., "CACHE", "JOBS", "MEMORY")
 // defaultPath is the default SQLite database path
@@ -44,6 +58,11 @@ func (cl *ConfigLoader) loadConfig(prefix, defaultPath string) Config {
 	// Format: AGENTCTL_<PREFIX>_DB_DRIVER (e.g., AGENTCTL_CACHE_DB_DRIVER)
 	driverEnv := fmt.Sprintf("AGENTCTL_%s_DB_DRIVER", strings.ToUpper(prefix))
 	driver := os.Getenv(driverEnv)
+
+	// Global fallback (applies to all stores) when per-store driver is not set.
+	if driver == "" {
+		driver = os.Getenv("AGENTCTL_DB_DRIVER")
+	}
 
 	// Default to SQLite if not specified
 	if driver == "" {
@@ -56,7 +75,7 @@ func (cl *ConfigLoader) loadConfig(prefix, defaultPath string) Config {
 	case DriverLibSQL:
 		return cl.loadLibSQLConfig(prefix, defaultPath)
 	case DriverTurso:
-		return cl.loadTursoConfig(prefix, strings.ToLower(prefix))
+		return cl.loadTursoConfig(prefix, defaultPath, strings.ToLower(prefix))
 	case DriverSQLite:
 		fallthrough
 	default:
@@ -168,8 +187,8 @@ func (cl *ConfigLoader) loadLibSQLConfig(prefix, defaultPath string) Config {
 	}
 }
 
-// loadTursoConfig loads Turso configuration
-func (cl *ConfigLoader) loadTursoConfig(prefix, dbName string) Config {
+// loadTursoConfig loads Turso configuration.
+func (cl *ConfigLoader) loadTursoConfig(prefix, defaultPath, dbName string) Config {
 	// Get Turso URL
 	// Format: AGENTCTL_<PREFIX>_DB_URL or AGENTCTL_TURSO_URL (fallback)
 	urlEnv := fmt.Sprintf("AGENTCTL_%s_DB_URL", strings.ToUpper(prefix))
@@ -184,6 +203,16 @@ func (cl *ConfigLoader) loadTursoConfig(prefix, dbName string) Config {
 	token := os.Getenv(tokenEnv)
 	if token == "" {
 		token = os.Getenv("AGENTCTL_TURSO_TOKEN")
+	}
+
+	// Replica path (persistent embedded replica file).
+	// Use AGENTCTL_<PREFIX>_DB_PATH when set, otherwise default under rootDir.
+	replicaPathEnv := fmt.Sprintf("AGENTCTL_%s_DB_PATH", strings.ToUpper(prefix))
+	replicaPath := os.Getenv(replicaPathEnv)
+	if replicaPath == "" && defaultPath != "" {
+		// Match existing memory factory behavior (e.g., memory.turso.replica).
+		name := strings.Replace(defaultPath, ".db", ".turso.replica", 1)
+		replicaPath = filepath.Join(cl.rootDir, name)
 	}
 
 	// Check if vector search should be enabled (default: true for MEMORY, false for others)
@@ -203,12 +232,24 @@ func (cl *ConfigLoader) loadTursoConfig(prefix, dbName string) Config {
 		}
 	}
 
+	// Check for sync interval (seconds, 0 = sync on demand).
+	// We reuse the same per-store env var name as libSQL for consistency.
+	syncIntervalEnv := fmt.Sprintf("AGENTCTL_%s_SYNC_INTERVAL", strings.ToUpper(prefix))
+	syncInterval := 0
+	if intervalStr := os.Getenv(syncIntervalEnv); intervalStr != "" {
+		if interval, err := strconv.Atoi(intervalStr); err == nil && interval > 0 {
+			syncInterval = interval
+		}
+	}
+
 	return Config{
 		Driver: DriverTurso,
 		Turso: TursoConfig{
 			URL:                url,
 			AuthToken:          token,
 			DatabaseName:       dbName,
+			ReplicaPath:        replicaPath,
+			SyncInterval:       syncInterval,
 			EnableVectorSearch: enableVector,
 			VectorDimensions:   vectorDims,
 		},
@@ -318,3 +359,6 @@ func (cl *ConfigLoader) ConfigFromPlatformSettings(settings PlatformDatabaseSett
 //   AGENTCTL_VECTOR_DIMS=1024            # Global default (1024 for Voyage, 3072 for Gemini)
 //
 // Where <DB> is one of: CACHE, JOBS, or MEMORY
+//
+// For store configuration beyond those core stores, agentctl uses the same
+// `AGENTCTL_<STORE>_...` environment variable pattern (e.g., `AGENTCTL_SESSIONS_DB_DRIVER`).

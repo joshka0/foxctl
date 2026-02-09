@@ -55,24 +55,19 @@ package main
 
 import (
     "context"
-    "github.com/jkatigb/agentctl/internal/storage/sqliteutil"
+    "github.com/jkatigb/agentctl/internal/storage/dbutil"
 )
 
 func main() {
     ctx := context.Background()
 
-    // Automatically uses SQLite or Turso based on env vars
-    db, err := sqliteutil.OpenDBWithAutoConfig(
-        ctx,
-        "~/.agentctl",
-        "memory",
-        "memory.db",
-        nil, // migration func
-    )
+    // Automatically uses SQLite/libSQL/Turso based on env vars.
+    // Env var prefix is derived from storeName: e.g., AGENTCTL_MEMORY_DB_DRIVER, AGENTCTL_DB_DRIVER.
+    db, closeFn, err := dbutil.OpenStoreDB(ctx, "~/.agentctl/storage", "MEMORY", "memory.db", nil)
     if err != nil {
         panic(err)
     }
-    defer db.Close()
+    defer closeFn()
 
     // Use db normally
 }

@@ -5,12 +5,11 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"path/filepath"
 	"time"
 
 	"github.com/jkatigb/agentctl/internal/domain/agent"
 	errs "github.com/jkatigb/agentctl/internal/platform/errors"
-	"github.com/jkatigb/agentctl/internal/storage/sqliteutil"
+	"github.com/jkatigb/agentctl/internal/storage/dbutil"
 	"github.com/oklog/ulid/v2"
 )
 
@@ -45,8 +44,7 @@ type boardSQLStore struct {
 // root/board.db. It applies the package migration function before returning the
 // store and returns an error if the database cannot be opened or migrated.
 func OpenBoardStore(ctx context.Context, root string) (BoardStore, error) {
-	dbPath := filepath.Join(root, "board.db")
-	db, closeFn, err := sqliteutil.OpenDBShared(ctx, dbPath, migrateBoard)
+	db, closeFn, err := dbutil.OpenStoreDB(ctx, root, "BOARD", "board.db", migrateBoard)
 	if err != nil {
 		return nil, fmt.Errorf("board: open db: %w", err)
 	}

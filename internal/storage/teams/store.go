@@ -11,7 +11,6 @@ import (
 
 	"github.com/jkatigb/agentctl/internal/platform/timeutil"
 	"github.com/jkatigb/agentctl/internal/storage/dbutil"
-	"github.com/jkatigb/agentctl/internal/storage/sqliteutil"
 )
 
 // Store defines persistence operations for teams and members.
@@ -51,12 +50,11 @@ type sqlStore struct {
 	close func() error
 }
 
-// Open opens or creates the teams SQLite database in the provided root directory and returns a Store backed by it.
-// It constructs the path root/teams.db, opens a shared SQLite database (applying migrations), and returns a Store
-// that manages the database connection or an error if opening fails.
+// Open opens or creates the teams database in the provided root directory and returns a Store backed by it.
+// The database driver is selected via the dbdriver env var conventions (e.g., AGENTCTL_TEAMS_DB_DRIVER).
 func Open(ctx context.Context, root string) (Store, error) {
 	dbPath := filepath.Join(root, "teams.db")
-	db, closeFn, err := sqliteutil.OpenDBShared(ctx, dbPath, migrate)
+	db, closeFn, err := dbutil.OpenStoreDB(ctx, root, "TEAMS", filepath.Base(dbPath), migrate)
 	if err != nil {
 		return nil, fmt.Errorf("teams: open db: %w", err)
 	}

@@ -6,15 +6,14 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 	"time"
 
 	errs "github.com/jkatigb/agentctl/internal/platform/errors"
 	"github.com/jkatigb/agentctl/internal/protocol"
+	"github.com/jkatigb/agentctl/internal/storage/dbutil"
 	"github.com/jkatigb/agentctl/internal/storage/jobs/types"
-	"github.com/jkatigb/agentctl/internal/storage/sqliteutil"
 	"github.com/jkatigb/agentctl/internal/storage/sqlutil"
 	"github.com/oklog/ulid/v2"
 )
@@ -43,8 +42,7 @@ type sqlStore struct {
 // If the on-disk database cannot be opened due to a read-only filesystem, Open writes a brief warning to stderr and falls back to an in-memory store.
 // On success it returns the Store; on failure it returns a non-nil error.
 func Open(ctx context.Context, root string) (Store, error) {
-	dbPath := filepath.Join(root, "jobs.db")
-	db, closeFn, err := sqliteutil.OpenDBShared(ctx, dbPath, migrate)
+	db, closeFn, err := dbutil.OpenStoreDB(ctx, root, "JOBS", "jobs.db", migrate)
 	if err != nil {
 		// Check if error is due to readonly filesystem
 		if isReadonlyError(err) {
@@ -54,7 +52,7 @@ func Open(ctx context.Context, root string) (Store, error) {
 			fmt.Fprintf(os.Stderr, "hint: if using Claude Code, this is expected in sandbox mode\n")
 
 			// Fall back to in-memory database for sandbox environments
-			memDB, memErr := sqliteutil.OpenInMemory(ctx, migrate)
+			memDB, memErr := dbutil.OpenSQLiteInMemory(ctx, migrate)
 			if memErr != nil {
 				return nil, fmt.Errorf("jobs: open in-memory db: %w", memErr)
 			}

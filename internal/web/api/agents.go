@@ -21,7 +21,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/platform/workspace"
 	"github.com/jkatigb/agentctl/internal/storage/agents"
 	"github.com/jkatigb/agentctl/internal/storage/contextvar"
-	"github.com/jkatigb/agentctl/internal/storage/sqliteutil"
+	"github.com/jkatigb/agentctl/internal/storage/dbutil"
 )
 
 // Agent name generation word lists for memorable random names
@@ -59,6 +59,7 @@ type AgentResponse struct {
 	HeartbeatAt    string   `json:"heartbeat_at,omitempty"`
 	LLMProvider    string   `json:"llm_provider,omitempty"`
 	LLMModel       string   `json:"llm_model,omitempty"`
+	ExecMode       string   `json:"exec_mode,omitempty"`       // reactive|autonomous|proactive|story
 	ConversationID string   `json:"conversation_id,omitempty"` // Linked companion conversation ID
 }
 
@@ -147,6 +148,7 @@ func AgentsListHandler(cfg config.Config, log zerolog.Logger) http.HandlerFunc {
 				State:          string(a.State),
 				LLMProvider:    a.LLMProvider,
 				LLMModel:       a.LLMModel,
+				ExecMode:       string(a.ExecMode),
 				ConversationID: a.ConversationID,
 			}
 			if !a.CreatedAt.IsZero() {
@@ -284,6 +286,7 @@ func AgentDetailHandler(cfg config.Config, log zerolog.Logger) http.HandlerFunc 
 			State:          string(agent.State),
 			LLMProvider:    agent.LLMProvider,
 			LLMModel:       agent.LLMModel,
+			ExecMode:       string(agent.ExecMode),
 			ConversationID: agent.ConversationID,
 		}
 		if !agent.CreatedAt.IsZero() {
@@ -762,7 +765,7 @@ func handleAgentAsk(w http.ResponseWriter, r *http.Request, cfg config.Config, l
 
 	// Open companion memory database
 	dbPath := filepath.Join(cfg.Storage.Root, "companion.db")
-	memoryDB, closeFn, err := sqliteutil.OpenDBShared(r.Context(), dbPath, nil)
+	memoryDB, closeFn, err := dbutil.OpenStoreDB(r.Context(), cfg.Storage.Root, "COMPANION", filepath.Base(dbPath), nil)
 	if err != nil {
 		log.Error().Err(err).Msg("failed to open companion memory database")
 		httpError(w, http.StatusInternalServerError, "failed to open memory database")
@@ -905,6 +908,7 @@ func handleAgentPatch(w http.ResponseWriter, r *http.Request, cfg config.Config,
 		State:          string(agent.State),
 		LLMProvider:    agent.LLMProvider,
 		LLMModel:       agent.LLMModel,
+		ExecMode:       string(agent.ExecMode),
 		ConversationID: agent.ConversationID,
 	}
 	if !agent.CreatedAt.IsZero() {

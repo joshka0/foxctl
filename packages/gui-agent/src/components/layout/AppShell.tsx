@@ -1,11 +1,8 @@
-import { type ReactNode, useState } from 'react'
+import { type ReactNode } from 'react'
 import { AgentSidebar } from './AgentSidebar'
-import { AgentHUD } from './AgentHUD'
 import { SpawnAgentPanel } from './SpawnAgentPanel'
 import { useActivityStream } from '@/hooks/useActivityStream'
 import { useViewStore } from '@/stores/viewStore'
-import { PanelRightClose, PanelRightOpen } from 'lucide-react'
-import { Button } from '@/components/ui/button'
 import type { ViewType } from '@/stores/viewStore'
 
 interface AppShellProps {
@@ -15,7 +12,6 @@ interface AppShellProps {
 }
 
 export function AppShell({ children, activeView, onViewChange }: AppShellProps) {
-  const [rightPanelOpen, setRightPanelOpen] = useState(true)
   const { spawnAgentOpen, setSpawnAgentOpen } = useViewStore()
 
   // Initialize SSE connection
@@ -31,20 +27,6 @@ export function AppShell({ children, activeView, onViewChange }: AppShellProps) 
         {/* Top Bar */}
         <header className="h-12 border-b border-border flex items-center justify-between px-4">
           <h1 className="text-sm font-medium text-foreground">Agent Operations Center</h1>
-          <div className="flex items-center gap-2">
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={() => setRightPanelOpen(!rightPanelOpen)}
-              title={rightPanelOpen ? 'Hide agent details panel' : 'Show agent details panel'}
-            >
-              {rightPanelOpen ? (
-                <PanelRightClose className="h-4 w-4" />
-              ) : (
-                <PanelRightOpen className="h-4 w-4" />
-              )}
-            </Button>
-          </div>
         </header>
 
         {/* Content Area */}
@@ -60,13 +42,6 @@ export function AppShell({ children, activeView, onViewChange }: AppShellProps) 
               onClose={() => setSpawnAgentOpen(false)}
               onViewChange={onViewChange}
             />
-          )}
-
-          {/* Right Panel - Communication */}
-          {rightPanelOpen && (
-            <aside className="w-80 border-l border-border bg-card">
-              <AgentHUD />
-            </aside>
           )}
         </div>
       </div>

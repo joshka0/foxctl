@@ -2,8 +2,7 @@ import { useEffect } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
-import { spawnAgent, type SpawnAgentParams } from '@/api/client'
-import type { AgentSpawnResponse } from '@/api/types'
+import { spawnAgent, createConsoleSession, patchAgent, type SpawnAgentParams } from '@/api/client'
 import { X } from 'lucide-react'
 import { SpawnAgentFormCore } from '@/components/agents/SpawnAgentFormCore'
 import type { ViewType } from '@/stores/viewStore'
@@ -25,12 +24,35 @@ export function SpawnAgentPanel({ onClose, onViewChange }: SpawnAgentPanelProps)
   }, [onClose])
 
   const mutation = useMutation({
-    mutationFn: (params: SpawnAgentParams) => spawnAgent(params),
-    onSuccess: (_data: AgentSpawnResponse) => {
-      // Invalidate agents list to show the new agent
+    mutationFn: async (params: SpawnAgentParams) => {
+      const spawnResult = await spawnAgent(params)
+
+      // Auto-create a companion conversation linked to the new agent
+      try {
+        const sessionData = await createConsoleSession({
+          workspace: params.workspace_id || '/',
+          profile: 'companion',
+        })
+        await patchAgent(spawnResult.actor_id, {
+          conversation_id: sessionData.session.id,
+        })
+        // Store the conversation ID for auto-select after navigation
+        localStorage.setItem(
+          'gui-agent-auto-select-conversation',
+          sessionData.session.id
+        )
+      } catch (err) {
+        console.warn('[SpawnAgentPanel] Failed to create linked conversation:', err)
+        localStorage.removeItem('gui-agent-auto-select-conversation')
+      }
+
+      return spawnResult
+    },
+    onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['agents'] })
-      // Navigate to agents view and select the new agent
-      onViewChange('agents')
+      queryClient.invalidateQueries({ queryKey: ['companion-conversations'] })
+      // Navigate to conversations view so the auto-select picks up the new chat
+      onViewChange('conversations')
       onClose()
     },
     onError: (error) => {

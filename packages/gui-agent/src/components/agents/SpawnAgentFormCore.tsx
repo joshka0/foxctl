@@ -1,8 +1,9 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { companionChat, listSkills, type SpawnAgentParams } from '@/api/client'
+import { companionChat, listSkills, listWorkspaces, type SpawnAgentParams } from '@/api/client'
+import { Folder } from 'lucide-react'
 import {
   Plus,
   RefreshCw,
@@ -29,6 +30,7 @@ export function SpawnAgentFormCore({ onSubmit, onCancel, isPending, error }: Spa
     role: 'coder',
     prompt: '',
     name: '',
+    workspace_id: '',
     exec_mode: 'reactive',
     llm_provider: '',
     llm_model: '',
@@ -36,6 +38,23 @@ export function SpawnAgentFormCore({ onSubmit, onCancel, isPending, error }: Spa
     max_auto_turns: 1,
     skills_allow: [],
   })
+
+  // Fetch available workspaces
+  const { data: workspacesData } = useQuery({
+    queryKey: ['workspaces'],
+    queryFn: listWorkspaces,
+  })
+
+  const workspaces = useMemo(() => workspacesData?.workspaces ?? [], [workspacesData?.workspaces])
+  const currentWorkspace = workspacesData?.current ?? ''
+
+  // Auto-select current workspace on first load
+  useEffect(() => {
+    if (currentWorkspace && !formData.workspace_id) {
+      setFormData((prev) => ({ ...prev, workspace_id: currentWorkspace }))
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentWorkspace])
 
   // Fetch available skills
   const { data: skillsData } = useQuery({
@@ -70,6 +89,7 @@ export function SpawnAgentFormCore({ onSubmit, onCancel, isPending, error }: Spa
       role: formData.role,
       prompt: formData.prompt,
     }
+    if (formData.workspace_id?.trim()) params.workspace_id = formData.workspace_id.trim()
     if (formData.name?.trim()) params.name = formData.name.trim()
     if (formData.exec_mode && formData.exec_mode !== 'reactive') {
       params.exec_mode = formData.exec_mode
@@ -169,6 +189,29 @@ export function SpawnAgentFormCore({ onSubmit, onCancel, isPending, error }: Spa
         />
         <p className="text-xs text-muted-foreground mt-1">
           Optional - a memorable name for this agent
+        </p>
+      </div>
+
+      {/* Workspace */}
+      <div>
+        <label className="text-sm font-medium text-foreground flex items-center gap-1.5">
+          <Folder className="h-3.5 w-3.5" />
+          Workspace
+        </label>
+        <select
+          value={formData.workspace_id}
+          onChange={(e) => setFormData({ ...formData, workspace_id: e.target.value })}
+          className="w-full mt-1 h-9 rounded-md border border-input bg-background px-3 text-sm font-mono"
+        >
+          <option value="">Default</option>
+          {workspaces.map((ws) => (
+            <option key={ws.path} value={ws.path}>
+              {ws.name}{ws.is_active ? ' (active)' : ''} — {ws.path}
+            </option>
+          ))}
+        </select>
+        <p className="text-xs text-muted-foreground mt-1">
+          The repo/directory this agent operates in and calls tools from
         </p>
       </div>
 

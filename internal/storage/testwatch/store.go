@@ -5,12 +5,10 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"path/filepath"
 	"time"
 
 	"github.com/jkatigb/agentctl/internal/platform/timeutil"
 	"github.com/jkatigb/agentctl/internal/storage/dbutil"
-	"github.com/jkatigb/agentctl/internal/storage/sqliteutil"
 )
 
 // Status represents the state of a watcher.
@@ -75,8 +73,7 @@ type sqlStore struct {
 // The returned store uses a shared SQLite connection and will invoke the underlying close function when closed.
 // Any error encountered while opening the database or running migrations is wrapped and returned.
 func Open(ctx context.Context, root string) (Store, error) {
-	dbPath := filepath.Join(root, "test_watch.db")
-	db, closeFn, err := sqliteutil.OpenDBShared(ctx, dbPath, migrate)
+	db, closeFn, err := dbutil.OpenStoreDB(ctx, root, "TESTWATCH", "test_watch.db", migrate)
 	if err != nil {
 		return nil, fmt.Errorf("testwatch: open db: %w", err)
 	}

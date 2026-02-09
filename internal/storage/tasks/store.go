@@ -5,13 +5,11 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"path/filepath"
 	"time"
 
 	"github.com/jkatigb/agentctl/internal/platform/timeutil"
 	ws "github.com/jkatigb/agentctl/internal/platform/workspace"
 	"github.com/jkatigb/agentctl/internal/storage/dbutil"
-	"github.com/jkatigb/agentctl/internal/storage/sqliteutil"
 	"github.com/oklog/ulid/v2"
 )
 
@@ -198,13 +196,12 @@ type sqlStore struct {
 	close func() error
 }
 
-// Open initializes and returns a Store backed by an SQLite database at root/tasks.db.
-// It runs the package migrations, configures the SQLite connection pool for single-writer
-// semantics and optimized task operations, and returns a store whose Close will release
-// the underlying database resources.
+// Open initializes and returns a Store backed by a database at root/tasks.db.
+// The database driver is selected via the dbdriver env var conventions (e.g., AGENTCTL_TASKS_DB_DRIVER).
+// It runs the package migrations, configures the connection pool for single-writer semantics
+// (primarily for SQLite), and returns a store whose Close will release the underlying resources.
 func Open(ctx context.Context, root string) (Store, error) {
-	dbPath := filepath.Join(root, "tasks.db")
-	db, closeFn, err := sqliteutil.OpenDBShared(ctx, dbPath, migrate)
+	db, closeFn, err := dbutil.OpenStoreDB(ctx, root, "TASKS", "tasks.db", migrate)
 	if err != nil {
 		return nil, fmt.Errorf("tasks: open db: %w", err)
 	}

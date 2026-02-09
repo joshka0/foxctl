@@ -8,7 +8,6 @@ import (
 	"io"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"syscall"
 	"time"
 
@@ -21,8 +20,9 @@ import (
 	"github.com/jkatigb/agentctl/internal/platform/config"
 	errs "github.com/jkatigb/agentctl/internal/platform/errors"
 	"github.com/jkatigb/agentctl/internal/protocol"
+	"github.com/jkatigb/agentctl/internal/storage"
+	"github.com/jkatigb/agentctl/internal/storage/dbutil"
 	"github.com/jkatigb/agentctl/internal/storage/mailbox"
-	"github.com/jkatigb/agentctl/internal/storage/sqliteutil"
 	"github.com/jkatigb/agentctl/internal/storage/trajectory"
 	"github.com/oklog/ulid/v2"
 	"github.com/rs/zerolog"
@@ -765,9 +765,8 @@ func runActorSysUnregister(cmd *cobra.Command, args []string) error {
 // It returns the opened *sql.DB, a close function that must be called to release shared DB resources, and any error encountered.
 
 func openActorRegistryDB(ctx context.Context, storageRoot string) (*sql.DB, func() error, error) {
-	// Use the agents.db for actor registry (shared with agent store)
-	dbPath := filepath.Join(storageRoot, "agents.db")
-	db, closeFn, err := sqliteutil.OpenDBShared(ctx, dbPath, nil)
+	// Use the AGENTS store for actor registry (shared with the agent store).
+	db, closeFn, err := dbutil.OpenStoreDB(ctx, storageRoot, string(storage.StoreAgents), "agents.db", nil)
 	if err != nil {
 		return nil, nil, err
 	}

@@ -10,7 +10,7 @@ import (
 	"time"
 
 	errs "github.com/jkatigb/agentctl/internal/platform/errors"
-	"github.com/jkatigb/agentctl/internal/storage/sqliteutil"
+	"github.com/jkatigb/agentctl/internal/storage/dbutil"
 	"github.com/jkatigb/agentctl/internal/storage/sqlutil"
 	"github.com/oklog/ulid/v2"
 )
@@ -38,18 +38,44 @@ type Store struct {
 // - Flow: normalize table -> open shared db -> migrate -> return store
 // - SideEffects: opens/creates SQLite DB; runs DDL migrations
 // - FailureModes: invalid table name, open errors, migration errors
-// - Related: sqliteutil.OpenDBShared, Migrate
-// - Keywords: queue, migrate, table, sqliteutil.OpenDBShared, Migrate
+// - Related: dbutil.OpenSQLiteDBShared, Migrate
+// - Keywords: queue, migrate, table, dbutil.OpenSQLiteDBShared, Migrate
 func Open(ctx context.Context, dbPath string, opts Options) (*Store, error) {
 	table, err := normalizeTableName(opts.Table)
 	if err != nil {
 		return nil, err
 	}
-	db, closeFn, err := sqliteutil.OpenDBShared(ctx, dbPath, func(ctx context.Context, db *sql.DB) error {
+	db, closeFn, err := dbutil.OpenSQLiteDBShared(ctx, dbPath, func(ctx context.Context, db *sql.DB) error {
 		return Migrate(ctx, db, Options{Table: table})
 	})
 	if err != nil {
 		return nil, fmt.Errorf("queue: open db: %w", err)
+	}
+	return &Store{db: db, table: table, ownsDB: true, close: closeFn}, nil
+}
+
+// OpenStore opens a queue Store using the canonical per-store dbdriver configuration.
+//
+// This is preferred over Open/OpenInRoot when the queue corresponds to a named store in the
+// agentctl store registry (e.g., SUMMARY_QUEUE).
+//
+// Index:
+// - Purpose: Open a queue DB via standardized store configuration (sqlite/libsql/turso)
+// - Flow: normalize table → open store DB via dbutil.OpenStoreDB → migrate table → return store
+// - SideEffects: may create local replica files/dirs; may run schema migrations
+// - FailureModes: invalid table, open errors, migration errors, remote auth/network errors (sync drivers)
+// - Related: dbutil.OpenStoreDB, Migrate
+// - Keywords: queue, store_db, dbdriver, migrate, summary_queue
+func OpenStore(ctx context.Context, storageRoot, storeName, defaultFile string, opts Options) (*Store, error) {
+	table, err := normalizeTableName(opts.Table)
+	if err != nil {
+		return nil, err
+	}
+	db, closeFn, err := dbutil.OpenStoreDB(ctx, storageRoot, storeName, defaultFile, func(ctx context.Context, db *sql.DB) error {
+		return Migrate(ctx, db, Options{Table: table})
+	})
+	if err != nil {
+		return nil, fmt.Errorf("queue: open store db: %w", err)
 	}
 	return &Store{db: db, table: table, ownsDB: true, close: closeFn}, nil
 }

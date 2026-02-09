@@ -21,6 +21,9 @@ type tursoDB struct {
 	enableVectorSearch bool
 	vectorDimensions   int
 	driverType         DriverType
+	syncURL            string
+	syncStop           chan struct{}
+	syncDone           chan struct{}
 }
 
 // openTurso opens a Turso database connection
@@ -105,14 +108,37 @@ func openTurso(ctx context.Context, cfg TursoConfig, migrate MigrationFunc) (DB,
 		cleanupDir = tempDir
 	}
 
-	return &tursoDB{
+	store := &tursoDB{
 		db:                 db,
 		connector:          connector,
 		tempDir:            cleanupDir,
 		enableVectorSearch: cfg.EnableVectorSearch,
 		vectorDimensions:   vectorDims,
 		driverType:         DriverTurso,
-	}, nil
+		syncURL:            cfg.URL,
+	}
+
+	if cfg.SyncInterval > 0 {
+		interval := time.Duration(cfg.SyncInterval) * time.Second
+		store.syncStop = make(chan struct{})
+		store.syncDone = make(chan struct{})
+		go func() {
+			ticker := time.NewTicker(interval)
+			defer ticker.Stop()
+			defer close(store.syncDone)
+
+			for {
+				select {
+				case <-store.syncStop:
+					return
+				case <-ticker.C:
+					_, _ = store.connector.Sync() // best-effort
+				}
+			}
+		}()
+	}
+
+	return store, nil
 }
 
 // ensureVectorSupport verifies that vector search is available
@@ -139,6 +165,14 @@ func ensureVectorSupport(ctx context.Context, db *sql.DB, dimensions int) error 
 // Close closes the database connection
 func (t *tursoDB) Close() error {
 	var err error
+
+	if t.syncStop != nil {
+		close(t.syncStop)
+		<-t.syncDone
+		t.syncStop = nil
+		t.syncDone = nil
+	}
+
 	if t.db != nil {
 		err = t.db.Close()
 	}
@@ -252,4 +286,26 @@ func (t *tursoDB) GetDriverType() DriverType {
 // GetVectorDimensions returns the configured vector dimensions
 func (t *tursoDB) GetVectorDimensions() int {
 	return t.vectorDimensions
+}
+
+// Sync triggers a manual sync with the remote Turso database.
+func (t *tursoDB) Sync() error {
+	if t.connector == nil {
+		return nil
+	}
+	_, err := t.connector.Sync()
+	if err != nil {
+		return fmt.Errorf("turso sync failed: %w", err)
+	}
+	return nil
+}
+
+// IsSyncEnabled returns true when a Turso URL is configured.
+func (t *tursoDB) IsSyncEnabled() bool {
+	return t.syncURL != ""
+}
+
+// GetSyncURL returns the configured Turso URL.
+func (t *tursoDB) GetSyncURL() string {
+	return t.syncURL
 }

@@ -293,6 +293,7 @@ func (m *ConversationMemory) ensureSchema(ctx context.Context) error {
 		CREATE TABLE IF NOT EXISTS companion_conversation_titles (
 			conversation_id TEXT PRIMARY KEY,
 			title TEXT NOT NULL,
+			agent_id TEXT,
 			updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 		);
 
@@ -396,7 +397,99 @@ func (m *ConversationMemory) ensureSchema(ctx context.Context) error {
 	_, _ = m.db.ExecContext(ctx, `ALTER TABLE companion_turns ADD COLUMN tool_calls TEXT`)
 	// Ignore error - column may already exist
 
+	// Migration: Add agent_id column to companion_conversation_titles
+	_, _ = m.db.ExecContext(ctx, `ALTER TABLE companion_conversation_titles ADD COLUMN agent_id TEXT`)
+	// Ignore error - column may already exist
+
+	// Migration: Fix malformed Go time.Time.String() timestamps in companion_turns.
+	// Older versions stored created_at as e.g. "2026-01-24 19:15:42.503658 +0200 EET m=+102.170251751"
+	// instead of the clean "2006-01-02 15:04:05.000000" UTC format. These break ORDER BY.
+	if err := m.migrateTimestamps(ctx); err != nil {
+		// Non-fatal: don't block startup
+		_ = err
+	}
+
 	return nil
+}
+
+// migrateTimestamps fixes malformed Go time.Time.String() timestamps in companion_turns.
+// These contain timezone names and monotonic clock readings that break SQLite ordering.
+func (m *ConversationMemory) migrateTimestamps(ctx context.Context) error {
+	// Select rows whose created_at contains a timezone offset (not clean UTC format).
+	// The libsql driver auto-parses stored timestamps, so we read them as-is and check
+	// in Go whether they need conversion to clean UTC format.
+	rows, err := m.db.QueryContext(ctx, `SELECT id, created_at FROM companion_turns`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	// The libsql driver may auto-parse stored timestamps into RFC3339 format on read.
+	// We detect any timestamp not already in clean "YYYY-MM-DD HH:MM:SS.ffffff" UTC format
+	// and convert it.
+	const cleanFormat = "2006-01-02 15:04:05.000000"
+	type fix struct {
+		id        string
+		cleanedAt string
+	}
+	var fixes []fix
+	for rows.Next() {
+		var id, raw string
+		if err := rows.Scan(&id, &raw); err != nil {
+			continue
+		}
+		// Skip rows already in clean UTC format (26 chars, no timezone suffix).
+		if len(raw) == 26 {
+			if _, err := time.Parse(cleanFormat, raw); err == nil {
+				continue
+			}
+		}
+		// Try RFC3339 (libsql driver format): "2026-01-20T10:14:42.397221+02:00"
+		t, err := time.Parse(time.RFC3339Nano, raw)
+		if err != nil {
+			// Try Go's time.Time.String() format (raw SQLite): "2026-01-20 10:14:42.503658 +0200 EET m=+29.73"
+			cleaned := raw
+			if idx := strings.Index(raw, " m="); idx > 0 {
+				cleaned = raw[:idx]
+			}
+			t, err = time.Parse("2006-01-02 15:04:05.999999 -0700 MST", cleaned)
+			if err != nil {
+				t, err = time.Parse("2006-01-02 15:04:05.999999 -0700", cleaned)
+			}
+		}
+		if err != nil {
+			continue
+		}
+		utcStr := t.UTC().Format(cleanFormat)
+		if utcStr != raw {
+			fixes = append(fixes, fix{id: id, cleanedAt: utcStr})
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+
+	if len(fixes) == 0 {
+		return nil
+	}
+
+	tx, err := m.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	stmt, err := tx.PrepareContext(ctx, `UPDATE companion_turns SET created_at = ? WHERE id = ?`)
+	if err != nil {
+		return err
+	}
+	defer stmt.Close()
+
+	for _, f := range fixes {
+		_, _ = stmt.ExecContext(ctx, f.cleanedAt, f.id)
+	}
+
+	return tx.Commit()
 }
 
 // AppendTurn adds a new turn to the conversation.
@@ -1315,6 +1408,15 @@ func (m *ConversationMemory) Clear(ctx context.Context, conversationID string) e
 
 // Helper functions
 
+// newID returns a new stable identifier for companion memory rows.
+//
+// Index:
+// - Purpose: Centralize ID generation for deterministic tests and consistent formatting
+// - Flow: call injected idGenerator
+// - SideEffects: increments internal sequence when using default generator
+// - FailureModes: none
+// - Related: WithIDGenerator, ConversationMemory.AppendTurn
+// - Keywords: id, deterministic, testing
 func (m *ConversationMemory) newID() string {
 	return m.idGenerator()
 }
@@ -1519,13 +1621,14 @@ func (m *ConversationMemory) Export(ctx context.Context, conversationID string) 
 type ConversationSummary struct {
 	ID           string `json:"id"`
 	Name         string `json:"name,omitempty"`
+	AgentID      string `json:"agent_id,omitempty"`
 	CreatedAt    string `json:"created_at"`
 	UpdatedAt    string `json:"updated_at"`
 	MessageCount int    `json:"message_count"`
 	LastMessage  string `json:"last_message,omitempty"`
 }
 
-// ListConversations returns all conversations with their summaries.
+// ListConversations returns all non-deleted conversations with titles, agent links, and summaries.
 func (m *ConversationMemory) ListConversations(ctx context.Context, limit int) ([]ConversationSummary, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -1541,7 +1644,8 @@ func (m *ConversationMemory) ListConversations(ctx context.Context, limit int) (
 			COUNT(*) as message_count,
 			MIN(t.created_at) as created_at,
 			MAX(t.created_at) as updated_at,
-			COALESCE(titles.title, '') as title
+			COALESCE(titles.title, '') as title,
+			COALESCE(titles.agent_id, '') as agent_id
 		FROM companion_turns t
 		LEFT JOIN companion_conversation_titles titles ON t.conversation_id = titles.conversation_id
 		WHERE t.conversation_id NOT IN (SELECT conversation_id FROM companion_deleted_conversations)
@@ -1559,11 +1663,12 @@ func (m *ConversationMemory) ListConversations(ctx context.Context, limit int) (
 	var conversations []ConversationSummary
 	for rows.Next() {
 		var conv ConversationSummary
-		var createdAt, updatedAt, title string
-		if err := rows.Scan(&conv.ID, &conv.MessageCount, &createdAt, &updatedAt, &title); err != nil {
+		var createdAt, updatedAt, title, agentID string
+		if err := rows.Scan(&conv.ID, &conv.MessageCount, &createdAt, &updatedAt, &title, &agentID); err != nil {
 			return nil, err
 		}
 		conv.Name = title
+		conv.AgentID = agentID
 		// Parse timestamps and convert to ISO 8601 for frontend compatibility
 		conv.CreatedAt = parseAndFormatTimestamp(createdAt)
 		conv.UpdatedAt = parseAndFormatTimestamp(updatedAt)
@@ -1680,14 +1785,15 @@ func (m *ConversationMemory) SoftDeleteConversation(ctx context.Context, convers
 }
 
 // RenameConversation sets or updates the custom title for a conversation.
+// Empty title clears the title but preserves agent_id (UPDATE, not DELETE).
 func (m *ConversationMemory) RenameConversation(ctx context.Context, conversationID, title string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
 	if title == "" {
-		// If empty title, delete the custom title entry
+		// If empty title, clear the title but preserve agent_id
 		_, err := m.db.ExecContext(ctx, `
-			DELETE FROM companion_conversation_titles WHERE conversation_id = ?
+			UPDATE companion_conversation_titles SET title = '', updated_at = CURRENT_TIMESTAMP WHERE conversation_id = ?
 		`, conversationID)
 		if err != nil {
 			return fmt.Errorf("remove conversation title: %w", err)
@@ -1696,13 +1802,39 @@ func (m *ConversationMemory) RenameConversation(ctx context.Context, conversatio
 	}
 
 	_, err := m.db.ExecContext(ctx, `
-		INSERT OR REPLACE INTO companion_conversation_titles (conversation_id, title, updated_at)
+		INSERT INTO companion_conversation_titles (conversation_id, title, updated_at)
 		VALUES (?, ?, CURRENT_TIMESTAMP)
-	`, conversationID, title)
+		ON CONFLICT(conversation_id) DO UPDATE SET title = ?, updated_at = CURRENT_TIMESTAMP
+	`, conversationID, title, title)
 	if err != nil {
 		return fmt.Errorf("rename conversation: %w", err)
 	}
 
+	return nil
+}
+
+// LinkConversationAgent associates a conversation with an agent ID.
+// Supports many-to-one: multiple conversations can link to the same agent.
+//
+// Index:
+// - Purpose: Set agent_id on companion_conversation_titles for many-to-one linking
+// - Flow: upsert conversation_titles row with agent_id
+// - SideEffects: writes companion_conversation_titles
+// - FailureModes: DB errors
+// - Related: ConversationMemory.RenameConversation, ConversationMemory.ListConversations
+// - Keywords: agent_id, conversation_titles, link, many_to_one
+func (m *ConversationMemory) LinkConversationAgent(ctx context.Context, conversationID, agentID string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	_, err := m.db.ExecContext(ctx, `
+		INSERT INTO companion_conversation_titles (conversation_id, title, agent_id, updated_at)
+		VALUES (?, '', ?, CURRENT_TIMESTAMP)
+		ON CONFLICT(conversation_id) DO UPDATE SET agent_id = ?, updated_at = CURRENT_TIMESTAMP
+	`, conversationID, agentID, agentID)
+	if err != nil {
+		return fmt.Errorf("link conversation agent: %w", err)
+	}
 	return nil
 }
 

@@ -14,6 +14,7 @@ import (
 	"github.com/rs/zerolog"
 
 	"github.com/jkatigb/agentctl/internal/platform/config"
+	"github.com/jkatigb/agentctl/internal/storage"
 
 	_ "modernc.org/sqlite"
 )
@@ -115,12 +116,19 @@ func handleListDatabases(w http.ResponseWriter, r *http.Request, cfg config.Conf
 
 	// List .db files in storage root
 	var databases []SQLiteDatabaseResponse
-	dbFiles := []string{
-		"jobs.db", "tasks.db", "sessions.db", "memory.db",
-		"agents.db", "mailbox.db", "blackboard.db", "trajectory.db",
-	}
+	for _, spec := range storage.CanonicalStores() {
+		// Skip stores outside the storage root and those not addressable by a static filename.
+		if spec.Class == storage.StoreClassExternal || spec.Class == storage.StoreClassObservability {
+			continue
+		}
+		if strings.Contains(spec.DefaultFile, "<") || strings.Contains(spec.DefaultFile, "/") {
+			continue
+		}
+		if !strings.HasSuffix(spec.DefaultFile, ".db") {
+			continue
+		}
 
-	for _, name := range dbFiles {
+		name := spec.DefaultFile
 		dbPath := filepath.Join(cfg.Storage.Root, name)
 		info, err := os.Stat(dbPath)
 		if err == nil && !info.IsDir() {

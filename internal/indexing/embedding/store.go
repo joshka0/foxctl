@@ -6,14 +6,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/jkatigb/agentctl/internal/indexing/embeddingtext"
 	"github.com/jkatigb/agentctl/internal/platform/config"
 	"github.com/jkatigb/agentctl/internal/queue"
-	"github.com/jkatigb/agentctl/internal/storage/sqliteutil"
+	"github.com/jkatigb/agentctl/internal/storage/dbutil"
 )
 
 const embeddingQueueTable = "embedding_queue_jobs"
@@ -45,8 +44,7 @@ type embeddingPayload struct {
 // before returning an error. The returned Store contains a cleanup function that must be called
 // via Store.Close when the store is no longer needed.
 func OpenStore(ctx context.Context, root string) (*Store, error) {
-	dbPath := filepath.Join(root, "embedding_queue.db")
-	db, closeFn, err := sqliteutil.OpenDBShared(ctx, dbPath, migrate)
+	db, closeFn, err := dbutil.OpenStoreDB(ctx, root, "EMBEDDING_QUEUE", "embedding_queue.db", migrate)
 	if err != nil {
 		return nil, fmt.Errorf("embedding: open db: %w", err)
 	}

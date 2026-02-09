@@ -13,7 +13,7 @@ import (
 	"github.com/oklog/ulid/v2"
 
 	ws "github.com/jkatigb/agentctl/internal/platform/workspace"
-	"github.com/jkatigb/agentctl/internal/storage/sqliteutil"
+	"github.com/jkatigb/agentctl/internal/storage/dbutil"
 )
 
 // Store defines the graph storage interface.
@@ -72,16 +72,15 @@ type SQLiteStore struct {
 func Open(ctx context.Context, dataDir string) (*SQLiteStore, error) {
 	dbPath := filepath.Join(dataDir, "graph.db")
 
-	db, closeFn, err := sqliteutil.OpenDBShared(ctx, dbPath, nil)
+	db, closeFn, err := dbutil.OpenStoreDB(ctx, dataDir, "GRAPH", "graph.db", func(ctx context.Context, db *sql.DB) error {
+		tmp := &SQLiteStore{db: db}
+		return tmp.migrate(ctx)
+	})
 	if err != nil {
 		return nil, fmt.Errorf("open graph db: %w", err)
 	}
 
 	store := &SQLiteStore{db: db, path: dbPath, close: closeFn}
-	if err := store.migrate(ctx); err != nil {
-		_ = closeFn()
-		return nil, fmt.Errorf("migrate graph db: %w", err)
-	}
 	store.repairWorkspaceIDs(ctx)
 
 	return store, nil

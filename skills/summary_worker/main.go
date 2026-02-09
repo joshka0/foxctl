@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -109,8 +108,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 		Msg("summary worker starting")
 
 	// Open queue store
-	queueDBPath := filepath.Join(rc.Config.Storage.Root, summary.QueueDBName)
-	queueStore, err := queue.Open(ctx, queueDBPath, queue.Options{Table: summary.QueueTable})
+	queueStore, err := queue.OpenStore(ctx, rc.Config.Storage.Root, "SUMMARY_QUEUE", summary.QueueDBName, queue.Options{Table: summary.QueueTable})
 	if err != nil {
 		return skillerr.IO("open queue", skillerr.WithCause(err))
 	}

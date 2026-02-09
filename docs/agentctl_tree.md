@@ -1724,7 +1724,7 @@ summaries and package/repo rollups.
 │   │   │   ├── pool.go
 │   │   │   │     └─ Manages SQLite connection pooling with Pool, Get, Release, Close, and Stats operations.
 │   │   │   ├── sqliteutil.go
-│   │   │   │     └─ Provides SQLite database utilities with OpenDB, OpenDBWithDriver, OpenDBWithAutoConfig ...
+│   │   │   │     └─ Provides SQLite database utilities with OpenDB, OpenDBWithDriver, and shared pooling.
 │   │   │   └── sqliteutil_test.go
 │   │   │         └─ Tests SQLite database operations, including directory creation (TestOpenDBCreatesDirect...
 │   │   ├── sqlutil/

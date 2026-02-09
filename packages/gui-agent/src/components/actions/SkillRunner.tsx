@@ -17,6 +17,7 @@ import {
   Code,
   Folder,
 } from 'lucide-react'
+import { runSkill } from '@/api/client'
 
 // Skill parameter definitions
 interface SkillParam {
@@ -272,17 +273,10 @@ export function SkillRunner() {
         input.workspace = workspace.trim()
       }
 
-      const response = await fetch('/api/skills/run', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ skill: selectedSkill, input }),
-      })
-
-      if (!response.ok) {
-        const error = await response.text()
-        setResult({ status: 'error', error })
+      const data = await runSkill(selectedSkill, input)
+      if (!data.ok) {
+        setResult({ status: 'error', error: data.error || 'Skill returned error' })
       } else {
-        const data = await response.json()
         setResult({
           status: 'success',
           output: JSON.stringify(data, null, 2),

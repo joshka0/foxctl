@@ -14,6 +14,7 @@ export interface Agent {
   heartbeat_at?: string
   llm_provider?: string
   llm_model?: string
+  exec_mode?: 'reactive' | 'autonomous' | 'proactive' | 'story'
   conversation_id?: string // Linked companion conversation ID
 }
 

@@ -212,9 +212,9 @@ export const PROVIDERS: ProviderConfig[] = [
     id: 'openrouter',
     name: 'OpenRouter',
     models: [
+      { id: 'mistralai/devstral-2512', name: 'Devstral' },
       { id: 'anthropic/claude-3-haiku', name: 'Claude 3 Haiku' },
       { id: 'meta-llama/llama-3-70b', name: 'Llama 3 70B' },
-      { id: 'mistralai/devstral-2512', name: 'Devstral' },
     ],
     allowCustom: true,
   },

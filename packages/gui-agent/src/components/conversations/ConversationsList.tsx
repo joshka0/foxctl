@@ -11,6 +11,9 @@ import {
   getCompanionConversationMessages,
   getCompanionPersonality,
   updatePersonalityDimension,
+  getCompanionConversationSettings,
+  patchCompanionConversationSettings,
+  deleteCompanionConversationSettings,
   createConsoleSession,
   getConsoleSession,
   askConsoleSession,
@@ -22,7 +25,12 @@ import {
   renameCompanionConversation,
   compressCompanionConversation,
   type CompanionCompressionResult,
-  patchAgent,
+  getProviderAvailability,
+  getCompanionMemoryStats,
+  getCompanionMemoryContext,
+  type CompanionMemoryStats,
+  type ConversationSettings,
+  type ConversationSettingsPatch,
   type ConsoleMessage,
   type ConsoleSession,
   type PersonalityInfo,
@@ -55,13 +63,23 @@ import {
   Sliders,
   Save,
   RotateCcw,
-  Wrench,
   ChevronDown,
   ChevronRight,
   User,
+  Play,
+  Square,
+  Activity,
+  Zap,
+  Brain,
+  Bug,
 } from 'lucide-react'
 import { Textarea } from '@/components/ui/textarea'
 import { Slider } from '@/components/ui/slider'
+import { useViewStore } from '@/stores/viewStore'
+import { CollapsibleSection } from '@/components/ui/collapsible-section'
+import { useAgentOperations } from '@/hooks/useAgentOperations'
+import type { AgentSession } from '@/api/types'
+import { ToolAllowlistEditor } from '@/components/conversations/ToolAllowlistEditor'
 
 const API_BASE = '/api'
 
@@ -69,6 +87,7 @@ interface Conversation {
   id: string
   title?: string
   name?: string  // Custom title from database
+  agent_id?: string // Linked agent ID (stored on conversation side)
   created_at: string
   updated_at: string
   message_count: number
@@ -91,7 +110,12 @@ interface ContextInfo {
   injectedContexts?: Array<{ source: string; content: string; toolName?: string }>
 }
 
+type ExecMode = '' | 'reactive' | 'autonomous' | 'proactive' | 'story'
+
+const DEFAULT_OPENROUTER_MODEL = 'mistralai/devstral-2512'
+
 export function ConversationsList() {
+  const setSelectedAgent = useViewStore((s) => s.setSelectedAgent)
   const [searchQuery, setSearchQuery] = useState('')
   const [selectedConversation, setSelectedConversation] = useState<Conversation | null>(null)
   const [messages, setMessages] = useState<ConsoleMessage[]>([])
@@ -114,21 +138,51 @@ export function ConversationsList() {
   const [editingSystemPrompt, setEditingSystemPrompt] = useState(false)
   // Debounce timer refs for personality sliders
   const personalityDebounceRefs = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map())
+  // Cleanup personality debounce timers on unmount
+  useEffect(() => {
+    const refs = personalityDebounceRefs
+    return () => {
+      refs.current.forEach((timer) => clearTimeout(timer))
+      refs.current.clear()
+    }
+  }, [])
   const [systemPromptDraft, setSystemPromptDraft] = useState('')
   const [selectedProvider, setSelectedProvider] = useState('')
   const [selectedModel, setSelectedModel] = useState('')
   const [customModelEnabled, setCustomModelEnabled] = useState(false)
   const [customModel, setCustomModel] = useState('')
+  // Persisted per-conversation settings (models, exec mode, tool allowlist)
+  const [conversationSettings, setConversationSettings] = useState<ConversationSettings | null>(null)
+  const [settingsError, setSettingsError] = useState<string | null>(null)
+  const [execModeOverride, setExecModeOverride] = useState<ExecMode>('')
+  const [toolsAllowDraft, setToolsAllowDraft] = useState<string[]>([])
   // Companion 2-stage model configuration
-  const [toolModel, setToolModel] = useState(COMPANION_TOOL_MODELS[0]?.id || '')
-  const [responseModel, setResponseModel] = useState(COMPANION_RESPONSE_MODELS[0]?.id || '')
+  const [toolModel, setToolModel] = useState('')
+  const [responseModel, setResponseModel] = useState('')
   const [maxHistoryTurns, setMaxHistoryTurns] = useState(50)
   const [isCompressing, setIsCompressing] = useState(false)
   const [lastCompression, setLastCompression] = useState<CompanionCompressionResult | null>(null)
+  // Compression model (separate from chat provider/model)
+  const [compressionProvider, setCompressionProvider] = useState('')
+  const [compressionModel, setCompressionModel] = useState('')
+  // Provider availability from server
+  const [providerAvailability, setProviderAvailability] = useState<Map<string, boolean>>(new Map())
+  const [defaultProvider, setDefaultProvider] = useState<string>('')
+  // Memory stats
+  const [memoryStats, setMemoryStats] = useState<CompanionMemoryStats | null>(null)
+  const [memoryContext, setMemoryContext] = useState<string | null>(null)
+  const [showMemoryContext, setShowMemoryContext] = useState(false)
+  const [agentSectionOpen, setAgentSectionOpen] = useState(false)
+
+  // Agent operations (start/stop/delete, sessions) — replaces AgentHUD
+  const agentOps = useAgentOperations(linkedAgent)
 
   const scrollRef = useRef<HTMLDivElement>(null)
   const eventSourceRef = useRef<EventSource | null>(null)
   const modelInitKeyRef = useRef<string>('')
+  const settingsRevisionRef = useRef(0)
+  // Track agent linked locally (before DB refetch completes)
+  const pendingLinkedAgentRef = useRef<Agent | null>(null)
 
   // Fetch conversations
   const { data, isLoading, refetch, isFetching } = useQuery({
@@ -138,11 +192,20 @@ export function ConversationsList() {
   })
 
   // Fetch agents to find linked agent
-  const { data: agentsData, refetch: refetchAgents } = useQuery({
+  const { data: agentsData } = useQuery({
     queryKey: ['agents'],
     queryFn: () => listAgents(100),
     staleTime: 60000,
   })
+
+  // Fetch provider availability on mount
+  useEffect(() => {
+    getProviderAvailability().then(data => {
+      const map = new Map(data.providers.map(p => [p.id, p.available]))
+      setProviderAvailability(map)
+      setDefaultProvider(data.default_provider)
+    }).catch(() => {}) // silent fail - all providers shown as available if endpoint unreachable
+  }, [])
 
   const conversations = useMemo(() => data?.conversations ?? [], [data?.conversations])
   const agents = useMemo(() => agentsData?.agents ?? [], [agentsData?.agents])
@@ -160,14 +223,34 @@ export function ConversationsList() {
     const agentGroups: Map<string, { agent: Agent; conversations: Conversation[] }> = new Map()
     const orphanConversations: Conversation[] = []
 
-    filteredConversations.forEach((conv) => {
-      const linkedAgent = agents.find(
-        (a) => a.conversation_id === conv.id || a.id === conv.id
+    // Build the list of conversations to group — include the selectedConversation
+    // placeholder if it's not yet in the API list (e.g. just created, no messages sent)
+    const knownIds = new Set(filteredConversations.map((c) => c.id))
+    const allConversations = [...filteredConversations]
+    if (selectedConversation && !knownIds.has(selectedConversation.id)) {
+      allConversations.push(selectedConversation)
+    }
+
+    // If the current conversation is locally linked to an agent (e.g. just created via
+    // "Start a conversation"), use that as a fallback — the agent's DB conversation_id
+    // may not have been refetched yet or may point to an older conversation.
+    const localLinkedConvId = selectedConversation && linkedAgent
+      ? selectedConversation.id
+      : null
+
+    allConversations.forEach((conv) => {
+      // Match by conversation-side agent_id (many-to-one), then agent-side conversation_id (legacy)
+      let matchedAgent = agents.find(
+        (a) => conv.agent_id === a.id || a.conversation_id === conv.id
       )
-      if (linkedAgent) {
-        const key = linkedAgent.id
+      if (!matchedAgent && localLinkedConvId === conv.id && linkedAgent) {
+        matchedAgent = linkedAgent
+      }
+
+      if (matchedAgent) {
+        const key = matchedAgent.id
         if (!agentGroups.has(key)) {
-          agentGroups.set(key, { agent: linkedAgent, conversations: [] })
+          agentGroups.set(key, { agent: matchedAgent, conversations: [] })
         }
         agentGroups.get(key)!.conversations.push(conv)
       } else {
@@ -179,7 +262,7 @@ export function ConversationsList() {
       agentGroups: Array.from(agentGroups.values()),
       orphanConversations,
     }
-  }, [filteredConversations, agents])
+  }, [filteredConversations, agents, selectedConversation, linkedAgent])
 
   // Auto-scroll to bottom on new messages
   useEffect(() => {
@@ -190,39 +273,117 @@ export function ConversationsList() {
 
   // Find linked agent when conversation changes
   useEffect(() => {
+    let cancelled = false
+
     if (!selectedConversation) {
       setLinkedAgent(null)
+      pendingLinkedAgentRef.current = null
       modelInitKeyRef.current = ''
+      setConversationSettings(null)
+      setSettingsError(null)
+      setExecModeOverride('')
+      setToolsAllowDraft([])
+      setToolModel('')
+      setResponseModel('')
       return
     }
 
-    // Check if any agent has this conversation_id linked
-    const agent = agents.find(
-      (a) => a.conversation_id === selectedConversation.id || a.id === selectedConversation.id
-    )
-    setLinkedAgent(agent || null)
+    // Check conversation-side link first (many-to-one), then agent-side (legacy)
+    const agent = selectedConversation.agent_id
+      ? agents.find((a) => a.id === selectedConversation.agent_id)
+      : agents.find((a) => a.conversation_id === selectedConversation.id)
+    // Fall back to the pending linked agent (set by handleNewConversationWithAgent
+    // before the DB refetch completes)
+    const resolved = agent || pendingLinkedAgentRef.current
+    setLinkedAgent(resolved || null)
 
-    // Initialize model overrides from linked agent once per (conversation, agent) pair.
+    // Initialize settings + model overrides once per (conversation, agent) pair.
     const initKey = `${selectedConversation.id}:${agent?.id || ''}`
     if (modelInitKeyRef.current !== initKey) {
       modelInitKeyRef.current = initKey
 
-      const provider = agent?.llm_provider || ''
-      const model = agent?.llm_model || ''
-      const providerCfg = PROVIDERS.find((p) => p.id === provider)
-      const knownModels = getModelsForProvider(provider)
+      setConversationSettings(null)
+      setSettingsError(null)
+      setExecModeOverride('')
+      setToolsAllowDraft([])
+      setToolModel('')
+      setResponseModel('')
 
-      setSelectedProvider(provider)
+      const initProviderModel = (provider: string, model: string) => {
+        const providerCfg = PROVIDERS.find((p) => p.id === provider)
+        const knownModels = getModelsForProvider(provider)
 
-      if (providerCfg?.allowCustom && model && !knownModels.some((m) => m.id === model)) {
-        setCustomModelEnabled(true)
-        setCustomModel(model)
-        setSelectedModel('')
-      } else {
-        setCustomModelEnabled(false)
-        setCustomModel('')
-        setSelectedModel(model)
+        setSelectedProvider(provider)
+
+        if (providerCfg?.allowCustom && model && !knownModels.some((m) => m.id === model)) {
+          setCustomModelEnabled(true)
+          setCustomModel(model)
+          setSelectedModel('')
+        } else {
+          setCustomModelEnabled(false)
+          setCustomModel('')
+          setSelectedModel(model)
+        }
       }
+
+      // Immediate fallback to linked agent defaults while settings load.
+      initProviderModel(resolved?.llm_provider || '', resolved?.llm_model || '')
+
+      const conversationID = selectedConversation.id
+      const expectedRevision = settingsRevisionRef.current
+      void (async () => {
+        try {
+          const data = await getCompanionConversationSettings(conversationID)
+          if (cancelled || settingsRevisionRef.current !== expectedRevision) return
+
+          let settings = data.settings
+          // If OpenRouter was selected previously without a model, default it to Devstral.
+          if ((settings.llm_provider || '').trim() === 'openrouter' && (settings.llm_model || '').trim() === '') {
+            try {
+              const patched = await patchCompanionConversationSettings(conversationID, {
+                llm_model: DEFAULT_OPENROUTER_MODEL,
+              })
+              if (cancelled || settingsRevisionRef.current !== expectedRevision) return
+              settingsRevisionRef.current += 1
+              settings = patched.settings
+            } catch (err) {
+              // Non-fatal: keep existing settings and let the user pick a model manually.
+              console.warn('Failed to default OpenRouter model:', err)
+            }
+          }
+
+          setConversationSettings(settings)
+
+          const providerOverride = (settings.llm_provider || '').trim()
+          const modelOverride = (settings.llm_model || '').trim()
+          initProviderModel(
+            providerOverride || resolved?.llm_provider || '',
+            modelOverride || resolved?.llm_model || ''
+          )
+
+          const nextExecMode = (settings.exec_mode || '').trim()
+          if (nextExecMode === 'reactive' || nextExecMode === 'autonomous' || nextExecMode === 'proactive' || nextExecMode === 'story') {
+            setExecModeOverride(nextExecMode)
+          } else {
+            setExecModeOverride('')
+          }
+          setToolModel((settings.story_gather_model || '').trim())
+          setResponseModel((settings.story_dialogue_model || '').trim())
+          setToolsAllowDraft(settings.tools_allow || [])
+        } catch (err) {
+          if (cancelled) return
+          console.warn('Failed to load conversation settings:', err)
+          setConversationSettings(null)
+          setSettingsError(null)
+          setExecModeOverride('')
+          setToolModel('')
+          setResponseModel('')
+          setToolsAllowDraft([])
+        }
+      })()
+    }
+    return () => {
+      cancelled = true
     }
   }, [selectedConversation, agents])
 
@@ -264,6 +425,9 @@ export function ConversationsList() {
     setSelectedMessage(null)
     setIsCompressing(false)
     setLastCompression(null)
+    setMemoryStats(null)
+    setMemoryContext(null)
+    setShowMemoryContext(false)
 
     try {
       // Load messages for this conversation from companion memory
@@ -327,6 +491,16 @@ export function ConversationsList() {
       } catch (personalityErr) {
         console.warn('Failed to load personality info:', personalityErr)
       }
+
+      // Fetch memory stats
+      try {
+        const stats = await getCompanionMemoryStats(conversation.id)
+        setMemoryStats(stats)
+      } catch {
+        setMemoryStats(null)
+      }
+      setMemoryContext(null)
+      setShowMemoryContext(false)
     } catch (err) {
       console.error('Failed to load conversation:', err)
     } finally {
@@ -395,6 +569,8 @@ export function ConversationsList() {
     setSessionId(null)
     setSession(null)
     setLinkedAgent(agent)
+    // Keep a ref so the useEffect doesn't overwrite linkedAgent before DB catches up
+    pendingLinkedAgentRef.current = agent
 
     try {
       // Create a new console session for this agent
@@ -433,14 +609,27 @@ Help the user understand and interact with this agent's work.`,
         createdAt: sessionData.session.created,
       })
 
-      // Link the conversation to the agent in the backend
+      // Link the conversation to the agent (conversation-side, supports many-to-one)
       try {
-        await patchAgent(agent.id, { conversation_id: sessionData.session.id })
-        // Refetch agents so grouping updates
-        refetchAgents()
+        await renameCompanionConversation(
+          sessionData.session.id,
+          `Chat with ${agent.name || agent.role || 'Agent'}`,
+          agent.id
+        )
+        // Refetch conversations so grouping updates immediately
+        await refetch()
+        // DB is now up-to-date; clear the pending ref
+        pendingLinkedAgentRef.current = null
       } catch (linkErr) {
-        console.warn('Failed to link conversation to agent:', linkErr)
+        console.error('Failed to link conversation to agent:', linkErr)
       }
+
+      // Auto-expand the agent in the sidebar so the new chat is visible
+      setExpandedAgents((prev) => {
+        const next = new Set(prev)
+        next.add(agent.id)
+        return next
+      })
 
       // Reset agent selector
       setSelectedAgentForNew('')
@@ -451,179 +640,203 @@ Help the user understand and interact with this agent's work.`,
     }
   }
 
+  const handleSSEMessage = useCallback((payload: { type?: string; content?: string; metadata?: unknown }) => {
+    switch (payload.type) {
+      case 'reply': {
+        setInflight(false)
+        refetch()
+        if (!sessionId) return
+        void (async () => {
+          try {
+            const data = await getConsoleSession(sessionId)
+            // Backend can emit a reply payload without persisting an assistant message
+            // (e.g. runner/config errors). In that case, fall back to the payload content
+            // so the user sees the error in the UI.
+            const replyContent = typeof payload.content === 'string' ? payload.content : ''
+            const nextMessages: ConsoleMessage[] = (() => {
+              if (!replyContent.trim()) return data.messages
+              const last = data.messages[data.messages.length - 1]
+              if (last?.role === 'assistant') return data.messages
+              return [
+                ...data.messages,
+                { role: 'assistant', content: replyContent, timestamp: new Date().toISOString() },
+              ]
+            })()
+            setMessages(nextMessages)
+            setSession(data.session)
+            setInflight(data.inflight)
+
+            // Prefer deriving tool call context from the persisted assistant message metadata.
+            const lastAssistant = [...data.messages].reverse().find((m) => m.role === 'assistant')
+            const meta = (lastAssistant as { metadata?: Record<string, unknown> })?.metadata
+            const metaToolCalls = Array.isArray(meta?.tool_calls) ? (meta?.tool_calls as unknown[]) : null
+            const metaInjected = Array.isArray(meta?.injected_contexts) ? (meta?.injected_contexts as unknown[]) : null
+
+            if (metaToolCalls || metaInjected) {
+              const toolCalls = (metaToolCalls || [])
+                .map((tc) => {
+                  if (!tc || typeof tc !== 'object') return null
+                  const tco = tc as { id?: string; name?: string; arguments?: unknown; result?: unknown }
+                  if (!tco.name) return null
+                  return {
+                    id: tco.id,
+                    name: tco.name,
+                    args: tco.arguments ? JSON.stringify(tco.arguments) : undefined,
+                    result: typeof tco.result === 'string' ? tco.result.slice(0, 500) : undefined,
+                  }
+                })
+                .filter(Boolean) as Array<{ id?: string; name: string; args?: string; result?: string }>
+
+              const toolNameByID = new Map<string, string>()
+              for (const tc of toolCalls) {
+                if (tc.id) toolNameByID.set(tc.id, tc.name)
+              }
+
+              const injectedContexts = (metaInjected || [])
+                .map((ic) => {
+                  if (!ic || typeof ic !== 'object') return null
+                  const ico = ic as { tool_call_id?: string; source?: unknown; content?: unknown }
+                  const source = typeof ico.source === 'string' ? ico.source : 'hook'
+                  const content = typeof ico.content === 'string' ? ico.content : ''
+                  if (!content) return null
+                  return {
+                    source,
+                    content,
+                    toolName: ico.tool_call_id ? toolNameByID.get(ico.tool_call_id) : undefined,
+                  }
+                })
+                .filter(Boolean) as Array<{ source: string; content: string; toolName?: string }>
+
+              setContextInfo((prev) => ({
+                ...prev,
+                toolCalls: toolCalls.map((tc) => ({ name: tc.name, args: tc.args, result: tc.result })),
+                injectedContexts,
+              }))
+            }
+          } catch (err) {
+            console.error('Failed to refresh console session:', err)
+          }
+        })()
+        break
+      }
+      case 'event': {
+        const meta = payload.metadata
+        if (!meta || typeof meta !== 'object') break
+        const toolData = meta as {
+          tool?: string
+          arguments?: unknown
+          phase?: 'call' | 'result'
+          cancelled?: boolean
+        }
+        const toolName = toolData.tool
+
+        if (toolData.cancelled) {
+          setInflight(false)
+          break
+        }
+
+        if (toolName && toolData.phase === 'call') {
+          const argsStr = toolData.arguments ? JSON.stringify(toolData.arguments) : undefined
+          setContextInfo((prev) => ({
+            ...prev,
+            toolCalls: [...(prev.toolCalls || []), { name: toolName, args: argsStr }],
+          }))
+        } else if (toolName && toolData.phase === 'result') {
+          const resultContent = payload.content || ''
+          setContextInfo((prev) => {
+            const toolCalls = prev.toolCalls ? [...prev.toolCalls] : []
+            for (let i = toolCalls.length - 1; i >= 0; i--) {
+              if (toolCalls[i].name === toolName && !toolCalls[i].result) {
+                toolCalls[i] = { ...toolCalls[i], result: resultContent.slice(0, 500) }
+                break
+              }
+            }
+            return { ...prev, toolCalls }
+          })
+        }
+        break
+      }
+    }
+  }, [refetch, sessionId])
+
   // Subscribe to session events via SSE
   useEffect(() => {
     if (!sessionId) return
 
     const eventSource = new EventSource(
-      `${API_BASE}/console/sessions/${sessionId}/events`
+      `${API_BASE}/console/sessions/${sessionId}/events?format=payload`
     )
     eventSourceRef.current = eventSource
 
     eventSource.addEventListener('message', (event) => {
-      handleSSEMessage(JSON.parse(event.data))
-    })
-
-    eventSource.addEventListener('chunk', (event) => {
-      const data = JSON.parse(event.data)
-      if (data.data?.content) {
-        setMessages((prev) => {
-          const updated = [...prev]
-          if (updated.length > 0) {
-            const last = updated[updated.length - 1]
-            if (last.role === 'assistant') {
-              updated[updated.length - 1] = {
-                ...last,
-                content: last.content + data.data.content,
-              }
-            }
-          }
-          return updated
-        })
+      try {
+        handleSSEMessage(JSON.parse(event.data) as { type?: string; content?: string; metadata?: unknown })
+      } catch (err) {
+        console.error('Failed to parse console SSE message:', err)
       }
     })
 
-    eventSource.addEventListener('done', () => {
+    eventSource.onerror = () => {
+      // If the stream drops, stop showing "typing".
       setInflight(false)
-    })
-
-    eventSource.addEventListener('error', () => {
-      setInflight(false)
-    })
+    }
 
     return () => {
       eventSource.close()
       eventSourceRef.current = null
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sessionId])
+  }, [sessionId, handleSSEMessage])
 
-  const handleSSEMessage = useCallback((event: { type: string; data: unknown }) => {
-    switch (event.type) {
-      case 'start':
-        setInflight(true)
-        setMessages((prev) => [
-          ...prev,
-          {
-            role: 'assistant',
-            content: '',
-            timestamp: new Date().toISOString(),
-          },
-        ])
-        break
-      case 'chunk':
-        if (typeof event.data === 'object' && event.data !== null) {
-          const content = (event.data as { content?: string }).content
-          if (content) {
-            setMessages((prev) => {
-              const updated = [...prev]
-              if (updated.length > 0) {
-                const last = updated[updated.length - 1]
-                if (last.role === 'assistant') {
-                  updated[updated.length - 1] = {
-                    ...last,
-                    content: last.content + content,
-                  }
-                }
-              }
-              return updated
-            })
-          }
-        }
-        break
-      case 'done':
-        setInflight(false)
-        refetch()
-        if (sessionId) {
-          void (async () => {
-            try {
-              const data = await getConsoleSession(sessionId)
-              setMessages(data.messages)
-              setSession(data.session)
-            } catch (err) {
-              console.error('Failed to refresh console session:', err)
-            }
-          })()
-        }
-        break
-      case 'tool_call':
-      case 'event':
-        // Track tool calls and results in context
-        // The actual tool data is in event.data.metadata (Payload structure from backend)
-        if (typeof event.data === 'object' && event.data !== null) {
-          const payload = event.data as {
-            type?: string
-            content?: string
-            metadata?: {
-              tool?: string
-              tool_id?: string
-              arguments?: unknown
-              phase?: 'call' | 'result'
-              partial?: boolean
-            }
-          }
-          const toolData = payload.metadata
-          const toolName = toolData?.tool
-
-          if (toolName && toolData?.phase === 'call') {
-            // Tool call phase
-            const argsStr = toolData.arguments
-              ? typeof toolData.arguments === 'string'
-                ? toolData.arguments
-                : JSON.stringify(toolData.arguments)
-              : undefined
-            setContextInfo((prev) => ({
-              ...prev,
-              toolCalls: [
-                ...(prev.toolCalls || []),
-                { name: toolName, args: argsStr },
-              ],
-            }))
-          } else if (toolName && toolData?.phase === 'result') {
-            // Tool result phase - check for injected context
-            // The result content is in payload.content (broadcast as display text)
-            const resultContent = payload.content || ''
-
-            // Parse injected context (appears after "---\n" separator)
-            const separatorIndex = resultContent.indexOf('\n\n---\n')
-            if (separatorIndex !== -1) {
-              const injectedContent = resultContent.slice(separatorIndex + 5) // Skip "\n\n---\n"
-              if (injectedContent.trim()) {
-                setContextInfo((prev) => ({
-                  ...prev,
-                  injectedContexts: [
-                    ...(prev.injectedContexts || []),
-                    {
-                      source: `PostToolUse:${toolName}`,
-                      content: injectedContent,
-                      toolName,
-                    },
-                  ],
-                }))
-              }
-            }
-
-            // Update the last matching tool call with its result
-            setContextInfo((prev) => {
-              const toolCalls = prev.toolCalls ? [...prev.toolCalls] : []
-              // Find the last tool call with matching name that doesn't have a result
-              for (let i = toolCalls.length - 1; i >= 0; i--) {
-                if (toolCalls[i].name === toolName && !toolCalls[i].result) {
-                  const actualResult = separatorIndex !== -1
-                    ? resultContent.slice(0, separatorIndex)
-                    : resultContent
-                  toolCalls[i] = { ...toolCalls[i], result: actualResult.slice(0, 500) }
-                  break
-                }
-              }
-              return { ...prev, toolCalls }
-            })
-          }
-        }
-        break
+  const patchConversationSettings = async (patch: ConversationSettingsPatch) => {
+    if (!selectedConversation) return
+    setSettingsError(null)
+    try {
+      const data = await patchCompanionConversationSettings(selectedConversation.id, patch)
+      settingsRevisionRef.current += 1
+      setConversationSettings(data.settings)
+      // Keep draft in sync with normalized backend output.
+      if (patch.tools_allow !== undefined) {
+        setToolsAllowDraft(data.settings.tools_allow || [])
+      }
+    } catch (err) {
+      console.error('Failed to patch conversation settings:', err)
+      setSettingsError(err instanceof Error ? err.message : String(err))
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [refetch])
+  }
+
+  const resetConversationSettings = async () => {
+    if (!selectedConversation) return
+    setSettingsError(null)
+    try {
+      await deleteCompanionConversationSettings(selectedConversation.id)
+      settingsRevisionRef.current += 1
+      setConversationSettings(null)
+      setExecModeOverride('')
+      setToolModel('')
+      setResponseModel('')
+      setToolsAllowDraft([])
+
+      // Reset UI to linked agent defaults (or empty = server defaults).
+      const provider = linkedAgent?.llm_provider || ''
+      const model = linkedAgent?.llm_model || ''
+      const providerCfg = PROVIDERS.find((p) => p.id === provider)
+      const knownModels = getModelsForProvider(provider)
+
+      setSelectedProvider(provider)
+      if (providerCfg?.allowCustom && model && !knownModels.some((m) => m.id === model)) {
+        setCustomModelEnabled(true)
+        setCustomModel(model)
+        setSelectedModel('')
+      } else {
+        setCustomModelEnabled(false)
+        setCustomModel('')
+        setSelectedModel(model)
+      }
+    } catch (err) {
+      console.error('Failed to reset conversation settings:', err)
+      setSettingsError(err instanceof Error ? err.message : String(err))
+    }
+  }
 
   const handleSend = async (content: string) => {
     // Need either a session (console mode) or a conversation (companion mode)
@@ -644,6 +857,37 @@ Help the user understand and interact with this agent's work.`,
         const llmModelOverride = (customModelEnabled ? customModel : selectedModel).trim()
         const llmProviderOverride = selectedProvider.trim()
 
+        const effectiveContextProvider =
+          llmProviderOverride ||
+          (conversationSettings?.llm_provider || '').trim() ||
+          (linkedAgent?.llm_provider || '').trim() ||
+          undefined
+        const effectiveContextModel =
+          llmModelOverride ||
+          (conversationSettings?.llm_model || '').trim() ||
+          (linkedAgent?.llm_model || '').trim() ||
+          undefined
+
+        // Build request context so the companion knows about its linked agent.
+        // Include effective chat model/provider so the model can "see" per-conversation overrides.
+        const agentContext: Record<string, unknown> | undefined = (() => {
+          const ctx: Record<string, unknown> = {}
+          if (effectiveContextProvider) ctx.chat_llm_provider = effectiveContextProvider
+          if (effectiveContextModel) ctx.chat_llm_model = effectiveContextModel
+
+          if (linkedAgent) {
+            ctx.agent_id = linkedAgent.id
+            ctx.agent_name = linkedAgent.name || linkedAgent.slug || undefined
+            ctx.agent_role = linkedAgent.role || undefined
+            ctx.agent_state = linkedAgent.state
+            ctx.agent_exec_mode = linkedAgent.exec_mode || undefined
+            ctx.agent_workspace = linkedAgent.ns || undefined
+            // Keep the agent's configured model in identity; effective chat settings are shown under Runtime.
+            ctx.agent_model = linkedAgent.llm_model || undefined
+          }
+
+          return Object.keys(ctx).length > 0 ? ctx : undefined
+        })()
         const response = await companionChat({
           conversation_id: selectedConversation.id,
           message: content,
@@ -651,6 +895,10 @@ Help the user understand and interact with this agent's work.`,
           max_history_turns: maxHistoryTurns,
           llm_provider: llmProviderOverride || undefined,
           llm_model: llmModelOverride || undefined,
+          exec_mode: execModeOverride === '' ? undefined : execModeOverride,
+          story_gather_model: toolModel || undefined,
+          story_dialogue_model: responseModel || undefined,
+          context: agentContext,
         })
 
         // Add the response with attached tool calls (for inline display)
@@ -720,8 +968,8 @@ Help the user understand and interact with this agent's work.`,
         include_today: true,
         max_days: 14,
         distill: true,
-        llm_provider: selectedProvider || undefined,
-        llm_model: selectedModel || undefined,
+        llm_provider: compressionProvider || selectedProvider || undefined,
+        llm_model: compressionModel || selectedModel || undefined,
       })
       setLastCompression(result)
 
@@ -736,6 +984,12 @@ Help the user understand and interact with this agent's work.`,
       } catch (personalityErr) {
         console.warn('Failed to reload personality info after compression:', personalityErr)
       }
+
+      // Refresh memory stats
+      try {
+        const stats = await getCompanionMemoryStats(selectedConversation.id)
+        setMemoryStats(stats)
+      } catch { /* ignore */ }
     } catch (err) {
       console.error('Failed to compress conversation memory:', err)
     } finally {
@@ -814,6 +1068,16 @@ Help the user understand and interact with this agent's work.`,
     }
   }
 
+  // Match agent to conversation — same broad match used by groupedConversations
+  const findAgentForConversation = (convId: string) => {
+    const conv = filteredConversations.find((c) => c.id === convId)
+    if (conv?.agent_id) {
+      const agentById = agents.find((a) => a.id === conv.agent_id)
+      if (agentById) return agentById
+    }
+    return agents.find((a) => a.conversation_id === convId)
+  }
+
   // Handle starting to edit a conversation title
   const handleStartRename = (e: React.MouseEvent, conversation: Conversation) => {
     e.stopPropagation() // Prevent selecting the conversation
@@ -821,9 +1085,8 @@ Help the user understand and interact with this agent's work.`,
     setEditingConversationId(conversation.id)
     setEditTitle(conversation.name || '')
 
-    // Find current linked agent
-    const currentAgent = agents.find(a => a.conversation_id === conversation.id)
-
+    // Find current linked agent (using broad match)
+    const currentAgent = findAgentForConversation(conversation.id)
     setEditLinkedAgentId(currentAgent?.id || '')
   }
 
@@ -831,33 +1094,33 @@ Help the user understand and interact with this agent's work.`,
   const handleSaveRename = async (e: React.MouseEvent | React.KeyboardEvent, conversationId: string) => {
     e.stopPropagation()
 
+    // Save title and agent link in a single PATCH call (conversation-side linking)
     try {
-      // Save title
-      await renameCompanionConversation(conversationId, editTitle.trim())
+      const previousAgent = findAgentForConversation(conversationId)
+      const agentChanged = previousAgent?.id !== editLinkedAgentId
+      await renameCompanionConversation(
+        conversationId,
+        editTitle.trim(),
+        agentChanged ? (editLinkedAgentId || null) : undefined
+      )
 
-      // Update agent linking
-      const previousAgent = agents.find(a => a.conversation_id === conversationId)
-      if (previousAgent?.id !== editLinkedAgentId) {
-        // Unlink previous agent (send empty string, not null)
-        if (previousAgent) {
-          await patchAgent(previousAgent.id, { conversation_id: '' })
-        }
-
-        // Link new agent
-        if (editLinkedAgentId) {
-          await patchAgent(editLinkedAgentId, { conversation_id: conversationId })
-        }
-
-        refetchAgents()
+      if (agentChanged && editLinkedAgentId) {
+        // Auto-expand the agent so the moved conversation is visible
+        setExpandedAgents((prev) => {
+          const next = new Set(prev)
+          next.add(editLinkedAgentId)
+          return next
+        })
       }
-
-      refetch()
-      setEditingConversationId(null)
-      setEditTitle('')
-      setEditLinkedAgentId('')
     } catch (err) {
-      console.error('[handleSaveRename] Failed:', err)
+      console.warn('[handleSaveRename] Save failed:', err)
+      return
     }
+
+    await refetch()
+    setEditingConversationId(null)
+    setEditTitle('')
+    setEditLinkedAgentId('')
   }
 
   // Handle canceling rename
@@ -892,8 +1155,33 @@ Help the user understand and interact with this agent's work.`,
         }
         return prev
       })
+      // Auto-expand Agent section in Inspector
+      setAgentSectionOpen(true)
+    } else {
+      setAgentSectionOpen(false)
     }
   }, [selectedConversation, linkedAgent])
+
+  const effectiveExecMode = (execModeOverride || linkedAgent?.exec_mode || 'reactive').trim()
+  const savedChatModel = (conversationSettings?.llm_model || '').trim()
+  const customModelValue = customModel.trim()
+  const isCustomSaved = customModelEnabled && customModelValue !== '' && savedChatModel === customModelValue
+  const isCustomDirty = customModelEnabled && customModelValue !== '' && savedChatModel !== customModelValue
+  const saveCustomModel = () => {
+    const m = customModel.trim()
+    if (!m) return
+    void patchConversationSettings({ llm_model: m })
+  }
+
+  const chatProviderValue = selectedProvider.trim()
+  const chatModelValue = (customModelEnabled ? customModel : selectedModel).trim()
+  const chatModelDisplay = (() => {
+    if (!chatProviderValue && !chatModelValue) return 'default'
+    if (!chatProviderValue) return chatModelValue || 'default'
+    if (!chatModelValue) return `${chatProviderValue}/(default)`
+    if (chatModelValue.startsWith(`${chatProviderValue}/`)) return chatModelValue
+    return `${chatProviderValue}/${chatModelValue}`
+  })()
 
   return (
     <div className="flex h-full">
@@ -981,18 +1269,17 @@ Help the user understand and interact with this agent's work.`,
                               'hover:bg-accent/50',
                               hasSelectedConv && 'bg-accent/30'
                             )}
-                            onClick={() => toggleAgentExpanded(agent.id)}
+                            onClick={() => {
+                              toggleAgentExpanded(agent.id)
+                              setSelectedAgent(agent)
+                            }}
                           >
                             {/* Expand/Collapse Icon */}
                             <div className="flex-shrink-0 w-4 h-4 flex items-center justify-center">
-                              {agentConvs.length > 0 ? (
-                                isExpanded ? (
-                                  <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
-                                ) : (
-                                  <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
-                                )
+                              {isExpanded ? (
+                                <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
                               ) : (
-                                <div className="h-1.5 w-1.5 rounded-full bg-muted-foreground/30" />
+                                <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
                               )}
                             </div>
 
@@ -1038,8 +1325,20 @@ Help the user understand and interact with this agent's work.`,
                           </div>
 
                           {/* Expanded Conversations */}
-                          {isExpanded && agentConvs.length > 0 && (
+                          {isExpanded && (
                             <div className="ml-6 pl-2 border-l border-border/50 space-y-0.5 mt-0.5">
+                              {agentConvs.length === 0 && (
+                                <div
+                                  className="flex items-center gap-2 px-2 py-1.5 rounded-md cursor-pointer text-muted-foreground hover:text-foreground hover:bg-accent/50 transition-colors"
+                                  onClick={(e) => {
+                                    e.stopPropagation()
+                                    handleNewConversationWithAgent(agent)
+                                  }}
+                                >
+                                  <Plus className="h-3 w-3" />
+                                  <span className="text-xs">Start a conversation</span>
+                                </div>
+                              )}
                               {agentConvs.map((conversation) => (
                                 <div
                                   key={conversation.id}
@@ -1412,13 +1711,13 @@ Help the user understand and interact with this agent's work.`,
         )}
       </div>
 
-      {/* Right Panel - Context */}
+      {/* Right Panel - Inspector */}
       {showContextPanel && selectedConversation && (
         <div className="w-80 border-l border-border flex flex-col bg-muted/20">
           <div className="h-12 border-b border-border flex items-center justify-between px-4">
             <div className="flex items-center gap-2">
-              <FileText className="h-4 w-4" />
-              <span className="text-sm font-medium">Context</span>
+              <Settings2 className="h-4 w-4" />
+              <span className="text-sm font-medium">Inspector</span>
             </div>
             <Button
               variant="ghost"
@@ -1430,54 +1729,225 @@ Help the user understand and interact with this agent's work.`,
             </Button>
           </div>
 
-          {/* MODEL HUD - Top Section */}
-          <div className="border-b border-border bg-card/50">
-            <div className="p-3 space-y-3">
-              {/* Provider Selector */}
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <Folder className="h-4 w-4 text-primary" />
-                  <span className="text-xs font-medium">Provider</span>
+          {/* Scrollable body */}
+          <ScrollArea className="flex-1">
+            {/* === 1. AGENT === */}
+            <CollapsibleSection
+              title="Agent"
+              icon={<Bot className="h-3.5 w-3.5 text-green-500" />}
+              open={agentSectionOpen}
+              onToggle={setAgentSectionOpen}
+              badge={agentOps.targetAgent ? agentOps.targetAgent.state : undefined}
+            >
+              {agentOps.targetAgent ? (
+                <div className="space-y-3">
+                  {/* Agent header */}
+                  <div className="flex items-center gap-3">
+                    <div className={cn(
+                      'h-10 w-10 rounded-lg flex items-center justify-center',
+                      agentOps.targetAgent.state === 'running' ? 'bg-green-500/10' : 'bg-muted'
+                    )}>
+                      <Bot className={cn(
+                        'h-5 w-5',
+                        agentOps.targetAgent.state === 'running' ? 'text-green-500' : 'text-muted-foreground'
+                      )} />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-semibold truncate">
+                          {agentOps.targetAgent.name || agentOps.targetAgent.slug || agentOps.targetAgent.role || 'Agent'}
+                        </span>
+                        <Badge variant={agentOps.targetAgent.state === 'running' ? 'default' : 'outline'} className="text-xs">
+                          {agentOps.targetAgent.state}
+                        </Badge>
+                      </div>
+                      <p className="text-xs text-muted-foreground font-mono truncate">
+                        {agentOps.targetAgent.id.slice(0, 16)}...
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Action buttons */}
+                  <div className="flex gap-2">
+                    {agentOps.targetAgent.state === 'running' ? (
+                      <Button
+                        variant="destructive"
+                        size="sm"
+                        className="flex-1 gap-1"
+                        onClick={() => {
+                          if (window.confirm(`Stop "${agentOps.targetAgent!.name || agentOps.targetAgent!.role || 'this agent'}"?`)) {
+                            agentOps.killAgent.mutate(agentOps.targetAgent!.id)
+                          }
+                        }}
+                        disabled={agentOps.killAgent.isPending}
+                      >
+                        <Square className="h-3 w-3" />
+                        {agentOps.killAgent.isPending ? 'Stopping...' : 'Stop'}
+                      </Button>
+                    ) : (
+                      <Button
+                        variant="default"
+                        size="sm"
+                        className="flex-1 gap-1"
+                        onClick={() => agentOps.startAgent.mutate(agentOps.targetAgent!.id)}
+                        disabled={agentOps.startAgent.isPending}
+                      >
+                        <Play className="h-3 w-3" />
+                        {agentOps.startAgent.isPending ? 'Starting...' : 'Start'}
+                      </Button>
+                    )}
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="gap-1"
+                      onClick={() => {
+                        if (window.confirm(`Remove "${agentOps.targetAgent!.name || agentOps.targetAgent!.role || 'this agent'}"? This cannot be undone.`)) {
+                          agentOps.trashAgent.mutate(agentOps.targetAgent!.id)
+                        }
+                      }}
+                      disabled={agentOps.trashAgent.isPending || agentOps.targetAgent.state === 'running'}
+                      title={agentOps.targetAgent.state === 'running' ? 'Stop agent before trashing' : 'Delete agent'}
+                    >
+                      <Trash2 className="h-3 w-3" />
+                    </Button>
+                  </div>
+
+                  {/* Workspace */}
+                  {agentOps.targetAgent.ns && (
+                    <div className="flex items-center gap-2 p-2 rounded-md bg-muted/30">
+                      <Folder className="h-3.5 w-3.5 text-muted-foreground flex-shrink-0" />
+                      <div className="min-w-0">
+                        <span className="text-[10px] text-muted-foreground">Workspace</span>
+                        <p className="text-xs font-mono truncate" title={agentOps.targetAgent.ns}>
+                          {agentOps.targetAgent.ns}
+                        </p>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* 2x2 stats grid */}
+                  <div className="grid grid-cols-2 gap-2">
+                    <div className="bg-muted/30 rounded-md p-2">
+                      <div className="flex items-center gap-1.5 text-muted-foreground mb-0.5">
+                        <Cpu className="h-3 w-3" />
+                        <span className="text-[10px]">Chat Model</span>
+                      </div>
+                      <p
+                        className="text-xs font-medium truncate"
+                        title={`Agent model: ${agentOps.targetAgent.llm_model || 'default'}`}
+                      >
+                        {chatModelDisplay}
+                      </p>
+                    </div>
+                    <div className="bg-muted/30 rounded-md p-2">
+                      <div className="flex items-center gap-1.5 text-muted-foreground mb-0.5">
+                        <Zap className="h-3 w-3" />
+                        <span className="text-[10px]">Role</span>
+                      </div>
+                      <p className="text-xs font-medium truncate">{agentOps.targetAgent.role || 'agent'}</p>
+                    </div>
+                    <div className="bg-muted/30 rounded-md p-2">
+                      <div className="flex items-center gap-1.5 text-muted-foreground mb-0.5">
+                        <Activity className="h-3 w-3" />
+                        <span className="text-[10px]">Sessions</span>
+                      </div>
+                      <p className="text-xs font-medium">{agentOps.sessions.length}</p>
+                    </div>
+                    <div className="bg-muted/30 rounded-md p-2">
+                      <div className="flex items-center gap-1.5 text-muted-foreground mb-0.5">
+                        <Clock className="h-3 w-3" />
+                        <span className="text-[10px]">Created</span>
+                      </div>
+                      <p className="text-xs font-medium truncate">
+                        {agentOps.targetAgent.created_at ? formatRelativeTime(agentOps.targetAgent.created_at) : '-'}
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Active sessions */}
+                  {agentOps.sessions.length > 0 && (
+                    <div className="space-y-1.5">
+                      <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">Active Sessions</span>
+                      {agentOps.sessions.slice(0, 5).map((sess: AgentSession) => (
+                        <Card key={sess.session_id} className="p-2 bg-muted/30">
+                          <div className="flex items-center justify-between mb-0.5">
+                            <span className="text-[10px] font-mono text-muted-foreground">{sess.session_id.slice(0, 12)}...</span>
+                            <Badge variant={sess.status === 'running' ? 'default' : 'outline'} className="text-[9px]">{sess.status}</Badge>
+                          </div>
+                          <div className="flex items-center gap-3 text-[10px] text-muted-foreground">
+                            <span>Iters: {sess.iterations || 0}</span>
+                            <span>{sess.role}</span>
+                          </div>
+                        </Card>
+                      ))}
+                    </div>
+                  )}
                 </div>
+              ) : (
+                <div className="text-xs text-muted-foreground italic text-center py-2">
+                  No agent linked to this conversation
+                </div>
+              )}
+            </CollapsibleSection>
+
+            {/* === 2. MODELS === */}
+            <CollapsibleSection
+              title="Models"
+              icon={<Cpu className="h-3.5 w-3.5 text-blue-500" />}
+              defaultOpen
+            >
+              {conversationSettings?.updated_at && (
+                <div className="text-[10px] text-muted-foreground mb-2">
+                  Settings saved {formatRelativeTime(conversationSettings.updated_at)}
+                </div>
+              )}
+              {/* Chat */}
+              <div className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider mb-1">Chat</div>
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-medium">Provider</span>
                 <select
                   value={selectedProvider}
                   onChange={(e) => {
-                    setSelectedProvider(e.target.value)
-                    setSelectedModel('')
+                    const nextProvider = e.target.value
+                    setSelectedProvider(nextProvider)
                     setCustomModelEnabled(false)
                     setCustomModel('')
+
+                    const nextModel = nextProvider === 'openrouter' ? DEFAULT_OPENROUTER_MODEL : ''
+                    setSelectedModel(nextModel)
+                    void patchConversationSettings({ llm_provider: nextProvider, llm_model: nextModel })
                   }}
-                  className="text-xs bg-muted border border-border rounded-md px-2 py-1 font-mono focus:outline-none focus:ring-1 focus:ring-ring"
+                  className="text-xs bg-muted border border-border rounded-md px-2 py-1 font-mono focus:outline-none focus:ring-1 focus:ring-ring max-w-[160px]"
                 >
                   {PROVIDERS.map((provider) => (
                     <option key={provider.id} value={provider.id}>
                       {provider.id === ''
-                        ? `Default (${linkedAgent?.llm_provider || 'openai'})`
-                        : provider.name}
+                        ? `Default (${defaultProvider || linkedAgent?.llm_provider || 'openai'})`
+                        : `${provider.name}${providerAvailability.has(provider.id) && !providerAvailability.get(provider.id) ? ' \u26A0' : ''}`}
                     </option>
                   ))}
                 </select>
               </div>
-
-              {/* Model Selector */}
+              {selectedProvider !== '' && providerAvailability.has(selectedProvider) && !providerAvailability.get(selectedProvider) && (
+                <div className="text-[10px] text-destructive">No API key configured for this provider</div>
+              )}
               <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <Cpu className="h-4 w-4 text-primary" />
-                  <span className="text-xs font-medium">Model</span>
-                </div>
+                <span className="text-xs font-medium">Model</span>
                 {PROVIDERS.find((p) => p.id === selectedProvider)?.allowCustom ? (
                   <div className="space-y-1">
                     <select
                       value={customModelEnabled ? '__custom__' : selectedModel}
                       onChange={(e) => {
-                        if (e.target.value === '__custom__') {
+                        const nextModel = e.target.value
+                        if (nextModel === '__custom__') {
                           setCustomModelEnabled(true)
                           setSelectedModel('')
                           return
                         }
                         setCustomModelEnabled(false)
                         setCustomModel('')
-                        setSelectedModel(e.target.value)
+                        setSelectedModel(nextModel)
+                        void patchConversationSettings({ llm_model: nextModel })
                       }}
                       className="text-xs bg-muted border border-border rounded-md px-2 py-1 font-mono focus:outline-none focus:ring-1 focus:ring-ring max-w-[160px]"
                     >
@@ -1487,21 +1957,55 @@ Help the user understand and interact with this agent's work.`,
                           {model.name}
                         </option>
                       ))}
-                      <option value="__custom__">Custom...</option>
+                      <option value="__custom__">
+                        {customModelValue ? `Custom (${customModelValue})` : 'Custom...'}
+                      </option>
                     </select>
                     {customModelEnabled && (
-                      <Input
-                        value={customModel}
-                        onChange={(e) => setCustomModel(e.target.value)}
-                        placeholder="e.g., openai/gpt-4o-mini"
-                        className="h-7 text-xs font-mono"
-                      />
+                      <div className="flex items-center gap-2">
+                        <Input
+                          value={customModel}
+                          onChange={(e) => setCustomModel(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              e.preventDefault()
+                              saveCustomModel()
+                            }
+                          }}
+                          placeholder="e.g., openrouter/deepseek-r1"
+                          className="h-7 text-xs font-mono flex-1"
+                        />
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          className="h-7 px-2 text-[10px]"
+                          disabled={!customModelValue || isCustomSaved}
+                          onClick={saveCustomModel}
+                          title={isCustomSaved ? 'Saved' : 'Save custom model'}
+                        >
+                          Save
+                        </Button>
+                        {customModelEnabled && (
+                          customModelValue ? (
+                            <Badge variant={isCustomSaved ? 'success' : isCustomDirty ? 'warning' : 'secondary'} className="text-[10px]">
+                              {isCustomSaved ? 'Saved' : 'Unsaved'}
+                            </Badge>
+                          ) : (
+                            <Badge variant="secondary" className="text-[10px]">Enter model</Badge>
+                          )
+                        )}
+                      </div>
                     )}
                   </div>
                 ) : (
                   <select
                     value={selectedModel}
-                    onChange={(e) => setSelectedModel(e.target.value)}
+                    onChange={(e) => {
+                      const nextModel = e.target.value
+                      setSelectedModel(nextModel)
+                      void patchConversationSettings({ llm_model: nextModel })
+                    }}
                     className="text-xs bg-muted border border-border rounded-md px-2 py-1 font-mono focus:outline-none focus:ring-1 focus:ring-ring max-w-[160px]"
                   >
                     {getModelsForProvider(selectedProvider).map((model) => (
@@ -1514,74 +2018,61 @@ Help the user understand and interact with this agent's work.`,
                   </select>
                 )}
               </div>
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-medium">History Turns</span>
+                <select
+                  value={maxHistoryTurns}
+                  onChange={(e) => setMaxHistoryTurns(Number(e.target.value))}
+                  className="text-xs bg-muted border border-border rounded-md px-2 py-1 font-mono focus:outline-none focus:ring-1 focus:ring-ring max-w-[140px]"
+                >
+                  <option value={10}>10 turns</option>
+                  <option value={20}>20 turns</option>
+                  <option value={50}>50 turns</option>
+                  <option value={100}>100 turns</option>
+                  <option value={-1}>Disabled</option>
+                </select>
+              </div>
 
-              {/* Companion 2-Stage Models */}
+              {/* Compression */}
               <div className="pt-2 border-t border-border space-y-2">
-                <div className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">Companion Models (2-Stage)</div>
-                
-                {/* Tool Model Selector */}
+                <div className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">Compression</div>
                 <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <Wrench className="h-4 w-4 text-orange-500" />
-                    <span className="text-xs font-medium">Tool Model</span>
-                  </div>
+                  <span className="text-xs font-medium">Provider</span>
                   <select
-                    value={toolModel}
-                    onChange={(e) => setToolModel(e.target.value)}
-                    className="text-xs bg-muted border border-border rounded-md px-2 py-1 font-mono focus:outline-none focus:ring-1 focus:ring-ring max-w-[140px]"
+                    value={compressionProvider}
+                    onChange={(e) => {
+                      setCompressionProvider(e.target.value)
+                      setCompressionModel('')
+                    }}
+                    className="text-xs bg-muted border border-border rounded-md px-2 py-1 font-mono focus:outline-none focus:ring-1 focus:ring-ring max-w-[160px]"
                   >
-                    {COMPANION_TOOL_MODELS.map((model) => (
-                      <option key={model.id} value={model.id}>
-                        {model.name}
+                    <option value="">Same as Chat</option>
+                    {PROVIDERS.filter((p) => p.id !== '').map((provider) => (
+                      <option key={provider.id} value={provider.id}>
+                        {`${provider.name}${providerAvailability.has(provider.id) && !providerAvailability.get(provider.id) ? ' \u26A0' : ''}`}
                       </option>
                     ))}
                   </select>
                 </div>
-
-                {/* Response Model Selector */}
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <Bot className="h-4 w-4 text-purple-500" />
-                    <span className="text-xs font-medium">Response Model</span>
+                {compressionProvider !== '' && (
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-medium">Model</span>
+                    <select
+                      value={compressionModel}
+                      onChange={(e) => setCompressionModel(e.target.value)}
+                      className="text-xs bg-muted border border-border rounded-md px-2 py-1 font-mono focus:outline-none focus:ring-1 focus:ring-ring max-w-[160px]"
+                    >
+                      <option value="">Default</option>
+                      {getModelsForProvider(compressionProvider).map((model) => (
+                        <option key={model.id} value={model.id}>
+                          {model.name}
+                        </option>
+                      ))}
+                    </select>
                   </div>
-                  <select
-                    value={responseModel}
-                    onChange={(e) => setResponseModel(e.target.value)}
-                    className="text-xs bg-muted border border-border rounded-md px-2 py-1 font-mono focus:outline-none focus:ring-1 focus:ring-ring max-w-[140px]"
-                  >
-                    {COMPANION_RESPONSE_MODELS.map((model) => (
-                      <option key={model.id} value={model.id}>
-                        {model.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                {/* Max History Turns */}
+                )}
                 <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <Clock className="h-4 w-4 text-blue-500" />
-                    <span className="text-xs font-medium">History Turns</span>
-                  </div>
-                  <select
-                    value={maxHistoryTurns}
-                    onChange={(e) => setMaxHistoryTurns(Number(e.target.value))}
-                    className="text-xs bg-muted border border-border rounded-md px-2 py-1 font-mono focus:outline-none focus:ring-1 focus:ring-ring max-w-[140px]"
-                  >
-                    <option value={10}>10 turns</option>
-                    <option value={20}>20 turns</option>
-                    <option value={50}>50 turns</option>
-                    <option value={100}>100 turns</option>
-                    <option value={-1}>Disabled</option>
-                  </select>
-                </div>
-
-                {/* Memory Compression */}
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <RefreshCw className="h-4 w-4 text-green-500" />
-                    <span className="text-xs font-medium">Compress Memory</span>
-                  </div>
+                  <span className="text-xs font-medium">Compress</span>
                   <Button
                     type="button"
                     variant="outline"
@@ -1590,46 +2081,360 @@ Help the user understand and interact with this agent's work.`,
                     disabled={isCompressing}
                     onClick={handleCompressMemory}
                   >
-                    {isCompressing ? 'Compressing...' : 'Run'}
+                    {isCompressing ? 'Running...' : 'Run'}
                   </Button>
                 </div>
                 {lastCompression && (
                   <div className="text-[10px] text-muted-foreground">
-                    Last run: {lastCompression.summarized} summarized, {lastCompression.skipped} skipped
+                    {lastCompression.summarized} summarized, {lastCompression.skipped} skipped
                     {lastCompression.distilled ? ', distilled' : ''}
                   </div>
                 )}
               </div>
 
+              {/* Story Pipeline — only shown when exec mode is "story" */}
+              {effectiveExecMode === 'story' && (
+                <div className="pt-2 border-t border-border space-y-2">
+                  <div className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">Story Pipeline</div>
+                  {providerAvailability.size > 0 && !providerAvailability.get('openrouter') && (
+                    <div className="text-[10px] text-destructive">OpenRouter key not configured</div>
+                  )}
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <Search className="h-4 w-4 text-orange-500" />
+                      <span className="text-xs font-medium">Gather Model</span>
+                    </div>
+                    <select
+                      value={toolModel}
+                      onChange={(e) => {
+                        const nextModel = e.target.value
+                        setToolModel(nextModel)
+                        void patchConversationSettings({ story_gather_model: nextModel })
+                      }}
+                      className="text-xs bg-muted border border-border rounded-md px-2 py-1 font-mono focus:outline-none focus:ring-1 focus:ring-ring max-w-[140px]"
+                    >
+                      <option value="">Default</option>
+                      {toolModel && !COMPANION_TOOL_MODELS.some((m) => m.id === toolModel) && (
+                        <option value={toolModel}>{toolModel}</option>
+                      )}
+                      {COMPANION_TOOL_MODELS.map((model) => (
+                        <option key={model.id} value={model.id}>
+                          {model.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <MessageCircle className="h-4 w-4 text-purple-500" />
+                      <span className="text-xs font-medium">Dialogue Model</span>
+                    </div>
+                    <select
+                      value={responseModel}
+                      onChange={(e) => {
+                        const nextModel = e.target.value
+                        setResponseModel(nextModel)
+                        void patchConversationSettings({ story_dialogue_model: nextModel })
+                      }}
+                      className="text-xs bg-muted border border-border rounded-md px-2 py-1 font-mono focus:outline-none focus:ring-1 focus:ring-ring max-w-[140px]"
+                    >
+                      <option value="">Default</option>
+                      {responseModel && !COMPANION_RESPONSE_MODELS.some((m) => m.id === responseModel) && (
+                        <option value={responseModel}>{responseModel}</option>
+                      )}
+                      {COMPANION_RESPONSE_MODELS.map((model) => (
+                        <option key={model.id} value={model.id}>
+                          {model.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+              )}
+
+              {/* Execution mode (per-conversation default) */}
+              <div className="pt-2 border-t border-border space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-medium">Exec Mode</span>
+                  <select
+                    value={execModeOverride}
+                    onChange={(e) => {
+                      const nextMode = e.target.value as ExecMode
+                      setExecModeOverride(nextMode)
+                      void patchConversationSettings({ exec_mode: nextMode })
+                    }}
+                    className="text-xs bg-muted border border-border rounded-md px-2 py-1 font-mono focus:outline-none focus:ring-1 focus:ring-ring max-w-[160px]"
+                  >
+                    <option value="">
+                      Default ({linkedAgent?.exec_mode || 'reactive'})
+                    </option>
+                    <option value="reactive">Reactive</option>
+                    <option value="autonomous">Autonomous</option>
+                    <option value="proactive">Proactive</option>
+                    <option value="story">Story</option>
+                  </select>
+                </div>
+                <p className="text-[10px] text-muted-foreground">
+                  {effectiveExecMode === 'reactive' && 'Single-turn: responds to each message independently'}
+                  {effectiveExecMode === 'autonomous' && 'Multi-turn: continues working until task complete'}
+                  {effectiveExecMode === 'proactive' && 'Self-directed: initiates work via think cycles'}
+                  {effectiveExecMode === 'story' && 'Two-stage: gather + dialogue with structured outputs'}
+                </p>
+              </div>
+
+              {/* Tools access (per-conversation) */}
+              <div className="pt-2 border-t border-border">
+                <ToolAllowlistEditor
+                  value={toolsAllowDraft}
+                  onChange={setToolsAllowDraft}
+                  onSave={() => void patchConversationSettings({ tools_allow: toolsAllowDraft })}
+                  onClear={() => void patchConversationSettings({ tools_allow: [] })}
+                  error={settingsError}
+                />
+              </div>
+
+              {/* Reset */}
+              <div className="pt-2 border-t border-border">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-7 text-xs w-full"
+                  onClick={() => {
+                    if (!selectedConversation) return
+                    if (window.confirm('Reset all conversation settings to defaults?')) {
+                      void resetConversationSettings()
+                    }
+                  }}
+                >
+                  Reset Conversation Settings
+                </Button>
+              </div>
+            </CollapsibleSection>
+
+            {/* === 3. MEMORY === */}
+            <CollapsibleSection
+              title="Memory"
+              icon={<Brain className="h-3.5 w-3.5 text-purple-500" />}
+              badge={memoryStats ? `${memoryStats.day_summaries} days` : undefined}
+            >
+              {memoryStats ? (
+                <div className="space-y-2">
+                  <div className="text-[10px] text-muted-foreground space-y-0.5">
+                    <div>{memoryStats.total_turns} turns, {memoryStats.day_summaries} day summaries{memoryStats.has_distilled_history ? ', distilled' : ''}</div>
+                    {memoryStats.last_summarized_date && <div>Last summarized: {memoryStats.last_summarized_date}</div>}
+                  </div>
+                  {memoryStats.day_summaries > 0 && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-6 text-[10px] px-2"
+                      onClick={async () => {
+                        if (showMemoryContext) {
+                          setShowMemoryContext(false)
+                          return
+                        }
+                        if (!selectedConversation) return
+                        try {
+                          const data = await getCompanionMemoryContext(selectedConversation.id)
+                          setMemoryContext(data.context)
+                          setShowMemoryContext(true)
+                        } catch { setMemoryContext(null) }
+                      }}
+                    >
+                      {showMemoryContext ? 'Hide memory context' : 'Show memory context'}
+                    </Button>
+                  )}
+                  {showMemoryContext && memoryContext && (
+                    <Card className="p-2 max-h-[120px] overflow-y-auto">
+                      <pre className="text-[10px] text-muted-foreground whitespace-pre-wrap">{memoryContext}</pre>
+                    </Card>
+                  )}
+                </div>
+              ) : (
+                <div className="text-xs text-muted-foreground italic">No memory data available</div>
+              )}
+            </CollapsibleSection>
+
+            {/* === 4. CONVERSATION === */}
+            <CollapsibleSection
+              title="Conversation"
+              icon={<MessageCircle className="h-3.5 w-3.5 text-yellow-500" />}
+              badge={`${messages.length} msgs`}
+            >
               {/* Token Usage */}
-              <div className="pt-2 border-t border-border space-y-2">
+              <div className="space-y-2">
                 <div className="flex items-center gap-2">
-                  <Coins className="h-4 w-4 text-yellow-500" />
+                  <Coins className="h-3.5 w-3.5 text-yellow-500" />
                   <span className="text-xs font-medium">Token Usage</span>
                 </div>
                 <div className="grid grid-cols-3 gap-2 text-center">
                   <div className="bg-muted/50 rounded-md p-2">
-                    <div className="text-xs text-muted-foreground">Input</div>
-                    <div className="text-sm font-mono font-medium">{tokenUsage.inputTokens.toLocaleString()}</div>
+                    <div className="text-[10px] text-muted-foreground">Input</div>
+                    <div className="text-xs font-mono font-medium">{tokenUsage.inputTokens.toLocaleString()}</div>
                   </div>
                   <div className="bg-muted/50 rounded-md p-2">
-                    <div className="text-xs text-muted-foreground">Output</div>
-                    <div className="text-sm font-mono font-medium">{tokenUsage.outputTokens.toLocaleString()}</div>
+                    <div className="text-[10px] text-muted-foreground">Output</div>
+                    <div className="text-xs font-mono font-medium">{tokenUsage.outputTokens.toLocaleString()}</div>
                   </div>
                   <div className="bg-primary/10 rounded-md p-2">
-                    <div className="text-xs text-muted-foreground">Total</div>
-                    <div className="text-sm font-mono font-medium text-primary">{tokenUsage.totalTokens.toLocaleString()}</div>
+                    <div className="text-[10px] text-muted-foreground">Total</div>
+                    <div className="text-xs font-mono font-medium text-primary">{tokenUsage.totalTokens.toLocaleString()}</div>
                   </div>
                 </div>
               </div>
 
-              {/* System Prompt (Editable) */}
-              <div className="pt-2 border-t border-border space-y-2">
+              {/* Session Info */}
+              <Card className="p-3 space-y-2 text-xs">
                 <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <Sliders className="h-4 w-4 text-blue-500" />
-                    <span className="text-xs font-medium">System Prompt</span>
+                  <span className="text-muted-foreground">Profile</span>
+                  <Badge variant="secondary" className="text-[10px]">
+                    {contextInfo.profile || session?.profile || 'companion'}
+                  </Badge>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-muted-foreground">Workspace</span>
+                  <span className="text-[10px] font-mono truncate max-w-[140px]" title={contextInfo.workspace}>
+                    {contextInfo.workspace || '/'}
+                  </span>
+                </div>
+                {contextInfo.createdAt && (
+                  <div className="flex items-center justify-between">
+                    <span className="text-muted-foreground">Created</span>
+                    <span className="text-[10px] flex items-center gap-1">
+                      <Clock className="h-3 w-3" />
+                      {formatRelativeTime(contextInfo.createdAt)}
+                    </span>
                   </div>
+                )}
+              </Card>
+
+              {/* Conversation metadata */}
+              <Card className="p-3 space-y-2 text-xs">
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">ID</span>
+                  <span className="font-mono truncate max-w-[140px]" title={selectedConversation.id}>
+                    {selectedConversation.id.slice(0, 20)}...
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Messages</span>
+                  <span>{messages.length}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Updated</span>
+                  <span>{formatRelativeTime(selectedConversation.updated_at)}</span>
+                </div>
+              </Card>
+            </CollapsibleSection>
+
+            {/* === 5. PERSONALITY === */}
+            <CollapsibleSection
+              title="Personality"
+              icon={<Sparkles className="h-3.5 w-3.5 text-purple-500" />}
+            >
+              {/* Dimension Sliders */}
+              {personalityInfo?.profile?.dimensions && personalityInfo.profile.dimensions.length > 0 && (
+                <div className="space-y-3">
+                  {personalityInfo.profile.dimensions.map((dim) => (
+                    <div key={dim.name} className="space-y-1.5">
+                      <div className="flex justify-between text-xs">
+                        <span className="capitalize text-muted-foreground">{dim.name}</span>
+                        <span className="font-mono text-primary">
+                          {(dim.value * 100).toFixed(0)}%
+                        </span>
+                      </div>
+                      <Slider
+                        value={dim.value}
+                        min={0}
+                        max={1}
+                        step={0.05}
+                        onChange={(value) => {
+                          setPersonalityInfo((prev) => {
+                            if (!prev?.profile) return prev
+                            return {
+                              ...prev,
+                              profile: {
+                                ...prev.profile,
+                                dimensions: prev.profile.dimensions.map((d) =>
+                                  d.name === dim.name ? { ...d, value } : d
+                                ),
+                              },
+                            }
+                          })
+                          if (!selectedConversation) return
+                          const existingTimer = personalityDebounceRefs.current.get(dim.name)
+                          if (existingTimer) clearTimeout(existingTimer)
+                          const timer = setTimeout(async () => {
+                            try {
+                              await updatePersonalityDimension(selectedConversation.id, dim.name, value)
+                            } catch (err) {
+                              console.error('Failed to update personality dimension:', err)
+                            }
+                            personalityDebounceRefs.current.delete(dim.name)
+                          }, 300)
+                          personalityDebounceRefs.current.set(dim.name, timer)
+                        }}
+                      />
+                      <div className="flex justify-between text-[10px] text-muted-foreground">
+                        <span>{dim.min_label}</span>
+                        <span>{dim.max_label}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Learned traits / interests / dislikes */}
+              {personalityInfo?.profile && (personalityInfo.profile.learned_traits?.length > 0 || personalityInfo.profile.interests?.length > 0 || personalityInfo.profile.dislikes?.length > 0) && (
+                <Card className="p-3 space-y-3">
+                  {personalityInfo.profile.learned_traits?.length > 0 && (
+                    <div>
+                      <span className="text-xs font-medium text-muted-foreground">Learned Traits</span>
+                      <div className="flex flex-wrap gap-1 mt-1">
+                        {personalityInfo.profile.learned_traits.map((trait, i) => (
+                          <Badge key={i} variant="secondary" className="text-[10px]">{trait}</Badge>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  {personalityInfo.profile.interests?.length > 0 && (
+                    <div className={personalityInfo.profile.learned_traits?.length > 0 ? "pt-2 border-t border-border" : ""}>
+                      <span className="text-xs font-medium text-muted-foreground">Interests</span>
+                      <div className="flex flex-wrap gap-1 mt-1">
+                        {personalityInfo.profile.interests.map((interest, i) => (
+                          <Badge key={i} variant="outline" className="text-[10px] text-green-600">{interest}</Badge>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  {personalityInfo.profile.dislikes?.length > 0 && (
+                    <div className={(personalityInfo.profile.learned_traits?.length > 0 || personalityInfo.profile.interests?.length > 0) ? "pt-2 border-t border-border" : ""}>
+                      <span className="text-xs font-medium text-muted-foreground">Dislikes</span>
+                      <div className="flex flex-wrap gap-1 mt-1">
+                        {personalityInfo.profile.dislikes.map((dislike, i) => (
+                          <Badge key={i} variant="outline" className="text-[10px] text-red-600">{dislike}</Badge>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </Card>
+              )}
+
+              {!personalityInfo?.profile?.dimensions?.length && !personalityInfo?.profile?.learned_traits?.length && (
+                <div className="text-xs text-muted-foreground italic">No personality data</div>
+              )}
+            </CollapsibleSection>
+
+            {/* === 6. PROMPT === */}
+            <CollapsibleSection
+              title="Prompt"
+              icon={<Sliders className="h-3.5 w-3.5 text-blue-500" />}
+            >
+              {/* System Prompt (Editable) */}
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-medium">System Prompt</span>
                   {!editingSystemPrompt ? (
                     <Button
                       variant="ghost"
@@ -1651,7 +2456,6 @@ Help the user understand and interact with this agent's work.`,
                         className="h-6 w-6 p-0"
                         onClick={() => {
                           setEditingSystemPrompt(false)
-                          // TODO: Save system prompt via API
                           setContextInfo((prev) => ({ ...prev, systemPrompt: systemPromptDraft }))
                         }}
                       >
@@ -1690,75 +2494,13 @@ Help the user understand and interact with this agent's work.`,
                 )}
               </div>
 
-              {/* Personality Dimensions (Sliders) */}
-              {personalityInfo?.profile?.dimensions && personalityInfo.profile.dimensions.length > 0 && (
-                <div className="pt-2 border-t border-border space-y-3">
-                  <div className="flex items-center gap-2">
-                    <Sparkles className="h-4 w-4 text-purple-500" />
-                    <span className="text-xs font-medium">Personality</span>
-                  </div>
-                  <div className="space-y-3">
-                    {personalityInfo.profile.dimensions.map((dim) => (
-                      <div key={dim.name} className="space-y-1.5">
-                        <div className="flex justify-between text-xs">
-                          <span className="capitalize text-muted-foreground">{dim.name}</span>
-                          <span className="font-mono text-primary">
-                            {(dim.value * 100).toFixed(0)}%
-                          </span>
-                        </div>
-                        <Slider
-                          value={dim.value}
-                          min={0}
-                          max={1}
-                          step={0.05}
-                          onChange={(value) => {
-                            // Update local state immediately for responsiveness
-                            setPersonalityInfo((prev) => {
-                              if (!prev?.profile) return prev
-                              return {
-                                ...prev,
-                                profile: {
-                                  ...prev.profile,
-                                  dimensions: prev.profile.dimensions.map((d) =>
-                                    d.name === dim.name ? { ...d, value } : d
-                                  ),
-                                },
-                              }
-                            })
-                            
-                            // Debounce API call
-                            if (!selectedConversation) return
-                            const existingTimer = personalityDebounceRefs.current.get(dim.name)
-                            if (existingTimer) clearTimeout(existingTimer)
-                            
-                            const timer = setTimeout(async () => {
-                              try {
-                                await updatePersonalityDimension(selectedConversation.id, dim.name, value)
-                              } catch (err) {
-                                console.error('Failed to update personality dimension:', err)
-                              }
-                              personalityDebounceRefs.current.delete(dim.name)
-                            }, 300)
-                            personalityDebounceRefs.current.set(dim.name, timer)
-                          }}
-                        />
-                        <div className="flex justify-between text-[10px] text-muted-foreground">
-                          <span>{dim.min_label}</span>
-                          <span>{dim.max_label}</span>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
               {/* Built Prompt Preview */}
               <div className="space-y-2">
                 <div className="flex items-center justify-between">
-                  <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-1">
+                  <span className="text-xs font-medium flex items-center gap-1">
                     <FileText className="h-3 w-3" />
                     Built Prompt Preview
-                  </h4>
+                  </span>
                   <Badge variant="outline" className="text-[10px]">
                     {messages.length} messages
                   </Badge>
@@ -1775,12 +2517,12 @@ Help the user understand and interact with this agent's work.`,
                       </div>
                     )}
                     {messages.slice(-5).map((msg, i) => (
-                      <div 
-                        key={i} 
+                      <div
+                        key={i}
                         className={cn(
                           "p-2 rounded border-l-2",
-                          msg.role === "user" 
-                            ? "bg-green-500/10 border-green-500" 
+                          msg.role === "user"
+                            ? "bg-green-500/10 border-green-500"
                             : "bg-purple-500/10 border-purple-500"
                         )}
                       >
@@ -1804,19 +2546,19 @@ Help the user understand and interact with this agent's work.`,
                   </div>
                 </Card>
               </div>
-            </div>
-          </div>
+            </CollapsibleSection>
 
-          {/* METADATA - Bottom Section */}
-          <ScrollArea className="flex-1">
-            <div className="p-4 space-y-4">
+            {/* === 7. DEBUG === */}
+            <CollapsibleSection
+              title="Debug"
+              icon={<Bug className="h-3.5 w-3.5 text-red-500" />}
+              badge={selectedMessage ? '1 selected' : undefined}
+            >
               {/* Selected Message Details */}
-              {selectedMessage && (
+              {selectedMessage ? (
                 <div className="space-y-2">
                   <div className="flex items-center justify-between">
-                    <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-                      Selected Message
-                    </h4>
+                    <span className="text-xs font-medium">Selected Message</span>
                     <Button
                       variant="ghost"
                       size="sm"
@@ -1856,9 +2598,7 @@ Help the user understand and interact with this agent's work.`,
                   {/* Tool Calls for Selected Message */}
                   {selectedMessage.tool_calls && selectedMessage.tool_calls.length > 0 && (
                     <div className="space-y-2">
-                      <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-                        Tool Calls ({selectedMessage.tool_calls.length})
-                      </h4>
+                      <span className="text-xs font-medium">Tool Calls ({selectedMessage.tool_calls.length})</span>
                       <div className="space-y-2">
                         {selectedMessage.tool_calls.map((tool, i) => (
                           <Card key={i} className="p-2">
@@ -1899,112 +2639,14 @@ Help the user understand and interact with this agent's work.`,
                     </div>
                   )}
                 </div>
+              ) : (
+                <div className="text-xs text-muted-foreground italic">Click a message to inspect it</div>
               )}
-
-              {/* Session Info */}
-              <div className="space-y-2">
-                <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-                  Session
-                </h4>
-                <Card className="p-3 space-y-2 text-sm">
-                  <div className="flex items-center justify-between">
-                    <span className="text-muted-foreground">Profile</span>
-                    <Badge variant="secondary" className="text-xs">
-                      {contextInfo.profile || session?.profile || 'companion'}
-                    </Badge>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-muted-foreground">Workspace</span>
-                    <span className="text-xs font-mono truncate max-w-[140px]" title={contextInfo.workspace}>
-                      {contextInfo.workspace || '/'}
-                    </span>
-                  </div>
-                  {contextInfo.createdAt && (
-                    <div className="flex items-center justify-between">
-                      <span className="text-muted-foreground">Created</span>
-                      <span className="text-xs flex items-center gap-1">
-                        <Clock className="h-3 w-3" />
-                        {formatRelativeTime(contextInfo.createdAt)}
-                      </span>
-                    </div>
-                  )}
-                </Card>
-              </div>
-
-              {/* Linked Agent */}
-              {linkedAgent && (
-                <div className="space-y-2">
-                  <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-                    Linked Agent
-                  </h4>
-                  <Card className="p-3 space-y-2">
-                    <div className="flex items-center gap-2">
-                      <div className="h-8 w-8 rounded-lg bg-primary/10 flex items-center justify-center">
-                        <Bot className="h-4 w-4 text-primary" />
-                      </div>
-                      <div>
-                        <div className="text-sm font-medium">
-                          {linkedAgent.name || linkedAgent.slug || 'Unnamed'}
-                        </div>
-                        <div className="text-xs text-muted-foreground">
-                          {linkedAgent.role || 'agent'}
-                        </div>
-                      </div>
-                    </div>
-                    <div className="pt-2 border-t border-border space-y-1 text-xs">
-                      <div className="flex justify-between">
-                        <span className="text-muted-foreground">ID</span>
-                        <span className="font-mono">{linkedAgent.id.slice(0, 16)}...</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-muted-foreground">Model</span>
-                        <span>{linkedAgent.llm_model || 'default'}</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-muted-foreground">State</span>
-                        <Badge
-                          variant={linkedAgent.state === 'running' ? 'default' : 'secondary'}
-                          className="text-[10px]"
-                        >
-                          {linkedAgent.state}
-                        </Badge>
-                      </div>
-                    </div>
-                  </Card>
-                </div>
-              )}
-
-              {/* Conversation Info */}
-              <div className="space-y-2">
-                <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-                  Conversation
-                </h4>
-                <Card className="p-3 space-y-2 text-xs">
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">ID</span>
-                    <span className="font-mono truncate max-w-[140px]" title={selectedConversation.id}>
-                      {selectedConversation.id.slice(0, 20)}...
-                    </span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">Messages</span>
-                    <span>{messages.length}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">Updated</span>
-                    <span>{formatRelativeTime(selectedConversation.updated_at)}</span>
-                  </div>
-                </Card>
-              </div>
-
-
 
               {/* Injected Context (from hooks) */}
               {contextInfo.injectedContexts && contextInfo.injectedContexts.length > 0 && (
-                <div className="space-y-2">
-                  <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-                    Injected Context ({contextInfo.injectedContexts.length})
-                  </h4>
+                <div className="space-y-2 pt-2 border-t border-border">
+                  <span className="text-xs font-medium">Injected Context ({contextInfo.injectedContexts.length})</span>
                   <div className="space-y-2">
                     {contextInfo.injectedContexts.slice(-3).map((ctx, i) => (
                       <Card key={i} className="p-2">
@@ -2023,61 +2665,7 @@ Help the user understand and interact with this agent's work.`,
                   </div>
                 </div>
               )}
-
-              {/* Personality Traits (learned traits, interests, dislikes - dimensions are sliders above) */}
-              {personalityInfo?.profile && (personalityInfo.profile.learned_traits?.length > 0 || personalityInfo.profile.interests?.length > 0 || personalityInfo.profile.dislikes?.length > 0) && (
-                <div className="space-y-2">
-                  <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-                    Personality Traits
-                  </h4>
-                  <Card className="p-3 space-y-3">
-                    {/* Learned Traits */}
-                    {personalityInfo.profile.learned_traits?.length > 0 && (
-                      <div>
-                        <span className="text-xs font-medium text-muted-foreground">Learned Traits</span>
-                        <div className="flex flex-wrap gap-1 mt-1">
-                          {personalityInfo.profile.learned_traits.map((trait, i) => (
-                            <Badge key={i} variant="secondary" className="text-[10px]">
-                              {trait}
-                            </Badge>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Interests */}
-                    {personalityInfo.profile.interests?.length > 0 && (
-                      <div className={personalityInfo.profile.learned_traits?.length > 0 ? "pt-2 border-t border-border" : ""}>
-                        <span className="text-xs font-medium text-muted-foreground">Interests</span>
-                        <div className="flex flex-wrap gap-1 mt-1">
-                          {personalityInfo.profile.interests.map((interest, i) => (
-                            <Badge key={i} variant="outline" className="text-[10px] text-green-600">
-                              {interest}
-                            </Badge>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Dislikes */}
-                    {personalityInfo.profile.dislikes?.length > 0 && (
-                      <div className={(personalityInfo.profile.learned_traits?.length > 0 || personalityInfo.profile.interests?.length > 0) ? "pt-2 border-t border-border" : ""}>
-                        <span className="text-xs font-medium text-muted-foreground">Dislikes</span>
-                        <div className="flex flex-wrap gap-1 mt-1">
-                          {personalityInfo.profile.dislikes.map((dislike, i) => (
-                            <Badge key={i} variant="outline" className="text-[10px] text-red-600">
-                              {dislike}
-                            </Badge>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-                  </Card>
-                </div>
-              )}
-
-
-            </div>
+            </CollapsibleSection>
           </ScrollArea>
         </div>
       )}

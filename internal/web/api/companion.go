@@ -1,6 +1,7 @@
 package api
 
 import (
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -11,11 +12,50 @@ import (
 	"github.com/rs/zerolog"
 
 	"github.com/jkatigb/agentctl/internal/companion"
+	agentdomain "github.com/jkatigb/agentctl/internal/domain/agent"
 	"github.com/jkatigb/agentctl/internal/domain/envelope"
 	"github.com/jkatigb/agentctl/internal/platform/config"
+	"github.com/jkatigb/agentctl/internal/storage/agents"
 	"github.com/jkatigb/agentctl/internal/storage/contextvar"
-	"github.com/jkatigb/agentctl/internal/storage/sqliteutil"
+	"github.com/jkatigb/agentctl/internal/storage/conversationsettings"
+	"github.com/jkatigb/agentctl/internal/storage/dbutil"
 )
+
+// CompanionProvidersHandler returns a handler for GET /api/companion/providers.
+// It reports which LLM providers have API keys configured, the default provider, and Voyage availability.
+func CompanionProvidersHandler(cfg config.Config, log zerolog.Logger) http.HandlerFunc {
+	type providerAvailability struct {
+		ID        string `json:"id"`
+		Available bool   `json:"available"`
+	}
+
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			httpError(w, http.StatusMethodNotAllowed, "method not allowed")
+			return
+		}
+
+		// Check provider-specific keys directly. ResolveAPIKey falls back to the
+		// generic APIKey which would make every provider look "available".
+		// lmstudio is always available (no real API key needed).
+		providers := []providerAvailability{
+			{ID: "anthropic", Available: cfg.LLM.AnthropicAPIKey != ""},
+			{ID: "openai", Available: cfg.LLM.OpenAIAPIKey != ""},
+			{ID: "openrouter", Available: cfg.LLM.OpenRouterAPIKey != ""},
+			{ID: "groq", Available: cfg.LLM.GroqAPIKey != ""},
+			{ID: "gemini", Available: cfg.LLM.GeminiAPIKey != ""},
+			{ID: "cerebras", Available: cfg.LLM.CerebrasAPIKey != ""},
+			{ID: "lmstudio", Available: true},
+		}
+
+		writeJSON(w, http.StatusOK, map[string]any{
+			"ok":               true,
+			"providers":        providers,
+			"default_provider": cfg.LLM.Provider,
+			"voyage_available": cfg.Embedding.VoyageAPIKey != "",
+		})
+	}
+}
 
 // CompanionChatHandler returns an HTTP handler for POST /api/companion/chat that handles chat requests from the companion mobile app.
 // The handler validates the request JSON (requiring conversation_id and message), opens the context store and companion memory DB,
@@ -54,15 +94,82 @@ func CompanionChatHandler(cfg config.Config, log zerolog.Logger) http.HandlerFun
 		}
 		defer store.Close()
 
-		// Open companion memory database for memory context injection
+		// Load conversation settings (optional).
+		settingsStore, err := conversationsettings.Open(r.Context(), cfg.Storage.Root)
+		if err != nil {
+			log.Error().Err(err).Msg("failed to open conversation settings store")
+			httpError(w, http.StatusInternalServerError, "failed to open conversation settings store")
+			return
+		}
+		defer settingsStore.Close()
+
+		settings, err := settingsStore.Get(r.Context(), req.ConversationID)
+		if err != nil && !errors.Is(err, conversationsettings.ErrNotFound) {
+			log.Error().Err(err).Str("conversation_id", req.ConversationID).Msg("failed to load conversation settings")
+			httpError(w, http.StatusInternalServerError, "failed to load conversation settings")
+			return
+		}
+
+		// Open companion memory database for memory context injection.
 		dbPath := filepath.Join(cfg.Storage.Root, "companion.db")
-		memoryDB, closeFn, err := sqliteutil.OpenDBShared(r.Context(), dbPath, nil)
+		memoryDB, closeFn, err := dbutil.OpenStoreDB(r.Context(), cfg.Storage.Root, "COMPANION", filepath.Base(dbPath), nil)
 		if err != nil {
 			log.Error().Err(err).Msg("failed to open companion memory database")
 			httpError(w, http.StatusInternalServerError, "failed to open companion memory database")
 			return
 		}
 		defer func() { _ = closeFn() }()
+
+		// If no per-turn override was provided, apply conversation defaults.
+		if req.LLMProvider == "" && settings.LLMProvider != "" {
+			req.LLMProvider = settings.LLMProvider
+		}
+		if req.LLMModel == "" && settings.LLMModel != "" {
+			req.LLMModel = settings.LLMModel
+		}
+		if req.ExecMode == "" && settings.ExecMode != "" {
+			req.ExecMode = agentdomain.ExecutionMode(settings.ExecMode)
+		}
+		if req.StoryGatherModel == "" && settings.StoryGatherModel != "" {
+			req.StoryGatherModel = settings.StoryGatherModel
+		}
+		if req.StoryDialogueModel == "" && settings.StoryDialogueModel != "" {
+			req.StoryDialogueModel = settings.StoryDialogueModel
+		}
+
+		// If still unset, fall back to linked agent defaults (conversation_id -> agent_id).
+		// Precedence: per-turn overrides > conversation settings > linked agent > global config.
+		var linkedAgentID string
+		if rowErr := memoryDB.QueryRowContext(r.Context(), `
+			SELECT agent_id FROM companion_conversation_titles WHERE conversation_id = ?
+		`, req.ConversationID).Scan(&linkedAgentID); rowErr == nil {
+			linkedAgentID = strings.TrimSpace(linkedAgentID)
+		} else if !errors.Is(rowErr, sql.ErrNoRows) {
+			log.Debug().Err(rowErr).Str("conversation_id", req.ConversationID).Msg("failed to query linked agent id")
+		}
+
+		if linkedAgentID != "" && (req.LLMProvider == "" || req.LLMModel == "" || req.ExecMode == "") {
+			agentStore, err := agents.Open(r.Context(), cfg.Storage.Root)
+			if err != nil {
+				log.Error().Err(err).Msg("failed to open agents store")
+				httpError(w, http.StatusInternalServerError, "failed to open agents store")
+				return
+			}
+			defer agentStore.Close()
+
+			a, err := agentStore.Get(r.Context(), linkedAgentID)
+			if err == nil {
+				if req.LLMProvider == "" && strings.TrimSpace(a.LLMProvider) != "" {
+					req.LLMProvider = strings.TrimSpace(a.LLMProvider)
+				}
+				if req.LLMModel == "" && strings.TrimSpace(a.LLMModel) != "" {
+					req.LLMModel = strings.TrimSpace(a.LLMModel)
+				}
+				if req.ExecMode == "" && a.ExecMode != "" {
+					req.ExecMode = a.ExecMode
+				}
+			}
+		}
 
 		// Resolve LLM credentials. The client may override provider/model for this request
 		// (for example to select an OpenRouter model), but API keys are always resolved
@@ -87,6 +194,7 @@ func CompanionChatHandler(cfg config.Config, log zerolog.Logger) http.HandlerFun
 			LLMProvider: llmProvider,
 			LLMAPIKey:   llmAPIKey,
 			LLMModel:    llmModel,
+			ToolsAllow:  settings.ToolsAllow,
 		})
 
 		// Execute chat
@@ -343,7 +451,7 @@ func CompanionConversationsHandler(cfg config.Config, log zerolog.Logger) http.H
 
 		// Open companion memory database
 		dbPath := filepath.Join(cfg.Storage.Root, "companion.db")
-		memoryDB, closeFn, err := sqliteutil.OpenDBShared(r.Context(), dbPath, nil)
+		memoryDB, closeFn, err := dbutil.OpenStoreDB(r.Context(), cfg.Storage.Root, "COMPANION", filepath.Base(dbPath), nil)
 		if err != nil {
 			log.Error().Err(err).Msg("failed to open companion memory database")
 			httpError(w, http.StatusInternalServerError, "failed to open companion memory database")
@@ -411,7 +519,7 @@ func CompanionConversationMessagesHandler(cfg config.Config, log zerolog.Logger)
 
 		// Open companion memory database
 		dbPath := filepath.Join(cfg.Storage.Root, "companion.db")
-		memoryDB, closeFn, err := sqliteutil.OpenDBShared(r.Context(), dbPath, nil)
+		memoryDB, closeFn, err := dbutil.OpenStoreDB(r.Context(), cfg.Storage.Root, "COMPANION", filepath.Base(dbPath), nil)
 		if err != nil {
 			log.Error().Err(err).Msg("failed to open companion memory database")
 			httpError(w, http.StatusInternalServerError, "failed to open companion memory database")
@@ -504,7 +612,7 @@ func CompanionConversationCompressHandler(cfg config.Config, log zerolog.Logger)
 
 		// Open companion memory database.
 		dbPath := filepath.Join(cfg.Storage.Root, "companion.db")
-		memoryDB, closeFn, err := sqliteutil.OpenDBShared(r.Context(), dbPath, nil)
+		memoryDB, closeFn, err := dbutil.OpenStoreDB(r.Context(), cfg.Storage.Root, "COMPANION", filepath.Base(dbPath), nil)
 		if err != nil {
 			log.Error().Err(err).Msg("failed to open companion memory database")
 			httpError(w, http.StatusInternalServerError, "failed to open companion memory database")
@@ -566,7 +674,7 @@ func CompanionMessageDeleteHandler(cfg config.Config, log zerolog.Logger) http.H
 
 		// Open companion memory database
 		dbPath := filepath.Join(cfg.Storage.Root, "companion.db")
-		memoryDB, closeFn, err := sqliteutil.OpenDBShared(r.Context(), dbPath, nil)
+		memoryDB, closeFn, err := dbutil.OpenStoreDB(r.Context(), cfg.Storage.Root, "COMPANION", filepath.Base(dbPath), nil)
 		if err != nil {
 			log.Error().Err(err).Msg("failed to open companion memory database")
 			httpError(w, http.StatusInternalServerError, "failed to open companion memory database")
@@ -639,7 +747,7 @@ func CompanionConversationDeleteHandler(cfg config.Config, log zerolog.Logger) h
 
 		// Open companion memory database
 		dbPath := filepath.Join(cfg.Storage.Root, "companion.db")
-		memoryDB, closeFn, err := sqliteutil.OpenDBShared(r.Context(), dbPath, nil)
+		memoryDB, closeFn, err := dbutil.OpenStoreDB(r.Context(), cfg.Storage.Root, "COMPANION", filepath.Base(dbPath), nil)
 		if err != nil {
 			log.Error().Err(err).Msg("failed to open companion memory database")
 			httpError(w, http.StatusInternalServerError, "failed to open companion memory database")
@@ -666,8 +774,8 @@ func CompanionConversationDeleteHandler(cfg config.Config, log zerolog.Logger) h
 }
 
 // CompanionConversationRenameHandler returns a handler for PATCH /api/companion/conversations/:id.
-// CompanionConversationRenameHandler returns an HTTP handler that renames a conversation's custom title for PATCH /api/companion/conversations/:id.
-// The handler expects a JSON body with a `title` field and, on success, responds with HTTP 200 and a SuccessResponse indicating the conversation was renamed.
+// Accepts a JSON body with `title` (string) and optional `agent_id` (*string) to link/unlink
+// the conversation to an agent. Supports many-to-one: multiple conversations can share one agent_id.
 func CompanionConversationRenameHandler(cfg config.Config, log zerolog.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPatch {
@@ -686,7 +794,8 @@ func CompanionConversationRenameHandler(cfg config.Config, log zerolog.Logger) h
 
 		// Parse request body
 		var req struct {
-			Title string `json:"title"`
+			Title   string  `json:"title"`
+			AgentID *string `json:"agent_id,omitempty"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			httpError(w, http.StatusBadRequest, "invalid request body: "+err.Error())
@@ -704,7 +813,7 @@ func CompanionConversationRenameHandler(cfg config.Config, log zerolog.Logger) h
 
 		// Open companion memory database
 		dbPath := filepath.Join(cfg.Storage.Root, "companion.db")
-		memoryDB, closeFn, err := sqliteutil.OpenDBShared(r.Context(), dbPath, nil)
+		memoryDB, closeFn, err := dbutil.OpenStoreDB(r.Context(), cfg.Storage.Root, "COMPANION", filepath.Base(dbPath), nil)
 		if err != nil {
 			log.Error().Err(err).Msg("failed to open companion memory database")
 			httpError(w, http.StatusInternalServerError, "failed to open companion memory database")
@@ -724,6 +833,20 @@ func CompanionConversationRenameHandler(cfg config.Config, log zerolog.Logger) h
 			log.Error().Err(err).Str("conversation_id", conversationID).Msg("rename conversation failed")
 			httpError(w, http.StatusInternalServerError, "rename conversation failed: "+err.Error())
 			return
+		}
+
+		// Link agent if provided
+		if req.AgentID != nil {
+			if linkErr := svc.LinkConversationAgent(r.Context(), conversationID, *req.AgentID); linkErr != nil {
+				log.Error().Err(linkErr).Str("conversation_id", conversationID).Str("agent_id", *req.AgentID).Msg("link conversation agent failed (rename succeeded)")
+				writeJSON(w, http.StatusOK, map[string]any{
+					"ok":       true,
+					"message":  "conversation renamed, but agent linking failed",
+					"agent_id": *req.AgentID,
+					"link_error": linkErr.Error(),
+				})
+				return
+			}
 		}
 
 		writeJSON(w, http.StatusOK, SuccessResponse{OK: true, Message: "conversation renamed"})
@@ -760,7 +883,7 @@ func CompanionMemoryStatsHandler(cfg config.Config, log zerolog.Logger) http.Han
 
 		// Open companion memory database
 		dbPath := filepath.Join(cfg.Storage.Root, "companion.db")
-		memoryDB, closeFn, err := sqliteutil.OpenDBShared(r.Context(), dbPath, nil)
+		memoryDB, closeFn, err := dbutil.OpenStoreDB(r.Context(), cfg.Storage.Root, "COMPANION", filepath.Base(dbPath), nil)
 		if err != nil {
 			log.Error().Err(err).Msg("failed to open companion memory database")
 			httpError(w, http.StatusInternalServerError, "failed to open companion memory database")
@@ -819,7 +942,7 @@ func CompanionMemoryContextHandler(cfg config.Config, log zerolog.Logger) http.H
 
 		// Open companion memory database
 		dbPath := filepath.Join(cfg.Storage.Root, "companion.db")
-		memoryDB, closeFn, err := sqliteutil.OpenDBShared(r.Context(), dbPath, nil)
+		memoryDB, closeFn, err := dbutil.OpenStoreDB(r.Context(), cfg.Storage.Root, "COMPANION", filepath.Base(dbPath), nil)
 		if err != nil {
 			log.Error().Err(err).Msg("failed to open companion memory database")
 			httpError(w, http.StatusInternalServerError, "failed to open companion memory database")
@@ -877,7 +1000,7 @@ func CompanionMemoryClearHandler(cfg config.Config, log zerolog.Logger) http.Han
 
 		// Open companion memory database
 		dbPath := filepath.Join(cfg.Storage.Root, "companion.db")
-		memoryDB, closeFn, err := sqliteutil.OpenDBShared(r.Context(), dbPath, nil)
+		memoryDB, closeFn, err := dbutil.OpenStoreDB(r.Context(), cfg.Storage.Root, "COMPANION", filepath.Base(dbPath), nil)
 		if err != nil {
 			log.Error().Err(err).Msg("failed to open companion memory database")
 			httpError(w, http.StatusInternalServerError, "failed to open companion memory database")
@@ -934,7 +1057,7 @@ func CompanionPersonalityHandler(cfg config.Config, log zerolog.Logger) http.Han
 
 		// Open companion memory database
 		dbPath := filepath.Join(cfg.Storage.Root, "companion.db")
-		memoryDB, closeFn, err := sqliteutil.OpenDBShared(r.Context(), dbPath, nil)
+		memoryDB, closeFn, err := dbutil.OpenStoreDB(r.Context(), cfg.Storage.Root, "COMPANION", filepath.Base(dbPath), nil)
 		if err != nil {
 			log.Error().Err(err).Msg("failed to open companion memory database")
 			httpError(w, http.StatusInternalServerError, "failed to open companion memory database")

@@ -118,6 +118,10 @@ type ServiceConfig struct {
 	// ExtraToolsOnly restricts tools to ExtraToolExecutor when true.
 	ExtraToolsOnly bool
 
+	// ToolsAllow restricts the toolset to this allowlist when non-empty.
+	// Names are engine tool names (ToolDef.Name).
+	ToolsAllow []string
+
 	// Logger for structured logging.
 	Logger zerolog.Logger
 
@@ -571,6 +575,14 @@ func (s *Service) chatWithLLMChat(ctx context.Context, req ChatRequest, rlmExecu
 		engineCfg.RequireContextQuery = false
 	}
 
+	// If the conversation tool allowlist excludes rlm_context_query, we must disable
+	// RequireContextQuery and remove RLM instructions. Otherwise the engine will
+	// endlessly nudge for a tool call it cannot make.
+	if len(s.config.ToolsAllow) > 0 && !containsString(s.config.ToolsAllow, "rlm_context_query") {
+		engineCfg.RequireContextQuery = false
+		engineCfg.RLMSystemPromptSuffix = ""
+	}
+
 	llmEngine, err := engine.NewLLMChatEngine(engineCfg)
 	if err != nil {
 		return nil, fmt.Errorf("create engine: %w", err)
@@ -734,6 +746,21 @@ func (s *Service) buildTooling(rlmExecutor *engine.RLMToolExecutor) (engine.Tool
 			toolDefs = toolExecutor.List()
 		}
 	}
+
+	// Apply conversation-level tool allowlist (normalize once for consistent matching).
+	if len(s.config.ToolsAllow) > 0 {
+		allowed := make([]string, 0, len(s.config.ToolsAllow))
+		for _, t := range s.config.ToolsAllow {
+			if v := strings.TrimSpace(t); v != "" {
+				allowed = append(allowed, v)
+			}
+		}
+		if len(allowed) > 0 {
+			toolExecutor = engine.NewFilteredToolExecutor(toolExecutor, allowed)
+			toolDefs = engine.FilterToolDefs(toolDefs, allowed)
+		}
+	}
+
 	return toolExecutor, toolDefs, usesRLM
 }
 
@@ -804,6 +831,10 @@ func (s *Service) chatWithStoryLoop(ctx context.Context, req ChatRequest, rlmExe
 	}
 	if hasHistory && req.RequireContextQuery == nil {
 		gatherCfg.RequireContextQuery = false
+	}
+	if len(s.config.ToolsAllow) > 0 && !containsString(s.config.ToolsAllow, "rlm_context_query") {
+		gatherCfg.RequireContextQuery = false
+		gatherCfg.RLMSystemPromptSuffix = ""
 	}
 
 	gatherInput := engine.EngineInput{
@@ -1065,6 +1096,16 @@ func stripThinkTags(s string) string {
 	return strings.TrimSpace(s)
 }
 
+func containsString(list []string, needle string) bool {
+	needle = strings.TrimSpace(needle)
+	for _, v := range list {
+		if strings.TrimSpace(v) == needle {
+			return true
+		}
+	}
+	return false
+}
+
 func parseDialogueEnvelope(raw string) (dialogueEnvelope, bool) {
 	var envelope dialogueEnvelope
 	if err := json.Unmarshal([]byte(raw), &envelope); err == nil {
@@ -1199,7 +1240,15 @@ func storyDialogueResponseFormat() json.RawMessage {
 	return json.RawMessage(storyDialogueResponseFormatJSON)
 }
 
-// buildSystemPrompt constructs the system prompt with personality and memory context.
+// buildSystemPrompt constructs the system prompt with personality, memory context, and agent identity.
+//
+// Index:
+// - Purpose: Assemble system prompt from personality + memory + request context
+// - Flow: load personality → build evolving prompt → inject memory context → inject request context via formatRequestContext
+// - SideEffects: reads contextvar store and conversation memory
+// - FailureModes: personality/memory errors yield partial prompt with defaults
+// - Related: EvolvingPersonality.BuildSystemPrompt, ConversationMemory.GetContext, formatRequestContext
+// - Keywords: system_prompt, personality, memory_context, request_context, agent_identity
 func (s *Service) buildSystemPrompt(ctx context.Context, req ChatRequest) (string, error) {
 	basePersonality := req.Personality
 	if basePersonality == "" {
@@ -1241,15 +1290,73 @@ func (s *Service) buildSystemPrompt(ctx context.Context, req ChatRequest) (strin
 	}
 
 	if len(req.Context) > 0 {
-		ctxJSON, err := json.Marshal(req.Context)
-		if err != nil {
-			s.logger.Warn().Err(err).Msg("Failed to marshal request context")
-		} else if len(ctxJSON) > 0 {
-			systemPrompt = systemPrompt + "\n\n# Request Context\n" + string(ctxJSON)
-		}
+		systemPrompt = systemPrompt + "\n\n" + formatRequestContext(req.Context)
 	}
 
 	return systemPrompt, nil
+}
+
+// formatRequestContext formats the request context map as a human-readable prompt section.
+// When agent identity fields are present, they are rendered as a dedicated "Your Identity"
+// section so the companion knows who it is. Remaining fields appear as general context.
+func formatRequestContext(ctx map[string]any) string {
+	var identity []string
+	var runtime []string
+	var general []string
+
+	// Known agent identity keys
+	agentKeys := map[string]string{
+		"agent_name":      "Name",
+		"agent_role":      "Role",
+		"agent_state":     "State",
+		"agent_exec_mode": "Execution Mode",
+		"agent_workspace": "Workspace",
+		"agent_model":     "Model",
+		"agent_id":        "ID",
+	}
+
+	// Common per-turn runtime keys (usually set by clients).
+	runtimeKeys := map[string]string{
+		"chat_llm_provider": "Chat Provider",
+		"chat_llm_model":    "Chat Model",
+	}
+
+	keys := make([]string, 0, len(ctx))
+	for k := range ctx {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+
+	for _, k := range keys {
+		v := ctx[k]
+		if v == nil {
+			continue
+		}
+		str := fmt.Sprintf("%v", v)
+		if str == "" {
+			continue
+		}
+		if label, ok := agentKeys[k]; ok {
+			identity = append(identity, fmt.Sprintf("- %s: %s", label, str))
+		} else if label, ok := runtimeKeys[k]; ok {
+			runtime = append(runtime, fmt.Sprintf("- %s: %s", label, str))
+		} else {
+			general = append(general, fmt.Sprintf("- %s: %s", k, str))
+		}
+	}
+
+	var sections []string
+	if len(identity) > 0 {
+		sections = append(sections, "# Your Identity\nYou are the following agent. Use this name and role when introducing yourself or when asked who you are.\n"+strings.Join(identity, "\n"))
+	}
+	if len(runtime) > 0 {
+		sections = append(sections, "# Runtime\n"+strings.Join(runtime, "\n"))
+	}
+	if len(general) > 0 {
+		sections = append(sections, "# Request Context\n"+strings.Join(general, "\n"))
+	}
+
+	return strings.Join(sections, "\n\n")
 }
 
 // addAutonomousInstructions adds thinking phase instructions for autonomous/proactive modes.
@@ -1615,6 +1722,14 @@ func (s *Service) RenameConversation(ctx context.Context, conversationID, title 
 		return fmt.Errorf("memory features not enabled")
 	}
 	return s.memory.RenameConversation(ctx, conversationID, title)
+}
+
+// LinkConversationAgent associates a conversation with an agent ID.
+func (s *Service) LinkConversationAgent(ctx context.Context, conversationID, agentID string) error {
+	if s.memory == nil {
+		return fmt.Errorf("memory features not enabled")
+	}
+	return s.memory.LinkConversationAgent(ctx, conversationID, agentID)
 }
 
 // PersonalityInfo contains the full personality state and built system prompt.

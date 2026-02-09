@@ -10,6 +10,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -25,6 +26,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/indexing/semantic"
 	"github.com/jkatigb/agentctl/internal/lsp/gopls"
 	"github.com/jkatigb/agentctl/internal/platform/config"
+	"github.com/jkatigb/agentctl/internal/platform/deviceid"
 	llmproviders "github.com/jkatigb/agentctl/internal/providers/llm"
 	"github.com/jkatigb/agentctl/internal/queue"
 	"github.com/jkatigb/agentctl/internal/sessionkit/summary"
@@ -32,6 +34,8 @@ import (
 	"github.com/jkatigb/agentctl/internal/storage/blackboard"
 	"github.com/jkatigb/agentctl/internal/storage/cache"
 	"github.com/jkatigb/agentctl/internal/storage/contextbuffer"
+	"github.com/jkatigb/agentctl/internal/storage/coordination"
+	"github.com/jkatigb/agentctl/internal/storage/dbdriver"
 	"github.com/jkatigb/agentctl/internal/storage/mailbox"
 	"github.com/jkatigb/agentctl/internal/storage/memory"
 	"github.com/jkatigb/agentctl/internal/storage/sessions"
@@ -67,6 +71,18 @@ type Service struct {
 	// Metrics
 	requestCount atomic.Int64
 
+	// Leader lease (cross-device safety).
+	// When enabled, only the leader runs background workers that mutate shared state.
+	leaderMu        sync.RWMutex
+	leaderEnabled   bool
+	isLeader        bool
+	deviceID        string
+	leaderOwnerID   string
+	coordStore      *coordination.Store
+	leaseCancel     context.CancelFunc
+	leaseWG         sync.WaitGroup
+	leaderWorkersMu sync.Mutex // serializes start/stop transitions when leader status flips
+
 	// Shutdown coordination
 	shutdownCh   chan struct{}
 	shutdownOnce sync.Once
@@ -78,11 +94,16 @@ type Service struct {
 	summaryWorker *summary.Worker
 	summaryCtx    context.Context
 	summaryCancel context.CancelFunc
+	summaryQueue  *queue.Store
+	summaryStore  *sessions.Store
 
 	// Context updater worker (proactive context surfacing)
 	contextUpdater       *updater.Worker
 	contextUpdaterCtx    context.Context
 	contextUpdaterCancel context.CancelFunc
+	contextUpdaterStore  *sessions.Store
+	contextUpdaterMemory storage.MemoryStore
+	contextUpdaterBuffer contextbuffer.Store
 
 	// File summary worker (background LLM summaries)
 	fileSummaryWorker       *filesummary.Worker
@@ -136,6 +157,199 @@ func NewService(cfg config.Config, opts ServiceOptions) (*Service, error) {
 	return svc, nil
 }
 
+const (
+	daemonLeaseName     = "agent_daemon"
+	daemonLeaseTTL      = 45 * time.Second
+	daemonLeaseInterval = 15 * time.Second
+)
+
+func coordinationIsShared(cfg dbdriver.Config) bool {
+	switch cfg.Driver {
+	case dbdriver.DriverTurso:
+		return true
+	case dbdriver.DriverLibSQL:
+		return strings.TrimSpace(cfg.LibSQL.SyncURL) != ""
+	default:
+		return false
+	}
+}
+
+// startLeaderLease initializes cross-device leader coordination when enabled.
+// When coordination is not shared (local-only), leader gating is disabled and background workers start normally.
+//
+// Index:
+// - Purpose: Prevent duplicate daemon background work when multiple machines share DB state
+// - Flow: load COORDINATION config → if shared, open coordination store → acquire/renew lease loop → start/stop leader workers on transitions
+// - SideEffects: may create/open coordination.db; may start/stop background workers
+// - FailureModes: config/open errors, lease acquisition errors (daemon remains follower)
+// - Related: Service.stopLeaderLease, coordination.Store.TryAcquireLease, deviceid.LoadOrCreate
+// - Keywords: leader_lease, coordination, single_leader, cross_device
+func (s *Service) startLeaderLease(ctx context.Context) error {
+	loader := dbdriver.NewConfigLoader(s.cfg.Storage.Root)
+	coordCfg := loader.LoadConfig("COORDINATION", "coordination.db")
+
+	// Only enforce leader gating when the coordination store is actually shared.
+	// For local-only stores, multiple machines won't share state anyway.
+	if !coordinationIsShared(coordCfg) {
+		deviceID, _ := deviceid.LoadOrCreate(s.cfg.Home)
+		s.leaderMu.Lock()
+		s.leaderEnabled = false
+		s.deviceID = deviceID
+		s.isLeader = true
+		s.leaderMu.Unlock()
+		return s.startLeaderWorkers(ctx)
+	}
+
+	deviceID, err := deviceid.LoadOrCreate(s.cfg.Home)
+	if err != nil {
+		return fmt.Errorf("leader lease: load device id: %w", err)
+	}
+	ownerID := fmt.Sprintf("%s:%d:%s", deviceID, os.Getpid(), ulid.Make().String())
+
+	store, err := coordination.Open(ctx, s.cfg.Storage.Root)
+	if err != nil {
+		s.leaderMu.Lock()
+		s.leaderEnabled = true
+		s.deviceID = deviceID
+		s.leaderOwnerID = ownerID
+		s.coordStore = nil
+		s.isLeader = false
+		s.leaderMu.Unlock()
+		return fmt.Errorf("leader lease: open coordination store: %w", err)
+	}
+
+	s.leaderMu.Lock()
+	s.leaderEnabled = true
+	s.deviceID = deviceID
+	s.leaderOwnerID = ownerID
+	s.coordStore = store
+	s.isLeader = false
+	s.leaderMu.Unlock()
+
+	leaseCtx, cancel := context.WithCancel(ctx)
+	s.leaseCancel = cancel
+
+	s.leaseWG.Add(1)
+	go s.runLeaseLoop(leaseCtx, store, ownerID)
+	return nil
+}
+
+func (s *Service) runLeaseLoop(ctx context.Context, store *coordination.Store, ownerID string) {
+	defer s.leaseWG.Done()
+
+	ticker := time.NewTicker(daemonLeaseInterval)
+	defer ticker.Stop()
+
+	for {
+		acquired, err := store.TryAcquireLease(ctx, daemonLeaseName, ownerID, daemonLeaseTTL)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "warning: leader lease acquire failed: %v\n", err)
+			s.transitionLeader(ctx, false)
+		} else {
+			s.transitionLeader(ctx, acquired)
+		}
+
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+	}
+}
+
+func (s *Service) transitionLeader(ctx context.Context, leader bool) {
+	s.leaderWorkersMu.Lock()
+	defer s.leaderWorkersMu.Unlock()
+
+	s.leaderMu.Lock()
+	if leader == s.isLeader {
+		s.leaderMu.Unlock()
+		return
+	}
+	s.isLeader = leader
+	s.leaderMu.Unlock()
+
+	if leader {
+		fmt.Fprintf(os.Stderr, "daemon: leader lease acquired; starting leader workers\n")
+		if err := s.startLeaderWorkers(ctx); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: leader workers start error: %v\n", err)
+		}
+		return
+	}
+
+	fmt.Fprintf(os.Stderr, "daemon: leader lease lost; stopping leader workers\n")
+	s.stopLeaderWorkers()
+}
+
+func (s *Service) startLeaderWorkers(ctx context.Context) error {
+	var firstErr error
+
+	if err := s.startSummaryWorker(ctx); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: summary worker failed to start: %v\n", err)
+		if firstErr == nil {
+			firstErr = err
+		}
+	}
+	if err := s.startContextUpdater(ctx); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: context updater failed to start: %v\n", err)
+		if firstErr == nil {
+			firstErr = err
+		}
+	}
+	if err := s.startFileSummaryWorker(ctx); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: file summary worker failed to start: %v\n", err)
+		if firstErr == nil {
+			firstErr = err
+		}
+	}
+	if err := s.startAgentOrchestration(ctx); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: agent orchestration failed to start: %v\n", err)
+		if firstErr == nil {
+			firstErr = err
+		}
+	}
+
+	return firstErr
+}
+
+func (s *Service) stopLeaderWorkers() {
+	s.stopSummaryWorker()
+	s.stopContextUpdater()
+	s.stopFileSummaryWorker()
+	s.stopAgentOrchestration()
+}
+
+func (s *Service) stopLeaderLease(ctx context.Context) {
+	if s.leaseCancel != nil {
+		s.leaseCancel()
+		s.leaseCancel = nil
+	}
+	s.leaseWG.Wait()
+
+	s.leaderMu.RLock()
+	store := s.coordStore
+	ownerID := s.leaderOwnerID
+	s.leaderMu.RUnlock()
+
+	if store != nil {
+		releaseCtx := ctx
+		if releaseCtx == nil {
+			releaseCtx = context.Background()
+		}
+		releaseCtx, cancel := context.WithTimeout(releaseCtx, 2*time.Second)
+		_ = store.ReleaseLease(releaseCtx, daemonLeaseName, ownerID)
+		cancel()
+		_ = store.Close()
+	}
+
+	s.leaderMu.Lock()
+	s.coordStore = nil
+	s.leaderEnabled = false
+	s.leaderOwnerID = ""
+	s.isLeader = false
+	s.leaderMu.Unlock()
+}
+
 // Run starts the daemon service and blocks until shutdown.
 //
 // Index:
@@ -175,28 +389,11 @@ func (s *Service) Run(ctx context.Context) error {
 	}
 	defer s.removePIDFile()
 
-	// Start background summary worker
-	if err := s.startSummaryWorker(ctx); err != nil {
-		// Log but don't fail daemon startup - worker is optional
-		fmt.Fprintf(os.Stderr, "warning: summary worker failed to start: %v\n", err)
-	}
-
-	// Start background context updater worker
-	if err := s.startContextUpdater(ctx); err != nil {
-		// Log but don't fail daemon startup - worker is optional
-		fmt.Fprintf(os.Stderr, "warning: context updater failed to start: %v\n", err)
-	}
-
-	// Start background file summary worker
-	if err := s.startFileSummaryWorker(ctx); err != nil {
-		// Log but don't fail daemon startup - worker is optional
-		fmt.Fprintf(os.Stderr, "warning: file summary worker failed to start: %v\n", err)
-	}
-
-	// Start agent orchestration (runtime + overseer)
-	if err := s.startAgentOrchestration(ctx); err != nil {
-		// Log but don't fail daemon startup - orchestration is optional
-		fmt.Fprintf(os.Stderr, "warning: agent orchestration failed to start: %v\n", err)
+	// Start leader lease coordination (only enabled when COORDINATION is configured for remote sync).
+	// This gates background workers so only one machine mutates shared state at a time.
+	if err := s.startLeaderLease(ctx); err != nil {
+		// Log but don't fail daemon startup; safest behavior is to run as follower (no leader workers).
+		fmt.Fprintf(os.Stderr, "warning: leader lease init failed (running without leader workers): %v\n", err)
 	}
 
 	// Accept connections
@@ -245,64 +442,11 @@ func (s *Service) Shutdown(ctx context.Context) error {
 		return ctx.Err()
 	}
 
-	// Stop summary worker
-	if s.summaryWorker != nil {
-		if err := s.summaryWorker.Stop(); err != nil {
-			fmt.Fprintf(os.Stderr, "warning: summary worker stop error: %v\n", err)
-		}
-	}
-	if s.summaryCancel != nil {
-		s.summaryCancel()
-	}
-
-	// Stop context updater worker
-	if s.contextUpdater != nil {
-		s.contextUpdater.Stop()
-	}
-	if s.contextUpdaterCancel != nil {
-		s.contextUpdaterCancel()
-	}
-
-	// Stop file summary worker
-	if s.fileSummaryWorker != nil {
-		if err := s.fileSummaryWorker.Stop(); err != nil {
-			fmt.Fprintf(os.Stderr, "warning: file summary worker stop error: %v\n", err)
-		}
-	}
-	if s.fileSummaryWorkerCancel != nil {
-		s.fileSummaryWorkerCancel()
-	}
-
-	// Stop agent orchestration
-	if s.agentCancel != nil {
-		s.agentCancel()
-	}
-	// Kill all running agent sessions
-	if s.agentRuntime != nil {
-		for _, session := range s.agentRuntime.List() {
-			_ = s.agentRuntime.Kill(session.ID)
-		}
-	}
-
-	// Close file summary worker memory store
-	if s.fileSummaryMemoryStore != nil {
-		s.fileSummaryMemoryStore.Close()
-		s.fileSummaryMemoryStore = nil
-	}
-
-	// Close agent orchestration stores
-	if s.agentSessionStore != nil {
-		s.agentSessionStore.Close()
-		s.agentSessionStore = nil
-	}
-	if s.agentMailboxStore != nil {
-		s.agentMailboxStore.Close()
-		s.agentMailboxStore = nil
-	}
-	if s.agentBoardStore != nil {
-		s.agentBoardStore.Close()
-		s.agentBoardStore = nil
-	}
+	// Stop leader lease loop first so it can't restart workers during shutdown.
+	s.stopLeaderLease(ctx)
+	s.leaderWorkersMu.Lock()
+	s.stopLeaderWorkers()
+	s.leaderWorkersMu.Unlock()
 
 	// Close shared resources
 	s.cacheMu.Lock()
@@ -492,6 +636,10 @@ type StatusResult struct {
 	UptimeSeconds  float64  `json:"uptime_seconds"`
 	RequestCount   int64    `json:"request_count"`
 	WarmWorkspaces []string `json:"warm_workspaces"`
+	LeaderEnabled  bool     `json:"leader_enabled,omitempty"`
+	IsLeader       bool     `json:"is_leader,omitempty"`
+	DeviceID       string   `json:"device_id,omitempty"`
+	LeaderOwnerID  string   `json:"leader_owner_id,omitempty"`
 }
 
 func (s *Service) handleStatus() StatusResult {
@@ -502,12 +650,23 @@ func (s *Service) handleStatus() StatusResult {
 	}
 	s.warmMu.RUnlock()
 
+	s.leaderMu.RLock()
+	leaderEnabled := s.leaderEnabled
+	isLeader := s.isLeader
+	deviceID := s.deviceID
+	ownerID := s.leaderOwnerID
+	s.leaderMu.RUnlock()
+
 	return StatusResult{
 		PID:            os.Getpid(),
 		StartedAt:      s.started.Format(time.RFC3339),
 		UptimeSeconds:  time.Since(s.started).Seconds(),
 		RequestCount:   s.requestCount.Load(),
 		WarmWorkspaces: workspaces,
+		LeaderEnabled:  leaderEnabled,
+		IsLeader:       isLeader,
+		DeviceID:       deviceID,
+		LeaderOwnerID:  ownerID,
 	}
 }
 
@@ -790,6 +949,11 @@ func Daemonize() error {
 // - Related: summary.NewWorker
 // - Keywords: summary_worker, sessions, queue, llm_provider
 func (s *Service) startSummaryWorker(ctx context.Context) error {
+	// Idempotency: allow leader transitions to call start repeatedly.
+	if s.summaryWorker != nil {
+		return nil
+	}
+
 	// Check if LLM providers are available
 	providers := llmproviders.SummarizationProviders()
 	if len(providers) == 0 {
@@ -798,8 +962,7 @@ func (s *Service) startSummaryWorker(ctx context.Context) error {
 	}
 
 	// Open queue store
-	queueDBPath := filepath.Join(s.cfg.Storage.Root, summary.QueueDBName)
-	queueStore, err := queue.Open(ctx, queueDBPath, queue.Options{Table: summary.QueueTable})
+	queueStore, err := queue.OpenStore(ctx, s.cfg.Storage.Root, "SUMMARY_QUEUE", summary.QueueDBName, queue.Options{Table: summary.QueueTable})
 	if err != nil {
 		return fmt.Errorf("open queue store: %w", err)
 	}
@@ -834,7 +997,31 @@ func (s *Service) startSummaryWorker(ctx context.Context) error {
 	}
 
 	s.summaryWorker = worker
+	s.summaryQueue = queueStore
+	s.summaryStore = sessionStore
 	return nil
+}
+
+func (s *Service) stopSummaryWorker() {
+	if s.summaryWorker != nil {
+		if err := s.summaryWorker.Stop(); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: summary worker stop error: %v\n", err)
+		}
+		s.summaryWorker = nil
+	}
+	if s.summaryCancel != nil {
+		s.summaryCancel()
+		s.summaryCancel = nil
+	}
+	if s.summaryQueue != nil {
+		_ = s.summaryQueue.Close()
+		s.summaryQueue = nil
+	}
+	if s.summaryStore != nil {
+		_ = s.summaryStore.Close()
+		s.summaryStore = nil
+	}
+	s.summaryCtx = nil
 }
 
 // startContextUpdater initializes and starts the background context updater worker.
@@ -847,6 +1034,11 @@ func (s *Service) startSummaryWorker(ctx context.Context) error {
 // - Related: updater.NewWorkerFromConfig
 // - Keywords: context_updater, memory_store, session_store, injector
 func (s *Service) startContextUpdater(ctx context.Context) error {
+	// Idempotency: allow leader transitions to call start repeatedly.
+	if s.contextUpdater != nil {
+		return nil
+	}
+
 	// Check if cheap LLM providers are available
 	if !updater.Available(s.cfg) {
 		// No providers configured - skip worker silently
@@ -946,8 +1138,35 @@ func (s *Service) startContextUpdater(ctx context.Context) error {
 	}()
 
 	s.contextUpdater = worker
+	s.contextUpdaterStore = sessionStore
+	s.contextUpdaterMemory = memoryStore
+	s.contextUpdaterBuffer = ctxBufferStore
 	fmt.Fprintf(os.Stderr, "context updater: started successfully\n")
 	return nil
+}
+
+func (s *Service) stopContextUpdater() {
+	if s.contextUpdater != nil {
+		s.contextUpdater.Stop()
+		s.contextUpdater = nil
+	}
+	if s.contextUpdaterCancel != nil {
+		s.contextUpdaterCancel()
+		s.contextUpdaterCancel = nil
+	}
+	if s.contextUpdaterStore != nil {
+		_ = s.contextUpdaterStore.Close()
+		s.contextUpdaterStore = nil
+	}
+	if s.contextUpdaterMemory != nil {
+		s.contextUpdaterMemory.Close()
+		s.contextUpdaterMemory = nil
+	}
+	if s.contextUpdaterBuffer != nil {
+		_ = s.contextUpdaterBuffer.Close()
+		s.contextUpdaterBuffer = nil
+	}
+	s.contextUpdaterCtx = nil
 }
 
 // startFileSummaryWorker initializes and starts the background file summary worker.
@@ -960,6 +1179,11 @@ func (s *Service) startContextUpdater(ctx context.Context) error {
 // - Related: filesummary.NewWorker
 // - Keywords: file_summary, memory_store, workspace, llm_provider
 func (s *Service) startFileSummaryWorker(ctx context.Context) error {
+	// Idempotency: allow leader transitions to call start repeatedly.
+	if s.fileSummaryWorker != nil {
+		return nil
+	}
+
 	// Check if we have a workspace
 	workspace := s.opts.Workspace
 	if workspace == "" {
@@ -1037,6 +1261,24 @@ func (s *Service) startFileSummaryWorker(ctx context.Context) error {
 	return nil
 }
 
+func (s *Service) stopFileSummaryWorker() {
+	if s.fileSummaryWorker != nil {
+		if err := s.fileSummaryWorker.Stop(); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: file summary worker stop error: %v\n", err)
+		}
+		s.fileSummaryWorker = nil
+	}
+	if s.fileSummaryWorkerCancel != nil {
+		s.fileSummaryWorkerCancel()
+		s.fileSummaryWorkerCancel = nil
+	}
+	if s.fileSummaryMemoryStore != nil {
+		s.fileSummaryMemoryStore.Close()
+		s.fileSummaryMemoryStore = nil
+	}
+	s.fileSummaryWorkerCtx = nil
+}
+
 // startAgentOrchestration initializes the agent runtime and overseer.
 //
 // Index:
@@ -1047,6 +1289,11 @@ func (s *Service) startFileSummaryWorker(ctx context.Context) error {
 // - Related: runtime.NewRuntime, runtime.NewOverseer
 // - Keywords: agent_orchestration, runtime, overseer, hook_dispatcher
 func (s *Service) startAgentOrchestration(ctx context.Context) error {
+	// Idempotency: allow leader transitions to call start repeatedly.
+	if s.agentRuntime != nil {
+		return nil
+	}
+
 	// Determine LLM configuration from centralized config
 	// Priority: configured provider > CEREBRAS > OPENROUTER > GROQ > GEMINI
 	llmProvider, llmAPIKey, llmModel := s.resolveLLMConfig()
@@ -1146,6 +1393,37 @@ func (s *Service) startAgentOrchestration(ctx context.Context) error {
 
 	fmt.Fprintf(os.Stderr, "agent orchestration: started (provider=%s, model=%s)\n", llmProvider, llmModel)
 	return nil
+}
+
+func (s *Service) stopAgentOrchestration() {
+	if s.agentCancel != nil {
+		s.agentCancel()
+		s.agentCancel = nil
+	}
+
+	// Kill all running agent sessions (best-effort).
+	if s.agentRuntime != nil {
+		for _, session := range s.agentRuntime.List() {
+			_ = s.agentRuntime.Kill(session.ID)
+		}
+	}
+
+	if s.agentSessionStore != nil {
+		s.agentSessionStore.Close()
+		s.agentSessionStore = nil
+	}
+	if s.agentMailboxStore != nil {
+		s.agentMailboxStore.Close()
+		s.agentMailboxStore = nil
+	}
+	if s.agentBoardStore != nil {
+		s.agentBoardStore.Close()
+		s.agentBoardStore = nil
+	}
+
+	s.agentRuntime = nil
+	s.agentOverseer = nil
+	s.agentCtx = nil
 }
 
 // --- Agent RPC Handlers ---

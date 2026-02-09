@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/jkatigb/agentctl/internal/engine"
@@ -14,14 +15,15 @@ import (
 
 // Runner executes LLM requests for console sessions.
 type Runner struct {
-	engine engine.AgentEngine
-	tools  []engine.ToolDef
+	baseConfig engine.LLMChatConfig
+	tools      []engine.ToolDef
 }
 
 // RunnerConfig configures the console runner.
 type RunnerConfig struct {
-	// Engine is the LLM engine to use.
-	Engine engine.AgentEngine
+	// BaseConfig is used to create an LLMChatEngine per turn.
+	// Per-turn overrides (e.g. provider/model) are applied from session metadata.
+	BaseConfig engine.LLMChatConfig
 
 	// Tools are the available tool definitions.
 	Tools []engine.ToolDef
@@ -30,14 +32,33 @@ type RunnerConfig struct {
 // NewRunner creates a new console runner.
 func NewRunner(cfg RunnerConfig) *Runner {
 	return &Runner{
-		engine: cfg.Engine,
-		tools:  cfg.Tools,
+		baseConfig: cfg.BaseConfig,
+		tools:      cfg.Tools,
 	}
 }
 
 // Run implements consolews.Runner.
 func (r *Runner) Run(ctx context.Context, session *consolews.Session, userMessage string, correlationID string) error {
 	start := time.Now()
+
+	// Create a new engine each turn so we can apply per-turn overrides.
+	engineCfg := r.baseConfig
+	meta := session.InFlightMetadata(correlationID)
+	if meta != nil {
+		if provider, ok := meta["llm_provider"].(string); ok && strings.TrimSpace(provider) != "" {
+			engineCfg.Provider = strings.TrimSpace(provider)
+			// Force NewLLMChatEngine to resolve the correct key for the overridden provider.
+			engineCfg.APIKey = ""
+		}
+		if model, ok := meta["llm_model"].(string); ok && strings.TrimSpace(model) != "" {
+			engineCfg.Model = strings.TrimSpace(model)
+		}
+	}
+
+	llmEngine, err := engine.NewLLMChatEngine(engineCfg)
+	if err != nil {
+		return fmt.Errorf("create engine: %w", err)
+	}
 
 	// Build engine input from session history
 	input := r.buildInput(session, userMessage)
@@ -58,7 +79,7 @@ func (r *Runner) Run(ctx context.Context, session *consolews.Session, userMessag
 	}
 
 	// Run the engine
-	output, err := r.engine.Run(ctx, input)
+	output, err := llmEngine.Run(ctx, input)
 	if err != nil {
 		observability.Emit(ctx, observability.NewEvent("console.engine_error").
 			WithComponent("console").

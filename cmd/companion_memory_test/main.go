@@ -15,8 +15,8 @@ import (
 	"github.com/jkatigb/agentctl/internal/indexing/semantic"
 	"github.com/jkatigb/agentctl/internal/platform/config"
 	"github.com/jkatigb/agentctl/internal/storage"
+	"github.com/jkatigb/agentctl/internal/storage/dbutil"
 	"github.com/jkatigb/agentctl/internal/storage/memory"
-	"github.com/jkatigb/agentctl/internal/storage/sqliteutil"
 )
 
 // main demonstrates a runnable Companion conversation-memory temporal-decay demo.
@@ -45,7 +45,7 @@ func main() {
 	defer os.RemoveAll(tmpDir)
 
 	dbPath := filepath.Join(tmpDir, "memory.db")
-	db, closeFn, err := sqliteutil.OpenDBShared(ctx, dbPath, nil) // Migration handled by ConversationMemory
+	db, closeFn, err := dbutil.OpenSQLiteDBShared(ctx, dbPath, nil) // Migration handled by ConversationMemory
 	if err != nil {
 		fmt.Printf("Failed to create database: %v\n", err)
 		os.Exit(1)

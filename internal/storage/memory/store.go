@@ -21,7 +21,6 @@ import (
 	"github.com/jkatigb/agentctl/internal/storage/cache"
 	"github.com/jkatigb/agentctl/internal/storage/cas"
 	"github.com/jkatigb/agentctl/internal/storage/dbutil"
-	"github.com/jkatigb/agentctl/internal/storage/sqliteutil"
 	"github.com/jkatigb/agentctl/internal/storage/sqlutil"
 	"github.com/jkatigb/agentctl/internal/storage/vector"
 )
@@ -80,7 +79,7 @@ const (
 // It creates or opens the SQLite database at root/memory.db, runs migrations, and configures the DB connection pool; if casPath is non-empty it also initializes a CAS store and an artifacts.Manager.
 func Open(ctx context.Context, root string, casPath string) (store *Store, err error) {
 	dbPath := filepath.Join(root, "memory.db")
-	db, closeFn, err := sqliteutil.OpenDBShared(ctx, dbPath, migrate)
+	db, closeFn, err := dbutil.OpenSQLiteDBShared(ctx, dbPath, migrate)
 	if err != nil {
 		return nil, fmt.Errorf("memory: open db: %w", err)
 	}
@@ -98,7 +97,7 @@ func Open(ctx context.Context, root string, casPath string) (store *Store, err e
 	db.SetConnMaxLifetime(defaultConnMaxLifetime)
 	db.SetConnMaxIdleTime(defaultConnMaxIdleTime)
 
-	// sqliteutil.OpenDB handles directory creation, WAL configuration, and migration execution.
+	// dbutil.OpenSQLiteDBShared (sqliteutil underneath) handles directory creation, WAL configuration, and migration execution.
 
 	var casStore *cas.Store
 	var artifactMgr artifacts.Manager

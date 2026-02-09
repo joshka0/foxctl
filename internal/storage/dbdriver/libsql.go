@@ -21,6 +21,8 @@ type libsqlDB struct {
 	vectorDimensions   int
 	driverType         DriverType
 	syncURL            string // non-empty if remote sync is enabled
+	syncStop           chan struct{}
+	syncDone           chan struct{}
 }
 
 // openLibSQL opens a local libSQL database file
@@ -88,19 +90,49 @@ func openLibSQL(ctx context.Context, cfg LibSQLConfig, migrate MigrationFunc) (D
 		}
 	}
 
-	return &libsqlDB{
+	store := &libsqlDB{
 		db:                 db,
 		connector:          connector,
 		enableVectorSearch: cfg.EnableVectorSearch,
 		vectorDimensions:   vectorDims,
 		driverType:         DriverLibSQL,
 		syncURL:            cfg.SyncURL,
-	}, nil
+	}
+
+	if cfg.SyncURL != "" && cfg.SyncInterval > 0 {
+		interval := time.Duration(cfg.SyncInterval) * time.Second
+		store.syncStop = make(chan struct{})
+		store.syncDone = make(chan struct{})
+		go func() {
+			ticker := time.NewTicker(interval)
+			defer ticker.Stop()
+			defer close(store.syncDone)
+
+			for {
+				select {
+				case <-store.syncStop:
+					return
+				case <-ticker.C:
+					_, _ = store.connector.Sync() // best-effort
+				}
+			}
+		}()
+	}
+
+	return store, nil
 }
 
 // Close closes the database connection
 func (l *libsqlDB) Close() error {
 	var err error
+
+	if l.syncStop != nil {
+		close(l.syncStop)
+		<-l.syncDone
+		l.syncStop = nil
+		l.syncDone = nil
+	}
+
 	if l.db != nil {
 		err = l.db.Close()
 	}

@@ -81,14 +81,15 @@ func createConsoleRunnerFactory(cfg config.Config) consolews.RunnerFactory {
 
 	return func(session *consolews.Session) consolews.Runner {
 		// Create LLM engine config
-		engineCfg := engine.LLMChatConfig{
+		baseCfg := engine.LLMChatConfig{
 			MaxIterations: 20,
 			Temperature:   0.0,
 			MaxTokens:     4096,
 		}
 
-		// Create the engine (auto-detects API keys)
-		llmEngine, err := engine.NewLLMChatEngine(engineCfg)
+		// Validate that we have some provider configured (auto-detects API keys).
+		// Per-turn overrides are applied inside the runner.
+		_, err := engine.NewLLMChatEngine(baseCfg)
 		if err != nil {
 			observability.Emit(context.Background(), observability.NewEvent("web.console_engine_failed").
 				WithComponent("web").
@@ -99,8 +100,8 @@ func createConsoleRunnerFactory(cfg config.Config) consolews.RunnerFactory {
 
 		// Create console runner
 		runner := consoleapp.NewRunner(consoleapp.RunnerConfig{
-			Engine: llmEngine,
-			Tools:  nil, // No tools for now - pure chat
+			BaseConfig: baseCfg,
+			Tools:      nil, // No tools for now - pure chat
 		})
 
 		return runner
@@ -213,6 +214,7 @@ func (s *Server) Handler() http.Handler {
 	apiMux.HandleFunc("/api/codemaps/", api.CodemapDetailHandler(s.cfg, s.log))
 
 	// --- Companion (RLM Mobile Backend) ---
+	apiMux.HandleFunc("/api/companion/providers", api.CompanionProvidersHandler(s.cfg, s.log))
 	apiMux.HandleFunc("/api/companion/chat", api.CompanionChatHandler(s.cfg, s.log))
 	apiMux.HandleFunc("/api/companion/conversations", api.CompanionConversationsHandler(s.cfg, s.log))
 	apiMux.HandleFunc("/api/companion/conversations/", func(w http.ResponseWriter, r *http.Request) {
@@ -237,6 +239,8 @@ func (s *Server) Handler() http.Handler {
 				} else {
 					api.CompanionPersonalityHandler(s.cfg, s.log).ServeHTTP(w, r)
 				}
+			case "settings":
+				api.CompanionConversationSettingsHandler(s.cfg, s.log).ServeHTTP(w, r)
 			default:
 				http.Error(w, "unknown conversation endpoint", http.StatusNotFound)
 			}

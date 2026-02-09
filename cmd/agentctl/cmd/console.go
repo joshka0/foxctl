@@ -5,14 +5,14 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"time"
 
 	"github.com/jkatigb/agentctl/internal/domain/envelope"
 	"github.com/jkatigb/agentctl/internal/platform/config"
 	"github.com/jkatigb/agentctl/internal/protocol"
+	"github.com/jkatigb/agentctl/internal/storage"
 	"github.com/jkatigb/agentctl/internal/storage/console"
-	"github.com/jkatigb/agentctl/internal/storage/sqliteutil"
+	"github.com/jkatigb/agentctl/internal/storage/dbutil"
 	"github.com/oklog/ulid/v2"
 	"github.com/spf13/cobra"
 )
@@ -354,18 +354,17 @@ func runConsoleRemove(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-// openConsoleStore opens the console store from the agents.db file.
-// openConsoleStore opens the consoles SQLite database at storageRoot/agents.db and returns a console store
-// plus a close function that releases the underlying database handle.
+// openConsoleStore opens the console store from the AGENTS store database (agents.db by default).
+// openConsoleStore opens the console store DB at storageRoot/agents.db (or the configured driver/path)
+// and returns a console store plus a close function that releases the underlying database handle.
 //
 // The returned close function must be called by the caller to release resources. If opening the database
 // or initializing the store fails, an error is returned. If store initialization fails after the DB is
 // opened, the DB handle is closed before the error is returned.
 func openConsoleStore(ctx context.Context, storageRoot string) (*console.SQLiteStore, func() error, error) {
-	dbPath := filepath.Join(storageRoot, "agents.db")
-	db, closeFn, err := sqliteutil.OpenDBShared(ctx, dbPath, nil)
+	db, closeFn, err := dbutil.OpenStoreDB(ctx, storageRoot, string(storage.StoreAgents), "agents.db", nil)
 	if err != nil {
-		return nil, nil, fmt.Errorf("open agents.db: %w", err)
+		return nil, nil, fmt.Errorf("open agents store: %w", err)
 	}
 
 	store, err := console.NewStore(ctx, db)

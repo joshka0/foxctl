@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strings"
 	"time"
@@ -10,7 +11,9 @@ import (
 	"github.com/oklog/ulid/v2"
 	"github.com/rs/zerolog"
 
+	"github.com/jkatigb/agentctl/internal/domain/envelope"
 	"github.com/jkatigb/agentctl/internal/platform/config"
+	"github.com/jkatigb/agentctl/internal/storage/conversationsettings"
 	"github.com/jkatigb/agentctl/internal/web/consolews"
 )
 
@@ -61,9 +64,16 @@ func ConsoleSessionCreateHandler(hub *consolews.Hub, cfg config.Config, log zero
 		}
 
 		var req struct {
-			Workspace    string `json:"workspace"`
-			Profile      string `json:"profile"`
-			SystemPrompt string `json:"system_prompt"`
+			Workspace    string    `json:"workspace"`
+			Profile      string    `json:"profile"`
+			SystemPrompt string    `json:"system_prompt"`
+			LLMProvider  *string   `json:"llm_provider,omitempty"`
+			LLMModel     *string   `json:"llm_model,omitempty"`
+			ToolsAllow   *[]string `json:"tools_allow,omitempty"`
+			ExecMode     *string   `json:"exec_mode,omitempty"`
+			// Story model defaults (mostly used by companion story mode, but stored here for consistency)
+			StoryGatherModel   *string `json:"story_gather_model,omitempty"`
+			StoryDialogueModel *string `json:"story_dialogue_model,omitempty"`
 		}
 		if err := readJSON(w, r, &req); err != nil {
 			httpError(w, http.StatusBadRequest, "invalid json")
@@ -80,6 +90,38 @@ func ConsoleSessionCreateHandler(hub *consolews.Hub, cfg config.Config, log zero
 			Profile:      req.Profile,
 			SystemPrompt: req.SystemPrompt,
 		})
+
+		// Persist optional session settings under conversation_settings (keyed by session ID).
+		if req.LLMProvider != nil || req.LLMModel != nil || req.ToolsAllow != nil || req.ExecMode != nil ||
+			req.StoryGatherModel != nil || req.StoryDialogueModel != nil {
+			settingsStore, err := conversationsettings.Open(r.Context(), cfg.Storage.Root)
+			if err != nil {
+				hub.RemoveSession(session.ID())
+				log.Error().Err(err).Msg("failed to open conversation settings store")
+				httpError(w, http.StatusInternalServerError, "failed to open conversation settings store")
+				return
+			}
+			defer settingsStore.Close()
+
+			_, err = settingsStore.Patch(r.Context(), session.ID(), conversationsettings.Patch{
+				ToolsAllow:         req.ToolsAllow,
+				LLMProvider:        req.LLMProvider,
+				LLMModel:           req.LLMModel,
+				ExecMode:           req.ExecMode,
+				StoryGatherModel:   req.StoryGatherModel,
+				StoryDialogueModel: req.StoryDialogueModel,
+			})
+			if err != nil {
+				hub.RemoveSession(session.ID())
+				if errors.Is(err, conversationsettings.ErrInvalid) {
+					httpError(w, http.StatusBadRequest, err.Error())
+					return
+				}
+				log.Error().Err(err).Msg("failed to persist conversation settings")
+				httpError(w, http.StatusInternalServerError, "failed to persist conversation settings")
+				return
+			}
+		}
 
 		log.Info().
 			Str("session_id", session.ID()).
@@ -120,7 +162,7 @@ func ConsoleSessionDetailHandler(hub *consolews.Hub, cfg config.Config, log zero
 		if len(parts) > 1 {
 			switch parts[1] {
 			case "ask":
-				handleSessionAsk(w, r, session, log)
+				handleSessionAsk(w, r, session, cfg, log)
 				return
 			case "cancel":
 				handleSessionCancel(w, r, session, log)
@@ -130,6 +172,9 @@ func ConsoleSessionDetailHandler(hub *consolews.Hub, cfg config.Config, log zero
 				return
 			case "messages":
 				handleSessionMessages(w, r, session, log)
+				return
+			case "settings":
+				handleSessionSettings(w, r, session, cfg, log)
 				return
 			}
 		}
@@ -165,7 +210,7 @@ func ConsoleSessionDetailHandler(hub *consolews.Hub, cfg config.Config, log zero
 // and dispatched to the session for background processing with a 30-minute timeout; the work is started in the
 // background so it can outlive the HTTP request. On success the handler responds with HTTP 202 and a JSON body
 // containing the `correlation_id` and a confirmation message.
-func handleSessionAsk(w http.ResponseWriter, r *http.Request, session *consolews.Session, log zerolog.Logger) {
+func handleSessionAsk(w http.ResponseWriter, r *http.Request, session *consolews.Session, cfg config.Config, log zerolog.Logger) {
 	if r.Method != http.MethodPost {
 		httpError(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
@@ -174,6 +219,8 @@ func handleSessionAsk(w http.ResponseWriter, r *http.Request, session *consolews
 	var req struct {
 		Content       string `json:"content"`
 		CorrelationID string `json:"correlation_id"`
+		LLMProvider   string `json:"llm_provider,omitempty"`
+		LLMModel      string `json:"llm_model,omitempty"`
 	}
 	if err := readJSON(w, r, &req); err != nil {
 		httpError(w, http.StatusBadRequest, "invalid json")
@@ -189,12 +236,44 @@ func handleSessionAsk(w http.ResponseWriter, r *http.Request, session *consolews
 		req.CorrelationID = ulid.Make().String()
 	}
 
+	// Resolve per-turn provider/model overrides against stored conversation settings.
+	// Precedence: request overrides > conversation settings > engine defaults.
+	effectiveProvider := strings.TrimSpace(req.LLMProvider)
+	effectiveModel := strings.TrimSpace(req.LLMModel)
+	if effectiveProvider == "" || effectiveModel == "" {
+		settingsStore, err := conversationsettings.Open(r.Context(), cfg.Storage.Root)
+		if err != nil {
+			// Don't fail the ask if settings can't be loaded; fall back to defaults.
+			log.Warn().Err(err).Str("session_id", session.ID()).Msg("failed to open conversation settings store; continuing without settings")
+		} else {
+			defer settingsStore.Close()
+			settings, err := settingsStore.Get(r.Context(), session.ID())
+			if err == nil {
+				if effectiveProvider == "" {
+					effectiveProvider = strings.TrimSpace(settings.LLMProvider)
+				}
+				if effectiveModel == "" {
+					effectiveModel = strings.TrimSpace(settings.LLMModel)
+				}
+			}
+		}
+	}
+
+	metadata := make(map[string]any)
+	if effectiveProvider != "" {
+		metadata["llm_provider"] = effectiveProvider
+	}
+	if effectiveModel != "" {
+		metadata["llm_model"] = effectiveModel
+	}
+
 	// Create a fake payload and handle it
 	payload := consolews.Payload{
 		Type:          consolews.PayloadTypeAsk,
 		ConsoleID:     session.ID(),
 		CorrelationID: req.CorrelationID,
 		Content:       req.Content,
+		Metadata:      metadata,
 	}
 
 	// Handle the payload (async) - use timeout context to prevent unbounded execution
@@ -269,6 +348,74 @@ func handleSessionMessages(w http.ResponseWriter, r *http.Request, session *cons
 		"messages": messages,
 		"count":    len(messages),
 	})
+}
+
+// handleSessionSettings handles GET/PATCH /api/console/sessions/:id/settings.
+func handleSessionSettings(w http.ResponseWriter, r *http.Request, session *consolews.Session, cfg config.Config, log zerolog.Logger) {
+	store, err := conversationsettings.Open(r.Context(), cfg.Storage.Root)
+	if err != nil {
+		log.Error().Err(err).Msg("failed to open conversation settings store")
+		httpError(w, http.StatusInternalServerError, "failed to open conversation settings store")
+		return
+	}
+	defer store.Close()
+
+	sessionID := session.ID()
+
+	switch r.Method {
+	case http.MethodGet:
+		settings, err := store.Get(r.Context(), sessionID)
+		if err != nil {
+			if errors.Is(err, conversationsettings.ErrNotFound) {
+				settings = conversationsettings.Settings{ConversationID: sessionID}
+			} else {
+				log.Error().Err(err).Str("session_id", sessionID).Msg("failed to get session settings")
+				httpError(w, http.StatusInternalServerError, "failed to get session settings")
+				return
+			}
+		}
+
+		writeJSON(w, http.StatusOK, envelope.OK("session.settings.get", map[string]any{
+			"session_id": sessionID,
+			"settings":   settings,
+		}))
+
+	case http.MethodPatch:
+		var patch conversationsettings.Patch
+		if err := json.NewDecoder(r.Body).Decode(&patch); err != nil {
+			httpError(w, http.StatusBadRequest, "invalid request body: "+err.Error())
+			return
+		}
+
+		settings, err := store.Patch(r.Context(), sessionID, patch)
+		if err != nil {
+			if errors.Is(err, conversationsettings.ErrInvalid) {
+				httpError(w, http.StatusBadRequest, err.Error())
+				return
+			}
+			log.Error().Err(err).Str("session_id", sessionID).Msg("failed to patch session settings")
+			httpError(w, http.StatusInternalServerError, "failed to patch session settings")
+			return
+		}
+
+		writeJSON(w, http.StatusOK, envelope.OK("session.settings.patch", map[string]any{
+			"session_id": sessionID,
+			"settings":   settings,
+		}))
+
+	case http.MethodDelete:
+		if err := store.Delete(r.Context(), sessionID); err != nil {
+			log.Error().Err(err).Str("session_id", sessionID).Msg("failed to delete session settings")
+			httpError(w, http.StatusInternalServerError, "failed to delete session settings")
+			return
+		}
+		writeJSON(w, http.StatusOK, envelope.OK("session.settings.delete", map[string]any{
+			"message": "settings deleted",
+		}))
+
+	default:
+		httpError(w, http.StatusMethodNotAllowed, "method not allowed")
+	}
 }
 
 // handleSessionEvents handles GET /api/console/sessions/:id/events (SSE).

@@ -5,11 +5,10 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"path/filepath"
 
 	"github.com/jkatigb/agentctl/internal/domain/agent"
 	errs "github.com/jkatigb/agentctl/internal/platform/errors"
-	"github.com/jkatigb/agentctl/internal/storage/sqliteutil"
+	"github.com/jkatigb/agentctl/internal/storage/dbutil"
 )
 
 // Store defines the persistence interface for namespace quotas.
@@ -33,8 +32,7 @@ type sqlStore struct {
 // It opens the SQLite database file at root/quotas.db, applies required schema migrations, and returns a Store backed by that database.
 // On failure it returns a non-nil error describing the problem.
 func Open(ctx context.Context, root string) (Store, error) {
-	dbPath := filepath.Join(root, "quotas.db")
-	db, closeFn, err := sqliteutil.OpenDBShared(ctx, dbPath, migrate)
+	db, closeFn, err := dbutil.OpenStoreDB(ctx, root, "QUOTAS", "quotas.db", migrate)
 	if err != nil {
 		return nil, fmt.Errorf("quotas: open db: %w", err)
 	}

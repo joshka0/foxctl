@@ -11,7 +11,7 @@ import (
 
 	"github.com/jkatigb/agentctl/internal/domain/agent"
 	errs "github.com/jkatigb/agentctl/internal/platform/errors"
-	"github.com/jkatigb/agentctl/internal/storage/sqliteutil"
+	"github.com/jkatigb/agentctl/internal/storage/dbutil"
 	"github.com/jkatigb/agentctl/internal/storage/sqlutil"
 )
 
@@ -38,10 +38,11 @@ type sqlStore struct {
 	close func() error
 }
 
-// Open opens the agents store rooted at the given workspace path.
+// Open opens the agents store rooted at the given storage root directory.
+// The database driver is selected via the dbdriver env var conventions (e.g., AGENTCTL_AGENTS_DB_DRIVER).
 func Open(ctx context.Context, root string) (Store, error) {
 	dbPath := filepath.Join(root, "agents.db")
-	db, closeFn, err := sqliteutil.OpenDBShared(ctx, dbPath, migrate)
+	db, closeFn, err := dbutil.OpenStoreDB(ctx, root, "AGENTS", filepath.Base(dbPath), migrate)
 	if err != nil {
 		return nil, fmt.Errorf("agents: open db: %w", err)
 	}
@@ -155,7 +156,7 @@ func (s *sqlStore) Get(ctx context.Context, id string) (agent.Agent, error) {
 
 func (s *sqlStore) GetByNamespace(ctx context.Context, ns string) (agent.Agent, error) {
 	row := s.db.QueryRowContext(ctx, `
-		SELECT id, parent_id, ns, name, slug, role, prompt, skills_allow, policy, share_bb, state, created_at, heartbeat_at, llm_provider, llm_model, llm_api_key, exec_mode, max_iterations, max_auto_turns, think_interval
+		SELECT id, parent_id, ns, name, slug, role, prompt, skills_allow, policy, share_bb, state, created_at, heartbeat_at, llm_provider, llm_model, llm_api_key, exec_mode, max_iterations, max_auto_turns, think_interval, conversation_id
 		FROM agents WHERE ns = ? AND deleted_at IS NULL`, ns)
 
 	var a agent.Agent
@@ -165,7 +166,8 @@ func (s *sqlStore) GetByNamespace(ctx context.Context, ns string) (agent.Agent, 
 	var llmProvider, llmModel, llmAPIKey sql.NullString
 	var execMode sql.NullString
 	var maxIterations, maxAutoTurns, thinkInterval sql.NullInt64
-	if err := row.Scan(&a.ID, &parentID, &a.Namespace, &name, &slug, &role, &prompt, &skillsJSON, &policyJSON, &a.ShareBB, &a.State, &created, &heartbeat, &llmProvider, &llmModel, &llmAPIKey, &execMode, &maxIterations, &maxAutoTurns, &thinkInterval); err != nil {
+	var conversationID sql.NullString
+	if err := row.Scan(&a.ID, &parentID, &a.Namespace, &name, &slug, &role, &prompt, &skillsJSON, &policyJSON, &a.ShareBB, &a.State, &created, &heartbeat, &llmProvider, &llmModel, &llmAPIKey, &execMode, &maxIterations, &maxAutoTurns, &thinkInterval, &conversationID); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return agent.Agent{}, ErrNotFound
 		}
@@ -212,12 +214,15 @@ func (s *sqlStore) GetByNamespace(ctx context.Context, ns string) (agent.Agent, 
 	a.MaxAutoTurns = int(maxAutoTurns.Int64)
 	a.ThinkInterval = int(thinkInterval.Int64)
 
+	// Set conversation ID
+	a.ConversationID = conversationID.String
+
 	return a, nil
 }
 
 func (s *sqlStore) GetBySlug(ctx context.Context, slug string) (agent.Agent, error) {
 	row := s.db.QueryRowContext(ctx, `
-		SELECT id, parent_id, ns, name, slug, role, prompt, skills_allow, policy, share_bb, state, created_at, heartbeat_at, llm_provider, llm_model, llm_api_key, exec_mode, max_iterations, max_auto_turns, think_interval
+		SELECT id, parent_id, ns, name, slug, role, prompt, skills_allow, policy, share_bb, state, created_at, heartbeat_at, llm_provider, llm_model, llm_api_key, exec_mode, max_iterations, max_auto_turns, think_interval, conversation_id
 		FROM agents WHERE slug = ? AND deleted_at IS NULL`, slug)
 
 	var a agent.Agent
@@ -227,7 +232,8 @@ func (s *sqlStore) GetBySlug(ctx context.Context, slug string) (agent.Agent, err
 	var llmProvider, llmModel, llmAPIKey sql.NullString
 	var execMode sql.NullString
 	var maxIterations, maxAutoTurns, thinkInterval sql.NullInt64
-	if err := row.Scan(&a.ID, &parentID, &a.Namespace, &name, &slugVal, &role, &prompt, &skillsJSON, &policyJSON, &a.ShareBB, &a.State, &created, &heartbeat, &llmProvider, &llmModel, &llmAPIKey, &execMode, &maxIterations, &maxAutoTurns, &thinkInterval); err != nil {
+	var conversationID sql.NullString
+	if err := row.Scan(&a.ID, &parentID, &a.Namespace, &name, &slugVal, &role, &prompt, &skillsJSON, &policyJSON, &a.ShareBB, &a.State, &created, &heartbeat, &llmProvider, &llmModel, &llmAPIKey, &execMode, &maxIterations, &maxAutoTurns, &thinkInterval, &conversationID); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return agent.Agent{}, ErrNotFound
 		}
@@ -273,6 +279,9 @@ func (s *sqlStore) GetBySlug(ctx context.Context, slug string) (agent.Agent, err
 	a.MaxIterations = int(maxIterations.Int64)
 	a.MaxAutoTurns = int(maxAutoTurns.Int64)
 	a.ThinkInterval = int(thinkInterval.Int64)
+
+	// Set conversation ID
+	a.ConversationID = conversationID.String
 
 	return a, nil
 }
@@ -345,7 +354,7 @@ func (s *sqlStore) List(ctx context.Context, limit int) ([]agent.Agent, error) {
 		limit = 100
 	}
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, parent_id, ns, name, slug, role, prompt, skills_allow, policy, share_bb, state, created_at, heartbeat_at, llm_provider, llm_model, llm_api_key, exec_mode, max_iterations, max_auto_turns, think_interval
+		SELECT id, parent_id, ns, name, slug, role, prompt, skills_allow, policy, share_bb, state, created_at, heartbeat_at, llm_provider, llm_model, llm_api_key, exec_mode, max_iterations, max_auto_turns, think_interval, conversation_id
 		FROM agents
 		WHERE deleted_at IS NULL
 		ORDER BY created_at DESC
@@ -373,7 +382,7 @@ func (s *sqlStore) ListByParent(ctx context.Context, parentID string, limit int)
 		limit = 100
 	}
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, parent_id, ns, name, slug, role, prompt, skills_allow, policy, share_bb, state, created_at, heartbeat_at, llm_provider, llm_model, llm_api_key, exec_mode, max_iterations, max_auto_turns, think_interval
+		SELECT id, parent_id, ns, name, slug, role, prompt, skills_allow, policy, share_bb, state, created_at, heartbeat_at, llm_provider, llm_model, llm_api_key, exec_mode, max_iterations, max_auto_turns, think_interval, conversation_id
 		FROM agents
 		WHERE parent_id = ? AND deleted_at IS NULL
 		ORDER BY created_at DESC
@@ -596,7 +605,8 @@ func scanAgent(rows *sql.Rows) (agent.Agent, error) {
 	var llmProvider, llmModel, llmAPIKey sql.NullString
 	var execMode sql.NullString
 	var maxIterations, maxAutoTurns, thinkInterval sql.NullInt64
-	if err := rows.Scan(&a.ID, &parentID, &a.Namespace, &name, &slug, &role, &prompt, &skillsJSON, &policyJSON, &a.ShareBB, &a.State, &created, &heartbeat, &llmProvider, &llmModel, &llmAPIKey, &execMode, &maxIterations, &maxAutoTurns, &thinkInterval); err != nil {
+	var conversationID sql.NullString
+	if err := rows.Scan(&a.ID, &parentID, &a.Namespace, &name, &slug, &role, &prompt, &skillsJSON, &policyJSON, &a.ShareBB, &a.State, &created, &heartbeat, &llmProvider, &llmModel, &llmAPIKey, &execMode, &maxIterations, &maxAutoTurns, &thinkInterval, &conversationID); err != nil {
 		return agent.Agent{}, fmt.Errorf("agents: scan: %w", err)
 	}
 
@@ -639,6 +649,9 @@ func scanAgent(rows *sql.Rows) (agent.Agent, error) {
 	a.MaxIterations = int(maxIterations.Int64)
 	a.MaxAutoTurns = int(maxAutoTurns.Int64)
 	a.ThinkInterval = int(thinkInterval.Int64)
+
+	// Set conversation ID
+	a.ConversationID = conversationID.String
 
 	return a, nil
 }

@@ -31,6 +31,9 @@ type Session struct {
 	cancelMu sync.Mutex
 	cancel   context.CancelFunc
 	inflight string // correlation ID of in-flight request
+	// inflightMeta stores per-request metadata for the current in-flight correlation_id.
+	// This allows REST callers to supply per-turn overrides (e.g., provider/model).
+	inflightMeta map[string]any
 
 	// Runner callback (set by consoleapp)
 	runner Runner
@@ -225,6 +228,7 @@ func (s *Session) handleAsk(ctx context.Context, client *Client, p Payload) {
 	}
 	s.cancel = cancel
 	s.inflight = correlationID
+	s.inflightMeta = cloneMetadata(p.Metadata)
 	s.cancelMu.Unlock()
 
 	// Run in background
@@ -234,6 +238,7 @@ func (s *Session) handleAsk(ctx context.Context, client *Client, p Payload) {
 			if s.inflight == correlationID {
 				s.cancel = nil
 				s.inflight = ""
+				s.inflightMeta = nil
 			}
 			s.cancelMu.Unlock()
 		}()
@@ -318,6 +323,18 @@ func (s *Session) InFlight() string {
 	return s.inflight
 }
 
+// InFlightMetadata returns a shallow copy of the in-flight request metadata when the
+// given correlationID matches the current in-flight request. If correlationID is
+// empty, it returns metadata for the current in-flight request.
+func (s *Session) InFlightMetadata(correlationID string) map[string]any {
+	s.cancelMu.Lock()
+	defer s.cancelMu.Unlock()
+	if correlationID != "" && s.inflight != correlationID {
+		return nil
+	}
+	return cloneMetadata(s.inflightMeta)
+}
+
 // Subscribe registers a subscriber channel to receive broadcast payloads.
 func (s *Session) Subscribe(buffer int) (<-chan Payload, func()) {
 	if buffer <= 0 {
@@ -340,4 +357,15 @@ func (s *Session) Subscribe(buffer int) (<-chan Payload, func()) {
 		s.subMu.Unlock()
 	}
 	return ch, unsubscribe
+}
+
+func cloneMetadata(in map[string]any) map[string]any {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make(map[string]any, len(in))
+	for k, v := range in {
+		out[k] = v
+	}
+	return out
 }

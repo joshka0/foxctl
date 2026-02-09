@@ -306,30 +306,3 @@ func OpenInMemory(ctx context.Context, migrate func(context.Context, *sql.DB) er
 func OpenDBWithDriver(ctx context.Context, cfg dbdriver.Config, migrate func(context.Context, *sql.DB) error) (*sql.DB, func() error, error) {
 	return dbdriver.OpenDBCompatWithCloser(ctx, cfg, migrate)
 }
-
-// OpenDBWithAutoConfig opens a database with automatic configuration detection.
-// It checks environment variables to determine whether to use SQLite or Turso.
-// dbType should be one of: "cache", "jobs", or "memory"
-// OpenDBWithAutoConfig accepts dbType values "cache", "jobs", or "memory" to select the corresponding configuration loader under rootDir. If the selected configuration uses SQLite and no path is set, defaultPath is assigned to cfg.SQLite.Path. The function returns the database handle, a closer function, and any error from opening the database.
-func OpenDBWithAutoConfig(ctx context.Context, rootDir string, dbType string, defaultPath string, migrate func(context.Context, *sql.DB) error) (*sql.DB, func() error, error) {
-	loader := dbdriver.NewConfigLoader(rootDir)
-
-	var cfg dbdriver.Config
-	switch dbType {
-	case "cache":
-		cfg = loader.LoadCacheConfig()
-	case "jobs":
-		cfg = loader.LoadJobsConfig()
-	case "memory":
-		cfg = loader.LoadMemoryConfig()
-	default:
-		return nil, nil, fmt.Errorf("sqliteutil: unknown database type: %s", dbType)
-	}
-
-	// Apply default path if not configured and using SQLite
-	if (cfg.Driver == "" || cfg.Driver == dbdriver.DriverSQLite) && cfg.SQLite.Path == "" {
-		cfg.SQLite.Path = defaultPath
-	}
-
-	return OpenDBWithDriver(ctx, cfg, migrate)
-}

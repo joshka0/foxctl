@@ -8,14 +8,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/oklog/ulid/v2"
 
 	errs "github.com/jkatigb/agentctl/internal/platform/errors"
-	"github.com/jkatigb/agentctl/internal/storage/sqliteutil"
+	"github.com/jkatigb/agentctl/internal/storage/dbutil"
 )
 
 // Entry represents a context buffer entry.
@@ -98,8 +97,7 @@ type sqlStore struct {
 // It applies necessary schema migrations using the provided context and returns an error if opening or migrating the database fails.
 // The returned Store holds an internal close function; callers must call Close on the Store to release underlying database resources.
 func Open(ctx context.Context, root string) (Store, error) {
-	dbPath := filepath.Join(root, "contextbuffer.db")
-	db, closeFn, err := sqliteutil.OpenDBShared(ctx, dbPath, migrate)
+	db, closeFn, err := dbutil.OpenStoreDB(ctx, root, "CONTEXTBUFFER", "contextbuffer.db", migrate)
 	if err != nil {
 		return nil, fmt.Errorf("contextbuffer: open db: %w", err)
 	}

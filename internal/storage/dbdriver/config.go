@@ -106,6 +106,10 @@ type TursoConfig struct {
 	// a temp directory is created and cleaned up on Close().
 	ReplicaPath string `json:"replica_path,omitempty" yaml:"replica_path,omitempty"`
 
+	// SyncInterval in seconds for periodic background sync (optional).
+	// When 0 (default), sync happens on-demand via Sync() calls.
+	SyncInterval int `json:"sync_interval,omitempty" yaml:"sync_interval,omitempty"`
+
 	// EnableVectorSearch enables vector search capabilities (only for memory database)
 	EnableVectorSearch bool `json:"enable_vector_search" yaml:"enable_vector_search"`
 

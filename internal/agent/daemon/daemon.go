@@ -26,8 +26,8 @@ import (
 	"github.com/jkatigb/agentctl/internal/storage/blackboard"
 	"github.com/jkatigb/agentctl/internal/storage/cas"
 	"github.com/jkatigb/agentctl/internal/storage/contextvar"
+	"github.com/jkatigb/agentctl/internal/storage/dbutil"
 	"github.com/jkatigb/agentctl/internal/storage/mailbox"
-	"github.com/jkatigb/agentctl/internal/storage/sqliteutil"
 	"github.com/jkatigb/agentctl/internal/storage/tasks"
 	"github.com/jkatigb/agentctl/internal/storage/trajectory"
 )
@@ -116,7 +116,7 @@ func openDaemonStores(ctx context.Context, root string, opts Options) (*daemonSt
 	// Open companion memory if enabled
 	if opts.EnableCompanionMemory {
 		dbPath := filepath.Join(root, "companion.db")
-		db, closeFn, err := sqliteutil.OpenDBShared(ctx, dbPath, nil) // schema managed by NewConversationMemory
+		db, closeFn, err := dbutil.OpenStoreDB(ctx, root, "COMPANION", filepath.Base(dbPath), nil) // schema managed by NewConversationMemory
 		if err != nil {
 			stores.Close()
 			return nil, fmt.Errorf("open companion db: %w", err)

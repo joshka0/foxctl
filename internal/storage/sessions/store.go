@@ -16,7 +16,7 @@ import (
 	ws "github.com/jkatigb/agentctl/internal/platform/workspace"
 	"github.com/jkatigb/agentctl/internal/storage"
 	"github.com/jkatigb/agentctl/internal/storage/dbdriver"
-	"github.com/jkatigb/agentctl/internal/storage/sqliteutil"
+	"github.com/jkatigb/agentctl/internal/storage/dbutil"
 	"github.com/jkatigb/agentctl/internal/storage/sqlutil"
 	"github.com/jkatigb/agentctl/internal/storage/vector"
 	"github.com/rs/zerolog"
@@ -96,14 +96,15 @@ const (
 	defaultConnMaxIdleTime = 15 * time.Minute
 )
 
-// Open opens or creates the sessions SQLite database at root and returns a configured Store.
+// Open opens or creates the sessions database at root and returns a configured Store.
+// The database driver is selected via the dbdriver env var conventions (e.g., AGENTCTL_SESSIONS_DB_DRIVER).
 //
 // The returned Store is configured with connection pool defaults and retains an internal
 // cleanup function that Close will invoke. Open also performs a non-blocking validation
 // of embedding dimensions and returns an error if the database cannot be opened or migrated.
 func Open(ctx context.Context, root string) (store *Store, err error) {
 	dbPath := filepath.Join(root, "sessions.db")
-	db, closeFn, err := sqliteutil.OpenDBShared(ctx, dbPath, migrate)
+	db, closeFn, err := dbutil.OpenStoreDB(ctx, root, "SESSIONS", filepath.Base(dbPath), migrate)
 	if err != nil {
 		return nil, fmt.Errorf("sessions: open db: %w", err)
 	}
