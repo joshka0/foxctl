@@ -27,6 +27,9 @@ type ChatAdapter interface {
 
 	// OnInteraction sets the handler for interactive components (buttons, modals).
 	OnInteraction(handler InteractionHandler)
+
+	// OnMessage sets the handler for natural language messages (Phase 3).
+	OnMessage(handler MessageHandler)
 }
 
 // CommandHandler processes an incoming slash command.
@@ -34,6 +37,64 @@ type CommandHandler func(ctx context.Context, evt CommandEvent) error
 
 // InteractionHandler processes an interactive component event (Phase 2).
 type InteractionHandler func(ctx context.Context, evt InteractionEvent) error
+
+// MessageHandler processes a natural language message (Phase 3).
+type MessageHandler func(ctx context.Context, evt MessageEvent) error
+
+// MessageEvent carries the context for a received natural language message.
+type MessageEvent struct {
+	Content   string
+	User      UserRef
+	ChannelID string
+	GuildID   string
+	MessageID string
+
+	respond   func(content string, embeds []Embed) (MessageRef, error)
+	edit      func(ref MessageRef, content string, embeds []Embed) error
+	responded *atomic.Bool
+}
+
+// Respond sends an initial reply to the message, returning a ref for later edits.
+func (e MessageEvent) Respond(content string, embeds []Embed) (MessageRef, error) {
+	if e.respond != nil {
+		ref, err := e.respond(content, embeds)
+		if err == nil && e.responded != nil {
+			e.responded.Store(true)
+		}
+		return ref, err
+	}
+	return MessageRef{}, nil
+}
+
+// Edit updates a previously sent message.
+func (e MessageEvent) Edit(ref MessageRef, content string, embeds []Embed) error {
+	if e.edit != nil {
+		return e.edit(ref, content, embeds)
+	}
+	return nil
+}
+
+// Responded returns true if Respond has already been called.
+func (e MessageEvent) Responded() bool {
+	if e.responded == nil {
+		return false
+	}
+	return e.responded.Load()
+}
+
+// NewMessageEvent creates a MessageEvent with the given callbacks.
+func NewMessageEvent(content string, user UserRef, channelID, guildID, messageID string, respond func(string, []Embed) (MessageRef, error), edit func(MessageRef, string, []Embed) error) MessageEvent {
+	return MessageEvent{
+		Content:   content,
+		User:      user,
+		ChannelID: channelID,
+		GuildID:   guildID,
+		MessageID: messageID,
+		respond:   respond,
+		edit:      edit,
+		responded: &atomic.Bool{},
+	}
+}
 
 // CommandDef defines a slash command to register with the platform.
 type CommandDef struct {

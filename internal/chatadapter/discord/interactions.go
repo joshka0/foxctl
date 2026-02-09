@@ -45,7 +45,7 @@ func (a *Adapter) handleStop(ctx context.Context, evt chatadapter.InteractionEve
 		return evt.Respond(fmt.Sprintf("Failed to create request: %s", err), nil)
 	}
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := a.httpClient.Do(req)
 	if err != nil {
 		return evt.Respond(fmt.Sprintf("Failed to kill agent: %s", err), nil)
 	}
@@ -80,7 +80,7 @@ func (a *Adapter) handleRetry(ctx context.Context, evt chatadapter.InteractionEv
 		return evt.Respond(fmt.Sprintf("Failed to create request: %s", err), nil)
 	}
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := a.httpClient.Do(req)
 	if err != nil {
 		return evt.Respond(fmt.Sprintf("Failed to restart agent: %s", err), nil)
 	}
@@ -106,7 +106,7 @@ func (a *Adapter) handleDetails(ctx context.Context, evt chatadapter.Interaction
 		return evt.Respond(fmt.Sprintf("Failed to create request: %s", err), nil)
 	}
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := a.httpClient.Do(req)
 	if err != nil {
 		return evt.Respond(fmt.Sprintf("Failed to fetch agent: %s", err), nil)
 	}

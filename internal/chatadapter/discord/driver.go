@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -28,11 +29,16 @@ type Adapter struct {
 	session    *discordgo.Session
 	cmdHandler chatadapter.CommandHandler
 	intHandler chatadapter.InteractionHandler
+	msgHandler chatadapter.MessageHandler
 
 	sseHub    *sse.Hub
 	sseClient *sse.Client
 
+	consoleHub interface{} // *consolews.Hub, stored as interface to avoid import cycle
+
 	threadMap sync.Map // sessionID -> threadID
+
+	msgSem chan struct{} // limits concurrent message handlers
 
 	mu             sync.Mutex
 	registeredCmds []*discordgo.ApplicationCommand
@@ -50,6 +56,7 @@ func New(cfg config.DiscordSettings, daemonURL string) *Adapter {
 		httpClient: &http.Client{Timeout: 15 * time.Second},
 		newTicker:  time.NewTicker,
 		cfg:        cfg,
+		msgSem:     make(chan struct{}, 10),
 	}
 }
 
@@ -69,24 +76,48 @@ func (a *Adapter) OnInteraction(handler chatadapter.InteractionHandler) {
 	a.intHandler = handler
 }
 
+// OnMessage sets the natural language message handler (Phase 3).
+func (a *Adapter) OnMessage(handler chatadapter.MessageHandler) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.msgHandler = handler
+}
+
 // Connect creates the discordgo session, registers the interaction handler, and opens the gateway.
 func (a *Adapter) Connect(ctx context.Context) error {
+	// Ensure we always have a non-nil parent context. Discord handlers derive
+	// per-request contexts from a.ctx, and context.WithCancel/WithTimeout will
+	// panic if given a nil parent.
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	a.ctx, a.cancel = context.WithCancel(ctx)
+
 	sess, err := discordgo.New("Bot " + a.token)
 	if err != nil {
 		return fmt.Errorf("discord: create session: %w", err)
 	}
 
-	sess.Identify.Intents = discordgo.IntentsGuilds | discordgo.IntentsGuildMessages
+	sess.Identify.Intents = discordgo.IntentsGuilds | discordgo.IntentsGuildMessages | discordgo.IntentMessageContent
 
 	// Register interaction create handler
 	sess.AddHandler(a.handleInteraction)
 
+	// Register message create handler (Phase 3 - natural language chat)
+	sess.AddHandler(a.handleMessageCreate)
+
+	// Set session before opening so handlers can safely reference it.
+	a.session = sess
+
 	if err := sess.Open(); err != nil {
+		// Avoid leaking the adapter context on failed connects.
+		if a.cancel != nil {
+			a.cancel()
+		}
+		a.session = nil
 		return fmt.Errorf("discord: open gateway: %w", err)
 	}
 
-	a.ctx, a.cancel = context.WithCancel(ctx)
-	a.session = sess
 	if sess.State != nil && sess.State.User != nil {
 		observability.Emit(ctx, observability.NewEvent("discord.connected").
 			WithComponent("discord").
@@ -132,17 +163,17 @@ func (a *Adapter) Disconnect(ctx context.Context) error {
 		select {
 		case <-ctx.Done():
 			observability.Emit(ctx, observability.NewEvent("discord.disconnect_cancelled").
-			WithComponent("discord").
-			WithData("remaining_commands", len(cmds)).
-			Canceled(0))
+				WithComponent("discord").
+				WithData("remaining_commands", len(cmds)).
+				Canceled(0))
 			goto close
 		default:
 		}
 		if err := a.session.ApplicationCommandDelete(appID, a.guildID, cmd.ID); err != nil {
 			observability.Emit(ctx, observability.NewEvent("discord.command_delete_failed").
-			WithComponent("discord").
-			WithData("cmd", cmd.Name).
-			Error(err, 0))
+				WithComponent("discord").
+				WithData("cmd", cmd.Name).
+				Error(err, 0))
 		}
 	}
 
@@ -175,8 +206,8 @@ func (a *Adapter) RegisterCommands(ctx context.Context, cmds []chatadapter.Comma
 		select {
 		case <-ctx.Done():
 			observability.Emit(ctx, observability.NewEvent("discord.register_cancelled").
-			WithComponent("discord").
-			Canceled(0))
+				WithComponent("discord").
+				Canceled(0))
 			a.mu.Lock()
 			a.registeredCmds = registered
 			a.mu.Unlock()
@@ -187,9 +218,9 @@ func (a *Adapter) RegisterCommands(ctx context.Context, cmds []chatadapter.Comma
 		created, err := a.session.ApplicationCommandCreate(appID, a.guildID, dcmd)
 		if err != nil {
 			observability.Emit(ctx, observability.NewEvent("discord.command_register_failed").
-			WithComponent("discord").
-			WithData("cmd", cmd.Name).
-			Error(err, 0))
+				WithComponent("discord").
+				WithData("cmd", cmd.Name).
+				Error(err, 0))
 			continue
 		}
 		registered = append(registered, created)
@@ -279,7 +310,11 @@ func (a *Adapter) handleComponentInteraction(s *discordgo.Session, i *discordgo.
 
 	evt := chatadapter.NewInteractionEvent("button", data.CustomID, user, i.ChannelID, i.GuildID, msgRef, respond, update)
 
-	handlerCtx, handlerCancel := context.WithCancel(a.ctx)
+	parent := a.ctx
+	if parent == nil {
+		parent = context.Background()
+	}
+	handlerCtx, handlerCancel := context.WithCancel(parent)
 	defer handlerCancel()
 
 	if err := handler(handlerCtx, evt); err != nil {
@@ -346,9 +381,14 @@ func (a *Adapter) handleSlashCommand(s *discordgo.Session, i *discordgo.Interact
 	}
 
 	// Immediately acknowledge the interaction (Discord's 3s deadline)
-	_ = s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+	if ackErr := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 		Type: discordgo.InteractionResponseDeferredChannelMessageWithSource,
-	})
+	}); ackErr != nil {
+		observability.Emit(context.Background(), observability.NewEvent("discord.interaction_ack_failed").
+			WithComponent("discord").
+			WithData("cmd", data.Name).
+			Error(ackErr, 0))
+	}
 
 	// Build the respond callback (edits the deferred message)
 	respond := func(content string, embeds []chatadapter.Embed) error {
@@ -367,7 +407,11 @@ func (a *Adapter) handleSlashCommand(s *discordgo.Session, i *discordgo.Interact
 
 	evt := chatadapter.NewCommandEvent(data.Name, opts, user, i.ChannelID, guildID, respond)
 
-	handlerCtx, handlerCancel := context.WithCancel(a.ctx)
+	parent := a.ctx
+	if parent == nil {
+		parent = context.Background()
+	}
+	handlerCtx, handlerCancel := context.WithCancel(parent)
 	defer handlerCancel()
 
 	if err := handler(handlerCtx, evt); err != nil {
@@ -376,7 +420,7 @@ func (a *Adapter) handleSlashCommand(s *discordgo.Session, i *discordgo.Interact
 			WithData("cmd", data.Name).
 			Error(err, 0))
 		if !evt.Responded() {
-			errMsg := fmt.Sprintf("Internal error: %s", err)
+			errMsg := fmt.Sprintf("Internal error: %s\n\nPlease try again or check bot configuration.", err)
 			_, _ = s.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{
 				Content: &errMsg,
 			})
@@ -435,6 +479,155 @@ func toDiscordOptionType(t chatadapter.OptionType) discordgo.ApplicationCommandO
 // SetSSEHub configures the SSE hub for event listening.
 func (a *Adapter) SetSSEHub(hub *sse.Hub) {
 	a.sseHub = hub
+}
+
+// SetConsoleHub stores the console hub reference for session bridge wiring.
+func (a *Adapter) SetConsoleHub(hub interface{}) {
+	a.consoleHub = hub
+}
+
+// handleMessageCreate processes incoming Discord messages for natural language chat.
+func (a *Adapter) handleMessageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
+	// Ignore bot messages
+	if m.Author == nil || m.Author.Bot {
+		return
+	}
+
+	// Ignore non-default message types (joins, pins, etc.)
+	if m.Type != discordgo.MessageTypeDefault && m.Type != discordgo.MessageTypeReply {
+		return
+	}
+
+	// Determine if we should respond: all messages in chat channels, only @mentions elsewhere
+	inChatChannel := a.isChatChannel(m.ChannelID)
+	mentioned := a.isBotMentioned(m.Message)
+	if !inChatChannel && !mentioned {
+		return
+	}
+
+	content := m.Content
+	if mentioned && !inChatChannel {
+		content = a.cleanMention(content)
+	}
+
+	// Ignore empty messages (e.g., image-only)
+	if strings.TrimSpace(content) == "" {
+		if m.Content == "" && len(m.Attachments) == 0 {
+			observability.Emit(context.Background(), observability.NewEvent("discord.message_empty_content").
+				WithComponent("discord").
+				WithData("channel_id", m.ChannelID).
+				WithData("hint", "ensure Message Content Intent is enabled in Discord Developer Portal").
+				Success(0))
+		}
+		return
+	}
+
+	a.mu.Lock()
+	handler := a.msgHandler
+	a.mu.Unlock()
+
+	if handler == nil {
+		return
+	}
+
+	user := chatadapter.UserRef{
+		ID:       m.Author.ID,
+		Username: m.Author.Username,
+	}
+
+	guildID := ""
+	if m.GuildID != "" {
+		guildID = m.GuildID
+	}
+
+	respond := func(content string, embeds []chatadapter.Embed) (chatadapter.MessageRef, error) {
+		var dEmbeds []*discordgo.MessageEmbed
+		if len(embeds) > 0 {
+			dEmbeds = toDiscordEmbeds(embeds)
+		}
+		return a.SendMessage(m.ChannelID, content, dEmbeds, nil)
+	}
+
+	edit := func(ref chatadapter.MessageRef, content string, embeds []chatadapter.Embed) error {
+		var dEmbeds []*discordgo.MessageEmbed
+		if len(embeds) > 0 {
+			dEmbeds = toDiscordEmbeds(embeds)
+		}
+		return a.EditMessage(ref, content, dEmbeds, nil)
+	}
+
+	evt := chatadapter.NewMessageEvent(content, user, m.ChannelID, guildID, m.ID, respond, edit)
+
+	// Limit concurrent message handlers to prevent resource exhaustion.
+	// Use a non-blocking select so messages are dropped (not queued) when at capacity.
+	select {
+	case a.msgSem <- struct{}{}:
+		go func() {
+			defer func() { <-a.msgSem }()
+			parent := a.ctx
+			if parent == nil {
+				parent = context.Background()
+			}
+			handlerCtx, handlerCancel := context.WithTimeout(parent, 5*time.Minute)
+			defer handlerCancel()
+
+			if err := handler(handlerCtx, evt); err != nil {
+				observability.Emit(context.Background(), observability.NewEvent("discord.message_handler_error").
+					WithComponent("discord").
+					WithData("channel_id", m.ChannelID).
+					Error(err, 0))
+			}
+		}()
+	default:
+		observability.Emit(context.Background(), observability.NewEvent("discord.message_handler_dropped").
+			WithComponent("discord").
+			WithData("channel_id", m.ChannelID).
+			WithData("reason", "concurrency limit reached").
+			Success(0))
+	}
+}
+
+// isChatChannel returns true if the channel is in the configured chat channel list.
+func (a *Adapter) isChatChannel(channelID string) bool {
+	for _, id := range a.cfg.ChatChannelIDs {
+		if id == channelID {
+			return true
+		}
+	}
+	return false
+}
+
+// isBotMentioned returns true if the bot is mentioned in the message.
+func (a *Adapter) isBotMentioned(m *discordgo.Message) bool {
+	botID := a.appID()
+	if botID == "" {
+		return false
+	}
+	for _, u := range m.Mentions {
+		if u.ID == botID {
+			return true
+		}
+	}
+	return false
+}
+
+// cleanMention strips the bot's @mention from message content.
+func (a *Adapter) cleanMention(content string) string {
+	botID := a.appID()
+	if botID == "" {
+		return content
+	}
+	// Discord mentions: <@ID> or <@!ID>
+	content = strings.ReplaceAll(content, "<@"+botID+">", "")
+	content = strings.ReplaceAll(content, "<@!"+botID+">", "")
+	return strings.TrimSpace(content)
+}
+
+// ShowTyping sends a typing indicator to a channel.
+func (a *Adapter) ShowTyping(channelID string) {
+	if a.session != nil {
+		_ = a.session.ChannelTyping(channelID)
+	}
 }
 
 // SendMessage sends a message to a Discord channel.

@@ -142,10 +142,16 @@ func (s *Server) startChatAdapter(ctx context.Context) error {
 	daemonURL := ""
 	if s.opts.Addr != "" {
 		host, port, err := net.SplitHostPort(s.opts.Addr)
-		if err == nil {
-			if host == "" || host == "0.0.0.0" {
+		if err != nil {
+			// Handle bare port like ":8090"
+			if strings.HasPrefix(s.opts.Addr, ":") {
 				host = "localhost"
+				port = strings.TrimPrefix(s.opts.Addr, ":")
 			}
+		} else if host == "" || host == "0.0.0.0" {
+			host = "localhost"
+		}
+		if port != "" {
 			daemonURL = "http://" + net.JoinHostPort(host, port)
 		}
 	}
@@ -156,6 +162,11 @@ func (s *Server) startChatAdapter(ctx context.Context) error {
 
 	adapter.OnCommand(bridge.HandleCommand)
 	adapter.OnInteraction(adapter.HandleInteraction)
+
+	// Phase 3: Wire console hub for natural language messaging
+	adapter.SetConsoleHub(s.consoleHub)
+	sessionBridge := discord.NewSessionBridge(s.consoleHub, adapter, s.cfg.Discord)
+	adapter.OnMessage(sessionBridge.HandleMessage)
 
 	if err := adapter.Connect(ctx); err != nil {
 		return err

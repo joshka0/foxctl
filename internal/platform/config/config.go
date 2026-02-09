@@ -81,6 +81,15 @@ type DiscordSettings struct {
 
 	// AgentChannelID is the channel where per-agent threads are created.
 	AgentChannelID string `mapstructure:"agent_channel_id" json:"agent_channel_id"`
+
+	// ChatChannelIDs lists channels where the bot responds to all messages (not just mentions).
+	ChatChannelIDs []string `mapstructure:"chat_channel_ids" json:"chat_channel_ids"`
+
+	// ChatProfile is the consolews session profile for chat messages (default: "explorer").
+	ChatProfile string `mapstructure:"chat_profile" json:"chat_profile"`
+
+	// ChatSystemPrompt overrides the system prompt for chat sessions.
+	ChatSystemPrompt string `mapstructure:"chat_system_prompt" json:"chat_system_prompt"`
 }
 
 // MarshalJSON implements json.Marshaler to redact the BotToken field.
@@ -689,6 +698,23 @@ func finalizeConfig(cfg Config, home string) Config {
 	}
 	if ch := os.Getenv("DISCORD_AGENT_CHANNEL"); ch != "" && cfg.Discord.AgentChannelID == "" {
 		cfg.Discord.AgentChannelID = ch
+	}
+	if channels := os.Getenv("DISCORD_CHAT_CHANNELS"); channels != "" && len(cfg.Discord.ChatChannelIDs) == 0 {
+		for _, ch := range strings.Split(channels, ",") {
+			ch = strings.TrimSpace(ch)
+			if ch != "" {
+				cfg.Discord.ChatChannelIDs = append(cfg.Discord.ChatChannelIDs, ch)
+			}
+		}
+	}
+	if profile := os.Getenv("DISCORD_CHAT_PROFILE"); profile != "" && cfg.Discord.ChatProfile == "" {
+		cfg.Discord.ChatProfile = profile
+	}
+	if cfg.Discord.ChatProfile == "" {
+		cfg.Discord.ChatProfile = "explorer"
+	}
+	if prompt := os.Getenv("DISCORD_CHAT_SYSTEM_PROMPT"); prompt != "" && cfg.Discord.ChatSystemPrompt == "" {
+		cfg.Discord.ChatSystemPrompt = prompt
 	}
 
 	return cfg

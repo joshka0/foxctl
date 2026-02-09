@@ -225,5 +225,6 @@ func (a *Adapter) getThreadID(sessionID string) string {
 	if !ok {
 		return ""
 	}
-	return v.(string)
+	s, _ := v.(string)
+	return s
 }

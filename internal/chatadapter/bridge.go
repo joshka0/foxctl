@@ -9,16 +9,19 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jkatigb/agentctl/internal/domain/envelope"
 	"github.com/jkatigb/agentctl/internal/observability"
 	"github.com/jkatigb/agentctl/internal/platform/config"
+	"github.com/jkatigb/agentctl/internal/protocol"
 	"github.com/jkatigb/agentctl/internal/web/api"
 )
 
 // Bridge connects chat adapter commands to agentctl skills and APIs.
 type Bridge struct {
-	runner    *api.SkillRunner
-	cfg       config.Config
-	daemonURL string
+	runner     *api.SkillRunner
+	cfg        config.Config
+	daemonURL  string
+	httpClient *http.Client
 }
 
 // NewBridge creates a Bridge with an explicit SkillRunner for dependency injection.
@@ -28,9 +31,10 @@ func NewBridge(runner *api.SkillRunner, cfg config.Config, daemonURL string) *Br
 		daemonURL = "http://localhost:8090"
 	}
 	return &Bridge{
-		runner:    runner,
-		cfg:       cfg,
-		daemonURL: daemonURL,
+		runner:     runner,
+		cfg:        cfg,
+		daemonURL:  daemonURL,
+		httpClient: &http.Client{Timeout: 10 * time.Second},
 	}
 }
 
@@ -42,52 +46,76 @@ func NewDefaultBridge(cfg config.Config, daemonURL string) *Bridge {
 // skillRoute maps a command name to its skill name and input builder.
 type skillRoute struct {
 	skill      string
-	buildInput func(opts map[string]any) map[string]any
+	buildInput func(opts map[string]any) (map[string]any, error)
 }
 
 // routes maps slash command names to skill invocations.
 var routes = map[string]skillRoute{
 	"search": {
 		skill: "code/semantic_search",
-		buildInput: func(opts map[string]any) map[string]any {
+		buildInput: func(opts map[string]any) (map[string]any, error) {
 			return map[string]any{
 				"query":  opts["query"],
 				"limit":  10,
 				"format": "tree",
-			}
+			}, nil
 		},
 	},
 	"todo": {
 		skill: "todo/manage",
-		buildInput: func(opts map[string]any) map[string]any {
-			input := map[string]any{
-				"action": opts["action"],
+		buildInput: func(opts map[string]any) (map[string]any, error) {
+			action, _ := opts["action"].(string)
+			action = strings.TrimSpace(action)
+			switch action {
+			case "", "list":
+				return map[string]any{
+					"operation": "list",
+				}, nil
+			case "add":
+				title, _ := opts["title"].(string)
+				title = strings.TrimSpace(title)
+				if title == "" {
+					return nil, fmt.Errorf("Missing required option `title` for `/todo action:add`.\nHint: set the `title` option.")
+				}
+				return map[string]any{
+					"operation": "add",
+					"add": map[string]any{
+						"title": title,
+					},
+				}, nil
+			case "complete":
+				id, _ := opts["id"].(string)
+				id = strings.TrimSpace(id)
+				if id == "" {
+					return nil, fmt.Errorf("Missing required option `id` for `/todo action:complete`.\nHint: set the `id` option to the task ID.")
+				}
+				return map[string]any{
+					"operation": "complete",
+					"complete": map[string]any{
+						"id": id,
+					},
+				}, nil
+			default:
+				return nil, fmt.Errorf("Unknown `/todo` action: %q (expected list|add|complete).", action)
 			}
-			if title, ok := opts["title"]; ok {
-				input["title"] = title
-			}
-			if id, ok := opts["id"]; ok {
-				input["id"] = id
-			}
-			return input
 		},
 	},
 	"memory": {
 		skill: "memory/query",
-		buildInput: func(opts map[string]any) map[string]any {
+		buildInput: func(opts map[string]any) (map[string]any, error) {
 			return map[string]any{
 				"query": opts["query"],
-			}
+			}, nil
 		},
 	},
 	"logs": {
 		skill: "obs/logs",
-		buildInput: func(opts map[string]any) map[string]any {
+		buildInput: func(opts map[string]any) (map[string]any, error) {
 			input := map[string]any{}
 			if errOnly, ok := opts["errors_only"]; ok {
 				input["errors_only"] = errOnly
 			}
-			return input
+			return input, nil
 		},
 	},
 }
@@ -117,7 +145,13 @@ func (b *Bridge) HandleCommand(ctx context.Context, evt CommandEvent) error {
 		return evt.Respond(fmt.Sprintf("Unknown command: `/%s`. Available: /search, /todo, /memory, /logs, /agent-spawn, /agent-list", evt.Command), nil)
 	}
 
-	input := route.buildInput(evt.Options)
+	input, err := route.buildInput(evt.Options)
+	if err != nil {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		return evt.Respond(err.Error(), nil)
+	}
 	result, err := b.runner.Run(ctx, route.skill, input)
 	if err != nil {
 		observability.Emit(ctx, observability.NewEvent("discord.skill_failed").
@@ -149,6 +183,22 @@ func formatSkillOutput(skillName string, output json.RawMessage) string {
 		return fmt.Sprintf("`%s` completed (no output)", skillName)
 	}
 
+	// Skills emit canonical envelopes. Prefer formatting the envelope data payload
+	// instead of dumping the full envelope.
+	if env, err := protocol.DecodeEnvelope(output); err == nil && env.Version == envelope.Version && env.Command != "" {
+		name := skillName
+		if env.Command != "" {
+			name = env.Command
+		}
+
+		if env.Status == envelope.StatusError {
+			statusErr := protocol.EnvelopeStatusErrorFromEnvelope(env)
+			return truncate(fmt.Sprintf("**%s**\n%s", name, statusErr.Error()), 1900)
+		}
+
+		return formatSkillPayload(name, env.Data)
+	}
+
 	// Try to pretty-print as indented JSON
 	var parsed any
 	if err := json.Unmarshal(output, &parsed); err == nil {
@@ -172,6 +222,47 @@ func formatSkillOutput(skillName string, output json.RawMessage) string {
 
 	// Raw string fallback
 	return truncate(fmt.Sprintf("**%s**\n```\n%s\n```", skillName, string(output)), 1900)
+}
+
+func formatSkillPayload(skillName string, payload any) string {
+	if payload == nil {
+		return fmt.Sprintf("`%s` completed (no data)", skillName)
+	}
+
+	// Common case: object payload.
+	if m, ok := payload.(map[string]any); ok {
+		if tree, ok := m["tree"].(string); ok && tree != "" {
+			return truncate(fmt.Sprintf("**%s**\n```\n%s\n```", skillName, tree), 1900)
+		}
+		if items, ok := m["items"].([]any); ok {
+			return formatItems(skillName, items)
+		}
+		if results, ok := m["results"].([]any); ok {
+			return formatItems(skillName, results)
+		}
+		if summary, ok := m["summary"].(string); ok && strings.TrimSpace(summary) != "" {
+			if art, ok := m["artifact"].(string); ok && strings.TrimSpace(art) != "" {
+				return truncate(fmt.Sprintf("**%s**\n%s\nartifact: `%s`", skillName, summary, art), 1900)
+			}
+			return truncate(fmt.Sprintf("**%s**\n%s", skillName, summary), 1900)
+		}
+
+		pretty, _ := json.MarshalIndent(m, "", "  ")
+		return truncate(fmt.Sprintf("**%s**\n```json\n%s\n```", skillName, string(pretty)), 1900)
+	}
+
+	// String payload.
+	if s, ok := payload.(string); ok && s != "" {
+		return truncate(fmt.Sprintf("**%s**\n```\n%s\n```", skillName, s), 1900)
+	}
+
+	// List payload.
+	if items, ok := payload.([]any); ok {
+		return formatItems(skillName, items)
+	}
+
+	pretty, _ := json.MarshalIndent(payload, "", "  ")
+	return truncate(fmt.Sprintf("**%s**\n```json\n%s\n```", skillName, string(pretty)), 1900)
 }
 
 // formatItems formats a list of result items.
@@ -248,8 +339,7 @@ func (b *Bridge) handleAgentSpawn(ctx context.Context, evt CommandEvent) error {
 	}
 	req.Header.Set("Content-Type", "application/json")
 
-	client := &http.Client{Timeout: 10 * time.Second}
-	resp, err := client.Do(req)
+	resp, err := b.httpClient.Do(req)
 	if err != nil {
 		return evt.Respond(fmt.Sprintf("Daemon unreachable: %s\nHint: ensure the daemon is running (`agentctl web serve`).", err), nil)
 	}
@@ -275,8 +365,7 @@ func (b *Bridge) handleAgentList(ctx context.Context, evt CommandEvent) error {
 		return evt.Respond(fmt.Sprintf("Failed to create request: %s\nHint: check daemon URL format.", err), nil)
 	}
 
-	client := &http.Client{Timeout: 10 * time.Second}
-	resp, err := client.Do(req)
+	resp, err := b.httpClient.Do(req)
 	if err != nil {
 		return evt.Respond(fmt.Sprintf("Daemon unreachable: %s\nHint: ensure the daemon is running (`agentctl web serve`).", err), nil)
 	}
@@ -304,5 +393,5 @@ func (b *Bridge) handleAgentList(ctx context.Context, evt CommandEvent) error {
 		status, _ := a["status"].(string)
 		sb.WriteString(fmt.Sprintf("- **%s** (%s) — %s\n", name, role, status))
 	}
-	return evt.Respond(sb.String(), nil)
+	return evt.Respond(truncate(sb.String(), 2000), nil)
 }
