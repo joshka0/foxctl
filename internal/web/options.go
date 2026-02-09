@@ -11,4 +11,8 @@ type Options struct {
 
 	// DevCORS enables permissive CORS headers for local development.
 	DevCORS bool
+
+	// ChatAdapter selects the chat platform adapter to enable (e.g. "discord").
+	// If empty, no chat adapter is started.
+	ChatAdapter string
 }

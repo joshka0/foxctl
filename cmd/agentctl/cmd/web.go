@@ -48,6 +48,7 @@ var (
 	webPort    int
 	webDevCORS bool
 	webUIDir   string
+	webChat    string
 )
 
 func init() {
@@ -57,6 +58,7 @@ func init() {
 	webServeCmd.Flags().IntVarP(&webPort, "port", "p", 8090, "Port to listen on")
 	webServeCmd.Flags().BoolVar(&webDevCORS, "dev-cors", false, "Enable CORS for development (allows localhost:5173)")
 	webServeCmd.Flags().StringVar(&webUIDir, "ui-dir", "", "Directory containing static UI files to serve")
+	webServeCmd.Flags().StringVar(&webChat, "chat", "", "Chat adapter to enable (discord)")
 }
 
 func runWebServe(cmd *cobra.Command, _ []string) error {
@@ -77,9 +79,12 @@ func runWebServe(cmd *cobra.Command, _ []string) error {
 						Logger()
 
 	// Create web server
+	addr := fmt.Sprintf(":%d", webPort)
 	opts := web.Options{
-		DevCORS: webDevCORS,
-		UIDir:   webUIDir,
+		Addr:        addr,
+		DevCORS:     webDevCORS,
+		UIDir:       webUIDir,
+		ChatAdapter: webChat,
 	}
 
 	server, err := web.NewServer(ctx, opts, cfg, log)
@@ -92,7 +97,6 @@ func runWebServe(cmd *cobra.Command, _ []string) error {
 
 	// Create HTTP server with appropriate timeouts
 	// Note: WriteTimeout is 0 to support SSE/streaming connections
-	addr := fmt.Sprintf(":%d", webPort)
 	httpServer := &http.Server{
 		Addr:              addr,
 		Handler:           server.Handler(),
@@ -140,6 +144,9 @@ func runWebServe(cmd *cobra.Command, _ []string) error {
 	// Graceful shutdown with timeout
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer shutdownCancel()
+
+	// Stop chat adapter if running (use shutdown context for bounded disconnect)
+	server.StopChatAdapter(shutdownCtx)
 
 	if err := httpServer.Shutdown(shutdownCtx); err != nil {
 		observability.Emit(context.Background(), observability.NewEvent("web.shutdown_error").

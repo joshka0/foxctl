@@ -64,6 +64,33 @@ type Config struct {
 	Indexing       IndexingSettings  `mapstructure:"indexing" json:"indexing"`
 	Database       DatabaseSettings  `mapstructure:"database" json:"database"`
 	LLM            LLMSettings       `mapstructure:"llm" json:"llm"`
+	Discord        DiscordSettings   `mapstructure:"discord" json:"discord"`
+}
+
+// DiscordSettings configure the Discord chat adapter.
+type DiscordSettings struct {
+	// BotToken is the Discord bot token (from DISCORD_BOT_TOKEN).
+	BotToken string `mapstructure:"bot_token" json:"bot_token"`
+
+	// GuildID restricts slash commands to a single guild (dev mode).
+	// If empty, commands are registered globally (takes ~1 hour to propagate).
+	GuildID string `mapstructure:"guild_id" json:"guild_id"`
+
+	// ActivityChannelID is the channel for compact agent activity feed messages.
+	ActivityChannelID string `mapstructure:"activity_channel_id" json:"activity_channel_id"`
+
+	// AgentChannelID is the channel where per-agent threads are created.
+	AgentChannelID string `mapstructure:"agent_channel_id" json:"agent_channel_id"`
+}
+
+// MarshalJSON implements json.Marshaler to redact the BotToken field.
+func (d DiscordSettings) MarshalJSON() ([]byte, error) {
+	type Alias DiscordSettings
+	redacted := Alias(d)
+	if redacted.BotToken != "" {
+		redacted.BotToken = "[REDACTED]"
+	}
+	return json.Marshal(redacted)
 }
 
 // Paths include common on-disk locations rooted at the agentctl home directory.
@@ -648,6 +675,20 @@ func finalizeConfig(cfg Config, home string) Config {
 	// Voice/TTS API key env var overrides (FC/IS compliant)
 	if key := os.Getenv("ELEVENLABS_API_KEY"); key != "" && cfg.LLM.ElevenLabsAPIKey == "" {
 		cfg.LLM.ElevenLabsAPIKey = key
+	}
+
+	// Discord chat adapter env var overrides
+	if token := os.Getenv("DISCORD_BOT_TOKEN"); token != "" && cfg.Discord.BotToken == "" {
+		cfg.Discord.BotToken = token
+	}
+	if guildID := os.Getenv("DISCORD_GUILD_ID"); guildID != "" && cfg.Discord.GuildID == "" {
+		cfg.Discord.GuildID = guildID
+	}
+	if ch := os.Getenv("DISCORD_ACTIVITY_CHANNEL"); ch != "" && cfg.Discord.ActivityChannelID == "" {
+		cfg.Discord.ActivityChannelID = ch
+	}
+	if ch := os.Getenv("DISCORD_AGENT_CHANNEL"); ch != "" && cfg.Discord.AgentChannelID == "" {
+		cfg.Discord.AgentChannelID = ch
 	}
 
 	return cfg

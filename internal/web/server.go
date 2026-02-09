@@ -2,11 +2,14 @@ package web
 
 import (
 	"context"
+	"net"
 	"net/http"
 	"strings"
 
 	"github.com/rs/zerolog"
 
+	"github.com/jkatigb/agentctl/internal/chatadapter"
+	"github.com/jkatigb/agentctl/internal/chatadapter/discord"
 	"github.com/jkatigb/agentctl/internal/consoleapp"
 	"github.com/jkatigb/agentctl/internal/engine"
 	"github.com/jkatigb/agentctl/internal/observability"
@@ -18,11 +21,12 @@ import (
 
 // Server is the agentctl web server.
 type Server struct {
-	opts       Options
-	cfg        config.Config
-	log        zerolog.Logger
-	sseHub     *sse.Hub
-	consoleHub *consolews.Hub
+	opts        Options
+	cfg         config.Config
+	log         zerolog.Logger
+	sseHub      *sse.Hub
+	consoleHub  *consolews.Hub
+	chatAdapter chatadapter.ChatAdapter
 }
 
 // NewServer creates and returns a configured Server for the web layer.
@@ -60,6 +64,15 @@ func NewServer(ctx context.Context, opts Options, cfg config.Config, log zerolog
 		log:        log,
 		sseHub:     sseHub,
 		consoleHub: consoleHub,
+	}
+
+	// Start chat adapter if configured
+	if opts.ChatAdapter == "discord" && cfg.Discord.BotToken != "" {
+		if err := s.startChatAdapter(ctx); err != nil {
+			log.Warn().Err(err).Msg("failed to start chat adapter (continuing without it)")
+		}
+	} else if opts.ChatAdapter == "discord" && cfg.Discord.BotToken == "" {
+		log.Warn().Msg("--chat discord requires DISCORD_BOT_TOKEN; skipping adapter")
 	}
 
 	return s, nil
@@ -121,6 +134,50 @@ func (s *Server) SSEHub() *sse.Hub {
 // ConsoleHub returns the console WebSocket hub.
 func (s *Server) ConsoleHub() *consolews.Hub {
 	return s.consoleHub
+}
+
+// startChatAdapter initializes and connects the chat adapter.
+func (s *Server) startChatAdapter(ctx context.Context) error {
+	// Derive daemon URL from the server's listen address
+	daemonURL := ""
+	if s.opts.Addr != "" {
+		host, port, err := net.SplitHostPort(s.opts.Addr)
+		if err == nil {
+			if host == "" || host == "0.0.0.0" {
+				host = "localhost"
+			}
+			daemonURL = "http://" + net.JoinHostPort(host, port)
+		}
+	}
+
+	adapter := discord.New(s.cfg.Discord, daemonURL)
+	adapter.SetSSEHub(s.sseHub)
+	bridge := chatadapter.NewDefaultBridge(s.cfg, daemonURL)
+
+	adapter.OnCommand(bridge.HandleCommand)
+	adapter.OnInteraction(adapter.HandleInteraction)
+
+	if err := adapter.Connect(ctx); err != nil {
+		return err
+	}
+
+	if err := adapter.RegisterCommands(ctx, discord.MVPCommands()); err != nil {
+		_ = adapter.Disconnect(ctx)
+		return err
+	}
+
+	s.chatAdapter = adapter
+	s.log.Info().Str("adapter", adapter.Name()).Msg("chat adapter started")
+	return nil
+}
+
+// StopChatAdapter gracefully disconnects the chat adapter.
+func (s *Server) StopChatAdapter(ctx context.Context) {
+	if s.chatAdapter != nil {
+		if err := s.chatAdapter.Disconnect(ctx); err != nil {
+			s.log.Warn().Err(err).Msg("chat adapter disconnect error")
+		}
+	}
 }
 
 // Handler returns the HTTP handler for the server.
