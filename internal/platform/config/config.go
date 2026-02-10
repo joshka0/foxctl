@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -65,6 +66,8 @@ type Config struct {
 	Database       DatabaseSettings  `mapstructure:"database" json:"database"`
 	LLM            LLMSettings       `mapstructure:"llm" json:"llm"`
 	Discord        DiscordSettings   `mapstructure:"discord" json:"discord"`
+	Telegram       TelegramSettings  `mapstructure:"telegram" json:"telegram"`
+	Teams          TeamsSettings     `mapstructure:"teams" json:"teams"`
 }
 
 // DiscordSettings configure the Discord chat adapter.
@@ -98,6 +101,85 @@ func (d DiscordSettings) MarshalJSON() ([]byte, error) {
 	redacted := Alias(d)
 	if redacted.BotToken != "" {
 		redacted.BotToken = "[REDACTED]"
+	}
+	return json.Marshal(redacted)
+}
+
+// TelegramSettings configure the Telegram chat adapter.
+type TelegramSettings struct {
+	// BotToken is the Telegram bot token (from TELEGRAM_BOT_TOKEN).
+	BotToken string `mapstructure:"bot_token" json:"bot_token"`
+
+	// ActivityChatID is the chat for compact agent activity feed messages.
+	ActivityChatID int64 `mapstructure:"activity_chat_id" json:"activity_chat_id"`
+
+	// AgentChatID is the chat where per-agent updates are posted.
+	// For best UX, use a forum supergroup so agent sessions can map to topics.
+	AgentChatID int64 `mapstructure:"agent_chat_id" json:"agent_chat_id"`
+
+	// ChatIDs lists chats where the bot responds to all messages (not just mentions).
+	ChatIDs []int64 `mapstructure:"chat_ids" json:"chat_ids"`
+
+	// ChatProfile is the consolews session profile for chat messages (default: "explorer").
+	ChatProfile string `mapstructure:"chat_profile" json:"chat_profile"`
+
+	// ChatSystemPrompt overrides the system prompt for chat sessions.
+	ChatSystemPrompt string `mapstructure:"chat_system_prompt" json:"chat_system_prompt"`
+
+	// MaxConcurrentMessages caps concurrent command/message handlers (default: 10).
+	MaxConcurrentMessages int `mapstructure:"max_concurrent_messages" json:"max_concurrent_messages"`
+
+	// EditIntervalMS is the edit cadence for streaming responses (default: 1500ms).
+	EditIntervalMS int `mapstructure:"edit_interval_ms" json:"edit_interval_ms"`
+}
+
+// MarshalJSON implements json.Marshaler to redact the BotToken field.
+func (t TelegramSettings) MarshalJSON() ([]byte, error) {
+	type Alias TelegramSettings
+	redacted := Alias(t)
+	if redacted.BotToken != "" {
+		redacted.BotToken = "[REDACTED]"
+	}
+	return json.Marshal(redacted)
+}
+
+// TeamsSettings configure the Microsoft Teams chat adapter.
+type TeamsSettings struct {
+	// TenantID is the Azure AD tenant to accept inbound webhook tokens from.
+	TenantID string `mapstructure:"tenant_id" json:"tenant_id"`
+
+	// ClientID is the Azure Bot / App Registration Application (client) ID.
+	ClientID string `mapstructure:"client_id" json:"client_id"`
+
+	// ClientSecret is the app client secret used for Bot Framework Connector tokens.
+	ClientSecret string `mapstructure:"client_secret" json:"client_secret"`
+
+	// ChatConversationIDs lists conversations where the bot responds to all messages.
+	// Outside this list: respond only when mentioned (except 1:1 chats).
+	ChatConversationIDs []string `mapstructure:"chat_conversation_ids" json:"chat_conversation_ids"`
+
+	// ChatProfile is the consolews session profile for chat messages (default: "explorer").
+	ChatProfile string `mapstructure:"chat_profile" json:"chat_profile"`
+
+	// ChatSystemPrompt overrides the system prompt for chat sessions.
+	ChatSystemPrompt string `mapstructure:"chat_system_prompt" json:"chat_system_prompt"`
+
+	// MaxConcurrentMessages caps concurrent message handlers (default: 10).
+	MaxConcurrentMessages int `mapstructure:"max_concurrent_messages" json:"max_concurrent_messages"`
+
+	// EditIntervalMS is the edit cadence for streaming responses (default: 1500ms).
+	EditIntervalMS int `mapstructure:"edit_interval_ms" json:"edit_interval_ms"`
+
+	// SkipJWTVerify disables inbound JWT verification. Dev-only; enforced at runtime.
+	SkipJWTVerify bool `mapstructure:"skip_jwt_verify" json:"skip_jwt_verify"`
+}
+
+// MarshalJSON implements json.Marshaler to redact the ClientSecret field.
+func (t TeamsSettings) MarshalJSON() ([]byte, error) {
+	type Alias TeamsSettings
+	redacted := Alias(t)
+	if redacted.ClientSecret != "" {
+		redacted.ClientSecret = "[REDACTED]"
 	}
 	return json.Marshal(redacted)
 }
@@ -165,11 +247,14 @@ type SearchSettings struct {
 
 // DatabaseSettings configure database driver and connection.
 type DatabaseSettings struct {
-	// Driver specifies which database driver to use: "sqlite" (default), "libsql", or "turso"
+	// Driver specifies which database driver to use: "sqlite" (default), "libsql", "turso", or "postgres"
 	Driver string `mapstructure:"driver" json:"driver"`
 
 	// Turso holds Turso-specific configuration (when driver is "turso")
 	Turso TursoSettings `mapstructure:"turso" json:"turso"`
+
+	// Postgres holds PostgreSQL-specific configuration (when driver is "postgres")
+	Postgres PostgresSettings `mapstructure:"postgres" json:"postgres"`
 
 	// Vector configures native vector search capabilities
 	Vector VectorSettings `mapstructure:"vector" json:"vector"`
@@ -198,6 +283,32 @@ func (t TursoSettings) MarshalJSON() ([]byte, error) {
 	redacted := Alias(t)
 	if redacted.AuthToken != "" {
 		redacted.AuthToken = "[REDACTED]"
+	}
+	return json.Marshal(redacted)
+}
+
+// PostgresSettings holds PostgreSQL database configuration.
+type PostgresSettings struct {
+	// DSN is the PostgreSQL connection string.
+	// Example: postgres://user:pass@host:5432/dbname?sslmode=require
+	// Can also be set via AGENTCTL_POSTGRES_DSN or DATABASE_URL.
+	DSN string `mapstructure:"dsn" json:"dsn"`
+
+	// MaxOpenConns is the maximum number of open connections per store.
+	// Default: 5.
+	MaxOpenConns int `mapstructure:"max_open_conns" json:"max_open_conns"`
+
+	// RequireVector fails startup if pgvector is unavailable.
+	// Default: false (gracefully degrade without vector search).
+	RequireVector bool `mapstructure:"require_vector" json:"require_vector"`
+}
+
+// MarshalJSON implements json.Marshaler to redact the DSN field.
+func (p PostgresSettings) MarshalJSON() ([]byte, error) {
+	type Alias PostgresSettings
+	redacted := Alias(p)
+	if redacted.DSN != "" {
+		redacted.DSN = "[REDACTED]"
 	}
 	return json.Marshal(redacted)
 }
@@ -483,6 +594,9 @@ func applyDefaults(v *viper.Viper, defaultHome string) {
 	v.SetDefault("database.driver", "libsql")
 	v.SetDefault("database.turso.url", "")
 	v.SetDefault("database.turso.auth_token", "")
+	v.SetDefault("database.postgres.dsn", "")
+	v.SetDefault("database.postgres.max_open_conns", 5)
+	v.SetDefault("database.postgres.require_vector", false)
 	v.SetDefault("database.vector.enabled", true)
 	v.SetDefault("database.vector.dimensions", dbdriver.DefaultVectorDimensions)
 	// CAS policy defaults - store always on, expose off by default (hooks/tools)
@@ -573,9 +687,33 @@ func finalizeConfig(cfg Config, home string) Config {
 	if token := os.Getenv("TURSO_AUTH_TOKEN"); token != "" && cfg.Database.Turso.AuthToken == "" {
 		cfg.Database.Turso.AuthToken = token
 	}
-	// Auto-detect driver from URL if not explicitly set
+
+	// PostgreSQL env var overrides
+	if dsn := os.Getenv("AGENTCTL_POSTGRES_DSN"); dsn != "" && cfg.Database.Postgres.DSN == "" {
+		cfg.Database.Postgres.DSN = dsn
+	}
+	if dsn := os.Getenv("DATABASE_URL"); dsn != "" && cfg.Database.Postgres.DSN == "" {
+		cfg.Database.Postgres.DSN = dsn
+	}
+	if v := os.Getenv("AGENTCTL_POSTGRES_MAX_CONNS"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			cfg.Database.Postgres.MaxOpenConns = n
+		}
+	}
+	if strings.EqualFold(os.Getenv("AGENTCTL_POSTGRES_REQUIRE_VECTOR"), "true") {
+		cfg.Database.Postgres.RequireVector = true
+	}
+
+	// Auto-detect driver from URL/DSN if not explicitly set
 	if cfg.Database.Driver == "sqlite" && cfg.Database.Turso.URL != "" {
 		cfg.Database.Driver = "turso"
+	}
+	if cfg.Database.Driver == "sqlite" && cfg.Database.Postgres.DSN != "" {
+		cfg.Database.Driver = "postgres"
+	}
+	// Explicit driver override via env var takes precedence over auto-detection
+	if driver := os.Getenv("AGENTCTL_DB_DRIVER"); driver != "" {
+		cfg.Database.Driver = driver
 	}
 	// Default vector dimensions from embedding config if not set
 	if cfg.Database.Vector.Dimensions == 0 {
@@ -715,6 +853,106 @@ func finalizeConfig(cfg Config, home string) Config {
 	}
 	if prompt := os.Getenv("DISCORD_CHAT_SYSTEM_PROMPT"); prompt != "" && cfg.Discord.ChatSystemPrompt == "" {
 		cfg.Discord.ChatSystemPrompt = prompt
+	}
+
+	// Telegram chat adapter env var overrides
+	if token := os.Getenv("TELEGRAM_BOT_TOKEN"); token != "" && cfg.Telegram.BotToken == "" {
+		cfg.Telegram.BotToken = token
+	}
+	if chatIDStr := os.Getenv("TELEGRAM_ACTIVITY_CHAT_ID"); chatIDStr != "" && cfg.Telegram.ActivityChatID == 0 {
+		if id, err := strconv.ParseInt(strings.TrimSpace(chatIDStr), 10, 64); err == nil {
+			cfg.Telegram.ActivityChatID = id
+		}
+	}
+	if chatIDStr := os.Getenv("TELEGRAM_AGENT_CHAT_ID"); chatIDStr != "" && cfg.Telegram.AgentChatID == 0 {
+		if id, err := strconv.ParseInt(strings.TrimSpace(chatIDStr), 10, 64); err == nil {
+			cfg.Telegram.AgentChatID = id
+		}
+	}
+	if chatIDs := os.Getenv("TELEGRAM_CHAT_IDS"); chatIDs != "" && len(cfg.Telegram.ChatIDs) == 0 {
+		for _, s := range strings.Split(chatIDs, ",") {
+			s = strings.TrimSpace(s)
+			if s == "" {
+				continue
+			}
+			if id, err := strconv.ParseInt(s, 10, 64); err == nil {
+				cfg.Telegram.ChatIDs = append(cfg.Telegram.ChatIDs, id)
+			}
+		}
+	}
+	if profile := os.Getenv("TELEGRAM_CHAT_PROFILE"); profile != "" && cfg.Telegram.ChatProfile == "" {
+		cfg.Telegram.ChatProfile = profile
+	}
+	if cfg.Telegram.ChatProfile == "" {
+		cfg.Telegram.ChatProfile = "explorer"
+	}
+	if prompt := os.Getenv("TELEGRAM_CHAT_SYSTEM_PROMPT"); prompt != "" && cfg.Telegram.ChatSystemPrompt == "" {
+		cfg.Telegram.ChatSystemPrompt = prompt
+	}
+	if s := os.Getenv("TELEGRAM_MAX_CONCURRENT_MESSAGES"); s != "" && cfg.Telegram.MaxConcurrentMessages == 0 {
+		if n, err := strconv.Atoi(strings.TrimSpace(s)); err == nil {
+			cfg.Telegram.MaxConcurrentMessages = n
+		}
+	}
+	if cfg.Telegram.MaxConcurrentMessages <= 0 {
+		cfg.Telegram.MaxConcurrentMessages = 10
+	}
+	if s := os.Getenv("TELEGRAM_EDIT_INTERVAL_MS"); s != "" && cfg.Telegram.EditIntervalMS == 0 {
+		if n, err := strconv.Atoi(strings.TrimSpace(s)); err == nil {
+			cfg.Telegram.EditIntervalMS = n
+		}
+	}
+	if cfg.Telegram.EditIntervalMS <= 0 {
+		cfg.Telegram.EditIntervalMS = 1500
+	}
+
+	// Microsoft Teams chat adapter env var overrides
+	if v := os.Getenv("TEAMS_TENANT_ID"); v != "" && cfg.Teams.TenantID == "" {
+		cfg.Teams.TenantID = strings.TrimSpace(v)
+	}
+	if v := os.Getenv("TEAMS_CLIENT_ID"); v != "" && cfg.Teams.ClientID == "" {
+		cfg.Teams.ClientID = strings.TrimSpace(v)
+	}
+	if v := os.Getenv("TEAMS_CLIENT_SECRET"); v != "" && cfg.Teams.ClientSecret == "" {
+		cfg.Teams.ClientSecret = strings.TrimSpace(v)
+	}
+	if v := os.Getenv("TEAMS_CHAT_CONVERSATION_IDS"); v != "" && len(cfg.Teams.ChatConversationIDs) == 0 {
+		for _, s := range strings.Split(v, ",") {
+			s = strings.TrimSpace(s)
+			if s != "" {
+				cfg.Teams.ChatConversationIDs = append(cfg.Teams.ChatConversationIDs, s)
+			}
+		}
+	}
+	if v := os.Getenv("TEAMS_CHAT_PROFILE"); v != "" && cfg.Teams.ChatProfile == "" {
+		cfg.Teams.ChatProfile = strings.TrimSpace(v)
+	}
+	if cfg.Teams.ChatProfile == "" {
+		cfg.Teams.ChatProfile = "explorer"
+	}
+	if v := os.Getenv("TEAMS_CHAT_SYSTEM_PROMPT"); v != "" && cfg.Teams.ChatSystemPrompt == "" {
+		cfg.Teams.ChatSystemPrompt = v
+	}
+	if v := os.Getenv("TEAMS_MAX_CONCURRENT_MESSAGES"); v != "" && cfg.Teams.MaxConcurrentMessages == 0 {
+		if n, err := strconv.Atoi(strings.TrimSpace(v)); err == nil {
+			cfg.Teams.MaxConcurrentMessages = n
+		}
+	}
+	if cfg.Teams.MaxConcurrentMessages <= 0 {
+		cfg.Teams.MaxConcurrentMessages = 10
+	}
+	if v := os.Getenv("TEAMS_EDIT_INTERVAL_MS"); v != "" && cfg.Teams.EditIntervalMS == 0 {
+		if n, err := strconv.Atoi(strings.TrimSpace(v)); err == nil {
+			cfg.Teams.EditIntervalMS = n
+		}
+	}
+	if cfg.Teams.EditIntervalMS <= 0 {
+		cfg.Teams.EditIntervalMS = 1500
+	}
+	if v := os.Getenv("TEAMS_SKIP_JWT_VERIFY"); v != "" && !cfg.Teams.SkipJWTVerify {
+		if b, err := strconv.ParseBool(strings.TrimSpace(v)); err == nil {
+			cfg.Teams.SkipJWTVerify = b
+		}
 	}
 
 	return cfg

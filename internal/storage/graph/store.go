@@ -94,6 +94,12 @@ func (s *SQLiteStore) Close() error {
 	return s.close()
 }
 
+// MigrateSchema runs the graph store DDL migrations against the given database.
+func MigrateSchema(ctx context.Context, db *sql.DB) error {
+	tmp := &SQLiteStore{db: db}
+	return tmp.migrate(ctx)
+}
+
 // migrate creates or updates the database schema.
 func (s *SQLiteStore) migrate(ctx context.Context) error {
 	schema := `
@@ -157,7 +163,7 @@ func (s *SQLiteStore) UpsertNode(ctx context.Context, node Node) error {
 
 	query := `
 	INSERT INTO graph_nodes (workspace, node_id, node_type, title, current_path, pagerank, in_degree, out_degree, last_seen, metadata, created_at, updated_at)
-	VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
 	ON CONFLICT(workspace, node_id) DO UPDATE SET
 		node_type = excluded.node_type,
 		title = CASE WHEN excluded.title != '' THEN excluded.title ELSE graph_nodes.title END,
@@ -193,7 +199,7 @@ func (s *SQLiteStore) GetNode(ctx context.Context, workspace, nodeID string) (No
 	query := `
 	SELECT workspace, node_id, node_type, title, current_path, pagerank, in_degree, out_degree, last_seen, metadata, created_at, updated_at
 	FROM graph_nodes
-	WHERE workspace = ? AND node_id = ?
+	WHERE workspace = $1 AND node_id = $2
 	`
 
 	var node Node
@@ -249,13 +255,13 @@ func (s *SQLiteStore) DeleteNode(ctx context.Context, workspace, nodeID string) 
 	defer tx.Rollback()
 
 	// Delete edges first
-	_, err = tx.ExecContext(ctx, "DELETE FROM graph_edges WHERE workspace = ? AND (from_id = ? OR to_id = ?)", workspace, nodeID, nodeID)
+	_, err = tx.ExecContext(ctx, "DELETE FROM graph_edges WHERE workspace = $1 AND (from_id = $2 OR to_id = $3)", workspace, nodeID, nodeID)
 	if err != nil {
 		return err
 	}
 
 	// Delete node
-	_, err = tx.ExecContext(ctx, "DELETE FROM graph_nodes WHERE workspace = ? AND node_id = ?", workspace, nodeID)
+	_, err = tx.ExecContext(ctx, "DELETE FROM graph_nodes WHERE workspace = $1 AND node_id = $2", workspace, nodeID)
 	if err != nil {
 		return err
 	}
@@ -268,21 +274,21 @@ func (s *SQLiteStore) TopNodes(ctx context.Context, opts TopNodesOptions) ([]Nod
 	opts.Workspace = ws.CanonicalID(opts.Workspace)
 	var args []any
 	query := `
-	SELECT workspace, node_id, node_type, title, current_path, pagerank, in_degree, out_degree, last_seen, metadata, created_at, updated_at
-	FROM graph_nodes
-	WHERE workspace = ? AND pagerank >= ?
-	`
+		SELECT workspace, node_id, node_type, title, current_path, pagerank, in_degree, out_degree, last_seen, metadata, created_at, updated_at
+		FROM graph_nodes
+		WHERE workspace = $1 AND pagerank >= $2
+		`
 	args = append(args, opts.Workspace, opts.MinRank)
 
 	if opts.NodeType != nil {
-		query += " AND node_type = ?"
+		query += fmt.Sprintf(" AND node_type = $%d", len(args)+1)
 		args = append(args, string(*opts.NodeType))
 	}
 
 	query += " ORDER BY pagerank DESC"
 
 	if opts.Limit > 0 {
-		query += " LIMIT ?"
+		query += fmt.Sprintf(" LIMIT $%d", len(args)+1)
 		args = append(args, opts.Limit)
 	}
 
@@ -299,7 +305,7 @@ func (s *SQLiteStore) TopNodes(ctx context.Context, opts TopNodesOptions) ([]Nod
 func (s *SQLiteStore) UpdatePageRank(ctx context.Context, workspace, nodeID string, pagerank float64) error {
 	workspace = ws.CanonicalID(workspace)
 	_, err := s.db.ExecContext(ctx,
-		"UPDATE graph_nodes SET pagerank = ?, updated_at = ? WHERE workspace = ? AND node_id = ?",
+		"UPDATE graph_nodes SET pagerank = $1, updated_at = $2 WHERE workspace = $3 AND node_id = $4",
 		pagerank, time.Now().UTC().Format(time.RFC3339), workspace, nodeID,
 	)
 	return err
@@ -309,7 +315,7 @@ func (s *SQLiteStore) UpdatePageRank(ctx context.Context, workspace, nodeID stri
 func (s *SQLiteStore) UpdateDegrees(ctx context.Context, workspace, nodeID string, inDegree, outDegree int) error {
 	workspace = ws.CanonicalID(workspace)
 	_, err := s.db.ExecContext(ctx,
-		"UPDATE graph_nodes SET in_degree = ?, out_degree = ?, updated_at = ? WHERE workspace = ? AND node_id = ?",
+		"UPDATE graph_nodes SET in_degree = $1, out_degree = $2, updated_at = $3 WHERE workspace = $4 AND node_id = $5",
 		inDegree, outDegree, time.Now().UTC().Format(time.RFC3339), workspace, nodeID,
 	)
 	return err
@@ -338,7 +344,7 @@ func (s *SQLiteStore) UpsertEdge(ctx context.Context, edge Edge) error {
 	// original creation time, but rather from their last refresh time.
 	query := `
 	INSERT INTO graph_edges (id, workspace, from_id, from_type, to_id, to_type, edge_type, weight, created_at, ttl_days, metadata)
-	VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 	ON CONFLICT(workspace, from_id, to_id, edge_type) DO UPDATE SET
 		weight = excluded.weight,
 		ttl_days = excluded.ttl_days,
@@ -367,7 +373,7 @@ func (s *SQLiteStore) GetEdge(ctx context.Context, id string) (Edge, error) {
 	query := `
 	SELECT id, workspace, from_id, from_type, to_id, to_type, edge_type, weight, created_at, ttl_days, metadata
 	FROM graph_edges
-	WHERE id = ?
+	WHERE id = $1
 	`
 
 	var edge Edge
@@ -411,7 +417,7 @@ func (s *SQLiteStore) GetEdge(ctx context.Context, id string) (Edge, error) {
 
 // DeleteEdge removes an edge.
 func (s *SQLiteStore) DeleteEdge(ctx context.Context, id string) error {
-	_, err := s.db.ExecContext(ctx, "DELETE FROM graph_edges WHERE id = ?", id)
+	_, err := s.db.ExecContext(ctx, "DELETE FROM graph_edges WHERE id = $1", id)
 	return err
 }
 
@@ -431,14 +437,14 @@ func (s *SQLiteStore) getEdges(ctx context.Context, workspace, nodeID, column st
 	query := fmt.Sprintf(`
 	SELECT id, workspace, from_id, from_type, to_id, to_type, edge_type, weight, created_at, ttl_days, metadata
 	FROM graph_edges
-	WHERE workspace = ? AND %s = ?
+	WHERE workspace = $1 AND %s = $2
 	`, column)
 	args = append(args, workspace, nodeID)
 
 	if len(edgeTypes) > 0 {
 		placeholders := make([]string, len(edgeTypes))
 		for i, et := range edgeTypes {
-			placeholders[i] = "?"
+			placeholders[i] = fmt.Sprintf("$%d", len(args)+1)
 			args = append(args, string(et))
 		}
 		query += fmt.Sprintf(" AND edge_type IN (%s)", strings.Join(placeholders, ","))
@@ -514,7 +520,7 @@ func (s *SQLiteStore) UpsertNodes(ctx context.Context, nodes []Node) error {
 
 	stmt, err := tx.PrepareContext(ctx, `
 	INSERT INTO graph_nodes (workspace, node_id, node_type, title, current_path, pagerank, in_degree, out_degree, last_seen, metadata, created_at, updated_at)
-	VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
 	ON CONFLICT(workspace, node_id) DO UPDATE SET
 		node_type = excluded.node_type,
 		title = CASE WHEN excluded.title != '' THEN excluded.title ELSE graph_nodes.title END,
@@ -579,7 +585,7 @@ func (s *SQLiteStore) UpsertEdges(ctx context.Context, edges []Edge) error {
 	// original creation time, but rather from their last refresh time.
 	stmt, err := tx.PrepareContext(ctx, `
 	INSERT INTO graph_edges (id, workspace, from_id, from_type, to_id, to_type, edge_type, weight, created_at, ttl_days, metadata)
-	VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 	ON CONFLICT(workspace, from_id, to_id, edge_type) DO UPDATE SET
 		weight = excluded.weight,
 		ttl_days = excluded.ttl_days,
@@ -641,14 +647,14 @@ func (s *SQLiteStore) Stats(ctx context.Context, workspace string) (GraphStats, 
 	// Node stats
 	row := s.db.QueryRowContext(ctx, `
 	SELECT COUNT(*), COALESCE(AVG(pagerank), 0), COALESCE(MAX(pagerank), 0), COALESCE(AVG(in_degree), 0), COALESCE(AVG(out_degree), 0)
-	FROM graph_nodes WHERE workspace = ?
+	FROM graph_nodes WHERE workspace = $1
 	`, workspace)
 	if err := row.Scan(&stats.Nodes.TotalNodes, &stats.Nodes.AvgPageRank, &stats.Nodes.MaxPageRank, &stats.Nodes.AvgInDegree, &stats.Nodes.AvgOutDegree); err != nil {
 		return stats, err
 	}
 
 	// Node counts by type
-	rows, err := s.db.QueryContext(ctx, "SELECT node_type, COUNT(*) FROM graph_nodes WHERE workspace = ? GROUP BY node_type", workspace)
+	rows, err := s.db.QueryContext(ctx, "SELECT node_type, COUNT(*) FROM graph_nodes WHERE workspace = $1 GROUP BY node_type", workspace)
 	if err != nil {
 		return stats, err
 	}
@@ -663,13 +669,13 @@ func (s *SQLiteStore) Stats(ctx context.Context, workspace string) (GraphStats, 
 	}
 
 	// Edge stats
-	row = s.db.QueryRowContext(ctx, "SELECT COUNT(*), COALESCE(AVG(weight), 0) FROM graph_edges WHERE workspace = ?", workspace)
+	row = s.db.QueryRowContext(ctx, "SELECT COUNT(*), COALESCE(AVG(weight), 0) FROM graph_edges WHERE workspace = $1", workspace)
 	if err := row.Scan(&stats.Edges.TotalEdges, &stats.Edges.AvgWeight); err != nil {
 		return stats, err
 	}
 
 	// Edge counts by type
-	rows, err = s.db.QueryContext(ctx, "SELECT edge_type, COUNT(*) FROM graph_edges WHERE workspace = ? GROUP BY edge_type", workspace)
+	rows, err = s.db.QueryContext(ctx, "SELECT edge_type, COUNT(*) FROM graph_edges WHERE workspace = $1 GROUP BY edge_type", workspace)
 	if err != nil {
 		return stats, err
 	}
@@ -704,13 +710,13 @@ func (s *SQLiteStore) CleanupExpiredEdges(ctx context.Context) (int, error) {
 func (s *SQLiteStore) CleanupDanglingEdges(ctx context.Context, workspace string) (int, error) {
 	workspace = ws.CanonicalID(workspace)
 	result, err := s.db.ExecContext(ctx, `
-		DELETE FROM graph_edges
-		WHERE workspace = ?
-		  AND (
-	    NOT EXISTS (SELECT 1 FROM graph_nodes WHERE workspace = graph_edges.workspace AND node_id = graph_edges.from_id)
-	    OR NOT EXISTS (SELECT 1 FROM graph_nodes WHERE workspace = graph_edges.workspace AND node_id = graph_edges.to_id)
-	  )
-	`, workspace)
+			DELETE FROM graph_edges
+			WHERE workspace = $1
+			  AND (
+		    NOT EXISTS (SELECT 1 FROM graph_nodes WHERE workspace = graph_edges.workspace AND node_id = graph_edges.from_id)
+		    OR NOT EXISTS (SELECT 1 FROM graph_nodes WHERE workspace = graph_edges.workspace AND node_id = graph_edges.to_id)
+		  )
+		`, workspace)
 	if err != nil {
 		return 0, err
 	}
@@ -722,13 +728,13 @@ func (s *SQLiteStore) CleanupDanglingEdges(ctx context.Context, workspace string
 func (s *SQLiteStore) RecalculateDegrees(ctx context.Context, workspace string) error {
 	workspace = ws.CanonicalID(workspace)
 	_, err := s.db.ExecContext(ctx, `
-		UPDATE graph_nodes
-		SET
-			in_degree = (SELECT COUNT(*) FROM graph_edges WHERE workspace = graph_nodes.workspace AND to_id = graph_nodes.node_id),
-		out_degree = (SELECT COUNT(*) FROM graph_edges WHERE workspace = graph_nodes.workspace AND from_id = graph_nodes.node_id),
-		updated_at = ?
-	WHERE workspace = ?
-	`, time.Now().UTC().Format(time.RFC3339), workspace)
+			UPDATE graph_nodes
+			SET
+				in_degree = (SELECT COUNT(*) FROM graph_edges WHERE workspace = graph_nodes.workspace AND to_id = graph_nodes.node_id),
+			out_degree = (SELECT COUNT(*) FROM graph_edges WHERE workspace = graph_nodes.workspace AND from_id = graph_nodes.node_id),
+			updated_at = $1
+		WHERE workspace = $2
+		`, time.Now().UTC().Format(time.RFC3339), workspace)
 	return err
 }
 
@@ -736,10 +742,10 @@ func (s *SQLiteStore) RecalculateDegrees(ctx context.Context, workspace string) 
 func (s *SQLiteStore) GetAllEdges(ctx context.Context, workspace string) ([]Edge, error) {
 	workspace = ws.CanonicalID(workspace)
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, workspace, from_id, from_type, to_id, to_type, edge_type, weight, created_at, ttl_days, metadata
-		FROM graph_edges
-		WHERE workspace = ?
-	`, workspace)
+			SELECT id, workspace, from_id, from_type, to_id, to_type, edge_type, weight, created_at, ttl_days, metadata
+			FROM graph_edges
+			WHERE workspace = $1
+		`, workspace)
 	if err != nil {
 		return nil, err
 	}
@@ -752,10 +758,10 @@ func (s *SQLiteStore) GetAllEdges(ctx context.Context, workspace string) ([]Edge
 func (s *SQLiteStore) GetAllNodes(ctx context.Context, workspace string) ([]Node, error) {
 	workspace = ws.CanonicalID(workspace)
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT workspace, node_id, node_type, title, current_path, pagerank, in_degree, out_degree, last_seen, metadata, created_at, updated_at
-		FROM graph_nodes
-		WHERE workspace = ?
-	`, workspace)
+			SELECT workspace, node_id, node_type, title, current_path, pagerank, in_degree, out_degree, last_seen, metadata, created_at, updated_at
+			FROM graph_nodes
+			WHERE workspace = $1
+		`, workspace)
 	if err != nil {
 		return nil, err
 	}
@@ -781,7 +787,7 @@ func (s *SQLiteStore) BulkUpdatePageRank(ctx context.Context, workspace string, 
 	}
 	defer tx.Rollback()
 
-	stmt, err := tx.PrepareContext(ctx, "UPDATE graph_nodes SET pagerank = ?, updated_at = ? WHERE workspace = ? AND node_id = ?")
+	stmt, err := tx.PrepareContext(ctx, "UPDATE graph_nodes SET pagerank = $1, updated_at = $2 WHERE workspace = $3 AND node_id = $4")
 	if err != nil {
 		return err
 	}
@@ -894,12 +900,12 @@ func (s *SQLiteStore) SearchNodes(ctx context.Context, workspace, term string, l
 	query := `
 	SELECT workspace, node_id, node_type, title, current_path, pagerank, in_degree, out_degree, last_seen, metadata, created_at, updated_at
 	FROM graph_nodes
-	WHERE workspace = ?
-	  AND (node_id LIKE '%' || ? || '%' COLLATE NOCASE
-	    OR title LIKE '%' || ? || '%' COLLATE NOCASE
-	    OR current_path LIKE '%' || ? || '%' COLLATE NOCASE)
+	WHERE workspace = $1
+	  AND (node_id LIKE '%' || $2 || '%' COLLATE NOCASE
+	    OR title LIKE '%' || $3 || '%' COLLATE NOCASE
+	    OR current_path LIKE '%' || $4 || '%' COLLATE NOCASE)
 	ORDER BY pagerank DESC
-	LIMIT ?
+	LIMIT $5
 	`
 
 	rows, err := s.db.QueryContext(ctx, query, workspace, term, term, term, limit)
@@ -919,28 +925,27 @@ func (s *SQLiteStore) GetEdgesBetween(ctx context.Context, workspace string, nod
 	}
 
 	// Build placeholders for IN clause
-	placeholders := make([]string, len(nodeIDs))
+	fromPlaceholders := make([]string, len(nodeIDs))
+	toPlaceholders := make([]string, len(nodeIDs))
 	args := make([]any, 0, 1+2*len(nodeIDs))
 	args = append(args, workspace)
 
 	for i, id := range nodeIDs {
-		placeholders[i] = "?"
+		fromPlaceholders[i] = fmt.Sprintf("$%d", len(args)+1)
 		args = append(args, id)
 	}
-	inClause := strings.Join(placeholders, ",")
-
-	// Add nodeIDs again for the to_id IN clause
-	for _, id := range nodeIDs {
+	for i, id := range nodeIDs {
+		toPlaceholders[i] = fmt.Sprintf("$%d", len(args)+1)
 		args = append(args, id)
 	}
 
 	query := fmt.Sprintf(`
 	SELECT id, workspace, from_id, from_type, to_id, to_type, edge_type, weight, created_at, ttl_days, metadata
 	FROM graph_edges
-	WHERE workspace = ?
+	WHERE workspace = $1
 	  AND from_id IN (%s)
 	  AND to_id IN (%s)
-	`, inClause, inClause)
+	`, strings.Join(fromPlaceholders, ","), strings.Join(toPlaceholders, ","))
 
 	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {

@@ -1,0 +1,36 @@
+# JSON Patch (RFC 6902) to inject PostgreSQL secrets and switch probes
+# Uses replace operations to fully override probes (strategic merge would merge exec+httpGet)
+
+# Add PostgreSQL DSN env var from secret
+- op: add
+  path: /spec/template/spec/containers/0/env/0
+  value:
+    name: AGENTCTL_POSTGRES_DSN
+    valueFrom:
+      secretKeyRef:
+        name: postgres-secrets
+        key: dsn
+
+# Replace liveness probe: exec -> httpGet
+- op: replace
+  path: /spec/template/spec/containers/0/livenessProbe
+  value:
+    httpGet:
+      path: /healthz
+      port: health
+    initialDelaySeconds: 10
+    periodSeconds: 30
+    timeoutSeconds: 5
+    failureThreshold: 3
+
+# Replace readiness probe: exec -> httpGet
+- op: replace
+  path: /spec/template/spec/containers/0/readinessProbe
+  value:
+    httpGet:
+      path: /readyz
+      port: health
+    initialDelaySeconds: 5
+    periodSeconds: 10
+    timeoutSeconds: 3
+    failureThreshold: 3

@@ -69,7 +69,7 @@ func (s *sqlStore) Send(ctx context.Context, msg agent.Message) error {
 
 	_, err = s.db.ExecContext(ctx, `
 		INSERT INTO mailbox (id, from_ns, to_ns, type, ttl_ms, headers, payload, visible_at, attempt, ts, session_id, workspace, agent_id)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
 		msg.ID, msg.FromNS, msg.ToNS, msg.Type, msg.TTLMS, string(headersJSON), string(msg.Payload), msg.VisibleAt, msg.Attempt, msg.Timestamp,
 		msg.SessionID, msg.Workspace, msg.AgentID)
 	if err != nil {
@@ -115,18 +115,23 @@ func (s *sqlStore) poll(ctx context.Context, agentNS string, leaseDuration time.
 	query := `
 		SELECT id, from_ns, to_ns, type, ttl_ms, headers, payload, visible_at, attempt, ts, session_id, workspace, agent_id
 		FROM mailbox
-		WHERE to_ns = ? AND visible_at <= ?`
+		WHERE to_ns = $1 AND visible_at <= $2`
 	args := []any{agentNS, now}
+	argIdx := 3
 	if len(types) > 0 {
-		placeholders := strings.TrimRight(strings.Repeat("?,", len(types)), ",")
-		query += " AND type IN (" + placeholders + ")"
+		var ph []string
+		for range types {
+			ph = append(ph, fmt.Sprintf("$%d", argIdx))
+			argIdx++
+		}
+		query += " AND type IN (" + strings.Join(ph, ",") + ")"
 		for _, msgType := range types {
 			args = append(args, string(msgType))
 		}
 	}
-	query += `
+	query += fmt.Sprintf(`
 		ORDER BY ts ASC
-		LIMIT ?`
+		LIMIT $%d`, argIdx)
 	args = append(args, maxMessages)
 
 	rows, err := tx.QueryContext(ctx, query, args...)
@@ -162,8 +167,8 @@ func (s *sqlStore) poll(ctx context.Context, agentNS string, leaseDuration time.
 	for i := range messages {
 		res, err := tx.ExecContext(ctx, `
 			UPDATE mailbox
-			SET visible_at = ?, attempt = attempt + 1
-			WHERE id = ? AND visible_at <= ?`,
+			SET visible_at = $1, attempt = attempt + 1
+			WHERE id = $2 AND visible_at <= $3`,
 			leaseUntil, messages[i].ID, now)
 		if err != nil {
 			return nil, fmt.Errorf("mailbox: update visibility: %w", err)
@@ -204,7 +209,7 @@ func (s *sqlStore) poll(ctx context.Context, agentNS string, leaseDuration time.
 }
 
 func (s *sqlStore) Ack(ctx context.Context, messageID string) error {
-	res, err := s.db.ExecContext(ctx, `DELETE FROM mailbox WHERE id = ?`, messageID)
+	res, err := s.db.ExecContext(ctx, `DELETE FROM mailbox WHERE id = $1`, messageID)
 	if err != nil {
 		return fmt.Errorf("mailbox: ack: %w", err)
 	}
@@ -220,7 +225,7 @@ func (s *sqlStore) Ack(ctx context.Context, messageID string) error {
 
 func (s *sqlStore) Nack(ctx context.Context, messageID string, visibilityTimeout time.Duration) error {
 	newVisibleAt := time.Now().Add(visibilityTimeout).Unix()
-	res, err := s.db.ExecContext(ctx, `UPDATE mailbox SET visible_at = ? WHERE id = ?`, newVisibleAt, messageID)
+	res, err := s.db.ExecContext(ctx, `UPDATE mailbox SET visible_at = $1 WHERE id = $2`, newVisibleAt, messageID)
 	if err != nil {
 		return fmt.Errorf("mailbox: nack: %w", err)
 	}
@@ -241,9 +246,9 @@ func (s *sqlStore) List(ctx context.Context, agentNS string, limit int) ([]agent
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT id, from_ns, to_ns, type, ttl_ms, headers, payload, visible_at, attempt, ts, session_id, workspace, agent_id
 		FROM mailbox
-		WHERE to_ns = ?
+		WHERE to_ns = $1
 		ORDER BY ts DESC
-		LIMIT ?`, agentNS, limit)
+		LIMIT $2`, agentNS, limit)
 	if err != nil {
 		return nil, fmt.Errorf("mailbox: list: %w", err)
 	}
@@ -263,7 +268,7 @@ func (s *sqlStore) List(ctx context.Context, agentNS string, limit int) ([]agent
 }
 
 func (s *sqlStore) Delete(ctx context.Context, messageID string) error {
-	res, err := s.db.ExecContext(ctx, `DELETE FROM mailbox WHERE id = ?`, messageID)
+	res, err := s.db.ExecContext(ctx, `DELETE FROM mailbox WHERE id = $1`, messageID)
 	if err != nil {
 		return fmt.Errorf("mailbox: delete: %w", err)
 	}
@@ -284,9 +289,9 @@ func (s *sqlStore) ListBySession(ctx context.Context, sessionID string, limit in
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT id, from_ns, to_ns, type, ttl_ms, headers, payload, visible_at, attempt, ts, session_id, workspace, agent_id
 		FROM mailbox
-		WHERE session_id = ?
+		WHERE session_id = $1
 		ORDER BY ts DESC
-		LIMIT ?`, sessionID, limit)
+		LIMIT $2`, sessionID, limit)
 	if err != nil {
 		return nil, fmt.Errorf("mailbox: list by session: %w", err)
 	}
@@ -312,9 +317,9 @@ func (s *sqlStore) ListByWorkspace(ctx context.Context, workspace string, limit 
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT id, from_ns, to_ns, type, ttl_ms, headers, payload, visible_at, attempt, ts, session_id, workspace, agent_id
 		FROM mailbox
-		WHERE workspace = ?
+		WHERE workspace = $1
 		ORDER BY ts DESC
-		LIMIT ?`, workspace, limit)
+		LIMIT $2`, workspace, limit)
 	if err != nil {
 		return nil, fmt.Errorf("mailbox: list by workspace: %w", err)
 	}

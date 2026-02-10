@@ -76,10 +76,9 @@ const (
 )
 
 // Open initializes a memory-backed Store rooted at the provided filesystem path.
-// It creates or opens the SQLite database at root/memory.db, runs migrations, and configures the DB connection pool; if casPath is non-empty it also initializes a CAS store and an artifacts.Manager.
+// It opens the database via dbutil.OpenStoreDB, runs migrations, and configures the DB connection pool; if casPath is non-empty it also initializes a CAS store and an artifacts.Manager.
 func Open(ctx context.Context, root string, casPath string) (store *Store, err error) {
-	dbPath := filepath.Join(root, "memory.db")
-	db, closeFn, err := dbutil.OpenSQLiteDBShared(ctx, dbPath, migrate)
+	db, closeFn, err := dbutil.OpenStoreDB(ctx, root, "MEMORY", "memory.db", migrate)
 	if err != nil {
 		return nil, fmt.Errorf("memory: open db: %w", err)
 	}
@@ -97,7 +96,7 @@ func Open(ctx context.Context, root string, casPath string) (store *Store, err e
 	db.SetConnMaxLifetime(defaultConnMaxLifetime)
 	db.SetConnMaxIdleTime(defaultConnMaxIdleTime)
 
-	// dbutil.OpenSQLiteDBShared (sqliteutil underneath) handles directory creation, WAL configuration, and migration execution.
+	// dbutil.OpenStoreDB handles directory creation, WAL configuration, and migration execution.
 
 	var casStore *cas.Store
 	var artifactMgr artifacts.Manager
@@ -107,7 +106,7 @@ func Open(ctx context.Context, root string, casPath string) (store *Store, err e
 		}
 		artifactMgr = artifacts.NewManager(casStore)
 	}
-	store = &Store{db: db, cas: casStore, artifactManager: artifactMgr, path: dbPath, close: closeFn}
+	store = &Store{db: db, cas: casStore, artifactManager: artifactMgr, path: filepath.Join(root, "memory.db"), close: closeFn}
 	store.repairWorkspaceIDs(ctx)
 	return store, nil
 }
@@ -162,16 +161,16 @@ func (s *Store) MigrateWorkspace(ctx context.Context, from, to string, dryRun bo
 	}
 
 	if dryRun {
-		if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM named_memory WHERE workspace = ?`, from).Scan(&summary.Total); err != nil {
+		if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM named_memory WHERE workspace = $1`, from).Scan(&summary.Total); err != nil {
 			return summary, fmt.Errorf("memory: migrate workspace count: %w", err)
 		}
 		if err := s.db.QueryRowContext(ctx, `
 			SELECT COUNT(*)
 			FROM named_memory src
-			WHERE src.workspace = ?
+			WHERE src.workspace = $1
 			  AND EXISTS (
 				SELECT 1 FROM named_memory dst
-				WHERE dst.workspace = ? AND dst.name = src.name
+				WHERE dst.workspace = $2 AND dst.name = src.name
 			  )`, from, to).Scan(&summary.Conflicts); err != nil {
 			return summary, fmt.Errorf("memory: migrate workspace conflicts: %w", err)
 		}
@@ -180,10 +179,10 @@ func (s *Store) MigrateWorkspace(ctx context.Context, from, to string, dryRun bo
 			summary.Migrated = 0
 		}
 		var fromMeta, toMeta int
-		if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM embedding_metadata WHERE workspace = ?`, from).Scan(&fromMeta); err != nil {
+		if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM embedding_metadata WHERE workspace = $1`, from).Scan(&fromMeta); err != nil {
 			return summary, fmt.Errorf("memory: migrate workspace metadata source: %w", err)
 		}
-		if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM embedding_metadata WHERE workspace = ?`, to).Scan(&toMeta); err != nil {
+		if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM embedding_metadata WHERE workspace = $1`, to).Scan(&toMeta); err != nil {
 			return summary, fmt.Errorf("memory: migrate workspace metadata target: %w", err)
 		}
 		summary.MetadataMoved = fromMeta > 0 && toMeta == 0
@@ -200,27 +199,27 @@ func (s *Store) MigrateWorkspace(ctx context.Context, from, to string, dryRun bo
 		}
 	}()
 
-	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM named_memory WHERE workspace = ?`, from).Scan(&summary.Total); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM named_memory WHERE workspace = $1`, from).Scan(&summary.Total); err != nil {
 		return summary, fmt.Errorf("memory: migrate workspace count: %w", err)
 	}
 	if err := tx.QueryRowContext(ctx, `
 		SELECT COUNT(*)
 		FROM named_memory src
-		WHERE src.workspace = ?
+		WHERE src.workspace = $1
 		  AND EXISTS (
 			SELECT 1 FROM named_memory dst
-			WHERE dst.workspace = ? AND dst.name = src.name
+			WHERE dst.workspace = $2 AND dst.name = src.name
 		  )`, from, to).Scan(&summary.Conflicts); err != nil {
 		return summary, fmt.Errorf("memory: migrate workspace conflicts: %w", err)
 	}
 
 	updateResult, err := tx.ExecContext(ctx, `
 		UPDATE named_memory AS src
-		SET workspace = ?
-		WHERE src.workspace = ?
+		SET workspace = $1
+		WHERE src.workspace = $2
 		  AND NOT EXISTS (
 			SELECT 1 FROM named_memory dst
-			WHERE dst.workspace = ? AND dst.name = src.name
+			WHERE dst.workspace = $3 AND dst.name = src.name
 		  )`, to, from, to)
 	if err != nil {
 		return summary, fmt.Errorf("memory: migrate workspace update: %w", err)
@@ -230,14 +229,14 @@ func (s *Store) MigrateWorkspace(ctx context.Context, from, to string, dryRun bo
 	}
 
 	var fromMeta, toMeta int
-	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM embedding_metadata WHERE workspace = ?`, from).Scan(&fromMeta); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM embedding_metadata WHERE workspace = $1`, from).Scan(&fromMeta); err != nil {
 		return summary, fmt.Errorf("memory: migrate workspace metadata source: %w", err)
 	}
-	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM embedding_metadata WHERE workspace = ?`, to).Scan(&toMeta); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM embedding_metadata WHERE workspace = $1`, to).Scan(&toMeta); err != nil {
 		return summary, fmt.Errorf("memory: migrate workspace metadata target: %w", err)
 	}
 	if fromMeta > 0 && toMeta == 0 {
-		metadataResult, err := tx.ExecContext(ctx, `UPDATE embedding_metadata SET workspace = ? WHERE workspace = ?`, to, from)
+		metadataResult, err := tx.ExecContext(ctx, `UPDATE embedding_metadata SET workspace = $1 WHERE workspace = $2`, to, from)
 		if err != nil {
 			return summary, fmt.Errorf("memory: migrate workspace metadata update: %w", err)
 		}
@@ -250,11 +249,11 @@ func (s *Store) MigrateWorkspace(ctx context.Context, from, to string, dryRun bo
 	// We intentionally don't fail the migration if this table doesn't exist in older DBs.
 	if _, err := tx.ExecContext(ctx, `
 		UPDATE indexer_state AS src
-		SET workspace = ?
-		WHERE src.workspace = ?
+		SET workspace = $1
+		WHERE src.workspace = $2
 		  AND NOT EXISTS (
 			SELECT 1 FROM indexer_state dst
-			WHERE dst.workspace = ? AND dst.indexer_id = src.indexer_id
+			WHERE dst.workspace = $3 AND dst.indexer_id = src.indexer_id
 		  )`, to, from, to); err != nil {
 		errMsg := strings.ToLower(err.Error())
 		if !strings.Contains(errMsg, "no such table") && !strings.Contains(errMsg, "does not exist") {
@@ -293,7 +292,7 @@ func (s *Store) Save(ctx context.Context, entry NamedEntry) (NamedEntry, error) 
 
 	_, err = s.db.ExecContext(ctx, `
 INSERT INTO named_memory (id, name, type, workspace, summary, result, digests, session_id, created_at, updated_at, last_accessed, access_count)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 0)
 ON CONFLICT(name, workspace) DO UPDATE SET
 	id = excluded.id,
 	type = excluded.type,
@@ -318,7 +317,7 @@ func (s *Store) Get(ctx context.Context, name, workspace string) (NamedEntry, er
 	row := s.db.QueryRowContext(ctx, `
 		SELECT id, name, type, workspace, summary, result, digests, created_at, updated_at, last_accessed, access_count, session_id
 		FROM named_memory
-		WHERE name = ? AND workspace = ?`, name, workspace)
+		WHERE name = $1 AND workspace = $2`, name, workspace)
 	var entry NamedEntry
 	var digests string
 	var created, updated, last string
@@ -355,8 +354,8 @@ func (s *Store) Get(ctx context.Context, name, workspace string) (NamedEntry, er
 
 	if _, updateErr := s.db.ExecContext(ctx, `
 		UPDATE named_memory
-		SET last_accessed = ?, access_count = access_count + 1
-		WHERE id = ?`, sqlutil.FormatTimestamp(timeutil.NowUTC()), entry.ID); updateErr != nil {
+		SET last_accessed = $1, access_count = access_count + 1
+		WHERE id = $2`, sqlutil.FormatTimestamp(timeutil.NowUTC()), entry.ID); updateErr != nil {
 		errs.Ignore(updateErr, "memory: refresh access metadata")
 	}
 
@@ -372,9 +371,9 @@ func (s *Store) List(ctx context.Context, workspace string, limit int) ([]NamedE
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT id, name, type, workspace, summary, result, digests, created_at, updated_at, last_accessed, access_count, session_id
 		FROM named_memory
-		WHERE workspace = ?
+		WHERE workspace = $1
 		ORDER BY updated_at DESC
-		LIMIT ?`, workspace, limit)
+		LIMIT $2`, workspace, limit)
 	if err != nil {
 		return nil, fmt.Errorf("memory: list: %w", err)
 	}
@@ -432,11 +431,14 @@ func (s *Store) ListFiltered(ctx context.Context, workspace string, filter ListF
 		offset = 0
 	}
 
-	where := []string{"workspace = ?"}
+	argIdx := 1
+	where := []string{fmt.Sprintf("workspace = $%d", argIdx)}
+	argIdx++
 	args := []any{workspace}
 
 	if strings.TrimSpace(filter.SessionID) != "" {
-		where = append(where, "session_id = ?")
+		where = append(where, fmt.Sprintf("session_id = $%d", argIdx))
+		argIdx++
 		args = append(args, strings.TrimSpace(filter.SessionID))
 	}
 
@@ -447,7 +449,8 @@ func (s *Store) ListFiltered(ctx context.Context, workspace string, filter ListF
 			if t == "" {
 				continue
 			}
-			placeholders = append(placeholders, "?")
+			placeholders = append(placeholders, fmt.Sprintf("$%d", argIdx))
+			argIdx++
 			args = append(args, t)
 		}
 		if len(placeholders) > 0 {
@@ -467,7 +470,7 @@ func (s *Store) ListFiltered(ctx context.Context, workspace string, filter ListF
 		FROM named_memory
 		WHERE %s
 		ORDER BY updated_at DESC
-		LIMIT ? OFFSET ?`, whereSQL)
+		LIMIT $%d OFFSET $%d`, whereSQL, argIdx, argIdx+1)
 	qArgs := append(append([]any{}, args...), limit, offset)
 
 	rows, err := s.db.QueryContext(ctx, q, qArgs...)
@@ -517,7 +520,7 @@ func (s *Store) ListFiltered(ctx context.Context, workspace string, filter ListF
 // Delete removes a named memory and unpins digests.
 func (s *Store) Delete(ctx context.Context, name, workspace string) error {
 	workspace = ws.CanonicalID(workspace)
-	row := s.db.QueryRowContext(ctx, `SELECT digests FROM named_memory WHERE name = ? AND workspace = ?`, name, workspace)
+	row := s.db.QueryRowContext(ctx, `SELECT digests FROM named_memory WHERE name = $1 AND workspace = $2`, name, workspace)
 	var digests string
 	if err := row.Scan(&digests); err != nil {
 		if dbutil.IsNoRows(err) {
@@ -525,7 +528,7 @@ func (s *Store) Delete(ctx context.Context, name, workspace string) error {
 		}
 		return fmt.Errorf("memory: scan digests: %w", err)
 	}
-	if _, err := s.db.ExecContext(ctx, `DELETE FROM named_memory WHERE name = ? AND workspace = ?`, name, workspace); err != nil {
+	if _, err := s.db.ExecContext(ctx, `DELETE FROM named_memory WHERE name = $1 AND workspace = $2`, name, workspace); err != nil {
 		return fmt.Errorf("memory: delete: %w", err)
 	}
 
@@ -544,7 +547,7 @@ func (s *Store) DeleteByNamePrefix(ctx context.Context, workspace, namePrefix st
 	// First collect digests from matching entries to unpin later
 	rows, err := s.db.QueryContext(ctx, `
 			SELECT digests FROM named_memory 
-			WHERE workspace = ? AND name LIKE ? || '%'`,
+			WHERE workspace = $1 AND name LIKE $2 || '%'`,
 		workspace, namePrefix)
 	if err != nil {
 		return 0, fmt.Errorf("memory: query delete prefix: %w", err)
@@ -574,7 +577,7 @@ func (s *Store) DeleteByNamePrefix(ctx context.Context, workspace, namePrefix st
 	// Delete matching entries
 	result, err := s.db.ExecContext(ctx, `
 		DELETE FROM named_memory 
-		WHERE workspace = ? AND name LIKE ? || '%'`,
+		WHERE workspace = $1 AND name LIKE $2 || '%'`,
 		workspace, namePrefix)
 	if err != nil {
 		return 0, fmt.Errorf("memory: delete prefix: %w", err)
@@ -642,6 +645,12 @@ func (s *Store) unpin(ctx context.Context, digests []string) {
 	if err := s.artifactManager.Unpin(ctx, digests...); err != nil {
 		errs.Ignore(err, "memory: unpin digests")
 	}
+}
+
+// MigrateSchema runs the memory store DDL migrations against the given database.
+// This is exported so the CLI db migrate command can create PostgreSQL tables.
+func MigrateSchema(ctx context.Context, db *sql.DB) error {
+	return migrate(ctx, db)
 }
 
 func migrate(ctx context.Context, db *sql.DB) error {
@@ -757,9 +766,9 @@ func (s *Store) Search(ctx context.Context, workspace, query string, limit int) 
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT id, name, type, workspace, summary, result, digests, created_at, updated_at, last_accessed, access_count, session_id
 		FROM named_memory
-		WHERE workspace = ? AND (LOWER(name) LIKE ? OR LOWER(summary) LIKE ?)
+		WHERE workspace = $1 AND (LOWER(name) LIKE $2 OR LOWER(summary) LIKE $3)
 		ORDER BY updated_at DESC
-		LIMIT ?`, workspace, like, like, limit)
+		LIMIT $4`, workspace, like, like, limit)
 	if err != nil {
 		return nil, fmt.Errorf("memory: search: %w", err)
 	}
@@ -796,7 +805,7 @@ func (s *Store) ExistsByNameSuffix(ctx context.Context, workspace, suffix string
 	var count int
 	err := s.db.QueryRowContext(ctx, `
 		SELECT COUNT(*) FROM named_memory
-		WHERE workspace = ? AND name LIKE '%' || ?`,
+		WHERE workspace = $1 AND name LIKE '%' || $2`,
 		workspace, suffix).Scan(&count)
 	if err != nil {
 		return false, fmt.Errorf("memory: exists by suffix: %w", err)
@@ -813,9 +822,9 @@ func (s *Store) ListByType(ctx context.Context, workspace, entryType string, lim
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT id, name, type, workspace, summary, result, digests, created_at, updated_at, last_accessed, access_count, session_id
 		FROM named_memory
-		WHERE workspace = ? AND type = ?
+		WHERE workspace = $1 AND type = $2
 		ORDER BY updated_at DESC
-		LIMIT ?`, workspace, entryType, limit)
+		LIMIT $3`, workspace, entryType, limit)
 	if err != nil {
 		return nil, fmt.Errorf("memory: list by type: %w", err)
 	}
@@ -845,9 +854,9 @@ func (s *Store) ListWithoutEmbedding(ctx context.Context, workspace string, limi
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT id, name, type, workspace, summary, result, digests, created_at, updated_at, last_accessed, access_count, session_id
 		FROM named_memory
-		WHERE workspace = ? AND (embedding IS NULL OR LENGTH(embedding) = 0) AND summary IS NOT NULL AND summary != ''
+		WHERE workspace = $1 AND (embedding IS NULL OR LENGTH(embedding) = 0) AND summary IS NOT NULL AND summary != ''
 		ORDER BY created_at DESC
-		LIMIT ?`, workspace, limit)
+		LIMIT $2`, workspace, limit)
 	if err != nil {
 		return nil, fmt.Errorf("memory: list without embedding: %w", err)
 	}
@@ -873,8 +882,8 @@ func (s *Store) Update(ctx context.Context, name, workspace string, summary, typ
 	entry.UpdatedAt = timeutil.NowUTC()
 	if _, err := s.db.ExecContext(ctx, `
 		UPDATE named_memory
-		SET summary = ?, type = ?, updated_at = ?
-		WHERE id = ?`, entry.Summary, entry.Type, sqlutil.FormatTimestamp(entry.UpdatedAt), entry.ID); err != nil {
+		SET summary = $1, type = $2, updated_at = $3
+		WHERE id = $4`, entry.Summary, entry.Type, sqlutil.FormatTimestamp(entry.UpdatedAt), entry.ID); err != nil {
 		return NamedEntry{}, fmt.Errorf("memory: update: %w", err)
 	}
 	return entry, nil
@@ -899,8 +908,8 @@ func (s *Store) UpdateEmbedding(ctx context.Context, name, workspace string, emb
 	// Update embedding column
 	if _, err := s.db.ExecContext(ctx, `
 		UPDATE named_memory
-		SET embedding = ?, updated_at = ?
-		WHERE name = ? AND workspace = ?
+		SET embedding = $1, updated_at = $2
+		WHERE name = $3 AND workspace = $4
 	`, embeddingJSON, sqlutil.FormatTimestamp(timeutil.NowUTC()), name, workspace); err != nil {
 		return fmt.Errorf("memory: update embedding: %w", err)
 	}
@@ -935,14 +944,18 @@ func (s *Store) SyncSymbolEmbeddings(ctx context.Context, embeddingDBPath string
 	}
 	defer conn.Close()
 
-	if _, err := conn.ExecContext(ctx, "ATTACH DATABASE ? AS embeddb", embeddingDBPath); err != nil {
+	if _, err := conn.ExecContext(ctx, "ATTACH DATABASE $1 AS embeddb", embeddingDBPath); err != nil {
 		return 0, fmt.Errorf("memory: sync embeddings: attach: %w", err)
 	}
 	defer func() {
 		_, _ = conn.ExecContext(ctx, "DETACH DATABASE embeddb")
 	}()
 
-	where := []string{"workspace = ?", "name LIKE ?"}
+	argIdx := 1
+	where := []string{fmt.Sprintf("workspace = $%d", argIdx)}
+	argIdx++
+	where = append(where, fmt.Sprintf("name LIKE $%d", argIdx))
+	argIdx++
 	args := []any{workspaceID, fmt.Sprintf("symbol://%s/%%", workspaceID)}
 	if opts.OnlyMissing {
 		where = append(where, "(embedding IS NULL OR LENGTH(embedding) = 0)")
@@ -959,7 +972,8 @@ func (s *Store) SyncSymbolEmbeddings(ctx context.Context, embeddingDBPath string
 		if len(names) > 0 {
 			pl := make([]string, 0, len(names))
 			for range names {
-				pl = append(pl, "?")
+				pl = append(pl, fmt.Sprintf("$%d", argIdx))
+				argIdx++
 			}
 			where = append(where, fmt.Sprintf("name IN (%s)", strings.Join(pl, ", ")))
 			for _, name := range names {
@@ -1002,7 +1016,7 @@ func (s *Store) GetEmbedding(ctx context.Context, name, workspace string) ([]flo
 	workspace = ws.CanonicalID(workspace)
 	var embeddingJSON []byte
 	err := s.db.QueryRowContext(ctx, `
-			SELECT embedding FROM named_memory WHERE name = ? AND workspace = ?
+			SELECT embedding FROM named_memory WHERE name = $1 AND workspace = $2
 		`, name, workspace).Scan(&embeddingJSON)
 	if err != nil {
 		if dbutil.IsNoRows(err) {
@@ -1031,7 +1045,7 @@ func (s *Store) GetEmbeddingMetadata(ctx context.Context, workspace string) (*Em
 	var createdAt, updatedAt string
 	err := s.db.QueryRowContext(ctx, `
 			SELECT workspace, provider, model, dimensions, created_at, updated_at
-			FROM embedding_metadata WHERE workspace = ?
+			FROM embedding_metadata WHERE workspace = $1
 	`, workspace).Scan(&meta.Workspace, &meta.Provider, &meta.Model, &meta.Dimensions, &createdAt, &updatedAt)
 	if err != nil {
 		if dbutil.IsNoRows(err) {
@@ -1061,7 +1075,7 @@ func (s *Store) SetEmbeddingMetadata(ctx context.Context, meta EmbeddingMetadata
 
 	_, err := s.db.ExecContext(ctx, `
 		INSERT INTO embedding_metadata (workspace, provider, model, dimensions, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?)
+		VALUES ($1, $2, $3, $4, $5, $6)
 		ON CONFLICT(workspace) DO UPDATE SET
 			provider = excluded.provider,
 			model = excluded.model,
@@ -1105,9 +1119,9 @@ func (s *Store) Relevant(ctx context.Context, workspace string, limit int) ([]Sc
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT id, name, type, workspace, summary, result, digests, created_at, updated_at, last_accessed, access_count, session_id
 		FROM named_memory
-		WHERE workspace = ?
+		WHERE workspace = $1
 		ORDER BY last_accessed DESC, updated_at DESC
-		LIMIT ?`, workspace, maxWindow)
+		LIMIT $2`, workspace, maxWindow)
 	if err != nil {
 		return nil, fmt.Errorf("memory: relevant: %w", err)
 	}
@@ -1150,7 +1164,7 @@ func (s *Store) SearchSimilar(ctx context.Context, workspace string, queryEmbedd
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT id, name, type, workspace, summary, result, digests, created_at, updated_at, last_accessed, access_count, session_id, embedding
 		FROM named_memory
-		WHERE workspace = ? AND embedding IS NOT NULL AND LENGTH(embedding) > 0
+		WHERE workspace = $1 AND embedding IS NOT NULL AND LENGTH(embedding) > 0
 		LIMIT 1000
 	`, workspace)
 	if err != nil {
@@ -1254,8 +1268,8 @@ func (s *Store) SearchSimilarByType(ctx context.Context, workspace, entryType st
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT id, name, type, workspace, summary, result, digests, created_at, updated_at, last_accessed, access_count, session_id, embedding
 		FROM named_memory
-		WHERE workspace = ? AND type = ? AND embedding IS NOT NULL AND LENGTH(embedding) > 0
-		LIMIT ?
+		WHERE workspace = $1 AND type = $2 AND embedding IS NOT NULL AND LENGTH(embedding) > 0
+		LIMIT $3
 	`, workspace, entryType, candidateLimit)
 	if err != nil {
 		return nil, fmt.Errorf("memory: search similar by type: %w", err)
@@ -1400,8 +1414,8 @@ func (s *Store) UpdateAtomic(ctx context.Context, name, workspace, atomicText st
 
 	result, err := s.db.ExecContext(ctx, `
 		UPDATE named_memory
-		SET atomic_text = ?, entities = ?, keywords = ?, updated_at = ?
-		WHERE name = ? AND workspace = ?
+		SET atomic_text = $1, entities = $2, keywords = $3, updated_at = $4
+		WHERE name = $5 AND workspace = $6
 	`, atomicText, entitiesJSON, keywordsJSON, sqlutil.FormatTimestamp(timeutil.NowUTC()), name, workspace)
 	if err != nil {
 		return fmt.Errorf("memory: update atomic: %w", err)

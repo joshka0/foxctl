@@ -2,6 +2,7 @@ package dbdriver
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"io"
 	"regexp"
@@ -28,6 +29,18 @@ type MigrationOptions struct {
 
 	// ContinueOnError continues migration even if some rows fail
 	ContinueOnError bool
+
+	// SkipSchemaCreation skips CREATE TABLE from source (target already has schema).
+	// Use when migrating to PostgreSQL where the target's own migrate() creates tables.
+	SkipSchemaCreation bool
+
+	// OnConflictDoNothing appends ON CONFLICT DO NOTHING to INSERT statements,
+	// making re-running migration idempotent. Works on both PostgreSQL and SQLite 3.24+.
+	OnConflictDoNothing bool
+
+	// DryRun performs the migration inside a transaction that is rolled back,
+	// collecting MigrationStats without persisting any changes.
+	DryRun bool
 
 	// ProgressCallback is called after each batch with current stats
 	ProgressCallback func(stats MigrationStats)
@@ -80,7 +93,9 @@ func NewMigrator(source, target DB, options MigrationOptions) *Migrator {
 	}
 }
 
-// Migrate migrates data from source to target database
+// Migrate migrates data from source to target database.
+// When DryRun is true, the entire migration runs inside a transaction
+// that is rolled back, so no data is persisted in the target.
 func (m *Migrator) Migrate(ctx context.Context) (MigrationStats, error) {
 	stats := MigrationStats{}
 
@@ -88,6 +103,24 @@ func (m *Migrator) Migrate(ctx context.Context) (MigrationStats, error) {
 	tables, err := m.getTablesToMigrate(ctx)
 	if err != nil {
 		return stats, fmt.Errorf("failed to get tables: %w", err)
+	}
+
+	// For dry-run mode, wrap all writes in a transaction that we roll back.
+	var dryRunTx *sql.Tx
+	if m.options.DryRun {
+		underlyingDB, ok := m.target.GetUnderlyingDB()
+		if !ok {
+			return stats, fmt.Errorf("dry-run requires underlying *sql.DB access")
+		}
+		dryRunTx, err = underlyingDB.BeginTx(ctx, nil)
+		if err != nil {
+			return stats, fmt.Errorf("dry-run: begin transaction: %w", err)
+		}
+		defer dryRunTx.Rollback() //nolint:errcheck
+		// Replace the target with a tx-wrapped DB so migrateTable writes into the tx.
+		origTarget := m.target
+		m.target = &txDB{tx: dryRunTx, driverType: origTarget.GetDriverType(), dialect: origTarget.GetDialect(), vectorEnabled: origTarget.IsVectorSearchEnabled()}
+		defer func() { m.target = origTarget }()
 	}
 
 	// Migrate each table
@@ -105,6 +138,7 @@ func (m *Migrator) Migrate(ctx context.Context) (MigrationStats, error) {
 		}
 	}
 
+	// In dry-run mode the deferred Rollback undoes everything.
 	return stats, nil
 }
 
@@ -152,31 +186,44 @@ func (m *Migrator) getTablesToMigrate(ctx context.Context) ([]string, error) {
 
 // migrateTable migrates a single table from source to target
 func (m *Migrator) migrateTable(ctx context.Context, tableName string, stats *MigrationStats) error {
-	// Get table schema
-	schema, err := m.getTableSchema(ctx, tableName)
-	if err != nil {
-		return fmt.Errorf("failed to get schema: %w", err)
-	}
-
-	// Create table in target if needed
+	// Drop target table if requested (works regardless of SkipSchemaCreation).
 	if m.options.DropTargetTables {
 		if _, err := m.target.ExecContext(ctx, fmt.Sprintf("DROP TABLE IF EXISTS %s", tableName)); err != nil {
 			return fmt.Errorf("failed to drop target table: %w", err)
 		}
 	}
 
-	// Create table with schema
-	if _, err := m.target.ExecContext(ctx, schema); err != nil {
-		// Ignore error if table already exists
-		if !strings.Contains(err.Error(), "already exists") {
-			return fmt.Errorf("failed to create target table: %w", err)
+	if !m.options.SkipSchemaCreation {
+		// Get table schema from source (SQLite)
+		schema, err := m.getTableSchema(ctx, tableName)
+		if err != nil {
+			return fmt.Errorf("failed to get schema: %w", err)
+		}
+
+		// Create table with schema
+		if _, err := m.target.ExecContext(ctx, schema); err != nil {
+			// Ignore error if table already exists
+			if !strings.Contains(err.Error(), "already exists") {
+				return fmt.Errorf("failed to create target table: %w", err)
+			}
 		}
 	}
 
-	// Get column names
-	columns, err := m.getTableColumns(ctx, tableName)
+	// Get column names from source
+	srcColumns, err := m.getTableColumns(ctx, tableName)
 	if err != nil {
-		return fmt.Errorf("failed to get columns: %w", err)
+		return fmt.Errorf("failed to get source columns: %w", err)
+	}
+
+	// When target schema is managed externally, intersect with target columns
+	// to handle column drift (e.g. source has old columns removed from codebase).
+	columns := srcColumns
+	if m.options.SkipSchemaCreation {
+		tgtColumns, err := m.getTargetTableColumns(ctx, tableName)
+		if err != nil {
+			return fmt.Errorf("failed to get target columns: %w", err)
+		}
+		columns = intersectColumns(srcColumns, tgtColumns)
 	}
 
 	// Migrate data in batches
@@ -224,6 +271,40 @@ func (m *Migrator) getTableColumns(ctx context.Context, tableName string) ([]str
 	return columns, nil
 }
 
+// getTargetTableColumns gets the column names for a table from the target database.
+func (m *Migrator) getTargetTableColumns(ctx context.Context, tableName string) ([]string, error) {
+	if err := validateSQLIdentifierMigrate(tableName); err != nil {
+		return nil, fmt.Errorf("invalid table name: %w", err)
+	}
+
+	rows, err := m.target.QueryContext(ctx, fmt.Sprintf("SELECT * FROM %s LIMIT 0", tableName))
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		if err := rows.Close(); err != nil {
+			_ = err
+		}
+	}()
+
+	return rows.Columns()
+}
+
+// intersectColumns returns columns present in both src and tgt, preserving src order.
+func intersectColumns(src, tgt []string) []string {
+	set := make(map[string]bool, len(tgt))
+	for _, c := range tgt {
+		set[c] = true
+	}
+	var result []string
+	for _, c := range src {
+		if set[c] {
+			result = append(result, c)
+		}
+	}
+	return result
+}
+
 // migrateTableData migrates the data from a table
 func (m *Migrator) migrateTableData(ctx context.Context, tableName string, columns []string, stats *MigrationStats) error {
 	// Validate SQL identifiers to prevent injection
@@ -249,10 +330,10 @@ func (m *Migrator) migrateTableData(ctx context.Context, tableName string, colum
 		}
 	}()
 
-	// Prepare insert statement
+	// Prepare insert statement with $N positional placeholders (works for both SQLite and PostgreSQL)
 	placeholders := make([]string, len(columns))
 	for i := range placeholders {
-		placeholders[i] = "?"
+		placeholders[i] = fmt.Sprintf("$%d", i+1)
 	}
 	insertQuery := fmt.Sprintf(
 		"INSERT INTO %s (%s) VALUES (%s)",
@@ -260,6 +341,9 @@ func (m *Migrator) migrateTableData(ctx context.Context, tableName string, colum
 		strings.Join(columns, ", "),
 		strings.Join(placeholders, ", "),
 	)
+	if m.options.OnConflictDoNothing {
+		insertQuery += " ON CONFLICT DO NOTHING"
+	}
 
 	// Migrate in batches
 	batch := make([][]any, 0, m.options.BatchSize)
@@ -427,3 +511,33 @@ func (m *Migrator) ExportToSQL(ctx context.Context, writer io.Writer) error {
 
 	return nil
 }
+
+// txDB wraps a *sql.Tx to implement the DB interface for dry-run migrations.
+// It routes all queries through the transaction so they can be rolled back.
+type txDB struct {
+	tx            *sql.Tx
+	driverType    DriverType
+	dialect       Dialect
+	vectorEnabled bool
+}
+
+func (t *txDB) Close() error                                                        { return nil }
+func (t *txDB) Exec(q string, args ...any) (sql.Result, error)                      { return t.tx.Exec(q, args...) }
+func (t *txDB) ExecContext(ctx context.Context, q string, args ...any) (sql.Result, error) { return t.tx.ExecContext(ctx, q, args...) }
+func (t *txDB) Query(q string, args ...any) (*sql.Rows, error)                      { return t.tx.Query(q, args...) }
+func (t *txDB) QueryContext(ctx context.Context, q string, args ...any) (*sql.Rows, error) { return t.tx.QueryContext(ctx, q, args...) }
+func (t *txDB) QueryRow(q string, args ...any) *sql.Row                             { return t.tx.QueryRow(q, args...) }
+func (t *txDB) QueryRowContext(ctx context.Context, q string, args ...any) *sql.Row  { return t.tx.QueryRowContext(ctx, q, args...) }
+func (t *txDB) Begin() (*sql.Tx, error)                                              { return nil, fmt.Errorf("nested transactions not supported in dry-run mode") }
+func (t *txDB) BeginTx(_ context.Context, _ *sql.TxOptions) (*sql.Tx, error)         { return nil, fmt.Errorf("nested transactions not supported in dry-run mode") }
+func (t *txDB) Ping() error                                                          { return nil }
+func (t *txDB) PingContext(_ context.Context) error                                   { return nil }
+func (t *txDB) SetMaxOpenConns(_ int)                                                {}
+func (t *txDB) SetMaxIdleConns(_ int)                                                {}
+func (t *txDB) SetConnMaxLifetime(_ any)                                             {}
+func (t *txDB) SetConnMaxIdleTime(_ any)                                             {}
+func (t *txDB) Stats() sql.DBStats                                                   { return sql.DBStats{} }
+func (t *txDB) GetUnderlyingDB() (*sql.DB, bool)                                     { return nil, false }
+func (t *txDB) IsVectorSearchEnabled() bool                                           { return t.vectorEnabled }
+func (t *txDB) GetDriverType() DriverType                                             { return t.driverType }
+func (t *txDB) GetDialect() Dialect                                                   { return t.dialect }

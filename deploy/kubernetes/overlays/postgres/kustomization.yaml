@@ -1,0 +1,16 @@
+# PostgreSQL overlay for enterprise K8s deployments
+# Usage: kubectl apply -k deploy/kubernetes/overlays/postgres/
+
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+- ../../base  # Base manifests
+- postgres-secrets.yaml
+
+patches:
+- path: configmap-patch.yaml
+- path: deployment-patch.yaml
+  target:
+    kind: Deployment
+    name: agentctl

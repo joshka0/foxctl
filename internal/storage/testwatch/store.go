@@ -92,6 +92,11 @@ func (s *sqlStore) Close() error {
 // It ensures the `test_status` table exists with columns for workspace_id, watcher_id,
 // status, command, started_at, finished_at, summary, failures_json, and raw_tail,
 // and creates an index on workspace_id. Returns an error if applying the DDL fails.
+// MigrateSchema runs the testwatch store DDL migrations against the given database.
+func MigrateSchema(ctx context.Context, db *sql.DB) error {
+	return migrate(ctx, db)
+}
+
 func migrate(ctx context.Context, db *sql.DB) error {
 	ddl := `
 CREATE TABLE IF NOT EXISTS test_status (
@@ -131,12 +136,12 @@ func (s *sqlStore) Upsert(ctx context.Context, ts TestStatus) error {
 	}
 
 	_, err = s.db.ExecContext(ctx, `
-INSERT INTO test_status (workspace_id, watcher_id, status, command, started_at, finished_at, summary, failures_json, raw_tail)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-ON CONFLICT (workspace_id, watcher_id) DO UPDATE SET
-	status = excluded.status,
-	command = excluded.command,
-	started_at = excluded.started_at,
+	INSERT INTO test_status (workspace_id, watcher_id, status, command, started_at, finished_at, summary, failures_json, raw_tail)
+	VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+	ON CONFLICT (workspace_id, watcher_id) DO UPDATE SET
+		status = excluded.status,
+		command = excluded.command,
+		started_at = excluded.started_at,
 	finished_at = excluded.finished_at,
 	summary = excluded.summary,
 	failures_json = excluded.failures_json,
@@ -154,10 +159,10 @@ ON CONFLICT (workspace_id, watcher_id) DO UPDATE SET
 // Get returns the test status for a (workspace, watcher) pair.
 func (s *sqlStore) Get(ctx context.Context, workspaceID, watcherID string) (TestStatus, bool, error) {
 	row := s.db.QueryRowContext(ctx, `
-SELECT workspace_id, watcher_id, status, command, started_at, finished_at, summary, failures_json, raw_tail
-FROM test_status
-WHERE workspace_id = ? AND watcher_id = ?
-`, workspaceID, watcherID)
+	SELECT workspace_id, watcher_id, status, command, started_at, finished_at, summary, failures_json, raw_tail
+	FROM test_status
+	WHERE workspace_id = $1 AND watcher_id = $2
+	`, workspaceID, watcherID)
 
 	ts, err := scanTestStatus(row)
 	if err == sql.ErrNoRows {
@@ -172,11 +177,11 @@ WHERE workspace_id = ? AND watcher_id = ?
 // ListByWorkspace returns all test statuses for a workspace.
 func (s *sqlStore) ListByWorkspace(ctx context.Context, workspaceID string) ([]TestStatus, error) {
 	rows, err := s.db.QueryContext(ctx, `
-SELECT workspace_id, watcher_id, status, command, started_at, finished_at, summary, failures_json, raw_tail
-FROM test_status
-WHERE workspace_id = ?
-ORDER BY watcher_id
-`, workspaceID)
+	SELECT workspace_id, watcher_id, status, command, started_at, finished_at, summary, failures_json, raw_tail
+	FROM test_status
+	WHERE workspace_id = $1
+	ORDER BY watcher_id
+	`, workspaceID)
 	if err != nil {
 		return nil, fmt.Errorf("testwatch: list by workspace: %w", err)
 	}
@@ -202,8 +207,8 @@ ORDER BY watcher_id
 // Delete removes the test status for a (workspace, watcher) pair.
 func (s *sqlStore) Delete(ctx context.Context, workspaceID, watcherID string) error {
 	_, err := s.db.ExecContext(ctx, `
-DELETE FROM test_status WHERE workspace_id = ? AND watcher_id = ?
-`, workspaceID, watcherID)
+	DELETE FROM test_status WHERE workspace_id = $1 AND watcher_id = $2
+	`, workspaceID, watcherID)
 	if err != nil {
 		return fmt.Errorf("testwatch: delete: %w", err)
 	}
@@ -213,8 +218,8 @@ DELETE FROM test_status WHERE workspace_id = ? AND watcher_id = ?
 // DeleteByWorkspace removes all test statuses for a workspace.
 func (s *sqlStore) DeleteByWorkspace(ctx context.Context, workspaceID string) error {
 	_, err := s.db.ExecContext(ctx, `
-DELETE FROM test_status WHERE workspace_id = ?
-`, workspaceID)
+	DELETE FROM test_status WHERE workspace_id = $1
+	`, workspaceID)
 	if err != nil {
 		return fmt.Errorf("testwatch: delete by workspace: %w", err)
 	}

@@ -76,6 +76,8 @@ func (cl *ConfigLoader) loadConfig(prefix, defaultPath string) Config {
 		return cl.loadLibSQLConfig(prefix, defaultPath)
 	case DriverTurso:
 		return cl.loadTursoConfig(prefix, defaultPath, strings.ToLower(prefix))
+	case DriverPostgres:
+		return cl.loadPostgresConfig(prefix)
 	case DriverSQLite:
 		fallthrough
 	default:
@@ -256,6 +258,73 @@ func (cl *ConfigLoader) loadTursoConfig(prefix, defaultPath, dbName string) Conf
 	}
 }
 
+// loadPostgresConfig loads PostgreSQL configuration from environment variables.
+func (cl *ConfigLoader) loadPostgresConfig(prefix string) Config {
+	// DSN: per-store override, then global AGENTCTL_POSTGRES_DSN, then DATABASE_URL
+	dsnEnv := fmt.Sprintf("AGENTCTL_%s_POSTGRES_DSN", strings.ToUpper(prefix))
+	dsn := os.Getenv(dsnEnv)
+	if dsn == "" {
+		dsn = os.Getenv("AGENTCTL_POSTGRES_DSN")
+	}
+	if dsn == "" {
+		dsn = os.Getenv("DATABASE_URL")
+	}
+
+	// Schema: default to lowercase store name for isolation
+	schemaEnv := fmt.Sprintf("AGENTCTL_%s_POSTGRES_SCHEMA", strings.ToUpper(prefix))
+	schema := os.Getenv(schemaEnv)
+	if schema == "" {
+		schema = strings.ToLower(prefix)
+	}
+
+	// Connection pool settings
+	maxOpenConns := 5
+	if v := os.Getenv("AGENTCTL_POSTGRES_MAX_CONNS"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			maxOpenConns = n
+		}
+	}
+	maxIdleConns := 2
+	if v := os.Getenv("AGENTCTL_POSTGRES_MAX_IDLE_CONNS"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			maxIdleConns = n
+		}
+	}
+
+	// Vector search settings (same pattern as libSQL/Turso)
+	vectorEnv := fmt.Sprintf("AGENTCTL_%s_VECTOR_SEARCH", strings.ToUpper(prefix))
+	enableVector := strings.ToUpper(prefix) == "MEMORY"
+	if vectorStr := os.Getenv(vectorEnv); vectorStr != "" {
+		enableVector = strings.ToLower(vectorStr) == "true" || vectorStr == "1"
+	}
+
+	dimsEnv := fmt.Sprintf("AGENTCTL_%s_VECTOR_DIMS", strings.ToUpper(prefix))
+	vectorDims := GetDefaultVectorDimensions()
+	if dimsStr := os.Getenv(dimsEnv); dimsStr != "" {
+		if dims, err := strconv.Atoi(dimsStr); err == nil && dims > 0 {
+			vectorDims = dims
+		}
+	}
+
+	requireVector := false
+	if v := os.Getenv("AGENTCTL_POSTGRES_REQUIRE_VECTOR"); v == "true" || v == "1" {
+		requireVector = true
+	}
+
+	return Config{
+		Driver: DriverPostgres,
+		Postgres: PostgresConfig{
+			DSN:                dsn,
+			Schema:             schema,
+			MaxOpenConns:       maxOpenConns,
+			MaxIdleConns:       maxIdleConns,
+			EnableVectorSearch: enableVector,
+			VectorDimensions:   vectorDims,
+			RequireVector:      requireVector,
+		},
+	}
+}
+
 // GetConfigSummary returns a human-readable summary of the configuration
 func GetConfigSummary(cfg Config) string {
 	switch cfg.Driver {
@@ -268,6 +337,15 @@ func GetConfigSummary(cfg Config) string {
 		return fmt.Sprintf("LibSQL: %s (local-only, vector: %v)", cfg.LibSQL.Path, cfg.LibSQL.EnableVectorSearch)
 	case DriverTurso:
 		return fmt.Sprintf("Turso: %s (vector: %v)", cfg.Turso.URL, cfg.Turso.EnableVectorSearch)
+	case DriverPostgres:
+		// Redact password from DSN for display
+		dsn := cfg.Postgres.DSN
+		idxAt := strings.Index(dsn, "@")
+		idxProto := strings.Index(dsn, "://")
+		if idxAt > 0 && idxProto >= 0 && idxProto+3 < len(dsn) {
+			dsn = dsn[:idxProto+3] + "***@" + dsn[idxAt+1:]
+		}
+		return fmt.Sprintf("Postgres: %s (schema: %s, vector: %v)", dsn, cfg.Postgres.Schema, cfg.Postgres.EnableVectorSearch)
 	default:
 		return "Unknown driver"
 	}
@@ -279,6 +357,8 @@ type PlatformDatabaseSettings struct {
 	Driver           string
 	TursoURL         string
 	TursoAuthToken   string
+	PostgresDSN      string
+	PostgresSchema   string
 	VectorEnabled    bool
 	VectorDimensions int
 }
@@ -318,6 +398,27 @@ func (cl *ConfigLoader) ConfigFromPlatformSettings(settings PlatformDatabaseSett
 			Driver: DriverLibSQL,
 			LibSQL: LibSQLConfig{
 				Path:               filepath.Join(cl.rootDir, dbName+".db"),
+				EnableVectorSearch: settings.VectorEnabled,
+				VectorDimensions:   dims,
+			},
+		}
+
+	case DriverPostgres:
+		dims := settings.VectorDimensions
+		if dims == 0 {
+			dims = GetDefaultVectorDimensions()
+		}
+		schema := settings.PostgresSchema
+		if schema == "" {
+			schema = strings.ToLower(dbName)
+		}
+		return Config{
+			Driver: DriverPostgres,
+			Postgres: PostgresConfig{
+				DSN:                settings.PostgresDSN,
+				Schema:             schema,
+				MaxOpenConns:       5,
+				MaxIdleConns:       2,
 				EnableVectorSearch: settings.VectorEnabled,
 				VectorDimensions:   dims,
 			},

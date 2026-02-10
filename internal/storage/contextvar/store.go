@@ -180,8 +180,8 @@ func (s *sqlStore) Put(ctx context.Context, params PutParams) (*Variable, error)
 		// Try update first
 		result, err := s.db.ExecContext(ctx, `
 			UPDATE context_variables
-			SET value_json = ?, updated_at_ms = ?, expires_at_ms = ?, source = ?
-			WHERE conversation_id = ? AND scope = ? AND key = ?
+			SET value_json = $1, updated_at_ms = $2, expires_at_ms = $3, source = $4
+			WHERE conversation_id = $5 AND scope = $6 AND key = $7
 		`, string(valueJSON), nowMS, expiresAtMS, params.Source,
 			params.ConversationID, string(params.Scope), params.Key)
 		if err != nil {
@@ -201,7 +201,7 @@ func (s *sqlStore) Put(ctx context.Context, params PutParams) (*Variable, error)
 		INSERT INTO context_variables (
 			id, conversation_id, scope, key, value_json, content_type,
 			sequence_num, source, created_at_ms, updated_at_ms, expires_at_ms
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 	`, id, params.ConversationID, string(params.Scope), params.Key,
 		string(valueJSON), params.ContentType, seqNum, params.Source,
 		nowMS, nowMS, expiresAtMS)
@@ -227,7 +227,7 @@ func (s *sqlStore) nextSequence(ctx context.Context, conversationID string) (int
 	// Upsert sequence counter
 	_, err = tx.ExecContext(ctx, `
 		INSERT INTO context_sequences (conversation_id, next_seq)
-		VALUES (?, 1)
+		VALUES ($1, 1)
 		ON CONFLICT(conversation_id) DO UPDATE SET next_seq = next_seq + 1
 	`, conversationID)
 	if err != nil {
@@ -236,7 +236,7 @@ func (s *sqlStore) nextSequence(ctx context.Context, conversationID string) (int
 
 	var seq int
 	err = tx.QueryRowContext(ctx, `
-		SELECT next_seq FROM context_sequences WHERE conversation_id = ?
+		SELECT next_seq FROM context_sequences WHERE conversation_id = $1
 	`, conversationID).Scan(&seq)
 	if err != nil {
 		return 0, err
@@ -254,7 +254,7 @@ func (s *sqlStore) Get(ctx context.Context, id string) (*Variable, error) {
 		SELECT id, conversation_id, scope, key, value_json, value_cas, content_type,
 		       sequence_num, source, created_at_ms, updated_at_ms, expires_at_ms,
 		       access_count, last_access_ms, embedding, embedding_model
-		FROM context_variables WHERE id = ?
+		FROM context_variables WHERE id = $1
 	`, id)
 
 	return s.scanVariable(row)
@@ -266,7 +266,7 @@ func (s *sqlStore) GetByKey(ctx context.Context, conversationID string, scope Sc
 		       sequence_num, source, created_at_ms, updated_at_ms, expires_at_ms,
 		       access_count, last_access_ms, embedding, embedding_model
 		FROM context_variables
-		WHERE conversation_id = ? AND scope = ? AND key = ?
+		WHERE conversation_id = $1 AND scope = $2 AND key = $3
 	`, conversationID, string(scope), key)
 
 	return s.scanVariable(row)
@@ -324,38 +324,46 @@ func (s *sqlStore) scanVariable(row *sql.Row) (*Variable, error) {
 func (s *sqlStore) Query(ctx context.Context, params QueryParams) (*QueryResult, error) {
 	var conditions []string
 	var args []interface{}
+	argIdx := 1
 
 	// Filter by conversation
 	if params.ConversationID != "" {
-		conditions = append(conditions, "conversation_id = ?")
+		conditions = append(conditions, fmt.Sprintf("conversation_id = $%d", argIdx))
+		argIdx++
 		args = append(args, params.ConversationID)
 	}
 
 	// Filter by scope
 	if params.Scope != "" {
-		conditions = append(conditions, "scope = ?")
+		conditions = append(conditions, fmt.Sprintf("scope = $%d", argIdx))
+		argIdx++
 		args = append(args, string(params.Scope))
 	}
 
 	// Filter by key
 	if params.Key != "" {
-		conditions = append(conditions, "key = ?")
+		conditions = append(conditions, fmt.Sprintf("key = $%d", argIdx))
+		argIdx++
 		args = append(args, params.Key)
 	} else if params.KeyPrefix != "" {
-		conditions = append(conditions, "key LIKE ? ESCAPE '\\'")
+		conditions = append(conditions, fmt.Sprintf("key LIKE $%d ESCAPE '\\'", argIdx))
+		argIdx++
 		args = append(args, escapeLikeLiteral(params.KeyPrefix)+"%")
 	} else if params.KeyPattern != "" {
 		// Convert glob to SQL LIKE while escaping literal wildcards.
-		conditions = append(conditions, "key LIKE ? ESCAPE '\\'")
+		conditions = append(conditions, fmt.Sprintf("key LIKE $%d ESCAPE '\\'", argIdx))
+		argIdx++
 		args = append(args, buildLikePattern(params.KeyPattern))
 	}
 
 	// Filter by sequence range
 	if params.SequenceRange != nil {
-		conditions = append(conditions, "sequence_num >= ?")
+		conditions = append(conditions, fmt.Sprintf("sequence_num >= $%d", argIdx))
+		argIdx++
 		args = append(args, params.SequenceRange.Start)
 		if params.SequenceRange.End >= 0 {
-			conditions = append(conditions, "sequence_num <= ?")
+			conditions = append(conditions, fmt.Sprintf("sequence_num <= $%d", argIdx))
+			argIdx++
 			args = append(args, params.SequenceRange.End)
 		}
 	}
@@ -363,7 +371,8 @@ func (s *sqlStore) Query(ctx context.Context, params QueryParams) (*QueryResult,
 	// Exclude expired by default
 	if !params.IncludeExpired {
 		nowMS := time.Now().UnixMilli()
-		conditions = append(conditions, "(expires_at_ms IS NULL OR expires_at_ms > ?)")
+		conditions = append(conditions, fmt.Sprintf("(expires_at_ms IS NULL OR expires_at_ms > $%d)", argIdx))
+		argIdx++
 		args = append(args, nowMS)
 	}
 
@@ -411,8 +420,8 @@ func (s *sqlStore) Query(ctx context.Context, params QueryParams) (*QueryResult,
 		       access_count, last_access_ms, embedding, embedding_model
 		FROM context_variables %s
 		ORDER BY %s
-		LIMIT ? OFFSET ?
-	`, whereClause, orderBy)
+		LIMIT $%d OFFSET $%d
+	`, whereClause, orderBy, argIdx, argIdx+1)
 
 	args = append(args, limit, params.Offset)
 
@@ -498,19 +507,22 @@ func (s *sqlStore) QuerySemantic(ctx context.Context, conversationID string, emb
 func (s *sqlStore) ListKeys(ctx context.Context, conversationID string, scope Scope) (*ListKeysResult, error) {
 	var conditions []string
 	var args []interface{}
+	argIdx := 1
 
 	if conversationID != "" {
-		conditions = append(conditions, "conversation_id = ?")
+		conditions = append(conditions, fmt.Sprintf("conversation_id = $%d", argIdx))
+		argIdx++
 		args = append(args, conversationID)
 	}
 	if scope != "" {
-		conditions = append(conditions, "scope = ?")
+		conditions = append(conditions, fmt.Sprintf("scope = $%d", argIdx))
+		argIdx++
 		args = append(args, string(scope))
 	}
 
 	// Exclude expired
 	nowMS := time.Now().UnixMilli()
-	conditions = append(conditions, "(expires_at_ms IS NULL OR expires_at_ms > ?)")
+	conditions = append(conditions, fmt.Sprintf("(expires_at_ms IS NULL OR expires_at_ms > $%d)", argIdx))
 	args = append(args, nowMS)
 
 	whereClause := ""
@@ -561,7 +573,7 @@ func (s *sqlStore) ListKeys(ctx context.Context, conversationID string, scope Sc
 }
 
 func (s *sqlStore) Delete(ctx context.Context, id string) error {
-	result, err := s.db.ExecContext(ctx, "DELETE FROM context_variables WHERE id = ?", id)
+	result, err := s.db.ExecContext(ctx, "DELETE FROM context_variables WHERE id = $1", id)
 	if err != nil {
 		return fmt.Errorf("contextvar: delete: %w", err)
 	}
@@ -577,7 +589,7 @@ func (s *sqlStore) Delete(ctx context.Context, id string) error {
 func (s *sqlStore) DeleteByKey(ctx context.Context, conversationID string, scope Scope, key string) error {
 	result, err := s.db.ExecContext(ctx, `
 		DELETE FROM context_variables
-		WHERE conversation_id = ? AND scope = ? AND key = ?
+		WHERE conversation_id = $1 AND scope = $2 AND key = $3
 	`, conversationID, string(scope), key)
 	if err != nil {
 		return fmt.Errorf("contextvar: delete by key: %w", err)
@@ -595,7 +607,7 @@ func (s *sqlStore) DeleteExpired(ctx context.Context) (int, error) {
 	nowMS := time.Now().UnixMilli()
 	result, err := s.db.ExecContext(ctx, `
 		DELETE FROM context_variables
-		WHERE expires_at_ms IS NOT NULL AND expires_at_ms <= ?
+		WHERE expires_at_ms IS NOT NULL AND expires_at_ms <= $1
 	`, nowMS)
 	if err != nil {
 		return 0, fmt.Errorf("contextvar: delete expired: %w", err)
@@ -607,7 +619,7 @@ func (s *sqlStore) DeleteExpired(ctx context.Context) (int, error) {
 
 func (s *sqlStore) DeleteByConversation(ctx context.Context, conversationID string) (int, error) {
 	result, err := s.db.ExecContext(ctx, `
-		DELETE FROM context_variables WHERE conversation_id = ?
+		DELETE FROM context_variables WHERE conversation_id = $1
 	`, conversationID)
 	if err != nil {
 		return 0, fmt.Errorf("contextvar: delete by conversation: %w", err)
@@ -617,7 +629,7 @@ func (s *sqlStore) DeleteByConversation(ctx context.Context, conversationID stri
 
 	// Also clean up sequence counter
 	_, _ = s.db.ExecContext(ctx, `
-		DELETE FROM context_sequences WHERE conversation_id = ?
+		DELETE FROM context_sequences WHERE conversation_id = $1
 	`, conversationID)
 
 	return int(rowsAffected), nil
@@ -627,8 +639,8 @@ func (s *sqlStore) IncrementAccess(ctx context.Context, id string) error {
 	nowMS := time.Now().UnixMilli()
 	result, err := s.db.ExecContext(ctx, `
 		UPDATE context_variables
-		SET access_count = access_count + 1, last_access_ms = ?
-		WHERE id = ?
+		SET access_count = access_count + 1, last_access_ms = $1
+		WHERE id = $2
 	`, nowMS, id)
 	if err != nil {
 		return fmt.Errorf("contextvar: increment access: %w", err)
@@ -665,7 +677,7 @@ func (s *sqlStore) Stats(ctx context.Context) (*Stats, error) {
 
 	// Expired count
 	nowMS := time.Now().UnixMilli()
-	err = s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM context_variables WHERE expires_at_ms IS NOT NULL AND expires_at_ms <= ?`, nowMS).Scan(&stats.ExpiredCount)
+	err = s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM context_variables WHERE expires_at_ms IS NOT NULL AND expires_at_ms <= $1`, nowMS).Scan(&stats.ExpiredCount)
 	if err != nil {
 		return nil, fmt.Errorf("contextvar: count expired: %w", err)
 	}

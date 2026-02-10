@@ -45,6 +45,8 @@ type Adapter struct {
 
 	ctx    context.Context
 	cancel context.CancelFunc
+
+	wg sync.WaitGroup
 }
 
 // New creates a Discord adapter with the given config and daemon URL.
@@ -130,11 +132,19 @@ func (a *Adapter) Connect(ctx context.Context) error {
 	}
 
 	// Start presence updater
-	go a.startPresenceUpdater(a.ctx)
+	a.wg.Add(1)
+	go func() {
+		defer a.wg.Done()
+		a.startPresenceUpdater(a.ctx)
+	}()
 
 	// Start SSE event listener if hub is configured
 	if a.sseHub != nil {
-		go a.startEventListener(a.ctx)
+		a.wg.Add(1)
+		go func() {
+			defer a.wg.Done()
+			a.startEventListener(a.ctx)
+		}()
 	}
 
 	return nil
@@ -184,6 +194,10 @@ close:
 	if err := a.session.Close(); err != nil {
 		return fmt.Errorf("discord: close: %w", err)
 	}
+
+	// Wait for background goroutines (presence updater, SSE listener, message handlers).
+	a.wg.Wait()
+
 	observability.Emit(ctx, observability.NewEvent("discord.disconnected").
 		WithComponent("discord").
 		Success(0))
@@ -411,7 +425,7 @@ func (a *Adapter) handleSlashCommand(s *discordgo.Session, i *discordgo.Interact
 	if parent == nil {
 		parent = context.Background()
 	}
-	handlerCtx, handlerCancel := context.WithCancel(parent)
+	handlerCtx, handlerCancel := context.WithTimeout(parent, 5*time.Minute)
 	defer handlerCancel()
 
 	if err := handler(handlerCtx, evt); err != nil {
@@ -562,7 +576,9 @@ func (a *Adapter) handleMessageCreate(s *discordgo.Session, m *discordgo.Message
 	// Use a non-blocking select so messages are dropped (not queued) when at capacity.
 	select {
 	case a.msgSem <- struct{}{}:
+		a.wg.Add(1)
 		go func() {
+			defer a.wg.Done()
 			defer func() { <-a.msgSem }()
 			parent := a.ctx
 			if parent == nil {
@@ -623,11 +639,17 @@ func (a *Adapter) cleanMention(content string) string {
 	return strings.TrimSpace(content)
 }
 
-// ShowTyping sends a typing indicator to a channel.
-func (a *Adapter) ShowTyping(channelID string) {
-	if a.session != nil {
-		_ = a.session.ChannelTyping(channelID)
+// ShowTyping sends a typing indicator to a channel, honoring context cancellation.
+func (a *Adapter) ShowTyping(ctx context.Context, channelID string) {
+	if a.session == nil {
+		return
 	}
+	select {
+	case <-ctx.Done():
+		return
+	default:
+	}
+	_ = a.session.ChannelTyping(channelID)
 }
 
 // SendMessage sends a message to a Discord channel.

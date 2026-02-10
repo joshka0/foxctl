@@ -1,0 +1,42 @@
+# Local deployment patches for k3s testing
+
+# Reduce agentctl to single replica
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: agentctl
+  namespace: agentctl
+spec:
+  replicas: 1
+  template:
+    spec:
+      containers:
+      - name: agentctl
+        # Use locally-built image (OrbStack k3s shares Docker daemon)
+        imagePullPolicy: Never
+        # Create storage dirs in emptyDir volumes, then start web server
+        command: ["sh", "-c"]
+        args:
+        - |
+          mkdir -p /var/cache/agentctl/storage /var/cache/agentctl/cas
+          exec agentctl web serve --port=8080
+        # Override CAS to use file-based (emptyDir) instead of S3
+        env:
+        - name: AGENTCTL_HOME
+          value: "/var/cache/agentctl"
+        - name: AGENTCTL_STORAGE_ROOT
+          value: "/var/cache/agentctl/storage"
+        - name: AGENTCTL_CAS_BACKEND
+          value: "file"
+        - name: AGENTCTL_CAS_ROOT
+          value: "/var/cache/agentctl/cas"
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "50m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+      # Remove topology constraints for single-node
+      topologySpreadConstraints: []
+      affinity: {}

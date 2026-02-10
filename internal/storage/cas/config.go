@@ -19,6 +19,8 @@ const (
 	DriverSQLite DriverType = "sqlite"
 	// DriverTurso uses Turso cloud for storage.
 	DriverTurso DriverType = "turso"
+	// DriverS3 uses S3/MinIO for storage (enterprise).
+	DriverS3 DriverType = "s3"
 )
 
 // Config holds CAS storage configuration.
@@ -34,6 +36,9 @@ type Config struct {
 
 	// Turso is the configuration for Turso-based storage.
 	Turso TursoConfig `json:"turso,omitempty" yaml:"turso,omitempty"`
+
+	// S3 is the configuration for S3/MinIO-based storage.
+	S3 S3Config `json:"s3,omitempty" yaml:"s3,omitempty"`
 
 	// Migration controls auto-migration behavior.
 	Migration MigrationConfig `json:"migration,omitempty" yaml:"migration,omitempty"`
@@ -80,6 +85,27 @@ type TursoConfig struct {
 	ReplicaPath string `json:"replica_path,omitempty" yaml:"replica_path,omitempty"`
 }
 
+// S3Config configures S3/MinIO-based CAS storage.
+type S3Config struct {
+	// Bucket is the S3 bucket name (required).
+	Bucket string `json:"bucket" yaml:"bucket"`
+
+	// Region is the AWS region (default: us-east-1).
+	Region string `json:"region,omitempty" yaml:"region,omitempty"`
+
+	// Endpoint is the S3 endpoint URL (required for MinIO, optional for AWS).
+	Endpoint string `json:"endpoint,omitempty" yaml:"endpoint,omitempty"`
+
+	// Prefix is the key prefix for all objects (default: "cas/").
+	Prefix string `json:"prefix,omitempty" yaml:"prefix,omitempty"`
+
+	// ForcePathStyle uses path-style addressing (required for MinIO).
+	ForcePathStyle bool `json:"force_path_style,omitempty" yaml:"force_path_style,omitempty"`
+
+	// DisableSSL disables HTTPS for the endpoint (for local MinIO).
+	DisableSSL bool `json:"disable_ssl,omitempty" yaml:"disable_ssl,omitempty"`
+}
+
 // MigrationConfig controls auto-migration behavior.
 type MigrationConfig struct {
 	// AutoMigrate enables automatic migration from file-based CAS.
@@ -107,6 +133,10 @@ func (c *Config) Validate() error {
 		}
 		if c.Turso.AuthToken == "" {
 			return errors.New("cas: turso auth_token is required")
+		}
+	case DriverS3:
+		if c.S3.Bucket == "" {
+			return errors.New("cas: s3 bucket is required")
 		}
 	case "":
 		return errors.New("cas: driver is required")
@@ -157,6 +187,8 @@ func LoadConfig(rootDir string) Config {
 		return loadFileConfig(rootDir)
 	case DriverTurso:
 		return loadTursoConfig(rootDir)
+	case DriverS3:
+		return loadS3Config()
 	case DriverSQLite:
 		fallthrough
 	default:
@@ -228,6 +260,39 @@ func loadSQLiteConfig(rootDir string) Config {
 		Migration: MigrationConfig{
 			AutoMigrate: autoMigrate,
 			SourcePath:  sourcePath,
+		},
+	}
+}
+
+func loadS3Config() Config {
+	bucket := os.Getenv("AGENTCTL_CAS_S3_BUCKET")
+	region := os.Getenv("AGENTCTL_CAS_S3_REGION")
+	if region == "" {
+		region = os.Getenv("AWS_REGION")
+	}
+	if region == "" {
+		region = "us-east-1"
+	}
+	endpoint := os.Getenv("AGENTCTL_CAS_S3_ENDPOINT")
+	prefix := os.Getenv("AGENTCTL_CAS_S3_PREFIX")
+	if prefix == "" {
+		prefix = "cas/"
+	}
+	forcePathStyle, _ := strconv.ParseBool(os.Getenv("AGENTCTL_CAS_S3_FORCE_PATH_STYLE"))
+	disableSSL, _ := strconv.ParseBool(os.Getenv("AGENTCTL_CAS_S3_DISABLE_SSL"))
+
+	return Config{
+		Driver: DriverS3,
+		S3: S3Config{
+			Bucket:         bucket,
+			Region:         region,
+			Endpoint:       endpoint,
+			Prefix:         prefix,
+			ForcePathStyle: forcePathStyle,
+			DisableSSL:     disableSSL,
+		},
+		Migration: MigrationConfig{
+			AutoMigrate: false,
 		},
 	}
 }

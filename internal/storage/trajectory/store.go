@@ -103,6 +103,11 @@ func (s *sqlStore) Close() error {
 // databases by attempting to add missing columns (`outcome_json`, `session_id`) and a session index;
 // errors from those ALTER/CREATE attempts are intentionally ignored. Returns an error if executing the
 // primary DDL statement fails.
+// MigrateSchema runs the trajectory store DDL migrations against the given database.
+func MigrateSchema(ctx context.Context, db *sql.DB) error {
+	return migrate(ctx, db)
+}
+
 func migrate(ctx context.Context, db *sql.DB) error {
 	ddl := `
 -- Trajectories table stores index records for coherent runs/episodes.

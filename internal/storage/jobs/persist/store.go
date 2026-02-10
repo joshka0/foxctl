@@ -87,10 +87,10 @@ func (s *sqlStore) List(ctx context.Context, limit int) ([]types.Job, error) {
 		limit = 100
 	}
 	rows, err := s.db.QueryContext(ctx, `
-        SELECT id, command, args_json, args_hash, state, result_path, error, created_at, updated_at, expires_at
-        FROM jobs
-        ORDER BY created_at DESC
-        LIMIT ?`, limit)
+	        SELECT id, command, args_json, args_hash, state, result_path, error, created_at, updated_at, expires_at
+	        FROM jobs
+	        ORDER BY created_at DESC
+	        LIMIT $1`, limit)
 	if err != nil {
 		return nil, fmt.Errorf("jobs: list: %w", err)
 	}
@@ -125,8 +125,8 @@ func (s *sqlStore) List(ctx context.Context, limit int) ([]types.Job, error) {
 
 func (s *sqlStore) Get(ctx context.Context, id string) (types.Job, error) {
 	row := s.db.QueryRowContext(ctx, `
-        SELECT id, command, args_json, args_hash, state, result_path, error, created_at, updated_at, expires_at
-        FROM jobs WHERE id = ?`, id)
+	        SELECT id, command, args_json, args_hash, state, result_path, error, created_at, updated_at, expires_at
+	        FROM jobs WHERE id = $1`, id)
 	var job types.Job
 	var created, updated, expires string
 	if err := row.Scan(&job.ID, &job.Command, &job.ArgsJSON, &job.ArgsHash, &job.State, &job.ResultPath, &job.Error, &created, &updated, &expires); err != nil {
@@ -152,7 +152,7 @@ func (s *sqlStore) Get(ctx context.Context, id string) (types.Job, error) {
 }
 
 func (s *sqlStore) InsertJob(ctx context.Context, job types.Job) error {
-	// Use INSERT OR IGNORE to handle rare ULID collisions from concurrent processes.
+	// Use INSERT ... ON CONFLICT DO NOTHING to handle rare ULID collisions from concurrent processes.
 	// Each process has its own entropy source, so if multiple processes call ulid.Make()
 	// at the same millisecond, they could theoretically produce the same ID.
 	// When this happens (rows == 0), we treat the existing job as valid since
@@ -161,8 +161,9 @@ func (s *sqlStore) InsertJob(ctx context.Context, job types.Job) error {
 		job.ExpiresAt = job.CreatedAt.Add(types.DefaultMaxJobAge)
 	}
 	_, err := s.db.ExecContext(ctx, `
-        INSERT OR IGNORE INTO jobs (id, command, args_json, args_hash, state, result_path, error, created_at, updated_at, expires_at)
-        VALUES (?, ?, ?, ?, ?, '', '', ?, ?, ?)`,
+	        INSERT INTO jobs (id, command, args_json, args_hash, state, result_path, error, created_at, updated_at, expires_at)
+	        VALUES ($1, $2, $3, $4, $5, '', '', $6, $7, $8)
+	        ON CONFLICT DO NOTHING`,
 		job.ID, job.Command, job.ArgsJSON, job.ArgsHash, job.State, sqlutil.FormatTimestamp(job.CreatedAt), sqlutil.FormatTimestamp(job.UpdatedAt), sqlutil.FormatTimestamp(job.ExpiresAt))
 	if err != nil {
 		return fmt.Errorf("jobs: insert: %w", err)
@@ -177,29 +178,29 @@ func (s *sqlStore) UpdateState(ctx context.Context, id string, newState types.St
 	// Build dynamic query with state transition validation.
 	// SQL injection safety: validSourceStates returns a hardcoded []State based on
 	// the newState parameter. All values are typed State constants, not user input.
-	// The dynamic portion only controls the number of '?' placeholders, not the
+	// The dynamic portion only controls the number of positional placeholders, not the
 	// SQL structure. All actual values are passed as parameterized arguments.
 	allowedStates := validSourceStates(newState)
-	placeholders := make([]string, len(allowedStates))
-	stateArgs := make([]any, len(allowedStates))
-	for i, state := range allowedStates {
-		placeholders[i] = "?"
-		stateArgs[i] = state
+	if len(allowedStates) == 0 {
+		return fmt.Errorf("%w: unknown target state %q", types.ErrInvalidState, newState)
 	}
-	stateConstraint := fmt.Sprintf("state IN (%s)", strings.Join(placeholders, ", "))
-
-	var setResult string
-	if resultPath != "" {
-		setResult = ", result_path = ?"
-	}
-	query := fmt.Sprintf(`UPDATE jobs SET state = ?, error = ?, updated_at = ?%s WHERE id = ? AND %s`, setResult, stateConstraint)
 
 	args := []any{newState, errMsg, sqlutil.FormatTimestamp(time.Now().UTC())}
+	query := `UPDATE jobs SET state = $1, error = $2, updated_at = $3`
 	if resultPath != "" {
+		query += fmt.Sprintf(", result_path = $%d", len(args)+1)
 		args = append(args, resultPath)
 	}
+
+	query += fmt.Sprintf(" WHERE id = $%d AND state IN (", len(args)+1)
 	args = append(args, id)
-	args = append(args, stateArgs...)
+
+	placeholders := make([]string, len(allowedStates))
+	for i, state := range allowedStates {
+		placeholders[i] = fmt.Sprintf("$%d", len(args)+1)
+		args = append(args, state)
+	}
+	query += strings.Join(placeholders, ", ") + ")"
 
 	res, execErr := s.db.ExecContext(ctx, query, args...)
 	if execErr != nil {
@@ -212,7 +213,7 @@ func (s *sqlStore) UpdateState(ctx context.Context, id string, newState types.St
 	}
 	if rows == 0 {
 		var exists bool
-		checkErr := s.db.QueryRowContext(ctx, `SELECT 1 FROM jobs WHERE id = ?`, id).Scan(&exists)
+		checkErr := s.db.QueryRowContext(ctx, `SELECT 1 FROM jobs WHERE id = $1`, id).Scan(&exists)
 		if checkErr != nil {
 			if errorsIsNoRows(checkErr) {
 				return types.ErrNotFound
@@ -220,7 +221,7 @@ func (s *sqlStore) UpdateState(ctx context.Context, id string, newState types.St
 			return fmt.Errorf("jobs: check existence: %w", checkErr)
 		}
 		var currentState types.State
-		if scanErr := s.db.QueryRowContext(ctx, `SELECT state FROM jobs WHERE id = ?`, id).Scan(&currentState); scanErr != nil {
+		if scanErr := s.db.QueryRowContext(ctx, `SELECT state FROM jobs WHERE id = $1`, id).Scan(&currentState); scanErr != nil {
 			return fmt.Errorf("jobs: fetch current state: %w", scanErr)
 		}
 		return fmt.Errorf("%w: cannot transition from %s to %s", types.ErrInvalidState, currentState, newState)
@@ -229,7 +230,7 @@ func (s *sqlStore) UpdateState(ctx context.Context, id string, newState types.St
 }
 
 func (s *sqlStore) Delete(ctx context.Context, id string) error {
-	res, err := s.db.ExecContext(ctx, `DELETE FROM jobs WHERE id = ?`, id)
+	res, err := s.db.ExecContext(ctx, `DELETE FROM jobs WHERE id = $1`, id)
 	if err != nil {
 		return fmt.Errorf("jobs: delete: %w", err)
 	}
@@ -245,9 +246,9 @@ func (s *sqlStore) Delete(ctx context.Context, id string) error {
 
 func (s *sqlStore) RecoverOrphanedJobs(ctx context.Context) (int64, error) {
 	result, err := s.db.ExecContext(ctx, `
-        UPDATE jobs
-        SET state = ?, error = ?, updated_at = ?
-        WHERE state = ?`,
+	        UPDATE jobs
+	        SET state = $1, error = $2, updated_at = $3
+	        WHERE state = $4`,
 		types.StateError,
 		fmt.Sprintf("%s: process restarted", protocol.ErrorCodeERuntimeRestart),
 		sqlutil.FormatTimestamp(time.Now().UTC()),
@@ -267,9 +268,9 @@ func (s *sqlStore) RecoverOrphanedJobsBefore(ctx context.Context, before time.Ti
 	now := time.Now().UTC()
 	nowStamp := sqlutil.FormatTimestamp(now)
 	result, err := s.db.ExecContext(ctx, `
-        UPDATE jobs
-        SET state = ?, error = ?, updated_at = ?
-        WHERE state = ? AND ((expires_at != '' AND expires_at < ?) OR (expires_at = '' AND updated_at < ?))`,
+	        UPDATE jobs
+	        SET state = $1, error = $2, updated_at = $3
+	        WHERE state = $4 AND ((expires_at != '' AND expires_at < $5) OR (expires_at = '' AND updated_at < $6))`,
 		types.StateError,
 		fmt.Sprintf("%s: stale running job", protocol.ErrorCodeERuntimeRestart),
 		nowStamp,
@@ -288,11 +289,11 @@ func (s *sqlStore) RecoverOrphanedJobsBefore(ctx context.Context, before time.Ti
 
 func (s *sqlStore) FindDuplicateJob(ctx context.Context, argsHash string) (types.Job, error) {
 	row := s.db.QueryRowContext(ctx, `
-        SELECT id, command, args_json, args_hash, state, result_path, error, created_at, updated_at, expires_at
-        FROM jobs
-        WHERE args_hash = ?
-        ORDER BY created_at DESC
-        LIMIT 1`, argsHash)
+	        SELECT id, command, args_json, args_hash, state, result_path, error, created_at, updated_at, expires_at
+	        FROM jobs
+	        WHERE args_hash = $1
+	        ORDER BY created_at DESC
+	        LIMIT 1`, argsHash)
 
 	var job types.Job
 	var created, updated, expires string
@@ -337,11 +338,11 @@ func (s *sqlStore) FindOrInsertJob(ctx context.Context, job types.Job) (types.Jo
 	}()
 
 	row := tx.QueryRowContext(ctx, `
-        SELECT id, command, args_json, args_hash, state, result_path, error, created_at, updated_at, expires_at
-        FROM jobs
-        WHERE args_hash = ?
-        ORDER BY created_at DESC
-        LIMIT 1`, job.ArgsHash)
+	        SELECT id, command, args_json, args_hash, state, result_path, error, created_at, updated_at, expires_at
+	        FROM jobs
+	        WHERE args_hash = $1
+	        ORDER BY created_at DESC
+	        LIMIT 1`, job.ArgsHash)
 
 	var existing types.Job
 	var created, updated, expires string
@@ -379,8 +380,8 @@ func (s *sqlStore) FindOrInsertJob(ctx context.Context, job types.Job) (types.Jo
 	}
 
 	_, err = tx.ExecContext(ctx, `
-        INSERT INTO jobs (id, command, args_json, args_hash, state, result_path, error, created_at, updated_at, expires_at)
-        VALUES (?, ?, ?, ?, ?, '', '', ?, ?, ?)`,
+	        INSERT INTO jobs (id, command, args_json, args_hash, state, result_path, error, created_at, updated_at, expires_at)
+	        VALUES ($1, $2, $3, $4, $5, '', '', $6, $7, $8)`,
 		job.ID, job.Command, job.ArgsJSON, job.ArgsHash, job.State, sqlutil.FormatTimestamp(job.CreatedAt), sqlutil.FormatTimestamp(job.UpdatedAt), sqlutil.FormatTimestamp(job.ExpiresAt))
 	if err != nil {
 		return types.Job{}, false, fmt.Errorf("jobs: insert: %w", err)
@@ -390,6 +391,11 @@ func (s *sqlStore) FindOrInsertJob(ctx context.Context, job types.Job) (types.Jo
 		return types.Job{}, false, fmt.Errorf("jobs: commit transaction: %w", err)
 	}
 	return job, false, nil
+}
+
+// MigrateSchema runs the jobs store DDL migrations against the given database.
+func MigrateSchema(ctx context.Context, db *sql.DB) error {
+	return migrate(ctx, db)
 }
 
 func migrate(ctx context.Context, db *sql.DB) error {

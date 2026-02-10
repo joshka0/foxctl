@@ -17,6 +17,8 @@ const (
 	DriverLibSQL DriverType = "libsql"
 	// DriverTurso uses Turso cloud database with libSQL (cloud, replicated)
 	DriverTurso DriverType = "turso"
+	// DriverPostgres uses PostgreSQL database (enterprise, shared state)
+	DriverPostgres DriverType = "postgres"
 )
 
 const (
@@ -50,6 +52,9 @@ type Config struct {
 
 	// Turso specific configuration (cloud libSQL)
 	Turso TursoConfig `json:"turso,omitempty" yaml:"turso,omitempty"`
+
+	// Postgres specific configuration (enterprise shared state)
+	Postgres PostgresConfig `json:"postgres,omitempty" yaml:"postgres,omitempty"`
 }
 
 // SQLiteConfig holds SQLite-specific configuration
@@ -119,6 +124,39 @@ type TursoConfig struct {
 	VectorDimensions int `json:"vector_dimensions" yaml:"vector_dimensions"`
 }
 
+// PostgresConfig holds PostgreSQL-specific configuration
+type PostgresConfig struct {
+	// DSN is the PostgreSQL connection string
+	// Example: "postgres://user:pass@host:5432/dbname?sslmode=require"
+	DSN string `json:"dsn" yaml:"dsn"`
+
+	// Schema is the PostgreSQL schema for store isolation (default: store name lowercased).
+	// Each store gets its own schema to avoid table name collisions.
+	Schema string `json:"schema,omitempty" yaml:"schema,omitempty"`
+
+	// MaxOpenConns is the maximum number of open connections (default: 5)
+	MaxOpenConns int `json:"max_open_conns,omitempty" yaml:"max_open_conns,omitempty"`
+
+	// MaxIdleConns is the maximum number of idle connections (default: 2)
+	MaxIdleConns int `json:"max_idle_conns,omitempty" yaml:"max_idle_conns,omitempty"`
+
+	// ConnMaxLifetimeSeconds is the maximum lifetime of a connection in seconds (default: 3600)
+	ConnMaxLifetimeSeconds int `json:"conn_max_lifetime_seconds,omitempty" yaml:"conn_max_lifetime_seconds,omitempty"`
+
+	// ConnMaxIdleTimeSeconds is the maximum idle time of a connection in seconds (default: 1800)
+	ConnMaxIdleTimeSeconds int `json:"conn_max_idle_time_seconds,omitempty" yaml:"conn_max_idle_time_seconds,omitempty"`
+
+	// EnableVectorSearch enables pgvector-based vector search
+	EnableVectorSearch bool `json:"enable_vector_search" yaml:"enable_vector_search"`
+
+	// VectorDimensions specifies the dimension of vector embeddings.
+	// If 0, uses GetDefaultVectorDimensions().
+	VectorDimensions int `json:"vector_dimensions" yaml:"vector_dimensions"`
+
+	// RequireVector fails startup if pgvector extension is not available
+	RequireVector bool `json:"require_vector" yaml:"require_vector"`
+}
+
 // Validate validates the configuration
 func (c *Config) Validate() error {
 	switch c.Driver {
@@ -136,6 +174,10 @@ func (c *Config) Validate() error {
 		}
 		if c.Turso.AuthToken == "" {
 			return errors.New("turso auth_token is required")
+		}
+	case DriverPostgres:
+		if c.Postgres.DSN == "" {
+			return errors.New("postgres dsn is required")
 		}
 	case "":
 		return errors.New("driver type is required")
@@ -179,6 +221,19 @@ func DefaultTursoConfig(url, authToken, dbName string) Config {
 			DatabaseName:       dbName,
 			EnableVectorSearch: false,
 			VectorDimensions:   GetDefaultVectorDimensions(),
+		},
+	}
+}
+
+// DefaultPostgresConfig returns a default PostgreSQL configuration
+func DefaultPostgresConfig(dsn string) Config {
+	return Config{
+		Driver: DriverPostgres,
+		Postgres: PostgresConfig{
+			DSN:              dsn,
+			MaxOpenConns:     5,
+			MaxIdleConns:     2,
+			VectorDimensions: GetDefaultVectorDimensions(),
 		},
 	}
 }

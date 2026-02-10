@@ -71,14 +71,16 @@ func ParseVector(data string) (Vector, error) {
 
 // CreateVectorColumn creates a vector column in the specified table
 func (vh *VectorHelper) CreateVectorColumn(ctx context.Context, tableName, columnName string) error {
-	query := fmt.Sprintf("ALTER TABLE %s ADD COLUMN %s F32_BLOB(%d)", tableName, columnName, vh.dimensions)
+	var query string
+	if vh.db.GetDriverType() == DriverPostgres {
+		query = pgCreateVectorColumnSQL(tableName, columnName, vh.dimensions)
+	} else {
+		query = fmt.Sprintf("ALTER TABLE %s ADD COLUMN %s F32_BLOB(%d)", tableName, columnName, vh.dimensions)
+	}
 	_, err := vh.db.ExecContext(ctx, query)
 	if err != nil {
-		// Ignore error if column already exists
-		// Check for duplicate column error message (works across SQLite versions)
 		errMsg := strings.ToLower(err.Error())
 		if strings.Contains(errMsg, "duplicate column") || strings.Contains(errMsg, "already exists") {
-			// Duplicate column error, safe to ignore
 			return nil
 		}
 		return fmt.Errorf("create vector column: %w", err)
@@ -88,8 +90,13 @@ func (vh *VectorHelper) CreateVectorColumn(ctx context.Context, tableName, colum
 
 // CreateVectorIndex creates a vector search index
 func (vh *VectorHelper) CreateVectorIndex(ctx context.Context, tableName, columnName, indexName string) error {
-	query := fmt.Sprintf("CREATE INDEX IF NOT EXISTS %s ON %s (libsql_vector_idx(%s))",
-		indexName, tableName, columnName)
+	var query string
+	if vh.db.GetDriverType() == DriverPostgres {
+		query = pgCreateVectorIndexSQL(tableName, columnName, indexName)
+	} else {
+		query = fmt.Sprintf("CREATE INDEX IF NOT EXISTS %s ON %s (libsql_vector_idx(%s))",
+			indexName, tableName, columnName)
+	}
 	_, err := vh.db.ExecContext(ctx, query)
 	return err
 }
@@ -97,29 +104,51 @@ func (vh *VectorHelper) CreateVectorIndex(ctx context.Context, tableName, column
 // VectorExpression inserts a vector into the database using the vector() SQL function
 // Returns a SQL expression that can be used in INSERT/UPDATE statements
 func (vh *VectorHelper) VectorExpression(vector Vector) string {
+	if vh.db.GetDriverType() == DriverPostgres {
+		return pgVectorExpression(vector)
+	}
 	return fmt.Sprintf("vector('%s')", vector.String())
 }
 
-// CosineSimilarity calculates cosine similarity between two vectors
-// Returns a SQL expression that can be used in SELECT/WHERE/ORDER BY clauses
+// CosineSimilarity returns a SQL expression for cosine similarity/distance between two vectors.
+// PostgreSQL: returns similarity (1 - distance); higher = more similar. Use ORDER BY ... DESC.
+// libSQL: returns distance via vector_distance_cos; lower = more similar. Use ORDER BY ... ASC.
+// Prefer SearchSimilar() for cross-driver queries that handle ordering automatically.
 func (vh *VectorHelper) CosineSimilarity(columnName string, queryVector Vector) string {
+	if vh.db.GetDriverType() == DriverPostgres {
+		return pgCosineSimilarity(columnName, queryVector)
+	}
 	return fmt.Sprintf("vector_distance_cos(%s, '%s')", columnName, queryVector.String())
 }
 
 // EuclideanDistance calculates Euclidean distance between two vectors
 // Returns a SQL expression that can be used in SELECT/WHERE/ORDER BY clauses
 func (vh *VectorHelper) EuclideanDistance(columnName string, queryVector Vector) string {
+	if vh.db.GetDriverType() == DriverPostgres {
+		return pgEuclideanDistance(columnName, queryVector)
+	}
 	return fmt.Sprintf("vector_distance_l2(%s, '%s')", columnName, queryVector.String())
 }
 
-// VectorTopK performs a vector similarity search using the index
-// Returns the SQL for querying top K similar vectors
+// VectorTopK performs a vector similarity search using the index.
+// For libSQL: returns a virtual table expression using vector_top_k().
+// For PostgreSQL: returns empty string (Postgres uses ORDER BY <=> in the main query).
+// Callers should use SearchSimilar() for cross-driver compatibility.
 func (vh *VectorHelper) VectorTopK(indexName string, queryVector Vector, k int) string {
+	if vh.db.GetDriverType() == DriverPostgres {
+		// PostgreSQL does not have a vector_top_k equivalent.
+		// Return empty string; callers should use SearchSimilar() instead.
+		return ""
+	}
 	return fmt.Sprintf("vector_top_k('%s', '%s', %d)", indexName, queryVector.String(), k)
 }
 
-// ExtractVector extracts a vector from the database into a string representation
+// ExtractVector extracts a vector from the database into a string representation.
+// PostgreSQL returns vector columns directly; libSQL uses vector_extract().
 func (vh *VectorHelper) ExtractVector(columnName string) string {
+	if vh.db.GetDriverType() == DriverPostgres {
+		return columnName
+	}
 	return fmt.Sprintf("vector_extract(%s)", columnName)
 }
 
@@ -137,8 +166,22 @@ func (vh *VectorHelper) SearchSimilar(
 ) (*sql.Rows, error) {
 	var query string
 
-	if indexName != "" {
-		// Use vector index for fast approximate search
+	if vh.db.GetDriverType() == DriverPostgres {
+		// PostgreSQL: use ORDER BY with <=> operator (HNSW index is used automatically)
+		qVC := pgQuoteIdent(vectorColumn)
+		query = fmt.Sprintf(`
+			SELECT *
+			FROM %s
+		`, pgQuoteIdent(tableName))
+		if additionalWhere != "" {
+			query += " WHERE " + additionalWhere
+		}
+		query += fmt.Sprintf(`
+			ORDER BY %s <=> '%s'
+			LIMIT %d
+		`, qVC, queryVector.String(), limit)
+	} else if indexName != "" {
+		// libSQL: Use vector index for fast approximate search
 		query = fmt.Sprintf(`
 			SELECT t.*
 			FROM %s vt

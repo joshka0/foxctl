@@ -232,6 +232,12 @@ func WithIDGenerator(gen func() string) MemoryOption {
 	}
 }
 
+// MigrateSchema runs the companion memory DDL migrations against the given database.
+func MigrateSchema(ctx context.Context, db *sql.DB) error {
+	m := &ConversationMemory{db: db}
+	return m.ensureSchema(ctx)
+}
+
 // ensureSchema creates the conversation memory tables.
 func (m *ConversationMemory) ensureSchema(ctx context.Context) error {
 	schema := `
@@ -479,7 +485,7 @@ func (m *ConversationMemory) migrateTimestamps(ctx context.Context) error {
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	stmt, err := tx.PrepareContext(ctx, `UPDATE companion_turns SET created_at = ? WHERE id = ?`)
+	stmt, err := tx.PrepareContext(ctx, `UPDATE companion_turns SET created_at = $1 WHERE id = $2`)
 	if err != nil {
 		return err
 	}
@@ -521,7 +527,7 @@ func (m *ConversationMemory) AppendTurn(ctx context.Context, turn ConversationTu
 	createdAtStr := turn.CreatedAt.UTC().Format("2006-01-02 15:04:05.000000")
 	_, err := m.db.ExecContext(ctx, `
 		INSERT INTO companion_turns (id, conversation_id, role, content, token_count, created_at, tool_calls)
-		VALUES (?, ?, ?, ?, ?, ?, ?)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)
 	`, turn.ID, turn.ConversationID, turn.Role, turn.Content, turn.TokenCount, createdAtStr, turn.ToolCalls)
 	if err != nil {
 		return fmt.Errorf("insert turn: %w", err)
@@ -530,7 +536,7 @@ func (m *ConversationMemory) AppendTurn(ctx context.Context, turn ConversationTu
 	// Update state
 	_, err = m.db.ExecContext(ctx, `
 		INSERT INTO companion_memory_state (conversation_id, total_turns, updated_at)
-		VALUES (?, 1, CURRENT_TIMESTAMP)
+		VALUES ($1, 1, CURRENT_TIMESTAMP)
 		ON CONFLICT(conversation_id) DO UPDATE SET
 			total_turns = total_turns + 1,
 			updated_at = CURRENT_TIMESTAMP
@@ -606,9 +612,9 @@ func (m *ConversationMemory) getVividTurns(ctx context.Context, conversationID s
 	rows, err := m.db.QueryContext(ctx, `
 		SELECT id, conversation_id, role, content, token_count, created_at
 		FROM companion_turns
-		WHERE conversation_id = ? AND created_at >= ?
+		WHERE conversation_id = $1 AND created_at >= $2
 		ORDER BY created_at DESC
-		LIMIT ?
+		LIMIT $3
 	`, conversationID, cutoffStr, m.config.VividMaxTurns)
 	if err != nil {
 		return nil, err
@@ -642,7 +648,7 @@ func (m *ConversationMemory) getRecentSummaries(ctx context.Context, conversatio
 	rows, err := m.db.QueryContext(ctx, `
 		SELECT id, conversation_id, date, turn_count, summary, topics, mood, key_moments, token_count, created_at
 		FROM companion_day_summaries
-		WHERE conversation_id = ? AND date >= ? AND date <= ?
+		WHERE conversation_id = $1 AND date >= $2 AND date <= $3
 		ORDER BY date DESC
 	`, conversationID, cutoffDate, todayDate) // Include today if a rolling summary exists.
 	if err != nil {
@@ -685,7 +691,7 @@ func (m *ConversationMemory) getDistilledHistory(ctx context.Context, conversati
 		SELECT id, conversation_id, relationship_note, recurring_topics, user_preferences,
 		       shared_memories, token_count, last_distilled_at
 		FROM companion_history
-		WHERE conversation_id = ?
+		WHERE conversation_id = $1
 	`, conversationID).Scan(
 		&h.ID, &h.ConversationID, &relNote, &recurringTopics, &userPrefs,
 		&sharedMemories, &h.TokenCount, &lastDistilled,
@@ -861,7 +867,7 @@ func (m *ConversationMemory) RunDayCompression(ctx context.Context, conversation
 	var totalTurns int
 	if err := db.QueryRowContext(ctx, `
 		SELECT COUNT(*) FROM companion_turns
-		WHERE conversation_id = ? AND created_at >= ? AND created_at < ?
+		WHERE conversation_id = $1 AND created_at >= $2 AND created_at < $3
 	`, conversationID, startStr, endStr).Scan(&totalTurns); err != nil {
 		return false, fmt.Errorf("count turns: %w", err)
 	}
@@ -873,7 +879,7 @@ func (m *ConversationMemory) RunDayCompression(ctx context.Context, conversation
 	var existingTurnCount int
 	err = db.QueryRowContext(ctx, `
 		SELECT turn_count FROM companion_day_summaries
-		WHERE conversation_id = ? AND date = ?
+		WHERE conversation_id = $1 AND date = $2
 	`, conversationID, date).Scan(&existingTurnCount)
 	switch err {
 	case nil:
@@ -890,7 +896,7 @@ func (m *ConversationMemory) RunDayCompression(ctx context.Context, conversation
 	rows, err := db.QueryContext(ctx, `
 		SELECT id, conversation_id, role, content, token_count, created_at
 		FROM companion_turns
-		WHERE conversation_id = ? AND created_at >= ? AND created_at < ?
+		WHERE conversation_id = $1 AND created_at >= $2 AND created_at < $3
 		ORDER BY created_at ASC
 	`, conversationID, startStr, endStr)
 	if err != nil {
@@ -931,7 +937,7 @@ func (m *ConversationMemory) RunDayCompression(ctx context.Context, conversation
 	_, err = db.ExecContext(ctx, `
 		INSERT INTO companion_day_summaries
 		(id, conversation_id, date, turn_count, summary, topics, mood, key_moments, token_count, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, CURRENT_TIMESTAMP)
 		ON CONFLICT(conversation_id, date) DO UPDATE SET
 			turn_count = excluded.turn_count,
 			summary = excluded.summary,
@@ -996,8 +1002,8 @@ func (m *ConversationMemory) RunDayCompression(ctx context.Context, conversation
 	// Update cursor.
 	_, err = db.ExecContext(ctx, `
 		UPDATE companion_memory_state
-		SET last_summarized_date = ?, updated_at = CURRENT_TIMESTAMP
-		WHERE conversation_id = ?
+		SET last_summarized_date = $1, updated_at = CURRENT_TIMESTAMP
+		WHERE conversation_id = $2
 	`, date, conversationID)
 	if err != nil {
 		return true, err
@@ -1046,11 +1052,11 @@ func (m *ConversationMemory) RunPendingDailyCompression(ctx context.Context, con
 		FROM (
 			SELECT substr(created_at, 1, 10) AS date, COUNT(*) AS turns
 			FROM companion_turns
-			WHERE conversation_id = ? AND substr(created_at, 1, 10) < ?
+			WHERE conversation_id = $1 AND substr(created_at, 1, 10) < $2
 			GROUP BY date
 		) d
 		LEFT JOIN companion_day_summaries s
-			ON s.conversation_id = ? AND s.date = d.date
+			ON s.conversation_id = $3 AND s.date = d.date
 		WHERE s.id IS NULL OR s.turn_count < d.turns
 		ORDER BY d.date DESC
 		LIMIT 1
@@ -1095,7 +1101,7 @@ func (m *ConversationMemory) CompressConversation(ctx context.Context, conversat
 	rows, err := db.QueryContext(ctx, `
 		SELECT DISTINCT substr(created_at, 1, 10) AS date
 		FROM companion_turns
-		WHERE conversation_id = ?
+		WHERE conversation_id = $1
 		ORDER BY date DESC
 	`, conversationID)
 	if err != nil {
@@ -1175,7 +1181,7 @@ func (m *ConversationMemory) RunWeeklyDistillation(ctx context.Context, conversa
 	err := m.db.QueryRowContext(ctx, `
 		SELECT last_distilled_date
 		FROM companion_memory_state
-		WHERE conversation_id = ?
+		WHERE conversation_id = $1
 	`, conversationID).Scan(&lastDistilled)
 	if err != nil && err != sql.ErrNoRows {
 		return fmt.Errorf("get last distilled cursor: %w", err)
@@ -1187,7 +1193,7 @@ func (m *ConversationMemory) RunWeeklyDistillation(ctx context.Context, conversa
 	rows, err := m.db.QueryContext(ctx, `
 		SELECT id, conversation_id, date, turn_count, summary, topics, mood, key_moments, token_count, created_at
 		FROM companion_day_summaries
-		WHERE conversation_id = ? AND date > ? AND date < ?
+		WHERE conversation_id = $1 AND date > $2 AND date < $3
 		ORDER BY date ASC
 	`, conversationID, lastDistilledDate, cutoffDate)
 	if err != nil {
@@ -1242,7 +1248,7 @@ func (m *ConversationMemory) RunWeeklyDistillation(ctx context.Context, conversa
 		INSERT INTO companion_history
 		(id, conversation_id, relationship_note, recurring_topics, user_preferences,
 		 shared_memories, token_count, last_distilled_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, CURRENT_TIMESTAMP)
 		ON CONFLICT(conversation_id) DO UPDATE SET
 			relationship_note = excluded.relationship_note,
 			recurring_topics = excluded.recurring_topics,
@@ -1311,7 +1317,7 @@ func (m *ConversationMemory) RunWeeklyDistillation(ctx context.Context, conversa
 	// Update cursor for incremental distillation (keep summaries/turns indefinitely).
 	_, err = m.db.ExecContext(ctx, `
 		INSERT INTO companion_memory_state (conversation_id, last_distilled_date, updated_at)
-		VALUES (?, ?, CURRENT_TIMESTAMP)
+		VALUES ($1, $2, CURRENT_TIMESTAMP)
 		ON CONFLICT(conversation_id) DO UPDATE SET
 			last_distilled_date = excluded.last_distilled_date,
 			updated_at = CURRENT_TIMESTAMP
@@ -1329,14 +1335,14 @@ func (m *ConversationMemory) GetStats(ctx context.Context, conversationID string
 
 	// Count turns
 	if err := m.db.QueryRowContext(ctx, `
-		SELECT COUNT(*) FROM companion_turns WHERE conversation_id = ?
+		SELECT COUNT(*) FROM companion_turns WHERE conversation_id = $1
 	`, conversationID).Scan(&stats.TotalTurns); err != nil {
 		return nil, fmt.Errorf("count turns: %w", err)
 	}
 
 	// Count summaries
 	if err := m.db.QueryRowContext(ctx, `
-		SELECT COUNT(*) FROM companion_day_summaries WHERE conversation_id = ?
+		SELECT COUNT(*) FROM companion_day_summaries WHERE conversation_id = $1
 	`, conversationID).Scan(&stats.DaySummaries); err != nil {
 		return nil, fmt.Errorf("count summaries: %w", err)
 	}
@@ -1344,7 +1350,7 @@ func (m *ConversationMemory) GetStats(ctx context.Context, conversationID string
 	// Check if has history
 	var historyCount int
 	if err := m.db.QueryRowContext(ctx, `
-		SELECT COUNT(*) FROM companion_history WHERE conversation_id = ?
+		SELECT COUNT(*) FROM companion_history WHERE conversation_id = $1
 	`, conversationID).Scan(&historyCount); err != nil {
 		return nil, fmt.Errorf("count history: %w", err)
 	}
@@ -1354,7 +1360,7 @@ func (m *ConversationMemory) GetStats(ctx context.Context, conversationID string
 	var lastSummarized, lastDistilled sql.NullString
 	err := m.db.QueryRowContext(ctx, `
 		SELECT last_summarized_date, last_distilled_date
-		FROM companion_memory_state WHERE conversation_id = ?
+		FROM companion_memory_state WHERE conversation_id = $1
 	`, conversationID).Scan(&lastSummarized, &lastDistilled)
 	if err != nil && err != sql.ErrNoRows {
 		return nil, fmt.Errorf("get memory state: %w", err)
@@ -1390,16 +1396,16 @@ func (m *ConversationMemory) Clear(ctx context.Context, conversationID string) e
 	}
 	defer tx.Rollback()
 
-	if _, err := tx.ExecContext(ctx, `DELETE FROM companion_turns WHERE conversation_id = ?`, conversationID); err != nil {
+	if _, err := tx.ExecContext(ctx, `DELETE FROM companion_turns WHERE conversation_id = $1`, conversationID); err != nil {
 		return err
 	}
-	if _, err := tx.ExecContext(ctx, `DELETE FROM companion_day_summaries WHERE conversation_id = ?`, conversationID); err != nil {
+	if _, err := tx.ExecContext(ctx, `DELETE FROM companion_day_summaries WHERE conversation_id = $1`, conversationID); err != nil {
 		return err
 	}
-	if _, err := tx.ExecContext(ctx, `DELETE FROM companion_history WHERE conversation_id = ?`, conversationID); err != nil {
+	if _, err := tx.ExecContext(ctx, `DELETE FROM companion_history WHERE conversation_id = $1`, conversationID); err != nil {
 		return err
 	}
-	if _, err := tx.ExecContext(ctx, `DELETE FROM companion_memory_state WHERE conversation_id = ?`, conversationID); err != nil {
+	if _, err := tx.ExecContext(ctx, `DELETE FROM companion_memory_state WHERE conversation_id = $1`, conversationID); err != nil {
 		return err
 	}
 
@@ -1651,7 +1657,7 @@ func (m *ConversationMemory) ListConversations(ctx context.Context, limit int) (
 		WHERE t.conversation_id NOT IN (SELECT conversation_id FROM companion_deleted_conversations)
 		GROUP BY t.conversation_id
 		ORDER BY MAX(t.created_at) DESC
-		LIMIT ?
+		LIMIT $1
 	`
 
 	rows, err := m.db.QueryContext(ctx, query, limit)
@@ -1679,7 +1685,7 @@ func (m *ConversationMemory) ListConversations(ctx context.Context, limit int) (
 	for i := range conversations {
 		lastMsgQuery := `
 			SELECT content FROM companion_turns
-			WHERE conversation_id = ?
+			WHERE conversation_id = $1
 			ORDER BY created_at DESC
 			LIMIT 1
 		`
@@ -1713,9 +1719,9 @@ func (m *ConversationMemory) GetConversationMessages(ctx context.Context, conver
 		FROM (
 			SELECT id, conversation_id, role, content, token_count, created_at, tool_calls
 			FROM companion_turns
-			WHERE conversation_id = ?
+			WHERE conversation_id = $1
 			ORDER BY created_at DESC
-			LIMIT ?
+			LIMIT $2
 		)
 		ORDER BY created_at ASC
 	`, conversationID, limit)
@@ -1751,7 +1757,7 @@ func (m *ConversationMemory) DeleteMessage(ctx context.Context, conversationID, 
 	defer m.mu.Unlock()
 
 	result, err := m.db.ExecContext(ctx, `
-		DELETE FROM companion_turns WHERE id = ? AND conversation_id = ?
+		DELETE FROM companion_turns WHERE id = $1 AND conversation_id = $2
 	`, messageID, conversationID)
 	if err != nil {
 		return fmt.Errorf("delete message: %w", err)
@@ -1774,8 +1780,9 @@ func (m *ConversationMemory) SoftDeleteConversation(ctx context.Context, convers
 	defer m.mu.Unlock()
 
 	_, err := m.db.ExecContext(ctx, `
-		INSERT OR REPLACE INTO companion_deleted_conversations (conversation_id, deleted_at)
-		VALUES (?, CURRENT_TIMESTAMP)
+		INSERT INTO companion_deleted_conversations (conversation_id, deleted_at)
+		VALUES ($1, CURRENT_TIMESTAMP)
+		ON CONFLICT (conversation_id) DO UPDATE SET deleted_at = EXCLUDED.deleted_at
 	`, conversationID)
 	if err != nil {
 		return fmt.Errorf("soft delete conversation: %w", err)
@@ -1793,7 +1800,7 @@ func (m *ConversationMemory) RenameConversation(ctx context.Context, conversatio
 	if title == "" {
 		// If empty title, clear the title but preserve agent_id
 		_, err := m.db.ExecContext(ctx, `
-			UPDATE companion_conversation_titles SET title = '', updated_at = CURRENT_TIMESTAMP WHERE conversation_id = ?
+			UPDATE companion_conversation_titles SET title = '', updated_at = CURRENT_TIMESTAMP WHERE conversation_id = $1
 		`, conversationID)
 		if err != nil {
 			return fmt.Errorf("remove conversation title: %w", err)
@@ -1803,8 +1810,8 @@ func (m *ConversationMemory) RenameConversation(ctx context.Context, conversatio
 
 	_, err := m.db.ExecContext(ctx, `
 		INSERT INTO companion_conversation_titles (conversation_id, title, updated_at)
-		VALUES (?, ?, CURRENT_TIMESTAMP)
-		ON CONFLICT(conversation_id) DO UPDATE SET title = ?, updated_at = CURRENT_TIMESTAMP
+		VALUES ($1, $2, CURRENT_TIMESTAMP)
+		ON CONFLICT(conversation_id) DO UPDATE SET title = $3, updated_at = CURRENT_TIMESTAMP
 	`, conversationID, title, title)
 	if err != nil {
 		return fmt.Errorf("rename conversation: %w", err)
@@ -1829,8 +1836,8 @@ func (m *ConversationMemory) LinkConversationAgent(ctx context.Context, conversa
 
 	_, err := m.db.ExecContext(ctx, `
 		INSERT INTO companion_conversation_titles (conversation_id, title, agent_id, updated_at)
-		VALUES (?, '', ?, CURRENT_TIMESTAMP)
-		ON CONFLICT(conversation_id) DO UPDATE SET agent_id = ?, updated_at = CURRENT_TIMESTAMP
+		VALUES ($1, '', $2, CURRENT_TIMESTAMP)
+		ON CONFLICT(conversation_id) DO UPDATE SET agent_id = $3, updated_at = CURRENT_TIMESTAMP
 	`, conversationID, agentID, agentID)
 	if err != nil {
 		return fmt.Errorf("link conversation agent: %w", err)

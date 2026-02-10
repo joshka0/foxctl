@@ -50,6 +50,11 @@ func (s *Store) Close() error {
 	return s.close()
 }
 
+// MigrateSchema runs the coordination store DDL migrations against the given database.
+func MigrateSchema(ctx context.Context, db *sql.DB) error {
+	return migrate(ctx, db)
+}
+
 func migrate(ctx context.Context, db *sql.DB) error {
 	ddl := `
 CREATE TABLE IF NOT EXISTS daemon_leases (
@@ -105,12 +110,12 @@ func (s *Store) TryAcquireLease(ctx context.Context, leaseName, ownerID string, 
 
 	res, err := s.db.ExecContext(ctx, `
 		INSERT INTO daemon_leases (name, owner_id, expires_at_ms, updated_at_ms, created_at_ms)
-		VALUES (?, ?, ?, ?, ?)
+		VALUES ($1, $2, $3, $4, $5)
 		ON CONFLICT(name) DO UPDATE SET
 			owner_id = excluded.owner_id,
 			expires_at_ms = excluded.expires_at_ms,
 			updated_at_ms = excluded.updated_at_ms
-		WHERE daemon_leases.expires_at_ms <= ? OR daemon_leases.owner_id = ?
+		WHERE daemon_leases.expires_at_ms <= $6 OR daemon_leases.owner_id = $7
 	`, leaseName, ownerID, expiresMS, nowMS, nowMS, nowMS, ownerID)
 	if err != nil {
 		return false, fmt.Errorf("coordination: acquire lease: %w", err)
@@ -141,7 +146,7 @@ func (s *Store) ReleaseLease(ctx context.Context, leaseName, ownerID string) err
 		return nil
 	}
 
-	_, err := s.db.ExecContext(ctx, `DELETE FROM daemon_leases WHERE name = ? AND owner_id = ?`, leaseName, ownerID)
+	_, err := s.db.ExecContext(ctx, `DELETE FROM daemon_leases WHERE name = $1 AND owner_id = $2`, leaseName, ownerID)
 	if err != nil {
 		return fmt.Errorf("coordination: release lease: %w", err)
 	}
@@ -163,7 +168,7 @@ func (s *Store) GetLease(ctx context.Context, leaseName string) (*Lease, error) 
 	err := s.db.QueryRowContext(ctx, `
 		SELECT name, owner_id, expires_at_ms, updated_at_ms
 		FROM daemon_leases
-		WHERE name = ?
+		WHERE name = $1
 	`, leaseName).Scan(&l.Name, &l.OwnerID, &expiresMS, &updatedMS)
 	if err != nil {
 		if err == sql.ErrNoRows {

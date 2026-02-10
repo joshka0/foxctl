@@ -1,0 +1,88 @@
+# Local k3s testing overlay
+# Usage: kubectl apply -k deploy/kubernetes/overlays/local/
+#
+# Extends the postgres overlay with local-specific adjustments:
+# - Adds local PostgreSQL StatefulSet
+# - Reduces replicas to 1
+# - Uses locally-built Docker image (imagePullPolicy: Never)
+# - Disables S3 CAS (uses file-based emptyDir)
+# - Removes embedding worker (no Voyage key needed for basic testing)
+
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+- ../postgres
+- local-postgres.yaml
+
+patches:
+# Local deployment adjustments
+- path: patches.yaml
+
+# Override secrets with local values
+- path: secrets.yaml
+
+# Scale down embedding worker to 0
+- target:
+    kind: Deployment
+    name: agentctl-embedding-worker
+  patch: |
+    - op: replace
+      path: /spec/replicas
+      value: 0
+
+# Remove HPA for embedding worker (0 replicas)
+- target:
+    kind: HorizontalPodAutoscaler
+    name: agentctl-embedding-worker
+  patch: |
+    $patch: delete
+    apiVersion: autoscaling/v2
+    kind: HorizontalPodAutoscaler
+    metadata:
+      name: agentctl-embedding-worker
+
+# Remove HPA for main deployment (single replica)
+- target:
+    kind: HorizontalPodAutoscaler
+    name: agentctl
+  patch: |
+    $patch: delete
+    apiVersion: autoscaling/v2
+    kind: HorizontalPodAutoscaler
+    metadata:
+      name: agentctl
+
+# Remove PDB (single replica)
+- target:
+    kind: PodDisruptionBudget
+    name: agentctl
+  patch: |
+    $patch: delete
+    apiVersion: policy/v1
+    kind: PodDisruptionBudget
+    metadata:
+      name: agentctl
+
+# Set imagePullPolicy: Never on all cronjobs (use local image)
+- target:
+    kind: CronJob
+    name: agentctl-pagerank
+  patch: |
+    - op: add
+      path: /spec/jobTemplate/spec/template/spec/containers/0/imagePullPolicy
+      value: Never
+- target:
+    kind: CronJob
+    name: agentctl-cas-gc
+  patch: |
+    - op: add
+      path: /spec/jobTemplate/spec/template/spec/containers/0/imagePullPolicy
+      value: Never
+- target:
+    kind: CronJob
+    name: agentctl-session-cleanup
+  patch: |
+    - op: add
+      path: /spec/jobTemplate/spec/template/spec/containers/0/imagePullPolicy
+      value: Never

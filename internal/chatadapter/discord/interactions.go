@@ -39,12 +39,16 @@ func (a *Adapter) handleStop(ctx context.Context, evt chatadapter.InteractionEve
 		return evt.Respond("Daemon URL not configured", nil)
 	}
 
-	url := fmt.Sprintf("%s/api/agents/%s/daemon/kill", a.daemonURL, sessionID)
+	baseURL := strings.TrimRight(a.daemonURL, "/")
+	url := fmt.Sprintf("%s/api/agents/%s/daemon/kill", baseURL, sessionID)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, nil)
 	if err != nil {
 		return evt.Respond(fmt.Sprintf("Failed to create request: %s", err), nil)
 	}
 
+	if a.httpClient == nil {
+		return evt.Respond("Internal error: HTTP client not configured", nil)
+	}
 	resp, err := a.httpClient.Do(req)
 	if err != nil {
 		return evt.Respond(fmt.Sprintf("Failed to kill agent: %s", err), nil)
@@ -52,8 +56,8 @@ func (a *Adapter) handleStop(ctx context.Context, evt chatadapter.InteractionEve
 	defer resp.Body.Close()
 
 	if resp.StatusCode >= 400 {
-		body, _ := io.ReadAll(resp.Body)
-		return evt.Respond(fmt.Sprintf("Kill failed (%d): %s", resp.StatusCode, truncate(string(body), 200)), nil)
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 64*1024))
+		return evt.Respond(fmt.Sprintf("Kill failed (%d): %s", resp.StatusCode, chatadapter.TruncateRunes(string(body), 200)), nil)
 	}
 
 	// Update the original message to show killed state
@@ -61,7 +65,7 @@ func (a *Adapter) handleStop(ctx context.Context, evt chatadapter.InteractionEve
 		"",
 		[]chatadapter.Embed{{
 			Title:       "Agent Killed",
-			Description: fmt.Sprintf("Session `%s` was stopped by %s", truncate(sessionID, 36), evt.User.Username),
+			Description: fmt.Sprintf("Session `%s` was stopped by %s", chatadapter.TruncateRunes(sessionID, 36), evt.User.Username),
 			Color:       colorKilled,
 		}},
 		nil, // remove buttons
@@ -74,12 +78,16 @@ func (a *Adapter) handleRetry(ctx context.Context, evt chatadapter.InteractionEv
 		return evt.Respond("Daemon URL not configured", nil)
 	}
 
-	url := fmt.Sprintf("%s/api/agents/%s/daemon/start", a.daemonURL, sessionID)
+	baseURL := strings.TrimRight(a.daemonURL, "/")
+	url := fmt.Sprintf("%s/api/agents/%s/daemon/start", baseURL, sessionID)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, nil)
 	if err != nil {
 		return evt.Respond(fmt.Sprintf("Failed to create request: %s", err), nil)
 	}
 
+	if a.httpClient == nil {
+		return evt.Respond("Internal error: HTTP client not configured", nil)
+	}
 	resp, err := a.httpClient.Do(req)
 	if err != nil {
 		return evt.Respond(fmt.Sprintf("Failed to restart agent: %s", err), nil)
@@ -87,11 +95,11 @@ func (a *Adapter) handleRetry(ctx context.Context, evt chatadapter.InteractionEv
 	defer resp.Body.Close()
 
 	if resp.StatusCode >= 400 {
-		body, _ := io.ReadAll(resp.Body)
-		return evt.Respond(fmt.Sprintf("Retry failed (%d): %s", resp.StatusCode, truncate(string(body), 200)), nil)
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 64*1024))
+		return evt.Respond(fmt.Sprintf("Retry failed (%d): %s", resp.StatusCode, chatadapter.TruncateRunes(string(body), 200)), nil)
 	}
 
-	return evt.Respond(fmt.Sprintf("Retrying agent `%s`...", truncate(sessionID, 36)), nil)
+	return evt.Respond(fmt.Sprintf("Retrying agent `%s`...", chatadapter.TruncateRunes(sessionID, 36)), nil)
 }
 
 // handleDetails fetches agent info and responds ephemerally.
@@ -100,31 +108,35 @@ func (a *Adapter) handleDetails(ctx context.Context, evt chatadapter.Interaction
 		return evt.Respond("Daemon URL not configured", nil)
 	}
 
-	url := fmt.Sprintf("%s/api/agents/%s", a.daemonURL, sessionID)
+	baseURL := strings.TrimRight(a.daemonURL, "/")
+	url := fmt.Sprintf("%s/api/agents/%s", baseURL, sessionID)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return evt.Respond(fmt.Sprintf("Failed to create request: %s", err), nil)
 	}
 
+	if a.httpClient == nil {
+		return evt.Respond("Internal error: HTTP client not configured", nil)
+	}
 	resp, err := a.httpClient.Do(req)
 	if err != nil {
 		return evt.Respond(fmt.Sprintf("Failed to fetch agent: %s", err), nil)
 	}
 	defer resp.Body.Close()
 
-	body, err := io.ReadAll(resp.Body)
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 64*1024))
 	if err != nil {
 		return evt.Respond(fmt.Sprintf("Failed to read response: %s", err), nil)
 	}
 
 	if resp.StatusCode >= 400 {
-		return evt.Respond(fmt.Sprintf("Agent not found (%d): %s", resp.StatusCode, truncate(string(body), 200)), nil)
+		return evt.Respond(fmt.Sprintf("Agent not found (%d): %s", resp.StatusCode, chatadapter.TruncateRunes(string(body), 200)), nil)
 	}
 
 	// Parse and format agent info
 	var agent map[string]any
 	if err := json.Unmarshal(body, &agent); err != nil {
-		return evt.Respond(fmt.Sprintf("```json\n%s\n```", truncate(string(body), 1800)), nil)
+		return evt.Respond(fmt.Sprintf("```json\n%s\n```", chatadapter.TruncateRunes(string(body), 1800)), nil)
 	}
 
 	fields := []chatadapter.Field{}

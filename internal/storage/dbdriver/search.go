@@ -319,22 +319,48 @@ func (h *HybridSearcher) Search(
 
 	// Phase 1: Get candidate documents using vector search
 	// This gives us a reasonable subset to score with BM25
-	candidateQuery := fmt.Sprintf(`
-		SELECT
-			t.id as id,
-			t.%s as text,
-			%s as vector_sim
-		FROM %s vt
-		JOIN %s t ON t.rowid = vt.id
-	`, textColumn,
-		h.vectorHelper.CosineSimilarity("t."+vectorColumn, queryVector),
-		h.vectorHelper.VectorTopK(indexName, queryVector, limit*2), // Get 2x candidates
-		tableName)
+	var candidateQuery string
 
-	if additionalWhere != "" {
-		candidateQuery += " WHERE " + additionalWhere
+	if h.db.GetDriverType() == DriverPostgres {
+		// PostgreSQL: use ORDER BY with <=> operator (HNSW index used automatically)
+		candidateQuery = fmt.Sprintf(`
+			SELECT
+				id,
+				%s as text,
+				%s as vector_sim
+			FROM %s
+		`, textColumn,
+			h.vectorHelper.CosineSimilarity(vectorColumn, queryVector),
+			tableName)
+
+		if additionalWhere != "" {
+			candidateQuery += " WHERE " + additionalWhere
+		}
+
+		candidateQuery += fmt.Sprintf(`
+			ORDER BY %s <=> '%s'
+			LIMIT %d
+		`, vectorColumn, queryVector.String(), limit*2)
+	} else {
+		// libSQL: use vector_top_k virtual table
+		candidateQuery = fmt.Sprintf(`
+			SELECT
+				t.id as id,
+				t.%s as text,
+				%s as vector_sim
+			FROM %s vt
+			JOIN %s t ON t.rowid = vt.id
+		`, textColumn,
+			h.vectorHelper.CosineSimilarity("t."+vectorColumn, queryVector),
+			h.vectorHelper.VectorTopK(indexName, queryVector, limit*2),
+			tableName)
+
+		if additionalWhere != "" {
+			candidateQuery += " WHERE " + additionalWhere
+		}
 	}
 
+	candidateQuery = h.db.GetDialect().Rebind(candidateQuery)
 	rows, err := h.db.QueryContext(ctx, candidateQuery, args...)
 	if err != nil {
 		return nil, fmt.Errorf("candidate query failed: %w", err)

@@ -149,18 +149,18 @@ func (s *sqlStore) Enqueue(ctx context.Context, params EnqueueParams) (*Entry, e
 		// Check for existing unconsumed entry with same hash
 		var existingID string
 		err := s.db.QueryRowContext(ctx, `
-			SELECT id FROM context_entries
-			WHERE workspace_id = ? AND session_id = ? AND dedupe_hash = ?
-			  AND consumed_at_ms IS NULL AND expires_at_ms > ?
-			LIMIT 1`,
+				SELECT id FROM context_entries
+				WHERE workspace_id = $1 AND session_id = $2 AND dedupe_hash = $3
+				  AND consumed_at_ms IS NULL AND expires_at_ms > $4
+				LIMIT 1`,
 			params.WorkspaceID, params.SessionID, dedupeHash.String, now.UnixMilli()).Scan(&existingID)
 
 		if err == nil {
 			// Found existing - update timestamp and return
 			_, err = s.db.ExecContext(ctx, `
-				UPDATE context_entries
-				SET created_at_ms = ?, expires_at_ms = ?
-				WHERE id = ?`,
+					UPDATE context_entries
+					SET created_at_ms = $1, expires_at_ms = $2
+					WHERE id = $3`,
 				now.UnixMilli(), expiresAt.UnixMilli(), existingID)
 			if err != nil {
 				return nil, fmt.Errorf("contextbuffer: update existing: %w", err)
@@ -195,8 +195,8 @@ func (s *sqlStore) Enqueue(ctx context.Context, params EnqueueParams) (*Entry, e
 	}
 
 	_, err := s.db.ExecContext(ctx, `
-		INSERT INTO context_entries (id, workspace_id, session_id, agent_id, source, text, priority, dedupe_hash, created_at_ms, expires_at_ms, metadata)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			INSERT INTO context_entries (id, workspace_id, session_id, agent_id, source, text, priority, dedupe_hash, created_at_ms, expires_at_ms, metadata)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
 		id, params.WorkspaceID, params.SessionID, params.AgentID, params.Source, params.Text, params.Priority,
 		dedupeHash, now.UnixMilli(), expiresAt.UnixMilli(), metadataJSON)
 	if err != nil {
@@ -253,32 +253,32 @@ func (s *sqlStore) drainInternal(ctx context.Context, params DrainParams) (*Drai
 	// Build query with optional filters
 	var args []any
 	query := `
-		SELECT id, workspace_id, session_id, agent_id, source, text, priority, created_at_ms, expires_at_ms, consumed_at_ms, metadata
-		FROM context_entries
-		WHERE workspace_id = ? AND session_id = ?
-		  AND consumed_at_ms IS NULL AND expires_at_ms > ?`
+			SELECT id, workspace_id, session_id, agent_id, source, text, priority, created_at_ms, expires_at_ms, consumed_at_ms, metadata
+			FROM context_entries
+			WHERE workspace_id = $1 AND session_id = $2
+			  AND consumed_at_ms IS NULL AND expires_at_ms > $3`
 	args = append(args, params.WorkspaceID, params.SessionID, nowMs)
 
 	if params.AgentID != "" {
-		query += ` AND agent_id = ?`
+		query += fmt.Sprintf(" AND agent_id = $%d", len(args)+1)
 		args = append(args, params.AgentID)
 	}
 
 	if len(params.Sources) > 0 {
 		placeholders := make([]string, len(params.Sources))
 		for i, src := range params.Sources {
-			placeholders[i] = "?"
+			placeholders[i] = fmt.Sprintf("$%d", len(args)+1)
 			args = append(args, src)
 		}
 		query += ` AND source IN (` + strings.Join(placeholders, ",") + `)`
 	}
 
 	if params.MinPriority > 0 {
-		query += ` AND priority <= ?`
+		query += fmt.Sprintf(" AND priority <= $%d", len(args)+1)
 		args = append(args, params.MinPriority)
 	}
 
-	query += ` ORDER BY priority ASC, created_at_ms ASC LIMIT ?`
+	query += fmt.Sprintf(" ORDER BY priority ASC, created_at_ms ASC LIMIT $%d", len(args)+1)
 	args = append(args, params.Limit)
 
 	tx, err := s.db.BeginTx(ctx, nil)
@@ -315,11 +315,11 @@ func (s *sqlStore) drainInternal(ctx context.Context, params DrainParams) (*Drai
 		placeholders := make([]string, len(ids))
 		updateArgs := []any{nowMs}
 		for i, id := range ids {
-			placeholders[i] = "?"
+			placeholders[i] = fmt.Sprintf("$%d", len(updateArgs)+1)
 			updateArgs = append(updateArgs, id)
 		}
 		_, err = tx.ExecContext(ctx,
-			`UPDATE context_entries SET consumed_at_ms = ? WHERE id IN (`+strings.Join(placeholders, ",")+`)`,
+			`UPDATE context_entries SET consumed_at_ms = $1 WHERE id IN (`+strings.Join(placeholders, ",")+`)`,
 			updateArgs...)
 		if err != nil {
 			return nil, fmt.Errorf("contextbuffer: mark consumed: %w", err)
@@ -329,9 +329,9 @@ func (s *sqlStore) drainInternal(ctx context.Context, params DrainParams) (*Drai
 	// Count remaining pending
 	var totalPending int
 	err = tx.QueryRowContext(ctx, `
-		SELECT COUNT(*) FROM context_entries
-		WHERE workspace_id = ? AND session_id = ?
-		  AND consumed_at_ms IS NULL AND expires_at_ms > ?`,
+			SELECT COUNT(*) FROM context_entries
+			WHERE workspace_id = $1 AND session_id = $2
+			  AND consumed_at_ms IS NULL AND expires_at_ms > $3`,
 		params.WorkspaceID, params.SessionID, nowMs).Scan(&totalPending)
 	if err != nil {
 		return nil, fmt.Errorf("contextbuffer: count pending: %w", err)
@@ -362,9 +362,9 @@ func (s *sqlStore) PruneExpired(ctx context.Context, maxConsumedAge time.Duratio
 
 	// Delete: expired unconsumed OR old consumed
 	res, err := s.db.ExecContext(ctx, `
-		DELETE FROM context_entries
-		WHERE (expires_at_ms <= ? AND consumed_at_ms IS NULL)
-		   OR (consumed_at_ms IS NOT NULL AND consumed_at_ms < ?)`,
+			DELETE FROM context_entries
+			WHERE (expires_at_ms <= $1 AND consumed_at_ms IS NULL)
+			   OR (consumed_at_ms IS NOT NULL AND consumed_at_ms < $2)`,
 		nowMs, consumedCutoff)
 	if err != nil {
 		return 0, fmt.Errorf("contextbuffer: prune: %w", err)
@@ -381,14 +381,19 @@ func (s *sqlStore) PruneExpired(ctx context.Context, maxConsumedAge time.Duratio
 func (s *sqlStore) Count(ctx context.Context, workspaceID, sessionID string) (int, error) {
 	var count int
 	err := s.db.QueryRowContext(ctx, `
-		SELECT COUNT(*) FROM context_entries
-		WHERE workspace_id = ? AND session_id = ?
-		  AND consumed_at_ms IS NULL AND expires_at_ms > ?`,
+			SELECT COUNT(*) FROM context_entries
+			WHERE workspace_id = $1 AND session_id = $2
+			  AND consumed_at_ms IS NULL AND expires_at_ms > $3`,
 		workspaceID, sessionID, time.Now().UnixMilli()).Scan(&count)
 	if err != nil {
 		return 0, fmt.Errorf("contextbuffer: count: %w", err)
 	}
 	return count, nil
+}
+
+// MigrateSchema runs the contextbuffer store DDL migrations against the given database.
+func MigrateSchema(ctx context.Context, db *sql.DB) error {
+	return migrate(ctx, db)
 }
 
 func migrate(ctx context.Context, db *sql.DB) error {

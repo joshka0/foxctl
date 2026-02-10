@@ -206,15 +206,15 @@ func (l *libsqlDB) SetMaxIdleConns(n int) {
 
 // SetConnMaxLifetime sets the maximum amount of time a connection may be reused
 func (l *libsqlDB) SetConnMaxLifetime(d any) {
-	if duration, ok := d.(time.Duration); ok {
-		l.db.SetConnMaxLifetime(duration)
+	if dur, ok := parseConnDuration(d); ok {
+		l.db.SetConnMaxLifetime(dur)
 	}
 }
 
 // SetConnMaxIdleTime sets the maximum amount of time a connection may be idle
 func (l *libsqlDB) SetConnMaxIdleTime(d any) {
-	if duration, ok := d.(time.Duration); ok {
-		l.db.SetConnMaxIdleTime(duration)
+	if dur, ok := parseConnDuration(d); ok {
+		l.db.SetConnMaxIdleTime(dur)
 	}
 }
 
@@ -236,6 +236,11 @@ func (l *libsqlDB) IsVectorSearchEnabled() bool {
 // GetDriverType returns DriverLibSQL
 func (l *libsqlDB) GetDriverType() DriverType {
 	return l.driverType
+}
+
+// GetDialect returns the SQLite dialect (libSQL uses SQLite-compatible SQL).
+func (l *libsqlDB) GetDialect() Dialect {
+	return SQLiteDialect{}
 }
 
 // GetVectorDimensions returns the configured vector dimensions

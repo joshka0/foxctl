@@ -7,18 +7,18 @@
 
 ## Problem Statement
 
-agentctl currently uses a custom GUI (`packages/gui-agent`) and internal primitives (mailbox, blackboard, SSE) for agent coordination. This works well for developers running locally, but doesn't scale to team-wide adoption or enterprise use cases where people already live inside Discord, Slack, or Teams.
+agentctl currently uses a custom GUI (`packages/gui-agent`) and internal primitives (mailbox, blackboard, SSE) for agent coordination. This works well for developers running locally, but doesn't scale to team-wide adoption or enterprise use cases where people already live inside Discord, Telegram, Slack, or Teams.
 
-**Goal:** Build a generic `ChatAdapter` interface that enables agentctl's full agent coordination capabilities through any chat platform, starting with Discord, then Teams, then Slack.
+**Goal:** Build a generic `ChatAdapter` interface that enables agentctl's full agent coordination capabilities through any chat platform, starting with Discord, then Telegram, then Teams, then Slack.
 
 ## Architecture
 
 ```
-Chat Platform (Discord / Teams / Slack)
+Chat Platform (Discord / Telegram / Teams / Slack)
     |
     v
 [Platform Driver]  <-- platform-specific Go code
-    |                   (discordgo, REST API, slack-go)
+    |                   (discordgo, Telegram Bot API, REST API, slack-go)
     v
 [ChatAdapter Interface]  <-- generic abstraction
     |
@@ -38,23 +38,23 @@ The adapter sits between the platform and agentctl's existing internals. Each pl
 
 ## Platform Capability Matrix
 
-| Capability | Discord | Teams | Slack |
-|---|---|---|---|
-| **Go Library** | `discordgo` (5.8k stars, mature) | No official SDK; `infracloudio/msbotbuilder-go` or REST | `slack-go/slack` (community) |
-| **Rich Messages** | Embeds (25 fields, 6KB, 10/msg) | Adaptive Cards (28KB, open standard) | Block Kit (100 blocks/view) |
-| **Slash Commands** | Structured params, autocomplete (25 choices) | Message extensions with structured params | Single text param, manual parsing |
-| **Interactive Components** | Buttons (5x5), select (25 opts), modals (5 inputs) | Adaptive Card actions (Submit, OpenUrl, ShowCard) | Buttons, selects, date pickers, modals (100 blocks) |
-| **Threading** | First-class thread objects (1000 active/guild) | `replyToId` on activities | `thread_ts` timestamp-based |
-| **Proactive Messages** | Direct via bot token | Stored conversation reference + OAuth | Bot token + channel ID |
-| **Rate Limits** | 50 req/sec global, 5/2s per webhook | ~30 msgs/min per conversation | Tier-based; **1 req/min for non-Marketplace apps (2026)** |
-| **File Uploads** | 25MB free, 500MB Nitro | 20MB via attachment | Varies by plan |
-| **Presence/Status** | Online/Idle/DND + activity types | Limited bot presence | Bot status via API |
-| **Persistent UI** | Channel pins, thread archives | Tabs (full web apps) | App Home (Block Kit, per-user) |
-| **Cross-Org** | Multi-server by default | External/Guest Access | Slack Connect (shared channels) |
-| **Enterprise Deployment** | Self-managed | Microsoft 365 admin + Azure AD | Enterprise Grid (org-wide tokens) |
-| **Compliance** | None built-in | DLP, eDiscovery, retention, audit | Enterprise Grid compliance |
-| **Workflow Automation** | None | Power Automate | Workflow Builder + custom steps |
-| **Dev Mode** | Gateway WebSocket | Requires public endpoint (or ngrok) | Socket Mode (no public endpoint) |
+| Capability | Discord | Telegram | Teams | Slack |
+|---|---|---|---|---|
+| **Go Library** | `discordgo` (5.8k stars, mature) | `go-telegram-bot-api` (community) or direct HTTP | No official SDK; `infracloudio/msbotbuilder-go` or REST | `slack-go/slack` (community) |
+| **Rich Messages** | Embeds (25 fields, 6KB, 10/msg) | MarkdownV2/HTML formatting + inline keyboards | Adaptive Cards (28KB, open standard) | Block Kit (100 blocks/view) |
+| **Slash Commands** | Structured params, autocomplete (25 choices) | Bot commands (`/cmd args`, manual parsing) | Message extensions with structured params | Single text param, manual parsing |
+| **Interactive Components** | Buttons (5x5), select (25 opts), modals (5 inputs) | Inline keyboard buttons (callback queries) | Adaptive Card actions (Submit, OpenUrl, ShowCard) | Buttons, selects, date pickers, modals (100 blocks) |
+| **Threading** | First-class thread objects (1000 active/guild) | Replies everywhere; topics in forum supergroups (optional) | `replyToId` on activities | `thread_ts` timestamp-based |
+| **Proactive Messages** | Direct via bot token | Direct via bot token | Stored conversation reference + OAuth | Bot token + channel ID |
+| **Rate Limits** | 50 req/sec global, 5/2s per webhook | Per-bot limits; 429 includes `retry_after` | ~30 msgs/min per conversation | Tier-based; **1 req/min for non-Marketplace apps (2026)** |
+| **File Uploads** | 25MB free, 500MB Nitro | Documents/photos supported; size limits apply | 20MB via attachment | Varies by plan |
+| **Presence/Status** | Online/Idle/DND + activity types | `sendChatAction` (typing) only | Limited bot presence | Bot status via API |
+| **Persistent UI** | Channel pins, thread archives | None | Tabs (full web apps) | App Home (Block Kit, per-user) |
+| **Cross-Org** | Multi-server by default | N/A | External/Guest Access | Slack Connect (shared channels) |
+| **Enterprise Deployment** | Self-managed | N/A | Microsoft 365 admin + Azure AD | Enterprise Grid (org-wide tokens) |
+| **Compliance** | None built-in | None built-in | DLP, eDiscovery, retention, audit | Enterprise Grid compliance |
+| **Workflow Automation** | None | None | Power Automate | Workflow Builder + custom steps |
+| **Dev Mode** | Gateway WebSocket | Long polling (no public endpoint); webhook optional | Requires public endpoint (or ngrok) | Socket Mode (no public endpoint) |
 
 ## Proposed Go Interface
 
@@ -427,6 +427,31 @@ discord:
     general: "general"            # default command channel
 ```
 
+### Phase 1b: Telegram Adapter (Low Friction)
+
+Telegram is a good early second platform:
+- Simple HTTP integration (Bot API) and long polling works locally without a public endpoint
+- Inline keyboard buttons cover the core “agent control” interactions (stop/retry/details)
+- Streaming can be done via `editMessageText` with a safe edit interval and 429 backoff
+
+**New packages:**
+```
+internal/chatadapter/
+    telegram/
+        driver.go        # long polling loop + update routing
+        messaging.go     # SessionBridge + streaming edits (4096-char limit)
+        interactions.go  # callback query handlers
+        commands.go      # command parsing + optional Bot API command registration
+```
+
+**Configuration (env vars, for first cut):**
+```
+TELEGRAM_BOT_TOKEN=...
+TELEGRAM_CHAT_IDS=<chat-id>,<chat-id>
+TELEGRAM_CHAT_PROFILE=explorer
+TELEGRAM_CHAT_SYSTEM_PROMPT="..."
+```
+
 ### Phase 2: Teams Adapter (Enterprise)
 
 **New packages:**
@@ -483,11 +508,13 @@ github.com/slack-go/slack  # Community Go library
 ```bash
 # Start chat adapter alongside web server
 agentctl web serve --chat discord
+agentctl web serve --chat telegram
 agentctl web serve --chat teams
-agentctl web serve --chat discord,teams  # multiple adapters
+agentctl web serve --chat discord,telegram,teams  # multiple adapters
 
 # Standalone adapter mode (no web GUI)
 agentctl chat connect discord
+agentctl chat connect telegram
 agentctl chat connect teams --tenant-id <id>
 ```
 

@@ -11,7 +11,6 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"time"
 )
 
 // sqliteDB wraps *sql.DB for SQLite
@@ -237,15 +236,15 @@ func (s *sqliteDB) SetMaxIdleConns(n int) {
 
 // SetConnMaxLifetime sets the maximum amount of time a connection may be reused
 func (s *sqliteDB) SetConnMaxLifetime(d any) {
-	if duration, ok := d.(time.Duration); ok {
-		s.db.SetConnMaxLifetime(duration)
+	if dur, ok := parseConnDuration(d); ok {
+		s.db.SetConnMaxLifetime(dur)
 	}
 }
 
 // SetConnMaxIdleTime sets the maximum amount of time a connection may be idle
 func (s *sqliteDB) SetConnMaxIdleTime(d any) {
-	if duration, ok := d.(time.Duration); ok {
-		s.db.SetConnMaxIdleTime(duration)
+	if dur, ok := parseConnDuration(d); ok {
+		s.db.SetConnMaxIdleTime(dur)
 	}
 }
 
@@ -267,4 +266,9 @@ func (s *sqliteDB) IsVectorSearchEnabled() bool {
 // GetDriverType returns DriverSQLite
 func (s *sqliteDB) GetDriverType() DriverType {
 	return DriverSQLite
+}
+
+// GetDialect returns the SQLite dialect.
+func (s *sqliteDB) GetDialect() Dialect {
+	return SQLiteDialect{}
 }

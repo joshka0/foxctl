@@ -316,6 +316,20 @@ export CLAUDE_MAX_MODEL=claude-haiku-4-5
 
 ---
 
+## Dependencies
+
+### Telegram Bot API Library is Unmaintained
+
+**Status:** `go-telegram-bot-api/telegram-bot-api` v5.5.1 — last release Dec 2021, last commit Oct 2022.
+
+**Impact:** Missing 3+ years of Telegram Bot API features (v6.0–v9.3). No security patches.
+
+**Recommended migration:** [`go-telegram/bot`](https://github.com/go-telegram/bot) — 1.6k stars, actively maintained, context-based API, zero dependencies, listed on Telegram's official Bot API samples.
+
+**Migration scope:** Not a drop-in replacement. Requires refactoring bot initialization, message/callback handling, and update processing in `internal/chatadapter/telegram/`.
+
+---
+
 ## Quick Reference
 
 | Gotcha | One-liner Fix |

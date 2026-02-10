@@ -1,0 +1,20 @@
+# Patch ConfigMap to use PostgreSQL driver
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: agentctl-config
+  namespace: agentctl
+data:
+  # Override database driver to PostgreSQL
+  AGENTCTL_DB_DRIVER: "postgres"
+
+  # Connection pool settings
+  AGENTCTL_POSTGRES_MAX_CONNS: "5"
+
+  # Require pgvector extension (fail fast if missing)
+  AGENTCTL_POSTGRES_REQUIRE_VECTOR: "true"
+
+  # CAS configuration (S3)
+  AGENTCTL_CAS_DRIVER: "s3"
+  AGENTCTL_CAS_S3_BUCKET: "agentctl-cas"
+  AWS_REGION: "us-west-2"

@@ -25,6 +25,8 @@ func OpenCAS(ctx context.Context, cfg Config) (storage.CASStore, error) {
 		store, err = NewSQLiteStore(ctx, cfg.SQLite)
 	case DriverTurso:
 		store, err = NewTursoStore(ctx, cfg.Turso)
+	case DriverS3:
+		store, err = NewS3Store(ctx, cfg.S3)
 	default:
 		// Fall back to file-based for backward compatibility
 		store, err = NewStore(cfg.File.Path)

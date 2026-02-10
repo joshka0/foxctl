@@ -164,12 +164,12 @@ func (s *Store) Put(ctx context.Context, entry Entry) error {
 	}
 
 	_, err = s.db.ExecContext(ctx, `
-		INSERT INTO auto_cache (cache_key, skill_name, skill_version, workspace, result, digests, created_at, expires_at, last_accessed, hit_count)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
-		ON CONFLICT(cache_key) DO UPDATE SET
-			result = excluded.result,
-			digests = excluded.digests,
-			workspace = excluded.workspace,
+			INSERT INTO auto_cache (cache_key, skill_name, skill_version, workspace, result, digests, created_at, expires_at, last_accessed, hit_count)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 0)
+			ON CONFLICT(cache_key) DO UPDATE SET
+				result = excluded.result,
+				digests = excluded.digests,
+				workspace = excluded.workspace,
 			created_at = excluded.created_at,
 			expires_at = excluded.expires_at,
 			last_accessed = excluded.last_accessed
@@ -188,9 +188,9 @@ func (s *Store) Get(ctx context.Context, key string) (Entry, bool, error) {
 		return Entry{}, false, err
 	}
 	row := s.db.QueryRowContext(ctx, `
-		SELECT cache_key, skill_name, skill_version, workspace, result, digests, created_at, expires_at, last_accessed, hit_count
-		FROM auto_cache
-		WHERE cache_key = ?`, key)
+			SELECT cache_key, skill_name, skill_version, workspace, result, digests, created_at, expires_at, last_accessed, hit_count
+			FROM auto_cache
+			WHERE cache_key = $1`, key)
 	var entry Entry
 	var digests string
 	var created, expires, last string
@@ -226,9 +226,9 @@ func (s *Store) Get(ctx context.Context, key string) (Entry, bool, error) {
 	// refresh access metadata (best-effort)
 	entry.LastAccessed = timeutil.NowUTC()
 	if _, updateErr := s.db.ExecContext(ctx, `
-		UPDATE auto_cache
-		SET last_accessed = ?, hit_count = hit_count + 1
-		WHERE cache_key = ?`,
+			UPDATE auto_cache
+			SET last_accessed = $1, hit_count = hit_count + 1
+			WHERE cache_key = $2`,
 		sqlutil.FormatTimestamp(entry.LastAccessed), key); updateErr != nil {
 		errs.Ignore(updateErr, "cache: refresh access metadata")
 	}
@@ -247,17 +247,17 @@ func (s *Store) Recent(ctx context.Context, workspace string, limit int) ([]Entr
 	var err error
 	if workspace == "" {
 		rows, err = s.db.QueryContext(ctx, `
-			SELECT cache_key, skill_name, skill_version, workspace, result, digests, created_at, expires_at, last_accessed, hit_count
-			FROM auto_cache
-			ORDER BY created_at DESC
-			LIMIT ?`, limit)
+				SELECT cache_key, skill_name, skill_version, workspace, result, digests, created_at, expires_at, last_accessed, hit_count
+				FROM auto_cache
+				ORDER BY created_at DESC
+				LIMIT $1`, limit)
 	} else {
 		rows, err = s.db.QueryContext(ctx, `
-			SELECT cache_key, skill_name, skill_version, workspace, result, digests, created_at, expires_at, last_accessed, hit_count
-			FROM auto_cache
-			WHERE workspace = ?
-			ORDER BY created_at DESC
-			LIMIT ?`, workspace, limit)
+				SELECT cache_key, skill_name, skill_version, workspace, result, digests, created_at, expires_at, last_accessed, hit_count
+				FROM auto_cache
+				WHERE workspace = $1
+				ORDER BY created_at DESC
+				LIMIT $2`, workspace, limit)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("cache: recent: %w", err)
@@ -304,7 +304,7 @@ func (s *Store) Delete(ctx context.Context, key string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	row := s.db.QueryRowContext(ctx, `SELECT digests FROM auto_cache WHERE cache_key = ?`, key)
+	row := s.db.QueryRowContext(ctx, `SELECT digests FROM auto_cache WHERE cache_key = $1`, key)
 	var digestsJSON string
 	if err := row.Scan(&digestsJSON); err != nil {
 		if dbutil.IsNoRows(err) {
@@ -318,7 +318,7 @@ func (s *Store) Delete(ctx context.Context, key string) error {
 		return fmt.Errorf("cache: scan digests for delete: %w", err)
 	}
 
-	if _, err := s.db.ExecContext(ctx, `DELETE FROM auto_cache WHERE cache_key = ?`, key); err != nil {
+	if _, err := s.db.ExecContext(ctx, `DELETE FROM auto_cache WHERE cache_key = $1`, key); err != nil {
 		return fmt.Errorf("cache: delete: %w", err)
 	}
 	s.unpinDigests(ctx, digests)
@@ -423,7 +423,7 @@ func canonicalArgs(input []byte) ([]byte, error) {
 
 func (s *Store) evictExpired(ctx context.Context) error {
 	now := timeutil.FormatNowUTC()
-	rows, err := s.db.QueryContext(ctx, `SELECT cache_key, digests FROM auto_cache WHERE expires_at <= ?`, now)
+	rows, err := s.db.QueryContext(ctx, `SELECT cache_key, digests FROM auto_cache WHERE expires_at <= $1`, now)
 	if err != nil {
 		return fmt.Errorf("cache: select expired: %w", err)
 	}
@@ -451,7 +451,7 @@ func (s *Store) evictExpired(ctx context.Context) error {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		if _, err := s.db.ExecContext(ctx, `DELETE FROM auto_cache WHERE cache_key = ?`, d.key); err != nil {
+		if _, err := s.db.ExecContext(ctx, `DELETE FROM auto_cache WHERE cache_key = $1`, d.key); err != nil {
 			return fmt.Errorf("cache: delete expired: %w", err)
 		}
 		s.unpinDigests(ctx, d.digests)
@@ -483,6 +483,11 @@ func (s *Store) unpinDigests(ctx context.Context, digests []string) {
 	if err := s.artifactManager.Unpin(ctx, digests...); err != nil {
 		errs.Ignore(err, "cache: unpin digests")
 	}
+}
+
+// MigrateSchema runs the cache store DDL migrations against the given database.
+func MigrateSchema(ctx context.Context, db *sql.DB) error {
+	return migrate(ctx, db)
 }
 
 func migrate(ctx context.Context, db *sql.DB) error {

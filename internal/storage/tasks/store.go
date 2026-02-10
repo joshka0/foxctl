@@ -239,6 +239,13 @@ func (s *sqlStore) Close() error {
 // The function returns an error if the primary schema creation step fails; individual
 // idempotent alter/update statements and auxiliary cleanup steps intentionally ignore
 // duplicate-column and similar minor errors.
+
+// MigrateSchema runs the tasks store DDL migrations against the given database.
+// This is exported so the CLI db migrate command can create PostgreSQL tables.
+func MigrateSchema(ctx context.Context, db *sql.DB) error {
+	return migrate(ctx, db)
+}
+
 func migrate(ctx context.Context, db *sql.DB) error {
 	ddl := `
 CREATE TABLE IF NOT EXISTS tasks (
@@ -417,7 +424,7 @@ func (s *sqlStore) Add(ctx context.Context, t Task) (Task, error) {
 
 	_, err = s.db.ExecContext(ctx, `
 INSERT INTO tasks (id, workspace_id, title, description, scope_path, parent_id, children, depends_on, status, created_at, completed_at, notes, gotchas, last_review_status, last_review_at, last_review_id, plan_file, plan_section, session_id)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)`,
 		t.ID, t.WorkspaceID, t.Title, t.Description, t.ScopePath, t.ParentID,
 		string(childrenJSON), string(dependsOnJSON), t.Status,
 		timeutil.FormatRFC3339Nano(t.CreatedAt), completedAt, t.Notes, t.Gotchas,
@@ -460,11 +467,11 @@ func (s *sqlStore) Update(ctx context.Context, t Task) (Task, error) {
 
 	res, err := s.db.ExecContext(ctx, `
 UPDATE tasks SET
-	title = ?, description = ?, scope_path = ?, parent_id = ?,
-	children = ?, depends_on = ?, status = ?, completed_at = ?,
-	notes = ?, gotchas = ?, last_review_status = ?, last_review_at = ?, last_review_id = ?,
-	plan_file = ?, plan_section = ?, session_id = ?
-WHERE id = ?`,
+	title = $1, description = $2, scope_path = $3, parent_id = $4,
+	children = $5, depends_on = $6, status = $7, completed_at = $8,
+	notes = $9, gotchas = $10, last_review_status = $11, last_review_at = $12, last_review_id = $13,
+	plan_file = $14, plan_section = $15, session_id = $16
+WHERE id = $17`,
 		t.Title, t.Description, t.ScopePath, t.ParentID,
 		string(childrenJSON), string(dependsOnJSON), t.Status, completedAt,
 		t.Notes, t.Gotchas, t.LastReviewStatus, lastReviewAt, t.LastReviewID,
@@ -484,7 +491,7 @@ WHERE id = ?`,
 func (s *sqlStore) Get(ctx context.Context, id string) (Task, error) {
 	row := s.db.QueryRowContext(ctx, `
 SELECT id, workspace_id, title, description, scope_path, parent_id, children, depends_on, status, created_at, completed_at, notes, gotchas, last_review_status, last_review_at, last_review_id, plan_file, plan_section, session_id, pagerank, epic_id, atomic_description, entities, keywords
-FROM tasks WHERE id = ?`, id)
+FROM tasks WHERE id = $1`, id)
 	return scanTask(row)
 }
 
@@ -493,7 +500,7 @@ func (s *sqlStore) ListByWorkspace(ctx context.Context, workspaceID string) ([]T
 	workspaceID = ws.CanonicalID(workspaceID)
 	rows, err := s.db.QueryContext(ctx, `
 SELECT id, workspace_id, title, description, scope_path, parent_id, children, depends_on, status, created_at, completed_at, notes, gotchas, last_review_status, last_review_at, last_review_id, plan_file, plan_section, session_id, pagerank, epic_id, atomic_description, entities, keywords
-FROM tasks WHERE workspace_id = ? ORDER BY created_at DESC`, workspaceID)
+FROM tasks WHERE workspace_id = $1 ORDER BY created_at DESC`, workspaceID)
 	if err != nil {
 		return nil, fmt.Errorf("tasks: list: %w", err)
 	}
@@ -517,11 +524,13 @@ FROM tasks WHERE workspace_id = ? ORDER BY created_at DESC`, workspaceID)
 func (s *sqlStore) ListWithOptions(ctx context.Context, workspaceID string, opts ListOptions) ([]Task, error) {
 	workspaceID = ws.CanonicalID(workspaceID)
 	// Build query with optional filters
-	query := `SELECT id, workspace_id, title, description, scope_path, parent_id, children, depends_on, status, created_at, completed_at, notes, gotchas, last_review_status, last_review_at, last_review_id, plan_file, plan_section, session_id, pagerank, epic_id, atomic_description, entities, keywords FROM tasks WHERE workspace_id = ?`
+	argIdx := 2
+	query := `SELECT id, workspace_id, title, description, scope_path, parent_id, children, depends_on, status, created_at, completed_at, notes, gotchas, last_review_status, last_review_at, last_review_id, plan_file, plan_section, session_id, pagerank, epic_id, atomic_description, entities, keywords FROM tasks WHERE workspace_id = $1`
 	args := []any{workspaceID}
 
 	if opts.SessionID != "" {
-		query += ` AND session_id = ?`
+		query += fmt.Sprintf(` AND session_id = $%d`, argIdx)
+		argIdx++
 		args = append(args, opts.SessionID)
 	}
 
@@ -531,7 +540,8 @@ func (s *sqlStore) ListWithOptions(ctx context.Context, workspaceID string, opts
 			if i > 0 {
 				placeholders += ", "
 			}
-			placeholders += "?"
+			placeholders += fmt.Sprintf("$%d", argIdx)
+			argIdx++
 			args = append(args, status)
 		}
 		query += ` AND status IN (` + placeholders + `)`
@@ -564,7 +574,7 @@ func (s *sqlStore) ListWithOptions(ctx context.Context, workspaceID string, opts
 func (s *sqlStore) ListByPlanFile(ctx context.Context, planFile string) ([]Task, error) {
 	rows, err := s.db.QueryContext(ctx, `
 SELECT id, workspace_id, title, description, scope_path, parent_id, children, depends_on, status, created_at, completed_at, notes, gotchas, last_review_status, last_review_at, last_review_id, plan_file, plan_section, session_id, pagerank, epic_id, atomic_description, entities, keywords
-FROM tasks WHERE plan_file = ? ORDER BY created_at ASC`, planFile)
+FROM tasks WHERE plan_file = $1 ORDER BY created_at ASC`, planFile)
 	if err != nil {
 		return nil, fmt.Errorf("tasks: list by plan: %w", err)
 	}
@@ -588,7 +598,7 @@ func (s *sqlStore) GetActive(ctx context.Context, workspaceID string) (Task, boo
 SELECT t.id, t.workspace_id, t.title, t.description, t.scope_path, t.parent_id, t.children, t.depends_on, t.status, t.created_at, t.completed_at, t.notes, t.gotchas, t.last_review_status, t.last_review_at, t.last_review_id, t.plan_file, t.plan_section, t.session_id, t.pagerank, t.epic_id, t.atomic_description, t.entities, t.keywords
 FROM tasks t
 JOIN active_tasks a ON t.id = a.task_id
-WHERE a.workspace_id = ?`, workspaceID)
+WHERE a.workspace_id = $1`, workspaceID)
 
 	t, err := scanTask(row)
 	if dbutil.IsNoRows(err) {
@@ -610,7 +620,7 @@ func (s *sqlStore) SetActive(ctx context.Context, workspaceID, taskID string) (T
 	}
 
 	_, err = s.db.ExecContext(ctx, `
-INSERT INTO active_tasks (workspace_id, task_id) VALUES (?, ?)
+INSERT INTO active_tasks (workspace_id, task_id) VALUES ($1, $2)
 ON CONFLICT(workspace_id) DO UPDATE SET task_id = excluded.task_id`, workspaceID, taskID)
 	if err != nil {
 		return Task{}, fmt.Errorf("tasks: set active: %w", err)
@@ -621,7 +631,7 @@ ON CONFLICT(workspace_id) DO UPDATE SET task_id = excluded.task_id`, workspaceID
 // ClearActive removes the active task for a workspace.
 func (s *sqlStore) ClearActive(ctx context.Context, workspaceID string) error {
 	workspaceID = ws.CanonicalID(workspaceID)
-	_, err := s.db.ExecContext(ctx, `DELETE FROM active_tasks WHERE workspace_id = ?`, workspaceID)
+	_, err := s.db.ExecContext(ctx, `DELETE FROM active_tasks WHERE workspace_id = $1`, workspaceID)
 	if err != nil {
 		return fmt.Errorf("tasks: clear active: %w", err)
 	}
@@ -697,7 +707,7 @@ func (s *sqlStore) ListAll(ctx context.Context, limit int) ([]Task, error) {
 	}
 	rows, err := s.db.QueryContext(ctx, `
 SELECT id, workspace_id, title, description, scope_path, parent_id, children, depends_on, status, created_at, completed_at, notes, gotchas, last_review_status, last_review_at, last_review_id, plan_file, plan_section, session_id, pagerank, epic_id, atomic_description, entities, keywords
-FROM tasks ORDER BY created_at DESC LIMIT ?`, limit)
+FROM tasks ORDER BY created_at DESC LIMIT $1`, limit)
 	if err != nil {
 		return nil, fmt.Errorf("tasks: list all: %w", err)
 	}
@@ -720,9 +730,9 @@ FROM tasks ORDER BY created_at DESC LIMIT ?`, limit)
 func (s *sqlStore) SetEmbedding(ctx context.Context, id string, embedding []byte, model string) error {
 	result, err := s.db.ExecContext(ctx, `
 		UPDATE tasks SET
-			embedding = ?,
-			embedding_model = ?
-		WHERE id = ?`,
+			embedding = $1,
+			embedding_model = $2
+		WHERE id = $3`,
 		embedding, model, id)
 	if err != nil {
 		return fmt.Errorf("tasks: set embedding: %w", err)
@@ -751,7 +761,7 @@ func (s *sqlStore) SetPageRanks(ctx context.Context, ranks map[string]float64) e
 		_ = tx.Rollback() //nolint:errcheck
 	}()
 
-	stmt, err := tx.PrepareContext(ctx, `UPDATE tasks SET pagerank = ? WHERE id = ?`)
+	stmt, err := tx.PrepareContext(ctx, `UPDATE tasks SET pagerank = $1 WHERE id = $2`)
 	if err != nil {
 		return fmt.Errorf("tasks: prepare pagerank update: %w", err)
 	}
@@ -851,7 +861,7 @@ func (s *sqlStore) AddEpic(ctx context.Context, e Epic) (Epic, error) {
 
 	_, err := s.db.ExecContext(ctx, `
 INSERT INTO epics (id, workspace_id, title, goal, status, created_at, completed_at, session_id)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
 		e.ID, e.WorkspaceID, e.Title, e.Goal, e.Status,
 		timeutil.FormatRFC3339Nano(e.CreatedAt), completedAt, e.SessionID)
 	if err != nil {
@@ -864,7 +874,7 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
 func (s *sqlStore) GetEpic(ctx context.Context, id string) (Epic, error) {
 	row := s.db.QueryRowContext(ctx, `
 SELECT id, workspace_id, title, goal, status, created_at, completed_at, session_id
-FROM epics WHERE id = ?`, id)
+FROM epics WHERE id = $1`, id)
 	return scanEpic(row)
 }
 
@@ -877,8 +887,8 @@ func (s *sqlStore) UpdateEpic(ctx context.Context, e Epic) (Epic, error) {
 	}
 
 	_, err := s.db.ExecContext(ctx, `
-UPDATE epics SET title = ?, goal = ?, status = ?, completed_at = ?, session_id = ?
-WHERE id = ?`,
+UPDATE epics SET title = $1, goal = $2, status = $3, completed_at = $4, session_id = $5
+WHERE id = $6`,
 		e.Title, e.Goal, e.Status, completedAt, e.SessionID, e.ID)
 	if err != nil {
 		return Epic{}, fmt.Errorf("tasks: update epic: %w", err)
@@ -891,7 +901,7 @@ func (s *sqlStore) ListEpics(ctx context.Context, workspaceID string) ([]Epic, e
 	workspaceID = ws.CanonicalID(workspaceID)
 	rows, err := s.db.QueryContext(ctx, `
 SELECT id, workspace_id, title, goal, status, created_at, completed_at, session_id
-FROM epics WHERE workspace_id = ? ORDER BY created_at DESC`, workspaceID)
+FROM epics WHERE workspace_id = $1 ORDER BY created_at DESC`, workspaceID)
 	if err != nil {
 		return nil, fmt.Errorf("tasks: list epics: %w", err)
 	}
@@ -915,7 +925,7 @@ func (s *sqlStore) GetActiveEpic(ctx context.Context, workspaceID, sessionID str
 SELECT e.id, e.workspace_id, e.title, e.goal, e.status, e.created_at, e.completed_at, e.session_id
 FROM epics e
 JOIN active_epics a ON e.id = a.epic_id
-WHERE a.workspace_id = ? AND a.session_id = ?`, workspaceID, sessionID)
+WHERE a.workspace_id = $1 AND a.session_id = $2`, workspaceID, sessionID)
 
 	e, err := scanEpic(row)
 	if dbutil.IsNoRows(err) {
@@ -931,7 +941,7 @@ WHERE a.workspace_id = ? AND a.session_id = ?`, workspaceID, sessionID)
 func (s *sqlStore) SetActiveEpic(ctx context.Context, workspaceID, sessionID, epicID string) error {
 	workspaceID = ws.CanonicalID(workspaceID)
 	_, err := s.db.ExecContext(ctx, `
-INSERT INTO active_epics (workspace_id, session_id, epic_id) VALUES (?, ?, ?)
+INSERT INTO active_epics (workspace_id, session_id, epic_id) VALUES ($1, $2, $3)
 ON CONFLICT(workspace_id, session_id) DO UPDATE SET epic_id = excluded.epic_id`, workspaceID, sessionID, epicID)
 	if err != nil {
 		return fmt.Errorf("tasks: set active epic: %w", err)
@@ -942,7 +952,7 @@ ON CONFLICT(workspace_id, session_id) DO UPDATE SET epic_id = excluded.epic_id`,
 // ClearActiveEpic removes the active epic for a workspace.
 func (s *sqlStore) ClearActiveEpic(ctx context.Context, workspaceID, sessionID string) error {
 	workspaceID = ws.CanonicalID(workspaceID)
-	_, err := s.db.ExecContext(ctx, `DELETE FROM active_epics WHERE workspace_id = ? AND session_id = ?`, workspaceID, sessionID)
+	_, err := s.db.ExecContext(ctx, `DELETE FROM active_epics WHERE workspace_id = $1 AND session_id = $2`, workspaceID, sessionID)
 	if err != nil {
 		return fmt.Errorf("tasks: clear active epic: %w", err)
 	}
@@ -953,7 +963,7 @@ func (s *sqlStore) ClearActiveEpic(ctx context.Context, workspaceID, sessionID s
 func (s *sqlStore) ListTasksByEpic(ctx context.Context, epicID string) ([]Task, error) {
 	rows, err := s.db.QueryContext(ctx, `
 SELECT id, workspace_id, title, description, scope_path, parent_id, children, depends_on, status, created_at, completed_at, notes, gotchas, last_review_status, last_review_at, last_review_id, plan_file, plan_section, session_id, pagerank, epic_id, atomic_description, entities, keywords
-FROM tasks WHERE epic_id = ? ORDER BY created_at ASC`, epicID)
+FROM tasks WHERE epic_id = $1 ORDER BY created_at ASC`, epicID)
 	if err != nil {
 		return nil, fmt.Errorf("tasks: list by epic: %w", err)
 	}
@@ -972,7 +982,7 @@ FROM tasks WHERE epic_id = ? ORDER BY created_at ASC`, epicID)
 
 // LinkTaskToEpic associates a task with an epic.
 func (s *sqlStore) LinkTaskToEpic(ctx context.Context, taskID, epicID string) error {
-	_, err := s.db.ExecContext(ctx, `UPDATE tasks SET epic_id = ? WHERE id = ?`, epicID, taskID)
+	_, err := s.db.ExecContext(ctx, `UPDATE tasks SET epic_id = $1 WHERE id = $2`, epicID, taskID)
 	if err != nil {
 		return fmt.Errorf("tasks: link to epic: %w", err)
 	}
@@ -1001,8 +1011,8 @@ func (s *sqlStore) UpdateAtomic(ctx context.Context, id, atomicDescription strin
 
 	result, execErr := s.db.ExecContext(ctx, `
 		UPDATE tasks
-		SET atomic_description = ?, entities = ?, keywords = ?
-		WHERE id = ?
+		SET atomic_description = $1, entities = $2, keywords = $3
+		WHERE id = $4
 	`, atomicDescription, string(entitiesJSON), string(keywordsJSON), id)
 	if execErr != nil {
 		return fmt.Errorf("tasks: update atomic: %w", execErr)

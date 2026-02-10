@@ -2,6 +2,7 @@ package web
 
 import (
 	"context"
+	"fmt"
 	"net"
 	"net/http"
 	"strings"
@@ -10,6 +11,8 @@ import (
 
 	"github.com/jkatigb/agentctl/internal/chatadapter"
 	"github.com/jkatigb/agentctl/internal/chatadapter/discord"
+	"github.com/jkatigb/agentctl/internal/chatadapter/teams"
+	"github.com/jkatigb/agentctl/internal/chatadapter/telegram"
 	"github.com/jkatigb/agentctl/internal/consoleapp"
 	"github.com/jkatigb/agentctl/internal/engine"
 	"github.com/jkatigb/agentctl/internal/observability"
@@ -67,12 +70,39 @@ func NewServer(ctx context.Context, opts Options, cfg config.Config, log zerolog
 	}
 
 	// Start chat adapter if configured
-	if opts.ChatAdapter == "discord" && cfg.Discord.BotToken != "" {
+	switch opts.ChatAdapter {
+	case "":
+		// no-op
+	case "discord":
+		if cfg.Discord.BotToken == "" {
+			log.Warn().Msg("--chat discord requires DISCORD_BOT_TOKEN; skipping adapter")
+			break
+		}
 		if err := s.startChatAdapter(ctx); err != nil {
 			log.Warn().Err(err).Msg("failed to start chat adapter (continuing without it)")
 		}
-	} else if opts.ChatAdapter == "discord" && cfg.Discord.BotToken == "" {
-		log.Warn().Msg("--chat discord requires DISCORD_BOT_TOKEN; skipping adapter")
+	case "telegram":
+		if cfg.Telegram.BotToken == "" {
+			log.Warn().Msg("--chat telegram requires TELEGRAM_BOT_TOKEN; skipping adapter")
+			break
+		}
+		if err := s.startChatAdapter(ctx); err != nil {
+			log.Warn().Err(err).Msg("failed to start chat adapter (continuing without it)")
+		}
+	case "teams":
+		if strings.TrimSpace(cfg.Teams.TenantID) == "" || strings.TrimSpace(cfg.Teams.ClientID) == "" || strings.TrimSpace(cfg.Teams.ClientSecret) == "" {
+			log.Warn().Msg("--chat teams requires TEAMS_TENANT_ID, TEAMS_CLIENT_ID, TEAMS_CLIENT_SECRET; skipping adapter")
+			break
+		}
+		if cfg.Teams.SkipJWTVerify && !opts.DevCORS {
+			log.Warn().Msg("--chat teams with TEAMS_SKIP_JWT_VERIFY=true requires --dev-cors; skipping adapter")
+			break
+		}
+		if err := s.startChatAdapter(ctx); err != nil {
+			log.Warn().Err(err).Msg("failed to start chat adapter (continuing without it)")
+		}
+	default:
+		log.Warn().Str("chat_adapter", opts.ChatAdapter).Msg("unknown chat adapter; skipping")
 	}
 
 	return s, nil
@@ -140,13 +170,26 @@ func (s *Server) ConsoleHub() *consolews.Hub {
 func (s *Server) startChatAdapter(ctx context.Context) error {
 	// Derive daemon URL from the server's listen address
 	daemonURL := ""
-	if s.opts.Addr != "" {
-		host, port, err := net.SplitHostPort(s.opts.Addr)
+	if strings.TrimSpace(s.opts.Addr) != "" {
+		addr := strings.TrimSpace(s.opts.Addr)
+		host, port, err := net.SplitHostPort(addr)
 		if err != nil {
-			// Handle bare port like ":8090"
-			if strings.HasPrefix(s.opts.Addr, ":") {
+			// Handle bare port formats like ":8090" and "8090".
+			if strings.HasPrefix(addr, ":") {
 				host = "localhost"
-				port = strings.TrimPrefix(s.opts.Addr, ":")
+				port = strings.TrimPrefix(addr, ":")
+			} else {
+				digitsOnly := true
+				for _, r := range addr {
+					if r < '0' || r > '9' {
+						digitsOnly = false
+						break
+					}
+				}
+				if digitsOnly {
+					host = "localhost"
+					port = addr
+				}
 			}
 		} else if host == "" || host == "0.0.0.0" {
 			host = "localhost"
@@ -156,29 +199,92 @@ func (s *Server) startChatAdapter(ctx context.Context) error {
 		}
 	}
 
-	adapter := discord.New(s.cfg.Discord, daemonURL)
-	adapter.SetSSEHub(s.sseHub)
 	bridge := chatadapter.NewDefaultBridge(s.cfg, daemonURL)
 
-	adapter.OnCommand(bridge.HandleCommand)
-	adapter.OnInteraction(adapter.HandleInteraction)
+	switch s.opts.ChatAdapter {
+	case "discord":
+		adapter := discord.New(s.cfg.Discord, daemonURL)
+		adapter.SetSSEHub(s.sseHub)
 
-	// Phase 3: Wire console hub for natural language messaging
-	adapter.SetConsoleHub(s.consoleHub)
-	sessionBridge := discord.NewSessionBridge(s.consoleHub, adapter, s.cfg.Discord)
-	adapter.OnMessage(sessionBridge.HandleMessage)
+		adapter.OnCommand(bridge.HandleCommand)
+		adapter.OnInteraction(adapter.HandleInteraction)
 
-	if err := adapter.Connect(ctx); err != nil {
-		return err
+		// Phase 3: Wire console hub for natural language messaging
+		adapter.SetConsoleHub(s.consoleHub)
+		sessionBridge := discord.NewSessionBridge(s.consoleHub, adapter, s.cfg.Discord)
+		adapter.OnMessage(sessionBridge.HandleMessage)
+
+		if err := adapter.Connect(ctx); err != nil {
+			return err
+		}
+		if err := adapter.RegisterCommands(ctx, discord.MVPCommands()); err != nil {
+			_ = adapter.Disconnect(ctx)
+			return err
+		}
+
+		s.chatAdapter = adapter
+
+	case "telegram":
+		adapter := telegram.New(s.cfg.Telegram, daemonURL, nil)
+		adapter.SetSSEHub(s.sseHub)
+
+		adapter.OnCommand(bridge.HandleCommand)
+		adapter.OnInteraction(adapter.HandleInteraction)
+
+		sessionBridge := telegram.NewSessionBridge(s.consoleHub, adapter, s.cfg.Telegram)
+		adapter.OnMessage(sessionBridge.HandleMessage)
+
+		if err := adapter.Connect(ctx); err != nil {
+			return err
+		}
+		if err := adapter.RegisterCommands(ctx, telegram.MVPCommands()); err != nil {
+			_ = adapter.Disconnect(ctx)
+			return err
+		}
+
+		s.chatAdapter = adapter
+
+	case "teams":
+		if s.cfg.Teams.SkipJWTVerify && !s.opts.DevCORS {
+			observability.Emit(ctx, observability.NewEvent("teams.skip_jwt_verify_blocked").
+				WithComponent("web").
+				WithData("warning", "TEAMS_SKIP_JWT_VERIFY requires --dev-cors; refusing to start Teams adapter").
+				Error(nil, 0))
+			return fmt.Errorf("teams adapter refused: TEAMS_SKIP_JWT_VERIFY requires --dev-cors")
+		}
+
+		adapter := teams.New(s.cfg.Teams, daemonURL)
+		adapter.SetSSEHub(s.sseHub)
+
+		adapter.OnCommand(bridge.HandleCommand)
+		adapter.OnInteraction(nil)
+
+		sessionBridge := chatadapter.NewSessionBridge(s.consoleHub, adapter, chatadapter.SessionBridgeConfig{
+			PlatformName:     "teams",
+			MaxMessageLen:    4000,
+			EditIntervalMS:   s.cfg.Teams.EditIntervalMS,
+			ChatProfile:      s.cfg.Teams.ChatProfile,
+			ChatSystemPrompt: s.cfg.Teams.ChatSystemPrompt,
+		})
+		adapter.OnMessage(sessionBridge.HandleMessage)
+
+		if err := adapter.Connect(ctx); err != nil {
+			return err
+		}
+		if err := adapter.RegisterCommands(ctx, nil); err != nil {
+			_ = adapter.Disconnect(ctx)
+			return err
+		}
+
+		s.chatAdapter = adapter
+
+	default:
+		return nil
 	}
 
-	if err := adapter.RegisterCommands(ctx, discord.MVPCommands()); err != nil {
-		_ = adapter.Disconnect(ctx)
-		return err
+	if s.chatAdapter != nil {
+		s.log.Info().Str("adapter", s.chatAdapter.Name()).Msg("chat adapter started")
 	}
-
-	s.chatAdapter = adapter
-	s.log.Info().Str("adapter", adapter.Name()).Msg("chat adapter started")
 	return nil
 }
 
@@ -208,6 +314,16 @@ func (s *Server) Handler() http.Handler {
 
 	// --- SSE Events ---
 	apiMux.HandleFunc("/api/events", sse.Handler(s.sseHub))
+
+	// --- Microsoft Teams Webhook (Chat Adapter) ---
+	apiMux.HandleFunc("/api/teams/messages", func(w http.ResponseWriter, r *http.Request) {
+		ta, ok := s.chatAdapter.(*teams.Adapter)
+		if !ok || ta == nil {
+			http.Error(w, "teams adapter inactive", http.StatusServiceUnavailable)
+			return
+		}
+		ta.HTTPHandler()(w, r)
+	})
 
 	// --- Jobs (Phase 2) ---
 	apiMux.HandleFunc("/api/jobs", api.JobsListHandler(s.cfg, s.log))
@@ -421,6 +537,10 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("/api/", apiMux)
 	mux.Handle("/api/v1/", wrapV1(apiMux))
 	mux.HandleFunc("/ws/console/", consolews.HandleWebSocket(s.consoleHub))
+
+	// --- Kubernetes Probes (root path, not under /api/) ---
+	mux.HandleFunc("/healthz", api.LivenessHandler())
+	mux.HandleFunc("/readyz", api.ReadinessHandler(s.cfg))
 
 	// --- Static UI (optional) ---
 	if s.opts.UIDir != "" {

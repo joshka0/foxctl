@@ -5,7 +5,7 @@ import (
 	"database/sql"
 )
 
-// DB is a unified database interface that works with both SQLite and Turso
+// DB is a unified database interface that works with SQLite, Turso, and PostgreSQL
 type DB interface {
 	// Close closes the database connection
 	Close() error
@@ -62,8 +62,11 @@ type DB interface {
 	// IsVectorSearchEnabled returns true if vector search is available
 	IsVectorSearchEnabled() bool
 
-	// GetDriverType returns the driver type (sqlite or turso)
+	// GetDriverType returns the driver type (sqlite, turso, or postgres)
 	GetDriverType() DriverType
+
+	// GetDialect returns the SQL dialect for this driver.
+	GetDialect() Dialect
 }
 
 // Syncer is an optional interface for databases that support remote sync.
@@ -100,6 +103,8 @@ func OpenDB(ctx context.Context, cfg Config, migrate MigrationFunc) (DB, error) 
 		return openLibSQL(ctx, cfg.LibSQL, migrate)
 	case DriverTurso:
 		return openTurso(ctx, cfg.Turso, migrate)
+	case DriverPostgres:
+		return openPostgres(ctx, cfg.Postgres, migrate)
 	default:
 		return nil, nil // unreachable due to Validate()
 	}

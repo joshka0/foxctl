@@ -21,11 +21,15 @@ type Migration struct {
 type Migrator struct {
 	db         *sql.DB
 	migrations []Migration
+	Clock      func() time.Time
 }
 
 // NewMigrator constructs a Migrator for db.
 func NewMigrator(db *sql.DB) *Migrator {
-	return &Migrator{db: db}
+	return &Migrator{
+		db:    db,
+		Clock: func() time.Time { return time.Now().UTC() },
+	}
 }
 
 // Add registers a migration to be applied when Migrate is called.
@@ -123,10 +127,10 @@ func (m *Migrator) applyMigration(ctx context.Context, migration Migration) erro
 			return fmt.Errorf("sqlutil: apply migration %d %q: %w", migration.Version, migration.Name, err)
 		}
 		_, err := tx.ExecContext(ctx,
-			`INSERT OR IGNORE INTO schema_migrations(version, name, applied_at) VALUES(?, ?, ?)`,
+			`INSERT INTO schema_migrations(version, name, applied_at) VALUES($1, $2, $3) ON CONFLICT DO NOTHING`,
 			migration.Version,
 			migration.Name,
-			FormatTimestamp(time.Now().UTC()),
+			FormatTimestamp(m.Clock()),
 		)
 		if err != nil {
 			return fmt.Errorf("sqlutil: record migration %d %q: %w", migration.Version, migration.Name, err)

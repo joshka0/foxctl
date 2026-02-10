@@ -214,7 +214,7 @@ INSERT INTO sessions (
 	tool_invocations, total_tokens, raw_jsonl_path, content_hash, embedding, embedding_model,
 	created_at, updated_at, parent_session_id, agent_id, agent_type, status,
 	prompt, prompt_hash, llm_provider, llm_model
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33)
 ON CONFLICT(id) DO UPDATE SET
 	workspace_id = excluded.workspace_id,
 	workspace_path = excluded.workspace_path,
@@ -273,7 +273,7 @@ func (s *Store) Get(ctx context.Context, id string) (Session, error) {
 			created_at, updated_at, parent_session_id, agent_id, agent_type, status, key_questions,
 			prompt, prompt_hash, llm_provider, llm_model
 		FROM sessions
-		WHERE id = ?`, id)
+		WHERE id = $1`, id)
 	return scanSession(row)
 }
 
@@ -291,23 +291,28 @@ func (s *Store) List(ctx context.Context, opts ListOptions) ([]Session, error) {
 
 	var conditions []string
 	var args []any
+	argIdx := 0
 
 	if opts.WorkspaceID != "" {
 		// Prefer stable workspace_id when available.
 		// When WorkspacePath is also provided, include legacy rows without a workspace_id.
 		if opts.WorkspacePath != "" {
-			conditions = append(conditions, "(workspace_id = ? OR (workspace_id = '' AND workspace_path = ?))")
+			argIdx += 2
+			conditions = append(conditions, fmt.Sprintf("(workspace_id = $%d OR (workspace_id = '' AND workspace_path = $%d))", argIdx-1, argIdx))
 			args = append(args, opts.WorkspaceID, opts.WorkspacePath)
 		} else {
-			conditions = append(conditions, "workspace_id = ?")
+			argIdx++
+			conditions = append(conditions, fmt.Sprintf("workspace_id = $%d", argIdx))
 			args = append(args, opts.WorkspaceID)
 		}
 	} else if opts.WorkspacePath != "" {
-		conditions = append(conditions, "workspace_path = ?")
+		argIdx++
+		conditions = append(conditions, fmt.Sprintf("workspace_path = $%d", argIdx))
 		args = append(args, opts.WorkspacePath)
 	}
 	if opts.ProjectName != "" {
-		conditions = append(conditions, "project_name = ?")
+		argIdx++
+		conditions = append(conditions, fmt.Sprintf("project_name = $%d", argIdx))
 		args = append(args, opts.ProjectName)
 	}
 	if len(opts.Tags) > 0 {
@@ -320,7 +325,8 @@ func (s *Store) List(ctx context.Context, opts ListOptions) ([]Session, error) {
 		)
 		tagConditions := make([]string, len(opts.Tags))
 		for i, tag := range opts.Tags {
-			tagConditions[i] = `tags LIKE ? ESCAPE '\'`
+			argIdx++
+			tagConditions[i] = fmt.Sprintf(`tags LIKE $%d ESCAPE '\'`, argIdx)
 			escapedTag := likeEscaper.Replace(tag)
 			args = append(args, `%"`+escapedTag+`"%`)
 		}
@@ -330,7 +336,8 @@ func (s *Store) List(ctx context.Context, opts ListOptions) ([]Session, error) {
 		// Match any of the specified statuses
 		placeholders := make([]string, len(opts.Statuses))
 		for i, status := range opts.Statuses {
-			placeholders[i] = "?"
+			argIdx++
+			placeholders[i] = fmt.Sprintf("$%d", argIdx)
 			args = append(args, status)
 		}
 		conditions = append(conditions, "status IN ("+strings.Join(placeholders, ", ")+")")
@@ -348,7 +355,11 @@ func (s *Store) List(ctx context.Context, opts ListOptions) ([]Session, error) {
 	if len(conditions) > 0 {
 		query += " WHERE " + strings.Join(conditions, " AND ")
 	}
-	query += " ORDER BY started_at DESC LIMIT ? OFFSET ?"
+	argIdx++
+	limitParam := argIdx
+	argIdx++
+	offsetParam := argIdx
+	query += fmt.Sprintf(" ORDER BY started_at DESC LIMIT $%d OFFSET $%d", limitParam, offsetParam)
 	args = append(args, opts.Limit, opts.Offset)
 
 	rows, err := s.db.QueryContext(ctx, query, args...)
@@ -364,7 +375,7 @@ func (s *Store) List(ctx context.Context, opts ListOptions) ([]Session, error) {
 
 // Delete removes a session.
 func (s *Store) Delete(ctx context.Context, id string) error {
-	result, err := s.db.ExecContext(ctx, `DELETE FROM sessions WHERE id = ?`, id)
+	result, err := s.db.ExecContext(ctx, `DELETE FROM sessions WHERE id = $1`, id)
 	if err != nil {
 		return fmt.Errorf("sessions: delete: %w", err)
 	}
@@ -392,13 +403,13 @@ func (s *Store) Search(ctx context.Context, query string, limit int) ([]Session,
 			created_at, updated_at, parent_session_id, agent_id, agent_type, status, key_questions,
 			prompt, prompt_hash, llm_provider, llm_model
 		FROM sessions
-		WHERE LOWER(summary) LIKE ?
-			OR LOWER(tags) LIKE ?
-			OR LOWER(accomplished) LIKE ?
-			OR LOWER(decisions) LIKE ?
-			OR LOWER(gotchas) LIKE ?
+		WHERE LOWER(summary) LIKE $1
+			OR LOWER(tags) LIKE $2
+			OR LOWER(accomplished) LIKE $3
+			OR LOWER(decisions) LIKE $4
+			OR LOWER(gotchas) LIKE $5
 		ORDER BY started_at DESC
-		LIMIT ?`, like, like, like, like, like, limit)
+		LIMIT $6`, like, like, like, like, like, limit)
 	if err != nil {
 		return nil, fmt.Errorf("sessions: search: %w", err)
 	}
@@ -447,17 +458,17 @@ func (s *Store) UpdateSummaryWithQuestions(ctx context.Context, id string, summa
 
 	result, err := s.db.ExecContext(ctx, `
 		UPDATE sessions SET
-			summary = ?,
-			accomplished = ?,
-			decisions = ?,
-			gotchas = ?,
-			user_insights = ?,
-			tags = ?,
-			key_files = ?,
-			tools_pattern = ?,
-			key_questions = ?,
-			updated_at = ?
-		WHERE id = ?`,
+			summary = $1,
+			accomplished = $2,
+			decisions = $3,
+			gotchas = $4,
+			user_insights = $5,
+			tags = $6,
+			key_files = $7,
+			tools_pattern = $8,
+			key_questions = $9,
+			updated_at = $10
+		WHERE id = $11`,
 		summary, accomplishedJSON, decisionsJSON, gotchasJSON, userInsightsJSON, tagsJSON, keyFilesJSON, toolsPattern, keyQuestionsJSON,
 		sqlutil.FormatTimestamp(timeutil.NowUTC()), id)
 	if err != nil {
@@ -477,10 +488,10 @@ func (s *Store) UpdateSummaryWithQuestions(ctx context.Context, id string, summa
 func (s *Store) SetEmbedding(ctx context.Context, id string, embedding []byte, model string) error {
 	result, err := s.db.ExecContext(ctx, `
 		UPDATE sessions SET
-			embedding = ?,
-			embedding_model = ?,
-			updated_at = ?
-		WHERE id = ?`,
+			embedding = $1,
+			embedding_model = $2,
+			updated_at = $3
+		WHERE id = $4`,
 		embedding, model, sqlutil.FormatTimestamp(timeutil.NowUTC()), id)
 	if err != nil {
 		return fmt.Errorf("sessions: set embedding: %w", err)
@@ -518,7 +529,7 @@ func (s *Store) SearchSimilar(ctx context.Context, workspace string, queryEmbedd
 					created_at, updated_at, parent_session_id, agent_id, agent_type, status, key_questions,
 					prompt, prompt_hash, llm_provider, llm_model
 				FROM sessions
-				WHERE (workspace_id = ? OR (workspace_id = '' AND workspace_path = ?))
+				WHERE (workspace_id = $1 OR (workspace_id = '' AND workspace_path = $2))
 				  AND embedding IS NOT NULL AND LENGTH(embedding) > 0
 				ORDER BY started_at DESC`, workspaceID, workspacePath)
 		} else {
@@ -530,7 +541,7 @@ func (s *Store) SearchSimilar(ctx context.Context, workspace string, queryEmbedd
 					created_at, updated_at, parent_session_id, agent_id, agent_type, status, key_questions,
 					prompt, prompt_hash, llm_provider, llm_model
 				FROM sessions
-				WHERE workspace_id = ?
+				WHERE workspace_id = $1
 				  AND embedding IS NOT NULL AND LENGTH(embedding) > 0
 				ORDER BY started_at DESC`, workspaceID)
 		}
@@ -612,7 +623,7 @@ func (s *Store) FindByContentHash(ctx context.Context, contentHash string) (*Ses
 			created_at, updated_at, parent_session_id, agent_id, agent_type, status, key_questions,
 			prompt, prompt_hash, llm_provider, llm_model
 		FROM sessions
-		WHERE content_hash = ? AND summary != '' AND summary IS NOT NULL
+		WHERE content_hash = $1 AND summary != '' AND summary IS NOT NULL
 		ORDER BY created_at DESC
 		LIMIT 1
 	`, contentHash)
@@ -630,7 +641,7 @@ func (s *Store) FindByContentHash(ctx context.Context, contentHash string) (*Ses
 // SetContentHash sets the content hash for a session.
 func (s *Store) SetContentHash(ctx context.Context, id, contentHash string) error {
 	_, err := s.db.ExecContext(ctx, `
-		UPDATE sessions SET content_hash = ?, updated_at = ? WHERE id = ?
+		UPDATE sessions SET content_hash = $1, updated_at = $2 WHERE id = $3
 	`, contentHash, timeutil.NowUTC(), id)
 	if err != nil {
 		return fmt.Errorf("sessions: set content hash: %w", err)
@@ -663,8 +674,8 @@ func (s *Store) GetActive(ctx context.Context, workspace, agentID string) (*Sess
 				created_at, updated_at, parent_session_id, agent_id, agent_type, status, key_questions,
 				prompt, prompt_hash, llm_provider, llm_model
 			FROM sessions
-			WHERE (workspace_id = ? OR (workspace_id = '' AND workspace_path = ?))
-			  AND agent_id = ? AND status = ?
+			WHERE (workspace_id = $1 OR (workspace_id = '' AND workspace_path = $2))
+			  AND agent_id = $3 AND status = $4
 			ORDER BY started_at DESC
 			LIMIT 1`, workspaceID, workspacePath, agentID, StatusRunning)
 	} else {
@@ -676,7 +687,7 @@ func (s *Store) GetActive(ctx context.Context, workspace, agentID string) (*Sess
 				created_at, updated_at, parent_session_id, agent_id, agent_type, status, key_questions,
 				prompt, prompt_hash, llm_provider, llm_model
 			FROM sessions
-			WHERE workspace_id = ? AND agent_id = ? AND status = ?
+			WHERE workspace_id = $1 AND agent_id = $2 AND status = $3
 			ORDER BY started_at DESC
 			LIMIT 1`, workspaceID, agentID, StatusRunning)
 	}
@@ -701,11 +712,11 @@ func (s *Store) SetStatus(ctx context.Context, id, status string) error {
 
 	if storage.IsTerminalStatus(status) {
 		// Terminal status: also set ended_at
-		query = `UPDATE sessions SET status = ?, ended_at = ?, updated_at = ? WHERE id = ?`
+		query = `UPDATE sessions SET status = $1, ended_at = $2, updated_at = $3 WHERE id = $4`
 		args = []any{status, now, now, id}
 	} else {
 		// Non-terminal status: clear ended_at (session is active)
-		query = `UPDATE sessions SET status = ?, ended_at = NULL, updated_at = ? WHERE id = ?`
+		query = `UPDATE sessions SET status = $1, ended_at = NULL, updated_at = $2 WHERE id = $3`
 		args = []any{status, now, id}
 	}
 
@@ -727,7 +738,7 @@ func (s *Store) SetStatus(ctx context.Context, id, status string) error {
 // This is used by the PreCompact hook to signal the UserPromptSubmit hook.
 func (s *Store) SetPendingRestore(ctx context.Context, id string) error {
 	now := sqlutil.FormatTimestamp(timeutil.NowUTC())
-	result, err := s.db.ExecContext(ctx, `UPDATE sessions SET pending_restore_at = ?, updated_at = ? WHERE id = ?`, now, now, id)
+	result, err := s.db.ExecContext(ctx, `UPDATE sessions SET pending_restore_at = $1, updated_at = $2 WHERE id = $3`, now, now, id)
 	if err != nil {
 		return fmt.Errorf("sessions: set pending restore: %w", err)
 	}
@@ -745,7 +756,7 @@ func (s *Store) SetPendingRestore(ctx context.Context, id string) error {
 // Called after restore has been successfully performed.
 func (s *Store) ClearPendingRestore(ctx context.Context, id string) error {
 	now := sqlutil.FormatTimestamp(timeutil.NowUTC())
-	result, err := s.db.ExecContext(ctx, `UPDATE sessions SET pending_restore_at = NULL, updated_at = ? WHERE id = ?`, now, id)
+	result, err := s.db.ExecContext(ctx, `UPDATE sessions SET pending_restore_at = NULL, updated_at = $1 WHERE id = $2`, now, id)
 	if err != nil {
 		return fmt.Errorf("sessions: clear pending restore: %w", err)
 	}
@@ -781,8 +792,8 @@ func (s *Store) GetPendingRestore(ctx context.Context, workspace string) (*Sessi
 				created_at, updated_at, parent_session_id, agent_id, agent_type, status, key_questions,
 				prompt, prompt_hash, llm_provider, llm_model
 			FROM sessions
-			WHERE (workspace_id = ? OR (workspace_id = '' AND workspace_path = ?))
-			  AND pending_restore_at IS NOT NULL AND pending_restore_at > ?
+			WHERE (workspace_id = $1 OR (workspace_id = '' AND workspace_path = $2))
+			  AND pending_restore_at IS NOT NULL AND pending_restore_at > $3
 			ORDER BY pending_restore_at DESC
 			LIMIT 1`, workspaceID, workspacePath, cutoff)
 	} else {
@@ -794,8 +805,8 @@ func (s *Store) GetPendingRestore(ctx context.Context, workspace string) (*Sessi
 				created_at, updated_at, parent_session_id, agent_id, agent_type, status, key_questions,
 				prompt, prompt_hash, llm_provider, llm_model
 			FROM sessions
-			WHERE workspace_id = ?
-			  AND pending_restore_at IS NOT NULL AND pending_restore_at > ?
+			WHERE workspace_id = $1
+			  AND pending_restore_at IS NOT NULL AND pending_restore_at > $2
 			ORDER BY pending_restore_at DESC
 			LIMIT 1`, workspaceID, cutoff)
 	}
@@ -823,8 +834,9 @@ func (s *Store) FindLastSession(ctx context.Context, workspace, agentID string, 
 	}
 
 	var (
-		query string
-		args  []any
+		query  string
+		args   []any
+		argIdx int
 	)
 	if workspacePath != "" {
 		query = `
@@ -835,9 +847,10 @@ func (s *Store) FindLastSession(ctx context.Context, workspace, agentID string, 
 				created_at, updated_at, parent_session_id, agent_id, agent_type, status, key_questions,
 				prompt, prompt_hash, llm_provider, llm_model
 			FROM sessions
-			WHERE (workspace_id = ? OR (workspace_id = '' AND workspace_path = ?))
-			  AND agent_id = ?`
+			WHERE (workspace_id = $1 OR (workspace_id = '' AND workspace_path = $2))
+			  AND agent_id = $3`
 		args = append(args, workspaceID, workspacePath, agentID)
+		argIdx = 3
 	} else {
 		query = `
 			SELECT id, workspace_id, workspace_path, project_name, git_branch, claude_version,
@@ -847,14 +860,16 @@ func (s *Store) FindLastSession(ctx context.Context, workspace, agentID string, 
 				created_at, updated_at, parent_session_id, agent_id, agent_type, status, key_questions,
 				prompt, prompt_hash, llm_provider, llm_model
 			FROM sessions
-			WHERE workspace_id = ? AND agent_id = ?`
+			WHERE workspace_id = $1 AND agent_id = $2`
 		args = append(args, workspaceID, agentID)
+		argIdx = 2
 	}
 
 	if len(statuses) > 0 {
 		placeholders := make([]string, len(statuses))
 		for i, s := range statuses {
-			placeholders[i] = "?"
+			argIdx++
+			placeholders[i] = fmt.Sprintf("$%d", argIdx)
 			args = append(args, s)
 		}
 		query += " AND status IN (" + strings.Join(placeholders, ",") + ")"
@@ -891,7 +906,7 @@ func (s *Store) SaveEdge(ctx context.Context, edge SessionEdge) error {
 
 	_, err := s.db.ExecContext(ctx, `
 		INSERT INTO session_edges (id, workspace, from_session, to_session, edge_type, created_at, metadata)
-		VALUES (?, ?, ?, ?, ?, ?, ?)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)
 		ON CONFLICT(from_session, to_session, edge_type) DO UPDATE SET
 			metadata = excluded.metadata`,
 		edge.ID, edge.Workspace, edge.FromSession, edge.ToSession, edge.EdgeType,
@@ -912,12 +927,12 @@ func (s *Store) GetAncestorChain(ctx context.Context, sessionID string, maxDepth
 
 	rows, err := s.db.QueryContext(ctx, `
 		WITH RECURSIVE ancestors(id, depth) AS (
-			SELECT parent_session_id, 1 FROM sessions WHERE id = ? AND parent_session_id IS NOT NULL
+			SELECT parent_session_id, 1 FROM sessions WHERE id = $1 AND parent_session_id IS NOT NULL
 			UNION ALL
 			SELECT s.parent_session_id, a.depth + 1
 			FROM sessions s
 			JOIN ancestors a ON s.id = a.id
-			WHERE s.parent_session_id IS NOT NULL AND a.depth < ?
+			WHERE s.parent_session_id IS NOT NULL AND a.depth < $2
 		)
 		SELECT s.id, s.workspace_id, s.workspace_path, s.project_name, s.git_branch, s.claude_version,
 			s.started_at, s.ended_at, s.summary, s.accomplished, s.decisions, s.gotchas, s.user_insights,
@@ -943,7 +958,7 @@ func (s *Store) GetEdges(ctx context.Context, sessionID string) ([]SessionEdge, 
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT id, workspace, from_session, to_session, edge_type, created_at, metadata
 		FROM session_edges
-		WHERE from_session = ? OR to_session = ?
+		WHERE from_session = $1 OR to_session = $2
 		ORDER BY created_at DESC`, sessionID, sessionID)
 	if err != nil {
 		return nil, fmt.Errorf("sessions: get edges: %w", err)
@@ -1013,7 +1028,7 @@ func (s *Store) SaveTurn(ctx context.Context, turn SessionTurn) (SessionTurn, er
 INSERT INTO session_turns (
 	id, session_id, turn_index, role, content_preview, content_cas_digest, tool_calls, files_touched,
 	has_error, error_type, error_message, resolution, tokens_used, timestamp, created_at
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
 ON CONFLICT(id) DO UPDATE SET
 	content_preview = excluded.content_preview,
 	content_cas_digest = COALESCE(excluded.content_cas_digest, content_cas_digest),
@@ -1054,7 +1069,7 @@ func (s *Store) SaveTurns(ctx context.Context, turns []SessionTurn) error {
 INSERT INTO session_turns (
 	id, session_id, turn_index, role, content_preview, tool_calls, files_touched,
 	has_error, error_type, error_message, resolution, tokens_used, timestamp, created_at
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
 ON CONFLICT(id) DO UPDATE SET
 	content_preview = excluded.content_preview,
 	tool_calls = excluded.tool_calls,
@@ -1120,25 +1135,33 @@ func (s *Store) GetTurns(ctx context.Context, sessionID string, opts TurnListOpt
 
 	var conditions []string
 	var args []any
+	argIdx := 0
 
-	conditions = append(conditions, "session_id = ?")
+	argIdx++
+	conditions = append(conditions, fmt.Sprintf("session_id = $%d", argIdx))
 	args = append(args, sessionID)
 
 	if opts.ErrorsOnly {
 		conditions = append(conditions, "has_error = 1")
 	}
 	if opts.Role != "" {
-		conditions = append(conditions, "role = ?")
+		argIdx++
+		conditions = append(conditions, fmt.Sprintf("role = $%d", argIdx))
 		args = append(args, opts.Role)
 	}
 
+	argIdx++
+	limitParam := argIdx
+	argIdx++
+	offsetParam := argIdx
 	query := `
 		SELECT id, session_id, turn_index, role, content_preview, content_cas_digest, tool_calls, files_touched,
 			has_error, error_type, error_message, resolution, tokens_used, timestamp, created_at
 		FROM session_turns
-		WHERE ` + strings.Join(conditions, " AND ") + `
+		WHERE ` + strings.Join(conditions, " AND ") +
+		fmt.Sprintf(`
 		ORDER BY turn_index ASC
-		LIMIT ? OFFSET ?`
+		LIMIT $%d OFFSET $%d`, limitParam, offsetParam)
 	args = append(args, opts.Limit, opts.Offset)
 
 	rows, err := s.db.QueryContext(ctx, query, args...)
@@ -1171,11 +1194,11 @@ func (s *Store) SearchTurns(ctx context.Context, query string, limit int) ([]Ses
 		SELECT id, session_id, turn_index, role, content_preview, tool_calls, files_touched,
 			has_error, error_type, error_message, resolution, tokens_used, timestamp, created_at
 		FROM session_turns
-		WHERE LOWER(content_preview) LIKE ?
-			OR LOWER(error_message) LIKE ?
-			OR LOWER(resolution) LIKE ?
+		WHERE LOWER(content_preview) LIKE $1
+			OR LOWER(error_message) LIKE $2
+			OR LOWER(resolution) LIKE $3
 		ORDER BY timestamp DESC
-		LIMIT ?`, like, like, like, limit)
+		LIMIT $4`, like, like, like, limit)
 	if err != nil {
 		return nil, fmt.Errorf("sessions: search turns: %w", err)
 	}
@@ -1188,7 +1211,7 @@ func (s *Store) SearchTurns(ctx context.Context, query string, limit int) ([]Ses
 
 // DeleteTurns removes all turns for a session.
 func (s *Store) DeleteTurns(ctx context.Context, sessionID string) error {
-	_, err := s.db.ExecContext(ctx, `DELETE FROM session_turns WHERE session_id = ?`, sessionID)
+	_, err := s.db.ExecContext(ctx, `DELETE FROM session_turns WHERE session_id = $1`, sessionID)
 	if err != nil {
 		return fmt.Errorf("sessions: delete turns: %w", err)
 	}
@@ -1216,7 +1239,7 @@ INSERT INTO session_chunks (
 	id, session_id, chunk_index, chunk_type, content_hash, content_preview,
 	byte_offset, byte_length, tools_used, files_touched, has_error, error_type,
 	context_window_index, embedding, embedding_model, created_at
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
 ON CONFLICT(id) DO UPDATE SET
 	chunk_type = excluded.chunk_type,
 	content_hash = excluded.content_hash,
@@ -1262,7 +1285,7 @@ INSERT INTO session_chunks (
 	id, session_id, chunk_index, chunk_type, content_hash, content_preview,
 	byte_offset, byte_length, tools_used, files_touched, has_error, error_type,
 	context_window_index, embedding, embedding_model, created_at
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
 ON CONFLICT(id) DO UPDATE SET
 	chunk_type = excluded.chunk_type,
 	content_hash = excluded.content_hash,
@@ -1317,9 +1340,9 @@ SELECT id, session_id, chunk_index, chunk_type, content_hash, content_preview,
        byte_offset, byte_length, tools_used, files_touched, has_error, error_type,
        embedding, embedding_model, context_window_index, created_at
 FROM session_chunks
-WHERE session_id = ?
+WHERE session_id = $1
 ORDER BY chunk_index ASC
-LIMIT ?`, sessionID, limit)
+LIMIT $2`, sessionID, limit)
 	if err != nil {
 		return nil, fmt.Errorf("sessions: get chunks: %w", err)
 	}
@@ -1335,7 +1358,7 @@ SELECT id, session_id, chunk_index, chunk_type, content_hash, content_preview,
        byte_offset, byte_length, tools_used, files_touched, has_error, error_type,
        embedding, embedding_model, context_window_index, created_at
 FROM session_chunks
-WHERE session_id = ? AND chunk_index = ?`, sessionID, chunkIndex)
+WHERE session_id = $1 AND chunk_index = $2`, sessionID, chunkIndex)
 
 	return scanChunk(row)
 }
@@ -1389,7 +1412,7 @@ WHERE embedding IS NOT NULL`)
 
 // DeleteChunks removes all chunks for a session.
 func (s *Store) DeleteChunks(ctx context.Context, sessionID string) error {
-	_, err := s.db.ExecContext(ctx, `DELETE FROM session_chunks WHERE session_id = ?`, sessionID)
+	_, err := s.db.ExecContext(ctx, `DELETE FROM session_chunks WHERE session_id = $1`, sessionID)
 	if err != nil {
 		return fmt.Errorf("sessions: delete chunks: %w", err)
 	}
@@ -1441,7 +1464,7 @@ func (s *Store) SaveChunkSummary(ctx context.Context, summary SessionChunkSummar
 INSERT INTO session_chunk_summaries (
 	id, session_id, window_index, trigger, chunk_indices, chunk_index_min, chunk_index_max, tools, files, errors,
 	summary, summary_model, created_at, updated_at
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
 ON CONFLICT(id) DO UPDATE SET
 	trigger = excluded.trigger,
 	chunk_indices = excluded.chunk_indices,
@@ -1487,7 +1510,7 @@ func (s *Store) SaveChunkSummaries(ctx context.Context, summaries []SessionChunk
 INSERT INTO session_chunk_summaries (
 	id, session_id, window_index, trigger, chunk_indices, chunk_index_min, chunk_index_max, tools, files, errors,
 	summary, summary_model, created_at, updated_at
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
 ON CONFLICT(id) DO UPDATE SET
 	trigger = excluded.trigger,
 	chunk_indices = excluded.chunk_indices,
@@ -1548,7 +1571,7 @@ func (s *Store) GetChunkSummaries(ctx context.Context, sessionID string, windowI
 SELECT id, session_id, window_index, trigger, chunk_indices, tools, files, errors,
        chunk_index_min, chunk_index_max, summary, summary_model, created_at, updated_at
 FROM session_chunk_summaries
-WHERE session_id = ? AND window_index = ?
+WHERE session_id = $1 AND window_index = $2
 ORDER BY created_at ASC`, sessionID, windowIndex)
 	if err != nil {
 		return nil, fmt.Errorf("sessions: get chunk summaries: %w", err)
@@ -1564,14 +1587,14 @@ func (s *Store) GetChunkSummary(ctx context.Context, summaryID string) (SessionC
 SELECT id, session_id, window_index, trigger, chunk_indices, tools, files, errors,
        chunk_index_min, chunk_index_max, summary, summary_model, created_at, updated_at
 FROM session_chunk_summaries
-WHERE id = ?`, summaryID)
+WHERE id = $1`, summaryID)
 
 	return scanChunkSummary(row)
 }
 
 // DeleteChunkSummaries removes all chunk summaries for a session.
 func (s *Store) DeleteChunkSummaries(ctx context.Context, sessionID string) error {
-	_, err := s.db.ExecContext(ctx, `DELETE FROM session_chunk_summaries WHERE session_id = ?`, sessionID)
+	_, err := s.db.ExecContext(ctx, `DELETE FROM session_chunk_summaries WHERE session_id = $1`, sessionID)
 	if err != nil {
 		return fmt.Errorf("sessions: delete chunk summaries: %w", err)
 	}
@@ -1580,7 +1603,7 @@ func (s *Store) DeleteChunkSummaries(ctx context.Context, sessionID string) erro
 
 // SetArchivePath sets the archive path for a session.
 func (s *Store) SetArchivePath(ctx context.Context, sessionID, archivePath string) error {
-	_, err := s.db.ExecContext(ctx, `UPDATE sessions SET raw_jsonl_path = ? WHERE id = ?`, archivePath, sessionID)
+	_, err := s.db.ExecContext(ctx, `UPDATE sessions SET raw_jsonl_path = $1 WHERE id = $2`, archivePath, sessionID)
 	if err != nil {
 		return fmt.Errorf("sessions: set archive path: %w", err)
 	}
@@ -1590,7 +1613,7 @@ func (s *Store) SetArchivePath(ctx context.Context, sessionID, archivePath strin
 // GetArchivePath retrieves the archive path for a session.
 func (s *Store) GetArchivePath(ctx context.Context, sessionID string) (string, error) {
 	var path sql.NullString
-	err := s.db.QueryRowContext(ctx, `SELECT raw_jsonl_path FROM sessions WHERE id = ?`, sessionID).Scan(&path)
+	err := s.db.QueryRowContext(ctx, `SELECT raw_jsonl_path FROM sessions WHERE id = $1`, sessionID).Scan(&path)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return "", ErrNotFound
@@ -1616,7 +1639,7 @@ func (s *Store) SaveContextWindow(ctx context.Context, window ContextWindow) (Co
 INSERT INTO session_context_windows (
 	id, session_id, window_index, started_at, ended_at, pre_compact_tokens,
 	trigger, chunk_start, chunk_end, message_count, summary, embedding, embedding_model, created_at
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
 ON CONFLICT(session_id, window_index) DO UPDATE SET
 	started_at = excluded.started_at,
 	ended_at = excluded.ended_at,
@@ -1664,7 +1687,7 @@ func (s *Store) SaveContextWindows(ctx context.Context, windows []ContextWindow)
 INSERT INTO session_context_windows (
 	id, session_id, window_index, started_at, ended_at, pre_compact_tokens,
 	trigger, chunk_start, chunk_end, message_count, summary, embedding, embedding_model, created_at
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
 ON CONFLICT(session_id, window_index) DO UPDATE SET
 	started_at = excluded.started_at,
 	ended_at = excluded.ended_at,
@@ -1711,7 +1734,7 @@ func (s *Store) GetContextWindows(ctx context.Context, sessionID string) ([]Cont
 SELECT id, session_id, window_index, started_at, ended_at, pre_compact_tokens,
        trigger, chunk_start, chunk_end, message_count, summary, embedding, embedding_model, created_at
 FROM session_context_windows
-WHERE session_id = ?
+WHERE session_id = $1
 ORDER BY window_index ASC`, sessionID)
 	if err != nil {
 		return nil, fmt.Errorf("sessions: get context windows: %w", err)
@@ -1727,7 +1750,7 @@ func (s *Store) GetContextWindow(ctx context.Context, sessionID string, windowIn
 SELECT id, session_id, window_index, started_at, ended_at, pre_compact_tokens,
        trigger, chunk_start, chunk_end, message_count, summary, embedding, embedding_model, created_at
 FROM session_context_windows
-WHERE session_id = ? AND window_index = ?`, sessionID, windowIndex)
+WHERE session_id = $1 AND window_index = $2`, sessionID, windowIndex)
 
 	return scanContextWindow(row)
 }
@@ -1747,10 +1770,10 @@ func (s *Store) UpdateWindowSummary(ctx context.Context, windowID string, summar
 
 	result, err := s.db.ExecContext(ctx, `
 UPDATE session_context_windows SET
-	summary = COALESCE(NULLIF(?, ''), summary),
-	embedding = COALESCE(?, embedding),
-	embedding_model = COALESCE(NULLIF(?, ''), embedding_model)
-WHERE id = ?`, summary, embedding, model, windowID)
+	summary = COALESCE(NULLIF($1, ''), summary),
+	embedding = COALESCE($2, embedding),
+	embedding_model = COALESCE(NULLIF($3, ''), embedding_model)
+WHERE id = $4`, summary, embedding, model, windowID)
 	if err != nil {
 		return fmt.Errorf("sessions: update window summary: %w", err)
 	}
@@ -1773,8 +1796,8 @@ func (s *Store) UpdateContextWindowSummary(ctx context.Context, windowID string,
 	}
 
 	result, err := s.db.ExecContext(ctx, `
-UPDATE session_context_windows SET summary = ?
-WHERE id = ?`, summary, windowID)
+UPDATE session_context_windows SET summary = $1
+WHERE id = $2`, summary, windowID)
 	if err != nil {
 		return fmt.Errorf("sessions: update context window summary: %w", err)
 	}
@@ -1797,8 +1820,8 @@ func (s *Store) SetContextWindowEmbedding(ctx context.Context, windowID string, 
 	model = strings.TrimSpace(model)
 
 	result, err := s.db.ExecContext(ctx, `
-UPDATE session_context_windows SET embedding = ?, embedding_model = ?
-WHERE id = ?`, embedding, model, windowID)
+UPDATE session_context_windows SET embedding = $1, embedding_model = $2
+WHERE id = $3`, embedding, model, windowID)
 	if err != nil {
 		return fmt.Errorf("sessions: set context window embedding: %w", err)
 	}
@@ -1860,7 +1883,7 @@ WHERE embedding IS NOT NULL AND LENGTH(embedding) > 0`)
 
 // DeleteContextWindows removes all context windows for a session.
 func (s *Store) DeleteContextWindows(ctx context.Context, sessionID string) error {
-	_, err := s.db.ExecContext(ctx, `DELETE FROM session_context_windows WHERE session_id = ?`, sessionID)
+	_, err := s.db.ExecContext(ctx, `DELETE FROM session_context_windows WHERE session_id = $1`, sessionID)
 	if err != nil {
 		return fmt.Errorf("sessions: delete context windows: %w", err)
 	}
@@ -1980,7 +2003,7 @@ func (s *Store) SetEmbeddingMetadata(ctx context.Context, meta EmbeddingMetadata
 
 	_, err := s.db.ExecContext(ctx, `
 		INSERT INTO embedding_metadata (table_name, column_name, provider, model, dimensions, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)
 		ON CONFLICT(table_name) DO UPDATE SET
 			column_name = excluded.column_name,
 			provider = excluded.provider,
@@ -2285,6 +2308,12 @@ func scanTurns(rows *sql.Rows) ([]SessionTurn, error) {
 // ErrNotFound indicates a session was not found.
 var ErrNotFound = fmt.Errorf("sessions: not found")
 
+// MigrateSchema runs the sessions store DDL migrations against the given database.
+// This is exported so the CLI db migrate command can create PostgreSQL tables.
+func MigrateSchema(ctx context.Context, db *sql.DB) error {
+	return migrate(ctx, db)
+}
+
 func migrate(ctx context.Context, db *sql.DB) error {
 	ddl := `
 CREATE TABLE IF NOT EXISTS sessions (
@@ -2422,58 +2451,29 @@ CREATE INDEX IF NOT EXISTS idx_session_edges_workspace ON session_edges(workspac
 	}
 
 	// Add workspace_id column for stable cross-machine scoping.
-	var colCount int
-	row := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM pragma_table_info('sessions') WHERE name = 'workspace_id'")
-	if err := row.Scan(&colCount); err == nil && colCount == 0 {
-		if _, err := db.ExecContext(ctx, "ALTER TABLE sessions ADD COLUMN workspace_id TEXT NOT NULL DEFAULT ''"); err != nil {
-			// Ignore error if column already exists
-			if !strings.Contains(err.Error(), "duplicate column") && !strings.Contains(err.Error(), "already exists") {
-				return fmt.Errorf("sessions: add workspace_id column: %w", err)
-			}
-		}
+	if err := dbutil.AddColumnIfNotExists(ctx, db, "sessions", "workspace_id", "TEXT NOT NULL", "''"); err != nil {
+		return fmt.Errorf("sessions: add workspace_id column: %w", err)
 	}
 
 	// Add user_insights column if it doesn't exist (for existing databases)
-	row = db.QueryRowContext(ctx, "SELECT COUNT(*) FROM pragma_table_info('sessions') WHERE name = 'user_insights'")
-	if err := row.Scan(&colCount); err == nil && colCount == 0 {
-		if _, err := db.ExecContext(ctx, "ALTER TABLE sessions ADD COLUMN user_insights TEXT"); err != nil {
-			// Ignore error if column already exists
-			if !strings.Contains(err.Error(), "duplicate column") {
-				return fmt.Errorf("sessions: add user_insights column: %w", err)
-			}
-		}
+	if err := dbutil.AddColumnIfNotExists(ctx, db, "sessions", "user_insights", "TEXT", ""); err != nil {
+		return fmt.Errorf("sessions: add user_insights column: %w", err)
 	}
 
 	// Add key_questions column if it doesn't exist (for existing databases)
-	row = db.QueryRowContext(ctx, "SELECT COUNT(*) FROM pragma_table_info('sessions') WHERE name = 'key_questions'")
-	if err := row.Scan(&colCount); err == nil && colCount == 0 {
-		if _, err := db.ExecContext(ctx, "ALTER TABLE sessions ADD COLUMN key_questions TEXT"); err != nil {
-			// Ignore error if column already exists
-			if !strings.Contains(err.Error(), "duplicate column") {
-				return fmt.Errorf("sessions: add key_questions column: %w", err)
-			}
-		}
+	if err := dbutil.AddColumnIfNotExists(ctx, db, "sessions", "key_questions", "TEXT", ""); err != nil {
+		return fmt.Errorf("sessions: add key_questions column: %w", err)
 	}
 
 	// Add lineage columns for existing databases
-	lineageColumns := []struct {
-		name       string
-		ddl        string
-		hasDefault bool
-	}{
-		{"parent_session_id", "ALTER TABLE sessions ADD COLUMN parent_session_id TEXT", false},
-		{"agent_id", "ALTER TABLE sessions ADD COLUMN agent_id TEXT NOT NULL DEFAULT 'agentctl'", true},
-		{"agent_type", "ALTER TABLE sessions ADD COLUMN agent_type TEXT NOT NULL DEFAULT 'claude'", true},
-		{"status", "ALTER TABLE sessions ADD COLUMN status TEXT NOT NULL DEFAULT 'ok'", true},
-	}
-	for _, col := range lineageColumns {
-		row := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM pragma_table_info('sessions') WHERE name = ?", col.name)
-		if err := row.Scan(&colCount); err == nil && colCount == 0 {
-			if _, err := db.ExecContext(ctx, col.ddl); err != nil {
-				if !strings.Contains(err.Error(), "duplicate column") {
-					return fmt.Errorf("sessions: add %s column: %w", col.name, err)
-				}
-			}
+	for _, col := range []struct{ name, colType, defaultVal string }{
+		{"parent_session_id", "TEXT", ""},
+		{"agent_id", "TEXT NOT NULL", "'agentctl'"},
+		{"agent_type", "TEXT NOT NULL", "'claude'"},
+		{"status", "TEXT NOT NULL", "'ok'"},
+	} {
+		if err := dbutil.AddColumnIfNotExists(ctx, db, "sessions", col.name, col.colType, col.defaultVal); err != nil {
+			return fmt.Errorf("sessions: add %s column: %w", col.name, err)
 		}
 	}
 
@@ -2541,33 +2541,16 @@ CREATE INDEX IF NOT EXISTS idx_context_windows_ended ON session_context_windows(
 	}
 
 	// Add context_window_index column to session_chunks if it doesn't exist
-	var cwColCount int
-	row = db.QueryRowContext(ctx, "SELECT COUNT(*) FROM pragma_table_info('session_chunks') WHERE name = 'context_window_index'")
-	if err := row.Scan(&cwColCount); err == nil && cwColCount == 0 {
-		if _, err := db.ExecContext(ctx, "ALTER TABLE session_chunks ADD COLUMN context_window_index INTEGER DEFAULT 0"); err != nil {
-			if !strings.Contains(err.Error(), "duplicate column") {
-				return fmt.Errorf("sessions: add context_window_index column: %w", err)
-			}
-		}
+	if err := dbutil.AddColumnIfNotExists(ctx, db, "session_chunks", "context_window_index", "INTEGER", "0"); err != nil {
+		return fmt.Errorf("sessions: add context_window_index column: %w", err)
 	}
 
 	// Add chunk_index_min/max columns for chunk summaries if missing (existing databases)
-	var chunkSummaryColCount int
-	row = db.QueryRowContext(ctx, "SELECT COUNT(*) FROM pragma_table_info('session_chunk_summaries') WHERE name = 'chunk_index_min'")
-	if err := row.Scan(&chunkSummaryColCount); err == nil && chunkSummaryColCount == 0 {
-		if _, err := db.ExecContext(ctx, "ALTER TABLE session_chunk_summaries ADD COLUMN chunk_index_min INTEGER"); err != nil {
-			if !strings.Contains(err.Error(), "duplicate column") {
-				return fmt.Errorf("sessions: add chunk_index_min column: %w", err)
-			}
-		}
+	if err := dbutil.AddColumnIfNotExists(ctx, db, "session_chunk_summaries", "chunk_index_min", "INTEGER", ""); err != nil {
+		return fmt.Errorf("sessions: add chunk_index_min column: %w", err)
 	}
-	row = db.QueryRowContext(ctx, "SELECT COUNT(*) FROM pragma_table_info('session_chunk_summaries') WHERE name = 'chunk_index_max'")
-	if err := row.Scan(&chunkSummaryColCount); err == nil && chunkSummaryColCount == 0 {
-		if _, err := db.ExecContext(ctx, "ALTER TABLE session_chunk_summaries ADD COLUMN chunk_index_max INTEGER"); err != nil {
-			if !strings.Contains(err.Error(), "duplicate column") {
-				return fmt.Errorf("sessions: add chunk_index_max column: %w", err)
-			}
-		}
+	if err := dbutil.AddColumnIfNotExists(ctx, db, "session_chunk_summaries", "chunk_index_max", "INTEGER", ""); err != nil {
+		return fmt.Errorf("sessions: add chunk_index_max column: %w", err)
 	}
 	if _, err := db.ExecContext(ctx, "CREATE INDEX IF NOT EXISTS idx_chunk_summaries_range ON session_chunk_summaries(session_id, window_index, chunk_index_min, chunk_index_max)"); err != nil {
 		if !strings.Contains(err.Error(), "already exists") {
@@ -2576,14 +2559,8 @@ CREATE INDEX IF NOT EXISTS idx_context_windows_ended ON session_context_windows(
 	}
 
 	// Add content_hash column for conversation content deduplication (forked sessions)
-	var contentHashColCount int
-	row = db.QueryRowContext(ctx, "SELECT COUNT(*) FROM pragma_table_info('sessions') WHERE name = 'content_hash'")
-	if err := row.Scan(&contentHashColCount); err == nil && contentHashColCount == 0 {
-		if _, err := db.ExecContext(ctx, "ALTER TABLE sessions ADD COLUMN content_hash TEXT"); err != nil {
-			if !strings.Contains(err.Error(), "duplicate column") {
-				return fmt.Errorf("sessions: add content_hash column: %w", err)
-			}
-		}
+	if err := dbutil.AddColumnIfNotExists(ctx, db, "sessions", "content_hash", "TEXT", ""); err != nil {
+		return fmt.Errorf("sessions: add content_hash column: %w", err)
 	}
 	if _, err := db.ExecContext(ctx, "CREATE INDEX IF NOT EXISTS idx_sessions_content_hash ON sessions(content_hash)"); err != nil {
 		if !strings.Contains(err.Error(), "already exists") {
@@ -2592,14 +2569,8 @@ CREATE INDEX IF NOT EXISTS idx_context_windows_ended ON session_context_windows(
 	}
 
 	// Add pending_restore_at column for post-compact context injection
-	var pendingRestoreColCount int
-	row = db.QueryRowContext(ctx, "SELECT COUNT(*) FROM pragma_table_info('sessions') WHERE name = 'pending_restore_at'")
-	if err := row.Scan(&pendingRestoreColCount); err == nil && pendingRestoreColCount == 0 {
-		if _, err := db.ExecContext(ctx, "ALTER TABLE sessions ADD COLUMN pending_restore_at TEXT"); err != nil {
-			if !strings.Contains(err.Error(), "duplicate column") {
-				return fmt.Errorf("sessions: add pending_restore_at column: %w", err)
-			}
-		}
+	if err := dbutil.AddColumnIfNotExists(ctx, db, "sessions", "pending_restore_at", "TEXT", ""); err != nil {
+		return fmt.Errorf("sessions: add pending_restore_at column: %w", err)
 	}
 	if _, err := db.ExecContext(ctx, "CREATE INDEX IF NOT EXISTS idx_sessions_pending_restore_ws_id ON sessions(workspace_id, pending_restore_at) WHERE pending_restore_at IS NOT NULL"); err != nil {
 		if !strings.Contains(err.Error(), "already exists") {
@@ -2608,32 +2579,20 @@ CREATE INDEX IF NOT EXISTS idx_context_windows_ended ON session_context_windows(
 	}
 
 	// Add agent execution context columns (prompt, prompt_hash, llm_provider, llm_model)
-	for _, col := range []struct{ name, typ string }{
+	for _, col := range []struct{ name, colType string }{
 		{"prompt", "TEXT"},
 		{"prompt_hash", "TEXT"},
 		{"llm_provider", "TEXT"},
 		{"llm_model", "TEXT"},
 	} {
-		var colCount int
-		row = db.QueryRowContext(ctx, "SELECT COUNT(*) FROM pragma_table_info('sessions') WHERE name = ?", col.name)
-		if err := row.Scan(&colCount); err == nil && colCount == 0 {
-			if _, err := db.ExecContext(ctx, fmt.Sprintf("ALTER TABLE sessions ADD COLUMN %s %s", col.name, col.typ)); err != nil {
-				if !strings.Contains(err.Error(), "duplicate column") {
-					return fmt.Errorf("sessions: add %s column: %w", col.name, err)
-				}
-			}
+		if err := dbutil.AddColumnIfNotExists(ctx, db, "sessions", col.name, col.colType, ""); err != nil {
+			return fmt.Errorf("sessions: add %s column: %w", col.name, err)
 		}
 	}
 
 	// Add content_cas_digest column to session_turns for full content storage
-	var turnsCASDigestCount int
-	row = db.QueryRowContext(ctx, "SELECT COUNT(*) FROM pragma_table_info('session_turns') WHERE name = 'content_cas_digest'")
-	if err := row.Scan(&turnsCASDigestCount); err == nil && turnsCASDigestCount == 0 {
-		if _, err := db.ExecContext(ctx, "ALTER TABLE session_turns ADD COLUMN content_cas_digest TEXT"); err != nil {
-			if !strings.Contains(err.Error(), "duplicate column") {
-				return fmt.Errorf("sessions: add content_cas_digest column: %w", err)
-			}
-		}
+	if err := dbutil.AddColumnIfNotExists(ctx, db, "session_turns", "content_cas_digest", "TEXT", ""); err != nil {
+		return fmt.Errorf("sessions: add content_cas_digest column: %w", err)
 	}
 
 	return nil

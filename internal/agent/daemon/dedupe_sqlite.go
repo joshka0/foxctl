@@ -29,6 +29,11 @@ func OpenSQLiteDedupeStore(ctx context.Context, storageRoot string) (*SQLiteDedu
 
 // migrateDedupe creates the daemon_dedupe table and its processed_at index if they do not exist.
 // It returns any error encountered while executing the migration SQL.
+// MigrateDedupe runs the daemon dedupe store DDL migrations against the given database.
+func MigrateDedupe(ctx context.Context, db *sql.DB) error {
+	return migrateDedupe(ctx, db)
+}
+
 func migrateDedupe(ctx context.Context, db *sql.DB) error {
 	schema := `
        CREATE TABLE IF NOT EXISTS daemon_dedupe (
@@ -47,7 +52,7 @@ func migrateDedupe(ctx context.Context, db *sql.DB) error {
 func (s *SQLiteDedupeStore) IsProcessed(ctx context.Context, agentID, messageID string) (bool, error) {
 	var count int
 	err := s.db.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM daemon_dedupe WHERE agent_id = ? AND message_id = ?`,
+		`SELECT COUNT(*) FROM daemon_dedupe WHERE agent_id = $1 AND message_id = $2`,
 		agentID, messageID,
 	).Scan(&count)
 	if err != nil {
@@ -59,7 +64,7 @@ func (s *SQLiteDedupeStore) IsProcessed(ctx context.Context, agentID, messageID 
 // MarkProcessed marks a message as processed.
 func (s *SQLiteDedupeStore) MarkProcessed(ctx context.Context, agentID, messageID string) error {
 	_, err := s.db.ExecContext(ctx,
-		`INSERT OR IGNORE INTO daemon_dedupe (agent_id, message_id, processed_at) VALUES (?, ?, ?)`,
+		`INSERT INTO daemon_dedupe (agent_id, message_id, processed_at) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`,
 		agentID, messageID, time.Now().Unix(),
 	)
 	if err != nil {
@@ -72,7 +77,7 @@ func (s *SQLiteDedupeStore) MarkProcessed(ctx context.Context, agentID, messageI
 func (s *SQLiteDedupeStore) Cleanup(ctx context.Context, olderThan time.Duration) (int64, error) {
 	cutoff := time.Now().Add(-olderThan).Unix()
 	result, err := s.db.ExecContext(ctx,
-		`DELETE FROM daemon_dedupe WHERE processed_at < ?`,
+		`DELETE FROM daemon_dedupe WHERE processed_at < $1`,
 		cutoff,
 	)
 	if err != nil {

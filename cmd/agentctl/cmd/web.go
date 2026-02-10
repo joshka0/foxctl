@@ -45,10 +45,12 @@ Examples:
 }
 
 var (
-	webPort    int
-	webDevCORS bool
-	webUIDir   string
-	webChat    string
+	webPort     int
+	webDevCORS  bool
+	webUIDir    string
+	webChat     string
+	webDBDriver string
+	webDBDSN    string
 )
 
 func init() {
@@ -58,7 +60,9 @@ func init() {
 	webServeCmd.Flags().IntVarP(&webPort, "port", "p", 8090, "Port to listen on")
 	webServeCmd.Flags().BoolVar(&webDevCORS, "dev-cors", false, "Enable CORS for development (allows localhost:5173)")
 	webServeCmd.Flags().StringVar(&webUIDir, "ui-dir", "", "Directory containing static UI files to serve")
-	webServeCmd.Flags().StringVar(&webChat, "chat", "", "Chat adapter to enable (discord)")
+	webServeCmd.Flags().StringVar(&webChat, "chat", "", "Chat adapter to enable (discord|telegram|teams)")
+	webServeCmd.Flags().StringVar(&webDBDriver, "db-driver", "", "Database driver (sqlite|libsql|turso|postgres)")
+	webServeCmd.Flags().StringVar(&webDBDSN, "db-dsn", "", "PostgreSQL DSN (overrides AGENTCTL_POSTGRES_DSN)")
 }
 
 func runWebServe(cmd *cobra.Command, _ []string) error {
@@ -69,6 +73,14 @@ func runWebServe(cmd *cobra.Command, _ []string) error {
 	cfg, err := loadConfig(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to load config: %w", err)
+	}
+
+	// Apply CLI flag overrides
+	if webDBDriver != "" {
+		cfg.Database.Driver = webDBDriver
+	}
+	if webDBDSN != "" {
+		cfg.Database.Postgres.DSN = webDBDSN
 	}
 
 	// Setup logger for web server internals

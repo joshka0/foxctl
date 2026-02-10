@@ -251,15 +251,15 @@ func (t *tursoDB) SetMaxIdleConns(n int) {
 
 // SetConnMaxLifetime sets the maximum amount of time a connection may be reused
 func (t *tursoDB) SetConnMaxLifetime(d any) {
-	if duration, ok := d.(time.Duration); ok {
-		t.db.SetConnMaxLifetime(duration)
+	if dur, ok := parseConnDuration(d); ok {
+		t.db.SetConnMaxLifetime(dur)
 	}
 }
 
 // SetConnMaxIdleTime sets the maximum amount of time a connection may be idle
 func (t *tursoDB) SetConnMaxIdleTime(d any) {
-	if duration, ok := d.(time.Duration); ok {
-		t.db.SetConnMaxIdleTime(duration)
+	if dur, ok := parseConnDuration(d); ok {
+		t.db.SetConnMaxIdleTime(dur)
 	}
 }
 
@@ -281,6 +281,11 @@ func (t *tursoDB) IsVectorSearchEnabled() bool {
 // GetDriverType returns DriverTurso
 func (t *tursoDB) GetDriverType() DriverType {
 	return t.driverType
+}
+
+// GetDialect returns the SQLite dialect (Turso uses SQLite-compatible SQL).
+func (t *tursoDB) GetDialect() Dialect {
+	return SQLiteDialect{}
 }
 
 // GetVectorDimensions returns the configured vector dimensions

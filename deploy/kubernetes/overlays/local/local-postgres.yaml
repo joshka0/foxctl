@@ -1,0 +1,74 @@
+# Local PostgreSQL with pgvector for k3s testing
+# Uses pgvector/pgvector image which has the extension pre-installed
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: agentctl-postgres
+  namespace: agentctl
+  labels:
+    app.kubernetes.io/name: agentctl-postgres
+    app.kubernetes.io/component: database
+spec:
+  ports:
+  - port: 5432
+    targetPort: 5432
+  selector:
+    app.kubernetes.io/name: agentctl-postgres
+
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: agentctl-postgres
+  namespace: agentctl
+  labels:
+    app.kubernetes.io/name: agentctl-postgres
+    app.kubernetes.io/component: database
+spec:
+  serviceName: agentctl-postgres
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: agentctl-postgres
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: agentctl-postgres
+    spec:
+      containers:
+      - name: postgres
+        image: pgvector/pgvector:pg17
+        ports:
+        - containerPort: 5432
+        env:
+        - name: POSTGRES_USER
+          value: agentctl
+        - name: POSTGRES_PASSWORD
+          value: dev
+        - name: POSTGRES_DB
+          value: agentctl
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "100m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+        volumeMounts:
+        - name: pgdata
+          mountPath: /var/lib/postgresql/data
+          subPath: pgdata
+        readinessProbe:
+          exec:
+            command: ["pg_isready", "-U", "agentctl"]
+          initialDelaySeconds: 5
+          periodSeconds: 10
+  volumeClaimTemplates:
+  - metadata:
+      name: pgdata
+    spec:
+      accessModes: ["ReadWriteOnce"]
+      resources:
+        requests:
+          storage: 1Gi

@@ -77,7 +77,7 @@ func (s *sqlStore) Create(ctx context.Context, a agent.Agent) error {
 
 	_, err = s.db.ExecContext(ctx, `
 		INSERT INTO agents (id, parent_id, ns, name, slug, role, prompt, skills_allow, policy, share_bb, state, created_at, heartbeat_at, llm_provider, llm_model, llm_api_key, exec_mode, max_iterations, max_auto_turns, think_interval)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)`,
 		a.ID, a.ParentID, a.Namespace, a.Name, slugVal, a.Role, a.Prompt, string(skillsJSON), string(policyJSON), a.ShareBB, a.State,
 		sqlutil.FormatTimestamp(a.CreatedAt), sqlutil.FormatTimestamp(a.HeartbeatAt),
 		a.LLMProvider, a.LLMModel, a.LLMAPIKey,
@@ -91,7 +91,7 @@ func (s *sqlStore) Create(ctx context.Context, a agent.Agent) error {
 func (s *sqlStore) Get(ctx context.Context, id string) (agent.Agent, error) {
 	row := s.db.QueryRowContext(ctx, `
 		SELECT id, parent_id, ns, name, slug, role, prompt, skills_allow, policy, share_bb, state, created_at, heartbeat_at, llm_provider, llm_model, llm_api_key, exec_mode, max_iterations, max_auto_turns, think_interval, conversation_id
-		FROM agents WHERE id = ? AND deleted_at IS NULL`, id)
+		FROM agents WHERE id = $1 AND deleted_at IS NULL`, id)
 
 	var a agent.Agent
 	var skillsJSON, policyJSON string
@@ -157,7 +157,7 @@ func (s *sqlStore) Get(ctx context.Context, id string) (agent.Agent, error) {
 func (s *sqlStore) GetByNamespace(ctx context.Context, ns string) (agent.Agent, error) {
 	row := s.db.QueryRowContext(ctx, `
 		SELECT id, parent_id, ns, name, slug, role, prompt, skills_allow, policy, share_bb, state, created_at, heartbeat_at, llm_provider, llm_model, llm_api_key, exec_mode, max_iterations, max_auto_turns, think_interval, conversation_id
-		FROM agents WHERE ns = ? AND deleted_at IS NULL`, ns)
+		FROM agents WHERE ns = $1 AND deleted_at IS NULL`, ns)
 
 	var a agent.Agent
 	var skillsJSON, policyJSON string
@@ -223,7 +223,7 @@ func (s *sqlStore) GetByNamespace(ctx context.Context, ns string) (agent.Agent, 
 func (s *sqlStore) GetBySlug(ctx context.Context, slug string) (agent.Agent, error) {
 	row := s.db.QueryRowContext(ctx, `
 		SELECT id, parent_id, ns, name, slug, role, prompt, skills_allow, policy, share_bb, state, created_at, heartbeat_at, llm_provider, llm_model, llm_api_key, exec_mode, max_iterations, max_auto_turns, think_interval, conversation_id
-		FROM agents WHERE slug = ? AND deleted_at IS NULL`, slug)
+		FROM agents WHERE slug = $1 AND deleted_at IS NULL`, slug)
 
 	var a agent.Agent
 	var skillsJSON, policyJSON string
@@ -300,7 +300,7 @@ func (s *sqlStore) Resolve(ctx context.Context, ref string) (agent.Agent, error)
 	// Try by name (case-insensitive)
 	row := s.db.QueryRowContext(ctx, `
 		SELECT id, parent_id, ns, name, slug, role, prompt, skills_allow, policy, share_bb, state, created_at, heartbeat_at, llm_provider, llm_model, llm_api_key, exec_mode, max_iterations, max_auto_turns, think_interval
-		FROM agents WHERE LOWER(name) = LOWER(?) AND deleted_at IS NULL LIMIT 1`, ref)
+		FROM agents WHERE LOWER(name) = LOWER($1) AND deleted_at IS NULL LIMIT 1`, ref)
 
 	var skillsJSON, policyJSON string
 	var created string
@@ -358,7 +358,7 @@ func (s *sqlStore) List(ctx context.Context, limit int) ([]agent.Agent, error) {
 		FROM agents
 		WHERE deleted_at IS NULL
 		ORDER BY created_at DESC
-		LIMIT ?`, limit)
+		LIMIT $1`, limit)
 	if err != nil {
 		return nil, fmt.Errorf("agents: list: %w", err)
 	}
@@ -384,9 +384,9 @@ func (s *sqlStore) ListByParent(ctx context.Context, parentID string, limit int)
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT id, parent_id, ns, name, slug, role, prompt, skills_allow, policy, share_bb, state, created_at, heartbeat_at, llm_provider, llm_model, llm_api_key, exec_mode, max_iterations, max_auto_turns, think_interval, conversation_id
 		FROM agents
-		WHERE parent_id = ? AND deleted_at IS NULL
+		WHERE parent_id = $1 AND deleted_at IS NULL
 		ORDER BY created_at DESC
-		LIMIT ?`, parentID, limit)
+		LIMIT $2`, parentID, limit)
 	if err != nil {
 		return nil, fmt.Errorf("agents: list by parent: %w", err)
 	}
@@ -407,7 +407,7 @@ func (s *sqlStore) ListByParent(ctx context.Context, parentID string, limit int)
 
 func (s *sqlStore) UpdateState(ctx context.Context, id string, state agent.State) error {
 	res, err := s.db.ExecContext(ctx, `
-		UPDATE agents SET state = ? WHERE id = ? AND deleted_at IS NULL`, state, id)
+		UPDATE agents SET state = $1 WHERE id = $2 AND deleted_at IS NULL`, state, id)
 	if err != nil {
 		return fmt.Errorf("agents: update state: %w", err)
 	}
@@ -423,7 +423,7 @@ func (s *sqlStore) UpdateState(ctx context.Context, id string, state agent.State
 
 func (s *sqlStore) UpdateHeartbeat(ctx context.Context, id string) error {
 	res, err := s.db.ExecContext(ctx, `
-		UPDATE agents SET heartbeat_at = ? WHERE id = ? AND deleted_at IS NULL`, sqlutil.FormatTimestamp(time.Now().UTC()), id)
+		UPDATE agents SET heartbeat_at = $1 WHERE id = $2 AND deleted_at IS NULL`, sqlutil.FormatTimestamp(time.Now().UTC()), id)
 	if err != nil {
 		return fmt.Errorf("agents: update heartbeat: %w", err)
 	}
@@ -449,7 +449,7 @@ func (s *sqlStore) UpdateIdentity(ctx context.Context, id, name, slug string) er
 		slugVal = slug
 	}
 	res, err := s.db.ExecContext(ctx, `
-		UPDATE agents SET name = ?, slug = ? WHERE id = ? AND deleted_at IS NULL`, nameVal, slugVal, id)
+		UPDATE agents SET name = $1, slug = $2 WHERE id = $3 AND deleted_at IS NULL`, nameVal, slugVal, id)
 	if err != nil {
 		return fmt.Errorf("agents: update identity: %w", err)
 	}
@@ -471,7 +471,7 @@ func (s *sqlStore) UpdateConversationID(ctx context.Context, id, conversationID 
 		convVal = conversationID
 	}
 	res, err := s.db.ExecContext(ctx, `
-		UPDATE agents SET conversation_id = ? WHERE id = ? AND deleted_at IS NULL`, convVal, id)
+		UPDATE agents SET conversation_id = $1 WHERE id = $2 AND deleted_at IS NULL`, convVal, id)
 	if err != nil {
 		return fmt.Errorf("agents: update conversation_id: %w", err)
 	}
@@ -486,7 +486,7 @@ func (s *sqlStore) UpdateConversationID(ctx context.Context, id, conversationID 
 }
 
 func (s *sqlStore) Delete(ctx context.Context, id string) error {
-	res, err := s.db.ExecContext(ctx, `DELETE FROM agents WHERE id = ?`, id)
+	res, err := s.db.ExecContext(ctx, `DELETE FROM agents WHERE id = $1`, id)
 	if err != nil {
 		return fmt.Errorf("agents: delete: %w", err)
 	}
@@ -504,8 +504,8 @@ func (s *sqlStore) Delete(ctx context.Context, id string) error {
 func (s *sqlStore) Trash(ctx context.Context, id string) error {
 	// Atomic update: only trash if agent exists, is stopped, and not already trashed
 	res, err := s.db.ExecContext(ctx, `
-		UPDATE agents SET deleted_at = ?
-		WHERE id = ? AND state = ? AND deleted_at IS NULL`,
+		UPDATE agents SET deleted_at = $1
+		WHERE id = $2 AND state = $3 AND deleted_at IS NULL`,
 		sqlutil.FormatTimestamp(time.Now().UTC()), id, string(agent.StateStopped))
 	if err != nil {
 		return fmt.Errorf("agents: trash: %w", err)
@@ -517,7 +517,7 @@ func (s *sqlStore) Trash(ctx context.Context, id string) error {
 	if rows == 0 {
 		// Check why: agent not found vs not stopped
 		var state string
-		err := s.db.QueryRowContext(ctx, `SELECT state FROM agents WHERE id = ? AND deleted_at IS NULL`, id).Scan(&state)
+		err := s.db.QueryRowContext(ctx, `SELECT state FROM agents WHERE id = $1 AND deleted_at IS NULL`, id).Scan(&state)
 		if err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
 				return ErrNotFound
@@ -538,6 +538,11 @@ var ErrNotStopped = errors.New("agent: must be stopped to trash")
 // columns required by newer versions (ignoring errors if those columns already
 // exist), and creates slug indexes including a unique partial index for
 // non-null slugs. It returns an error if applying the initial DDL fails.
+// MigrateSchema runs the agents store DDL migrations against the given database.
+func MigrateSchema(ctx context.Context, db *sql.DB) error {
+	return migrate(ctx, db)
+}
+
 func migrate(ctx context.Context, db *sql.DB) error {
 	ddl := `
 CREATE TABLE IF NOT EXISTS agents (

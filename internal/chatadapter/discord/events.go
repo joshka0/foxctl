@@ -7,6 +7,7 @@ import (
 
 	"github.com/bwmarrin/discordgo"
 
+	"github.com/jkatigb/agentctl/internal/chatadapter"
 	"github.com/jkatigb/agentctl/internal/observability"
 	"github.com/jkatigb/agentctl/internal/web/sse"
 )
@@ -122,8 +123,8 @@ func (a *Adapter) handleAgentSpawn(event observability.ActivityEvent) {
 		return
 	}
 
-	role := getDataString(event.Data, "role")
-	threadName := fmt.Sprintf("Agent %s", truncate(sessionID, 8))
+	role := chatadapter.GetDataString(event.Data, "role")
+	threadName := fmt.Sprintf("Agent %s", chatadapter.TruncateRunes(sessionID, 8))
 	if role != "" {
 		threadName = fmt.Sprintf("%s (%s)", threadName, role)
 	}

@@ -1,0 +1,38 @@
+# Build artifacts
+bin/
+dist/
+coverage/
+
+# Node/Bun
+node_modules/
+bun.lockb
+packages/*/dist/
+web-ui/dist/
+
+# Databases and logs
+*.db
+*.db-shm
+*.db-wal
+*.log
+
+# Editor and IDE
+.DS_Store
+.idea/
+.vscode/
+
+# Environment and secrets
+.env
+.env.*.local
+*.token
+*.key
+
+# Git
+.git/
+
+# Claude Code
+.claude/
+
+# Temporary
+tmp/
+.opencode/
+.fastembed_cache/

@@ -75,7 +75,7 @@ var routes = map[string]skillRoute{
 				title, _ := opts["title"].(string)
 				title = strings.TrimSpace(title)
 				if title == "" {
-					return nil, fmt.Errorf("Missing required option `title` for `/todo action:add`.\nHint: set the `title` option.")
+					return nil, fmt.Errorf("missing required option `title` for `/todo action:add`; hint: set the `title` option")
 				}
 				return map[string]any{
 					"operation": "add",
@@ -87,7 +87,7 @@ var routes = map[string]skillRoute{
 				id, _ := opts["id"].(string)
 				id = strings.TrimSpace(id)
 				if id == "" {
-					return nil, fmt.Errorf("Missing required option `id` for `/todo action:complete`.\nHint: set the `id` option to the task ID.")
+					return nil, fmt.Errorf("missing required option `id` for `/todo action:complete`; hint: set the `id` option to the task ID")
 				}
 				return map[string]any{
 					"operation": "complete",
@@ -96,7 +96,7 @@ var routes = map[string]skillRoute{
 					},
 				}, nil
 			default:
-				return nil, fmt.Errorf("Unknown `/todo` action: %q (expected list|add|complete).", action)
+				return nil, fmt.Errorf("unknown `/todo` action: %q (expected list|add|complete)", action)
 			}
 		},
 	},
