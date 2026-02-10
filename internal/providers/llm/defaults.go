@@ -42,6 +42,11 @@ func DefaultModelForProvider(provider string) string {
 			return model
 		}
 		return "zai-org/glm-4.7-flash"
+	case "bedrock":
+		if model := os.Getenv("BEDROCK_MODEL"); model != "" {
+			return model
+		}
+		return "anthropic.claude-3-5-sonnet-20241022-v2:0"
 	default:
 		// Default to gemini for unknown providers
 		return "gemini-2.5-flash"

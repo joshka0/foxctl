@@ -26,11 +26,12 @@ type HookContext struct {
 // LLMChatEngine implements AgentEngine using OpenAI-compatible chat completions.
 // Supports OpenRouter, Groq, OpenAI, and other compatible providers.
 type LLMChatEngine struct {
-	config      LLMChatConfig
-	client      *http.Client
-	toolRunner  *ToolRunner
-	rlmExecutor *RLMToolExecutor // For tracking RLM context queries
-	hookContext HookContext      // Context for hook dispatch
+	config        LLMChatConfig
+	client        *http.Client
+	bedrockClient *BedrockClient  // Non-nil when provider is "bedrock"
+	toolRunner    *ToolRunner
+	rlmExecutor   *RLMToolExecutor // For tracking RLM context queries
+	hookContext   HookContext      // Context for hook dispatch
 }
 
 // LLMChatConfig configures the LLM chat engine.
@@ -152,6 +153,28 @@ func NewLLMChatEngine(cfg LLMChatConfig) (*LLMChatEngine, error) {
 	engine := &LLMChatEngine{
 		config: cfg,
 		client: &http.Client{Timeout: cfg.Timeout},
+	}
+
+	// Initialize Bedrock client when using AWS Bedrock provider.
+	if cfg.Provider == "bedrock" {
+		region := cfg.BaseURL // BaseURL field reused for region override
+		if region == "" {
+			region = os.Getenv("BEDROCK_REGION")
+			if region == "" {
+				region = os.Getenv("AWS_DEFAULT_REGION")
+			}
+		}
+		if region == "" {
+			return nil, fmt.Errorf("bedrock provider requires BEDROCK_REGION or AWS_DEFAULT_REGION")
+		}
+		// Use a timeout context for initialization instead of Background
+		initCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		bc, err := NewBedrockClient(initCtx, region)
+		if err != nil {
+			return nil, fmt.Errorf("bedrock client: %w", err)
+		}
+		engine.bedrockClient = bc
 	}
 
 	return engine, nil
@@ -523,6 +546,11 @@ func (e *LLMChatEngine) buildTools(tools []ToolDef) []oaiTool {
 
 // callLLM makes the API request.
 func (e *LLMChatEngine) callLLM(ctx context.Context, messages []oaiMessage, tools []oaiTool) (*oaiResponse, error) {
+	// Bedrock uses the AWS SDK Converse API instead of HTTP.
+	if e.bedrockClient != nil {
+		return e.bedrockClient.Converse(ctx, e.config.Model, messages, tools, e.config.Temperature, e.config.MaxTokens)
+	}
+
 	reqBody := oaiRequest{
 		Model:       e.config.Model,
 		Messages:    messages,
@@ -731,6 +759,9 @@ func apiKeyForProvider(provider string) string {
 			return key
 		}
 		return "lm-studio"
+	case "bedrock":
+		// Bedrock uses AWS IAM credentials, not an API key
+		return "bedrock-iam"
 	default:
 		return ""
 	}
@@ -749,6 +780,9 @@ func detectProvider() (apiKey, provider string) {
 	if key := os.Getenv("OPENAI_API_KEY"); key != "" {
 		return key, "openai"
 	}
+	if os.Getenv("BEDROCK_REGION") != "" || os.Getenv("AWS_DEFAULT_REGION") != "" {
+		return "bedrock-iam", "bedrock"
+	}
 	return "", ""
 }
 
@@ -765,6 +799,8 @@ func baseURLForProvider(provider string) string {
 			return url
 		}
 		return "http://localhost:1234/v1"
+	case "bedrock":
+		return "" // Uses AWS SDK, not HTTP base URL
 	default:
 		return "https://api.openai.com/v1"
 	}

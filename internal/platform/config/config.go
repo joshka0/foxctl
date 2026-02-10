@@ -404,6 +404,10 @@ type LLMSettings struct {
 	// ElevenLabsAPIKey is the ElevenLabs API key (from ELEVENLABS_API_KEY)
 	// Used for text-to-speech synthesis in presence/voice skill.
 	ElevenLabsAPIKey string `mapstructure:"elevenlabs_api_key" json:"elevenlabs_api_key"`
+
+	// BedrockRegion is the AWS region for Bedrock (from BEDROCK_REGION or AWS_DEFAULT_REGION).
+	// Uses the standard AWS credential chain (env vars, shared credentials, IAM role).
+	BedrockRegion string `mapstructure:"bedrock_region" json:"bedrock_region"`
 }
 
 // ResolveAPIKey returns the API key for the given provider.
@@ -442,6 +446,9 @@ func (l LLMSettings) ResolveAPIKey(provider string) string {
 	case "lmstudio":
 		// LM Studio doesn't require a real API key
 		return "lm-studio"
+	case "bedrock":
+		// Bedrock uses AWS IAM credentials, not an API key
+		return "bedrock-iam"
 	}
 	// Fall back to generic API key
 	return l.APIKey
@@ -459,6 +466,14 @@ func (l LLMSettings) ResolveModel(provider string) string {
 		if l.CerebrasModel != "" {
 			return l.CerebrasModel
 		}
+	case "bedrock":
+		if model := os.Getenv("BEDROCK_MODEL"); model != "" {
+			return model
+		}
+		if l.Model != "" {
+			return l.Model
+		}
+		return "anthropic.claude-3-5-sonnet-20241022-v2:0"
 	}
 	return l.Model
 }
@@ -786,6 +801,14 @@ func finalizeConfig(cfg Config, home string) Config {
 	}
 	if model := os.Getenv("AGENTCTL_LLM_MODEL"); model != "" && cfg.LLM.Model == "" {
 		cfg.LLM.Model = model
+	}
+	if region := os.Getenv("BEDROCK_REGION"); region != "" && cfg.LLM.BedrockRegion == "" {
+		cfg.LLM.BedrockRegion = region
+	}
+	if cfg.LLM.BedrockRegion == "" {
+		if region := os.Getenv("AWS_DEFAULT_REGION"); region != "" {
+			cfg.LLM.BedrockRegion = region
+		}
 	}
 
 	// Atomic processing config (for SimpleMem-style fact decomposition)

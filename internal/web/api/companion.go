@@ -46,6 +46,7 @@ func CompanionProvidersHandler(cfg config.Config, log zerolog.Logger) http.Handl
 			{ID: "gemini", Available: cfg.LLM.GeminiAPIKey != ""},
 			{ID: "cerebras", Available: cfg.LLM.CerebrasAPIKey != ""},
 			{ID: "lmstudio", Available: true},
+			{ID: "bedrock", Available: cfg.LLM.BedrockRegion != ""},
 		}
 
 		writeJSON(w, http.StatusOK, map[string]any{
