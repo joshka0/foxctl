@@ -28,6 +28,8 @@ func RegisterWorkers() *river.Workers {
 		Processor: noopTurnProcessor{},
 		Deliverer: noopReplyDeliverer{},
 	})
+	mustRegisterWorker(workers, &workerspkg.OAuthRefreshWorker{Refresher: noopTokenRefresher{}})
+	mustRegisterWorker(workers, &workerspkg.OAuthCleanupWorker{Cleaner: noopExpiredTokenCleaner{}})
 
 	return workers
 }
@@ -53,6 +55,13 @@ func PeriodicJobs() []*river.PeriodicJob {
 			river.PeriodicInterval(30*time.Minute),
 			func() (river.JobArgs, *river.InsertOpts) {
 				return workerspkg.AgentIndexCleanupArgs{}, nil
+			},
+			nil,
+		),
+		river.NewPeriodicJob(
+			river.PeriodicInterval(1*time.Hour),
+			func() (river.JobArgs, *river.InsertOpts) {
+				return workerspkg.OAuthCleanupArgs{}, nil
 			},
 			nil,
 		),
@@ -106,4 +115,16 @@ type noopReplyDeliverer struct{}
 
 func (noopReplyDeliverer) DeliverReply(_ context.Context, _, _, _ string) error {
 	return nil
+}
+
+type noopTokenRefresher struct{}
+
+func (noopTokenRefresher) RefreshToken(_ context.Context, _ string) error {
+	return nil
+}
+
+type noopExpiredTokenCleaner struct{}
+
+func (noopExpiredTokenCleaner) CleanupExpiredOAuth(_ context.Context) (int64, int64, error) {
+	return 0, 0, nil
 }

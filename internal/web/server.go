@@ -403,6 +403,9 @@ func (s *Server) Handler() http.Handler {
 	// --- SSE Events ---
 	apiMux.HandleFunc("/api/events", sse.Handler(s.sseHub))
 
+	// --- OAuth AuthBroker Callback ---
+	apiMux.HandleFunc("/api/oauth/callback", api.OAuthCallbackHandler(s.cfg, s.log))
+
 	// --- Microsoft Teams Webhook (Chat Adapter) ---
 	apiMux.HandleFunc("/api/teams/messages", func(w http.ResponseWriter, r *http.Request) {
 		ta, ok := s.chatAdapter.(*teams.Adapter)

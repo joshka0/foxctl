@@ -9,7 +9,7 @@ Transform agentctl from a single-process CLI tool into a multi-tenant conversati
 - Plans 01-04b: Complete
 - Plan 04c: In Progress
 - Plan 04d: Complete
-- Plan 05: Deferred
+- Plan 05: In Progress
 - Plan 06: Deferred
 
 ## Dependency Graph
@@ -39,6 +39,7 @@ Transform agentctl from a single-process CLI tool into a multi-tenant conversati
 | [02](02-casbin-authorization.md) | Casbin Authorization Layer | Complete | P1 | 01 |
 | [03](03-river-background-jobs.md) | River Background Jobs | Complete | P1 | 01 |
 | [04](04-turn-serialization-and-distribution.md) | Turn Serialization & Distribution | In Progress (04c); Complete (04a, 04b, 04d) | **P0** (4a) / P2 (4b-d) | 01, 03 |
+| [05](05-oauth-authbroker.md) | OAuth AuthBroker | In Progress | P2 | 01, 03 |
 
 ## What We Explicitly Defer
 
@@ -46,7 +47,6 @@ Transform agentctl from a single-process CLI tool into a multi-tenant conversati
 |-----------|-------------|
 | **Proto.Actor Cluster** | Alpha in Go; Postgres advisory locks + River suffice to ~50 pods |
 | **Temporal Workflows** | River covers 90% of needs; Temporal adds infra ops burden |
-| **OAuth AuthBroker** | Build when user-delegated API calls are needed |
 | **OPA** | Casbin is simpler for embedded authz; OPA is for distributed policy |
 | **Full CQRS/Event Sourcing** | Existing L0/L1/L2 memory layers handle this domain-specifically |
 

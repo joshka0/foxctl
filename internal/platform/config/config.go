@@ -68,6 +68,7 @@ type Config struct {
 	Discord        DiscordSettings   `mapstructure:"discord" json:"discord"`
 	Telegram       TelegramSettings  `mapstructure:"telegram" json:"telegram"`
 	Teams          TeamsSettings     `mapstructure:"teams" json:"teams"`
+	OAuth          OAuthSettings     `mapstructure:"oauth" json:"oauth"`
 }
 
 // DiscordSettings configure the Discord chat adapter.
@@ -180,6 +181,50 @@ func (t TeamsSettings) MarshalJSON() ([]byte, error) {
 	redacted := Alias(t)
 	if redacted.ClientSecret != "" {
 		redacted.ClientSecret = "[REDACTED]"
+	}
+	return json.Marshal(redacted)
+}
+
+// OAuthSettings configures the OAuth AuthBroker.
+type OAuthSettings struct {
+	// EncryptionKey is a base64-encoded 32-byte AES-256-GCM key for encrypting
+	// tokens at rest. Generate with: openssl rand -base64 32
+	EncryptionKey string `mapstructure:"encryption_key" json:"encryption_key"`
+
+	// CallbackBaseURL is the public URL base for OAuth callbacks.
+	// Example: "https://agentctl.example.com"
+	// The callback endpoint will be at {CallbackBaseURL}/api/oauth/callback
+	CallbackBaseURL string `mapstructure:"callback_base_url" json:"callback_base_url"`
+
+	// Microsoft Graph OAuth settings
+	MicrosoftClientID     string `mapstructure:"microsoft_client_id" json:"microsoft_client_id"`
+	MicrosoftClientSecret string `mapstructure:"microsoft_client_secret" json:"microsoft_client_secret"`
+	MicrosoftTenantID     string `mapstructure:"microsoft_tenant_id" json:"microsoft_tenant_id"` // "common" for multi-tenant, specific tenant ID for single
+
+	// Google OAuth settings
+	GoogleClientID     string `mapstructure:"google_client_id" json:"google_client_id"`
+	GoogleClientSecret string `mapstructure:"google_client_secret" json:"google_client_secret"`
+
+	// GitHub OAuth settings
+	GitHubClientID     string `mapstructure:"github_client_id" json:"github_client_id"`
+	GitHubClientSecret string `mapstructure:"github_client_secret" json:"github_client_secret"`
+}
+
+// MarshalJSON implements json.Marshaler to redact secret fields.
+func (o OAuthSettings) MarshalJSON() ([]byte, error) {
+	type Alias OAuthSettings
+	redacted := Alias(o)
+	if redacted.EncryptionKey != "" {
+		redacted.EncryptionKey = "[REDACTED]"
+	}
+	if redacted.MicrosoftClientSecret != "" {
+		redacted.MicrosoftClientSecret = "[REDACTED]"
+	}
+	if redacted.GoogleClientSecret != "" {
+		redacted.GoogleClientSecret = "[REDACTED]"
+	}
+	if redacted.GitHubClientSecret != "" {
+		redacted.GitHubClientSecret = "[REDACTED]"
 	}
 	return json.Marshal(redacted)
 }
@@ -976,6 +1021,38 @@ func finalizeConfig(cfg Config, home string) Config {
 		if b, err := strconv.ParseBool(strings.TrimSpace(v)); err == nil {
 			cfg.Teams.SkipJWTVerify = b
 		}
+	}
+
+	// OAuth AuthBroker
+	if v := os.Getenv("AGENTCTL_OAUTH_ENC_KEY"); v != "" && cfg.OAuth.EncryptionKey == "" {
+		cfg.OAuth.EncryptionKey = v
+	}
+	if v := os.Getenv("AGENTCTL_OAUTH_CALLBACK_URL"); v != "" && cfg.OAuth.CallbackBaseURL == "" {
+		cfg.OAuth.CallbackBaseURL = v
+	}
+	// Microsoft Graph
+	if v := os.Getenv("MICROSOFT_CLIENT_ID"); v != "" && cfg.OAuth.MicrosoftClientID == "" {
+		cfg.OAuth.MicrosoftClientID = v
+	}
+	if v := os.Getenv("MICROSOFT_CLIENT_SECRET"); v != "" && cfg.OAuth.MicrosoftClientSecret == "" {
+		cfg.OAuth.MicrosoftClientSecret = v
+	}
+	if v := os.Getenv("MICROSOFT_TENANT_ID"); v != "" && cfg.OAuth.MicrosoftTenantID == "" {
+		cfg.OAuth.MicrosoftTenantID = v
+	}
+	// Google
+	if v := os.Getenv("GOOGLE_CLIENT_ID"); v != "" && cfg.OAuth.GoogleClientID == "" {
+		cfg.OAuth.GoogleClientID = v
+	}
+	if v := os.Getenv("GOOGLE_CLIENT_SECRET"); v != "" && cfg.OAuth.GoogleClientSecret == "" {
+		cfg.OAuth.GoogleClientSecret = v
+	}
+	// GitHub
+	if v := os.Getenv("GITHUB_CLIENT_ID"); v != "" && cfg.OAuth.GitHubClientID == "" {
+		cfg.OAuth.GitHubClientID = v
+	}
+	if v := os.Getenv("GITHUB_CLIENT_SECRET"); v != "" && cfg.OAuth.GitHubClientSecret == "" {
+		cfg.OAuth.GitHubClientSecret = v
 	}
 
 	return cfg

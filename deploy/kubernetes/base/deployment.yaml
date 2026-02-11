@@ -65,6 +65,12 @@ spec:
             secretKeyRef:
               name: agentctl-secrets
               key: voyage-key
+        - name: AGENTCTL_OAUTH_ENC_KEY
+          valueFrom:
+            secretKeyRef:
+              name: agentctl-secrets
+              key: oauth-enc-key
+              optional: true
 
         # Pod identity for distributed coordination
         - name: POD_NAME
