@@ -143,15 +143,15 @@ const (
 )
 
 func main() {
-	skillmain.Main(commandName, run)
+	skillmain.Main(commandName, skillmain.Chain(run,
+		skillmain.WithTimeout[Input](5*time.Minute),
+		skillmain.WithRecover[Input](),
+	))
 }
 
 func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	// Initialize package logger
 	logger = obs.NewLogger(obs.WithLogCommand(commandName))
-
-	ctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
-	defer cancel()
 
 	if in.SessionID == "" {
 		return skillerr.Arg("session_id is required")

@@ -85,7 +85,15 @@ type LSPClient struct {
 
 // main is the skill entry point for lsp/tsserver with comprehensive TypeScript/JavaScript language server capabilities.
 func main() {
-	skillmain.Main(command, run)
+	skillmain.Main(command, skillmain.Chain(run,
+		skillmain.WithDynamicTimeout[input](func(in input) time.Duration {
+			if in.Timeout > 0 {
+				return time.Duration(in.Timeout) * time.Second
+			}
+			return defaultTimeout
+		}),
+		skillmain.WithRecover[input](),
+	))
 }
 
 // run orchestrates TypeScript/JavaScript language server operations using typescript-language-server with JSON-RPC communication.
@@ -125,14 +133,6 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 			skillerr.WithHint("Install with: npm i -g typescript-language-server"),
 		)
 	}
-
-	// Apply timeout to context
-	timeout := defaultTimeout
-	if in.Timeout > 0 {
-		timeout = time.Duration(in.Timeout) * time.Second
-	}
-	ctx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
 
 	workspace := rc.Workspace
 	out := output{Operation: op}

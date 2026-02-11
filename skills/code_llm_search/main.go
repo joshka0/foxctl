@@ -159,7 +159,15 @@ type RankingProvider interface {
 
 // main is the skill entry point for code/llm_search.
 func main() {
-	skillmain.Main(Command, run)
+	skillmain.Main(Command, skillmain.Chain(run,
+		skillmain.WithDynamicTimeout[Input](func(in Input) time.Duration {
+			if in.Limits.Timeout > 0 {
+				return in.Limits.Timeout
+			}
+			return DefaultTimeout
+		}),
+		skillmain.WithRecover[Input](),
+	))
 }
 
 // detectAvailableProviders returns providers that have API keys configured with priority ordering.
@@ -217,9 +225,6 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	if in.Limits.MaxCandidates <= 0 {
 		in.Limits.MaxCandidates = DefaultMaxCandidates
 	}
-	if in.Limits.Timeout <= 0 {
-		in.Limits.Timeout = DefaultTimeout
-	}
 	// Limit candidates
 	if len(in.Candidates) > in.Limits.MaxCandidates {
 		in.Candidates = in.Candidates[:in.Limits.MaxCandidates]
@@ -244,9 +249,6 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	}
 
 	// Run providers in parallel
-	ctx, cancel := context.WithTimeout(ctx, in.Limits.Timeout)
-	defer cancel()
-
 	var wg sync.WaitGroup
 	providerResults := make(map[string]ProviderResult)
 	var mu sync.Mutex

@@ -49,7 +49,9 @@ type symbol struct {
 
 // main is the skill entry point for code/symbols.
 func main() {
-	skillmain.Main("code/symbols", run)
+	skillmain.Main("code/symbols", skillmain.Chain(run,
+		skillmain.WithRecover[Input](),
+	))
 }
 
 // run orchestrates symbol extraction from files with configurable filtering options.

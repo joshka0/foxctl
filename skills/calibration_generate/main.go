@@ -94,7 +94,10 @@ const (
 
 // main is the skill entry point for calibration/generate.
 func main() {
-	skillmain.Main(command, run)
+	skillmain.Main(command, skillmain.Chain(run,
+		skillmain.WithTimeout[Input](10*time.Minute),
+		skillmain.WithRecover[Input](),
+	))
 }
 
 // run orchestrates user profile calibration through session analysis and LLM signal extraction.
@@ -110,9 +113,6 @@ func main() {
 func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	// Initialize package logger
 	logger = obs.NewLogger(obs.WithLogCommand(command))
-
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Minute)
-	defer cancel()
 
 	// Resolve workspace
 	workspace := workspaceutil.Resolve(in.Workspace, "", rc.Workspace)

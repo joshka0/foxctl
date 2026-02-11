@@ -232,7 +232,10 @@ type TimelineRollup struct {
 
 // main is the skill entry point for code/semantic_search.
 func main() {
-	skillmain.Main(Command, run)
+	skillmain.Main(Command, skillmain.Chain(run,
+		skillmain.WithTimeout[Input](DefaultTotalTimeout),
+		skillmain.WithRecover[Input](),
+	))
 }
 
 // run orchestrates unified semantic search across multiple data sources.
@@ -306,10 +309,6 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 func search(ctx context.Context, rc *skillmain.RunContext, in *Input, voyageKey, geminiKey string) (*Output, error) {
 	logger := rc.Logger
 	cfg := rc.Config
-	// Apply total timeout
-	searchCtx, cancel := context.WithTimeout(ctx, DefaultTotalTimeout)
-	defer cancel()
-
 	out := &Output{
 		Query:   in.Query,
 		Results: []Result{},
@@ -367,7 +366,7 @@ func search(ctx context.Context, rc *skillmain.RunContext, in *Input, voyageKey,
 
 		start := time.Now()
 		var embErr error
-		scopedEmb, embErr = generateScopedEmbeddings(searchCtx, cfg, in.Query, scopeSet, codeModel, memoryModel, textModel, voyageKey, geminiKey)
+		scopedEmb, embErr = generateScopedEmbeddings(ctx, cfg, in.Query, scopeSet, codeModel, memoryModel, textModel, voyageKey, geminiKey)
 		if embErr != nil {
 			out.Stats.Hint = fmt.Sprintf("embedding failed: %v; using BM25-only", embErr)
 		} else {
@@ -410,7 +409,7 @@ func search(ctx context.Context, rc *skillmain.RunContext, in *Input, voyageKey,
 		}
 
 		if len(fileSummaryEmbedding) == 0 && fileSummaryProvider != nil {
-			embedding, err := fileSummaryProvider.Embed(searchCtx, in.Query)
+			embedding, err := fileSummaryProvider.Embed(ctx, in.Query)
 			if err != nil {
 				logger.Debug().Err(err).Msg("file summary embedding failed")
 			} else {
@@ -434,7 +433,7 @@ func search(ctx context.Context, rc *skillmain.RunContext, in *Input, voyageKey,
 		go func() {
 			defer wg.Done()
 			start := time.Now()
-			sourceCtx, sourceCancel := context.WithTimeout(searchCtx, DefaultSourceTimeout)
+			sourceCtx, sourceCancel := context.WithTimeout(ctx, DefaultSourceTimeout)
 			defer sourceCancel()
 
 			results, err := searchSymbolsWithRetrieval(
@@ -462,7 +461,7 @@ func search(ctx context.Context, rc *skillmain.RunContext, in *Input, voyageKey,
 		go func() {
 			defer wg.Done()
 			start := time.Now()
-			sourceCtx, sourceCancel := context.WithTimeout(searchCtx, DefaultSourceTimeout)
+			sourceCtx, sourceCancel := context.WithTimeout(ctx, DefaultSourceTimeout)
 			defer sourceCancel()
 
 			// Session search requires embeddings for vector similarity (uses text model)
@@ -494,7 +493,7 @@ func search(ctx context.Context, rc *skillmain.RunContext, in *Input, voyageKey,
 		go func() {
 			defer wg.Done()
 			start := time.Now()
-			sourceCtx, sourceCancel := context.WithTimeout(searchCtx, DefaultSourceTimeout)
+			sourceCtx, sourceCancel := context.WithTimeout(ctx, DefaultSourceTimeout)
 			defer sourceCancel()
 
 			// Memory search requires embeddings for vector similarity (uses memory model: voyage-3-large)
@@ -526,7 +525,7 @@ func search(ctx context.Context, rc *skillmain.RunContext, in *Input, voyageKey,
 		go func() {
 			defer wg.Done()
 			start := time.Now()
-			sourceCtx, sourceCancel := context.WithTimeout(searchCtx, DefaultSourceTimeout)
+			sourceCtx, sourceCancel := context.WithTimeout(ctx, DefaultSourceTimeout)
 			defer sourceCancel()
 
 			// Task search requires embeddings for vector similarity (uses text model)
@@ -557,7 +556,7 @@ func search(ctx context.Context, rc *skillmain.RunContext, in *Input, voyageKey,
 		go func() {
 			defer wg.Done()
 			start := time.Now()
-			sourceCtx, sourceCancel := context.WithTimeout(searchCtx, DefaultSourceTimeout)
+			sourceCtx, sourceCancel := context.WithTimeout(ctx, DefaultSourceTimeout)
 			defer sourceCancel()
 
 			// Codemap search requires embeddings for vector similarity (uses text model)
@@ -618,10 +617,10 @@ func search(ctx context.Context, rc *skillmain.RunContext, in *Input, voyageKey,
 	fusedResults := reciprocalRankFusion(allResults, in.MinSimilarity)
 
 	// Apply PageRank boost from dependency graph
-	fusedResults = applyPageRankBoost(searchCtx, cfg, workspaceID, fusedResults)
+	fusedResults = applyPageRankBoost(ctx, cfg, workspaceID, fusedResults)
 
 	// Apply reranking if enabled
-	fusedResults, rerankStats := applyReranking(searchCtx, rc, logger, *in, fusedResults)
+	fusedResults, rerankStats := applyReranking(ctx, rc, logger, *in, fusedResults)
 	if rerankStats.enabled {
 		out.Stats.RerankEnabled = true
 		out.Stats.RerankModel = rerankStats.model
@@ -648,7 +647,7 @@ func search(ctx context.Context, rc *skillmain.RunContext, in *Input, voyageKey,
 	}
 
 	// Fetch timelines for session results if requested
-	// Use fresh context to avoid issues with searchCtx timeout/cancellation
+	// Use fresh context to avoid issues with ctx timeout/cancellation
 	if in.Timeline && len(allResults[ScopeSessions]) > 0 {
 		timelineLimit := in.TimelineLimit
 		if timelineLimit <= 0 {

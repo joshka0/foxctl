@@ -94,7 +94,15 @@ type LSPClient struct {
 }
 
 func main() {
-	skillmain.Main(command, run)
+	skillmain.Main(command, skillmain.Chain(run,
+		skillmain.WithDynamicTimeout[input](func(in input) time.Duration {
+			if in.Timeout > 0 {
+				return time.Duration(in.Timeout) * time.Second
+			}
+			return defaultTimeout
+		}),
+		skillmain.WithRecover[input](),
+	))
 }
 
 func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
@@ -120,14 +128,6 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	if err != nil {
 		return err
 	}
-
-	// Apply timeout to context
-	timeout := defaultTimeout
-	if in.Timeout > 0 {
-		timeout = time.Duration(in.Timeout) * time.Second
-	}
-	ctx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
 
 	workspace := rc.Workspace
 	out := output{Operation: op}

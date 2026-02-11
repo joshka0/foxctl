@@ -38,7 +38,10 @@ type ModeValue struct {
 
 // main is the skill entry point for setup/agentctl_mode.
 func main() {
-	skillmain.Main(command, run)
+	skillmain.Main(command, skillmain.Chain(run,
+		skillmain.WithTimeout[Input](5*time.Second),
+		skillmain.WithRecover[Input](),
+	))
 }
 
 // run orchestrates agentctl mode management with get/set operations and workspace resolution.
@@ -66,9 +69,6 @@ func run(ctx context.Context, rc *skillmain.RunContext, input Input) error {
 		agentctlHome = filepath.Join(home, ".agentctl")
 	}
 	dbPath := filepath.Join(agentctlHome, "storage", "tasks.db")
-
-	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
 
 	db, err := sql.Open("sqlite", dbPath)
 	if err != nil {

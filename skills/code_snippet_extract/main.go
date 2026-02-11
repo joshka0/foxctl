@@ -165,7 +165,9 @@ type Input struct {
 
 // main is the skill entry point for code/snippet_extract.
 func main() {
-	skillmain.Main(Command, run)
+	skillmain.Main(Command, skillmain.Chain(run,
+		skillmain.WithRecover[Input](),
+	))
 }
 
 // run orchestrates code snippet extraction from candidate files with question-aware matching.

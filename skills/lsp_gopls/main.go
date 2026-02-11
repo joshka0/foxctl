@@ -130,7 +130,15 @@ type output struct {
 
 // main is the skill entry point for lsp/gopls with comprehensive Go language server capabilities.
 func main() {
-	skillmain.Main("lsp/gopls", run)
+	skillmain.Main("lsp/gopls", skillmain.Chain(run,
+		skillmain.WithDynamicTimeout[Input](func(in Input) time.Duration {
+			if in.Timeout > 0 {
+				return time.Duration(in.Timeout) * time.Second
+			}
+			return defaultTimeout
+		}),
+		skillmain.WithRecover[Input](),
+	))
 }
 
 // run orchestrates Go language server operations using either persistent daemon or CLI mode with fallback.
@@ -146,14 +154,6 @@ func main() {
 func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	// Apply defaults and normalize LSP-style parameters
 	normalizeInput(&in)
-
-	// Apply timeout to context
-	timeout := defaultTimeout
-	if in.Timeout > 0 {
-		timeout = time.Duration(in.Timeout) * time.Second
-	}
-	ctx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
 
 	workspace := rc.PathValidator.Workspace()
 

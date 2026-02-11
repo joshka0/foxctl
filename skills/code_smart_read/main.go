@@ -102,7 +102,10 @@ type Stats struct {
 
 // main is the skill entry point for code/smart_read.
 func main() {
-	skillmain.Main(command, run)
+	skillmain.Main(command, skillmain.Chain(run,
+		skillmain.WithTimeout[Input](DefaultTimeout),
+		skillmain.WithRecover[Input](),
+	))
 }
 
 // run orchestrates intelligent file reading with auto-selection and context extraction.
@@ -139,9 +142,6 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 
 	// Map mode to RenderMode
 	renderMode := mapMode(in.Mode)
-
-	ctx, cancel := context.WithTimeout(ctx, DefaultTimeout)
-	defer cancel()
 
 	out := &Output{
 		Stats: Stats{

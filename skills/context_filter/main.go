@@ -114,7 +114,9 @@ func debugf(logger zerolog.Logger, format string, args ...any) {
 
 // main is the skill entry point for context/filter.
 func main() {
-	skillmain.Main(command, run)
+	skillmain.Main(command, skillmain.Chain(run,
+		skillmain.WithRecover[input](),
+	))
 }
 
 // run orchestrates intelligent context chunk selection using LLM assistance.

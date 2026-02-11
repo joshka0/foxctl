@@ -34,7 +34,9 @@ type input struct {
 
 // main is the skill entry point for codemap/generate.
 func main() {
-	skillmain.Main(command, run)
+	skillmain.Main(command, skillmain.Chain(run,
+		skillmain.WithRecover[input](),
+	))
 }
 
 // run orchestrates codemap generation using the codemap agent with optional embedding storage.

@@ -138,7 +138,9 @@ const command = "session/restore"
 // main is the skill entry point for session/restore with context reconstruction capabilities.
 func main() {
 	config.LoadDotEnv()
-	skillmain.Main(command, run)
+	skillmain.Main(command, skillmain.Chain(run,
+		skillmain.WithRecover[Input](),
+	))
 }
 
 // run orchestrates session restoration with semantic search, memory retrieval, and context injection.

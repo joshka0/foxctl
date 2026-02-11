@@ -149,7 +149,10 @@ type Stats struct {
 
 // main is the skill entry point for code/counsel.
 func main() {
-	skillmain.Main(command, run)
+	skillmain.Main(command, skillmain.Chain(run,
+		skillmain.WithTimeout[Input](DefaultTimeout),
+		skillmain.WithRecover[Input](),
+	))
 }
 
 // run orchestrates multi-perspective code analysis using LLMs with evidence gathering and secret detection.
@@ -177,9 +180,6 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	if len(in.Perspectives) == 0 {
 		in.Perspectives = []string{PerspectiveGeneral}
 	}
-
-	ctx, cancel := context.WithTimeout(ctx, DefaultTimeout)
-	defer cancel()
 
 	out := &Output{
 		Analyses: []PerspectiveAnalysis{},

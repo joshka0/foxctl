@@ -137,7 +137,9 @@ type metricsOut struct {
 
 // main is the skill entry point for verification/cove_verify.
 func main() {
-	skillmain.Main(command, run)
+	skillmain.Main(command, skillmain.Chain(run,
+		skillmain.WithRecover[input](),
+	))
 }
 
 // run orchestrates claim verification using the CoVE (Chain of Verification) method.

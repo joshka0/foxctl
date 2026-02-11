@@ -69,7 +69,9 @@ type QueueSnapshot struct {
 
 // main is the skill entry point for summary/worker with queue processing capabilities.
 func main() {
-	skillmain.Main(command, run)
+	skillmain.Main(command, skillmain.Chain(run,
+		skillmain.WithRecover[Input](),
+	))
 }
 
 // run orchestrates summary queue processing with batch management, timeout handling, and error recovery.

@@ -85,7 +85,10 @@ type StoredTrace struct {
 
 // main is the skill entry point for codemap/get.
 func main() {
-	skillmain.Main(command, run)
+	skillmain.Main(command, skillmain.Chain(run,
+		skillmain.WithTimeout[Input](DefaultTimeout),
+		skillmain.WithRecover[Input](),
+	))
 }
 
 // run retrieves a codemap by ID with configurable trace inclusion and content limits.
@@ -107,9 +110,6 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 		defaultTrue := true
 		in.IncludeTraces = &defaultTrue
 	}
-
-	ctx, cancel := context.WithTimeout(ctx, DefaultTimeout)
-	defer cancel()
 
 	start := time.Now()
 	out := &Output{

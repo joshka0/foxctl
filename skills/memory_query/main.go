@@ -80,7 +80,10 @@ type QueryStats struct {
 
 // main is the skill entry point for memory/query with filtered memory access capabilities.
 func main() {
-	skillmain.Main("memory/query", run)
+	skillmain.Main("memory/query", skillmain.Chain(run,
+		skillmain.WithTimeout[Input](DefaultTimeout),
+		skillmain.WithRecover[Input](),
+	))
 }
 
 // run orchestrates memory query operations with validation, normalization, and result formatting.
@@ -127,9 +130,6 @@ func normalizeInput(in *Input, rc *skillmain.RunContext) {
 
 // query executes memory search with filtering, vector search fallback, and result pagination.
 func query(ctx context.Context, rc *skillmain.RunContext, in *Input) (*Output, error) {
-	ctx, cancel := context.WithTimeout(ctx, DefaultTimeout)
-	defer cancel()
-
 	start := time.Now()
 	out := &Output{
 		Memories: []MemoryResult{},

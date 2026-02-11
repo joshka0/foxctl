@@ -298,7 +298,10 @@ type LLMProvider = llmproviders.Provider
 
 // main is the skill entry point for session/summarize with multi-mode summarization capabilities.
 func main() {
-	skillmain.Main(command, run)
+	skillmain.Main(command, skillmain.Chain(run,
+		skillmain.WithTimeout[Input](5*time.Minute),
+		skillmain.WithRecover[Input](),
+	))
 }
 
 // run orchestrates session summarization with multiple modes, deduplication, and embedding generation.
@@ -312,10 +315,6 @@ func main() {
 // - Related: persistSessionLearnings, filterJSONL, summarizeWithFallback, buildSeedPrompt, reembedAll
 // - Keywords: session/summarize, session_summary, llm_summarization, deduplication, embeddings, cost_tracking
 func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
-	// Apply timeout
-	ctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
-	defer cancel()
-
 	// Initialize package logger
 	logger = obs.NewLogger(
 		obs.WithLogCommand("session/summarize"),
