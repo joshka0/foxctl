@@ -2,6 +2,7 @@ package companion
 
 import "testing"
 
+// TestStripThinkTags verifies <think> blocks are removed from model output.
 func TestStripThinkTags(t *testing.T) {
 	tests := []struct {
 		name  string

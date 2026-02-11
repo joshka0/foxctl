@@ -14,6 +14,7 @@ import (
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 
 	"github.com/jkatigb/agentctl/internal/chatadapter"
+	"github.com/jkatigb/agentctl/internal/domain/identity"
 	"github.com/jkatigb/agentctl/internal/observability"
 	"github.com/jkatigb/agentctl/internal/platform/config"
 	"github.com/jkatigb/agentctl/internal/web/sse"
@@ -399,6 +400,12 @@ func (a *Adapter) dispatchMessage(m *tgbotapi.Message, chatKey string, content s
 		Username: displayName(m.From),
 	}
 
+	principal := identity.Principal{
+		UserID:   strconv.FormatInt(m.From.ID, 10),
+		Username: displayName(m.From),
+		Platform: "telegram",
+	}
+
 	respond := func(content string, _ []chatadapter.Embed) (chatadapter.MessageRef, error) {
 		sentID, err := a.sendMessage(m.Chat.ID, m.MessageID, content, nil)
 		if err != nil {
@@ -423,6 +430,7 @@ func (a *Adapter) dispatchMessage(m *tgbotapi.Message, chatKey string, content s
 	}
 
 	evt := chatadapter.NewMessageEvent(content, user, chatKey, "", strconv.Itoa(m.MessageID), respond, edit)
+	evt.Principal = principal
 
 	a.dispatchWithLimit("telegram.message", m.Chat.ID, func(ctx context.Context) error {
 		return handler(ctx, evt)

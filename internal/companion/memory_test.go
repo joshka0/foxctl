@@ -12,6 +12,7 @@ import (
 	_ "modernc.org/sqlite"
 )
 
+// TestTrimTurnsToTokenBudget verifies trimming preserves the most recent turns within a budget.
 func TestTrimTurnsToTokenBudget(t *testing.T) {
 	turns := []ConversationTurn{
 		{Content: "first", TokenCount: 4},
@@ -28,6 +29,7 @@ func TestTrimTurnsToTokenBudget(t *testing.T) {
 	}
 }
 
+// TestApplyTotalTokenBudgetPrefersRecent verifies budget allocation drops older history before newer content.
 func TestApplyTotalTokenBudgetPrefersRecent(t *testing.T) {
 	history := strings.Repeat("h", 40) // 10 tokens
 	summary := strings.Repeat("s", 40) // 10 tokens
@@ -51,6 +53,7 @@ func TestApplyTotalTokenBudgetPrefersRecent(t *testing.T) {
 	}
 }
 
+// TestTrimToTokenBudgetUTF8 verifies trimming does not split UTF-8 runes.
 func TestTrimToTokenBudgetUTF8(t *testing.T) {
 	text := strings.Repeat("你好", 10)
 
@@ -65,6 +68,7 @@ func TestTrimToTokenBudgetUTF8(t *testing.T) {
 	}
 }
 
+// TestGetContextIncludesHistoryWithoutRelationshipNote verifies history renders without requiring a relationship note.
 func TestGetContextIncludesHistoryWithoutRelationshipNote(t *testing.T) {
 	ctx := context.Background()
 	db, err := sql.Open("sqlite", ":memory:")

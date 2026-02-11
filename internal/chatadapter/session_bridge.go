@@ -7,6 +7,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/jkatigb/agentctl/internal/companion"
+	"github.com/jkatigb/agentctl/internal/domain/identity"
 	"github.com/jkatigb/agentctl/internal/observability"
 	"github.com/jkatigb/agentctl/internal/web/consolews"
 )
@@ -43,21 +45,26 @@ type SessionBridge struct {
 	cfg        SessionBridgeConfig
 	clock      Clock
 
+	turnLock companion.Locker
+
 	channelSessions sync.Map // channelKey -> sessionID (string)
-	activeRequests  sync.Map // channelKey -> context.CancelFunc
 }
 
-// NewSessionBridge creates a SessionBridge wired to the given console hub and typing adapter.
-func NewSessionBridge(hub *consolews.Hub, typing TypingIndicator, cfg SessionBridgeConfig) *SessionBridge {
+// NewSessionBridge creates a SessionBridge wired to the given console hub, typing adapter, and turn locker.
+func NewSessionBridge(hub *consolews.Hub, typing TypingIndicator, cfg SessionBridgeConfig, turnLock companion.Locker) *SessionBridge {
 	clk := cfg.Clock
 	if clk == nil {
 		clk = realClock{}
+	}
+	if turnLock == nil {
+		turnLock = companion.NewTurnLock()
 	}
 	return &SessionBridge{
 		consoleHub: hub,
 		typing:     typing,
 		cfg:        cfg,
 		clock:      clk,
+		turnLock:   turnLock,
 	}
 }
 
@@ -67,30 +74,37 @@ func (sb *SessionBridge) HandleMessage(ctx context.Context, evt MessageEvent) er
 		ctx = context.Background()
 	}
 
+	principal := evt.Principal
+	if strings.TrimSpace(principal.Platform) == "" {
+		// Fallback for tests or callers that didn't populate Principal yet.
+		platform := strings.TrimSpace(sb.cfg.PlatformName)
+		if platform == "" {
+			platform = "chat"
+		}
+		principal.Platform = platform
+	}
+	ctx = identity.WithPrincipal(ctx, principal)
+	channelKey := principal.ConversationKey(evt.ChannelID)
+
+	unlock, err := sb.turnLock.Lock(ctx, channelKey)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+
 	if sb.typing != nil {
 		sb.typing.ShowTyping(ctx, evt.ChannelID)
 	}
 
-	session, err := sb.GetOrCreateSession(ctx, evt.ChannelID)
+	session, err := sb.GetOrCreateSession(ctx, channelKey)
 	if err != nil {
 		_, _ = evt.Respond("Failed to create chat session.", nil)
 		return err
 	}
 
-	// Cancel any previous in-flight request for this channel key.
-	if v, ok := sb.activeRequests.LoadAndDelete(evt.ChannelID); ok {
-		if cancelFn, ok := v.(context.CancelFunc); ok && cancelFn != nil {
-			cancelFn()
-		}
-	}
-
 	// Create cancellable context for this request.
 	reqCtx, reqCancel := context.WithCancel(ctx)
-	sb.activeRequests.Store(evt.ChannelID, reqCancel)
-	defer func() {
-		sb.activeRequests.Delete(evt.ChannelID)
-		reqCancel()
-	}()
+	defer reqCancel()
 
 	// Post initial "Thinking..." message.
 	ref, err := evt.Respond("Thinking...", nil)

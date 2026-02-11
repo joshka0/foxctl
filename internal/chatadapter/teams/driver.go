@@ -12,10 +12,19 @@ import (
 	"time"
 
 	"github.com/jkatigb/agentctl/internal/chatadapter"
+	"github.com/jkatigb/agentctl/internal/domain/identity"
 	"github.com/jkatigb/agentctl/internal/observability"
 	"github.com/jkatigb/agentctl/internal/platform/config"
 	"github.com/jkatigb/agentctl/internal/web/sse"
 )
+
+// serviceURLEntry holds the normalized service URL together with the raw
+// (platform-native) conversation ID so that outbound Bot Framework API calls
+// can use the raw ID while the map key uses a tenant-scoped ConversationKey.
+type serviceURLEntry struct {
+	url       string // normalized service URL
+	rawConvID string // platform-native conversation ID (not tenant-scoped)
+}
 
 // Adapter implements chatadapter.ChatAdapter for Microsoft Teams (Bot Framework webhook).
 type Adapter struct {
@@ -33,7 +42,7 @@ type Adapter struct {
 
 	sseHub *sse.Hub
 
-	// conversationID -> normalized service URL
+	// convKey (tenant-scoped) -> serviceURLEntry
 	serviceURLs sync.Map
 
 	msgSem chan struct{}
@@ -144,6 +153,7 @@ func (a *Adapter) Disconnect(ctx context.Context) error {
 func (a *Adapter) RegisterCommands(_ context.Context, _ []chatadapter.CommandDef) error { return nil }
 
 // ShowTyping sends a typing indicator to a conversation (best-effort).
+// channelID is the tenant-scoped conversation key (as stored in serviceURLs).
 func (a *Adapter) ShowTyping(ctx context.Context, channelID string) {
 	if a.botClient == nil {
 		return
@@ -152,15 +162,17 @@ func (a *Adapter) ShowTyping(ctx context.Context, channelID string) {
 	if !ok {
 		return
 	}
-	svcURL, ok := v.(string)
-	if !ok || strings.TrimSpace(svcURL) == "" {
+	entry, ok := v.(serviceURLEntry)
+	if !ok || strings.TrimSpace(entry.url) == "" {
 		return
 	}
 
 	typingCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
 
-	_ = a.botClient.SendTyping(typingCtx, svcURL, channelID)
+	// SendTyping requires the raw (platform-native) conversation ID for the
+	// Bot Framework API URL, not the tenant-scoped key.
+	_ = a.botClient.SendTyping(typingCtx, entry.url, entry.rawConvID)
 }
 
 // HTTPHandler returns the webhook handler for incoming Bot Framework activities.
@@ -214,7 +226,34 @@ func (a *Adapter) HTTPHandler() http.HandlerFunc {
 				Error(err, 0))
 			return
 		}
-		a.serviceURLs.Store(convID, serviceURL)
+
+		// Construct Principal early so the tenant-scoped conversation key
+		// is available before any map stores or gating checks. This prevents
+		// two tenants with colliding raw conversation IDs from overwriting
+		// each other's service URL.
+		tenantID := extractTenantID(activity, a.cfg.TenantID)
+		if tenantID == "" {
+			// Not fatal: single-tenant deployments may not have tenant IDs. This can cause
+			// cross-tenant collisions if multiple tenants share conversation IDs.
+			observability.Emit(r.Context(), observability.NewEvent("teams.missing_tenant_id").
+				WithComponent("teams").
+				WithData("conversation_id", convID).
+				WithData("from_id", strings.TrimSpace(activity.From.ID)).
+				WithData("warning", "missing tenant id; conversation key will be unscoped").
+				Success(0))
+		}
+		principal := identity.Principal{
+			TenantID: tenantID,
+			UserID:   strings.TrimSpace(activity.From.ID),
+			Username: strings.TrimSpace(activity.From.Name),
+			Platform: "teams",
+		}
+		convKey := principal.ConversationKey(convID)
+
+		a.serviceURLs.Store(convKey, serviceURLEntry{
+			url:       serviceURL,
+			rawConvID: convID,
+		})
 
 		// Ignore self-messages.
 		if strings.TrimSpace(activity.From.ID) != "" && strings.TrimSpace(activity.From.ID) == strings.TrimSpace(activity.Recipient.ID) {
@@ -228,6 +267,8 @@ func (a *Adapter) HTTPHandler() http.HandlerFunc {
 			return
 		}
 
+		// The allowlist in config uses raw (platform-native) conversation IDs,
+		// so we check against the raw convID here.
 		allowlisted := a.isChatConversation(convID)
 		isOneToOne := !activity.Conversation.IsGroup
 		mentioned := isBotMentioned(activity)
@@ -252,19 +293,41 @@ func (a *Adapter) HTTPHandler() http.HandlerFunc {
 		if a.botClient == nil {
 			observability.Emit(r.Context(), observability.NewEvent("teams.webhook_uninitialized").
 				WithComponent("teams").
-				WithData("conversation_id", convID).
+				WithData("conversation_id", convKey).
 				Error(fmt.Errorf("botClient is nil; Connect() not called"), 0))
 			return
 		}
 
-		a.dispatchWithLimit(a.ctx, "teams.message", convID, func(ctx context.Context) error {
+		a.dispatchWithLimit(a.ctx, "teams.message", convKey, func(ctx context.Context) error {
 			// Text commands: "/cmd args"
 			if cmd, args, ok := parseTextCommand(text); ok {
-				return a.handleCommand(ctx, serviceURL, activity, cmd, args)
+				return a.handleCommand(ctx, serviceURL, activity, principal, convKey, cmd, args)
 			}
-			return a.handleMessage(ctx, serviceURL, activity, text)
+			return a.handleMessage(ctx, serviceURL, activity, principal, convKey, text)
 		})
 	}
+}
+
+func extractTenantID(activity Activity, cfgTenantID string) string {
+	if tid := strings.TrimSpace(activity.Conversation.TenantID); tid != "" {
+		return tid
+	}
+
+	// Teams sends channelData.tenant.id in all contexts (conversation.tenantId may be absent).
+	if len(activity.ChannelData) > 0 {
+		var cd struct {
+			Tenant struct {
+				ID string `json:"id"`
+			} `json:"tenant"`
+		}
+		if err := json.Unmarshal(activity.ChannelData, &cd); err == nil {
+			if tid := strings.TrimSpace(cd.Tenant.ID); tid != "" {
+				return tid
+			}
+		}
+	}
+
+	return strings.TrimSpace(cfgTenantID)
 }
 
 func (a *Adapter) dispatchWithLimit(ctx context.Context, op string, conversationID string, fn func(ctx context.Context) error) {
@@ -302,7 +365,7 @@ func (a *Adapter) dispatchWithLimit(ctx context.Context, op string, conversation
 	}
 }
 
-func (a *Adapter) handleCommand(ctx context.Context, serviceURL string, activity Activity, cmd string, args string) error {
+func (a *Adapter) handleCommand(ctx context.Context, serviceURL string, activity Activity, principal identity.Principal, convKey string, cmd string, args string) error {
 	a.mu.Lock()
 	handler := a.cmdHandler
 	a.mu.Unlock()
@@ -310,14 +373,15 @@ func (a *Adapter) handleCommand(ctx context.Context, serviceURL string, activity
 		return nil
 	}
 
-	convID := strings.TrimSpace(activity.Conversation.ID)
-	if convID == "" {
+	// Raw conversation ID for Bot Framework API calls.
+	rawConvID := strings.TrimSpace(activity.Conversation.ID)
+	if rawConvID == "" {
 		return fmt.Errorf("teams: missing conversation id")
 	}
 
 	user := chatadapter.UserRef{
-		ID:       strings.TrimSpace(activity.From.ID),
-		Username: strings.TrimSpace(activity.From.Name),
+		ID:       principal.UserID,
+		Username: principal.Username,
 	}
 	if user.Username == "" {
 		user.Username = user.ID
@@ -330,19 +394,22 @@ func (a *Adapter) handleCommand(ctx context.Context, serviceURL string, activity
 		out := Activity{Type: "message", Text: content}
 		replyTo := strings.TrimSpace(activity.ID)
 		if replyTo != "" {
-			_, err := a.botClient.ReplyToActivity(ctx, serviceURL, convID, replyTo, out)
+			_, err := a.botClient.ReplyToActivity(ctx, serviceURL, rawConvID, replyTo, out)
 			return err
 		}
-		_, err := a.botClient.SendActivity(ctx, serviceURL, convID, out)
+		_, err := a.botClient.SendActivity(ctx, serviceURL, rawConvID, out)
 		return err
 	}
 
 	opts := parseCommandOptions(cmd, args)
-	evt := chatadapter.NewCommandEvent(cmd, opts, user, convID, "", respond)
+	// Use convKey (tenant-scoped) as the event's ChannelID for consistent
+	// session bridging and serviceURLs lookups.
+	evt := chatadapter.NewCommandEvent(cmd, opts, user, convKey, "", respond)
+	evt.Principal = principal
 	return handler(ctx, evt)
 }
 
-func (a *Adapter) handleMessage(ctx context.Context, serviceURL string, activity Activity, content string) error {
+func (a *Adapter) handleMessage(ctx context.Context, serviceURL string, activity Activity, principal identity.Principal, convKey string, content string) error {
 	a.mu.Lock()
 	handler := a.msgHandler
 	a.mu.Unlock()
@@ -350,14 +417,15 @@ func (a *Adapter) handleMessage(ctx context.Context, serviceURL string, activity
 		return nil
 	}
 
-	convID := strings.TrimSpace(activity.Conversation.ID)
-	if convID == "" {
+	// Raw conversation ID for Bot Framework API calls.
+	rawConvID := strings.TrimSpace(activity.Conversation.ID)
+	if rawConvID == "" {
 		return fmt.Errorf("teams: missing conversation id")
 	}
 
 	user := chatadapter.UserRef{
-		ID:       strings.TrimSpace(activity.From.ID),
-		Username: strings.TrimSpace(activity.From.Name),
+		ID:       principal.UserID,
+		Username: principal.Username,
 	}
 	if user.Username == "" {
 		user.Username = user.ID
@@ -369,21 +437,25 @@ func (a *Adapter) handleMessage(ctx context.Context, serviceURL string, activity
 		var rr ResourceResponse
 		var err error
 		if replyTo != "" {
-			rr, err = a.botClient.ReplyToActivity(ctx, serviceURL, convID, replyTo, out)
+			rr, err = a.botClient.ReplyToActivity(ctx, serviceURL, rawConvID, replyTo, out)
 		} else {
-			rr, err = a.botClient.SendActivity(ctx, serviceURL, convID, out)
+			rr, err = a.botClient.SendActivity(ctx, serviceURL, rawConvID, out)
 		}
 		if err != nil {
 			return chatadapter.MessageRef{}, err
 		}
-		return chatadapter.MessageRef{ChannelID: convID, MessageID: rr.ID}, nil
+		// MessageRef uses convKey for consistent lookups.
+		return chatadapter.MessageRef{ChannelID: convKey, MessageID: rr.ID}, nil
 	}
 
 	edit := func(ref chatadapter.MessageRef, content string, _ []chatadapter.Embed) error {
-		return a.botClient.UpdateActivity(ctx, serviceURL, convID, ref.MessageID, Activity{Type: "message", Text: content})
+		return a.botClient.UpdateActivity(ctx, serviceURL, rawConvID, ref.MessageID, Activity{Type: "message", Text: content})
 	}
 
-	evt := chatadapter.NewMessageEvent(content, user, convID, "", strings.TrimSpace(activity.ID), respond, edit)
+	// Use convKey (tenant-scoped) as the event's ChannelID for consistent
+	// session bridging and serviceURLs lookups.
+	evt := chatadapter.NewMessageEvent(content, user, convKey, "", strings.TrimSpace(activity.ID), respond, edit)
+	evt.Principal = principal
 	return handler(ctx, evt)
 }
 

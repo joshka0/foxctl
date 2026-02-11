@@ -62,7 +62,7 @@ func CompanionProvidersHandler(cfg config.Config, log zerolog.Logger) http.Handl
 // The handler validates the request JSON (requiring conversation_id and message), opens the context store and companion memory DB,
 // constructs a companion service with memory enabled, invokes the chat operation, and writes the chat response as JSON.
 // On invalid input it responds 400, on method mismatch 405, and on internal failures 500.
-func CompanionChatHandler(cfg config.Config, log zerolog.Logger) http.HandlerFunc {
+func CompanionChatHandler(cfg config.Config, log zerolog.Logger, turnLock companion.Locker) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			httpError(w, http.StatusMethodNotAllowed, "method not allowed")
@@ -189,6 +189,8 @@ func CompanionChatHandler(cfg config.Config, log zerolog.Logger) http.HandlerFun
 		}
 
 		// Create service with memory enabled and LLM credentials.
+		// The shared turnLock ensures per-conversation mutual exclusion
+		// across all HTTP requests (not just within a single Service instance).
 		svc := companion.NewService(store, companion.ServiceConfig{
 			Logger:      log,
 			MemoryDB:    memoryDB,
@@ -196,7 +198,7 @@ func CompanionChatHandler(cfg config.Config, log zerolog.Logger) http.HandlerFun
 			LLMAPIKey:   llmAPIKey,
 			LLMModel:    llmModel,
 			ToolsAllow:  settings.ToolsAllow,
-		})
+		}, turnLock)
 
 		// Execute chat
 		resp, err := svc.Chat(r.Context(), req)
@@ -248,7 +250,7 @@ func CompanionContextSetHandler(cfg config.Config, log zerolog.Logger) http.Hand
 		// Create service
 		svc := companion.NewService(store, companion.ServiceConfig{
 			Logger: log,
-		})
+		}, nil)
 
 		// Set context
 		resp, err := svc.SetContext(r.Context(), req)
@@ -293,7 +295,7 @@ func CompanionContextGetHandler(cfg config.Config, log zerolog.Logger) http.Hand
 		// Create service
 		svc := companion.NewService(store, companion.ServiceConfig{
 			Logger: log,
-		})
+		}, nil)
 
 		// Get context
 		resp, err := svc.GetContext(r.Context(), conversationID)
@@ -345,7 +347,7 @@ func CompanionContextDeleteHandler(cfg config.Config, log zerolog.Logger) http.H
 		// Create service
 		svc := companion.NewService(store, companion.ServiceConfig{
 			Logger: log,
-		})
+		}, nil)
 
 		// Delete context
 		err = svc.DeleteContext(r.Context(), conversationID, key, scope)
@@ -407,7 +409,7 @@ func CompanionContextClearHandler(cfg config.Config, log zerolog.Logger) http.Ha
 		// Create service
 		svc := companion.NewService(store, companion.ServiceConfig{
 			Logger: log,
-		})
+		}, nil)
 
 		// Clear conversation
 		count, err := svc.ClearConversation(r.Context(), conversationID)
@@ -464,7 +466,7 @@ func CompanionConversationsHandler(cfg config.Config, log zerolog.Logger) http.H
 		svc := companion.NewService(store, companion.ServiceConfig{
 			Logger:   log,
 			MemoryDB: memoryDB,
-		})
+		}, nil)
 
 		// List conversations
 		conversations, err := svc.ListConversations(r.Context(), limit)
@@ -532,7 +534,7 @@ func CompanionConversationMessagesHandler(cfg config.Config, log zerolog.Logger)
 		svc := companion.NewService(store, companion.ServiceConfig{
 			Logger:   log,
 			MemoryDB: memoryDB,
-		})
+		}, nil)
 
 		// Get messages
 		messages, err := svc.GetConversationMessages(r.Context(), conversationID, limit)
@@ -628,7 +630,7 @@ func CompanionConversationCompressHandler(cfg config.Config, log zerolog.Logger)
 			LLMProvider: llmProvider,
 			LLMAPIKey:   llmAPIKey,
 			LLMModel:    llmModel,
-		})
+		}, nil)
 		if svc.Memory() == nil {
 			httpError(w, http.StatusInternalServerError, "memory features not enabled")
 			return
@@ -696,7 +698,7 @@ func CompanionMessageDeleteHandler(cfg config.Config, log zerolog.Logger) http.H
 		svc := companion.NewService(store, companion.ServiceConfig{
 			Logger:   log,
 			MemoryDB: memoryDB,
-		})
+		}, nil)
 
 		// Delete message
 		err = svc.DeleteMessage(r.Context(), conversationID, messageID)
@@ -760,7 +762,7 @@ func CompanionConversationDeleteHandler(cfg config.Config, log zerolog.Logger) h
 		svc := companion.NewService(store, companion.ServiceConfig{
 			Logger:   log,
 			MemoryDB: memoryDB,
-		})
+		}, nil)
 
 		// Soft delete conversation
 		err = svc.SoftDeleteConversation(r.Context(), conversationID)
@@ -826,7 +828,7 @@ func CompanionConversationRenameHandler(cfg config.Config, log zerolog.Logger) h
 		svc := companion.NewService(store, companion.ServiceConfig{
 			Logger:   log,
 			MemoryDB: memoryDB,
-		})
+		}, nil)
 
 		// Rename conversation
 		err = svc.RenameConversation(r.Context(), conversationID, req.Title)
@@ -841,9 +843,9 @@ func CompanionConversationRenameHandler(cfg config.Config, log zerolog.Logger) h
 			if linkErr := svc.LinkConversationAgent(r.Context(), conversationID, *req.AgentID); linkErr != nil {
 				log.Error().Err(linkErr).Str("conversation_id", conversationID).Str("agent_id", *req.AgentID).Msg("link conversation agent failed (rename succeeded)")
 				writeJSON(w, http.StatusOK, map[string]any{
-					"ok":       true,
-					"message":  "conversation renamed, but agent linking failed",
-					"agent_id": *req.AgentID,
+					"ok":         true,
+					"message":    "conversation renamed, but agent linking failed",
+					"agent_id":   *req.AgentID,
 					"link_error": linkErr.Error(),
 				})
 				return
@@ -896,7 +898,7 @@ func CompanionMemoryStatsHandler(cfg config.Config, log zerolog.Logger) http.Han
 		svc := companion.NewService(store, companion.ServiceConfig{
 			Logger:   log,
 			MemoryDB: memoryDB,
-		})
+		}, nil)
 
 		// Get stats
 		stats, err := svc.GetMemoryStats(r.Context(), conversationID)
@@ -955,7 +957,7 @@ func CompanionMemoryContextHandler(cfg config.Config, log zerolog.Logger) http.H
 		svc := companion.NewService(store, companion.ServiceConfig{
 			Logger:   log,
 			MemoryDB: memoryDB,
-		})
+		}, nil)
 
 		// Get context
 		context, err := svc.GetMemoryContext(r.Context(), conversationID)
@@ -1013,7 +1015,7 @@ func CompanionMemoryClearHandler(cfg config.Config, log zerolog.Logger) http.Han
 		svc := companion.NewService(store, companion.ServiceConfig{
 			Logger:   log,
 			MemoryDB: memoryDB,
-		})
+		}, nil)
 
 		// Clear memory
 		err = svc.ClearMemory(r.Context(), conversationID)
@@ -1070,7 +1072,7 @@ func CompanionPersonalityHandler(cfg config.Config, log zerolog.Logger) http.Han
 		svc := companion.NewService(store, companion.ServiceConfig{
 			Logger:   log,
 			MemoryDB: memoryDB,
-		})
+		}, nil)
 
 		// Get personality info
 		info, err := svc.GetPersonalityInfo(r.Context(), conversationID)
@@ -1131,7 +1133,7 @@ func CompanionPersonalityDimensionPatchHandler(cfg config.Config, log zerolog.Lo
 		// Create companion service
 		svc := companion.NewService(store, companion.ServiceConfig{
 			Logger: log,
-		})
+		}, nil)
 
 		// Update the dimension
 		if err := svc.UpdatePersonalityDimension(r.Context(), conversationID, req.Name, req.Value); err != nil {

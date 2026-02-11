@@ -1,10 +1,12 @@
 package teams
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
-	"net/http/httptest"
+	"strconv"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -15,20 +17,30 @@ func TestTokenManager_CachesAndRefreshes(t *testing.T) {
 
 	var reqCount atomic.Int64
 
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		reqCount.Add(1)
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"access_token": "tok-" + time.Now().Format("150405.000"),
-			"expires_in":   3600,
-			"token_type":   "Bearer",
-		})
-	}))
-	t.Cleanup(srv.Close)
+	client := &http.Client{
+		Transport: roundTripperFunc(func(r *http.Request) (*http.Response, error) {
+			n := reqCount.Add(1)
+			buf := bytes.NewBuffer(nil)
+			_ = json.NewEncoder(buf).Encode(map[string]any{
+				"access_token": "tok-" + strconv.FormatInt(n, 10),
+				"expires_in":   3600,
+				"token_type":   "Bearer",
+			})
+			h := make(http.Header)
+			h.Set("Content-Type", "application/json")
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Status:     "200 OK",
+				Header:     h,
+				Body:       io.NopCloser(bytes.NewReader(buf.Bytes())),
+				Request:    r,
+			}, nil
+		}),
+	}
 
 	now := time.Date(2026, 2, 9, 12, 0, 0, 0, time.UTC)
-	m := newTokenManager("cid", "secret", srv.Client())
-	m.tokenURL = srv.URL
+	m := newTokenManager("cid", "secret", client)
+	m.tokenURL = "https://token.invalid"
 	m.now = func() time.Time { return now }
 
 	tok1, err := m.Token(context.Background())

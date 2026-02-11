@@ -794,7 +794,7 @@ func handleAgentAsk(w http.ResponseWriter, r *http.Request, cfg config.Config, l
 		LLMProvider: llmProvider,
 		LLMAPIKey:   llmAPIKey,
 		LLMModel:    llmModel,
-	})
+	}, nil)
 
 	// Use stored conversation_id if set, otherwise agent ID - this is where the daemon agent reads from
 	resp, err := svc.Chat(r.Context(), companion.ChatRequest{

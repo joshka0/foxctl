@@ -7,12 +7,14 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rs/zerolog"
 
 	"github.com/jkatigb/agentctl/internal/chatadapter"
 	"github.com/jkatigb/agentctl/internal/chatadapter/discord"
 	"github.com/jkatigb/agentctl/internal/chatadapter/teams"
 	"github.com/jkatigb/agentctl/internal/chatadapter/telegram"
+	"github.com/jkatigb/agentctl/internal/companion"
 	"github.com/jkatigb/agentctl/internal/consoleapp"
 	"github.com/jkatigb/agentctl/internal/engine"
 	"github.com/jkatigb/agentctl/internal/observability"
@@ -30,6 +32,7 @@ type Server struct {
 	sseHub      *sse.Hub
 	consoleHub  *consolews.Hub
 	chatAdapter chatadapter.ChatAdapter
+	turnLock    companion.Locker
 }
 
 // NewServer creates and returns a configured Server for the web layer.
@@ -67,6 +70,7 @@ func NewServer(ctx context.Context, opts Options, cfg config.Config, log zerolog
 		log:        log,
 		sseHub:     sseHub,
 		consoleHub: consoleHub,
+		turnLock:   buildCompanionLocker(ctx, cfg),
 	}
 
 	// Start chat adapter if configured
@@ -106,6 +110,49 @@ func NewServer(ctx context.Context, opts Options, cfg config.Config, log zerolog
 	}
 
 	return s, nil
+}
+
+func buildCompanionLocker(ctx context.Context, cfg config.Config) companion.Locker {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	if strings.EqualFold(cfg.Database.Driver, "postgres") && strings.TrimSpace(cfg.Database.Postgres.DSN) != "" {
+		poolCfg, err := pgxpool.ParseConfig(cfg.Database.Postgres.DSN)
+		if err != nil {
+			observability.Emit(ctx, observability.NewEvent("web.companion_turnlock_init").
+				WithComponent("web").
+				WithData("mode", "in-memory").
+				WithData("reason", "invalid_postgres_dsn").
+				Error(err, 0))
+			return companion.NewTurnLock()
+		}
+		if cfg.Database.Postgres.MaxOpenConns > 0 {
+			poolCfg.MaxConns = int32(cfg.Database.Postgres.MaxOpenConns)
+		}
+
+		pool, err := pgxpool.NewWithConfig(ctx, poolCfg)
+		if err != nil {
+			observability.Emit(ctx, observability.NewEvent("web.companion_turnlock_init").
+				WithComponent("web").
+				WithData("mode", "in-memory").
+				WithData("reason", "postgres_pool_init_failed").
+				Error(err, 0))
+			return companion.NewTurnLock()
+		}
+
+		observability.Emit(ctx, observability.NewEvent("web.companion_turnlock_init").
+			WithComponent("web").
+			WithData("mode", "postgres").
+			Success(0))
+		return companion.NewPgTurnLock(pool)
+	}
+
+	observability.Emit(ctx, observability.NewEvent("web.companion_turnlock_init").
+		WithComponent("web").
+		WithData("mode", "in-memory").
+		Success(0))
+	return companion.NewTurnLock()
 }
 
 // createConsoleRunnerFactory creates a factory function that creates LLM runners for console sessions.
@@ -211,7 +258,7 @@ func (s *Server) startChatAdapter(ctx context.Context) error {
 
 		// Phase 3: Wire console hub for natural language messaging
 		adapter.SetConsoleHub(s.consoleHub)
-		sessionBridge := discord.NewSessionBridge(s.consoleHub, adapter, s.cfg.Discord)
+		sessionBridge := discord.NewSessionBridge(s.consoleHub, adapter, s.cfg.Discord, s.turnLock)
 		adapter.OnMessage(sessionBridge.HandleMessage)
 
 		if err := adapter.Connect(ctx); err != nil {
@@ -231,7 +278,7 @@ func (s *Server) startChatAdapter(ctx context.Context) error {
 		adapter.OnCommand(bridge.HandleCommand)
 		adapter.OnInteraction(adapter.HandleInteraction)
 
-		sessionBridge := telegram.NewSessionBridge(s.consoleHub, adapter, s.cfg.Telegram)
+		sessionBridge := telegram.NewSessionBridge(s.consoleHub, adapter, s.cfg.Telegram, s.turnLock)
 		adapter.OnMessage(sessionBridge.HandleMessage)
 
 		if err := adapter.Connect(ctx); err != nil {
@@ -265,7 +312,7 @@ func (s *Server) startChatAdapter(ctx context.Context) error {
 			EditIntervalMS:   s.cfg.Teams.EditIntervalMS,
 			ChatProfile:      s.cfg.Teams.ChatProfile,
 			ChatSystemPrompt: s.cfg.Teams.ChatSystemPrompt,
-		})
+		}, s.turnLock)
 		adapter.OnMessage(sessionBridge.HandleMessage)
 
 		if err := adapter.Connect(ctx); err != nil {
@@ -398,8 +445,11 @@ func (s *Server) Handler() http.Handler {
 	apiMux.HandleFunc("/api/codemaps/", api.CodemapDetailHandler(s.cfg, s.log))
 
 	// --- Companion (RLM Mobile Backend) ---
+	// Shared Locker ensures per-conversation mutual exclusion across all
+	// HTTP requests. Without this, each per-request Service would have its own
+	// lock instance providing zero mutual exclusion.
 	apiMux.HandleFunc("/api/companion/providers", api.CompanionProvidersHandler(s.cfg, s.log))
-	apiMux.HandleFunc("/api/companion/chat", api.CompanionChatHandler(s.cfg, s.log))
+	apiMux.HandleFunc("/api/companion/chat", api.CompanionChatHandler(s.cfg, s.log, s.turnLock))
 	apiMux.HandleFunc("/api/companion/conversations", api.CompanionConversationsHandler(s.cfg, s.log))
 	apiMux.HandleFunc("/api/companion/conversations/", func(w http.ResponseWriter, r *http.Request) {
 		// Route based on sub-path: /api/companion/conversations/:id/(messages|personality)

@@ -6,6 +6,8 @@ package chatadapter
 import (
 	"context"
 	"sync/atomic"
+
+	"github.com/jkatigb/agentctl/internal/domain/identity"
 )
 
 // ChatAdapter is the platform-agnostic interface for chat platform integrations.
@@ -44,6 +46,7 @@ type MessageHandler func(ctx context.Context, evt MessageEvent) error
 // MessageEvent carries the context for a received natural language message.
 type MessageEvent struct {
 	Content   string
+	Principal identity.Principal
 	User      UserRef
 	ChannelID string
 	GuildID   string
@@ -131,6 +134,7 @@ type Choice struct {
 type CommandEvent struct {
 	Command   string
 	Options   map[string]any
+	Principal identity.Principal
 	User      UserRef
 	ChannelID string
 	GuildID   string
@@ -164,6 +168,7 @@ func (e CommandEvent) Responded() bool {
 type InteractionEvent struct {
 	Type       string // "button", "select"
 	CustomID   string
+	Principal  identity.Principal
 	User       UserRef
 	ChannelID  string
 	GuildID    string
@@ -247,7 +252,7 @@ type ButtonStyle int
 const (
 	ButtonPrimary ButtonStyle = iota + 1
 	ButtonSecondary
-	_  // skip 3 (Discord uses 3 for Success which we don't need)
+	_ // skip 3 (Discord uses 3 for Success which we don't need)
 	ButtonDanger
 )
 

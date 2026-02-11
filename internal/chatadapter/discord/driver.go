@@ -12,6 +12,7 @@ import (
 	"github.com/bwmarrin/discordgo"
 
 	"github.com/jkatigb/agentctl/internal/chatadapter"
+	"github.com/jkatigb/agentctl/internal/domain/identity"
 	"github.com/jkatigb/agentctl/internal/observability"
 	"github.com/jkatigb/agentctl/internal/platform/config"
 	"github.com/jkatigb/agentctl/internal/web/sse"
@@ -549,6 +550,12 @@ func (a *Adapter) handleMessageCreate(s *discordgo.Session, m *discordgo.Message
 		Username: m.Author.Username,
 	}
 
+	principal := identity.Principal{
+		UserID:   m.Author.ID,
+		Username: m.Author.Username,
+		Platform: "discord",
+	}
+
 	guildID := ""
 	if m.GuildID != "" {
 		guildID = m.GuildID
@@ -571,6 +578,7 @@ func (a *Adapter) handleMessageCreate(s *discordgo.Session, m *discordgo.Message
 	}
 
 	evt := chatadapter.NewMessageEvent(content, user, m.ChannelID, guildID, m.ID, respond, edit)
+	evt.Principal = principal
 
 	// Limit concurrent message handlers to prevent resource exhaustion.
 	// Use a non-blocking select so messages are dropped (not queued) when at capacity.

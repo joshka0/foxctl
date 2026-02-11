@@ -132,8 +132,8 @@ func (e *Executor) Spawn(ctx context.Context, cfg SpawnConfig) (*CompanionActor,
 	}
 	svcConfig.Logger = e.logger.With().Str("companion", namespace).Logger()
 
-	// Create companion service
-	svc := NewService(e.contextStore, svcConfig)
+	// Create companion service (nil TurnLock: each executor manages its own conversations)
+	svc := NewService(e.contextStore, svcConfig, nil)
 
 	// Create companion actor
 	actorCfg := CompanionActorConfig{

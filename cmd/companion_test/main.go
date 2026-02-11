@@ -66,7 +66,7 @@ func main() {
 		MaxIterations:      10,
 		Timeout:            90 * time.Second,
 		Logger:             log,
-	})
+	}, nil)
 
 	conversationID := "test-conv-" + time.Now().Format("20060102-150405")
 

@@ -38,6 +38,8 @@ type Service struct {
 	config       ServiceConfig
 	logger       zerolog.Logger
 
+	turnLock Locker
+
 	autoCompressMu       sync.Mutex
 	autoCompressInFlight map[string]struct{} // keyed by conversation ID
 }
@@ -173,6 +175,12 @@ func DefaultServiceConfig() ServiceConfig {
 // NewService creates a new companion service.
 // NewService initializes the companion service with optional memory and embeddings.
 //
+// The turnLock parameter provides per-conversation mutual exclusion for turn
+// processing. Pass a shared Locker across all requests to the same server so
+// that concurrent requests for the same conversation are serialized. If nil, a
+// new in-memory TurnLock is created (useful for tests but NOT for production where the
+// Service is constructed per-request).
+//
 // Index:
 // - Purpose: Configure companion service defaults and optional conversation memory
 // - Flow: normalize config → init memory/summarizer → return service
@@ -180,7 +188,7 @@ func DefaultServiceConfig() ServiceConfig {
 // - FailureModes: memory initialization errors logged as warnings
 // - Related: NewConversationMemory, NewLLMSummarizer
 // - Keywords: companion_service, memory, summarizer, embedder, config
-func NewService(store contextvar.Store, cfg ServiceConfig) *Service {
+func NewService(store contextvar.Store, cfg ServiceConfig, turnLock Locker) *Service {
 	if cfg.MaxIterations <= 0 {
 		cfg.MaxIterations = 20
 	}
@@ -191,10 +199,16 @@ func NewService(store contextvar.Store, cfg ServiceConfig) *Service {
 		cfg.DefaultPersonality = DefaultRLMPersonality
 	}
 
+	if turnLock == nil {
+		turnLock = NewTurnLock()
+	}
+
 	svc := &Service{
 		contextStore: store,
 		config:       cfg,
 		logger:       cfg.Logger,
+
+		turnLock: turnLock,
 
 		autoCompressInFlight: make(map[string]struct{}),
 	}
@@ -450,6 +464,12 @@ func (s *Service) Chat(ctx context.Context, req ChatRequest) (*ChatResponse, err
 	if req.Message == "" {
 		return nil, fmt.Errorf("message is required")
 	}
+
+	unlock, err := s.turnLock.Lock(ctx, req.ConversationID)
+	if err != nil {
+		return nil, fmt.Errorf("turn lock: %w", err)
+	}
+	defer unlock()
 
 	// Determine effective exec mode and engine type
 	execMode := s.config.ExecMode

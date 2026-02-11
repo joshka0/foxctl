@@ -1,6 +1,10 @@
 package hooks
 
-import "encoding/json"
+import (
+	"encoding/json"
+
+	"github.com/jkatigb/agentctl/internal/domain/identity"
+)
 
 // Event is the canonical event name.
 // v1 supports ONLY these events.
@@ -161,13 +165,14 @@ type ProviderCapabilities struct {
 // Fields are populated based on Event; unused fields may be omitted.
 type Input struct {
 	// Core routing
-	Event          Event  `json:"event"`
-	ActorID        string `json:"actor_id,omitempty"`        // e.g. actor:agent:coder-1
-	WorkspaceID    string `json:"workspace_id,omitempty"`    // stable workspace key (e.g. hashed)
-	WorkspaceRoot  string `json:"workspace_root,omitempty"`  // absolute path (when available)
-	Cwd            string `json:"cwd,omitempty"`             // current working directory (Claude Code)
-	PermissionMode string `json:"permission_mode,omitempty"` // permission mode (normal, etc.)
-	HookEventName  string `json:"hook_event_name,omitempty"` // hook event name from Claude Code
+	Event          Event              `json:"event"`
+	ActorID        string             `json:"actor_id,omitempty"`        // e.g. actor:agent:coder-1
+	Principal      identity.Principal `json:"principal,omitempty"`       // Unified identity for policy decisions
+	WorkspaceID    string             `json:"workspace_id,omitempty"`    // stable workspace key (e.g. hashed)
+	WorkspaceRoot  string             `json:"workspace_root,omitempty"`  // absolute path (when available)
+	Cwd            string             `json:"cwd,omitempty"`             // current working directory (Claude Code)
+	PermissionMode string             `json:"permission_mode,omitempty"` // permission mode (normal, etc.)
+	HookEventName  string             `json:"hook_event_name,omitempty"` // hook event name from Claude Code
 
 	// Provider capabilities - helps hooks decide inject vs enqueue
 	Provider *ProviderCapabilities `json:"provider,omitempty"`

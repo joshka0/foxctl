@@ -1,14 +1,15 @@
 package teams
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/rsa"
 	"encoding/base64"
 	"encoding/json"
+	"io"
 	"math/big"
 	"net/http"
-	"net/http/httptest"
 	"testing"
 	"time"
 
@@ -45,25 +46,42 @@ func TestJWTVerifier_Verify_v1Token(t *testing.T) {
 	var openIDURL string
 	var jwksURL string
 
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/openid":
-			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(map[string]any{
-				"issuer":   issuer,
-				"jwks_uri": jwksURL,
-			})
-		case "/jwks":
-			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(jwksJSON)
-		default:
-			http.NotFound(w, r)
-		}
-	}))
-	t.Cleanup(srv.Close)
+	openIDURL = "https://openid.invalid/openid"
+	jwksURL = "https://openid.invalid/jwks"
+	client := &http.Client{
+		Transport: roundTripperFunc(func(r *http.Request) (*http.Response, error) {
+			var payload any
+			switch r.URL.String() {
+			case openIDURL:
+				payload = map[string]any{
+					"issuer":   issuer,
+					"jwks_uri": jwksURL,
+				}
+			case jwksURL:
+				payload = jwksJSON
+			default:
+				return &http.Response{
+					StatusCode: http.StatusNotFound,
+					Status:     "404 Not Found",
+					Header:     make(http.Header),
+					Body:       io.NopCloser(bytes.NewReader([]byte("not found"))),
+					Request:    r,
+				}, nil
+			}
 
-	openIDURL = srv.URL + "/openid"
-	jwksURL = srv.URL + "/jwks"
+			buf := bytes.NewBuffer(nil)
+			_ = json.NewEncoder(buf).Encode(payload)
+			h := make(http.Header)
+			h.Set("Content-Type", "application/json")
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Status:     "200 OK",
+				Header:     h,
+				Body:       io.NopCloser(bytes.NewReader(buf.Bytes())),
+				Request:    r,
+			}, nil
+		}),
+	}
 
 	claims := botClaims{
 		RegisteredClaims: jwt.RegisteredClaims{
@@ -84,7 +102,7 @@ func TestJWTVerifier_Verify_v1Token(t *testing.T) {
 		t.Fatalf("SignedString: %v", err)
 	}
 
-	v := newJWTVerifier(clientID, tenantID, srv.Client())
+	v := newJWTVerifier(clientID, tenantID, client)
 	v.openIDURL = openIDURL
 
 	if err := v.Verify(context.Background(), "Bearer "+tokenStr); err != nil {
@@ -122,25 +140,42 @@ func TestJWTVerifier_Verify_InvalidTenant(t *testing.T) {
 	var openIDURL string
 	var jwksURL string
 
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/openid":
-			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(map[string]any{
-				"issuer":   issuer,
-				"jwks_uri": jwksURL,
-			})
-		case "/jwks":
-			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(jwksJSON)
-		default:
-			http.NotFound(w, r)
-		}
-	}))
-	t.Cleanup(srv.Close)
+	openIDURL = "https://openid.invalid/openid"
+	jwksURL = "https://openid.invalid/jwks"
+	client := &http.Client{
+		Transport: roundTripperFunc(func(r *http.Request) (*http.Response, error) {
+			var payload any
+			switch r.URL.String() {
+			case openIDURL:
+				payload = map[string]any{
+					"issuer":   issuer,
+					"jwks_uri": jwksURL,
+				}
+			case jwksURL:
+				payload = jwksJSON
+			default:
+				return &http.Response{
+					StatusCode: http.StatusNotFound,
+					Status:     "404 Not Found",
+					Header:     make(http.Header),
+					Body:       io.NopCloser(bytes.NewReader([]byte("not found"))),
+					Request:    r,
+				}, nil
+			}
 
-	openIDURL = srv.URL + "/openid"
-	jwksURL = srv.URL + "/jwks"
+			buf := bytes.NewBuffer(nil)
+			_ = json.NewEncoder(buf).Encode(payload)
+			h := make(http.Header)
+			h.Set("Content-Type", "application/json")
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Status:     "200 OK",
+				Header:     h,
+				Body:       io.NopCloser(bytes.NewReader(buf.Bytes())),
+				Request:    r,
+			}, nil
+		}),
+	}
 
 	claims := botClaims{
 		RegisteredClaims: jwt.RegisteredClaims{
@@ -160,7 +195,7 @@ func TestJWTVerifier_Verify_InvalidTenant(t *testing.T) {
 		t.Fatalf("SignedString: %v", err)
 	}
 
-	v := newJWTVerifier(clientID, tenantID, srv.Client())
+	v := newJWTVerifier(clientID, tenantID, client)
 	v.openIDURL = openIDURL
 
 	if err := v.Verify(context.Background(), "Bearer "+tokenStr); err == nil {

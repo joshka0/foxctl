@@ -1,5 +1,7 @@
 package teams
 
+import "encoding/json"
+
 // Minimal Bot Framework / Microsoft Teams activity types.
 
 // Activity represents an inbound or outbound Bot Framework activity.
@@ -17,6 +19,10 @@ type Activity struct {
 	From         ChannelAccount      `json:"from,omitempty"`
 	Recipient    ChannelAccount      `json:"recipient,omitempty"`
 	Conversation ConversationAccount `json:"conversation,omitempty"`
+
+	// ChannelData is Teams-specific metadata. In some contexts, tenant ID is only present
+	// under channelData.tenant.id.
+	ChannelData json.RawMessage `json:"channelData,omitempty"`
 
 	Entities []Entity `json:"entities,omitempty"`
 }

@@ -16,7 +16,7 @@ func TestGetOrCreateSession_ReusesAndRecreates(t *testing.T) {
 		PlatformName:  "test",
 		MaxMessageLen: 2000,
 		ChatProfile:   "explorer",
-	})
+	}, nil)
 
 	// First call creates a session.
 	s1, err := sb.GetOrCreateSession(ctx, "chan1")
@@ -60,7 +60,7 @@ func TestGetOrCreateSession_ReusesAndRecreates(t *testing.T) {
 
 func TestCollectAndUpdate_FinalReply(t *testing.T) {
 	hub := consolews.NewHub(context.Background())
-	sb := NewSessionBridge(hub, nil, SessionBridgeConfig{MaxMessageLen: 2000})
+	sb := NewSessionBridge(hub, nil, SessionBridgeConfig{MaxMessageLen: 2000}, nil)
 
 	ctx := context.Background()
 	ch := make(chan consolews.Payload, 8)
@@ -95,7 +95,7 @@ func TestCollectAndUpdate_PartialEdit_TruncatesToLimit(t *testing.T) {
 	sb := NewSessionBridge(hub, nil, SessionBridgeConfig{
 		MaxMessageLen:  2000,
 		EditIntervalMS: 1,
-	})
+	}, nil)
 
 	ctx := context.Background()
 	ch := make(chan consolews.Payload, 8)
