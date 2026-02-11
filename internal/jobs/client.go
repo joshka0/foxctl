@@ -10,7 +10,10 @@ import (
 	"github.com/riverqueue/river/riverdriver/riverpgxv5"
 )
 
-const defaultMaxWorkers = 25
+const (
+	defaultMaxWorkers      = 25
+	conversationsQueueName = "conversations"
+)
 
 // Config configures the River job client.
 type Config struct {
@@ -40,7 +43,8 @@ func NewClient(cfg Config, workers *river.Workers) (*river.Client[pgx.Tx], error
 	}
 
 	queues := map[string]river.QueueConfig{
-		river.QueueDefault: {MaxWorkers: maxWorkers},
+		river.QueueDefault:     {MaxWorkers: maxWorkers},
+		conversationsQueueName: {MaxWorkers: maxWorkers},
 	}
 	for name, queueMaxWorkers := range cfg.Queues {
 		trimmedName := strings.TrimSpace(name)

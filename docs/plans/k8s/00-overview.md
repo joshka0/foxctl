@@ -4,6 +4,14 @@
 
 Transform agentctl from a single-process CLI tool into a multi-tenant conversation runtime deployable on Kubernetes, with proper authorization, background job processing, and horizontal scaling.
 
+## Current Status
+
+- Plans 01-04b: Complete
+- Plan 04c: In Progress
+- Plan 04d: Complete
+- Plan 05: Deferred
+- Plan 06: Deferred
+
 ## Dependency Graph
 
 ```
@@ -27,10 +35,10 @@ Transform agentctl from a single-process CLI tool into a multi-tenant conversati
 
 | # | Plan | Status | Priority | Key Dependency |
 |---|------|--------|----------|----------------|
-| [01](01-principal-and-tenant-isolation.md) | Principal Type & Tenant Isolation | Proposed | **P0** | None |
-| [02](02-casbin-authorization.md) | Casbin Authorization Layer | Proposed | P1 | 01 |
-| [03](03-river-background-jobs.md) | River Background Jobs | Proposed | P1 | 01 |
-| [04](04-turn-serialization-and-distribution.md) | Turn Serialization & Distribution | Proposed | **P0** (4a) / P2 (4b-d) | 01, 03 |
+| [01](01-principal-and-tenant-isolation.md) | Principal Type & Tenant Isolation | Complete | **P0** | None |
+| [02](02-casbin-authorization.md) | Casbin Authorization Layer | Complete | P1 | 01 |
+| [03](03-river-background-jobs.md) | River Background Jobs | Complete | P1 | 01 |
+| [04](04-turn-serialization-and-distribution.md) | Turn Serialization & Distribution | In Progress (04c); Complete (04a, 04b, 04d) | **P0** (4a) / P2 (4b-d) | 01, 03 |
 
 ## What We Explicitly Defer
 

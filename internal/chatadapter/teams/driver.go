@@ -15,6 +15,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/domain/identity"
 	"github.com/jkatigb/agentctl/internal/observability"
 	"github.com/jkatigb/agentctl/internal/platform/config"
+	"github.com/jkatigb/agentctl/internal/storage/convref"
 	"github.com/jkatigb/agentctl/internal/web/sse"
 )
 
@@ -41,6 +42,9 @@ type Adapter struct {
 	msgHandler chatadapter.MessageHandler
 
 	sseHub *sse.Hub
+
+	// persistent conversation refs (optional)
+	convRefStore convref.Store
 
 	// convKey (tenant-scoped) -> serviceURLEntry
 	serviceURLs sync.Map
@@ -73,6 +77,9 @@ func (a *Adapter) Name() string { return "teams" }
 
 // SetSSEHub configures the SSE hub for future proactive messaging (Phase 3+).
 func (a *Adapter) SetSSEHub(hub *sse.Hub) { a.sseHub = hub }
+
+// SetConvRefStore configures the persistent conversation reference store.
+func (a *Adapter) SetConvRefStore(store convref.Store) { a.convRefStore = store }
 
 // OnCommand sets the handler for incoming text commands ("/cmd args").
 func (a *Adapter) OnCommand(handler chatadapter.CommandHandler) {
@@ -158,12 +165,30 @@ func (a *Adapter) ShowTyping(ctx context.Context, channelID string) {
 	if a.botClient == nil {
 		return
 	}
-	v, ok := a.serviceURLs.Load(channelID)
-	if !ok {
+	channelID = strings.TrimSpace(channelID)
+	if channelID == "" {
 		return
 	}
-	entry, ok := v.(serviceURLEntry)
-	if !ok || strings.TrimSpace(entry.url) == "" {
+
+	var entry serviceURLEntry
+	if v, ok := a.serviceURLs.Load(channelID); ok {
+		cachedEntry, cachedOK := v.(serviceURLEntry)
+		if !cachedOK {
+			return
+		}
+		entry = cachedEntry
+	} else if a.convRefStore != nil {
+		ref, err := a.convRefStore.Get(ctx, channelID)
+		if err == nil && ref != nil {
+			entry = serviceURLEntry{
+				url:       ref.ServiceURL,
+				rawConvID: ref.RawConversationID,
+			}
+			// Populate cache for subsequent lookups.
+			a.serviceURLs.Store(channelID, entry)
+		}
+	}
+	if strings.TrimSpace(entry.url) == "" {
 		return
 	}
 
@@ -254,6 +279,17 @@ func (a *Adapter) HTTPHandler() http.HandlerFunc {
 			url:       serviceURL,
 			rawConvID: convID,
 		})
+		if a.convRefStore != nil {
+			_ = a.convRefStore.Upsert(r.Context(), convref.Ref{
+				ConversationKey:   convKey,
+				Platform:          "teams",
+				TenantID:          tenantID,
+				RawConversationID: convID,
+				ServiceURL:        serviceURL,
+				LastActivityID:    strings.TrimSpace(activity.ID),
+				BotID:             strings.TrimSpace(activity.Recipient.ID),
+			})
+		}
 
 		// Ignore self-messages.
 		if strings.TrimSpace(activity.From.ID) != "" && strings.TrimSpace(activity.From.ID) == strings.TrimSpace(activity.Recipient.ID) {

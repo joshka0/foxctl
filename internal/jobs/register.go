@@ -2,6 +2,7 @@ package jobs
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -23,6 +24,10 @@ func RegisterWorkers() *river.Workers {
 	})
 	mustRegisterWorker(workers, &workerspkg.AgentHeartbeatCheckWorker{Recoverer: noopStaleAgentRecoverer{}})
 	mustRegisterWorker(workers, &workerspkg.AgentIndexCleanupWorker{Cleaner: noopAgentIndexCleaner{}})
+	mustRegisterWorker(workers, &workerspkg.ConversationTurnWorker{
+		Processor: noopTurnProcessor{},
+		Deliverer: noopReplyDeliverer{},
+	})
 
 	return workers
 }
@@ -89,4 +94,16 @@ type noopAgentIndexCleaner struct{}
 
 func (noopAgentIndexCleaner) CleanupAgentIndexes(_ context.Context) (int, error) {
 	return 0, nil
+}
+
+type noopTurnProcessor struct{}
+
+func (noopTurnProcessor) ProcessTurn(_ context.Context, _, _ string, _ json.RawMessage) (string, error) {
+	return "", nil
+}
+
+type noopReplyDeliverer struct{}
+
+func (noopReplyDeliverer) DeliverReply(_ context.Context, _, _, _ string) error {
+	return nil
 }

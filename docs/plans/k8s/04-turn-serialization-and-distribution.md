@@ -1,8 +1,10 @@
 # Plan 04: Turn Serialization and Distribution
 
-**Status**: Proposed
+**Status**: In Progress
 **Depends on**: 01-principal-and-tenant-isolation, 03-river-background-jobs
 **Blocks**: None (final scaling plan)
+
+**Update (2026-02-11)**: Phases 4a and 4b are implemented (merged in PR #205). Phase 4c is in progress. Phase 4d is implemented.
 
 ## Problem
 
@@ -173,7 +175,7 @@ func (pl *PgTurnLock) TryWithTurnLock(ctx context.Context, conversationID string
 }
 ```
 
-### Phase 4c: River-Based Conversation Routing (Multi-Pod)
+### Phase 4c: River-Based Conversation Routing (Multi-Pod) — In Progress
 
 Instead of sticky sessions, each incoming turn becomes a River job. River's `SKIP LOCKED` claiming ensures exactly one worker processes each turn.
 
@@ -217,20 +219,17 @@ func (w *ConversationTurnWorker) Work(ctx context.Context, job *river.Job[Conver
 }
 ```
 
-### Phase 4d: K8s Session Affinity (Optional Optimization)
+### Phase 4d: K8s Session Affinity (Optional Optimization) — Implemented
 
-For WebSocket connections, k8s can route based on conversation ID hash:
+For WebSocket connections, use ingress cookie affinity:
 
 ```yaml
-# deploy/kubernetes/base/deployment.yaml
-spec:
-  template:
-    metadata:
-      annotations:
-        # Sticky sessions for WebSocket connections
-        nginx.ingress.kubernetes.io/affinity: "cookie"
-        nginx.ingress.kubernetes.io/session-cookie-name: "agentctl-affinity"
-        nginx.ingress.kubernetes.io/session-cookie-hash: "sha1"
+# deploy/kubernetes/base/ingress.yaml
+metadata:
+  annotations:
+    nginx.ingress.kubernetes.io/affinity: "cookie"
+    nginx.ingress.kubernetes.io/session-cookie-name: "agentctl-affinity"
+    nginx.ingress.kubernetes.io/session-cookie-hash: "sha1"
 ```
 
 This is an optimization (avoid re-creating consolews sessions on every request), not a correctness requirement. The advisory lock + River approach handles correctness.

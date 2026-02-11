@@ -1,0 +1,41 @@
+# K8s session affinity for WebSocket connections (Plan 04d)
+#
+# This is an optimization, not a correctness requirement.
+# River-based conversation routing (Plan 04c) + PgTurnLock handle
+# correctness across pods. Session affinity reduces session recreation
+# overhead for WebSocket connections.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: agentctl
+  namespace: agentctl
+  labels:
+    app.kubernetes.io/name: agentctl
+    app.kubernetes.io/component: ingress
+  annotations:
+    # Session affinity via cookie - routes repeat WebSocket connections
+    # to the same pod, avoiding consolews session recreation.
+    nginx.ingress.kubernetes.io/affinity: "cookie"
+    nginx.ingress.kubernetes.io/session-cookie-name: "agentctl-affinity"
+    nginx.ingress.kubernetes.io/session-cookie-hash: "sha1"
+    nginx.ingress.kubernetes.io/session-cookie-max-age: "3600"
+    # WebSocket support
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-connect-timeout: "60"
+    # Connection upgrade for WebSocket
+    nginx.ingress.kubernetes.io/configuration-snippet: |
+      proxy_set_header Upgrade $http_upgrade;
+      proxy_set_header Connection "upgrade";
+spec:
+  ingressClassName: nginx
+  rules:
+  - http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: agentctl
+            port:
+              number: 8080

@@ -17,6 +17,7 @@ resources:
 - secrets.yaml
 - rbac.yaml
 - configmap.yaml
+- service.yaml
 
 # Deployments
 - deployment.yaml
@@ -30,6 +31,7 @@ resources:
 - cronjobs.yaml
 
 # Security
+- ingress.yaml
 - network-policy.yaml
 
 # Optional: Workspace deployment with git-sync

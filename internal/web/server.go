@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"path/filepath"
 	"strings"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -19,6 +20,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/engine"
 	"github.com/jkatigb/agentctl/internal/observability"
 	"github.com/jkatigb/agentctl/internal/platform/config"
+	"github.com/jkatigb/agentctl/internal/storage/convref"
 	"github.com/jkatigb/agentctl/internal/web/api"
 	"github.com/jkatigb/agentctl/internal/web/consolews"
 	"github.com/jkatigb/agentctl/internal/web/sse"
@@ -26,13 +28,14 @@ import (
 
 // Server is the agentctl web server.
 type Server struct {
-	opts        Options
-	cfg         config.Config
-	log         zerolog.Logger
-	sseHub      *sse.Hub
-	consoleHub  *consolews.Hub
-	chatAdapter chatadapter.ChatAdapter
-	turnLock    companion.Locker
+	opts         Options
+	cfg          config.Config
+	log          zerolog.Logger
+	sseHub       *sse.Hub
+	consoleHub   *consolews.Hub
+	chatAdapter  chatadapter.ChatAdapter
+	turnLock     companion.Locker
+	convRefStore convref.Store
 }
 
 // NewServer creates and returns a configured Server for the web layer.
@@ -153,6 +156,26 @@ func buildCompanionLocker(ctx context.Context, cfg config.Config) companion.Lock
 		WithData("mode", "in-memory").
 		Success(0))
 	return companion.NewTurnLock()
+}
+
+func (s *Server) buildConvRefStore(ctx context.Context) convref.Store {
+	if strings.EqualFold(s.cfg.Database.Driver, "postgres") && strings.TrimSpace(s.cfg.Database.Postgres.DSN) != "" {
+		store, err := convref.OpenPostgres(ctx, s.cfg.Database.Postgres.DSN)
+		if err != nil {
+			s.log.Warn().Err(err).Msg("failed to open postgres convref store; conversation refs will not be persisted")
+			return nil
+		}
+		return store
+	}
+
+	// SQLite fallback for local/dev setups.
+	dbPath := filepath.Join(s.cfg.Storage.Root, "storage", "convref.db")
+	store, err := convref.OpenSQLite(ctx, dbPath)
+	if err != nil {
+		s.log.Warn().Err(err).Msg("failed to open sqlite convref store; conversation refs will not be persisted")
+		return nil
+	}
+	return store
 }
 
 // createConsoleRunnerFactory creates a factory function that creates LLM runners for console sessions.
@@ -302,6 +325,10 @@ func (s *Server) startChatAdapter(ctx context.Context) error {
 
 		adapter := teams.New(s.cfg.Teams, daemonURL)
 		adapter.SetSSEHub(s.sseHub)
+		if convRefStore := s.buildConvRefStore(ctx); convRefStore != nil {
+			adapter.SetConvRefStore(convRefStore)
+			s.convRefStore = convRefStore
+		}
 
 		adapter.OnCommand(bridge.HandleCommand)
 		adapter.OnInteraction(nil)
@@ -316,10 +343,18 @@ func (s *Server) startChatAdapter(ctx context.Context) error {
 		adapter.OnMessage(sessionBridge.HandleMessage)
 
 		if err := adapter.Connect(ctx); err != nil {
+			if s.convRefStore != nil {
+				_ = s.convRefStore.Close()
+				s.convRefStore = nil
+			}
 			return err
 		}
 		if err := adapter.RegisterCommands(ctx, nil); err != nil {
 			_ = adapter.Disconnect(ctx)
+			if s.convRefStore != nil {
+				_ = s.convRefStore.Close()
+				s.convRefStore = nil
+			}
 			return err
 		}
 
@@ -341,6 +376,12 @@ func (s *Server) StopChatAdapter(ctx context.Context) {
 		if err := s.chatAdapter.Disconnect(ctx); err != nil {
 			s.log.Warn().Err(err).Msg("chat adapter disconnect error")
 		}
+	}
+	if s.convRefStore != nil {
+		if err := s.convRefStore.Close(); err != nil {
+			s.log.Warn().Err(err).Msg("convref store close error")
+		}
+		s.convRefStore = nil
 	}
 }
 
