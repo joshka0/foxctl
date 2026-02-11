@@ -14,7 +14,6 @@ import (
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/workspaceutil"
 	"github.com/jkatigb/agentctl/internal/indexing/semantic"
-	"github.com/jkatigb/agentctl/internal/sessionkit"
 	"github.com/jkatigb/agentctl/internal/storage"
 	"github.com/jkatigb/agentctl/internal/storage/dbdriver"
 	"github.com/jkatigb/agentctl/internal/storage/memory"
@@ -139,6 +138,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 		rc.Config,
 		semantic.WithVoyageKey(voyageKey),
 		semantic.WithGeminiKey(geminiKey),
+		skillmain.EmbeddingGuard(rc),
 	)
 	if err != nil {
 		output.Status = "error"
@@ -240,11 +240,10 @@ func getSymbolContent(ctx context.Context, symbolID, workspaceID string) (string
 // Format: [Jan 2, 2026] [activity] Summary...
 // This enables natural language date/activity searches like "January debugging sessions".
 func getSessionContent(ctx context.Context, rc *skillmain.RunContext, sessionID string) (string, error) {
-	store, cleanup, err := sessionkit.OpenSessions(ctx, rc.Config)
+	store, err := rc.Stores.Sessions(ctx)
 	if err != nil {
 		return "", skillerr.WrapIO("open sessions store", err)
 	}
-	defer cleanup() //nolint:errcheck
 
 	session, err := store.Get(ctx, sessionID)
 	if err != nil {
@@ -452,11 +451,10 @@ func storeSymbolEmbedding(ctx context.Context, symbolID, workspaceID string, emb
 
 // storeSessionEmbedding stores an embedding for a session.
 func storeSessionEmbedding(ctx context.Context, rc *skillmain.RunContext, sessionID string, embedding []float32, model string) error {
-	store, cleanup, err := sessionkit.OpenSessions(ctx, rc.Config)
+	store, err := rc.Stores.Sessions(ctx)
 	if err != nil {
 		return skillerr.WrapIO("open sessions store", err)
 	}
-	defer cleanup() //nolint:errcheck
 
 	// Serialize embedding as binary float32 (little-endian)
 	embeddingBytes := vector.SerializeF32(embedding)

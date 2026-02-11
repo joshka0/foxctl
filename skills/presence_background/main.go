@@ -115,8 +115,13 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	}
 
 	// Generate image using Gemini
-	imageData, model, err := generateImageGemini(ctx, apiKey, prompt)
-	if err != nil {
+	var imageData []byte
+	var model string
+	if err := skillmain.GuardCall(rc, skillmain.BreakerHTTP, ctx, func(ctx context.Context) error {
+		var e error
+		imageData, model, e = generateImageGemini(ctx, apiKey, prompt)
+		return e
+	}); err != nil {
 		return skillerr.WrapRuntime("generate image", err)
 	}
 

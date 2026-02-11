@@ -59,6 +59,7 @@ func TestRun_ScopesBySessionIDAndCountsUnscoped(t *testing.T) {
 	rc := &skillmain.RunContext{
 		Config:    cfg,
 		CASStore:  casStore,
+		Stores:    skillmain.NewStoreProvider(cfg),
 		Workspace: ws,
 		SessionID: "session-a",
 		Stdout:    buf,

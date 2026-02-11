@@ -27,7 +27,6 @@ import (
 	"github.com/jkatigb/agentctl/internal/platform/config"
 	llmproviders "github.com/jkatigb/agentctl/internal/providers/llm"
 	"github.com/jkatigb/agentctl/internal/queue"
-	"github.com/jkatigb/agentctl/internal/sessionkit"
 	"github.com/jkatigb/agentctl/internal/sessionkit/codexjsonl"
 	"github.com/jkatigb/agentctl/internal/storage/memory"
 	"github.com/jkatigb/agentctl/internal/storage/sessions"
@@ -343,15 +342,14 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	}
 
 	// Open sessions store
-	sessionStore, cleanup, err := sessionkit.OpenSessions(ctx, rc.Config)
+	sessionStore, err := rc.Stores.Sessions(ctx)
 	if err != nil {
 		return skillerr.IO("open sessions store", skillerr.WithCause(err))
 	}
-	defer cleanup()
 
 	// Handle reembed mode early - doesn't need a specific session
 	if mode == "reembed" {
-		output := reembedAll(ctx, sessionStore, in, rc.Config)
+		output := reembedAll(ctx, sessionStore, in, rc.Config, skillmain.EmbeddingGuard(rc))
 		return skillout.Emit(rc, command, output)
 	}
 
@@ -379,9 +377,9 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	if mode == "windows" {
 		var output Output
 		if in.Queue || in.QueueOnly {
-			output = summarizeWindowsQueued(ctx, sessionStore, session, windowProviders, in, rc.Config)
+			output = summarizeWindowsQueued(ctx, sessionStore, session, windowProviders, in, rc.Config, skillmain.EmbeddingGuard(rc))
 		} else {
-			output = summarizeWindows(ctx, sessionStore, session, windowProviders, in, rc.Config)
+			output = summarizeWindows(ctx, sessionStore, session, windowProviders, in, rc.Config, skillmain.EmbeddingGuard(rc))
 		}
 		return skillout.Emit(rc, command, output)
 	}
@@ -464,7 +462,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 
 		if !deduped {
 			// Call LLM for summarization (with fallback, filtering per-provider)
-			summaryResp, contentHash, usedProvider, tokenUsage, err = summarizeWithFallback(ctx, providers, session.RawJSONLPath, in.MaxTokens)
+			summaryResp, contentHash, usedProvider, tokenUsage, err = summarizeWithFallback(ctx, rc, providers, session.RawJSONLPath, in.MaxTokens)
 			if err != nil {
 				return skillerr.Runtime(fmt.Sprintf("summarization failed (tried %d providers)", len(providers)), skillerr.WithCause(err))
 			}
@@ -566,7 +564,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	}
 
 	if mode == "seed" {
-		seedPrompt, err := buildSeedPrompt(ctx, sessionStore, session, summaryResp, in, rc.Config)
+		seedPrompt, err := buildSeedPrompt(ctx, sessionStore, session, summaryResp, in, rc.Config, skillmain.EmbeddingGuard(rc))
 		if err != nil {
 			output.Message += fmt.Sprintf(" (seed failed: %v)", err)
 		} else {
@@ -592,6 +590,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 			semantic.ScopeSessions,
 			rc.Config,
 			semantic.WithAllowFallback(true),
+			skillmain.EmbeddingGuard(rc),
 		)
 		if err != nil {
 			embeddingErr = err
@@ -639,11 +638,10 @@ func persistSessionLearnings(ctx context.Context, rc *skillmain.RunContext, sess
 		return 0, skillerr.Validation("missing session workspace_path")
 	}
 
-	store, cleanup, err := sessionkit.OpenMemory(ctx, rc.Config)
+	store, err := rc.Stores.Memory(ctx)
 	if err != nil {
 		return 0, skillerr.WrapIO("open memory store", err)
 	}
-	defer cleanup()
 
 	// Initialize embedding provider (optional - learnings work without embeddings)
 	var embedProvider semantic.EmbeddingProvider
@@ -1054,7 +1052,7 @@ func filterCodexResponseItem(item codexjsonl.ResponseItem) *FilteredMessage {
 	}
 }
 
-func summarizeWithFallback(ctx context.Context, providers []LLMProvider, jsonlPath string, userMaxTokens int) (*SummaryResponse, string, string, *TokenUsage, error) {
+func summarizeWithFallback(ctx context.Context, rc *skillmain.RunContext, providers []LLMProvider, jsonlPath string, userMaxTokens int) (*SummaryResponse, string, string, *TokenUsage, error) {
 	var lastErr error
 	var contentHash string
 	for _, p := range providers {
@@ -1080,12 +1078,15 @@ func summarizeWithFallback(ctx context.Context, providers []LLMProvider, jsonlPa
 
 		var resp *SummaryResponse
 		var usage *TokenUsage
-		if p.IsCLI {
-			// CLI providers don't report token usage
-			resp, err = summarizeWithCLI(ctx, p, filtered)
-		} else {
-			resp, usage, err = summarizeWithProvider(ctx, p, filtered)
-		}
+		err = skillmain.GuardCall(rc, skillmain.BreakerLLMProvider, ctx, func(ctx context.Context) error {
+			var e error
+			if p.IsCLI {
+				resp, e = summarizeWithCLI(ctx, p, filtered)
+			} else {
+				resp, usage, e = summarizeWithProvider(ctx, p, filtered)
+			}
+			return e
+		})
 
 		if err == nil {
 			return resp, contentHash, p.Name, usage, nil
@@ -1444,7 +1445,7 @@ type scoredSeedWindow struct {
 	Similarity float64
 }
 
-func buildSeedPrompt(ctx context.Context, sessionStore *sessions.Store, session sessions.Session, summary *SummaryResponse, in Input, cfg config.Config) (string, error) {
+func buildSeedPrompt(ctx context.Context, sessionStore *sessions.Store, session sessions.Session, summary *SummaryResponse, in Input, cfg config.Config, embedOpts ...semantic.EmbedderOption) (string, error) {
 	maxChars := in.SeedMaxChars
 	if maxChars <= 0 {
 		maxChars = 12000
@@ -1466,7 +1467,7 @@ func buildSeedPrompt(ctx context.Context, sessionStore *sessions.Store, session 
 
 	var queryEmbedding []float32
 	if query != "" {
-		if emb, _, err := embedSeedQuery(ctx, query, cfg); err == nil {
+		if emb, _, err := embedSeedQuery(ctx, query, cfg, embedOpts...); err == nil {
 			queryEmbedding = emb
 		}
 	}
@@ -1605,16 +1606,17 @@ func buildSeedQuery(session sessions.Session, summary *SummaryResponse) string {
 	return strings.Join(parts, "\n")
 }
 
-func embedSeedQuery(ctx context.Context, text string, cfg config.Config) ([]float32, string, error) {
+func embedSeedQuery(ctx context.Context, text string, cfg config.Config, embedOpts ...semantic.EmbedderOption) ([]float32, string, error) {
 	if strings.TrimSpace(text) == "" {
 		return nil, "", nil
 	}
 
 	// Use Embedder with Gemini fallback for query embedding
+	opts := append([]semantic.EmbedderOption{semantic.WithAllowFallback(true)}, embedOpts...)
 	embedder, err := semantic.NewEmbedderFromConfig(
 		semantic.ScopeSessions,
 		cfg,
-		semantic.WithAllowFallback(true),
+		opts...,
 	)
 	if err != nil {
 		return nil, "", nil
@@ -1702,13 +1704,13 @@ func sampleChunkIndices(start, end, max int) []int {
 // reembedAll re-embeds sessions and context windows that have wrong embedding model/dimensions.
 // This is a no-LLM operation - it only calls the embedding API using existing summaries.
 // Skips items that already have correct embeddings (voyage-3.5, 1024 dims = 4096 bytes).
-func reembedAll(ctx context.Context, sessionStore *sessions.Store, input Input, cfg config.Config) Output {
+func reembedAll(ctx context.Context, sessionStore *sessions.Store, input Input, cfg config.Config, embedOpts ...semantic.EmbedderOption) Output {
 	output := Output{
 		Status: "reembed_complete",
 	}
 
 	// Create embedder for sessions scope
-	embedder, err := semantic.NewEmbedderFromConfig(semantic.ScopeSessions, cfg)
+	embedder, err := semantic.NewEmbedderFromConfig(semantic.ScopeSessions, cfg, embedOpts...)
 	if err != nil {
 		output.Status = "error"
 		output.Message = fmt.Sprintf("no embedding provider: %v", err)
@@ -1886,7 +1888,7 @@ func inferActivityType(tags []string) string {
 }
 
 // summarizeWindowsQueued processes window summaries via the queue.
-func summarizeWindowsQueued(ctx context.Context, sessionStore *sessions.Store, session sessions.Session, providers []LLMProvider, input Input, cfg config.Config) Output {
+func summarizeWindowsQueued(ctx context.Context, sessionStore *sessions.Store, session sessions.Session, providers []LLMProvider, input Input, cfg config.Config, embedOpts ...semantic.EmbedderOption) Output {
 	output := Output{
 		SessionID: session.ID,
 		Status:    "windows_queued",
@@ -1948,7 +1950,7 @@ func summarizeWindowsQueued(ctx context.Context, sessionStore *sessions.Store, s
 	embedder, embedderErr := semantic.NewEmbedderFromConfig(
 		semantic.ScopeSessions,
 		cfg,
-		semantic.WithAllowFallback(true),
+		append([]semantic.EmbedderOption{semantic.WithAllowFallback(true)}, embedOpts...)...,
 	)
 
 	totalSummarized := 0
@@ -2107,14 +2109,14 @@ func summarizeWindowsQueued(ctx context.Context, sessionStore *sessions.Store, s
 
 // summarizeWindows generates LLM-based summaries for context windows with batch processing.
 // When process_all=true, loops until all windows are done. Otherwise returns after one batch.
-func summarizeWindows(ctx context.Context, sessionStore *sessions.Store, session sessions.Session, providers []LLMProvider, input Input, cfg config.Config) Output {
+func summarizeWindows(ctx context.Context, sessionStore *sessions.Store, session sessions.Session, providers []LLMProvider, input Input, cfg config.Config, embedOpts ...semantic.EmbedderOption) Output {
 	output := Output{
 		SessionID: session.ID,
 		Status:    "windows_summarized",
 	}
 
 	if input.Queue {
-		return summarizeWindowsQueued(ctx, sessionStore, session, providers, input, cfg)
+		return summarizeWindowsQueued(ctx, sessionStore, session, providers, input, cfg, embedOpts...)
 	}
 
 	// Default batch size: 5 windows per batch
@@ -2129,7 +2131,7 @@ func summarizeWindows(ctx context.Context, sessionStore *sessions.Store, session
 	embedder, embedderErr := semantic.NewEmbedderFromConfig(
 		semantic.ScopeSessions,
 		cfg,
-		semantic.WithAllowFallback(true),
+		append([]semantic.EmbedderOption{semantic.WithAllowFallback(true)}, embedOpts...)...,
 	)
 
 	// Totals across all batches

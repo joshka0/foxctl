@@ -261,7 +261,12 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 				Provider: provider.Name(),
 			}
 
-			scores, err := provider.RankCandidates(ctx, in.Question, in.Candidates)
+			var scores []ProviderScore
+			err := skillmain.GuardCall(rc, skillmain.BreakerLLMProvider, ctx, func(ctx context.Context) error {
+				var e error
+				scores, e = provider.RankCandidates(ctx, in.Question, in.Candidates)
+				return e
+			})
 			result.DurationMS = time.Since(providerStart).Milliseconds()
 
 			if err != nil {

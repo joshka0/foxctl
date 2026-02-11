@@ -13,7 +13,6 @@ import (
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/workspaceutil"
-	"github.com/jkatigb/agentctl/internal/sessionkit"
 	"github.com/jkatigb/agentctl/internal/storage/memory"
 	"github.com/jkatigb/agentctl/internal/storage/sessions"
 )
@@ -171,11 +170,10 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 		includeLearnings = true
 	}
 
-	sessionStore, cleanup, err := sessionkit.OpenSessions(ctx, rc.Config)
+	sessionStore, err := rc.Stores.Sessions(ctx)
 	if err != nil {
 		return skillerr.IO("open sessions store", skillerr.WithCause(err))
 	}
-	defer cleanup()
 
 	sess, err := sessionStore.Get(ctx, in.SessionID)
 	if err != nil {
@@ -231,11 +229,10 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	var learningItems []LearningItem
 	if includeLearnings {
 		workspace := workspaceutil.Resolve(in.Workspace, sess.WorkspacePath, rc.Workspace)
-		memStore, memCleanup, err := sessionkit.OpenMemory(ctx, rc.Config)
+		memStore, err := rc.Stores.Memory(ctx)
 		if err != nil {
 			return skillerr.IO("open memory store", skillerr.WithCause(err))
 		}
-		defer memCleanup()
 
 		learningItems, err = fetchLearningItems(ctx, memStore, workspace, sess.ID, normalizeTypes(in.Types), anchorSummary.WindowIndex)
 		if err != nil {

@@ -86,11 +86,10 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	sessionID := sessionkit.ResolveSessionID(in.Workspace, in.SessionID)
 
 	// Open memory store in cache
-	memStore, cleanup, err := sessionkit.OpenMemoryInCache(ctx, rc.Config)
+	memStore, err := rc.Stores.MemoryInCache(ctx)
 	if err != nil {
 		return skillerr.IO("open memory store", skillerr.WithCause(err))
 	}
-	defer cleanup()
 
 	// Generate feedback ID
 	feedbackID := ulid.Make().String()

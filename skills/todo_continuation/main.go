@@ -103,11 +103,10 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	paths := sessionkit.ResolvePaths(rc.Config)
 
 	// Open task store
-	store, storeCleanup, err := sessionkit.OpenTasks(ctx, rc.Config)
+	store, err := rc.Stores.Tasks(ctx)
 	if err != nil {
 		return skillerr.IO("open task store", skillerr.WithCause(err))
 	}
-	defer storeCleanup()
 
 	out, err := runContinuation(ctx, paths.CachePath, store, in, includeExecutionOrder)
 	if err != nil {

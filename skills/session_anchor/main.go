@@ -117,11 +117,10 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	}
 
 	// Open memory store in cache
-	store, cleanup, err := sessionkit.OpenMemoryInCache(ctx, rc.Config)
+	store, err := rc.Stores.MemoryInCache(ctx)
 	if err != nil {
 		return skillerr.IO("open memory store", skillerr.WithCause(err))
 	}
-	defer cleanup()
 
 	switch op {
 	case "get":

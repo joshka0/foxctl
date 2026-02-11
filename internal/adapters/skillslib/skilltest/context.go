@@ -120,6 +120,7 @@ func NewTestRunContext(t *testing.T, stdout io.Writer, opts *TestContextOptions)
 	rc := &skillmain.RunContext{
 		Config:        cfg,
 		CASStore:      casStore,
+		Stores:        skillmain.NewStoreProvider(cfg),
 		Workspace:     workspace,
 		SessionID:     sessionID,
 		AgentID:       agentID,
@@ -131,6 +132,9 @@ func NewTestRunContext(t *testing.T, stdout io.Writer, opts *TestContextOptions)
 	}
 
 	cleanup := func() {
+		if err := rc.Stores.Close(); err != nil {
+			t.Errorf("close stores: %v", err)
+		}
 		if casStore != nil {
 			casStore.Close()
 		}

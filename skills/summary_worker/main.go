@@ -236,7 +236,11 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 			} else {
 				var lastErr error
 				for _, provider := range providers {
-					summaryText, err = callLLM(ctx, provider, buildWindowSummaryPrompt(&window, contentPreview))
+					err = skillmain.GuardCall(rc, skillmain.BreakerLLMProvider, ctx, func(ctx context.Context) error {
+						var e error
+						summaryText, e = callLLM(ctx, provider, buildWindowSummaryPrompt(&window, contentPreview))
+						return e
+					})
 					if err != nil {
 						lastErr = err
 						log.Warn().

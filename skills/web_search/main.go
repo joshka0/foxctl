@@ -115,9 +115,17 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 
 	switch provider {
 	case "exa":
-		results, err = searchExa(ctx, in, rc.Config.Search.ExaAPIKey)
+		err = skillmain.GuardCall(rc, skillmain.BreakerHTTP, ctx, func(ctx context.Context) error {
+			var e error
+			results, e = searchExa(ctx, in, rc.Config.Search.ExaAPIKey)
+			return e
+		})
 	case "tavily":
-		results, err = searchTavily(ctx, in, rc.Config.Search.TavilyAPIKey)
+		err = skillmain.GuardCall(rc, skillmain.BreakerHTTP, ctx, func(ctx context.Context) error {
+			var e error
+			results, e = searchTavily(ctx, in, rc.Config.Search.TavilyAPIKey)
+			return e
+		})
 	default:
 		return skillerr.Arg(
 			fmt.Sprintf("unknown provider: %s", provider),

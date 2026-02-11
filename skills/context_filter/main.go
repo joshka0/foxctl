@@ -193,7 +193,13 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 		return skillout.Emit(rc, command, data)
 	}
 
-	selection, usage, err := callLLMForSelection(ctx, rc.Logger, in, candidates)
+	var selection llmSelectionResponse
+	var usage map[string]any
+	err = skillmain.GuardCall(rc, skillmain.BreakerLLMProvider, ctx, func(ctx context.Context) error {
+		var e error
+		selection, usage, e = callLLMForSelection(ctx, rc.Logger, in, candidates)
+		return e
+	})
 	if err != nil {
 		return err
 	}

@@ -166,19 +166,16 @@ func run(ctx context.Context, rc *skillmain.RunContext, input Input) error {
 	}
 
 	// Open memory store - use cache path (matches CLI)
-	memStore, memCleanup, err := sessionkit.OpenMemoryInCache(ctx, rc.Config)
+	memStore, err := rc.Stores.MemoryInCache(ctx)
 	if err != nil {
 		// No snapshot available - that's ok, just return empty context
 		return emitEmptyOutput(rc, "no memory store")
 	}
-	defer memCleanup()
 
 	// Open sessions store for fallback data
-	sessStore, sessCleanup, err := sessionkit.OpenSessions(ctx, rc.Config)
+	sessStore, err := rc.Stores.Sessions(ctx)
 	if err != nil {
 		sessStore = nil
-	} else {
-		defer sessCleanup()
 	}
 
 	// If check_pending is true, only proceed if there's a pending restore
@@ -198,11 +195,9 @@ func run(ctx context.Context, rc *skillmain.RunContext, input Input) error {
 	}
 
 	// Open tasks store for pending todos
-	taskStore, taskCleanup, err := sessionkit.OpenTasks(ctx, rc.Config)
+	taskStore, err := rc.Stores.Tasks(ctx)
 	if err != nil {
 		taskStore = nil
-	} else {
-		defer taskCleanup()
 	}
 
 	// Search for most recent session snapshot
@@ -287,9 +282,9 @@ func run(ctx context.Context, rc *skillmain.RunContext, input Input) error {
 	var similarWindows []SimilarContextWindow
 	if contextSummary != "" && sessStore != nil {
 		// Search other sessions' summaries (excluding current session)
-		similarSessions = searchSimilarSessions(ctx, sessStore, input.Workspace, contextSummary, sessionID, 3, rc.Config)
+		similarSessions = searchSimilarSessions(ctx, sessStore, input.Workspace, contextSummary, sessionID, 3, rc.Config, skillmain.EmbeddingGuard(rc))
 		// Search current session's context windows
-		similarWindows = searchCurrentSessionWindows(ctx, sessStore, contextSummary, sessionID, 3, rc.Config)
+		similarWindows = searchCurrentSessionWindows(ctx, sessStore, contextSummary, sessionID, 3, rc.Config, skillmain.EmbeddingGuard(rc))
 	}
 
 	// Search for relevant memories (gotchas, decisions, user_prefs) based on active task/plan
@@ -910,13 +905,13 @@ func buildContextSummaryFromSnapshot(snap SessionSnapshot) string {
 
 // searchSimilarSessions searches OTHER sessions' summaries (excluding current session).
 // Returns high-level matches: "what similar work have we done before?"
-func searchSimilarSessions(ctx context.Context, sessStore *sessions.Store, workspace, summary, currentSessionID string, limit int, cfg config.Config) []SimilarSession {
+func searchSimilarSessions(ctx context.Context, sessStore *sessions.Store, workspace, summary, currentSessionID string, limit int, cfg config.Config, embedOpts ...semantic.EmbedderOption) []SimilarSession {
 	if summary == "" || sessStore == nil {
 		return nil
 	}
 
 	// Generate embedding for the summary
-	embedding, err := embedText(ctx, summary, cfg)
+	embedding, err := embedText(ctx, summary, cfg, embedOpts...)
 	if err != nil || len(embedding) == 0 {
 		return nil
 	}
@@ -966,13 +961,13 @@ func searchSimilarSessions(ctx context.Context, sessStore *sessions.Store, works
 
 // searchCurrentSessionWindows searches context windows from the CURRENT session only.
 // Returns granular matches: "what similar context was in previous windows of this session?"
-func searchCurrentSessionWindows(ctx context.Context, sessStore *sessions.Store, summary, currentSessionID string, limit int, cfg config.Config) []SimilarContextWindow {
+func searchCurrentSessionWindows(ctx context.Context, sessStore *sessions.Store, summary, currentSessionID string, limit int, cfg config.Config, embedOpts ...semantic.EmbedderOption) []SimilarContextWindow {
 	if summary == "" || sessStore == nil || currentSessionID == "" {
 		return nil
 	}
 
 	// Generate embedding for the summary
-	embedding, err := embedText(ctx, summary, cfg)
+	embedding, err := embedText(ctx, summary, cfg, embedOpts...)
 	if err != nil || len(embedding) == 0 {
 		return nil
 	}
@@ -1019,12 +1014,12 @@ func searchCurrentSessionWindows(ctx context.Context, sessStore *sessions.Store,
 }
 
 // embedText generates an embedding for the given text using the Embedder.
-func embedText(ctx context.Context, text string, cfg config.Config) ([]float32, error) {
+func embedText(ctx context.Context, text string, cfg config.Config, embedOpts ...semantic.EmbedderOption) ([]float32, error) {
 	if strings.TrimSpace(text) == "" {
 		return nil, nil
 	}
 
-	embedder, err := semantic.NewEmbedderFromConfig(semantic.ScopeSessions, cfg)
+	embedder, err := semantic.NewEmbedderFromConfig(semantic.ScopeSessions, cfg, embedOpts...)
 	if err != nil {
 		// No provider available - not an error, just skip embedding
 		return nil, nil

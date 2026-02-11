@@ -17,6 +17,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillerr"
 	"github.com/jkatigb/agentctl/internal/domain/envelope"
 	"github.com/jkatigb/agentctl/internal/domain/policy"
+	"github.com/jkatigb/agentctl/internal/execution/circuitbreaker"
 	"github.com/jkatigb/agentctl/internal/observability"
 	"github.com/jkatigb/agentctl/internal/platform/config"
 	errs "github.com/jkatigb/agentctl/internal/platform/errors"
@@ -266,6 +267,8 @@ func buildRunContext(cfg config.Config, stdout io.Writer) (*RunContext, error) {
 	return &RunContext{
 		Config:        cfg,
 		CASStore:      store,
+		Stores:        NewStoreProvider(cfg),
+		Breakers:      circuitbreaker.NewManager(circuitbreaker.DefaultConfig()),
 		Workspace:     workspacePath,
 		SessionID:     resolveSessionIDWithFallback(workspacePath, cfg.Home),
 		AgentID:       agentID,

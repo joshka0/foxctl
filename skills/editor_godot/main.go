@@ -114,8 +114,12 @@ func run(ctx context.Context, rc *skillmain.RunContext, in handlers.Input) error
 
 	// Call plugin
 	timeout := time.Duration(in.TimeoutMS) * time.Millisecond
-	resp, err := callPlugin(ctx, in.Host, in.Port, timeout, req)
-	if err != nil {
+	var resp *PluginResponse
+	if err := skillmain.GuardCall(rc, skillmain.BreakerHTTP, ctx, func(ctx context.Context) error {
+		var e error
+		resp, e = callPlugin(ctx, in.Host, in.Port, timeout, req)
+		return e
+	}); err != nil {
 		return err
 	}
 

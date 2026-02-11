@@ -9,7 +9,6 @@ import (
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillerr"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
-	"github.com/jkatigb/agentctl/internal/sessionkit"
 	"github.com/jkatigb/agentctl/internal/sessionkit/archive"
 	"github.com/jkatigb/agentctl/internal/storage/sessions"
 )
@@ -77,11 +76,10 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	}
 
 	// Open sessions store
-	sessionStore, cleanup, err := sessionkit.OpenSessions(ctx, rc.Config)
+	sessionStore, err := rc.Stores.Sessions(ctx)
 	if err != nil {
 		return skillerr.IO("open sessions store", skillerr.WithCause(err))
 	}
-	defer cleanup()
 
 	// Get archive path
 	archivePath, err := sessionStore.GetArchivePath(ctx, in.SessionID)

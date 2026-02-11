@@ -234,7 +234,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 			defer wg.Done()
 
 			perspectiveStart := time.Now()
-			analysis, err := runPerspectiveAnalysis(ctx, provider, p, in.Query, contextStr, logger)
+			analysis, err := runPerspectiveAnalysis(ctx, rc, provider, p, in.Query, contextStr, logger)
 			if err != nil {
 				logger.Warn().Err(err).Str("perspective", p).Msg("perspective analysis failed")
 				analysis = &PerspectiveAnalysis{
@@ -321,7 +321,7 @@ func autoSelectFiles(ctx context.Context, rc *skillmain.RunContext, query string
 
 	// Create embedding provider (optional)
 	var embedProvider semantic.EmbeddingProvider
-	embedder, err := semantic.NewEmbedderFromConfig(semantic.ScopeSymbols, rc.Config)
+	embedder, err := semantic.NewEmbedderFromConfig(semantic.ScopeSymbols, rc.Config, skillmain.EmbeddingGuard(rc))
 	if err == nil {
 		embedProvider = &embedderAdapter{embedder: embedder}
 	}
@@ -394,10 +394,15 @@ func detectProvider() string {
 }
 
 // runPerspectiveAnalysis runs analysis from a specific perspective using LLM with structured parsing.
-func runPerspectiveAnalysis(ctx context.Context, provider, perspective, query, codeContext string, logger zerolog.Logger) (*PerspectiveAnalysis, error) {
+func runPerspectiveAnalysis(ctx context.Context, rc *skillmain.RunContext, provider, perspective, query, codeContext string, logger zerolog.Logger) (*PerspectiveAnalysis, error) {
 	prompt := buildAnalysisPrompt(perspective, query, codeContext)
 
-	response, err := callLLM(ctx, provider, prompt)
+	var response string
+	err := skillmain.GuardCall(rc, skillmain.BreakerLLMProvider, ctx, func(ctx context.Context) error {
+		var e error
+		response, e = callLLM(ctx, provider, prompt)
+		return e
+	})
 	if err != nil {
 		return nil, skillerr.WrapRuntime("call LLM", err)
 	}

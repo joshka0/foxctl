@@ -230,7 +230,7 @@ func autoSelectFiles(ctx context.Context, rc *skillmain.RunContext, query string
 
 	// Create embedding provider (optional - retrieval falls back to ripgrep)
 	var embedProvider semantic.EmbeddingProvider
-	embedder, err := semantic.NewEmbedderFromConfig(semantic.ScopeSymbols, rc.Config)
+	embedder, err := semantic.NewEmbedderFromConfig(semantic.ScopeSymbols, rc.Config, skillmain.EmbeddingGuard(rc))
 	if err == nil {
 		embedProvider = &embedderAdapter{embedder: embedder}
 	} else {

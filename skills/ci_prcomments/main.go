@@ -178,7 +178,12 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 
 	client := &http.Client{Timeout: 30 * time.Second}
 
-	prInfo, err := getPR(client, token, owner, repo, prNum)
+	var prInfo *PRInfo
+	err = skillmain.GuardCall(rc, skillmain.BreakerHTTP, ctx, func(ctx context.Context) error {
+		var e error
+		prInfo, e = getPR(client, token, owner, repo, prNum)
+		return e
+	})
 	if err != nil {
 		return err
 	}
@@ -188,19 +193,34 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 		conflictingFiles = getChangedFilesForPR(client, token, owner, repo, prNum)
 	}
 
-	issueComments, err := getIssueComments(client, token, owner, repo, prNum)
+	var issueComments []Comment
+	err = skillmain.GuardCall(rc, skillmain.BreakerHTTP, ctx, func(ctx context.Context) error {
+		var e error
+		issueComments, e = getIssueComments(client, token, owner, repo, prNum)
+		return e
+	})
 	if err != nil {
 		logger.Warn().Err(err).Str("operation", "get-issue-comments").Int("pr", prNum).Msg("failed to get issue comments")
 	}
 
-	reviewComments, err := getReviewComments(client, token, owner, repo, prNum)
+	var reviewComments []Comment
+	err = skillmain.GuardCall(rc, skillmain.BreakerHTTP, ctx, func(ctx context.Context) error {
+		var e error
+		reviewComments, e = getReviewComments(client, token, owner, repo, prNum)
+		return e
+	})
 	if err != nil {
 		logger.Warn().Err(err).Str("operation", "get-review-comments").Int("pr", prNum).Msg("failed to get review comments")
 	}
 
 	// Fetch PR reviews for CodeRabbit "Fix all issues with AI Agents" content
 	var codeRabbitAIPrompt string
-	prReviews, err := getPRReviews(client, token, owner, repo, prNum)
+	var prReviews []PRReview
+	err = skillmain.GuardCall(rc, skillmain.BreakerHTTP, ctx, func(ctx context.Context) error {
+		var e error
+		prReviews, e = getPRReviews(client, token, owner, repo, prNum)
+		return e
+	})
 	if err != nil {
 		logger.Warn().Err(err).Str("operation", "get-pr-reviews").Int("pr", prNum).Msg("failed to get PR reviews")
 	} else {
@@ -211,14 +231,24 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	}
 
 	// Fetch resolved/outdated status via GraphQL and merge into review comments
-	threadStatuses, err := getReviewThreadStatuses(client, token, owner, repo, prNum)
+	var threadStatuses map[int]ReviewThreadStatus
+	err = skillmain.GuardCall(rc, skillmain.BreakerHTTP, ctx, func(ctx context.Context) error {
+		var e error
+		threadStatuses, e = getReviewThreadStatuses(client, token, owner, repo, prNum)
+		return e
+	})
 	if err != nil {
 		logger.Warn().Err(err).Str("operation", "get-review-thread-statuses").Int("pr", prNum).Msg("failed to get review thread statuses")
 	} else {
 		mergeResolvedStatus(reviewComments, threadStatuses)
 	}
 
-	checkRuns, err := getCheckRuns(client, token, owner, repo, prNum)
+	var checkRuns []CheckRun
+	err = skillmain.GuardCall(rc, skillmain.BreakerHTTP, ctx, func(ctx context.Context) error {
+		var e error
+		checkRuns, e = getCheckRuns(client, token, owner, repo, prNum)
+		return e
+	})
 	if err != nil {
 		logger.Warn().Err(err).Str("operation", "get-check-runs").Int("pr", prNum).Msg("failed to get CI check runs")
 	}

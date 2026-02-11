@@ -135,8 +135,12 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	settings := getVoiceSettings(in.Emotion, in.Intensity)
 
 	// Generate audio using ElevenLabs
-	audioData, err := generateSpeech(ctx, apiKey, voiceID, model, in.Text, settings)
-	if err != nil {
+	var audioData []byte
+	if err := skillmain.GuardCall(rc, skillmain.BreakerHTTP, ctx, func(ctx context.Context) error {
+		var e error
+		audioData, e = generateSpeech(ctx, apiKey, voiceID, model, in.Text, settings)
+		return e
+	}); err != nil {
 		return skillerr.WrapRuntime("generate speech", err)
 	}
 

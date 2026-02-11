@@ -93,10 +93,8 @@ func run(ctx context.Context, rc *skillmain.RunContext, in HookInput) error {
 
 	// Get task stats for this workspace
 	var taskStore tasks.Store
-	var err error
-	taskStore, cleanup, err := sessionkit.OpenTasks(ctx, rc.Config)
+	taskStore, err := rc.Stores.Tasks(ctx)
 	if err == nil {
-		defer cleanup()
 
 		allTasks, listErr := taskStore.ListByWorkspace(ctx, workspaceID)
 		if listErr == nil {

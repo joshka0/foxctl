@@ -12,7 +12,6 @@ import (
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
 	"github.com/jkatigb/agentctl/internal/indexing/semantic"
-	"github.com/jkatigb/agentctl/internal/sessionkit"
 	"github.com/jkatigb/agentctl/internal/storage/sessions"
 )
 
@@ -115,11 +114,10 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	useFTSFallback := voyageKey == "" && geminiKey == ""
 
 	// Open sessions store
-	sessionStore, cleanup, err := sessionkit.OpenSessions(ctx, rc.Config)
+	sessionStore, err := rc.Stores.Sessions(ctx)
 	if err != nil {
 		return skillerr.WrapIO("open sessions store", err)
 	}
-	defer cleanup()
 
 	// Generate embedding for the query - prefer Voyage, fall back to Gemini, then FTS
 	var queryEmbedding []float32

@@ -13,7 +13,6 @@ import (
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/workspaceutil"
 	"github.com/jkatigb/agentctl/internal/calibration"
-	"github.com/jkatigb/agentctl/internal/sessionkit"
 )
 
 const command = "calibration/feedback"
@@ -95,11 +94,10 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	}
 
 	// Open memory store
-	store, cleanup, err := sessionkit.OpenMemory(ctx, rc.Config)
+	store, err := rc.Stores.Memory(ctx)
 	if err != nil {
 		return skillerr.IO("open memory store", skillerr.WithCause(err))
 	}
-	defer cleanup()
 
 	// Load profile
 	profile, err := calibration.LoadProfile(ctx, store, workspace)

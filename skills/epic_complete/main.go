@@ -80,18 +80,15 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	// Initialize package logger
 	logger = obs.NewLogger(obs.WithLogCommand(commandName))
 
-	cfg := rc.Config
-
 	workspaceID := workspaceutil.Resolve(rc.Workspace, "", rc.Workspace)
 
 	sessionID := sessionkit.ResolveSessionID(rc.Workspace, rc.SessionID)
 
 	// Open task store
-	store, cleanup, err := sessionkit.OpenTasks(ctx, cfg)
+	store, err := rc.Stores.Tasks(ctx)
 	if err != nil {
 		return skillerr.WrapIO("open task store", err)
 	}
-	defer cleanup()
 
 	// Get the epic to complete
 	var epic tasks.Epic
@@ -187,7 +184,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	// Extract learnings if not skipped and we have a session
 	var learnings, decisions []string
 	if !in.SkipLearnings && sessionID != "" {
-		extracted, err := extractLearnings(ctx, cfg, epic.ID, workspaceID)
+		extracted, err := extractLearnings(ctx, rc, epic.ID, workspaceID)
 		if err != nil {
 			logger.Warn("failed to extract learnings", obs.Err(err))
 		} else {
@@ -218,7 +215,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 
 	// Persist gotchas from tasks to memory store
 	if len(gotchas) > 0 {
-		persistGotchas(ctx, cfg, epic.ID, workspaceID, gotchas)
+		persistGotchas(ctx, rc, epic.ID, workspaceID, gotchas)
 	}
 
 	// Mark epic as completed
@@ -264,7 +261,7 @@ type ExtractedLearnings struct {
 }
 
 // extractLearnings retrieves learnings from memory store linked to this epic.
-func extractLearnings(ctx context.Context, cfg config.Config, epicID, workspace string) (*ExtractedLearnings, error) {
+func extractLearnings(ctx context.Context, rc *skillmain.RunContext, epicID, workspace string) (*ExtractedLearnings, error) {
 	result := &ExtractedLearnings{
 		Learnings: []string{},
 		Decisions: []string{},
@@ -272,11 +269,10 @@ func extractLearnings(ctx context.Context, cfg config.Config, epicID, workspace 
 	}
 
 	// Try to read any recent learnings from memory store
-	memStore, cleanup, err := sessionkit.OpenMemory(ctx, cfg)
+	memStore, err := rc.Stores.Memory(ctx)
 	if err != nil {
 		return result, nil // Non-fatal
 	}
-	defer cleanup()
 
 	filter := memory.ListFilter{
 		Types: []string{"learning", "decision", "gotcha"},
@@ -323,17 +319,16 @@ func matchesEpic(entry storage.NamedEntry, epicID string) bool {
 }
 
 // persistGotchas saves task gotchas to the memory store.
-func persistGotchas(ctx context.Context, cfg config.Config, epicID, workspace string, gotchas []GotchaSummary) {
+func persistGotchas(ctx context.Context, rc *skillmain.RunContext, epicID, workspace string, gotchas []GotchaSummary) {
 	if len(gotchas) == 0 {
 		return
 	}
 
-	memStore, cleanup, err := sessionkit.OpenMemory(ctx, cfg)
+	memStore, err := rc.Stores.Memory(ctx)
 	if err != nil {
 		logger.Warn("failed to open memory store", obs.Err(err))
 		return
 	}
-	defer cleanup()
 
 	for _, g := range gotchas {
 		summary := fmt.Sprintf("[%s] %s", g.TaskTitle, g.Gotcha)

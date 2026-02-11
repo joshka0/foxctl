@@ -7,10 +7,10 @@ package main
 import (
 	"context"
 
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillerr"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
 	"github.com/jkatigb/agentctl/internal/providers/claude/todos"
-	"github.com/jkatigb/agentctl/internal/sessionkit"
 	"github.com/jkatigb/agentctl/internal/todosync"
 )
 
@@ -64,11 +64,10 @@ func main() {
 // - Keywords: todo/sync_from_provider, todo_sync, inbound_sync, claude_code, task_management
 func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	// Open task store
-	taskStore, cleanup, err := sessionkit.OpenTasks(ctx, rc.Config)
+	taskStore, err := rc.Stores.Tasks(ctx)
 	if err != nil {
-		return err
+		return skillerr.WrapIO("open task store", err)
 	}
-	defer cleanup()
 
 	// Resolve session ID
 	sessionID := in.SessionID

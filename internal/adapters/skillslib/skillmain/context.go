@@ -10,6 +10,7 @@ import (
 
 	"github.com/go-playground/validator/v10"
 	"github.com/jkatigb/agentctl/internal/domain/policy"
+	"github.com/jkatigb/agentctl/internal/execution/circuitbreaker"
 	"github.com/jkatigb/agentctl/internal/platform/config"
 	"github.com/jkatigb/agentctl/internal/storage/cas"
 	"github.com/rs/zerolog"
@@ -22,6 +23,15 @@ type RunContext struct {
 
 	// CASStore is the content-addressable storage for large outputs.
 	CASStore *cas.Store
+
+	// Stores provides lazy-initialized access to memory, session, and task stores.
+	// Use this instead of manually calling sessionkit.Open* + defer cleanup().
+	Stores *StoreProvider
+
+	// Breakers is a circuit breaker manager for guarding external service calls.
+	// Use rc.Breakers.Execute(ctx, "service_name", fn) to wrap calls to
+	// embedding APIs, LLM providers, HTTP endpoints, and shell commands.
+	Breakers *circuitbreaker.Manager
 
 	// Workspace is the current workspace path.
 	Workspace string
@@ -59,10 +69,18 @@ type RunContext struct {
 
 // Close releases resources held by the run context.
 func (rc *RunContext) Close() error {
-	if rc.CASStore != nil {
-		return rc.CASStore.Close()
+	var firstErr error
+	if rc.Stores != nil {
+		if err := rc.Stores.Close(); err != nil && firstErr == nil {
+			firstErr = err
+		}
 	}
-	return nil
+	if rc.CASStore != nil {
+		if err := rc.CASStore.Close(); err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+	return firstErr
 }
 
 // ShouldTruncate returns true if the data size exceeds the inline limit and NoCAS is not set.

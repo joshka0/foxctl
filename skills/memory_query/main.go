@@ -15,7 +15,6 @@ import (
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
 	"github.com/jkatigb/agentctl/internal/indexing/semantic"
 	"github.com/jkatigb/agentctl/internal/platform/config"
-	"github.com/jkatigb/agentctl/internal/sessionkit"
 	"github.com/jkatigb/agentctl/internal/storage"
 	"github.com/jkatigb/agentctl/internal/storage/memory"
 )
@@ -161,11 +160,10 @@ func query(ctx context.Context, rc *skillmain.RunContext, in *Input) (*Output, e
 	}
 
 	// TODO: Migrate to OpenWithConfig once ListFiltered is added to interface
-	memStore, cleanup, err := sessionkit.OpenMemory(ctx, rc.Config)
+	memStore, err := rc.Stores.Memory(ctx)
 	if err != nil {
 		return nil, skillerr.WrapIO("open memory store", err)
 	}
-	defer cleanup()
 
 	var scoredEntries []storage.ScoredEntry
 
@@ -207,7 +205,7 @@ func query(ctx context.Context, rc *skillmain.RunContext, in *Input) (*Output, e
 	}
 
 	if in.Query != "" {
-		scoredEntries, err = searchWithEmbeddings(ctx, memStore, rc.Config, workspacePath, in)
+		scoredEntries, err = searchWithEmbeddings(ctx, memStore, rc.Config, workspacePath, in, skillmain.EmbeddingGuard(rc))
 		if err != nil {
 			out.Stats.Hint = fmt.Sprintf("vector search failed: %v; using BM25", err)
 			scoredEntries, err = memStore.Search(ctx, workspacePath, in.Query, in.Limit*3)
@@ -329,8 +327,8 @@ func query(ctx context.Context, rc *skillmain.RunContext, in *Input) (*Output, e
 }
 
 // searchWithEmbeddings performs vector similarity search using embeddings with query enrichment.
-func searchWithEmbeddings(ctx context.Context, memStore *memory.Store, cfg config.Config, workspacePath string, in *Input) ([]storage.ScoredEntry, error) {
-	embedder, err := semantic.NewEmbedderFromConfig(semantic.ScopeMemory, cfg)
+func searchWithEmbeddings(ctx context.Context, memStore *memory.Store, cfg config.Config, workspacePath string, in *Input, embedOpts ...semantic.EmbedderOption) ([]storage.ScoredEntry, error) {
+	embedder, err := semantic.NewEmbedderFromConfig(semantic.ScopeMemory, cfg, embedOpts...)
 	if err != nil {
 		return nil, skillerr.WrapRuntime("create embedder", err)
 	}

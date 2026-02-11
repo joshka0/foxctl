@@ -148,6 +148,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 		rc.Config,
 		semantic.WithVoyageKey(voyageKey),
 		semantic.WithGeminiKey(geminiKey),
+		skillmain.EmbeddingGuard(rc),
 	)
 	if err != nil {
 		return skillerr.Runtime("embedding provider", skillerr.WithCause(err))

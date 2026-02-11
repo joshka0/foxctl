@@ -23,7 +23,6 @@ import (
 	"github.com/jkatigb/agentctl/internal/calibration"
 	"github.com/jkatigb/agentctl/internal/platform/config"
 	llmproviders "github.com/jkatigb/agentctl/internal/providers/llm"
-	"github.com/jkatigb/agentctl/internal/sessionkit"
 	"github.com/jkatigb/agentctl/internal/storage/sessions"
 )
 
@@ -137,17 +136,15 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	}
 
 	// Open stores
-	sessionStore, sessionCleanup, err := sessionkit.OpenSessions(ctx, rc.Config)
+	sessionStore, err := rc.Stores.Sessions(ctx)
 	if err != nil {
 		return skillerr.IO("open sessions store", skillerr.WithCause(err))
 	}
-	defer sessionCleanup()
 
-	memStore, memCleanup, err := sessionkit.OpenMemory(ctx, rc.Config)
+	memStore, err := rc.Stores.Memory(ctx)
 	if err != nil {
 		return skillerr.IO("open memory store", skillerr.WithCause(err))
 	}
-	defer memCleanup()
 
 	// Load or create profile
 	profile, err := calibration.LoadProfile(ctx, memStore, workspace)
@@ -237,7 +234,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 			}
 
 			// Extract signals via LLM
-			llmSignals, provider, err := extractSignals(ctx, providers, session.ID, window.WindowIndex, content)
+			llmSignals, provider, err := extractSignals(ctx, rc, providers, session.ID, window.WindowIndex, content)
 			if err != nil {
 				logger.Warn("LLM extraction failed for window", obs.Int("window_index", window.WindowIndex), obs.Err(err))
 				continue
@@ -397,27 +394,27 @@ func hashContent(content string) string {
 // - Observability: none (handled by caller)
 // - Related: buildExtractionPrompt, extractWithAPI, extractWithCLI, parseResponse
 // - Keywords: extractSignals, llm_providers, api, cli, prompt, response_parsing
-func extractSignals(ctx context.Context, providers []llmproviders.Provider, sessionID string, windowIndex int, content string) (*LLMSignals, string, error) {
+type extractResult struct {
+	signals  *LLMSignals
+	provider string
+}
+
+func extractSignals(ctx context.Context, rc *skillmain.RunContext, providers []llmproviders.Provider, sessionID string, windowIndex int, content string) (*LLMSignals, string, error) {
 	prompt := buildExtractionPrompt(sessionID, windowIndex, content)
 
-	var lastErr error
-	for _, p := range providers {
-		var signals *LLMSignals
-		var err error
-
-		if p.IsCLI {
-			signals, err = extractWithCLI(ctx, p, prompt)
-		} else {
-			signals, err = extractWithAPI(ctx, p, prompt)
-		}
-
-		if err == nil {
-			return signals, p.Name, nil
-		}
-		lastErr = err
-	}
-
-	return nil, "", lastErr
+	r, err := skillmain.TryProviders(rc, skillmain.BreakerLLMProvider, ctx, providers,
+		func(ctx context.Context, p llmproviders.Provider) (extractResult, error) {
+			var signals *LLMSignals
+			var e error
+			if p.IsCLI {
+				signals, e = extractWithCLI(ctx, p, prompt)
+			} else {
+				signals, e = extractWithAPI(ctx, p, prompt)
+			}
+			return extractResult{signals, p.Name}, e
+		},
+	)
+	return r.signals, r.provider, err
 }
 
 // extractWithAPI extracts signals using an HTTP API LLM provider.

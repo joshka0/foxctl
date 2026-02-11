@@ -34,7 +34,6 @@ import (
 	"github.com/jkatigb/agentctl/internal/platform/config"
 	errs "github.com/jkatigb/agentctl/internal/platform/errors"
 	ws "github.com/jkatigb/agentctl/internal/platform/workspace"
-	"github.com/jkatigb/agentctl/internal/sessionkit"
 )
 
 // Command is the envelope command for this skill.
@@ -262,7 +261,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	// Use actual workspace path from runner context for filtering (not the input workspace_id
 	// which may be a logical name rather than an absolute path)
 	workspacePath := rc.PathValidator.Workspace()
-	if relatedSessions, hint := searchRelatedSessions(ctx, rc.Config, workspacePath, in.Question, DefaultMaxRelatedSessions); len(relatedSessions) > 0 {
+	if relatedSessions, hint := searchRelatedSessions(ctx, rc, workspacePath, in.Question, DefaultMaxRelatedSessions); len(relatedSessions) > 0 {
 		data["related_sessions"] = relatedSessions
 	} else if hint != "" {
 		// Surface non-fatal hint when session context is unavailable
@@ -1135,8 +1134,8 @@ func readFileWithLimit(ctx context.Context, path string, maxBytes int) ([]byte, 
 
 // searchRelatedSessions searches for sessions related to the question using embeddings.
 // Returns sessions and a hint when unavailable/non-fatal.
-func searchRelatedSessions(ctx context.Context, cfg config.Config, workspaceID, question string, limit int) ([]SessionContext, string) {
-	provider, hint := createEmbeddingProvider(cfg)
+func searchRelatedSessions(ctx context.Context, rc *skillmain.RunContext, workspaceID, question string, limit int) ([]SessionContext, string) {
+	provider, hint := createEmbeddingProvider(rc.Config)
 	if provider == nil {
 		return nil, hint
 	}
@@ -1151,11 +1150,10 @@ func searchRelatedSessions(ctx context.Context, cfg config.Config, workspaceID, 
 	}
 
 	// Open sessions store
-	sessionStore, cleanup, err := sessionkit.OpenSessions(ctx, cfg)
+	sessionStore, err := rc.Stores.Sessions(ctx)
 	if err != nil {
 		return nil, "session context unavailable: open sessions store failed"
 	}
-	defer cleanup()
 
 	// Search for similar sessions with timeout (fetch extra for workspace filtering)
 	searchCtx, searchCancel := context.WithTimeout(ctx, ContextSearchTimeout)

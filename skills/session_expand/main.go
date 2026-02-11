@@ -9,7 +9,6 @@ import (
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillerr"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
-	"github.com/jkatigb/agentctl/internal/sessionkit"
 	"github.com/jkatigb/agentctl/internal/storage"
 )
 
@@ -91,12 +90,11 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 		in.Limit = defaultLimit
 	}
 
-	// Open sessions store using sessionkit
-	store, cleanup, err := sessionkit.OpenSessions(ctx, rc.Config)
+	// Open sessions store
+	store, err := rc.Stores.Sessions(ctx)
 	if err != nil {
 		return skillerr.IO("open sessions store", skillerr.WithCause(err))
 	}
-	defer cleanup()
 
 	// Get session metadata
 	session, err := store.Get(ctx, in.SessionID)

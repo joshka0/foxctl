@@ -142,9 +142,8 @@ func run(ctx context.Context, rc *skillmain.RunContext, in hooks.Input) error {
 	}
 
 	var taskStore tasks.Store
-	if store, cleanup, err := sessionkit.OpenTasks(ctx, rc.Config); err == nil {
+	if store, err := rc.Stores.Tasks(ctx); err == nil {
 		taskStore = store
-		defer cleanup()
 	}
 
 	// Get active task context for the reservation reason

@@ -21,6 +21,10 @@ type EmbedResult struct {
 	Dims int
 }
 
+// GuardFunc wraps an operation with external protection (e.g. circuit breaker).
+// The guard calls fn and may short-circuit based on prior failures.
+type GuardFunc func(ctx context.Context, fn func(context.Context) error) error
+
 // Embedder provides a unified interface for generating embeddings with automatic
 // provider selection, rate limiting, and fallback behavior.
 type Embedder struct {
@@ -29,6 +33,7 @@ type Embedder struct {
 	providerName  string
 	rateLimitWait bool
 	allowFallback bool
+	guard         GuardFunc
 }
 
 // EmbedderOption configures an Embedder.
@@ -40,6 +45,7 @@ type embedderConfig struct {
 	modelOverride string
 	rateLimitWait bool
 	allowFallback bool
+	guard         GuardFunc
 }
 
 func newEmbedderConfig(opts ...EmbedderOption) *embedderConfig {
@@ -92,6 +98,13 @@ func WithAllowFallback(allow bool) EmbedderOption {
 	}
 }
 
+// WithGuardFunc sets a guard function that wraps each API call (e.g. circuit breaker).
+func WithGuardFunc(fn GuardFunc) EmbedderOption {
+	return func(c *embedderConfig) {
+		c.guard = fn
+	}
+}
+
 // NewEmbedder creates an Embedder for the given scope.
 // It automatically selects the appropriate provider based on available API keys
 // and scope-based model recommendations.
@@ -108,6 +121,7 @@ func NewEmbedder(scope EmbeddingScope, opts ...EmbedderOption) (*Embedder, error
 		scope:         scope,
 		rateLimitWait: cfg.rateLimitWait,
 		allowFallback: cfg.allowFallback,
+		guard:         cfg.guard,
 	}
 
 	// Get recommended model for scope (can be overridden)
@@ -177,7 +191,19 @@ func (e *Embedder) Embed(ctx context.Context, text string) (EmbedResult, error) 
 		return EmbedResult{}, nil
 	}
 
-	vec, err := e.provider.Embed(ctx, text)
+	var vec []float32
+	embed := func(ctx context.Context) error {
+		var err error
+		vec, err = e.provider.Embed(ctx, text)
+		return err
+	}
+
+	var err error
+	if e.guard != nil {
+		err = e.guard(ctx, embed)
+	} else {
+		err = embed(ctx)
+	}
 	if err != nil {
 		return EmbedResult{}, err
 	}
@@ -198,7 +224,19 @@ func (e *Embedder) EmbedBatch(ctx context.Context, texts []string) ([]EmbedResul
 		trimmed[i] = strings.TrimSpace(t)
 	}
 
-	vecs, err := e.provider.EmbedBatch(ctx, trimmed)
+	var vecs [][]float32
+	batch := func(ctx context.Context) error {
+		var err error
+		vecs, err = e.provider.EmbedBatch(ctx, trimmed)
+		return err
+	}
+
+	var err error
+	if e.guard != nil {
+		err = e.guard(ctx, batch)
+	} else {
+		err = batch(ctx)
+	}
 	if err != nil {
 		return nil, err
 	}

@@ -123,12 +123,22 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 
 	client := &http.Client{Timeout: 30 * time.Second}
 
-	prInfo, err := getPR(client, token, owner, repo, prNum)
+	var prInfo *PRInfo
+	err = skillmain.GuardCall(rc, skillmain.BreakerHTTP, ctx, func(ctx context.Context) error {
+		var e error
+		prInfo, e = getPR(client, token, owner, repo, prNum)
+		return e
+	})
 	if err != nil {
 		return err
 	}
 
-	checkRuns, err := getCheckRuns(client, token, owner, repo, prInfo.Head.SHA)
+	var checkRuns []CheckRun
+	err = skillmain.GuardCall(rc, skillmain.BreakerHTTP, ctx, func(ctx context.Context) error {
+		var e error
+		checkRuns, e = getCheckRuns(client, token, owner, repo, prInfo.Head.SHA)
+		return e
+	})
 	if err != nil {
 		return err
 	}

@@ -91,11 +91,10 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	}
 
 	// Open sessions store
-	sessionStore, cleanup, err := sessionkit.OpenSessions(ctx, rc.Config)
+	sessionStore, err := rc.Stores.Sessions(ctx)
 	if err != nil {
 		return skillerr.IO("open sessions store", skillerr.WithCause(err))
 	}
-	defer cleanup()
 
 	// Get or create session
 	session, err := sessionStore.Get(ctx, in.SessionID)
@@ -254,7 +253,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 			savedWindows = nil
 		}
 		if len(savedWindows) > 0 {
-			embeddedCount, embeddingModel := embedContextWindows(ctx, sessionStore, savedWindows, result.Chunks, rc.Config)
+			embeddedCount, embeddingModel := embedContextWindows(ctx, sessionStore, savedWindows, result.Chunks, rc.Config, skillmain.EmbeddingGuard(rc))
 			output.EmbeddedWindows = embeddedCount
 			output.EmbeddingModel = embeddingModel
 		}
@@ -284,9 +283,10 @@ func embedContextWindows(
 	windows []storage.ContextWindow,
 	chunks []storage.SessionChunk,
 	cfg config.Config,
+	embedOpts ...semantic.EmbedderOption,
 ) (int, string) {
 	// Create embedder for sessions scope
-	embedder, err := semantic.NewEmbedderFromConfig(semantic.ScopeSessions, cfg)
+	embedder, err := semantic.NewEmbedderFromConfig(semantic.ScopeSessions, cfg, embedOpts...)
 	if err != nil {
 		return 0, ""
 	}

@@ -340,7 +340,12 @@ func handleFetch(ctx context.Context, rc *skillmain.RunContext, in Input) error 
 
 	// Execute request
 	client := &http.Client{Timeout: 30 * time.Second}
-	resp, err := client.Do(req)
+	var resp *http.Response
+	err = skillmain.GuardCall(rc, skillmain.BreakerHTTP, ctx, func(ctx context.Context) error {
+		var e error
+		resp, e = client.Do(req)
+		return e
+	})
 	if err != nil {
 		return skillerr.Integration("execute request", skillerr.WithCause(err))
 	}
@@ -476,7 +481,12 @@ func handle402Response(ctx context.Context, rc *skillmain.RunContext, in Input, 
 	retryReq.Header.Set("X-Payment", paymentPayload)
 
 	client := &http.Client{Timeout: 30 * time.Second}
-	retryResp, err := client.Do(retryReq)
+	var retryResp *http.Response
+	err = skillmain.GuardCall(rc, skillmain.BreakerHTTP, ctx, func(ctx context.Context) error {
+		var e error
+		retryResp, e = client.Do(retryReq)
+		return e
+	})
 	if err != nil {
 		return skillerr.Integration("execute payment request", skillerr.WithCause(err))
 	}

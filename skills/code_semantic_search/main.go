@@ -39,7 +39,6 @@ import (
 	"github.com/jkatigb/agentctl/internal/platform/workspace"
 	llmproviders "github.com/jkatigb/agentctl/internal/providers/llm"
 	"github.com/jkatigb/agentctl/internal/retrieval"
-	"github.com/jkatigb/agentctl/internal/sessionkit"
 	"github.com/jkatigb/agentctl/internal/storage"
 	"github.com/jkatigb/agentctl/internal/storage/dbdriver"
 	"github.com/jkatigb/agentctl/internal/storage/graph"
@@ -295,7 +294,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	voyageKey := os.Getenv("VOYAGE_API_KEY")
 	geminiKey := os.Getenv("GEMINI_API_KEY")
 
-	out, err := search(ctx, rc.Logger, rc.Config, &in, voyageKey, geminiKey)
+	out, err := search(ctx, rc, &in, voyageKey, geminiKey)
 	if err != nil {
 		return err
 	}
@@ -304,7 +303,9 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 }
 
 // search performs the core search logic with parallel source queries and result fusion.
-func search(ctx context.Context, logger zerolog.Logger, cfg config.Config, in *Input, voyageKey, geminiKey string) (*Output, error) {
+func search(ctx context.Context, rc *skillmain.RunContext, in *Input, voyageKey, geminiKey string) (*Output, error) {
+	logger := rc.Logger
+	cfg := rc.Config
 	// Apply total timeout
 	searchCtx, cancel := context.WithTimeout(ctx, DefaultTotalTimeout)
 	defer cancel()
@@ -381,6 +382,7 @@ func search(ctx context.Context, logger zerolog.Logger, cfg config.Config, in *I
 			// Create a code provider for backward compat with searchSymbolsWithRetrieval
 			if len(scopedEmb.code) > 0 {
 				embedProvider, _ = createProviderWithModel(codeModel, cfg, voyageKey, geminiKey)
+				embedProvider = skillmain.GuardProvider(rc, embedProvider)
 			}
 		}
 	} else {
@@ -403,7 +405,7 @@ func search(ctx context.Context, logger zerolog.Logger, cfg config.Config, in *I
 			if err != nil {
 				logger.Debug().Err(err).Msg("file summary embedding provider unavailable")
 			} else {
-				fileSummaryProvider = provider
+				fileSummaryProvider = skillmain.GuardProvider(rc, provider)
 			}
 		}
 
@@ -476,7 +478,7 @@ func search(ctx context.Context, logger zerolog.Logger, cfg config.Config, in *I
 				return
 			}
 
-			results, err := searchSessions(sourceCtx, cfg, textEmbedding, in.Limit*2, in)
+			results, err := searchSessions(sourceCtx, rc, textEmbedding, in.Limit*2, in)
 			resultsCh <- sourceResults{
 				source:  ScopeSessions,
 				results: results,
@@ -539,7 +541,7 @@ func search(ctx context.Context, logger zerolog.Logger, cfg config.Config, in *I
 				return
 			}
 
-			results, err := searchTasks(sourceCtx, cfg, workspaceID, textEmbedding, in.Limit*2)
+			results, err := searchTasks(sourceCtx, rc, workspaceID, textEmbedding, in.Limit*2)
 			resultsCh <- sourceResults{
 				source:  ScopeTasks,
 				results: results,
@@ -616,10 +618,10 @@ func search(ctx context.Context, logger zerolog.Logger, cfg config.Config, in *I
 	fusedResults := reciprocalRankFusion(allResults, in.MinSimilarity)
 
 	// Apply PageRank boost from dependency graph
-		fusedResults = applyPageRankBoost(searchCtx, cfg, workspaceID, fusedResults)
+	fusedResults = applyPageRankBoost(searchCtx, cfg, workspaceID, fusedResults)
 
 	// Apply reranking if enabled
-	fusedResults, rerankStats := applyReranking(searchCtx, logger, *in, fusedResults)
+	fusedResults, rerankStats := applyReranking(searchCtx, rc, logger, *in, fusedResults)
 	if rerankStats.enabled {
 		out.Stats.RerankEnabled = true
 		out.Stats.RerankModel = rerankStats.model
@@ -653,7 +655,7 @@ func search(ctx context.Context, logger zerolog.Logger, cfg config.Config, in *I
 			timelineLimit = 3 // default
 		}
 		timelineCtx, timelineCancel := context.WithTimeout(context.Background(), 30*time.Second)
-		out.Timelines = fetchTimelines(timelineCtx, cfg, allResults[ScopeSessions], timelineLimit, in.TimelineTypes, workspaceID)
+		out.Timelines = fetchTimelines(timelineCtx, rc, allResults[ScopeSessions], timelineLimit, in.TimelineTypes, workspaceID)
 		timelineCancel()
 
 		// Attach timeline data to matching session results for grouped output
@@ -683,7 +685,7 @@ func search(ctx context.Context, logger zerolog.Logger, cfg config.Config, in *I
 
 	// Synthesize results with LLM if requested
 	if in.Summarize && len(fusedResults) > 0 {
-		summary, err := synthesizeResults(ctx, in.Query, fusedResults, in.SummarizeModel)
+		summary, err := synthesizeResults(ctx, rc, in.Query, fusedResults, in.SummarizeModel)
 		if err != nil {
 			// Non-fatal: log hint but don't fail
 			if out.Stats.Hint == "" {
@@ -1046,9 +1048,11 @@ type globalSessionSearcher interface {
 // searchSessions searches sessions using vector similarity.
 // When Turso is configured with vector enabled, it uses TursoStore for cloud-native vector search.
 // When in.Remote is true, it uses cross-workspace search capabilities.
-func searchSessions(ctx context.Context, cfg config.Config, queryEmbedding []float32, limit int, in *Input) ([]Result, error) {
+func searchSessions(ctx context.Context, rc *skillmain.RunContext, queryEmbedding []float32, limit int, in *Input) ([]Result, error) {
+	cfg := rc.Config
 	var store sessionSearcher
 	var err error
+	var needClose bool // true when store is NOT managed by StoreProvider
 
 	// Use Turso when:
 	// 1. Remote mode is requested (always use Turso for cross-workspace)
@@ -1078,19 +1082,23 @@ func searchSessions(ctx context.Context, cfg config.Config, queryEmbedding []flo
 				return nil, skillerr.WrapIO("open turso sessions store (remote mode)", err)
 			}
 			// Fallback to local store if Turso fails
-			store, _, err = sessionkit.OpenSessions(ctx, cfg)
+			store, err = rc.Stores.Sessions(ctx)
 			if err != nil {
 				return nil, skillerr.WrapIO("open sessions store (turso fallback)", err)
 			}
+		} else {
+			needClose = true
 		}
 	} else {
 		// Use local SQLite store
-		store, _, err = sessionkit.OpenSessions(ctx, cfg)
+		store, err = rc.Stores.Sessions(ctx)
 		if err != nil {
 			return nil, skillerr.WrapIO("open sessions store", err)
 		}
 	}
-	defer func() { errs.Ignore(store.Close(), "close session store") }()
+	if needClose {
+		defer func() { errs.Ignore(store.Close(), "close session store") }()
+	}
 
 	// Use appropriate search method based on remote options
 	var similar []storage.SimilarSession
@@ -1425,12 +1433,12 @@ func normalizeCodemapID(codemapID string) string {
 // searchTasks searches task embeddings using vector similarity.
 func searchTasks(
 	ctx context.Context,
-	cfg config.Config, workspaceID string,
+	rc *skillmain.RunContext, workspaceID string,
 	queryEmbedding []float32,
 	limit int,
 ) ([]Result, error) {
 	// Open memory store (task embeddings are stored in named_memory)
-	memStore, err := memory.OpenWithConfig(ctx, cfg)
+	memStore, err := memory.OpenWithConfig(ctx, rc.Config)
 	if err != nil {
 		return nil, skillerr.WrapIO("open memory store", err)
 	}
@@ -1450,11 +1458,10 @@ func searchTasks(
 
 	// Open tasks store to get full task details
 	// Note: tasks.Open expects root directory, it appends "tasks.db" internally
-	taskStore, cleanup, err := sessionkit.OpenTasks(ctx, cfg)
+	taskStore, err := rc.Stores.Tasks(ctx)
 	if err != nil {
 		return nil, skillerr.WrapIO("open tasks store", err)
 	}
-	defer cleanup()
 
 	// Filter to only task_embedding entries and fetch task details
 	results := make([]Result, 0, len(scoredEntries))
@@ -1832,7 +1839,7 @@ type rerankStatsResult struct {
 // applyReranking applies Voyage rerank-2.5 to improve result relevance.
 // Reranking uses cross-attention between query and documents for better precision.
 // Returns original results unchanged if reranking is disabled or fails.
-func applyReranking(ctx context.Context, logger zerolog.Logger, in Input, results []Result) ([]Result, rerankStatsResult) {
+func applyReranking(ctx context.Context, rc *skillmain.RunContext, logger zerolog.Logger, in Input, results []Result) ([]Result, rerankStatsResult) {
 	stats := rerankStatsResult{}
 
 	// Check if reranking is enabled
@@ -1852,11 +1859,12 @@ func applyReranking(ctx context.Context, logger zerolog.Logger, in Input, result
 	}
 
 	// Create reranker provider
-	provider, err := rerank.NewVoyageProvider(rerankCfg.ToVoyageConfig())
+	inner, err := rerank.NewVoyageProvider(rerankCfg.ToVoyageConfig())
 	if err != nil {
 		// Reranking unavailable (no API key) - return original results silently
 		return results, stats
 	}
+	provider := skillmain.GuardReranker(rc, inner)
 
 	// Determine how many candidates to rerank
 	topK := rerankCfg.TopK
@@ -2043,7 +2051,7 @@ func extractSnippet(filePath string, targetLine, contextLines int) string {
 type LLMProvider = llmproviders.Provider
 
 // synthesizeResults sends search results to an LLM for intelligent synthesis.
-func synthesizeResults(ctx context.Context, query string, results []Result, modelOverride string) (*SynthesisSummary, error) {
+func synthesizeResults(ctx context.Context, rc *skillmain.RunContext, query string, results []Result, modelOverride string) (*SynthesisSummary, error) {
 	providers := llmproviders.SynthesisProviders(modelOverride)
 	if len(providers) == 0 {
 		return nil, skillerr.Auth("no LLM provider available", skillerr.WithHint("Set OPENROUTER_API_KEY, GROQ_API_KEY, or CEREBRAS_API_KEY."))
@@ -2051,19 +2059,19 @@ func synthesizeResults(ctx context.Context, query string, results []Result, mode
 
 	prompt := buildSynthesisPrompt(query, results)
 
-	// Try providers in order
-	var lastErr error
-	for _, provider := range providers {
-		summary, err := callLLMProvider(ctx, provider, prompt)
-		if err != nil {
-			lastErr = err
-			continue
-		}
-		summary.Model = provider.Name
-		return summary, nil
+	summary, err := skillmain.TryProviders(rc, skillmain.BreakerLLMProvider, ctx, providers,
+		func(ctx context.Context, provider LLMProvider) (*SynthesisSummary, error) {
+			s, e := callLLMProvider(ctx, provider, prompt)
+			if e == nil {
+				s.Model = provider.Name
+			}
+			return s, e
+		},
+	)
+	if err != nil {
+		return nil, skillerr.WrapRuntime("all LLM providers failed", err)
 	}
-
-	return nil, skillerr.WrapRuntime("all LLM providers failed", lastErr)
+	return summary, nil
 }
 
 // callLLMProvider calls an OpenAI-compatible API endpoint for synthesis.
@@ -2605,7 +2613,7 @@ func generateRootSummary(
 }
 
 // fetchTimelines retrieves timeline data for the top N session results.
-func fetchTimelines(ctx context.Context, cfg config.Config, sessionResults []Result, limit int, types []string, workspace string) []SessionTimeline {
+func fetchTimelines(ctx context.Context, rc *skillmain.RunContext, sessionResults []Result, limit int, types []string, workspace string) []SessionTimeline {
 	if len(sessionResults) == 0 {
 		return nil
 	}
@@ -2615,28 +2623,23 @@ func fetchTimelines(ctx context.Context, cfg config.Config, sessionResults []Res
 		sessionResults = sessionResults[:limit]
 	}
 
-	storeCtx := context.Background()
-
 	// Open session store for chunk summaries only
-	sessionStore, cleanup, err := sessionkit.OpenSessions(storeCtx, cfg)
+	sessionStore, err := rc.Stores.Sessions(ctx)
 	if err != nil {
 		return nil
 	}
-	defer cleanup()
 
 	// Open memory store for learnings
-	memStore, memCleanup, err := sessionkit.OpenMemory(storeCtx, cfg)
+	memStore, err := rc.Stores.Memory(ctx)
 	if err != nil {
 		memStore = nil
-	}
-	if memStore != nil {
-		defer memCleanup()
 	}
 
 	// Open a SEPARATE db connection for context windows queries
 	// This bypasses the sessionStore entirely to test if the issue is there
-	dbPath := filepath.Join(cfg.Storage.Root, "sessions.db")
+	dbPath := filepath.Join(rc.Config.Storage.Root, "sessions.db")
 	windowsDB, err := sql.Open("sqlite", dbPath+"?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)")
+	storeCtx := ctx
 	if err != nil {
 		return []SessionTimeline{{
 			SessionID: "debug",
@@ -2681,7 +2684,10 @@ func fetchTimelines(ctx context.Context, cfg config.Config, sessionResults []Res
 		timeline.ChunkSummaries = chunks
 
 		// Fetch learnings from memory store
-		learnings := fetchTimelineLearnings(storeCtx, memStore, sessionID, workspace, types)
+		var learnings []TimelineLearning
+		if memStore != nil {
+			learnings = fetchTimelineLearnings(storeCtx, memStore, sessionID, workspace, types)
+		}
 		timeline.Learnings = learnings
 
 		// Build rollup

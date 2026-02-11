@@ -25,7 +25,6 @@ import (
 	"github.com/jkatigb/agentctl/internal/indexing/atomic"
 	"github.com/jkatigb/agentctl/internal/indexing/semantic"
 	llmproviders "github.com/jkatigb/agentctl/internal/providers/llm"
-	"github.com/jkatigb/agentctl/internal/sessionkit"
 	"github.com/jkatigb/agentctl/internal/storage/memory"
 	"github.com/jkatigb/agentctl/internal/storage/sessions"
 )
@@ -172,11 +171,10 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	}
 
 	// Open sessions store
-	sessionStore, cleanup, err := sessionkit.OpenSessions(ctx, rc.Config)
+	sessionStore, err := rc.Stores.Sessions(ctx)
 	if err != nil {
 		return skillerr.IO("open sessions store", skillerr.WithCause(err))
 	}
-	defer cleanup()
 
 	// Get session
 	session, err := sessionStore.Get(ctx, in.SessionID)
@@ -216,7 +214,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	}
 
 	// Extract learnings with LLM
-	llmResp, provider, err := extractWithFallback(ctx, providers, resolvedTranscriptPath, in.MaxTokens)
+	llmResp, provider, err := extractWithFallback(ctx, rc, providers, resolvedTranscriptPath, in.MaxTokens)
 	if err != nil {
 		return skillerr.Runtimef("extraction failed: %v", err)
 	}
@@ -243,60 +241,55 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	return skillout.Emit(rc, commandName, output)
 }
 
-func extractWithFallback(ctx context.Context, providers []LLMProvider, transcriptPath string, maxTokens int) (*LLMResponse, string, error) {
-	var lastErr error
-	for _, p := range providers {
-		tokens := p.MaxTokens
-		if maxTokens > 0 && maxTokens < tokens {
-			tokens = maxTokens
-		}
-
-		// Read and filter transcript
-		transcript, err := readTranscript(transcriptPath, tokens)
-		if err != nil {
-			lastErr = err
-			continue
-		}
-
-		var resp *LLMResponse
-		if p.IsCLI {
-			resp, err = extractWithCLI(ctx, p, transcript)
-		} else {
-			resp, err = extractWithAPI(ctx, p, transcript)
-		}
-
-		if err == nil {
-			return resp, p.Name, nil
-		}
-		lastErr = err
-	}
-	return nil, "", lastErr
+func extractWithFallback(ctx context.Context, rc *skillmain.RunContext, providers []LLMProvider, transcriptPath string, userMaxTokens int) (*LLMResponse, string, error) {
+	r, err := skillmain.TryProviders(rc, skillmain.BreakerLLMProvider, ctx, providers,
+		func(ctx context.Context, p LLMProvider) (llmResult, error) {
+			tokens := p.MaxTokens
+			if userMaxTokens > 0 && userMaxTokens < tokens {
+				tokens = userMaxTokens
+			}
+			transcript, e := readTranscript(transcriptPath, tokens)
+			if e != nil {
+				return llmResult{}, e
+			}
+			var resp *LLMResponse
+			if p.IsCLI {
+				resp, e = extractWithCLI(ctx, p, transcript)
+			} else {
+				resp, e = extractWithAPI(ctx, p, transcript)
+			}
+			return llmResult{resp, p.Name}, e
+		},
+	)
+	return r.resp, r.provider, err
 }
 
 // extractFromContent extracts learnings from transcript content directly (not from file).
-func extractFromContent(ctx context.Context, providers []LLMProvider, content string, maxTokens int) (*LLMResponse, string, error) {
+type llmResult struct {
+	resp     *LLMResponse
+	provider string
+}
+
+func extractFromContent(ctx context.Context, rc *skillmain.RunContext, providers []LLMProvider, content string, maxTokens int) (*LLMResponse, string, error) {
 	// Simple truncation by estimated tokens (4 chars per token)
 	maxChars := maxTokens * 4
 	if len(content) > maxChars {
 		content = content[len(content)-maxChars:] // Keep most recent
 	}
 
-	var lastErr error
-	for _, p := range providers {
-		var resp *LLMResponse
-		var err error
-		if p.IsCLI {
-			resp, err = extractWithCLI(ctx, p, content)
-		} else {
-			resp, err = extractWithAPI(ctx, p, content)
-		}
-
-		if err == nil {
-			return resp, p.Name, nil
-		}
-		lastErr = err
-	}
-	return nil, "", lastErr
+	r, err := skillmain.TryProviders(rc, skillmain.BreakerLLMProvider, ctx, providers,
+		func(ctx context.Context, p LLMProvider) (llmResult, error) {
+			var resp *LLMResponse
+			var e error
+			if p.IsCLI {
+				resp, e = extractWithCLI(ctx, p, content)
+			} else {
+				resp, e = extractWithAPI(ctx, p, content)
+			}
+			return llmResult{resp, p.Name}, e
+		},
+	)
+	return r.resp, r.provider, err
 }
 
 func readTranscript(path string, maxTokens int) (string, error) {
@@ -483,19 +476,16 @@ func persistLearnings(ctx context.Context, rc *skillmain.RunContext, sessionID, 
 		return 0, nil
 	}
 
-	store, cleanup, err := sessionkit.OpenMemory(ctx, rc.Config)
+	store, err := rc.Stores.Memory(ctx)
 	if err != nil {
 		return 0, err
 	}
 
 	// WaitGroup for async atomic processing goroutines
 	var atomicWg sync.WaitGroup
-	defer func() {
-		atomicWg.Wait() // Wait for all atomic goroutines before cleanup
-		cleanup()
-	}()
+	defer atomicWg.Wait()
 
-	embedder, err := semantic.NewEmbedderFromConfig(semantic.ScopeMemory, rc.Config)
+	embedder, err := semantic.NewEmbedderFromConfig(semantic.ScopeMemory, rc.Config, skillmain.EmbeddingGuard(rc))
 	if err != nil {
 		embedder = nil
 	}
@@ -663,23 +653,20 @@ func extractLearningsWindows(ctx context.Context, rc *skillmain.RunContext, sess
 	}
 
 	// Open memory store for persistence
-	memStore, memCleanup, err := sessionkit.OpenMemory(ctx, rc.Config)
+	memStore, err := rc.Stores.Memory(ctx)
 	if err != nil {
 		output.Status = "error"
 		output.Message = fmt.Sprintf("failed to open memory store: %v", err)
 		return output
 	}
-	// Track async atomic processing goroutines to wait before cleanup
+	// Track async atomic processing goroutines to wait before return
 	var atomicWg sync.WaitGroup
-	defer func() {
-		atomicWg.Wait() // Wait for all atomic goroutines before closing store
-		memCleanup()
-	}()
+	defer atomicWg.Wait()
 
 	// Workspace detection
 	workspace := workspaceutil.Resolve(session.WorkspacePath, "", rc.Workspace)
 
-	embedder, err := semantic.NewEmbedderFromConfig(semantic.ScopeMemory, rc.Config)
+	embedder, err := semantic.NewEmbedderFromConfig(semantic.ScopeMemory, rc.Config, skillmain.EmbeddingGuard(rc))
 	if err != nil {
 		embedder = nil
 	}
@@ -748,7 +735,7 @@ func extractLearningsWindows(ctx context.Context, rc *skillmain.RunContext, sess
 			rc.Config.LLM.AtomicModel,
 		}
 		processed, persisted, gotchas, decisions, prefs, anti, learnings := processWindowBatch(
-			ctx, sessionStore, memStore, embedder, session.ID, in.EpicID, workspace, atomicCfg, &atomicWg, batch, providers, in.MaxTokens,
+			ctx, rc, sessionStore, memStore, embedder, session.ID, in.EpicID, workspace, atomicCfg, &atomicWg, batch, providers, in.MaxTokens,
 		)
 
 		totalProcessed += processed
@@ -793,6 +780,7 @@ func extractLearningsWindows(ctx context.Context, rc *skillmain.RunContext, sess
 // processWindowBatch processes a batch of windows for learning extraction.
 func processWindowBatch(
 	ctx context.Context,
+	rc *skillmain.RunContext,
 	sessionStore *sessions.Store,
 	memStore *memory.Store,
 	embedder *semantic.Embedder,
@@ -869,7 +857,7 @@ func processWindowBatch(
 		}
 
 		// Extract learnings via LLM
-		resp, _, err := extractFromContent(ctx, providers, windowContent, maxTokens)
+		resp, _, err := extractFromContent(ctx, rc, providers, windowContent, maxTokens)
 		if err != nil {
 			logger.Warn("LLM failed for window", obs.Int("window_index", window.WindowIndex), obs.Err(err))
 			continue

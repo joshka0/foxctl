@@ -46,9 +46,8 @@ func run(ctx context.Context, rc *skillmain.RunContext, in hooks.Input) error {
 
 	// Get active task ID if available
 	taskID := ""
-	taskStore, cleanup, err := sessionkit.OpenTasks(ctx, rc.Config)
+	taskStore, err := rc.Stores.Tasks(ctx)
 	if err == nil {
-		defer cleanup()
 		// Best-effort active task lookup; errors are ignored.
 		if task, found, _ := taskStore.GetActive(ctx, workspaceID); found { //nolint:errcheck
 			taskID = task.ID

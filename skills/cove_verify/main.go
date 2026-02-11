@@ -196,11 +196,15 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 
 	var resp *verification.CoVeResponse
 	usedBaseline := strings.TrimSpace(in.Baseline) != ""
-	if usedBaseline {
-		resp, err = cove.RunFromBaseline(ctx, req, in.Baseline)
-	} else {
-		resp, err = cove.Run(ctx, req)
-	}
+	err = skillmain.GuardCall(rc, skillmain.BreakerLLMProvider, ctx, func(ctx context.Context) error {
+		var e error
+		if usedBaseline {
+			resp, e = cove.RunFromBaseline(ctx, req, in.Baseline)
+		} else {
+			resp, e = cove.Run(ctx, req)
+		}
+		return e
+	})
 	if err != nil {
 		return err
 	}

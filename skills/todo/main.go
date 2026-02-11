@@ -28,7 +28,6 @@ import (
 	"github.com/jkatigb/agentctl/internal/platform/env"
 	errs "github.com/jkatigb/agentctl/internal/platform/errors"
 	"github.com/jkatigb/agentctl/internal/platform/workspace"
-	"github.com/jkatigb/agentctl/internal/sessionkit"
 	"github.com/jkatigb/agentctl/internal/storage/blackboard"
 	"github.com/jkatigb/agentctl/internal/storage/graph"
 	"github.com/jkatigb/agentctl/internal/storage/memory"
@@ -282,16 +281,13 @@ func main() {
 func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	cfg := rc.Config
 	// Open SQLite-backed task store
-	store, cleanup, err := sessionkit.OpenTasks(ctx, rc.Config)
+	store, err := rc.Stores.Tasks(ctx)
 	if err != nil {
 		return skillerr.WrapIO("open task store", err)
 	}
-	// Track async atomic processing goroutines to wait before cleanup
+	// Track async atomic processing goroutines to wait before return
 	var atomicWg sync.WaitGroup
-	defer func() {
-		atomicWg.Wait() // Wait for all atomic goroutines before closing store
-		cleanup()
-	}()
+	defer atomicWg.Wait()
 
 	op := oputil.Op(in.Operation)
 	if op == "" {
@@ -583,7 +579,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 		}
 
 	case "search":
-		results, err := handleSearch(ctx, store, cfg, workspaceID, in.Search, rc.Logger)
+		results, err := handleSearch(ctx, store, cfg, workspaceID, in.Search, rc.Logger, skillmain.EmbeddingGuard(rc))
 		if err != nil {
 			return err
 		}
@@ -713,8 +709,10 @@ func handleAdd(ctx context.Context, store tasks.Store, cfg config.Config, worksp
 	// Atomic fact processing (SimpleMem-style) - async with WaitGroup
 	if req.Atomic && atomicWg != nil {
 		atomicWg.Add(1)
+		atomicCtx, atomicCancel := context.WithTimeout(ctx, 30*time.Second)
 		go func(taskID, title, desc, ws, apiKey, endpoint, model string) {
 			defer atomicWg.Done()
+			defer atomicCancel()
 			processor, procErr := atomic.NewProcessorWithConfig(apiKey, endpoint, model)
 			if procErr != nil {
 				return // Silently skip if processor unavailable
@@ -724,14 +722,14 @@ func handleAdd(ctx context.Context, store tasks.Store, cfg config.Config, worksp
 			if desc != "" {
 				rawText = title + ": " + desc
 			}
-			fact, _, factErr := processor.ProcessSingle(context.Background(), rawText, atomic.ProcessContext{
+			fact, _, factErr := processor.ProcessSingle(atomicCtx, rawText, atomic.ProcessContext{
 				Workspace: ws,
 			})
 			if factErr != nil {
 				return // Silently skip on processing error
 			}
 			// Update task with atomic fields
-			_ = store.UpdateAtomic(context.Background(), taskID, fact.Atomic, fact.Entities, fact.Keywords)
+			_ = store.UpdateAtomic(atomicCtx, taskID, fact.Atomic, fact.Entities, fact.Keywords)
 		}(added.ID, added.Title, added.Description, workspaceID, cfg.LLM.AtomicAPIKey, cfg.LLM.AtomicEndpoint, cfg.LLM.AtomicModel)
 	}
 
@@ -1021,7 +1019,7 @@ type searchTaskResult struct {
 }
 
 // handleSearch performs semantic search over task embeddings.
-func handleSearch(ctx context.Context, store tasks.Store, cfg config.Config, workspaceID string, req *searchReq, logger zerolog.Logger) (*searchOutput, error) {
+func handleSearch(ctx context.Context, store tasks.Store, cfg config.Config, workspaceID string, req *searchReq, logger zerolog.Logger, embedOpts ...semantic.EmbedderOption) (*searchOutput, error) {
 	if req == nil {
 		return nil, skillerr.Arg("search payload is required")
 	}
@@ -1052,8 +1050,10 @@ func handleSearch(ctx context.Context, store tasks.Store, cfg config.Config, wor
 	embedder, err := semantic.NewEmbedderFromConfig(
 		semantic.ScopeTasks,
 		cfg,
-		semantic.WithVoyageKey(voyageKey),
-		semantic.WithGeminiKey(geminiKey),
+		append([]semantic.EmbedderOption{
+			semantic.WithVoyageKey(voyageKey),
+			semantic.WithGeminiKey(geminiKey),
+		}, embedOpts...)...,
 	)
 	if err != nil {
 		return nil, skillerr.WrapRuntime("embedding provider", err)

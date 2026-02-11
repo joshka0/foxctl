@@ -85,7 +85,16 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	client := &http.Client{Timeout: 20 * time.Second}
 
 	for _, url := range in.URLs {
-		extraction := extractURL(ctx, client, url, maxBytes, in.Query, in.IncludeLinks)
+		var extraction Extraction
+		if err := skillmain.GuardCall(rc, skillmain.BreakerHTTP, ctx, func(ctx context.Context) error {
+			extraction = extractURL(ctx, client, url, maxBytes, in.Query, in.IncludeLinks)
+			if extraction.Error != "" {
+				return fmt.Errorf("%s", extraction.Error)
+			}
+			return nil
+		}); err != nil && extraction.Error == "" {
+			extraction.Error = fmt.Sprintf("extract %s: %v", url, err)
+		}
 		extractions = append(extractions, extraction)
 	}
 

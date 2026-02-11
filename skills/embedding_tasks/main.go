@@ -112,11 +112,10 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	}
 
 	// Open task store
-	taskStore, cleanup, err := sessionkit.OpenTasks(ctx, rc.Config)
+	taskStore, err := rc.Stores.Tasks(ctx)
 	if err != nil {
 		return skillerr.Runtime("open task store", skillerr.WithCause(err))
 	}
-	defer cleanup() //nolint:errcheck
 
 	// Open memory store
 	memStore, err := memory.OpenWithConfig(ctx, rc.Config)
@@ -161,6 +160,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 		rc.Config,
 		semantic.WithVoyageKey(voyageKey),
 		semantic.WithGeminiKey(geminiKey),
+		skillmain.EmbeddingGuard(rc),
 	)
 	if err != nil {
 		return skillerr.Runtime("embedding provider", skillerr.WithCause(err))

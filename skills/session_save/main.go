@@ -101,17 +101,15 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	}
 
 	// Open stores - memory uses cache path (matches CLI), tasks uses storage
-	memStore, memCleanup, err := sessionkit.OpenMemoryInCache(ctx, rc.Config)
+	memStore, err := rc.Stores.MemoryInCache(ctx)
 	if err != nil {
 		return skillerr.IO("open memory store", skillerr.WithCause(err))
 	}
-	defer memCleanup()
 
-	taskStore, taskCleanup, err := sessionkit.OpenTasks(ctx, rc.Config)
+	taskStore, err := rc.Stores.Tasks(ctx)
 	if err != nil {
 		return skillerr.IO("open task store", skillerr.WithCause(err))
 	}
-	defer taskCleanup()
 
 	// Build snapshot
 	snapshot := SessionSnapshot{
@@ -307,9 +305,8 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 
 		// Set pending_restore_at flag for post-compact context injection
 		// The UserPromptSubmit hook will check this flag and run session/restore
-		sessStore, sessCleanup, sessErr := sessionkit.OpenSessions(ctx, rc.Config)
+		sessStore, sessErr := rc.Stores.Sessions(ctx)
 		if sessErr == nil {
-			defer sessCleanup()
 			if setErr := sessStore.SetPendingRestore(ctx, sessionID); setErr == nil {
 				output.Message += " (pending restore set)"
 			}

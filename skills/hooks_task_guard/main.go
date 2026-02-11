@@ -67,11 +67,10 @@ func run(ctx context.Context, rc *skillmain.RunContext, in hooks.Input) error {
 	}
 
 	// Open task store
-	store, cleanup, err := sessionkit.OpenTasks(ctx, rc.Config)
+	store, err := rc.Stores.Tasks(ctx)
 	if err != nil {
 		return fmt.Errorf("open task store: %w", err)
 	}
-	defer cleanup()
 
 	// Generate default title from tool + file path
 	defaultTitle := deriveTaskTitle(in, workspaceRoot)

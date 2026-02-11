@@ -129,7 +129,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	paged := false
 
 	if in.Query != "" {
-		codemapEntries, err = searchCodemaps(ctx, memStore, rc.Config, workspaceID, in.Query, in.Limit+in.Offset+10)
+		codemapEntries, err = searchCodemaps(ctx, memStore, rc.Config, workspaceID, in.Query, in.Limit+in.Offset+10, skillmain.EmbeddingGuard(rc))
 		if err != nil {
 			entries, listTotal, listErr := memStore.ListFiltered(ctx, workspaceID, storage.MemoryListFilter{Types: []string{"codemap"}}, in.Limit, in.Offset)
 			if listErr != nil {
@@ -212,8 +212,8 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 }
 
 // searchCodemaps performs vector search for codemaps using semantic embeddings.
-func searchCodemaps(ctx context.Context, memStore storage.MemoryStore, cfg config.Config, workspaceID, query string, limit int) ([]storage.ScoredEntry, error) {
-	embedder, err := semantic.NewEmbedderFromConfig(semantic.ScopeCodemaps, cfg)
+func searchCodemaps(ctx context.Context, memStore storage.MemoryStore, cfg config.Config, workspaceID, query string, limit int, embedOpts ...semantic.EmbedderOption) ([]storage.ScoredEntry, error) {
+	embedder, err := semantic.NewEmbedderFromConfig(semantic.ScopeCodemaps, cfg, embedOpts...)
 	if err != nil {
 		return nil, skillerr.WrapRuntime("create embedder", err)
 	}
