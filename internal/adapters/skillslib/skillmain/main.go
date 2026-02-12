@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"syscall"
@@ -240,6 +241,15 @@ func buildRunContext(cfg config.Config, stdout io.Writer) (*RunContext, error) {
 	}
 	if tmp := os.TempDir(); tmp != "" {
 		allowedRoots = append(allowedRoots, tmp)
+	}
+	// On macOS, /tmp symlinks to /private/tmp which differs from os.TempDir()
+	// ($TMPDIR, typically /var/folders/.../T). Claude Code sandboxes create
+	// dirs like /tmp/agentctl-* and /tmp/plan-build-*. Add only those specific
+	// sandbox dirs rather than all of /tmp.
+	for _, pattern := range []string{"/tmp/agentctl-*", "/tmp/plan-build-*"} {
+		if matches, _ := filepath.Glob(pattern); len(matches) > 0 {
+			allowedRoots = append(allowedRoots, matches...)
+		}
 	}
 
 	// Initialize path validator

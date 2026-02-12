@@ -195,6 +195,7 @@ type Input struct {
 	AssistantText string `json:"assistant_text,omitempty"` // latest assistant text (if any)
 
 	// Tool context (for PreToolUse/PostToolUse)
+	ToolUseID     string          `json:"tool_use_id,omitempty"`    // tool call ID from the provider (e.g. Claude Code)
 	ToolName      string          `json:"tool_name,omitempty"`      // platform tool name (e.g. Edit, Write for CC; edit for OC)
 	ToolCanonical string          `json:"tool_canonical,omitempty"` // agentctl canonical tool name (e.g. edit.apply_patch)
 	ToolKind      ToolKind        `json:"tool_kind,omitempty"`      // tool category: read|write|exec|search|any
