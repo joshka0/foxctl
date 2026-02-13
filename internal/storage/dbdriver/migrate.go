@@ -534,9 +534,11 @@ func (t *txDB) QueryRow(q string, args ...any) *sql.Row { return t.tx.QueryRow(q
 func (t *txDB) QueryRowContext(ctx context.Context, q string, args ...any) *sql.Row {
 	return t.tx.QueryRowContext(ctx, q, args...)
 }
+
 func (t *txDB) Begin() (*sql.Tx, error) {
 	return nil, fmt.Errorf("nested transactions not supported in dry-run mode")
 }
+
 func (t *txDB) BeginTx(_ context.Context, _ *sql.TxOptions) (*sql.Tx, error) {
 	return nil, fmt.Errorf("nested transactions not supported in dry-run mode")
 }
