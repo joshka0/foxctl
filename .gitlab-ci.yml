@@ -1,4 +1,4 @@
-image: ghcr.io/jkatigb/agentctl-ci:go1.25
+image: registry.gitlab.com/joshka0/agentctl/ci:go1.25
 
 variables:
   GOFLAGS: "-buildvcs=false"
