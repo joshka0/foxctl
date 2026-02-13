@@ -1,10 +1,11 @@
-image: registry.gitlab.com/joshka0/agentctl/ci:go1.25
-
 variables:
   GOFLAGS: "-buildvcs=false"
   GOTOOLCHAIN: "go1.25.0"
+  CI_IMAGE: ${CI_REGISTRY_IMAGE}/ci:go1.25
 
-cache:
+image: ${CI_IMAGE}
+
+cache: &go-cache
   key: go-${CI_COMMIT_REF_SLUG}
   paths:
     - .cache/go-build
@@ -18,57 +19,77 @@ before_script:
   - export GOLANGCI_LINT_CACHE="$CI_PROJECT_DIR/.cache/golangci-lint"
 
 stages:
-  - lint
-  - test
+  - prepare
+  - check
   - build
 
-# Skip CI for docs-only changes
 workflow:
   rules:
     - if: $CI_COMMIT_BRANCH == "main"
     - if: $CI_MERGE_REQUEST_IID
     - if: $CI_COMMIT_TAG
 
+# --- Stage: prepare ---
+# Rebuilds CI image only when infra files change. All downstream stages wait.
+build-ci-image:
+  stage: prepare
+  image: docker:27
+  services:
+    - docker:27-dind
+  variables:
+    DOCKER_TLS_CERTDIR: "/certs"
+  cache: []
+  before_script: []
+  script:
+    - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
+    - docker build -t ${CI_IMAGE} -f Dockerfile.ci .
+    - docker push ${CI_IMAGE}
+  rules:
+    - changes:
+        - Dockerfile.ci
+        - go.mod
+        - go.sum
+    - if: $FORCE_CI_IMAGE_BUILD == "true"
+
+# --- Stage: check (all jobs run in parallel via DAG) ---
 static-analysis:
-  stage: lint
+  stage: check
   script:
     - make fmt
     - git diff --exit-code || (echo 'Formatting changed files. Run make fmt locally.' && exit 1)
     - make lint
+  cache:
+    <<: *go-cache
+    policy: pull
 
 unit-tests:
-  stage: test
+  stage: check
   variables:
     CGO_ENABLED: "0"
   script:
     - go test -short ./...
 
 race-tests:
-  stage: test
+  stage: check
   script:
     - make test-race
 
 cgo-build-and-tests:
-  stage: test
+  stage: check
   script:
     - make build-cgo
     - make test-cgo-short
 
 integration-tests:
-  stage: test
+  stage: check
   script:
     - make test-integration
 
 llm-planner-integration:
-  stage: test
+  stage: check
   variables:
     AGENTCTL_ENABLE_LIVE_LLM_TESTS: "1"
   script:
-    - |
-      if [ -z "$OPENROUTER_API_KEY" ]; then
-        echo "OPENROUTER_API_KEY not set; skipping LLM planner integration test"
-        exit 0
-      fi
     - CGO_ENABLED=1 go test -tags=libsqlite3 ./internal/planning/llm -run TestOpenAIPlanner_Integration -timeout 120s -v
   rules:
     - if: $CI_COMMIT_BRANCH == "main"
@@ -76,8 +97,12 @@ llm-planner-integration:
       when: manual
       allow_failure: true
 
+# --- Stage: build ---
 build:
   stage: build
+  needs:
+    - job: static-analysis
+    - job: unit-tests
   script:
     - make build
     - make skills-build
