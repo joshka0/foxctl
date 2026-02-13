@@ -5,18 +5,9 @@ variables:
 
 image: ${CI_IMAGE}
 
-cache: &go-cache
-  key: go-${CI_COMMIT_REF_SLUG}
-  paths:
-    - .cache/go-build
-    - .cache/golangci-lint
-    - .cache/go-mod
-  policy: pull-push
-
 before_script:
-  - export GOPATH="$CI_PROJECT_DIR/.cache/go-mod"
-  - export GOCACHE="$CI_PROJECT_DIR/.cache/go-build"
-  - export GOLANGCI_LINT_CACHE="$CI_PROJECT_DIR/.cache/golangci-lint"
+  - export GOMODCACHE=$(go env GOMODCACHE)
+  - export GOCACHE=$(go env GOCACHE)
 
 stages:
   - prepare
@@ -47,7 +38,6 @@ build-ci-image:
     DOCKER_TLS_CERTDIR: "/certs"
     DOCKER_CERT_PATH: "/certs/client"
     DOCKER_TLS_VERIFY: "1"
-  cache: []
   before_script: []
   script:
     - until docker info; do sleep 1; done
@@ -68,9 +58,6 @@ static-analysis:
     - make fmt
     - git diff --exit-code || (echo 'Formatting changed files. Run make fmt locally.' && exit 1)
     - make lint
-  cache:
-    <<: *go-cache
-    policy: pull
 
 unit-tests:
   stage: check
@@ -126,7 +113,6 @@ build:
 # --- Stage: review (MR only) ---
 ai-code-review:
   stage: review
-  cache: []
   variables:
     GIT_DEPTH: 0
   before_script:
