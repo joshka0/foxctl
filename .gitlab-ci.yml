@@ -5,9 +5,7 @@ variables:
 
 image: ${CI_IMAGE}
 
-before_script:
-  - export GOMODCACHE=$(go env GOMODCACHE)
-  - export GOCACHE=$(go env GOCACHE)
+before_script: []
 
 stages:
   - prepare
