@@ -24,7 +24,12 @@ stages:
   - build
   - review
 
+default:
+  interruptible: true
+
 workflow:
+  auto_cancel:
+    on_new_commit: interruptible
   rules:
     - if: $CI_COMMIT_BRANCH == "main"
     - if: $CI_MERGE_REQUEST_IID
