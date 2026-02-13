@@ -1,0 +1,89 @@
+image: ghcr.io/jkatigb/agentctl-ci:go1.25
+
+variables:
+  GOFLAGS: "-buildvcs=false"
+  GOTOOLCHAIN: "go1.25.0"
+
+cache:
+  key: go-${CI_COMMIT_REF_SLUG}
+  paths:
+    - .cache/go-build
+    - .cache/golangci-lint
+    - .cache/go-mod
+  policy: pull-push
+
+before_script:
+  - export GOPATH="$CI_PROJECT_DIR/.cache/go-mod"
+  - export GOCACHE="$CI_PROJECT_DIR/.cache/go-build"
+  - export GOLANGCI_LINT_CACHE="$CI_PROJECT_DIR/.cache/golangci-lint"
+
+stages:
+  - lint
+  - test
+  - build
+
+# Skip CI for docs-only changes
+workflow:
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+    - if: $CI_MERGE_REQUEST_IID
+    - if: $CI_COMMIT_TAG
+
+static-analysis:
+  stage: lint
+  script:
+    - make fmt
+    - git diff --exit-code || (echo 'Formatting changed files. Run make fmt locally.' && exit 1)
+    - make lint
+
+unit-tests:
+  stage: test
+  variables:
+    CGO_ENABLED: "0"
+  script:
+    - go test -short ./...
+
+race-tests:
+  stage: test
+  script:
+    - make test-race
+
+cgo-build-and-tests:
+  stage: test
+  script:
+    - make build-cgo
+    - make test-cgo-short
+
+integration-tests:
+  stage: test
+  script:
+    - make test-integration
+
+llm-planner-integration:
+  stage: test
+  variables:
+    AGENTCTL_ENABLE_LIVE_LLM_TESTS: "1"
+  script:
+    - |
+      if [ -z "$OPENROUTER_API_KEY" ]; then
+        echo "OPENROUTER_API_KEY not set; skipping LLM planner integration test"
+        exit 0
+      fi
+    - CGO_ENABLED=1 go test -tags=libsqlite3 ./internal/planning/llm -run TestOpenAIPlanner_Integration -timeout 120s -v
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+    - if: $CI_MERGE_REQUEST_IID
+      when: manual
+      allow_failure: true
+
+build:
+  stage: build
+  script:
+    - make build
+    - make skills-build
+    - go run ./scripts/checkmanifests
+  artifacts:
+    paths:
+      - bin/agentctl
+      - dist/skills/
+    expire_in: 7 days
