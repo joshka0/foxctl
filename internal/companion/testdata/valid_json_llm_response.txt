@@ -1,0 +1,37 @@
+{
+  "summary": "The user discussed their preference for Go over Rust for backend services. The assistant provided a comparison of both languages.",
+  "hard_state_entries": [
+    {
+      "entry_type": "preference",
+      "raw_text": "User prefers Go for backend services",
+      "value": "Go preferred for backend",
+      "confidence": 0.85,
+      "source_event_id": 10
+    },
+    {
+      "entry_type": "technical_context",
+      "raw_text": "The project uses Go modules",
+      "value": "Project uses Go modules",
+      "confidence": 0.9,
+      "source_event_id": 11
+    }
+  ],
+  "evidence_snippets": [
+    {
+      "source_event_id": 10,
+      "event_type": "user_message",
+      "fact_text": "I prefer Go for backend services because of its simplicity.",
+      "confidence": 0.88,
+      "bucket": "default",
+      "ttl_days": null
+    },
+    {
+      "source_event_id": 11,
+      "event_type": "assistant_message",
+      "fact_text": "Go modules provide excellent dependency management.",
+      "confidence": 0.82,
+      "bucket": "default",
+      "ttl_days": 30
+    }
+  ]
+}

@@ -10,8 +10,11 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/rs/zerolog"
+
 	actormemory "github.com/jkatigb/agentctl/internal/actor/memory"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skilltest"
+	"github.com/jkatigb/agentctl/internal/engine"
 	"github.com/jkatigb/agentctl/internal/indexing/semantic"
 	"github.com/jkatigb/agentctl/internal/observability"
 	"github.com/jkatigb/agentctl/internal/storage"
@@ -29,16 +32,17 @@ import (
 // - L1 (Recent): Yesterday's conversation, summarized
 // - L2 (History): Older conversations, distilled to key facts/topics
 type ConversationMemory struct {
-	db          *sql.DB
-	summarizer  ConversationSummarizer
-	memoryStore storage.MemoryStore // Optional: for semantic search integration
-	workspace   string              // Workspace for semantic search scoping
-	embedder    *semantic.Embedder  // Optional: for generating embeddings on summaries
-	config      MemoryConfig
-	clock       skilltest.Clock
-	idGenerator func() string
-	idSeq       uint64
-	mu          sync.RWMutex
+	db                   *sql.DB
+	summarizer           ConversationSummarizer
+	memoryStore          storage.MemoryStore // Optional: for semantic search integration
+	workspace            string              // Workspace for semantic search scoping
+	embedder             *semantic.Embedder  // Optional: for generating embeddings on summaries
+	episodeSummaryRunner func(ctx context.Context, cfg engine.LLMChatConfig, input engine.EngineInput) (engine.EngineOutput, error)
+	config               MemoryConfig
+	clock                skilltest.Clock
+	idGenerator          func() string
+	idSeq                uint64
+	mu                   sync.RWMutex
 }
 
 // MemoryConfig configures conversation memory behavior.
@@ -161,6 +165,9 @@ func NewConversationMemory(db *sql.DB, opts ...MemoryOption) (*ConversationMemor
 		opt(m)
 	}
 
+	if m.episodeSummaryRunner == nil {
+		m.episodeSummaryRunner = defaultEpisodeSummaryRunner
+	}
 	if m.clock == nil {
 		m.clock = skilltest.RealClock{}
 	}
@@ -230,6 +237,20 @@ func WithIDGenerator(gen func() string) MemoryOption {
 			m.idGenerator = gen
 		}
 	}
+}
+
+func defaultEpisodeSummaryRunner(ctx context.Context, cfg engine.LLMChatConfig, input engine.EngineInput) (engine.EngineOutput, error) {
+	llm, err := engine.NewLLMChatEngine(cfg)
+	if err != nil {
+		return engine.EngineOutput{}, err
+	}
+	return llm.Run(ctx, input)
+}
+
+// WithEpisodeSummaryRunner sets the function used to run LLM calls for episode summarization.
+// Useful for injecting test doubles.
+func WithEpisodeSummaryRunner(fn func(context.Context, engine.LLMChatConfig, engine.EngineInput) (engine.EngineOutput, error)) MemoryOption {
+	return func(m *ConversationMemory) { m.episodeSummaryRunner = fn }
 }
 
 // MigrateSchema runs the companion memory DDL migrations against the given database.
@@ -719,8 +740,34 @@ func (m *ConversationMemory) AppendTurn(ctx context.Context, turn ConversationTu
 			total_turns = total_turns + 1,
 			updated_at = CURRENT_TIMESTAMP
 	`, turn.ConversationID)
+	if err != nil {
+		return err
+	}
 
-	return err
+	// Bridge to hybrid event pipeline: if this conversation is in hybrid mode,
+	// also insert a companion_events row so the pipeline can process it.
+	mode, modeErr := m.GetMemoryMode(ctx, turn.ConversationID)
+	if modeErr == nil && mode == MemoryModeHybrid {
+		eventType := EventTypeUserMessage
+		if turn.Role == "assistant" {
+			eventType = EventTypeAssistantMessage
+		}
+		if evErr := m.InsertEvent(ctx, &ConversationEvent{
+			ConversationID: turn.ConversationID,
+			EventType:      eventType,
+			TurnID:         turn.ID,
+			Content:        turn.Content,
+			TokenCount:     turn.TokenCount,
+		}); evErr != nil {
+			zerolog.Ctx(ctx).Warn().
+				Str("conversation_id", turn.ConversationID).
+				Str("turn_id", turn.ID).
+				Err(evErr).
+				Msg("hybrid bridge: failed to insert event")
+		}
+	}
+
+	return nil
 }
 
 // GetContext builds the memory context for an LLM prompt.

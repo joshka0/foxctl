@@ -1,0 +1,10 @@
+{
+  "conversation_id": "conv-golden",
+  "episode_id": 1,
+  "start_event_id": 10,
+  "end_event_id": 12,
+  "summary": "A brief greeting exchange with no notable information.",
+  "token_count": 13,
+  "hard_state_entries": null,
+  "evidence_snippets": null
+}

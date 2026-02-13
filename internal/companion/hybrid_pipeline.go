@@ -48,6 +48,27 @@ func (m *ConversationMemory) InsertEvent(ctx context.Context, event *Conversatio
 		parentToolCallID = event.ParentToolCallID
 	}
 
+	// Convert empty strings to nil so SQL sees NULL (required by CHECK constraints).
+	var turnID, toolName, toolRunID, payloadJSON, payloadRef, contentHash any
+	if s := strings.TrimSpace(event.TurnID); s != "" {
+		turnID = s
+	}
+	if s := strings.TrimSpace(event.ToolName); s != "" {
+		toolName = s
+	}
+	if s := strings.TrimSpace(event.ToolRunID); s != "" {
+		toolRunID = s
+	}
+	if s := strings.TrimSpace(event.PayloadJSON); s != "" {
+		payloadJSON = s
+	}
+	if s := strings.TrimSpace(event.PayloadRef); s != "" {
+		payloadRef = s
+	}
+	if s := strings.TrimSpace(event.ContentHash); s != "" {
+		contentHash = s
+	}
+
 	var insertedID int64
 	if err := m.db.QueryRowContext(ctx, `
 		INSERT INTO companion_events (
@@ -67,14 +88,14 @@ func (m *ConversationMemory) InsertEvent(ctx context.Context, event *Conversatio
 	`,
 		event.ConversationID,
 		eventType,
-		event.TurnID,
-		event.ToolName,
-		event.ToolRunID,
+		turnID,
+		toolName,
+		toolRunID,
 		parentToolCallID,
-		event.PayloadJSON,
-		event.PayloadRef,
+		payloadJSON,
+		payloadRef,
 		event.TokenCount,
-		event.ContentHash,
+		contentHash,
 	).Scan(&insertedID); err != nil {
 		return fmt.Errorf("insert companion event: %w", err)
 	}
@@ -300,6 +321,7 @@ func (m *ConversationMemory) BuildHybridContextLayers(ctx context.Context, conve
 			toolName       sql.NullString
 			toolRunID      sql.NullString
 			parentToolCall sql.NullInt64
+			payloadJSON    sql.NullString
 			payloadRef     sql.NullString
 			contentHash    sql.NullString
 			turnContent    sql.NullString
@@ -313,7 +335,7 @@ func (m *ConversationMemory) BuildHybridContextLayers(ctx context.Context, conve
 			&toolName,
 			&toolRunID,
 			&parentToolCall,
-			&event.PayloadJSON,
+			&payloadJSON,
 			&payloadRef,
 			&event.TokenCount,
 			&contentHash,
@@ -333,6 +355,9 @@ func (m *ConversationMemory) BuildHybridContextLayers(ctx context.Context, conve
 		}
 		if parentToolCall.Valid {
 			event.ParentToolCallID = parentToolCall.Int64
+		}
+		if payloadJSON.Valid {
+			event.PayloadJSON = payloadJSON.String
 		}
 		if payloadRef.Valid {
 			event.PayloadRef = payloadRef.String

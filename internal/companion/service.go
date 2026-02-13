@@ -1476,8 +1476,9 @@ func (s *Service) storeConversationTurns(ctx context.Context, req ChatRequest, r
 		s.logger.Warn().Err(err).Msg("Failed to store assistant turn")
 	}
 
-	// Auto-trigger L1/L2 compression in background if needed
-	go s.autoCompress(ctx, req.ConversationID)
+	// Auto-trigger L1/L2 compression in background if needed.
+	// Detach from request cancellation but preserve context values (logger, tracing).
+	go s.autoCompress(context.WithoutCancel(ctx), req.ConversationID)
 }
 
 // autoCompress checks if L1 (daily summaries) or L2 (weekly distillation) need
@@ -1492,6 +1493,7 @@ func (s *Service) storeConversationTurns(ctx context.Context, req ChatRequest, r
 // - Related: ConversationMemory.RunPendingDailyCompression, ConversationMemory.RunWeeklyDistillation
 // - Keywords: companion_memory, auto_compress, L1, L2, summaries, distillation
 func (s *Service) autoCompress(ctx context.Context, conversationID string) {
+	s.logger.Debug().Str("conversation_id", conversationID).Bool("memory_set", s.memory != nil).Msg("autoCompress called")
 	if s.memory == nil {
 		return
 	}
@@ -1519,19 +1521,22 @@ func (s *Service) autoCompress(ctx context.Context, conversationID string) {
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
 
+	s.logger.Debug().Bool("use_hybrid", s.config.UseHybridMemory).Bool("supports_hybrid", s.supportsHybridMemory()).Msg("autoCompress: checking hybrid mode")
 	if s.config.UseHybridMemory && s.supportsHybridMemory() {
 		mode, err := s.getMemoryMode(ctx, conversationID)
+		s.logger.Debug().Str("conversation_id", conversationID).Str("mode", mode).Err(err).Msg("autoCompress: getMemoryMode")
 		if err != nil {
 			s.logger.Debug().Err(err).Str("conversation_id", conversationID).Msg("Failed to check memory mode")
 		}
 		if mode == "hybrid" || (mode == "" && s.config.UseHybridMemory) {
 			if err := s.ensureHybridMode(ctx, conversationID); err != nil {
-				s.logger.Debug().Err(err).Msg("Failed to ensure hybrid mode")
+				s.logger.Debug().Err(err).Str("conversation_id", conversationID).Msg("Failed to ensure hybrid mode")
 			}
 
 			if err := s.buildHybridContext(ctx, conversationID); err != nil {
-				s.logger.Debug().Err(err).Msg("Hybrid pipeline failed, falling back to legacy")
+				s.logger.Debug().Err(err).Str("conversation_id", conversationID).Msg("Hybrid pipeline failed, falling back to legacy")
 			} else {
+				s.logger.Debug().Str("conversation_id", conversationID).Msg("autoCompress: hybrid context built successfully")
 				return
 			}
 		}

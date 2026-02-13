@@ -6,13 +6,14 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
-	"github.com/rs/zerolog"
 	"github.com/spf13/cobra"
 
 	"github.com/jkatigb/agentctl/internal/observability"
+	"github.com/jkatigb/agentctl/internal/platform/logging"
 	"github.com/jkatigb/agentctl/internal/web"
 )
 
@@ -85,10 +86,30 @@ func runWebServe(cmd *cobra.Command, _ []string) error {
 
 	// Setup logger for web server internals
 	// TODO: Migrate web server to use observability instead of zerolog
-	log := zerolog.New(os.Stderr).With(). //nolint:forbidigo // web server requires zerolog internally
-						Timestamp().
-						Str("component", "web").
-						Logger()
+	logPath := cfg.Logging.Output
+	if logPath == "" {
+		logPath = filepath.Join("/tmp", "agentctl-gui.log")
+	}
+	logWriter, closeWriter, err := logging.OpenWriter(logPath)
+	if err != nil {
+		return fmt.Errorf("failed to initialize logger: %w", err)
+	}
+	if closeWriter != nil {
+		defer func() {
+			if err := closeWriter(); err != nil {
+				fmt.Fprintf(os.Stderr, "failed to close log writer: %v\n", err)
+			}
+		}()
+	}
+
+	log := logging.New(logging.Config{
+		Level:  logging.ParseLevel(cfg.Logging.Level),
+		Format: logging.ParseFormat(cfg.Logging.Format),
+		Writer: logWriter,
+	}).With().
+		Timestamp().
+		Str("component", "web").
+		Logger()
 
 	// Create web server
 	addr := fmt.Sprintf(":%d", webPort)
@@ -123,13 +144,13 @@ func runWebServe(cmd *cobra.Command, _ []string) error {
 	// Start server in goroutine
 	errCh := make(chan error, 1)
 	go func() {
-		fmt.Fprintf(os.Stderr, "Starting agentctl web server on http://localhost%s\n", addr)
-		fmt.Fprintf(os.Stderr, "Health: http://localhost%s/api/health\n", addr)
+		log.Info().Str("addr", addr).Msg("Starting agentctl web server")
+		log.Info().Str("health", fmt.Sprintf("http://localhost%s/api/health", addr)).Msg("Health endpoint")
 		if webDevCORS {
-			fmt.Fprintf(os.Stderr, "CORS enabled for development (localhost:5173)\n")
+			log.Info().Msg("CORS enabled for development (localhost:5173)")
 		}
 		if webUIDir != "" {
-			fmt.Fprintf(os.Stderr, "Serving UI from: %s\n", webUIDir)
+			log.Info().Str("ui_dir", webUIDir).Msg("Serving UI directory")
 		}
 		if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			errCh <- err
@@ -140,11 +161,11 @@ func runWebServe(cmd *cobra.Command, _ []string) error {
 	// Wait for shutdown signal or error
 	select {
 	case sig := <-shutdownCh:
-		fmt.Fprintf(os.Stderr, "\nReceived %s, shutting down gracefully...\n", sig)
+		log.Info().Str("signal", sig.String()).Msg("Received signal, shutting down gracefully")
 	case err := <-errCh:
 		return fmt.Errorf("server error: %w", err)
 	case <-ctx.Done():
-		fmt.Fprintf(os.Stderr, "\nContext cancelled, shutting down...\n")
+		log.Info().Msg("Context cancelled, shutting down")
 	}
 
 	// Cancel context to stop persistence goroutines
@@ -167,6 +188,6 @@ func runWebServe(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 
-	fmt.Fprintf(os.Stderr, "Server stopped\n")
+	log.Info().Msg("Server stopped")
 	return nil
 }

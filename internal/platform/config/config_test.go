@@ -42,6 +42,9 @@ func TestLoadDefaults(t *testing.T) {
 	if cfg.Logging.Format != "text" {
 		t.Fatalf("expected default logging format text got %s", cfg.Logging.Format)
 	}
+	if cfg.Logging.Output != "" {
+		t.Fatalf("expected default logging output empty got %s", cfg.Logging.Output)
+	}
 	expectedPluginPath := filepath.Join(expectedHome, "plugins")
 	if len(cfg.OpenAPI.PluginPath) != 1 || cfg.OpenAPI.PluginPath[0] != expectedPluginPath {
 		t.Fatalf("expected default plugin path %s got %v", expectedPluginPath, cfg.OpenAPI.PluginPath)
@@ -58,7 +61,7 @@ func TestLoadWithConfigFile(t *testing.T) {
 	}
 
 	cfgFile := filepath.Join(home, "config.yaml")
-	content := []byte("inline_output_kb: 1024\nlogging:\n  level: warn\n  format: json\npaths:\n  cas: custom/cas\nopenapi:\n  plugin_path: plugins:/opt/agentctl/plugins\n")
+	content := []byte("inline_output_kb: 1024\nlogging:\n  level: warn\n  format: json\n  output: /tmp/agentctl-json.log\npaths:\n  cas: custom/cas\nopenapi:\n  plugin_path: plugins:/opt/agentctl/plugins\n")
 	if err := os.WriteFile(cfgFile, content, 0o644); err != nil {
 		t.Fatalf("write config: %v", err)
 	}
@@ -81,6 +84,9 @@ func TestLoadWithConfigFile(t *testing.T) {
 	if cfg.Logging.Format != "json" {
 		t.Fatalf("expected logging format json got %s", cfg.Logging.Format)
 	}
+	if cfg.Logging.Output != "/tmp/agentctl-json.log" {
+		t.Fatalf("expected logging output /tmp/agentctl-json.log got %s", cfg.Logging.Output)
+	}
 	expectedPluginPaths := []string{
 		filepath.Join(cfg.Home, "plugins"),
 		"/opt/agentctl/plugins",
@@ -98,6 +104,7 @@ func TestLoadWithEnvOverridesAndTildePaths(t *testing.T) {
 	t.Setenv("AGENTCTL_PATHS_CAS", "~/custom/cas")
 	t.Setenv("AGENTCTL_LOGGING_LEVEL", "DEBUG")
 	t.Setenv("AGENTCTL_LOGGING_FORMAT", "JSON")
+	t.Setenv("AGENTCTL_LOGGING_OUTPUT", "/tmp/env-agentctl.log")
 	t.Setenv("AGENTCTL_OPENAPI_PLUGIN_PATH", "~/plugins:/usr/local/agentctl/plugins")
 
 	cfg, err := Load(context.Background())
@@ -117,6 +124,9 @@ func TestLoadWithEnvOverridesAndTildePaths(t *testing.T) {
 	}
 	if cfg.Logging.Format != "json" {
 		t.Fatalf("expected logging format json got %s", cfg.Logging.Format)
+	}
+	if cfg.Logging.Output != "/tmp/env-agentctl.log" {
+		t.Fatalf("expected logging output /tmp/env-agentctl.log got %s", cfg.Logging.Output)
 	}
 	expectedPluginPaths := []string{
 		filepath.Join(tmp, "plugins"),

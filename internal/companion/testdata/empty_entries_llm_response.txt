@@ -1,0 +1,5 @@
+{
+  "summary": "A brief greeting exchange with no notable information.",
+  "hard_state_entries": [],
+  "evidence_snippets": []
+}

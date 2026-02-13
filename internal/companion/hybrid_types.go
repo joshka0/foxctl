@@ -19,17 +19,17 @@ type ConversationEvent struct {
 
 // HardStateEntry represents a row in companion_hard_state_entries.
 type HardStateEntry struct {
-	ID           int64   `json:"id"`
+	ID             int64   `json:"id"`
 	ConversationID string  `json:"conversation_id"`
-	EntryType    string  `json:"entry_type"`
-	Key          string  `json:"key"`
-	ValueJSON    string  `json:"value_json"`
-	Status       string  `json:"status"`
-	SourceEventID int64  `json:"source_event_id"`
-	Confidence   float64 `json:"confidence"`
-	MetadataJSON *string `json:"metadata_json,omitempty"`
-	Supersedes   *int64  `json:"supersedes,omitempty"`
-	CreatedAt    string  `json:"created_at"`
+	EntryType      string  `json:"entry_type"`
+	Key            string  `json:"key"`
+	ValueJSON      string  `json:"value_json"`
+	Status         string  `json:"status"`
+	SourceEventID  int64   `json:"source_event_id"`
+	Confidence     float64 `json:"confidence"`
+	MetadataJSON   *string `json:"metadata_json,omitempty"`
+	Supersedes     *int64  `json:"supersedes,omitempty"`
+	CreatedAt      string  `json:"created_at"`
 }
 
 // SoftEpisode represents a row in companion_soft_episodes.
@@ -66,28 +66,28 @@ type EvidenceSnippet struct {
 
 // Assumption represents a row in companion_assumptions_ledger.
 type Assumption struct {
-	ID                  int64   `json:"id"`
-	ConversationID      string  `json:"conversation_id"`
-	Assumption          string  `json:"assumption"`
-	Status              string  `json:"status"`
-	Reason              *string `json:"reason,omitempty"`
-	SourceEventID       int64   `json:"source_event_id"`
-	Confidence          float64 `json:"confidence"`
-	CreatedAt           string  `json:"created_at"`
-	RetractedAt         *string `json:"retracted_at,omitempty"`
-	RetractedByEventID  *int64  `json:"retracted_by_event_id,omitempty"`
-	RetractionReason    *string `json:"retraction_reason,omitempty"`
+	ID                 int64   `json:"id"`
+	ConversationID     string  `json:"conversation_id"`
+	Assumption         string  `json:"assumption"`
+	Status             string  `json:"status"`
+	Reason             *string `json:"reason,omitempty"`
+	SourceEventID      int64   `json:"source_event_id"`
+	Confidence         float64 `json:"confidence"`
+	CreatedAt          string  `json:"created_at"`
+	RetractedAt        *string `json:"retracted_at,omitempty"`
+	RetractedByEventID *int64  `json:"retracted_by_event_id,omitempty"`
+	RetractionReason   *string `json:"retraction_reason,omitempty"`
 }
 
 // MemoryModeState represents a row in companion_memory_mode_state.
 type MemoryModeState struct {
-	ConversationID    string `json:"conversation_id"`
-	Mode             string `json:"mode"`
-	SchemaVersion    int    `json:"schema_version"`
+	ConversationID     string `json:"conversation_id"`
+	Mode               string `json:"mode"`
+	SchemaVersion      int    `json:"schema_version"`
 	LastProcessedEvent int64  `json:"last_processed_event"`
-	LastSoftEvent     int64  `json:"last_soft_event"`
-	LastEvidenceEvent int64  `json:"last_evidence_event"`
-	UpdatedAt         string `json:"updated_at"`
+	LastSoftEvent      int64  `json:"last_soft_event"`
+	LastEvidenceEvent  int64  `json:"last_evidence_event"`
+	UpdatedAt          string `json:"updated_at"`
 }
 
 // OpenEpisodeState represents a row in companion_open_episode.
@@ -97,17 +97,17 @@ type OpenEpisodeState struct {
 	EpisodeType       string  `json:"episode_type"`
 	EventCount        int     `json:"event_count"`
 	TopicSig          *string `json:"topic_sig,omitempty"`
-	PendingSealReason  *string `json:"pending_seal_reason,omitempty"`
+	PendingSealReason *string `json:"pending_seal_reason,omitempty"`
 	UpdatedAt         string  `json:"updated_at"`
 }
 
 // OpenToolRun represents a row in companion_open_tool_runs.
 type OpenToolRun struct {
-	ConversationID     string  `json:"conversation_id"`
-	ToolRunID         string  `json:"tool_run_id"`
-	StartEventID      int64   `json:"start_event_id"`
-	ParentCallEventID *int64  `json:"parent_call_event_id,omitempty"`
-	CreatedAt         string  `json:"created_at"`
+	ConversationID    string `json:"conversation_id"`
+	ToolRunID         string `json:"tool_run_id"`
+	StartEventID      int64  `json:"start_event_id"`
+	ParentCallEventID *int64 `json:"parent_call_event_id,omitempty"`
+	CreatedAt         string `json:"created_at"`
 }
 
 // ExtractionStagingEntry represents a row in companion_extraction_staging.
@@ -136,17 +136,20 @@ type HardStateCache struct {
 const (
 	EventTypeUserMessage      = "user_message"
 	EventTypeAssistantMessage = "assistant_message"
-	EventTypeToolCall        = "tool_call"
-	EventTypeToolResult      = "tool_result"
+	EventTypeToolCall         = "tool_call"
+	EventTypeToolResult       = "tool_result"
 )
 
 const (
-	EntryTypePreference   = "preference"
-	EntryTypeDecision     = "decision"
-	EntryTypeGlossary     = "glossary"
-	EntryTypeOpenQuestion = "open_question"
-	EntryTypeGoal         = "goal"
-	EntryTypePolicy       = "policy"
+	EntryTypePreference       = "preference"
+	EntryTypeDecision         = "decision"
+	EntryTypeGlossary         = "glossary"
+	EntryTypeOpenQuestion     = "open_question"
+	EntryTypeGoal             = "goal"
+	EntryTypePolicy           = "policy"
+	EntryTypeIdentity         = "identity"
+	EntryTypeRelationship     = "relationship_dynamic"
+	EntryTypeTechnicalContext = "technical_context"
 )
 
 const (
@@ -170,8 +173,8 @@ type ExtractedEntry struct {
 	Confidence float64 `json:"confidence"`
 }
 
-func strPtr(s string) *string   { return &s }
-func int64Ptr(i int64) *int64    { return &i }
+func strPtr(s string) *string { return &s }
+func int64Ptr(i int64) *int64 { return &i }
 
 const (
 	MemoryModeLegacy = "legacy"

@@ -370,8 +370,7 @@ func (m *ConversationMemory) sealEpisodeInTx(ctx context.Context, tx *sql.Tx, co
 			end_event_id = EXCLUDED.end_event_id,
 			summary = '',
 			needs_summary = 1,
-			episode_type = EXCLUDED.episode_type,
-			updated_at = CURRENT_TIMESTAMP
+			episode_type = EXCLUDED.episode_type
 		RETURNING id
 	`, convID, episodeType, startEventID, endEventID, boundaryHash).Scan(&episodeID); err != nil {
 		return 0, fmt.Errorf("insert sealed episode: %w", err)

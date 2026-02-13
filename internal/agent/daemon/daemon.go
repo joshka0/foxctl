@@ -335,6 +335,7 @@ func Run(ctx context.Context, opts Options) error {
 			MemoryDB:           stores.companionMemoryDB,
 			ExtraToolExecutor:  extraToolExecutor,
 			ExtraToolsOnly:     extraToolsOnly,
+			UseHybridMemory:    true,
 		}, nil)
 	}
 

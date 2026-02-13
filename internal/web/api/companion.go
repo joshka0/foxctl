@@ -149,7 +149,8 @@ func CompanionChatHandler(cfg config.Config, log zerolog.Logger, turnLock compan
 			log.Debug().Err(rowErr).Str("conversation_id", req.ConversationID).Msg("failed to query linked agent id")
 		}
 
-		if linkedAgentID != "" && (req.LLMProvider == "" || req.LLMModel == "" || req.ExecMode == "") {
+		var agentPrompt string
+		if linkedAgentID != "" {
 			agentStore, err := agents.Open(r.Context(), cfg.Storage.Root)
 			if err != nil {
 				log.Error().Err(err).Msg("failed to open agents store")
@@ -169,6 +170,7 @@ func CompanionChatHandler(cfg config.Config, log zerolog.Logger, turnLock compan
 				if req.ExecMode == "" && a.ExecMode != "" {
 					req.ExecMode = a.ExecMode
 				}
+				agentPrompt = strings.TrimSpace(a.Prompt)
 			}
 		}
 
@@ -191,14 +193,19 @@ func CompanionChatHandler(cfg config.Config, log zerolog.Logger, turnLock compan
 		// Create service with memory enabled and LLM credentials.
 		// The shared turnLock ensures per-conversation mutual exclusion
 		// across all HTTP requests (not just within a single Service instance).
-		svc := companion.NewService(store, companion.ServiceConfig{
-			Logger:      log,
-			MemoryDB:    memoryDB,
-			LLMProvider: llmProvider,
-			LLMAPIKey:   llmAPIKey,
-			LLMModel:    llmModel,
-			ToolsAllow:  settings.ToolsAllow,
-		}, turnLock)
+		svcCfg := companion.ServiceConfig{
+			Logger:          log,
+			MemoryDB:        memoryDB,
+			LLMProvider:     llmProvider,
+			LLMAPIKey:       llmAPIKey,
+			LLMModel:        llmModel,
+			ToolsAllow:      settings.ToolsAllow,
+			UseHybridMemory: true,
+		}
+		if agentPrompt != "" {
+			svcCfg.DefaultPersonality = agentPrompt
+		}
+		svc := companion.NewService(store, svcCfg, turnLock)
 
 		// Execute chat
 		resp, err := svc.Chat(r.Context(), req)

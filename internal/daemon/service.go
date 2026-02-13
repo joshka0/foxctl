@@ -112,6 +112,7 @@ type Service struct {
 	fileSummaryMemoryStore  storage.MemoryStore // Memory store for file summary worker (close on shutdown)
 
 	// Agent orchestration
+	agentMu           sync.Mutex
 	agentRuntime      *runtime.Runtime
 	agentOverseer     *runtime.Overseer
 	agentCtx          context.Context
@@ -1289,6 +1290,9 @@ func (s *Service) stopFileSummaryWorker() {
 // - Related: runtime.NewRuntime, runtime.NewOverseer
 // - Keywords: agent_orchestration, runtime, overseer, hook_dispatcher
 func (s *Service) startAgentOrchestration(ctx context.Context) error {
+	s.agentMu.Lock()
+	defer s.agentMu.Unlock()
+
 	// Idempotency: allow leader transitions to call start repeatedly.
 	if s.agentRuntime != nil {
 		return nil
@@ -1396,6 +1400,9 @@ func (s *Service) startAgentOrchestration(ctx context.Context) error {
 }
 
 func (s *Service) stopAgentOrchestration() {
+	s.agentMu.Lock()
+	defer s.agentMu.Unlock()
+
 	if s.agentCancel != nil {
 		s.agentCancel()
 		s.agentCancel = nil

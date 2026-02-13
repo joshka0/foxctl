@@ -26,12 +26,12 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
-	"github.com/rs/zerolog"
-
 	"github.com/jkatigb/agentctl/internal/platform/config"
+	"github.com/jkatigb/agentctl/internal/platform/logging"
 	"github.com/jkatigb/agentctl/internal/web"
 )
 
@@ -58,9 +58,29 @@ func main() {
 		os.Exit(1)
 	}
 
+	logPath := cfg.Logging.Output
+	if logPath == "" {
+		logPath = filepath.Join(os.TempDir(), "agentctl-companion.log")
+	}
+	writer, closeWriter, err := logging.OpenWriter(logPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "failed to initialize logger: %v\n", err)
+		os.Exit(1)
+	}
+	if closeWriter != nil {
+		defer func() {
+			if err := closeWriter(); err != nil {
+				fmt.Fprintf(os.Stderr, "failed to close log writer: %v\n", err)
+			}
+		}()
+	}
+
 	// Set up logger
-	logger := zerolog.New(zerolog.ConsoleWriter{Out: os.Stderr, TimeFormat: time.RFC3339}).
-		With().
+	logger := logging.New(logging.Config{
+		Level:  logging.ParseLevel(cfg.Logging.Level),
+		Format: logging.ParseFormat(cfg.Logging.Format),
+		Writer: writer,
+	}).With().
 		Timestamp().
 		Str("service", "agentctl_web").
 		Logger()

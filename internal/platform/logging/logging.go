@@ -3,8 +3,10 @@ package logging
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -81,6 +83,36 @@ func New(cfg Config) zerolog.Logger {
 
 	logger := zerolog.New(writer).Level(lvl).With().Timestamp().Logger()
 	return logger
+}
+
+// OpenWriter resolves and opens a log sink from a path.
+//
+// Special values:
+// - "" or "stderr": standard error
+// - "stdout": standard output
+//
+// For file paths, directories are created automatically.
+func OpenWriter(path string) (io.Writer, func() error, error) {
+	target := strings.TrimSpace(path)
+	switch strings.ToLower(target) {
+	case "", "stderr":
+		return os.Stderr, nil, nil
+	case "stdout":
+		return os.Stdout, nil, nil
+	}
+
+	target = os.ExpandEnv(target)
+	target = filepath.Clean(target)
+	dir := filepath.Dir(target)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return nil, nil, fmt.Errorf("create log directory: %w", err)
+	}
+
+	f, err := os.OpenFile(target, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	if err != nil {
+		return nil, nil, fmt.Errorf("open log file %s: %w", target, err)
+	}
+	return f, f.Close, nil
 }
 
 // Default returns a shared logger writing to stderr at info level.

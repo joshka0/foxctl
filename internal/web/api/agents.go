@@ -789,11 +789,12 @@ func handleAgentAsk(w http.ResponseWriter, r *http.Request, cfg config.Config, l
 
 	// Create companion service with memory and LLM credentials
 	svc := companion.NewService(store, companion.ServiceConfig{
-		Logger:      log,
-		MemoryDB:    memoryDB,
-		LLMProvider: llmProvider,
-		LLMAPIKey:   llmAPIKey,
-		LLMModel:    llmModel,
+		Logger:          log,
+		MemoryDB:        memoryDB,
+		LLMProvider:     llmProvider,
+		LLMAPIKey:       llmAPIKey,
+		LLMModel:        llmModel,
+		UseHybridMemory: true,
 	}, nil)
 
 	// Use stored conversation_id if set, otherwise agent ID - this is where the daemon agent reads from

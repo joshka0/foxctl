@@ -266,6 +266,7 @@ type CacheSettings struct {
 type LoggingSettings struct {
 	Level  string `mapstructure:"level" json:"level"`
 	Format string `mapstructure:"format" json:"format"`
+	Output string `mapstructure:"output" json:"output"`
 }
 
 // EmbeddingSettings configure embedding provider defaults.
@@ -650,6 +651,7 @@ func applyDefaults(v *viper.Viper, defaultHome string) {
 	v.SetDefault("cache.default_mode", "off")
 	v.SetDefault("logging.level", "info")
 	v.SetDefault("logging.format", "text")
+	v.SetDefault("logging.output", "")
 	v.SetDefault("embedding.provider", "voyage")
 	v.SetDefault("embedding.model", "voyage-code-3")
 	v.SetDefault("embedding.dimensions", dbdriver.DefaultVectorDimensions)
@@ -745,6 +747,13 @@ func finalizeConfig(cfg Config, home string) Config {
 	cfg.Logging.Format = strings.ToLower(strings.TrimSpace(cfg.Logging.Format))
 	if cfg.Logging.Format == "" {
 		cfg.Logging.Format = "text"
+	}
+	cfg.Logging.Output = strings.TrimSpace(cfg.Logging.Output)
+	switch strings.ToLower(cfg.Logging.Output) {
+	case "", "stderr", "stdout":
+		// keep special stream identifiers for logging.OpenWriter.
+	default:
+		cfg.Logging.Output = resolvePath(cfg.Logging.Output, cfg.Home, home)
 	}
 
 	// Database/Turso: Allow standard Turso env vars as overrides
