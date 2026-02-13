@@ -4,6 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -17,6 +19,8 @@ type CompressionDaemon struct {
 	db             *sql.DB
 	dailyInterval  time.Duration
 	weeklyInterval time.Duration
+	now            func() time.Time
+	dialect        SQLDialect
 	logger         zerolog.Logger
 	stopCh         chan struct{}
 	doneCh         chan struct{}
@@ -25,6 +29,7 @@ type CompressionDaemon struct {
 	mu             sync.Mutex
 	lastDailyRun   time.Time
 	lastWeeklyRun  time.Time
+	lastJanitorRun time.Time
 }
 
 // DaemonConfig configures the compression daemon.
@@ -42,6 +47,10 @@ type DaemonConfig struct {
 	// WeeklyInterval is how often to run weekly distillation.
 	// Default: 6 hours (checks if weekly distillation is needed)
 	WeeklyInterval time.Duration
+
+	// Dialect is the SQL dialect for query generation.
+	// Default: SQLiteDialect{}.
+	Dialect SQLDialect
 
 	// Logger for structured logging.
 	Logger zerolog.Logger
@@ -63,11 +72,18 @@ func NewCompressionDaemon(cfg DaemonConfig) *CompressionDaemon {
 		cfg.WeeklyInterval = 6 * time.Hour
 	}
 
+	dialect := cfg.Dialect
+	if dialect == nil {
+		dialect = SQLiteDialect{}
+	}
+
 	return &CompressionDaemon{
 		memory:         cfg.Memory,
 		db:             cfg.DB,
 		dailyInterval:  cfg.DailyInterval,
 		weeklyInterval: cfg.WeeklyInterval,
+		now:            time.Now,
+		dialect:        dialect,
 		logger:         cfg.Logger,
 		stopCh:         make(chan struct{}),
 		doneCh:         make(chan struct{}),
@@ -93,9 +109,10 @@ func (d *CompressionDaemon) Start(ctx context.Context) {
 		d.doneOnce.Do(func() { close(d.doneCh) }) // Ensure doneCh is closed on early failure
 		return
 	}
-	d.wg.Add(2)
+	d.wg.Add(3)
 	go d.runDailyLoop(ctx)
 	go d.runWeeklyLoop(ctx)
+	go d.runJanitorLoop(ctx)
 }
 
 // Stop stops the daemon and waits for it to finish.
@@ -156,11 +173,32 @@ func (d *CompressionDaemon) runWeeklyLoop(ctx context.Context) {
 	}
 }
 
+// runJanitorLoop runs hybrid cleanup jobs periodically.
+func (d *CompressionDaemon) runJanitorLoop(ctx context.Context) {
+	defer d.wg.Done()
+
+	ticker := time.NewTicker(30 * time.Minute)
+	defer ticker.Stop()
+
+	d.runJanitors(ctx)
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-d.stopCh:
+			return
+		case <-ticker.C:
+			d.runJanitors(ctx)
+		}
+	}
+}
+
 // runDailyCompression compresses yesterday's turns for all conversations.
 func (d *CompressionDaemon) runDailyCompression(ctx context.Context) {
 	d.mu.Lock()
 	// Only run at most every 24 hours.
-	if time.Since(d.lastDailyRun) < 24*time.Hour {
+	if d.now().Sub(d.lastDailyRun) < 24*time.Hour {
 		d.mu.Unlock()
 		return
 	}
@@ -169,12 +207,12 @@ func (d *CompressionDaemon) runDailyCompression(ctx context.Context) {
 	d.logger.Debug().Msg("Starting daily conversation compression")
 
 	// Get all conversations with turns from yesterday
-	yesterday := time.Now().AddDate(0, 0, -1).Format("2006-01-02")
-	rows, err := d.db.QueryContext(ctx, `
+	yesterday := d.now().AddDate(0, 0, -1).Format("2006-01-02")
+	rows, err := d.db.QueryContext(ctx, fmt.Sprintf(`
 		SELECT DISTINCT conversation_id
 		FROM companion_turns
-		WHERE date(created_at) = ?
-	`, yesterday)
+		WHERE date(created_at) = %s
+	`, d.dialect.Placeholder(1)), yesterday)
 	if err != nil {
 		d.logger.Error().Err(err).Msg("Failed to query conversations for daily compression")
 		return
@@ -206,6 +244,13 @@ func (d *CompressionDaemon) runDailyCompression(ctx context.Context) {
 		default:
 		}
 
+		if d.isHybridConversation(ctx, convID) {
+			d.logger.Debug().
+				Str("conversation_id", convID).
+				Msg("Skipping legacy daily compression for hybrid conversation")
+			continue
+		}
+
 		if err := d.memory.RunDailyCompression(ctx, convID); err != nil {
 			d.logger.Warn().
 				Err(err).
@@ -226,7 +271,7 @@ func (d *CompressionDaemon) runDailyCompression(ctx context.Context) {
 func (d *CompressionDaemon) runWeeklyDistillation(ctx context.Context) {
 	d.mu.Lock()
 	// Only run at most every 7 days.
-	if time.Since(d.lastWeeklyRun) < 7*24*time.Hour {
+	if d.now().Sub(d.lastWeeklyRun) < 7*24*time.Hour {
 		d.mu.Unlock()
 		return
 	}
@@ -239,12 +284,12 @@ func (d *CompressionDaemon) runWeeklyDistillation(ctx context.Context) {
 	if d.memory != nil && d.memory.config.RecentWindowDays > 0 {
 		recentWindowDays = d.memory.config.RecentWindowDays
 	}
-	cutoffDate := time.Now().AddDate(0, 0, -recentWindowDays).Format("2006-01-02")
-	rows, err := d.db.QueryContext(ctx, `
+	cutoffDate := d.now().AddDate(0, 0, -recentWindowDays).Format("2006-01-02")
+	rows, err := d.db.QueryContext(ctx, fmt.Sprintf(`
 		SELECT DISTINCT conversation_id
 		FROM companion_day_summaries
-		WHERE date < ?
-	`, cutoffDate)
+		WHERE date < %s
+	`, d.dialect.Placeholder(1)), cutoffDate)
 	if err != nil {
 		d.logger.Error().Err(err).Msg("Failed to query conversations for distillation")
 		return
@@ -274,6 +319,13 @@ func (d *CompressionDaemon) runWeeklyDistillation(ctx context.Context) {
 		case <-d.stopCh:
 			return
 		default:
+		}
+
+		if d.isHybridConversation(ctx, convID) {
+			d.logger.Debug().
+				Str("conversation_id", convID).
+				Msg("Skipping legacy distillation for hybrid conversation")
+			continue
 		}
 
 		if err := d.memory.RunWeeklyDistillation(ctx, convID); err != nil {
@@ -321,18 +373,284 @@ func (d *CompressionDaemon) Stats() DaemonStats {
 
 func (d *CompressionDaemon) markDailyRun() {
 	d.mu.Lock()
-	d.lastDailyRun = time.Now()
+	d.lastDailyRun = d.now()
 	d.mu.Unlock()
 }
 
 func (d *CompressionDaemon) markWeeklyRun() {
 	d.mu.Lock()
-	d.lastWeeklyRun = time.Now()
+	d.lastWeeklyRun = d.now()
 	d.mu.Unlock()
+}
+
+func (d *CompressionDaemon) markJanitorRun() {
+	d.mu.Lock()
+	d.lastJanitorRun = d.now()
+	d.mu.Unlock()
+}
+
+func (d *CompressionDaemon) isHybridConversation(ctx context.Context, conversationID string) bool {
+	type memoryModeGetter interface {
+		GetMemoryMode(context.Context, string) (string, error)
+	}
+
+	getter, ok := any(d.memory).(memoryModeGetter)
+	if !ok {
+		return false
+	}
+	mode, err := getter.GetMemoryMode(ctx, conversationID)
+	if err != nil {
+		return false
+	}
+	return strings.TrimSpace(mode) == "hybrid"
+}
+
+// runJanitors executes periodic hybrid janitor tasks.
+func (d *CompressionDaemon) runJanitors(ctx context.Context) {
+	d.mu.Lock()
+	if d.now().Sub(d.lastJanitorRun) < 30*time.Minute {
+		d.mu.Unlock()
+		return
+	}
+	d.mu.Unlock()
+
+	if err := d.runEvidenceJanitor(ctx); err != nil {
+		d.logger.Warn().Err(err).Msg("Evidence janitor failed")
+	}
+	if err := d.runEpisodeSummaryJanitor(ctx); err != nil {
+		d.logger.Warn().Err(err).Msg("Episode summary janitor failed")
+	}
+	if err := d.runStagingJanitor(ctx); err != nil {
+		d.logger.Warn().Err(err).Msg("Extraction staging janitor failed")
+	}
+
+	d.markJanitorRun()
+}
+
+func (d *CompressionDaemon) runEvidenceJanitor(ctx context.Context) error {
+	if d.db == nil {
+		return nil
+	}
+	type evidenceJanitor interface {
+		DeleteExpiredEvidence(context.Context) (int64, error)
+	}
+
+	if janitor, ok := any(d.memory).(evidenceJanitor); ok {
+		deleted, err := janitor.DeleteExpiredEvidence(ctx)
+		if err != nil {
+			return err
+		}
+		if deleted > 0 {
+			d.logger.Info().Int64("deleted", deleted).Msg("Evidence TTL janitor cleaned expired snippets")
+		}
+		return nil
+	}
+
+	res, err := d.db.ExecContext(ctx, `
+		DELETE FROM companion_evidence_snippets
+		WHERE expires_at IS NOT NULL AND expires_at < CURRENT_TIMESTAMP
+	`)
+	if err != nil {
+		return err
+	}
+	deleted, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if deleted > 0 {
+		d.logger.Info().Int64("deleted", deleted).Msg("Evidence TTL janitor cleaned expired snippets")
+	}
+	return nil
+}
+
+func (d *CompressionDaemon) runEpisodeSummaryJanitor(ctx context.Context) error {
+	if d.db == nil {
+		return nil
+	}
+	if !d.canSummarizeEpisode() {
+		d.logger.Debug().Msg("Episode summarizer unavailable; skipping episode summary janitor")
+		return nil
+	}
+
+	rows, err := d.db.QueryContext(ctx, `
+		SELECT id, conversation_id, start_event_id, end_event_id
+		FROM companion_soft_episodes
+		WHERE needs_summary = 1
+		ORDER BY id ASC
+		LIMIT 50
+	`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	type episodeRow struct {
+		id           int64
+		convID       string
+		startEventID int64
+		endEventID   int64
+	}
+	var episodes []episodeRow
+	for rows.Next() {
+		var e episodeRow
+		if err := rows.Scan(&e.id, &e.convID, &e.startEventID, &e.endEventID); err != nil {
+			return err
+		}
+		episodes = append(episodes, e)
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	if len(episodes) == 0 {
+		return nil
+	}
+
+	updated := 0
+	for _, ep := range episodes {
+		summary, tokenCount, err := d.summarizeEpisode(ctx, ep.convID, ep.id, ep.startEventID, ep.endEventID)
+		if err != nil {
+			d.logger.Warn().Err(err).
+				Str("conversation_id", ep.convID).
+				Int64("episode_id", ep.id).
+				Msg("Episode summary generation failed, retry later")
+			continue
+		}
+
+		res, err := d.db.ExecContext(ctx, fmt.Sprintf(`
+			UPDATE companion_soft_episodes
+			SET summary = %s, needs_summary = 0, token_count = %s
+			WHERE id = %s
+		`, d.dialect.Placeholder(1), d.dialect.Placeholder(2), d.dialect.Placeholder(3)), summary, tokenCount, ep.id)
+		if err != nil {
+			d.logger.Warn().Err(err).
+				Str("conversation_id", ep.convID).
+				Int64("episode_id", ep.id).
+				Msg("Failed to update generated episode summary")
+			continue
+		}
+		affected, err := res.RowsAffected()
+		if err == nil {
+			updated += int(affected)
+		}
+	}
+
+	if updated > 0 {
+		d.logger.Info().Int("updated", updated).Msg("Episode summary janitor generated summaries")
+	}
+	return nil
+}
+
+func (d *CompressionDaemon) summarizeEpisode(ctx context.Context, conversationID string, episodeID, startEventID, endEventID int64) (string, int, error) {
+	type summarizerA interface {
+		SummarizeEpisode(context.Context, string, int64, int64, int64) (string, int, error)
+	}
+	type summarizerB interface {
+		SummarizeEpisode(context.Context, int64, int64, int64) (string, int, error)
+	}
+	type summarizerC interface {
+		SummarizeEpisode(context.Context, int64) (string, int, error)
+	}
+
+	if s, ok := any(d.memory).(summarizerA); ok {
+		return s.SummarizeEpisode(ctx, conversationID, episodeID, startEventID, endEventID)
+	}
+	if s, ok := any(d.memory).(summarizerB); ok {
+		return s.SummarizeEpisode(ctx, episodeID, startEventID, endEventID)
+	}
+	if s, ok := any(d.memory).(summarizerC); ok {
+		return s.SummarizeEpisode(ctx, episodeID)
+	}
+
+	return "", 0, errors.New("episode summarizer helper unavailable")
+}
+
+func (d *CompressionDaemon) canSummarizeEpisode() bool {
+	type summarizerA interface {
+		SummarizeEpisode(context.Context, string, int64, int64, int64) (string, int, error)
+	}
+	type summarizerB interface {
+		SummarizeEpisode(context.Context, int64, int64, int64) (string, int, error)
+	}
+	type summarizerC interface {
+		SummarizeEpisode(context.Context, int64) (string, int, error)
+	}
+
+	_, hasA := any(d.memory).(summarizerA)
+	_, hasB := any(d.memory).(summarizerB)
+	_, hasC := any(d.memory).(summarizerC)
+	return hasA || hasB || hasC
+}
+
+func (d *CompressionDaemon) runStagingJanitor(ctx context.Context) error {
+	if d.db == nil {
+		return nil
+	}
+	rows, err := d.db.QueryContext(ctx, `
+		SELECT id, conversation_id, source_event_id, proposed_entry_type, raw_text, reason, attempt_count
+		FROM companion_extraction_staging
+		WHERE resolved_at IS NULL AND discarded_at IS NULL AND attempt_count < 3
+		ORDER BY id ASC
+	`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	type stagingRow struct {
+		id           int64
+		conversation string
+		sourceEvent  int64
+		entryType    string
+		rawText      string
+		reason       string
+		attempts     int
+	}
+	var entries []stagingRow
+	for rows.Next() {
+		var e stagingRow
+		if err := rows.Scan(&e.id, &e.conversation, &e.sourceEvent, &e.entryType, &e.rawText, &e.reason, &e.attempts); err != nil {
+			return err
+		}
+		entries = append(entries, e)
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+
+	for _, entry := range entries {
+		nextAttempts := entry.attempts + 1
+
+		// Attempt normalization via daemon pass.
+		// In this implementation, staging entries are considered attempted every run.
+		// Max attempts is 3 (0, 1, 2), then the entry is discarded.
+		if nextAttempts >= 3 {
+			if _, err := d.db.ExecContext(ctx, fmt.Sprintf(`
+				UPDATE companion_extraction_staging
+				SET attempt_count = attempt_count + 1,
+					discarded_at = CURRENT_TIMESTAMP,
+					discard_reason = COALESCE(discard_reason, 'max_attempts_exceeded')
+				WHERE id = %s AND resolved_at IS NULL AND discarded_at IS NULL
+			`, d.dialect.Placeholder(1)), entry.id); err != nil {
+				return err
+			}
+			continue
+		}
+
+		if _, err := d.db.ExecContext(ctx, fmt.Sprintf(`
+			UPDATE companion_extraction_staging
+			SET attempt_count = attempt_count + 1
+			WHERE id = %s
+		`, d.dialect.Placeholder(1)), entry.id); err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 // DaemonStats contains daemon statistics.
 type DaemonStats struct {
 	LastDailyRun  time.Time `json:"last_daily_run"`
 	LastWeeklyRun time.Time `json:"last_weekly_run"`
+	LastJanitorRun time.Time `json:"last_janitor_run"`
 }

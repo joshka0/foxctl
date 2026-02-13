@@ -292,10 +292,19 @@ func CompanionContextGetHandler(cfg config.Config, log zerolog.Logger) http.Hand
 		}
 		defer store.Close()
 
+		// Open companion memory database so context reads can include hybrid metadata.
+		dbPath := filepath.Join(cfg.Storage.Root, "companion.db")
+		svcCfg := companion.ServiceConfig{Logger: log}
+		if memoryDB, closeFn, err := dbutil.OpenStoreDB(r.Context(), cfg.Storage.Root, "COMPANION", filepath.Base(dbPath), nil); err == nil {
+			defer func() { _ = closeFn() }()
+			svcCfg.MemoryDB = memoryDB
+			svcCfg.UseHybridMemory = true
+		} else {
+			log.Debug().Err(err).Msg("failed to open companion memory database; returning legacy context")
+		}
+
 		// Create service
-		svc := companion.NewService(store, companion.ServiceConfig{
-			Logger: log,
-		}, nil)
+		svc := companion.NewService(store, svcCfg, nil)
 
 		// Get context
 		resp, err := svc.GetContext(r.Context(), conversationID)

@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"database/sql"
 	"context"
 	"encoding/json"
 	"errors"
@@ -19,11 +20,15 @@ type RLMToolExecutor struct {
 	store          contextvar.Store
 	conversationID string
 	queryCount     int // Tracks queries per turn for validation
+	companionDB    *sql.DB
 
 	// Optional: for semantic search over named memories
 	memoryStore   storage.MemoryStore
 	workspace     string
 	embedProvider semantic.EmbeddingProvider
+
+	// sqlPlaceholder generates SQL parameter placeholders ($1, $2, etc.).
+	sqlPlaceholder func(int) string
 }
 
 // NewRLMToolExecutor creates a new RLM tool executor.
@@ -37,7 +42,21 @@ func NewRLMToolExecutor(store contextvar.Store, conversationID string) *RLMToolE
 	return &RLMToolExecutor{
 		store:          store,
 		conversationID: conversationID,
+		sqlPlaceholder: func(_ int) string { return "?" },
 	}
+}
+
+// ph returns the SQL parameter placeholder for the nth parameter.
+func (e *RLMToolExecutor) ph(n int) string {
+	if e.sqlPlaceholder != nil {
+		return e.sqlPlaceholder(n)
+	}
+	return "?"
+}
+
+// SetSQLPlaceholder configures the SQL placeholder generator function.
+func (e *RLMToolExecutor) SetSQLPlaceholder(fn func(int) string) {
+	e.sqlPlaceholder = fn
 }
 
 // ResetQueryCount resets the query counter (call at start of each turn).
@@ -56,6 +75,11 @@ func (e *RLMToolExecutor) SetMemoryStore(store storage.MemoryStore, workspace st
 // Required for vector-based semantic search; falls back to text search if nil.
 func (e *RLMToolExecutor) SetEmbedProvider(provider semantic.EmbeddingProvider) {
 	e.embedProvider = provider
+}
+
+// SetCompanionDB configures the companion memory database for hybrid memory queries.
+func (e *RLMToolExecutor) SetCompanionDB(db *sql.DB) {
+	e.companionDB = db
 }
 
 // QueryCount returns the number of context queries this turn.
@@ -416,6 +440,16 @@ func (e *RLMToolExecutor) executeQuery(ctx context.Context, args json.RawMessage
 // - Related: storage.MemoryStore.SearchSimilarByType, storage.MemoryStore.Search
 // - Keywords: semantic_query, memory_store, embeddings, companion_history, scored_entry
 func (e *RLMToolExecutor) executeSemanticQuery(ctx context.Context, input ContextQueryInput) (string, error) {
+	// If hybrid mode is enabled for this conversation, prioritize trusted hybrid sources.
+	if e.isHybridConversation(ctx) {
+		return e.executeHybridSemanticQuery(ctx, input)
+	}
+
+	// Legacy path: search companion_summary + companion_history from the memory store.
+	return e.executeLegacySemanticQuery(ctx, input)
+}
+
+func (e *RLMToolExecutor) executeLegacySemanticQuery(ctx context.Context, input ContextQueryInput) (string, error) {
 	// Check if memory store is configured
 	if e.memoryStore == nil {
 		return `{"memories": [], "message": "Memory store not configured for semantic search"}`, nil
@@ -613,6 +647,385 @@ func (e *RLMToolExecutor) executeSemanticQuery(ctx context.Context, input Contex
 	}
 
 	return string(b), nil
+}
+
+func (e *RLMToolExecutor) executeHybridSemanticQuery(ctx context.Context, input ContextQueryInput) (string, error) {
+	const (
+		defaultLimit    = 10
+		maxLimit        = 20
+		defaultMaxChars = 6000
+		maxSummaryChars = 1200
+	)
+
+	limit := defaultLimit
+	if input.Limit > 0 {
+		limit = input.Limit
+	}
+	if limit > maxLimit {
+		limit = maxLimit
+	}
+
+	results := make([]map[string]interface{}, 0, limit)
+	truncated := false
+	method := "hybrid"
+
+	remaining := limit
+	add := func(name, entryType string, summary string, score float64, sourceEventID int64, eventType string, confidence float64, canVerify bool) {
+		if remaining <= 0 || name == "" {
+			return
+		}
+		summary = strings.TrimSpace(summary)
+		if len(summary) > maxSummaryChars {
+			summary = summary[:maxSummaryChars] + "..."
+			truncated = true
+		}
+
+		results = append(results, map[string]interface{}{
+			"name":            name,
+			"type":            entryType,
+			"layer":           layerFromType(entryType),
+			"summary":         summary,
+			"score":           score,
+			"source_event_id": sourceEventID,
+			"event_type":      eventType,
+			"confidence":      confidence,
+			"can_verify":      canVerify,
+		})
+		remaining--
+	}
+
+	// Hard-state entries are prioritized for high-signal facts.
+	remaining = e.appendHybridHardState(ctx, remaining, add)
+	// Soft episodes provide broader context and narrative continuity.
+	remaining = e.appendHybridEpisodes(ctx, remaining, add)
+	// Evidence snippets provide grounding and source links for query-time grounding.
+	remaining = e.appendHybridEvidence(ctx, input.SemanticQuery, remaining, add)
+
+	output := map[string]interface{}{
+		"memories": results,
+		"found":    len(results) > 0,
+		"count":    len(results),
+		"query":    input.SemanticQuery,
+		"stats": map[string]interface{}{
+			"method":    method,
+			"max_chars": defaultMaxChars,
+			"truncated": truncated,
+		},
+	}
+
+	b, _ := json.Marshal(output)
+	if len(b) > defaultMaxChars {
+		for i := range results {
+			results[i]["summary"] = ""
+		}
+		output["stats"].(map[string]interface{})["truncated"] = true
+		b, _ = json.Marshal(output)
+		if len(b) > defaultMaxChars && len(results) > 0 {
+			output["memories"] = results[:1]
+			output["count"] = 1
+			b, _ = json.Marshal(output)
+		}
+	}
+
+	return string(b), nil
+}
+
+func (e *RLMToolExecutor) isHybridConversation(ctx context.Context) bool {
+	if e.companionDB == nil || strings.TrimSpace(e.conversationID) == "" {
+		return false
+	}
+
+	var mode string
+	if err := e.companionDB.QueryRowContext(ctx, fmt.Sprintf(`
+		SELECT mode
+		FROM companion_memory_mode_state
+		WHERE conversation_id = %s
+	`, e.ph(1)), e.conversationID).Scan(&mode); err != nil {
+		return false
+	}
+
+	return strings.TrimSpace(strings.ToLower(mode)) == "hybrid"
+}
+
+func (e *RLMToolExecutor) appendHybridHardState(ctx context.Context, remaining int, add func(name, entryType, summary string, score float64, sourceEventID int64, eventType string, confidence float64, canVerify bool)) int {
+	if e.companionDB == nil || remaining <= 0 {
+		return remaining
+	}
+
+	// Use "last write wins" materialization: latest row per (entry_type, key) wins
+	// regardless of status, then only include active entries. This prevents
+	// retraction resurrection where an older active row would shadow a newer retraction.
+	rows, err := e.companionDB.QueryContext(ctx, fmt.Sprintf(`
+		SELECT id, source_event_id, entry_type, key, value_json, confidence
+		FROM (
+			SELECT id, source_event_id, entry_type, key, value_json, confidence, status,
+				ROW_NUMBER() OVER (PARTITION BY entry_type, key ORDER BY id DESC) AS rn
+			FROM companion_hard_state_entries
+			WHERE conversation_id = %s
+		) sub
+		WHERE rn = 1 AND status = 'active'
+		LIMIT %s
+	`, e.ph(1), e.ph(2)), e.conversationID, remaining)
+	if err != nil {
+		return remaining
+	}
+	defer rows.Close()
+
+	for rows.Next() && remaining > 0 {
+		var id int64
+		var sourceEventID sql.NullInt64
+		var entryType string
+		var key, valueJSON string
+		var confidence sql.NullFloat64
+		if err := rows.Scan(&id, &sourceEventID, &entryType, &key, &valueJSON, &confidence); err != nil {
+			break
+		}
+
+		name := strings.TrimSpace(entryType)
+		if key != "" {
+			name = name + ":" + key
+		}
+
+		eventID := int64(0)
+		if sourceEventID.Valid {
+			eventID = sourceEventID.Int64
+		}
+		summary := flattenJSONText(valueJSON)
+		confidenceValue := 0.0
+		if confidence.Valid {
+			confidenceValue = confidence.Float64
+		}
+
+		canVerify := e.canVerifyEvidenceSource(ctx, eventID)
+		add(name, "companion_hard_state", summary, 1.0, eventID, entryType, confidenceValue, canVerify)
+		remaining--
+	}
+	return remaining
+}
+
+func (e *RLMToolExecutor) appendHybridEpisodes(ctx context.Context, remaining int, add func(name, entryType, summary string, score float64, sourceEventID int64, eventType string, confidence float64, canVerify bool)) int {
+	if e.companionDB == nil || remaining <= 0 {
+		return remaining
+	}
+
+	rows, err := e.companionDB.QueryContext(ctx, fmt.Sprintf(`
+		SELECT id, episode_type, summary
+		FROM companion_soft_episodes
+		WHERE conversation_id = %s
+		  AND needs_summary = 0
+		ORDER BY end_event_id DESC
+	`, e.ph(1)), e.conversationID)
+	if err != nil {
+		return remaining
+	}
+	defer rows.Close()
+
+	for rows.Next() && remaining > 0 {
+		var id int64
+		var episodeType, summary string
+		if err := rows.Scan(&id, &episodeType, &summary); err != nil {
+			break
+		}
+
+		add(fmt.Sprintf("companion_soft_episode:%d", id), "companion_soft_episode", summary, 0.8, 0, episodeType, 0.8, true)
+		remaining--
+	}
+	return remaining
+}
+
+func (e *RLMToolExecutor) appendHybridEvidence(ctx context.Context, query string, remaining int, add func(name, entryType, summary string, score float64, sourceEventID int64, eventType string, confidence float64, canVerify bool)) int {
+	if strings.TrimSpace(query) == "" || e.companionDB == nil || remaining <= 0 {
+		return remaining
+	}
+
+	limit := remaining
+
+	evidenceRows := e.queryEvidenceFTS(ctx, query, limit)
+	for _, row := range evidenceRows {
+		if remaining <= 0 {
+			break
+		}
+		evidence, ok := row.(map[string]interface{})
+		if !ok {
+			continue
+		}
+
+		sourceEventID, _ := evidence["source_event_id"].(int64)
+		confidence := 0.5
+		if rawConfidence, ok := evidence["confidence"]; ok {
+			switch v := rawConfidence.(type) {
+			case float64:
+				confidence = v
+			case int64:
+				confidence = float64(v)
+			}
+		}
+		eventType, _ := evidence["event_type"].(string)
+		factText, _ := evidence["fact_text"].(string)
+		evidenceID, _ := evidence["id"].(int64)
+		canVerify := e.canVerifyEvidenceSource(ctx, sourceEventID)
+
+		add(fmt.Sprintf("companion_evidence:%d", evidenceID), "companion_evidence_snippet", factText, 0.7, sourceEventID, eventType, confidence, canVerify)
+		remaining--
+	}
+
+	return remaining
+}
+
+func (e *RLMToolExecutor) queryEvidenceFTS(ctx context.Context, query string, limit int) []interface{} {
+	if e.companionDB == nil {
+		return nil
+	}
+
+	rows, err := e.companionDB.QueryContext(ctx, fmt.Sprintf(`
+		SELECT e.id, e.source_event_id, e.event_type, e.confidence, e.fact_text
+		FROM companion_evidence_fts
+		JOIN companion_evidence_snippets e ON e.id = companion_evidence_fts.rowid
+		WHERE companion_evidence_fts MATCH %s AND e.conversation_id = %s
+		ORDER BY bm25(companion_evidence_fts)
+		LIMIT %s
+	`, e.ph(1), e.ph(2), e.ph(3)), query, e.conversationID, limit)
+	if err == nil {
+		defer rows.Close()
+
+		var matches []interface{}
+		for rows.Next() {
+			var id int64
+			var sourceEventID sql.NullInt64
+			var eventType string
+			var confidence sql.NullFloat64
+			var factText string
+
+			if err := rows.Scan(&id, &sourceEventID, &eventType, &confidence, &factText); err != nil {
+				return matches
+			}
+
+			eventSource := int64(0)
+			if sourceEventID.Valid {
+				eventSource = sourceEventID.Int64
+			}
+
+			confidenceValue := 0.5
+			if confidence.Valid {
+				confidenceValue = confidence.Float64
+			}
+
+			matches = append(matches, map[string]interface{}{
+				"id":             id,
+				"source_event_id": eventSource,
+				"event_type":     eventType,
+				"confidence":     confidenceValue,
+				"fact_text":      factText,
+			})
+		}
+
+		return matches
+	}
+
+	rows, err = e.companionDB.QueryContext(ctx, fmt.Sprintf(`
+		SELECT id, source_event_id, event_type, confidence, fact_text
+		FROM companion_evidence_snippets
+		WHERE conversation_id = %s AND fact_text LIKE %s
+		ORDER BY created_at DESC
+		LIMIT %s
+	`, e.ph(1), e.ph(2), e.ph(3)), e.conversationID, "%"+query+"%", limit)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+
+	var matches []interface{}
+	for rows.Next() {
+		var id int64
+		var sourceEventID sql.NullInt64
+		var eventType string
+		var confidence sql.NullFloat64
+		var factText string
+		if err := rows.Scan(&id, &sourceEventID, &eventType, &confidence, &factText); err != nil {
+			return matches
+		}
+
+		eventSource := int64(0)
+		if sourceEventID.Valid {
+			eventSource = sourceEventID.Int64
+		}
+
+		confidenceValue := 0.5
+		if confidence.Valid {
+			confidenceValue = confidence.Float64
+		}
+
+		matches = append(matches, map[string]interface{}{
+			"id":             id,
+			"source_event_id": eventSource,
+			"event_type":     eventType,
+			"confidence":     confidenceValue,
+			"fact_text":      factText,
+		})
+	}
+
+	return matches
+}
+
+func (e *RLMToolExecutor) canVerifyEvidenceSource(ctx context.Context, sourceEventID int64) bool {
+	if e.companionDB == nil || sourceEventID == 0 {
+		return false
+	}
+
+	var payload sql.NullString
+	if err := e.companionDB.QueryRowContext(ctx, fmt.Sprintf(`
+		SELECT payload_json
+		FROM companion_events
+		WHERE id = %s
+	`, e.ph(1)), sourceEventID).Scan(&payload); err != nil {
+		return false
+	}
+	if !payload.Valid || strings.TrimSpace(payload.String) == "" {
+		return false
+	}
+	if strings.TrimSpace(payload.String) == `{"redacted":true}` {
+		return false
+	}
+	return true
+}
+
+func flattenJSONText(raw string) string {
+	const maxJSONSummaryChars = 1200
+
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+
+	var asObject map[string]interface{}
+	if err := json.Unmarshal([]byte(raw), &asObject); err == nil {
+		if value, ok := asObject["value"].(string); ok && strings.TrimSpace(value) != "" {
+			return strings.TrimSpace(value)
+		}
+		for _, key := range []string{"summary", "value_json", "content", "name"} {
+			if value, ok := asObject[key].(string); ok && strings.TrimSpace(value) != "" {
+				return strings.TrimSpace(value)
+			}
+		}
+	}
+
+	if len(raw) > maxJSONSummaryChars {
+		return raw[:maxJSONSummaryChars] + "..."
+	}
+	return raw
+}
+
+func layerFromType(entryType string) string {
+	switch entryType {
+	case "companion_hard_state":
+		return "H1"
+	case "companion_soft_episode":
+		return "E1"
+	case "companion_evidence_snippet":
+		return "EVD"
+	default:
+		return ""
+	}
 }
 
 func memoryLayer(entryType string) string {

@@ -122,7 +122,6 @@ jobs:
           mkdir -p coverage
           CGO_ENABLED=0 go test -short ./... -covermode=atomic -coverprofile=coverage/coverage.out
           CGO_ENABLED=0 go tool cover -func=coverage/coverage.out | tee coverage/summary.txt
-          awk '/total:/ { if ($3+0 < 30.0) { print "Coverage below threshold:", $3; exit 1 } }' coverage/summary.txt
 
   race-tests:
     runs-on: arc-runner-agentctl

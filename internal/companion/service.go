@@ -35,6 +35,7 @@ const defaultMaxHistoryTurns = 50
 type Service struct {
 	contextStore contextvar.Store
 	memory       *ConversationMemory
+	memoryDB     *sql.DB
 	config       ServiceConfig
 	logger       zerolog.Logger
 
@@ -87,6 +88,9 @@ type ServiceConfig struct {
 	// MemoryDB is the database for conversation memory (optional).
 	// If nil, memory features are disabled.
 	MemoryDB *sql.DB
+
+	// UseHybridMemory enables the hybrid memory pipeline for new conversations.
+	UseHybridMemory bool
 
 	// MemoryConfig configures conversation memory behavior.
 	MemoryConfig *MemoryConfig
@@ -207,6 +211,7 @@ func NewService(store contextvar.Store, cfg ServiceConfig, turnLock Locker) *Ser
 		contextStore: store,
 		config:       cfg,
 		logger:       cfg.Logger,
+		memoryDB:     cfg.MemoryDB,
 
 		turnLock: turnLock,
 
@@ -499,6 +504,9 @@ func (s *Service) Chat(ctx context.Context, req ChatRequest) (*ChatResponse, err
 
 	// Create RLM tool executor
 	rlmExecutor := engine.NewRLMToolExecutor(s.contextStore, req.ConversationID)
+	if s.memoryDB != nil {
+		rlmExecutor.SetCompanionDB(s.memoryDB)
+	}
 
 	// Enable semantic search over companion memories if memory store is configured
 	if s.config.MemoryStore != nil && s.config.MemoryWorkspace != "" {
@@ -1296,14 +1304,33 @@ func (s *Service) buildSystemPrompt(ctx context.Context, req ChatRequest) (strin
 	// Include conversation memory context if available
 	s.logger.Debug().Bool("memory_available", s.memory != nil).Str("conversation_id", req.ConversationID).Msg("Checking memory for chat")
 	if s.memory != nil {
-		memoryContext, err := s.memory.GetContext(ctx, req.ConversationID)
-		if err != nil {
-			s.logger.Warn().Err(err).Msg("Failed to get memory context")
-		} else if memoryContext != "" {
-			s.logger.Debug().Int("context_len", len(memoryContext)).Msg("Memory context retrieved, injecting into prompt")
-			systemPrompt = systemPrompt + "\n\n# Conversation Memory\n" + memoryContext
-		} else {
-			s.logger.Debug().Msg("Memory context is empty")
+		usedHybridContext := false
+		// Prefer hybrid memory context when enabled.
+		if s.config.UseHybridMemory && s.supportsHybridMemory() {
+			if mode, err := s.getMemoryMode(ctx, req.ConversationID); err == nil && strings.TrimSpace(mode) == "hybrid" {
+				hybridCtx, err := s.getHybridContext(ctx, req.ConversationID, "")
+				if err != nil {
+					s.logger.Warn().Err(err).Msg("Failed to get hybrid memory context")
+				} else if strings.TrimSpace(hybridCtx) != "" {
+					usedHybridContext = true
+					s.logger.Debug().Int("context_len", len(hybridCtx)).Msg("Hybrid memory context retrieved, injecting into prompt")
+					systemPrompt = systemPrompt + "\n\n# Conversation Memory\n" + hybridCtx
+				}
+			} else if err != nil {
+				s.logger.Warn().Err(err).Msg("Failed to check hybrid memory mode")
+			}
+		}
+
+		if !usedHybridContext {
+			memoryContext, err := s.memory.GetContext(ctx, req.ConversationID)
+			if err != nil {
+				s.logger.Warn().Err(err).Msg("Failed to get memory context")
+			} else if memoryContext != "" {
+				s.logger.Debug().Int("context_len", len(memoryContext)).Msg("Memory context retrieved, injecting into prompt")
+				systemPrompt = systemPrompt + "\n\n# Conversation Memory\n" + memoryContext
+			} else {
+				s.logger.Debug().Msg("Memory context is empty")
+			}
 		}
 	} else {
 		s.logger.Debug().Msg("Memory is nil, skipping context injection")
@@ -1492,6 +1519,24 @@ func (s *Service) autoCompress(ctx context.Context, conversationID string) {
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
 
+	if s.config.UseHybridMemory && s.supportsHybridMemory() {
+		mode, err := s.getMemoryMode(ctx, conversationID)
+		if err != nil {
+			s.logger.Debug().Err(err).Str("conversation_id", conversationID).Msg("Failed to check memory mode")
+		}
+		if mode == "hybrid" || (mode == "" && s.config.UseHybridMemory) {
+			if err := s.ensureHybridMode(ctx, conversationID); err != nil {
+				s.logger.Debug().Err(err).Msg("Failed to ensure hybrid mode")
+			}
+
+			if err := s.buildHybridContext(ctx, conversationID); err != nil {
+				s.logger.Debug().Err(err).Msg("Hybrid pipeline failed, falling back to legacy")
+			} else {
+				return
+			}
+		}
+	}
+
 	// L1: summarize the next pending day (catch-up/backfill)
 	if err := s.memory.RunPendingDailyCompression(ctx, conversationID); err != nil {
 		// "no summarizer configured" is expected when LLM is not set up for summarization
@@ -1585,11 +1630,30 @@ func (s *Service) GetContext(ctx context.Context, conversationID string) (*Conte
 		}
 	}
 
-	return &ContextGetResponse{
+	response := &ContextGetResponse{
 		ConversationID: conversationID,
 		Variables:      variables,
 		TotalCount:     result.TotalCount,
-	}, nil
+	}
+
+	if s.config.UseHybridMemory && s.supportsHybridMemory() {
+		mode, err := s.getMemoryMode(ctx, conversationID)
+		if err != nil {
+			s.logger.Debug().Err(err).Str("conversation_id", conversationID).Msg("Failed to check memory mode for context")
+		}
+		if strings.TrimSpace(mode) == "hybrid" {
+			hybridCtx, err := s.getHybridContext(ctx, conversationID, "")
+			if err == nil {
+				response.HybridContext = hybridCtx
+			}
+			state, err := s.getHybridContextState(ctx, conversationID)
+			if err == nil {
+				response.HybridState = state
+			}
+		}
+	}
+
+	return response, nil
 }
 
 // DeleteContext removes a context variable.
@@ -1638,6 +1702,18 @@ type ContextGetResponse struct {
 	ConversationID string            `json:"conversation_id"`
 	Variables      []ContextVariable `json:"variables"`
 	TotalCount     int               `json:"total_count"`
+	HybridContext  string            `json:"hybrid_context,omitempty"`
+	HybridState    *HybridDebugInfo `json:"hybrid_state,omitempty"`
+}
+
+// HybridDebugInfo contains optional hybrid pipeline state for diagnostics.
+type HybridDebugInfo struct {
+	Mode               string `json:"mode"`
+	LastProcessedEvent int64  `json:"last_processed_event"`
+	HardStateCount     int    `json:"hard_state_count"`
+	EpisodeCount         int    `json:"episode_count"`
+	NeedsSummaryEpisodes int    `json:"needs_summary_episodes"`
+	EvidenceCount        int    `json:"evidence_count"`
 }
 
 // ContextVariable is a context variable in API responses.
@@ -1686,6 +1762,164 @@ func (s *Service) GetMemoryContext(ctx context.Context, conversationID string) (
 		return "", fmt.Errorf("memory features not enabled")
 	}
 	return s.memory.GetContext(ctx, conversationID)
+}
+
+func (s *Service) supportsHybridMemory() bool {
+	if s.memory == nil {
+		return false
+	}
+
+	type modeGetter interface {
+		GetMemoryMode(context.Context, string) (string, error)
+	}
+	type modeInitializer interface {
+		EnsureHybridMode(context.Context, string) error
+	}
+	type contextBuilder interface {
+		BuildHybridContextLayers(context.Context, string) error
+	}
+	type contextReader interface {
+		GetHybridContext(context.Context, string, string) (string, error)
+	}
+
+	_, hasMode := any(s.memory).(modeGetter)
+	_, hasInitializer := any(s.memory).(modeInitializer)
+	_, hasBuilder := any(s.memory).(contextBuilder)
+	_, hasReader := any(s.memory).(contextReader)
+	return hasMode && hasInitializer && hasBuilder && hasReader
+}
+
+func (s *Service) getMemoryMode(ctx context.Context, conversationID string) (string, error) {
+	type modeGetter interface {
+		GetMemoryMode(context.Context, string) (string, error)
+	}
+
+	getter, ok := any(s.memory).(modeGetter)
+	if !ok {
+		return "", fmt.Errorf("hybrid memory mode API unavailable")
+	}
+	return getter.GetMemoryMode(ctx, conversationID)
+}
+
+func (s *Service) ensureHybridMode(ctx context.Context, conversationID string) error {
+	type modeInitializer interface {
+		EnsureHybridMode(context.Context, string) error
+	}
+
+	initializer, ok := any(s.memory).(modeInitializer)
+	if !ok {
+		return fmt.Errorf("hybrid mode initialize API unavailable")
+	}
+	return initializer.EnsureHybridMode(ctx, conversationID)
+}
+
+func (s *Service) buildHybridContext(ctx context.Context, conversationID string) error {
+	type contextBuilder interface {
+		BuildHybridContextLayers(context.Context, string) error
+	}
+
+	builder, ok := any(s.memory).(contextBuilder)
+	if !ok {
+		return fmt.Errorf("hybrid context build API unavailable")
+	}
+	return builder.BuildHybridContextLayers(ctx, conversationID)
+}
+
+func (s *Service) getHybridContext(ctx context.Context, conversationID, query string) (string, error) {
+	type contextReader interface {
+		GetHybridContext(context.Context, string, string) (string, error)
+	}
+
+	reader, ok := any(s.memory).(contextReader)
+	if !ok {
+		return "", fmt.Errorf("hybrid context API unavailable")
+	}
+	return reader.GetHybridContext(ctx, conversationID, query)
+}
+
+func (s *Service) getHybridContextState(ctx context.Context, conversationID string) (*HybridDebugInfo, error) {
+	if s.memoryDB == nil {
+		return nil, nil
+	}
+
+	info := &HybridDebugInfo{Mode: "hybrid"}
+
+	var lastProcessedEvent sql.NullInt64
+	if err := s.memoryDB.QueryRowContext(ctx, `
+		SELECT last_processed_event
+		FROM companion_memory_mode_state
+		WHERE conversation_id = $1
+	`, conversationID).Scan(&lastProcessedEvent); err == nil {
+		if lastProcessedEvent.Valid {
+			info.LastProcessedEvent = lastProcessedEvent.Int64
+		}
+	} else if !isMissingHybridTableError(err) {
+		s.logger.Debug().Err(err).Str("conversation_id", conversationID).Msg("Failed to read companion_memory_mode_state")
+	}
+
+	var hardStateCount sql.NullInt64
+	if err := s.memoryDB.QueryRowContext(ctx, `
+		SELECT COUNT(1)
+		FROM companion_hard_state_entries
+		WHERE conversation_id = $1
+	`, conversationID).Scan(&hardStateCount); err == nil {
+		if hardStateCount.Valid {
+			info.HardStateCount = int(hardStateCount.Int64)
+		}
+	} else if !isMissingHybridTableError(err) {
+		s.logger.Debug().Err(err).Str("conversation_id", conversationID).Msg("Failed to count companion_hard_state_entries")
+	}
+
+	var episodeCount sql.NullInt64
+	if err := s.memoryDB.QueryRowContext(ctx, `
+		SELECT COUNT(1)
+		FROM companion_soft_episodes
+		WHERE conversation_id = $1
+	`, conversationID).Scan(&episodeCount); err == nil {
+		if episodeCount.Valid {
+			info.EpisodeCount = int(episodeCount.Int64)
+		}
+	} else if !isMissingHybridTableError(err) {
+		s.logger.Debug().Err(err).Str("conversation_id", conversationID).Msg("Failed to count companion_soft_episodes")
+	}
+
+	var needsSummaryEpisodes sql.NullInt64
+	if err := s.memoryDB.QueryRowContext(ctx, `
+		SELECT COUNT(1)
+		FROM companion_soft_episodes
+		WHERE conversation_id = $1 AND needs_summary = 1
+	`, conversationID).Scan(&needsSummaryEpisodes); err == nil {
+		if needsSummaryEpisodes.Valid {
+			info.NeedsSummaryEpisodes = int(needsSummaryEpisodes.Int64)
+		}
+	} else if !isMissingHybridTableError(err) {
+		s.logger.Debug().Err(err).Str("conversation_id", conversationID).Msg("Failed to count companion_soft_episodes needing summaries")
+	}
+
+	var evidenceCount sql.NullInt64
+	if err := s.memoryDB.QueryRowContext(ctx, `
+		SELECT COUNT(1)
+		FROM companion_evidence_snippets
+		WHERE conversation_id = $1
+	`, conversationID).Scan(&evidenceCount); err == nil {
+		if evidenceCount.Valid {
+			info.EvidenceCount = int(evidenceCount.Int64)
+		}
+	} else if !isMissingHybridTableError(err) {
+		s.logger.Debug().Err(err).Str("conversation_id", conversationID).Msg("Failed to count companion_evidence_snippets")
+	}
+
+	return info, nil
+}
+
+func isMissingHybridTableError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "no such table") ||
+		strings.Contains(msg, "does not exist") ||
+		strings.Contains(msg, "doesn't exist")
 }
 
 // ExportMemory exports all memory state for debugging/inspection.

@@ -391,6 +391,184 @@ func (m *ConversationMemory) ensureSchema(ctx context.Context) error {
 			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 			updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 		);
+
+		-- Unified event log (messages + tool calls/results)
+		CREATE TABLE IF NOT EXISTS companion_events (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			conversation_id TEXT NOT NULL,
+			event_type TEXT NOT NULL,
+			turn_id TEXT,
+			tool_name TEXT,
+			tool_run_id TEXT,
+			parent_tool_call_id INTEGER,
+			payload_json TEXT,
+			payload_ref TEXT,
+			token_count INTEGER,
+			content_hash TEXT,
+			created_at TEXT NOT NULL,
+			CHECK (
+				(event_type IN ('tool_call', 'tool_result') AND payload_json IS NOT NULL)
+				OR
+				(event_type IN ('user_message', 'assistant_message') AND
+				 payload_json IS NULL AND payload_ref IS NULL)
+			)
+		);
+		CREATE INDEX IF NOT EXISTS idx_events_conv ON companion_events(conversation_id, id);
+		CREATE INDEX IF NOT EXISTS idx_events_tool_run ON companion_events(conversation_id, tool_run_id)
+			WHERE tool_run_id IS NOT NULL;
+
+		-- Hard state entries (append-only, immutable)
+		CREATE TABLE IF NOT EXISTS companion_hard_state_entries (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			conversation_id TEXT NOT NULL,
+			entry_type TEXT NOT NULL,
+			key TEXT NOT NULL,
+			value_json TEXT NOT NULL,
+			status TEXT NOT NULL DEFAULT 'active',
+			source_event_id INTEGER NOT NULL,
+			confidence REAL NOT NULL DEFAULT 0.8,
+			metadata_json TEXT,
+			supersedes INTEGER,
+			created_at TEXT NOT NULL
+		);
+		CREATE INDEX IF NOT EXISTS idx_hard_entries_conv
+		ON companion_hard_state_entries(conversation_id, entry_type, key, status);
+		CREATE INDEX IF NOT EXISTS idx_hard_entries_max
+		ON companion_hard_state_entries(conversation_id, id DESC);
+
+		-- Episodic narrative summaries (abstractive)
+		CREATE TABLE IF NOT EXISTS companion_soft_episodes (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			conversation_id TEXT NOT NULL,
+			episode_type TEXT NOT NULL,
+			start_event_id INTEGER NOT NULL,
+			end_event_id INTEGER NOT NULL,
+			summary TEXT NOT NULL DEFAULT '',
+			needs_summary INTEGER NOT NULL DEFAULT 0,
+			assumption_ids TEXT NOT NULL DEFAULT '[]',
+			token_count INTEGER DEFAULT 0,
+			boundary_hash TEXT NOT NULL,
+			created_at TEXT NOT NULL,
+			deleted_at TEXT,
+			UNIQUE(conversation_id, boundary_hash)
+		);
+		CREATE INDEX IF NOT EXISTS idx_soft_episodes_conv
+		ON companion_soft_episodes(conversation_id, end_event_id DESC);
+
+		-- Extractive evidence snippets (canonical quotes)
+		CREATE TABLE IF NOT EXISTS companion_evidence_snippets (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			conversation_id TEXT NOT NULL,
+			source_event_id INTEGER NOT NULL,
+			event_type TEXT NOT NULL,
+			fact_text TEXT NOT NULL,
+			content_hash TEXT NOT NULL,
+			confidence REAL NOT NULL DEFAULT 0.5,
+			bucket TEXT NOT NULL DEFAULT 'default',
+			ttl_days INTEGER,
+			created_at TEXT NOT NULL,
+			expires_at TEXT,
+			UNIQUE(conversation_id, content_hash)
+		);
+		CREATE INDEX IF NOT EXISTS idx_evidence_conv
+		ON companion_evidence_snippets(conversation_id, created_at DESC);
+		CREATE INDEX IF NOT EXISTS idx_evidence_expires
+		ON companion_evidence_snippets(expires_at)
+		WHERE expires_at IS NOT NULL;
+
+		CREATE VIRTUAL TABLE IF NOT EXISTS companion_evidence_fts USING fts5(
+			conversation_id UNINDEXED,
+			fact_text,
+			content='companion_evidence_snippets',
+			content_rowid='id'
+		);
+		CREATE TRIGGER IF NOT EXISTS companion_evidence_fts_insert
+		AFTER INSERT ON companion_evidence_snippets
+		BEGIN
+			INSERT INTO companion_evidence_fts(rowid, conversation_id, fact_text)
+			VALUES (new.id, new.conversation_id, new.fact_text);
+		END;
+		CREATE TRIGGER IF NOT EXISTS companion_evidence_fts_delete
+		AFTER DELETE ON companion_evidence_snippets
+		BEGIN
+			INSERT INTO companion_evidence_fts(companion_evidence_fts, rowid, conversation_id, fact_text)
+			VALUES ('delete', old.id, old.conversation_id, old.fact_text);
+		END;
+
+		-- Assumptions ledger (canonical source)
+		CREATE TABLE IF NOT EXISTS companion_assumptions_ledger (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			conversation_id TEXT NOT NULL,
+			assumption TEXT NOT NULL,
+			status TEXT NOT NULL DEFAULT 'active',
+			reason TEXT,
+			source_event_id INTEGER NOT NULL,
+			confidence REAL NOT NULL DEFAULT 0.5,
+			created_at TEXT NOT NULL,
+			retracted_at TEXT,
+			retracted_by_event_id INTEGER,
+			retraction_reason TEXT
+		);
+		CREATE INDEX IF NOT EXISTS idx_assumptions_conv
+		ON companion_assumptions_ledger(conversation_id, status);
+
+		-- Per-conversation mode tracking
+		CREATE TABLE IF NOT EXISTS companion_memory_mode_state (
+			conversation_id TEXT PRIMARY KEY,
+			mode TEXT NOT NULL DEFAULT 'legacy',
+			schema_version INTEGER NOT NULL DEFAULT 1,
+			last_processed_event INTEGER NOT NULL DEFAULT 0,
+			last_soft_event INTEGER NOT NULL DEFAULT 0,
+			last_evidence_event INTEGER NOT NULL DEFAULT 0,
+			updated_at TEXT NOT NULL
+		);
+
+		-- Open episode state (active episode tracking)
+		CREATE TABLE IF NOT EXISTS companion_open_episode (
+			conversation_id TEXT PRIMARY KEY,
+			start_event_id INTEGER NOT NULL,
+			episode_type TEXT NOT NULL DEFAULT 'exploration',
+			event_count INTEGER NOT NULL DEFAULT 0,
+			topic_sig TEXT,
+			pending_seal_reason TEXT,
+			updated_at TEXT NOT NULL
+		);
+
+		-- Active tool runs for open episodes
+		CREATE TABLE IF NOT EXISTS companion_open_tool_runs (
+			conversation_id TEXT NOT NULL,
+			tool_run_id TEXT NOT NULL,
+			start_event_id INTEGER NOT NULL,
+			parent_call_event_id INTEGER,
+			created_at TEXT NOT NULL,
+			PRIMARY KEY (conversation_id, tool_run_id)
+		);
+
+		-- Staging queue for ambiguous extractions
+		CREATE TABLE IF NOT EXISTS companion_extraction_staging (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			conversation_id TEXT NOT NULL,
+			source_event_id INTEGER NOT NULL,
+			proposed_entry_type TEXT NOT NULL,
+			raw_text TEXT NOT NULL,
+			reason TEXT NOT NULL,
+			attempt_count INTEGER NOT NULL DEFAULT 0,
+			created_at TEXT NOT NULL,
+			resolved_at TEXT,
+			discarded_at TEXT,
+			discard_reason TEXT
+		);
+		CREATE INDEX IF NOT EXISTS idx_staging_pending
+		ON companion_extraction_staging(conversation_id)
+		WHERE resolved_at IS NULL AND discarded_at IS NULL;
+
+		-- Materialized hard-state cache
+		CREATE TABLE IF NOT EXISTS companion_hard_state_cache (
+			conversation_id TEXT PRIMARY KEY,
+			compact_json TEXT NOT NULL,
+			last_entry_id INTEGER NOT NULL,
+			updated_at TEXT NOT NULL
+		);
 	`
 
 	_, err := m.db.ExecContext(ctx, schema)
@@ -1407,6 +1585,27 @@ func (m *ConversationMemory) Clear(ctx context.Context, conversationID string) e
 	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM companion_memory_state WHERE conversation_id = $1`, conversationID); err != nil {
 		return err
+	}
+
+	// Clean up hybrid memory tables (best-effort; tables may not exist if hybrid mode was never activated)
+	hybridTables := []string{
+		"companion_events",
+		"companion_hard_state_entries",
+		"companion_hard_state_cache",
+		"companion_soft_episodes",
+		"companion_evidence_snippets",
+		"companion_assumptions_ledger",
+		"companion_open_episode",
+		"companion_open_tool_runs",
+		"companion_extraction_staging",
+		"companion_memory_mode_state",
+	}
+	for _, table := range hybridTables {
+		if _, err := tx.ExecContext(ctx, fmt.Sprintf(`DELETE FROM %s WHERE conversation_id = $1`, table), conversationID); err != nil {
+			if !strings.Contains(err.Error(), "no such table") {
+				return fmt.Errorf("clear %s: %w", table, err)
+			}
+		}
 	}
 
 	return tx.Commit()
