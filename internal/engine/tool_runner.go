@@ -48,6 +48,10 @@ type ToolRunnerConfig struct {
 	// ActorID is the actor identifier for hook context.
 	ActorID string
 
+	// NormalizeToolName optionally normalizes raw tool names before hook dispatch
+	// and execution. Return false to mark the tool as unknown.
+	NormalizeToolName func(rawName string) (canonicalName string, ok bool)
+
 	// ActionExecutor processes hook output actions. Optional - actions are
 	// skipped if nil.
 	ActionExecutor hooks.ActionExecutor
@@ -93,6 +97,18 @@ func (r *ToolRunner) SetSessionID(sessionID string) {
 // - Keywords: tool_execute, hooks, tool_call, tool_result, post_tool_use
 func (r *ToolRunner) Execute(ctx context.Context, call ToolCall) (ToolResult, error) {
 	start := time.Now()
+
+	if r.config.NormalizeToolName != nil {
+		normalizedName, ok := r.config.NormalizeToolName(call.Name)
+		if !ok {
+			return ToolResult{
+				ToolCallID: call.ID,
+				Content:    fmt.Sprintf("unknown tool: %s", call.Name),
+				IsError:    true,
+			}, nil
+		}
+		call.Name = normalizedName
+	}
 
 	// 1. Dispatch PreToolUse hook
 	preOutput, err := r.dispatchPreToolUse(ctx, call)

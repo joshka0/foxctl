@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"math/rand"
 	"net"
 	"os"
 	"path/filepath"
@@ -16,6 +17,7 @@ import (
 	"time"
 
 	"github.com/jkatigb/agentctl/internal/agent/runtime"
+	"github.com/jkatigb/agentctl/internal/agent/toolnames"
 	"github.com/jkatigb/agentctl/internal/agent/types"
 	"github.com/jkatigb/agentctl/internal/context/updater"
 	"github.com/jkatigb/agentctl/internal/domain/agent"
@@ -31,6 +33,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/queue"
 	"github.com/jkatigb/agentctl/internal/sessionkit/summary"
 	"github.com/jkatigb/agentctl/internal/storage"
+	agentstore "github.com/jkatigb/agentctl/internal/storage/agents"
 	"github.com/jkatigb/agentctl/internal/storage/blackboard"
 	"github.com/jkatigb/agentctl/internal/storage/cache"
 	"github.com/jkatigb/agentctl/internal/storage/contextbuffer"
@@ -120,6 +123,7 @@ type Service struct {
 	agentSessionStore *sessions.Store       // Session store for agent persistence (close on shutdown)
 	agentMailboxStore mailbox.Store         // Mailbox store for agent messaging (close on shutdown)
 	agentBoardStore   blackboard.BoardStore // Blackboard store for agent coordination (close on shutdown)
+	agentSessionMap   map[string]string     // agentID (agents.db) → sessionID (runtime); protected by agentMu
 }
 
 // NewService creates a new daemon service.
@@ -1415,6 +1419,23 @@ func (s *Service) stopAgentOrchestration() {
 		}
 	}
 
+	// Mark all tracked agents as stopped in agents.db (best-effort)
+	if len(s.agentSessionMap) > 0 {
+		ctx := context.Background()
+		store, err := agentstore.Open(ctx, s.cfg.Storage.Root)
+		if err != nil {
+			slog.Warn("failed to open agents store for shutdown cleanup", "error", err)
+		} else {
+			for agentID := range s.agentSessionMap {
+				if err := store.UpdateState(ctx, agentID, agent.StateStopped); err != nil {
+					slog.Warn("failed to update agent state on shutdown", "agent_id", agentID, "error", err)
+				}
+			}
+			store.Close()
+		}
+		s.agentSessionMap = nil
+	}
+
 	if s.agentSessionStore != nil {
 		s.agentSessionStore.Close()
 		s.agentSessionStore = nil
@@ -1452,7 +1473,7 @@ type AgentSpawnParams struct {
 	// Execution config
 	MaxIterations    int    `json:"max_iterations,omitempty"`
 	MaxContextTokens int    `json:"max_context_tokens,omitempty"` // Context budget (0=no limit)
-	ExecMode         string `json:"exec_mode,omitempty"`          // "reactive", "autonomous", "proactive", "story"
+	ExecMode         string `json:"exec_mode,omitempty"`          // "reactive", "autonomous", "autonomous_reactive", "proactive", "story"
 	MaxAutoTurns     int    `json:"max_auto_turns,omitempty"`
 
 	// LLM override
@@ -1465,6 +1486,8 @@ type AgentSpawnParams struct {
 type AgentSpawnResult struct {
 	SessionID string `json:"session_id"`
 	ActorID   string `json:"actor_id"`
+	AgentID   string `json:"agent_id"`  // Persistent ID in agents.db
+	Name      string `json:"name"`      // Generated or provided agent name
 	Status    string `json:"status"`
 	Role      string `json:"role"`
 	NS        string `json:"ns,omitempty"` // Namespace for mailbox routing
@@ -1493,6 +1516,15 @@ func (s *Service) handleAgentSpawn(ctx context.Context, params json.RawMessage) 
 		return nil, errors.New("role is required")
 	}
 
+	// Normalize skills allowlist for runtime tool names
+	if len(p.SkillsAllow) > 0 {
+		normalized, unknown := toolnames.ValidateAllowlist(toolnames.ToolModeRuntime, p.SkillsAllow)
+		if len(unknown) > 0 {
+			slog.Warn("unknown skills_allow entries in spawn request", "unknown", unknown)
+		}
+		p.SkillsAllow = normalized
+	}
+
 	// Generate actor ID if not provided
 	actorID := p.AgentID
 	if actorID == "" {
@@ -1519,7 +1551,7 @@ func (s *Service) handleAgentSpawn(ctx context.Context, params json.RawMessage) 
 	}
 	if p.ExecMode != "" {
 		switch p.ExecMode {
-		case string(agent.ModeReactive), string(agent.ModeAutonomous), string(agent.ModeProactive), string(agent.ModeStory):
+		case string(agent.ModeReactive), string(agent.ModeAutonomous), string(agent.ModeAutonomousReactive), string(agent.ModeProactive), string(agent.ModeStory):
 			cfg.ExecMode = agent.ExecutionMode(p.ExecMode)
 		default:
 			return nil, fmt.Errorf("invalid exec_mode: %s", p.ExecMode)
@@ -1546,9 +1578,64 @@ func (s *Service) handleAgentSpawn(ctx context.Context, params json.RawMessage) 
 		return nil, fmt.Errorf("spawn agent: %w", err)
 	}
 
+	// Persist agent record to agents.db
+	agentID := ulid.Make().String()
+	agentName := p.Name
+	if agentName == "" {
+		agentName = agent.GenerateAgentName(rand.New(rand.NewSource(time.Now().UnixNano())))
+	}
+
+	execMode := agent.ExecutionMode(p.ExecMode)
+	if execMode == "" {
+		execMode = agent.ModeReactive
+	}
+
+	agentRecord := agent.Agent{
+		ID:            agentID,
+		Namespace:     actorID,
+		Name:          agentName,
+		Slug:          p.Slug,
+		Role:          p.Role,
+		Prompt:        p.Prompt,
+		SkillsAllow:   p.SkillsAllow,
+		Policy:        agent.Policy{},
+		ShareBB:       "scoped",
+		State:         agent.StateRunning,
+		CreatedAt:     time.Now().UTC(),
+		LLMProvider:   p.LLMProvider,
+		LLMModel:      p.LLMModel,
+		LLMAPIKey:     p.LLMAPIKey,
+		ExecMode:      execMode,
+		MaxIterations: p.MaxIterations,
+		MaxAutoTurns:  p.MaxAutoTurns,
+	}
+	if agentRecord.SkillsAllow == nil {
+		agentRecord.SkillsAllow = []string{}
+	}
+
+	store, err := agentstore.Open(ctx, s.cfg.Storage.Root)
+	if err != nil {
+		slog.Warn("failed to open agents store for persistence", "error", err)
+	} else {
+		defer store.Close()
+		if err := store.Create(ctx, agentRecord); err != nil {
+			slog.Warn("failed to persist agent record", "agent_id", agentID, "error", err)
+		} else {
+			// Track mapping for kill/shutdown cleanup
+			s.agentMu.Lock()
+			if s.agentSessionMap == nil {
+				s.agentSessionMap = make(map[string]string)
+			}
+			s.agentSessionMap[agentID] = session.ID
+			s.agentMu.Unlock()
+		}
+	}
+
 	return &AgentSpawnResult{
 		SessionID: session.ID,
 		ActorID:   session.Config.ActorID,
+		AgentID:   agentID,
+		Name:      agentName,
 		Status:    string(session.Status),
 		Role:      string(session.Config.Role),
 		NS:        session.Config.ActorID, // Use ActorID as namespace for mailbox
@@ -1834,6 +1921,31 @@ func (s *Service) handleAgentKill(params json.RawMessage) (*AgentKillResult, err
 
 	if err := s.agentRuntime.Kill(p.SessionID); err != nil {
 		return nil, err
+	}
+
+	// Update agent state in agents.db (best-effort)
+	s.agentMu.Lock()
+	var agentID string
+	for aID, sID := range s.agentSessionMap {
+		if sID == p.SessionID {
+			agentID = aID
+			delete(s.agentSessionMap, aID)
+			break
+		}
+	}
+	s.agentMu.Unlock()
+
+	if agentID != "" {
+		ctx := context.Background()
+		store, err := agentstore.Open(ctx, s.cfg.Storage.Root)
+		if err != nil {
+			slog.Warn("failed to open agents store for kill", "error", err)
+		} else {
+			if err := store.UpdateState(ctx, agentID, agent.StateStopped); err != nil {
+				slog.Warn("failed to update agent state on kill", "agent_id", agentID, "error", err)
+			}
+			store.Close()
+		}
 	}
 
 	return &AgentKillResult{

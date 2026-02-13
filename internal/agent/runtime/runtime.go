@@ -19,9 +19,11 @@ import (
 
 	"github.com/oklog/ulid/v2"
 
+	"github.com/jkatigb/agentctl/internal/agent/toolnames"
 	"github.com/jkatigb/agentctl/internal/agent/types"
 	"github.com/jkatigb/agentctl/internal/agentprompt"
 	"github.com/jkatigb/agentctl/internal/domain/agent"
+	"github.com/jkatigb/agentctl/internal/domain/envelope"
 	"github.com/jkatigb/agentctl/internal/engine"
 	"github.com/jkatigb/agentctl/internal/hooks"
 	"github.com/jkatigb/agentctl/internal/observability"
@@ -431,6 +433,12 @@ func (e *agentToolExecutor) Execute(ctx context.Context, name string, args json.
 			return "", fmt.Errorf("parse args: %w", err)
 		}
 	}
+
+	canonicalName, ok := toolnames.CanonicalizeToolName(toolnames.ToolModeRuntime, name)
+	if !ok {
+		return "", fmt.Errorf("unknown tool: %s", name)
+	}
+	name = canonicalName
 
 	// Execute based on tool name (using underscores for Anthropic API compatibility)
 	switch name {
@@ -1520,6 +1528,9 @@ func buildToolDefsForRole(role types.AgentRole, hasMailbox, hasBoard bool, allow
 	}
 
 	if len(allowlist) > 0 {
+		allowlist = toolnames.NormalizeAllowlist(toolnames.ToolModeRuntime, allowlist)
+	}
+	if len(allowlist) > 0 {
 		tools = filterToolDefs(tools, allowlist)
 	}
 
@@ -1598,7 +1609,7 @@ func (r *Runtime) runSession(ctx context.Context, session *Session) {
 	}
 
 	// Build the system prompt and task message
-	session.SystemPrompt = agentprompt.Instruction(session.Config.Role)
+	session.SystemPrompt = agentprompt.InstructionRuntime(session.Config.Role)
 	taskPrompt := buildTaskPrompt(session.Config)
 	var result string
 
@@ -1724,6 +1735,17 @@ func (r *Runtime) runSession(ctx context.Context, session *Session) {
 	case agent.ModeAutonomous:
 		// Run autonomous continuation loop
 		result = r.runAutonomousContinuation(ctx, session, result)
+
+	case agent.ModeAutonomousReactive:
+		// Run autonomous continuation first, then stay alive in reactive mode.
+		result = r.runAutonomousContinuation(ctx, session, result)
+
+		session.mu.Lock()
+		session.Status = types.StatusRunning
+		session.mu.Unlock()
+		r.persistSessionStatus(session)
+
+		r.runMessageLoop(ctx, session, 0)
 
 	case agent.ModeReactive:
 		// Reactive mode: stay alive polling for messages
@@ -2530,6 +2552,16 @@ func (r *Runtime) processMailboxMessages(ctx context.Context, session *Session, 
 			continue
 		}
 
+		if msg.Type == agent.MessageTypeAsk {
+			if err := r.sendAskReply(ctx, session, msg, output.AssistantText); err != nil {
+				observability.Emit(ctx, observability.NewEvent("agent.mailbox_reply_error").
+					WithComponent(observability.ComponentAgent).
+					WithSession(session.ID, session.Config.ActorID).
+					WithWorkspace(r.config.WorkspaceRoot).
+					Error(err, 0))
+			}
+		}
+
 		// Record tool calls
 		session.mu.Lock()
 		for _, tc := range output.ToolCalls {
@@ -2566,6 +2598,68 @@ func (r *Runtime) processMailboxMessages(ctx context.Context, session *Session, 
 		// Ack the message
 		_ = r.config.MailboxStore.Ack(ctx, msg.ID)
 	}
+}
+
+func (r *Runtime) sendAskReply(ctx context.Context, session *Session, msg agent.Message, response string) error {
+	if r.config.MailboxStore == nil {
+		return fmt.Errorf("mailbox not configured")
+	}
+
+	askID := extractAskID(msg)
+	if askID == "" {
+		return fmt.Errorf("missing ask correlation")
+	}
+
+	replyData := agent.ReplyData{
+		AskID:  askID,
+		Answer: map[string]any{"response": response},
+	}
+	replyEnv := envelope.OK("agent.reply", replyData)
+	replyPayload, err := json.Marshal(replyEnv)
+	if err != nil {
+		return fmt.Errorf("marshal reply envelope: %w", err)
+	}
+
+	fromNS := msg.ToNS
+	if fromNS == "" {
+		fromNS = session.Config.ActorID
+	}
+
+	replyMsg := agent.Message{
+		ID:        ulid.Make().String(),
+		FromNS:    fromNS,
+		ToNS:      msg.FromNS,
+		Type:      agent.MessageTypeReply,
+		TTLMS:     300000,
+		Headers:   map[string]string{"correlation": askID, "ask_id": askID},
+		Payload:   replyPayload,
+		VisibleAt: time.Now().Unix(),
+		Timestamp: time.Now().Unix(),
+	}
+
+	return r.config.MailboxStore.Send(ctx, replyMsg)
+}
+
+func extractAskID(msg agent.Message) string {
+	if corr := strings.TrimSpace(msg.Headers["correlation"]); corr != "" {
+		return corr
+	}
+
+	var askEnv struct {
+		Data agent.AskData `json:"data"`
+	}
+	if err := json.Unmarshal(msg.Payload, &askEnv); err == nil {
+		if askID := strings.TrimSpace(askEnv.Data.AskID); askID != "" {
+			return askID
+		}
+	}
+
+	var askData agent.AskData
+	if err := json.Unmarshal(msg.Payload, &askData); err == nil {
+		return strings.TrimSpace(askData.AskID)
+	}
+
+	return ""
 }
 
 // runProactiveThink runs a periodic "think" cycle for proactive agents.

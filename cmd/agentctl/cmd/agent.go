@@ -13,6 +13,7 @@ import (
 
 	agentdaemon "github.com/jkatigb/agentctl/internal/agent/daemon"
 	"github.com/jkatigb/agentctl/internal/agent/prompts"
+	"github.com/jkatigb/agentctl/internal/agent/toolnames"
 	"github.com/jkatigb/agentctl/internal/daemon"
 	"github.com/jkatigb/agentctl/internal/domain/agent"
 	"github.com/jkatigb/agentctl/internal/domain/envelope"
@@ -307,6 +308,11 @@ func runAgentSpawn(cmd *cobra.Command, _ []string) error {
 		}
 	}
 
+	// Normalize skills allowlist
+	if len(skillsAllow) > 0 {
+		skillsAllow = toolnames.NormalizeAllowlist(toolnames.ToolModeRuntime, skillsAllow)
+	}
+
 	// Resolve LLM API key (support $ENV_VAR syntax)
 	llmAPIKey := spawnLLMAPIKey
 	if strings.HasPrefix(llmAPIKey, "$") {
@@ -378,6 +384,8 @@ func runAgentSpawn(cmd *cobra.Command, _ []string) error {
 		data := map[string]any{
 			"session_id": result.SessionID,
 			"actor_id":   result.ActorID,
+			"agent_id":   result.AgentID,
+			"name":       result.Name,
 			"status":     result.Status,
 			"role":       result.Role,
 			"ns":         result.NS,

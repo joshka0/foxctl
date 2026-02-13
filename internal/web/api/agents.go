@@ -24,26 +24,6 @@ import (
 	"github.com/jkatigb/agentctl/internal/storage/dbutil"
 )
 
-// Agent name generation word lists for memorable random names
-var agentAdjectives = []string{
-	"swift", "bright", "clever", "noble", "quiet", "bold", "calm", "keen",
-	"wise", "brave", "kind", "fair", "true", "warm", "sharp", "clear",
-	"deep", "free", "wild", "soft", "strong", "gentle", "nimble", "steady",
-}
-
-var agentNouns = []string{
-	"atlas", "nova", "echo", "iris", "luna", "orion", "sage", "phoenix",
-	"zephyr", "ember", "cedar", "river", "cliff", "dawn", "frost", "grove",
-	"harbor", "jade", "maple", "oak", "peak", "rain", "sky", "tide",
-}
-
-// generateAgentName generates a memorable hyphenated name composed of a random adjective and noun (for example, "swift-atlas").
-func generateAgentName() string {
-	adj := agentAdjectives[rand.Intn(len(agentAdjectives))]
-	noun := agentNouns[rand.Intn(len(agentNouns))]
-	return adj + "-" + noun
-}
-
 // AgentResponse represents an agent in API responses.
 type AgentResponse struct {
 	ID             string   `json:"id"`
@@ -593,7 +573,7 @@ func handleAgentSpawn(w http.ResponseWriter, r *http.Request, cfg config.Config,
 	// Generate name if not provided
 	name := req.Name
 	if name == "" {
-		name = generateAgentName()
+		name = agenttypes.GenerateAgentName(rand.New(rand.NewSource(time.Now().UnixNano())))
 	}
 
 	// Generate agent ID

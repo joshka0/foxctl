@@ -1,6 +1,10 @@
 package agentprompt
 
-import agenttypes "github.com/jkatigb/agentctl/internal/agent/types"
+import (
+	"strings"
+
+	agenttypes "github.com/jkatigb/agentctl/internal/agent/types"
+)
 
 // Instruction returns the agent system instruction for a role.
 func Instruction(role agenttypes.AgentRole) string {
@@ -179,6 +183,43 @@ Always provide: file paths, expected sizes, which tools to use, what to look for
 	default:
 		return `You are a helpful agent. Complete the given task using available tools.`
 	}
+}
+
+// InstructionRuntime returns role-specific system instructions with runtime tool names.
+func InstructionRuntime(role agenttypes.AgentRole) string {
+	instruction := Instruction(role)
+
+	replacer := strings.NewReplacer(
+		"code.symbol_search", "code_symbol_search",
+		"code.swe_grep", "code_swe_grep",
+		"code.search", "code_search",
+		"fs.read_file", "fs_read_file",
+		"fs.list_dir", "fs_list_dir",
+		"edit.create_file", "edit_create_file",
+		"edit.apply_patch", "edit_apply_patch",
+		"edit.apply_structured_diff", "edit_apply_structured_diff",
+		"tests.run", "tests_run",
+		"todo.add", "todo_add",
+		"todo.query", "todo_query",
+		"todo.graph_insights", "todo_graph_insights",
+		"mail.send", "mail_send",
+		"context.search", "context_search",
+		"smart.search", "smart_search",
+		"context.grep", "context_grep",
+		"session.timeline", "session_timeline",
+		"agent.spawn", "agent_spawn",
+		"agent.list", "agent_list",
+		"agent.status", "agent_status",
+		"agent.kill", "agent_kill",
+		"agent.hierarchy", "agent_hierarchy",
+		"agent.wait", "agent_wait",
+		"agent.mail", "agent_mail",
+		"mail.inbox", "mail_inbox",
+		"bb.inbox", "bb_inbox",
+		"bb.post", "bb_post",
+	)
+
+	return replacer.Replace(instruction)
 }
 
 // BuildSignature was removed with the dspy-go migration. Use Instruction(role)

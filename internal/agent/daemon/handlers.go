@@ -111,8 +111,8 @@ func handleAsk(ctx context.Context, logger zerolog.Logger, msg agent.Message, co
 		TTLMS:     300000, // 5 min
 		Headers:   map[string]string{"correlation": askData.AskID, "ask_id": askData.AskID},
 		Payload:   replyPayload,
-		VisibleAt: time.Now().Unix(),
-		Timestamp: time.Now().Unix(),
+		VisibleAt: time.Now().UnixMilli(),
+		Timestamp: time.Now().UnixMilli(),
 	}
 	return mailboxStore.Send(ctx, replyMsg)
 }

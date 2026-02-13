@@ -210,7 +210,7 @@ type AgentConfig struct {
 	// Set to 0 to use runtime default.
 	MaxContextTokens int `json:"max_context_tokens,omitempty"`
 
-	// ExecMode controls execution mode (reactive|autonomous|proactive|story).
+	// ExecMode controls execution mode (reactive|autonomous|autonomous_reactive|proactive|story).
 	ExecMode agent.ExecutionMode `json:"exec_mode,omitempty"`
 
 	// MaxAutoTurns limits the number of autonomous continuations.
