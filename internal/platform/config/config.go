@@ -173,6 +173,13 @@ type TeamsSettings struct {
 
 	// SkipJWTVerify disables inbound JWT verification. Dev-only; enforced at runtime.
 	SkipJWTVerify bool `mapstructure:"skip_jwt_verify" json:"skip_jwt_verify"`
+
+	// AgentConversationID is the Teams conversation where agent lifecycle cards are posted.
+	// Without this, agent events are silently ignored (same pattern as Telegram AgentChatID).
+	AgentConversationID string `mapstructure:"agent_conversation_id" json:"agent_conversation_id"`
+
+	// ActivityFeedConversationID is an optional conversation for compact one-line lifecycle events.
+	ActivityFeedConversationID string `mapstructure:"activity_feed_conversation_id" json:"activity_feed_conversation_id"`
 }
 
 // MarshalJSON implements json.Marshaler to redact the ClientSecret field.
@@ -1021,6 +1028,12 @@ func finalizeConfig(cfg Config, home string) Config {
 		if b, err := strconv.ParseBool(strings.TrimSpace(v)); err == nil {
 			cfg.Teams.SkipJWTVerify = b
 		}
+	}
+	if v := os.Getenv("TEAMS_AGENT_CONVERSATION_ID"); v != "" && cfg.Teams.AgentConversationID == "" {
+		cfg.Teams.AgentConversationID = strings.TrimSpace(v)
+	}
+	if v := os.Getenv("TEAMS_ACTIVITY_FEED_CONVERSATION_ID"); v != "" && cfg.Teams.ActivityFeedConversationID == "" {
+		cfg.Teams.ActivityFeedConversationID = strings.TrimSpace(v)
 	}
 
 	// OAuth AuthBroker

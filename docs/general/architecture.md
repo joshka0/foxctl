@@ -21,6 +21,7 @@ flowchart TD
             ENV[envelope]
             SKL[skill]
             POL[policy]
+            DRV[dbdriver]
         end
 
         subgraph Execution["execution/"]
@@ -29,15 +30,18 @@ flowchart TD
         end
 
         subgraph Storage["storage/"]
-            SQLDB[sqlite stores]
+            SQLDB[sqlite/libsql/turso/postgres stores]
             CAS[cas store]
             VEC[vector store]
+            CVR[convref store]
         end
 
         subgraph Platform["platform/"]
             CFG[config]
             WS[workspace]
             LOG[logging]
+            WEB[web]
+            CHAT[chatadapter]
         end
     end
 
@@ -48,11 +52,11 @@ flowchart TD
         TEST[test/*]
     end
 
-    CLI --> Domain
-    CLI --> Execution
-    Execution --> Storage
-    Execution --> Skills
-    Skills --> Storage
+        CLI --> Domain
+        CLI --> Execution
+        Execution --> Storage
+        Execution --> Skills
+        Skills --> Storage
 ```
 
 ---
@@ -93,6 +97,7 @@ Persistence layer.
 
 | Package | Purpose |
 |---------|---------|
+| `dbdriver` | Database driver abstraction and migrations |
 | `memory` | Named memories with vector search |
 | `tasks` | Task management with dependencies |
 | `sessions` | Session lifecycle and lineage |
@@ -100,6 +105,7 @@ Persistence layer.
 | `vector` | Vector embeddings (Voyage AI) |
 | `jobs` | Async job execution |
 | `contextvar` | RLM context variables with TTL and scopes |
+| `convref` | Teams conversation reference persistence |
 
 ### `internal/companion/`
 Companion agent infrastructure for long-form conversations.
@@ -129,6 +135,28 @@ Infrastructure utilities.
 | `workspace` | Workspace detection |
 | `logging` | Structured logging (zerolog) |
 | `fsutil` | File system utilities |
+
+### `internal/web/`
+HTTP API server, sockets, and API routing.
+
+| File | Purpose |
+|------|---------|
+| `server.go` | Creates HTTP server, health routes, websocket/callback routes |
+| `consolews/*` | Console websocket sessions and persistence |
+| `sse/*` | Server-sent events |
+| `api/*` | REST endpoints |
+
+### `internal/chatadapter/`
+Chat adapters and platform abstraction layer.
+
+| File | Purpose |
+|------|---------|
+| `adapter.go` | Chat adapter interface and event contracts |
+| `bridge.go` | Command bridge to skills and daemon endpoints |
+| `session_bridge.go` | NL message bridge into console sessions |
+| `discord/*` | Discord driver |
+| `telegram/*` | Telegram driver |
+| `teams/*` | Teams driver |
 
 ### `internal/codemap/`
 Codemap generation system using the LLMChatEngine-based codemap agent.

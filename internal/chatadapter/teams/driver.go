@@ -36,18 +36,23 @@ type Adapter struct {
 	tokenMgr   *tokenManager
 	botClient  *BotClient
 	verifier   JWTVerifier
+	clock      chatadapter.Clock
 
 	cmdHandler chatadapter.CommandHandler
 	intHandler chatadapter.InteractionHandler
 	msgHandler chatadapter.MessageHandler
 
-	sseHub *sse.Hub
+	sseHub    *sse.Hub
+	sseClient *sse.Client
 
 	// persistent conversation refs (optional)
 	convRefStore convref.Store
 
 	// convKey (tenant-scoped) -> serviceURLEntry
 	serviceURLs sync.Map
+
+	agentThreads sync.Map // agentID -> agentThread (root card + throttling state)
+	agentRootIdx sync.Map // "convKey:activityID" -> agentRootIndexEntry; for reply-based agent chat
 
 	msgSem chan struct{}
 
@@ -58,17 +63,28 @@ type Adapter struct {
 	wg     sync.WaitGroup
 }
 
-// New creates a Teams adapter with the given config and daemon URL.
-func New(cfg config.TeamsSettings, daemonURL string) *Adapter {
+// defaultClock implements chatadapter.Clock using real time.
+type defaultClock struct{}
+
+func (defaultClock) Now() time.Time { return time.Now() }
+
+// New creates a Teams adapter with the given config, daemon URL, and optional clock.
+// If clk is nil, a real-time clock is used.
+func New(cfg config.TeamsSettings, daemonURL string, clk chatadapter.Clock) *Adapter {
 	limit := cfg.MaxConcurrentMessages
 	if limit <= 0 {
 		limit = 10
+	}
+
+	if clk == nil {
+		clk = defaultClock{}
 	}
 
 	return &Adapter{
 		daemonURL:  daemonURL,
 		cfg:        cfg,
 		httpClient: &http.Client{Timeout: 15 * time.Second},
+		clock:      clk,
 		msgSem:     make(chan struct{}, limit),
 	}
 }
@@ -131,6 +147,22 @@ func (a *Adapter) Connect(ctx context.Context) error {
 	} else {
 		a.verifier = newJWTVerifier(a.cfg.ClientID, a.cfg.TenantID, a.httpClient)
 	}
+
+	// Start SSE event listener if hub is configured.
+	if a.sseHub != nil {
+		a.wg.Add(1)
+		go func() {
+			defer a.wg.Done()
+			a.startEventListener(a.ctx)
+		}()
+	}
+
+	// Periodically evict old agent thread/index entries.
+	a.wg.Add(1)
+	go func() {
+		defer a.wg.Done()
+		a.agentIndexJanitor(a.ctx)
+	}()
 
 	observability.Emit(ctx, observability.NewEvent("teams.connected").
 		WithComponent("teams").
@@ -231,12 +263,6 @@ func (a *Adapter) HTTPHandler() http.HandlerFunc {
 			}
 		}
 
-		// MVP: ignore non-message activities.
-		if strings.TrimSpace(activity.Type) != "message" {
-			w.WriteHeader(http.StatusOK)
-			return
-		}
-
 		convID := strings.TrimSpace(activity.Conversation.ID)
 		if convID == "" {
 			http.Error(w, "missing conversation id", http.StatusBadRequest)
@@ -291,6 +317,21 @@ func (a *Adapter) HTTPHandler() http.HandlerFunc {
 			})
 		}
 
+		// Route invoke activities (Adaptive Card Action.Submit).
+		if strings.TrimSpace(activity.Type) == "invoke" {
+			w.WriteHeader(http.StatusOK)
+			a.dispatchWithLimit(a.ctx, "teams.invoke", convKey, func(ctx context.Context) error {
+				return a.handleInvoke(ctx, serviceURL, activity, convKey)
+			})
+			return
+		}
+
+		// Ignore non-message activities.
+		if strings.TrimSpace(activity.Type) != "message" {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+
 		// Ignore self-messages.
 		if strings.TrimSpace(activity.From.ID) != "" && strings.TrimSpace(activity.From.ID) == strings.TrimSpace(activity.Recipient.ID) {
 			w.WriteHeader(http.StatusOK)
@@ -332,6 +373,17 @@ func (a *Adapter) HTTPHandler() http.HandlerFunc {
 				WithData("conversation_id", convKey).
 				Error(fmt.Errorf("botClient is nil; Connect() not called"), 0))
 			return
+		}
+
+		// Check if this is a reply to a known agent root card.
+		if replyToID := strings.TrimSpace(activity.ReplyToID); replyToID != "" {
+			key := agentRootKey(convKey, replyToID)
+			if entry, ok := a.agentRootIdx.Load(key); ok {
+				if idx, ok := entry.(agentRootIndexEntry); ok && idx.AgentID != "" {
+					a.dispatchAgentAsk(a.ctx, serviceURL, activity, convKey, idx.AgentID, text)
+					return
+				}
+			}
 		}
 
 		a.dispatchWithLimit(a.ctx, "teams.message", convKey, func(ctx context.Context) error {

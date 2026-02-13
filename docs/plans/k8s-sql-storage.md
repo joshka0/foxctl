@@ -1,5 +1,9 @@
 # Plan: PostgreSQL (RDS + pgvector) Storage Backend for K8s Enterprise Deployment
 
+> **Type:** Implementation plan (historical)
+> **Current architecture status:** Implemented with driver-based PostgreSQL support and dedicated k8s overlays in `internal/storage/dbdriver/*`, `internal/storage/dbutil/*`, `deploy/kubernetes/overlays/postgres`, and `docs/architecture/postgres-storage.md`.
+> **Active docs for architecture:** [`docs/architecture/postgres-storage.md`](../architecture/postgres-storage.md).
+
 ## Context
 
 agentctl already supports Kubernetes deployments backed by Turso/libSQL (see `docs/kubernetes.md`). This plan is for environments that require a self-hosted/shared SQL control-plane (AWS RDS PostgreSQL) for enterprise multi-pod deployments.

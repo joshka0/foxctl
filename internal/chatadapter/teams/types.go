@@ -25,6 +25,15 @@ type Activity struct {
 	ChannelData json.RawMessage `json:"channelData,omitempty"`
 
 	Entities []Entity `json:"entities,omitempty"`
+
+	Attachments []Attachment    `json:"attachments,omitempty"`
+	Value       json.RawMessage `json:"value,omitempty"`
+}
+
+// Attachment represents a Bot Framework attachment (e.g., an Adaptive Card).
+type Attachment struct {
+	ContentType string `json:"contentType"`
+	Content     any    `json:"content,omitempty"`
 }
 
 type ChannelAccount struct {

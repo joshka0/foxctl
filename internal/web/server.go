@@ -323,7 +323,7 @@ func (s *Server) startChatAdapter(ctx context.Context) error {
 			return fmt.Errorf("teams adapter refused: TEAMS_SKIP_JWT_VERIFY requires --dev-cors")
 		}
 
-		adapter := teams.New(s.cfg.Teams, daemonURL)
+		adapter := teams.New(s.cfg.Teams, daemonURL, nil)
 		adapter.SetSSEHub(s.sseHub)
 		if convRefStore := s.buildConvRefStore(ctx); convRefStore != nil {
 			adapter.SetConvRefStore(convRefStore)
@@ -331,7 +331,7 @@ func (s *Server) startChatAdapter(ctx context.Context) error {
 		}
 
 		adapter.OnCommand(bridge.HandleCommand)
-		adapter.OnInteraction(nil)
+		adapter.OnInteraction(adapter.HandleInteraction)
 
 		sessionBridge := chatadapter.NewSessionBridge(s.consoleHub, adapter, chatadapter.SessionBridgeConfig{
 			PlatformName:     "teams",

@@ -12,10 +12,37 @@ contributors
 | [README.md](README.md)                             | Overview, quick start                            |
 | [.claude/CLAUDE.md](.claude/CLAUDE.md)             | Claude Code hooks, commands, environment         |
 | [docs/general/](docs/general/)                     | Detailed documentation                           |
+| [docs/architecture/](docs/architecture/)           | Current architecture overviews (runtime + storage + adapters) |
 | [docs/general/gotchas.md](docs/general/gotchas.md) | Common pitfalls                                  |
 | [docs/codemaps/](docs/codemaps/)                   | Codemap documentation (**GREAT PLACE TO START**) |
+| [docs/kubernetes.md](docs/kubernetes.md)           | Kubernetes deployment guide                      |
+| [deploy/kubernetes/](deploy/kubernetes/)           | Kubernetes manifests and overlays                |
+| [docs/spec/agent_hierarchy.md](docs/spec/agent_hierarchy.md) | Subagent hierarchy and spawn protocol   |
+| [docs/spec/overseer_profile.md](docs/spec/overseer_profile.md) | Overseer coordination profile |
+| [docs/spec/v1/agent_profile_v1.md](docs/spec/v1/agent_profile_v1.md) | Multi-agent profile specification |
+| [docs/architecture/chat-platform-adapter.md](docs/architecture/chat-platform-adapter.md) | Chat adapter runtime architecture (current) |
+| [docs/architecture/kubernetes-runtime.md](docs/architecture/kubernetes-runtime.md) | Kubernetes runtime architecture (current) |
+| [docs/architecture/postgres-storage.md](docs/architecture/postgres-storage.md) | PostgreSQL + CAS storage architecture |
+| [docs/plans/chat-platform-adapter.md](docs/plans/chat-platform-adapter.md) | Implementation plan + historical notes |
+| [docs/plans/k8s-sql-storage.md](docs/plans/k8s-sql-storage.md) | Historical implementation plan (now partially complete) |
 
 ---
+
+## Subagents & Multi-Agent Coordination
+
+- Multi-agent execution uses the **Overseer model** with explicit spawn control:
+  - The overseer (`actor:system:overseer`) owns plan changes and cross-agent coordination.
+  - Non-overseer agents should request subagents via the `agent.spawn` workflow rather than creating sessions directly.
+- `agent.spawn` is currently documented as:
+  - Request-based (mail to overseer),
+  - Depth-governed (`Depth`, `MaxDepth`, `LocalMaxDepth`),
+  - Potentially denied when limits are exceeded.
+- CLI agent daemons still support direct `agentctl agent spawn` for session creation; protocol-level behavior is now defined by the overseer/agent hierarchy specs.
+- If you need to coordinate subagents, consult these first:
+  - [docs/spec/agent_hierarchy.md](docs/spec/agent_hierarchy.md)
+  - [docs/spec/overseer_profile.md](docs/spec/overseer_profile.md)
+  - [docs/spec/v1/agent_profile_v1.md](docs/spec/v1/agent_profile_v1.md)
+  - [docs/general/agent-daemon.md](docs/general/agent-daemon.md)
 
 ## TL;DR
 
@@ -30,7 +57,31 @@ contributors
 7. **`--dry-run` required** for state-changing commands (writes to DB, modifies workspace, creates CAS artifacts, spawns agents, edits tasks), except `agentctl todo` commands that do not support `--dry-run` (for example `agentctl todo add` or `agentctl todo complete`)
 8. **Task titles** — generate based on current work; do not require user-provided titles
 9. **Native tools** — prefer agentctl skills, but if a skill is unavailable or makes completion harder, fall back to native tools
-10. **Terminology coaching** — when the user asks something technical but uses imprecise language, provide the correct terminology in parentheses as a mini-lesson (e.g., "Fixed. Added scrolling *(in CSS terms: `overflow-y: auto` to handle content overflow)*")
+10. **Subagent-aware planning** — before requesting agent splits, verify current spawning rules in [docs/spec/agent_hierarchy.md](docs/spec/agent_hierarchy.md) (depth constraints, actor roles, rejection paths).
+11. **Terminology coaching** — when the user asks something technical but uses imprecise language, provide the correct terminology in parentheses as a mini-lesson (e.g., "Fixed. Added scrolling *(in CSS terms: `overflow-y: auto` to handle content overflow)*")
+
+## Agent Orchestration
+
+- `agentctl` supports multi-agent coordination under **Agent Profile v1** and the Overseer role.
+- Relevant commands/flows:
+  - `agentctl agent spawn --role <role> --exec-mode <mode> --llm-provider ...`
+  - `agentctl agent run <id>`
+  - `agentctl agent list`
+  - `agentctl agent kill <id>`
+  - `agentctl agent info <id>`
+  - `agentctl agent watch <id>`
+  - `agentctl agent ask <id> --question ...`
+  - `agentctl agent cmd <id> --action ...`
+  - `agentctl agent resume <session-id> --prompt ...`
+  - `agentctl agent hierarchy [session-id]`
+  - `agentctl agent --help` for the full current command list
+- Subagent control in protocol terms is covered by `agent.spawn` + mailbox messaging documented in:
+  - [docs/spec/agent_hierarchy.md](docs/spec/agent_hierarchy.md)
+  - [docs/spec/overseer_profile.md](docs/spec/overseer_profile.md)
+  - [docs/spec/v1/agent_profile_v1.md](docs/spec/v1/agent_profile_v1.md)
+  - [docs/kubernetes.md](docs/kubernetes.md)
+  - [docs/plans/chat-platform-adapter.md](docs/plans/chat-platform-adapter.md)
+  - [docs/plans/k8s-sql-storage.md](docs/plans/k8s-sql-storage.md)
 
 ---
 
@@ -47,10 +98,12 @@ flowchart LR
         SKILL[Skills]
         MEM[Memory]
         SESS[Sessions]
+        CHAT[Chat Adapter Layer]
+        COMPANION[Companion]
     end
 
     subgraph Storage
-        DB[(SQLite)]
+        DB[(sqlite/libsql/turso/postgres)]
         CAS[CAS]
         VEC[Vectors]
     end
@@ -59,13 +112,17 @@ flowchart LR
     HOOK --> SKILL
     SKILL --> MEM
     SKILL --> SESS
+    SKILL --> CHAT
+    SKILL --> COMPANION
     MEM --> DB
     MEM --> VEC
     SESS --> DB
+    CHAT --> SVC[API/Websocket Services]
+    COMPANION --> SVC
     SKILL --> CAS
 ```
 
-**Detailed docs:** [docs/general/architecture.md](docs/general/architecture.md)
+**Detailed docs:** [docs/general/architecture.md](docs/general/architecture.md) and [docs/architecture/](docs/architecture/)
 
 ---
 
@@ -152,12 +209,12 @@ gh pr create
 
 ### JSON Envelopes
 
-All I/O uses canonical envelopes:
+All I/O uses canonical envelopes (Protocol v1):
 
 ```json
 {
   "version": 1,
-  "status": "ok",
+  "status": "ok|error|progress",
   "command": "skill/name",
   "data": { ... },
   "meta": { "ts": "2026-01-12T12:00:00Z" },
@@ -168,6 +225,7 @@ All I/O uses canonical envelopes:
 - `meta.ts` **MUST** be present (RFC3339 UTC)
 - `status:"ok"` → `error` fields empty
 - `status:"error"` → `error.code` and `error.message` required
+- `status:"progress"` → progress updates (non-terminal), terminal envelope still `ok` or `error`
 - **stdout** = envelopes only, **stderr** = logs only
 
 ### Large Outputs
@@ -495,6 +553,11 @@ I/O: JSON envelopes (version: 1)
 | Sessions     | [docs/general/sessions.md](docs/general/sessions.md)         |
 | Storage      | [docs/general/storage.md](docs/general/storage.md)           |
 | Gotchas      | [docs/general/gotchas.md](docs/general/gotchas.md)           |
+| Multi-Agent  | [docs/spec/v1/agent_profile_v1.md](docs/spec/v1/agent_profile_v1.md) |
+| Deployment   | [docs/kubernetes.md](docs/kubernetes.md)                    |
+| Deployment Manifests | [deploy/kubernetes/](deploy/kubernetes/)              |
+| Chat Adapter | [docs/plans/chat-platform-adapter.md](docs/plans/chat-platform-adapter.md) |
+| Postgres     | [docs/plans/k8s-sql-storage.md](docs/plans/k8s-sql-storage.md) |
 
 ---
 

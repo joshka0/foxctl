@@ -23,7 +23,7 @@ func (f fakeVerifier) Verify(_ context.Context, _ string) error { return f.err }
 func TestHTTPHandler_Unauthorized(t *testing.T) {
 	t.Parallel()
 
-	a := New(config.TeamsSettings{MaxConcurrentMessages: 1}, "")
+	a := New(config.TeamsSettings{MaxConcurrentMessages: 1}, "", nil)
 	a.verifier = fakeVerifier{err: errors.New("nope")}
 
 	body := `{
@@ -49,7 +49,7 @@ func TestHTTPHandler_Unauthorized(t *testing.T) {
 func TestHTTPHandler_Gating_GroupNotAllowlisted_NoMention(t *testing.T) {
 	t.Parallel()
 
-	a := New(config.TeamsSettings{MaxConcurrentMessages: 1}, "")
+	a := New(config.TeamsSettings{MaxConcurrentMessages: 1}, "", nil)
 	a.verifier = nopJWTVerifier{}
 
 	called := make(chan struct{}, 1)
@@ -87,7 +87,7 @@ func TestHTTPHandler_Gating_GroupNotAllowlisted_NoMention(t *testing.T) {
 func TestHTTPHandler_Gating_AllowlistedConversation(t *testing.T) {
 	t.Parallel()
 
-	a := New(config.TeamsSettings{MaxConcurrentMessages: 1, ChatConversationIDs: []string{"c1"}}, "")
+	a := New(config.TeamsSettings{MaxConcurrentMessages: 1, ChatConversationIDs: []string{"c1"}}, "", nil)
 	a.verifier = nopJWTVerifier{}
 	a.botClient = &BotClient{} // non-nil so dispatch guard passes (handlers don't send replies)
 
@@ -129,7 +129,7 @@ func TestHTTPHandler_Gating_AllowlistedConversation(t *testing.T) {
 func TestHTTPHandler_Gating_MentionInGroup(t *testing.T) {
 	t.Parallel()
 
-	a := New(config.TeamsSettings{MaxConcurrentMessages: 1}, "")
+	a := New(config.TeamsSettings{MaxConcurrentMessages: 1}, "", nil)
 	a.verifier = nopJWTVerifier{}
 	a.botClient = &BotClient{} // non-nil so dispatch guard passes
 
@@ -171,7 +171,7 @@ func TestHTTPHandler_Gating_MentionInGroup(t *testing.T) {
 func TestHTTPHandler_Gating_OneToOne(t *testing.T) {
 	t.Parallel()
 
-	a := New(config.TeamsSettings{MaxConcurrentMessages: 1}, "")
+	a := New(config.TeamsSettings{MaxConcurrentMessages: 1}, "", nil)
 	a.verifier = nopJWTVerifier{}
 	a.botClient = &BotClient{} // non-nil so dispatch guard passes
 
@@ -211,7 +211,7 @@ func TestHTTPHandler_Gating_OneToOne(t *testing.T) {
 func TestHTTPHandler_CommandRouting(t *testing.T) {
 	t.Parallel()
 
-	a := New(config.TeamsSettings{MaxConcurrentMessages: 1, ChatConversationIDs: []string{"c1"}}, "")
+	a := New(config.TeamsSettings{MaxConcurrentMessages: 1, ChatConversationIDs: []string{"c1"}}, "", nil)
 	a.verifier = nopJWTVerifier{}
 	a.botClient = &BotClient{} // non-nil so dispatch guard passes
 
@@ -267,7 +267,7 @@ func TestHTTPHandler_CommandRouting(t *testing.T) {
 func TestHTTPHandler_TenantIsolation_ServiceURLs(t *testing.T) {
 	t.Parallel()
 
-	a := New(config.TeamsSettings{MaxConcurrentMessages: 2}, "")
+	a := New(config.TeamsSettings{MaxConcurrentMessages: 2}, "", nil)
 	a.verifier = nopJWTVerifier{}
 	a.botClient = &BotClient{} // non-nil so dispatch guard passes
 
@@ -372,7 +372,7 @@ func TestHTTPHandler_TenantIsolation_ServiceURLs(t *testing.T) {
 func TestHTTPHandler_UntrustedServiceURL(t *testing.T) {
 	t.Parallel()
 
-	a := New(config.TeamsSettings{MaxConcurrentMessages: 1}, "")
+	a := New(config.TeamsSettings{MaxConcurrentMessages: 1}, "", nil)
 	a.verifier = nopJWTVerifier{}
 
 	body := `{
