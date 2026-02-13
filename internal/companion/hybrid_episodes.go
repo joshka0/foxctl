@@ -15,12 +15,11 @@ import (
 )
 
 const (
-	episodeMaxTurns         = 20
-	toolRunOrphanWindow      = int64(50)
-	topicDriftThreshold     = 0.15
-	episodeTopicTokenLimit  = 12
+	episodeMaxTurns        = 20
+	toolRunOrphanWindow    = int64(50)
+	topicDriftThreshold    = 0.15
+	episodeTopicTokenLimit = 12
 )
-
 
 // updateOpenEpisodeState updates the open episode's event count, topic signature,
 // and manages tool runs. This runs on EVERY event (Tier 0).

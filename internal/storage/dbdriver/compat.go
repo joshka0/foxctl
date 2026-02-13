@@ -31,34 +31,43 @@ type wrappedDB struct {
 	dialect    Dialect
 }
 
-func (w *wrappedDB) Close() error                                         { return w.db.Close() }
-func (w *wrappedDB) Exec(q string, args ...any) (sql.Result, error)        { return w.db.Exec(q, args...) }
-func (w *wrappedDB) ExecContext(ctx context.Context, q string, args ...any) (sql.Result, error) { return w.db.ExecContext(ctx, q, args...) }
-func (w *wrappedDB) Query(q string, args ...any) (*sql.Rows, error)        { return w.db.Query(q, args...) }
-func (w *wrappedDB) QueryContext(ctx context.Context, q string, args ...any) (*sql.Rows, error) { return w.db.QueryContext(ctx, q, args...) }
-func (w *wrappedDB) QueryRow(q string, args ...any) *sql.Row               { return w.db.QueryRow(q, args...) }
-func (w *wrappedDB) QueryRowContext(ctx context.Context, q string, args ...any) *sql.Row { return w.db.QueryRowContext(ctx, q, args...) }
-func (w *wrappedDB) Begin() (*sql.Tx, error)                               { return w.db.Begin() }
-func (w *wrappedDB) BeginTx(ctx context.Context, opts *sql.TxOptions) (*sql.Tx, error) { return w.db.BeginTx(ctx, opts) }
-func (w *wrappedDB) Ping() error                                           { return w.db.Ping() }
-func (w *wrappedDB) PingContext(ctx context.Context) error                  { return w.db.PingContext(ctx) }
-func (w *wrappedDB) SetMaxOpenConns(n int)                                 { w.db.SetMaxOpenConns(n) }
-func (w *wrappedDB) SetMaxIdleConns(n int)                                 { w.db.SetMaxIdleConns(n) }
+func (w *wrappedDB) Close() error                                   { return w.db.Close() }
+func (w *wrappedDB) Exec(q string, args ...any) (sql.Result, error) { return w.db.Exec(q, args...) }
+func (w *wrappedDB) ExecContext(ctx context.Context, q string, args ...any) (sql.Result, error) {
+	return w.db.ExecContext(ctx, q, args...)
+}
+func (w *wrappedDB) Query(q string, args ...any) (*sql.Rows, error) { return w.db.Query(q, args...) }
+func (w *wrappedDB) QueryContext(ctx context.Context, q string, args ...any) (*sql.Rows, error) {
+	return w.db.QueryContext(ctx, q, args...)
+}
+func (w *wrappedDB) QueryRow(q string, args ...any) *sql.Row { return w.db.QueryRow(q, args...) }
+func (w *wrappedDB) QueryRowContext(ctx context.Context, q string, args ...any) *sql.Row {
+	return w.db.QueryRowContext(ctx, q, args...)
+}
+func (w *wrappedDB) Begin() (*sql.Tx, error) { return w.db.Begin() }
+func (w *wrappedDB) BeginTx(ctx context.Context, opts *sql.TxOptions) (*sql.Tx, error) {
+	return w.db.BeginTx(ctx, opts)
+}
+func (w *wrappedDB) Ping() error                           { return w.db.Ping() }
+func (w *wrappedDB) PingContext(ctx context.Context) error { return w.db.PingContext(ctx) }
+func (w *wrappedDB) SetMaxOpenConns(n int)                 { w.db.SetMaxOpenConns(n) }
+func (w *wrappedDB) SetMaxIdleConns(n int)                 { w.db.SetMaxIdleConns(n) }
 func (w *wrappedDB) SetConnMaxLifetime(d any) {
 	if dur, ok := parseConnDuration(d); ok {
 		w.db.SetConnMaxLifetime(dur)
 	}
 }
+
 func (w *wrappedDB) SetConnMaxIdleTime(d any) {
 	if dur, ok := parseConnDuration(d); ok {
 		w.db.SetConnMaxIdleTime(dur)
 	}
 }
-func (w *wrappedDB) Stats() sql.DBStats                                   { return w.db.Stats() }
-func (w *wrappedDB) GetUnderlyingDB() (*sql.DB, bool)                      { return w.db, true }
-func (w *wrappedDB) IsVectorSearchEnabled() bool                           { return false }
-func (w *wrappedDB) GetDriverType() DriverType                             { return w.driverType }
-func (w *wrappedDB) GetDialect() Dialect                                   { return w.dialect }
+func (w *wrappedDB) Stats() sql.DBStats               { return w.db.Stats() }
+func (w *wrappedDB) GetUnderlyingDB() (*sql.DB, bool) { return w.db, true }
+func (w *wrappedDB) IsVectorSearchEnabled() bool      { return false }
+func (w *wrappedDB) GetDriverType() DriverType        { return w.driverType }
+func (w *wrappedDB) GetDialect() Dialect              { return w.dialect }
 
 // OpenDBCompat is a backward-compatible version of OpenDB that returns *sql.DB
 // OpenDBCompat opens a database via the package's DB layer and returns its underlying *sql.DB for backward compatibility with callers that expect the standard library type.

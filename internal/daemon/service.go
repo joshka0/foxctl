@@ -1486,8 +1486,8 @@ type AgentSpawnParams struct {
 type AgentSpawnResult struct {
 	SessionID string `json:"session_id"`
 	ActorID   string `json:"actor_id"`
-	AgentID   string `json:"agent_id"`  // Persistent ID in agents.db
-	Name      string `json:"name"`      // Generated or provided agent name
+	AgentID   string `json:"agent_id"` // Persistent ID in agents.db
+	Name      string `json:"name"`     // Generated or provided agent name
 	Status    string `json:"status"`
 	Role      string `json:"role"`
 	NS        string `json:"ns,omitempty"` // Namespace for mailbox routing

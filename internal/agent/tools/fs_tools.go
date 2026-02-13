@@ -9,8 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	tooling "github.com/jkatigb/agentctl/internal/tooling"
 	models "github.com/XiaoConstantine/mcp-go/pkg/model"
+	tooling "github.com/jkatigb/agentctl/internal/tooling"
 )
 
 // registerFSTools registers filesystem tools.

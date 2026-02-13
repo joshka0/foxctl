@@ -86,8 +86,8 @@ func WithDynamicTimeout[I any](getDuration func(I) time.Duration) Middleware[I] 
 
 // RetryPolicy configures retry behavior.
 type RetryPolicy struct {
-	MaxAttempts int           // Total attempts (1 = no retry)
-	Backoff     time.Duration // Initial backoff between retries
+	MaxAttempts int              // Total attempts (1 = no retry)
+	Backoff     time.Duration    // Initial backoff between retries
 	Retryable   func(error) bool // Return true to retry; nil = retry all errors
 }
 

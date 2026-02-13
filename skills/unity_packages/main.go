@@ -161,11 +161,11 @@ func listPackages(projectPath string) (map[string]any, error) {
 	}
 
 	return map[string]any{
-		"operation":      "list",
-		"packages":       sortedDeps,
-		"package_count":  len(sortedDeps),
-		"package_names":  names,
-		"manifest_path":  manifestPath(projectPath),
+		"operation":     "list",
+		"packages":      sortedDeps,
+		"package_count": len(sortedDeps),
+		"package_names": names,
+		"manifest_path": manifestPath(projectPath),
 	}, nil
 }
 
@@ -196,8 +196,8 @@ func addPackage(projectPath string, in Input) (map[string]any, error) {
 	return map[string]any{
 		"operation":    "add",
 		"package_name": in.PackageName,
-		"version":     in.Version,
-		"summary":     fmt.Sprintf("Set %s to %s", in.PackageName, in.Version),
+		"version":      in.Version,
+		"summary":      fmt.Sprintf("Set %s to %s", in.PackageName, in.Version),
 	}, nil
 }
 

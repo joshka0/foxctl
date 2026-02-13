@@ -240,18 +240,18 @@ func (m *ConversationMemory) GetRelevantEpisodes(ctx context.Context, convID, _ 
 	var episodes []SoftEpisode
 	for rows.Next() {
 		var (
-			id            int64
+			id             int64
 			conversationID string
-			episodeType   string
-			startEventID  int64
-			endEventID    int64
-			summary       sql.NullString
-			needsSummary  int
-			assumptionIDs sql.NullString
-			tokenCount    sql.NullInt64
-			boundaryHash  sql.NullString
-			createdAt     string
-			deletedAt     sql.NullString
+			episodeType    string
+			startEventID   int64
+			endEventID     int64
+			summary        sql.NullString
+			needsSummary   int
+			assumptionIDs  sql.NullString
+			tokenCount     sql.NullInt64
+			boundaryHash   sql.NullString
+			createdAt      string
+			deletedAt      sql.NullString
 		)
 
 		if err := rows.Scan(
@@ -272,17 +272,17 @@ func (m *ConversationMemory) GetRelevantEpisodes(ctx context.Context, convID, _ 
 		}
 
 		raw := map[string]interface{}{
-			"id":             id,
+			"id":              id,
 			"conversation_id": conversationID,
-			"episode_type":   episodeType,
-			"start_event_id": startEventID,
-			"end_event_id":   endEventID,
-			"summary":        summary.String,
-			"needs_summary":  needsSummary,
-			"assumption_ids": assumptionIDs.String,
-			"token_count":    tokenCount.Int64,
-			"boundary_hash":  boundaryHash.String,
-			"created_at":     createdAt,
+			"episode_type":    episodeType,
+			"start_event_id":  startEventID,
+			"end_event_id":    endEventID,
+			"summary":         summary.String,
+			"needs_summary":   needsSummary,
+			"assumption_ids":  assumptionIDs.String,
+			"token_count":     tokenCount.Int64,
+			"boundary_hash":   boundaryHash.String,
+			"created_at":      createdAt,
 		}
 		if deletedAt.Valid {
 			raw["deleted_at"] = deletedAt.String
@@ -590,7 +590,7 @@ func (m *ConversationMemory) getActiveAssumptions(ctx context.Context, convID st
 	for rows.Next() {
 		var (
 			id             int64
-			conversationID  string
+			conversationID string
 			assumptionText string
 			status         string
 			reason         sql.NullString
@@ -619,13 +619,13 @@ func (m *ConversationMemory) getActiveAssumptions(ctx context.Context, convID st
 		}
 
 		raw := map[string]interface{}{
-			"id":             id,
+			"id":              id,
 			"conversation_id": conversationID,
-			"assumption":     assumptionText,
-			"status":         status,
+			"assumption":      assumptionText,
+			"status":          status,
 			"source_event_id": sourceEventID,
-			"confidence":     confidence,
-			"created_at":     createdAt,
+			"confidence":      confidence,
+			"created_at":      createdAt,
 		}
 		if reason.Valid {
 			raw["reason"] = reason.String
@@ -792,15 +792,15 @@ func (m *ConversationMemory) scanEvidenceRows(rows *sql.Rows) ([]EvidenceSnippet
 		}
 
 		raw := map[string]interface{}{
-			"id":             id,
+			"id":              id,
 			"conversation_id": conversation,
 			"source_event_id": sourceEvent,
-			"event_type":     eventType,
-			"fact_text":      factText,
-			"confidence":     confidence,
-			"content_hash":   contentHash,
-			"can_verify":     canVerifyInt == 1,
-			"created_at":     createdAt,
+			"event_type":      eventType,
+			"fact_text":       factText,
+			"confidence":      confidence,
+			"content_hash":    contentHash,
+			"can_verify":      canVerifyInt == 1,
+			"created_at":      createdAt,
 		}
 		if bucket.Valid {
 			raw["bucket"] = bucket.String
@@ -946,7 +946,7 @@ func (m *ConversationMemory) tombstoneHardStateEntries(ctx context.Context, tx *
 	}
 
 	metadata := map[string]interface{}{
-		"deleted_via":     "cascade_delete",
+		"deleted_via":      "cascade_delete",
 		"source_event_ids": eventIDs,
 	}
 	metadataJSON, _ := json.Marshal(metadata)
@@ -1175,7 +1175,7 @@ func tokenizeInterface(value interface{}) map[string]struct{} {
 func intersectionTokens(left, right map[string]struct{}) map[string]struct{} {
 	for k := range right {
 		if _, ok := left[k]; ok {
-			return map[string]struct{}{k: struct{}{}}
+			return map[string]struct{}{k: {}}
 		}
 	}
 	return map[string]struct{}{}

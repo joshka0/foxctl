@@ -85,7 +85,7 @@ func sanitizeSQLType(s string) (string, error) {
 //   - Boolean/null keywords: TRUE, FALSE, NULL
 //   - Timestamp keywords: CURRENT_TIMESTAMP, CURRENT_DATE, CURRENT_TIME
 //   - Numeric literals: 0, 1, -1, 3.14
-//   - Single-quoted string literals: '', 'hello', 'it''s' (balanced, no nested injection)
+//   - Single-quoted string literals: ”, 'hello', 'it”s' (balanced, no nested injection)
 //   - Simple function calls: NOW(), datetime('now')
 func sanitizeDefaultValue(s string) (string, error) {
 	if s == "" {
@@ -153,7 +153,7 @@ func isNumericLiteral(s string) bool {
 }
 
 // isValidQuotedString checks if s is a properly balanced single-quoted SQL string.
-// Escaped quotes are represented as '' (two single quotes).
+// Escaped quotes are represented as ” (two single quotes).
 func isValidQuotedString(s string) bool {
 	if len(s) < 2 || s[0] != '\'' {
 		return false

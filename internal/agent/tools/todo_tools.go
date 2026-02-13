@@ -7,11 +7,11 @@ import (
 	"fmt"
 	"time"
 
-	tooling "github.com/jkatigb/agentctl/internal/tooling"
 	models "github.com/XiaoConstantine/mcp-go/pkg/model"
 	"github.com/jkatigb/agentctl/internal/analysis/tasksgraph"
 	errspkg "github.com/jkatigb/agentctl/internal/platform/errors"
 	"github.com/jkatigb/agentctl/internal/storage/tasks"
+	tooling "github.com/jkatigb/agentctl/internal/tooling"
 )
 
 // registerTodoTools registers task/todo management tools.

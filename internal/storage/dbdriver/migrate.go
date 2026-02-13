@@ -521,23 +521,33 @@ type txDB struct {
 	vectorEnabled bool
 }
 
-func (t *txDB) Close() error                                                        { return nil }
-func (t *txDB) Exec(q string, args ...any) (sql.Result, error)                      { return t.tx.Exec(q, args...) }
-func (t *txDB) ExecContext(ctx context.Context, q string, args ...any) (sql.Result, error) { return t.tx.ExecContext(ctx, q, args...) }
-func (t *txDB) Query(q string, args ...any) (*sql.Rows, error)                      { return t.tx.Query(q, args...) }
-func (t *txDB) QueryContext(ctx context.Context, q string, args ...any) (*sql.Rows, error) { return t.tx.QueryContext(ctx, q, args...) }
-func (t *txDB) QueryRow(q string, args ...any) *sql.Row                             { return t.tx.QueryRow(q, args...) }
-func (t *txDB) QueryRowContext(ctx context.Context, q string, args ...any) *sql.Row  { return t.tx.QueryRowContext(ctx, q, args...) }
-func (t *txDB) Begin() (*sql.Tx, error)                                              { return nil, fmt.Errorf("nested transactions not supported in dry-run mode") }
-func (t *txDB) BeginTx(_ context.Context, _ *sql.TxOptions) (*sql.Tx, error)         { return nil, fmt.Errorf("nested transactions not supported in dry-run mode") }
-func (t *txDB) Ping() error                                                          { return nil }
-func (t *txDB) PingContext(_ context.Context) error                                   { return nil }
-func (t *txDB) SetMaxOpenConns(_ int)                                                {}
-func (t *txDB) SetMaxIdleConns(_ int)                                                {}
-func (t *txDB) SetConnMaxLifetime(_ any)                                             {}
-func (t *txDB) SetConnMaxIdleTime(_ any)                                             {}
-func (t *txDB) Stats() sql.DBStats                                                   { return sql.DBStats{} }
-func (t *txDB) GetUnderlyingDB() (*sql.DB, bool)                                     { return nil, false }
-func (t *txDB) IsVectorSearchEnabled() bool                                           { return t.vectorEnabled }
-func (t *txDB) GetDriverType() DriverType                                             { return t.driverType }
-func (t *txDB) GetDialect() Dialect                                                   { return t.dialect }
+func (t *txDB) Close() error                                   { return nil }
+func (t *txDB) Exec(q string, args ...any) (sql.Result, error) { return t.tx.Exec(q, args...) }
+func (t *txDB) ExecContext(ctx context.Context, q string, args ...any) (sql.Result, error) {
+	return t.tx.ExecContext(ctx, q, args...)
+}
+func (t *txDB) Query(q string, args ...any) (*sql.Rows, error) { return t.tx.Query(q, args...) }
+func (t *txDB) QueryContext(ctx context.Context, q string, args ...any) (*sql.Rows, error) {
+	return t.tx.QueryContext(ctx, q, args...)
+}
+func (t *txDB) QueryRow(q string, args ...any) *sql.Row { return t.tx.QueryRow(q, args...) }
+func (t *txDB) QueryRowContext(ctx context.Context, q string, args ...any) *sql.Row {
+	return t.tx.QueryRowContext(ctx, q, args...)
+}
+func (t *txDB) Begin() (*sql.Tx, error) {
+	return nil, fmt.Errorf("nested transactions not supported in dry-run mode")
+}
+func (t *txDB) BeginTx(_ context.Context, _ *sql.TxOptions) (*sql.Tx, error) {
+	return nil, fmt.Errorf("nested transactions not supported in dry-run mode")
+}
+func (t *txDB) Ping() error                         { return nil }
+func (t *txDB) PingContext(_ context.Context) error { return nil }
+func (t *txDB) SetMaxOpenConns(_ int)               {}
+func (t *txDB) SetMaxIdleConns(_ int)               {}
+func (t *txDB) SetConnMaxLifetime(_ any)            {}
+func (t *txDB) SetConnMaxIdleTime(_ any)            {}
+func (t *txDB) Stats() sql.DBStats                  { return sql.DBStats{} }
+func (t *txDB) GetUnderlyingDB() (*sql.DB, bool)    { return nil, false }
+func (t *txDB) IsVectorSearchEnabled() bool         { return t.vectorEnabled }
+func (t *txDB) GetDriverType() DriverType           { return t.driverType }
+func (t *txDB) GetDialect() Dialect                 { return t.dialect }

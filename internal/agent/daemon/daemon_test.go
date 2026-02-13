@@ -149,7 +149,7 @@ func setupDaemon(t *testing.T) (context.Context, string, Options, *fakeCompanion
 		HeartbeatInterval: 100 * time.Millisecond,
 		MaxPollMessages:   10,
 		UseMemoryDedupe:   true,
-		CompanionService: fakeSvc,
+		CompanionService:  fakeSvc,
 	}
 
 	return ctx, agentID, opts, fakeSvc

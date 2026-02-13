@@ -10,7 +10,6 @@ import (
 	"strings"
 	"unicode"
 
-	tooling "github.com/jkatigb/agentctl/internal/tooling"
 	models "github.com/XiaoConstantine/mcp-go/pkg/model"
 	"github.com/jkatigb/agentctl/internal/domain/skill"
 	"github.com/jkatigb/agentctl/internal/indexing/symbol"
@@ -19,6 +18,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/platform/workspace"
 	"github.com/jkatigb/agentctl/internal/skillrun"
 	"github.com/jkatigb/agentctl/internal/storage"
+	tooling "github.com/jkatigb/agentctl/internal/tooling"
 )
 
 // registerCodeTools registers code search and retrieval tools.

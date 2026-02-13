@@ -650,7 +650,7 @@ func (d *CompressionDaemon) runStagingJanitor(ctx context.Context) error {
 
 // DaemonStats contains daemon statistics.
 type DaemonStats struct {
-	LastDailyRun  time.Time `json:"last_daily_run"`
-	LastWeeklyRun time.Time `json:"last_weekly_run"`
+	LastDailyRun   time.Time `json:"last_daily_run"`
+	LastWeeklyRun  time.Time `json:"last_weekly_run"`
 	LastJanitorRun time.Time `json:"last_janitor_run"`
 }

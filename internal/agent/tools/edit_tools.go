@@ -8,9 +8,9 @@ import (
 	"path/filepath"
 	"strings"
 
-	tooling "github.com/jkatigb/agentctl/internal/tooling"
 	models "github.com/XiaoConstantine/mcp-go/pkg/model"
 	"github.com/jkatigb/agentctl/internal/platform/maputil"
+	tooling "github.com/jkatigb/agentctl/internal/tooling"
 )
 
 // StructuredDiff represents a diff output from code/diff skill.

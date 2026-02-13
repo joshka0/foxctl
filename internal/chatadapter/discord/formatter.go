@@ -10,7 +10,7 @@ import (
 
 const (
 	// Discord embed limits
-	embedDescLimit = 4096
+	embedDescLimit  = 4096
 	embedTotalLimit = 6000
 	embedFieldLimit = 25
 	fieldValueLimit = 1024

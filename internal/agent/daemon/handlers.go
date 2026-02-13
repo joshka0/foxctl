@@ -397,7 +397,6 @@ func handleConsoleCmd(_ context.Context, logger zerolog.Logger, msg agent.Messag
 	return nil
 }
 
-
 // CancelContext manages cancellation functions for in-flight requests.
 type CancelContext struct {
 	mu      sync.Mutex

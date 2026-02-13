@@ -5,10 +5,10 @@ import (
 	"encoding/json"
 	"testing"
 
-	tooling "github.com/jkatigb/agentctl/internal/tooling"
 	"github.com/jkatigb/agentctl/internal/domain/agent"
 	"github.com/jkatigb/agentctl/internal/domain/envelope"
 	"github.com/jkatigb/agentctl/internal/storage/mailbox"
+	tooling "github.com/jkatigb/agentctl/internal/tooling"
 	"github.com/stretchr/testify/require"
 )
 

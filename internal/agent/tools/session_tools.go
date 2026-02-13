@@ -6,8 +6,8 @@ import (
 	"errors"
 	"fmt"
 
-	tooling "github.com/jkatigb/agentctl/internal/tooling"
 	models "github.com/XiaoConstantine/mcp-go/pkg/model"
+	tooling "github.com/jkatigb/agentctl/internal/tooling"
 
 	"github.com/jkatigb/agentctl/internal/domain/skill"
 	"github.com/jkatigb/agentctl/internal/platform/buildinfo"

@@ -583,13 +583,13 @@ func parseRepoEdgeTypes(values []string) ([]repoindex.EdgeType, error) {
 	}
 
 	allowed := map[string]struct{}{
-		string(repoindex.EdgeContains):   {},
-		string(repoindex.EdgeImports):    {},
-		string(repoindex.EdgeRefersTo):   {},
-		string(repoindex.EdgeCalls):      {},
-		string(repoindex.EdgeImplements): {},
-		string(repoindex.EdgeEmbeds):     {},
-		string(repoindex.EdgeTests):      {},
+		string(repoindex.EdgeContains):        {},
+		string(repoindex.EdgeImports):         {},
+		string(repoindex.EdgeRefersTo):        {},
+		string(repoindex.EdgeCalls):           {},
+		string(repoindex.EdgeImplements):      {},
+		string(repoindex.EdgeEmbeds):          {},
+		string(repoindex.EdgeTests):           {},
 		string(repoindex.EdgeHasKeyword):      {},
 		string(repoindex.EdgeHasOutputField):  {},
 		string(repoindex.EdgeTouchesResource): {},

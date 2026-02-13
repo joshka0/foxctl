@@ -1708,14 +1708,14 @@ type ContextGetResponse struct {
 	Variables      []ContextVariable `json:"variables"`
 	TotalCount     int               `json:"total_count"`
 	HybridContext  string            `json:"hybrid_context,omitempty"`
-	HybridState    *HybridDebugInfo `json:"hybrid_state,omitempty"`
+	HybridState    *HybridDebugInfo  `json:"hybrid_state,omitempty"`
 }
 
 // HybridDebugInfo contains optional hybrid pipeline state for diagnostics.
 type HybridDebugInfo struct {
-	Mode               string `json:"mode"`
-	LastProcessedEvent int64  `json:"last_processed_event"`
-	HardStateCount     int    `json:"hard_state_count"`
+	Mode                 string `json:"mode"`
+	LastProcessedEvent   int64  `json:"last_processed_event"`
+	HardStateCount       int    `json:"hard_state_count"`
 	EpisodeCount         int    `json:"episode_count"`
 	NeedsSummaryEpisodes int    `json:"needs_summary_episodes"`
 	EvidenceCount        int    `json:"evidence_count"`

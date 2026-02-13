@@ -175,5 +175,7 @@ func (w *CompressScanWorker) Work(ctx context.Context, job *river.Job[CompressSc
 	return nil
 }
 
-var _ river.Worker[CompressDailyArgs] = (*CompressDailyWorker)(nil)
-var _ river.Worker[CompressScanArgs] = (*CompressScanWorker)(nil)
+var (
+	_ river.Worker[CompressDailyArgs] = (*CompressDailyWorker)(nil)
+	_ river.Worker[CompressScanArgs]  = (*CompressScanWorker)(nil)
+)

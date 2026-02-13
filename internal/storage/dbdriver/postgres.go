@@ -235,6 +235,7 @@ func (p *postgresDB) Exec(query string, args ...any) (sql.Result, error) {
 	defer cancel()
 	return p.db.ExecContext(ctx, query, args...)
 }
+
 func (p *postgresDB) ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error) {
 	return p.db.ExecContext(ctx, query, args...)
 }
@@ -244,6 +245,7 @@ func (p *postgresDB) ExecContext(ctx context.Context, query string, args ...any)
 func (p *postgresDB) Query(query string, args ...any) (*sql.Rows, error) {
 	return p.db.QueryContext(context.Background(), query, args...)
 }
+
 func (p *postgresDB) QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error) {
 	return p.db.QueryContext(ctx, query, args...)
 }
@@ -253,6 +255,7 @@ func (p *postgresDB) QueryContext(ctx context.Context, query string, args ...any
 func (p *postgresDB) QueryRow(query string, args ...any) *sql.Row {
 	return p.db.QueryRowContext(context.Background(), query, args...)
 }
+
 func (p *postgresDB) QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row {
 	return p.db.QueryRowContext(ctx, query, args...)
 }
@@ -262,6 +265,7 @@ func (p *postgresDB) QueryRowContext(ctx context.Context, query string, args ...
 func (p *postgresDB) Begin() (*sql.Tx, error) {
 	return p.db.BeginTx(context.Background(), nil)
 }
+
 func (p *postgresDB) BeginTx(ctx context.Context, opts *sql.TxOptions) (*sql.Tx, error) {
 	return p.db.BeginTx(ctx, opts)
 }
@@ -273,21 +277,22 @@ func (p *postgresDB) Ping() error {
 	return p.db.PingContext(ctx)
 }
 func (p *postgresDB) PingContext(ctx context.Context) error { return p.db.PingContext(ctx) }
-func (p *postgresDB) SetMaxOpenConns(n int)                { p.db.SetMaxOpenConns(n) }
-func (p *postgresDB) SetMaxIdleConns(n int)                { p.db.SetMaxIdleConns(n) }
+func (p *postgresDB) SetMaxOpenConns(n int)                 { p.db.SetMaxOpenConns(n) }
+func (p *postgresDB) SetMaxIdleConns(n int)                 { p.db.SetMaxIdleConns(n) }
 func (p *postgresDB) SetConnMaxLifetime(d any) {
 	if dur, ok := parseConnDuration(d); ok {
 		p.db.SetConnMaxLifetime(dur)
 	}
 }
+
 func (p *postgresDB) SetConnMaxIdleTime(d any) {
 	if dur, ok := parseConnDuration(d); ok {
 		p.db.SetConnMaxIdleTime(dur)
 	}
 }
-func (p *postgresDB) Stats() sql.DBStats              { return p.db.Stats() }
+func (p *postgresDB) Stats() sql.DBStats               { return p.db.Stats() }
 func (p *postgresDB) GetUnderlyingDB() (*sql.DB, bool) { return p.db, true }
 func (p *postgresDB) IsVectorSearchEnabled() bool      { return p.vectorEnabled }
-func (p *postgresDB) GetVectorDimensions() int          { return p.vectorDims }
+func (p *postgresDB) GetVectorDimensions() int         { return p.vectorDims }
 func (p *postgresDB) GetDriverType() DriverType        { return DriverPostgres }
 func (p *postgresDB) GetDialect() Dialect              { return PostgresDialect{} }

@@ -81,7 +81,6 @@ func TestChain_Empty(t *testing.T) {
 	chained := Chain(run)
 	rc, _ := testRC(t)
 	err := chained(context.Background(), rc, mwTestInput{})
-
 	if err != nil {
 		t.Errorf("unexpected error: %v", err)
 	}
@@ -239,7 +238,6 @@ func TestWithRetry_SucceedsFirst(t *testing.T) {
 	mw := WithRetry[mwTestInput](RetryPolicy{MaxAttempts: 3, Backoff: time.Millisecond})
 	rc, _ := testRC(t)
 	err := mw(run)(context.Background(), rc, mwTestInput{})
-
 	if err != nil {
 		t.Errorf("unexpected error: %v", err)
 	}
@@ -261,7 +259,6 @@ func TestWithRetry_RetriesOnError(t *testing.T) {
 	mw := WithRetry[mwTestInput](RetryPolicy{MaxAttempts: 3, Backoff: time.Millisecond})
 	rc, _ := testRC(t)
 	err := mw(run)(context.Background(), rc, mwTestInput{})
-
 	if err != nil {
 		t.Errorf("unexpected error: %v", err)
 	}

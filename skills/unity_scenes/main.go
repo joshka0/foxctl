@@ -317,7 +317,7 @@ func writeLines(path string, lines []string) error {
 	if data != "" {
 		data += "\n"
 	}
-	if err := os.WriteFile(path, []byte(data), 0644); err != nil {
+	if err := os.WriteFile(path, []byte(data), 0o644); err != nil {
 		return skillerr.WrapIO(fmt.Sprintf("write %s", path), err, skillerr.WithHint("Check write permission for the Unity project directory."))
 	}
 	return nil

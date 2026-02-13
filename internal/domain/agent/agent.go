@@ -57,10 +57,10 @@ type Agent struct {
 	LLMAPIKey   string `json:"llm_api_key,omitempty"`  // API key (or env var name like $GROQ_API_KEY)
 
 	// Execution mode configuration
-	ExecMode      ExecutionMode `json:"exec_mode,omitempty"`            // reactive|autonomous|autonomous_reactive|proactive|story (default: reactive)
-	MaxIterations int           `json:"max_iterations,omitempty"`       // Max tool calls per turn (default: 10)
-	MaxAutoTurns  int           `json:"max_auto_turns,omitempty"`       // Max autonomous turns per session (default: 1)
-	ThinkInterval int           `json:"think_interval,omitempty"`       // Seconds between proactive think cycles (default: 60)
+	ExecMode      ExecutionMode `json:"exec_mode,omitempty"`      // reactive|autonomous|autonomous_reactive|proactive|story (default: reactive)
+	MaxIterations int           `json:"max_iterations,omitempty"` // Max tool calls per turn (default: 10)
+	MaxAutoTurns  int           `json:"max_auto_turns,omitempty"` // Max autonomous turns per session (default: 1)
+	ThinkInterval int           `json:"think_interval,omitempty"` // Seconds between proactive think cycles (default: 60)
 
 	// Linked companion conversation
 	ConversationID string `json:"conversation_id,omitempty"` // Linked companion conversation ID for chat history

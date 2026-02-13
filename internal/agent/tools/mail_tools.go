@@ -5,10 +5,10 @@ import (
 	"fmt"
 	"time"
 
-	tooling "github.com/jkatigb/agentctl/internal/tooling"
 	models "github.com/XiaoConstantine/mcp-go/pkg/model"
 	"github.com/jkatigb/agentctl/internal/domain/agent"
 	errspkg "github.com/jkatigb/agentctl/internal/platform/errors"
+	tooling "github.com/jkatigb/agentctl/internal/tooling"
 )
 
 // registerMailTools registers mailbox/communication tools.

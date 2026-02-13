@@ -409,9 +409,9 @@ func TestSummarizeEpisodePlan_ValueFallback(t *testing.T) {
 
 func TestSummarizeEpisodePlan_Golden(t *testing.T) {
 	cases := []struct {
-		name        string
-		llmFixture  string
-		goldenFile  string
+		name       string
+		llmFixture string
+		goldenFile string
 	}{
 		{"valid_json", "valid_json_llm_response.txt", "valid_json.golden.json"},
 		{"malformed_json", "malformed_json_llm_response.txt", "malformed_json.golden.json"},
@@ -439,7 +439,7 @@ func TestSummarizeEpisodePlan_Golden(t *testing.T) {
 
 			goldenPath := filepath.Join("testdata", tc.goldenFile)
 			if *updateGolden {
-				if err := os.WriteFile(goldenPath, got, 0644); err != nil {
+				if err := os.WriteFile(goldenPath, got, 0o644); err != nil {
 					t.Fatalf("write golden file: %v", err)
 				}
 				return

@@ -301,9 +301,9 @@ func listActions(inputFile, mapName string) (map[string]any, error) {
 	}
 
 	return map[string]any{
-		"operation":   "list_actions",
-		"map_name":    targetMap.Name,
-		"actions":     actions,
+		"operation":    "list_actions",
+		"map_name":     targetMap.Name,
+		"actions":      actions,
 		"action_count": len(actions),
 	}, nil
 }

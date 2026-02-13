@@ -1,8 +1,8 @@
 package engine
 
 import (
-	"database/sql"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -911,11 +911,11 @@ func (e *RLMToolExecutor) queryEvidenceFTS(ctx context.Context, query string, li
 			}
 
 			matches = append(matches, map[string]interface{}{
-				"id":             id,
+				"id":              id,
 				"source_event_id": eventSource,
-				"event_type":     eventType,
-				"confidence":     confidenceValue,
-				"fact_text":      factText,
+				"event_type":      eventType,
+				"confidence":      confidenceValue,
+				"fact_text":       factText,
 			})
 		}
 
@@ -956,11 +956,11 @@ func (e *RLMToolExecutor) queryEvidenceFTS(ctx context.Context, query string, li
 		}
 
 		matches = append(matches, map[string]interface{}{
-			"id":             id,
+			"id":              id,
 			"source_event_id": eventSource,
-			"event_type":     eventType,
-			"confidence":     confidenceValue,
-			"fact_text":      factText,
+			"event_type":      eventType,
+			"confidence":      confidenceValue,
+			"fact_text":       factText,
 		})
 	}
 

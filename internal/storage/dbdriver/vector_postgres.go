@@ -8,7 +8,7 @@ import (
 // pgQuoteIdent safely quotes a PostgreSQL identifier with double quotes.
 // Embedded double quotes are escaped by doubling them.
 func pgQuoteIdent(name string) string {
-	return "\"" + strings.ReplaceAll(name, "\"" , "\"\"") + "\""
+	return "\"" + strings.ReplaceAll(name, "\"", "\"\"") + "\""
 }
 
 // pgCosineSimilarity returns a SQL expression for cosine similarity using pgvector.
@@ -42,5 +42,3 @@ func pgCreateVectorIndexSQL(tableName, columnName, indexName string) string {
 		"CREATE INDEX IF NOT EXISTS %s ON %s USING hnsw (%s vector_cosine_ops) WITH (m = 16, ef_construction = 64)",
 		pgQuoteIdent(indexName), pgQuoteIdent(tableName), pgQuoteIdent(columnName))
 }
-
-

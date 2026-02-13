@@ -420,13 +420,13 @@ func TestDetector_Detect(t *testing.T) {
 		if err != nil {
 			t.Fatalf("DetectMostRecent() error = %v", err)
 		}
-			if plan == nil {
-				t.Fatal("DetectMostRecent() = nil, want plan")
-				return
-			}
-			if plan.Title != "Plan Two" {
-				t.Errorf("DetectMostRecent() = %q, want Plan Two", plan.Title)
-			}
+		if plan == nil {
+			t.Fatal("DetectMostRecent() = nil, want plan")
+			return
+		}
+		if plan.Title != "Plan Two" {
+			t.Errorf("DetectMostRecent() = %q, want Plan Two", plan.Title)
+		}
 	})
 
 	t.Run("empty directory", func(t *testing.T) {

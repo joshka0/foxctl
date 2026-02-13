@@ -28,7 +28,7 @@ type HookContext struct {
 type LLMChatEngine struct {
 	config        LLMChatConfig
 	client        *http.Client
-	bedrockClient *BedrockClient  // Non-nil when provider is "bedrock"
+	bedrockClient *BedrockClient // Non-nil when provider is "bedrock"
 	toolRunner    *ToolRunner
 	rlmExecutor   *RLMToolExecutor // For tracking RLM context queries
 	hookContext   HookContext      // Context for hook dispatch
