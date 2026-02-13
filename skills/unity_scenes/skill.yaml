@@ -1,0 +1,86 @@
+apiVersion: agentctl/v1
+kind: Skill
+metadata:
+  name: unity/scenes
+  version: 0.1.0
+  description: "Manage Unity scene build settings in ProjectSettings/EditorBuildSettings.asset"
+  tags: ["unity", "scenes", "build-settings"]
+distribution:
+  type: exec
+  exec:
+    entry: skills/unity_scenes/unity_scenes
+io:
+  format: JSON
+  inline_output_kb: 32
+  network: none
+signature:
+  command: unity/scenes
+  parameters:
+    - name: operation
+      type: string
+      required: true
+      description: |
+        Operation to perform:
+        - list: List scenes in build settings with enabled status
+        - add: Add scene to build settings
+        - remove: Remove scene from build settings
+        - enable: Enable a scene in build settings
+        - disable: Disable a scene in build settings
+        - reorder: Move scene to a specific index
+        - find: Find .unity scene files in Assets/
+    - name: scene_path
+      type: string
+      required: false
+      description: "Scene path relative to project (e.g., Assets/Scenes/MainMenu.unity)"
+    - name: index
+      type: integer
+      required: false
+      description: "Target index for reorder operation"
+    - name: pattern
+      type: string
+      required: false
+      description: "Glob pattern for find operation (default: **/*.unity)"
+    - name: project_path
+      type: string
+      required: false
+      description: "Unity project directory (defaults to workspace)"
+  help:
+    short: "Manage Unity scene build settings."
+    long: |
+      Use unity/scenes to manage scene build settings in ProjectSettings/EditorBuildSettings.asset.
+      Example commands:
+        agentctl run unity/scenes --input '{"operation":"list"}'
+        agentctl run unity/scenes --input '{"operation":"add","scene_path":"Assets/Scenes/MainMenu.unity"}'
+        agentctl run unity/scenes --input '{"operation":"remove","scene_path":"Assets/Scenes/MainMenu.unity"}'
+        agentctl run unity/scenes --input '{"operation":"enable","scene_path":"Assets/Scenes/MainMenu.unity"}'
+        agentctl run unity/scenes --input '{"operation":"disable","scene_path":"Assets/Scenes/MainMenu.unity"}'
+        agentctl run unity/scenes --input '{"operation":"reorder","scene_path":"Assets/Scenes/MainMenu.unity","index":0}'
+        agentctl run unity/scenes --input '{"operation":"find"}'
+  returns:
+    - name: scenes
+      type: array
+      required: false
+      description: "List of scenes with enabled status and index"
+    - name: files
+      type: array
+      required: false
+      description: "Found .unity files (for find operation)"
+  workflows:
+    - id: list-scenes
+      description: "List scenes in build settings"
+      example_input:
+        operation: "list"
+    - id: add-scene
+      description: "Add a scene to build settings"
+      example_input:
+        operation: "add"
+        scene_path: "Assets/Scenes/MainMenu.unity"
+    - id: find-scenes
+      description: "Find all .unity files in project"
+      example_input:
+        operation: "find"
+openapi:
+  enabled: true
+  methods:
+    GET: "true"
+    POST: "true"

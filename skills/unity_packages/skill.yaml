@@ -1,0 +1,87 @@
+apiVersion: agentctl/v1
+kind: Skill
+metadata:
+  name: unity/packages
+  version: 0.1.0
+  description: "Manage Unity Package Manager (UPM) dependencies in Packages/manifest.json"
+  tags: ["unity", "packages", "upm", "dependencies"]
+distribution:
+  type: exec
+  exec:
+    entry: skills/unity_packages/unity_packages
+io:
+  format: JSON
+  inline_output_kb: 32
+  network: none
+signature:
+  command: unity/packages
+  parameters:
+    - name: operation
+      type: string
+      required: true
+      description: |
+        Operation to perform:
+        - list: List all package dependencies with versions
+        - add: Add or update a package dependency
+        - remove: Remove a package dependency
+        - get: Get version of a specific package
+    - name: package_name
+      type: string
+      required: false
+      description: "Package identifier (e.g., com.unity.inputsystem)"
+    - name: version
+      type: string
+      required: false
+      description: "Package version (e.g., 1.7.0)"
+    - name: project_path
+      type: string
+      required: false
+      description: "Unity project directory (defaults to workspace)"
+  help:
+    short: "Manage Unity package dependencies."
+    long: |
+      Use unity/packages to manage Unity Package Manager (UPM) dependencies in Packages/manifest.json.
+      Example commands:
+        agentctl run unity/packages --input '{"operation":"list"}'
+        agentctl run unity/packages --input '{"operation":"add","package_name":"com.unity.inputsystem","version":"1.7.0"}'
+        agentctl run unity/packages --input '{"operation":"remove","package_name":"com.unity.inputsystem"}'
+        agentctl run unity/packages --input '{"operation":"get","package_name":"com.unity.inputsystem"}'
+  returns:
+    - name: packages
+      type: object
+      required: false
+      description: "Map of package name to version (for list)"
+    - name: package_name
+      type: string
+      required: false
+      description: "Package identifier"
+    - name: version
+      type: string
+      required: false
+      description: "Package version"
+  workflows:
+    - id: list-packages
+      description: "List all package dependencies"
+      example_input:
+        operation: "list"
+    - id: add-package
+      description: "Add the Input System package"
+      example_input:
+        operation: "add"
+        package_name: "com.unity.inputsystem"
+        version: "1.7.0"
+    - id: remove-package
+      description: "Remove a package"
+      example_input:
+        operation: "remove"
+        package_name: "com.unity.inputsystem"
+    - id: get-package
+      description: "Check a package version"
+      example_input:
+        operation: "get"
+        package_name: "com.unity.inputsystem"
+openapi:
+  enabled: true
+  methods:
+    GET: "true"
+    POST: "true"

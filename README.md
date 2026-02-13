@@ -221,6 +221,7 @@ Skills are the primary interface for AI assistants to interact with code and inf
 | **Sessions** | `session/restore`, `session/summarize`, `session/recall` | Context preservation |
 | **Memory** | `memory/put`, `memory/search`, `memory/query` | Persistent knowledge |
 | **Codemaps** | `codemap/generate`, `codemap/search` | Semantic code traces |
+| **Game Engines** | `build/unity`, `unity/packages`, `unity/scenes`, `unity/input` | Unity project management |
 
 ```bash
 # List all available skills

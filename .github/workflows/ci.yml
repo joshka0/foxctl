@@ -117,11 +117,8 @@ jobs:
           key: go-${{ runner.os }}-go1.25-${{ hashFiles('**/go.sum') }}
           restore-keys: go-${{ runner.os }}-go1.25-
 
-      - name: Unit tests with coverage
-        run: |
-          mkdir -p coverage
-          CGO_ENABLED=0 go test -short ./... -covermode=atomic -coverprofile=coverage/coverage.out
-          CGO_ENABLED=0 go tool cover -func=coverage/coverage.out | tee coverage/summary.txt
+      - name: Unit tests
+        run: make test-short
 
   race-tests:
     runs-on: arc-runner-agentctl

@@ -1,0 +1,138 @@
+apiVersion: agentctl/v1
+kind: Skill
+metadata:
+  name: build/unity
+  version: 0.1.0
+  description: "Build, test, and export Unity projects using the Unity Editor CLI"
+  tags: ["build", "unity", "game", "export", "test"]
+distribution:
+  type: exec
+  exec:
+    entry: skills/build_unity/build_unity
+io:
+  format: JSON
+  inline_output_kb: 32
+  network: none
+signature:
+  command: build/unity
+  parameters:
+    - name: action
+      type: string
+      required: true
+      description: |
+        Operation to perform:
+        - list_targets: List available build targets (platform names)
+        - build: Build the Unity project for a target platform
+        - test: Run EditMode/PlayMode tests via Unity Test Runner
+        - export: Build and export a standalone player
+        - clean: Clean Library/ and build artifacts
+    - name: build_target
+      type: string
+      required: false
+      description: "Build target platform (e.g., StandaloneOSX, StandaloneWindows64, StandaloneLinux64, Android, iOS, WebGL)"
+    - name: output_path
+      type: string
+      required: false
+      description: "Output path for the build/export"
+    - name: unity_path
+      type: string
+      required: false
+      description: "Path to Unity Editor executable (auto-detected if not provided)"
+    - name: development
+      type: boolean
+      required: false
+      default: false
+      description: "Enable development build (includes debug symbols and profiler)"
+    - name: test_platform
+      type: string
+      required: false
+      default: "EditMode"
+      description: "Test platform: EditMode or PlayMode"
+    - name: test_filter
+      type: string
+      required: false
+      description: "Filter tests by name pattern"
+    - name: test_results
+      type: string
+      required: false
+      description: "Path for test results XML output"
+    - name: project_path
+      type: string
+      required: false
+      description: "Unity project directory (defaults to workspace)"
+  help:
+    short: "Build, test, or export Unity projects."
+    long: |
+      Use build/unity to build, test, and export Unity game projects via the Unity Editor CLI (-batchmode).
+      Auto-detects Unity Editor on macOS via Unity Hub or common install paths.
+      Example commands:
+        agentctl run build/unity --input '{"action":"list_targets"}'
+        agentctl run build/unity --input '{"action":"build","build_target":"StandaloneOSX"}'
+        agentctl run build/unity --input '{"action":"test","test_platform":"EditMode"}'
+        agentctl run build/unity --input '{"action":"export","build_target":"StandaloneOSX","output_path":"builds/game.app"}'
+        agentctl run build/unity --input '{"action":"clean"}'
+  returns:
+    - name: targets
+      type: array
+      required: false
+      description: "List of available build targets (for list_targets)"
+    - name: exit_code
+      type: integer
+      required: false
+      description: "Unity CLI exit code"
+    - name: stdout
+      type: string
+      required: false
+      description: "Unity CLI stdout"
+    - name: stderr
+      type: string
+      required: false
+      description: "Unity CLI stderr"
+    - name: output_path
+      type: string
+      required: false
+      description: "Path to build output"
+    - name: test_results_path
+      type: string
+      required: false
+      description: "Path to test results XML"
+  workflows:
+    - id: list-targets
+      description: "List available build target platforms"
+      example_input:
+        action: "list_targets"
+    - id: build-osx
+      description: "Build for macOS"
+      example_input:
+        action: "build"
+        build_target: "StandaloneOSX"
+    - id: build-windows
+      description: "Build for Windows"
+      example_input:
+        action: "build"
+        build_target: "StandaloneWindows64"
+    - id: test-editmode
+      description: "Run EditMode tests"
+      example_input:
+        action: "test"
+        test_platform: "EditMode"
+    - id: test-playmode
+      description: "Run PlayMode tests"
+      example_input:
+        action: "test"
+        test_platform: "PlayMode"
+    - id: export-osx
+      description: "Export standalone macOS player"
+      example_input:
+        action: "export"
+        build_target: "StandaloneOSX"
+        output_path: "builds/game.app"
+    - id: clean
+      description: "Clean build artifacts"
+      example_input:
+        action: "clean"
+openapi:
+  enabled: true
+  methods:
+    GET: "true"
+    POST: "true"

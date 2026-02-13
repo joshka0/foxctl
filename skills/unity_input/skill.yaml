@@ -1,0 +1,106 @@
+apiVersion: agentctl/v1
+kind: Skill
+metadata:
+  name: unity/input
+  version: 0.1.0
+  description: "Manage Unity Input System action maps, actions, and bindings in .inputactions files"
+  tags: ["unity", "input", "input-system", "actions", "bindings"]
+distribution:
+  type: exec
+  exec:
+    entry: skills/unity_input/unity_input
+io:
+  format: JSON
+  inline_output_kb: 32
+  network: none
+signature:
+  command: unity/input
+  parameters:
+    - name: operation
+      type: string
+      required: true
+      description: |
+        Operation to perform:
+        - list_maps: List all action maps
+        - list_actions: List actions in a map
+        - add_map: Add new action map
+        - add_action: Add action to a map
+        - add_binding: Add binding to an action
+        - remove_map: Remove action map
+        - remove_action: Remove action from map
+    - name: input_file
+      type: string
+      required: false
+      description: "Path to .inputactions file (relative to project root)"
+    - name: map_name
+      type: string
+      required: false
+      description: "Action map name"
+    - name: action_name
+      type: string
+      required: false
+      description: "Action name within a map"
+    - name: action_type
+      type: string
+      required: false
+      description: "Action type: Button, Value, or PassThrough"
+    - name: binding_path
+      type: string
+      required: false
+      description: "Input binding path (e.g., <Keyboard>/w, <Gamepad>/leftStick)"
+    - name: project_path
+      type: string
+      required: false
+      description: "Unity project directory (defaults to workspace)"
+  help:
+    short: "Manage Unity Input System action maps and bindings."
+    long: |
+      Use unity/input to manage Unity Input System .inputactions files.
+      Example commands:
+        agentctl run unity/input --input '{"operation":"list_maps","input_file":"Assets/Input/PlayerControls.inputactions"}'
+        agentctl run unity/input --input '{"operation":"list_actions","input_file":"Assets/Input/PlayerControls.inputactions","map_name":"Player"}'
+        agentctl run unity/input --input '{"operation":"add_map","input_file":"Assets/Input/PlayerControls.inputactions","map_name":"UI"}'
+        agentctl run unity/input --input '{"operation":"add_action","input_file":"Assets/Input/PlayerControls.inputactions","map_name":"Player","action_name":"Move","action_type":"Value"}'
+        agentctl run unity/input --input '{"operation":"add_binding","input_file":"Assets/Input/PlayerControls.inputactions","map_name":"Player","action_name":"Move","binding_path":"<Keyboard>/w"}'
+  returns:
+    - name: maps
+      type: array
+      required: false
+      description: "List of action maps (for list_maps)"
+    - name: actions
+      type: array
+      required: false
+      description: "List of actions in a map (for list_actions)"
+  workflows:
+    - id: list-maps
+      description: "List all action maps"
+      example_input:
+        operation: "list_maps"
+        input_file: "Assets/Input/PlayerControls.inputactions"
+    - id: add-map
+      description: "Add a new action map"
+      example_input:
+        operation: "add_map"
+        input_file: "Assets/Input/PlayerControls.inputactions"
+        map_name: "Player"
+    - id: add-action
+      description: "Add an action to a map"
+      example_input:
+        operation: "add_action"
+        input_file: "Assets/Input/PlayerControls.inputactions"
+        map_name: "Player"
+        action_name: "Move"
+        action_type: "Value"
+    - id: add-binding
+      description: "Add a binding to an action"
+      example_input:
+        operation: "add_binding"
+        input_file: "Assets/Input/PlayerControls.inputactions"
+        map_name: "Player"
+        action_name: "Move"
+        binding_path: "<Keyboard>/w"
+openapi:
+  enabled: true
+  methods:
+    GET: "true"
+    POST: "true"
