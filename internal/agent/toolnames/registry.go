@@ -1,12 +1,16 @@
+// Package toolnames provides canonical tool name resolution and alias mapping.
 package toolnames
 
 import "strings"
 
+// ToolMode selects the naming convention for tool resolution.
 type ToolMode string
 
 const (
+	// ToolModeRuntime uses underscore-delimited names (e.g., "fs_read_file").
 	ToolModeRuntime ToolMode = "runtime"
-	ToolModeLegacy  ToolMode = "legacy"
+	// ToolModeLegacy uses dot-delimited names (e.g., "fs.read.file").
+	ToolModeLegacy ToolMode = "legacy"
 )
 
 var (
@@ -47,6 +51,8 @@ func init() {
 	}
 }
 
+// CanonicalizeToolName resolves a tool name to its canonical form for the given mode.
+// Returns the canonical name and true if found, or empty string and false otherwise.
 func CanonicalizeToolName(mode ToolMode, name string) (string, bool) {
 	key := strings.ToLower(name)
 	switch mode {
@@ -61,10 +67,12 @@ func CanonicalizeToolName(mode ToolMode, name string) (string, bool) {
 	}
 }
 
+// NormalizeAllowlist canonicalizes tool names in an allowlist, deduplicating entries.
 func NormalizeAllowlist(mode ToolMode, allowlist []string) []string {
 	return normalizeAllowlist(mode, allowlist)
 }
 
+// ValidateAllowlist canonicalizes an allowlist and returns unrecognized names separately.
 func ValidateAllowlist(mode ToolMode, allowlist []string) (normalized []string, unknown []string) {
 	seenUnknown := make(map[string]struct{})
 	seenNormalized := make(map[string]struct{})
@@ -87,6 +95,7 @@ func ValidateAllowlist(mode ToolMode, allowlist []string) (normalized []string, 
 	return normalized, unknown
 }
 
+// RuntimeToolNames returns a copy of all registered runtime tool names.
 func RuntimeToolNames() []string {
 	return append([]string(nil), runtimeToolNames...)
 }

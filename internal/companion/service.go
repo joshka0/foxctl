@@ -176,7 +176,6 @@ func DefaultServiceConfig() ServiceConfig {
 	}
 }
 
-// NewService creates a new companion service.
 // NewService initializes the companion service with optional memory and embeddings.
 //
 // The turnLock parameter provides per-conversation mutual exclusion for turn

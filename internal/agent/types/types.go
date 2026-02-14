@@ -396,10 +396,14 @@ type DeniedAgent struct {
 	Reason string `json:"reason"`
 }
 
-// SpawnDenialReason constants for spawn denial.
+// Spawn denial reason constants.
 const (
+	// DenialDepthLimitExceeded indicates the global tree depth cap was reached.
 	DenialDepthLimitExceeded = "depth_limit_exceeded"
+	// DenialLocalLimitExceeded indicates the subtree depth cap was reached.
 	DenialLocalLimitExceeded = "local_limit_exceeded"
-	DenialResourceExhausted  = "resource_exhausted"
-	DenialPolicyViolation    = "policy_violation"
+	// DenialResourceExhausted indicates no resources are available for spawning.
+	DenialResourceExhausted = "resource_exhausted"
+	// DenialPolicyViolation indicates the spawn request violates a policy constraint.
+	DenialPolicyViolation = "policy_violation"
 )

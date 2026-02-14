@@ -56,7 +56,6 @@ type DaemonConfig struct {
 	Logger zerolog.Logger
 }
 
-// NewCompressionDaemon creates a new compression daemon.
 // NewCompressionDaemon creates a compression daemon with default intervals.
 //
 // Index:
@@ -90,7 +89,6 @@ func NewCompressionDaemon(cfg DaemonConfig) *CompressionDaemon {
 	}
 }
 
-// Start begins the daemon loops.
 // Start begins daily and weekly compression loops.
 //
 // Index:
@@ -115,7 +113,6 @@ func (d *CompressionDaemon) Start(ctx context.Context) {
 	go d.runJanitorLoop(ctx)
 }
 
-// Stop stops the daemon and waits for it to finish.
 // Stop signals compression loops to stop and waits for completion.
 //
 // Index:

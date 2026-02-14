@@ -89,9 +89,10 @@ func New(cfg config.TeamsSettings, daemonURL string, clk chatadapter.Clock) *Ada
 	}
 }
 
+// Name returns the adapter identifier ("teams").
 func (a *Adapter) Name() string { return "teams" }
 
-// SetSSEHub configures the SSE hub for future proactive messaging (Phase 3+).
+// SetSSEHub configures the SSE hub for proactive messaging.
 func (a *Adapter) SetSSEHub(hub *sse.Hub) { a.sseHub = hub }
 
 // SetConvRefStore configures the persistent conversation reference store.

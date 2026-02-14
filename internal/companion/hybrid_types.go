@@ -133,6 +133,7 @@ type HardStateCache struct {
 	UpdatedAt      string `json:"updated_at"`
 }
 
+// Conversation event types stored in companion_events.
 const (
 	EventTypeUserMessage      = "user_message"
 	EventTypeAssistantMessage = "assistant_message"
@@ -140,6 +141,7 @@ const (
 	EventTypeToolResult       = "tool_result"
 )
 
+// Hard state entry types for companion_hard_state_entries.
 const (
 	EntryTypePreference       = "preference"
 	EntryTypeDecision         = "decision"
@@ -152,12 +154,14 @@ const (
 	EntryTypeTechnicalContext = "technical_context"
 )
 
+// Hard state entry lifecycle statuses.
 const (
 	EntryStatusActive     = "active"
 	EntryStatusSuperseded = "superseded"
 	EntryStatusRetracted  = "retracted"
 )
 
+// Assumption ledger statuses.
 const (
 	AssumptionStatusActive    = "active"
 	AssumptionStatusRetracted = "retracted"
@@ -176,6 +180,7 @@ type ExtractedEntry struct {
 func strPtr(s string) *string { return &s }
 func int64Ptr(i int64) *int64 { return &i }
 
+// Conversation memory pipeline modes.
 const (
 	MemoryModeLegacy = "legacy"
 	MemoryModeHybrid = "hybrid"

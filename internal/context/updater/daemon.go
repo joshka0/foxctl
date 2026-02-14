@@ -95,24 +95,33 @@ func Available(cfg config.Config) bool {
 		cfg.LLM.OpenAIAPIKey != ""
 }
 
-// NoOpSessionProvider is a session provider that returns nothing (for testing).
+// NoOpSessionProvider is a SessionProvider that returns empty results (for testing).
 type NoOpSessionProvider struct{}
 
+// ActiveSessions returns nil (no active sessions).
 func (NoOpSessionProvider) ActiveSessions(ctx context.Context) ([]string, error) {
 	return nil, nil
 }
 
+// RecentTurns returns nil (no turns).
 func (NoOpSessionProvider) RecentTurns(ctx context.Context, sessionID string, limit int) ([]Turn, error) {
 	return nil, nil
 }
 
+// LastTurnID returns an empty string (no turns).
 func (NoOpSessionProvider) LastTurnID(ctx context.Context, sessionID string) (string, error) {
 	return "", nil
 }
 
-// NoOpFinder is a finder that returns nothing (for testing).
+// GetSessionWorkspace returns an empty string (no workspace).
+func (NoOpSessionProvider) GetSessionWorkspace(ctx context.Context, sessionID string) (string, error) {
+	return "", nil
+}
+
+// NoOpFinder is a ContextFinder that returns no candidates (for testing).
 type NoOpFinder struct{}
 
-func (NoOpFinder) FindContext(ctx context.Context, analysis *AnalysisResult, sessionID string) ([]ContextCandidate, error) {
+// FindContext returns nil (no context candidates).
+func (NoOpFinder) FindContext(ctx context.Context, analysis *AnalysisResult, sessionID, workspace string) ([]ContextCandidate, error) {
 	return nil, nil
 }

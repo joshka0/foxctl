@@ -36,23 +36,27 @@ type Attachment struct {
 	Content     any    `json:"content,omitempty"`
 }
 
+// ChannelAccount identifies a user or bot in a Bot Framework conversation.
 type ChannelAccount struct {
 	ID   string `json:"id,omitempty"`
 	Name string `json:"name,omitempty"`
 }
 
+// ConversationAccount identifies a Bot Framework conversation and its tenant.
 type ConversationAccount struct {
 	ID       string `json:"id,omitempty"`
 	TenantID string `json:"tenantId,omitempty"`
 	IsGroup  bool   `json:"isGroup,omitempty"`
 }
 
+// Entity represents a Bot Framework entity such as a mention.
 type Entity struct {
 	Type      string         `json:"type,omitempty"`
 	Text      string         `json:"text,omitempty"`
 	Mentioned ChannelAccount `json:"mentioned,omitempty"`
 }
 
+// ResourceResponse is the Bot Framework response containing the created resource ID.
 type ResourceResponse struct {
 	ID string `json:"id"`
 }

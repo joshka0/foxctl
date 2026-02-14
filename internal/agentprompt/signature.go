@@ -222,5 +222,3 @@ func InstructionRuntime(role agenttypes.AgentRole) string {
 	return replacer.Replace(instruction)
 }
 
-// BuildSignature was removed with the dspy-go migration. Use Instruction(role)
-// to obtain the system prompt for LLMChatEngine-based agents.
