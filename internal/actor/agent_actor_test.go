@@ -61,8 +61,8 @@ func TestDefaultModelForProvider(t *testing.T) {
 		{"openai", "gpt-4.1-mini"},
 		{"anthropic", "claude-haiku-4-5"},
 		{"groq", "llama-4-scout-17b-16e"},
-		{"openrouter", "mistralai/devstral-2512:free"},
-		{"unknown", "gemini-2.5-flash"},
+		{"openrouter", "openrouter/aurora-alpha"},
+		{"unknown", "openrouter/aurora-alpha"},
 	}
 
 	for _, tt := range tests {

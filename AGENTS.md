@@ -62,26 +62,102 @@ contributors
 
 ## Agent Orchestration
 
-- `agentctl` supports multi-agent coordination under **Agent Profile v1** and the Overseer role.
-- Relevant commands/flows:
-  - `agentctl agent spawn --role <role> --exec-mode <mode> --llm-provider ...`
-  - `agentctl agent run <id>`
-  - `agentctl agent list`
-  - `agentctl agent kill <id>`
-  - `agentctl agent info <id>`
-  - `agentctl agent watch <id>`
-  - `agentctl agent ask <id> --question ...`
-  - `agentctl agent cmd <id> --action ...`
-  - `agentctl agent resume <session-id> --prompt ...`
-  - `agentctl agent hierarchy [session-id]`
-  - `agentctl agent --help` for the full current command list
-- Subagent control in protocol terms is covered by `agent.spawn` + mailbox messaging documented in:
-  - [docs/spec/agent_hierarchy.md](docs/spec/agent_hierarchy.md)
-  - [docs/spec/overseer_profile.md](docs/spec/overseer_profile.md)
-  - [docs/spec/v1/agent_profile_v1.md](docs/spec/v1/agent_profile_v1.md)
-  - [docs/kubernetes.md](docs/kubernetes.md)
-  - [docs/plans/chat-platform-adapter.md](docs/plans/chat-platform-adapter.md)
-  - [docs/plans/k8s-sql-storage.md](docs/plans/k8s-sql-storage.md)
+`agentctl` supports persistent, multi-agent coordination via the daemon. Agents persist to `agents.db`, maintain conversation history across turns, and can be queried after autonomous research completes.
+
+### Commands
+
+| Command | Purpose |
+|---------|---------|
+| `agentctl agent spawn` | Create and start a new agent |
+| `agentctl agent list` | List all agents |
+| `agentctl agent info <id>` | Detailed agent status |
+| `agentctl agent ask <id> --question "..." --wait` | Send a question and wait for reply |
+| `agentctl agent kill <id>` | Stop an agent |
+| `agentctl agent resume <session-id> --prompt "..."` | Continue a previous session |
+| `agentctl agent hierarchy [session-id]` | Show agent tree |
+| `agentctl agent watch <id>` | Live activity stream |
+
+### Execution Modes
+
+| Mode | Behavior |
+|------|----------|
+| `reactive` (default) | Waits for mailbox messages, responds to each |
+| `autonomous` | Runs initial prompt + continuation turns, then exits |
+| `autonomous_reactive` | Runs autonomous turns, then stays alive for mailbox messages |
+| `proactive` | Stays alive with periodic think cycles + message polling |
+
+### Spawn Examples
+
+```bash
+# Research agent — autonomous research, then queryable via ask
+agentctl agent spawn --role researcher \
+  --prompt "Research the hook system architecture" \
+  --exec-mode autonomous_reactive \
+  --llm-provider openrouter --llm-model openrouter/aurora-alpha \
+  --max-auto-turns 3 --max-iterations 20
+
+# Wait for research, then query findings
+agentctl agent ask <id> --question "What did you find?" --wait --timeout 120s
+
+# Overseer — coordinates subagents
+agentctl agent spawn --role overseer \
+  --prompt "Coordinate a code review of the storage layer" \
+  --exec-mode autonomous --max-auto-turns 5
+
+# Simple reactive agent
+agentctl agent spawn --role coder --prompt "Help with Go code"
+```
+
+### Spawn Flags
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--role` | - | `overseer`, `researcher`, `coder`, `planner`, `reviewer` |
+| `--exec-mode` | `reactive` | `reactive`, `autonomous`, `autonomous_reactive`, `proactive` |
+| `--llm-provider` | auto-detect | `openrouter`, `cerebras`, `groq`, `openai`, `anthropic` |
+| `--llm-model` | provider default | Model name (e.g., `openrouter/aurora-alpha`) |
+| `--max-iterations` | 10 | Max tool calls per engine run |
+| `--max-auto-turns` | 1 | Max autonomous continuation turns |
+| `--max-context-tokens` | 0 | Context budget (0=no limit) |
+
+### Role-Specific Tools
+
+| Role | Tools |
+|------|-------|
+| **All roles** | `fs_read_file`, `fs_list_dir`, `code_search`, `think` |
+| **researcher** | + `context_search`, `smart_search`, `context_grep`, `repo_index_search`, `repo_index_expand`, `repo_index_open`, `repo_index_dag_grep` |
+| **coder** | + `fs_write_file` |
+| **overseer** | + `context_search`, `smart_search`, `context_grep`, `session_timeline`, `agent_spawn`, `agent_list`, `agent_status`, `agent_kill`, `agent_hierarchy`, `agent_wait` |
+
+### Conversation Memory
+
+Agents maintain conversation history across engine `Run()` calls. When an `autonomous_reactive` agent:
+1. Runs initial prompt → researches via tool calls
+2. Runs autonomous continuation turns → finds more
+3. Receives a mailbox `ask` → **responds with full context from prior research**
+
+History is accumulated in-memory on the Session via `ConversationHistory []engine.Message`. Token budget (`MaxContextTokens`) prevents unbounded growth.
+
+### Ask-Reply Pipeline
+
+The `agent ask` command sends a `MessageTypeAsk` to the agent's mailbox. After the engine processes it, a `MessageTypeReply` is sent back with correlation headers. The caller polls its own namespace for the matching reply.
+
+```
+CLI (agent ask) → mailbox.Send(ask) → daemon polls → engine.Run(with history) → mailbox.Send(reply) → CLI polls → reply received
+```
+
+### LLM Provider Priority
+
+Auto-detection order (first available key wins): openrouter → cerebras → groq → openai.
+
+Default models: `openrouter/aurora-alpha` (free), context updater uses `qwen/qwen3-coder-next`.
+
+### Specs & Docs
+
+- [docs/spec/agent_hierarchy.md](docs/spec/agent_hierarchy.md)
+- [docs/spec/overseer_profile.md](docs/spec/overseer_profile.md)
+- [docs/spec/v1/agent_profile_v1.md](docs/spec/v1/agent_profile_v1.md)
+- [docs/general/agent-daemon.md](docs/general/agent-daemon.md)
 
 ---
 

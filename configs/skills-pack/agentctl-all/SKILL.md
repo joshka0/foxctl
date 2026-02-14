@@ -102,31 +102,48 @@ List: `agentctl skills list`
 ### Agent Orchestration
 | Command | Purpose |
 |---------|---------|
-| `agentctl agent spawn` | Spawn autonomous agents |
-| `agentctl agent list` | List running agents |
-| `agentctl agent kill <id>` | Terminate an agent |
-| `agentctl agent resume <id>` | Continue a previous session |
+| `agentctl agent spawn` | Spawn persistent daemon agents |
+| `agentctl agent list` | List all agents |
+| `agentctl agent info <id>` | Agent details and status |
+| `agentctl agent ask <id> --question "..." --wait` | Query an agent and wait for reply |
+| `agentctl agent kill <id>` | Stop an agent |
+| `agentctl agent resume <id> --prompt "..."` | Continue a previous session |
 | `agentctl agent hierarchy` | Show agent tree structure |
-| `agentctl sessions list` | List agent sessions |
+| `agentctl agent watch <id>` | Live activity stream |
 
 **Roles:** `overseer` (coordinator), `researcher`, `coder`, `planner`, `reviewer`
+
+**Exec modes:** `reactive` (wait for messages), `autonomous` (run and exit), `autonomous_reactive` (research then stay alive), `proactive` (think cycles)
 
 **Key spawn flags:**
 - `--prompt "..."` - Inline prompt text
 - `--role overseer|researcher|coder|planner|reviewer` - Agent role
-- `--max-iterations 20` - Tool call limit
+- `--exec-mode autonomous_reactive` - Research then queryable
+- `--max-iterations 20` - Tool call limit per engine run
+- `--max-auto-turns 3` - Autonomous continuation turns
 - `--max-context-tokens 30000` - Context budget (stops when exceeded)
-- `--exec-mode autonomous` - Enable tool calling loop
+- `--llm-provider openrouter` - LLM provider (auto-detect: openrouter→cerebras→groq→openai)
+- `--llm-model openrouter/aurora-alpha` - Model name
 
-**Multi-agent with overseer:**
+**Research agent (replaces /agentctl-research for persistent use):**
 ```bash
-# Overseer coordinates subagents
-agentctl agent spawn --role overseer --prompt "Spawn researcher and coder to analyze X"
+agentctl agent spawn --role researcher \
+  --prompt "Research the hook system architecture" \
+  --exec-mode autonomous_reactive \
+  --llm-provider openrouter --llm-model openrouter/aurora-alpha \
+  --max-auto-turns 3 --max-iterations 20
+# Wait for research, then query:
+agentctl agent ask <id> --question "What did you find?" --wait --timeout 120s
+```
+
+**Overseer with subagents:**
+```bash
+agentctl agent spawn --role overseer --prompt "Coordinate analysis of storage layer" \
+  --exec-mode autonomous --max-auto-turns 5
 ```
 
 **Session continuation:**
 ```bash
-# Resume with follow-up
 agentctl agent resume <session-id> --prompt "Based on your findings, explain X"
 ```
 

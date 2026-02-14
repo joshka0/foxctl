@@ -122,6 +122,7 @@ type Config struct {
 type MailboxStore interface {
 	Send(ctx context.Context, msg agent.Message) error
 	Ack(ctx context.Context, messageID string) error
+	Nack(ctx context.Context, messageID string, visibilityTimeout time.Duration) error
 	List(ctx context.Context, agentNS string, limit int) ([]agent.Message, error)
 }
 
@@ -155,13 +156,45 @@ type Session struct {
 	Children     []string // IDs of spawned child sessions
 	SystemPrompt string   // Role-specific system prompt
 	TurnCounter  uint64   // Monotonically increasing turn index
-	cancel       context.CancelFunc
-	mu           sync.RWMutex
+	// ConversationHistory accumulates user/assistant messages across engine Run() calls
+	// so that follow-up turns (autonomous continuation, mailbox ask) have full context.
+	ConversationHistory []engine.Message
+	cancel              context.CancelFunc
+	mu                  sync.RWMutex
 }
 
 // nextTurnIndex atomically increments and returns the next turn index for this session.
 func (s *Session) nextTurnIndex() int {
 	return int(atomic.AddUint64(&s.TurnCounter, 1) - 1)
+}
+
+// buildEngineInput creates an EngineInput that includes the session's accumulated
+// conversation history plus a new user prompt. This ensures follow-up engine calls
+// (autonomous continuation, mailbox ask) have context from prior turns.
+func (r *Runtime) buildEngineInput(session *Session, userPrompt string) engine.EngineInput {
+	session.mu.RLock()
+	history := make([]engine.Message, len(session.ConversationHistory))
+	copy(history, session.ConversationHistory)
+	session.mu.RUnlock()
+
+	messages := append(history, engine.Message{Role: engine.RoleUser, Content: userPrompt})
+	return engine.EngineInput{
+		SystemPrompt: session.SystemPrompt,
+		Messages:     messages,
+		Tools:        session.Tools,
+		Workspace:    r.config.WorkspaceRoot,
+		SessionID:    session.ID,
+	}
+}
+
+// appendToHistory records a user/assistant exchange in the session's conversation history.
+func appendToHistory(session *Session, userPrompt, assistantText string) {
+	session.mu.Lock()
+	session.ConversationHistory = append(session.ConversationHistory,
+		engine.Message{Role: engine.RoleUser, Content: userPrompt},
+		engine.Message{Role: engine.RoleAssistant, Content: assistantText},
+	)
+	session.mu.Unlock()
 }
 
 // NewRuntime creates a new agent runtime.
@@ -1614,16 +1647,8 @@ func (r *Runtime) runSession(ctx context.Context, session *Session) {
 	var result string
 
 	for {
-		// Build input for LLMChatEngine
-		engineInput := engine.EngineInput{
-			SystemPrompt: session.SystemPrompt,
-			Messages: []engine.Message{
-				{Role: engine.RoleUser, Content: taskPrompt},
-			},
-			Tools:     session.Tools,
-			Workspace: r.config.WorkspaceRoot,
-			SessionID: session.ID,
-		}
+		// Build input with conversation history
+		engineInput := r.buildEngineInput(session, taskPrompt)
 
 		// Persist user turn before running engine
 		turnIndex := session.nextTurnIndex()
@@ -1654,6 +1679,9 @@ func (r *Runtime) runSession(ctx context.Context, session *Session) {
 
 		// Extract result from output
 		result = output.AssistantText
+
+		// Accumulate conversation history for cross-turn context
+		appendToHistory(session, taskPrompt, result)
 
 		// Record tool calls
 		session.mu.Lock()
@@ -2397,15 +2425,7 @@ func (r *Runtime) runAutonomousContinuation(ctx context.Context, session *Sessio
 		// Persist user turn before running engine
 		_ = r.saveTurn(ctx, session.ID, session.nextTurnIndex(), "user", continuePrompt, nil, 0)
 
-		engineInput := engine.EngineInput{
-			SystemPrompt: session.SystemPrompt,
-			Messages: []engine.Message{
-				{Role: engine.RoleUser, Content: continuePrompt},
-			},
-			Tools:     session.Tools,
-			Workspace: r.config.WorkspaceRoot,
-			SessionID: session.ID,
-		}
+		engineInput := r.buildEngineInput(session, continuePrompt)
 
 		output, err := session.Engine.Run(ctx, engineInput)
 		if err != nil {
@@ -2413,6 +2433,9 @@ func (r *Runtime) runAutonomousContinuation(ctx context.Context, session *Sessio
 		}
 
 		result = output.AssistantText
+
+		// Accumulate conversation history
+		appendToHistory(session, continuePrompt, result)
 
 		// Record tool calls for this continuation turn
 		session.mu.Lock()
@@ -2518,11 +2541,17 @@ func (r *Runtime) processMailboxMessages(ctx context.Context, session *Session, 
 		return
 	}
 
+	now := time.Now().Unix()
 	for _, msg := range messages {
 		select {
 		case <-ctx.Done():
 			return
 		default:
+		}
+
+		// Skip messages that are not yet visible (nacked with future visibility)
+		if msg.VisibleAt > now {
+			continue
 		}
 
 		// Process message - extract body from Payload
@@ -2532,15 +2561,7 @@ func (r *Runtime) processMailboxMessages(ctx context.Context, session *Session, 
 		// Persist user turn before running engine
 		_ = r.saveTurn(ctx, session.ID, session.nextTurnIndex(), "user", prompt, nil, 0)
 
-		engineInput := engine.EngineInput{
-			SystemPrompt: session.SystemPrompt,
-			Messages: []engine.Message{
-				{Role: engine.RoleUser, Content: prompt},
-			},
-			Tools:     session.Tools,
-			Workspace: r.config.WorkspaceRoot,
-			SessionID: session.ID,
-		}
+		engineInput := r.buildEngineInput(session, prompt)
 
 		output, err := session.Engine.Run(ctx, engineInput)
 		if err != nil {
@@ -2549,8 +2570,13 @@ func (r *Runtime) processMailboxMessages(ctx context.Context, session *Session, 
 				WithSession(session.ID, session.Config.ActorID).
 				WithWorkspace(r.config.WorkspaceRoot).
 				Error(err, 0))
+			// Nack with 30s delay to avoid tight retry loops on persistent errors
+			_ = r.config.MailboxStore.Nack(ctx, msg.ID, 30*time.Second)
 			continue
 		}
+
+		// Accumulate conversation history
+		appendToHistory(session, prompt, output.AssistantText)
 
 		if msg.Type == agent.MessageTypeAsk {
 			if err := r.sendAskReply(ctx, session, msg, output.AssistantText); err != nil {

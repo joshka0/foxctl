@@ -41,3 +41,19 @@
   - prompt_hash (SHA256) enables correlation with wide events task_hash
   - Turn content stored in CAS via content_cas_digest for large responses
   - Query sessions by prompt: SELECT * FROM sessions WHERE prompt LIKE '%search%'
+- 2026-02-14 [feature]: Daemon agent persistence + autonomous_reactive mode
+  - Agents persist to agents.db across daemon restarts
+  - `autonomous_reactive` exec mode: runs autonomous turns, then enters reactive mailbox loop
+  - Ask-reply pipeline: `agent ask` sends MessageTypeAsk, agent responds with MessageTypeReply
+  - Conversation memory: Session.ConversationHistory accumulates across engine Run() calls
+  - Mailbox nack: engine errors nack with 30s visibility timeout (prevents tight retry loops)
+  - Context updater backoff: exponential backoff (30s→60s→120s, cap 5min) after 3 consecutive LLM failures
+- 2026-02-14 [gotcha]: LLM provider defaults changed
+  - Auto-detect priority: openrouter → cerebras → groq → openai (was cerebras first)
+  - Default openrouter model: `openrouter/aurora-alpha` (free)
+  - Context updater uses `qwen/qwen3-coder-next` (aurora-alpha returns non-JSON)
+  - Set `AGENTCTL_LLM_PROVIDER=openrouter` in ~/.agentctl/.env
+- 2026-02-14 [gotcha]: Cerebras API 402 errors
+  - Cerebras free tier quota exceeded → all agent calls fail silently with empty responses
+  - Symptom: engine runs, 0 completion tokens, empty assistant text
+  - Fix: switch to openrouter or groq provider

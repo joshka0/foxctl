@@ -768,11 +768,11 @@ func apiKeyForProvider(provider string) string {
 }
 
 func detectProvider() (apiKey, provider string) {
-	if key := os.Getenv("CEREBRAS_API_KEY"); key != "" {
-		return key, "cerebras"
-	}
 	if key := os.Getenv("OPENROUTER_API_KEY"); key != "" {
 		return key, "openrouter"
+	}
+	if key := os.Getenv("CEREBRAS_API_KEY"); key != "" {
+		return key, "cerebras"
 	}
 	if key := os.Getenv("GROQ_API_KEY"); key != "" {
 		return key, "groq"

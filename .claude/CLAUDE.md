@@ -251,19 +251,23 @@ agentctl run obs/logs --input '{"errors_only": true, "since": "1h"}'
 
 ## Agent Orchestration
 
-Spawn autonomous agents via the daemon.
+Spawn persistent daemon agents that maintain conversation history across turns.
 
 ```bash
-# Simple research agent
-agentctl agent spawn --role researcher --prompt "Find all hook implementations"
+# Research agent — autonomous research, then queryable via ask
+agentctl agent spawn --role researcher \
+  --prompt "Research the hook system architecture" \
+  --exec-mode autonomous_reactive \
+  --llm-provider openrouter --llm-model openrouter/aurora-alpha \
+  --max-auto-turns 3 --max-iterations 20
 
-# With limits
-agentctl agent spawn --role coder --prompt "Analyze storage" \
-  --exec-mode autonomous --max-iterations 20
+# Query findings after autonomous phase completes
+agentctl agent ask <id> --question "What did you find?" --wait --timeout 120s
 
-# Session management
+# Management
 agentctl agent list
-agentctl agent kill <session-id>
+agentctl agent info <id>
+agentctl agent kill <id>
 ```
 
 ### Key Flags
@@ -271,10 +275,21 @@ agentctl agent kill <session-id>
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--role` | - | overseer, researcher, coder, planner, reviewer |
-| `--exec-mode` | reactive | reactive, autonomous, proactive |
-| `--max-iterations` | 10 | Max tool calls per turn |
-| `--max-context-tokens` | 0 | Context budget (0=no limit) |
+| `--exec-mode` | reactive | reactive, autonomous, autonomous_reactive, proactive |
+| `--llm-provider` | auto-detect | openrouter, cerebras, groq, openai |
+| `--llm-model` | provider default | e.g., `openrouter/aurora-alpha` (free) |
+| `--max-iterations` | 10 | Max tool calls per engine run |
 | `--max-auto-turns` | 1 | Max autonomous continuations |
+| `--max-context-tokens` | 0 | Context budget (0=no limit) |
+
+### Exec Modes
+
+| Mode | Behavior |
+|------|----------|
+| `reactive` | Wait for mailbox messages |
+| `autonomous` | Run turns then exit |
+| `autonomous_reactive` | Research autonomously, then stay alive for `agent ask` |
+| `proactive` | Periodic think cycles + message polling |
 
 **Full details:** [AGENTS.md](../AGENTS.md#agent-orchestration)
 

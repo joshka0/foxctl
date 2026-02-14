@@ -1303,7 +1303,7 @@ func (s *Service) startAgentOrchestration(ctx context.Context) error {
 	}
 
 	// Determine LLM configuration from centralized config
-	// Priority: configured provider > CEREBRAS > OPENROUTER > GROQ > GEMINI
+	// Priority: configured provider > OPENROUTER > CEREBRAS > GROQ > GEMINI
 	llmProvider, llmAPIKey, llmModel := s.resolveLLMConfig()
 
 	if llmAPIKey == "" {
@@ -1991,7 +1991,7 @@ func (e *exec) Start() error {
 }
 
 // resolveLLMConfig returns the LLM provider, API key, and model from centralized config.
-// Priority: configured provider > cerebras > openrouter > groq > gemini
+// Priority: configured provider > openrouter > cerebras > groq > gemini
 //
 // Index:
 // - Purpose: Select provider credentials and model for agent orchestration
@@ -2014,7 +2014,7 @@ func (s *Service) resolveLLMConfig() (provider, apiKey, model string) {
 	}
 
 	// Auto-detect from available API keys (priority order)
-	providers := []string{"cerebras", "openrouter", "groq", "gemini"}
+	providers := []string{"openrouter", "cerebras", "groq", "gemini"}
 	for _, p := range providers {
 		if key := llm.ResolveAPIKey(p); key != "" {
 			provider = p

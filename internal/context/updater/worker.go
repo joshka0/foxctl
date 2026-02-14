@@ -53,6 +53,10 @@ type Worker struct {
 	running      bool
 	shutdownOnce sync.Once
 	done         chan struct{}
+
+	// Error backoff
+	consecutiveErrors int
+	backoffUntil      time.Time
 }
 
 // NewWorker creates a new context updater worker.
@@ -152,6 +156,11 @@ func (w *Worker) tick(ctx context.Context) {
 	w.metrics.TickCount++
 	tickNum := w.metrics.TickCount
 	w.metrics.LastTickTime = time.Now()
+	// Check backoff
+	if time.Now().Before(w.backoffUntil) {
+		w.mu.Unlock()
+		return
+	}
 	w.mu.Unlock()
 
 	w.logger.Debug("tick", "tick_num", tickNum)
@@ -230,9 +239,32 @@ func (w *Worker) processSession(ctx context.Context, sessionID string) error {
 	llmLatency := time.Since(startTime)
 
 	if err != nil {
-		w.logger.Warn("analysis failed", "session_id", sessionID, "error", err, "latency_ms", llmLatency.Milliseconds())
+		w.mu.Lock()
+		w.consecutiveErrors++
+		if w.consecutiveErrors >= 3 {
+			// Exponential backoff: 30s, 60s, 120s, capped at 5min
+			backoff := time.Duration(30<<(w.consecutiveErrors-3)) * time.Second
+			if backoff > 5*time.Minute {
+				backoff = 5 * time.Minute
+			}
+			w.backoffUntil = time.Now().Add(backoff)
+			w.logger.Warn("analysis failed, backing off",
+				"session_id", sessionID, "error", err,
+				"consecutive_errors", w.consecutiveErrors,
+				"backoff", backoff)
+		} else {
+			w.logger.Warn("analysis failed", "session_id", sessionID, "error", err, "latency_ms", llmLatency.Milliseconds())
+		}
+		w.mu.Unlock()
 		return err
 	}
+
+	// Reset backoff on success
+	w.mu.Lock()
+	w.consecutiveErrors = 0
+	w.backoffUntil = time.Time{}
+	w.mu.Unlock()
+
 	w.logger.Debug("analysis complete", "session_id", sessionID, "latency_ms", llmLatency.Milliseconds())
 
 	w.mu.Lock()

@@ -16,7 +16,7 @@ func DefaultModelForProvider(provider string) string {
 		if model := os.Getenv("OPENROUTER_MODEL"); model != "" {
 			return model
 		}
-		return "mistralai/devstral-2512:free"
+		return "openrouter/aurora-alpha"
 	case "groq":
 		if model := os.Getenv("GROQ_MODEL"); model != "" {
 			return model
@@ -48,7 +48,7 @@ func DefaultModelForProvider(provider string) string {
 		}
 		return "anthropic.claude-3-5-sonnet-20241022-v2:0"
 	default:
-		// Default to gemini for unknown providers
-		return "gemini-2.5-flash"
+		// Default to openrouter for unknown providers
+		return "openrouter/aurora-alpha"
 	}
 }

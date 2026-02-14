@@ -43,17 +43,17 @@ func NewWorkerFromConfig(ctx context.Context, cfg DaemonConfig) (*Worker, error)
 		return nil, nil // No LLM available - skip silently
 	}
 
-	// Determine API key and provider to use
+	// Determine API key and provider to use (priority: openrouter > cerebras > groq > openai)
 	var apiKey, provider, model string
 	switch {
+	case providerCfg.OpenRouterAPIKey != "":
+		apiKey = providerCfg.OpenRouterAPIKey
+		provider = "openrouter"
+		model = "qwen/qwen3-coder-next"
 	case providerCfg.CerebrasAPIKey != "":
 		apiKey = providerCfg.CerebrasAPIKey
 		provider = "cerebras"
 		model = "llama3.1-8b"
-	case providerCfg.OpenRouterAPIKey != "":
-		apiKey = providerCfg.OpenRouterAPIKey
-		provider = "openrouter"
-		model = "meta-llama/llama-3.1-8b-instruct"
 	case providerCfg.GroqAPIKey != "":
 		apiKey = providerCfg.GroqAPIKey
 		provider = "groq"
