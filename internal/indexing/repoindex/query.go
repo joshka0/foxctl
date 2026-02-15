@@ -18,28 +18,20 @@ func NewQueryEngine(store *Store) *QueryEngine {
 // Search performs an FTS search over nodes.
 //
 // Index:
-// - Purpose: Find repo graph nodes using FTS with syntax fallback
-// - Flow: run FTS → on syntax error retry with quoted query
+// - Purpose: Find repo graph nodes using FTS with syntax and OR fallback
+// - Flow: run FTS → on syntax error retry quoted → on zero results retry OR
 // - FailureModes: FTS query errors, store errors
-// - Related: Store.SearchFTS, quoteFTSQuery
+// - Related: Store.SearchFTS, quoteFTSQuery, buildFallbackCandidates
 // - Keywords: repo_index_search, fts5, query, nodes, SearchFTS
 func (q *QueryEngine) Search(ctx context.Context, query string, limit int) ([]Node, error) {
 	if q == nil || q.store == nil {
 		return nil, ErrNotFound
 	}
-	results, err := q.store.SearchFTS(ctx, query, limit)
-	if err == nil || !isFTSSyntaxError(err) {
-		return results, err
+	candidates := buildFallbackCandidates(query)
+	if len(candidates) == 0 {
+		return nil, nil
 	}
-	fallback := quoteFTSQuery(query)
-	if fallback == "" || fallback == query {
-		return nil, err
-	}
-	results, retryErr := q.store.SearchFTS(ctx, fallback, limit)
-	if retryErr != nil {
-		return nil, retryErr
-	}
-	return results, nil
+	return searchWithFallback(ctx, candidates, limit, q.store.SearchFTS, query)
 }
 
 // SearchScored performs an FTS search over nodes and returns BM25 scores.
@@ -48,19 +40,98 @@ func (q *QueryEngine) SearchScored(ctx context.Context, query string, limit int)
 	if q == nil || q.store == nil {
 		return nil, ErrNotFound
 	}
-	results, err := q.store.SearchFTSScored(ctx, query, limit)
-	if err == nil || !isFTSSyntaxError(err) {
-		return results, err
+	candidates := buildFallbackCandidates(query)
+	if len(candidates) == 0 {
+		return nil, nil
 	}
-	fallback := quoteFTSQuery(query)
-	if fallback == "" || fallback == query {
-		return nil, err
+	return searchWithFallback(ctx, candidates, limit, q.store.SearchFTSScored, query)
+}
+
+// searchWithFallback tries each candidate query in order. It advances to the
+// next candidate when the current one returns zero results (for multi-word
+// queries) or a syntax error.
+func searchWithFallback[T any](
+	ctx context.Context,
+	candidates []string,
+	limit int,
+	searchFn func(context.Context, string, int) ([]T, error),
+	originalQuery string,
+) ([]T, error) {
+	var lastErr error
+	isMulti := isMultiWordQuery(originalQuery)
+
+	for i, candidate := range candidates {
+		results, err := searchFn(ctx, candidate, limit)
+		if err == nil {
+			if len(results) > 0 || !isMulti || i == len(candidates)-1 {
+				return results, nil
+			}
+			continue // zero results on multi-word, try next candidate
+		}
+		if !isFTSSyntaxError(err) {
+			return nil, err // non-syntax errors fail fast
+		}
+		lastErr = err
 	}
-	results, retryErr := q.store.SearchFTSScored(ctx, fallback, limit)
-	if retryErr != nil {
-		return nil, retryErr
+
+	if lastErr != nil {
+		return nil, lastErr
 	}
-	return results, nil
+	return nil, nil
+}
+
+// buildFallbackCandidates returns candidate queries in priority order:
+// 1. Raw trimmed query (existing AND behavior)
+// 2. Quoted fallback (existing syntax-error repair)
+// 3. OR fallback (for multi-word queries only)
+func buildFallbackCandidates(query string) []string {
+	trimmed := strings.TrimSpace(query)
+	if trimmed == "" {
+		return nil
+	}
+	candidates := []string{trimmed}
+
+	quoted := quoteFTSQuery(trimmed)
+	if quoted != "" && quoted != trimmed {
+		candidates = append(candidates, quoted)
+	}
+
+	if isMultiWordQuery(trimmed) {
+		if orQuery := buildOrFallbackQuery(trimmed); orQuery != "" && orQuery != trimmed && orQuery != quoted {
+			candidates = append(candidates, orQuery)
+		}
+	}
+	return candidates
+}
+
+// isMultiWordQuery returns true if the query contains more than one word.
+func isMultiWordQuery(query string) bool {
+	return len(strings.Fields(strings.TrimSpace(query))) > 1
+}
+
+// buildOrFallbackQuery converts "a b c" to "a OR b OR c", stripping FTS5 operators.
+func buildOrFallbackQuery(query string) string {
+	raw := strings.Fields(strings.TrimSpace(query))
+	terms := make([]string, 0, len(raw))
+	for _, term := range raw {
+		t := strings.TrimSpace(term)
+		if t == "" {
+			continue
+		}
+		upper := strings.ToUpper(t)
+		if upper == "AND" || upper == "OR" || upper == "NOT" {
+			continue
+		}
+		t = strings.Trim(t, "\"'")
+		if t == "" {
+			continue
+		}
+		terms = append(terms, t)
+	}
+	if len(terms) < 2 {
+		return ""
+	}
+	return strings.Join(terms, " OR ")
 }
 
 func isFTSSyntaxError(err error) bool {
@@ -68,7 +139,9 @@ func isFTSSyntaxError(err error) bool {
 		return false
 	}
 	msg := err.Error()
-	return strings.Contains(msg, "fts5") || strings.Contains(msg, "syntax error")
+	return strings.Contains(msg, "fts5") ||
+		strings.Contains(msg, "syntax error") ||
+		strings.Contains(msg, "unterminated string")
 }
 
 func quoteFTSQuery(query string) string {
