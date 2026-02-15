@@ -2,6 +2,7 @@ package retrieval
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -101,6 +102,9 @@ func (g *Generator) semanticBM25Fallback(ctx context.Context, workspaceID, quest
 		// Extract file path from entry name
 		filePath := extractFilePath(r.Entry.Name)
 		if filePath == "" {
+			filePath = extractFilePathFromEntryPayload(r.Entry.Result)
+		}
+		if filePath == "" {
 			continue
 		}
 
@@ -139,6 +143,9 @@ func (g *Generator) memoryResultsToCandidates(results []memory.SearchResult, lim
 	for _, r := range results {
 		// Extract file path from entry name
 		filePath := extractFilePath(r.Entry.Name)
+		if filePath == "" {
+			filePath = extractFilePathFromEntryPayload(r.Entry.Result)
+		}
 		if filePath == "" {
 			continue
 		}
@@ -179,10 +186,19 @@ func extractFilePath(name string) string {
 	// Handle symbol:// format
 	if strings.HasPrefix(name, "symbol://") {
 		// Format: symbol://<workspace>/<file_path>:<symbol_name>
+		// or:     symbol://<workspace>/key:<symbol_key>
 		rest := strings.TrimPrefix(name, "symbol://")
 		// Skip workspace
 		if idx := strings.Index(rest, "/"); idx != -1 {
 			rest = rest[idx+1:]
+		}
+		// New package-scoped key format: symbol://<workspace>/<pkg>::<symbolKey>
+		if strings.Contains(rest, "::") {
+			return ""
+		}
+		// Key-based entries don't contain a file path - caller falls back to payload
+		if strings.HasPrefix(rest, "key:") {
+			return ""
 		}
 		// Remove symbol name
 		if idx := strings.LastIndex(rest, ":"); idx != -1 {
@@ -221,4 +237,24 @@ func isCodeFile(path string) bool {
 		return true
 	}
 	return false
+}
+
+// extractFilePathFromEntryPayload extracts a file path from the JSON payload of a memory entry.
+// Used as a fallback when the entry name uses a key-based format without an embedded file path.
+func extractFilePathFromEntryPayload(raw json.RawMessage) string {
+	if len(raw) == 0 {
+		return ""
+	}
+
+	var payload struct {
+		Symbol struct {
+			FilePath string `json:"file_path"`
+		} `json:"symbol"`
+	}
+
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		return ""
+	}
+
+	return strings.TrimSpace(payload.Symbol.FilePath)
 }

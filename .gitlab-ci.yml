@@ -11,7 +11,6 @@ stages:
   - prepare
   - check
   - build
-  - review
 
 default:
   interruptible: true
@@ -107,17 +106,3 @@ build:
       - bin/agentctl
       - dist/skills/
     expire_in: 7 days
-
-# --- Stage: review (MR only) ---
-ai-code-review:
-  stage: review
-  variables:
-    GIT_DEPTH: 0
-  before_script:
-    - mkdir -p ~/.coderabbit
-    - cp "$CODERABBIT_AUTH_JSON" ~/.coderabbit/auth.json
-  script:
-    - coderabbit review --plain -t committed --base "$CI_MERGE_REQUEST_DIFF_BASE_SHA"
-  rules:
-    - if: $CI_MERGE_REQUEST_IID
-  allow_failure: true

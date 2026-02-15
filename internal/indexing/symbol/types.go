@@ -72,6 +72,10 @@ type Symbol struct {
 	//   - Unchanged symbols at the same path retain stable IDs across re-indexing
 	ID string `json:"id"`
 
+	// Key is a stable, file-path-independent identity for the symbol.
+	// When set, EffectiveID() returns Key.String() instead of ID.
+	Key SymbolKey `json:"key,omitempty"`
+
 	// FilePath is the relative path within the workspace (spec §3.1: not null).
 	FilePath string `json:"file_path"`
 
@@ -117,6 +121,15 @@ type Symbol struct {
 	Documentation string `json:"documentation,omitempty"`
 }
 
+// EffectiveID returns the canonical identity for this symbol.
+// It prefers the stable Key (file-path-independent) over the legacy ID (file-path-based).
+func (s Symbol) EffectiveID() string {
+	if id := s.Key.String(); id != "" {
+		return id
+	}
+	return strings.TrimSpace(s.ID)
+}
+
 // CallEdge represents a directed call relationship between two symbols.
 // See code_symbol_index_and_swe_grep.md §3.2 for the conceptual data model.
 //
@@ -139,6 +152,11 @@ type CallEdge struct {
 //
 // Per spec §3.3: Indexers MUST consult file_meta to avoid unnecessary work,
 // but MAY still force re-indexing under certain conditions (e.g. configuration changes).
+
+// CurrentFileMetaSchema is the current version of the file meta schema.
+// When this changes, files are re-indexed even if content hasn't changed.
+const CurrentFileMetaSchema = 3
+
 type FileMeta struct {
 	// FilePath is the relative file path (spec §3.3: primary key).
 	FilePath string `json:"file_path"`
@@ -148,6 +166,10 @@ type FileMeta struct {
 
 	// LastModTime is the last observed modification time as Unix timestamp (spec §3.3).
 	LastModTime int64 `json:"last_mod_time"`
+
+	// IndexSchema is the schema version under which this file was indexed.
+	// Used to force re-indexing when the schema changes (e.g., SymbolKey introduction).
+	IndexSchema int `json:"index_schema"`
 
 	// Count is the number of symbols in this file.
 	// Implementation addition (not in spec §3.3) for diagnostics and incremental update tracking.
@@ -457,7 +479,9 @@ func UnmarshalFileSummaryResult(data []byte) (*FileSummaryResult, error) {
 
 // SymbolSummaryResult stores metadata used to validate symbol summaries.
 type SymbolSummaryResult struct {
+	Pkg       string `json:"pkg,omitempty"`
 	SymbolID  string `json:"symbol_id"`
+	SymbolKey string `json:"symbol_key,omitempty"`
 	FilePath  string `json:"file_path,omitempty"`
 	Name      string `json:"name"`
 	Kind      Kind   `json:"kind,omitempty"`
@@ -471,9 +495,17 @@ func SymbolSummaryEntryName(workspace, symbolID string) string {
 	return fmt.Sprintf("symbol-summary://%s/%s", workspace, symbolID)
 }
 
+// SymbolSummaryKeyEntryName returns the named memory entry for a symbol summary using the stable SymbolKey.
+// Format: symbol-summary://<workspace>/<pkg>::<symbolKey>
+func SymbolSummaryKeyEntryName(workspace, pkg, symbolKey string) string {
+	return fmt.Sprintf("symbol-summary://%s/%s::%s", workspace, pkg, symbolKey)
+}
+
 // SymbolSummaryInput captures the fields used to generate a symbol summary.
 type SymbolSummaryInput struct {
+	Pkg           string `json:"pkg,omitempty"`
 	SymbolID      string `json:"symbol_id"`
+	SymbolKey     string `json:"symbol_key,omitempty"`
 	FilePath      string `json:"file_path,omitempty"`
 	Name          string `json:"name"`
 	Kind          Kind   `json:"kind,omitempty"`

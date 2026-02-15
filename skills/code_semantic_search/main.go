@@ -420,7 +420,7 @@ func search(ctx context.Context, rc *skillmain.RunContext, in *Input, voyageKey,
 
 	// Use appropriate embedding per scope
 	queryEmbedding := scopedEmb.code    // For symbols scope
-	memoryEmbedding := scopedEmb.memory // For memories scope (voyage-3-large)
+	memoryEmbedding := scopedEmb.memory // For memories scope (voyage-3.5)
 	textEmbedding := scopedEmb.text     // For tasks, sessions, codemaps scopes (voyage-3.5)
 
 	// Parallel search across enabled scopes
@@ -496,7 +496,7 @@ func search(ctx context.Context, rc *skillmain.RunContext, in *Input, voyageKey,
 			sourceCtx, sourceCancel := context.WithTimeout(ctx, DefaultSourceTimeout)
 			defer sourceCancel()
 
-			// Memory search requires embeddings for vector similarity (uses memory model: voyage-3-large)
+			// Memory search requires embeddings for vector similarity (uses memory model: voyage-3.5)
 			if memoryEmbedding == nil {
 				resultsCh <- sourceResults{
 					source:  ScopeMemories,
@@ -772,7 +772,7 @@ type sourceResults struct {
 // Different scopes may use different embedding models optimized for that content type.
 type scopedEmbeddings struct {
 	code   []float32 // For symbols scope (voyage-code-3)
-	memory []float32 // For memories scope (voyage-3-large)
+	memory []float32 // For memories scope (voyage-3.5)
 	text   []float32 // For tasks, sessions, codemaps (voyage-3.5)
 }
 
@@ -824,7 +824,7 @@ func createProviderWithModel(model string, cfg config.Config, voyageKey, geminiK
 // Only generates embeddings for scope groups that are actually requested.
 // Uses scope-specific models:
 //   - code model for symbols (voyage-code-3)
-//   - memory model for memories (voyage-3-large)
+//   - memory model for memories (voyage-3.5)
 //   - text model for tasks, sessions, codemaps (voyage-3.5)
 func generateScopedEmbeddings(ctx context.Context, cfg config.Config, query string, scopeSet map[string]bool, codeModel, memoryModel, textModel, voyageKey, geminiKey string) (scopedEmbeddings, error) {
 	var emb scopedEmbeddings
@@ -1996,9 +1996,26 @@ func extractContextHints(sessionResults []Result, maxHints int) []ContextHint {
 
 // extractSymbolName extracts the symbol name from a symbol ID string.
 func extractSymbolName(symbolID string) string {
+	if idx := strings.Index(symbolID, "::"); idx != -1 {
+		symbolKey := strings.TrimSpace(symbolID[idx+2:])
+		if symbolKey != "" {
+			return symbol.SymbolKey(symbolKey).Name()
+		}
+	}
 	// Symbol ID format: file.go:FunctionName or file.go:Type.Method
 	parts := strings.SplitN(symbolID, ":", 2)
 	if len(parts) == 2 {
+		rest := parts[1]
+		if marker := strings.LastIndex(rest, "/key:"); marker != -1 {
+			rest = rest[marker+1:]
+		}
+		if strings.HasPrefix(rest, "key:") {
+			key := strings.TrimPrefix(rest, "key:")
+			if idx := strings.LastIndex(key, "/"); idx != -1 {
+				return key[idx+1:]
+			}
+			return key
+		}
 		return parts[1]
 	}
 	return symbolID

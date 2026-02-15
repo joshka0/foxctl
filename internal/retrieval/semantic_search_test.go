@@ -2,6 +2,7 @@ package retrieval
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 
 	"github.com/jkatigb/agentctl/internal/indexing/semantic"
@@ -123,5 +124,35 @@ func TestEmbedForQueryEnvOverride(t *testing.T) {
 	}
 	if provider.embedQueryCalls != 0 {
 		t.Fatalf("expected EmbedQuery not called due to env override, got %d", provider.embedQueryCalls)
+	}
+}
+
+func TestExtractFilePath_KeyPrefix(t *testing.T) {
+	got := extractFilePath("symbol://workspace/internal/builder.go:Build")
+	if got != "internal/builder.go" {
+		t.Errorf("legacy format: got %q, want %q", got, "internal/builder.go")
+	}
+
+	got = extractFilePath("symbol://workspace/key:Builder.Build")
+	if got != "" {
+		t.Errorf("key format: got %q, want empty", got)
+	}
+}
+
+func TestExtractFilePathFromEntryPayload(t *testing.T) {
+	payload := json.RawMessage(`{"symbol":{"file_path":"internal/builder.go"}}`)
+	got := extractFilePathFromEntryPayload(payload)
+	if got != "internal/builder.go" {
+		t.Errorf("got %q, want %q", got, "internal/builder.go")
+	}
+
+	got = extractFilePathFromEntryPayload(nil)
+	if got != "" {
+		t.Errorf("nil payload: got %q, want empty", got)
+	}
+
+	got = extractFilePathFromEntryPayload(json.RawMessage(`invalid`))
+	if got != "" {
+		t.Errorf("invalid json: got %q, want empty", got)
 	}
 }

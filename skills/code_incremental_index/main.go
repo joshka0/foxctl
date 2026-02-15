@@ -17,6 +17,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/langutil"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillerr"
@@ -28,6 +30,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/indexing/symbol"
 	"github.com/jkatigb/agentctl/internal/platform/config"
 	errs "github.com/jkatigb/agentctl/internal/platform/errors"
+	"github.com/jkatigb/agentctl/internal/platform/symbolutil"
 	ws "github.com/jkatigb/agentctl/internal/platform/workspace"
 	"github.com/jkatigb/agentctl/internal/storage"
 	"github.com/jkatigb/agentctl/internal/storage/graph"
@@ -137,6 +140,8 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 		if err != nil {
 			// Log but don't fail - partial indexing is acceptable
 			symbols = nil
+		} else {
+			setSymbolKeys(symbols, lang)
 		}
 	}
 
@@ -148,7 +153,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	defer func() { errs.Ignore(store.Close(), "close memory store") }()
 
 	// Upsert symbols and delete stale ones
-	updated, deleted, err := upsertSymbols(ctx, store, in.WorkspaceID, relPath, rc.SessionID, symbols)
+	updated, deleted, err := upsertSymbols(ctx, store, in.WorkspaceID, relPath, lang, rc.SessionID, symbols)
 	if err != nil {
 		return skillerr.WrapIO("upsert symbols", err)
 	}
@@ -193,6 +198,32 @@ func extractSymbols(ctx context.Context, lang, filePath string, content []byte) 
 		return extractJSSymbols(filePath, content, lang)
 	default:
 		return nil, skillerr.Validationf("unsupported language: %s", lang)
+	}
+}
+
+func setSymbolKeys(symbols []symbol.Symbol, lang string) {
+	for i, sym := range symbols {
+		if sym.Key != "" {
+			continue
+		}
+		switch lang {
+		case "go":
+			if sym.Name == "init" {
+				sym.Key = symbol.GoInitSymbolKey(filepath.Base(sym.FilePath))
+			} else {
+				r, _ := utf8.DecodeRuneInString(sym.Name)
+				if unicode.IsUpper(r) {
+					sym.Key = symbol.GoSymbolKey(sym.Name)
+				} else {
+					sym.Key = symbol.GoNonExportedSymbolKey(sym.Name, filepath.Base(sym.FilePath))
+				}
+			}
+		case "typescript":
+			sym.Key = symbol.TSSymbolKey(sym.Name, false, filepath.Base(sym.FilePath))
+		case "python":
+			sym.Key = symbol.PythonSymbolKey(sym.Name)
+		}
+		symbols[i] = sym
 	}
 }
 
@@ -254,6 +285,7 @@ func extractJSSymbols(filePath string, content []byte, lang string) ([]symbol.Sy
 			parts := strings.SplitN(trimmed, "(", 2)
 			if len(parts) == 2 {
 				name := strings.TrimSpace(strings.TrimPrefix(parts[0], "function"))
+				exported := false
 				symbols = append(symbols, symbol.Symbol{
 					ID:        symbol.ID(filePath, name),
 					FilePath:  filePath,
@@ -262,6 +294,7 @@ func extractJSSymbols(filePath string, content []byte, lang string) ([]symbol.Sy
 					Kind:      symbol.KindFunction,
 					StartLine: i + 1,
 					Signature: trimmed,
+					Key:       symbol.TSSymbolKey(name, exported, filepath.Base(filePath)),
 				})
 			}
 		}
@@ -271,6 +304,7 @@ func extractJSSymbols(filePath string, content []byte, lang string) ([]symbol.Sy
 			parts := strings.Fields(trimmed)
 			if len(parts) >= 2 {
 				name := strings.TrimSuffix(parts[1], "{")
+				exported := false
 				symbols = append(symbols, symbol.Symbol{
 					ID:        symbol.ID(filePath, name),
 					FilePath:  filePath,
@@ -279,6 +313,7 @@ func extractJSSymbols(filePath string, content []byte, lang string) ([]symbol.Sy
 					Kind:      symbol.KindClass,
 					StartLine: i + 1,
 					Signature: trimmed,
+					Key:       symbol.TSSymbolKey(name, exported, filepath.Base(filePath)),
 				})
 			}
 		}
@@ -288,6 +323,7 @@ func extractJSSymbols(filePath string, content []byte, lang string) ([]symbol.Sy
 			parts := strings.Fields(trimmed)
 			if len(parts) >= 2 {
 				name := strings.TrimSuffix(parts[1], "{")
+				exported := false
 				symbols = append(symbols, symbol.Symbol{
 					ID:        symbol.ID(filePath, name),
 					FilePath:  filePath,
@@ -296,6 +332,7 @@ func extractJSSymbols(filePath string, content []byte, lang string) ([]symbol.Sy
 					Kind:      symbol.KindInterface,
 					StartLine: i + 1,
 					Signature: trimmed,
+					Key:       symbol.TSSymbolKey(name, exported, filepath.Base(filePath)),
 				})
 			}
 		}
@@ -305,6 +342,7 @@ func extractJSSymbols(filePath string, content []byte, lang string) ([]symbol.Sy
 			parts := strings.SplitN(strings.TrimPrefix(trimmed, "export "), "(", 2)
 			if len(parts) == 2 {
 				name := strings.TrimSpace(strings.TrimPrefix(parts[0], "function"))
+				exported := true
 				symbols = append(symbols, symbol.Symbol{
 					ID:        symbol.ID(filePath, name),
 					FilePath:  filePath,
@@ -313,6 +351,7 @@ func extractJSSymbols(filePath string, content []byte, lang string) ([]symbol.Sy
 					Kind:      symbol.KindFunction,
 					StartLine: i + 1,
 					Signature: trimmed,
+					Key:       symbol.TSSymbolKey(name, exported, filepath.Base(filePath)),
 				})
 			}
 		}
@@ -323,36 +362,49 @@ func extractJSSymbols(filePath string, content []byte, lang string) ([]symbol.Sy
 
 // upsertSymbols saves new/updated symbols and removes stale ones with session tracking and deduplication.
 // Returns (updated count, deleted count, error).
-func upsertSymbols(ctx context.Context, store storage.MemoryStore, workspaceID, filePath, sessionID string, symbols []symbol.Symbol) (int, int, error) {
+func upsertSymbols(ctx context.Context, store storage.MemoryStore, workspaceID, filePath, lang, sessionID string, symbols []symbol.Symbol) (int, int, error) {
+	pkg := symbolutil.DeriveSymbolPackage(filePath, lang)
+
 	// Build a map of new symbol entry names
 	newSymbolNames := make(map[string]bool)
 	for _, sym := range symbols {
-		entryName := symbol.EntryName(workspaceID, filePath, sym.Name)
+		entryName := symbolutil.KeyEntryName(workspaceID, pkg, sym.EffectiveID())
 		newSymbolNames[entryName] = true
 	}
 
-	// Get existing symbols for this file by searching with file path prefix
-	// Entry names follow: symbol://<workspace>/<file_path>:<symbol_name>
-	prefix := fmt.Sprintf("symbol://%s/%s:", workspaceID, filePath)
+	// Get existing symbols for this package by searching with package-scoped key prefix
+	prefix := fmt.Sprintf("symbol://%s/%s::", workspaceID, pkg)
 
-	// Find existing symbols to detect stale ones
-	existingEntries, err := store.List(ctx, workspaceID, 1000)
-	if err != nil {
-		return 0, 0, skillerr.WrapIO("list entries", err)
-	}
-
-	// Collect stale symbols to delete
+	// Paginate through all symbol entries to detect stale ones for the CURRENT file.
+	// The prefix matches all symbols in the package, so we must check each entry's
+	// stored FilePath to avoid accidentally deleting symbols from other files.
 	var staleNames []string
-	for _, entry := range existingEntries {
-		if entry.Type != symbol.SymbolType {
-			continue
+	const pageSize = 500
+	for offset := 0; ; offset += pageSize {
+		page, total, err := store.ListFiltered(ctx, workspaceID, storage.MemoryListFilter{
+			Types: []string{symbol.SymbolType},
+		}, pageSize, offset)
+		if err != nil {
+			return 0, 0, skillerr.WrapIO("list entries", err)
 		}
-		if !strings.HasPrefix(entry.Name, prefix) {
-			continue
-		}
-		// If not in new symbols, it's stale
-		if !newSymbolNames[entry.Name] {
+		for _, entry := range page {
+			if !strings.HasPrefix(entry.Name, prefix) {
+				continue
+			}
+			if newSymbolNames[entry.Name] {
+				continue
+			}
+			stored, unmarshalErr := symbol.UnmarshalResult(entry.Result)
+			if unmarshalErr != nil {
+				continue
+			}
+			if stored.Symbol.FilePath != filePath {
+				continue
+			}
 			staleNames = append(staleNames, entry.Name)
+		}
+		if offset+pageSize >= total {
+			break
 		}
 	}
 
@@ -369,7 +421,7 @@ func upsertSymbols(ctx context.Context, store storage.MemoryStore, workspaceID, 
 	// Upsert new symbols
 	updated := 0
 	for _, sym := range symbols {
-		entryName := symbol.EntryName(workspaceID, filePath, sym.Name)
+		entryName := symbolutil.KeyEntryName(workspaceID, pkg, sym.EffectiveID())
 
 		// Serialize symbol result
 		result := symbol.Result{Symbol: sym}

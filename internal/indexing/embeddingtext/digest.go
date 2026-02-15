@@ -39,6 +39,10 @@ type SymbolDigestInput struct {
 	// Name is the symbol name.
 	Name string
 
+	// SymbolKey is the stable, file-path-independent key for the symbol.
+	// When set, replaces FilePath in the digest computation for stability across file moves.
+	SymbolKey string
+
 	// FilePath is the symbol file path (workspace-relative).
 	FilePath string
 
@@ -69,21 +73,24 @@ func BuildSymbolContentDigest(input SymbolDigestInput) string {
 	body := strings.TrimSpace(input.BodyDigest)
 	name := strings.TrimSpace(input.Name)
 	kind := strings.TrimSpace(input.Kind)
-	filePath := strings.TrimSpace(input.FilePath)
+	symbolKey := strings.TrimSpace(input.SymbolKey)
+	if symbolKey == "" {
+		symbolKey = strings.TrimSpace(input.FilePath)
+	}
 	signature := strings.TrimSpace(input.Signature)
 	model := strings.TrimSpace(input.Model)
 
 	var builder strings.Builder
 	builder.Grow(256)
-	builder.WriteString("v1\n")
+	builder.WriteString("v2\n")
 	builder.WriteString("model:")
 	builder.WriteString(model)
 	builder.WriteString("\nkind:")
 	builder.WriteString(kind)
 	builder.WriteString("\nname:")
 	builder.WriteString(name)
-	builder.WriteString("\nfile:")
-	builder.WriteString(filePath)
+	builder.WriteString("\nkey:")
+	builder.WriteString(symbolKey)
 	builder.WriteString("\nsignature:")
 	builder.WriteString(signature)
 	builder.WriteString("\ndoc:")

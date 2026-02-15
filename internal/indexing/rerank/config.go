@@ -55,8 +55,8 @@ type Config struct {
 	Timeout time.Duration
 
 	// RateLimit is the max requests per window.
-	// nil = default (3 for free tier)
-	// 0 = disabled (for paid accounts)
+	// nil or 0 = disabled (no rate limit)
+	// >0 = limit to N requests per window
 	RateLimit *int
 
 	// RateLimitWait controls behavior when rate limited.
@@ -76,7 +76,7 @@ func DefaultConfig() Config {
 		ScoreBlend: nil, // Pure rerank score (nil means use 0.0)
 		Model:      "rerank-2.5",
 		Timeout:    60 * time.Second,
-		RateLimit:  nil, // nil means use default (3 for free tier)
+		RateLimit:  nil, // nil = no rate limit
 	}
 }
 

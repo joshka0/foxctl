@@ -541,18 +541,21 @@ func filterFileSummaryEntries(scored []storage.ScoredEntry, limit int) []FileEnt
 		if entry.Type != symbol.FileSummaryType && !strings.HasPrefix(entry.Name, "file://") {
 			continue
 		}
-		path := extractFilePath(entry.Name)
-		if path == "" || seen[path] {
+		filePath := extractFilePath(entry.Name)
+		if filePath == "" {
+			filePath = extractFilePathFromEntryPayload(entry.Result)
+		}
+		if filePath == "" || seen[filePath] {
 			continue
 		}
-		seen[path] = true
+		seen[filePath] = true
 
 		score := s.Score
 		if score > 1.0 {
 			score = 1.0
 		}
 		entries = append(entries, FileEntry{
-			Path:    path,
+			Path:    filePath,
 			Score:   score,
 			Summary: entry.Summary,
 		})
@@ -601,7 +604,7 @@ func (g *SymbolSummaryGenerator) GetOrCreateSummary(
 	ctx context.Context,
 	input symbol.SymbolSummaryInput,
 ) (string, bool, error) {
-	entryName := symbol.SymbolSummaryEntryName(g.workspace, input.SymbolID)
+	entryName := symbolSummaryEntryName(g.workspace, input)
 
 	entry, err := g.store.Get(ctx, entryName, g.workspace)
 	if err != nil {
@@ -714,11 +717,13 @@ func (g *SymbolSummaryGenerator) storeSummary(
 	input symbol.SymbolSummaryInput,
 	summary string,
 ) error {
-	entryName := symbol.SymbolSummaryEntryName(g.workspace, input.SymbolID)
+	entryName := symbolSummaryEntryName(g.workspace, input)
 	digest := symbol.ComputeSymbolSummaryDigest(input)
 
 	result := symbol.SymbolSummaryResult{
+		Pkg:       input.Pkg,
 		SymbolID:  input.SymbolID,
+		SymbolKey: input.SymbolKey,
 		FilePath:  input.FilePath,
 		Name:      input.Name,
 		Kind:      input.Kind,
@@ -776,6 +781,13 @@ func (g *SymbolSummaryGenerator) storeSummary(
 	}
 
 	return nil
+}
+
+func symbolSummaryEntryName(workspace string, input symbol.SymbolSummaryInput) string {
+	if strings.TrimSpace(input.Pkg) != "" && strings.TrimSpace(input.SymbolKey) != "" {
+		return symbol.SymbolSummaryKeyEntryName(workspace, input.Pkg, input.SymbolKey)
+	}
+	return symbol.SymbolSummaryEntryName(workspace, input.SymbolID)
 }
 
 func providerNameFromModel(model string) string {

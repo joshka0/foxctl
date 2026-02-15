@@ -7,10 +7,18 @@ import (
 	"testing"
 
 	"github.com/jkatigb/agentctl/internal/indexing"
+	"github.com/jkatigb/agentctl/internal/platform/symbolutil"
 	"github.com/jkatigb/agentctl/internal/platform/workspace"
 	"github.com/jkatigb/agentctl/internal/storage/memory"
 	"github.com/rs/zerolog"
 )
+
+// keyEntryName constructs the expected key-based entry name for test lookups.
+func keyEntryName(workspace, filePath, symbolName string) string {
+	pkg := symbolutil.DeriveSymbolPackage(filePath, "go")
+	key := GoSymbolKey(symbolName).String()
+	return symbolutil.KeyEntryName(workspace, pkg, key)
+}
 
 func setupTestIndexer(t *testing.T, cfg Config) (*Indexer, *memory.Store, string, string) {
 	t.Helper()
@@ -127,7 +135,7 @@ func main() {
 	ctx := context.Background()
 
 	// Check Greet function
-	greetName := EntryName(workspaceID, "main.go", "Greet")
+	greetName := keyEntryName(workspaceID, "main.go", "Greet")
 	greetEntry, err := store.Get(ctx, greetName, workspaceID)
 	if err != nil {
 		t.Fatalf("Get Greet entry failed: %v", err)
@@ -148,7 +156,7 @@ func main() {
 	}
 
 	// Check User struct
-	userName := EntryName(workspaceID, "main.go", "User")
+	userName := keyEntryName(workspaceID, "main.go", "User")
 	userEntry, err := store.Get(ctx, userName, workspaceID)
 	if err != nil {
 		t.Fatalf("Get User entry failed: %v", err)
@@ -163,7 +171,7 @@ func main() {
 	}
 
 	// Check User.GetName method
-	getNameName := EntryName(workspaceID, "main.go", "User.GetName")
+	getNameName := keyEntryName(workspaceID, "main.go", "User.GetName")
 	getNameEntry, err := store.Get(ctx, getNameName, workspaceID)
 	if err != nil {
 		t.Fatalf("Get User.GetName entry failed: %v", err)
@@ -901,7 +909,7 @@ func Second() string {
 	}
 
 	// Get First function's entry
-	firstEntry1, err := store.Get(ctx, EntryName(workspaceID, "funcs.go", "First"), workspaceID)
+	firstEntry1, err := store.Get(ctx, keyEntryName(workspaceID, "funcs.go", "First"), workspaceID)
 	if err != nil {
 		t.Fatalf("Get First failed: %v", err)
 	}
@@ -935,7 +943,7 @@ func Second() string {
 	}
 
 	// Verify First function was NOT re-saved (same body_digest)
-	firstEntry2, err := store.Get(ctx, EntryName(workspaceID, "funcs.go", "First"), workspaceID)
+	firstEntry2, err := store.Get(ctx, keyEntryName(workspaceID, "funcs.go", "First"), workspaceID)
 	if err != nil {
 		t.Fatalf("Get First after update failed: %v", err)
 	}
@@ -950,7 +958,7 @@ func Second() string {
 	}
 
 	// Verify Second function WAS updated
-	secondEntry, err := store.Get(ctx, EntryName(workspaceID, "funcs.go", "Second"), workspaceID)
+	secondEntry, err := store.Get(ctx, keyEntryName(workspaceID, "funcs.go", "Second"), workspaceID)
 	if err != nil {
 		t.Fatalf("Get Second failed: %v", err)
 	}
@@ -993,11 +1001,11 @@ func DeleteMe() {}
 	}
 
 	// Verify both symbols exist
-	_, err = store.Get(ctx, EntryName(workspaceID, "deletion.go", "KeepMe"), workspaceID)
+	_, err = store.Get(ctx, keyEntryName(workspaceID, "deletion.go", "KeepMe"), workspaceID)
 	if err != nil {
 		t.Fatalf("KeepMe should exist: %v", err)
 	}
-	_, err = store.Get(ctx, EntryName(workspaceID, "deletion.go", "DeleteMe"), workspaceID)
+	_, err = store.Get(ctx, keyEntryName(workspaceID, "deletion.go", "DeleteMe"), workspaceID)
 	if err != nil {
 		t.Fatalf("DeleteMe should exist: %v", err)
 	}
@@ -1017,13 +1025,13 @@ func KeepMe() {}
 	}
 
 	// Verify KeepMe still exists
-	_, err = store.Get(ctx, EntryName(workspaceID, "deletion.go", "KeepMe"), workspaceID)
+	_, err = store.Get(ctx, keyEntryName(workspaceID, "deletion.go", "KeepMe"), workspaceID)
 	if err != nil {
 		t.Fatalf("KeepMe should still exist: %v", err)
 	}
 
 	// Verify DeleteMe is gone
-	_, err = store.Get(ctx, EntryName(workspaceID, "deletion.go", "DeleteMe"), workspaceID)
+	_, err = store.Get(ctx, keyEntryName(workspaceID, "deletion.go", "DeleteMe"), workspaceID)
 	if err == nil {
 		t.Error("DeleteMe should have been deleted")
 	}

@@ -144,8 +144,9 @@ type FileSummaryProvider interface {
 }
 
 // SymbolSummaryProvider resolves summaries for symbol nodes.
+// Accepts symbol package, stable ID and stable key for lookup.
 type SymbolSummaryProvider interface {
-	Summary(ctx context.Context, symbolID string) (string, error)
+	Summary(ctx context.Context, symbolID, symbolKey, pkg string) (string, error)
 }
 
 // BuildOptions configure repoindex build behavior.
@@ -185,6 +186,21 @@ type ExpandResult struct {
 	Nodes []Node   `json:"nodes"`
 	Edges []Edge   `json:"edges"`
 	Trail []string `json:"trail,omitempty"`
+}
+
+// LocatorEntry maps a stable SymbolKey to its current file location and metadata.
+// This table is the "phone book" that resolves a key to where the symbol currently lives.
+type LocatorEntry struct {
+	SymbolKey string `json:"symbol_key"`
+	Pkg       string `json:"pkg"`
+	FilePath  string `json:"file_path"`
+	Name      string `json:"name"`
+	Kind      string `json:"kind"`
+	Exported  bool   `json:"exported"`
+	SpanStart int    `json:"span_start"`
+	SpanEnd   int    `json:"span_end"`
+	BodyHash  string `json:"body_hash"`
+	UpdatedAt string `json:"updated_at"`
 }
 
 // NamespacedID prefixes a raw node ID with the repo key namespace.

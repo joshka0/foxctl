@@ -668,7 +668,7 @@ type memorySymbolSummaryProvider struct {
 	workspace string
 }
 
-func (p *memorySymbolSummaryProvider) Summary(ctx context.Context, symbolID string) (string, error) {
+func (p *memorySymbolSummaryProvider) Summary(ctx context.Context, symbolID, symbolKey, pkg string) (string, error) {
 	if p == nil || p.store == nil {
 		return "", fmt.Errorf("symbol summary provider not configured")
 	}
@@ -680,16 +680,27 @@ func (p *memorySymbolSummaryProvider) Summary(ctx context.Context, symbolID stri
 	var lastErr error
 	for _, workspace := range workspaces {
 		for _, id := range ids {
+			if pkg != "" && symbolKey != "" {
+				keyEntryName := symbol.SymbolSummaryKeyEntryName(workspace, pkg, symbolKey)
+				entry, err := p.store.Get(ctx, keyEntryName, workspace)
+				if err == nil {
+					return entry.Summary, nil
+				}
+				if !errors.Is(err, memory.ErrNotFound) {
+					return "", err
+				}
+			}
+			// Legacy fallback: try old entry name format
 			entryName := symbol.SymbolSummaryEntryName(workspace, id)
 			entry, err := p.store.Get(ctx, entryName, workspace)
-			if err != nil {
-				if errors.Is(err, memory.ErrNotFound) {
-					lastErr = err
-					continue
-				}
-				return "", err
+			if err == nil {
+				return entry.Summary, nil
 			}
-			return entry.Summary, nil
+			if errors.Is(err, memory.ErrNotFound) {
+				lastErr = err
+				continue
+			}
+			return "", err
 		}
 	}
 	if lastErr == nil {

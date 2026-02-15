@@ -12,12 +12,15 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"golang.org/x/tools/go/packages"
 
 	docparser "github.com/jkatigb/agentctl/internal/indexing/repoindex/parser"
 	"github.com/jkatigb/agentctl/internal/indexing/symbol"
 	"github.com/jkatigb/agentctl/internal/platform/fsutil"
+	"github.com/jkatigb/agentctl/internal/platform/symbolutil"
 )
 
 const (
@@ -77,19 +80,20 @@ func (b *Builder) Build(ctx context.Context, opts BuildOptions) (BuildResult, er
 	nodes := make(map[string]Node)
 	edges := make(map[string]Edge)
 	var pending []pendingNameEdge
+	var locators []LocatorEntry
 
 	if opts.IncludeGo {
-		if err := b.buildGo(ctx, opts, nodes, edges, &result); err != nil {
+		if err := b.buildGo(ctx, opts, nodes, edges, &result, &locators); err != nil {
 			return result, err
 		}
 	}
 	if opts.IncludeTypescript {
-		if err := b.buildTS(ctx, opts, nodes, edges, &result, &pending); err != nil {
+		if err := b.buildTS(ctx, opts, nodes, edges, &result, &pending, &locators); err != nil {
 			return result, err
 		}
 	}
 	if opts.IncludeElixir {
-		if err := b.buildElixir(ctx, opts, nodes, edges, &result, &pending); err != nil {
+		if err := b.buildElixir(ctx, opts, nodes, edges, &result, &pending, &locators); err != nil {
 			return result, err
 		}
 	}
@@ -120,6 +124,11 @@ func (b *Builder) Build(ctx context.Context, opts BuildOptions) (BuildResult, er
 	if err := b.store.ReplaceAll(ctx, nodeList, edgeList); err != nil {
 		return result, err
 	}
+	for _, loc := range locators {
+		if err := b.store.UpsertLocator(ctx, loc); err != nil {
+			return result, fmt.Errorf("repoindex: upsert locator: %w", err)
+		}
+	}
 
 	meta := IndexMeta{
 		RepoRoot:      opts.RepoRoot,
@@ -134,7 +143,7 @@ func (b *Builder) Build(ctx context.Context, opts BuildOptions) (BuildResult, er
 	return result, nil
 }
 
-func (b *Builder) buildGo(ctx context.Context, opts BuildOptions, nodes map[string]Node, edges map[string]Edge, result *BuildResult) error {
+func (b *Builder) buildGo(ctx context.Context, opts BuildOptions, nodes map[string]Node, edges map[string]Edge, result *BuildResult, locators *[]LocatorEntry) error {
 	cfg := &packages.Config{
 		Context: ctx,
 		Dir:     opts.RepoRoot,
@@ -224,7 +233,8 @@ func (b *Builder) buildGo(ctx context.Context, opts BuildOptions, nodes map[stri
 				return fmt.Errorf("repoindex: extract go symbols %s: %w", fileRelPath, err)
 			}
 			for _, sym := range syms {
-				addSymbol(ctx, opts, nodes, edges, pkgID, fileNode.ID, sym)
+				sym.Key = goSymbolKeyFromName(sym.Name, sym.FilePath)
+				addSymbol(ctx, opts, nodes, edges, pkgID, fileNode.ID, sym, locators)
 				result.Symbols++
 			}
 		}
@@ -237,7 +247,7 @@ func (b *Builder) buildGo(ctx context.Context, opts BuildOptions, nodes map[stri
 	return nil
 }
 
-func (b *Builder) buildTS(ctx context.Context, opts BuildOptions, nodes map[string]Node, edges map[string]Edge, result *BuildResult, pending *[]pendingNameEdge) error {
+func (b *Builder) buildTS(ctx context.Context, opts BuildOptions, nodes map[string]Node, edges map[string]Edge, result *BuildResult, pending *[]pendingNameEdge, locators *[]LocatorEntry) error {
 	extractor := b.registry.Get("typescript")
 	if extractor == nil {
 		return fmt.Errorf("repoindex: no typescript extractor registered")
@@ -327,8 +337,9 @@ func (b *Builder) buildTS(ctx context.Context, opts BuildOptions, nodes map[stri
 			return fmt.Errorf("repoindex: extract typescript symbols %s: %w", fileRelPath, err)
 		}
 		for _, sym := range syms {
-			srcID := SymbolID(opts.RepoKey, pkgID, sym.ID)
-			addSymbol(ctx, opts, nodes, edges, pkgID, fileNode.ID, sym)
+			sym.Key = symbol.TSSymbolKey(sym.Name, isExportedSymbol(sym), filepath.Base(fileRelPath))
+			srcID := SymbolID(opts.RepoKey, pkgID, sym.EffectiveID())
+			addSymbol(ctx, opts, nodes, edges, pkgID, fileNode.ID, sym, locators)
 			result.Symbols++
 
 			callNames, err := extractor.ExtractCalls(ctx, sym, content)
@@ -379,7 +390,7 @@ func (b *Builder) buildTS(ctx context.Context, opts BuildOptions, nodes map[stri
 	return nil
 }
 
-func (b *Builder) buildElixir(ctx context.Context, opts BuildOptions, nodes map[string]Node, edges map[string]Edge, result *BuildResult, pending *[]pendingNameEdge) error {
+func (b *Builder) buildElixir(ctx context.Context, opts BuildOptions, nodes map[string]Node, edges map[string]Edge, result *BuildResult, pending *[]pendingNameEdge, locators *[]LocatorEntry) error {
 	extractor := b.registry.Get("elixir")
 	if extractor == nil {
 		return fmt.Errorf("repoindex: no elixir extractor registered")
@@ -468,8 +479,9 @@ func (b *Builder) buildElixir(ctx context.Context, opts BuildOptions, nodes map[
 			return fmt.Errorf("repoindex: extract elixir symbols %s: %w", fileRelPath, err)
 		}
 		for _, sym := range syms {
-			srcID := SymbolID(opts.RepoKey, pkgID, sym.ID)
-			addSymbol(ctx, opts, nodes, edges, pkgID, fileNode.ID, sym)
+			sym.Key = symbol.ElixirSymbolKey(sym.Name)
+			srcID := SymbolID(opts.RepoKey, pkgID, sym.EffectiveID())
+			addSymbol(ctx, opts, nodes, edges, pkgID, fileNode.ID, sym, locators)
 			result.Symbols++
 
 			// Elixir call graph is mostly "module references" (alias/use/remote calls).
@@ -537,7 +549,7 @@ func (b *Builder) addGoReferenceEdges(opts BuildOptions, pkgs []*packages.Packag
 				if name == "" {
 					continue
 				}
-				srcID := SymbolID(opts.RepoKey, pkgID, symbol.ID(fileRelPath, name))
+				srcID := SymbolID(opts.RepoKey, pkgID, goSymbolKeyFromName(name, fileRelPath).String())
 				if _, ok := nodes[srcID]; !ok {
 					continue
 				}
@@ -662,11 +674,24 @@ func goObjectNodeID(opts BuildOptions, pkg *packages.Package, obj types.Object, 
 	if pkgPath == "" {
 		return ""
 	}
-	nodeID := SymbolID(opts.RepoKey, goPackageID(pkgPath), symbol.ID(fileRelPath, name))
+	nodeID := SymbolID(opts.RepoKey, goPackageID(pkgPath), goSymbolKeyFromName(name, fileRelPath).String())
 	if _, ok := nodes[nodeID]; !ok {
 		return ""
 	}
 	return nodeID
+}
+
+// goSymbolKeyFromName returns a SymbolKey for a Go symbol given its name and file path.
+func goSymbolKeyFromName(name, fileRelPath string) symbol.SymbolKey {
+	name = strings.TrimSpace(name)
+	if name == "init" {
+		return symbol.GoInitSymbolKey(filepath.Base(fileRelPath))
+	}
+	r, _ := utf8.DecodeRuneInString(name)
+	if unicode.IsUpper(r) {
+		return symbol.GoSymbolKey(name)
+	}
+	return symbol.GoNonExportedSymbolKey(name, filepath.Base(fileRelPath))
 }
 
 func goObjectIsPackageSymbol(obj types.Object) bool {
@@ -713,7 +738,7 @@ func goRecvTypeName(t types.Type) string {
 	}
 }
 
-func addSymbol(ctx context.Context, opts BuildOptions, nodes map[string]Node, edges map[string]Edge, pkgID string, fileID string, sym symbol.Symbol) {
+func addSymbol(ctx context.Context, opts BuildOptions, nodes map[string]Node, edges map[string]Edge, pkgID string, fileID string, sym symbol.Symbol, locators *[]LocatorEntry) {
 	name := sym.Name
 	if name == "" {
 		return
@@ -730,7 +755,7 @@ func addSymbol(ctx context.Context, opts BuildOptions, nodes map[string]Node, ed
 		spanStart = 1
 	}
 
-	nodeID := SymbolID(opts.RepoKey, pkgID, sym.ID)
+	nodeID := SymbolID(opts.RepoKey, pkgID, sym.EffectiveID())
 	node := Node{
 		ID:        nodeID,
 		Kind:      NodeSymbol,
@@ -755,7 +780,9 @@ func addSymbol(ctx context.Context, opts BuildOptions, nodes map[string]Node, ed
 			node.Meta = meta
 		}
 	}
-	applySymbolSummary(ctx, opts, &node, sym.ID)
+	lang := languageFromPackageID(pkgID)
+	pkg := symbolutil.DeriveSymbolPackage(sym.FilePath, lang)
+	applySymbolSummary(ctx, opts, &node, sym.ID, sym.EffectiveID(), pkg)
 	addNode(nodes, node)
 	addEdge(edges, Edge{
 		Src:    fileID,
@@ -763,6 +790,20 @@ func addSymbol(ctx context.Context, opts BuildOptions, nodes map[string]Node, ed
 		Type:   EdgeContains,
 		Weight: 1.0,
 	})
+	if locators != nil {
+		*locators = append(*locators, LocatorEntry{
+			SymbolKey: sym.EffectiveID(),
+			Pkg:       pkgID,
+			FilePath:  sym.FilePath,
+			Name:      sym.Name,
+			Kind:      string(sym.Kind),
+			Exported:  isExportedSymbol(sym),
+			SpanStart: spanStart,
+			SpanEnd:   spanEnd,
+			BodyHash:  sym.BodyDigest,
+			UpdatedAt: time.Now().UTC().Format(time.RFC3339Nano),
+		})
+	}
 }
 
 func applyFileSummary(ctx context.Context, opts BuildOptions, node *Node, relPath string) {
@@ -783,7 +824,7 @@ func applyFileSummary(ctx context.Context, opts BuildOptions, node *Node, relPat
 	node.Summary = summary
 }
 
-func applySymbolSummary(ctx context.Context, opts BuildOptions, node *Node, symbolID string) {
+func applySymbolSummary(ctx context.Context, opts BuildOptions, node *Node, symbolID, symbolKey, pkg string) {
 	if node == nil || opts.SymbolSummaryProvider == nil {
 		return
 	}
@@ -793,7 +834,7 @@ func applySymbolSummary(ctx context.Context, opts BuildOptions, node *Node, symb
 	if symbolID == "" {
 		return
 	}
-	summary, err := opts.SymbolSummaryProvider.Summary(ctx, symbolID)
+	summary, err := opts.SymbolSummaryProvider.Summary(ctx, symbolID, symbolKey, pkg)
 	if err != nil {
 		return
 	}
@@ -1096,8 +1137,8 @@ func isExportedName(name string) bool {
 	if name == "" {
 		return false
 	}
-	r := rune(name[0])
-	return r >= 'A' && r <= 'Z'
+	r, _ := utf8.DecodeRuneInString(name)
+	return unicode.IsUpper(r)
 }
 
 func isExportedSymbol(sym symbol.Symbol) bool {
@@ -1151,6 +1192,21 @@ func relPath(root, path string) (string, bool) {
 
 func goPackageID(importPath string) string {
 	return goPkgPrefix + importPath
+}
+
+func languageFromPackageID(pkgID string) string {
+	switch {
+	case strings.HasPrefix(pkgID, goPkgPrefix):
+		return "go"
+	case strings.HasPrefix(pkgID, tsLocalPrefix):
+		return "typescript"
+	case strings.HasPrefix(pkgID, tsNpmPrefix):
+		return "typescript"
+	case strings.HasPrefix(pkgID, elixirPkgPrefix):
+		return "elixir"
+	default:
+		return ""
+	}
 }
 
 func importMeta(path string) []byte {

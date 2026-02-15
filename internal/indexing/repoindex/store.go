@@ -16,7 +16,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/storage/dbutil"
 )
 
-const schemaVersion = 2
+const schemaVersion = 3
 
 // ErrNotFound indicates the requested node or edge was not found.
 var ErrNotFound = errors.New("not found")
@@ -202,6 +202,9 @@ func (s *Store) ReplaceAll(ctx context.Context, nodes []Node, edges []Edge) erro
 		return err
 	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM nodes`); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM symbol_locator`); err != nil {
 		return err
 	}
 
@@ -571,6 +574,21 @@ func migrate(ctx context.Context, db *sql.DB) error {
 		files_hash TEXT NOT NULL,
 		indexed_at INTEGER NOT NULL
 	);
+
+	CREATE TABLE IF NOT EXISTS symbol_locator (
+		symbol_key TEXT NOT NULL,
+		pkg TEXT NOT NULL,
+		file_path TEXT NOT NULL,
+		name TEXT NOT NULL,
+		kind TEXT,
+		exported INTEGER NOT NULL DEFAULT 0,
+		span_start INTEGER,
+		span_end INTEGER,
+		body_hash TEXT,
+		updated_at TEXT NOT NULL,
+		PRIMARY KEY (symbol_key, pkg)
+	);
+	CREATE INDEX IF NOT EXISTS idx_locator_file ON symbol_locator(file_path);
 	`
 
 	if _, err := db.ExecContext(ctx, schema); err != nil {
@@ -603,6 +621,7 @@ func loadSchemaVersion(ctx context.Context, db *sql.DB) (int, error) {
 
 func resetSchema(ctx context.Context, db *sql.DB) error {
 	_, err := db.ExecContext(ctx, `
+		DROP TABLE IF EXISTS symbol_locator;
 		DROP TRIGGER IF EXISTS nodes_ai;
 		DROP TRIGGER IF EXISTS nodes_ad;
 		DROP TRIGGER IF EXISTS nodes_au;
@@ -612,6 +631,110 @@ func resetSchema(ctx context.Context, db *sql.DB) error {
 		DROP TABLE IF EXISTS pkg_state;
 	`)
 	return err
+}
+
+// UpsertLocator inserts or updates a symbol locator entry.
+func (s *Store) UpsertLocator(ctx context.Context, loc LocatorEntry) error {
+	_, err := s.db.ExecContext(ctx, `
+		INSERT INTO symbol_locator (symbol_key, pkg, file_path, name, kind, exported, span_start, span_end, body_hash, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(symbol_key, pkg) DO UPDATE SET
+			file_path=excluded.file_path,
+			name=excluded.name,
+			kind=excluded.kind,
+			exported=excluded.exported,
+			span_start=excluded.span_start,
+			span_end=excluded.span_end,
+			body_hash=excluded.body_hash,
+			updated_at=excluded.updated_at
+	`, loc.SymbolKey, loc.Pkg, loc.FilePath, loc.Name, loc.Kind,
+		boolToInt(loc.Exported), nullIfZero(loc.SpanStart), nullIfZero(loc.SpanEnd),
+		nullIfEmpty(loc.BodyHash), loc.UpdatedAt)
+	return err
+}
+
+// LookupLocator returns a locator entry by symbol key and package.
+func (s *Store) LookupLocator(ctx context.Context, symbolKey, pkg string) (*LocatorEntry, error) {
+	row := s.db.QueryRowContext(ctx, `
+		SELECT symbol_key, pkg, file_path, name, kind, exported, span_start, span_end, body_hash, updated_at
+		FROM symbol_locator
+		WHERE symbol_key = ? AND pkg = ?
+	`, symbolKey, pkg)
+
+	var loc LocatorEntry
+	var kind sql.NullString
+	var exported int
+	var spanStart, spanEnd sql.NullInt64
+	var bodyHash sql.NullString
+	if err := row.Scan(
+		&loc.SymbolKey, &loc.Pkg, &loc.FilePath, &loc.Name,
+		&kind, &exported, &spanStart, &spanEnd, &bodyHash, &loc.UpdatedAt,
+	); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	if kind.Valid {
+		loc.Kind = kind.String
+	}
+	loc.Exported = exported > 0
+	if spanStart.Valid {
+		loc.SpanStart = int(spanStart.Int64)
+	}
+	if spanEnd.Valid {
+		loc.SpanEnd = int(spanEnd.Int64)
+	}
+	if bodyHash.Valid {
+		loc.BodyHash = bodyHash.String
+	}
+	return &loc, nil
+}
+
+// LookupLocatorsByFile returns all locator entries for a given file path.
+func (s *Store) LookupLocatorsByFile(ctx context.Context, filePath string) ([]LocatorEntry, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT symbol_key, pkg, file_path, name, kind, exported, span_start, span_end, body_hash, updated_at
+		FROM symbol_locator
+		WHERE file_path = ?
+	`, filePath)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var locators []LocatorEntry
+	for rows.Next() {
+		var loc LocatorEntry
+		var kind sql.NullString
+		var exported int
+		var spanStart, spanEnd sql.NullInt64
+		var bodyHash sql.NullString
+		if err := rows.Scan(
+			&loc.SymbolKey, &loc.Pkg, &loc.FilePath, &loc.Name,
+			&kind, &exported, &spanStart, &spanEnd, &bodyHash, &loc.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		if kind.Valid {
+			loc.Kind = kind.String
+		}
+		loc.Exported = exported > 0
+		if spanStart.Valid {
+			loc.SpanStart = int(spanStart.Int64)
+		}
+		if spanEnd.Valid {
+			loc.SpanEnd = int(spanEnd.Int64)
+		}
+		if bodyHash.Valid {
+			loc.BodyHash = bodyHash.String
+		}
+		locators = append(locators, loc)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return locators, nil
 }
 
 func repoKey(root string) string {
