@@ -221,4 +221,3 @@ func InstructionRuntime(role agenttypes.AgentRole) string {
 
 	return replacer.Replace(instruction)
 }
-
