@@ -49,9 +49,9 @@ export function foo() {
 
 	repoKey := store.RepoKey()
 	pkgID := tsLocalPrefix + "."
-	fooID := SymbolID(repoKey, pkgID, "src/a.ts:foo")
-	barID := SymbolID(repoKey, pkgID, "src/a.ts:bar")
-	zooID := SymbolID(repoKey, pkgID, "src/a.ts:Zoo")
+	fooID := SymbolID(repoKey, pkgID, "foo")
+	barID := SymbolID(repoKey, pkgID, "bar")
+	zooID := SymbolID(repoKey, pkgID, "Zoo")
 
 	outgoing, err := store.GetOutgoingEdges(ctx, fooID, []EdgeType{EdgeCalls}, 100)
 	if err != nil {
@@ -108,8 +108,8 @@ end
 
 	repoKey := store.RepoKey()
 	pkgID := elixirPackageID("lib/a.ex")
-	fooID := SymbolID(repoKey, pkgID, "lib/a.ex:foo")
-	modBID := SymbolID(repoKey, pkgID, "lib/b.ex:MyApp.B")
+	fooID := SymbolID(repoKey, pkgID, "foo")
+	modBID := SymbolID(repoKey, pkgID, "MyApp.B")
 
 	outgoing, err := store.GetOutgoingEdges(ctx, fooID, []EdgeType{EdgeRefersTo}, 100)
 	if err != nil {

@@ -9,6 +9,9 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/jkatigb/agentctl/internal/indexing"
 	"github.com/jkatigb/agentctl/internal/indexing/embedding"
@@ -16,6 +19,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/indexing/semantic"
 	"github.com/jkatigb/agentctl/internal/platform/config"
 	"github.com/jkatigb/agentctl/internal/platform/fsutil"
+	platformsymbol "github.com/jkatigb/agentctl/internal/platform/symbolutil"
 	workspaceutil "github.com/jkatigb/agentctl/internal/platform/workspace"
 	"github.com/jkatigb/agentctl/internal/storage"
 	"github.com/jkatigb/agentctl/internal/storage/memory"
@@ -166,6 +170,8 @@ func (idx *Indexer) Index(ctx context.Context, event indexing.PostReviewEvent) (
 // indexFile indexes a single file's symbols with per-symbol incremental updates.
 // Per spec §4.3: unchanged body_digest means embeddings can be reused.
 func (idx *Indexer) indexFile(ctx context.Context, event indexing.PostReviewEvent, file indexing.FileChange, lang string, extractor Extractor) error {
+	pkg := platformsymbol.DeriveSymbolPackage(file.Path, lang)
+
 	// Read file content
 	content, err := idx.readFileContent(file.Path)
 	if err != nil {
@@ -190,7 +196,9 @@ func (idx *Indexer) indexFile(ctx context.Context, event indexing.PostReviewEven
 	oldMeta := idx.loadFileMeta(ctx, event.WorkspaceID, file.Path)
 
 	// Check file-level freshness first
-	if !idx.config.Force && oldMeta != nil && oldMeta.ContentHash == fileDigest {
+	if !idx.config.Force && oldMeta != nil &&
+		oldMeta.IndexSchema == CurrentFileMetaSchema &&
+		oldMeta.ContentHash == fileDigest {
 		idx.logger.Debug().Str("path", file.Path).Msg("file unchanged, skipping")
 		return ErrUnchanged
 	}
@@ -199,6 +207,33 @@ func (idx *Indexer) indexFile(ctx context.Context, event indexing.PostReviewEven
 	symbols, err := extractor.Extract(ctx, file.Path, content)
 	if err != nil {
 		return fmt.Errorf("extract symbols: %w", err)
+	}
+
+	// Assign stable SymbolKeys based on language
+	for i := range symbols {
+		if symbols[i].Key != "" {
+			continue
+		}
+		switch lang {
+		case "go":
+			if symbols[i].Name == "init" {
+				symbols[i].Key = GoInitSymbolKey(filepath.Base(symbols[i].FilePath))
+			} else {
+				r, _ := utf8.DecodeRuneInString(symbols[i].Name)
+				if unicode.IsUpper(r) {
+					symbols[i].Key = GoSymbolKey(symbols[i].Name)
+				} else {
+					symbols[i].Key = GoNonExportedSymbolKey(symbols[i].Name, filepath.Base(symbols[i].FilePath))
+				}
+			}
+		case "typescript", "javascript":
+			exported := strings.HasPrefix(strings.TrimSpace(symbols[i].Signature), "export ")
+			symbols[i].Key = TSSymbolKey(symbols[i].Name, exported, filepath.Base(symbols[i].FilePath))
+		case "elixir":
+			symbols[i].Key = ElixirSymbolKey(symbols[i].Name)
+		case "python":
+			symbols[i].Key = PythonSymbolKey(symbols[i].Name)
+		}
 	}
 
 	// Check LOC limit for large files per spec §4.2
@@ -242,7 +277,7 @@ func (idx *Indexer) indexFile(ctx context.Context, event indexing.PostReviewEven
 	newSymbolIDs := make(map[string]bool)
 	nameToID := make(map[string]string)
 	for _, sym := range symbols {
-		nameToID[sym.Name] = sym.ID
+		nameToID[sym.Name] = sym.EffectiveID()
 	}
 
 	var savedCount, skippedCount int
@@ -252,6 +287,7 @@ func (idx *Indexer) indexFile(ctx context.Context, event indexing.PostReviewEven
 	for _, sym := range symbols {
 		sym.FileDigest = fileDigest
 		sym.Language = lang
+		symID := sym.EffectiveID()
 
 		skipDigest := sym.BodyDigest
 		if useDocAwareDigest {
@@ -259,19 +295,20 @@ func (idx *Indexer) indexFile(ctx context.Context, event indexing.PostReviewEven
 				Model:      embedModel,
 				Kind:       string(sym.Kind),
 				Name:       sym.Name,
+				SymbolKey:  sym.EffectiveID(),
 				FilePath:   sym.FilePath,
 				Signature:  sym.Signature,
 				Doc:        sym.Documentation,
 				BodyDigest: sym.BodyDigest,
 			})
 		}
-		newDigests[sym.ID] = skipDigest
-		newSymbolIDs[sym.ID] = true
+		newDigests[symID] = skipDigest
+		newSymbolIDs[symID] = true
 
 		// Per-symbol incremental check per spec §4.3:
 		// If existing symbol has identical body_digest, skip save (reuse embedding)
 		if !idx.config.Force {
-			if oldDigest, exists := oldDigests[sym.ID]; exists && oldDigest == skipDigest {
+			if oldDigest, exists := oldDigests[symID]; exists && oldDigest == skipDigest {
 				skippedCount++
 				continue
 			}
@@ -289,7 +326,7 @@ func (idx *Indexer) indexFile(ctx context.Context, event indexing.PostReviewEven
 			calls = idx.resolveCallTargets(ctx, event.WorkspaceID, extractedCalls, nameToID)
 		}
 
-		if err := idx.saveSymbol(ctx, event, sym, calls); err != nil {
+		if err := idx.saveSymbol(ctx, event, pkg, sym, calls); err != nil {
 			return fmt.Errorf("save symbol %s: %w", sym.Name, err)
 		}
 		savedCount++
@@ -298,7 +335,7 @@ func (idx *Indexer) indexFile(ctx context.Context, event indexing.PostReviewEven
 			content, digest := idx.buildEmbeddingPayload(sym, calls, content, embedMode, embedModel)
 			if strings.TrimSpace(content) != "" {
 				embedInputs = append(embedInputs, embedding.SymbolInput{
-					SymbolID:      sym.ID,
+					SymbolID:      symID,
 					FilePath:      sym.FilePath,
 					SymbolName:    sym.Name,
 					Content:       content,
@@ -313,7 +350,7 @@ func (idx *Indexer) indexFile(ctx context.Context, event indexing.PostReviewEven
 	for oldID := range oldDigests {
 		if !newSymbolIDs[oldID] {
 			// Symbol was removed - delete its entry
-			if err := idx.deleteSymbol(ctx, event.WorkspaceID, file.Path, oldID); err != nil {
+			if err := idx.deleteSymbol(ctx, event.WorkspaceID, file.Path, oldID, pkg); err != nil {
 				idx.logger.Warn().
 					Err(err).
 					Str("symbol_id", oldID).
@@ -373,6 +410,7 @@ func (idx *Indexer) buildEmbeddingPayload(sym Symbol, calls []string, fileConten
 			Model:      model,
 			Kind:       string(sym.Kind),
 			Name:       sym.Name,
+			SymbolKey:  sym.EffectiveID(),
 			FilePath:   sym.FilePath,
 			Signature:  sym.Signature,
 			Doc:        sym.Documentation,
@@ -510,7 +548,7 @@ func (idx *Indexer) resolveCallTargets(ctx context.Context, workspace string, ca
 			if res.Symbol.Name != callName {
 				continue
 			}
-			candidates = append(candidates, candidate{id: res.Symbol.ID, filePath: res.Symbol.FilePath})
+			candidates = append(candidates, candidate{id: res.Symbol.EffectiveID(), filePath: res.Symbol.FilePath})
 		}
 		if len(candidates) == 0 {
 			continue
@@ -563,24 +601,53 @@ func (idx *Indexer) loadFileMeta(ctx context.Context, workspace, filePath string
 }
 
 // deleteSymbol deletes a single symbol entry.
-func (idx *Indexer) deleteSymbol(ctx context.Context, workspace, filePath, symbolID string) error {
-	// Extract symbol name from ID (format: "file_path:symbol_name")
-	parts := strings.SplitN(symbolID, ":", 2)
-	if len(parts) != 2 {
-		return fmt.Errorf("invalid symbol ID format: %s", symbolID)
-	}
-	symbolName := parts[1]
+func (idx *Indexer) deleteSymbol(ctx context.Context, workspace, filePath, symbolID, pkg string) error {
+	var errs []error
 
-	name := EntryName(workspace, filePath, symbolName)
-	if err := idx.memoryStore.Delete(ctx, name, workspace); err != nil {
-		return err
+	// Delete key-based entry
+	keyName := platformsymbol.KeyEntryName(workspace, pkg, symbolID)
+	if err := idx.memoryStore.Delete(ctx, keyName, workspace); err != nil {
+		// Not fatal - may not exist in key format yet
+		idx.logger.Debug().Err(err).Str("name", keyName).Msg("key-based entry not found")
 	}
-	return idx.deleteOutgoingCallEdges(ctx, workspace, symbolID)
+
+	// Delete legacy file-path-based entry
+	if legacyFile, legacyName, ok := splitLegacySymbolID(symbolID); ok {
+		name := EntryName(workspace, legacyFile, legacyName)
+		if err := idx.memoryStore.Delete(ctx, name, workspace); err != nil {
+			idx.logger.Debug().Err(err).Str("name", name).Msg("legacy entry not found")
+		}
+	} else if filePath != "" {
+		// symbolID is a SymbolKey (no ":" separator) — use the provided filePath
+		// to construct the legacy entry name for backward-compat cleanup.
+		symName := SymbolKey(symbolID).Name()
+		// init@filename.go keys were stored with legacy name "init", not "init@filename.go"
+		if strings.HasPrefix(symbolID, "init@") {
+			symName = "init"
+		}
+		name := EntryName(workspace, filePath, symName)
+		if err := idx.memoryStore.Delete(ctx, name, workspace); err != nil {
+			idx.logger.Debug().Err(err).Str("name", name).Msg("legacy entry not found")
+		}
+	}
+
+	// Always try to clean up call edges
+	errs = append(errs, idx.deleteOutgoingCallEdges(ctx, workspace, symbolID))
+	return errors.Join(errs...)
+}
+
+// splitLegacySymbolID attempts to split a symbol ID in legacy "filePath:symbolName" format.
+func splitLegacySymbolID(symbolID string) (string, string, bool) {
+	parts := strings.SplitN(symbolID, ":", 2)
+	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+		return "", "", false
+	}
+	return parts[0], parts[1], true
 }
 
 // saveSymbol saves a symbol to the memory store.
-func (idx *Indexer) saveSymbol(ctx context.Context, event indexing.PostReviewEvent, sym Symbol, calls []string) error {
-	if err := idx.saveCallEdges(ctx, event.WorkspaceID, sym.ID, calls); err != nil {
+func (idx *Indexer) saveSymbol(ctx context.Context, event indexing.PostReviewEvent, pkg string, sym Symbol, calls []string) error {
+	if err := idx.saveCallEdges(ctx, event.WorkspaceID, sym.EffectiveID(), calls); err != nil {
 		return fmt.Errorf("save call edges: %w", err)
 	}
 
@@ -600,9 +667,10 @@ func (idx *Indexer) saveSymbol(ctx context.Context, event indexing.PostReviewEve
 		return fmt.Errorf("marshal result: %w", err)
 	}
 
-	name := EntryName(event.WorkspaceID, sym.FilePath, sym.Name)
+	// Primary entry: key-based name (stable across file moves)
+	primaryName := platformsymbol.KeyEntryName(event.WorkspaceID, pkg, sym.EffectiveID())
 	entry := storage.NamedEntry{
-		Name:      name,
+		Name:      primaryName,
 		Type:      SymbolType,
 		Workspace: event.WorkspaceID,
 		Summary:   fmt.Sprintf("%s %s in %s", sym.Kind, sym.Name, sym.FilePath),
@@ -668,6 +736,8 @@ func (idx *Indexer) updateFileMetaFull(ctx context.Context, workspace, filePath,
 	meta := FileMeta{
 		FilePath:      filePath,
 		ContentHash:   digest,
+		LastModTime:   time.Now().Unix(),
+		IndexSchema:   CurrentFileMetaSchema,
 		Count:         symbolCount,
 		SymbolDigests: symbolDigests,
 	}
@@ -693,7 +763,18 @@ func (idx *Indexer) updateFileMetaFull(ctx context.Context, workspace, filePath,
 // deleteFileSymbols removes all symbols for a file.
 // Returns accumulated errors if any delete operations fail.
 func (idx *Indexer) deleteFileSymbols(ctx context.Context, workspace, filePath string) error {
+	lang := normalizeLanguageHint(fsutil.DetectLanguage(filePath))
+	pkg := platformsymbol.DeriveSymbolPackage(filePath, lang)
 	var errs []error
+
+	// Try to delete using stored FileMeta digests (key-based IDs)
+	if oldMeta := idx.loadFileMeta(ctx, workspace, filePath); oldMeta != nil {
+		for oldID := range oldMeta.SymbolDigests {
+			if err := idx.deleteSymbol(ctx, workspace, filePath, oldID, pkg); err != nil {
+				idx.logger.Debug().Err(err).Str("id", oldID).Msg("failed to delete symbol by ID")
+			}
+		}
+	}
 
 	// Delete file meta
 	metaName := FileMetaEntryName(workspace, filePath)
@@ -705,12 +786,11 @@ func (idx *Indexer) deleteFileSymbols(ctx context.Context, workspace, filePath s
 		}
 	}
 
-	// Delete all symbol entries for this file
-	// Symbols are named: symbol://<workspace>/<file_path>:<symbol_name>
+	// Best-effort legacy prefix cleanup
 	symbolPrefix := fmt.Sprintf("symbol://%s/%s:", workspace, filePath)
 	deleted, err := idx.memoryStore.DeleteByNamePrefix(ctx, workspace, symbolPrefix)
 	if err != nil {
-		idx.logger.Warn().Err(err).Str("path", filePath).Msg("failed to delete symbol entries")
+		idx.logger.Warn().Err(err).Str("path", filePath).Msg("failed to delete legacy symbol entries")
 		errs = append(errs, fmt.Errorf("delete symbol entries: %w", err))
 	} else if deleted > 0 {
 		idx.logger.Debug().Str("path", filePath).Int("count", deleted).Msg("deleted symbol entries")

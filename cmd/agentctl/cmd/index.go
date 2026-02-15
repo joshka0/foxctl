@@ -19,6 +19,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/observability"
 	"github.com/jkatigb/agentctl/internal/platform/config"
 	"github.com/jkatigb/agentctl/internal/platform/fsutil"
+	"github.com/jkatigb/agentctl/internal/platform/symbolutil"
 	workspaceutil "github.com/jkatigb/agentctl/internal/platform/workspace"
 	"github.com/jkatigb/agentctl/internal/protocol"
 	llmproviders "github.com/jkatigb/agentctl/internal/providers/llm"
@@ -177,7 +178,7 @@ For fine-grained control, use 'agentctl semantic-index'.
 
 Scopes (model selection via semantic.ScopeModelRecommendation):
   symbols   - Code files (voyage-code-3)
-  memory    - Gotchas/notes (voyage-3-large)
+  memory    - Gotchas/notes (voyage-3.5)
   tasks     - Task descriptions (voyage-3.5)
   sessions  - Session context (voyage-3.5)
 
@@ -219,7 +220,7 @@ This command performs one-time full embedding generation using the
 recommended Voyage AI models for each scope (see semantic.ScopeModelRecommendation):
 
   symbols   → voyage-code-3   (code files)
-  memory    → voyage-3-large  (gotchas, notes)
+  memory    → voyage-3.5      (gotchas, notes)
   tasks     → voyage-3.5      (task descriptions)
   sessions  → voyage-3.5      (session summaries)
 
@@ -565,9 +566,8 @@ func indexSymbols(ctx context.Context, cfg config.Config, workspace, glob string
 	defer store.Close()
 
 	provider, err := semantic.NewVoyageProvider(semantic.VoyageConfig{
-		APIKey:        apiKey,
-		Model:         modelForScope("symbols"),
-		RateLimitWait: boolPtr(true),
+		APIKey: apiKey,
+		Model:  modelForScope("symbols"),
 	})
 	if err != nil {
 		return 0, fmt.Errorf("create voyage provider: %w", err)
@@ -737,9 +737,8 @@ func reembedMemories(ctx context.Context, cfg config.Config, workspace, apiKey s
 	defer store.Close()
 
 	provider, err := semantic.NewVoyageProvider(semantic.VoyageConfig{
-		APIKey:        apiKey,
-		Model:         modelForScope("memory"),
-		RateLimitWait: boolPtr(true),
+		APIKey: apiKey,
+		Model:  modelForScope("memory"),
 	})
 	if err != nil {
 		return 0, fmt.Errorf("create voyage provider: %w", err)
@@ -815,9 +814,8 @@ func reembedTasks(ctx context.Context, cfg config.Config, defaultWorkspace, apiK
 	defer memStore.Close()
 
 	provider, err := semantic.NewVoyageProvider(semantic.VoyageConfig{
-		APIKey:        apiKey,
-		Model:         modelForScope("tasks"),
-		RateLimitWait: boolPtr(true),
+		APIKey: apiKey,
+		Model:  modelForScope("tasks"),
 	})
 	if err != nil {
 		return 0, fmt.Errorf("create voyage provider: %w", err)
@@ -917,9 +915,8 @@ func reembedSessions(ctx context.Context, cfg config.Config, apiKey string) (int
 	defer store.Close()
 
 	provider, err := semantic.NewVoyageProvider(semantic.VoyageConfig{
-		APIKey:        apiKey,
-		Model:         modelForScope("sessions"),
-		RateLimitWait: boolPtr(true),
+		APIKey: apiKey,
+		Model:  modelForScope("sessions"),
 	})
 	if err != nil {
 		return 0, fmt.Errorf("create voyage provider: %w", err)
@@ -1206,9 +1203,8 @@ func runIndexSyncQuery(cmd *cobra.Command, remoteURL, remoteToken, query string,
 
 	// Generate query embedding
 	provider, err := semantic.NewVoyageProvider(semantic.VoyageConfig{
-		APIKey:        voyageKey,
-		Model:         modelForScope("memory"), // Use memory model for text queries
-		RateLimitWait: boolPtr(true),
+		APIKey: voyageKey,
+		Model:  modelForScope("memory"),
 	})
 	if err != nil {
 		return fmt.Errorf("create voyage provider: %w", err)
@@ -2324,15 +2320,33 @@ func runIndexSymbolSummaries(cmd *cobra.Command, workspace string, force, dryRun
 			}
 
 			if !force {
-				entryName := symbol.SymbolSummaryEntryName(absWorkspace, sym.ID)
-				entry, getErr := store.Get(ctx, entryName, absWorkspace)
-				if getErr == nil {
-					var cached symbol.SymbolSummaryResult
-					if err := json.Unmarshal(entry.Result, &cached); err == nil {
-						currentDigest := symbol.ComputeSymbolSummaryDigest(input)
-						if cached.Digest == currentDigest {
-							skippedCount++
-							continue
+				entryFound := false
+				if sym.Key != "" {
+					pkg := symbolutil.DeriveSymbolPackage(sym.FilePath, sym.Language)
+					keyEntryName := symbol.SymbolSummaryKeyEntryName(absWorkspace, pkg, sym.Key.String())
+					if entry, getErr := store.Get(ctx, keyEntryName, absWorkspace); getErr == nil {
+						var cached symbol.SymbolSummaryResult
+						if err := json.Unmarshal(entry.Result, &cached); err == nil {
+							currentDigest := symbol.ComputeSymbolSummaryDigest(input)
+							if cached.Digest == currentDigest {
+								skippedCount++
+								continue
+							}
+						}
+						entryFound = true
+					}
+				}
+				if !entryFound {
+					entryName := symbol.SymbolSummaryEntryName(absWorkspace, sym.ID)
+					entry, getErr := store.Get(ctx, entryName, absWorkspace)
+					if getErr == nil {
+						var cached symbol.SymbolSummaryResult
+						if err := json.Unmarshal(entry.Result, &cached); err == nil {
+							currentDigest := symbol.ComputeSymbolSummaryDigest(input)
+							if cached.Digest == currentDigest {
+								skippedCount++
+								continue
+							}
 						}
 					}
 				}
@@ -2561,6 +2575,7 @@ func buildSymbolSummaryInput(sym symbol.Symbol) (symbol.SymbolSummaryInput, erro
 	}
 	input := symbol.SymbolSummaryInput{
 		SymbolID:      sym.ID,
+		SymbolKey:     sym.Key.String(),
 		FilePath:      sym.FilePath,
 		Name:          sym.Name,
 		Kind:          sym.Kind,
@@ -2568,6 +2583,7 @@ func buildSymbolSummaryInput(sym symbol.Symbol) (symbol.SymbolSummaryInput, erro
 		Documentation: sym.Documentation,
 		BodyDigest:    sym.BodyDigest,
 		Language:      sym.Language,
+		Pkg:           symbolutil.DeriveSymbolPackage(sym.FilePath, sym.Language),
 	}
 
 	return input, nil

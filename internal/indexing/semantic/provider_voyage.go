@@ -51,10 +51,10 @@ type VoyageProvider struct {
 	dimensions int
 	httpClient *http.Client
 
-	// Rate limiting for free tier (3 RPM without payment method)
+	// Rate limiting (disabled by default; set via config or AGENTCTL_EMBEDDING_RATE_LIMIT)
 	rateLimitMu   sync.Mutex
 	requestTimes  []time.Time
-	rateLimit     int           // Max requests per window (default: 3)
+	rateLimit     int           // Max requests per window (0 = disabled)
 	rateWindow    time.Duration // Window duration (default: 62s)
 	rateLimitWait bool          // Whether to wait or error on rate limit
 
@@ -77,9 +77,11 @@ type VoyageConfig struct {
 	// Timeout is the HTTP request timeout. Default: 60s
 	Timeout time.Duration
 
-	// RateLimit is max requests per window. Default: 3 (free tier without payment)
-	// Set to 0 to disable rate limiting (for paid accounts)
-	RateLimit int
+	// RateLimit is max requests per window.
+	// nil = check env var, then default to no limit.
+	// 0 = disable rate limiting (for paid accounts).
+	// >0 = explicit limit.
+	RateLimit *int
 
 	// RateWindow is the rate limit window duration. Default: 62s
 	RateWindow time.Duration
@@ -121,17 +123,17 @@ func NewVoyageProvider(cfg VoyageConfig) (*VoyageProvider, error) {
 		timeout = 60 * time.Second
 	}
 
-	// Rate limiting: check env var first, then config, then default
+	// Rate limiting: check env var first, then config, then default to unlimited.
 	// AGENTCTL_EMBEDDING_RATE_LIMIT: 0 = disabled, >0 = requests per minute
-	rateLimit := cfg.RateLimit
+	var rateLimit int
 	if v := os.Getenv("AGENTCTL_EMBEDDING_RATE_LIMIT"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil {
 			rateLimit = n // 0 means disabled, >0 means limit
 		}
+	} else if cfg.RateLimit != nil {
+		rateLimit = *cfg.RateLimit
 	}
-	if rateLimit == 0 && os.Getenv("AGENTCTL_EMBEDDING_RATE_LIMIT") == "" {
-		rateLimit = 3 // Default to free tier limit only if not explicitly set
-	}
+	// Default: no rate limit (0 = disabled)
 	rateWindow := cfg.RateWindow
 	if rateWindow == 0 {
 		rateWindow = 62 * time.Second // Slightly over 1 minute to be safe
@@ -220,7 +222,7 @@ func (p *VoyageProvider) waitForRateLimit(ctx context.Context) error {
 		p.rateLimitMu.Unlock()
 
 		if !p.rateLimitWait {
-			return fmt.Errorf("voyage: rate limit exceeded (3 RPM free tier); retry in %v or add payment method at dashboard.voyageai.com", waitDuration.Round(time.Second))
+			return fmt.Errorf("voyage: rate limit exceeded (%d RPM); retry in %v", p.rateLimit, waitDuration.Round(time.Second))
 		}
 
 		// Wait for the duration or context cancellation

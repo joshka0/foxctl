@@ -46,12 +46,11 @@ const (
 // Environment variable overrides (checked in order):
 //  1. Per-scope vars: AGENTCTL_EMBEDDING_MODEL_SYMBOLS, _MEMORY, _TASKS, _SESSIONS, _CODEMAPS
 //  2. Category vars: AGENTCTL_EMBEDDING_MODEL_CODE (symbols), AGENTCTL_EMBEDDING_MODEL_TEXT (others)
-//  3. Defaults: voyage-code-3 (symbols), voyage-3-large (memory), voyage-3.5 (tasks, sessions, codemaps)
+//  3. Defaults: voyage-code-3 (symbols), voyage-3.5 (memory, tasks, sessions, codemaps)
 //
-// Model strategy (Jan 2025):
-// - voyage-code-3: Best for code retrieval (13.80% better than OpenAI), $0.18/1M
-// - voyage-3-large: Best quality for text retrieval, $0.06/1M
-// - voyage-3.5: Good price/performance for general text, $0.06/1M
+// Model strategy (Feb 2025):
+// - voyage-code-3: Best for code retrieval (13.80% better than OpenAI), $0.06/1M
+// - voyage-3.5: Best quality for general text (2.66% better than voyage-3), $0.06/1M
 //
 // All models use 1024 dimensions by default, ensuring storage compatibility.
 func ScopeModelRecommendation(scope EmbeddingScope) (model string, isCodeModel bool) {
@@ -76,7 +75,7 @@ func ScopeModelRecommendation(scope EmbeddingScope) (model string, isCodeModel b
 		if env := os.Getenv("AGENTCTL_EMBEDDING_MODEL_TEXT"); env != "" {
 			return env, false
 		}
-		return "voyage-3-large", false // Best quality for memories/gotchas
+		return "voyage-3.5", false
 	case ScopeCodemaps, ScopeTasks, ScopeSessions:
 		if env := os.Getenv("AGENTCTL_EMBEDDING_MODEL_TEXT"); env != "" {
 			return env, false

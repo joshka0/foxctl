@@ -469,7 +469,7 @@ func ToDelete() {}
 	}
 
 	// Verify symbol exists
-	_, err = store.Get(ctx, EntryName(workspaceID, "delete_me.go", "ToDelete"), workspaceID)
+	_, err = store.Get(ctx, keyEntryName(workspaceID, "delete_me.go", "ToDelete"), workspaceID)
 	if err != nil {
 		t.Fatalf("symbol should exist: %v", err)
 	}
@@ -493,7 +493,7 @@ func ToDelete() {}
 	}
 
 	// Verify symbol is gone
-	_, err = store.Get(ctx, EntryName(workspaceID, "delete_me.go", "ToDelete"), workspaceID)
+	_, err = store.Get(ctx, keyEntryName(workspaceID, "delete_me.go", "ToDelete"), workspaceID)
 	if err == nil {
 		t.Error("symbol should have been deleted")
 	}

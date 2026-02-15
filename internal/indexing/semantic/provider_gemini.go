@@ -67,9 +67,11 @@ type GeminiConfig struct {
 	// Timeout is the HTTP request timeout. Default: 60s
 	Timeout time.Duration
 
-	// RateLimit is max requests per window. Default: 15 (free tier for text-embedding-004)
-	// Set to 0 to disable rate limiting (for higher tier accounts)
-	RateLimit int
+	// RateLimit is max requests per window.
+	// nil = check env var, then default to no limit.
+	// 0 = disable rate limiting.
+	// >0 = explicit limit.
+	RateLimit *int
 
 	// RateWindow is the rate limit window duration. Default: 62s
 	RateWindow time.Duration
@@ -111,22 +113,17 @@ func NewGeminiProvider(cfg GeminiConfig) (*GeminiProvider, error) {
 		dimensions = 768
 	}
 
-	// Rate limiting: check env var first, then config, then default
+	// Rate limiting: check env var first, then config, then default to unlimited.
 	// AGENTCTL_EMBEDDING_RATE_LIMIT: 0 = disabled, >0 = requests per minute
-	rateLimit := cfg.RateLimit
+	var rateLimit int
 	if v := os.Getenv("AGENTCTL_EMBEDDING_RATE_LIMIT"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil {
 			rateLimit = n // 0 means disabled, >0 means limit
 		}
+	} else if cfg.RateLimit != nil {
+		rateLimit = *cfg.RateLimit
 	}
-	if rateLimit == 0 && os.Getenv("AGENTCTL_EMBEDDING_RATE_LIMIT") == "" {
-		// Default to free tier limits
-		if model == "text-embedding-004" {
-			rateLimit = 15 // 15 RPM for text-embedding-004
-		} else {
-			rateLimit = 5 // 5 RPM for gemini-embedding-001 (default)
-		}
-	}
+	// Default: no rate limit (0 = disabled)
 	rateWindow := cfg.RateWindow
 	if rateWindow == 0 {
 		rateWindow = 62 * time.Second // Slightly over 1 minute to be safe

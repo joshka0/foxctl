@@ -1,6 +1,9 @@
 package embeddingtext
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestDigestSHA256Stability(t *testing.T) {
 	a := DigestSHA256("hello   world")
@@ -58,4 +61,59 @@ func TestBuildSymbolContentDigestChangesOnDoc(t *testing.T) {
 	if BuildSymbolContentDigest(withDoc) == BuildSymbolContentDigest(withoutDoc) {
 		t.Fatalf("expected digest to change when doc changes")
 	}
+}
+
+func TestBuildSymbolContentDigest_V2SymbolKey(t *testing.T) {
+	// Ensure v2 format is used for content digests.
+	digest := BuildSymbolContentDigest(SymbolDigestInput{
+		Model:      "model-x",
+		Kind:       "function",
+		Name:       "Build",
+		SymbolKey:  "Builder.Build",
+		FilePath:   "builder.go",
+		Signature:  "func Build() {}",
+		BodyDigest: "sha256:abc",
+	})
+	if !strings.HasPrefix(digest, "sha256:") {
+		t.Fatalf("expected digest to use sha256 format, got %q", digest)
+	}
+
+	// With SymbolKey set - should use key even if file path changes.
+	input1 := SymbolDigestInput{
+		Kind:      "function",
+		Name:      "Build",
+		SymbolKey: "Builder.Build",
+		FilePath:  "builder.go",
+	}
+	digest1 := BuildSymbolContentDigest(input1)
+	if digest1 == "" {
+		t.Fatal("expected non-empty digest")
+	}
+
+	input2 := SymbolDigestInput{
+		Kind:      "function",
+		Name:      "Build",
+		SymbolKey: "Builder.Build",
+		FilePath:  "new_location/builder.go",
+	}
+	digest2 := BuildSymbolContentDigest(input2)
+	if digest1 != digest2 {
+		t.Errorf("expected same digest for same SymbolKey regardless of FilePath, got %q vs %q", digest1, digest2)
+	}
+
+	input3 := SymbolDigestInput{
+		Kind:     "function",
+		Name:     "Build",
+		FilePath: "builder.go",
+	}
+	digest3 := BuildSymbolContentDigest(input3)
+	if digest3 == "" {
+		t.Fatal("expected non-empty digest")
+	}
+
+	if digest1 == digest3 {
+		t.Error("expected different digest when using FilePath fallback vs SymbolKey")
+	}
+
+	_ = digest
 }

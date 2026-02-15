@@ -300,9 +300,8 @@ func createSemanticIndexer(ctx context.Context, workspace string, chunkBytes, ch
 			model = "voyage-code-3" // Best for code (1024 dims, 200M free tokens)
 		}
 		provider, err = semantic.NewVoyageProvider(semantic.VoyageConfig{
-			APIKey:        voyageKey,
-			Model:         model,
-			RateLimitWait: boolPtr(true), // Wait when rate limited (3 RPM free tier)
+			APIKey: voyageKey,
+			Model:  model,
 		})
 		if err != nil {
 			cleanup()
@@ -319,9 +318,8 @@ func createSemanticIndexer(ctx context.Context, workspace string, chunkBytes, ch
 			model = "gemini-embedding-001" // 3072 dims
 		}
 		provider, err = semantic.NewGeminiProvider(semantic.GeminiConfig{
-			APIKey:        geminiKey,
-			Model:         model,
-			RateLimitWait: boolPtr(true), // Wait when rate limited (5 RPM free tier)
+			APIKey: geminiKey,
+			Model:  model,
 		})
 		if err != nil {
 			cleanup()
@@ -395,11 +393,6 @@ func writeSemanticError(cmd *cobra.Command, code, message string) error {
 		return fmt.Errorf("write error envelope: %w", err)
 	}
 	return fmt.Errorf("%s: %s", code, message)
-}
-
-// boolPtr returns a pointer to a bool value.
-func boolPtr(b bool) *bool {
-	return &b
 }
 
 func init() {

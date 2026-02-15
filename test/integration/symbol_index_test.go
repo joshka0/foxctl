@@ -12,6 +12,7 @@ import (
 
 	"github.com/jkatigb/agentctl/internal/indexing"
 	"github.com/jkatigb/agentctl/internal/indexing/symbol"
+	platformsymbol "github.com/jkatigb/agentctl/internal/platform/symbolutil"
 	"github.com/jkatigb/agentctl/internal/platform/workspace"
 	"github.com/jkatigb/agentctl/internal/storage/memory"
 	"github.com/rs/zerolog"
@@ -178,11 +179,13 @@ func (h *Helper) DoWork() error {
 		symbolNames[e.Name] = true
 	}
 
+	mainPkg := platformsymbol.DeriveSymbolPackage("main.go", "go")
+	utilsPkg := platformsymbol.DeriveSymbolPackage("utils/helper.go", "go")
 	expectedSymbols := []string{
-		symbol.EntryName(workspaceID, "main.go", "main"),
-		symbol.EntryName(workspaceID, "main.go", "greet"),
-		symbol.EntryName(workspaceID, "utils/helper.go", "Helper"),
-		symbol.EntryName(workspaceID, "utils/helper.go", "Helper.DoWork"),
+		platformsymbol.KeyEntryName(workspaceID, mainPkg, symbol.GoNonExportedSymbolKey("main", "main.go").String()),
+		platformsymbol.KeyEntryName(workspaceID, mainPkg, symbol.GoNonExportedSymbolKey("greet", "main.go").String()),
+		platformsymbol.KeyEntryName(workspaceID, utilsPkg, symbol.GoSymbolKey("Helper").String()),
+		platformsymbol.KeyEntryName(workspaceID, utilsPkg, symbol.GoSymbolKey("Helper.DoWork").String()),
 	}
 
 	for _, name := range expectedSymbols {
@@ -362,17 +365,21 @@ func helper() {}
 		t.Fatalf("list entries: %v", err)
 	}
 
-	// Find the caller symbol and verify it has calls
+	// Find the caller symbol using key-based entry name (stable across file moves)
+	// "caller" is non-exported, so key includes filename: "calls.go/caller"
+	pkg := platformsymbol.DeriveSymbolPackage("calls.go", "go")
+	callerKey := symbol.GoNonExportedSymbolKey("caller", "calls.go")
+	callerKeyName := platformsymbol.KeyEntryName(workspaceID, pkg, callerKey.String())
 	var callerEntry *memory.NamedEntry
 	for i := range allEntries {
-		if allEntries[i].Type == symbol.SymbolType && allEntries[i].Name == symbol.EntryName(workspaceID, "calls.go", "caller") {
+		if allEntries[i].Type == symbol.SymbolType && allEntries[i].Name == callerKeyName {
 			callerEntry = &allEntries[i]
 			break
 		}
 	}
 
 	if callerEntry == nil {
-		t.Fatalf("caller symbol not found")
+		t.Fatalf("caller symbol not found: %s", callerKeyName)
 	}
 
 	// Unmarshal and check calls

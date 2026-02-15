@@ -70,8 +70,8 @@ type VoyageConfig struct {
 	// Timeout is the HTTP request timeout. Default: 60s
 	Timeout time.Duration
 
-	// RateLimit is max requests per window. Default: 3 (free tier without payment)
-	// Set to nil to use default (3), set to pointer to 0 to disable rate limiting.
+	// RateLimit is max requests per window. Default: no limit (nil or 0 = disabled).
+	// Set to >0 to enable rate limiting.
 	RateLimit *int
 
 	// RateWindow is the rate limit window duration. Default: 62s
@@ -114,14 +114,12 @@ func NewVoyageProvider(cfg VoyageConfig) (*VoyageProvider, error) {
 		timeout = 60 * time.Second
 	}
 
-	// Rate limiting defaults (free tier: 3 RPM)
-	// nil → default to 3, *0 → disabled, *>0 → use value
+	// Rate limiting: nil → no limit, *0 → disabled, *>0 → use value
 	var rateLimit int
-	if cfg.RateLimit == nil {
-		rateLimit = 3 // Default to free tier limit
-	} else {
-		rateLimit = *cfg.RateLimit // 0 means disabled
+	if cfg.RateLimit != nil {
+		rateLimit = *cfg.RateLimit
 	}
+	// Default: no rate limit (0 = disabled)
 	rateWindow := cfg.RateWindow
 	if rateWindow == 0 {
 		rateWindow = 62 * time.Second // Slightly over 1 minute to be safe
