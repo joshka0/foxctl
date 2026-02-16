@@ -1,0 +1,183 @@
+apiVersion: agentctl/v1
+kind: Skill
+metadata:
+  name: exa/search
+  version: 0.1.0
+  description: "Full-featured Exa search API: search, find_similar, contents, answer"
+  tags: ["web", "search", "exa", "ai"]
+distribution:
+  type: exec
+  exec:
+    entry: bin
+io:
+  format: JSON
+  inline_output_kb: 32
+signature:
+  command: exa/search
+  parameters:
+    - name: action
+      type: string
+      required: false
+      default: search
+      description: "Action: search, find_similar, contents, answer"
+    - name: query
+      type: string
+      required: false
+      description: "Search query (required for search/answer)"
+    - name: url
+      type: string
+      required: false
+      description: "URL to find similar pages for (required for find_similar)"
+    - name: urls
+      type: array
+      required: false
+      description: "URLs to get contents for (required for contents)"
+    - name: num_results
+      type: integer
+      required: false
+      default: 10
+      description: "Number of results (1-100)"
+    - name: type
+      type: string
+      required: false
+      description: "Search type: auto, neural, fast, deep"
+    - name: category
+      type: string
+      required: false
+      description: "Category filter: company, research paper, news, pdf, github, tweet, personal site, people"
+    - name: include_domains
+      type: array
+      required: false
+      description: "Only include results from these domains"
+    - name: exclude_domains
+      type: array
+      required: false
+      description: "Exclude results from these domains"
+    - name: start_published_date
+      type: string
+      required: false
+      description: "Only results published after this date (ISO 8601)"
+    - name: end_published_date
+      type: string
+      required: false
+      description: "Only results published before this date (ISO 8601)"
+    - name: include_text
+      type: array
+      required: false
+      description: "Strings that must appear in result text (max 1, up to 5 words)"
+    - name: exclude_text
+      type: array
+      required: false
+      description: "Strings that must not appear in result text (max 1, up to 5 words)"
+    - name: text
+      type: boolean
+      required: false
+      default: true
+      description: "Return full text content"
+    - name: text_max_chars
+      type: integer
+      required: false
+      description: "Max characters for text content"
+    - name: highlights
+      type: boolean
+      required: false
+      description: "Return highlighted snippets"
+    - name: highlight_query
+      type: string
+      required: false
+      description: "Custom query for highlight extraction"
+    - name: summary
+      type: boolean
+      required: false
+      description: "Return page summaries"
+    - name: summary_query
+      type: string
+      required: false
+      description: "Custom query for summary generation"
+  help:
+    short: "Search the web using the full Exa API"
+    long: |
+      Full-featured Exa API skill with 4 actions:
+        search        - Neural/keyword web search with rich filtering
+        find_similar  - Find pages similar to a given URL
+        contents      - Get contents for specific URLs
+        answer        - Get AI-generated answers with citations
+
+      Requires EXA_API_KEY environment variable.
+
+      Examples:
+        agentctl run exa --input '{"query": "AI startups 2025"}'
+        agentctl run exa --input '{"query": "transformer architecture", "type": "deep", "category": "research paper"}'
+        agentctl run exa --input '{"query": "OpenAI news", "include_domains": ["techcrunch.com"], "highlights": true}'
+        agentctl run exa --input '{"action": "find_similar", "url": "https://arxiv.org/abs/2303.08774"}'
+        agentctl run exa --input '{"action": "contents", "urls": ["https://example.com/article"]}'
+        agentctl run exa --input '{"action": "answer", "query": "What is the latest valuation of SpaceX?"}'
+    workflows:
+      - id: basic-search
+        description: "Simple web search with text"
+        example_input:
+          query: "latest AI developments"
+          num_results: 10
+      - id: deep-research
+        description: "Deep search with highlights for research"
+        example_input:
+          query: "transformer architecture innovations"
+          type: "deep"
+          category: "research paper"
+          highlights: true
+          highlight_query: "key findings"
+      - id: domain-filtered
+        description: "Search within specific domains"
+        example_input:
+          query: "React Server Components"
+          include_domains: ["react.dev", "vercel.com"]
+          text: true
+      - id: find-similar
+        description: "Find similar pages to a URL"
+        example_input:
+          action: "find_similar"
+          url: "https://arxiv.org/abs/2303.08774"
+          num_results: 10
+      - id: get-contents
+        description: "Get contents for specific URLs"
+        example_input:
+          action: "contents"
+          urls: ["https://example.com/article"]
+          summary: true
+      - id: answer
+        description: "Get an AI answer with citations"
+        example_input:
+          action: "answer"
+          query: "What caused the 2008 financial crisis?"
+returns:
+  - name: results
+    type: array
+    description: "Search results with title, url, text, highlights, summary"
+  - name: answer
+    type: string
+    description: "AI-generated answer (answer action only)"
+  - name: citations
+    type: array
+    description: "Citations for the answer (answer action only)"
+  - name: action
+    type: string
+    description: "The action that was performed"
+  - name: query
+    type: string
+    description: "The original query"
+  - name: cost
+    type: object
+    description: "Cost breakdown from Exa API"
+  - name: artifact
+    type: string
+    description: "CAS digest if results were truncated"
+capabilities:
+  network: "egress"
+  filesystem:
+    - type: workdir
+  pure: false
+openapi:
+  enabled: true
+  methods:
+    GET: "true"
+    POST: "true"

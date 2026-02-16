@@ -60,9 +60,8 @@ var skillGroups = map[string][]string{
 		"code/symbols",
 		"code/snippet_extract",
 		"code/context_grep",
-		"code/context_ripgrep",
+		"code/dag_grep",
 		"codemap/get",
-		"codemap/generate",
 	},
 	// code-write: Code modification tools
 	"code-write": {
@@ -75,6 +74,7 @@ var skillGroups = map[string][]string{
 		"todo/manage",
 		"memory/query",
 		"session/recall",
+		"session/timeline",
 	},
 	// agentctl-ci: CI/CD integration tools
 	"agentctl-ci": {

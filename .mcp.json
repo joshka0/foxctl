@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "agentctl": {
+      "command": "/Users/joshka/.local/bin/agentctl",
+      "args": ["mcp", "serve", "--groups", "code-intel,project"]
+    }
+  }
+}

@@ -1968,7 +1968,6 @@ package testutil
 
 import (
     "context"
-    "github.com/XiaoConstantine/dspy-go/pkg/core"
 )
 
 // FakeLLM returns scripted responses for deterministic testing.

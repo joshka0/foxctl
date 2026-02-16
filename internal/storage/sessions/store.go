@@ -271,7 +271,7 @@ func (s *Store) Get(ctx context.Context, id string) (Session, error) {
 			tags, key_files, tools_pattern, message_count, user_turns,
 			tool_invocations, total_tokens, raw_jsonl_path, content_hash, embedding, embedding_model,
 			created_at, updated_at, parent_session_id, agent_id, agent_type, status, key_questions,
-			prompt, prompt_hash, llm_provider, llm_model
+			prompt, prompt_hash, llm_provider, llm_model, error_message
 		FROM sessions
 		WHERE id = $1`, id)
 	return scanSession(row)
@@ -349,7 +349,7 @@ func (s *Store) List(ctx context.Context, opts ListOptions) ([]Session, error) {
 			tags, key_files, tools_pattern, message_count, user_turns,
 			tool_invocations, total_tokens, raw_jsonl_path, content_hash, embedding, embedding_model,
 			created_at, updated_at, parent_session_id, agent_id, agent_type, status, key_questions,
-			prompt, prompt_hash, llm_provider, llm_model
+			prompt, prompt_hash, llm_provider, llm_model, error_message
 		FROM sessions`
 
 	if len(conditions) > 0 {
@@ -401,7 +401,7 @@ func (s *Store) Search(ctx context.Context, query string, limit int) ([]Session,
 			tags, key_files, tools_pattern, message_count, user_turns,
 			tool_invocations, total_tokens, raw_jsonl_path, content_hash, embedding, embedding_model,
 			created_at, updated_at, parent_session_id, agent_id, agent_type, status, key_questions,
-			prompt, prompt_hash, llm_provider, llm_model
+			prompt, prompt_hash, llm_provider, llm_model, error_message
 		FROM sessions
 		WHERE LOWER(summary) LIKE $1
 			OR LOWER(tags) LIKE $2
@@ -527,7 +527,7 @@ func (s *Store) SearchSimilar(ctx context.Context, workspace string, queryEmbedd
 					tags, key_files, tools_pattern, message_count, user_turns,
 					tool_invocations, total_tokens, raw_jsonl_path, content_hash, embedding, embedding_model,
 					created_at, updated_at, parent_session_id, agent_id, agent_type, status, key_questions,
-					prompt, prompt_hash, llm_provider, llm_model
+					prompt, prompt_hash, llm_provider, llm_model, error_message
 				FROM sessions
 				WHERE (workspace_id = $1 OR (workspace_id = '' AND workspace_path = $2))
 				  AND embedding IS NOT NULL AND LENGTH(embedding) > 0
@@ -539,7 +539,7 @@ func (s *Store) SearchSimilar(ctx context.Context, workspace string, queryEmbedd
 					tags, key_files, tools_pattern, message_count, user_turns,
 					tool_invocations, total_tokens, raw_jsonl_path, content_hash, embedding, embedding_model,
 					created_at, updated_at, parent_session_id, agent_id, agent_type, status, key_questions,
-					prompt, prompt_hash, llm_provider, llm_model
+					prompt, prompt_hash, llm_provider, llm_model, error_message
 				FROM sessions
 				WHERE workspace_id = $1
 				  AND embedding IS NOT NULL AND LENGTH(embedding) > 0
@@ -553,7 +553,7 @@ func (s *Store) SearchSimilar(ctx context.Context, workspace string, queryEmbedd
 				tags, key_files, tools_pattern, message_count, user_turns,
 				tool_invocations, total_tokens, raw_jsonl_path, content_hash, embedding, embedding_model,
 				created_at, updated_at, parent_session_id, agent_id, agent_type, status, key_questions,
-				prompt, prompt_hash, llm_provider, llm_model
+				prompt, prompt_hash, llm_provider, llm_model, error_message
 			FROM sessions
 			WHERE embedding IS NOT NULL AND LENGTH(embedding) > 0
 			ORDER BY started_at DESC`)
@@ -621,7 +621,7 @@ func (s *Store) FindByContentHash(ctx context.Context, contentHash string) (*Ses
 			tags, key_files, tools_pattern, message_count, user_turns,
 			tool_invocations, total_tokens, raw_jsonl_path, content_hash, embedding, embedding_model,
 			created_at, updated_at, parent_session_id, agent_id, agent_type, status, key_questions,
-			prompt, prompt_hash, llm_provider, llm_model
+			prompt, prompt_hash, llm_provider, llm_model, error_message
 		FROM sessions
 		WHERE content_hash = $1 AND summary != '' AND summary IS NOT NULL
 		ORDER BY created_at DESC
@@ -672,7 +672,7 @@ func (s *Store) GetActive(ctx context.Context, workspace, agentID string) (*Sess
 				tags, key_files, tools_pattern, message_count, user_turns,
 				tool_invocations, total_tokens, raw_jsonl_path, content_hash, embedding, embedding_model,
 				created_at, updated_at, parent_session_id, agent_id, agent_type, status, key_questions,
-				prompt, prompt_hash, llm_provider, llm_model
+				prompt, prompt_hash, llm_provider, llm_model, error_message
 			FROM sessions
 			WHERE (workspace_id = $1 OR (workspace_id = '' AND workspace_path = $2))
 			  AND agent_id = $3 AND status = $4
@@ -685,7 +685,7 @@ func (s *Store) GetActive(ctx context.Context, workspace, agentID string) (*Sess
 				tags, key_files, tools_pattern, message_count, user_turns,
 				tool_invocations, total_tokens, raw_jsonl_path, content_hash, embedding, embedding_model,
 				created_at, updated_at, parent_session_id, agent_id, agent_type, status, key_questions,
-				prompt, prompt_hash, llm_provider, llm_model
+				prompt, prompt_hash, llm_provider, llm_model, error_message
 			FROM sessions
 			WHERE workspace_id = $1 AND agent_id = $2 AND status = $3
 			ORDER BY started_at DESC
@@ -723,6 +723,36 @@ func (s *Store) SetStatus(ctx context.Context, id, status string) error {
 	result, err := s.db.ExecContext(ctx, query, args...)
 	if err != nil {
 		return fmt.Errorf("sessions: set status: %w", err)
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("sessions: rows affected: %w", err)
+	}
+	if affected == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// SetStatusWithError updates a session's status and error message.
+// If the status is terminal (ok, error, canceled), also sets ended_at.
+func (s *Store) SetStatusWithError(ctx context.Context, id, status, errorMessage string) error {
+	now := sqlutil.FormatTimestamp(timeutil.NowUTC())
+
+	var query string
+	var args []any
+
+	if storage.IsTerminalStatus(status) {
+		query = `UPDATE sessions SET status = $1, error_message = $2, ended_at = $3, updated_at = $4 WHERE id = $5`
+		args = []any{status, errorMessage, now, now, id}
+	} else {
+		query = `UPDATE sessions SET status = $1, error_message = $2, ended_at = NULL, updated_at = $3 WHERE id = $4`
+		args = []any{status, errorMessage, now, id}
+	}
+
+	result, err := s.db.ExecContext(ctx, query, args...)
+	if err != nil {
+		return fmt.Errorf("sessions: set status with error: %w", err)
 	}
 	affected, err := result.RowsAffected()
 	if err != nil {
@@ -790,7 +820,7 @@ func (s *Store) GetPendingRestore(ctx context.Context, workspace string) (*Sessi
 				tags, key_files, tools_pattern, message_count, user_turns,
 				tool_invocations, total_tokens, raw_jsonl_path, content_hash, embedding, embedding_model,
 				created_at, updated_at, parent_session_id, agent_id, agent_type, status, key_questions,
-				prompt, prompt_hash, llm_provider, llm_model
+				prompt, prompt_hash, llm_provider, llm_model, error_message
 			FROM sessions
 			WHERE (workspace_id = $1 OR (workspace_id = '' AND workspace_path = $2))
 			  AND pending_restore_at IS NOT NULL AND pending_restore_at > $3
@@ -803,7 +833,7 @@ func (s *Store) GetPendingRestore(ctx context.Context, workspace string) (*Sessi
 				tags, key_files, tools_pattern, message_count, user_turns,
 				tool_invocations, total_tokens, raw_jsonl_path, content_hash, embedding, embedding_model,
 				created_at, updated_at, parent_session_id, agent_id, agent_type, status, key_questions,
-				prompt, prompt_hash, llm_provider, llm_model
+				prompt, prompt_hash, llm_provider, llm_model, error_message
 			FROM sessions
 			WHERE workspace_id = $1
 			  AND pending_restore_at IS NOT NULL AND pending_restore_at > $2
@@ -845,7 +875,7 @@ func (s *Store) FindLastSession(ctx context.Context, workspace, agentID string, 
 				tags, key_files, tools_pattern, message_count, user_turns,
 				tool_invocations, total_tokens, raw_jsonl_path, content_hash, embedding, embedding_model,
 				created_at, updated_at, parent_session_id, agent_id, agent_type, status, key_questions,
-				prompt, prompt_hash, llm_provider, llm_model
+				prompt, prompt_hash, llm_provider, llm_model, error_message
 			FROM sessions
 			WHERE (workspace_id = $1 OR (workspace_id = '' AND workspace_path = $2))
 			  AND agent_id = $3`
@@ -858,7 +888,7 @@ func (s *Store) FindLastSession(ctx context.Context, workspace, agentID string, 
 				tags, key_files, tools_pattern, message_count, user_turns,
 				tool_invocations, total_tokens, raw_jsonl_path, content_hash, embedding, embedding_model,
 				created_at, updated_at, parent_session_id, agent_id, agent_type, status, key_questions,
-				prompt, prompt_hash, llm_provider, llm_model
+				prompt, prompt_hash, llm_provider, llm_model, error_message
 			FROM sessions
 			WHERE workspace_id = $1 AND agent_id = $2`
 		args = append(args, workspaceID, agentID)
@@ -915,6 +945,33 @@ func (s *Store) SaveEdge(ctx context.Context, edge SessionEdge) error {
 		return fmt.Errorf("sessions: save edge: %w", err)
 	}
 	return nil
+}
+
+// FindByAgentNamespace returns the most recent session for a given agent namespace.
+func (s *Store) FindByAgentNamespace(ctx context.Context, namespace string) (*Session, error) {
+	if namespace == "" {
+		return nil, nil
+	}
+	row := s.db.QueryRowContext(ctx, `
+		SELECT id, workspace_id, workspace_path, project_name, git_branch, claude_version,
+			started_at, ended_at, summary, accomplished, decisions, gotchas, user_insights,
+			tags, key_files, tools_pattern, message_count, user_turns,
+			tool_invocations, total_tokens, raw_jsonl_path, content_hash, embedding, embedding_model,
+			created_at, updated_at, parent_session_id, agent_id, agent_type, status, key_questions,
+			prompt, prompt_hash, llm_provider, llm_model, error_message
+		FROM sessions
+		WHERE agent_id = $1
+		ORDER BY created_at DESC
+		LIMIT 1`, namespace)
+
+	sess, err := scanSession(row)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("find by agent namespace: %w", err)
+	}
+	return &sess, nil
 }
 
 // GetAncestorChain retrieves the ancestor chain of a session using CTE.
@@ -2595,6 +2652,11 @@ CREATE INDEX IF NOT EXISTS idx_context_windows_ended ON session_context_windows(
 		return fmt.Errorf("sessions: add content_cas_digest column: %w", err)
 	}
 
+	// Add error_message column for session-level error persistence
+	if err := dbutil.AddColumnIfNotExists(ctx, db, "sessions", "error_message", "TEXT", ""); err != nil {
+		return fmt.Errorf("sessions: add error_message column: %w", err)
+	}
+
 	return nil
 }
 
@@ -2625,6 +2687,7 @@ func scanSession(row scannable) (Session, error) {
 	var contentHash sql.NullString
 	// Nullable string fields for agent sessions
 	var prompt, promptHash, llmProvider, llmModel sql.NullString
+	var errorMessage sql.NullString
 	// Nullable string fields that might be NULL in database
 	var projectName, gitBranch, claudeVersion, rawJSONLPath sql.NullString
 
@@ -2634,7 +2697,7 @@ func scanSession(row scannable) (Session, error) {
 		&tags, &keyFiles, &toolsPattern, &session.MessageCount, &session.UserTurns,
 		&session.ToolInvocations, &session.TotalTokens, &rawJSONLPath, &contentHash, &embedding, &embeddingModel,
 		&createdAt, &updatedAt, &parentSessionID, &agentID, &agentType, &status, &keyQuestions,
-		&prompt, &promptHash, &llmProvider, &llmModel,
+		&prompt, &promptHash, &llmProvider, &llmModel, &errorMessage,
 	)
 	if err != nil {
 		if err == sql.ErrNoRows {
@@ -2753,6 +2816,9 @@ func scanSession(row scannable) (Session, error) {
 	}
 	if llmModel.Valid {
 		session.LLMModel = llmModel.String
+	}
+	if errorMessage.Valid {
+		session.ErrorMessage = errorMessage.String
 	}
 
 	return session, nil

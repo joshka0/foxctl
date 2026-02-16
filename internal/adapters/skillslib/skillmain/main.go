@@ -143,7 +143,11 @@ func mainWithCode[I any](command string, run RunFunc[I], stdin io.Reader, stdout
 	// Parse input from stdin
 	var input I
 	decoder := json.NewDecoder(stdin)
-	decoder.DisallowUnknownFields() // Reject typos like "scopes" instead of "scope"
+	// Hook skills must be forward-compatible with new fields added to hooks.Input,
+	// so only enforce strict field checking for non-hook skills.
+	if !strings.HasPrefix(command, "hooks/") {
+		decoder.DisallowUnknownFields()
+	}
 	if err := decoder.Decode(&input); err != nil {
 		if err == io.EOF {
 			// Empty input is ok - use zero value

@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -160,6 +161,7 @@ type Session struct {
 	// so that follow-up turns (autonomous continuation, mailbox ask) have full context.
 	ConversationHistory []engine.Message
 	cancel              context.CancelFunc
+	done                chan struct{} // closed when runSession exits
 	mu                  sync.RWMutex
 }
 
@@ -200,7 +202,7 @@ func appendToHistory(session *Session, userPrompt, assistantText string) {
 // NewRuntime creates a new agent runtime.
 func NewRuntime(cfg Config) *Runtime {
 	if cfg.DefaultMaxIterations <= 0 {
-		cfg.DefaultMaxIterations = 10
+		cfg.DefaultMaxIterations = 20
 	}
 	if cfg.DefaultTimeout <= 0 {
 		cfg.DefaultTimeout = 30 * time.Minute
@@ -273,6 +275,7 @@ func (r *Runtime) Spawn(ctx context.Context, cfg types.AgentConfig) (*Session, e
 		ToolCalls: []types.ToolCall{},
 		Children:  []string{},
 		cancel:    cancel,
+		done:      make(chan struct{}),
 	}
 
 	// Store session (atomic with limit check to avoid TOCTOU race)
@@ -374,6 +377,7 @@ func (r *Runtime) createEngine(cfg types.AgentConfig, sessionID string) (*engine
 		MaxIterations:    cfg.MaxIterations,
 		MaxContextTokens: maxContextTokens,
 		Timeout:          cfg.Timeout,
+		SynthesisReserve: 2,
 		HookDispatcher:   r.config.HookDispatcher,
 		ActionExecutor:   r.config.ActionExecutor,
 	}
@@ -428,6 +432,8 @@ func (r *Runtime) createToolExecutor(cfg types.AgentConfig, sessionID string) (e
 		mailboxStore:    r.config.MailboxStore,
 		boardStore:      r.config.BoardStore,
 		toolDefs:        toolDefs,
+		llmProvider:     cfg.LLMProvider,
+		llmModel:        cfg.LLMModel,
 	}
 
 	// Overseer agents get runtime access for agent management
@@ -453,6 +459,8 @@ type agentToolExecutor struct {
 	mailboxStore    MailboxStore
 	boardStore      BoardStore
 	toolDefs        []engine.ToolDef
+	llmProvider     string // Agent's configured LLM provider
+	llmModel        string // Agent's configured LLM model
 	// runtime is set for overseer agents to enable agent management
 	runtime *Runtime
 }
@@ -508,6 +516,12 @@ func (e *agentToolExecutor) Execute(ctx context.Context, name string, args json.
 		return e.executeSmartSearch(ctx, argsMap)
 	case "context_grep":
 		return e.executeContextGrep(ctx, argsMap)
+	case "code_symbols":
+		return e.executeCodeSymbols(ctx, argsMap)
+	case "memory_query":
+		return e.executeMemoryQuery(ctx, argsMap)
+	case "session_recall":
+		return e.executeSessionRecall(ctx, argsMap)
 	case "repo_index_search":
 		return e.executeRepoIndexSearch(ctx, argsMap)
 	case "repo_index_expand":
@@ -516,6 +530,8 @@ func (e *agentToolExecutor) Execute(ctx context.Context, name string, args json.
 		return e.executeRepoIndexOpen(ctx, argsMap)
 	case "repo_index_dag_grep":
 		return e.executeRepoIndexDagGrep(ctx, argsMap)
+	case "context_filter":
+		return e.executeContextFilter(ctx, argsMap)
 	// Overseer agent management tools
 	case "agent_spawn":
 		return e.executeAgentSpawn(ctx, argsMap)
@@ -1180,16 +1196,68 @@ func (e *agentToolExecutor) executeSmartSearch(ctx context.Context, args map[str
 		return "", fmt.Errorf("query is required")
 	}
 
-	limit := 10
-	if l, ok := args["limit"].(float64); ok && l > 0 {
-		limit = int(l)
+	inputMap := map[string]any{
+		"question": query,
+	}
+	maxSnippets := intArg(args, 0, "max_snippets", "limit")
+	if maxSnippets > 0 {
+		inputMap["limits"] = map[string]any{"max_snippets": maxSnippets}
+	}
+	inputBytes, err := json.Marshal(inputMap)
+	if err != nil {
+		return "", fmt.Errorf("marshal smart_search input: %w", err)
 	}
 
-	input := fmt.Sprintf(`{"question": %q, "limit": %d}`, query, limit)
-	cmd := exec.CommandContext(ctx, "agentctl", "run", "code/smart_search", "--input", input)
+	cmd := exec.CommandContext(ctx, "agentctl", "run", "code/smart_search", "--input", string(inputBytes))
 	cmd.Dir = e.workspaceRoot
 
 	return commandOutput(cmd, "smart_search")
+}
+
+// executeContextFilter calls context/filter skill for LLM-powered chunk selection
+func (e *agentToolExecutor) executeContextFilter(ctx context.Context, args map[string]any) (string, error) {
+	prompt, _ := args["prompt"].(string)
+	if prompt == "" {
+		return "", fmt.Errorf("prompt is required")
+	}
+
+	inputMap := map[string]any{
+		"prompt": prompt,
+	}
+
+	// Use agent's configured LLM provider, falling back to openrouter
+	llmCfg := map[string]any{}
+	if e.llmProvider != "" {
+		llmCfg["provider"] = e.llmProvider
+	} else {
+		llmCfg["provider"] = "openrouter"
+	}
+	if e.llmModel != "" {
+		llmCfg["model"] = e.llmModel
+	}
+	inputMap["llm"] = llmCfg
+
+	// Pass source through (text or chunks)
+	if source, ok := args["source"].(map[string]any); ok {
+		inputMap["source"] = source
+	} else {
+		return "", fmt.Errorf("source is required (object with text or chunks)")
+	}
+
+	// Pass budget through if provided
+	if budget, ok := args["budget"].(map[string]any); ok {
+		inputMap["budget"] = budget
+	}
+
+	inputBytes, err := json.Marshal(inputMap)
+	if err != nil {
+		return "", fmt.Errorf("marshal context_filter input: %w", err)
+	}
+
+	cmd := exec.CommandContext(ctx, "agentctl", "run", "context/filter", "--input", string(inputBytes))
+	cmd.Dir = e.workspaceRoot
+
+	return commandOutput(cmd, "context_filter")
 }
 
 // executeContextGrep calls code/context_grep for pattern search with full function bodies
@@ -1209,6 +1277,26 @@ func (e *agentToolExecutor) executeContextGrep(ctx context.Context, args map[str
 	cmd.Dir = e.workspaceRoot
 
 	return commandOutput(cmd, "context_grep")
+}
+
+func (e *agentToolExecutor) executeCodeSymbols(ctx context.Context, args map[string]any) (string, error) {
+	path, _ := args["path"].(string)
+	if path == "" {
+		path = "."
+	}
+
+	inputMap := map[string]any{
+		"path":         path,
+		"include_docs": true,
+	}
+	if kind, ok := args["kind"].(string); ok && kind != "" {
+		inputMap["symbol_type"] = kind
+	}
+
+	inputBytes, _ := json.Marshal(inputMap)
+	cmd := exec.CommandContext(ctx, "agentctl", "run", "code/symbols", "--input", string(inputBytes))
+	cmd.Dir = e.workspaceRoot
+	return commandOutput(cmd, "code_symbols")
 }
 
 func (e *agentToolExecutor) executeRepoIndexSearch(ctx context.Context, args map[string]any) (string, error) {
@@ -1323,6 +1411,47 @@ func (e *agentToolExecutor) executeSessionTimeline(ctx context.Context, args map
 	return commandOutput(cmd, "session_timeline")
 }
 
+// executeMemoryQuery calls memory/query skill for gotchas, decisions, learnings
+func (e *agentToolExecutor) executeMemoryQuery(ctx context.Context, args map[string]any) (string, error) {
+	query, _ := args["query"].(string)
+	if query == "" {
+		return "", fmt.Errorf("query is required")
+	}
+	limit := intArg(args, 10, "limit")
+	types, _ := args["types"].(string)
+
+	inputMap := map[string]any{
+		"query":     query,
+		"workspace": e.workspaceRoot,
+		"limit":     limit,
+	}
+	if types != "" {
+		inputMap["types"] = types
+	}
+	inputBytes, err := json.Marshal(inputMap)
+	if err != nil {
+		return "", fmt.Errorf("marshal memory_query input: %w", err)
+	}
+
+	cmd := exec.CommandContext(ctx, "agentctl", "run", "memory/query", "--input", string(inputBytes))
+	cmd.Dir = e.workspaceRoot
+	return commandOutput(cmd, "memory_query")
+}
+
+// executeSessionRecall calls code/semantic_search with sessions scope
+func (e *agentToolExecutor) executeSessionRecall(ctx context.Context, args map[string]any) (string, error) {
+	query, _ := args["query"].(string)
+	if query == "" {
+		return "", fmt.Errorf("query is required")
+	}
+	limit := intArg(args, 5, "limit")
+
+	input := fmt.Sprintf(`{"query": %q, "scope": ["sessions"], "limit": %d}`, query, limit)
+	cmd := exec.CommandContext(ctx, "agentctl", "run", "code/semantic_search", "--input", input)
+	cmd.Dir = e.workspaceRoot
+	return commandOutput(cmd, "session_recall")
+}
+
 func commandOutput(cmd *exec.Cmd, label string) (string, error) {
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
@@ -1347,28 +1476,39 @@ func commandOutput(cmd *exec.Cmd, label string) (string, error) {
 // buildToolDefsForRole returns tool definitions appropriate for the agent role.
 // Tool names use underscores for Anthropic API compatibility (pattern: ^[a-zA-Z0-9_-]{1,128}$).
 func buildToolDefsForRole(role types.AgentRole, hasMailbox, hasBoard bool, allowlist []string) []engine.ToolDef {
-	// Base tools available to all agents
+	// think is available to all agents
 	tools := []engine.ToolDef{
-		{
-			Name:        "fs_read_file",
-			Description: "Read the contents of a file at the given path",
-			Parameters:  json.RawMessage(`{"type":"object","properties":{"path":{"type":"string","description":"File path to read"}},"required":["path"]}`),
-		},
-		{
-			Name:        "fs_list_dir",
-			Description: "List files and directories in a directory",
-			Parameters:  json.RawMessage(`{"type":"object","properties":{"path":{"type":"string","description":"Directory path to list"}}}`),
-		},
-		{
-			Name:        "code_search",
-			Description: "Search for patterns in the codebase using regex",
-			Parameters:  json.RawMessage(`{"type":"object","properties":{"pattern":{"type":"string","description":"Regex pattern to search for"}},"required":["pattern"]}`),
-		},
 		{
 			Name:        "think",
 			Description: "Record your reasoning or analysis without taking action",
 			Parameters:  json.RawMessage(`{"type":"object","properties":{"thought":{"type":"string","description":"Your reasoning or analysis"}},"required":["thought"]}`),
 		},
+	}
+
+	// Scout roles only get their specialized tools — no base file tools
+	isScout := role == types.RoleSemanticScout || role == types.RoleDAGScout || role == types.RoleSymbolScout
+	if !isScout {
+		tools = append(tools,
+			engine.ToolDef{
+				Name:        "fs_read_file",
+				Description: "Read the contents of a file at the given path",
+				Parameters:  json.RawMessage(`{"type":"object","properties":{"path":{"type":"string","description":"File path to read"}},"required":["path"]}`),
+			},
+			engine.ToolDef{
+				Name:        "code_search",
+				Description: "Search for patterns in the codebase using regex",
+				Parameters:  json.RawMessage(`{"type":"object","properties":{"pattern":{"type":"string","description":"Regex pattern to search for"}},"required":["pattern"]}`),
+			},
+		)
+	}
+
+	// fs_list_dir for roles that benefit from directory browsing (not researcher or scouts — wastes iterations)
+	if role != types.RoleResearcher && !isScout {
+		tools = append(tools, engine.ToolDef{
+			Name:        "fs_list_dir",
+			Description: "List files and directories in a directory",
+			Parameters:  json.RawMessage(`{"type":"object","properties":{"path":{"type":"string","description":"Directory path to list"}}}`),
+		})
 	}
 
 	// Add role-specific tools
@@ -1395,7 +1535,7 @@ func buildToolDefsForRole(role types.AgentRole, hasMailbox, hasBoard bool, allow
 				Description: "All-in-one search: finds candidate files AND extracts relevant code snippets. Best for getting actual code context quickly.",
 				Parameters: json.RawMessage(`{"type":"object","properties":{
 					"question":{"type":"string","description":"Natural language query describing what code to find"},
-					"limit":{"type":"integer","description":"Maximum snippets to return (default 10)"}
+					"max_snippets":{"type":"integer","description":"Maximum snippets to return (default 20)"}
 				},"required":["question"]}`),
 			},
 			engine.ToolDef{
@@ -1405,6 +1545,14 @@ func buildToolDefsForRole(role types.AgentRole, hasMailbox, hasBoard bool, allow
 					"pattern":{"type":"string","description":"Regex pattern to search for"},
 					"path":{"type":"string","description":"Path to search in (default: workspace root)"}
 				},"required":["pattern"]}`),
+			},
+			engine.ToolDef{
+				Name:        "code_symbols",
+				Description: "Extract function/type/method signatures from a file with line numbers. Use this to see what's in a file before reading specific sections.",
+				Parameters: json.RawMessage(`{"type":"object","properties":{
+					"path":{"type":"string","description":"File path to extract symbols from"},
+					"kind":{"type":"string","description":"Filter by kind: function, method, type, interface, struct, const, var (default: all)"}
+				},"required":["path"]}`),
 			},
 			engine.ToolDef{
 				Name:        "repo_index_search",
@@ -1439,6 +1587,128 @@ func buildToolDefsForRole(role types.AgentRole, hasMailbox, hasBoard bool, allow
 					"render":{"type":"string","enum":["none","tree","mermaid"]}
 				},"required":["query"]}`),
 			},
+			engine.ToolDef{
+				Name:        "memory_query",
+				Description: "Search stored memories (gotchas, decisions, learnings) for relevant context about the codebase.",
+				Parameters: json.RawMessage(`{"type":"object","properties":{
+					"query":{"type":"string","description":"What to search for"},
+					"types":{"type":"string","description":"Filter: gotcha,decision,learning,pattern (default: all)"},
+					"limit":{"type":"integer","description":"Max results (default 10)"}
+				},"required":["query"]}`),
+			},
+			engine.ToolDef{
+				Name:        "session_recall",
+				Description: "Search past agent sessions for relevant context, summaries, and findings.",
+				Parameters: json.RawMessage(`{"type":"object","properties":{
+					"query":{"type":"string","description":"Topic to search past sessions for"},
+					"limit":{"type":"integer","description":"Max results (default 5)"}
+				},"required":["query"]}`),
+			},
+			engine.ToolDef{
+				Name:        "session_timeline",
+				Description: "Get past session learnings as a timeline. Shows what work has been done before.",
+				Parameters: json.RawMessage(`{"type":"object","properties":{
+					"query":{"type":"string","description":"Topic to search past sessions for"},
+					"limit":{"type":"integer","description":"Max sessions (default 5)"}
+				},"required":["query"]}`),
+			},
+			engine.ToolDef{
+				Name:        "context_filter",
+				Description: "LLM-powered context filtering: given text chunks and a question, uses an LLM to select the most relevant chunks. Use when you have large text output from tools and need to extract the most relevant parts for your report.",
+				Parameters: json.RawMessage(`{"type":"object","properties":{
+					"prompt":{"type":"string","description":"What context to select (e.g., 'Find code related to session spawning')"},
+					"source":{"type":"object","properties":{"text":{"type":"string","description":"Raw text to filter"},"chunks":{"type":"array","items":{"type":"object","properties":{"id":{"type":"string"},"text":{"type":"string"}}},"description":"Pre-chunked text segments"}},"description":"Text or chunks to filter"},
+					"budget":{"type":"object","properties":{"target_tokens":{"type":"integer","description":"Approximate token budget for selected chunks (default 2000)"},"max_chunks":{"type":"integer","description":"Max chunks to return (default 16)"}},"description":"Size constraints"}
+				},"required":["prompt","source"]}`),
+			},
+		)
+	case types.RoleSemanticScout:
+		tools = append(tools,
+			engine.ToolDef{
+				Name:        "context_search",
+				Description: "Search codebase for relevant files and symbols. Returns a tree view of matches with file paths and sizes.",
+				Parameters: json.RawMessage(`{"type":"object","properties":{
+					"query":{"type":"string","description":"Natural language query describing what to find (e.g., 'hook dispatcher implementation')"},
+					"limit":{"type":"integer","description":"Maximum results to return (default 20)"}
+				},"required":["query"]}`),
+			},
+			engine.ToolDef{
+				Name:        "smart_search",
+				Description: "All-in-one search: finds candidate files AND extracts relevant code snippets. Best for getting actual code context quickly.",
+				Parameters: json.RawMessage(`{"type":"object","properties":{
+					"question":{"type":"string","description":"Natural language query describing what code to find"},
+					"max_snippets":{"type":"integer","description":"Maximum snippets to return (default 20)"}
+				},"required":["question"]}`),
+			},
+			engine.ToolDef{
+				Name:        "memory_query",
+				Description: "Search stored memories (gotchas, decisions, learnings) for relevant context about the codebase.",
+				Parameters: json.RawMessage(`{"type":"object","properties":{
+					"query":{"type":"string","description":"What to search for"},
+					"types":{"type":"string","description":"Filter: gotcha,decision,learning,pattern (default: all)"},
+					"limit":{"type":"integer","description":"Max results (default 10)"}
+				},"required":["query"]}`),
+			},
+		)
+	case types.RoleDAGScout:
+		tools = append(tools,
+			engine.ToolDef{
+				Name:        "repo_index_search",
+				Description: "Search the repo index for nodes that match a text query.",
+				Parameters:  json.RawMessage(`{"type":"object","properties":{"query":{"type":"string","description":"FTS query string"},"limit":{"type":"integer","description":"Maximum results","default":20}},"required":["query"]}`),
+			},
+			engine.ToolDef{
+				Name:        "repo_index_expand",
+				Description: "Expand the repo index graph from seed node IDs.",
+				Parameters:  json.RawMessage(`{"type":"object","properties":{"seeds":{"type":"array","items":{"type":"string"},"description":"Seed node IDs"},"edge_types":{"type":"array","items":{"type":"string"},"description":"Edge types to traverse"},"direction":{"type":"string","enum":["out","in"],"description":"Traversal direction"},"depth":{"type":"integer","description":"Traversal depth","default":1},"budget":{"type":"integer","description":"Max nodes to return","default":50},"per_node_cap":{"type":"integer","description":"Max edges per node per hop","default":50}},"required":["seeds"]}`),
+			},
+			engine.ToolDef{
+				Name:        "repo_index_open",
+				Description: "Open a repo index node by ID.",
+				Parameters:  json.RawMessage(`{"type":"object","properties":{"id":{"type":"string","description":"Node ID"}},"required":["id"]}`),
+			},
+			engine.ToolDef{
+				Name:        "repo_index_dag_grep",
+				Description: "Search and expand the repo index into a compact explanation subgraph.",
+				Parameters: json.RawMessage(`{"type":"object","properties":{
+					"query":{"type":"string","description":"Search query"},
+					"mode":{"type":"string","enum":["fts","semantic","hybrid"]},
+					"k":{"type":"integer","description":"Number of seed nodes (default 10)"},
+					"node_kinds":{"type":"array","items":{"type":"string","enum":["symbol","file","package","concept"]}},
+					"edge_sets":{"type":"array","items":{"type":"string","enum":["structural","doc","all"]}},
+					"edge_types":{"type":"array","items":{"type":"string"}},
+					"direction":{"type":"string","enum":["out","in"]},
+					"depth":{"type":"integer","description":"Traversal depth"},
+					"budget":{"type":"integer","description":"Max nodes to return"},
+					"per_node_cap":{"type":"integer","description":"Max edges per node"},
+					"include_anchors":{"type":"boolean","description":"Include file/package anchors"},
+					"render":{"type":"string","enum":["none","tree","mermaid"]}
+				},"required":["query"]}`),
+			},
+		)
+	case types.RoleSymbolScout:
+		tools = append(tools,
+			engine.ToolDef{
+				Name:        "code_symbols",
+				Description: "Extract function/type/method signatures from a file with line numbers. Use this to see what's in a file before reading specific sections.",
+				Parameters: json.RawMessage(`{"type":"object","properties":{
+					"path":{"type":"string","description":"File path to extract symbols from"},
+					"kind":{"type":"string","description":"Filter by kind: function, method, type, interface, struct, const, var (default: all)"}
+				},"required":["path"]}`),
+			},
+			engine.ToolDef{
+				Name:        "context_grep",
+				Description: "Search with regex pattern, returns full function/block bodies (not just matching lines). Good for finding specific patterns with surrounding context.",
+				Parameters: json.RawMessage(`{"type":"object","properties":{
+					"pattern":{"type":"string","description":"Regex pattern to search for"},
+					"path":{"type":"string","description":"Path to search in (default: workspace root)"}
+				},"required":["pattern"]}`),
+			},
+			engine.ToolDef{
+				Name:        "code_search",
+				Description: "Search for patterns in the codebase using regex",
+				Parameters:  json.RawMessage(`{"type":"object","properties":{"pattern":{"type":"string","description":"Regex pattern to search for"}},"required":["pattern"]}`),
+			},
 		)
 	case types.RoleOverseer:
 		// Overseer gets context gathering tools FIRST (for spawn prep)
@@ -1456,7 +1726,7 @@ func buildToolDefsForRole(role types.AgentRole, hasMailbox, hasBoard bool, allow
 				Description: "All-in-one search: finds candidate files AND extracts relevant code snippets. Best for getting actual code context quickly.",
 				Parameters: json.RawMessage(`{"type":"object","properties":{
 					"question":{"type":"string","description":"Natural language query describing what code to find"},
-					"limit":{"type":"integer","description":"Maximum snippets to return (default 10)"}
+					"max_snippets":{"type":"integer","description":"Maximum snippets to return (default 20)"}
 				},"required":["question"]}`),
 			},
 			engine.ToolDef{
@@ -1604,6 +1874,12 @@ func (r *Runtime) runSession(ctx context.Context, session *Session) {
 	sessionStart := time.Now()
 
 	defer func() {
+		if session.done != nil {
+			close(session.done)
+		}
+	}()
+
+	defer func() {
 		if rec := recover(); rec != nil {
 			session.mu.Lock()
 			session.Status = types.StatusError
@@ -1645,6 +1921,8 @@ func (r *Runtime) runSession(ctx context.Context, session *Session) {
 	session.SystemPrompt = agentprompt.InstructionRuntime(session.Config.Role)
 	taskPrompt := buildTaskPrompt(session.Config)
 	var result string
+	var bestResult string // Track most substantive response for summary
+	var engineRetries int
 
 	for {
 		// Build input with conversation history
@@ -1657,6 +1935,48 @@ func (r *Runtime) runSession(ctx context.Context, session *Session) {
 		// Run the engine
 		output, err := session.Engine.Run(ctx, engineInput)
 		if err != nil {
+			// Context errors are not retryable
+			if ctx.Err() != nil {
+				session.mu.Lock()
+				now := time.Now()
+				session.EndedAt = &now
+				if errors.Is(ctx.Err(), context.Canceled) {
+					session.Status = types.StatusCanceled
+					session.Error = "session canceled"
+				} else {
+					session.Status = types.StatusError
+					session.Error = err.Error()
+				}
+				iterations := session.Iterations
+				session.mu.Unlock()
+				r.persistSessionStatus(session)
+				observability.Emit(ctx, observability.NewEvent(observability.OpAgentComplete).
+					WithComponent(observability.ComponentAgent).
+					WithSession(session.ID, session.Config.ActorID).
+					WithWorkspace(r.config.WorkspaceRoot).
+					WithData("role", string(session.Config.Role)).
+					WithData("iterations", iterations).
+					Error(err, time.Since(sessionStart)))
+				return
+			}
+
+			// Retry once on transient errors
+			engineRetries++
+			if engineRetries <= 1 {
+				observability.Emit(ctx, observability.NewEvent(observability.OpAgentIteration).
+					WithComponent(observability.ComponentAgent).
+					WithSession(session.ID, session.Config.ActorID).
+					WithWorkspace(r.config.WorkspaceRoot).
+					WithData("role", string(session.Config.Role)).
+					WithData("retry", engineRetries).
+					WithData("error", err.Error()).
+					Success(0))
+
+				taskPrompt = fmt.Sprintf("The previous engine call failed with error: %s\n\nPlease adjust your approach and try again. If a tool failed, try a different tool or different parameters.", err.Error())
+				continue
+			}
+
+			// Second failure: die
 			session.mu.Lock()
 			now := time.Now()
 			session.EndedAt = &now
@@ -1666,19 +1986,22 @@ func (r *Runtime) runSession(ctx context.Context, session *Session) {
 			session.mu.Unlock()
 			r.persistSessionStatus(session)
 
-			// Emit error completion event
 			observability.Emit(ctx, observability.NewEvent(observability.OpAgentComplete).
 				WithComponent(observability.ComponentAgent).
 				WithSession(session.ID, session.Config.ActorID).
 				WithWorkspace(r.config.WorkspaceRoot).
 				WithData("role", string(session.Config.Role)).
 				WithData("iterations", iterations).
+				WithData("retries_exhausted", true).
 				Error(err, time.Since(sessionStart)))
 			return
 		}
 
 		// Extract result from output
 		result = output.AssistantText
+		if isSubstantiveResult(result, bestResult) {
+			bestResult = result
+		}
 
 		// Accumulate conversation history for cross-turn context
 		appendToHistory(session, taskPrompt, result)
@@ -1718,20 +2041,40 @@ func (r *Runtime) runSession(ctx context.Context, session *Session) {
 
 		// Check for errors in output
 		if output.StopReason == engine.StopReasonError || output.Error != "" {
+			// Context errors are not retryable
+			if ctx.Err() != nil {
+				session.mu.Lock()
+				now := time.Now()
+				session.EndedAt = &now
+				if errors.Is(ctx.Err(), context.Canceled) {
+					session.Status = types.StatusCanceled
+					session.Error = "session canceled"
+				} else {
+					session.Status = types.StatusError
+					session.Error = "session timeout"
+				}
+				session.mu.Unlock()
+				r.persistSessionStatus(session)
+				return
+			}
+
+			// Retry once on output errors
+			engineRetries++
+			if engineRetries <= 1 {
+				errMsg := output.Error
+				if errMsg == "" {
+					errMsg = "engine returned error stop reason"
+				}
+				taskPrompt = fmt.Sprintf("The previous attempt returned an error: %s\n\nPlease adjust your approach and try again.", errMsg)
+				continue
+			}
+
+			// Second failure: die
 			session.mu.Lock()
 			now := time.Now()
 			session.EndedAt = &now
-
-			if ctx.Err() == context.Canceled {
-				session.Status = types.StatusCanceled
-				session.Error = "session canceled"
-			} else if ctx.Err() == context.DeadlineExceeded {
-				session.Status = types.StatusError
-				session.Error = "session timeout"
-			} else {
-				session.Status = types.StatusError
-				session.Error = output.Error
-			}
+			session.Status = types.StatusError
+			session.Error = output.Error
 			session.mu.Unlock()
 			r.persistSessionStatus(session)
 			return
@@ -1762,11 +2105,11 @@ func (r *Runtime) runSession(ctx context.Context, session *Session) {
 	switch session.Config.ExecMode {
 	case agent.ModeAutonomous:
 		// Run autonomous continuation loop
-		result = r.runAutonomousContinuation(ctx, session, result)
+		result = r.runAutonomousContinuation(ctx, session, result, &bestResult)
 
 	case agent.ModeAutonomousReactive:
 		// Run autonomous continuation first, then stay alive in reactive mode.
-		result = r.runAutonomousContinuation(ctx, session, result)
+		result = r.runAutonomousContinuation(ctx, session, result, &bestResult)
 
 		session.mu.Lock()
 		session.Status = types.StatusRunning
@@ -1816,7 +2159,11 @@ func (r *Runtime) runSession(ctx context.Context, session *Session) {
 	} else {
 		session.Status = types.StatusOK
 	}
-	session.Summary = result
+	if bestResult != "" {
+		session.Summary = bestResult
+	} else {
+		session.Summary = result
+	}
 	totalIterations := session.Iterations
 	totalToolCalls := len(session.ToolCalls)
 	session.mu.Unlock()
@@ -1967,6 +2314,7 @@ func (r *Runtime) persistSessionStatus(session *Session) {
 	sessionStatus := session.Status
 	sessionEndedAt := session.EndedAt
 	sessionSummary := session.Summary
+	sessionError := session.Error
 	session.mu.RUnlock()
 
 	// Map agent status to storage status
@@ -1984,13 +2332,20 @@ func (r *Runtime) persistSessionStatus(session *Session) {
 		status = storage.SessionStatusError
 	}
 
-	// Update status
+	// Update status (with error message if present)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	if err := r.config.SessionStore.SetStatus(ctx, sessionID, status); err != nil {
-		_ = err // TODO: Add logging
-		return
+	if sessionError != "" {
+		if err := r.config.SessionStore.SetStatusWithError(ctx, sessionID, status, sessionError); err != nil {
+			_ = err // best-effort
+			return
+		}
+	} else {
+		if err := r.config.SessionStore.SetStatus(ctx, sessionID, status); err != nil {
+			_ = err // best-effort
+			return
+		}
 	}
 
 	// If session has ended, also update summary
@@ -2018,7 +2373,7 @@ func (r *Runtime) RecoverSessions(ctx context.Context) error {
 
 	for _, s := range staleSessions {
 		// Mark as error with interruption message
-		if err := r.config.SessionStore.SetStatus(ctx, s.ID, storage.SessionStatusError); err != nil {
+		if err := r.config.SessionStore.SetStatusWithError(ctx, s.ID, storage.SessionStatusError, "session interrupted by daemon restart"); err != nil {
 			continue // Best effort
 		}
 		_ = r.config.SessionStore.UpdateSummary(ctx, s.ID, "Session interrupted by daemon restart",
@@ -2110,6 +2465,11 @@ func (r *Runtime) Kill(sessionID string) error {
 	}
 
 	return nil
+}
+
+// Done returns a channel that is closed when the session completes.
+func (s *Session) Done() <-chan struct{} {
+	return s.done
 }
 
 // GetSession returns the session state.
@@ -2380,6 +2740,19 @@ func containsNoWork(result string) bool {
 	return trimmed == "NO_WORK_NEEDED" || trimmed == "No work needed"
 }
 
+// isSubstantiveResult returns true if candidate is a more substantive response than current.
+// Filters out control signals (TASK_COMPLETE, etc.) and picks the longer meaningful response.
+func isSubstantiveResult(candidate, current string) bool {
+	candidate = strings.TrimSpace(candidate)
+	if candidate == "" {
+		return false
+	}
+	if containsTaskComplete(candidate) || containsNoWork(candidate) {
+		return false
+	}
+	return len(candidate) > len(current)
+}
+
 // runAutonomousContinuation allows the agent to continue working across multiple turns
 // without needing a new external message. Used for autonomous mode.
 //
@@ -2391,7 +2764,7 @@ func containsNoWork(result string) bool {
 // - Observability: emits agent.autonomous_turn and iteration events
 // - Related: containsTaskComplete, Runtime.runSession
 // - Keywords: autonomous_turn, max_auto_turns, continuation
-func (r *Runtime) runAutonomousContinuation(ctx context.Context, session *Session, lastResult string) string {
+func (r *Runtime) runAutonomousContinuation(ctx context.Context, session *Session, lastResult string, bestResult *string) string {
 	maxTurns := session.Config.MaxAutoTurns
 	if maxTurns <= 1 {
 		return lastResult // Autonomous continuation disabled
@@ -2420,7 +2793,7 @@ func (r *Runtime) runAutonomousContinuation(ctx context.Context, session *Sessio
 			break
 		}
 
-		continuePrompt := "Continue working on the previous task if there is more to do. If the task is complete, respond with 'TASK_COMPLETE'. Do not repeat already completed work."
+		continuePrompt := r.continuationPrompt(session)
 
 		// Persist user turn before running engine
 		_ = r.saveTurn(ctx, session.ID, session.nextTurnIndex(), "user", continuePrompt, nil, 0)
@@ -2433,6 +2806,9 @@ func (r *Runtime) runAutonomousContinuation(ctx context.Context, session *Sessio
 		}
 
 		result = output.AssistantText
+		if bestResult != nil && isSubstantiveResult(result, *bestResult) {
+			*bestResult = result
+		}
 
 		// Accumulate conversation history
 		appendToHistory(session, continuePrompt, result)
@@ -2476,6 +2852,93 @@ func (r *Runtime) runAutonomousContinuation(ctx context.Context, session *Sessio
 	}
 
 	return result
+}
+
+// sessionResearchSummary builds a summary of research done across all turns
+// from the session's accumulated tool calls (types.ToolCall format).
+func sessionResearchSummary(toolCalls []types.ToolCall) string {
+	var files, searches []string
+	seen := make(map[string]bool)
+	for _, tc := range toolCalls {
+		switch tc.ToolName {
+		case "fs_read_file":
+			if p, _ := tc.Args["path"].(string); p != "" && !seen["f:"+p] {
+				seen["f:"+p] = true
+				files = append(files, filepath.Base(p))
+			}
+		case "code_symbols":
+			if p, _ := tc.Args["path"].(string); p != "" && !seen["s:"+p] {
+				seen["s:"+p] = true
+				files = append(files, filepath.Base(p)+" (symbols)")
+			}
+		case "context_filter":
+			if q, _ := tc.Args["prompt"].(string); q != "" {
+				searches = append(searches, `context_filter("`+q+`")`)
+			}
+		case "context_search":
+			if q, _ := tc.Args["query"].(string); q != "" {
+				searches = append(searches, tc.ToolName+`("`+q+`")`)
+			}
+		case "smart_search":
+			q, _ := tc.Args["question"].(string)
+			if q == "" {
+				q, _ = tc.Args["query"].(string)
+			}
+			if q != "" {
+				searches = append(searches, tc.ToolName+`("`+q+`")`)
+			}
+		case "code_search", "context_grep":
+			q, _ := tc.Args["pattern"].(string)
+			if q == "" {
+				q, _ = tc.Args["query"].(string)
+			}
+			if q != "" {
+				searches = append(searches, tc.ToolName+`("`+q+`")`)
+			}
+		case "repo_index_dag_grep":
+			if q, _ := tc.Args["query"].(string); q != "" {
+				searches = append(searches, `dag_grep("`+q+`")`)
+			}
+		}
+	}
+	var b strings.Builder
+	b.WriteString("Files read: ")
+	if len(files) > 0 {
+		b.WriteString(strings.Join(files, ", "))
+	} else {
+		b.WriteString("(none)")
+	}
+	b.WriteString("\nSearches: ")
+	if len(searches) > 0 {
+		b.WriteString(strings.Join(searches, ", "))
+	} else {
+		b.WriteString("(none)")
+	}
+	return b.String()
+}
+
+// continuationPrompt returns the prompt used for autonomous continuation turns.
+// For researcher agents, it pushes for deeper investigation instead of early completion,
+// and includes a summary of research done so far so the model knows what it already covered.
+func (r *Runtime) continuationPrompt(session *Session) string {
+	if session.Config.Role == types.RoleResearcher {
+		session.mu.RLock()
+		toolCalls := make([]types.ToolCall, len(session.ToolCalls))
+		copy(toolCalls, session.ToolCalls)
+		session.mu.RUnlock()
+
+		summary := sessionResearchSummary(toolCalls)
+
+		return "CONTINUATION TURN — if you have NOT yet produced a text report, write it NOW.\n\n" +
+			"Prior research this session:\n" + summary + "\n\n" +
+			"If you HAVE already produced a report, deepen it:\n" +
+			"1. Read files you referenced but haven't read (schemas, configs, tests)\n" +
+			"2. Find alternative code paths (code_search for callers you missed)\n" +
+			"3. Verify claims by reading actual source — never paraphrase from memory\n" +
+			"4. Append a '## Deepening' section with new findings and code snippets\n\n" +
+			"Respond with 'TASK_COMPLETE' only if your report is already comprehensive."
+	}
+	return "Continue working on the previous task if there is more to do. If the task is complete, respond with 'TASK_COMPLETE'. Do not repeat already completed work."
 }
 
 // runMessageLoop polls for mailbox messages and processes them.
@@ -2776,6 +3239,6 @@ If there is nothing to do, respond with 'NO_WORK_NEEDED'.`
 
 	// If work was started and autonomous continuation is enabled
 	if session.Config.MaxAutoTurns > 1 {
-		r.runAutonomousContinuation(ctx, session, output.AssistantText)
+		r.runAutonomousContinuation(ctx, session, output.AssistantText, nil)
 	}
 }

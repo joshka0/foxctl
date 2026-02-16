@@ -1,11 +1,18 @@
 package runtime
 
 import (
+	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/jkatigb/agentctl/internal/agent/types"
 	"github.com/jkatigb/agentctl/internal/agentprompt"
+	"github.com/jkatigb/agentctl/internal/engine"
 )
 
 func TestAgentInstruction_CoderRole(t *testing.T) {
@@ -225,5 +232,241 @@ func TestReviewerSignature_ToolCategories(t *testing.T) {
 		if !strings.Contains(instruction, cat) {
 			t.Errorf("Reviewer signature should have category section %q", cat)
 		}
+	}
+}
+
+// helper: returns tool names from buildToolDefsForRole.
+func toolNamesForRole(role types.AgentRole) []string {
+	defs := buildToolDefsForRole(role, false, false, nil)
+	names := make([]string, len(defs))
+	for i, d := range defs {
+		names[i] = d.Name
+	}
+	return names
+}
+
+func hasToolName(names []string, name string) bool {
+	for _, n := range names {
+		if n == name {
+			return true
+		}
+	}
+	return false
+}
+
+func TestBuildToolDefsForRole_SemanticScout(t *testing.T) {
+	names := toolNamesForRole(types.RoleSemanticScout)
+
+	// Must have
+	for _, want := range []string{"think", "context_search", "smart_search", "memory_query"} {
+		if !hasToolName(names, want) {
+			t.Errorf("semantic_scout should have %q, got %v", want, names)
+		}
+	}
+
+	// Must NOT have
+	for _, deny := range []string{"fs_read_file", "code_search", "fs_list_dir"} {
+		if hasToolName(names, deny) {
+			t.Errorf("semantic_scout should NOT have %q", deny)
+		}
+	}
+}
+
+func TestBuildToolDefsForRole_DAGScout(t *testing.T) {
+	names := toolNamesForRole(types.RoleDAGScout)
+
+	for _, want := range []string{"think", "repo_index_search", "repo_index_expand", "repo_index_open", "repo_index_dag_grep"} {
+		if !hasToolName(names, want) {
+			t.Errorf("dag_scout should have %q, got %v", want, names)
+		}
+	}
+
+	for _, deny := range []string{"fs_read_file", "code_search", "fs_list_dir"} {
+		if hasToolName(names, deny) {
+			t.Errorf("dag_scout should NOT have %q", deny)
+		}
+	}
+}
+
+func TestBuildToolDefsForRole_SymbolScout(t *testing.T) {
+	names := toolNamesForRole(types.RoleSymbolScout)
+
+	for _, want := range []string{"think", "code_symbols", "context_grep", "code_search"} {
+		if !hasToolName(names, want) {
+			t.Errorf("symbol_scout should have %q, got %v", want, names)
+		}
+	}
+
+	for _, deny := range []string{"fs_read_file", "fs_list_dir"} {
+		if hasToolName(names, deny) {
+			t.Errorf("symbol_scout should NOT have %q", deny)
+		}
+	}
+}
+
+func TestBuildToolDefsForRole_ResearcherUnchanged(t *testing.T) {
+	names := toolNamesForRole(types.RoleResearcher)
+
+	// Researcher must still have base tools + agentctl tools
+	for _, want := range []string{"fs_read_file", "code_search", "think", "context_search", "smart_search", "context_grep", "code_symbols", "repo_index_search"} {
+		if !hasToolName(names, want) {
+			t.Errorf("researcher should still have %q, got %v", want, names)
+		}
+	}
+}
+
+func TestBuildToolDefsForRole_CoderUnchanged(t *testing.T) {
+	names := toolNamesForRole(types.RoleCoder)
+
+	for _, want := range []string{"fs_read_file", "code_search", "think", "fs_write_file", "fs_list_dir"} {
+		if !hasToolName(names, want) {
+			t.Errorf("coder should still have %q, got %v", want, names)
+		}
+	}
+}
+
+// --- Engine retry tests ---
+
+// mockLLMResponse returns a valid OpenAI-compatible JSON response.
+func mockLLMResponse(content string) []byte {
+	resp := map[string]any{
+		"id": "test-resp",
+		"choices": []map[string]any{
+			{
+				"message":       map[string]string{"role": "assistant", "content": content},
+				"finish_reason": "stop",
+			},
+		},
+		"usage": map[string]int{"prompt_tokens": 10, "completion_tokens": 5},
+	}
+	b, _ := json.Marshal(resp)
+	return b
+}
+
+// newTestEngine creates an LLMChatEngine pointing at the given test server URL.
+func newTestEngine(t *testing.T, serverURL string) *engine.LLMChatEngine {
+	t.Helper()
+	eng, err := engine.NewLLMChatEngine(engine.LLMChatConfig{
+		APIKey:        "test-key",
+		BaseURL:       serverURL,
+		Model:         "test-model",
+		MaxIterations: 10,
+	})
+	if err != nil {
+		t.Fatalf("create engine: %v", err)
+	}
+	return eng
+}
+
+// newTestSession creates a minimal Session for retry testing.
+func newTestSession(eng *engine.LLMChatEngine) *Session {
+	return &Session{
+		ID: "test-session",
+		Config: types.AgentConfig{
+			Role:    types.RoleCoder,
+			Prompt:  "test prompt",
+			Timeout: 30 * time.Second,
+		},
+		Engine:    eng,
+		StartedAt: time.Now(),
+		ToolCalls: []types.ToolCall{},
+		Children:  []string{},
+		done:      make(chan struct{}),
+	}
+}
+
+func TestEngineRetryOnFirstError(t *testing.T) {
+	// Mock server: first call returns 500 (engine error), second call succeeds.
+	var callCount int64
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		n := atomic.AddInt64(&callCount, 1)
+		if n == 1 {
+			w.WriteHeader(http.StatusInternalServerError)
+			_, _ = w.Write([]byte("temporary failure"))
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(mockLLMResponse("Recovered successfully"))
+	}))
+	defer server.Close()
+
+	eng := newTestEngine(t, server.URL)
+	session := newTestSession(eng)
+
+	rt := &Runtime{
+		sessions: make(map[string]*Session),
+		config:   Config{DefaultMaxIterations: 10},
+	}
+
+	ctx := context.Background()
+	rt.runSession(ctx, session)
+
+	if session.Status != types.StatusOK {
+		t.Errorf("expected StatusOK after retry, got %s (error: %s)", session.Status, session.Error)
+	}
+	if atomic.LoadInt64(&callCount) < 2 {
+		t.Errorf("expected at least 2 LLM calls (1 failure + 1 success), got %d", atomic.LoadInt64(&callCount))
+	}
+}
+
+func TestEngineRetryExhausted(t *testing.T) {
+	// Mock server: always returns 500 — both attempts fail.
+	var callCount int64
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt64(&callCount, 1)
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte("persistent failure"))
+	}))
+	defer server.Close()
+
+	eng := newTestEngine(t, server.URL)
+	session := newTestSession(eng)
+
+	rt := &Runtime{
+		sessions: make(map[string]*Session),
+		config:   Config{DefaultMaxIterations: 10},
+	}
+
+	ctx := context.Background()
+	rt.runSession(ctx, session)
+
+	if session.Status != types.StatusError {
+		t.Errorf("expected StatusError after retries exhausted, got %s", session.Status)
+	}
+	if session.Error == "" {
+		t.Error("expected non-empty error message")
+	}
+	calls := atomic.LoadInt64(&callCount)
+	if calls < 2 {
+		t.Errorf("expected at least 2 LLM calls (original + 1 retry), got %d", calls)
+	}
+}
+
+func TestEngineRetrySkipsContextErrors(t *testing.T) {
+	// Mock server: returns 500, but context is canceled so no retry should happen.
+	var callCount int64
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt64(&callCount, 1)
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(mockLLMResponse("should not reach here"))
+	}))
+	defer server.Close()
+
+	eng := newTestEngine(t, server.URL)
+	session := newTestSession(eng)
+
+	rt := &Runtime{
+		sessions: make(map[string]*Session),
+		config:   Config{DefaultMaxIterations: 10},
+	}
+
+	// Cancel context before running — the engine should detect cancellation
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // Cancel immediately
+
+	rt.runSession(ctx, session)
+
+	if session.Status != types.StatusCanceled {
+		t.Errorf("expected StatusCanceled for context error, got %s (error: %s)", session.Status, session.Error)
 	}
 }

@@ -15,7 +15,7 @@
 #   AGENTCTL_BIN - Path to agentctl binary
 #   AGENTCTL_COMPLEXITY_THRESHOLD - Complexity threshold (default: 15)
 #   AGENTCTL_IMPACT_MAX_SYMBOLS - Max symbols to analyze (default: 3)
-#   AGENTCTL_IMPACT_TIMEOUT - LSP timeout in seconds (default: 45)
+#   AGENTCTL_IMPACT_TIMEOUT - LSP timeout in seconds (default: 10)
 
 set -euo pipefail
 
@@ -32,7 +32,10 @@ AGENTCTL_BIN="${AGENTCTL_BIN:-agentctl}"
 COMPLEXITY_THRESHOLD="${AGENTCTL_COMPLEXITY_THRESHOLD:-15}"
 MAX_SYMBOLS="${AGENTCTL_IMPACT_MAX_SYMBOLS:-3}"
 MAX_REFS="${AGENTCTL_IMPACT_MAX_REFS:-5}"
-LSP_TIMEOUT="${AGENTCTL_IMPACT_TIMEOUT:-45}"
+LSP_TIMEOUT="${AGENTCTL_IMPACT_TIMEOUT:-10}"
+
+# Validate that input is valid JSON before passing to jq
+is_json() { echo "$1" | jq empty 2>/dev/null; }
 
 # Read hook input from stdin
 INPUT=$(cat)
@@ -80,7 +83,7 @@ if [[ "${AGENTCTL_COMPLEXITY_DISABLED:-}" != "1" ]]; then
 
   result=$("$AGENTCTL_BIN" run --daemon code/complexity --input "$input_json" 2>/dev/null) || true
 
-  if [[ -n "$result" ]]; then
+  if [[ -n "$result" ]] && is_json "$result"; then
     results=$(echo "$result" | jq -r '.data.results // []')
     high_risk=$(echo "$results" | jq '[.[] | select(.risk_level == "high" or .risk_level == "medium")]')
     risk_count=$(echo "$high_risk" | jq 'length')
@@ -129,7 +132,7 @@ if [[ "${AGENTCTL_IMPACT_DISABLED:-}" != "1" ]]; then
 
     symbols_result=$("$AGENTCTL_BIN" run --daemon code/symbols --ephemeral --input "$input_json" 2>/dev/null) || true
 
-    if [[ -n "$symbols_result" ]]; then
+    if [[ -n "$symbols_result" ]] && is_json "$symbols_result"; then
       symbols=$(echo "$symbols_result" | jq -r '.data.preview // []')
       symbol_count=$(echo "$symbols" | jq 'length')
 
@@ -181,7 +184,7 @@ if [[ "${AGENTCTL_IMPACT_DISABLED:-}" != "1" ]]; then
 
           refs_result=$("$AGENTCTL_BIN" run --daemon "$lsp_skill" --ephemeral --input "$lsp_input" 2>/dev/null) || true
 
-          if [[ -n "$refs_result" ]]; then
+          if [[ -n "$refs_result" ]] && is_json "$refs_result"; then
             ref_count=$(echo "$refs_result" | jq -r --arg self "$abs_file_path" '
               [.data.locations // [] | .[] | select(.file != $self)] | length
             ')

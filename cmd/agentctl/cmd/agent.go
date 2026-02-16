@@ -24,6 +24,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/protocol"
 	"github.com/jkatigb/agentctl/internal/storage/agents"
 	"github.com/jkatigb/agentctl/internal/storage/mailbox"
+	"github.com/jkatigb/agentctl/internal/storage/sessions"
 	"github.com/oklog/ulid/v2"
 	"github.com/spf13/cobra"
 )
@@ -62,6 +63,14 @@ var agentInfoCmd = &cobra.Command{
 	Long:  "Retrieve detailed information about an agent",
 	Args:  cobra.ExactArgs(1),
 	RunE:  runAgentInfo,
+}
+
+var agentOutputCmd = &cobra.Command{
+	Use:   "output [agent-id]",
+	Short: "Get agent output",
+	Long:  "Retrieve the output/summary from an agent's most recent session",
+	Args:  cobra.ExactArgs(1),
+	RunE:  runAgentOutput,
 }
 
 var agentRenameCmd = &cobra.Command{
@@ -141,6 +150,7 @@ var (
 	spawnMaxContextTokens int
 	spawnMaxAutoTurns     int
 	spawnThinkInterval    int
+	spawnTimeout          string // Session timeout (e.g. "10m", "30m")
 	spawnDryRun           bool
 	spawnChat             bool // Convenience flag for chat/roleplay companions
 )
@@ -187,6 +197,7 @@ func init() {
 	agentCmd.AddCommand(agentListCmd)
 	agentCmd.AddCommand(agentKillCmd)
 	agentCmd.AddCommand(agentInfoCmd)
+	agentCmd.AddCommand(agentOutputCmd)
 	agentCmd.AddCommand(agentRenameCmd)
 	agentCmd.AddCommand(agentWatchCmd)
 	agentCmd.AddCommand(agentRunCmd)
@@ -217,6 +228,7 @@ func init() {
 	agentSpawnCmd.Flags().IntVar(&spawnMaxContextTokens, "max-context-tokens", 0, "Max context tokens before stopping (0=no limit)")
 	agentSpawnCmd.Flags().IntVar(&spawnMaxAutoTurns, "max-auto-turns", 1, "Max autonomous turns per session (only for autonomous/proactive modes)")
 	agentSpawnCmd.Flags().IntVar(&spawnThinkInterval, "think-interval", 60, "Seconds between proactive think cycles (only for proactive mode)")
+	agentSpawnCmd.Flags().StringVar(&spawnTimeout, "timeout", "", "Session timeout (e.g. 10m, 30m). Default: 30m")
 	agentSpawnCmd.Flags().BoolVar(&spawnDryRun, "dry-run", false, "Preview what would be spawned without creating the agent")
 	agentSpawnCmd.Flags().BoolVar(&spawnChat, "chat", false, "Convenience flag for chat/roleplay companions (sets role=companion, exec-mode=reactive, max-iterations=3)")
 
@@ -351,6 +363,7 @@ func runAgentSpawn(cmd *cobra.Command, _ []string) error {
 			MaxContextTokens: spawnMaxContextTokens,
 			ExecMode:         spawnExecMode,
 			MaxAutoTurns:     spawnMaxAutoTurns,
+			Timeout:          spawnTimeout,
 			LLMProvider:      spawnLLMProvider,
 			LLMModel:         spawnLLMModel,
 			LLMAPIKey:        llmAPIKey,
@@ -601,6 +614,59 @@ func runAgentInfo(cmd *cobra.Command, args []string) error {
 
 	// Write success envelope
 	return writeOK(cmd, "agent/info", a, "run", nil)
+}
+
+func runAgentOutput(cmd *cobra.Command, args []string) error {
+	ctx := cmd.Context()
+	cfg := config.MustFromContext(ctx)
+	agentRef := args[0]
+
+	// Resolve agent to get namespace
+	agentStore, err := agents.Open(ctx, cfg.Storage.Root)
+	if err != nil {
+		return writeErrorEnvelope(cmd, "agent/output", string(protocol.ErrorCodeERuntime), fmt.Sprintf("failed to open agent store: %v", err))
+	}
+	defer func() { errs.Ignore(agentStore.Close(), "close agent store") }()
+
+	a, err := agentStore.Resolve(ctx, agentRef)
+	if err != nil {
+		return writeErrorEnvelope(cmd, "agent/output", string(protocol.ErrorCodeENotFound), fmt.Sprintf("agent not found: %v", err))
+	}
+
+	// Open session store and find latest session for this agent by namespace
+	sessionStore, err := sessions.OpenFromConfig(ctx, cfg)
+	if err != nil {
+		return writeErrorEnvelope(cmd, "agent/output", string(protocol.ErrorCodeERuntime), fmt.Sprintf("failed to open session store: %v", err))
+	}
+	defer func() { errs.Ignore(sessionStore.Close(), "close session store") }()
+
+	sess, err := sessionStore.FindByAgentNamespace(ctx, a.Namespace)
+	if err != nil {
+		return writeErrorEnvelope(cmd, "agent/output", string(protocol.ErrorCodeERuntime), fmt.Sprintf("failed to find session: %v", err))
+	}
+	if sess == nil {
+		return writeErrorEnvelope(cmd, "agent/output", string(protocol.ErrorCodeENotFound), "no session found for agent")
+	}
+
+	type AgentOutput struct {
+		AgentID      string `json:"agent_id"`
+		AgentName    string `json:"agent_name"`
+		SessionID    string `json:"session_id"`
+		Status       string `json:"status"`
+		Summary      string `json:"summary"`
+		ErrorMessage string `json:"error_message,omitempty"`
+	}
+
+	result := AgentOutput{
+		AgentID:      a.ID,
+		AgentName:    a.Name,
+		SessionID:    sess.ID,
+		Status:       sess.Status,
+		Summary:      sess.Summary,
+		ErrorMessage: sess.ErrorMessage,
+	}
+
+	return writeOK(cmd, "agent/output", result, "run", nil)
 }
 
 func runAgentRename(cmd *cobra.Command, args []string) error {
