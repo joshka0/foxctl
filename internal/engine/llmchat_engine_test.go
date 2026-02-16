@@ -444,6 +444,9 @@ func TestLLMChatEngine_SynthesisReserve_EdgeCase(t *testing.T) {
 	if output.StopReason != StopReasonMaxIterations {
 		t.Errorf("expected max_iterations, got %s", output.StopReason)
 	}
+	if output.Error != "" {
+		t.Errorf("expected empty error for max_iterations stop, got %q", output.Error)
+	}
 }
 
 type handlerTransport struct {
@@ -519,6 +522,9 @@ func TestLLMChatEngine_Run_MaxIterations(t *testing.T) {
 
 	if output.StopReason != StopReasonMaxIterations {
 		t.Errorf("expected max_iterations, got %s", output.StopReason)
+	}
+	if output.Error != "" {
+		t.Errorf("expected empty error for max_iterations stop, got %q", output.Error)
 	}
 }
 
