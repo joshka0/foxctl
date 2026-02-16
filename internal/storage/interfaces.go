@@ -256,9 +256,10 @@ type Session struct {
 	UpdatedAt       time.Time `json:"updated_at"`
 	// Lineage fields for session tracking
 	ParentSessionID string `json:"parent_session_id,omitempty"`
-	AgentID         string `json:"agent_id,omitempty"`   // AI agent identifier (default: "agentctl")
-	AgentType       string `json:"agent_type,omitempty"` // Source system (claude, codex, opencode)
-	Status          string `json:"status,omitempty"`     // ok, error, canceled
+	AgentID         string `json:"agent_id,omitempty"`      // AI agent identifier (default: "agentctl")
+	AgentType       string `json:"agent_type,omitempty"`    // Source system (claude, codex, opencode)
+	Status          string `json:"status,omitempty"`        // ok, error, canceled
+	ErrorMessage    string `json:"error_message,omitempty"` // Error details when status=error
 	// Agent execution context
 	Prompt      string `json:"prompt,omitempty"`       // Original prompt/task for agent sessions
 	PromptHash  string `json:"prompt_hash,omitempty"`  // SHA256 hash for correlation with wide events
@@ -376,6 +377,7 @@ type SessionStore interface {
 	// Lineage operations
 	GetActive(ctx context.Context, workspace, agentID string) (*Session, error)
 	SetStatus(ctx context.Context, id, status string) error
+	SetStatusWithError(ctx context.Context, id, status, errorMessage string) error
 	FindLastSession(ctx context.Context, workspace, agentID string, statuses []string) (*Session, error)
 
 	// Pending restore operations (for post-compact context injection)

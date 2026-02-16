@@ -25,6 +25,13 @@ const (
 	RoleVerifier AgentRole = "verifier"
 	// RoleResearcher is a research agent for information gathering and analysis.
 	RoleResearcher AgentRole = "researcher"
+	// RoleSemanticScout discovers files and symbols by concept using semantic search.
+	RoleSemanticScout AgentRole = "semantic_scout"
+	// RoleDAGScout traces call/reference relationships using the repo index graph.
+	RoleDAGScout AgentRole = "dag_scout"
+	// RoleSymbolScout extracts function/type signatures and finds callers.
+	RoleSymbolScout AgentRole = "symbol_scout"
+
 	// RoleOverseer is a coordination agent that manages agent hierarchies.
 	// It handles spawn requests, enforces depth limits, and coordinates multi-agent workflows.
 	RoleOverseer AgentRole = "overseer"

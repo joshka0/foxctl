@@ -125,7 +125,7 @@ agentctl agent spawn --role coder --prompt "Help with Go code"
 | Role | Tools |
 |------|-------|
 | **All roles** | `fs_read_file`, `fs_list_dir`, `code_search`, `think` |
-| **researcher** | + `context_search`, `smart_search`, `context_grep`, `repo_index_search`, `repo_index_expand`, `repo_index_open`, `repo_index_dag_grep` |
+| **researcher** | + `context_search`, `smart_search`, `context_grep`, `repo_index_search`, `repo_index_expand`, `repo_index_open`, `repo_index_dag_grep`, `memory_query`, `session_recall`, `session_timeline` |
 | **coder** | + `fs_write_file` |
 | **overseer** | + `context_search`, `smart_search`, `context_grep`, `session_timeline`, `agent_spawn`, `agent_list`, `agent_status`, `agent_kill`, `agent_hierarchy`, `agent_wait` |
 
@@ -151,6 +151,51 @@ CLI (agent ask) → mailbox.Send(ask) → daemon polls → engine.Run(with histo
 Auto-detection order (first available key wins): openrouter → cerebras → groq → openai.
 
 Default models: `openrouter/aurora-alpha` (free), context updater uses `qwen/qwen3-coder-next`.
+
+### Retrieving Agent Output
+
+After an agent completes, retrieve its research output:
+
+```bash
+# By agent ID
+agentctl agent output 01KHGYRWC98M3YP551FPKZ5379
+
+# By agent name
+agentctl agent output brave-dawn
+```
+
+Returns `agent_id`, `agent_name`, `session_id`, `status`, and `summary` (the agent's most substantive response).
+
+### Researcher Workflow
+
+The hybrid researcher combines semantic search tools with file access tools for deep codebase investigation.
+
+**Recommended spawn command:**
+
+```bash
+agentctl agent spawn --role researcher \
+  --prompt "Research <topic>. Read the actual source files and include code snippets." \
+  --exec-mode autonomous \
+  --llm-provider openrouter --llm-model openrouter/aurora-alpha \
+  --max-auto-turns 3 --max-iterations 20
+```
+
+**Strategy (built into the researcher system prompt):**
+1. DISCOVER — `context_search` or `smart_search` to find relevant files
+2. READ — `fs_read_file` to read key source files (at least 3-5)
+3. GREP — `code_search` and `context_grep` for exact patterns
+4. DEEPEN — `memory_query` for past gotchas, `session_recall` for prior sessions
+5. GRAPH — `repo_index_dag_grep` for call/reference relationships
+
+**Model benchmarks** (companion memory pipeline research task):
+
+| Model | Time | Output | Notes |
+|-------|------|--------|-------|
+| `openrouter/aurora-alpha` | ~20s | 12,890 chars | Best tradeoff — free, fast, deep |
+| `minimax/minimax-m2.5` | ~120s | 8,761 chars | Slower and shallower than aurora |
+| Claude Code reviewer (Opus) | ~173s | 24,901 chars | Deepest but ~$15/run |
+
+Aurora-alpha with `--max-auto-turns 3 --max-iterations 20` produces ~52% of Opus depth at 0% cost and 10x speed.
 
 ### Specs & Docs
 

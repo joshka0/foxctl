@@ -36,6 +36,7 @@ import (
 	agentstore "github.com/jkatigb/agentctl/internal/storage/agents"
 	"github.com/jkatigb/agentctl/internal/storage/blackboard"
 	"github.com/jkatigb/agentctl/internal/storage/cache"
+	"github.com/jkatigb/agentctl/internal/storage/cas"
 	"github.com/jkatigb/agentctl/internal/storage/contextbuffer"
 	"github.com/jkatigb/agentctl/internal/storage/coordination"
 	"github.com/jkatigb/agentctl/internal/storage/dbdriver"
@@ -1341,6 +1342,14 @@ func (s *Service) startAgentOrchestration(ctx context.Context) error {
 		boardStore = bb
 	}
 
+	// Open CAS store for full turn content persistence
+	var casStore storage.CASStore
+	if cs, err := cas.OpenDefault(ctx, s.cfg.Storage.Root); err != nil {
+		fmt.Fprintf(os.Stderr, "agent orchestration: CAS store open failed: %v\n", err)
+	} else {
+		casStore = cs
+	}
+
 	// Create memory store opener for agent tools
 	openMemoryStore := func(ctx context.Context) (storage.MemoryStore, error) {
 		return memory.OpenWithConfig(ctx, s.cfg)
@@ -1378,6 +1387,7 @@ func (s *Service) startAgentOrchestration(ctx context.Context) error {
 		BoardStore:           boardStore,
 		HookDispatcher:       hookDispatcher,
 		ActionExecutor:       actionExecutor,
+		CASStore:             casStore,
 	}
 
 	// Create runtime
@@ -1476,6 +1486,9 @@ type AgentSpawnParams struct {
 	ExecMode         string `json:"exec_mode,omitempty"`          // "reactive", "autonomous", "autonomous_reactive", "proactive", "story"
 	MaxAutoTurns     int    `json:"max_auto_turns,omitempty"`
 
+	// Session timeout
+	Timeout string `json:"timeout,omitempty"` // e.g. "10m", "30m"
+
 	// LLM override
 	LLMProvider string `json:"llm_provider,omitempty"`
 	LLMModel    string `json:"llm_model,omitempty"`
@@ -1560,6 +1573,16 @@ func (s *Service) handleAgentSpawn(ctx context.Context, params json.RawMessage) 
 	if p.MaxAutoTurns > 0 {
 		cfg.MaxAutoTurns = p.MaxAutoTurns
 	}
+	if p.Timeout != "" {
+		d, err := time.ParseDuration(p.Timeout)
+		if err != nil {
+			return nil, fmt.Errorf("invalid timeout %q: %w", p.Timeout, err)
+		}
+		if d <= 0 {
+			return nil, fmt.Errorf("invalid timeout %q: must be positive", p.Timeout)
+		}
+		cfg.Timeout = d
+	}
 
 	// Apply LLM override if provided
 	if p.LLMProvider != "" {
@@ -1628,6 +1651,32 @@ func (s *Service) handleAgentSpawn(ctx context.Context, params json.RawMessage) 
 			}
 			s.agentSessionMap[agentID] = session.ID
 			s.agentMu.Unlock()
+
+			go func(agentID string, session *runtime.Session) {
+				<-session.Done()
+
+				agentState := agent.StateStopped
+				sess := session.GetSession()
+				if sess.Status == types.StatusError {
+					agentState = agent.StateError
+				}
+
+				updateCtx := context.Background()
+				updateStore, err := agentstore.Open(updateCtx, s.cfg.Storage.Root)
+				if err != nil {
+					slog.Warn("failed to open agent store for state update", "agent_id", agentID, "error", err)
+					return
+				}
+				defer updateStore.Close()
+
+				if err := updateStore.UpdateState(updateCtx, agentID, agentState); err != nil {
+					slog.Warn("failed to update agent state on completion", "agent_id", agentID, "error", err)
+				}
+
+				s.agentMu.Lock()
+				delete(s.agentSessionMap, agentID)
+				s.agentMu.Unlock()
+			}(agentID, session)
 		}
 	}
 

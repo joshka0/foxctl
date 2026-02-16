@@ -3,8 +3,10 @@ package engine
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/jkatigb/agentctl/internal/hooks"
@@ -213,6 +215,234 @@ func TestLLMChatEngine_Run_WithToolCall(t *testing.T) {
 	}
 	if callCount != 2 {
 		t.Errorf("expected 2 API calls, got %d", callCount)
+	}
+}
+
+// --- buildResearchSummary Tests ---
+
+func TestBuildResearchSummary_Mixed(t *testing.T) {
+	calls := []ToolCall{
+		{Name: "fs_read_file", Arguments: json.RawMessage(`{"path":"/src/engine/runtime.go"}`)},
+		{Name: "context_search", Arguments: json.RawMessage(`{"query":"hook dispatch"}`)},
+		{Name: "code_symbols", Arguments: json.RawMessage(`{"path":"/src/engine/types.go"}`)},
+		{Name: "repo_index_dag_grep", Arguments: json.RawMessage(`{"query":"Spawn"}`)},
+		{Name: "context_grep", Arguments: json.RawMessage(`{"query":"runSession"}`)},
+	}
+
+	result := buildResearchSummary(calls)
+
+	if !strings.Contains(result, "runtime.go") {
+		t.Errorf("expected runtime.go in files, got: %s", result)
+	}
+	if !strings.Contains(result, "types.go (symbols)") {
+		t.Errorf("expected types.go (symbols) in files, got: %s", result)
+	}
+	if !strings.Contains(result, `context_search("hook dispatch")`) {
+		t.Errorf("expected context_search in searches, got: %s", result)
+	}
+	if !strings.Contains(result, `dag_grep("Spawn")`) {
+		t.Errorf("expected dag_grep in searches, got: %s", result)
+	}
+	if !strings.Contains(result, `context_grep("runSession")`) {
+		t.Errorf("expected context_grep in searches, got: %s", result)
+	}
+}
+
+func TestBuildResearchSummary_Dedup(t *testing.T) {
+	calls := []ToolCall{
+		{Name: "fs_read_file", Arguments: json.RawMessage(`{"path":"/src/a.go"}`)},
+		{Name: "fs_read_file", Arguments: json.RawMessage(`{"path":"/src/a.go"}`)},
+		{Name: "fs_read_file", Arguments: json.RawMessage(`{"path":"/src/b.go"}`)},
+	}
+
+	result := buildResearchSummary(calls)
+
+	// Count occurrences of "a.go"
+	count := strings.Count(result, "a.go")
+	if count != 1 {
+		t.Errorf("expected a.go to appear once, appeared %d times in: %s", count, result)
+	}
+}
+
+func TestBuildResearchSummary_Empty(t *testing.T) {
+	result := buildResearchSummary(nil)
+	if result != "Files read: (none)\nSearches: (none)" {
+		t.Errorf("unexpected empty result: %q", result)
+	}
+}
+
+func TestBuildResearchSummary_MalformedJSON(t *testing.T) {
+	calls := []ToolCall{
+		{Name: "fs_read_file", Arguments: json.RawMessage(`not json`)},
+		{Name: "fs_read_file", Arguments: json.RawMessage(`{"path":"/valid.go"}`)},
+	}
+
+	result := buildResearchSummary(calls)
+	if !strings.Contains(result, "valid.go") {
+		t.Errorf("expected valid.go despite malformed entry, got: %s", result)
+	}
+}
+
+// --- Synthesis Transition Tests ---
+
+func TestLLMChatEngine_Run_SynthesisTransition(t *testing.T) {
+	callCount := 0
+	var lastRequestTools bool
+
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		callCount++
+
+		// Parse request to check if tools are present
+		var reqBody map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&reqBody)
+		_, lastRequestTools = reqBody["tools"]
+
+		// For iterations 1-3 (MaxIterations=5, SynthesisReserve=2, threshold at iter 3):
+		// return tool calls to keep the loop going
+		if callCount <= 3 {
+			resp := oaiResponse{
+				ID: "test",
+				Choices: []struct {
+					Message      oaiMessage `json:"message"`
+					FinishReason string     `json:"finish_reason"`
+				}{
+					{
+						Message: oaiMessage{
+							Role: "assistant",
+							ToolCalls: []oaiToolCall{
+								{
+									ID:   fmt.Sprintf("call_%d", callCount),
+									Type: "function",
+									Function: oaiFunction{
+										Name:      "fs_read_file",
+										Arguments: fmt.Sprintf(`{"path":"/file%d.go"}`, callCount),
+									},
+								},
+							},
+						},
+						FinishReason: "tool_calls",
+					},
+				},
+			}
+			_ = json.NewEncoder(w).Encode(resp)
+			return
+		}
+
+		// After synthesis transition (tools stripped), model produces text
+		resp := oaiResponse{
+			ID: "test-final",
+			Choices: []struct {
+				Message      oaiMessage `json:"message"`
+				FinishReason string     `json:"finish_reason"`
+			}{
+				{
+					Message:      oaiMessage{Role: "assistant", Content: "Here is my synthesis report."},
+					FinishReason: "stop",
+				},
+			},
+		}
+		_ = json.NewEncoder(w).Encode(resp)
+	})
+
+	mockExecutor := &MockToolExecutor{
+		ExecuteFn: func(ctx context.Context, name string, args json.RawMessage) (string, error) {
+			return `{"content":"file data"}`, nil
+		},
+	}
+
+	engine := &LLMChatEngine{
+		config: LLMChatConfig{
+			APIKey:           "test-key",
+			BaseURL:          "http://mock",
+			Model:            "test-model",
+			MaxIterations:    5,
+			SynthesisReserve: 2,
+		},
+		client:     &http.Client{Transport: &handlerTransport{handler: handler}},
+		toolRunner: NewToolRunner(mockExecutor, nil, ToolRunnerConfig{}),
+	}
+
+	output, err := engine.Run(context.Background(), EngineInput{
+		Messages: []Message{{Role: RoleUser, Content: "Research the codebase"}},
+		Tools:    []ToolDef{{Name: "fs_read_file", Description: "Read files"}},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if output.AssistantText != "Here is my synthesis report." {
+		t.Errorf("expected synthesis report, got: %s", output.AssistantText)
+	}
+
+	// The 4th LLM call should have had tools stripped
+	if lastRequestTools {
+		t.Error("expected tools to be stripped after synthesis transition")
+	}
+}
+
+func TestLLMChatEngine_SynthesisReserve_EdgeCase(t *testing.T) {
+	// When MaxIterations <= SynthesisReserve, synthesis should never trigger
+	callCount := 0
+
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		callCount++
+		// Always return tool calls to exhaust iterations
+		resp := oaiResponse{
+			ID: "test",
+			Choices: []struct {
+				Message      oaiMessage `json:"message"`
+				FinishReason string     `json:"finish_reason"`
+			}{
+				{
+					Message: oaiMessage{
+						Role: "assistant",
+						ToolCalls: []oaiToolCall{
+							{
+								ID:   fmt.Sprintf("call_%d", callCount),
+								Type: "function",
+								Function: oaiFunction{
+									Name:      "loop_tool",
+									Arguments: `{}`,
+								},
+							},
+						},
+					},
+					FinishReason: "tool_calls",
+				},
+			},
+		}
+		_ = json.NewEncoder(w).Encode(resp)
+	})
+
+	mockExecutor := &MockToolExecutor{
+		ExecuteFn: func(ctx context.Context, name string, args json.RawMessage) (string, error) {
+			return `{}`, nil
+		},
+	}
+
+	engine := &LLMChatEngine{
+		config: LLMChatConfig{
+			APIKey:           "test-key",
+			BaseURL:          "http://mock",
+			Model:            "test-model",
+			MaxIterations:    2,
+			SynthesisReserve: 5, // Greater than MaxIterations
+		},
+		client:     &http.Client{Transport: &handlerTransport{handler: handler}},
+		toolRunner: NewToolRunner(mockExecutor, nil, ToolRunnerConfig{}),
+	}
+
+	output, err := engine.Run(context.Background(), EngineInput{
+		Messages: []Message{{Role: RoleUser, Content: "Loop"}},
+		Tools:    []ToolDef{{Name: "loop_tool", Description: "Loops"}},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Should hit max iterations, not synthesis
+	if output.StopReason != StopReasonMaxIterations {
+		t.Errorf("expected max_iterations, got %s", output.StopReason)
 	}
 }
 

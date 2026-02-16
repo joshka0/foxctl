@@ -8,6 +8,8 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/jkatigb/agentctl/internal/hooks"
@@ -90,6 +92,11 @@ type LLMChatConfig struct {
 	// RequireContextQuery blocks completion if no context was queried in StatelessMode.
 	// Useful for enforcing context-aware responses.
 	RequireContextQuery bool
+
+	// SynthesisReserve is the number of iterations to reserve for text-only
+	// synthesis at the end of the tool-call loop. Tools are stripped when
+	// iteration reaches MaxIterations - SynthesisReserve. Default: 2.
+	SynthesisReserve int
 }
 
 // DefaultLLMChatConfig returns sensible defaults.
@@ -148,6 +155,9 @@ func NewLLMChatEngine(cfg LLMChatConfig) (*LLMChatEngine, error) {
 	}
 	if cfg.MaxTokens <= 0 {
 		cfg.MaxTokens = 8192
+	}
+	if cfg.SynthesisReserve <= 0 {
+		cfg.SynthesisReserve = 2
 	}
 
 	engine := &LLMChatEngine{
@@ -230,6 +240,20 @@ func (e *LLMChatEngine) Run(ctx context.Context, input EngineInput) (EngineOutpu
 		// Check iteration limit
 		iteration++
 		if iteration > e.config.MaxIterations {
+			// Finalize: if no text output yet, run one final text-only call (no tools)
+			// so the model can produce a summary, PLAN_COMPLETE, or final report.
+			if output.AssistantText == "" {
+				finalizeMessages := append(messages, oaiMessage{
+					Role:    "user",
+					Content: "Your tool budget is exhausted. Produce your complete text response NOW.\n\nResearch:\n" + buildResearchSummary(output.ToolCalls),
+				})
+				if finalResp, err := e.callLLM(ctx, finalizeMessages, nil); err == nil && len(finalResp.Choices) > 0 {
+					output.AssistantText = finalResp.Choices[0].Message.Content
+					output.Tokens.Add(finalResp.Usage.PromptTokens, finalResp.Usage.CompletionTokens)
+					fmt.Fprintf(os.Stderr, "[CONTEXT] finalize: prompt_tokens=%d completion_tokens=%d\n",
+						finalResp.Usage.PromptTokens, finalResp.Usage.CompletionTokens)
+				}
+			}
 			output.StopReason = StopReasonMaxIterations
 			output.Error = fmt.Sprintf("exceeded max iterations (%d)", e.config.MaxIterations)
 			return output, nil
@@ -423,11 +447,15 @@ func (e *LLMChatEngine) Run(ctx context.Context, input EngineInput) (EngineOutpu
 				})
 			}
 
-			// Warn on second-to-last iteration so agent can wrap up
-			if iteration == e.config.MaxIterations-1 {
+			// Synthesis transition: strip tools N iterations before exhaustion
+			// so the model MUST produce text instead of more tool calls.
+			if e.config.SynthesisReserve > 0 &&
+				e.config.MaxIterations > e.config.SynthesisReserve &&
+				iteration == e.config.MaxIterations-e.config.SynthesisReserve {
+				tools = nil
 				messages = append(messages, oaiMessage{
 					Role:    "user",
-					Content: "⚠️ IMPORTANT: This is your FINAL iteration. You must provide your complete response NOW. Do NOT call any more tools - just give your final answer/summary.",
+					Content: "SYNTHESIS PHASE: Your tool budget is ending. Write your complete report NOW.\n\nResearch:\n" + buildResearchSummary(output.ToolCalls),
 				})
 			}
 
@@ -438,6 +466,21 @@ func (e *LLMChatEngine) Run(ctx context.Context, input EngineInput) (EngineOutpu
 		// No tool calls - this is the final response
 		output.AssistantText = choice.Message.Content
 		output.StopReason = mapFinishReason(choice.FinishReason)
+
+		// If the model stopped without producing text and has done tool work,
+		// run one final text-only call to force output.
+		if output.AssistantText == "" && len(output.ToolCalls) > 0 {
+			finalizeMessages := append(messages,
+				oaiMessage{Role: "assistant", Content: ""},
+				oaiMessage{Role: "user", Content: "You stopped without producing a text response. Write your complete report NOW.\n\nResearch:\n" + buildResearchSummary(output.ToolCalls)},
+			)
+			if finalResp, finalErr := e.callLLM(ctx, finalizeMessages, nil); finalErr == nil && len(finalResp.Choices) > 0 {
+				output.AssistantText = finalResp.Choices[0].Message.Content
+				output.Tokens.Add(finalResp.Usage.PromptTokens, finalResp.Usage.CompletionTokens)
+				fmt.Fprintf(os.Stderr, "[CONTEXT] finalize (early stop): prompt_tokens=%d completion_tokens=%d\n",
+					finalResp.Usage.PromptTokens, finalResp.Usage.CompletionTokens)
+			}
+		}
 
 		// In StatelessMode with RequireContextQuery, verify context was queried.
 		// If the model skipped tool calling, nudge it to query context first.
@@ -737,6 +780,74 @@ func (e *LLMChatEngine) dispatchPostToolUse(ctx context.Context, call ToolCall, 
 		return hooks.NewNone()
 	}
 	return hookResult.Output
+}
+
+// buildResearchSummary extracts a structured summary from accumulated tool calls.
+// Used by finalize and synthesis prompts to give the model context about what
+// was researched before asking it to write.
+func buildResearchSummary(toolCalls []ToolCall) string {
+	var files, searches []string
+	seen := make(map[string]bool)
+	for _, tc := range toolCalls {
+		var args map[string]any
+		if err := json.Unmarshal(tc.Arguments, &args); err != nil {
+			continue
+		}
+		switch tc.Name {
+		case "fs_read_file":
+			if p, _ := args["path"].(string); p != "" && !seen["f:"+p] {
+				seen["f:"+p] = true
+				files = append(files, filepath.Base(p))
+			}
+		case "code_symbols":
+			if p, _ := args["path"].(string); p != "" && !seen["s:"+p] {
+				seen["s:"+p] = true
+				files = append(files, filepath.Base(p)+" (symbols)")
+			}
+		case "context_filter":
+			if q, _ := args["prompt"].(string); q != "" {
+				searches = append(searches, `context_filter("`+q+`")`)
+			}
+		case "context_search":
+			if q, _ := args["query"].(string); q != "" {
+				searches = append(searches, tc.Name+`("`+q+`")`)
+			}
+		case "smart_search":
+			q, _ := args["question"].(string)
+			if q == "" {
+				q, _ = args["query"].(string)
+			}
+			if q != "" {
+				searches = append(searches, tc.Name+`("`+q+`")`)
+			}
+		case "code_search", "context_grep":
+			q, _ := args["pattern"].(string)
+			if q == "" {
+				q, _ = args["query"].(string)
+			}
+			if q != "" {
+				searches = append(searches, tc.Name+`("`+q+`")`)
+			}
+		case "repo_index_dag_grep":
+			if q, _ := args["query"].(string); q != "" {
+				searches = append(searches, `dag_grep("`+q+`")`)
+			}
+		}
+	}
+	var b strings.Builder
+	b.WriteString("Files read: ")
+	if len(files) > 0 {
+		b.WriteString(strings.Join(files, ", "))
+	} else {
+		b.WriteString("(none)")
+	}
+	b.WriteString("\nSearches: ")
+	if len(searches) > 0 {
+		b.WriteString(strings.Join(searches, ", "))
+	} else {
+		b.WriteString("(none)")
+	}
+	return b.String()
 }
 
 // Helper functions

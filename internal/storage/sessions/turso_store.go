@@ -202,6 +202,7 @@ func migrateTursoWithDimensions(ctx context.Context, db *sql.DB, dimensions int)
 		{"agent_type", "ALTER TABLE sessions ADD COLUMN agent_type TEXT NOT NULL DEFAULT 'claude'"},
 		{"status", "ALTER TABLE sessions ADD COLUMN status TEXT NOT NULL DEFAULT 'ok'"},
 		{"content_hash", "ALTER TABLE sessions ADD COLUMN content_hash TEXT"},
+		{"error_message", "ALTER TABLE sessions ADD COLUMN error_message TEXT"},
 	}
 	for _, m := range columnMigrations {
 		// Try to add the column - ignore error if it already exists
@@ -2216,6 +2217,33 @@ func (s *TursoStore) SetStatus(ctx context.Context, id, status string) error {
 	result, err := s.db.ExecContext(ctx, query, args...)
 	if err != nil {
 		return fmt.Errorf("sessions: set status: %w", err)
+	}
+	affected, _ := result.RowsAffected()
+	if affected == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// SetStatusWithError updates a session's status and error message.
+// If the status is terminal (ok, error, canceled), also sets ended_at.
+func (s *TursoStore) SetStatusWithError(ctx context.Context, id, status, errorMessage string) error {
+	now := sqlutil.FormatTimestamp(timeutil.NowUTC())
+
+	var query string
+	var args []any
+
+	if storage.IsTerminalStatus(status) {
+		query = `UPDATE sessions SET status = ?, error_message = ?, ended_at = ?, updated_at = ? WHERE id = ?`
+		args = []any{status, errorMessage, now, now, id}
+	} else {
+		query = `UPDATE sessions SET status = ?, error_message = ?, ended_at = NULL, updated_at = ? WHERE id = ?`
+		args = []any{status, errorMessage, now, id}
+	}
+
+	result, err := s.db.ExecContext(ctx, query, args...)
+	if err != nil {
+		return fmt.Errorf("sessions: set status with error: %w", err)
 	}
 	affected, _ := result.RowsAffected()
 	if affected == 0 {

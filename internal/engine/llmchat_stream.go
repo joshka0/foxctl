@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"strings"
 )
 
@@ -74,6 +75,19 @@ func (e *LLMChatEngine) RunStreaming(ctx context.Context, input EngineInput, str
 		// Check iteration limit
 		iteration++
 		if iteration > e.config.MaxIterations {
+			// Finalize: if no text output yet, run one final text-only call (no tools)
+			if output.AssistantText == "" {
+				finalizeMessages := append(messages, oaiMessage{
+					Role:    "user",
+					Content: "Your tool budget is exhausted. Produce your complete text response NOW.\n\nResearch:\n" + buildResearchSummary(output.ToolCalls),
+				})
+				if finalResp, err := e.callLLM(ctx, finalizeMessages, nil); err == nil && len(finalResp.Choices) > 0 {
+					output.AssistantText = finalResp.Choices[0].Message.Content
+					output.Tokens.Add(finalResp.Usage.PromptTokens, finalResp.Usage.CompletionTokens)
+					fmt.Fprintf(os.Stderr, "[CONTEXT] finalize: prompt_tokens=%d completion_tokens=%d\n",
+						finalResp.Usage.PromptTokens, finalResp.Usage.CompletionTokens)
+				}
+			}
 			output.StopReason = StopReasonMaxIterations
 			output.Error = fmt.Sprintf("exceeded max iterations (%d)", e.config.MaxIterations)
 			return output, nil
@@ -163,6 +177,17 @@ func (e *LLMChatEngine) RunStreaming(ctx context.Context, input EngineInput, str
 				})
 			}
 
+			// Synthesis transition: strip tools N iterations before exhaustion
+			if e.config.SynthesisReserve > 0 &&
+				e.config.MaxIterations > e.config.SynthesisReserve &&
+				iteration == e.config.MaxIterations-e.config.SynthesisReserve {
+				tools = nil
+				messages = append(messages, oaiMessage{
+					Role:    "user",
+					Content: "SYNTHESIS PHASE: Your tool budget is ending. Write your complete report NOW.\n\nResearch:\n" + buildResearchSummary(output.ToolCalls),
+				})
+			}
+
 			// Continue the loop
 			continue
 		}
@@ -170,6 +195,22 @@ func (e *LLMChatEngine) RunStreaming(ctx context.Context, input EngineInput, str
 		// No tool calls - this is the final response
 		output.AssistantText = resp.content
 		output.StopReason = mapFinishReason(resp.finishReason)
+
+		// If the model stopped without producing text and has done tool work,
+		// run one final text-only call to force output.
+		if output.AssistantText == "" && len(output.ToolCalls) > 0 {
+			finalizeMessages := append(messages,
+				oaiMessage{Role: "assistant", Content: ""},
+				oaiMessage{Role: "user", Content: "You stopped without producing a text response. Write your complete report NOW.\n\nResearch:\n" + buildResearchSummary(output.ToolCalls)},
+			)
+			if finalResp, finalErr := e.callLLM(ctx, finalizeMessages, nil); finalErr == nil && len(finalResp.Choices) > 0 {
+				output.AssistantText = finalResp.Choices[0].Message.Content
+				output.Tokens.Add(finalResp.Usage.PromptTokens, finalResp.Usage.CompletionTokens)
+				fmt.Fprintf(os.Stderr, "[CONTEXT] finalize (early stop): prompt_tokens=%d completion_tokens=%d\n",
+					finalResp.Usage.PromptTokens, finalResp.Usage.CompletionTokens)
+			}
+		}
+
 		return output, nil
 	}
 }
