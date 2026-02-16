@@ -146,7 +146,9 @@ Help the user understand and interact with this agent's work.`,
           .filter((msg) => msg.type === 'user' || msg.type === 'assistant' || msg.type === 'human')
           .map((msg) => ({
             role: msg.type === 'human' ? 'user' : (msg.type as 'user' | 'assistant'),
-            content: msg.summary || msg.error || '[No content]',
+            content: msg.summary || msg.error || (msg.tool_calls?.length
+              ? `[Used ${msg.tool_calls.length} tool${msg.tool_calls.length > 1 ? 's' : ''}: ${msg.tool_calls.map((tc: any) => tc.name || tc.function?.name || 'unknown').join(', ')}]`
+              : '[No content]'),
             timestamp: msg.timestamp || new Date().toISOString(),
           }))
         setMessages(consoleMessages)
@@ -420,6 +422,12 @@ function SessionDetail({ session, onContinue }: { session: PersistedSession; onC
           .filter(Boolean)
           .join('\n')
       }
+    }
+    if (msg.tool_calls && msg.tool_calls.length > 0) {
+      const toolNames = msg.tool_calls
+        .map((tc: any) => tc.name || tc.function?.name || 'unknown')
+        .join(', ')
+      return `[Used ${msg.tool_calls.length} tool${msg.tool_calls.length > 1 ? 's' : ''}: ${toolNames}]`
     }
     return '[No content]'
   }

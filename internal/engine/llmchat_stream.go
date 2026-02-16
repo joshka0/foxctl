@@ -89,7 +89,6 @@ func (e *LLMChatEngine) RunStreaming(ctx context.Context, input EngineInput, str
 				}
 			}
 			output.StopReason = StopReasonMaxIterations
-			output.Error = fmt.Sprintf("exceeded max iterations (%d)", e.config.MaxIterations)
 			return output, nil
 		}
 

@@ -255,7 +255,6 @@ func (e *LLMChatEngine) Run(ctx context.Context, input EngineInput) (EngineOutpu
 				}
 			}
 			output.StopReason = StopReasonMaxIterations
-			output.Error = fmt.Sprintf("exceeded max iterations (%d)", e.config.MaxIterations)
 			return output, nil
 		}
 
@@ -332,7 +331,6 @@ func (e *LLMChatEngine) Run(ctx context.Context, input EngineInput) (EngineOutpu
 				Canceled(iterDuration))
 
 			output.StopReason = StopReasonContextBudget
-			output.Error = fmt.Sprintf("context budget exceeded (%d tokens > %d limit)", resp.Usage.PromptTokens, e.config.MaxContextTokens)
 			// Still capture any assistant text from this response
 			if len(resp.Choices) > 0 && resp.Choices[0].Message.Content != "" {
 				output.AssistantText = resp.Choices[0].Message.Content

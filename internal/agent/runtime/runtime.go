@@ -2039,8 +2039,10 @@ func (r *Runtime) runSession(ctx context.Context, session *Session) {
 		// Persist assistant turn after engine run
 		_ = r.saveTurn(ctx, session.ID, session.nextTurnIndex(), "assistant", result, output.ToolCalls, output.Tokens.TotalTokens)
 
-		// Check for errors in output
-		if output.StopReason == engine.StopReasonError || output.Error != "" {
+		// Check for actual engine errors in output.
+		// Note: max_iterations/context_budget may set output.Error informationally
+		// and should still complete normally.
+		if output.StopReason == engine.StopReasonError {
 			// Context errors are not retryable
 			if ctx.Err() != nil {
 				session.mu.Lock()

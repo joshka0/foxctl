@@ -343,6 +343,34 @@ func mockLLMResponse(content string) []byte {
 	return b
 }
 
+func mockLLMToolCallResponse(toolName string, args string) []byte {
+	resp := map[string]any{
+		"id": "test-tool-resp",
+		"choices": []map[string]any{
+			{
+				"message": map[string]any{
+					"role":    "assistant",
+					"content": "",
+					"tool_calls": []map[string]any{
+						{
+							"id":   "call-1",
+							"type": "function",
+							"function": map[string]string{
+								"name":      toolName,
+								"arguments": args,
+							},
+						},
+					},
+				},
+				"finish_reason": "tool_calls",
+			},
+		},
+		"usage": map[string]int{"prompt_tokens": 12, "completion_tokens": 3},
+	}
+	b, _ := json.Marshal(resp)
+	return b
+}
+
 // newTestEngine creates an LLMChatEngine pointing at the given test server URL.
 func newTestEngine(t *testing.T, serverURL string) *engine.LLMChatEngine {
 	t.Helper()
@@ -439,6 +467,62 @@ func TestEngineRetryExhausted(t *testing.T) {
 	calls := atomic.LoadInt64(&callCount)
 	if calls < 2 {
 		t.Errorf("expected at least 2 LLM calls (original + 1 retry), got %d", calls)
+	}
+}
+
+func TestEngineMaxIterationsDoesNotRetry(t *testing.T) {
+	// Mock server:
+	// 1) First call returns a tool call with no assistant text.
+	// 2) Finalize call returns assistant text.
+	// Any additional call indicates runtime retried the engine run.
+	var callCount int64
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		n := atomic.AddInt64(&callCount, 1)
+		w.WriteHeader(http.StatusOK)
+
+		switch n {
+		case 1:
+			_, _ = w.Write(mockLLMToolCallResponse("fs_read_file", `{"path":"README.md"}`))
+		case 2:
+			_, _ = w.Write(mockLLMResponse("Finalized report after max iterations"))
+		default:
+			_, _ = w.Write(mockLLMResponse("unexpected extra call"))
+		}
+	}))
+	defer server.Close()
+
+	eng, err := engine.NewLLMChatEngine(engine.LLMChatConfig{
+		APIKey:        "test-key",
+		BaseURL:       server.URL,
+		Model:         "test-model",
+		MaxIterations: 1, // Force max-iterations after first tool-call iteration.
+	})
+	if err != nil {
+		t.Fatalf("create engine: %v", err)
+	}
+
+	session := newTestSession(eng)
+
+	rt := &Runtime{
+		sessions: make(map[string]*Session),
+		config:   Config{DefaultMaxIterations: 10},
+	}
+
+	ctx := context.Background()
+	rt.runSession(ctx, session)
+
+	if session.Status != types.StatusOK {
+		t.Errorf("expected StatusOK after max-iterations finalize, got %s (error: %s)", session.Status, session.Error)
+	}
+	if session.Error != "" {
+		t.Errorf("expected empty session error, got %q", session.Error)
+	}
+	if session.Summary == "" {
+		t.Error("expected non-empty summary from finalize output")
+	}
+	calls := atomic.LoadInt64(&callCount)
+	if calls != 2 {
+		t.Errorf("expected exactly 2 LLM calls (tool-call + finalize) with no retry, got %d", calls)
 	}
 }
 
