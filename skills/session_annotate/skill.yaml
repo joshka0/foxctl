@@ -1,0 +1,53 @@
+apiVersion: agentctl/v1
+kind: Skill
+metadata:
+  name: session/annotate
+  version: 0.1.0
+  description: Annotate Claude Code conversation turns with slice anchors and TOC labels
+  tags: [session, annotation, recall]
+distribution:
+  type: exec
+  exec:
+    entry: bin
+io:
+  format: JSON
+  inline_output_kb: 16
+signature:
+  command: session/annotate
+  parameters:
+    - name: session_id
+      type: string
+      required: false
+      description: Specific session to annotate (omit for most recent)
+    - name: workspace
+      type: string
+      required: false
+      description: Workspace path filter
+    - name: force
+      type: boolean
+      required: false
+      description: Re-annotate even if annotations exist
+    - name: batch_size
+      type: integer
+      required: false
+      description: Turns per LLM batch (default 10)
+    - name: skip_embedding
+      type: boolean
+      required: false
+      description: Skip embedding generation
+    - name: skip_llm
+      type: boolean
+      required: false
+      description: Skip LLM annotation (anchors only)
+    - name: llm_endpoint
+      type: string
+      required: false
+      description: LM Studio API endpoint (default http://localhost:1234/v1)
+    - name: embedding_model
+      type: string
+      required: false
+      description: Local embedding model name (uses LM Studio endpoint; omit for Voyage API)
+    - name: queue_embedding
+      type: boolean
+      required: false
+      description: Queue annotation embedding jobs for async processing/backfill

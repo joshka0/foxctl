@@ -17,8 +17,8 @@ signature:
   parameters:
     - name: query
       type: string
-      required: true
-      description: "Natural language query to find relevant sessions"
+      required: false
+      description: "Natural language query to find relevant sessions (required unless list_sessions or toc mode is used)"
     - name: limit
       type: integer
       required: false
@@ -35,6 +35,18 @@ signature:
       type: string
       required: false
       description: "Filter by project name (optional)"
+    - name: session_id
+      type: string
+      required: false
+      description: "Restrict search to a specific session ID"
+    - name: list_sessions
+      type: boolean
+      required: false
+      description: "List available sessions instead of searching"
+    - name: toc
+      type: boolean
+      required: false
+      description: "Return TOC labels for a session (requires session_id)"
     - name: window_granularity
       type: boolean
       required: false
@@ -43,6 +55,18 @@ signature:
       type: boolean
       required: false
       description: "Search at chunk level (requires embeddings)"
+    - name: annotation_granularity
+      type: boolean
+      required: false
+      description: "Search at annotation level (requires embeddings)"
+    - name: filter_category
+      type: string
+      required: false
+      description: "Annotation category filter (decision, debug, code_change, etc.); annotation mode only"
+    - name: sort_by
+      type: string
+      required: false
+      description: "Comma-separated annotation sort keys: similarity, date, recent (annotation mode only)"
   help:
     short: "Recall relevant sessions via semantic search."
     long: |
@@ -69,6 +93,9 @@ signature:
     - name: chunk_matches
       type: array
       description: "Matching chunks with similarity scores"
+    - name: annotation_matches
+      type: array
+      description: "Matching turn annotations with similarity scores"
     - name: total_with_embeddings
       type: integer
       description: "Total sessions with embeddings available"
@@ -100,6 +127,14 @@ examples:
       project: "agentctl"
       limit: 5
     description: "Find database migration sessions for a specific project"
+  - name: "Decision evolution"
+    input:
+      query: "database migration strategy"
+      annotation_granularity: true
+      filter_category: "decision"
+      sort_by: "date,similarity"
+      limit: 20
+    description: "Track how database migration decisions evolved over time"
 openapi:
   enabled: true
   methods:

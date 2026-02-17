@@ -31,6 +31,8 @@ const (
 	RoleDAGScout AgentRole = "dag_scout"
 	// RoleSymbolScout extracts function/type signatures and finds callers.
 	RoleSymbolScout AgentRole = "symbol_scout"
+	// RoleAnnotationScout searches past session annotations for decisions, errors, and code changes.
+	RoleAnnotationScout AgentRole = "annotation_scout"
 
 	// RoleOverseer is a coordination agent that manages agent hierarchies.
 	// It handles spawn requests, enforces depth limits, and coordinates multi-agent workflows.

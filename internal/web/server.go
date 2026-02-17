@@ -492,8 +492,9 @@ func (s *Server) Handler() http.Handler {
 	// Shared Locker ensures per-conversation mutual exclusion across all
 	// HTTP requests. Without this, each per-request Service would have its own
 	// lock instance providing zero mutual exclusion.
+	skillRunner := api.NewSkillRunner(s.cfg)
 	apiMux.HandleFunc("/api/companion/providers", api.CompanionProvidersHandler(s.cfg, s.log))
-	apiMux.HandleFunc("/api/companion/chat", api.CompanionChatHandler(s.cfg, s.log, s.turnLock))
+	apiMux.HandleFunc("/api/companion/chat", api.CompanionChatHandler(s.cfg, s.log, s.turnLock, skillRunner))
 	apiMux.HandleFunc("/api/companion/conversations", api.CompanionConversationsHandler(s.cfg, s.log))
 	apiMux.HandleFunc("/api/companion/conversations/", func(w http.ResponseWriter, r *http.Request) {
 		// Route based on sub-path: /api/companion/conversations/:id/(messages|personality)
@@ -558,7 +559,6 @@ func (s *Server) Handler() http.Handler {
 		}
 	})
 	// Character routes (presence)
-	skillRunner := api.NewSkillRunner(s.cfg)
 	apiMux.HandleFunc("/api/companion/characters", api.CompanionCharacterCreateHandler(s.cfg, s.log, skillRunner))
 	apiMux.HandleFunc("/api/companion/characters/", func(w http.ResponseWriter, r *http.Request) {
 		// Route based on path and method

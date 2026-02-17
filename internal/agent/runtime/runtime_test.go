@@ -304,11 +304,29 @@ func TestBuildToolDefsForRole_SymbolScout(t *testing.T) {
 	}
 }
 
+func TestBuildToolDefsForRole_AnnotationScout(t *testing.T) {
+	names := toolNamesForRole(types.RoleAnnotationScout)
+
+	// Must have
+	for _, want := range []string{"think", "annotation_recall", "annotation_list_sessions", "annotation_category_stats", "memory_query"} {
+		if !hasToolName(names, want) {
+			t.Errorf("annotation_scout should have %q, got %v", want, names)
+		}
+	}
+
+	// Must NOT have
+	for _, deny := range []string{"fs_read_file", "code_search", "fs_list_dir", "context_search"} {
+		if hasToolName(names, deny) {
+			t.Errorf("annotation_scout should NOT have %q", deny)
+		}
+	}
+}
+
 func TestBuildToolDefsForRole_ResearcherUnchanged(t *testing.T) {
 	names := toolNamesForRole(types.RoleResearcher)
 
 	// Researcher must still have base tools + agentctl tools
-	for _, want := range []string{"fs_read_file", "code_search", "think", "context_search", "smart_search", "context_grep", "code_symbols", "repo_index_search"} {
+	for _, want := range []string{"fs_read_file", "code_search", "think", "context_search", "smart_search", "context_grep", "code_symbols", "repo_index_search", "annotation_recall"} {
 		if !hasToolName(names, want) {
 			t.Errorf("researcher should still have %q, got %v", want, names)
 		}

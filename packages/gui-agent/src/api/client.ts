@@ -5,36 +5,40 @@ import type {
   BlackboardListResponse,
   LogsListResponse,
   AgentSession,
-} from './types'
+  PresenceBundle,
+} from "./types";
 
-const API_BASE = '/api'
+const API_BASE = "/api";
 
-function mergeHeaders(defaults: Record<string, string>, headers: RequestInit['headers']): Headers {
-  const merged = new Headers()
+function mergeHeaders(
+  defaults: Record<string, string>,
+  headers: RequestInit["headers"],
+): Headers {
+  const merged = new Headers();
 
   for (const [k, v] of Object.entries(defaults)) {
-    merged.set(k, v)
+    merged.set(k, v);
   }
 
   if (!headers) {
-    return merged
+    return merged;
   }
   if (headers instanceof Headers) {
-    headers.forEach((v, k) => merged.set(k, v))
-    return merged
+    headers.forEach((v, k) => merged.set(k, v));
+    return merged;
   }
   if (Array.isArray(headers)) {
     for (const [k, v] of headers) {
-      merged.set(k, v)
+      merged.set(k, v);
     }
-    return merged
+    return merged;
   }
 
   for (const [k, v] of Object.entries(headers)) {
-    if (typeof v === 'undefined') continue
-    merged.set(k, String(v))
+    if (typeof v === "undefined") continue;
+    merged.set(k, String(v));
   }
-  return merged
+  return merged;
 }
 
 /**
@@ -47,44 +51,44 @@ function mergeHeaders(defaults: Record<string, string>, headers: RequestInit['he
  */
 async function request<T>(
   endpoint: string,
-  options: RequestInit = {}
+  options: RequestInit = {},
 ): Promise<T> {
-  const defaults: Record<string, string> = { Accept: 'application/json' }
+  const defaults: Record<string, string> = { Accept: "application/json" };
   // Only set JSON Content-Type when sending a JSON body. (Avoid overriding
   // FormData/multipart or triggering unnecessary CORS preflights.)
-  if (typeof options.body === 'string' && options.body.length > 0) {
-    defaults['Content-Type'] = 'application/json'
+  if (typeof options.body === "string" && options.body.length > 0) {
+    defaults["Content-Type"] = "application/json";
   }
 
-  const headers = mergeHeaders(defaults, options.headers)
+  const headers = mergeHeaders(defaults, options.headers);
 
   const response = await fetch(`${API_BASE}${endpoint}`, {
     ...options,
     headers,
-  })
+  });
 
-  const text = await response.text()
+  const text = await response.text();
   if (!response.ok) {
-    throw new Error(text || `Request failed: ${response.status}`)
+    throw new Error(text || `Request failed: ${response.status}`);
   }
   if (!text) {
-    return undefined as T
+    return undefined as T;
   }
   try {
-    return JSON.parse(text) as T
+    return JSON.parse(text) as T;
   } catch {
-    throw new Error('Invalid JSON response')
+    throw new Error("Invalid JSON response");
   }
 }
 
 // ApiEnvelope matches the canonical agentctl envelope returned by some API endpoints.
 interface ApiEnvelope<T> {
-  version: number
-  status: 'ok' | 'error' | 'progress'
-  command: string
-  data: T
-  meta: { ts: string; [key: string]: unknown }
-  error: { code?: string; message?: string }
+  version: number;
+  status: "ok" | "error" | "progress";
+  command: string;
+  data: T;
+  meta: { ts: string; [key: string]: unknown };
+  error: { code?: string; message?: string };
 }
 
 /**
@@ -94,7 +98,7 @@ interface ApiEnvelope<T> {
  * @returns An `AgentsListResponse` containing the array of agents and the total count
  */
 export async function listAgents(limit = 100): Promise<AgentsListResponse> {
-  return request<AgentsListResponse>(`/agents?limit=${limit}`)
+  return request<AgentsListResponse>(`/agents?limit=${limit}`);
 }
 
 /**
@@ -104,25 +108,25 @@ export async function listAgents(limit = 100): Promise<AgentsListResponse> {
  * @returns The object containing the requested `agent`.
  */
 export async function getAgent(id: string) {
-  return request<{ agent: AgentsListResponse['agents'][0] }>(`/agents/${id}`)
+  return request<{ agent: AgentsListResponse["agents"][0] }>(`/agents/${id}`);
 }
 
 export interface SpawnAgentParams {
-  role: string
-  prompt: string
-  workspace_id?: string
-  skills_allow?: string[]
+  role: string;
+  prompt: string;
+  workspace_id?: string;
+  skills_allow?: string[];
   // Agent metadata
-  name?: string // Human name (auto-generated if empty)
-  slug?: string // Human-readable handle
+  name?: string; // Human name (auto-generated if empty)
+  slug?: string; // Human-readable handle
   // Execution config
-  exec_mode?: 'reactive' | 'autonomous' | 'proactive' | 'story'
-  max_iterations?: number
-  max_context_tokens?: number
-  max_auto_turns?: number
+  exec_mode?: "reactive" | "autonomous" | "proactive" | "story";
+  max_iterations?: number;
+  max_context_tokens?: number;
+  max_auto_turns?: number;
   // LLM override
-  llm_provider?: string
-  llm_model?: string
+  llm_provider?: string;
+  llm_model?: string;
 }
 
 /**
@@ -131,11 +135,13 @@ export interface SpawnAgentParams {
  * @param params - Parameters for the agent to create (e.g., role, prompt, workspace_id, allowed skills, metadata, execution configuration, and LLM overrides)
  * @returns The `AgentSpawnResponse` containing details about the spawned agent and the operation status
  */
-export async function spawnAgent(params: SpawnAgentParams): Promise<AgentSpawnResponse> {
-  return request<AgentSpawnResponse>('/agents/spawn', {
-    method: 'POST',
+export async function spawnAgent(
+  params: SpawnAgentParams,
+): Promise<AgentSpawnResponse> {
+  return request<AgentSpawnResponse>("/agents/spawn", {
+    method: "POST",
     body: JSON.stringify(params),
-  })
+  });
 }
 
 /**
@@ -143,10 +149,12 @@ export async function spawnAgent(params: SpawnAgentParams): Promise<AgentSpawnRe
  *
  * @returns An object containing `status` describing the outcome and `agent_id` with the id of the deleted agent.
  */
-export async function trashAgent(agentId: string): Promise<{ status: string; agent_id: string }> {
+export async function trashAgent(
+  agentId: string,
+): Promise<{ status: string; agent_id: string }> {
   return request(`/agents/${agentId}`, {
-    method: 'DELETE',
-  })
+    method: "DELETE",
+  });
 }
 
 /**
@@ -156,14 +164,14 @@ export async function trashAgent(agentId: string): Promise<{ status: string; age
  * @returns `ok` indicates whether the kill request succeeded, `session_id` is the daemon session identifier, `status` is the resulting agent status, and `message` contains server-provided details
  */
 export async function killAgent(agentId: string): Promise<{
-  ok: boolean
-  session_id: string
-  status: string
-  message: string
+  ok: boolean;
+  session_id: string;
+  status: string;
+  message: string;
 }> {
   return request(`/agents/${agentId}/daemon/kill`, {
-    method: 'POST',
-  })
+    method: "POST",
+  });
 }
 
 /**
@@ -177,20 +185,20 @@ export async function killAgent(agentId: string): Promise<{
  */
 export async function startAgent(
   agentId: string,
-  params?: { prompt?: string; workspace?: string }
+  params?: { prompt?: string; workspace?: string },
 ): Promise<{
-  session_id: string
-  actor_id: string
-  status: string
+  session_id: string;
+  actor_id: string;
+  status: string;
 }> {
   return request(`/agents/${agentId}/daemon/start`, {
-    method: 'POST',
+    method: "POST",
     body: JSON.stringify(params || {}),
-  })
+  });
 }
 
 export interface PatchAgentParams {
-  conversation_id?: string // empty string to unlink
+  conversation_id?: string; // empty string to unlink
 }
 
 /**
@@ -202,12 +210,12 @@ export interface PatchAgentParams {
  */
 export async function patchAgent(
   agentId: string,
-  params: PatchAgentParams
-): Promise<{ agent: AgentsListResponse['agents'][0] }> {
+  params: PatchAgentParams,
+): Promise<{ agent: AgentsListResponse["agents"][0] }> {
   return request(`/agents/${agentId}`, {
-    method: 'PATCH',
+    method: "PATCH",
     body: JSON.stringify(params),
-  })
+  });
 }
 
 /**
@@ -217,10 +225,10 @@ export async function patchAgent(
  * @returns An object containing `sessions`, an array of `AgentSession` objects, and `count`, the total number of sessions.
  */
 export async function listAgentSessions(agentId: string): Promise<{
-  sessions: AgentSession[]
-  count: number
+  sessions: AgentSession[];
+  count: number;
 }> {
-  return request(`/agents/${agentId}/daemon/sessions`)
+  return request(`/agents/${agentId}/daemon/sessions`);
 }
 
 /**
@@ -234,18 +242,18 @@ export async function listAgentSessions(agentId: string): Promise<{
  * @returns MailboxListResponse containing the matching messages and metadata (e.g., count)
  */
 export async function listMailbox(params: {
-  workspace_id: string
-  actor_id?: string
-  only_unread?: boolean
-  limit?: number
+  workspace_id: string;
+  actor_id?: string;
+  only_unread?: boolean;
+  limit?: number;
 }): Promise<MailboxListResponse> {
-  const query = new URLSearchParams()
-  query.set('workspace_id', params.workspace_id)
-  if (params.actor_id) query.set('actor_id', params.actor_id)
-  if (params.only_unread) query.set('only_unread', 'true')
-  if (params.limit) query.set('limit', String(params.limit))
+  const query = new URLSearchParams();
+  query.set("workspace_id", params.workspace_id);
+  if (params.actor_id) query.set("actor_id", params.actor_id);
+  if (params.only_unread) query.set("only_unread", "true");
+  if (params.limit) query.set("limit", String(params.limit));
 
-  return request<MailboxListResponse>(`/mailbox?${query}`)
+  return request<MailboxListResponse>(`/mailbox?${query}`);
 }
 
 /**
@@ -255,18 +263,18 @@ export async function listMailbox(params: {
  * @returns The created message `id` and its `status`
  */
 export async function sendMessage(params: {
-  workspace_id: string
-  sender: string
-  recipient: string
-  subject: string
-  body: string
-  kind?: string
-  priority?: number
+  workspace_id: string;
+  sender: string;
+  recipient: string;
+  subject: string;
+  body: string;
+  kind?: string;
+  priority?: number;
 }): Promise<{ id: string; status: string }> {
-  return request('/mailbox', {
-    method: 'POST',
+  return request("/mailbox", {
+    method: "POST",
     body: JSON.stringify(params),
-  })
+  });
 }
 
 /**
@@ -280,18 +288,18 @@ export async function sendMessage(params: {
  * @returns A BlackboardListResponse containing matching entries and associated metadata (for example, `count`)
  */
 export async function listBlackboard(params: {
-  ns?: string
-  topic?: string
-  all?: boolean
-  limit?: number
+  ns?: string;
+  topic?: string;
+  all?: boolean;
+  limit?: number;
 }): Promise<BlackboardListResponse> {
-  const query = new URLSearchParams()
-  if (params.ns) query.set('ns', params.ns)
-  if (params.topic) query.set('topic', params.topic)
-  if (params.all) query.set('all', 'true')
-  if (params.limit) query.set('limit', String(params.limit))
+  const query = new URLSearchParams();
+  if (params.ns) query.set("ns", params.ns);
+  if (params.topic) query.set("topic", params.topic);
+  if (params.all) query.set("all", "true");
+  if (params.limit) query.set("limit", String(params.limit));
 
-  return request<BlackboardListResponse>(`/blackboard?${query}`)
+  return request<BlackboardListResponse>(`/blackboard?${query}`);
 }
 
 /**
@@ -304,15 +312,15 @@ export async function listBlackboard(params: {
  * @returns An object with the created entry's `id` and the operation `status`
  */
 export async function postBlackboard(params: {
-  ns?: string
-  topic: string
-  payload: string
-  ttl_sec?: number
+  ns?: string;
+  topic: string;
+  payload: string;
+  ttl_sec?: number;
 }): Promise<{ id: string; status: string }> {
-  return request('/blackboard', {
-    method: 'POST',
+  return request("/blackboard", {
+    method: "POST",
     body: JSON.stringify(params),
-  })
+  });
 }
 
 /**
@@ -321,7 +329,7 @@ export async function postBlackboard(params: {
  * @param id - The blackboard entry identifier to remove
  */
 export async function deleteBlackboard(id: string): Promise<void> {
-  await request(`/blackboard/${id}`, { method: 'DELETE' })
+  await request(`/blackboard/${id}`, { method: "DELETE" });
 }
 
 /**
@@ -335,53 +343,53 @@ export async function deleteBlackboard(id: string): Promise<void> {
  * @returns A LogsListResponse containing the matching log entries and a count.
  */
 export async function getLogs(params: {
-  limit?: number
-  since?: string
-  component?: string
-  operation?: string
-  errors_only?: boolean
+  limit?: number;
+  since?: string;
+  component?: string;
+  operation?: string;
+  errors_only?: boolean;
 }): Promise<LogsListResponse> {
-  const query = new URLSearchParams()
-  if (params.limit) query.set('limit', String(params.limit))
-  if (params.since) query.set('since', params.since)
-  if (params.component) query.set('component', params.component)
-  if (params.operation) query.set('operation', params.operation)
-  if (params.errors_only) query.set('errors_only', 'true')
+  const query = new URLSearchParams();
+  if (params.limit) query.set("limit", String(params.limit));
+  if (params.since) query.set("since", params.since);
+  if (params.component) query.set("component", params.component);
+  if (params.operation) query.set("operation", params.operation);
+  if (params.errors_only) query.set("errors_only", "true");
 
-  return request<LogsListResponse>(`/logs?${query}`)
+  return request<LogsListResponse>(`/logs?${query}`);
 }
 
 // Skills
 export interface SkillParameter {
-  name: string
-  type: string
-  required: boolean
-  description: string
-  enum?: string[]
-  default?: unknown
+  name: string;
+  type: string;
+  required: boolean;
+  description: string;
+  enum?: string[];
+  default?: unknown;
 }
 
 export interface Skill {
-  name: string
-  version: string
-  description: string
-  tags: string[]
-  command: string
-  parameters: SkillParameter[]
-  returns: SkillParameter[]
+  name: string;
+  version: string;
+  description: string;
+  tags: string[];
+  command: string;
+  parameters: SkillParameter[];
+  returns: SkillParameter[];
 }
 
 export interface SkillsListResponse {
-  skills: Skill[]
-  count: number
+  skills: Skill[];
+  count: number;
 }
 
 export interface SkillRunResponse {
-  ok: boolean
-  skill: string
-  output?: unknown
-  error?: string
-  duration_ms: number
+  ok: boolean;
+  skill: string;
+  output?: unknown;
+  error?: string;
+  duration_ms: number;
 }
 
 /**
@@ -390,57 +398,62 @@ export interface SkillRunResponse {
  * @returns The skills list response containing `skills` and `count`.
  */
 export async function listSkills(): Promise<SkillsListResponse> {
-  return request<SkillsListResponse>('/skills')
+  return request<SkillsListResponse>("/skills");
 }
 
 /**
  * Execute a skill via the web API and return the skill runner result.
  */
-export async function runSkill(skill: string, input: Record<string, unknown>): Promise<SkillRunResponse> {
-  return request<SkillRunResponse>('/skills/run', {
-    method: 'POST',
+export async function runSkill(
+  skill: string,
+  input: Record<string, unknown>,
+): Promise<SkillRunResponse> {
+  return request<SkillRunResponse>("/skills/run", {
+    method: "POST",
     body: JSON.stringify({ skill, input }),
-  })
+  });
 }
 
 export interface WorkspaceInfo {
-  path: string
-  name: string
-  session_count: number
-  last_active?: string
-  is_active: boolean
+  path: string;
+  name: string;
+  session_count: number;
+  last_active?: string;
+  is_active: boolean;
 }
 
 // Conversation / session settings
 export interface ConversationSettings {
-  conversation_id: string
-  tools_allow?: string[]
-  llm_provider?: string
-  llm_model?: string
-  exec_mode?: 'reactive' | 'autonomous' | 'proactive' | 'story' | string
-  story_gather_model?: string
-  story_dialogue_model?: string
-  updated_at?: string
+  conversation_id: string;
+  tools_allow?: string[];
+  llm_provider?: string;
+  llm_model?: string;
+  exec_mode?: "reactive" | "autonomous" | "proactive" | "story" | string;
+  story_gather_model?: string;
+  story_dialogue_model?: string;
+  presence_enabled?: boolean;
+  updated_at?: string;
 }
 
 export interface ConversationSettingsPatch {
   // Pass an empty array to clear. Omit to leave unchanged.
-  tools_allow?: string[]
+  tools_allow?: string[];
   // Pass empty string to clear. Omit to leave unchanged.
-  llm_provider?: string
-  llm_model?: string
+  llm_provider?: string;
+  llm_model?: string;
   // Pass empty string to clear. Omit to leave unchanged.
-  exec_mode?: '' | 'reactive' | 'autonomous' | 'proactive' | 'story'
-  story_gather_model?: string
-  story_dialogue_model?: string
+  exec_mode?: "" | "reactive" | "autonomous" | "proactive" | "story";
+  story_gather_model?: string;
+  story_dialogue_model?: string;
+  presence_enabled?: boolean;
 }
 
 export async function listWorkspaces(): Promise<{
-  workspaces: WorkspaceInfo[]
-  count: number
-  current: string
+  workspaces: WorkspaceInfo[];
+  count: number;
+  current: string;
 }> {
-  return request('/workspaces')
+  return request("/workspaces");
 }
 
 /**
@@ -449,17 +462,19 @@ export async function listWorkspaces(): Promise<{
  * @returns An object with `status` containing the current health state (for example, `"ok"`).
  */
 export async function getHealth(): Promise<{ status: string }> {
-  return request('/health')
+  return request("/health");
 }
 
 /**
  * Fetch per-conversation settings for a companion conversation.
  */
-export async function getCompanionConversationSettings(conversationId: string): Promise<{
-  conversation_id: string
-  settings: ConversationSettings
+export async function getCompanionConversationSettings(
+  conversationId: string,
+): Promise<{
+  conversation_id: string;
+  settings: ConversationSettings;
 }> {
-  return request(`/companion/conversations/${conversationId}/settings`)
+  return request(`/companion/conversations/${conversationId}/settings`);
 }
 
 /**
@@ -469,34 +484,36 @@ export async function getCompanionConversationSettings(conversationId: string): 
  */
 export async function patchCompanionConversationSettings(
   conversationId: string,
-  patch: ConversationSettingsPatch
+  patch: ConversationSettingsPatch,
 ): Promise<{
-  conversation_id: string
-  settings: ConversationSettings
+  conversation_id: string;
+  settings: ConversationSettings;
 }> {
   return request(`/companion/conversations/${conversationId}/settings`, {
-    method: 'PATCH',
+    method: "PATCH",
     body: JSON.stringify(patch),
-  })
+  });
 }
 
 /**
  * Delete all per-conversation settings for a companion conversation (reset to defaults).
  */
-export async function deleteCompanionConversationSettings(conversationId: string): Promise<{ ok: boolean; message: string }> {
+export async function deleteCompanionConversationSettings(
+  conversationId: string,
+): Promise<{ ok: boolean; message: string }> {
   return request(`/companion/conversations/${conversationId}/settings`, {
-    method: 'DELETE',
-  })
+    method: "DELETE",
+  });
 }
 
 /**
  * Fetch per-session settings for a console session.
  */
 export async function getConsoleSessionSettings(sessionId: string): Promise<{
-  session_id: string
-  settings: ConversationSettings
+  session_id: string;
+  settings: ConversationSettings;
 }> {
-  return request(`/console/sessions/${sessionId}/settings`)
+  return request(`/console/sessions/${sessionId}/settings`);
 }
 
 /**
@@ -504,110 +521,137 @@ export async function getConsoleSessionSettings(sessionId: string): Promise<{
  */
 export async function patchConsoleSessionSettings(
   sessionId: string,
-  patch: ConversationSettingsPatch
+  patch: ConversationSettingsPatch,
 ): Promise<{
-  session_id: string
-  settings: ConversationSettings
+  session_id: string;
+  settings: ConversationSettings;
 }> {
   return request(`/console/sessions/${sessionId}/settings`, {
-    method: 'PATCH',
+    method: "PATCH",
     body: JSON.stringify(patch),
-  })
+  });
 }
 
 /**
  * Delete all per-session settings for a console session (reset to defaults).
  */
-export async function deleteConsoleSessionSettings(sessionId: string): Promise<{ ok: boolean; message: string }> {
+export async function deleteConsoleSessionSettings(
+  sessionId: string,
+): Promise<{ ok: boolean; message: string }> {
   return request(`/console/sessions/${sessionId}/settings`, {
-    method: 'DELETE',
-  })
+    method: "DELETE",
+  });
 }
 
 // Console Sessions
 export interface ConsoleSession {
-  id: string
-  workspace: string
-  profile: string
-  created: string
-  last_activity?: string
-  message_count: number
-  client_count?: number
+  id: string;
+  workspace: string;
+  profile: string;
+  created: string;
+  last_activity?: string;
+  message_count: number;
+  client_count?: number;
 }
 
 export interface ConsoleMessage {
-  id?: string
-  role: 'user' | 'assistant'
-  content: string
+  id?: string;
+  role: "user" | "assistant";
+  content: string;
   // Server may return unix millis; UI may construct ISO strings.
-  timestamp: string | number
-  correlation_id?: string
-  tool_calls?: ToolCall[]
+  timestamp: string | number;
+  correlation_id?: string;
+  tool_calls?: ToolCall[];
   // Raw metadata returned by the console session backend (tool calls, injected contexts, etc.)
-  metadata?: Record<string, unknown>
+  metadata?: Record<string, unknown>;
+  presence?: PresenceBundle;
 }
 
 export interface ToolCall {
-  name: string
-  input?: Record<string, unknown>
-  output?: string
-  status: 'pending' | 'completed' | 'error'
+  name: string;
+  input?: Record<string, unknown>;
+  output?: string;
+  status: "pending" | "completed" | "error";
 }
 
 interface RawConsoleMessage {
-  id?: string
-  role: string
-  content: string
-  timestamp: string | number
-  correlation_id?: string
-  tool_calls?: unknown
-  metadata?: Record<string, unknown>
+  id?: string;
+  role: string;
+  content: string;
+  timestamp: string | number;
+  correlation_id?: string;
+  tool_calls?: unknown;
+  metadata?: Record<string, unknown>;
+  presence?: unknown;
 }
 
 function normalizeConsoleMessage(msg: RawConsoleMessage): ConsoleMessage {
   return {
     id: msg.id,
-    role: msg.role === 'user' ? 'user' : 'assistant',
+    role: msg.role === "user" ? "user" : "assistant",
     content: msg.content,
     timestamp: msg.timestamp,
     correlation_id: msg.correlation_id,
     tool_calls: extractToolCalls(msg),
     metadata: msg.metadata,
+    presence: extractPresence(msg),
+  };
+}
+
+function extractPresence(msg: RawConsoleMessage): PresenceBundle | undefined {
+  const candidate = msg.presence ?? msg.metadata?.["presence"];
+  if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) {
+    return undefined;
   }
+  return candidate as PresenceBundle;
 }
 
 function extractToolCalls(msg: RawConsoleMessage): ToolCall[] | undefined {
-  const meta = msg.metadata
-  const metaToolCalls = meta?.['tool_calls']
-  const rawToolCalls = Array.isArray(metaToolCalls) ? metaToolCalls : Array.isArray(msg.tool_calls) ? msg.tool_calls : null
-  if (!rawToolCalls || rawToolCalls.length === 0) return undefined
+  const meta = msg.metadata;
+  const metaToolCalls = meta?.["tool_calls"];
+  const rawToolCalls = Array.isArray(metaToolCalls)
+    ? metaToolCalls
+    : Array.isArray(msg.tool_calls)
+      ? msg.tool_calls
+      : null;
+  if (!rawToolCalls || rawToolCalls.length === 0) return undefined;
 
-  const normalized: ToolCall[] = []
+  const normalized: ToolCall[] = [];
   for (const tc of rawToolCalls) {
-    if (!tc || typeof tc !== 'object') continue
-    const tco = tc as Record<string, unknown>
+    if (!tc || typeof tc !== "object") continue;
+    const tco = tc as Record<string, unknown>;
 
-    const name = typeof tco.name === 'string' ? tco.name : typeof tco.tool === 'string' ? tco.tool : ''
-    if (!name) continue
+    const name =
+      typeof tco.name === "string"
+        ? tco.name
+        : typeof tco.tool === "string"
+          ? tco.tool
+          : "";
+    if (!name) continue;
 
-    const args = tco.arguments ?? tco.input
-    let input: Record<string, unknown> | undefined
-    if (args && typeof args === 'object' && !Array.isArray(args)) {
-      input = args as Record<string, unknown>
+    const args = tco.arguments ?? tco.input;
+    let input: Record<string, unknown> | undefined;
+    if (args && typeof args === "object" && !Array.isArray(args)) {
+      input = args as Record<string, unknown>;
     }
 
-    const output = typeof tco.result === 'string' ? tco.result : typeof tco.output === 'string' ? tco.output : undefined
-    const isError = Boolean(tco.is_error ?? tco.error ?? false)
+    const output =
+      typeof tco.result === "string"
+        ? tco.result
+        : typeof tco.output === "string"
+          ? tco.output
+          : undefined;
+    const isError = Boolean(tco.is_error ?? tco.error ?? false);
 
     normalized.push({
       name,
       input,
       output,
-      status: isError ? 'error' : output ? 'completed' : 'pending',
-    })
+      status: isError ? "error" : output ? "completed" : "pending",
+    });
   }
 
-  return normalized.length > 0 ? normalized : undefined
+  return normalized.length > 0 ? normalized : undefined;
 }
 
 /**
@@ -617,11 +661,11 @@ function extractToolCalls(msg: RawConsoleMessage): ToolCall[] | undefined {
  * @returns An object containing `sessions` (array of ConsoleSession) and `count` (total number of sessions matching the query)
  */
 export async function listConsoleSessions(workspace?: string): Promise<{
-  sessions: ConsoleSession[]
-  count: number
+  sessions: ConsoleSession[];
+  count: number;
 }> {
-  const query = workspace ? `?workspace=${encodeURIComponent(workspace)}` : ''
-  return request(`/console/sessions${query}`)
+  const query = workspace ? `?workspace=${encodeURIComponent(workspace)}` : "";
+  return request(`/console/sessions${query}`);
 }
 
 /**
@@ -642,59 +686,69 @@ export async function listConsoleSessions(workspace?: string): Promise<{
  * @returns The created `session`
  */
 export async function createConsoleSession(params: {
-  workspace?: string
-  profile?: string
-  system_prompt?: string
-  llm_provider?: string
-  llm_model?: string
-  tools_allow?: string[]
-  exec_mode?: 'reactive' | 'autonomous' | 'proactive' | 'story'
-  story_gather_model?: string
-  story_dialogue_model?: string
+  workspace?: string;
+  profile?: string;
+  system_prompt?: string;
+  llm_provider?: string;
+  llm_model?: string;
+  tools_allow?: string[];
+  exec_mode?: "reactive" | "autonomous" | "proactive" | "story";
+  story_gather_model?: string;
+  story_dialogue_model?: string;
   // Deprecated/back-compat fields
-  conversation_id?: string
-  tool_model?: string
-  response_model?: string
+  conversation_id?: string;
+  tool_model?: string;
+  response_model?: string;
 }): Promise<{ session: ConsoleSession }> {
   const body: Record<string, unknown> = {
     workspace: params.workspace,
     profile: params.profile,
     system_prompt: params.system_prompt,
-  }
+  };
 
   // Preferred: explicit provider/model.
-  if (params.llm_provider !== undefined) body.llm_provider = params.llm_provider
-  if (params.llm_model !== undefined) body.llm_model = params.llm_model
+  if (params.llm_provider !== undefined)
+    body.llm_provider = params.llm_provider;
+  if (params.llm_model !== undefined) body.llm_model = params.llm_model;
 
   // Preferred: tool allowlist + exec mode.
-  if (params.tools_allow !== undefined) body.tools_allow = params.tools_allow
-  if (params.exec_mode !== undefined) body.exec_mode = params.exec_mode
+  if (params.tools_allow !== undefined) body.tools_allow = params.tools_allow;
+  if (params.exec_mode !== undefined) body.exec_mode = params.exec_mode;
 
   // Preferred: story defaults.
-  if (params.story_gather_model !== undefined) body.story_gather_model = params.story_gather_model
-  if (params.story_dialogue_model !== undefined) body.story_dialogue_model = params.story_dialogue_model
+  if (params.story_gather_model !== undefined)
+    body.story_gather_model = params.story_gather_model;
+  if (params.story_dialogue_model !== undefined)
+    body.story_dialogue_model = params.story_dialogue_model;
 
   // Back-compat: 2-stage model fields. Console sessions currently support a single model;
   // we map the "response model" to `llm_model` and default provider to openrouter.
-  const legacyToolModel = typeof params.tool_model === 'string' ? params.tool_model.trim() : ''
-  const legacyResponseModel = typeof params.response_model === 'string' ? params.response_model.trim() : ''
-  if (params.llm_provider === undefined && (legacyToolModel || legacyResponseModel)) {
-    body.llm_provider = 'openrouter'
+  const legacyToolModel =
+    typeof params.tool_model === "string" ? params.tool_model.trim() : "";
+  const legacyResponseModel =
+    typeof params.response_model === "string"
+      ? params.response_model.trim()
+      : "";
+  if (
+    params.llm_provider === undefined &&
+    (legacyToolModel || legacyResponseModel)
+  ) {
+    body.llm_provider = "openrouter";
   }
   if (params.llm_model === undefined && legacyResponseModel) {
-    body.llm_model = legacyResponseModel
+    body.llm_model = legacyResponseModel;
   }
   if (params.story_gather_model === undefined && legacyToolModel) {
-    body.story_gather_model = legacyToolModel
+    body.story_gather_model = legacyToolModel;
   }
   if (params.story_dialogue_model === undefined && legacyResponseModel) {
-    body.story_dialogue_model = legacyResponseModel
+    body.story_dialogue_model = legacyResponseModel;
   }
 
-  return request('/console/sessions', {
-    method: 'POST',
+  return request("/console/sessions", {
+    method: "POST",
     body: JSON.stringify(body),
-  })
+  });
 }
 
 /**
@@ -704,28 +758,28 @@ export async function createConsoleSession(params: {
  * @returns An object containing `session` (the session metadata), `messages` (array of console messages), and `inflight` (`true` when the session has active inflight activity, `false` otherwise)
  */
 export async function getConsoleSession(sessionId: string): Promise<{
-  session: ConsoleSession
-  messages: ConsoleMessage[]
-  inflight: boolean
+  session: ConsoleSession;
+  messages: ConsoleMessage[];
+  inflight: boolean;
 }> {
   const data = await request<{
-    session: ConsoleSession
-    messages: RawConsoleMessage[]
-    inflight: string
-  }>(`/console/sessions/${sessionId}`)
+    session: ConsoleSession;
+    messages: RawConsoleMessage[];
+    inflight: string;
+  }>(`/console/sessions/${sessionId}`);
 
   return {
     session: data.session,
     messages: (data.messages || []).map(normalizeConsoleMessage),
     inflight: Boolean(data.inflight),
-  }
+  };
 }
 
 /**
  * Delete a console session by its ID.
  */
 export async function deleteConsoleSession(sessionId: string): Promise<void> {
-  await request(`/console/sessions/${sessionId}`, { method: 'DELETE' })
+  await request(`/console/sessions/${sessionId}`, { method: "DELETE" });
 }
 
 /**
@@ -739,28 +793,46 @@ export async function askConsoleSession(
   sessionId: string,
   content: string,
   correlationId?: string,
-  overrides?: { llm_provider?: string; llm_model?: string; tool_model?: string; response_model?: string }
+  overrides?: {
+    llm_provider?: string;
+    llm_model?: string;
+    tool_model?: string;
+    response_model?: string;
+  },
 ): Promise<{ ok: boolean; correlation_id: string }> {
-  const body: Record<string, unknown> = { content, correlation_id: correlationId }
+  const body: Record<string, unknown> = {
+    content,
+    correlation_id: correlationId,
+  };
 
   if (overrides) {
-    if (overrides.llm_provider !== undefined) body.llm_provider = overrides.llm_provider
-    if (overrides.llm_model !== undefined) body.llm_model = overrides.llm_model
+    if (overrides.llm_provider !== undefined)
+      body.llm_provider = overrides.llm_provider;
+    if (overrides.llm_model !== undefined) body.llm_model = overrides.llm_model;
 
-    const legacyToolModel = typeof overrides.tool_model === 'string' ? overrides.tool_model.trim() : ''
-    const legacyResponseModel = typeof overrides.response_model === 'string' ? overrides.response_model.trim() : ''
-    if (overrides.llm_provider === undefined && (legacyToolModel || legacyResponseModel)) {
-      body.llm_provider = 'openrouter'
+    const legacyToolModel =
+      typeof overrides.tool_model === "string"
+        ? overrides.tool_model.trim()
+        : "";
+    const legacyResponseModel =
+      typeof overrides.response_model === "string"
+        ? overrides.response_model.trim()
+        : "";
+    if (
+      overrides.llm_provider === undefined &&
+      (legacyToolModel || legacyResponseModel)
+    ) {
+      body.llm_provider = "openrouter";
     }
     if (overrides.llm_model === undefined && legacyResponseModel) {
-      body.llm_model = legacyResponseModel
+      body.llm_model = legacyResponseModel;
     }
   }
 
   return request(`/console/sessions/${sessionId}/ask`, {
-    method: 'POST',
+    method: "POST",
     body: JSON.stringify(body),
-  })
+  });
 }
 
 /**
@@ -772,12 +844,12 @@ export async function askConsoleSession(
  */
 export async function cancelConsoleSession(
   sessionId: string,
-  correlationId?: string
+  correlationId?: string,
 ): Promise<{ ok: boolean }> {
   return request(`/console/sessions/${sessionId}/cancel`, {
-    method: 'POST',
+    method: "POST",
     body: JSON.stringify({ correlation_id: correlationId }),
-  })
+  });
 }
 
 /**
@@ -787,32 +859,32 @@ export async function cancelConsoleSession(
  * @returns An object with `messages` — an array of ConsoleMessage entries, and `count` — the total number of messages
  */
 export async function getConsoleMessages(sessionId: string): Promise<{
-  messages: ConsoleMessage[]
-  count: number
+  messages: ConsoleMessage[];
+  count: number;
 }> {
   const data = await request<{
-    messages: RawConsoleMessage[]
-    count: number
-  }>(`/console/sessions/${sessionId}/messages`)
+    messages: RawConsoleMessage[];
+    count: number;
+  }>(`/console/sessions/${sessionId}/messages`);
 
   return {
     messages: (data.messages || []).map(normalizeConsoleMessage),
     count: data.count,
-  }
+  };
 }
 
 // Provider Availability
 
 export interface ProviderAvailability {
-  id: string
-  available: boolean
+  id: string;
+  available: boolean;
 }
 
 export interface ProvidersResponse {
-  ok: boolean
-  providers: ProviderAvailability[]
-  default_provider: string
-  voyage_available: boolean
+  ok: boolean;
+  providers: ProviderAvailability[];
+  default_provider: string;
+  voyage_available: boolean;
 }
 
 /**
@@ -821,58 +893,67 @@ export interface ProvidersResponse {
  * @returns A ProvidersResponse with availability info per provider, the default provider, and Voyage status
  */
 export async function getProviderAvailability(): Promise<ProvidersResponse> {
-  return request<ProvidersResponse>('/companion/providers')
+  return request<ProvidersResponse>("/companion/providers");
 }
 
 // Companion Memory
 
 export interface CompanionMemoryStats {
-  conversation_id: string
-  total_turns: number
-  day_summaries: number
-  has_distilled_history: boolean
-  last_summarized_date?: string
-  last_distilled_date?: string
+  conversation_id: string;
+  total_turns: number;
+  day_summaries: number;
+  has_distilled_history: boolean;
+  last_summarized_date?: string;
+  last_distilled_date?: string;
 }
 
 /**
  * Fetches memory statistics for a companion conversation.
  */
-export async function getCompanionMemoryStats(conversationId: string): Promise<CompanionMemoryStats> {
-  return request<CompanionMemoryStats>(`/companion/memory/${conversationId}/stats`)
+export async function getCompanionMemoryStats(
+  conversationId: string,
+): Promise<CompanionMemoryStats> {
+  return request<CompanionMemoryStats>(
+    `/companion/memory/${conversationId}/stats`,
+  );
 }
 
 /**
  * Fetches the formatted memory context for a companion conversation.
  */
-export async function getCompanionMemoryContext(conversationId: string): Promise<{ context: string }> {
-  return request<{ context: string }>(`/companion/memory/${conversationId}/context`)
+export async function getCompanionMemoryContext(
+  conversationId: string,
+): Promise<{ context: string }> {
+  return request<{ context: string }>(
+    `/companion/memory/${conversationId}/context`,
+  );
 }
 
 // Companion Chat
 
 // Detailed tool call information from companion chat
 export interface ToolCallDetail {
-  id: string
-  name: string
-  arguments?: unknown
-  output?: string // Result from executing the tool
+  id: string;
+  name: string;
+  arguments?: unknown;
+  output?: string; // Result from executing the tool
 }
 
 // Context injected by hooks during tool execution
 export interface InjectedContextDetail {
-  tool_call_id: string
-  source?: string
-  content: string
+  tool_call_id: string;
+  source?: string;
+  content: string;
 }
 
 export interface CompanionChatResponse {
-  response: string
-  conversation_id: string
-  memory_context?: string
-  tools_used?: string[]
-  tool_calls?: ToolCallDetail[]
-  injected_contexts?: InjectedContextDetail[]
+  response: string;
+  conversation_id: string;
+  memory_context?: string;
+  tools_used?: string[];
+  tool_calls?: ToolCallDetail[];
+  injected_contexts?: InjectedContextDetail[];
+  presence?: PresenceBundle;
 }
 
 /**
@@ -884,21 +965,21 @@ export interface CompanionChatResponse {
  * @returns A CompanionChatResponse containing the companion's reply, conversation ID, memory context, tools used, tool call details, and any injected contexts
  */
 export async function companionChat(params: {
-  conversation_id: string
-  message: string
-  workspace?: string
-  max_history_turns?: number
-  llm_provider?: string
-  llm_model?: string
-  exec_mode?: 'reactive' | 'autonomous' | 'proactive' | 'story'
-  story_gather_model?: string
-  story_dialogue_model?: string
-  context?: Record<string, unknown>
+  conversation_id: string;
+  message: string;
+  workspace?: string;
+  max_history_turns?: number;
+  llm_provider?: string;
+  llm_model?: string;
+  exec_mode?: "reactive" | "autonomous" | "proactive" | "story";
+  story_gather_model?: string;
+  story_dialogue_model?: string;
+  context?: Record<string, unknown>;
 }): Promise<CompanionChatResponse> {
-  return request('/companion/chat', {
-    method: 'POST',
+  return request("/companion/chat", {
+    method: "POST",
     body: JSON.stringify(params),
-  })
+  });
 }
 
 /**
@@ -909,26 +990,26 @@ export async function companionChat(params: {
  */
 export async function listCompanionConversations(limit = 50): Promise<{
   conversations: Array<{
-    id: string
-    title?: string
-    name?: string  // Custom title from database
-    agent_id?: string // Linked agent ID
-    created_at: string
-    updated_at: string
-    message_count: number
-  }>
+    id: string;
+    title?: string;
+    name?: string; // Custom title from database
+    agent_id?: string; // Linked agent ID
+    created_at: string;
+    updated_at: string;
+    message_count: number;
+  }>;
 }> {
-  return request(`/companion/conversations?limit=${limit}`)
+  return request(`/companion/conversations?limit=${limit}`);
 }
 
 export interface CompanionMessage {
-  id: string
-  conversation_id: string
-  role: 'user' | 'assistant'
-  content: string
-  token_count: number
-  created_at: string
-  tool_calls?: ToolCallDetail[]
+  id: string;
+  conversation_id: string;
+  role: "user" | "assistant";
+  content: string;
+  token_count: number;
+  created_at: string;
+  tool_calls?: ToolCallDetail[];
 }
 
 /**
@@ -940,13 +1021,15 @@ export interface CompanionMessage {
  */
 export async function getCompanionConversationMessages(
   conversationId: string,
-  limit = 100
+  limit = 100,
 ): Promise<{
-  conversation_id: string
-  messages: CompanionMessage[]
-  count: number
+  conversation_id: string;
+  messages: CompanionMessage[];
+  count: number;
 }> {
-  return request(`/companion/conversations/${conversationId}/messages?limit=${limit}`)
+  return request(
+    `/companion/conversations/${conversationId}/messages?limit=${limit}`,
+  );
 }
 
 /**
@@ -958,11 +1041,14 @@ export async function getCompanionConversationMessages(
  */
 export async function deleteCompanionMessage(
   conversationId: string,
-  messageId: string
+  messageId: string,
 ): Promise<{ ok: boolean; message: string }> {
-  return request(`/companion/conversations/${conversationId}/messages/${messageId}`, {
-    method: 'DELETE',
-  })
+  return request(
+    `/companion/conversations/${conversationId}/messages/${messageId}`,
+    {
+      method: "DELETE",
+    },
+  );
 }
 
 /**
@@ -971,11 +1057,11 @@ export async function deleteCompanionMessage(
  * @returns An object where `ok` is `true` if the operation succeeded, and `message` contains a status description.
  */
 export async function deleteCompanionConversation(
-  conversationId: string
+  conversationId: string,
 ): Promise<{ ok: boolean; message: string }> {
   return request(`/companion/conversations/${conversationId}`, {
-    method: 'DELETE',
-  })
+    method: "DELETE",
+  });
 }
 
 /**
@@ -988,24 +1074,24 @@ export async function deleteCompanionConversation(
 export async function renameCompanionConversation(
   conversationId: string,
   title: string,
-  agentId?: string | null
+  agentId?: string | null,
 ): Promise<{ ok: boolean; message: string }> {
-  const body: Record<string, unknown> = { title }
+  const body: Record<string, unknown> = { title };
   if (agentId !== undefined) {
-    body.agent_id = agentId ?? ''
+    body.agent_id = agentId ?? "";
   }
   return request(`/companion/conversations/${conversationId}`, {
-    method: 'PATCH',
+    method: "PATCH",
     body: JSON.stringify(body),
-  })
+  });
 }
 
 export interface CompanionCompressionResult {
-  conversation_id: string
-  processed_dates?: string[]
-  summarized: number
-  skipped: number
-  distilled: boolean
+  conversation_id: string;
+  processed_dates?: string[];
+  summarized: number;
+  skipped: number;
+  distilled: boolean;
 }
 
 /**
@@ -1017,49 +1103,49 @@ export interface CompanionCompressionResult {
 export async function compressCompanionConversation(
   conversationId: string,
   params: {
-    include_today?: boolean
-    max_days?: number
-    force?: boolean
-    distill?: boolean
-    llm_provider?: string
-    llm_model?: string
-  } = {}
+    include_today?: boolean;
+    max_days?: number;
+    force?: boolean;
+    distill?: boolean;
+    llm_provider?: string;
+    llm_model?: string;
+  } = {},
 ): Promise<CompanionCompressionResult> {
   const env = await request<ApiEnvelope<CompanionCompressionResult>>(
     `/companion/conversations/${conversationId}/compress`,
     {
-      method: 'POST',
+      method: "POST",
       body: JSON.stringify(params),
-    }
-  )
-  if (env.status !== 'ok') {
-    throw new Error(env.error?.message || 'Compression failed')
+    },
+  );
+  if (env.status !== "ok") {
+    throw new Error(env.error?.message || "Compression failed");
   }
-  return env.data
+  return env.data;
 }
 
 // Personality dimensions (0.0 to 1.0 scale)
 export interface PersonalityDimension {
-  name: string
-  description: string
-  value: number
-  min_label: string
-  max_label: string
+  name: string;
+  description: string;
+  value: number;
+  min_label: string;
+  max_label: string;
 }
 
 // Full personality profile
 export interface PersonalityProfile {
-  dimensions: PersonalityDimension[]
-  learned_traits: string[]
-  interests: string[]
-  dislikes: string[]
+  dimensions: PersonalityDimension[];
+  learned_traits: string[];
+  interests: string[];
+  dislikes: string[];
 }
 
 // Personality info response
 export interface PersonalityInfo {
-  profile: PersonalityProfile
-  system_prompt: string
-  memory_context?: string
+  profile: PersonalityProfile;
+  system_prompt: string;
+  memory_context?: string;
 }
 
 /**
@@ -1069,9 +1155,9 @@ export interface PersonalityInfo {
  * @returns The conversation's `PersonalityInfo` containing the personality profile, system prompt, and memory context
  */
 export async function getCompanionPersonality(
-  conversationId: string
+  conversationId: string,
 ): Promise<PersonalityInfo> {
-  return request(`/companion/conversations/${conversationId}/personality`)
+  return request(`/companion/conversations/${conversationId}/personality`);
 }
 
 /**
@@ -1085,54 +1171,57 @@ export async function getCompanionPersonality(
 export async function updatePersonalityDimension(
   conversationId: string,
   name: string,
-  value: number
+  value: number,
 ): Promise<{ success: boolean; name: string; value: number }> {
-  return request(`/companion/conversations/${conversationId}/personality/dimension`, {
-    method: 'PATCH',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name, value }),
-  })
+  return request(
+    `/companion/conversations/${conversationId}/personality/dimension`,
+    {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name, value }),
+    },
+  );
 }
 
 // Persisted Sessions (Claude Code sessions stored in sessions.db)
 export interface PersistedSession {
-  id: string
-  workspace_path: string
-  project_name?: string
-  git_branch?: string
-  claude_version?: string
-  started_at: string
-  ended_at?: string
-  summary?: string
-  accomplished?: string[]
-  decisions?: string[]
-  gotchas?: string[]
-  tags?: string[]
-  key_files?: string[]
-  tools_pattern?: string
-  message_count: number
-  user_turns: number
-  tool_invocations: number
-  total_tokens: number
-  status: string
-  agent_id: string
-  agent_type?: string
-  parent_session_id?: string
+  id: string;
+  workspace_path: string;
+  project_name?: string;
+  git_branch?: string;
+  claude_version?: string;
+  started_at: string;
+  ended_at?: string;
+  summary?: string;
+  accomplished?: string[];
+  decisions?: string[];
+  gotchas?: string[];
+  tags?: string[];
+  key_files?: string[];
+  tools_pattern?: string;
+  message_count: number;
+  user_turns: number;
+  tool_invocations: number;
+  total_tokens: number;
+  status: string;
+  agent_id: string;
+  agent_type?: string;
+  parent_session_id?: string;
 }
 
 export interface SessionMessage {
-  index: number
-  type: string
-  timestamp: string
-  uuid?: string
-  summary?: string
-  error?: string
+  index: number;
+  type: string;
+  timestamp: string;
+  uuid?: string;
+  summary?: string;
+  error?: string;
   message?: {
-    role?: string
-    content?: unknown
-  }
-  tool_calls?: string[]
-  files_touched?: string[]
+    role?: string;
+    content?: unknown;
+  };
+  tool_calls?: string[];
+  files_touched?: string[];
 }
 
 /**
@@ -1144,22 +1233,22 @@ export interface SessionMessage {
  * @returns An object with `sessions` (array of persisted sessions), `total` (total matching sessions), `limit` (applied limit) and `offset` (applied offset).
  */
 export async function listPersistedSessions(params?: {
-  workspace?: string
-  limit?: number
-  offset?: number
+  workspace?: string;
+  limit?: number;
+  offset?: number;
 }): Promise<{
-  sessions: PersistedSession[]
-  total: number
-  limit: number
-  offset: number
+  sessions: PersistedSession[];
+  total: number;
+  limit: number;
+  offset: number;
 }> {
-  const query = new URLSearchParams()
-  if (params?.workspace) query.set('workspace', params.workspace)
-  if (params?.limit) query.set('limit', String(params.limit))
-  if (params?.offset) query.set('offset', String(params.offset))
+  const query = new URLSearchParams();
+  if (params?.workspace) query.set("workspace", params.workspace);
+  if (params?.limit) query.set("limit", String(params.limit));
+  if (params?.offset) query.set("offset", String(params.offset));
 
-  const queryStr = query.toString()
-  return request(`/sessions${queryStr ? `?${queryStr}` : ''}`)
+  const queryStr = query.toString();
+  return request(`/sessions${queryStr ? `?${queryStr}` : ""}`);
 }
 
 /**
@@ -1169,9 +1258,9 @@ export async function listPersistedSessions(params?: {
  * @returns An object containing the `session` (`PersistedSession`)
  */
 export async function getPersistedSession(sessionId: string): Promise<{
-  session: PersistedSession
+  session: PersistedSession;
 }> {
-  return request(`/sessions/${sessionId}`)
+  return request(`/sessions/${sessionId}`);
 }
 
 /**
@@ -1183,18 +1272,20 @@ export async function getPersistedSession(sessionId: string): Promise<{
  */
 export async function getSessionMessages(
   sessionId: string,
-  params?: { limit?: number; offset?: number }
+  params?: { limit?: number; offset?: number },
 ): Promise<{
-  messages: SessionMessage[]
-  total: number
-  limit: number
-  offset: number
-  path?: string
+  messages: SessionMessage[];
+  total: number;
+  limit: number;
+  offset: number;
+  path?: string;
 }> {
-  const query = new URLSearchParams()
-  if (params?.limit) query.set('limit', String(params.limit))
-  if (params?.offset) query.set('offset', String(params.offset))
+  const query = new URLSearchParams();
+  if (params?.limit) query.set("limit", String(params.limit));
+  if (params?.offset) query.set("offset", String(params.offset));
 
-  const queryStr = query.toString()
-  return request(`/sessions/${sessionId}/messages${queryStr ? `?${queryStr}` : ''}`)
+  const queryStr = query.toString();
+  return request(
+    `/sessions/${sessionId}/messages${queryStr ? `?${queryStr}` : ""}`,
+  );
 }

@@ -35,7 +35,22 @@ type Settings struct {
 	StoryGatherModel   string `json:"story_gather_model,omitempty"`
 	StoryDialogueModel string `json:"story_dialogue_model,omitempty"`
 
+	// PresenceEnabled controls multimodal presence generation.
+	// Nil means "enabled by default".
+	PresenceEnabled *bool `json:"presence_enabled,omitempty"`
+
 	UpdatedAt string `json:"updated_at,omitempty"`
+}
+
+// IsPresenceEnabled returns true when presence is enabled or unset.
+func (s *Settings) IsPresenceEnabled() bool {
+	if s == nil {
+		return true
+	}
+	if s.PresenceEnabled == nil {
+		return true
+	}
+	return *s.PresenceEnabled
 }
 
 // Patch represents a partial update. Nil fields are "no change".
@@ -49,6 +64,7 @@ type Patch struct {
 
 	StoryGatherModel   *string `json:"story_gather_model,omitempty"`
 	StoryDialogueModel *string `json:"story_dialogue_model,omitempty"`
+	PresenceEnabled    *bool   `json:"presence_enabled,omitempty"`
 }
 
 // Store persists per-conversation settings.
@@ -106,6 +122,7 @@ CREATE TABLE IF NOT EXISTS conversation_settings (
 	exec_mode TEXT,
 	story_gather_model TEXT,
 	story_dialogue_model TEXT,
+	presence_enabled INTEGER,
 
 	updated_at TEXT NOT NULL
 );
@@ -113,6 +130,14 @@ CREATE TABLE IF NOT EXISTS conversation_settings (
 	_, err := db.ExecContext(ctx, ddl)
 	if err != nil {
 		return fmt.Errorf("conversationsettings: migrate: %w", err)
+	}
+	// Best-effort backfill for existing DBs.
+	if _, err := db.ExecContext(ctx, `ALTER TABLE conversation_settings ADD COLUMN presence_enabled INTEGER`); err != nil {
+		msg := strings.ToLower(err.Error())
+		if !strings.Contains(msg, "duplicate column name") &&
+			!strings.Contains(msg, "already exists") {
+			return fmt.Errorf("conversationsettings: migrate add presence_enabled: %w", err)
+		}
 	}
 	return nil
 }
@@ -136,13 +161,14 @@ func (s *sqlStore) getWithQuerier(ctx context.Context, q querier, conversationID
 
 	var toolsJSON sql.NullString
 	var llmProvider, llmModel, execMode, gatherModel, dialogueModel sql.NullString
+	var presenceEnabled sql.NullInt64
 	var updatedAt string
 
 	err := q.QueryRowContext(ctx, `
-		SELECT tools_allow_json, llm_provider, llm_model, exec_mode, story_gather_model, story_dialogue_model, updated_at
+		SELECT tools_allow_json, llm_provider, llm_model, exec_mode, story_gather_model, story_dialogue_model, presence_enabled, updated_at
 		FROM conversation_settings
 		WHERE conversation_id = ?
-	`, conversationID).Scan(&toolsJSON, &llmProvider, &llmModel, &execMode, &gatherModel, &dialogueModel, &updatedAt)
+	`, conversationID).Scan(&toolsJSON, &llmProvider, &llmModel, &execMode, &gatherModel, &dialogueModel, &presenceEnabled, &updatedAt)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return Settings{}, ErrNotFound
@@ -162,6 +188,10 @@ func (s *sqlStore) getWithQuerier(ctx context.Context, q querier, conversationID
 	out.ExecMode = execMode.String
 	out.StoryGatherModel = gatherModel.String
 	out.StoryDialogueModel = dialogueModel.String
+	if presenceEnabled.Valid {
+		v := presenceEnabled.Int64 != 0
+		out.PresenceEnabled = &v
+	}
 	out.UpdatedAt = updatedAt
 
 	return out, nil
@@ -206,6 +236,10 @@ func (s *sqlStore) Patch(ctx context.Context, conversationID string, patch Patch
 	if patch.StoryDialogueModel != nil {
 		current.StoryDialogueModel = strings.TrimSpace(*patch.StoryDialogueModel)
 	}
+	if patch.PresenceEnabled != nil {
+		v := *patch.PresenceEnabled
+		current.PresenceEnabled = &v
+	}
 
 	if err := validate(current); err != nil {
 		return Settings{}, err
@@ -232,8 +266,9 @@ func (s *sqlStore) Patch(ctx context.Context, conversationID string, patch Patch
 			exec_mode,
 			story_gather_model,
 			story_dialogue_model,
+			presence_enabled,
 			updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(conversation_id) DO UPDATE SET
 			tools_allow_json = excluded.tools_allow_json,
 			llm_provider = excluded.llm_provider,
@@ -241,6 +276,7 @@ func (s *sqlStore) Patch(ctx context.Context, conversationID string, patch Patch
 			exec_mode = excluded.exec_mode,
 			story_gather_model = excluded.story_gather_model,
 			story_dialogue_model = excluded.story_dialogue_model,
+			presence_enabled = excluded.presence_enabled,
 			updated_at = excluded.updated_at
 	`, conversationID,
 		toolsAllowJSON,
@@ -249,6 +285,7 @@ func (s *sqlStore) Patch(ctx context.Context, conversationID string, patch Patch
 		nullString(current.ExecMode),
 		nullString(current.StoryGatherModel),
 		nullString(current.StoryDialogueModel),
+		nullBoolInt(current.PresenceEnabled),
 		updatedAt,
 	)
 	if err != nil {
@@ -278,6 +315,16 @@ func nullString(s string) sql.NullString {
 		return sql.NullString{}
 	}
 	return sql.NullString{String: s, Valid: true}
+}
+
+func nullBoolInt(v *bool) sql.NullInt64 {
+	if v == nil {
+		return sql.NullInt64{}
+	}
+	if *v {
+		return sql.NullInt64{Int64: 1, Valid: true}
+	}
+	return sql.NullInt64{Int64: 0, Valid: true}
 }
 
 func normalizeAllowlist(in []string) []string {

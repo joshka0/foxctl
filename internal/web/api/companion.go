@@ -62,7 +62,7 @@ func CompanionProvidersHandler(cfg config.Config, log zerolog.Logger) http.Handl
 // The handler validates the request JSON (requiring conversation_id and message), opens the context store and companion memory DB,
 // constructs a companion service with memory enabled, invokes the chat operation, and writes the chat response as JSON.
 // On invalid input it responds 400, on method mismatch 405, and on internal failures 500.
-func CompanionChatHandler(cfg config.Config, log zerolog.Logger, turnLock companion.Locker) http.HandlerFunc {
+func CompanionChatHandler(cfg config.Config, log zerolog.Logger, turnLock companion.Locker, skillRunner *SkillRunner) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			httpError(w, http.StatusMethodNotAllowed, "method not allowed")
@@ -193,6 +193,7 @@ func CompanionChatHandler(cfg config.Config, log zerolog.Logger, turnLock compan
 		// Create service with memory enabled and LLM credentials.
 		// The shared turnLock ensures per-conversation mutual exclusion
 		// across all HTTP requests (not just within a single Service instance).
+		presenceEnabled := settings.IsPresenceEnabled()
 		svcCfg := companion.ServiceConfig{
 			Logger:          log,
 			MemoryDB:        memoryDB,
@@ -201,6 +202,16 @@ func CompanionChatHandler(cfg config.Config, log zerolog.Logger, turnLock compan
 			LLMModel:        llmModel,
 			ToolsAllow:      settings.ToolsAllow,
 			UseHybridMemory: true,
+		}
+		if presenceEnabled {
+			svcCfg.PresenceConfig = &companion.PresenceConfig{
+				Enabled: true,
+			}
+			if skillRunner != nil {
+				svcCfg.SkillRunner = &companionSkillRunnerAdapter{
+					inner: skillRunner,
+				}
+			}
 		}
 		if agentPrompt != "" {
 			svcCfg.DefaultPersonality = agentPrompt

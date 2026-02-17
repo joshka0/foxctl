@@ -171,6 +171,16 @@ func run(ctx context.Context, rc *skillmain.RunContext, in HookInput) error {
 		},
 	}
 
+	// Auto-trigger annotation generation for this session.
+	if in.SessionID != "" {
+		annotateArgs, _ := json.Marshal(map[string]any{
+			"session_id":      in.SessionID,
+			"workspace":       workspaceID,
+			"queue_embedding": true,
+		})
+		output.Actions = append(output.Actions, hooks.RunSkillAction("session/annotate", annotateArgs))
+	}
+
 	return hookutil.EmitOutput(rc, command, output, nil)
 }
 

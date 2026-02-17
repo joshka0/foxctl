@@ -3,8 +3,8 @@ kind: Skill
 metadata:
   name: presence/voice
   version: 0.1.0
-  description: "Generate speech audio using ElevenLabs TTS with emotion support"
-  tags: ["presence", "voice", "tts", "elevenlabs", "companion"]
+  description: "Generate speech audio using ElevenLabs or Pocket TTS with optional rewrite"
+  tags: ["presence", "voice", "tts", "elevenlabs", "pocket-tts", "companion"]
 distribution:
   type: exec
   exec:
@@ -22,7 +22,7 @@ signature:
     - name: voice_id
       type: string
       required: false
-      description: "ElevenLabs voice ID (default: Rachel)"
+      description: "Voice selector (ElevenLabs voice ID or Pocket voice alias/url)"
     - name: emotion
       type: string
       required: false
@@ -45,11 +45,49 @@ signature:
       type: string
       required: false
       default: "eleven_multilingual_v2"
-      description: "ElevenLabs model to use"
+      description: "TTS model (ElevenLabs only; ignored for Pocket)"
+    - name: provider
+      type: string
+      required: false
+      default: "elevenlabs"
+      description: "TTS provider: elevenlabs|pocket"
+    - name: pocket_base_url
+      type: string
+      required: false
+      default: "http://127.0.0.1:18765"
+      description: "Pocket TTS server base URL"
+    - name: rewrite_for_tts
+      type: boolean
+      required: false
+      default: false
+      description: "Rewrite text for speech-friendly conversational output before synthesis"
+    - name: rewrite_model
+      type: string
+      required: false
+      default: "minimax/minimax-m2-her"
+      description: "OpenRouter model used for rewrite_for_tts"
+    - name: rewrite_max_chars
+      type: integer
+      required: false
+      default: 280
+      description: "Maximum character length for rewritten speech text"
+    - name: rewrite_prompt
+      type: string
+      required: false
+      description: "Extra prompt guidance passed to minimax-m2-her for TTS style"
+    - name: rewrite_base_url
+      type: string
+      required: false
+      default: "https://openrouter.ai/api/v1"
+      description: "OpenAI-compatible base URL for rewrite model (e.g. LM Studio: http://127.0.0.1:1234/v1)"
   help:
-    short: "Generate emotion-aware speech with ElevenLabs"
+    short: "Generate emotion-aware speech with ElevenLabs or Pocket TTS"
     long: |
-      Generate speech audio using ElevenLabs TTS with emotion-aware voice settings.
+      Generate speech audio with emotion-aware delivery.
+
+      Providers:
+      - elevenlabs: cloud TTS with rich voice settings
+      - pocket: local Pocket TTS server (`pocket-tts serve`)
 
       Voice settings adjust based on emotion:
       - neutral: Balanced stability and similarity
@@ -96,6 +134,18 @@ signature:
     - name: voice_id
       type: string
       description: "Voice ID used"
+    - name: provider
+      type: string
+      description: "Provider used for synthesis"
+    - name: rewrite_applied
+      type: boolean
+      description: "Whether rewrite_for_tts was applied successfully"
+    - name: rewrite_model
+      type: string
+      description: "Model used for rewrite_for_tts when applied"
+    - name: rewrite_error
+      type: string
+      description: "Rewrite error when rewrite_for_tts failed and original text was used"
 capabilities:
   network: "egress"
   filesystem: []

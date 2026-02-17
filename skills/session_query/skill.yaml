@@ -1,0 +1,109 @@
+apiVersion: agentctl/v1
+kind: Skill
+metadata:
+  name: session/query
+  version: 0.1.0
+  description: "Structured queries on session annotations — file tracking, error chains, category counts"
+  tags: ["session", "query", "annotations", "structured"]
+distribution:
+  type: exec
+  exec:
+    entry: skills/session_query/session_query
+io:
+  format: JSON
+  inline_output_kb: 32
+signature:
+  command: session/query
+  parameters:
+    - name: file_path
+      type: string
+      required: false
+      description: "File path to track across sessions"
+    - name: detail
+      type: boolean
+      required: false
+      description: "Return annotation-level results instead of per-session summaries"
+    - name: error_chains
+      type: boolean
+      required: false
+      description: "Find error→fix chains"
+    - name: query
+      type: string
+      required: false
+      description: "Semantic query for error chain discovery"
+    - name: list_categories
+      type: boolean
+      required: false
+      description: "List annotation category counts"
+    - name: session_id
+      type: string
+      required: false
+    - name: workspace
+      type: string
+      required: false
+    - name: project
+      type: string
+      required: false
+    - name: limit
+      type: integer
+      required: false
+      description: "Max results (default: 20)"
+    - name: lookahead_min
+      type: integer
+      required: false
+      description: "Min turns ahead to look for fixes (default: 3)"
+    - name: lookahead_max
+      type: integer
+      required: false
+      description: "Max turns ahead to look for fixes (default: 5)"
+    - name: top_k
+      type: integer
+      required: false
+      description: "Max fix candidates per error (default: 1)"
+  returns:
+    - name: status
+      type: string
+      description: "Status of the query operation"
+    - name: message
+      type: string
+      description: "Human-readable status message"
+    - name: file_tracking_summaries
+      type: array
+      description: "Per-session summaries for file tracking mode"
+    - name: file_tracking_annotations
+      type: array
+      description: "Annotation-level file tracking results"
+    - name: error_chains
+      type: array
+      description: "Error turns with ranked fix candidates"
+    - name: category_counts
+      type: array
+      description: "Annotation counts grouped by category"
+capabilities:
+  network: "egress"
+  filesystem:
+    - type: workdir
+  pure: false
+examples:
+  - name: "Track a file across sessions"
+    input:
+      file_path: "skills/session_recall/main.go"
+      detail: false
+      limit: 20
+    description: "Get per-session summary for where a file was discussed or changed"
+  - name: "Find error chains"
+    input:
+      error_chains: true
+      query: "embedding mismatch errors"
+      lookahead_max: 6
+      top_k: 2
+    description: "Find likely error→fix chains within each session"
+  - name: "List categories"
+    input:
+      list_categories: true
+    description: "Count annotation categories in current workspace scope"
+openapi:
+  enabled: true
+  methods:
+    GET: true
+    POST: true

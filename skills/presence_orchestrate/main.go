@@ -25,6 +25,13 @@ type Input struct {
 	Scene              string `json:"scene"`
 	Style              string `json:"style"`
 	VoiceID            string `json:"voice_id"`
+	TTSProvider        string `json:"tts_provider"`
+	PocketBaseURL      string `json:"pocket_base_url"`
+	RewriteForTTS      bool   `json:"rewrite_for_tts"`
+	RewriteModel       string `json:"rewrite_model"`
+	RewriteMaxChars    int    `json:"rewrite_max_chars"`
+	RewritePrompt      string `json:"rewrite_prompt"`
+	RewriteBaseURL     string `json:"rewrite_base_url"`
 }
 
 // Output defines the output for presence/orchestrate.
@@ -274,6 +281,27 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 		}
 		if in.VoiceID != "" {
 			out.VoiceParams["voice_id"] = in.VoiceID
+		}
+		if in.TTSProvider != "" {
+			out.VoiceParams["provider"] = in.TTSProvider
+		}
+		if in.PocketBaseURL != "" {
+			out.VoiceParams["pocket_base_url"] = in.PocketBaseURL
+		}
+		if in.RewriteForTTS {
+			out.VoiceParams["rewrite_for_tts"] = true
+		}
+		if in.RewriteModel != "" {
+			out.VoiceParams["rewrite_model"] = in.RewriteModel
+		}
+		if in.RewriteMaxChars > 0 {
+			out.VoiceParams["rewrite_max_chars"] = in.RewriteMaxChars
+		}
+		if in.RewritePrompt != "" {
+			out.VoiceParams["rewrite_prompt"] = in.RewritePrompt
+		}
+		if in.RewriteBaseURL != "" {
+			out.VoiceParams["rewrite_base_url"] = in.RewriteBaseURL
 		}
 	}
 

@@ -84,6 +84,9 @@ func handleAsk(ctx context.Context, logger zerolog.Logger, msg agent.Message, co
 	if chatErr != nil {
 		return fmt.Errorf("companion chat failed: %w", chatErr)
 	}
+	if resp == nil {
+		return fmt.Errorf("companion chat returned nil response")
+	}
 	result = resp.Response
 
 	logger.Debug().
@@ -92,9 +95,16 @@ func handleAsk(ctx context.Context, logger zerolog.Logger, msg agent.Message, co
 		Msg("companion chat completed")
 
 	// 6. Build reply payload
+	answer := map[string]any{"response": result}
+	if resp.Presence != nil {
+		answer["presence"] = resp.Presence
+	}
+	if resp.Tone != nil {
+		answer["tone"] = resp.Tone
+	}
 	replyData := agent.ReplyData{
 		AskID:  askData.AskID,
-		Answer: map[string]any{"response": result},
+		Answer: answer,
 	}
 	replyEnv := envelope.OK("agent.reply", replyData)
 	replyPayload, err := json.Marshal(replyEnv)
@@ -334,6 +344,12 @@ func handleConsoleAsk(ctx context.Context, logger zerolog.Logger, msg agent.Mess
 		Metrics: map[string]any{
 			"duration_ms": durationMS,
 		},
+	}
+	if resp != nil && resp.Presence != nil {
+		replyData.Presence = resp.Presence
+	}
+	if resp != nil && resp.Tone != nil {
+		replyData.Tone = resp.Tone
 	}
 	replyEnv := envelope.OK("console.reply", replyData)
 	replyPayload, err := json.Marshal(replyEnv)

@@ -13,6 +13,7 @@ import { useViewStore } from '@/stores/viewStore'
 import type { ConsoleMessage } from '@/api/client'
 import { AgentDetailView } from './AgentDetailView'
 import { SpawnAgentFormCore } from './SpawnAgentFormCore'
+import { getRoleIcon, getAgentDisplayName, getPromptSummaryOrSubtitle } from '@/lib/agent-utils'
 import {
   Bot,
   Plus,
@@ -167,7 +168,7 @@ Help the user understand and interact with this agent's work.`,
     }
 
     // Confirm before trashing
-    if (!window.confirm(`Are you sure you want to remove "${agent.name || agent.role || 'this agent'}"? This action cannot be undone.`)) {
+    if (!window.confirm(`Are you sure you want to remove "${getAgentDisplayName(agent)}"? This action cannot be undone.`)) {
       return
     }
 
@@ -191,7 +192,7 @@ Help the user understand and interact with this agent's work.`,
       return
     }
 
-    if (!window.confirm(`Are you sure you want to stop "${agent.name || agent.role || 'this agent'}"?`)) {
+    if (!window.confirm(`Are you sure you want to stop "${getAgentDisplayName(agent)}"?`)) {
       return
     }
 
@@ -437,6 +438,7 @@ interface AgentCardProps {
  * @returns A JSX element representing the agent card
  */
 function AgentCard({ agent, onViewDetails, onChat, onTrash, onKill, onStart, isChatLoading, isTrashLoading, isKillLoading, isStartLoading }: AgentCardProps) {
+  const RoleIcon = getRoleIcon(agent.role)
   const stateColors: Record<string, string> = {
     running: 'bg-green-500',
     idle: 'bg-yellow-500',
@@ -467,7 +469,7 @@ function AgentCard({ agent, onViewDetails, onChat, onTrash, onKill, onStart, isC
                 'h-10 w-10 rounded-lg flex items-center justify-center',
                 agent.state === 'running' ? 'bg-green-500/10' : 'bg-muted'
               )}>
-                <Bot className={cn(
+                <RoleIcon className={cn(
                   'h-5 w-5',
                   agent.state === 'running' ? 'text-green-500' : 'text-muted-foreground'
                 )} />
@@ -482,12 +484,12 @@ function AgentCard({ agent, onViewDetails, onChat, onTrash, onKill, onStart, isC
             </div>
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-2 flex-wrap">
-                <span className="font-medium text-foreground">
-                  {agent.name || agent.slug || agent.role || 'Agent'}
+                <span className="font-medium text-foreground capitalize">
+                  {getAgentDisplayName(agent)}
                 </span>
-                {agent.name && agent.role && (
-                  <Badge variant="secondary" className="text-xs capitalize">
-                    {agent.role}
+                {agent.role && agent.name && (
+                  <Badge variant="secondary" className="text-xs">
+                    {agent.name}
                   </Badge>
                 )}
                 <Badge
@@ -514,6 +516,13 @@ function AgentCard({ agent, onViewDetails, onChat, onTrash, onKill, onStart, isC
                   </span>
                 )}
               </div>
+
+              {/* Prompt Summary */}
+              {agent.prompt_summary && (
+                <p className="mt-1 text-xs text-muted-foreground line-clamp-1">
+                  {getPromptSummaryOrSubtitle(agent)}
+                </p>
+              )}
 
               {/* Model and Timing info */}
               <div className="flex items-center gap-3 mt-2 text-xs text-muted-foreground flex-wrap">
