@@ -17,9 +17,9 @@ import type { Agent } from '@/api/types'
 import { useChatStore } from '@/stores/chatStore'
 import { useViewStore } from '@/stores/viewStore'
 import type { ConsoleMessage } from '@/api/client'
+import { getRoleIcon, getAgentDisplayName } from '@/lib/agent-utils'
 import {
   ArrowLeft,
-  Bot,
   Clock,
   MessageSquare,
   MessageCircle,
@@ -47,6 +47,7 @@ interface AgentDetailViewProps {
  * @returns The Agent detail view UI component.
  */
 export function AgentDetailView({ agent, onBack }: AgentDetailViewProps) {
+  const RoleIcon = getRoleIcon(agent.role)
   const [selectedSession, setSelectedSession] = useState<PersistedSession | null>(null)
   const [isChatLoading, setIsChatLoading] = useState(false)
   const { setSessionId, setSession, setMessages, setInflight, setPersistedSessionId, setInitializing, setSourceAgent } = useChatStore()
@@ -190,19 +191,19 @@ Help the user understand and interact with this agent's work.`,
                 'h-10 w-10 rounded-lg flex items-center justify-center',
                 agent.state === 'running' ? 'bg-green-500/10' : 'bg-muted'
               )}>
-                <Bot className={cn(
+                <RoleIcon className={cn(
                   'h-5 w-5',
                   agent.state === 'running' ? 'text-green-500' : 'text-muted-foreground'
                 )} />
               </div>
               <div>
                 <div className="flex items-center gap-2">
-                  <h2 className="text-lg font-semibold text-foreground">
-                    {agent.name || agent.slug || agent.role || 'Agent'}
+                  <h2 className="text-lg font-semibold text-foreground capitalize">
+                    {getAgentDisplayName(agent)}
                   </h2>
-                  {agent.name && agent.role && (
-                    <Badge variant="secondary" className="text-xs capitalize">
-                      {agent.role}
+                  {agent.role && agent.name && (
+                    <Badge variant="secondary" className="text-xs">
+                      {agent.name}
                     </Badge>
                   )}
                 </div>

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/oklog/ulid/v2"
+	"github.com/rs/zerolog"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -70,6 +71,7 @@ func TestMemoryDedupeStore(t *testing.T) {
 type fakeCompanionService struct {
 	mu              sync.Mutex
 	responses       []string
+	chatResponses   map[int]*companion.ChatResponse
 	errors          map[int]error
 	callIndex       int
 	capturedPrompts []string
@@ -77,8 +79,9 @@ type fakeCompanionService struct {
 
 func newFakeCompanionService(responses ...string) *fakeCompanionService {
 	return &fakeCompanionService{
-		responses: responses,
-		errors:    make(map[int]error),
+		responses:     responses,
+		chatResponses: make(map[int]*companion.ChatResponse),
+		errors:        make(map[int]error),
 	}
 }
 
@@ -92,6 +95,10 @@ func (f *fakeCompanionService) Chat(ctx context.Context, req companion.ChatReque
 
 	if err, ok := f.errors[idx]; ok {
 		return nil, err
+	}
+
+	if resp, ok := f.chatResponses[idx]; ok {
+		return resp, nil
 	}
 
 	response := "No more scripted responses"
@@ -111,6 +118,12 @@ func (f *fakeCompanionService) SetError(index int, err error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.errors[index] = err
+}
+
+func (f *fakeCompanionService) SetChatResponse(index int, resp *companion.ChatResponse) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.chatResponses[index] = resp
 }
 
 func setupDaemon(t *testing.T) (context.Context, string, Options, *fakeCompanionService) {
@@ -358,6 +371,141 @@ func TestDaemon_AskReplyCorrelation(t *testing.T) {
 	answer, ok := maputil.AsStringMap(dataMap["answer"])
 	require.True(t, ok)
 	assert.Equal(t, "I am fine.", answer["response"])
+}
+
+func TestDaemon_AskReplyIncludesPresenceAndTone(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping daemon test in short mode (race detector uses too much memory)")
+	}
+	ctx, agentID, opts, fakeSvc := setupDaemon(t)
+	fakeSvc.SetChatResponse(0, &companion.ChatResponse{
+		Response: "I can help with that.",
+		Presence: &companion.PresenceBundle{Emotion: "joy", Intensity: 0.7},
+		Tone:     &companion.ChatTone{Voice: "friendly"},
+	})
+
+	ms, err := mailbox.Open(ctx, opts.StorageRoot)
+	require.NoError(t, err)
+	defer func() { require.NoError(t, ms.Close()) }()
+
+	askID := ulid.Make().String()
+	askData := agent.AskData{AskID: askID, Question: "status?"}
+	payload, err := json.Marshal(envelope.Envelope{Version: 1, Status: "ok", Command: "agent.ask", Data: askData})
+	require.NoError(t, err)
+
+	msg := agent.Message{
+		ID:        ulid.Make().String(),
+		FromNS:    "caller:presence",
+		ToNS:      "actor:agent:" + agentID,
+		Type:      agent.MessageTypeAsk,
+		Timestamp: time.Now().Unix(),
+		Headers:   map[string]string{"correlation": askID},
+		Payload:   payload,
+	}
+	require.NoError(t, ms.Send(ctx, msg))
+
+	daemonCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	errCh := make(chan error, 1)
+	go func() { errCh <- Run(daemonCtx, opts) }()
+
+	var reply agent.Message
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		replies, listErr := ms.List(context.Background(), "caller:presence", 10)
+		require.NoError(t, listErr)
+		if len(replies) > 0 {
+			reply = replies[0]
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("timed out waiting for reply")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	cancel()
+	err = <-errCh
+	if err != nil && !errors.Is(err, context.Canceled) {
+		t.Errorf("daemon run error: %v", err)
+	}
+
+	var env envelope.Envelope
+	require.NoError(t, json.Unmarshal(reply.Payload, &env))
+	dataMap, ok := maputil.AsStringMap(env.Data)
+	require.True(t, ok)
+	answer, ok := maputil.AsStringMap(dataMap["answer"])
+	require.True(t, ok)
+	assert.Equal(t, "I can help with that.", answer["response"])
+	presence, ok := maputil.AsStringMap(answer["presence"])
+	require.True(t, ok)
+	assert.Equal(t, "joy", presence["emotion"])
+	tone, ok := maputil.AsStringMap(answer["tone"])
+	require.True(t, ok)
+	assert.Equal(t, "friendly", tone["voice"])
+}
+
+func TestHandleConsoleAsk_ReplyIncludesPresenceAndTone(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+
+	ms, err := mailbox.Open(ctx, root)
+	require.NoError(t, err)
+	defer func() { require.NoError(t, ms.Close()) }()
+
+	fakeSvc := newFakeCompanionService()
+	fakeSvc.SetChatResponse(0, &companion.ChatResponse{
+		Response: "Done.",
+		Presence: &companion.PresenceBundle{Emotion: "surprise", Intensity: 0.4},
+		Tone:     &companion.ChatTone{Voice: "direct"},
+	})
+
+	askID := ulid.Make().String()
+	consoleID := ulid.Make().String()
+	payload, err := json.Marshal(envelope.Envelope{
+		Version: 1,
+		Status:  "ok",
+		Command: "console.ask",
+		Data: agent.ConsoleAskData{
+			AskID:     askID,
+			Prompt:    "check",
+			ConsoleID: consoleID,
+		},
+	})
+	require.NoError(t, err)
+
+	msg := agent.Message{
+		ID:      ulid.Make().String(),
+		FromNS:  "caller:console",
+		ToNS:    "actor:agent:test",
+		Type:    agent.MessageTypeConsoleAsk,
+		Headers: map[string]string{"correlation": askID},
+		Payload: payload,
+	}
+
+	logger := zerolog.Nop()
+	err = handleConsoleAsk(ctx, logger, msg, fakeSvc, ms, agent.Policy{}, nil, nil, "agent-1")
+	require.NoError(t, err)
+
+	replies, err := ms.List(ctx, "caller:console", 10)
+	require.NoError(t, err)
+	require.Len(t, replies, 1)
+	reply := replies[0]
+	require.Equal(t, agent.MessageTypeConsoleReply, reply.Type)
+	require.Equal(t, askID, reply.Headers["correlation"])
+
+	var env envelope.Envelope
+	require.NoError(t, json.Unmarshal(reply.Payload, &env))
+	dataMap, ok := maputil.AsStringMap(env.Data)
+	require.True(t, ok)
+	assert.Equal(t, "Done.", dataMap["response"])
+	assert.Equal(t, "ok", dataMap["status"])
+	presence, ok := maputil.AsStringMap(dataMap["presence"])
+	require.True(t, ok)
+	assert.Equal(t, "surprise", presence["emotion"])
+	tone, ok := maputil.AsStringMap(dataMap["tone"])
+	require.True(t, ok)
+	assert.Equal(t, "direct", tone["voice"])
 }
 
 func TestDaemon_EndToEnd_SpawnAskReplyStop(t *testing.T) {

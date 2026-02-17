@@ -2,9 +2,11 @@ package main
 
 import (
 	"testing"
+	"time"
 
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
 	"github.com/jkatigb/agentctl/internal/platform/config"
+	"github.com/jkatigb/agentctl/internal/storage/annotations"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -283,4 +285,114 @@ func TestChunkMatch_Fields(t *testing.T) {
 	assert.Equal(t, 8, match.ChunkIndexMin)
 	assert.Equal(t, 12, match.ChunkIndexMax)
 	assert.Equal(t, 0.95, match.Similarity)
+}
+
+func TestParseSortBy_Default(t *testing.T) {
+	fields, err := parseSortBy("", "")
+	assert.NoError(t, err)
+	assert.Equal(t, []annotationSortField{sortFieldSimilarity}, fields)
+}
+
+func TestParseSortBy_MultiKey(t *testing.T) {
+	fields, err := parseSortBy("date,similarity", "")
+	assert.NoError(t, err)
+	assert.Equal(t, []annotationSortField{sortFieldDate, sortFieldSimilarity}, fields)
+}
+
+func TestParseSortBy_Aliases(t *testing.T) {
+	fields, err := parseSortBy("recent,relevance", "")
+	assert.NoError(t, err)
+	assert.Equal(t, []annotationSortField{sortFieldRecent, sortFieldSimilarity}, fields)
+
+	legacyFields, legacyErr := parseSortBy("", "oldest")
+	assert.NoError(t, legacyErr)
+	assert.Equal(t, []annotationSortField{sortFieldDate}, legacyFields)
+}
+
+func TestParseSortBy_Conflict(t *testing.T) {
+	_, err := parseSortBy("date", "recent")
+	assert.Error(t, err)
+}
+
+func TestParseSortBy_Invalid(t *testing.T) {
+	_, err := parseSortBy("unknown", "")
+	assert.Error(t, err)
+}
+
+func TestSortAnnotationCandidates_ByDateThenSimilarity(t *testing.T) {
+	t1 := time.Date(2026, 1, 1, 10, 0, 0, 0, time.UTC)
+	t2 := time.Date(2026, 1, 2, 10, 0, 0, 0, time.UTC)
+	t3 := time.Date(2026, 1, 3, 10, 0, 0, 0, time.UTC)
+	cands := []annotationCandidate{
+		{SessionID: "s2", WindowIndex: 0, TurnIndex: 2, Similarity: 0.91, SortAt: t3},
+		{SessionID: "s1", WindowIndex: 0, TurnIndex: 1, Similarity: 0.80, SortAt: t1},
+		{SessionID: "s3", WindowIndex: 0, TurnIndex: 3, Similarity: 0.95, SortAt: t2},
+	}
+
+	sortAnnotationCandidates(cands, []annotationSortField{sortFieldDate, sortFieldSimilarity})
+
+	assert.Equal(t, "s1", cands[0].SessionID)
+	assert.Equal(t, "s3", cands[1].SessionID)
+	assert.Equal(t, "s2", cands[2].SessionID)
+}
+
+func TestSortAnnotationCandidates_TieBreaks(t *testing.T) {
+	t1 := time.Date(2026, 1, 1, 10, 0, 0, 0, time.UTC)
+	cands := []annotationCandidate{
+		{SessionID: "s2", WindowIndex: 1, TurnIndex: 4, Similarity: 0.8, SortAt: t1},
+		{SessionID: "s1", WindowIndex: 2, TurnIndex: 3, Similarity: 0.8, SortAt: t1},
+		{SessionID: "s1", WindowIndex: 1, TurnIndex: 2, Similarity: 0.8, SortAt: t1},
+	}
+
+	sortAnnotationCandidates(cands, []annotationSortField{sortFieldSimilarity})
+
+	assert.Equal(t, "s1", cands[0].SessionID)
+	assert.Equal(t, 1, cands[0].WindowIndex)
+	assert.Equal(t, 2, cands[0].TurnIndex)
+	assert.Equal(t, "s1", cands[1].SessionID)
+	assert.Equal(t, "s2", cands[2].SessionID)
+}
+
+func TestAnnotationMatchTime_Fallback(t *testing.T) {
+	created := time.Date(2026, 1, 5, 10, 0, 0, 0, time.UTC)
+	ann := &annotations.TurnAnnotation{CreatedAt: created}
+	got := annotationMatchTime(ann)
+	assert.Equal(t, created, got)
+}
+
+func TestAnnotationMatchTime_UsesTimestamp(t *testing.T) {
+	ts := time.Date(2026, 2, 1, 12, 0, 0, 0, time.UTC)
+	created := time.Date(2026, 1, 5, 10, 0, 0, 0, time.UTC)
+	ann := &annotations.TurnAnnotation{Timestamp: ts, CreatedAt: created}
+	got := annotationMatchTime(ann)
+	assert.Equal(t, ts, got)
+}
+
+func TestParseSortBy_MatchingValues(t *testing.T) {
+	// Both set to same value should succeed
+	fields, err := parseSortBy("date", "oldest")
+	assert.NoError(t, err)
+	assert.Equal(t, []annotationSortField{sortFieldDate}, fields)
+}
+
+func TestParseSortBy_TrailingComma(t *testing.T) {
+	// Trailing comma — empty token skipped, "similarity" is valid
+	fields, err := parseSortBy("similarity,", "")
+	assert.NoError(t, err)
+	assert.Equal(t, []annotationSortField{sortFieldSimilarity}, fields)
+}
+
+func TestSortAnnotationCandidates_EpsilonSimilarity(t *testing.T) {
+	// Nearly identical similarities should use tiebreaker
+	t1 := time.Date(2026, 1, 1, 10, 0, 0, 0, time.UTC)
+	cands := []annotationCandidate{
+		{SessionID: "s2", WindowIndex: 0, TurnIndex: 2, Similarity: 0.8500000000000001, SortAt: t1},
+		{SessionID: "s1", WindowIndex: 0, TurnIndex: 1, Similarity: 0.85, SortAt: t1},
+	}
+
+	sortAnnotationCandidates(cands, []annotationSortField{sortFieldSimilarity})
+
+	// Epsilon treats them as equal, so tiebreaker (session ID) applies
+	assert.Equal(t, "s1", cands[0].SessionID)
+	assert.Equal(t, "s2", cands[1].SessionID)
 }

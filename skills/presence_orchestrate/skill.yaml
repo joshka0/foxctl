@@ -49,7 +49,41 @@ signature:
     - name: voice_id
       type: string
       required: false
-      description: "ElevenLabs voice ID override"
+      description: "Voice selector (ElevenLabs voice id or Pocket voice alias/url)"
+    - name: tts_provider
+      type: string
+      required: false
+      default: "elevenlabs"
+      description: "TTS provider for presence/voice: elevenlabs|pocket"
+    - name: pocket_base_url
+      type: string
+      required: false
+      default: "http://127.0.0.1:18765"
+      description: "Pocket TTS server base URL"
+    - name: rewrite_for_tts
+      type: boolean
+      required: false
+      default: false
+      description: "Condense text into short speech-friendly phrasing before synthesis"
+    - name: rewrite_model
+      type: string
+      required: false
+      default: "minimax/minimax-m2-her"
+      description: "OpenRouter model for rewrite_for_tts"
+    - name: rewrite_max_chars
+      type: integer
+      required: false
+      default: 280
+      description: "Max characters in rewritten TTS text"
+    - name: rewrite_prompt
+      type: string
+      required: false
+      description: "Extra style prompt forwarded to presence/voice rewrite_for_tts"
+    - name: rewrite_base_url
+      type: string
+      required: false
+      default: "https://openrouter.ai/api/v1"
+      description: "OpenAI-compatible base URL for rewrite model (e.g. LM Studio: http://127.0.0.1:1234/v1)"
   help:
     short: "Orchestrate presence generation for companion responses"
     long: |

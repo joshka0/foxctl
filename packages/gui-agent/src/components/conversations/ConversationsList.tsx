@@ -20,6 +20,8 @@ import {
   cancelConsoleSession,
   companionChat,
   listAgents,
+  killAgent,
+  trashAgent,
   deleteCompanionConversation,
   deleteCompanionMessage,
   renameCompanionConversation,
@@ -50,8 +52,6 @@ import {
   PanelRightOpen,
   PanelRightClose,
   Cpu,
-  Folder,
-  Clock,
   FileText,
   Settings2,
   X,
@@ -66,13 +66,13 @@ import {
   ChevronDown,
   ChevronRight,
   User,
-  Play,
   Square,
   Activity,
   Zap,
   Brain,
   Bug,
 } from 'lucide-react'
+import { Play, Clock, Folder } from 'lucide-react'
 import { Textarea } from '@/components/ui/textarea'
 import { Slider } from '@/components/ui/slider'
 import { useViewStore } from '@/stores/viewStore'
@@ -80,6 +80,7 @@ import { CollapsibleSection } from '@/components/ui/collapsible-section'
 import { useAgentOperations } from '@/hooks/useAgentOperations'
 import type { AgentSession } from '@/api/types'
 import { ToolAllowlistEditor } from '@/components/conversations/ToolAllowlistEditor'
+import { getRoleIcon, getAgentDisplayName, getPromptSummaryOrSubtitle, getAgentActivityTimestamp } from '@/lib/agent-utils'
 
 const API_BASE = '/api'
 
@@ -113,6 +114,202 @@ interface ContextInfo {
 type ExecMode = '' | 'reactive' | 'autonomous' | 'proactive' | 'story'
 
 const DEFAULT_OPENROUTER_MODEL = 'mistralai/devstral-2512'
+
+interface AgentConversationGroupProps {
+  agent: Agent
+  conversations: Conversation[]
+  isExpanded: boolean
+  hasSelectedConversation: boolean
+  selectedConversationId?: string
+  agents: Agent[]
+  editingConversationId: string | null
+  editTitle: string
+  onEditTitleChange: (value: string) => void
+  editLinkedAgentId: string
+  onEditLinkedAgentIdChange: (value: string) => void
+  onToggleExpanded: (agentId: string) => void
+  onSelectAgent: (agent: Agent) => void
+  onNewConversationWithAgent: (agent: Agent) => void
+  onSelectConversation: (conversation: Conversation) => void
+  onSaveRename: (e: React.MouseEvent | React.KeyboardEvent, conversationId: string) => void
+  onCancelRename: (e: React.MouseEvent | React.KeyboardEvent) => void
+  onStartRename: (e: React.MouseEvent, conversation: Conversation) => void
+  onDeleteConversation: (e: React.MouseEvent, conversationId: string) => void
+}
+
+function AgentConversationGroup({
+  agent,
+  conversations,
+  isExpanded,
+  hasSelectedConversation,
+  selectedConversationId,
+  agents,
+  editingConversationId,
+  editTitle,
+  onEditTitleChange,
+  editLinkedAgentId,
+  onEditLinkedAgentIdChange,
+  onToggleExpanded,
+  onSelectAgent,
+  onNewConversationWithAgent,
+  onSelectConversation,
+  onSaveRename,
+  onCancelRename,
+  onStartRename,
+  onDeleteConversation,
+}: AgentConversationGroupProps) {
+  const RoleIcon = getRoleIcon(agent.role)
+
+  return (
+    <div>
+      <div
+        className={cn(
+          'flex items-center gap-2 px-2 py-2 rounded-lg cursor-pointer transition-colors group',
+          'hover:bg-accent/50',
+          hasSelectedConversation && 'bg-accent/30'
+        )}
+        onClick={() => {
+          onToggleExpanded(agent.id)
+          onSelectAgent(agent)
+        }}
+      >
+        <div className="flex-shrink-0 w-4 h-4 flex items-center justify-center">
+          {isExpanded ? (
+            <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
+          ) : (
+            <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
+          )}
+        </div>
+
+        <div className={cn(
+          'h-7 w-7 rounded-lg flex items-center justify-center flex-shrink-0',
+          agent.state === 'running' ? 'bg-green-500/20' : 'bg-primary/10'
+        )}>
+          <RoleIcon className={cn(
+            'h-3.5 w-3.5',
+            agent.state === 'running' ? 'text-green-500' : 'text-primary'
+          )} />
+        </div>
+
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-1.5">
+            <span className="text-sm font-medium truncate">
+              {getAgentDisplayName(agent)}
+            </span>
+            <Badge variant="secondary" className="text-[9px] px-1 py-0 flex-shrink-0">
+              {conversations.length}
+            </Badge>
+            {agent.state === 'running' && (
+              <span className="h-1.5 w-1.5 rounded-full bg-green-500 animate-pulse" />
+            )}
+          </div>
+          <div className="text-[10px] text-muted-foreground truncate">
+            {getPromptSummaryOrSubtitle(agent)}
+          </div>
+        </div>
+
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0"
+          onClick={(e) => {
+            e.stopPropagation()
+            onNewConversationWithAgent(agent)
+          }}
+          title="New chat with this agent"
+        >
+          <Plus className="h-3.5 w-3.5" />
+        </Button>
+      </div>
+
+      {isExpanded && (
+        <div className="ml-6 pl-2 border-l border-border/50 space-y-0.5 mt-0.5">
+          {conversations.length === 0 && (
+            <div
+              className="flex items-center gap-2 px-2 py-1.5 rounded-md cursor-pointer text-muted-foreground hover:text-foreground hover:bg-accent/50 transition-colors"
+              onClick={(e) => {
+                e.stopPropagation()
+                onNewConversationWithAgent(agent)
+              }}
+            >
+              <Plus className="h-3 w-3" />
+              <span className="text-xs">Start a conversation</span>
+            </div>
+          )}
+          {conversations.map((conversation) => (
+            <div
+              key={conversation.id}
+              className={cn(
+                'flex items-center gap-2 px-2 py-1.5 rounded-md cursor-pointer transition-colors group',
+                'hover:bg-accent/50',
+                selectedConversationId === conversation.id && 'bg-accent border-l-2 border-primary -ml-0.5 pl-2.5'
+              )}
+              onClick={() => onSelectConversation(conversation)}
+            >
+              <MessageCircle className="h-3 w-3 text-muted-foreground flex-shrink-0" />
+              <div className="flex-1 min-w-0">
+                {editingConversationId === conversation.id ? (
+                  <div className="space-y-1" onClick={(e) => e.stopPropagation()}>
+                    <Input
+                      value={editTitle}
+                      onChange={(e) => onEditTitleChange(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') onSaveRename(e, conversation.id)
+                        if (e.key === 'Escape') onCancelRename(e)
+                      }}
+                      className="h-5 text-xs py-0 px-1"
+                      placeholder="Title..."
+                      autoFocus
+                    />
+                    <div className="flex items-center gap-1">
+                      <select
+                        value={editLinkedAgentId}
+                        onChange={(e) => onEditLinkedAgentIdChange(e.target.value)}
+                        className="flex-1 h-5 text-[10px] bg-muted border border-border rounded px-1"
+                      >
+                        <option value="">No agent</option>
+                        {agents.map((a) => (
+                          <option key={a.id} value={a.id}>
+                            {getAgentDisplayName(a)}
+                          </option>
+                        ))}
+                      </select>
+                      <Button variant="ghost" size="icon" className="h-5 w-5" onClick={(e) => onSaveRename(e, conversation.id)}>
+                        <Check className="h-3 w-3 text-green-500" />
+                      </Button>
+                      <Button variant="ghost" size="icon" className="h-5 w-5" onClick={onCancelRename}>
+                        <X className="h-3 w-3" />
+                      </Button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-xs truncate">
+                      {conversation.name || conversation.id.slice(0, 12)}
+                    </span>
+                    <Badge variant="secondary" className="text-[9px] px-1 py-0 flex-shrink-0">
+                      {conversation.message_count}
+                    </Badge>
+                  </div>
+                )}
+              </div>
+              {editingConversationId !== conversation.id && (
+                <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
+                  <Button variant="ghost" size="icon" className="h-5 w-5" onClick={(e) => onStartRename(e, conversation)} title="Rename">
+                    <Pencil className="h-2.5 w-2.5 text-muted-foreground" />
+                  </Button>
+                  <Button variant="ghost" size="icon" className="h-5 w-5" onClick={(e) => onDeleteConversation(e, conversation.id)} title="Delete">
+                    <Trash2 className="h-2.5 w-2.5 text-muted-foreground" />
+                  </Button>
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
 
 export function ConversationsList() {
   const setSelectedAgent = useViewStore((s) => s.setSelectedAgent)
@@ -192,7 +389,7 @@ export function ConversationsList() {
   })
 
   // Fetch agents to find linked agent
-  const { data: agentsData } = useQuery({
+  const { data: agentsData, refetch: refetchAgents } = useQuery({
     queryKey: ['agents'],
     queryFn: () => listAgents(100),
     staleTime: 60000,
@@ -263,6 +460,48 @@ export function ConversationsList() {
       orphanConversations,
     }
   }, [filteredConversations, agents, selectedConversation, linkedAgent])
+
+  const ONE_DAY_MS = 24 * 60 * 60 * 1000
+
+  const filteredAgents = useMemo(() => {
+    if (!searchQuery) return agents
+    const q = searchQuery.toLowerCase()
+    return agents.filter((a) =>
+      (a.name || '').toLowerCase().includes(q) ||
+      (a.slug || '').toLowerCase().includes(q) ||
+      (a.role || '').toLowerCase().includes(q) ||
+      a.id.toLowerCase().includes(q)
+    )
+  }, [agents, searchQuery])
+
+  const agentSections = useMemo(() => {
+    const sections = {
+      active: [] as Agent[],
+      errored: [] as Agent[],
+      recent: [] as Agent[],
+      archive: [] as Agent[],
+    }
+    const cutoff = Date.now() - ONE_DAY_MS
+
+    for (const agent of filteredAgents) {
+      const state = (agent.state || '').toLowerCase()
+      if (state === 'running' || state === 'idle') {
+        sections.active.push(agent)
+        continue
+      }
+      if (state === 'error') {
+        sections.errored.push(agent)
+        continue
+      }
+      const ts = getAgentActivityTimestamp(agent)
+      if (ts > 0 && ts >= cutoff) {
+        sections.recent.push(agent)
+      } else {
+        sections.archive.push(agent)
+      }
+    }
+    return sections
+  }, [filteredAgents])
 
   // Auto-scroll to bottom on new messages
   useEffect(() => {
@@ -580,7 +819,7 @@ export function ConversationsList() {
         system_prompt: `You are chatting in the context of an agent session.
 
 Agent Details:
-- Name: ${agent.name || agent.slug || 'Unnamed'}
+- Name: ${getAgentDisplayName(agent)}
 - Role: ${agent.role || 'N/A'}
 - ID: ${agent.id}
 - Workspace: ${agent.ns || '/'}
@@ -597,7 +836,7 @@ Help the user understand and interact with this agent's work.`,
       // Create a placeholder conversation for the UI
       const newConv: Conversation = {
         id: sessionData.session.id,
-        title: `Chat with ${agent.name || agent.role || 'Agent'}`,
+        title: `Chat with ${getAgentDisplayName(agent)}`,
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
         message_count: 0,
@@ -613,7 +852,7 @@ Help the user understand and interact with this agent's work.`,
       try {
         await renameCompanionConversation(
           sessionData.session.id,
-          `Chat with ${agent.name || agent.role || 'Agent'}`,
+          `Chat with ${getAgentDisplayName(agent)}`,
           agent.id
         )
         // Refetch conversations so grouping updates immediately
@@ -877,7 +1116,7 @@ Help the user understand and interact with this agent's work.`,
 
           if (linkedAgent) {
             ctx.agent_id = linkedAgent.id
-            ctx.agent_name = linkedAgent.name || linkedAgent.slug || undefined
+            ctx.agent_name = getAgentDisplayName(linkedAgent)
             ctx.agent_role = linkedAgent.role || undefined
             ctx.agent_state = linkedAgent.state
             ctx.agent_exec_mode = linkedAgent.exec_mode || undefined
@@ -1144,6 +1383,30 @@ Help the user understand and interact with this agent's work.`,
     })
   }
 
+  const handleKillAllStopped = async () => {
+    const targets = filteredAgents.filter((a) => a.state === 'stopped')
+    if (targets.length === 0) return
+    if (!window.confirm(`Kill ${targets.length} stopped agents?`)) return
+    const result = await Promise.allSettled(targets.map((a) => killAgent(a.id)))
+    const failed = result.filter((r) => r.status === 'rejected').length
+    alert(`Kill stopped: ${targets.length - failed} succeeded, ${failed} failed.`)
+    await refetchAgents()
+  }
+
+  const handleTrashOldAgents = async () => {
+    const cutoff = Date.now() - ONE_DAY_MS
+    const targets = filteredAgents.filter((a) => {
+      const ts = getAgentActivityTimestamp(a)
+      return a.state === 'stopped' && ts > 0 && ts < cutoff
+    })
+    if (targets.length === 0) return
+    if (!window.confirm(`Trash ${targets.length} old agents?`)) return
+    const result = await Promise.allSettled(targets.map((a) => trashAgent(a.id)))
+    const failed = result.filter((r) => r.status === 'rejected').length
+    alert(`Trash old: ${targets.length - failed} succeeded, ${failed} failed.`)
+    await refetchAgents()
+  }
+
   // Auto-expand agent when its conversation is selected
   useEffect(() => {
     if (selectedConversation && linkedAgent) {
@@ -1182,6 +1445,8 @@ Help the user understand and interact with this agent's work.`,
     if (chatModelValue.startsWith(`${chatProviderValue}/`)) return chatModelValue
     return `${chatProviderValue}/${chatModelValue}`
   })()
+  const LinkedRoleIcon = linkedAgent ? getRoleIcon(linkedAgent.role) : Bot
+  const InspectorRoleIcon = getRoleIcon(agentOps.targetAgent?.role)
 
   return (
     <div className="flex h-full">
@@ -1226,6 +1491,30 @@ Help the user understand and interact with this agent's work.`,
               className="pl-7 h-8 text-sm"
             />
           </div>
+
+          <div className="flex items-center gap-1">
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-7 text-xs"
+              onClick={() => void handleKillAllStopped()}
+              disabled={filteredAgents.every((a) => a.state !== 'stopped')}
+            >
+              Kill Stopped
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-7 text-xs"
+              onClick={() => void handleTrashOldAgents()}
+              disabled={filteredAgents.every((a) => {
+                const ts = getAgentActivityTimestamp(a)
+                return !(a.state === 'stopped' && ts > 0 && ts < (Date.now() - ONE_DAY_MS))
+              })}
+            >
+              Trash Old
+            </Button>
+          </div>
         </div>
 
         {/* Sidebar List - Agents with Collapsible Conversations */}
@@ -1236,10 +1525,10 @@ Help the user understand and interact with this agent's work.`,
                 <RefreshCw className="h-5 w-5 mx-auto mb-2 animate-spin" />
                 <p className="text-xs">Loading...</p>
               </div>
-            ) : agents.length === 0 && filteredConversations.length === 0 ? (
+            ) : filteredAgents.length === 0 && filteredConversations.length === 0 ? (
               <div className="text-center py-8 text-muted-foreground">
                 <Bot className="h-8 w-8 mx-auto mb-2 opacity-40" />
-                <p className="text-sm">No agents yet</p>
+                <p className="text-sm">{searchQuery ? 'No matches' : 'No agents yet'}</p>
                 <Button
                   variant="outline"
                   size="sm"
@@ -1253,171 +1542,158 @@ Help the user understand and interact with this agent's work.`,
             ) : (
               <>
                 {/* Agents Section */}
-                {agents.length > 0 && (
-                  <div className="space-y-1">
-                    {agents.map((agent) => {
-                      const agentConvs = groupedConversations.agentGroups.find(g => g.agent.id === agent.id)?.conversations || []
-                      const isExpanded = expandedAgents.has(agent.id)
-                      const hasSelectedConv = agentConvs.some(c => c.id === selectedConversation?.id)
-
-                      return (
-                        <div key={agent.id}>
-                          {/* Agent Header - Clickable to expand/collapse */}
-                          <div
-                            className={cn(
-                              'flex items-center gap-2 px-2 py-2 rounded-lg cursor-pointer transition-colors group',
-                              'hover:bg-accent/50',
-                              hasSelectedConv && 'bg-accent/30'
-                            )}
-                            onClick={() => {
-                              toggleAgentExpanded(agent.id)
-                              setSelectedAgent(agent)
-                            }}
-                          >
-                            {/* Expand/Collapse Icon */}
-                            <div className="flex-shrink-0 w-4 h-4 flex items-center justify-center">
-                              {isExpanded ? (
-                                <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
-                              ) : (
-                                <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
-                              )}
-                            </div>
-
-                            {/* Agent Avatar */}
-                            <div className={cn(
-                              'h-7 w-7 rounded-lg flex items-center justify-center flex-shrink-0',
-                              agent.state === 'running' ? 'bg-green-500/20' : 'bg-primary/10'
-                            )}>
-                              <Bot className={cn(
-                                'h-3.5 w-3.5',
-                                agent.state === 'running' ? 'text-green-500' : 'text-primary'
-                              )} />
-                            </div>
-
-                            {/* Agent Info */}
-                            <div className="flex-1 min-w-0">
-                              <div className="flex items-center gap-1.5">
-                                <span className="text-sm font-medium truncate">
-                                  {agent.name || agent.slug || agent.role || 'Agent'}
-                                </span>
-                                {agent.state === 'running' && (
-                                  <span className="h-1.5 w-1.5 rounded-full bg-green-500 animate-pulse" />
-                                )}
-                              </div>
-                              <div className="text-[10px] text-muted-foreground truncate">
-                                {agent.role || 'agent'} · {agentConvs.length} {agentConvs.length === 1 ? 'chat' : 'chats'}
-                              </div>
-                            </div>
-
-                            {/* New Chat Button */}
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0"
-                              onClick={(e) => {
-                                e.stopPropagation()
-                                handleNewConversationWithAgent(agent)
-                              }}
-                              title="New chat with this agent"
-                            >
-                              <Plus className="h-3.5 w-3.5" />
-                            </Button>
-                          </div>
-
-                          {/* Expanded Conversations */}
-                          {isExpanded && (
-                            <div className="ml-6 pl-2 border-l border-border/50 space-y-0.5 mt-0.5">
-                              {agentConvs.length === 0 && (
-                                <div
-                                  className="flex items-center gap-2 px-2 py-1.5 rounded-md cursor-pointer text-muted-foreground hover:text-foreground hover:bg-accent/50 transition-colors"
-                                  onClick={(e) => {
-                                    e.stopPropagation()
-                                    handleNewConversationWithAgent(agent)
-                                  }}
-                                >
-                                  <Plus className="h-3 w-3" />
-                                  <span className="text-xs">Start a conversation</span>
-                                </div>
-                              )}
-                              {agentConvs.map((conversation) => (
-                                <div
-                                  key={conversation.id}
-                                  className={cn(
-                                    'flex items-center gap-2 px-2 py-1.5 rounded-md cursor-pointer transition-colors group',
-                                    'hover:bg-accent/50',
-                                    selectedConversation?.id === conversation.id && 'bg-accent border-l-2 border-primary -ml-0.5 pl-2.5'
-                                  )}
-                                  onClick={() => handleSelectConversation(conversation)}
-                                >
-                                  <MessageCircle className="h-3 w-3 text-muted-foreground flex-shrink-0" />
-                                  <div className="flex-1 min-w-0">
-                                    {editingConversationId === conversation.id ? (
-                                      <div className="space-y-1" onClick={(e) => e.stopPropagation()}>
-                                        <Input
-                                          value={editTitle}
-                                          onChange={(e) => setEditTitle(e.target.value)}
-                                          onKeyDown={(e) => {
-                                            if (e.key === 'Enter') handleSaveRename(e, conversation.id)
-                                            if (e.key === 'Escape') handleCancelRename(e)
-                                          }}
-                                          className="h-5 text-xs py-0 px-1"
-                                          placeholder="Title..."
-                                          autoFocus
-                                        />
-                                        <div className="flex items-center gap-1">
-                                          <select
-                                            value={editLinkedAgentId}
-                                            onChange={(e) => setEditLinkedAgentId(e.target.value)}
-                                            className="flex-1 h-5 text-[10px] bg-muted border border-border rounded px-1"
-                                          >
-                                            <option value="">No agent</option>
-                                            {agents.map((a) => (
-                                              <option key={a.id} value={a.id}>
-                                                {a.name || a.slug || a.role || a.id.slice(0, 8)}
-                                              </option>
-                                            ))}
-                                          </select>
-                                          <Button variant="ghost" size="icon" className="h-5 w-5" onClick={(e) => handleSaveRename(e, conversation.id)}>
-                                            <Check className="h-3 w-3 text-green-500" />
-                                          </Button>
-                                          <Button variant="ghost" size="icon" className="h-5 w-5" onClick={handleCancelRename}>
-                                            <X className="h-3 w-3" />
-                                          </Button>
-                                        </div>
-                                      </div>
-                                    ) : (
-                                      <div className="flex items-center gap-1.5">
-                                        <span className="text-xs truncate">
-                                          {conversation.name || conversation.id.slice(0, 12)}
-                                        </span>
-                                        <Badge variant="secondary" className="text-[9px] px-1 py-0 flex-shrink-0">
-                                          {conversation.message_count}
-                                        </Badge>
-                                      </div>
-                                    )}
-                                  </div>
-                                  {editingConversationId !== conversation.id && (
-                                    <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
-                                      <Button variant="ghost" size="icon" className="h-5 w-5" onClick={(e) => handleStartRename(e, conversation)} title="Rename">
-                                        <Pencil className="h-2.5 w-2.5 text-muted-foreground" />
-                                      </Button>
-                                      <Button variant="ghost" size="icon" className="h-5 w-5" onClick={(e) => handleDeleteConversation(e, conversation.id)} title="Delete">
-                                        <Trash2 className="h-2.5 w-2.5 text-muted-foreground" />
-                                      </Button>
-                                    </div>
-                                  )}
-                                </div>
-                              ))}
-                            </div>
-                          )}
-                        </div>
-                      )
-                    })}
-                  </div>
+                {agentSections.active.length > 0 && (
+                  <CollapsibleSection
+                    title="Active"
+                    icon={<Play className="h-3.5 w-3.5" />}
+                    defaultOpen
+                    badge={String(agentSections.active.length)}
+                  >
+                    <div className="space-y-1">
+                      {agentSections.active.map((agent) => (
+                        <AgentConversationGroup
+                          key={agent.id}
+                          agent={agent}
+                          conversations={groupedConversations.agentGroups.find((g) => g.agent.id === agent.id)?.conversations || []}
+                          isExpanded={expandedAgents.has(agent.id)}
+                          hasSelectedConversation={
+                            (groupedConversations.agentGroups.find((g) => g.agent.id === agent.id)?.conversations || [])
+                              .some((c) => c.id === selectedConversation?.id)
+                          }
+                          selectedConversationId={selectedConversation?.id}
+                          agents={agents}
+                          editingConversationId={editingConversationId}
+                          editTitle={editTitle}
+                          onEditTitleChange={setEditTitle}
+                          editLinkedAgentId={editLinkedAgentId}
+                          onEditLinkedAgentIdChange={setEditLinkedAgentId}
+                          onToggleExpanded={toggleAgentExpanded}
+                          onSelectAgent={setSelectedAgent}
+                          onNewConversationWithAgent={handleNewConversationWithAgent}
+                          onSelectConversation={handleSelectConversation}
+                          onSaveRename={handleSaveRename}
+                          onCancelRename={handleCancelRename}
+                          onStartRename={handleStartRename}
+                          onDeleteConversation={handleDeleteConversation}
+                        />
+                      ))}
+                    </div>
+                  </CollapsibleSection>
+                )}
+                {agentSections.errored.length > 0 && (
+                  <CollapsibleSection
+                    title="Errored"
+                    icon={<Bug className="h-3.5 w-3.5" />}
+                    defaultOpen
+                    badge={String(agentSections.errored.length)}
+                  >
+                    <div className="space-y-1">
+                      {agentSections.errored.map((agent) => (
+                        <AgentConversationGroup
+                          key={agent.id}
+                          agent={agent}
+                          conversations={groupedConversations.agentGroups.find((g) => g.agent.id === agent.id)?.conversations || []}
+                          isExpanded={expandedAgents.has(agent.id)}
+                          hasSelectedConversation={
+                            (groupedConversations.agentGroups.find((g) => g.agent.id === agent.id)?.conversations || [])
+                              .some((c) => c.id === selectedConversation?.id)
+                          }
+                          selectedConversationId={selectedConversation?.id}
+                          agents={agents}
+                          editingConversationId={editingConversationId}
+                          editTitle={editTitle}
+                          onEditTitleChange={setEditTitle}
+                          editLinkedAgentId={editLinkedAgentId}
+                          onEditLinkedAgentIdChange={setEditLinkedAgentId}
+                          onToggleExpanded={toggleAgentExpanded}
+                          onSelectAgent={setSelectedAgent}
+                          onNewConversationWithAgent={handleNewConversationWithAgent}
+                          onSelectConversation={handleSelectConversation}
+                          onSaveRename={handleSaveRename}
+                          onCancelRename={handleCancelRename}
+                          onStartRename={handleStartRename}
+                          onDeleteConversation={handleDeleteConversation}
+                        />
+                      ))}
+                    </div>
+                  </CollapsibleSection>
+                )}
+                {agentSections.recent.length > 0 && (
+                  <CollapsibleSection
+                    title="Recent"
+                    icon={<Clock className="h-3.5 w-3.5" />}
+                    badge={String(agentSections.recent.length)}
+                  >
+                    <div className="space-y-1">
+                      {agentSections.recent.map((agent) => (
+                        <AgentConversationGroup
+                          key={agent.id}
+                          agent={agent}
+                          conversations={groupedConversations.agentGroups.find((g) => g.agent.id === agent.id)?.conversations || []}
+                          isExpanded={expandedAgents.has(agent.id)}
+                          hasSelectedConversation={
+                            (groupedConversations.agentGroups.find((g) => g.agent.id === agent.id)?.conversations || [])
+                              .some((c) => c.id === selectedConversation?.id)
+                          }
+                          selectedConversationId={selectedConversation?.id}
+                          agents={agents}
+                          editingConversationId={editingConversationId}
+                          editTitle={editTitle}
+                          onEditTitleChange={setEditTitle}
+                          editLinkedAgentId={editLinkedAgentId}
+                          onEditLinkedAgentIdChange={setEditLinkedAgentId}
+                          onToggleExpanded={toggleAgentExpanded}
+                          onSelectAgent={setSelectedAgent}
+                          onNewConversationWithAgent={handleNewConversationWithAgent}
+                          onSelectConversation={handleSelectConversation}
+                          onSaveRename={handleSaveRename}
+                          onCancelRename={handleCancelRename}
+                          onStartRename={handleStartRename}
+                          onDeleteConversation={handleDeleteConversation}
+                        />
+                      ))}
+                    </div>
+                  </CollapsibleSection>
+                )}
+                {agentSections.archive.length > 0 && (
+                  <CollapsibleSection
+                    title="Archive"
+                    icon={<Folder className="h-3.5 w-3.5" />}
+                  >
+                    <div className="space-y-1">
+                      {agentSections.archive.map((agent) => (
+                        <AgentConversationGroup
+                          key={agent.id}
+                          agent={agent}
+                          conversations={groupedConversations.agentGroups.find((g) => g.agent.id === agent.id)?.conversations || []}
+                          isExpanded={expandedAgents.has(agent.id)}
+                          hasSelectedConversation={
+                            (groupedConversations.agentGroups.find((g) => g.agent.id === agent.id)?.conversations || [])
+                              .some((c) => c.id === selectedConversation?.id)
+                          }
+                          selectedConversationId={selectedConversation?.id}
+                          agents={agents}
+                          editingConversationId={editingConversationId}
+                          editTitle={editTitle}
+                          onEditTitleChange={setEditTitle}
+                          editLinkedAgentId={editLinkedAgentId}
+                          onEditLinkedAgentIdChange={setEditLinkedAgentId}
+                          onToggleExpanded={toggleAgentExpanded}
+                          onSelectAgent={setSelectedAgent}
+                          onNewConversationWithAgent={handleNewConversationWithAgent}
+                          onSelectConversation={handleSelectConversation}
+                          onSaveRename={handleSaveRename}
+                          onCancelRename={handleCancelRename}
+                          onStartRename={handleStartRename}
+                          onDeleteConversation={handleDeleteConversation}
+                        />
+                      ))}
+                    </div>
+                  </CollapsibleSection>
                 )}
 
                 {/* Divider if both agents and orphan conversations exist */}
-                {agents.length > 0 && groupedConversations.orphanConversations.length > 0 && (
+                {(agentSections.active.length > 0 || agentSections.errored.length > 0 || agentSections.recent.length > 0 || agentSections.archive.length > 0) && groupedConversations.orphanConversations.length > 0 && (
                   <div className="my-2 border-t border-border" />
                 )}
 
@@ -1478,7 +1754,7 @@ Help the user understand and interact with this agent's work.`,
                                       <option value="">Link to agent...</option>
                                       {agents.map((a) => (
                                         <option key={a.id} value={a.id}>
-                                          {a.name || a.slug || a.role || a.id.slice(0, 8)}
+                                          {getAgentDisplayName(a)}
                                         </option>
                                       ))}
                                     </select>
@@ -1539,12 +1815,12 @@ Help the user understand and interact with this agent's work.`,
                   {linkedAgent ? (
                     <>
                       <div className="h-8 w-8 rounded-lg bg-primary/10 flex items-center justify-center flex-shrink-0">
-                        <Bot className="h-4 w-4 text-primary" />
+                        <LinkedRoleIcon className="h-4 w-4 text-primary" />
                       </div>
                       <div className="min-w-0">
                         <div className="flex items-center gap-2">
                           <span className="text-sm font-medium truncate">
-                            {linkedAgent.name || linkedAgent.slug || 'Agent'}
+                            {getAgentDisplayName(linkedAgent)}
                           </span>
                           <Badge variant="outline" className="text-[10px]">
                             {linkedAgent.role || 'agent'}
@@ -1575,8 +1851,8 @@ Help the user understand and interact with this agent's work.`,
                           <span>{messages.length} messages</span>
                           {linkedAgent !== null && (
                             <Badge variant="secondary" className="text-[9px] bg-primary/10 text-primary">
-                              <Bot className="h-2.5 w-2.5 mr-0.5" />
-                              {(linkedAgent as Agent).name || (linkedAgent as Agent).role || 'Agent'}
+                              <LinkedRoleIcon className="h-2.5 w-2.5 mr-0.5" />
+                              {getAgentDisplayName(linkedAgent as Agent)}
                             </Badge>
                           )}
                         </div>
@@ -1687,7 +1963,7 @@ Help the user understand and interact with this agent's work.`,
                 <option value="">No agent</option>
                 {agents.map((agent) => (
                   <option key={agent.id} value={agent.id}>
-                    {agent.name || agent.slug || agent.role || agent.id.slice(0, 12)}
+                    {getAgentDisplayName(agent)}
                   </option>
                 ))}
               </select>
@@ -1734,7 +2010,7 @@ Help the user understand and interact with this agent's work.`,
             {/* === 1. AGENT === */}
             <CollapsibleSection
               title="Agent"
-              icon={<Bot className="h-3.5 w-3.5 text-green-500" />}
+              icon={<InspectorRoleIcon className="h-3.5 w-3.5 text-green-500" />}
               open={agentSectionOpen}
               onToggle={setAgentSectionOpen}
               badge={agentOps.targetAgent ? agentOps.targetAgent.state : undefined}
@@ -1747,7 +2023,7 @@ Help the user understand and interact with this agent's work.`,
                       'h-10 w-10 rounded-lg flex items-center justify-center',
                       agentOps.targetAgent.state === 'running' ? 'bg-green-500/10' : 'bg-muted'
                     )}>
-                      <Bot className={cn(
+                      <InspectorRoleIcon className={cn(
                         'h-5 w-5',
                         agentOps.targetAgent.state === 'running' ? 'text-green-500' : 'text-muted-foreground'
                       )} />
@@ -1755,7 +2031,7 @@ Help the user understand and interact with this agent's work.`,
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2">
                         <span className="text-sm font-semibold truncate">
-                          {agentOps.targetAgent.name || agentOps.targetAgent.slug || agentOps.targetAgent.role || 'Agent'}
+                          {getAgentDisplayName(agentOps.targetAgent)}
                         </span>
                         <Badge variant={agentOps.targetAgent.state === 'running' ? 'default' : 'outline'} className="text-xs">
                           {agentOps.targetAgent.state}
@@ -1775,7 +2051,7 @@ Help the user understand and interact with this agent's work.`,
                         size="sm"
                         className="flex-1 gap-1"
                         onClick={() => {
-                          if (window.confirm(`Stop "${agentOps.targetAgent!.name || agentOps.targetAgent!.role || 'this agent'}"?`)) {
+                          if (window.confirm(`Stop "${getAgentDisplayName(agentOps.targetAgent!)}"?`)) {
                             agentOps.killAgent.mutate(agentOps.targetAgent!.id)
                           }
                         }}
@@ -1801,7 +2077,7 @@ Help the user understand and interact with this agent's work.`,
                       size="sm"
                       className="gap-1"
                       onClick={() => {
-                        if (window.confirm(`Remove "${agentOps.targetAgent!.name || agentOps.targetAgent!.role || 'this agent'}"? This cannot be undone.`)) {
+                        if (window.confirm(`Remove "${getAgentDisplayName(agentOps.targetAgent!)}"? This cannot be undone.`)) {
                           agentOps.trashAgent.mutate(agentOps.targetAgent!.id)
                         }
                       }}

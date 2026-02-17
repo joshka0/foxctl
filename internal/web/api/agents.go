@@ -32,6 +32,7 @@ type AgentResponse struct {
 	Name           string   `json:"name,omitempty"` // Human name (e.g., "Luna", "Atlas")
 	Slug           string   `json:"slug,omitempty"` // Human-readable handle (e.g., "researcher")
 	Role           string   `json:"role,omitempty"`
+	PromptSummary  string   `json:"prompt_summary,omitempty"`
 	SkillsAllow    []string `json:"skills_allow"`
 	ShareBB        string   `json:"share_bb"`
 	State          string   `json:"state"`
@@ -71,6 +72,18 @@ type AgentSpawnResponse struct {
 	ActorID   string `json:"actor_id"`
 	Status    string `json:"status"`
 	Name      string `json:"name,omitempty"` // Generated or provided name
+}
+
+func summarizePrompt(prompt string, maxLen int) string {
+	prompt = strings.TrimSpace(prompt)
+	if maxLen <= 0 || prompt == "" {
+		return ""
+	}
+	runes := []rune(prompt)
+	if len(runes) <= maxLen {
+		return prompt
+	}
+	return string(runes[:maxLen]) + "..."
 }
 
 // AgentsListHandler provides an HTTP handler for listing agents at GET /api/agents.
@@ -123,6 +136,7 @@ func AgentsListHandler(cfg config.Config, log zerolog.Logger) http.HandlerFunc {
 				Name:           a.Name,
 				Slug:           a.Slug,
 				Role:           a.Role,
+				PromptSummary:  summarizePrompt(a.Prompt, 100),
 				SkillsAllow:    a.SkillsAllow,
 				ShareBB:        a.ShareBB,
 				State:          string(a.State),
@@ -261,6 +275,7 @@ func AgentDetailHandler(cfg config.Config, log zerolog.Logger) http.HandlerFunc 
 			Name:           agent.Name,
 			Slug:           agent.Slug,
 			Role:           agent.Role,
+			PromptSummary:  summarizePrompt(agent.Prompt, 100),
 			SkillsAllow:    agent.SkillsAllow,
 			ShareBB:        agent.ShareBB,
 			State:          string(agent.State),
@@ -884,6 +899,7 @@ func handleAgentPatch(w http.ResponseWriter, r *http.Request, cfg config.Config,
 		Name:           agent.Name,
 		Slug:           agent.Slug,
 		Role:           agent.Role,
+		PromptSummary:  summarizePrompt(agent.Prompt, 100),
 		SkillsAllow:    agent.SkillsAllow,
 		ShareBB:        agent.ShareBB,
 		State:          string(agent.State),

@@ -522,6 +522,12 @@ func (e *agentToolExecutor) Execute(ctx context.Context, name string, args json.
 		return e.executeMemoryQuery(ctx, argsMap)
 	case "session_recall":
 		return e.executeSessionRecall(ctx, argsMap)
+	case "annotation_recall":
+		return e.executeAnnotationRecall(ctx, argsMap)
+	case "annotation_list_sessions":
+		return e.executeAnnotationListSessions(ctx)
+	case "annotation_category_stats":
+		return e.executeAnnotationCategoryStats(ctx, argsMap)
 	case "repo_index_search":
 		return e.executeRepoIndexSearch(ctx, argsMap)
 	case "repo_index_expand":
@@ -1452,6 +1458,68 @@ func (e *agentToolExecutor) executeSessionRecall(ctx context.Context, args map[s
 	return commandOutput(cmd, "session_recall")
 }
 
+// executeAnnotationRecall calls session/recall with annotation_granularity mode
+func (e *agentToolExecutor) executeAnnotationRecall(ctx context.Context, args map[string]any) (string, error) {
+	query, _ := args["query"].(string)
+	if query == "" {
+		return "", fmt.Errorf("query is required")
+	}
+	limit := intArg(args, 10, "limit")
+
+	inputMap := map[string]any{
+		"query":                  query,
+		"annotation_granularity": true,
+		"workspace":              e.workspaceRoot,
+		"limit":                  limit,
+	}
+	if cat, ok := args["filter_category"].(string); ok && cat != "" {
+		inputMap["filter_category"] = cat
+	}
+	if sortBy, ok := args["sort_by"].(string); ok && sortBy != "" {
+		inputMap["sort_by"] = sortBy
+	}
+	if sid, ok := args["session_id"].(string); ok && sid != "" {
+		inputMap["session_id"] = sid
+	}
+
+	inputBytes, err := json.Marshal(inputMap)
+	if err != nil {
+		return "", fmt.Errorf("marshal annotation_recall input: %w", err)
+	}
+
+	cmd := exec.CommandContext(ctx, "agentctl", "run", "session/recall", "--input", string(inputBytes))
+	cmd.Dir = e.workspaceRoot
+	return commandOutput(cmd, "annotation_recall")
+}
+
+// executeAnnotationCategoryStats calls session/recall in category_stats mode
+func (e *agentToolExecutor) executeAnnotationCategoryStats(ctx context.Context, args map[string]any) (string, error) {
+	inputMap := map[string]any{
+		"category_stats": true,
+		"workspace":      e.workspaceRoot,
+	}
+	if sid, ok := args["session_id"].(string); ok && sid != "" {
+		inputMap["session_id"] = sid
+	}
+
+	inputBytes, err := json.Marshal(inputMap)
+	if err != nil {
+		return "", fmt.Errorf("marshal annotation_category_stats input: %w", err)
+	}
+
+	cmd := exec.CommandContext(ctx, "agentctl", "run", "session/recall", "--input", string(inputBytes))
+	cmd.Dir = e.workspaceRoot
+	return commandOutput(cmd, "annotation_category_stats")
+}
+
+// executeAnnotationListSessions calls session/recall in list_sessions mode
+func (e *agentToolExecutor) executeAnnotationListSessions(ctx context.Context) (string, error) {
+	input := fmt.Sprintf(`{"list_sessions": true, "workspace": %q}`, e.workspaceRoot)
+	cmd := exec.CommandContext(ctx, "agentctl", "run", "session/recall", "--input", input)
+	cmd.Dir = e.workspaceRoot
+	return commandOutput(cmd, "annotation_list_sessions")
+}
+
 func commandOutput(cmd *exec.Cmd, label string) (string, error) {
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
@@ -1486,7 +1554,7 @@ func buildToolDefsForRole(role types.AgentRole, hasMailbox, hasBoard bool, allow
 	}
 
 	// Scout roles only get their specialized tools — no base file tools
-	isScout := role == types.RoleSemanticScout || role == types.RoleDAGScout || role == types.RoleSymbolScout
+	isScout := role == types.RoleSemanticScout || role == types.RoleDAGScout || role == types.RoleSymbolScout || role == types.RoleAnnotationScout
 	if !isScout {
 		tools = append(tools,
 			engine.ToolDef{
@@ -1613,6 +1681,17 @@ func buildToolDefsForRole(role types.AgentRole, hasMailbox, hasBoard bool, allow
 				},"required":["query"]}`),
 			},
 			engine.ToolDef{
+				Name:        "annotation_recall",
+				Description: "Search past session turn-level annotations using semantic similarity. Supports category filtering (decision, debug, code_change, refactor, config, test, documentation) and multi-key sorting (similarity, date, recent). Returns detailed annotation matches with content previews.",
+				Parameters: json.RawMessage(`{"type":"object","properties":{
+					"query":{"type":"string","description":"Natural language query to find relevant annotations"},
+					"filter_category":{"type":"string","description":"Filter by annotation category: decision, debug, code_change, refactor, config, test, documentation, discussion"},
+					"sort_by":{"type":"string","description":"Comma-separated sort keys: similarity (default), date (oldest first), recent (newest first)"},
+					"limit":{"type":"integer","description":"Maximum results (default 10)"},
+					"session_id":{"type":"string","description":"Restrict search to a specific session ID"}
+				},"required":["query"]}`),
+			},
+			engine.ToolDef{
 				Name:        "context_filter",
 				Description: "LLM-powered context filtering: given text chunks and a question, uses an LLM to select the most relevant chunks. Use when you have large text output from tools and need to extract the most relevant parts for your report.",
 				Parameters: json.RawMessage(`{"type":"object","properties":{
@@ -1708,6 +1787,41 @@ func buildToolDefsForRole(role types.AgentRole, hasMailbox, hasBoard bool, allow
 				Name:        "code_search",
 				Description: "Search for patterns in the codebase using regex",
 				Parameters:  json.RawMessage(`{"type":"object","properties":{"pattern":{"type":"string","description":"Regex pattern to search for"}},"required":["pattern"]}`),
+			},
+		)
+	case types.RoleAnnotationScout:
+		tools = append(tools,
+			engine.ToolDef{
+				Name:        "annotation_recall",
+				Description: "Search past session annotations using semantic similarity. Supports category filtering and multi-key sorting. Returns matching annotations with similarity scores, content previews, and metadata.",
+				Parameters: json.RawMessage(`{"type":"object","properties":{
+					"query":{"type":"string","description":"Natural language query to find relevant annotations"},
+					"filter_category":{"type":"string","description":"Filter by annotation category: decision, debug, code_change, refactor, config, test, documentation, discussion"},
+					"sort_by":{"type":"string","description":"Comma-separated sort keys: similarity (default), date (oldest first), recent (newest first)"},
+					"limit":{"type":"integer","description":"Maximum results (default 10)"},
+					"session_id":{"type":"string","description":"Restrict search to a specific session ID"}
+				},"required":["query"]}`),
+			},
+			engine.ToolDef{
+				Name:        "annotation_list_sessions",
+				Description: "List available sessions that have annotations. Use this to discover which sessions exist before searching.",
+				Parameters:  json.RawMessage(`{"type":"object","properties":{}}`),
+			},
+			engine.ToolDef{
+				Name:        "annotation_category_stats",
+				Description: "Get annotation counts grouped by category. Call this FIRST to see what categories exist and how many annotations each has. Helps you decide which categories to filter on.",
+				Parameters: json.RawMessage(`{"type":"object","properties":{
+					"session_id":{"type":"string","description":"Optional: restrict counts to a specific session"}
+				}}`),
+			},
+			engine.ToolDef{
+				Name:        "memory_query",
+				Description: "Search stored memories (gotchas, decisions, learnings) for relevant context about the codebase.",
+				Parameters: json.RawMessage(`{"type":"object","properties":{
+					"query":{"type":"string","description":"What to search for"},
+					"types":{"type":"string","description":"Filter: gotcha,decision,learning,pattern (default: all)"},
+					"limit":{"type":"integer","description":"Max results (default 10)"}
+				},"required":["query"]}`),
 			},
 		)
 	case types.RoleOverseer:

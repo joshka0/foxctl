@@ -1422,16 +1422,47 @@ WHERE session_id = $1 AND chunk_index = $2`, sessionID, chunkIndex)
 
 // SearchChunks searches chunks by embedding similarity.
 func (s *Store) SearchChunks(ctx context.Context, embedding []float32, limit int) ([]ScoredChunk, error) {
+	return s.SearchChunksWithOptions(ctx, embedding, limit, storage.ChunkSearchOptions{})
+}
+
+// SearchChunksWithOptions searches chunks by embedding similarity with optional session/workspace filters.
+func (s *Store) SearchChunksWithOptions(ctx context.Context, embedding []float32, limit int, opts storage.ChunkSearchOptions) ([]ScoredChunk, error) {
 	if limit <= 0 {
 		limit = 20
 	}
 
-	rows, err := s.db.QueryContext(ctx, `
-SELECT id, session_id, chunk_index, chunk_type, content_hash, content_preview,
-       byte_offset, byte_length, tools_used, files_touched, has_error, error_type,
-       embedding, embedding_model, context_window_index, created_at
-FROM session_chunks
-WHERE embedding IS NOT NULL`)
+	var query strings.Builder
+	query.WriteString(`
+SELECT sc.id, sc.session_id, sc.chunk_index, sc.chunk_type, sc.content_hash, sc.content_preview,
+       sc.byte_offset, sc.byte_length, sc.tools_used, sc.files_touched, sc.has_error, sc.error_type,
+       sc.embedding, sc.embedding_model, sc.context_window_index, sc.created_at
+FROM session_chunks sc`)
+
+	var conditions []string
+	args := make([]any, 0, 3)
+	argIdx := 0
+
+	if opts.Workspace != "" {
+		query.WriteString(`
+JOIN sessions s ON s.id = sc.session_id`)
+	}
+
+	if opts.SessionID != "" {
+		argIdx++
+		conditions = append(conditions, fmt.Sprintf("sc.session_id = $%d", argIdx))
+		args = append(args, opts.SessionID)
+	}
+	if opts.Workspace != "" {
+		argIdx += 2
+		conditions = append(conditions, fmt.Sprintf("(s.workspace_id = $%d OR (s.workspace_id = '' AND s.workspace_path = $%d))", argIdx-1, argIdx))
+		args = append(args, opts.Workspace, opts.Workspace)
+	}
+	conditions = append(conditions, "sc.embedding IS NOT NULL", "LENGTH(sc.embedding) > 0")
+
+	query.WriteString("\nWHERE ")
+	query.WriteString(strings.Join(conditions, " AND "))
+
+	rows, err := s.db.QueryContext(ctx, query.String(), args...)
 	if err != nil {
 		return nil, fmt.Errorf("sessions: search chunks: %w", err)
 	}

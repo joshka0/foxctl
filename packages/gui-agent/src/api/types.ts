@@ -12,6 +12,7 @@ export interface Agent {
   created_at: string
   updated_at?: string
   heartbeat_at?: string
+  prompt_summary?: string
   llm_provider?: string
   llm_model?: string
   exec_mode?: 'reactive' | 'autonomous' | 'proactive' | 'story'

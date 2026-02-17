@@ -21,7 +21,7 @@ var (
 var runtimeToolNames = []string{
 	"fs_read_file", "fs_list_dir", "fs_write_file", "code_search", "think",
 	"context_search", "smart_search", "context_grep", "code_symbols", "context_filter", "session_timeline",
-	"memory_query", "session_recall",
+	"memory_query", "session_recall", "annotation_recall", "annotation_list_sessions", "annotation_category_stats",
 	"repo_index_search", "repo_index_expand", "repo_index_open", "repo_index_dag_grep",
 	"agent_spawn", "agent_list", "agent_status", "agent_kill", "agent_hierarchy", "agent_wait",
 	"mail_inbox", "mail_send", "mail_ack",

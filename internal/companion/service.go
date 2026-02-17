@@ -347,6 +347,21 @@ type PresenceConfig struct {
 
 	// VoiceID is the ElevenLabs voice ID override.
 	VoiceID string `json:"voice_id,omitempty"`
+
+	// TTSProvider selects the voice provider: elevenlabs|pocket.
+	TTSProvider string `json:"tts_provider,omitempty"`
+
+	// PocketBaseURL is the Pocket TTS server URL when TTSProvider is pocket.
+	PocketBaseURL string `json:"pocket_base_url,omitempty"`
+
+	// RewriteForTTS rewrites model output into concise speech-ready text.
+	RewriteForTTS bool `json:"rewrite_for_tts,omitempty"`
+
+	// RewriteModel is the OpenRouter model used for rewrite_for_tts.
+	RewriteModel string `json:"rewrite_model,omitempty"`
+
+	// RewriteMaxChars caps rewrite output length.
+	RewriteMaxChars int `json:"rewrite_max_chars,omitempty"`
 }
 
 // PresenceBundle contains multimodal presence assets for a response.
@@ -2105,6 +2120,21 @@ func (s *Service) generatePresence(ctx context.Context, req ChatRequest, resp *C
 	}
 	if presenceCfg.VoiceID != "" {
 		input["voice_id"] = presenceCfg.VoiceID
+	}
+	if presenceCfg.TTSProvider != "" {
+		input["tts_provider"] = presenceCfg.TTSProvider
+	}
+	if presenceCfg.PocketBaseURL != "" {
+		input["pocket_base_url"] = presenceCfg.PocketBaseURL
+	}
+	if presenceCfg.RewriteForTTS {
+		input["rewrite_for_tts"] = true
+	}
+	if presenceCfg.RewriteModel != "" {
+		input["rewrite_model"] = presenceCfg.RewriteModel
+	}
+	if presenceCfg.RewriteMaxChars > 0 {
+		input["rewrite_max_chars"] = presenceCfg.RewriteMaxChars
 	}
 	// Add scene from ChatAction if present
 	if resp.Action != nil && resp.Action.Scene != "" {

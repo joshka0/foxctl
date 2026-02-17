@@ -402,6 +402,7 @@ type SessionStore interface {
 	GetChunks(ctx context.Context, sessionID string, limit int) ([]SessionChunk, error)
 	GetChunk(ctx context.Context, sessionID string, chunkIndex int) (SessionChunk, error)
 	SearchChunks(ctx context.Context, embedding []float32, limit int) ([]ScoredChunk, error)
+	SearchChunksWithOptions(ctx context.Context, embedding []float32, limit int, opts ChunkSearchOptions) ([]ScoredChunk, error)
 	DeleteChunks(ctx context.Context, sessionID string) error
 	SetArchivePath(ctx context.Context, sessionID, archivePath string) error
 	GetArchivePath(ctx context.Context, sessionID string) (string, error)
@@ -448,6 +449,55 @@ type SessionChunk struct {
 	CreatedAt          time.Time `json:"created_at"`
 }
 
+// TurnAnnotation represents a per-turn annotation with slice anchors.
+// Stored in a separate annotations database with native vector search.
+type TurnAnnotation struct {
+	ID                 string `json:"id"` // ULID
+	SessionID          string `json:"session_id"`
+	TurnIndex          int    `json:"turn_index"`           // 0-based in session
+	ContextWindowIndex int    `json:"context_window_index"` // compaction window
+
+	// Source location in JSONL
+	ByteOffset int64     `json:"byte_offset"`
+	ByteLength int64     `json:"byte_length"`
+	LineNum    int       `json:"line_num"`
+	Timestamp  time.Time `json:"timestamp,omitempty"`
+
+	// Classification
+	ChunkType string `json:"chunk_type"` // user_request, assistant_response, etc.
+	Role      string `json:"role"`       // user, assistant, system
+
+	// Deterministic slice anchors (JSON arrays)
+	CodeBlocks     []any    `json:"code_blocks,omitempty"` // [{language, content_hash, preview}]
+	Commands       []any    `json:"commands,omitempty"`    // [{tool, command, exit_code}]
+	Errors         []any    `json:"errors,omitempty"`      // [{type, message, tool}]
+	FilePaths      []string `json:"file_paths,omitempty"`
+	Symbols        []any    `json:"symbols,omitempty"` // [{name, kind, file}]
+	ToolsUsed      []string `json:"tools_used,omitempty"`
+	ContentPreview string   `json:"content_preview,omitempty"`
+	ContentHash    string   `json:"content_hash"` // SHA256 of raw JSONL line
+
+	// LLM annotations (filled by tiny model)
+	TOCLabel          string `json:"toc_label,omitempty"`
+	TOCCategory       string `json:"toc_category,omitempty"`
+	Intent            string `json:"intent,omitempty"`
+	AnnotationModel   string `json:"annotation_model,omitempty"`
+	AnnotationVersion string `json:"annotation_version,omitempty"`
+
+	// Embedding for semantic search
+	Embedding      []byte `json:"embedding,omitempty"`
+	EmbeddingModel string `json:"embedding_model,omitempty"`
+	EmbeddingText  string `json:"embedding_text,omitempty"`
+
+	// Metadata
+	HasError          bool `json:"has_error"`
+	IsCompactBoundary bool `json:"is_compact_boundary"`
+	PreCompactTokens  int  `json:"pre_compact_tokens,omitempty"`
+
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
 // SessionChunkSummary captures a persisted summary over a chunk window.
 type SessionChunkSummary struct {
 	ID            string    `json:"id"`
@@ -470,6 +520,12 @@ type SessionChunkSummary struct {
 type ScoredChunk struct {
 	Chunk      SessionChunk `json:"chunk"`
 	Similarity float64      `json:"similarity"`
+}
+
+// ChunkSearchOptions controls filtering for chunk-level vector search.
+type ChunkSearchOptions struct {
+	Workspace string // workspace path or stable ID
+	SessionID string // restrict to a single session
 }
 
 // ChunkListOptions configures chunk listing.

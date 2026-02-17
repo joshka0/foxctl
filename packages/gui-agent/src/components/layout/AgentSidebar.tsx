@@ -8,6 +8,7 @@ import { useActivityStore } from '@/stores/activityStore'
 import { useViewStore } from '@/stores/viewStore'
 import { listAgents } from '@/api/client'
 import type { Agent } from '@/api/types'
+import { getRoleIcon, getAgentDisplayName } from '@/lib/agent-utils'
 import {
   Search,
   FileText,
@@ -18,7 +19,6 @@ import {
   ChevronRight,
   Activity,
   MessagesSquare,
-  Bot,
 } from 'lucide-react'
 import type { ViewType } from '@/stores/viewStore'
 
@@ -173,18 +173,19 @@ interface AgentButtonProps {
 
 function AgentButton({ agent, collapsed, selected, onClick }: AgentButtonProps) {
   const isRunning = agent.state === 'running'
-  const displayName = agent.name || agent.slug || agent.role || 'Agent'
+  const displayName = getAgentDisplayName(agent)
+  const RoleIcon = getRoleIcon(agent.role)
 
   return (
     <Button variant={selected ? 'secondary' : 'ghost'} className={cn('w-full justify-start mb-1 relative px-2')} onClick={onClick} title={displayName}>
       <span className="relative">
-        <Bot className={cn('h-4 w-4', isRunning ? 'text-green-500' : 'text-muted-foreground')} />
+        <RoleIcon className={cn('h-4 w-4', isRunning ? 'text-green-500' : 'text-muted-foreground')} />
         {isRunning && <span className="absolute -top-1 -right-1 h-2 w-2 rounded-full bg-green-500" />}
       </span>
       {!collapsed && (
         <>
-          <span className="ml-2 truncate">{displayName}</span>
-          {agent.role && <Badge variant="outline" className="ml-auto text-xs">{agent.role.slice(0, 3)}</Badge>}
+          <span className="ml-2 truncate capitalize">{displayName}</span>
+          {agent.role && agent.name && <Badge variant="outline" className="ml-auto text-xs">{agent.name.slice(0, 8)}</Badge>}
         </>
       )}
     </Button>

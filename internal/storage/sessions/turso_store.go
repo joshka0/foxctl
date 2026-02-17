@@ -1309,6 +1309,13 @@ func (s *TursoStore) SearchChunks(ctx context.Context, embedding []float32, limi
 	return results, rows.Err()
 }
 
+// SearchChunksWithOptions finds chunks similar to the given embedding with optional filters.
+func (s *TursoStore) SearchChunksWithOptions(ctx context.Context, embedding []float32, limit int, opts storage.ChunkSearchOptions) ([]ScoredChunk, error) {
+	// TODO: Add native workspace/session filtering when Turso vector search supports efficient predicate pushdown.
+	_ = opts
+	return s.SearchChunks(ctx, embedding, limit)
+}
+
 // DeleteChunks removes all chunks for a session.
 func (s *TursoStore) DeleteChunks(ctx context.Context, sessionID string) error {
 	_, err := s.db.ExecContext(ctx, `DELETE FROM session_chunks WHERE session_id = ?`, sessionID)

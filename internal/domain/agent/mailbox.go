@@ -93,6 +93,8 @@ type ConsoleReplyData struct {
 	Response string         `json:"response"`
 	Status   string         `json:"status"` // ok, error, cancelled
 	Metrics  map[string]any `json:"metrics,omitempty"`
+	Presence any            `json:"presence,omitempty"`
+	Tone     any            `json:"tone,omitempty"`
 }
 
 // ConsoleEventData represents streaming update during execution.

@@ -26,13 +26,15 @@ func TestStore_PatchAndGet(t *testing.T) {
 	provider := "openrouter"
 	model := "openai/gpt-4o-mini"
 	execMode := "story"
+	presenceEnabled := false
 	tools := []string{"rlm_context_query", " rlm_context_query ", "rlm_context_put", ""}
 
 	got, err := store.Patch(ctx, convID, Patch{
-		LLMProvider: &provider,
-		LLMModel:    &model,
-		ExecMode:    &execMode,
-		ToolsAllow:  &tools,
+		LLMProvider:     &provider,
+		LLMModel:        &model,
+		ExecMode:        &execMode,
+		ToolsAllow:      &tools,
+		PresenceEnabled: &presenceEnabled,
 	})
 	if err != nil {
 		t.Fatalf("Patch: %v", err)
@@ -55,6 +57,12 @@ func TestStore_PatchAndGet(t *testing.T) {
 	if got.UpdatedAt == "" {
 		t.Fatalf("UpdatedAt: expected non-empty")
 	}
+	if got.PresenceEnabled == nil || *got.PresenceEnabled {
+		t.Fatalf("PresenceEnabled: got %#v", got.PresenceEnabled)
+	}
+	if got.IsPresenceEnabled() {
+		t.Fatalf("IsPresenceEnabled expected false")
+	}
 
 	roundTrip, err := store.Get(ctx, convID)
 	if err != nil {
@@ -63,8 +71,35 @@ func TestStore_PatchAndGet(t *testing.T) {
 	if roundTrip.LLMProvider != provider || roundTrip.LLMModel != model || roundTrip.ExecMode != execMode {
 		t.Fatalf("roundTrip mismatch: %#v", roundTrip)
 	}
+	if roundTrip.PresenceEnabled == nil || *roundTrip.PresenceEnabled {
+		t.Fatalf("roundTrip PresenceEnabled mismatch: %#v", roundTrip.PresenceEnabled)
+	}
 	if len(roundTrip.ToolsAllow) != 2 || roundTrip.ToolsAllow[0] != "rlm_context_put" || roundTrip.ToolsAllow[1] != "rlm_context_query" {
 		t.Fatalf("roundTrip ToolsAllow: got %#v", roundTrip.ToolsAllow)
+	}
+}
+
+func TestSettings_IsPresenceEnabled(t *testing.T) {
+	var nilSettings *Settings
+	if !nilSettings.IsPresenceEnabled() {
+		t.Fatalf("nil settings should default to enabled")
+	}
+
+	unset := &Settings{}
+	if !unset.IsPresenceEnabled() {
+		t.Fatalf("unset presence should default to enabled")
+	}
+
+	enabled := true
+	explicitOn := &Settings{PresenceEnabled: &enabled}
+	if !explicitOn.IsPresenceEnabled() {
+		t.Fatalf("explicit true should be enabled")
+	}
+
+	disabled := false
+	explicitOff := &Settings{PresenceEnabled: &disabled}
+	if explicitOff.IsPresenceEnabled() {
+		t.Fatalf("explicit false should be disabled")
 	}
 }
 

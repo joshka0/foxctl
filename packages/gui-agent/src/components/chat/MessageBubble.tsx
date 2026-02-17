@@ -1,16 +1,33 @@
-import { cn, formatRelativeTime } from '@/lib/utils'
-import { Badge } from '@/components/ui/badge'
-import { Bot, User, Wrench, ChevronDown, ChevronRight, Trash2 } from 'lucide-react'
-import { useState } from 'react'
-import type { ConsoleMessage, ToolCall } from '@/api/client'
+import { cn, formatRelativeTime } from "@/lib/utils";
+import { Badge } from "@/components/ui/badge";
+import {
+  Bot,
+  User,
+  Wrench,
+  ChevronDown,
+  ChevronRight,
+  Trash2,
+} from "lucide-react";
+import { useState } from "react";
+import type { ConsoleMessage, ToolCall } from "@/api/client";
 
 interface MessageBubbleProps {
-  message: ConsoleMessage
-  showTimestamp?: boolean
-  isSelected?: boolean
-  onSelect?: (message: ConsoleMessage) => void
-  onDelete?: (message: ConsoleMessage) => void
+  message: ConsoleMessage;
+  showTimestamp?: boolean;
+  isSelected?: boolean;
+  onSelect?: (message: ConsoleMessage) => void;
+  onDelete?: (message: ConsoleMessage) => void;
 }
+
+const emotionColors: Record<string, string> = {
+  joy: "bg-yellow-400",
+  sadness: "bg-blue-400",
+  anger: "bg-red-500",
+  fear: "bg-purple-500",
+  surprise: "bg-orange-400",
+  playful: "bg-pink-400",
+  disgust: "bg-green-500",
+};
 
 /**
  * Renders a chat message bubble with avatar, content, optional timestamp, and optional tool-call previews.
@@ -21,61 +38,83 @@ interface MessageBubbleProps {
  * @param onSelect - Optional callback invoked with the message when a non-user message is clicked.
  * @returns The JSX element representing the styled message bubble.
  */
-export function MessageBubble({ message, showTimestamp = true, isSelected, onSelect, onDelete }: MessageBubbleProps) {
-  const isUser = message.role === 'user'
-  const hasToolCalls = message.tool_calls && message.tool_calls.length > 0
-  const isClickable = !isUser && onSelect
+export function MessageBubble({
+  message,
+  showTimestamp = true,
+  isSelected,
+  onSelect,
+  onDelete,
+}: MessageBubbleProps) {
+  const isUser = message.role === "user";
+  const hasToolCalls = message.tool_calls && message.tool_calls.length > 0;
+  const isClickable = !isUser && onSelect;
+  const presence = message.presence;
+  const emotion = presence?.emotion;
+  const intensity = presence?.intensity ?? 0;
 
   const handleClick = () => {
     if (isClickable) {
-      onSelect(message)
+      onSelect(message);
     }
-  }
+  };
 
   const handleDelete = (e: React.MouseEvent) => {
-    e.stopPropagation()
+    e.stopPropagation();
     if (onDelete) {
-      onDelete(message)
+      onDelete(message);
     }
-  }
+  };
 
   return (
     <div
       className={cn(
-        'group relative flex gap-3 p-3',
-        isUser ? 'flex-row-reverse' : 'flex-row',
-        isClickable && 'cursor-pointer hover:bg-accent/30 transition-colors rounded-lg',
-        isSelected && 'bg-accent/50 ring-1 ring-primary/30 rounded-lg'
+        "group relative flex gap-3 p-3",
+        isUser ? "flex-row-reverse" : "flex-row",
+        isClickable &&
+          "cursor-pointer hover:bg-accent/30 transition-colors rounded-lg",
+        isSelected && "bg-accent/50 ring-1 ring-primary/30 rounded-lg",
       )}
       onClick={handleClick}
     >
       {/* Avatar */}
       <div
         className={cn(
-          'flex-shrink-0 h-8 w-8 rounded-full flex items-center justify-center',
-          isUser ? 'bg-primary text-primary-foreground' : 'bg-muted'
+          "relative flex-shrink-0 h-8 w-8 rounded-full flex items-center justify-center",
+          isUser ? "bg-primary text-primary-foreground" : "bg-muted",
         )}
       >
         {isUser ? (
           <User className="h-4 w-4" />
         ) : (
-          <Bot className="h-4 w-4" />
+          <>
+            <Bot className="h-4 w-4" />
+            {emotion && emotion !== "neutral" && (
+              <span
+                className={cn(
+                  "absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full border border-background",
+                  emotionColors[emotion] ?? "bg-muted-foreground",
+                )}
+                title={`${emotion} (${intensity.toFixed(2)})`}
+                aria-label={`presence emotion ${emotion}`}
+              />
+            )}
+          </>
         )}
       </div>
 
       {/* Content */}
       <div
         className={cn(
-          'flex-1 max-w-[80%]',
-          isUser ? 'items-end' : 'items-start'
+          "flex-1 max-w-[80%]",
+          isUser ? "items-end" : "items-start",
         )}
       >
         <div
           className={cn(
-            'rounded-lg px-4 py-2',
+            "rounded-lg px-4 py-2",
             isUser
-              ? 'bg-primary text-primary-foreground'
-              : 'bg-card border border-border'
+              ? "bg-primary text-primary-foreground"
+              : "bg-card border border-border",
           )}
         >
           {/* Message content */}
@@ -97,8 +136,8 @@ export function MessageBubble({ message, showTimestamp = true, isSelected, onSel
         {showTimestamp && message.timestamp && (
           <div
             className={cn(
-              'text-xs text-muted-foreground mt-1',
-              isUser ? 'text-right' : 'text-left'
+              "text-xs text-muted-foreground mt-1",
+              isUser ? "text-right" : "text-left",
             )}
           >
             {formatRelativeTime(message.timestamp)}
@@ -119,11 +158,11 @@ export function MessageBubble({ message, showTimestamp = true, isSelected, onSel
         </button>
       )}
     </div>
-  )
+  );
 }
 
 interface ToolCallCardProps {
-  tool: ToolCall
+  tool: ToolCall;
 }
 
 /**
@@ -137,13 +176,13 @@ interface ToolCallCardProps {
  * @returns A React element containing the tool call card UI.
  */
 function ToolCallCard({ tool }: ToolCallCardProps) {
-  const [expanded, setExpanded] = useState(false)
+  const [expanded, setExpanded] = useState(false);
 
   const statusColor = {
-    pending: 'bg-yellow-500/20 text-yellow-500',
-    completed: 'bg-green-500/20 text-green-500',
-    error: 'bg-red-500/20 text-red-500',
-  }[tool.status]
+    pending: "bg-yellow-500/20 text-yellow-500",
+    completed: "bg-green-500/20 text-green-500",
+    error: "bg-red-500/20 text-red-500",
+  }[tool.status];
 
   return (
     <div className="rounded-md border border-border bg-background/50 overflow-hidden">
@@ -160,7 +199,7 @@ function ToolCallCard({ tool }: ToolCallCardProps) {
         <span className="text-xs font-medium flex-1 text-left truncate">
           {tool.name}
         </span>
-        <Badge className={cn('text-xs', statusColor)}>{tool.status}</Badge>
+        <Badge className={cn("text-xs", statusColor)}>{tool.status}</Badge>
       </button>
 
       {expanded && (
@@ -182,14 +221,14 @@ function ToolCallCard({ tool }: ToolCallCardProps) {
               </span>
               <pre className="text-xs bg-muted rounded p-2 mt-1 overflow-x-auto max-h-40">
                 {tool.output.slice(0, 500)}
-                {tool.output.length > 500 && '...'}
+                {tool.output.length > 500 && "..."}
               </pre>
             </div>
           )}
         </div>
       )}
     </div>
-  )
+  );
 }
 
 /**
@@ -207,13 +246,13 @@ export function TypingIndicator() {
         <span className="h-2 w-2 rounded-full bg-muted-foreground animate-bounce" />
         <span
           className="h-2 w-2 rounded-full bg-muted-foreground animate-bounce"
-          style={{ animationDelay: '0.1s' }}
+          style={{ animationDelay: "0.1s" }}
         />
         <span
           className="h-2 w-2 rounded-full bg-muted-foreground animate-bounce"
-          style={{ animationDelay: '0.2s' }}
+          style={{ animationDelay: "0.2s" }}
         />
       </div>
     </div>
-  )
+  );
 }
