@@ -13,16 +13,19 @@
 
 set -euo pipefail
 
-DEBUG="${AGENTCTL_STRICT_DEBUG:-}"
+DEBUG_LOG="${AGENTCTL_STRICT_DEBUG:+/tmp/strict-mode-debug.log}"
+log() { [[ -n "${DEBUG_LOG:-}" ]] && echo "$(date +%H:%M:%S) $*" >> "$DEBUG_LOG" 2>/dev/null; true; }
 
-# Debug: log invocations only when DEBUG is enabled
-[[ -n "$DEBUG" ]] && echo "$(date): $0 invoked" >> /tmp/strict-mode-debug.log
+trap 'log "TRAP: error at line $LINENO, exit=$?"' ERR
+
+log "=== hook invoked (pid=$$) ==="
 
 # Read hook payload from stdin
 payload="$(cat)"
 
 # Extract tool name
 TOOL="$(printf '%s' "$payload" | jq -r '.tool_name // ""')"
+log "tool=$TOOL"
 
 # Extract workspace for state file lookup (per-workspace, not per-session)
 WORKSPACE="$(printf '%s' "$payload" | jq -r '.cwd // ""' 2>/dev/null || true)"
@@ -45,13 +48,17 @@ if [[ -f "$DB_PATH" ]]; then
   fi
 fi
 
+log "workspace=$WORKSPACE enabled=$enabled db=$DB_PATH"
+
 if [[ "$enabled" != "true" ]]; then
+    log "mode disabled, approving"
     echo '{"decision":"approve"}'
     exit 0
 fi
-[[ -n "$DEBUG" ]] && echo "DEBUG: strict mode enabled, processing $TOOL" >&2
+log "strict mode ON, processing $TOOL"
 
 # Find agentctl binary
+log "finding agentctl binary..."
 if [[ -n "${AGENTCTL_BIN:-}" ]]; then
   : # Use provided path
 elif command -v agentctl &>/dev/null; then
@@ -59,12 +66,16 @@ elif command -v agentctl &>/dev/null; then
 elif [[ -x "${CLAUDE_PROJECT_DIR:-}/bin/agentctl" ]]; then
   AGENTCTL_BIN="${CLAUDE_PROJECT_DIR}/bin/agentctl"
 else
+  log "agentctl not found, approving"
   echo '{"decision":"approve"}'
   exit 0
 fi
+log "agentctl=$AGENTCTL_BIN"
 
 # Extract tool input
+log "extracting tool_input..."
 tool_input="$(printf '%s' "$payload" | jq -c '.tool_input // {}')"
+log "tool_input extracted, len=${#tool_input}"
 
 # Self-protection: block edits to hook files and settings while agentctl mode is enabled
 if [[ "$TOOL" =~ ^(Edit|Write|MultiEdit)$ ]]; then
@@ -245,14 +256,17 @@ ${symbols_formatted}${GOTCHAS_SECTION}
     ;;
 
   Bash)
+    log "entered Bash case"
     # Parse bash command for specific patterns to redirect
     COMMAND="$(printf '%s' "$tool_input" | jq -r '.command // ""')"
+    log "bash command extracted, len=${#COMMAND}"
 
     if [[ -z "$COMMAND" ]]; then
       echo '{"decision":"approve"}'
       exit 0
     fi
 
+    log "bash: checking bypass patterns..."
     # Block attempts to bypass agentctl mode via state manipulation
     if [[ "$COMMAND" =~ (workspace-modes) ]]; then
       jq -nc '{
@@ -262,10 +276,12 @@ ${symbols_formatted}${GOTCHAS_SECTION}
       exit 0
     fi
 
+    log "bash: checking sqlite3 patterns..."
     # Block sqlite3 modifications to workspace_settings
     # Case-insensitive check for sqlite3 targeting tasks.db with write operations
     # Also detect pipe/redirect bypass attempts (echo "INSERT..." | sqlite3)
-    COMMAND_LOWER="${COMMAND,,}"
+    COMMAND_LOWER="$(printf '%s' "$COMMAND" | tr '[:upper:]' '[:lower:]')"
+    log "bash: COMMAND_LOWER ok"
     if [[ "$COMMAND_LOWER" =~ sqlite3.*tasks\.db.*(insert|update|delete|drop).*workspace_settings ]] || \
        [[ "$COMMAND_LOWER" =~ sqlite3.*tasks\.db.*(insert|update|delete).*agentctl_mode ]] || \
        [[ "$COMMAND_LOWER" =~ (\||'<').*sqlite3.*tasks\.db ]]; then
@@ -276,6 +292,7 @@ ${symbols_formatted}${GOTCHAS_SECTION}
       exit 0
     fi
 
+    log "bash: checking go test pattern..."
     # Block go test commands - use make test-* instead for consistency
     if [[ "$COMMAND" =~ ^go[[:space:]]+test ]]; then
       jq -nc '{
@@ -294,8 +311,14 @@ ${symbols_formatted}${GOTCHAS_SECTION}
       exit 0
     fi
 
+    log "bash: extracting base_cmd from command=$COMMAND"
     # Extract the base command (first word, handling pipes)
-    BASE_CMD="$(echo "$COMMAND" | sed 's/|.*//' | awk '{print $1}' | xargs)"
+    BASE_CMD="$(echo "$COMMAND" | sed 's/|.*//' | awk '{print $1}' | xargs)" || {
+      log "bash: BASE_CMD extraction failed"
+      echo '{"decision":"approve"}'
+      exit 0
+    }
+    log "bash: base_cmd=$BASE_CMD"
 
     case "$BASE_CMD" in
       grep|rg|ripgrep)
@@ -361,6 +384,7 @@ ${symbols_formatted}${GOTCHAS_SECTION}
         ;;
 
       sed)
+        log "bash: matched sed case, blocking"
         # BLOCK sed - always use fs/apply_edit instead
         jq -nc '{
           "decision": "block",
@@ -417,14 +441,14 @@ ${symbols_formatted}${GOTCHAS_SECTION}
     ;;
 esac
 
-[[ -n "$DEBUG" ]] && echo "DEBUG: running $SKILL with input: $SKILL_INPUT" >&2
+log "running skill=$SKILL input=$SKILL_INPUT"
 
 # Run the skill
 skill_stderr=$(mktemp)
 result=$(printf '%s' "$SKILL_INPUT" | "$AGENTCTL_BIN" run --daemon "$SKILL" --input-file - 2>"$skill_stderr") || {
   error_detail=$(cat "$skill_stderr" 2>/dev/null || echo "unknown error")
   rm -f "$skill_stderr"
-  [[ -n "$DEBUG" ]] && echo "DEBUG: skill failed: $error_detail" >&2
+  log "SKILL FAILED: $error_detail"
 
   # Skill failed - approve original tool and add warning
   jq -nc --arg err "$error_detail" '{
@@ -438,7 +462,7 @@ result=$(printf '%s' "$SKILL_INPUT" | "$AGENTCTL_BIN" run --daemon "$SKILL" --in
 }
 rm -f "$skill_stderr"
 
-[[ -n "$DEBUG" ]] && echo "DEBUG: skill result: $result" >&2
+log "skill succeeded, result_len=${#result}"
 
 # Format result for context injection (with line numbers)
 formatted=$(printf '%s' "$result" | jq -r '
@@ -477,6 +501,8 @@ formatted=$(printf '%s' "$result" | jq -r '
 
 # Block the original tool and return skill result
 context="$PREFIX\n\n$formatted"
+
+log "blocking with formatted result, len=${#formatted}"
 
 jq -nc --arg ctx "$context" '{
   "decision": "block",
