@@ -60,6 +60,9 @@ func TestV2Error_HTTPStatusAndToEvent(t *testing.T) {
 			CausationID:   "cause-001",
 			ActorID:       "actor-overseer",
 			RequestID:     "req-001",
+			Now: func() time.Time {
+				return time.Date(2026, time.February, 18, 12, 34, 56, 0, time.UTC)
+			},
 		}
 
 		evt := verr.ToEvent(ctx, events.EventRunFailed)
@@ -84,8 +87,8 @@ func TestV2Error_HTTPStatusAndToEvent(t *testing.T) {
 		if evt.RequestID != "req-001" {
 			t.Fatalf("request_id=%q want req-001", evt.RequestID)
 		}
-		if evt.OccurredAt.IsZero() {
-			t.Fatal("occurred_at is zero")
+		if got := evt.OccurredAt; !got.Equal(time.Date(2026, time.February, 18, 12, 34, 56, 0, time.UTC)) {
+			t.Fatalf("occurred_at=%s want fixed timestamp", got)
 		}
 
 		var payload events.ErrorPayload

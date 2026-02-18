@@ -32,6 +32,7 @@ type EventContext struct {
 	CausationID   string
 	ActorID       string
 	RequestID     string
+	Now           func() time.Time
 }
 
 // V2Error is the canonical v2 error contract used by service/runtime layers.
@@ -133,6 +134,10 @@ func (e *V2Error) ToEvent(ctx EventContext, evtType events.EventType) events.Eve
 	if ctx.StreamType == "" {
 		ctx.StreamType = events.StreamTypeRun
 	}
+	now := ctx.Now
+	if now == nil {
+		now = func() time.Time { return time.Now().UTC() }
+	}
 
 	payload := events.ErrorPayload{
 		Kind:         string(e.Kind),
@@ -163,7 +168,7 @@ func (e *V2Error) ToEvent(ctx EventContext, evtType events.EventType) events.Eve
 		StreamID:      ctx.StreamID,
 		StreamType:    ctx.StreamType,
 		EventType:     evtType,
-		OccurredAt:    time.Now().UTC(),
+		OccurredAt:    now().UTC(),
 		CorrelationID: ctx.CorrelationID,
 		CausationID:   ctx.CausationID,
 		ActorID:       ctx.ActorID,

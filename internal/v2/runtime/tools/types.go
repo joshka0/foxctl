@@ -35,14 +35,14 @@ func compileSchema(raw json.RawMessage) (*toolSchema, error) {
 	}
 
 	if required, ok := schema["required"].([]any); ok {
-		for _, v := range required {
+		for i, v := range required {
 			s, ok := v.(string)
 			if !ok {
-				continue
+				return nil, fmt.Errorf("invalid required entry at index %d: %T", i, v)
 			}
 			s = strings.TrimSpace(s)
 			if s == "" {
-				continue
+				return nil, fmt.Errorf("invalid required entry at index %d: empty string", i)
 			}
 			out.required = append(out.required, s)
 		}
@@ -123,6 +123,6 @@ func matchesJSONType(v any, typ string) bool {
 		_, ok := v.([]any)
 		return ok
 	default:
-		return true
+		return false
 	}
 }
