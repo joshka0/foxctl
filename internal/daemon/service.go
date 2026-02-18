@@ -655,10 +655,16 @@ func daemonMethodRouter() v2daemonports.Router {
 		shadowFlags = v2portconfig.V2Flags{}
 	}
 	shadowFlags = v2portconfig.SanitizeShadowFlags(shadowFlags, v2portconfig.ShadowMutatingEnabledFromEnv())
+	freezeFlags, err := v2portconfig.ParseV2FreezeCommandsFromEnv()
+	if err != nil {
+		slog.Warn("invalid AGENTCTL_V2_FREEZE_V1_COMMANDS; freeze routing disabled", "error", err)
+		freezeFlags = v2portconfig.V2Flags{}
+	}
 
-	return v2daemonports.NewRouterWithShadow(
+	return v2daemonports.NewRouterWithShadowAndFreeze(
 		flags,
 		shadowFlags,
+		freezeFlags,
 		func(command string, decision v2ports.Decision, correlationID string) {
 			slog.Debug("daemon v2 routing decision",
 				"command", command,

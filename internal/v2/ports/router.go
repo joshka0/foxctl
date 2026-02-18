@@ -48,6 +48,7 @@ type ShadowComparator[T any] func(primary T, primaryErr error, shadow T, shadowE
 type DispatchOptions[T any] struct {
 	Flags         portconfig.V2Flags
 	ShadowFlags   portconfig.V2Flags
+	FreezeFlags   portconfig.V2Flags
 	Command       string
 	CorrelationID string
 	V1            Runner[T]
@@ -95,6 +96,18 @@ func DispatchWithShadow[T any](ctx context.Context, opts DispatchOptions[T]) (T,
 	if opts.Flags.Enabled(cmd) {
 		decision = DecisionV2
 		exec = opts.V2
+	}
+
+	if decision == DecisionV1 && opts.FreezeFlags.Enabled(cmd) {
+		return zero, decision, &v2errors.V2Error{
+			Kind:    v2errors.ErrPolicyViolation,
+			Message: fmt.Sprintf("v1 path frozen for command %s; enable v2 routing", cmd),
+			Fatal:   true,
+			Details: map[string]any{
+				"command":  cmd,
+				"decision": decision,
+			},
+		}
 	}
 
 	if opts.Observe != nil {

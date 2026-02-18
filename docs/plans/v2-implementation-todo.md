@@ -26,7 +26,7 @@ Primary specs/plans:
 - [x] Wave 1 foundation complete (PR-01 through PR-10) with tests and review notes
 - [x] v2 docs aligned to companion/general references and non-blocking v2 scope rules
 - [x] Wave 2 production cutover batch 1 complete (PR-11 through PR-13)
-- [ ] Wave 2 dynamic context pipeline work queued (PR-16)
+- [x] Wave 2 dynamic context + decommission gate batch complete (PR-14 through PR-16)
 
 ## Wave 1 Completed (Reference)
 
@@ -63,10 +63,10 @@ Wave 2 rationale, DoD expectations, and exit criteria live in:
 
 ## Next
 
-- [ ] PR-16: v1 decommission readiness gates
+- [x] PR-16: v1 decommission readiness gates
   - [x] expand shadow parity past `ask` to `spawn/run/list/kill`
   - [x] define sustained parity window + incident-free thresholds
-  - [ ] remove/freeze superseded v1 handlers command-by-command
+  - [x] remove/freeze superseded v1 handlers command-by-command
 
 ## Decisions (Locked)
 
@@ -181,6 +181,24 @@ Subagent Review
     - `internal/web/api/agents_v2_routing_test.go`
     - `internal/daemon/service_v2_routing_test.go`
   - Added explicit PR-16 parity-window and promotion thresholds in `docs/plans/v2-greenfield-bootstrap.md`.
+- 2026-02-18: Completed PR-16 v1 decommission readiness gates.
+  - Added v1-freeze command set parsing via `AGENTCTL_V2_FREEZE_V1_COMMANDS` in `internal/v2/ports/config/v2flags.go` (+ tests).
+  - Added freeze enforcement in `internal/v2/ports/router.go` so frozen commands fail fast with `ErrPolicyViolation` before either runner executes.
+  - Wired CLI/API/daemon routers and dispatchers to pass freeze flags with shadow flags via `NewRouterWithShadowAndFreeze(...)`.
+  - Added freeze-routing coverage in:
+    - `internal/v2/ports/router_shadow_test.go`
+    - `cmd/agentctl/cmd/agent_v2_routing_test.go`
+    - `internal/web/api/agents_v2_routing_test.go`
+    - `internal/daemon/service_v2_routing_test.go`
+  - Validated with:
+    - `go test ./internal/v2/ports/config ./internal/v2/ports ./cmd/agentctl/cmd ./internal/web/api ./internal/daemon`
+    - `go test ./internal/v2/...`
+- 2026-02-18:
+  Subagent Review
+  - reviewer: `019c7315-8761-7543-9035-f8ad55dab480`
+  - scope: `PR-16 freeze-gate completion slice` (`internal/v2/ports/{config/v2flags.go,router.go,router_shadow_test.go,cli/router.go,api/router.go,daemon/router.go}`, `cmd/agentctl/cmd/{agent.go,agent_v2_routing_test.go}`, `internal/web/api/{agents.go,agents_v2_routing_test.go}`, `internal/daemon/{service.go,service_v2_routing_test.go}`, `docs/plans/v2-implementation-todo.md`)
+  - findings: `none`
+  - decision: `approved`
 - 2026-02-18:
   Subagent Review
   - reviewer: `019c730f-e7ef-7a01-af53-4f912ff57574`

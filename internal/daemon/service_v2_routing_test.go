@@ -200,3 +200,34 @@ func TestDaemonMethodRouter_ShadowMutatingRequiresOptIn(t *testing.T) {
 		t.Fatal("timed out waiting for allowed daemon mutating shadow call")
 	}
 }
+
+func TestDaemonMethodRouter_FreezeBlocksV1Path(t *testing.T) {
+	t.Setenv("AGENTCTL_V2_COMMANDS", "")
+	t.Setenv("AGENTCTL_V2_FREEZE_V1_COMMANDS", "list")
+
+	router := daemonMethodRouter()
+	var v1Calls atomic.Int32
+	var v2Calls atomic.Int32
+	_, decision, err := v2daemonports.DispatchMethod(context.Background(), router, "agent.list", "corr-freeze-list",
+		func(context.Context) (string, error) {
+			v1Calls.Add(1)
+			return "ok", nil
+		},
+		func(context.Context) (string, error) {
+			v2Calls.Add(1)
+			return "ok", nil
+		},
+	)
+	if err == nil {
+		t.Fatal("DispatchMethod() error = nil, want freeze error")
+	}
+	if !strings.Contains(err.Error(), "v1 path frozen for command list") {
+		t.Fatalf("unexpected freeze error: %v", err)
+	}
+	if decision != v2ports.DecisionV1 {
+		t.Fatalf("decision=%q want v1", decision)
+	}
+	if v1Calls.Load() != 0 || v2Calls.Load() != 0 {
+		t.Fatalf("calls v1/v2 = %d/%d want 0/0", v1Calls.Load(), v2Calls.Load())
+	}
+}

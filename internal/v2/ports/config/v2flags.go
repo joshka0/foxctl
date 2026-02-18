@@ -11,6 +11,7 @@ const (
 	envV2Commands       = "AGENTCTL_V2_COMMANDS"
 	envV2ShadowCommands = "AGENTCTL_V2_SHADOW_COMMANDS"
 	envV2ShadowMutating = "AGENTCTL_V2_SHADOW_MUTATING"
+	envV2FreezeCommands = "AGENTCTL_V2_FREEZE_V1_COMMANDS"
 )
 
 var supportedCommands = map[string]struct{}{
@@ -67,6 +68,16 @@ func ParseV2ShadowCommands(raw string) (V2Flags, error) {
 // ParseV2ShadowCommandsFromEnv parses AGENTCTL_V2_SHADOW_COMMANDS from the environment.
 func ParseV2ShadowCommandsFromEnv() (V2Flags, error) {
 	return ParseV2ShadowCommands(os.Getenv(envV2ShadowCommands))
+}
+
+// ParseV2FreezeCommands parses AGENTCTL_V2_FREEZE_V1_COMMANDS-like comma-separated command sets.
+func ParseV2FreezeCommands(raw string) (V2Flags, error) {
+	return ParseV2Commands(raw)
+}
+
+// ParseV2FreezeCommandsFromEnv parses AGENTCTL_V2_FREEZE_V1_COMMANDS from the environment.
+func ParseV2FreezeCommandsFromEnv() (V2Flags, error) {
+	return ParseV2FreezeCommands(os.Getenv(envV2FreezeCommands))
 }
 
 // ShadowMutatingEnabledFromEnv reports whether mutating command shadow runs are allowed.

@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	v2errors "github.com/jkatigb/agentctl/internal/v2/core/errors"
 	v2ports "github.com/jkatigb/agentctl/internal/v2/ports"
 	portconfig "github.com/jkatigb/agentctl/internal/v2/ports/config"
 )
@@ -200,5 +201,45 @@ func TestDispatchWithShadow_ShadowMismatchReported(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("timed out waiting for shadow report")
+	}
+}
+
+func TestDispatchWithShadow_FreezeFlagsBlockV1Path(t *testing.T) {
+	t.Parallel()
+
+	freezeFlags, err := portconfig.ParseV2FreezeCommands("list")
+	if err != nil {
+		t.Fatalf("ParseV2FreezeCommands() error = %v", err)
+	}
+
+	var v1Called atomic.Int32
+	var v2Called atomic.Int32
+	_, decision, dispatchErr := v2ports.DispatchWithShadow(context.Background(), v2ports.DispatchOptions[string]{
+		Command:     "list",
+		FreezeFlags: freezeFlags,
+		V1: func(context.Context) (string, error) {
+			v1Called.Add(1)
+			return "v1", nil
+		},
+		V2: func(context.Context) (string, error) {
+			v2Called.Add(1)
+			return "v2", nil
+		},
+	})
+	if dispatchErr == nil {
+		t.Fatal("DispatchWithShadow() error = nil, want policy violation")
+	}
+	var v2Err *v2errors.V2Error
+	if !errors.As(dispatchErr, &v2Err) {
+		t.Fatalf("DispatchWithShadow() error type = %T, want *V2Error", dispatchErr)
+	}
+	if v2Err.Kind != v2errors.ErrPolicyViolation {
+		t.Fatalf("error kind=%q want %q", v2Err.Kind, v2errors.ErrPolicyViolation)
+	}
+	if decision != v2ports.DecisionV1 {
+		t.Fatalf("decision=%q want v1", decision)
+	}
+	if v1Called.Load() != 0 || v2Called.Load() != 0 {
+		t.Fatalf("calls v1/v2 = %d/%d want 0/0", v1Called.Load(), v2Called.Load())
 	}
 }

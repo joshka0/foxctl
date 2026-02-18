@@ -295,7 +295,11 @@ func dispatchAgentCLICommand(
 		shadowFlags = v2portconfig.V2Flags{}
 	}
 	shadowFlags = v2portconfig.SanitizeShadowFlags(shadowFlags, v2portconfig.ShadowMutatingEnabledFromEnv())
-	router := v2cliports.NewRouterWithShadow(flags, shadowFlags, nil, nil, 2*time.Second)
+	freezeFlags, err := v2portconfig.ParseV2FreezeCommandsFromEnv()
+	if err != nil {
+		freezeFlags = v2portconfig.V2Flags{}
+	}
+	router := v2cliports.NewRouterWithShadowAndFreeze(flags, shadowFlags, freezeFlags, nil, nil, 2*time.Second)
 
 	ctx := cmd.Context()
 	if ctx == nil {

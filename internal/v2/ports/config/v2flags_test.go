@@ -68,6 +68,18 @@ func TestParseV2ShadowCommandsFromEnv(t *testing.T) {
 	}
 }
 
+func TestParseV2FreezeCommandsFromEnv(t *testing.T) {
+	t.Setenv(envV2FreezeCommands, "spawn,kill")
+
+	flags, err := ParseV2FreezeCommandsFromEnv()
+	if err != nil {
+		t.Fatalf("ParseV2FreezeCommandsFromEnv returned error: %v", err)
+	}
+	if !flags.Enabled("spawn") || !flags.Enabled("kill") {
+		t.Fatalf("expected spawn/kill enabled for freeze flags, got %v", flags.Commands())
+	}
+}
+
 func TestSanitizeShadowFlags_DefaultBlocksMutating(t *testing.T) {
 	t.Parallel()
 
