@@ -13,10 +13,8 @@ import (
 	v2events "github.com/jkatigb/agentctl/internal/v2/core/events"
 )
 
-var (
-	// ErrNotFound indicates projection rows are absent.
-	ErrNotFound = errors.New("v2 projections: not found")
-)
+// ErrNotFound indicates projection rows are absent.
+var ErrNotFound = errors.New("v2 projections: not found")
 
 type runStatus string
 

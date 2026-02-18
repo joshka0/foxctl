@@ -229,7 +229,8 @@ func normalizeEvent(event v2events.Event, now time.Time) v2events.Event {
 
 func scanEvent(row interface {
 	Scan(dest ...any) error
-}) (v2events.Event, error) {
+},
+) (v2events.Event, error) {
 	var (
 		evt        v2events.Event
 		streamType string

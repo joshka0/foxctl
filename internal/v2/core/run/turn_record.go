@@ -6,10 +6,8 @@ import (
 	"time"
 )
 
-var (
-	// ErrTurnNotFound indicates a referenced turn record does not exist.
-	ErrTurnNotFound = errors.New("v2 run: turn not found")
-)
+// ErrTurnNotFound indicates a referenced turn record does not exist.
+var ErrTurnNotFound = errors.New("v2 run: turn not found")
 
 // MessageRef references textual content captured in a turn.
 type MessageRef struct {

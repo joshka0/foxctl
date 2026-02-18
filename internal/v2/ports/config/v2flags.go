@@ -7,8 +7,10 @@ import (
 	"strings"
 )
 
-const envV2Commands = "AGENTCTL_V2_COMMANDS"
-const envV2ShadowCommands = "AGENTCTL_V2_SHADOW_COMMANDS"
+const (
+	envV2Commands       = "AGENTCTL_V2_COMMANDS"
+	envV2ShadowCommands = "AGENTCTL_V2_SHADOW_COMMANDS"
+)
 
 var supportedCommands = map[string]struct{}{
 	"spawn": {},

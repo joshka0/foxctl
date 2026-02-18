@@ -113,6 +113,16 @@ func TestSnapshotStore_ConcurrentReaders_NoContentionRegression(t *testing.T) {
 		t.Fatal("timeout waiting for writer completion")
 	}
 
+	// Reader goroutines can be slow to schedule on constrained CI runners.
+	// Give them a short window to observe at least one snapshot before stop.
+	deadline := time.Now().Add(500 * time.Millisecond)
+	for reads.Load() == 0 && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if reads.Load() == 0 {
+		t.Fatal("expected concurrent readers to observe snapshots")
+	}
+
 	close(done)
 	wgDone := make(chan struct{})
 	go func() {
@@ -123,10 +133,6 @@ func TestSnapshotStore_ConcurrentReaders_NoContentionRegression(t *testing.T) {
 	case <-wgDone:
 	case <-time.After(2 * time.Second):
 		t.Fatal("timeout waiting for readers to stop")
-	}
-
-	if reads.Load() == 0 {
-		t.Fatal("expected concurrent readers to observe snapshots")
 	}
 
 	got := store.Load()

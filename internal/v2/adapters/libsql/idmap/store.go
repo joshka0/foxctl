@@ -12,10 +12,8 @@ import (
 	v2events "github.com/jkatigb/agentctl/internal/v2/core/events"
 )
 
-var (
-	// ErrConflict indicates a conflicting immutable mapping.
-	ErrConflict = errors.New("v2 idmap: conflict")
-)
+// ErrConflict indicates a conflicting immutable mapping.
+var ErrConflict = errors.New("v2 idmap: conflict")
 
 // Store persists immutable mappings between legacy and v2 identifiers.
 type Store struct {
