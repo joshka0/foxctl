@@ -595,7 +595,9 @@ Exit checks:
 9. **PR-09**: Turn Intelligence + Context Builder
 10. **PR-10**: Ask Shadow Validation Plumbing
 
-Each PR is independently testable. PRs 1-5 have no v1 business-logic changes. PR-06 wires routing with opt-in flag and minimal touch points in existing command dispatch files. PRs 7-8 add Go-native control-plane capabilities without coupling them to the turn execution critical path. PR-09 adds turn lineage and derived context intelligence without introducing a second execution path.
+Note: PR-10 is a transitional Wave 1 -> Wave 2 slice focused on shadow parity plumbing for `ask`; detailed rollout/expansion behavior is captured in the Wave 2 sections below.
+
+Each PR is independently testable. PRs 1-5 have no v1 business-logic changes. PR-06 wires routing with opt-in flag and minimal touch points in existing command dispatch files. PRs 7-8 add Go-native control-plane capabilities without coupling them to the turn execution critical path. PR-09 adds turn lineage and derived context intelligence without introducing a second execution path. PR-10 establishes shadow validation plumbing for parity verification before Wave 2 cutover.
 
 ## Wave 2: Productionization + Dynamic Context (V2-Only)
 

@@ -25,7 +25,8 @@ Primary specs/plans:
 
 - [x] Wave 1 foundation complete (PR-01 through PR-10) with tests and review notes
 - [x] v2 docs aligned to companion/general references and non-blocking v2 scope rules
-- [ ] Wave 2 production cutover and dynamic context pipeline work started
+- [x] Wave 2 production cutover batch 1 complete (PR-11 through PR-13)
+- [ ] Wave 2 dynamic context pipeline work queued (PR-14 through PR-16)
 
 ## Wave 1 Completed (Reference)
 

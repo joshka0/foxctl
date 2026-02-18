@@ -112,6 +112,7 @@ func TestEnricherQueue_KeyReleasedAfterProcessing(t *testing.T) {
 		Now: func() time.Time {
 			return time.Date(2026, time.February, 18, 22, 30, 0, 0, time.UTC)
 		},
+		NewID: fakes.NewFakeUUID("artifact").New,
 	})
 
 	job := enrichers.NewJob(run.TurnRecord{ID: "turn-retry"}, "embedding", "v1")

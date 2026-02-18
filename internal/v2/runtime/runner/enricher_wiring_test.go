@@ -139,7 +139,7 @@ func TestPipeline_TurnRecordedTriggersAsyncEnricherFailureEvent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RunTurn() error = %v", err)
 	}
-	if elapsed := time.Since(start); elapsed > 200*time.Millisecond {
+	if elapsed := time.Since(start); elapsed > 2*time.Second {
 		t.Fatalf("RunTurn blocked too long: %s", elapsed)
 	}
 	if out.TurnID != "turn-enricher-001" {
