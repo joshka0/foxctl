@@ -33,7 +33,7 @@ func (j Job) Key() string {
 	)
 }
 
-// Queue is a bounded, non-blocking enrichment queue with idempotent keys.
+// Queue is a bounded, non-blocking enrichment queue with in-flight key dedupe.
 type Queue struct {
 	mu     sync.Mutex
 	ch     chan Job
@@ -89,6 +89,21 @@ func (q *Queue) Jobs() <-chan Job {
 		return nil
 	}
 	return q.ch
+}
+
+// Release clears one dedupe key after worker completion.
+func (q *Queue) Release(job Job) {
+	if q == nil {
+		return
+	}
+	key := strings.TrimSpace(job.Key())
+	if key == "||" || key == "" {
+		return
+	}
+
+	q.mu.Lock()
+	delete(q.seen, key)
+	q.mu.Unlock()
 }
 
 // Close closes the queue exactly once.

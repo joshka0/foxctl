@@ -593,5 +593,80 @@ Exit checks:
 7. **PR-07**: Supervisor + Runtime Event Bus
 8. **PR-08**: Snapshots + Non-Blocking Maintenance
 9. **PR-09**: Turn Intelligence + Context Builder
+10. **PR-10**: Ask Shadow Validation Plumbing
 
 Each PR is independently testable. PRs 1-5 have no v1 business-logic changes. PR-06 wires routing with opt-in flag and minimal touch points in existing command dispatch files. PRs 7-8 add Go-native control-plane capabilities without coupling them to the turn execution critical path. PR-09 adds turn lineage and derived context intelligence without introducing a second execution path.
+
+## Wave 2: Productionization + Dynamic Context (V2-Only)
+
+Wave 1 established the v2 runtime skeleton and contracts. Wave 2 focuses on
+real cutover, persistent turn intelligence, and dynamic context assembly that
+reduces dependence on a single large prompt window.
+
+### Wave 2 Goals
+
+1. Route live command paths through v2 services/ports (without breaking v1 fallback).
+2. Persist turn/iteration/tool-call intelligence in a libsql-first model, including
+   retrieval-friendly artifact metadata.
+3. Feed an asynchronous event pipeline for enrichment, annotation, and context materialization.
+4. Build layered, budgeted context assembly (L2 -> L1 -> L0) with temporal drill-down
+   (`hours -> days -> weeks -> months`) and stable references.
+5. Define hard decommission gates for v1 command paths.
+
+### Areas That Need Consideration and Fleshing Out
+
+1. **Live routing integration**
+   - Ensure CLI/API/daemon entrypoints actually dispatch to `internal/v2/ports/*`
+     when `AGENTCTL_V2_COMMANDS` is enabled.
+   - Keep rollback one-step (`unset`/remove command from flag) with no schema rollback.
+2. **Turn persistence and retrieval**
+   - Add concrete `TurnRecorder` and `TurnReader` adapters backed by libsql.
+   - Persist iteration/tool-call detail and reference slices to support partial recall.
+3. **Artifact schema and vector-ready storage**
+   - Use libsql-first artifact tables for embeddings/annotations/classifications/learnings.
+   - Prefer libsql vector search/index capabilities as the primary retrieval backend in v2.
+   - Keep versioned idempotency keys `(turn_id, artifact_type, artifact_version)`.
+4. **Dynamic event pipeline**
+   - Wire runner emits (`turn.recorded`) to enricher producers via bounded queues.
+   - Enforce non-blocking semantics; degraded/missing artifacts must not fail turn completion.
+5. **Context builder evolution**
+   - Expose deterministic reference resolution for whole turn, iteration, tool-call, and slices.
+   - Support hierarchical retrieval with drill-down metadata (`expandable_dates`) and
+     temporal pyramids aligned with:
+     - `docs/general/companion-memory.md`
+     - `docs/designs/hierarchical-memory-retrieval.md`
+     - `docs/designs/progressive-memory-system.md`
+6. **Parity and observability**
+   - Expand shadow parity beyond `ask` to `spawn`, `run`, `list`, `kill`.
+   - Track divergence, queue lag, drop counts, and context quality metrics by command.
+7. **v1 retirement path**
+   - Define command-by-command deletion criteria and cleanup order once parity windows pass.
+
+### Wave 2 PR Slices (Proposed)
+
+1. **PR-11: Command Surface Cutover**
+   - Wire real CLI/API/daemon handlers to v2 routers for enabled commands.
+   - DoD: v2 routing is exercised in live command tests; disabled commands still use v1.
+2. **PR-12: Libsql Turn + Artifact Stores**
+   - Implement production `TurnRecorder`/`TurnReader` and artifact persistence.
+   - DoD: turn lineage and artifact metadata are queryable by stable refs.
+3. **PR-13: Enrichment Pipeline Wiring**
+   - Connect runtime event bus to enricher queue/worker producers.
+   - DoD: `turn.recorded` triggers async jobs; failures emit events without blocking turn success.
+4. **PR-14: Hierarchical Context Builder**
+   - Add temporal pyramid retrieval and drill-down APIs (`hours/days/weeks/months`).
+   - DoD: context assembly can return coarse summaries with explicit drill targets.
+5. **PR-15: Companion Memory Integration**
+   - Feed context artifacts into layered companion memory assembly (L2 -> L1 -> L0 budgets).
+   - DoD: context builder can mix recent turn refs + companion summaries deterministically.
+6. **PR-16: v1 Decommission Gates**
+   - Enforce parity windows, remove duplicate v1 paths command-by-command.
+   - DoD: command is v2-primary with documented rollback and no orphan transport logic.
+
+### Full v2 Exit Criteria (From v1)
+
+1. `spawn`, `ask`, `run`, `list`, and `kill` are v2-primary in CLI, API, and daemon ports.
+2. Turn lineage plus derived artifacts are persisted and retrievable through stable references.
+3. Enrichment/event/context pipelines are non-blocking under load with bounded backpressure.
+4. Shadow parity reports are stable across all migrated commands for a sustained window.
+5. v1 command handlers are either removed or explicitly frozen behind compatibility boundaries.

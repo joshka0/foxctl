@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -22,6 +23,8 @@ import (
 	"github.com/jkatigb/agentctl/internal/storage/agents"
 	"github.com/jkatigb/agentctl/internal/storage/contextvar"
 	"github.com/jkatigb/agentctl/internal/storage/dbutil"
+	v2apiports "github.com/jkatigb/agentctl/internal/v2/ports/api"
+	v2portconfig "github.com/jkatigb/agentctl/internal/v2/ports/config"
 )
 
 // AgentResponse represents an agent in API responses.
@@ -84,6 +87,54 @@ func summarizePrompt(prompt string, maxLen int) string {
 		return prompt
 	}
 	return string(runes[:maxLen]) + "..."
+}
+
+var (
+	handleAgentSpawnV1Fn          = handleAgentSpawnLegacy
+	handleAgentSpawnV2Fn          = handleAgentSpawnV2
+	handleAgentDaemonStartV1Fn    = handleAgentDaemonStartLegacy
+	handleAgentDaemonStartV2Fn    = handleAgentDaemonStartV2
+	handleAgentDaemonSessionsV1Fn = handleAgentDaemonSessionsLegacy
+	handleAgentDaemonSessionsV2Fn = handleAgentDaemonSessionsV2
+	handleAgentDaemonKillV1Fn     = handleAgentDaemonKillLegacy
+	handleAgentDaemonKillV2Fn     = handleAgentDaemonKillV2
+)
+
+func dispatchAgentAPICommand(
+	ctx context.Context,
+	command string,
+	correlationID string,
+	v1 func(context.Context) error,
+	v2 func(context.Context) error,
+) error {
+	flags, err := v2portconfig.ParseV2CommandsFromEnv()
+	if err != nil {
+		flags = v2portconfig.V2Flags{}
+	}
+	router := v2apiports.NewRouter(flags, nil)
+
+	_, _, err = v2apiports.Dispatch(ctx, router, strings.TrimSpace(command), strings.TrimSpace(correlationID),
+		func(ctx context.Context) (struct{}, error) {
+			return struct{}{}, v1(ctx)
+		},
+		func(ctx context.Context) (struct{}, error) {
+			return struct{}{}, v2(ctx)
+		},
+	)
+	return err
+}
+
+func requestCorrelationID(r *http.Request) string {
+	if r == nil {
+		return ulid.Make().String()
+	}
+	if id := strings.TrimSpace(r.Header.Get("X-Request-ID")); id != "" {
+		return id
+	}
+	if id := strings.TrimSpace(r.Header.Get("X-Correlation-ID")); id != "" {
+		return id
+	}
+	return ulid.Make().String()
 }
 
 // AgentsListHandler provides an HTTP handler for listing agents at GET /api/agents.
@@ -310,14 +361,35 @@ type AgentDaemonStartResponse struct {
 	Status    string `json:"status"`
 }
 
-// handleAgentDaemonStart starts an agent via the daemon using the agent's stored configuration
+func handleAgentDaemonStart(w http.ResponseWriter, r *http.Request, cfg config.Config, log zerolog.Logger, agentID string) {
+	_ = dispatchAgentAPICommand(
+		r.Context(),
+		"spawn",
+		requestCorrelationID(r),
+		func(context.Context) error {
+			handleAgentDaemonStartV1Fn(w, r, cfg, log, agentID)
+			return nil
+		},
+		func(context.Context) error {
+			handleAgentDaemonStartV2Fn(w, r, cfg, log, agentID)
+			return nil
+		},
+	)
+}
+
+func handleAgentDaemonStartV2(w http.ResponseWriter, r *http.Request, cfg config.Config, log zerolog.Logger, agentID string) {
+	// PR-11 routes real API handlers through v2 ports while preserving current behavior.
+	handleAgentDaemonStartLegacy(w, r, cfg, log, agentID)
+}
+
+// handleAgentDaemonStartLegacy starts an agent via the daemon using the agent's stored configuration
 // and an optional request body.
 //
 // It ensures the daemon is running, spawns a daemon session using the workspace and prompt
 // from the request (falling back to the agent's namespace and prompt), updates the agent's
 // state to running in the store, and writes an AgentDaemonStartResponse on success or an
 // appropriate HTTP error on failure.
-func handleAgentDaemonStart(w http.ResponseWriter, r *http.Request, cfg config.Config, log zerolog.Logger, agentID string) {
+func handleAgentDaemonStartLegacy(w http.ResponseWriter, r *http.Request, cfg config.Config, log zerolog.Logger, agentID string) {
 	if r.Method != http.MethodPost {
 		httpError(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
@@ -398,11 +470,32 @@ func handleAgentDaemonStart(w http.ResponseWriter, r *http.Request, cfg config.C
 	})
 }
 
-// handleAgentDaemonSessions handles GET requests to list active daemon sessions for the specified agentID.
+func handleAgentDaemonSessions(w http.ResponseWriter, r *http.Request, log zerolog.Logger, agentID string) {
+	_ = dispatchAgentAPICommand(
+		r.Context(),
+		"list",
+		requestCorrelationID(r),
+		func(context.Context) error {
+			handleAgentDaemonSessionsV1Fn(w, r, log, agentID)
+			return nil
+		},
+		func(context.Context) error {
+			handleAgentDaemonSessionsV2Fn(w, r, log, agentID)
+			return nil
+		},
+	)
+}
+
+func handleAgentDaemonSessionsV2(w http.ResponseWriter, r *http.Request, log zerolog.Logger, agentID string) {
+	// PR-11 routes real API handlers through v2 ports while preserving current behavior.
+	handleAgentDaemonSessionsLegacy(w, r, log, agentID)
+}
+
+// handleAgentDaemonSessionsLegacy handles GET requests to list active daemon sessions for the specified agentID.
 // It ensures the daemon is running, filters daemon sessions by ActorID equal to agentID, and writes a JSON
 // response with "sessions" (slice of session info) and "count" (number of sessions). It responds with 405 on
 // non-GET methods, 503 if the daemon cannot be started, and 500 on internal listing errors.
-func handleAgentDaemonSessions(w http.ResponseWriter, r *http.Request, log zerolog.Logger, agentID string) {
+func handleAgentDaemonSessionsLegacy(w http.ResponseWriter, r *http.Request, log zerolog.Logger, agentID string) {
 	if r.Method != http.MethodGet {
 		httpError(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
@@ -437,12 +530,33 @@ func handleAgentDaemonSessions(w http.ResponseWriter, r *http.Request, log zerol
 	})
 }
 
-// handleAgentDaemonKill terminates a running daemon session for the given agent and ensures the agent's stored state is set to stopped.
+func handleAgentDaemonKill(w http.ResponseWriter, r *http.Request, cfg config.Config, log zerolog.Logger, agentID string) {
+	_ = dispatchAgentAPICommand(
+		r.Context(),
+		"kill",
+		requestCorrelationID(r),
+		func(context.Context) error {
+			handleAgentDaemonKillV1Fn(w, r, cfg, log, agentID)
+			return nil
+		},
+		func(context.Context) error {
+			handleAgentDaemonKillV2Fn(w, r, cfg, log, agentID)
+			return nil
+		},
+	)
+}
+
+func handleAgentDaemonKillV2(w http.ResponseWriter, r *http.Request, cfg config.Config, log zerolog.Logger, agentID string) {
+	// PR-11 routes real API handlers through v2 ports while preserving current behavior.
+	handleAgentDaemonKillLegacy(w, r, cfg, log, agentID)
+}
+
+// handleAgentDaemonKillLegacy terminates a running daemon session for the given agent and ensures the agent's stored state is set to stopped.
 //
 // It handles POST requests and writes JSON HTTP responses describing the outcome. If the daemon is not running or no matching session is found,
 // the handler updates the agent state to "stopped" and returns an OK payload indicating no active session; on successful termination it returns
 // the killed session ID and status. Errors are reported via appropriate HTTP error responses.
-func handleAgentDaemonKill(w http.ResponseWriter, r *http.Request, cfg config.Config, log zerolog.Logger, agentID string) {
+func handleAgentDaemonKillLegacy(w http.ResponseWriter, r *http.Request, cfg config.Config, log zerolog.Logger, agentID string) {
 	if r.Method != http.MethodPost {
 		httpError(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
@@ -546,7 +660,28 @@ func handleAgentDaemonKill(w http.ResponseWriter, r *http.Request, cfg config.Co
 	})
 }
 
-// handleAgentSpawn creates a new agent record, launches it via the daemon, and responds with the spawn result.
+func handleAgentSpawn(w http.ResponseWriter, r *http.Request, cfg config.Config, log zerolog.Logger) {
+	_ = dispatchAgentAPICommand(
+		r.Context(),
+		"spawn",
+		requestCorrelationID(r),
+		func(context.Context) error {
+			handleAgentSpawnV1Fn(w, r, cfg, log)
+			return nil
+		},
+		func(context.Context) error {
+			handleAgentSpawnV2Fn(w, r, cfg, log)
+			return nil
+		},
+	)
+}
+
+func handleAgentSpawnV2(w http.ResponseWriter, r *http.Request, cfg config.Config, log zerolog.Logger) {
+	// PR-11 routes real API handlers through v2 ports while preserving current behavior.
+	handleAgentSpawnLegacy(w, r, cfg, log)
+}
+
+// handleAgentSpawnLegacy creates a new agent record, launches it via the daemon, and responds with the spawn result.
 //
 // It only accepts POST requests with a JSON AgentSpawnRequest containing at minimum `role` and `prompt`.
 // If no name is provided one is generated; a new ULID is assigned as the agent ID. The workspace is normalized
@@ -555,7 +690,7 @@ func handleAgentDaemonKill(w http.ResponseWriter, r *http.Request, cfg config.Co
 // requests the daemon to spawn the agent, updates the agent state to running on success, and returns an
 // AgentSpawnResponse containing the session ID, actor ID (the persisted agent ID), status, and name.
 // On validation, store, daemon, or spawn failures it writes an appropriate HTTP error response.
-func handleAgentSpawn(w http.ResponseWriter, r *http.Request, cfg config.Config, log zerolog.Logger) {
+func handleAgentSpawnLegacy(w http.ResponseWriter, r *http.Request, cfg config.Config, log zerolog.Logger) {
 	if r.Method != http.MethodPost {
 		httpError(w, http.StatusMethodNotAllowed, "method not allowed")
 		return

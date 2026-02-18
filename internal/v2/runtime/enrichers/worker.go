@@ -110,6 +110,10 @@ func (w *Worker) Run(ctx context.Context) error {
 }
 
 func (w *Worker) process(ctx context.Context, job Job) {
+	if w.queue != nil {
+		defer w.queue.Release(job)
+	}
+
 	err := w.enricher.Enrich(ctx, job)
 	if err == nil {
 		return

@@ -23,38 +23,49 @@ Primary specs/plans:
 
 ## Current State
 
-- [x] v2 spec/plan/rules documents aligned and cross-linked to companion/general docs
-- [x] v2 non-blocking behavior explicitly marked as v2-only
-- [x] implementation scaffold under `internal/v2/*` started
+- [x] Wave 1 foundation complete (PR-01 through PR-10) with tests and review notes
+- [x] v2 docs aligned to companion/general references and non-blocking v2 scope rules
+- [ ] Wave 2 production cutover and dynamic context pipeline work started
 
-## Now (In Progress)
+## Wave 1 Completed (Reference)
 
-- [x] PR-01B: Error/event contracts + deterministic golden harness
-  - [x] `internal/v2/core/errors/errors.go`
-  - [x] `internal/v2/core/events/{types,payloads}.go`
-  - [x] deterministic fakes (`fake_clock`, `fake_uuid`, `fake_event_store`)
-  - [x] first JSONL golden fixture + comparator
-- [x] PR-02A: Event store vertical slice (`spawn`) (libsql-first)
-  - [x] libsql append-only event schema/store with monotonic stream version checks
-  - [x] minimal projections (`agent_state`, `run_state`)
-  - [x] replay + idmap roundtrip tests
-- [x] PR-03: runner pipeline (no transport)
-- [x] PR-04: unified tool stack
-- [x] PR-05: unified spawn/ask/run/list/kill services
-- [x] PR-06: v2 ports + feature-flag routing
+- [x] PR-01 to PR-06: skeleton/contracts through feature-flag routing
+- [x] PR-07 to PR-09: supervisor/events/snapshots + turn intelligence foundation
+- [x] PR-10: `ask` shadow validation plumbing and parity telemetry
+
+## Now (Wave 2 Active)
+
+Wave 2 rationale, DoD expectations, and exit criteria live in:
+`docs/plans/v2-greenfield-bootstrap.md` ("Wave 2: Productionization + Dynamic Context (V2-Only)").
+
+- [x] PR-11: Live command-surface cutover (v2 routing in real CLI/API/daemon handlers)
+  - [x] wire daemon `agent.spawn`/`agent.list`/`agent.kill` request handling through `internal/v2/ports/daemon` with env-flag routing and safe fallback
+  - [x] wire CLI `spawn/run/list/kill` entrypoints through `internal/v2/ports/cli` in real command handlers
+  - [x] wire API agent spawn/daemon action handlers through `internal/v2/ports/api` in real HTTP handlers
+  - [x] keep v1 fallback behavior unchanged when flags are unset
+  - [x] add integration tests proving real handler routing (not router-only unit tests)
+- [x] PR-12: Libsql turn/artifact stores (production `TurnRecorder` + `TurnReader`)
+  - [x] persist `Turn -> Iteration -> ToolCall` lineage in libsql-backed stores
+  - [x] add artifact tables for embeddings/annotations/classifications/learnings
+  - [x] keep idempotency key contract `(turn_id, artifact_type, artifact_version)`
+- [x] PR-13: Event-to-enricher wiring
+  - [x] emit `turn.recorded` from runtime pipeline into enricher producer
+  - [x] consume via bounded queue/worker with non-blocking guarantees
+  - [x] emit failure/retry telemetry events without failing completed turns
 
 ## Next
 
-- [x] PR-01A residual-risk follow-up
-  - [x] replace pure compile-smoke coverage with behavioral tests as v2 runtime logic lands
-  - [x] keep `internal/v2/ports/config/v2flags.go` command map aligned with routed v2 command surfaces
-
-## Later (Queued)
-
-- [x] PR-07 supervisor + runtime event bus
-- [x] PR-08 snapshots + non-blocking maintenance
-- [x] PR-09 turn intelligence + context builder
-- [x] PR-10 ask shadow validation plumbing (v1 primary + v2 mirror + parity telemetry)
+- [ ] PR-14: Hierarchical context builder + temporal pyramid retrieval
+  - [ ] support `hours -> days -> weeks -> months` summaries with drill-down refs
+  - [ ] expose expandable-date style metadata for selective deepening
+- [ ] PR-15: Companion memory layered assembly integration
+  - [ ] wire L2 -> L1 -> L0 budgeted context composition
+  - [ ] blend turn refs + companion summaries deterministically
+  - [ ] validate referenceability of whole turns and partial slices in assembled context
+- [ ] PR-16: v1 decommission readiness gates
+  - [ ] expand shadow parity past `ask` to `spawn/run/list/kill`
+  - [ ] define sustained parity window + incident-free thresholds
+  - [ ] remove/freeze superseded v1 handlers command-by-command
 
 ## Decisions (Locked)
 
@@ -67,9 +78,9 @@ Primary specs/plans:
 
 ## Open Questions
 
-- [x] initial overflow policy for bounded queues: default `drop_newest`, with explicit `drop_oldest` and `block` support
-- [x] first context-builder mode to ship (`chat` only for v2 bootstrap)
-- [x] first command to route in shadow validation (`ask`)
+- [ ] libsql embedding storage format and vector indexing policy for artifact tables
+- [ ] context budget policy across L2/L1/L0 (global vs per-command vs per-role)
+- [ ] whether and how to backfill selected v1 turns into v2 retrieval surfaces
 
 ## Completion Gate (Required Before Marking Done)
 
@@ -105,6 +116,68 @@ Subagent Review
 
 ## Progress Log
 
+- 2026-02-18: Documented Wave 2 planning and reset tracker to active Wave 2 execution.
+  - Updated `docs/plans/v2-greenfield-bootstrap.md` with Wave 2 goals, consideration areas, proposed PR-11..PR-16 slices, and full-v2 exit criteria.
+  - Updated this tracker to mark Wave 1 complete and set Wave 2 live cutover + dynamic context work as current priorities.
+- 2026-02-18: PR-11 partial implementation landed for daemon command surface.
+  - Routed `agent.spawn`/`agent.list`/`agent.kill` through v2 daemon ports in `internal/daemon/service.go` (`dispatchAgent*` + flag/shadow router) while preserving existing behavior by delegating v2 handlers to current logic.
+  - Disabled daemon shadow execution for these mutating RPC methods to avoid duplicate side effects during routing rollout.
+  - Added daemon routing tests in `internal/daemon/service_v2_routing_test.go` to assert v1/v2 decision switching via `AGENTCTL_V2_COMMANDS`.
+- 2026-02-18: PR-11 completed for CLI/API/daemon command surfaces.
+  - Routed real CLI handlers (`agent spawn/run/list/kill`) through `internal/v2/ports/cli` in `cmd/agentctl/cmd/agent.go` with v1 fallback and v2 command opt-in via `AGENTCTL_V2_COMMANDS`.
+  - Routed API agent spawn and daemon action handlers through `internal/v2/ports/api` in `internal/web/api/agents.go` while preserving current behavior in v2 delegates.
+  - Added handler-level routing tests:
+    - `cmd/agentctl/cmd/agent_v2_routing_test.go`
+    - `internal/web/api/agents_v2_routing_test.go`
+    - extended daemon fallback coverage in `internal/daemon/service_v2_routing_test.go`
+- 2026-02-18: Completed PR-12 libsql turn/artifact persistence slice.
+  - Added new v2 libsql turns adapter package: `internal/v2/adapters/libsql/turns`.
+  - Added production `run.TurnRecorder`/`run.TurnReader` implementation with hierarchical persistence for `Turn -> Iteration -> ToolCall`.
+  - Added artifact persistence with stable refs (`turn/{turn_id}/artifact/{artifact_type}/{artifact_version}`), vector-ready schema (`F32_BLOB`) for libsql, and idempotent upsert keyed by `(turn_id, artifact_type, artifact_version)`.
+  - Added coverage for lineage roundtrip, lineage replacement on upsert, artifact idempotency, stable-ref lookup, and invalid artifact type handling.
+- 2026-02-18: Completed PR-13 event-to-enricher wiring.
+  - Added runtime enricher producer component in `internal/v2/runtime/enrichers/producer.go` to subscribe to runtime events and enqueue configured artifact jobs on `turn.recorded`.
+  - Wired runner event fanout via optional best-effort bus publish in `internal/v2/runtime/runner/{types,pipeline}.go` with non-fatal `OnEventError` handling.
+  - Added integration coverage in `internal/v2/runtime/runner/enricher_wiring_test.go` proving:
+    - bus publish failures do not fail turn completion,
+    - `turn.recorded` triggers async enrichment jobs and `artifact.failed` events while turns still complete successfully.
+  - Hardened queue dedupe lifecycle by releasing keys after job processing (`internal/v2/runtime/enrichers/{queue,worker}.go`) and added retry-friendly release test coverage.
+- 2026-02-18:
+  Subagent Review
+  - reviewer: `019c72be-2275-7aa2-bfd2-7904f4cbeafb`
+  - scope: `PR-11 daemon routing slice` (`internal/daemon/service.go`, `internal/daemon/service_v2_routing_test.go`)
+  - findings: `none` (approved: safe fallback behavior and stable routing tests)
+  - decision: `approved`
+- 2026-02-18:
+  Subagent Review
+  - reviewer: `019c72ca-4cd5-74a0-b5bd-548700eaee61`
+  - scope: `PR-11 expanded routing slice` (`cmd/agentctl/cmd/agent.go`, `cmd/agentctl/cmd/agent_v2_routing_test.go`, `internal/web/api/agents.go`, `internal/web/api/agents_v2_routing_test.go`, `internal/daemon/service.go`, `internal/daemon/service_v2_routing_test.go`)
+  - findings: `none` (non-blocking note addressed by adding daemon invalid-env fallback test coverage)
+  - decision: `approved`
+- 2026-02-18:
+  Subagent Review
+  - reviewer: `019c72c1-d634-7a21-85b2-5dd546d8dd11`
+  - scope: `PR-11 daemon routing slice (post-shadow-safety fix)` (`internal/daemon/service.go`, `internal/daemon/service_v2_routing_test.go`, `docs/plans/v2-implementation-todo.md`)
+  - findings: `none` (approved; daemon shadow disabled for mutating routes and tests remain coherent)
+  - decision: `approved`
+- 2026-02-18:
+  Subagent Review
+  - reviewer: `019c72b7-b0a7-7a13-ba4b-a50ebc5c6eb0`
+  - scope: `Wave 2 doc alignment` (`docs/plans/v2-greenfield-bootstrap.md`, `docs/plans/v2-implementation-todo.md`)
+  - findings: `none` (optional improvement applied: added direct Wave 2 cross-reference in tracker)
+  - decision: `approved`
+- 2026-02-18:
+  Subagent Review
+  - reviewer: `019c72da-b7c0-7c53-a1d7-8c2e27f12649`
+  - scope: `PR-12 libsql turns/artifacts slice` (`internal/v2/adapters/libsql/turns/schema.go`, `internal/v2/adapters/libsql/turns/store.go`, `internal/v2/adapters/libsql/turns/store_test.go`)
+  - findings: `none` (initial low-risk vector fallback note addressed by atomic disable-after-unsupported behavior)
+  - decision: `approved`
+- 2026-02-18:
+  Subagent Review
+  - reviewer: `019c72e1-080c-7451-9b1a-424c35c55ef2`
+  - scope: `PR-13 event-to-enricher slice` (`internal/v2/runtime/runner/{types,pipeline}.go`, `internal/v2/runtime/enrichers/{producer,queue,worker}.go`, `internal/v2/runtime/enrichers/producer_test.go`, `internal/v2/runtime/runner/enricher_wiring_test.go`, `internal/v2/runtime/enrichers/worker_test.go`)
+  - findings: `none` (low-risk dedupe-map growth note resolved by key release on worker completion; residual risk: queue-full drops remain telemetry-only)
+  - decision: `approved`
 - 2026-02-18: Created v2 tracker; linked v2 docs to companion/general references; added kickoff batches in main v2 plan.
 - 2026-02-18: Completed PR-01A scaffold (`internal/v2/*` package tree), added `v2flags` parser + tests, added core import-boundary guard test, and validated with `go test ./internal/v2/...` and `go test -tags=libsqlite3 ./...`.
 - 2026-02-18:
