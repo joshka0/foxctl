@@ -4,9 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	v2ports "github.com/jkatigb/agentctl/internal/v2/ports"
+	v2daemonports "github.com/jkatigb/agentctl/internal/v2/ports/daemon"
 )
 
 func TestDispatchAgentSpawn_RoutesByFlag(t *testing.T) {
@@ -109,5 +112,91 @@ func TestDispatchAgentSpawn_InvalidEnvFallsBackToV1(t *testing.T) {
 	}
 	if decision != v2ports.DecisionV1 {
 		t.Fatalf("decision = %q, want %q", decision, v2ports.DecisionV1)
+	}
+}
+
+func TestDaemonMethodRouter_ShadowRunsForNonMutatingCommand(t *testing.T) {
+	t.Setenv("AGENTCTL_V2_COMMANDS", "")
+	t.Setenv("AGENTCTL_V2_SHADOW_COMMANDS", "list")
+	t.Setenv("AGENTCTL_V2_SHADOW_MUTATING", "")
+
+	router := daemonMethodRouter()
+	var v1Calls atomic.Int32
+	shadowDone := make(chan struct{}, 1)
+
+	out, decision, err := v2daemonports.DispatchMethod(context.Background(), router, "agent.list", "corr-shadow-list",
+		func(context.Context) (string, error) {
+			v1Calls.Add(1)
+			return "ok", nil
+		},
+		func(context.Context) (string, error) {
+			select {
+			case shadowDone <- struct{}{}:
+			default:
+			}
+			return "ok", nil
+		},
+	)
+	if err != nil {
+		t.Fatalf("DispatchMethod() error = %v", err)
+	}
+	if out != "ok" || decision != v2ports.DecisionV1 {
+		t.Fatalf("out/decision = %q/%q want ok/v1", out, decision)
+	}
+	if v1Calls.Load() != 1 {
+		t.Fatalf("v1 calls=%d want 1", v1Calls.Load())
+	}
+	select {
+	case <-shadowDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for daemon shadow call")
+	}
+}
+
+func TestDaemonMethodRouter_ShadowMutatingRequiresOptIn(t *testing.T) {
+	t.Setenv("AGENTCTL_V2_COMMANDS", "")
+	t.Setenv("AGENTCTL_V2_SHADOW_COMMANDS", "kill")
+	t.Setenv("AGENTCTL_V2_SHADOW_MUTATING", "")
+
+	router := daemonMethodRouter()
+	var blockedCalls atomic.Int32
+	_, decision, err := v2daemonports.DispatchMethod(context.Background(), router, "agent.kill", "corr-shadow-kill-blocked",
+		func(context.Context) (string, error) { return "ok", nil },
+		func(context.Context) (string, error) {
+			blockedCalls.Add(1)
+			return "ok", nil
+		},
+	)
+	if err != nil {
+		t.Fatalf("DispatchMethod() blocked case error = %v", err)
+	}
+	if decision != v2ports.DecisionV1 {
+		t.Fatalf("decision=%q want v1", decision)
+	}
+	time.Sleep(200 * time.Millisecond)
+	if blockedCalls.Load() != 0 {
+		t.Fatalf("blocked shadow calls=%d want 0", blockedCalls.Load())
+	}
+
+	t.Setenv("AGENTCTL_V2_SHADOW_MUTATING", "true")
+	router = daemonMethodRouter()
+	allowedDone := make(chan struct{}, 1)
+	_, _, err = v2daemonports.DispatchMethod(context.Background(), router, "agent.kill", "corr-shadow-kill-allowed",
+		func(context.Context) (string, error) { return "ok", nil },
+		func(context.Context) (string, error) {
+			select {
+			case allowedDone <- struct{}{}:
+			default:
+			}
+			return "ok", nil
+		},
+	)
+	if err != nil {
+		t.Fatalf("DispatchMethod() allowed case error = %v", err)
+	}
+	select {
+	case <-allowedDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for allowed daemon mutating shadow call")
 	}
 }

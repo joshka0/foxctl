@@ -111,7 +111,12 @@ func dispatchAgentAPICommand(
 	if err != nil {
 		flags = v2portconfig.V2Flags{}
 	}
-	router := v2apiports.NewRouter(flags, nil)
+	shadowFlags, err := v2portconfig.ParseV2ShadowCommandsFromEnv()
+	if err != nil {
+		shadowFlags = v2portconfig.V2Flags{}
+	}
+	shadowFlags = v2portconfig.SanitizeShadowFlags(shadowFlags, v2portconfig.ShadowMutatingEnabledFromEnv())
+	router := v2apiports.NewRouterWithShadow(flags, shadowFlags, nil, nil, 2*time.Second)
 
 	_, _, err = v2apiports.Dispatch(ctx, router, strings.TrimSpace(command), strings.TrimSpace(correlationID),
 		func(ctx context.Context) (struct{}, error) {

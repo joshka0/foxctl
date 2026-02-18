@@ -2,7 +2,9 @@ package cmd
 
 import (
 	"context"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/spf13/cobra"
 )
@@ -160,5 +162,100 @@ func TestDispatchAgentCLICommand_InvalidEnvFallsBackToV1(t *testing.T) {
 	}
 	if v1Calls != 1 || v2Calls != 0 {
 		t.Fatalf("v1/v2 calls = %d/%d, want 1/0", v1Calls, v2Calls)
+	}
+}
+
+func TestDispatchAgentCLICommand_ShadowRunsForNonMutatingCommand(t *testing.T) {
+	t.Setenv("AGENTCTL_V2_COMMANDS", "")
+	t.Setenv("AGENTCTL_V2_SHADOW_COMMANDS", "list")
+	t.Setenv("AGENTCTL_V2_SHADOW_MUTATING", "")
+
+	cmd := &cobra.Command{}
+	cmd.SetContext(context.Background())
+
+	var v1Calls atomic.Int32
+	shadowDone := make(chan struct{}, 1)
+
+	err := dispatchAgentCLICommand(
+		cmd,
+		"list",
+		"corr-shadow-list",
+		func(context.Context) error {
+			v1Calls.Add(1)
+			return nil
+		},
+		func(context.Context) error {
+			select {
+			case shadowDone <- struct{}{}:
+			default:
+			}
+			return nil
+		},
+	)
+	if err != nil {
+		t.Fatalf("dispatchAgentCLICommand() error = %v", err)
+	}
+	if v1Calls.Load() != 1 {
+		t.Fatalf("v1 calls=%d want 1", v1Calls.Load())
+	}
+
+	select {
+	case <-shadowDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for shadow v2 call")
+	}
+}
+
+func TestDispatchAgentCLICommand_ShadowMutatingRequiresOptIn(t *testing.T) {
+	cmd := &cobra.Command{}
+	cmd.SetContext(context.Background())
+
+	// Without opt-in: mutating command shadow should be sanitized out.
+	t.Setenv("AGENTCTL_V2_COMMANDS", "")
+	t.Setenv("AGENTCTL_V2_SHADOW_COMMANDS", "kill")
+	t.Setenv("AGENTCTL_V2_SHADOW_MUTATING", "")
+
+	var blockedShadowCalls atomic.Int32
+	err := dispatchAgentCLICommand(
+		cmd,
+		"kill",
+		"corr-shadow-kill-blocked",
+		func(context.Context) error { return nil },
+		func(context.Context) error {
+			blockedShadowCalls.Add(1)
+			return nil
+		},
+	)
+	if err != nil {
+		t.Fatalf("dispatchAgentCLICommand() blocked case error = %v", err)
+	}
+	time.Sleep(200 * time.Millisecond)
+	if blockedShadowCalls.Load() != 0 {
+		t.Fatalf("blocked shadow calls=%d want 0", blockedShadowCalls.Load())
+	}
+
+	// With opt-in: mutating command shadow is allowed.
+	t.Setenv("AGENTCTL_V2_SHADOW_MUTATING", "true")
+	allowedDone := make(chan struct{}, 1)
+	err = dispatchAgentCLICommand(
+		cmd,
+		"kill",
+		"corr-shadow-kill-allowed",
+		func(context.Context) error { return nil },
+		func(context.Context) error {
+			select {
+			case allowedDone <- struct{}{}:
+			default:
+			}
+			return nil
+		},
+	)
+	if err != nil {
+		t.Fatalf("dispatchAgentCLICommand() allowed case error = %v", err)
+	}
+	select {
+	case <-allowedDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for allowed mutating shadow call")
 	}
 }

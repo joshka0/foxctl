@@ -64,8 +64,8 @@ Wave 2 rationale, DoD expectations, and exit criteria live in:
 ## Next
 
 - [ ] PR-16: v1 decommission readiness gates
-  - [ ] expand shadow parity past `ask` to `spawn/run/list/kill`
-  - [ ] define sustained parity window + incident-free thresholds
+  - [x] expand shadow parity past `ask` to `spawn/run/list/kill`
+  - [x] define sustained parity window + incident-free thresholds
   - [ ] remove/freeze superseded v1 handlers command-by-command
 
 ## Decisions (Locked)
@@ -171,6 +171,22 @@ Subagent Review
   - scope: `PR-15 layered context slice` (`internal/v2/runtime/contextbuilder/{builder,layered,layered_test}.go`)
   - findings: `none`
   - decision: `approved`
+- 2026-02-18: PR-16 partial decommission readiness implementation.
+  - Added shared shadow sanitization + mutating opt-in:
+    - `AGENTCTL_V2_SHADOW_MUTATING` (default false)
+    - mutating shadow commands (`spawn`,`run`,`kill`) blocked unless explicitly enabled
+  - Wired CLI/API/daemon command dispatchers to `NewRouterWithShadow(...)` with sanitized shadow flags.
+  - Added parity routing tests for non-mutating shadow execution and mutating opt-in behavior:
+    - `cmd/agentctl/cmd/agent_v2_routing_test.go`
+    - `internal/web/api/agents_v2_routing_test.go`
+    - `internal/daemon/service_v2_routing_test.go`
+  - Added explicit PR-16 parity-window and promotion thresholds in `docs/plans/v2-greenfield-bootstrap.md`.
+- 2026-02-18:
+  Subagent Review
+  - reviewer: `019c730f-e7ef-7a01-af53-4f912ff57574`
+  - scope: `PR-16 partial decommission readiness slice` (`internal/v2/ports/config/{v2flags,v2flags_test}.go`, `cmd/agentctl/cmd/{agent.go,agent_v2_routing_test.go}`, `internal/web/api/{agents.go,agents_v2_routing_test.go}`, `internal/daemon/{service.go,service_v2_routing_test.go}`, `docs/plans/{v2-greenfield-bootstrap,v2-implementation-todo}.md`)
+  - findings: `none` (overall `pass`; note: reviewer requested a full-suite run before merge, completed in local verification step)
+  - decision: `approved-with-known-risks`
 - 2026-02-18:
   Subagent Review
   - reviewer: `019c72be-2275-7aa2-bfd2-7904f4cbeafb`

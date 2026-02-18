@@ -290,7 +290,12 @@ func dispatchAgentCLICommand(
 	if err != nil {
 		flags = v2portconfig.V2Flags{}
 	}
-	router := v2cliports.NewRouter(flags, nil)
+	shadowFlags, err := v2portconfig.ParseV2ShadowCommandsFromEnv()
+	if err != nil {
+		shadowFlags = v2portconfig.V2Flags{}
+	}
+	shadowFlags = v2portconfig.SanitizeShadowFlags(shadowFlags, v2portconfig.ShadowMutatingEnabledFromEnv())
+	router := v2cliports.NewRouterWithShadow(flags, shadowFlags, nil, nil, 2*time.Second)
 
 	ctx := cmd.Context()
 	if ctx == nil {

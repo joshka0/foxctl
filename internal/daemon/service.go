@@ -649,15 +649,35 @@ func daemonMethodRouter() v2daemonports.Router {
 		slog.Warn("invalid AGENTCTL_V2_COMMANDS; defaulting to v1 routing", "error", err)
 		flags = v2portconfig.V2Flags{}
 	}
+	shadowFlags, err := v2portconfig.ParseV2ShadowCommandsFromEnv()
+	if err != nil {
+		slog.Warn("invalid AGENTCTL_V2_SHADOW_COMMANDS; shadow routing disabled", "error", err)
+		shadowFlags = v2portconfig.V2Flags{}
+	}
+	shadowFlags = v2portconfig.SanitizeShadowFlags(shadowFlags, v2portconfig.ShadowMutatingEnabledFromEnv())
 
-	return v2daemonports.NewRouter(
+	return v2daemonports.NewRouterWithShadow(
 		flags,
+		shadowFlags,
 		func(command string, decision v2ports.Decision, correlationID string) {
 			slog.Debug("daemon v2 routing decision",
 				"command", command,
 				"decision", string(decision),
 				"correlation_id", strings.TrimSpace(correlationID))
 		},
+		func(report v2ports.ShadowReport) {
+			slog.Debug("daemon v2 shadow parity",
+				"command", report.Command,
+				"correlation_id", strings.TrimSpace(report.CorrelationID),
+				"primary_decision", string(report.PrimaryDecision),
+				"shadow_decision", string(report.ShadowDecision),
+				"match", report.Match,
+				"reason", strings.TrimSpace(report.Reason),
+				"primary_error", strings.TrimSpace(report.PrimaryError),
+				"shadow_error", strings.TrimSpace(report.ShadowError),
+				"duration_ms", report.DurationMS)
+		},
+		2*time.Second,
 	)
 }
 

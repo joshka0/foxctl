@@ -665,6 +665,26 @@ reduces dependence on a single large prompt window.
    - Enforce parity windows, remove duplicate v1 paths command-by-command.
    - DoD: command is v2-primary with documented rollback and no orphan transport logic.
 
+### PR-16 Readiness Gates (Operational Policy)
+
+1. **Shadow parity coverage**
+   - `AGENTCTL_V2_SHADOW_COMMANDS` supports `spawn,run,list,kill` in addition to `ask`.
+   - Mutating command shadows (`spawn`,`run`,`kill`) are blocked by default and require
+     explicit opt-in with `AGENTCTL_V2_SHADOW_MUTATING=true`.
+   - Non-mutating shadows (`ask`,`list`) can run by default.
+2. **Sustained parity window**
+   - Require a rolling 7-day window per command before promoting to v2-primary.
+   - Require at least 200 shadow samples per command in that window.
+   - Require `match_rate >= 99.0%` and no severity-1 incidents attributable to routing divergence.
+3. **Incident-free promotion checks**
+   - No unresolved `shadow_error` spikes for the command during the parity window.
+   - No queue/backpressure regressions in non-blocking paths attributable to shadow runs.
+4. **Command-by-command v1 freeze/removal order**
+   - Stage A: Freeze v1 path for the command (compatibility boundary only; no new behavior work).
+   - Stage B: Switch command default to v2 (flagless v2 primary, rollback flag retained).
+   - Stage C: Remove v1 command path after one additional incident-free window.
+   - Recommended order: `list` -> `ask` -> `run` -> `spawn` -> `kill`.
+
 ### Full v2 Exit Criteria (From v1)
 
 1. `spawn`, `ask`, `run`, `list`, and `kill` are v2-primary in CLI, API, and daemon ports.

@@ -5,7 +5,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/jkatigb/agentctl/internal/platform/config"
 	"github.com/rs/zerolog"
@@ -134,5 +136,91 @@ func TestDispatchAgentAPICommand_InvalidEnvFallsBackToV1(t *testing.T) {
 	}
 	if v1Calls != 1 || v2Calls != 0 {
 		t.Fatalf("v1/v2 calls = %d/%d, want 1/0", v1Calls, v2Calls)
+	}
+}
+
+func TestDispatchAgentAPICommand_ShadowRunsForNonMutatingCommand(t *testing.T) {
+	t.Setenv("AGENTCTL_V2_COMMANDS", "")
+	t.Setenv("AGENTCTL_V2_SHADOW_COMMANDS", "list")
+	t.Setenv("AGENTCTL_V2_SHADOW_MUTATING", "")
+
+	var v1Calls atomic.Int32
+	shadowDone := make(chan struct{}, 1)
+	err := dispatchAgentAPICommand(
+		context.Background(),
+		"list",
+		"corr-api-shadow-list",
+		func(context.Context) error {
+			v1Calls.Add(1)
+			return nil
+		},
+		func(context.Context) error {
+			select {
+			case shadowDone <- struct{}{}:
+			default:
+			}
+			return nil
+		},
+	)
+	if err != nil {
+		t.Fatalf("dispatchAgentAPICommand() error = %v", err)
+	}
+	if v1Calls.Load() != 1 {
+		t.Fatalf("v1 calls=%d want 1", v1Calls.Load())
+	}
+
+	select {
+	case <-shadowDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for api shadow call")
+	}
+}
+
+func TestDispatchAgentAPICommand_ShadowMutatingRequiresOptIn(t *testing.T) {
+	t.Setenv("AGENTCTL_V2_COMMANDS", "")
+	t.Setenv("AGENTCTL_V2_SHADOW_COMMANDS", "kill")
+	t.Setenv("AGENTCTL_V2_SHADOW_MUTATING", "")
+
+	var blocked atomic.Int32
+	err := dispatchAgentAPICommand(
+		context.Background(),
+		"kill",
+		"corr-api-shadow-kill-blocked",
+		func(context.Context) error { return nil },
+		func(context.Context) error {
+			blocked.Add(1)
+			return nil
+		},
+	)
+	if err != nil {
+		t.Fatalf("dispatchAgentAPICommand() blocked case error = %v", err)
+	}
+	time.Sleep(200 * time.Millisecond)
+	if blocked.Load() != 0 {
+		t.Fatalf("blocked shadow calls=%d want 0", blocked.Load())
+	}
+
+	t.Setenv("AGENTCTL_V2_SHADOW_MUTATING", "1")
+	allowedDone := make(chan struct{}, 1)
+	err = dispatchAgentAPICommand(
+		context.Background(),
+		"kill",
+		"corr-api-shadow-kill-allowed",
+		func(context.Context) error { return nil },
+		func(context.Context) error {
+			select {
+			case allowedDone <- struct{}{}:
+			default:
+			}
+			return nil
+		},
+	)
+	if err != nil {
+		t.Fatalf("dispatchAgentAPICommand() allowed case error = %v", err)
+	}
+	select {
+	case <-allowedDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for allowed api mutating shadow call")
 	}
 }
