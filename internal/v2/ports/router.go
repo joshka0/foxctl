@@ -113,11 +113,11 @@ func DispatchWithShadow[T any](ctx context.Context, opts DispatchOptions[T]) (T,
 	}
 	out, err := exec(ctx)
 
-	launchShadowIfEnabled(cmd, decision, out, err, opts)
+	launchShadowIfEnabled(ctx, cmd, decision, out, err, opts)
 	return out, decision, err
 }
 
-func launchShadowIfEnabled[T any](cmd string, primaryDecision Decision, primaryOut T, primaryErr error, opts DispatchOptions[T]) {
+func launchShadowIfEnabled[T any](parentCtx context.Context, cmd string, primaryDecision Decision, primaryOut T, primaryErr error, opts DispatchOptions[T]) {
 	if primaryDecision != DecisionV1 {
 		return
 	}
@@ -138,10 +138,14 @@ func launchShadowIfEnabled[T any](cmd string, primaryDecision Decision, primaryO
 
 	go func() {
 		start := time.Now()
-		ctx, cancel := context.WithTimeout(context.Background(), timeout)
+		baseCtx := parentCtx
+		if baseCtx == nil {
+			baseCtx = context.Background()
+		}
+		shadowCtx, cancel := context.WithTimeout(baseCtx, timeout)
 		defer cancel()
 
-		shadowOut, shadowErr := opts.V2(ctx)
+		shadowOut, shadowErr := opts.V2(shadowCtx)
 		match, reason := compareShadow(primaryOut, primaryErr, shadowOut, shadowErr, compare)
 		if observe != nil {
 			observe(ShadowReport{

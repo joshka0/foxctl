@@ -315,11 +315,15 @@ func (f *fakeEventReader) ListStream(context.Context, events.StreamFilter) ([]ev
 type fakeProjectionStore struct {
 	byRun      map[string]services.RunState
 	lastFilter services.RunStateFilter
+	now        func() time.Time
 }
 
 func newFakeProjectionStore() *fakeProjectionStore {
 	return &fakeProjectionStore{
 		byRun: map[string]services.RunState{},
+		now: func() time.Time {
+			return time.Date(2026, time.February, 18, 12, 0, 0, 0, time.UTC)
+		},
 	}
 }
 
@@ -332,7 +336,7 @@ func (f *fakeProjectionStore) Apply(_ context.Context, evt events.Event) error {
 	state.Command = evt.Command
 	state.RequestID = evt.RequestID
 	state.ActorID = evt.ActorID
-	state.UpdatedAt = time.Now().UTC()
+	state.UpdatedAt = f.now().UTC()
 
 	switch evt.EventType {
 	case events.EventRunStarted:

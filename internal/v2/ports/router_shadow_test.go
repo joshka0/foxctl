@@ -3,6 +3,7 @@ package ports_test
 import (
 	"context"
 	"errors"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -19,19 +20,19 @@ func TestDispatchWithShadow_V1PrimaryRunsV2Shadow(t *testing.T) {
 	}
 
 	shadowDone := make(chan v2ports.ShadowReport, 1)
-	v1Called := 0
-	v2Called := 0
+	var v1Called atomic.Int32
+	var v2Called atomic.Int32
 
 	out, decision, dispatchErr := v2ports.DispatchWithShadow(context.Background(), v2ports.DispatchOptions[string]{
 		Command:       "ask",
 		CorrelationID: "corr-ask-1",
 		ShadowFlags:   shadowFlags,
 		V1: func(context.Context) (string, error) {
-			v1Called++
+			v1Called.Add(1)
 			return "ok", nil
 		},
 		V2: func(context.Context) (string, error) {
-			v2Called++
+			v2Called.Add(1)
 			return "ok", nil
 		},
 		ShadowObserve: func(report v2ports.ShadowReport) {
@@ -61,8 +62,8 @@ func TestDispatchWithShadow_V1PrimaryRunsV2Shadow(t *testing.T) {
 		t.Fatal("timed out waiting for shadow report")
 	}
 
-	if v1Called != 1 || v2Called != 1 {
-		t.Fatalf("calls v1/v2 = %d/%d want 1/1", v1Called, v2Called)
+	if v1Called.Load() != 1 || v2Called.Load() != 1 {
+		t.Fatalf("calls v1/v2 = %d/%d want 1/1", v1Called.Load(), v2Called.Load())
 	}
 }
 
@@ -75,7 +76,7 @@ func TestDispatchWithShadow_DoesNotRunWhenCommandNotEnabled(t *testing.T) {
 	}
 
 	shadowDone := make(chan v2ports.ShadowReport, 1)
-	v2Called := 0
+	var v2Called atomic.Int32
 
 	_, decision, dispatchErr := v2ports.DispatchWithShadow(context.Background(), v2ports.DispatchOptions[string]{
 		Command:       "ask",
@@ -85,7 +86,7 @@ func TestDispatchWithShadow_DoesNotRunWhenCommandNotEnabled(t *testing.T) {
 			return "ok", nil
 		},
 		V2: func(context.Context) (string, error) {
-			v2Called++
+			v2Called.Add(1)
 			return "shadow", nil
 		},
 		ShadowObserve: func(report v2ports.ShadowReport) {
@@ -105,8 +106,8 @@ func TestDispatchWithShadow_DoesNotRunWhenCommandNotEnabled(t *testing.T) {
 		t.Fatalf("unexpected shadow report: %+v", report)
 	case <-time.After(200 * time.Millisecond):
 	}
-	if v2Called != 0 {
-		t.Fatalf("v2 calls=%d want 0", v2Called)
+	if v2Called.Load() != 0 {
+		t.Fatalf("v2 calls=%d want 0", v2Called.Load())
 	}
 }
 
@@ -122,8 +123,8 @@ func TestDispatchWithShadow_PrimaryV2SkipsShadow(t *testing.T) {
 		t.Fatalf("ParseV2ShadowCommands() error = %v", err)
 	}
 
-	v1Called := 0
-	v2Called := 0
+	var v1Called atomic.Int32
+	var v2Called atomic.Int32
 	shadowDone := make(chan v2ports.ShadowReport, 1)
 
 	out, decision, dispatchErr := v2ports.DispatchWithShadow(context.Background(), v2ports.DispatchOptions[string]{
@@ -132,11 +133,11 @@ func TestDispatchWithShadow_PrimaryV2SkipsShadow(t *testing.T) {
 		Flags:         flags,
 		ShadowFlags:   shadowFlags,
 		V1: func(context.Context) (string, error) {
-			v1Called++
+			v1Called.Add(1)
 			return "v1", nil
 		},
 		V2: func(context.Context) (string, error) {
-			v2Called++
+			v2Called.Add(1)
 			return "v2", nil
 		},
 		ShadowObserve: func(report v2ports.ShadowReport) {
@@ -150,8 +151,8 @@ func TestDispatchWithShadow_PrimaryV2SkipsShadow(t *testing.T) {
 	if out != "v2" || decision != v2ports.DecisionV2 {
 		t.Fatalf("out/decision = %q/%q want v2/v2", out, decision)
 	}
-	if v1Called != 0 || v2Called != 1 {
-		t.Fatalf("calls v1/v2 = %d/%d want 0/1", v1Called, v2Called)
+	if v1Called.Load() != 0 || v2Called.Load() != 1 {
+		t.Fatalf("calls v1/v2 = %d/%d want 0/1", v1Called.Load(), v2Called.Load())
 	}
 	select {
 	case report := <-shadowDone:

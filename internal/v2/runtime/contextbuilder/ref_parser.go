@@ -19,7 +19,7 @@ var (
 	reWhole = regexp.MustCompile(`^turn/([^/#]+)$`)
 	reIter  = regexp.MustCompile(`^turn/([^/#]+)/iter/([0-9]+)$`)
 	reTool  = regexp.MustCompile(`^turn/([^/#]+)/iter/([0-9]+)/tool/([^/#]+)$`)
-	reSlice = regexp.MustCompile(`^turn/([^#]+)#msg:([^:]+):([0-9]+)-([0-9]+)$`)
+	reSlice = regexp.MustCompile(`^turn/([^/#]+)#msg:([^:]+):([0-9]+)-([0-9]+)$`)
 )
 
 // RefKind is the parsed reference type.

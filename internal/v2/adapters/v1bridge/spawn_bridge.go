@@ -73,7 +73,7 @@ func (b *SpawnBridge) Spawn(ctx context.Context, req spawn.Request) (spawn.Respo
 			Kind:      v2errors.ErrDependency,
 			Message:   "legacy spawn failed",
 			Cause:     err,
-			Fatal:     true,
+			Fatal:     false,
 			Retryable: true,
 		}
 	}

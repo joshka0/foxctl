@@ -94,7 +94,11 @@ func main() {
 }
 
 func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
-	_ = ctx
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	default:
+	}
 
 	subject := strings.TrimSpace(in.Subject)
 	if subject == "" {
@@ -184,6 +188,9 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 		"gate_note":                  gateNote,
 	}
 
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	return skillout.Emit(rc, command, data)
 }
 

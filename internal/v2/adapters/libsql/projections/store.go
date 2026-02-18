@@ -247,6 +247,8 @@ func (s *Store) GetRunStateByRef(ctx context.Context, ref string, resolver Legac
 	}
 	if state, err := s.GetRunState(ctx, runID); err == nil {
 		return state, nil
+	} else if !errors.Is(err, ErrNotFound) {
+		return RunState{}, err
 	}
 	if resolver == nil {
 		return RunState{}, ErrNotFound

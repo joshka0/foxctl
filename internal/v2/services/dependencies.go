@@ -105,9 +105,11 @@ func defaultNewID() func() string {
 	}
 }
 
+var defaultIDGenerator = defaultNewID()
+
 func prefixedID(prefix string, nextID func() string) string {
 	if nextID == nil {
-		nextID = defaultNewID()
+		nextID = defaultIDGenerator
 	}
 	return strings.TrimSpace(prefix) + "-" + strings.TrimSpace(nextID())
 }
