@@ -1160,6 +1160,17 @@ func runAgentAsk(cmd *cobra.Command, args []string) error {
 	}, "ask", nil); err != nil {
 		return err
 	}
+	maybeRunAgentAskShadow(ctx, askShadowInput{
+		AskID:          askID,
+		AgentID:        agentRecord.ID,
+		Namespace:      agentRecord.Namespace,
+		FromNS:         msg.FromNS,
+		Kind:           kind,
+		Question:       question,
+		ConversationID: conversationID,
+		Timeout:        timeout,
+		V1MessageID:    msg.ID,
+	})
 
 	if wait {
 		return waitForReply(ctx, mailboxStore, cmd.OutOrStdout(), msg.FromNS, askID, timeout)

@@ -1,0 +1,95 @@
+package profiles
+
+import (
+	"fmt"
+	"sort"
+	"strings"
+
+	coretool "github.com/jkatigb/agentctl/internal/v2/core/tool"
+)
+
+// ProfileSpec defines a deny-by-default allowlist for one process profile.
+type ProfileSpec struct {
+	Profile      coretool.ProcessProfile `json:"profile"`
+	AllowedTools []string                `json:"allowed_tools"`
+}
+
+// DefaultSpecs returns deterministic built-in allowlists for v2 PR-04.
+func DefaultSpecs() map[coretool.ProcessProfile]ProfileSpec {
+	return map[coretool.ProcessProfile]ProfileSpec{
+		coretool.ProfileOverseer: {
+			Profile: coretool.ProfileOverseer,
+			AllowedTools: []string{
+				"agent_hierarchy",
+				"agent_kill",
+				"agent_list",
+				"agent_spawn",
+				"agent_status",
+				"agent_wait",
+				"code_search",
+				"context_grep",
+				"context_search",
+				"fs_list_dir",
+				"fs_read_file",
+				"session_timeline",
+				"smart_search",
+				"think",
+			},
+		},
+		coretool.ProfileWorker: {
+			Profile: coretool.ProfileWorker,
+			AllowedTools: []string{
+				"code_search",
+				"fs_list_dir",
+				"fs_read_file",
+				"fs_write_file",
+				"think",
+			},
+		},
+		coretool.ProfileCompanion: {
+			Profile: coretool.ProfileCompanion,
+			AllowedTools: []string{
+				"code_search",
+				"context_search",
+				"fs_list_dir",
+				"fs_read_file",
+				"session_timeline",
+				"smart_search",
+				"think",
+			},
+		},
+	}
+}
+
+// Resolve normalizes a textual profile name.
+func Resolve(name string) (coretool.ProcessProfile, error) {
+	switch strings.ToLower(strings.TrimSpace(name)) {
+	case string(coretool.ProfileOverseer):
+		return coretool.ProfileOverseer, nil
+	case string(coretool.ProfileWorker):
+		return coretool.ProfileWorker, nil
+	case string(coretool.ProfileCompanion):
+		return coretool.ProfileCompanion, nil
+	default:
+		return "", fmt.Errorf("unknown process profile %q", name)
+	}
+}
+
+// NormalizeAllowedTools returns a deduplicated sorted allowlist.
+func NormalizeAllowedTools(in []string) []string {
+	seen := map[string]struct{}{}
+	out := make([]string, 0, len(in))
+	for _, name := range in {
+		n := strings.TrimSpace(strings.ToLower(name))
+		if n == "" {
+			continue
+		}
+		if _, ok := seen[n]; ok {
+			continue
+		}
+		seen[n] = struct{}{}
+		out = append(out, n)
+	}
+	sort.Strings(out)
+	return out
+}

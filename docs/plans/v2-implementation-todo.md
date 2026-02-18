@@ -1,0 +1,274 @@
+# V2 Implementation Todo Tracker
+
+Status: Active  
+Owner: Solo maintainer  
+Last Updated: 2026-02-18
+
+## Objective
+
+Implement the v2 runtime incrementally with:
+
+- one orchestration path per command
+- one tool execution path
+- append-only events + projections
+- non-blocking enrichment/context assembly
+- strict v1/v2 boundary via `AGENTCTL_V2_COMMANDS`
+- shadow validation via `AGENTCTL_V2_SHADOW_COMMANDS`
+
+Primary specs/plans:
+
+- `docs/spec/v2_greenfield_bootstrap.md`
+- `docs/spec/v2_repo_rules_and_skills.md`
+- `docs/plans/v2-greenfield-bootstrap.md`
+
+## Current State
+
+- [x] v2 spec/plan/rules documents aligned and cross-linked to companion/general docs
+- [x] v2 non-blocking behavior explicitly marked as v2-only
+- [x] implementation scaffold under `internal/v2/*` started
+
+## Now (In Progress)
+
+- [x] PR-01B: Error/event contracts + deterministic golden harness
+  - [x] `internal/v2/core/errors/errors.go`
+  - [x] `internal/v2/core/events/{types,payloads}.go`
+  - [x] deterministic fakes (`fake_clock`, `fake_uuid`, `fake_event_store`)
+  - [x] first JSONL golden fixture + comparator
+- [x] PR-02A: Event store vertical slice (`spawn`) (libsql-first)
+  - [x] libsql append-only event schema/store with monotonic stream version checks
+  - [x] minimal projections (`agent_state`, `run_state`)
+  - [x] replay + idmap roundtrip tests
+- [x] PR-03: runner pipeline (no transport)
+- [x] PR-04: unified tool stack
+- [x] PR-05: unified spawn/ask/run/list/kill services
+- [x] PR-06: v2 ports + feature-flag routing
+
+## Next
+
+- [x] PR-01A residual-risk follow-up
+  - [x] replace pure compile-smoke coverage with behavioral tests as v2 runtime logic lands
+  - [x] keep `internal/v2/ports/config/v2flags.go` command map aligned with routed v2 command surfaces
+
+## Later (Queued)
+
+- [x] PR-07 supervisor + runtime event bus
+- [x] PR-08 snapshots + non-blocking maintenance
+- [x] PR-09 turn intelligence + context builder
+- [x] PR-10 ask shadow validation plumbing (v1 primary + v2 mirror + parity telemetry)
+
+## Decisions (Locked)
+
+- [x] v2 remains opt-in per command through `AGENTCTL_V2_COMMANDS`
+- [x] no command-level `--dry-run` requirement for v2 rollout
+- [x] turn completion must never block on enrichers/maintenance
+- [x] turn lineage is `Turn -> Iteration -> ToolCall` with trace metadata
+- [x] context retrieval uses stable refs (`turn/*`, slice refs)
+- [x] first shadow-validation command is `ask` (lowest rollout risk, high parity signal)
+
+## Open Questions
+
+- [x] initial overflow policy for bounded queues: default `drop_newest`, with explicit `drop_oldest` and `block` support
+- [x] first context-builder mode to ship (`chat` only for v2 bootstrap)
+- [x] first command to route in shadow validation (`ask`)
+
+## Completion Gate (Required Before Marking Done)
+
+Before checking off any PR slice, run a subagent review and add a short note.
+
+Required note fields:
+
+1. `reviewer`: subagent id/handle
+2. `scope`: files or PR slice reviewed
+3. `findings`: summary or `none`
+4. `decision`: `approved` | `approved-with-known-risks`
+
+Template:
+
+```text
+Subagent Review
+- reviewer: <id>
+- scope: <files/slice>
+- findings: <summary|none>
+- decision: <approved|approved-with-known-risks>
+```
+
+## Resume Protocol (After Context Loss)
+
+1. Open this tracker and continue from the first unchecked item under `Now`.
+2. Open `docs/plans/v2-greenfield-bootstrap.md` for acceptance tests and file list.
+3. Keep changes scoped to one PR slice only.
+4. Before stopping, update:
+   - `Last Updated` date
+   - checkboxes
+   - subagent review note for the completed slice
+   - short entry in `Progress Log`
+
+## Progress Log
+
+- 2026-02-18: Created v2 tracker; linked v2 docs to companion/general references; added kickoff batches in main v2 plan.
+- 2026-02-18: Completed PR-01A scaffold (`internal/v2/*` package tree), added `v2flags` parser + tests, added core import-boundary guard test, and validated with `go test ./internal/v2/...` and `go test -tags=libsqlite3 ./...`.
+- 2026-02-18:
+  Subagent Review
+  - reviewer: `019c7088-6e8c-7e80-871d-371c266a6728`
+  - scope: `PR-01A` scaffold (`internal/v2/**`)
+  - findings: `none` (no blocking issues). Residual risks:
+    1) `internal/v2/scaffold_test.go` is compile-only; add behavioral tests as runtime logic lands.
+    2) `internal/v2/ports/config/v2flags.go` command map must stay in sync with actual routed v2 commands.
+  - decision: `approved-with-known-risks`
+- 2026-02-18: Completed PR-01B error/event contracts and deterministic test harness.
+  - Added `internal/v2/core/errors/errors.go` with HTTP status mapping + `ToEvent` conversion.
+  - Added `internal/v2/core/events/{types,payloads}.go` and deterministic testkit fakes/comparator.
+  - Added first JSONL fixture at `internal/v2/runtime/runner/testdata/golden_events/pr01b_event_contract.jsonl`.
+  - Validated with `go test ./internal/v2/...` and `go test -tags=libsqlite3 ./...`.
+- 2026-02-18:
+  Subagent Review
+  - reviewer: `019c7091-4f82-7612-a4dd-c42bb6040469`
+  - scope: `PR-01B` contracts/harness (`internal/v2/core/errors`, `internal/v2/core/events`, `internal/v2/testkit/*`, fixture + scaffold import update)
+  - findings: `none`
+  - decision: `approved`
+- 2026-02-18: Completed PR-02A as a libsql-first storage slice.
+  - Added `internal/v2/core/events/repository.go` contracts for stream listing/replay.
+  - Added libsql adapters under `internal/v2/adapters/libsql/{events,projections,idmap}` with schema/store/replay.
+  - Added tests for monotonic append, replay rebuild, legacy lookup, and idmap roundtrip.
+  - Validated with `go test ./internal/v2/...` and `go test -tags=libsqlite3 ./...`.
+- 2026-02-18:
+  Subagent Review
+  - reviewer: `019c70a0-2f79-7952-b1e7-dabccc0b23f7`
+  - scope: `PR-02A` libsql adapters (`internal/v2/adapters/libsql/**`) + `internal/v2/core/events/repository.go`
+  - findings: `none`
+  - decision: `approved`
+- 2026-02-18: Completed PR-03 runner pipeline (no transport).
+  - Added canonical stage pipeline under `internal/v2/runtime/runner/*`:
+    `InitContext -> ResolveDependencies -> ApplyPreHooks -> BuildToolset -> ModelCall -> ApplyPostHooks -> PersistTurn -> EmitEvents`.
+  - Added v2 run domain types in `internal/v2/core/run/types.go`.
+  - Added deterministic runner fakes: `fake_model`, `fake_tool_executor`.
+  - Added runner tests for happy path, max-iteration degrade, non-fatal stage failure continuation, cancellation-before-persist, model no-tool/done handling, tool failure, post-hook failure, and golden JSONL stability.
+  - Added golden fixture: `internal/v2/runtime/runner/testdata/golden_events/run_worker_toolflow_success.jsonl`.
+  - Validated with `go test ./internal/v2/...` and `go test -tags=libsqlite3 ./...`.
+- 2026-02-18:
+  Subagent Review
+  - reviewer: `019c70bc-a5c4-73a2-a811-6cbbc3d9574a`
+  - scope: `PR-03` runner pipeline (`internal/v2/core/run/types.go`, `internal/v2/runtime/runner/*`, `internal/v2/testkit/fakes/{fake_model,fake_tool_executor}.go`, golden fixture)
+  - findings: `none`
+  - decision: `approved`
+- 2026-02-18: Completed PR-04 unified tool stack.
+  - Added core tool contracts in `internal/v2/core/tool/types.go` (`ProcessProfile`, `ToolDef`, `ToolPolicy`, `ToolCatalog`).
+  - Added runtime profile allowlists in `internal/v2/runtime/profiles/profiles.go`.
+  - Added unified runtime catalog/executor in `internal/v2/runtime/tools/{types,catalog,executor}.go` with deny-by-default profile filtering and schema-based arg validation.
+  - Added v1 bridge adapter in `internal/v2/adapters/v1bridge/tool_bridge.go` to map legacy execution to v2 tool result/error semantics.
+  - Extended deterministic fake tool executor (`internal/v2/testkit/fakes/fake_tool_executor.go`) with per-tool call counting.
+  - Added PR-04 acceptance tests in `internal/v2/runtime/tools/executor_test.go` and bridge tests in `internal/v2/adapters/v1bridge/tool_bridge_test.go`.
+  - Validated with `go test ./internal/v2/...` and `go test -tags=libsqlite3 ./...`.
+- 2026-02-18:
+  Subagent Review
+  - reviewer: `019c70cd-a3b7-7d41-bb05-197f51ca95c4`
+  - scope: `PR-04` unified tools (`internal/v2/core/tool/types.go`, `internal/v2/runtime/profiles/profiles.go`, `internal/v2/runtime/tools/*`, `internal/v2/adapters/v1bridge/tool_bridge.go`, `internal/v2/testkit/fakes/fake_tool_executor.go`)
+  - findings: `none`
+  - decision: `approved`
+- 2026-02-18: Completed PR-05 unified service layer.
+  - Added v2 command DTOs for spawn/ask/list/kill and service interfaces in `internal/v2/core/{spawn,ask,list,kill,services}`.
+  - Added service implementations in `internal/v2/services/{dependencies,run_service,spawn_service,ask_service,list_service,kill_service}.go`.
+  - Added v1 interop bridges in `internal/v2/adapters/v1bridge/{spawn_bridge,ask_bridge,kill_bridge}.go`.
+  - Added PR-05 acceptance tests in `internal/v2/services/services_test.go` for spawn create/idempotency, ask policy gating, kill idmap fallback, and projection-filtered list behavior.
+  - Fixed reviewer findings by making default ID generation concurrency-safe and resolving idmap in kill flow even without projections.
+  - Validated with `go test ./internal/v2/...` and `go test -tags=libsqlite3 ./...`.
+- 2026-02-18:
+  Subagent Review
+  - reviewer: `019c70dd-1d42-7e93-8ee2-0876814d592a`
+  - scope: `PR-05` services + v1 bridges (`internal/v2/core/{spawn,ask,list,kill}/types.go`, `internal/v2/core/services/interfaces.go`, `internal/v2/services/*`, `internal/v2/adapters/v1bridge/{spawn_bridge,ask_bridge,kill_bridge}.go`)
+  - findings: `none` (initial findings fixed: default ID generator race, kill idmap fallback when projections are nil)
+  - decision: `approved`
+- 2026-02-18: Completed PR-06 v2 ports + feature-flag routing.
+  - Added shared routing dispatch core in `internal/v2/ports/router.go` with command-level v1/v2 decisioning and observability hook support.
+  - Added CLI port routing adapters in `internal/v2/ports/cli/{router,spawn,ask,run,list,kill}.go`.
+  - Added API port routing + envelope mappers in `internal/v2/ports/api/{router,mappers}.go`.
+  - Added daemon method routing in `internal/v2/ports/daemon/router.go` with `agent.*` method to command mapping and unknown-method v1 fallback.
+  - Added PR-06 acceptance-style tests:
+    - `TestRouter_DefaultV1WhenFlagUnset`
+    - `TestRouter_SingleCommandOptInToV2`
+    - `TestCLI_API_ParityShellTest_Ask`
+    - `TestDaemonDispatch_SpawnAskKillRouting`
+    - `TestKillCommandRollbackToV1WhenNotEnabled`
+    - `TestRouter_EnvelopeContract_ParityV1V2`
+  - Added regression tests for wrapped v2 error mapping and unknown daemon method observability.
+  - Validated with `go test ./internal/v2/...` and `go test -tags=libsqlite3 ./...`.
+- 2026-02-18:
+  Subagent Review
+  - reviewer: `019c716b-6c9c-70d2-a6db-4342780e9f4a`
+  - scope: `PR-06` routing (`internal/v2/ports/router.go`, `internal/v2/ports/cli/*`, `internal/v2/ports/api/*`, `internal/v2/ports/daemon/router.go`, associated tests)
+  - findings: `none` (initial findings fixed: wrapped `V2Error` unwrapping in API mapper, unknown-method observability in daemon router)
+  - decision: `approved`
+- 2026-02-18: Completed PR-07 supervisor + runtime event bus.
+  - Added supervisor lifecycle host and tests in `internal/v2/runtime/supervisor/{component,host,host_test}.go`.
+  - Added bounded runtime event bus with explicit overflow policies and telemetry counters in `internal/v2/runtime/events/{doc,bus,bus_test}.go`.
+  - Added PR-07 tests for bounded overflow behavior and slow-subscriber non-deadlock fanout.
+  - Validated with `go test ./internal/v2/runtime/supervisor ./internal/v2/runtime/events` and `go test ./internal/v2/...`.
+- 2026-02-18:
+  Subagent Review
+  - reviewer: `019c717c-b8c2-7421-a2ff-9b1ef21290fa`
+  - scope: `PR-07` supervisor + runtime bus (`internal/v2/runtime/supervisor/*`, `internal/v2/runtime/events/*`)
+  - findings: `approved with low-risk note` (publish currently holds read lock during blocking overflow waits; acceptable for now)
+  - decision: `approved`
+- 2026-02-18: Completed PR-08 snapshots + non-blocking maintenance.
+  - Added immutable snapshot store with deep-clone load/store semantics in `internal/v2/runtime/snapshots/store.go`.
+  - Added first maintenance projector component in `internal/v2/runtime/maintenance/digest_component.go` that consumes runtime events and publishes digest snapshots without blocking turn execution.
+  - Added PR-08 tests:
+    - `TestSnapshotStore_LoadStoreAtomic`
+    - `TestSnapshotStore_ConcurrentReaders_NoContentionRegression`
+    - `TestMaintenanceComponent_PublishesSnapshot`
+    - `TestMaintenanceFailure_DoesNotBlockRunEngine`
+    - `TestSnapshotProjection_Parity`
+  - Validated with `go test ./internal/v2/runtime/snapshots ./internal/v2/runtime/maintenance`, `go test ./internal/v2/runtime/...`, `go test ./internal/v2/...`, and `go test -tags=libsqlite3 ./...`.
+- 2026-02-18:
+  Subagent Review
+  - reviewer: `019c718b-43e1-7d91-a157-679f98ff08e2`
+  - scope: `PR-08` snapshots + maintenance (`internal/v2/runtime/snapshots/*`, `internal/v2/runtime/maintenance/*`)
+  - findings: `none` (initial observability note addressed by default projector error logging)
+  - decision: `approved`
+- 2026-02-18: Completed PR-09 turn intelligence + context builder.
+  - Added canonical lineage records in `internal/v2/core/run/{turn_record,iteration_record,tool_call_record}.go`.
+  - Wired runner lineage persistence via optional `TurnRecorder` in `internal/v2/runtime/runner/{types,init_context,model_call,persist_turn}.go`.
+  - Added async enrichers with idempotent queue keys `(turn_id, artifact_type, artifact_version)` in `internal/v2/runtime/enrichers/{queue,worker}.go`.
+  - Added deterministic context reference parsing/building in `internal/v2/runtime/contextbuilder/{ref_parser,builder}.go`.
+  - Added PR-09 tests:
+    - `TestTurnRecord_PersistsIterationAndToolCallLineage`
+    - `TestTraceLineage_ParentSpanRelationships`
+    - `TestEnricherQueue_IdempotentByArtifactVersion`
+    - `TestEnricherFailure_DoesNotBlockTurnCompletion`
+    - `TestContextBuilder_ResolveWholeTurnRef`
+    - `TestContextBuilder_ResolveSliceRef`
+  - Validated with `go test ./internal/v2/runtime/runner ./internal/v2/runtime/enrichers ./internal/v2/runtime/contextbuilder`, `go test ./internal/v2/...`, and `go test -tags=libsqlite3 ./...`.
+- 2026-02-18:
+  Subagent Review
+  - reviewer: `019c71a3-e2c6-7161-bd36-6d5ba86b134a`
+  - scope: `PR-09` lineage/enrichers/contextbuilder (`internal/v2/core/run/*`, `internal/v2/runtime/{runner,enrichers,contextbuilder}/*`, `internal/v2/scaffold_test.go`)
+  - findings: `none` (initial queue close/send race in `enrichers/queue.go` fixed and re-reviewed)
+  - decision: `approved`
+- 2026-02-18: Completed PR-01A residual-risk follow-up and shadow-route decision.
+  - Added `SupportedCommands()` export in `internal/v2/ports/config/v2flags.go` and canonical-set test coverage in `internal/v2/ports/config/v2flags_test.go`.
+  - Added command-surface drift guards:
+    - `internal/v2/ports/daemon/command_surface_test.go`
+    - `internal/v2/ports/cli/command_surface_test.go`
+    - `internal/v2/ports/api/router_test.go` (`TestRouter_AllSupportedCommandsCanRouteV2`)
+  - Locked first shadow-validation command to `ask` and updated parity-verification sequencing in `docs/plans/v2-greenfield-bootstrap.md`.
+  - Validated with `go test ./internal/v2/ports/config ./internal/v2/ports/cli ./internal/v2/ports/api ./internal/v2/ports/daemon`, `go test ./internal/v2/...`, `go test -tags=libsqlite3 ./...`, and `make check-doc-links`.
+- 2026-02-18:
+  Subagent Review
+  - reviewer: `019c71ae-23eb-7d01-80fb-3ae209caf6de`
+  - scope: `PR-01A residual follow-up` (`internal/v2/ports/{config,cli,api,daemon}/*`, `docs/plans/v2-greenfield-bootstrap.md`, `docs/plans/v2-implementation-todo.md`)
+  - findings: `none`
+  - decision: `approved`
+- 2026-02-18: Completed PR-10 ask shadow validation plumbing.
+  - Added shadow command parsing via `AGENTCTL_V2_SHADOW_COMMANDS` in `internal/v2/ports/config/v2flags.go` (+ tests).
+  - Added non-blocking-capable shadow execution contract in `internal/v2/ports/router.go` with `DispatchWithShadow`, `ShadowReport`, comparator support, and parity tests.
+  - Wired CLI/API/daemon v2 routers to pass shadow configuration (`internal/v2/ports/{cli,api,daemon}/router.go`).
+  - Added real CLI `agent ask` shadow validation hook in `cmd/agentctl/cmd/agent_ask_shadow.go` and called it from `runAgentAsk` after v1 ack/write.
+  - Shadow run is side-effect safe (no second mailbox send) by using v2 ask service with an in-memory dispatcher and emits `agent.ask.shadow` observability events.
+  - Updated parity verification docs to include `AGENTCTL_V2_SHADOW_COMMANDS=ask` bootstrap.
+  - Validated with `go test ./cmd/agentctl/cmd ./internal/v2/ports/... ./internal/v2/...`, `go test -tags=libsqlite3 ./...`, and `make check-doc-links`.
+- 2026-02-18:
+  Subagent Review
+  - reviewer: `019c71bb-e52a-7a52-a5a9-53e57fd0268b`
+  - scope: `PR-10 ask shadow plumbing` (`cmd/agentctl/cmd/{agent.go,agent_ask_shadow.go,agent_ask_shadow_test.go}`, `internal/v2/ports/{config,router,cli,api,daemon}/*`, plan docs)
+  - findings: `none`
+  - decision: `approved`

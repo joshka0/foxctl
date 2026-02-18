@@ -14,6 +14,14 @@ Use this folder for canonical behavior and wire-contract specifications.
 - `semantic_file_index.md` - Semantic file indexing spec.
 - `code_symbol_index_and_swe_grep.md` - Symbol index + snippet extraction behavior.
 
+## V2 Supporting References
+
+- `docs/plans/v2-greenfield-bootstrap.md` - Sequenced implementation plan for v2 rollout.
+- `docs/general/runtime-orchestration.md` - Current runtime execution map used as migration baseline.
+- `docs/general/memory.md` - Current memory/storage contract baseline.
+- `docs/general/companion-memory.md` - Companion memory layering and temporal context model.
+- `docs/general/context-and-observability.md` - Existing observability/context primitives that inform v2 events/trace design.
+
 ## Status Guidance
 
 - `docs/spec/v1/*` should be treated as stable contracts unless explicitly versioned.

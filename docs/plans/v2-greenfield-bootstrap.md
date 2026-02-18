@@ -3,6 +3,19 @@
 Status: Approved (A+)
 Iterations: 4
 Source Spec: `docs/spec/v2_greenfield_bootstrap.md`
+Working Tracker: `docs/plans/v2-implementation-todo.md`
+
+## Companion and General References
+
+- `docs/spec/v2_repo_rules_and_skills.md`
+- `docs/general/runtime-orchestration.md`
+- `docs/general/agent-daemon.md`
+- `docs/general/memory.md`
+- `docs/general/companion-memory.md`
+- `docs/general/context-and-observability.md`
+- `docs/architecture/system-architecture.md`
+- `docs/designs/hierarchical-memory-retrieval.md`
+- `docs/designs/progressive-memory-system.md`
 
 ## Problem Statement
 
@@ -39,13 +52,19 @@ runtime → adapters (through interfaces)
 core imports no adapters
 ```
 
+### V2 Scope Guardrails
+
+- All behaviors in this plan apply to `internal/v2/*` paths.
+- v1 command behavior does not change unless that command is listed in `AGENTCTL_V2_COMMANDS`.
+- Non-blocking/background guarantees in this plan are acceptance criteria for v2-routed commands only.
+
 ## Design Patterns
 
 | Pattern | Location | Rationale |
 |---------|----------|-----------|
 | Command | `internal/v2/services/{spawn,ask,run,list,kill}_service.go` | Isolate operation behavior behind request/response DTOs |
 | Pipeline / Chain of Responsibility | `internal/v2/runtime/runner/*` | Deterministic stage execution, composable and testable |
-| Repository | `internal/v2/core/events` interfaces + `internal/v2/adapters/sqlite/*` | Append-only persistence with projection reads |
+| Repository | `internal/v2/core/events` interfaces + `internal/v2/adapters/libsql/*` | Append-only persistence with projection reads |
 | Adapter | `internal/v2/adapters/v1bridge/*` | Call v1 runtime/hooks/tools without duplicate logic |
 | Supervisor | `internal/v2/runtime/supervisor/*` | Standard `Run(ctx)` lifecycle for background components |
 | Single Writer | `internal/v2/runtime/*` state loops | Clear ownership of mutable state, fewer race conditions |
@@ -129,6 +148,71 @@ Reference forms for context building:
 
 Rule: enrichment jobs (embedding/annotation/classification) are asynchronous and idempotent by `(turn_id, artifact_type, artifact_version)` and must not block turn completion.
 
+## Non-Blocking Contract (V2 Routes)
+
+1. Turn write path must not wait on enrichers.
+2. Enrichers consume `turn.recorded` events asynchronously via bounded queues.
+3. Missing artifacts degrade context quality only; they do not fail turn completion.
+4. Enricher failures emit `artifact.failed` events and retry policy metadata without retroactively failing a completed turn.
+
+## Completion Review Gate
+
+For every PR slice in this plan, completion requires a subagent second-pass review
+note (reviewer, scope, findings, decision) before marking the slice done.
+Use the protocol in `docs/spec/v2_repo_rules_and_skills.md`.
+
+## Kickoff Plan (Start Now)
+
+The first implementation slice should lock contracts and test determinism before
+feature migration.
+
+### Kickoff Batch A: Contracts + Compile-Safe Skeleton (PR-01A)
+
+Goal: create `internal/v2` package tree, core interfaces/types, and no-op
+adapters with zero behavior change.
+
+Tasks:
+- [ ] create `internal/v2/core/{events,run,spawn,ask,list,kill,tool,policy,services}`
+- [ ] create `internal/v2/runtime/{runner,supervisor,snapshots}`
+- [ ] create `internal/v2/ports/config/v2flags.go`
+- [ ] add compile-only tests for package shape and imports
+
+Exit checks:
+- [ ] `go test ./internal/v2/...` passes
+- [ ] `go test ./...` passes
+
+### Kickoff Batch B: Error/Event Contracts + Golden Harness (PR-01B)
+
+Goal: define canonical v2 error/event structures and deterministic fixture
+harness before implementing behavior.
+
+Tasks:
+- [ ] implement `internal/v2/core/errors/errors.go`
+- [ ] implement `internal/v2/core/events/{types,payloads}.go`
+- [ ] add deterministic fakes (`fake_clock`, `fake_uuid`, `fake_event_store`)
+- [ ] add first golden fixture and comparator utility for JSONL events
+
+Exit checks:
+- [ ] `TestV2Error_HTTPStatusAndToEvent` passes
+- [ ] `TestEnvelopeContract_V2Output_V1Shape` passes
+- [ ] golden fixtures are byte-stable in CI
+
+### Kickoff Batch C: Event Store Vertical Slice (PR-02A)
+
+Goal: wire append-only events and projection replay for one command path
+(`spawn`) behind tests, without routing live traffic yet.
+
+Tasks:
+- [ ] add libsql-first schema/store for v2 events with monotonic stream version
+- [ ] add minimal projection tables (`agent_state`, `run_state`)
+- [ ] implement replay utility + idmap primitives
+- [ ] add integration tests for append/replay/idmap roundtrip
+
+Exit checks:
+- [ ] event append/replay tests pass
+- [ ] idmap tests pass
+- [ ] no v1 command path changes
+
 ## File Changes
 
 ### PR-01: V2 Skeleton + Contracts
@@ -181,14 +265,14 @@ Rule: enrichment jobs (embedding/annotation/classification) are asynchronous and
 | File | Status |
 |------|--------|
 | `internal/v2/core/events/repository.go` | new |
-| `internal/v2/adapters/sqlite/events/schema.go` | new |
-| `internal/v2/adapters/sqlite/events/store.go` | new |
-| `internal/v2/adapters/sqlite/events/replay.go` | new |
-| `internal/v2/adapters/sqlite/projections/schema.go` | new |
-| `internal/v2/adapters/sqlite/projections/store.go` | new |
-| `internal/v2/adapters/sqlite/projections/replay.go` | new |
-| `internal/v2/adapters/sqlite/idmap/schema.go` | new |
-| `internal/v2/adapters/sqlite/idmap/store.go` | new |
+| `internal/v2/adapters/libsql/events/schema.go` | new |
+| `internal/v2/adapters/libsql/events/store.go` | new |
+| `internal/v2/adapters/libsql/events/replay.go` | new |
+| `internal/v2/adapters/libsql/projections/schema.go` | new |
+| `internal/v2/adapters/libsql/projections/store.go` | new |
+| `internal/v2/adapters/libsql/projections/replay.go` | new |
+| `internal/v2/adapters/libsql/idmap/schema.go` | new |
+| `internal/v2/adapters/libsql/idmap/store.go` | new |
 
 **Key implementation points**:
 - Enforce monotonic `stream_version` per `(stream_id, stream_type)` as single ordering source
@@ -477,10 +561,11 @@ Rule: enrichment jobs (embedding/annotation/classification) are asynchronous and
 4. v2 writes are isolated — v1 path resumes without schema rollback
 
 ### B) Parity Verification
-1. Run mirrored command fixtures through both paths in shadow mode
-2. Compare: envelope contract (`version`, `status`, `meta.ts`, `error.code`, `error.message`), return text ordering, tool-call count/IDs/results, error class and HTTP status, correlation_id, and timing metadata
-3. Enforce error mapping parity: malformed input must map to `ErrValidation`/400; policy denies must map to `ErrPolicyViolation`/403
-4. Alert on divergence in fatal/terminal outcomes; allow drift only in v2-only extensions
+1. Start with `ask` as the first shadow-validation command before expanding to `spawn`, `run`, `list`, and `kill`
+2. Enable shadow mode with `AGENTCTL_V2_SHADOW_COMMANDS=ask` while keeping primary routing unchanged
+3. Run mirrored command fixtures through both paths in shadow mode
+4. Compare: envelope contract (`version`, `status`, `meta.ts`, `error.code`, `error.message`), return text ordering, tool-call count/IDs/results, error class and HTTP status, correlation_id, and timing metadata. Enforce error mapping parity: malformed input must map to `ErrValidation`/400; policy denies must map to `ErrPolicyViolation`/403.
+5. Alert on divergence in fatal/terminal outcomes; allow drift only in v2-only extensions
 
 ### C) v1 Path Deletion Criteria
 1. Command-specific diff below tolerance for sustained validation window

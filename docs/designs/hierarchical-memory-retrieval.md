@@ -4,6 +4,12 @@
 ## Date: 2026-02-07
 ## Branch: feat/companion-dynamic-compress
 
+## Scope Note (V2-first)
+
+This design targets the v2 runtime context-builder/event-pipeline path.
+Phase 1/2 items that touch current `internal/engine/rlm_tools.go` are
+transitional options; the canonical target lives under `internal/v2/runtime/*`.
+
 ---
 
 ## Problem
@@ -23,6 +29,7 @@ The companion RLM agent loop has two retrieval paths, both suboptimal:
 - **Atomic text fields unused**: SimpleMem processing stores `atomic_text`, `entities`, `keywords` in `named_memory` but RLM search ignores them
 - **No token budget on tool output**: `executeSemanticQuery` returns unlimited results
 - **Autonomous instructions are vague**: Don't guide the model toward hierarchical retrieval strategy
+- **No temporal pyramid views**: Can't request coarse-grained context (`hours` → `days` → `weeks` → `months`) before drilling down
 
 ---
 
@@ -147,11 +154,14 @@ type MemoryRetrieveInput struct {
     {"layer": "L1", "name": "companion:summary:abc:2026-02-01", "type": "companion_summary", "score": 0.82, "date": "2026-02-01"}
   ],
   "stats": {"method": "vector", "l2_hits": 1, "l1_hits": 3, "chars": 4200},
-  "expandable_dates": ["2026-02-01", "2026-02-05"]
+  "expandable_dates": ["2026-02-01", "2026-02-05"],
+  "expandable_refs": ["day:2026-02-01", "turn:abc123#msg:m9:0-600"]
 }
 ```
 
-Key: `expandable_dates` tells the model which dates have underlying L0 turns available for drill-down.
+Key:
+- `expandable_dates` tells the model which dates have underlying L0 turns available for drill-down.
+- `expandable_refs` exposes stable references for partial-turn expansion.
 
 #### Retrieval Strategy
 
@@ -320,7 +330,85 @@ This is a tradeoff: less automatic context vs. more targeted retrieval. Start by
 
 ---
 
+### Phase 5: Event-Driven Temporal Pyramid (PR-10)
+
+Add an event pipeline that turns raw turns into cheap temporal views and
+referenceable artifacts.
+
+#### Event Schema
+
+```json
+{
+  "event_type": "turn.recorded",
+  "trace_id": "trace_123",
+  "correlation_id": "req_456",
+  "causation_id": "ask_789",
+  "payload": {
+    "conversation_id": "conv_1",
+    "turn_id": "turn_42",
+    "timestamp": "2026-02-18T14:23:11Z",
+    "token_count": 1830
+  }
+}
+```
+
+Additional events:
+- `bucket.updated`
+- `bucket.closed`
+- `artifact.created`
+- `artifact.failed`
+
+#### Artifact Schema
+
+```json
+{
+  "artifact_id": "art_001",
+  "subject_kind": "bucket",
+  "subject_id": "day:2026-02-18",
+  "artifact_kind": "summary",
+  "artifact_version": "v1",
+  "content_ref": "cas:sha256:...",
+  "metadata": {"top_topics": ["auth", "runtime"], "decision_count": 2}
+}
+```
+
+#### Context-Builder API Surface
+
+```go
+type ContextRequest struct {
+    Query        string
+    BudgetTokens int
+    Mode         string // chat|recap|planning|search
+    Views        []string // hours|days|weeks|months
+}
+
+type ContextBundle struct {
+    Markdown   string
+    Refs       []string
+    UsedTokens int
+}
+```
+
+#### Temporal Pyramid
+
+| View | Primary Source | Drill-down Target |
+|------|----------------|-------------------|
+| `months` | L2 history artifacts | `weeks` |
+| `weeks` | grouped L1 summaries + L2 | `days` |
+| `days` | L1 summaries | `hours` / L0 turns |
+| `hours` | L0 turns | turn slices |
+
+Rules:
+1. Turn write path must not block on enrichment.
+2. Enrichment idempotency key: `(turn_id, artifact_kind, artifact_version)`.
+3. Context builder always returns drill-down refs (`expandable_dates`, `expandable_refs`) when available.
+
+---
+
 ## Implementation Order
+
+Phases 1-4 are transitional and can be used to improve current retrieval
+behavior incrementally. Phase 5 is the canonical v2 target architecture.
 
 ```
 Phase 1 ─── Fix executeSemanticQuery ──── (small, same-file change, ship immediately)
@@ -330,6 +418,8 @@ Phase 2 ─── Add rlm_memory_retrieve ──── (new tool, same file, add
 Phase 3 ─── Add rlm_memory_expand ─────── (new interface + adapter, 3 files)
     │
 Phase 4 ─── Strengthen instructions ───── (prompt engineering, test empirically)
+    │
+Phase 5 ─── Event pipeline + temporal pyramid (non-blocking enrichers, refs)
 ```
 
 Each phase is independently shippable. Phase 1 is a clear improvement with no downside.
@@ -367,6 +457,8 @@ Each phase is independently shippable. Phase 1 is a clear improvement with no do
 
 - Full Chat() flow with autonomous mode → model calls `rlm_memory_retrieve` → responds with context
 - Compression → retrieve → expand roundtrip (store turns, compress to L1, retrieve L1, expand back to L0)
+- Event pipeline roundtrip (`turn.recorded` → bucket/artifact events) with non-blocking turn completion
+- Temporal pyramid retrieval (`months` → `weeks` → `days` → `hours`) with deterministic refs
 
 ---
 
@@ -379,3 +471,5 @@ Each phase is independently shippable. Phase 1 is a clear improvement with no do
 | `internal/companion/memory_reader.go` | 3 | New: adapter implementing `ConversationTurnReader` via SQL |
 | `internal/companion/service.go` | 3,4 | Wire turn reader; update autonomous instructions |
 | `internal/engine/rlm_tools_test.go` | 1,2,3 | Tests for all phases |
+| `internal/v2/runtime/enrichers/*` | 5 | Event-driven enrichment workers (bucket/artifact producers) |
+| `internal/v2/runtime/contextbuilder/*` | 5 | Context builder + temporal view selection + refs |

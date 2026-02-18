@@ -1,0 +1,87 @@
+apiVersion: agentctl/v1
+kind: Skill
+metadata:
+  name: code/greenlight
+  version: 0.1.0
+  description: "Port of greenlight App Store-oriented code scanning rules"
+  tags:
+    - security
+    - compliance
+    - scanning
+    - mobile
+distribution:
+  type: exec
+  exec:
+    entry: skills/code_greenlight/code_greenlight
+io:
+  format: JSON
+  inline_output_kb: 64
+signature:
+  command: code/greenlight
+  parameters:
+    - name: path
+      type: string
+      required: false
+      description: Directory or file to scan (default workspace root)
+    - name: scan_mode
+      type: string
+      required: false
+      enum:
+        - scan
+        - secrets
+        - crypto
+        - injection
+      default: scan
+      description: Optional mode that adds focused category filters
+    - name: severity_threshold
+      type: string
+      required: false
+      enum:
+        - low
+        - medium
+        - high
+        - critical
+      default: medium
+      description: Minimum severity to report
+    - name: categories
+      type: array
+      required: false
+      items:
+        type: string
+      description: Explicit categories or rule IDs to scan
+    - name: exclude_tests
+      type: boolean
+      required: false
+      default: false
+      description: Exclude files that look like tests
+    - name: max_results
+      type: integer
+      required: false
+      default: 200
+      description: Maximum number of findings returned
+  help:
+    short: Scan code for greenlight-style App Store risk patterns.
+    long: |
+      Use code/greenlight to run rule-based scans for App Store policy risks.
+      Example:
+        agentctl run code/greenlight --path . --scan_mode scan --severity_threshold medium
+  returns:
+    - name: findings
+      type: array
+      description: Matched findings (previewed inline)
+    - name: stats
+      type: object
+      description: Summary statistics
+    - name: artifact
+      type: string
+      description: CAS digest when results exceed preview limits
+capabilities:
+  network: none
+  filesystem:
+    - type: workdir
+  pure: true
+openapi:
+  enabled: true
+  methods:
+    GET: "true"
+    POST: "true"

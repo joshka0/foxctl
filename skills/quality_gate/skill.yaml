@@ -1,0 +1,85 @@
+apiVersion: agentctl/v1
+kind: Skill
+metadata:
+  name: quality/gate
+  version: 0.1.0
+  description: "Policy-based quality gate for subagent reviews and definition-of-done checks"
+  tags: ["quality", "review", "gate", "validation"]
+distribution:
+  type: exec
+  exec:
+    entry: skills/quality_gate/quality_gate
+io:
+  format: JSON
+  inline_output_kb: 64
+signature:
+  command: quality/gate
+  parameters:
+    - name: subject
+      type: string
+      required: false
+      description: "Human-readable target under review (PR, task, artifact, component)"
+    - name: scope
+      type: string
+      required: false
+      description: "Scope label for the gate run (default: default)"
+    - name: language_hints
+      type: array
+      required: false
+      items:
+        type: string
+      description: "Optional stack/language hints for downstream reporting"
+    - name: findings
+      type: array
+      required: false
+      description: "Review findings from one or more reviewers/subagents"
+    - name: checks
+      type: array
+      required: false
+      description: "Definition-of-done checks with required flag and status"
+    - name: policy
+      type: object
+      required: false
+      description: "Gate behavior overrides (block severities, warning budget, required-check strictness)"
+  help:
+    short: "Apply a deterministic quality gate across findings and DoD checks."
+    long: |
+      Use quality/gate to normalize review findings and produce a deterministic gate decision:
+      approved | approved-with-known-risks | needs-changes.
+
+      This skill is language-agnostic. It does not assume Go or any specific stack.
+
+      Example:
+        agentctl run quality/gate --input '{
+          "subject":"companion memory pipeline",
+          "language_hints":["go","sql","typescript"],
+          "findings":[
+            {"id":"F-1","source":"reviewer-a","severity":"high","summary":"missing rollback path"}
+          ],
+          "checks":[
+            {"id":"C-1","title":"integration tests","required":true,"status":"pass"}
+          ]
+        }'
+returns:
+  - name: decision
+    type: string
+    description: "approved | approved-with-known-risks | needs-changes"
+  - name: summary
+    type: object
+    description: "Counts for findings/checks and policy-impacting outcomes"
+  - name: gate_note
+    type: string
+    description: "Compact tracker-friendly status note"
+  - name: recommendations
+    type: array
+    description: "Actionable next steps derived from gate outcomes"
+capabilities:
+  network: "none"
+  filesystem:
+    - type: workdir
+  pure: true
+openapi:
+  enabled: true
+  methods:
+    GET: "true"
+    POST: "true"

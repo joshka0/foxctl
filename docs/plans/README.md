@@ -10,6 +10,8 @@ This directory contains active planning documents and implementation roadmaps.
 
 ## High-Signal Entrypoints
 
+- `v2-implementation-todo.md`
+- `v2-greenfield-bootstrap.md`
 - `chat-platform-adapter.md`
 - `k8s-sql-storage.md`
 - `embedding-quality-roadmap/README.md`
