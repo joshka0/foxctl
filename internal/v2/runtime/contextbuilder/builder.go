@@ -83,7 +83,8 @@ type TemporalBundle struct {
 
 // Builder resolves turn references to context bundles.
 type Builder struct {
-	reader run.TurnReader
+	reader    run.TurnReader
+	companion CompanionProvider
 }
 
 // New creates a context builder.

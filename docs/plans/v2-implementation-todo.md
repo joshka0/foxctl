@@ -26,7 +26,7 @@ Primary specs/plans:
 - [x] Wave 1 foundation complete (PR-01 through PR-10) with tests and review notes
 - [x] v2 docs aligned to companion/general references and non-blocking v2 scope rules
 - [x] Wave 2 production cutover batch 1 complete (PR-11 through PR-13)
-- [ ] Wave 2 dynamic context pipeline work queued (PR-15 through PR-16)
+- [ ] Wave 2 dynamic context pipeline work queued (PR-16)
 
 ## Wave 1 Completed (Reference)
 
@@ -56,13 +56,13 @@ Wave 2 rationale, DoD expectations, and exit criteria live in:
 - [x] PR-14: Hierarchical context builder + temporal pyramid retrieval
   - [x] support `hours -> days -> weeks -> months` summaries with drill-down refs
   - [x] expose expandable-date style metadata for selective deepening
+- [x] PR-15: Companion memory layered assembly integration
+  - [x] wire L2 -> L1 -> L0 budgeted context composition
+  - [x] blend turn refs + companion summaries deterministically
+  - [x] validate referenceability of whole turns and partial slices in assembled context
 
 ## Next
 
-- [ ] PR-15: Companion memory layered assembly integration
-  - [ ] wire L2 -> L1 -> L0 budgeted context composition
-  - [ ] blend turn refs + companion summaries deterministically
-  - [ ] validate referenceability of whole turns and partial slices in assembled context
 - [ ] PR-16: v1 decommission readiness gates
   - [ ] expand shadow parity past `ask` to `spawn/run/list/kill`
   - [ ] define sustained parity window + incident-free thresholds
@@ -157,6 +157,20 @@ Subagent Review
   - scope: `PR-14 hierarchical context builder slice` (`internal/v2/core/run/turn_record.go`, `internal/v2/adapters/libsql/turns/{schema,store,store_test}.go`, `internal/v2/runtime/contextbuilder/{builder,builder_test}.go`)
   - findings: `none` (review output `overall=warn` was doc/check-status oriented; code-level findings list was empty)
   - decision: `approved-with-known-risks`
+- 2026-02-18: Completed PR-15 companion memory layered assembly integration.
+  - Added layered context API in `internal/v2/runtime/contextbuilder/layered.go`:
+    - `CompanionProvider` + `SetCompanionProvider`
+    - `BuildLayered` for deterministic `L2 -> L1 -> L0` assembly
+  - Layered output blends companion summaries with temporal turn buckets and stable refs.
+  - Added derived slice refs (`turn/{id}#msg:{msg_id}:0-{n}`) from recent turns so assembled context can reference both whole turns and partial slices.
+  - Added deterministic integration test in `internal/v2/runtime/contextbuilder/layered_test.go`.
+  - Validated with `go test ./internal/v2/runtime/contextbuilder` and `go test ./internal/v2/...`.
+- 2026-02-18:
+  Subagent Review
+  - reviewer: `019c72fe-9fcd-76e0-9550-e0a7700e4d41`
+  - scope: `PR-15 layered context slice` (`internal/v2/runtime/contextbuilder/{builder,layered,layered_test}.go`)
+  - findings: `none`
+  - decision: `approved`
 - 2026-02-18:
   Subagent Review
   - reviewer: `019c72be-2275-7aa2-bfd2-7904f4cbeafb`
