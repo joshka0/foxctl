@@ -721,5 +721,5 @@ These questions have been resolved:
 ## Related Documents
 
 - [Reactive Actor System](./reactive-actor-system.md) - Actor architecture
-- [Unified Session Lineage](./unified-session-lineage.md) - Session tracking
+- [Unified Session Lineage](../archive/designs/unified-session-lineage.md) - Session tracking
 - [Progressive Memory System](./progressive-memory-system.md) - Related design

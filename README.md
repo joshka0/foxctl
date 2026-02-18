@@ -131,12 +131,11 @@ agentctl/
 Agents are mailbox-driven workers. Spawn a profile, run it in the foreground, and ask questions through the mailbox interface.
 
 ```bash
-# Spawn a story-mode companion
+# Spawn a chat companion
 agentctl agent spawn \
+  --chat \
   --name "Stormscribe" \
   --slug "stormscribe" \
-  --role companion \
-  --exec-mode story \
   --llm-provider openrouter \
   --llm-model "z-ai/glm-4.7-flash"
 
@@ -449,6 +448,7 @@ Always use `make build-cgo` which includes `-tags=libsqlite3`.
 | Document | Description |
 |----------|-------------|
 | [AGENTS.md](AGENTS.md) | AI assistant contribution guide |
+| [docs/README.md](docs/README.md) | Canonical documentation map |
 | [.claude/CLAUDE.md](.claude/CLAUDE.md) | Claude Code integration reference |
 | [docs/spec/](docs/spec/) | Technical specifications |
 | [docs/observability/](docs/observability/) | Wide events documentation |
@@ -465,6 +465,6 @@ Apache License 2.0
 
 **agentctl** — Infrastructure for AI coding assistants
 
-[Documentation](docs/) • [Contributing](AGENTS.md) • [Specifications](docs/spec/)
+[Documentation](docs/README.md) • [Contributing](AGENTS.md) • [Specifications](docs/spec/)
 
 </div>

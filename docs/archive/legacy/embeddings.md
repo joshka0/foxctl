@@ -189,4 +189,4 @@ Uses Voyage `rerank-2.5` to reorder results by relevance after initial vector se
 
 - [Vector Search Implementation](./vector-search.md) - Low-level vector storage details
 - [Vector Search Notes](./vector-search-implementation-notes.md) - SQLite vector evaluation
-- [Semantic Search Design](./designs/unified_semantic_search.md) - Architecture design
+- [Semantic Search Design](../../designs/unified_semantic_search.md) - Architecture design

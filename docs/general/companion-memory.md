@@ -40,7 +40,7 @@ The companion memory system provides progressive context decay for long-form con
 
 ```bash
 # Quick spawn with chat defaults
-agentctl agent spawn --name "Luna" --chat --system-prompt @prompt.txt
+agentctl agent spawn --name "Luna" --chat --prompt-file prompt.txt
 
 # Explicit configuration
 agentctl agent spawn \

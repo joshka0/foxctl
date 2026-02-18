@@ -615,5 +615,5 @@ These questions have been resolved:
 ## Related Documents
 
 - [Actor Progressive Memory](./actor-progressive-memory.md) - Context management
-- [Unified Session Lineage](./unified-session-lineage.md) - Session tracking
-- [DSPy-Go Agents Spec](../spec/dspy_go_agents.md) - Agent implementation
+- [Unified Session Lineage](../archive/designs/unified-session-lineage.md) - Session tracking
+- [DSPy-Go Agents Spec](../archive/specs/dspy_go_agents.md) - Agent implementation

@@ -221,6 +221,6 @@ app.use(Sentry.Handlers.errorHandler());
 
 **Related Files:**
 
-- [SKILL.md](SKILL.md)
+- [SKILL.md](../SKILL.md)
 - [routing-and-controllers.md](routing-and-controllers.md)
 - [async-and-errors.md](async-and-errors.md)

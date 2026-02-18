@@ -10,11 +10,14 @@ contributors
 | Resource                                           | Purpose                                          |
 | -------------------------------------------------- | ------------------------------------------------ |
 | [README.md](README.md)                             | Overview, quick start                            |
+| [docs/README.md](docs/README.md)                   | Canonical documentation map                      |
+| [docs/DOC_LIFECYCLE.md](docs/DOC_LIFECYCLE.md)     | Documentation lifecycle policy                   |
+| [docs/start/README.md](docs/start/README.md)       | Fast orientation guides                          |
 | [.claude/CLAUDE.md](.claude/CLAUDE.md)             | Claude Code hooks, commands, environment         |
 | [docs/general/](docs/general/)                     | Detailed documentation                           |
 | [docs/architecture/](docs/architecture/)           | Current architecture overviews (runtime + storage + adapters) |
 | [docs/general/gotchas.md](docs/general/gotchas.md) | Common pitfalls                                  |
-| [docs/codemaps/](docs/codemaps/)                   | Codemap documentation (**GREAT PLACE TO START**) |
+| [docs/codemaps/](docs/codemaps/)                   | Generated codemap artifacts and notes            |
 | [docs/kubernetes.md](docs/kubernetes.md)           | Kubernetes deployment guide                      |
 | [deploy/kubernetes/](deploy/kubernetes/)           | Kubernetes manifests and overlays                |
 | [docs/spec/agent_hierarchy.md](docs/spec/agent_hierarchy.md) | Subagent hierarchy and spawn protocol   |
@@ -47,18 +50,42 @@ contributors
 ## TL;DR
 
 1. **Start with a tree** — `agentctl run code/semantic_search --input '{"query": "your task", "format": "tree"}'`
-2. **Build the repo graph** — `agentctl index repo build --dry-run --workspace . --go --typescript --elixir` *(use `--go=false` for non-Go repos)* (then rerun without `--dry-run`) for call/ref navigation
+2. **Build the repo graph** — `agentctl index repo build --workspace . --go --typescript --elixir` *(use `--go=false` for non-Go repos)* for call/ref navigation
 3. **Envelope contract is sacred** — never change `meta.*` fields without spec
    updates (downstream tooling relies on stable envelope shape; breaking it breaks hooks, GUIs, and golden tests)
 4. **WASI = `network:"none"`** — Core v1 mandates isolation
 5. **Large outputs → CAS** — use `data.summary` + `data.artifact`
 6. **Check gotchas first** — read
    [docs/general/gotchas.md](docs/general/gotchas.md)
-7. **`--dry-run` required** for state-changing commands (writes to DB, modifies workspace, creates CAS artifacts, spawns agents, edits tasks), except `agentctl todo` commands that do not support `--dry-run` (for example `agentctl todo add` or `agentctl todo complete`)
-8. **Task titles** — generate based on current work; do not require user-provided titles
-9. **Native tools** — prefer agentctl skills, but if a skill is unavailable or makes completion harder, fall back to native tools
-10. **Subagent-aware planning** — before requesting agent splits, verify current spawning rules in [docs/spec/agent_hierarchy.md](docs/spec/agent_hierarchy.md) (depth constraints, actor roles, rejection paths).
-11. **Terminology coaching** — when the user asks something technical but uses imprecise language, provide the correct terminology in parentheses as a mini-lesson (e.g., "Fixed. Added scrolling *(in CSS terms: `overflow-y: auto` to handle content overflow)*")
+7. **Task titles** — generate based on current work; do not require user-provided titles
+8. **Native tools** — prefer agentctl skills, but if a skill is unavailable or makes completion harder, fall back to native tools
+9. **Subagent-aware planning** — before requesting agent splits, verify current spawning rules in [docs/spec/agent_hierarchy.md](docs/spec/agent_hierarchy.md) (depth constraints, actor roles, rejection paths).
+10. **Terminology coaching** — when the user asks something technical but uses imprecise language, provide the correct terminology in parentheses as a mini-lesson (e.g., "Fixed. Added scrolling *(in CSS terms: `overflow-y: auto` to handle content overflow)*")
+11. **Docs link hygiene** — run `make check-doc-links` for markdown/doc updates; CI enforces this via `.github/workflows/docs.yml`
+12. **Go-native runtime rules (v2)** — prefer `Run(ctx)` components, bounded channels, single-writer state ownership, and immutable snapshots for high-read paths
+
+## Machine-Readable Decision Matrix
+
+Use this table as the deterministic execution contract.
+
+| Condition | Required action | Verification |
+|-----------|------------------|--------------|
+| Exploring unfamiliar code | Run semantic tree and (when needed) repo graph index before deep edits | `agentctl run code/semantic_search --input '{"format":"tree"}'` and relevant `agentctl index repo ...` command succeeds |
+| Any state-changing command (DB writes, workspace edits, CAS writes, agent spawn, task edits) | Prefer feature-flagged rollout + idempotency keys + append-only writes for safety | Rollout can be scoped/rolled back and repeated requests are safe |
+| Editing envelope/protocol behavior | Preserve `version/status/command/data/meta/error` shape; do not change `meta.*` without spec update | Existing envelope tests or golden files still pass |
+| WASI skill manifest or runtime change | Keep `capabilities.network: "none"` | Manifest validation (`ValidateWASIPolicy`) continues to pass |
+| Large output result (>64KB or blob-like) | Persist to CAS and return `data.summary` + `data.artifact` pointer | Output envelope contains artifact digest instead of large inline payload |
+| Documentation changed (`*.md`) | Run doc link checker | `make check-doc-links` passes |
+| User asks for terminology clarification | Include corrected term in parentheses with the fix | Response includes concise term mapping |
+| Skill unavailable or unsuitable | Fall back to native tools and continue | Completion does not block on missing skill |
+
+## Preflight Checklist (Before Final Output)
+
+1. Confirm mutating operations are protected by feature flags, idempotency, or equivalent rollback-safe controls.
+2. Confirm protocol/envelope invariants were not broken by changes.
+3. Confirm WASI/network and path policy constraints still hold for modified skills.
+4. Confirm docs links are valid when markdown changed (`make check-doc-links`).
+5. Confirm summaries/references point to canonical docs under `docs/architecture/*` and `docs/general/*`.
 
 ## Agent Orchestration
 
@@ -83,18 +110,17 @@ contributors
 |------|----------|
 | `reactive` (default) | Waits for mailbox messages, responds to each |
 | `autonomous` | Runs initial prompt + continuation turns, then exits |
-| `autonomous_reactive` | Runs autonomous turns, then stays alive for mailbox messages |
-| `proactive` | Stays alive with periodic think cycles + message polling |
+| `proactive` | Runs autonomous turns and stays alive with periodic think cycles + message polling |
 
 ### Spawn Examples
 
 ```bash
-# Research agent — autonomous research, then queryable via ask
+# Research agent — autonomous turns + stays available for asks
 agentctl agent spawn --role researcher \
   --prompt "Research the hook system architecture" \
-  --exec-mode autonomous_reactive \
+  --exec-mode proactive \
   --llm-provider openrouter --llm-model openrouter/aurora-alpha \
-  --max-auto-turns 3 --max-iterations 20
+  --max-auto-turns 3 --max-iterations 20 --think-interval 60
 
 # Wait for research, then query findings
 agentctl agent ask <id> --question "What did you find?" --wait --timeout 120s
@@ -113,7 +139,7 @@ agentctl agent spawn --role coder --prompt "Help with Go code"
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--role` | - | `overseer`, `researcher`, `coder`, `planner`, `reviewer` |
-| `--exec-mode` | `reactive` | `reactive`, `autonomous`, `autonomous_reactive`, `proactive` |
+| `--exec-mode` | `reactive` | `reactive`, `autonomous`, `proactive` |
 | `--llm-provider` | auto-detect | `openrouter`, `cerebras`, `groq`, `openai`, `anthropic` |
 | `--llm-model` | provider default | Model name (e.g., `openrouter/aurora-alpha`) |
 | `--max-iterations` | 10 | Max tool calls per engine run |
@@ -131,7 +157,7 @@ agentctl agent spawn --role coder --prompt "Help with Go code"
 
 ### Conversation Memory
 
-Agents maintain conversation history across engine `Run()` calls. When an `autonomous_reactive` agent:
+Agents maintain conversation history across engine `Run()` calls. When a `proactive` agent:
 1. Runs initial prompt → researches via tool calls
 2. Runs autonomous continuation turns → finds more
 3. Receives a mailbox `ask` → **responds with full context from prior research**
@@ -152,19 +178,20 @@ Auto-detection order (first available key wins): openrouter → cerebras → gro
 
 Default models: `openrouter/aurora-alpha` (free), context updater uses `qwen/qwen3-coder-next`.
 
-### Retrieving Agent Output
+### Inspecting Agent State and Replies
 
-After an agent completes, retrieve its research output:
+Use these commands to inspect progress and retrieve responses:
 
 ```bash
-# By agent ID
-agentctl agent output 01KHGYRWC98M3YP551FPKZ5379
+# View agent metadata/status
+agentctl agent info <agent-id>
 
-# By agent name
-agentctl agent output brave-dawn
+# Stream live events
+agentctl agent watch <agent-id>
+
+# Ask a follow-up and wait for the reply
+agentctl agent ask <agent-id> --question "What did you find?" --wait
 ```
-
-Returns `agent_id`, `agent_name`, `session_id`, `status`, and `summary` (the agent's most substantive response).
 
 ### Researcher Workflow
 
@@ -276,9 +303,8 @@ agentctl run code/semantic_search --input '{"query": "storage memory", "format":
 Use repoindex when you need relationships (calls, references, imports):
 
 ```bash
-# Build the repo graph index (dry-run first; this writes to the repoindex DB).
+# Build the repo graph index.
 # For TS/Elixir-only repos, add `--go=false` (otherwise Go indexing may fail).
-agentctl index repo build --dry-run --workspace . --go --typescript --elixir
 agentctl index repo build --workspace . --go --typescript --elixir
 
 agentctl index repo search --workspace . --query "repoindex" --limit 10
@@ -379,10 +405,13 @@ These principles keep agentctl **safe, deterministic, and testable**.
 | --------------------- | ------------------------------------------------------------ | ----------------------------------------------- |
 | **Functional Core**   | Business logic = pure functions (no IO, env, clock, globals) | Unit tests stay fast; behavior is deterministic |
 | **Imperative Shell**  | IO + wiring in thin shell only                               | Isolates effects; skills can swap runtimes      |
-| **Plan/Apply**        | State changes split into `Plan() → Apply()`                  | Enables `--dry-run`; safer refactors            |
+| **Plan/Apply**        | State changes split into `Plan() → Apply()`                  | Enables previews and safer refactors            |
 | **Explicit Deps**     | Inject clock/UUID/config as parameters                       | Reproducible tests; stable golden files         |
 | **Boundary Parsing**  | Validate envelopes at edge; domain types inside              | No stringly-typed bugs in core                  |
 | **Context Threading** | `context.Context` through all calls                          | Clean cancellation; timeout safety              |
+| **Component Lifecycle** | Long-lived services expose `Run(ctx context.Context) error` | Predictable startup/shutdown, testable loops    |
+| **Bounded Concurrency** | Async queues are bounded with explicit backpressure policy  | Prevents runaway memory and hidden deadlocks    |
+| **Snapshot Reads** | Hot read paths use immutable snapshots (`atomic.Value`/`atomic.Pointer`) | Low contention and deterministic read behavior  |
 
 ### Preferred Shape
 
@@ -439,7 +468,6 @@ make check       # All of the above
 | Changing `meta.*` or envelope fields                            | Wire contract break          |
 | `network:` not `"none"` in WASI manifest                        | Core v1 isolation            |
 | Non-JSON stdout from CLI/skills                                 | Envelopes-only forever       |
-| Missing `--dry-run` on state-changing cmd                       | Safety valve                 |
 | CGO build without `-tags=libsqlite3`                            | Duplicate SQLite symbols     |
 | IO mixed into core logic (time.Now, env reads, DB in pure func) | Untestable; nondeterministic |
 
@@ -455,6 +483,8 @@ These aren't auto-reject but should be called out:
 | Non-deterministic output ordering                      | Flaky golden tests; sort before emit      |
 | Unbounded goroutines / missing `ctx` cancellation      | Resource leaks; hang on shutdown          |
 | Giant in-memory buffers when CAS exists                | OOM risk; stream to CAS                   |
+| Unbounded channels or no backpressure policy           | Hidden queue growth and latency collapse  |
+| Shared mutable maps with no single owner goroutine     | Races and non-deterministic behavior      |
 
 ---
 
@@ -677,8 +707,8 @@ I/O: JSON envelopes (version: 1)
 | Multi-Agent  | [docs/spec/v1/agent_profile_v1.md](docs/spec/v1/agent_profile_v1.md) |
 | Deployment   | [docs/kubernetes.md](docs/kubernetes.md)                    |
 | Deployment Manifests | [deploy/kubernetes/](deploy/kubernetes/)              |
-| Chat Adapter | [docs/plans/chat-platform-adapter.md](docs/plans/chat-platform-adapter.md) |
-| Postgres     | [docs/plans/k8s-sql-storage.md](docs/plans/k8s-sql-storage.md) |
+| Chat Adapter | [docs/architecture/chat-platform-adapter.md](docs/architecture/chat-platform-adapter.md) |
+| Postgres     | [docs/architecture/postgres-storage.md](docs/architecture/postgres-storage.md) |
 
 ---
 

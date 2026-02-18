@@ -1,346 +1,105 @@
 # Sessions
 
-Session management for context preservation across compaction boundaries.
+Machine-friendly reference for session lifecycle, lineage, and retrieval.
 
----
+## Metadata
 
-## Overview
+| Field | Value |
+|------|-------|
+| Status | Current |
+| Canonical packages | `internal/storage/sessions`, `cmd/agentctl/cmd/sessions.go`, `skills/session_restore`, `skills/session_summarize`, `skills/session_recall`, `internal/sessionkit` |
+| Last reviewed | 2026-02-17 |
 
-```mermaid
-flowchart TD
-    subgraph Session["Session Lifecycle"]
-        START[Session Start]
-        WORK[Working]
-        COMPACT[Compaction]
-        RESUME[Resume]
-        END[Session End]
-    end
+## Scope
 
-    subgraph Windows["Context Windows"]
-        W1[Window 1]
-        W2[Window 2]
-        W3[Window 3]
-    end
+Sessions capture agent/user interaction history, lineage edges, context windows, chunk summaries, and restore metadata for continuity across compaction and resume.
 
-    subgraph Learnings["Extracted Learnings"]
-        L1[Gotchas]
-        L2[Decisions]
-        L3[Patterns]
-    end
+## CLI Surfaces (`agentctl sessions`)
 
-    START --> WORK
-    WORK --> COMPACT
-    COMPACT --> W1
-    COMPACT --> W2
-    WORK --> END
+| Command | Purpose |
+|--------|---------|
+| `list`, `show`, `search`, `stats` | Inspect stored sessions |
+| `capture`, `import`, `summarize`, `windows`, `export` | Capture and process session data |
+| `new`, `resume`, `fork`, `chain`, `close` | Manage active lineage and session state |
 
-    RESUME --> WORK
-    W1 --> L1
-    W2 --> L2
-    W3 --> L3
-```
+Notable contract details:
 
----
+- `sessions chain` requires `--session <id>`.
+- `sessions close` status must be one of `ok`, `error`, `canceled`.
 
-## Session Lineage
+## Skill Contracts
 
-Sessions track their ancestry for context chain:
+| Skill | Role |
+|------|------|
+| `session/restore` | Rebuild context after resume/compaction triggers |
+| `session/summarize` | Generate window/session summaries and extracted learnings |
+| `session/recall` | Retrieve historical sessions and related context |
 
-```mermaid
-flowchart LR
-    S1[Session 1<br/>parent: null]
-    S2[Session 2<br/>parent: S1]
-    S3[Session 3<br/>parent: S2]
-    S4[Session 4<br/>parent: S1]
+## Identity Resolution
 
-    S1 --> S2
-    S2 --> S3
-    S1 --> S4
-```
+Session id fallback chain (from `internal/sessionkit/identity.go`):
 
-```bash
-# View session chain
-agentctl sessions chain
+1. Explicit id input
+2. `AGENTCTL_SESSION_ID`
+3. `CLAUDE_SESSION_ID`
+4. `OPENCODE_SESSION_ID`
+5. `CURSOR_SESSION_ID`
+6. Identity file under `~/.agentctl/sessions/active/<workspace_hash>-<agent>.json`
+7. `TERM_SESSION_ID` (last resort)
 
-# Output:
-# Session 3 (current)
-#   └── Session 2
-#       └── Session 1 (root)
-```
+## Storage Contract
 
----
+Source of truth: `internal/storage/sessions/store.go`.
 
-## Context Windows
+| Table | Purpose |
+|------|---------|
+| `sessions` | Session header, lineage pointers, agent/LLM context, status |
+| `session_turns` | Per-turn previews, tool/error metadata |
+| `session_chunks` | Chunked archive metadata + optional embeddings |
+| `session_chunk_summaries` | Persisted chunk-window summaries |
+| `session_context_windows` | Compaction window tracking with token/chunk bounds |
+| `session_edges` | Explicit lineage edges (`continues`, `forked_from`, related) |
+| `embedding_metadata` | Embedding model/dimension metadata for session vectors |
 
-Each compaction creates a new context window within a session:
+## Lifecycle (Condensed)
 
-| Field | Description |
-|-------|-------------|
-| `session_id` | Parent session |
-| `window_number` | Sequential within session |
-| `chunk_count` | Number of message chunks |
-| `raw_jsonl_path` | Path to captured JSONL |
-| `summary` | LLM-generated summary |
+1. Create or resume active session (`new`/`resume`/`fork`).
+2. Persist turns/chunks/edges as work progresses.
+3. Summarize on compaction boundaries (`session/summarize`).
+4. Set `pending_restore_at` for post-compact restore workflows.
+5. Restore and continue with `session/restore` on next start.
+6. Close with terminal status (`ok`/`error`/`canceled`).
 
----
-
-## Session Skills
-
-### session/restore
-
-Restore context when resuming or after compaction:
+## Operational Examples
 
 ```bash
-agentctl run session/restore --input '{"session_id": "..."}'
+agentctl sessions list --limit 20
+agentctl sessions chain --session <session-id> --depth 10
+agentctl sessions close --status ok
+agentctl run session/restore --input '{"session_id":"<id>","trigger":"session_start"}'
+agentctl run session/recall --input '{"query":"oauth callback failure","limit":10}'
 ```
 
-Returns:
-- Recent session context
-- Relevant past windows (via vector search)
-- Active anchor goal
-- Pending tasks
+## Invariants
 
-### session/summarize
+| Invariant | Why it matters |
+|----------|----------------|
+| Lineage uses explicit parent links + edges | Enables deterministic ancestry and graph-based analysis |
+| Workspace-aware active identity files | Supports recovery when env vars are absent |
+| Session status transitions are explicit | Prevents ambiguous closed/active state |
+| Context windows/chunk summaries are persisted | Improves post-compaction continuity and recall |
 
-Extract learnings from session windows:
+## Failure Modes
 
-```bash
-agentctl run session/summarize --input '{"session_id": "..."}'
-```
+| Symptom | Likely cause |
+|--------|---------------|
+| `--session is required` on chain | Missing required chain selector |
+| Resume cannot find active session | Workspace/agent mismatch or closed status |
+| Weak recall quality | Missing/stale summaries or embeddings |
 
-Extracts:
-- Gotchas discovered
-- Decisions made
-- Patterns identified
-- Technical learnings
+## Related Docs
 
-### session/recall
-
-Search past sessions:
-
-```bash
-# Semantic search
-agentctl run session/recall --input '{"query": "authentication bug"}'
-
-# Date-based search
-agentctl run session/recall --input '{"query": "January debugging sessions"}'
-agentctl run session/recall --input '{"query": "last week feature implementation"}'
-agentctl run session/recall --input '{"query": "recent refactoring work"}'
-
-# Activity-based search
-agentctl run session/recall --input '{"query": "bug-fix sessions"}'
-agentctl run session/recall --input '{"query": "code review sessions"}'
-```
-
-**Temporal patterns:** Sessions are indexed with `[Jan 2, 2026] [debugging]` prefixes for date-aware search.
-
----
-
-## Session Hooks
-
-| Hook | Event | Purpose |
-|------|-------|---------|
-| `session-restore` | SessionStart | Restore context on resume |
-| `session-save` | PreCompact | Capture session state |
-| `session-summarize` | PreCompact | Extract learnings via LLM |
-
-### Hook Flow
-
-```mermaid
-sequenceDiagram
-    participant CC as Claude Code
-    participant Save as session-save
-    participant Sum as session-summarize
-    participant Restore as session-restore
-
-    Note over CC: Compaction triggered
-    CC->>Save: PreCompact
-    Save->>Save: Capture JSONL
-    CC->>Sum: PreCompact
-    Sum->>Sum: LLM extraction
-    Sum->>Sum: Store learnings
-
-    Note over CC: Session resume
-    CC->>Restore: SessionStart
-    Restore->>Restore: Load context
-    Restore-->>CC: Inject context
-```
-
----
-
-## Identity Fallback
-
-For hooks without environment access, a fallback file stores session identity:
-
-```
-~/.agentctl/sessions/active/<workspace_hash>.json
-```
-
-```json
-{
-  "session_id": "abc123",
-  "agent_id": "claude",
-  "parent_session_id": "xyz789",
-  "workspace": "/path/to/project"
-}
-```
-
----
-
-## Environment Variables
-
-Skills receive session context via environment:
-
-| Variable | Description |
-|----------|-------------|
-| `AGENTCTL_SESSION_ID` | Current session ID |
-| `AGENTCTL_AGENT_ID` | Agent identifier |
-| `CLAUDE_SESSION_ID` | Claude Code session ID |
-
-Fallback chain:
-1. `AGENTCTL_SESSION_ID`
-2. `CLAUDE_SESSION_ID`
-3. `OPENCODE_SESSION_ID`
-4. `CURSOR_SESSION_ID`
-5. `TERM_SESSION_ID`
-
----
-
-## Anchor Goals
-
-Sessions can have an anchor goal that persists across compaction:
-
-```bash
-# Set anchor (in Claude Code chat)
-/anchor Fix the authentication timeout bug
-
-# Anchor is restored on resume via session/restore
-```
-
----
-
-## Storage Schema
-
-Sessions stored in `~/.agentctl/storage/sessions.db`:
-
-```sql
-CREATE TABLE sessions (
-    id TEXT PRIMARY KEY,
-    workspace_path TEXT,
-    project_name TEXT,
-    git_branch TEXT,
-    claude_version TEXT,
-    started_at DATETIME,
-    ended_at DATETIME,
-    summary TEXT,
-    accomplished TEXT,           -- JSON array
-    decisions TEXT,              -- JSON array
-    gotchas TEXT,                -- JSON array
-    user_insights TEXT,          -- JSON array
-    key_questions TEXT,          -- JSON array (semantic search queries)
-    tags TEXT,                   -- JSON array
-    key_files TEXT,              -- JSON array
-    tools_pattern TEXT,
-    message_count INTEGER,
-    user_turns INTEGER,
-    tool_invocations INTEGER,
-    total_tokens INTEGER,
-    raw_jsonl_path TEXT,
-    content_hash TEXT,
-    embedding BLOB,
-    embedding_model TEXT,
-    created_at DATETIME,
-    updated_at DATETIME,
-    -- Lineage fields
-    parent_session_id TEXT,
-    agent_id TEXT,               -- AI agent identifier (default: "agentctl")
-    agent_type TEXT,             -- Source system (claude, codex, opencode)
-    status TEXT,                 -- running, ok, error, canceled
-    -- Agent execution context (new in session persistence)
-    prompt TEXT,                 -- Original prompt/task for agent sessions
-    prompt_hash TEXT,            -- SHA256 hash for correlation with wide events
-    llm_provider TEXT,           -- LLM provider (cerebras, openrouter, etc.)
-    llm_model TEXT,              -- Model name
-    -- Restore flag
-    pending_restore_at DATETIME,
-    FOREIGN KEY (parent_session_id) REFERENCES sessions(id)
-);
-
-CREATE TABLE session_turns (
-    id TEXT PRIMARY KEY,
-    session_id TEXT NOT NULL,
-    turn_index INTEGER NOT NULL,
-    role TEXT NOT NULL,          -- user, assistant, system
-    content_preview TEXT,        -- First 500 chars
-    content_cas_digest TEXT,     -- CAS digest for full content
-    tool_calls TEXT,             -- JSON array of tool calls
-    tokens_used INTEGER,
-    created_at DATETIME,
-    FOREIGN KEY (session_id) REFERENCES sessions(id)
-);
-
-CREATE TABLE context_windows (
-    id TEXT PRIMARY KEY,
-    session_id TEXT NOT NULL,
-    window_number INTEGER NOT NULL,
-    chunk_count INTEGER,
-    raw_jsonl_path TEXT,
-    summary TEXT,
-    created_at DATETIME,
-    FOREIGN KEY (session_id) REFERENCES sessions(id)
-);
-
-CREATE TABLE session_edges (
-    id TEXT PRIMARY KEY,
-    from_session TEXT NOT NULL,
-    to_session TEXT NOT NULL,
-    edge_type TEXT NOT NULL,     -- continues, forked_from
-    created_at DATETIME,
-    FOREIGN KEY (from_session) REFERENCES sessions(id),
-    FOREIGN KEY (to_session) REFERENCES sessions(id)
-);
-```
-
-### Agent Execution Context Fields
-
-For daemon agent sessions, additional fields track execution context:
-
-| Field | Description |
-|-------|-------------|
-| `prompt` | Original prompt/task given to the agent |
-| `prompt_hash` | SHA256 hash of prompt for correlation with wide events |
-| `llm_provider` | LLM provider used (cerebras, openrouter, anthropic, etc.) |
-| `llm_model` | Specific model name |
-
-### Turn Persistence
-
-Agent sessions persist each turn to `session_turns` with:
-- `content_preview` - First 500 chars for quick display
-- `content_cas_digest` - CAS reference to full content
-- `tool_calls` - JSON array of tool invocations
-- `tokens_used` - Token count for context budget tracking
-
----
-
-## Gotchas
-
-### Session Archives are Gzipped
-Session JSONL files are archived as `.jsonl.gz`. Skills reading
-`session.RawJSONLPath` must handle gzip:
-
-```go
-if strings.HasSuffix(path, ".gz") {
-    gzReader, err := gzip.NewReader(file)
-    // ...
-}
-```
-
-### Session Learnings are Idempotent
-`session/summarize` uses content-hash naming and checks for existing
-embeddings before re-processing. Safe to run multiple times.
-
-### Context Window vs Session Summaries
-Summaries are at the **context window** level, not session level.
-A session may have multiple windows, each with its own summary.
-
-See [gotchas.md](gotchas.md) for more common pitfalls.
+- [docs/general/storage.md](storage.md)
+- [docs/general/memory.md](memory.md)
+- [docs/general/search.md](search.md)
+- [docs/general/hooks.md](hooks.md)

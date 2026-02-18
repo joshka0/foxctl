@@ -475,10 +475,11 @@ agentctl run http/openapi \
 More plugin examples available at:
 - `plugins/auth-hmac/` - HMAC authentication
 - `plugins/paging-custom/` - Custom pagination
-- `docs/spec/openapi_skill.md` - Full plugin protocol spec
+- `docs/spec/v1/plugin_protocol.md` - Full plugin protocol spec
 
 ## Reference
 
-- [OpenAPI Skill Specification](openapi_skill.md) - Section 11: Plugin Protocol
+- [OpenAPI Skill Specification](spec/openapi_skill.md) - Skill behavior and plugin integration
+- [Plugin Protocol](spec/v1/plugin_protocol.md) - Plugin wire contract
 - [Plugin Manager Source](../internal/openapi/plugin/manager.go)
 - [Example Plugins](../plugins/)

@@ -4,7 +4,7 @@ You already have the right primitives in agentctl:
   (`task_id`, `workspace_id`, `scope_path`, `DependsOn`).
 - **Hooks:** `hooks/task_guard` and `hooks/knowledge_router` with a clean
   `hook.Input`/`Output` contract.
-- **Memory spec:** [task_hooks_memory.md](./task_hooks_memory.md) describes
+- **Memory spec:** [task_hooks_memory.md](../../spec/task_hooks_memory.md) describes
   task-aware memory entries and a future `hooks/context_inject`.
 - **Mail/blackboard:** same spec has a “Mailbox (Inter-Agent Messaging)”
   section.

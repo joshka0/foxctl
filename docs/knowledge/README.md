@@ -229,7 +229,7 @@ Claude should:
 4. Verify integration
 ```
 
-See [CLAUDE_INTEGRATION_GUIDE.md](../../CLAUDE_INTEGRATION_GUIDE.md) for
+See [CLAUDE_INTEGRATION_GUIDE.md](../../.claude/CLAUDE.md) for
 complete instructions.
 
 ### Manual Integration
@@ -412,7 +412,7 @@ Update skill-rules.json:
 
 **When integrating a skill for a user:**
 
-1. **Read [CLAUDE_INTEGRATION_GUIDE.md](../../CLAUDE_INTEGRATION_GUIDE.md)**
+1. **Read [CLAUDE_INTEGRATION_GUIDE.md](../../.claude/CLAUDE.md)**
    first
 2. Ask about their project structure
 3. Customize `pathPatterns` in skill-rules.json
@@ -435,5 +435,5 @@ Update skill-rules.json:
 4. **Customize:** Adjust triggers based on your workflow
 
 **Questions?** See
-[CLAUDE_INTEGRATION_GUIDE.md](../../CLAUDE_INTEGRATION_GUIDE.md) for
+[CLAUDE_INTEGRATION_GUIDE.md](../../.claude/CLAUDE.md) for
 comprehensive integration instructions.

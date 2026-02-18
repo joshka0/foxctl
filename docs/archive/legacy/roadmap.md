@@ -104,10 +104,10 @@ Month 4 (Weeks 13–14): Integration testing, v1.0 release
 
 ## References
 
-- [`docs/spec/core_profile_v1.md`](spec/core_profile_v1.md) — Authoritative spec
-- [`docs/spec/openapi_skill.md`](spec/openapi_skill.md) — OpenAPI design
-- [`docs/impl_plan/`](impl_plan/) — Detailed implementation plans
-- [`AGENTS.md`](../AGENTS.md) — AI assistant conventions
+- [`docs/spec/core_profile_v1.md`](../../spec/core_profile_v1.md) — Authoritative spec
+- [`docs/spec/openapi_skill.md`](../../spec/openapi_skill.md) — OpenAPI design
+- [`docs/impl_plan/`](../../impl_plan/) — Detailed implementation plans
+- [`AGENTS.md`](../../../AGENTS.md) — AI assistant conventions
 
 ---
 

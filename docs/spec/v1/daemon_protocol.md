@@ -2,8 +2,8 @@
 
 **Status:** Draft\
 **Last Updated:** 2025-12-21\
-**Related:** `docs/agent_profile.md`, `docs/spec/mailbox_blackboard.md`,
-`docs/spec/core_profile_v1.md`
+**Related:** `agent_profile_v1.md`, `../mailbox_blackboard.md`,
+`core_profile_v1.md`
 
 ---
 

@@ -3,9 +3,11 @@
 **Status:** Draft\
 **Scope:** Canonical profile for the overseer in agentctl-based workspaces.\
 **Related specs:** [overseer_planning.md](./overseer_planning.md),
-[bd_mail_agent_interface.md](./bd_mail_agent_interface.md),
-`mailbox_blackboard.md`, `task_graph_insights.md`, `unified_agents.md`,
-`semantic_file_index.md`
+[../archive/specs/bd_mail_agent_interface.md](../archive/specs/bd_mail_agent_interface.md),
+[mailbox_blackboard.md](./mailbox_blackboard.md),
+[../archive/specs/task_graph_insights.md](../archive/specs/task_graph_insights.md),
+[../archive/specs/unified_agents.md](../archive/specs/unified_agents.md),
+[semantic_file_index.md](./semantic_file_index.md)
 
 ---
 
@@ -61,10 +63,10 @@ The overseer SHOULD have the following specs in its knowledge set for a
 workspace:
 
 - [overseer_planning.md](./overseer_planning.md)
-- [bd_mail_agent_interface.md](./bd_mail_agent_interface.md)
-- `docs/spec/mailbox_blackboard.md`
-- `docs/spec/task_graph_insights.md`
-- `docs/spec/unified_agents.md`
+- [../archive/specs/bd_mail_agent_interface.md](../archive/specs/bd_mail_agent_interface.md)
+- [mailbox_blackboard.md](./mailbox_blackboard.md)
+- [../archive/specs/task_graph_insights.md](../archive/specs/task_graph_insights.md)
+- [../archive/specs/unified_agents.md](../archive/specs/unified_agents.md)
 
 Installations MAY add workspace-specific specs, but the above form the core
 behavior contract.

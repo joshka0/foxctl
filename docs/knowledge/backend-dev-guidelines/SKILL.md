@@ -38,7 +38,7 @@ Automatically activates when working on:
 
 ### New Microservice Checklist
 
-- [ ] Directory structure (see [architecture-overview.md](architecture-overview.md))
+- [ ] Directory structure (see [architecture-overview.md](resources/architecture-overview.md))
 - [ ] instrument.ts for Sentry
 - [ ] unifiedConfig setup
 - [ ] BaseController class
@@ -68,7 +68,7 @@ Database (Prisma)
 
 **Key Principle:** Each layer has ONE responsibility.
 
-See [architecture-overview.md](architecture-overview.md) for complete details.
+See [architecture-overview.md](resources/architecture-overview.md) for complete details.
 
 ---
 
@@ -238,53 +238,53 @@ import { asyncErrorWrapper } from './middleware/errorBoundary';
 
 | Need to... | Read this |
 |------------|-----------|
-| Understand architecture | [architecture-overview.md](architecture-overview.md) |
-| Create routes/controllers | [routing-and-controllers.md](routing-and-controllers.md) |
-| Organize business logic | [services-and-repositories.md](services-and-repositories.md) |
-| Validate input | [validation-patterns.md](validation-patterns.md) |
-| Add error tracking | [sentry-and-monitoring.md](sentry-and-monitoring.md) |
-| Create middleware | [middleware-guide.md](middleware-guide.md) |
-| Database access | [database-patterns.md](database-patterns.md) |
-| Manage config | [configuration.md](configuration.md) |
-| Handle async/errors | [async-and-errors.md](async-and-errors.md) |
-| Write tests | [testing-guide.md](testing-guide.md) |
-| See examples | [complete-examples.md](complete-examples.md) |
+| Understand architecture | [architecture-overview.md](resources/architecture-overview.md) |
+| Create routes/controllers | [routing-and-controllers.md](resources/routing-and-controllers.md) |
+| Organize business logic | [services-and-repositories.md](resources/services-and-repositories.md) |
+| Validate input | [validation-patterns.md](resources/validation-patterns.md) |
+| Add error tracking | [sentry-and-monitoring.md](resources/sentry-and-monitoring.md) |
+| Create middleware | [middleware-guide.md](resources/middleware-guide.md) |
+| Database access | [database-patterns.md](resources/database-patterns.md) |
+| Manage config | [configuration.md](resources/configuration.md) |
+| Handle async/errors | [async-and-errors.md](resources/async-and-errors.md) |
+| Write tests | [testing-guide.md](resources/testing-guide.md) |
+| See examples | [complete-examples.md](resources/complete-examples.md) |
 
 ---
 
 ## Resource Files
 
-### [architecture-overview.md](architecture-overview.md)
+### [architecture-overview.md](resources/architecture-overview.md)
 Layered architecture, request lifecycle, separation of concerns
 
-### [routing-and-controllers.md](routing-and-controllers.md)
+### [routing-and-controllers.md](resources/routing-and-controllers.md)
 Route definitions, BaseController, error handling, examples
 
-### [services-and-repositories.md](services-and-repositories.md)
+### [services-and-repositories.md](resources/services-and-repositories.md)
 Service patterns, DI, repository pattern, caching
 
-### [validation-patterns.md](validation-patterns.md)
+### [validation-patterns.md](resources/validation-patterns.md)
 Zod schemas, validation, DTO pattern
 
-### [sentry-and-monitoring.md](sentry-and-monitoring.md)
+### [sentry-and-monitoring.md](resources/sentry-and-monitoring.md)
 Sentry init, error capture, performance monitoring
 
-### [middleware-guide.md](middleware-guide.md)
+### [middleware-guide.md](resources/middleware-guide.md)
 Auth, audit, error boundaries, AsyncLocalStorage
 
-### [database-patterns.md](database-patterns.md)
+### [database-patterns.md](resources/database-patterns.md)
 PrismaService, repositories, transactions, optimization
 
-### [configuration.md](configuration.md)
+### [configuration.md](resources/configuration.md)
 UnifiedConfig, environment configs, secrets
 
-### [async-and-errors.md](async-and-errors.md)
+### [async-and-errors.md](resources/async-and-errors.md)
 Async patterns, custom errors, asyncErrorWrapper
 
-### [testing-guide.md](testing-guide.md)
+### [testing-guide.md](resources/testing-guide.md)
 Unit/integration tests, mocking, coverage
 
-### [complete-examples.md](complete-examples.md)
+### [complete-examples.md](resources/complete-examples.md)
 Full examples, refactoring guide
 
 ---

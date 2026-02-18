@@ -549,6 +549,6 @@ Use it for thorough testing before deploying to Turso!
 ## Resources
 
 - [libSQL Documentation](https://github.com/tursodatabase/libsql)
-- [Turso Migration Guide](./turso-migration.md)
-- [Search Guide](./search-guide.md)
-- [Example Tests](../examples/search_example.go)
+- [Turso Migration Guide](./archive/legacy/turso-migration.md)
+- [Search Guide](./archive/legacy/search-guide.md)
+- [Example Tests](./examples/skills_chain.md)

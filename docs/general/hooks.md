@@ -1,244 +1,99 @@
 # Hooks
 
-Hooks inject context into AI coding sessions at tool boundaries.
+Machine-friendly reference for hook configuration, event dispatch, and action merging.
 
----
+## Metadata
 
-## Overview
+| Field | Value |
+|------|-------|
+| Status | Current |
+| Canonical packages | `internal/hooks/config.go`, `internal/hooks/types.go`, `internal/hooks/dispatcher.go`, `internal/hooks/merge.go`, `internal/hooks/registry.go` |
+| Last reviewed | 2026-02-17 |
 
-```mermaid
-flowchart TD
-    subgraph "Claude Code Events"
-        PRE[PreToolUse]
-        POST[PostToolUse]
-        SESS[SessionStart]
-        COMP[PreCompact]
-        STOP[Stop]
-        USR[UserPromptSubmit]
-    end
+## Configuration Contract
 
-    subgraph "Hook Scripts"
-        H1[semantic-search.sh]
-        H2[file-memory-recall.sh]
-        H3[session-restore.sh]
-        H4[todo-continuation.sh]
-    end
+| Item | Value |
+|-----|-------|
+| Workspace config path | `<workspace>/.agentctl/hooks.yaml` |
+| Global config path | `~/.agentctl/hooks.yaml` |
+| Merge behavior | Later file overrides earlier definitions by hook `id` |
+| Execution ordering | Enabled hooks sorted by ascending `priority` per event |
+| Default run timeout | `2000ms` per run entry |
+| Default failure mode | Fail-open (unless overridden per run entry) |
 
-    subgraph "agentctl Skills"
-        SK1[code/semantic_search]
-        SK2[memory/search]
-        SK3[session/restore]
-        SK4[todo/list]
-    end
+## Canonical Events (v1)
 
-    PRE --> H1
-    PRE --> H2
-    SESS --> H3
-    STOP --> H4
-    H1 --> SK1
-    H2 --> SK2
-    H3 --> SK3
-    H4 --> SK4
-```
+| Event |
+|------|
+| `SessionStart` |
+| `MessageReceived` |
+| `UserPromptSubmit` |
+| `LLMRequest` |
+| `LLMResponse` |
+| `PreToolUse` |
+| `PostToolUse` |
+| `StopRequested` |
+| `PostAgentTurn` |
+| `ContextBudgetExceeded` |
+| `SessionEnd` |
+| `SubagentStart` |
+| `SubagentStop` |
 
----
+## Hook Input/Output Contract
 
-## Hook Events
+### Input (`hooks.Input`)
 
-| Event | When Triggered | Use Case |
-|-------|----------------|----------|
-| `PreToolUse` | Before tool execution | Inject context, check conditions |
-| `PostToolUse` | After tool execution | Suggest follow-ups, capture data |
-| `SessionStart` | Session begins/resumes | Restore context |
-| `PreCompact` | Before context compaction | Save state |
-| `Stop` | User attempts to stop | Block if tasks remain |
-| `UserPromptSubmit` | User sends message | Detect patterns, suggest skills |
+Core fields include event identity, principal/workspace/session metadata, provider capabilities, tool metadata (`tool_name`, `tool_canonical`, `tool_kind`, input/observation), and optional hook-specific config.
 
----
+### Output (`hooks.Output`)
 
-## Active Hooks
+| Field | Purpose |
+|------|---------|
+| `decision` | `none`, `approve`, or `block` |
+| `reason` | Human-readable explanation (especially for block) |
+| `context` | Context to inject (if provider/event supports direct injection) |
+| `updated_tool_input` | Last-wins mutation for pre-tool execution |
+| `updated_assistant_text` | Last-wins mutation for post-turn text |
+| `actions[]` | Ordered structured actions (`run_skill`, `inject_context`, `enqueue_context`, `send_mailbox`, `bb_post`, `bb_claim`) |
+| `meta` | Debug/observability metadata |
 
-### PreToolUse Hooks
+## Merge Semantics (`internal/hooks/merge.go`)
 
-| Hook | Triggers On | Purpose |
-|------|-------------|---------|
-| `semantic-search` | Grep, Glob | Vector search for relevant code |
-| `file-memory-recall` | Edit, Write | Surface memories before editing |
-| `overseer-inbox` | Read, Bash, Grep, Glob, Task | Human-in-the-loop messages |
-| `task-guard` | Write, Edit | Ensure task exists for writes |
+| Rule | Behavior |
+|-----|----------|
+| Decision precedence | `block` > `approve` > `none` |
+| Reason selection | First non-empty reason for final decision class |
+| Tool input mutation | Last-wins |
+| Assistant text mutation | Last-wins |
+| Context | Concatenated in execution order (`\n\n`) |
+| Actions | Concatenated in execution order |
+| Meta | Shallow merge, last-wins by key |
 
-### PostToolUse Hooks
+## Provider/Event Capability Constraints
 
-| Hook | Triggers On | Purpose |
-|------|-------------|---------|
-| `read-context-suggestions` | Read | Suggest context_ripgrep for symbols |
-| `counsel-suggest` | Read (3+ files) | Suggest /counsel analysis |
-| `lsp-diagnostics` | Edit, Write | Show LSP errors after editing |
-| `memory-prompt` | TodoWrite | Prompt to save memories on completion |
+| Constraint | Effect |
+|-----------|--------|
+| `PreToolUse` cannot directly inject context | Use `enqueue_context` action for later drain |
+| Inject-capable events (`PostToolUse`, `UserPromptSubmit`, `SessionStart`) | Can apply immediate context injection |
+| Blocking support depends on provider capabilities | Dispatcher honors `decision:block` when supported |
 
-### Session Hooks
+## Dispatcher Flow
 
-| Hook | Event | Purpose |
-|------|-------|---------|
-| `session-restore` | SessionStart | Restore context on resume |
-| `session-save` | PreCompact | Capture session state |
-| `session-summarize` | PreCompact | Extract learnings via LLM |
+1. Select enabled hooks matching event.
+2. Evaluate matchers (`actor/tool/path/namespace/prompt`).
+3. Execute each run entry via registry runner (skill or shell) with timeout/fail mode.
+4. Collect outputs and merge deterministically.
+5. Emit observability metadata and return final merged output.
 
-### Control Hooks
+## Operational Notes
 
-| Hook | Event | Purpose |
-|------|-------|---------|
-| `todo-continuation` | Stop | Block stop if tasks remain |
-| `plan-sync` | Stop | Sync plans to tasks |
+- Skills are resolved via hook resolver/registry from installed skill paths.
+- Shell-based hooks are supported through shell runner.
+- Prefer structured action outputs over ad-hoc stdout text for reliable automation.
 
-### Detection Hooks
+## Related Docs
 
-| Hook | Event | Purpose |
-|------|-------|---------|
-| `memory-detector` | UserPromptSubmit | Detect save/recall patterns |
-| `skill-advisor` | UserPromptSubmit | Suggest skills based on prompt |
-| `anchor-detect` | UserPromptSubmit | Set session goal via `/anchor` |
-| `counsel-detect` | UserPromptSubmit | Run `/counsel` analysis |
-| `context-detect` | UserPromptSubmit | Run `/context` gathering |
-
----
-
-## Hook Configuration
-
-Hooks are configured in `.claude/settings.json`:
-
-```json
-{
-  "hooks": {
-    "PreToolUse": [
-      {
-        "matcher": "Grep|Glob",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "~/.agentctl/hooks/semantic-search.sh \"$TOOL_INPUT\""
-          }
-        ]
-      }
-    ],
-    "PostToolUse": [
-      {
-        "matcher": "Read",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "~/.agentctl/hooks/read-context-suggestions.sh \"$TOOL_INPUT\" \"$TOOL_OUTPUT\""
-          }
-        ]
-      }
-    ]
-  }
-}
-```
-
----
-
-## Hook Implementation
-
-### Basic Hook Script
-
-```bash
-#!/bin/bash
-# configs/hooks/my-hook.sh
-
-TOOL_INPUT="$1"
-TOOL_OUTPUT="${2:-}"
-
-# Parse input
-FILE_PATH=$(echo "$TOOL_INPUT" | jq -r '.file_path // empty')
-
-# Run skill
-RESULT=$(agentctl run my/skill --input "{\"path\": \"$FILE_PATH\"}" 2>/dev/null)
-
-# Output context injection (if any)
-if [ -n "$RESULT" ]; then
-    echo "---"
-    echo "**Context from my-hook:**"
-    echo "$RESULT" | jq -r '.data.summary // empty'
-fi
-```
-
-### Hook Output
-
-Hooks can output text that gets injected into the AI's context:
-
-- Return nothing for no injection
-- Return text for context injection
-- Use `---` separator for visual separation
-- Format as markdown for readability
-
----
-
-## Environment Variables
-
-Hooks receive these environment variables:
-
-| Variable | Description |
-|----------|-------------|
-| `TOOL_INPUT` | JSON input to the tool |
-| `TOOL_OUTPUT` | JSON output from tool (PostToolUse only) |
-| `TOOL_NAME` | Name of the tool being called |
-| `AGENTCTL_WORKSPACE` | Current workspace path |
-| `AGENTCTL_SESSION_ID` | Current session ID |
-
----
-
-## Human-in-the-Loop: Overseer Inbox
-
-Send messages to a running Claude session:
-
-```bash
-# Send a message
-agentctl-mail "Priority change" "Focus on auth bug first"
-
-# With priority
-agentctl-mail -p 1 "STOP" "Pause and review this issue"
-
-# Require acknowledgment
-agentctl-mail --ack "Review needed" "Check the API changes"
-```
-
-The `overseer-inbox` hook checks for unread messages on every tool call
-and injects them into Claude's context.
-
----
-
-## Slash Commands
-
-Hooks enable slash commands in Claude Code:
-
-| Command | Hook | Purpose |
-|---------|------|---------|
-| `/anchor <goal>` | `anchor-detect` | Set session goal |
-| `/todo` | - | Enable todo check-in mode |
-| `/counsel <question>` | `counsel-detect` | Multi-perspective analysis |
-| `/context <query>` | `context-detect` | Quick code context |
-
----
-
-## Gotchas
-
-### Hook Timeout
-Hooks have a timeout (default 30s). Long-running operations should:
-- Use background jobs
-- Cache results
-- Fail fast with partial results
-
-### Hook Blocking
-Hooks run synchronously. A slow hook blocks the AI:
-- Keep hooks fast (<1s ideal)
-- Use async patterns for heavy work
-- Consider caching
-
-### Context Size
-Hook output adds to context window:
-- Keep output concise
-- Use summaries, not full content
-- Truncate large results
-
-See [gotchas.md](gotchas.md) for more common pitfalls.
+- [docs/general/runtime-orchestration.md](runtime-orchestration.md)
+- [docs/general/context-and-observability.md](context-and-observability.md)
+- [docs/general/agent-policy-and-prompts.md](agent-policy-and-prompts.md)
+- [docs/spec/task_hooks_memory.md](../spec/task_hooks_memory.md)

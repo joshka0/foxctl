@@ -668,7 +668,7 @@ $env:CGO_ENABLED=0
 make build
 
 REM Or use Go directly
-go build -tags=CGO_ENABLED=0 ./cmd/agentctl
+go build ./cmd/agentctl
 ```
 
 ---
@@ -678,22 +678,22 @@ go build -tags=CGO_ENABLED=0 ./cmd/agentctl
 ### Self-Service Resources
 
 1. **Documentation**: [docs/](../) directory
-   - [Core Profile v1](../spec/core_profile_v1.md)
-   - [OpenAPI Skill Guide](../spec/openapi_skill.md)
-   - [AGENTS.md](../../AGENTS.md)
+   - [Core Profile v1](./spec/v1/core_profile_v1.md)
+   - [OpenAPI Skill Guide](./spec/openapi_skill.md)
+   - [AGENTS.md](../AGENTS.md)
 
-2. **Examples**: [docs/examples/](../examples/)
-   - [Minimum Workflow Skills](../examples/minimum_workflow_skills.md)
-   - [Skills Chain](../examples/skills_chain.md)
+2. **Examples**: [docs/examples/](./examples/)
+   - [Minimum Workflow Skills](./examples/minimum_workflow_skills.md)
+   - [Skills Chain](./examples/skills_chain.md)
 
-3. **Specs**: [docs/refactoring/](../refactoring/)
-   - Detailed implementation specs for each feature
+3. **Specs**: [docs/spec/](./spec/)
+   - Protocol and implementation behavior specs
 
 ### Community Support
 
 - **GitHub Issues**: [Report bugs](https://github.com/jkatigb/agentctl/issues)
 - **GitHub Discussions**: [Ask questions](https://github.com/jkatigb/agentctl/discussions)
-- **Contributing**: See [CONTRIBUTING.md](../../CONTRIBUTING.md)
+- **Contributing**: See [CONTRIBUTING.md](../CONTRIBUTING.md)
 
 ### Reporting Bugs
 
@@ -706,7 +706,7 @@ go version         # Go version
 agentctl version   # agentctl version
 
 # Reproduction
-agentctl run <skill> --args '...' 2>error.log
+agentctl run <skill> --input '{}' 2>error.log
 
 # Relevant logs (redact secrets!)
 cat error.log
@@ -830,13 +830,13 @@ See [GitHub Issues](https://github.com/jkatigb/agentctl/issues) for current know
 
 ## Additional Resources
 
-- **[Core Profile v1](../spec/core_profile_v1.md)** — Complete specification
-- **[ROADMAP_TO_V1.md](../../ROADMAP_TO_V1.md)** — Project roadmap
-- **[CONTRIBUTING.md](../../CONTRIBUTING.md)** — Development guide
+- **[Core Profile v1](./spec/v1/core_profile_v1.md)** — Complete specification
+- **[docs/roadmap.md](./roadmap.md)** — Roadmap pointer (current + historical)
+- **[CONTRIBUTING.md](../CONTRIBUTING.md)** — Development guide
 - **[SECURITY.md](SECURITY.md)** — Security policy
 
 ---
 
-**Last Updated**: November 2025
+**Last Updated**: February 2026
 
 If this guide didn't solve your problem, please [open an issue](https://github.com/jkatigb/agentctl/issues) with details!

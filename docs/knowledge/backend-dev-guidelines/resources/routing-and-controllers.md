@@ -784,7 +784,7 @@ export class ActionRepository {
 
 **Related Files:**
 
-- [SKILL.md](SKILL.md) - Main guide
+- [SKILL.md](../SKILL.md) - Main guide
 - [services-and-repositories.md](services-and-repositories.md) - Service layer
   details
 - [complete-examples.md](complete-examples.md) - Full refactoring examples

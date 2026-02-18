@@ -1473,5 +1473,5 @@ I'll remind you when it arrives. Alex is going to love this!
 
 - [Agent Profile v1 Spec](../spec/v1/agent_profile_v1.md)
 - [Daemon Protocol](../spec/v1/daemon_protocol.md)
-- [Companion Memory Docs](companion-memory.md)
+- [Companion Memory Docs](../general/companion-memory.md)
 - [x402 Protocol](https://www.x402.org/)

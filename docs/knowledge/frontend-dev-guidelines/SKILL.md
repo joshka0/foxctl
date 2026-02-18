@@ -63,7 +63,7 @@ Creating a feature? Set up this structure:
 | `~components` | `src/components` | `import { SuspenseLoader } from '~components/SuspenseLoader'` |
 | `~features` | `src/features` | `import { authApi } from '~features/auth'` |
 
-Defined in: [vite.config.ts](../../vite.config.ts) lines 180-185
+Defined in: [packages/gui-agent/vite.config.ts](../../../packages/gui-agent/vite.config.ts) lines 180-185
 
 ---
 

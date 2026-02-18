@@ -1,344 +1,67 @@
 # Skills
 
-Skills are discoverable tools that AI assistants can invoke through agentctl.
-
----
-
-## Overview
-
-```mermaid
-flowchart LR
-    subgraph Input
-        JSON[JSON Input]
-    end
-
-    subgraph Resolution
-        RES[Skill Resolver]
-        MAN[skill.yaml]
-    end
-
-    subgraph Execution
-        EXEC[Exec Runner]
-        WASI[WASI Runner]
-    end
-
-    subgraph Output
-        ENV[JSON Envelope]
-    end
-
-    JSON --> RES
-    RES --> MAN
-    MAN --> EXEC
-    MAN --> WASI
-    EXEC --> ENV
-    WASI --> ENV
-```
-
----
-
-## Skill Categories
-
-### Code Analysis
-
-| Skill | Description | Input |
-|-------|-------------|-------|
-| `code/symbols` | Extract functions, types, variables | `{"path": "file.go"}` |
-| `code/complexity` | Cyclomatic complexity analysis | `{"path": "."}` |
-| `code/imports` | Import/dependency analysis | `{"path": "file.go"}` |
-| `code/security` | Security vulnerability scan | `{"path": "."}` |
-| `code/git` | Git blame, hotspots | `{"path": "."}` |
-
-### Code Search
-
-| Skill | Description | Input |
-|-------|-------------|-------|
-| `code/semantic_search` | Vector-based code search | `{"query": "...", "limit": 10}` |
-| `code/smart_search` | Auto-candidate generation + extraction | `{"query": "..."}` |
-| `code/context_ripgrep` | Search with full function bodies | `{"pattern": "...", "path": "."}` |
-| `code/snippet_extract` | Extract code snippets from candidates | `{"candidates": [...]}` |
-
-### Code Editing
-
-| Skill | Description | Input |
-|-------|-------------|-------|
-| `code/smart_write` | Symbol-based editing with dry-run | `{"path": "...", "edits": [...]}` |
-
-### Testing
-
-| Skill | Description | Input |
-|-------|-------------|-------|
-| `test/run` | Run tests with coverage | `{"path": ".", "pattern": "..."}` |
-
-### LSP
-
-| Skill | Description | Input |
-|-------|-------------|-------|
-| `lsp/gopls` | Go LSP operations | `{"operation": "definition", "path": "...", "line": 10}` |
-
-### Mobile
-
-| Skill | Description | Input |
-|-------|-------------|-------|
-| `mobile/ios` | iOS Simulator automation | `{"action": "tap", "x": 100, "y": 200}` |
-| `mobile/android` | Android Emulator automation | `{"action": "screenshot"}` |
-
-### Sessions
-
-| Skill | Description | Input |
-|-------|-------------|-------|
-| `session/restore` | Restore context on resume | `{"session_id": "..."}` |
-| `session/summarize` | Extract learnings from session | `{"session_id": "..."}` |
-| `session/recall` | Search past sessions | `{"query": "..."}` |
-
-### Memory
-
-| Skill | Description | Input |
-|-------|-------------|-------|
-| `memory/put` | Store a memory | `{"name": "...", "type": "gotcha", "summary": "..."}` |
-| `memory/search` | Search memories | `{"query": "..."}` |
-| `memory/query` | Query by type/workspace | `{"type": "gotcha"}` |
-
-### Codemaps
-
-| Skill | Description | Input |
-|-------|-------------|-------|
-| `codemap/generate` | Generate semantic code trace | `{"query": "..."}` |
-| `codemap/search` | Search existing codemaps | `{"query": "..."}` |
-
-### CI/Git
-
-| Skill | Description | Input |
-|-------|-------------|-------|
-| `ci/status` | CI status and PR info | `{"pr": 123}` |
-| `ci/comments` | PR review comments | `{"pr": 123, "source": "coderabbit"}` |
-| `git/status` | Git status | `{}` |
-
-### Observability
-
-| Skill | Description | Input |
-|-------|-------------|-------|
-| `obs/logs` | Query and browse wide events | `{"limit": 20, "errors_only": true}` |
-| `obs/replay` | Reconstruct events from trace ID | `{"trace_id": "...", "include_data": true}` |
-
----
-
-## Skill Manifest Format
-
-Each skill has a `skill.yaml` manifest:
-
-```yaml
-name: code/symbols
-version: 0.1.0
-description: Extract symbols from source code
-distribution: exec  # or "wasi"
-
-input:
-  type: object
-  properties:
-    path:
-      type: string
-      description: Path to file or directory
-  required:
-    - path
-
-output:
-  type: object
-  properties:
-    symbols:
-      type: array
-      items:
-        type: object
-```
-
----
-
-## Runners
-
-### Exec Runner
-Native process execution with resource limits.
-
-- Spawns skill binary as subprocess
-- Sets `AGENTCTL_WORKSPACE` environment variable
-- Enforces rlimits (memory, CPU time)
-- Captures stdout as JSON envelope
-
-### WASI Runner
-WebAssembly execution via wazero (pure Go).
-
-- No network access (Core v1 mandate)
-- Sandboxed filesystem
-- Used for portable, isolated skills
-
----
-
-## Creating Skills
-
-### Directory Structure
-
-```
-skills/
-└── my_skill/
-    ├── main.go       # Implementation
-    ├── skill.yaml    # Manifest
-    └── main_test.go  # Tests
-```
-
-### Implementation Pattern
-
-```go
-package main
-
-import (
-    "encoding/json"
-    "os"
-
-    "github.com/jkatigb/agentctl/internal/platform/config"
-)
-
-func main() {
-    // Load .env for API keys
-    config.LoadDotEnv()
-
-    // Read input from stdin
-    var input struct {
-        Path string `json:"path"`
-    }
-    json.NewDecoder(os.Stdin).Decode(&input)
-
-    // Do work...
-    result := doWork(input.Path)
-
-    // Output JSON envelope to stdout
-    json.NewEncoder(os.Stdout).Encode(map[string]any{
-        "version": 1,
-        "status":  "ok",
-        "command": "my/skill",
-        "data":    result,
-        "meta": map[string]any{
-            "ts": time.Now().UTC().Format(time.RFC3339),
-        },
-    })
-}
-```
-
-### Build and Install
-
-```bash
-# Build and install to ~/.agentctl/skills/
-CGO_ENABLED=0 go build -o ~/.agentctl/skills/my/skill/bin ./skills/my_skill
-
-# Or use make target (rebuilds all)
-make skills-install
-```
-
----
-
-## Gotchas
-
-### Skill Binary Naming
-The loader looks for `bin` or `bin-cgo`, NOT custom names from `skill.yaml`.
-
-```bash
-# Correct
-go build -o ~/.agentctl/skills/my/skill/bin ./skills/my_skill
-
-# Wrong - loader won't find it
-go build -o ~/.agentctl/skills/my/skill/my_skill ./skills/my_skill
-```
-
-### .env Loading
-Skills must explicitly load `.env` files:
-
-```go
-import "github.com/jkatigb/agentctl/internal/platform/config"
-
-func main() {
-    config.LoadDotEnv() // Must call BEFORE os.Getenv()
-    // ...
-}
-```
-
-### Two-Stage Deploy
-Changes require both build AND install:
-
-```bash
-# Build creates binary in wrong location
-go build ./skills/my_skill  # Creates ./my_skill
-
-# Must install to correct location
-go build -o ~/.agentctl/skills/my/skill/bin ./skills/my_skill
-```
-
-See [gotchas.md](gotchas.md) for more common pitfalls.
-
----
-
-## Observability
-
-Skills should use the `skillslib/obs` package to emit wide events and structured
-logs. This provides proper observability without importing internal packages.
-
-### Span-Based Instrumentation
-
-```go
-import "github.com/jkatigb/agentctl/internal/adapters/skillslib/obs"
-
-func main() {
-    config.LoadDotEnv()
-
-    ctx := context.Background()
-
-    // Start a span for the skill execution
-    ctx, done, span := obs.StartSpan(ctx, "skill.run",
-        obs.WithCommand("my/skill"),
-        obs.WithComponent(obs.ComponentSkill),
-    )
-
-    var err error
-    defer func() { done(err) }()  // Emits wide event with status
-
-    // Add data during execution
-    span.WithData("input_count", len(items))
-
-    // ... do work ...
-
-    span.WithData("processed", count)
-    span.WithData("cache_hit", cacheHit)
-}
-```
-
-### Structured Logging
-
-For detailed logs during execution:
-
-```go
-log := obs.NewLogger("my/skill")
-
-log.Info("processing started", obs.Int("items", len(items)))
-log.Debug("cache lookup", obs.Str("key", cacheKey))
-log.Warn("slow operation", obs.Duration("elapsed", elapsed))
-log.Error("failed to process", obs.Err(err), obs.Str("file", path))
-```
-
-### Persistence Modes
-
-For high-value events that need queryability:
-
-```go
-// SQL persistence for critical events
-ctx, done, span := obs.StartSpan(ctx, "skill.run",
-    obs.WithCommand("session/summarize"),
-    obs.WithPersistence(obs.PersistSQL),
-)
-
-// Hybrid persistence (recommended for queryable events)
-ctx, done, span := obs.StartSpan(ctx, "skill.run",
-    obs.WithCommand("codemap/generate"),
-    obs.WithPersistence(obs.PersistHybrid),
-)
-```
-
-See [../observability/wide-events.md](../observability/wide-events.md) for
-complete observability documentation and
-[../observability/persistence.md](../observability/persistence.md) for
-persistence options.
+Machine-friendly reference for skill contracts and execution.
+
+## Metadata
+
+| Field | Value |
+|------|-------|
+| Status | Current |
+| Canonical packages | `internal/domain/skill`, `internal/execution/*`, `internal/runservice` |
+| Last reviewed | 2026-02-17 |
+
+## Runtime Flow
+
+1. Resolve a skill handle from installed `skill.yaml` manifests.
+2. Parse and validate manifest fields.
+3. Resolve artifact (`bin-cgo` when preferred, then `bin`, then manifest `entry`).
+4. Run via exec or WASI runner.
+5. Parse stdout as protocol envelope (`version/status/command/data/meta.ts`).
+
+## Manifest Contract (`skill.yaml`)
+
+Source of truth: `internal/domain/skill/manifest.go`.
+
+| Field | Required | Notes |
+|------|----------|-------|
+| `apiVersion` | Yes | Must be non-empty |
+| `kind` | Yes | Must be `Skill` |
+| `metadata.name` | Yes | Must include namespace, e.g. `code/semantic_search` |
+| `metadata.version` | Yes | Semantic version string |
+| `distribution.type` | Yes | `exec` or `wasi` |
+| `distribution.exec.entry` | For `exec` | Binary entry path |
+| `distribution.wasi.module` | For `wasi` | WASM module path |
+| `signature.command` | Yes | Command id exposed by the skill |
+| `io`, `capabilities`, `memory`, `openapi` | Optional | Runtime policy and UX metadata |
+
+## Distribution Semantics
+
+| Distribution | Artifact resolution | Runtime rules |
+|-------------|---------------------|---------------|
+| `exec` | Prefer `bin-cgo` (when requested), then `bin`, then `exec.entry` | Network capability may be `none` or `egress` |
+| `wasi` | `module.wasm` or manifest `wasi.module` | `capabilities.network` must be `none` |
+
+## Execution Invariants
+
+| Invariant | Why it matters |
+|----------|----------------|
+| stdout must be protocol envelope JSON | Keeps CLI, hooks, and automation stable |
+| `meta.ts` present on terminal envelopes | Required by envelope contract |
+| WASI network remains disabled | Core v1 isolation guarantee |
+| Workspace/path policy checked before execution | Prevents path escapes |
+| Large outputs go to CAS (`data.summary` + `data.artifact`) | Avoids oversized inline payloads |
+
+## Authoring Checklist
+
+1. Add `skills/<name>/main.go` and `skills/<name>/skill.yaml`.
+2. Keep envelope output protocol-compliant.
+3. Declare accurate `capabilities` (`network`, `filesystem`, `pure`).
+4. Build/install with `make skills-install` (or explicit `go build .../bin`).
+5. Verify with `agentctl skills list` and `agentctl run <command> --input ...`.
+
+## Related Docs
+
+- [docs/general/search.md](search.md)
+- [docs/general/storage.md](storage.md)
+- [docs/general/gotchas.md](gotchas.md)
+- [docs/spec/protocol_v1.md](../spec/protocol_v1.md)

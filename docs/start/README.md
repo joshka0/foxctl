@@ -1,64 +1,28 @@
-# docs/ — Documentation Index
+# Start Here
 
-> **Start with `AGENTS.md`** for conventions, then use this index to find
-> detailed documentation.
+Use this directory for fast orientation before diving into detailed subsystem docs.
 
-## Directory Tree
+## First 5 Minutes
 
-```
-docs/
-├── start/                    # Quick-start guides (this directory)
-│   ├── README.md             # ← You are here
-│   ├── testing_and_ci.md     # Tests, coverage, race, CI pipelines
-│   ├── openapi_and_plugins.md # http/openapi skill, auth/pagination plugins
-│   └── gotchas.md            # Gotchas Graveyard rules and "never again" list
-├── spec/                     # Canonical specifications
-│   ├── core_profile_v1.md    # Envelope, CAS, jobs, WASI/exec runners
-│   ├── openapi_skill.md      # http/openapi input/output contract
-│   ├── plugin_protocol.md    # Auth/pagination plugin SPI
-│   └── agent_hierarchy.md    # Agent runtime hierarchy and coordination
-├── impl_plan/                # Phased implementation plans
-│   └── universal_swe_grep_and_agents*.md
-├── changelogs/               # YYYY-MM-DD_<name>.md entries
-├── ci/                       # CI skill docs (prcomments, github_checks)
-├── examples/                 # Workflow examples
-├── guides/                   # How-to guides (agent_loop, protocol_v1)
-├── knowledge/                # Knowledge packs for Claude hooks
-├── godot/                    # Godot editor integration (future)
-├── agent_profile.md          # Multi-agent orchestration spec
-├── architecture.md           # Layered architecture overview
-├── roadmap.md                # v1.0 roadmap and priorities
-├── error-handling.md         # Error codes & patterns
-├── SECURITY.md               # Security policy
-└── TROUBLESHOOTING.md        # Common issues
-```
+1. Read [AGENTS.md](../../AGENTS.md) for repository operating rules.
+2. Scan [docs/README.md](../README.md) for the docs map.
+3. Use one of the focused quick-start guides below.
 
-## Quick Reference
+## Quick-Start Guides
 
-| Topic                    | Document                                    |
-| ------------------------ | ------------------------------------------- |
-| **Envelope contract**    | `spec/core_profile_v1.md` §2                |
-| **CAS & large outputs**  | `spec/core_profile_v1.md` §4                |
-| **Jobs & caching**       | `spec/core_profile_v1.md` §7–8              |
-| **WASI vs exec runners** | `spec/core_profile_v1.md` §10               |
-| **OpenAPI skill**        | `spec/openapi_skill.md`                     |
-| **Plugin protocol**      | `spec/plugin_protocol.md`                   |
-| **Agent orchestration**  | `agent_profile.md`                          |
-| **Agent runtime**        | `spec/agent_hierarchy.md`                   |
-| **SWE Grep skill**       | `spec/code_symbol_index_and_swe_grep.md` §5 |
-| **Symbol index**         | `start/symbol_index.md`                     |
-| **Testing & CI**         | `start/testing_and_ci.md`                   |
-| **OpenAPI & plugins**    | `start/openapi_and_plugins.md`              |
-| **Gotchas & rules**      | `start/gotchas.md`                          |
-| **Architecture**         | `architecture.md`                           |
-| **Roadmap**              | `roadmap.md`                                |
-| **Error codes**          | `error-handling.md`                         |
+- [testing_and_ci.md](testing_and_ci.md) - test strategy, CI expectations, CGO/race caveats.
+- [openapi_and_plugins.md](openapi_and_plugins.md) - `http/openapi` skill + plugin model.
+- [symbol_index.md](symbol_index.md) - code symbol indexing and post-review integration.
+- [gotchas.md](gotchas.md) - enforced "never again" rules tied to incidents.
 
-## Where to Look
+## Canonical Follow-Up Docs
 
-- **Wire contract questions** → `spec/core_profile_v1.md`
-- **How to test / CI failing** → `start/testing_and_ci.md`
-- **OpenAPI skill behavior** → `spec/openapi_skill.md` +
-  `start/openapi_and_plugins.md`
-- **Multi-agent features** → `agent_profile.md`
-- **Implementation status** → `impl_plan/universal_swe_grep_and_agents.md`
+- Current subsystem docs: [docs/general/](../general/)
+- Current architecture docs: [docs/architecture/](../architecture/)
+- Specs: [docs/spec/README.md](../spec/README.md)
+- Active plans: [docs/plans/README.md](../plans/README.md)
+- Historical docs: [docs/archive/README.md](../archive/README.md)
+
+## Legacy Note
+
+Some older documents and links still reference pre-reorg paths (for example `docs/impl_plan/*` or older spec locations). Prefer the directories above when creating new docs or making updates.

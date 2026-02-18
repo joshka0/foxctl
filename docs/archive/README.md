@@ -20,6 +20,12 @@ This directory contains documentation that is no longer actively maintained but 
 - **legacy/**: Superseded root-level docs (search-guide, vector-search, embeddings, agent_profile, protocol_v1_implementation)
 - **specs/**: Phase 7 trajectory; completed specs (task_graph_insights, mailbox_blackboard, dspy_trajectory_capture, knowledge_factory_bridge); superseded design docs
 
+## Maintenance Policy
+
+- Archive docs are historical references, not canonical behavior docs.
+- Content may remain stale by design, but local links should stay navigable.
+- If a linked doc is moved, update archive links to the new location or to a compatibility shim.
+
 ## Active Documentation
 
 See `docs/general/` for current documentation:

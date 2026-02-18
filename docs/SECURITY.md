@@ -433,7 +433,7 @@ Future plans include:
 
 ## Additional Resources
 
-- **[Core Profile v1](../spec/core_profile_v1.md)** — Security model details
+- **[Core Profile v1](./spec/v1/core_profile_v1.md)** — Security model details
 - **[AGENTS.md](../AGENTS.md)** — Security considerations for AI assistants
 - **[CONTRIBUTING.md](../CONTRIBUTING.md)** — Secure development practices
 
@@ -447,7 +447,7 @@ Future plans include:
 
 ---
 
-**Last Updated**: November 2025
+**Last Updated**: February 2026
 **Version**: Pre-1.0 (subject to change)
 
 We take security seriously. Thank you for helping us keep agentctl secure!

@@ -1,154 +1,101 @@
-# Search & Embeddings
+# Search and Embeddings
 
-agentctl provides semantic search across code symbols, sessions, memories, and codemaps.
+Machine-friendly reference for semantic retrieval, reranking, and repo graph search.
 
----
+## Metadata
 
-## Quick Start
+| Field | Value |
+|------|-------|
+| Status | Current |
+| Canonical packages | `skills/code_semantic_search`, `internal/indexing/semantic`, `internal/indexing/rerank`, `internal/indexing/repoindex`, `internal/storage/dbdriver/search.go` |
+| Last reviewed | 2026-02-17 |
+
+## Search Surfaces
+
+| Surface | Command | Best use |
+|--------|---------|----------|
+| Unified semantic search | `agentctl run code/semantic_search --input ...` | Cross-source retrieval (`symbols`, `sessions`, `memories`, `tasks`, `codemaps`) |
+| Repo graph index | `agentctl index repo <build|search|expand|open|ask>` | Structural relationships (calls/refers/imports) |
+
+## `code/semantic_search` Input Contract
+
+Source of truth: `skills/code_semantic_search/main.go`.
+
+| Field | Type | Notes |
+|------|------|-------|
+| `query` | string | Required unless `format:"tree"` |
+| `scope` | string[] | Valid values: `symbols`, `sessions`, `memories`, `tasks`, `codemaps` |
+| `limit` | int | Default `20` |
+| `min_similarity` | float | Default `0.3` |
+| `rerank_enabled` | bool | Optional Voyage reranking |
+| `rerank_top_k` | int | Candidate size before rerank |
+| `rerank_model` | string | Default `rerank-2.5` |
+| `remote` / `global` / `workspaces` | bool/string[] | Cross-workspace remote search mode |
+| `format` | string | `json` or `tree` |
+
+## Embedding Model Selection
+
+Source of truth: `internal/indexing/semantic/provider.go`.
+
+| Scope category | Default model |
+|---------------|---------------|
+| `symbols` and file summaries | `voyage-code-3` |
+| `memory`, `tasks`, `sessions`, `codemaps` | `voyage-3.5` |
+
+Override order:
+
+1. `AGENTCTL_EMBEDDING_MODEL_<SCOPE>` (for example `AGENTCTL_EMBEDDING_MODEL_SYMBOLS`)
+2. `AGENTCTL_EMBEDDING_MODEL_CODE` (code scopes) / `AGENTCTL_EMBEDDING_MODEL_TEXT` (text scopes)
+3. Built-in defaults above
+
+## Rerank Configuration
+
+Source of truth: `internal/indexing/rerank/config.go`.
+
+| Env var | Purpose |
+|--------|---------|
+| `AGENTCTL_RERANK_ENABLED` | Enable reranking |
+| `AGENTCTL_RERANK_TOP_K` | Candidates passed to reranker |
+| `AGENTCTL_RERANK_FINAL_K` | Final result count |
+| `AGENTCTL_RERANK_MODEL` | Reranker model (default `rerank-2.5`) |
+| `AGENTCTL_RERANK_SCORE_BLEND` | Blend original and rerank score |
+| `AGENTCTL_RERANK_TIMEOUT` | Request timeout |
+| `AGENTCTL_RERANK_RATE_LIMIT` | Requests/minute (`0` disables) |
+| `AGENTCTL_RERANK_RATE_LIMIT_WAIT` | Wait vs fail when throttled |
+
+## Hybrid Scoring (BM25 + Vector)
+
+Source of truth: `internal/storage/dbdriver/search.go`.
+
+| Parameter | Meaning |
+|----------|---------|
+| `alpha=1.0` | BM25-only weight |
+| `alpha=0.5` | Balanced lexical/semantic weighting (default) |
+| `alpha=0.0` | Vector-only weight |
+
+Formula: `score = alpha * bm25_scaled + (1 - alpha) * vector_scaled`
+
+## Repo Graph Index Flow
 
 ```bash
-# Semantic search (uses skills)
-agentctl run code/semantic_search --input '{"query": "authentication flow", "limit": 10}'
-
-# With scope filter
-agentctl run code/semantic_search --input '{"query": "auth", "scopes": ["symbols", "memories"]}'
-```
-
----
-
-## Repo Graph Index (repoindex)
-
-Repoindex is a relationship-based graph that complements semantic search. It
-does not use embeddings; it uses FTS + graph expansion over code structure.
-
-```bash
-# Build the graph (Go + TypeScript)
-agentctl index repo build --workspace . --go --typescript
-
-# Search nodes by text (FTS)
+agentctl index repo build --dry-run --workspace . --go --typescript --elixir
+agentctl index repo build --workspace . --go --typescript --elixir
 agentctl index repo search --workspace . --query "Supervisor" --limit 10
-
-# Expand relationships
 agentctl index repo expand --workspace . --seed "<node-id>" --edge CALLS --edge REFERS_TO --depth 2
 ```
 
-For details and edge types, see [repoindex.md](repoindex.md).
+## Common Failure Modes
 
----
+| Symptom | Likely cause |
+|--------|---------------|
+| Empty semantic matches for vector-only scopes | Missing embedding provider key (`VOYAGE_API_KEY` / `GEMINI_API_KEY`) |
+| Dimension mismatch | Model/store dimension drift; rebuild/reindex with consistent config |
+| Rerank unavailable | Missing key or `AGENTCTL_RERANK_ENABLED` not enabled |
+| Remote/global search unavailable | Missing Turso remote configuration |
 
-## Search Modes
+## Related Docs
 
-| Mode | Type | Best For |
-|------|------|----------|
-| **Vector** | Semantic/meaning | Conceptual queries, "how does X work" |
-| **BM25** | Lexical/keyword | Exact terms, technical names |
-| **Hybrid** | Combined | General purpose (default) |
-
----
-
-## Embedding Models
-
-All embeddings use **1024 dimensions** (Voyage AI).
-
-| Scope | Model | Cost/1M | Use |
-|-------|-------|---------|-----|
-| `symbols` | `voyage-code-3` | $0.18 | Code search |
-| `memories` | `voyage-3.5` | $0.06 | Gotchas, notes |
-| `tasks` | `voyage-3.5` | $0.06 | Task descriptions |
-| `sessions` | `voyage-3.5` | $0.06 | Session context |
-| `codemaps` | `voyage-3.5` | $0.06 | Code relationship maps |
-
-**Why two models?** `voyage-code-3` is 13.8% better than OpenAI on code retrieval but costs 3x more. We use it only for code symbols.
-
----
-
-## Configuration
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `VOYAGE_API_KEY` | - | **Required** for embeddings |
-| `AGENTCTL_VECTOR_DIMS` | `1024` | Vector dimensions |
-| `AGENTCTL_SEMANTIC_RERANK` | `0` | Enable Voyage rerank-2.5 |
-| `AGENTCTL_EMBEDDING_RATE_LIMIT` | `3` | RPM limit (0=unlimited) |
-
-### Optional Overrides
-
-```bash
-# Override models
-export EMBEDDING_MODEL_CODE=voyage-code-3
-export EMBEDDING_MODEL_TEXT=voyage-3.5
-
-# Use Gemini instead (3072 dims - incompatible with Voyage)
-export GEMINI_API_KEY=your-key
-export EMBEDDING_MODEL=gemini-embedding-001
-```
-
----
-
-## Search Scopes
-
-| Scope | Content | Storage |
-|-------|---------|---------|
-| `symbols` | Code functions, types, methods | `memory.db` |
-| `memories` | Gotchas, decisions, patterns | `memory.db` |
-| `sessions` | Session summaries | `sessions.db` |
-| `codemaps` | Generated code traces | `memory.db` |
-| `tasks` | Task descriptions | `tasks.db` |
-
----
-
-## Hybrid Search Tuning
-
-The `alpha` parameter balances BM25 vs vector search:
-
-```
-alpha = 0.7  → 70% BM25, 30% vector (favor exact matches)
-alpha = 0.5  → 50/50 balanced (default)
-alpha = 0.3  → 30% BM25, 70% vector (favor concepts)
-```
-
----
-
-## Troubleshooting
-
-### Dimension Mismatch
-```
-Error: dimension mismatch: query 3072, stored 1024
-```
-Query and stored embeddings use different providers. Re-index with consistent provider.
-
-### Zero Results
-Embedding model changed since indexing. Verify `ScopeModelRecommendation()` matches storage.
-
-### Rate Limiting (429)
-Set `AGENTCTL_EMBEDDING_RATE_LIMIT=0` for paid tier or increase value.
-
----
-
-## Building with Vector Support
-
-Vector search requires CGO:
-
-```bash
-# With vector support
-make build-cgo
-
-# Without (default)
-make build
-```
-
-See [gotchas.md](gotchas.md#cgo-build) for CGO build details.
-
----
-
-## Cost Estimate
-
-~$0.30/month for typical usage (3M tokens across all scopes).
-
----
-
-## Related
-
-- [Skills](skills.md) - Search skill usage
-- [Gotchas](gotchas.md) - CGO build requirements
-- [Storage](storage.md) - Where embeddings are stored
+- [docs/general/repoindex.md](repoindex.md)
+- [docs/general/storage.md](storage.md)
+- [docs/general/skills.md](skills.md)
+- [docs/general/gotchas.md](gotchas.md)

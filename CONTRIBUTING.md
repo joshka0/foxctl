@@ -110,7 +110,7 @@ You can override the config path with `--config` flag or `AGENTCTL_CONFIG` envir
 
 ### 1. Find or Create an Issue
 
-- Check [IMPLEMENTATION_PRIORITY.md](IMPLEMENTATION_PRIORITY.md) for prioritized tasks
+- Check [docs/plans/README.md](docs/plans/README.md) for prioritized planning areas
 - Browse open issues on GitHub
 - For new features, discuss in an issue first
 
@@ -400,8 +400,8 @@ Copy this into your PR description:
 
 ### Where to Start
 
-1. **Read** [IMPLEMENTATION_PRIORITY.md](IMPLEMENTATION_PRIORITY.md)
-2. **Pick a spec** from [docs/refactoring/](docs/refactoring/)
+1. **Read** [docs/plans/README.md](docs/plans/README.md)
+2. **Pick a spec** from [docs/spec/](docs/spec/)
 3. **Read the spec** thoroughly (includes step-by-step plan)
 4. **Ask questions** in GitHub issues if anything is unclear
 5. **Implement** following the spec's guidance
@@ -430,7 +430,7 @@ If you're an AI coding assistant, read [AGENTS.md](AGENTS.md) for specific guide
 ### Getting Help
 
 - Read the [Core Profile v1 spec](docs/spec/core_profile_v1.md)
-- Check [ROADMAP_TO_V1.md](ROADMAP_TO_V1.md) for project status
+- Check [docs/roadmap.md](docs/roadmap.md) for project status
 - Review [AGENTS.md](AGENTS.md) for detailed conventions
 - Ask questions in GitHub Discussions
 
@@ -478,7 +478,7 @@ Contributors do **not** need to worry about releases.
 - **[Core Profile v1](docs/spec/core_profile_v1.md)** — Complete specification
 - **[OpenAPI Skill](docs/spec/openapi_skill.md)** — Universal REST API client
 - **[Plugin Protocol](docs/spec/plugin_protocol.md)** — Extensibility via plugins
-- **[Protocol v1 Implementation](docs/guides/protocol_v1_implementation.md)** — Build-out plan
+- **[Protocol v1 Implementation](docs/archive/legacy/protocol_v1_implementation.md)** — Historical build-out plan
 - **[AGENTS.md](AGENTS.md)** — Guide for AI coding assistants
 
 ---

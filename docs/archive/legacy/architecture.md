@@ -371,10 +371,10 @@ This architecture follows principles from:
 
 ## Related Documentation
 
-- [SPEC-008](docs/refactoring/SPEC-008-reorganize-packages.md): Package
-  reorganization specification
-- [Protocol v1 Implementation](docs/guides/protocol_v1_implementation.md):
+- [SPEC-008](./protocol_v1_implementation.md#task-1-spec-008-complete-package-reorganization-4h): Package
+  reorganization specification (historical task breakdown)
+- [Protocol v1 Implementation](./protocol_v1_implementation.md):
   Protocol details
-- [Contributing Guide](CONTRIBUTING.md): Development guidelines
-- [Review, Semantic Index, and Trajectory Specs](docs/spec/review_semantic_trajectory_specs.md):
+- [Contributing Guide](../../../CONTRIBUTING.md): Development guidelines
+- [Review, Semantic Index, and Trajectory Specs](../specs/review_semantic_trajectory_specs.md):
   End-to-end review → post-review indexing → trajectories
