@@ -490,6 +490,75 @@ func (s *Store) GetTurn(ctx context.Context, turnID string) (run.TurnRecord, err
 	return turn.Clone(), nil
 }
 
+// ListTurns returns turn records for one session ordered by created time.
+func (s *Store) ListTurns(ctx context.Context, sessionID string, opts run.TurnListOptions) ([]run.TurnRecord, error) {
+	if s == nil || s.db == nil {
+		return nil, fmt.Errorf("v2 turns list turns: nil store")
+	}
+
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return nil, nil
+	}
+
+	order := "DESC"
+	if opts.Asc {
+		order = "ASC"
+	}
+
+	limit := opts.Limit
+	if limit <= 0 {
+		limit = 64
+	}
+
+	query := fmt.Sprintf(`
+		SELECT id
+		FROM v2_turns
+		WHERE session_id = $1
+		  AND ($2 = '' OR created_at >= $2)
+		  AND ($3 = '' OR created_at <= $3)
+		ORDER BY created_at %s, id %s
+		LIMIT $4
+	`, order, order)
+
+	since := ""
+	until := ""
+	if !opts.Since.IsZero() {
+		since = sqlutil.FormatTimestamp(opts.Since.UTC())
+	}
+	if !opts.Until.IsZero() {
+		until = sqlutil.FormatTimestamp(opts.Until.UTC())
+	}
+
+	rows, err := s.db.QueryContext(ctx, query, sessionID, since, until, limit)
+	if err != nil {
+		return nil, fmt.Errorf("query turn ids: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	turnIDs := make([]string, 0, limit)
+	for rows.Next() {
+		var turnID string
+		if err := rows.Scan(&turnID); err != nil {
+			return nil, fmt.Errorf("scan turn id: %w", err)
+		}
+		turnIDs = append(turnIDs, strings.TrimSpace(turnID))
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate turn ids: %w", err)
+	}
+
+	out := make([]run.TurnRecord, 0, len(turnIDs))
+	for _, turnID := range turnIDs {
+		turn, err := s.GetTurn(ctx, turnID)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, turn)
+	}
+	return out, nil
+}
+
 // SaveArtifact upserts one versioned artifact under its idempotency key.
 func (s *Store) SaveArtifact(ctx context.Context, artifact Artifact) error {
 	if s == nil || s.db == nil {
@@ -811,6 +880,7 @@ func isVectorUnsupported(err error) bool {
 }
 
 var (
-	_ run.TurnRecorder = (*Store)(nil)
-	_ run.TurnReader   = (*Store)(nil)
+	_ run.TurnRecorder       = (*Store)(nil)
+	_ run.TurnReader         = (*Store)(nil)
+	_ run.TurnTimelineReader = (*Store)(nil)
 )

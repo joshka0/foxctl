@@ -39,6 +39,8 @@ func MigrateSchema(ctx context.Context, db *sql.DB) error {
 			ON v2_turns(session_id, turn_index)`,
 		`CREATE INDEX IF NOT EXISTS idx_v2_turns_trace
 			ON v2_turns(trace_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_v2_turns_session_created_at
+			ON v2_turns(session_id, created_at)`,
 		`CREATE TABLE IF NOT EXISTS v2_turn_iterations (
 			turn_id TEXT NOT NULL,
 			iteration_index INTEGER NOT NULL,

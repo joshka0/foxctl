@@ -26,7 +26,7 @@ Primary specs/plans:
 - [x] Wave 1 foundation complete (PR-01 through PR-10) with tests and review notes
 - [x] v2 docs aligned to companion/general references and non-blocking v2 scope rules
 - [x] Wave 2 production cutover batch 1 complete (PR-11 through PR-13)
-- [ ] Wave 2 dynamic context pipeline work queued (PR-14 through PR-16)
+- [ ] Wave 2 dynamic context pipeline work queued (PR-15 through PR-16)
 
 ## Wave 1 Completed (Reference)
 
@@ -53,12 +53,12 @@ Wave 2 rationale, DoD expectations, and exit criteria live in:
   - [x] emit `turn.recorded` from runtime pipeline into enricher producer
   - [x] consume via bounded queue/worker with non-blocking guarantees
   - [x] emit failure/retry telemetry events without failing completed turns
+- [x] PR-14: Hierarchical context builder + temporal pyramid retrieval
+  - [x] support `hours -> days -> weeks -> months` summaries with drill-down refs
+  - [x] expose expandable-date style metadata for selective deepening
 
 ## Next
 
-- [ ] PR-14: Hierarchical context builder + temporal pyramid retrieval
-  - [ ] support `hours -> days -> weeks -> months` summaries with drill-down refs
-  - [ ] expose expandable-date style metadata for selective deepening
 - [ ] PR-15: Companion memory layered assembly integration
   - [ ] wire L2 -> L1 -> L0 budgeted context composition
   - [ ] blend turn refs + companion summaries deterministically
@@ -143,6 +143,20 @@ Subagent Review
     - bus publish failures do not fail turn completion,
     - `turn.recorded` triggers async enrichment jobs and `artifact.failed` events while turns still complete successfully.
   - Hardened queue dedupe lifecycle by releasing keys after job processing (`internal/v2/runtime/enrichers/{queue,worker}.go`) and added retry-friendly release test coverage.
+- 2026-02-18: Completed PR-14 hierarchical context builder + temporal pyramid retrieval.
+  - Added `run.TurnListOptions` + `run.TurnTimelineReader` and production list support in `internal/v2/adapters/libsql/turns/store.go` with session/time filtering and deterministic ordering.
+  - Added context-builder temporal retrieval in `internal/v2/runtime/contextbuilder/builder.go` for `hours`, `days`, `weeks`, and `months` with coarse summaries.
+  - Added drill-down metadata outputs (`expandable_dates`, `expandable_refs`) including `day:*`, `hour:*`, `week:*`, and stable `turn/*` refs.
+  - Added tests:
+    - `internal/v2/adapters/libsql/turns/store_test.go` (`TestTurnStore_ListTurns_BySessionAndTime`)
+    - `internal/v2/runtime/contextbuilder/builder_test.go` (`BuildTemporal*` cases)
+  - Validated with `go test ./internal/v2/...`.
+- 2026-02-18:
+  Subagent Review
+  - reviewer: `019c72fa-5465-7563-93df-36870fabd2a5`
+  - scope: `PR-14 hierarchical context builder slice` (`internal/v2/core/run/turn_record.go`, `internal/v2/adapters/libsql/turns/{schema,store,store_test}.go`, `internal/v2/runtime/contextbuilder/{builder,builder_test}.go`)
+  - findings: `none` (review output `overall=warn` was doc/check-status oriented; code-level findings list was empty)
+  - decision: `approved-with-known-risks`
 - 2026-02-18:
   Subagent Review
   - reviewer: `019c72be-2275-7aa2-bfd2-7904f4cbeafb`

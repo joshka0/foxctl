@@ -185,6 +185,80 @@ func TestTurnStore_SaveTurn_ReplacesPriorLineage(t *testing.T) {
 	}
 }
 
+func TestTurnStore_ListTurns_BySessionAndTime(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	db, closeFn, err := dbutil.OpenSQLiteDBShared(ctx, filepath.Join(t.TempDir(), "turns_list.db"), nil)
+	if err != nil {
+		t.Fatalf("open sqlite db: %v", err)
+	}
+	t.Cleanup(func() { _ = closeFn() })
+	if err := MigrateSchema(ctx, db); err != nil {
+		t.Fatalf("migrate schema: %v", err)
+	}
+
+	store := NewStore(db, db.Close)
+	base := time.Date(2026, time.February, 18, 12, 0, 0, 0, time.UTC)
+	store.SetNowForTest(func() time.Time { return base })
+
+	mustSave := func(turn run.TurnRecord) {
+		t.Helper()
+		if err := store.SaveTurn(ctx, turn); err != nil {
+			t.Fatalf("SaveTurn(%s) error = %v", turn.ID, err)
+		}
+	}
+
+	mustSave(run.TurnRecord{
+		ID:        "turn-101",
+		SessionID: "run-list-1",
+		CreatedAt: base.Add(-2 * time.Hour),
+		UpdatedAt: base.Add(-2 * time.Hour),
+	})
+	mustSave(run.TurnRecord{
+		ID:        "turn-102",
+		SessionID: "run-list-1",
+		CreatedAt: base.Add(-1 * time.Hour),
+		UpdatedAt: base.Add(-1 * time.Hour),
+	})
+	mustSave(run.TurnRecord{
+		ID:        "turn-201",
+		SessionID: "run-list-2",
+		CreatedAt: base,
+		UpdatedAt: base,
+	})
+
+	asc, err := store.ListTurns(ctx, "run-list-1", run.TurnListOptions{Asc: true})
+	if err != nil {
+		t.Fatalf("ListTurns(asc) error = %v", err)
+	}
+	if len(asc) != 2 {
+		t.Fatalf("asc len=%d want 2", len(asc))
+	}
+	if asc[0].ID != "turn-101" || asc[1].ID != "turn-102" {
+		t.Fatalf("asc ids = [%s,%s] want [turn-101,turn-102]", asc[0].ID, asc[1].ID)
+	}
+
+	descLimited, err := store.ListTurns(ctx, "run-list-1", run.TurnListOptions{Limit: 1, Asc: false})
+	if err != nil {
+		t.Fatalf("ListTurns(desc limited) error = %v", err)
+	}
+	if len(descLimited) != 1 || descLimited[0].ID != "turn-102" {
+		t.Fatalf("desc limited unexpected ids = %+v", descLimited)
+	}
+
+	sinceFiltered, err := store.ListTurns(ctx, "run-list-1", run.TurnListOptions{
+		Asc:   true,
+		Since: base.Add(-90 * time.Minute),
+	})
+	if err != nil {
+		t.Fatalf("ListTurns(since) error = %v", err)
+	}
+	if len(sinceFiltered) != 1 || sinceFiltered[0].ID != "turn-102" {
+		t.Fatalf("since filtered unexpected ids = %+v", sinceFiltered)
+	}
+}
+
 func TestTurnStore_SaveArtifact_IdempotentAndStableRefLookup(t *testing.T) {
 	t.Parallel()
 
