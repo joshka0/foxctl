@@ -51,7 +51,7 @@ func maybeRunAgentAskShadow(ctx context.Context, in askShadowInput) {
 	}
 
 	start := time.Now()
-	shadowCtx, cancel := context.WithTimeout(context.Background(), shadowAskTimeout)
+	shadowCtx, cancel := context.WithTimeout(ctx, shadowAskTimeout)
 	defer cancel()
 
 	dispatcher := &shadowAskDispatcher{messageID: in.V1MessageID}

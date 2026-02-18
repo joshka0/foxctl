@@ -34,7 +34,7 @@ type ToolDef struct {
 // AllowedFor reports whether policy-level explicit profile restrictions allow profile.
 func (d ToolDef) AllowedFor(profile ProcessProfile) bool {
 	if len(d.Policy.AllowProfiles) == 0 {
-		return true
+		return !d.Policy.DenyByDefault
 	}
 	for _, p := range d.Policy.AllowProfiles {
 		if strings.EqualFold(string(p), string(profile)) {

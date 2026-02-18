@@ -83,5 +83,5 @@ capabilities:
 openapi:
   enabled: true
   methods:
-    GET: "true"
-    POST: "true"
+    GET: true
+    POST: true

@@ -33,8 +33,6 @@ func MigrateSchema(ctx context.Context, db *sql.DB) error {
 			ON v2_events(stream_id, stream_type, stream_version)`,
 		`CREATE UNIQUE INDEX IF NOT EXISTS idx_v2_events_stream_sequence
 			ON v2_events(stream_id, stream_type, sequence)`,
-		`CREATE INDEX IF NOT EXISTS idx_v2_events_stream_order
-			ON v2_events(stream_id, stream_type, stream_version)`,
 		`CREATE INDEX IF NOT EXISTS idx_v2_events_type_time
 			ON v2_events(event_type, occurred_at)`,
 	}

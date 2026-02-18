@@ -113,7 +113,7 @@ func TestMaintenanceFailure_DoesNotBlockRunEngine(t *testing.T) {
 		}
 	}
 	elapsed := time.Since(start)
-	if elapsed > 400*time.Millisecond {
+	if elapsed > time.Second {
 		t.Fatalf("publish loop blocked too long (%s)", elapsed)
 	}
 

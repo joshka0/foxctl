@@ -105,18 +105,26 @@ func (p *Pipeline) invokeTool(ctx context.Context, st *executionState, iteration
 	}
 
 	res, err := p.cfg.ToolExecutor.Execute(ctx, call.Name, call.Args)
-	status := strings.TrimSpace(res.Status)
-	if status == "" {
-		status = "ok"
-	}
+	status := "ok"
 	if err != nil {
 		status = "error"
+	} else {
+		status = strings.TrimSpace(res.Status)
+		if status == "" {
+			status = "ok"
+		}
+	}
+	resultKind := "tool_result"
+	resultText := strings.TrimSpace(res.Output)
+	if err != nil {
+		resultKind = "tool_error"
+		resultText = strings.TrimSpace(err.Error())
 	}
 	callRecord.Status = status
 	callRecord.ResultRef = run.ArtifactRef{
 		ID:   fmt.Sprintf("artifact-%s", callID),
-		Kind: "tool_result",
-		Text: strings.TrimSpace(res.Output),
+		Kind: resultKind,
+		Text: resultText,
 	}
 	if emitErr := p.appendEvent(ctx, st, StageModelCall, events.EventToolResponded, events.ToolRespondedPayload{
 		Name:   call.Name,

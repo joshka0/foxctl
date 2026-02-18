@@ -58,6 +58,6 @@ func (s *RunService) Run(ctx context.Context, in run.TurnInput) (run.TurnOutput,
 		Message:   "run execution failed",
 		Cause:     err,
 		Fatal:     true,
-		Retryable: true,
+		Retryable: false,
 	}
 }

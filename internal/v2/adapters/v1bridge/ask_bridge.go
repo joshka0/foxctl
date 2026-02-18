@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/jkatigb/agentctl/internal/domain/agent"
@@ -31,10 +32,9 @@ func NewAskBridge(mailbox LegacyMailboxSender, now func() time.Time, newID func(
 		now = func() time.Time { return time.Now().UTC() }
 	}
 	if newID == nil {
-		var seq uint64
+		var seq atomic.Uint64
 		newID = func() string {
-			seq++
-			return fmt.Sprintf("msg-%06d", seq)
+			return fmt.Sprintf("msg-%06d", seq.Add(1))
 		}
 	}
 	return &AskBridge{
