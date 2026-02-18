@@ -3,10 +3,10 @@ package maintenance
 import (
 	"context"
 	"errors"
-	"log"
 	"strings"
 	"time"
 
+	"github.com/jkatigb/agentctl/internal/observability"
 	coreevents "github.com/jkatigb/agentctl/internal/v2/core/events"
 	"github.com/jkatigb/agentctl/internal/v2/runtime/snapshots"
 )
@@ -72,9 +72,12 @@ func NewDigestComponent(cfg Config) *DigestComponent {
 	}
 	if cfg.OnError == nil {
 		cfg.OnError = func(err error) {
-			if err != nil {
-				log.Printf("v2 maintenance digest projector error: %v", err)
+			if err == nil {
+				return
 			}
+			observability.Emit(context.Background(), observability.NewEvent("v2.runtime.maintenance.error").
+				WithComponent(observability.ComponentAgent).
+				Error(err, 0))
 		}
 	}
 

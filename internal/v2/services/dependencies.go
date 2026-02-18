@@ -89,10 +89,6 @@ type RunKiller interface {
 	Kill(ctx context.Context, runID string) error
 }
 
-type requestIDSource interface {
-	NewID() string
-}
-
 func defaultNow() func() time.Time {
 	return func() time.Time { return time.Now().UTC() }
 }

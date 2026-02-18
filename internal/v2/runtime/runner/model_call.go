@@ -105,7 +105,7 @@ func (p *Pipeline) invokeTool(ctx context.Context, st *executionState, iteration
 	}
 
 	res, err := p.cfg.ToolExecutor.Execute(ctx, call.Name, call.Args)
-	status := "ok"
+	var status string
 	if err != nil {
 		status = "error"
 	} else {

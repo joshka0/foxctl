@@ -4,10 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
 	"sync/atomic"
 	"time"
 
+	"github.com/jkatigb/agentctl/internal/observability"
 	coreevents "github.com/jkatigb/agentctl/internal/v2/core/events"
 	"github.com/jkatigb/agentctl/internal/v2/core/run"
 )
@@ -67,9 +67,12 @@ func NewWorker(cfg Config) *Worker {
 	}
 	if cfg.OnError == nil {
 		cfg.OnError = func(err error) {
-			if err != nil {
-				log.Printf("v2 enricher error: %v", err)
+			if err == nil {
+				return
 			}
+			observability.Emit(context.Background(), observability.NewEvent("v2.runtime.enricher.error").
+				WithComponent(observability.ComponentAgent).
+				Error(err, 0))
 		}
 	}
 
