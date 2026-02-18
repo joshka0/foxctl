@@ -1,6 +1,6 @@
 # Companion Memory System
 
-> Status: Fully implemented (L0/L1/L2 with compression daemon)
+> Status: Implemented for v1 layered memory (L0/L1/L2 with compression daemon)
 
 ## Overview
 
@@ -26,6 +26,41 @@ The companion memory system provides progressive context decay for long-form con
 │  Permanent      │ Topics, preferences, key moments         │
 └─────────────────────────────────────────────────────────────┘
 ```
+
+## Layered Budgeted Context Assembly (L2 -> L1 -> L0)
+
+`ConversationMemory.GetContext()` assembles context in layered order with
+explicit token budgets per layer:
+
+1. `L2` distilled history (`companion_history`) for durable relationship context
+2. `L1` day summaries (`companion_day_summaries`) for recent recall
+3. `L0` vivid turns (`companion_turns`) for immediate conversational continuity
+
+This keeps prompt construction deterministic and bounded while still preserving
+temporal depth.
+
+Implementation reference:
+- `internal/companion/memory.go` (`GetContext`, `LayerBudget`)
+
+## Temporal Pyramid (Cheap Derived Views)
+
+To support dynamic context assembly without replaying all turns, companion
+memory should expose progressively coarser time views:
+
+| View | Source | Cost | Typical Use |
+|------|--------|------|-------------|
+| `hours` | L0 turns | Very low | "What just happened?" |
+| `days` | L1 summaries | Low | Recent continuity / daily recap |
+| `weeks` | L2 distilled history + grouped L1 | Low-medium | Ongoing topics and decisions |
+| `months` | L2 distilled history snapshots | Low-medium | Long-term relationship memory |
+
+This temporal pyramid is compatible with the v2 dynamic context builder:
+start coarse (`months`/`weeks`), then drill down (`days`/`hours`) only when
+needed.
+
+V2 note: coarse-to-fine retrieval + drill-down refs (`expandable_dates`, turn
+refs) are planned for `internal/v2/runtime/contextbuilder/*`. Current v1 path
+still injects a bounded markdown context blob from `GetContext()`.
 
 ## Memory Modes
 
@@ -112,9 +147,10 @@ User Message
 │    - Fallback: agentID:callerNS         │
 │                                         │
 │ 2. GetContext(conversationID)           │
-│    - L2: Our History (if exists)        │
-│    - L1: Recent Conversations (if any)  │
-│    - L0: Today's Conversation           │
+│    - L2: Our History (weeks/months)     │
+│    - L1: Recent Conversations (days)    │
+│    - L0: Today's Conversation (hours)   │
+│    - Apply per-layer + total budgets    │
 │                                         │
 │ 3. Store user turn                      │
 │                                         │
@@ -130,6 +166,14 @@ User Message
 │ 6. Store assistant turn (on success)    │
 └─────────────────────────────────────────┘
 ```
+
+### Dynamic Drill-Down (V2 Planned)
+
+For PR-10 style dynamic context, retrieval should return drill-down metadata
+(`expandable_dates`, turn refs) so the model can move from day summaries into
+specific turn slices only when required, rather than injecting the full memory
+blob every turn. This is roadmap behavior for v2 and is not enabled by default
+in the current v1 runtime path.
 
 ## Context Format
 

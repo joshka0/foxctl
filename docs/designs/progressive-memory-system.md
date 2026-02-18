@@ -1,5 +1,11 @@
 # Progressive Memory System for agentctl
 
+## Scope: Transitional + V2 Target
+
+- Phases 1-4 describe existing/prototyped session-memory behavior.
+- Event schema + artifact schema + context-builder API surfaces are the v2
+  target, intended for `internal/v2/runtime/*`.
+
 ## Overview
 
 A tiered memory system that enables agents to learn from past Claude Code sessions,
@@ -72,6 +78,27 @@ Tier 3: Full conversation (on-demand)
 │ The error message and how it was resolved                   │
 └─────────────────────────────────────────────────────────────┘
 ```
+
+### Temporal Pyramid + Referenceability
+
+To avoid full-history replay, retrieval should prefer coarse-to-fine temporal
+views before loading raw chunks:
+
+1. `months` view (long-term pattern summaries)
+2. `weeks` view (grouped work themes)
+3. `days` view (daily summaries/context windows)
+4. `hours` view (dense turn/chunk slices)
+
+Stable references enable deterministic drill-down:
+
+- `session/{session_id}`
+- `session/{session_id}/window/{window_index}`
+- `session/{session_id}/chunk/{chunk_index}`
+- `turn/{turn_id}`
+- `turn/{turn_id}#msg:{msg_id}:{start}-{end}`
+
+These refs should be emitted in retrieval responses so callers can progressively
+expand context without replaying full JSONL archives.
 
 ### Context Windows (Tier 1.5)
 
@@ -554,12 +581,17 @@ CREATE TABLE session_chunks (
     content_preview TEXT,               -- First 500 chars
     byte_offset INTEGER,                -- Offset in JSONL for lazy loading
     byte_length INTEGER,                -- Length for extraction
+    turn_ref TEXT,                      -- Optional: turn/<id> reference
+    chunk_ref TEXT,                     -- Optional: session/<id>/chunk/<idx> reference
 
     -- Metadata
     tools_used JSON,                    -- ["Edit", "Bash"]
     files_touched JSON,                 -- ["auth.go"]
     has_error BOOLEAN DEFAULT FALSE,
     error_type TEXT,                    -- "TypeError", "CompileError", etc.
+    trace_id TEXT,                      -- Trace lineage for observability
+    span_id TEXT,
+    parent_span_id TEXT,
 
     -- Embedding for chunk-level search
     embedding BLOB,
@@ -570,6 +602,7 @@ CREATE TABLE session_chunks (
 CREATE INDEX idx_chunks_session ON session_chunks(session_id);
 CREATE INDEX idx_chunks_error ON session_chunks(session_id) WHERE has_error = TRUE;
 CREATE INDEX idx_chunks_files ON session_chunks(files_touched);
+CREATE INDEX idx_chunks_turn_ref ON session_chunks(turn_ref);
 ```
 
 ### Schema: session_context_windows
@@ -643,6 +676,12 @@ User query: "How did I fix the JWT refresh race condition?"
 │ Tier 1: Session-level search (fast, ~50ms)                  │
 │ session/recall → "Session abc123: JWT auth implementation"  │
 └─────────────────────────────────────────────────────────────┘
+                    │ request temporal context?
+                    ▼
+┌─────────────────────────────────────────────────────────────┐
+│ Temporal Pyramid View                                       │
+│ months → weeks → days → hours (with expandable refs)        │
+└─────────────────────────────────────────────────────────────┘
                     │ need more detail?
                     ▼
 ┌─────────────────────────────────────────────────────────────┐
@@ -663,6 +702,21 @@ User query: "How did I fix the JWT refresh race condition?"
 │ session/deep-dive → Full Edit tool call with diff           │
 └─────────────────────────────────────────────────────────────┘
 ```
+
+### Event-Driven Enrichment Hook (PR-10 Alignment, V2 Target)
+
+Turn/chunk indexing should emit events so artifacts can be generated
+asynchronously:
+
+- `turn.recorded`
+- `chunk.indexed`
+- `bucket.updated`
+- `artifact.created`
+- `artifact.failed`
+
+Artifacts (summaries, embeddings, labels) should use idempotency keys:
+`(subject_id, artifact_kind, artifact_version)` so retries are safe and
+turn completion remains non-blocking.
 
 ### Storage Estimates
 

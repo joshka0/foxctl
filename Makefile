@@ -21,7 +21,7 @@ SKILL_DIRS := $(shell find skills -mindepth 1 -maxdepth 1 -type d)
 # Skills requiring CGO (excluded from non-CGO builds)
 CGO_SKILLS := libsql_migrate
 
-.PHONY: fmt lint typecheck lsp-check vet test test-cgo test-cgo-short test-race test-integration test-integration-cmd cover check-coverage build build-cgo build-all viewer snapshot tidy check skill skills-build skills-build-cgo skills-build-all skills-install skills-install-cgo skills-install-all skills-test completions init ts-install ts-dev-tui ts-dev-gui ts-build-tui ts-tui ts-build ts-typecheck env-sync env-watch env-watch-stop db-backup db-backup-list db-backup-clean
+.PHONY: fmt lint typecheck lsp-check vet test test-cgo test-cgo-short test-race test-integration test-integration-cmd cover check-coverage check-doc-links build build-cgo build-all viewer snapshot tidy check skill skills-build skills-build-cgo skills-build-all skills-install skills-install-cgo skills-install-all skills-test completions init ts-install ts-dev-tui ts-dev-gui ts-build-tui ts-tui ts-build ts-typecheck env-sync env-watch env-watch-stop db-backup db-backup-list db-backup-clean
 
 fmt:
 	@echo "Running gofumpt"
@@ -410,7 +410,10 @@ snapshot:
 tidy:
 	@$(GO_CMD) mod tidy
 
-check: fmt lint vet test check-coverage build
+check-doc-links:
+	@bash scripts/check_doc_links.sh
+
+check: fmt lint vet test check-coverage check-doc-links build
 
 completions: build
 	@mkdir -p dist

@@ -28,9 +28,9 @@ import (
 // - Relationship context (tone, topics, emotional continuity)
 //
 // Layers:
-// - L0 (Vivid): Recent turns from today, kept in full
-// - L1 (Recent): Yesterday's conversation, summarized
-// - L2 (History): Older conversations, distilled to key facts/topics
+// - L0 (Vivid): Recent turns from today, kept in full (hours view)
+// - L1 (Recent): Daily summaries for recent history (days view)
+// - L2 (History): Distilled long-term context (weeks/months view)
 type ConversationMemory struct {
 	db                   *sql.DB
 	summarizer           ConversationSummarizer
@@ -63,6 +63,16 @@ type MemoryConfig struct {
 	TotalTokenBudget int // Total tokens for memory context (default: 40000)
 }
 
+// ContextLayerBudget captures token budgets for each memory layer.
+// This keeps layered context assembly explicit and easy to reuse by dynamic
+// context builders that may choose to pull only a subset of layers.
+type ContextLayerBudget struct {
+	L0Vivid   int
+	L1Recent  int
+	L2History int
+	Total     int
+}
+
 // DefaultMemoryConfig returns sensible defaults for companion conversations.
 func DefaultMemoryConfig() MemoryConfig {
 	return MemoryConfig{
@@ -91,6 +101,16 @@ func RoleplayMemoryConfig() MemoryConfig {
 		RecentTokenBudget:  12000, // More for relationship consistency
 		HistoryTokenBudget: 8000,  // Relationship history matters more
 		TotalTokenBudget:   50000, // ~50K total for rich context
+	}
+}
+
+// LayerBudget returns per-layer and total token budgets for context assembly.
+func (m *ConversationMemory) LayerBudget() ContextLayerBudget {
+	return ContextLayerBudget{
+		L0Vivid:   m.config.VividTokenBudget,
+		L1Recent:  m.config.RecentTokenBudget,
+		L2History: m.config.HistoryTokenBudget,
+		Total:     m.config.TotalTokenBudget,
 	}
 }
 
@@ -771,11 +791,16 @@ func (m *ConversationMemory) AppendTurn(ctx context.Context, turn ConversationTu
 }
 
 // GetContext builds the memory context for an LLM prompt.
-// Returns formatted text combining L0 (vivid) + L1 (recent) + L2 (history).
-// GetContext builds layered context for a conversation.
+// Returns formatted text combining L2 (history) + L1 (recent) + L0 (vivid)
+// under explicit per-layer token budgets.
+//
+// Temporal pyramid mapping:
+// - L0: last hours/day (full turns)
+// - L1: recent days (daily summaries)
+// - L2: weeks/months (distilled relationship context)
 //
 // Index:
-// - Purpose: Assemble vivid turns, summaries, and distilled history into context
+// - Purpose: Assemble layered, budgeted context for dynamic prompt construction
 // - Flow: load history → load summaries → load turns → apply budgets → format sections
 // - SideEffects: reads conversation data
 // - FailureModes: query errors yield partial context
@@ -789,26 +814,28 @@ func (m *ConversationMemory) GetContext(ctx context.Context, conversationID stri
 	var summaryText string
 	var turnText string
 
-	// L2: Distilled history (oldest context, most compressed)
+	budget := m.LayerBudget()
+
+	// L2: Distilled history (oldest context, most compressed).
 	history, err := m.getDistilledHistory(ctx, conversationID)
 	if err == nil && history != nil {
-		historyText = trimToTokenBudget(m.formatHistory(history), m.config.HistoryTokenBudget, false)
+		historyText = trimToTokenBudget(m.formatHistory(history), budget.L2History, false)
 	}
 
-	// L1: Recent summaries (last week, summarized by day)
+	// L1: Recent summaries (days view).
 	summaries, err := m.getRecentSummaries(ctx, conversationID)
 	if err == nil && len(summaries) > 0 {
-		summaryText = trimToTokenBudget(m.formatSummaries(summaries), m.config.RecentTokenBudget, false)
+		summaryText = trimToTokenBudget(m.formatSummaries(summaries), budget.L1Recent, false)
 	}
 
-	// L0: Vivid turns (today's conversation, full content)
+	// L0: Vivid turns (hours/day view, full content).
 	turns, err := m.getVividTurns(ctx, conversationID)
 	if err == nil && len(turns) > 0 {
-		trimmedTurns := trimTurnsToTokenBudget(turns, m.config.VividTokenBudget)
-		turnText = trimToTokenBudget(m.formatTurns(trimmedTurns), m.config.VividTokenBudget, true)
+		trimmedTurns := trimTurnsToTokenBudget(turns, budget.L0Vivid)
+		turnText = trimToTokenBudget(m.formatTurns(trimmedTurns), budget.L0Vivid, true)
 	}
 
-	historyText, summaryText, turnText = applyTotalTokenBudget(historyText, summaryText, turnText, m.config.TotalTokenBudget)
+	historyText, summaryText, turnText = applyTotalTokenBudget(historyText, summaryText, turnText, budget.Total)
 
 	var parts []string
 	if historyText != "" {

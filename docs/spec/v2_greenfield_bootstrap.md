@@ -2,7 +2,7 @@
 
 Status: Draft  
 Owner: Solo maintainer  
-Last Updated: 2026-02-17
+Last Updated: 2026-02-18
 
 ## Purpose
 
@@ -14,6 +14,24 @@ Define a practical bootstrap sequence for a clean v2 runtime with:
 - Thin transports (CLI/Web/Daemon)
 - Deterministic, test-first behavior
 - Go-native non-blocking control-plane components
+
+## Version Boundary
+
+This spec is `v2`-only and maps to `internal/v2/*`.
+v1 behavior remains unchanged unless a command is explicitly routed through
+`AGENTCTL_V2_COMMANDS`.
+
+## Related Docs
+
+- `docs/spec/v2_repo_rules_and_skills.md`
+- `docs/plans/v2-greenfield-bootstrap.md`
+- `docs/general/runtime-orchestration.md`
+- `docs/general/memory.md`
+- `docs/general/companion-memory.md`
+- `docs/general/context-and-observability.md`
+- `docs/architecture/system-architecture.md`
+- `docs/designs/hierarchical-memory-retrieval.md`
+- `docs/designs/progressive-memory-system.md`
 
 ## V2 Design Principles
 
@@ -141,9 +159,16 @@ Use a split runtime model:
 4. High-read shared state is exposed as immutable snapshots (atomic swap), not lock-heavy mutable structs.
 5. Mutable runtime state has single owner goroutines where practical.
 
+### Non-Blocking Guarantees (V2)
+
+1. Turn completion is request-scoped and ends at `PersistTurn` + `EmitEvents`.
+2. Enrichment/digest/indexing runs in supervisor-managed background components.
+3. Backpressure is handled with bounded/drop-or-defer queue policies and events, never by stalling turn execution.
+4. Context assembly reads persisted artifacts/snapshots and must not wait for in-flight enrichers.
+
 ## Turn Intelligence Model
 
-Turns are immutable source-of-truth records. Enrichment (embedding/classification/annotation/summarization) is derived asynchronously.
+In v2, turns are immutable source-of-truth records. Enrichment (embedding/classification/annotation/summarization) is derived asynchronously.
 
 Hierarchy:
 
@@ -200,6 +225,7 @@ Rules:
 1. Turn writes must not block on enrichment.
 2. Enrichment jobs are idempotent per `(turn_id, artifact_type, artifact_version)`.
 3. Async enrichers link lineage through `correlation_id`/`causation_id`.
+4. These rules apply only to commands currently routed to v2.
 
 ## Canonical Runtime Pipeline
 

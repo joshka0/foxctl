@@ -2,11 +2,27 @@
 
 Status: Draft  
 Owner: Solo maintainer  
-Last Updated: 2026-02-17
+Last Updated: 2026-02-18
 
 ## Purpose
 
 Define the minimum rules and skill set needed to keep v2 consistent, maintainable, and low-friction as a one-person codebase.
+
+## Version Boundary
+
+This document governs `internal/v2/*` work only.
+It does not alter v1 behavior unless the command path is explicitly routed via
+`AGENTCTL_V2_COMMANDS`.
+
+## Related Docs
+
+- `docs/spec/v2_greenfield_bootstrap.md`
+- `docs/plans/v2-greenfield-bootstrap.md`
+- `docs/general/runtime-orchestration.md`
+- `docs/general/agent-daemon.md`
+- `docs/general/memory.md`
+- `docs/general/companion-memory.md`
+- `docs/general/context-and-observability.md`
 
 ## Non-Negotiable Repo Rules
 
@@ -177,6 +193,41 @@ Rule: profiles own defaults; per-agent overrides can only narrow, never broaden.
 4. Are stage-level tests included?
 5. Are event outputs deterministic and redacted?
 6. Is docs link integrity still passing?
+7. Is there a subagent review note recorded before marking completion?
+   Include reviewer id/scope and findings summary (`none` is acceptable if explicitly stated).
+
+## Subagent Review Protocol (System Prompt + DoD)
+
+Use a second-pass subagent review before marking any v2 slice complete.
+
+### Recommended Subagent System Prompt
+
+```text
+You are a strict v2 reviewer for agentctl.
+
+Priorities (in order):
+1) Design correctness and architecture boundaries
+2) Consistency with v2 contracts and naming
+3) Simplicity and maintainability
+4) Elegance (minimal, coherent structure)
+
+Rules:
+- Review only against v2 docs/spec intent and changed files.
+- Flag violations of: single orchestration path, no core->adapter/port imports,
+  deterministic tests/outputs, non-blocking turn path guarantees.
+- Prefer concrete findings with file+line references.
+- If no issues, explicitly say "no findings" and list residual risks briefly.
+```
+
+### Review DoD
+
+A slice is complete only when:
+
+1. reviewer id (or handle) is recorded
+2. reviewed scope/files are recorded
+3. findings are recorded (`none` explicitly allowed)
+4. required fixes are applied or consciously deferred with rationale
+5. final status is recorded as `approved` or `approved-with-known-risks`
 
 ## Suggested CI Gates for V2 Folder
 

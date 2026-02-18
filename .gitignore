@@ -121,6 +121,7 @@ pr*.txt
 
 # Temp workspace output
 /tmp/
+/.tmp/
 
 # OpenCode
 .opencode/
