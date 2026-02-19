@@ -104,7 +104,7 @@ Wave 3 retrieval goals and PR-17+ scope live in:
 
 ## Open Questions
 
-- [ ] libsql embedding storage format and vector indexing policy for artifact tables
+- [x] libsql embedding storage format and vector indexing policy for artifact tables
 - [ ] context budget policy across L2/L1/L0 (global vs per-command vs per-role)
 - [ ] whether and how to backfill selected v1 turns into v2 retrieval surfaces
 - [x] native libsql/Turso vector-path CI coverage for `SearchArtifactsByEmbedding` (CI now runs strict native-vector gate with `AGENTCTL_V2_REQUIRE_NATIVE_VECTOR_SQL=1`)
@@ -143,6 +143,17 @@ Subagent Review
 
 ## Progress Log
 
+- 2026-02-19:
+  Subagent Review
+  - reviewer: `019c781b-8e7b-73d1-9812-2f77532c3322`
+  - scope: `v2 artifact embedding+index policy slice` (`internal/v2/adapters/libsql/turns/{store.go,schema.go,store_test.go,store_vector_cgo_test.go}`, `docs/spec/v2_greenfield_bootstrap.md`, `docs/plans/v2-greenfield-bootstrap.md`, `docs/plans/v2-implementation-todo.md`)
+  - findings: `none`
+  - decision: `approved`
+- 2026-02-19: Implemented v2 artifact embedding storage + vector index policy.
+  - Added explicit vector index policy constants and index-assisted vector candidate retrieval (`vector_top_k`) in turns adapter.
+  - Added strict dimension policy for vector mode (`ErrInvalidEmbeddingDimensions`) on both artifact writes and semantic queries.
+  - Added coverage for dimension-mismatch rejection and fallback-compatibility behavior.
+  - Aligned cgo vector test config with explicit vector dimensions (`AGENTCTL_V2_TURNS_VECTOR_DIMS=4` / `AGENTCTL_VECTOR_DIMS=4`) for deterministic strict-gate runs.
 - 2026-02-19:
   Subagent Review
   - reviewer: `019c7812-a3d8-78f1-b3ff-300fb8c46c04`

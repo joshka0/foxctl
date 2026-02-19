@@ -112,10 +112,10 @@ func MigrateSchema(ctx context.Context, db *sql.DB) error {
 
 	// Best-effort vector index for libsql deployments. SQLite fallback builds
 	// do not have libsql_vector_idx and should continue without failing.
-	_, err := db.ExecContext(ctx, `
-		CREATE INDEX IF NOT EXISTS idx_v2_turn_artifacts_embedding_vec
+	_, err := db.ExecContext(ctx, fmt.Sprintf(`
+		CREATE INDEX IF NOT EXISTS %s
 		ON v2_turn_artifacts(libsql_vector_idx(embedding))
-	`)
+	`, artifactVectorIndexName))
 	if err != nil && !isVectorIndexUnsupported(err) {
 		return fmt.Errorf("v2 turns migrate vector index: %w", err)
 	}

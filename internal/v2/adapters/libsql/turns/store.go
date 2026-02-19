@@ -27,7 +27,10 @@ const (
 	ArtifactTypeClassification = "classification"
 	ArtifactTypeLearning       = "learning"
 
-	defaultArtifactVersion = "v1"
+	defaultArtifactVersion        = "v1"
+	artifactVectorIndexName       = "idx_v2_turn_artifacts_embedding_vec"
+	artifactVectorCandidateFactor = 12
+	artifactVectorCandidateCap    = 500
 )
 
 var (
@@ -37,6 +40,9 @@ var (
 	ErrInvalidArtifactType = errors.New("v2 turns: invalid artifact type")
 	// ErrInvalidArtifactRef indicates malformed artifact references.
 	ErrInvalidArtifactRef = errors.New("v2 turns: invalid artifact ref")
+	// ErrInvalidEmbeddingDimensions indicates embeddings do not match
+	// configured vector dimensions when vector mode is active.
+	ErrInvalidEmbeddingDimensions = errors.New("v2 turns: invalid embedding dimensions")
 
 	artifactRefPattern = regexp.MustCompile(`^turn/([^/#]+)/artifact/([^/#]+)/([^/#]+)$`)
 
@@ -84,6 +90,8 @@ type Store struct {
 	closeFn       func() error
 	now           func() time.Time
 	vectorEnabled atomic.Bool
+	// vectorDimensions is the configured embedding width for vector mode.
+	vectorDimensions int
 }
 
 // NewStore constructs a turns store over an existing sql.DB.
@@ -94,6 +102,7 @@ func NewStore(db *sql.DB, closeFn func() error) *Store {
 		now: func() time.Time {
 			return time.Now().UTC()
 		},
+		vectorDimensions: dbdriver.GetDefaultVectorDimensions(),
 	}
 }
 
@@ -118,6 +127,7 @@ func Open(ctx context.Context, storageRoot string) (*Store, error) {
 	}
 
 	driverType := cfg.Driver
+	vectorDims := resolveVectorDimensions(cfg)
 	db, closeFn, err := dbdriver.OpenDBCompatWithCloser(ctx, cfg, MigrateSchema)
 	if err != nil && cfg.Driver == dbdriver.DriverLibSQL {
 		fallback := dbdriver.DefaultSQLiteConfig(filepath.Join(storageRoot, "v2_turns.db"))
@@ -130,6 +140,7 @@ func Open(ctx context.Context, storageRoot string) (*Store, error) {
 
 	store := NewStore(db, closeFn)
 	store.vectorEnabled.Store(driverType == dbdriver.DriverLibSQL || driverType == dbdriver.DriverTurso)
+	store.vectorDimensions = vectorDims
 	return store, nil
 }
 
@@ -728,6 +739,14 @@ func (s *Store) SearchArtifactsByEmbedding(
 			return run.ArtifactSearchResult{}, fmt.Errorf("v2 turns search artifacts: embedding contains invalid value at index %d", i)
 		}
 	}
+	if s.vectorEnabled.Load() && s.vectorDimensions > 0 && len(queryEmbedding) != s.vectorDimensions {
+		return run.ArtifactSearchResult{}, fmt.Errorf(
+			"%w: query=%d configured=%d",
+			ErrInvalidEmbeddingDimensions,
+			len(queryEmbedding),
+			s.vectorDimensions,
+		)
+	}
 
 	normalized, err := normalizeArtifactSearchOptions(opts)
 	if err != nil {
@@ -832,6 +851,7 @@ func (s *Store) searchArtifactCandidatesVector(
 	opts run.ArtifactSearchOptions,
 ) ([]artifactSimilarityCandidate, error) {
 	vectorStr := float32sToVectorString(queryEmbedding)
+	vectorTopKExpr := vectorTopKExpression(artifactVectorIndexName, vectorStr, vectorCandidateLimit(opts))
 
 	where := []string{"a.embedding IS NOT NULL"}
 	args := make([]any, 0, 8)
@@ -847,14 +867,7 @@ func (s *Store) searchArtifactCandidatesVector(
 		}
 		where = append(where, fmt.Sprintf("a.artifact_type IN (%s)", strings.Join(typePredicates, ", ")))
 	}
-	queryLimit := opts.Limit
-	if opts.MinSimilarity > 0 {
-		queryLimit = opts.Limit * 12
-		if queryLimit > 500 {
-			queryLimit = 500
-		}
-	}
-	args = append(args, queryLimit)
+	args = append(args, opts.Limit)
 
 	query := fmt.Sprintf(`
 		SELECT
@@ -863,12 +876,13 @@ func (s *Store) searchArtifactCandidatesVector(
 			a.artifact_version,
 			COALESCE(a.updated_at, ''),
 			vector_distance_cos(a.embedding, vector('%s')) AS distance
-		FROM v2_turn_artifacts a
+		FROM %s vt
+		JOIN v2_turn_artifacts a ON a.rowid = vt.id
 		JOIN v2_turns t ON t.id = a.turn_id
 		WHERE %s
 		ORDER BY distance ASC, a.updated_at DESC, a.turn_id ASC, a.artifact_type ASC, a.artifact_version ASC
 		LIMIT $%d
-	`, vectorStr, strings.Join(where, " AND "), len(args))
+	`, vectorStr, vectorTopKExpr, strings.Join(where, " AND "), len(args))
 
 	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
@@ -1075,7 +1089,6 @@ func (s *Store) normalizeArtifact(artifact Artifact) (Artifact, error) {
 			return Artifact{}, fmt.Errorf("v2 turns save artifact: embedding contains invalid value at index %d", i)
 		}
 	}
-
 	now := s.now().UTC()
 	if artifact.CreatedAt.IsZero() {
 		artifact.CreatedAt = now
@@ -1128,6 +1141,15 @@ func (s *Store) insertArtifactWithoutVector(ctx context.Context, artifact Artifa
 }
 
 func (s *Store) insertArtifactWithVector(ctx context.Context, artifact Artifact) error {
+	if s.vectorDimensions > 0 && len(artifact.Embedding) > 0 && len(artifact.Embedding) != s.vectorDimensions {
+		return fmt.Errorf(
+			"%w: artifact=%d configured=%d",
+			ErrInvalidEmbeddingDimensions,
+			len(artifact.Embedding),
+			s.vectorDimensions,
+		)
+	}
+
 	embeddingJSON, err := sqlutil.FormatJSON(artifact.Embedding)
 	if err != nil {
 		return fmt.Errorf("format embedding json: %w", err)
@@ -1211,6 +1233,48 @@ func float32sToVectorString(values []float32) string {
 	return "[" + strings.Join(parts, ",") + "]"
 }
 
+func vectorTopKExpression(indexName string, vectorString string, k int) string {
+	return fmt.Sprintf("vector_top_k('%s', '%s', %d)", indexName, vectorString, k)
+}
+
+func vectorCandidateLimit(opts run.ArtifactSearchOptions) int {
+	limit := opts.Limit
+	if limit <= 0 {
+		limit = 10
+	}
+	// Use a wider candidate pool when post-filtering is likely (session/type filters
+	// or similarity threshold) to reduce false negatives from preselection.
+	if opts.MinSimilarity > 0 || opts.SessionID != "" || len(opts.ArtifactTypes) > 0 {
+		limit *= artifactVectorCandidateFactor
+	}
+	if limit > artifactVectorCandidateCap {
+		limit = artifactVectorCandidateCap
+	}
+	if limit < 1 {
+		limit = 1
+	}
+	return limit
+}
+
+func resolveVectorDimensions(cfg dbdriver.Config) int {
+	dims := dbdriver.GetDefaultVectorDimensions()
+	switch cfg.Driver {
+	case dbdriver.DriverLibSQL:
+		if cfg.LibSQL.VectorDimensions > 0 {
+			dims = cfg.LibSQL.VectorDimensions
+		}
+	case dbdriver.DriverTurso:
+		if cfg.Turso.VectorDimensions > 0 {
+			dims = cfg.Turso.VectorDimensions
+		}
+	case dbdriver.DriverPostgres:
+		if cfg.Postgres.VectorDimensions > 0 {
+			dims = cfg.Postgres.VectorDimensions
+		}
+	}
+	return dims
+}
+
 func isVectorUnsupported(err error) bool {
 	if err == nil {
 		return false
@@ -1219,7 +1283,9 @@ func isVectorUnsupported(err error) bool {
 	return strings.Contains(msg, "no such function") ||
 		strings.Contains(msg, "unknown function") ||
 		strings.Contains(msg, "vector(") ||
-		strings.Contains(msg, "libsql_vector_idx")
+		strings.Contains(msg, "libsql_vector_idx") ||
+		strings.Contains(msg, "vector_top_k") ||
+		strings.Contains(msg, artifactVectorIndexName)
 }
 
 var (

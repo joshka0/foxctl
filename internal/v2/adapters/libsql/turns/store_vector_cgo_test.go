@@ -28,6 +28,9 @@ func TestTurnStore_SearchArtifactsByEmbedding_VectorPathLibSQL(t *testing.T) {
 	// Force libsql driver so this test validates the native vector SQL path.
 	t.Setenv("AGENTCTL_V2_TURNS_DB_DRIVER", "libsql")
 	t.Setenv("AGENTCTL_V2_TURNS_DB_PATH", filepath.Join(storageRoot, "turns_vector.libsql"))
+	t.Setenv("AGENTCTL_V2_TURNS_VECTOR_SEARCH", "1")
+	t.Setenv("AGENTCTL_V2_TURNS_VECTOR_DIMS", "4")
+	t.Setenv("AGENTCTL_VECTOR_DIMS", "4")
 
 	store, err := Open(ctx, storageRoot)
 	if err != nil {

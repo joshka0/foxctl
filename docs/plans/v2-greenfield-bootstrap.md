@@ -821,3 +821,15 @@ for production use of vector-backed retrieval.
      must be visible in telemetry.
    - Required threshold for promotion: fallback path ratio **<= 5%** over a
      rolling 24-hour window for retrieval-dependent commands.
+
+#### Artifact Vector Policy (Implemented)
+
+1. Embeddings are dual-written in artifact rows:
+   - native vector column (`embedding`, `F32_BLOB(N)`)
+   - portable JSON column (`embedding_json`) for fallback cosine
+2. Vector mode enforces dimension consistency for write/query operations.
+3. Native vector retrieval path uses index-assisted candidate selection
+   (`vector_top_k` on `idx_v2_turn_artifacts_embedding_vec`) with deterministic
+   rerank and stable tie-break ordering.
+4. If vector primitives are unavailable, retrieval degrades to fallback mode and
+   emits path/capability telemetry.

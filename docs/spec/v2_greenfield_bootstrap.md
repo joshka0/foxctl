@@ -270,6 +270,24 @@ Required properties:
 4. Ordering is deterministic and bounded by explicit limits.
 5. Retrieval failure/degradation must not affect turn completion guarantees.
 
+Embedding storage and index policy:
+
+1. Artifacts persist embeddings in two forms:
+   - `embedding` (`F32_BLOB(N)`) for native libsql vector SQL
+   - `embedding_json` (`TEXT`) for deterministic fallback cosine ranking and portability
+2. Vector dimension policy:
+   - canonical dimension `N` is configured by `AGENTCTL_VECTOR_DIMS` (and per-store
+     overrides where available)
+   - when vector mode is active, writes/queries with mismatched embedding dimensions
+     fail fast with typed errors
+3. Vector index policy:
+   - maintain best-effort libsql index `idx_v2_turn_artifacts_embedding_vec` via
+     `libsql_vector_idx(embedding)`
+   - vector retrieval uses `vector_top_k(...)` candidate selection plus deterministic
+     rerank (`vector_distance_cos`, then stable tie-breaks)
+   - if vector SQL/index primitives are unavailable, retrieval downgrades to fallback
+     cosine and must surface degraded path/capability metadata
+
 Fallback guardrails (required for rollout readiness):
 
 1. Fallback execution is allowed for continuity, but must be explicitly surfaced
