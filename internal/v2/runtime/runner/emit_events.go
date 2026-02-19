@@ -10,6 +10,7 @@ import (
 
 func (p *Pipeline) stageEmitEvents(ctx context.Context, st *executionState) *v2errors.V2Error {
 	summary := strings.TrimSpace(st.out.Summary)
+	st.out.Summary = summary
 	if summary == "" {
 		if st.out.Degraded {
 			summary = "completed with degradation"
