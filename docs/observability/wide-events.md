@@ -263,11 +263,36 @@ for dynamic context building:
 - `total_hits`
 - `vector_hits`
 - `fallback_hits`
+- `vector_capability_enabled_calls`
+- `vector_capability_disabled_calls`
+- `vector_capability_unknown_calls`
+- vector latency buckets:
+  - `vector_latency_le_10ms`
+  - `vector_latency_le_50ms`
+  - `vector_latency_le_100ms`
+  - `vector_latency_gt_100ms`
+- fallback latency buckets:
+  - `fallback_latency_le_10ms`
+  - `fallback_latency_le_50ms`
+  - `fallback_latency_le_100ms`
+  - `fallback_latency_gt_100ms`
+- vector hit buckets:
+  - `vector_hit_bucket_zero`
+  - `vector_hit_bucket_one_to_three`
+  - `vector_hit_bucket_four_to_ten`
+  - `vector_hit_bucket_gt_ten`
+- fallback hit buckets:
+  - `fallback_hit_bucket_zero`
+  - `fallback_hit_bucket_one_to_three`
+  - `fallback_hit_bucket_four_to_ten`
+  - `fallback_hit_bucket_gt_ten`
 
 Layered context responses also include per-request metadata:
 
 - `artifact_search_path`
+- `artifact_vector_capability`
 - `artifact_hit_count`
+- `artifact_hit_bucket`
 - `artifact_search_error` (only on non-fatal semantic retrieval failures)
 
 ### Wide Event Mapping (Implemented)
@@ -280,7 +305,10 @@ When exporting semantic retrieval behavior as wide events, use:
 - `trace_id`: inherited from request context when present
 - `parent_id`: inherited from current span when present
 - `data.search_path`: `vector|fallback|disabled|error`
+- `data.vector_capability`: `enabled|disabled|unknown`
 - `data.hit_count`: integer
+- `data.latency_bucket`: `le_10ms|le_50ms|le_100ms|gt_100ms`
+- `data.hit_bucket`: `zero|one_to_three|four_to_ten|gt_ten`
 - `data.session_id`: v2 session ID
 - `data.artifact_types`: optional list filter
 - `data.min_similarity`: optional threshold
@@ -294,7 +322,10 @@ Example payload:
   "status": "ok",
   "data": {
     "search_path": "fallback",
+    "vector_capability": "disabled",
     "hit_count": 2,
+    "latency_bucket": "le_50ms",
+    "hit_bucket": "one_to_three",
     "session_id": "run-layered",
     "artifact_types": ["embedding", "annotation"],
     "min_similarity": 0.5

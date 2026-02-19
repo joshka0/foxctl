@@ -85,8 +85,8 @@ Wave 3 retrieval goals and PR-17+ scope live in:
 
 - [ ] PR-18: libsql vector-path validation + retrieval quality hardening
   - [ ] add deterministic integration tests that exercise native libsql vector SQL path (`vector_distance_cos`) in CI-friendly setup
-  - [ ] add explicit runtime capability signal (vector enabled/disabled) to retrieval observability output and docs
-  - [ ] add latency + hit-rate telemetry buckets for semantic artifact search path quality
+  - [x] add explicit runtime capability signal (vector enabled/disabled) to retrieval observability output and docs
+  - [x] add latency + hit-rate telemetry buckets for semantic artifact search path quality
   - [ ] document fallback guardrails (when fallback is expected vs treated as degraded) in `docs/spec/v2_greenfield_bootstrap.md`
   - [ ] define rollout gate with measurable thresholds:
     - fallback-only corpus required invariants pass rate = `100%`
@@ -143,6 +143,25 @@ Subagent Review
 
 ## Progress Log
 
+- 2026-02-19:
+  Subagent Review
+  - reviewer: `019c77e4-a3a3-7df2-983c-303bdb82af09`
+  - scope: `PR-18 capability+telemetry slice` (`internal/v2/core/run/artifact_search.go`, `internal/v2/adapters/libsql/turns/{store.go,store_test.go}`, `internal/v2/runtime/contextbuilder/{builder.go,layered.go,layered_test.go,layered_observability_test.go}`, `docs/observability/wide-events.md`, `docs/spec/v2_greenfield_bootstrap.md`, `docs/plans/v2-implementation-todo.md`)
+  - findings: `none`
+  - decision: `approved`
+- 2026-02-19: Implemented PR-18 semantic retrieval capability and telemetry buckets.
+  - Added explicit semantic retrieval vector capability signaling (`enabled|disabled|unknown`) in `run.ArtifactSearchResult` and libsql turns store responses.
+  - Added context-builder artifact stats for:
+    - vector/fallback path-scoped latency buckets (`<=10ms`, `<=50ms`, `<=100ms`, `>100ms`)
+    - vector/fallback hit-rate buckets (`0`, `1-3`, `4-10`, `>10`)
+    - vector capability call distribution (enabled/disabled/unknown)
+  - Added layered context metadata and wide-event fields:
+    - `artifact_vector_capability`
+    - `hit_bucket`
+    - `latency_bucket` (wide events)
+  - Synced spec/docs contract updates in:
+    - `docs/observability/wide-events.md`
+    - `docs/spec/v2_greenfield_bootstrap.md`
 - 2026-02-19:
   Subagent Review
   - reviewer: `019c75d0-9ede-70a2-8541-b07ab5237599`

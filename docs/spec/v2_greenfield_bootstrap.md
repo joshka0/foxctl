@@ -163,8 +163,9 @@ type ScoredArtifact struct {
 }
 
 type ArtifactSearchResult struct {
-    Hits       []ScoredArtifact
-    SearchPath string // vector | fallback | disabled | error
+    Hits             []ScoredArtifact
+    SearchPath       string // vector | fallback | disabled | error
+    VectorCapability string // enabled | disabled | unknown
 }
 
 type ArtifactSemanticRetriever interface {
@@ -297,7 +298,7 @@ type ContextBundle struct {
     Ref          string
     Content      string
     ArtifactRefs []string
-    Meta         map[string]any // includes artifact_search_path and artifact_hit_count
+    Meta         map[string]any // includes artifact_search_path, artifact_vector_capability, artifact_hit_count
 }
 ```
 

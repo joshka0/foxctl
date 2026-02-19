@@ -719,7 +719,8 @@ func (s *Store) SearchArtifactsByEmbedding(
 	}
 	if len(queryEmbedding) == 0 {
 		return run.ArtifactSearchResult{
-			SearchPath: run.ArtifactSearchPathDisabled,
+			SearchPath:       run.ArtifactSearchPathDisabled,
+			VectorCapability: s.vectorCapability(),
 		}, nil
 	}
 	for i, value := range queryEmbedding {
@@ -741,8 +742,9 @@ func (s *Store) SearchArtifactsByEmbedding(
 				return run.ArtifactSearchResult{}, loadErr
 			}
 			return run.ArtifactSearchResult{
-				Hits:       hits,
-				SearchPath: run.ArtifactSearchPathVector,
+				Hits:             hits,
+				SearchPath:       run.ArtifactSearchPathVector,
+				VectorCapability: run.ArtifactVectorCapabilityEnabled,
 			}, nil
 		}
 		if !isVectorUnsupported(err) {
@@ -762,9 +764,20 @@ func (s *Store) SearchArtifactsByEmbedding(
 		return run.ArtifactSearchResult{}, err
 	}
 	return run.ArtifactSearchResult{
-		Hits:       hits,
-		SearchPath: run.ArtifactSearchPathFallback,
+		Hits:             hits,
+		SearchPath:       run.ArtifactSearchPathFallback,
+		VectorCapability: s.vectorCapability(),
 	}, nil
+}
+
+func (s *Store) vectorCapability() run.ArtifactVectorCapability {
+	if s == nil {
+		return run.ArtifactVectorCapabilityUnknown
+	}
+	if s.vectorEnabled.Load() {
+		return run.ArtifactVectorCapabilityEnabled
+	}
+	return run.ArtifactVectorCapabilityDisabled
 }
 
 type artifactSimilarityCandidate struct {

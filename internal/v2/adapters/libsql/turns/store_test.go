@@ -424,6 +424,9 @@ func TestTurnStore_SearchArtifactsByEmbedding_FallbackAndFilters(t *testing.T) {
 	if results.SearchPath != run.ArtifactSearchPathFallback {
 		t.Fatalf("search path=%q want %q", results.SearchPath, run.ArtifactSearchPathFallback)
 	}
+	if results.VectorCapability != run.ArtifactVectorCapabilityDisabled {
+		t.Fatalf("vector capability=%q want %q", results.VectorCapability, run.ArtifactVectorCapabilityDisabled)
+	}
 	if store.vectorEnabled.Load() {
 		t.Fatal("vectorEnabled should be disabled after unsupported vector search fallback")
 	}

@@ -127,7 +127,8 @@ func TestContextBuilder_BuildLayered_SemanticArtifactsDeterministic(t *testing.T
 	builder.SetCompanionProvider(fakeCompanionProvider{})
 	builder.SetArtifactRetriever(&fakeArtifactRetriever{
 		result: run.ArtifactSearchResult{
-			SearchPath: run.ArtifactSearchPathFallback,
+			SearchPath:       run.ArtifactSearchPathFallback,
+			VectorCapability: run.ArtifactVectorCapabilityDisabled,
 			Hits: []run.ScoredArtifact{
 				{
 					Ref:             "turn/turn-l1/artifact/annotation/v1",
@@ -184,6 +185,9 @@ func TestContextBuilder_BuildLayered_SemanticArtifactsDeterministic(t *testing.T
 	if got.Meta["artifact_search_path"] != string(run.ArtifactSearchPathFallback) {
 		t.Fatalf("artifact_search_path=%v want %q", got.Meta["artifact_search_path"], run.ArtifactSearchPathFallback)
 	}
+	if got.Meta["artifact_vector_capability"] != string(run.ArtifactVectorCapabilityDisabled) {
+		t.Fatalf("artifact_vector_capability=%v want %q", got.Meta["artifact_vector_capability"], run.ArtifactVectorCapabilityDisabled)
+	}
 	if got.Meta["artifact_hit_count"] != len(wantRefs) {
 		t.Fatalf("artifact_hit_count=%v want %d", got.Meta["artifact_hit_count"], len(wantRefs))
 	}
@@ -208,6 +212,16 @@ func TestContextBuilder_BuildLayered_SemanticArtifactsDeterministic(t *testing.T
 	}
 	if stats.TotalHits != 2 || stats.FallbackHits != 2 || stats.VectorHits != 0 {
 		t.Fatalf("unexpected stats hit distribution: %+v", stats)
+	}
+	if stats.VectorCapabilityDisabledCalls != 1 || stats.VectorCapabilityEnabledCalls != 0 || stats.VectorCapabilityUnknownCalls != 0 {
+		t.Fatalf("unexpected vector capability distribution: %+v", stats)
+	}
+	if stats.FallbackHitBucketOneTo3 != 1 || stats.FallbackHitBucketZero != 0 || stats.FallbackHitBucketFourTo10 != 0 || stats.FallbackHitBucketGT10 != 0 {
+		t.Fatalf("unexpected fallback hit buckets: %+v", stats)
+	}
+	latencyBuckets := stats.FallbackLatencyLE10MS + stats.FallbackLatencyLE50MS + stats.FallbackLatencyLE100MS + stats.FallbackLatencyGT100MS
+	if latencyBuckets != 1 {
+		t.Fatalf("fallback latency bucket total=%d want 1", latencyBuckets)
 	}
 }
 
@@ -249,6 +263,9 @@ func TestContextBuilder_BuildLayered_SemanticErrorNonFatal(t *testing.T) {
 	if got.Meta["artifact_search_path"] != string(run.ArtifactSearchPathError) {
 		t.Fatalf("artifact_search_path=%v want %q", got.Meta["artifact_search_path"], run.ArtifactSearchPathError)
 	}
+	if got.Meta["artifact_vector_capability"] != string(run.ArtifactVectorCapabilityUnknown) {
+		t.Fatalf("artifact_vector_capability=%v want %q", got.Meta["artifact_vector_capability"], run.ArtifactVectorCapabilityUnknown)
+	}
 	if got.Meta["artifact_hit_count"] != 0 {
 		t.Fatalf("artifact_hit_count=%v want 0", got.Meta["artifact_hit_count"])
 	}
@@ -268,6 +285,9 @@ func TestContextBuilder_BuildLayered_SemanticErrorNonFatal(t *testing.T) {
 	}
 	if stats.TotalHits != 0 || stats.VectorHits != 0 || stats.FallbackHits != 0 {
 		t.Fatalf("unexpected stats hits on error path: %+v", stats)
+	}
+	if stats.VectorCapabilityUnknownCalls != 1 || stats.VectorCapabilityEnabledCalls != 0 || stats.VectorCapabilityDisabledCalls != 0 {
+		t.Fatalf("unexpected vector capability stats on error path: %+v", stats)
 	}
 }
 
@@ -349,8 +369,9 @@ func (f *fakeArtifactRetriever) SearchArtifactsByEmbedding(_ context.Context, _ 
 		return run.ArtifactSearchResult{}, f.err
 	}
 	out := run.ArtifactSearchResult{
-		SearchPath: f.result.SearchPath,
-		Hits:       make([]run.ScoredArtifact, 0, len(f.result.Hits)),
+		SearchPath:       f.result.SearchPath,
+		VectorCapability: f.result.VectorCapability,
+		Hits:             make([]run.ScoredArtifact, 0, len(f.result.Hits)),
 	}
 	for _, hit := range f.result.Hits {
 		out.Hits = append(out.Hits, hit.Clone())
