@@ -145,6 +145,16 @@ Subagent Review
 
 - 2026-02-19:
   Subagent Review
+  - reviewer: `019c7807-10fb-7ac0-ab59-41450b92fd67`
+  - scope: `PR-18 rollout-gate no-vector-refs follow-up` (`internal/v2/runtime/contextbuilder/rollout_gate.go`, `internal/v2/runtime/contextbuilder/rollout_gate_test.go`)
+  - findings: `none`
+  - decision: `approved`
+- 2026-02-19: Hardened PR-18 rollout-gate overlap semantics for empty vector baseline cases.
+  - Set per-case `overlapRate` default to `0.0` when `expected==0` so case metrics align with aggregate overlap behavior.
+  - Added `TestEvaluateSemanticRolloutGate_NoComparableVectorRefsFailsOverlap` coverage for this path.
+  - Guarded `CaseResults` indexing in the new test to avoid panics on empty result slices.
+- 2026-02-19:
+  Subagent Review
   - reviewer: `019c77fd-dbb5-75f1-9e26-257938cb6f4e`
   - scope: `PR-18 rollout-gate evaluator slice` (`internal/v2/runtime/contextbuilder/rollout_gate.go`, `internal/v2/runtime/contextbuilder/rollout_gate_test.go`, `docs/plans/v2-implementation-todo.md`)
   - findings: `none`
