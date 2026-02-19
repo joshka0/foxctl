@@ -5,10 +5,23 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/jkatigb/agentctl/internal/observability"
 	"github.com/jkatigb/agentctl/internal/v2/core/run"
+)
+
+const semanticEventQueueCapacity = 128
+
+type semanticEventJob struct {
+	ctx   context.Context
+	event *observability.WideEvent
+}
+
+var (
+	semanticEventQueueOnce sync.Once
+	semanticEventQueue     = make(chan semanticEventJob, semanticEventQueueCapacity)
 )
 
 // CompanionRequest controls companion-memory context fetches.
@@ -355,7 +368,7 @@ func (b *Builder) emitSemanticArtifactSearchEvent(
 	}
 
 	if strings.TrimSpace(errText) != "" || path == run.ArtifactSearchPathError {
-		emitWideEventAsync(event.ErrorWithDetails(
+		emitWideEventAsync(ctx, event.ErrorWithDetails(
 			"semantic_retrieval",
 			"ESEMANTIC_RETRIEVAL",
 			strings.TrimSpace(errText),
@@ -363,14 +376,36 @@ func (b *Builder) emitSemanticArtifactSearchEvent(
 			duration))
 		return
 	}
-	emitWideEventAsync(event.Success(duration))
+	emitWideEventAsync(ctx, event.Success(duration))
 }
 
-func emitWideEventAsync(event *observability.WideEvent) {
+func emitWideEventAsync(ctx context.Context, event *observability.WideEvent) {
 	if event == nil {
 		return
 	}
-	go observability.Emit(context.Background(), event)
+	semanticEventQueueOnce.Do(func() {
+		go func() {
+			for job := range semanticEventQueue {
+				if job.event == nil {
+					continue
+				}
+				emitCtx := job.ctx
+				if emitCtx == nil {
+					emitCtx = context.Background()
+				}
+				observability.Emit(emitCtx, job.event)
+			}
+		}()
+	})
+
+	select {
+	case semanticEventQueue <- semanticEventJob{
+		ctx:   ctx,
+		event: event,
+	}:
+	default:
+		// Preserve non-blocking behavior under burst load by dropping low-priority telemetry.
+	}
 }
 
 func normalizeSemanticHits(hits []run.ScoredArtifact, minSimilarity float64, limit int) []run.ScoredArtifact {
