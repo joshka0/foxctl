@@ -13,6 +13,7 @@ import (
 type Router struct {
 	flags         portconfig.V2Flags
 	shadowFlags   portconfig.V2Flags
+	freezeFlags   portconfig.V2Flags
 	observe       ports.Observer
 	shadowObserve ports.ShadowObserver
 	shadowTimeout time.Duration
@@ -43,6 +44,25 @@ func NewRouterWithShadow(
 	}
 }
 
+// NewRouterWithShadowAndFreeze builds a CLI router with optional shadow execution and freeze gates.
+func NewRouterWithShadowAndFreeze(
+	flags portconfig.V2Flags,
+	shadowFlags portconfig.V2Flags,
+	freezeFlags portconfig.V2Flags,
+	observe ports.Observer,
+	shadowObserve ports.ShadowObserver,
+	shadowTimeout time.Duration,
+) Router {
+	return Router{
+		flags:         flags,
+		shadowFlags:   shadowFlags,
+		freezeFlags:   freezeFlags,
+		observe:       observe,
+		shadowObserve: shadowObserve,
+		shadowTimeout: shadowTimeout,
+	}
+}
+
 // Enabled reports whether a command is routed to v2.
 func (r Router) Enabled(command string) bool {
 	return r.flags.Enabled(strings.TrimSpace(command))
@@ -60,6 +80,7 @@ func Dispatch[T any](
 	return ports.DispatchWithShadow(ctx, ports.DispatchOptions[T]{
 		Flags:         router.flags,
 		ShadowFlags:   router.shadowFlags,
+		FreezeFlags:   router.freezeFlags,
 		Command:       command,
 		CorrelationID: correlationID,
 		V1:            v1,

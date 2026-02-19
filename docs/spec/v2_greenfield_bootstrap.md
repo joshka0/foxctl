@@ -144,6 +144,33 @@ type TurnArtifactEnricher interface {
     Enrich(ctx context.Context, turn TurnRecord) ([]TurnArtifact, error)
 }
 
+type ArtifactSearchOptions struct {
+    SessionID     string
+    ArtifactTypes []string
+    Limit         int
+    MinSimilarity float64
+}
+
+type ScoredArtifact struct {
+    Ref             string
+    TurnID          string
+    ArtifactType    string
+    ArtifactVersion string
+    Similarity      float64
+    Distance        float64
+    Summary         string
+    MetadataJSON    json.RawMessage
+}
+
+type ArtifactSearchResult struct {
+    Hits       []ScoredArtifact
+    SearchPath string // vector | fallback | disabled | error
+}
+
+type ArtifactSemanticRetriever interface {
+    SearchArtifactsByEmbedding(ctx context.Context, queryEmbedding []float32, opts ArtifactSearchOptions) (ArtifactSearchResult, error)
+}
+
 type ContextBuilder interface {
     Build(ctx context.Context, req ContextRequest) (ContextBundle, error)
 }
@@ -226,6 +253,66 @@ Rules:
 2. Enrichment jobs are idempotent per `(turn_id, artifact_type, artifact_version)`.
 3. Async enrichers link lineage through `correlation_id`/`causation_id`.
 4. These rules apply only to commands currently routed to v2.
+
+### Artifact Semantic Retrieval Contract (Wave 3)
+
+Derived artifact retrieval should support semantic lookup over persisted
+embeddings with deterministic behavior across driver modes.
+
+Required properties:
+
+1. Retrieval is libsql-vector first when vector SQL is available.
+2. Retrieval falls back to in-process cosine ranking when vector SQL is unavailable.
+3. Filter dimensions include:
+   - `session_id` (optional)
+   - `artifact_type` (optional; one of embedding/annotation/classification/learning)
+4. Ordering is deterministic and bounded by explicit limits.
+5. Retrieval failure/degradation must not affect turn completion guarantees.
+
+### Context Builder Integration Contract (PR-17 Proposal)
+
+Context assembly should treat artifact-semantic retrieval as an optional layer
+that enriches, but never blocks, baseline temporal/context retrieval.
+
+Proposed request/response extensions:
+
+```go
+type ArtifactSemanticQuery struct {
+    QueryEmbedding []float32
+    SessionID      string
+    ArtifactTypes  []string
+    Limit          int
+    MinSimilarity  float64
+    // Maps directly to ArtifactSearchOptions in the semantic retriever.
+}
+
+type ContextRequest struct {
+    Ref       string
+    Temporal  *TemporalRequest
+    Semantic  *ArtifactSemanticQuery
+    // Existing budget/config fields remain; semantic retrieval must honor them.
+}
+
+type ContextBundle struct {
+    Ref          string
+    Content      string
+    ArtifactRefs []string
+    Meta         map[string]any // includes artifact_search_path and artifact_hit_count
+}
+```
+
+Integration rules:
+
+1. If `Semantic == nil`, context builder behavior is unchanged.
+2. If retriever is unavailable/fails, return context without semantic matches and
+   set non-fatal metadata (`artifact_search_path=disabled|error`).
+3. Semantic matches are filtered by `MinSimilarity`, deduplicated by `ref`, and
+   bounded by explicit limits/budgets.
+4. Deterministic merge order:
+   - temporal/coarse context blocks first
+   - semantic artifact refs sorted by similarity desc, then ref asc
+5. Context builder must query persisted artifact state only and must not wait for
+   in-flight enricher jobs.
 
 ## Canonical Runtime Pipeline
 

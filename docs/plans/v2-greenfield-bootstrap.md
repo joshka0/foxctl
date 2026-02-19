@@ -593,5 +593,173 @@ Exit checks:
 7. **PR-07**: Supervisor + Runtime Event Bus
 8. **PR-08**: Snapshots + Non-Blocking Maintenance
 9. **PR-09**: Turn Intelligence + Context Builder
+10. **PR-10**: Ask Shadow Validation Plumbing
 
-Each PR is independently testable. PRs 1-5 have no v1 business-logic changes. PR-06 wires routing with opt-in flag and minimal touch points in existing command dispatch files. PRs 7-8 add Go-native control-plane capabilities without coupling them to the turn execution critical path. PR-09 adds turn lineage and derived context intelligence without introducing a second execution path.
+Note: PR-10 is a transitional Wave 1 -> Wave 2 slice focused on shadow parity plumbing for `ask`; detailed rollout/expansion behavior is captured in the Wave 2 sections below.
+
+Each PR is independently testable. PRs 1-5 have no v1 business-logic changes. PR-06 wires routing with opt-in flag and minimal touch points in existing command dispatch files. PRs 7-8 add Go-native control-plane capabilities without coupling them to the turn execution critical path. PR-09 adds turn lineage and derived context intelligence without introducing a second execution path. PR-10 establishes shadow validation plumbing for parity verification before Wave 2 cutover.
+
+## Wave 2: Productionization + Dynamic Context (V2-Only)
+
+Wave 1 established the v2 runtime skeleton and contracts. Wave 2 focuses on
+real cutover, persistent turn intelligence, and dynamic context assembly that
+reduces dependence on a single large prompt window.
+
+### Wave 2 Goals
+
+1. Route live command paths through v2 services/ports (without breaking v1 fallback).
+2. Persist turn/iteration/tool-call intelligence in a libsql-first model, including
+   retrieval-friendly artifact metadata.
+3. Feed an asynchronous event pipeline for enrichment, annotation, and context materialization.
+4. Build layered, budgeted context assembly (L2 -> L1 -> L0) with temporal drill-down
+   (`hours -> days -> weeks -> months`) and stable references.
+5. Define hard decommission gates for v1 command paths.
+
+### Areas That Need Consideration and Fleshing Out
+
+1. **Live routing integration**
+   - Ensure CLI/API/daemon entrypoints actually dispatch to `internal/v2/ports/*`
+     when `AGENTCTL_V2_COMMANDS` is enabled.
+   - Keep rollback one-step (`unset`/remove command from flag) with no schema rollback.
+2. **Turn persistence and retrieval**
+   - Add concrete `TurnRecorder` and `TurnReader` adapters backed by libsql.
+   - Persist iteration/tool-call detail and reference slices to support partial recall.
+3. **Artifact schema and vector-ready storage**
+   - Use libsql-first artifact tables for embeddings/annotations/classifications/learnings.
+   - Prefer libsql vector search/index capabilities as the primary retrieval backend in v2.
+   - Keep versioned idempotency keys `(turn_id, artifact_type, artifact_version)`.
+4. **Dynamic event pipeline**
+   - Wire runner emits (`turn.recorded`) to enricher producers via bounded queues.
+   - Enforce non-blocking semantics; degraded/missing artifacts must not fail turn completion.
+5. **Context builder evolution**
+   - Expose deterministic reference resolution for whole turn, iteration, tool-call, and slices.
+   - Support hierarchical retrieval with drill-down metadata (`expandable_dates`) and
+     temporal pyramids aligned with:
+     - `docs/general/companion-memory.md`
+     - `docs/designs/hierarchical-memory-retrieval.md`
+     - `docs/designs/progressive-memory-system.md`
+6. **Parity and observability**
+   - Expand shadow parity beyond `ask` to `spawn`, `run`, `list`, `kill`.
+   - Track divergence, queue lag, drop counts, and context quality metrics by command.
+7. **v1 retirement path**
+   - Define command-by-command deletion criteria and cleanup order once parity windows pass.
+
+### Wave 2 PR Slices (Proposed)
+
+1. **PR-11: Command Surface Cutover**
+   - Wire real CLI/API/daemon handlers to v2 routers for enabled commands.
+   - DoD: v2 routing is exercised in live command tests; disabled commands still use v1.
+2. **PR-12: Libsql Turn + Artifact Stores**
+   - Implement production `TurnRecorder`/`TurnReader` and artifact persistence.
+   - DoD: turn lineage and artifact metadata are queryable by stable refs.
+3. **PR-13: Enrichment Pipeline Wiring**
+   - Connect runtime event bus to enricher queue/worker producers.
+   - DoD: `turn.recorded` triggers async jobs; failures emit events without blocking turn success.
+4. **PR-14: Hierarchical Context Builder**
+   - Add temporal pyramid retrieval and drill-down APIs (`hours/days/weeks/months`).
+   - DoD: context assembly can return coarse summaries with explicit drill targets.
+5. **PR-15: Companion Memory Integration**
+   - Feed context artifacts into layered companion memory assembly (L2 -> L1 -> L0 budgets).
+   - DoD: context builder can mix recent turn refs + companion summaries deterministically.
+6. **PR-16: v1 Decommission Gates**
+   - Enforce parity windows, remove duplicate v1 paths command-by-command.
+   - DoD: command is v2-primary with documented rollback and no orphan transport logic.
+
+### PR-16 Readiness Gates (Operational Policy)
+
+1. **Shadow parity coverage**
+   - `AGENTCTL_V2_SHADOW_COMMANDS` supports `spawn,run,list,kill` in addition to `ask`.
+   - Mutating command shadows (`spawn`,`run`,`kill`) are blocked by default and require
+     explicit opt-in with `AGENTCTL_V2_SHADOW_MUTATING=true`.
+   - Non-mutating shadows (`ask`,`list`) can run by default.
+2. **Sustained parity window**
+   - Require a rolling 7-day window per command before promoting to v2-primary.
+   - Require at least 200 shadow samples per command in that window.
+   - Require `match_rate >= 99.0%` and no severity-1 incidents attributable to routing divergence.
+3. **Incident-free promotion checks**
+   - No unresolved `shadow_error` spikes for the command during the parity window.
+   - No queue/backpressure regressions in non-blocking paths attributable to shadow runs.
+4. **Command-by-command v1 freeze/removal order**
+   - Stage A: Freeze v1 path for the command (compatibility boundary only; no new behavior work).
+   - Stage B: Switch command default to v2 (flagless v2 primary, rollback flag retained).
+   - Stage C: Remove v1 command path after one additional incident-free window.
+   - Recommended order: `list` -> `ask` -> `run` -> `spawn` -> `kill`.
+
+### Full v2 Exit Criteria (From v1)
+
+1. `spawn`, `ask`, `run`, `list`, and `kill` are v2-primary in CLI, API, and daemon ports.
+2. Turn lineage plus derived artifacts are persisted and retrievable through stable references.
+3. Enrichment/event/context pipelines are non-blocking under load with bounded backpressure.
+4. Shadow parity reports are stable across all migrated commands for a sustained window.
+5. v1 command handlers are either removed or explicitly frozen behind compatibility boundaries.
+
+## Wave 3: Retrieval + Dynamic Context Intelligence (PR-17+)
+
+Wave 2 established persistence and non-blocking enrichment pipelines. Wave 3
+focuses on retrieval surfaces that let context assembly use turn artifacts
+directly instead of relying only on chronological windows.
+
+### Wave 3 Goals
+
+1. Add a production retrieval surface for artifact embeddings in v2 turns storage.
+2. Keep retrieval deterministic and bounded across both libsql vector and SQLite fallback paths.
+3. Add runtime-facing interfaces so context assembly can blend:
+   - temporal lineage (`hours/days/weeks/months`)
+   - artifact-semantic matches
+   - companion-memory layers (L2 -> L1 -> L0)
+4. Add observability for retrieval path quality (vector hit path vs fallback path).
+
+### PR-17: Libsql-First Artifact Semantic Retrieval
+
+#### Scope
+
+1. Add `SearchArtifactsByEmbedding` on the v2 libsql turns adapter.
+2. Use vector-first SQL retrieval (`vector_distance_cos`) when supported.
+3. Fall back to deterministic in-process cosine scoring when vector SQL is unavailable.
+4. Support retrieval filters:
+   - `session_id`
+   - `artifact_type` (`embedding`, `annotation`, `classification`, `learning`)
+5. Cap retrieval result limits to prevent unbounded scans.
+
+#### Acceptance Criteria
+
+1. Retrieval returns stable ordering (similarity first, deterministic tie-breakers).
+2. Fallback mode behavior is deterministic and tested.
+3. Invalid artifact filters fail fast with explicit typed errors.
+4. Existing turn completion non-blocking guarantees remain unchanged.
+5. Context-builder contract includes deterministic merge metadata:
+   - `artifact_search_path` (`vector|fallback|disabled|error`)
+   - `artifact_hit_count`
+   - dedup by `ref`
+   - merge ordering: temporal blocks first, then semantic refs by similarity desc + ref asc
+
+#### Interface Proposal (Documented Contract)
+
+1. Define a core-facing retrieval port in `internal/v2/core/run`:
+   - `ArtifactSemanticRetriever`
+   - `ArtifactSearchOptions`
+   - `ScoredArtifact`
+2. Keep libsql adapter ownership of concrete SQL/search behavior while exposing a
+   transport-agnostic interface to runtime/context components.
+3. Extend context-builder request/response contracts to support optional semantic
+   artifact queries and explicit result metadata (`artifact_search_path`,
+   `artifact_hit_count`).
+4. Keep semantic retrieval optional and non-fatal so baseline temporal assembly
+   remains available when retrieval is degraded/unavailable.
+
+Reference: `docs/spec/v2_greenfield_bootstrap.md` ("Artifact Semantic Retrieval Contract (Wave 3)" and "Context Builder Integration Contract (PR-17 Proposal)").
+
+#### Known Risk (Current)
+
+- CI currently validates fallback retrieval behavior, but does not yet run an
+  end-to-end native libsql vector-query execution path. This is tracked in
+  `docs/plans/v2-implementation-todo.md` as an open question.
+
+### Post-PR-17 Follow-Ons
+
+1. Define a core runtime retrieval interface for artifact semantic lookups.
+2. Integrate semantic artifact retrieval into v2 context builder assembly.
+3. Add retrieval observability counters/events:
+   - `artifact_search.vector_path`
+   - `artifact_search.fallback_path`
+   - result count and latency buckets

@@ -96,6 +96,63 @@ func TestEnricherFailure_DoesNotBlockTurnCompletion(t *testing.T) {
 	}
 }
 
+func TestEnricherQueue_KeyReleasedAfterProcessing(t *testing.T) {
+	t.Parallel()
+
+	queue := enrichers.NewQueue(8)
+	defer queue.Close()
+
+	store := fakes.NewFakeEventStore()
+	worker := enrichers.NewWorker(enrichers.Config{
+		Queue: queue,
+		Enricher: enrichers.EnricherFunc(func(context.Context, enrichers.Job) error {
+			return stderrors.New("still retryable")
+		}),
+		EventStore: store,
+		Now: func() time.Time {
+			return time.Date(2026, time.February, 18, 22, 30, 0, 0, time.UTC)
+		},
+		NewID: fakes.NewFakeUUID("artifact").New,
+	})
+
+	job := enrichers.NewJob(run.TurnRecord{ID: "turn-retry"}, "embedding", "v1")
+	if accepted := queue.Enqueue(job); !accepted {
+		t.Fatal("expected first enqueue accepted")
+	}
+	if accepted := queue.Enqueue(job); accepted {
+		t.Fatal("expected duplicate enqueue rejected while in flight")
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { done <- worker.Run(ctx) }()
+
+	waitFor(t, 2*time.Second, func() bool {
+		events := store.Events()
+		for _, evt := range events {
+			if evt.EventType == coreevents.EventArtifactFailed {
+				return true
+			}
+		}
+		return false
+	})
+
+	if accepted := queue.Enqueue(job); !accepted {
+		t.Fatal("expected enqueue accepted after worker released dedupe key")
+	}
+
+	cancel()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("worker Run() error = %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for worker shutdown")
+	}
+}
+
 func waitFor(t *testing.T, timeout time.Duration, condition func() bool) {
 	t.Helper()
 	deadline := time.Now().Add(timeout)

@@ -68,6 +68,46 @@ func TestParseV2ShadowCommandsFromEnv(t *testing.T) {
 	}
 }
 
+func TestParseV2FreezeCommandsFromEnv(t *testing.T) {
+	t.Setenv(envV2FreezeCommands, "spawn,kill")
+
+	flags, err := ParseV2FreezeCommandsFromEnv()
+	if err != nil {
+		t.Fatalf("ParseV2FreezeCommandsFromEnv returned error: %v", err)
+	}
+	if !flags.Enabled("spawn") || !flags.Enabled("kill") {
+		t.Fatalf("expected spawn/kill enabled for freeze flags, got %v", flags.Commands())
+	}
+}
+
+func TestSanitizeShadowFlags_DefaultBlocksMutating(t *testing.T) {
+	t.Parallel()
+
+	flags, err := ParseV2ShadowCommands("spawn,run,kill,ask,list")
+	if err != nil {
+		t.Fatalf("ParseV2ShadowCommands returned error: %v", err)
+	}
+
+	sanitized := SanitizeShadowFlags(flags, false)
+	got := sanitized.Commands()
+	want := []string{"ask", "list"}
+	if !slices.Equal(got, want) {
+		t.Fatalf("shadow commands mismatch: got %v, want %v", got, want)
+	}
+}
+
+func TestShadowMutatingEnabledFromEnv(t *testing.T) {
+	t.Setenv(envV2ShadowMutating, "true")
+	if !ShadowMutatingEnabledFromEnv() {
+		t.Fatal("expected mutating shadow enabled for env=true")
+	}
+
+	t.Setenv(envV2ShadowMutating, "0")
+	if ShadowMutatingEnabledFromEnv() {
+		t.Fatal("expected mutating shadow disabled for env=0")
+	}
+}
+
 func TestSupportedCommands_CanonicalSet(t *testing.T) {
 	t.Parallel()
 

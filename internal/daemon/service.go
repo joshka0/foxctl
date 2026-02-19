@@ -44,6 +44,9 @@ import (
 	"github.com/jkatigb/agentctl/internal/storage/memory"
 	"github.com/jkatigb/agentctl/internal/storage/sessions"
 	"github.com/jkatigb/agentctl/internal/storage/sqliteutil"
+	v2ports "github.com/jkatigb/agentctl/internal/v2/ports"
+	v2portconfig "github.com/jkatigb/agentctl/internal/v2/ports/config"
+	v2daemonports "github.com/jkatigb/agentctl/internal/v2/ports/daemon"
 	"github.com/oklog/ulid/v2"
 )
 
@@ -592,14 +595,19 @@ func (s *Service) handleConnection(ctx context.Context, conn net.Conn) {
 		}()
 		return
 	case "agent.spawn":
-		result, err := s.handleAgentSpawn(ctx, req.Params)
+		result, _, err := s.dispatchAgentSpawn(ctx, req.ID, req.Params)
 		if err != nil {
 			resp.Error = &Error{Code: "ESPAWN", Message: err.Error()}
 		} else {
 			resp.Result = result
 		}
 	case "agent.list":
-		resp.Result = s.handleAgentList()
+		result, _, err := s.dispatchAgentList(ctx, req.ID)
+		if err != nil {
+			resp.Error = &Error{Code: "ELIST", Message: err.Error()}
+		} else {
+			resp.Result = result
+		}
 	case "agent.status":
 		result, err := s.handleAgentStatus(req.Params)
 		if err != nil {
@@ -608,7 +616,7 @@ func (s *Service) handleConnection(ctx context.Context, conn net.Conn) {
 			resp.Result = result
 		}
 	case "agent.kill":
-		result, err := s.handleAgentKill(req.Params)
+		result, _, err := s.dispatchAgentKill(ctx, req.ID, req.Params)
 		if err != nil {
 			resp.Error = &Error{Code: "EKILL", Message: err.Error()}
 		} else {
@@ -633,6 +641,50 @@ func (s *Service) handleConnection(ctx context.Context, conn net.Conn) {
 	}
 
 	s.writeResponse(conn, resp)
+}
+
+func daemonMethodRouter() v2daemonports.Router {
+	flags, err := v2portconfig.ParseV2CommandsFromEnv()
+	if err != nil {
+		slog.Warn("invalid AGENTCTL_V2_COMMANDS; defaulting to v1 routing", "error", err)
+		flags = v2portconfig.V2Flags{}
+	}
+	shadowFlags, err := v2portconfig.ParseV2ShadowCommandsFromEnv()
+	if err != nil {
+		slog.Warn("invalid AGENTCTL_V2_SHADOW_COMMANDS; shadow routing disabled", "error", err)
+		shadowFlags = v2portconfig.V2Flags{}
+	}
+	shadowFlags = v2portconfig.SanitizeShadowFlags(shadowFlags, v2portconfig.ShadowMutatingEnabledFromEnv())
+	freezeFlags, err := v2portconfig.ParseV2FreezeCommandsFromEnv()
+	if err != nil {
+		slog.Warn("invalid AGENTCTL_V2_FREEZE_V1_COMMANDS; freeze routing disabled", "error", err)
+		freezeFlags = v2portconfig.V2Flags{}
+	}
+
+	return v2daemonports.NewRouterWithShadowAndFreeze(
+		flags,
+		shadowFlags,
+		freezeFlags,
+		func(command string, decision v2ports.Decision, correlationID string) {
+			slog.Debug("daemon v2 routing decision",
+				"command", command,
+				"decision", string(decision),
+				"correlation_id", strings.TrimSpace(correlationID))
+		},
+		func(report v2ports.ShadowReport) {
+			slog.Debug("daemon v2 shadow parity",
+				"command", report.Command,
+				"correlation_id", strings.TrimSpace(report.CorrelationID),
+				"primary_decision", string(report.PrimaryDecision),
+				"shadow_decision", string(report.ShadowDecision),
+				"match", report.Match,
+				"reason", strings.TrimSpace(report.Reason),
+				"primary_error", strings.TrimSpace(report.PrimaryError),
+				"shadow_error", strings.TrimSpace(report.ShadowError),
+				"duration_ms", report.DurationMS)
+		},
+		2*time.Second,
+	)
 }
 
 // StatusResult contains daemon status information.
@@ -1466,6 +1518,45 @@ func (s *Service) stopAgentOrchestration() {
 
 // --- Agent RPC Handlers ---
 
+func (s *Service) dispatchAgentSpawn(ctx context.Context, requestID string, params json.RawMessage) (*AgentSpawnResult, v2ports.Decision, error) {
+	router := daemonMethodRouter()
+	result, decision, err := v2daemonports.DispatchMethod(ctx, router, "agent.spawn", requestID,
+		func(ctx context.Context) (*AgentSpawnResult, error) {
+			return s.handleAgentSpawn(ctx, params)
+		},
+		func(ctx context.Context) (*AgentSpawnResult, error) {
+			return s.handleAgentSpawnV2(ctx, params)
+		},
+	)
+	return result, decision, err
+}
+
+func (s *Service) dispatchAgentList(ctx context.Context, requestID string) (*AgentListResult, v2ports.Decision, error) {
+	router := daemonMethodRouter()
+	result, decision, err := v2daemonports.DispatchMethod(ctx, router, "agent.list", requestID,
+		func(context.Context) (*AgentListResult, error) {
+			return s.handleAgentList(), nil
+		},
+		func(context.Context) (*AgentListResult, error) {
+			return s.handleAgentListV2(), nil
+		},
+	)
+	return result, decision, err
+}
+
+func (s *Service) dispatchAgentKill(ctx context.Context, requestID string, params json.RawMessage) (*AgentKillResult, v2ports.Decision, error) {
+	router := daemonMethodRouter()
+	result, decision, err := v2daemonports.DispatchMethod(ctx, router, "agent.kill", requestID,
+		func(context.Context) (*AgentKillResult, error) {
+			return s.handleAgentKill(params)
+		},
+		func(context.Context) (*AgentKillResult, error) {
+			return s.handleAgentKillV2(params)
+		},
+	)
+	return result, decision, err
+}
+
 // AgentSpawnParams are the parameters for agent.spawn.
 type AgentSpawnParams struct {
 	Role        string   `json:"role"`
@@ -1691,6 +1782,12 @@ func (s *Service) handleAgentSpawn(ctx context.Context, params json.RawMessage) 
 	}, nil
 }
 
+func (s *Service) handleAgentSpawnV2(ctx context.Context, params json.RawMessage) (*AgentSpawnResult, error) {
+	// PR-11 command-surface cutover keeps behavior parity by delegating to the
+	// existing spawn path. Later PR slices can replace this with v2-native orchestration.
+	return s.handleAgentSpawn(ctx, params)
+}
+
 // AgentResumeParams are the parameters for agent.resume.
 type AgentResumeParams struct {
 	SessionID string `json:"session_id"`
@@ -1873,6 +1970,12 @@ func (s *Service) handleAgentList() *AgentListResult {
 	return result
 }
 
+func (s *Service) handleAgentListV2() *AgentListResult {
+	// PR-11 command-surface cutover keeps behavior parity by delegating to the
+	// existing list path. Later PR slices can replace this with v2-native projections.
+	return s.handleAgentList()
+}
+
 // AgentStatusParams are the parameters for agent.status.
 type AgentStatusParams struct {
 	SessionID string `json:"session_id"`
@@ -2001,6 +2104,12 @@ func (s *Service) handleAgentKill(params json.RawMessage) (*AgentKillResult, err
 		SessionID: p.SessionID,
 		Status:    "killed",
 	}, nil
+}
+
+func (s *Service) handleAgentKillV2(params json.RawMessage) (*AgentKillResult, error) {
+	// PR-11 command-surface cutover keeps behavior parity by delegating to the
+	// existing kill path. Later PR slices can replace this with v2-native kill orchestration.
+	return s.handleAgentKill(params)
 }
 
 // exec is a minimal process starter (avoiding os/exec import cycle issues).

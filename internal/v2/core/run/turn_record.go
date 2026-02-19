@@ -56,3 +56,16 @@ type TurnRecorder interface {
 type TurnReader interface {
 	GetTurn(ctx context.Context, turnID string) (TurnRecord, error)
 }
+
+// TurnListOptions controls timeline retrieval for one session.
+type TurnListOptions struct {
+	Limit int
+	Since time.Time
+	Until time.Time
+	Asc   bool
+}
+
+// TurnTimelineReader lists canonical turn records for temporal context assembly.
+type TurnTimelineReader interface {
+	ListTurns(ctx context.Context, sessionID string, opts TurnListOptions) ([]TurnRecord, error)
+}

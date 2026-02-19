@@ -46,6 +46,9 @@ func New(cfg Config) *Pipeline {
 			return fmt.Sprintf("evt-%06d", n)
 		}
 	}
+	if cfg.OnEventError == nil {
+		cfg.OnEventError = func(error) {}
+	}
 	return &Pipeline{cfg: cfg}
 }
 
@@ -162,6 +165,13 @@ func (p *Pipeline) appendEvent(ctx context.Context, st *executionState, stageNam
 			Cause:     err,
 			Fatal:     true,
 			Retryable: true,
+		}
+	}
+	if p.cfg.EventBus != nil {
+		// Runtime bus fanout is best-effort background wiring; event store append
+		// remains the authoritative path and must not fail when subscribers lag.
+		if err := p.cfg.EventBus.Publish(ctx, evt.Clone()); err != nil {
+			p.cfg.OnEventError(err)
 		}
 	}
 	return nil

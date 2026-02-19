@@ -70,6 +70,8 @@ const (
 	ComponentSkill = "skill"
 	ComponentJob   = "job"
 	ComponentAgent = "agent"
+	// ComponentContextBuilder identifies layered context assembly and retrieval operations.
+	ComponentContextBuilder = "contextbuilder"
 )
 
 // Operation constants for common operations.
@@ -90,4 +92,7 @@ const (
 	OpAgentKill      = "agent.kill"
 	OpAgentIteration = "agent.iteration"
 	OpAgentTool      = "agent.tool"
+
+	// OpContextSemanticArtifactSearch is emitted for optional semantic artifact retrieval.
+	OpContextSemanticArtifactSearch = "context.semantic_artifact_search"
 )

@@ -10,6 +10,8 @@ import (
 const (
 	envV2Commands       = "AGENTCTL_V2_COMMANDS"
 	envV2ShadowCommands = "AGENTCTL_V2_SHADOW_COMMANDS"
+	envV2ShadowMutating = "AGENTCTL_V2_SHADOW_MUTATING"
+	envV2FreezeCommands = "AGENTCTL_V2_FREEZE_V1_COMMANDS"
 )
 
 var supportedCommands = map[string]struct{}{
@@ -17,6 +19,12 @@ var supportedCommands = map[string]struct{}{
 	"ask":   {},
 	"run":   {},
 	"list":  {},
+	"kill":  {},
+}
+
+var mutatingCommands = map[string]struct{}{
+	"spawn": {},
+	"run":   {},
 	"kill":  {},
 }
 
@@ -62,6 +70,37 @@ func ParseV2ShadowCommandsFromEnv() (V2Flags, error) {
 	return ParseV2ShadowCommands(os.Getenv(envV2ShadowCommands))
 }
 
+// ParseV2FreezeCommands parses AGENTCTL_V2_FREEZE_V1_COMMANDS-like comma-separated command sets.
+func ParseV2FreezeCommands(raw string) (V2Flags, error) {
+	return ParseV2Commands(raw)
+}
+
+// ParseV2FreezeCommandsFromEnv parses AGENTCTL_V2_FREEZE_V1_COMMANDS from the environment.
+func ParseV2FreezeCommandsFromEnv() (V2Flags, error) {
+	return ParseV2FreezeCommands(os.Getenv(envV2FreezeCommands))
+}
+
+// ShadowMutatingEnabledFromEnv reports whether mutating command shadow runs are allowed.
+func ShadowMutatingEnabledFromEnv() bool {
+	return parseBoolLoose(os.Getenv(envV2ShadowMutating))
+}
+
+// SanitizeShadowFlags removes mutating commands unless explicitly allowed.
+func SanitizeShadowFlags(flags V2Flags, allowMutating bool) V2Flags {
+	if allowMutating {
+		return flags
+	}
+
+	filtered := V2Flags{enabled: map[string]struct{}{}}
+	for _, cmd := range flags.Commands() {
+		if _, mutating := mutatingCommands[cmd]; mutating {
+			continue
+		}
+		filtered.enabled[cmd] = struct{}{}
+	}
+	return filtered
+}
+
 // Enabled reports whether command is routed to v2.
 func (f V2Flags) Enabled(command string) bool {
 	_, ok := f.enabled[strings.ToLower(strings.TrimSpace(command))]
@@ -91,4 +130,13 @@ func SupportedCommands() []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+func parseBoolLoose(raw string) bool {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "1", "true", "yes", "on", "y":
+		return true
+	default:
+		return false
+	}
 }

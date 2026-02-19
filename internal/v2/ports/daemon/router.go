@@ -15,6 +15,7 @@ import (
 type Router struct {
 	flags         portconfig.V2Flags
 	shadowFlags   portconfig.V2Flags
+	freezeFlags   portconfig.V2Flags
 	observe       ports.Observer
 	shadowObserve ports.ShadowObserver
 	shadowTimeout time.Duration
@@ -39,6 +40,25 @@ func NewRouterWithShadow(
 	return Router{
 		flags:         flags,
 		shadowFlags:   shadowFlags,
+		observe:       observe,
+		shadowObserve: shadowObserve,
+		shadowTimeout: shadowTimeout,
+	}
+}
+
+// NewRouterWithShadowAndFreeze builds a daemon router with optional shadow execution and freeze gates.
+func NewRouterWithShadowAndFreeze(
+	flags portconfig.V2Flags,
+	shadowFlags portconfig.V2Flags,
+	freezeFlags portconfig.V2Flags,
+	observe ports.Observer,
+	shadowObserve ports.ShadowObserver,
+	shadowTimeout time.Duration,
+) Router {
+	return Router{
+		flags:         flags,
+		shadowFlags:   shadowFlags,
+		freezeFlags:   freezeFlags,
 		observe:       observe,
 		shadowObserve: shadowObserve,
 		shadowTimeout: shadowTimeout,
@@ -93,6 +113,7 @@ func DispatchMethod[T any](
 	return ports.DispatchWithShadow(ctx, ports.DispatchOptions[T]{
 		Flags:         router.flags,
 		ShadowFlags:   router.shadowFlags,
+		FreezeFlags:   router.freezeFlags,
 		Command:       command,
 		CorrelationID: correlationID,
 		V1:            v1,

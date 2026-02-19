@@ -2,7 +2,7 @@
 
 Status: Active  
 Owner: Solo maintainer  
-Last Updated: 2026-02-18
+Last Updated: 2026-02-19
 
 ## Objective
 
@@ -23,38 +23,65 @@ Primary specs/plans:
 
 ## Current State
 
-- [x] v2 spec/plan/rules documents aligned and cross-linked to companion/general docs
-- [x] v2 non-blocking behavior explicitly marked as v2-only
-- [x] implementation scaffold under `internal/v2/*` started
+- [x] Wave 1 foundation complete (PR-01 through PR-10) with tests and review notes
+- [x] v2 docs aligned to companion/general references and non-blocking v2 scope rules
+- [x] Wave 2 production cutover batch 1 complete (PR-11 through PR-13)
+- [x] Wave 2 dynamic context + decommission gate batch complete (PR-14 through PR-16)
+- [x] Wave 3 kickoff complete for PR-17 (artifact retrieval + semantic observability/tracing)
 
-## Now (In Progress)
+## Wave 1 Completed (Reference)
 
-- [x] PR-01B: Error/event contracts + deterministic golden harness
-  - [x] `internal/v2/core/errors/errors.go`
-  - [x] `internal/v2/core/events/{types,payloads}.go`
-  - [x] deterministic fakes (`fake_clock`, `fake_uuid`, `fake_event_store`)
-  - [x] first JSONL golden fixture + comparator
-- [x] PR-02A: Event store vertical slice (`spawn`) (libsql-first)
-  - [x] libsql append-only event schema/store with monotonic stream version checks
-  - [x] minimal projections (`agent_state`, `run_state`)
-  - [x] replay + idmap roundtrip tests
-- [x] PR-03: runner pipeline (no transport)
-- [x] PR-04: unified tool stack
-- [x] PR-05: unified spawn/ask/run/list/kill services
-- [x] PR-06: v2 ports + feature-flag routing
+- [x] PR-01 to PR-06: skeleton/contracts through feature-flag routing
+- [x] PR-07 to PR-09: supervisor/events/snapshots + turn intelligence foundation
+- [x] PR-10: `ask` shadow validation plumbing and parity telemetry
 
-## Next
+## Now (Wave 3 Active)
 
-- [x] PR-01A residual-risk follow-up
-  - [x] replace pure compile-smoke coverage with behavioral tests as v2 runtime logic lands
-  - [x] keep `internal/v2/ports/config/v2flags.go` command map aligned with routed v2 command surfaces
+Wave 2 rationale, DoD expectations, and exit criteria live in:
+`docs/plans/v2-greenfield-bootstrap.md` ("Wave 2: Productionization + Dynamic Context (V2-Only)").
 
-## Later (Queued)
+Wave 3 retrieval goals and PR-17+ scope live in:
+`docs/plans/v2-greenfield-bootstrap.md` ("Wave 3: Retrieval + Dynamic Context Intelligence (PR-17+)").
 
-- [x] PR-07 supervisor + runtime event bus
-- [x] PR-08 snapshots + non-blocking maintenance
-- [x] PR-09 turn intelligence + context builder
-- [x] PR-10 ask shadow validation plumbing (v1 primary + v2 mirror + parity telemetry)
+- [x] PR-11: Live command-surface cutover (v2 routing in real CLI/API/daemon handlers)
+  - [x] wire daemon `agent.spawn`/`agent.list`/`agent.kill` request handling through `internal/v2/ports/daemon` with env-flag routing and safe fallback
+  - [x] wire CLI `spawn/run/list/kill` entrypoints through `internal/v2/ports/cli` in real command handlers
+  - [x] wire API agent spawn/daemon action handlers through `internal/v2/ports/api` in real HTTP handlers
+  - [x] keep v1 fallback behavior unchanged when flags are unset
+  - [x] add integration tests proving real handler routing (not router-only unit tests)
+- [x] PR-12: Libsql turn/artifact stores (production `TurnRecorder` + `TurnReader`)
+  - [x] persist `Turn -> Iteration -> ToolCall` lineage in libsql-backed stores
+  - [x] add artifact tables for embeddings/annotations/classifications/learnings
+  - [x] keep idempotency key contract `(turn_id, artifact_type, artifact_version)`
+- [x] PR-13: Event-to-enricher wiring
+  - [x] emit `turn.recorded` from runtime pipeline into enricher producer
+  - [x] consume via bounded queue/worker with non-blocking guarantees
+  - [x] emit failure/retry telemetry events without failing completed turns
+- [x] PR-14: Hierarchical context builder + temporal pyramid retrieval
+  - [x] support `hours -> days -> weeks -> months` summaries with drill-down refs
+  - [x] expose expandable-date style metadata for selective deepening
+- [x] PR-15: Companion memory layered assembly integration
+  - [x] wire L2 -> L1 -> L0 budgeted context composition
+  - [x] blend turn refs + companion summaries deterministically
+  - [x] validate referenceability of whole turns and partial slices in assembled context
+
+## Next (Wave 3 Kickoff)
+
+- [x] PR-17: libsql-first artifact semantic retrieval surfaces
+  - [x] add `SearchArtifactsByEmbedding` in `internal/v2/adapters/libsql/turns/store.go` with vector-first query + safe cosine fallback
+  - [x] add deterministic retrieval tests (ranking, filtering, fallback-disable behavior)
+  - [x] document core-facing retrieval interface + context builder integration contract (`docs/spec/v2_greenfield_bootstrap.md`, `docs/plans/v2-greenfield-bootstrap.md`)
+  - [x] define core-facing artifact semantic retrieval interface for runtime consumers
+  - [x] wire optional semantic artifact layer into context builder assembly path
+  - [x] enforce context-builder metadata and merge guarantees (`artifact_search_path`, `artifact_hit_count`, dedup-by-ref, deterministic merge ordering)
+  - [x] add observability counters for vector-path vs fallback-path query usage
+  - [x] add optional wide-event emission for `context.semantic_artifact_search`
+  - [x] propagate tracing context to semantic events (`trace_id` + `parent_id` when span context exists)
+
+- [x] PR-16: v1 decommission readiness gates
+  - [x] expand shadow parity past `ask` to `spawn/run/list/kill`
+  - [x] define sustained parity window + incident-free thresholds
+  - [x] remove/freeze superseded v1 handlers command-by-command
 
 ## Decisions (Locked)
 
@@ -67,9 +94,10 @@ Primary specs/plans:
 
 ## Open Questions
 
-- [x] initial overflow policy for bounded queues: default `drop_newest`, with explicit `drop_oldest` and `block` support
-- [x] first context-builder mode to ship (`chat` only for v2 bootstrap)
-- [x] first command to route in shadow validation (`ask`)
+- [ ] libsql embedding storage format and vector indexing policy for artifact tables
+- [ ] context budget policy across L2/L1/L0 (global vs per-command vs per-role)
+- [ ] whether and how to backfill selected v1 turns into v2 retrieval surfaces
+- [ ] native libsql/Turso vector-path CI coverage for `SearchArtifactsByEmbedding` (current tests cover deterministic fallback path only)
 
 ## Completion Gate (Required Before Marking Done)
 
@@ -105,6 +133,226 @@ Subagent Review
 
 ## Progress Log
 
+- 2026-02-19:
+  Subagent Review
+  - reviewer: `019c750b-7ecd-7980-b862-6ac80123efdb`
+  - scope: `PR-17 tracing propagation slice` (`internal/observability/{span.go,span_test.go}`, `internal/v2/runtime/contextbuilder/{layered.go,layered_observability_test.go}`, `docs/observability/wide-events.md`)
+  - findings: `none`
+  - decision: `approved`
+- 2026-02-19: Completed tracing propagation for semantic retrieval wide events.
+  - `StartSpan` now attaches generated `span_id` to context in `internal/observability/span.go`.
+  - Semantic retrieval events now inherit `trace_id` from context and set `parent_id` from current span when present.
+  - Added regression assertions for:
+    - context `span_id` propagation in `internal/observability/span_test.go`
+    - `trace_id` and `parent_id` linkage in `internal/v2/runtime/contextbuilder/layered_observability_test.go`
+- 2026-02-19:
+  Subagent Review
+  - reviewer: `019c7501-d05a-7352-902e-ca988f39b71e`
+  - scope: `PR-17 wide-event emission slice` (`internal/v2/runtime/contextbuilder/{layered.go,layered_observability_test.go}`, `internal/observability/wide_event.go`, `docs/observability/wide-events.md`, `docs/plans/v2-implementation-todo.md`)
+  - findings: `none` (vector/error/disabled path coverage confirmed)
+  - decision: `approved`
+- 2026-02-19: Implemented PR-17 retrieval counters + semantic wide-event emission.
+  - Added atomic semantic retrieval counters to `internal/v2/runtime/contextbuilder/Builder` with snapshot API (`ArtifactStats`):
+    - calls: total/vector/fallback/disabled/error
+    - hits: total/vector/fallback
+  - Wired counter increments in semantic retrieval resolution path in `internal/v2/runtime/contextbuilder/layered.go`.
+  - Added optional wide-event emission in `internal/v2/runtime/contextbuilder/layered.go`:
+    - operation: `context.semantic_artifact_search`
+    - component: `contextbuilder`
+    - data: `search_path`, `hit_count`, `session_id`, `query_dims`, and optional filters
+    - error path emits `status=error` while context assembly remains non-blocking
+  - Added regression coverage in `internal/v2/runtime/contextbuilder/layered_observability_test.go`.
+  - Added test assertions for counter behavior in `internal/v2/runtime/contextbuilder/layered_test.go`.
+  - Updated `docs/observability/wide-events.md` to mark semantic retrieval wide-event mapping as implemented.
+- 2026-02-19:
+  Subagent Review
+  - reviewer: `019c74e7-34d1-7741-ad85-4c6ebfdeffca`
+  - scope: `PR-17 implementation slice` (`internal/v2/core/run/artifact_search.go`, `internal/v2/adapters/libsql/turns/{store,store_test}.go`, `internal/v2/runtime/contextbuilder/{builder,layered,layered_test}.go`, `docs/spec/v2_greenfield_bootstrap.md`, `docs/plans/v2-implementation-todo.md`)
+  - findings: `none`
+  - decision: `approved`
+- 2026-02-19: Implemented PR-17 interface and context-builder semantic merge contract.
+  - Added new core run retrieval contract in `internal/v2/core/run/artifact_search.go`:
+    - `ArtifactSearchOptions`
+    - `ScoredArtifact`
+    - `ArtifactSearchResult`
+    - `ArtifactSemanticRetriever`
+  - Updated libsql turns adapter to implement the core retriever:
+    - `SearchArtifactsByEmbedding(...) (run.ArtifactSearchResult, error)`
+    - supports `ArtifactTypes[]` and `MinSimilarity`
+    - returns explicit search path metadata (`vector`/`fallback`/`disabled`)
+  - Wired optional semantic retrieval into `internal/v2/runtime/contextbuilder/layered.go`:
+    - `LayeredRequest.Semantic`
+    - `Builder.SetArtifactRetriever(...)`
+    - non-fatal degraded behavior (`artifact_search_path=error`, turn assembly continues)
+    - deterministic semantic merge and dedup-by-ref
+  - Added tests in:
+    - `internal/v2/adapters/libsql/turns/store_test.go`
+    - `internal/v2/runtime/contextbuilder/layered_test.go`
+  - Validation:
+    - `go test ./internal/v2/adapters/libsql/turns`
+    - `go test ./internal/v2/runtime/contextbuilder`
+    - `go test ./internal/v2/...`
+- 2026-02-19: Documented concrete PR-17 interface proposal (core/run + context builder).
+  - Added proposed core retrieval interfaces (`ArtifactSemanticRetriever`, `ArtifactSearchOptions`, `ScoredArtifact`) in `docs/spec/v2_greenfield_bootstrap.md`.
+  - Added context-builder integration contract with optional semantic query shape, deterministic merge order, and degraded-mode behavior.
+  - Added Wave 3 plan-level interface proposal section and cross-reference in `docs/plans/v2-greenfield-bootstrap.md`.
+- 2026-02-19: Refined PR-17 interface docs after subagent review.
+  - Aligned retrieval option contract to include `ArtifactTypes[]` and `MinSimilarity` in `docs/spec/v2_greenfield_bootstrap.md`.
+  - Added explicit PR-17 acceptance criteria for context-builder metadata + deterministic semantic merge behavior in `docs/plans/v2-greenfield-bootstrap.md`.
+  - Added explicit tracker work item for metadata/merge guarantees in this file.
+- 2026-02-19:
+  Subagent Review
+  - reviewer: `019c74da-2c68-7b83-8639-4d6631991652`
+  - scope: `PR-17 interface proposal docs` (`docs/spec/v2_greenfield_bootstrap.md`, `docs/plans/v2-greenfield-bootstrap.md`, `docs/plans/v2-implementation-todo.md`)
+  - findings: `resolved` — aligned retrieval options with context contract and added explicit metadata/merge acceptance items
+  - decision: `approved-with-known-risks`
+- 2026-02-19: Expanded PR-17 documentation across planning/spec/general docs.
+  - Added Wave 3/PR-17 scope, goals, acceptance criteria, and risk notes in `docs/plans/v2-greenfield-bootstrap.md`.
+  - Aligned tracker phase wording to Wave 3 and added direct Wave 3 cross-reference in this file.
+  - Added companion-memory bridge note for PR-17 semantic artifact retrieval in `docs/general/companion-memory.md`.
+  - Added artifact semantic retrieval contract language to `docs/spec/v2_greenfield_bootstrap.md`.
+- 2026-02-19:
+  Subagent Review
+  - reviewer: `019c74d3-1ca0-7020-8a20-9689f1c2c922`
+  - scope: `PR-17 docs alignment slice` (`docs/plans/v2-greenfield-bootstrap.md`, `docs/plans/v2-implementation-todo.md`, `docs/general/companion-memory.md`, `docs/spec/v2_greenfield_bootstrap.md`)
+  - findings: `none`
+  - decision: `approved`
+- 2026-02-19: Started PR-17 (Wave 3 kickoff) with libsql-first artifact semantic retrieval.
+  - Added `SearchArtifactsByEmbedding` + supporting option/result types in `internal/v2/adapters/libsql/turns/store.go`.
+  - Retrieval prefers native `vector_distance_cos(...)` when enabled and downgrades to in-process cosine scoring when vector SQL is unavailable.
+  - Added filter support for `session_id` and `artifact_type` with deterministic ranking and bounded limits.
+  - Added tests in `internal/v2/adapters/libsql/turns/store_test.go` covering fallback behavior, ordering, and filter correctness.
+  - Validation: `go test ./internal/v2/adapters/libsql/turns` and `go test ./internal/v2/...`.
+- 2026-02-19:
+  Subagent Review
+  - reviewer: `019c74cd-b1c3-7592-876a-f17c1b22d19d`
+  - scope: `PR-17 kickoff retrieval slice` (`internal/v2/adapters/libsql/turns/{store,store_test}.go`, `docs/plans/v2-implementation-todo.md`)
+  - findings: `low` — native libsql vector-path branch lacks direct CI coverage; fallback path is covered
+  - decision: `approved-with-known-risks`
+- 2026-02-18: Documented Wave 2 planning and reset tracker to active Wave 2 execution.
+  - Updated `docs/plans/v2-greenfield-bootstrap.md` with Wave 2 goals, consideration areas, proposed PR-11..PR-16 slices, and full-v2 exit criteria.
+  - Updated this tracker to mark Wave 1 complete and set Wave 2 live cutover + dynamic context work as current priorities.
+- 2026-02-18: PR-11 partial implementation landed for daemon command surface.
+  - Routed `agent.spawn`/`agent.list`/`agent.kill` through v2 daemon ports in `internal/daemon/service.go` (`dispatchAgent*` + flag/shadow router) while preserving existing behavior by delegating v2 handlers to current logic.
+  - Disabled daemon shadow execution for these mutating RPC methods to avoid duplicate side effects during routing rollout.
+  - Added daemon routing tests in `internal/daemon/service_v2_routing_test.go` to assert v1/v2 decision switching via `AGENTCTL_V2_COMMANDS`.
+- 2026-02-18: PR-11 completed for CLI/API/daemon command surfaces.
+  - Routed real CLI handlers (`agent spawn/run/list/kill`) through `internal/v2/ports/cli` in `cmd/agentctl/cmd/agent.go` with v1 fallback and v2 command opt-in via `AGENTCTL_V2_COMMANDS`.
+  - Routed API agent spawn and daemon action handlers through `internal/v2/ports/api` in `internal/web/api/agents.go` while preserving current behavior in v2 delegates.
+  - Added handler-level routing tests:
+    - `cmd/agentctl/cmd/agent_v2_routing_test.go`
+    - `internal/web/api/agents_v2_routing_test.go`
+    - extended daemon fallback coverage in `internal/daemon/service_v2_routing_test.go`
+- 2026-02-18: Completed PR-12 libsql turn/artifact persistence slice.
+  - Added new v2 libsql turns adapter package: `internal/v2/adapters/libsql/turns`.
+  - Added production `run.TurnRecorder`/`run.TurnReader` implementation with hierarchical persistence for `Turn -> Iteration -> ToolCall`.
+  - Added artifact persistence with stable refs (`turn/{turn_id}/artifact/{artifact_type}/{artifact_version}`), vector-ready schema (`F32_BLOB`) for libsql, and idempotent upsert keyed by `(turn_id, artifact_type, artifact_version)`.
+  - Added coverage for lineage roundtrip, lineage replacement on upsert, artifact idempotency, stable-ref lookup, and invalid artifact type handling.
+- 2026-02-18: Completed PR-13 event-to-enricher wiring.
+  - Added runtime enricher producer component in `internal/v2/runtime/enrichers/producer.go` to subscribe to runtime events and enqueue configured artifact jobs on `turn.recorded`.
+  - Wired runner event fanout via optional best-effort bus publish in `internal/v2/runtime/runner/{types,pipeline}.go` with non-fatal `OnEventError` handling.
+  - Added integration coverage in `internal/v2/runtime/runner/enricher_wiring_test.go` proving:
+    - bus publish failures do not fail turn completion,
+    - `turn.recorded` triggers async enrichment jobs and `artifact.failed` events while turns still complete successfully.
+  - Hardened queue dedupe lifecycle by releasing keys after job processing (`internal/v2/runtime/enrichers/{queue,worker}.go`) and added retry-friendly release test coverage.
+- 2026-02-18: Completed PR-14 hierarchical context builder + temporal pyramid retrieval.
+  - Added `run.TurnListOptions` + `run.TurnTimelineReader` and production list support in `internal/v2/adapters/libsql/turns/store.go` with session/time filtering and deterministic ordering.
+  - Added context-builder temporal retrieval in `internal/v2/runtime/contextbuilder/builder.go` for `hours`, `days`, `weeks`, and `months` with coarse summaries.
+  - Added drill-down metadata outputs (`expandable_dates`, `expandable_refs`) including `day:*`, `hour:*`, `week:*`, and stable `turn/*` refs.
+  - Added tests:
+    - `internal/v2/adapters/libsql/turns/store_test.go` (`TestTurnStore_ListTurns_BySessionAndTime`)
+    - `internal/v2/runtime/contextbuilder/builder_test.go` (`BuildTemporal*` cases)
+  - Validated with `go test ./internal/v2/...`.
+- 2026-02-18:
+  Subagent Review
+  - reviewer: `019c72fa-5465-7563-93df-36870fabd2a5`
+  - scope: `PR-14 hierarchical context builder slice` (`internal/v2/core/run/turn_record.go`, `internal/v2/adapters/libsql/turns/{schema,store,store_test}.go`, `internal/v2/runtime/contextbuilder/{builder,builder_test}.go`)
+  - findings: `none` (review output `overall=warn` was doc/check-status oriented; code-level findings list was empty)
+  - decision: `approved-with-known-risks`
+- 2026-02-18: Completed PR-15 companion memory layered assembly integration.
+  - Added layered context API in `internal/v2/runtime/contextbuilder/layered.go`:
+    - `CompanionProvider` + `SetCompanionProvider`
+    - `BuildLayered` for deterministic `L2 -> L1 -> L0` assembly
+  - Layered output blends companion summaries with temporal turn buckets and stable refs.
+  - Added derived slice refs (`turn/{id}#msg:{msg_id}:0-{n}`) from recent turns so assembled context can reference both whole turns and partial slices.
+  - Added deterministic integration test in `internal/v2/runtime/contextbuilder/layered_test.go`.
+  - Validated with `go test ./internal/v2/runtime/contextbuilder` and `go test ./internal/v2/...`.
+- 2026-02-18:
+  Subagent Review
+  - reviewer: `019c72fe-9fcd-76e0-9550-e0a7700e4d41`
+  - scope: `PR-15 layered context slice` (`internal/v2/runtime/contextbuilder/{builder,layered,layered_test}.go`)
+  - findings: `none`
+  - decision: `approved`
+- 2026-02-18: PR-16 partial decommission readiness implementation.
+  - Added shared shadow sanitization + mutating opt-in:
+    - `AGENTCTL_V2_SHADOW_MUTATING` (default false)
+    - mutating shadow commands (`spawn`,`run`,`kill`) blocked unless explicitly enabled
+  - Wired CLI/API/daemon command dispatchers to `NewRouterWithShadow(...)` with sanitized shadow flags.
+  - Added parity routing tests for non-mutating shadow execution and mutating opt-in behavior:
+    - `cmd/agentctl/cmd/agent_v2_routing_test.go`
+    - `internal/web/api/agents_v2_routing_test.go`
+    - `internal/daemon/service_v2_routing_test.go`
+  - Added explicit PR-16 parity-window and promotion thresholds in `docs/plans/v2-greenfield-bootstrap.md`.
+- 2026-02-18: Completed PR-16 v1 decommission readiness gates.
+  - Added v1-freeze command set parsing via `AGENTCTL_V2_FREEZE_V1_COMMANDS` in `internal/v2/ports/config/v2flags.go` (+ tests).
+  - Added freeze enforcement in `internal/v2/ports/router.go` so frozen commands fail fast with `ErrPolicyViolation` before either runner executes.
+  - Wired CLI/API/daemon routers and dispatchers to pass freeze flags with shadow flags via `NewRouterWithShadowAndFreeze(...)`.
+  - Added freeze-routing coverage in:
+    - `internal/v2/ports/router_shadow_test.go`
+    - `cmd/agentctl/cmd/agent_v2_routing_test.go`
+    - `internal/web/api/agents_v2_routing_test.go`
+    - `internal/daemon/service_v2_routing_test.go`
+  - Validated with:
+    - `go test ./internal/v2/ports/config ./internal/v2/ports ./cmd/agentctl/cmd ./internal/web/api ./internal/daemon`
+    - `go test ./internal/v2/...`
+- 2026-02-18:
+  Subagent Review
+  - reviewer: `019c7315-8761-7543-9035-f8ad55dab480`
+  - scope: `PR-16 freeze-gate completion slice` (`internal/v2/ports/{config/v2flags.go,router.go,router_shadow_test.go,cli/router.go,api/router.go,daemon/router.go}`, `cmd/agentctl/cmd/{agent.go,agent_v2_routing_test.go}`, `internal/web/api/{agents.go,agents_v2_routing_test.go}`, `internal/daemon/{service.go,service_v2_routing_test.go}`, `docs/plans/v2-implementation-todo.md`)
+  - findings: `none`
+  - decision: `approved`
+- 2026-02-18:
+  Subagent Review
+  - reviewer: `019c730f-e7ef-7a01-af53-4f912ff57574`
+  - scope: `PR-16 partial decommission readiness slice` (`internal/v2/ports/config/{v2flags,v2flags_test}.go`, `cmd/agentctl/cmd/{agent.go,agent_v2_routing_test.go}`, `internal/web/api/{agents.go,agents_v2_routing_test.go}`, `internal/daemon/{service.go,service_v2_routing_test.go}`, `docs/plans/{v2-greenfield-bootstrap,v2-implementation-todo}.md`)
+  - findings: `none` (overall `pass`; note: reviewer requested a full-suite run before merge, completed in local verification step)
+  - decision: `approved-with-known-risks`
+- 2026-02-18:
+  Subagent Review
+  - reviewer: `019c72be-2275-7aa2-bfd2-7904f4cbeafb`
+  - scope: `PR-11 daemon routing slice` (`internal/daemon/service.go`, `internal/daemon/service_v2_routing_test.go`)
+  - findings: `none` (approved: safe fallback behavior and stable routing tests)
+  - decision: `approved`
+- 2026-02-18:
+  Subagent Review
+  - reviewer: `019c72ca-4cd5-74a0-b5bd-548700eaee61`
+  - scope: `PR-11 expanded routing slice` (`cmd/agentctl/cmd/agent.go`, `cmd/agentctl/cmd/agent_v2_routing_test.go`, `internal/web/api/agents.go`, `internal/web/api/agents_v2_routing_test.go`, `internal/daemon/service.go`, `internal/daemon/service_v2_routing_test.go`)
+  - findings: `none` (non-blocking note addressed by adding daemon invalid-env fallback test coverage)
+  - decision: `approved`
+- 2026-02-18:
+  Subagent Review
+  - reviewer: `019c72c1-d634-7a21-85b2-5dd546d8dd11`
+  - scope: `PR-11 daemon routing slice (post-shadow-safety fix)` (`internal/daemon/service.go`, `internal/daemon/service_v2_routing_test.go`, `docs/plans/v2-implementation-todo.md`)
+  - findings: `none` (approved; daemon shadow disabled for mutating routes and tests remain coherent)
+  - decision: `approved`
+- 2026-02-18:
+  Subagent Review
+  - reviewer: `019c72b7-b0a7-7a13-ba4b-a50ebc5c6eb0`
+  - scope: `Wave 2 doc alignment` (`docs/plans/v2-greenfield-bootstrap.md`, `docs/plans/v2-implementation-todo.md`)
+  - findings: `none` (optional improvement applied: added direct Wave 2 cross-reference in tracker)
+  - decision: `approved`
+- 2026-02-18:
+  Subagent Review
+  - reviewer: `019c72da-b7c0-7c53-a1d7-8c2e27f12649`
+  - scope: `PR-12 libsql turns/artifacts slice` (`internal/v2/adapters/libsql/turns/schema.go`, `internal/v2/adapters/libsql/turns/store.go`, `internal/v2/adapters/libsql/turns/store_test.go`)
+  - findings: `none` (initial low-risk vector fallback note addressed by atomic disable-after-unsupported behavior)
+  - decision: `approved`
+- 2026-02-18:
+  Subagent Review
+  - reviewer: `019c72e1-080c-7451-9b1a-424c35c55ef2`
+  - scope: `PR-13 event-to-enricher slice` (`internal/v2/runtime/runner/{types,pipeline}.go`, `internal/v2/runtime/enrichers/{producer,queue,worker}.go`, `internal/v2/runtime/enrichers/producer_test.go`, `internal/v2/runtime/runner/enricher_wiring_test.go`, `internal/v2/runtime/enrichers/worker_test.go`)
+  - findings: `none` (low-risk dedupe-map growth note resolved by key release on worker completion; residual risk: queue-full drops remain telemetry-only)
+  - decision: `approved`
 - 2026-02-18: Created v2 tracker; linked v2 docs to companion/general references; added kickoff batches in main v2 plan.
 - 2026-02-18: Completed PR-01A scaffold (`internal/v2/*` package tree), added `v2flags` parser + tests, added core import-boundary guard test, and validated with `go test ./internal/v2/...` and `go test -tags=libsqlite3 ./...`.
 - 2026-02-18:

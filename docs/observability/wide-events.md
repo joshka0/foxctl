@@ -95,7 +95,7 @@ Each line in the NDJSON file is a `WideEvent`:
 |-------|------|-------------|
 | `service` | string | Always "agentctl" |
 | `version` | string | Build version |
-| `component` | string | "cli", "web", "hook", "skill", "job", "agent" |
+| `component` | string | "cli", "web", "hook", "skill", "job", "agent", "contextbuilder" |
 
 #### Operation Context
 
@@ -240,6 +240,74 @@ Default configuration samples:
 - 100% of errors
 - 100% of events > 1 second
 - 5% of healthy, fast events
+
+## V2 Semantic Retrieval Observability (PR-17)
+
+V2 layered context assembly now tracks semantic artifact retrieval path usage
+for dynamic context building:
+
+- `vector` path (native libsql vector search)
+- `fallback` path (in-process cosine fallback)
+- `disabled` path (semantic query not configured or retriever unavailable)
+- `error` path (semantic retriever call failed; context assembly still completes)
+
+### Runtime Counters
+
+`internal/v2/runtime/contextbuilder.Builder` exposes a point-in-time snapshot:
+
+- `total_calls`
+- `vector_calls`
+- `fallback_calls`
+- `disabled_calls`
+- `error_calls`
+- `total_hits`
+- `vector_hits`
+- `fallback_hits`
+
+Layered context responses also include per-request metadata:
+
+- `artifact_search_path`
+- `artifact_hit_count`
+- `artifact_search_error` (only on non-fatal semantic retrieval failures)
+
+### Wide Event Mapping (Implemented)
+
+When exporting semantic retrieval behavior as wide events, use:
+
+- `component`: `contextbuilder`
+- `operation`: `context.semantic_artifact_search`
+- `status`: `ok` for vector/fallback/disabled paths, `error` for retriever failures
+- `trace_id`: inherited from request context when present
+- `parent_id`: inherited from current span when present
+- `data.search_path`: `vector|fallback|disabled|error`
+- `data.hit_count`: integer
+- `data.session_id`: v2 session ID
+- `data.artifact_types`: optional list filter
+- `data.min_similarity`: optional threshold
+
+Example payload:
+
+```json
+{
+  "component": "contextbuilder",
+  "operation": "context.semantic_artifact_search",
+  "status": "ok",
+  "data": {
+    "search_path": "fallback",
+    "hit_count": 2,
+    "session_id": "run-layered",
+    "artifact_types": ["embedding", "annotation"],
+    "min_similarity": 0.5
+  }
+}
+```
+
+Emission is best-effort and non-blocking with respect to context assembly:
+semantic retrieval still returns normally even if observability persistence is
+disabled or sampled out.
+
+This keeps semantic retrieval telemetry aligned with wide-event principles: one
+event per operation with both technical path and business context.
 
 ## Consumption Patterns
 

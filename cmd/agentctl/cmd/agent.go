@@ -25,6 +25,8 @@ import (
 	"github.com/jkatigb/agentctl/internal/storage/agents"
 	"github.com/jkatigb/agentctl/internal/storage/mailbox"
 	"github.com/jkatigb/agentctl/internal/storage/sessions"
+	v2cliports "github.com/jkatigb/agentctl/internal/v2/ports/cli"
+	v2portconfig "github.com/jkatigb/agentctl/internal/v2/ports/config"
 	"github.com/oklog/ulid/v2"
 	"github.com/spf13/cobra"
 )
@@ -190,6 +192,17 @@ var (
 	cmdDryRun bool
 )
 
+var (
+	runAgentSpawnV1Fn = runAgentSpawnV1
+	runAgentSpawnV2Fn = runAgentSpawnV2
+	runAgentListV1Fn  = runAgentListV1
+	runAgentListV2Fn  = runAgentListV2
+	runAgentKillV1Fn  = runAgentKillV1
+	runAgentKillV2Fn  = runAgentKillV2
+	runAgentRunV1Fn   = runAgentRunV1
+	runAgentRunV2Fn   = runAgentRunV2
+)
+
 func init() {
 	// Add agent commands to root
 	rootCmd.AddCommand(agentCmd)
@@ -266,7 +279,54 @@ func init() {
 	_ = agentCmdCmd.MarkFlagRequired("action") //nolint:errcheck
 }
 
-func runAgentSpawn(cmd *cobra.Command, _ []string) error {
+func dispatchAgentCLICommand(
+	cmd *cobra.Command,
+	command string,
+	correlationID string,
+	v1 func(context.Context) error,
+	v2 func(context.Context) error,
+) error {
+	flags, err := v2portconfig.ParseV2CommandsFromEnv()
+	if err != nil {
+		flags = v2portconfig.V2Flags{}
+	}
+	shadowFlags, err := v2portconfig.ParseV2ShadowCommandsFromEnv()
+	if err != nil {
+		shadowFlags = v2portconfig.V2Flags{}
+	}
+	shadowFlags = v2portconfig.SanitizeShadowFlags(shadowFlags, v2portconfig.ShadowMutatingEnabledFromEnv())
+	freezeFlags, err := v2portconfig.ParseV2FreezeCommandsFromEnv()
+	if err != nil {
+		freezeFlags = v2portconfig.V2Flags{}
+	}
+	router := v2cliports.NewRouterWithShadowAndFreeze(flags, shadowFlags, freezeFlags, nil, nil, 2*time.Second)
+
+	ctx := cmd.Context()
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	_, _, err = v2cliports.Dispatch(ctx, router, command, strings.TrimSpace(correlationID),
+		func(ctx context.Context) (struct{}, error) {
+			return struct{}{}, v1(ctx)
+		},
+		func(ctx context.Context) (struct{}, error) {
+			return struct{}{}, v2(ctx)
+		},
+	)
+	return err
+}
+
+func runAgentSpawn(cmd *cobra.Command, args []string) error {
+	return dispatchAgentCLICommand(
+		cmd,
+		"spawn",
+		ulid.Make().String(),
+		func(context.Context) error { return runAgentSpawnV1Fn(cmd, args) },
+		func(context.Context) error { return runAgentSpawnV2Fn(cmd, args) },
+	)
+}
+
+func runAgentSpawnV1(cmd *cobra.Command, _ []string) error {
 	ctx := cmd.Context()
 	cfg := config.MustFromContext(ctx)
 
@@ -496,7 +556,23 @@ func runAgentSpawn(cmd *cobra.Command, _ []string) error {
 	return writeOK(cmd, "agent/spawn", data, "run", nil)
 }
 
-func runAgentList(cmd *cobra.Command, _ []string) error {
+func runAgentSpawnV2(cmd *cobra.Command, args []string) error {
+	// PR-11 routes real CLI command handlers through v2 ports while preserving
+	// current behavior. Later slices can replace this with v2-native services.
+	return runAgentSpawnV1(cmd, args)
+}
+
+func runAgentList(cmd *cobra.Command, args []string) error {
+	return dispatchAgentCLICommand(
+		cmd,
+		"list",
+		ulid.Make().String(),
+		func(context.Context) error { return runAgentListV1Fn(cmd, args) },
+		func(context.Context) error { return runAgentListV2Fn(cmd, args) },
+	)
+}
+
+func runAgentListV1(cmd *cobra.Command, _ []string) error {
 	ctx := cmd.Context()
 	cfg := config.MustFromContext(ctx)
 
@@ -525,7 +601,23 @@ func runAgentList(cmd *cobra.Command, _ []string) error {
 	}, "run", nil)
 }
 
+func runAgentListV2(cmd *cobra.Command, args []string) error {
+	// PR-11 routes real CLI command handlers through v2 ports while preserving
+	// current behavior. Later slices can replace this with v2-native services.
+	return runAgentListV1(cmd, args)
+}
+
 func runAgentKill(cmd *cobra.Command, args []string) error {
+	return dispatchAgentCLICommand(
+		cmd,
+		"kill",
+		ulid.Make().String(),
+		func(context.Context) error { return runAgentKillV1Fn(cmd, args) },
+		func(context.Context) error { return runAgentKillV2Fn(cmd, args) },
+	)
+}
+
+func runAgentKillV1(cmd *cobra.Command, args []string) error {
 	ctx := cmd.Context()
 	cfg := config.MustFromContext(ctx)
 	agentID := args[0]
@@ -586,6 +678,12 @@ func runAgentKill(cmd *cobra.Command, args []string) error {
 	}
 
 	return writeOK(cmd, "agent/kill", data, "run", nil)
+}
+
+func runAgentKillV2(cmd *cobra.Command, args []string) error {
+	// PR-11 routes real CLI command handlers through v2 ports while preserving
+	// current behavior. Later slices can replace this with v2-native services.
+	return runAgentKillV1(cmd, args)
 }
 
 func runAgentInfo(cmd *cobra.Command, args []string) error {
@@ -988,6 +1086,16 @@ func filterAgentsByState(list []agent.Agent, stateFilter string) ([]agent.Agent,
 }
 
 func runAgentRun(cmd *cobra.Command, args []string) error {
+	return dispatchAgentCLICommand(
+		cmd,
+		"run",
+		ulid.Make().String(),
+		func(context.Context) error { return runAgentRunV1Fn(cmd, args) },
+		func(context.Context) error { return runAgentRunV2Fn(cmd, args) },
+	)
+}
+
+func runAgentRunV1(cmd *cobra.Command, args []string) error {
 	ctx := cmd.Context()
 	cfg := config.MustFromContext(ctx)
 	agentRef := args[0] // Can be ID, slug, or name
@@ -1063,6 +1171,12 @@ func runAgentRun(cmd *cobra.Command, args []string) error {
 	}
 
 	return agentdaemon.Run(ctx, opts)
+}
+
+func runAgentRunV2(cmd *cobra.Command, args []string) error {
+	// PR-11 routes real CLI command handlers through v2 ports while preserving
+	// current behavior. Later slices can replace this with v2-native services.
+	return runAgentRunV1(cmd, args)
 }
 
 func runAgentAsk(cmd *cobra.Command, args []string) error {
