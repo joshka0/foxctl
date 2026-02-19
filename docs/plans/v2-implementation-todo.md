@@ -35,10 +35,13 @@ Primary specs/plans:
 - [x] PR-07 to PR-09: supervisor/events/snapshots + turn intelligence foundation
 - [x] PR-10: `ask` shadow validation plumbing and parity telemetry
 
-## Now (Wave 2 Active)
+## Now (Wave 3 Active)
 
 Wave 2 rationale, DoD expectations, and exit criteria live in:
 `docs/plans/v2-greenfield-bootstrap.md` ("Wave 2: Productionization + Dynamic Context (V2-Only)").
+
+Wave 3 retrieval goals and PR-17+ scope live in:
+`docs/plans/v2-greenfield-bootstrap.md` ("Wave 3: Retrieval + Dynamic Context Intelligence (PR-17+)").
 
 - [x] PR-11: Live command-surface cutover (v2 routing in real CLI/API/daemon handlers)
   - [x] wire daemon `agent.spawn`/`agent.list`/`agent.kill` request handling through `internal/v2/ports/daemon` with env-flag routing and safe fallback
@@ -126,6 +129,17 @@ Subagent Review
 
 ## Progress Log
 
+- 2026-02-19: Expanded PR-17 documentation across planning/spec/general docs.
+  - Added Wave 3/PR-17 scope, goals, acceptance criteria, and risk notes in `docs/plans/v2-greenfield-bootstrap.md`.
+  - Aligned tracker phase wording to Wave 3 and added direct Wave 3 cross-reference in this file.
+  - Added companion-memory bridge note for PR-17 semantic artifact retrieval in `docs/general/companion-memory.md`.
+  - Added artifact semantic retrieval contract language to `docs/spec/v2_greenfield_bootstrap.md`.
+- 2026-02-19:
+  Subagent Review
+  - reviewer: `019c74d3-1ca0-7020-8a20-9689f1c2c922`
+  - scope: `PR-17 docs alignment slice` (`docs/plans/v2-greenfield-bootstrap.md`, `docs/plans/v2-implementation-todo.md`, `docs/general/companion-memory.md`, `docs/spec/v2_greenfield_bootstrap.md`)
+  - findings: `none`
+  - decision: `approved`
 - 2026-02-19: Started PR-17 (Wave 3 kickoff) with libsql-first artifact semantic retrieval.
   - Added `SearchArtifactsByEmbedding` + supporting option/result types in `internal/v2/adapters/libsql/turns/store.go`.
   - Retrieval prefers native `vector_distance_cos(...)` when enabled and downgrades to in-process cosine scoring when vector SQL is unavailable.

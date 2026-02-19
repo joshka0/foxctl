@@ -692,3 +692,53 @@ reduces dependence on a single large prompt window.
 3. Enrichment/event/context pipelines are non-blocking under load with bounded backpressure.
 4. Shadow parity reports are stable across all migrated commands for a sustained window.
 5. v1 command handlers are either removed or explicitly frozen behind compatibility boundaries.
+
+## Wave 3: Retrieval + Dynamic Context Intelligence (PR-17+)
+
+Wave 2 established persistence and non-blocking enrichment pipelines. Wave 3
+focuses on retrieval surfaces that let context assembly use turn artifacts
+directly instead of relying only on chronological windows.
+
+### Wave 3 Goals
+
+1. Add a production retrieval surface for artifact embeddings in v2 turns storage.
+2. Keep retrieval deterministic and bounded across both libsql vector and SQLite fallback paths.
+3. Add runtime-facing interfaces so context assembly can blend:
+   - temporal lineage (`hours/days/weeks/months`)
+   - artifact-semantic matches
+   - companion-memory layers (L2 -> L1 -> L0)
+4. Add observability for retrieval path quality (vector hit path vs fallback path).
+
+### PR-17: Libsql-First Artifact Semantic Retrieval
+
+#### Scope
+
+1. Add `SearchArtifactsByEmbedding` on the v2 libsql turns adapter.
+2. Use vector-first SQL retrieval (`vector_distance_cos`) when supported.
+3. Fall back to deterministic in-process cosine scoring when vector SQL is unavailable.
+4. Support retrieval filters:
+   - `session_id`
+   - `artifact_type` (`embedding`, `annotation`, `classification`, `learning`)
+5. Cap retrieval result limits to prevent unbounded scans.
+
+#### Acceptance Criteria
+
+1. Retrieval returns stable ordering (similarity first, deterministic tie-breakers).
+2. Fallback mode behavior is deterministic and tested.
+3. Invalid artifact filters fail fast with explicit typed errors.
+4. Existing turn completion non-blocking guarantees remain unchanged.
+
+#### Known Risk (Current)
+
+- CI currently validates fallback retrieval behavior, but does not yet run an
+  end-to-end native libsql vector-query execution path. This is tracked in
+  `docs/plans/v2-implementation-todo.md` as an open question.
+
+### Post-PR-17 Follow-Ons
+
+1. Define a core runtime retrieval interface for artifact semantic lookups.
+2. Integrate semantic artifact retrieval into v2 context builder assembly.
+3. Add retrieval observability counters/events:
+   - `artifact_search.vector_path`
+   - `artifact_search.fallback_path`
+   - result count and latency buckets

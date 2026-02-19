@@ -62,6 +62,12 @@ V2 note: coarse-to-fine retrieval + drill-down refs (`expandable_dates`, turn
 refs) are planned for `internal/v2/runtime/contextbuilder/*`. Current v1 path
 still injects a bounded markdown context blob from `GetContext()`.
 
+PR-17 note: v2 now has a libsql-first artifact semantic retrieval surface in
+`internal/v2/adapters/libsql/turns` (`SearchArtifactsByEmbedding`) with a
+deterministic cosine fallback when vector SQL is unavailable. The next step is
+to blend those artifact-semantic hits into layered context assembly (alongside
+temporal drill-down refs) rather than only using chronological context.
+
 ## Memory Modes
 
 | Mode | Vivid Window | Token Budget | Use Case |

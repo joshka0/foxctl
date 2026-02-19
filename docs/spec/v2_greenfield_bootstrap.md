@@ -227,6 +227,21 @@ Rules:
 3. Async enrichers link lineage through `correlation_id`/`causation_id`.
 4. These rules apply only to commands currently routed to v2.
 
+### Artifact Semantic Retrieval Contract (Wave 3)
+
+Derived artifact retrieval should support semantic lookup over persisted
+embeddings with deterministic behavior across driver modes.
+
+Required properties:
+
+1. Retrieval is libsql-vector first when vector SQL is available.
+2. Retrieval falls back to in-process cosine ranking when vector SQL is unavailable.
+3. Filter dimensions include:
+   - `session_id` (optional)
+   - `artifact_type` (optional; one of embedding/annotation/classification/learning)
+4. Ordering is deterministic and bounded by explicit limits.
+5. Retrieval failure/degradation must not affect turn completion guarantees.
+
 ## Canonical Runtime Pipeline
 
 Each turn runs the same staged flow:
