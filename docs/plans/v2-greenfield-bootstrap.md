@@ -780,11 +780,13 @@ directly instead of relying only on chronological windows.
 
 Reference: `docs/spec/v2_greenfield_bootstrap.md` ("Artifact Semantic Retrieval Contract (Wave 3)" and "Context Builder Integration Contract (PR-17 Proposal)").
 
-#### Known Risk (Current)
+#### Native Vector CI Gate (Current)
 
-- CI currently validates fallback retrieval behavior, but does not yet run an
-  end-to-end native libsql vector-query execution path. This is tracked in
-  `docs/plans/v2-implementation-todo.md` as an open question.
+- CI now enforces an end-to-end native libsql vector-query execution path via
+  `TestTurnStore_SearchArtifactsByEmbedding_VectorPathLibSQL` in strict mode:
+  `AGENTCTL_V2_REQUIRE_NATIVE_VECTOR_SQL=1`.
+- The test still skips in local/dev environments without vector SQL support,
+  but hard-fails in CI when native vector capability is missing or downgraded.
 
 ### PR-18 Focus: Vector Path Confidence + Retrieval Quality
 

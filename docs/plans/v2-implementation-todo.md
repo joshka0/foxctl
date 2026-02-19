@@ -83,8 +83,8 @@ Wave 3 retrieval goals and PR-17+ scope live in:
   - [x] define sustained parity window + incident-free thresholds
   - [x] remove/freeze superseded v1 handlers command-by-command
 
-- [ ] PR-18: libsql vector-path validation + retrieval quality hardening
-  - [ ] add deterministic integration tests that exercise native libsql vector SQL path (`vector_distance_cos`) in CI-friendly setup
+- [x] PR-18: libsql vector-path validation + retrieval quality hardening
+  - [x] add deterministic integration tests that exercise native libsql vector SQL path (`vector_distance_cos`) in CI-friendly setup
   - [x] add explicit runtime capability signal (vector enabled/disabled) to retrieval observability output and docs
   - [x] add latency + hit-rate telemetry buckets for semantic artifact search path quality
   - [x] document fallback guardrails (when fallback is expected vs treated as degraded) in `docs/spec/v2_greenfield_bootstrap.md`
@@ -107,7 +107,7 @@ Wave 3 retrieval goals and PR-17+ scope live in:
 - [ ] libsql embedding storage format and vector indexing policy for artifact tables
 - [ ] context budget policy across L2/L1/L0 (global vs per-command vs per-role)
 - [ ] whether and how to backfill selected v1 turns into v2 retrieval surfaces
-- [ ] native libsql/Turso vector-path CI coverage for `SearchArtifactsByEmbedding` (new cgo integration test skips when native vector SQL is unavailable)
+- [x] native libsql/Turso vector-path CI coverage for `SearchArtifactsByEmbedding` (CI now runs strict native-vector gate with `AGENTCTL_V2_REQUIRE_NATIVE_VECTOR_SQL=1`)
 
 ## Completion Gate (Required Before Marking Done)
 
@@ -143,6 +143,18 @@ Subagent Review
 
 ## Progress Log
 
+- 2026-02-19:
+  Subagent Review
+  - reviewer: `019c7812-a3d8-78f1-b3ff-300fb8c46c04`
+  - scope: `PR-18 native vector CI gate slice` (`internal/v2/adapters/libsql/turns/store_vector_cgo_test.go`, `.github/workflows/ci.yml`, `docs/plans/v2-greenfield-bootstrap.md`, `docs/plans/v2-implementation-todo.md`)
+  - findings: `none`
+  - decision: `approved`
+- 2026-02-19: Completed PR-18 native vector-path CI hard gate.
+  - Added strict-mode behavior to `TestTurnStore_SearchArtifactsByEmbedding_VectorPathLibSQL` via `AGENTCTL_V2_REQUIRE_NATIVE_VECTOR_SQL=1`:
+    - local/dev keeps skip behavior when vector SQL is unavailable
+    - CI fails when native vector capability is expected but unavailable or downgraded
+  - Added dedicated CI step in `.github/workflows/ci.yml` to run the strict native vector-path test.
+  - Marked PR-18 and native vector CI coverage tracker items complete.
 - 2026-02-19:
   Subagent Review
   - reviewer: `019c7807-10fb-7ac0-ab59-41450b92fd67`

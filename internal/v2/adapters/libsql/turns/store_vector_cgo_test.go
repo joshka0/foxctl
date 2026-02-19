@@ -4,15 +4,26 @@ package turns
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"testing"
 
 	"github.com/jkatigb/agentctl/internal/v2/core/run"
 )
 
+func requireNativeVectorSQL() bool {
+	switch os.Getenv("AGENTCTL_V2_REQUIRE_NATIVE_VECTOR_SQL") {
+	case "1", "true", "TRUE", "yes", "YES":
+		return true
+	default:
+		return false
+	}
+}
+
 func TestTurnStore_SearchArtifactsByEmbedding_VectorPathLibSQL(t *testing.T) {
 	ctx := context.Background()
 	storageRoot := t.TempDir()
+	requireNative := requireNativeVectorSQL()
 
 	// Force libsql driver so this test validates the native vector SQL path.
 	t.Setenv("AGENTCTL_V2_TURNS_DB_DRIVER", "libsql")
@@ -25,6 +36,9 @@ func TestTurnStore_SearchArtifactsByEmbedding_VectorPathLibSQL(t *testing.T) {
 	t.Cleanup(func() { _ = store.Close() })
 
 	if !store.vectorEnabled.Load() {
+		if requireNative {
+			t.Fatalf("native vector SQL required, but store initialized without vector capability")
+		}
 		t.Skip("skipping: libsql vector capability unavailable in this test environment")
 	}
 
@@ -64,6 +78,9 @@ func TestTurnStore_SearchArtifactsByEmbedding_VectorPathLibSQL(t *testing.T) {
 	if result.SearchPath != run.ArtifactSearchPathVector {
 		if result.SearchPath == run.ArtifactSearchPathFallback &&
 			result.VectorCapability == run.ArtifactVectorCapabilityDisabled {
+			if requireNative {
+				t.Fatalf("native vector SQL required, but search downgraded to fallback (vector_capability=%q)", result.VectorCapability)
+			}
 			t.Skip("skipping: vector SQL unavailable at runtime; store downgraded to fallback path")
 		}
 		t.Fatalf("search_path=%q want %q", result.SearchPath, run.ArtifactSearchPathVector)

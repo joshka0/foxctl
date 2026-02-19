@@ -207,6 +207,14 @@ jobs:
       - name: Unit tests (CGO + libsqlite3)
         run: make test-cgo-short
 
+      - name: Native libsql vector path test (required)
+        env:
+          AGENTCTL_V2_REQUIRE_NATIVE_VECTOR_SQL: "1"
+        run: |
+          CGO_ENABLED=1 go test -tags=libsqlite3 ./internal/v2/adapters/libsql/turns \
+            -run TestTurnStore_SearchArtifactsByEmbedding_VectorPathLibSQL \
+            -count=1 -v
+
   integration-tests:
     runs-on: arc-runner-agentctl
     container:
