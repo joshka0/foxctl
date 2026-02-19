@@ -532,6 +532,37 @@ Exit checks:
 
 **Definition of done**: turn lineage is durable, enrichment is asynchronous, and context references are deterministic.
 
+---
+
+### PR-10: Ask Shadow Validation Plumbing
+
+**Scope**: add deterministic shadow parity plumbing for `ask` so v2 behavior
+can be validated under real command flow while keeping v1 as the primary path.
+
+| File | Status |
+|------|--------|
+| `internal/v2/ports/router.go` | modified |
+| `internal/v2/ports/router_shadow_test.go` | new |
+| `cmd/agentctl/cmd/agent_ask_shadow.go` | new |
+| `cmd/agentctl/cmd/agent_ask_shadow_test.go` | new |
+
+**Key implementation points**:
+- Shadow runs are opt-in per command via `AGENTCTL_V2_SHADOW_COMMANDS`.
+- `ask` keeps v1 as primary unless promoted through `AGENTCTL_V2_COMMANDS`.
+- Parity observations emit deterministic fields: `command`,
+  `correlation_id`, `match`, `reason`, and `shadow_error`.
+- Shadow execution is bounded by timeout and never blocks primary response.
+
+**Tests** (5):
+1. `TestDispatchWithShadow_V1PrimaryRunsV2Shadow` — v1 primary with v2 shadow
+2. `TestDispatchWithShadow_DoesNotRunWhenCommandNotEnabled` — shadow allowlist
+3. `TestDispatchWithShadow_PrimaryV2SkipsShadow` — no duplicate run when v2 primary
+4. `TestEvaluateAskShadowParity_Match` — comparator parity success
+5. `TestEvaluateAskShadowParity_FieldMismatch` — mismatch reason reporting
+
+**Definition of done**: deterministic `ask` shadow parity reports are available
+without changing primary routing behavior.
+
 ## Testing Strategy
 
 ### Unit Tests
@@ -771,3 +802,20 @@ for production use of vector-backed retrieval.
    - fallback is acceptable for continuity, but must be marked degraded when
      vector capability is expected
    - fallback-only runs must not break temporal/context assembly correctness
+
+#### PR-18 Measurable Rollout Gate (Must Pass)
+
+1. **Fallback correctness gate**
+   - Run fixed fallback-only context-builder regression corpus.
+   - Required threshold: **100% pass** on required invariants:
+     - deterministic ordering
+     - stable refs
+     - required temporal blocks present
+2. **Vector/fallback parity gate**
+   - On corpus cases with vector capability available, compare top-K semantic refs.
+   - Required threshold: **>= 90% overlap@10** between vector and fallback sets.
+3. **Runtime degradation gate**
+   - If vector capability is advertised, fallback path use is degraded mode and
+     must be visible in telemetry.
+   - Required threshold for promotion: fallback path ratio **<= 5%** over a
+     rolling 24-hour window for retrieval-dependent commands.

@@ -88,7 +88,10 @@ Wave 3 retrieval goals and PR-17+ scope live in:
   - [ ] add explicit runtime capability signal (vector enabled/disabled) to retrieval observability output and docs
   - [ ] add latency + hit-rate telemetry buckets for semantic artifact search path quality
   - [ ] document fallback guardrails (when fallback is expected vs treated as degraded) in `docs/spec/v2_greenfield_bootstrap.md`
-  - [ ] define rollout gate: fallback-only behavior must not regress baseline context assembly correctness
+  - [ ] define rollout gate with measurable thresholds:
+    - fallback-only corpus required invariants pass rate = `100%`
+    - vector vs fallback semantic overlap@10 >= `90%` on validation corpus
+    - fallback ratio <= `5%` over rolling 24h when vector capability is expected
 
 ## Decisions (Locked)
 
@@ -140,6 +143,12 @@ Subagent Review
 
 ## Progress Log
 
+- 2026-02-19:
+  Subagent Review
+  - reviewer: `019c75d0-9ede-70a2-8541-b07ab5237599`
+  - scope: `PR-18 warning-fix docs slice` (`docs/plans/v2-greenfield-bootstrap.md`, `docs/plans/v2-implementation-todo.md`)
+  - findings: `none` (prior warnings resolved: PR-10 deterministic detail added; PR-18 measurable rollout gates added)
+  - decision: `approved`
 - 2026-02-19:
   Subagent Review
   - reviewer: `019c750b-7ecd-7980-b862-6ac80123efdb`
