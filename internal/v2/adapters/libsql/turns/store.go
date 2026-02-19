@@ -10,12 +10,14 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"sync/atomic"
 	"time"
 
 	"github.com/jkatigb/agentctl/internal/storage/dbdriver"
 	"github.com/jkatigb/agentctl/internal/storage/sqlutil"
+	"github.com/jkatigb/agentctl/internal/storage/vector"
 	"github.com/jkatigb/agentctl/internal/v2/core/run"
 )
 
@@ -74,6 +76,20 @@ func (a Artifact) Clone() Artifact {
 		out.Embedding = append([]float32(nil), a.Embedding...)
 	}
 	return out
+}
+
+// ArtifactSearchOptions controls artifact embedding retrieval.
+type ArtifactSearchOptions struct {
+	SessionID    string `json:"session_id,omitempty"`
+	ArtifactType string `json:"artifact_type,omitempty"`
+	Limit        int    `json:"limit,omitempty"`
+}
+
+// ScoredArtifact pairs an artifact with semantic similarity metadata.
+type ScoredArtifact struct {
+	Artifact   Artifact `json:"artifact"`
+	Similarity float64  `json:"similarity"`
+	Distance   float64  `json:"distance,omitempty"`
 }
 
 // Store persists turn lineage and derived artifacts.
@@ -700,6 +716,269 @@ func (s *Store) ListArtifacts(ctx context.Context, turnID string) ([]Artifact, e
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("iterate artifact keys: %w", err)
+	}
+	return out, nil
+}
+
+// SearchArtifactsByEmbedding returns top artifacts by embedding similarity.
+// It prefers native libsql vector functions and falls back to in-process cosine
+// scoring when vector SQL is unavailable.
+func (s *Store) SearchArtifactsByEmbedding(
+	ctx context.Context,
+	queryEmbedding []float32,
+	opts ArtifactSearchOptions,
+) ([]ScoredArtifact, error) {
+	if s == nil || s.db == nil {
+		return nil, fmt.Errorf("v2 turns search artifacts: nil store")
+	}
+	if len(queryEmbedding) == 0 {
+		return nil, nil
+	}
+	for i, value := range queryEmbedding {
+		if math.IsNaN(float64(value)) || math.IsInf(float64(value), 0) {
+			return nil, fmt.Errorf("v2 turns search artifacts: embedding contains invalid value at index %d", i)
+		}
+	}
+
+	normalized, err := normalizeArtifactSearchOptions(opts)
+	if err != nil {
+		return nil, err
+	}
+
+	if s.vectorEnabled.Load() {
+		candidates, err := s.searchArtifactCandidatesVector(ctx, queryEmbedding, normalized)
+		if err == nil {
+			return s.loadScoredArtifacts(ctx, candidates)
+		}
+		if !isVectorUnsupported(err) {
+			return nil, err
+		}
+		// Disable vector search after first unsupported query to avoid repeated
+		// expensive failures on fallback drivers.
+		s.vectorEnabled.Store(false)
+	}
+
+	candidates, err := s.searchArtifactCandidatesFallback(ctx, queryEmbedding, normalized)
+	if err != nil {
+		return nil, err
+	}
+	return s.loadScoredArtifacts(ctx, candidates)
+}
+
+type artifactSimilarityCandidate struct {
+	TurnID          string
+	ArtifactType    string
+	ArtifactVersion string
+	Similarity      float64
+	Distance        float64
+	UpdatedAt       time.Time
+}
+
+func normalizeArtifactSearchOptions(opts ArtifactSearchOptions) (ArtifactSearchOptions, error) {
+	opts.SessionID = strings.TrimSpace(opts.SessionID)
+	opts.ArtifactType = strings.TrimSpace(strings.ToLower(opts.ArtifactType))
+	if opts.ArtifactType != "" {
+		if _, ok := allowedArtifactTypes[opts.ArtifactType]; !ok {
+			return ArtifactSearchOptions{}, ErrInvalidArtifactType
+		}
+	}
+	if opts.Limit <= 0 {
+		opts.Limit = 10
+	}
+	if opts.Limit > 100 {
+		opts.Limit = 100
+	}
+	return opts, nil
+}
+
+func (s *Store) searchArtifactCandidatesVector(
+	ctx context.Context,
+	queryEmbedding []float32,
+	opts ArtifactSearchOptions,
+) ([]artifactSimilarityCandidate, error) {
+	vectorStr := float32sToVectorString(queryEmbedding)
+
+	where := []string{"a.embedding IS NOT NULL"}
+	args := make([]any, 0, 4)
+	if opts.SessionID != "" {
+		args = append(args, opts.SessionID)
+		where = append(where, fmt.Sprintf("t.session_id = $%d", len(args)))
+	}
+	if opts.ArtifactType != "" {
+		args = append(args, opts.ArtifactType)
+		where = append(where, fmt.Sprintf("a.artifact_type = $%d", len(args)))
+	}
+	args = append(args, opts.Limit)
+
+	query := fmt.Sprintf(`
+		SELECT
+			a.turn_id,
+			a.artifact_type,
+			a.artifact_version,
+			COALESCE(a.updated_at, ''),
+			vector_distance_cos(a.embedding, vector('%s')) AS distance
+		FROM v2_turn_artifacts a
+		JOIN v2_turns t ON t.id = a.turn_id
+		WHERE %s
+		ORDER BY distance ASC, a.updated_at DESC, a.turn_id ASC, a.artifact_type ASC, a.artifact_version ASC
+		LIMIT $%d
+	`, vectorStr, strings.Join(where, " AND "), len(args))
+
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("query artifact vector similarity: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	out := make([]artifactSimilarityCandidate, 0, opts.Limit)
+	for rows.Next() {
+		var (
+			candidate   artifactSimilarityCandidate
+			updatedAt   string
+			distanceRaw float64
+		)
+		if err := rows.Scan(
+			&candidate.TurnID,
+			&candidate.ArtifactType,
+			&candidate.ArtifactVersion,
+			&updatedAt,
+			&distanceRaw,
+		); err != nil {
+			return nil, fmt.Errorf("scan artifact vector candidate: %w", err)
+		}
+		candidate.Distance = distanceRaw
+		candidate.Similarity = 1.0 - distanceRaw
+		candidate.UpdatedAt, _ = sqlutil.ScanTimestamp(updatedAt)
+		out = append(out, candidate)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate artifact vector candidates: %w", err)
+	}
+	return out, nil
+}
+
+func (s *Store) searchArtifactCandidatesFallback(
+	ctx context.Context,
+	queryEmbedding []float32,
+	opts ArtifactSearchOptions,
+) ([]artifactSimilarityCandidate, error) {
+	where := []string{"COALESCE(a.embedding_json, '[]') <> '[]'"}
+	args := make([]any, 0, 4)
+	if opts.SessionID != "" {
+		args = append(args, opts.SessionID)
+		where = append(where, fmt.Sprintf("t.session_id = $%d", len(args)))
+	}
+	if opts.ArtifactType != "" {
+		args = append(args, opts.ArtifactType)
+		where = append(where, fmt.Sprintf("a.artifact_type = $%d", len(args)))
+	}
+	candidateLimit := opts.Limit * 12
+	if candidateLimit < opts.Limit {
+		candidateLimit = opts.Limit
+	}
+	if candidateLimit > 500 {
+		candidateLimit = 500
+	}
+	args = append(args, candidateLimit)
+
+	query := fmt.Sprintf(`
+		SELECT
+			a.turn_id,
+			a.artifact_type,
+			a.artifact_version,
+			COALESCE(a.embedding_json, '[]'),
+			COALESCE(a.updated_at, '')
+		FROM v2_turn_artifacts a
+		JOIN v2_turns t ON t.id = a.turn_id
+		WHERE %s
+		ORDER BY a.updated_at DESC, a.turn_id ASC, a.artifact_type ASC, a.artifact_version ASC
+		LIMIT $%d
+	`, strings.Join(where, " AND "), len(args))
+
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("query artifact fallback candidates: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	candidates := make([]artifactSimilarityCandidate, 0, candidateLimit)
+	for rows.Next() {
+		var (
+			candidate   artifactSimilarityCandidate
+			embeddingJS string
+			updatedAt   string
+			embedding   []float32
+		)
+		if err := rows.Scan(
+			&candidate.TurnID,
+			&candidate.ArtifactType,
+			&candidate.ArtifactVersion,
+			&embeddingJS,
+			&updatedAt,
+		); err != nil {
+			return nil, fmt.Errorf("scan artifact fallback candidate: %w", err)
+		}
+		if err := json.Unmarshal([]byte(strings.TrimSpace(embeddingJS)), &embedding); err != nil {
+			continue
+		}
+		if len(embedding) == 0 || len(embedding) != len(queryEmbedding) {
+			continue
+		}
+		candidate.Similarity = vector.Cosine(queryEmbedding, embedding)
+		candidate.Distance = 1.0 - candidate.Similarity
+		candidate.UpdatedAt, _ = sqlutil.ScanTimestamp(updatedAt)
+		candidates = append(candidates, candidate)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate artifact fallback candidates: %w", err)
+	}
+
+	sort.SliceStable(candidates, func(i, j int) bool {
+		left := candidates[i]
+		right := candidates[j]
+		if left.Similarity != right.Similarity {
+			return left.Similarity > right.Similarity
+		}
+		if !left.UpdatedAt.Equal(right.UpdatedAt) {
+			return left.UpdatedAt.After(right.UpdatedAt)
+		}
+		if left.TurnID != right.TurnID {
+			return left.TurnID < right.TurnID
+		}
+		if left.ArtifactType != right.ArtifactType {
+			return left.ArtifactType < right.ArtifactType
+		}
+		return left.ArtifactVersion < right.ArtifactVersion
+	})
+
+	if len(candidates) > opts.Limit {
+		candidates = candidates[:opts.Limit]
+	}
+	return candidates, nil
+}
+
+func (s *Store) loadScoredArtifacts(
+	ctx context.Context,
+	candidates []artifactSimilarityCandidate,
+) ([]ScoredArtifact, error) {
+	if len(candidates) == 0 {
+		return nil, nil
+	}
+
+	out := make([]ScoredArtifact, 0, len(candidates))
+	for _, candidate := range candidates {
+		artifact, err := s.GetArtifact(ctx, candidate.TurnID, candidate.ArtifactType, candidate.ArtifactVersion)
+		if errors.Is(err, ErrArtifactNotFound) {
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, ScoredArtifact{
+			Artifact:   artifact,
+			Similarity: candidate.Similarity,
+			Distance:   candidate.Distance,
+		})
 	}
 	return out, nil
 }

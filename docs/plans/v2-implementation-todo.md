@@ -2,7 +2,7 @@
 
 Status: Active  
 Owner: Solo maintainer  
-Last Updated: 2026-02-18
+Last Updated: 2026-02-19
 
 ## Objective
 
@@ -27,6 +27,7 @@ Primary specs/plans:
 - [x] v2 docs aligned to companion/general references and non-blocking v2 scope rules
 - [x] Wave 2 production cutover batch 1 complete (PR-11 through PR-13)
 - [x] Wave 2 dynamic context + decommission gate batch complete (PR-14 through PR-16)
+- [ ] Wave 3 kickoff in progress (PR-17 libsql-first artifact semantic retrieval)
 
 ## Wave 1 Completed (Reference)
 
@@ -61,7 +62,14 @@ Wave 2 rationale, DoD expectations, and exit criteria live in:
   - [x] blend turn refs + companion summaries deterministically
   - [x] validate referenceability of whole turns and partial slices in assembled context
 
-## Next
+## Next (Wave 3 Kickoff)
+
+- [ ] PR-17: libsql-first artifact semantic retrieval surfaces
+  - [x] add `SearchArtifactsByEmbedding` in `internal/v2/adapters/libsql/turns/store.go` with vector-first query + safe cosine fallback
+  - [x] add deterministic retrieval tests (ranking, filtering, fallback-disable behavior)
+  - [ ] define core-facing artifact semantic retrieval interface for runtime consumers
+  - [ ] wire optional semantic artifact layer into context builder assembly path
+  - [ ] add observability counters for vector-path vs fallback-path query usage
 
 - [x] PR-16: v1 decommission readiness gates
   - [x] expand shadow parity past `ask` to `spawn/run/list/kill`
@@ -82,6 +90,7 @@ Wave 2 rationale, DoD expectations, and exit criteria live in:
 - [ ] libsql embedding storage format and vector indexing policy for artifact tables
 - [ ] context budget policy across L2/L1/L0 (global vs per-command vs per-role)
 - [ ] whether and how to backfill selected v1 turns into v2 retrieval surfaces
+- [ ] native libsql/Turso vector-path CI coverage for `SearchArtifactsByEmbedding` (current tests cover deterministic fallback path only)
 
 ## Completion Gate (Required Before Marking Done)
 
@@ -117,6 +126,18 @@ Subagent Review
 
 ## Progress Log
 
+- 2026-02-19: Started PR-17 (Wave 3 kickoff) with libsql-first artifact semantic retrieval.
+  - Added `SearchArtifactsByEmbedding` + supporting option/result types in `internal/v2/adapters/libsql/turns/store.go`.
+  - Retrieval prefers native `vector_distance_cos(...)` when enabled and downgrades to in-process cosine scoring when vector SQL is unavailable.
+  - Added filter support for `session_id` and `artifact_type` with deterministic ranking and bounded limits.
+  - Added tests in `internal/v2/adapters/libsql/turns/store_test.go` covering fallback behavior, ordering, and filter correctness.
+  - Validation: `go test ./internal/v2/adapters/libsql/turns` and `go test ./internal/v2/...`.
+- 2026-02-19:
+  Subagent Review
+  - reviewer: `019c74cd-b1c3-7592-876a-f17c1b22d19d`
+  - scope: `PR-17 kickoff retrieval slice` (`internal/v2/adapters/libsql/turns/{store,store_test}.go`, `docs/plans/v2-implementation-todo.md`)
+  - findings: `low` — native libsql vector-path branch lacks direct CI coverage; fallback path is covered
+  - decision: `approved-with-known-risks`
 - 2026-02-18: Documented Wave 2 planning and reset tracker to active Wave 2 execution.
   - Updated `docs/plans/v2-greenfield-bootstrap.md` with Wave 2 goals, consideration areas, proposed PR-11..PR-16 slices, and full-v2 exit criteria.
   - Updated this tracker to mark Wave 1 complete and set Wave 2 live cutover + dynamic context work as current priorities.

@@ -356,6 +356,110 @@ func TestTurnStore_SaveArtifact_RejectsInvalidType(t *testing.T) {
 	}
 }
 
+func TestTurnStore_SearchArtifactsByEmbedding_FallbackAndFilters(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	db, closeFn, err := dbutil.OpenSQLiteDBShared(ctx, filepath.Join(t.TempDir(), "turn_artifact_search.db"), nil)
+	if err != nil {
+		t.Fatalf("open sqlite db: %v", err)
+	}
+	t.Cleanup(func() { _ = closeFn() })
+	if err := MigrateSchema(ctx, db); err != nil {
+		t.Fatalf("migrate schema: %v", err)
+	}
+
+	store := NewStore(db, db.Close)
+	base := time.Date(2026, 2, 19, 12, 0, 0, 0, time.UTC)
+	store.SetNowForTest(func() time.Time { return base })
+
+	if err := store.SaveTurn(ctx, run.TurnRecord{ID: "turn-s1-a", SessionID: "run-s1"}); err != nil {
+		t.Fatalf("SaveTurn(turn-s1-a) error = %v", err)
+	}
+	if err := store.SaveTurn(ctx, run.TurnRecord{ID: "turn-s1-b", SessionID: "run-s1"}); err != nil {
+		t.Fatalf("SaveTurn(turn-s1-b) error = %v", err)
+	}
+	if err := store.SaveTurn(ctx, run.TurnRecord{ID: "turn-s2-a", SessionID: "run-s2"}); err != nil {
+		t.Fatalf("SaveTurn(turn-s2-a) error = %v", err)
+	}
+
+	if err := store.SaveArtifact(ctx, Artifact{
+		TurnID:          "turn-s1-a",
+		ArtifactType:    ArtifactTypeEmbedding,
+		ArtifactVersion: "v1",
+		Summary:         "s1 embedding primary",
+		Embedding:       []float32{1.0, 0.0, 0.0},
+	}); err != nil {
+		t.Fatalf("SaveArtifact(turn-s1-a embedding) error = %v", err)
+	}
+	if err := store.SaveArtifact(ctx, Artifact{
+		TurnID:          "turn-s1-b",
+		ArtifactType:    ArtifactTypeAnnotation,
+		ArtifactVersion: "v1",
+		Summary:         "s1 annotation secondary",
+		Embedding:       []float32{0.7, 0.3, 0.0},
+	}); err != nil {
+		t.Fatalf("SaveArtifact(turn-s1-b annotation) error = %v", err)
+	}
+	if err := store.SaveArtifact(ctx, Artifact{
+		TurnID:          "turn-s2-a",
+		ArtifactType:    ArtifactTypeEmbedding,
+		ArtifactVersion: "v1",
+		Summary:         "s2 embedding other session",
+		Embedding:       []float32{0.0, 1.0, 0.0},
+	}); err != nil {
+		t.Fatalf("SaveArtifact(turn-s2-a embedding) error = %v", err)
+	}
+
+	// Force vector-query path on sqlite to verify graceful downgrade and fallback search.
+	store.vectorEnabled.Store(true)
+
+	results, err := store.SearchArtifactsByEmbedding(ctx, []float32{1.0, 0.0, 0.0}, ArtifactSearchOptions{
+		SessionID: "run-s1",
+		Limit:     5,
+	})
+	if err != nil {
+		t.Fatalf("SearchArtifactsByEmbedding() error = %v", err)
+	}
+	if store.vectorEnabled.Load() {
+		t.Fatal("vectorEnabled should be disabled after unsupported vector search fallback")
+	}
+	if len(results) != 2 {
+		t.Fatalf("results len=%d want 2", len(results))
+	}
+	if results[0].Artifact.TurnID != "turn-s1-a" {
+		t.Fatalf("top result turn=%q want turn-s1-a", results[0].Artifact.TurnID)
+	}
+	if results[0].Similarity < results[1].Similarity {
+		t.Fatalf("results not sorted by similarity desc: %.4f < %.4f", results[0].Similarity, results[1].Similarity)
+	}
+
+	typed, err := store.SearchArtifactsByEmbedding(ctx, []float32{1.0, 0.0, 0.0}, ArtifactSearchOptions{
+		SessionID:    "run-s1",
+		ArtifactType: ArtifactTypeAnnotation,
+		Limit:        5,
+	})
+	if err != nil {
+		t.Fatalf("SearchArtifactsByEmbedding(annotation) error = %v", err)
+	}
+	if len(typed) != 1 {
+		t.Fatalf("typed results len=%d want 1", len(typed))
+	}
+	if typed[0].Artifact.ArtifactType != ArtifactTypeAnnotation {
+		t.Fatalf("typed result artifact_type=%q want %q", typed[0].Artifact.ArtifactType, ArtifactTypeAnnotation)
+	}
+
+	invalidType, err := store.SearchArtifactsByEmbedding(ctx, []float32{1.0, 0.0, 0.0}, ArtifactSearchOptions{
+		ArtifactType: "bogus",
+	})
+	if !errors.Is(err, ErrInvalidArtifactType) {
+		t.Fatalf("invalid type error=%v want ErrInvalidArtifactType", err)
+	}
+	if invalidType != nil {
+		t.Fatalf("invalid type results=%v want nil", invalidType)
+	}
+}
+
 func TestParseArtifactRef(t *testing.T) {
 	t.Parallel()
 
