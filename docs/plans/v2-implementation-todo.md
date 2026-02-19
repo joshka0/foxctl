@@ -65,7 +65,7 @@ Wave 3 retrieval goals and PR-17+ scope live in:
   - [x] blend turn refs + companion summaries deterministically
   - [x] validate referenceability of whole turns and partial slices in assembled context
 
-## Next (Wave 3 Kickoff)
+## Next (Wave 3 Active)
 
 - [x] PR-17: libsql-first artifact semantic retrieval surfaces
   - [x] add `SearchArtifactsByEmbedding` in `internal/v2/adapters/libsql/turns/store.go` with vector-first query + safe cosine fallback
@@ -82,6 +82,13 @@ Wave 3 retrieval goals and PR-17+ scope live in:
   - [x] expand shadow parity past `ask` to `spawn/run/list/kill`
   - [x] define sustained parity window + incident-free thresholds
   - [x] remove/freeze superseded v1 handlers command-by-command
+
+- [ ] PR-18: libsql vector-path validation + retrieval quality hardening
+  - [ ] add deterministic integration tests that exercise native libsql vector SQL path (`vector_distance_cos`) in CI-friendly setup
+  - [ ] add explicit runtime capability signal (vector enabled/disabled) to retrieval observability output and docs
+  - [ ] add latency + hit-rate telemetry buckets for semantic artifact search path quality
+  - [ ] document fallback guardrails (when fallback is expected vs treated as degraded) in `docs/spec/v2_greenfield_bootstrap.md`
+  - [ ] define rollout gate: fallback-only behavior must not regress baseline context assembly correctness
 
 ## Decisions (Locked)
 

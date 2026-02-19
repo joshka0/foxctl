@@ -755,11 +755,19 @@ Reference: `docs/spec/v2_greenfield_bootstrap.md` ("Artifact Semantic Retrieval 
   end-to-end native libsql vector-query execution path. This is tracked in
   `docs/plans/v2-implementation-todo.md` as an open question.
 
-### Post-PR-17 Follow-Ons
+### PR-18 Focus: Vector Path Confidence + Retrieval Quality
 
-1. Define a core runtime retrieval interface for artifact semantic lookups.
-2. Integrate semantic artifact retrieval into v2 context builder assembly.
-3. Add retrieval observability counters/events:
-   - `artifact_search.vector_path`
-   - `artifact_search.fallback_path`
-   - result count and latency buckets
+PR-17 completed the core retrieval interface, context-builder integration, and
+path observability/tracing. PR-18 should focus on confidence and quality gates
+for production use of vector-backed retrieval.
+
+1. Add deterministic coverage for native libsql vector path execution
+   (`vector_distance_cos`) in a CI-friendly test setup.
+2. Expose explicit runtime capability status for retrieval path selection
+   (vector-enabled vs fallback-only) in observability output.
+3. Expand retrieval quality telemetry with path-scoped latency and hit-rate
+   buckets so degraded behavior is measurable.
+4. Codify fallback guardrails and rollout criteria:
+   - fallback is acceptable for continuity, but must be marked degraded when
+     vector capability is expected
+   - fallback-only runs must not break temporal/context assembly correctness
