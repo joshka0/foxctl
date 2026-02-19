@@ -70,8 +70,10 @@ Wave 3 retrieval goals and PR-17+ scope live in:
 - [ ] PR-17: libsql-first artifact semantic retrieval surfaces
   - [x] add `SearchArtifactsByEmbedding` in `internal/v2/adapters/libsql/turns/store.go` with vector-first query + safe cosine fallback
   - [x] add deterministic retrieval tests (ranking, filtering, fallback-disable behavior)
+  - [x] document core-facing retrieval interface + context builder integration contract (`docs/spec/v2_greenfield_bootstrap.md`, `docs/plans/v2-greenfield-bootstrap.md`)
   - [ ] define core-facing artifact semantic retrieval interface for runtime consumers
   - [ ] wire optional semantic artifact layer into context builder assembly path
+  - [ ] enforce context-builder metadata and merge guarantees (`artifact_search_path`, `artifact_hit_count`, dedup-by-ref, deterministic merge ordering)
   - [ ] add observability counters for vector-path vs fallback-path query usage
 
 - [x] PR-16: v1 decommission readiness gates
@@ -129,6 +131,20 @@ Subagent Review
 
 ## Progress Log
 
+- 2026-02-19: Documented concrete PR-17 interface proposal (core/run + context builder).
+  - Added proposed core retrieval interfaces (`ArtifactSemanticRetriever`, `ArtifactSearchOptions`, `ScoredArtifact`) in `docs/spec/v2_greenfield_bootstrap.md`.
+  - Added context-builder integration contract with optional semantic query shape, deterministic merge order, and degraded-mode behavior.
+  - Added Wave 3 plan-level interface proposal section and cross-reference in `docs/plans/v2-greenfield-bootstrap.md`.
+- 2026-02-19: Refined PR-17 interface docs after subagent review.
+  - Aligned retrieval option contract to include `ArtifactTypes[]` and `MinSimilarity` in `docs/spec/v2_greenfield_bootstrap.md`.
+  - Added explicit PR-17 acceptance criteria for context-builder metadata + deterministic semantic merge behavior in `docs/plans/v2-greenfield-bootstrap.md`.
+  - Added explicit tracker work item for metadata/merge guarantees in this file.
+- 2026-02-19:
+  Subagent Review
+  - reviewer: `019c74da-2c68-7b83-8639-4d6631991652`
+  - scope: `PR-17 interface proposal docs` (`docs/spec/v2_greenfield_bootstrap.md`, `docs/plans/v2-greenfield-bootstrap.md`, `docs/plans/v2-implementation-todo.md`)
+  - findings: `resolved` — aligned retrieval options with context contract and added explicit metadata/merge acceptance items
+  - decision: `approved-with-known-risks`
 - 2026-02-19: Expanded PR-17 documentation across planning/spec/general docs.
   - Added Wave 3/PR-17 scope, goals, acceptance criteria, and risk notes in `docs/plans/v2-greenfield-bootstrap.md`.
   - Aligned tracker phase wording to Wave 3 and added direct Wave 3 cross-reference in this file.

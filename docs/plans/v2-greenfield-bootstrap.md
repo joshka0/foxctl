@@ -727,6 +727,27 @@ directly instead of relying only on chronological windows.
 2. Fallback mode behavior is deterministic and tested.
 3. Invalid artifact filters fail fast with explicit typed errors.
 4. Existing turn completion non-blocking guarantees remain unchanged.
+5. Context-builder contract includes deterministic merge metadata:
+   - `artifact_search_path` (`vector|fallback|disabled|error`)
+   - `artifact_hit_count`
+   - dedup by `ref`
+   - merge ordering: temporal blocks first, then semantic refs by similarity desc + ref asc
+
+#### Interface Proposal (Documented Contract)
+
+1. Define a core-facing retrieval port in `internal/v2/core/run`:
+   - `ArtifactSemanticRetriever`
+   - `ArtifactSearchOptions`
+   - `ScoredArtifact`
+2. Keep libsql adapter ownership of concrete SQL/search behavior while exposing a
+   transport-agnostic interface to runtime/context components.
+3. Extend context-builder request/response contracts to support optional semantic
+   artifact queries and explicit result metadata (`artifact_search_path`,
+   `artifact_hit_count`).
+4. Keep semantic retrieval optional and non-fatal so baseline temporal assembly
+   remains available when retrieval is degraded/unavailable.
+
+Reference: `docs/spec/v2_greenfield_bootstrap.md` ("Artifact Semantic Retrieval Contract (Wave 3)" and "Context Builder Integration Contract (PR-17 Proposal)").
 
 #### Known Risk (Current)
 
