@@ -87,7 +87,7 @@ Wave 3 retrieval goals and PR-17+ scope live in:
   - [ ] add deterministic integration tests that exercise native libsql vector SQL path (`vector_distance_cos`) in CI-friendly setup
   - [x] add explicit runtime capability signal (vector enabled/disabled) to retrieval observability output and docs
   - [x] add latency + hit-rate telemetry buckets for semantic artifact search path quality
-  - [ ] document fallback guardrails (when fallback is expected vs treated as degraded) in `docs/spec/v2_greenfield_bootstrap.md`
+  - [x] document fallback guardrails (when fallback is expected vs treated as degraded) in `docs/spec/v2_greenfield_bootstrap.md`
   - [ ] define rollout gate with measurable thresholds:
     - fallback-only corpus required invariants pass rate = `100%`
     - vector vs fallback semantic overlap@10 >= `90%` on validation corpus
@@ -143,6 +143,15 @@ Subagent Review
 
 ## Progress Log
 
+- 2026-02-19:
+  Subagent Review
+  - reviewer: `019c77f9-268a-75f3-a041-483b6cbf45ed`
+  - scope: `PR-18 fallback-guardrail docs slice` (`docs/spec/v2_greenfield_bootstrap.md`, `docs/plans/v2-implementation-todo.md`)
+  - findings: `none`
+  - decision: `approved`
+- 2026-02-19: Documented PR-18 fallback guardrails in spec and marked tracker item complete.
+  - Added required degraded-mode signaling and context invariants for fallback retrieval in `docs/spec/v2_greenfield_bootstrap.md`.
+  - Added required telemetry dimensions for promotion readiness (`path`, `vector_capability`, `hit_bucket`, `latency_bucket`).
 - 2026-02-19:
   Subagent Review
   - reviewer: `019c77f5-1ace-7d50-b597-f865fddce957`

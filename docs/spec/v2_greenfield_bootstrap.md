@@ -270,6 +270,21 @@ Required properties:
 4. Ordering is deterministic and bounded by explicit limits.
 5. Retrieval failure/degradation must not affect turn completion guarantees.
 
+Fallback guardrails (required for rollout readiness):
+
+1. Fallback execution is allowed for continuity, but must be explicitly surfaced
+   as degraded when vector capability is expected.
+2. Context assembly invariants must hold in fallback mode:
+   - deterministic ordering
+   - stable references
+   - required temporal blocks present
+3. Runtime telemetry must expose retrieval path quality to support promotion
+   decisions:
+   - path (`vector|fallback|disabled|error`)
+   - vector capability (`enabled|disabled|unknown`)
+   - hit-count bucket (`zero|one_to_three|four_to_ten|gt_ten`)
+   - latency bucket (`le_10ms|le_50ms|le_100ms|gt_100ms`)
+
 ### Context Builder Integration Contract (PR-17 Proposal)
 
 Context assembly should treat artifact-semantic retrieval as an optional layer
