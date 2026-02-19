@@ -232,3 +232,39 @@ func TestEvaluateSemanticRolloutGate_OverlapAtK_DedupAndLimit(t *testing.T) {
 		t.Fatalf("CaseResults unexpected: %+v", got.CaseResults)
 	}
 }
+
+func TestEvaluateSemanticRolloutGate_NoComparableVectorRefsFailsOverlap(t *testing.T) {
+	t.Parallel()
+
+	got := EvaluateSemanticRolloutGate(SemanticRolloutGateInput{
+		Cases: []SemanticValidationCase{
+			{
+				ID:                    "case-no-vector-refs",
+				DeterministicOrdering: true,
+				StableRefs:            true,
+				RequiredTemporalBlock: true,
+				VectorArtifactRefs:    nil,
+				FallbackArtifactRefs:  []string{"r1", "r2"},
+			},
+		},
+		Stats: ArtifactSearchStats{
+			VectorCalls:   95,
+			FallbackCalls: 5,
+		},
+		VectorCapabilityExpected: true,
+		Thresholds:               DefaultSemanticRolloutGateThresholds(),
+	})
+
+	if got.VectorFallbackOverlapAtK != 0 {
+		t.Fatalf("VectorFallbackOverlapAtK=%.3f want 0", got.VectorFallbackOverlapAtK)
+	}
+	if got.CaseResults[0].ExpectedAtK != 0 || got.CaseResults[0].OverlapAtK != 0 {
+		t.Fatalf("case result unexpected: %+v", got.CaseResults[0])
+	}
+	if got.Checks.VectorFallbackOverlapAtK {
+		t.Fatalf("VectorFallbackOverlapAtK check=true want false")
+	}
+	if !slices.Contains(got.FailedChecks, "vector_fallback_overlap_at_k") {
+		t.Fatalf("missing vector_fallback_overlap_at_k in failed checks: %v", got.FailedChecks)
+	}
+}

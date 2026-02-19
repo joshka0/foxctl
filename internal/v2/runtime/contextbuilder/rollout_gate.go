@@ -88,7 +88,7 @@ func EvaluateSemanticRolloutGate(input SemanticRolloutGateInput) SemanticRollout
 		}
 
 		expected, overlapCount := overlapAtK(c.VectorArtifactRefs, c.FallbackArtifactRefs, thresholds.OverlapTopK)
-		overlapRate := 1.0
+		overlapRate := 0.0
 		if expected > 0 {
 			overlapRate = float64(overlapCount) / float64(expected)
 		}
