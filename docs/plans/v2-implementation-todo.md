@@ -88,7 +88,7 @@ Wave 3 retrieval goals and PR-17+ scope live in:
   - [x] add explicit runtime capability signal (vector enabled/disabled) to retrieval observability output and docs
   - [x] add latency + hit-rate telemetry buckets for semantic artifact search path quality
   - [x] document fallback guardrails (when fallback is expected vs treated as degraded) in `docs/spec/v2_greenfield_bootstrap.md`
-  - [ ] define rollout gate with measurable thresholds:
+  - [x] define rollout gate with measurable thresholds:
     - fallback-only corpus required invariants pass rate = `100%`
     - vector vs fallback semantic overlap@10 >= `90%` on validation corpus
     - fallback ratio <= `5%` over rolling 24h when vector capability is expected
@@ -143,6 +143,24 @@ Subagent Review
 
 ## Progress Log
 
+- 2026-02-19:
+  Subagent Review
+  - reviewer: `019c77fd-dbb5-75f1-9e26-257938cb6f4e`
+  - scope: `PR-18 rollout-gate evaluator slice` (`internal/v2/runtime/contextbuilder/rollout_gate.go`, `internal/v2/runtime/contextbuilder/rollout_gate_test.go`, `docs/plans/v2-implementation-todo.md`)
+  - findings: `none`
+  - decision: `approved`
+- 2026-02-19: Implemented PR-18 rollout-gate evaluator and corpus checks.
+  - Added pure rollout gate evaluation API in `internal/v2/runtime/contextbuilder/rollout_gate.go`:
+    - `SemanticRolloutGateThresholds`
+    - `SemanticValidationCase`
+    - `EvaluateSemanticRolloutGate(...)`
+  - Enforced threshold checks:
+    - fallback invariant pass rate (`100%`)
+    - vector/fallback overlap@10 (`>= 90%`)
+    - fallback ratio (`<= 5%`) when vector capability is expected
+  - Added table-driven tests in `internal/v2/runtime/contextbuilder/rollout_gate_test.go` including edge cases:
+    - no-sample fallback ratio behavior
+    - overlap dedup and top-K limit behavior
 - 2026-02-19:
   Subagent Review
   - reviewer: `019c77f9-268a-75f3-a041-483b6cbf45ed`
