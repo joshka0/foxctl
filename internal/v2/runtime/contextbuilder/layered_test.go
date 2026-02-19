@@ -93,6 +93,31 @@ func TestContextBuilder_BuildLayered_DeterministicMixAndRefs(t *testing.T) {
 	}
 }
 
+func TestContextBuilder_BuildLayered_BudgetReallocatesWhenSemanticUnavailable(t *testing.T) {
+	t.Parallel()
+
+	reader := &layeredTurnReader{}
+	builder := contextbuilder.New(reader)
+	builder.SetCompanionProvider(fakeCompanionProvider{})
+
+	got, err := builder.BuildLayered(context.Background(), contextbuilder.LayeredRequest{
+		SessionID: "run-layered",
+		MaxChars:  100,
+		// Semantic request exists but cannot execute (empty embedding + no retriever).
+		Semantic: &contextbuilder.ArtifactSemanticQuery{},
+	})
+	if err != nil {
+		t.Fatalf("BuildLayered() error = %v", err)
+	}
+
+	if got.Meta["budget_semantic_chars"] != 0 {
+		t.Fatalf("budget_semantic_chars=%v want 0", got.Meta["budget_semantic_chars"])
+	}
+	if got.Meta["budget_l0_chars"] != 55 {
+		t.Fatalf("budget_l0_chars=%v want 55", got.Meta["budget_l0_chars"])
+	}
+}
+
 func TestContextBuilder_BuildLayered_SemanticArtifactsDeterministic(t *testing.T) {
 	t.Parallel()
 

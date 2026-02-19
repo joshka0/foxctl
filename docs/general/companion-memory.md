@@ -42,6 +42,16 @@ temporal depth.
 Implementation reference:
 - `internal/companion/memory.go` (`GetContext`, `LayerBudget`)
 
+V2 policy note: layered runtime assembly now uses a deterministic char-budget
+split under one total cap:
+- `L2=20%`
+- `L1=25%`
+- `L0=45%`
+- `Semantic=10%` (reallocated to `L0` when semantic retrieval is disabled)
+
+Per-request overrides are supported for each layer in
+`internal/v2/runtime/contextbuilder.LayerBudget`.
+
 ## Temporal Pyramid (Cheap Derived Views)
 
 To support dynamic context assembly without replaying all turns, companion

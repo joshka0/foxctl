@@ -105,7 +105,7 @@ Wave 3 retrieval goals and PR-17+ scope live in:
 ## Open Questions
 
 - [x] libsql embedding storage format and vector indexing policy for artifact tables
-- [ ] context budget policy across L2/L1/L0 (global vs per-command vs per-role)
+- [x] context budget policy across L2/L1/L0 (resolved: global default split + per-command overrides via `LayerBudget`)
 - [ ] whether and how to backfill selected v1 turns into v2 retrieval surfaces
 - [x] native libsql/Turso vector-path CI coverage for `SearchArtifactsByEmbedding` (CI now runs strict native-vector gate with `AGENTCTL_V2_REQUIRE_NATIVE_VECTOR_SQL=1`)
 
@@ -143,6 +143,19 @@ Subagent Review
 
 ## Progress Log
 
+- 2026-02-19:
+  Subagent Review
+  - reviewer: `019c7825-d823-7f80-959c-561eb0c65319`
+  - scope: `v2 layered budget policy slice` (`internal/v2/runtime/contextbuilder/{layered.go,layered_budget_test.go}`, `docs/spec/v2_greenfield_bootstrap.md`, `docs/general/companion-memory.md`, `docs/plans/v2-greenfield-bootstrap.md`, `docs/plans/v2-implementation-todo.md`)
+  - findings: `none` (prior semantic-budget reservation issue fixed and regression-covered)
+  - decision: `approved`
+- 2026-02-19: Implemented v2 layered context budget policy (L2/L1/L0 + semantic).
+  - Added deterministic per-layer budget resolution under a single total cap:
+    - defaults `L2=20%`, `L1=25%`, `L0=45%`, `Semantic=10%`
+    - semantic budget reallocated to `L0` when semantic retrieval is absent
+    - per-request overrides via `LayerBudget`
+  - Added pure budget-policy tests in `internal/v2/runtime/contextbuilder/layered_budget_test.go`.
+  - Updated v2 spec/plan and companion-memory docs to describe the resolved policy.
 - 2026-02-19:
   Subagent Review
   - reviewer: `019c781b-8e7b-73d1-9812-2f77532c3322`

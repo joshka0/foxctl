@@ -833,3 +833,11 @@ for production use of vector-backed retrieval.
    rerank and stable tie-break ordering.
 4. If vector primitives are unavailable, retrieval degrades to fallback mode and
    emits path/capability telemetry.
+
+#### Layered Budget Policy (Implemented)
+
+1. Layered context assembly resolves one total cap and deterministic defaults:
+   - `L2=20%`, `L1=25%`, `L0=45%`, `Semantic=10%`
+2. When semantic retrieval is not requested, semantic budget is reassigned to `L0`.
+3. Per-request overrides are supported via `LayerBudget` for command-level tuning.
+4. Final rendered content remains globally bounded by the resolved total cap.

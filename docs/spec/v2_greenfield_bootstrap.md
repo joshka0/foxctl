@@ -320,11 +320,20 @@ type ArtifactSemanticQuery struct {
     // Maps directly to ArtifactSearchOptions in the semantic retriever.
 }
 
+type LayerBudget struct {
+    TotalChars    int // overall cap for rendered layered content
+    L2Chars       int // optional override
+    L1Chars       int // optional override
+    L0Chars       int // optional override
+    SemanticChars int // optional override
+}
+
 type ContextRequest struct {
     Ref       string
     Temporal  *TemporalRequest
     Semantic  *ArtifactSemanticQuery
-    // Existing budget/config fields remain; semantic retrieval must honor them.
+    Budget    *LayerBudget
+    // Semantic retrieval and layer rendering must honor resolved budget limits.
 }
 
 type ContextBundle struct {
@@ -347,6 +356,10 @@ Integration rules:
    - semantic artifact refs sorted by similarity desc, then ref asc
 5. Context builder must query persisted artifact state only and must not wait for
    in-flight enricher jobs.
+6. Default layered budget policy uses one total cap with deterministic split:
+   - `L2=20%`, `L1=25%`, `L0=45%`, `Semantic=10%`
+   - if semantic retrieval is not requested, semantic budget is reallocated to `L0`
+   - explicit per-layer overrides are allowed per request via `LayerBudget`
 
 ## Canonical Runtime Pipeline
 
