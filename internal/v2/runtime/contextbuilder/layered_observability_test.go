@@ -188,23 +188,24 @@ func mustFindSemanticEvent(t *testing.T, filePath, sessionID string) observabili
 	t.Helper()
 
 	deadline := time.Now().Add(3 * time.Second)
-	for {
+	var lastErr error
+	for time.Now().Before(deadline) {
 		evt, found, err := findSemanticEvent(filePath, sessionID)
 		if err == nil && found {
 			return evt
 		}
 		if err != nil && !os.IsNotExist(err) {
-			t.Fatalf("find semantic event: %v", err)
+			lastErr = err
+			break
 		}
-		if time.Now().After(deadline) {
-			if err != nil {
-				t.Fatalf("missing %q event for session %s (last err: %v)", observability.OpContextSemanticArtifactSearch, sessionID, err)
-			}
-			t.Fatalf("missing %q event for session %s", observability.OpContextSemanticArtifactSearch, sessionID)
-		}
+		lastErr = err
 		time.Sleep(15 * time.Millisecond)
 	}
 
+	if lastErr != nil {
+		t.Fatalf("missing %q event for session %s (last err: %v)", observability.OpContextSemanticArtifactSearch, sessionID, lastErr)
+	}
+	t.Fatalf("missing %q event for session %s", observability.OpContextSemanticArtifactSearch, sessionID)
 	return observability.WideEvent{}
 }
 
