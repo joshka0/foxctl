@@ -258,6 +258,9 @@ func TestEvaluateSemanticRolloutGate_NoComparableVectorRefsFailsOverlap(t *testi
 	if got.VectorFallbackOverlapAtK != 0 {
 		t.Fatalf("VectorFallbackOverlapAtK=%.3f want 0", got.VectorFallbackOverlapAtK)
 	}
+	if len(got.CaseResults) != 1 {
+		t.Fatalf("CaseResults len=%d want 1", len(got.CaseResults))
+	}
 	if got.CaseResults[0].ExpectedAtK != 0 || got.CaseResults[0].OverlapAtK != 0 {
 		t.Fatalf("case result unexpected: %+v", got.CaseResults[0])
 	}
