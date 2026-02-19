@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+
+	"github.com/jkatigb/agentctl/internal/v2/core/run"
 )
 
 // CompanionRequest controls companion-memory context fetches.
@@ -26,13 +28,23 @@ type CompanionProvider interface {
 	GetLayeredContext(ctx context.Context, sessionID string, req CompanionRequest) (CompanionLayeredContext, error)
 }
 
+// ArtifactSemanticQuery controls optional semantic artifact retrieval.
+type ArtifactSemanticQuery struct {
+	QueryEmbedding []float32 `json:"query_embedding,omitempty"`
+	SessionID      string    `json:"session_id,omitempty"`
+	ArtifactTypes  []string  `json:"artifact_types,omitempty"`
+	Limit          int       `json:"limit,omitempty"`
+	MinSimilarity  float64   `json:"min_similarity,omitempty"`
+}
+
 // LayeredRequest asks for L2 -> L1 -> L0 context assembly.
 type LayeredRequest struct {
-	SessionID   string `json:"session_id"`
-	MaxChars    int    `json:"max_chars,omitempty"`
-	MonthsLimit int    `json:"months_limit,omitempty"`
-	DaysLimit   int    `json:"days_limit,omitempty"`
-	HoursLimit  int    `json:"hours_limit,omitempty"`
+	SessionID   string                 `json:"session_id"`
+	MaxChars    int                    `json:"max_chars,omitempty"`
+	MonthsLimit int                    `json:"months_limit,omitempty"`
+	DaysLimit   int                    `json:"days_limit,omitempty"`
+	HoursLimit  int                    `json:"hours_limit,omitempty"`
+	Semantic    *ArtifactSemanticQuery `json:"semantic,omitempty"`
 }
 
 // LayeredBundle is deterministic layered context with turn/slice refs.
@@ -41,9 +53,10 @@ type LayeredBundle struct {
 	Content   string            `json:"content"`
 	Layers    map[string]string `json:"layers,omitempty"`
 
-	Refs      []string `json:"refs,omitempty"`
-	TurnRefs  []string `json:"turn_refs,omitempty"`
-	SliceRefs []string `json:"slice_refs,omitempty"`
+	Refs         []string `json:"refs,omitempty"`
+	TurnRefs     []string `json:"turn_refs,omitempty"`
+	SliceRefs    []string `json:"slice_refs,omitempty"`
+	ArtifactRefs []string `json:"artifact_refs,omitempty"`
 
 	Meta map[string]any `json:"meta,omitempty"`
 }
@@ -54,6 +67,14 @@ func (b *Builder) SetCompanionProvider(provider CompanionProvider) {
 		return
 	}
 	b.companion = provider
+}
+
+// SetArtifactRetriever configures optional semantic artifact retrieval.
+func (b *Builder) SetArtifactRetriever(retriever run.ArtifactSemanticRetriever) {
+	if b == nil {
+		return
+	}
+	b.artifactSearcher = retriever
 }
 
 // BuildLayered assembles deterministic layered context (L2 -> L1 -> L0).
@@ -127,7 +148,8 @@ func (b *Builder) BuildLayered(ctx context.Context, req LayeredRequest) (Layered
 		strings.TrimSpace(renderTemporalLayer(l0Temporal)),
 	)
 
-	content := renderLayeredContent(l2Section, l1Section, l0Section)
+	semanticRefs, semanticSection, semanticPath, semanticErr := b.resolveSemanticArtifacts(ctx, sessionID, req.Semantic)
+	content := renderLayeredContent(l2Section, l1Section, l0Section, semanticSection)
 	if req.MaxChars > 0 {
 		content = truncateRunes(content, req.MaxChars)
 	}
@@ -140,8 +162,22 @@ func (b *Builder) BuildLayered(ctx context.Context, req LayeredRequest) (Layered
 			append([]string(nil), companionCtx.Refs...),
 			l2Temporal.ExpandableRefs...,
 		),
-		append(append(l1Temporal.ExpandableRefs, l0Temporal.ExpandableRefs...), sliceRefs...)...,
+		append(append(append(l1Temporal.ExpandableRefs, l0Temporal.ExpandableRefs...), sliceRefs...), semanticRefs...)...,
 	))
+
+	meta := map[string]any{
+		"session_id":           sessionID,
+		"has_companion":        b.companion != nil,
+		"l2_bucket_count":      len(l2Temporal.Buckets),
+		"l1_bucket_count":      len(l1Temporal.Buckets),
+		"l0_bucket_count":      len(l0Temporal.Buckets),
+		"expandable_date_cnt":  len(uniqueStrings(append(l1Temporal.ExpandableDates, l2Temporal.ExpandableDates...))),
+		"artifact_search_path": string(semanticPath),
+		"artifact_hit_count":   len(semanticRefs),
+	}
+	if semanticErr != "" {
+		meta["artifact_search_error"] = semanticErr
+	}
 
 	return LayeredBundle{
 		SessionID: sessionID,
@@ -151,17 +187,11 @@ func (b *Builder) BuildLayered(ctx context.Context, req LayeredRequest) (Layered
 			"L1": l1Section,
 			"L0": l0Section,
 		},
-		Refs:      refs,
-		TurnRefs:  turnRefs,
-		SliceRefs: sliceRefs,
-		Meta: map[string]any{
-			"session_id":          sessionID,
-			"has_companion":       b.companion != nil,
-			"l2_bucket_count":     len(l2Temporal.Buckets),
-			"l1_bucket_count":     len(l1Temporal.Buckets),
-			"l0_bucket_count":     len(l0Temporal.Buckets),
-			"expandable_date_cnt": len(uniqueStrings(append(l1Temporal.ExpandableDates, l2Temporal.ExpandableDates...))),
-		},
+		Refs:         refs,
+		TurnRefs:     turnRefs,
+		SliceRefs:    sliceRefs,
+		ArtifactRefs: semanticRefs,
+		Meta:         meta,
 	}, nil
 }
 
@@ -195,7 +225,7 @@ func renderTemporalLayer(bundle TemporalBundle) string {
 	return strings.TrimSpace(sb.String())
 }
 
-func renderLayeredContent(l2, l1, l0 string) string {
+func renderLayeredContent(l2, l1, l0, semantic string) string {
 	var sections []string
 	if strings.TrimSpace(l2) != "" {
 		sections = append(sections, "## L2 History\n"+strings.TrimSpace(l2))
@@ -206,7 +236,118 @@ func renderLayeredContent(l2, l1, l0 string) string {
 	if strings.TrimSpace(l0) != "" {
 		sections = append(sections, "## L0 Vivid\n"+strings.TrimSpace(l0))
 	}
+	if strings.TrimSpace(semantic) != "" {
+		sections = append(sections, "## Semantic Artifacts\n"+strings.TrimSpace(semantic))
+	}
 	return strings.Join(sections, "\n\n")
+}
+
+func (b *Builder) resolveSemanticArtifacts(
+	ctx context.Context,
+	defaultSessionID string,
+	query *ArtifactSemanticQuery,
+) (refs []string, section string, path run.ArtifactSearchPath, errText string) {
+	path = run.ArtifactSearchPathDisabled
+	if query == nil || b == nil || b.artifactSearcher == nil || len(query.QueryEmbedding) == 0 {
+		return nil, "", path, ""
+	}
+
+	sessionID := strings.TrimSpace(query.SessionID)
+	if sessionID == "" {
+		sessionID = strings.TrimSpace(defaultSessionID)
+	}
+
+	searchResult, err := b.artifactSearcher.SearchArtifactsByEmbedding(ctx, query.QueryEmbedding, run.ArtifactSearchOptions{
+		SessionID:     sessionID,
+		ArtifactTypes: append([]string(nil), query.ArtifactTypes...),
+		Limit:         query.Limit,
+		MinSimilarity: query.MinSimilarity,
+	})
+	if err != nil {
+		return nil, "", run.ArtifactSearchPathError, strings.TrimSpace(err.Error())
+	}
+
+	path = searchResult.SearchPath
+	if strings.TrimSpace(string(path)) == "" {
+		path = run.ArtifactSearchPathVector
+	}
+
+	hits := normalizeSemanticHits(searchResult.Hits, query.MinSimilarity, query.Limit)
+	if len(hits) == 0 {
+		return nil, "", path, ""
+	}
+
+	lines := make([]string, 0, len(hits))
+	refs = make([]string, 0, len(hits))
+	for _, hit := range hits {
+		ref := semanticRef(hit)
+		if ref == "" {
+			continue
+		}
+		refs = append(refs, ref)
+
+		line := fmt.Sprintf("- %s (sim=%.3f", ref, hit.Similarity)
+		if strings.TrimSpace(hit.ArtifactType) != "" {
+			line += ", type=" + strings.TrimSpace(hit.ArtifactType)
+		}
+		line += ")"
+		if summary := strings.TrimSpace(hit.Summary); summary != "" {
+			line += ": " + truncateRunes(summary, 140)
+		}
+		lines = append(lines, line)
+	}
+
+	refs = uniqueStrings(refs)
+	return refs, strings.Join(lines, "\n"), path, ""
+}
+
+func normalizeSemanticHits(hits []run.ScoredArtifact, minSimilarity float64, limit int) []run.ScoredArtifact {
+	filtered := make([]run.ScoredArtifact, 0, len(hits))
+	for _, hit := range hits {
+		if hit.Similarity < minSimilarity {
+			continue
+		}
+		filtered = append(filtered, hit.Clone())
+	}
+
+	sort.SliceStable(filtered, func(i, j int) bool {
+		if filtered[i].Similarity == filtered[j].Similarity {
+			return semanticRef(filtered[i]) < semanticRef(filtered[j])
+		}
+		return filtered[i].Similarity > filtered[j].Similarity
+	})
+
+	out := make([]run.ScoredArtifact, 0, len(filtered))
+	seen := make(map[string]struct{}, len(filtered))
+	for _, hit := range filtered {
+		ref := semanticRef(hit)
+		if ref == "" {
+			continue
+		}
+		if _, ok := seen[ref]; ok {
+			continue
+		}
+		seen[ref] = struct{}{}
+		out = append(out, hit)
+		if limit > 0 && len(out) >= limit {
+			break
+		}
+	}
+	return out
+}
+
+func semanticRef(hit run.ScoredArtifact) string {
+	ref := strings.TrimSpace(hit.Ref)
+	if ref != "" {
+		return ref
+	}
+	turnID := strings.TrimSpace(hit.TurnID)
+	artifactType := strings.TrimSpace(strings.ToLower(hit.ArtifactType))
+	artifactVersion := strings.TrimSpace(hit.ArtifactVersion)
+	if turnID == "" || artifactType == "" || artifactVersion == "" {
+		return ""
+	}
+	return fmt.Sprintf("turn/%s/artifact/%s/%s", turnID, artifactType, artifactVersion)
 }
 
 func joinSections(parts ...string) string {

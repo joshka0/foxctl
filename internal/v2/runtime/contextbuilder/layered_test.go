@@ -2,6 +2,7 @@ package contextbuilder_test
 
 import (
 	"context"
+	"errors"
 	"reflect"
 	"sort"
 	"strings"
@@ -92,6 +93,159 @@ func TestContextBuilder_BuildLayered_DeterministicMixAndRefs(t *testing.T) {
 	}
 }
 
+func TestContextBuilder_BuildLayered_SemanticArtifactsDeterministic(t *testing.T) {
+	t.Parallel()
+
+	reader := &layeredTurnReader{
+		sessionTurns: []run.TurnRecord{
+			{
+				ID:        "turn-l1",
+				SessionID: "run-layered",
+				CreatedAt: time.Date(2026, time.February, 18, 10, 0, 0, 0, time.UTC),
+				Command:   "ask",
+				FinalOutput: run.MessageRef{
+					ID:   "msg-final-1",
+					Role: "assistant",
+					Text: "final one",
+				},
+			},
+			{
+				ID:        "turn-l2",
+				SessionID: "run-layered",
+				CreatedAt: time.Date(2026, time.February, 18, 11, 0, 0, 0, time.UTC),
+				Command:   "run",
+				FinalOutput: run.MessageRef{
+					ID:   "msg-final-2",
+					Role: "assistant",
+					Text: "final two",
+				},
+			},
+		},
+	}
+
+	builder := contextbuilder.New(reader)
+	builder.SetCompanionProvider(fakeCompanionProvider{})
+	builder.SetArtifactRetriever(&fakeArtifactRetriever{
+		result: run.ArtifactSearchResult{
+			SearchPath: run.ArtifactSearchPathFallback,
+			Hits: []run.ScoredArtifact{
+				{
+					Ref:             "turn/turn-l1/artifact/annotation/v1",
+					TurnID:          "turn-l1",
+					ArtifactType:    "annotation",
+					ArtifactVersion: "v1",
+					Similarity:      0.73,
+				},
+				{
+					Ref:             "turn/turn-l2/artifact/embedding/v1",
+					TurnID:          "turn-l2",
+					ArtifactType:    "embedding",
+					ArtifactVersion: "v1",
+					Similarity:      0.91,
+				},
+				{
+					Ref:             "turn/turn-l1/artifact/annotation/v1", // duplicate ref
+					TurnID:          "turn-l1",
+					ArtifactType:    "annotation",
+					ArtifactVersion: "v1",
+					Similarity:      0.70,
+				},
+				{
+					Ref:             "turn/turn-l2/artifact/classification/v1", // filtered by min similarity
+					TurnID:          "turn-l2",
+					ArtifactType:    "classification",
+					ArtifactVersion: "v1",
+					Similarity:      0.40,
+				},
+			},
+		},
+	})
+
+	got, err := builder.BuildLayered(context.Background(), contextbuilder.LayeredRequest{
+		SessionID: "run-layered",
+		MaxChars:  6000,
+		Semantic: &contextbuilder.ArtifactSemanticQuery{
+			QueryEmbedding: []float32{0.1, 0.2, 0.3},
+			Limit:          5,
+			MinSimilarity:  0.5,
+		},
+	})
+	if err != nil {
+		t.Fatalf("BuildLayered() error = %v", err)
+	}
+
+	wantRefs := []string{
+		"turn/turn-l2/artifact/embedding/v1",
+		"turn/turn-l1/artifact/annotation/v1",
+	}
+	if !reflect.DeepEqual(got.ArtifactRefs, wantRefs) {
+		t.Fatalf("artifact refs=%v want %v", got.ArtifactRefs, wantRefs)
+	}
+	if got.Meta["artifact_search_path"] != string(run.ArtifactSearchPathFallback) {
+		t.Fatalf("artifact_search_path=%v want %q", got.Meta["artifact_search_path"], run.ArtifactSearchPathFallback)
+	}
+	if got.Meta["artifact_hit_count"] != len(wantRefs) {
+		t.Fatalf("artifact_hit_count=%v want %d", got.Meta["artifact_hit_count"], len(wantRefs))
+	}
+	if !strings.Contains(got.Content, "## Semantic Artifacts") {
+		t.Fatalf("content missing semantic section: %q", got.Content)
+	}
+	firstPos := strings.Index(got.Content, wantRefs[0])
+	secondPos := strings.Index(got.Content, wantRefs[1])
+	if firstPos < 0 || secondPos < 0 || firstPos > secondPos {
+		t.Fatalf("semantic refs not rendered in deterministic order: %q", got.Content)
+	}
+}
+
+func TestContextBuilder_BuildLayered_SemanticErrorNonFatal(t *testing.T) {
+	t.Parallel()
+
+	reader := &layeredTurnReader{
+		sessionTurns: []run.TurnRecord{
+			{
+				ID:        "turn-l1",
+				SessionID: "run-layered",
+				CreatedAt: time.Date(2026, time.February, 18, 10, 0, 0, 0, time.UTC),
+				Command:   "ask",
+				FinalOutput: run.MessageRef{
+					ID:   "msg-final-1",
+					Role: "assistant",
+					Text: "final one",
+				},
+			},
+		},
+	}
+
+	builder := contextbuilder.New(reader)
+	builder.SetCompanionProvider(fakeCompanionProvider{})
+	builder.SetArtifactRetriever(&fakeArtifactRetriever{
+		err: errors.New("semantic backend unavailable"),
+	})
+
+	got, err := builder.BuildLayered(context.Background(), contextbuilder.LayeredRequest{
+		SessionID: "run-layered",
+		Semantic: &contextbuilder.ArtifactSemanticQuery{
+			QueryEmbedding: []float32{0.1, 0.2, 0.3},
+		},
+	})
+	if err != nil {
+		t.Fatalf("BuildLayered() error = %v", err)
+	}
+
+	if got.Meta["artifact_search_path"] != string(run.ArtifactSearchPathError) {
+		t.Fatalf("artifact_search_path=%v want %q", got.Meta["artifact_search_path"], run.ArtifactSearchPathError)
+	}
+	if got.Meta["artifact_hit_count"] != 0 {
+		t.Fatalf("artifact_hit_count=%v want 0", got.Meta["artifact_hit_count"])
+	}
+	if strings.TrimSpace(got.Meta["artifact_search_error"].(string)) == "" {
+		t.Fatalf("artifact_search_error should be populated: %#v", got.Meta)
+	}
+	if strings.Contains(got.Content, "## Semantic Artifacts") {
+		t.Fatalf("semantic section should be omitted on error: %q", got.Content)
+	}
+}
+
 type layeredTurnReader struct {
 	sessionTurns []run.TurnRecord
 }
@@ -158,4 +312,23 @@ func containsString(items []string, target string) bool {
 		}
 	}
 	return false
+}
+
+type fakeArtifactRetriever struct {
+	result run.ArtifactSearchResult
+	err    error
+}
+
+func (f *fakeArtifactRetriever) SearchArtifactsByEmbedding(_ context.Context, _ []float32, _ run.ArtifactSearchOptions) (run.ArtifactSearchResult, error) {
+	if f.err != nil {
+		return run.ArtifactSearchResult{}, f.err
+	}
+	out := run.ArtifactSearchResult{
+		SearchPath: f.result.SearchPath,
+		Hits:       make([]run.ScoredArtifact, 0, len(f.result.Hits)),
+	}
+	for _, hit := range f.result.Hits {
+		out.Hits = append(out.Hits, hit.Clone())
+	}
+	return out, nil
 }

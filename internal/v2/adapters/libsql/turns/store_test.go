@@ -414,49 +414,52 @@ func TestTurnStore_SearchArtifactsByEmbedding_FallbackAndFilters(t *testing.T) {
 	// Force vector-query path on sqlite to verify graceful downgrade and fallback search.
 	store.vectorEnabled.Store(true)
 
-	results, err := store.SearchArtifactsByEmbedding(ctx, []float32{1.0, 0.0, 0.0}, ArtifactSearchOptions{
+	results, err := store.SearchArtifactsByEmbedding(ctx, []float32{1.0, 0.0, 0.0}, run.ArtifactSearchOptions{
 		SessionID: "run-s1",
 		Limit:     5,
 	})
 	if err != nil {
 		t.Fatalf("SearchArtifactsByEmbedding() error = %v", err)
 	}
+	if results.SearchPath != run.ArtifactSearchPathFallback {
+		t.Fatalf("search path=%q want %q", results.SearchPath, run.ArtifactSearchPathFallback)
+	}
 	if store.vectorEnabled.Load() {
 		t.Fatal("vectorEnabled should be disabled after unsupported vector search fallback")
 	}
-	if len(results) != 2 {
-		t.Fatalf("results len=%d want 2", len(results))
+	if len(results.Hits) != 2 {
+		t.Fatalf("results len=%d want 2", len(results.Hits))
 	}
-	if results[0].Artifact.TurnID != "turn-s1-a" {
-		t.Fatalf("top result turn=%q want turn-s1-a", results[0].Artifact.TurnID)
+	if results.Hits[0].TurnID != "turn-s1-a" {
+		t.Fatalf("top result turn=%q want turn-s1-a", results.Hits[0].TurnID)
 	}
-	if results[0].Similarity < results[1].Similarity {
-		t.Fatalf("results not sorted by similarity desc: %.4f < %.4f", results[0].Similarity, results[1].Similarity)
+	if results.Hits[0].Similarity < results.Hits[1].Similarity {
+		t.Fatalf("results not sorted by similarity desc: %.4f < %.4f", results.Hits[0].Similarity, results.Hits[1].Similarity)
 	}
 
-	typed, err := store.SearchArtifactsByEmbedding(ctx, []float32{1.0, 0.0, 0.0}, ArtifactSearchOptions{
-		SessionID:    "run-s1",
-		ArtifactType: ArtifactTypeAnnotation,
-		Limit:        5,
+	typed, err := store.SearchArtifactsByEmbedding(ctx, []float32{1.0, 0.0, 0.0}, run.ArtifactSearchOptions{
+		SessionID:     "run-s1",
+		ArtifactTypes: []string{ArtifactTypeAnnotation},
+		Limit:         5,
 	})
 	if err != nil {
 		t.Fatalf("SearchArtifactsByEmbedding(annotation) error = %v", err)
 	}
-	if len(typed) != 1 {
-		t.Fatalf("typed results len=%d want 1", len(typed))
+	if len(typed.Hits) != 1 {
+		t.Fatalf("typed results len=%d want 1", len(typed.Hits))
 	}
-	if typed[0].Artifact.ArtifactType != ArtifactTypeAnnotation {
-		t.Fatalf("typed result artifact_type=%q want %q", typed[0].Artifact.ArtifactType, ArtifactTypeAnnotation)
+	if typed.Hits[0].ArtifactType != ArtifactTypeAnnotation {
+		t.Fatalf("typed result artifact_type=%q want %q", typed.Hits[0].ArtifactType, ArtifactTypeAnnotation)
 	}
 
-	invalidType, err := store.SearchArtifactsByEmbedding(ctx, []float32{1.0, 0.0, 0.0}, ArtifactSearchOptions{
-		ArtifactType: "bogus",
+	invalidType, err := store.SearchArtifactsByEmbedding(ctx, []float32{1.0, 0.0, 0.0}, run.ArtifactSearchOptions{
+		ArtifactTypes: []string{"bogus"},
 	})
 	if !errors.Is(err, ErrInvalidArtifactType) {
 		t.Fatalf("invalid type error=%v want ErrInvalidArtifactType", err)
 	}
-	if invalidType != nil {
-		t.Fatalf("invalid type results=%v want nil", invalidType)
+	if len(invalidType.Hits) != 0 {
+		t.Fatalf("invalid type results=%v want empty", invalidType.Hits)
 	}
 }
 

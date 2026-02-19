@@ -162,8 +162,13 @@ type ScoredArtifact struct {
     MetadataJSON    json.RawMessage
 }
 
+type ArtifactSearchResult struct {
+    Hits       []ScoredArtifact
+    SearchPath string // vector | fallback | disabled | error
+}
+
 type ArtifactSemanticRetriever interface {
-    SearchArtifactsByEmbedding(ctx context.Context, queryEmbedding []float32, opts ArtifactSearchOptions) ([]ScoredArtifact, error)
+    SearchArtifactsByEmbedding(ctx context.Context, queryEmbedding []float32, opts ArtifactSearchOptions) (ArtifactSearchResult, error)
 }
 
 type ContextBuilder interface {

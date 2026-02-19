@@ -71,9 +71,9 @@ Wave 3 retrieval goals and PR-17+ scope live in:
   - [x] add `SearchArtifactsByEmbedding` in `internal/v2/adapters/libsql/turns/store.go` with vector-first query + safe cosine fallback
   - [x] add deterministic retrieval tests (ranking, filtering, fallback-disable behavior)
   - [x] document core-facing retrieval interface + context builder integration contract (`docs/spec/v2_greenfield_bootstrap.md`, `docs/plans/v2-greenfield-bootstrap.md`)
-  - [ ] define core-facing artifact semantic retrieval interface for runtime consumers
-  - [ ] wire optional semantic artifact layer into context builder assembly path
-  - [ ] enforce context-builder metadata and merge guarantees (`artifact_search_path`, `artifact_hit_count`, dedup-by-ref, deterministic merge ordering)
+  - [x] define core-facing artifact semantic retrieval interface for runtime consumers
+  - [x] wire optional semantic artifact layer into context builder assembly path
+  - [x] enforce context-builder metadata and merge guarantees (`artifact_search_path`, `artifact_hit_count`, dedup-by-ref, deterministic merge ordering)
   - [ ] add observability counters for vector-path vs fallback-path query usage
 
 - [x] PR-16: v1 decommission readiness gates
@@ -131,6 +131,34 @@ Subagent Review
 
 ## Progress Log
 
+- 2026-02-19:
+  Subagent Review
+  - reviewer: `019c74e7-34d1-7741-ad85-4c6ebfdeffca`
+  - scope: `PR-17 implementation slice` (`internal/v2/core/run/artifact_search.go`, `internal/v2/adapters/libsql/turns/{store,store_test}.go`, `internal/v2/runtime/contextbuilder/{builder,layered,layered_test}.go`, `docs/spec/v2_greenfield_bootstrap.md`, `docs/plans/v2-implementation-todo.md`)
+  - findings: `none`
+  - decision: `approved`
+- 2026-02-19: Implemented PR-17 interface and context-builder semantic merge contract.
+  - Added new core run retrieval contract in `internal/v2/core/run/artifact_search.go`:
+    - `ArtifactSearchOptions`
+    - `ScoredArtifact`
+    - `ArtifactSearchResult`
+    - `ArtifactSemanticRetriever`
+  - Updated libsql turns adapter to implement the core retriever:
+    - `SearchArtifactsByEmbedding(...) (run.ArtifactSearchResult, error)`
+    - supports `ArtifactTypes[]` and `MinSimilarity`
+    - returns explicit search path metadata (`vector`/`fallback`/`disabled`)
+  - Wired optional semantic retrieval into `internal/v2/runtime/contextbuilder/layered.go`:
+    - `LayeredRequest.Semantic`
+    - `Builder.SetArtifactRetriever(...)`
+    - non-fatal degraded behavior (`artifact_search_path=error`, turn assembly continues)
+    - deterministic semantic merge and dedup-by-ref
+  - Added tests in:
+    - `internal/v2/adapters/libsql/turns/store_test.go`
+    - `internal/v2/runtime/contextbuilder/layered_test.go`
+  - Validation:
+    - `go test ./internal/v2/adapters/libsql/turns`
+    - `go test ./internal/v2/runtime/contextbuilder`
+    - `go test ./internal/v2/...`
 - 2026-02-19: Documented concrete PR-17 interface proposal (core/run + context builder).
   - Added proposed core retrieval interfaces (`ArtifactSemanticRetriever`, `ArtifactSearchOptions`, `ScoredArtifact`) in `docs/spec/v2_greenfield_bootstrap.md`.
   - Added context-builder integration contract with optional semantic query shape, deterministic merge order, and degraded-mode behavior.
