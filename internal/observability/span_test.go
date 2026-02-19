@@ -24,6 +24,13 @@ func TestStartSpan_Success(t *testing.T) {
 	if traceID == "" {
 		t.Error("expected trace ID to be set in context")
 	}
+	spanID := SpanIDFromContext(ctx)
+	if spanID == "" {
+		t.Error("expected span ID to be set in context")
+	}
+	if spanID != builder.event.SpanID {
+		t.Errorf("expected context span ID %q, got %q", builder.event.SpanID, spanID)
+	}
 
 	// Verify builder was populated
 	if builder.event.Operation != OpSkillRun {
@@ -216,5 +223,8 @@ func TestStartSpan_InheritsFromContext(t *testing.T) {
 	// Context should still have the same trace ID
 	if TraceIDFromContext(ctx2) != existingTraceID {
 		t.Errorf("expected context trace ID %q, got %q", existingTraceID, TraceIDFromContext(ctx2))
+	}
+	if SpanIDFromContext(ctx2) != builder.event.SpanID {
+		t.Errorf("expected context span ID %q, got %q", builder.event.SpanID, SpanIDFromContext(ctx2))
 	}
 }

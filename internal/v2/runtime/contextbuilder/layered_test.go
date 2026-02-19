@@ -195,6 +195,20 @@ func TestContextBuilder_BuildLayered_SemanticArtifactsDeterministic(t *testing.T
 	if firstPos < 0 || secondPos < 0 || firstPos > secondPos {
 		t.Fatalf("semantic refs not rendered in deterministic order: %q", got.Content)
 	}
+
+	stats := builder.ArtifactStats()
+	if stats.TotalCalls != 1 {
+		t.Fatalf("stats.TotalCalls=%d want 1", stats.TotalCalls)
+	}
+	if stats.FallbackCalls != 1 {
+		t.Fatalf("stats.FallbackCalls=%d want 1", stats.FallbackCalls)
+	}
+	if stats.VectorCalls != 0 || stats.ErrorCalls != 0 || stats.DisabledCalls != 0 {
+		t.Fatalf("unexpected stats call distribution: %+v", stats)
+	}
+	if stats.TotalHits != 2 || stats.FallbackHits != 2 || stats.VectorHits != 0 {
+		t.Fatalf("unexpected stats hit distribution: %+v", stats)
+	}
 }
 
 func TestContextBuilder_BuildLayered_SemanticErrorNonFatal(t *testing.T) {
@@ -243,6 +257,17 @@ func TestContextBuilder_BuildLayered_SemanticErrorNonFatal(t *testing.T) {
 	}
 	if strings.Contains(got.Content, "## Semantic Artifacts") {
 		t.Fatalf("semantic section should be omitted on error: %q", got.Content)
+	}
+
+	stats := builder.ArtifactStats()
+	if stats.TotalCalls != 1 {
+		t.Fatalf("stats.TotalCalls=%d want 1", stats.TotalCalls)
+	}
+	if stats.ErrorCalls != 1 {
+		t.Fatalf("stats.ErrorCalls=%d want 1", stats.ErrorCalls)
+	}
+	if stats.TotalHits != 0 || stats.VectorHits != 0 || stats.FallbackHits != 0 {
+		t.Fatalf("unexpected stats hits on error path: %+v", stats)
 	}
 }
 

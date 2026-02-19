@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/jkatigb/agentctl/internal/v2/core/run"
@@ -86,11 +87,78 @@ type Builder struct {
 	reader           run.TurnReader
 	companion        CompanionProvider
 	artifactSearcher run.ArtifactSemanticRetriever
+
+	artifactSearchTotal        atomic.Int64
+	artifactSearchVector       atomic.Int64
+	artifactSearchFallback     atomic.Int64
+	artifactSearchDisabled     atomic.Int64
+	artifactSearchError        atomic.Int64
+	artifactSearchTotalHits    atomic.Int64
+	artifactSearchVectorHits   atomic.Int64
+	artifactSearchFallbackHits atomic.Int64
+}
+
+// ArtifactSearchStats is a point-in-time snapshot of semantic retrieval counters.
+type ArtifactSearchStats struct {
+	TotalCalls    int64 `json:"total_calls"`
+	VectorCalls   int64 `json:"vector_calls"`
+	FallbackCalls int64 `json:"fallback_calls"`
+	DisabledCalls int64 `json:"disabled_calls"`
+	ErrorCalls    int64 `json:"error_calls"`
+
+	TotalHits    int64 `json:"total_hits"`
+	VectorHits   int64 `json:"vector_hits"`
+	FallbackHits int64 `json:"fallback_hits"`
 }
 
 // New creates a context builder.
 func New(reader run.TurnReader) *Builder {
 	return &Builder{reader: reader}
+}
+
+// ArtifactStats returns semantic retrieval usage counters.
+func (b *Builder) ArtifactStats() ArtifactSearchStats {
+	if b == nil {
+		return ArtifactSearchStats{}
+	}
+	return ArtifactSearchStats{
+		TotalCalls:    b.artifactSearchTotal.Load(),
+		VectorCalls:   b.artifactSearchVector.Load(),
+		FallbackCalls: b.artifactSearchFallback.Load(),
+		DisabledCalls: b.artifactSearchDisabled.Load(),
+		ErrorCalls:    b.artifactSearchError.Load(),
+		TotalHits:     b.artifactSearchTotalHits.Load(),
+		VectorHits:    b.artifactSearchVectorHits.Load(),
+		FallbackHits:  b.artifactSearchFallbackHits.Load(),
+	}
+}
+
+func (b *Builder) recordArtifactSearch(path run.ArtifactSearchPath, hits int) {
+	if b == nil {
+		return
+	}
+
+	b.artifactSearchTotal.Add(1)
+	if hits > 0 {
+		b.artifactSearchTotalHits.Add(int64(hits))
+	}
+
+	switch path {
+	case run.ArtifactSearchPathVector:
+		b.artifactSearchVector.Add(1)
+		if hits > 0 {
+			b.artifactSearchVectorHits.Add(int64(hits))
+		}
+	case run.ArtifactSearchPathFallback:
+		b.artifactSearchFallback.Add(1)
+		if hits > 0 {
+			b.artifactSearchFallbackHits.Add(int64(hits))
+		}
+	case run.ArtifactSearchPathError:
+		b.artifactSearchError.Add(1)
+	default:
+		b.artifactSearchDisabled.Add(1)
+	}
 }
 
 // Build resolves one reference into deterministic context content.

@@ -206,6 +206,7 @@ func StartSpanAt(ctx context.Context, startedAt time.Time, op string, opts ...Sp
 	ctx, traceID := EnsureTraceID(ctx)
 
 	b := NewEvent(op).WithTraceID(traceID)
+	ctx = WithSpanID(ctx, b.event.SpanID)
 	if o.parentID != "" {
 		b = b.WithParentID(o.parentID)
 	}

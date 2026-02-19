@@ -27,7 +27,7 @@ Primary specs/plans:
 - [x] v2 docs aligned to companion/general references and non-blocking v2 scope rules
 - [x] Wave 2 production cutover batch 1 complete (PR-11 through PR-13)
 - [x] Wave 2 dynamic context + decommission gate batch complete (PR-14 through PR-16)
-- [ ] Wave 3 kickoff in progress (PR-17 libsql-first artifact semantic retrieval)
+- [x] Wave 3 kickoff complete for PR-17 (artifact retrieval + semantic observability/tracing)
 
 ## Wave 1 Completed (Reference)
 
@@ -67,14 +67,16 @@ Wave 3 retrieval goals and PR-17+ scope live in:
 
 ## Next (Wave 3 Kickoff)
 
-- [ ] PR-17: libsql-first artifact semantic retrieval surfaces
+- [x] PR-17: libsql-first artifact semantic retrieval surfaces
   - [x] add `SearchArtifactsByEmbedding` in `internal/v2/adapters/libsql/turns/store.go` with vector-first query + safe cosine fallback
   - [x] add deterministic retrieval tests (ranking, filtering, fallback-disable behavior)
   - [x] document core-facing retrieval interface + context builder integration contract (`docs/spec/v2_greenfield_bootstrap.md`, `docs/plans/v2-greenfield-bootstrap.md`)
   - [x] define core-facing artifact semantic retrieval interface for runtime consumers
   - [x] wire optional semantic artifact layer into context builder assembly path
   - [x] enforce context-builder metadata and merge guarantees (`artifact_search_path`, `artifact_hit_count`, dedup-by-ref, deterministic merge ordering)
-  - [ ] add observability counters for vector-path vs fallback-path query usage
+  - [x] add observability counters for vector-path vs fallback-path query usage
+  - [x] add optional wide-event emission for `context.semantic_artifact_search`
+  - [x] propagate tracing context to semantic events (`trace_id` + `parent_id` when span context exists)
 
 - [x] PR-16: v1 decommission readiness gates
   - [x] expand shadow parity past `ask` to `spawn/run/list/kill`
@@ -131,6 +133,37 @@ Subagent Review
 
 ## Progress Log
 
+- 2026-02-19:
+  Subagent Review
+  - reviewer: `019c750b-7ecd-7980-b862-6ac80123efdb`
+  - scope: `PR-17 tracing propagation slice` (`internal/observability/{span.go,span_test.go}`, `internal/v2/runtime/contextbuilder/{layered.go,layered_observability_test.go}`, `docs/observability/wide-events.md`)
+  - findings: `none`
+  - decision: `approved`
+- 2026-02-19: Completed tracing propagation for semantic retrieval wide events.
+  - `StartSpan` now attaches generated `span_id` to context in `internal/observability/span.go`.
+  - Semantic retrieval events now inherit `trace_id` from context and set `parent_id` from current span when present.
+  - Added regression assertions for:
+    - context `span_id` propagation in `internal/observability/span_test.go`
+    - `trace_id` and `parent_id` linkage in `internal/v2/runtime/contextbuilder/layered_observability_test.go`
+- 2026-02-19:
+  Subagent Review
+  - reviewer: `019c7501-d05a-7352-902e-ca988f39b71e`
+  - scope: `PR-17 wide-event emission slice` (`internal/v2/runtime/contextbuilder/{layered.go,layered_observability_test.go}`, `internal/observability/wide_event.go`, `docs/observability/wide-events.md`, `docs/plans/v2-implementation-todo.md`)
+  - findings: `none` (vector/error/disabled path coverage confirmed)
+  - decision: `approved`
+- 2026-02-19: Implemented PR-17 retrieval counters + semantic wide-event emission.
+  - Added atomic semantic retrieval counters to `internal/v2/runtime/contextbuilder/Builder` with snapshot API (`ArtifactStats`):
+    - calls: total/vector/fallback/disabled/error
+    - hits: total/vector/fallback
+  - Wired counter increments in semantic retrieval resolution path in `internal/v2/runtime/contextbuilder/layered.go`.
+  - Added optional wide-event emission in `internal/v2/runtime/contextbuilder/layered.go`:
+    - operation: `context.semantic_artifact_search`
+    - component: `contextbuilder`
+    - data: `search_path`, `hit_count`, `session_id`, `query_dims`, and optional filters
+    - error path emits `status=error` while context assembly remains non-blocking
+  - Added regression coverage in `internal/v2/runtime/contextbuilder/layered_observability_test.go`.
+  - Added test assertions for counter behavior in `internal/v2/runtime/contextbuilder/layered_test.go`.
+  - Updated `docs/observability/wide-events.md` to mark semantic retrieval wide-event mapping as implemented.
 - 2026-02-19:
   Subagent Review
   - reviewer: `019c74e7-34d1-7741-ad85-4c6ebfdeffca`

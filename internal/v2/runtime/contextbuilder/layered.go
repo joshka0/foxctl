@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
+	"github.com/jkatigb/agentctl/internal/observability"
 	"github.com/jkatigb/agentctl/internal/v2/core/run"
 )
 
@@ -248,13 +250,25 @@ func (b *Builder) resolveSemanticArtifacts(
 	query *ArtifactSemanticQuery,
 ) (refs []string, section string, path run.ArtifactSearchPath, errText string) {
 	path = run.ArtifactSearchPathDisabled
-	if query == nil || b == nil || b.artifactSearcher == nil || len(query.QueryEmbedding) == 0 {
+	if query == nil || len(query.QueryEmbedding) == 0 {
 		return nil, "", path, ""
 	}
 
+	startedAt := time.Now()
 	sessionID := strings.TrimSpace(query.SessionID)
 	if sessionID == "" {
 		sessionID = strings.TrimSpace(defaultSessionID)
+	}
+
+	finalize := func(refs []string, section string, path run.ArtifactSearchPath, errText string) ([]string, string, run.ArtifactSearchPath, string) {
+		if b != nil {
+			b.recordArtifactSearch(path, len(refs))
+			b.emitSemanticArtifactSearchEvent(ctx, sessionID, query, path, len(refs), errText, time.Since(startedAt))
+		}
+		return refs, section, path, errText
+	}
+	if b == nil || b.artifactSearcher == nil {
+		return finalize(nil, "", path, "")
 	}
 
 	searchResult, err := b.artifactSearcher.SearchArtifactsByEmbedding(ctx, query.QueryEmbedding, run.ArtifactSearchOptions{
@@ -264,7 +278,7 @@ func (b *Builder) resolveSemanticArtifacts(
 		MinSimilarity: query.MinSimilarity,
 	})
 	if err != nil {
-		return nil, "", run.ArtifactSearchPathError, strings.TrimSpace(err.Error())
+		return finalize(nil, "", run.ArtifactSearchPathError, strings.TrimSpace(err.Error()))
 	}
 
 	path = searchResult.SearchPath
@@ -274,7 +288,7 @@ func (b *Builder) resolveSemanticArtifacts(
 
 	hits := normalizeSemanticHits(searchResult.Hits, query.MinSimilarity, query.Limit)
 	if len(hits) == 0 {
-		return nil, "", path, ""
+		return finalize(nil, "", path, "")
 	}
 
 	lines := make([]string, 0, len(hits))
@@ -298,7 +312,65 @@ func (b *Builder) resolveSemanticArtifacts(
 	}
 
 	refs = uniqueStrings(refs)
-	return refs, strings.Join(lines, "\n"), path, ""
+	return finalize(refs, strings.Join(lines, "\n"), path, "")
+}
+
+func (b *Builder) emitSemanticArtifactSearchEvent(
+	ctx context.Context,
+	sessionID string,
+	query *ArtifactSemanticQuery,
+	path run.ArtifactSearchPath,
+	hitCount int,
+	errText string,
+	duration time.Duration,
+) {
+	if b == nil || query == nil || len(query.QueryEmbedding) == 0 {
+		return
+	}
+
+	event := observability.NewEvent(observability.OpContextSemanticArtifactSearch).
+		WithComponent(observability.ComponentContextBuilder).
+		WithCommand("contextbuilder.layered").
+		WithSession(sessionID, "").
+		WithData("search_path", string(path)).
+		WithData("hit_count", hitCount).
+		WithData("session_id", sessionID).
+		WithData("query_dims", len(query.QueryEmbedding)).
+		EnrichFromContext(ctx)
+
+	if parentID := strings.TrimSpace(observability.SpanIDFromContext(ctx)); parentID != "" {
+		event.WithParentID(parentID)
+	}
+
+	if len(query.ArtifactTypes) > 0 {
+		artifactTypes := append([]string(nil), query.ArtifactTypes...)
+		sort.Strings(artifactTypes)
+		event.WithData("artifact_types", artifactTypes)
+	}
+	if query.MinSimilarity > 0 {
+		event.WithData("min_similarity", query.MinSimilarity)
+	}
+	if query.Limit > 0 {
+		event.WithData("limit", query.Limit)
+	}
+
+	if strings.TrimSpace(errText) != "" || path == run.ArtifactSearchPathError {
+		emitWideEventAsync(event.ErrorWithDetails(
+			"semantic_retrieval",
+			"ESEMANTIC_RETRIEVAL",
+			strings.TrimSpace(errText),
+			true,
+			duration))
+		return
+	}
+	emitWideEventAsync(event.Success(duration))
+}
+
+func emitWideEventAsync(event *observability.WideEvent) {
+	if event == nil {
+		return
+	}
+	go observability.Emit(context.Background(), event)
 }
 
 func normalizeSemanticHits(hits []run.ScoredArtifact, minSimilarity float64, limit int) []run.ScoredArtifact {
