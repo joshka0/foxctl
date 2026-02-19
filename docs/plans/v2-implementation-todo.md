@@ -107,7 +107,7 @@ Wave 3 retrieval goals and PR-17+ scope live in:
 - [ ] libsql embedding storage format and vector indexing policy for artifact tables
 - [ ] context budget policy across L2/L1/L0 (global vs per-command vs per-role)
 - [ ] whether and how to backfill selected v1 turns into v2 retrieval surfaces
-- [ ] native libsql/Turso vector-path CI coverage for `SearchArtifactsByEmbedding` (current tests cover deterministic fallback path only)
+- [ ] native libsql/Turso vector-path CI coverage for `SearchArtifactsByEmbedding` (new cgo integration test skips when native vector SQL is unavailable)
 
 ## Completion Gate (Required Before Marking Done)
 
@@ -143,6 +143,16 @@ Subagent Review
 
 ## Progress Log
 
+- 2026-02-19:
+  Subagent Review
+  - reviewer: `019c77f5-1ace-7d50-b597-f865fddce957`
+  - scope: `PR-18 vector-path cgo test scaffold` (`internal/v2/adapters/libsql/turns/store_vector_cgo_test.go`, `docs/plans/v2-implementation-todo.md`)
+  - findings: `low` — native vector coverage depends on CI runtime exposing `vector_distance_cos`; test currently skips otherwise
+  - decision: `approved-with-known-risks`
+- 2026-02-19: Added cgo integration test scaffold for native libsql vector retrieval.
+  - Added `internal/v2/adapters/libsql/turns/store_vector_cgo_test.go` to exercise vector-path semantic search with local libsql files.
+  - Test currently skips when native vector SQL is unavailable at runtime (store downgrades to fallback), preserving deterministic behavior across environments.
+  - Tracker item remains open until CI confirms native vector-path execution coverage.
 - 2026-02-19:
   Subagent Review
   - reviewer: `019c77e4-a3a3-7df2-983c-303bdb82af09`
