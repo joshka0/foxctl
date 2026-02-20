@@ -2,7 +2,7 @@
 
 Status: Active  
 Owner: Solo maintainer  
-Last Updated: 2026-02-19
+Last Updated: 2026-02-20
 
 ## Objective
 
@@ -28,6 +28,7 @@ Primary specs/plans:
 - [x] Wave 2 production cutover batch 1 complete (PR-11 through PR-13)
 - [x] Wave 2 dynamic context + decommission gate batch complete (PR-14 through PR-16)
 - [x] Wave 3 kickoff complete for PR-17 (artifact retrieval + semantic observability/tracing)
+- [x] Wave 3 source-resynthesis slice complete (PR-19: source conversations -> v2 turns/artifacts)
 
 ## Wave 1 Completed (Reference)
 
@@ -93,6 +94,13 @@ Wave 3 retrieval goals and PR-17+ scope live in:
     - vector vs fallback semantic overlap@10 >= `90%` on validation corpus
     - fallback ratio <= `5%` over rolling 24h when vector capability is expected
 
+- [x] PR-19: source conversation resynthesis for v2 artifact surfaces
+  - [x] add source-import adapter for Claude/Codex JSONL -> canonical v2 turn lineage
+  - [x] add deterministic artifact derivation (`annotation`, `classification`, `learning`, optional `embedding`)
+  - [x] add `agentctl sessions resynthesize-v2` command for direct v2 backfill writes
+  - [x] support optional Claude todo snapshot ingestion in artifact synthesis context
+  - [x] enforce embedding dimension compatibility with turns store settings
+
 ## Decisions (Locked)
 
 - [x] v2 remains opt-in per command through `AGENTCTL_V2_COMMANDS`
@@ -106,7 +114,7 @@ Wave 3 retrieval goals and PR-17+ scope live in:
 
 - [x] libsql embedding storage format and vector indexing policy for artifact tables
 - [x] context budget policy across L2/L1/L0 (resolved: global default split + per-command overrides via `LayerBudget`)
-- [ ] whether and how to backfill selected v1 turns into v2 retrieval surfaces
+- [x] whether and how to backfill selected v1 turns into v2 retrieval surfaces (resolved via `agentctl sessions resynthesize-v2` source-log import/resynthesis path)
 - [x] native libsql/Turso vector-path CI coverage for `SearchArtifactsByEmbedding` (CI now runs strict native-vector gate with `AGENTCTL_V2_REQUIRE_NATIVE_VECTOR_SQL=1`)
 
 ## Completion Gate (Required Before Marking Done)
@@ -143,6 +151,21 @@ Subagent Review
 
 ## Progress Log
 
+- 2026-02-20:
+  Subagent Review
+  - reviewer: `019c7a17-f8a4-71a3-8a7a-3fa2dd05ca9c`
+  - scope: `PR-19 source resynthesis slice` (`cmd/agentctl/cmd/sessions.go`, `internal/v2/adapters/sourceimport/*`, `internal/v2/adapters/libsql/turns/store.go`)
+  - findings: `none`
+  - decision: `approved`
+- 2026-02-20: Completed PR-19 source conversation resynthesis into v2 turns/artifacts.
+  - Added new source import adapter package at `internal/v2/adapters/sourceimport`:
+    - provider detection + parsing for Claude/Codex JSONL sources
+    - canonical lineage mapping (`Turn -> Iteration -> ToolCall`)
+    - deterministic artifact derivation (`annotation`, `classification`, `learning`, optional `embedding`)
+  - Added CLI surface `agentctl sessions resynthesize-v2` in `cmd/agentctl/cmd/sessions.go` with provider/source/session/workspace controls and `--dry-run`.
+  - Added optional Claude todo ingestion and integration into synthesized artifact context (`--include-todos`).
+  - Added `VectorDimensions()` accessor on turns store and switched embedder dimensions to store-configured values to avoid vector-dimension mismatch in environments with non-default settings.
+  - Added parser/artifact derivation tests under `internal/v2/adapters/sourceimport/importer_test.go`.
 - 2026-02-19:
   Subagent Review
   - reviewer: `019c7825-d823-7f80-959c-561eb0c65319`

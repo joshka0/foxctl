@@ -8,7 +8,7 @@ Machine-friendly reference for session lifecycle, lineage, and retrieval.
 |------|-------|
 | Status | Current |
 | Canonical packages | `internal/storage/sessions`, `cmd/agentctl/cmd/sessions.go`, `skills/session_restore`, `skills/session_summarize`, `skills/session_recall`, `internal/sessionkit` |
-| Last reviewed | 2026-02-17 |
+| Last reviewed | 2026-02-20 |
 
 ## Scope
 
@@ -20,12 +20,31 @@ Sessions capture agent/user interaction history, lineage edges, context windows,
 |--------|---------|
 | `list`, `show`, `search`, `stats` | Inspect stored sessions |
 | `capture`, `import`, `summarize`, `windows`, `export` | Capture and process session data |
+| `resynthesize-v2` | Parse Claude/Codex source logs and backfill v2 turns + artifacts |
 | `new`, `resume`, `fork`, `chain`, `close` | Manage active lineage and session state |
 
 Notable contract details:
 
 - `sessions chain` requires `--session <id>`.
 - `sessions close` status must be one of `ok`, `error`, `canceled`.
+- `sessions resynthesize-v2` writes to the v2 turns/artifact store and supports `--provider`, `--source-file`, `--session-id`, `--workspace`, `--include-todos`, `--include-embedding`, and `--dry-run`.
+
+## V2 Resynthesis (`sessions resynthesize-v2`)
+
+Use this command when you want to rebuild v2 turn/artifact state from source
+conversation files.
+
+Supported sources:
+
+1. Claude JSONL sessions
+2. Codex JSONL sessions
+
+Behavior:
+
+1. Parse source messages into canonical v2 lineage (`Turn -> Iteration -> ToolCall`).
+2. Derive deterministic artifacts (`annotation`, `classification`, `learning`, optional `embedding`).
+3. Optionally include Claude todos as additional classification/learning context.
+4. Persist into the v2 turns/artifact store (or report counts in `--dry-run` mode).
 
 ## Skill Contracts
 

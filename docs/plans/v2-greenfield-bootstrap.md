@@ -841,3 +841,29 @@ for production use of vector-backed retrieval.
 2. When semantic retrieval is not requested, semantic budget is reassigned to `L0`.
 3. Per-request overrides are supported via `LayerBudget` for command-level tuning.
 4. Final rendered content remains globally bounded by the resolved total cap.
+
+### PR-19: Source Conversation Resynthesis (Implemented)
+
+PR-19 adds a deterministic backfill path that ingests source conversation logs
+(Claude/Codex JSONL) and writes canonical v2 turns/artifacts directly into v2
+storage.
+
+#### Scope
+
+1. Parse source logs into canonical lineage (`Turn -> Iteration -> ToolCall`).
+2. Derive deterministic artifacts (`annotation`, `classification`, `learning`,
+   optional `embedding`) from imported turns.
+3. Add CLI entrypoint `agentctl sessions resynthesize-v2` with provider/source
+   resolution and dry-run mode.
+4. Include optional Claude todo snapshots as classification/learning context.
+
+#### Acceptance Criteria
+
+1. Source imports are deterministic and idempotent for repeated runs on the same
+   source session.
+2. Artifact derivation does not require network calls and supports local-only
+   deterministic embedding.
+3. Embedding dimensions follow v2 turns-store configuration to avoid
+   vector-dimension mismatch when non-default dimensions are configured.
+4. Failures in source parsing are explicit and do not mutate partially parsed
+   lineage records.

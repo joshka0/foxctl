@@ -361,6 +361,30 @@ Integration rules:
    - if semantic retrieval is not requested, semantic budget is reallocated to `L0`
    - explicit per-layer overrides are allowed per request via `LayerBudget`
 
+### Source Conversation Resynthesis Contract (PR-19)
+
+V2 supports backfilling turn/artifact surfaces from source conversation logs
+without depending on legacy v1 session projections.
+
+Required properties:
+
+1. Supported source providers:
+   - Claude JSONL
+   - Codex JSONL
+2. Source parsing must emit canonical lineage compatible with v2 runtime reads:
+   - `Turn -> Iteration -> ToolCall`
+3. Artifact derivation must produce deterministic results for:
+   - `annotation`
+   - `classification`
+   - `learning`
+   - optional `embedding`
+4. Embedding generation for resynthesis must support local deterministic mode
+   and must use turns-store vector dimensions when embeddings are enabled.
+5. Optional source-side todo snapshots may be folded into classification and
+   learning artifacts as supplemental context.
+6. Import runs must be repeat-safe for the same source session and must preserve
+   non-blocking v2 invariants (no turn completion dependency on enrichers).
+
 ## Canonical Runtime Pipeline
 
 Each turn runs the same staged flow:

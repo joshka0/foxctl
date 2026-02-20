@@ -114,6 +114,14 @@ func (s *Store) SetNowForTest(now func() time.Time) {
 	s.now = now
 }
 
+// VectorDimensions returns the configured embedding width for this store.
+func (s *Store) VectorDimensions() int {
+	if s == nil || s.vectorDimensions <= 0 {
+		return dbdriver.GetDefaultVectorDimensions()
+	}
+	return s.vectorDimensions
+}
+
 // Open opens a libsql-first v2 turns store.
 func Open(ctx context.Context, storageRoot string) (*Store, error) {
 	if strings.TrimSpace(storageRoot) == "" {
