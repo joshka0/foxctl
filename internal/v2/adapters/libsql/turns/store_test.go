@@ -275,6 +275,7 @@ func TestTurnStore_SaveArtifact_IdempotentAndStableRefLookup(t *testing.T) {
 	store := NewStore(db, db.Close)
 	// Force vector path in sqlite test to verify graceful fallback to non-vector writes.
 	store.vectorEnabled.Store(true)
+	store.vectorDimensions = 3
 
 	if err := store.SaveTurn(ctx, run.TurnRecord{ID: "turn-003", SessionID: "run-003"}); err != nil {
 		t.Fatalf("SaveTurn() error = %v", err)
@@ -370,6 +371,7 @@ func TestTurnStore_SearchArtifactsByEmbedding_FallbackAndFilters(t *testing.T) {
 	}
 
 	store := NewStore(db, db.Close)
+	store.vectorDimensions = 3
 	base := time.Date(2026, 2, 19, 12, 0, 0, 0, time.UTC)
 	store.SetNowForTest(func() time.Time { return base })
 
@@ -424,6 +426,9 @@ func TestTurnStore_SearchArtifactsByEmbedding_FallbackAndFilters(t *testing.T) {
 	if results.SearchPath != run.ArtifactSearchPathFallback {
 		t.Fatalf("search path=%q want %q", results.SearchPath, run.ArtifactSearchPathFallback)
 	}
+	if results.VectorCapability != run.ArtifactVectorCapabilityDisabled {
+		t.Fatalf("vector capability=%q want %q", results.VectorCapability, run.ArtifactVectorCapabilityDisabled)
+	}
 	if store.vectorEnabled.Load() {
 		t.Fatal("vectorEnabled should be disabled after unsupported vector search fallback")
 	}
@@ -460,6 +465,73 @@ func TestTurnStore_SearchArtifactsByEmbedding_FallbackAndFilters(t *testing.T) {
 	}
 	if len(invalidType.Hits) != 0 {
 		t.Fatalf("invalid type results=%v want empty", invalidType.Hits)
+	}
+}
+
+func TestTurnStore_SaveArtifact_EmbeddingDimensionsPolicy(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	db, closeFn, err := dbutil.OpenSQLiteDBShared(ctx, filepath.Join(t.TempDir(), "turn_artifact_dims.db"), nil)
+	if err != nil {
+		t.Fatalf("open sqlite db: %v", err)
+	}
+	t.Cleanup(func() { _ = closeFn() })
+	if err := MigrateSchema(ctx, db); err != nil {
+		t.Fatalf("migrate schema: %v", err)
+	}
+
+	store := NewStore(db, db.Close)
+	store.vectorDimensions = 4
+	store.vectorEnabled.Store(true)
+
+	if err := store.SaveTurn(ctx, run.TurnRecord{ID: "turn-dims", SessionID: "run-dims"}); err != nil {
+		t.Fatalf("SaveTurn() error = %v", err)
+	}
+
+	err = store.SaveArtifact(ctx, Artifact{
+		TurnID:          "turn-dims",
+		ArtifactType:    ArtifactTypeEmbedding,
+		ArtifactVersion: "v1",
+		Embedding:       []float32{1.0, 0.0, 0.0},
+	})
+	if !errors.Is(err, ErrInvalidEmbeddingDimensions) {
+		t.Fatalf("SaveArtifact() error=%v want ErrInvalidEmbeddingDimensions", err)
+	}
+
+	// When vector mode is disabled we preserve embedding_json for fallback mode and
+	// do not enforce strict vector dimensions.
+	store.vectorEnabled.Store(false)
+	if err := store.SaveArtifact(ctx, Artifact{
+		TurnID:          "turn-dims",
+		ArtifactType:    ArtifactTypeEmbedding,
+		ArtifactVersion: "v1",
+		Embedding:       []float32{1.0, 0.0, 0.0},
+	}); err != nil {
+		t.Fatalf("SaveArtifact(vector disabled) error = %v", err)
+	}
+}
+
+func TestTurnStore_SearchArtifactsByEmbedding_RejectsDimensionMismatchWhenVectorEnabled(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	db, closeFn, err := dbutil.OpenSQLiteDBShared(ctx, filepath.Join(t.TempDir(), "turn_artifact_query_dims.db"), nil)
+	if err != nil {
+		t.Fatalf("open sqlite db: %v", err)
+	}
+	t.Cleanup(func() { _ = closeFn() })
+	if err := MigrateSchema(ctx, db); err != nil {
+		t.Fatalf("migrate schema: %v", err)
+	}
+
+	store := NewStore(db, db.Close)
+	store.vectorDimensions = 4
+	store.vectorEnabled.Store(true)
+
+	_, err = store.SearchArtifactsByEmbedding(ctx, []float32{1.0, 0.0, 0.0}, run.ArtifactSearchOptions{Limit: 3})
+	if !errors.Is(err, ErrInvalidEmbeddingDimensions) {
+		t.Fatalf("SearchArtifactsByEmbedding() error=%v want ErrInvalidEmbeddingDimensions", err)
 	}
 }
 

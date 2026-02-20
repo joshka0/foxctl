@@ -13,6 +13,12 @@ import (
 )
 
 const semanticEventQueueCapacity = 128
+const (
+	defaultL2BudgetPct       = 20
+	defaultL1BudgetPct       = 25
+	defaultL0BudgetPct       = 45
+	defaultSemanticBudgetPct = 10
+)
 
 type semanticEventJob struct {
 	ctx   context.Context
@@ -52,6 +58,16 @@ type ArtifactSemanticQuery struct {
 	MinSimilarity  float64   `json:"min_similarity,omitempty"`
 }
 
+// LayerBudget configures per-layer and total character budgets for layered
+// context assembly.
+type LayerBudget struct {
+	TotalChars    int `json:"total_chars,omitempty"`
+	L2Chars       int `json:"l2_chars,omitempty"`
+	L1Chars       int `json:"l1_chars,omitempty"`
+	L0Chars       int `json:"l0_chars,omitempty"`
+	SemanticChars int `json:"semantic_chars,omitempty"`
+}
+
 // LayeredRequest asks for L2 -> L1 -> L0 context assembly.
 type LayeredRequest struct {
 	SessionID   string                 `json:"session_id"`
@@ -59,6 +75,7 @@ type LayeredRequest struct {
 	MonthsLimit int                    `json:"months_limit,omitempty"`
 	DaysLimit   int                    `json:"days_limit,omitempty"`
 	HoursLimit  int                    `json:"hours_limit,omitempty"`
+	Budget      *LayerBudget           `json:"budget,omitempty"`
 	Semantic    *ArtifactSemanticQuery `json:"semantic,omitempty"`
 }
 
@@ -141,9 +158,11 @@ func (b *Builder) BuildLayered(ctx context.Context, req LayeredRequest) (Layered
 	}
 
 	companionCtx := CompanionLayeredContext{}
+	hasSemanticBudget := req.Semantic != nil && len(req.Semantic.QueryEmbedding) > 0 && b.artifactSearcher != nil
+	budget := resolveLayerBudget(req, hasSemanticBudget)
 	if b.companion != nil {
 		companionCtx, err = b.companion.GetLayeredContext(ctx, sessionID, CompanionRequest{
-			MaxChars: req.MaxChars,
+			MaxChars: budget.TotalChars,
 		})
 		if err != nil {
 			return LayeredBundle{}, err
@@ -163,10 +182,35 @@ func (b *Builder) BuildLayered(ctx context.Context, req LayeredRequest) (Layered
 		strings.TrimSpace(renderTemporalLayer(l0Temporal)),
 	)
 
-	semanticRefs, semanticSection, semanticPath, semanticErr := b.resolveSemanticArtifacts(ctx, sessionID, req.Semantic)
+	semanticRefs, semanticSection, semanticPath, semanticCapability, semanticErr := b.resolveSemanticArtifacts(ctx, sessionID, req.Semantic)
+	if budget.TotalChars > 0 {
+		if budget.L2Chars > 0 {
+			l2Section = truncateRunes(l2Section, budget.L2Chars)
+		} else {
+			l2Section = ""
+		}
+		if budget.L1Chars > 0 {
+			l1Section = truncateRunes(l1Section, budget.L1Chars)
+		} else {
+			l1Section = ""
+		}
+		if budget.L0Chars > 0 {
+			l0Section = truncateRunes(l0Section, budget.L0Chars)
+		} else {
+			l0Section = ""
+		}
+		if strings.TrimSpace(semanticSection) != "" {
+			if budget.SemanticChars > 0 {
+				semanticSection = truncateRunes(semanticSection, budget.SemanticChars)
+			} else {
+				semanticSection = ""
+			}
+		}
+	}
+
 	content := renderLayeredContent(l2Section, l1Section, l0Section, semanticSection)
-	if req.MaxChars > 0 {
-		content = truncateRunes(content, req.MaxChars)
+	if budget.TotalChars > 0 {
+		content = truncateRunes(content, budget.TotalChars)
 	}
 
 	turnRefs := collectTurnRefs(l0Temporal, l1Temporal)
@@ -181,14 +225,21 @@ func (b *Builder) BuildLayered(ctx context.Context, req LayeredRequest) (Layered
 	))
 
 	meta := map[string]any{
-		"session_id":           sessionID,
-		"has_companion":        b.companion != nil,
-		"l2_bucket_count":      len(l2Temporal.Buckets),
-		"l1_bucket_count":      len(l1Temporal.Buckets),
-		"l0_bucket_count":      len(l0Temporal.Buckets),
-		"expandable_date_cnt":  len(uniqueStrings(append(l1Temporal.ExpandableDates, l2Temporal.ExpandableDates...))),
-		"artifact_search_path": string(semanticPath),
-		"artifact_hit_count":   len(semanticRefs),
+		"session_id":                 sessionID,
+		"has_companion":              b.companion != nil,
+		"l2_bucket_count":            len(l2Temporal.Buckets),
+		"l1_bucket_count":            len(l1Temporal.Buckets),
+		"l0_bucket_count":            len(l0Temporal.Buckets),
+		"expandable_date_cnt":        len(uniqueStrings(append(l1Temporal.ExpandableDates, l2Temporal.ExpandableDates...))),
+		"artifact_search_path":       string(semanticPath),
+		"artifact_vector_capability": string(semanticCapability),
+		"artifact_hit_count":         len(semanticRefs),
+		"artifact_hit_bucket":        semanticHitBucket(len(semanticRefs)),
+		"budget_total_chars":         budget.TotalChars,
+		"budget_l2_chars":            budget.L2Chars,
+		"budget_l1_chars":            budget.L1Chars,
+		"budget_l0_chars":            budget.L0Chars,
+		"budget_semantic_chars":      budget.SemanticChars,
 	}
 	if semanticErr != "" {
 		meta["artifact_search_error"] = semanticErr
@@ -257,14 +308,82 @@ func renderLayeredContent(l2, l1, l0, semantic string) string {
 	return strings.Join(sections, "\n\n")
 }
 
+func resolveLayerBudget(req LayeredRequest, hasSemantic bool) LayerBudget {
+	total := req.MaxChars
+	if req.Budget != nil && req.Budget.TotalChars > 0 {
+		total = req.Budget.TotalChars
+	}
+	if total <= 0 {
+		return LayerBudget{}
+	}
+
+	l2 := percentOf(total, defaultL2BudgetPct)
+	l1 := percentOf(total, defaultL1BudgetPct)
+	l0 := percentOf(total, defaultL0BudgetPct)
+	semantic := percentOf(total, defaultSemanticBudgetPct)
+	if !hasSemantic {
+		l0 += semantic
+		semantic = 0
+	}
+
+	if req.Budget != nil {
+		if req.Budget.L2Chars > 0 {
+			l2 = req.Budget.L2Chars
+		}
+		if req.Budget.L1Chars > 0 {
+			l1 = req.Budget.L1Chars
+		}
+		if req.Budget.L0Chars > 0 {
+			l0 = req.Budget.L0Chars
+		}
+		if req.Budget.SemanticChars > 0 {
+			semantic = req.Budget.SemanticChars
+		}
+	}
+
+	remaining := total
+	l2 = clampToRemaining(l2, &remaining)
+	l1 = clampToRemaining(l1, &remaining)
+	l0 = clampToRemaining(l0, &remaining)
+	semantic = clampToRemaining(semantic, &remaining)
+	l0 += remaining
+
+	return LayerBudget{
+		TotalChars:    total,
+		L2Chars:       l2,
+		L1Chars:       l1,
+		L0Chars:       l0,
+		SemanticChars: semantic,
+	}
+}
+
+func percentOf(total int, pct int) int {
+	if total <= 0 || pct <= 0 {
+		return 0
+	}
+	return (total * pct) / 100
+}
+
+func clampToRemaining(value int, remaining *int) int {
+	if remaining == nil || *remaining <= 0 || value <= 0 {
+		return 0
+	}
+	if value > *remaining {
+		value = *remaining
+	}
+	*remaining -= value
+	return value
+}
+
 func (b *Builder) resolveSemanticArtifacts(
 	ctx context.Context,
 	defaultSessionID string,
 	query *ArtifactSemanticQuery,
-) (refs []string, section string, path run.ArtifactSearchPath, errText string) {
+) (refs []string, section string, path run.ArtifactSearchPath, capability run.ArtifactVectorCapability, errText string) {
 	path = run.ArtifactSearchPathDisabled
+	capability = run.ArtifactVectorCapabilityUnknown
 	if query == nil || len(query.QueryEmbedding) == 0 {
-		return nil, "", path, ""
+		return nil, "", path, capability, ""
 	}
 
 	startedAt := time.Now()
@@ -273,15 +392,16 @@ func (b *Builder) resolveSemanticArtifacts(
 		sessionID = strings.TrimSpace(defaultSessionID)
 	}
 
-	finalize := func(refs []string, section string, path run.ArtifactSearchPath, errText string) ([]string, string, run.ArtifactSearchPath, string) {
+	finalize := func(refs []string, section string, path run.ArtifactSearchPath, capability run.ArtifactVectorCapability, errText string) ([]string, string, run.ArtifactSearchPath, run.ArtifactVectorCapability, string) {
 		if b != nil {
-			b.recordArtifactSearch(path, len(refs))
-			b.emitSemanticArtifactSearchEvent(ctx, sessionID, query, path, len(refs), errText, time.Since(startedAt))
+			elapsed := time.Since(startedAt)
+			b.recordArtifactSearch(path, capability, len(refs), elapsed)
+			b.emitSemanticArtifactSearchEvent(ctx, sessionID, query, path, capability, len(refs), errText, elapsed)
 		}
-		return refs, section, path, errText
+		return refs, section, path, capability, errText
 	}
 	if b == nil || b.artifactSearcher == nil {
-		return finalize(nil, "", path, "")
+		return finalize(nil, "", path, run.ArtifactVectorCapabilityDisabled, "")
 	}
 
 	searchResult, err := b.artifactSearcher.SearchArtifactsByEmbedding(ctx, query.QueryEmbedding, run.ArtifactSearchOptions{
@@ -291,17 +411,21 @@ func (b *Builder) resolveSemanticArtifacts(
 		MinSimilarity: query.MinSimilarity,
 	})
 	if err != nil {
-		return finalize(nil, "", run.ArtifactSearchPathError, strings.TrimSpace(err.Error()))
+		return finalize(nil, "", run.ArtifactSearchPathError, capability, strings.TrimSpace(err.Error()))
 	}
 
 	path = searchResult.SearchPath
 	if strings.TrimSpace(string(path)) == "" {
 		path = run.ArtifactSearchPathVector
 	}
+	capability = searchResult.VectorCapability
+	if strings.TrimSpace(string(capability)) == "" {
+		capability = run.ArtifactVectorCapabilityUnknown
+	}
 
 	hits := normalizeSemanticHits(searchResult.Hits, query.MinSimilarity, query.Limit)
 	if len(hits) == 0 {
-		return finalize(nil, "", path, "")
+		return finalize(nil, "", path, capability, "")
 	}
 
 	lines := make([]string, 0, len(hits))
@@ -325,7 +449,7 @@ func (b *Builder) resolveSemanticArtifacts(
 	}
 
 	refs = uniqueStrings(refs)
-	return finalize(refs, strings.Join(lines, "\n"), path, "")
+	return finalize(refs, strings.Join(lines, "\n"), path, capability, "")
 }
 
 func (b *Builder) emitSemanticArtifactSearchEvent(
@@ -333,6 +457,7 @@ func (b *Builder) emitSemanticArtifactSearchEvent(
 	sessionID string,
 	query *ArtifactSemanticQuery,
 	path run.ArtifactSearchPath,
+	capability run.ArtifactVectorCapability,
 	hitCount int,
 	errText string,
 	duration time.Duration,
@@ -346,7 +471,10 @@ func (b *Builder) emitSemanticArtifactSearchEvent(
 		WithCommand("contextbuilder.layered").
 		WithSession(sessionID, "").
 		WithData("search_path", string(path)).
+		WithData("vector_capability", string(capability)).
 		WithData("hit_count", hitCount).
+		WithData("latency_bucket", semanticLatencyBucket(duration)).
+		WithData("hit_bucket", semanticHitBucket(hitCount)).
 		WithData("session_id", sessionID).
 		WithData("query_dims", len(query.QueryEmbedding)).
 		EnrichFromContext(ctx)
@@ -377,6 +505,32 @@ func (b *Builder) emitSemanticArtifactSearchEvent(
 		return
 	}
 	emitWideEventAsync(ctx, event.Success(duration))
+}
+
+func semanticLatencyBucket(duration time.Duration) string {
+	switch {
+	case duration <= 10*time.Millisecond:
+		return "le_10ms"
+	case duration <= 50*time.Millisecond:
+		return "le_50ms"
+	case duration <= 100*time.Millisecond:
+		return "le_100ms"
+	default:
+		return "gt_100ms"
+	}
+}
+
+func semanticHitBucket(hitCount int) string {
+	switch {
+	case hitCount <= 0:
+		return "zero"
+	case hitCount <= 3:
+		return "one_to_three"
+	case hitCount <= 10:
+		return "four_to_ten"
+	default:
+		return "gt_ten"
+	}
 }
 
 func emitWideEventAsync(ctx context.Context, event *observability.WideEvent) {

@@ -2,7 +2,7 @@
 
 Status: Active  
 Owner: Solo maintainer  
-Last Updated: 2026-02-19
+Last Updated: 2026-02-20
 
 ## Objective
 
@@ -28,6 +28,7 @@ Primary specs/plans:
 - [x] Wave 2 production cutover batch 1 complete (PR-11 through PR-13)
 - [x] Wave 2 dynamic context + decommission gate batch complete (PR-14 through PR-16)
 - [x] Wave 3 kickoff complete for PR-17 (artifact retrieval + semantic observability/tracing)
+- [x] Wave 3 source-resynthesis slice complete (PR-19: source conversations -> v2 turns/artifacts)
 
 ## Wave 1 Completed (Reference)
 
@@ -65,7 +66,7 @@ Wave 3 retrieval goals and PR-17+ scope live in:
   - [x] blend turn refs + companion summaries deterministically
   - [x] validate referenceability of whole turns and partial slices in assembled context
 
-## Next (Wave 3 Kickoff)
+## Next (Wave 3 Active)
 
 - [x] PR-17: libsql-first artifact semantic retrieval surfaces
   - [x] add `SearchArtifactsByEmbedding` in `internal/v2/adapters/libsql/turns/store.go` with vector-first query + safe cosine fallback
@@ -83,6 +84,23 @@ Wave 3 retrieval goals and PR-17+ scope live in:
   - [x] define sustained parity window + incident-free thresholds
   - [x] remove/freeze superseded v1 handlers command-by-command
 
+- [x] PR-18: libsql vector-path validation + retrieval quality hardening
+  - [x] add deterministic integration tests that exercise native libsql vector SQL path (`vector_distance_cos`) in CI-friendly setup
+  - [x] add explicit runtime capability signal (vector enabled/disabled) to retrieval observability output and docs
+  - [x] add latency + hit-rate telemetry buckets for semantic artifact search path quality
+  - [x] document fallback guardrails (when fallback is expected vs treated as degraded) in `docs/spec/v2_greenfield_bootstrap.md`
+  - [x] define rollout gate with measurable thresholds:
+    - fallback-only corpus required invariants pass rate = `100%`
+    - vector vs fallback semantic overlap@10 >= `90%` on validation corpus
+    - fallback ratio <= `5%` over rolling 24h when vector capability is expected
+
+- [x] PR-19: source conversation resynthesis for v2 artifact surfaces
+  - [x] add source-import adapter for Claude/Codex JSONL -> canonical v2 turn lineage
+  - [x] add deterministic artifact derivation (`annotation`, `classification`, `learning`, optional `embedding`)
+  - [x] add `agentctl sessions resynthesize-v2` command for direct v2 backfill writes
+  - [x] support optional Claude todo snapshot ingestion in artifact synthesis context
+  - [x] enforce embedding dimension compatibility with turns store settings
+
 ## Decisions (Locked)
 
 - [x] v2 remains opt-in per command through `AGENTCTL_V2_COMMANDS`
@@ -94,10 +112,10 @@ Wave 3 retrieval goals and PR-17+ scope live in:
 
 ## Open Questions
 
-- [ ] libsql embedding storage format and vector indexing policy for artifact tables
-- [ ] context budget policy across L2/L1/L0 (global vs per-command vs per-role)
-- [ ] whether and how to backfill selected v1 turns into v2 retrieval surfaces
-- [ ] native libsql/Turso vector-path CI coverage for `SearchArtifactsByEmbedding` (current tests cover deterministic fallback path only)
+- [x] libsql embedding storage format and vector indexing policy for artifact tables
+- [x] context budget policy across L2/L1/L0 (resolved: global default split + per-command overrides via `LayerBudget`)
+- [x] whether and how to backfill selected v1 turns into v2 retrieval surfaces (resolved via `agentctl sessions resynthesize-v2` source-log import/resynthesis path)
+- [x] native libsql/Turso vector-path CI coverage for `SearchArtifactsByEmbedding` (CI now runs strict native-vector gate with `AGENTCTL_V2_REQUIRE_NATIVE_VECTOR_SQL=1`)
 
 ## Completion Gate (Required Before Marking Done)
 
@@ -133,6 +151,129 @@ Subagent Review
 
 ## Progress Log
 
+- 2026-02-20:
+  Subagent Review
+  - reviewer: `019c7a17-f8a4-71a3-8a7a-3fa2dd05ca9c`
+  - scope: `PR-19 source resynthesis slice` (`cmd/agentctl/cmd/sessions.go`, `internal/v2/adapters/sourceimport/*`, `internal/v2/adapters/libsql/turns/store.go`)
+  - findings: `none`
+  - decision: `approved`
+- 2026-02-20: Completed PR-19 source conversation resynthesis into v2 turns/artifacts.
+  - Added new source import adapter package at `internal/v2/adapters/sourceimport`:
+    - provider detection + parsing for Claude/Codex JSONL sources
+    - canonical lineage mapping (`Turn -> Iteration -> ToolCall`)
+    - deterministic artifact derivation (`annotation`, `classification`, `learning`, optional `embedding`)
+  - Added CLI surface `agentctl sessions resynthesize-v2` in `cmd/agentctl/cmd/sessions.go` with provider/source/session/workspace controls and `--dry-run`.
+  - Added optional Claude todo ingestion and integration into synthesized artifact context (`--include-todos`).
+  - Added `VectorDimensions()` accessor on turns store and switched embedder dimensions to store-configured values to avoid vector-dimension mismatch in environments with non-default settings.
+  - Added parser/artifact derivation tests under `internal/v2/adapters/sourceimport/importer_test.go`.
+- 2026-02-19:
+  Subagent Review
+  - reviewer: `019c7825-d823-7f80-959c-561eb0c65319`
+  - scope: `v2 layered budget policy slice` (`internal/v2/runtime/contextbuilder/{layered.go,layered_budget_test.go}`, `docs/spec/v2_greenfield_bootstrap.md`, `docs/general/companion-memory.md`, `docs/plans/v2-greenfield-bootstrap.md`, `docs/plans/v2-implementation-todo.md`)
+  - findings: `none` (prior semantic-budget reservation issue fixed and regression-covered)
+  - decision: `approved`
+- 2026-02-19: Implemented v2 layered context budget policy (L2/L1/L0 + semantic).
+  - Added deterministic per-layer budget resolution under a single total cap:
+    - defaults `L2=20%`, `L1=25%`, `L0=45%`, `Semantic=10%`
+    - semantic budget reallocated to `L0` when semantic retrieval is absent
+    - per-request overrides via `LayerBudget`
+  - Added pure budget-policy tests in `internal/v2/runtime/contextbuilder/layered_budget_test.go`.
+  - Updated v2 spec/plan and companion-memory docs to describe the resolved policy.
+- 2026-02-19:
+  Subagent Review
+  - reviewer: `019c781b-8e7b-73d1-9812-2f77532c3322`
+  - scope: `v2 artifact embedding+index policy slice` (`internal/v2/adapters/libsql/turns/{store.go,schema.go,store_test.go,store_vector_cgo_test.go}`, `docs/spec/v2_greenfield_bootstrap.md`, `docs/plans/v2-greenfield-bootstrap.md`, `docs/plans/v2-implementation-todo.md`)
+  - findings: `none`
+  - decision: `approved`
+- 2026-02-19: Implemented v2 artifact embedding storage + vector index policy.
+  - Added explicit vector index policy constants and index-assisted vector candidate retrieval (`vector_top_k`) in turns adapter.
+  - Added strict dimension policy for vector mode (`ErrInvalidEmbeddingDimensions`) on both artifact writes and semantic queries.
+  - Added coverage for dimension-mismatch rejection and fallback-compatibility behavior.
+  - Aligned cgo vector test config with explicit vector dimensions (`AGENTCTL_V2_TURNS_VECTOR_DIMS=4` / `AGENTCTL_VECTOR_DIMS=4`) for deterministic strict-gate runs.
+- 2026-02-19:
+  Subagent Review
+  - reviewer: `019c7812-a3d8-78f1-b3ff-300fb8c46c04`
+  - scope: `PR-18 native vector CI gate slice` (`internal/v2/adapters/libsql/turns/store_vector_cgo_test.go`, `.github/workflows/ci.yml`, `docs/plans/v2-greenfield-bootstrap.md`, `docs/plans/v2-implementation-todo.md`)
+  - findings: `none`
+  - decision: `approved`
+- 2026-02-19: Completed PR-18 native vector-path CI hard gate.
+  - Added strict-mode behavior to `TestTurnStore_SearchArtifactsByEmbedding_VectorPathLibSQL` via `AGENTCTL_V2_REQUIRE_NATIVE_VECTOR_SQL=1`:
+    - local/dev keeps skip behavior when vector SQL is unavailable
+    - CI fails when native vector capability is expected but unavailable or downgraded
+  - Added dedicated CI step in `.github/workflows/ci.yml` to run the strict native vector-path test.
+  - Marked PR-18 and native vector CI coverage tracker items complete.
+- 2026-02-19:
+  Subagent Review
+  - reviewer: `019c7807-10fb-7ac0-ab59-41450b92fd67`
+  - scope: `PR-18 rollout-gate no-vector-refs follow-up` (`internal/v2/runtime/contextbuilder/rollout_gate.go`, `internal/v2/runtime/contextbuilder/rollout_gate_test.go`)
+  - findings: `none`
+  - decision: `approved`
+- 2026-02-19: Hardened PR-18 rollout-gate overlap semantics for empty vector baseline cases.
+  - Set per-case `overlapRate` default to `0.0` when `expected==0` so case metrics align with aggregate overlap behavior.
+  - Added `TestEvaluateSemanticRolloutGate_NoComparableVectorRefsFailsOverlap` coverage for this path.
+  - Guarded `CaseResults` indexing in the new test to avoid panics on empty result slices.
+- 2026-02-19:
+  Subagent Review
+  - reviewer: `019c77fd-dbb5-75f1-9e26-257938cb6f4e`
+  - scope: `PR-18 rollout-gate evaluator slice` (`internal/v2/runtime/contextbuilder/rollout_gate.go`, `internal/v2/runtime/contextbuilder/rollout_gate_test.go`, `docs/plans/v2-implementation-todo.md`)
+  - findings: `none`
+  - decision: `approved`
+- 2026-02-19: Implemented PR-18 rollout-gate evaluator and corpus checks.
+  - Added pure rollout gate evaluation API in `internal/v2/runtime/contextbuilder/rollout_gate.go`:
+    - `SemanticRolloutGateThresholds`
+    - `SemanticValidationCase`
+    - `EvaluateSemanticRolloutGate(...)`
+  - Enforced threshold checks:
+    - fallback invariant pass rate (`100%`)
+    - vector/fallback overlap@10 (`>= 90%`)
+    - fallback ratio (`<= 5%`) when vector capability is expected
+  - Added table-driven tests in `internal/v2/runtime/contextbuilder/rollout_gate_test.go` including edge cases:
+    - no-sample fallback ratio behavior
+    - overlap dedup and top-K limit behavior
+- 2026-02-19:
+  Subagent Review
+  - reviewer: `019c77f9-268a-75f3-a041-483b6cbf45ed`
+  - scope: `PR-18 fallback-guardrail docs slice` (`docs/spec/v2_greenfield_bootstrap.md`, `docs/plans/v2-implementation-todo.md`)
+  - findings: `none`
+  - decision: `approved`
+- 2026-02-19: Documented PR-18 fallback guardrails in spec and marked tracker item complete.
+  - Added required degraded-mode signaling and context invariants for fallback retrieval in `docs/spec/v2_greenfield_bootstrap.md`.
+  - Added required telemetry dimensions for promotion readiness (`path`, `vector_capability`, `hit_bucket`, `latency_bucket`).
+- 2026-02-19:
+  Subagent Review
+  - reviewer: `019c77f5-1ace-7d50-b597-f865fddce957`
+  - scope: `PR-18 vector-path cgo test scaffold` (`internal/v2/adapters/libsql/turns/store_vector_cgo_test.go`, `docs/plans/v2-implementation-todo.md`)
+  - findings: `low` — native vector coverage depends on CI runtime exposing `vector_distance_cos`; test currently skips otherwise
+  - decision: `approved-with-known-risks`
+- 2026-02-19: Added cgo integration test scaffold for native libsql vector retrieval.
+  - Added `internal/v2/adapters/libsql/turns/store_vector_cgo_test.go` to exercise vector-path semantic search with local libsql files.
+  - Test currently skips when native vector SQL is unavailable at runtime (store downgrades to fallback), preserving deterministic behavior across environments.
+  - Tracker item remains open until CI confirms native vector-path execution coverage.
+- 2026-02-19:
+  Subagent Review
+  - reviewer: `019c77e4-a3a3-7df2-983c-303bdb82af09`
+  - scope: `PR-18 capability+telemetry slice` (`internal/v2/core/run/artifact_search.go`, `internal/v2/adapters/libsql/turns/{store.go,store_test.go}`, `internal/v2/runtime/contextbuilder/{builder.go,layered.go,layered_test.go,layered_observability_test.go}`, `docs/observability/wide-events.md`, `docs/spec/v2_greenfield_bootstrap.md`, `docs/plans/v2-implementation-todo.md`)
+  - findings: `none`
+  - decision: `approved`
+- 2026-02-19: Implemented PR-18 semantic retrieval capability and telemetry buckets.
+  - Added explicit semantic retrieval vector capability signaling (`enabled|disabled|unknown`) in `run.ArtifactSearchResult` and libsql turns store responses.
+  - Added context-builder artifact stats for:
+    - vector/fallback path-scoped latency buckets (`<=10ms`, `<=50ms`, `<=100ms`, `>100ms`)
+    - vector/fallback hit-rate buckets (`0`, `1-3`, `4-10`, `>10`)
+    - vector capability call distribution (enabled/disabled/unknown)
+  - Added layered context metadata and wide-event fields:
+    - `artifact_vector_capability`
+    - `hit_bucket`
+    - `latency_bucket` (wide events)
+  - Synced spec/docs contract updates in:
+    - `docs/observability/wide-events.md`
+    - `docs/spec/v2_greenfield_bootstrap.md`
+- 2026-02-19:
+  Subagent Review
+  - reviewer: `019c75d0-9ede-70a2-8541-b07ab5237599`
+  - scope: `PR-18 warning-fix docs slice` (`docs/plans/v2-greenfield-bootstrap.md`, `docs/plans/v2-implementation-todo.md`)
+  - findings: `none` (prior warnings resolved: PR-10 deterministic detail added; PR-18 measurable rollout gates added)
+  - decision: `approved`
 - 2026-02-19:
   Subagent Review
   - reviewer: `019c750b-7ecd-7980-b862-6ac80123efdb`

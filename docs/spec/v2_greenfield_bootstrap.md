@@ -163,8 +163,9 @@ type ScoredArtifact struct {
 }
 
 type ArtifactSearchResult struct {
-    Hits       []ScoredArtifact
-    SearchPath string // vector | fallback | disabled | error
+    Hits             []ScoredArtifact
+    SearchPath       string // vector | fallback | disabled | error
+    VectorCapability string // enabled | disabled | unknown
 }
 
 type ArtifactSemanticRetriever interface {
@@ -269,6 +270,39 @@ Required properties:
 4. Ordering is deterministic and bounded by explicit limits.
 5. Retrieval failure/degradation must not affect turn completion guarantees.
 
+Embedding storage and index policy:
+
+1. Artifacts persist embeddings in two forms:
+   - `embedding` (`F32_BLOB(N)`) for native libsql vector SQL
+   - `embedding_json` (`TEXT`) for deterministic fallback cosine ranking and portability
+2. Vector dimension policy:
+   - canonical dimension `N` is configured by `AGENTCTL_VECTOR_DIMS` (and per-store
+     overrides where available)
+   - when vector mode is active, writes/queries with mismatched embedding dimensions
+     fail fast with typed errors
+3. Vector index policy:
+   - maintain best-effort libsql index `idx_v2_turn_artifacts_embedding_vec` via
+     `libsql_vector_idx(embedding)`
+   - vector retrieval uses `vector_top_k(...)` candidate selection plus deterministic
+     rerank (`vector_distance_cos`, then stable tie-breaks)
+   - if vector SQL/index primitives are unavailable, retrieval downgrades to fallback
+     cosine and must surface degraded path/capability metadata
+
+Fallback guardrails (required for rollout readiness):
+
+1. Fallback execution is allowed for continuity, but must be explicitly surfaced
+   as degraded when vector capability is expected.
+2. Context assembly invariants must hold in fallback mode:
+   - deterministic ordering
+   - stable references
+   - required temporal blocks present
+3. Runtime telemetry must expose retrieval path quality to support promotion
+   decisions:
+   - path (`vector|fallback|disabled|error`)
+   - vector capability (`enabled|disabled|unknown`)
+   - hit-count bucket (`zero|one_to_three|four_to_ten|gt_ten`)
+   - latency bucket (`le_10ms|le_50ms|le_100ms|gt_100ms`)
+
 ### Context Builder Integration Contract (PR-17 Proposal)
 
 Context assembly should treat artifact-semantic retrieval as an optional layer
@@ -286,18 +320,27 @@ type ArtifactSemanticQuery struct {
     // Maps directly to ArtifactSearchOptions in the semantic retriever.
 }
 
+type LayerBudget struct {
+    TotalChars    int // overall cap for rendered layered content
+    L2Chars       int // optional override
+    L1Chars       int // optional override
+    L0Chars       int // optional override
+    SemanticChars int // optional override
+}
+
 type ContextRequest struct {
     Ref       string
     Temporal  *TemporalRequest
     Semantic  *ArtifactSemanticQuery
-    // Existing budget/config fields remain; semantic retrieval must honor them.
+    Budget    *LayerBudget
+    // Semantic retrieval and layer rendering must honor resolved budget limits.
 }
 
 type ContextBundle struct {
     Ref          string
     Content      string
     ArtifactRefs []string
-    Meta         map[string]any // includes artifact_search_path and artifact_hit_count
+    Meta         map[string]any // includes artifact_search_path, artifact_vector_capability, artifact_hit_count
 }
 ```
 
@@ -313,6 +356,34 @@ Integration rules:
    - semantic artifact refs sorted by similarity desc, then ref asc
 5. Context builder must query persisted artifact state only and must not wait for
    in-flight enricher jobs.
+6. Default layered budget policy uses one total cap with deterministic split:
+   - `L2=20%`, `L1=25%`, `L0=45%`, `Semantic=10%`
+   - if semantic retrieval is not requested, semantic budget is reallocated to `L0`
+   - explicit per-layer overrides are allowed per request via `LayerBudget`
+
+### Source Conversation Resynthesis Contract (PR-19)
+
+V2 supports backfilling turn/artifact surfaces from source conversation logs
+without depending on legacy v1 session projections.
+
+Required properties:
+
+1. Supported source providers:
+   - Claude JSONL
+   - Codex JSONL
+2. Source parsing must emit canonical lineage compatible with v2 runtime reads:
+   - `Turn -> Iteration -> ToolCall`
+3. Artifact derivation must produce deterministic results for:
+   - `annotation`
+   - `classification`
+   - `learning`
+   - optional `embedding`
+4. Embedding generation for resynthesis must support local deterministic mode
+   and must use turns-store vector dimensions when embeddings are enabled.
+5. Optional source-side todo snapshots may be folded into classification and
+   learning artifacts as supplemental context.
+6. Import runs must be repeat-safe for the same source session and must preserve
+   non-blocking v2 invariants (no turn completion dependency on enrichers).
 
 ## Canonical Runtime Pipeline
 

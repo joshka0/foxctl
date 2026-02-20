@@ -16,8 +16,14 @@ import (
 
 	"github.com/jkatigb/agentctl/cmd/agentctl/cmd/sessionscmd"
 	"github.com/jkatigb/agentctl/internal/platform/config"
+	providertodos "github.com/jkatigb/agentctl/internal/providers/claude/todos"
+	"github.com/jkatigb/agentctl/internal/sessionkit/claudejsonl"
+	"github.com/jkatigb/agentctl/internal/sessionkit/codexjsonl"
 	"github.com/jkatigb/agentctl/internal/storage"
 	"github.com/jkatigb/agentctl/internal/storage/sessions"
+	"github.com/jkatigb/agentctl/internal/todosync"
+	"github.com/jkatigb/agentctl/internal/v2/adapters/libsql/turns"
+	"github.com/jkatigb/agentctl/internal/v2/adapters/sourceimport"
 	"github.com/spf13/cobra"
 )
 
@@ -44,6 +50,7 @@ manually with:
 		newSessionsCaptureCommand(),
 		newSessionsSummarizeCommand(),
 		newSessionsImportCommand(),
+		newSessionsResynthesizeV2Command(),
 		newSessionsWindowsCommand(),
 		newSessionsExportCommand(),
 		// Lineage commands
@@ -435,6 +442,240 @@ Requires OPENROUTER_API_KEY or GEMINI_API_KEY for summarization and embeddings.`
 	cmd.Flags().BoolVar(&summarize, "summarize", true, "Generate LLM summary and embeddings after capture")
 	cmd.Flags().IntVar(&limit, "limit", 0, "Maximum sessions to import (0 = unlimited)")
 	cmd.Flags().StringVar(&projectFilter, "project", "", "Only import sessions from this project")
+	return cmd
+}
+
+func newSessionsResynthesizeV2Command() *cobra.Command {
+	var provider string
+	var sourceFile string
+	var sessionID string
+	var workspace string
+	var actorID string
+	var includeTodos bool
+	var includeEmbedding bool
+	var dryRun bool
+
+	cmd := &cobra.Command{
+		Use:   "resynthesize-v2",
+		Short: "Backfill source conversations into v2 turn/artifact stores",
+		Long: `Read source conversation logs (Claude/Codex JSONL) and resynthesize
+deterministic v2 turn/artifact records.
+
+This command writes directly to the v2 turns store (libsql/sqlite fallback) and
+does not require running the legacy v1 runtime path.`,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			return sessionscmd.WithConfig(cmd, func(ctx context.Context, cfg config.Config) error {
+				resolvedProvider := sourceimport.Provider(strings.ToLower(strings.TrimSpace(provider)))
+				if resolvedProvider == "" {
+					resolvedProvider = sourceimport.ProviderAuto
+				}
+				switch resolvedProvider {
+				case sourceimport.ProviderAuto, sourceimport.ProviderClaude, sourceimport.ProviderCodex:
+				default:
+					return sessionscmd.WriteArgError(
+						cmd.OutOrStdout(),
+						"agentctl.sessions.resynthesize_v2",
+						"--provider must be one of: auto, claude, codex",
+						"Set --provider to auto, claude, or codex.",
+					)
+				}
+
+				resolvedSourcePath := strings.TrimSpace(sourceFile)
+				resolvedSessionID := strings.TrimSpace(sessionID)
+				resolvedWorkspace := strings.TrimSpace(workspace)
+
+				if resolvedSourcePath != "" && resolvedProvider == sourceimport.ProviderAuto {
+					detected, err := sourceimport.DetectProviderFromFile(resolvedSourcePath)
+					if err != nil {
+						return err
+					}
+					resolvedProvider = detected
+				}
+
+				if resolvedSourcePath == "" {
+					switch resolvedProvider {
+					case sourceimport.ProviderClaude:
+						if resolvedSessionID == "" {
+							return sessionscmd.WriteArgError(
+								cmd.OutOrStdout(),
+								"agentctl.sessions.resynthesize_v2",
+								"--session-id is required for --provider claude when --source-file is unset",
+								"Pass --session-id or provide --source-file.",
+							)
+						}
+						resolvedSourcePath = claudejsonl.LocateSessionJSONL(resolvedWorkspace, resolvedSessionID)
+					case sourceimport.ProviderCodex:
+						if resolvedSessionID != "" {
+							resolvedSourcePath = codexjsonl.LocateSessionJSONL(resolvedSessionID)
+						} else {
+							path, sid := codexjsonl.LocateMostRecentSessionJSONL()
+							resolvedSourcePath = strings.TrimSpace(path)
+							if resolvedSessionID == "" {
+								resolvedSessionID = strings.TrimSpace(sid)
+							}
+						}
+					case sourceimport.ProviderAuto:
+						if resolvedSessionID != "" {
+							if path := claudejsonl.LocateSessionJSONL(resolvedWorkspace, resolvedSessionID); path != "" {
+								resolvedSourcePath = path
+								resolvedProvider = sourceimport.ProviderClaude
+							} else if path := codexjsonl.LocateSessionJSONL(resolvedSessionID); path != "" {
+								resolvedSourcePath = path
+								resolvedProvider = sourceimport.ProviderCodex
+							}
+						} else {
+							if path, sid := codexjsonl.LocateMostRecentSessionJSONL(); path != "" {
+								resolvedSourcePath = strings.TrimSpace(path)
+								resolvedProvider = sourceimport.ProviderCodex
+								resolvedSessionID = strings.TrimSpace(sid)
+							}
+						}
+					}
+				}
+
+				if strings.TrimSpace(resolvedSourcePath) == "" {
+					return sessionscmd.WriteArgError(
+						cmd.OutOrStdout(),
+						"agentctl.sessions.resynthesize_v2",
+						"source session JSONL could not be resolved",
+						"Pass --source-file directly, or provide --provider + --session-id.",
+					)
+				}
+
+				turnStore, err := turns.Open(ctx, cfg.Storage.Root)
+				if err != nil {
+					return fmt.Errorf("open v2 turns store: %w", err)
+				}
+				defer func() { _ = turnStore.Close() }()
+
+				var parsed sourceimport.ParsedSession
+				switch resolvedProvider {
+				case sourceimport.ProviderClaude:
+					parsed, err = sourceimport.ParseClaudeFile(
+						resolvedSourcePath,
+						resolvedSessionID,
+						resolvedWorkspace,
+						actorID,
+					)
+				case sourceimport.ProviderCodex:
+					parsed, err = sourceimport.ParseCodexFile(
+						resolvedSourcePath,
+						resolvedSessionID,
+						resolvedWorkspace,
+						actorID,
+					)
+				default:
+					return sessionscmd.WriteArgError(
+						cmd.OutOrStdout(),
+						"agentctl.sessions.resynthesize_v2",
+						"provider could not be resolved",
+						"Set --provider explicitly when auto-detection is ambiguous.",
+					)
+				}
+				if err != nil {
+					return err
+				}
+
+				var sourceTodos []todosync.ClaudeTodo
+				todoWarnings := []string{}
+				if includeTodos && parsed.Provider == sourceimport.ProviderClaude {
+					todoStore := providertodos.NewStore("")
+					todos, readErr := todoStore.Read(parsed.SessionID)
+					if readErr != nil {
+						todoWarnings = append(todoWarnings, fmt.Sprintf("todos: %v", readErr))
+					} else {
+						sourceTodos = append(sourceTodos, todos...)
+					}
+				}
+
+				build := sourceimport.BuildArtifacts(ctx, parsed, sourceimport.ArtifactBuildOptions{
+					IncludeEmbedding: includeEmbedding,
+					Embedder:         sourceimport.NewHashEmbedder(turnStore.VectorDimensions()),
+					Todos:            sourceTodos,
+				})
+
+				allWarnings := append([]string(nil), build.Warnings...)
+				allWarnings = append(allWarnings, todoWarnings...)
+
+				artifactTypeCounts := make(map[string]int, 4)
+				for _, artifact := range build.Artifacts {
+					artifactTypeCounts[artifact.ArtifactType]++
+				}
+
+				if dryRun {
+					payload := struct {
+						Provider      string                 `json:"provider"`
+						SessionID     string                 `json:"session_id"`
+						SourcePath    string                 `json:"source_path"`
+						Turns         int                    `json:"turns"`
+						Artifacts     int                    `json:"artifacts"`
+						ArtifactTypes map[string]int         `json:"artifact_types"`
+						TodoStats     sourceimport.TodoStats `json:"todo_stats"`
+						DryRun        bool                   `json:"dry_run"`
+						Warnings      []string               `json:"warnings,omitempty"`
+					}{
+						Provider:      string(parsed.Provider),
+						SessionID:     parsed.SessionID,
+						SourcePath:    parsed.SourcePath,
+						Turns:         len(parsed.Turns),
+						Artifacts:     len(build.Artifacts),
+						ArtifactTypes: artifactTypeCounts,
+						TodoStats:     build.TodoStats,
+						DryRun:        true,
+						Warnings:      allWarnings,
+					}
+					return sessionscmd.WriteOK(cmd.OutOrStdout(), "agentctl.sessions.resynthesize_v2", payload)
+				}
+
+				savedTurns := 0
+				for _, turn := range parsed.Turns {
+					if err := turnStore.SaveTurn(ctx, turn); err != nil {
+						return fmt.Errorf("save turn %s: %w", turn.ID, err)
+					}
+					savedTurns++
+				}
+
+				savedArtifacts := 0
+				for _, artifact := range build.Artifacts {
+					if err := turnStore.SaveArtifact(ctx, artifact); err != nil {
+						return fmt.Errorf("save artifact %s/%s/%s: %w",
+							artifact.TurnID, artifact.ArtifactType, artifact.ArtifactVersion, err)
+					}
+					savedArtifacts++
+				}
+
+				payload := struct {
+					Provider       string                 `json:"provider"`
+					SessionID      string                 `json:"session_id"`
+					SourcePath     string                 `json:"source_path"`
+					TurnsSaved     int                    `json:"turns_saved"`
+					ArtifactsSaved int                    `json:"artifacts_saved"`
+					ArtifactTypes  map[string]int         `json:"artifact_types"`
+					TodoStats      sourceimport.TodoStats `json:"todo_stats"`
+					Warnings       []string               `json:"warnings,omitempty"`
+				}{
+					Provider:       string(parsed.Provider),
+					SessionID:      parsed.SessionID,
+					SourcePath:     parsed.SourcePath,
+					TurnsSaved:     savedTurns,
+					ArtifactsSaved: savedArtifacts,
+					ArtifactTypes:  artifactTypeCounts,
+					TodoStats:      build.TodoStats,
+					Warnings:       allWarnings,
+				}
+				return sessionscmd.WriteOK(cmd.OutOrStdout(), "agentctl.sessions.resynthesize_v2", payload)
+			})
+		},
+	}
+
+	cmd.Flags().StringVar(&provider, "provider", "auto", "Source provider: auto, claude, codex")
+	cmd.Flags().StringVar(&sourceFile, "source-file", "", "Path to source session JSONL")
+	cmd.Flags().StringVar(&sessionID, "session-id", "", "Source session ID (for auto-locate)")
+	cmd.Flags().StringVar(&workspace, "workspace", "", "Workspace path hint (used by Claude locate)")
+	cmd.Flags().StringVar(&actorID, "actor-id", "actor:system:source-import", "Actor ID for synthesized turns")
+	cmd.Flags().BoolVar(&includeTodos, "include-todos", true, "Include Claude todo snapshot in synthesized artifacts")
+	cmd.Flags().BoolVar(&includeEmbedding, "include-embedding", true, "Emit deterministic embedding artifacts")
+	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Parse and synthesize without persisting")
 	return cmd
 }
 

@@ -532,6 +532,37 @@ Exit checks:
 
 **Definition of done**: turn lineage is durable, enrichment is asynchronous, and context references are deterministic.
 
+---
+
+### PR-10: Ask Shadow Validation Plumbing
+
+**Scope**: add deterministic shadow parity plumbing for `ask` so v2 behavior
+can be validated under real command flow while keeping v1 as the primary path.
+
+| File | Status |
+|------|--------|
+| `internal/v2/ports/router.go` | modified |
+| `internal/v2/ports/router_shadow_test.go` | new |
+| `cmd/agentctl/cmd/agent_ask_shadow.go` | new |
+| `cmd/agentctl/cmd/agent_ask_shadow_test.go` | new |
+
+**Key implementation points**:
+- Shadow runs are opt-in per command via `AGENTCTL_V2_SHADOW_COMMANDS`.
+- `ask` keeps v1 as primary unless promoted through `AGENTCTL_V2_COMMANDS`.
+- Parity observations emit deterministic fields: `command`,
+  `correlation_id`, `match`, `reason`, and `shadow_error`.
+- Shadow execution is bounded by timeout and never blocks primary response.
+
+**Tests** (5):
+1. `TestDispatchWithShadow_V1PrimaryRunsV2Shadow` — v1 primary with v2 shadow
+2. `TestDispatchWithShadow_DoesNotRunWhenCommandNotEnabled` — shadow allowlist
+3. `TestDispatchWithShadow_PrimaryV2SkipsShadow` — no duplicate run when v2 primary
+4. `TestEvaluateAskShadowParity_Match` — comparator parity success
+5. `TestEvaluateAskShadowParity_FieldMismatch` — mismatch reason reporting
+
+**Definition of done**: deterministic `ask` shadow parity reports are available
+without changing primary routing behavior.
+
 ## Testing Strategy
 
 ### Unit Tests
@@ -749,17 +780,90 @@ directly instead of relying only on chronological windows.
 
 Reference: `docs/spec/v2_greenfield_bootstrap.md` ("Artifact Semantic Retrieval Contract (Wave 3)" and "Context Builder Integration Contract (PR-17 Proposal)").
 
-#### Known Risk (Current)
+#### Native Vector CI Gate (Current)
 
-- CI currently validates fallback retrieval behavior, but does not yet run an
-  end-to-end native libsql vector-query execution path. This is tracked in
-  `docs/plans/v2-implementation-todo.md` as an open question.
+- CI now enforces an end-to-end native libsql vector-query execution path via
+  `TestTurnStore_SearchArtifactsByEmbedding_VectorPathLibSQL` in strict mode:
+  `AGENTCTL_V2_REQUIRE_NATIVE_VECTOR_SQL=1`.
+- The test still skips in local/dev environments without vector SQL support,
+  but hard-fails in CI when native vector capability is missing or downgraded.
 
-### Post-PR-17 Follow-Ons
+### PR-18 Focus: Vector Path Confidence + Retrieval Quality
 
-1. Define a core runtime retrieval interface for artifact semantic lookups.
-2. Integrate semantic artifact retrieval into v2 context builder assembly.
-3. Add retrieval observability counters/events:
-   - `artifact_search.vector_path`
-   - `artifact_search.fallback_path`
-   - result count and latency buckets
+PR-17 completed the core retrieval interface, context-builder integration, and
+path observability/tracing. PR-18 should focus on confidence and quality gates
+for production use of vector-backed retrieval.
+
+1. Add deterministic coverage for native libsql vector path execution
+   (`vector_distance_cos`) in a CI-friendly test setup.
+2. Expose explicit runtime capability status for retrieval path selection
+   (vector-enabled vs fallback-only) in observability output.
+3. Expand retrieval quality telemetry with path-scoped latency and hit-rate
+   buckets so degraded behavior is measurable.
+4. Codify fallback guardrails and rollout criteria:
+   - fallback is acceptable for continuity, but must be marked degraded when
+     vector capability is expected
+   - fallback-only runs must not break temporal/context assembly correctness
+
+#### PR-18 Measurable Rollout Gate (Must Pass)
+
+1. **Fallback correctness gate**
+   - Run fixed fallback-only context-builder regression corpus.
+   - Required threshold: **100% pass** on required invariants:
+     - deterministic ordering
+     - stable refs
+     - required temporal blocks present
+2. **Vector/fallback parity gate**
+   - On corpus cases with vector capability available, compare top-K semantic refs.
+   - Required threshold: **>= 90% overlap@10** between vector and fallback sets.
+3. **Runtime degradation gate**
+   - If vector capability is advertised, fallback path use is degraded mode and
+     must be visible in telemetry.
+   - Required threshold for promotion: fallback path ratio **<= 5%** over a
+     rolling 24-hour window for retrieval-dependent commands.
+
+#### Artifact Vector Policy (Implemented)
+
+1. Embeddings are dual-written in artifact rows:
+   - native vector column (`embedding`, `F32_BLOB(N)`)
+   - portable JSON column (`embedding_json`) for fallback cosine
+2. Vector mode enforces dimension consistency for write/query operations.
+3. Native vector retrieval path uses index-assisted candidate selection
+   (`vector_top_k` on `idx_v2_turn_artifacts_embedding_vec`) with deterministic
+   rerank and stable tie-break ordering.
+4. If vector primitives are unavailable, retrieval degrades to fallback mode and
+   emits path/capability telemetry.
+
+#### Layered Budget Policy (Implemented)
+
+1. Layered context assembly resolves one total cap and deterministic defaults:
+   - `L2=20%`, `L1=25%`, `L0=45%`, `Semantic=10%`
+2. When semantic retrieval is not requested, semantic budget is reassigned to `L0`.
+3. Per-request overrides are supported via `LayerBudget` for command-level tuning.
+4. Final rendered content remains globally bounded by the resolved total cap.
+
+### PR-19: Source Conversation Resynthesis (Implemented)
+
+PR-19 adds a deterministic backfill path that ingests source conversation logs
+(Claude/Codex JSONL) and writes canonical v2 turns/artifacts directly into v2
+storage.
+
+#### Scope
+
+1. Parse source logs into canonical lineage (`Turn -> Iteration -> ToolCall`).
+2. Derive deterministic artifacts (`annotation`, `classification`, `learning`,
+   optional `embedding`) from imported turns.
+3. Add CLI entrypoint `agentctl sessions resynthesize-v2` with provider/source
+   resolution and dry-run mode.
+4. Include optional Claude todo snapshots as classification/learning context.
+
+#### Acceptance Criteria
+
+1. Source imports are deterministic and idempotent for repeated runs on the same
+   source session.
+2. Artifact derivation does not require network calls and supports local-only
+   deterministic embedding.
+3. Embedding dimensions follow v2 turns-store configuration to avoid
+   vector-dimension mismatch when non-default dimensions are configured.
+4. Failures in source parsing are explicit and do not mutate partially parsed
+   lineage records.

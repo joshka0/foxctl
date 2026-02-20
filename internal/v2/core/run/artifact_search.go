@@ -15,6 +15,16 @@ const (
 	ArtifactSearchPathError    ArtifactSearchPath = "error"
 )
 
+// ArtifactVectorCapability indicates whether native vector search is currently
+// available for the retriever at runtime.
+type ArtifactVectorCapability string
+
+const (
+	ArtifactVectorCapabilityEnabled  ArtifactVectorCapability = "enabled"
+	ArtifactVectorCapabilityDisabled ArtifactVectorCapability = "disabled"
+	ArtifactVectorCapabilityUnknown  ArtifactVectorCapability = "unknown"
+)
+
 // ArtifactSearchOptions controls semantic artifact retrieval.
 type ArtifactSearchOptions struct {
 	SessionID     string
@@ -46,8 +56,9 @@ func (a ScoredArtifact) Clone() ScoredArtifact {
 
 // ArtifactSearchResult is the semantic retrieval result set plus path metadata.
 type ArtifactSearchResult struct {
-	Hits       []ScoredArtifact   `json:"hits,omitempty"`
-	SearchPath ArtifactSearchPath `json:"search_path,omitempty"`
+	Hits             []ScoredArtifact         `json:"hits,omitempty"`
+	SearchPath       ArtifactSearchPath       `json:"search_path,omitempty"`
+	VectorCapability ArtifactVectorCapability `json:"vector_capability,omitempty"`
 }
 
 // ArtifactSemanticRetriever searches persisted turn artifacts by semantic embedding.

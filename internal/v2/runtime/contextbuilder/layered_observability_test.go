@@ -21,7 +21,8 @@ func TestContextBuilder_BuildLayered_SemanticEmitsWideEvent(t *testing.T) {
 	builder := newObsBuilder("run-layered-obs")
 	builder.SetArtifactRetriever(&fakeArtifactRetriever{
 		result: run.ArtifactSearchResult{
-			SearchPath: run.ArtifactSearchPathVector,
+			SearchPath:       run.ArtifactSearchPathVector,
+			VectorCapability: run.ArtifactVectorCapabilityEnabled,
 			Hits: []run.ScoredArtifact{
 				{
 					Ref:             "turn/turn-obs-1/artifact/embedding/v1",
@@ -71,8 +72,17 @@ func TestContextBuilder_BuildLayered_SemanticEmitsWideEvent(t *testing.T) {
 	if evt.Data["search_path"] != string(run.ArtifactSearchPathVector) {
 		t.Fatalf("data.search_path=%v want %q", evt.Data["search_path"], run.ArtifactSearchPathVector)
 	}
+	if evt.Data["vector_capability"] != string(run.ArtifactVectorCapabilityEnabled) {
+		t.Fatalf("data.vector_capability=%v want %q", evt.Data["vector_capability"], run.ArtifactVectorCapabilityEnabled)
+	}
 	if got, ok := evt.Data["hit_count"].(float64); !ok || int(got) != 1 {
 		t.Fatalf("data.hit_count=%v want 1", evt.Data["hit_count"])
+	}
+	if evt.Data["hit_bucket"] != "one_to_three" {
+		t.Fatalf("data.hit_bucket=%v want one_to_three", evt.Data["hit_bucket"])
+	}
+	if _, ok := evt.Data["latency_bucket"].(string); !ok {
+		t.Fatalf("data.latency_bucket missing/invalid: %v", evt.Data["latency_bucket"])
 	}
 	if evt.Data["session_id"] != "run-layered-obs" {
 		t.Fatalf("data.session_id=%v want run-layered-obs", evt.Data["session_id"])
@@ -106,6 +116,9 @@ func TestContextBuilder_BuildLayered_SemanticErrorEmitsWideEvent(t *testing.T) {
 	}
 	if evt.Data["search_path"] != string(run.ArtifactSearchPathError) {
 		t.Fatalf("data.search_path=%v want %q", evt.Data["search_path"], run.ArtifactSearchPathError)
+	}
+	if evt.Data["vector_capability"] != string(run.ArtifactVectorCapabilityUnknown) {
+		t.Fatalf("data.vector_capability=%v want %q", evt.Data["vector_capability"], run.ArtifactVectorCapabilityUnknown)
 	}
 	if got, ok := evt.Data["hit_count"].(float64); !ok || int(got) != 0 {
 		t.Fatalf("data.hit_count=%v want 0", evt.Data["hit_count"])
@@ -144,8 +157,14 @@ func TestContextBuilder_BuildLayered_SemanticDisabledEmitsWideEvent(t *testing.T
 	if evt.Data["search_path"] != string(run.ArtifactSearchPathDisabled) {
 		t.Fatalf("data.search_path=%v want %q", evt.Data["search_path"], run.ArtifactSearchPathDisabled)
 	}
+	if evt.Data["vector_capability"] != string(run.ArtifactVectorCapabilityDisabled) {
+		t.Fatalf("data.vector_capability=%v want %q", evt.Data["vector_capability"], run.ArtifactVectorCapabilityDisabled)
+	}
 	if got, ok := evt.Data["hit_count"].(float64); !ok || int(got) != 0 {
 		t.Fatalf("data.hit_count=%v want 0", evt.Data["hit_count"])
+	}
+	if evt.Data["hit_bucket"] != "zero" {
+		t.Fatalf("data.hit_bucket=%v want zero", evt.Data["hit_bucket"])
 	}
 }
 

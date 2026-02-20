@@ -96,6 +96,27 @@ type Builder struct {
 	artifactSearchTotalHits    atomic.Int64
 	artifactSearchVectorHits   atomic.Int64
 	artifactSearchFallbackHits atomic.Int64
+	artifactSearchCapEnabled   atomic.Int64
+	artifactSearchCapDisabled  atomic.Int64
+	artifactSearchCapUnknown   atomic.Int64
+
+	artifactVectorLatencyLE10MS    atomic.Int64
+	artifactVectorLatencyLE50MS    atomic.Int64
+	artifactVectorLatencyLE100MS   atomic.Int64
+	artifactVectorLatencyGT100MS   atomic.Int64
+	artifactFallbackLatencyLE10MS  atomic.Int64
+	artifactFallbackLatencyLE50MS  atomic.Int64
+	artifactFallbackLatencyLE100MS atomic.Int64
+	artifactFallbackLatencyGT100MS atomic.Int64
+
+	artifactVectorHitsZero       atomic.Int64
+	artifactVectorHitsOneTo3     atomic.Int64
+	artifactVectorHitsFourTo10   atomic.Int64
+	artifactVectorHitsGT10       atomic.Int64
+	artifactFallbackHitsZero     atomic.Int64
+	artifactFallbackHitsOneTo3   atomic.Int64
+	artifactFallbackHitsFourTo10 atomic.Int64
+	artifactFallbackHitsGT10     atomic.Int64
 }
 
 // ArtifactSearchStats is a point-in-time snapshot of semantic retrieval counters.
@@ -109,6 +130,28 @@ type ArtifactSearchStats struct {
 	TotalHits    int64 `json:"total_hits"`
 	VectorHits   int64 `json:"vector_hits"`
 	FallbackHits int64 `json:"fallback_hits"`
+
+	VectorCapabilityEnabledCalls  int64 `json:"vector_capability_enabled_calls"`
+	VectorCapabilityDisabledCalls int64 `json:"vector_capability_disabled_calls"`
+	VectorCapabilityUnknownCalls  int64 `json:"vector_capability_unknown_calls"`
+
+	VectorLatencyLE10MS    int64 `json:"vector_latency_le_10ms"`
+	VectorLatencyLE50MS    int64 `json:"vector_latency_le_50ms"`
+	VectorLatencyLE100MS   int64 `json:"vector_latency_le_100ms"`
+	VectorLatencyGT100MS   int64 `json:"vector_latency_gt_100ms"`
+	FallbackLatencyLE10MS  int64 `json:"fallback_latency_le_10ms"`
+	FallbackLatencyLE50MS  int64 `json:"fallback_latency_le_50ms"`
+	FallbackLatencyLE100MS int64 `json:"fallback_latency_le_100ms"`
+	FallbackLatencyGT100MS int64 `json:"fallback_latency_gt_100ms"`
+
+	VectorHitBucketZero       int64 `json:"vector_hit_bucket_zero"`
+	VectorHitBucketOneTo3     int64 `json:"vector_hit_bucket_one_to_three"`
+	VectorHitBucketFourTo10   int64 `json:"vector_hit_bucket_four_to_ten"`
+	VectorHitBucketGT10       int64 `json:"vector_hit_bucket_gt_ten"`
+	FallbackHitBucketZero     int64 `json:"fallback_hit_bucket_zero"`
+	FallbackHitBucketOneTo3   int64 `json:"fallback_hit_bucket_one_to_three"`
+	FallbackHitBucketFourTo10 int64 `json:"fallback_hit_bucket_four_to_ten"`
+	FallbackHitBucketGT10     int64 `json:"fallback_hit_bucket_gt_ten"`
 }
 
 // New creates a context builder.
@@ -122,18 +165,37 @@ func (b *Builder) ArtifactStats() ArtifactSearchStats {
 		return ArtifactSearchStats{}
 	}
 	return ArtifactSearchStats{
-		TotalCalls:    b.artifactSearchTotal.Load(),
-		VectorCalls:   b.artifactSearchVector.Load(),
-		FallbackCalls: b.artifactSearchFallback.Load(),
-		DisabledCalls: b.artifactSearchDisabled.Load(),
-		ErrorCalls:    b.artifactSearchError.Load(),
-		TotalHits:     b.artifactSearchTotalHits.Load(),
-		VectorHits:    b.artifactSearchVectorHits.Load(),
-		FallbackHits:  b.artifactSearchFallbackHits.Load(),
+		TotalCalls:                    b.artifactSearchTotal.Load(),
+		VectorCalls:                   b.artifactSearchVector.Load(),
+		FallbackCalls:                 b.artifactSearchFallback.Load(),
+		DisabledCalls:                 b.artifactSearchDisabled.Load(),
+		ErrorCalls:                    b.artifactSearchError.Load(),
+		TotalHits:                     b.artifactSearchTotalHits.Load(),
+		VectorHits:                    b.artifactSearchVectorHits.Load(),
+		FallbackHits:                  b.artifactSearchFallbackHits.Load(),
+		VectorCapabilityEnabledCalls:  b.artifactSearchCapEnabled.Load(),
+		VectorCapabilityDisabledCalls: b.artifactSearchCapDisabled.Load(),
+		VectorCapabilityUnknownCalls:  b.artifactSearchCapUnknown.Load(),
+		VectorLatencyLE10MS:           b.artifactVectorLatencyLE10MS.Load(),
+		VectorLatencyLE50MS:           b.artifactVectorLatencyLE50MS.Load(),
+		VectorLatencyLE100MS:          b.artifactVectorLatencyLE100MS.Load(),
+		VectorLatencyGT100MS:          b.artifactVectorLatencyGT100MS.Load(),
+		FallbackLatencyLE10MS:         b.artifactFallbackLatencyLE10MS.Load(),
+		FallbackLatencyLE50MS:         b.artifactFallbackLatencyLE50MS.Load(),
+		FallbackLatencyLE100MS:        b.artifactFallbackLatencyLE100MS.Load(),
+		FallbackLatencyGT100MS:        b.artifactFallbackLatencyGT100MS.Load(),
+		VectorHitBucketZero:           b.artifactVectorHitsZero.Load(),
+		VectorHitBucketOneTo3:         b.artifactVectorHitsOneTo3.Load(),
+		VectorHitBucketFourTo10:       b.artifactVectorHitsFourTo10.Load(),
+		VectorHitBucketGT10:           b.artifactVectorHitsGT10.Load(),
+		FallbackHitBucketZero:         b.artifactFallbackHitsZero.Load(),
+		FallbackHitBucketOneTo3:       b.artifactFallbackHitsOneTo3.Load(),
+		FallbackHitBucketFourTo10:     b.artifactFallbackHitsFourTo10.Load(),
+		FallbackHitBucketGT10:         b.artifactFallbackHitsGT10.Load(),
 	}
 }
 
-func (b *Builder) recordArtifactSearch(path run.ArtifactSearchPath, hits int) {
+func (b *Builder) recordArtifactSearch(path run.ArtifactSearchPath, capability run.ArtifactVectorCapability, hits int, duration time.Duration) {
 	if b == nil {
 		return
 	}
@@ -142,6 +204,14 @@ func (b *Builder) recordArtifactSearch(path run.ArtifactSearchPath, hits int) {
 	if hits > 0 {
 		b.artifactSearchTotalHits.Add(int64(hits))
 	}
+	switch capability {
+	case run.ArtifactVectorCapabilityEnabled:
+		b.artifactSearchCapEnabled.Add(1)
+	case run.ArtifactVectorCapabilityDisabled:
+		b.artifactSearchCapDisabled.Add(1)
+	default:
+		b.artifactSearchCapUnknown.Add(1)
+	}
 
 	switch path {
 	case run.ArtifactSearchPathVector:
@@ -149,15 +219,77 @@ func (b *Builder) recordArtifactSearch(path run.ArtifactSearchPath, hits int) {
 		if hits > 0 {
 			b.artifactSearchVectorHits.Add(int64(hits))
 		}
+		recordLatencyBucket(duration,
+			&b.artifactVectorLatencyLE10MS,
+			&b.artifactVectorLatencyLE50MS,
+			&b.artifactVectorLatencyLE100MS,
+			&b.artifactVectorLatencyGT100MS,
+		)
+		recordHitBucket(hits,
+			&b.artifactVectorHitsZero,
+			&b.artifactVectorHitsOneTo3,
+			&b.artifactVectorHitsFourTo10,
+			&b.artifactVectorHitsGT10,
+		)
 	case run.ArtifactSearchPathFallback:
 		b.artifactSearchFallback.Add(1)
 		if hits > 0 {
 			b.artifactSearchFallbackHits.Add(int64(hits))
 		}
+		recordLatencyBucket(duration,
+			&b.artifactFallbackLatencyLE10MS,
+			&b.artifactFallbackLatencyLE50MS,
+			&b.artifactFallbackLatencyLE100MS,
+			&b.artifactFallbackLatencyGT100MS,
+		)
+		recordHitBucket(hits,
+			&b.artifactFallbackHitsZero,
+			&b.artifactFallbackHitsOneTo3,
+			&b.artifactFallbackHitsFourTo10,
+			&b.artifactFallbackHitsGT10,
+		)
 	case run.ArtifactSearchPathError:
 		b.artifactSearchError.Add(1)
 	default:
 		b.artifactSearchDisabled.Add(1)
+	}
+}
+
+func recordLatencyBucket(
+	duration time.Duration,
+	le10ms *atomic.Int64,
+	le50ms *atomic.Int64,
+	le100ms *atomic.Int64,
+	gt100ms *atomic.Int64,
+) {
+	switch {
+	case duration <= 10*time.Millisecond:
+		le10ms.Add(1)
+	case duration <= 50*time.Millisecond:
+		le50ms.Add(1)
+	case duration <= 100*time.Millisecond:
+		le100ms.Add(1)
+	default:
+		gt100ms.Add(1)
+	}
+}
+
+func recordHitBucket(
+	hits int,
+	zero *atomic.Int64,
+	oneTo3 *atomic.Int64,
+	fourTo10 *atomic.Int64,
+	gt10 *atomic.Int64,
+) {
+	switch {
+	case hits <= 0:
+		zero.Add(1)
+	case hits <= 3:
+		oneTo3.Add(1)
+	case hits <= 10:
+		fourTo10.Add(1)
+	default:
+		gt10.Add(1)
 	}
 }
 
