@@ -49,7 +49,7 @@ type SemanticRolloutGateInput struct {
 	Cases                    []SemanticValidationCase `json:"cases,omitempty"`
 	Stats                    ArtifactSearchStats      `json:"stats"`
 	VectorCapabilityExpected bool                     `json:"vector_capability_expected"`
-	Thresholds               SemanticRolloutGateThresholds
+	Thresholds               SemanticRolloutGateThresholds `json:"thresholds,omitempty"`
 }
 
 // SemanticRolloutGateChecks indicates pass/fail per rollout condition.
