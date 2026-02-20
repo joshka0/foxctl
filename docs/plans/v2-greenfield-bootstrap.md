@@ -31,9 +31,9 @@ The current v1 agentctl runtime has accumulated dual tool systems (Registry for 
 
 ## Architecture Decision
 
-**Approach**: Strangler Fig pattern — v2 lives in `internal/v2/` alongside v1. A per-command feature flag (`AGENTCTL_V2_COMMANDS=spawn,ask,run,list,kill`) routes specific commands to v2 while v1 remains the default behavior.
+**Approach**: Strangler Fig pattern — v2 lives in `internal/v2/` alongside v1. Command routing is now v2-primary by default for `spawn,ask,run,list,kill` (`AGENTCTL_V2_COMMANDS` unset/empty), with explicit fallback control via `AGENTCTL_V2_COMMANDS=none` (all v1) or a scoped allowlist.
 
-**Why**: Allows incremental migration with low risk to v1 stability. Each command can be validated independently before cutting over. Rollback is trivial (remove command from flag).
+**Why**: Allows incremental migration with low risk to v1 stability. Each command can be validated independently before cutting over. Rollback remains trivial (`AGENTCTL_V2_COMMANDS=none` or scoped command list).
 
 **Safety model**: No command-level `--dry-run` gate is required for v2 rollout. Safety comes from per-command feature flags, idempotency keys (`request_id`), append-only events, and scoped rollback.
 
@@ -55,7 +55,7 @@ core imports no adapters
 ### V2 Scope Guardrails
 
 - All behaviors in this plan apply to `internal/v2/*` paths.
-- v1 command behavior does not change unless that command is listed in `AGENTCTL_V2_COMMANDS`.
+- v2 command routing is default-on for supported command surfaces; v1 fallback remains available via `AGENTCTL_V2_COMMANDS=none` or scoped routing lists.
 - Non-blocking/background guarantees in this plan are acceptance criteria for v2-routed commands only.
 
 ## Design Patterns
@@ -69,7 +69,7 @@ core imports no adapters
 | Supervisor | `internal/v2/runtime/supervisor/*` | Standard `Run(ctx)` lifecycle for background components |
 | Single Writer | `internal/v2/runtime/*` state loops | Clear ownership of mutable state, fewer race conditions |
 | Snapshot Cache | `internal/v2/runtime/snapshots/*` | Lock-light reads for hot paths and status surfaces |
-| Strangler Fig | `internal/v2/ports/{cli,api,daemon}` + command flag gate | Incremental migration with per-command opt-in |
+| Strangler Fig | `internal/v2/ports/{cli,api,daemon}` + command flag gate | Incremental migration with v2-primary defaults and explicit v1 fallback |
 
 ## Error Contract
 
@@ -409,7 +409,7 @@ Exit checks:
 
 ### PR-06: V2 Ports + Feature-Flagged Strangler Routing
 
-**Scope**: Wire CLI/API/daemon to service layer, per-command opt-in, v1 default.
+**Scope**: Wire CLI/API/daemon to service layer with command-gated routing and rollback-safe fallback.
 
 | File | Status |
 |------|--------|
@@ -430,8 +430,8 @@ Exit checks:
 | `internal/agent/runtime/runtime.go` | modified |
 
 **Key implementation points**:
-- Parse `AGENTCTL_V2_COMMANDS` and route only matching commands to v2
-- All unmatched commands route to existing v1 handlers unchanged
+- Parse `AGENTCTL_V2_COMMANDS` and apply command-gated v2 routing (v2-primary default semantics were finalized in PR-20)
+- Explicit fallback mode (`AGENTCTL_V2_COMMANDS=none`) routes all supported commands through v1 handlers
 - Keep v1 execution logic untouched; PR-06 changes are routing and wiring only
 - Inject observability fields on every dispatch (`command`, `decision=v1|v2`, `correlation`)
 - Maintain API payload compatibility unless v2 adds extras
@@ -444,7 +444,7 @@ Exit checks:
 5. `TestKillCommandRollbackToV1WhenNotEnabled` — per-command opt-out behavior
 6. `TestRouter_EnvelopeContract_ParityV1V2` — verifies `version`, `status`, `meta.ts`, and `error` contract parity
 
-**Definition of done**: Side-by-side run capability (v1 default, v2 opt-in), smoke tests for spawn/list/ask/kill pass, and disabled commands preserve v1 behavior.
+**Definition of done**: Side-by-side run capability with explicit rollback controls, smoke tests for spawn/list/ask/kill pass, and fallback mode preserves v1 behavior.
 
 ---
 
@@ -548,7 +548,7 @@ can be validated under real command flow while keeping v1 as the primary path.
 
 **Key implementation points**:
 - Shadow runs are opt-in per command via `AGENTCTL_V2_SHADOW_COMMANDS`.
-- `ask` keeps v1 as primary unless promoted through `AGENTCTL_V2_COMMANDS`.
+- `ask` participates in v2-primary routing by default; v1-primary shadow validation remains available by setting `AGENTCTL_V2_COMMANDS=none` during parity runs.
 - Parity observations emit deterministic fields: `command`,
   `correlation_id`, `match`, `reason`, and `shadow_error`.
 - Shadow execution is bounded by timeout and never blocks primary response.
@@ -586,7 +586,7 @@ without changing primary routing behavior.
 ## Migration Notes (Strangler Strategy)
 
 ### A) Rollback Procedure
-1. Remove command from `AGENTCTL_V2_COMMANDS` (scoped rollback) or set empty (full rollback)
+1. Set `AGENTCTL_V2_COMMANDS=none` (full rollback) or use a scoped command list to roll back selected commands
 2. Restart service boundaries (CLI wrapper, web API, daemon)
 3. Verify v2 event producers/consumers are quiescent for that command
 4. v2 writes are isolated — v1 path resumes without schema rollback
@@ -628,7 +628,7 @@ without changing primary routing behavior.
 
 Note: PR-10 is a transitional Wave 1 -> Wave 2 slice focused on shadow parity plumbing for `ask`; detailed rollout/expansion behavior is captured in the Wave 2 sections below.
 
-Each PR is independently testable. PRs 1-5 have no v1 business-logic changes. PR-06 wires routing with opt-in flag and minimal touch points in existing command dispatch files. PRs 7-8 add Go-native control-plane capabilities without coupling them to the turn execution critical path. PR-09 adds turn lineage and derived context intelligence without introducing a second execution path. PR-10 establishes shadow validation plumbing for parity verification before Wave 2 cutover.
+Each PR is independently testable. PRs 1-5 have no v1 business-logic changes. PR-06 wires routing flags and minimal touch points in existing command dispatch files (with v2-primary defaults finalized later in PR-20). PRs 7-8 add Go-native control-plane capabilities without coupling them to the turn execution critical path. PR-09 adds turn lineage and derived context intelligence without introducing a second execution path. PR-10 establishes shadow validation plumbing for parity verification before Wave 2 cutover.
 
 ## Wave 2: Productionization + Dynamic Context (V2-Only)
 
@@ -638,7 +638,7 @@ reduces dependence on a single large prompt window.
 
 ### Wave 2 Goals
 
-1. Route live command paths through v2 services/ports (without breaking v1 fallback).
+1. Keep live command paths v2-primary while preserving explicit v1 fallback controls.
 2. Persist turn/iteration/tool-call intelligence in a libsql-first model, including
    retrieval-friendly artifact metadata.
 3. Feed an asynchronous event pipeline for enrichment, annotation, and context materialization.
@@ -649,9 +649,8 @@ reduces dependence on a single large prompt window.
 ### Areas That Need Consideration and Fleshing Out
 
 1. **Live routing integration**
-   - Ensure CLI/API/daemon entrypoints actually dispatch to `internal/v2/ports/*`
-     when `AGENTCTL_V2_COMMANDS` is enabled.
-   - Keep rollback one-step (`unset`/remove command from flag) with no schema rollback.
+   - Ensure CLI/API/daemon entrypoints dispatch to `internal/v2/ports/*` by default.
+   - Keep rollback one-step (`AGENTCTL_V2_COMMANDS=none` or scoped list) with no schema rollback.
 2. **Turn persistence and retrieval**
    - Add concrete `TurnRecorder` and `TurnReader` adapters backed by libsql.
    - Persist iteration/tool-call detail and reference slices to support partial recall.

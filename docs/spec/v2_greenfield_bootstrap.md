@@ -2,7 +2,7 @@
 
 Status: Draft  
 Owner: Solo maintainer  
-Last Updated: 2026-02-18
+Last Updated: 2026-02-20
 
 ## Purpose
 
@@ -18,8 +18,9 @@ Define a practical bootstrap sequence for a clean v2 runtime with:
 ## Version Boundary
 
 This spec is `v2`-only and maps to `internal/v2/*`.
-v1 behavior remains unchanged unless a command is explicitly routed through
-`AGENTCTL_V2_COMMANDS`.
+Supported command surfaces (`spawn`, `ask`, `run`, `list`, `kill`) are v2-primary
+by default when `AGENTCTL_V2_COMMANDS` is unset/empty. v1 fallback remains
+available via `AGENTCTL_V2_COMMANDS=none` or scoped command lists.
 
 ## Related Docs
 
@@ -509,12 +510,12 @@ Definition of done:
 Deliverables:
 
 - `ports/cli`, `ports/api`, `ports/daemon` adapters for v2 services
-- per-command feature flag (`AGENTCTL_V2_COMMANDS=spawn,ask,run,list,kill`) for routing
-- migration shim that keeps v1 default
+- per-command routing flag (`AGENTCTL_V2_COMMANDS`) with v2-primary defaults and explicit v1 fallback (`none`)
+- migration shim that preserves rollback-safe v1 routing paths
 
 Definition of done:
 
-- side-by-side run capability (v1 default, v2 opt-in)
+- side-by-side run capability (v2 default, explicit v1 fallback)
 - smoke tests for spawn/list/ask/kill
 - envelope parity tests verify `version`, `status`, `meta.ts`, and `error` compatibility across v1/v2 routes
 
@@ -562,8 +563,8 @@ Definition of done:
 
 ## Migration Strategy (Strangler Pattern)
 
-1. Keep v1 as the default behavior.
-2. Route specific commands to v2 behind explicit feature flag.
+1. Keep v2 as the default behavior for supported command surfaces.
+2. Use `AGENTCTL_V2_COMMANDS` for scoped routing overrides and rollback control.
 3. Migrate one command surface at a time (`spawn` -> `ask` -> `run`).
 4. Keep v1 business logic untouched while introducing v2 routing/wiring changes.
 5. Remove v1 duplicated paths only after parity tests are stable.
@@ -571,7 +572,7 @@ Definition of done:
 
 Rollback model:
 
-- remove command(s) from `AGENTCTL_V2_COMMANDS`
+- set `AGENTCTL_V2_COMMANDS=none` (global v1 fallback) or scoped command list
 - restart relevant boundary process (CLI/API/daemon)
 - confirm v2 event writers are quiescent for that command
 

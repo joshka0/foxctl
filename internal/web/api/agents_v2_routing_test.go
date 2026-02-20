@@ -27,7 +27,7 @@ func TestAgentDetailHandler_SpawnRoutesByFlag(t *testing.T) {
 
 	handler := AgentDetailHandler(config.Config{}, zerolog.Nop())
 
-	t.Setenv("AGENTCTL_V2_COMMANDS", "")
+	t.Setenv("AGENTCTL_V2_COMMANDS", "none")
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/agents/spawn", strings.NewReader(`{}`))
 	handler.ServeHTTP(rec, req)
@@ -42,6 +42,15 @@ func TestAgentDetailHandler_SpawnRoutesByFlag(t *testing.T) {
 	handler.ServeHTTP(rec, req)
 	if v1Calls != 0 || v2Calls != 1 {
 		t.Fatalf("v1/v2 calls = %d/%d, want 0/1", v1Calls, v2Calls)
+	}
+
+	v1Calls, v2Calls = 0, 0
+	t.Setenv("AGENTCTL_V2_COMMANDS", "")
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodPost, "/api/agents/spawn", strings.NewReader(`{}`))
+	handler.ServeHTTP(rec, req)
+	if v1Calls != 0 || v2Calls != 1 {
+		t.Fatalf("default-env v1/v2 calls = %d/%d, want 0/1", v1Calls, v2Calls)
 	}
 }
 
@@ -71,7 +80,7 @@ func TestAgentDetailHandler_DaemonRoutesByFlag(t *testing.T) {
 
 	handler := AgentDetailHandler(config.Config{}, zerolog.Nop())
 
-	t.Setenv("AGENTCTL_V2_COMMANDS", "")
+	t.Setenv("AGENTCTL_V2_COMMANDS", "none")
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/agents/a1/daemon/start", nil)
 	handler.ServeHTTP(rec, req)
@@ -140,7 +149,7 @@ func TestDispatchAgentAPICommand_InvalidEnvFallsBackToV1(t *testing.T) {
 }
 
 func TestDispatchAgentAPICommand_ShadowRunsForNonMutatingCommand(t *testing.T) {
-	t.Setenv("AGENTCTL_V2_COMMANDS", "")
+	t.Setenv("AGENTCTL_V2_COMMANDS", "none")
 	t.Setenv("AGENTCTL_V2_SHADOW_COMMANDS", "list")
 	t.Setenv("AGENTCTL_V2_SHADOW_MUTATING", "")
 
@@ -177,7 +186,7 @@ func TestDispatchAgentAPICommand_ShadowRunsForNonMutatingCommand(t *testing.T) {
 }
 
 func TestDispatchAgentAPICommand_ShadowMutatingRequiresOptIn(t *testing.T) {
-	t.Setenv("AGENTCTL_V2_COMMANDS", "")
+	t.Setenv("AGENTCTL_V2_COMMANDS", "none")
 	t.Setenv("AGENTCTL_V2_SHADOW_COMMANDS", "kill")
 	t.Setenv("AGENTCTL_V2_SHADOW_MUTATING", "")
 
@@ -226,7 +235,7 @@ func TestDispatchAgentAPICommand_ShadowMutatingRequiresOptIn(t *testing.T) {
 }
 
 func TestDispatchAgentAPICommand_FreezeBlocksV1Path(t *testing.T) {
-	t.Setenv("AGENTCTL_V2_COMMANDS", "")
+	t.Setenv("AGENTCTL_V2_COMMANDS", "none")
 	t.Setenv("AGENTCTL_V2_FREEZE_V1_COMMANDS", "list")
 
 	var v1Calls, v2Calls atomic.Int32

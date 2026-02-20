@@ -69,6 +69,24 @@ Conversation history is retained on session state and reused across daemon turns
 
 Provider/model are configured at spawn time (for example `--llm-provider` and `--llm-model`) and/or via environment configuration. Keep API keys in env vars or secure secret mounts, not inline prompt text.
 
+## V2 Routing Controls
+
+Supported agent command surfaces (`spawn`, `ask`, `run`, `list`, `kill`) route
+to v2 by default when `AGENTCTL_V2_COMMANDS` is unset/empty.
+
+Use these controls when you need rollout overrides:
+
+```bash
+# Global v1 fallback
+export AGENTCTL_V2_COMMANDS=none
+
+# Scoped routing override
+export AGENTCTL_V2_COMMANDS=spawn,ask
+
+# Optional shadow parity sampling (non-mutating by default)
+export AGENTCTL_V2_SHADOW_COMMANDS=ask,list
+```
+
 ## Code References
 
 | Component | Location |

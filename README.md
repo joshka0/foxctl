@@ -154,6 +154,22 @@ agentctl agent kill <agent-id>
 
 See `docs/general/agent-daemon.md` for engine routing and execution modes.
 
+### V2 Routing Flags
+
+Agent command routing defaults to v2 for supported commands (`spawn`, `ask`,
+`run`, `list`, `kill`) when `AGENTCTL_V2_COMMANDS` is unset/empty.
+
+```bash
+# Default behavior (unset/empty): v2-primary routing for supported commands
+unset AGENTCTL_V2_COMMANDS
+
+# Global fallback to v1 handlers
+export AGENTCTL_V2_COMMANDS=none
+
+# Scoped routing override
+export AGENTCTL_V2_COMMANDS=spawn,ask
+```
+
 ---
 
 ## Quick Start

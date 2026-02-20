@@ -17,6 +17,18 @@ func TestParseV2Commands_DefaultOff(t *testing.T) {
 	}
 }
 
+func TestParseV2Commands_ExplicitNone(t *testing.T) {
+	t.Parallel()
+
+	flags, err := ParseV2Commands("none")
+	if err != nil {
+		t.Fatalf("ParseV2Commands returned error: %v", err)
+	}
+	if !flags.Empty() {
+		t.Fatalf("expected no enabled commands for none, got %v", flags.Commands())
+	}
+}
+
 func TestParseV2Commands_CommandSetNormalization(t *testing.T) {
 	t.Parallel()
 
@@ -53,6 +65,32 @@ func TestParseV2CommandsFromEnv(t *testing.T) {
 	}
 	if !flags.Enabled("spawn") || !flags.Enabled("kill") {
 		t.Fatalf("expected spawn and kill enabled, got %v", flags.Commands())
+	}
+}
+
+func TestParseV2CommandsFromEnv_DefaultsToAllWhenUnset(t *testing.T) {
+	t.Setenv(envV2Commands, "")
+
+	flags, err := ParseV2CommandsFromEnv()
+	if err != nil {
+		t.Fatalf("ParseV2CommandsFromEnv returned error: %v", err)
+	}
+	want := SupportedCommands()
+	got := flags.Commands()
+	if !slices.Equal(got, want) {
+		t.Fatalf("default commands mismatch: got %v, want %v", got, want)
+	}
+}
+
+func TestParseV2CommandsFromEnv_NoneDisablesAll(t *testing.T) {
+	t.Setenv(envV2Commands, "none")
+
+	flags, err := ParseV2CommandsFromEnv()
+	if err != nil {
+		t.Fatalf("ParseV2CommandsFromEnv returned error: %v", err)
+	}
+	if !flags.Empty() {
+		t.Fatalf("expected no enabled commands for env=none, got %v", flags.Commands())
 	}
 }
 

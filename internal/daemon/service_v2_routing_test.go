@@ -16,7 +16,7 @@ func TestDispatchAgentSpawn_RoutesByFlag(t *testing.T) {
 	svc := &Service{}
 	params := json.RawMessage(`{"role":"researcher","prompt":"hello"}`)
 
-	t.Setenv("AGENTCTL_V2_COMMANDS", "")
+	t.Setenv("AGENTCTL_V2_COMMANDS", "none")
 	_, decision, err := svc.dispatchAgentSpawn(context.Background(), "req-spawn-v1", params)
 	if err == nil {
 		t.Fatalf("dispatchAgentSpawn() error = nil, want non-nil")
@@ -44,7 +44,7 @@ func TestDispatchAgentSpawn_RoutesByFlag(t *testing.T) {
 func TestDispatchAgentList_RoutesByFlag(t *testing.T) {
 	svc := &Service{}
 
-	t.Setenv("AGENTCTL_V2_COMMANDS", "")
+	t.Setenv("AGENTCTL_V2_COMMANDS", "none")
 	result, decision, err := svc.dispatchAgentList(context.Background(), "req-list-v1")
 	if err != nil {
 		t.Fatalf("dispatchAgentList() error = %v", err)
@@ -67,13 +67,25 @@ func TestDispatchAgentList_RoutesByFlag(t *testing.T) {
 	if result == nil || result.Count != 0 {
 		t.Fatalf("result = %#v, want empty list result", result)
 	}
+
+	t.Setenv("AGENTCTL_V2_COMMANDS", "")
+	result, decision, err = svc.dispatchAgentList(context.Background(), "req-list-default-env")
+	if err != nil {
+		t.Fatalf("dispatchAgentList() default-env error = %v", err)
+	}
+	if decision != v2ports.DecisionV2 {
+		t.Fatalf("default-env decision = %q, want %q", decision, v2ports.DecisionV2)
+	}
+	if result == nil || result.Count != 0 {
+		t.Fatalf("default-env result = %#v, want empty list result", result)
+	}
 }
 
 func TestDispatchAgentKill_RoutesByFlag(t *testing.T) {
 	svc := &Service{}
 	params := json.RawMessage(`{"session_id":"sess-1"}`)
 
-	t.Setenv("AGENTCTL_V2_COMMANDS", "")
+	t.Setenv("AGENTCTL_V2_COMMANDS", "none")
 	_, decision, err := svc.dispatchAgentKill(context.Background(), "req-kill-v1", params)
 	if err == nil {
 		t.Fatalf("dispatchAgentKill() error = nil, want non-nil")
@@ -116,7 +128,7 @@ func TestDispatchAgentSpawn_InvalidEnvFallsBackToV1(t *testing.T) {
 }
 
 func TestDaemonMethodRouter_ShadowRunsForNonMutatingCommand(t *testing.T) {
-	t.Setenv("AGENTCTL_V2_COMMANDS", "")
+	t.Setenv("AGENTCTL_V2_COMMANDS", "none")
 	t.Setenv("AGENTCTL_V2_SHADOW_COMMANDS", "list")
 	t.Setenv("AGENTCTL_V2_SHADOW_MUTATING", "")
 
@@ -154,7 +166,7 @@ func TestDaemonMethodRouter_ShadowRunsForNonMutatingCommand(t *testing.T) {
 }
 
 func TestDaemonMethodRouter_ShadowMutatingRequiresOptIn(t *testing.T) {
-	t.Setenv("AGENTCTL_V2_COMMANDS", "")
+	t.Setenv("AGENTCTL_V2_COMMANDS", "none")
 	t.Setenv("AGENTCTL_V2_SHADOW_COMMANDS", "kill")
 	t.Setenv("AGENTCTL_V2_SHADOW_MUTATING", "")
 
@@ -202,7 +214,7 @@ func TestDaemonMethodRouter_ShadowMutatingRequiresOptIn(t *testing.T) {
 }
 
 func TestDaemonMethodRouter_FreezeBlocksV1Path(t *testing.T) {
-	t.Setenv("AGENTCTL_V2_COMMANDS", "")
+	t.Setenv("AGENTCTL_V2_COMMANDS", "none")
 	t.Setenv("AGENTCTL_V2_FREEZE_V1_COMMANDS", "list")
 
 	router := daemonMethodRouter()

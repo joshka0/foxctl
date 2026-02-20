@@ -25,7 +25,7 @@ func TestRunAgentSpawn_RoutesByFlag(t *testing.T) {
 	cmd := &cobra.Command{}
 	cmd.SetContext(context.Background())
 
-	t.Setenv("AGENTCTL_V2_COMMANDS", "")
+	t.Setenv("AGENTCTL_V2_COMMANDS", "none")
 	if err := runAgentSpawn(cmd, nil); err != nil {
 		t.Fatalf("runAgentSpawn() v1 error = %v", err)
 	}
@@ -58,7 +58,7 @@ func TestRunAgentList_RoutesByFlag(t *testing.T) {
 	cmd := &cobra.Command{}
 	cmd.SetContext(context.Background())
 
-	t.Setenv("AGENTCTL_V2_COMMANDS", "")
+	t.Setenv("AGENTCTL_V2_COMMANDS", "none")
 	if err := runAgentList(cmd, nil); err != nil {
 		t.Fatalf("runAgentList() v1 error = %v", err)
 	}
@@ -70,6 +70,30 @@ func TestRunAgentList_RoutesByFlag(t *testing.T) {
 	t.Setenv("AGENTCTL_V2_COMMANDS", "list")
 	if err := runAgentList(cmd, nil); err != nil {
 		t.Fatalf("runAgentList() v2 error = %v", err)
+	}
+	if v1Calls != 0 || v2Calls != 1 {
+		t.Fatalf("v1/v2 calls = %d/%d, want 0/1", v1Calls, v2Calls)
+	}
+}
+
+func TestRunAgentList_DefaultEnvRoutesToV2(t *testing.T) {
+	origV1 := runAgentListV1Fn
+	origV2 := runAgentListV2Fn
+	defer func() {
+		runAgentListV1Fn = origV1
+		runAgentListV2Fn = origV2
+	}()
+
+	var v1Calls, v2Calls int
+	runAgentListV1Fn = func(*cobra.Command, []string) error { v1Calls++; return nil }
+	runAgentListV2Fn = func(*cobra.Command, []string) error { v2Calls++; return nil }
+
+	cmd := &cobra.Command{}
+	cmd.SetContext(context.Background())
+
+	t.Setenv("AGENTCTL_V2_COMMANDS", "")
+	if err := runAgentList(cmd, nil); err != nil {
+		t.Fatalf("runAgentList() default-env error = %v", err)
 	}
 	if v1Calls != 0 || v2Calls != 1 {
 		t.Fatalf("v1/v2 calls = %d/%d, want 0/1", v1Calls, v2Calls)
@@ -92,7 +116,7 @@ func TestRunAgentKill_RoutesByFlag(t *testing.T) {
 	cmd.SetContext(context.Background())
 	args := []string{"agent-1"}
 
-	t.Setenv("AGENTCTL_V2_COMMANDS", "")
+	t.Setenv("AGENTCTL_V2_COMMANDS", "none")
 	if err := runAgentKill(cmd, args); err != nil {
 		t.Fatalf("runAgentKill() v1 error = %v", err)
 	}
@@ -126,7 +150,7 @@ func TestRunAgentRun_RoutesByFlag(t *testing.T) {
 	cmd.SetContext(context.Background())
 	args := []string{"agent-1"}
 
-	t.Setenv("AGENTCTL_V2_COMMANDS", "")
+	t.Setenv("AGENTCTL_V2_COMMANDS", "none")
 	if err := runAgentRun(cmd, args); err != nil {
 		t.Fatalf("runAgentRun() v1 error = %v", err)
 	}
@@ -167,7 +191,7 @@ func TestDispatchAgentCLICommand_InvalidEnvFallsBackToV1(t *testing.T) {
 }
 
 func TestDispatchAgentCLICommand_ShadowRunsForNonMutatingCommand(t *testing.T) {
-	t.Setenv("AGENTCTL_V2_COMMANDS", "")
+	t.Setenv("AGENTCTL_V2_COMMANDS", "none")
 	t.Setenv("AGENTCTL_V2_SHADOW_COMMANDS", "list")
 	t.Setenv("AGENTCTL_V2_SHADOW_MUTATING", "")
 
@@ -212,7 +236,7 @@ func TestDispatchAgentCLICommand_ShadowMutatingRequiresOptIn(t *testing.T) {
 	cmd.SetContext(context.Background())
 
 	// Without opt-in: mutating command shadow should be sanitized out.
-	t.Setenv("AGENTCTL_V2_COMMANDS", "")
+	t.Setenv("AGENTCTL_V2_COMMANDS", "none")
 	t.Setenv("AGENTCTL_V2_SHADOW_COMMANDS", "kill")
 	t.Setenv("AGENTCTL_V2_SHADOW_MUTATING", "")
 
@@ -265,7 +289,7 @@ func TestDispatchAgentCLICommand_FreezeBlocksV1Path(t *testing.T) {
 	cmd := &cobra.Command{}
 	cmd.SetContext(context.Background())
 
-	t.Setenv("AGENTCTL_V2_COMMANDS", "")
+	t.Setenv("AGENTCTL_V2_COMMANDS", "none")
 	t.Setenv("AGENTCTL_V2_FREEZE_V1_COMMANDS", "list")
 
 	var v1Calls, v2Calls atomic.Int32
