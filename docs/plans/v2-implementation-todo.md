@@ -12,7 +12,7 @@ Implement the v2 runtime incrementally with:
 - one tool execution path
 - append-only events + projections
 - non-blocking enrichment/context assembly
-- strict v1/v2 boundary via `AGENTCTL_V2_COMMANDS`
+- strict v1/v2 boundary via `AGENTCTL_V2_COMMANDS` (v2-primary default with explicit v1 fallback)
 - shadow validation via `AGENTCTL_V2_SHADOW_COMMANDS`
 
 Primary specs/plans:
@@ -29,6 +29,7 @@ Primary specs/plans:
 - [x] Wave 2 dynamic context + decommission gate batch complete (PR-14 through PR-16)
 - [x] Wave 3 kickoff complete for PR-17 (artifact retrieval + semantic observability/tracing)
 - [x] Wave 3 source-resynthesis slice complete (PR-19: source conversations -> v2 turns/artifacts)
+- [x] Wave 3 routing-default slice complete (PR-20: v2-primary command routing defaults)
 
 ## Wave 1 Completed (Reference)
 
@@ -101,9 +102,15 @@ Wave 3 retrieval goals and PR-17+ scope live in:
   - [x] support optional Claude todo snapshot ingestion in artifact synthesis context
   - [x] enforce embedding dimension compatibility with turns store settings
 
+- [x] PR-20: v2-primary command routing defaults
+  - [x] make `ParseV2CommandsFromEnv()` default to all supported commands when env is unset/empty
+  - [x] add explicit `none` value for `AGENTCTL_V2_COMMANDS` to force global v1 fallback
+  - [x] update CLI/API/daemon routing tests to use `none` where v1-primary behavior is required
+  - [x] add default-env routing assertions proving v2-primary behavior in command/API/daemon paths
+
 ## Decisions (Locked)
 
-- [x] v2 remains opt-in per command through `AGENTCTL_V2_COMMANDS`
+- [x] v2 routing is primary for supported commands by default; `AGENTCTL_V2_COMMANDS=none` provides explicit global v1 fallback
 - [x] no command-level `--dry-run` requirement for v2 rollout
 - [x] turn completion must never block on enrichers/maintenance
 - [x] turn lineage is `Turn -> Iteration -> ToolCall` with trace metadata
@@ -151,6 +158,18 @@ Subagent Review
 
 ## Progress Log
 
+- 2026-02-20:
+  Subagent Review
+  - reviewer: `019c7a42-5bc2-7fa1-9945-68904fac8326`
+  - scope: `PR-20 routing-default slice` (`internal/v2/ports/config/{v2flags.go,v2flags_test.go}`, `cmd/agentctl/cmd/agent_v2_routing_test.go`, `internal/web/api/agents_v2_routing_test.go`, `internal/daemon/service_v2_routing_test.go`, `docs/spec/v2_greenfield_bootstrap.md`, `docs/plans/v2-greenfield-bootstrap.md`, `docs/plans/v2-implementation-todo.md`)
+  - findings: `none`
+  - decision: `approved`
+- 2026-02-20: Completed PR-20 v2-primary routing defaults.
+  - `ParseV2CommandsFromEnv()` now enables all supported commands by default when `AGENTCTL_V2_COMMANDS` is unset/empty.
+  - Added explicit global fallback token `AGENTCTL_V2_COMMANDS=none` to force v1 routing.
+  - Updated CLI/API/daemon routing tests so intentional v1-primary cases use `none`.
+  - Added default-env routing assertions that verify v2-primary behavior in command, API, and daemon dispatch paths.
+  - Updated v2 spec/plan docs to reflect default-on routing semantics and rollback guidance.
 - 2026-02-20:
   Subagent Review
   - reviewer: `019c7a17-f8a4-71a3-8a7a-3fa2dd05ca9c`

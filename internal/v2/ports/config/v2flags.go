@@ -12,6 +12,7 @@ const (
 	envV2ShadowCommands = "AGENTCTL_V2_SHADOW_COMMANDS"
 	envV2ShadowMutating = "AGENTCTL_V2_SHADOW_MUTATING"
 	envV2FreezeCommands = "AGENTCTL_V2_FREEZE_V1_COMMANDS"
+	commandsNoneLiteral = "none"
 )
 
 var supportedCommands = map[string]struct{}{
@@ -40,6 +41,9 @@ func ParseV2Commands(raw string) (V2Flags, error) {
 	if trimmed == "" {
 		return flags, nil
 	}
+	if strings.EqualFold(trimmed, commandsNoneLiteral) {
+		return flags, nil
+	}
 
 	parts := strings.Split(trimmed, ",")
 	for _, part := range parts {
@@ -57,7 +61,11 @@ func ParseV2Commands(raw string) (V2Flags, error) {
 
 // ParseV2CommandsFromEnv parses AGENTCTL_V2_COMMANDS from the environment.
 func ParseV2CommandsFromEnv() (V2Flags, error) {
-	return ParseV2Commands(os.Getenv(envV2Commands))
+	raw := os.Getenv(envV2Commands)
+	if strings.TrimSpace(raw) == "" {
+		return DefaultV2Commands(), nil
+	}
+	return ParseV2Commands(raw)
 }
 
 // ParseV2ShadowCommands parses AGENTCTL_V2_SHADOW_COMMANDS-like comma-separated command sets.
@@ -130,6 +138,15 @@ func SupportedCommands() []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+// DefaultV2Commands returns the default v2-enabled command set.
+func DefaultV2Commands() V2Flags {
+	flags := V2Flags{enabled: map[string]struct{}{}}
+	for _, cmd := range SupportedCommands() {
+		flags.enabled[cmd] = struct{}{}
+	}
+	return flags
 }
 
 func parseBoolLoose(raw string) bool {
