@@ -46,9 +46,9 @@ type SemanticValidationCaseResult struct {
 
 // SemanticRolloutGateInput is the input to rollout gate evaluation.
 type SemanticRolloutGateInput struct {
-	Cases                    []SemanticValidationCase `json:"cases,omitempty"`
-	Stats                    ArtifactSearchStats      `json:"stats"`
-	VectorCapabilityExpected bool                     `json:"vector_capability_expected"`
+	Cases                    []SemanticValidationCase      `json:"cases,omitempty"`
+	Stats                    ArtifactSearchStats           `json:"stats"`
+	VectorCapabilityExpected bool                          `json:"vector_capability_expected"`
 	Thresholds               SemanticRolloutGateThresholds `json:"thresholds,omitempty"`
 }
 
