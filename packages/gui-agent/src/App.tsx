@@ -1,10 +1,11 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { AppShell } from '@/components/layout/AppShell'
-import { ActivityFeed } from '@/components/activity/ActivityFeed'
-
-import { LogsViewer, SkillRunner } from '@/components/actions'
+import { LogsViewer } from '@/components/actions'
 import { AgentList } from '@/components/agents'
 import { ConversationsList } from '@/components/conversations'
+import { RoomsView } from '@/components/rooms/RoomsView'
+import { ArtifactsExplorer, ContextExplorer, TurnsExplorer } from '@/components/v2/V2Explorers'
+import { OrchestrationBoardScreen } from '@/components/v2/OrchestrationBoardScreen'
 import { useViewStore, type ViewType } from '@/stores/viewStore'
 
 const queryClient = new QueryClient({
@@ -43,44 +44,23 @@ export function App() {
  */
 function MainContent({ view }: { view: ViewType }) {
   switch (view) {
-    case 'activity':
-      return <ActivityFeed />
-    case 'agents':
+    case 'runtime':
       return <AgentList />
-    case 'conversations':
-      return <ConversationsList />
-    case 'search':
-      return <PlaceholderView title="Search" description="Search code, memory, and sessions" />
-    case 'logs':
+    case 'rooms':
+      return <RoomsView />
+    case 'orchestration':
+      return <OrchestrationBoardScreen />
+    case 'turns':
+      return <TurnsExplorer />
+    case 'context':
+      return <ContextExplorer />
+    case 'artifacts':
+      return <ArtifactsExplorer />
+    case 'events':
       return <LogsViewer />
-    case 'skills':
-      return <SkillRunner />
-    case 'mailbox':
-      return <PlaceholderView title="Mailbox" description="Inter-agent messages" />
-    case 'blackboard':
-      return <PlaceholderView title="Blackboard" description="Shared context records" />
-    case 'settings':
-      return <PlaceholderView title="Settings" description="Configure the agent system" />
+    case 'companion':
+      return <ConversationsList />
     default:
       return <AgentList />
   }
-}
-
-/**
- * Renders a centered placeholder view with a title, description, and a "Coming soon..." note.
- *
- * @param title - Heading text displayed prominently at the top of the placeholder.
- * @param description - Supporting descriptive text shown beneath the title.
- * @returns The placeholder view element.
- */
-function PlaceholderView({ title, description }: { title: string; description: string }) {
-  return (
-    <div className="flex items-center justify-center h-full">
-      <div className="text-center">
-        <h2 className="text-xl font-semibold text-foreground mb-2">{title}</h2>
-        <p className="text-muted-foreground">{description}</p>
-        <p className="text-sm text-muted-foreground mt-4">Coming soon...</p>
-      </div>
-    </div>
-  )
 }

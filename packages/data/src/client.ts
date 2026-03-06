@@ -32,7 +32,12 @@ import type {
   MemoryEntryDetail,
   MemoryTypeCount,
   Agent,
+  AgentMemoryCompressResult,
+  AgentMemoryContextResult,
+  AgentMemorySearchResult,
+  AgentMemoryStatsResult,
   AgentState,
+  Room,
   Trajectory,
   TrajectoryEvent,
   UserRequest,
@@ -44,6 +49,15 @@ import type {
   ConsoleCancelResponse,
   ConsoleFeedbackRequest,
   ConsoleFeedbackResponse,
+  OrchestrationBoard,
+  OrchestrationBoardArtifactRef,
+  OrchestrationBoardResult,
+  OrchestrationBoardCardRuntimeResult,
+  OrchestrationCardAction,
+  OrchestrationCardActionResult,
+  OrchestrationDispatchResult,
+  OrchestrationLaneID,
+  OrchestrationRefreshResult,
 } from "./types";
 
 // Get API base URL - works in both Vite (browser) and Bun environments
@@ -74,9 +88,18 @@ export class APIError extends Error {
   }
 }
 
+interface ApiEnvelope<T> {
+  version: number;
+  status: "ok" | "error" | "progress";
+  command: string;
+  data: T;
+  meta: { ts: string; [key: string]: unknown };
+  error: { code?: string; message?: string };
+}
+
 async function request<T>(
   endpoint: string,
-  options: RequestInit = {}
+  options: RequestInit = {},
 ): Promise<T> {
   const url = `${API_BASE}${endpoint}`;
 
@@ -108,7 +131,7 @@ async function request<T>(
 
 async function requestVoid(
   endpoint: string,
-  options: RequestInit = {}
+  options: RequestInit = {},
 ): Promise<void> {
   const url = `${API_BASE}${endpoint}`;
 
@@ -125,6 +148,30 @@ async function requestVoid(
     const text = await response.text();
     throw new APIError(response.status, text || `HTTP ${response.status}`);
   }
+}
+
+function unwrapEnvelope<T>(env: ApiEnvelope<T>): T {
+  if (env.status !== "ok") {
+    throw new APIError(500, env.error?.message || "Request failed");
+  }
+  return env.data;
+}
+
+function normalizeBoardPayload(data: unknown): OrchestrationBoardResult {
+  if (!data || typeof data !== "object") {
+    return { board: null, artifact: null };
+  }
+  const asRecord = data as Record<string, unknown>;
+  if (Array.isArray(asRecord.lanes)) {
+    return { board: asRecord as unknown as OrchestrationBoard, artifact: null };
+  }
+  if (typeof asRecord.artifact === "string") {
+    return {
+      board: null,
+      artifact: asRecord as unknown as OrchestrationBoardArtifactRef,
+    };
+  }
+  return { board: null, artifact: null };
 }
 
 // Jobs
@@ -204,6 +251,98 @@ export async function getBlackboard(params?: {
   return request(`/api/blackboard${query ? `?${query}` : ""}`);
 }
 
+export async function getOrchestrationBoard(params?: {
+  request_id?: string;
+  workspace_id?: string;
+  limit?: number;
+  cursor?: string;
+  lane?: OrchestrationLaneID;
+}): Promise<OrchestrationBoardResult> {
+  const query = new URLSearchParams();
+  if (params?.request_id) query.set("request_id", params.request_id);
+  if (params?.workspace_id) query.set("workspace_id", params.workspace_id);
+  if (typeof params?.limit === "number" && Number.isFinite(params.limit)) {
+    query.set("limit", String(params.limit));
+  }
+  if (params?.cursor) query.set("cursor", params.cursor);
+  if (params?.lane) query.set("lane", params.lane);
+
+  const suffix = query.size > 0 ? `?${query.toString()}` : "";
+  const env = await request<ApiEnvelope<unknown>>(
+    `/api/orchestration/board-get${suffix}`,
+  );
+  return normalizeBoardPayload(unwrapEnvelope(env));
+}
+
+export async function getOrchestrationBoardCardRuntime(params: {
+  request_id?: string;
+  workspace_id?: string;
+  issue_id: string;
+  depth?: number;
+}): Promise<OrchestrationBoardCardRuntimeResult> {
+  const query = new URLSearchParams();
+  if (params.request_id) query.set("request_id", params.request_id);
+  if (params.workspace_id) query.set("workspace_id", params.workspace_id);
+  query.set("issue_id", params.issue_id);
+  if (typeof params.depth === "number" && Number.isFinite(params.depth)) {
+    query.set("depth", String(params.depth));
+  }
+
+  const env = await request<ApiEnvelope<OrchestrationBoardCardRuntimeResult>>(
+    `/api/orchestration/board-card-runtime-get?${query.toString()}`,
+  );
+  return unwrapEnvelope(env);
+}
+
+export async function applyOrchestrationCardAction(params: {
+  request_id: string;
+  workspace_id?: string;
+  issue_id: string;
+  action: OrchestrationCardAction;
+}): Promise<OrchestrationCardActionResult> {
+  const env = await request<ApiEnvelope<OrchestrationCardActionResult>>(
+    "/api/orchestration/card-action",
+    {
+      method: "POST",
+      body: JSON.stringify(params),
+    },
+  );
+  return unwrapEnvelope(env);
+}
+
+export async function dispatchOrchestrationIssue(params: {
+  request_id: string;
+  workspace_id?: string;
+  issue_id: string;
+  issue_identifier?: string;
+  title?: string;
+  prompt?: string;
+  parent_agent_id?: string;
+}): Promise<OrchestrationDispatchResult> {
+  const env = await request<ApiEnvelope<OrchestrationDispatchResult>>(
+    "/api/orchestration/dispatch-issue",
+    {
+      method: "POST",
+      body: JSON.stringify(params),
+    },
+  );
+  return unwrapEnvelope(env);
+}
+
+export async function refreshOrchestration(params: {
+  request_id: string;
+  workspace_id?: string;
+}): Promise<OrchestrationRefreshResult> {
+  const env = await request<ApiEnvelope<OrchestrationRefreshResult>>(
+    "/api/orchestration/refresh",
+    {
+      method: "POST",
+      body: JSON.stringify(params),
+    },
+  );
+  return unwrapEnvelope(env);
+}
+
 // SQLite
 export async function getSQLiteDatabases(): Promise<{
   databases: SQLiteDatabase[];
@@ -212,7 +351,7 @@ export async function getSQLiteDatabases(): Promise<{
 }
 
 export async function getSQLiteTables(
-  db: string
+  db: string,
 ): Promise<{ tables: SQLiteTable[] }> {
   return request(`/api/sqlite/${encodeURIComponent(db)}`);
 }
@@ -221,7 +360,7 @@ export async function getSQLiteData(
   db: string,
   table: string,
   limit = 100,
-  offset = 0
+  offset = 0,
 ): Promise<{
   columns: string[];
   rows: Record<string, unknown>[];
@@ -229,22 +368,26 @@ export async function getSQLiteData(
   limit: number;
   offset: number;
 }> {
-  return request(`/api/sqlite/${encodeURIComponent(db)}/${encodeURIComponent(table)}?limit=${limit}&offset=${offset}`);
+  return request(
+    `/api/sqlite/${encodeURIComponent(db)}/${encodeURIComponent(table)}?limit=${limit}&offset=${offset}`,
+  );
 }
 
 export async function getSQLiteSchema(
   db: string,
-  table: string
+  table: string,
 ): Promise<{
   schema: string;
   columns: SQLiteColumn[];
 }> {
-  return request(`/api/sqlite/${encodeURIComponent(db)}/${encodeURIComponent(table)}/schema`);
+  return request(
+    `/api/sqlite/${encodeURIComponent(db)}/${encodeURIComponent(table)}/schema`,
+  );
 }
 
 export async function getSQLiteIndexes(
   db: string,
-  table?: string
+  table?: string,
 ): Promise<{ indexes: SQLiteIndex[] }> {
   const params = table ? `?table=${encodeURIComponent(table)}` : "";
   return request(`/api/sqlite/${encodeURIComponent(db)}/indexes${params}`);
@@ -253,7 +396,7 @@ export async function getSQLiteIndexes(
 export async function executeSQLiteQuery(
   db: string,
   query: string,
-  limit = 100
+  limit = 100,
 ): Promise<SQLiteQueryResult> {
   return request(`/api/sqlite/${encodeURIComponent(db)}/query`, {
     method: "POST",
@@ -292,7 +435,7 @@ export async function getWorkspaces(): Promise<{
 export async function switchWorkspace(workspace: string): Promise<void> {
   return requestVoid(
     `/api/workspaces/switch?workspace=${encodeURIComponent(workspace)}`,
-    { method: "POST" }
+    { method: "POST" },
   );
 }
 
@@ -319,7 +462,7 @@ export async function getSession(id: string): Promise<{ session: Session }> {
 
 export async function getSessionMessages(
   id: string,
-  params?: { limit?: number; offset?: number }
+  params?: { limit?: number; offset?: number },
 ): Promise<{
   messages: SessionMessage[];
   total: number;
@@ -331,18 +474,23 @@ export async function getSessionMessages(
   if (params?.limit) searchParams.set("limit", String(params.limit));
   if (params?.offset) searchParams.set("offset", String(params.offset));
   const query = searchParams.toString();
-  return request(`/api/sessions/${encodeURIComponent(id)}/messages${query ? `?${query}` : ""}`);
+  return request(
+    `/api/sessions/${encodeURIComponent(id)}/messages${query ? `?${query}` : ""}`,
+  );
 }
 
 export async function updateSessionMessage(
   sessionId: string,
   index: number,
-  message: unknown
+  message: unknown,
 ): Promise<{ success: boolean; index: number }> {
-  return request(`/api/sessions/${encodeURIComponent(sessionId)}/messages/${index}`, {
-    method: "PUT",
-    body: JSON.stringify({ message }),
-  });
+  return request(
+    `/api/sessions/${encodeURIComponent(sessionId)}/messages/${index}`,
+    {
+      method: "PUT",
+      body: JSON.stringify({ message }),
+    },
+  );
 }
 
 export async function searchSessions(params: {
@@ -359,9 +507,7 @@ export async function searchSessions(params: {
   return request(`/api/sessions/search?${searchParams.toString()}`);
 }
 
-export async function getSessionContextWindows(
-  id: string
-): Promise<{
+export async function getSessionContextWindows(id: string): Promise<{
   context_windows: ContextWindow[];
   total: number;
 }> {
@@ -380,20 +526,31 @@ export async function getCodemaps(params?: {
   return request(`/api/codemaps${query ? `?${query}` : ""}`);
 }
 
-export async function getCodemap(id: string, workspace?: string): Promise<Codemap> {
+export async function getCodemap(
+  id: string,
+  workspace?: string,
+): Promise<Codemap> {
   const searchParams = new URLSearchParams();
   if (workspace) searchParams.set("workspace", workspace);
   const query = searchParams.toString();
-  return request(`/api/codemaps/${encodeURIComponent(id)}${query ? `?${query}` : ""}`);
+  return request(
+    `/api/codemaps/${encodeURIComponent(id)}${query ? `?${query}` : ""}`,
+  );
 }
 
-export async function deleteCodemap(id: string, workspace?: string): Promise<void> {
+export async function deleteCodemap(
+  id: string,
+  workspace?: string,
+): Promise<void> {
   const searchParams = new URLSearchParams();
   if (workspace) searchParams.set("workspace", workspace);
   const query = searchParams.toString();
-  return requestVoid(`/api/codemaps/${encodeURIComponent(id)}${query ? `?${query}` : ""}`, {
-    method: "DELETE",
-  });
+  return requestVoid(
+    `/api/codemaps/${encodeURIComponent(id)}${query ? `?${query}` : ""}`,
+    {
+      method: "DELETE",
+    },
+  );
 }
 
 export async function searchCodemaps(params: {
@@ -476,7 +633,7 @@ export async function saveMemory(params: {
 }
 
 export async function pinMemory(
-  id: string
+  id: string,
 ): Promise<{ success: boolean; pinned: boolean; pinned_at: string | null }> {
   return request(`/api/memory/${encodeURIComponent(id)}/pin`, {
     method: "POST",
@@ -484,7 +641,7 @@ export async function pinMemory(
 }
 
 export async function deleteMemory(
-  id: string
+  id: string,
 ): Promise<{ success: boolean; deleted: string }> {
   return request(`/api/memory/${encodeURIComponent(id)}`, {
     method: "DELETE",
@@ -515,30 +672,95 @@ export async function getAgent(id: string): Promise<{ agent: Agent }> {
 
 // Spawn a new agent
 export interface SpawnAgentParams {
-  ns: string;
+  workspace_id?: string;
   role?: string;
   parent_id?: string;
   prompt?: string;
-  skills_allow?: string;
-  policy?: string;
-  share_bb?: "all" | "scoped" | "none";
+  skills_allow?: string[];
   llm_provider?: string;
   llm_model?: string;
+  name?: string;
+  slug?: string;
+  exec_mode?: string;
+  think_interval?: number;
+  max_iterations?: number;
+  max_context_tokens?: number;
+  max_auto_turns?: number;
+  memory_scope?: "agent" | "session";
+  memory_retention?: "companion" | "durable" | "task" | "ephemeral";
+  room_id?: string;
+  room_role?: string;
 }
 
 export async function spawnAgent(params: SpawnAgentParams): Promise<{
-  agent: {
-    id: string;
-    ns: string;
-    role: string;
-    state: string;
-    parent_id: string | null;
-  };
+  session_id: string;
+  actor_id: string;
+  status: string;
+  name?: string;
 }> {
   return request("/api/agents", {
     method: "POST",
     body: JSON.stringify(params),
   });
+}
+
+export async function getAgentMemoryStats(
+  id: string,
+): Promise<AgentMemoryStatsResult> {
+  return request(`/api/agents/${encodeURIComponent(id)}/memory/stats`);
+}
+
+export async function getAgentMemoryContext(
+  id: string,
+  params?: { conversation_id?: string },
+): Promise<AgentMemoryContextResult> {
+  const query = new URLSearchParams();
+  if (params?.conversation_id) {
+    query.set("conversation_id", params.conversation_id);
+  }
+  const suffix = query.size > 0 ? `?${query.toString()}` : "";
+  return request(
+    `/api/agents/${encodeURIComponent(id)}/memory/context${suffix}`,
+  );
+}
+
+export async function searchAgentMemory(
+  id: string,
+  params: { q: string; limit?: number; conversation_id?: string },
+): Promise<AgentMemorySearchResult> {
+  const query = new URLSearchParams();
+  query.set("q", params.q);
+  if (typeof params.limit === "number" && Number.isFinite(params.limit)) {
+    query.set("limit", String(params.limit));
+  }
+  if (params.conversation_id) {
+    query.set("conversation_id", params.conversation_id);
+  }
+  return request(
+    `/api/agents/${encodeURIComponent(id)}/memory/search?${query.toString()}`,
+  );
+}
+
+export async function compressAgentMemory(
+  id: string,
+  params?: { conversation_id?: string; distill?: boolean },
+): Promise<AgentMemoryCompressResult> {
+  return request(`/api/agents/${encodeURIComponent(id)}/memory/compress`, {
+    method: "POST",
+    body: JSON.stringify(params || {}),
+  });
+}
+
+export async function getRoom(
+  roomId: string,
+  params: { workspace_id: string; actor_id?: string },
+): Promise<{ room: Room }> {
+  const query = new URLSearchParams();
+  query.set("workspace_id", params.workspace_id);
+  if (params.actor_id) query.set("actor_id", params.actor_id);
+  return request(
+    `/api/rooms/${encodeURIComponent(roomId)}?${query.toString()}`,
+  );
 }
 
 // Stop/kill an agent
@@ -555,7 +777,7 @@ export async function stopAgent(id: string): Promise<{
 // Update agent state
 export async function updateAgentState(
   id: string,
-  state: AgentState
+  state: AgentState,
 ): Promise<{
   updated: boolean;
   agent_id: string;
@@ -576,7 +798,7 @@ export async function sendAgentMessage(
     kind?: string;
     priority?: number;
     sender?: string;
-  }
+  },
 ): Promise<{
   message_id: string;
   recipient: string;
@@ -605,7 +827,7 @@ export interface SendMailboxMessageParams {
 }
 
 export async function sendMailboxMessage(
-  params: SendMailboxMessageParams
+  params: SendMailboxMessageParams,
 ): Promise<{
   message_id: string;
   status: string;
@@ -619,7 +841,7 @@ export async function sendMailboxMessage(
 // Acknowledge a mailbox message (mark as read/handled)
 export async function acknowledgeMessage(
   messageId: string,
-  actorId?: string
+  actorId?: string,
 ): Promise<{
   acknowledged: boolean;
   message_id: string;
@@ -652,14 +874,14 @@ export async function getTrajectories(params?: {
 
 export async function getTrajectoryEvents(
   trajectoryId: string,
-  params?: { kind?: string; limit?: number }
+  params?: { kind?: string; limit?: number },
 ): Promise<{ events: TrajectoryEvent[] }> {
   const searchParams = new URLSearchParams();
   if (params?.kind) searchParams.set("kind", params.kind);
   if (params?.limit) searchParams.set("limit", String(params.limit));
   const query = searchParams.toString();
   return request(
-    `/api/trajectories/${encodeURIComponent(trajectoryId)}/events${query ? `?${query}` : ""}`
+    `/api/trajectories/${encodeURIComponent(trajectoryId)}/events${query ? `?${query}` : ""}`,
   );
 }
 
@@ -671,14 +893,16 @@ export interface TrajectoryFeedback {
 }
 
 export async function getTrajectoryFeedback(
-  trajectoryId: string
+  trajectoryId: string,
 ): Promise<{ feedback: TrajectoryFeedback | null }> {
-  return request(`/api/trajectories/${encodeURIComponent(trajectoryId)}/feedback`);
+  return request(
+    `/api/trajectories/${encodeURIComponent(trajectoryId)}/feedback`,
+  );
 }
 
 export async function submitTrajectoryFeedback(
   trajectoryId: string,
-  params: { rating: number; comment?: string }
+  params: { rating: number; comment?: string },
 ): Promise<{
   success: boolean;
   trajectory_id: string;
@@ -686,10 +910,13 @@ export async function submitTrajectoryFeedback(
   comment: string | null;
   recorded_at: string;
 }> {
-  return request(`/api/trajectories/${encodeURIComponent(trajectoryId)}/feedback`, {
-    method: "POST",
-    body: JSON.stringify(params),
-  });
+  return request(
+    `/api/trajectories/${encodeURIComponent(trajectoryId)}/feedback`,
+    {
+      method: "POST",
+      body: JSON.stringify(params),
+    },
+  );
 }
 
 // Scorer weights (learnable scoring system)
@@ -731,7 +958,7 @@ export async function getUserRequests(params?: {
 export function subscribeToEvents(
   onMessage: (event: SSEEvent) => void,
   onError?: (error: Event) => void,
-  onConnected?: () => void
+  onConnected?: () => void,
 ): () => void {
   if (typeof EventSource === "undefined") {
     console.warn("EventSource not available in this environment");
@@ -773,7 +1000,7 @@ export async function getConsoles(params?: {
 }
 
 export async function createConsole(
-  data: ConsoleSessionCreate
+  data: ConsoleSessionCreate,
 ): Promise<ConsoleSession> {
   return request("/api/consoles", {
     method: "POST",
@@ -793,7 +1020,7 @@ export async function deleteConsole(id: string): Promise<void> {
 
 export async function sendConsoleMessage(
   consoleId: string,
-  data: ConsoleSendRequest
+  data: ConsoleSendRequest,
 ): Promise<ConsoleSendResponse> {
   return request(`/api/consoles/${encodeURIComponent(consoleId)}/send`, {
     method: "POST",
@@ -803,7 +1030,7 @@ export async function sendConsoleMessage(
 
 export async function cancelConsoleRequest(
   consoleId: string,
-  data?: ConsoleCancelRequest
+  data?: ConsoleCancelRequest,
 ): Promise<ConsoleCancelResponse> {
   return request(`/api/consoles/${encodeURIComponent(consoleId)}/cancel`, {
     method: "POST",
@@ -813,7 +1040,7 @@ export async function cancelConsoleRequest(
 
 export async function submitConsoleFeedback(
   consoleId: string,
-  data: ConsoleFeedbackRequest
+  data: ConsoleFeedbackRequest,
 ): Promise<ConsoleFeedbackResponse> {
   return request(`/api/consoles/${encodeURIComponent(consoleId)}/feedback`, {
     method: "POST",
@@ -826,7 +1053,7 @@ export function subscribeToConsoleEvents(
   consoleId: string,
   onMessage: (event: SSEEvent) => void,
   onError?: (error: Event) => void,
-  onConnected?: () => void
+  onConnected?: () => void,
 ): () => void {
   if (typeof EventSource === "undefined") {
     console.warn("EventSource not available in this environment");
@@ -834,7 +1061,7 @@ export function subscribeToConsoleEvents(
   }
 
   const eventSource = new EventSource(
-    `${API_BASE}/api/consoles/${encodeURIComponent(consoleId)}/events`
+    `${API_BASE}/api/consoles/${encodeURIComponent(consoleId)}/events`,
   );
 
   eventSource.onmessage = (event) => {

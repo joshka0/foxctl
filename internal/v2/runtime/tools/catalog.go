@@ -1,11 +1,12 @@
 package tools
 
 import (
+	"fmt"
 	"sort"
-	"strings"
 
 	coretool "github.com/jkatigb/agentctl/internal/v2/core/tool"
 	"github.com/jkatigb/agentctl/internal/v2/runtime/profiles"
+	runtimetoolnames "github.com/jkatigb/agentctl/internal/v2/runtime/toolnames"
 )
 
 // Catalog is the unified profile-aware v2 tool catalog.
@@ -34,9 +35,13 @@ func NewCatalog(defs []coretool.ToolDef, specs map[coretool.ProcessProfile]profi
 	}
 
 	for _, def := range defs {
-		name := normalizeName(def.Name)
+		rawName := def.Name
+		name := normalizeName(rawName)
 		if name == "" {
 			continue
+		}
+		if _, exists := c.toolsByName[name]; exists {
+			return nil, fmt.Errorf("duplicate canonical tool name %q (input %q)", name, rawName)
 		}
 		def.Name = name
 		schema, err := compileSchema(def.Parameters)
@@ -111,7 +116,7 @@ func isAllowedForProfile(def coretool.ToolDef, profile coretool.ProcessProfile, 
 }
 
 func normalizeName(name string) string {
-	return strings.ToLower(strings.TrimSpace(name))
+	return runtimetoolnames.Canonical(name)
 }
 
 var _ coretool.ToolCatalog = (*Catalog)(nil)

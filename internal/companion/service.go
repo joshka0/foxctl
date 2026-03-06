@@ -19,6 +19,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/platform/config"
 	"github.com/jkatigb/agentctl/internal/storage"
 	"github.com/jkatigb/agentctl/internal/storage/contextvar"
+	"github.com/jkatigb/agentctl/internal/v2/runtime/contextbuilder"
 )
 
 // EngineType selects the execution engine for the companion service.
@@ -36,6 +37,7 @@ type Service struct {
 	contextStore contextvar.Store
 	memory       *ConversationMemory
 	memoryDB     *sql.DB
+	layeredCtx   *contextbuilder.Builder
 	config       ServiceConfig
 	logger       zerolog.Logger
 
@@ -89,11 +91,11 @@ type ServiceConfig struct {
 	// If nil, memory features are disabled.
 	MemoryDB *sql.DB
 
-	// UseHybridMemory enables the hybrid memory pipeline for new conversations.
-	UseHybridMemory bool
-
 	// MemoryConfig configures conversation memory behavior.
 	MemoryConfig *MemoryConfig
+
+	// MemoryBehavior configures reply-time memory retrieval and compression policy.
+	MemoryBehavior MemoryBehavior
 
 	// MemoryStore is the named memory store for semantic search integration (optional).
 	// When set, companion summaries will be stored in named_memory for semantic search.
@@ -106,6 +108,9 @@ type ServiceConfig struct {
 	// When set along with MemoryStore, an embedder will be created automatically
 	// using the configured embedding provider (VOYAGE_API_KEY from .env).
 	Config *config.Config
+
+	// SessionRecallProvider injects related prior sessions into the prompt when configured.
+	SessionRecallProvider SessionRecallProvider
 
 	// HookDispatcher for pre/post tool use hooks (optional).
 	// When set, hooks will be invoked around tool execution.
@@ -201,6 +206,7 @@ func NewService(store contextvar.Store, cfg ServiceConfig, turnLock Locker) *Ser
 	if cfg.DefaultPersonality == "" {
 		cfg.DefaultPersonality = DefaultRLMPersonality
 	}
+	cfg.MemoryBehavior = normalizeMemoryBehavior(cfg.MemoryBehavior)
 
 	if turnLock == nil {
 		turnLock = NewTurnLock()
@@ -225,6 +231,7 @@ func NewService(store contextvar.Store, cfg ServiceConfig, turnLock Locker) *Ser
 		if cfg.MemoryConfig != nil {
 			opts = append(opts, WithMemoryConfig(*cfg.MemoryConfig))
 		}
+		opts = append(opts, WithTokenCounter(NewTikTokenCounter(cfg.LLMModel)))
 
 		// Create LLM summarizer only if credentials are available
 		if cfg.LLMProvider != "" && cfg.LLMAPIKey != "" {
@@ -259,6 +266,7 @@ func NewService(store contextvar.Store, cfg ServiceConfig, turnLock Locker) *Ser
 			cfg.Logger.Warn().Err(err).Msg("Failed to initialize conversation memory")
 		} else {
 			svc.memory = memory
+			svc.layeredCtx = newCompanionContextBuilder(memory)
 			cfg.Logger.Debug().Msg("Conversation memory initialized successfully")
 		}
 	}
@@ -312,6 +320,12 @@ type ChatRequest struct {
 	// - 0: use default (currently 50)
 	// - -1: disable history injection
 	MaxHistoryTurns int `json:"max_history_turns,omitempty"`
+}
+
+type memoryPromptMetadata struct {
+	HasLayeredContext   bool
+	ImplicitRecallCount int
+	SessionRecallCount  int
 }
 
 // ChatTone captures structured emotion metadata for responses.
@@ -458,6 +472,34 @@ type ChatResponse struct {
 	Error string `json:"error,omitempty"`
 }
 
+// ChatStreamDelta is one streamed text/tool delta for a companion turn.
+type ChatStreamDelta struct {
+	ContentDelta string `json:"content_delta,omitempty"`
+	FinishReason string `json:"finish_reason,omitempty"`
+}
+
+// ChatToolCallEvent describes one streamed tool call.
+type ChatToolCallEvent struct {
+	ID        string          `json:"id"`
+	Name      string          `json:"name"`
+	Arguments json.RawMessage `json:"arguments,omitempty"`
+}
+
+// ChatToolResultEvent describes one streamed tool result.
+type ChatToolResultEvent struct {
+	ToolCallID string `json:"tool_call_id"`
+	Name       string `json:"name"`
+	Content    string `json:"content,omitempty"`
+	IsError    bool   `json:"is_error,omitempty"`
+}
+
+// ChatStreamCallbacks receives streaming updates for one companion turn.
+type ChatStreamCallbacks struct {
+	OnDelta      func(ChatStreamDelta)
+	OnToolCall   func(ChatToolCallEvent)
+	OnToolResult func(ChatToolResultEvent)
+}
+
 // TokenUsage tracks token consumption.
 type TokenUsage struct {
 	InputTokens  int `json:"input_tokens"`
@@ -538,7 +580,7 @@ func (s *Service) Chat(ctx context.Context, req ChatRequest) (*ChatResponse, err
 	}
 
 	// Build system prompt
-	systemPrompt, err := s.buildSystemPrompt(ctx, req)
+	systemPrompt, promptMeta, err := s.buildSystemPrompt(ctx, req)
 	if err != nil {
 		return nil, fmt.Errorf("build system prompt: %w", err)
 	}
@@ -552,9 +594,9 @@ func (s *Service) Chat(ctx context.Context, req ChatRequest) (*ChatResponse, err
 
 	// Route to appropriate engine
 	if execMode == agent.ModeStory {
-		resp, err = s.chatWithStoryLoop(ctx, req, rlmExecutor, systemPrompt, start)
+		resp, err = s.chatWithStoryLoop(ctx, req, rlmExecutor, systemPrompt, promptMeta, start)
 	} else {
-		resp, err = s.chatWithLLMChat(ctx, req, rlmExecutor, systemPrompt, start)
+		resp, err = s.chatWithLLMChat(ctx, req, rlmExecutor, systemPrompt, promptMeta, start, nil)
 	}
 
 	if err != nil {
@@ -574,6 +616,84 @@ func (s *Service) Chat(ctx context.Context, req ChatRequest) (*ChatResponse, err
 	return resp, nil
 }
 
+// ChatStreaming executes one companion turn and emits streamed deltas when supported.
+func (s *Service) ChatStreaming(ctx context.Context, req ChatRequest, callbacks ChatStreamCallbacks) (*ChatResponse, error) {
+	start := time.Now()
+
+	if req.ConversationID == "" {
+		return nil, fmt.Errorf("conversation_id is required")
+	}
+	if req.Message == "" {
+		return nil, fmt.Errorf("message is required")
+	}
+
+	unlock, err := s.turnLock.Lock(ctx, req.ConversationID)
+	if err != nil {
+		return nil, fmt.Errorf("turn lock: %w", err)
+	}
+	defer unlock()
+
+	execMode := s.config.ExecMode
+	if req.ExecMode != "" {
+		execMode = req.ExecMode
+	}
+	if execMode == "" {
+		execMode = agent.ModeReactive
+	}
+
+	engineType := s.config.EngineType
+	if req.EngineType != "" {
+		engineType = req.EngineType
+	}
+	if engineType == "" {
+		engineType = EngineTypeLLMChat
+	}
+	if engineType != EngineTypeLLMChat {
+		return nil, fmt.Errorf("unsupported engine_type %q (only %q is supported)", engineType, EngineTypeLLMChat)
+	}
+	if execMode == agent.ModeStory {
+		return s.Chat(ctx, req)
+	}
+
+	rlmExecutor := engine.NewRLMToolExecutor(s.contextStore, req.ConversationID)
+	if s.memoryDB != nil {
+		rlmExecutor.SetCompanionDB(s.memoryDB)
+	}
+	if s.config.MemoryStore != nil && s.config.MemoryWorkspace != "" {
+		rlmExecutor.SetMemoryStore(s.config.MemoryStore, s.config.MemoryWorkspace)
+		if s.config.Config != nil {
+			provider, err := semantic.NewProviderForScope(semantic.ScopeMemory, *s.config.Config)
+			if err != nil {
+				s.logger.Warn().Err(err).Msg("Could not create embedding provider for semantic_query; falling back to text search")
+			} else {
+				rlmExecutor.SetEmbedProvider(provider)
+			}
+		}
+	}
+
+	systemPrompt, promptMeta, err := s.buildSystemPrompt(ctx, req)
+	if err != nil {
+		return nil, fmt.Errorf("build system prompt: %w", err)
+	}
+	if execMode == agent.ModeAutonomous || execMode == agent.ModeProactive {
+		systemPrompt = s.addAutonomousInstructions(systemPrompt, execMode)
+	}
+
+	resp, err := s.chatWithLLMChat(ctx, req, rlmExecutor, systemPrompt, promptMeta, start, &callbacks)
+	if err != nil {
+		return nil, err
+	}
+
+	s.storeConversationTurns(ctx, req, resp, start)
+	if s.presenceEnabled() {
+		presenceCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		s.generatePresence(presenceCtx, req, resp)
+	}
+
+	return resp, nil
+}
+
 // chatWithLLMChat executes using the LLMChatEngine.
 // The systemPrompt parameter is the full system prompt for this turn.
 //
@@ -584,7 +704,7 @@ func (s *Service) Chat(ctx context.Context, req ChatRequest) (*ChatResponse, err
 // - FailureModes: engine init errors, engine run errors
 // - Related: engine.NewLLMChatEngine, engine.LLMChatEngine.Run, buildTooling
 // - Keywords: llmchat, provider, model, tool_calls, conversation_id, tools_used
-func (s *Service) chatWithLLMChat(ctx context.Context, req ChatRequest, rlmExecutor *engine.RLMToolExecutor, systemPrompt string, start time.Time) (*ChatResponse, error) {
+func (s *Service) chatWithLLMChat(ctx context.Context, req ChatRequest, rlmExecutor *engine.RLMToolExecutor, systemPrompt string, promptMeta memoryPromptMetadata, start time.Time, stream *ChatStreamCallbacks) (*ChatResponse, error) {
 	messages, hasHistory := s.buildChatMessages(ctx, req)
 
 	// Create LLM engine in stateless mode
@@ -601,29 +721,7 @@ func (s *Service) chatWithLLMChat(ctx context.Context, req ChatRequest, rlmExecu
 		ActionExecutor:        s.config.ActionExecutor,
 	}
 
-	// Override RequireContextQuery if specified in request
-	if req.RequireContextQuery != nil {
-		engineCfg.RequireContextQuery = *req.RequireContextQuery
-	}
-	if s.config.ExtraToolsOnly && s.config.ExtraToolExecutor != nil {
-		engineCfg.RequireContextQuery = false
-		engineCfg.RLMSystemPromptSuffix = ""
-	}
-
-	// If we have meaningful conversation history, don't force a context query —
-	// the model can see the conversation. Context tools remain available for
-	// long-term memory/preferences but aren't mandatory.
-	if hasHistory && req.RequireContextQuery == nil {
-		engineCfg.RequireContextQuery = false
-	}
-
-	// If the conversation tool allowlist excludes rlm_context_query, we must disable
-	// RequireContextQuery and remove RLM instructions. Otherwise the engine will
-	// endlessly nudge for a tool call it cannot make.
-	if len(s.config.ToolsAllow) > 0 && !containsString(s.config.ToolsAllow, "rlm_context_query") {
-		engineCfg.RequireContextQuery = false
-		engineCfg.RLMSystemPromptSuffix = ""
-	}
+	s.applyRetentionAwareContextPolicy(&engineCfg, req, hasHistory, promptMeta, true)
 
 	llmEngine, err := engine.NewLLMChatEngine(engineCfg)
 	if err != nil {
@@ -657,13 +755,118 @@ func (s *Service) chatWithLLMChat(ctx context.Context, req ChatRequest, rlmExecu
 	}
 
 	// Execute
-	output, err := llmEngine.Run(ctx, input)
+	var output engine.EngineOutput
+	if stream != nil {
+		output, err = llmEngine.RunStreaming(ctx, input, engine.StreamConfig{
+			Stream: true,
+			OnDelta: func(delta engine.StreamDelta) {
+				if stream.OnDelta != nil {
+					stream.OnDelta(ChatStreamDelta{
+						ContentDelta: delta.ContentDelta,
+						FinishReason: delta.FinishReason,
+					})
+				}
+			},
+			OnToolCall: func(call engine.ToolCall) {
+				if stream.OnToolCall != nil {
+					stream.OnToolCall(ChatToolCallEvent{
+						ID:        call.ID,
+						Name:      call.Name,
+						Arguments: call.Arguments,
+					})
+				}
+			},
+			OnToolResult: func(call engine.ToolCall, result engine.ToolResult) {
+				if stream.OnToolResult != nil {
+					stream.OnToolResult(ChatToolResultEvent{
+						ToolCallID: result.ToolCallID,
+						Name:       call.Name,
+						Content:    result.Content,
+						IsError:    result.IsError,
+					})
+				}
+			},
+		})
+	} else {
+		output, err = llmEngine.Run(ctx, input)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("engine run: %w", err)
 	}
 
-	// Strip <think>...</think> blocks from reasoning models (e.g., GLM, DeepSeek)
-	responseText := stripThinkTags(output.AssistantText)
+	enforceGrounded := req.RequireContextQuery != nil && *req.RequireContextQuery
+
+	// Strip <think>...</think> blocks from reasoning models (e.g., GLM, DeepSeek).
+	// Some local models may return only reasoning in <think> tags; if that happens,
+	// run a one-shot recovery prompt to force a visible plain-text answer.
+	rawAssistantText := output.AssistantText
+	responseText := strings.TrimSpace(stripThinkTags(rawAssistantText))
+	if shouldRetryGroundedTurn(enforceGrounded, output, responseText, rlmExecutor.QueryCount()) {
+		retryOutput, retryErr := s.retryGroundedTurn(
+			ctx, req, engineCfg, input, toolExecutor, toolDefs, rlmExecutor, usesRLM,
+		)
+		if retryErr != nil {
+			s.logger.Warn().
+				Err(retryErr).
+				Str("conversation_id", req.ConversationID).
+				Msg("grounded retry failed")
+		} else {
+			// Keep accounting from the original attempt and use retry output as canonical.
+			retryOutput.Tokens.Add(output.Tokens.InputTokens, output.Tokens.OutputTokens)
+			output = retryOutput
+			rawAssistantText = output.AssistantText
+			responseText = strings.TrimSpace(stripThinkTags(rawAssistantText))
+			s.logger.Debug().
+				Str("conversation_id", req.ConversationID).
+				Int("context_queries", rlmExecutor.QueryCount()).
+				Int("tool_calls", len(output.ToolCalls)).
+				Msg("grounded retry completed")
+		}
+	}
+
+	if responseText == "" {
+		if !enforceGrounded {
+			recoveredText, recoveredTokens := s.recoverEmptyAssistantText(ctx, systemPrompt, messages, rawAssistantText)
+			if recoveredText != "" {
+				responseText = recoveredText
+			}
+			if recoveredTokens.InputTokens > 0 || recoveredTokens.OutputTokens > 0 {
+				output.Tokens.Add(recoveredTokens.InputTokens, recoveredTokens.OutputTokens)
+			}
+		}
+	}
+	if enforceGrounded && len(output.ToolCalls) == 0 {
+		forcedCalls, forcedResults, forcedEvidence := s.collectForcedResearchEvidence(ctx, toolExecutor, toolDefs, req.Message)
+		if len(forcedCalls) > 0 {
+			output.ToolCalls = append(output.ToolCalls, forcedCalls...)
+			output.ToolResults = append(output.ToolResults, forcedResults...)
+		}
+		if forcedEvidence != "" {
+			synthText, synthTokens, synthErr := s.synthesizeForcedResearchAnswer(ctx, req, engineCfg, systemPrompt, req.Message, forcedEvidence)
+			if synthErr != nil {
+				s.logger.Warn().
+					Err(synthErr).
+					Str("conversation_id", req.ConversationID).
+					Msg("forced grounded synthesis failed")
+			} else if strings.TrimSpace(synthText) != "" {
+				responseText = strings.TrimSpace(synthText)
+				output.Tokens.Add(synthTokens.InputTokens, synthTokens.OutputTokens)
+				s.logger.Debug().
+					Str("conversation_id", req.ConversationID).
+					Int("forced_tool_calls", len(forcedCalls)).
+					Msg("forced grounded synthesis completed")
+			}
+		}
+		if strings.TrimSpace(responseText) == "" && len(forcedCalls) > 0 {
+			responseText = buildForcedResearchFallbackReport(forcedCalls, forcedResults)
+		}
+	}
+	if enforceGrounded && len(output.ToolCalls) == 0 && strings.TrimSpace(responseText) == "" {
+		responseText = "I could not complete a tool-grounded research pass in this turn. Retry with a narrower target (path/function) or use a model with stronger tool-calling support."
+	}
+	if responseText == "" {
+		responseText = "I couldn't generate a visible response. Please try again."
+	}
 
 	// Build response
 	resp := &ChatResponse{
@@ -723,6 +926,290 @@ func (s *Service) chatWithLLMChat(ctx context.Context, req ChatRequest, rlmExecu
 	return resp, nil
 }
 
+func shouldRetryGroundedTurn(enforceGrounded bool, output engine.EngineOutput, responseText string, contextQueries int) bool {
+	if !enforceGrounded {
+		return false
+	}
+	if output.StopReason == engine.StopReasonError {
+		return true
+	}
+	if strings.TrimSpace(responseText) == "" {
+		return true
+	}
+	if len(output.ToolCalls) == 0 && contextQueries == 0 {
+		return true
+	}
+	return false
+}
+
+func (s *Service) retryGroundedTurn(
+	ctx context.Context,
+	req ChatRequest,
+	engineCfg engine.LLMChatConfig,
+	input engine.EngineInput,
+	toolExecutor engine.ToolExecutor,
+	toolDefs []engine.ToolDef,
+	rlmExecutor *engine.RLMToolExecutor,
+	usesRLM bool,
+) (engine.EngineOutput, error) {
+	retryCfg := engineCfg
+	if retryCfg.MaxIterations > 8 {
+		retryCfg.MaxIterations = 8
+	}
+	if retryCfg.MaxIterations < 3 {
+		retryCfg.MaxIterations = 3
+	}
+
+	retryInput := input
+	retryInput.Messages = append(append([]engine.Message{}, input.Messages...),
+		engine.NewUserMessage("RETRY CONTRACT: Your previous turn did not produce a usable evidence-backed answer. You MUST use available context/code tools before final response. Then provide specific findings with file references in `path:line` format. If evidence is missing, say so explicitly."),
+	)
+
+	return s.runLLMChat(ctx, req, retryCfg, retryInput, toolExecutor, toolDefs, rlmExecutor, usesRLM)
+}
+
+func (s *Service) collectForcedResearchEvidence(
+	ctx context.Context,
+	toolExecutor engine.ToolExecutor,
+	toolDefs []engine.ToolDef,
+	query string,
+) ([]engine.ToolCall, []engine.ToolResult, string) {
+	if toolExecutor == nil || strings.TrimSpace(query) == "" {
+		return nil, nil, ""
+	}
+
+	available := make(map[string]struct{}, len(toolDefs))
+	for _, td := range toolDefs {
+		available[td.Name] = struct{}{}
+	}
+
+	type forcedStep struct {
+		name string
+		args map[string]any
+	}
+
+	pattern := queryToSearchPattern(query)
+	explicitPath := extractLikelyFilePath(query)
+
+	var steps []forcedStep
+	if explicitPath != "" {
+		steps = append(steps,
+			forcedStep{name: "fs.read_file", args: map[string]any{"path": explicitPath}},
+			forcedStep{name: "fs_read_file", args: map[string]any{"path": explicitPath}},
+		)
+	}
+	steps = append(steps,
+		forcedStep{name: "context_search", args: map[string]any{"query": query, "limit": 12}},
+		forcedStep{name: "smart_search", args: map[string]any{"question": query, "max_snippets": 8}},
+		forcedStep{name: "repo_index_search", args: map[string]any{"query": query, "limit": 20}},
+		forcedStep{name: "repo_index_dag_grep", args: map[string]any{"query": query, "render": "tree", "edge_sets": []string{"structural"}, "depth": 2, "budget": 80, "k": 5}},
+		forcedStep{name: "code.search", args: map[string]any{"pattern": pattern, "max_results": 40}},
+	)
+
+	var calls []engine.ToolCall
+	var results []engine.ToolResult
+	var evidenceBlocks []string
+
+	for _, step := range steps {
+		if _, ok := available[step.name]; !ok {
+			continue
+		}
+
+		argBytes, err := json.Marshal(step.args)
+		if err != nil {
+			continue
+		}
+
+		callID := fmt.Sprintf("forced_%s_%d", step.name, len(calls)+1)
+		resultText, callErr := toolExecutor.Execute(ctx, step.name, argBytes)
+
+		calls = append(calls, engine.ToolCall{
+			ID:        callID,
+			Name:      step.name,
+			Arguments: json.RawMessage(argBytes),
+		})
+
+		content := strings.TrimSpace(resultText)
+		isError := callErr != nil
+		if callErr != nil {
+			content = fmt.Sprintf("forced tool call failed: %v", callErr)
+		}
+		content = truncateForPrompt(content, 5000)
+		results = append(results, engine.ToolResult{
+			ToolCallID: callID,
+			Content:    content,
+			IsError:    isError,
+		})
+
+		if content != "" {
+			if isError {
+				evidenceBlocks = append(evidenceBlocks, "## "+step.name+"\nERROR: "+content)
+			} else {
+				evidenceBlocks = append(evidenceBlocks, "## "+step.name+"\n"+content)
+			}
+		}
+	}
+
+	if len(evidenceBlocks) == 0 {
+		return calls, results, ""
+	}
+	return calls, results, strings.Join(evidenceBlocks, "\n\n")
+}
+
+func (s *Service) synthesizeForcedResearchAnswer(
+	ctx context.Context,
+	req ChatRequest,
+	engineCfg engine.LLMChatConfig,
+	systemPrompt string,
+	question string,
+	evidence string,
+) (string, engine.TokenUsage, error) {
+	synthCfg := engineCfg
+	synthCfg.MaxIterations = 2
+	synthCfg.RequireContextQuery = false
+	synthCfg.RLMSystemPromptSuffix = ""
+	synthCfg.ResponseFormat = nil
+
+	synthEngine, err := engine.NewLLMChatEngine(synthCfg)
+	if err != nil {
+		return "", engine.TokenUsage{}, fmt.Errorf("create synth engine: %w", err)
+	}
+
+	synthInput := engine.EngineInput{
+		SystemPrompt: strings.TrimSpace(systemPrompt) + "\n\nYou are synthesizing an answer from provided tool evidence. Do not claim facts that are not in the evidence.",
+		Messages: []engine.Message{
+			engine.NewUserMessage(
+				"Question:\n" + strings.TrimSpace(question) + "\n\n" +
+					"Tool Evidence:\n" + evidence + "\n\n" +
+					"Write a concise answer with sections: Findings, Evidence, Gaps, Next Steps.\n" +
+					"For Evidence, include concrete file references as `path:line` whenever present in the tool outputs.",
+			),
+		},
+	}
+
+	synthOutput, err := synthEngine.Run(ctx, synthInput)
+	if err != nil {
+		return "", engine.TokenUsage{}, fmt.Errorf("run synth engine: %w", err)
+	}
+
+	text := strings.TrimSpace(stripThinkTags(synthOutput.AssistantText))
+	return text, synthOutput.Tokens, nil
+}
+
+func truncateForPrompt(s string, maxLen int) string {
+	if maxLen <= 0 || len(s) <= maxLen {
+		return s
+	}
+	return s[:maxLen] + "\n...(truncated)"
+}
+
+func buildForcedResearchFallbackReport(calls []engine.ToolCall, results []engine.ToolResult) string {
+	toolNameByCallID := make(map[string]string, len(calls))
+	for _, call := range calls {
+		toolNameByCallID[call.ID] = call.Name
+	}
+
+	var b strings.Builder
+	b.WriteString("Findings\n")
+	b.WriteString("The model did not complete a native tool-calling response, so a forced tool evidence pass was executed.\n\n")
+	b.WriteString("Evidence\n")
+	for _, result := range results {
+		name := toolNameByCallID[result.ToolCallID]
+		if name == "" {
+			name = result.ToolCallID
+		}
+		line := strings.ReplaceAll(strings.TrimSpace(result.Content), "\n", " ")
+		line = truncateForPrompt(line, 260)
+		if result.IsError {
+			b.WriteString("- " + name + ": ERROR: " + line + "\n")
+		} else {
+			b.WriteString("- " + name + ": " + line + "\n")
+		}
+	}
+	b.WriteString("\nGaps\n")
+	b.WriteString("- A native model tool-calling turn did not complete in this request.\n")
+	b.WriteString("- If you need deeper source grounding, retry with a narrower query (specific file/function) or a stronger tool-calling model.\n")
+	return b.String()
+}
+
+func queryToSearchPattern(query string) string {
+	fields := strings.Fields(query)
+	if len(fields) == 0 {
+		return query
+	}
+	var terms []string
+	for _, f := range fields {
+		clean := strings.Trim(strings.TrimSpace(f), ".,:;!?()[]{}\"'")
+		if len(clean) < 3 {
+			continue
+		}
+		switch strings.ToLower(clean) {
+		case "the", "and", "for", "with", "this", "that", "from", "into", "how", "what", "where", "when", "which", "does", "were", "have", "has", "our", "your":
+			continue
+		}
+		terms = append(terms, clean)
+		if len(terms) == 4 {
+			break
+		}
+	}
+	if len(terms) == 0 {
+		return query
+	}
+	return strings.Join(terms, "|")
+}
+
+func extractLikelyFilePath(query string) string {
+	for _, token := range strings.Fields(query) {
+		clean := strings.Trim(strings.TrimSpace(token), ".,:;!?()[]{}\"'`")
+		if strings.Contains(clean, "/") &&
+			(strings.Contains(clean, ".go") || strings.Contains(clean, ".ts") || strings.Contains(clean, ".tsx") || strings.Contains(clean, ".js") || strings.Contains(clean, ".rs") || strings.Contains(clean, ".py") || strings.Contains(clean, ".md")) {
+			return clean
+		}
+	}
+	return ""
+}
+
+// recoverEmptyAssistantText attempts a one-shot recovery when a model returns a
+// non-empty assistant payload that becomes empty after stripping <think> tags.
+func (s *Service) recoverEmptyAssistantText(ctx context.Context, systemPrompt string, messages []engine.Message, rawAssistantText string) (string, engine.TokenUsage) {
+	recoveryCfg := engine.LLMChatConfig{
+		Provider:            s.config.LLMProvider,
+		APIKey:              s.config.LLMAPIKey,
+		Model:               s.config.LLMModel,
+		MaxIterations:       2,
+		Timeout:             s.config.Timeout,
+		StatelessMode:       true,
+		RequireContextQuery: false,
+	}
+
+	recoveryEngine, err := engine.NewLLMChatEngine(recoveryCfg)
+	if err != nil {
+		s.logger.Debug().Err(err).Msg("empty-response recovery disabled: create engine failed")
+		return "", engine.TokenUsage{}
+	}
+
+	recoveryMessages := append([]engine.Message{}, messages...)
+	if strings.TrimSpace(rawAssistantText) != "" {
+		recoveryMessages = append(recoveryMessages, engine.NewAssistantMessage(rawAssistantText))
+	}
+	recoveryMessages = append(recoveryMessages, engine.NewUserMessage(
+		"Your previous output did not contain a visible final answer. Return only the final user-facing answer now in plain text. Do not use <think> tags.",
+	))
+
+	recoveryInput := engine.EngineInput{
+		SystemPrompt: strings.TrimSpace(systemPrompt) + "\n\nReturn only plain text for the user-facing answer.",
+		Messages:     recoveryMessages,
+	}
+
+	recoveryOutput, err := recoveryEngine.Run(ctx, recoveryInput)
+	if err != nil {
+		s.logger.Debug().Err(err).Msg("empty-response recovery call failed")
+		return "", engine.TokenUsage{}
+	}
+
+	return strings.TrimSpace(stripThinkTags(recoveryOutput.AssistantText)), recoveryOutput.Tokens
+}
+
 // buildChatMessages constructs the message list for a turn by injecting recent conversation
 // history from companion memory (when enabled), followed by the current user message.
 //
@@ -737,7 +1224,7 @@ func (s *Service) buildChatMessages(ctx context.Context, req ChatRequest) ([]eng
 	historyLimit := req.MaxHistoryTurns
 	switch {
 	case historyLimit == 0:
-		historyLimit = defaultMaxHistoryTurns
+		historyLimit = s.config.MemoryBehavior.HistoryTurnLimit
 	case historyLimit < 0:
 		historyLimit = 0
 	}
@@ -830,7 +1317,7 @@ type dialogueEnvelope struct {
 // - FailureModes: gather/dialogue errors, response format parsing failures
 // - Related: runLLMChatWithResponseFormatFallback, parseStoryContextBundle, parseDialogueEnvelope
 // - Keywords: story_mode, gather_model, dialogue_model, response_format, tools_used, conversation_id
-func (s *Service) chatWithStoryLoop(ctx context.Context, req ChatRequest, rlmExecutor *engine.RLMToolExecutor, systemPrompt string, start time.Time) (*ChatResponse, error) {
+func (s *Service) chatWithStoryLoop(ctx context.Context, req ChatRequest, rlmExecutor *engine.RLMToolExecutor, systemPrompt string, promptMeta memoryPromptMetadata, start time.Time) (*ChatResponse, error) {
 	messages, hasHistory := s.buildChatMessages(ctx, req)
 
 	gatherModel := s.config.StoryGatherModel
@@ -864,20 +1351,7 @@ func (s *Service) chatWithStoryLoop(ctx context.Context, req ChatRequest, rlmExe
 		ActionExecutor:        s.config.ActionExecutor,
 		ResponseFormat:        storyGatherResponseFormat(),
 	}
-	if req.RequireContextQuery != nil {
-		gatherCfg.RequireContextQuery = *req.RequireContextQuery
-	}
-	if !usesRLM {
-		gatherCfg.RequireContextQuery = false
-		gatherCfg.RLMSystemPromptSuffix = ""
-	}
-	if hasHistory && req.RequireContextQuery == nil {
-		gatherCfg.RequireContextQuery = false
-	}
-	if len(s.config.ToolsAllow) > 0 && !containsString(s.config.ToolsAllow, "rlm_context_query") {
-		gatherCfg.RequireContextQuery = false
-		gatherCfg.RLMSystemPromptSuffix = ""
-	}
+	s.applyRetentionAwareContextPolicy(&gatherCfg, req, hasHistory, promptMeta, usesRLM)
 
 	gatherInput := engine.EngineInput{
 		SystemPrompt: buildStoryGatherPrompt(systemPrompt),
@@ -1282,16 +1756,17 @@ func storyDialogueResponseFormat() json.RawMessage {
 	return json.RawMessage(storyDialogueResponseFormatJSON)
 }
 
-// buildSystemPrompt constructs the system prompt with personality, memory context, and agent identity.
+// buildSystemPrompt constructs the system prompt with personality, hybrid memory context, and agent identity.
 //
 // Index:
 // - Purpose: Assemble system prompt from personality + memory + request context
-// - Flow: load personality → build evolving prompt → inject memory context → inject request context via formatRequestContext
+// - Flow: load personality → build evolving prompt → inject hybrid memory context → inject request context via formatRequestContext
 // - SideEffects: reads contextvar store and conversation memory
 // - FailureModes: personality/memory errors yield partial prompt with defaults
-// - Related: EvolvingPersonality.BuildSystemPrompt, ConversationMemory.GetContext, formatRequestContext
+// - Related: EvolvingPersonality.BuildSystemPrompt, ConversationMemory.GetHybridContext, formatRequestContext
 // - Keywords: system_prompt, personality, memory_context, request_context, agent_identity
-func (s *Service) buildSystemPrompt(ctx context.Context, req ChatRequest) (string, error) {
+func (s *Service) buildSystemPrompt(ctx context.Context, req ChatRequest) (string, memoryPromptMetadata, error) {
+	meta := memoryPromptMetadata{}
 	basePersonality := req.Personality
 	if basePersonality == "" {
 		// Try to load stored base personality for this conversation
@@ -1318,43 +1793,36 @@ func (s *Service) buildSystemPrompt(ctx context.Context, req ChatRequest) (strin
 	// Include conversation memory context if available
 	s.logger.Debug().Bool("memory_available", s.memory != nil).Str("conversation_id", req.ConversationID).Msg("Checking memory for chat")
 	if s.memory != nil {
-		usedHybridContext := false
-		// Prefer hybrid memory context when enabled.
-		if s.config.UseHybridMemory && s.supportsHybridMemory() {
-			if mode, err := s.getMemoryMode(ctx, req.ConversationID); err == nil && strings.TrimSpace(mode) == "hybrid" {
-				hybridCtx, err := s.getHybridContext(ctx, req.ConversationID, "")
-				if err != nil {
-					s.logger.Warn().Err(err).Msg("Failed to get hybrid memory context")
-				} else if strings.TrimSpace(hybridCtx) != "" {
-					usedHybridContext = true
-					s.logger.Debug().Int("context_len", len(hybridCtx)).Msg("Hybrid memory context retrieved, injecting into prompt")
-					systemPrompt = systemPrompt + "\n\n# Conversation Memory\n" + hybridCtx
-				}
-			} else if err != nil {
-				s.logger.Warn().Err(err).Msg("Failed to check hybrid memory mode")
-			}
+		layeredCtx, err := s.getLayeredMemoryContext(ctx, req.ConversationID)
+		if err != nil {
+			s.logger.Warn().Err(err).Msg("Failed to get layered memory context")
+		} else if strings.TrimSpace(layeredCtx) != "" {
+			s.logger.Debug().Int("context_len", len(layeredCtx)).Msg("Layered memory context retrieved, injecting into prompt")
+			systemPrompt = systemPrompt + "\n\n# Conversation Memory\n" + layeredCtx
+			meta.HasLayeredContext = true
+		} else {
+			s.logger.Debug().Msg("Layered memory context is empty")
 		}
-
-		if !usedHybridContext {
-			memoryContext, err := s.memory.GetContext(ctx, req.ConversationID)
-			if err != nil {
-				s.logger.Warn().Err(err).Msg("Failed to get memory context")
-			} else if memoryContext != "" {
-				s.logger.Debug().Int("context_len", len(memoryContext)).Msg("Memory context retrieved, injecting into prompt")
-				systemPrompt = systemPrompt + "\n\n# Conversation Memory\n" + memoryContext
-			} else {
-				s.logger.Debug().Msg("Memory context is empty")
-			}
+		recalled := s.getImplicitMemoryRecalls(ctx, req)
+		if len(recalled) > 0 {
+			systemPrompt = systemPrompt + "\n\n# Relevant Recalled Memory\n" + formatImplicitMemoryRecalls(recalled)
+			meta.ImplicitRecallCount = len(recalled)
 		}
 	} else {
 		s.logger.Debug().Msg("Memory is nil, skipping context injection")
+	}
+
+	sessionMatches := s.getImplicitSessionRecalls(ctx, req)
+	if len(sessionMatches) > 0 {
+		systemPrompt = systemPrompt + "\n\n# Related Past Sessions\n" + formatSessionRecallMatches(sessionMatches)
+		meta.SessionRecallCount = len(sessionMatches)
 	}
 
 	if len(req.Context) > 0 {
 		systemPrompt = systemPrompt + "\n\n" + formatRequestContext(req.Context)
 	}
 
-	return systemPrompt, nil
+	return systemPrompt, meta, nil
 }
 
 // formatRequestContext formats the request context map as a human-readable prompt section.
@@ -1420,6 +1888,188 @@ func formatRequestContext(ctx map[string]any) string {
 	return strings.Join(sections, "\n\n")
 }
 
+func (s *Service) getImplicitMemoryRecalls(ctx context.Context, req ChatRequest) []storage.ScoredEntry {
+	if s.memory == nil || !shouldInjectImplicitRecall(req.Message, s.config.MemoryBehavior) {
+		return nil
+	}
+
+	merged := map[string]storage.ScoredEntry{}
+	addResults := func(results []storage.ScoredEntry) {
+		for _, result := range results {
+			if result.Score < s.config.MemoryBehavior.ImplicitRecallMinScore {
+				continue
+			}
+			existing, ok := merged[result.Entry.Name]
+			if !ok || result.Score > existing.Score {
+				merged[result.Entry.Name] = result
+			}
+		}
+	}
+
+	addResults(s.getImplicitConversationRecalls(ctx, req))
+	addResults(s.getImplicitWorkspaceMemoryRecalls(ctx, req))
+
+	if len(merged) == 0 {
+		return nil
+	}
+
+	results := make([]storage.ScoredEntry, 0, len(merged))
+	for _, result := range merged {
+		results = append(results, result)
+	}
+	sort.SliceStable(results, func(i, j int) bool {
+		if results[i].Score == results[j].Score {
+			return results[i].Entry.Name < results[j].Entry.Name
+		}
+		return results[i].Score > results[j].Score
+	})
+	if len(results) > s.config.MemoryBehavior.ImplicitRecallLimit {
+		results = results[:s.config.MemoryBehavior.ImplicitRecallLimit]
+	}
+	return results
+}
+
+func (s *Service) getImplicitConversationRecalls(ctx context.Context, req ChatRequest) []storage.ScoredEntry {
+	results, err := s.memory.SearchCompanionMemories(ctx, req.ConversationID, req.Message, s.config.MemoryBehavior.ImplicitRecallLimit*2)
+	if err != nil {
+		s.logger.Debug().Err(err).Str("conversation_id", req.ConversationID).Msg("Conversation-local implicit recall skipped")
+		return nil
+	}
+	return results
+}
+
+func (s *Service) getImplicitWorkspaceMemoryRecalls(ctx context.Context, req ChatRequest) []storage.ScoredEntry {
+	if s.config.MemoryBehavior.SemanticRecallLimit <= 0 {
+		return nil
+	}
+	if s.memory == nil || s.memory.memoryStore == nil || strings.TrimSpace(s.memory.workspace) == "" {
+		return nil
+	}
+
+	fetchLimit := s.config.MemoryBehavior.SemanticRecallLimit * 4
+	if fetchLimit < 8 {
+		fetchLimit = 8
+	}
+
+	query := semantic.EnrichQuery(req.Message)
+	results, usedBM25, err := s.searchImplicitWorkspaceMemories(ctx, query, fetchLimit)
+	if err != nil {
+		s.logger.Debug().Err(err).Str("conversation_id", req.ConversationID).Msg("Workspace implicit recall skipped")
+		return nil
+	}
+
+	filtered := make([]storage.ScoredEntry, 0, len(results))
+	for _, result := range results {
+		if !isImplicitWorkspaceMemoryCandidate(result.Entry) {
+			continue
+		}
+		if strings.TrimSpace(result.Entry.Summary) == "" {
+			continue
+		}
+		if usedBM25 {
+			result.Score = normalizeImplicitRecallBM25Score(result.Score)
+		}
+		if strings.TrimSpace(result.Entry.SessionID) == strings.TrimSpace(req.ConversationID) {
+			result.Score = minFloat(1.0, result.Score+0.1)
+		}
+		filtered = append(filtered, result)
+	}
+
+	sort.SliceStable(filtered, func(i, j int) bool {
+		if filtered[i].Score == filtered[j].Score {
+			return filtered[i].Entry.Name < filtered[j].Entry.Name
+		}
+		return filtered[i].Score > filtered[j].Score
+	})
+	if len(filtered) > s.config.MemoryBehavior.SemanticRecallLimit {
+		filtered = filtered[:s.config.MemoryBehavior.SemanticRecallLimit]
+	}
+	return filtered
+}
+
+func (s *Service) getImplicitSessionRecalls(ctx context.Context, req ChatRequest) []SessionRecallMatch {
+	if s.config.SessionRecallProvider == nil {
+		return nil
+	}
+	if !shouldInjectSessionRecall(req.Message, s.config.MemoryBehavior) {
+		return nil
+	}
+
+	matches, err := s.config.SessionRecallProvider.RecallSessions(ctx, SessionRecallRequest{
+		Query:                 req.Message,
+		Workspace:             s.config.MemoryWorkspace,
+		Limit:                 s.config.MemoryBehavior.SessionRecallLimit,
+		MinSimilarity:         s.config.MemoryBehavior.SessionRecallMinScore,
+		IncludeTimeline:       s.config.MemoryBehavior.SessionTimelineSummaryLimit > 0 || s.config.MemoryBehavior.SessionTimelineLearningLimit > 0,
+		TimelineSummaryLimit:  s.config.MemoryBehavior.SessionTimelineSummaryLimit,
+		TimelineLearningLimit: s.config.MemoryBehavior.SessionTimelineLearningLimit,
+	})
+	if err != nil {
+		s.logger.Debug().Err(err).Str("conversation_id", req.ConversationID).Msg("Session implicit recall skipped")
+		return nil
+	}
+	return matches
+}
+
+func (s *Service) searchImplicitWorkspaceMemories(ctx context.Context, query string, limit int) ([]storage.ScoredEntry, bool, error) {
+	if s.memory == nil || s.memory.memoryStore == nil {
+		return nil, false, nil
+	}
+	if s.memory.embedder != nil {
+		result, err := s.memory.embedder.EmbedQuery(ctx, query)
+		if err == nil && len(result.Vec) > 0 {
+			scored, searchErr := s.memory.memoryStore.SearchSimilar(ctx, s.memory.workspace, result.Vec, limit)
+			if searchErr == nil && len(scored) > 0 {
+				return scored, false, nil
+			}
+			if searchErr != nil {
+				s.logger.Debug().Err(searchErr).Msg("workspace semantic recall failed, falling back to BM25")
+			}
+		} else if err != nil {
+			s.logger.Debug().Err(err).Msg("workspace query embedding failed, falling back to BM25")
+		}
+	}
+
+	scored, err := s.memory.memoryStore.Search(ctx, s.memory.workspace, query, limit)
+	if err != nil {
+		return nil, true, err
+	}
+	return scored, true, nil
+}
+
+func isImplicitWorkspaceMemoryCandidate(entry storage.NamedEntry) bool {
+	switch entry.Type {
+	case "code_symbol", "symbol", "file_embedding", "edit", "codemap", "codemap_chunk", "task_embedding":
+		return false
+	default:
+		return true
+	}
+}
+
+func normalizeImplicitRecallBM25Score(score float64) float64 {
+	normalized := 0.3 + (score * 0.7)
+	if normalized > 1.0 {
+		return 1.0
+	}
+	return normalized
+}
+
+func formatImplicitMemoryRecalls(results []storage.ScoredEntry) string {
+	if len(results) == 0 {
+		return ""
+	}
+	lines := make([]string, 0, len(results))
+	for _, result := range results {
+		summary := strings.TrimSpace(result.Entry.Summary)
+		if summary == "" {
+			continue
+		}
+		summary = truncateForPrompt(strings.ReplaceAll(summary, "\n", " "), 240)
+		lines = append(lines, fmt.Sprintf("- [%s %.2f] %s", result.Entry.Type, result.Score, summary))
+	}
+	return strings.Join(lines, "\n")
+}
+
 // addAutonomousInstructions adds thinking phase instructions for autonomous/proactive modes.
 func (s *Service) addAutonomousInstructions(systemPrompt string, execMode agent.ExecutionMode) string {
 	var instructions string
@@ -1452,6 +2102,41 @@ Be thorough in your information gathering and don't hesitate to make helpful sug
 	}
 
 	return systemPrompt + instructions
+}
+
+func (s *Service) applyRetentionAwareContextPolicy(engineCfg *engine.LLMChatConfig, req ChatRequest, hasHistory bool, promptMeta memoryPromptMetadata, usesRLM bool) {
+	if engineCfg == nil {
+		return
+	}
+
+	if req.RequireContextQuery != nil {
+		engineCfg.RequireContextQuery = *req.RequireContextQuery
+	}
+	if (s.config.ExtraToolsOnly && s.config.ExtraToolExecutor != nil) || !usesRLM {
+		engineCfg.RequireContextQuery = false
+		engineCfg.RLMSystemPromptSuffix = ""
+	}
+
+	// If we have meaningful conversation history, don't force a context query —
+	// the model can see the conversation. Context tools remain available for
+	// long-term memory/preferences but aren't mandatory.
+	if hasHistory && req.RequireContextQuery == nil {
+		engineCfg.RequireContextQuery = false
+	}
+
+	if len(s.config.ToolsAllow) > 0 && !containsString(s.config.ToolsAllow, "rlm_context_query") {
+		engineCfg.RequireContextQuery = false
+		engineCfg.RLMSystemPromptSuffix = ""
+	}
+
+	if req.RequireContextQuery == nil &&
+		!hasHistory &&
+		!promptMeta.HasLayeredContext &&
+		promptMeta.ImplicitRecallCount == 0 &&
+		promptMeta.SessionRecallCount == 0 &&
+		s.config.MemoryBehavior.RequireContextQueryWhenMemorySparse {
+		engineCfg.RequireContextQuery = true
+	}
 }
 
 // storeConversationTurns saves the conversation to memory.
@@ -1490,22 +2175,43 @@ func (s *Service) storeConversationTurns(ctx context.Context, req ChatRequest, r
 		s.logger.Warn().Err(err).Msg("Failed to store assistant turn")
 	}
 
-	// Auto-trigger L1/L2 compression in background if needed.
+	if !s.shouldAutoCompress(ctx, req.ConversationID) {
+		return
+	}
+
+	// Auto-trigger hybrid context processing in background.
 	// Detach from request cancellation but preserve context values (logger, tracing).
 	go s.autoCompress(context.WithoutCancel(ctx), req.ConversationID)
 }
 
-// autoCompress checks if L1 (daily summaries) or L2 (weekly distillation) need
-// to run for a conversation and triggers them in-process. This ensures memory
-// layers stay populated without relying on the external compression daemon.
+func (s *Service) shouldAutoCompress(ctx context.Context, conversationID string) bool {
+	if s.memory == nil || strings.TrimSpace(conversationID) == "" {
+		return false
+	}
+	stats, err := s.memory.GetStats(ctx, conversationID)
+	if err != nil {
+		s.logger.Debug().Err(err).Str("conversation_id", conversationID).Msg("Auto compression stats unavailable, falling back to enabled")
+		return true
+	}
+	if !shouldTriggerAutoCompress(s.config.MemoryBehavior, stats.TotalTurns) {
+		s.logger.Debug().
+			Str("conversation_id", conversationID).
+			Int("total_turns", stats.TotalTurns).
+			Msg("Auto compression deferred by retention policy")
+		return false
+	}
+	return true
+}
+
+// autoCompress triggers in-process hybrid memory processing for a conversation.
 //
 // Index:
-// - Purpose: Keep L1/L2 memory layers populated after each companion chat turn
-// - Flow: de-dupe per conversation → derive bounded context → run pending L1 compression → run L2 weekly distillation
-// - SideEffects: may invoke summarizer/LLM and write summary rows to SQLite
-// - FailureModes: context cancellation/timeouts; missing summarizer; DB/LLM errors (logged, best-effort)
-// - Related: ConversationMemory.RunPendingDailyCompression, ConversationMemory.RunWeeklyDistillation
-// - Keywords: companion_memory, auto_compress, L1, L2, summaries, distillation
+// - Purpose: Keep hybrid layers current after each companion chat turn
+// - Flow: de-dupe per conversation → ensure mode → process events/context
+// - SideEffects: writes hybrid artifacts/tables; may invoke episode summarizer
+// - FailureModes: context cancellation/timeouts; DB/LLM errors (logged, best-effort)
+// - Related: ConversationMemory.EnsureHybridMode, ConversationMemory.BuildHybridContextLayers
+// - Keywords: companion_memory, auto_compress, hybrid, context_layers
 func (s *Service) autoCompress(ctx context.Context, conversationID string) {
 	s.logger.Debug().Str("conversation_id", conversationID).Bool("memory_set", s.memory != nil).Msg("autoCompress called")
 	if s.memory == nil {
@@ -1535,45 +2241,14 @@ func (s *Service) autoCompress(ctx context.Context, conversationID string) {
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
 
-	s.logger.Debug().Bool("use_hybrid", s.config.UseHybridMemory).Bool("supports_hybrid", s.supportsHybridMemory()).Msg("autoCompress: checking hybrid mode")
-	if s.config.UseHybridMemory && s.supportsHybridMemory() {
-		mode, err := s.getMemoryMode(ctx, conversationID)
-		s.logger.Debug().Str("conversation_id", conversationID).Str("mode", mode).Err(err).Msg("autoCompress: getMemoryMode")
-		if err != nil {
-			s.logger.Debug().Err(err).Str("conversation_id", conversationID).Msg("Failed to check memory mode")
-		}
-		if mode == "hybrid" || (mode == "" && s.config.UseHybridMemory) {
-			if err := s.ensureHybridMode(ctx, conversationID); err != nil {
-				s.logger.Debug().Err(err).Str("conversation_id", conversationID).Msg("Failed to ensure hybrid mode")
-			}
-
-			if err := s.buildHybridContext(ctx, conversationID); err != nil {
-				s.logger.Debug().Err(err).Str("conversation_id", conversationID).Msg("Hybrid pipeline failed, falling back to legacy")
-			} else {
-				s.logger.Debug().Str("conversation_id", conversationID).Msg("autoCompress: hybrid context built successfully")
-				return
-			}
-		}
+	if err := s.ensureHybridMode(ctx, conversationID); err != nil {
+		s.logger.Debug().Err(err).Str("conversation_id", conversationID).Msg("Failed to ensure hybrid mode")
 	}
-
-	// L1: summarize the next pending day (catch-up/backfill)
-	if err := s.memory.RunPendingDailyCompression(ctx, conversationID); err != nil {
-		// "no summarizer configured" is expected when LLM is not set up for summarization
-		if err.Error() != "no summarizer configured" {
-			s.logger.Debug().Err(err).Str("conversation_id", conversationID).Msg("Auto L1 compression skipped")
-		}
-	} else {
-		s.logger.Debug().Str("conversation_id", conversationID).Msg("Auto L1 compression completed")
+	if err := s.buildHybridContext(ctx, conversationID); err != nil {
+		s.logger.Warn().Err(err).Str("conversation_id", conversationID).Msg("Hybrid pipeline failed")
+		return
 	}
-
-	// L2: distill old summaries into history
-	if err := s.memory.RunWeeklyDistillation(ctx, conversationID); err != nil {
-		if err.Error() != "no summarizer configured" {
-			s.logger.Debug().Err(err).Str("conversation_id", conversationID).Msg("Auto L2 distillation skipped")
-		}
-	} else {
-		s.logger.Debug().Str("conversation_id", conversationID).Msg("Auto L2 distillation completed")
-	}
+	s.logger.Debug().Str("conversation_id", conversationID).Msg("autoCompress: hybrid context built successfully")
 }
 
 // SetContext stores a context variable for a conversation.
@@ -1655,20 +2330,14 @@ func (s *Service) GetContext(ctx context.Context, conversationID string) (*Conte
 		TotalCount:     result.TotalCount,
 	}
 
-	if s.config.UseHybridMemory && s.supportsHybridMemory() {
-		mode, err := s.getMemoryMode(ctx, conversationID)
-		if err != nil {
-			s.logger.Debug().Err(err).Str("conversation_id", conversationID).Msg("Failed to check memory mode for context")
+	if s.memory != nil {
+		layeredCtx, err := s.getLayeredMemoryContext(ctx, conversationID)
+		if err == nil {
+			response.HybridContext = layeredCtx
 		}
-		if strings.TrimSpace(mode) == "hybrid" {
-			hybridCtx, err := s.getHybridContext(ctx, conversationID, "")
-			if err == nil {
-				response.HybridContext = hybridCtx
-			}
-			state, err := s.getHybridContextState(ctx, conversationID)
-			if err == nil {
-				response.HybridState = state
-			}
+		state, err := s.getHybridContextState(ctx, conversationID)
+		if err == nil {
+			response.HybridState = state
 		}
 	}
 
@@ -1780,80 +2449,33 @@ func (s *Service) GetMemoryContext(ctx context.Context, conversationID string) (
 	if s.memory == nil {
 		return "", fmt.Errorf("memory features not enabled")
 	}
-	return s.memory.GetContext(ctx, conversationID)
-}
-
-func (s *Service) supportsHybridMemory() bool {
-	if s.memory == nil {
-		return false
-	}
-
-	type modeGetter interface {
-		GetMemoryMode(context.Context, string) (string, error)
-	}
-	type modeInitializer interface {
-		EnsureHybridMode(context.Context, string) error
-	}
-	type contextBuilder interface {
-		BuildHybridContextLayers(context.Context, string) error
-	}
-	type contextReader interface {
-		GetHybridContext(context.Context, string, string) (string, error)
-	}
-
-	_, hasMode := any(s.memory).(modeGetter)
-	_, hasInitializer := any(s.memory).(modeInitializer)
-	_, hasBuilder := any(s.memory).(contextBuilder)
-	_, hasReader := any(s.memory).(contextReader)
-	return hasMode && hasInitializer && hasBuilder && hasReader
-}
-
-func (s *Service) getMemoryMode(ctx context.Context, conversationID string) (string, error) {
-	type modeGetter interface {
-		GetMemoryMode(context.Context, string) (string, error)
-	}
-
-	getter, ok := any(s.memory).(modeGetter)
-	if !ok {
-		return "", fmt.Errorf("hybrid memory mode API unavailable")
-	}
-	return getter.GetMemoryMode(ctx, conversationID)
+	return s.getLayeredMemoryContext(ctx, conversationID)
 }
 
 func (s *Service) ensureHybridMode(ctx context.Context, conversationID string) error {
-	type modeInitializer interface {
-		EnsureHybridMode(context.Context, string) error
-	}
-
-	initializer, ok := any(s.memory).(modeInitializer)
-	if !ok {
-		return fmt.Errorf("hybrid mode initialize API unavailable")
-	}
-	return initializer.EnsureHybridMode(ctx, conversationID)
+	return s.memory.EnsureHybridMode(ctx, conversationID)
 }
 
 func (s *Service) buildHybridContext(ctx context.Context, conversationID string) error {
-	type contextBuilder interface {
-		BuildHybridContextLayers(context.Context, string) error
-	}
-
-	builder, ok := any(s.memory).(contextBuilder)
-	if !ok {
-		return fmt.Errorf("hybrid context build API unavailable")
-	}
-	return builder.BuildHybridContextLayers(ctx, conversationID)
+	return s.memory.BuildHybridContextLayers(ctx, conversationID)
 }
 
-func (s *Service) getHybridContext(ctx context.Context, conversationID, query string) (string, error) {
-	type contextReader interface {
-		GetHybridContext(context.Context, string, string) (string, error)
+func (s *Service) getLayeredMemoryContext(ctx context.Context, conversationID string) (string, error) {
+	if s.layeredCtx == nil {
+		return "", fmt.Errorf("layered context builder not configured")
 	}
-
-	reader, ok := any(s.memory).(contextReader)
-	if !ok {
-		return "", fmt.Errorf("hybrid context API unavailable")
+	maxChars := 0
+	if s.memory != nil {
+		maxChars = s.memory.LayerBudget().Total * 4
 	}
-	return reader.GetHybridContext(ctx, conversationID, query)
+	bundle, err := s.layeredCtx.BuildLayered(ctx, contextbuilder.LayeredRequest{
+		SessionID: strings.TrimSpace(conversationID),
+		MaxChars:  maxChars,
+	})
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(bundle.Content), nil
 }
 
 func (s *Service) getHybridContextState(ctx context.Context, conversationID string) (*HybridDebugInfo, error) {
@@ -1947,6 +2569,41 @@ func (s *Service) ExportMemory(ctx context.Context, conversationID string) (json
 		return nil, fmt.Errorf("memory features not enabled")
 	}
 	return s.memory.Export(ctx, conversationID)
+}
+
+// ImportMemory restores companion memory state for a conversation from backup JSON.
+func (s *Service) ImportMemory(ctx context.Context, conversationID string, payload json.RawMessage) error {
+	if s.memory == nil {
+		return fmt.Errorf("memory features not enabled")
+	}
+	if strings.TrimSpace(conversationID) == "" {
+		return fmt.Errorf("conversation_id is required")
+	}
+
+	var backup MemoryBackupPayload
+	if err := json.Unmarshal(payload, &backup); err != nil {
+		return fmt.Errorf("decode import payload: %w", err)
+	}
+	if strings.TrimSpace(backup.ConversationID) == "" {
+		backup.ConversationID = conversationID
+		bytes, marshalErr := json.Marshal(backup)
+		if marshalErr != nil {
+			return fmt.Errorf("normalize import payload: %w", marshalErr)
+		}
+		payload = bytes
+	} else if backup.ConversationID != conversationID {
+		return fmt.Errorf("conversation_id mismatch between path and payload")
+	}
+
+	return s.memory.Import(ctx, payload)
+}
+
+// SearchMemory queries hybrid companion memory artifacts for a conversation.
+func (s *Service) SearchMemory(ctx context.Context, conversationID, query string, limit int) ([]storage.ScoredEntry, error) {
+	if s.memory == nil {
+		return nil, fmt.Errorf("memory features not enabled")
+	}
+	return s.memory.SearchCompanionMemories(ctx, conversationID, query, limit)
 }
 
 // ClearMemory removes all conversation memory for a conversation.
@@ -2044,10 +2701,10 @@ func (s *Service) GetPersonalityInfo(ctx context.Context, conversationID string)
 		systemPrompt = basePersonality
 	}
 
-	// Get memory context if available
+	// Get hybrid memory context if available
 	var memoryContext string
 	if s.memory != nil {
-		memoryContext, _ = s.memory.GetContext(ctx, conversationID)
+		memoryContext, _ = s.getLayeredMemoryContext(ctx, conversationID)
 	}
 
 	return &PersonalityInfo{

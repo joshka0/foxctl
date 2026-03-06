@@ -1,5 +1,4 @@
-// companion_memory_test demonstrates the conversation memory system with temporal decay.
-// Shows L0 (vivid) → L1 (summarized) → L2 (distilled) progression.
+// companion_memory_test demonstrates the v2 hybrid companion memory system.
 //
 // Run with: go run ./cmd/companion_memory_test/
 package main
@@ -147,23 +146,20 @@ func main() {
 	stats, _ := companionMemory.GetStats(ctx, convID)
 	fmt.Printf("\n📊 Memory Stats:\n")
 	fmt.Printf("   Total turns: %d\n", stats.TotalTurns)
-	fmt.Printf("   Day summaries: %d\n", stats.DaySummaries)
-	fmt.Printf("   Has distilled history: %v\n", stats.HasDistilledHistory)
+	fmt.Printf("   Events: %d\n", stats.EventCount)
+	fmt.Printf("   Hard state: %d\n", stats.HardStateCount)
 
-	// Get current context (L0 only - no compression yet)
+	// Get current context (hybrid layers before maintenance pass)
 	fmt.Println("\n━━━ Current Context (L0 - Vivid) ━━━")
-	context1, _ := companionMemory.GetContext(ctx, convID)
+	context1, _ := companionMemory.GetHybridContext(ctx, convID, "")
 	if context1 != "" {
 		fmt.Println(context1)
 	} else {
 		fmt.Println("(no vivid context - old turns are outside window)")
 	}
 
-	// Now simulate running daily compression
-	fmt.Println("\n━━━ Running Daily Compression (L0 → L1) ━━━")
-
-	// For testing, we need a summarizer. Create a mock one.
-	mockSummarizer := &mockSummarizer{}
+	// Now simulate running hybrid maintenance
+	fmt.Println("\n━━━ Running Hybrid Maintenance ━━━")
 
 	// Try to create an embedder for vector search (uses VOYAGE_API_KEY from config/.env)
 	var embedder *semantic.Embedder
@@ -179,7 +175,6 @@ func main() {
 	// Create memory with all options
 	memOpts := []companion.MemoryOption{
 		companion.WithMemoryConfig(cfg),
-		companion.WithSummarizer(mockSummarizer),
 		companion.WithMemoryStore(memoryStore, "test-workspace"), // Enable semantic search storage
 	}
 	if embedder != nil {
@@ -191,22 +186,22 @@ func main() {
 		os.Exit(1)
 	}
 
-	if err := memoryWithSummarizer.RunDailyCompression(ctx, convID); err != nil {
-		fmt.Printf("Daily compression error: %v\n", err)
+	if _, err := memoryWithSummarizer.RunDayCompression(ctx, convID, "", false); err != nil {
+		fmt.Printf("Daily hybrid maintenance error: %v\n", err)
 	} else {
-		fmt.Println("✅ Daily compression complete")
+		fmt.Println("✅ Daily hybrid maintenance complete")
 	}
 
 	// Show updated stats
 	stats, _ = memoryWithSummarizer.GetStats(ctx, convID)
 	fmt.Printf("\n📊 Updated Stats:\n")
 	fmt.Printf("   Total turns: %d\n", stats.TotalTurns)
-	fmt.Printf("   Day summaries: %d\n", stats.DaySummaries)
-	fmt.Printf("   Last summarized: %s\n", stats.LastSummarizedDate)
+	fmt.Printf("   Episodes: %d\n", stats.EpisodeCount)
+	fmt.Printf("   Last processed event: %d\n", stats.LastProcessedEvent)
 
-	// Get context with summaries
+	// Get context after hybrid maintenance pass
 	fmt.Println("\n━━━ Context with Memory (L0 + L1) ━━━")
-	context2, _ := memoryWithSummarizer.GetContext(ctx, convID)
+	context2, _ := memoryWithSummarizer.GetHybridContext(ctx, convID, "")
 	if context2 != "" {
 		fmt.Println(context2)
 	}
@@ -219,7 +214,7 @@ func main() {
 	// Check what was stored in named_memory for semantic search
 	fmt.Println("\n━━━ Semantic Search Storage ━━━")
 	memories, _, err := memoryStore.ListFiltered(ctx, "test-workspace", storage.MemoryListFilter{
-		Types: []string{"companion_summary", "companion_history"},
+		Types: []string{"companion_hard_state", "companion_episode", "companion_evidence"},
 	}, 10, 0)
 	if err != nil {
 		fmt.Printf("Error listing memories: %v\n", err)
@@ -244,10 +239,10 @@ func main() {
 
 	fmt.Println("\n✨ Memory test complete!")
 	fmt.Println("\nArchitecture summary:")
-	fmt.Println("  • L0 (Vivid): Today's turns in full - natural conversation flow")
-	fmt.Println("  • L1 (Recent): Yesterday summarized - \"we talked about guitar\"")
-	fmt.Println("  • L2 (History): Older weeks distilled - relationship, preferences, key moments")
-	fmt.Println("  • Semantic: Summaries stored in named_memory for vector search")
+	fmt.Println("  • Turns: immutable conversation messages")
+	fmt.Println("  • Events: canonical hybrid event stream")
+	fmt.Println("  • Hard state: durable extracted preferences/facts")
+	fmt.Println("  • Episodes/Evidence: narrative + grounding layers")
 }
 
 func truncate(s string, maxLen int) string {
@@ -261,42 +256,4 @@ func truncate(s string, maxLen int) string {
 		return s[:maxLen]
 	}
 	return s[:maxLen-3] + "..."
-}
-
-// mockSummarizer provides simple summaries without LLM for testing
-type mockSummarizer struct{}
-
-func (m *mockSummarizer) SummarizeDay(ctx context.Context, turns []companion.ConversationTurn) (*companion.DaySummary, error) {
-	// Count user turns for the summary
-	userTurnCount := 0
-	for _, t := range turns {
-		if t.Role == "user" {
-			userTurnCount++
-		}
-	}
-
-	return &companion.DaySummary{
-		Summary:    fmt.Sprintf("Discussed %d topics. User seemed interested in learning guitar and music.", userTurnCount),
-		Topics:     []string{"guitar", "music", "learning"},
-		Mood:       "enthusiastic and curious",
-		KeyMoments: []string{"User mentioned wanting to learn fingerpicking"},
-		TokenCount: 50,
-	}, nil
-}
-
-func (m *mockSummarizer) DistillHistory(ctx context.Context, existing *companion.DistilledHistory, summaries []companion.DaySummary) (*companion.DistilledHistory, error) {
-	history := &companion.DistilledHistory{
-		RelationshipNote: "A friendly conversation about learning music and pursuing hobbies",
-		RecurringTopics:  []string{"guitar", "music", "hobbies"},
-		UserPreferences:  []string{"acoustic music", "folk and indie", "portable instruments"},
-		SharedMemories:   []string{"Discussed their piano background", "Excited about new Yamaha guitar"},
-		TokenCount:       100,
-	}
-
-	// Merge with existing if present
-	if existing != nil && len(existing.RecurringTopics) > 0 {
-		history.RecurringTopics = append(existing.RecurringTopics, history.RecurringTopics...)
-	}
-
-	return history, nil
 }

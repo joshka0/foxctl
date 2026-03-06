@@ -1,6 +1,6 @@
 # System Architecture (Canonical)
 
-This is the canonical architecture map for `agentctl`.
+This is the canonical current-state architecture map for `agentctl`.
 
 ## Metadata
 
@@ -8,43 +8,60 @@ This is the canonical architecture map for `agentctl`.
 |------|-------|
 | Status | Current |
 | Canonical scope | Runtime/component architecture for `cmd/agentctl` + `internal/*` |
-| Last reviewed | 2026-02-17 |
+| Last reviewed | 2026-03-06 |
 
 ## Runtime Topology
 
 ```mermaid
 flowchart TD
     CLI[cmd/agentctl]
-    Skills[skills/*]
-    Runtime[agent/runtime + execution + engine]
-    Stores[storage/* + cas + queues]
-    Indexing[indexing/* + retrieval/*]
-    Interfaces[web + chatadapter + openapi]
-    Obs[context/updater + observability + hooks]
+    Web[internal/web + API handlers]
+    Legacy[legacy agent runtime\ninternal/agent + internal/agent/daemon]
+    V2[v2 services/runtime\ninternal/v2/services + internal/v2/runtime/*]
+    Jido[Jido bridge\ninternal/v2/adapters/jido]
+    Stores[storage + libsql projections/CAS]
+    Context[companion + contextbuilder]
+    Indexing[indexing/retrieval]
+    Obs[observability + hooks]
 
-    CLI --> Runtime
-    CLI --> Interfaces
-    Runtime --> Skills
-    Runtime --> Stores
-    Runtime --> Indexing
-    Runtime --> Obs
-    Interfaces --> Runtime
-    Indexing --> Stores
-    Skills --> Stores
+    CLI --> Legacy
+    CLI --> V2
+    CLI --> Web
+    Web --> V2
+    Web --> Legacy
+    Legacy --> Stores
+    V2 --> Jido
+    V2 --> Stores
+    V2 --> Context
+    Context --> Stores
+    V2 --> Indexing
+    Legacy --> Obs
+    V2 --> Obs
+    Jido --> Stores
 ```
+
+## Current State Notes
+
+1. The repo is not a single-runtime system yet. Legacy mailbox-driven agent
+   execution and newer v2/Jido-backed services both exist.
+2. The clearest v2 ownership today is ask/projection handling, orchestration
+   scheduling/reconciliation, v2 event stores, context building, and companion
+   integration points.
+3. Some CLI agent management surfaces still route through legacy stores or
+   `agentmanager` fallback paths.
 
 ## Core Package Groups
 
 | Group | Key packages | Responsibility | Primary docs |
 |------|--------------|----------------|--------------|
-| Agent orchestration | `internal/agent`, `internal/daemon`, `internal/execution`, `internal/engine` | Agent lifecycle, tool-loop execution, daemon control plane | `docs/general/agent-daemon.md`, `docs/general/runtime-orchestration.md` |
-| Session/runtime support | `internal/sessionkit`, `internal/skillrun`, `internal/runservice`, `internal/queue`, `internal/workflow` | Session parsing/archival, run invocation pipeline, queueing, DAG workflows | `docs/general/runtime-orchestration.md` |
-| State and persistence | `internal/storage/*` | Durable stores (sessions, memory, tasks, mailbox, CAS integration) | `docs/general/storage.md` |
+| Legacy agent runtime | `internal/agent`, `internal/agent/daemon`, `internal/execution/agentmanager` | Mailbox-driven sessions, overseer hierarchy, legacy spawn/list/run/kill paths still used by some CLI flows | `docs/general/agent-daemon.md`, `docs/spec/agent_hierarchy.md` |
+| V2 command and orchestration stack | `internal/v2/core/*`, `internal/v2/services`, `internal/v2/runtime/{runner,orchestration,supervisor,tools,snapshots,profiles}` | Typed v2 commands, event-sourced orchestration, staged turn execution, long-lived components | `docs/general/runtime-orchestration.md`, `docs/spec/v2_symphony_kanban_orchestration.md` |
+| Jido execution bridge | `internal/v2/adapters/jido` | JSON-RPC client, child spawn bridge, ask/runtime adapter, orchestration reconciliation, companion provider | `docs/general/runtime-orchestration.md` |
+| Companion and context assembly | `internal/companion`, `internal/v2/runtime/contextbuilder`, `internal/v2/runtime/enrichers` | Conversation memory, layered context assembly, async derived artifacts, companion bridge integration | `docs/general/companion-memory.md`, `docs/general/context-and-observability.md` |
+| State and persistence | `internal/storage/*`, `internal/v2/adapters/libsql/*` | Durable stores, CAS, mailbox/task/session persistence, v2 events and projections | `docs/general/storage.md`, `docs/architecture/postgres-storage.md` |
 | Retrieval and indexing | `internal/indexing/*`, `internal/retrieval`, `internal/codecontext`, `internal/codemap` | Semantic/symbol/repo indexing and context extraction | `docs/general/search.md`, `docs/general/repoindex.md` |
-| Interface layers | `internal/web`, `internal/chatadapter`, `internal/openapi`, `internal/lsp`, `internal/providers` | API/server surfaces and external platform integrations | `docs/general/api-server.md`, `docs/architecture/chat-platform-adapter.md`, `docs/start/openapi_and_plugins.md` |
-| Context and observability | `internal/context/updater`, `internal/observability`, `internal/hooks` | Proactive context surfacing, trace/event propagation, hook execution | `docs/general/context-and-observability.md`, `docs/observability/README.md`, `docs/general/hooks.md` |
-| Policy and prompting | `internal/agentpolicy`, `internal/agentprompt` | Capability profiles and role-specific system instructions | `docs/general/agent-policy-and-prompts.md` |
-| Security/identity | `internal/auth`, `internal/authbroker`, `internal/verification`, `internal/domain/identity` | Auth flows, broker integration, verification paths | `docs/architecture/auth-identity.md` |
+| Interface layers | `internal/web`, `internal/chatadapter`, `internal/openapi`, `internal/providers` | API/server surfaces and external platform integrations | `docs/general/api-server.md`, `docs/architecture/chat-platform-adapter.md` |
+| Observability and hooks | `internal/observability`, `internal/hooks`, `internal/context/updater` | Trace/event propagation, hook execution, proactive context surfacing | `docs/general/context-and-observability.md`, `docs/general/hooks.md` |
 | Foundations | `internal/domain`, `internal/platform`, `internal/protocol`, `internal/tools`, `internal/tooling` | Core types, config/platform utilities, protocol helpers | `docs/general/architecture.md`, `docs/spec/README.md` |
 
 ## Architectural Invariants
@@ -52,14 +69,17 @@ flowchart TD
 | Invariant | Why it matters |
 |----------|----------------|
 | Envelope contract stability (`meta.*` and shape) | Prevents breakage across hooks/UI/golden tests |
-| WASI isolation (`network:"none"`) | Security boundary for sandboxed skills |
+| Append-first v2 events plus projection reads | Keeps orchestration and ask state replayable |
+| Jido bridge remains adapter-scoped | Prevents runtime transport concerns from leaking into v2 core contracts |
 | Workspace-constrained IO | Prevents path escapes and unsafe file access |
 | CAS-backed large outputs | Avoids oversized envelopes and preserves replayability |
-| Context propagation (`context.Context`) | Enables cancellation/timeouts across runtime stack |
+| Context propagation (`context.Context`) | Enables cancellation/timeouts across both legacy and v2 stacks |
 
 ## Related Architecture Docs
 
+- `docs/general/runtime-orchestration.md`
+- `docs/architecture/jido-hybrid-runtime.md`
+- `docs/general/agent-daemon.md`
 - `docs/architecture/chat-platform-adapter.md`
 - `docs/architecture/kubernetes-runtime.md`
 - `docs/architecture/postgres-storage.md`
-- `docs/kubernetes.md`

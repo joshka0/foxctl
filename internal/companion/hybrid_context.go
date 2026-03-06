@@ -551,28 +551,6 @@ func (m *ConversationMemory) CascadeDeleteEvents(ctx context.Context, eventIDs [
 	return nil
 }
 
-// BackfillLegacyAware marks a conversation as hybrid mode and optionally
-// backfills from legacy data. Safe to call repeatedly.
-func (m *ConversationMemory) BackfillLegacyAware(ctx context.Context, convID string) error {
-	if strings.TrimSpace(convID) == "" {
-		return fmt.Errorf("conversation id is required")
-	}
-
-	_, err := m.db.ExecContext(ctx, `
-		INSERT INTO companion_memory_mode_state (conversation_id, mode, schema_version, last_processed_event, last_soft_event, last_evidence_event, updated_at)
-		VALUES ($1, 'hybrid', 1, 0, 0, 0, CURRENT_TIMESTAMP)
-		ON CONFLICT(conversation_id) DO UPDATE SET
-			mode = 'hybrid',
-			schema_version = COALESCE(companion_memory_mode_state.schema_version, 1),
-			updated_at = CURRENT_TIMESTAMP
-	`, convID)
-	if err != nil {
-		return fmt.Errorf("set hybrid mode: %w", err)
-	}
-
-	return nil
-}
-
 func (m *ConversationMemory) getActiveAssumptions(ctx context.Context, convID string) ([]Assumption, error) {
 	rows, err := m.db.QueryContext(ctx, `
 		SELECT id, conversation_id, assumption, status, reason, source_event_id, confidence,

@@ -861,7 +861,7 @@ func toSnakeCase(raw string) string {
 }
 
 func normalizePreferenceTopic(rawText string) string {
-	return firstMatchAfterPattern(rawText, []string{
+	matched := firstMatchAfterPattern(rawText, []string{
 		"i prefer",
 		"i'd prefer",
 		"i always",
@@ -870,6 +870,12 @@ func normalizePreferenceTopic(rawText string) string {
 		"i dislike",
 		"i like",
 	})
+	if strings.TrimSpace(matched) != "" {
+		return matched
+	}
+	// Deterministic extractors may already pass the preference value without
+	// the leading phrase ("short responses" instead of "I prefer short responses").
+	return strings.Trim(strings.TrimSpace(rawText), `"'`)
 }
 
 func normalizeGlossaryTerm(rawText string) string {

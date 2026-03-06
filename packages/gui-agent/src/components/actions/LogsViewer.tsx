@@ -7,6 +7,11 @@ import { Input } from '@/components/ui/input'
 import { Checkbox } from '@/components/ui/checkbox'
 import { cn, formatRelativeTime } from '@/lib/utils'
 import { useActivityStore } from '@/stores/activityStore'
+import { useActivityFocusStore } from '@/stores/activityFocusStore'
+import { useEventProjectionStore } from '@/stores/eventProjectionStore'
+import { useViewStore } from '@/stores/viewStore'
+import { EventTraceDrawer } from '@/components/v2/EventTraceDrawer'
+import { RefDrilldownPanel } from '@/components/v2/RefDrilldownPanel'
 import { getLogs } from '@/api/client'
 import type { ActivityEvent } from '@/api/types'
 import {
@@ -23,8 +28,24 @@ import {
   Loader2,
   ChevronDown,
   ChevronUp,
+  CornerUpLeft,
+  ArrowRight,
   X,
 } from 'lucide-react'
+
+function formatSurfaceLabel(
+  surface?:
+    | 'runtime'
+    | 'orchestration'
+    | 'turns'
+    | 'context'
+    | 'artifacts'
+    | 'companion'
+    | 'events',
+): string {
+  if (!surface) return 'Surface'
+  return surface.charAt(0).toUpperCase() + surface.slice(1)
+}
 
 // Convert ActivityEvent to LogEntry-like format
 interface LogEntry {
@@ -55,6 +76,40 @@ interface LogEntry {
   retriable?: boolean
   data?: Record<string, unknown>
   raw?: Record<string, unknown>
+}
+
+type SurfaceTarget = 'runtime' | 'turns' | 'context' | 'artifacts' | 'companion'
+
+type TraceSummary = {
+  traceID: string
+  sessionID?: string
+  count: number
+  status: 'ok' | 'error'
+  lastTS: string
+  lastOperation: string
+}
+
+function toStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) return []
+  return value.filter((item): item is string => typeof item === 'string' && item.length > 0)
+}
+
+function inferSurfaceTarget(log: LogEntry): SurfaceTarget | null {
+  const data = (log.data ?? {}) as Record<string, unknown>
+  const turnRefs = toStringArray(data.turn_refs)
+  const contextRefs = [
+    ...toStringArray(data.slice_refs),
+    ...toStringArray(data.episode_refs),
+    ...toStringArray(data.narrative_refs),
+    ...toStringArray(data.refs),
+    ...toStringArray(data.expandable_refs),
+  ]
+  const artifactRefs = toStringArray(data.artifact_refs)
+
+  if (turnRefs.length > 0) return 'turns'
+  if (artifactRefs.length > 0) return 'artifacts'
+  if (contextRefs.length > 0) return 'context'
+  return null
 }
 
 /**
@@ -117,15 +172,6 @@ function activityToLog(event: ActivityEvent): LogEntry {
   }
 }
 
-// Default noisy commands to hide initially
-const DEFAULT_HIDDEN_COMMANDS = new Set([
-  'hooks/dispatch',
-  'hooks/overseer_inbox',
-  'session/restore',
-  'code/incremental_index',
-  'lsp/gopls',
-])
-
 /**
  * Render an interactive activity logs viewer with filtering, search, and live connection state.
  *
@@ -139,21 +185,11 @@ const DEFAULT_HIDDEN_COMMANDS = new Set([
  * @returns A JSX element containing the activity logs UI.
  */
 export function LogsViewer() {
-  const [errorsOnly, setErrorsOnly] = useState(false)
-  const [hiddenCommands, setHiddenCommands] = useState<Set<string>>(
-    () => new Set(DEFAULT_HIDDEN_COMMANDS)
-  )
-  const [showFilterPanel, setShowFilterPanel] = useState(false)
-  const [componentFilter, setComponentFilter] = useState<string>('')
-  const [workspaceFilter, setWorkspaceFilter] = useState<string>('')
   const [searchInput, setSearchInput] = useState('')
-  const [searchQuery, setSearchQuery] = useState('')
+  const [showFilterPanel, setShowFilterPanel] = useState(false)
   const [loading, setLoading] = useState(false)
-
-  useEffect(() => {
-    const timer = setTimeout(() => setSearchQuery(searchInput), 300)
-    return () => clearTimeout(timer)
-  }, [searchInput])
+  const [selectedTraceID, setSelectedTraceID] = useState<string | null>(null)
+  const [selectedLog, setSelectedLog] = useState<LogEntry | null>(null)
 
   // Use activity store events - includes both API-loaded and SSE events
   const events = useActivityStore((s) => s.events)
@@ -161,6 +197,56 @@ export function LogsViewer() {
   const clearEvents = useActivityStore((s) => s.clearEvents)
   const setEvents = useActivityStore((s) => s.setEvents)
   const initialLoaded = useActivityStore((s) => s.initialLoaded)
+  const focus = useActivityFocusStore((s) => s.focus)
+  const setActivityFocus = useActivityFocusStore((s) => s.setFocus)
+  const clearFocus = useActivityFocusStore((s) => s.clearFocus)
+  const setActiveView = useViewStore((s) => s.setActiveView)
+  const {
+    errorsOnly,
+    hiddenCommands,
+    componentFilter,
+    workspaceFilter,
+    searchQuery,
+    showRawEvents,
+    setErrorsOnly,
+    toggleHiddenCommand,
+    setComponentFilter,
+    setWorkspaceFilter,
+    setSearchQuery,
+    setShowRawEvents,
+    clearHiddenCommands,
+    resetToDefaults,
+  } = useEventProjectionStore()
+  const hiddenCommandSet = useMemo(() => new Set(hiddenCommands), [hiddenCommands])
+
+  useEffect(() => {
+    setSearchInput(searchQuery)
+  }, [searchQuery])
+
+  useEffect(() => {
+    const timer = setTimeout(() => setSearchQuery(searchInput), 300)
+    return () => clearTimeout(timer)
+  }, [searchInput, setSearchQuery])
+
+  useEffect(() => {
+    if (!focus) return
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return
+      const target = event.target as HTMLElement | null
+      if (target) {
+        const tag = target.tagName?.toLowerCase()
+        const isEditable =
+          target.isContentEditable ||
+          tag === 'input' ||
+          tag === 'textarea' ||
+          tag === 'select'
+        if (isEditable) return
+      }
+      clearFocus()
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [focus, clearFocus])
 
   // Fetch initial logs from API
   const fetchLogs = useCallback(async () => {
@@ -231,41 +317,26 @@ export function LogsViewer() {
     return parts[parts.length - 1] || workspace
   }
 
-  // Toggle a command's hidden state
-  const toggleCommand = useCallback((command: string) => {
-    setHiddenCommands((prev) => {
-      const next = new Set(prev)
-      if (next.has(command)) {
-        next.delete(command)
-      } else {
-        next.add(command)
-      }
-      return next
-    })
-  }, [])
-
-  // Clear all filters
-  const clearFilters = useCallback(() => {
-    setHiddenCommands(new Set())
-  }, [])
-
-  // Reset to default filters
-  const resetFilters = useCallback(() => {
-    setHiddenCommands(new Set(DEFAULT_HIDDEN_COMMANDS))
-  }, [])
-
   // Convert and filter events
-  const filteredLogs = useMemo(() => {
+  const logsAfterPrimaryFilters = useMemo(() => {
     let logs = activityLogs
 
-    // Filter out hidden commands
-    if (hiddenCommands.size > 0) {
-      logs = logs.filter((log) => !hiddenCommands.has(log.command || ''))
+    // Focused trace/session filter from Turns/Context explorers
+    const hasFocusSelectors = Boolean(
+      focus && (focus.traceIDs.length > 0 || focus.sessionID),
+    )
+    if (hasFocusSelectors && focus) {
+      const traceSet = new Set(focus.traceIDs)
+      logs = logs.filter((log) => {
+        const traceMatch = Boolean(log.trace_id && traceSet.has(log.trace_id))
+        const sessionMatch = Boolean(focus.sessionID && log.session_id === focus.sessionID)
+        return traceMatch || sessionMatch
+      })
     }
 
-    // Filter by errors
-    if (errorsOnly) {
-      logs = logs.filter((log) => log.status === 'error')
+    // Filter out hidden commands
+    if (hiddenCommandSet.size > 0) {
+      logs = logs.filter((log) => !hiddenCommandSet.has(log.command || ''))
     }
 
     // Filter by component
@@ -291,7 +362,98 @@ export function LogsViewer() {
     }
 
     return logs
-  }, [activityLogs, errorsOnly, hiddenCommands, componentFilter, workspaceFilter, searchQuery])
+  }, [activityLogs, focus, hiddenCommandSet, componentFilter, workspaceFilter, searchQuery])
+
+  const filteredLogs = useMemo(() => {
+    if (!errorsOnly) return logsAfterPrimaryFilters
+    return logsAfterPrimaryFilters.filter((log) => log.status === 'error')
+  }, [logsAfterPrimaryFilters, errorsOnly])
+
+  const summarySourceLogs = useMemo(
+    () =>
+      [...filteredLogs].sort(
+        (a, b) => Date.parse(b.ts) - Date.parse(a.ts),
+      ),
+    [filteredLogs],
+  )
+  const recentErrors = useMemo(
+    () => summarySourceLogs.filter((log) => log.status === 'error').slice(0, 5),
+    [summarySourceLogs],
+  )
+  const slowOperations = useMemo(
+    () =>
+      summarySourceLogs
+        .filter(
+          (log) =>
+            typeof log.duration_ms === 'number' &&
+            Number.isFinite(log.duration_ms) &&
+            log.duration_ms >= 1000,
+        )
+        .sort((a, b) => (b.duration_ms ?? 0) - (a.duration_ms ?? 0))
+        .slice(0, 5),
+    [summarySourceLogs],
+  )
+  const activeTraces = useMemo(() => {
+    const traces = new Map<string, TraceSummary>()
+    for (const log of summarySourceLogs) {
+      if (!log.trace_id) continue
+      const existing = traces.get(log.trace_id)
+      if (!existing) {
+        traces.set(log.trace_id, {
+          traceID: log.trace_id,
+          sessionID: log.session_id,
+          count: 1,
+          status: log.status === 'error' ? 'error' : 'ok',
+          lastTS: log.ts,
+          lastOperation: log.operation,
+        })
+        continue
+      }
+      const existingTS = Date.parse(existing.lastTS)
+      const nextTS = Date.parse(log.ts)
+      existing.count += 1
+      if (log.status === 'error') existing.status = 'error'
+      if (Number.isFinite(nextTS) && nextTS > existingTS) {
+        existing.lastTS = log.ts
+        existing.lastOperation = log.operation
+        if (log.session_id) existing.sessionID = log.session_id
+      }
+    }
+    return Array.from(traces.values())
+      .sort((a, b) => Date.parse(b.lastTS) - Date.parse(a.lastTS))
+      .slice(0, 5)
+  }, [summarySourceLogs])
+
+  const selectLog = useCallback((log: LogEntry) => {
+    setSelectedLog(log)
+    setSelectedTraceID(log.trace_id ?? null)
+  }, [])
+
+  const selectTrace = useCallback((traceID: string) => {
+    setSelectedTraceID(traceID)
+    setSelectedLog((prev) => (prev?.trace_id === traceID ? prev : null))
+  }, [])
+
+  const openLogFocus = useCallback((log: LogEntry, label?: string) => {
+    if (!log.trace_id && !log.session_id) {
+      return
+    }
+    setActivityFocus({
+      traceIDs: log.trace_id ? [log.trace_id] : [],
+      sessionID: log.session_id,
+      sourceSurface: 'events',
+      label: label ?? formatOperation(log.operation, log.command),
+    })
+  }, [setActivityFocus])
+
+  const navigateFromLog = useCallback(
+    (log: LogEntry, target: SurfaceTarget) => {
+      selectLog(log)
+      openLogFocus(log)
+      setActiveView(target)
+    },
+    [openLogFocus, selectLog, setActiveView],
+  )
 
   return (
     <div className="flex flex-col h-full">
@@ -340,6 +502,43 @@ export function LogsViewer() {
           </div>
         </div>
 
+        {focus && (
+          <div className="flex items-center justify-between gap-2 rounded-md border border-border bg-muted/40 px-3 py-2">
+            <div className="text-xs text-muted-foreground flex flex-wrap gap-x-3 gap-y-1">
+              <span>
+                Focused from {focus.sourceSurface ?? 'surface'}
+                {focus.label ? ` · ${focus.label}` : ''}
+              </span>
+              {focus.sessionID && <span>session {focus.sessionID.slice(0, 8)}</span>}
+              {focus.traceIDs.length > 0 && <span>{focus.traceIDs.length} trace ids</span>}
+              <span>Esc to clear</span>
+            </div>
+            <div className="flex items-center gap-2">
+              {focus.sourceSurface && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-7 text-[11px] px-2"
+                  onClick={() => setActiveView(focus.sourceSurface!)}
+                >
+                  <CornerUpLeft className="h-3 w-3 mr-1" />
+                  Back to {formatSurfaceLabel(focus.sourceSurface)}
+                </Button>
+              )}
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-7 text-[11px] px-2"
+                onClick={clearFocus}
+                title="Clear focus (Esc)"
+              >
+                <X className="h-3 w-3 mr-1" />
+                Clear focus (Esc)
+              </Button>
+            </div>
+          </div>
+        )}
+
         {/* Filters */}
         <div className="flex items-center gap-2">
           <div className="relative flex-1">
@@ -352,14 +551,14 @@ export function LogsViewer() {
             />
           </div>
           <Button
-            variant={hiddenCommands.size > 0 ? 'default' : 'outline'}
+            variant={hiddenCommands.length > 0 ? 'default' : 'outline'}
             size="sm"
             onClick={() => setShowFilterPanel(!showFilterPanel)}
             className="h-9"
             title="Filter commands"
           >
             <Filter className="h-4 w-4 mr-1" />
-            {hiddenCommands.size > 0 ? `${hiddenCommands.size} hidden` : 'Filter'}
+            {hiddenCommands.length > 0 ? `${hiddenCommands.length} hidden` : 'Filter'}
             {showFilterPanel ? (
               <ChevronUp className="h-3 w-3 ml-1" />
             ) : (
@@ -413,7 +612,7 @@ export function LogsViewer() {
                 <Button
                   variant="ghost"
                   size="sm"
-                  onClick={resetFilters}
+                  onClick={resetToDefaults}
                   className="h-6 text-xs px-2"
                 >
                   Reset
@@ -421,7 +620,7 @@ export function LogsViewer() {
                 <Button
                   variant="ghost"
                   size="sm"
-                  onClick={clearFilters}
+                  onClick={clearHiddenCommands}
                   className="h-6 text-xs px-2"
                 >
                   Clear All
@@ -439,17 +638,17 @@ export function LogsViewer() {
                     key={command}
                     className={cn(
                       'flex items-center gap-1.5 px-2 py-1 rounded-md text-xs cursor-pointer transition-colors',
-                      hiddenCommands.has(command)
+                      hiddenCommands.includes(command)
                         ? 'bg-destructive/20 text-destructive-foreground'
                         : 'bg-muted hover:bg-muted/80'
                     )}
                   >
                     <Checkbox
-                      checked={hiddenCommands.has(command)}
-                      onCheckedChange={() => toggleCommand(command)}
+                      checked={hiddenCommands.includes(command)}
+                      onCheckedChange={() => toggleHiddenCommand(command)}
                     />
                     <span className="truncate max-w-[150px]">{command}</span>
-                    {hiddenCommands.has(command) && (
+                    {hiddenCommands.includes(command) && (
                       <X className="h-3 w-3 opacity-60" />
                     )}
                   </label>
@@ -462,7 +661,147 @@ export function LogsViewer() {
 
       {/* Logs List */}
       <ScrollArea className="flex-1">
-        <div className="p-4 space-y-2">
+        <div className="p-4 space-y-3">
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
+            <div className="rounded-md border border-border bg-card px-3 py-2">
+              <div className="text-[11px] uppercase tracking-wide text-muted-foreground mb-2">
+                Recent errors
+              </div>
+              {recentErrors.length === 0 ? (
+                <div className="text-xs text-muted-foreground">No recent errors.</div>
+              ) : (
+                <div className="space-y-1.5">
+                  {recentErrors.map((log) => (
+                    <button
+                      key={`error-${log.ts}-${log.operation}`}
+                      type="button"
+                      className="w-full text-left rounded border border-red-500/20 bg-red-500/5 px-2 py-1.5 hover:bg-red-500/10"
+                      onClick={() => {
+                        selectLog(log)
+                        openLogFocus(log)
+                        if (showRawEvents === false) setShowRawEvents(true)
+                      }}
+                    >
+                      <div className="text-[11px] font-medium text-red-300 truncate">
+                        {formatOperation(log.operation, log.command)}
+                      </div>
+                      <div className="text-[10px] text-red-200/80 flex items-center justify-between">
+                        <span>{log.component || 'event'}</span>
+                        <span>{formatRelativeTime(log.ts)}</span>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+            <div className="rounded-md border border-border bg-card px-3 py-2">
+              <div className="text-[11px] uppercase tracking-wide text-muted-foreground mb-2">
+                High latency
+              </div>
+              {slowOperations.length === 0 ? (
+                <div className="text-xs text-muted-foreground">No slow operations in current filters.</div>
+              ) : (
+                <div className="space-y-1.5">
+                  {slowOperations.map((log) => (
+                    <button
+                      key={`slow-${log.ts}-${log.operation}`}
+                      type="button"
+                      className="w-full text-left rounded border border-border/70 bg-muted/30 px-2 py-1.5 hover:bg-muted/50"
+                      onClick={() => {
+                        selectLog(log)
+                        openLogFocus(log)
+                        if (showRawEvents === false) setShowRawEvents(true)
+                      }}
+                    >
+                      <div className="text-[11px] font-medium text-foreground truncate">
+                        {formatOperation(log.operation, log.command)}
+                      </div>
+                      <div className="text-[10px] text-muted-foreground flex items-center justify-between">
+                        <span>{log.duration_ms ?? 0}ms</span>
+                        <span>{formatRelativeTime(log.ts)}</span>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+            <div className="rounded-md border border-border bg-card px-3 py-2">
+              <div className="text-[11px] uppercase tracking-wide text-muted-foreground mb-2">
+                Active traces
+              </div>
+              {activeTraces.length === 0 ? (
+                <div className="text-xs text-muted-foreground">No trace ids in current filters.</div>
+              ) : (
+                <div className="space-y-1.5">
+                  {activeTraces.map((trace) => (
+                    <button
+                      key={trace.traceID}
+                      type="button"
+                      className="w-full text-left rounded border border-border/70 bg-muted/30 px-2 py-1.5 hover:bg-muted/50"
+                      onClick={() => {
+                        setActivityFocus({
+                          traceIDs: [trace.traceID],
+                          sessionID: trace.sessionID,
+                          sourceSurface: 'events',
+                          label: `trace ${trace.traceID.slice(0, 8)}`,
+                        })
+                        selectTrace(trace.traceID)
+                        if (showRawEvents === false) setShowRawEvents(true)
+                      }}
+                    >
+                      <div className="text-[11px] font-medium text-foreground flex items-center justify-between gap-2">
+                        <span className="font-mono truncate">{trace.traceID.slice(0, 12)}</span>
+                        <Badge
+                          variant={trace.status === 'error' ? 'destructive' : 'secondary'}
+                          className="text-[10px]"
+                        >
+                          {trace.count}
+                        </Badge>
+                      </div>
+                      <div className="text-[10px] text-muted-foreground flex items-center justify-between">
+                        <span className="truncate">{trace.lastOperation}</span>
+                        <span>{formatRelativeTime(trace.lastTS)}</span>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div className="flex items-center justify-between rounded-md border border-border bg-muted/30 px-3 py-2">
+            <div className="text-xs text-muted-foreground">
+              Summary-first mode: open raw event rows only when needed.
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-7 text-[11px]"
+              onClick={() => setShowRawEvents(!showRawEvents)}
+            >
+              {showRawEvents ? 'Hide raw events' : `Show raw events (${filteredLogs.length})`}
+              <ArrowRight className={cn('h-3 w-3 ml-1 transition-transform', showRawEvents && 'rotate-90')} />
+            </Button>
+          </div>
+
+          {(selectedTraceID || selectedLog) && (
+            <div className="grid grid-cols-1 xl:grid-cols-2 gap-3">
+              <EventTraceDrawer
+                traceID={selectedTraceID}
+                events={filteredLogs}
+                onClose={() => setSelectedTraceID(null)}
+              />
+              {selectedLog && (
+                <RefDrilldownPanel
+                  label={formatOperation(selectedLog.operation, selectedLog.command)}
+                  data={selectedLog.data}
+                  canNavigate={Boolean(selectedLog.trace_id || selectedLog.session_id)}
+                  onNavigate={(target) => navigateFromLog(selectedLog, target)}
+                />
+              )}
+            </div>
+          )}
+
           {loading ? (
             <div className="text-center py-12 text-muted-foreground">
               <Loader2 className="h-8 w-8 mx-auto mb-2 animate-spin opacity-50" />
@@ -478,9 +817,20 @@ export function LogsViewer() {
                   : 'Click refresh to load historical logs'}
               </p>
             </div>
+          ) : !showRawEvents ? (
+            <div className="text-center py-8 text-muted-foreground">
+              <p className="text-sm">Raw events are hidden.</p>
+              <p className="text-xs mt-1">Use “Show raw events” to inspect full event rows and payloads.</p>
+            </div>
           ) : (
             filteredLogs.map((log, idx) => (
-              <LogEntryCard key={`${log.ts}-${log.operation}-${log.session_id || idx}`} log={log} />
+              <LogEntryCard
+                key={`${log.ts}-${log.operation}-${log.session_id || idx}`}
+                log={log}
+                onFocus={openLogFocus}
+                onNavigate={navigateFromLog}
+                onSelect={selectLog}
+              />
             ))
           )}
         </div>
@@ -497,7 +847,17 @@ export function LogsViewer() {
  * @param log - The log entry to display
  * @returns A JSX element representing the rendered log entry card
  */
-function LogEntryCard({ log }: { log: LogEntry }) {
+function LogEntryCard({
+  log,
+  onFocus,
+  onNavigate,
+  onSelect,
+}: {
+  log: LogEntry
+  onFocus: (log: LogEntry, label?: string) => void
+  onNavigate: (log: LogEntry, target: SurfaceTarget) => void
+  onSelect: (log: LogEntry) => void
+}) {
   const isError = log.status === "error"
   const [expanded, setExpanded] = useState(isError)
   const [copied, setCopied] = useState(false)
@@ -509,6 +869,9 @@ function LogEntryCard({ log }: { log: LogEntry }) {
     log.caller ??
     (log.caller_file && log.caller_line ? `${log.caller_file}:${log.caller_line}` : log.caller_file)
   const callerTitle = [log.caller_func, log.caller_path].filter(Boolean).join(' · ') || undefined
+  const inferredSurface = inferSurfaceTarget(log)
+  const canFocus = Boolean(log.trace_id || log.session_id)
+  const canRuntime = Boolean(log.session_id || log.agent_id)
 
   const handleCopyRaw = (event: MouseEvent<HTMLButtonElement>) => {
     event.stopPropagation()
@@ -535,7 +898,10 @@ function LogEntryCard({ log }: { log: LogEntry }) {
         'flex gap-3 p-3 rounded-lg bg-card border border-border hover:bg-accent/30 transition-colors cursor-pointer',
         isError && 'border-red-500/30'
       )}
-      onClick={() => setExpanded(!expanded)}
+      onClick={() => {
+        setExpanded(!expanded)
+        onSelect(log)
+      }}
     >
         <div className="flex-shrink-0 mt-0.5">{icon}</div>
         <div className="flex-1 min-w-0">
@@ -588,6 +954,51 @@ function LogEntryCard({ log }: { log: LogEntry }) {
                   </span>
                 ))}
               </div>
+            </div>
+          )}
+
+          {(canFocus || canRuntime || inferredSurface) && (
+            <div className="mt-2 flex items-center gap-1.5 flex-wrap">
+              {canFocus && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-6 px-2 text-[10px]"
+                  onClick={(event) => {
+                    event.stopPropagation()
+                    onSelect(log)
+                    onFocus(log)
+                  }}
+                >
+                  Focus
+                </Button>
+              )}
+              {canRuntime && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-6 px-2 text-[10px]"
+                  onClick={(event) => {
+                    event.stopPropagation()
+                    onNavigate(log, 'runtime')
+                  }}
+                >
+                  Runtime
+                </Button>
+              )}
+              {inferredSurface && canFocus && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-6 px-2 text-[10px]"
+                  onClick={(event) => {
+                    event.stopPropagation()
+                    onNavigate(log, inferredSurface)
+                  }}
+                >
+                  {formatSurfaceLabel(inferredSurface)}
+                </Button>
+              )}
             </div>
           )}
 

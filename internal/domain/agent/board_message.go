@@ -2,6 +2,13 @@ package agent
 
 import "time"
 
+const (
+	// DefaultStream is the default stream for messages.
+	DefaultStream = "coordination"
+	// RoomStreamPrefix is the canonical stream prefix for room timelines.
+	RoomStreamPrefix = "room:"
+)
+
 // BoardMessageKind defines the type of mailbox message.
 type BoardMessageKind string
 
@@ -100,9 +107,6 @@ type InboxFilter struct {
 	Limit          int  `json:"limit,omitempty"`
 }
 
-// DefaultStream is the default stream for messages.
-const DefaultStream = "coordination"
-
 // DefaultPriority is the default priority (mid-level).
 const DefaultPriority = 3
 
@@ -120,4 +124,63 @@ func IsAdminSender(sender string) bool {
 // IsOverseerSender checks if the sender is the system overseer.
 func IsOverseerSender(sender string) bool {
 	return sender == "actor:system:overseer"
+}
+
+// RoomSummary is a derived read model over room-scoped board messages.
+type RoomSummary struct {
+	ID               string       `json:"id"`
+	WorkspaceID      string       `json:"workspace_id"`
+	Stream           string       `json:"stream"`
+	Title            string       `json:"title"`
+	Description      string       `json:"description,omitempty"`
+	DispatchPolicy   string       `json:"dispatch_policy,omitempty"`
+	DispatchAgentIDs []string     `json:"dispatch_agent_ids,omitempty"`
+	CreatedAt        time.Time    `json:"created_at,omitempty"`
+	UpdatedAt        time.Time    `json:"updated_at,omitempty"`
+	LatestSubject    string       `json:"latest_subject,omitempty"`
+	LatestPreview    string       `json:"latest_preview,omitempty"`
+	LatestSender     string       `json:"latest_sender,omitempty"`
+	LatestMessageAt  time.Time    `json:"latest_message_at"`
+	MessageCount     int          `json:"message_count"`
+	UnreadCount      int          `json:"unread_count"`
+	Participants     []string     `json:"participants,omitempty"`
+	TaskIDs          []string     `json:"task_ids,omitempty"`
+	Members          []RoomMember `json:"members,omitempty"`
+}
+
+// RoomMember is an explicit membership record for one room.
+type RoomMember struct {
+	ActorID  string    `json:"actor_id"`
+	Role     string    `json:"role,omitempty"`
+	JoinedAt time.Time `json:"joined_at"`
+}
+
+// Room is the first-class metadata record for a room.
+type Room struct {
+	ID               string       `json:"id"`
+	WorkspaceID      string       `json:"workspace_id"`
+	Stream           string       `json:"stream"`
+	Title            string       `json:"title"`
+	Description      string       `json:"description,omitempty"`
+	DispatchPolicy   string       `json:"dispatch_policy,omitempty"`
+	DispatchAgentIDs []string     `json:"dispatch_agent_ids,omitempty"`
+	CreatedAt        time.Time    `json:"created_at"`
+	UpdatedAt        time.Time    `json:"updated_at"`
+	Members          []RoomMember `json:"members,omitempty"`
+}
+
+// RoomStreamName builds the canonical board stream for a room id.
+func RoomStreamName(roomID string) string {
+	if roomID == "" {
+		return RoomStreamPrefix
+	}
+	return RoomStreamPrefix + roomID
+}
+
+// RoomIDFromStream returns the room id encoded in a room stream.
+func RoomIDFromStream(stream string) string {
+	if len(stream) < len(RoomStreamPrefix) || stream[:len(RoomStreamPrefix)] != RoomStreamPrefix {
+		return ""
+	}
+	return stream[len(RoomStreamPrefix):]
 }

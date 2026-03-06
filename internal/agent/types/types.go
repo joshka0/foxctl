@@ -219,11 +219,14 @@ type AgentConfig struct {
 	// Set to 0 to use runtime default.
 	MaxContextTokens int `json:"max_context_tokens,omitempty"`
 
-	// ExecMode controls execution mode (reactive|autonomous|autonomous_reactive|proactive|story).
+	// ExecMode controls execution mode (reactive|autonomous|autonomous_reactive|proactive|tick|story).
 	ExecMode agent.ExecutionMode `json:"exec_mode,omitempty"`
 
 	// MaxAutoTurns limits the number of autonomous continuations.
 	MaxAutoTurns int `json:"max_auto_turns,omitempty"`
+
+	// ThinkInterval controls proactive/tick cadence in seconds.
+	ThinkInterval int `json:"think_interval,omitempty"`
 
 	// Timeout is the maximum execution time.
 	Timeout time.Duration `json:"timeout,omitempty,format:units"`

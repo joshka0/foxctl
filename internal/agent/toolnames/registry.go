@@ -24,6 +24,7 @@ var runtimeToolNames = []string{
 	"memory_query", "session_recall", "annotation_recall", "annotation_list_sessions", "annotation_category_stats",
 	"repo_index_search", "repo_index_expand", "repo_index_open", "repo_index_dag_grep",
 	"agent_spawn", "agent_list", "agent_status", "agent_kill", "agent_hierarchy", "agent_wait",
+	"end_tick",
 	"mail_inbox", "mail_send", "mail_ack",
 	"bb_inbox", "bb_post", "bb_mark_read",
 }

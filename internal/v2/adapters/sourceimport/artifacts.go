@@ -28,6 +28,10 @@ func BuildArtifacts(ctx context.Context, parsed ParsedSession, opts ArtifactBuil
 	if now == nil {
 		now = func() time.Time { return time.Now().UTC() }
 	}
+	artifactSource := strings.TrimSpace(opts.ArtifactSource)
+	if artifactSource == "" {
+		artifactSource = "sourceimport"
+	}
 	includeEmbedding := opts.IncludeEmbedding
 	embedder := opts.Embedder
 	if includeEmbedding && embedder == nil {
@@ -53,7 +57,7 @@ func BuildArtifacts(ctx context.Context, parsed ParsedSession, opts ArtifactBuil
 			"todo_pending":  todoStats.Pending,
 			"todo_active":   todoStats.InProgress,
 			"todo_done":     todoStats.Completed,
-			"artifact_from": "sourceimport",
+			"artifact_from": artifactSource,
 		}
 
 		annotationContent := map[string]any{
@@ -254,6 +258,14 @@ func tokenStream(text string) []string {
 		}
 	}
 	return out
+}
+
+// Dimensions returns the configured deterministic embedding width.
+func (h *HashEmbedder) Dimensions() int {
+	if h == nil || h.dimensions <= 0 {
+		return 0
+	}
+	return h.dimensions
 }
 
 func summarizeTodos(todosIn []todosync.ClaudeTodo) TodoStats {

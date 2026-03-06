@@ -267,8 +267,8 @@ func main() {
 		if err == nil {
 			fmt.Printf("Memory Stats for companion:philosopher:\n")
 			fmt.Printf("  Total turns: %d\n", stats.TotalTurns)
-			fmt.Printf("  Day summaries: %d\n", stats.DaySummaries)
-			fmt.Printf("  Has distilled history: %v\n", stats.HasDistilledHistory)
+			fmt.Printf("  Events: %d\n", stats.EventCount)
+			fmt.Printf("  Hard state: %d\n", stats.HardStateCount)
 		}
 
 		// Show current memory context
@@ -284,7 +284,7 @@ func main() {
 
 	// List companion memories in the workspace
 	memories, _, err := memoryStore.ListFiltered(ctx, "test-workspace", storage.MemoryListFilter{
-		Types: []string{"companion_summary", "companion_history"},
+		Types: []string{"companion_hard_state", "companion_episode", "companion_evidence"},
 	}, 10, 0)
 	if err != nil {
 		fmt.Printf("Error listing memories: %v\n", err)

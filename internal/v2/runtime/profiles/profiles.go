@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	coretool "github.com/jkatigb/agentctl/internal/v2/core/tool"
+	runtimetoolnames "github.com/jkatigb/agentctl/internal/v2/runtime/toolnames"
 )
 
 // ProfileSpec defines a deny-by-default allowlist for one process profile.
@@ -26,7 +27,7 @@ func DefaultSpecs() map[coretool.ProcessProfile]ProfileSpec {
 				"agent_spawn",
 				"agent_status",
 				"agent_wait",
-				"code_search",
+				"code/search",
 				"context_grep",
 				"context_search",
 				"fs_list_dir",
@@ -34,12 +35,16 @@ func DefaultSpecs() map[coretool.ProcessProfile]ProfileSpec {
 				"session_timeline",
 				"smart_search",
 				"think",
+				"todo/add",
+				"todo/complete",
+				"todo/graph_insights",
+				"todo/query",
 			},
 		},
 		coretool.ProfileWorker: {
 			Profile: coretool.ProfileWorker,
 			AllowedTools: []string{
-				"code_search",
+				"code/search",
 				"fs_list_dir",
 				"fs_read_file",
 				"fs_write_file",
@@ -49,13 +54,17 @@ func DefaultSpecs() map[coretool.ProcessProfile]ProfileSpec {
 		coretool.ProfileCompanion: {
 			Profile: coretool.ProfileCompanion,
 			AllowedTools: []string{
-				"code_search",
+				"code/search",
 				"context_search",
 				"fs_list_dir",
 				"fs_read_file",
+				"memory/query",
 				"session_timeline",
 				"smart_search",
 				"think",
+				"todo/ensure_active",
+				"todo/query",
+				"todo/set_active",
 			},
 		},
 	}
@@ -80,7 +89,7 @@ func NormalizeAllowedTools(in []string) []string {
 	seen := map[string]struct{}{}
 	out := make([]string, 0, len(in))
 	for _, name := range in {
-		n := strings.TrimSpace(strings.ToLower(name))
+		n := runtimetoolnames.Canonical(name)
 		if n == "" {
 			continue
 		}

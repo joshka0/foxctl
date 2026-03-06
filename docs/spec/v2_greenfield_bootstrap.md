@@ -1,6 +1,6 @@
-# Agentctl V2 Greenfield Bootstrap Plan
+# Agentctl V2 Greenfield Bootstrap Design Spec
 
-Status: Draft  
+Status: Draft target-state design  
 Owner: Solo maintainer  
 Last Updated: 2026-02-20
 
@@ -17,10 +17,10 @@ Define a practical bootstrap sequence for a clean v2 runtime with:
 
 ## Version Boundary
 
-This spec is `v2`-only and maps to `internal/v2/*`.
-Supported command surfaces (`spawn`, `ask`, `run`, `list`, `kill`) are v2-primary
-by default when `AGENTCTL_V2_COMMANDS` is unset/empty. v1 fallback remains
-available via `AGENTCTL_V2_COMMANDS=none` or scoped command lists.
+This spec is `v2`-only and maps to the intended direction of `internal/v2/*`.
+It is not the canonical as-built runtime map. For current implementation
+behavior, use `docs/architecture/system-architecture.md`,
+`docs/general/runtime-orchestration.md`, and `docs/general/agent-daemon.md`.
 
 ## Related Docs
 
@@ -61,7 +61,7 @@ Out of scope for MVP:
 - optimization/reflection automation
 - multi-provider strategy matrix beyond one primary provider
 
-## Target Package Layout
+## Target Package Layout (Design Target, Not Exact As-Built Tree)
 
 ```text
 internal/v2/
@@ -510,12 +510,11 @@ Definition of done:
 Deliverables:
 
 - `ports/cli`, `ports/api`, `ports/daemon` adapters for v2 services
-- per-command routing flag (`AGENTCTL_V2_COMMANDS`) with v2-primary defaults and explicit v1 fallback (`none`)
-- migration shim that preserves rollback-safe v1 routing paths
+- historical transitional routing flag/shim work (now retired for supported command surfaces)
 
-Definition of done:
+Definition of done (historical transition milestone):
 
-- side-by-side run capability (v2 default, explicit v1 fallback)
+- side-by-side run capability during migration window
 - smoke tests for spawn/list/ask/kill
 - envelope parity tests verify `version`, `status`, `meta.ts`, and `error` compatibility across v1/v2 routes
 
@@ -563,18 +562,16 @@ Definition of done:
 
 ## Migration Strategy (Strangler Pattern)
 
-1. Keep v2 as the default behavior for supported command surfaces.
-2. Use `AGENTCTL_V2_COMMANDS` for scoped routing overrides and rollback control.
-3. Migrate one command surface at a time (`spawn` -> `ask` -> `run`).
-4. Keep v1 business logic untouched while introducing v2 routing/wiring changes.
-5. Remove v1 duplicated paths only after parity tests are stable.
-6. Keep control-plane components optional and composable during rollout.
+1. Keep one v2 orchestration path per supported command surface.
+2. Keep v1 business logic untouched outside active migration slices.
+3. Remove duplicated transition paths after parity/test validation.
+4. Keep control-plane components optional and composable during rollout.
 
 Rollback model:
 
-- set `AGENTCTL_V2_COMMANDS=none` (global v1 fallback) or scoped command list
-- restart relevant boundary process (CLI/API/daemon)
-- confirm v2 event writers are quiescent for that command
+- use normal git/config rollback process for the relevant slice
+- restart relevant boundary process (CLI/API/daemon) if needed
+- confirm v2 event writers are quiescent before rollback
 
 ## Acceptance Criteria for MVP
 

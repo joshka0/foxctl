@@ -110,7 +110,15 @@ var sseActivityPrefixes = []string{
 	"rerank.",
 	"codemap.",
 	"memory.",
+	"orchestration.",
+	"v2.runtime.enricher.",
+	"v2.runtime.maintenance.",
 	"web.",
+}
+
+var sseActivityOperations = map[string]struct{}{
+	OpContextSemanticArtifactSearch: {},
+	OpContextLayeredBundle:          {},
 }
 
 // shouldPublishToSSE reports whether a WideEvent should be forwarded to SSE clients.
@@ -120,6 +128,9 @@ func shouldPublishToSSE(event *WideEvent) bool {
 	}
 
 	op := event.Operation
+	if _, ok := sseActivityOperations[op]; ok {
+		return true
+	}
 	for _, prefix := range sseActivityPrefixes {
 		if strings.HasPrefix(op, prefix) {
 			return true
@@ -225,6 +236,50 @@ func extractActivityData(event *WideEvent) map[string]any {
 		"tokens_actual",
 		"tokens_estimated",
 		"cost_usd",
+		// Context/semantic retrieval fields
+		"search_path",
+		"vector_capability",
+		"hit_count",
+		"hit_bucket",
+		"latency_bucket",
+		"artifact_types",
+		"min_similarity",
+		"limit",
+		"query_dims",
+		"working_context_applied",
+		"working_context_fallback_level",
+		"working_context_eligible_count",
+		"artifact_search_path",
+		"artifact_vector_capability",
+		"artifact_hit_count",
+		"artifact_search_error",
+		// Context bundle refs
+		"refs",
+		"turn_refs",
+		"slice_refs",
+		"episode_refs",
+		"narrative_refs",
+		"artifact_refs",
+		"expandable_refs",
+		"ref_count",
+		"turn_ref_count",
+		"slice_ref_count",
+		"episode_ref_count",
+		"narrative_ref_count",
+		"artifact_ref_count",
+		// Orchestration fields
+		"request_id",
+		"issue_id",
+		"issue_identifier",
+		"lane",
+		"last_outcome",
+		"policy_status",
+		"eligibility",
+		"coalesced",
+		"queued",
+		"idempotent",
+		"card_count",
+		"lane_filter",
 		// Skill input fields (from enrichSpanWithInput)
 		"input_query",
 		"input_scope",

@@ -16,16 +16,18 @@ var (
 )
 
 var (
-	reWhole = regexp.MustCompile(`^turn/([^/#]+)$`)
-	reIter  = regexp.MustCompile(`^turn/([^/#]+)/iter/([0-9]+)$`)
-	reTool  = regexp.MustCompile(`^turn/([^/#]+)/iter/([0-9]+)/tool/([^/#]+)$`)
-	reSlice = regexp.MustCompile(`^turn/([^/#]+)#msg:([^:]+):([0-9]+)-([0-9]+)$`)
+	reEpisode = regexp.MustCompile(`^episode/([^/#]+)$`)
+	reWhole   = regexp.MustCompile(`^turn/([^/#]+)$`)
+	reIter    = regexp.MustCompile(`^turn/([^/#]+)/iter/([0-9]+)$`)
+	reTool    = regexp.MustCompile(`^turn/([^/#]+)/iter/([0-9]+)/tool/([^/#]+)$`)
+	reSlice   = regexp.MustCompile(`^turn/([^/#]+)#msg:([^:]+):([0-9]+)-([0-9]+)$`)
 )
 
 // RefKind is the parsed reference type.
 type RefKind string
 
 const (
+	RefEpisode   RefKind = "episode"
 	RefWholeTurn RefKind = "turn"
 	RefIteration RefKind = "iteration"
 	RefToolCall  RefKind = "tool_call"
@@ -38,7 +40,8 @@ type Ref struct {
 
 	Kind RefKind
 
-	TurnID string
+	EpisodeID string
+	TurnID    string
 
 	IterationIndex int
 	ToolCallID     string
@@ -74,6 +77,14 @@ func ParseRef(raw string) (Ref, error) {
 			MessageID: strings.TrimSpace(m[2]),
 			Start:     start,
 			End:       end,
+		}, nil
+	}
+
+	if m := reEpisode.FindStringSubmatch(raw); len(m) == 2 {
+		return Ref{
+			Raw:       raw,
+			Kind:      RefEpisode,
+			EpisodeID: strings.TrimSpace(m[1]),
 		}, nil
 	}
 

@@ -182,6 +182,5 @@ func int64Ptr(i int64) *int64 { return &i }
 
 // Conversation memory pipeline modes.
 const (
-	MemoryModeLegacy = "legacy"
 	MemoryModeHybrid = "hybrid"
 )

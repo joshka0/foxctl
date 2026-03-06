@@ -138,6 +138,244 @@ func TestBoardStore_AckMessages(t *testing.T) {
 	}
 }
 
+func TestBoardStore_InboxFiltersByStreamAndTask(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+
+	store, err := OpenBoardStore(ctx, dir)
+	if err != nil {
+		t.Fatalf("OpenBoardStore: %v", err)
+	}
+	defer store.Close()
+
+	msgs := []agent.BoardMessage{
+		{
+			WorkspaceID: "ws1",
+			TaskID:      "task-1",
+			Stream:      "room:alpha",
+			Sender:      "actor:agent:a",
+			Recipient:   "actor:agent:coder",
+			Subject:     "alpha-task-1",
+			Body:        "match",
+		},
+		{
+			WorkspaceID: "ws1",
+			TaskID:      "task-2",
+			Stream:      "room:alpha",
+			Sender:      "actor:agent:b",
+			Recipient:   "actor:agent:coder",
+			Subject:     "alpha-task-2",
+			Body:        "wrong-task",
+		},
+		{
+			WorkspaceID: "ws1",
+			TaskID:      "task-1",
+			Stream:      "room:beta",
+			Sender:      "actor:agent:c",
+			Recipient:   "actor:agent:coder",
+			Subject:     "beta-task-1",
+			Body:        "wrong-stream",
+		},
+	}
+	for i := range msgs {
+		if err := store.SendMessage(ctx, &msgs[i]); err != nil {
+			t.Fatalf("SendMessage[%d]: %v", i, err)
+		}
+	}
+
+	got, err := store.Inbox(ctx, agent.InboxFilter{
+		WorkspaceID: "ws1",
+		ActorID:     "actor:agent:coder",
+		TaskID:      "task-1",
+		Stream:      "room:alpha",
+		Limit:       10,
+	})
+	if err != nil {
+		t.Fatalf("Inbox: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("expected 1 filtered message, got %d", len(got))
+	}
+	if got[0].Subject != "alpha-task-1" {
+		t.Fatalf("subject=%q want alpha-task-1", got[0].Subject)
+	}
+}
+
+func TestBoardStore_ListRoomsAndRoomMessages(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+
+	store, err := OpenBoardStore(ctx, dir)
+	if err != nil {
+		t.Fatalf("OpenBoardStore: %v", err)
+	}
+	defer store.Close()
+
+	now := time.Now().UTC()
+	msgs := []agent.BoardMessage{
+		{
+			WorkspaceID: "ws1",
+			TaskID:      "task-1",
+			Stream:      agent.RoomStreamName("alpha"),
+			Sender:      "actor:agent:a",
+			Recipient:   agent.BroadcastRecipient,
+			Subject:     "alpha-1",
+			Body:        "first",
+			Status:      agent.BoardMessageStatusRead,
+			CreatedAt:   now.Add(-2 * time.Minute),
+		},
+		{
+			WorkspaceID: "ws1",
+			TaskID:      "task-2",
+			Stream:      agent.RoomStreamName("alpha"),
+			Sender:      "actor:agent:b",
+			Recipient:   "actor:agent:viewer",
+			Subject:     "alpha-2",
+			Body:        "second",
+			Status:      agent.BoardMessageStatusUnread,
+			CreatedAt:   now.Add(-1 * time.Minute),
+		},
+		{
+			WorkspaceID: "ws1",
+			TaskID:      "task-3",
+			Stream:      agent.RoomStreamName("beta"),
+			Sender:      "actor:agent:c",
+			Recipient:   agent.BroadcastRecipient,
+			Subject:     "beta-1",
+			Body:        "third",
+			Status:      agent.BoardMessageStatusUnread,
+			CreatedAt:   now,
+		},
+	}
+	for i := range msgs {
+		if err := store.SendMessage(ctx, &msgs[i]); err != nil {
+			t.Fatalf("SendMessage[%d]: %v", i, err)
+		}
+	}
+
+	rooms, err := store.ListRooms(ctx, "ws1", "actor:agent:viewer", 10)
+	if err != nil {
+		t.Fatalf("ListRooms: %v", err)
+	}
+	if len(rooms) != 2 {
+		t.Fatalf("rooms=%d want 2", len(rooms))
+	}
+	if rooms[0].ID != "beta" {
+		t.Fatalf("latest room=%q want beta", rooms[0].ID)
+	}
+	if rooms[1].ID != "alpha" {
+		t.Fatalf("second room=%q want alpha", rooms[1].ID)
+	}
+	if rooms[1].UnreadCount != 1 {
+		t.Fatalf("alpha unread=%d want 1", rooms[1].UnreadCount)
+	}
+	if rooms[1].MessageCount != 2 {
+		t.Fatalf("alpha message_count=%d want 2", rooms[1].MessageCount)
+	}
+	if len(rooms[1].Members) != 0 {
+		t.Fatalf("alpha members=%d want 0", len(rooms[1].Members))
+	}
+	if len(rooms[1].Participants) != 3 {
+		t.Fatalf("alpha participants=%d want 3", len(rooms[1].Participants))
+	}
+
+	room, err := store.GetRoom(ctx, "ws1", "alpha", "actor:agent:viewer")
+	if err != nil {
+		t.Fatalf("GetRoom: %v", err)
+	}
+	if room.Title != "alpha-2" {
+		t.Fatalf("room title=%q want alpha-2", room.Title)
+	}
+	if len(room.TaskIDs) != 2 {
+		t.Fatalf("alpha task_ids=%d want 2", len(room.TaskIDs))
+	}
+
+	roomMessages, err := store.ListRoomMessages(ctx, "ws1", "alpha", 10)
+	if err != nil {
+		t.Fatalf("ListRoomMessages: %v", err)
+	}
+	if len(roomMessages) != 2 {
+		t.Fatalf("room messages=%d want 2", len(roomMessages))
+	}
+	if roomMessages[0].Subject != "alpha-1" || roomMessages[1].Subject != "alpha-2" {
+		t.Fatalf("room messages not chronological: %+v", []string{roomMessages[0].Subject, roomMessages[1].Subject})
+	}
+}
+
+func TestBoardStore_RoomMetadataAndMembers(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+
+	store, err := OpenBoardStore(ctx, dir)
+	if err != nil {
+		t.Fatalf("OpenBoardStore: %v", err)
+	}
+	defer store.Close()
+
+	room, err := store.UpsertRoom(ctx, agent.Room{
+		ID:          "alpha",
+		WorkspaceID: "ws1",
+		Title:       "Alpha Room",
+		Description: "Primary coordination room",
+		Members: []agent.RoomMember{
+			{ActorID: "actor:agent:one", Role: "owner"},
+			{ActorID: "actor:agent:two", Role: "member"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("UpsertRoom: %v", err)
+	}
+	if room.Stream != agent.RoomStreamName("alpha") {
+		t.Fatalf("stream=%q want %q", room.Stream, agent.RoomStreamName("alpha"))
+	}
+
+	summary, err := store.GetRoom(ctx, "ws1", "alpha", "")
+	if err != nil {
+		t.Fatalf("GetRoom: %v", err)
+	}
+	if summary.Title != "Alpha Room" {
+		t.Fatalf("title=%q want Alpha Room", summary.Title)
+	}
+	if summary.Description != "Primary coordination room" {
+		t.Fatalf("description=%q want Primary coordination room", summary.Description)
+	}
+	if len(summary.Members) != 2 {
+		t.Fatalf("members=%d want 2", len(summary.Members))
+	}
+	if len(summary.Participants) != 2 {
+		t.Fatalf("participants=%d want 2", len(summary.Participants))
+	}
+
+	messages, err := store.ListRoomMessages(ctx, "ws1", "alpha", 10)
+	if err != nil {
+		t.Fatalf("ListRoomMessages metadata-only room: %v", err)
+	}
+	if len(messages) != 0 {
+		t.Fatalf("metadata-only room messages=%d want 0", len(messages))
+	}
+
+	replaced, err := store.ReplaceRoomMembers(ctx, "ws1", "alpha", []agent.RoomMember{
+		{ActorID: "actor:agent:three", Role: "owner"},
+	})
+	if err != nil {
+		t.Fatalf("ReplaceRoomMembers: %v", err)
+	}
+	if len(replaced) != 1 {
+		t.Fatalf("replaced members=%d want 1", len(replaced))
+	}
+
+	updated, err := store.GetRoom(ctx, "ws1", "alpha", "")
+	if err != nil {
+		t.Fatalf("GetRoom after replace members: %v", err)
+	}
+	if len(updated.Members) != 1 || updated.Members[0].ActorID != "actor:agent:three" {
+		t.Fatalf("updated members=%+v want actor:agent:three", updated.Members)
+	}
+	if len(updated.Participants) != 1 || updated.Participants[0] != "actor:agent:three" {
+		t.Fatalf("updated participants=%+v want actor:agent:three", updated.Participants)
+	}
+}
+
 func TestBoardStore_ReserveAndRelease(t *testing.T) {
 	ctx := context.Background()
 	dir := t.TempDir()

@@ -31,6 +31,17 @@ type ArtifactSearchOptions struct {
 	ArtifactTypes []string
 	Limit         int
 	MinSimilarity float64
+	Working       WorkingContext
+}
+
+// WorkingContext constrains semantic retrieval to task-relevant evidence before
+// ranking. Empty values mean "no additional constraint" for that field.
+type WorkingContext struct {
+	SessionID      string
+	WorkspaceID    string
+	ActiveFiles    []string
+	RequiredLabels []string
+	MinSalience    float64
 }
 
 // ScoredArtifact is one semantic artifact search hit.
@@ -59,6 +70,9 @@ type ArtifactSearchResult struct {
 	Hits             []ScoredArtifact         `json:"hits,omitempty"`
 	SearchPath       ArtifactSearchPath       `json:"search_path,omitempty"`
 	VectorCapability ArtifactVectorCapability `json:"vector_capability,omitempty"`
+	WorkingApplied   bool                     `json:"working_context_applied,omitempty"`
+	FallbackLevel    int                      `json:"working_context_fallback_level,omitempty"`
+	EligibleCount    int                      `json:"working_context_eligible_count,omitempty"`
 }
 
 // ArtifactSemanticRetriever searches persisted turn artifacts by semantic embedding.

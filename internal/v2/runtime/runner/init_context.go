@@ -36,9 +36,11 @@ func (p *Pipeline) stageInitContext(ctx context.Context, st *executionState) *v2
 		st.in.CausationID = st.in.RequestID
 	}
 	st.out.TurnID = st.in.TurnID
+	turnIndex := p.nextTurnIndex(ctx, st.in.RunID)
 	st.turn = run.TurnRecord{
 		ID:            st.in.TurnID,
 		SessionID:     st.in.RunID,
+		TurnIndex:     turnIndex,
 		TraceID:       st.in.CorrelationID,
 		RootSpanID:    fmt.Sprintf("span:%s:%s:root", st.in.RunID, st.in.TurnID),
 		CorrelationID: st.in.CorrelationID,

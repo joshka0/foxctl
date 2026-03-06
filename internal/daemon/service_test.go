@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/jkatigb/agentctl/internal/platform/config"
+	llmproviders "github.com/jkatigb/agentctl/internal/providers/llm"
 )
 
 func TestService_StartsAndStops(t *testing.T) {
@@ -140,6 +141,47 @@ func TestService_StatusRequest(t *testing.T) {
 	_ = svc.Shutdown(shutdownCtx)
 }
 
+func TestServiceResolveLLMConfig_DefaultsToLMStudio(t *testing.T) {
+	t.Setenv("LMSTUDIO_MODEL", "")
+	svc := &Service{cfg: config.Config{}}
+
+	provider, apiKey, model := svc.resolveLLMConfig()
+	if provider != "lmstudio" {
+		t.Fatalf("provider=%q want lmstudio", provider)
+	}
+	if apiKey != "lm-studio" {
+		t.Fatalf("apiKey=%q want lm-studio", apiKey)
+	}
+	wantModel := llmproviders.DefaultModelForProvider("lmstudio")
+	if model != wantModel {
+		t.Fatalf("model=%q want %q", model, wantModel)
+	}
+}
+
+func TestServiceResolveLLMConfig_RespectsConfiguredProvider(t *testing.T) {
+	t.Setenv("LMSTUDIO_MODEL", "")
+	svc := &Service{
+		cfg: config.Config{
+			LLM: config.LLMSettings{
+				Provider:         "openrouter",
+				OpenRouterAPIKey: "or-key",
+				OpenRouterModel:  "openrouter/custom",
+			},
+		},
+	}
+
+	provider, apiKey, model := svc.resolveLLMConfig()
+	if provider != "openrouter" {
+		t.Fatalf("provider=%q want openrouter", provider)
+	}
+	if apiKey != "or-key" {
+		t.Fatalf("apiKey=%q want or-key", apiKey)
+	}
+	if model != "openrouter/custom" {
+		t.Fatalf("model=%q want openrouter/custom", model)
+	}
+}
+
 func waitForSocket(t *testing.T, socketPath string, errCh <-chan error) {
 	t.Helper()
 	for i := 0; i < 200; i++ {
@@ -213,5 +255,67 @@ func TestSocketPath(t *testing.T) {
 	expected := filepath.Join(tmp, "agentctl.sock")
 	if path != expected {
 		t.Fatalf("expected %s, got %s", expected, path)
+	}
+}
+
+func TestSocketPath_EnvOverride(t *testing.T) {
+	tmp := t.TempDir()
+	expected := filepath.Join(tmp, "custom.sock")
+	t.Setenv(EnvDaemonSocketPath, expected)
+	t.Setenv("XDG_RUNTIME_DIR", filepath.Join(tmp, "ignored"))
+
+	path := SocketPath()
+	if path != expected {
+		t.Fatalf("expected %s, got %s", expected, path)
+	}
+}
+
+func TestService_UsesSocketEnvOverride(t *testing.T) {
+	tmp := t.TempDir()
+	skipIfUnixSocketsUnavailable(t, tmp)
+
+	socketPath := filepath.Join(tmp, "daemon.sock")
+	t.Setenv(EnvDaemonSocketPath, socketPath)
+	t.Setenv("XDG_RUNTIME_DIR", filepath.Join(tmp, "ignored"))
+
+	cfg := config.Config{
+		Paths: config.Paths{
+			Cache: filepath.Join(tmp, "cache"),
+			CAS:   filepath.Join(tmp, "cas"),
+		},
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	svc, err := NewService(cfg, ServiceOptions{})
+	if err != nil {
+		t.Fatalf("NewService: %v", err)
+	}
+
+	if svc.socketPath != socketPath {
+		t.Fatalf("expected service socketPath %s, got %s", socketPath, svc.socketPath)
+	}
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- svc.Run(ctx)
+	}()
+
+	waitForSocket(t, socketPath, errCh)
+
+	client := NewClient()
+	if client.socketPath != socketPath {
+		t.Fatalf("expected client socketPath %s, got %s", socketPath, client.socketPath)
+	}
+
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer shutdownCancel()
+	if err := svc.Shutdown(shutdownCtx); err != nil {
+		t.Fatalf("Shutdown: %v", err)
+	}
+
+	if _, err := os.Stat(socketPath); !os.IsNotExist(err) {
+		t.Fatalf("expected socket to be removed, err=%v", err)
 	}
 }

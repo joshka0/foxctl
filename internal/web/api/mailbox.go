@@ -51,6 +51,21 @@ type MailboxSendResponse struct {
 	Message string `json:"message,omitempty"`
 }
 
+// MailboxStatusUpdateRequest updates the read/ack lifecycle for existing board messages.
+type MailboxStatusUpdateRequest struct {
+	WorkspaceID string   `json:"workspace_id"`
+	ActorID     string   `json:"actor_id,omitempty"`
+	Action      string   `json:"action"`
+	MessageIDs  []string `json:"message_ids"`
+}
+
+// MailboxStatusUpdateResponse reports how many messages changed state.
+type MailboxStatusUpdateResponse struct {
+	Action  string `json:"action"`
+	Updated int    `json:"updated"`
+	Status  string `json:"status"`
+}
+
 // MailboxListHandler returns an HTTP handler for the /api/mailbox endpoint.
 //
 // It handles GET and POST requests. POST requests are forwarded to handleMailboxSend to create and send a mailbox message.
@@ -58,15 +73,24 @@ type MailboxSendResponse struct {
 // - limit: integer 1–500 (defaults to 50).
 // - actor_id or actor: actor identifier; if omitted and `all` is not true, defaults to the broadcast recipient.
 // - all: boolean flag to bypass actor restriction.
+// - task_id: optional task identifier to filter room/task-local messages.
+// - stream: optional stream identifier (for example `room:<id>`) to filter room timelines.
 // - only_unread: boolean flag to filter only unread messages.
 // - only_unsurfaced: boolean flag to filter only unsurfaced messages.
 // - workspace_id or workspace: required workspace identifier.
+//
+// PATCH requests update message lifecycle state and require workspace_id, action, and at least one message_id.
+// Supported PATCH actions are `read`, `surfaced`, and `ack`.
 //
 // For a successful GET the handler returns a JSON object with a "messages" array. For unsupported HTTP methods it responds with 405 Method Not Allowed.
 func MailboxListHandler(cfg config.Config, log zerolog.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodPost {
 			handleMailboxSend(w, r, cfg, log)
+			return
+		}
+		if r.Method == http.MethodPatch {
+			handleMailboxStatusUpdate(w, r, cfg, log)
 			return
 		}
 		if r.Method != http.MethodGet {
@@ -93,6 +117,8 @@ func MailboxListHandler(cfg config.Config, log zerolog.Logger) http.HandlerFunc 
 
 		onlyUnread := parseBool(r.URL.Query().Get("only_unread"))
 		onlyUnsurfaced := parseBool(r.URL.Query().Get("only_unsurfaced"))
+		taskID := strings.TrimSpace(r.URL.Query().Get("task_id"))
+		stream := strings.TrimSpace(r.URL.Query().Get("stream"))
 
 		workspace := r.URL.Query().Get("workspace_id")
 		if workspace == "" {
@@ -114,6 +140,8 @@ func MailboxListHandler(cfg config.Config, log zerolog.Logger) http.HandlerFunc 
 		msgList, err := store.Inbox(r.Context(), agent.InboxFilter{
 			WorkspaceID:    workspace,
 			ActorID:        actor,
+			TaskID:         taskID,
+			Stream:         stream,
 			OnlyUnread:     onlyUnread,
 			OnlyUnsurfaced: onlyUnsurfaced,
 			Limit:          limit,
@@ -257,4 +285,80 @@ func handleMailboxSend(w http.ResponseWriter, r *http.Request, cfg config.Config
 		Status:  "sent",
 		Message: "Message sent successfully",
 	})
+}
+
+func handleMailboxStatusUpdate(w http.ResponseWriter, r *http.Request, cfg config.Config, log zerolog.Logger) {
+	var req MailboxStatusUpdateRequest
+	if err := readJSON(w, r, &req); err != nil {
+		httpError(w, http.StatusBadRequest, "invalid request body: "+err.Error())
+		return
+	}
+
+	req.WorkspaceID = strings.TrimSpace(req.WorkspaceID)
+	req.ActorID = strings.TrimSpace(req.ActorID)
+	req.Action = normalizeMailboxStatusAction(req.Action)
+	if req.WorkspaceID == "" {
+		httpError(w, http.StatusBadRequest, "workspace_id is required")
+		return
+	}
+	if req.Action == "" {
+		httpError(w, http.StatusBadRequest, "action must be one of read, surfaced, ack")
+		return
+	}
+
+	messageIDs := make([]string, 0, len(req.MessageIDs))
+	for _, id := range req.MessageIDs {
+		if trimmed := strings.TrimSpace(id); trimmed != "" {
+			messageIDs = append(messageIDs, trimmed)
+		}
+	}
+	if len(messageIDs) == 0 {
+		httpError(w, http.StatusBadRequest, "message_ids must contain at least one id")
+		return
+	}
+
+	store, err := blackboard.OpenBoardStore(r.Context(), cfg.Storage.Root)
+	if err != nil {
+		log.Error().Err(err).Msg("failed to open board store")
+		httpError(w, http.StatusInternalServerError, "failed to open board store")
+		return
+	}
+	defer store.Close()
+
+	var updated int
+	switch req.Action {
+	case "read":
+		updated, err = store.MarkRead(r.Context(), req.WorkspaceID, req.ActorID, messageIDs)
+	case "surfaced":
+		updated, err = store.MarkSurfaced(r.Context(), req.WorkspaceID, req.ActorID, messageIDs)
+	case "ack":
+		updated, err = store.AckMessages(r.Context(), req.WorkspaceID, req.ActorID, messageIDs)
+	default:
+		httpError(w, http.StatusBadRequest, "action must be one of read, surfaced, ack")
+		return
+	}
+	if err != nil {
+		log.Error().Err(err).Str("action", req.Action).Msg("failed to update mailbox messages")
+		httpError(w, http.StatusInternalServerError, "failed to update mailbox messages")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, MailboxStatusUpdateResponse{
+		Action:  req.Action,
+		Updated: updated,
+		Status:  "ok",
+	})
+}
+
+func normalizeMailboxStatusAction(raw string) string {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "read":
+		return "read"
+	case "surfaced":
+		return "surfaced"
+	case "ack", "acked":
+		return "ack"
+	default:
+		return ""
+	}
 }

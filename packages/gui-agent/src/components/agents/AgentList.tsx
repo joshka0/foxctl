@@ -1,20 +1,49 @@
-import { useState } from 'react'
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { ScrollArea } from '@/components/ui/scroll-area'
-import { Button } from '@/components/ui/button'
-import { Badge } from '@/components/ui/badge'
-import { Card, CardContent } from '@/components/ui/card'
-import { Input } from '@/components/ui/input'
-import { cn, formatRelativeTime } from '@/lib/utils'
-import { listAgents, spawnAgent, trashAgent, killAgent, startAgent, createConsoleSession, getCompanionConversationMessages, type SpawnAgentParams } from '@/api/client'
-import type { Agent, AgentSpawnResponse } from '@/api/types'
-import { useChatStore } from '@/stores/chatStore'
-import { useViewStore } from '@/stores/viewStore'
-import type { ConsoleMessage } from '@/api/client'
-import { AgentDetailView } from './AgentDetailView'
-import { SpawnAgentFormCore } from './SpawnAgentFormCore'
-import { getRoleIcon, getAgentDisplayName, getPromptSummaryOrSubtitle } from '@/lib/agent-utils'
+import { useMemo, useRef, useState } from "react";
 import {
+  useQuery,
+  useQueries,
+  useMutation,
+  useQueryClient,
+} from "@tanstack/react-query";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Card, CardContent } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { cn, formatRelativeTime } from "@/lib/utils";
+import {
+  listAgents,
+  listRooms,
+  listWorkspaces,
+  spawnAgent,
+  trashAgent,
+  killAgent,
+  startAgent,
+  type SpawnAgentParams,
+} from "@/api/client";
+import type { Agent, AgentSpawnResponse, Room } from "@/api/types";
+import type { ActivityEvent } from "@/api/types";
+import { useActivityStore } from "@/stores/activityStore";
+import { useActivityFocusStore } from "@/stores/activityFocusStore";
+import { useViewStore } from "@/stores/viewStore";
+import { AgentDetailView } from "./AgentDetailView";
+import { SpawnAgentFormCore } from "./SpawnAgentFormCore";
+import { RuntimeRoomPanel } from "@/components/rooms/RuntimeRoomPanel";
+import {
+  getRoleIcon,
+  getAgentDisplayName,
+  getPromptSummaryOrSubtitle,
+  isWorkerAgent,
+  getAgentActivityTimestamp,
+} from "@/lib/agent-utils";
+import {
+  indexRoomsByActor,
+  isPathWorkspace,
+  resolveRoomWorkspacePath,
+  roomDisplayName,
+} from "@/lib/room-utils";
+import {
+  AlertTriangle,
   Bot,
   Plus,
   RefreshCw,
@@ -30,7 +59,17 @@ import {
   Eye,
   MessageSquare,
   Trash2,
-} from 'lucide-react'
+  Wrench,
+} from "lucide-react";
+
+const STALE_RUNNING_MS = 10 * 60 * 1000;
+const RECENT_STOPPED_MS = 2 * 60 * 60 * 1000;
+
+type AttentionSignal = {
+  agent: Agent;
+  reason: string;
+  severity: "error" | "warn" | "info";
+};
 
 /**
  * Renders the Agents management UI: list, search, spawn form, per-agent actions, and chat integration.
@@ -43,191 +82,311 @@ import {
  * @returns The React element for the agents management view.
  */
 export function AgentList() {
-  const [searchQuery, setSearchQuery] = useState('')
-  const [chatLoadingAgentId, setChatLoadingAgentId] = useState<string | null>(null)
-  const [trashLoadingAgentId, setTrashLoadingAgentId] = useState<string | null>(null)
-  const [killLoadingAgentId, setKillLoadingAgentId] = useState<string | null>(null)
-  const [startLoadingAgentId, setStartLoadingAgentId] = useState<string | null>(null)
-  const queryClient = useQueryClient()
+  const [searchQuery, setSearchQuery] = useState("");
+  const [showStopped, setShowStopped] = useState(false);
+  const [trashLoadingAgentId, setTrashLoadingAgentId] = useState<string | null>(
+    null,
+  );
+  const [killLoadingAgentId, setKillLoadingAgentId] = useState<string | null>(
+    null,
+  );
+  const [startLoadingAgentId, setStartLoadingAgentId] = useState<string | null>(
+    null,
+  );
+  const queryClient = useQueryClient();
+  const activityEvents = useActivityStore((s) => s.events);
+  const setActivityFocus = useActivityFocusStore((s) => s.setFocus);
 
-  // Access chat store to switch sessions
-  const { setSessionId, setSession, setMessages, setInflight, setPersistedSessionId, setInitializing, setSourceAgent } = useChatStore()
-  const { selectedAgent, setSelectedAgent, setActiveView, spawnAgentOpen, setSpawnAgentOpen } = useViewStore()
+  const {
+    selectedAgent,
+    setSelectedAgent,
+    setSelectedRoom,
+    setActiveView,
+    spawnAgentOpen,
+    setSpawnAgentOpen,
+  } = useViewStore();
 
   const { data, isLoading, refetch, isFetching } = useQuery({
-    queryKey: ['agents'],
+    queryKey: ["agents"],
     queryFn: () => listAgents(50),
     refetchInterval: 10000,
-  })
+  });
+  const { data: workspacesData } = useQuery({
+    queryKey: ["workspaces"],
+    queryFn: listWorkspaces,
+    staleTime: 10000,
+  });
 
-  const agents = data?.agents ?? []
-  const filteredAgents = searchQuery
+  const agents = data?.agents ?? [];
+  const normalizedQuery = searchQuery.trim().toLowerCase();
+  const matchedAgents = normalizedQuery
     ? agents.filter(
         (a) =>
-          a.name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-          a.slug?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-          a.role?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-          a.id.toLowerCase().includes(searchQuery.toLowerCase())
+          a.name?.toLowerCase().includes(normalizedQuery) ||
+          a.slug?.toLowerCase().includes(normalizedQuery) ||
+          a.role?.toLowerCase().includes(normalizedQuery) ||
+          a.id.toLowerCase().includes(normalizedQuery),
       )
-    : agents
+    : agents;
+  const sortedMatchedAgents = useMemo(() => {
+    const rank: Record<Agent["state"], number> = {
+      running: 0,
+      error: 1,
+      idle: 2,
+      stopped: 3,
+      unknown: 4,
+    };
+    const ts = (agent: Agent): number => {
+      const raw = agent.heartbeat_at || agent.updated_at || agent.created_at;
+      if (!raw) return 0;
+      const parsed = Date.parse(raw);
+      return Number.isFinite(parsed) ? parsed : 0;
+    };
 
-  // Handle loading an agent into the companion chat
-  const handleChat = async (agent: Agent) => {
-    setChatLoadingAgentId(agent.id)
-    setInitializing(true)
+    return [...matchedAgents].sort((a, b) => {
+      const byRank = rank[a.state] - rank[b.state];
+      if (byRank !== 0) return byRank;
+      const byTs = ts(b) - ts(a);
+      if (byTs !== 0) return byTs;
+      return getAgentDisplayName(a).localeCompare(getAgentDisplayName(b));
+    });
+  }, [matchedAgents]);
+  const stoppedCountInResults = sortedMatchedAgents.filter(
+    (a) => a.state === "stopped",
+  ).length;
+  const hideStoppedByDefault = normalizedQuery.length === 0 && !showStopped;
+  const visibleAgents = hideStoppedByDefault
+    ? sortedMatchedAgents.filter((a) => a.state !== "stopped")
+    : sortedMatchedAgents;
+  const conversationalAgents = useMemo(
+    () => visibleAgents.filter((agent) => !isWorkerAgent(agent)),
+    [visibleAgents],
+  );
+  const workerAgents = useMemo(
+    () => visibleAgents.filter((agent) => isWorkerAgent(agent)),
+    [visibleAgents],
+  );
+  const conversationalTotal = useMemo(
+    () => agents.filter((agent) => !isWorkerAgent(agent)).length,
+    [agents],
+  );
+  const workerTotal = agents.length - conversationalTotal;
+  const latestStoppedAgent = useMemo(() => {
+    return [...agents]
+      .filter((agent) => agent.state === "stopped")
+      .sort(
+        (a, b) => getAgentActivityTimestamp(b) - getAgentActivityTimestamp(a),
+      )[0];
+  }, [agents]);
+  const latestConversationalAgent = useMemo(() => {
+    return [...agents]
+      .filter((agent) => !isWorkerAgent(agent))
+      .sort(
+        (a, b) => getAgentActivityTimestamp(b) - getAgentActivityTimestamp(a),
+      )[0];
+  }, [agents]);
+  const latestErrorEvent = useMemo(() => {
+    return activityEvents.find((event) => event.status === "error");
+  }, [activityEvents]);
+  const needsAttention = useMemo<AttentionSignal[]>(() => {
+    const now = Date.now();
+    const out: AttentionSignal[] = [];
+    const seen = new Set<string>();
+    const push = (
+      agent: Agent,
+      reason: string,
+      severity: AttentionSignal["severity"],
+    ) => {
+      if (seen.has(agent.id)) return;
+      seen.add(agent.id);
+      out.push({ agent, reason, severity });
+    };
 
-    try {
-      // Try to load companion conversation messages for this agent
-      // Use linked conversation_id if available, otherwise fall back to agent.id
-      const conversationId = agent.conversation_id || agent.id
-      let companionMessages: ConsoleMessage[] = []
-      let hasHistory = false
-
-      try {
-        const messagesData = await getCompanionConversationMessages(conversationId, 200)
-        if (messagesData.messages && messagesData.messages.length > 0) {
-          hasHistory = true
-          companionMessages = messagesData.messages.map((msg) => ({
-            role: msg.role as 'user' | 'assistant',
-            content: msg.content,
-            timestamp: msg.created_at,
-            // Map tool calls from companion format to console format
-            tool_calls: msg.tool_calls?.map((tc) => ({
-              name: tc.name,
-              input: tc.arguments as Record<string, unknown>,
-              status: 'completed' as const,
-            })),
-          }))
-        }
-      } catch {
-        // No companion conversation found for agent, starting fresh
-      }
-
-      // Create a new console session for this agent's workspace
-      const data = await createConsoleSession({
-        workspace: agent.ns || '/',
-        profile: 'companion',
-        system_prompt: `You are chatting in the context of an agent session.
-
-Agent Details:
-- Name: ${agent.name || agent.slug || 'Unnamed'}
-- Role: ${agent.role || 'N/A'}
-- ID: ${agent.id}
-- Workspace: ${agent.ns || '/'}
-- Model: ${agent.llm_model || 'default'}
-- State: ${agent.state}
-${hasHistory ? `- Continuing conversation with ${companionMessages.length} previous messages` : ''}
-
-Help the user understand and interact with this agent's work.`,
-      })
-
-      const newSessionId = data.session.id
-      setSessionId(newSessionId)
-      setSession(data.session)
-      setSourceAgent({
-        id: agent.id,
-        name: agent.name,
-        role: agent.role,
-        ns: agent.ns,
-      })
-
-      // Set messages from companion conversation
-      if (companionMessages.length > 0) {
-        setMessages(companionMessages)
-        setPersistedSessionId(conversationId) // Use conversation_id for persisted session reference
-      } else {
-        setMessages([])
-        setPersistedSessionId(null)
-      }
-
-      setInflight(false)
-
-      // Switch to conversations view to show the new chat
-      setActiveView('conversations')
-
-      // Set localStorage AFTER switching view and loading messages
-      localStorage.setItem('gui-agent-session-id', newSessionId)
-
-      // Small delay to ensure ConversationsList has mounted before clearing the flag
-      setTimeout(() => {
-        setInitializing(false)
-      }, 500)
-    } catch (err) {
-      console.error('Failed to create chat session for agent:', err)
-      setInitializing(false)
-    } finally {
-      setChatLoadingAgentId(null)
+    const errored = [...agents]
+      .filter((agent) => agent.state === "error")
+      .sort(
+        (a, b) => getAgentActivityTimestamp(b) - getAgentActivityTimestamp(a),
+      );
+    for (const agent of errored) {
+      push(agent, "Errored and requires intervention.", "error");
     }
-  }
+
+    const staleRunning = [...agents]
+      .filter((agent) => {
+        if (agent.state !== "running" && agent.state !== "idle") return false;
+        const ts = getAgentActivityTimestamp(agent);
+        return ts > 0 && now - ts > STALE_RUNNING_MS;
+      })
+      .sort(
+        (a, b) => getAgentActivityTimestamp(a) - getAgentActivityTimestamp(b),
+      );
+    for (const agent of staleRunning) {
+      push(
+        agent,
+        `No activity for ${Math.max(1, Math.floor((now - getAgentActivityTimestamp(agent)) / 60000))}m.`,
+        "warn",
+      );
+    }
+
+    const resumable = [...agents]
+      .filter((agent) => {
+        if (agent.state !== "stopped") return false;
+        const ts = getAgentActivityTimestamp(agent);
+        return ts > 0 && now - ts <= RECENT_STOPPED_MS;
+      })
+      .sort(
+        (a, b) => getAgentActivityTimestamp(b) - getAgentActivityTimestamp(a),
+      );
+    for (const agent of resumable) {
+      push(agent, "Recently stopped; likely resumable context.", "info");
+    }
+
+    return out.slice(0, 8);
+  }, [agents]);
+  const activeCount = agents.filter(
+    (agent) => agent.state === "running" || agent.state === "idle",
+  ).length;
+
+  const roomWorkspaces = useMemo(
+    () => {
+      const knownPaths = (workspacesData?.workspaces ?? []).map(
+        (workspace) => workspace.path,
+      );
+      const fallbackCurrent = workspacesData?.current;
+      return [
+        ...new Set(
+          agents
+            .map((agent) =>
+              resolveRoomWorkspacePath(agent.ns, knownPaths, fallbackCurrent),
+            )
+            .filter((workspace) => isPathWorkspace(workspace)),
+        ),
+      ];
+    },
+    [agents, workspacesData?.current, workspacesData?.workspaces],
+  );
+  const roomQueries = useQueries({
+    queries: roomWorkspaces.map((workspaceID) => ({
+      queryKey: ["rooms", workspaceID, "runtime-affinity"],
+      queryFn: () => listRooms({ workspace_id: workspaceID, limit: 100 }),
+      staleTime: 5000,
+      retry: false,
+    })),
+  });
+  const roomsByAgent = useMemo(() => {
+    const allRooms: Room[] = [];
+    for (const query of roomQueries) {
+      for (const room of query.data?.rooms ?? []) {
+        allRooms.push(room);
+      }
+    }
+    return indexRoomsByActor(allRooms);
+  }, [roomQueries]);
+
+  // Handle opening the primary human-facing agent workbench.
+  const handleChat = async (agent: Agent) => {
+    setSelectedAgent(agent);
+    setActiveView("runtime");
+  };
+
+  const handleOpenRoom = (room: Room) => {
+    setSelectedAgent(null);
+    setSelectedRoom(room.id, room.workspace_id);
+    setActiveView("rooms");
+  };
 
   // Handle trashing a stopped agent
   const handleTrash = async (agent: Agent) => {
-    if (agent.state !== 'stopped') {
-      console.error('Can only trash stopped agents')
-      return
+    if (agent.state !== "stopped") {
+      console.error("Can only trash stopped agents");
+      return;
     }
 
     // Confirm before trashing
-    if (!window.confirm(`Are you sure you want to remove "${getAgentDisplayName(agent)}"? This action cannot be undone.`)) {
-      return
+    if (
+      !window.confirm(
+        `Are you sure you want to remove "${getAgentDisplayName(agent)}"? This action cannot be undone.`,
+      )
+    ) {
+      return;
     }
 
-    setTrashLoadingAgentId(agent.id)
+    setTrashLoadingAgentId(agent.id);
     try {
-      await trashAgent(agent.id)
+      await trashAgent(agent.id);
       // Refresh the agent list
-      queryClient.invalidateQueries({ queryKey: ['agents'] })
+      queryClient.invalidateQueries({ queryKey: ["agents"] });
     } catch (err) {
-      console.error('Failed to trash agent:', err)
-      alert(err instanceof Error ? err.message : 'Failed to trash agent')
+      console.error("Failed to trash agent:", err);
+      alert(err instanceof Error ? err.message : "Failed to trash agent");
     } finally {
-      setTrashLoadingAgentId(null)
+      setTrashLoadingAgentId(null);
     }
-  }
+  };
 
   // Handle killing a running agent
   const handleKill = async (agent: Agent) => {
-    if (agent.state !== 'running') {
-      console.error('Can only kill running agents')
-      return
+    if (agent.state !== "running") {
+      console.error("Can only kill running agents");
+      return;
     }
 
-    if (!window.confirm(`Are you sure you want to stop "${getAgentDisplayName(agent)}"?`)) {
-      return
+    if (
+      !window.confirm(
+        `Are you sure you want to stop "${getAgentDisplayName(agent)}"?`,
+      )
+    ) {
+      return;
     }
 
-    setKillLoadingAgentId(agent.id)
+    setKillLoadingAgentId(agent.id);
     try {
-      await killAgent(agent.id)
+      await killAgent(agent.id);
       // Refresh the agent list
-      queryClient.invalidateQueries({ queryKey: ['agents'] })
+      queryClient.invalidateQueries({ queryKey: ["agents"] });
     } catch (err) {
-      console.error('Failed to kill agent:', err)
-      alert(err instanceof Error ? err.message : 'Failed to stop agent')
+      console.error("Failed to kill agent:", err);
+      alert(err instanceof Error ? err.message : "Failed to stop agent");
     } finally {
-      setKillLoadingAgentId(null)
+      setKillLoadingAgentId(null);
     }
-  }
+  };
 
   // Handle starting/resuming a stopped agent
   const handleStart = async (agent: Agent) => {
-    if (agent.state === 'running') {
-      console.error('Agent is already running')
-      return
+    if (agent.state === "running") {
+      console.error("Agent is already running");
+      return;
     }
 
-    setStartLoadingAgentId(agent.id)
+    setStartLoadingAgentId(agent.id);
     try {
-      await startAgent(agent.id)
+      await startAgent(agent.id);
       // Refresh the agent list
-      queryClient.invalidateQueries({ queryKey: ['agents'] })
+      queryClient.invalidateQueries({ queryKey: ["agents"] });
     } catch (err) {
-      console.error('Failed to start agent:', err)
-      alert(err instanceof Error ? err.message : 'Failed to start agent')
+      console.error("Failed to start agent:", err);
+      alert(err instanceof Error ? err.message : "Failed to start agent");
     } finally {
-      setStartLoadingAgentId(null)
+      setStartLoadingAgentId(null);
     }
-  }
+  };
+  const handleOpenLatestErrorTrace = (event: ActivityEvent | undefined) => {
+    if (!event) return;
+    if (!event.trace_id && !event.session_id) {
+      setActiveView("events");
+      return;
+    }
+    setActivityFocus({
+      traceIDs: event.trace_id ? [event.trace_id] : [],
+      sessionID: event.session_id,
+      sourceSurface: "runtime",
+      label: event.command
+        ? `${event.command} (${event.operation})`
+        : event.operation,
+    });
+    setActiveView("events");
+  };
 
   // If an agent is selected, show detail view
   if (selectedAgent) {
@@ -236,17 +395,17 @@ Help the user understand and interact with this agent's work.`,
         agent={selectedAgent}
         onBack={() => setSelectedAgent(null)}
       />
-    )
+    );
   }
 
   // Count agents by state
   const agentCounts = agents.reduce(
     (acc, agent) => {
-      acc[agent.state] = (acc[agent.state] || 0) + 1
-      return acc
+      acc[agent.state] = (acc[agent.state] || 0) + 1;
+      return acc;
     },
-    {} as Record<string, number>
-  )
+    {} as Record<string, number>,
+  );
 
   return (
     <div className="flex flex-col h-full">
@@ -255,7 +414,7 @@ Help the user understand and interact with this agent's work.`,
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             <Users className="h-5 w-5" />
-            <h2 className="text-lg font-semibold text-foreground">All Agents</h2>
+            <h2 className="text-lg font-semibold text-foreground">Runtime</h2>
           </div>
           <div className="flex items-center gap-2">
             <Button
@@ -266,10 +425,13 @@ Help the user understand and interact with this agent's work.`,
               className="h-8 w-8"
             >
               <RefreshCw
-                className={cn('h-4 w-4', isFetching && 'animate-spin')}
+                className={cn("h-4 w-4", isFetching && "animate-spin")}
               />
             </Button>
-            <Button size="sm" onClick={() => setSpawnAgentOpen(!spawnAgentOpen)}>
+            <Button
+              size="sm"
+              onClick={() => setSpawnAgentOpen(!spawnAgentOpen)}
+            >
               <Plus className="h-4 w-4 mr-1" />
               Spawn
             </Button>
@@ -281,6 +443,12 @@ Help the user understand and interact with this agent's work.`,
           <div className="flex items-center gap-2 flex-wrap">
             <Badge variant="secondary" className="text-xs">
               {agents.length} total
+            </Badge>
+            <Badge variant="secondary" className="text-xs">
+              {conversationalTotal} conversational
+            </Badge>
+            <Badge variant="secondary" className="text-xs">
+              {workerTotal} workers
             </Badge>
             {agentCounts.running > 0 && (
               <Badge className="text-xs bg-green-500/10 text-green-500 border-green-500/20">
@@ -299,7 +467,8 @@ Help the user understand and interact with this agent's work.`,
             )}
             {agentCounts.error > 0 && (
               <Badge className="text-xs bg-red-500/10 text-red-500 border-red-500/20">
-                {agentCounts.error} error
+                {agentCounts.error}{" "}
+                {agentCounts.error === 1 ? "error" : "errors"}
               </Badge>
             )}
           </div>
@@ -315,38 +484,156 @@ Help the user understand and interact with this agent's work.`,
             className="pl-9 h-9"
           />
         </div>
+        {normalizedQuery.length === 0 && (
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-xs text-muted-foreground uppercase tracking-wider">
+              Quick Actions
+            </span>
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-7 text-xs"
+              onClick={() =>
+                latestStoppedAgent && handleStart(latestStoppedAgent)
+              }
+              disabled={!latestStoppedAgent || !!startLoadingAgentId}
+            >
+              Resume Last Stopped
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-7 text-xs"
+              onClick={() => handleOpenLatestErrorTrace(latestErrorEvent)}
+              disabled={
+                !latestErrorEvent ||
+                (!latestErrorEvent.trace_id && !latestErrorEvent.session_id)
+              }
+            >
+              Open Latest Error Trace
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-7 text-xs"
+              onClick={() =>
+                latestConversationalAgent &&
+                handleChat(latestConversationalAgent)
+              }
+              disabled={!latestConversationalAgent}
+            >
+              Continue Latest Chat
+            </Button>
+          </div>
+        )}
+        {normalizedQuery.length === 0 && (
+          <Card className="bg-muted/30 border-border">
+            <CardContent className="p-3 space-y-1.5">
+              <div className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                Agent Utilization
+              </div>
+              <div className="text-xs text-foreground">
+                Keep 1-3 conversational agents active; use workers for one-off
+                tasks.
+              </div>
+              {agentCounts.stopped > activeCount && (
+                <div className="text-xs text-muted-foreground">
+                  Stopped backlog is high ({agentCounts.stopped}). Resume useful
+                  agents or remove old ones.
+                </div>
+              )}
+              {agentCounts.error > 0 && (
+                <div className="text-xs text-muted-foreground">
+                  {agentCounts.error} errored agents detected. Use error traces
+                  before restarting.
+                </div>
+              )}
+              {activeCount === 0 && (
+                <div className="text-xs text-muted-foreground">
+                  No active agents. Spawn one proactive researcher to keep
+                  runtime alive.
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        )}
+        {normalizedQuery.length === 0 && stoppedCountInResults > 0 && (
+          <div className="flex items-center gap-2">
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-7 text-xs"
+              onClick={() => setShowStopped((prev) => !prev)}
+            >
+              {showStopped
+                ? "Hide Stopped"
+                : `Show Stopped (${stoppedCountInResults})`}
+            </Button>
+            {!showStopped && (
+              <span className="text-xs text-muted-foreground">
+                Runtime defaults to active/error agents to reduce noise.
+              </span>
+            )}
+          </div>
+        )}
+
       </div>
 
       {/* Spawn Form */}
       {spawnAgentOpen && (
         <SpawnAgentForm
           onClose={() => setSpawnAgentOpen(false)}
-          onSuccess={async (actorId: string, spawnData: AgentSpawnResponse) => {
-            setSpawnAgentOpen(false)
+          onSuccess={async (
+            actorId: string,
+            spawnData: AgentSpawnResponse,
+            params?: SpawnAgentParams,
+          ) => {
+            setSpawnAgentOpen(false);
 
             // Refresh the agent list
-            queryClient.invalidateQueries({ queryKey: ['agents'] })
+            await queryClient.invalidateQueries({ queryKey: ["agents"] });
 
             // Extract info from actor_id (format: "actor:role:UUID")
-            const parts = actorId.split(':')
-            const agentId = parts.pop() || actorId
-            const role = parts.length > 1 ? parts[1] : 'agent'
+            const parts = actorId.split(":");
+            const agentId = parts.pop() || actorId;
+            const role = parts.length > 1 ? parts[1] : "agent";
+            let resolvedAgent: Agent | undefined;
+
+            try {
+              const refreshed = await listAgents(100);
+              resolvedAgent = refreshed.agents.find(
+                (agent) => agent.id === agentId,
+              );
+            } catch {
+              resolvedAgent = undefined;
+            }
 
             // Construct a minimal agent from spawn response to open chat immediately
             const newAgent: Agent = {
               id: agentId,
-              name: spawnData.name || 'New Agent',
-              slug: spawnData.name?.toLowerCase().replace(/\s+/g, '-'),
+              name: spawnData.name || "New Agent",
+              slug: spawnData.name?.toLowerCase().replace(/\s+/g, "-"),
               role: role,
+              memory_scope: params?.memory_scope,
+              memory_retention: params?.memory_retention,
               skills_allow: [],
-              share_bb: 'none',
-              state: (spawnData.status || 'running') as Agent['state'],
-              ns: '/',
+              share_bb: "none",
+              state: (spawnData.status || "running") as Agent["state"],
+              ns: resolvedAgent?.ns || params?.workspace_id || "/",
               created_at: new Date().toISOString(),
               updated_at: new Date().toISOString(),
-            }
+            };
 
-            handleChat(newAgent)
+            if (resolvedAgent) {
+              handleChat(resolvedAgent);
+              return;
+            }
+            if (params?.workspace_id) {
+              handleChat(newAgent);
+              return;
+            }
+            // If namespace is not yet available, avoid opening chat in the wrong workspace.
+            setActiveView("runtime");
           }}
         />
       )}
@@ -354,25 +641,32 @@ Help the user understand and interact with this agent's work.`,
       {/* Agent List */}
       <ScrollArea className="flex-1">
         <div className="p-4 space-y-3">
+          {normalizedQuery.length === 0 && <RuntimeRoomPanel agents={agents} />}
           {isLoading ? (
             <div className="text-center py-12 text-muted-foreground">
               <RefreshCw className="h-8 w-8 mx-auto mb-2 animate-spin" />
               <p>Loading agents...</p>
             </div>
-          ) : filteredAgents.length === 0 ? (
+          ) : visibleAgents.length === 0 ? (
             <div className="text-center py-12 text-muted-foreground">
               <div className="h-16 w-16 mx-auto mb-4 rounded-xl bg-muted flex items-center justify-center">
                 <Bot className="h-8 w-8 opacity-40" />
               </div>
               <p className="text-lg font-medium text-foreground">
-                {searchQuery ? 'No matching agents' : 'No agents running'}
+                {normalizedQuery
+                  ? "No matching agents"
+                  : stoppedCountInResults > 0
+                    ? "Stopped agents are hidden"
+                    : "No agents running"}
               </p>
               <p className="text-sm mt-1 max-w-xs mx-auto">
-                {searchQuery
+                {normalizedQuery
                   ? `No agents match "${searchQuery}". Try a different search.`
-                  : 'Spawn autonomous agents to perform tasks like research, coding, or reviewing.'}
+                  : stoppedCountInResults > 0
+                    ? "Use “Show Stopped” above to inspect archived runtime agents."
+                    : "Spawn autonomous agents to perform tasks like research, coding, or reviewing."}
               </p>
-              {!searchQuery && (
+              {!normalizedQuery && stoppedCountInResults === 0 && (
                 <Button
                   size="sm"
                   className="mt-4"
@@ -384,39 +678,139 @@ Help the user understand and interact with this agent's work.`,
               )}
             </div>
           ) : (
-            filteredAgents.map((agent) => (
-              <AgentCard
-                key={agent.id}
-                agent={agent}
-                onViewDetails={setSelectedAgent}
-                onChat={handleChat}
-                onTrash={handleTrash}
-                onKill={handleKill}
-                onStart={handleStart}
-                isChatLoading={chatLoadingAgentId === agent.id}
-                isTrashLoading={trashLoadingAgentId === agent.id}
-                isKillLoading={killLoadingAgentId === agent.id}
-                isStartLoading={startLoadingAgentId === agent.id}
-              />
-            ))
+            <>
+              {normalizedQuery.length === 0 && needsAttention.length > 0 && (
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <div className="text-xs font-medium uppercase tracking-wider text-muted-foreground inline-flex items-center gap-1.5">
+                      <AlertTriangle className="h-3.5 w-3.5 text-amber-500" />
+                      Needs Attention
+                    </div>
+                    <Badge variant="secondary" className="text-[10px]">
+                      {needsAttention.length}
+                    </Badge>
+                  </div>
+                  {needsAttention.map(({ agent, reason, severity }) => (
+                    <Card
+                      key={`attention-${agent.id}`}
+                      className={cn(
+                        severity === "error" && "border-red-500/30",
+                        severity === "warn" && "border-amber-500/30",
+                      )}
+                    >
+                      <CardContent className="p-3 flex items-center justify-between gap-3">
+                        <div className="min-w-0">
+                          <div className="text-sm font-medium text-foreground truncate">
+                            {getAgentDisplayName(agent)}
+                          </div>
+                          <div className="text-xs text-muted-foreground truncate">
+                            {reason}
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-1 flex-shrink-0">
+                          {agent.state === "stopped" && (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="h-7 text-xs"
+                              onClick={() => handleStart(agent)}
+                              disabled={startLoadingAgentId === agent.id}
+                            >
+                              Start
+                            </Button>
+                          )}
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="h-7 text-xs"
+                            onClick={() => setSelectedAgent(agent)}
+                          >
+                            Details
+                          </Button>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  ))}
+                </div>
+              )}
+              {conversationalAgents.length > 0 && (
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                      Conversational Agents
+                    </div>
+                    <Badge variant="secondary" className="text-[10px]">
+                      {conversationalAgents.length}
+                    </Badge>
+                  </div>
+                  {conversationalAgents.map((agent) => (
+                    <AgentCard
+                      key={agent.id}
+                      agent={agent}
+                      rooms={roomsByAgent.get(agent.id) ?? []}
+                      onViewDetails={setSelectedAgent}
+                      onOpenRoom={handleOpenRoom}
+                      onChat={handleChat}
+                      onTrash={handleTrash}
+                      onKill={handleKill}
+                      onStart={handleStart}
+                      isTrashLoading={trashLoadingAgentId === agent.id}
+                      isKillLoading={killLoadingAgentId === agent.id}
+                      isStartLoading={startLoadingAgentId === agent.id}
+                    />
+                  ))}
+                </div>
+              )}
+
+              {workerAgents.length > 0 && (
+                <div className="space-y-3 pt-1">
+                  <div className="flex items-center justify-between">
+                    <div className="text-xs font-medium uppercase tracking-wider text-muted-foreground inline-flex items-center gap-1.5">
+                      <Wrench className="h-3.5 w-3.5" />
+                      Worker Agents
+                    </div>
+                    <Badge variant="secondary" className="text-[10px]">
+                      {workerAgents.length}
+                    </Badge>
+                  </div>
+                  {workerAgents.map((agent) => (
+                    <AgentCard
+                      key={agent.id}
+                      agent={agent}
+                      rooms={roomsByAgent.get(agent.id) ?? []}
+                      onViewDetails={setSelectedAgent}
+                      onOpenRoom={handleOpenRoom}
+                      onChat={handleChat}
+                      onTrash={handleTrash}
+                      onKill={handleKill}
+                      onStart={handleStart}
+                      isTrashLoading={trashLoadingAgentId === agent.id}
+                      isKillLoading={killLoadingAgentId === agent.id}
+                      isStartLoading={startLoadingAgentId === agent.id}
+                    />
+                  ))}
+                </div>
+              )}
+            </>
           )}
         </div>
       </ScrollArea>
     </div>
-  )
+  );
 }
 
 interface AgentCardProps {
-  agent: Agent
-  onViewDetails: (agent: Agent) => void
-  onChat: (agent: Agent) => void
-  onTrash: (agent: Agent) => void
-  onKill: (agent: Agent) => void
-  onStart: (agent: Agent) => void
-  isChatLoading?: boolean
-  isTrashLoading?: boolean
-  isKillLoading?: boolean
-  isStartLoading?: boolean
+  agent: Agent;
+  rooms: Room[];
+  onViewDetails: (agent: Agent) => void;
+  onOpenRoom: (room: Room) => void;
+  onChat: (agent: Agent) => void;
+  onTrash: (agent: Agent) => void;
+  onKill: (agent: Agent) => void;
+  onStart: (agent: Agent) => void;
+  isTrashLoading?: boolean;
+  isKillLoading?: boolean;
+  isStartLoading?: boolean;
 }
 
 /**
@@ -431,33 +825,44 @@ interface AgentCardProps {
  * @param onTrash - Callback invoked when the "remove/trash" action is triggered
  * @param onKill - Callback invoked when the "stop/kill" action is triggered
  * @param onStart - Callback invoked when the "start/resume" action is triggered
- * @param isChatLoading - Whether the chat action is currently loading (disables chat button)
  * @param isTrashLoading - Whether the trash action is currently loading (disables trash button)
  * @param isKillLoading - Whether the kill action is currently loading (disables kill button)
  * @param isStartLoading - Whether the start action is currently loading (disables start button)
  * @returns A JSX element representing the agent card
  */
-function AgentCard({ agent, onViewDetails, onChat, onTrash, onKill, onStart, isChatLoading, isTrashLoading, isKillLoading, isStartLoading }: AgentCardProps) {
-  const RoleIcon = getRoleIcon(agent.role)
+function AgentCard({
+  agent,
+  rooms,
+  onViewDetails,
+  onOpenRoom,
+  onChat,
+  onTrash,
+  onKill,
+  onStart,
+  isTrashLoading,
+  isKillLoading,
+  isStartLoading,
+}: AgentCardProps) {
+  const RoleIcon = getRoleIcon(agent.role);
   const stateColors: Record<string, string> = {
-    running: 'bg-green-500',
-    idle: 'bg-yellow-500',
-    stopped: 'bg-gray-500',
-    error: 'bg-red-500',
-  }
+    running: "bg-green-500",
+    idle: "bg-yellow-500",
+    stopped: "bg-gray-500",
+    error: "bg-red-500",
+  };
 
   const stateLabels: Record<string, string> = {
-    running: 'Running',
-    idle: 'Idle',
-    stopped: 'Stopped',
-    error: 'Error',
-  }
+    running: "Running",
+    idle: "Idle",
+    stopped: "Stopped",
+    error: "Error",
+  };
 
   const getWorkspaceDisplayName = (ns: string) => {
-    if (!ns || ns === '/') return 'root'
-    const parts = ns.split('/')
-    return parts[parts.length - 1] || ns
-  }
+    if (!ns || ns === "/") return "root";
+    const parts = ns.split("/");
+    return parts[parts.length - 1] || ns;
+  };
 
   return (
     <Card className="hover:bg-accent/30 transition-colors">
@@ -465,19 +870,25 @@ function AgentCard({ agent, onViewDetails, onChat, onTrash, onKill, onStart, isC
         <div className="flex items-start justify-between">
           <div className="flex items-start gap-3 flex-1 min-w-0">
             <div className="relative flex-shrink-0">
-              <div className={cn(
-                'h-10 w-10 rounded-lg flex items-center justify-center',
-                agent.state === 'running' ? 'bg-green-500/10' : 'bg-muted'
-              )}>
-                <RoleIcon className={cn(
-                  'h-5 w-5',
-                  agent.state === 'running' ? 'text-green-500' : 'text-muted-foreground'
-                )} />
+              <div
+                className={cn(
+                  "h-10 w-10 rounded-lg flex items-center justify-center",
+                  agent.state === "running" ? "bg-green-500/10" : "bg-muted",
+                )}
+              >
+                <RoleIcon
+                  className={cn(
+                    "h-5 w-5",
+                    agent.state === "running"
+                      ? "text-green-500"
+                      : "text-muted-foreground",
+                  )}
+                />
               </div>
               <span
                 className={cn(
-                  'absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full border-2 border-card',
-                  stateColors[agent.state] || 'bg-gray-500'
+                  "absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full border-2 border-card",
+                  stateColors[agent.state] || "bg-gray-500",
                 )}
                 title={stateLabels[agent.state] || agent.state}
               />
@@ -493,10 +904,11 @@ function AgentCard({ agent, onViewDetails, onChat, onTrash, onKill, onStart, isC
                   </Badge>
                 )}
                 <Badge
-                  variant={agent.state === 'running' ? 'default' : 'outline'}
+                  variant={agent.state === "running" ? "default" : "outline"}
                   className={cn(
-                    'text-xs',
-                    agent.state === 'running' && 'bg-green-500/10 text-green-500 border-green-500/20'
+                    "text-xs",
+                    agent.state === "running" &&
+                      "bg-green-500/10 text-green-500 border-green-500/20",
                   )}
                 >
                   {stateLabels[agent.state] || agent.state}
@@ -505,7 +917,10 @@ function AgentCard({ agent, onViewDetails, onChat, onTrash, onKill, onStart, isC
 
               {/* ID and Namespace */}
               <div className="flex items-center gap-3 mt-1 text-xs text-muted-foreground">
-                <span className="flex items-center gap-1 font-mono" title={agent.id}>
+                <span
+                  className="flex items-center gap-1 font-mono"
+                  title={agent.id}
+                >
                   <Hash className="h-3 w-3" />
                   {agent.id.slice(0, 8)}
                 </span>
@@ -526,18 +941,27 @@ function AgentCard({ agent, onViewDetails, onChat, onTrash, onKill, onStart, isC
 
               {/* Model and Timing info */}
               <div className="flex items-center gap-3 mt-2 text-xs text-muted-foreground flex-wrap">
-                <span className="flex items-center gap-1" title={`Provider: ${agent.llm_provider || 'default'}`}>
+                <span
+                  className="flex items-center gap-1"
+                  title={`Provider: ${agent.llm_provider || "default"}`}
+                >
                   <Cpu className="h-3 w-3" />
-                  {agent.llm_model || 'default model'}
+                  {agent.llm_model || "default model"}
                 </span>
                 {agent.created_at && (
-                  <span className="flex items-center gap-1" title={`Created: ${new Date(agent.created_at).toLocaleString()}`}>
+                  <span
+                    className="flex items-center gap-1"
+                    title={`Created: ${new Date(agent.created_at).toLocaleString()}`}
+                  >
                     <Calendar className="h-3 w-3" />
                     {formatRelativeTime(agent.created_at)}
                   </span>
                 )}
                 {agent.heartbeat_at && (
-                  <span className="flex items-center gap-1" title={`Last heartbeat: ${new Date(agent.heartbeat_at).toLocaleString()}`}>
+                  <span
+                    className="flex items-center gap-1"
+                    title={`Last heartbeat: ${new Date(agent.heartbeat_at).toLocaleString()}`}
+                  >
                     <Clock className="h-3 w-3" />
                     {formatRelativeTime(agent.heartbeat_at)}
                   </span>
@@ -548,7 +972,11 @@ function AgentCard({ agent, onViewDetails, onChat, onTrash, onKill, onStart, isC
               {agent.skills_allow && agent.skills_allow.length > 0 && (
                 <div className="mt-2 flex items-center gap-1 flex-wrap">
                   {agent.skills_allow.slice(0, 3).map((skill) => (
-                    <Badge key={skill} variant="secondary" className="text-xs font-mono">
+                    <Badge
+                      key={skill}
+                      variant="secondary"
+                      className="text-xs font-mono"
+                    >
                       {skill}
                     </Badge>
                   ))}
@@ -559,107 +987,156 @@ function AgentCard({ agent, onViewDetails, onChat, onTrash, onKill, onStart, isC
                   )}
                 </div>
               )}
+              {rooms.length > 0 && (
+                <div className="mt-2 flex items-center gap-1 flex-wrap">
+                  {rooms.slice(0, 2).map((room) => (
+                    <button
+                      key={room.id}
+                      type="button"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        onOpenRoom(room);
+                      }}
+                    >
+                      <Badge variant="outline" className="text-xs">
+                        room:{roomDisplayName(room)}
+                      </Badge>
+                    </button>
+                  ))}
+                  {rooms.length > 2 && (
+                    <Badge variant="outline" className="text-xs">
+                      +{rooms.length - 2} rooms
+                    </Badge>
+                  )}
+                </div>
+              )}
             </div>
           </div>
 
           {/* Actions */}
-          <div className="flex items-center gap-1 flex-shrink-0">
+          <div className="flex items-center gap-1 flex-shrink-0 flex-wrap justify-end">
             <Button
-              variant="ghost"
-              size="icon"
-              className="h-8 w-8 text-primary hover:text-primary hover:bg-primary/10"
-              title="Chat with agent"
+              variant="outline"
+              size="sm"
+              className="h-8 text-xs gap-1.5 text-primary hover:text-primary hover:bg-primary/10"
+              title="Open agent workbench"
               onClick={() => onChat(agent)}
-              disabled={isChatLoading}
             >
-              <MessageSquare className={cn('h-4 w-4', isChatLoading && 'animate-pulse')} />
+              <MessageSquare className="h-3.5 w-3.5" />
+              Open
             </Button>
+            {rooms.length > 0 && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-8 text-xs gap-1.5"
+                title="Open first affiliated room"
+                onClick={() => onOpenRoom(rooms[0])}
+              >
+                <Hash className="h-3.5 w-3.5" />
+                Room
+              </Button>
+            )}
             <Button
-              variant="ghost"
-              size="icon"
-              className="h-8 w-8"
+              variant="outline"
+              size="sm"
+              className="h-8 text-xs gap-1.5"
               title="View details"
               onClick={() => onViewDetails(agent)}
             >
-              <Eye className="h-4 w-4" />
+              <Eye className="h-3.5 w-3.5" />
+              Details
             </Button>
-            {agent.state === 'running' ? (
+            {agent.state === "running" ? (
               <Button
-                variant="ghost"
-                size="icon"
-                className="h-8 w-8 text-orange-500 hover:text-orange-600 hover:bg-orange-500/10"
+                variant="outline"
+                size="sm"
+                className="h-8 text-xs gap-1.5 text-orange-500 hover:text-orange-600 hover:bg-orange-500/10"
                 title="Stop agent"
                 onClick={(e) => {
-                  e.stopPropagation()
-                  onKill(agent)
+                  e.stopPropagation();
+                  onKill(agent);
                 }}
                 disabled={isKillLoading}
               >
                 {isKillLoading ? (
-                  <RefreshCw className="h-4 w-4 animate-spin" />
+                  <RefreshCw className="h-3.5 w-3.5 animate-spin" />
                 ) : (
-                  <Square className="h-4 w-4" />
+                  <Square className="h-3.5 w-3.5" />
                 )}
+                Stop
               </Button>
-            ) : agent.state === 'stopped' ? (
+            ) : agent.state === "stopped" ? (
               <>
                 <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-8 w-8 text-green-500 hover:text-green-600 hover:bg-green-500/10"
+                  variant="outline"
+                  size="sm"
+                  className="h-8 text-xs gap-1.5 text-green-500 hover:text-green-600 hover:bg-green-500/10"
                   title="Resume agent"
                   onClick={(e) => {
-                    e.stopPropagation()
-                    onStart(agent)
+                    e.stopPropagation();
+                    onStart(agent);
                   }}
                   disabled={isStartLoading}
                 >
                   {isStartLoading ? (
-                    <RefreshCw className="h-4 w-4 animate-spin" />
+                    <RefreshCw className="h-3.5 w-3.5 animate-spin" />
                   ) : (
-                    <Play className="h-4 w-4" />
+                    <Play className="h-3.5 w-3.5" />
                   )}
+                  Start
                 </Button>
                 <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-8 w-8 text-red-500 hover:text-red-600 hover:bg-red-500/10"
+                  variant="outline"
+                  size="sm"
+                  className="h-8 text-xs gap-1.5 text-red-500 hover:text-red-600 hover:bg-red-500/10"
                   title="Remove agent"
                   onClick={() => onTrash(agent)}
                   disabled={isTrashLoading}
                 >
-                  <Trash2 className={cn('h-4 w-4', isTrashLoading && 'animate-pulse')} />
+                  <Trash2
+                    className={cn(
+                      "h-3.5 w-3.5",
+                      isTrashLoading && "animate-pulse",
+                    )}
+                  />
+                  Remove
                 </Button>
               </>
             ) : (
               <Button
-                variant="ghost"
-                size="icon"
-                className="h-8 w-8 text-green-500 hover:text-green-600 hover:bg-green-500/10"
+                variant="outline"
+                size="sm"
+                className="h-8 text-xs gap-1.5 text-green-500 hover:text-green-600 hover:bg-green-500/10"
                 title="Resume agent"
                 onClick={(e) => {
-                  e.stopPropagation()
-                  onStart(agent)
+                  e.stopPropagation();
+                  onStart(agent);
                 }}
                 disabled={isStartLoading}
               >
                 {isStartLoading ? (
-                  <RefreshCw className="h-4 w-4 animate-spin" />
+                  <RefreshCw className="h-3.5 w-3.5 animate-spin" />
                 ) : (
-                  <Play className="h-4 w-4" />
+                  <Play className="h-3.5 w-3.5" />
                 )}
+                Start
               </Button>
             )}
           </div>
         </div>
       </CardContent>
     </Card>
-  )
+  );
 }
 
 interface SpawnAgentFormProps {
-  onClose: () => void
-  onSuccess: (actorId: string, spawnData: AgentSpawnResponse) => void
+  onClose: () => void;
+  onSuccess: (
+    actorId: string,
+    spawnData: AgentSpawnResponse,
+    params?: SpawnAgentParams,
+  ) => void;
 }
 
 /**
@@ -673,24 +1150,28 @@ interface SpawnAgentFormProps {
  * @returns The spawn agent form React element
  */
 function SpawnAgentForm({ onClose, onSuccess }: SpawnAgentFormProps) {
+  const lastSubmittedRef = useRef<SpawnAgentParams | undefined>(undefined);
   const mutation = useMutation({
     mutationFn: (params: SpawnAgentParams) => spawnAgent(params),
     onSuccess: (data) => {
-      onSuccess(data.actor_id, data)
+      onSuccess(data.actor_id, data, lastSubmittedRef.current);
     },
     onError: (error) => {
-      console.error('[SpawnAgentForm] Spawn failed:', error)
+      console.error("[SpawnAgentForm] Spawn failed:", error);
     },
-  })
+  });
 
   return (
     <div className="p-4 border-b border-border bg-muted/30 max-h-[70vh] overflow-y-auto">
       <SpawnAgentFormCore
-        onSubmit={(params) => mutation.mutate(params)}
+        onSubmit={(params) => {
+          lastSubmittedRef.current = params;
+          mutation.mutate(params);
+        }}
         onCancel={onClose}
         isPending={mutation.isPending}
         error={mutation.error instanceof Error ? mutation.error : null}
       />
     </div>
-  )
+  );
 }

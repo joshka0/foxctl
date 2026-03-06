@@ -133,7 +133,7 @@ func NewLLMChatEngine(cfg LLMChatConfig) (*LLMChatEngine, error) {
 		cfg.APIKey, cfg.Provider = detectProvider()
 	}
 	if cfg.APIKey == "" {
-		return nil, fmt.Errorf("no API key configured (set CEREBRAS_API_KEY, OPENROUTER_API_KEY, GROQ_API_KEY, or OPENAI_API_KEY)")
+		return nil, fmt.Errorf("no API key configured (set LMSTUDIO_API_KEY or provider-specific API keys)")
 	}
 
 	// Set base URL based on provider
@@ -222,6 +222,11 @@ func (e *LLMChatEngine) IsStatelessMode() bool {
 // - Related: callLLM, dispatchPreToolUse, dispatchPostToolUse, ToolRunner.Execute
 // - Keywords: agent_run, tool_calls, hook_dispatch, iterations, stop_reason
 func (e *LLMChatEngine) Run(ctx context.Context, input EngineInput) (EngineOutput, error) {
+	if os.Getenv("AGENTCTL_DEBUG_CONTEXT_QUERY") == "1" {
+		fmt.Fprintf(os.Stderr, "[CTX-POLICY] stateless=%t require_context_query=%t max_iterations=%d provider=%s model=%s\n",
+			e.config.StatelessMode, e.config.RequireContextQuery, e.config.MaxIterations, e.config.Provider, e.config.Model)
+	}
+
 	// Reset RLM query counter at start of turn
 	if e.rlmExecutor != nil {
 		e.rlmExecutor.ResetQueryCount()
@@ -248,7 +253,7 @@ func (e *LLMChatEngine) Run(ctx context.Context, input EngineInput) (EngineOutpu
 					Content: "Your tool budget is exhausted. Produce your complete text response NOW.\n\nResearch:\n" + buildResearchSummary(output.ToolCalls),
 				})
 				if finalResp, err := e.callLLM(ctx, finalizeMessages, nil); err == nil && len(finalResp.Choices) > 0 {
-					output.AssistantText = finalResp.Choices[0].Message.Content
+					output.AssistantText = resolveAssistantContent(finalResp.Choices[0].Message)
 					output.Tokens.Add(finalResp.Usage.PromptTokens, finalResp.Usage.CompletionTokens)
 					fmt.Fprintf(os.Stderr, "[CONTEXT] finalize: prompt_tokens=%d completion_tokens=%d\n",
 						finalResp.Usage.PromptTokens, finalResp.Usage.CompletionTokens)
@@ -288,8 +293,8 @@ func (e *LLMChatEngine) Run(ctx context.Context, input EngineInput) (EngineOutpu
 			totalTokens := promptTokens + completionTokens
 
 			// Per-iteration context tracking (stderr for visibility)
-			fmt.Fprintf(os.Stderr, "[CONTEXT] iter=%d msgs=%d prompt_tokens=%d completion_tokens=%d total=%d finish=%s\n",
-				iteration, len(messages), promptTokens, completionTokens, totalTokens, finishReason)
+			fmt.Fprintf(os.Stderr, "[CONTEXT] iter=%d msgs=%d prompt_tokens=%d completion_tokens=%d total=%d finish=%s tool_calls=%d\n",
+				iteration, len(messages), promptTokens, completionTokens, totalTokens, finishReason, len(resp.Choices[0].Message.ToolCalls))
 
 			// Emit structured wide event for observability
 			observability.Emit(ctx, observability.NewEvent(observability.OpAgentIteration).
@@ -332,8 +337,8 @@ func (e *LLMChatEngine) Run(ctx context.Context, input EngineInput) (EngineOutpu
 
 			output.StopReason = StopReasonContextBudget
 			// Still capture any assistant text from this response
-			if len(resp.Choices) > 0 && resp.Choices[0].Message.Content != "" {
-				output.AssistantText = resp.Choices[0].Message.Content
+			if len(resp.Choices) > 0 {
+				output.AssistantText = resolveAssistantContent(resp.Choices[0].Message)
 			}
 			return output, nil
 		}
@@ -462,18 +467,22 @@ func (e *LLMChatEngine) Run(ctx context.Context, input EngineInput) (EngineOutpu
 		}
 
 		// No tool calls - this is the final response
-		output.AssistantText = choice.Message.Content
+		output.AssistantText = resolveAssistantContent(choice.Message)
 		output.StopReason = mapFinishReason(choice.FinishReason)
 
-		// If the model stopped without producing text and has done tool work,
-		// run one final text-only call to force output.
-		if output.AssistantText == "" && len(output.ToolCalls) > 0 {
+		// If the model stopped without producing text, run one final text-only
+		// call to force a concrete answer.
+		if strings.TrimSpace(output.AssistantText) == "" {
+			finalPrompt := "You returned an empty response. Respond to the user's latest message now with plain text."
+			if len(output.ToolCalls) > 0 {
+				finalPrompt = "You stopped without producing a text response. Write your complete report NOW.\n\nResearch:\n" + buildResearchSummary(output.ToolCalls)
+			}
 			finalizeMessages := append(messages,
 				oaiMessage{Role: "assistant", Content: ""},
-				oaiMessage{Role: "user", Content: "You stopped without producing a text response. Write your complete report NOW.\n\nResearch:\n" + buildResearchSummary(output.ToolCalls)},
+				oaiMessage{Role: "user", Content: finalPrompt},
 			)
 			if finalResp, finalErr := e.callLLM(ctx, finalizeMessages, nil); finalErr == nil && len(finalResp.Choices) > 0 {
-				output.AssistantText = finalResp.Choices[0].Message.Content
+				output.AssistantText = strings.TrimSpace(resolveAssistantContent(finalResp.Choices[0].Message))
 				output.Tokens.Add(finalResp.Usage.PromptTokens, finalResp.Usage.CompletionTokens)
 				fmt.Fprintf(os.Stderr, "[CONTEXT] finalize (early stop): prompt_tokens=%d completion_tokens=%d\n",
 					finalResp.Usage.PromptTokens, finalResp.Usage.CompletionTokens)
@@ -482,15 +491,30 @@ func (e *LLMChatEngine) Run(ctx context.Context, input EngineInput) (EngineOutpu
 
 		// In StatelessMode with RequireContextQuery, verify context was queried.
 		// If the model skipped tool calling, nudge it to query context first.
+		if os.Getenv("AGENTCTL_DEBUG_CONTEXT_QUERY") == "1" {
+			qc := -1
+			if e.rlmExecutor != nil {
+				qc = e.rlmExecutor.QueryCount()
+			}
+			fmt.Fprintf(os.Stderr, "[CTX-POLICY] pre-check stateless=%t require=%t query_count=%d\n",
+				e.config.StatelessMode, e.config.RequireContextQuery, qc)
+		}
 		if e.config.StatelessMode && e.config.RequireContextQuery {
 			if e.rlmExecutor == nil || e.rlmExecutor.QueryCount() == 0 {
+				if os.Getenv("AGENTCTL_DEBUG_CONTEXT_QUERY") == "1" {
+					fmt.Fprintf(os.Stderr, "[CTX-POLICY] unsatisfied context query: nudging model and continuing\n")
+				}
 				// Add the model's premature response as an assistant message, then
 				// inject a user nudge asking it to query context before responding.
+				assistantText := resolveAssistantContent(choice.Message)
 				messages = append(messages,
-					oaiMessage{Role: "assistant", Content: choice.Message.Content},
+					oaiMessage{Role: "assistant", Content: assistantText},
 					oaiMessage{Role: "user", Content: "You MUST use the rlm_context_query tool to retrieve conversation context BEFORE responding. Please query context first, then respond."},
 				)
 				continue
+			}
+			if os.Getenv("AGENTCTL_DEBUG_CONTEXT_QUERY") == "1" {
+				fmt.Fprintf(os.Stderr, "[CTX-POLICY] satisfied context query count=%d\n", e.rlmExecutor.QueryCount())
 			}
 		}
 
@@ -649,7 +673,36 @@ func (e *LLMChatEngine) callLLM(ctx context.Context, messages []oaiMessage, tool
 		return nil, fmt.Errorf("API error: %s", oaiResp.Error.Message)
 	}
 
+	if os.Getenv("AGENTCTL_DEBUG_LLM_EMPTY") == "1" && len(oaiResp.Choices) == 0 {
+		raw := string(body)
+		if len(raw) > 800 {
+			raw = raw[:800] + "...(truncated)"
+		}
+		fmt.Fprintf(os.Stderr, "[LLM-NO-CHOICES] provider=%s model=%s raw=%s\n", e.config.Provider, e.config.Model, raw)
+	}
+
+	if os.Getenv("AGENTCTL_DEBUG_LLM_EMPTY") == "1" &&
+		len(oaiResp.Choices) > 0 &&
+		resolveAssistantContent(oaiResp.Choices[0].Message) == "" &&
+		len(oaiResp.Choices[0].Message.ToolCalls) == 0 {
+		raw := string(body)
+		if len(raw) > 800 {
+			raw = raw[:800] + "...(truncated)"
+		}
+		fmt.Fprintf(os.Stderr, "[LLM-EMPTY] provider=%s model=%s raw=%s\n", e.config.Provider, e.config.Model, raw)
+	}
+
 	return &oaiResp, nil
+}
+
+func resolveAssistantContent(msg oaiMessage) string {
+	if strings.TrimSpace(msg.Content) != "" {
+		return msg.Content
+	}
+	if strings.TrimSpace(msg.OutputText) != "" {
+		return msg.OutputText
+	}
+	return ""
 }
 
 // OpenAI API types
@@ -666,6 +719,7 @@ type oaiRequest struct {
 type oaiMessage struct {
 	Role       string        `json:"role"`
 	Content    string        `json:"content,omitempty"`
+	OutputText string        `json:"output_text,omitempty"`
 	ToolCalls  []oaiToolCall `json:"tool_calls,omitempty"`
 	ToolCallID string        `json:"tool_call_id,omitempty"`
 }
@@ -877,6 +931,14 @@ func apiKeyForProvider(provider string) string {
 }
 
 func detectProvider() (apiKey, provider string) {
+	// Default to LM Studio when no explicit provider is configured.
+	// LM Studio is local and does not require a real API key.
+	if key := os.Getenv("LMSTUDIO_API_KEY"); key != "" {
+		return key, "lmstudio"
+	}
+	if os.Getenv("LMSTUDIO_BASE_URL") != "" || os.Getenv("LMSTUDIO_MODEL") != "" {
+		return apiKeyForProvider("lmstudio"), "lmstudio"
+	}
 	if key := os.Getenv("OPENROUTER_API_KEY"); key != "" {
 		return key, "openrouter"
 	}
@@ -892,7 +954,7 @@ func detectProvider() (apiKey, provider string) {
 	if os.Getenv("BEDROCK_REGION") != "" || os.Getenv("AWS_DEFAULT_REGION") != "" {
 		return "bedrock-iam", "bedrock"
 	}
-	return "", ""
+	return apiKeyForProvider("lmstudio"), "lmstudio"
 }
 
 func baseURLForProvider(provider string) string {

@@ -1,8 +1,35 @@
 import { useEffect, useRef, useCallback } from 'react'
 import { useActivityStore } from '../stores/activityStore'
 import type { ActivityEvent } from '../api/types'
+import { getLogs } from '../api/client'
 
 const SSE_URL = '/api/events'
+const MAX_EVENTS = 500
+
+function dedupKey(event: ActivityEvent): string {
+  return `${event.ts}:${event.operation}:${event.session_id || ''}`
+}
+
+function parseTS(ts: string): number {
+  const parsed = Date.parse(ts)
+  return Number.isFinite(parsed) ? parsed : 0
+}
+
+function mergeActivityEvents(snapshot: ActivityEvent[], existing: ActivityEvent[]): ActivityEvent[] {
+  const merged = [...existing, ...snapshot]
+  if (merged.length === 0) return []
+  const deduped = new Map<string, ActivityEvent>()
+  for (const event of merged) {
+    const key = dedupKey(event)
+    const prev = deduped.get(key)
+    if (!prev || parseTS(event.ts) > parseTS(prev.ts)) {
+      deduped.set(key, event)
+    }
+  }
+  return Array.from(deduped.values())
+    .sort((a, b) => parseTS(b.ts) - parseTS(a.ts))
+    .slice(0, MAX_EVENTS)
+}
 
 export function useActivityStream() {
   const eventSourceRef = useRef<EventSource | null>(null)
@@ -10,7 +37,7 @@ export function useActivityStream() {
   const reconnectAttemptsRef = useRef(0)
   const connectRef = useRef<(() => void) | null>(null)
   const maxReconnectAttempts = 10
-  const { addEvent, setConnected, setError } = useActivityStore()
+  const { addEvent, setConnected, setError, setEvents, initialLoaded } = useActivityStore()
 
   const connect = useCallback(() => {
     if (reconnectTimerRef.current) {
@@ -89,6 +116,24 @@ export function useActivityStream() {
     connect()
     return disconnect
   }, [connect, disconnect])
+
+  useEffect(() => {
+    if (initialLoaded) return
+    let cancelled = false
+    getLogs({ limit: MAX_EVENTS })
+      .then((response) => {
+        if (cancelled) return
+        const snapshot = response.entries.map((entry) => ({ ...entry })) as ActivityEvent[]
+        const existing = useActivityStore.getState().events
+        setEvents(mergeActivityEvents(snapshot, existing))
+      })
+      .catch(() => {
+        // Keep stream-only behavior if snapshot bootstrap fails.
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [initialLoaded, setEvents])
 
   return {
     connect,

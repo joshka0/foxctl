@@ -95,4 +95,6 @@ const (
 
 	// OpContextSemanticArtifactSearch is emitted for optional semantic artifact retrieval.
 	OpContextSemanticArtifactSearch = "context.semantic_artifact_search"
+	// OpContextLayeredBundle is emitted when layered context assembly completes with stable refs.
+	OpContextLayeredBundle = "context.layered_bundle"
 )

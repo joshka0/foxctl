@@ -137,7 +137,7 @@ interface ContextInfo {
   }>;
 }
 
-type ExecMode = "" | "reactive" | "autonomous" | "proactive" | "story";
+type ExecMode = "" | "reactive" | "autonomous" | "proactive" | "tick" | "story";
 type FeedItem =
   | {
       kind: "companion";
@@ -147,7 +147,15 @@ type FeedItem =
     }
   | { kind: "session"; session: PersistedSession; sortAt: number };
 
-const DEFAULT_OPENROUTER_MODEL = "mistralai/devstral-2512";
+const DEFAULT_OPENROUTER_MODEL = "google/gemini-3.1-flash-lite-preview";
+
+const shortAgentID = (id: string) => id.slice(0, 8);
+
+function agentOptionLabel(agent: Agent): string {
+  return `${getAgentDisplayName(agent)} · #${shortAgentID(agent.id)} · ${
+    agent.role || "agent"
+  }`;
+}
 
 interface AgentConversationGroupProps {
   agent: Agent;
@@ -236,6 +244,12 @@ function AgentConversationGroup({
               {getAgentDisplayName(agent)}
             </span>
             <Badge
+              variant="outline"
+              className="text-[9px] px-1 py-0 font-mono flex-shrink-0"
+            >
+              {shortAgentID(agent.id)}
+            </Badge>
+            <Badge
               variant="secondary"
               className="text-[9px] px-1 py-0 flex-shrink-0"
             >
@@ -318,7 +332,7 @@ function AgentConversationGroup({
                         <option value="">No agent</option>
                         {agents.map((a) => (
                           <option key={a.id} value={a.id}>
-                            {getAgentDisplayName(a)}
+                            {agentOptionLabel(a)}
                           </option>
                         ))}
                       </select>
@@ -421,7 +435,12 @@ function CompanionFeedRow({
           </Badge>
         </div>
         <div className="text-[10px] text-muted-foreground truncate">
-          {agent ? getAgentDisplayName(agent) : "Companion chat"} •{" "}
+          {agent
+            ? `${getAgentDisplayName(agent)} · #${shortAgentID(agent.id)} · ${
+                agent.state
+              }`
+            : "Companion chat"}{" "}
+          •{" "}
           {formatRelativeTime(conversation.updated_at)}
         </div>
       </div>
@@ -474,6 +493,7 @@ function SessionFeedRow({
 
 export function ConversationsList() {
   const setSelectedAgent = useViewStore((s) => s.setSelectedAgent);
+  const setActiveView = useViewStore((s) => s.setActiveView);
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedConversation, setSelectedConversation] =
     useState<Conversation | null>(null);
@@ -596,7 +616,49 @@ export function ConversationsList() {
     () => sessionsData?.sessions ?? [],
     [sessionsData?.sessions],
   );
-  const agents = useMemo(() => agentsData?.agents ?? [], [agentsData?.agents]);
+  const agents = useMemo(() => {
+    const raw = agentsData?.agents ?? [];
+    const seen = new Set<string>();
+    const deduped: Agent[] = [];
+    for (const agent of raw) {
+      if (!agent?.id || seen.has(agent.id)) continue;
+      seen.add(agent.id);
+      deduped.push(agent);
+    }
+    return deduped;
+  }, [agentsData?.agents]);
+  const linkableAgents = useMemo(() => {
+    const rankState = (state: string): number => {
+      switch ((state || "").toLowerCase()) {
+        case "running":
+          return 0;
+        case "error":
+          return 1;
+        case "idle":
+          return 2;
+        case "stopped":
+          return 3;
+        default:
+          return 4;
+      }
+    };
+    const timestamp = (agent: Agent): number => {
+      const raw = agent.heartbeat_at || agent.updated_at || agent.created_at;
+      if (!raw) return 0;
+      const parsed = Date.parse(raw);
+      return Number.isFinite(parsed) ? parsed : 0;
+    };
+
+    return agents
+      .filter((agent) => !isWorkerAgent(agent))
+      .sort((a, b) => {
+        const byState = rankState(a.state) - rankState(b.state);
+        if (byState !== 0) return byState;
+        const byTime = timestamp(b) - timestamp(a);
+        if (byTime !== 0) return byTime;
+        return getAgentDisplayName(a).localeCompare(getAgentDisplayName(b));
+      });
+  }, [agents]);
 
   const filteredConversations = searchQuery
     ? conversations.filter(
@@ -2033,7 +2095,7 @@ Help the user understand and interact with this agent's work.`,
                             )?.conversations || []
                           ).some((c) => c.id === selectedConversation?.id)}
                           selectedConversationId={selectedConversation?.id}
-                          agents={agents}
+                          agents={linkableAgents}
                           editingConversationId={editingConversationId}
                           editTitle={editTitle}
                           onEditTitleChange={setEditTitle}
@@ -2056,7 +2118,7 @@ Help the user understand and interact with this agent's work.`,
                 )}
                 {agentSections.errored.length > 0 && (
                   <CollapsibleSection
-                    title="Errored"
+                    title="Errors"
                     icon={<Bug className="h-3.5 w-3.5" />}
                     defaultOpen
                     badge={String(agentSections.errored.length)}
@@ -2078,7 +2140,7 @@ Help the user understand and interact with this agent's work.`,
                             )?.conversations || []
                           ).some((c) => c.id === selectedConversation?.id)}
                           selectedConversationId={selectedConversation?.id}
-                          agents={agents}
+                          agents={linkableAgents}
                           editingConversationId={editingConversationId}
                           editTitle={editTitle}
                           onEditTitleChange={setEditTitle}
@@ -2360,32 +2422,50 @@ Help the user understand and interact with this agent's work.`,
                 className="w-full h-9 rounded-md border border-input bg-background px-3 text-sm"
               >
                 <option value="">No agent</option>
-                {agents.map((agent) => (
+                {linkableAgents.map((agent) => (
                   <option key={agent.id} value={agent.id}>
-                    {getAgentDisplayName(agent)}
+                    {agentOptionLabel(agent)}
                   </option>
                 ))}
               </select>
             </div>
 
-            <Button
-              onClick={() => {
-                if (selectedAgentForNew) {
-                  const agent = agents.find(
-                    (a) => a.id === selectedAgentForNew,
-                  );
-                  if (agent) {
-                    // Use handleChat logic from AgentList to create linked conversation
-                    handleNewConversationWithAgent(agent);
-                    return;
+            <div className="flex items-center gap-2">
+              <Button
+                onClick={() => {
+                  if (selectedAgentForNew) {
+                    const agent = agents.find(
+                      (a) => a.id === selectedAgentForNew,
+                    );
+                    if (agent) {
+                      // Use handleChat logic from AgentList to create linked conversation
+                      handleNewConversationWithAgent(agent);
+                      return;
+                    }
                   }
-                }
-                handleNewConversation();
-              }}
-            >
-              <Plus className="h-4 w-4 mr-2" />
-              New Conversation
-            </Button>
+                  handleNewConversation();
+                }}
+              >
+                <Plus className="h-4 w-4 mr-2" />
+                New Conversation
+              </Button>
+              <Button
+                variant="outline"
+                onClick={() => {
+                  if (selectedAgentForNew) {
+                    const agent = agents.find(
+                      (a) => a.id === selectedAgentForNew,
+                    );
+                    if (agent) {
+                      setSelectedAgent(agent);
+                    }
+                  }
+                  setActiveView("runtime");
+                }}
+              >
+                Open Runtime
+              </Button>
+            </div>
           </div>
         )}
       </div>
@@ -2965,6 +3045,7 @@ Help the user understand and interact with this agent's work.`,
                     <option value="reactive">Reactive</option>
                     <option value="autonomous">Autonomous</option>
                     <option value="proactive">Proactive</option>
+                    <option value="tick">Tick</option>
                     <option value="story">Story</option>
                   </select>
                 </div>

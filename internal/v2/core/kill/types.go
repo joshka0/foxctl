@@ -8,7 +8,6 @@ type Request struct {
 
 // Response is the canonical kill output.
 type Response struct {
-	RunID            string `json:"run_id"`
-	Status           string `json:"status"`
-	MappedFromLegacy bool   `json:"mapped_from_legacy,omitempty"`
+	RunID  string `json:"run_id"`
+	Status string `json:"status"`
 }

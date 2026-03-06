@@ -107,6 +107,116 @@ func TestContextBuilder_ResolveSliceRef(t *testing.T) {
 	}
 }
 
+func TestContextBuilder_ResolveEpisodeRef(t *testing.T) {
+	t.Parallel()
+
+	reader := &fakeTurnReader{
+		turns: map[string]run.TurnRecord{
+			"turn-ctx-ep-start": {ID: "turn-ctx-ep-start"},
+			"turn-ctx-ep-end":   {ID: "turn-ctx-ep-end"},
+		},
+		episodes: map[string]run.EpisodeRecord{
+			"ep-ctx-1": {
+				ID:             "ep-ctx-1",
+				SessionID:      "run-ctx-ep",
+				EpisodeVersion: "v1",
+				BoundaryKey:    "chunk:0001-0002",
+				StartTurnID:    "turn-ctx-ep-start",
+				EndTurnID:      "turn-ctx-ep-end",
+				StartTurnIndex: 1,
+				EndTurnIndex:   2,
+				Topic:          "Migration stabilization",
+				Summary:        "Captured migration retry and fix strategy.",
+				SalienceScore:  0.73,
+				IsLandmark:     true,
+				AnchorRefs: []string{
+					"turn/turn-ctx-ep-start",
+					"turn/turn-ctx-ep-end",
+				},
+			},
+		},
+	}
+
+	builder := contextbuilder.New(reader)
+	bundle, err := builder.Build(context.Background(), contextbuilder.Request{
+		Ref: "episode/ep-ctx-1",
+	})
+	if err != nil {
+		t.Fatalf("Build() error = %v", err)
+	}
+	if bundle.Kind != contextbuilder.RefEpisode {
+		t.Fatalf("kind=%q want %q", bundle.Kind, contextbuilder.RefEpisode)
+	}
+	if bundle.TurnID != "turn-ctx-ep-start" {
+		t.Fatalf("turn_id=%q want turn-ctx-ep-start", bundle.TurnID)
+	}
+	if !strings.Contains(bundle.Content, "Migration stabilization") {
+		t.Fatalf("content missing topic: %q", bundle.Content)
+	}
+	if !strings.Contains(bundle.Content, "Landmark: true") {
+		t.Fatalf("content missing landmark marker: %q", bundle.Content)
+	}
+	if got, _ := bundle.Meta["episode_id"].(string); got != "ep-ctx-1" {
+		t.Fatalf("meta.episode_id=%q want ep-ctx-1", got)
+	}
+}
+
+func TestContextBuilder_ResolveEpisodeRef_MissingEpisodeReader(t *testing.T) {
+	t.Parallel()
+
+	reader := &readOnlyTurnReader{
+		turns: map[string]run.TurnRecord{
+			"turn-only": {ID: "turn-only"},
+		},
+	}
+
+	builder := contextbuilder.New(reader)
+	_, err := builder.Build(context.Background(), contextbuilder.Request{
+		Ref: "episode/ep-missing-reader",
+	})
+	if !errors.Is(err, contextbuilder.ErrMissingEpisodeReader) {
+		t.Fatalf("Build() error=%v want ErrMissingEpisodeReader", err)
+	}
+}
+
+func TestContextBuilder_ResolveEpisodeRef_WithInjectedEpisodeReader(t *testing.T) {
+	t.Parallel()
+
+	builder := contextbuilder.New(&readOnlyTurnReader{
+		turns: map[string]run.TurnRecord{
+			"turn-only": {ID: "turn-only"},
+		},
+	})
+	builder.SetEpisodeReader(&fakeEpisodeReader{
+		episodes: map[string]run.EpisodeRecord{
+			"ep-injected": {
+				ID:             "ep-injected",
+				SessionID:      "run-ctx-ep",
+				EpisodeVersion: "v1",
+				BoundaryKey:    "chunk:0001-0001",
+				StartTurnID:    "turn-only",
+				EndTurnID:      "turn-only",
+				StartTurnIndex: 1,
+				EndTurnIndex:   1,
+				Topic:          "Injected episode",
+			},
+		},
+	})
+
+	bundle, err := builder.Build(context.Background(), contextbuilder.Request{
+		Ref: "episode/ep-injected",
+	})
+	if err != nil {
+		t.Fatalf("Build() error = %v", err)
+	}
+	if bundle.Kind != contextbuilder.RefEpisode {
+		t.Fatalf("kind=%q want %q", bundle.Kind, contextbuilder.RefEpisode)
+	}
+	if got, _ := bundle.Meta["episode_id"].(string); got != "ep-injected" {
+		t.Fatalf("meta.episode_id=%q want ep-injected", got)
+	}
+}
+
 func TestContextBuilder_BuildTemporalDays(t *testing.T) {
 	t.Parallel()
 
@@ -243,6 +353,8 @@ func TestContextBuilder_BuildTemporalRequiresTimelineReader(t *testing.T) {
 type fakeTurnReader struct {
 	turns        map[string]run.TurnRecord
 	sessionTurns []run.TurnRecord
+	episodes     map[string]run.EpisodeRecord
+	sessionEps   []run.EpisodeRecord
 }
 
 func (f *fakeTurnReader) GetTurn(_ context.Context, turnID string) (run.TurnRecord, error) {
@@ -293,6 +405,82 @@ func (f *fakeTurnReader) ListTurns(_ context.Context, sessionID string, opts run
 	return filtered, nil
 }
 
+func (f *fakeTurnReader) GetEpisode(_ context.Context, episodeID string) (run.EpisodeRecord, error) {
+	if episode, ok := f.episodes[episodeID]; ok {
+		return episode.Clone(), nil
+	}
+	for _, episode := range f.sessionEps {
+		if episode.ID == episodeID {
+			return episode.Clone(), nil
+		}
+	}
+	return run.EpisodeRecord{}, run.ErrEpisodeNotFound
+}
+
+func (f *fakeTurnReader) ListEpisodes(_ context.Context, sessionID string, opts run.EpisodeListOptions) ([]run.EpisodeRecord, error) {
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return nil, nil
+	}
+
+	matchesOpts := func(episode run.EpisodeRecord) bool {
+		if opts.LandmarkOnly && !episode.IsLandmark {
+			return false
+		}
+		if !opts.Since.IsZero() && episode.CreatedAt.Before(opts.Since) {
+			return false
+		}
+		if !opts.Until.IsZero() && episode.CreatedAt.After(opts.Until) {
+			return false
+		}
+		return true
+	}
+
+	seen := make(map[string]struct{}, len(f.sessionEps)+len(f.episodes))
+	filtered := make([]run.EpisodeRecord, 0, len(f.sessionEps))
+	for _, episode := range f.sessionEps {
+		if episode.SessionID != sessionID {
+			continue
+		}
+		if !matchesOpts(episode) {
+			continue
+		}
+		if _, dup := seen[episode.ID]; dup {
+			continue
+		}
+		seen[episode.ID] = struct{}{}
+		filtered = append(filtered, episode.Clone())
+	}
+	for _, episode := range f.episodes {
+		if episode.SessionID != sessionID {
+			continue
+		}
+		if !matchesOpts(episode) {
+			continue
+		}
+		if _, dup := seen[episode.ID]; dup {
+			continue
+		}
+		seen[episode.ID] = struct{}{}
+		filtered = append(filtered, episode.Clone())
+	}
+
+	sort.SliceStable(filtered, func(i, j int) bool {
+		if filtered[i].CreatedAt.Equal(filtered[j].CreatedAt) {
+			return filtered[i].ID < filtered[j].ID
+		}
+		if opts.Asc {
+			return filtered[i].CreatedAt.Before(filtered[j].CreatedAt)
+		}
+		return filtered[i].CreatedAt.After(filtered[j].CreatedAt)
+	})
+
+	if opts.Limit > 0 && len(filtered) > opts.Limit {
+		filtered = filtered[:opts.Limit]
+	}
+	return filtered, nil
+}
+
 type readOnlyTurnReader struct {
 	turns map[string]run.TurnRecord
 }
@@ -302,6 +490,50 @@ func (r *readOnlyTurnReader) GetTurn(_ context.Context, turnID string) (run.Turn
 		return turn.Clone(), nil
 	}
 	return run.TurnRecord{}, run.ErrTurnNotFound
+}
+
+type fakeEpisodeReader struct {
+	episodes map[string]run.EpisodeRecord
+}
+
+func (f *fakeEpisodeReader) GetEpisode(_ context.Context, episodeID string) (run.EpisodeRecord, error) {
+	if episode, ok := f.episodes[episodeID]; ok {
+		return episode.Clone(), nil
+	}
+	return run.EpisodeRecord{}, run.ErrEpisodeNotFound
+}
+
+func (f *fakeEpisodeReader) ListEpisodes(_ context.Context, sessionID string, opts run.EpisodeListOptions) ([]run.EpisodeRecord, error) {
+	sessionID = strings.TrimSpace(sessionID)
+	out := make([]run.EpisodeRecord, 0, len(f.episodes))
+	for _, episode := range f.episodes {
+		if strings.TrimSpace(episode.SessionID) != sessionID {
+			continue
+		}
+		if opts.LandmarkOnly && !episode.IsLandmark {
+			continue
+		}
+		if !opts.Since.IsZero() && episode.CreatedAt.Before(opts.Since) {
+			continue
+		}
+		if !opts.Until.IsZero() && episode.CreatedAt.After(opts.Until) {
+			continue
+		}
+		out = append(out, episode.Clone())
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		if out[i].CreatedAt.Equal(out[j].CreatedAt) {
+			return out[i].ID < out[j].ID
+		}
+		if opts.Asc {
+			return out[i].CreatedAt.Before(out[j].CreatedAt)
+		}
+		return out[i].CreatedAt.After(out[j].CreatedAt)
+	})
+	if opts.Limit > 0 && len(out) > opts.Limit {
+		out = out[:opts.Limit]
+	}
+	return out, nil
 }
 
 func contains(items []string, target string) bool {

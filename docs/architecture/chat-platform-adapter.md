@@ -1,95 +1,122 @@
 # Chat Platform Adapter Architecture
 
-This is the current architecture snapshot for chat integration (implemented in web server runtime).
+Current architecture snapshot for chat-platform integration in the web server
+runtime.
 
 ## Scope and entry point
 
-`agentctl web serve --chat <discord|telegram|teams>` enables exactly one inbound adapter:
+`agentctl web serve --chat <discord|telegram|teams>` enables one inbound chat
+adapter in the web process.
 
-- `internal/web/server.go` reads `--chat`.
-- `StartChatAdapter` in `internal/web/server.go` creates the selected adapter and connects it.
-- Missing tokens or validation failures disable the adapter with warnings but do not fail server startup.
+The startup path lives in `internal/web/server.go`:
+
+1. The server builds a shared `chatadapter.Bridge`.
+2. The selected adapter is created and connected.
+3. Slash/text command handlers are wired into the bridge.
+4. Natural-language message handlers are wired into a `SessionBridge` backed by
+   `consolews`.
+
+Missing credentials or platform validation failures prevent that adapter from
+starting; the rest of the web server still exists as normal.
 
 ## Runtime flow
 
 ```mermaid
 flowchart LR
-    Platform["Discord / Telegram / Teams"] --> PlatformDriver
-    PlatformDriver["chatadapter driver\ninternal/chatadapter/{discord,telegram,teams}"] --> ChatAdapterAPI["chatadapter.ChatAdapter"]
-    ChatAdapterAPI --> Bridge["chatadapter.Bridge"]
-    ChatAdapterAPI --> SessionBridge["chatadapter.SessionBridge"]
+    Platform["Discord / Telegram / Teams"] --> Driver["chatadapter driver"]
+    Driver --> Bridge["chatadapter.Bridge"]
+    Driver --> SessionBridge["chatadapter.SessionBridge"]
     Bridge --> SkillRunner["internal/web/api.SkillRunner"]
-    Bridge --> DaemonAPI["agentctl agent endpoints / local daemon"]
+    Bridge --> AgentsAPI["/api/agents/* HTTP endpoints"]
     SessionBridge --> ConsoleHub["internal/web/consolews Hub"]
-    ConsoleHub --> CompanionEngine["internal/companion + LLM chat"]
+    ConsoleHub --> Companion["internal/companion + console runner"]
+    Companion --> Context["v2 context builder / optional Jido companion provider"]
 ```
 
-## Contract in code
+## Current command model
 
-The interface is defined in `internal/chatadapter/adapter.go`:
+The shared bridge routes MVP command intents to either:
 
-- `Connect`/`Disconnect`
-- `Name`
-- `RegisterCommands`
-- `OnCommand`, `OnInteraction`, `OnMessage`
+- skill execution through `api.SkillRunner`
+- agent HTTP endpoints under `/api/agents/*`
 
-## Command and message flows
+Shared bridge-backed commands:
 
-- `OnCommand` handlers route to `chatadapter.Bridge` in `internal/chatadapter/bridge.go`.
-- `OnInteraction` is implemented for Discord/Telegram adapters; Teams currently does not register an interaction handler.
-- The shared command map currently supports:
-  - `/search`
-  - `/todo` (`list|add|complete`)
-  - `/memory`
-  - `/logs`
-  - `/agent-spawn`
-  - `/agent-list`
-- `FormatSkillOutput` formats canonical skill envelopes into platform-safe markdown/code blocks.
-- `OnMessage` routes natural-language messages through `SessionBridge` into `consolews` sessions, enabling streaming replies.
+- `/search`
+- `/todo`
+- `/memory`
+- `/logs`
+- `/agent-spawn`
+- `/agent-list`
 
-## Session and concurrency behavior
+Platform naming differences:
 
-- `chatadapter.SessionBridge` maps a platform `channel/user` tuple to a console session:
-  - Channel-specific session reuse.
-  - Streaming edits respect platform message-length limits.
-  - Streaming cadence is configurable by platform.
-- Turn-level concurrency is serialized via `companion.Locker`.
-- For PostgreSQL-backed deployments (`AGENTCTL_DB_DRIVER=postgres` and a valid DSN), the lock backend is PostgreSQL (`companion.NewPgTurnLock`) to avoid duplicate active turns across pods.
-- Without PostgreSQL, it falls back to in-memory locking.
+- Discord uses hyphenated slash commands such as `agent-spawn`.
+- Telegram registers names that satisfy Telegram rules, such as `agent_spawn`,
+  and normalizes them back into the shared bridge command names.
+- Teams accepts text commands and parses the same MVP command set from message
+  content.
 
-## Platform-specific details
+## Platform behavior
 
 - Discord
-  - Requires `DISCORD_BOT_TOKEN`.
-  - Supports commands, interactions, and NL message mode.
-  - Optional platform settings via `Discord` config section (channels, guild scoping, prompts).
+  - Uses explicit command registration from `discord.MVPCommands()`.
+  - Supports commands, interactions, and natural-language message mode.
+  - Binds a Discord-specific session bridge over the shared console hub.
 
 - Telegram
-  - Requires `TELEGRAM_BOT_TOKEN`.
-- Supports command handlers, message handlers, and per-conversation/session bridge routing.
+  - Uses explicit command registration from `telegram.MVPCommands()`.
+  - Supports commands, callback interactions, and natural-language messaging.
+  - Uses a Telegram-specific session bridge over the shared console hub.
 
 - Teams
-  - Requires:
-    - `TEAMS_TENANT_ID`
-    - `TEAMS_CLIENT_ID`
-    - `TEAMS_CLIENT_SECRET`
-  - If `TEAMS_SKIP_JWT_VERIFY=true`, `--dev-cors` must be passed; otherwise startup is blocked.
-  - Inbound webhooks are handled by `POST /api/teams/messages`.
-  - Teams uses conversation-reference store:
-    - PostgreSQL (`AGENTCTL_DB_DRIVER=postgres`) when available.
-    - SQLite fallback otherwise.
+  - Uses Bot Framework webhook ingestion at `POST /api/teams/messages`.
+  - Wires command, interaction, and message handlers in the web server.
+  - Uses conversation-reference persistence plus a shared generic session bridge.
+  - Does not rely on slash-command registration in the same way as Discord and Telegram.
+
+## Session and concurrency model
+
+- Natural-language chat is routed through `consolews` sessions, not directly
+  through the slash-command bridge.
+- `chatadapter.SessionBridge` maps a platform conversation to a console session
+  and streams edits/messages back to the platform.
+- Turn-level concurrency is serialized through `companion.Locker`.
+- For PostgreSQL-backed deployments, the lock backend can be PostgreSQL to avoid
+  duplicate active turns across pods; otherwise it falls back to in-memory
+  locking.
+
+## API dependencies
+
+The chat layer depends on current web-server routes rather than a separate daemon
+API surface:
+
+- `/api/agents`
+- `/api/agents/{id}`
+- `/api/agents/{id}/ask`
+- `/api/agents/{id}/daemon/{start|kill|sessions}`
+- `/api/events`
+- `/api/teams/messages`
+- `/ws/console/{id}`
+
+## Jido and v2 notes
+
+- Chat adapters do not talk to Jido directly.
+- They indirectly benefit from v2/Jido-backed behavior through:
+  - `/api/agents/*` handlers
+  - companion context building
+  - orchestration/event surfaces exposed elsewhere in the web server
 
 ## Operational characteristics
 
-- Adapter registration is best-effort: failure to start one adapter stops only that adapter and logs warnings.
-- Adapter command/interaction handlers are shared and call shared bridge logic.
-- The adapter layer currently includes Discord, Telegram, and Teams only (Slack remains unimplemented in this branch).
-
-## What this map is (not)
-
-- This document is an architectural view (boundaries, data flow, runtime behavior).
-- It intentionally omits phased implementation checklists and step-by-step rollout plans.
+- Adapter startup is platform-specific; only one adapter is selected per
+  `agentctl web serve` process.
+- SSE hooks are available to adapters that render live agent state updates.
+- Teams JWT verification can be skipped only in dev mode and requires
+  `--dev-cors`.
 
 ## Cross-reference
 
-- Historical implementation plan: `docs/plans/chat-platform-adapter.md`
+- Current web/API map: `docs/general/api-server.md`
+- Current runtime map: `docs/general/runtime-orchestration.md`
+- Historical plan: `docs/plans/chat-platform-adapter.md`

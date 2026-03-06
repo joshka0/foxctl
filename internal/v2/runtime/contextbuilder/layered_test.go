@@ -93,6 +93,244 @@ func TestContextBuilder_BuildLayered_DeterministicMixAndRefs(t *testing.T) {
 	}
 }
 
+func TestContextBuilder_BuildLayered_IncludesEpisodeRefs(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, time.February, 18, 12, 0, 0, 0, time.UTC)
+	reader := &layeredTurnReader{
+		sessionTurns: []run.TurnRecord{
+			{
+				ID:        "turn-l1",
+				SessionID: "run-layered-ep",
+				CreatedAt: now.Add(-2 * time.Hour),
+				Command:   "ask",
+				FinalOutput: run.MessageRef{
+					ID:   "msg-final-1",
+					Role: "assistant",
+					Text: "First output",
+				},
+			},
+			{
+				ID:        "turn-l2",
+				SessionID: "run-layered-ep",
+				CreatedAt: now.Add(-1 * time.Hour),
+				Command:   "run",
+				FinalOutput: run.MessageRef{
+					ID:   "msg-final-2",
+					Role: "assistant",
+					Text: "Second output",
+				},
+			},
+		},
+		sessionEps: []run.EpisodeRecord{
+			{
+				ID:             "ep-layered-1",
+				SessionID:      "run-layered-ep",
+				EpisodeVersion: "v1",
+				BoundaryKey:    "chunk:0001-0001",
+				StartTurnID:    "turn-l1",
+				EndTurnID:      "turn-l1",
+				StartTurnIndex: 1,
+				EndTurnIndex:   1,
+				Topic:          "Initial investigation",
+				Summary:        "Captured initial investigation details.",
+				IsLandmark:     false,
+				AnchorRefs: []string{
+					"turn/turn-l1",
+					"turn/turn-l1/artifact/annotation/v1",
+				},
+				CreatedAt: now.Add(-2 * time.Hour),
+			},
+			{
+				ID:             "ep-layered-2",
+				SessionID:      "run-layered-ep",
+				EpisodeVersion: "v1",
+				BoundaryKey:    "chunk:0002-0002",
+				StartTurnID:    "turn-l2",
+				EndTurnID:      "turn-l2",
+				StartTurnIndex: 2,
+				EndTurnIndex:   2,
+				Topic:          "Decision milestone",
+				Summary:        "Marked a decision checkpoint for rollout.",
+				IsLandmark:     true,
+				AnchorRefs: []string{
+					"turn/turn-l2",
+					"turn/turn-l2/artifact/learning/v1",
+				},
+				CreatedAt: now.Add(-1 * time.Hour),
+			},
+		},
+	}
+
+	builder := contextbuilder.New(reader)
+	builder.SetNow(func() time.Time { return now })
+	builder.SetCompanionProvider(fakeCompanionProvider{})
+
+	got, err := builder.BuildLayered(context.Background(), contextbuilder.LayeredRequest{
+		SessionID: "run-layered-ep",
+		MaxChars:  6000,
+	})
+	if err != nil {
+		t.Fatalf("BuildLayered() error = %v", err)
+	}
+
+	if !containsString(got.EpisodeRefs, "episode/ep-layered-1") || !containsString(got.EpisodeRefs, "episode/ep-layered-2") {
+		t.Fatalf("episode refs=%v missing episode refs", got.EpisodeRefs)
+	}
+	if !containsString(got.Refs, "turn/turn-l1/artifact/annotation/v1") {
+		t.Fatalf("refs=%v missing episode anchor ref turn/turn-l1/artifact/annotation/v1", got.Refs)
+	}
+	if !containsString(got.Refs, "turn/turn-l2/artifact/learning/v1") {
+		t.Fatalf("refs=%v missing episode anchor ref turn/turn-l2/artifact/learning/v1", got.Refs)
+	}
+	if got.Meta["episode_count"] != 2 {
+		t.Fatalf("meta.episode_count=%v want 2", got.Meta["episode_count"])
+	}
+	if got.Meta["episode_landmark_count"] != 1 {
+		t.Fatalf("meta.episode_landmark_count=%v want 1", got.Meta["episode_landmark_count"])
+	}
+	if !strings.Contains(got.Layers["L2"], "[landmark]") {
+		t.Fatalf("L2 layer missing landmark annotation: %q", got.Layers["L2"])
+	}
+}
+
+func TestContextBuilder_BuildLayered_IncludesNarrativeSectionAndRefs(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, time.February, 18, 12, 0, 0, 0, time.UTC)
+	reader := &layeredTurnReader{
+		sessionTurns: []run.TurnRecord{
+			{
+				ID:        "turn-n1",
+				SessionID: "run-layered-narrative",
+				CreatedAt: now.Add(-30 * time.Minute),
+				Command:   "ask",
+				FinalOutput: run.MessageRef{
+					ID:   "msg-final-n1",
+					Role: "assistant",
+					Text: "first narrative seed",
+				},
+			},
+		},
+		narrative: &run.NarrativeRecord{
+			SessionID:       "run-layered-narrative",
+			TurnID:          "turn-n1",
+			Ref:             "turn/turn-n1/artifact/narrative/v1",
+			ArtifactVersion: "v1",
+			Summary:         "We stabilized the retrieval path and agreed on strict citation.",
+			Claims: []run.NarrativeClaim{
+				{
+					Text:       "Team agreed to require anchor refs on narrative claims.",
+					AnchorRefs: []string{"turn/turn-n1", "turn/turn-n1/artifact/annotation/v1"},
+				},
+			},
+			AnchorRefs: []string{"turn/turn-n1", "turn/turn-n1/artifact/annotation/v1"},
+			UpdatedAt:  now,
+		},
+	}
+
+	builder := contextbuilder.New(reader)
+	builder.SetNow(func() time.Time { return now })
+	builder.SetCompanionProvider(fakeCompanionProvider{})
+
+	got, err := builder.BuildLayered(context.Background(), contextbuilder.LayeredRequest{
+		SessionID: "run-layered-narrative",
+		MaxChars:  6000,
+	})
+	if err != nil {
+		t.Fatalf("BuildLayered() error = %v", err)
+	}
+
+	if !strings.Contains(got.Content, "## Narrative") {
+		t.Fatalf("content missing narrative section: %q", got.Content)
+	}
+	if !containsString(got.NarrativeRefs, "turn/turn-n1/artifact/narrative/v1") {
+		t.Fatalf("narrative refs=%v missing narrative artifact ref", got.NarrativeRefs)
+	}
+	if !containsString(got.Refs, "turn/turn-n1/artifact/annotation/v1") {
+		t.Fatalf("refs=%v missing narrative anchor ref", got.Refs)
+	}
+	if got.Meta["narrative_present"] != true {
+		t.Fatalf("meta.narrative_present=%v want true", got.Meta["narrative_present"])
+	}
+	if got.Meta["narrative_claim_count"] != 1 {
+		t.Fatalf("meta.narrative_claim_count=%v want 1", got.Meta["narrative_claim_count"])
+	}
+	if got.Meta["narrative_version"] != "v1" {
+		t.Fatalf("meta.narrative_version=%v want v1", got.Meta["narrative_version"])
+	}
+	if got.Meta["narrative_stale"] != false {
+		t.Fatalf("meta.narrative_stale=%v want false", got.Meta["narrative_stale"])
+	}
+	if got.Meta["narrative_age_seconds"] != int64(0) {
+		t.Fatalf("meta.narrative_age_seconds=%v want 0", got.Meta["narrative_age_seconds"])
+	}
+	if got.Meta["narrative_max_age_seconds"] != int64(1800) {
+		t.Fatalf("meta.narrative_max_age_seconds=%v want 1800", got.Meta["narrative_max_age_seconds"])
+	}
+}
+
+func TestContextBuilder_BuildLayered_NarrativeStalenessMetadata(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, time.February, 23, 12, 0, 0, 0, time.UTC)
+	reader := &layeredTurnReader{
+		sessionTurns: []run.TurnRecord{
+			{
+				ID:        "turn-n-stale",
+				SessionID: "run-layered-narrative-stale",
+				CreatedAt: now.Add(-2 * time.Hour),
+				Command:   "ask",
+				FinalOutput: run.MessageRef{
+					ID:   "msg-final-n-stale",
+					Role: "assistant",
+					Text: "stale narrative test",
+				},
+			},
+		},
+		narrative: &run.NarrativeRecord{
+			SessionID:       "run-layered-narrative-stale",
+			TurnID:          "turn-n-stale",
+			ArtifactVersion: "v1",
+			Summary:         "Old narrative snapshot.",
+			Claims: []run.NarrativeClaim{
+				{
+					Text:       "Prior summary exists for stale metadata assertion.",
+					AnchorRefs: []string{"turn/turn-n-stale"},
+				},
+			},
+			AnchorRefs: []string{"turn/turn-n-stale"},
+			UpdatedAt:  now.Add(-2 * time.Hour),
+		},
+	}
+
+	builder := contextbuilder.New(reader)
+	builder.SetNow(func() time.Time { return now })
+	builder.SetCompanionProvider(fakeCompanionProvider{})
+
+	got, err := builder.BuildLayered(context.Background(), contextbuilder.LayeredRequest{
+		SessionID: "run-layered-narrative-stale",
+		MaxChars:  6000,
+	})
+	if err != nil {
+		t.Fatalf("BuildLayered() error = %v", err)
+	}
+
+	if got.Meta["narrative_stale"] != true {
+		t.Fatalf("meta.narrative_stale=%v want true", got.Meta["narrative_stale"])
+	}
+	age, ok := got.Meta["narrative_age_seconds"].(int64)
+	if !ok {
+		t.Fatalf("meta.narrative_age_seconds=%T want int64", got.Meta["narrative_age_seconds"])
+	}
+	if age < int64((2 * time.Hour).Seconds()) {
+		t.Fatalf("meta.narrative_age_seconds=%d want >= %d", age, int64((2 * time.Hour).Seconds()))
+	}
+	if got.Meta["narrative_max_age_seconds"] != int64(1800) {
+		t.Fatalf("meta.narrative_max_age_seconds=%v want 1800", got.Meta["narrative_max_age_seconds"])
+	}
+}
+
 func TestContextBuilder_BuildLayered_BudgetReallocatesWhenSemanticUnavailable(t *testing.T) {
 	t.Parallel()
 
@@ -154,6 +392,9 @@ func TestContextBuilder_BuildLayered_SemanticArtifactsDeterministic(t *testing.T
 		result: run.ArtifactSearchResult{
 			SearchPath:       run.ArtifactSearchPathFallback,
 			VectorCapability: run.ArtifactVectorCapabilityDisabled,
+			WorkingApplied:   true,
+			FallbackLevel:    1,
+			EligibleCount:    7,
 			Hits: []run.ScoredArtifact{
 				{
 					Ref:             "turn/turn-l1/artifact/annotation/v1",
@@ -215,6 +456,15 @@ func TestContextBuilder_BuildLayered_SemanticArtifactsDeterministic(t *testing.T
 	}
 	if got.Meta["artifact_hit_count"] != len(wantRefs) {
 		t.Fatalf("artifact_hit_count=%v want %d", got.Meta["artifact_hit_count"], len(wantRefs))
+	}
+	if got.Meta["working_context_applied"] != true {
+		t.Fatalf("working_context_applied=%v want true", got.Meta["working_context_applied"])
+	}
+	if got.Meta["working_context_fallback_level"] != 1 {
+		t.Fatalf("working_context_fallback_level=%v want 1", got.Meta["working_context_fallback_level"])
+	}
+	if got.Meta["working_context_eligible_count"] != 7 {
+		t.Fatalf("working_context_eligible_count=%v want 7", got.Meta["working_context_eligible_count"])
 	}
 	if !strings.Contains(got.Content, "## Semantic Artifacts") {
 		t.Fatalf("content missing semantic section: %q", got.Content)
@@ -316,8 +566,67 @@ func TestContextBuilder_BuildLayered_SemanticErrorNonFatal(t *testing.T) {
 	}
 }
 
+func TestContextBuilder_BuildLayered_SemanticPassesWorkingContext(t *testing.T) {
+	t.Parallel()
+
+	reader := &layeredTurnReader{
+		sessionTurns: []run.TurnRecord{
+			{
+				ID:        "turn-l1",
+				SessionID: "run-layered-working",
+				CreatedAt: time.Date(2026, time.February, 18, 10, 0, 0, 0, time.UTC),
+				Command:   "ask",
+				FinalOutput: run.MessageRef{
+					ID:   "msg-final-1",
+					Role: "assistant",
+					Text: "final one",
+				},
+			},
+		},
+	}
+
+	retriever := &fakeArtifactRetriever{
+		result: run.ArtifactSearchResult{
+			SearchPath:       run.ArtifactSearchPathFallback,
+			VectorCapability: run.ArtifactVectorCapabilityDisabled,
+		},
+	}
+
+	builder := contextbuilder.New(reader)
+	builder.SetCompanionProvider(fakeCompanionProvider{})
+	builder.SetArtifactRetriever(retriever)
+
+	_, err := builder.BuildLayered(context.Background(), contextbuilder.LayeredRequest{
+		SessionID: "run-layered-working",
+		Semantic: &contextbuilder.ArtifactSemanticQuery{
+			QueryEmbedding: []float32{0.2, 0.3, 0.4},
+			Working: run.WorkingContext{
+				WorkspaceID:    "ws-1",
+				ActiveFiles:    []string{"internal/v2/runtime/contextbuilder/layered.go"},
+				RequiredLabels: []string{"auth", "decision"},
+				MinSalience:    0.75,
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("BuildLayered() error = %v", err)
+	}
+
+	if retriever.lastOpts.Working.WorkspaceID != "ws-1" {
+		t.Fatalf("working.workspace_id=%q want ws-1", retriever.lastOpts.Working.WorkspaceID)
+	}
+	if !reflect.DeepEqual(retriever.lastOpts.Working.RequiredLabels, []string{"auth", "decision"}) {
+		t.Fatalf("working.required_labels=%v want [auth decision]", retriever.lastOpts.Working.RequiredLabels)
+	}
+	if retriever.lastOpts.Working.MinSalience != 0.75 {
+		t.Fatalf("working.min_salience=%v want 0.75", retriever.lastOpts.Working.MinSalience)
+	}
+}
+
 type layeredTurnReader struct {
 	sessionTurns []run.TurnRecord
+	sessionEps   []run.EpisodeRecord
+	narrative    *run.NarrativeRecord
 }
 
 func (r *layeredTurnReader) GetTurn(_ context.Context, turnID string) (run.TurnRecord, error) {
@@ -361,6 +670,61 @@ func (r *layeredTurnReader) ListTurns(_ context.Context, sessionID string, opts 
 	return out, nil
 }
 
+func (r *layeredTurnReader) GetEpisode(_ context.Context, episodeID string) (run.EpisodeRecord, error) {
+	for _, episode := range r.sessionEps {
+		if episode.ID == episodeID {
+			return episode.Clone(), nil
+		}
+	}
+	return run.EpisodeRecord{}, run.ErrEpisodeNotFound
+}
+
+func (r *layeredTurnReader) ListEpisodes(_ context.Context, sessionID string, opts run.EpisodeListOptions) ([]run.EpisodeRecord, error) {
+	sessionID = strings.TrimSpace(sessionID)
+	out := make([]run.EpisodeRecord, 0, len(r.sessionEps))
+	for _, episode := range r.sessionEps {
+		if episode.SessionID != sessionID {
+			continue
+		}
+		if opts.LandmarkOnly && !episode.IsLandmark {
+			continue
+		}
+		if !opts.Since.IsZero() && episode.CreatedAt.Before(opts.Since) {
+			continue
+		}
+		if !opts.Until.IsZero() && episode.CreatedAt.After(opts.Until) {
+			continue
+		}
+		out = append(out, episode.Clone())
+	}
+
+	sort.SliceStable(out, func(i, j int) bool {
+		if out[i].CreatedAt.Equal(out[j].CreatedAt) {
+			return out[i].ID < out[j].ID
+		}
+		if opts.Asc {
+			return out[i].CreatedAt.Before(out[j].CreatedAt)
+		}
+		return out[i].CreatedAt.After(out[j].CreatedAt)
+	})
+
+	if opts.Limit > 0 && len(out) > opts.Limit {
+		out = out[:opts.Limit]
+	}
+	return out, nil
+}
+
+func (r *layeredTurnReader) GetNarrative(_ context.Context, sessionID, _ string) (run.NarrativeRecord, error) {
+	if r.narrative == nil {
+		return run.NarrativeRecord{}, run.ErrNarrativeNotFound
+	}
+	narrative := r.narrative.Clone()
+	if strings.TrimSpace(narrative.SessionID) != strings.TrimSpace(sessionID) {
+		return run.NarrativeRecord{}, run.ErrNarrativeNotFound
+	}
+	return narrative, nil
+}
+
 type fakeCompanionProvider struct{}
 
 func (fakeCompanionProvider) GetLayeredContext(_ context.Context, _ string, _ contextbuilder.CompanionRequest) (contextbuilder.CompanionLayeredContext, error) {
@@ -385,17 +749,22 @@ func containsString(items []string, target string) bool {
 }
 
 type fakeArtifactRetriever struct {
-	result run.ArtifactSearchResult
-	err    error
+	result   run.ArtifactSearchResult
+	err      error
+	lastOpts run.ArtifactSearchOptions
 }
 
-func (f *fakeArtifactRetriever) SearchArtifactsByEmbedding(_ context.Context, _ []float32, _ run.ArtifactSearchOptions) (run.ArtifactSearchResult, error) {
+func (f *fakeArtifactRetriever) SearchArtifactsByEmbedding(_ context.Context, _ []float32, opts run.ArtifactSearchOptions) (run.ArtifactSearchResult, error) {
+	f.lastOpts = opts
 	if f.err != nil {
 		return run.ArtifactSearchResult{}, f.err
 	}
 	out := run.ArtifactSearchResult{
 		SearchPath:       f.result.SearchPath,
 		VectorCapability: f.result.VectorCapability,
+		WorkingApplied:   f.result.WorkingApplied,
+		FallbackLevel:    f.result.FallbackLevel,
+		EligibleCount:    f.result.EligibleCount,
 		Hits:             make([]run.ScoredArtifact, 0, len(f.result.Hits)),
 	}
 	for _, hit := range f.result.Hits {

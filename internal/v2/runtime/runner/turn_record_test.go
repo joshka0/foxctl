@@ -2,6 +2,8 @@ package runner_test
 
 import (
 	"context"
+	"fmt"
+	"sort"
 	"sync"
 	"testing"
 	"time"
@@ -162,6 +164,130 @@ func TestTraceLineage_ParentSpanRelationships(t *testing.T) {
 	}
 }
 
+func TestTurnRecord_AssignsMonotonicTurnIndexPerRun(t *testing.T) {
+	t.Parallel()
+
+	store := fakes.NewFakeEventStore()
+	clock := fakes.NewFakeClock(time.Date(2026, time.February, 18, 23, 0, 0, 0, time.UTC), time.Second)
+	ids := fakes.NewFakeUUID("evt")
+	model := fakes.NewFakeModel(
+		runner.ModelResponse{Message: "first", Done: true},
+		runner.ModelResponse{Message: "second", Done: true},
+	)
+	tools := fakes.NewFakeToolExecutor()
+	recorder := &captureTurnRecorder{}
+
+	p := runner.New(runner.Config{
+		EventStore:   store,
+		Model:        model,
+		ToolExecutor: tools,
+		TurnRecorder: recorder,
+		Now:          clock.Now,
+		NewID:        ids.New,
+	})
+
+	if _, err := p.RunTurn(context.Background(), run.TurnInput{
+		RunID:         "run-turn-index",
+		TurnID:        "turn-idx-1",
+		Command:       "run",
+		Prompt:        "first",
+		CorrelationID: "trace-idx-1",
+		CausationID:   "cause-idx-1",
+		RequestID:     "req-idx-1",
+	}); err != nil {
+		t.Fatalf("RunTurn(first) error = %v", err)
+	}
+
+	if _, err := p.RunTurn(context.Background(), run.TurnInput{
+		RunID:         "run-turn-index",
+		TurnID:        "turn-idx-2",
+		Command:       "run",
+		Prompt:        "second",
+		CorrelationID: "trace-idx-2",
+		CausationID:   "cause-idx-2",
+		RequestID:     "req-idx-2",
+	}); err != nil {
+		t.Fatalf("RunTurn(second) error = %v", err)
+	}
+
+	all := recorder.All()
+	if len(all) != 2 {
+		t.Fatalf("saved turns=%d want 2", len(all))
+	}
+	if all[0].TurnIndex != 1 {
+		t.Fatalf("first turn_index=%d want 1", all[0].TurnIndex)
+	}
+	if all[1].TurnIndex != 2 {
+		t.Fatalf("second turn_index=%d want 2", all[1].TurnIndex)
+	}
+}
+
+func TestTurnRecord_AssignsUniqueTurnIndexUnderConcurrentRuns(t *testing.T) {
+	t.Parallel()
+
+	store := fakes.NewFakeEventStore()
+	clock := fakes.NewFakeClock(time.Date(2026, time.February, 18, 23, 30, 0, 0, time.UTC), time.Second)
+	ids := fakes.NewFakeUUID("evt")
+	model := fakes.NewFakeModel().WithDefault(runner.ModelResponse{Message: "ok", Done: true})
+	tools := fakes.NewFakeToolExecutor()
+	recorder := &captureTurnRecorder{}
+
+	p := runner.New(runner.Config{
+		EventStore:   store,
+		Model:        model,
+		ToolExecutor: tools,
+		TurnRecorder: recorder,
+		Now:          clock.Now,
+		NewID:        ids.New,
+	})
+
+	const concurrentTurns = 24
+	var wg sync.WaitGroup
+	errs := make(chan error, concurrentTurns)
+	for i := 0; i < concurrentTurns; i++ {
+		i := i
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, err := p.RunTurn(context.Background(), run.TurnInput{
+				RunID:         "run-turn-concurrent",
+				TurnID:        fmt.Sprintf("turn-conc-%02d", i+1),
+				Command:       "run",
+				Prompt:        "concurrent",
+				CorrelationID: fmt.Sprintf("trace-conc-%02d", i+1),
+				CausationID:   fmt.Sprintf("cause-conc-%02d", i+1),
+				RequestID:     fmt.Sprintf("req-conc-%02d", i+1),
+			})
+			errs <- err
+		}()
+	}
+	wg.Wait()
+	close(errs)
+
+	for err := range errs {
+		if err != nil {
+			t.Fatalf("RunTurn(concurrent) error = %v", err)
+		}
+	}
+
+	all := recorder.All()
+	if len(all) != concurrentTurns {
+		t.Fatalf("saved turns=%d want %d", len(all), concurrentTurns)
+	}
+
+	indexes := make([]int, 0, len(all))
+	for _, turn := range all {
+		indexes = append(indexes, turn.TurnIndex)
+	}
+	sort.Ints(indexes)
+	for i := 0; i < concurrentTurns; i++ {
+		want := i + 1
+		if indexes[i] != want {
+			t.Fatalf("turn indexes=%v want contiguous 1..%d", indexes, concurrentTurns)
+		}
+	}
+}
+
 type captureTurnRecorder struct {
 	mu    sync.Mutex
 	turns []run.TurnRecord
@@ -181,4 +307,42 @@ func (r *captureTurnRecorder) Last() (run.TurnRecord, bool) {
 		return run.TurnRecord{}, false
 	}
 	return r.turns[len(r.turns)-1].Clone(), true
+}
+
+func (r *captureTurnRecorder) All() []run.TurnRecord {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := make([]run.TurnRecord, 0, len(r.turns))
+	for _, turn := range r.turns {
+		out = append(out, turn.Clone())
+	}
+	return out
+}
+
+func (r *captureTurnRecorder) ListTurns(_ context.Context, sessionID string, opts run.TurnListOptions) ([]run.TurnRecord, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	out := make([]run.TurnRecord, 0, len(r.turns))
+	for _, turn := range r.turns {
+		if sessionID != "" && turn.SessionID != sessionID {
+			continue
+		}
+		out = append(out, turn.Clone())
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		if out[i].TurnIndex == out[j].TurnIndex {
+			return out[i].ID < out[j].ID
+		}
+		return out[i].TurnIndex < out[j].TurnIndex
+	})
+	if !opts.Asc {
+		for i, j := 0, len(out)-1; i < j; i, j = i+1, j-1 {
+			out[i], out[j] = out[j], out[i]
+		}
+	}
+	if opts.Limit > 0 && len(out) > opts.Limit {
+		out = out[:opts.Limit]
+	}
+	return out, nil
 }

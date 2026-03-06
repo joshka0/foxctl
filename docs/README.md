@@ -14,6 +14,7 @@ This is the canonical map for docs in this repository.
 - [docs/general/](general/) - Core subsystem guides (skills, hooks, memory, storage, sessions).
 - [docs/general/core-package-coverage.md](general/core-package-coverage.md) - Machine-friendly core package coverage matrix.
 - [docs/architecture/](architecture/) - Current runtime architecture docs.
+- [docs/architecture/jido-hybrid-runtime.md](architecture/jido-hybrid-runtime.md) - Canonical hybrid-runtime split for Jido orchestration + `agentctl` semantics.
 - [docs/architecture/auth-identity.md](architecture/auth-identity.md) - Auth, identity, and verification architecture map.
 - [docs/kubernetes.md](kubernetes.md) - Kubernetes deployment guide tied to current overlays.
 - [docs/observability/README.md](observability/README.md) - Event schema and persistence docs.
@@ -22,8 +23,19 @@ This is the canonical map for docs in this repository.
 
 - [docs/spec/README.md](spec/README.md) - Canonical protocol and behavior specs.
 - [docs/spec/v1/README.md](spec/v1/README.md) - Foundational v1 contracts.
-- [docs/spec/v2_greenfield_bootstrap.md](spec/v2_greenfield_bootstrap.md) - Greenfield v2 bootstrap plan.
-- [docs/spec/v2_repo_rules_and_skills.md](spec/v2_repo_rules_and_skills.md) - v2 repo rules and core skills set.
+- [docs/spec/agent_hierarchy.md](spec/agent_hierarchy.md) - Current hierarchy and spawn protocol.
+- [docs/spec/overseer_profile.md](spec/overseer_profile.md) - Overseer coordination profile.
+- [docs/spec/v2_greenfield_bootstrap.md](spec/v2_greenfield_bootstrap.md) - Evolving target-state v2 design spec, not the canonical as-built runtime map.
+- [docs/spec/v2_repo_rules_and_skills.md](spec/v2_repo_rules_and_skills.md) - v2 repo rules and core skills governance.
+
+## Current Runtime Reading Order
+
+1. [docs/architecture/system-architecture.md](architecture/system-architecture.md)
+2. [docs/architecture/jido-hybrid-runtime.md](architecture/jido-hybrid-runtime.md)
+3. [docs/general/runtime-orchestration.md](general/runtime-orchestration.md)
+4. [docs/general/agent-daemon.md](general/agent-daemon.md)
+5. [docs/spec/agent_hierarchy.md](spec/agent_hierarchy.md)
+6. [docs/spec/overseer_profile.md](spec/overseer_profile.md)
 
 ## Planning Docs
 

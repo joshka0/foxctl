@@ -1,11 +1,23 @@
 import type {
   AgentsListResponse,
+  AgentRuntimeTree,
   AgentSpawnResponse,
   MailboxListResponse,
+  Room,
   BlackboardListResponse,
   LogsListResponse,
   AgentSession,
   PresenceBundle,
+  OrchestrationBoard,
+  OrchestrationBoardArtifactRef,
+  OrchestrationBoardCardRuntimeResult,
+  OrchestrationCard,
+  OrchestrationCardAction,
+  OrchestrationCardActionResult,
+  OrchestrationLaneID,
+  OrchestrationRefreshResult,
+  OrchestrationSeedCardInput,
+  OrchestrationSeedCardsResult,
 } from "./types";
 
 const API_BASE = "/api";
@@ -69,6 +81,24 @@ async function request<T>(
 
   const text = await response.text();
   if (!response.ok) {
+    if (text) {
+      try {
+        const parsed = JSON.parse(text) as {
+          error?: { message?: string; code?: string };
+          message?: string;
+        };
+        const envelopeMessage = parsed?.error?.message || parsed?.message;
+        if (envelopeMessage) {
+          throw new Error(envelopeMessage);
+        }
+      } catch (parseErr) {
+        if (parseErr instanceof SyntaxError) {
+          // Non-JSON error body; fall back to raw text/status below.
+        } else if (parseErr instanceof Error && parseErr.message) {
+          throw parseErr;
+        }
+      }
+    }
     throw new Error(text || `Request failed: ${response.status}`);
   }
   if (!text) {
@@ -91,6 +121,155 @@ interface ApiEnvelope<T> {
   error: { code?: string; message?: string };
 }
 
+function unwrapEnvelope<T>(env: ApiEnvelope<T>): T {
+  if (env.status !== "ok") {
+    throw new Error(env.error?.message || "Request failed");
+  }
+  return env.data;
+}
+
+export interface OrchestrationBoardResult {
+  board: OrchestrationBoard | null;
+  artifact: OrchestrationBoardArtifactRef | null;
+}
+
+export interface OrchestrationBoardGetParams {
+  request_id?: string;
+  workspace_id?: string;
+  limit?: number;
+  cursor?: string;
+  lane?: OrchestrationLaneID;
+}
+
+function normalizeBoardPayload(data: unknown): OrchestrationBoardResult {
+  if (!data || typeof data !== "object") {
+    return { board: null, artifact: null };
+  }
+  const asRecord = data as Record<string, unknown>;
+  if (Array.isArray(asRecord.lanes)) {
+    return { board: asRecord as unknown as OrchestrationBoard, artifact: null };
+  }
+  if (typeof asRecord.artifact === "string") {
+    return {
+      board: null,
+      artifact: asRecord as unknown as OrchestrationBoardArtifactRef,
+    };
+  }
+  return { board: null, artifact: null };
+}
+
+export async function getOrchestrationBoard(
+  params: OrchestrationBoardGetParams = {},
+): Promise<OrchestrationBoardResult> {
+  const query = new URLSearchParams();
+  if (params.request_id) query.set("request_id", params.request_id);
+  if (params.workspace_id) query.set("workspace_id", params.workspace_id);
+  if (typeof params.limit === "number" && Number.isFinite(params.limit)) {
+    query.set("limit", String(params.limit));
+  }
+  if (params.cursor) query.set("cursor", params.cursor);
+  if (params.lane) query.set("lane", params.lane);
+
+  const suffix = query.size > 0 ? `?${query.toString()}` : "";
+  const env = await request<ApiEnvelope<unknown>>(
+    `/orchestration/board-get${suffix}`,
+  );
+  return normalizeBoardPayload(unwrapEnvelope(env));
+}
+
+export interface OrchestrationBoardCardGetParams {
+  request_id?: string;
+  workspace_id?: string;
+  issue_id: string;
+}
+
+export async function getOrchestrationBoardCard(
+  params: OrchestrationBoardCardGetParams,
+): Promise<OrchestrationCard> {
+  const query = new URLSearchParams();
+  if (params.request_id) query.set("request_id", params.request_id);
+  if (params.workspace_id) query.set("workspace_id", params.workspace_id);
+  query.set("issue_id", params.issue_id);
+
+  const env = await request<ApiEnvelope<{ card: OrchestrationCard }>>(
+    `/orchestration/board-card-get?${query.toString()}`,
+  );
+  const data = unwrapEnvelope(env);
+  if (!data?.card) {
+    throw new Error("Missing card payload");
+  }
+  return data.card;
+}
+
+export interface OrchestrationBoardCardRuntimeGetParams {
+  request_id?: string;
+  workspace_id?: string;
+  issue_id: string;
+  depth?: number;
+}
+
+export async function getOrchestrationBoardCardRuntime(
+  params: OrchestrationBoardCardRuntimeGetParams,
+): Promise<OrchestrationBoardCardRuntimeResult> {
+  const query = new URLSearchParams();
+  if (params.request_id) query.set("request_id", params.request_id);
+  if (params.workspace_id) query.set("workspace_id", params.workspace_id);
+  query.set("issue_id", params.issue_id);
+  if (typeof params.depth === "number" && Number.isFinite(params.depth)) {
+    query.set("depth", String(params.depth));
+  }
+
+  const env = await request<ApiEnvelope<OrchestrationBoardCardRuntimeResult>>(
+    `/orchestration/board-card-runtime-get?${query.toString()}`,
+  );
+  return unwrapEnvelope(env);
+}
+
+export async function applyOrchestrationCardAction(params: {
+  request_id: string;
+  workspace_id?: string;
+  issue_id: string;
+  action: OrchestrationCardAction;
+}): Promise<OrchestrationCardActionResult> {
+  const env = await request<ApiEnvelope<OrchestrationCardActionResult>>(
+    "/orchestration/card-action",
+    {
+      method: "POST",
+      body: JSON.stringify(params),
+    },
+  );
+  return unwrapEnvelope(env);
+}
+
+export async function refreshOrchestration(params: {
+  request_id: string;
+  workspace_id?: string;
+}): Promise<OrchestrationRefreshResult> {
+  const env = await request<ApiEnvelope<OrchestrationRefreshResult>>(
+    "/orchestration/refresh",
+    {
+      method: "POST",
+      body: JSON.stringify(params),
+    },
+  );
+  return unwrapEnvelope(env);
+}
+
+export async function seedOrchestrationCards(params: {
+  request_id: string;
+  workspace_id?: string;
+  cards: OrchestrationSeedCardInput[];
+}): Promise<OrchestrationSeedCardsResult> {
+  const env = await request<ApiEnvelope<OrchestrationSeedCardsResult>>(
+    "/orchestration/seed-cards",
+    {
+      method: "POST",
+      body: JSON.stringify(params),
+    },
+  );
+  return unwrapEnvelope(env);
+}
+
 /**
  * Retrieve a list of agents from the server.
  *
@@ -111,16 +290,36 @@ export async function getAgent(id: string) {
   return request<{ agent: AgentsListResponse["agents"][0] }>(`/agents/${id}`);
 }
 
+export async function getAgentRuntime(
+  id: string,
+  params: { depth?: number } = {},
+): Promise<{ runtime: AgentRuntimeTree }> {
+  const query = new URLSearchParams();
+  if (typeof params.depth === "number" && Number.isFinite(params.depth)) {
+    query.set("depth", String(params.depth));
+  }
+  const suffix = query.size > 0 ? `?${query.toString()}` : "";
+  return request<{ runtime: AgentRuntimeTree }>(
+    `/agents/${id}/runtime${suffix}`,
+  );
+}
+
 export interface SpawnAgentParams {
   role: string;
   prompt: string;
   workspace_id?: string;
   skills_allow?: string[];
+  parent_id?: string;
+  memory_scope?: "agent" | "session";
+  memory_retention?: "companion" | "durable" | "task" | "ephemeral";
+  room_id?: string;
+  room_role?: string;
   // Agent metadata
   name?: string; // Human name (auto-generated if empty)
   slug?: string; // Human-readable handle
   // Execution config
-  exec_mode?: "reactive" | "autonomous" | "proactive" | "story";
+  exec_mode?: "reactive" | "autonomous" | "proactive" | "tick" | "story";
+  think_interval?: number;
   max_iterations?: number;
   max_context_tokens?: number;
   max_auto_turns?: number;
@@ -199,6 +398,8 @@ export async function startAgent(
 
 export interface PatchAgentParams {
   conversation_id?: string; // empty string to unlink
+  memory_scope?: "agent" | "session";
+  memory_retention?: "companion" | "durable" | "task" | "ephemeral";
 }
 
 /**
@@ -214,6 +415,65 @@ export async function patchAgent(
 ): Promise<{ agent: AgentsListResponse["agents"][0] }> {
   return request(`/agents/${agentId}`, {
     method: "PATCH",
+    body: JSON.stringify(params),
+  });
+}
+
+export async function askAgentStream(
+  agentId: string,
+  params: {
+    message: string;
+    correlation_id?: string;
+    conversation_id?: string;
+    context?: Record<string, unknown>;
+  },
+): Promise<{
+  accepted: boolean;
+  agent_id: string;
+  correlation_id: string;
+  conversation_id: string;
+}> {
+  return request(`/agents/${agentId}/ask-stream`, {
+    method: "POST",
+    body: JSON.stringify(params),
+  });
+}
+
+export async function cancelAgentStream(
+  agentId: string,
+  correlationId?: string,
+): Promise<{
+  ok: boolean;
+  agent_id: string;
+  correlation_id?: string;
+  cancelled: number;
+}> {
+  return request(`/agents/${agentId}/ask-stream/cancel`, {
+    method: "POST",
+    body: JSON.stringify({ correlation_id: correlationId }),
+  });
+}
+
+export async function compressAgentMemory(
+  agentId: string,
+  params: {
+    conversation_id?: string;
+    distill?: boolean;
+  } = {},
+): Promise<{
+  conversation_id: string;
+  summarized: number;
+  skipped: number;
+  distilled: boolean;
+  processed_dates?: string[];
+  policy: {
+    memory_scope: string;
+    memory_retention: string;
+    default_distill: boolean;
+  };
+}> {
+  return request(`/agents/${agentId}/memory/compress`, {
+    method: "POST",
     body: JSON.stringify(params),
   });
 }
@@ -272,6 +532,148 @@ export async function sendMessage(params: {
   priority?: number;
 }): Promise<{ id: string; status: string }> {
   return request("/mailbox", {
+    method: "POST",
+    body: JSON.stringify(params),
+  });
+}
+
+export async function listRooms(params: {
+  workspace_id: string;
+  actor_id?: string;
+  limit?: number;
+}): Promise<{ rooms: Room[]; count: number }> {
+  const query = new URLSearchParams();
+  query.set("workspace_id", params.workspace_id);
+  if (params.actor_id) query.set("actor_id", params.actor_id);
+  if (params.limit) query.set("limit", String(params.limit));
+
+  return request<{ rooms: Room[]; count: number }>(`/rooms?${query}`);
+}
+
+export async function createRoom(params: {
+  workspace_id: string;
+  id?: string;
+  title: string;
+  description?: string;
+  dispatch_policy?: "all_subtree" | "children_only" | "lead_only" | "selected";
+  dispatch_agent_ids?: string[];
+  members?: Array<{ actor_id: string; role?: string }>;
+}): Promise<{ room: Room }> {
+  return request<{ room: Room }>("/rooms", {
+    method: "POST",
+    body: JSON.stringify(params),
+  });
+}
+
+export async function getRoom(
+  roomId: string,
+  params: { workspace_id: string; actor_id?: string },
+): Promise<{ room: Room }> {
+  const query = new URLSearchParams();
+  query.set("workspace_id", params.workspace_id);
+  if (params.actor_id) query.set("actor_id", params.actor_id);
+
+  return request<{ room: Room }>(
+    `/rooms/${encodeURIComponent(roomId)}?${query}`,
+  );
+}
+
+export async function patchRoom(
+  roomId: string,
+  params: {
+    workspace_id: string;
+    title?: string;
+    description?: string;
+    dispatch_policy?:
+      | "all_subtree"
+      | "children_only"
+      | "lead_only"
+      | "selected";
+    dispatch_agent_ids?: string[];
+  },
+): Promise<{ room: Room }> {
+  const query = new URLSearchParams();
+  query.set("workspace_id", params.workspace_id);
+
+  return request<{ room: Room }>(
+    `/rooms/${encodeURIComponent(roomId)}?${query}`,
+    {
+      method: "PATCH",
+      body: JSON.stringify({
+        title: params.title,
+        description: params.description,
+        dispatch_policy: params.dispatch_policy,
+        dispatch_agent_ids: params.dispatch_agent_ids,
+      }),
+    },
+  );
+}
+
+export async function patchRoomMembers(
+  roomId: string,
+  params: {
+    workspace_id: string;
+    members: Array<{ actor_id: string; role?: string }>;
+  },
+): Promise<{ room: Room }> {
+  const query = new URLSearchParams();
+  query.set("workspace_id", params.workspace_id);
+
+  return request<{ room: Room }>(
+    `/rooms/${encodeURIComponent(roomId)}/members?${query}`,
+    {
+      method: "PATCH",
+      body: JSON.stringify({ members: params.members }),
+    },
+  );
+}
+
+export async function listRoomMessages(
+  roomId: string,
+  params: { workspace_id: string; limit?: number },
+): Promise<{
+  room_id: string;
+  stream: string;
+  messages: MailboxListResponse["messages"];
+  count: number;
+}> {
+  const query = new URLSearchParams();
+  query.set("workspace_id", params.workspace_id);
+  if (params.limit) query.set("limit", String(params.limit));
+
+  return request<{
+    room_id: string;
+    stream: string;
+    messages: MailboxListResponse["messages"];
+    count: number;
+  }>(`/rooms/${encodeURIComponent(roomId)}/messages?${query}`);
+}
+
+export async function sendRoomMessage(
+  roomId: string,
+  params: {
+    workspace_id: string;
+    sender: string;
+    body: string;
+    recipient?: string;
+    subject?: string;
+    kind?: string;
+    priority?: number;
+    ack_required?: boolean;
+    task_id?: string;
+    dispatch_agents?: boolean;
+    dispatch_agent_ids?: string[];
+    context?: Record<string, unknown>;
+  },
+): Promise<{
+  id: string;
+  room_id: string;
+  stream: string;
+  status: string;
+  dispatched?: number;
+  skipped?: number;
+}> {
+  return request(`/rooms/${encodeURIComponent(roomId)}/messages`, {
     method: "POST",
     body: JSON.stringify(params),
   });
@@ -428,7 +830,7 @@ export interface ConversationSettings {
   tools_allow?: string[];
   llm_provider?: string;
   llm_model?: string;
-  exec_mode?: "reactive" | "autonomous" | "proactive" | "story" | string;
+  exec_mode?: "reactive" | "autonomous" | "proactive" | "tick" | "story" | string;
   story_gather_model?: string;
   story_dialogue_model?: string;
   presence_enabled?: boolean;
@@ -442,7 +844,7 @@ export interface ConversationSettingsPatch {
   llm_provider?: string;
   llm_model?: string;
   // Pass empty string to clear. Omit to leave unchanged.
-  exec_mode?: "" | "reactive" | "autonomous" | "proactive" | "story";
+  exec_mode?: "" | "reactive" | "autonomous" | "proactive" | "tick" | "story";
   story_gather_model?: string;
   story_dialogue_model?: string;
   presence_enabled?: boolean;
@@ -454,6 +856,17 @@ export async function listWorkspaces(): Promise<{
   current: string;
 }> {
   return request("/workspaces");
+}
+
+export async function switchWorkspace(path: string): Promise<{
+  ok: boolean;
+  workspace: string;
+  name: string;
+}> {
+  return request("/workspaces/switch", {
+    method: "POST",
+    body: JSON.stringify({ path }),
+  });
 }
 
 /**
@@ -692,7 +1105,7 @@ export async function createConsoleSession(params: {
   llm_provider?: string;
   llm_model?: string;
   tools_allow?: string[];
-  exec_mode?: "reactive" | "autonomous" | "proactive" | "story";
+  exec_mode?: "reactive" | "autonomous" | "proactive" | "tick" | "story";
   story_gather_model?: string;
   story_dialogue_model?: string;
   // Deprecated/back-compat fields
@@ -971,7 +1384,7 @@ export async function companionChat(params: {
   max_history_turns?: number;
   llm_provider?: string;
   llm_model?: string;
-  exec_mode?: "reactive" | "autonomous" | "proactive" | "story";
+  exec_mode?: "reactive" | "autonomous" | "proactive" | "tick" | "story";
   story_gather_model?: string;
   story_dialogue_model?: string;
   context?: Record<string, unknown>;
@@ -1118,10 +1531,7 @@ export async function compressCompanionConversation(
       body: JSON.stringify(params),
     },
   );
-  if (env.status !== "ok") {
-    throw new Error(env.error?.message || "Compression failed");
-  }
-  return env.data;
+  return unwrapEnvelope(env);
 }
 
 // Personality dimensions (0.0 to 1.0 scale)

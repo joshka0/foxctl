@@ -23,6 +23,9 @@ func TestContextBuilder_BuildLayered_SemanticEmitsWideEvent(t *testing.T) {
 		result: run.ArtifactSearchResult{
 			SearchPath:       run.ArtifactSearchPathVector,
 			VectorCapability: run.ArtifactVectorCapabilityEnabled,
+			WorkingApplied:   true,
+			FallbackLevel:    2,
+			EligibleCount:    5,
 			Hits: []run.ScoredArtifact{
 				{
 					Ref:             "turn/turn-obs-1/artifact/embedding/v1",
@@ -89,6 +92,15 @@ func TestContextBuilder_BuildLayered_SemanticEmitsWideEvent(t *testing.T) {
 	}
 	if got, ok := evt.Data["query_dims"].(float64); !ok || int(got) != 3 {
 		t.Fatalf("data.query_dims=%v want 3", evt.Data["query_dims"])
+	}
+	if got, ok := evt.Data["working_context_applied"].(bool); !ok || !got {
+		t.Fatalf("data.working_context_applied=%v want true", evt.Data["working_context_applied"])
+	}
+	if got, ok := evt.Data["working_context_fallback_level"].(float64); !ok || int(got) != 2 {
+		t.Fatalf("data.working_context_fallback_level=%v want 2", evt.Data["working_context_fallback_level"])
+	}
+	if got, ok := evt.Data["working_context_eligible_count"].(float64); !ok || int(got) != 5 {
+		t.Fatalf("data.working_context_eligible_count=%v want 5", evt.Data["working_context_eligible_count"])
 	}
 }
 
@@ -168,6 +180,38 @@ func TestContextBuilder_BuildLayered_SemanticDisabledEmitsWideEvent(t *testing.T
 	}
 }
 
+func TestContextBuilder_BuildLayered_EmitsLayeredBundleEventWithRefs(t *testing.T) {
+	filePath := setupWideEvents(t)
+
+	builder := newObsBuilder("run-layered-obs-refs")
+	got, err := builder.BuildLayered(context.Background(), contextbuilder.LayeredRequest{
+		SessionID: "run-layered-obs-refs",
+	})
+	if err != nil {
+		t.Fatalf("BuildLayered() error = %v", err)
+	}
+	if len(got.Refs) == 0 {
+		t.Fatalf("expected layered refs, got none: %+v", got)
+	}
+
+	evt := mustFindOperationEvent(t, filePath, observability.OpContextLayeredBundle, "run-layered-obs-refs")
+	if evt.Status != observability.StatusOK {
+		t.Fatalf("status=%q want %q", evt.Status, observability.StatusOK)
+	}
+	if evt.Data["session_id"] != "run-layered-obs-refs" {
+		t.Fatalf("data.session_id=%v want run-layered-obs-refs", evt.Data["session_id"])
+	}
+	if gotCount, ok := evt.Data["ref_count"].(float64); !ok || int(gotCount) <= 0 {
+		t.Fatalf("data.ref_count=%v want >0", evt.Data["ref_count"])
+	}
+	if _, ok := evt.Data["refs"].([]any); !ok {
+		t.Fatalf("data.refs type=%T want []any", evt.Data["refs"])
+	}
+	if _, ok := evt.Data["turn_refs"].([]any); !ok {
+		t.Fatalf("data.turn_refs type=%T want []any", evt.Data["turn_refs"])
+	}
+}
+
 func setupWideEvents(t *testing.T) string {
 	t.Helper()
 
@@ -205,11 +249,16 @@ func newObsBuilder(sessionID string) *contextbuilder.Builder {
 
 func mustFindSemanticEvent(t *testing.T, filePath, sessionID string) observability.WideEvent {
 	t.Helper()
+	return mustFindOperationEvent(t, filePath, observability.OpContextSemanticArtifactSearch, sessionID)
+}
+
+func mustFindOperationEvent(t *testing.T, filePath, operation, sessionID string) observability.WideEvent {
+	t.Helper()
 
 	deadline := time.Now().Add(3 * time.Second)
 	var lastErr error
 	for time.Now().Before(deadline) {
-		evt, found, err := findSemanticEvent(filePath, sessionID)
+		evt, found, err := findOperationEvent(filePath, operation, sessionID)
 		if err == nil && found {
 			return evt
 		}
@@ -222,13 +271,13 @@ func mustFindSemanticEvent(t *testing.T, filePath, sessionID string) observabili
 	}
 
 	if lastErr != nil {
-		t.Fatalf("missing %q event for session %s (last err: %v)", observability.OpContextSemanticArtifactSearch, sessionID, lastErr)
+		t.Fatalf("missing %q event for session %s (last err: %v)", operation, sessionID, lastErr)
 	}
-	t.Fatalf("missing %q event for session %s", observability.OpContextSemanticArtifactSearch, sessionID)
+	t.Fatalf("missing %q event for session %s", operation, sessionID)
 	return observability.WideEvent{}
 }
 
-func findSemanticEvent(filePath, sessionID string) (observability.WideEvent, bool, error) {
+func findOperationEvent(filePath, operation, sessionID string) (observability.WideEvent, bool, error) {
 	f, err := os.Open(filePath)
 	if err != nil {
 		return observability.WideEvent{}, false, err
@@ -241,7 +290,7 @@ func findSemanticEvent(filePath, sessionID string) (observability.WideEvent, boo
 		if err := json.Unmarshal(scanner.Bytes(), &evt); err != nil {
 			return observability.WideEvent{}, false, err
 		}
-		if evt.Operation != observability.OpContextSemanticArtifactSearch {
+		if evt.Operation != operation {
 			continue
 		}
 		if evt.SessionID != sessionID {

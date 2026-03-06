@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/rs/zerolog"
 
@@ -15,10 +16,12 @@ import (
 	agentdomain "github.com/jkatigb/agentctl/internal/domain/agent"
 	"github.com/jkatigb/agentctl/internal/domain/envelope"
 	"github.com/jkatigb/agentctl/internal/platform/config"
+	ws "github.com/jkatigb/agentctl/internal/platform/workspace"
 	"github.com/jkatigb/agentctl/internal/storage/agents"
 	"github.com/jkatigb/agentctl/internal/storage/contextvar"
 	"github.com/jkatigb/agentctl/internal/storage/conversationsettings"
 	"github.com/jkatigb/agentctl/internal/storage/dbutil"
+	memorystore "github.com/jkatigb/agentctl/internal/storage/memory"
 )
 
 // CompanionProvidersHandler returns a handler for GET /api/companion/providers.
@@ -195,13 +198,12 @@ func CompanionChatHandler(cfg config.Config, log zerolog.Logger, turnLock compan
 		// across all HTTP requests (not just within a single Service instance).
 		presenceEnabled := settings.IsPresenceEnabled()
 		svcCfg := companion.ServiceConfig{
-			Logger:          log,
-			MemoryDB:        memoryDB,
-			LLMProvider:     llmProvider,
-			LLMAPIKey:       llmAPIKey,
-			LLMModel:        llmModel,
-			ToolsAllow:      settings.ToolsAllow,
-			UseHybridMemory: true,
+			Logger:      log,
+			MemoryDB:    memoryDB,
+			LLMProvider: llmProvider,
+			LLMAPIKey:   llmAPIKey,
+			LLMModel:    llmModel,
+			ToolsAllow:  settings.ToolsAllow,
 		}
 		if presenceEnabled {
 			svcCfg.PresenceConfig = &companion.PresenceConfig{
@@ -316,9 +318,8 @@ func CompanionContextGetHandler(cfg config.Config, log zerolog.Logger) http.Hand
 		if memoryDB, closeFn, err := dbutil.OpenStoreDB(r.Context(), cfg.Storage.Root, "COMPANION", filepath.Base(dbPath), nil); err == nil {
 			defer func() { _ = closeFn() }()
 			svcCfg.MemoryDB = memoryDB
-			svcCfg.UseHybridMemory = true
 		} else {
-			log.Debug().Err(err).Msg("failed to open companion memory database; returning legacy context")
+			log.Debug().Err(err).Msg("failed to open companion memory database; returning context variables only")
 		}
 
 		// Create service
@@ -580,8 +581,9 @@ func CompanionConversationMessagesHandler(cfg config.Config, log zerolog.Logger)
 }
 
 // CompanionConversationCompressHandler returns a handler for POST /api/companion/conversations/:id/compress.
-// The handler triggers on-demand L0→L1→L2 compression for the specified conversation by generating/updating
-// day summaries (L1) and optionally running weekly distillation (L2).
+// The handler triggers on-demand v2 hybrid processing for the specified
+// conversation (event processing + context rebuild, with optional episode
+// summary generation).
 func CompanionConversationCompressHandler(cfg config.Config, log zerolog.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
@@ -599,14 +601,7 @@ func CompanionConversationCompressHandler(cfg config.Config, log zerolog.Logger)
 		conversationID := parts[0]
 
 		var req struct {
-			IncludeToday bool  `json:"include_today,omitempty"`
-			MaxDays      int   `json:"max_days,omitempty"`
-			Force        bool  `json:"force,omitempty"`
-			Distill      *bool `json:"distill,omitempty"`
-
-			// Optional: override which provider/model are used for summarization.
-			LLMProvider string `json:"llm_provider,omitempty"`
-			LLMModel    string `json:"llm_model,omitempty"`
+			Distill *bool `json:"distill,omitempty"`
 		}
 		if err := readJSON(w, r, &req); err != nil {
 			httpError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
@@ -615,20 +610,6 @@ func CompanionConversationCompressHandler(cfg config.Config, log zerolog.Logger)
 		distill := true
 		if req.Distill != nil {
 			distill = *req.Distill
-		}
-
-		// Resolve LLM credentials. API keys are always resolved server-side from config/env.
-		llmProvider := strings.TrimSpace(req.LLMProvider)
-		if llmProvider == "" {
-			llmProvider = cfg.LLM.Provider
-		}
-		llmAPIKey := ""
-		llmModel := strings.TrimSpace(req.LLMModel)
-		if llmProvider != "" {
-			llmAPIKey = cfg.LLM.ResolveAPIKey(llmProvider)
-			if llmModel == "" {
-				llmModel = cfg.LLM.ResolveModel(llmProvider)
-			}
 		}
 
 		// Open context store (required by Service constructor).
@@ -650,30 +631,18 @@ func CompanionConversationCompressHandler(cfg config.Config, log zerolog.Logger)
 		}
 		defer func() { _ = closeFn() }()
 
-		// Create service with memory + summarizer credentials.
+		// Create service with memory DB.
 		svc := companion.NewService(store, companion.ServiceConfig{
-			Logger:      log,
-			MemoryDB:    memoryDB,
-			LLMProvider: llmProvider,
-			LLMAPIKey:   llmAPIKey,
-			LLMModel:    llmModel,
+			Logger:   log,
+			MemoryDB: memoryDB,
 		}, nil)
 		if svc.Memory() == nil {
 			httpError(w, http.StatusInternalServerError, "memory features not enabled")
 			return
 		}
 
-		result, err := svc.Memory().CompressConversation(r.Context(), conversationID, companion.CompressionOptions{
-			IncludeToday: req.IncludeToday,
-			MaxDays:      req.MaxDays,
-			Force:        req.Force,
-			Distill:      distill,
-		})
+		result, err := svc.Memory().CompressConversation(r.Context(), conversationID, companion.CompressionOptions{Distill: distill})
 		if err != nil {
-			if strings.Contains(err.Error(), "no summarizer configured") {
-				httpError(w, http.StatusBadRequest, "summarization is not configured (missing LLM provider/api key)")
-				return
-			}
 			log.Error().Err(err).Str("conversation_id", conversationID).Msg("compress conversation failed")
 			httpError(w, http.StatusInternalServerError, "compress conversation failed: "+err.Error())
 			return
@@ -996,6 +965,212 @@ func CompanionMemoryContextHandler(cfg config.Config, log zerolog.Logger) http.H
 
 		writeJSON(w, http.StatusOK, map[string]any{
 			"context": context,
+		})
+	}
+}
+
+// CompanionMemoryExportHandler returns a handler for GET /api/companion/memory/:id/export.
+func CompanionMemoryExportHandler(cfg config.Config, log zerolog.Logger) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			httpError(w, http.StatusMethodNotAllowed, "method not allowed")
+			return
+		}
+
+		path := r.URL.Path
+		parts := strings.Split(strings.TrimPrefix(path, "/api/companion/memory/"), "/")
+		if len(parts) < 2 || parts[0] == "" || parts[1] != "export" {
+			httpError(w, http.StatusBadRequest, "invalid path, expected /api/companion/memory/:id/export")
+			return
+		}
+		conversationID := parts[0]
+
+		store, err := contextvar.Open(r.Context(), cfg.Storage.Root)
+		if err != nil {
+			log.Error().Err(err).Msg("failed to open context store")
+			httpError(w, http.StatusInternalServerError, "failed to open context store")
+			return
+		}
+		defer store.Close()
+
+		dbPath := filepath.Join(cfg.Storage.Root, "companion.db")
+		memoryDB, closeFn, err := dbutil.OpenStoreDB(r.Context(), cfg.Storage.Root, "COMPANION", filepath.Base(dbPath), nil)
+		if err != nil {
+			log.Error().Err(err).Msg("failed to open companion memory database")
+			httpError(w, http.StatusInternalServerError, "failed to open companion memory database")
+			return
+		}
+		defer func() { _ = closeFn() }()
+
+		svc := companion.NewService(store, companion.ServiceConfig{
+			Logger:   log,
+			MemoryDB: memoryDB,
+		}, nil)
+
+		raw, err := svc.ExportMemory(r.Context(), conversationID)
+		if err != nil {
+			log.Error().Err(err).Str("conversation_id", conversationID).Msg("export memory failed")
+			httpError(w, http.StatusInternalServerError, "export memory failed: "+err.Error())
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		_, _ = w.Write(raw)
+	}
+}
+
+// CompanionMemoryImportHandler returns a handler for POST /api/companion/memory/:id/import.
+func CompanionMemoryImportHandler(cfg config.Config, log zerolog.Logger) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			httpError(w, http.StatusMethodNotAllowed, "method not allowed")
+			return
+		}
+
+		path := r.URL.Path
+		parts := strings.Split(strings.TrimPrefix(path, "/api/companion/memory/"), "/")
+		if len(parts) < 2 || parts[0] == "" || parts[1] != "import" {
+			httpError(w, http.StatusBadRequest, "invalid path, expected /api/companion/memory/:id/import")
+			return
+		}
+		conversationID := parts[0]
+
+		var payload json.RawMessage
+		if err := readJSON(w, r, &payload); err != nil {
+			httpError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+			return
+		}
+		if len(payload) == 0 {
+			httpError(w, http.StatusBadRequest, "import payload is required")
+			return
+		}
+
+		store, err := contextvar.Open(r.Context(), cfg.Storage.Root)
+		if err != nil {
+			log.Error().Err(err).Msg("failed to open context store")
+			httpError(w, http.StatusInternalServerError, "failed to open context store")
+			return
+		}
+		defer store.Close()
+
+		dbPath := filepath.Join(cfg.Storage.Root, "companion.db")
+		memoryDB, closeFn, err := dbutil.OpenStoreDB(r.Context(), cfg.Storage.Root, "COMPANION", filepath.Base(dbPath), nil)
+		if err != nil {
+			log.Error().Err(err).Msg("failed to open companion memory database")
+			httpError(w, http.StatusInternalServerError, "failed to open companion memory database")
+			return
+		}
+		defer func() { _ = closeFn() }()
+
+		svc := companion.NewService(store, companion.ServiceConfig{
+			Logger:   log,
+			MemoryDB: memoryDB,
+		}, nil)
+
+		if err := svc.ImportMemory(r.Context(), conversationID, payload); err != nil {
+			log.Error().Err(err).Str("conversation_id", conversationID).Msg("import memory failed")
+			httpError(w, http.StatusInternalServerError, "import memory failed: "+err.Error())
+			return
+		}
+
+		writeJSON(w, http.StatusOK, map[string]any{
+			"ok": true,
+		})
+	}
+}
+
+// CompanionMemorySearchHandler returns a handler for GET /api/companion/memory/:id/search.
+func CompanionMemorySearchHandler(cfg config.Config, log zerolog.Logger) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			httpError(w, http.StatusMethodNotAllowed, "method not allowed")
+			return
+		}
+
+		path := r.URL.Path
+		parts := strings.Split(strings.TrimPrefix(path, "/api/companion/memory/"), "/")
+		if len(parts) < 2 || parts[0] == "" || parts[1] != "search" {
+			httpError(w, http.StatusBadRequest, "invalid path, expected /api/companion/memory/:id/search")
+			return
+		}
+		conversationID := parts[0]
+		query := strings.TrimSpace(r.URL.Query().Get("q"))
+		if query == "" {
+			httpError(w, http.StatusBadRequest, "query parameter q is required")
+			return
+		}
+		limit := 10
+		if raw := strings.TrimSpace(r.URL.Query().Get("limit")); raw != "" {
+			if parsed, err := strconv.Atoi(raw); err == nil && parsed > 0 {
+				limit = parsed
+			}
+		}
+
+		store, err := contextvar.Open(r.Context(), cfg.Storage.Root)
+		if err != nil {
+			log.Error().Err(err).Msg("failed to open context store")
+			httpError(w, http.StatusInternalServerError, "failed to open context store")
+			return
+		}
+		defer store.Close()
+
+		dbPath := filepath.Join(cfg.Storage.Root, "companion.db")
+		memoryDB, closeFn, err := dbutil.OpenStoreDB(r.Context(), cfg.Storage.Root, "COMPANION", filepath.Base(dbPath), nil)
+		if err != nil {
+			log.Error().Err(err).Msg("failed to open companion memory database")
+			httpError(w, http.StatusInternalServerError, "failed to open companion memory database")
+			return
+		}
+		defer func() { _ = closeFn() }()
+
+		memStore, err := memorystore.OpenFromConfig(r.Context(), cfg)
+		if err != nil {
+			log.Error().Err(err).Msg("failed to open memory store")
+			httpError(w, http.StatusInternalServerError, "failed to open memory store")
+			return
+		}
+		defer memStore.Close()
+
+		memoryWorkspace := ws.CanonicalID(cfg.Storage.Root)
+		svc := companion.NewService(store, companion.ServiceConfig{
+			Logger:          log,
+			MemoryDB:        memoryDB,
+			MemoryStore:     memStore,
+			MemoryWorkspace: memoryWorkspace,
+			Config:          &cfg,
+		}, nil)
+
+		results, err := svc.SearchMemory(r.Context(), conversationID, query, limit)
+		if err != nil {
+			log.Error().Err(err).Str("conversation_id", conversationID).Msg("search memory failed")
+			httpError(w, http.StatusInternalServerError, "search memory failed: "+err.Error())
+			return
+		}
+
+		type memorySearchResult struct {
+			Name      string  `json:"name"`
+			Type      string  `json:"type"`
+			Score     float64 `json:"score"`
+			Summary   string  `json:"summary"`
+			SessionID string  `json:"session_id,omitempty"`
+			UpdatedAt string  `json:"updated_at,omitempty"`
+		}
+		out := make([]memorySearchResult, 0, len(results))
+		for _, result := range results {
+			out = append(out, memorySearchResult{
+				Name:      result.Entry.Name,
+				Type:      result.Entry.Type,
+				Score:     result.Score,
+				Summary:   result.Entry.Summary,
+				SessionID: result.Entry.SessionID,
+				UpdatedAt: result.Entry.UpdatedAt.UTC().Format(time.RFC3339),
+			})
+		}
+
+		writeJSON(w, http.StatusOK, map[string]any{
+			"conversation_id": conversationID,
+			"query":           query,
+			"results":         out,
 		})
 	}
 }

@@ -136,8 +136,7 @@ func BlackboardListHandler(cfg config.Config, log zerolog.Logger) http.HandlerFu
 //   - GET /api/blackboard/{id} - Get record details
 //
 // BlackboardDetailHandler returns an HTTP handler that serves GET and DELETE for a single
-// blackboard record identified by the URL path suffix (/api/blackboard/{id} or
-// /api/v1/blackboard/{id}).
+// blackboard record identified by the URL path suffix (/api/blackboard/{id}).
 //
 // GET responds with JSON containing the record under the "record" key when the record
 // exists. DELETE removes the record and responds with a JSON status/message pair when
@@ -148,15 +147,7 @@ func BlackboardListHandler(cfg config.Config, log zerolog.Logger) http.HandlerFu
 func BlackboardDetailHandler(cfg config.Config, log zerolog.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// Extract record ID from path: /api/blackboard/{id}
-		path := r.URL.Path
-		prefixes := []string{"/api/v1/blackboard/", "/api/blackboard/"}
-		var id string
-		for _, prefix := range prefixes {
-			if strings.HasPrefix(path, prefix) {
-				id = strings.TrimPrefix(path, prefix)
-				break
-			}
-		}
+		id := strings.TrimPrefix(r.URL.Path, "/api/blackboard/")
 
 		if id == "" {
 			httpError(w, http.StatusBadRequest, "missing record id")

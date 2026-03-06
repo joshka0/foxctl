@@ -1,6 +1,5 @@
 # Roadmap (Archived)
 
-The previous root roadmap document is archived.
+The previous root roadmap document was retired during the V2 migration.
 
-- Historical roadmap: [docs/archive/legacy/roadmap.md](archive/legacy/roadmap.md)
 - Active implementation planning: [docs/plans/README.md](plans/README.md)

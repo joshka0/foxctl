@@ -1,157 +1,154 @@
-# API Server v1 (Draft)
+# API Server
 
-Purpose: Provide a stable HTTP surface for subagents, memory, session recall, todos, multi-agent coordination (blackboard, mailbox, overseer), skills, and hooks.
+Current HTTP surface for `agentctl web serve`.
 
-## Goals
-- HTTP API for GUI and external clients with explicit workspace scoping
-- Lightweight JSON responses; skill endpoints return envelopes
-- CAS-backed artifacts for large outputs
+## Current status
 
-## Non-goals (v1)
-- Remote auth, multi-tenant isolation, or public deployment
-- Long-term compatibility guarantees beyond v1
+This is the live `/api` server surface registered in `internal/web/server.go`.
+It is not the older `/api/v1` draft contract.
 
-## Versioning and Base Paths
-- Primary: /api/v1
-- Legacy alias: /api (until clients migrate)
+- Base path: `/api`
+- Legacy `/api/v1/*`: removed and now returns `EDEPRECATED`
+- WebSocket console path: `/ws/console/{id}`
+- Kubernetes probe paths: `/healthz`, `/readyz`
 
-## Response Envelope (non-skill endpoints)
-```yaml
-ok: true
-data: {}
-error:
-  code: EARG
-  message: workspace required
-  hint: set ?workspace=...
-meta:
-  request_id: req_...
-  ts: 2026-01-21T00:00:00Z
-  duration_ms: 12
-```
+## Current response styles
 
-- Error codes reuse Protocol v1: EARG, EPOLICY, ENOTFOUND, ERUNTIME, ETIMEOUT.
+There are two main response patterns:
 
-## Workspace Scoping
-- Required for storage-backed endpoints (tasks, memory, sessions, mailbox).
-- Accept workspace query param or X-Workspace header.
+1. Protocol-style command envelopes for many command-oriented handlers.
+2. JSON resource responses for list/detail style endpoints.
 
-## Large Outputs
-- Inline summaries under data.summary with data.artifact (CAS digest) for large payloads.
+Large payloads may be artifactized through CAS, especially in orchestration and
+other high-volume responses.
 
-## Local-only and Remote-ready
-- Default bind: 127.0.0.1
-- Remote-ready plan: bearer auth, TLS/mTLS, rate limits, audit logs
+## Route groups
 
-## Endpoint Map (Draft)
-```yaml
-base: /api/v1
-system:
-  - GET /health
-  - GET /status
-  - GET /stats
-  - GET /insights
-workspaces:
-  - GET /workspaces
-  - POST /workspaces/switch
-skills:
-  - GET /skills
-  - GET /skills/{name}
-  - GET /skills/schema
-  - POST /skills/run
-  - POST /skills/{name}/run
-jobs:
-  - GET /jobs
-  - GET /jobs/{id}
-  - POST /jobs
-  - DELETE /jobs/{id}
-cas:
-  - POST /cas
-  - GET /cas/{digest}
-  - HEAD /cas/{digest}
-  - POST /cas/{digest}/pin
-  - DELETE /cas/{digest}/pin
-agents:
-  - GET /agents
-  - POST /agents
-  - GET /agents/{id}
-  - PATCH /agents/{id}
-  - POST /agents/{id}/start
-  - POST /agents/{id}/stop
-  - GET /agents/{id}/sessions
-sessions:
-  - GET /sessions
-  - GET /sessions/{id}
-  - GET /sessions/{id}/messages
-  - GET /sessions/{id}/context-windows
-  - POST /sessions/{id}/restore
-  - POST /sessions/recall
-memory:
-  - GET /memories
-  - GET /memories/{name}
-  - POST /memories
-  - PATCH /memories/{name}
-  - DELETE /memories/{name}
-  - POST /memories/search
-  - GET /memories/stats
-contextvars:
-  - GET /contextvars
-  - POST /contextvars
-  - POST /contextvars/query
-  - DELETE /contextvars/{key}
-tasks:
-  - GET /tasks
-  - POST /tasks
-  - GET /tasks/{id}
-  - PATCH /tasks/{id}
-  - POST /tasks/{id}/complete
-  - POST /tasks/{id}/uncomplete
-  - POST /tasks/{id}/dependencies
-  - DELETE /tasks/{id}/dependencies/{dep}
-  - GET /tasks/graph
-overseer:
-  - GET /overseer/recommendations
-  - POST /overseer/run
-  - GET /overseer/weights
-blackboard:
-  - GET /blackboard
-  - POST /blackboard
-  - POST /blackboard/{id}/lease
-  - DELETE /blackboard/{id}
-mailbox:
-  - GET /mailbox
-  - POST /mailbox
-  - PATCH /mailbox/{id}
-reservations:
-  - GET /reservations
-  - POST /reservations
-  - DELETE /reservations/{id}
-hooks:
-  - GET /hooks
-  - POST /hooks/reload
-  - POST /hooks/validate
-  - POST /hooks/run
-search:
-  - GET /search
-  - POST /search
-codemaps:
-  - GET /codemaps
-  - GET /codemaps/{id}
-  - POST /codemaps/search
-  - POST /codemaps/generate
-companion:
-  - POST /companion/chat
-  - GET /companion/conversations
-  - POST /companion/context
-  - GET /companion/context/{conversation_id}
-  - DELETE /companion/context/{conversation_id}
-  - DELETE /companion/context/{conversation_id}/{key}
-  - GET /companion/memory/{conversation_id}/stats
-  - GET /companion/memory/{conversation_id}/context
-  - DELETE /companion/memory/{conversation_id}
-realtime:
-  - GET /events
-  - WS /ws/console/{id}
-```
+### System and transport
 
-## OpenAPI Stub
-- docs/general/api-server.openapi.yaml
+- `GET /api/health`
+- `GET /api/events`
+- `GET /api/openapi.json`
+- `GET /api/swagger`
+- `GET /api/swagger/`
+- `GET /healthz`
+- `GET /readyz`
+- `WS /ws/console/{id}`
+
+### OAuth and platform webhooks
+
+- `GET /api/oauth/callback`
+- `POST /api/teams/messages`
+
+### Jobs, CAS, and workspaces
+
+- `GET /api/jobs`
+- `GET /api/jobs/{id}`
+- `GET|HEAD|POST|DELETE /api/cas/{digest...}`
+- `GET /api/workspaces`
+- `POST /api/workspaces/switch`
+
+### Skills
+
+- `GET /api/skills`
+- `GET /api/skills/schema`
+- `POST /api/skills/run`
+- `GET|POST|PUT|DELETE /api/skills/{skill...}`
+
+### Console sessions
+
+- `GET|POST /api/console/sessions`
+- `GET|POST|DELETE|PATCH /api/console/sessions/{id...}`
+
+### Core state surfaces
+
+- `GET|POST /api/tasks`
+- `GET|PATCH|POST /api/tasks/{id...}`
+- `GET /api/sessions`
+- `GET /api/sessions/{id...}`
+- `GET /api/agents`
+- `POST|GET|PATCH|DELETE /api/agents/{id...}`
+- `POST /api/agents/spawn`
+- `POST /api/agents/{id}/ask`
+- `POST /api/agents/{id}/daemon/start`
+- `POST /api/agents/{id}/daemon/kill`
+- `GET /api/agents/{id}/daemon/sessions`
+
+### Stats and collaboration
+
+- `GET /api/stats`
+- `GET /api/insights`
+- `GET|POST|PATCH /api/mailbox`
+- `GET|POST /api/rooms`
+- `GET|POST|PATCH /api/rooms/{id...}`
+- `GET|POST|DELETE /api/reservations`
+- `GET|POST /api/blackboard`
+- `GET|POST|PATCH|DELETE /api/blackboard/{id...}`
+
+### Search and inspection
+
+- `GET /api/logs`
+- `GET /api/sqlite`
+- `GET /api/sqlite/{...}`
+- `GET|POST /api/search`
+- `GET /api/codemaps`
+- `GET /api/codemaps/{id}`
+
+### Orchestration
+
+- `POST /api/orchestration/dispatch-issue`
+- `POST /api/orchestration/card-action`
+- `GET /api/orchestration/board-get`
+- `GET /api/orchestration/board-card-get`
+- `GET /api/orchestration/board-card-runtime-get`
+- `POST /api/orchestration/refresh`
+- `POST /api/orchestration/seed-cards`
+
+These routes are the main HTTP view into the v2/Jido-backed orchestration board
+and projection state.
+
+### Companion
+
+- `GET /api/companion/providers`
+- `POST /api/companion/chat`
+- `GET /api/companion/conversations`
+- `DELETE|PATCH /api/companion/conversations/{id}`
+- `GET|DELETE /api/companion/conversations/{id}/messages`
+- `POST /api/companion/conversations/{id}/compress`
+- `GET|PATCH /api/companion/conversations/{id}/personality`
+- `PATCH /api/companion/conversations/{id}/personality/dimension`
+- `GET|PATCH /api/companion/conversations/{id}/settings`
+- `POST /api/companion/context`
+- `GET|DELETE /api/companion/context/{conversation_id...}`
+- `POST /api/companion/characters`
+- `GET /api/companion/characters/{conversation_id...}`
+- `POST /api/companion/characters/{conversation_id}/{character_id}/overlays`
+- `GET /api/companion/memory/{conversation_id}/stats`
+- `GET /api/companion/memory/{conversation_id}/context`
+- `GET /api/companion/memory/{conversation_id}/export`
+- `GET /api/companion/memory/{conversation_id}/search`
+- `POST /api/companion/memory/{conversation_id}/import`
+- `DELETE /api/companion/memory/{conversation_id}`
+
+## Current architecture notes
+
+- The API server is hybrid: some handlers are classic storage/resource handlers,
+  while orchestration, ask state, and runtime tree inspection now intersect with
+  v2 projections and Jido-backed runtime data.
+- `/api/agents/*` is a mix of local store operations, daemon-backed agent
+  control, and newer runtime-state inspection helpers.
+- `/api/orchestration/*` is the clearest current v2/Jido-backed HTTP surface.
+
+## Versioning note
+
+Earlier docs referred to `/api/v1` as the primary base path. That is no longer
+current. The live server serves `/api/*`, and `/api/v1/*` now exists only as a
+deprecation response path.
+
+## Related docs
+
+- `docs/architecture/system-architecture.md`
+- `docs/general/runtime-orchestration.md`
+- `docs/architecture/chat-platform-adapter.md`
+- `docs/architecture/kubernetes-runtime.md`
+- `docs/general/api-server.openapi.yaml`

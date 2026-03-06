@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -24,6 +25,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/todosync"
 	"github.com/jkatigb/agentctl/internal/v2/adapters/libsql/turns"
 	"github.com/jkatigb/agentctl/internal/v2/adapters/sourceimport"
+	"github.com/jkatigb/agentctl/internal/v2/core/run"
 	"github.com/spf13/cobra"
 )
 
@@ -114,6 +116,14 @@ func newSessionsShowCommand() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			sessionID := args[0]
 			return sessionscmd.WithConfig(cmd, func(ctx context.Context, cfg config.Config) error {
+				v2Detail, foundV2, err := loadV2SessionDetail(ctx, cfg.Storage.Root, sessionID)
+				if err != nil {
+					return err
+				}
+				if foundV2 {
+					return sessionscmd.WriteOK(cmd.OutOrStdout(), "agentctl.sessions.show", v2Detail)
+				}
+
 				return sessionscmd.WithSessionStore(ctx, cfg, func(store storage.SessionStore) error {
 					session, err := store.Get(ctx, sessionID)
 					if err != nil {
@@ -171,20 +181,26 @@ func newSessionsSearchCommand() *cobra.Command {
 					"Provide a search query to find relevant sessions.")
 			}
 			return sessionscmd.WithConfig(cmd, func(ctx context.Context, cfg config.Config) error {
+				v2Results, err := searchV2Sessions(ctx, cfg.Storage.Root, query, limit)
+				if err != nil {
+					return fmt.Errorf("search v2 sessions: %w", err)
+				}
 				return sessionscmd.WithSessionStore(ctx, cfg, func(store storage.SessionStore) error {
 					sessionList, err := store.Search(ctx, query, limit)
 					if err != nil {
 						return err
 					}
+					legacy := summarizeSessions(sessionList, 100)
+					merged := mergeSessionSummaries(v2Results, legacy, limit)
 
 					payload := struct {
 						Sessions []sessionSummary `json:"sessions"`
 						Query    string           `json:"query"`
 						Count    int              `json:"count"`
 					}{
-						Sessions: summarizeSessions(sessionList, 100),
+						Sessions: merged,
 						Query:    query,
-						Count:    len(sessionList),
+						Count:    len(merged),
 					}
 					return sessionscmd.WriteOK(cmd.OutOrStdout(), "agentctl.sessions.search", payload)
 				})
@@ -453,6 +469,11 @@ func newSessionsResynthesizeV2Command() *cobra.Command {
 	var actorID string
 	var includeTodos bool
 	var includeEmbedding bool
+	var embeddingProvider string
+	var embeddingBaseURL string
+	var embeddingModel string
+	var embeddingAPIKey string
+	var embeddingTimeout time.Duration
 	var dryRun bool
 
 	cmd := &cobra.Command{
@@ -576,6 +597,65 @@ does not require running the legacy v1 runtime path.`,
 					return err
 				}
 
+				resolvedEmbeddingProvider := strings.ToLower(strings.TrimSpace(embeddingProvider))
+				if resolvedEmbeddingProvider == "" {
+					resolvedEmbeddingProvider = sourceimport.EmbeddingProviderHash
+				}
+				var embedder sourceimport.Embedder
+				resolvedEmbeddingModel := strings.TrimSpace(embeddingModel)
+				if includeEmbedding {
+					var embedErr error
+					var embedderResolved sourceimport.ResolvedEmbedderConfig
+					embedder, embedderResolved, embedErr = resolveResynthesizeEmbedder(includeEmbedding, sourceimport.EmbedderConfig{
+						Provider:   resolvedEmbeddingProvider,
+						Model:      embeddingModel,
+						BaseURL:    embeddingBaseURL,
+						APIKey:     embeddingAPIKey,
+						Timeout:    embeddingTimeout,
+						Dimensions: turnStore.VectorDimensions(),
+					})
+					if embedErr != nil {
+						return sessionscmd.WriteArgError(
+							cmd.OutOrStdout(),
+							"agentctl.sessions.resynthesize_v2",
+							embedErr.Error(),
+							"Set --embedding-provider to hash, lmstudio, or voyage.",
+						)
+					}
+
+					resolvedEmbeddingProvider = embedderResolved.Provider
+					resolvedEmbeddingModel = embedderResolved.Model
+				}
+				if includeEmbedding {
+					storeDims := turnStore.VectorDimensions()
+					embedDims := sourceimport.DeclaredEmbedderDimensions(embedder)
+					// If provider dimensions are not statically known, probe once so we can
+					// fail fast with a clear mismatch error before artifact persistence.
+					if embedDims <= 0 {
+						probeDims, probeModel, probeErr := sourceimport.ProbeEmbedderDimensions(ctx, embedder, embeddingTimeout)
+						if probeErr == nil {
+							embedDims = probeDims
+							if resolvedEmbeddingModel == "" && strings.TrimSpace(probeModel) != "" {
+								resolvedEmbeddingModel = strings.TrimSpace(probeModel)
+							}
+						}
+					}
+					if embedDims > 0 && storeDims > 0 && embedDims != storeDims {
+						return sessionscmd.WriteArgError(
+							cmd.OutOrStdout(),
+							"agentctl.sessions.resynthesize_v2",
+							fmt.Sprintf(
+								"embedding dimensions mismatch: provider=%s model=%s dims=%d, store dims=%d",
+								resolvedEmbeddingProvider,
+								resolvedEmbeddingModel,
+								embedDims,
+								storeDims,
+							),
+							"Set AGENTCTL_V2_TURNS_VECTOR_DIMS to match the embedding model dimensions, then use a matching v2 turns DB path.",
+						)
+					}
+				}
+
 				var sourceTodos []todosync.ClaudeTodo
 				todoWarnings := []string{}
 				if includeTodos && parsed.Provider == sourceimport.ProviderClaude {
@@ -590,12 +670,20 @@ does not require running the legacy v1 runtime path.`,
 
 				build := sourceimport.BuildArtifacts(ctx, parsed, sourceimport.ArtifactBuildOptions{
 					IncludeEmbedding: includeEmbedding,
-					Embedder:         sourceimport.NewHashEmbedder(turnStore.VectorDimensions()),
+					Embedder:         embedder,
 					Todos:            sourceTodos,
+				})
+				episodes := sourceimport.BuildEpisodes(parsed, build.Artifacts, sourceimport.EpisodeBuildOptions{
+					EpisodeVersion: "v1",
+				})
+				narrative := sourceimport.BuildNarrative(parsed, build.Artifacts, sourceimport.NarrativeBuildOptions{
+					ArtifactVersion: "v1",
 				})
 
 				allWarnings := append([]string(nil), build.Warnings...)
 				allWarnings = append(allWarnings, todoWarnings...)
+				allWarnings = append(allWarnings, episodes.Warnings...)
+				allWarnings = append(allWarnings, narrative.Warnings...)
 
 				artifactTypeCounts := make(map[string]int, 4)
 				for _, artifact := range build.Artifacts {
@@ -609,7 +697,12 @@ does not require running the legacy v1 runtime path.`,
 						SourcePath    string                 `json:"source_path"`
 						Turns         int                    `json:"turns"`
 						Artifacts     int                    `json:"artifacts"`
+						Episodes      int                    `json:"episodes"`
+						Narrative     bool                   `json:"narrative"`
+						NarrativeRefs int                    `json:"narrative_refs"`
 						ArtifactTypes map[string]int         `json:"artifact_types"`
+						EmbeddingProv string                 `json:"embedding_provider,omitempty"`
+						EmbeddingMod  string                 `json:"embedding_model,omitempty"`
 						TodoStats     sourceimport.TodoStats `json:"todo_stats"`
 						DryRun        bool                   `json:"dry_run"`
 						Warnings      []string               `json:"warnings,omitempty"`
@@ -619,7 +712,12 @@ does not require running the legacy v1 runtime path.`,
 						SourcePath:    parsed.SourcePath,
 						Turns:         len(parsed.Turns),
 						Artifacts:     len(build.Artifacts),
+						Episodes:      len(episodes.Episodes),
+						Narrative:     narrative.HasResult,
+						NarrativeRefs: narrative.ClaimCount,
 						ArtifactTypes: artifactTypeCounts,
+						EmbeddingProv: resolvedEmbeddingProvider,
+						EmbeddingMod:  resolvedEmbeddingModel,
 						TodoStats:     build.TodoStats,
 						DryRun:        true,
 						Warnings:      allWarnings,
@@ -627,10 +725,14 @@ does not require running the legacy v1 runtime path.`,
 					return sessionscmd.WriteOK(cmd.OutOrStdout(), "agentctl.sessions.resynthesize_v2", payload)
 				}
 
+				// Save operations are idempotent upserts in the v2 store, so if any
+				// step fails, rerunning this command converges state safely.
+				rerunHint := "partial writes may exist; rerun is safe because v2 persistence uses idempotent upserts"
+
 				savedTurns := 0
 				for _, turn := range parsed.Turns {
 					if err := turnStore.SaveTurn(ctx, turn); err != nil {
-						return fmt.Errorf("save turn %s: %w", turn.ID, err)
+						return fmt.Errorf("save turn %s: %w (%s)", turn.ID, err, rerunHint)
 					}
 					savedTurns++
 				}
@@ -638,30 +740,77 @@ does not require running the legacy v1 runtime path.`,
 				savedArtifacts := 0
 				for _, artifact := range build.Artifacts {
 					if err := turnStore.SaveArtifact(ctx, artifact); err != nil {
-						return fmt.Errorf("save artifact %s/%s/%s: %w",
-							artifact.TurnID, artifact.ArtifactType, artifact.ArtifactVersion, err)
+						return fmt.Errorf("save artifact %s/%s/%s: %w (%s)",
+							artifact.TurnID, artifact.ArtifactType, artifact.ArtifactVersion, err, rerunHint)
 					}
 					savedArtifacts++
 				}
+				savedEpisodes := 0
+				for _, episode := range episodes.Episodes {
+					if err := turnStore.SaveEpisode(ctx, episode); err != nil {
+						return fmt.Errorf("save episode %s: %w (%s)", episode.BoundaryKey, err, rerunHint)
+					}
+					savedEpisodes++
+				}
+				savedNarrative := false
+				if narrative.HasResult {
+					if err := turnStore.SaveNarrative(ctx, narrative.Narrative); err != nil {
+						return fmt.Errorf("save narrative: %w (%s)", err, rerunHint)
+					}
+					savedNarrative = true
+				}
+				persistedSessionID := resolvePersistedSessionID(parsed)
+
+				verified, verifyErr := collectResynthesizePersistedStats(
+					ctx,
+					turnStore,
+					persistedSessionID,
+					narrative.Narrative.ArtifactVersion,
+				)
+				if verifyErr != nil {
+					return fmt.Errorf("verify persisted v2 records: %w", verifyErr)
+				}
 
 				payload := struct {
-					Provider       string                 `json:"provider"`
-					SessionID      string                 `json:"session_id"`
-					SourcePath     string                 `json:"source_path"`
-					TurnsSaved     int                    `json:"turns_saved"`
-					ArtifactsSaved int                    `json:"artifacts_saved"`
-					ArtifactTypes  map[string]int         `json:"artifact_types"`
-					TodoStats      sourceimport.TodoStats `json:"todo_stats"`
-					Warnings       []string               `json:"warnings,omitempty"`
+					Provider              string                 `json:"provider"`
+					SessionID             string                 `json:"session_id"`
+					PersistedSessionID    string                 `json:"persisted_session_id"`
+					SourcePath            string                 `json:"source_path"`
+					TurnsSaved            int                    `json:"turns_saved"`
+					ArtifactsSaved        int                    `json:"artifacts_saved"`
+					EpisodesSaved         int                    `json:"episodes_saved"`
+					NarrativeSaved        bool                   `json:"narrative_saved"`
+					NarrativeRefs         int                    `json:"narrative_refs"`
+					ArtifactTypes         map[string]int         `json:"artifact_types"`
+					VerifiedTurns         int                    `json:"verified_turns"`
+					VerifiedArtifacts     int                    `json:"verified_artifacts"`
+					VerifiedEpisodes      int                    `json:"verified_episodes"`
+					VerifiedNarrative     bool                   `json:"verified_narrative"`
+					VerifiedArtifactTypes map[string]int         `json:"verified_artifact_types"`
+					EmbeddingProv         string                 `json:"embedding_provider,omitempty"`
+					EmbeddingMod          string                 `json:"embedding_model,omitempty"`
+					TodoStats             sourceimport.TodoStats `json:"todo_stats"`
+					Warnings              []string               `json:"warnings,omitempty"`
 				}{
-					Provider:       string(parsed.Provider),
-					SessionID:      parsed.SessionID,
-					SourcePath:     parsed.SourcePath,
-					TurnsSaved:     savedTurns,
-					ArtifactsSaved: savedArtifacts,
-					ArtifactTypes:  artifactTypeCounts,
-					TodoStats:      build.TodoStats,
-					Warnings:       allWarnings,
+					Provider:              string(parsed.Provider),
+					SessionID:             parsed.SessionID,
+					PersistedSessionID:    persistedSessionID,
+					SourcePath:            parsed.SourcePath,
+					TurnsSaved:            savedTurns,
+					ArtifactsSaved:        savedArtifacts,
+					EpisodesSaved:         savedEpisodes,
+					NarrativeSaved:        savedNarrative,
+					NarrativeRefs:         narrative.ClaimCount,
+					ArtifactTypes:         artifactTypeCounts,
+					VerifiedTurns:         verified.Turns,
+					VerifiedArtifacts:     verified.Artifacts,
+					VerifiedEpisodes:      verified.Episodes,
+					VerifiedNarrative:     verified.Narrative,
+					VerifiedArtifactTypes: verified.ArtifactTypes,
+					EmbeddingProv:         resolvedEmbeddingProvider,
+					EmbeddingMod:          resolvedEmbeddingModel,
+					TodoStats:             build.TodoStats,
+					Warnings:              allWarnings,
 				}
 				return sessionscmd.WriteOK(cmd.OutOrStdout(), "agentctl.sessions.resynthesize_v2", payload)
 			})
@@ -674,7 +823,12 @@ does not require running the legacy v1 runtime path.`,
 	cmd.Flags().StringVar(&workspace, "workspace", "", "Workspace path hint (used by Claude locate)")
 	cmd.Flags().StringVar(&actorID, "actor-id", "actor:system:source-import", "Actor ID for synthesized turns")
 	cmd.Flags().BoolVar(&includeTodos, "include-todos", true, "Include Claude todo snapshot in synthesized artifacts")
-	cmd.Flags().BoolVar(&includeEmbedding, "include-embedding", true, "Emit deterministic embedding artifacts")
+	cmd.Flags().BoolVar(&includeEmbedding, "include-embedding", true, "Emit embedding artifacts")
+	cmd.Flags().StringVar(&embeddingProvider, "embedding-provider", "hash", "Embedding backend: hash, lmstudio, or voyage")
+	cmd.Flags().StringVar(&embeddingBaseURL, "embedding-base-url", "", "Embeddings API base URL override (lmstudio: LMSTUDIO_BASE_URL/default localhost; voyage: VOYAGE_BASE_URL/default api.voyageai.com)")
+	cmd.Flags().StringVar(&embeddingModel, "embedding-model", "", "Embedding model override (lmstudio default: text-embedding-nomic-embed-text-v1.5; voyage default: voyage-3.5)")
+	cmd.Flags().StringVar(&embeddingAPIKey, "embedding-api-key", "", "Embedding API key override (lmstudio: LMSTUDIO_API_KEY, voyage: VOYAGE_API_KEY)")
+	cmd.Flags().DurationVar(&embeddingTimeout, "embedding-timeout", 20*time.Second, "Embedding request timeout (lmstudio/voyage)")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Parse and synthesize without persisting")
 	return cmd
 }
@@ -702,6 +856,482 @@ func runSessionSkillQuiet(cmd *cobra.Command, cfg config.Config, skillName strin
 
 	runCmd.SetArgs([]string{"--input", inputJSON, skillName})
 	return runCmd.Execute()
+}
+
+func resolveResynthesizeEmbedder(
+	includeEmbedding bool,
+	cfg sourceimport.EmbedderConfig,
+) (sourceimport.Embedder, sourceimport.ResolvedEmbedderConfig, error) {
+	provider := strings.ToLower(strings.TrimSpace(cfg.Provider))
+	if provider == "" {
+		provider = sourceimport.EmbeddingProviderHash
+	}
+	if !includeEmbedding {
+		return nil, sourceimport.ResolvedEmbedderConfig{
+			Provider: provider,
+			Model:    strings.TrimSpace(cfg.Model),
+		}, nil
+	}
+
+	resolved, err := sourceimport.ResolveEmbedderConfig(cfg)
+	if err != nil {
+		return nil, sourceimport.ResolvedEmbedderConfig{}, err
+	}
+	embedder, err := sourceimport.NewEmbedderFromResolvedConfig(resolved)
+	if err != nil {
+		return nil, sourceimport.ResolvedEmbedderConfig{}, err
+	}
+	return embedder, resolved, nil
+}
+
+type resynthesizePersistedStats struct {
+	Turns         int
+	Artifacts     int
+	Episodes      int
+	Narrative     bool
+	ArtifactTypes map[string]int
+}
+
+func collectResynthesizePersistedStats(
+	ctx context.Context,
+	turnStore *turns.Store,
+	sessionID string,
+	narrativeVersion string,
+) (resynthesizePersistedStats, error) {
+	stats := resynthesizePersistedStats{
+		ArtifactTypes: map[string]int{},
+	}
+	if turnStore == nil {
+		return stats, fmt.Errorf("collect persisted stats: nil turn store")
+	}
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return stats, fmt.Errorf("collect persisted stats: session id is required")
+	}
+	narrativeVersion = strings.TrimSpace(narrativeVersion)
+	if narrativeVersion == "" {
+		narrativeVersion = "v1"
+	}
+
+	// A high fixed limit keeps verification bounded while covering realistic sessions.
+	turnList, err := turnStore.ListTurns(ctx, sessionID, run.TurnListOptions{
+		Limit: 100000,
+		Asc:   true,
+	})
+	if err != nil {
+		return stats, fmt.Errorf("list turns: %w", err)
+	}
+	stats.Turns = len(turnList)
+	for _, turn := range turnList {
+		artifacts, err := turnStore.ListArtifacts(ctx, turn.ID)
+		if err != nil {
+			return stats, fmt.Errorf("list artifacts for turn %s: %w", turn.ID, err)
+		}
+		stats.Artifacts += len(artifacts)
+		for _, artifact := range artifacts {
+			stats.ArtifactTypes[strings.TrimSpace(artifact.ArtifactType)]++
+		}
+	}
+
+	episodeList, err := turnStore.ListEpisodes(ctx, sessionID, run.EpisodeListOptions{Limit: 100000})
+	if err != nil {
+		return stats, fmt.Errorf("list episodes: %w", err)
+	}
+	stats.Episodes = len(episodeList)
+
+	if _, err := turnStore.GetNarrative(ctx, sessionID, narrativeVersion); err == nil {
+		stats.Narrative = true
+	} else if !errors.Is(err, run.ErrNarrativeNotFound) {
+		return stats, fmt.Errorf("get narrative: %w", err)
+	}
+
+	return stats, nil
+}
+
+func resolvePersistedSessionID(parsed sourceimport.ParsedSession) string {
+	for _, turn := range parsed.Turns {
+		if id := strings.TrimSpace(turn.SessionID); id != "" {
+			return id
+		}
+	}
+	return strings.TrimSpace(parsed.SessionID)
+}
+
+type v2SessionSnapshot struct {
+	RequestedSessionID string
+	PersistedSessionID string
+	SourceSessionID    string
+	SourceProvider     string
+	WorkspacePath      string
+	SourcePath         string
+	Summary            string
+	EmbeddingModel     string
+	ArtifactTypes      map[string]int
+	Turns              int
+	UserTurns          int
+	ToolInvocations    int
+	EpisodeCount       int
+	HasEmbedding       bool
+	Narrative          bool
+	StartedAt          time.Time
+	EndedAt            time.Time
+}
+
+func mergeSessionSummaries(primary []sessionSummary, secondary []sessionSummary, limit int) []sessionSummary {
+	out := make([]sessionSummary, 0, len(primary)+len(secondary))
+	seen := make(map[string]struct{}, len(primary)+len(secondary))
+	appendUnique := func(list []sessionSummary) {
+		for _, item := range list {
+			id := strings.TrimSpace(item.ID)
+			if id == "" {
+				continue
+			}
+			if _, ok := seen[id]; ok {
+				continue
+			}
+			seen[id] = struct{}{}
+			out = append(out, item)
+		}
+	}
+	appendUnique(primary)
+	appendUnique(secondary)
+	if limit > 0 && len(out) > limit {
+		out = out[:limit]
+	}
+	return out
+}
+
+func searchV2Sessions(ctx context.Context, storageRoot string, query string, limit int) ([]sessionSummary, error) {
+	if strings.TrimSpace(query) == "" {
+		return nil, nil
+	}
+	if limit <= 0 {
+		limit = 20
+	}
+
+	turnStore, err := turns.Open(ctx, storageRoot)
+	if err != nil {
+		return nil, fmt.Errorf("open v2 turns store: %w", err)
+	}
+	defer func() { _ = turnStore.Close() }()
+
+	embedder := sourceimport.NewHashEmbedder(turnStore.VectorDimensions())
+	embedding, err := embedder.Embed(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("embed query: %w", err)
+	}
+	if len(embedding.Vector) == 0 {
+		return nil, nil
+	}
+
+	result, err := turnStore.SearchArtifactsByEmbedding(ctx, embedding.Vector, run.ArtifactSearchOptions{
+		Limit: limit * 10,
+		ArtifactTypes: []string{
+			turns.ArtifactTypeEmbedding,
+		},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("search artifacts: %w", err)
+	}
+	if len(result.Hits) == 0 {
+		return nil, nil
+	}
+
+	scoreBySession := make(map[string]float64, len(result.Hits))
+	for _, hit := range result.Hits {
+		turn, err := turnStore.GetTurn(ctx, hit.TurnID)
+		if err != nil {
+			continue
+		}
+		sessionID := strings.TrimSpace(turn.SessionID)
+		if sessionID == "" {
+			continue
+		}
+		if hit.Similarity > scoreBySession[sessionID] {
+			scoreBySession[sessionID] = hit.Similarity
+		}
+	}
+	if len(scoreBySession) == 0 {
+		return nil, nil
+	}
+
+	sessionIDs := make([]string, 0, len(scoreBySession))
+	for sessionID := range scoreBySession {
+		sessionIDs = append(sessionIDs, sessionID)
+	}
+	sort.Slice(sessionIDs, func(i, j int) bool {
+		left, right := scoreBySession[sessionIDs[i]], scoreBySession[sessionIDs[j]]
+		if left == right {
+			return sessionIDs[i] < sessionIDs[j]
+		}
+		return left > right
+	})
+
+	out := make([]sessionSummary, 0, min(limit, len(sessionIDs)))
+	for _, sessionID := range sessionIDs {
+		snapshot, err := loadV2SessionSnapshotByID(ctx, turnStore, sessionID)
+		if err != nil {
+			continue
+		}
+		out = append(out, v2SessionSummaryFromSnapshot(snapshot))
+		if len(out) >= limit {
+			break
+		}
+	}
+	return out, nil
+}
+
+func loadV2SessionDetail(ctx context.Context, storageRoot string, sessionID string) (sessionDetail, bool, error) {
+	turnStore, err := turns.Open(ctx, storageRoot)
+	if err != nil {
+		return sessionDetail{}, false, fmt.Errorf("open v2 turns store: %w", err)
+	}
+	defer func() { _ = turnStore.Close() }()
+
+	persistedSessionID, found, err := resolvePersistedV2SessionID(ctx, turnStore, sessionID)
+	if err != nil {
+		return sessionDetail{}, false, err
+	}
+	if !found {
+		return sessionDetail{}, false, nil
+	}
+	snapshot, err := loadV2SessionSnapshotByID(ctx, turnStore, persistedSessionID)
+	if err != nil {
+		return sessionDetail{}, false, err
+	}
+	snapshot.RequestedSessionID = strings.TrimSpace(sessionID)
+	return v2SessionDetailFromSnapshot(snapshot), true, nil
+}
+
+func resolvePersistedV2SessionID(ctx context.Context, turnStore *turns.Store, requestedSessionID string) (string, bool, error) {
+	if turnStore == nil {
+		return "", false, fmt.Errorf("resolve v2 session id: nil turn store")
+	}
+	for _, candidate := range resolveV2SessionCandidates(requestedSessionID) {
+		turnList, err := turnStore.ListTurns(ctx, candidate, run.TurnListOptions{Limit: 1, Asc: true})
+		if err != nil {
+			return "", false, fmt.Errorf("list turns for candidate %s: %w", candidate, err)
+		}
+		if len(turnList) > 0 {
+			return candidate, true, nil
+		}
+	}
+	return "", false, nil
+}
+
+func resolveV2SessionCandidates(sessionID string) []string {
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return nil
+	}
+	out := []string{sessionID}
+	if !strings.HasPrefix(sessionID, "source:") {
+		out = append(out, "source:codex:"+sessionID, "source:claude:"+sessionID)
+	}
+	seen := make(map[string]struct{}, len(out))
+	deduped := make([]string, 0, len(out))
+	for _, candidate := range out {
+		candidate = strings.TrimSpace(candidate)
+		if candidate == "" {
+			continue
+		}
+		if _, ok := seen[candidate]; ok {
+			continue
+		}
+		seen[candidate] = struct{}{}
+		deduped = append(deduped, candidate)
+	}
+	return deduped
+}
+
+func loadV2SessionSnapshotByID(ctx context.Context, turnStore *turns.Store, persistedSessionID string) (v2SessionSnapshot, error) {
+	persistedSessionID = strings.TrimSpace(persistedSessionID)
+	if persistedSessionID == "" {
+		return v2SessionSnapshot{}, fmt.Errorf("load v2 snapshot: persisted session id is required")
+	}
+	if turnStore == nil {
+		return v2SessionSnapshot{}, fmt.Errorf("load v2 snapshot: nil turn store")
+	}
+
+	turnList, err := turnStore.ListTurns(ctx, persistedSessionID, run.TurnListOptions{
+		Limit: 100000,
+		Asc:   true,
+	})
+	if err != nil {
+		return v2SessionSnapshot{}, fmt.Errorf("list turns: %w", err)
+	}
+	if len(turnList) == 0 {
+		return v2SessionSnapshot{}, run.ErrTurnNotFound
+	}
+
+	snapshot := v2SessionSnapshot{
+		PersistedSessionID: persistedSessionID,
+		SourceSessionID:    sourceSessionIDFromPersistedID(persistedSessionID),
+		SourceProvider:     sourceProviderFromPersistedID(persistedSessionID),
+		ArtifactTypes:      map[string]int{},
+		StartedAt:          turnList[0].CreatedAt,
+		EndedAt:            turnList[0].UpdatedAt,
+	}
+	snapshot.Turns = len(turnList)
+
+	for _, turn := range turnList {
+		if strings.TrimSpace(turn.Prompt) != "" {
+			snapshot.UserTurns++
+		}
+		if !turn.CreatedAt.IsZero() && turn.CreatedAt.Before(snapshot.StartedAt) {
+			snapshot.StartedAt = turn.CreatedAt
+		}
+		if !turn.UpdatedAt.IsZero() && turn.UpdatedAt.After(snapshot.EndedAt) {
+			snapshot.EndedAt = turn.UpdatedAt
+		}
+		for _, iter := range turn.Iterations {
+			snapshot.ToolInvocations += len(iter.ToolCalls)
+		}
+
+		artifacts, err := turnStore.ListArtifacts(ctx, turn.ID)
+		if err != nil {
+			return v2SessionSnapshot{}, fmt.Errorf("list artifacts for turn %s: %w", turn.ID, err)
+		}
+		for _, artifact := range artifacts {
+			artifactType := strings.TrimSpace(artifact.ArtifactType)
+			if artifactType == "" {
+				continue
+			}
+			snapshot.ArtifactTypes[artifactType]++
+			if artifactType == turns.ArtifactTypeEmbedding {
+				snapshot.HasEmbedding = true
+				if snapshot.EmbeddingModel == "" {
+					snapshot.EmbeddingModel = strings.TrimSpace(artifact.EmbeddingModel)
+				}
+			}
+			if snapshot.SourcePath == "" || snapshot.WorkspacePath == "" || snapshot.SourceProvider == "" {
+				metadata := map[string]any{}
+				if err := json.Unmarshal(artifact.MetadataJSON, &metadata); err == nil {
+					if snapshot.SourcePath == "" {
+						snapshot.SourcePath = mapString(metadata, "source_path")
+					}
+					if snapshot.WorkspacePath == "" {
+						snapshot.WorkspacePath = mapString(metadata, "workspace")
+					}
+					if snapshot.SourceProvider == "" {
+						snapshot.SourceProvider = mapString(metadata, "provider")
+					}
+				}
+			}
+		}
+	}
+
+	episodes, err := turnStore.ListEpisodes(ctx, persistedSessionID, run.EpisodeListOptions{Limit: 100000})
+	if err != nil {
+		return v2SessionSnapshot{}, fmt.Errorf("list episodes: %w", err)
+	}
+	snapshot.EpisodeCount = len(episodes)
+
+	narrative, err := turnStore.GetNarrative(ctx, persistedSessionID, "v1")
+	if err == nil {
+		snapshot.Narrative = true
+		snapshot.Summary = strings.TrimSpace(narrative.Summary)
+		if snapshot.Summary == "" && len(narrative.Claims) > 0 {
+			snapshot.Summary = strings.TrimSpace(narrative.Claims[0].Text)
+		}
+	} else if !errors.Is(err, run.ErrNarrativeNotFound) {
+		return v2SessionSnapshot{}, fmt.Errorf("get narrative: %w", err)
+	}
+
+	if snapshot.Summary == "" {
+		for i := len(turnList) - 1; i >= 0; i-- {
+			candidate := strings.TrimSpace(turnList[i].FinalOutput.Text)
+			if candidate != "" {
+				snapshot.Summary = truncateSummary(candidate, 220)
+				break
+			}
+		}
+	}
+
+	return snapshot, nil
+}
+
+func v2SessionSummaryFromSnapshot(snapshot v2SessionSnapshot) sessionSummary {
+	project := filepath.Base(strings.TrimSpace(snapshot.WorkspacePath))
+	if project == "." || project == "/" {
+		project = ""
+	}
+	return sessionSummary{
+		ID:              snapshot.PersistedSessionID,
+		ProjectName:     project,
+		Summary:         truncateSummary(snapshot.Summary, 100),
+		MessageCount:    snapshot.Turns,
+		UserTurns:       snapshot.UserTurns,
+		ToolInvocations: snapshot.ToolInvocations,
+		StartedAt:       snapshot.StartedAt,
+		SourceProvider:  snapshot.SourceProvider,
+		V2:              true,
+	}
+}
+
+func v2SessionDetailFromSnapshot(snapshot v2SessionSnapshot) sessionDetail {
+	project := filepath.Base(strings.TrimSpace(snapshot.WorkspacePath))
+	if project == "." || project == "/" {
+		project = ""
+	}
+	detailID := snapshot.PersistedSessionID
+	if detailID == "" {
+		detailID = snapshot.RequestedSessionID
+	}
+	return sessionDetail{
+		ID:              detailID,
+		WorkspacePath:   snapshot.WorkspacePath,
+		ProjectName:     project,
+		AgentType:       snapshot.SourceProvider,
+		StartedAt:       snapshot.StartedAt,
+		EndedAt:         snapshot.EndedAt,
+		Summary:         snapshot.Summary,
+		MessageCount:    snapshot.Turns,
+		UserTurns:       snapshot.UserTurns,
+		ToolInvocations: snapshot.ToolInvocations,
+		RawJSONLPath:    snapshot.SourcePath,
+		HasEmbedding:    snapshot.HasEmbedding,
+		EmbeddingModel:  snapshot.EmbeddingModel,
+		CreatedAt:       snapshot.StartedAt,
+		UpdatedAt:       snapshot.EndedAt,
+		SourceSessionID: snapshot.SourceSessionID,
+		SourceProvider:  snapshot.SourceProvider,
+		V2:              true,
+		EpisodeCount:    snapshot.EpisodeCount,
+		ArtifactTypes:   snapshot.ArtifactTypes,
+	}
+}
+
+func sourceSessionIDFromPersistedID(persistedID string) string {
+	parts := strings.SplitN(strings.TrimSpace(persistedID), ":", 3)
+	if len(parts) == 3 && parts[0] == "source" {
+		return strings.TrimSpace(parts[2])
+	}
+	return ""
+}
+
+func sourceProviderFromPersistedID(persistedID string) string {
+	parts := strings.SplitN(strings.TrimSpace(persistedID), ":", 3)
+	if len(parts) >= 2 && parts[0] == "source" {
+		return strings.TrimSpace(parts[1])
+	}
+	return ""
+}
+
+func mapString(values map[string]any, key string) string {
+	if values == nil {
+		return ""
+	}
+	value, ok := values[key]
+	if !ok {
+		return ""
+	}
+	switch typed := value.(type) {
+	case string:
+		return strings.TrimSpace(typed)
+	default:
+		return strings.TrimSpace(fmt.Sprintf("%v", typed))
+	}
 }
 
 // runSessionSkill runs a session skill via the run command.
@@ -748,6 +1378,8 @@ type sessionSummary struct {
 	TotalTokens     int       `json:"total_tokens"`
 	StartedAt       time.Time `json:"started_at,omitempty"`
 	Tags            []string  `json:"tags,omitempty"`
+	SourceProvider  string    `json:"source_provider,omitempty"`
+	V2              bool      `json:"v2,omitempty"`
 }
 
 func summarizeSessions(list []storage.Session, maxSummaryLen int) []sessionSummary {
@@ -771,30 +1403,35 @@ func summarizeSessions(list []storage.Session, maxSummaryLen int) []sessionSumma
 
 // sessionDetail is the full session representation for show output.
 type sessionDetail struct {
-	ID              string    `json:"id"`
-	WorkspacePath   string    `json:"workspace_path"`
-	ProjectName     string    `json:"project_name"`
-	GitBranch       string    `json:"git_branch,omitempty"`
-	ClaudeVersion   string    `json:"claude_version,omitempty"`
-	AgentType       string    `json:"agent_type,omitempty"`
-	StartedAt       time.Time `json:"started_at,omitempty"`
-	EndedAt         time.Time `json:"ended_at,omitempty"`
-	Summary         string    `json:"summary,omitempty"`
-	Accomplished    []string  `json:"accomplished,omitempty"`
-	Decisions       []string  `json:"decisions,omitempty"`
-	Gotchas         []string  `json:"gotchas,omitempty"`
-	Tags            []string  `json:"tags,omitempty"`
-	KeyFiles        []string  `json:"key_files,omitempty"`
-	ToolsPattern    string    `json:"tools_pattern,omitempty"`
-	MessageCount    int       `json:"message_count"`
-	UserTurns       int       `json:"user_turns"`
-	ToolInvocations int       `json:"tool_invocations"`
-	TotalTokens     int       `json:"total_tokens"`
-	RawJSONLPath    string    `json:"raw_jsonl_path,omitempty"`
-	HasEmbedding    bool      `json:"has_embedding"`
-	EmbeddingModel  string    `json:"embedding_model,omitempty"`
-	CreatedAt       time.Time `json:"created_at"`
-	UpdatedAt       time.Time `json:"updated_at"`
+	ID              string         `json:"id"`
+	WorkspacePath   string         `json:"workspace_path"`
+	ProjectName     string         `json:"project_name"`
+	GitBranch       string         `json:"git_branch,omitempty"`
+	ClaudeVersion   string         `json:"claude_version,omitempty"`
+	AgentType       string         `json:"agent_type,omitempty"`
+	StartedAt       time.Time      `json:"started_at,omitempty"`
+	EndedAt         time.Time      `json:"ended_at,omitempty"`
+	Summary         string         `json:"summary,omitempty"`
+	Accomplished    []string       `json:"accomplished,omitempty"`
+	Decisions       []string       `json:"decisions,omitempty"`
+	Gotchas         []string       `json:"gotchas,omitempty"`
+	Tags            []string       `json:"tags,omitempty"`
+	KeyFiles        []string       `json:"key_files,omitempty"`
+	ToolsPattern    string         `json:"tools_pattern,omitempty"`
+	MessageCount    int            `json:"message_count"`
+	UserTurns       int            `json:"user_turns"`
+	ToolInvocations int            `json:"tool_invocations"`
+	TotalTokens     int            `json:"total_tokens"`
+	RawJSONLPath    string         `json:"raw_jsonl_path,omitempty"`
+	HasEmbedding    bool           `json:"has_embedding"`
+	EmbeddingModel  string         `json:"embedding_model,omitempty"`
+	CreatedAt       time.Time      `json:"created_at"`
+	UpdatedAt       time.Time      `json:"updated_at"`
+	SourceSessionID string         `json:"source_session_id,omitempty"`
+	SourceProvider  string         `json:"source_provider,omitempty"`
+	V2              bool           `json:"v2,omitempty"`
+	EpisodeCount    int            `json:"episode_count,omitempty"`
+	ArtifactTypes   map[string]int `json:"artifact_types,omitempty"`
 }
 
 func truncateSummary(s string, maxLen int) string {

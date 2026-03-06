@@ -130,6 +130,7 @@ func TestShortTermMemory_InitState(t *testing.T) {
 	}
 	if state == nil {
 		t.Fatal("GetState() returned nil")
+		return
 	}
 	if state.ActorID != "actor-1" {
 		t.Errorf("ActorID = %q, want actor-1", state.ActorID)
@@ -325,6 +326,7 @@ func TestShortTermMemory_Export(t *testing.T) {
 	}
 	if state == nil {
 		t.Fatal("Export() returned nil")
+		return
 	}
 	if state.ActorID != "actor-1" {
 		t.Errorf("ActorID = %q, want actor-1", state.ActorID)

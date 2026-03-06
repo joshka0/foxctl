@@ -28,6 +28,7 @@ func TestMockSummarizer_SummarizeTurns(t *testing.T) {
 
 	if summary == nil {
 		t.Fatal("summary is nil")
+		return
 	}
 
 	if summary.TurnRange.Start != 0 {

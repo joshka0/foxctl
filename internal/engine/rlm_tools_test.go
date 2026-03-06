@@ -2,15 +2,14 @@ package engine
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
-	"fmt"
 	"strings"
 	"testing"
 
 	"github.com/jkatigb/agentctl/internal/indexing/semantic"
-	"github.com/jkatigb/agentctl/internal/storage"
 	"github.com/jkatigb/agentctl/internal/storage/contextvar"
-	memorystore "github.com/jkatigb/agentctl/internal/storage/memory"
+	_ "modernc.org/sqlite"
 )
 
 func TestRLMToolExecutor_Put(t *testing.T) {
@@ -418,14 +417,79 @@ func (f fakeEmbedProvider) Dimensions() int { return len(f.vec) }
 
 var _ semantic.EmbeddingProvider = (*fakeEmbedProvider)(nil)
 
-func setupTestMemoryStore(t *testing.T) *memorystore.Store {
+func setupTestCompanionDB(t *testing.T) *sql.DB {
 	t.Helper()
-	dir := t.TempDir()
-	store, err := memorystore.Open(context.Background(), dir, "")
+
+	db, err := sql.Open("sqlite", ":memory:")
 	if err != nil {
-		t.Fatalf("Failed to open test memory store: %v", err)
+		t.Fatalf("open companion sqlite: %v", err)
 	}
-	return store
+
+	schema := `
+		CREATE TABLE companion_memory_mode_state (
+			conversation_id TEXT PRIMARY KEY,
+			mode TEXT NOT NULL,
+			schema_version INTEGER NOT NULL DEFAULT 1,
+			last_processed_event INTEGER NOT NULL DEFAULT 0,
+			last_soft_event INTEGER NOT NULL DEFAULT 0,
+			last_evidence_event INTEGER NOT NULL DEFAULT 0,
+			updated_at TEXT NOT NULL
+		);
+		CREATE TABLE companion_hard_state_entries (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			conversation_id TEXT NOT NULL,
+			entry_type TEXT NOT NULL,
+			key TEXT NOT NULL,
+			value_json TEXT NOT NULL,
+			status TEXT NOT NULL DEFAULT 'active',
+			source_event_id INTEGER NOT NULL,
+			confidence REAL NOT NULL DEFAULT 0.8,
+			metadata_json TEXT,
+			supersedes INTEGER,
+			created_at TEXT NOT NULL
+		);
+		CREATE TABLE companion_soft_episodes (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			conversation_id TEXT NOT NULL,
+			episode_type TEXT NOT NULL,
+			start_event_id INTEGER NOT NULL,
+			end_event_id INTEGER NOT NULL,
+			summary TEXT NOT NULL DEFAULT '',
+			needs_summary INTEGER NOT NULL DEFAULT 0,
+			assumption_ids TEXT NOT NULL DEFAULT '[]',
+			token_count INTEGER DEFAULT 0,
+			boundary_hash TEXT NOT NULL,
+			created_at TEXT NOT NULL,
+			deleted_at TEXT
+		);
+		CREATE TABLE companion_evidence_snippets (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			conversation_id TEXT NOT NULL,
+			source_event_id INTEGER NOT NULL,
+			event_type TEXT NOT NULL,
+			fact_text TEXT NOT NULL,
+			content_hash TEXT NOT NULL,
+			confidence REAL NOT NULL DEFAULT 0.5,
+			bucket TEXT NOT NULL DEFAULT 'default',
+			ttl_days INTEGER,
+			created_at TEXT NOT NULL,
+			expires_at TEXT
+		);
+		CREATE TABLE companion_events (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			conversation_id TEXT NOT NULL,
+			event_type TEXT NOT NULL,
+			payload_json TEXT
+		);
+	`
+
+	if _, err := db.Exec(schema); err != nil {
+		_ = db.Close()
+		t.Fatalf("create companion schema: %v", err)
+	}
+
+	t.Cleanup(func() { _ = db.Close() })
+	return db
 }
 
 func TestRLMToolExecutor_SemanticQuery_VectorByTypeFiltersSessionAndAddsLayer(t *testing.T) {
@@ -433,72 +497,60 @@ func TestRLMToolExecutor_SemanticQuery_VectorByTypeFiltersSessionAndAddsLayer(t 
 	store := setupTestContextStore(t)
 	defer store.Close()
 
-	mem := setupTestMemoryStore(t)
-	defer mem.Close()
-
-	workspace := "test-workspace"
+	companionDB := setupTestCompanionDB(t)
 	convID := "conv-a"
 
 	exec := NewRLMToolExecutor(store, convID)
-	exec.SetMemoryStore(mem, workspace)
-	exec.SetEmbedProvider(fakeEmbedProvider{vec: []float32{1, 0}})
+	exec.SetCompanionDB(companionDB)
 
-	// Seed this conversation's L2 + L1.
-	l2 := storage.MemorySaveOptions{
-		Name:      fmt.Sprintf("companion:history:%s", convID),
-		Type:      "companion_history",
-		Workspace: workspace,
-		SessionID: convID,
-		Summary:   "We have a long-running relationship with recurring themes.",
-		Result:    []byte(`{"relationship_note":"...","recurring_topics":["x"]}`),
+	if _, err := companionDB.ExecContext(ctx, `
+		INSERT INTO companion_memory_mode_state (conversation_id, mode, schema_version, last_processed_event, last_soft_event, last_evidence_event, updated_at)
+		VALUES (?, 'hybrid', 1, 10, 10, 10, '2026-02-01 10:00:00')
+	`, convID); err != nil {
+		t.Fatalf("insert mode state: %v", err)
 	}
-	l2Entry, err := mem.SaveResult(ctx, l2)
-	if err != nil {
-		t.Fatalf("SaveResult L2 failed: %v", err)
+	if _, err := companionDB.ExecContext(ctx, `
+		INSERT INTO companion_events (id, conversation_id, event_type, payload_json)
+		VALUES (1, ?, 'user_message', '{"text":"I prefer concise responses"}')
+	`, convID); err != nil {
+		t.Fatalf("insert source event: %v", err)
 	}
-	if err := mem.UpdateEmbedding(ctx, l2Entry.Name, l2Entry.Workspace, []float32{1, 0}); err != nil {
-		t.Fatalf("UpdateEmbedding L2 failed: %v", err)
+	if _, err := companionDB.ExecContext(ctx, `
+		INSERT INTO companion_hard_state_entries
+			(conversation_id, entry_type, key, value_json, status, source_event_id, confidence, created_at)
+		VALUES
+			(?, 'preference', 'response_style', '{"value":"concise"}', 'active', 1, 0.95, '2026-02-01 10:00:00')
+	`, convID); err != nil {
+		t.Fatalf("insert hard state: %v", err)
 	}
-
-	l1 := storage.MemorySaveOptions{
-		Name:      fmt.Sprintf("companion:summary:%s:%s", convID, "2026-02-01"),
-		Type:      "companion_summary",
-		Workspace: workspace,
-		SessionID: convID,
-		Summary:   "On Feb 1 we talked about embracing the unknown.",
-		Result:    []byte(`{"date":"2026-02-01","summary":"..."}`),
+	if _, err := companionDB.ExecContext(ctx, `
+		INSERT INTO companion_soft_episodes
+			(conversation_id, episode_type, start_event_id, end_event_id, summary, needs_summary, assumption_ids, token_count, boundary_hash, created_at)
+		VALUES
+			(?, 'planning', 1, 1, 'Discussed response format and constraints.', 0, '[]', 12, 'episode-a', '2026-02-01 10:01:00')
+	`, convID); err != nil {
+		t.Fatalf("insert soft episode: %v", err)
 	}
-	l1Entry, err := mem.SaveResult(ctx, l1)
-	if err != nil {
-		t.Fatalf("SaveResult L1 failed: %v", err)
-	}
-	if err := mem.UpdateEmbedding(ctx, l1Entry.Name, l1Entry.Workspace, []float32{0.5, 0.5}); err != nil {
-		t.Fatalf("UpdateEmbedding L1 failed: %v", err)
-	}
-
-	// Add a bunch of other conversations' L1 entries in the same workspace to ensure
-	// we don't accidentally leak cross-session results.
-	for i := 0; i < 50; i++ {
-		otherConvID := fmt.Sprintf("conv-b-%d", i)
-		opts := storage.MemorySaveOptions{
-			Name:      fmt.Sprintf("companion:summary:%s:%s", otherConvID, "2026-02-01"),
-			Type:      "companion_summary",
-			Workspace: workspace,
-			SessionID: otherConvID,
-			Summary:   "Other conversation summary.",
-			Result:    []byte(`{"date":"2026-02-01","summary":"other"}`),
-		}
-		entry, err := mem.SaveResult(ctx, opts)
-		if err != nil {
-			t.Fatalf("SaveResult other L1 failed: %v", err)
-		}
-		// Identical embedding so these dominate the global top-K unless we over-fetch.
-		if err := mem.UpdateEmbedding(ctx, entry.Name, entry.Workspace, []float32{1, 0}); err != nil {
-			t.Fatalf("UpdateEmbedding other L1 failed: %v", err)
-		}
+	if _, err := companionDB.ExecContext(ctx, `
+		INSERT INTO companion_evidence_snippets
+			(conversation_id, source_event_id, event_type, fact_text, content_hash, confidence, bucket, created_at)
+		VALUES
+			(?, 1, 'user_message', 'User asked for concise responses.', 'evidence-a', 0.91, 'preference', '2026-02-01 10:01:00')
+	`, convID); err != nil {
+		t.Fatalf("insert evidence snippet: %v", err)
 	}
 
-	out, err := exec.Execute(ctx, "rlm_context_query", json.RawMessage(`{"semantic_query":"remember our themes","limit":5}`))
+	// Cross-session rows should be ignored.
+	if _, err := companionDB.ExecContext(ctx, `
+		INSERT INTO companion_hard_state_entries
+			(conversation_id, entry_type, key, value_json, status, source_event_id, confidence, created_at)
+		VALUES
+			('conv-b', 'preference', 'response_style', '{"value":"verbose"}', 'active', 1, 0.50, '2026-02-01 10:02:00')
+	`); err != nil {
+		t.Fatalf("insert cross-session hard state: %v", err)
+	}
+
+	out, err := exec.Execute(ctx, "rlm_context_query", json.RawMessage(`{"semantic_query":"concise responses","limit":5}`))
 	if err != nil {
 		t.Fatalf("Execute semantic query failed: %v", err)
 	}
@@ -519,6 +571,9 @@ func TestRLMToolExecutor_SemanticQuery_VectorByTypeFiltersSessionAndAddsLayer(t 
 		t.Fatalf("Expected memories, got none")
 	}
 
+	hasHard := false
+	hasEpisode := false
+	hasEvidence := false
 	for _, m := range resp.Memories {
 		name, _ := m["name"].(string)
 		if name == "" {
@@ -531,22 +586,31 @@ func TestRLMToolExecutor_SemanticQuery_VectorByTypeFiltersSessionAndAddsLayer(t 
 
 		typ, _ := m["type"].(string)
 		layer, _ := m["layer"].(string)
-		if typ == "companion_history" && layer != "L2" {
-			t.Fatalf("Expected L2 for companion_history, got %q", layer)
-		}
-		if typ == "companion_summary" && layer != "L1" {
-			t.Fatalf("Expected L1 for companion_summary, got %q", layer)
-		}
-
-		if typ == "companion_summary" {
-			if got, _ := m["date"].(string); got != "2026-02-01" {
-				t.Fatalf("Expected date=2026-02-01, got %q", got)
+		switch typ {
+		case "companion_hard_state":
+			hasHard = true
+			if layer != "H1" {
+				t.Fatalf("Expected H1 for companion_hard_state, got %q", layer)
+			}
+		case "companion_soft_episode":
+			hasEpisode = true
+			if layer != "E1" {
+				t.Fatalf("Expected E1 for companion_soft_episode, got %q", layer)
+			}
+		case "companion_evidence_snippet":
+			hasEvidence = true
+			if layer != "EVD" {
+				t.Fatalf("Expected EVD for companion_evidence_snippet, got %q", layer)
 			}
 		}
 	}
 
-	if resp.Stats["method"] == "" {
-		t.Fatalf("Expected stats.method to be set")
+	if !hasHard || !hasEpisode || !hasEvidence {
+		t.Fatalf("Expected hard/episode/evidence results, got hard=%v episode=%v evidence=%v", hasHard, hasEpisode, hasEvidence)
+	}
+
+	if got, _ := resp.Stats["method"].(string); got != "hybrid" {
+		t.Fatalf("Expected stats.method=hybrid, got %q", got)
 	}
 }
 
@@ -555,28 +619,26 @@ func TestRLMToolExecutor_SemanticQuery_TruncatesLongSummaries(t *testing.T) {
 	store := setupTestContextStore(t)
 	defer store.Close()
 
-	mem := setupTestMemoryStore(t)
-	defer mem.Close()
-
-	workspace := "test-workspace"
+	companionDB := setupTestCompanionDB(t)
 	convID := "conv-long"
 
 	exec := NewRLMToolExecutor(store, convID)
-	exec.SetMemoryStore(mem, workspace)
+	exec.SetCompanionDB(companionDB)
 
 	long := strings.Repeat("x", 2000)
-	entry, err := mem.SaveResult(ctx, storage.MemorySaveOptions{
-		Name:      fmt.Sprintf("companion:summary:%s:%s", convID, "2026-02-01"),
-		Type:      "companion_summary",
-		Workspace: workspace,
-		SessionID: convID,
-		Summary:   long,
-		Result:    []byte(`{"date":"2026-02-01"}`),
-	})
-	if err != nil {
-		t.Fatalf("SaveResult failed: %v", err)
+	if _, err := companionDB.ExecContext(ctx, `
+		INSERT INTO companion_memory_mode_state (conversation_id, mode, schema_version, last_processed_event, last_soft_event, last_evidence_event, updated_at)
+		VALUES (?, 'hybrid', 1, 1, 1, 1, '2026-02-01 10:00:00')
+	`, convID); err != nil {
+		t.Fatalf("insert mode state: %v", err)
 	}
-	_ = entry
+	if _, err := companionDB.ExecContext(ctx, `
+		INSERT INTO companion_hard_state_entries
+			(conversation_id, entry_type, key, value_json, status, source_event_id, confidence, created_at)
+		VALUES (?, 'preference', 'verbosity', ?, 'active', 1, 0.99, '2026-02-01 10:00:00')
+	`, convID, long); err != nil {
+		t.Fatalf("insert long hard state value: %v", err)
+	}
 
 	out, err := exec.Execute(ctx, "rlm_context_query", json.RawMessage(`{"semantic_query":"anything","limit":1}`))
 	if err != nil {

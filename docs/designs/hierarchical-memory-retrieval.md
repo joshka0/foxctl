@@ -1,6 +1,6 @@
 # Hierarchical Memory Retrieval for RLM Agent Loop
 
-## Status: Draft
+## Status: Historical Draft (Superseded by v2 Hybrid Runtime)
 ## Date: 2026-02-07
 ## Branch: feat/companion-dynamic-compress
 
@@ -9,6 +9,11 @@
 This design targets the v2 runtime context-builder/event-pipeline path.
 Phase 1/2 items that touch current `internal/engine/rlm_tools.go` are
 transitional options; the canonical target lives under `internal/v2/runtime/*`.
+
+Historical note: sections below reference earlier transitional storage terms
+(`companion_day_summaries`, `companion_history`, `companion_memory_state`).
+Current runtime behavior is hybrid-only and documented in
+`docs/general/companion-memory.md`.
 
 ---
 

@@ -421,6 +421,62 @@ jq -c 'select(.session_id == "01KFH..." and .operation | startswith("agent."))' 
 | `data.spawned_session` | string | Session ID of spawned agent |
 | `data.result_artifact` | string | CAS digest of agent output (for replay) |
 
+## Orchestration Events (Kanban)
+
+Symphony/Kanban runtime surfaces emit orchestration-focused wide events from web command handlers.
+
+### Operation Types
+
+| Operation | Command | Description |
+|-----------|---------|-------------|
+| `web.orchestration.board_get` | `orchestration/board-get` | Board query + lane/count summary retrieval |
+| `web.orchestration.board_card_get` | `orchestration/board-card-get` | Single card retrieval with lane/outcome metadata |
+| `web.orchestration.refresh` | `orchestration/refresh` | Projection replay/refresh enqueue |
+
+### SSE-visible fields (contract)
+
+These fields are forwarded by `internal/observability/sse_bridge.go` into GUI activity events:
+
+- always: top-level `trace_id`
+- when present in source event data: `data.request_id`, `data.lane`, `data.last_outcome`
+
+Operation-specific guarantees:
+
+- `web.orchestration.board_card_get` includes `data.request_id`, `data.lane`, and `data.last_outcome`.
+- `web.orchestration.board_get` includes `data.request_id` and board summary fields (for example `data.card_count`, `data.lane_filter`).
+- `web.orchestration.refresh` includes `data.request_id` and refresh ack fields (for example `data.queued`, `data.coalesced`, `data.idempotent`).
+
+### Additional orchestration fields (when present)
+
+- `data.issue_id`
+- `data.issue_identifier`
+- `data.policy_status`
+- `data.eligibility`
+- `data.queued`
+- `data.coalesced`
+- `data.idempotent`
+- `data.card_count`
+- `data.lane_filter`
+
+Example:
+
+```json
+{
+  "operation": "web.orchestration.board_card_get",
+  "command": "orchestration/board-card-get",
+  "trace_id": "01K...",
+  "status": "ok",
+  "data": {
+    "request_id": "req-card-001",
+    "issue_id": "issue-123",
+    "issue_identifier": "ABC-123",
+    "lane": "Running",
+    "last_outcome": "policy_denied",
+    "policy_status": "denied"
+  }
+}
+```
+
 ## Migration from Narrow Events
 
 The existing `SweGrepEvent` and other narrow events continue to work. Wide

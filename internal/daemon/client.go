@@ -11,6 +11,8 @@ import (
 	"time"
 )
 
+const EnvDaemonSocketPath = "AGENTCTL_DAEMON_SOCKET"
+
 // Client connects to the daemon over Unix socket.
 type Client struct {
 	socketPath string
@@ -264,6 +266,29 @@ func (c *Client) AgentKill(sessionID string) (*AgentKillResult, error) {
 	return &result, nil
 }
 
+// AgentAsk sends a message to a persistent agent and waits for its reply.
+func (c *Client) AgentAsk(params AgentAskParams) (*AgentAskResult, error) {
+	resp, err := c.call("agent.ask", params)
+	if err != nil {
+		return nil, err
+	}
+
+	if resp.Error != nil {
+		return nil, fmt.Errorf("%s: %s", resp.Error.Code, resp.Error.Message)
+	}
+
+	var result AgentAskResult
+	payload, err := marshalResult(resp.Result)
+	if err != nil {
+		return nil, err
+	}
+	if err := json.Unmarshal(payload, &result); err != nil {
+		return nil, fmt.Errorf("unmarshal result: %w", err)
+	}
+
+	return &result, nil
+}
+
 // AgentResume continues a previous agent session.
 func (c *Client) AgentResume(params AgentResumeParams) (*AgentResumeResult, error) {
 	resp, err := c.call("agent.resume", params)
@@ -393,6 +418,10 @@ func (c *Client) call(method string, params any) (*Response, error) {
 
 // SocketPath returns the daemon socket path.
 func SocketPath() string {
+	if socketPath := os.Getenv(EnvDaemonSocketPath); socketPath != "" {
+		return socketPath
+	}
+
 	// Use XDG_RUNTIME_DIR if available (Linux)
 	if runtimeDir := os.Getenv("XDG_RUNTIME_DIR"); runtimeDir != "" {
 		return filepath.Join(runtimeDir, "agentctl.sock")

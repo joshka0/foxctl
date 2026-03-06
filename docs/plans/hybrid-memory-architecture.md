@@ -1,5 +1,11 @@
 # Implementation Plan: Hybrid Memory Architecture for Companion/RLM Conversations
 
+## Status: Historical Plan (Superseded by v2 Hard-Cut)
+
+Historical note: this document contains transitional planning language for
+legacy compatibility. Current runtime behavior is hybrid-only and documented in
+`docs/general/companion-memory.md`.
+
 ## Problem Statement
 
 The current companion memory path (`companion_turns` + `companion_day_summaries` + `companion_history`) is lossy and hard to verify because L1/L2 are abstractive, tool-agnostic summaries. It also runs compression every turn even when no meaningful change occurred. The goal is to introduce a three-tier, evidence-aware memory model that is safer for long-running conversations and remains backward-compatible with existing storage and API behavior.
@@ -23,7 +29,7 @@ Adopt a hybrid architecture that layers a new trust model above the existing mem
   - SoftEpisodes (episodic narrative with deterministic boundaries)
   - EvidenceIndex (extractive snippets with retention policy)
   - AssumptionsLedger (canonical source for active/retracted beliefs)
-- Keep existing `RunPendingDailyCompression` and `RunWeeklyDistillation` for legacy conversations.
+- Superseded by v2 hard-cut: wrapper-based legacy compression paths were removed; runtime is hybrid-only.
 - Route context building to a new pipeline:
   1. HardState (materialized from entries) + active assumptions
   2. Last 1-3 relevant soft episodes
@@ -65,7 +71,7 @@ flowchart TD
   D --> EX[Evidence extractor + redaction]
   D --> AL[Assumptions ledger update]
   D --> STG[Staging queue if ambiguous]
-  C -->|legacy| H[RunPendingDailyCompression + RunWeeklyDistillation]
+  C -->|historical transitional branch (removed in v2)| H[RunPendingDailyCompression + RunWeeklyDistillation]
   E --> S[(companion_hard_state_entries)]
   EX --> EI[(companion_evidence_snippets)]
   AL --> AS[(companion_assumptions_ledger)]

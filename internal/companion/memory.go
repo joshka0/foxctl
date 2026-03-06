@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -20,23 +21,19 @@ import (
 	"github.com/jkatigb/agentctl/internal/storage"
 )
 
-// ConversationMemory manages progressive context for companion conversations.
+// ConversationMemory manages hybrid companion context for conversations.
 //
 // Unlike code-focused ShortTermMemory, this is optimized for:
 // - Short conversational turns (50-200 tokens)
-// - Time-based decay (today vivid, yesterday summarized, last week distilled)
-// - Relationship context (tone, topics, emotional continuity)
-//
-// Layers:
-// - L0 (Vivid): Recent turns from today, kept in full (hours view)
-// - L1 (Recent): Daily summaries for recent history (days view)
-// - L2 (History): Distilled long-term context (weeks/months view)
+// - Event-derived, trust-labeled context layers
+// - Relationship continuity (preferences, assumptions, episodic summaries)
 type ConversationMemory struct {
 	db                   *sql.DB
-	summarizer           ConversationSummarizer
+	llmSummarizer        *LLMSummarizer
 	memoryStore          storage.MemoryStore // Optional: for semantic search integration
 	workspace            string              // Workspace for semantic search scoping
 	embedder             *semantic.Embedder  // Optional: for generating embeddings on summaries
+	tokenCounter         TokenCounter
 	episodeSummaryRunner func(ctx context.Context, cfg engine.LLMChatConfig, input engine.EngineInput) (engine.EngineOutput, error)
 	config               MemoryConfig
 	clock                skilltest.Clock
@@ -125,41 +122,6 @@ type ConversationTurn struct {
 	ToolCalls      json.RawMessage `json:"tool_calls,omitempty"` // JSON array of tool calls made during this turn
 }
 
-// DaySummary represents a summarized day of conversation.
-type DaySummary struct {
-	ID             string    `json:"id"`
-	ConversationID string    `json:"conversation_id"`
-	Date           string    `json:"date"` // YYYY-MM-DD
-	TurnCount      int       `json:"turn_count"`
-	Summary        string    `json:"summary"`
-	Topics         []string  `json:"topics"`
-	Mood           string    `json:"mood,omitempty"` // Overall emotional tone
-	KeyMoments     []string  `json:"key_moments,omitempty"`
-	TokenCount     int       `json:"token_count"`
-	CreatedAt      time.Time `json:"created_at"`
-}
-
-// DistilledHistory represents the compressed long-term memory.
-type DistilledHistory struct {
-	ID               string    `json:"id"`
-	ConversationID   string    `json:"conversation_id"`
-	RelationshipNote string    `json:"relationship_note"` // How do we relate?
-	RecurringTopics  []string  `json:"recurring_topics"`
-	UserPreferences  []string  `json:"user_preferences"`
-	SharedMemories   []string  `json:"shared_memories"` // Key moments we've shared
-	LastDistilledAt  time.Time `json:"last_distilled_at"`
-	TokenCount       int       `json:"token_count"`
-}
-
-// ConversationSummarizer creates summaries from turns.
-type ConversationSummarizer interface {
-	// SummarizeDay creates a day summary from turns
-	SummarizeDay(ctx context.Context, turns []ConversationTurn) (*DaySummary, error)
-
-	// DistillHistory compresses multiple day summaries into distilled history
-	DistillHistory(ctx context.Context, existing *DistilledHistory, summaries []DaySummary) (*DistilledHistory, error)
-}
-
 // NewConversationMemory creates a new conversation memory store.
 // NewConversationMemory initializes conversation memory storage and schema.
 //
@@ -172,9 +134,10 @@ type ConversationSummarizer interface {
 // - Keywords: conversation_memory, schema, options, sqlite, summaries
 func NewConversationMemory(db *sql.DB, opts ...MemoryOption) (*ConversationMemory, error) {
 	m := &ConversationMemory{
-		db:     db,
-		config: DefaultMemoryConfig(),
-		clock:  skilltest.RealClock{},
+		db:           db,
+		config:       DefaultMemoryConfig(),
+		clock:        skilltest.RealClock{},
+		tokenCounter: NewTikTokenCounter(""),
 	}
 	m.idGenerator = func() string {
 		seq := atomic.AddUint64(&m.idSeq, 1)
@@ -197,6 +160,9 @@ func NewConversationMemory(db *sql.DB, opts ...MemoryOption) (*ConversationMemor
 			return fmt.Sprintf("%d-%d", m.clock.Now().UnixNano(), seq)
 		}
 	}
+	if m.tokenCounter == nil {
+		m.tokenCounter = NewHeuristicTokenCounter()
+	}
 
 	if err := m.ensureSchema(context.Background()); err != nil {
 		return nil, fmt.Errorf("ensure schema: %w", err)
@@ -215,10 +181,10 @@ func WithMemoryConfig(cfg MemoryConfig) MemoryOption {
 	}
 }
 
-// WithSummarizer sets the conversation summarizer.
-func WithSummarizer(s ConversationSummarizer) MemoryOption {
+// WithSummarizer sets the LLM summarizer used by hybrid episode summarization.
+func WithSummarizer(s *LLMSummarizer) MemoryOption {
 	return func(m *ConversationMemory) {
-		m.summarizer = s
+		m.llmSummarizer = s
 	}
 }
 
@@ -238,6 +204,15 @@ func WithMemoryStore(store storage.MemoryStore, workspace string) MemoryOption {
 func WithEmbedder(embedder *semantic.Embedder) MemoryOption {
 	return func(m *ConversationMemory) {
 		m.embedder = embedder
+	}
+}
+
+// WithTokenCounter sets the token counter used for companion memory budgeting.
+func WithTokenCounter(counter TokenCounter) MemoryOption {
+	return func(m *ConversationMemory) {
+		if counter != nil {
+			m.tokenCounter = counter
+		}
 	}
 }
 
@@ -299,37 +274,6 @@ func (m *ConversationMemory) ensureSchema(ctx context.Context) error {
 		-- SQLite doesn't have IF NOT EXISTS for ALTER, so we use a pragma check
 		-- This is safe because SQLite ignores duplicate column additions silently with this pattern
 
-		-- Day summaries (L1 storage)
-		CREATE TABLE IF NOT EXISTS companion_day_summaries (
-			id TEXT PRIMARY KEY,
-			conversation_id TEXT NOT NULL,
-			date TEXT NOT NULL,
-			turn_count INTEGER DEFAULT 0,
-			summary TEXT NOT NULL,
-			topics TEXT,
-			mood TEXT,
-			key_moments TEXT,
-			token_count INTEGER DEFAULT 0,
-			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-			UNIQUE(conversation_id, date)
-		);
-		CREATE INDEX IF NOT EXISTS idx_companion_summaries_conv_date
-		ON companion_day_summaries(conversation_id, date DESC);
-
-		-- Distilled history (L2 storage)
-		CREATE TABLE IF NOT EXISTS companion_history (
-			id TEXT PRIMARY KEY,
-			conversation_id TEXT NOT NULL UNIQUE,
-			relationship_note TEXT,
-			recurring_topics TEXT,
-			user_preferences TEXT,
-			shared_memories TEXT,
-			token_count INTEGER DEFAULT 0,
-			last_distilled_at TIMESTAMP,
-			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-			updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-		);
-
 		-- Soft-deleted conversations tracking
 		CREATE TABLE IF NOT EXISTS companion_deleted_conversations (
 			conversation_id TEXT PRIMARY KEY,
@@ -341,15 +285,6 @@ func (m *ConversationMemory) ensureSchema(ctx context.Context) error {
 			conversation_id TEXT PRIMARY KEY,
 			title TEXT NOT NULL,
 			agent_id TEXT,
-			updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-		);
-
-		-- Compression cursor tracking
-		CREATE TABLE IF NOT EXISTS companion_memory_state (
-			conversation_id TEXT PRIMARY KEY,
-			last_summarized_date TEXT,
-			last_distilled_date TEXT,
-			total_turns INTEGER DEFAULT 0,
 			updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 		);
 
@@ -553,14 +488,14 @@ func (m *ConversationMemory) ensureSchema(ctx context.Context) error {
 		CREATE INDEX IF NOT EXISTS idx_assumptions_conv
 		ON companion_assumptions_ledger(conversation_id, status);
 
-		-- Per-conversation mode tracking
-		CREATE TABLE IF NOT EXISTS companion_memory_mode_state (
-			conversation_id TEXT PRIMARY KEY,
-			mode TEXT NOT NULL DEFAULT 'legacy',
-			schema_version INTEGER NOT NULL DEFAULT 1,
-			last_processed_event INTEGER NOT NULL DEFAULT 0,
-			last_soft_event INTEGER NOT NULL DEFAULT 0,
-			last_evidence_event INTEGER NOT NULL DEFAULT 0,
+			-- Per-conversation mode tracking
+			CREATE TABLE IF NOT EXISTS companion_memory_mode_state (
+				conversation_id TEXT PRIMARY KEY,
+				mode TEXT NOT NULL DEFAULT 'hybrid',
+				schema_version INTEGER NOT NULL DEFAULT 1,
+				last_processed_event INTEGER NOT NULL DEFAULT 0,
+				last_soft_event INTEGER NOT NULL DEFAULT 0,
+				last_evidence_event INTEGER NOT NULL DEFAULT 0,
 			updated_at TEXT NOT NULL
 		);
 
@@ -625,6 +560,13 @@ func (m *ConversationMemory) ensureSchema(ctx context.Context) error {
 	// Migration: Add agent_id column to companion_conversation_titles
 	_, _ = m.db.ExecContext(ctx, `ALTER TABLE companion_conversation_titles ADD COLUMN agent_id TEXT`)
 	// Ignore error - column may already exist
+
+	// Migration: hard-cut legacy mode rows to hybrid.
+	_, _ = m.db.ExecContext(ctx, `
+		UPDATE companion_memory_mode_state
+		SET mode = 'hybrid', updated_at = CURRENT_TIMESTAMP
+		WHERE mode IS NULL OR lower(trim(mode)) <> 'hybrid'
+	`)
 
 	// Migration: Fix malformed Go time.Time.String() timestamps in companion_turns.
 	// Older versions stored created_at as e.g. "2026-01-24 19:15:42.503658 +0200 EET m=+102.170251751"
@@ -718,15 +660,15 @@ func (m *ConversationMemory) migrateTimestamps(ctx context.Context) error {
 }
 
 // AppendTurn adds a new turn to the conversation.
-// AppendTurn stores a conversation turn and updates memory state.
+// AppendTurn stores a conversation turn and emits a hybrid event.
 //
 // Index:
 // - Purpose: Persist a conversation turn and update totals
-// - Flow: normalize turn → insert turn → update memory state
-// - SideEffects: writes to companion_turns and companion_memory_state
-// - FailureModes: insert errors, state update errors
-// - Related: ConversationMemory.GetContext
-// - Keywords: append_turn, conversation_id, token_count, memory_state, tool_calls
+// - Flow: normalize turn → insert turn → insert hybrid event
+// - SideEffects: writes to companion_turns + companion_events(+derived hybrid tables)
+// - FailureModes: insert errors, hybrid bridge errors (logged)
+// - Related: ConversationMemory.GetHybridContext
+// - Keywords: append_turn, conversation_id, token_count, hybrid_event, tool_calls
 func (m *ConversationMemory) AppendTurn(ctx context.Context, turn ConversationTurn) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -739,7 +681,7 @@ func (m *ConversationMemory) AppendTurn(ctx context.Context, turn ConversationTu
 	}
 	turn.CreatedAt = turn.CreatedAt.UTC()
 	if turn.TokenCount == 0 {
-		turn.TokenCount = actormemory.EstimateTokens(turn.Content)
+		turn.TokenCount = m.countTokens(turn.Content)
 	}
 
 	// Format timestamp consistently for SQLite text comparison
@@ -752,122 +694,83 @@ func (m *ConversationMemory) AppendTurn(ctx context.Context, turn ConversationTu
 		return fmt.Errorf("insert turn: %w", err)
 	}
 
-	// Update state
-	_, err = m.db.ExecContext(ctx, `
-		INSERT INTO companion_memory_state (conversation_id, total_turns, updated_at)
-		VALUES ($1, 1, CURRENT_TIMESTAMP)
-		ON CONFLICT(conversation_id) DO UPDATE SET
-			total_turns = total_turns + 1,
-			updated_at = CURRENT_TIMESTAMP
-	`, turn.ConversationID)
-	if err != nil {
-		return err
+	// Bridge every turn to the hybrid event pipeline (v2 hard-cut: hybrid is the only mode).
+	eventType := EventTypeUserMessage
+	if turn.Role == "assistant" {
+		eventType = EventTypeAssistantMessage
 	}
-
-	// Bridge to hybrid event pipeline: if this conversation is in hybrid mode,
-	// also insert a companion_events row so the pipeline can process it.
-	mode, modeErr := m.GetMemoryMode(ctx, turn.ConversationID)
-	if modeErr == nil && mode == MemoryModeHybrid {
-		eventType := EventTypeUserMessage
-		if turn.Role == "assistant" {
-			eventType = EventTypeAssistantMessage
-		}
-		if evErr := m.InsertEvent(ctx, &ConversationEvent{
-			ConversationID: turn.ConversationID,
-			EventType:      eventType,
-			TurnID:         turn.ID,
-			Content:        turn.Content,
-			TokenCount:     turn.TokenCount,
-		}); evErr != nil {
+	event := &ConversationEvent{
+		ConversationID: turn.ConversationID,
+		EventType:      eventType,
+		TurnID:         turn.ID,
+		Content:        turn.Content,
+		TokenCount:     turn.TokenCount,
+	}
+	if evErr := m.InsertEvent(ctx, event); evErr != nil {
+		zerolog.Ctx(ctx).Warn().
+			Str("conversation_id", turn.ConversationID).
+			Str("turn_id", turn.ID).
+			Err(evErr).
+			Msg("hybrid bridge: failed to insert event")
+	} else if turn.Role == "user" && event.ID > 0 {
+		// Capture explicit preference signals immediately so they are available
+		// even if async pipeline work is delayed.
+		if prefErr := m.extractUserPreferencesFromTurn(ctx, turn.ConversationID, event.ID, turn.Content); prefErr != nil {
 			zerolog.Ctx(ctx).Warn().
 				Str("conversation_id", turn.ConversationID).
 				Str("turn_id", turn.ID).
-				Err(evErr).
-				Msg("hybrid bridge: failed to insert event")
+				Err(prefErr).
+				Msg("hybrid bridge: failed to extract preferences from turn")
 		}
 	}
 
 	return nil
 }
 
-// GetContext builds the memory context for an LLM prompt.
-// Returns formatted text combining L2 (history) + L1 (recent) + L0 (vivid)
-// under explicit per-layer token budgets.
-//
-// Temporal pyramid mapping:
-// - L0: last hours/day (full turns)
-// - L1: recent days (daily summaries)
-// - L2: weeks/months (distilled relationship context)
-//
-// Index:
-// - Purpose: Assemble layered, budgeted context for dynamic prompt construction
-// - Flow: load history → load summaries → load turns → apply budgets → format sections
-// - SideEffects: reads conversation data
-// - FailureModes: query errors yield partial context
-// - Related: getDistilledHistory, getRecentSummaries, getVividTurns
-// - Keywords: conversation_context, vivid_turns, summaries, history, token_budget
-func (m *ConversationMemory) GetContext(ctx context.Context, conversationID string) (string, error) {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-
-	var historyText string
-	var summaryText string
-	var turnText string
-
-	budget := m.LayerBudget()
-
-	// L2: Distilled history (oldest context, most compressed).
-	history, err := m.getDistilledHistory(ctx, conversationID)
-	if err == nil && history != nil {
-		historyText = trimToTokenBudget(m.formatHistory(history), budget.L2History, false)
+func (m *ConversationMemory) extractUserPreferencesFromTurn(ctx context.Context, conversationID string, sourceEventID int64, content string) error {
+	content = strings.TrimSpace(content)
+	if conversationID == "" || sourceEventID <= 0 || content == "" {
+		return nil
 	}
 
-	// L1: Recent summaries (days view).
-	summaries, err := m.getRecentSummaries(ctx, conversationID)
-	if err == nil && len(summaries) > 0 {
-		summaryText = trimToTokenBudget(m.formatSummaries(summaries), budget.L1Recent, false)
+	extractions := extractProfileClaims(content)
+	if len(extractions) == 0 {
+		return nil
 	}
 
-	// L0: Vivid turns (hours/day view, full content).
-	turns, err := m.getVividTurns(ctx, conversationID)
-	if err == nil && len(turns) > 0 {
-		trimmedTurns := trimTurnsToTokenBudget(turns, budget.L0Vivid)
-		turnText = trimToTokenBudget(m.formatTurns(trimmedTurns), budget.L0Vivid, true)
+	tx, err := m.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin preference extraction tx: %w", err)
+	}
+	defer tx.Rollback()
+
+	for _, entry := range extractions {
+		if entry.EntryType != EntryTypePreference {
+			continue
+		}
+		if err := m.persistDeterministicExtraction(ctx, tx, conversationID, sourceEventID, entry); err != nil {
+			return fmt.Errorf("persist preference extraction: %w", err)
+		}
 	}
 
-	historyText, summaryText, turnText = applyTotalTokenBudget(historyText, summaryText, turnText, budget.Total)
-
-	var parts []string
-	if historyText != "" {
-		parts = append(parts, "## Our History\n"+historyText)
-	}
-	if summaryText != "" {
-		parts = append(parts, "## Recent Conversations\n"+summaryText)
-	}
-	if turnText != "" {
-		parts = append(parts, "## Today's Conversation\n"+turnText)
+	if _, err := tx.ExecContext(ctx, `DELETE FROM companion_hard_state_cache WHERE conversation_id = $1`, conversationID); err != nil {
+		return fmt.Errorf("invalidate hard state cache: %w", err)
 	}
 
-	if len(parts) == 0 {
-		return "", nil
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit preference extraction tx: %w", err)
 	}
 
-	return strings.Join(parts, "\n\n---\n\n"), nil
+	return nil
 }
 
-// getVividTurns retrieves recent turns within the vivid window.
-func (m *ConversationMemory) getVividTurns(ctx context.Context, conversationID string) ([]ConversationTurn, error) {
-	cutoff := m.clock.Now().UTC().Add(-time.Duration(m.config.VividWindowHours) * time.Hour)
-	// Format as string matching the stored Go time.Time format for correct SQLite text comparison
-	cutoffStr := cutoff.Format("2006-01-02 15:04:05")
-
+func (m *ConversationMemory) getAllTurns(ctx context.Context, conversationID string) ([]ConversationTurn, error) {
 	rows, err := m.db.QueryContext(ctx, `
-		SELECT id, conversation_id, role, content, token_count, created_at
+		SELECT id, conversation_id, role, content, token_count, created_at, tool_calls
 		FROM companion_turns
-		WHERE conversation_id = $1 AND created_at >= $2
-		ORDER BY created_at DESC
-		LIMIT $3
-	`, conversationID, cutoffStr, m.config.VividMaxTurns)
+		WHERE conversation_id = $1
+		ORDER BY created_at ASC
+	`, conversationID)
 	if err != nil {
 		return nil, err
 	}
@@ -876,77 +779,33 @@ func (m *ConversationMemory) getVividTurns(ctx context.Context, conversationID s
 	var turns []ConversationTurn
 	for rows.Next() {
 		var t ConversationTurn
-		if err := rows.Scan(&t.ID, &t.ConversationID, &t.Role, &t.Content, &t.TokenCount, &t.CreatedAt); err != nil {
-			// Log but continue - partial results are acceptable for memory context
+		var toolCallsJSON sql.NullString
+		if err := rows.Scan(&t.ID, &t.ConversationID, &t.Role, &t.Content, &t.TokenCount, &t.CreatedAt, &toolCallsJSON); err != nil {
 			continue
 		}
+		if toolCallsJSON.Valid && strings.TrimSpace(toolCallsJSON.String) != "" {
+			t.ToolCalls = json.RawMessage(toolCallsJSON.String)
+		}
 		turns = append(turns, t)
-	}
-
-	// Reverse to chronological order
-	for i, j := 0, len(turns)-1; i < j; i, j = i+1, j-1 {
-		turns[i], turns[j] = turns[j], turns[i]
 	}
 
 	return turns, rows.Err()
 }
 
-// getRecentSummaries retrieves day summaries from the recent window.
-func (m *ConversationMemory) getRecentSummaries(ctx context.Context, conversationID string) ([]DaySummary, error) {
-	now := m.clock.Now().UTC()
-	cutoffDate := now.AddDate(0, 0, -m.config.RecentWindowDays).Format("2006-01-02")
-	todayDate := now.Format("2006-01-02")
-
-	rows, err := m.db.QueryContext(ctx, `
-		SELECT id, conversation_id, date, turn_count, summary, topics, mood, key_moments, token_count, created_at
-		FROM companion_day_summaries
-		WHERE conversation_id = $1 AND date >= $2 AND date <= $3
-		ORDER BY date DESC
-	`, conversationID, cutoffDate, todayDate) // Include today if a rolling summary exists.
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var summaries []DaySummary
-	for rows.Next() {
-		var s DaySummary
-		var topics, keyMoments sql.NullString
-		var mood sql.NullString
-		if err := rows.Scan(&s.ID, &s.ConversationID, &s.Date, &s.TurnCount, &s.Summary,
-			&topics, &mood, &keyMoments, &s.TokenCount, &s.CreatedAt); err != nil {
-			continue
-		}
-		if topics.Valid {
-			s.Topics = splitList(topics.String)
-		}
-		if mood.Valid {
-			s.Mood = mood.String
-		}
-		if keyMoments.Valid {
-			s.KeyMoments = splitList(keyMoments.String)
-		}
-		summaries = append(summaries, s)
-	}
-
-	return summaries, rows.Err()
-}
-
-// getDistilledHistory retrieves the distilled long-term history.
-func (m *ConversationMemory) getDistilledHistory(ctx context.Context, conversationID string) (*DistilledHistory, error) {
-	var h DistilledHistory
-	var recurringTopics, userPrefs, sharedMemories sql.NullString
-	var relNote sql.NullString
-	var lastDistilled sql.NullTime
-
+func (m *ConversationMemory) getMemoryModeState(ctx context.Context, conversationID string) (*MemoryModeState, error) {
+	var state MemoryModeState
 	err := m.db.QueryRowContext(ctx, `
-		SELECT id, conversation_id, relationship_note, recurring_topics, user_preferences,
-		       shared_memories, token_count, last_distilled_at
-		FROM companion_history
+		SELECT conversation_id, mode, schema_version, last_processed_event, last_soft_event, last_evidence_event, updated_at
+		FROM companion_memory_mode_state
 		WHERE conversation_id = $1
 	`, conversationID).Scan(
-		&h.ID, &h.ConversationID, &relNote, &recurringTopics, &userPrefs,
-		&sharedMemories, &h.TokenCount, &lastDistilled,
+		&state.ConversationID,
+		&state.Mode,
+		&state.SchemaVersion,
+		&state.LastProcessedEvent,
+		&state.LastSoftEvent,
+		&state.LastEvidenceEvent,
+		&state.UpdatedAt,
 	)
 	if err == sql.ErrNoRows {
 		return nil, nil
@@ -955,111 +814,35 @@ func (m *ConversationMemory) getDistilledHistory(ctx context.Context, conversati
 		return nil, err
 	}
 
-	if relNote.Valid {
-		h.RelationshipNote = relNote.String
-	}
-	if recurringTopics.Valid {
-		h.RecurringTopics = splitList(recurringTopics.String)
-	}
-	if userPrefs.Valid {
-		h.UserPreferences = splitList(userPrefs.String)
-	}
-	if sharedMemories.Valid {
-		h.SharedMemories = splitList(sharedMemories.String)
-	}
-	if lastDistilled.Valid {
-		h.LastDistilledAt = lastDistilled.Time
-	}
-
-	return &h, nil
+	state.Mode = MemoryModeHybrid
+	return &state, nil
 }
 
-// formatTurns formats vivid turns for the prompt.
-func (m *ConversationMemory) formatTurns(turns []ConversationTurn) string {
-	if len(turns) == 0 {
-		return ""
+func (m *ConversationMemory) countTokens(text string) int {
+	if strings.TrimSpace(text) == "" {
+		return 0
 	}
-
-	var parts []string
-	for _, t := range turns {
-		timeStr := t.CreatedAt.Format("3:04 PM")
-		role := "You"
-		if t.Role == "user" {
-			role = "Human"
-		}
-		parts = append(parts, fmt.Sprintf("[%s] %s: %s", timeStr, role, t.Content))
+	if m.tokenCounter == nil {
+		return actormemory.EstimateTokens(text)
 	}
-
-	return strings.Join(parts, "\n\n")
+	if count := m.tokenCounter.Count(text); count > 0 {
+		return count
+	}
+	return actormemory.EstimateTokens(text)
 }
 
-// formatSummaries formats day summaries for the prompt.
-func (m *ConversationMemory) formatSummaries(summaries []DaySummary) string {
-	if len(summaries) == 0 {
-		return ""
-	}
-
-	var parts []string
-	for _, s := range summaries {
-		// Parse date for friendly display
-		date, _ := time.Parse("2006-01-02", s.Date)
-		dateStr := date.Format("Monday, Jan 2")
-
-		part := fmt.Sprintf("**%s** (%d messages)", dateStr, s.TurnCount)
-		if s.Summary != "" {
-			part += "\n" + s.Summary
-		}
-		if len(s.Topics) > 0 {
-			part += "\nTopics: " + strings.Join(s.Topics, ", ")
-		}
-		if s.Mood != "" {
-			part += "\nMood: " + s.Mood
-		}
-
-		parts = append(parts, part)
-	}
-
-	return strings.Join(parts, "\n\n")
-}
-
-// formatHistory formats distilled history for the prompt.
-func (m *ConversationMemory) formatHistory(h *DistilledHistory) string {
-	if h == nil {
-		return ""
-	}
-
-	var parts []string
-
-	if h.RelationshipNote != "" {
-		parts = append(parts, h.RelationshipNote)
-	}
-	if len(h.RecurringTopics) > 0 {
-		parts = append(parts, "We often discuss: "+strings.Join(h.RecurringTopics, ", "))
-	}
-	if len(h.UserPreferences) > 0 {
-		parts = append(parts, "They prefer: "+strings.Join(h.UserPreferences, "; "))
-	}
-	if len(h.SharedMemories) > 0 {
-		parts = append(parts, "Key moments: "+strings.Join(h.SharedMemories, "; "))
-	}
-
-	return strings.Join(parts, "\n")
-}
-
-// CompressionOptions configures how conversation turns are compressed into summaries and history.
+// CompressionOptions configures hybrid maintenance behavior.
 type CompressionOptions struct {
-	// IncludeToday enables summarization for today's date as well. This is useful
-	// when a conversation grows long within a single day and L0 history injection
-	// is truncated.
+	// IncludeToday is retained for request-shape compatibility.
 	IncludeToday bool
 
-	// MaxDays bounds how many distinct dates will be processed. 0 means unlimited.
+	// MaxDays is retained for request-shape compatibility.
 	MaxDays int
 
-	// Force recomputes summaries even if an up-to-date summary already exists.
+	// Force is retained for request-shape compatibility.
 	Force bool
 
-	// Distill triggers L2 distillation after generating/updating day summaries.
+	// Distill triggers episode summary generation for pending soft episodes.
 	Distill bool
 }
 
@@ -1072,510 +855,117 @@ type CompressionResult struct {
 	Distilled      bool     `json:"distilled"`
 }
 
-// RunDayCompression summarizes all turns for a specific date (YYYY-MM-DD) into a day summary.
-// If a summary already exists, it is recomputed only when the day has new turns or when force is true.
-//
-// Index:
-// - Purpose: Produce an L1 day summary for a specific day of a conversation
-// - Flow: validate → resolve day boundaries → detect if update needed → load turns → (optionally trim) → summarize → upsert summary → update cursor
-// - SideEffects: may invoke LLM summarizer; writes companion_day_summaries and companion_memory_state
-// - FailureModes: missing summarizer, DB errors, LLM errors
-// - Related: ConversationMemory.RunPendingDailyCompression, ConversationMemory.CompressConversation
-// - Keywords: day_summary, L1, compression, backfill, conversation_memory
-func (m *ConversationMemory) RunDayCompression(ctx context.Context, conversationID, date string, force bool) (bool, error) {
+// RunDayCompression executes hybrid event processing for a conversation.
+func (m *ConversationMemory) RunDayCompression(ctx context.Context, conversationID, _ string, _ bool) (bool, error) {
 	if strings.TrimSpace(conversationID) == "" {
 		return false, fmt.Errorf("conversation_id is required")
 	}
-	date = strings.TrimSpace(date)
-	if date == "" {
-		return false, fmt.Errorf("date is required")
+	if err := m.EnsureHybridMode(ctx, conversationID); err != nil {
+		return false, err
 	}
-
-	// Check summarizer without holding lock for the whole operation.
-	m.mu.Lock()
-	if m.summarizer == nil {
-		m.mu.Unlock()
-		return false, fmt.Errorf("no summarizer configured")
+	if err := m.BuildHybridContextLayers(ctx, conversationID); err != nil {
+		return false, err
 	}
-	summarizer := m.summarizer
-	db := m.db
-	memoryStore := m.memoryStore
-	embedder := m.embedder
-	workspace := m.workspace
-	// Reuse RecentTokenBudget as a safe bound for summarizer input size.
-	inputBudget := m.config.RecentTokenBudget
-	m.mu.Unlock()
-
-	dayStart, err := time.ParseInLocation("2006-01-02", date, time.UTC)
-	if err != nil {
-		return false, fmt.Errorf("parse date %q: %w", date, err)
-	}
-	dayEnd := dayStart.AddDate(0, 0, 1)
-
-	startStr := dayStart.Format("2006-01-02 15:04:05")
-	endStr := dayEnd.Format("2006-01-02 15:04:05")
-
-	// Count turns for the day.
-	var totalTurns int
-	if err := db.QueryRowContext(ctx, `
-		SELECT COUNT(*) FROM companion_turns
-		WHERE conversation_id = $1 AND created_at >= $2 AND created_at < $3
-	`, conversationID, startStr, endStr).Scan(&totalTurns); err != nil {
-		return false, fmt.Errorf("count turns: %w", err)
-	}
-	if totalTurns == 0 {
-		return false, nil
-	}
-
-	// Check if existing summary is up-to-date.
-	var existingTurnCount int
-	err = db.QueryRowContext(ctx, `
-		SELECT turn_count FROM companion_day_summaries
-		WHERE conversation_id = $1 AND date = $2
-	`, conversationID, date).Scan(&existingTurnCount)
-	switch err {
-	case nil:
-		if !force && existingTurnCount >= totalTurns {
-			return false, nil
-		}
-	case sql.ErrNoRows:
-		// No summary yet - proceed.
-	default:
-		return false, fmt.Errorf("get existing summary: %w", err)
-	}
-
-	// Load turns (chronological).
-	rows, err := db.QueryContext(ctx, `
-		SELECT id, conversation_id, role, content, token_count, created_at
-		FROM companion_turns
-		WHERE conversation_id = $1 AND created_at >= $2 AND created_at < $3
-		ORDER BY created_at ASC
-	`, conversationID, startStr, endStr)
-	if err != nil {
-		return false, fmt.Errorf("query turns: %w", err)
-	}
-	defer rows.Close()
-
-	var turns []ConversationTurn
-	for rows.Next() {
-		var t ConversationTurn
-		if err := rows.Scan(&t.ID, &t.ConversationID, &t.Role, &t.Content, &t.TokenCount, &t.CreatedAt); err != nil {
-			continue
-		}
-		turns = append(turns, t)
-	}
-	if err := rows.Err(); err != nil {
-		return false, fmt.Errorf("scan turns: %w", err)
-	}
-	if len(turns) == 0 {
-		return false, nil
-	}
-
-	// Bound summarizer input size for long conversations by selecting a representative subset.
-	turnsForSummary := selectTurnsForSummaryBudget(turns, inputBudget)
-
-	// Create summary - this is the slow LLM call, done without holding lock.
-	summary, err := summarizer.SummarizeDay(ctx, turnsForSummary)
-	if err != nil {
-		return false, fmt.Errorf("summarize day: %w", err)
-	}
-
-	summary.ConversationID = conversationID
-	summary.Date = date
-	summary.ID = m.newID()
-	summary.TurnCount = totalTurns
-
-	// Upsert summary.
-	_, err = db.ExecContext(ctx, `
-		INSERT INTO companion_day_summaries
-		(id, conversation_id, date, turn_count, summary, topics, mood, key_moments, token_count, created_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, CURRENT_TIMESTAMP)
-		ON CONFLICT(conversation_id, date) DO UPDATE SET
-			turn_count = excluded.turn_count,
-			summary = excluded.summary,
-			topics = excluded.topics,
-			mood = excluded.mood,
-			key_moments = excluded.key_moments,
-			token_count = excluded.token_count
-	`, summary.ID, summary.ConversationID, summary.Date, summary.TurnCount,
-		summary.Summary, joinList(summary.Topics), summary.Mood,
-		joinList(summary.KeyMoments), summary.TokenCount)
-	if err != nil {
-		return false, fmt.Errorf("store summary: %w", err)
-	}
-
-	// Store in named_memory for semantic search (if configured).
-	if memoryStore != nil && workspace != "" {
-		// Build rich summary text for embedding.
-		summaryText := summary.Summary
-		if len(summary.Topics) > 0 {
-			summaryText += "\nTopics: " + strings.Join(summary.Topics, ", ")
-		}
-		if summary.Mood != "" {
-			summaryText += "\nMood: " + summary.Mood
-		}
-		if len(summary.KeyMoments) > 0 {
-			summaryText += "\nKey moments: " + strings.Join(summary.KeyMoments, "; ")
-		}
-
-		// Create result JSON for full data preservation.
-		resultData, _ := json.Marshal(summary)
-
-		// Memory name for storage and embedding update.
-		memoryName := fmt.Sprintf("companion:summary:%s:%s", conversationID, summary.Date)
-
-		_, saveErr := memoryStore.SaveResult(ctx, storage.MemorySaveOptions{
-			Name:      memoryName,
-			Type:      "companion_summary",
-			Workspace: workspace,
-			SessionID: conversationID, // Use conversation_id as session for filtering.
-			Summary:   summaryText,
-			Result:    resultData,
-		})
-		if saveErr != nil {
-			// Log but don't fail - companion memory table is primary; semantic search is supplementary.
-			_ = saveErr
-		}
-
-		// Generate and store embedding for vector search (if embedder configured).
-		if embedder != nil && saveErr == nil {
-			dateForDisplay := summary.Date
-			if parsedDate, parseErr := time.Parse("2006-01-02", summary.Date); parseErr == nil {
-				dateForDisplay = parsedDate.Format("Jan 2, 2006")
-			}
-			datedSummary := fmt.Sprintf("[%s] %s", dateForDisplay, summaryText)
-
-			if embedding, embErr := embedder.Embed(ctx, datedSummary); embErr == nil && len(embedding.Vec) > 0 {
-				_ = memoryStore.UpdateEmbedding(ctx, memoryName, workspace, embedding.Vec)
-			}
-		}
-	}
-
-	// Update cursor.
-	_, err = db.ExecContext(ctx, `
-		UPDATE companion_memory_state
-		SET last_summarized_date = $1, updated_at = CURRENT_TIMESTAMP
-		WHERE conversation_id = $2
-	`, date, conversationID)
-	if err != nil {
-		return true, err
-	}
-
 	return true, nil
 }
 
-// RunDailyCompression summarizes yesterday's turns into a day summary (best-effort).
-// It is safe to call repeatedly; it only recomputes when yesterday has new turns.
-func (m *ConversationMemory) RunDailyCompression(ctx context.Context, conversationID string) error {
-	yesterday := m.clock.Now().UTC().AddDate(0, 0, -1).Format("2006-01-02")
-	_, err := m.RunDayCompression(ctx, conversationID, yesterday, false)
-	return err
-}
-
-// RunPendingDailyCompression summarizes the most recent day prior to today that has turns but
-// no up-to-date day summary. This is useful for catch-up when a conversation spans days
-// without continuous daily compression runs.
-//
-// Index:
-// - Purpose: Backfill L1 day summaries opportunistically without unbounded work
-// - Flow: find most recent unsummarized day (< today) → run day compression
-// - SideEffects: may invoke LLM summarizer; writes day summary rows
-// - FailureModes: missing summarizer, DB errors, LLM errors
-// - Related: ConversationMemory.RunDayCompression, ConversationMemory.RunDailyCompression
-// - Keywords: pending_compression, backfill, day_summary, L1
-func (m *ConversationMemory) RunPendingDailyCompression(ctx context.Context, conversationID string) error {
-	if strings.TrimSpace(conversationID) == "" {
-		return fmt.Errorf("conversation_id is required")
-	}
-
-	// Check summarizer (fast path) without holding lock for the whole operation.
-	m.mu.RLock()
-	hasSummarizer := m.summarizer != nil
-	db := m.db
-	m.mu.RUnlock()
-	if !hasSummarizer {
-		return fmt.Errorf("no summarizer configured")
-	}
-
-	todayDate := m.clock.Now().UTC().Format("2006-01-02")
-	var pendingDate string
-	err := db.QueryRowContext(ctx, `
-		SELECT d.date
-		FROM (
-			SELECT substr(created_at, 1, 10) AS date, COUNT(*) AS turns
-			FROM companion_turns
-			WHERE conversation_id = $1 AND substr(created_at, 1, 10) < $2
-			GROUP BY date
-		) d
-		LEFT JOIN companion_day_summaries s
-			ON s.conversation_id = $3 AND s.date = d.date
-		WHERE s.id IS NULL OR s.turn_count < d.turns
-		ORDER BY d.date DESC
-		LIMIT 1
-	`, conversationID, todayDate, conversationID).Scan(&pendingDate)
-	if err == sql.ErrNoRows {
-		return nil
-	}
-	if err != nil {
-		return fmt.Errorf("query pending date: %w", err)
-	}
-
-	_, err = m.RunDayCompression(ctx, conversationID, pendingDate, false)
-	return err
-}
-
-// CompressConversation runs multi-day compression for a conversation, optionally including today,
-// and then runs weekly distillation (L2) when requested.
-//
-// Index:
-// - Purpose: Trigger L0→L1→L2 compaction on demand (manual or UI-triggered)
-// - Flow: list distinct turn dates → select up to MaxDays most-recent dates → run day compression per date → optionally distill
-// - SideEffects: may invoke LLM summarizer; writes summaries/history; keeps all rows (no pruning)
-// - FailureModes: missing summarizer, DB errors, LLM errors
-// - Related: ConversationMemory.RunDayCompression, ConversationMemory.RunWeeklyDistillation
-// - Keywords: compress, L0, L1, L2, summaries, distillation
+// CompressConversation executes v2 hybrid processing for a conversation.
 func (m *ConversationMemory) CompressConversation(ctx context.Context, conversationID string, opts CompressionOptions) (*CompressionResult, error) {
 	if strings.TrimSpace(conversationID) == "" {
 		return nil, fmt.Errorf("conversation_id is required")
 	}
-
-	// Check summarizer (fast path).
-	m.mu.RLock()
-	hasSummarizer := m.summarizer != nil
-	db := m.db
-	m.mu.RUnlock()
-	if !hasSummarizer {
-		return nil, fmt.Errorf("no summarizer configured")
+	res := &CompressionResult{
+		ConversationID: conversationID,
+		ProcessedDates: []string{m.clock.Now().UTC().Format("2006-01-02")},
 	}
-
-	today := m.clock.Now().UTC().Format("2006-01-02")
-
-	rows, err := db.QueryContext(ctx, `
-		SELECT DISTINCT substr(created_at, 1, 10) AS date
-		FROM companion_turns
-		WHERE conversation_id = $1
-		ORDER BY date DESC
-	`, conversationID)
+	ran, err := m.RunDayCompression(ctx, conversationID, "", false)
 	if err != nil {
-		return nil, fmt.Errorf("list turn dates: %w", err)
+		return res, err
 	}
-	defer rows.Close()
-
-	var dates []string
-	for rows.Next() {
-		var d string
-		if err := rows.Scan(&d); err == nil && d != "" {
-			dates = append(dates, d)
-		}
+	if ran {
+		res.Summarized = 1
 	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("scan dates: %w", err)
-	}
-
-	res := &CompressionResult{ConversationID: conversationID}
-
-	// Select up to MaxDays most-recent distinct dates (optionally excluding today).
-	var selected []string
-	for _, d := range dates {
-		if !opts.IncludeToday && d == today {
-			continue
-		}
-		selected = append(selected, d)
-	}
-	if opts.MaxDays > 0 && len(selected) > opts.MaxDays {
-		selected = selected[:opts.MaxDays]
-	}
-
-	for _, d := range selected {
-
-		ran, err := m.RunDayCompression(ctx, conversationID, d, opts.Force)
-		if err != nil {
-			return res, err
-		}
-		res.ProcessedDates = append(res.ProcessedDates, d)
-		if ran {
-			res.Summarized++
-		} else {
-			res.Skipped++
-		}
-	}
-
 	if opts.Distill {
-		if err := m.RunWeeklyDistillation(ctx, conversationID); err != nil {
+		if err := m.RunEpisodeSummaryPass(ctx, conversationID); err != nil {
 			return res, err
 		}
 		res.Distilled = true
 	}
-
 	return res, nil
 }
 
-// RunWeeklyDistillation distills old summaries into long-term history.
-// Should be called weekly or when summaries exceed the recent window.
-func (m *ConversationMemory) RunWeeklyDistillation(ctx context.Context, conversationID string) error {
-	if m.summarizer == nil {
-		return fmt.Errorf("no summarizer configured")
+// RunEpisodeSummaryPass performs a hybrid episode-summary pass on pending episodes.
+func (m *ConversationMemory) RunEpisodeSummaryPass(ctx context.Context, conversationID string) error {
+	if strings.TrimSpace(conversationID) == "" {
+		return fmt.Errorf("conversation_id is required")
+	}
+	if err := m.EnsureHybridMode(ctx, conversationID); err != nil {
+		return err
+	}
+	if err := m.BuildHybridContextLayers(ctx, conversationID); err != nil {
+		return err
 	}
 
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	nowUTC := m.clock.Now().UTC()
-
-	// Distill day summaries that have moved out of the recent window. We keep all L1 summaries
-	// (and all turns) indefinitely; distillation is additive, so we only distill summaries that
-	// haven't been distilled yet.
-	cutoffDate := nowUTC.AddDate(0, 0, -m.config.RecentWindowDays).Format("2006-01-02")
-
-	// Read last distilled cursor (YYYY-MM-DD). Empty means "never distilled".
-	lastDistilledDate := "0000-00-00"
-	var lastDistilled sql.NullString
-	err := m.db.QueryRowContext(ctx, `
-		SELECT last_distilled_date
-		FROM companion_memory_state
-		WHERE conversation_id = $1
-	`, conversationID).Scan(&lastDistilled)
-	if err != nil && err != sql.ErrNoRows {
-		return fmt.Errorf("get last distilled cursor: %w", err)
-	}
-	if lastDistilled.Valid && strings.TrimSpace(lastDistilled.String) != "" {
-		lastDistilledDate = strings.TrimSpace(lastDistilled.String)
+	m.mu.RLock()
+	llmSummarizer := m.llmSummarizer
+	m.mu.RUnlock()
+	if llmSummarizer == nil {
+		return nil
 	}
 
 	rows, err := m.db.QueryContext(ctx, `
-		SELECT id, conversation_id, date, turn_count, summary, topics, mood, key_moments, token_count, created_at
-		FROM companion_day_summaries
-		WHERE conversation_id = $1 AND date > $2 AND date < $3
-		ORDER BY date ASC
-	`, conversationID, lastDistilledDate, cutoffDate)
+		SELECT id, start_event_id, end_event_id
+		FROM companion_soft_episodes
+		WHERE conversation_id = $1 AND needs_summary = 1
+		ORDER BY id ASC
+		LIMIT 50
+	`, conversationID)
 	if err != nil {
-		return err
+		return fmt.Errorf("query pending episode summaries: %w", err)
 	}
 	defer rows.Close()
 
-	var summaries []DaySummary
+	type episodeRow struct {
+		id           int64
+		startEventID int64
+		endEventID   int64
+	}
+	var episodes []episodeRow
 	for rows.Next() {
-		var s DaySummary
-		var topics, keyMoments, mood sql.NullString
-		if err := rows.Scan(&s.ID, &s.ConversationID, &s.Date, &s.TurnCount, &s.Summary,
-			&topics, &mood, &keyMoments, &s.TokenCount, &s.CreatedAt); err != nil {
+		var e episodeRow
+		if scanErr := rows.Scan(&e.id, &e.startEventID, &e.endEventID); scanErr != nil {
+			return fmt.Errorf("scan pending episode summaries: %w", scanErr)
+		}
+		episodes = append(episodes, e)
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("iterate pending episode summaries: %w", err)
+	}
+
+	for _, ep := range episodes {
+		summary, tokenCount, sumErr := m.SummarizeEpisode(ctx, conversationID, ep.id, ep.startEventID, ep.endEventID)
+		if sumErr != nil {
+			zerolog.Ctx(ctx).Warn().
+				Str("conversation_id", conversationID).
+				Int64("episode_id", ep.id).
+				Err(sumErr).
+				Msg("hybrid episode summary pass: episode summary failed")
 			continue
 		}
-		if topics.Valid {
-			s.Topics = splitList(topics.String)
-		}
-		if mood.Valid {
-			s.Mood = mood.String
-		}
-		if keyMoments.Valid {
-			s.KeyMoments = splitList(keyMoments.String)
-		}
-		summaries = append(summaries, s)
-	}
-
-	if len(summaries) == 0 {
-		return nil // Nothing to distill
-	}
-
-	// Track cursor for incremental distillation (we keep summaries, so we only advance by date).
-	maxDistilledDate := summaries[len(summaries)-1].Date
-
-	// Get existing history
-	existing, _ := m.getDistilledHistory(ctx, conversationID)
-
-	// Distill
-	history, err := m.summarizer.DistillHistory(ctx, existing, summaries)
-	if err != nil {
-		return fmt.Errorf("distill history: %w", err)
-	}
-
-	history.ConversationID = conversationID
-	if history.ID == "" {
-		history.ID = m.newID()
-	}
-	history.LastDistilledAt = nowUTC
-
-	// Upsert history
-	_, err = m.db.ExecContext(ctx, `
-		INSERT INTO companion_history
-		(id, conversation_id, relationship_note, recurring_topics, user_preferences,
-		 shared_memories, token_count, last_distilled_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, CURRENT_TIMESTAMP)
-		ON CONFLICT(conversation_id) DO UPDATE SET
-			relationship_note = excluded.relationship_note,
-			recurring_topics = excluded.recurring_topics,
-			user_preferences = excluded.user_preferences,
-			shared_memories = excluded.shared_memories,
-			token_count = excluded.token_count,
-			last_distilled_at = excluded.last_distilled_at,
-			updated_at = CURRENT_TIMESTAMP
-	`, history.ID, history.ConversationID, history.RelationshipNote,
-		joinList(history.RecurringTopics), joinList(history.UserPreferences),
-		joinList(history.SharedMemories), history.TokenCount, history.LastDistilledAt)
-	if err != nil {
-		return fmt.Errorf("store history: %w", err)
-	}
-
-	// Store in named_memory for semantic search (if memory store configured)
-	if m.memoryStore != nil && m.workspace != "" {
-		// Build rich summary text for embedding
-		var historyParts []string
-		if history.RelationshipNote != "" {
-			historyParts = append(historyParts, history.RelationshipNote)
-		}
-		if len(history.RecurringTopics) > 0 {
-			historyParts = append(historyParts, "Recurring topics: "+strings.Join(history.RecurringTopics, ", "))
-		}
-		if len(history.UserPreferences) > 0 {
-			historyParts = append(historyParts, "User preferences: "+strings.Join(history.UserPreferences, "; "))
-		}
-		if len(history.SharedMemories) > 0 {
-			historyParts = append(historyParts, "Key memories: "+strings.Join(history.SharedMemories, "; "))
-		}
-
-		summaryText := strings.Join(historyParts, "\n")
-
-		// Create result JSON for full data preservation
-		resultData, _ := json.Marshal(history)
-
-		// Memory name for storage and embedding update
-		memoryName := fmt.Sprintf("companion:history:%s", conversationID)
-
-		_, saveErr := m.memoryStore.SaveResult(ctx, storage.MemorySaveOptions{
-			Name:      memoryName,
-			Type:      "companion_history",
-			Workspace: m.workspace,
-			SessionID: conversationID, // Use conversation_id as session for filtering
-			Summary:   summaryText,
-			Result:    resultData,
-		})
-		if saveErr != nil {
-			// Log but don't fail - companion memory table is primary
-			_ = saveErr
-		}
-
-		// Generate and store embedding for vector search (if embedder configured)
-		// Use dated format for temporal context in searches
-		if m.embedder != nil && saveErr == nil {
-			dateStr := nowUTC.Format("Jan 2, 2006")
-			datedSummary := fmt.Sprintf("[%s] Distilled history: %s", dateStr, summaryText)
-
-			if embedding, embErr := m.embedder.Embed(ctx, datedSummary); embErr == nil && len(embedding.Vec) > 0 {
-				_ = m.memoryStore.UpdateEmbedding(ctx, memoryName, m.workspace, embedding.Vec)
-			}
+		if _, updateErr := m.db.ExecContext(ctx, `
+			UPDATE companion_soft_episodes
+			SET summary = $1, needs_summary = 0, token_count = $2
+			WHERE id = $3
+		`, summary, tokenCount, ep.id); updateErr != nil {
+			zerolog.Ctx(ctx).Warn().
+				Str("conversation_id", conversationID).
+				Int64("episode_id", ep.id).
+				Err(updateErr).
+				Msg("hybrid episode summary pass: failed to persist episode summary")
 		}
 	}
 
-	// Update cursor for incremental distillation (keep summaries/turns indefinitely).
-	_, err = m.db.ExecContext(ctx, `
-		INSERT INTO companion_memory_state (conversation_id, last_distilled_date, updated_at)
-		VALUES ($1, $2, CURRENT_TIMESTAMP)
-		ON CONFLICT(conversation_id) DO UPDATE SET
-			last_distilled_date = excluded.last_distilled_date,
-			updated_at = CURRENT_TIMESTAMP
-	`, conversationID, maxDistilledDate)
-
-	return err
+	return nil
 }
 
 // GetStats returns memory statistics for a conversation.
@@ -1592,36 +982,65 @@ func (m *ConversationMemory) GetStats(ctx context.Context, conversationID string
 		return nil, fmt.Errorf("count turns: %w", err)
 	}
 
-	// Count summaries
+	// Count events
 	if err := m.db.QueryRowContext(ctx, `
-		SELECT COUNT(*) FROM companion_day_summaries WHERE conversation_id = $1
-	`, conversationID).Scan(&stats.DaySummaries); err != nil {
-		return nil, fmt.Errorf("count summaries: %w", err)
+		SELECT COUNT(*) FROM companion_events WHERE conversation_id = $1
+	`, conversationID).Scan(&stats.EventCount); err != nil {
+		return nil, fmt.Errorf("count events: %w", err)
 	}
 
-	// Check if has history
-	var historyCount int
 	if err := m.db.QueryRowContext(ctx, `
-		SELECT COUNT(*) FROM companion_history WHERE conversation_id = $1
-	`, conversationID).Scan(&historyCount); err != nil {
-		return nil, fmt.Errorf("count history: %w", err)
+		SELECT COUNT(*) FROM companion_hard_state_entries WHERE conversation_id = $1
+	`, conversationID).Scan(&stats.HardStateCount); err != nil {
+		return nil, fmt.Errorf("count hard state entries: %w", err)
 	}
-	stats.HasDistilledHistory = historyCount > 0
 
-	// Get state (may not exist, so sql.ErrNoRows is acceptable)
-	var lastSummarized, lastDistilled sql.NullString
 	err := m.db.QueryRowContext(ctx, `
-		SELECT last_summarized_date, last_distilled_date
-		FROM companion_memory_state WHERE conversation_id = $1
-	`, conversationID).Scan(&lastSummarized, &lastDistilled)
+		SELECT COUNT(*) FROM companion_soft_episodes WHERE conversation_id = $1 AND deleted_at IS NULL
+	`, conversationID).Scan(&stats.EpisodeCount)
+	if err != nil {
+		return nil, fmt.Errorf("count episodes: %w", err)
+	}
+
+	err = m.db.QueryRowContext(ctx, `
+		SELECT COUNT(*) FROM companion_evidence_snippets WHERE conversation_id = $1
+	`, conversationID).Scan(&stats.EvidenceCount)
+	if err != nil {
+		return nil, fmt.Errorf("count evidence snippets: %w", err)
+	}
+
+	err = m.db.QueryRowContext(ctx, `
+		SELECT COUNT(*) FROM companion_assumptions_ledger WHERE conversation_id = $1
+	`, conversationID).Scan(&stats.AssumptionCount)
+	if err != nil {
+		return nil, fmt.Errorf("count assumptions: %w", err)
+	}
+
+	// Mode state is optional for brand new conversations.
+	var state MemoryModeState
+	err = m.db.QueryRowContext(ctx, `
+		SELECT conversation_id, mode, schema_version, last_processed_event, last_soft_event, last_evidence_event, updated_at
+		FROM companion_memory_mode_state
+		WHERE conversation_id = $1
+	`, conversationID).Scan(
+		&state.ConversationID,
+		&state.Mode,
+		&state.SchemaVersion,
+		&state.LastProcessedEvent,
+		&state.LastSoftEvent,
+		&state.LastEvidenceEvent,
+		&state.UpdatedAt,
+	)
 	if err != nil && err != sql.ErrNoRows {
-		return nil, fmt.Errorf("get memory state: %w", err)
+		return nil, fmt.Errorf("get memory mode state: %w", err)
 	}
-	if lastSummarized.Valid {
-		stats.LastSummarizedDate = lastSummarized.String
-	}
-	if lastDistilled.Valid {
-		stats.LastDistilledDate = lastDistilled.String
+	if err == nil {
+		stats.Mode = MemoryModeHybrid
+		stats.SchemaVersion = state.SchemaVersion
+		stats.LastProcessedEvent = state.LastProcessedEvent
+		stats.LastSoftEvent = state.LastSoftEvent
+		stats.LastEvidenceEvent = state.LastEvidenceEvent
+		stats.UpdatedAt = state.UpdatedAt
 	}
 
 	return stats, nil
@@ -1629,12 +1048,19 @@ func (m *ConversationMemory) GetStats(ctx context.Context, conversationID string
 
 // MemoryStats contains statistics about conversation memory.
 type MemoryStats struct {
-	ConversationID      string `json:"conversation_id"`
-	TotalTurns          int    `json:"total_turns"`
-	DaySummaries        int    `json:"day_summaries"`
-	HasDistilledHistory bool   `json:"has_distilled_history"`
-	LastSummarizedDate  string `json:"last_summarized_date,omitempty"`
-	LastDistilledDate   string `json:"last_distilled_date,omitempty"`
+	ConversationID     string `json:"conversation_id"`
+	Mode               string `json:"mode,omitempty"`
+	SchemaVersion      int    `json:"schema_version,omitempty"`
+	TotalTurns         int    `json:"total_turns"`
+	EventCount         int    `json:"event_count"`
+	HardStateCount     int    `json:"hard_state_count"`
+	EpisodeCount       int    `json:"episode_count"`
+	EvidenceCount      int    `json:"evidence_count"`
+	AssumptionCount    int    `json:"assumption_count"`
+	LastProcessedEvent int64  `json:"last_processed_event,omitempty"`
+	LastSoftEvent      int64  `json:"last_soft_event,omitempty"`
+	LastEvidenceEvent  int64  `json:"last_evidence_event,omitempty"`
+	UpdatedAt          string `json:"updated_at,omitempty"`
 }
 
 // Clear removes all memory for a conversation.
@@ -1651,17 +1077,8 @@ func (m *ConversationMemory) Clear(ctx context.Context, conversationID string) e
 	if _, err := tx.ExecContext(ctx, `DELETE FROM companion_turns WHERE conversation_id = $1`, conversationID); err != nil {
 		return err
 	}
-	if _, err := tx.ExecContext(ctx, `DELETE FROM companion_day_summaries WHERE conversation_id = $1`, conversationID); err != nil {
-		return err
-	}
-	if _, err := tx.ExecContext(ctx, `DELETE FROM companion_history WHERE conversation_id = $1`, conversationID); err != nil {
-		return err
-	}
-	if _, err := tx.ExecContext(ctx, `DELETE FROM companion_memory_state WHERE conversation_id = $1`, conversationID); err != nil {
-		return err
-	}
 
-	// Clean up hybrid memory tables (best-effort; tables may not exist if hybrid mode was never activated)
+	// Clean up hybrid memory tables.
 	hybridTables := []string{
 		"companion_events",
 		"companion_hard_state_entries",
@@ -1676,9 +1093,7 @@ func (m *ConversationMemory) Clear(ctx context.Context, conversationID string) e
 	}
 	for _, table := range hybridTables {
 		if _, err := tx.ExecContext(ctx, fmt.Sprintf(`DELETE FROM %s WHERE conversation_id = $1`, table), conversationID); err != nil {
-			if !strings.Contains(err.Error(), "no such table") {
-				return fmt.Errorf("clear %s: %w", table, err)
-			}
+			return fmt.Errorf("clear %s: %w", table, err)
 		}
 	}
 
@@ -1726,93 +1141,6 @@ func trimTurnsToTokenBudget(turns []ConversationTurn, budget int) []Conversation
 	return kept
 }
 
-// selectTurnsForSummaryBudget returns a representative subset of turns that fits within a token budget.
-//
-// For long days, we prefer keeping a slice from the beginning and end of the day so the summary
-// can capture both how the conversation started and where it ended.
-func selectTurnsForSummaryBudget(turns []ConversationTurn, budget int) []ConversationTurn {
-	if len(turns) == 0 || budget <= 0 {
-		return turns
-	}
-
-	// Fast path: fits as-is.
-	total := 0
-	for _, t := range turns {
-		tokens := t.TokenCount
-		if tokens == 0 {
-			tokens = actormemory.EstimateTokens(t.Content)
-		}
-		total += tokens
-		if total > budget {
-			break
-		}
-	}
-	if total <= budget {
-		return turns
-	}
-
-	headBudget := budget / 2
-	tailBudget := budget - headBudget
-
-	var head []ConversationTurn
-	headTokens := 0
-	i := 0
-	for i < len(turns) {
-		tokens := turns[i].TokenCount
-		if tokens == 0 {
-			tokens = actormemory.EstimateTokens(turns[i].Content)
-		}
-		if headTokens+tokens > headBudget && headTokens > 0 {
-			break
-		}
-		headTokens += tokens
-		head = append(head, turns[i])
-		i++
-		if headTokens >= headBudget {
-			break
-		}
-	}
-
-	var tail []ConversationTurn
-	tailTokens := 0
-	j := len(turns) - 1
-	for j >= i {
-		tokens := turns[j].TokenCount
-		if tokens == 0 {
-			tokens = actormemory.EstimateTokens(turns[j].Content)
-		}
-		if tailTokens+tokens > tailBudget && tailTokens > 0 {
-			break
-		}
-		tailTokens += tokens
-		tail = append(tail, turns[j])
-		j--
-		if tailTokens >= tailBudget {
-			break
-		}
-	}
-
-	// Restore chronological order for the tail slice.
-	for a, b := 0, len(tail)-1; a < b; a, b = a+1, b-1 {
-		tail[a], tail[b] = tail[b], tail[a]
-	}
-
-	// Fallback: always return something.
-	if len(head) == 0 && len(tail) == 0 {
-		return nil
-	}
-	if len(head) == 0 {
-		return tail
-	}
-	if len(tail) == 0 {
-		return head
-	}
-
-	out := append([]ConversationTurn{}, head...)
-	out = append(out, tail...)
-	return out
-}
-
 func trimToTokenBudget(text string, budget int, keepTail bool) string {
 	if text == "" || budget <= 0 {
 		return text
@@ -1857,43 +1185,1083 @@ func trimTextWithBudget(text string, budget *actormemory.TokenBudget, keepTail b
 	return trimmed
 }
 
-func splitList(s string) []string {
-	if s == "" {
-		return nil
-	}
-	return strings.Split(s, "|||")
+// MemoryBackupPayload is a portable backup format for companion memory state.
+type MemoryBackupPayload struct {
+	ConversationID   string                   `json:"conversation_id"`
+	Turns            []ConversationTurn       `json:"turns"`
+	Events           []ConversationEvent      `json:"events,omitempty"`
+	HardStateEntries []HardStateEntry         `json:"hard_state_entries,omitempty"`
+	SoftEpisodes     []SoftEpisode            `json:"soft_episodes,omitempty"`
+	EvidenceSnippets []EvidenceSnippet        `json:"evidence_snippets,omitempty"`
+	Assumptions      []Assumption             `json:"assumptions,omitempty"`
+	ModeState        *MemoryModeState         `json:"mode_state,omitempty"`
+	OpenEpisode      *OpenEpisodeState        `json:"open_episode,omitempty"`
+	OpenToolRuns     []OpenToolRun            `json:"open_tool_runs,omitempty"`
+	ExtractionStage  []ExtractionStagingEntry `json:"extraction_staging,omitempty"`
+	HardStateCache   *HardStateCache          `json:"hard_state_cache,omitempty"`
 }
 
-func joinList(items []string) string {
-	return strings.Join(items, "|||")
-}
-
-// Export returns the full memory state as JSON for debugging.
+// Export returns the full conversation memory state as JSON for backup/debugging.
 func (m *ConversationMemory) Export(ctx context.Context, conversationID string) (json.RawMessage, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
-	export := map[string]interface{}{
-		"conversation_id": conversationID,
+	backup := MemoryBackupPayload{
+		ConversationID: conversationID,
 	}
 
-	// Get turns
-	turns, _ := m.getVividTurns(ctx, conversationID)
-	export["vivid_turns"] = turns
+	turns, err := m.getAllTurns(ctx, conversationID)
+	if err != nil {
+		return nil, fmt.Errorf("export turns: %w", err)
+	}
+	backup.Turns = turns
 
-	// Get summaries
-	summaries, _ := m.getRecentSummaries(ctx, conversationID)
-	export["day_summaries"] = summaries
+	eventRows, err := m.db.QueryContext(ctx, `
+		SELECT id, conversation_id, event_type, turn_id, tool_name, tool_run_id, parent_tool_call_id,
+		       payload_json, payload_ref, token_count, content_hash, created_at
+		FROM companion_events
+		WHERE conversation_id = $1
+		ORDER BY id ASC
+	`, conversationID)
+	if err != nil {
+		return nil, fmt.Errorf("export events: %w", err)
+	}
+	for eventRows.Next() {
+		var (
+			e                ConversationEvent
+			turnID           sql.NullString
+			toolName         sql.NullString
+			toolRunID        sql.NullString
+			parentToolCallID sql.NullInt64
+			payloadJSON      sql.NullString
+			payloadRef       sql.NullString
+			tokenCount       sql.NullInt64
+			contentHash      sql.NullString
+		)
+		if err := eventRows.Scan(
+			&e.ID,
+			&e.ConversationID,
+			&e.EventType,
+			&turnID,
+			&toolName,
+			&toolRunID,
+			&parentToolCallID,
+			&payloadJSON,
+			&payloadRef,
+			&tokenCount,
+			&contentHash,
+			&e.CreatedAt,
+		); err != nil {
+			return nil, fmt.Errorf("scan export event: %w", err)
+		}
+		if turnID.Valid {
+			e.TurnID = turnID.String
+		}
+		if toolName.Valid {
+			e.ToolName = toolName.String
+		}
+		if toolRunID.Valid {
+			e.ToolRunID = toolRunID.String
+		}
+		if parentToolCallID.Valid {
+			e.ParentToolCallID = parentToolCallID.Int64
+		}
+		if payloadJSON.Valid {
+			e.PayloadJSON = payloadJSON.String
+		}
+		if payloadRef.Valid {
+			e.PayloadRef = payloadRef.String
+		}
+		if tokenCount.Valid {
+			e.TokenCount = int(tokenCount.Int64)
+		}
+		if contentHash.Valid {
+			e.ContentHash = contentHash.String
+		}
+		backup.Events = append(backup.Events, e)
+	}
+	if err := eventRows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate export events: %w", err)
+	}
+	_ = eventRows.Close()
 
-	// Get history
-	history, _ := m.getDistilledHistory(ctx, conversationID)
-	export["distilled_history"] = history
+	hardRows, err := m.db.QueryContext(ctx, `
+		SELECT id, conversation_id, entry_type, key, value_json, status, source_event_id, confidence, metadata_json, supersedes, created_at
+		FROM companion_hard_state_entries
+		WHERE conversation_id = $1
+		ORDER BY id ASC
+	`, conversationID)
+	if err != nil {
+		return nil, fmt.Errorf("export hard state entries: %w", err)
+	}
+	for hardRows.Next() {
+		var (
+			entry      HardStateEntry
+			metadata   sql.NullString
+			supersedes sql.NullInt64
+		)
+		if err := hardRows.Scan(
+			&entry.ID,
+			&entry.ConversationID,
+			&entry.EntryType,
+			&entry.Key,
+			&entry.ValueJSON,
+			&entry.Status,
+			&entry.SourceEventID,
+			&entry.Confidence,
+			&metadata,
+			&supersedes,
+			&entry.CreatedAt,
+		); err != nil {
+			return nil, fmt.Errorf("scan export hard state entry: %w", err)
+		}
+		if metadata.Valid {
+			entry.MetadataJSON = strPtr(metadata.String)
+		}
+		if supersedes.Valid {
+			entry.Supersedes = int64Ptr(supersedes.Int64)
+		}
+		backup.HardStateEntries = append(backup.HardStateEntries, entry)
+	}
+	if err := hardRows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate export hard state entries: %w", err)
+	}
+	_ = hardRows.Close()
 
-	// Get stats
-	stats, _ := m.GetStats(ctx, conversationID)
-	export["stats"] = stats
+	episodeRows, err := m.db.QueryContext(ctx, `
+		SELECT id, conversation_id, episode_type, start_event_id, end_event_id, summary, needs_summary,
+		       assumption_ids, token_count, boundary_hash, created_at, deleted_at
+		FROM companion_soft_episodes
+		WHERE conversation_id = $1
+		ORDER BY id ASC
+	`, conversationID)
+	if err != nil {
+		return nil, fmt.Errorf("export soft episodes: %w", err)
+	}
+	for episodeRows.Next() {
+		var (
+			episode   SoftEpisode
+			deletedAt sql.NullString
+		)
+		if err := episodeRows.Scan(
+			&episode.ID,
+			&episode.ConversationID,
+			&episode.EpisodeType,
+			&episode.StartEventID,
+			&episode.EndEventID,
+			&episode.Summary,
+			&episode.NeedsSummary,
+			&episode.AssumptionIDs,
+			&episode.TokenCount,
+			&episode.BoundaryHash,
+			&episode.CreatedAt,
+			&deletedAt,
+		); err != nil {
+			return nil, fmt.Errorf("scan export soft episode: %w", err)
+		}
+		if deletedAt.Valid {
+			episode.DeletedAt = strPtr(deletedAt.String)
+		}
+		backup.SoftEpisodes = append(backup.SoftEpisodes, episode)
+	}
+	if err := episodeRows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate export soft episodes: %w", err)
+	}
+	_ = episodeRows.Close()
 
-	return json.MarshalIndent(export, "", "  ")
+	evidenceRows, err := m.db.QueryContext(ctx, `
+		SELECT id, conversation_id, source_event_id, event_type, fact_text, content_hash, confidence,
+		       bucket, ttl_days, created_at, expires_at
+		FROM companion_evidence_snippets
+		WHERE conversation_id = $1
+		ORDER BY id ASC
+	`, conversationID)
+	if err != nil {
+		return nil, fmt.Errorf("export evidence snippets: %w", err)
+	}
+	for evidenceRows.Next() {
+		var (
+			snippet   EvidenceSnippet
+			ttlDays   sql.NullInt64
+			expiresAt sql.NullString
+		)
+		if err := evidenceRows.Scan(
+			&snippet.ID,
+			&snippet.ConversationID,
+			&snippet.SourceEventID,
+			&snippet.EventType,
+			&snippet.FactText,
+			&snippet.ContentHash,
+			&snippet.Confidence,
+			&snippet.Bucket,
+			&ttlDays,
+			&snippet.CreatedAt,
+			&expiresAt,
+		); err != nil {
+			return nil, fmt.Errorf("scan export evidence snippet: %w", err)
+		}
+		if ttlDays.Valid {
+			ttl := int(ttlDays.Int64)
+			snippet.TTLDays = &ttl
+		}
+		if expiresAt.Valid {
+			snippet.ExpiresAt = strPtr(expiresAt.String)
+		}
+		backup.EvidenceSnippets = append(backup.EvidenceSnippets, snippet)
+	}
+	if err := evidenceRows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate export evidence snippets: %w", err)
+	}
+	_ = evidenceRows.Close()
+
+	assumptionRows, err := m.db.QueryContext(ctx, `
+		SELECT id, conversation_id, assumption, status, reason, source_event_id, confidence,
+		       created_at, retracted_at, retracted_by_event_id, retraction_reason
+		FROM companion_assumptions_ledger
+		WHERE conversation_id = $1
+		ORDER BY id ASC
+	`, conversationID)
+	if err != nil {
+		return nil, fmt.Errorf("export assumptions: %w", err)
+	}
+	for assumptionRows.Next() {
+		var (
+			assumption       Assumption
+			reason           sql.NullString
+			retractedAt      sql.NullString
+			retractedByEvent sql.NullInt64
+			retractionReason sql.NullString
+		)
+		if err := assumptionRows.Scan(
+			&assumption.ID,
+			&assumption.ConversationID,
+			&assumption.Assumption,
+			&assumption.Status,
+			&reason,
+			&assumption.SourceEventID,
+			&assumption.Confidence,
+			&assumption.CreatedAt,
+			&retractedAt,
+			&retractedByEvent,
+			&retractionReason,
+		); err != nil {
+			return nil, fmt.Errorf("scan export assumption: %w", err)
+		}
+		if reason.Valid {
+			assumption.Reason = strPtr(reason.String)
+		}
+		if retractedAt.Valid {
+			assumption.RetractedAt = strPtr(retractedAt.String)
+		}
+		if retractedByEvent.Valid {
+			assumption.RetractedByEventID = int64Ptr(retractedByEvent.Int64)
+		}
+		if retractionReason.Valid {
+			assumption.RetractionReason = strPtr(retractionReason.String)
+		}
+		backup.Assumptions = append(backup.Assumptions, assumption)
+	}
+	if err := assumptionRows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate export assumptions: %w", err)
+	}
+	_ = assumptionRows.Close()
+
+	modeState, err := m.getMemoryModeState(ctx, conversationID)
+	if err != nil {
+		return nil, fmt.Errorf("export mode state: %w", err)
+	}
+	backup.ModeState = modeState
+
+	var openEpisode OpenEpisodeState
+	var topicSig sql.NullString
+	var pendingSealReason sql.NullString
+	err = m.db.QueryRowContext(ctx, `
+		SELECT conversation_id, start_event_id, episode_type, event_count, topic_sig, pending_seal_reason, updated_at
+		FROM companion_open_episode
+		WHERE conversation_id = $1
+	`, conversationID).Scan(
+		&openEpisode.ConversationID,
+		&openEpisode.StartEventID,
+		&openEpisode.EpisodeType,
+		&openEpisode.EventCount,
+		&topicSig,
+		&pendingSealReason,
+		&openEpisode.UpdatedAt,
+	)
+	if err != nil && err != sql.ErrNoRows {
+		return nil, fmt.Errorf("export open episode: %w", err)
+	}
+	if err == nil {
+		if topicSig.Valid {
+			openEpisode.TopicSig = strPtr(topicSig.String)
+		}
+		if pendingSealReason.Valid {
+			openEpisode.PendingSealReason = strPtr(pendingSealReason.String)
+		}
+		backup.OpenEpisode = &openEpisode
+	}
+
+	openToolRows, err := m.db.QueryContext(ctx, `
+		SELECT conversation_id, tool_run_id, start_event_id, parent_call_event_id, created_at
+		FROM companion_open_tool_runs
+		WHERE conversation_id = $1
+		ORDER BY start_event_id ASC
+	`, conversationID)
+	if err != nil {
+		return nil, fmt.Errorf("export open tool runs: %w", err)
+	}
+	for openToolRows.Next() {
+		var (
+			run             OpenToolRun
+			parentCallEvent sql.NullInt64
+		)
+		if err := openToolRows.Scan(
+			&run.ConversationID,
+			&run.ToolRunID,
+			&run.StartEventID,
+			&parentCallEvent,
+			&run.CreatedAt,
+		); err != nil {
+			return nil, fmt.Errorf("scan export open tool run: %w", err)
+		}
+		if parentCallEvent.Valid {
+			run.ParentCallEventID = int64Ptr(parentCallEvent.Int64)
+		}
+		backup.OpenToolRuns = append(backup.OpenToolRuns, run)
+	}
+	if err := openToolRows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate export open tool runs: %w", err)
+	}
+	_ = openToolRows.Close()
+
+	stageRows, err := m.db.QueryContext(ctx, `
+		SELECT id, conversation_id, source_event_id, proposed_entry_type, raw_text, reason, attempt_count,
+		       created_at, resolved_at, discarded_at, discard_reason
+		FROM companion_extraction_staging
+		WHERE conversation_id = $1
+		ORDER BY id ASC
+	`, conversationID)
+	if err != nil {
+		return nil, fmt.Errorf("export extraction staging: %w", err)
+	}
+	for stageRows.Next() {
+		var (
+			entry         ExtractionStagingEntry
+			resolvedAt    sql.NullString
+			discardedAt   sql.NullString
+			discardReason sql.NullString
+		)
+		if err := stageRows.Scan(
+			&entry.ID,
+			&entry.ConversationID,
+			&entry.SourceEventID,
+			&entry.ProposedEntryType,
+			&entry.RawText,
+			&entry.Reason,
+			&entry.AttemptCount,
+			&entry.CreatedAt,
+			&resolvedAt,
+			&discardedAt,
+			&discardReason,
+		); err != nil {
+			return nil, fmt.Errorf("scan export extraction staging entry: %w", err)
+		}
+		if resolvedAt.Valid {
+			entry.ResolvedAt = strPtr(resolvedAt.String)
+		}
+		if discardedAt.Valid {
+			entry.DiscardedAt = strPtr(discardedAt.String)
+		}
+		if discardReason.Valid {
+			entry.DiscardReason = strPtr(discardReason.String)
+		}
+		backup.ExtractionStage = append(backup.ExtractionStage, entry)
+	}
+	if err := stageRows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate export extraction staging: %w", err)
+	}
+	_ = stageRows.Close()
+
+	var cache HardStateCache
+	err = m.db.QueryRowContext(ctx, `
+		SELECT conversation_id, compact_json, last_entry_id, updated_at
+		FROM companion_hard_state_cache
+		WHERE conversation_id = $1
+	`, conversationID).Scan(&cache.ConversationID, &cache.CompactJSON, &cache.LastEntryID, &cache.UpdatedAt)
+	if err != nil && err != sql.ErrNoRows {
+		return nil, fmt.Errorf("export hard state cache: %w", err)
+	}
+	if err == nil {
+		backup.HardStateCache = &cache
+	}
+
+	return json.MarshalIndent(backup, "", "  ")
+}
+
+// Import restores conversation memory from a backup payload.
+// Import is idempotent: existing rows are upserted by primary/unique keys.
+func (m *ConversationMemory) Import(ctx context.Context, payload json.RawMessage) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	var backup MemoryBackupPayload
+	if err := json.Unmarshal(payload, &backup); err != nil {
+		return fmt.Errorf("decode backup payload: %w", err)
+	}
+	if strings.TrimSpace(backup.ConversationID) == "" {
+		return fmt.Errorf("conversation_id is required")
+	}
+
+	tx, err := m.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin import tx: %w", err)
+	}
+	defer tx.Rollback()
+
+	for _, turn := range backup.Turns {
+		if strings.TrimSpace(turn.ID) == "" {
+			continue
+		}
+		createdAt := turn.CreatedAt.UTC()
+		if createdAt.IsZero() {
+			createdAt = m.clock.Now().UTC()
+		}
+		createdAtStr := createdAt.Format("2006-01-02 15:04:05.000000")
+		if turn.TokenCount <= 0 {
+			turn.TokenCount = m.countTokens(turn.Content)
+		}
+		if _, err := tx.ExecContext(ctx, `
+			INSERT INTO companion_turns (id, conversation_id, role, content, token_count, created_at, tool_calls)
+			VALUES ($1, $2, $3, $4, $5, $6, $7)
+			ON CONFLICT(id) DO UPDATE SET
+				conversation_id = excluded.conversation_id,
+				role = excluded.role,
+				content = excluded.content,
+				token_count = excluded.token_count,
+				created_at = excluded.created_at,
+				tool_calls = excluded.tool_calls
+		`, turn.ID, backup.ConversationID, turn.Role, turn.Content, turn.TokenCount, createdAtStr, turn.ToolCalls); err != nil {
+			return fmt.Errorf("import turn %s: %w", turn.ID, err)
+		}
+	}
+
+	for _, event := range backup.Events {
+		if strings.TrimSpace(event.EventType) == "" {
+			continue
+		}
+		createdAt := strings.TrimSpace(event.CreatedAt)
+		if createdAt == "" {
+			createdAt = m.clock.Now().UTC().Format("2006-01-02 15:04:05.000000")
+		}
+		_, err := tx.ExecContext(ctx, `
+			INSERT INTO companion_events
+				(id, conversation_id, event_type, turn_id, tool_name, tool_run_id, parent_tool_call_id,
+				 payload_json, payload_ref, token_count, content_hash, created_at)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+			ON CONFLICT(id) DO UPDATE SET
+				conversation_id = excluded.conversation_id,
+				event_type = excluded.event_type,
+				turn_id = excluded.turn_id,
+				tool_name = excluded.tool_name,
+				tool_run_id = excluded.tool_run_id,
+				parent_tool_call_id = excluded.parent_tool_call_id,
+				payload_json = excluded.payload_json,
+				payload_ref = excluded.payload_ref,
+				token_count = excluded.token_count,
+				content_hash = excluded.content_hash,
+				created_at = excluded.created_at
+		`, event.ID, backup.ConversationID, event.EventType, nullableString(event.TurnID), nullableString(event.ToolName),
+			nullableString(event.ToolRunID), nullableInt64(event.ParentToolCallID), nullableString(event.PayloadJSON),
+			nullableString(event.PayloadRef), nullableInt(event.TokenCount), nullableString(event.ContentHash), createdAt)
+		if err != nil {
+			return fmt.Errorf("import event %d: %w", event.ID, err)
+		}
+	}
+
+	for _, entry := range backup.HardStateEntries {
+		createdAt := strings.TrimSpace(entry.CreatedAt)
+		if createdAt == "" {
+			createdAt = m.clock.Now().UTC().Format("2006-01-02 15:04:05.000000")
+		}
+		if _, err := tx.ExecContext(ctx, `
+			INSERT INTO companion_hard_state_entries
+				(id, conversation_id, entry_type, key, value_json, status, source_event_id, confidence, metadata_json, supersedes, created_at)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+			ON CONFLICT(id) DO UPDATE SET
+				conversation_id = excluded.conversation_id,
+				entry_type = excluded.entry_type,
+				key = excluded.key,
+				value_json = excluded.value_json,
+				status = excluded.status,
+				source_event_id = excluded.source_event_id,
+				confidence = excluded.confidence,
+				metadata_json = excluded.metadata_json,
+				supersedes = excluded.supersedes,
+				created_at = excluded.created_at
+		`, entry.ID, backup.ConversationID, entry.EntryType, entry.Key, entry.ValueJSON, entry.Status, entry.SourceEventID, entry.Confidence,
+			entry.MetadataJSON, entry.Supersedes, createdAt); err != nil {
+			return fmt.Errorf("import hard state entry %d: %w", entry.ID, err)
+		}
+	}
+
+	for _, episode := range backup.SoftEpisodes {
+		createdAt := strings.TrimSpace(episode.CreatedAt)
+		if createdAt == "" {
+			createdAt = m.clock.Now().UTC().Format("2006-01-02 15:04:05.000000")
+		}
+		if _, err := tx.ExecContext(ctx, `
+			INSERT INTO companion_soft_episodes
+				(id, conversation_id, episode_type, start_event_id, end_event_id, summary, needs_summary, assumption_ids, token_count, boundary_hash, created_at, deleted_at)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+			ON CONFLICT(id) DO UPDATE SET
+				conversation_id = excluded.conversation_id,
+				episode_type = excluded.episode_type,
+				start_event_id = excluded.start_event_id,
+				end_event_id = excluded.end_event_id,
+				summary = excluded.summary,
+				needs_summary = excluded.needs_summary,
+				assumption_ids = excluded.assumption_ids,
+				token_count = excluded.token_count,
+				boundary_hash = excluded.boundary_hash,
+				created_at = excluded.created_at,
+				deleted_at = excluded.deleted_at
+		`, episode.ID, backup.ConversationID, episode.EpisodeType, episode.StartEventID, episode.EndEventID, episode.Summary,
+			episode.NeedsSummary, episode.AssumptionIDs, episode.TokenCount, episode.BoundaryHash, createdAt, episode.DeletedAt); err != nil {
+			return fmt.Errorf("import soft episode %d: %w", episode.ID, err)
+		}
+	}
+
+	for _, snippet := range backup.EvidenceSnippets {
+		createdAt := strings.TrimSpace(snippet.CreatedAt)
+		if createdAt == "" {
+			createdAt = m.clock.Now().UTC().Format("2006-01-02 15:04:05.000000")
+		}
+		if _, err := tx.ExecContext(ctx, `
+			INSERT INTO companion_evidence_snippets
+				(id, conversation_id, source_event_id, event_type, fact_text, content_hash, confidence, bucket, ttl_days, created_at, expires_at)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+			ON CONFLICT(conversation_id, content_hash) DO UPDATE SET
+				source_event_id = excluded.source_event_id,
+				event_type = excluded.event_type,
+				fact_text = excluded.fact_text,
+				confidence = excluded.confidence,
+				bucket = excluded.bucket,
+				ttl_days = excluded.ttl_days,
+				created_at = excluded.created_at,
+				expires_at = excluded.expires_at
+		`, snippet.ID, backup.ConversationID, snippet.SourceEventID, snippet.EventType, snippet.FactText, snippet.ContentHash, snippet.Confidence,
+			snippet.Bucket, snippet.TTLDays, createdAt, snippet.ExpiresAt); err != nil {
+			return fmt.Errorf("import evidence snippet %d: %w", snippet.ID, err)
+		}
+	}
+
+	for _, assumption := range backup.Assumptions {
+		createdAt := strings.TrimSpace(assumption.CreatedAt)
+		if createdAt == "" {
+			createdAt = m.clock.Now().UTC().Format("2006-01-02 15:04:05.000000")
+		}
+		if _, err := tx.ExecContext(ctx, `
+			INSERT INTO companion_assumptions_ledger
+				(id, conversation_id, assumption, status, reason, source_event_id, confidence, created_at, retracted_at, retracted_by_event_id, retraction_reason)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+			ON CONFLICT(id) DO UPDATE SET
+				conversation_id = excluded.conversation_id,
+				assumption = excluded.assumption,
+				status = excluded.status,
+				reason = excluded.reason,
+				source_event_id = excluded.source_event_id,
+				confidence = excluded.confidence,
+				created_at = excluded.created_at,
+				retracted_at = excluded.retracted_at,
+				retracted_by_event_id = excluded.retracted_by_event_id,
+				retraction_reason = excluded.retraction_reason
+		`, assumption.ID, backup.ConversationID, assumption.Assumption, assumption.Status, assumption.Reason, assumption.SourceEventID,
+			assumption.Confidence, createdAt, assumption.RetractedAt, assumption.RetractedByEventID, assumption.RetractionReason); err != nil {
+			return fmt.Errorf("import assumption %d: %w", assumption.ID, err)
+		}
+	}
+
+	if backup.OpenEpisode != nil {
+		openEpisode := backup.OpenEpisode
+		updatedAt := strings.TrimSpace(openEpisode.UpdatedAt)
+		if updatedAt == "" {
+			updatedAt = m.clock.Now().UTC().Format("2006-01-02 15:04:05.000000")
+		}
+		if _, err := tx.ExecContext(ctx, `
+			INSERT INTO companion_open_episode
+				(conversation_id, start_event_id, episode_type, event_count, topic_sig, pending_seal_reason, updated_at)
+			VALUES ($1, $2, $3, $4, $5, $6, $7)
+			ON CONFLICT(conversation_id) DO UPDATE SET
+				start_event_id = excluded.start_event_id,
+				episode_type = excluded.episode_type,
+				event_count = excluded.event_count,
+				topic_sig = excluded.topic_sig,
+				pending_seal_reason = excluded.pending_seal_reason,
+				updated_at = excluded.updated_at
+		`, backup.ConversationID, openEpisode.StartEventID, openEpisode.EpisodeType, openEpisode.EventCount,
+			openEpisode.TopicSig, openEpisode.PendingSealReason, updatedAt); err != nil {
+			return fmt.Errorf("import open episode: %w", err)
+		}
+	}
+
+	for _, run := range backup.OpenToolRuns {
+		createdAt := strings.TrimSpace(run.CreatedAt)
+		if createdAt == "" {
+			createdAt = m.clock.Now().UTC().Format("2006-01-02 15:04:05.000000")
+		}
+		if _, err := tx.ExecContext(ctx, `
+			INSERT INTO companion_open_tool_runs
+				(conversation_id, tool_run_id, start_event_id, parent_call_event_id, created_at)
+			VALUES ($1, $2, $3, $4, $5)
+			ON CONFLICT(conversation_id, tool_run_id) DO UPDATE SET
+				start_event_id = excluded.start_event_id,
+				parent_call_event_id = excluded.parent_call_event_id,
+				created_at = excluded.created_at
+		`, backup.ConversationID, run.ToolRunID, run.StartEventID, run.ParentCallEventID, createdAt); err != nil {
+			return fmt.Errorf("import open tool run %q: %w", run.ToolRunID, err)
+		}
+	}
+
+	for _, entry := range backup.ExtractionStage {
+		createdAt := strings.TrimSpace(entry.CreatedAt)
+		if createdAt == "" {
+			createdAt = m.clock.Now().UTC().Format("2006-01-02 15:04:05.000000")
+		}
+		if _, err := tx.ExecContext(ctx, `
+			INSERT INTO companion_extraction_staging
+				(id, conversation_id, source_event_id, proposed_entry_type, raw_text, reason, attempt_count, created_at, resolved_at, discarded_at, discard_reason)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+			ON CONFLICT(id) DO UPDATE SET
+				conversation_id = excluded.conversation_id,
+				source_event_id = excluded.source_event_id,
+				proposed_entry_type = excluded.proposed_entry_type,
+				raw_text = excluded.raw_text,
+				reason = excluded.reason,
+				attempt_count = excluded.attempt_count,
+				created_at = excluded.created_at,
+				resolved_at = excluded.resolved_at,
+				discarded_at = excluded.discarded_at,
+				discard_reason = excluded.discard_reason
+		`, entry.ID, backup.ConversationID, entry.SourceEventID, entry.ProposedEntryType, entry.RawText, entry.Reason, entry.AttemptCount,
+			createdAt, entry.ResolvedAt, entry.DiscardedAt, entry.DiscardReason); err != nil {
+			return fmt.Errorf("import extraction staging %d: %w", entry.ID, err)
+		}
+	}
+
+	if backup.HardStateCache != nil {
+		cache := backup.HardStateCache
+		updatedAt := strings.TrimSpace(cache.UpdatedAt)
+		if updatedAt == "" {
+			updatedAt = m.clock.Now().UTC().Format("2006-01-02 15:04:05.000000")
+		}
+		if _, err := tx.ExecContext(ctx, `
+			INSERT INTO companion_hard_state_cache
+				(conversation_id, compact_json, last_entry_id, updated_at)
+			VALUES ($1, $2, $3, $4)
+			ON CONFLICT(conversation_id) DO UPDATE SET
+				compact_json = excluded.compact_json,
+				last_entry_id = excluded.last_entry_id,
+				updated_at = excluded.updated_at
+		`, backup.ConversationID, cache.CompactJSON, cache.LastEntryID, updatedAt); err != nil {
+			return fmt.Errorf("import hard state cache: %w", err)
+		}
+	}
+
+	modeState := backup.ModeState
+	if modeState == nil {
+		modeState = &MemoryModeState{
+			ConversationID: backup.ConversationID,
+			Mode:           MemoryModeHybrid,
+			SchemaVersion:  1,
+		}
+	}
+	if modeState.SchemaVersion <= 0 {
+		modeState.SchemaVersion = 1
+	}
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO companion_memory_mode_state
+			(conversation_id, mode, schema_version, last_processed_event, last_soft_event, last_evidence_event, updated_at)
+		VALUES ($1, 'hybrid', $2, $3, $4, $5, CURRENT_TIMESTAMP)
+		ON CONFLICT(conversation_id) DO UPDATE SET
+			mode = 'hybrid',
+			schema_version = excluded.schema_version,
+			last_processed_event = excluded.last_processed_event,
+			last_soft_event = excluded.last_soft_event,
+			last_evidence_event = excluded.last_evidence_event,
+			updated_at = CURRENT_TIMESTAMP
+	`, backup.ConversationID, modeState.SchemaVersion, modeState.LastProcessedEvent, modeState.LastSoftEvent, modeState.LastEvidenceEvent); err != nil {
+		return fmt.Errorf("import mode state: %w", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit memory import: %w", err)
+	}
+
+	return nil
+}
+
+func nullableString(value string) any {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return nil
+	}
+	return value
+}
+
+func nullableInt(value int) any {
+	if value == 0 {
+		return nil
+	}
+	return value
+}
+
+// SearchCompanionMemories searches v2 hybrid companion memory artifacts for a conversation.
+func (m *ConversationMemory) SearchCompanionMemories(ctx context.Context, conversationID, query string, limit int) ([]storage.ScoredEntry, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	if strings.TrimSpace(conversationID) == "" {
+		return nil, fmt.Errorf("conversation_id is required")
+	}
+	query = strings.TrimSpace(query)
+	if query == "" {
+		return nil, fmt.Errorf("query is required")
+	}
+	if limit <= 0 {
+		limit = 10
+	}
+	like := "%" + query + "%"
+	queryTokens := tokenizeForGrounding(query)
+
+	resultByName := map[string]storage.ScoredEntry{}
+	addResult := func(r storage.ScoredEntry) {
+		existing, ok := resultByName[r.Entry.Name]
+		if !ok || r.Score > existing.Score {
+			resultByName[r.Entry.Name] = r
+		}
+	}
+
+	// 1) Hard state entries (facts/preferences/decisions).
+	hardRows, err := m.db.QueryContext(ctx, `
+		SELECT id, entry_type, key, value_json, confidence
+		FROM companion_hard_state_entries
+		WHERE conversation_id = $1 AND status = 'active'
+			AND (
+				lower(key) LIKE lower($2)
+				OR lower(value_json) LIKE lower($2)
+			)
+		ORDER BY confidence DESC, created_at DESC
+		LIMIT $3
+	`, conversationID, like, limit*3)
+	if err != nil {
+		return nil, fmt.Errorf("query hard state search: %w", err)
+	}
+	for hardRows.Next() {
+		var (
+			id         int64
+			entryType  string
+			key        string
+			valueJSON  string
+			confidence float64
+		)
+		if scanErr := hardRows.Scan(&id, &entryType, &key, &valueJSON, &confidence); scanErr != nil {
+			continue
+		}
+		summary := strings.TrimSpace(valueJSON)
+		var asString string
+		if err := json.Unmarshal([]byte(valueJSON), &asString); err == nil && strings.TrimSpace(asString) != "" {
+			summary = strings.TrimSpace(asString)
+		}
+		if summary == "" {
+			continue
+		}
+		addResult(storage.ScoredEntry{
+			Entry: storage.NamedEntry{
+				Name:      fmt.Sprintf("companion:v2:hard_state:%s:%d", conversationID, id),
+				Type:      "companion_hard_state",
+				Workspace: m.workspace,
+				Summary:   summary,
+				SessionID: conversationID,
+			},
+			Score: maxFloat(0.1, confidence),
+		})
+	}
+	_ = hardRows.Close()
+
+	// 2) Episode summaries.
+	episodeRows, err := m.db.QueryContext(ctx, `
+		SELECT id, summary
+		FROM companion_soft_episodes
+		WHERE conversation_id = $1
+			AND deleted_at IS NULL
+			AND needs_summary = 0
+			AND summary IS NOT NULL
+			AND trim(summary) <> ''
+			AND lower(summary) LIKE lower($2)
+		ORDER BY end_event_id DESC
+		LIMIT $3
+	`, conversationID, like, limit*3)
+	if err != nil {
+		return nil, fmt.Errorf("query episode summary search: %w", err)
+	}
+	for episodeRows.Next() {
+		var (
+			id      int64
+			summary string
+		)
+		if scanErr := episodeRows.Scan(&id, &summary); scanErr != nil {
+			continue
+		}
+		if strings.TrimSpace(summary) == "" {
+			continue
+		}
+		addResult(storage.ScoredEntry{
+			Entry: storage.NamedEntry{
+				Name:      fmt.Sprintf("companion:v2:episode:%s:%d", conversationID, id),
+				Type:      "companion_episode",
+				Workspace: m.workspace,
+				Summary:   summary,
+				SessionID: conversationID,
+			},
+			Score: 0.85,
+		})
+	}
+	_ = episodeRows.Close()
+
+	// 3) Evidence snippets.
+	evidenceRows, err := m.db.QueryContext(ctx, `
+		SELECT id, fact_text, confidence
+		FROM companion_evidence_snippets
+		WHERE conversation_id = $1
+			AND lower(fact_text) LIKE lower($2)
+		ORDER BY confidence DESC, created_at DESC
+		LIMIT $3
+	`, conversationID, like, limit*3)
+	if err != nil {
+		return nil, fmt.Errorf("query evidence search: %w", err)
+	}
+	for evidenceRows.Next() {
+		var (
+			id         int64
+			factText   string
+			confidence float64
+		)
+		if scanErr := evidenceRows.Scan(&id, &factText, &confidence); scanErr != nil {
+			continue
+		}
+		if strings.TrimSpace(factText) == "" {
+			continue
+		}
+		addResult(storage.ScoredEntry{
+			Entry: storage.NamedEntry{
+				Name:      fmt.Sprintf("companion:v2:evidence:%s:%d", conversationID, id),
+				Type:      "companion_evidence",
+				Workspace: m.workspace,
+				Summary:   factText,
+				SessionID: conversationID,
+			},
+			Score: maxFloat(0.2, confidence),
+		})
+	}
+	_ = evidenceRows.Close()
+
+	if len(resultByName) == 0 && len(queryTokens) > 0 {
+		candidateLimit := limit * 10
+		if candidateLimit < 50 {
+			candidateLimit = 50
+		}
+
+		hardRows, err := m.db.QueryContext(ctx, `
+			SELECT id, entry_type, key, value_json, confidence
+			FROM companion_hard_state_entries
+			WHERE conversation_id = $1 AND status = 'active'
+			ORDER BY confidence DESC, created_at DESC
+			LIMIT $2
+		`, conversationID, candidateLimit)
+		if err != nil {
+			return nil, fmt.Errorf("query hard state token fallback: %w", err)
+		}
+		for hardRows.Next() {
+			var (
+				id         int64
+				entryType  string
+				key        string
+				valueJSON  string
+				confidence float64
+			)
+			if scanErr := hardRows.Scan(&id, &entryType, &key, &valueJSON, &confidence); scanErr != nil {
+				continue
+			}
+			summary := decodeCompanionValueSummary(valueJSON)
+			if summary == "" {
+				continue
+			}
+			overlap := tokenOverlapCount(queryTokens, tokenizeForGrounding(key+" "+summary))
+			if overlap == 0 {
+				continue
+			}
+			ratio := normalizedTokenOverlap(overlap, len(queryTokens))
+			addResult(storage.ScoredEntry{
+				Entry: storage.NamedEntry{
+					Name:      fmt.Sprintf("companion:v2:hard_state:%s:%d", conversationID, id),
+					Type:      "companion_hard_state",
+					Workspace: m.workspace,
+					Summary:   summary,
+					SessionID: conversationID,
+				},
+				Score: minFloat(1.0, maxFloat(0.1, confidence*0.6+ratio*0.4)),
+			})
+		}
+		_ = hardRows.Close()
+
+		episodeRows, err := m.db.QueryContext(ctx, `
+			SELECT id, summary
+			FROM companion_soft_episodes
+			WHERE conversation_id = $1
+				AND deleted_at IS NULL
+				AND needs_summary = 0
+				AND summary IS NOT NULL
+				AND trim(summary) <> ''
+			ORDER BY end_event_id DESC
+			LIMIT $2
+		`, conversationID, candidateLimit)
+		if err != nil {
+			return nil, fmt.Errorf("query episode token fallback: %w", err)
+		}
+		for episodeRows.Next() {
+			var (
+				id      int64
+				summary string
+			)
+			if scanErr := episodeRows.Scan(&id, &summary); scanErr != nil {
+				continue
+			}
+			summary = strings.TrimSpace(summary)
+			if summary == "" {
+				continue
+			}
+			overlap := tokenOverlapCount(queryTokens, tokenizeForGrounding(summary))
+			if overlap == 0 {
+				continue
+			}
+			ratio := normalizedTokenOverlap(overlap, len(queryTokens))
+			addResult(storage.ScoredEntry{
+				Entry: storage.NamedEntry{
+					Name:      fmt.Sprintf("companion:v2:episode:%s:%d", conversationID, id),
+					Type:      "companion_episode",
+					Workspace: m.workspace,
+					Summary:   summary,
+					SessionID: conversationID,
+				},
+				Score: minFloat(0.9, 0.45+ratio*0.4),
+			})
+		}
+		_ = episodeRows.Close()
+
+		evidenceRows, err := m.db.QueryContext(ctx, `
+			SELECT id, fact_text, confidence
+			FROM companion_evidence_snippets
+			WHERE conversation_id = $1
+			ORDER BY confidence DESC, created_at DESC
+			LIMIT $2
+		`, conversationID, candidateLimit)
+		if err != nil {
+			return nil, fmt.Errorf("query evidence token fallback: %w", err)
+		}
+		for evidenceRows.Next() {
+			var (
+				id         int64
+				factText   string
+				confidence float64
+			)
+			if scanErr := evidenceRows.Scan(&id, &factText, &confidence); scanErr != nil {
+				continue
+			}
+			factText = strings.TrimSpace(factText)
+			if factText == "" {
+				continue
+			}
+			overlap := tokenOverlapCount(queryTokens, tokenizeForGrounding(factText))
+			if overlap == 0 {
+				continue
+			}
+			ratio := normalizedTokenOverlap(overlap, len(queryTokens))
+			addResult(storage.ScoredEntry{
+				Entry: storage.NamedEntry{
+					Name:      fmt.Sprintf("companion:v2:evidence:%s:%d", conversationID, id),
+					Type:      "companion_evidence",
+					Workspace: m.workspace,
+					Summary:   factText,
+					SessionID: conversationID,
+				},
+				Score: minFloat(1.0, maxFloat(0.2, confidence*0.4+ratio*0.6)),
+			})
+		}
+		_ = evidenceRows.Close()
+	}
+
+	if len(resultByName) == 0 {
+		return []storage.ScoredEntry{}, nil
+	}
+
+	merged := make([]storage.ScoredEntry, 0, len(resultByName))
+	for _, r := range resultByName {
+		merged = append(merged, r)
+	}
+	sort.SliceStable(merged, func(i, j int) bool {
+		if merged[i].Score == merged[j].Score {
+			return merged[i].Entry.Name < merged[j].Entry.Name
+		}
+		return merged[i].Score > merged[j].Score
+	})
+	if len(merged) > limit {
+		merged = merged[:limit]
+	}
+
+	return merged, nil
+}
+
+func maxFloat(a, b float64) float64 {
+	if a > b {
+		return a
+	}
+	return b
+}
+
+func minFloat(a, b float64) float64 {
+	if a < b {
+		return a
+	}
+	return b
+}
+
+func decodeCompanionValueSummary(valueJSON string) string {
+	summary := strings.TrimSpace(valueJSON)
+	var asString string
+	if err := json.Unmarshal([]byte(valueJSON), &asString); err == nil && strings.TrimSpace(asString) != "" {
+		summary = strings.TrimSpace(asString)
+	}
+	return summary
+}
+
+func tokenOverlapCount(queryTokens, candidateTokens map[string]struct{}) int {
+	if len(queryTokens) == 0 || len(candidateTokens) == 0 {
+		return 0
+	}
+	count := 0
+	for token := range queryTokens {
+		if _, ok := candidateTokens[token]; ok {
+			count++
+		}
+	}
+	return count
+}
+
+func normalizedTokenOverlap(overlap, total int) float64 {
+	if overlap <= 0 || total <= 0 {
+		return 0
+	}
+	return float64(overlap) / float64(total)
 }
 
 // ConversationSummary represents a conversation for listing.

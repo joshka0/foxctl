@@ -98,6 +98,124 @@ export interface BlackboardRecord {
   payload: string;
 }
 
+// Orchestration (v2 runtime board)
+export type OrchestrationLaneID =
+  | "Todo"
+  | "Claimed"
+  | "Running"
+  | "RetryQueued"
+  | "Blocked"
+  | "Review"
+  | "Done";
+
+export interface OrchestrationCard {
+  workspace_id?: string;
+  issue_id: string;
+  issue_identifier?: string;
+  title?: string;
+  state: string;
+  lane?: OrchestrationLaneID;
+  tracker_state?: string;
+  policy_status?: string;
+  last_outcome?: string;
+  eligibility?: string;
+  denial_reason?: string;
+  suggestion?: string;
+  run_id?: string;
+  agent_id?: string;
+  actor_id?: string;
+  attempt?: number;
+  retry_due_at?: string;
+  last_event_type?: string;
+  last_event_at?: string;
+}
+
+export interface OrchestrationLane {
+  id: OrchestrationLaneID;
+  title: string;
+  cards: OrchestrationCard[];
+}
+
+export interface OrchestrationBoard {
+  generated_at: string;
+  counts: Partial<Record<OrchestrationLaneID, number>>;
+  lanes: OrchestrationLane[];
+  next_cursor?: string;
+}
+
+export interface OrchestrationBoardArtifactRef {
+  summary: string;
+  artifact: string;
+  hint?: string;
+  generated_at?: string;
+  counts?: Partial<Record<OrchestrationLaneID, number>>;
+}
+
+export interface OrchestrationBoardResult {
+  board: OrchestrationBoard | null;
+  artifact: OrchestrationBoardArtifactRef | null;
+}
+
+export type OrchestrationCardAction = "retry-now" | "release" | "mark-done";
+
+export interface OrchestrationCardActionResult {
+  request_id: string;
+  action: OrchestrationCardAction;
+  card: OrchestrationCard;
+  idempotent?: boolean;
+  ts: string;
+}
+
+export interface OrchestrationDispatchResult {
+  request_id: string;
+  workspace_id?: string;
+  issue_id: string;
+  issue_identifier?: string;
+  status: string;
+  policy_status?: string;
+  last_outcome?: string;
+  denial_reason?: string;
+  suggestion?: string;
+  run_id?: string;
+  turn_id?: string;
+  agent_id?: string;
+  actor_id?: string;
+  idempotent?: boolean;
+  ts: string;
+}
+
+export interface OrchestrationRuntimeTreeNode {
+  tag?: string;
+  agent_id?: string;
+  pid?: string;
+  metadata?: Record<string, unknown>;
+  status?: string;
+  state?: unknown;
+  error?: string;
+  children?: OrchestrationRuntimeTreeNode[];
+}
+
+export interface OrchestrationRuntimeTree {
+  enabled: boolean;
+  agent_id?: string;
+  depth: number;
+  root?: OrchestrationRuntimeTreeNode;
+  error?: string;
+}
+
+export interface OrchestrationBoardCardRuntimeResult {
+  card: OrchestrationCard;
+  runtime?: OrchestrationRuntimeTree;
+}
+
+export interface OrchestrationRefreshResult {
+  request_id: string;
+  queued: boolean;
+  coalesced?: boolean;
+  idempotent?: boolean;
+  ts: string;
+}
+
 export type DatabaseDriver = "sqlite" | "turso" | "libsql";
 
 export interface SQLiteDatabase {
@@ -314,21 +432,134 @@ export interface APIResponse<T> {
 // Agent types (from agents.db)
 export type AgentState = "starting" | "running" | "stopped" | "error";
 export type BlackboardShareMode = "all" | "scoped" | "none";
+export type AgentMemoryScope = "agent" | "session";
+export type AgentMemoryRetention =
+  | "companion"
+  | "durable"
+  | "task"
+  | "ephemeral";
 
 export interface Agent {
   id: string;
   parent_id?: string;
   ns: string; // namespace (unique)
+  name?: string;
+  slug?: string;
   role?: string;
   prompt?: string;
-  skills_allow: string; // comma-separated skill patterns
-  policy: string;
+  skills_allow?: string[] | string;
+  policy?: Record<string, unknown> | string;
   share_bb: BlackboardShareMode;
   state: AgentState;
   llm_provider?: string;
   llm_model?: string;
+  exec_mode?: string;
+  think_interval?: number;
+  conversation_id?: string;
+  memory_scope?: AgentMemoryScope | string;
+  memory_retention?: AgentMemoryRetention | string;
+  max_iterations?: number;
+  max_auto_turns?: number;
   created_at: string;
   heartbeat_at?: string;
+}
+
+export interface AgentMemoryStats {
+  total_turns?: number;
+  vivid_turns?: number;
+  recent_summaries?: number;
+  daily_summaries?: number;
+  daily_distillations?: number;
+  total_tokens_estimate?: number;
+  compression_runs?: number;
+  [key: string]: unknown;
+}
+
+export interface AgentMemoryStatsResult {
+  stats: AgentMemoryStats;
+  policy?: {
+    memory_scope?: AgentMemoryScope | string;
+    memory_retention?: AgentMemoryRetention | string;
+    default_distill?: boolean;
+  };
+}
+
+export interface AgentMemoryContextResult {
+  conversation_id: string;
+  context: string;
+  policy?: {
+    memory_scope?: AgentMemoryScope | string;
+    memory_retention?: AgentMemoryRetention | string;
+    search_limit?: number;
+    default_distill?: boolean;
+    context_token_hint?: number;
+  };
+}
+
+export interface AgentMemorySearchResultItem {
+  name: string;
+  type: string;
+  score: number;
+  summary: string;
+  session_id?: string;
+  updated_at?: string;
+}
+
+export interface AgentMemorySearchResult {
+  conversation_id: string;
+  query: string;
+  limit: number;
+  results: AgentMemorySearchResultItem[];
+  policy?: {
+    memory_scope?: AgentMemoryScope | string;
+    memory_retention?: AgentMemoryRetention | string;
+    default_limit?: number;
+    effective_limit?: number;
+  };
+}
+
+export interface AgentMemoryCompressResult {
+  conversation_id: string;
+  processed_dates?: string[];
+  summarized?: number;
+  skipped?: number;
+  distilled?: number;
+  default_distill?: boolean;
+  effective_distill?: boolean;
+  memory_scope?: AgentMemoryScope | string;
+  memory_retention?: AgentMemoryRetention | string;
+}
+
+export interface RoomMember {
+  actor_id: string;
+  role?: string;
+  joined_at?: string;
+}
+
+export interface Room {
+  id: string;
+  workspace_id: string;
+  stream: string;
+  title: string;
+  description?: string;
+  dispatch_policy?:
+    | "all_subtree"
+    | "children_only"
+    | "lead_only"
+    | "selected"
+    | string;
+  dispatch_agent_ids?: string[];
+  created_at?: string;
+  updated_at?: string;
+  latest_subject?: string;
+  latest_preview?: string;
+  latest_sender?: string;
+  latest_message_at?: string;
+  message_count: number;
+  unread_count: number;
+  participants?: string[];
+  task_ids?: string[];
+  members?: RoomMember[];
 }
 
 // Trajectory types (from trajectory.db)
@@ -443,7 +674,12 @@ export interface ConsoleSession {
   last_attached_at: string;
   meta?: Record<string, unknown>;
   // Daemon status info (returned on create)
-  daemon_status?: "already_running" | "daemon_spawned" | "created_and_spawned" | "unknown" | "error";
+  daemon_status?:
+    | "already_running"
+    | "daemon_spawned"
+    | "created_and_spawned"
+    | "unknown"
+    | "error";
   agent_id?: string;
   daemon_error?: string;
 }

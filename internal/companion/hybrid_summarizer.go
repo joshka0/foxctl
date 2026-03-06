@@ -107,9 +107,9 @@ func (m *ConversationMemory) SummarizeEpisodePlan(ctx context.Context, conversat
 	}
 
 	m.mu.RLock()
-	llmSummarizer, ok := m.summarizer.(*LLMSummarizer)
+	llmSummarizer := m.llmSummarizer
 	m.mu.RUnlock()
-	if !ok || llmSummarizer == nil {
+	if llmSummarizer == nil {
 		return nil, fmt.Errorf("no llm summarizer configured")
 	}
 

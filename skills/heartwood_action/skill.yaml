@@ -1,0 +1,78 @@
+apiVersion: agentctl/v1
+kind: Skill
+metadata:
+  name: heartwood/action
+  version: 0.1.0
+  description: |
+    Execute a whitelisted Heartwood participant action through the real generated SpacetimeDB client.
+    Intended for agent participants acting as ordinary users in rooms, rituals, threads, and connections.
+  tags: [heartwood, spacetime, action, ritual, connection]
+distribution:
+  type: exec
+  exec:
+    entry: skills/heartwood_action/heartwood_action
+io:
+  format: JSON
+  inline_output_kb: 64
+signature:
+  command: heartwood/action
+  parameters:
+    - name: heartwood_root
+      type: string
+      required: false
+      description: Path to the Heartwood repo. Defaults to current working directory.
+    - name: host
+      type: string
+      required: true
+      description: WebSocket host for Heartwood, e.g. ws://192.168.0.243:3001
+    - name: db_name
+      type: string
+      required: true
+      description: Heartwood database name
+    - name: token
+      type: string
+      required: false
+      description: Existing SpacetimeDB session token for this agent identity
+    - name: token_path
+      type: string
+      required: false
+      description: Optional path to persist/reuse the session token for this agent
+    - name: wait_timeout_ms
+      type: integer
+      required: false
+      description: Connection wait timeout in milliseconds
+    - name: operation
+      type: string
+      required: true
+      enum: [upsert_profile, upsert_user_prefs, join_space, create_space, create_ritual, join_ritual, start_ritual, submit_vote, send_thread_message, create_focus_session, join_focus_session, request_connection_upgrade, accept_connection_upgrade, send_connection_message, request_exposure, respond_exposure, resume_paused_connection, close_connection]
+      description: Whitelisted Heartwood participant action
+    - name: args
+      type: object
+      required: false
+      description: Operation-specific arguments forwarded to the Heartwood bridge
+  help:
+    short: "Execute a Heartwood participant action."
+    long: |
+      Use heartwood/action to invoke a whitelisted participant action against Heartwood.
+      Example commands:
+        agentctl run heartwood/action --input '{"host":"ws://192.168.0.243:3001","db_name":"heartwood","token_path":"/tmp/hw-agent-1.token","operation":"upsert_profile","args":{"alias":"Mira","city":"Tallinn","intent":"long_term"}}'
+        agentctl run heartwood/action --input '{"host":"ws://192.168.0.243:3001","db_name":"heartwood","token_path":"/tmp/hw-agent-1.token","operation":"join_space","args":{"spaceId":"1"}}'
+        agentctl run heartwood/action --input '{"host":"ws://192.168.0.243:3001","db_name":"heartwood","token_path":"/tmp/hw-agent-1.token","operation":"send_thread_message","args":{"threadId":"3","body":"I'd stay with this conversation a little longer."}}'
+returns:
+  - name: ok
+    type: boolean
+  - name: identityHex
+    type: string
+  - name: token
+    type: string
+  - name: action
+    type: object
+capabilities:
+  network: egress
+  filesystem:
+    - type: workdir
+  pure: false
+openapi:
+  enabled: true
+  methods:
+    POST: "true"

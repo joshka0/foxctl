@@ -216,6 +216,43 @@ func (e *Embedder) Embed(ctx context.Context, text string) (EmbedResult, error) 
 	}, nil
 }
 
+// EmbedQuery generates a query-optimized embedding when the provider supports it.
+// It falls back to regular Embed behavior for providers without query/document modes.
+func (e *Embedder) EmbedQuery(ctx context.Context, query string) (EmbedResult, error) {
+	query = strings.TrimSpace(query)
+	if query == "" {
+		return EmbedResult{}, nil
+	}
+
+	var vec []float32
+	embed := func(ctx context.Context) error {
+		var err error
+		if qp, ok := e.provider.(QueryEmbeddingProvider); ok {
+			vec, err = qp.EmbedQuery(ctx, query)
+		} else {
+			vec, err = e.provider.Embed(ctx, query)
+		}
+		return err
+	}
+
+	var err error
+	if e.guard != nil {
+		err = e.guard(ctx, embed)
+	} else {
+		err = embed(ctx)
+	}
+	if err != nil {
+		return EmbedResult{}, err
+	}
+
+	return EmbedResult{
+		Vec:      vec,
+		Provider: e.providerName,
+		Model:    e.provider.Model(),
+		Dims:     e.provider.Dimensions(),
+	}, nil
+}
+
 // EmbedBatch generates embeddings for multiple texts.
 func (e *Embedder) EmbedBatch(ctx context.Context, texts []string) ([]EmbedResult, error) {
 	// Trim all texts

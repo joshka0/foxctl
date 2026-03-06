@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/jkatigb/agentctl/internal/domain/agent"
@@ -31,6 +32,8 @@ type Store interface {
 	Delete(ctx context.Context, id string) error
 	Trash(ctx context.Context, id string) error                                // Soft delete (only stopped agents)
 	UpdateConversationID(ctx context.Context, id, conversationID string) error // Link agent to conversation
+	UpdateMemoryScope(ctx context.Context, id string, scope agent.MemoryScope) error
+	UpdateMemoryRetention(ctx context.Context, id string, retention agent.MemoryRetention) error
 }
 
 type sqlStore struct {
@@ -74,14 +77,21 @@ func (s *sqlStore) Create(ctx context.Context, a agent.Agent) error {
 	if a.Slug != "" {
 		slugVal = a.Slug
 	}
+	memoryScope := agent.NormalizeMemoryScope(a.MemoryScope)
+	memoryRetention := a.MemoryRetention
+	if strings.TrimSpace(string(memoryRetention)) == "" {
+		memoryRetention = agent.DefaultMemoryRetentionForScope(memoryScope)
+	} else {
+		memoryRetention = agent.NormalizeMemoryRetention(memoryRetention)
+	}
 
 	_, err = s.db.ExecContext(ctx, `
-		INSERT INTO agents (id, parent_id, ns, name, slug, role, prompt, skills_allow, policy, share_bb, state, created_at, heartbeat_at, llm_provider, llm_model, llm_api_key, exec_mode, max_iterations, max_auto_turns, think_interval)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)`,
+		INSERT INTO agents (id, parent_id, ns, name, slug, role, prompt, skills_allow, policy, share_bb, state, created_at, heartbeat_at, llm_provider, llm_model, llm_api_key, exec_mode, max_iterations, max_auto_turns, think_interval, memory_scope, memory_retention)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22)`,
 		a.ID, a.ParentID, a.Namespace, a.Name, slugVal, a.Role, a.Prompt, string(skillsJSON), string(policyJSON), a.ShareBB, a.State,
 		sqlutil.FormatTimestamp(a.CreatedAt), sqlutil.FormatTimestamp(a.HeartbeatAt),
 		a.LLMProvider, a.LLMModel, a.LLMAPIKey,
-		string(a.ExecMode), a.MaxIterations, a.MaxAutoTurns, a.ThinkInterval)
+		string(a.ExecMode), a.MaxIterations, a.MaxAutoTurns, a.ThinkInterval, string(memoryScope), string(memoryRetention))
 	if err != nil {
 		return fmt.Errorf("agents: create: %w", err)
 	}
@@ -90,7 +100,7 @@ func (s *sqlStore) Create(ctx context.Context, a agent.Agent) error {
 
 func (s *sqlStore) Get(ctx context.Context, id string) (agent.Agent, error) {
 	row := s.db.QueryRowContext(ctx, `
-		SELECT id, parent_id, ns, name, slug, role, prompt, skills_allow, policy, share_bb, state, created_at, heartbeat_at, llm_provider, llm_model, llm_api_key, exec_mode, max_iterations, max_auto_turns, think_interval, conversation_id
+		SELECT id, parent_id, ns, name, slug, role, prompt, skills_allow, policy, share_bb, state, created_at, heartbeat_at, llm_provider, llm_model, llm_api_key, exec_mode, max_iterations, max_auto_turns, think_interval, conversation_id, memory_scope, memory_retention
 		FROM agents WHERE id = $1 AND deleted_at IS NULL`, id)
 
 	var a agent.Agent
@@ -100,8 +110,8 @@ func (s *sqlStore) Get(ctx context.Context, id string) (agent.Agent, error) {
 	var llmProvider, llmModel, llmAPIKey sql.NullString
 	var execMode sql.NullString
 	var maxIterations, maxAutoTurns, thinkInterval sql.NullInt64
-	var conversationID sql.NullString
-	if err := row.Scan(&a.ID, &parentID, &a.Namespace, &name, &slug, &role, &prompt, &skillsJSON, &policyJSON, &a.ShareBB, &a.State, &created, &heartbeat, &llmProvider, &llmModel, &llmAPIKey, &execMode, &maxIterations, &maxAutoTurns, &thinkInterval, &conversationID); err != nil {
+	var conversationID, memoryScope, memoryRetention sql.NullString
+	if err := row.Scan(&a.ID, &parentID, &a.Namespace, &name, &slug, &role, &prompt, &skillsJSON, &policyJSON, &a.ShareBB, &a.State, &created, &heartbeat, &llmProvider, &llmModel, &llmAPIKey, &execMode, &maxIterations, &maxAutoTurns, &thinkInterval, &conversationID, &memoryScope, &memoryRetention); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return agent.Agent{}, ErrNotFound
 		}
@@ -150,14 +160,23 @@ func (s *sqlStore) Get(ctx context.Context, id string) (agent.Agent, error) {
 
 	// Set conversation ID
 	a.ConversationID = conversationID.String
+	a.MemoryScope = agent.NormalizeMemoryScope(agent.MemoryScope(memoryScope.String))
+	if memoryRetention.Valid && strings.TrimSpace(memoryRetention.String) != "" {
+		a.MemoryRetention = agent.NormalizeMemoryRetention(agent.MemoryRetention(memoryRetention.String))
+	} else {
+		a.MemoryRetention = agent.DefaultMemoryRetentionForScope(a.MemoryScope)
+	}
 
 	return a, nil
 }
 
 func (s *sqlStore) GetByNamespace(ctx context.Context, ns string) (agent.Agent, error) {
 	row := s.db.QueryRowContext(ctx, `
-		SELECT id, parent_id, ns, name, slug, role, prompt, skills_allow, policy, share_bb, state, created_at, heartbeat_at, llm_provider, llm_model, llm_api_key, exec_mode, max_iterations, max_auto_turns, think_interval, conversation_id
-		FROM agents WHERE ns = $1 AND deleted_at IS NULL`, ns)
+		SELECT id, parent_id, ns, name, slug, role, prompt, skills_allow, policy, share_bb, state, created_at, heartbeat_at, llm_provider, llm_model, llm_api_key, exec_mode, max_iterations, max_auto_turns, think_interval, conversation_id, memory_scope, memory_retention
+		FROM agents
+		WHERE ns = $1 AND deleted_at IS NULL
+		ORDER BY created_at DESC, id DESC
+		LIMIT 1`, ns)
 
 	var a agent.Agent
 	var skillsJSON, policyJSON string
@@ -166,8 +185,8 @@ func (s *sqlStore) GetByNamespace(ctx context.Context, ns string) (agent.Agent, 
 	var llmProvider, llmModel, llmAPIKey sql.NullString
 	var execMode sql.NullString
 	var maxIterations, maxAutoTurns, thinkInterval sql.NullInt64
-	var conversationID sql.NullString
-	if err := row.Scan(&a.ID, &parentID, &a.Namespace, &name, &slug, &role, &prompt, &skillsJSON, &policyJSON, &a.ShareBB, &a.State, &created, &heartbeat, &llmProvider, &llmModel, &llmAPIKey, &execMode, &maxIterations, &maxAutoTurns, &thinkInterval, &conversationID); err != nil {
+	var conversationID, memoryScope, memoryRetention sql.NullString
+	if err := row.Scan(&a.ID, &parentID, &a.Namespace, &name, &slug, &role, &prompt, &skillsJSON, &policyJSON, &a.ShareBB, &a.State, &created, &heartbeat, &llmProvider, &llmModel, &llmAPIKey, &execMode, &maxIterations, &maxAutoTurns, &thinkInterval, &conversationID, &memoryScope, &memoryRetention); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return agent.Agent{}, ErrNotFound
 		}
@@ -216,13 +235,19 @@ func (s *sqlStore) GetByNamespace(ctx context.Context, ns string) (agent.Agent, 
 
 	// Set conversation ID
 	a.ConversationID = conversationID.String
+	a.MemoryScope = agent.NormalizeMemoryScope(agent.MemoryScope(memoryScope.String))
+	if memoryRetention.Valid && strings.TrimSpace(memoryRetention.String) != "" {
+		a.MemoryRetention = agent.NormalizeMemoryRetention(agent.MemoryRetention(memoryRetention.String))
+	} else {
+		a.MemoryRetention = agent.DefaultMemoryRetentionForScope(a.MemoryScope)
+	}
 
 	return a, nil
 }
 
 func (s *sqlStore) GetBySlug(ctx context.Context, slug string) (agent.Agent, error) {
 	row := s.db.QueryRowContext(ctx, `
-		SELECT id, parent_id, ns, name, slug, role, prompt, skills_allow, policy, share_bb, state, created_at, heartbeat_at, llm_provider, llm_model, llm_api_key, exec_mode, max_iterations, max_auto_turns, think_interval, conversation_id
+		SELECT id, parent_id, ns, name, slug, role, prompt, skills_allow, policy, share_bb, state, created_at, heartbeat_at, llm_provider, llm_model, llm_api_key, exec_mode, max_iterations, max_auto_turns, think_interval, conversation_id, memory_scope, memory_retention
 		FROM agents WHERE slug = $1 AND deleted_at IS NULL`, slug)
 
 	var a agent.Agent
@@ -232,8 +257,8 @@ func (s *sqlStore) GetBySlug(ctx context.Context, slug string) (agent.Agent, err
 	var llmProvider, llmModel, llmAPIKey sql.NullString
 	var execMode sql.NullString
 	var maxIterations, maxAutoTurns, thinkInterval sql.NullInt64
-	var conversationID sql.NullString
-	if err := row.Scan(&a.ID, &parentID, &a.Namespace, &name, &slugVal, &role, &prompt, &skillsJSON, &policyJSON, &a.ShareBB, &a.State, &created, &heartbeat, &llmProvider, &llmModel, &llmAPIKey, &execMode, &maxIterations, &maxAutoTurns, &thinkInterval, &conversationID); err != nil {
+	var conversationID, memoryScope, memoryRetention sql.NullString
+	if err := row.Scan(&a.ID, &parentID, &a.Namespace, &name, &slugVal, &role, &prompt, &skillsJSON, &policyJSON, &a.ShareBB, &a.State, &created, &heartbeat, &llmProvider, &llmModel, &llmAPIKey, &execMode, &maxIterations, &maxAutoTurns, &thinkInterval, &conversationID, &memoryScope, &memoryRetention); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return agent.Agent{}, ErrNotFound
 		}
@@ -282,6 +307,12 @@ func (s *sqlStore) GetBySlug(ctx context.Context, slug string) (agent.Agent, err
 
 	// Set conversation ID
 	a.ConversationID = conversationID.String
+	a.MemoryScope = agent.NormalizeMemoryScope(agent.MemoryScope(memoryScope.String))
+	if memoryRetention.Valid && strings.TrimSpace(memoryRetention.String) != "" {
+		a.MemoryRetention = agent.NormalizeMemoryRetention(agent.MemoryRetention(memoryRetention.String))
+	} else {
+		a.MemoryRetention = agent.DefaultMemoryRetentionForScope(a.MemoryScope)
+	}
 
 	return a, nil
 }
@@ -299,7 +330,7 @@ func (s *sqlStore) Resolve(ctx context.Context, ref string) (agent.Agent, error)
 
 	// Try by name (case-insensitive)
 	row := s.db.QueryRowContext(ctx, `
-		SELECT id, parent_id, ns, name, slug, role, prompt, skills_allow, policy, share_bb, state, created_at, heartbeat_at, llm_provider, llm_model, llm_api_key, exec_mode, max_iterations, max_auto_turns, think_interval
+		SELECT id, parent_id, ns, name, slug, role, prompt, skills_allow, policy, share_bb, state, created_at, heartbeat_at, llm_provider, llm_model, llm_api_key, exec_mode, max_iterations, max_auto_turns, think_interval, conversation_id, memory_scope, memory_retention
 		FROM agents WHERE LOWER(name) = LOWER($1) AND deleted_at IS NULL LIMIT 1`, ref)
 
 	var skillsJSON, policyJSON string
@@ -308,7 +339,8 @@ func (s *sqlStore) Resolve(ctx context.Context, ref string) (agent.Agent, error)
 	var llmProvider, llmModel, llmAPIKey sql.NullString
 	var execMode sql.NullString
 	var maxIterations, maxAutoTurns, thinkInterval sql.NullInt64
-	scanErr := row.Scan(&a.ID, &parentID, &a.Namespace, &name, &slugVal, &role, &prompt, &skillsJSON, &policyJSON, &a.ShareBB, &a.State, &created, &heartbeat, &llmProvider, &llmModel, &llmAPIKey, &execMode, &maxIterations, &maxAutoTurns, &thinkInterval)
+	var conversationID, memoryScope, memoryRetention sql.NullString
+	scanErr := row.Scan(&a.ID, &parentID, &a.Namespace, &name, &slugVal, &role, &prompt, &skillsJSON, &policyJSON, &a.ShareBB, &a.State, &created, &heartbeat, &llmProvider, &llmModel, &llmAPIKey, &execMode, &maxIterations, &maxAutoTurns, &thinkInterval, &conversationID, &memoryScope, &memoryRetention)
 	if scanErr == nil {
 		a.ParentID = parentID.String
 		a.Name = name.String
@@ -339,6 +371,13 @@ func (s *sqlStore) Resolve(ctx context.Context, ref string) (agent.Agent, error)
 		a.MaxIterations = int(maxIterations.Int64)
 		a.MaxAutoTurns = int(maxAutoTurns.Int64)
 		a.ThinkInterval = int(thinkInterval.Int64)
+		a.ConversationID = conversationID.String
+		a.MemoryScope = agent.NormalizeMemoryScope(agent.MemoryScope(memoryScope.String))
+		if memoryRetention.Valid && strings.TrimSpace(memoryRetention.String) != "" {
+			a.MemoryRetention = agent.NormalizeMemoryRetention(agent.MemoryRetention(memoryRetention.String))
+		} else {
+			a.MemoryRetention = agent.DefaultMemoryRetentionForScope(a.MemoryScope)
+		}
 		return a, nil
 	}
 	if !errors.Is(scanErr, sql.ErrNoRows) {
@@ -354,7 +393,7 @@ func (s *sqlStore) List(ctx context.Context, limit int) ([]agent.Agent, error) {
 		limit = 100
 	}
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, parent_id, ns, name, slug, role, prompt, skills_allow, policy, share_bb, state, created_at, heartbeat_at, llm_provider, llm_model, llm_api_key, exec_mode, max_iterations, max_auto_turns, think_interval, conversation_id
+		SELECT id, parent_id, ns, name, slug, role, prompt, skills_allow, policy, share_bb, state, created_at, heartbeat_at, llm_provider, llm_model, llm_api_key, exec_mode, max_iterations, max_auto_turns, think_interval, conversation_id, memory_scope, memory_retention
 		FROM agents
 		WHERE deleted_at IS NULL
 		ORDER BY created_at DESC
@@ -382,7 +421,7 @@ func (s *sqlStore) ListByParent(ctx context.Context, parentID string, limit int)
 		limit = 100
 	}
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, parent_id, ns, name, slug, role, prompt, skills_allow, policy, share_bb, state, created_at, heartbeat_at, llm_provider, llm_model, llm_api_key, exec_mode, max_iterations, max_auto_turns, think_interval, conversation_id
+		SELECT id, parent_id, ns, name, slug, role, prompt, skills_allow, policy, share_bb, state, created_at, heartbeat_at, llm_provider, llm_model, llm_api_key, exec_mode, max_iterations, max_auto_turns, think_interval, conversation_id, memory_scope, memory_retention
 		FROM agents
 		WHERE parent_id = $1 AND deleted_at IS NULL
 		ORDER BY created_at DESC
@@ -485,6 +524,38 @@ func (s *sqlStore) UpdateConversationID(ctx context.Context, id, conversationID 
 	return nil
 }
 
+func (s *sqlStore) UpdateMemoryScope(ctx context.Context, id string, scope agent.MemoryScope) error {
+	res, err := s.db.ExecContext(ctx, `
+		UPDATE agents SET memory_scope = $1 WHERE id = $2 AND deleted_at IS NULL`, string(agent.NormalizeMemoryScope(scope)), id)
+	if err != nil {
+		return fmt.Errorf("agents: update memory_scope: %w", err)
+	}
+	rows, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("agents: update memory_scope rows affected: %w", err)
+	}
+	if rows == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+func (s *sqlStore) UpdateMemoryRetention(ctx context.Context, id string, retention agent.MemoryRetention) error {
+	res, err := s.db.ExecContext(ctx, `
+		UPDATE agents SET memory_retention = $1 WHERE id = $2 AND deleted_at IS NULL`, string(agent.NormalizeMemoryRetention(retention)), id)
+	if err != nil {
+		return fmt.Errorf("agents: update memory_retention: %w", err)
+	}
+	rows, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("agents: update memory_retention rows affected: %w", err)
+	}
+	if rows == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 func (s *sqlStore) Delete(ctx context.Context, id string) error {
 	res, err := s.db.ExecContext(ctx, `DELETE FROM agents WHERE id = $1`, id)
 	if err != nil {
@@ -548,7 +619,7 @@ func migrate(ctx context.Context, db *sql.DB) error {
 CREATE TABLE IF NOT EXISTS agents (
 	id           TEXT PRIMARY KEY,
 	parent_id    TEXT,
-	ns           TEXT UNIQUE NOT NULL,
+	ns           TEXT NOT NULL,
 	name         TEXT,
 	slug         TEXT UNIQUE,
 	role         TEXT,
@@ -561,7 +632,9 @@ CREATE TABLE IF NOT EXISTS agents (
 	heartbeat_at TEXT,
 	llm_provider TEXT,
 	llm_model    TEXT,
-	llm_api_key  TEXT
+	llm_api_key  TEXT,
+	memory_scope TEXT,
+	memory_retention TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_agents_ns ON agents(ns);
 CREATE INDEX IF NOT EXISTS idx_agents_parent ON agents(parent_id);
@@ -586,6 +659,8 @@ CREATE INDEX IF NOT EXISTS idx_agents_state ON agents(state);
 		"ALTER TABLE agents ADD COLUMN think_interval INTEGER",
 		"ALTER TABLE agents ADD COLUMN deleted_at TEXT",      // Soft delete timestamp
 		"ALTER TABLE agents ADD COLUMN conversation_id TEXT", // Linked companion conversation ID
+		"ALTER TABLE agents ADD COLUMN memory_scope TEXT",
+		"ALTER TABLE agents ADD COLUMN memory_retention TEXT",
 	}
 	for _, stmt := range alterStmts {
 		// SQLite will error if column already exists, which is fine
@@ -599,6 +674,96 @@ CREATE INDEX IF NOT EXISTS idx_agents_state ON agents(state);
 	_, err = db.ExecContext(ctx, "CREATE UNIQUE INDEX IF NOT EXISTS idx_agents_slug_unique ON agents(slug) WHERE slug IS NOT NULL")
 	errs.Ignore(err, "CREATE UNIQUE INDEX may fail if index exists")
 
+	if err := migrateNamespaceUniqueness(ctx, db); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func migrateNamespaceUniqueness(ctx context.Context, db *sql.DB) error {
+	row := db.QueryRowContext(ctx, `
+		SELECT sql
+		FROM sqlite_master
+		WHERE type = 'table' AND name = 'agents'`)
+	var ddl sql.NullString
+	if err := row.Scan(&ddl); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil
+		}
+		return fmt.Errorf("agents: inspect schema for namespace uniqueness: %w", err)
+	}
+	if !ddl.Valid {
+		return nil
+	}
+
+	schema := strings.ToLower(ddl.String)
+	if !strings.Contains(schema, "ns") || !strings.Contains(schema, "unique") {
+		return nil
+	}
+	if !strings.Contains(schema, "ns           text unique not null") &&
+		!strings.Contains(schema, "ns text unique not null") &&
+		!strings.Contains(schema, "ns\ttext unique not null") {
+		return nil
+	}
+
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("agents: begin namespace uniqueness migration: %w", err)
+	}
+	defer func() {
+		errs.Ignore(tx.Rollback(), "rollback agents namespace uniqueness migration")
+	}()
+
+	rebuildDDL := `
+CREATE TABLE agents_new (
+	id              TEXT PRIMARY KEY,
+	parent_id       TEXT,
+	ns              TEXT NOT NULL,
+	name            TEXT,
+	slug            TEXT,
+	role            TEXT,
+	prompt          TEXT,
+	skills_allow    TEXT NOT NULL,
+	policy          TEXT NOT NULL,
+	share_bb        TEXT NOT NULL CHECK (share_bb IN ('all','scoped','none')),
+	state           TEXT NOT NULL CHECK (state IN ('starting','running','stopped','error')),
+	created_at      TEXT NOT NULL,
+	heartbeat_at    TEXT,
+	llm_provider    TEXT,
+	llm_model       TEXT,
+	llm_api_key     TEXT,
+	exec_mode       TEXT,
+	max_iterations  INTEGER,
+	max_auto_turns  INTEGER,
+	think_interval  INTEGER,
+	deleted_at      TEXT,
+	conversation_id TEXT,
+	memory_scope    TEXT,
+	memory_retention TEXT
+);
+INSERT INTO agents_new (
+	id, parent_id, ns, name, slug, role, prompt, skills_allow, policy, share_bb, state, created_at, heartbeat_at,
+	llm_provider, llm_model, llm_api_key, exec_mode, max_iterations, max_auto_turns, think_interval, deleted_at, conversation_id, memory_scope, memory_retention
+)
+SELECT
+	id, parent_id, ns, name, slug, role, prompt, skills_allow, policy, share_bb, state, created_at, heartbeat_at,
+	llm_provider, llm_model, llm_api_key, exec_mode, max_iterations, max_auto_turns, think_interval, deleted_at, conversation_id, memory_scope, memory_retention
+FROM agents;
+DROP TABLE agents;
+ALTER TABLE agents_new RENAME TO agents;
+CREATE INDEX idx_agents_ns ON agents(ns);
+CREATE INDEX idx_agents_parent ON agents(parent_id);
+CREATE INDEX idx_agents_state ON agents(state);
+CREATE INDEX idx_agents_slug ON agents(slug);
+CREATE UNIQUE INDEX idx_agents_slug_unique ON agents(slug) WHERE slug IS NOT NULL;
+`
+	if _, err := tx.ExecContext(ctx, rebuildDDL); err != nil {
+		return fmt.Errorf("agents: rebuild schema without namespace uniqueness: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("agents: commit namespace uniqueness migration: %w", err)
+	}
 	return nil
 }
 
@@ -610,8 +775,8 @@ func scanAgent(rows *sql.Rows) (agent.Agent, error) {
 	var llmProvider, llmModel, llmAPIKey sql.NullString
 	var execMode sql.NullString
 	var maxIterations, maxAutoTurns, thinkInterval sql.NullInt64
-	var conversationID sql.NullString
-	if err := rows.Scan(&a.ID, &parentID, &a.Namespace, &name, &slug, &role, &prompt, &skillsJSON, &policyJSON, &a.ShareBB, &a.State, &created, &heartbeat, &llmProvider, &llmModel, &llmAPIKey, &execMode, &maxIterations, &maxAutoTurns, &thinkInterval, &conversationID); err != nil {
+	var conversationID, memoryScope, memoryRetention sql.NullString
+	if err := rows.Scan(&a.ID, &parentID, &a.Namespace, &name, &slug, &role, &prompt, &skillsJSON, &policyJSON, &a.ShareBB, &a.State, &created, &heartbeat, &llmProvider, &llmModel, &llmAPIKey, &execMode, &maxIterations, &maxAutoTurns, &thinkInterval, &conversationID, &memoryScope, &memoryRetention); err != nil {
 		return agent.Agent{}, fmt.Errorf("agents: scan: %w", err)
 	}
 
@@ -657,6 +822,12 @@ func scanAgent(rows *sql.Rows) (agent.Agent, error) {
 
 	// Set conversation ID
 	a.ConversationID = conversationID.String
+	a.MemoryScope = agent.NormalizeMemoryScope(agent.MemoryScope(memoryScope.String))
+	if memoryRetention.Valid && strings.TrimSpace(memoryRetention.String) != "" {
+		a.MemoryRetention = agent.NormalizeMemoryRetention(agent.MemoryRetention(memoryRetention.String))
+	} else {
+		a.MemoryRetention = agent.DefaultMemoryRetentionForScope(a.MemoryScope)
+	}
 
 	return a, nil
 }

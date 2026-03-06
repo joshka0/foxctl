@@ -124,6 +124,81 @@ func TestLLMChatEngine_Run_NoToolCalls(t *testing.T) {
 	}
 }
 
+func TestLLMChatEngine_Run_EmptyFinalResponseForcesFinalize(t *testing.T) {
+	callCount := 0
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		callCount++
+		if callCount == 1 {
+			resp := oaiResponse{
+				ID: "test-empty-1",
+				Choices: []struct {
+					Message      oaiMessage `json:"message"`
+					FinishReason string     `json:"finish_reason"`
+				}{
+					{
+						Message:      oaiMessage{Role: "assistant", Content: ""},
+						FinishReason: "stop",
+					},
+				},
+				Usage: struct {
+					PromptTokens     int `json:"prompt_tokens"`
+					CompletionTokens int `json:"completion_tokens"`
+				}{
+					PromptTokens:     12,
+					CompletionTokens: 15,
+				},
+			}
+			_ = json.NewEncoder(w).Encode(resp)
+			return
+		}
+
+		resp := oaiResponse{
+			ID: "test-empty-2",
+			Choices: []struct {
+				Message      oaiMessage `json:"message"`
+				FinishReason string     `json:"finish_reason"`
+			}{
+				{
+					Message:      oaiMessage{Role: "assistant", Content: "Fallback final answer."},
+					FinishReason: "stop",
+				},
+			},
+			Usage: struct {
+				PromptTokens     int `json:"prompt_tokens"`
+				CompletionTokens int `json:"completion_tokens"`
+			}{
+				PromptTokens:     6,
+				CompletionTokens: 4,
+			},
+		}
+		_ = json.NewEncoder(w).Encode(resp)
+	})
+
+	engine := &LLMChatEngine{
+		config: LLMChatConfig{
+			APIKey:        "test-key",
+			BaseURL:       "http://mock",
+			Model:         "test-model",
+			MaxIterations: 10,
+		},
+		client: &http.Client{Transport: &handlerTransport{handler: handler}},
+	}
+
+	output, err := engine.Run(context.Background(), EngineInput{
+		Messages: []Message{{Role: RoleUser, Content: "Hi"}},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if output.AssistantText != "Fallback final answer." {
+		t.Fatalf("assistant_text=%q want %q", output.AssistantText, "Fallback final answer.")
+	}
+	if callCount != 2 {
+		t.Fatalf("call_count=%d want 2", callCount)
+	}
+}
+
 func TestLLMChatEngine_Run_WithToolCall(t *testing.T) {
 	callCount := 0
 
@@ -536,19 +611,19 @@ func TestDetectProvider(t *testing.T) {
 		wantProv string
 	}{
 		{
-			name:     "no keys",
+			name:     "lmstudio default when no keys",
 			envVars:  map[string]string{},
-			wantKey:  "",
-			wantProv: "",
+			wantKey:  "lm-studio",
+			wantProv: "lmstudio",
 		},
 		{
-			name:     "openrouter priority",
-			envVars:  map[string]string{"OPENROUTER_API_KEY": "or-key", "GROQ_API_KEY": "groq-key"},
-			wantKey:  "or-key",
-			wantProv: "openrouter",
+			name:     "lmstudio env priority over remote keys",
+			envVars:  map[string]string{"LMSTUDIO_API_KEY": "local-key", "OPENROUTER_API_KEY": "or-key"},
+			wantKey:  "local-key",
+			wantProv: "lmstudio",
 		},
 		{
-			name:     "groq fallback",
+			name:     "remote fallback when lmstudio not set",
 			envVars:  map[string]string{"GROQ_API_KEY": "groq-key"},
 			wantKey:  "groq-key",
 			wantProv: "groq",
@@ -558,7 +633,7 @@ func TestDetectProvider(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Clear env
-			for _, k := range []string{"OPENROUTER_API_KEY", "GROQ_API_KEY", "OPENAI_API_KEY"} {
+			for _, k := range []string{"LMSTUDIO_API_KEY", "LMSTUDIO_BASE_URL", "LMSTUDIO_MODEL", "OPENROUTER_API_KEY", "GROQ_API_KEY", "OPENAI_API_KEY"} {
 				t.Setenv(k, "")
 			}
 			// Set test env
@@ -578,10 +653,13 @@ func TestDetectProvider(t *testing.T) {
 }
 
 func TestBaseURLForProvider(t *testing.T) {
+	t.Setenv("LMSTUDIO_BASE_URL", "")
+
 	tests := []struct {
 		provider string
 		want     string
 	}{
+		{"lmstudio", "http://localhost:1234/v1"},
 		{"openrouter", "https://openrouter.ai/api/v1"},
 		{"groq", "https://api.groq.com/openai/v1"},
 		{"openai", "https://api.openai.com/v1"},

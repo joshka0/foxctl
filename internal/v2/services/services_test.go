@@ -4,6 +4,7 @@ import (
 	"context"
 	stderrors "errors"
 	"sort"
+	"strings"
 	"testing"
 	"time"
 
@@ -139,6 +140,78 @@ func TestSpawnService_DuplicateRequestIDIdempotent(t *testing.T) {
 	}
 }
 
+func TestSpawnService_WithParentAgentUsesRuntimeSpawner(t *testing.T) {
+	t.Parallel()
+
+	runtimeSpawner := &fakeRuntimeSpawner{
+		resp: spawn.Response{
+			RunID:     "run-jido-001",
+			AgentID:   "agent:worker-1",
+			ActorID:   "actor:worker-1",
+			TurnID:    "spawn-1",
+			RequestID: "req-runtime",
+			Status:    "spawned",
+		},
+	}
+	runSvc := &fakeRunInvoker{}
+	svc := services.NewSpawnService(services.SpawnDependencies{
+		RunService:     runSvc,
+		RuntimeSpawner: runtimeSpawner,
+		Now:            func() time.Time { return time.Date(2026, time.March, 6, 10, 0, 0, 0, time.UTC) },
+		NewID:          sequentialID("id"),
+	})
+
+	resp, err := svc.Spawn(context.Background(), spawn.Request{
+		RequestID:     "req-runtime",
+		Role:          "worker",
+		RunID:         "run-jido-001",
+		AgentID:       "agent:worker-1",
+		ActorID:       "actor:worker-1",
+		ParentAgentID: "agent:parent-1",
+		Prompt:        "investigate issue",
+	})
+	if err != nil {
+		t.Fatalf("Spawn() error = %v", err)
+	}
+	if resp.Status != "spawned" {
+		t.Fatalf("status=%q want spawned", resp.Status)
+	}
+	if runtimeSpawner.calls != 1 {
+		t.Fatalf("runtime spawn calls=%d want 1", runtimeSpawner.calls)
+	}
+	if runSvc.calls != 0 {
+		t.Fatalf("run invocations=%d want 0", runSvc.calls)
+	}
+	if runtimeSpawner.last.ParentAgentID != "agent:parent-1" {
+		t.Fatalf("parent_agent_id=%q want agent:parent-1", runtimeSpawner.last.ParentAgentID)
+	}
+}
+
+func TestSpawnService_WithParentAgentRequiresRuntimeSpawner(t *testing.T) {
+	t.Parallel()
+
+	svc := services.NewSpawnService(services.SpawnDependencies{
+		Now:   func() time.Time { return time.Date(2026, time.March, 6, 10, 5, 0, 0, time.UTC) },
+		NewID: sequentialID("id"),
+	})
+
+	_, err := svc.Spawn(context.Background(), spawn.Request{
+		RequestID:     "req-parent-missing",
+		Role:          "worker",
+		ParentAgentID: "agent:parent-1",
+	})
+	if err == nil {
+		t.Fatal("expected runtime spawner dependency error")
+	}
+	var verr *v2errors.V2Error
+	if !stderrors.As(err, &verr) {
+		t.Fatalf("error type=%T want *V2Error", err)
+	}
+	if verr.Kind != v2errors.ErrDependency {
+		t.Fatalf("error kind=%q want %q", verr.Kind, v2errors.ErrDependency)
+	}
+}
+
 func TestAskService_PolicyViolationReturns403Mapping(t *testing.T) {
 	t.Parallel()
 
@@ -173,25 +246,122 @@ func TestAskService_PolicyViolationReturns403Mapping(t *testing.T) {
 	}
 }
 
-func TestKillService_V1IDMappedToV2(t *testing.T) {
+func TestAskService_AppendsAndProjectsDispatchEvent(t *testing.T) {
 	t.Parallel()
 
+	dispatcher := &fakeAskDispatcher{}
+	eventStore := &fakeEventAppender{}
 	projections := newFakeProjectionStore()
-	idMap := &fakeIDMap{
-		mapping: map[string]string{
-			"legacy-run-001": "run-v2-001",
-		},
+	now := time.Date(2026, time.March, 5, 12, 30, 0, 0, time.UTC)
+
+	svc := services.NewAskService(services.AskDependencies{
+		Dispatcher:  dispatcher,
+		Events:      eventStore,
+		Projections: projections,
+		Now:         func() time.Time { return now },
+		NewID:       sequentialID("id"),
+	})
+
+	resp, err := svc.Ask(context.Background(), ask.Request{
+		RequestID: "req-ask-1",
+		AskID:     "ask-1",
+		AgentID:   "agent-001",
+		Namespace: "agent:001",
+		Kind:      "context",
+		Question:  "what changed?",
+		CallerNS:  "cli:1",
+		Timeout:   45 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("Ask() error = %v", err)
 	}
+	if resp.Status != "sent" {
+		t.Fatalf("status=%q want sent", resp.Status)
+	}
+	if len(eventStore.events) != 1 {
+		t.Fatalf("appended events=%d want 1", len(eventStore.events))
+	}
+	evt := eventStore.events[0]
+	if evt.EventType != events.EventRunStarted {
+		t.Fatalf("event_type=%q want %q", evt.EventType, events.EventRunStarted)
+	}
+	if evt.StreamID != "ask:ask-1" {
+		t.Fatalf("stream_id=%q want ask:ask-1", evt.StreamID)
+	}
+	if evt.Command != "ask" {
+		t.Fatalf("command=%q want ask", evt.Command)
+	}
+
+	state, err := projections.GetRunState(context.Background(), "ask:ask-1")
+	if err != nil {
+		t.Fatalf("GetRunState() error = %v", err)
+	}
+	if state.Status != "running" {
+		t.Fatalf("projection status=%q want running", state.Status)
+	}
+	if state.RequestID != "req-ask-1" {
+		t.Fatalf("projection request_id=%q want req-ask-1", state.RequestID)
+	}
+}
+
+func TestAskService_DispatchFailureRecordsRunFailed(t *testing.T) {
+	t.Parallel()
+
+	dispatcher := &fakeAskDispatcher{err: stderrors.New("mailbox down")}
+	eventStore := &fakeEventAppender{}
+	projections := newFakeProjectionStore()
+	now := time.Date(2026, time.March, 5, 12, 40, 0, 0, time.UTC)
+
+	svc := services.NewAskService(services.AskDependencies{
+		Dispatcher:  dispatcher,
+		Events:      eventStore,
+		Projections: projections,
+		Now:         func() time.Time { return now },
+		NewID:       sequentialID("id"),
+	})
+
+	_, err := svc.Ask(context.Background(), ask.Request{
+		RequestID: "req-ask-fail",
+		AskID:     "ask-fail",
+		AgentID:   "agent-001",
+		Namespace: "agent:001",
+		Kind:      "context",
+		Question:  "what changed?",
+		CallerNS:  "cli:1",
+		Timeout:   45 * time.Second,
+	})
+	if err == nil {
+		t.Fatal("expected Ask() error")
+	}
+	if len(eventStore.events) != 2 {
+		t.Fatalf("appended events=%d want 2", len(eventStore.events))
+	}
+	if eventStore.events[0].EventType != events.EventRunStarted {
+		t.Fatalf("event[0].type=%q want %q", eventStore.events[0].EventType, events.EventRunStarted)
+	}
+	if eventStore.events[1].EventType != events.EventRunFailed {
+		t.Fatalf("event[1].type=%q want %q", eventStore.events[1].EventType, events.EventRunFailed)
+	}
+	state, getErr := projections.GetRunState(context.Background(), "ask:ask-fail")
+	if getErr != nil {
+		t.Fatalf("GetRunState() error = %v", getErr)
+	}
+	if state.Status != "failed" {
+		t.Fatalf("projection status=%q want failed", state.Status)
+	}
+}
+
+func TestKillService_UsesProvidedRunID(t *testing.T) {
+	t.Parallel()
+
 	killer := &fakeKiller{}
 
 	svc := services.NewKillService(services.KillDependencies{
-		Killer:      killer,
-		Projections: projections,
-		IDMap:       idMap,
+		Killer: killer,
 	})
 
 	resp, err := svc.Kill(context.Background(), kill.Request{
-		RunID: "legacy-run-001",
+		RunID: "run-v2-001",
 	})
 	if err != nil {
 		t.Fatalf("Kill() error = %v", err)
@@ -199,43 +369,37 @@ func TestKillService_V1IDMappedToV2(t *testing.T) {
 	if resp.RunID != "run-v2-001" {
 		t.Fatalf("run_id=%q want run-v2-001", resp.RunID)
 	}
-	if !resp.MappedFromLegacy {
-		t.Fatal("expected mapped_from_legacy=true")
-	}
 	if killer.last != "run-v2-001" {
 		t.Fatalf("killer target=%q want run-v2-001", killer.last)
 	}
 }
 
-func TestKillService_V1IDMappedToV2_WithoutProjections(t *testing.T) {
+func TestKillService_ProjectionNotFoundReturnsNotFound(t *testing.T) {
 	t.Parallel()
 
-	idMap := &fakeIDMap{
-		mapping: map[string]string{
-			"legacy-run-002": "run-v2-002",
-		},
-	}
+	projections := newFakeProjectionStore()
 	killer := &fakeKiller{}
 
 	svc := services.NewKillService(services.KillDependencies{
-		Killer: killer,
-		IDMap:  idMap,
+		Killer:      killer,
+		Projections: projections,
 	})
 
-	resp, err := svc.Kill(context.Background(), kill.Request{
-		RunID: "legacy-run-002",
+	_, err := svc.Kill(context.Background(), kill.Request{
+		RunID: "run-missing",
 	})
-	if err != nil {
-		t.Fatalf("Kill() error = %v", err)
+	if err == nil {
+		t.Fatal("expected not found error")
 	}
-	if resp.RunID != "run-v2-002" {
-		t.Fatalf("run_id=%q want run-v2-002", resp.RunID)
+	var verr *v2errors.V2Error
+	if !stderrors.As(err, &verr) {
+		t.Fatalf("error type=%T want *V2Error", err)
 	}
-	if !resp.MappedFromLegacy {
-		t.Fatal("expected mapped_from_legacy=true")
+	if verr.Kind != v2errors.ErrNotFound {
+		t.Fatalf("error kind=%q want %q", verr.Kind, v2errors.ErrNotFound)
 	}
-	if killer.last != "run-v2-002" {
-		t.Fatalf("killer target=%q want run-v2-002", killer.last)
+	if killer.last != "" {
+		t.Fatalf("killer target=%q want empty", killer.last)
 	}
 }
 
@@ -302,6 +466,19 @@ func (f *fakeRunInvoker) Run(ctx context.Context, in run.TurnInput) (run.TurnOut
 	return f.out, f.err
 }
 
+type fakeRuntimeSpawner struct {
+	resp  spawn.Response
+	err   error
+	calls int
+	last  spawn.Request
+}
+
+func (f *fakeRuntimeSpawner) SpawnChild(_ context.Context, req spawn.Request) (spawn.Response, error) {
+	f.calls++
+	f.last = req
+	return f.resp, f.err
+}
+
 type fakeEventReader struct {
 	events []events.Event
 }
@@ -310,6 +487,15 @@ func (f *fakeEventReader) ListStream(context.Context, events.StreamFilter) ([]ev
 	out := make([]events.Event, len(f.events))
 	copy(out, f.events)
 	return out, nil
+}
+
+type fakeEventAppender struct {
+	events []events.Event
+}
+
+func (f *fakeEventAppender) Append(_ context.Context, evt events.Event) error {
+	f.events = append(f.events, evt)
+	return nil
 }
 
 type fakeProjectionStore struct {
@@ -400,13 +586,21 @@ func (f fakeAskPolicy) AuthorizeAsk(context.Context, ask.Request) error {
 }
 
 type fakeAskDispatcher struct {
-	calls   int
-	lastMsg ask.Message
+	calls     int
+	lastMsg   ask.Message
+	messageID string
+	err       error
 }
 
 func (f *fakeAskDispatcher) Send(_ context.Context, msg ask.Message) (string, error) {
 	f.calls++
 	f.lastMsg = msg
+	if f.err != nil {
+		return "", f.err
+	}
+	if strings.TrimSpace(f.messageID) != "" {
+		return f.messageID, nil
+	}
 	return "msg-001", nil
 }
 
@@ -417,21 +611,6 @@ type fakeKiller struct {
 func (f *fakeKiller) Kill(_ context.Context, runID string) error {
 	f.last = runID
 	return nil
-}
-
-type fakeIDMap struct {
-	mapping map[string]string
-}
-
-func (f *fakeIDMap) Put(context.Context, string, string, string) error {
-	return nil
-}
-
-func (f *fakeIDMap) ResolveV2ID(_ context.Context, _ string, legacyID string) (string, error) {
-	if id, ok := f.mapping[legacyID]; ok {
-		return id, nil
-	}
-	return "", events.ErrNotFound
 }
 
 func sequentialID(prefix string) func() string {

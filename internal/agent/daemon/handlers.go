@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -25,7 +26,7 @@ import (
 // - FailureModes: payload decode errors, execution errors, reply marshal/send errors
 // - Related: handleCmd, handleConsoleAsk
 // - Keywords: agent.ask, agent.reply, mailbox, companion
-func handleAsk(ctx context.Context, logger zerolog.Logger, msg agent.Message, companionSvc ChatService, mailboxStore mailbox.Store, policy agent.Policy, optCtx *OptimizationContext, agentID string) error {
+func handleAsk(ctx context.Context, logger zerolog.Logger, msg agent.Message, companionSvc ChatService, mailboxStore mailbox.Store, policy agent.Policy, optCtx *OptimizationContext, agentID string, agentRole string) error {
 	// 1. Parse payload envelope
 	var env struct {
 		Data agent.AskData `json:"data"`
@@ -59,6 +60,20 @@ func handleAsk(ctx context.Context, logger zerolog.Logger, msg agent.Message, co
 
 	// Inject tool hints from optimization (if enabled)
 	question := askData.Question
+	originalQuestion := askData.Question
+	requireContextQuery := false
+	execMode := agent.ExecutionMode("")
+	if shouldEnforceResearchExecution(agentRole, originalQuestion) {
+		question = injectResearchExecutionContract(question)
+		requireContextQuery = true
+		execMode = agent.ModeReactive
+	}
+	logger.Debug().
+		Str("agent_role", agentRole).
+		Bool("require_context_query", requireContextQuery).
+		Str("exec_mode_override", string(execMode)).
+		Msg("ask execution policy")
+
 	if optCtx != nil && optCtx.Enabled && optCtx.Collector != nil {
 		hints, err := optCtx.Collector.GetHints(ctx, optCtx.AgentRole, askData.Question)
 		if err == nil && len(hints) > 0 {
@@ -74,11 +89,20 @@ func handleAsk(ctx context.Context, logger zerolog.Logger, msg agent.Message, co
 	defer cancel()
 
 	startTime := time.Now()
-	resp, chatErr := companionSvc.Chat(turnCtx, companion.ChatRequest{
-		ConversationID: conversationID,
-		Message:        question,
-		Context:        askData.Context,
-	})
+	var requireContextQueryPtr *bool
+	if requireContextQuery {
+		requireContextQueryPtr = &requireContextQuery
+	}
+	chatReq := companion.ChatRequest{
+		ConversationID:      conversationID,
+		Message:             question,
+		Context:             askData.Context,
+		RequireContextQuery: requireContextQueryPtr,
+	}
+	if execMode != "" {
+		chatReq.ExecMode = execMode
+	}
+	resp, chatErr := companionSvc.Chat(turnCtx, chatReq)
 	durationMS = time.Since(startTime).Milliseconds()
 
 	if chatErr != nil {
@@ -125,6 +149,48 @@ func handleAsk(ctx context.Context, logger zerolog.Logger, msg agent.Message, co
 		Timestamp: time.Now().UnixMilli(),
 	}
 	return mailboxStore.Send(ctx, replyMsg)
+}
+
+func shouldEnforceResearchExecution(agentRole, question string) bool {
+	role := strings.ToLower(strings.TrimSpace(agentRole))
+	switch role {
+	case "researcher", "semantic_scout", "dag_scout", "symbol_scout", "annotation_scout":
+		// Skip strict enforcement for very short conversational asks.
+		q := strings.ToLower(strings.TrimSpace(question))
+		if q == "" {
+			return false
+		}
+		if len(q) <= 24 {
+			shortConversational := []string{
+				"hello", "hi", "hey", "thanks", "thank you",
+				"how are you", "who are you", "what can you do",
+			}
+			for _, phrase := range shortConversational {
+				if q == phrase {
+					return false
+				}
+			}
+		}
+		return true
+	default:
+		return false
+	}
+}
+
+func injectResearchExecutionContract(question string) string {
+	contractHeader := "RESEARCH EXECUTION CONTRACT (must follow):"
+	if strings.Contains(question, contractHeader) {
+		return question
+	}
+	contract := []string{
+		contractHeader,
+		"1. First call one discovery tool: context_search OR smart_search OR repo_index_search OR code.search.",
+		"2. Then call one source tool: fs_read_file OR fs.read_file OR code_search OR code.search OR repo_index_dag_grep.",
+		"3. Ground major claims with concrete file references (`path:line`).",
+		"4. If evidence is missing, state it explicitly under 'Gaps'.",
+		"5. Final format: Findings, Evidence, Gaps, Next Steps.",
+	}
+	return strings.TrimSpace(question) + "\n\n" + strings.Join(contract, "\n")
 }
 
 // handleCmd processes agent.cmd messages and executes requested actions.

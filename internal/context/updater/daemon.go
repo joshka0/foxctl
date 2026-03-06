@@ -4,8 +4,8 @@ import (
 	"context"
 	"log/slog"
 
-	"github.com/jkatigb/agentctl/internal/planning/llm"
 	"github.com/jkatigb/agentctl/internal/platform/config"
+	llmproviders "github.com/jkatigb/agentctl/internal/providers/llm"
 )
 
 // DaemonConfig provides dependencies for the context updater worker.
@@ -29,40 +29,47 @@ type DaemonConfig struct {
 // NewWorkerFromConfig creates a context updater worker configured from daemon settings.
 // Returns nil if LLM providers are not available.
 func NewWorkerFromConfig(ctx context.Context, cfg DaemonConfig) (*Worker, error) {
-	// Build LLM provider config from platform config
-	providerCfg := llm.ProviderConfig{
-		CerebrasAPIKey:   cfg.Config.LLM.CerebrasAPIKey,
-		OpenRouterAPIKey: cfg.Config.LLM.OpenRouterAPIKey,
-		OpenRouterModel:  cfg.Config.LLM.OpenRouterModel,
-		GroqAPIKey:       cfg.Config.LLM.GroqAPIKey,
-		OpenAIAPIKey:     cfg.Config.LLM.OpenAIAPIKey,
-	}
-
-	// Check if any cheap LLM provider is available
-	if !llm.IsLLMPlanningAvailableFromConfig(providerCfg) {
-		return nil, nil // No LLM available - skip silently
-	}
-
-	// Determine API key and provider to use (priority: openrouter > cerebras > groq > openai)
+	// Determine API key and provider to use.
 	var apiKey, provider, model string
-	switch {
-	case providerCfg.OpenRouterAPIKey != "":
-		apiKey = providerCfg.OpenRouterAPIKey
-		provider = "openrouter"
-		model = "qwen/qwen3-coder-next"
-	case providerCfg.CerebrasAPIKey != "":
-		apiKey = providerCfg.CerebrasAPIKey
-		provider = "cerebras"
-		model = "llama3.1-8b"
-	case providerCfg.GroqAPIKey != "":
-		apiKey = providerCfg.GroqAPIKey
-		provider = "groq"
-		model = "llama-3.1-8b-instant"
-	case providerCfg.OpenAIAPIKey != "":
-		apiKey = providerCfg.OpenAIAPIKey
-		provider = "openai"
-		model = "gpt-4o-mini"
+	provider = cfg.Config.LLM.Provider
+	if provider == "" {
+		provider = "lmstudio"
+	}
+	switch provider {
+	case "lmstudio":
+		apiKey = cfg.Config.LLM.ResolveAPIKey(provider)
+		model = cfg.Config.LLM.ResolveModel(provider)
+		if model == "" {
+			model = llmproviders.DefaultModelForProvider(provider)
+		}
+	case "openrouter":
+		apiKey = cfg.Config.LLM.ResolveAPIKey(provider)
+		model = cfg.Config.LLM.ResolveModel(provider)
+		if model == "" {
+			model = "qwen/qwen3-coder-next"
+		}
+	case "cerebras":
+		apiKey = cfg.Config.LLM.ResolveAPIKey(provider)
+		model = cfg.Config.LLM.ResolveModel(provider)
+		if model == "" {
+			model = "llama3.1-8b"
+		}
+	case "groq":
+		apiKey = cfg.Config.LLM.ResolveAPIKey(provider)
+		model = cfg.Config.LLM.ResolveModel(provider)
+		if model == "" {
+			model = "llama-3.1-8b-instant"
+		}
+	case "openai":
+		apiKey = cfg.Config.LLM.ResolveAPIKey(provider)
+		model = cfg.Config.LLM.ResolveModel(provider)
+		if model == "" {
+			model = "gpt-4o-mini"
+		}
 	default:
+		return nil, nil // Unknown provider.
+	}
+	if apiKey == "" {
 		return nil, nil
 	}
 
@@ -89,6 +96,9 @@ func NewWorkerFromConfig(ctx context.Context, cfg DaemonConfig) (*Worker, error)
 
 // Available returns true if cheap LLM providers are configured.
 func Available(cfg config.Config) bool {
+	if cfg.LLM.Provider == "" || cfg.LLM.Provider == "lmstudio" {
+		return true
+	}
 	return cfg.LLM.CerebrasAPIKey != "" ||
 		cfg.LLM.OpenRouterAPIKey != "" ||
 		cfg.LLM.GroqAPIKey != "" ||

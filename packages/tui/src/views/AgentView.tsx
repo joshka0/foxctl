@@ -1,8 +1,15 @@
 // Agent View - Browse agents and their activity streams
 import { useState } from "react";
 import { useKeyboard } from "@opentui/react";
-import { useAgents } from "../hooks/useData";
-import { useAgent, useTrajectoryEvents } from "../hooks/useData";
+import {
+  useAgent,
+  useAgentMemoryContext,
+  useAgentMemoryStats,
+  useAgents,
+  useCompressAgentMemory,
+  useRoom,
+  useTrajectoryEvents,
+} from "../hooks/useData";
 import { WINDOWED_LIST_HEIGHT } from "../constants";
 import type { Agent, TrajectoryEvent } from "@agentctl/data";
 
@@ -72,6 +79,37 @@ function truncate(s: string | undefined, len: number): string {
   return s.length > len ? s.slice(0, len - 3) + "..." : s;
 }
 
+function formatSkillsAllow(skills: Agent["skills_allow"]): string {
+  if (!skills) return "";
+  if (Array.isArray(skills)) return skills.join(", ");
+  return skills;
+}
+
+function formatPolicy(policy: Agent["policy"]): string {
+  if (!policy) return "";
+  if (typeof policy === "string") return policy;
+  try {
+    return JSON.stringify(policy);
+  } catch {
+    return String(policy);
+  }
+}
+
+function resolveAgentWorkspace(agent: Agent | undefined): string | undefined {
+  const ns = (agent?.ns || "").trim();
+  if (ns.startsWith("/")) return ns;
+  if (typeof process !== "undefined" && typeof process.cwd === "function") {
+    return process.cwd();
+  }
+  return undefined;
+}
+
+function controlRoomID(agent: Agent | undefined): string | undefined {
+  const id = (agent?.id || "").trim();
+  if (!id) return undefined;
+  return `agent-${id}`;
+}
+
 interface AgentRowProps {
   agent: Agent;
   selected: boolean;
@@ -85,9 +123,13 @@ function AgentRow({ agent, selected }: AgentRowProps) {
     <box height={1} backgroundColor={bg} flexDirection="row">
       <text fg="#ffffff">
         {cursor}
-        <span fg={stateColor(agent.state)}>{(agent.state || "?").slice(0, 8).padEnd(9)}</span>
+        <span fg={stateColor(agent.state)}>
+          {(agent.state || "?").slice(0, 8).padEnd(9)}
+        </span>
         {"  "}
-        <span fg="#aa77ff">{(agent.role || "agent").slice(0, 12).padEnd(13)}</span>
+        <span fg="#aa77ff">
+          {(agent.role || "agent").slice(0, 12).padEnd(13)}
+        </span>
         {"  "}
         <span fg="#888888">{formatDate(agent.created_at).padEnd(14)}</span>
         {"  "}
@@ -110,7 +152,8 @@ function EventRow({ event, selected }: EventRowProps) {
   if (!preview && event.data_inline_json) {
     try {
       const data = JSON.parse(event.data_inline_json);
-      preview = data.summary || data.message || JSON.stringify(data).slice(0, 50);
+      preview =
+        data.summary || data.message || JSON.stringify(data).slice(0, 50);
     } catch {
       preview = event.data_inline_json.slice(0, 50);
     }
@@ -121,7 +164,9 @@ function EventRow({ event, selected }: EventRowProps) {
       <text fg="#ffffff">
         <span fg="#666666">{formatTime(event.ts).padEnd(12)}</span>
         {"  "}
-        <span fg={eventKindColor(event.kind)}>{event.kind.slice(0, 15).padEnd(16)}</span>
+        <span fg={eventKindColor(event.kind)}>
+          {event.kind.slice(0, 15).padEnd(16)}
+        </span>
         {"  "}
         <span fg="#888888">{truncate(preview, 45)}</span>
       </text>
@@ -135,9 +180,25 @@ interface AgentDetailProps {
   events: TrajectoryEvent[] | undefined;
   eventsLoading: boolean;
   eventCursor: number;
+  memoryStats?: Record<string, unknown>;
+  memoryContext?: string;
+  controlRoomPolicy?: string;
+  controlRoomTargets?: string[];
+  memoryRefreshing?: boolean;
 }
 
-function AgentDetail({ agent, detail, events, eventsLoading, eventCursor }: AgentDetailProps) {
+function AgentDetail({
+  agent,
+  detail,
+  events,
+  eventsLoading,
+  eventCursor,
+  memoryStats,
+  memoryContext,
+  controlRoomPolicy,
+  controlRoomTargets,
+  memoryRefreshing,
+}: AgentDetailProps) {
   if (!agent) {
     return (
       <box padding={1}>
@@ -200,7 +261,9 @@ function AgentDetail({ agent, detail, events, eventsLoading, eventCursor }: Agen
             <b>Skills:</b>
           </text>
           <box paddingLeft={1}>
-            <text fg="#888888">{truncate(agentData.skills_allow, 60)}</text>
+            <text fg="#888888">
+              {truncate(formatSkillsAllow(agentData.skills_allow), 60)}
+            </text>
           </box>
         </>
       )}
@@ -211,10 +274,52 @@ function AgentDetail({ agent, detail, events, eventsLoading, eventCursor }: Agen
             <b>Policy:</b>
           </text>
           <box paddingLeft={1}>
-            <text fg="#888888">{truncate(agentData.policy, 60)}</text>
+            <text fg="#888888">
+              {truncate(formatPolicy(agentData.policy), 60)}
+            </text>
           </box>
         </>
       )}
+      <text> </text>
+      <text>
+        <b fg="#666666">Memory: </b>
+        <span fg="#00ffff">{agentData.memory_scope || "agent"}</span>
+        <span fg="#666666"> / </span>
+        <span fg="#ffaa00">{agentData.memory_retention || "durable"}</span>
+      </text>
+      {agentData.conversation_id && (
+        <text>
+          <b fg="#666666">Conversation: </b>
+          <span fg="#888888">{truncate(agentData.conversation_id, 32)}</span>
+        </text>
+      )}
+      {memoryStats && (
+        <text>
+          <b fg="#666666">Memory Stats: </b>
+          <span fg="#888888">
+            vivid={String(memoryStats["vivid_turns"] ?? "-")} recent=
+            {String(memoryStats["recent_summaries"] ?? "-")} tokens=
+            {String(memoryStats["total_tokens_estimate"] ?? "-")}
+          </span>
+        </text>
+      )}
+      {memoryContext && (
+        <text>
+          <b fg="#666666">Memory Context: </b>
+          <span fg="#888888">
+            {truncate(memoryContext.replace(/\s+/g, " ").trim(), 80)}
+          </span>
+        </text>
+      )}
+      {controlRoomPolicy && (
+        <text>
+          <b fg="#666666">Control Room: </b>
+          <span fg="#aa77ff">{controlRoomPolicy}</span>
+          <span fg="#666666"> targets=</span>
+          <span fg="#888888">{String((controlRoomTargets || []).length)}</span>
+        </text>
+      )}
+      {memoryRefreshing && <text fg="#666666">Refreshing memory...</text>}
       <text> </text>
       <text fg="#aa77ff">
         <b>Recent Activity:</b>
@@ -223,9 +328,15 @@ function AgentDetail({ agent, detail, events, eventsLoading, eventCursor }: Agen
         {eventsLoading ? (
           <text fg="#666666">Loading events...</text>
         ) : events && events.length > 0 ? (
-          events.slice(0, 8).map((event, i) => (
-            <EventRow key={event.id} event={event} selected={i === eventCursor} />
-          ))
+          events
+            .slice(0, 8)
+            .map((event, i) => (
+              <EventRow
+                key={event.id}
+                event={event}
+                selected={i === eventCursor}
+              />
+            ))
         ) : (
           <text fg="#666666">No recent activity</text>
         )}
@@ -243,11 +354,24 @@ interface AgentFullDetailProps {
 function AgentFullDetail({ agent, onClose }: AgentFullDetailProps) {
   const [eventCursor, setEventCursor] = useState(0);
   const [eventScrollOffset, setEventScrollOffset] = useState(0);
+  const [memoryStatus, setMemoryStatus] = useState<string>("");
   const EVENT_LIST_HEIGHT = WINDOWED_LIST_HEIGHT;
+  const workspace = resolveAgentWorkspace(agent);
+  const roomID = controlRoomID(agent);
 
-  const { data: events, isLoading, refetch } = useTrajectoryEvents(agent.id, {
+  const {
+    data: events,
+    isLoading,
+    refetch,
+  } = useTrajectoryEvents(agent.id, {
     limit: 100,
   });
+  const { data: memoryStats, refetch: refetchMemoryStats } =
+    useAgentMemoryStats(agent.id);
+  const { data: memoryContext, refetch: refetchMemoryContext } =
+    useAgentMemoryContext(agent.id);
+  const { data: room } = useRoom(roomID, { workspace });
+  const { compress, isLoading: compressingMemory } = useCompressAgentMemory();
 
   const updateEventCursor = (newCursor: number) => {
     const maxCursor = Math.max(0, (events?.length || 0) - 1);
@@ -276,6 +400,23 @@ function AgentFullDetail({ agent, onClose }: AgentFullDetailProps) {
         break;
       case "r":
         refetch();
+        refetchMemoryStats();
+        refetchMemoryContext();
+        break;
+      case "c":
+        void compress({ agentID: agent.id })
+          .then((result) => {
+            setMemoryStatus(
+              `Compressed memory: ${String(result.summarized ?? 0)} summarized`,
+            );
+            refetchMemoryStats();
+            refetchMemoryContext();
+          })
+          .catch((err) => {
+            setMemoryStatus(
+              `Compress failed: ${err instanceof Error ? err.message : "unknown error"}`,
+            );
+          });
         break;
       case "g":
         updateEventCursor(0);
@@ -289,16 +430,31 @@ function AgentFullDetail({ agent, onClose }: AgentFullDetailProps) {
   return (
     <box flexDirection="column" width="100%" height="100%">
       {/* Header */}
-      <box height={2} paddingLeft={1} borderStyle="single" borderColor="#333333" border={["bottom"]}>
+      <box
+        height={2}
+        paddingLeft={1}
+        borderStyle="single"
+        borderColor="#333333"
+        border={["bottom"]}
+      >
         <text fg="#aa77ff">
           <b>AGENT DETAIL</b>
           <span fg="#666666"> | {agent.id.slice(0, 24)}...</span>
         </text>
-        <text fg="#666666">j/k: navigate events | q/Esc: close</text>
+        <text fg="#666666">
+          j/k: navigate events | c: compress memory | q/Esc: close
+        </text>
       </box>
 
       {/* Agent Info */}
-      <box height={8} paddingLeft={1} paddingTop={1} borderStyle="single" borderColor="#333333" border={["bottom"]}>
+      <box
+        height={12}
+        paddingLeft={1}
+        paddingTop={1}
+        borderStyle="single"
+        borderColor="#333333"
+        border={["bottom"]}
+      >
         <box flexDirection="row">
           <text fg={stateColor(agent.state)}>
             <b>{(agent.state || "unknown").toUpperCase()}</b>
@@ -326,15 +482,83 @@ function AgentFullDetail({ agent, onClose }: AgentFullDetailProps) {
         {agent.llm_provider && (
           <text>
             <b fg="#666666">LLM: </b>
-            <span fg="#888888">{agent.llm_provider}{agent.llm_model ? `/${agent.llm_model}` : ""}</span>
+            <span fg="#888888">
+              {agent.llm_provider}
+              {agent.llm_model ? `/${agent.llm_model}` : ""}
+            </span>
           </text>
         )}
         {agent.skills_allow && (
           <text>
             <b fg="#666666">Skills: </b>
-            <span fg="#888888">{truncate(agent.skills_allow, 60)}</span>
+            <span fg="#888888">
+              {truncate(formatSkillsAllow(agent.skills_allow), 60)}
+            </span>
           </text>
         )}
+        <text>
+          <b fg="#666666">Memory: </b>
+          <span fg="#00ffff">{agent.memory_scope || "agent"}</span>
+          <span fg="#666666"> / </span>
+          <span fg="#ffaa00">{agent.memory_retention || "durable"}</span>
+        </text>
+        {agent.conversation_id && (
+          <text>
+            <b fg="#666666">Conversation: </b>
+            <span fg="#888888">{truncate(agent.conversation_id, 36)}</span>
+          </text>
+        )}
+        {memoryStats?.stats && (
+          <text>
+            <b fg="#666666">Stats: </b>
+            <span fg="#888888">
+              vivid={String(memoryStats.stats["vivid_turns"] ?? "-")} recent=
+              {String(memoryStats.stats["recent_summaries"] ?? "-")} tokens=
+              {String(memoryStats.stats["total_tokens_estimate"] ?? "-")}
+            </span>
+          </text>
+        )}
+        {room && (
+          <text>
+            <b fg="#666666">Room: </b>
+            <span fg="#aa77ff">{room.dispatch_policy || "all_subtree"}</span>
+            <span fg="#666666">
+              {" "}
+              ({(room.dispatch_agent_ids || []).length} pinned targets)
+            </span>
+          </text>
+        )}
+      </box>
+
+      <box
+        height={4}
+        paddingLeft={1}
+        paddingTop={1}
+        borderStyle="single"
+        borderColor="#333333"
+        border={["bottom"]}
+      >
+        <text fg="#ffff00">
+          <b>MEMORY CONTEXT</b>
+          <span fg="#666666">
+            {" "}
+            {compressingMemory ? "| compressing..." : ""}
+          </span>
+        </text>
+        <text fg="#888888">
+          {truncate(
+            memoryContext?.context?.replace(/\s+/g, " ").trim() ||
+              "No memory context yet",
+            180,
+          )}
+        </text>
+        <text
+          fg={
+            memoryStatus.startsWith("Compress failed") ? "#ff4444" : "#666666"
+          }
+        >
+          {memoryStatus || "Retention-aware recall window shown here"}
+        </text>
       </box>
 
       {/* Events list */}
@@ -350,13 +574,17 @@ function AgentFullDetail({ agent, onClose }: AgentFullDetailProps) {
         ) : events && events.length > 0 ? (
           <box flexDirection="column" overflow="hidden">
             <box height={1}>
-              <text fg="#555555">
-                TIME          KIND             PREVIEW
-              </text>
+              <text fg="#555555">TIME KIND PREVIEW</text>
             </box>
-            {events.slice(eventScrollOffset, eventScrollOffset + EVENT_LIST_HEIGHT).map((event, i) => (
-              <EventRow key={event.id} event={event} selected={i + eventScrollOffset === eventCursor} />
-            ))}
+            {events
+              .slice(eventScrollOffset, eventScrollOffset + EVENT_LIST_HEIGHT)
+              .map((event, i) => (
+                <EventRow
+                  key={event.id}
+                  event={event}
+                  selected={i + eventScrollOffset === eventCursor}
+                />
+              ))}
           </box>
         ) : (
           <text fg="#666666">No activity recorded</text>
@@ -364,7 +592,13 @@ function AgentFullDetail({ agent, onClose }: AgentFullDetailProps) {
       </box>
 
       {/* Footer */}
-      <box height={1} paddingLeft={1} borderStyle="single" borderColor="#333333" border={["top"]}>
+      <box
+        height={1}
+        paddingLeft={1}
+        borderStyle="single"
+        borderColor="#333333"
+        border={["top"]}
+      >
         <text fg="#666666">
           {eventCursor + 1}/{events?.length || 0} events
         </text>
@@ -384,19 +618,31 @@ export function AgentView() {
   const [stateIndex, setStateIndex] = useState(0);
 
   const { data, isLoading, error, refetch } = useAgents({
-    state: (stateFilter || undefined) as "running" | "starting" | "stopped" | "error" | undefined,
+    state: (stateFilter || undefined) as
+      | "running"
+      | "starting"
+      | "stopped"
+      | "error"
+      | undefined,
     limit: 50,
   });
 
   const agents = data?.agents || [];
   const selectedAgent = agents[cursor];
+  const selectedWorkspace = resolveAgentWorkspace(selectedAgent);
+  const selectedRoomID = controlRoomID(selectedAgent);
 
   const { data: agentDetail } = useAgent(selectedAgent?.id);
+  const { data: memoryStats } = useAgentMemoryStats(selectedAgent?.id);
+  const { data: memoryContext } = useAgentMemoryContext(selectedAgent?.id);
+  const { data: controlRoom } = useRoom(selectedRoomID, {
+    workspace: selectedWorkspace,
+  });
 
   // Get trajectory events for the selected agent (using agent id as trajectory id for now)
   const { data: events, isLoading: eventsLoading } = useTrajectoryEvents(
     selectedAgent?.id,
-    { limit: 20 }
+    { limit: 20 },
   );
 
   const LIST_HEIGHT = WINDOWED_LIST_HEIGHT;
@@ -446,7 +692,8 @@ export function AgentView() {
         break;
       case "F":
         // Cycle backwards
-        const prevIdx = (stateIndex - 1 + stateFilters.length) % stateFilters.length;
+        const prevIdx =
+          (stateIndex - 1 + stateFilters.length) % stateFilters.length;
         setStateIndex(prevIdx);
         setStateFilter(stateFilters[prevIdx]);
         setCursor(0);
@@ -495,7 +742,9 @@ export function AgentView() {
             </text>
           ))}
         </box>
-        <text fg="#888888">No agents found{stateFilter ? ` with state: ${stateFilter}` : ""}</text>
+        <text fg="#888888">
+          No agents found{stateFilter ? ` with state: ${stateFilter}` : ""}
+        </text>
         <text fg="#666666">Press f to cycle filters, r to refresh</text>
       </box>
     );
@@ -514,8 +763,21 @@ export function AgentView() {
   return (
     <box flexDirection="row" width="100%" height="100%">
       {/* Agents list */}
-      <box width="50%" flexDirection="column" borderStyle="single" borderColor="#333333" border={["right"]}>
-        <box height={4} paddingLeft={1} paddingTop={1} borderStyle="single" borderColor="#333333" border={["bottom"]}>
+      <box
+        width="50%"
+        flexDirection="column"
+        borderStyle="single"
+        borderColor="#333333"
+        border={["right"]}
+      >
+        <box
+          height={4}
+          paddingLeft={1}
+          paddingTop={1}
+          borderStyle="single"
+          borderColor="#333333"
+          border={["bottom"]}
+        >
           <text fg="#aa77ff">
             <b>AGENTS</b>
             <span fg="#666666"> ({data?.total || 0}) | Enter: full detail</span>
@@ -532,29 +794,41 @@ export function AgentView() {
               </text>
             ))}
           </box>
-          <text fg="#666666">
-            STATE      ROLE           CREATED          NAMESPACE
-          </text>
+          <text fg="#666666">STATE ROLE CREATED NAMESPACE</text>
         </box>
         <box flexGrow={1} flexDirection="column" overflow="hidden">
-          {agents.slice(scrollOffset, scrollOffset + LIST_HEIGHT).map((agent, i) => (
-            <AgentRow
-              key={agent.id}
-              agent={agent}
-              selected={i + scrollOffset === cursor}
-            />
-          ))}
+          {agents
+            .slice(scrollOffset, scrollOffset + LIST_HEIGHT)
+            .map((agent, i) => (
+              <AgentRow
+                key={agent.id}
+                agent={agent}
+                selected={i + scrollOffset === cursor}
+              />
+            ))}
         </box>
       </box>
 
       {/* Detail pane */}
-      <box flexGrow={1} borderStyle="single" borderColor="#444444" border={["left"]}>
+      <box
+        flexGrow={1}
+        borderStyle="single"
+        borderColor="#444444"
+        border={["left"]}
+      >
         <AgentDetail
           agent={selectedAgent}
           detail={agentDetail}
           events={events}
           eventsLoading={eventsLoading}
           eventCursor={eventCursor}
+          memoryStats={
+            memoryStats?.stats as Record<string, unknown> | undefined
+          }
+          memoryContext={memoryContext?.context}
+          controlRoomPolicy={controlRoom?.dispatch_policy}
+          controlRoomTargets={controlRoom?.dispatch_agent_ids}
+          memoryRefreshing={false}
         />
       </box>
     </box>

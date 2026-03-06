@@ -52,6 +52,7 @@ func TestUpsert_CreatesThenUpdates(t *testing.T) {
 	}
 	if got1 == nil {
 		t.Fatalf("expected ref, got nil")
+		return
 	}
 	if got1.ServiceURL != ref1.ServiceURL || got1.LastActivityID != ref1.LastActivityID {
 		t.Fatalf("unexpected ref after first upsert: %+v", *got1)
@@ -76,6 +77,7 @@ func TestUpsert_CreatesThenUpdates(t *testing.T) {
 	}
 	if got2 == nil {
 		t.Fatalf("expected ref, got nil")
+		return
 	}
 	if got2.ServiceURL != ref2.ServiceURL {
 		t.Fatalf("expected service_url %q, got %q", ref2.ServiceURL, got2.ServiceURL)

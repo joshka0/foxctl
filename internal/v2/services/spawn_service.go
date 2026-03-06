@@ -5,6 +5,7 @@ import (
 	stderrors "errors"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	v2errors "github.com/jkatigb/agentctl/internal/v2/core/errors"
@@ -15,17 +16,25 @@ import (
 
 // SpawnDependencies wires SpawnService collaborators.
 type SpawnDependencies struct {
-	RunService  RunInvoker
-	Events      EventStreamReader
-	Projections ProjectionStore
-	IDMap       IDMapStore
-	Now         func() time.Time
-	NewID       func() string
+	RunService     RunInvoker
+	RuntimeSpawner RuntimeSpawner
+	Events         EventStreamReader
+	Projections    ProjectionStore
+	Now            func() time.Time
+	NewID          func() string
+}
+
+// RuntimeSpawner performs parent-aware child spawn against an external runtime.
+type RuntimeSpawner interface {
+	SpawnChild(ctx context.Context, req spawn.Request) (spawn.Response, error)
 }
 
 // SpawnService orchestrates spawn operations through the shared run service.
 type SpawnService struct {
 	deps SpawnDependencies
+	mu   sync.Mutex
+
+	runtimeDedupe map[string]spawn.Response
 }
 
 // NewSpawnService builds a spawn service with deterministic-friendly defaults.
@@ -36,16 +45,19 @@ func NewSpawnService(deps SpawnDependencies) *SpawnService {
 	if deps.NewID == nil {
 		deps.NewID = defaultNewID()
 	}
-	return &SpawnService{deps: deps}
+	return &SpawnService{
+		deps:          deps,
+		runtimeDedupe: map[string]spawn.Response{},
+	}
 }
 
 // Spawn validates request, enforces request-id idempotency, executes a run turn,
 // and hydrates projections from append-only events.
 func (s *SpawnService) Spawn(ctx context.Context, req spawn.Request) (spawn.Response, error) {
-	if s == nil || s.deps.RunService == nil {
+	if s == nil {
 		return spawn.Response{}, &v2errors.V2Error{
 			Kind:    v2errors.ErrDependency,
-			Message: "spawn run service is not configured",
+			Message: "spawn service is not configured",
 			Fatal:   true,
 		}
 	}
@@ -58,6 +70,7 @@ func (s *SpawnService) Spawn(ctx context.Context, req spawn.Request) (spawn.Resp
 	}
 
 	req.RequestID = normalizeOrGenerate(req.RequestID, defaultRequestPref, s.deps.NewID)
+	req.ParentAgentID = strings.TrimSpace(req.ParentAgentID)
 
 	// Idempotency key: request_id.
 	if s.deps.Projections != nil && req.RequestID != "" {
@@ -80,9 +93,65 @@ func (s *SpawnService) Spawn(ctx context.Context, req spawn.Request) (spawn.Resp
 		}
 	}
 
+	if req.ParentAgentID != "" {
+		if previous, ok := s.getRuntimeDeduped(req.RequestID); ok {
+			previous.Idempotent = true
+			return previous, nil
+		}
+		if s.deps.RuntimeSpawner == nil {
+			return spawn.Response{}, &v2errors.V2Error{
+				Kind:    v2errors.ErrDependency,
+				Message: "spawn runtime spawner is not configured",
+				Fatal:   true,
+				Details: map[string]any{
+					"parent_agent_id": req.ParentAgentID,
+				},
+			}
+		}
+	}
+
+	if s.deps.RunService == nil && req.ParentAgentID == "" {
+		return spawn.Response{}, &v2errors.V2Error{
+			Kind:    v2errors.ErrDependency,
+			Message: "spawn run service is not configured",
+			Fatal:   true,
+		}
+	}
+
 	runID := normalizeOrGenerate(req.RunID, defaultRunPref, s.deps.NewID)
 	agentID := normalizeOrGenerate(req.AgentID, defaultAgentPref, s.deps.NewID)
 	actorID := normalizeOrGenerate(req.ActorID, "actor:"+req.Role, s.deps.NewID)
+	req.RunID = runID
+	req.AgentID = agentID
+	req.ActorID = actorID
+
+	if req.ParentAgentID != "" {
+		resp, err := s.deps.RuntimeSpawner.SpawnChild(ctx, req)
+		if err != nil {
+			return spawn.Response{}, err
+		}
+		if resp.RunID == "" {
+			resp.RunID = runID
+		}
+		if resp.AgentID == "" {
+			resp.AgentID = agentID
+		}
+		if resp.ActorID == "" {
+			resp.ActorID = actorID
+		}
+		if resp.RequestID == "" {
+			resp.RequestID = req.RequestID
+		}
+		if resp.Status == "" {
+			resp.Status = "spawned"
+		}
+		if resp.CreatedAt.IsZero() {
+			resp.CreatedAt = s.deps.Now()
+		}
+		s.setRuntimeDeduped(req.RequestID, resp)
+		return resp, nil
+	}
+
 	turnID := prefixedID(defaultTurnPref, s.deps.NewID)
 
 	mode := strings.TrimSpace(req.ExecMode)
@@ -114,22 +183,6 @@ func (s *SpawnService) Spawn(ctx context.Context, req spawn.Request) (spawn.Resp
 		return spawn.Response{}, err
 	}
 
-	mappedLegacy := false
-	if s.deps.IDMap != nil {
-		if legacyRunID := strings.TrimSpace(req.LegacyRunID); legacyRunID != "" {
-			if mapErr := s.deps.IDMap.Put(ctx, "run", legacyRunID, runID); mapErr != nil {
-				return spawn.Response{}, asDependencyError("persist run id mapping", mapErr)
-			}
-			mappedLegacy = true
-		}
-		if legacyAgentID := strings.TrimSpace(req.LegacyAgentID); legacyAgentID != "" {
-			if mapErr := s.deps.IDMap.Put(ctx, "agent", legacyAgentID, agentID); mapErr != nil {
-				return spawn.Response{}, asDependencyError("persist agent id mapping", mapErr)
-			}
-			mappedLegacy = true
-		}
-	}
-
 	status := "completed"
 	if s.deps.Projections != nil {
 		state, stateErr := s.deps.Projections.GetRunState(ctx, runID)
@@ -146,19 +199,39 @@ func (s *SpawnService) Spawn(ctx context.Context, req spawn.Request) (spawn.Resp
 	}
 
 	return spawn.Response{
-		RunID:        runID,
-		AgentID:      agentID,
-		ActorID:      actorID,
-		TurnID:       out.TurnID,
-		RequestID:    req.RequestID,
-		Status:       status,
-		Summary:      out.Summary,
-		Iterations:   out.Iterations,
-		ToolCalls:    out.ToolCalls,
-		Degraded:     out.Degraded,
-		MappedLegacy: mappedLegacy,
-		CreatedAt:    s.deps.Now(),
+		RunID:      runID,
+		AgentID:    agentID,
+		ActorID:    actorID,
+		TurnID:     out.TurnID,
+		RequestID:  req.RequestID,
+		Status:     status,
+		Summary:    out.Summary,
+		Iterations: out.Iterations,
+		ToolCalls:  out.ToolCalls,
+		Degraded:   out.Degraded,
+		CreatedAt:  s.deps.Now(),
 	}, nil
+}
+
+func (s *SpawnService) getRuntimeDeduped(requestID string) (spawn.Response, bool) {
+	requestID = strings.TrimSpace(requestID)
+	if requestID == "" {
+		return spawn.Response{}, false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	resp, ok := s.runtimeDedupe[requestID]
+	return resp, ok
+}
+
+func (s *SpawnService) setRuntimeDeduped(requestID string, resp spawn.Response) {
+	requestID = strings.TrimSpace(requestID)
+	if requestID == "" {
+		return
+	}
+	s.mu.Lock()
+	s.runtimeDedupe[requestID] = resp
+	s.mu.Unlock()
 }
 
 func (s *SpawnService) hydrateProjection(ctx context.Context, runID string) error {

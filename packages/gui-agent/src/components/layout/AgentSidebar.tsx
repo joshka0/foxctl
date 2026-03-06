@@ -1,200 +1,236 @@
-import { createElement, useMemo, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
-import { cn } from "@/lib/utils";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { ScrollArea } from "@/components/ui/scroll-area";
-import { useActivityStore } from "@/stores/activityStore";
-import { useViewStore } from "@/stores/viewStore";
-import { killAgent, listAgents, trashAgent } from "@/api/client";
-import type { Agent } from "@/api/types";
+import { createElement, useMemo, useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
+import { cn } from '@/lib/utils'
+import { Button } from '@/components/ui/button'
+import { Badge } from '@/components/ui/badge'
+import { ScrollArea } from '@/components/ui/scroll-area'
+import { useActivityStore } from '@/stores/activityStore'
+import { useViewStore, type ViewType } from '@/stores/viewStore'
+import { killAgent, listAgents, trashAgent } from '@/api/client'
+import type { Agent } from '@/api/types'
 import {
   getRoleIcon,
   getAgentActivityTimestamp,
   getAgentDisplayName,
   isWorkerAgent,
-} from "@/lib/agent-utils";
+} from '@/lib/agent-utils'
 import {
-  Search,
-  FileText,
-  Zap,
-  Settings,
-  Plus,
+  Activity,
   ChevronLeft,
   ChevronRight,
-  Activity,
+  Cpu,
+  FileSearch,
+  Hash,
+  Layers,
+  LayoutGrid,
   MessagesSquare,
+  Plus,
+  Workflow,
   Wrench,
-} from "lucide-react";
-import type { ViewType } from "@/stores/viewStore";
+} from 'lucide-react'
 
 interface SidebarItem {
-  id: ViewType;
-  icon: React.ReactNode;
-  label: string;
-  badge?: number;
-  active?: boolean;
-  type: "agent" | "action";
+  id: ViewType
+  icon: React.ReactNode
+  label: string
+  badge?: number
 }
 
 interface AgentSidebarProps {
-  activeView: ViewType;
-  onViewChange: (view: ViewType) => void;
+  activeView: ViewType
+  onViewChange: (view: ViewType) => void
 }
 
-const ONE_DAY_MS = 24 * 60 * 60 * 1000;
+const ONE_DAY_MS = 24 * 60 * 60 * 1000
 
 export function AgentSidebar({ activeView, onViewChange }: AgentSidebarProps) {
-  const [collapsed, setCollapsed] = useState(false);
-  const [showWorkers, setShowWorkers] = useState(false);
-  const [isMutatingWorkers, setIsMutatingWorkers] = useState(false);
-  const activityCount = useActivityStore((s) => s.events.length);
-  const connected = useActivityStore((s) => s.connected);
-  const { selectedAgent, setSelectedAgent, setSpawnAgentOpen } = useViewStore();
+  const [collapsed, setCollapsed] = useState(false)
+  const [showWorkers, setShowWorkers] = useState(false)
+  const [isMutatingWorkers, setIsMutatingWorkers] = useState(false)
+  const activityEvents = useActivityStore((s) => s.events)
+  const connected = useActivityStore((s) => s.connected)
+  const { selectedAgent, setSelectedAgent, setSpawnAgentOpen } = useViewStore()
+  const activityErrorCount = useMemo(
+    () => activityEvents.filter((event) => event.status === 'error').length,
+    [activityEvents],
+  )
 
   const { data: agentsData, refetch: refetchAgents } = useQuery({
-    queryKey: ["agents"],
+    queryKey: ['agents'],
     queryFn: () => listAgents(100),
     refetchInterval: 10000,
-  });
+  })
 
-  const agents = useMemo(() => agentsData?.agents ?? [], [agentsData?.agents]);
+  const agents = useMemo(() => agentsData?.agents ?? [], [agentsData?.agents])
   const { conversationalAgents, workerAgents } = useMemo(() => {
-    const oneDayAgo = Date.now() - ONE_DAY_MS;
-    const conversational: Agent[] = [];
-    const workers: Agent[] = [];
+    const conversational: Agent[] = []
+    const workers: Agent[] = []
 
     for (const agent of agents) {
       if (isWorkerAgent(agent)) {
-        workers.push(agent);
+        workers.push(agent)
       } else {
         const isImportantState =
-          agent.state === "running" ||
-          agent.state === "idle" ||
-          agent.state === "error";
-        const isRecent = getAgentActivityTimestamp(agent) >= oneDayAgo;
-        if (isImportantState || isRecent || selectedAgent?.id === agent.id) {
-          conversational.push(agent);
+          agent.state === 'running' ||
+          agent.state === 'idle' ||
+          agent.state === 'error'
+        if (isImportantState || selectedAgent?.id === agent.id) {
+          conversational.push(agent)
         }
       }
     }
 
-    const statusRank = (state: Agent["state"]): number => {
+    const statusRank = (state: Agent['state']): number => {
       switch (state) {
-        case "running":
-          return 0;
-        case "idle":
-          return 1;
-        case "error":
-          return 2;
-        case "stopped":
-          return 3;
+        case 'running':
+          return 0
+        case 'error':
+          return 1
+        case 'idle':
+          return 2
+        case 'stopped':
+          return 3
         default:
-          return 4;
+          return 4
       }
-    };
+    }
 
     conversational.sort((a, b) => {
-      const byStatus = statusRank(a.state) - statusRank(b.state);
-      if (byStatus !== 0) return byStatus;
-      return getAgentActivityTimestamp(b) - getAgentActivityTimestamp(a);
-    });
+      const byStatus = statusRank(a.state) - statusRank(b.state)
+      if (byStatus !== 0) return byStatus
+      return getAgentActivityTimestamp(b) - getAgentActivityTimestamp(a)
+    })
     workers.sort((a, b) => {
-      const byStatus = statusRank(a.state) - statusRank(b.state);
-      if (byStatus !== 0) return byStatus;
-      return getAgentActivityTimestamp(b) - getAgentActivityTimestamp(a);
-    });
+      const byStatus = statusRank(a.state) - statusRank(b.state)
+      if (byStatus !== 0) return byStatus
+      return getAgentActivityTimestamp(b) - getAgentActivityTimestamp(a)
+    })
 
     return {
       conversationalAgents: conversational,
       workerAgents: workers,
-    };
-  }, [agents, selectedAgent?.id]);
+    }
+  }, [agents, selectedAgent?.id])
+
+  const navItems: SidebarItem[] = [
+    {
+      id: 'runtime',
+      icon: <Cpu className="h-4 w-4" />,
+      label: 'Runtime',
+    },
+    {
+      id: 'rooms',
+      icon: <Hash className="h-4 w-4" />,
+      label: 'Rooms',
+    },
+    {
+      id: 'orchestration',
+      icon: <LayoutGrid className="h-4 w-4" />,
+      label: 'Orchestration',
+    },
+    {
+      id: 'turns',
+      icon: <Workflow className="h-4 w-4" />,
+      label: 'Turns',
+    },
+    {
+      id: 'context',
+      icon: <Layers className="h-4 w-4" />,
+      label: 'Context',
+    },
+    {
+      id: 'artifacts',
+      icon: <FileSearch className="h-4 w-4" />,
+      label: 'Artifacts',
+    },
+    {
+      id: 'events',
+      icon: <Activity className="h-4 w-4" />,
+      label: 'Events',
+      badge: activityErrorCount > 0 ? Math.min(activityErrorCount, 99) : undefined,
+    },
+    {
+      id: 'companion',
+      icon: <MessagesSquare className="h-4 w-4" />,
+      label: 'Companion',
+    },
+  ]
 
   const workerRunning = workerAgents.filter(
-    (agent) => agent.state === "running" || agent.state === "idle",
-  ).length;
+    (agent) => agent.state === 'running' || agent.state === 'idle',
+  ).length
   const workerErrored = workerAgents.filter(
-    (agent) => agent.state === "error",
-  ).length;
+    (agent) => agent.state === 'error',
+  ).length
   const workerStopped = workerAgents.filter(
-    (agent) => agent.state === "stopped",
-  ).length;
+    (agent) => agent.state === 'stopped',
+  ).length
   const workerTrashable = workerAgents.filter((agent) => {
-    if (agent.state !== "stopped") return false;
-    const ts = getAgentActivityTimestamp(agent);
-    return ts > 0 && ts < Date.now() - ONE_DAY_MS;
-  }).length;
-
-  const quickActions: SidebarItem[] = [
-    {
-      id: "search",
-      icon: <Search className="h-4 w-4" />,
-      label: "Search",
-      type: "action",
-    },
-    {
-      id: "logs",
-      icon: <FileText className="h-4 w-4" />,
-      label: "Logs",
-      type: "action",
-    },
-    {
-      id: "skills",
-      icon: <Zap className="h-4 w-4" />,
-      label: "Run Skill",
-      type: "action",
-    },
-  ];
+    if (agent.state !== 'stopped') return false
+    const ts = getAgentActivityTimestamp(agent)
+    return ts > 0 && ts < Date.now() - ONE_DAY_MS
+  }).length
+  const conversationalRunning = conversationalAgents.filter(
+    (agent) => agent.state === 'running' || agent.state === 'idle',
+  ).length
+  const conversationalErrored = conversationalAgents.filter(
+    (agent) => agent.state === 'error',
+  ).length
 
   const handleAgentClick = (agent: Agent) => {
-    setSelectedAgent(agent);
-    onViewChange("agents");
-  };
+    setSelectedAgent(agent)
+    onViewChange('runtime')
+  }
+
+  // Keep sidebar summary-first outside Runtime, but keep it usable from any view.
+  const showFullAgentLists = activeView === 'runtime'
+  const visibleConversationalAgents = showFullAgentLists
+    ? conversationalAgents
+    : conversationalAgents.slice(0, 5)
 
   const handleKillStoppedWorkers = async () => {
-    const targets = workerAgents.filter((agent) => agent.state === "stopped");
-    if (targets.length === 0) return;
-    if (!window.confirm(`Stop ${targets.length} stopped workers now?`)) return;
+    const targets = workerAgents.filter((agent) => agent.state === 'stopped')
+    if (targets.length === 0) return
+    if (!window.confirm(`Stop ${targets.length} stopped workers now?`)) return
 
-    setIsMutatingWorkers(true);
+    setIsMutatingWorkers(true)
     try {
-      await Promise.allSettled(targets.map((agent) => killAgent(agent.id)));
-      await refetchAgents();
+      await Promise.allSettled(targets.map((agent) => killAgent(agent.id)))
+      await refetchAgents()
     } finally {
-      setIsMutatingWorkers(false);
+      setIsMutatingWorkers(false)
     }
-  };
+  }
 
   const handleTrashOldWorkers = async () => {
-    const cutoff = Date.now() - ONE_DAY_MS;
+    const cutoff = Date.now() - ONE_DAY_MS
     const targets = workerAgents.filter((agent) => {
-      if (agent.state !== "stopped") return false;
-      const ts = getAgentActivityTimestamp(agent);
-      return ts > 0 && ts < cutoff;
-    });
-    if (targets.length === 0) return;
-    if (!window.confirm(`Trash ${targets.length} old workers?`)) return;
+      if (agent.state !== 'stopped') return false
+      const ts = getAgentActivityTimestamp(agent)
+      return ts > 0 && ts < cutoff
+    })
+    if (targets.length === 0) return
+    if (!window.confirm(`Trash ${targets.length} old workers?`)) return
 
-    setIsMutatingWorkers(true);
+    setIsMutatingWorkers(true)
     try {
-      await Promise.allSettled(targets.map((agent) => trashAgent(agent.id)));
-      await refetchAgents();
+      await Promise.allSettled(targets.map((agent) => trashAgent(agent.id)))
+      await refetchAgents()
     } finally {
-      setIsMutatingWorkers(false);
+      setIsMutatingWorkers(false)
     }
-  };
+  }
 
   return (
     <aside
       className={cn(
-        "flex flex-col bg-card border-r border-border transition-all duration-200",
-        collapsed ? "w-14" : "w-56",
+        'flex flex-col bg-card border-r border-border transition-all duration-200',
+        collapsed ? 'w-14' : 'w-56',
       )}
     >
       <div className="h-12 flex items-center justify-between px-3 border-b border-border">
         {!collapsed && (
-          <span className="text-sm font-semibold text-foreground">Agents</span>
+          <span className="text-sm font-semibold text-foreground">V2</span>
         )}
         <Button
           variant="ghost"
@@ -214,30 +250,29 @@ export function AgentSidebar({ activeView, onViewChange }: AgentSidebarProps) {
         <div className="px-2 mb-4">
           {!collapsed && (
             <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider px-2">
-              Chat
+              Surfaces
             </span>
           )}
-          <SidebarButton
-            item={{
-              id: "conversations",
-              icon: <MessagesSquare className="h-4 w-4" />,
-              label: "Conversations",
-              type: "agent",
-            }}
-            collapsed={collapsed}
-            active={activeView === "conversations"}
-            onClick={() => {
-              setSelectedAgent(null);
-              onViewChange("conversations");
-            }}
-          />
+          {navItems.map((item) => (
+            <SidebarButton
+              key={item.id}
+              item={item}
+              collapsed={collapsed}
+              active={activeView === item.id}
+              connected={item.id === 'events' ? connected : undefined}
+              onClick={() => {
+                if (item.id !== 'runtime') setSelectedAgent(null)
+                onViewChange(item.id)
+              }}
+            />
+          ))}
         </div>
 
         <div className="px-2 mb-4">
           {!collapsed && (
             <div className="flex items-center justify-between mb-2 px-2">
               <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
-                Agents
+                Conversational
               </span>
               <Button
                 variant="ghost"
@@ -245,12 +280,27 @@ export function AgentSidebar({ activeView, onViewChange }: AgentSidebarProps) {
                 className="h-5 w-5"
                 title="Spawn new agent"
                 onClick={() => {
-                  setSelectedAgent(null);
-                  setSpawnAgentOpen(true);
+                  setSelectedAgent(null)
+                  setSpawnAgentOpen(true)
                 }}
               >
                 <Plus className="h-3 w-3" />
               </Button>
+            </div>
+          )}
+          {!collapsed && agents.length > 0 && (
+            <div className="px-2 pb-2 text-[10px] text-muted-foreground flex items-center gap-2 flex-wrap">
+              <Badge variant="secondary" className="text-[10px]">
+                {conversationalAgents.length} conversational
+              </Badge>
+              <Badge className="text-[10px] bg-green-500/10 text-green-500 border-green-500/20">
+                {conversationalRunning} running
+              </Badge>
+              {conversationalErrored > 0 && (
+                <Badge className="text-[10px] bg-red-500/10 text-red-500 border-red-500/20">
+                  {conversationalErrored} errors
+                </Badge>
+              )}
             </div>
           )}
           {agents.length === 0
@@ -259,7 +309,7 @@ export function AgentSidebar({ activeView, onViewChange }: AgentSidebarProps) {
                   No agents yet
                 </div>
               )
-            : conversationalAgents.map((agent) => (
+            : visibleConversationalAgents.map((agent) => (
                 <AgentButton
                   key={agent.id}
                   agent={agent}
@@ -268,19 +318,21 @@ export function AgentSidebar({ activeView, onViewChange }: AgentSidebarProps) {
                   onClick={() => handleAgentClick(agent)}
                 />
               ))}
+          {!collapsed &&
+            !showFullAgentLists &&
+            conversationalAgents.length > visibleConversationalAgents.length && (
+              <div className="px-2 py-1 text-[10px] text-muted-foreground">
+                +{conversationalAgents.length - visibleConversationalAgents.length} more in Runtime
+              </div>
+            )}
 
           {workerAgents.length > 0 && (
-            <div
-              className={cn(
-                "mt-2",
-                !collapsed && "border-t border-border pt-2",
-              )}
-            >
+            <div className={cn('mt-2', !collapsed && 'border-t border-border pt-2')}>
               <Button
                 variant="ghost"
                 className={cn(
-                  "w-full justify-start mb-1 px-2",
-                  collapsed && "justify-center",
+                  'w-full justify-start mb-1 px-2',
+                  collapsed && 'justify-center',
                 )}
                 onClick={() => setShowWorkers((prev) => !prev)}
                 title="Worker agents"
@@ -292,18 +344,18 @@ export function AgentSidebar({ activeView, onViewChange }: AgentSidebarProps) {
                       Workers ({workerAgents.length})
                     </span>
                     <Badge variant="secondary" className="ml-auto text-[10px]">
-                      {workerRunning} run
+                      {workerRunning} running
                     </Badge>
                   </>
                 )}
               </Button>
               {!collapsed && (
                 <div className="px-2 pb-1 text-[10px] text-muted-foreground">
-                  {workerRunning} running, {workerErrored} errored,{" "}
-                  {workerStopped} stopped
+                  {workerRunning} running, {workerErrored} errors, {workerStopped}{' '}
+                  stopped
                 </div>
               )}
-              {showWorkers && (
+              {showWorkers && showFullAgentLists && (
                 <>
                   {!collapsed && (
                     <div className="px-2 mb-2 flex items-center gap-1">
@@ -341,70 +393,17 @@ export function AgentSidebar({ activeView, onViewChange }: AgentSidebarProps) {
             </div>
           )}
         </div>
-
-        <div className="px-2 mb-4">
-          {!collapsed && (
-            <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider px-2">
-              Activity
-            </span>
-          )}
-          <SidebarButton
-            item={{
-              id: "activity",
-              icon: <Activity className="h-4 w-4" />,
-              label: "Activity",
-              badge:
-                activityCount > 0 ? Math.min(activityCount, 99) : undefined,
-              type: "action",
-            }}
-            collapsed={collapsed}
-            active={activeView === "activity"}
-            onClick={() => onViewChange("activity")}
-            connected={connected}
-          />
-        </div>
-
-        <div className="px-2">
-          {!collapsed && (
-            <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider px-2">
-              Quick Actions
-            </span>
-          )}
-          {quickActions.map((item) => (
-            <SidebarButton
-              key={item.id}
-              item={item}
-              collapsed={collapsed}
-              active={activeView === item.id}
-              onClick={() => onViewChange(item.id)}
-            />
-          ))}
-        </div>
       </ScrollArea>
-
-      <div className="p-2 border-t border-border">
-        <SidebarButton
-          item={{
-            id: "settings",
-            icon: <Settings className="h-4 w-4" />,
-            label: "Settings",
-            type: "action",
-          }}
-          collapsed={collapsed}
-          active={activeView === "settings"}
-          onClick={() => onViewChange("settings")}
-        />
-      </div>
     </aside>
-  );
+  )
 }
 
 interface SidebarButtonProps {
-  item: SidebarItem;
-  collapsed: boolean;
-  active: boolean;
-  onClick: () => void;
-  connected?: boolean;
+  item: SidebarItem
+  collapsed: boolean
+  active: boolean
+  onClick: () => void
+  connected?: boolean
 }
 
 function SidebarButton({
@@ -416,8 +415,8 @@ function SidebarButton({
 }: SidebarButtonProps) {
   return (
     <Button
-      variant={active ? "secondary" : "ghost"}
-      className={cn("w-full justify-start mb-1 relative px-2")}
+      variant={active ? 'secondary' : 'ghost'}
+      className={cn('w-full justify-start mb-1 relative px-2')}
       onClick={onClick}
     >
       <span className="relative">
@@ -425,8 +424,8 @@ function SidebarButton({
         {connected !== undefined && (
           <span
             className={cn(
-              "absolute -top-1 -right-1 h-2 w-2 rounded-full",
-              connected ? "bg-green-500" : "bg-red-500",
+              'absolute -top-1 -right-1 h-2 w-2 rounded-full',
+              connected ? 'bg-green-500' : 'bg-red-500',
             )}
           />
         )}
@@ -442,37 +441,33 @@ function SidebarButton({
         </>
       )}
     </Button>
-  );
+  )
 }
 
 interface AgentButtonProps {
-  agent: Agent;
-  collapsed: boolean;
-  selected: boolean;
-  onClick: () => void;
+  agent: Agent
+  collapsed: boolean
+  selected: boolean
+  onClick: () => void
 }
 
-function AgentButton({
-  agent,
-  collapsed,
-  selected,
-  onClick,
-}: AgentButtonProps) {
-  const isRunning = agent.state === "running";
-  const displayName = getAgentDisplayName(agent);
+function AgentButton({ agent, collapsed, selected, onClick }: AgentButtonProps) {
+  const isRunning = agent.state === 'running'
+  const displayName = getAgentDisplayName(agent)
+  const shortID = agent.id.slice(0, 8)
 
   return (
     <Button
-      variant={selected ? "secondary" : "ghost"}
-      className={cn("w-full justify-start mb-1 relative px-2")}
+      variant={selected ? 'secondary' : 'ghost'}
+      className={cn('w-full justify-start mb-1 relative px-2')}
       onClick={onClick}
       title={displayName}
     >
       <span className="relative">
         {createElement(getRoleIcon(agent.role), {
           className: cn(
-            "h-4 w-4",
-            isRunning ? "text-green-500" : "text-muted-foreground",
+            'h-4 w-4',
+            isRunning ? 'text-green-500' : 'text-muted-foreground',
           ),
         })}
         {isRunning && (
@@ -480,10 +475,13 @@ function AgentButton({
         )}
       </span>
       {!collapsed && (
-        <>
-          <span className="ml-2 truncate capitalize">{displayName}</span>
-        </>
+        <span className="ml-2 min-w-0 flex items-center gap-1.5">
+          <span className="truncate capitalize">{displayName}</span>
+          <span className="shrink-0 rounded border border-border px-1 py-0 text-[10px] text-muted-foreground">
+            {shortID}
+          </span>
+        </span>
       )}
     </Button>
-  );
+  )
 }

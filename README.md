@@ -401,8 +401,11 @@ allowing any MCP-compatible client to discover and invoke them.
 
 ```bash
 # Start API server + Web GUI
-make ts-dev-gui
-# Open http://localhost:5173
+make gui-agent
+# Open http://localhost:5174
+
+# GUI only (requires API server already running)
+bun run dev:gui
 ```
 
 ### Terminal UI
@@ -437,7 +440,7 @@ make lint               # Linting
 
 # TypeScript
 bun install             # Install deps
-make ts-dev-gui         # Start GUI
+make gui-agent          # Start API + GUI
 ```
 
 ### CGO Build Note
