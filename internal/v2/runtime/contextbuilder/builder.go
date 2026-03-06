@@ -15,6 +15,8 @@ import (
 var (
 	// ErrMissingReader indicates the builder was configured without turn source.
 	ErrMissingReader = errors.New("v2 contextbuilder: missing turn reader")
+	// ErrMissingEpisodeReader indicates episode refs are unavailable without an episode source.
+	ErrMissingEpisodeReader = errors.New("v2 contextbuilder: missing episode reader")
 	// ErrMessageNotFound indicates a requested message ID is not present in the turn.
 	ErrMessageNotFound = errors.New("v2 contextbuilder: message not found")
 	// ErrMissingSessionID indicates temporal requests missing session identity.
@@ -85,8 +87,11 @@ type TemporalBundle struct {
 // Builder resolves turn references to context bundles.
 type Builder struct {
 	reader           run.TurnReader
+	episodeReader    run.EpisodeReader
+	narrativeReader  run.NarrativeReader
 	companion        CompanionProvider
 	artifactSearcher run.ArtifactSemanticRetriever
+	now              func() time.Time
 
 	artifactSearchTotal        atomic.Int64
 	artifactSearchVector       atomic.Int64
@@ -156,7 +161,41 @@ type ArtifactSearchStats struct {
 
 // New creates a context builder.
 func New(reader run.TurnReader) *Builder {
-	return &Builder{reader: reader}
+	builder := &Builder{
+		reader: reader,
+		now:    func() time.Time { return time.Now().UTC() },
+	}
+	if episodeReader, ok := reader.(run.EpisodeReader); ok {
+		builder.episodeReader = episodeReader
+	}
+	if narrativeReader, ok := reader.(run.NarrativeReader); ok {
+		builder.narrativeReader = narrativeReader
+	}
+	return builder
+}
+
+// SetEpisodeReader configures optional episode retrieval support.
+func (b *Builder) SetEpisodeReader(reader run.EpisodeReader) {
+	if b == nil {
+		return
+	}
+	b.episodeReader = reader
+}
+
+// SetNarrativeReader configures optional narrative retrieval support.
+func (b *Builder) SetNarrativeReader(reader run.NarrativeReader) {
+	if b == nil {
+		return
+	}
+	b.narrativeReader = reader
+}
+
+// SetNow configures an optional clock for deterministic tests.
+func (b *Builder) SetNow(now func() time.Time) {
+	if b == nil || now == nil {
+		return
+	}
+	b.now = now
 }
 
 // ArtifactStats returns semantic retrieval usage counters.
@@ -303,6 +342,27 @@ func (b *Builder) Build(ctx context.Context, req Request) (Bundle, error) {
 		return Bundle{}, err
 	}
 
+	if parsed.Kind == RefEpisode {
+		if b.episodeReader == nil {
+			return Bundle{}, ErrMissingEpisodeReader
+		}
+		episode, err := b.episodeReader.GetEpisode(ctx, parsed.EpisodeID)
+		if err != nil {
+			return Bundle{}, err
+		}
+		content, meta, err := b.resolveEpisode(parsed, episode.Clone())
+		if err != nil {
+			return Bundle{}, err
+		}
+		return Bundle{
+			Ref:     parsed.Raw,
+			TurnID:  episode.StartTurnID,
+			Kind:    parsed.Kind,
+			Content: content,
+			Meta:    meta,
+		}, nil
+	}
+
 	turn, err := b.reader.GetTurn(ctx, parsed.TurnID)
 	if err != nil {
 		return Bundle{}, err
@@ -320,6 +380,23 @@ func (b *Builder) Build(ctx context.Context, req Request) (Bundle, error) {
 		Kind:    parsed.Kind,
 		Content: content,
 		Meta:    meta,
+	}, nil
+}
+
+func (b *Builder) resolveEpisode(parsed Ref, episode run.EpisodeRecord) (string, map[string]any, error) {
+	if parsed.Kind != RefEpisode {
+		return "", nil, ErrInvalidRef
+	}
+	return renderEpisode(episode), map[string]any{
+		"episode_id":       episode.ID,
+		"episode_version":  episode.EpisodeVersion,
+		"boundary_key":     episode.BoundaryKey,
+		"start_turn_id":    episode.StartTurnID,
+		"end_turn_id":      episode.EndTurnID,
+		"start_turn_index": episode.StartTurnIndex,
+		"end_turn_index":   episode.EndTurnIndex,
+		"is_landmark":      episode.IsLandmark,
+		"anchor_ref_count": len(episode.AnchorRefs),
 	}, nil
 }
 
@@ -809,6 +886,34 @@ func renderToolCall(call run.ToolCallRecord) string {
 		text = "<empty>"
 	}
 	return fmt.Sprintf("Tool %s (%s): %s", call.Name, call.CallID, text)
+}
+
+func renderEpisode(episode run.EpisodeRecord) string {
+	var sb strings.Builder
+	sb.WriteString("Episode")
+	if topic := strings.TrimSpace(episode.Topic); topic != "" {
+		sb.WriteString(": ")
+		sb.WriteString(topic)
+	}
+	sb.WriteString("\n")
+	if summary := strings.TrimSpace(episode.Summary); summary != "" {
+		sb.WriteString("Summary: ")
+		sb.WriteString(summary)
+		sb.WriteString("\n")
+	}
+	sb.WriteString(fmt.Sprintf("Turns: %d-%d (%s -> %s)\n",
+		episode.StartTurnIndex,
+		episode.EndTurnIndex,
+		strings.TrimSpace(episode.StartTurnID),
+		strings.TrimSpace(episode.EndTurnID)))
+	sb.WriteString(fmt.Sprintf("Landmark: %t | Salience: %.2f",
+		episode.IsLandmark,
+		episode.SalienceScore))
+	if len(episode.AnchorRefs) > 0 {
+		sb.WriteString("\nAnchors: ")
+		sb.WriteString(strings.Join(episode.AnchorRefs, ", "))
+	}
+	return strings.TrimSpace(sb.String())
 }
 
 func countToolCalls(turn run.TurnRecord) int {

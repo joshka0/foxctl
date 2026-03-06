@@ -31,9 +31,77 @@ const (
 	ModeAutonomousReactive ExecutionMode = "autonomous_reactive"
 	// ModeProactive means agent can initiate work on its own.
 	ModeProactive ExecutionMode = "proactive"
+	// ModeTick means agent executes one interval-driven tick at a fixed cadence.
+	ModeTick ExecutionMode = "tick"
 	// ModeStory means agent runs a gather + dialogue story loop.
 	ModeStory ExecutionMode = "story"
 )
+
+// MemoryScope defines how a human-facing agent workbench should scope memory lineage.
+type MemoryScope string
+
+const (
+	// MemoryScopeAgent uses the agent's stable canonical conversation lineage.
+	MemoryScopeAgent MemoryScope = "agent"
+	// MemoryScopeSession uses a detached workbench session lineage rather than the canonical agent thread.
+	MemoryScopeSession MemoryScope = "session"
+)
+
+// NormalizeMemoryScope applies stable defaults for persisted agent metadata.
+func NormalizeMemoryScope(scope MemoryScope) MemoryScope {
+	switch scope {
+	case MemoryScopeSession:
+		return MemoryScopeSession
+	case MemoryScopeAgent:
+		fallthrough
+	default:
+		return MemoryScopeAgent
+	}
+}
+
+// MemoryRetention defines the expected retention profile for an agent's memory.
+type MemoryRetention string
+
+const (
+	// MemoryRetentionCompanion is for long-lived companion-style agents with durable layered memory.
+	MemoryRetentionCompanion MemoryRetention = "companion"
+	// MemoryRetentionDurable is for long-running agents that should keep stable memory but are not persona-driven companions.
+	MemoryRetentionDurable MemoryRetention = "durable"
+	// MemoryRetentionTask is for task-scoped worker memory that is useful during a unit of work.
+	MemoryRetentionTask MemoryRetention = "task"
+	// MemoryRetentionEphemeral is for scratch agents that should stay mostly detached.
+	MemoryRetentionEphemeral MemoryRetention = "ephemeral"
+)
+
+// NormalizeMemoryRetention applies stable defaults for persisted retention metadata.
+func NormalizeMemoryRetention(retention MemoryRetention) MemoryRetention {
+	switch retention {
+	case MemoryRetentionCompanion, MemoryRetentionDurable, MemoryRetentionTask, MemoryRetentionEphemeral:
+		return retention
+	default:
+		return MemoryRetentionDurable
+	}
+}
+
+// DefaultMemoryRetentionForScope maps older scope-only records onto the newer retention presets.
+func DefaultMemoryRetentionForScope(scope MemoryScope) MemoryRetention {
+	switch NormalizeMemoryScope(scope) {
+	case MemoryScopeSession:
+		return MemoryRetentionTask
+	default:
+		return MemoryRetentionDurable
+	}
+}
+
+// RecommendedMemoryScopeForRetention returns the default lineage scope for a retention preset.
+func RecommendedMemoryScopeForRetention(retention MemoryRetention) MemoryScope {
+	switch NormalizeMemoryRetention(retention) {
+	case MemoryRetentionTask, MemoryRetentionEphemeral:
+		return MemoryScopeSession
+	default:
+		return MemoryScopeAgent
+	}
+}
 
 // Agent represents an autonomous actor in the multi-agent system.
 type Agent struct {
@@ -57,13 +125,15 @@ type Agent struct {
 	LLMAPIKey   string `json:"llm_api_key,omitempty"`  // API key (or env var name like $GROQ_API_KEY)
 
 	// Execution mode configuration
-	ExecMode      ExecutionMode `json:"exec_mode,omitempty"`      // reactive|autonomous|autonomous_reactive|proactive|story (default: reactive)
+	ExecMode      ExecutionMode `json:"exec_mode,omitempty"`      // reactive|autonomous|autonomous_reactive|proactive|tick|story (default: reactive)
 	MaxIterations int           `json:"max_iterations,omitempty"` // Max tool calls per turn (default: 10)
 	MaxAutoTurns  int           `json:"max_auto_turns,omitempty"` // Max autonomous turns per session (default: 1)
-	ThinkInterval int           `json:"think_interval,omitempty"` // Seconds between proactive think cycles (default: 60)
+	ThinkInterval int           `json:"think_interval,omitempty"` // Seconds between proactive/tick cycles (default: 60)
 
 	// Linked companion conversation
-	ConversationID string `json:"conversation_id,omitempty"` // Linked companion conversation ID for chat history
+	ConversationID  string          `json:"conversation_id,omitempty"`  // Linked companion conversation ID for chat history
+	MemoryScope     MemoryScope     `json:"memory_scope,omitempty"`     // agent|session for human-facing memory lineage
+	MemoryRetention MemoryRetention `json:"memory_retention,omitempty"` // companion|durable|task|ephemeral retention preset
 }
 
 // Policy defines execution constraints and capabilities for an agent.

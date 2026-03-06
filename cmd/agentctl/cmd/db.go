@@ -128,7 +128,7 @@ var allStores = []storeSpec{
 		name:       "companion",
 		sqliteFile: "companion.db",
 		pgSchema:   "companion",
-		tables:     []string{"companion_turns", "companion_day_summaries", "companion_history", "companion_deleted_conversations", "companion_conversation_titles", "companion_memory_state", "companion_characters", "companion_character_overlays", "companion_generated_backgrounds", "companion_generated_voices", "companion_presence_bundles"},
+		tables:     []string{"companion_turns", "companion_deleted_conversations", "companion_conversation_titles", "companion_characters", "companion_character_overlays", "companion_generated_backgrounds", "companion_generated_voices", "companion_presence_bundles", "companion_events", "companion_hard_state_entries", "companion_soft_episodes", "companion_evidence_snippets", "companion_assumptions_ledger", "companion_memory_mode_state", "companion_open_episode", "companion_open_tool_runs", "companion_extraction_staging", "companion_hard_state_cache", "companion_evidence_fts"},
 		migrate:    companion.MigrateSchema,
 	},
 }

@@ -1,5 +1,8 @@
 FROM golang:1.25
 
+ENV DEBIAN_FRONTEND=noninteractive
+ENV PATH=/usr/local/go/bin:${PATH}
+
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
     bash \
@@ -9,10 +12,7 @@ RUN apt-get update \
     gcc \
     libc6-dev \
     libsqlite3-dev \
-    nodejs \
-    npm \
-    && rm -rf /var/lib/apt/lists/* \
-    && npm install -g coderabbit
+    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /workspace
 

@@ -263,14 +263,6 @@ func (m *ConversationMemory) BuildHybridContextLayers(ctx context.Context, conve
 		return fmt.Errorf("conversation_id is required")
 	}
 
-	mode, err := m.GetMemoryMode(ctx, conversationID)
-	if err != nil {
-		return fmt.Errorf("get memory mode: %w", err)
-	}
-	if mode != "hybrid" {
-		return nil
-	}
-
 	if err := m.EnsureHybridMode(ctx, conversationID); err != nil {
 		return fmt.Errorf("ensure hybrid mode: %w", err)
 	}
@@ -431,7 +423,7 @@ func (m *ConversationMemory) processEventTier1(ctx context.Context, tx *sql.Tx, 
 }
 
 // GetMemoryMode returns the current memory mode for a conversation.
-// New conversations default to hybrid; existing conversations with legacy L1/L2 rows return legacy.
+// Companion memory is hybrid-only; missing mode state is treated as hybrid.
 func (m *ConversationMemory) GetMemoryMode(ctx context.Context, conversationID string) (string, error) {
 	if strings.TrimSpace(conversationID) == "" {
 		return "", fmt.Errorf("conversation_id is required")
@@ -444,35 +436,13 @@ func (m *ConversationMemory) GetMemoryMode(ctx context.Context, conversationID s
 		WHERE conversation_id = $1
 	`, conversationID).Scan(&mode)
 	if err == nil {
-		mode = strings.ToLower(strings.TrimSpace(mode))
-		if mode == "hybrid" || mode == "legacy" {
-			return mode, nil
-		}
+		return MemoryModeHybrid, nil
 	}
 	if err != nil && err != sql.ErrNoRows {
 		return "", fmt.Errorf("get memory mode state: %w", err)
 	}
 
-	var hasLegacy bool
-	if err := m.db.QueryRowContext(ctx, `
-		SELECT EXISTS (SELECT 1 FROM companion_day_summaries WHERE conversation_id = $1 LIMIT 1)
-	`, conversationID).Scan(&hasLegacy); err != nil {
-		return "", fmt.Errorf("check legacy summaries: %w", err)
-	}
-	if hasLegacy {
-		return "legacy", nil
-	}
-
-	if err := m.db.QueryRowContext(ctx, `
-		SELECT EXISTS (SELECT 1 FROM companion_history WHERE conversation_id = $1 LIMIT 1)
-	`, conversationID).Scan(&hasLegacy); err != nil {
-		return "", fmt.Errorf("check legacy history: %w", err)
-	}
-	if hasLegacy {
-		return "legacy", nil
-	}
-
-	return "hybrid", nil
+	return MemoryModeHybrid, nil
 }
 
 // EnsureHybridMode initializes hybrid mode for a conversation if not already set.
@@ -481,19 +451,13 @@ func (m *ConversationMemory) EnsureHybridMode(ctx context.Context, conversationI
 		return fmt.Errorf("conversation_id is required")
 	}
 
-	mode, err := m.GetMemoryMode(ctx, conversationID)
-	if err != nil {
-		return fmt.Errorf("get memory mode: %w", err)
-	}
-	if mode != "hybrid" {
-		return nil
-	}
-
-	_, err = m.db.ExecContext(ctx, `
+	_, err := m.db.ExecContext(ctx, `
 		INSERT INTO companion_memory_mode_state
 			(conversation_id, mode, schema_version, last_processed_event, last_soft_event, last_evidence_event, updated_at)
 		VALUES ($1, 'hybrid', 1, 0, 0, 0, CURRENT_TIMESTAMP)
-		ON CONFLICT (conversation_id) DO NOTHING
+		ON CONFLICT (conversation_id) DO UPDATE SET
+			mode = 'hybrid',
+			updated_at = CURRENT_TIMESTAMP
 	`, conversationID)
 	if err != nil {
 		return fmt.Errorf("ensure hybrid mode: %w", err)

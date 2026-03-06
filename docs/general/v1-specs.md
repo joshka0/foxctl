@@ -180,13 +180,14 @@ starting → running → stopped|error
 
 ---
 
-## API Server v1 (Draft)
+## API Server (Current)
 
 See `docs/general/api-server.md`.
 
 ### Skill Execution
-- POST /api/v1/skills/run returns the raw skill envelope in data.envelope.
-- Skill envelopes keep Protocol v1 invariants (meta.ts, status, error).
+- POST `/api/skills/run` returns:
+  - `ok` (boolean), `skill` (string), `output` (any), `error` (string), `duration_ms` (number)
+- Protocol v1 envelope invariants are owned by skill CLI/output contracts, not the web JSON wrapper.
 
 ---
 

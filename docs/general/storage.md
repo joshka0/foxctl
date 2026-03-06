@@ -42,7 +42,7 @@ This section reflects current table names in code (not legacy aliases).
 |---------|------------------|
 | `memory.db` | `named_memory`, `embedding_metadata`, `indexer_state` |
 | `contextvar.db` | `context_variables`, `context_sequences` |
-| `companion.db` | `companion_turns`, `companion_day_summaries`, `companion_history`, plus hybrid/event/extraction tables |
+| `companion.db` | `companion_turns`, `companion_events`, `companion_hard_state_entries`, `companion_soft_episodes`, `companion_evidence_snippets`, `companion_assumptions_ledger`, `companion_memory_mode_state`, and related hybrid pipeline tables |
 | `repoindex/<key>.db` | graph nodes/edges/index metadata per workspace |
 
 ## CAS Contract

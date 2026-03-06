@@ -14,7 +14,7 @@
 //	-addr string
 //	      HTTP listen address (default "127.0.0.1:8090")
 //	-ui-dir string
-//	      Path to built UI (e.g., ./packages/gui/dist)
+//	      Path to built UI (e.g., ./packages/gui-agent/dist)
 //	-dev-cors
 //	      Enable permissive CORS for local dev (default true)
 package main
@@ -42,7 +42,7 @@ func main() {
 		devCORS bool
 	)
 	flag.StringVar(&addr, "addr", "127.0.0.1:8090", "HTTP listen address")
-	flag.StringVar(&uiDir, "ui-dir", "", "Path to built UI (e.g., ./packages/gui/dist)")
+	flag.StringVar(&uiDir, "ui-dir", "", "Path to built UI (e.g., ./packages/gui-agent/dist)")
 	flag.BoolVar(&devCORS, "dev-cors", true, "Enable permissive CORS for local dev")
 	flag.Parse()
 

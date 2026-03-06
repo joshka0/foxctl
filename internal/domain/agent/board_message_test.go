@@ -151,6 +151,18 @@ func TestIsOverseerSender(t *testing.T) {
 	}
 }
 
+func TestRoomStreamHelpers(t *testing.T) {
+	if got := RoomStreamName("alpha"); got != "room:alpha" {
+		t.Fatalf("RoomStreamName(alpha)=%q want room:alpha", got)
+	}
+	if got := RoomIDFromStream("room:alpha"); got != "alpha" {
+		t.Fatalf("RoomIDFromStream(room:alpha)=%q want alpha", got)
+	}
+	if got := RoomIDFromStream("coordination"); got != "" {
+		t.Fatalf("RoomIDFromStream(coordination)=%q want empty", got)
+	}
+}
+
 func TestBoardMessage_JSONSerialization(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Second)
 	msg := BoardMessage{

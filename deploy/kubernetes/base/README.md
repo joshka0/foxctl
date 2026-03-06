@@ -1,125 +1,57 @@
-# Kubernetes Deployment
+# Kubernetes Base Manifests
 
-This directory contains Kubernetes manifests for deploying agentctl.
+This directory is the base manifest layer for `deploy/kubernetes`.
 
-## Quick Start
+## Status
 
-```bash
-# Create namespace and apply all resources
-kubectl apply -k deploy/kubernetes/
+The base is not the single source of production truth. It contains older
+defaults that are still useful for composition, but some settings are from an
+earlier Turso/CAS generation.
 
-# Or apply individually
-kubectl apply -f deploy/kubernetes/namespace.yaml
-kubectl apply -f deploy/kubernetes/secrets.yaml  # Edit first!
-kubectl apply -f deploy/kubernetes/rbac.yaml
-kubectl apply -f deploy/kubernetes/configmap.yaml
-kubectl apply -f deploy/kubernetes/deployment.yaml
-```
+Prefer reading these docs first:
 
-## Prerequisites
+- [docs/kubernetes.md](../../docs/kubernetes.md)
+- [docs/architecture/kubernetes-runtime.md](../../docs/architecture/kubernetes-runtime.md)
+- [docs/architecture/postgres-storage.md](../../docs/architecture/postgres-storage.md)
 
-1. **Turso Database**: Create a Turso database and obtain credentials
-2. **Voyage API Key**: Sign up at voyageai.com for embedding API access
-3. **Container Image**: Build and push the agentctl image to your registry
+## How to use this directory
 
-## Configuration
+- Use `deploy/kubernetes/base` as the Kustomize base layer.
+- Apply an overlay for the runtime/storage model you actually want.
+- Do not assume the base env vars represent the recommended production setup.
 
-### Required Secrets
-
-Edit `secrets.yaml` before applying:
-
-```yaml
-stringData:
-  turso-url: "libsql://your-database.turso.io"
-  turso-token: "your-auth-token"
-  voyage-key: "your-voyage-api-key"
-```
-
-### Optional: Git Credentials
-
-For workspace deployments with git-sync:
-
-```yaml
-stringData:
-  username: "git"
-  token: "ghp_your_github_token"
-```
-
-## Components
-
-| File | Description |
-|------|-------------|
-| `namespace.yaml` | Namespace definition |
-| `secrets.yaml` | Secrets (edit before applying) |
-| `rbac.yaml` | ServiceAccount, Role, RoleBinding |
-| `configmap.yaml` | Configuration options |
-| `deployment.yaml` | Core agentctl deployment |
-| `workspace-deployment.yaml` | Workspace with git-sync sidecar |
-| `embedding-worker.yaml` | Embedding job processor |
-| `hpa.yaml` | Horizontal Pod Autoscaler |
-| `pdb.yaml` | Pod Disruption Budgets |
-| `cronjobs.yaml` | Scheduled maintenance jobs |
-| `network-policy.yaml` | Network security policies |
-| `kustomization.yaml` | Kustomize configuration |
-
-## Workspace Access Patterns
-
-### Read-Only (Recommended)
-
-Use `workspace-deployment.yaml` with git-sync for analysis workloads:
+Typical entrypoints:
 
 ```bash
-# Customize repository URL and branch in workspace-deployment.yaml
-kubectl apply -f deploy/kubernetes/workspace-deployment.yaml
+kubectl apply -k deploy/kubernetes/overlays/local
+kubectl apply -k deploy/kubernetes/overlays/postgres
 ```
 
-### Read-Write
+## What is in base
 
-For code generation that needs to commit:
+| File | Role |
+|------|------|
+| `deployment.yaml` | Main `agentctl` deployment |
+| `configmap.yaml` | Base env vars, including some legacy defaults |
+| `workspace-deployment.yaml` | Optional workspace pod with git-sync sidecar |
+| `embedding-worker.yaml` | Background embedding worker deployment |
+| `cronjobs.yaml` | Scheduled maintenance workloads |
+| `service.yaml`, `ingress.yaml` | Service exposure |
+| `rbac.yaml`, `network-policy.yaml`, `pdb.yaml`, `hpa.yaml` | Operational support objects |
 
-1. Use a PersistentVolumeClaim with ReadWriteMany access
-2. Or generate patches stored in CAS/S3 and apply via separate PR creation job
+## Important caveats
 
-## Scaling
+- The base `ConfigMap` still defaults `AGENTCTL_DB_DRIVER` to `turso`.
+- The base also still uses older CAS key names like `AGENTCTL_CAS_BACKEND` and
+  `AGENTCTL_CAS_BUCKET`.
+- Production-oriented PostgreSQL and newer CAS settings live in
+  `deploy/kubernetes/overlays/postgres`.
+- Local development overrides live in `deploy/kubernetes/overlays/local`.
 
-The HPA scales based on CPU/memory. For custom metrics:
+## Runtime notes
 
-1. Deploy a metrics adapter (e.g., Prometheus Adapter)
-2. Uncomment the custom metric section in `hpa.yaml`
-3. Configure `agentctl_mailbox_depth` metric
-
-## Monitoring
-
-Pods expose metrics on port 8080. Prometheus annotations are included:
-
-```yaml
-annotations:
-  prometheus.io/scrape: "true"
-  prometheus.io/port: "8080"
-  prometheus.io/path: "/metrics"
-```
-
-## Troubleshooting
-
-### Check pod status
-
-```bash
-kubectl get pods -n agentctl
-kubectl logs -n agentctl deployment/agentctl
-```
-
-### Verify database connectivity
-
-```bash
-kubectl exec -n agentctl deployment/agentctl -- agentctl health
-```
-
-### Check mailbox depth
-
-```bash
-kubectl exec -n agentctl deployment/agentctl -- agentctl mailbox stats
-```
-
-## Documentation
-
-See [docs/kubernetes.md](../../docs/kubernetes.md) for detailed architecture documentation.
+- The deployed process is typically `agentctl web serve`.
+- Live HTTP app routes are under `/api`.
+- Kubernetes probes should target `/healthz` and `/readyz`.
+- Optional chat adapters and optional Jido-backed orchestration require extra
+  runtime configuration beyond what this base README used to describe.

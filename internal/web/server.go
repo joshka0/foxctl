@@ -2,6 +2,7 @@ package web
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net"
 	"net/http"
@@ -458,7 +459,7 @@ func (s *Server) Handler() http.Handler {
 
 	// --- Agents (Phase 11) ---
 	apiMux.HandleFunc("/api/agents", api.AgentsListHandler(s.cfg, s.log))
-	apiMux.HandleFunc("/api/agents/", api.AgentDetailHandler(s.cfg, s.log))
+	apiMux.HandleFunc("/api/agents/", api.AgentDetailHandler(s.cfg, s.log, s.sseHub))
 
 	// --- Stats & Insights (Phase 11) ---
 	apiMux.HandleFunc("/api/stats", api.StatsHandler(s.cfg, s.log))
@@ -466,6 +467,8 @@ func (s *Server) Handler() http.Handler {
 
 	// --- Mailbox (Phase 11) ---
 	apiMux.HandleFunc("/api/mailbox", api.MailboxListHandler(s.cfg, s.log))
+	apiMux.HandleFunc("/api/rooms", api.RoomsListHandler(s.cfg, s.log))
+	apiMux.HandleFunc("/api/rooms/", api.RoomDetailHandler(s.cfg, s.log, s.sseHub))
 
 	// --- Reservations (Phase 11) ---
 	apiMux.HandleFunc("/api/reservations", api.ReservationsListHandler(s.cfg, s.log))
@@ -487,6 +490,15 @@ func (s *Server) Handler() http.Handler {
 	// --- Codemaps (Phase 11) ---
 	apiMux.HandleFunc("/api/codemaps", api.CodemapsListHandler(s.cfg, s.log))
 	apiMux.HandleFunc("/api/codemaps/", api.CodemapDetailHandler(s.cfg, s.log))
+
+	// --- Orchestration (Wave 7 / PR-46) ---
+	apiMux.HandleFunc("/api/orchestration/dispatch-issue", api.OrchestrationDispatchIssueHandler(s.cfg, s.log))
+	apiMux.HandleFunc("/api/orchestration/card-action", api.OrchestrationCardActionHandler(s.cfg, s.log))
+	apiMux.HandleFunc("/api/orchestration/board-get", api.OrchestrationBoardGetHandler(s.cfg, s.log))
+	apiMux.HandleFunc("/api/orchestration/board-card-get", api.OrchestrationBoardCardGetHandler(s.cfg, s.log))
+	apiMux.HandleFunc("/api/orchestration/board-card-runtime-get", api.OrchestrationBoardCardRuntimeGetHandler(s.cfg, s.log))
+	apiMux.HandleFunc("/api/orchestration/refresh", api.OrchestrationRefreshHandler(s.cfg, s.log))
+	apiMux.HandleFunc("/api/orchestration/seed-cards", api.OrchestrationSeedCardsHandler(s.cfg, s.log))
 
 	// --- Companion (RLM Mobile Backend) ---
 	// Shared Locker ensures per-conversation mutual exclusion across all
@@ -608,9 +620,19 @@ func (s *Server) Handler() http.Handler {
 					api.CompanionMemoryStatsHandler(s.cfg, s.log).ServeHTTP(w, r)
 				case "context":
 					api.CompanionMemoryContextHandler(s.cfg, s.log).ServeHTTP(w, r)
+				case "export":
+					api.CompanionMemoryExportHandler(s.cfg, s.log).ServeHTTP(w, r)
+				case "search":
+					api.CompanionMemorySearchHandler(s.cfg, s.log).ServeHTTP(w, r)
 				default:
 					http.Error(w, "unknown memory endpoint", http.StatusNotFound)
 				}
+			} else {
+				http.Error(w, "invalid memory path", http.StatusBadRequest)
+			}
+		case http.MethodPost:
+			if len(parts) == 2 && parts[1] == "import" {
+				api.CompanionMemoryImportHandler(s.cfg, s.log).ServeHTTP(w, r)
 			} else {
 				http.Error(w, "invalid memory path", http.StatusBadRequest)
 			}
@@ -626,10 +648,20 @@ func (s *Server) Handler() http.Handler {
 		}
 	})
 
-	// Route legacy /api and wrapped /api/v1 to the same handlers.
+	// Route canonical API handlers.
 	mux := http.NewServeMux()
 	mux.Handle("/api/", apiMux)
-	mux.Handle("/api/v1/", wrapV1(apiMux))
+	mux.HandleFunc("/api/v1/", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(http.StatusGone)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"error": map[string]any{
+				"code":    "EDEPRECATED",
+				"message": "legacy /api/v1 routes were removed; use /api routes",
+				"hint":    "replace /api/v1/... with /api/...",
+			},
+		})
+	})
 	mux.HandleFunc("/ws/console/", consolews.HandleWebSocket(s.consoleHub))
 
 	// --- Kubernetes Probes (root path, not under /api/) ---

@@ -82,7 +82,7 @@ func (e *LLMChatEngine) RunStreaming(ctx context.Context, input EngineInput, str
 					Content: "Your tool budget is exhausted. Produce your complete text response NOW.\n\nResearch:\n" + buildResearchSummary(output.ToolCalls),
 				})
 				if finalResp, err := e.callLLM(ctx, finalizeMessages, nil); err == nil && len(finalResp.Choices) > 0 {
-					output.AssistantText = finalResp.Choices[0].Message.Content
+					output.AssistantText = resolveAssistantContent(finalResp.Choices[0].Message)
 					output.Tokens.Add(finalResp.Usage.PromptTokens, finalResp.Usage.CompletionTokens)
 					fmt.Fprintf(os.Stderr, "[CONTEXT] finalize: prompt_tokens=%d completion_tokens=%d\n",
 						finalResp.Usage.PromptTokens, finalResp.Usage.CompletionTokens)
@@ -195,15 +195,19 @@ func (e *LLMChatEngine) RunStreaming(ctx context.Context, input EngineInput, str
 		output.AssistantText = resp.content
 		output.StopReason = mapFinishReason(resp.finishReason)
 
-		// If the model stopped without producing text and has done tool work,
-		// run one final text-only call to force output.
-		if output.AssistantText == "" && len(output.ToolCalls) > 0 {
+		// If the model stopped without producing text, run one final text-only
+		// call to force a concrete answer.
+		if strings.TrimSpace(output.AssistantText) == "" {
+			finalPrompt := "You returned an empty response. Respond to the user's latest message now with plain text."
+			if len(output.ToolCalls) > 0 {
+				finalPrompt = "You stopped without producing a text response. Write your complete report NOW.\n\nResearch:\n" + buildResearchSummary(output.ToolCalls)
+			}
 			finalizeMessages := append(messages,
 				oaiMessage{Role: "assistant", Content: ""},
-				oaiMessage{Role: "user", Content: "You stopped without producing a text response. Write your complete report NOW.\n\nResearch:\n" + buildResearchSummary(output.ToolCalls)},
+				oaiMessage{Role: "user", Content: finalPrompt},
 			)
 			if finalResp, finalErr := e.callLLM(ctx, finalizeMessages, nil); finalErr == nil && len(finalResp.Choices) > 0 {
-				output.AssistantText = finalResp.Choices[0].Message.Content
+				output.AssistantText = strings.TrimSpace(resolveAssistantContent(finalResp.Choices[0].Message))
 				output.Tokens.Add(finalResp.Usage.PromptTokens, finalResp.Usage.CompletionTokens)
 				fmt.Fprintf(os.Stderr, "[CONTEXT] finalize (early stop): prompt_tokens=%d completion_tokens=%d\n",
 					finalResp.Usage.PromptTokens, finalResp.Usage.CompletionTokens)

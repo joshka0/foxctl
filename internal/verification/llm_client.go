@@ -164,6 +164,8 @@ func baseURLForProvider(provider string) string {
 		return "https://api.anthropic.com/v1"
 	case "openrouter":
 		return "https://openrouter.ai/api/v1"
+	case "lmstudio":
+		return "http://localhost:1234/v1"
 	case "openai":
 		return "https://api.openai.com/v1"
 	default:

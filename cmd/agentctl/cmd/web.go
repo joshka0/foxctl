@@ -41,7 +41,7 @@ Examples:
   agentctl web serve --dev-cors
 
   # Start server with static UI files
-  agentctl web serve --ui-dir ./packages/gui/dist`,
+  agentctl web serve --ui-dir ./packages/gui-agent/dist`,
 	RunE: runWebServe,
 }
 
@@ -59,7 +59,7 @@ func init() {
 	webCmd.AddCommand(webServeCmd)
 
 	webServeCmd.Flags().IntVarP(&webPort, "port", "p", 8090, "Port to listen on")
-	webServeCmd.Flags().BoolVar(&webDevCORS, "dev-cors", false, "Enable CORS for development (allows localhost:5173)")
+	webServeCmd.Flags().BoolVar(&webDevCORS, "dev-cors", false, "Enable CORS for development (allows localhost:5174)")
 	webServeCmd.Flags().StringVar(&webUIDir, "ui-dir", "", "Directory containing static UI files to serve")
 	webServeCmd.Flags().StringVar(&webChat, "chat", "", "Chat adapter to enable (discord|telegram|teams)")
 	webServeCmd.Flags().StringVar(&webDBDriver, "db-driver", "", "Database driver (sqlite|libsql|turso|postgres)")
@@ -147,7 +147,7 @@ func runWebServe(cmd *cobra.Command, _ []string) error {
 		log.Info().Str("addr", addr).Msg("Starting agentctl web server")
 		log.Info().Str("health", fmt.Sprintf("http://localhost%s/api/health", addr)).Msg("Health endpoint")
 		if webDevCORS {
-			log.Info().Msg("CORS enabled for development (localhost:5173)")
+			log.Info().Msg("CORS enabled for development (localhost:5174)")
 		}
 		if webUIDir != "" {
 			log.Info().Str("ui_dir", webUIDir).Msg("Serving UI directory")

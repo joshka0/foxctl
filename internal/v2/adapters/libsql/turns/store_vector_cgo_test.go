@@ -101,3 +101,24 @@ func TestTurnStore_SearchArtifactsByEmbedding_VectorPathLibSQL(t *testing.T) {
 		t.Fatalf("hits not sorted by similarity desc: %.4f < %.4f", result.Hits[0].Similarity, result.Hits[1].Similarity)
 	}
 }
+
+func TestTurnStore_Open_DefaultVectorDimensionsLocal(t *testing.T) {
+	ctx := context.Background()
+	storageRoot := t.TempDir()
+
+	t.Setenv("AGENTCTL_V2_TURNS_DB_DRIVER", "libsql")
+	t.Setenv("AGENTCTL_V2_TURNS_DB_PATH", filepath.Join(storageRoot, "turns_default_dims.libsql"))
+	t.Setenv("AGENTCTL_V2_TURNS_VECTOR_SEARCH", "1")
+	t.Setenv("AGENTCTL_V2_TURNS_VECTOR_DIMS", "")
+	t.Setenv("AGENTCTL_VECTOR_DIMS", "")
+
+	store, err := Open(ctx, storageRoot)
+	if err != nil {
+		t.Fatalf("Open(libsql) error = %v", err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+
+	if got := store.VectorDimensions(); got != defaultV2TurnsVectorDims {
+		t.Fatalf("VectorDimensions() = %d, want %d", got, defaultV2TurnsVectorDims)
+	}
+}

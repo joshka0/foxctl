@@ -22,11 +22,16 @@ import (
 	"github.com/jkatigb/agentctl/internal/platform/config"
 	errs "github.com/jkatigb/agentctl/internal/platform/errors"
 	"github.com/jkatigb/agentctl/internal/protocol"
+	llmproviders "github.com/jkatigb/agentctl/internal/providers/llm"
 	"github.com/jkatigb/agentctl/internal/storage/agents"
 	"github.com/jkatigb/agentctl/internal/storage/mailbox"
 	"github.com/jkatigb/agentctl/internal/storage/sessions"
-	v2cliports "github.com/jkatigb/agentctl/internal/v2/ports/cli"
-	v2portconfig "github.com/jkatigb/agentctl/internal/v2/ports/config"
+	libsqlevents "github.com/jkatigb/agentctl/internal/v2/adapters/libsql/events"
+	libsqlprojections "github.com/jkatigb/agentctl/internal/v2/adapters/libsql/projections"
+	v2ask "github.com/jkatigb/agentctl/internal/v2/core/ask"
+	v2errors "github.com/jkatigb/agentctl/internal/v2/core/errors"
+	"github.com/jkatigb/agentctl/internal/v2/core/events"
+	v2services "github.com/jkatigb/agentctl/internal/v2/services"
 	"github.com/oklog/ulid/v2"
 	"github.com/spf13/cobra"
 )
@@ -105,6 +110,13 @@ var agentAskCmd = &cobra.Command{
 	RunE:  runAgentAsk,
 }
 
+var agentAskStatusCmd = &cobra.Command{
+	Use:   "ask-status <ask-id>",
+	Short: "Get ask status and callback details",
+	Args:  cobra.ExactArgs(1),
+	RunE:  runAgentAskStatus,
+}
+
 var agentCmdCmd = &cobra.Command{
 	Use:   "cmd <agent-id>",
 	Short: "Send a command to an agent",
@@ -152,6 +164,8 @@ var (
 	spawnMaxContextTokens int
 	spawnMaxAutoTurns     int
 	spawnThinkInterval    int
+	spawnMemoryScope      string
+	spawnMemoryRetention  string
 	spawnTimeout          string // Session timeout (e.g. "10m", "30m")
 	spawnDryRun           bool
 	spawnChat             bool // Convenience flag for chat/roleplay companions
@@ -184,23 +198,13 @@ var (
 
 // Flags for agent ask
 var (
-	askDryRun bool
+	askDryRun         bool
+	askDispatcherMode string
 )
 
 // Flags for agent cmd
 var (
 	cmdDryRun bool
-)
-
-var (
-	runAgentSpawnV1Fn = runAgentSpawnV1
-	runAgentSpawnV2Fn = runAgentSpawnV2
-	runAgentListV1Fn  = runAgentListV1
-	runAgentListV2Fn  = runAgentListV2
-	runAgentKillV1Fn  = runAgentKillV1
-	runAgentKillV2Fn  = runAgentKillV2
-	runAgentRunV1Fn   = runAgentRunV1
-	runAgentRunV2Fn   = runAgentRunV2
 )
 
 func init() {
@@ -215,6 +219,7 @@ func init() {
 	agentCmd.AddCommand(agentWatchCmd)
 	agentCmd.AddCommand(agentRunCmd)
 	agentCmd.AddCommand(agentAskCmd)
+	agentCmd.AddCommand(agentAskStatusCmd)
 	agentCmd.AddCommand(agentCmdCmd)
 	agentCmd.AddCommand(agentResumeCmd)
 	agentCmd.AddCommand(agentHierarchyCmd)
@@ -233,14 +238,16 @@ func init() {
 	agentSpawnCmd.Flags().StringVar(&spawnSkillsAllow, "skills-allow", "", "Comma-separated list of allowed skills")
 	agentSpawnCmd.Flags().StringVar(&spawnPolicyFile, "policy", "", "Path to policy JSON file")
 	agentSpawnCmd.Flags().StringVar(&spawnShareBB, "share-bb", "scoped", "Blackboard sharing mode (all|scoped|none)")
-	agentSpawnCmd.Flags().StringVar(&spawnLLMProvider, "llm-provider", "", "LLM provider (gemini|openai|anthropic|groq|openrouter)")
+	agentSpawnCmd.Flags().StringVar(&spawnLLMProvider, "llm-provider", "", "LLM provider (lmstudio|gemini|openai|anthropic|groq|openrouter)")
 	agentSpawnCmd.Flags().StringVar(&spawnLLMModel, "llm-model", "", "LLM model ID (e.g., claude-haiku-4-5)")
 	agentSpawnCmd.Flags().StringVar(&spawnLLMAPIKey, "llm-api-key", "", "LLM API key (or env var like $GROQ_API_KEY)")
-	agentSpawnCmd.Flags().StringVar(&spawnExecMode, "exec-mode", "reactive", "Execution mode (reactive|autonomous|proactive)")
+	agentSpawnCmd.Flags().StringVar(&spawnExecMode, "exec-mode", "reactive", "Execution mode (reactive|autonomous|proactive|tick)")
 	agentSpawnCmd.Flags().IntVar(&spawnMaxIterations, "max-iterations", 10, "Max tool calls per turn")
 	agentSpawnCmd.Flags().IntVar(&spawnMaxContextTokens, "max-context-tokens", 0, "Max context tokens before stopping (0=no limit)")
-	agentSpawnCmd.Flags().IntVar(&spawnMaxAutoTurns, "max-auto-turns", 1, "Max autonomous turns per session (only for autonomous/proactive modes)")
-	agentSpawnCmd.Flags().IntVar(&spawnThinkInterval, "think-interval", 60, "Seconds between proactive think cycles (only for proactive mode)")
+	agentSpawnCmd.Flags().IntVar(&spawnMaxAutoTurns, "max-auto-turns", 1, "Max autonomous turns per session (only for autonomous/proactive/tick modes)")
+	agentSpawnCmd.Flags().IntVar(&spawnThinkInterval, "think-interval", 60, "Seconds between proactive/tick cycles")
+	agentSpawnCmd.Flags().StringVar(&spawnMemoryScope, "memory-scope", "", "Memory lineage scope (agent|session)")
+	agentSpawnCmd.Flags().StringVar(&spawnMemoryRetention, "memory-retention", "", "Memory retention preset (companion|durable|task|ephemeral)")
 	agentSpawnCmd.Flags().StringVar(&spawnTimeout, "timeout", "", "Session timeout (e.g. 10m, 30m). Default: 30m")
 	agentSpawnCmd.Flags().BoolVar(&spawnDryRun, "dry-run", false, "Preview what would be spawned without creating the agent")
 	agentSpawnCmd.Flags().BoolVar(&spawnChat, "chat", false, "Convenience flag for chat/roleplay companions (sets role=companion, exec-mode=reactive, max-iterations=3)")
@@ -269,6 +276,7 @@ func init() {
 	agentAskCmd.Flags().Bool("wait", false, "Wait for reply before returning")
 	agentAskCmd.Flags().Duration("timeout", 5*time.Minute, "Timeout for --wait")
 	agentAskCmd.Flags().BoolVar(&askDryRun, "dry-run", false, "Preview what would be sent without sending the message")
+	agentAskCmd.Flags().StringVar(&askDispatcherMode, "dispatcher", "", "Ask dispatcher backend: mailbox|jido (default from AGENTCTL_V2_ASK_DISPATCHER)")
 	_ = agentAskCmd.MarkFlagRequired("question") //nolint:errcheck
 
 	// Cmd flags
@@ -279,54 +287,11 @@ func init() {
 	_ = agentCmdCmd.MarkFlagRequired("action") //nolint:errcheck
 }
 
-func dispatchAgentCLICommand(
-	cmd *cobra.Command,
-	command string,
-	correlationID string,
-	v1 func(context.Context) error,
-	v2 func(context.Context) error,
-) error {
-	flags, err := v2portconfig.ParseV2CommandsFromEnv()
-	if err != nil {
-		flags = v2portconfig.V2Flags{}
-	}
-	shadowFlags, err := v2portconfig.ParseV2ShadowCommandsFromEnv()
-	if err != nil {
-		shadowFlags = v2portconfig.V2Flags{}
-	}
-	shadowFlags = v2portconfig.SanitizeShadowFlags(shadowFlags, v2portconfig.ShadowMutatingEnabledFromEnv())
-	freezeFlags, err := v2portconfig.ParseV2FreezeCommandsFromEnv()
-	if err != nil {
-		freezeFlags = v2portconfig.V2Flags{}
-	}
-	router := v2cliports.NewRouterWithShadowAndFreeze(flags, shadowFlags, freezeFlags, nil, nil, 2*time.Second)
-
-	ctx := cmd.Context()
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	_, _, err = v2cliports.Dispatch(ctx, router, command, strings.TrimSpace(correlationID),
-		func(ctx context.Context) (struct{}, error) {
-			return struct{}{}, v1(ctx)
-		},
-		func(ctx context.Context) (struct{}, error) {
-			return struct{}{}, v2(ctx)
-		},
-	)
-	return err
-}
-
 func runAgentSpawn(cmd *cobra.Command, args []string) error {
-	return dispatchAgentCLICommand(
-		cmd,
-		"spawn",
-		ulid.Make().String(),
-		func(context.Context) error { return runAgentSpawnV1Fn(cmd, args) },
-		func(context.Context) error { return runAgentSpawnV2Fn(cmd, args) },
-	)
+	return runAgentSpawnWithRoute(cmd)
 }
 
-func runAgentSpawnV1(cmd *cobra.Command, _ []string) error {
+func runAgentSpawnWithRoute(cmd *cobra.Command) error {
 	ctx := cmd.Context()
 	cfg := config.MustFromContext(ctx)
 
@@ -405,9 +370,6 @@ func runAgentSpawnV1(cmd *cobra.Command, _ []string) error {
 		if spawnParentNS != "" {
 			unsupportedFlags = append(unsupportedFlags, "--ns")
 		}
-		if spawnThinkInterval != 60 {
-			unsupportedFlags = append(unsupportedFlags, "--think-interval")
-		}
 		if len(unsupportedFlags) > 0 {
 			return writeErrorEnvelope(cmd, "agent/spawn", string(protocol.ErrorCodeEARG),
 				fmt.Sprintf("flags not supported in daemon mode: %s (use direct spawn instead)", strings.Join(unsupportedFlags, ", ")))
@@ -419,10 +381,13 @@ func runAgentSpawnV1(cmd *cobra.Command, _ []string) error {
 			Name:             spawnName,
 			Slug:             spawnSlug,
 			SkillsAllow:      skillsAllow,
+			MemoryScope:      spawnMemoryScope,
+			MemoryRetention:  spawnMemoryRetention,
 			MaxIterations:    spawnMaxIterations,
 			MaxContextTokens: spawnMaxContextTokens,
 			ExecMode:         spawnExecMode,
 			MaxAutoTurns:     spawnMaxAutoTurns,
+			ThinkInterval:    spawnThinkInterval,
 			Timeout:          spawnTimeout,
 			LLMProvider:      spawnLLMProvider,
 			LLMModel:         spawnLLMModel,
@@ -432,18 +397,21 @@ func runAgentSpawnV1(cmd *cobra.Command, _ []string) error {
 		// Dry-run mode: show what would be spawned via daemon
 		if spawnDryRun {
 			data := map[string]any{
-				"dry_run":        true,
-				"would_spawn":    true,
-				"via_daemon":     true,
-				"role":           params.Role,
-				"name":           params.Name,
-				"slug":           params.Slug,
-				"llm_provider":   params.LLMProvider,
-				"llm_model":      params.LLMModel,
-				"exec_mode":      params.ExecMode,
-				"max_iterations": params.MaxIterations,
-				"max_auto_turns": params.MaxAutoTurns,
-				"has_prompt":     len(params.Prompt) > 0,
+				"dry_run":          true,
+				"would_spawn":      true,
+				"via_daemon":       true,
+				"role":             params.Role,
+				"name":             params.Name,
+				"slug":             params.Slug,
+				"llm_provider":     params.LLMProvider,
+				"llm_model":        params.LLMModel,
+				"exec_mode":        params.ExecMode,
+				"memory_scope":     params.MemoryScope,
+				"memory_retention": params.MemoryRetention,
+				"max_iterations":   params.MaxIterations,
+				"max_auto_turns":   params.MaxAutoTurns,
+				"think_interval":   params.ThinkInterval,
+				"has_prompt":       len(params.Prompt) > 0,
 			}
 			return writeOK(cmd, "agent/spawn", data, "run", nil)
 		}
@@ -499,43 +467,47 @@ func runAgentSpawnV1(cmd *cobra.Command, _ []string) error {
 
 	// Spawn agent
 	req := agentmanager.SpawnRequest{
-		ParentNS:      spawnParentNS,
-		Name:          spawnName,
-		Slug:          spawnSlug,
-		Role:          spawnRole,
-		Prompt:        prompt,
-		SkillsAllow:   skillsAllow,
-		Policy:        policy,
-		ShareBB:       spawnShareBB,
-		LLMProvider:   spawnLLMProvider,
-		LLMModel:      spawnLLMModel,
-		LLMAPIKey:     llmAPIKey,
-		ExecMode:      agent.ExecutionMode(spawnExecMode),
-		MaxIterations: spawnMaxIterations,
-		MaxAutoTurns:  spawnMaxAutoTurns,
-		ThinkInterval: spawnThinkInterval,
+		ParentNS:        spawnParentNS,
+		Name:            spawnName,
+		Slug:            spawnSlug,
+		Role:            spawnRole,
+		Prompt:          prompt,
+		SkillsAllow:     skillsAllow,
+		Policy:          policy,
+		ShareBB:         spawnShareBB,
+		MemoryScope:     agent.MemoryScope(strings.TrimSpace(spawnMemoryScope)),
+		MemoryRetention: agent.MemoryRetention(strings.TrimSpace(spawnMemoryRetention)),
+		LLMProvider:     spawnLLMProvider,
+		LLMModel:        spawnLLMModel,
+		LLMAPIKey:       llmAPIKey,
+		ExecMode:        agent.ExecutionMode(spawnExecMode),
+		MaxIterations:   spawnMaxIterations,
+		MaxAutoTurns:    spawnMaxAutoTurns,
+		ThinkInterval:   spawnThinkInterval,
 	}
 
 	// Dry-run mode: show what would be spawned
 	if spawnDryRun {
 		data := map[string]any{
-			"dry_run":        true,
-			"would_spawn":    true,
-			"via_daemon":     false,
-			"parent_ns":      req.ParentNS,
-			"name":           req.Name,
-			"slug":           req.Slug,
-			"role":           req.Role,
-			"skills_allow":   req.SkillsAllow,
-			"share_bb":       req.ShareBB,
-			"llm_provider":   req.LLMProvider,
-			"llm_model":      req.LLMModel,
-			"exec_mode":      string(req.ExecMode),
-			"max_iterations": req.MaxIterations,
-			"max_auto_turns": req.MaxAutoTurns,
-			"think_interval": req.ThinkInterval,
-			"has_prompt":     len(req.Prompt) > 0,
-			"has_policy":     req.Policy.CPU > 0 || req.Policy.MemoryMB > 0 || req.Policy.Timeout != "",
+			"dry_run":          true,
+			"would_spawn":      true,
+			"via_daemon":       false,
+			"parent_ns":        req.ParentNS,
+			"name":             req.Name,
+			"slug":             req.Slug,
+			"role":             req.Role,
+			"skills_allow":     req.SkillsAllow,
+			"share_bb":         req.ShareBB,
+			"memory_scope":     string(req.MemoryScope),
+			"memory_retention": string(req.MemoryRetention),
+			"llm_provider":     req.LLMProvider,
+			"llm_model":        req.LLMModel,
+			"exec_mode":        string(req.ExecMode),
+			"max_iterations":   req.MaxIterations,
+			"max_auto_turns":   req.MaxAutoTurns,
+			"think_interval":   req.ThinkInterval,
+			"has_prompt":       len(req.Prompt) > 0,
+			"has_policy":       req.Policy.CPU > 0 || req.Policy.MemoryMB > 0 || req.Policy.Timeout != "",
 		}
 		return writeOK(cmd, "agent/spawn", data, "run", nil)
 	}
@@ -556,23 +528,11 @@ func runAgentSpawnV1(cmd *cobra.Command, _ []string) error {
 	return writeOK(cmd, "agent/spawn", data, "run", nil)
 }
 
-func runAgentSpawnV2(cmd *cobra.Command, args []string) error {
-	// PR-11 routes real CLI command handlers through v2 ports while preserving
-	// current behavior. Later slices can replace this with v2-native services.
-	return runAgentSpawnV1(cmd, args)
-}
-
 func runAgentList(cmd *cobra.Command, args []string) error {
-	return dispatchAgentCLICommand(
-		cmd,
-		"list",
-		ulid.Make().String(),
-		func(context.Context) error { return runAgentListV1Fn(cmd, args) },
-		func(context.Context) error { return runAgentListV2Fn(cmd, args) },
-	)
+	return runAgentListWithRoute(cmd)
 }
 
-func runAgentListV1(cmd *cobra.Command, _ []string) error {
+func runAgentListWithRoute(cmd *cobra.Command) error {
 	ctx := cmd.Context()
 	cfg := config.MustFromContext(ctx)
 
@@ -601,23 +561,11 @@ func runAgentListV1(cmd *cobra.Command, _ []string) error {
 	}, "run", nil)
 }
 
-func runAgentListV2(cmd *cobra.Command, args []string) error {
-	// PR-11 routes real CLI command handlers through v2 ports while preserving
-	// current behavior. Later slices can replace this with v2-native services.
-	return runAgentListV1(cmd, args)
-}
-
 func runAgentKill(cmd *cobra.Command, args []string) error {
-	return dispatchAgentCLICommand(
-		cmd,
-		"kill",
-		ulid.Make().String(),
-		func(context.Context) error { return runAgentKillV1Fn(cmd, args) },
-		func(context.Context) error { return runAgentKillV2Fn(cmd, args) },
-	)
+	return runAgentKillWithRoute(cmd, args)
 }
 
-func runAgentKillV1(cmd *cobra.Command, args []string) error {
+func runAgentKillWithRoute(cmd *cobra.Command, args []string) error {
 	ctx := cmd.Context()
 	cfg := config.MustFromContext(ctx)
 	agentID := args[0]
@@ -678,12 +626,6 @@ func runAgentKillV1(cmd *cobra.Command, args []string) error {
 	}
 
 	return writeOK(cmd, "agent/kill", data, "run", nil)
-}
-
-func runAgentKillV2(cmd *cobra.Command, args []string) error {
-	// PR-11 routes real CLI command handlers through v2 ports while preserving
-	// current behavior. Later slices can replace this with v2-native services.
-	return runAgentKillV1(cmd, args)
 }
 
 func runAgentInfo(cmd *cobra.Command, args []string) error {
@@ -1086,16 +1028,10 @@ func filterAgentsByState(list []agent.Agent, stateFilter string) ([]agent.Agent,
 }
 
 func runAgentRun(cmd *cobra.Command, args []string) error {
-	return dispatchAgentCLICommand(
-		cmd,
-		"run",
-		ulid.Make().String(),
-		func(context.Context) error { return runAgentRunV1Fn(cmd, args) },
-		func(context.Context) error { return runAgentRunV2Fn(cmd, args) },
-	)
+	return runAgentRunWithRoute(cmd, args)
 }
 
-func runAgentRunV1(cmd *cobra.Command, args []string) error {
+func runAgentRunWithRoute(cmd *cobra.Command, args []string) error {
 	ctx := cmd.Context()
 	cfg := config.MustFromContext(ctx)
 	agentRef := args[0] // Can be ID, slug, or name
@@ -1118,24 +1054,7 @@ func runAgentRunV1(cmd *cobra.Command, args []string) error {
 		provider = cfg.LLM.Provider
 	}
 	if provider == "" {
-		// Auto-detect provider based on available API keys
-		// Priority: cerebras > groq > openrouter > gemini > anthropic > openai
-		switch {
-		case cfg.LLM.CerebrasAPIKey != "":
-			provider = "cerebras"
-		case cfg.LLM.GroqAPIKey != "":
-			provider = "groq"
-		case cfg.LLM.OpenRouterAPIKey != "":
-			provider = "openrouter"
-		case cfg.LLM.GeminiAPIKey != "":
-			provider = "gemini"
-		case cfg.LLM.AnthropicAPIKey != "":
-			provider = "anthropic"
-		case cfg.LLM.OpenAIAPIKey != "":
-			provider = "openai"
-		default:
-			provider = "gemini" // fallback default
-		}
+		provider = "lmstudio"
 	}
 
 	// Determine companion mode: use flag if set, else auto-detect based on role
@@ -1156,6 +1075,11 @@ func runAgentRunV1(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("resolve workspace root: %w", err)
 	}
 
+	model := cfg.LLM.ResolveModel(provider)
+	if model == "" {
+		model = llmproviders.DefaultModelForProvider(provider)
+	}
+
 	opts := agentdaemon.Options{
 		AgentID:               agentRecord.ID, // Use resolved ID
 		StorageRoot:           cfg.Storage.Root,
@@ -1164,7 +1088,7 @@ func runAgentRunV1(cmd *cobra.Command, args []string) error {
 		HeartbeatInterval:     10 * time.Second,
 		MaxPollMessages:       10,
 		LLMProvider:           provider,
-		LLMModel:              cfg.LLM.ResolveModel(provider),
+		LLMModel:              model,
 		LLMAPIKey:             cfg.LLM.ResolveAPIKey(provider),
 		EnableCompanionMemory: enableCompanionMemory,
 		CompanionMode:         companionMode,
@@ -1173,16 +1097,55 @@ func runAgentRunV1(cmd *cobra.Command, args []string) error {
 	return agentdaemon.Run(ctx, opts)
 }
 
-func runAgentRunV2(cmd *cobra.Command, args []string) error {
-	// PR-11 routes real CLI command handlers through v2 ports while preserving
-	// current behavior. Later slices can replace this with v2-native services.
-	return runAgentRunV1(cmd, args)
+func runAgentAsk(cmd *cobra.Command, args []string) error {
+	return runAgentAskWithRoute(cmd, args)
 }
 
-func runAgentAsk(cmd *cobra.Command, args []string) error {
+func runAgentAskStatus(cmd *cobra.Command, args []string) error {
+	ctx := cmd.Context()
+	cfg := config.MustFromContext(ctx)
+	askID := strings.TrimSpace(args[0])
+	if askID == "" {
+		return writeErrorEnvelope(cmd, "agent/ask_status", string(protocol.ErrorCodeEARG), "ask_id is required")
+	}
+	runID := "ask:" + askID
+
+	projectionStore, closeProjections, err := libsqlprojections.Open(ctx, cfg.Storage.Root)
+	if err != nil {
+		return writeErrorEnvelope(cmd, "agent/ask_status", string(protocol.ErrorCodeERuntime), fmt.Sprintf("failed to open v2 projection store: %v", err))
+	}
+	defer func() {
+		if closeProjections != nil {
+			_ = closeProjections()
+		}
+	}()
+
+	runState, err := projectionStore.GetRunState(ctx, runID)
+	if err != nil {
+		if errors.Is(err, libsqlprojections.ErrNotFound) {
+			return writeErrorEnvelope(cmd, "agent/ask_status", string(protocol.ErrorCodeENotFound), fmt.Sprintf("ask status not found for ask_id=%s", askID))
+		}
+		return writeErrorEnvelope(cmd, "agent/ask_status", string(protocol.ErrorCodeERuntime), fmt.Sprintf("failed to load ask run state: %v", err))
+	}
+
+	callback := jidoTerminalCallback{}
+	eventStore, eventErr := libsqlevents.Open(ctx, cfg.Storage.Root)
+	if eventErr == nil {
+		defer func() { _ = eventStore.Close() }()
+		if resolved, resolveErr := resolveJidoTerminalCallback(ctx, eventStore, askID); resolveErr == nil {
+			callback = resolved
+		}
+	}
+
+	data := buildAskRunResponseData(askID, runState, callback)
+	return writeOK(cmd, "agent/ask_status", data, "ask_status", nil)
+}
+
+func runAgentAskWithRoute(cmd *cobra.Command, args []string) error {
 	ctx := cmd.Context()
 	cfg := config.MustFromContext(ctx)
 	agentID := args[0]
+	dispatcherMode := resolvedAskDispatcherMode(askDispatcherMode)
 	question, err := cmd.Flags().GetString("question")
 	if err != nil {
 		return fmt.Errorf("get question flag: %w", err)
@@ -1203,13 +1166,14 @@ func runAgentAsk(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("get conversation-id flag: %w", err)
 	}
-
-	// Open mailbox store
-	mailboxStore, err := mailbox.Open(ctx, cfg.Storage.Root)
-	if err != nil {
-		return writeErrorEnvelope(cmd, "agent/ask", string(protocol.ErrorCodeERuntime), fmt.Sprintf("failed to open mailbox store: %v", err))
+	var mailboxStore mailbox.Store
+	if dispatcherMode == askDispatchModeMailbox {
+		mailboxStore, err = mailbox.Open(ctx, cfg.Storage.Root)
+		if err != nil {
+			return writeErrorEnvelope(cmd, "agent/ask", string(protocol.ErrorCodeERuntime), fmt.Sprintf("failed to open mailbox store: %v", err))
+		}
+		defer func() { errs.Ignore(mailboxStore.Close(), "close mailbox store") }()
 	}
-	defer func() { errs.Ignore(mailboxStore.Close(), "close mailbox store") }()
 
 	// Get agent to find its namespace (supports slug, name, or ID)
 	agentStore, err := agents.Open(ctx, cfg.Storage.Root)
@@ -1222,30 +1186,8 @@ func runAgentAsk(cmd *cobra.Command, args []string) error {
 		return writeErrorEnvelope(cmd, "agent/ask", string(protocol.ErrorCodeENotFound), fmt.Sprintf("agent not found: %v", err))
 	}
 
-	// Build ask message
 	askID := ulid.Make().String()
-	askData := agent.AskData{
-		AskID:          askID,
-		Kind:           kind,
-		Question:       question,
-		ConversationID: conversationID,
-	}
-	payload, err := json.Marshal(envelope.OK("agent.ask", askData))
-	if err != nil {
-		return writeErrorEnvelope(cmd, "agent/ask", string(protocol.ErrorCodeERuntime), fmt.Sprintf("failed to marshal ask payload: %v", err))
-	}
-
-	msg := agent.Message{
-		ID:        ulid.Make().String(),
-		FromNS:    "cli:" + ulid.Make().String(), // unique caller namespace
-		ToNS:      agentRecord.Namespace,
-		Type:      agent.MessageTypeAsk,
-		TTLMS:     int64(timeout.Milliseconds()),
-		Headers:   map[string]string{"correlation": askID},
-		Payload:   payload,
-		VisibleAt: time.Now().Unix(),
-		Timestamp: time.Now().Unix(),
-	}
+	callerNS := "cli:" + ulid.Make().String()
 
 	// Dry-run mode: show what would be sent
 	if askDryRun {
@@ -1255,41 +1197,132 @@ func runAgentAsk(cmd *cobra.Command, args []string) error {
 			"agent_id":   agentID,
 			"namespace":  agentRecord.Namespace,
 			"ask_id":     askID,
+			"caller_ns":  callerNS,
 			"kind":       kind,
 			"question":   question,
 			"timeout_ms": timeout.Milliseconds(),
+			"dispatcher": dispatcherMode,
 		}
 		return writeOK(cmd, "agent/ask", data, "ask", nil)
 	}
 
-	if err := mailboxStore.Send(ctx, msg); err != nil {
-		return writeErrorEnvelope(cmd, "agent/ask", string(protocol.ErrorCodeEIO), err.Error())
+	nowFn := func() time.Time { return time.Now().UTC() }
+	newID := func() string { return ulid.Make().String() }
+
+	var (
+		dispatcher  v2services.AskDispatcher
+		eventStore  events.Appender
+		projections v2services.AskProjectionApplier
+		cleanupFn   func()
+	)
+
+	switch dispatcherMode {
+	case askDispatchModeMailbox:
+		dispatcher = newMailboxAskDispatcher(mailboxStore, nowFn, newID)
+	case askDispatchModeJido:
+		var runtimeErr error
+		dispatcher, eventStore, projections, cleanupFn, runtimeErr = newJidoAskRuntime(ctx, cfg.Storage.Root, nowFn, newID)
+		if runtimeErr != nil {
+			return writeErrorEnvelope(cmd, "agent/ask", string(protocol.ErrorCodeERuntime), runtimeErr.Error())
+		}
+		if cleanupFn != nil {
+			defer cleanupFn()
+		}
+	default:
+		return writeErrorEnvelope(cmd, "agent/ask", string(protocol.ErrorCodeEARG), fmt.Sprintf("unsupported dispatcher mode %q", dispatcherMode))
+	}
+
+	svc := v2services.NewAskService(v2services.AskDependencies{
+		Dispatcher:  dispatcher,
+		Events:      eventStore,
+		Projections: projections,
+		DefaultTTL:  timeout,
+		Now:         nowFn,
+		NewID:       newID,
+	})
+
+	resp, err := svc.Ask(ctx, v2ask.Request{
+		AskID:          askID,
+		AgentID:        agentRecord.ID,
+		Namespace:      agentRecord.Namespace,
+		Kind:           kind,
+		Question:       question,
+		ConversationID: conversationID,
+		CallerNS:       callerNS,
+		Timeout:        timeout,
+	})
+	if err != nil {
+		return writeErrorEnvelope(cmd, "agent/ask", string(askServiceErrorCode(err)), err.Error())
 	}
 
 	// Output ask confirmation
 	if err := writeOK(cmd, "agent/ask", map[string]any{
-		"ask_id":     askID,
-		"message_id": msg.ID,
-		"sent_to":    agentRecord.Namespace,
+		"ask_id":     resp.AskID,
+		"message_id": resp.MessageID,
+		"sent_to":    resp.Namespace,
 	}, "ask", nil); err != nil {
 		return err
 	}
-	maybeRunAgentAskShadow(ctx, askShadowInput{
-		AskID:          askID,
-		AgentID:        agentRecord.ID,
-		Namespace:      agentRecord.Namespace,
-		FromNS:         msg.FromNS,
-		Kind:           kind,
-		Question:       question,
-		ConversationID: conversationID,
-		Timeout:        timeout,
-		V1MessageID:    msg.ID,
-	})
 
 	if wait {
-		return waitForReply(ctx, mailboxStore, cmd.OutOrStdout(), msg.FromNS, askID, timeout)
+		switch dispatcherMode {
+		case askDispatchModeMailbox:
+			if mailboxStore == nil {
+				return writeErrorEnvelope(cmd, "agent/ask", string(protocol.ErrorCodeERuntime), "mailbox store is not configured for wait mode")
+			}
+			return waitForReply(ctx, mailboxStore, cmd.OutOrStdout(), callerNS, resp.AskID, timeout)
+		case askDispatchModeJido:
+			runStateReader, ok := projections.(jidoRunStateReader)
+			if !ok || runStateReader == nil {
+				return writeErrorEnvelope(cmd, "agent/ask", string(protocol.ErrorCodeERuntime), "jido run-state reader is not configured for wait mode")
+			}
+			runState, waitErr := waitForJidoRunState(ctx, runStateReader, resp.AskID, timeout)
+			if waitErr != nil {
+				return writeErrorEnvelope(cmd, "agent/ask", string(protocol.ErrorCodeERuntime), waitErr.Error())
+			}
+			callback := jidoTerminalCallback{}
+			if runEventReader, ok := eventStore.(jidoRunEventReader); ok && runEventReader != nil {
+				if resolved, resolveErr := resolveJidoTerminalCallback(ctx, runEventReader, resp.AskID); resolveErr == nil {
+					callback = resolved
+				}
+			}
+			if strings.EqualFold(strings.TrimSpace(runState.Status), "completed") {
+				data := buildAskRunResponseData(resp.AskID, runState, callback)
+				return writeOK(cmd, "agent/ask_wait", data, "ask_wait", nil)
+			}
+			errMessage := fmt.Sprintf("ask run ended with status %q", strings.TrimSpace(runState.Status))
+			if callback.Error != "" {
+				errMessage = fmt.Sprintf("%s: %s", errMessage, callback.Error)
+			}
+			hint := askWaitFailureHint(callback)
+			if hint == "" {
+				return writeErrorEnvelope(
+					cmd,
+					"agent/ask_wait",
+					string(protocol.ErrorCodeERuntime),
+					errMessage,
+				)
+			}
+			return writeErrorEnvelope(
+				cmd,
+				"agent/ask_wait",
+				string(protocol.ErrorCodeERuntime),
+				errMessage,
+				hint,
+			)
+		default:
+			return writeErrorEnvelope(cmd, "agent/ask", string(protocol.ErrorCodeEARG), fmt.Sprintf("unsupported dispatcher mode %q", dispatcherMode))
+		}
 	}
 	return nil
+}
+
+func askServiceErrorCode(err error) protocol.ErrorCode {
+	var verr *v2errors.V2Error
+	if errors.As(err, &verr) {
+		return protocol.ErrorCode(verr.EnvelopeCode())
+	}
+	return protocol.ErrorCodeERuntime
 }
 
 func runAgentCmd(cmd *cobra.Command, args []string) error {
@@ -1441,6 +1474,200 @@ func waitForReply(ctx context.Context, store mailbox.Store, out io.Writer, calle
 		}
 	}
 	return fmt.Errorf("timeout waiting for reply to ask_id=%s", askID)
+}
+
+type jidoRunStateReader interface {
+	GetRunState(ctx context.Context, runID string) (libsqlprojections.RunState, error)
+}
+
+type jidoRunEventReader interface {
+	ListStream(ctx context.Context, filter events.StreamFilter) ([]events.Event, error)
+}
+
+type jidoTerminalCallback struct {
+	EventID  string
+	Status   string
+	Summary  string
+	Error    string
+	Metadata map[string]any
+}
+
+func waitForJidoRunState(
+	ctx context.Context,
+	reader jidoRunStateReader,
+	askID string,
+	timeout time.Duration,
+) (libsqlprojections.RunState, error) {
+	return waitForJidoRunStateWithPoll(ctx, reader, askID, timeout, 250*time.Millisecond)
+}
+
+func waitForJidoRunStateWithPoll(
+	ctx context.Context,
+	reader jidoRunStateReader,
+	askID string,
+	timeout time.Duration,
+	pollInterval time.Duration,
+) (libsqlprojections.RunState, error) {
+	if reader == nil {
+		return libsqlprojections.RunState{}, fmt.Errorf("jido run-state reader is required")
+	}
+	askID = strings.TrimSpace(askID)
+	if askID == "" {
+		return libsqlprojections.RunState{}, fmt.Errorf("ask_id is required")
+	}
+	if timeout <= 0 {
+		timeout = 5 * time.Minute
+	}
+	if pollInterval <= 0 {
+		pollInterval = 250 * time.Millisecond
+	}
+
+	runID := "ask:" + askID
+	deadline := time.Now().Add(timeout)
+
+	for time.Now().Before(deadline) {
+		select {
+		case <-ctx.Done():
+			return libsqlprojections.RunState{}, ctx.Err()
+		case <-time.After(pollInterval):
+			state, err := reader.GetRunState(ctx, runID)
+			if err != nil {
+				if errors.Is(err, libsqlprojections.ErrNotFound) {
+					continue
+				}
+				return libsqlprojections.RunState{}, fmt.Errorf("query run state for %s: %w", runID, err)
+			}
+			switch strings.ToLower(strings.TrimSpace(state.Status)) {
+			case "completed", "failed", "canceled", "cancelled", "timed_out", "timeout":
+				return state, nil
+			}
+		}
+	}
+
+	return libsqlprojections.RunState{}, fmt.Errorf("timeout waiting for jido ask run to complete: ask_id=%s", askID)
+}
+
+func resolveJidoTerminalCallback(
+	ctx context.Context,
+	reader jidoRunEventReader,
+	askID string,
+) (jidoTerminalCallback, error) {
+	if reader == nil {
+		return jidoTerminalCallback{}, fmt.Errorf("jido run-event reader is required")
+	}
+	askID = strings.TrimSpace(askID)
+	if askID == "" {
+		return jidoTerminalCallback{}, fmt.Errorf("ask_id is required")
+	}
+
+	streamID := "ask:" + askID
+	list, err := reader.ListStream(ctx, events.StreamFilter{
+		StreamID:   streamID,
+		StreamType: events.StreamTypeRun,
+		Limit:      256,
+	})
+	if err != nil {
+		return jidoTerminalCallback{}, fmt.Errorf("list run events for %s: %w", streamID, err)
+	}
+
+	for i := len(list) - 1; i >= 0; i-- {
+		evt := list[i]
+		switch evt.EventType {
+		case events.EventRunCompleted, events.EventRunFailed:
+			parsed := parseJidoTerminalCallbackPayload(evt.Payload)
+			parsed.EventID = strings.TrimSpace(evt.ID)
+			if parsed.Status == "" {
+				if evt.EventType == events.EventRunFailed {
+					parsed.Status = "failed"
+				} else {
+					parsed.Status = "completed"
+				}
+			}
+			return parsed, nil
+		}
+	}
+
+	return jidoTerminalCallback{}, events.ErrNotFound
+}
+
+func parseJidoTerminalCallbackPayload(payload json.RawMessage) jidoTerminalCallback {
+	if len(payload) == 0 || !json.Valid(payload) {
+		return jidoTerminalCallback{}
+	}
+	var raw map[string]any
+	if err := json.Unmarshal(payload, &raw); err != nil {
+		return jidoTerminalCallback{}
+	}
+	out := jidoTerminalCallback{
+		Status:  strings.TrimSpace(anyToString(raw["status"])),
+		Summary: strings.TrimSpace(anyToString(raw["summary"])),
+		Error:   strings.TrimSpace(anyToString(raw["error"])),
+	}
+	if md, ok := raw["metadata"].(map[string]any); ok && len(md) > 0 {
+		out.Metadata = md
+	}
+	return out
+}
+
+func anyToString(v any) string {
+	switch value := v.(type) {
+	case nil:
+		return ""
+	case string:
+		return value
+	default:
+		return fmt.Sprintf("%v", value)
+	}
+}
+
+func askWaitFailureHint(callback jidoTerminalCallback) string {
+	parts := make([]string, 0, 4)
+	if callback.EventID != "" {
+		parts = append(parts, "callback_event_id="+callback.EventID)
+	}
+	if callback.Status != "" {
+		parts = append(parts, "callback_status="+callback.Status)
+	}
+	if callback.Summary != "" {
+		parts = append(parts, "callback_summary="+callback.Summary)
+	}
+	if len(callback.Metadata) > 0 {
+		if raw, err := json.Marshal(callback.Metadata); err == nil {
+			parts = append(parts, "callback_metadata="+string(raw))
+		}
+	}
+	return strings.TrimSpace(strings.Join(parts, "; "))
+}
+
+func buildAskRunResponseData(
+	askID string,
+	runState libsqlprojections.RunState,
+	callback jidoTerminalCallback,
+) map[string]any {
+	data := map[string]any{
+		"ask_id":        strings.TrimSpace(askID),
+		"run_id":        strings.TrimSpace(runState.RunID),
+		"status":        strings.TrimSpace(runState.Status),
+		"last_event_id": strings.TrimSpace(runState.LastEventID),
+		"request_id":    strings.TrimSpace(runState.RequestID),
+		"actor_id":      strings.TrimSpace(runState.ActorID),
+	}
+	if callback.EventID != "" {
+		data["callback_event_id"] = callback.EventID
+	}
+	if callback.Status != "" {
+		data["callback_status"] = callback.Status
+	}
+	if callback.Summary != "" {
+		data["callback_summary"] = callback.Summary
+	}
+	if callback.Error != "" {
+		data["callback_error"] = callback.Error
+	}
+	if len(callback.Metadata) > 0 {
+		data["callback_metadata"] = callback.Metadata
+	}
+	return data
 }
 
 func runAgentResume(cmd *cobra.Command, args []string) error {

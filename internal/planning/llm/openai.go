@@ -16,7 +16,7 @@ type OpenAIConfig struct {
 	BaseURL  string        // API base URL (default based on Provider)
 	Model    string        // Model name (default based on Provider)
 	Timeout  time.Duration // Request timeout (default: 60s)
-	Provider string        // Provider: "openai", "groq", "openrouter"
+	Provider string        // Provider: "openai", "groq", "openrouter", "cerebras", or "lmstudio"
 }
 
 // OpenAIPlanner implements Planner using an OpenAI-compatible API.
@@ -40,6 +40,8 @@ func NewOpenAIPlanner(ctx context.Context, config OpenAIConfig) *OpenAIPlanner {
 			config.BaseURL = "https://openrouter.ai/api/v1"
 		case "groq":
 			config.BaseURL = "https://api.groq.com/openai/v1"
+		case "lmstudio":
+			config.BaseURL = "http://localhost:1234/v1"
 		default:
 			config.BaseURL = "https://api.openai.com/v1"
 		}
@@ -54,6 +56,8 @@ func NewOpenAIPlanner(ctx context.Context, config OpenAIConfig) *OpenAIPlanner {
 			config.Model = "openai/gpt-4o-mini"
 		case "groq":
 			config.Model = "llama-3.3-70b-versatile"
+		case "lmstudio":
+			config.Model = "zai-org/glm-4.7-flash"
 		default:
 			config.Model = "gpt-4o-mini"
 		}
@@ -202,6 +206,8 @@ func (p *OpenAIPlanner) Provider() string {
 		return "groq"
 	case "https://openrouter.ai/api/v1":
 		return "openrouter"
+	case "http://localhost:1234/v1":
+		return "lmstudio"
 	default:
 		return "openai"
 	}

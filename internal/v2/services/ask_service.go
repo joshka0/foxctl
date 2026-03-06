@@ -7,14 +7,23 @@ import (
 
 	"github.com/jkatigb/agentctl/internal/v2/core/ask"
 	v2errors "github.com/jkatigb/agentctl/internal/v2/core/errors"
+	"github.com/jkatigb/agentctl/internal/v2/core/events"
 )
 
 // AskDependencies wires AskService collaborators.
 type AskDependencies struct {
-	Policy     AskPolicyAuthorizer
-	Dispatcher AskDispatcher
-	DefaultTTL time.Duration
-	NewID      func() string
+	Policy      AskPolicyAuthorizer
+	Dispatcher  AskDispatcher
+	Events      events.Appender
+	Projections AskProjectionApplier
+	DefaultTTL  time.Duration
+	Now         func() time.Time
+	NewID       func() string
+}
+
+// AskProjectionApplier materializes ask-related events into read models.
+type AskProjectionApplier interface {
+	Apply(ctx context.Context, evt events.Event) error
 }
 
 // AskService centralizes ask validation, policy checks, and dispatch mapping.
@@ -29,6 +38,9 @@ func NewAskService(deps AskDependencies) *AskService {
 	}
 	if deps.DefaultTTL <= 0 {
 		deps.DefaultTTL = 5 * time.Minute
+	}
+	if deps.Now == nil {
+		deps.Now = defaultNow()
 	}
 	return &AskService{deps: deps}
 }
@@ -87,8 +99,12 @@ func (s *AskService) Ask(ctx context.Context, req ask.Request) (ask.Response, er
 		TTLMS:          parsePositiveDurationOrDefault(req.Timeout, s.deps.DefaultTTL).Milliseconds(),
 	}
 
+	if err := s.recordDispatch(ctx, req, msg, msg.AskID); err != nil {
+		return ask.Response{}, err
+	}
 	messageID, err := s.deps.Dispatcher.Send(ctx, msg)
 	if err != nil {
+		_ = s.recordDispatchFailure(ctx, req, msg, err)
 		return ask.Response{}, asDependencyError("dispatch ask message", err)
 	}
 
@@ -99,4 +115,81 @@ func (s *AskService) Ask(ctx context.Context, req ask.Request) (ask.Response, er
 		Namespace: toNS,
 		Status:    "sent",
 	}, nil
+}
+
+func (s *AskService) recordDispatch(ctx context.Context, req ask.Request, msg ask.Message, messageID string) error {
+	if s.deps.Events == nil {
+		return nil
+	}
+	askID := strings.TrimSpace(msg.AskID)
+	now := s.deps.Now()
+	evt := events.Event{
+		ID:            prefixedID("evt", s.deps.NewID),
+		StreamID:      "ask:" + askID,
+		StreamType:    events.StreamTypeRun,
+		EventType:     events.EventRunStarted,
+		OccurredAt:    now,
+		CorrelationID: askID,
+		CausationID:   strings.TrimSpace(msg.RequestID),
+		ActorID:       strings.TrimSpace(req.AgentID),
+		RequestID:     strings.TrimSpace(msg.RequestID),
+		Command:       "ask",
+		Payload: events.MustMarshalPayload(map[string]any{
+			"ask_id":     askID,
+			"message_id": strings.TrimSpace(messageID),
+			"kind":       strings.TrimSpace(msg.Kind),
+			"question":   strings.TrimSpace(msg.Question),
+			"agent_id":   strings.TrimSpace(req.AgentID),
+			"namespace":  strings.TrimSpace(msg.ToNS),
+			"status":     "dispatching",
+		}),
+	}
+	if err := s.deps.Events.Append(ctx, evt); err != nil {
+		return asDependencyError("append ask event", err)
+	}
+	if s.deps.Projections != nil {
+		if err := s.deps.Projections.Apply(ctx, evt); err != nil {
+			return asDependencyError("apply ask projection", err)
+		}
+	}
+	return nil
+}
+
+func (s *AskService) recordDispatchFailure(ctx context.Context, req ask.Request, msg ask.Message, dispatchErr error) error {
+	if s.deps.Events == nil {
+		return nil
+	}
+	askID := strings.TrimSpace(msg.AskID)
+	now := s.deps.Now()
+	evt := events.Event{
+		ID:            prefixedID("evt", s.deps.NewID),
+		StreamID:      "ask:" + askID,
+		StreamType:    events.StreamTypeRun,
+		EventType:     events.EventRunFailed,
+		OccurredAt:    now,
+		CorrelationID: askID,
+		CausationID:   strings.TrimSpace(msg.RequestID),
+		ActorID:       strings.TrimSpace(req.AgentID),
+		RequestID:     strings.TrimSpace(msg.RequestID),
+		Command:       "ask",
+		Payload: events.MustMarshalPayload(map[string]any{
+			"ask_id":    askID,
+			"kind":      strings.TrimSpace(msg.Kind),
+			"question":  strings.TrimSpace(msg.Question),
+			"agent_id":  strings.TrimSpace(req.AgentID),
+			"namespace": strings.TrimSpace(msg.ToNS),
+			"status":    "failed",
+			"error":     strings.TrimSpace(dispatchErr.Error()),
+			"failed_at": now.UTC().Format(time.RFC3339Nano),
+		}),
+	}
+	if err := s.deps.Events.Append(ctx, evt); err != nil {
+		return asDependencyError("append ask failure event", err)
+	}
+	if s.deps.Projections != nil {
+		if err := s.deps.Projections.Apply(ctx, evt); err != nil {
+			return asDependencyError("apply ask failure projection", err)
+		}
+	}
+	return nil
 }

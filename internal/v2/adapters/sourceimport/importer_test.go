@@ -2,13 +2,17 @@ package sourceimport
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jkatigb/agentctl/internal/todosync"
 	"github.com/jkatigb/agentctl/internal/v2/adapters/libsql/turns"
+	"github.com/jkatigb/agentctl/internal/v2/core/run"
 )
 
 func TestParseClaudeFile_ToCanonicalTurns(t *testing.T) {
@@ -93,6 +97,37 @@ func TestParseCodexFile_ToCanonicalTurns(t *testing.T) {
 	}
 }
 
+func TestParseClaudeFile_UsesInjectedClockForMissingTimestamps(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "claude-missing-timestamp.jsonl")
+	lines := []string{
+		`{"type":"user","message":{"role":"user","content":"Review pipeline"}}`,
+		`{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Pipeline reviewed."}]}}`,
+	}
+	if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")+"\n"), 0o644); err != nil {
+		t.Fatalf("write source file: %v", err)
+	}
+
+	fixedNow := time.Date(2026, time.February, 24, 8, 30, 0, 0, time.UTC)
+	parsed, err := parseClaudeFileWithClock(path, "sess-fixed-time", "/tmp/workspace", "actor:test", func() time.Time {
+		return fixedNow
+	})
+	if err != nil {
+		t.Fatalf("parseClaudeFileWithClock() error = %v", err)
+	}
+	if len(parsed.Turns) != 1 {
+		t.Fatalf("turn count=%d want 1", len(parsed.Turns))
+	}
+	turn := parsed.Turns[0]
+	if !turn.CreatedAt.Equal(fixedNow) {
+		t.Fatalf("created_at=%s want %s", turn.CreatedAt, fixedNow)
+	}
+	if !turn.UpdatedAt.Equal(fixedNow) {
+		t.Fatalf("updated_at=%s want %s", turn.UpdatedAt, fixedNow)
+	}
+}
+
 func TestBuildArtifacts_DerivesDeterministicTypes(t *testing.T) {
 	t.Parallel()
 
@@ -132,10 +167,21 @@ func TestBuildArtifacts_DerivesDeterministicTypes(t *testing.T) {
 
 	typeSet := map[string]bool{}
 	var firstEmbedding, secondEmbedding []float32
+	foundSourceTag := false
 	for _, artifact := range first.Artifacts {
 		typeSet[artifact.ArtifactType] = true
 		if artifact.ArtifactType == turns.ArtifactTypeEmbedding {
 			firstEmbedding = artifact.Embedding
+		}
+		if artifact.ArtifactType == turns.ArtifactTypeAnnotation {
+			var metadata map[string]any
+			if err := json.Unmarshal(artifact.MetadataJSON, &metadata); err != nil {
+				t.Fatalf("unmarshal annotation metadata: %v", err)
+			}
+			if strings.TrimSpace(toString(metadata["artifact_from"])) != "sourceimport" {
+				t.Fatalf("annotation metadata artifact_from=%q want sourceimport", toString(metadata["artifact_from"]))
+			}
+			foundSourceTag = true
 		}
 	}
 	for _, artifact := range second.Artifacts {
@@ -156,6 +202,9 @@ func TestBuildArtifacts_DerivesDeterministicTypes(t *testing.T) {
 	if len(firstEmbedding) != 16 {
 		t.Fatalf("embedding dims=%d want 16", len(firstEmbedding))
 	}
+	if !foundSourceTag {
+		t.Fatal("expected annotation artifact with sourceimport provenance tag")
+	}
 	if BinaryDigest(firstEmbedding) == "" {
 		t.Fatal("embedding digest is empty")
 	}
@@ -163,4 +212,108 @@ func TestBuildArtifacts_DerivesDeterministicTypes(t *testing.T) {
 		t.Fatalf("embedding digest mismatch first=%s second=%s",
 			BinaryDigest(firstEmbedding), BinaryDigest(secondEmbedding))
 	}
+}
+
+func TestBuildEpisodes_DeterministicChunkedOutput(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, time.February, 22, 12, 0, 0, 0, time.UTC)
+	parsed := ParsedSession{
+		Provider:  ProviderClaude,
+		SessionID: "sess-episodes",
+		Turns: []run.TurnRecord{
+			{
+				ID:        "turn-e-1",
+				SessionID: "source:claude:sess-episodes",
+				TurnIndex: 1,
+				Prompt:    "Investigate failing migration tests",
+				CreatedAt: now.Add(-3 * time.Hour),
+				UpdatedAt: now.Add(-3 * time.Hour),
+			},
+			{
+				ID:        "turn-e-2",
+				SessionID: "source:claude:sess-episodes",
+				TurnIndex: 2,
+				Prompt:    "we decided to keep libsql fallback",
+				FinalOutput: run.MessageRef{
+					ID:   "msg-e-2",
+					Role: "assistant",
+					Text: "decision recorded",
+				},
+				Iterations: []run.IterationRecord{
+					{
+						IterationIndex: 1,
+						ToolCalls: []run.ToolCallRecord{
+							{Name: "code_search", Status: "error"},
+						},
+					},
+				},
+				CreatedAt: now.Add(-2 * time.Hour),
+				UpdatedAt: now.Add(-2 * time.Hour),
+			},
+			{
+				ID:        "turn-e-3",
+				SessionID: "source:claude:sess-episodes",
+				TurnIndex: 3,
+				Prompt:    "ship it",
+				CreatedAt: now.Add(-1 * time.Hour),
+				UpdatedAt: now.Add(-1 * time.Hour),
+			},
+		},
+	}
+
+	artifacts := []turns.Artifact{
+		{
+			TurnID:          "turn-e-1",
+			ArtifactType:    turns.ArtifactTypeAnnotation,
+			ArtifactVersion: "v1",
+			Ref:             turns.BuildArtifactRef("turn-e-1", turns.ArtifactTypeAnnotation, "v1"),
+		},
+		{
+			TurnID:          "turn-e-2",
+			ArtifactType:    turns.ArtifactTypeClassification,
+			ArtifactVersion: "v1",
+			Ref:             turns.BuildArtifactRef("turn-e-2", turns.ArtifactTypeClassification, "v1"),
+		},
+		{
+			TurnID:          "turn-e-3",
+			ArtifactType:    turns.ArtifactTypeLearning,
+			ArtifactVersion: "v1",
+			Ref:             turns.BuildArtifactRef("turn-e-3", turns.ArtifactTypeLearning, "v1"),
+		},
+	}
+
+	opts := EpisodeBuildOptions{
+		EpisodeVersion:     "v1",
+		MaxTurnsPerEpisode: 2,
+		Now:                func() time.Time { return now },
+	}
+
+	first := BuildEpisodes(parsed, artifacts, opts)
+	second := BuildEpisodes(parsed, artifacts, opts)
+	if !reflect.DeepEqual(first, second) {
+		t.Fatalf("BuildEpisodes() not deterministic:\nfirst=%+v\nsecond=%+v", first, second)
+	}
+
+	if len(first.Episodes) != 2 {
+		t.Fatalf("episodes len=%d want 2", len(first.Episodes))
+	}
+	ep1 := first.Episodes[0]
+	if ep1.BoundaryKey != "chunk:0001-0002:turn-e-1-turn-e-2" {
+		t.Fatalf("episode boundary_key=%q want chunk:0001-0002:turn-e-1-turn-e-2", ep1.BoundaryKey)
+	}
+	if ep1.StartTurnID != "turn-e-1" || ep1.EndTurnID != "turn-e-2" {
+		t.Fatalf("episode turn span unexpected: start=%q end=%q", ep1.StartTurnID, ep1.EndTurnID)
+	}
+	if !ep1.IsLandmark {
+		t.Fatal("episode 1 should be landmark due to decision/error cues")
+	}
+	if len(ep1.AnchorRefs) == 0 {
+		t.Fatal("episode anchor refs should not be empty")
+	}
+}
+
+func toString(v any) string {
+	s, _ := v.(string)
+	return s
 }

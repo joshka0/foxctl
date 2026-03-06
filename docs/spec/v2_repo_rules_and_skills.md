@@ -11,8 +11,8 @@ Define the minimum rules and skill set needed to keep v2 consistent, maintainabl
 ## Version Boundary
 
 This document governs `internal/v2/*` work only.
-It does not alter v1 behavior unless the command path is explicitly routed via
-`AGENTCTL_V2_COMMANDS`.
+Supported agent command surfaces are hard-cut to v2 paths; this document does
+not define v1 fallback routing controls.
 
 ## Related Docs
 

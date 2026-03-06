@@ -9,17 +9,18 @@ type SemanticRolloutGateThresholds struct {
 	// MinVectorFallbackOverlapAtK is the minimum weighted overlap@K threshold across validation corpus.
 	MinVectorFallbackOverlapAtK float64 `json:"min_vector_fallback_overlap_at_k"`
 	// MaxFallbackRatio is the maximum allowed fallback ratio when vector capability is expected.
-	MaxFallbackRatio float64 `json:"max_fallback_ratio"`
+	MaxFallbackRatio *float64 `json:"max_fallback_ratio,omitempty"`
 	// OverlapTopK is the top-K depth used for vector/fallback overlap comparison.
 	OverlapTopK int `json:"overlap_top_k"`
 }
 
 // DefaultSemanticRolloutGateThresholds returns the PR-18 rollout thresholds.
 func DefaultSemanticRolloutGateThresholds() SemanticRolloutGateThresholds {
+	defaultMaxFallbackRatio := 0.05
 	return SemanticRolloutGateThresholds{
 		MinFallbackInvariantPassRate: 1.0,
 		MinVectorFallbackOverlapAtK:  0.9,
-		MaxFallbackRatio:             0.05,
+		MaxFallbackRatio:             &defaultMaxFallbackRatio,
 		OverlapTopK:                  10,
 	}
 }
@@ -122,7 +123,7 @@ func EvaluateSemanticRolloutGate(input SemanticRolloutGateInput) SemanticRollout
 	checks := SemanticRolloutGateChecks{
 		FallbackInvariantPassRate: fallbackInvariantPassRate >= thresholds.MinFallbackInvariantPassRate,
 		VectorFallbackOverlapAtK:  vectorFallbackOverlapAtK >= thresholds.MinVectorFallbackOverlapAtK,
-		FallbackRatio:             !input.VectorCapabilityExpected || fallbackRatio <= thresholds.MaxFallbackRatio,
+		FallbackRatio:             !input.VectorCapabilityExpected || fallbackRatio <= *thresholds.MaxFallbackRatio,
 	}
 
 	failed := make([]string, 0, 3)
@@ -154,8 +155,9 @@ func normalizeRolloutThresholds(t SemanticRolloutGateThresholds) SemanticRollout
 	if t.MinVectorFallbackOverlapAtK <= 0 {
 		t.MinVectorFallbackOverlapAtK = 0.9
 	}
-	if t.MaxFallbackRatio <= 0 {
-		t.MaxFallbackRatio = 0.05
+	if t.MaxFallbackRatio == nil || *t.MaxFallbackRatio < 0 {
+		defaultMaxFallbackRatio := 0.05
+		t.MaxFallbackRatio = &defaultMaxFallbackRatio
 	}
 	if t.OverlapTopK <= 0 {
 		t.OverlapTopK = 10

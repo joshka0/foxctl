@@ -40,9 +40,14 @@ func openLibSQL(ctx context.Context, cfg LibSQLConfig, migrate MigrationFunc) (D
 		vectorDims = 384 // Default to all-MiniLM-L6-v2 dimensions
 	}
 
-	// Create libSQL connector
-	var connector *libsql.Connector
-	var err error
+	// Create libSQL connection.
+	// NOTE: go-libsql requires a non-empty primary URL for embedded-replica mode.
+	// For local-only operation, open directly via the "file:" DSN.
+	var (
+		connector *libsql.Connector
+		db        *sql.DB
+		err       error
+	)
 
 	if cfg.SyncURL != "" {
 		// Remote sync mode - create embedded replica that syncs with remote sqld
@@ -54,29 +59,32 @@ func openLibSQL(ctx context.Context, cfg LibSQLConfig, migrate MigrationFunc) (D
 		if err != nil {
 			return nil, fmt.Errorf("failed to create libsql connector with sync (url=%s): %w", cfg.SyncURL, err)
 		}
+		db = sql.OpenDB(connector)
 	} else {
-		// Local-only mode - no remote sync
-		connector, err = libsql.NewEmbeddedReplicaConnector(cfg.Path, "")
+		// Local-only mode - no remote sync.
+		// Use libsql's local driver mode instead of embedded replica.
+		db, err = sql.Open("libsql", "file:"+cfg.Path)
 		if err != nil {
-			return nil, fmt.Errorf("failed to create libsql connector: %w", err)
+			return nil, fmt.Errorf("failed to open local libsql database: %w", err)
 		}
 	}
 
-	// Open database connection
-	db := sql.OpenDB(connector)
-
 	// Test the connection
 	if err := db.PingContext(ctx); err != nil {
-		_ = db.Close()        //nolint:errcheck
-		_ = connector.Close() //nolint:errcheck
+		_ = db.Close() //nolint:errcheck
+		if connector != nil {
+			_ = connector.Close() //nolint:errcheck
+		}
 		return nil, fmt.Errorf("failed to connect to libsql database: %w", err)
 	}
 
 	// Run migrations if provided
 	if migrate != nil {
 		if err := migrate(ctx, db); err != nil {
-			_ = db.Close()        //nolint:errcheck
-			_ = connector.Close() //nolint:errcheck
+			_ = db.Close() //nolint:errcheck
+			if connector != nil {
+				_ = connector.Close() //nolint:errcheck
+			}
 			return nil, fmt.Errorf("failed to run migrations: %w", err)
 		}
 	}
@@ -84,8 +92,10 @@ func openLibSQL(ctx context.Context, cfg LibSQLConfig, migrate MigrationFunc) (D
 	// If vector search is enabled, ensure vector columns exist
 	if cfg.EnableVectorSearch {
 		if err := ensureVectorSupport(ctx, db, vectorDims); err != nil {
-			_ = db.Close()        //nolint:errcheck
-			_ = connector.Close() //nolint:errcheck
+			_ = db.Close() //nolint:errcheck
+			if connector != nil {
+				_ = connector.Close() //nolint:errcheck
+			}
 			return nil, fmt.Errorf("failed to enable vector search: %w", err)
 		}
 	}

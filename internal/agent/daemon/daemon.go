@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/oklog/ulid/v2"
@@ -21,6 +22,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/domain/agent"
 	"github.com/jkatigb/agentctl/internal/engine"
 	"github.com/jkatigb/agentctl/internal/indexing/repoindex"
+	llmproviders "github.com/jkatigb/agentctl/internal/providers/llm"
 	"github.com/jkatigb/agentctl/internal/storage"
 	storagents "github.com/jkatigb/agentctl/internal/storage/agents"
 	"github.com/jkatigb/agentctl/internal/storage/blackboard"
@@ -28,6 +30,8 @@ import (
 	"github.com/jkatigb/agentctl/internal/storage/contextvar"
 	"github.com/jkatigb/agentctl/internal/storage/dbutil"
 	"github.com/jkatigb/agentctl/internal/storage/mailbox"
+	memorystore "github.com/jkatigb/agentctl/internal/storage/memory"
+	"github.com/jkatigb/agentctl/internal/storage/sessions"
 	"github.com/jkatigb/agentctl/internal/storage/tasks"
 	"github.com/jkatigb/agentctl/internal/storage/trajectory"
 )
@@ -43,11 +47,13 @@ type daemonStores struct {
 	tasksStore           tasks.Store
 	boardStore           blackboard.BoardStore
 	bbStore              blackboard.Store
-	contextvarStore      contextvar.Store              // for companion service RLM context
+	contextvarStore      contextvar.Store // for companion service RLM context
+	namedMemoryStore     storage.MemoryStore
+	sessionsStore        *sessions.Store
 	companionMemory      *companion.ConversationMemory // nil if disabled
 	companionMemoryDB    *sql.DB                       // need to close this too
 	companionMemoryClose func() error
-	compressionDaemon    *companion.CompressionDaemon // nil if disabled
+	compressionDaemon    *companion.CompressionDaemon // nil if disabled (hybrid maintenance daemon)
 	repoIndexStore       *repoindex.Store
 }
 
@@ -57,14 +63,14 @@ type daemonStores struct {
 // The function opens agent, mailbox, tasks, board, blackboard, and contextvar stores. If Options.EnableCompanionMemory
 // is true it also opens a companion memory DB, constructs a ConversationMemory (with roleplay or standard memory
 // configuration based on Options.CompanionMode), optionally attaches an LLM-based summarizer, and may start a background
-// compression daemon. The returned daemonStores includes any cleanup callback for the companion DB.
+// maintenance daemon. The returned daemonStores includes any cleanup callback for the companion DB.
 //
 // On any error the function closes any already-opened resources before returning the error.
 //
 // Index:
 // - Purpose: Initialize daemon storage dependencies and optional companion services
-// - Flow: open stores → configure companion memory → start compression daemon → return handles
-// - SideEffects: opens databases; starts compression daemon
+// - Flow: open stores → configure companion memory → start hybrid maintenance daemon → return handles
+// - SideEffects: opens databases; starts hybrid maintenance daemon
 // - FailureModes: store open errors, companion initialization failures
 // - Related: daemonStores.Close, initOptimization
 // - Keywords: daemon_stores, companion_memory, contextvar, mailbox, blackboard
@@ -113,8 +119,22 @@ func openDaemonStores(ctx context.Context, root string, opts Options) (*daemonSt
 	}
 	stores.contextvarStore = contextvarStore
 
+	sessionsStore, err := sessions.Open(ctx, root)
+	if err != nil {
+		stores.Close()
+		return nil, fmt.Errorf("open sessions store: %w", err)
+	}
+	stores.sessionsStore = sessionsStore
+
 	// Open companion memory if enabled
 	if opts.EnableCompanionMemory {
+		memoryStore, memErr := memorystore.Open(ctx, root, "")
+		if memErr != nil {
+			log.Warn().Err(memErr).Msg("open named memory store failed; continuing without workspace memory recall")
+		} else {
+			stores.namedMemoryStore = memoryStore
+		}
+
 		dbPath := filepath.Join(root, "companion.db")
 		db, closeFn, err := dbutil.OpenStoreDB(ctx, root, "COMPANION", filepath.Base(dbPath), nil) // schema managed by NewConversationMemory
 		if err != nil {
@@ -143,7 +163,7 @@ func openDaemonStores(ctx context.Context, root string, opts Options) (*daemonSt
 		// Create memory options
 		memOpts := []companion.MemoryOption{companion.WithMemoryConfig(memCfg)}
 
-		// Create summarizer if LLM is configured (enables L1/L2 compression)
+		// Create summarizer if LLM is configured (enables hybrid episode summaries)
 		enableCompression := false
 		if opts.LLMAPIKey != "" && opts.LLMProvider != "" {
 			summarizer := companion.NewLLMSummarizer(companion.LLMSummarizerConfig{
@@ -164,19 +184,19 @@ func openDaemonStores(ctx context.Context, root string, opts Options) (*daemonSt
 		}
 		stores.companionMemory = companionMem
 
-		// Start compression daemon for L0→L1→L2 compression
+		// Start hybrid maintenance daemon
 		if enableCompression {
 			stores.compressionDaemon = companion.NewCompressionDaemon(companion.DaemonConfig{
 				Memory:         companionMem,
 				DB:             db,
-				DailyInterval:  1 * time.Hour, // Check for daily compression every hour
-				WeeklyInterval: 6 * time.Hour, // Check for weekly distillation every 6 hours
+				DailyInterval:  1 * time.Hour, // Check for daily hybrid maintenance every hour
+				WeeklyInterval: 6 * time.Hour, // Check for weekly hybrid maintenance every 6 hours
 				Logger:         log.Logger,
 			})
 			stores.compressionDaemon.Start(ctx)
-			log.Info().Msg("companion compression daemon started")
+			log.Info().Msg("companion hybrid maintenance daemon started")
 		} else {
-			log.Info().Msg("companion memory summarizer not configured; compression daemon disabled")
+			log.Info().Msg("companion memory summarizer not configured; hybrid maintenance daemon disabled")
 		}
 	}
 
@@ -187,7 +207,7 @@ func (s *daemonStores) Close() {
 	if s == nil {
 		return
 	}
-	// Stop compression daemon first (it uses memory and db)
+	// Stop hybrid maintenance daemon first (it uses memory and db)
 	if s.compressionDaemon != nil {
 		s.compressionDaemon.Stop()
 	}
@@ -203,6 +223,12 @@ func (s *daemonStores) Close() {
 	}
 	if s.contextvarStore != nil {
 		_ = s.contextvarStore.Close()
+	}
+	if s.namedMemoryStore != nil {
+		_ = s.namedMemoryStore.Close()
+	}
+	if s.sessionsStore != nil {
+		_ = s.sessionsStore.Close()
 	}
 	if s.bbStore != nil {
 		_ = s.bbStore.Close()
@@ -273,31 +299,38 @@ func Run(ctx context.Context, opts Options) error {
 	traceID := ulid.Make().String()
 	recorder := &noopRecorder{}
 	var companionSvc ChatService
+	var endTickRequested atomic.Bool
 	log.Info().Msg("using LLMChatEngine via companion service")
 
 	if opts.CompanionService != nil {
 		companionSvc = opts.CompanionService
 	} else {
-		// Resolve LLM configuration - default to cerebras
+		// Resolve LLM configuration - default to LM Studio.
 		provider := agentRecord.LLMProvider
 		if provider == "" {
 			provider = opts.LLMProvider
 		}
 		if provider == "" {
-			provider = "cerebras" // Default to cerebras for companion agents
+			provider = "lmstudio"
+		}
+		if agentRecord.ExecMode == agent.ModeTick {
+			provider = "lmstudio"
 		}
 
 		model := agentRecord.LLMModel
 		if model == "" {
 			model = opts.LLMModel
 		}
-		if model == "" && provider == "cerebras" {
-			model = "llama3.1-8b" // Default cerebras model
+		if model == "" {
+			model = llmproviders.DefaultModelForProvider(provider)
 		}
 
 		apiKey := agentRecord.LLMAPIKey
 		if apiKey == "" {
 			apiKey = opts.LLMAPIKey
+		}
+		if apiKey == "" && provider == "lmstudio" {
+			apiKey = "lm-studio"
 		}
 		if apiKey == "" {
 			return fmt.Errorf("LLM API key required for companion service (set AGENTCTL_LLM_API_KEY or provider-specific key)")
@@ -308,7 +341,13 @@ func Run(ctx context.Context, opts Options) error {
 			Str("model", model).
 			Msg("companion service LLM config")
 
-		toolsCfg := buildToolsConfig(opts, agentRecord, traceID, stores)
+		toolsCfg := buildToolsConfig(opts, agentRecord, traceID, stores, func(ctx context.Context) (bool, error) {
+			if agentRecord.ExecMode != agent.ModeTick {
+				return false, fmt.Errorf("end_tick is only available in tick mode")
+			}
+			endTickRequested.Store(true)
+			return true, nil
+		})
 		toolsCfg.FilesystemPolicy = mapFilesystemPolicy(agentRecord.Policy)
 
 		registry, err := tools.NewRegistry(toolsCfg, recorder)
@@ -324,18 +363,26 @@ func Run(ctx context.Context, opts Options) error {
 		}
 
 		companionSvc = companion.NewService(stores.contextvarStore, companion.ServiceConfig{
-			LLMProvider:        provider,
-			LLMAPIKey:          apiKey,
-			LLMModel:           model,
-			DefaultPersonality: agentRecord.Prompt,
-			MaxIterations:      agentRecord.MaxIterations,
-			Timeout:            90 * time.Second,
-			ExecMode:           agentRecord.ExecMode,
-			Logger:             log.Logger,
-			MemoryDB:           stores.companionMemoryDB,
-			ExtraToolExecutor:  extraToolExecutor,
-			ExtraToolsOnly:     extraToolsOnly,
-			UseHybridMemory:    true,
+			LLMProvider:         provider,
+			LLMAPIKey:           apiKey,
+			LLMModel:            model,
+			DefaultPersonality:  agentRecord.Prompt,
+			MaxIterations:       agentRecord.MaxIterations,
+			Timeout:             90 * time.Second,
+			ExecMode:            agentRecord.ExecMode,
+			RequireContextQuery: false,
+			Logger:              log.Logger,
+			MemoryDB:            stores.companionMemoryDB,
+			MemoryStore:         stores.namedMemoryStore,
+			MemoryWorkspace:     opts.WorkspaceRoot,
+			MemoryBehavior:      companion.MemoryBehaviorForRetention(agent.NormalizeMemoryRetention(agentRecord.MemoryRetention)),
+			SessionRecallProvider: &companion.SessionStoreRecallProvider{
+				Store:       stores.sessionsStore,
+				MemoryStore: stores.namedMemoryStore,
+				Workspace:   opts.WorkspaceRoot,
+			},
+			ExtraToolExecutor: extraToolExecutor,
+			ExtraToolsOnly:    extraToolsOnly,
 		}, nil)
 	}
 
@@ -370,6 +417,7 @@ func Run(ctx context.Context, opts Options) error {
 		companionSvc: companionSvc,
 		cancelCtx:    cancelCtx,
 		optCtx:       optCtx,
+		endTick:      &endTickRequested,
 	})
 }
 
@@ -383,6 +431,7 @@ type pollDeps struct {
 	companionSvc ChatService // non-nil for companion agents
 	cancelCtx    *CancelContext
 	optCtx       *OptimizationContext
+	endTick      *atomic.Bool
 }
 
 // initOptimization initializes optimization stores and pattern collector if enabled.
@@ -437,7 +486,7 @@ func loadAgentRecord(ctx context.Context, store storagents.Store, agentID string
 	return agentRecord, nil
 }
 
-func buildToolsConfig(opts Options, agentRecord agent.Agent, traceID string, stores *daemonStores) tools.Config {
+func buildToolsConfig(opts Options, agentRecord agent.Agent, traceID string, stores *daemonStores, endTick func(context.Context) (bool, error)) tools.Config {
 	workspaceRoot := strings.TrimSpace(opts.WorkspaceRoot)
 	if workspaceRoot == "" {
 		workspaceRoot = "."
@@ -470,6 +519,7 @@ func buildToolsConfig(opts Options, agentRecord agent.Agent, traceID string, sto
 		OpenRepoIndexStore: func(ctx context.Context) (*repoindex.Store, error) {
 			return repoindex.Open(ctx, opts.StorageRoot, workspaceRoot)
 		},
+		EndTick: endTick,
 	}
 }
 
@@ -573,22 +623,22 @@ func initDedupeStore(ctx context.Context, opts Options) (DedupeStore, func(), er
 // - SideEffects: polls mailbox; updates agent state; invokes message handlers
 // - Concurrency: runs ticker loop with non-blocking think checks
 // - FailureModes: poll errors, agent stop signals, message processing errors
-// - Related: processPollTick, runProactiveThink
+// - Related: processPollTick, runScheduledThink
 // - Keywords: poll_loop, mailbox, proactive, poll_interval, think_interval
 func runPollLoop(ctx context.Context, deps pollDeps) error {
 	pollTicker := time.NewTicker(deps.opts.PollInterval)
 	defer pollTicker.Stop()
 
-	// Setup proactive think ticker if in proactive mode
+	// Setup scheduled work ticker for proactive/tick modes.
 	var thinkTicker *time.Ticker
-	if deps.agentRecord.ExecMode == agent.ModeProactive {
-		interval := time.Duration(deps.agentRecord.ThinkInterval) * time.Second
-		if interval <= 0 {
-			interval = 60 * time.Second
-		}
+	if isTickDrivenMode(deps.agentRecord.ExecMode) {
+		interval := scheduledTickInterval(deps.agentRecord.ThinkInterval)
 		thinkTicker = time.NewTicker(interval)
 		defer thinkTicker.Stop()
-		deps.logger.Info().Dur("think_interval", interval).Msg("proactive mode enabled")
+		deps.logger.Info().
+			Dur("think_interval", interval).
+			Str("exec_mode", string(deps.agentRecord.ExecMode)).
+			Msg("scheduled tick mode enabled")
 	}
 
 	deps.logger.Info().
@@ -598,6 +648,12 @@ func runPollLoop(ctx context.Context, deps pollDeps) error {
 		Msg("daemon started")
 
 	for {
+		if deps.endTick != nil && deps.endTick.Load() {
+			_ = deps.agentStore.UpdateState(context.Background(), deps.opts.AgentID, agent.StateStopped) //nolint:errcheck
+			deps.logger.Info().Msg("tick agent requested graceful shutdown")
+			return nil
+		}
+
 		// Build select cases dynamically based on mode
 		select {
 		case <-ctx.Done():
@@ -613,12 +669,12 @@ func runPollLoop(ctx context.Context, deps pollDeps) error {
 			}
 		}
 
-		// Check proactive tick separately (Go doesn't allow dynamic select)
+		// Check scheduled tick separately (Go doesn't allow dynamic select)
 		if thinkTicker != nil {
 			select {
 			case <-thinkTicker.C:
-				if err := runProactiveThink(ctx, deps); err != nil {
-					deps.logger.Warn().Err(err).Msg("proactive think failed")
+				if err := runScheduledThink(ctx, deps); err != nil {
+					deps.logger.Warn().Err(err).Msg("scheduled tick failed")
 				}
 			default:
 				// Non-blocking check
@@ -686,7 +742,7 @@ func processPollTick(ctx context.Context, deps pollDeps) error {
 			continue
 		}
 
-		procErr := processMessage(ctx, deps.logger, msg, deps.companionSvc, deps.mailboxStore, currentAgent.Policy, deps.optCtx, deps.cancelCtx, deps.opts.AgentID)
+		procErr := processMessage(ctx, deps.logger, msg, deps.companionSvc, deps.mailboxStore, currentAgent.Policy, deps.optCtx, deps.cancelCtx, deps.opts.AgentID, currentAgent.Role)
 		if procErr != nil {
 			deps.logger.Error().Err(procErr).Str("msg_id", msg.ID).Msg("processing failed")
 			_ = deps.mailboxStore.Nack(ctx, msg.ID, backoffDuration(msg.Attempt)) //nolint:errcheck
@@ -698,7 +754,10 @@ func processPollTick(ctx context.Context, deps pollDeps) error {
 
 			// For autonomous mode: check if agent wants to continue working
 			// This runs after successful message processing
-			if deps.agentRecord.ExecMode == agent.ModeAutonomous || deps.agentRecord.ExecMode == agent.ModeProactive {
+			if deps.endTick != nil && deps.endTick.Load() {
+				continue
+			}
+			if deps.agentRecord.ExecMode == agent.ModeAutonomous || deps.agentRecord.ExecMode == agent.ModeProactive || deps.agentRecord.ExecMode == agent.ModeTick {
 				runAutonomousContinuation(ctx, deps, msg)
 			}
 		}
@@ -715,7 +774,7 @@ func processPollTick(ctx context.Context, deps pollDeps) error {
 // - Flow: check max turns → run continuation prompt loop → stop on completion signal
 // - SideEffects: LLM calls via companion service
 // - FailureModes: execution errors stop continuation
-// - Related: runProactiveThink
+// - Related: runScheduledThink
 // - Keywords: autonomous, continuation, max_auto_turns, llmchat
 func runAutonomousContinuation(ctx context.Context, deps pollDeps, lastMsg agent.Message) {
 	if deps.companionSvc == nil {
@@ -759,30 +818,23 @@ func runAutonomousContinuation(ctx context.Context, deps pollDeps, lastMsg agent
 	}
 }
 
-// runProactiveThink runs a periodic "think" cycle for proactive agents.
-// This allows the agent to check if there's work to do and initiate it.
+// runScheduledThink runs a periodic cycle for proactive and tick-driven agents.
 //
 // Index:
-// - Purpose: Execute proactive think cycle to initiate work
+// - Purpose: Execute proactive/tick cycle to initiate work
 // - Flow: build prompt → execute LLMChat → evaluate result → run continuation
 // - SideEffects: LLM calls via companion service; logs activity
 // - FailureModes: execution errors propagated
 // - Related: runAutonomousContinuation
-// - Keywords: proactive_think, llmchat, think_prompt, continuation
-func runProactiveThink(ctx context.Context, deps pollDeps) error {
-	deps.logger.Debug().Msg("running proactive think cycle")
+// - Keywords: proactive_think, tick_cycle, llmchat, think_prompt, continuation
+func runScheduledThink(ctx context.Context, deps pollDeps) error {
+	eventName := scheduledThinkEventName(deps.agentRecord.ExecMode)
+	deps.logger.Debug().Str("event", eventName).Msg("running scheduled agent cycle")
 	if deps.companionSvc == nil {
 		return fmt.Errorf("companion service not configured")
 	}
 
-	// Proactive prompt: ask agent to check for work
-	thinkPrompt := `You are in proactive mode. Check if there is any work that needs to be done:
-1. Review any pending tasks or todos
-2. Check for any issues that need attention
-3. Look for opportunities to help
-
-If there is work to do, start working on the highest priority item.
-If there is nothing to do, respond with 'NO_WORK_NEEDED'.`
+	thinkPrompt := scheduledThinkPrompt(deps.agentRecord.ExecMode)
 
 	timeout := 5 * time.Minute
 	turnCtx, cancel := context.WithTimeout(ctx, timeout)
@@ -794,16 +846,19 @@ If there is nothing to do, respond with 'NO_WORK_NEEDED'.`
 		ExecMode:       deps.agentRecord.ExecMode,
 	})
 	if err != nil {
-		return fmt.Errorf("proactive think execution: %w", err)
+		return fmt.Errorf("scheduled tick execution: %w", err)
 	}
 
 	result := resp.Response
+	if deps.endTick != nil && deps.endTick.Load() {
+		return nil
+	}
 	if containsNoWork(result) {
-		deps.logger.Debug().Msg("proactive think: no work needed")
+		deps.logger.Debug().Str("event", eventName).Msg("scheduled cycle: no work needed")
 		return nil
 	}
 
-	deps.logger.Info().Msg("proactive think: initiated work")
+	deps.logger.Info().Str("event", eventName).Msg("scheduled cycle: initiated work")
 
 	// If work was started, allow autonomous continuation
 	if deps.agentRecord.MaxAutoTurns > 1 {
@@ -831,6 +886,40 @@ func containsNoWork(result string) bool {
 	return result == "NO_WORK_NEEDED" || result == "No work needed"
 }
 
+func isTickDrivenMode(mode agent.ExecutionMode) bool {
+	return mode == agent.ModeProactive || mode == agent.ModeTick
+}
+
+func scheduledTickInterval(seconds int) time.Duration {
+	interval := time.Duration(seconds) * time.Second
+	if interval <= 0 {
+		return 60 * time.Second
+	}
+	return interval
+}
+
+func scheduledThinkEventName(mode agent.ExecutionMode) string {
+	if mode == agent.ModeTick {
+		return "tick_cycle"
+	}
+	return "proactive_think"
+}
+
+func scheduledThinkPrompt(mode agent.ExecutionMode) string {
+	if mode == agent.ModeTick {
+		return `You are in tick mode. This is one scheduled simulation/work tick.
+Advance the current work by one step using the latest context.
+If no action is required on this tick, respond with 'NO_WORK_NEEDED'.`
+	}
+	return `You are in proactive mode. Check if there is any work that needs to be done:
+1. Review any pending tasks or todos
+2. Check for any issues that need attention
+3. Look for opportunities to help
+
+If there is work to do, start working on the highest priority item.
+If there is nothing to do, respond with 'NO_WORK_NEEDED'.`
+}
+
 func processMessage(
 	ctx context.Context,
 	logger zerolog.Logger,
@@ -841,10 +930,11 @@ func processMessage(
 	optCtx *OptimizationContext,
 	cancelCtx *CancelContext,
 	agentID string, // needed for conversation scoping
+	agentRole string,
 ) error {
 	switch msg.Type {
 	case agent.MessageTypeAsk:
-		return handleAsk(ctx, logger, msg, companionSvc, mailboxStore, policy, optCtx, agentID)
+		return handleAsk(ctx, logger, msg, companionSvc, mailboxStore, policy, optCtx, agentID, agentRole)
 	case agent.MessageTypeCmd:
 		return handleCmd(ctx, logger, msg, companionSvc, policy, optCtx, agentID)
 	case agent.MessageTypeEvent:

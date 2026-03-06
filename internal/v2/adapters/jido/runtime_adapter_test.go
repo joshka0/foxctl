@@ -1,0 +1,280 @@
+package jido
+
+import (
+	"context"
+	"encoding/json"
+	"sync/atomic"
+	"testing"
+
+	"github.com/jkatigb/agentctl/internal/v2/core/ask"
+)
+
+func TestRuntimeAdapter_SendMapsAskToSignal(t *testing.T) {
+	t.Parallel()
+
+	client := &fakeClient{
+		signalResp: SignalResponse{
+			Status:    "sent",
+			MessageID: "msg-123",
+		},
+	}
+
+	adapter, err := NewRuntimeAdapter(RuntimeAdapterConfig{
+		Client: client,
+	})
+	if err != nil {
+		t.Fatalf("NewRuntimeAdapter() error = %v", err)
+	}
+
+	msg := ask.Message{
+		AskID:          "ask-1",
+		RequestID:      "req-1",
+		Kind:           "context",
+		Question:       "What did you find?",
+		ConversationID: "conv-1",
+		FromNS:         "caller:one",
+		ToNS:           "agent:one",
+		TTLMS:          120000,
+	}
+
+	mid, err := adapter.Send(context.Background(), msg)
+	if err != nil {
+		t.Fatalf("Send() error = %v", err)
+	}
+	if mid != "msg-123" {
+		t.Fatalf("message_id=%q want msg-123", mid)
+	}
+
+	if client.signalReq.AgentID != "agent:one" {
+		t.Fatalf("agent_id=%q want agent:one", client.signalReq.AgentID)
+	}
+	if client.signalReq.Mode != SignalModeCall {
+		t.Fatalf("mode=%q want %q", client.signalReq.Mode, SignalModeCall)
+	}
+	if client.signalReq.Signal.Type != DefaultAskSignal {
+		t.Fatalf("signal.type=%q want %q", client.signalReq.Signal.Type, DefaultAskSignal)
+	}
+	if client.signalReq.Signal.Source != DefaultSignalSource {
+		t.Fatalf("signal.source=%q want %q", client.signalReq.Signal.Source, DefaultSignalSource)
+	}
+
+	var data map[string]any
+	if err := json.Unmarshal(client.signalReq.Signal.Data, &data); err != nil {
+		t.Fatalf("unmarshal signal data: %v", err)
+	}
+	if got := data["question"]; got != "What did you find?" {
+		t.Fatalf("signal.data.question=%v want %q", got, "What did you find?")
+	}
+}
+
+func TestRuntimeAdapter_SendFallsBackToAskID(t *testing.T) {
+	t.Parallel()
+
+	client := &fakeClient{
+		signalResp: SignalResponse{
+			Status: "sent",
+		},
+	}
+	adapter, err := NewRuntimeAdapter(RuntimeAdapterConfig{Client: client})
+	if err != nil {
+		t.Fatalf("NewRuntimeAdapter() error = %v", err)
+	}
+
+	mid, err := adapter.Send(context.Background(), ask.Message{
+		AskID:    "ask-fallback",
+		Kind:     "context",
+		Question: "hello",
+		FromNS:   "caller",
+		ToNS:     "agent",
+		TTLMS:    1000,
+	})
+	if err != nil {
+		t.Fatalf("Send() error = %v", err)
+	}
+	if mid != "ask-fallback" {
+		t.Fatalf("message_id=%q want ask-fallback", mid)
+	}
+}
+
+func TestRuntimeAdapter_SendValidation(t *testing.T) {
+	t.Parallel()
+
+	client := &fakeClient{}
+	adapter, err := NewRuntimeAdapter(RuntimeAdapterConfig{Client: client})
+	if err != nil {
+		t.Fatalf("NewRuntimeAdapter() error = %v", err)
+	}
+
+	_, err = adapter.Send(context.Background(), ask.Message{
+		AskID:  "ask-1",
+		Kind:   "context",
+		FromNS: "caller",
+		ToNS:   "agent",
+	})
+	if err == nil {
+		t.Fatal("expected validation error")
+	}
+}
+
+func TestRuntimeAdapter_SendInvokesSignalAckHook(t *testing.T) {
+	t.Parallel()
+
+	client := &fakeClient{
+		signalResp: SignalResponse{
+			Status:    "processed",
+			MessageID: "msg-ack-1",
+		},
+	}
+	var called atomic.Int32
+
+	adapter, err := NewRuntimeAdapter(RuntimeAdapterConfig{
+		Client: client,
+		OnSignalAck: func(_ context.Context, req SignalRequest, resp SignalResponse) error {
+			called.Add(1)
+			if req.AgentID != "agent:ack" {
+				t.Fatalf("req.agent_id=%q want agent:ack", req.AgentID)
+			}
+			if resp.MessageID != "msg-ack-1" {
+				t.Fatalf("resp.message_id=%q want msg-ack-1", resp.MessageID)
+			}
+			return nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewRuntimeAdapter() error = %v", err)
+	}
+
+	_, err = adapter.Send(context.Background(), ask.Message{
+		AskID:    "ask-ack",
+		Kind:     "context",
+		Question: "ack?",
+		FromNS:   "caller:ack",
+		ToNS:     "agent:ack",
+		TTLMS:    1_000,
+	})
+	if err != nil {
+		t.Fatalf("Send() error = %v", err)
+	}
+	if got := called.Load(); got != 1 {
+		t.Fatalf("ack hook calls=%d want 1", got)
+	}
+}
+
+func TestRuntimeAdapter_SpawnChildForwardsRequest(t *testing.T) {
+	t.Parallel()
+
+	client := &fakeClient{
+		spawnChildResp: SignalResponse{
+			Status:    "spawned",
+			MessageID: "spawn-1",
+		},
+	}
+
+	adapter, err := NewRuntimeAdapter(RuntimeAdapterConfig{Client: client})
+	if err != nil {
+		t.Fatalf("NewRuntimeAdapter() error = %v", err)
+	}
+
+	resp, err := adapter.SpawnChild(context.Background(), SignalRequest{
+		AgentID: "parent-1",
+		Signal: Signal{
+			Type:   DefaultSpawnChildSignal,
+			Source: "/tests",
+			Data:   json.RawMessage(`{"tag":"worker-1","child_id":"agent:worker-1","profile":"worker"}`),
+		},
+	})
+	if err != nil {
+		t.Fatalf("SpawnChild() error = %v", err)
+	}
+	if resp.MessageID != "spawn-1" {
+		t.Fatalf("message_id=%q want spawn-1", resp.MessageID)
+	}
+	if client.spawnChildReq.AgentID != "parent-1" {
+		t.Fatalf("agent_id=%q want parent-1", client.spawnChildReq.AgentID)
+	}
+	if client.spawnChildReq.Signal.Type != DefaultSpawnChildSignal {
+		t.Fatalf("signal.type=%q want %q", client.spawnChildReq.Signal.Type, DefaultSpawnChildSignal)
+	}
+}
+
+func TestRuntimeAdapter_ConfigValidation(t *testing.T) {
+	t.Parallel()
+
+	_, err := NewRuntimeAdapter(RuntimeAdapterConfig{})
+	if err == nil {
+		t.Fatal("expected missing client error")
+	}
+}
+
+type fakeClient struct {
+	signalReq       SignalRequest
+	signalResp      SignalResponse
+	signalErr       error
+	spawnChildReq   SignalRequest
+	spawnChildResp  SignalResponse
+	spawnChildErr   error
+	awaitReq        AwaitRequest
+	awaitResp       AwaitResponse
+	awaitErr        error
+	getChildrenReq  GetChildrenRequest
+	getChildrenResp GetChildrenResponse
+	getChildrenErr  error
+	stateReq        StateRequest
+	stateResp       StateResponse
+	stateErr        error
+}
+
+func (f *fakeClient) Health(context.Context) (HealthResponse, error) {
+	return HealthResponse{Status: "ok"}, nil
+}
+
+func (f *fakeClient) StartAgent(context.Context, StartAgentRequest) (StartAgentResponse, error) {
+	return StartAgentResponse{Status: "started"}, nil
+}
+
+func (f *fakeClient) StopAgent(context.Context, StopAgentRequest) (StopAgentResponse, error) {
+	return StopAgentResponse{Status: "stopped"}, nil
+}
+
+func (f *fakeClient) Signal(_ context.Context, req SignalRequest) (SignalResponse, error) {
+	f.signalReq = req
+	if f.signalErr != nil {
+		return SignalResponse{}, f.signalErr
+	}
+	return f.signalResp, nil
+}
+
+func (f *fakeClient) SpawnChild(_ context.Context, req SignalRequest) (SignalResponse, error) {
+	f.spawnChildReq = req
+	if f.spawnChildErr != nil {
+		return SignalResponse{}, f.spawnChildErr
+	}
+	return f.spawnChildResp, nil
+}
+
+func (f *fakeClient) Await(_ context.Context, req AwaitRequest) (AwaitResponse, error) {
+	f.awaitReq = req
+	if f.awaitErr != nil {
+		return AwaitResponse{}, f.awaitErr
+	}
+	if f.awaitResp.Status == "" {
+		return AwaitResponse{Status: "completed"}, nil
+	}
+	return f.awaitResp, nil
+}
+
+func (f *fakeClient) GetChildren(_ context.Context, req GetChildrenRequest) (GetChildrenResponse, error) {
+	f.getChildrenReq = req
+	if f.getChildrenErr != nil {
+		return GetChildrenResponse{}, f.getChildrenErr
+	}
+	return f.getChildrenResp, nil
+}
+
+func (f *fakeClient) State(_ context.Context, req StateRequest) (StateResponse, error) {
+	f.stateReq = req
+	if f.stateErr != nil {
+		return StateResponse{}, f.stateErr
+	}
+	return f.stateResp, nil
+}

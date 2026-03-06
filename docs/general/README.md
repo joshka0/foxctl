@@ -15,6 +15,7 @@ Detailed documentation for agentctl subsystems. For quick reference, see:
 | [Architecture](architecture.md) | Architecture entry point with canonical pointers |
 | [Auth & Identity Architecture](../architecture/auth-identity.md) | Canonical identity, authorization, auth broker, and verification architecture |
 | [Runtime Orchestration](runtime-orchestration.md) | Agent/runtime execution pipeline and run lifecycle |
+| [API Server](api-server.md) | Current `/api` surface, route groups, and transport notes |
 | [Agent Policy & Prompts](agent-policy-and-prompts.md) | Capability profiles and role instruction model |
 | [Context & Observability](context-and-observability.md) | Context updater and observability primitives |
 | [Core Package Coverage](core-package-coverage.md) | Coverage matrix for core `internal/*` concepts |

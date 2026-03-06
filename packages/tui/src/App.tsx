@@ -200,7 +200,7 @@ function StatusBar({ currentView, activeCategory }: StatusBarProps) {
     trajectory: "j/k: navigate | f: cycle status | h/l: events | r: refresh",
     memory: "j/k: navigate | t: cycle type | /: search | r: refresh",
     sessions: "j/k: navigate | enter: view turns | r: refresh",
-    orchestration: "h/l/tab: panels | j/k: navigate | a: answer | d: delegate | r: refresh",
+    orchestration: "h/l/tab: panels | j/k: navigate | enter: detail | d: dispatch/delegate | t/u/m: card actions | w/W: workspace | r: refresh",
     console: "i: input | 1-5: rate | Esc: back",
   };
 

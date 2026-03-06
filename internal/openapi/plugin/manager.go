@@ -21,19 +21,20 @@ import (
 )
 
 const (
-	defaultWallTimeout      = 500 * time.Millisecond
-	defaultCPUTimeout       = 200 * time.Millisecond
-	defaultMaxOutputBytes   = 32 * 1024
-	defaultMaxInputBytes    = 128 * 1024
-	defaultMaxStderrBytes   = 16 * 1024
-	defaultHandshakeTimeout = 500 * time.Millisecond
-	maxAllowedWallTimeout   = 5 * time.Second
-	maxAllowedCPUTimeout    = 2 * time.Second
-	maxAllowedOutputBytes   = 128 * 1024
-	maxAllowedInputBytes    = 1024 * 1024
-	envPluginPath           = "AGENTCTL_PLUGIN_PATH"
-	envOpenAPIPluginPath    = "AGENTCTL_OPENAPI_PLUGIN_PATH"
-	pluginBinaryPrefix      = "agentctl-plugin-"
+	defaultWallTimeout         = 500 * time.Millisecond
+	defaultCPUTimeout          = 200 * time.Millisecond
+	defaultMaxOutputBytes      = 32 * 1024
+	defaultMaxInputBytes       = 128 * 1024
+	defaultMaxStderrBytes      = 16 * 1024
+	defaultHandshakeTimeout    = 5 * time.Second
+	maxAllowedWallTimeout      = 5 * time.Second
+	maxAllowedCPUTimeout       = 2 * time.Second
+	maxAllowedHandshakeTimeout = 15 * time.Second
+	maxAllowedOutputBytes      = 128 * 1024
+	maxAllowedInputBytes       = 1024 * 1024
+	envPluginPath              = "AGENTCTL_PLUGIN_PATH"
+	envOpenAPIPluginPath       = "AGENTCTL_OPENAPI_PLUGIN_PATH"
+	pluginBinaryPrefix         = "agentctl-plugin-"
 )
 
 // Manager locates and executes auth/pagination plugins according to the Plugin Protocol v1 specification.
@@ -136,8 +137,8 @@ func WithHandshakeTimeout(d time.Duration) Option {
 		if d <= 0 {
 			return
 		}
-		if d > maxAllowedWallTimeout {
-			d = maxAllowedWallTimeout
+		if d > maxAllowedHandshakeTimeout {
+			d = maxAllowedHandshakeTimeout
 		}
 		m.handshakeTimeout = d
 	}

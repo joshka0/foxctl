@@ -19,14 +19,15 @@ const (
 type EventType string
 
 const (
-	EventRunStarted     EventType = "run.started"
-	EventRunCompleted   EventType = "run.completed"
-	EventRunFailed      EventType = "run.failed"
-	EventToolInvoked    EventType = "tool.invoked"
-	EventToolResponded  EventType = "tool.responded"
-	EventTurnRecorded   EventType = "turn.recorded"
-	EventStageFailed    EventType = "stage.failed"
-	EventArtifactFailed EventType = "artifact.failed"
+	EventRunStarted           EventType = "run.started"
+	EventRunCompleted         EventType = "run.completed"
+	EventRunFailed            EventType = "run.failed"
+	EventOrchestrationUpdated EventType = "orchestration.updated"
+	EventToolInvoked          EventType = "tool.invoked"
+	EventToolResponded        EventType = "tool.responded"
+	EventTurnRecorded         EventType = "turn.recorded"
+	EventStageFailed          EventType = "stage.failed"
+	EventArtifactFailed       EventType = "artifact.failed"
 )
 
 // Event is the canonical append-only v2 runtime event envelope.

@@ -194,5 +194,4 @@ func main() {
 - [docs/spec/v1/core_profile_v1.md](../spec/v1/core_profile_v1.md) - Core Profile spec; see OpenAPI integration and artifacts.
 - [docs/spec/openapi_skill.md](../spec/openapi_skill.md) - detailed `http/openapi` skill behavior.
 - [docs/spec/v1/plugin_protocol.md](../spec/v1/plugin_protocol.md) - plugin handshake and envelope protocol.
-- [docs/archive/legacy/openapi_implementation_summary.md](../archive/legacy/openapi_implementation_summary.md) - historical implementation narrative.
 - [docs/openapi_plugin_guide.md](../openapi_plugin_guide.md) - narrative guide to OpenAPI plugin usage.

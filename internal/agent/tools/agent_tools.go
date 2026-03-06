@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	models "github.com/XiaoConstantine/mcp-go/pkg/model"
@@ -32,6 +33,9 @@ func (r *Registry) registerAgentTools() error {
 	// Register agent.ask tool for inter-agent communication
 	if err := r.registerAgentAskTool(); err != nil {
 		return fmt.Errorf("register agent.ask: %w", err)
+	}
+	if err := r.registerAgentEndTickTool(); err != nil {
+		return fmt.Errorf("register agent.end_tick: %w", err)
 	}
 
 	return nil
@@ -77,6 +81,25 @@ func (r *Registry) registerAgentAskTool() error {
 		r.wrapWithTelemetry("agent.ask", r.agentAsk),
 	)
 	return r.tools.Register(askTool)
+}
+
+func (r *Registry) registerAgentEndTickTool() error {
+	endTickTool := tooling.NewFuncTool(
+		"agent.end_tick",
+		"Request a graceful shutdown of the current tick-mode agent loop. "+
+			"Use this when a simulation or background tick agent should stop running.",
+		models.InputSchema{
+			Type: "object",
+			Properties: map[string]models.ParameterSchema{
+				"reason": {
+					Type:        "string",
+					Description: "Optional short reason for ending the tick loop",
+				},
+			},
+		},
+		r.wrapWithTelemetry("agent.end_tick", r.agentEndTick),
+	)
+	return r.tools.Register(endTickTool)
 }
 
 const (
@@ -218,6 +241,26 @@ func (r *Registry) agentAsk(ctx context.Context, args map[string]any) (*models.C
 	}
 	if resolvedName != "" {
 		result["resolved_as"] = resolvedName
+	}
+	return successResult(result), nil
+}
+
+func (r *Registry) agentEndTick(ctx context.Context, args map[string]any) (*models.CallToolResult, error) {
+	if r.config.EndTick == nil {
+		return errorResult("end_tick is not available for this agent"), nil
+	}
+
+	ended, err := r.config.EndTick(ctx)
+	if err != nil {
+		return errorResult(fmt.Sprintf("end_tick failed: %v", err)), nil
+	}
+
+	result := map[string]any{
+		"status": "requested",
+		"ended":  ended,
+	}
+	if reason, ok := args["reason"].(string); ok && strings.TrimSpace(reason) != "" {
+		result["reason"] = strings.TrimSpace(reason)
 	}
 	return successResult(result), nil
 }

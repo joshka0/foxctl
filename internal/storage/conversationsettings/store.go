@@ -28,7 +28,7 @@ type Settings struct {
 	LLMProvider string `json:"llm_provider,omitempty"`
 	LLMModel    string `json:"llm_model,omitempty"`
 
-	// ExecMode is a default execution mode (reactive|autonomous|proactive|story).
+	// ExecMode is a default execution mode (reactive|autonomous|proactive|tick|story).
 	ExecMode string `json:"exec_mode,omitempty"`
 
 	// StoryGatherModel and StoryDialogueModel are defaults for story mode.
@@ -357,7 +357,7 @@ func validate(s Settings) error {
 	}
 	if s.ExecMode != "" {
 		switch s.ExecMode {
-		case "reactive", "autonomous", "proactive", "story":
+		case "reactive", "autonomous", "proactive", "tick", "story":
 			// ok
 		default:
 			return fmt.Errorf("%w: invalid exec_mode %q", ErrInvalid, s.ExecMode)

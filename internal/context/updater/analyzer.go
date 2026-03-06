@@ -185,6 +185,8 @@ func (a *Analyzer) getProviderConfig() (baseURL, model string) {
 		return "https://api.groq.com/openai/v1", "llama-3.1-8b-instant"
 	case "openrouter":
 		return "https://openrouter.ai/api/v1", "meta-llama/llama-3.1-8b-instruct"
+	case "lmstudio":
+		return "http://localhost:1234/v1", "zai-org/glm-4.7-flash"
 	default:
 		return "https://api.openai.com/v1", "gpt-4o-mini"
 	}

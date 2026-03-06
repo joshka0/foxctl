@@ -7,11 +7,14 @@ This directory contains active planning documents and implementation roadmaps.
 - Treat documents here as current planning references.
 - When a plan is completed or superseded, move it to `docs/archive/` (or mark it historical in-file).
 - Keep architecture reality in `docs/architecture/`; keep rollout sequencing and backlog in `docs/plans/`.
+- Do not treat plan docs as the canonical as-built runtime map. For current behavior, prefer `docs/architecture/*` and `docs/general/*`.
 
 ## High-Signal Entrypoints
 
 - `v2-implementation-todo.md`
 - `v2-greenfield-bootstrap.md`
+- `v2-symphony-kanban-implementation.md`
+- `jidoctl-v2-hybrid-interface.md`
 - `chat-platform-adapter.md`
 - `k8s-sql-storage.md`
 - `embedding-quality-roadmap/README.md`

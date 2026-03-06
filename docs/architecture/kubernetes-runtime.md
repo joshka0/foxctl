@@ -1,19 +1,22 @@
 # Kubernetes Runtime Architecture (Current + In-Repo)
 
-This page describes the *current deployed topology* represented by `deploy/kubernetes` and how it maps to runtime behavior in the code.
+This page describes the in-repo Kubernetes topology and how it maps to the
+current web/runtime behavior in code.
 
 ## High-level topology
 
 ```mermaid
 flowchart LR
     Internet[Users / APIs] --> Ingress
-    Ingress --> AgentCtl["agentctl Deployment\n(web API + web socket + optional chat adapter)"]
+    Ingress --> AgentCtl["agentctl Deployment\n(web API + websocket + optional chat adapter)"]
     AgentCtl --> Store[Logical stores via dbdriver]
     Store --> PostgreSQL[(PostgreSQL)] 
     Store --> SQLite[(SQLite local fallback)]
     AgentCtl --> CAS[(CAS: s3/sqlite/file)]
-    AgentCtl --> Embeds["Voyage embedding jobs / vector search"]
-    AgentCtl --> Observability[OpenTelemetry / /events / logs]
+    AgentCtl --> Runtime["legacy agent runtime + v2 services"]
+    Runtime --> Jido["optional Jido bridge"]
+    AgentCtl --> Embeds["embedding / retrieval jobs"]
+    AgentCtl --> Observability["/api/events / logs / probes"]
 ```
 
 ## What is represented in-repo today
@@ -24,7 +27,7 @@ flowchart LR
 2. PostgreSQL overlay
 3. Local overlay (k3s/dev variants)
 
-## Base manifests (current snapshot, requires drift review)
+## Base manifests (legacy-biased snapshot)
 
 `deploy/kubernetes/base/` is the base set used as the foundation:
 
@@ -34,7 +37,8 @@ flowchart LR
 - `cronjobs.yaml`: scheduled companion workloads (rerank, sqlite maintenance), still wired for the same env style as base.
 - `embedding-worker.yaml`: separate worker deployment for background embedding pipeline.
 
-This base is useful as a historical template but contains mixed configuration generations.
+This base is useful as a starting point or historical template but still
+contains mixed configuration generations.
 
 ## PostgreSQL production overlay (implemented)
 
@@ -50,15 +54,31 @@ This base is useful as a historical template but contains mixed configuration ge
     - `GET /healthz` (liveness)
     - `GET /readyz` (readiness)
 
-This overlay matches current server behavior where `web/` registers root-level health endpoints and `agentctl web` serves command endpoints under `/api`.
+This overlay matches current server behavior where:
+
+- `agentctl web serve` exposes application routes under `/api`
+- `/api/v1` is deprecated
+- root-level `/healthz` and `/readyz` are used for probes
 
 ## Local overlay (dev)
 
 `deploy/kubernetes/overlays/local/`:
 
 - Runs a single pod and local state directories in `emptyDir`.
-- Executes `agentctl web serve --port=8080` from container command.
+- Executes `agentctl web serve --port=8080` from the container command.
 - Includes local PostgreSQL + pgvector statefulset (`local-postgres.yaml`) when local multi-component testing is desired.
+
+## Runtime notes for Kubernetes
+
+- The web pod is the main entrypoint for:
+  - `/api/*`
+  - `/ws/console/*`
+  - optional chat adapter ingress
+- The runtime behind that pod is hybrid:
+  - legacy mailbox-driven agent runtime still exists
+  - v2 projections/orchestration/context surfaces also exist
+- Jido-backed orchestration requires additional `AGENTCTL_JIDO_*` configuration;
+  those variables are not broadly documented in the base manifests yet.
 
 ## Chat adapters in Kubernetes
 
@@ -68,7 +88,8 @@ Adapters are not selected in manifests. They are runtime CLI flags:
 - `agentctl web serve --chat telegram`
 - `agentctl web serve --chat teams`
 
-Teams webhooks use `POST /api/teams/messages`; this endpoint must remain reachable in whichever ingress/network policies are in use.
+Teams webhooks use `POST /api/teams/messages`; this endpoint must remain
+reachable in whichever ingress/network policies are in use.
 
 ## Deployment architecture notes for multi-pod operation
 
@@ -76,7 +97,8 @@ Teams webhooks use `POST /api/teams/messages`; this endpoint must remain reachab
   - PostgreSQL-backed sessions/sessions-like stores
   - CAS in external object storage
   - Shared locks (companion turn lock via PostgreSQL when available)
-- Local-only SQLite mode can still run with replicas for dev and smaller deployments but does not give true shared state semantics.
+- Local-only SQLite mode can still run for dev and smaller deployments but does
+  not provide true shared-state semantics across replicas.
 
 ## Environment keys to use when documenting runbooks
 
@@ -89,6 +111,7 @@ Prefer:
 - `AGENTCTL_CAS_DRIVER`
 - `AGENTCTL_CAS_S3_*`
 - `AGENTCTL_WORKSPACE`, `AGENTCTL_STORAGE_ROOT`
+- `AGENTCTL_JIDO_*` when enabling Jido-backed orchestration or companion bridges
 
 Legacy keys still seen in base artifacts:
 
@@ -102,4 +125,3 @@ Legacy keys still seen in base artifacts:
   - [docs/architecture/postgres-storage.md](postgres-storage.md)
 - Historical plans:
   - [docs/plans/k8s-sql-storage.md](../plans/k8s-sql-storage.md)
-

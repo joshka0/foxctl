@@ -16,7 +16,7 @@ func DefaultModelForProvider(provider string) string {
 		if model := os.Getenv("OPENROUTER_MODEL"); model != "" {
 			return model
 		}
-		return "openrouter/aurora-alpha"
+		return "google/gemini-3.1-flash-lite-preview"
 	case "groq":
 		if model := os.Getenv("GROQ_MODEL"); model != "" {
 			return model
@@ -48,7 +48,10 @@ func DefaultModelForProvider(provider string) string {
 		}
 		return "anthropic.claude-3-5-sonnet-20241022-v2:0"
 	default:
-		// Default to openrouter for unknown providers
-		return "openrouter/aurora-alpha"
+		// Default to LM Studio for unknown providers.
+		if model := os.Getenv("LMSTUDIO_MODEL"); model != "" {
+			return model
+		}
+		return "zai-org/glm-4.7-flash"
 	}
 }

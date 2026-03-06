@@ -2,6 +2,7 @@ package projections
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
 	"testing"
 	"time"
@@ -9,6 +10,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/storage/dbutil"
 	libsqlevents "github.com/jkatigb/agentctl/internal/v2/adapters/libsql/events"
 	"github.com/jkatigb/agentctl/internal/v2/adapters/libsql/idmap"
+	v2errors "github.com/jkatigb/agentctl/internal/v2/core/errors"
 	v2events "github.com/jkatigb/agentctl/internal/v2/core/events"
 )
 
@@ -151,4 +153,103 @@ func TestProjectionStore_LegacyEntityLookup(t *testing.T) {
 	if state.RunID != "run-v2-lookup" {
 		t.Fatalf("run_id=%q want run-v2-lookup", state.RunID)
 	}
+}
+
+func TestReplayFrom_DelegatesToAdditionalProjector(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	db, closeFn, err := dbutil.OpenSQLiteDBShared(ctx, filepath.Join(t.TempDir(), "replay_delegate.db"), nil)
+	if err != nil {
+		t.Fatalf("open sqlite db: %v", err)
+	}
+	t.Cleanup(func() { _ = closeFn() })
+
+	if err := libsqlevents.MigrateSchema(ctx, db); err != nil {
+		t.Fatalf("migrate events: %v", err)
+	}
+	if err := MigrateSchema(ctx, db); err != nil {
+		t.Fatalf("migrate projections: %v", err)
+	}
+
+	eventStore := libsqlevents.NewStore(db, db.Close)
+	eventStore.SetNowForTest(func() time.Time { return time.Date(2026, time.February, 18, 15, 0, 0, 0, time.UTC) })
+	if err := eventStore.Append(ctx, v2events.Event{
+		ID:            "evt-001",
+		StreamID:      "run-v2-002",
+		StreamType:    v2events.StreamTypeRun,
+		StreamVersion: 1,
+		Sequence:      1,
+		EventType:     v2events.EventRunStarted,
+		OccurredAt:    time.Date(2026, time.February, 18, 15, 0, 0, 0, time.UTC),
+		Command:       "spawn",
+		RequestID:     "req-002",
+		ActorID:       "actor-overseer",
+		Payload:       v2events.MustMarshalPayload(map[string]any{"agent_id": "agent-002"}),
+	}); err != nil {
+		t.Fatalf("append event: %v", err)
+	}
+
+	projStore := NewStore(db)
+	projector := &fakeProjector{}
+	if err := projStore.ReplayFrom(ctx, eventStore, v2events.ReplayFilter{}, projector); err != nil {
+		t.Fatalf("replay with projector: %v", err)
+	}
+	if projector.calls != 1 {
+		t.Fatalf("projector calls=%d want 1", projector.calls)
+	}
+}
+
+func TestReplayFrom_ProjectorErrorFailsReplay(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	db, closeFn, err := dbutil.OpenSQLiteDBShared(ctx, filepath.Join(t.TempDir(), "replay_delegate_err.db"), nil)
+	if err != nil {
+		t.Fatalf("open sqlite db: %v", err)
+	}
+	t.Cleanup(func() { _ = closeFn() })
+
+	if err := libsqlevents.MigrateSchema(ctx, db); err != nil {
+		t.Fatalf("migrate events: %v", err)
+	}
+	if err := MigrateSchema(ctx, db); err != nil {
+		t.Fatalf("migrate projections: %v", err)
+	}
+
+	eventStore := libsqlevents.NewStore(db, db.Close)
+	eventStore.SetNowForTest(func() time.Time { return time.Date(2026, time.February, 18, 15, 10, 0, 0, time.UTC) })
+	if err := eventStore.Append(ctx, v2events.Event{
+		ID:            "evt-err-001",
+		StreamID:      "run-v2-003",
+		StreamType:    v2events.StreamTypeRun,
+		StreamVersion: 1,
+		Sequence:      1,
+		EventType:     v2events.EventRunStarted,
+		OccurredAt:    time.Date(2026, time.February, 18, 15, 10, 0, 0, time.UTC),
+		Payload:       v2events.MustMarshalPayload(map[string]any{"agent_id": "agent-003"}),
+	}); err != nil {
+		t.Fatalf("append event: %v", err)
+	}
+
+	projStore := NewStore(db)
+	wantErr := errors.New("projector boom")
+	err = projStore.ReplayFrom(ctx, eventStore, v2events.ReplayFilter{}, &fakeProjector{err: wantErr})
+	var verr *v2errors.V2Error
+	if !errors.As(err, &verr) {
+		t.Fatalf("replay error type=%T want *V2Error (err=%v)", err, err)
+	}
+	if !errors.Is(verr.Cause, wantErr) {
+		t.Fatalf("replay cause=%v want %v", verr.Cause, wantErr)
+	}
+}
+
+type fakeProjector struct {
+	calls int
+	err   error
+}
+
+func (f *fakeProjector) Apply(_ context.Context, _ v2events.Event) error {
+	f.calls++
+	return f.err
 }

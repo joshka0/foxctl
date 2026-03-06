@@ -1,6 +1,10 @@
 package companion
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/jkatigb/agentctl/internal/engine"
+)
 
 // TestStripThinkTags verifies <think> blocks are removed from model output.
 func TestStripThinkTags(t *testing.T) {
@@ -30,6 +34,67 @@ func TestStripThinkTags(t *testing.T) {
 			got := stripThinkTags(tt.input)
 			if got != tt.want {
 				t.Errorf("stripThinkTags(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestShouldRetryGroundedTurn(t *testing.T) {
+	tests := []struct {
+		name            string
+		enforceGrounded bool
+		output          engine.EngineOutput
+		responseText    string
+		contextQueries  int
+		want            bool
+	}{
+		{
+			name:            "disabled policy never retries",
+			enforceGrounded: false,
+			output:          engine.EngineOutput{StopReason: engine.StopReasonError},
+			responseText:    "",
+			contextQueries:  0,
+			want:            false,
+		},
+		{
+			name:            "error retries",
+			enforceGrounded: true,
+			output:          engine.EngineOutput{StopReason: engine.StopReasonError},
+			responseText:    "some text",
+			contextQueries:  0,
+			want:            true,
+		},
+		{
+			name:            "empty response retries",
+			enforceGrounded: true,
+			output:          engine.EngineOutput{StopReason: engine.StopReasonEndTurn},
+			responseText:    "",
+			contextQueries:  1,
+			want:            true,
+		},
+		{
+			name:            "no tools and no context query retries",
+			enforceGrounded: true,
+			output:          engine.EngineOutput{StopReason: engine.StopReasonEndTurn},
+			responseText:    "generic answer",
+			contextQueries:  0,
+			want:            true,
+		},
+		{
+			name:            "tool-backed answer does not retry",
+			enforceGrounded: true,
+			output:          engine.EngineOutput{StopReason: engine.StopReasonEndTurn, ToolCalls: []engine.ToolCall{{Name: "context_search"}}},
+			responseText:    "grounded answer",
+			contextQueries:  1,
+			want:            false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := shouldRetryGroundedTurn(tt.enforceGrounded, tt.output, tt.responseText, tt.contextQueries)
+			if got != tt.want {
+				t.Fatalf("shouldRetryGroundedTurn() = %v, want %v", got, tt.want)
 			}
 		})
 	}

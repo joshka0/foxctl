@@ -475,10 +475,10 @@ Contributors do **not** need to worry about releases.
 
 ## Additional Resources
 
-- **[Core Profile v1](docs/spec/core_profile_v1.md)** — Complete specification
+- **[Core Profile v1](docs/spec/v1/core_profile_v1.md)** — Complete specification
 - **[OpenAPI Skill](docs/spec/openapi_skill.md)** — Universal REST API client
-- **[Plugin Protocol](docs/spec/plugin_protocol.md)** — Extensibility via plugins
-- **[Protocol v1 Implementation](docs/archive/legacy/protocol_v1_implementation.md)** — Historical build-out plan
+- **[Plugin Protocol](docs/spec/v1/plugin_protocol.md)** — Extensibility via plugins
+- **[Protocol v1](docs/spec/v1/protocol_v1.md)** — Wire contract and envelope semantics
 - **[AGENTS.md](AGENTS.md)** — Guide for AI coding assistants
 
 ---

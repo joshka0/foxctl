@@ -20,6 +20,8 @@ import (
 	"github.com/jkatigb/agentctl/internal/protocol"
 )
 
+const testHandshakeTimeout = 10 * time.Second
+
 func TestManagerInvokeAuthSuccess(t *testing.T) {
 	t.Parallel()
 	tmp := t.TempDir()
@@ -28,7 +30,7 @@ func TestManagerInvokeAuthSuccess(t *testing.T) {
 	cfg := config.Config{Home: tmp}
 	mgr := NewManager(cfg,
 		WithSearchPaths([]string{tmp}),
-		WithHandshakeTimeout(5*time.Second),
+		WithHandshakeTimeout(testHandshakeTimeout),
 		WithRuntimeLimits(RuntimeLimits{WallTimeout: 5 * time.Second}),
 	)
 
@@ -67,7 +69,7 @@ func TestManagerInvokeAuthPluginError(t *testing.T) {
 	cfg := config.Config{Home: tmp}
 	mgr := NewManager(cfg,
 		WithSearchPaths([]string{tmp}),
-		WithHandshakeTimeout(5*time.Second),
+		WithHandshakeTimeout(testHandshakeTimeout),
 		WithRuntimeLimits(RuntimeLimits{WallTimeout: 5 * time.Second}),
 	)
 
@@ -99,7 +101,7 @@ func TestManagerInvokeAuthTimeout(t *testing.T) {
 	buildPluginBinary(t, tmp, "auth-hmac")
 
 	cfg := config.Config{Home: tmp}
-	mgr := NewManager(cfg, WithSearchPaths([]string{tmp}), WithHandshakeTimeout(5*time.Second))
+	mgr := NewManager(cfg, WithSearchPaths([]string{tmp}), WithHandshakeTimeout(testHandshakeTimeout))
 
 	payload := AuthRequestPayload{
 		Request: HTTPRequest{Method: "GET", URL: "https://example.com"},
@@ -135,7 +137,7 @@ func TestManagerInvokePagination(t *testing.T) {
 	cfg := config.Config{Home: tmp}
 	mgr := NewManager(cfg,
 		WithSearchPaths([]string{tmp}),
-		WithHandshakeTimeout(5*time.Second),
+		WithHandshakeTimeout(testHandshakeTimeout),
 		WithRuntimeLimits(RuntimeLimits{WallTimeout: 5 * time.Second}),
 	)
 

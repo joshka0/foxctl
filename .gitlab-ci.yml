@@ -1,11 +1,18 @@
 variables:
   GOFLAGS: "-buildvcs=false"
-  GOTOOLCHAIN: "go1.25.0"
-  CI_IMAGE: ${CI_REGISTRY_IMAGE}/ci:go1.25
+  GOTOOLCHAIN: "local"
+  CI_IMAGE: ${CI_REGISTRY_IMAGE}/ci:${CI_COMMIT_SHA}
+  GOPATH: ${CI_PROJECT_DIR}/.go
+  GOMODCACHE: ${CI_PROJECT_DIR}/.cache/go-mod
+  GOCACHE: ${CI_PROJECT_DIR}/.cache/go-build
+  GOPROXY: https://proxy.golang.org,direct
 
 image: ${CI_IMAGE}
 
-before_script: []
+before_script:
+  - export PATH="/usr/local/go/bin:${GOPATH}/bin:$PATH"
+  - mkdir -p "${GOPATH}/bin" "${GOMODCACHE}" "${GOCACHE}"
+  - go mod download
 
 stages:
   - prepare
@@ -38,15 +45,9 @@ build-ci-image:
   before_script: []
   script:
     - until docker info; do sleep 1; done
-    - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
-    - docker build -t ${CI_IMAGE} -f Dockerfile.ci .
+    - echo "$CI_REGISTRY_PASSWORD" | docker login -u "$CI_REGISTRY_USER" --password-stdin "$CI_REGISTRY"
+    - docker build --pull -t ${CI_IMAGE} -f Dockerfile.ci .
     - docker push ${CI_IMAGE}
-  rules:
-    - changes:
-        - Dockerfile.ci
-        - go.mod
-        - go.sum
-    - if: $FORCE_CI_IMAGE_BUILD == "true"
 
 # --- Stage: check (all jobs run in parallel via DAG) ---
 static-analysis:

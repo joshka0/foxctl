@@ -9,8 +9,23 @@ import {
   useAcknowledgeMessage,
   useSpawnAgent,
   useStopAgent,
+  useOrchestrationBoard,
+  useOrchestrationCardRuntime,
+  useApplyOrchestrationCardAction,
+  useRefreshOrchestration,
+  useDispatchOrchestrationIssue,
+  useWorkspaces,
+  useSwitchWorkspace,
 } from "../hooks/useData";
-import type { Agent, MailboxMessage } from "@agentctl/data";
+import type {
+  Agent,
+  MailboxMessage,
+  OrchestrationBoard,
+  OrchestrationBoardArtifactRef,
+  OrchestrationCard,
+  OrchestrationCardAction,
+  OrchestrationRuntimeTreeNode,
+} from "@agentctl/data";
 
 function stateColor(state: string): string {
   switch (state) {
@@ -86,6 +101,138 @@ function truncate(s: string | undefined, len: number): string {
   return s.length > len ? s.slice(0, len - 3) + "..." : s;
 }
 
+function formatAgentSkills(skills: Agent["skills_allow"]): string {
+  if (!skills) return "";
+  return Array.isArray(skills) ? skills.join(", ") : skills;
+}
+
+function formatAgentPolicy(policy: Agent["policy"]): string {
+  if (!policy) return "";
+  if (typeof policy === "string") return policy;
+  try {
+    return JSON.stringify(policy);
+  } catch {
+    return String(policy);
+  }
+}
+
+function workspaceID(): string | undefined {
+  if (typeof process !== "undefined" && typeof process.cwd === "function") {
+    return process.cwd();
+  }
+  return undefined;
+}
+
+function workspaceDisplayName(workspace: string | undefined): string {
+  if (!workspace) return "(unset)";
+  const normalized = workspace.replace(/\\/g, "/");
+  const parts = normalized.split("/").filter(Boolean);
+  return parts[parts.length - 1] || workspace;
+}
+
+function cardTitle(card: OrchestrationCard): string {
+  const issue = card.issue_identifier || card.issue_id;
+  const title = (card.title || "").trim();
+  if (!title) return issue;
+  return `${issue}: ${title}`;
+}
+
+function laneColor(lane: string | undefined): string {
+  switch (lane) {
+    case "Running":
+      return "#00ff00";
+    case "RetryQueued":
+      return "#ffaa00";
+    case "Blocked":
+      return "#ff4444";
+    case "Review":
+      return "#00ffff";
+    case "Done":
+      return "#888888";
+    case "Claimed":
+      return "#ffff00";
+    default:
+      return "#aa77ff";
+  }
+}
+
+function canRetryNow(card: OrchestrationCard | undefined): boolean {
+  return card?.lane === "Blocked" || card?.lane === "RetryQueued";
+}
+
+function canRelease(card: OrchestrationCard | undefined): boolean {
+  return (
+    !!card &&
+    card.state !== "Running" &&
+    card.state !== "Claimed" &&
+    card.lane !== "Todo"
+  );
+}
+
+function canMarkDone(card: OrchestrationCard | undefined): boolean {
+  return (
+    !!card &&
+    card.state !== "Running" &&
+    card.state !== "Claimed" &&
+    card.lane !== "Done"
+  );
+}
+
+function canDispatch(card: OrchestrationCard | undefined): boolean {
+  if (!card) return false;
+  return (
+    card.lane === "Todo" ||
+    card.lane === "RetryQueued" ||
+    card.lane === "Blocked"
+  );
+}
+
+interface BoardRowData {
+  lane: string;
+  card: OrchestrationCard;
+}
+
+function flattenBoard(
+  board: OrchestrationBoard | null | undefined,
+): BoardRowData[] {
+  if (!board?.lanes) return [];
+  const rows: BoardRowData[] = [];
+  for (const lane of board.lanes) {
+    for (const card of lane.cards || []) {
+      rows.push({ lane: lane.id, card });
+    }
+  }
+  return rows;
+}
+
+function formatRuntimeLines(
+  node: OrchestrationRuntimeTreeNode | undefined,
+  depth = 0,
+): string[] {
+  if (!node) return [];
+  const indent = "  ".repeat(depth);
+  const lines = [
+    `${indent}${node.tag || node.agent_id || "node"} [${node.status || "unknown"}]`,
+  ];
+  if (node.agent_id) {
+    lines.push(`${indent}  agent: ${node.agent_id}`);
+  }
+  if (node.error) {
+    lines.push(`${indent}  error: ${node.error}`);
+  }
+  if (node.state !== undefined && node.state !== null) {
+    try {
+      lines.push(`${indent}  state: ${JSON.stringify(node.state)}`);
+    } catch {
+      lines.push(`${indent}  state: ${String(node.state)}`);
+    }
+  }
+  for (const child of node.children || []) {
+    lines.push(...formatRuntimeLines(child, depth + 1));
+  }
+  return lines;
+}
+
 // Build tree structure from flat agent list
 interface AgentNode {
   agent: Agent;
@@ -154,12 +301,15 @@ function AgentRow({ node, selected }: AgentRowProps) {
     <box height={1} backgroundColor={bg} flexDirection="row">
       <text fg="#ffffff">
         {cursor}
-        <span fg="#444444">{indent}{prefix}</span>
-        <span fg={stateColor(agent.state)}>[{stateIcon(agent.state)}]</span>
-        {" "}
-        <span fg="#aa77ff">{roleIcon(agent.role)}</span>
-        {" "}
-        <span fg="#ffffff">{truncate(agent.role || "agent", 12).padEnd(13)}</span>
+        <span fg="#444444">
+          {indent}
+          {prefix}
+        </span>
+        <span fg={stateColor(agent.state)}>[{stateIcon(agent.state)}]</span>{" "}
+        <span fg="#aa77ff">{roleIcon(agent.role)}</span>{" "}
+        <span fg="#ffffff">
+          {truncate(agent.role || "agent", 12).padEnd(13)}
+        </span>
         {"  "}
         <span fg="#888888">{truncate(agent.ns, 20).padEnd(21)}</span>
         {"  "}
@@ -201,7 +351,12 @@ interface HierarchyPanelProps {
   listHeight: number;
 }
 
-function HierarchyPanel({ agents, cursor, scrollOffset, listHeight }: HierarchyPanelProps) {
+function HierarchyPanel({
+  agents,
+  cursor,
+  scrollOffset,
+  listHeight,
+}: HierarchyPanelProps) {
   const tree = buildAgentTree(agents);
   const flatList = flattenTree(tree);
 
@@ -217,17 +372,17 @@ function HierarchyPanel({ agents, cursor, scrollOffset, listHeight }: HierarchyP
   return (
     <box flexDirection="column" overflow="hidden">
       <box height={1} paddingLeft={1} paddingBottom={1}>
-        <text fg="#555555">
-          ST  R  ROLE           NAMESPACE               ID
-        </text>
+        <text fg="#555555">ST R ROLE NAMESPACE ID</text>
       </box>
-      {flatList.slice(scrollOffset, scrollOffset + listHeight).map((node, i) => (
-        <AgentRow
-          key={node.agent.id}
-          node={node}
-          selected={i + scrollOffset === cursor}
-        />
-      ))}
+      {flatList
+        .slice(scrollOffset, scrollOffset + listHeight)
+        .map((node, i) => (
+          <AgentRow
+            key={node.agent.id}
+            node={node}
+            selected={i + scrollOffset === cursor}
+          />
+        ))}
     </box>
   );
 }
@@ -239,7 +394,12 @@ interface ActivityPanelProps {
   listHeight: number;
 }
 
-function ActivityPanel({ messages, cursor, scrollOffset, listHeight }: ActivityPanelProps) {
+function ActivityPanel({
+  messages,
+  cursor,
+  scrollOffset,
+  listHeight,
+}: ActivityPanelProps) {
   if (!messages || messages.length === 0) {
     return (
       <box padding={1}>
@@ -251,9 +411,7 @@ function ActivityPanel({ messages, cursor, scrollOffset, listHeight }: ActivityP
   return (
     <box flexDirection="column" overflow="hidden">
       <box height={1} paddingLeft={1} paddingBottom={1}>
-        <text fg="#555555">
-          TIME          FROM           P   KIND         SUBJECT
-        </text>
+        <text fg="#555555">TIME FROM P KIND SUBJECT</text>
       </box>
       {messages.slice(scrollOffset, scrollOffset + listHeight).map((msg, i) => (
         <MessageRow
@@ -262,6 +420,81 @@ function ActivityPanel({ messages, cursor, scrollOffset, listHeight }: ActivityP
           selected={i + scrollOffset === cursor}
         />
       ))}
+    </box>
+  );
+}
+
+interface BoardPanelProps {
+  rows: BoardRowData[];
+  cursor: number;
+  scrollOffset: number;
+  listHeight: number;
+  artifact: OrchestrationBoardArtifactRef | null;
+}
+
+function BoardPanel({
+  rows,
+  cursor,
+  scrollOffset,
+  listHeight,
+  artifact,
+}: BoardPanelProps) {
+  if (artifact) {
+    return (
+      <box padding={1} flexDirection="column">
+        <text fg="#ffaa00">Board payload was moved to CAS</text>
+        <text fg="#cccccc">{artifact.summary}</text>
+        <text fg="#888888">{artifact.artifact}</text>
+        {artifact.hint && <text fg="#666666">{artifact.hint}</text>}
+      </box>
+    );
+  }
+
+  if (rows.length === 0) {
+    return (
+      <box padding={1}>
+        <text fg="#888888">No orchestration cards projected</text>
+      </box>
+    );
+  }
+
+  return (
+    <box flexDirection="column" overflow="hidden">
+      <box height={1} paddingLeft={1} paddingBottom={1}>
+        <text fg="#555555">LANE ISSUE POLICY OUTCOME TITLE</text>
+      </box>
+      {rows.slice(scrollOffset, scrollOffset + listHeight).map((row, i) => {
+        const selected = i + scrollOffset === cursor;
+        const bg = selected ? "#223344" : undefined;
+        return (
+          <box
+            key={row.card.issue_id}
+            height={1}
+            backgroundColor={bg}
+            flexDirection="row"
+          >
+            <text fg="#ffffff">
+              {selected ? "> " : "  "}
+              <span fg={laneColor(row.lane)}>
+                {truncate(row.lane, 11).padEnd(12)}
+              </span>
+              <span fg="#00ffff">
+                {truncate(
+                  row.card.issue_identifier || row.card.issue_id,
+                  23,
+                ).padEnd(24)}
+              </span>
+              <span fg="#888888">
+                {truncate(row.card.policy_status || "-", 11).padEnd(12)}
+              </span>
+              <span fg="#ffaa00">
+                {truncate(row.card.last_outcome || "-", 13).padEnd(14)}
+              </span>
+              <span fg="#cccccc">{truncate(row.card.title || "", 28)}</span>
+            </text>
+          </box>
+        );
+      })}
     </box>
   );
 }
@@ -300,7 +533,12 @@ interface PendingQuestionsPanelProps {
   listHeight: number;
 }
 
-function PendingQuestionsPanel({ questions, cursor, scrollOffset, listHeight }: PendingQuestionsPanelProps) {
+function PendingQuestionsPanel({
+  questions,
+  cursor,
+  scrollOffset,
+  listHeight,
+}: PendingQuestionsPanelProps) {
   if (questions.length === 0) {
     return (
       <box padding={1}>
@@ -316,17 +554,17 @@ function PendingQuestionsPanel({ questions, cursor, scrollOffset, listHeight }: 
   return (
     <box flexDirection="column" overflow="hidden">
       <box height={1} paddingLeft={1}>
-        <text fg="#555555">
-          [a]nswer  [d]elegate  [v]iew context
-        </text>
+        <text fg="#555555">[a]nswer [d]elegate [v]iew context</text>
       </box>
-      {questions.slice(scrollOffset, scrollOffset + listHeight).map((msg, i) => (
-        <PendingQuestionRow
-          key={msg.id}
-          message={msg}
-          selected={i + scrollOffset === cursor}
-        />
-      ))}
+      {questions
+        .slice(scrollOffset, scrollOffset + listHeight)
+        .map((msg, i) => (
+          <PendingQuestionRow
+            key={msg.id}
+            message={msg}
+            selected={i + scrollOffset === cursor}
+          />
+        ))}
     </box>
   );
 }
@@ -346,7 +584,13 @@ function OrchAgentDetail({ agent, onClose }: OrchAgentDetailProps) {
 
   return (
     <box flexDirection="column" width="100%" height="100%">
-      <box height={2} paddingLeft={1} borderStyle="single" borderColor="#333333" border={["bottom"]}>
+      <box
+        height={2}
+        paddingLeft={1}
+        borderStyle="single"
+        borderColor="#333333"
+        border={["bottom"]}
+      >
         <text fg="#aa77ff">
           <b>AGENT DETAIL</b>
           <span fg="#666666"> | {agent.id.slice(0, 24)}...</span>
@@ -382,21 +626,28 @@ function OrchAgentDetail({ agent, onClose }: OrchAgentDetailProps) {
         {agent.llm_provider && (
           <text>
             <b fg="#666666">LLM: </b>
-            <span fg="#888888">{agent.llm_provider}{agent.llm_model ? `/${agent.llm_model}` : ""}</span>
+            <span fg="#888888">
+              {agent.llm_provider}
+              {agent.llm_model ? `/${agent.llm_model}` : ""}
+            </span>
           </text>
         )}
         {agent.skills_allow && (
           <>
             <text> </text>
-            <text fg="#00ff00"><b>Skills:</b></text>
-            <text fg="#888888">{agent.skills_allow}</text>
+            <text fg="#00ff00">
+              <b>Skills:</b>
+            </text>
+            <text fg="#888888">{formatAgentSkills(agent.skills_allow)}</text>
           </>
         )}
         {agent.policy && (
           <>
             <text> </text>
-            <text fg="#ffff00"><b>Policy:</b></text>
-            <text fg="#888888">{agent.policy}</text>
+            <text fg="#ffff00">
+              <b>Policy:</b>
+            </text>
+            <text fg="#888888">{formatAgentPolicy(agent.policy)}</text>
           </>
         )}
       </box>
@@ -419,7 +670,13 @@ function OrchMessageDetail({ message, onClose }: OrchMessageDetailProps) {
 
   return (
     <box flexDirection="column" width="100%" height="100%">
-      <box height={2} paddingLeft={1} borderStyle="single" borderColor="#333333" border={["bottom"]}>
+      <box
+        height={2}
+        paddingLeft={1}
+        borderStyle="single"
+        borderColor="#333333"
+        border={["bottom"]}
+      >
         <text fg="#ffff00">
           <b>MESSAGE</b>
           <span fg="#666666"> | {message.id.slice(0, 24)}...</span>
@@ -445,7 +702,9 @@ function OrchMessageDetail({ message, onClose }: OrchMessageDetailProps) {
         <box flexDirection="row">
           <text>
             <b fg="#666666">Priority: </b>
-            <span fg={priorityColor(message.priority)}>P{message.priority}</span>
+            <span fg={priorityColor(message.priority)}>
+              P{message.priority}
+            </span>
           </text>
           <text fg="#666666">{"  |  "}</text>
           <text>
@@ -455,7 +714,9 @@ function OrchMessageDetail({ message, onClose }: OrchMessageDetailProps) {
           <text fg="#666666">{"  |  "}</text>
           <text>
             <b fg="#666666">Status: </b>
-            <span fg={message.status === "unread" ? "#00ff00" : "#888888"}>{message.status}</span>
+            <span fg={message.status === "unread" ? "#00ff00" : "#888888"}>
+              {message.status}
+            </span>
           </text>
         </box>
         <text>
@@ -463,7 +724,9 @@ function OrchMessageDetail({ message, onClose }: OrchMessageDetailProps) {
           <span fg="#888888">{message.created_at}</span>
         </text>
         <text> </text>
-        <text fg="#aa77ff"><b>Body:</b></text>
+        <text fg="#aa77ff">
+          <b>Body:</b>
+        </text>
         <box paddingTop={1} overflow="scroll">
           {message.body ? (
             <text fg="#cccccc">{message.body}</text>
@@ -476,36 +739,223 @@ function OrchMessageDetail({ message, onClose }: OrchMessageDetailProps) {
   );
 }
 
+interface OrchBoardCardDetailProps {
+  card: OrchestrationCard;
+  runtimeLines: string[];
+  runtimeError?: string;
+  busy: boolean;
+  onClose: () => void;
+  onRefresh: () => void;
+  onAction: (action: OrchestrationCardAction) => void;
+  onDispatch: () => void;
+}
+
+function OrchBoardCardDetail({
+  card,
+  runtimeLines,
+  runtimeError,
+  busy,
+  onClose,
+  onRefresh,
+  onAction,
+  onDispatch,
+}: OrchBoardCardDetailProps) {
+  useKeyboard((e) => {
+    if (e.name === "escape" || e.name === "q") {
+      onClose();
+      return;
+    }
+    if (e.name === "r") {
+      onRefresh();
+      return;
+    }
+    if (e.name === "d" && canDispatch(card)) {
+      onDispatch();
+      return;
+    }
+    if (e.name === "t" && canRetryNow(card)) {
+      onAction("retry-now");
+      return;
+    }
+    if (e.name === "u" && canRelease(card)) {
+      onAction("release");
+      return;
+    }
+    if (e.name === "m" && canMarkDone(card)) {
+      onAction("mark-done");
+    }
+  });
+
+  return (
+    <box flexDirection="column" width="100%" height="100%">
+      <box
+        height={2}
+        paddingLeft={1}
+        borderStyle="single"
+        borderColor="#333333"
+        border={["bottom"]}
+      >
+        <text fg="#00aaff">
+          <b>BOARD CARD</b>
+          <span fg="#666666"> | {card.issue_identifier || card.issue_id}</span>
+        </text>
+        <text fg="#666666">
+          q/Esc close | r refresh | d dispatch | t retry | u release | m done
+        </text>
+      </box>
+      <box padding={1} flexDirection="column">
+        <text fg="#ffffff">
+          <b>{cardTitle(card)}</b>
+        </text>
+        <text>
+          <b fg="#666666">Lane: </b>
+          <span fg={laneColor(card.lane)}>{card.lane || "-"}</span>
+          <span fg="#666666"> | </span>
+          <b fg="#666666">State: </b>
+          <span fg="#cccccc">{card.state}</span>
+        </text>
+        <text>
+          <b fg="#666666">Policy: </b>
+          <span fg="#cccccc">{card.policy_status || "-"}</span>
+          <span fg="#666666"> | </span>
+          <b fg="#666666">Outcome: </b>
+          <span fg="#ffaa00">{card.last_outcome || "-"}</span>
+        </text>
+        <text>
+          <b fg="#666666">Run: </b>
+          <span fg="#888888">{card.run_id || "-"}</span>
+        </text>
+        <text>
+          <b fg="#666666">Agent: </b>
+          <span fg="#888888">{card.agent_id || "-"}</span>
+        </text>
+        {canDispatch(card) && (
+          <text fg="#00ff88">Dispatchable from board detail with key d</text>
+        )}
+        {card.denial_reason && (
+          <text>
+            <b fg="#666666">Reason: </b>
+            <span fg="#ffcc66">{card.denial_reason}</span>
+          </text>
+        )}
+        {card.suggestion && (
+          <text>
+            <b fg="#666666">Suggestion: </b>
+            <span fg="#cccccc">{card.suggestion}</span>
+          </text>
+        )}
+        <text> </text>
+        <text fg="#00ffcc">
+          <b>Runtime Tree</b>
+        </text>
+        {runtimeError && <text fg="#ff8800">{runtimeError}</text>}
+        {runtimeLines.length > 0 ? (
+          runtimeLines.slice(0, 24).map((line, index) => (
+            <text key={`${line}-${index}`} fg="#888888">
+              {line}
+            </text>
+          ))
+        ) : (
+          <text fg="#666666">
+            {card.agent_id
+              ? "Runtime tree unavailable"
+              : "No runtime agent attached"}
+          </text>
+        )}
+        {busy && <text fg="#00ff00">Working…</text>}
+      </box>
+    </box>
+  );
+}
+
 export function OrchestrationView() {
-  const [panel, setPanel] = useState<"hierarchy" | "questions" | "activity">("hierarchy");
+  const [panel, setPanel] = useState<
+    "hierarchy" | "board" | "questions" | "activity"
+  >("hierarchy");
   const [hierarchyCursor, setHierarchyCursor] = useState(0);
   const [hierarchyScroll, setHierarchyScroll] = useState(0);
+  const [boardCursor, setBoardCursor] = useState(0);
+  const [boardScroll, setBoardScroll] = useState(0);
   const [activityCursor, setActivityCursor] = useState(0);
   const [activityScroll, setActivityScroll] = useState(0);
   const [questionsCursor, setQuestionsCursor] = useState(0);
   const [questionsScroll, setQuestionsScroll] = useState(0);
   const [showAgentDetail, setShowAgentDetail] = useState(false);
   const [showMessageDetail, setShowMessageDetail] = useState(false);
+  const [showBoardCardDetail, setShowBoardCardDetail] = useState(false);
   const [answerMode, setAnswerMode] = useState(false);
   const [answerText, setAnswerText] = useState("");
+  const [activeWorkspace, setActiveWorkspace] = useState("");
 
   const HIERARCHY_HEIGHT = 8;
+  const BOARD_HEIGHT = 7;
   const QUESTIONS_HEIGHT = 4;
   const ACTIVITY_HEIGHT = 6;
+  const currentWorkspace = workspaceID();
 
-  const { data: agentsData, isLoading: agentsLoading, error: agentsError, refetch: refetchAgents } = useAgents({
+  const {
+    data: agentsData,
+    isLoading: agentsLoading,
+    error: agentsError,
+    refetch: refetchAgents,
+  } = useAgents({
     limit: 100,
   });
+  const { data: workspaceData, refetch: refetchWorkspaces } = useWorkspaces();
 
-  const { data: messages, isLoading: messagesLoading, refetch: refetchMessages } = useMailbox({
+  const workspaceOptions = useMemo(() => {
+    const values = new Set<string>();
+    const current = (workspaceData?.current || "").trim();
+    if (current) values.add(current);
+    for (const ws of workspaceData?.workspaces || []) {
+      const path = (ws.path || "").trim();
+      if (path) values.add(path);
+    }
+    if (currentWorkspace) values.add(currentWorkspace);
+    return Array.from(values);
+  }, [currentWorkspace, workspaceData?.current, workspaceData?.workspaces]);
+
+  const resolvedWorkspace = useMemo(() => {
+    const preferred = activeWorkspace.trim();
+    if (preferred) return preferred;
+    const current = (workspaceData?.current || "").trim();
+    if (current) return current;
+    return currentWorkspace;
+  }, [activeWorkspace, currentWorkspace, workspaceData?.current]);
+
+  const {
+    data: messages,
+    isLoading: messagesLoading,
+    refetch: refetchMessages,
+  } = useMailbox({
+    limit: 50,
+    workspace: resolvedWorkspace,
+  });
+
+  const {
+    data: boardData,
+    isLoading: boardLoading,
+    error: boardError,
+    refetch: refetchBoard,
+  } = useOrchestrationBoard({
+    workspace: resolvedWorkspace,
     limit: 50,
   });
 
   // Mutation hooks for agent orchestration
-  const { send: sendMessage, isLoading: sendingMessage } = useSendMailboxMessage();
+  const { send: sendMessage, isLoading: sendingMessage } =
+    useSendMailboxMessage();
   const { acknowledge, isLoading: acknowledging } = useAcknowledgeMessage();
   const { spawn: spawnNewAgent, isLoading: spawning } = useSpawnAgent();
   const { stop: stopSelectedAgent, isLoading: stopping } = useStopAgent();
+  const { apply: applyCardAction, isLoading: applyingCardAction } =
+    useApplyOrchestrationCardAction();
+  const { refresh: refreshBoardProjection, isLoading: refreshingBoard } =
+    useRefreshOrchestration();
+  const { dispatch: dispatchIssue, isLoading: dispatchingIssue } =
+    useDispatchOrchestrationIssue();
+  const { switchTo: switchWorkspaceTo, isLoading: switchingWorkspace } =
+    useSwitchWorkspace();
 
   // Status message for user feedback
   const [statusMessage, setStatusMessage] = useState<string>("");
@@ -513,6 +963,21 @@ export function OrchestrationView() {
   const agents = agentsData?.agents || [];
   const tree = buildAgentTree(agents);
   const flatAgents = flattenTree(tree);
+  const board = boardData?.board || null;
+  const boardArtifact = boardData?.artifact || null;
+  const boardRows = useMemo(() => flattenBoard(board), [board]);
+  const selectedBoardRow = boardRows[boardCursor];
+  const selectedBoardCard = selectedBoardRow?.card;
+
+  const {
+    data: boardCardRuntime,
+    isLoading: boardCardRuntimeLoading,
+    error: boardCardRuntimeError,
+    refetch: refetchBoardCardRuntime,
+  } = useOrchestrationCardRuntime(selectedBoardCard?.issue_id, {
+    workspace: resolvedWorkspace,
+    depth: 3,
+  });
 
   // Filter pending questions (agent.ask messages to overseer that are unread/unacked)
   const pendingQuestions = useMemo(() => {
@@ -535,6 +1000,17 @@ export function OrchestrationView() {
       setHierarchyScroll(clampedCursor);
     } else if (clampedCursor >= hierarchyScroll + HIERARCHY_HEIGHT) {
       setHierarchyScroll(clampedCursor - HIERARCHY_HEIGHT + 1);
+    }
+  };
+
+  const updateBoardCursor = (newCursor: number) => {
+    const maxCursor = Math.max(0, boardRows.length - 1);
+    const clampedCursor = Math.min(Math.max(0, newCursor), maxCursor);
+    setBoardCursor(clampedCursor);
+    if (clampedCursor < boardScroll) {
+      setBoardScroll(clampedCursor);
+    } else if (clampedCursor >= boardScroll + BOARD_HEIGHT) {
+      setBoardScroll(clampedCursor - BOARD_HEIGHT + 1);
     }
   };
 
@@ -580,7 +1056,9 @@ export function OrchestrationView() {
       setStatusMessage(`Answered: ${selectedQuestion.sender}`);
       setManagedTimeout(() => setStatusMessage(""), 3000);
     } catch (err) {
-      setStatusMessage(`Error: ${err instanceof Error ? err.message : "Failed to send"}`);
+      setStatusMessage(
+        `Error: ${err instanceof Error ? err.message : "Failed to send"}`,
+      );
       setManagedTimeout(() => setStatusMessage(""), 5000);
     }
     setAnswerMode(false);
@@ -597,11 +1075,156 @@ export function OrchestrationView() {
       setStatusMessage(`Delegated to overseer: ${selectedQuestion.subject}`);
       setManagedTimeout(() => setStatusMessage(""), 3000);
     } catch (err) {
-      setStatusMessage(`Error: ${err instanceof Error ? err.message : "Failed to delegate"}`);
+      setStatusMessage(
+        `Error: ${err instanceof Error ? err.message : "Failed to delegate"}`,
+      );
       setManagedTimeout(() => setStatusMessage(""), 5000);
     }
     refetchMessages();
   }, [selectedQuestion, acknowledge, refetchMessages]);
+
+  const handleRefreshAll = useCallback(async () => {
+    try {
+      await refreshBoardProjection(resolvedWorkspace);
+      refetchBoard();
+      refetchAgents();
+      refetchMessages();
+      if (selectedBoardCard?.issue_id) {
+        refetchBoardCardRuntime();
+      }
+      setStatusMessage("Refreshed orchestration surfaces");
+      setManagedTimeout(() => setStatusMessage(""), 3000);
+    } catch (err) {
+      setStatusMessage(
+        `Error: ${err instanceof Error ? err.message : "Failed to refresh"}`,
+      );
+      setManagedTimeout(() => setStatusMessage(""), 5000);
+    }
+  }, [
+    refetchAgents,
+    refetchBoard,
+    refetchBoardCardRuntime,
+    refetchMessages,
+    refreshBoardProjection,
+    resolvedWorkspace,
+    selectedBoardCard?.issue_id,
+    setManagedTimeout,
+  ]);
+
+  const handleBoardCardAction = useCallback(
+    async (action: OrchestrationCardAction) => {
+      if (!selectedBoardCard) return;
+      try {
+        await applyCardAction({
+          workspace: resolvedWorkspace,
+          issueID: selectedBoardCard.issue_id,
+          action,
+        });
+        refetchBoard();
+        refetchBoardCardRuntime();
+        setStatusMessage(
+          `${action} applied to ${selectedBoardCard.issue_identifier || selectedBoardCard.issue_id}`,
+        );
+        setManagedTimeout(() => setStatusMessage(""), 3000);
+      } catch (err) {
+        setStatusMessage(
+          `Error: ${err instanceof Error ? err.message : "Failed to apply card action"}`,
+        );
+        setManagedTimeout(() => setStatusMessage(""), 5000);
+      }
+    },
+    [
+      applyCardAction,
+      refetchBoard,
+      refetchBoardCardRuntime,
+      resolvedWorkspace,
+      selectedBoardCard,
+      setManagedTimeout,
+    ],
+  );
+
+  const handleDispatchBoardCard = useCallback(async () => {
+    if (!selectedBoardCard || !canDispatch(selectedBoardCard)) return;
+    try {
+      const result = await dispatchIssue({
+        workspace: resolvedWorkspace,
+        card: selectedBoardCard,
+      });
+      refetchBoard();
+      refetchBoardCardRuntime();
+      const target =
+        selectedBoardCard.issue_identifier || selectedBoardCard.issue_id;
+      const summary =
+        [result.policy_status, result.last_outcome]
+          .filter(Boolean)
+          .join(" / ") || result.status;
+      setStatusMessage(`Dispatch ${target}: ${summary}`);
+      setManagedTimeout(() => setStatusMessage(""), 3000);
+    } catch (err) {
+      setStatusMessage(
+        `Error: ${err instanceof Error ? err.message : "Failed to dispatch card"}`,
+      );
+      setManagedTimeout(() => setStatusMessage(""), 5000);
+    }
+  }, [
+    dispatchIssue,
+    refetchBoard,
+    refetchBoardCardRuntime,
+    resolvedWorkspace,
+    selectedBoardCard,
+    setManagedTimeout,
+  ]);
+
+  const handleWorkspaceCycle = useCallback(
+    async (direction: 1 | -1) => {
+      if (workspaceOptions.length === 0) return;
+      const currentIndex = Math.max(
+        0,
+        workspaceOptions.indexOf(resolvedWorkspace || ""),
+      );
+      const nextIndex =
+        (currentIndex + direction + workspaceOptions.length) %
+        workspaceOptions.length;
+      const nextWorkspace = workspaceOptions[nextIndex];
+      if (!nextWorkspace) return;
+
+      setActiveWorkspace(nextWorkspace);
+      setBoardCursor(0);
+      setBoardScroll(0);
+      setQuestionsCursor(0);
+      setQuestionsScroll(0);
+      setActivityCursor(0);
+      setActivityScroll(0);
+
+      let switched = true;
+      try {
+        await switchWorkspaceTo(nextWorkspace);
+      } catch {
+        switched = false;
+      }
+
+      refetchWorkspaces();
+      refetchBoard();
+      refetchMessages();
+
+      const name = workspaceDisplayName(nextWorkspace);
+      setStatusMessage(
+        switched
+          ? `Workspace: ${name}`
+          : `Workspace: ${name} (local view only)`,
+      );
+      setManagedTimeout(() => setStatusMessage(""), switched ? 2500 : 4000);
+    },
+    [
+      refetchBoard,
+      refetchMessages,
+      refetchWorkspaces,
+      resolvedWorkspace,
+      setManagedTimeout,
+      switchWorkspaceTo,
+      workspaceOptions,
+    ],
+  );
 
   const selectedAgent = flatAgents[hierarchyCursor]?.agent;
   const selectedMessage = messages?.[activityCursor];
@@ -615,13 +1238,15 @@ export function OrchestrationView() {
       setManagedTimeout(() => setStatusMessage(""), 3000);
       refetchAgents();
     } catch (err) {
-      setStatusMessage(`Error: ${err instanceof Error ? err.message : "Failed to stop"}`);
+      setStatusMessage(
+        `Error: ${err instanceof Error ? err.message : "Failed to stop"}`,
+      );
       setManagedTimeout(() => setStatusMessage(""), 5000);
     }
   }, [selectedAgent, stopSelectedAgent, refetchAgents]);
 
   useKeyboard((e) => {
-    if (showAgentDetail || showMessageDetail) return; // Detail views handle their own keys
+    if (showAgentDetail || showMessageDetail || showBoardCardDetail) return; // Detail views handle their own keys
 
     // Handle answer mode input
     if (answerMode) {
@@ -651,6 +1276,8 @@ export function OrchestrationView() {
       case "k":
         if (panel === "hierarchy") {
           updateHierarchyCursor(hierarchyCursor - 1);
+        } else if (panel === "board") {
+          updateBoardCursor(boardCursor - 1);
         } else if (panel === "questions") {
           updateQuestionsCursor(questionsCursor - 1);
         } else {
@@ -661,6 +1288,8 @@ export function OrchestrationView() {
       case "j":
         if (panel === "hierarchy") {
           updateHierarchyCursor(hierarchyCursor + 1);
+        } else if (panel === "board") {
+          updateBoardCursor(boardCursor + 1);
         } else if (panel === "questions") {
           updateQuestionsCursor(questionsCursor + 1);
         } else {
@@ -670,6 +1299,8 @@ export function OrchestrationView() {
       case "return":
         if (panel === "hierarchy" && selectedAgent) {
           setShowAgentDetail(true);
+        } else if (panel === "board" && selectedBoardCard) {
+          setShowBoardCardDetail(true);
         } else if (panel === "questions" && selectedQuestion) {
           setShowMessageDetail(true);
         } else if (panel === "activity" && selectedMessage) {
@@ -677,18 +1308,20 @@ export function OrchestrationView() {
         }
         break;
       case "h":
-        // Previous panel: activity -> questions -> hierarchy
+        // Previous panel: activity -> questions -> board -> hierarchy
         setPanel((p) => {
           if (p === "activity") return "questions";
-          if (p === "questions") return "hierarchy";
+          if (p === "questions") return "board";
+          if (p === "board") return "hierarchy";
           return "activity";
         });
         break;
       case "l":
       case "tab":
-        // Next panel: hierarchy -> questions -> activity
+        // Next panel: hierarchy -> board -> questions -> activity
         setPanel((p) => {
-          if (p === "hierarchy") return "questions";
+          if (p === "hierarchy") return "board";
+          if (p === "board") return "questions";
           if (p === "questions") return "activity";
           return "hierarchy";
         });
@@ -701,10 +1334,17 @@ export function OrchestrationView() {
         }
         break;
       case "d":
-        // Delegate question
         if (panel === "questions" && selectedQuestion) {
           handleDelegate();
+        } else if (panel === "board" && canDispatch(selectedBoardCard)) {
+          void handleDispatchBoardCard();
         }
+        break;
+      case "w":
+        void handleWorkspaceCycle(1);
+        break;
+      case "W":
+        void handleWorkspaceCycle(-1);
         break;
       case "v":
         // View question context (show full message detail)
@@ -713,12 +1353,13 @@ export function OrchestrationView() {
         }
         break;
       case "r":
-        refetchAgents();
-        refetchMessages();
+        void handleRefreshAll();
         break;
       case "g":
         if (panel === "hierarchy") {
           updateHierarchyCursor(0);
+        } else if (panel === "board") {
+          updateBoardCursor(0);
         } else if (panel === "questions") {
           updateQuestionsCursor(0);
         } else {
@@ -728,6 +1369,8 @@ export function OrchestrationView() {
       case "G":
         if (panel === "hierarchy") {
           updateHierarchyCursor(flatAgents.length - 1);
+        } else if (panel === "board") {
+          updateBoardCursor(boardRows.length - 1);
         } else if (panel === "questions") {
           updateQuestionsCursor(pendingQuestions.length - 1);
         } else {
@@ -740,10 +1383,29 @@ export function OrchestrationView() {
           handleStopAgent();
         }
         break;
+      case "t":
+        if (panel === "board" && canRetryNow(selectedBoardCard)) {
+          void handleBoardCardAction("retry-now");
+        }
+        break;
+      case "u":
+        if (panel === "board" && canRelease(selectedBoardCard)) {
+          void handleBoardCardAction("release");
+        }
+        break;
+      case "m":
+        if (panel === "board" && canMarkDone(selectedBoardCard)) {
+          void handleBoardCardAction("mark-done");
+        }
+        break;
     }
   });
 
-  if ((agentsLoading && !agentsData) || (messagesLoading && !messages)) {
+  if (
+    (agentsLoading && !agentsData) ||
+    (messagesLoading && !messages) ||
+    (boardLoading && !boardData)
+  ) {
     return (
       <box padding={1}>
         <text fg="#888888">Loading orchestration data...</text>
@@ -751,10 +1413,13 @@ export function OrchestrationView() {
     );
   }
 
-  if (agentsError) {
+  if (agentsError || boardError) {
     return (
       <box padding={1}>
-        <text fg="#ff0000">Error loading agents: {agentsError.message}</text>
+        <text fg="#ff0000">
+          Error loading orchestration data:{" "}
+          {(agentsError || boardError)?.message}
+        </text>
         <text fg="#666666">Press r to retry</text>
       </box>
     );
@@ -771,7 +1436,8 @@ export function OrchestrationView() {
   }
 
   // Show message detail when Enter/v is pressed (works for both activity and questions panel)
-  const messageToShow = panel === "questions" ? selectedQuestion : selectedMessage;
+  const messageToShow =
+    panel === "questions" ? selectedQuestion : selectedMessage;
   if (showMessageDetail && messageToShow) {
     return (
       <OrchMessageDetail
@@ -781,8 +1447,42 @@ export function OrchestrationView() {
     );
   }
 
+  if (showBoardCardDetail && selectedBoardCard) {
+    return (
+      <OrchBoardCardDetail
+        card={boardCardRuntime?.card || selectedBoardCard}
+        runtimeLines={formatRuntimeLines(boardCardRuntime?.runtime?.root)}
+        runtimeError={
+          boardCardRuntime?.runtime?.error || boardCardRuntimeError?.message
+        }
+        busy={
+          applyingCardAction ||
+          boardCardRuntimeLoading ||
+          refreshingBoard ||
+          dispatchingIssue
+        }
+        onClose={() => setShowBoardCardDetail(false)}
+        onRefresh={() => void handleRefreshAll()}
+        onAction={(action) => void handleBoardCardAction(action)}
+        onDispatch={() => void handleDispatchBoardCard()}
+      />
+    );
+  }
+
   return (
     <box flexDirection="column" width="100%" height="100%">
+      <box height={1} paddingLeft={1}>
+        <text fg="#666666">
+          workspace: <span fg="#cccccc">{truncate(resolvedWorkspace, 64)}</span>
+          <span fg="#666666"> ({workspaceDisplayName(resolvedWorkspace)})</span>
+          <span fg="#666666">
+            {" "}
+            | options: {workspaceOptions.length} | w/W cycle
+            {switchingWorkspace && " | switching..."}
+          </span>
+        </text>
+      </box>
+
       {/* Agent Hierarchy Panel */}
       <box
         flexGrow={1}
@@ -805,6 +1505,34 @@ export function OrchestrationView() {
         />
       </box>
 
+      {/* Board Panel */}
+      <box
+        height={10}
+        flexDirection="column"
+        borderStyle="single"
+        borderColor={panel === "board" ? "#00aaff" : "#333333"}
+        border={["bottom"]}
+      >
+        <box height={2} paddingLeft={1} paddingTop={1}>
+          <text fg={panel === "board" ? "#00aaff" : "#00cccc"}>
+            <b>BOARD CONTROL PLANE</b>
+            <span fg="#666666">
+              {" "}
+              ({boardRows.length} cards)
+              {selectedBoardCard &&
+                " | Enter detail | d dispatch | t retry | u release | m done"}
+            </span>
+          </text>
+        </box>
+        <BoardPanel
+          rows={boardRows}
+          cursor={boardCursor}
+          scrollOffset={boardScroll}
+          listHeight={BOARD_HEIGHT}
+          artifact={boardArtifact}
+        />
+      </box>
+
       {/* Pending Questions Panel */}
       <box
         height={pendingQuestions.length > 0 ? 12 : 5}
@@ -817,7 +1545,8 @@ export function OrchestrationView() {
           <text fg={panel === "questions" ? "#ffaa00" : "#ff8800"}>
             <b>PENDING QUESTIONS</b>
             <span fg="#666666">
-              {" "}({pendingQuestions.length})
+              {" "}
+              ({pendingQuestions.length})
               {pendingQuestions.length > 0 && " | [a]nswer [d]elegate [v]iew"}
             </span>
           </text>
@@ -830,7 +1559,13 @@ export function OrchestrationView() {
         />
         {/* Answer input bar */}
         {answerMode && (
-          <box height={2} paddingLeft={1} borderStyle="single" borderColor="#ffaa00" backgroundColor="#332200">
+          <box
+            height={2}
+            paddingLeft={1}
+            borderStyle="single"
+            borderColor="#ffaa00"
+            backgroundColor="#332200"
+          >
             <text fg="#ffffff">
               <span fg="#ffaa00">Answer: </span>
               {answerText}
@@ -875,8 +1610,13 @@ export function OrchestrationView() {
       {/* Controls hint */}
       <box height={1} paddingLeft={1}>
         <text fg="#666666">
-          h/l/tab: switch panel | j/k: navigate | r: refresh | x: stop agent
-          {panel === "questions" && pendingQuestions.length > 0 && " | a: answer, d: delegate"}
+          h/l/tab: switch panel | j/k: navigate | r: refresh | w/W: workspace
+          {panel === "hierarchy" && " | x: stop agent"}
+          {panel === "board" &&
+            " | Enter: detail | d: dispatch | t: retry | u: release | m: done"}
+          {panel === "questions" &&
+            pendingQuestions.length > 0 &&
+            " | a: answer | d: delegate"}
         </text>
       </box>
     </box>

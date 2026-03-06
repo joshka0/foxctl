@@ -111,6 +111,8 @@ type MockBoardStore struct {
 	MarkReadFn    func(ctx context.Context, workspaceID, actorID string, messageIDs []string) (int, error)
 	Messages      []*agent.BoardMessage
 	ClaimedIDs    []string
+	Rooms         []agent.Room
+	RoomMembers   []agent.RoomMember
 }
 
 func (m *MockBoardStore) Close() error { return nil }
@@ -123,6 +125,39 @@ func (m *MockBoardStore) SendMessage(ctx context.Context, msg *agent.BoardMessag
 }
 
 func (m *MockBoardStore) Inbox(ctx context.Context, filter agent.InboxFilter) ([]agent.BoardMessage, error) {
+	return nil, nil
+}
+
+func (m *MockBoardStore) UpsertRoom(ctx context.Context, room agent.Room) (agent.Room, error) {
+	m.Rooms = append(m.Rooms, room)
+	return room, nil
+}
+
+func (m *MockBoardStore) EnsureRoom(ctx context.Context, workspaceID, roomID, title string) (agent.Room, error) {
+	room := agent.Room{
+		ID:          roomID,
+		WorkspaceID: workspaceID,
+		Stream:      agent.RoomStreamName(roomID),
+		Title:       title,
+	}
+	m.Rooms = append(m.Rooms, room)
+	return room, nil
+}
+
+func (m *MockBoardStore) ReplaceRoomMembers(ctx context.Context, workspaceID, roomID string, members []agent.RoomMember) ([]agent.RoomMember, error) {
+	m.RoomMembers = append([]agent.RoomMember(nil), members...)
+	return members, nil
+}
+
+func (m *MockBoardStore) ListRooms(ctx context.Context, workspaceID, actorID string, limit int) ([]agent.RoomSummary, error) {
+	return nil, nil
+}
+
+func (m *MockBoardStore) GetRoom(ctx context.Context, workspaceID, roomID, actorID string) (agent.RoomSummary, error) {
+	return agent.RoomSummary{}, nil
+}
+
+func (m *MockBoardStore) ListRoomMessages(ctx context.Context, workspaceID, roomID string, limit int) ([]agent.BoardMessage, error) {
 	return nil, nil
 }
 

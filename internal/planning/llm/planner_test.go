@@ -126,16 +126,19 @@ func configFromEnv() ProviderConfig {
 }
 
 func TestAutoPlanner_NoAPIKey(t *testing.T) {
-	// Test with empty config - no API keys set
+	// With empty config, planner defaults to local LM Studio.
 	cfg := ProviderConfig{}
 
 	planner := AutoPlannerFromConfig(context.Background(), cfg)
-	if planner != nil {
-		t.Error("expected nil planner when no API keys are set")
+	if planner == nil {
+		t.Fatal("expected planner to default to lmstudio when no API keys are set")
+	}
+	if got := planner.Provider(); got != "lmstudio" {
+		t.Fatalf("planner provider = %q, want lmstudio", got)
 	}
 
-	if IsLLMPlanningAvailableFromConfig(cfg) {
-		t.Error("expected LLM planning to be unavailable")
+	if !IsLLMPlanningAvailableFromConfig(cfg) {
+		t.Error("expected LLM planning to be available via lmstudio default")
 	}
 }
 

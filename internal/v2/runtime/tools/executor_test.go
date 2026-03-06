@@ -129,6 +129,64 @@ func TestToolExecutor_PassesThroughSuccessPayload(t *testing.T) {
 	}
 }
 
+func TestToolExecutor_SlashAliasDelegatesCanonicalName(t *testing.T) {
+	t.Parallel()
+
+	catalog := mustCatalog(t, []coretool.ToolDef{
+		{
+			Name:       "code/search",
+			Parameters: json.RawMessage(`{"type":"object","required":["query"],"properties":{"query":{"type":"string"}}}`),
+		},
+	}, map[coretool.ProcessProfile]profiles.ProfileSpec{
+		coretool.ProfileWorker: {
+			Profile:      coretool.ProfileWorker,
+			AllowedTools: []string{"code/search"},
+		},
+	})
+
+	delegate := &capturingDelegate{
+		result: runner.ToolResult{Output: "ok"},
+	}
+	exec := tools.NewExecutor(catalog, coretool.ProfileWorker, delegate)
+
+	_, err := exec.Execute(context.Background(), "code/search", json.RawMessage(`{"query":"runtime"}`))
+	if err != nil {
+		t.Fatalf("Execute returned error: %v", err)
+	}
+	if delegate.lastName != "code_search" {
+		t.Fatalf("delegate tool name=%q want code_search", delegate.lastName)
+	}
+}
+
+func TestToolExecutor_DotAliasDelegatesCanonicalName(t *testing.T) {
+	t.Parallel()
+
+	catalog := mustCatalog(t, []coretool.ToolDef{
+		{
+			Name:       "code/search",
+			Parameters: json.RawMessage(`{"type":"object","required":["query"],"properties":{"query":{"type":"string"}}}`),
+		},
+	}, map[coretool.ProcessProfile]profiles.ProfileSpec{
+		coretool.ProfileWorker: {
+			Profile:      coretool.ProfileWorker,
+			AllowedTools: []string{"code.search"},
+		},
+	})
+
+	delegate := &capturingDelegate{
+		result: runner.ToolResult{Output: "ok"},
+	}
+	exec := tools.NewExecutor(catalog, coretool.ProfileWorker, delegate)
+
+	_, err := exec.Execute(context.Background(), "code.search", json.RawMessage(`{"query":"runtime"}`))
+	if err != nil {
+		t.Fatalf("Execute returned error: %v", err)
+	}
+	if delegate.lastName != "code_search" {
+		t.Fatalf("delegate tool name=%q want code_search", delegate.lastName)
+	}
+}
+
 func TestToolExecutor_MapsToolFailureToErrToolFailed(t *testing.T) {
 	t.Parallel()
 
@@ -144,6 +202,75 @@ func TestToolExecutor_MapsToolFailureToErrToolFailed(t *testing.T) {
 		t.Fatal("expected tool failure")
 	}
 	assertErrKind(t, err, v2errors.ErrToolFailed)
+}
+
+func TestToolCatalog_DuplicateCanonicalNameRejected(t *testing.T) {
+	t.Parallel()
+
+	_, err := tools.NewCatalog([]coretool.ToolDef{
+		{Name: "code/search"},
+		{Name: "code_search"},
+	}, map[coretool.ProcessProfile]profiles.ProfileSpec{
+		coretool.ProfileWorker: {
+			Profile:      coretool.ProfileWorker,
+			AllowedTools: []string{"code/search"},
+		},
+	})
+	if err == nil {
+		t.Fatal("expected duplicate canonical name error")
+	}
+}
+
+func TestToolExecutor_TodoSlashAliasDelegatesCanonicalName(t *testing.T) {
+	t.Parallel()
+
+	catalog := mustCatalog(t, []coretool.ToolDef{
+		{
+			Name:       "todo/query",
+			Parameters: json.RawMessage(`{"type":"object","required":["status"],"properties":{"status":{"type":"string"}}}`),
+		},
+	}, map[coretool.ProcessProfile]profiles.ProfileSpec{
+		coretool.ProfileCompanion: {
+			Profile:      coretool.ProfileCompanion,
+			AllowedTools: []string{"todo/query"},
+		},
+	})
+
+	delegate := &capturingDelegate{result: runner.ToolResult{Output: "ok"}}
+	exec := tools.NewExecutor(catalog, coretool.ProfileCompanion, delegate)
+
+	_, err := exec.Execute(context.Background(), "todo/query", json.RawMessage(`{"status":"pending"}`))
+	if err != nil {
+		t.Fatalf("Execute returned error: %v", err)
+	}
+	if delegate.lastName != "todo_query" {
+		t.Fatalf("delegate tool name=%q want todo_query", delegate.lastName)
+	}
+}
+
+func TestToolExecutor_DefaultSpecsAllowCompanionTodoQuery(t *testing.T) {
+	t.Parallel()
+
+	catalog, err := tools.NewCatalog([]coretool.ToolDef{
+		{
+			Name:       "todo/query",
+			Parameters: json.RawMessage(`{"type":"object","required":["status"],"properties":{"status":{"type":"string"}}}`),
+		},
+	}, nil)
+	if err != nil {
+		t.Fatalf("NewCatalog returned error: %v", err)
+	}
+
+	delegate := &capturingDelegate{result: runner.ToolResult{Output: "ok"}}
+	exec := tools.NewExecutor(catalog, coretool.ProfileCompanion, delegate)
+
+	_, err = exec.Execute(context.Background(), "todo/query", json.RawMessage(`{"status":"pending"}`))
+	if err != nil {
+		t.Fatalf("Execute returned error: %v", err)
+	}
+	if delegate.lastName != "todo_query" {
+		t.Fatalf("delegate tool name=%q want todo_query", delegate.lastName)
+	}
 }
 
 func TestExecutor_UnknownToolReturnsPolicyViolation(t *testing.T) {
@@ -208,4 +335,18 @@ func (f fakeDelegate) Execute(_ context.Context, _ string, _ json.RawMessage) (r
 		return runner.ToolResult{}, f.err
 	}
 	return f.result, nil
+}
+
+type capturingDelegate struct {
+	lastName string
+	result   runner.ToolResult
+	err      error
+}
+
+func (d *capturingDelegate) Execute(_ context.Context, name string, _ json.RawMessage) (runner.ToolResult, error) {
+	d.lastName = name
+	if d.err != nil {
+		return runner.ToolResult{}, d.err
+	}
+	return d.result, nil
 }

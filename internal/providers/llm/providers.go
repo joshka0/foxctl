@@ -45,7 +45,7 @@ func SummarizationProviders() []Provider {
 	)
 	providers = appendOpenRouterProviders(
 		providers,
-		envOrDefault("OPENROUTER_MODELS", "minimax/minimax-m2.1"),
+		envOrDefault("OPENROUTER_MODELS", "google/gemini-3.1-flash-lite-preview"),
 		24000,
 	)
 	providers = appendCLIProvider(
@@ -87,7 +87,7 @@ func ExtractionProviders() []Provider {
 	)
 	providers = appendOpenRouterProviders(
 		providers,
-		"anthropic/claude-3-haiku",
+		"google/gemini-3.1-flash-lite-preview",
 		24000,
 	)
 	providers = appendCLIProvider(
@@ -106,7 +106,7 @@ func SynthesisProviders(modelOverride string) []Provider {
 	var providers []Provider
 	openRouterModel := strings.TrimSpace(modelOverride)
 	if openRouterModel == "" {
-		openRouterModel = envOrDefault("OPENROUTER_MODELS", "mistralai/devstral-2512:free")
+		openRouterModel = envOrDefault("OPENROUTER_MODELS", "google/gemini-3.1-flash-lite-preview")
 	}
 	providers = appendOpenRouterProviders(providers, openRouterModel, 0)
 
@@ -206,7 +206,7 @@ func FileSummaryProviders() []Provider {
 	// Devstral is best for technical code summaries - direct and precise
 	providers = appendOpenRouterProviders(
 		providers,
-		"mistralai/devstral-2512:free",
+		"google/gemini-3.1-flash-lite-preview",
 		256,
 	)
 

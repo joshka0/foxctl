@@ -27,23 +27,25 @@ func New(agentStore agents.Store, mailboxStore mailbox.Store) *Manager {
 
 // SpawnRequest contains parameters for spawning a new agent.
 type SpawnRequest struct {
-	ParentNS    string
-	Name        string // Human name (e.g., "Luna", "Atlas")
-	Slug        string // Human-readable handle for referencing (e.g., "researcher", "companion")
-	Role        string
-	Prompt      string
-	SkillsAllow []string
-	Policy      agent.Policy
-	ShareBB     string // all|scoped|none
-	LLMProvider string // Per-agent LLM provider override
-	LLMModel    string // Per-agent LLM model override
-	LLMAPIKey   string // Per-agent LLM API key override
+	ParentNS        string
+	Name            string // Human name (e.g., "Luna", "Atlas")
+	Slug            string // Human-readable handle for referencing (e.g., "researcher", "companion")
+	Role            string
+	Prompt          string
+	SkillsAllow     []string
+	Policy          agent.Policy
+	ShareBB         string // all|scoped|none
+	MemoryScope     agent.MemoryScope
+	MemoryRetention agent.MemoryRetention
+	LLMProvider     string // Per-agent LLM provider override
+	LLMModel        string // Per-agent LLM model override
+	LLMAPIKey       string // Per-agent LLM API key override
 
 	// Execution mode configuration
-	ExecMode      agent.ExecutionMode // reactive|autonomous|proactive (default: reactive)
+	ExecMode      agent.ExecutionMode // reactive|autonomous|proactive|tick (default: reactive)
 	MaxIterations int                 // Max tool calls per turn (default: 10)
 	MaxAutoTurns  int                 // Max autonomous turns per session (default: 1)
-	ThinkInterval int                 // Seconds between proactive think cycles (default: 60)
+	ThinkInterval int                 // Seconds between proactive/tick cycles (default: 60)
 }
 
 // SpawnResponse contains the result of spawning an agent.
@@ -104,16 +106,23 @@ func (m *Manager) Spawn(ctx context.Context, req SpawnRequest) (SpawnResponse, e
 	}
 
 	a := agent.Agent{
-		ID:            agentID,
-		ParentID:      parentID,
-		Namespace:     ns,
-		Name:          req.Name,
-		Slug:          req.Slug,
-		Role:          req.Role,
-		Prompt:        req.Prompt,
-		SkillsAllow:   req.SkillsAllow,
-		Policy:        req.Policy,
-		ShareBB:       req.ShareBB,
+		ID:          agentID,
+		ParentID:    parentID,
+		Namespace:   ns,
+		Name:        req.Name,
+		Slug:        req.Slug,
+		Role:        req.Role,
+		Prompt:      req.Prompt,
+		SkillsAllow: req.SkillsAllow,
+		Policy:      req.Policy,
+		ShareBB:     req.ShareBB,
+		MemoryScope: agent.NormalizeMemoryScope(req.MemoryScope),
+		MemoryRetention: func() agent.MemoryRetention {
+			if req.MemoryRetention == "" {
+				return agent.DefaultMemoryRetentionForScope(agent.NormalizeMemoryScope(req.MemoryScope))
+			}
+			return agent.NormalizeMemoryRetention(req.MemoryRetention)
+		}(),
 		State:         agent.StateStarting,
 		CreatedAt:     now,
 		HeartbeatAt:   now,

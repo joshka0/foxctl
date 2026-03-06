@@ -44,9 +44,8 @@ import (
 	"github.com/jkatigb/agentctl/internal/storage/memory"
 	"github.com/jkatigb/agentctl/internal/storage/sessions"
 	"github.com/jkatigb/agentctl/internal/storage/sqliteutil"
-	v2ports "github.com/jkatigb/agentctl/internal/v2/ports"
-	v2portconfig "github.com/jkatigb/agentctl/internal/v2/ports/config"
-	v2daemonports "github.com/jkatigb/agentctl/internal/v2/ports/daemon"
+	v2kill "github.com/jkatigb/agentctl/internal/v2/core/kill"
+	v2services "github.com/jkatigb/agentctl/internal/v2/services"
 	"github.com/oklog/ulid/v2"
 )
 
@@ -58,10 +57,11 @@ type ServiceOptions struct {
 
 // Service is the main daemon service.
 type Service struct {
-	cfg      config.Config
-	opts     ServiceOptions
-	listener net.Listener
-	started  time.Time
+	cfg        config.Config
+	opts       ServiceOptions
+	listener   net.Listener
+	started    time.Time
+	socketPath string
 
 	// Skill resolution
 	skillResolver *SkillResolver
@@ -151,6 +151,7 @@ func NewService(cfg config.Config, opts ServiceOptions) (*Service, error) {
 		cfg:            cfg,
 		opts:           opts,
 		started:        time.Now(),
+		socketPath:     SocketPath(),
 		skillResolver:  NewSkillResolver(cfg),
 		warmWorkspaces: make(map[string]bool),
 		shutdownCh:     make(chan struct{}),
@@ -370,7 +371,7 @@ func (s *Service) stopLeaderLease(ctx context.Context) {
 // - Keywords: daemon_run, unix_socket, shutdown, summary_worker, context_updater
 func (s *Service) Run(ctx context.Context) error {
 	// Remove stale socket
-	socketPath := SocketPath()
+	socketPath := s.socketPath
 	_ = os.Remove(socketPath)
 
 	// Ensure socket directory exists
@@ -472,7 +473,7 @@ func (s *Service) Shutdown(ctx context.Context) error {
 	}
 
 	// Remove socket
-	_ = os.Remove(SocketPath())
+	_ = os.Remove(s.socketPath)
 
 	return nil
 }
@@ -595,14 +596,14 @@ func (s *Service) handleConnection(ctx context.Context, conn net.Conn) {
 		}()
 		return
 	case "agent.spawn":
-		result, _, err := s.dispatchAgentSpawn(ctx, req.ID, req.Params)
+		result, err := s.dispatchAgentSpawn(ctx, req.Params)
 		if err != nil {
 			resp.Error = &Error{Code: "ESPAWN", Message: err.Error()}
 		} else {
 			resp.Result = result
 		}
 	case "agent.list":
-		result, _, err := s.dispatchAgentList(ctx, req.ID)
+		result, err := s.dispatchAgentList(ctx)
 		if err != nil {
 			resp.Error = &Error{Code: "ELIST", Message: err.Error()}
 		} else {
@@ -616,9 +617,16 @@ func (s *Service) handleConnection(ctx context.Context, conn net.Conn) {
 			resp.Result = result
 		}
 	case "agent.kill":
-		result, _, err := s.dispatchAgentKill(ctx, req.ID, req.Params)
+		result, err := s.dispatchAgentKill(ctx, req.Params)
 		if err != nil {
 			resp.Error = &Error{Code: "EKILL", Message: err.Error()}
+		} else {
+			resp.Result = result
+		}
+	case "agent.ask":
+		result, err := s.handleAgentAskRPC(ctx, req.Params)
+		if err != nil {
+			resp.Error = &Error{Code: "EASK", Message: err.Error()}
 		} else {
 			resp.Result = result
 		}
@@ -641,50 +649,6 @@ func (s *Service) handleConnection(ctx context.Context, conn net.Conn) {
 	}
 
 	s.writeResponse(conn, resp)
-}
-
-func daemonMethodRouter() v2daemonports.Router {
-	flags, err := v2portconfig.ParseV2CommandsFromEnv()
-	if err != nil {
-		slog.Warn("invalid AGENTCTL_V2_COMMANDS; defaulting to v1 routing", "error", err)
-		flags = v2portconfig.V2Flags{}
-	}
-	shadowFlags, err := v2portconfig.ParseV2ShadowCommandsFromEnv()
-	if err != nil {
-		slog.Warn("invalid AGENTCTL_V2_SHADOW_COMMANDS; shadow routing disabled", "error", err)
-		shadowFlags = v2portconfig.V2Flags{}
-	}
-	shadowFlags = v2portconfig.SanitizeShadowFlags(shadowFlags, v2portconfig.ShadowMutatingEnabledFromEnv())
-	freezeFlags, err := v2portconfig.ParseV2FreezeCommandsFromEnv()
-	if err != nil {
-		slog.Warn("invalid AGENTCTL_V2_FREEZE_V1_COMMANDS; freeze routing disabled", "error", err)
-		freezeFlags = v2portconfig.V2Flags{}
-	}
-
-	return v2daemonports.NewRouterWithShadowAndFreeze(
-		flags,
-		shadowFlags,
-		freezeFlags,
-		func(command string, decision v2ports.Decision, correlationID string) {
-			slog.Debug("daemon v2 routing decision",
-				"command", command,
-				"decision", string(decision),
-				"correlation_id", strings.TrimSpace(correlationID))
-		},
-		func(report v2ports.ShadowReport) {
-			slog.Debug("daemon v2 shadow parity",
-				"command", report.Command,
-				"correlation_id", strings.TrimSpace(report.CorrelationID),
-				"primary_decision", string(report.PrimaryDecision),
-				"shadow_decision", string(report.ShadowDecision),
-				"match", report.Match,
-				"reason", strings.TrimSpace(report.Reason),
-				"primary_error", strings.TrimSpace(report.PrimaryError),
-				"shadow_error", strings.TrimSpace(report.ShadowError),
-				"duration_ms", report.DurationMS)
-		},
-		2*time.Second,
-	)
 }
 
 // StatusResult contains daemon status information.
@@ -1518,54 +1482,32 @@ func (s *Service) stopAgentOrchestration() {
 
 // --- Agent RPC Handlers ---
 
-func (s *Service) dispatchAgentSpawn(ctx context.Context, requestID string, params json.RawMessage) (*AgentSpawnResult, v2ports.Decision, error) {
-	router := daemonMethodRouter()
-	result, decision, err := v2daemonports.DispatchMethod(ctx, router, "agent.spawn", requestID,
-		func(ctx context.Context) (*AgentSpawnResult, error) {
-			return s.handleAgentSpawn(ctx, params)
-		},
-		func(ctx context.Context) (*AgentSpawnResult, error) {
-			return s.handleAgentSpawnV2(ctx, params)
-		},
-	)
-	return result, decision, err
+func (s *Service) dispatchAgentSpawn(ctx context.Context, params json.RawMessage) (*AgentSpawnResult, error) {
+	result, err := s.handleAgentSpawnV2(ctx, params)
+	return result, err
 }
 
-func (s *Service) dispatchAgentList(ctx context.Context, requestID string) (*AgentListResult, v2ports.Decision, error) {
-	router := daemonMethodRouter()
-	result, decision, err := v2daemonports.DispatchMethod(ctx, router, "agent.list", requestID,
-		func(context.Context) (*AgentListResult, error) {
-			return s.handleAgentList(), nil
-		},
-		func(context.Context) (*AgentListResult, error) {
-			return s.handleAgentListV2(), nil
-		},
-	)
-	return result, decision, err
+func (s *Service) dispatchAgentList(ctx context.Context) (*AgentListResult, error) {
+	result, err := s.handleAgentListV2(ctx)
+	return result, err
 }
 
-func (s *Service) dispatchAgentKill(ctx context.Context, requestID string, params json.RawMessage) (*AgentKillResult, v2ports.Decision, error) {
-	router := daemonMethodRouter()
-	result, decision, err := v2daemonports.DispatchMethod(ctx, router, "agent.kill", requestID,
-		func(context.Context) (*AgentKillResult, error) {
-			return s.handleAgentKill(params)
-		},
-		func(context.Context) (*AgentKillResult, error) {
-			return s.handleAgentKillV2(params)
-		},
-	)
-	return result, decision, err
+func (s *Service) dispatchAgentKill(ctx context.Context, params json.RawMessage) (*AgentKillResult, error) {
+	result, err := s.handleAgentKillV2(ctx, params)
+	return result, err
 }
 
 // AgentSpawnParams are the parameters for agent.spawn.
 type AgentSpawnParams struct {
-	Role        string   `json:"role"`
-	AgentID     string   `json:"agent_id,omitempty"` // Agent config ID for session filtering
-	WorkspaceID string   `json:"workspace_id,omitempty"`
-	EpicID      string   `json:"epic_id,omitempty"`
-	TaskID      string   `json:"task_id,omitempty"`
-	Prompt      string   `json:"prompt,omitempty"`
-	SkillsAllow []string `json:"skills_allow,omitempty"`
+	Role            string   `json:"role"`
+	AgentID         string   `json:"agent_id,omitempty"` // Agent config ID for session filtering
+	WorkspaceID     string   `json:"workspace_id,omitempty"`
+	EpicID          string   `json:"epic_id,omitempty"`
+	TaskID          string   `json:"task_id,omitempty"`
+	Prompt          string   `json:"prompt,omitempty"`
+	SkillsAllow     []string `json:"skills_allow,omitempty"`
+	MemoryScope     string   `json:"memory_scope,omitempty"`
+	MemoryRetention string   `json:"memory_retention,omitempty"`
 
 	// Agent metadata
 	Name string `json:"name,omitempty"`
@@ -1574,8 +1516,9 @@ type AgentSpawnParams struct {
 	// Execution config
 	MaxIterations    int    `json:"max_iterations,omitempty"`
 	MaxContextTokens int    `json:"max_context_tokens,omitempty"` // Context budget (0=no limit)
-	ExecMode         string `json:"exec_mode,omitempty"`          // "reactive", "autonomous", "autonomous_reactive", "proactive", "story"
+	ExecMode         string `json:"exec_mode,omitempty"`          // "reactive", "autonomous", "autonomous_reactive", "proactive", "tick", "story"
 	MaxAutoTurns     int    `json:"max_auto_turns,omitempty"`
+	ThinkInterval    int    `json:"think_interval,omitempty"`
 
 	// Session timeout
 	Timeout string `json:"timeout,omitempty"` // e.g. "10m", "30m"
@@ -1597,18 +1540,36 @@ type AgentSpawnResult struct {
 	NS        string `json:"ns,omitempty"` // Namespace for mailbox routing
 }
 
-// handleAgentSpawn spawns a new agent session via the runtime.
-//
-// Index:
-// - Purpose: Create and start an agent session with provided configuration
-// - Flow: parse params → validate role → build config → spawn session → return result
-// - SideEffects: spawns agent session; may allocate runtime resources
-// - FailureModes: invalid params, runtime spawn errors
-// - Related: runtime.Runtime.Spawn
-// - Keywords: agent.spawn, agent_session, runtime, actor_id, exec_mode
-func (s *Service) handleAgentSpawn(ctx context.Context, params json.RawMessage) (*AgentSpawnResult, error) {
+// AgentAskParams are the parameters for agent.ask.
+type AgentAskParams struct {
+	AgentID   string         `json:"agent_id"`
+	Message   string         `json:"message"`
+	Kind      string         `json:"kind,omitempty"`
+	Context   map[string]any `json:"context,omitempty"`
+	TimeoutMS int            `json:"timeout_ms,omitempty"`
+}
+
+// AgentAskResult is the result of asking a running agent.
+type AgentAskResult struct {
+	AgentID string `json:"agent_id"`
+	AskID   string `json:"ask_id"`
+	Reply   string `json:"reply"`
+	Status  string `json:"status"`
+}
+
+func (s *Service) handleAgentSpawnV2(ctx context.Context, params json.RawMessage) (*AgentSpawnResult, error) {
+	return s.handleAgentSpawnWithRoute(ctx, params)
+}
+
+func (s *Service) handleAgentSpawnWithRoute(ctx context.Context, params json.RawMessage) (*AgentSpawnResult, error) {
 	if s.agentRuntime == nil {
 		return nil, errors.New("agent orchestration not initialized")
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
 	}
 
 	var p AgentSpawnParams
@@ -1655,7 +1616,7 @@ func (s *Service) handleAgentSpawn(ctx context.Context, params json.RawMessage) 
 	}
 	if p.ExecMode != "" {
 		switch p.ExecMode {
-		case string(agent.ModeReactive), string(agent.ModeAutonomous), string(agent.ModeAutonomousReactive), string(agent.ModeProactive), string(agent.ModeStory):
+		case string(agent.ModeReactive), string(agent.ModeAutonomous), string(agent.ModeAutonomousReactive), string(agent.ModeProactive), string(agent.ModeTick), string(agent.ModeStory):
 			cfg.ExecMode = agent.ExecutionMode(p.ExecMode)
 		default:
 			return nil, fmt.Errorf("invalid exec_mode: %s", p.ExecMode)
@@ -1664,15 +1625,29 @@ func (s *Service) handleAgentSpawn(ctx context.Context, params json.RawMessage) 
 	if p.MaxAutoTurns > 0 {
 		cfg.MaxAutoTurns = p.MaxAutoTurns
 	}
+	if p.ThinkInterval > 0 {
+		cfg.ThinkInterval = p.ThinkInterval
+	}
 	if p.Timeout != "" {
-		d, err := time.ParseDuration(p.Timeout)
-		if err != nil {
-			return nil, fmt.Errorf("invalid timeout %q: %w", p.Timeout, err)
+		if strings.TrimSpace(p.Timeout) == "0" {
+			cfg.Timeout = -1
+		} else {
+			d, err := time.ParseDuration(p.Timeout)
+			if err != nil {
+				return nil, fmt.Errorf("invalid timeout %q: %w", p.Timeout, err)
+			}
+			if d <= 0 {
+				return nil, fmt.Errorf("invalid timeout %q: must be positive", p.Timeout)
+			}
+			cfg.Timeout = d
 		}
-		if d <= 0 {
-			return nil, fmt.Errorf("invalid timeout %q: must be positive", p.Timeout)
+	}
+
+	if cfg.ExecMode == agent.ModeTick {
+		cfg.LLMProvider = "lmstudio"
+		if strings.TrimSpace(cfg.LLMModel) == "" {
+			cfg.LLMModel = llmproviders.DefaultModelForProvider("lmstudio")
 		}
-		cfg.Timeout = d
 	}
 
 	// Apply LLM override if provided
@@ -1722,6 +1697,20 @@ func (s *Service) handleAgentSpawn(ctx context.Context, params json.RawMessage) 
 		ExecMode:      execMode,
 		MaxIterations: p.MaxIterations,
 		MaxAutoTurns:  p.MaxAutoTurns,
+		ThinkInterval: p.ThinkInterval,
+		MemoryScope:   agent.NormalizeMemoryScope(agent.MemoryScope(strings.TrimSpace(p.MemoryScope))),
+		MemoryRetention: func() agent.MemoryRetention {
+			if strings.TrimSpace(p.MemoryRetention) == "" {
+				return agent.DefaultMemoryRetentionForScope(agent.NormalizeMemoryScope(agent.MemoryScope(strings.TrimSpace(p.MemoryScope))))
+			}
+			return agent.NormalizeMemoryRetention(agent.MemoryRetention(strings.TrimSpace(p.MemoryRetention)))
+		}(),
+	}
+	if execMode == agent.ModeTick {
+		agentRecord.LLMProvider = "lmstudio"
+		if strings.TrimSpace(agentRecord.LLMModel) == "" {
+			agentRecord.LLMModel = llmproviders.DefaultModelForProvider("lmstudio")
+		}
 	}
 	if agentRecord.SkillsAllow == nil {
 		agentRecord.SkillsAllow = []string{}
@@ -1782,12 +1771,6 @@ func (s *Service) handleAgentSpawn(ctx context.Context, params json.RawMessage) 
 	}, nil
 }
 
-func (s *Service) handleAgentSpawnV2(ctx context.Context, params json.RawMessage) (*AgentSpawnResult, error) {
-	// PR-11 command-surface cutover keeps behavior parity by delegating to the
-	// existing spawn path. Later PR slices can replace this with v2-native orchestration.
-	return s.handleAgentSpawn(ctx, params)
-}
-
 // AgentResumeParams are the parameters for agent.resume.
 type AgentResumeParams struct {
 	SessionID string `json:"session_id"`
@@ -1839,6 +1822,113 @@ func (s *Service) handleAgentResume(ctx context.Context, params json.RawMessage)
 		Status:      string(session.Status),
 		FromSession: p.SessionID,
 	}, nil
+}
+
+func (s *Service) handleAgentAskRPC(ctx context.Context, params json.RawMessage) (*AgentAskResult, error) {
+	if s.agentMailboxStore == nil {
+		return nil, errors.New("agent mailbox is not initialized")
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
+	var p AgentAskParams
+	if err := json.Unmarshal(params, &p); err != nil {
+		return nil, fmt.Errorf("parse params: %w", err)
+	}
+
+	agentID := strings.TrimSpace(p.AgentID)
+	if agentID == "" {
+		return nil, errors.New("agent_id is required")
+	}
+	message := strings.TrimSpace(p.Message)
+	if message == "" {
+		return nil, errors.New("message is required")
+	}
+
+	store, err := agentstore.Open(ctx, s.cfg.Storage.Root)
+	if err != nil {
+		return nil, fmt.Errorf("open agents store: %w", err)
+	}
+	defer store.Close()
+
+	agentRecord, err := store.Get(ctx, agentID)
+	if err != nil {
+		return nil, fmt.Errorf("get agent: %w", err)
+	}
+
+	timeout := 30 * time.Second
+	if p.TimeoutMS > 0 {
+		timeout = time.Duration(p.TimeoutMS) * time.Millisecond
+	}
+	if timeout <= 0 {
+		timeout = 30 * time.Second
+	}
+
+	senderNS := "actor:system:daemon_rpc"
+	sender := agent.NewSender(s.agentMailboxStore, senderNS)
+	askID, err := sender.SendAsk(
+		ctx,
+		strings.TrimSpace(agentRecord.Namespace),
+		message,
+		agent.WithAskTTL(timeout),
+		agent.WithAskKind(strings.TrimSpace(p.Kind)),
+		agent.WithAskContext(p.Context),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("send ask: %w", err)
+	}
+
+	deadline := time.Now().Add(timeout)
+	ticker := time.NewTicker(250 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		if time.Now().After(deadline) {
+			return nil, fmt.Errorf("timeout waiting for reply")
+		}
+
+		messages, err := s.agentMailboxStore.List(ctx, senderNS, 100)
+		if err != nil {
+			return nil, fmt.Errorf("list replies: %w", err)
+		}
+		for _, msg := range messages {
+			if msg.Type != agent.MessageTypeReply {
+				continue
+			}
+			replies := agent.WithAskID([]agent.Message{msg}, askID)
+			if len(replies) == 0 {
+				continue
+			}
+			if err := s.agentMailboxStore.Ack(ctx, msg.ID); err != nil {
+				slog.Warn("failed to ack daemon ask reply", "message_id", msg.ID, "error", err)
+			}
+
+			replyData, err := agent.ParsePayload[agent.ReplyData](msg)
+			if err != nil {
+				return nil, fmt.Errorf("parse reply payload: %w", err)
+			}
+			replyText := strings.TrimSpace(fmt.Sprint(replyData.Answer["response"]))
+			return &AgentAskResult{
+				AgentID: agentID,
+				AskID:   askID,
+				Reply:   replyText,
+				Status:  "replied",
+			}, nil
+		}
+
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-ticker.C:
+		}
+	}
 }
 
 // handleAgentHierarchy returns the current agent hierarchy.
@@ -1936,20 +2026,20 @@ type AgentSessionInfo struct {
 	Iterations int       `json:"iterations"`
 }
 
-// handleAgentList lists active agent sessions.
-//
-// Index:
-// - Purpose: Summarize active agent sessions
-// - Flow: list runtime sessions → build summary → return result
-// - SideEffects: reads runtime state
-// - Related: runtime.Runtime.List
-// - Keywords: agent.list, sessions, runtime, count
-func (s *Service) handleAgentList() *AgentListResult {
-	if s.agentRuntime == nil {
-		return &AgentListResult{Sessions: []AgentSessionInfo{}, Count: 0}
+func (s *Service) handleAgentListV2(ctx context.Context) (*AgentListResult, error) {
+	if ctx == nil {
+		ctx = context.Background()
 	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if s.agentRuntime == nil {
+		return &AgentListResult{Sessions: []AgentSessionInfo{}, Count: 0}, nil
+	}
+	return buildAgentListResult(s.agentRuntime.List()), nil
+}
 
-	sessions := s.agentRuntime.List()
+func buildAgentListResult(sessions []*runtime.Session) *AgentListResult {
 	result := &AgentListResult{
 		Sessions: make([]AgentSessionInfo, 0, len(sessions)),
 		Count:    len(sessions),
@@ -1968,12 +2058,6 @@ func (s *Service) handleAgentList() *AgentListResult {
 	}
 
 	return result
-}
-
-func (s *Service) handleAgentListV2() *AgentListResult {
-	// PR-11 command-surface cutover keeps behavior parity by delegating to the
-	// existing list path. Later PR slices can replace this with v2-native projections.
-	return s.handleAgentList()
 }
 
 // AgentStatusParams are the parameters for agent.status.
@@ -2048,18 +2132,36 @@ type AgentKillResult struct {
 	Status    string `json:"status"`
 }
 
-// handleAgentKill terminates a running agent session.
-//
-// Index:
-// - Purpose: Stop an agent session by ID
-// - Flow: parse params → validate → kill session → return status
-// - SideEffects: terminates agent session
-// - FailureModes: missing session, runtime kill errors
-// - Related: runtime.Runtime.Kill
-// - Keywords: agent.kill, session_id, runtime, stop
-func (s *Service) handleAgentKill(params json.RawMessage) (*AgentKillResult, error) {
+type runtimeRunKiller struct {
+	runtime *runtime.Runtime
+}
+
+func (k runtimeRunKiller) Kill(ctx context.Context, runID string) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if k.runtime == nil {
+		return errors.New("agent runtime is not initialized")
+	}
+	return k.runtime.Kill(strings.TrimSpace(runID))
+}
+
+func (s *Service) handleAgentKillV2(ctx context.Context, params json.RawMessage) (*AgentKillResult, error) {
+	return s.handleAgentKillWithRoute(ctx, params, true)
+}
+
+func (s *Service) handleAgentKillWithRoute(ctx context.Context, params json.RawMessage, useV2 bool) (*AgentKillResult, error) {
 	if s.agentRuntime == nil {
 		return nil, errors.New("agent orchestration not initialized")
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
 	}
 
 	var p AgentKillParams
@@ -2067,19 +2169,48 @@ func (s *Service) handleAgentKill(params json.RawMessage) (*AgentKillResult, err
 		return nil, fmt.Errorf("parse params: %w", err)
 	}
 
-	if p.SessionID == "" {
+	sessionID := strings.TrimSpace(p.SessionID)
+	if sessionID == "" {
 		return nil, errors.New("session_id is required")
 	}
 
-	if err := s.agentRuntime.Kill(p.SessionID); err != nil {
-		return nil, err
+	if useV2 {
+		svc := v2services.NewKillService(v2services.KillDependencies{
+			Killer: runtimeRunKiller{runtime: s.agentRuntime},
+		})
+		resp, err := svc.Kill(ctx, v2kill.Request{RunID: sessionID})
+		if err != nil {
+			return nil, err
+		}
+		if rid := strings.TrimSpace(resp.RunID); rid != "" {
+			sessionID = rid
+		}
+	} else {
+		if err := s.agentRuntime.Kill(sessionID); err != nil {
+			return nil, err
+		}
 	}
+
+	s.updateAgentStateAfterKill(ctx, sessionID)
+
+	return &AgentKillResult{
+		SessionID: sessionID,
+		Status:    "killed",
+	}, nil
+}
+
+func (s *Service) updateAgentStateAfterKill(ctx context.Context, sessionID string) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	updateCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
 
 	// Update agent state in agents.db (best-effort)
 	s.agentMu.Lock()
 	var agentID string
 	for aID, sID := range s.agentSessionMap {
-		if sID == p.SessionID {
+		if sID == sessionID {
 			agentID = aID
 			delete(s.agentSessionMap, aID)
 			break
@@ -2088,28 +2219,16 @@ func (s *Service) handleAgentKill(params json.RawMessage) (*AgentKillResult, err
 	s.agentMu.Unlock()
 
 	if agentID != "" {
-		ctx := context.Background()
-		store, err := agentstore.Open(ctx, s.cfg.Storage.Root)
+		store, err := agentstore.Open(updateCtx, s.cfg.Storage.Root)
 		if err != nil {
 			slog.Warn("failed to open agents store for kill", "error", err)
 		} else {
-			if err := store.UpdateState(ctx, agentID, agent.StateStopped); err != nil {
+			if err := store.UpdateState(updateCtx, agentID, agent.StateStopped); err != nil {
 				slog.Warn("failed to update agent state on kill", "agent_id", agentID, "error", err)
 			}
 			store.Close()
 		}
 	}
-
-	return &AgentKillResult{
-		SessionID: p.SessionID,
-		Status:    "killed",
-	}, nil
-}
-
-func (s *Service) handleAgentKillV2(params json.RawMessage) (*AgentKillResult, error) {
-	// PR-11 command-surface cutover keeps behavior parity by delegating to the
-	// existing kill path. Later PR slices can replace this with v2-native kill orchestration.
-	return s.handleAgentKill(params)
 }
 
 // exec is a minimal process starter (avoiding os/exec import cycle issues).
@@ -2149,7 +2268,7 @@ func (e *exec) Start() error {
 }
 
 // resolveLLMConfig returns the LLM provider, API key, and model from centralized config.
-// Priority: configured provider > openrouter > cerebras > groq > gemini
+// Priority: configured provider > LM Studio default.
 //
 // Index:
 // - Purpose: Select provider credentials and model for agent orchestration
@@ -2171,19 +2290,12 @@ func (s *Service) resolveLLMConfig() (provider, apiKey, model string) {
 		return
 	}
 
-	// Auto-detect from available API keys (priority order)
-	providers := []string{"openrouter", "cerebras", "groq", "gemini"}
-	for _, p := range providers {
-		if key := llm.ResolveAPIKey(p); key != "" {
-			provider = p
-			apiKey = key
-			model = llm.ResolveModel(p)
-			if model == "" {
-				model = llmproviders.DefaultModelForProvider(p)
-			}
-			return
-		}
+	// Default to LM Studio for local-first behavior when no provider is configured.
+	provider = "lmstudio"
+	apiKey = llm.ResolveAPIKey(provider)
+	model = llm.ResolveModel(provider)
+	if model == "" {
+		model = llmproviders.DefaultModelForProvider(provider)
 	}
-
-	return "", "", ""
+	return
 }

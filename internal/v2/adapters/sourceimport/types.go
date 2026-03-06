@@ -53,6 +53,7 @@ type TodoStats struct {
 type ArtifactBuildOptions struct {
 	IncludeEmbedding bool
 	Embedder         Embedder
+	ArtifactSource   string
 	Todos            []todosync.ClaudeTodo
 	Now              func() time.Time
 }
@@ -73,4 +74,15 @@ type EmbeddingResult struct {
 // Embedder produces deterministic embeddings for source-derived artifacts.
 type Embedder interface {
 	Embed(ctx context.Context, text string) (EmbeddingResult, error)
+}
+
+// DimensionalEmbedder optionally exposes fixed embedding width metadata.
+// Embedders with dynamic dimensions (e.g. model-dependent at runtime) may omit it.
+type DimensionalEmbedder interface {
+	Dimensions() int
+}
+
+// TurnArtifactReader loads persisted artifacts for one turn.
+type TurnArtifactReader interface {
+	ListArtifacts(ctx context.Context, turnID string) ([]turns.Artifact, error)
 }

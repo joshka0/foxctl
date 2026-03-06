@@ -6,6 +6,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/agent/runtime"
 	"github.com/jkatigb/agentctl/internal/platform/config"
 	"github.com/spf13/cobra"
+	"golang.org/x/sync/errgroup"
 )
 
 var overseerCmd = &cobra.Command{
@@ -21,11 +22,32 @@ var overseerRunCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := cmd.Context()
 		cfg := config.MustFromContext(ctx)
-		return runtime.RunOverseer(ctx, runtime.OverseerDaemonOptions{
-			StorageRoot:  cfg.Storage.Root,
-			PollInterval: 500 * time.Millisecond,
-			DryRun:       overseerDryRun,
+		if !orchestrationComponentEnabled() || overseerDryRun {
+			return runtime.RunOverseer(ctx, runtime.OverseerDaemonOptions{
+				StorageRoot:  cfg.Storage.Root,
+				PollInterval: 500 * time.Millisecond,
+				DryRun:       overseerDryRun,
+			})
+		}
+
+		component, cleanup, err := newOverseerJidoOrchestrationComponent(ctx, cfg)
+		if err != nil {
+			return err
+		}
+		defer cleanup()
+
+		group, groupCtx := errgroup.WithContext(ctx)
+		group.Go(func() error {
+			return runtime.RunOverseer(groupCtx, runtime.OverseerDaemonOptions{
+				StorageRoot:  cfg.Storage.Root,
+				PollInterval: 500 * time.Millisecond,
+				DryRun:       overseerDryRun,
+			})
 		})
+		group.Go(func() error {
+			return component.Run(groupCtx)
+		})
+		return group.Wait()
 	},
 }
 

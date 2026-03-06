@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/jkatigb/agentctl/internal/domain/agent"
+	"github.com/jkatigb/agentctl/internal/storage/dbdriver"
 )
 
 func TestAgentStore(t *testing.T) {
@@ -59,6 +60,12 @@ func TestAgentStore(t *testing.T) {
 		if a.Role != "test-role" {
 			t.Errorf("expected role test-role, got %s", a.Role)
 		}
+		if a.MemoryScope != agent.MemoryScopeAgent {
+			t.Errorf("expected default memory scope %q, got %q", agent.MemoryScopeAgent, a.MemoryScope)
+		}
+		if a.MemoryRetention != agent.MemoryRetentionDurable {
+			t.Errorf("expected default memory retention %q, got %q", agent.MemoryRetentionDurable, a.MemoryRetention)
+		}
 	})
 
 	// Test GetByNamespace
@@ -86,6 +93,38 @@ func TestAgentStore(t *testing.T) {
 
 		if a.State != agent.StateRunning {
 			t.Errorf("expected state running, got %s", a.State)
+		}
+	})
+
+	// Test UpdateMemoryScope
+	t.Run("UpdateMemoryScope", func(t *testing.T) {
+		if err := store.UpdateMemoryScope(ctx, "test-agent-001", agent.MemoryScopeSession); err != nil {
+			t.Fatalf("failed to update memory scope: %v", err)
+		}
+
+		a, err := store.Get(ctx, "test-agent-001")
+		if err != nil {
+			t.Fatalf("failed to get agent: %v", err)
+		}
+
+		if a.MemoryScope != agent.MemoryScopeSession {
+			t.Errorf("expected memory scope session, got %q", a.MemoryScope)
+		}
+	})
+
+	// Test UpdateMemoryRetention
+	t.Run("UpdateMemoryRetention", func(t *testing.T) {
+		if err := store.UpdateMemoryRetention(ctx, "test-agent-001", agent.MemoryRetentionEphemeral); err != nil {
+			t.Fatalf("failed to update memory retention: %v", err)
+		}
+
+		a, err := store.Get(ctx, "test-agent-001")
+		if err != nil {
+			t.Fatalf("failed to get agent: %v", err)
+		}
+
+		if a.MemoryRetention != agent.MemoryRetentionEphemeral {
+			t.Errorf("expected memory retention ephemeral, got %q", a.MemoryRetention)
 		}
 	})
 
@@ -135,4 +174,148 @@ func TestAgentStore(t *testing.T) {
 			t.Errorf("expected error getting deleted agent")
 		}
 	})
+}
+
+func TestAgentStore_AllowsDuplicateNamespaces(t *testing.T) {
+	ctx := context.Background()
+	tmpDir := t.TempDir()
+
+	store, err := Open(ctx, tmpDir)
+	if err != nil {
+		t.Fatalf("failed to open store: %v", err)
+	}
+	defer store.Close()
+
+	first := agent.Agent{
+		ID:          "agent-1",
+		Namespace:   "org/shared",
+		Role:        "researcher",
+		Prompt:      "first",
+		SkillsAllow: []string{},
+		Policy:      agent.Policy{},
+		ShareBB:     "scoped",
+		State:       agent.StateStarting,
+		CreatedAt:   time.Date(2026, time.March, 6, 10, 0, 0, 0, time.UTC),
+	}
+	second := agent.Agent{
+		ID:          "agent-2",
+		Namespace:   "org/shared",
+		Role:        "coder",
+		Prompt:      "second",
+		SkillsAllow: []string{},
+		Policy:      agent.Policy{},
+		ShareBB:     "scoped",
+		State:       agent.StateStarting,
+		CreatedAt:   time.Date(2026, time.March, 6, 10, 1, 0, 0, time.UTC),
+	}
+
+	if err := store.Create(ctx, first); err != nil {
+		t.Fatalf("failed to create first agent: %v", err)
+	}
+	if err := store.Create(ctx, second); err != nil {
+		t.Fatalf("failed to create second agent in same namespace: %v", err)
+	}
+
+	agentsList, err := store.List(ctx, 10)
+	if err != nil {
+		t.Fatalf("failed to list agents: %v", err)
+	}
+	if len(agentsList) != 2 {
+		t.Fatalf("expected 2 agents, got %d", len(agentsList))
+	}
+
+	got, err := store.GetByNamespace(ctx, "org/shared")
+	if err != nil {
+		t.Fatalf("failed to get by namespace: %v", err)
+	}
+	if got.ID != "agent-2" {
+		t.Fatalf("expected latest agent-2 for namespace, got %s", got.ID)
+	}
+}
+
+func TestAgentStore_MigratesLegacyUniqueNamespaceSchema(t *testing.T) {
+	ctx := context.Background()
+	tmpDir := t.TempDir()
+
+	dbCfg := dbdriver.DefaultSQLiteConfig(tmpDir + "/agents.db")
+	db, closeFn, err := dbdriver.OpenDBCompatWithCloser(ctx, dbCfg, nil)
+	if err != nil {
+		t.Fatalf("open raw sqlite db: %v", err)
+	}
+	defer func() { _ = closeFn() }()
+
+	legacyDDL := `
+CREATE TABLE agents (
+	id           TEXT PRIMARY KEY,
+	parent_id    TEXT,
+	ns           TEXT UNIQUE NOT NULL,
+	name         TEXT,
+	slug         TEXT UNIQUE,
+	role         TEXT,
+	prompt       TEXT,
+	skills_allow TEXT NOT NULL,
+	policy       TEXT NOT NULL,
+	share_bb     TEXT NOT NULL,
+	state        TEXT NOT NULL,
+	created_at   TEXT NOT NULL,
+	heartbeat_at TEXT,
+	llm_provider TEXT,
+	llm_model    TEXT,
+	llm_api_key  TEXT,
+	exec_mode    TEXT,
+	max_iterations INTEGER,
+	max_auto_turns INTEGER,
+	think_interval INTEGER,
+	deleted_at   TEXT,
+	conversation_id TEXT,
+	memory_scope TEXT
+);`
+	if _, err := db.ExecContext(ctx, legacyDDL); err != nil {
+		t.Fatalf("create legacy schema: %v", err)
+	}
+
+	insertAgent := func(id, prompt, createdAt string) {
+		t.Helper()
+		_, err := db.ExecContext(ctx, `
+			INSERT INTO agents (id, ns, role, prompt, skills_allow, policy, share_bb, state, created_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			id, "org/shared", "coder", prompt, "[]", "{}", "scoped", string(agent.StateStarting), createdAt,
+		)
+		if err != nil {
+			t.Fatalf("insert legacy agent %s: %v", id, err)
+		}
+	}
+	insertAgent("agent-1", "first", "2026-03-06T10:00:00Z")
+
+	if err := migrate(ctx, db); err != nil {
+		t.Fatalf("migrate legacy schema: %v", err)
+	}
+
+	store, err := Open(ctx, tmpDir)
+	if err != nil {
+		t.Fatalf("open migrated store: %v", err)
+	}
+	defer store.Close()
+
+	if err := store.Create(ctx, agent.Agent{
+		ID:          "agent-2",
+		Namespace:   "org/shared",
+		Role:        "reviewer",
+		Prompt:      "second",
+		SkillsAllow: []string{},
+		Policy:      agent.Policy{},
+		ShareBB:     "scoped",
+		State:       agent.StateStarting,
+		CreatedAt:   time.Date(2026, time.March, 6, 10, 1, 0, 0, time.UTC),
+	}); err != nil {
+		t.Fatalf("create second agent after migration: %v", err)
+	}
+
+	got, err := store.GetByNamespace(ctx, "org/shared")
+	if err != nil {
+		t.Fatalf("get by namespace after migration: %v", err)
+	}
+	if got.ID != "agent-2" {
+		t.Fatalf("expected latest agent-2 after migration, got %s", got.ID)
+	}
 }

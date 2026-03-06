@@ -25,63 +25,82 @@ type ProviderConfig struct {
 }
 
 // AutoPlannerFromConfig returns the best available LLM planner based on config.
-// Priority order for background/cheap tasks: Cerebras → OpenRouter → Groq → OpenAI.
-// Returns nil if no supported API keys are configured.
+// Priority: explicit provider override, else local-first LM Studio default.
 // This function does NOT read environment variables - config must be pre-populated.
 func AutoPlannerFromConfig(ctx context.Context, cfg ProviderConfig) *OpenAIPlanner {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	// Prefer Cerebras if configured (fastest, cheapest for background tasks)
-	if cfg.CerebrasAPIKey != "" {
+	// Explicit provider override.
+	switch cfg.Provider {
+	case "lmstudio":
 		return NewOpenAIPlanner(ctx, OpenAIConfig{
-			APIKey:   cfg.CerebrasAPIKey,
-			BaseURL:  "https://api.cerebras.ai/v1",
-			Model:    "llama3.1-8b", // ~$0.10/M tokens
-			Provider: "cerebras",
+			APIKey:   "lm-studio",
+			BaseURL:  "http://localhost:1234/v1",
+			Model:    cfg.Model,
+			Provider: "lmstudio",
 		})
-	}
-
-	// Next, check for OpenRouter
-	if cfg.OpenRouterAPIKey != "" {
-		model := cfg.OpenRouterModel
-		if model == "" {
-			model = "mistralai/devstral-2512"
+	case "cerebras":
+		if cfg.CerebrasAPIKey != "" {
+			return NewOpenAIPlanner(ctx, OpenAIConfig{
+				APIKey:   cfg.CerebrasAPIKey,
+				BaseURL:  "https://api.cerebras.ai/v1",
+				Model:    cfg.Model,
+				Provider: "cerebras",
+			})
 		}
-		return NewOpenAIPlanner(ctx, OpenAIConfig{
-			APIKey:   cfg.OpenRouterAPIKey,
-			BaseURL:  "https://openrouter.ai/api/v1",
-			Model:    model,
-			Provider: "openrouter",
-		})
+	case "openrouter":
+		if cfg.OpenRouterAPIKey != "" {
+			model := cfg.OpenRouterModel
+			if model == "" {
+				model = cfg.Model
+			}
+			if model == "" {
+				model = "mistralai/devstral-2512"
+			}
+			return NewOpenAIPlanner(ctx, OpenAIConfig{
+				APIKey:   cfg.OpenRouterAPIKey,
+				BaseURL:  "https://openrouter.ai/api/v1",
+				Model:    model,
+				Provider: "openrouter",
+			})
+		}
+	case "groq":
+		if cfg.GroqAPIKey != "" {
+			return NewOpenAIPlanner(ctx, OpenAIConfig{
+				APIKey:   cfg.GroqAPIKey,
+				BaseURL:  "https://api.groq.com/openai/v1",
+				Model:    cfg.Model,
+				Provider: "groq",
+			})
+		}
+	case "openai":
+		if cfg.OpenAIAPIKey != "" {
+			return NewOpenAIPlanner(ctx, OpenAIConfig{
+				APIKey:   cfg.OpenAIAPIKey,
+				BaseURL:  "https://api.openai.com/v1",
+				Model:    cfg.Model,
+				Provider: "openai",
+			})
+		}
 	}
 
-	// Next, check for Groq
-	if cfg.GroqAPIKey != "" {
-		return NewOpenAIPlanner(ctx, OpenAIConfig{
-			APIKey:   cfg.GroqAPIKey,
-			BaseURL:  "https://api.groq.com/openai/v1",
-			Model:    "llama-3.3-70b-versatile",
-			Provider: "groq",
-		})
-	}
-
-	// Finally, check for OpenAI
-	if cfg.OpenAIAPIKey != "" {
-		return NewOpenAIPlanner(ctx, OpenAIConfig{
-			APIKey:   cfg.OpenAIAPIKey,
-			BaseURL:  "https://api.openai.com/v1",
-			Model:    "gpt-4o-mini",
-			Provider: "openai",
-		})
-	}
-
-	// No API key available
-	return nil
+	// Local-first default.
+	return NewOpenAIPlanner(ctx, OpenAIConfig{
+		APIKey:   "lm-studio",
+		BaseURL:  "http://localhost:1234/v1",
+		Model:    cfg.Model,
+		Provider: "lmstudio",
+	})
 }
 
 // IsLLMPlanningAvailableFromConfig returns true if LLM-based planning is available.
 // This function does NOT read environment variables - config must be pre-populated.
 func IsLLMPlanningAvailableFromConfig(cfg ProviderConfig) bool {
-	return cfg.CerebrasAPIKey != "" || cfg.OpenRouterAPIKey != "" || cfg.GroqAPIKey != "" || cfg.OpenAIAPIKey != ""
+	return cfg.Provider == "lmstudio" ||
+		cfg.CerebrasAPIKey != "" ||
+		cfg.OpenRouterAPIKey != "" ||
+		cfg.GroqAPIKey != "" ||
+		cfg.OpenAIAPIKey != "" ||
+		cfg.Provider == ""
 }

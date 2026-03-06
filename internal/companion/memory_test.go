@@ -3,6 +3,7 @@ package companion
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
@@ -11,6 +12,10 @@ import (
 	actormemory "github.com/jkatigb/agentctl/internal/actor/memory"
 	_ "modernc.org/sqlite"
 )
+
+type fixedTokenCounter int
+
+func (c fixedTokenCounter) Count(_ string) int { return int(c) }
 
 // TestTrimTurnsToTokenBudget verifies trimming preserves the most recent turns within a budget.
 func TestTrimTurnsToTokenBudget(t *testing.T) {
@@ -68,8 +73,8 @@ func TestTrimToTokenBudgetUTF8(t *testing.T) {
 	}
 }
 
-// TestGetContextIncludesHistoryWithoutRelationshipNote verifies history renders without requiring a relationship note.
-func TestGetContextIncludesHistoryWithoutRelationshipNote(t *testing.T) {
+// TestGetHybridContextUsesHybridRuntime verifies hybrid context formatting.
+func TestGetHybridContextUsesHybridRuntime(t *testing.T) {
 	ctx := context.Background()
 	db, err := sql.Open("sqlite", ":memory:")
 	if err != nil {
@@ -83,23 +88,300 @@ func TestGetContextIncludesHistoryWithoutRelationshipNote(t *testing.T) {
 	}
 
 	convID := "conv-1"
-	_, err = db.ExecContext(ctx, `
-		INSERT INTO companion_history
-			(id, conversation_id, relationship_note, recurring_topics, user_preferences, shared_memories, token_count, last_distilled_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-	`, "hist-1", convID, "", joinList([]string{"hiking", "travel"}), "", "", 0, time.Now())
-	if err != nil {
-		t.Fatalf("insert history: %v", err)
+	if err := mem.AppendTurn(ctx, ConversationTurn{
+		ConversationID: convID,
+		Role:           "user",
+		Content:        "We should use sqlite for now.",
+		CreatedAt:      time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("append turn: %v", err)
 	}
 
-	got, err := mem.GetContext(ctx, convID)
+	got, err := mem.GetHybridContext(ctx, convID, "")
 	if err != nil {
 		t.Fatalf("get context: %v", err)
 	}
-	if !strings.Contains(got, "## Our History") {
-		t.Fatalf("expected history section, got %q", got)
+	if !strings.Contains(got, "=== RECENT TURNS ===") {
+		t.Fatalf("expected hybrid recent turns section, got %q", got)
 	}
-	if !strings.Contains(got, "We often discuss: hiking, travel") {
-		t.Fatalf("expected recurring topics in history, got %q", got)
+	if !strings.Contains(got, "user: We should use sqlite for now.") {
+		t.Fatalf("expected user turn in hybrid context, got %q", got)
+	}
+}
+
+func TestAppendTurnUsesConfiguredTokenCounter(t *testing.T) {
+	ctx := context.Background()
+	db, err := sql.Open("sqlite", ":memory:")
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	defer db.Close()
+
+	mem, err := NewConversationMemory(db, WithTokenCounter(fixedTokenCounter(42)))
+	if err != nil {
+		t.Fatalf("new conversation memory: %v", err)
+	}
+
+	turn := ConversationTurn{
+		ConversationID: "conv-token-counter",
+		Role:           "user",
+		Content:        "I prefer concise answers.",
+	}
+	if err := mem.AppendTurn(ctx, turn); err != nil {
+		t.Fatalf("append turn: %v", err)
+	}
+
+	var tokenCount int
+	if err := db.QueryRowContext(ctx, `SELECT token_count FROM companion_turns WHERE conversation_id = ? LIMIT 1`, "conv-token-counter").Scan(&tokenCount); err != nil {
+		t.Fatalf("query token_count: %v", err)
+	}
+	if tokenCount != 42 {
+		t.Fatalf("token_count = %d, want %d", tokenCount, 42)
+	}
+}
+
+func TestAppendTurnExtractsPreferencesImmediately(t *testing.T) {
+	ctx := context.Background()
+	db, err := sql.Open("sqlite", ":memory:")
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	defer db.Close()
+
+	mem, err := NewConversationMemory(db)
+	if err != nil {
+		t.Fatalf("new conversation memory: %v", err)
+	}
+
+	turn := ConversationTurn{
+		ConversationID: "conv-pref-extract",
+		Role:           "user",
+		Content:        "I prefer short responses and bullet points.",
+	}
+	if err := mem.AppendTurn(ctx, turn); err != nil {
+		t.Fatalf("append turn: %v", err)
+	}
+
+	var count int
+	if err := db.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM companion_hard_state_entries
+		WHERE conversation_id = ? AND entry_type = ?
+	`, "conv-pref-extract", EntryTypePreference).Scan(&count); err != nil {
+		t.Fatalf("query preference entries: %v", err)
+	}
+	if count == 0 {
+		t.Fatalf("expected at least one preference extraction entry")
+	}
+}
+
+func TestAppendTurnAlwaysBridgesToHybridEvents(t *testing.T) {
+	ctx := context.Background()
+	db, err := sql.Open("sqlite", ":memory:")
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	defer db.Close()
+
+	mem, err := NewConversationMemory(db)
+	if err != nil {
+		t.Fatalf("new conversation memory: %v", err)
+	}
+
+	turn := ConversationTurn{
+		ConversationID: "conv-hybrid-bridge",
+		Role:           "assistant",
+		Content:        "Here is the summary.",
+	}
+	if err := mem.AppendTurn(ctx, turn); err != nil {
+		t.Fatalf("append turn: %v", err)
+	}
+
+	var count int
+	if err := db.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM companion_events
+		WHERE conversation_id = ?
+	`, "conv-hybrid-bridge").Scan(&count); err != nil {
+		t.Fatalf("query companion events: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("event rows = %d, want 1", count)
+	}
+}
+
+func TestSearchCompanionMemories_SearchesHybridArtifacts(t *testing.T) {
+	ctx := context.Background()
+	db, err := sql.Open("sqlite", ":memory:")
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	defer db.Close()
+
+	mem, err := NewConversationMemory(db)
+	if err != nil {
+		t.Fatalf("new conversation memory: %v", err)
+	}
+
+	convID := "conv-hybrid-search"
+	if err := mem.AppendTurn(ctx, ConversationTurn{
+		ConversationID: convID,
+		Role:           "user",
+		Content:        "I prefer short responses.",
+	}); err != nil {
+		t.Fatalf("append turn: %v", err)
+	}
+
+	results, err := mem.SearchCompanionMemories(ctx, convID, "short responses", 5)
+	if err != nil {
+		t.Fatalf("search companion memories: %v", err)
+	}
+	if len(results) == 0 {
+		t.Fatalf("expected hybrid search results")
+	}
+	if results[0].Entry.Type == "" {
+		t.Fatalf("expected result type to be set")
+	}
+}
+
+func TestExportImportRoundTrip(t *testing.T) {
+	ctx := context.Background()
+
+	srcDB, err := sql.Open("sqlite", ":memory:")
+	if err != nil {
+		t.Fatalf("open src db: %v", err)
+	}
+	defer srcDB.Close()
+	srcMem, err := NewConversationMemory(srcDB)
+	if err != nil {
+		t.Fatalf("new src memory: %v", err)
+	}
+
+	convID := "conv-roundtrip"
+	if err := srcMem.AppendTurn(ctx, ConversationTurn{
+		ID:             "turn-1",
+		ConversationID: convID,
+		Role:           "user",
+		Content:        "I prefer short responses.",
+		TokenCount:     3,
+		CreatedAt:      time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("append turn: %v", err)
+	}
+
+	if _, err := srcDB.ExecContext(ctx, `
+		INSERT INTO companion_soft_episodes
+			(id, conversation_id, episode_type, start_event_id, end_event_id, summary, needs_summary, assumption_ids, token_count, boundary_hash, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`, 1, convID, "exploration", 1, 1, "User stated a response preference.", 0, "[]", 9, "bh-roundtrip-1", "2026-02-01 10:00:00.000000"); err != nil {
+		t.Fatalf("insert soft episode: %v", err)
+	}
+	if _, err := srcDB.ExecContext(ctx, `
+		INSERT INTO companion_evidence_snippets
+			(id, conversation_id, source_event_id, event_type, fact_text, content_hash, confidence, bucket, ttl_days, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`, 1, convID, 1, EventTypeUserMessage, "User prefers short responses.", "hash-roundtrip-evidence-1", 0.95, "preference", nil, "2026-02-01 10:00:00.000000"); err != nil {
+		t.Fatalf("insert evidence snippet: %v", err)
+	}
+	if _, err := srcDB.ExecContext(ctx, `
+		INSERT INTO companion_assumptions_ledger
+			(id, conversation_id, assumption, status, reason, source_event_id, confidence, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+	`, 1, convID, "User values concise output", AssumptionStatusActive, "stated preference", 1, 0.9, "2026-02-01 10:00:00.000000"); err != nil {
+		t.Fatalf("insert assumption: %v", err)
+	}
+
+	exported, err := srcMem.Export(ctx, convID)
+	if err != nil {
+		t.Fatalf("export memory: %v", err)
+	}
+
+	dstDB, err := sql.Open("sqlite", ":memory:")
+	if err != nil {
+		t.Fatalf("open dst db: %v", err)
+	}
+	defer dstDB.Close()
+	dstMem, err := NewConversationMemory(dstDB)
+	if err != nil {
+		t.Fatalf("new dst memory: %v", err)
+	}
+	if err := dstMem.Import(ctx, exported); err != nil {
+		t.Fatalf("import memory: %v", err)
+	}
+
+	var turnsCount int
+	if err := dstDB.QueryRowContext(ctx, `SELECT COUNT(*) FROM companion_turns WHERE conversation_id = ?`, convID).Scan(&turnsCount); err != nil {
+		t.Fatalf("count imported turns: %v", err)
+	}
+	if turnsCount != 1 {
+		t.Fatalf("imported turns = %d, want 1", turnsCount)
+	}
+
+	var eventCount int
+	if err := dstDB.QueryRowContext(ctx, `SELECT COUNT(*) FROM companion_events WHERE conversation_id = ?`, convID).Scan(&eventCount); err != nil {
+		t.Fatalf("count imported events: %v", err)
+	}
+	if eventCount == 0 {
+		t.Fatalf("expected imported events, got %d", eventCount)
+	}
+
+	var hardStateCount int
+	if err := dstDB.QueryRowContext(ctx, `SELECT COUNT(*) FROM companion_hard_state_entries WHERE conversation_id = ?`, convID).Scan(&hardStateCount); err != nil {
+		t.Fatalf("count imported hard state entries: %v", err)
+	}
+	if hardStateCount == 0 {
+		t.Fatalf("expected imported hard-state entries, got %d", hardStateCount)
+	}
+
+	var episodeCount int
+	if err := dstDB.QueryRowContext(ctx, `SELECT COUNT(*) FROM companion_soft_episodes WHERE conversation_id = ?`, convID).Scan(&episodeCount); err != nil {
+		t.Fatalf("count imported episodes: %v", err)
+	}
+	if episodeCount == 0 {
+		t.Fatalf("expected imported episodes, got %d", episodeCount)
+	}
+
+	var evidenceCount int
+	if err := dstDB.QueryRowContext(ctx, `SELECT COUNT(*) FROM companion_evidence_snippets WHERE conversation_id = ?`, convID).Scan(&evidenceCount); err != nil {
+		t.Fatalf("count imported evidence snippets: %v", err)
+	}
+	if evidenceCount == 0 {
+		t.Fatalf("expected imported evidence snippets, got %d", evidenceCount)
+	}
+
+	var assumptionCount int
+	if err := dstDB.QueryRowContext(ctx, `SELECT COUNT(*) FROM companion_assumptions_ledger WHERE conversation_id = ?`, convID).Scan(&assumptionCount); err != nil {
+		t.Fatalf("count imported assumptions: %v", err)
+	}
+	if assumptionCount == 0 {
+		t.Fatalf("expected imported assumptions, got %d", assumptionCount)
+	}
+
+	var mode string
+	if err := dstDB.QueryRowContext(ctx, `SELECT mode FROM companion_memory_mode_state WHERE conversation_id = ?`, convID).Scan(&mode); err != nil {
+		t.Fatalf("query mode state: %v", err)
+	}
+	if mode != MemoryModeHybrid {
+		t.Fatalf("mode = %q, want %q", mode, MemoryModeHybrid)
+	}
+}
+
+func TestImportUsesPathConversationIDWhenMissingInPayload(t *testing.T) {
+	ctx := context.Background()
+	db, err := sql.Open("sqlite", ":memory:")
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	defer db.Close()
+
+	mem, err := NewConversationMemory(db)
+	if err != nil {
+		t.Fatalf("new conversation memory: %v", err)
+	}
+
+	raw := json.RawMessage(`{"turns":[{"id":"t1","role":"user","content":"hello"}],"day_summaries":[]}`)
+	// Service-level normalization is outside this test; memory import should reject missing conversation_id.
+	if err := mem.Import(ctx, raw); err == nil {
+		t.Fatalf("expected import error for missing conversation_id")
 	}
 }

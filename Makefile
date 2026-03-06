@@ -199,47 +199,64 @@ ts-build-tui: ts-install
 ts-dev-tui: ts-install
 	@cd packages/tui && bun run dev
 
-# Starts both API server and GUI (dev:all = server + vite)
-ts-dev-gui: ts-install
-	@cd packages/gui && bun run dev:all
+# Starts API server + gui-agent (Vite) development workflow
+ts-dev-gui: gui-agent
 
-.PHONY: gui-agent gui-agent-dev gui-agent-build gui-agent-vite
+.PHONY: gui-agent gui-agent-dev gui-agent-build gui-agent-vite gui-smoke-seed room-board-live-e2e
+
+GUI_API_PORT ?= 8090
+GUI_VITE_PORT ?= 5174
+GUI_WEB_LOG ?= /tmp/agentctl-web.log
+GUI_DB_DRIVER ?= sqlite
+GUI_V2_EVENTS_DB_DRIVER ?= sqlite
 
 # Build and restart gui-agent with API server (full rebuild workflow)
-gui-agent-dev: build
+gui-agent-dev: build ts-install
 	@echo "Building gui-agent frontend..."
-	@cd packages/gui-agent && npm run build
+	@cd packages/gui-agent && bun run build
 	@echo "Stopping any running servers..."
 	@pkill -f 'agentctl web serve' 2>/dev/null || true
-	@lsof -ti :5174 | xargs kill 2>/dev/null || true
+	@lsof -ti :$(GUI_API_PORT) | xargs kill 2>/dev/null || true
+	@lsof -ti :$(GUI_VITE_PORT) | xargs kill 2>/dev/null || true
+
+room-board-live-e2e:
+	@./scripts/room_board_live_e2e.sh
 	@sleep 1
-	@echo "Starting web server..."
-	@./bin/agentctl web serve --dev-cors --ui-dir packages/gui-agent/dist > /tmp/agentctl-web.log 2>&1 &
+	@echo "Starting web server on :$(GUI_API_PORT)..."
+	@AGENTCTL_DB_DRIVER=$${AGENTCTL_DB_DRIVER:-$(GUI_DB_DRIVER)} AGENTCTL_V2_EVENTS_DB_DRIVER=$${AGENTCTL_V2_EVENTS_DB_DRIVER:-$(GUI_V2_EVENTS_DB_DRIVER)} ./bin/agentctl web serve --dev-cors --port $(GUI_API_PORT) --ui-dir packages/gui-agent/dist > $(GUI_WEB_LOG) 2>&1 &
 	@sleep 2
-	@echo "Web server running at http://localhost:8090 (logs: /tmp/agentctl-web.log)"
-	@curl -sf http://localhost:8090/api/health > /dev/null && echo "Health check: OK" || echo "Health check: FAILED"
+	@echo "Web server running at http://localhost:$(GUI_API_PORT) (logs: $(GUI_WEB_LOG))"
+	@curl -sf http://localhost:$(GUI_API_PORT)/api/health > /dev/null || (echo "Health check failed; tailing $(GUI_WEB_LOG)"; tail -n 80 $(GUI_WEB_LOG); exit 1)
+	@curl -sf "http://localhost:$(GUI_API_PORT)/api/orchestration/board-get?request_id=make-gui-preflight" > /dev/null || (echo "Orchestration preflight failed; tailing $(GUI_WEB_LOG)"; tail -n 120 $(GUI_WEB_LOG); exit 1)
+	@echo "API + orchestration preflight: OK"
 
 # Build gui-agent frontend only (no server restart)
-gui-agent-build:
-	@cd packages/gui-agent && npm run build
+gui-agent-build: ts-install
+	@cd packages/gui-agent && bun run build
 
 # Build Go backend + start API server + Vite dev mode with hot reload
-gui-agent: build
+gui-agent: build ts-install
 	@echo "Stopping any running servers..."
 	@pkill -f 'agentctl web serve' 2>/dev/null || true
-	@lsof -ti :5174 | xargs kill 2>/dev/null || true
+	@lsof -ti :$(GUI_API_PORT) | xargs kill 2>/dev/null || true
+	@lsof -ti :$(GUI_VITE_PORT) | xargs kill 2>/dev/null || true
 	@sleep 1
-	@echo "Starting API server on :8090..."
-	@./bin/agentctl web serve --dev-cors > /tmp/agentctl-web.log 2>&1 &
+	@echo "Starting API server on :$(GUI_API_PORT)..."
+	@AGENTCTL_DB_DRIVER=$${AGENTCTL_DB_DRIVER:-$(GUI_DB_DRIVER)} AGENTCTL_V2_EVENTS_DB_DRIVER=$${AGENTCTL_V2_EVENTS_DB_DRIVER:-$(GUI_V2_EVENTS_DB_DRIVER)} ./bin/agentctl web serve --dev-cors --port $(GUI_API_PORT) > $(GUI_WEB_LOG) 2>&1 &
 	@sleep 2
-	@curl -sf http://localhost:8090/api/health > /dev/null && echo "API health check: OK" || echo "API health check: FAILED"
-	@echo "Starting Vite dev server on :5174..."
-	@cd packages/gui-agent && npm run dev
+	@curl -sf http://localhost:$(GUI_API_PORT)/api/health > /dev/null || (echo "Health check failed; tailing $(GUI_WEB_LOG)"; tail -n 80 $(GUI_WEB_LOG); exit 1)
+	@curl -sf "http://localhost:$(GUI_API_PORT)/api/orchestration/board-get?request_id=make-gui-preflight" > /dev/null || (echo "Orchestration preflight failed; tailing $(GUI_WEB_LOG)"; tail -n 120 $(GUI_WEB_LOG); exit 1)
+	@echo "API + orchestration preflight: OK"
+	@echo "Starting Vite dev server on :$(GUI_VITE_PORT)..."
+	@cd packages/gui-agent && bun run dev -- --port $(GUI_VITE_PORT)
 
 # Run gui-agent in Vite dev mode with hot reload (no Go rebuild)
-gui-agent-vite:
-	@lsof -ti :5174 | xargs kill 2>/dev/null || true
-	@cd packages/gui-agent && npm run dev
+gui-agent-vite: ts-install
+	@lsof -ti :$(GUI_VITE_PORT) | xargs kill 2>/dev/null || true
+	@cd packages/gui-agent && bun run dev -- --port $(GUI_VITE_PORT)
+
+gui-smoke-seed:
+	@bash scripts/gui_smoke_seed.sh "$(CURDIR)"
 
 # Runs both API server and TUI binary together
 ts-tui: ts-build-tui build

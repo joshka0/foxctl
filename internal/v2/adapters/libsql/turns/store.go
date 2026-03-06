@@ -2,7 +2,9 @@ package turns
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -11,6 +13,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -26,6 +29,12 @@ const (
 	ArtifactTypeAnnotation     = "annotation"
 	ArtifactTypeClassification = "classification"
 	ArtifactTypeLearning       = "learning"
+	ArtifactTypeNarrative      = "narrative"
+
+	// defaultV2TurnsVectorDims is the local-testing default for v2 turns
+	// embeddings. Override with AGENTCTL_V2_TURNS_VECTOR_DIMS (preferred) or
+	// AGENTCTL_VECTOR_DIMS for provider-specific dimensions (e.g. Voyage).
+	defaultV2TurnsVectorDims = 768
 
 	defaultArtifactVersion        = "v1"
 	artifactVectorIndexName       = "idx_v2_turn_artifacts_embedding_vec"
@@ -36,6 +45,8 @@ const (
 var (
 	// ErrArtifactNotFound indicates a requested artifact row is missing.
 	ErrArtifactNotFound = errors.New("v2 turns: artifact not found")
+	// ErrEpisodeNotFound indicates a requested episode row is missing.
+	ErrEpisodeNotFound = errors.New("v2 turns: episode not found")
 	// ErrInvalidArtifactType indicates an unsupported artifact type.
 	ErrInvalidArtifactType = errors.New("v2 turns: invalid artifact type")
 	// ErrInvalidArtifactRef indicates malformed artifact references.
@@ -43,16 +54,29 @@ var (
 	// ErrInvalidEmbeddingDimensions indicates embeddings do not match
 	// configured vector dimensions when vector mode is active.
 	ErrInvalidEmbeddingDimensions = errors.New("v2 turns: invalid embedding dimensions")
+	// ErrInvalidNarrativeClaims indicates narrative artifacts without evidence.
+	ErrInvalidNarrativeClaims = errors.New("v2 turns: invalid narrative claims")
 
 	artifactRefPattern = regexp.MustCompile(`^turn/([^/#]+)/artifact/([^/#]+)/([^/#]+)$`)
+	vectorDimsPattern  = regexp.MustCompile(`(?i)f32_blob\s*\(\s*(\d+)\s*\)`)
 
 	allowedArtifactTypes = map[string]struct{}{
 		ArtifactTypeEmbedding:      {},
 		ArtifactTypeAnnotation:     {},
 		ArtifactTypeClassification: {},
 		ArtifactTypeLearning:       {},
+		ArtifactTypeNarrative:      {},
 	}
 )
+
+type narrativeContent struct {
+	Summary         string               `json:"summary,omitempty"`
+	Claims          []run.NarrativeClaim `json:"claims,omitempty"`
+	AnchorRefs      []string             `json:"anchor_refs,omitempty"`
+	SourceTurnID    string               `json:"source_turn_id,omitempty"`
+	SourceTurnIndex int                  `json:"source_turn_index,omitempty"`
+	SourceTurnCount int                  `json:"source_turn_count,omitempty"`
+}
 
 // Artifact is one derived, versioned turn artifact.
 type Artifact struct {
@@ -102,7 +126,7 @@ func NewStore(db *sql.DB, closeFn func() error) *Store {
 		now: func() time.Time {
 			return time.Now().UTC()
 		},
-		vectorDimensions: dbdriver.GetDefaultVectorDimensions(),
+		vectorDimensions: defaultV2TurnsVectorDimensions(),
 	}
 }
 
@@ -117,7 +141,7 @@ func (s *Store) SetNowForTest(now func() time.Time) {
 // VectorDimensions returns the configured embedding width for this store.
 func (s *Store) VectorDimensions() int {
 	if s == nil || s.vectorDimensions <= 0 {
-		return dbdriver.GetDefaultVectorDimensions()
+		return defaultV2TurnsVectorDimensions()
 	}
 	return s.vectorDimensions
 }
@@ -132,6 +156,17 @@ func Open(ctx context.Context, storageRoot string) (*Store, error) {
 	cfg := defaultCfg
 	if hasDriverOverride() {
 		cfg = dbdriver.NewConfigLoader(storageRoot).LoadConfig("V2_TURNS", "v2_turns.db")
+	}
+	if !hasVectorDimsOverride() {
+		v2DefaultDims := defaultV2TurnsVectorDimensions()
+		switch cfg.Driver {
+		case dbdriver.DriverLibSQL:
+			cfg.LibSQL.VectorDimensions = v2DefaultDims
+		case dbdriver.DriverTurso:
+			cfg.Turso.VectorDimensions = v2DefaultDims
+		case dbdriver.DriverPostgres:
+			cfg.Postgres.VectorDimensions = v2DefaultDims
+		}
 	}
 
 	driverType := cfg.Driver
@@ -148,12 +183,17 @@ func Open(ctx context.Context, storageRoot string) (*Store, error) {
 
 	store := NewStore(db, closeFn)
 	store.vectorEnabled.Store(driverType == dbdriver.DriverLibSQL || driverType == dbdriver.DriverTurso)
-	store.vectorDimensions = vectorDims
+	store.vectorDimensions = detectArtifactVectorDimensions(ctx, db, vectorDims)
 	return store, nil
 }
 
 func hasDriverOverride() bool {
 	return os.Getenv("AGENTCTL_V2_TURNS_DB_DRIVER") != "" || os.Getenv("AGENTCTL_DB_DRIVER") != ""
+}
+
+func hasVectorDimsOverride() bool {
+	return strings.TrimSpace(os.Getenv("AGENTCTL_V2_TURNS_VECTOR_DIMS")) != "" ||
+		strings.TrimSpace(os.Getenv("AGENTCTL_VECTOR_DIMS")) != ""
 }
 
 // Close releases database resources.
@@ -580,6 +620,217 @@ func (s *Store) ListTurns(ctx context.Context, sessionID string, opts run.TurnLi
 	return out, nil
 }
 
+// SaveEpisode upserts one semantic episode record using boundary-key idempotency.
+func (s *Store) SaveEpisode(ctx context.Context, episode run.EpisodeRecord) error {
+	if s == nil || s.db == nil {
+		return fmt.Errorf("v2 turns save episode: nil store")
+	}
+
+	normalized, err := s.normalizeEpisode(episode)
+	if err != nil {
+		return err
+	}
+
+	anchorRefsJSON, err := sqlutil.FormatJSON(normalized.AnchorRefs)
+	if err != nil {
+		return fmt.Errorf("format episode anchor refs: %w", err)
+	}
+
+	_, err = s.db.ExecContext(ctx, `
+		INSERT INTO v2_episodes (
+			id, session_id, episode_version, boundary_key,
+			start_turn_id, end_turn_id, start_turn_index, end_turn_index,
+			topic, summary, salience_score, is_landmark, anchor_refs_json,
+			created_at, updated_at
+		) VALUES (
+			$1, $2, $3, $4,
+			$5, $6, $7, $8,
+			$9, $10, $11, $12, $13,
+			$14, $15
+		)
+		ON CONFLICT(session_id, episode_version, boundary_key) DO UPDATE SET
+			start_turn_id = excluded.start_turn_id,
+			end_turn_id = excluded.end_turn_id,
+			start_turn_index = excluded.start_turn_index,
+			end_turn_index = excluded.end_turn_index,
+			topic = excluded.topic,
+			summary = excluded.summary,
+			salience_score = excluded.salience_score,
+			is_landmark = excluded.is_landmark,
+			anchor_refs_json = excluded.anchor_refs_json,
+			updated_at = excluded.updated_at
+	`,
+		normalized.ID,
+		normalized.SessionID,
+		normalized.EpisodeVersion,
+		normalized.BoundaryKey,
+		normalized.StartTurnID,
+		normalized.EndTurnID,
+		normalized.StartTurnIndex,
+		normalized.EndTurnIndex,
+		normalized.Topic,
+		normalized.Summary,
+		normalized.SalienceScore,
+		boolToInt(normalized.IsLandmark),
+		anchorRefsJSON,
+		sqlutil.FormatTimestamp(normalized.CreatedAt),
+		sqlutil.FormatTimestamp(normalized.UpdatedAt),
+	)
+	if err != nil {
+		return fmt.Errorf("upsert episode: %w", err)
+	}
+	return nil
+}
+
+// GetEpisode loads one semantic episode by ID.
+func (s *Store) GetEpisode(ctx context.Context, episodeID string) (run.EpisodeRecord, error) {
+	if s == nil || s.db == nil {
+		return run.EpisodeRecord{}, fmt.Errorf("v2 turns get episode: nil store")
+	}
+
+	episodeID = strings.TrimSpace(episodeID)
+	if episodeID == "" {
+		return run.EpisodeRecord{}, run.ErrEpisodeNotFound
+	}
+
+	var (
+		out            run.EpisodeRecord
+		isLandmarkInt  int
+		anchorRefsJSON string
+		createdAtRaw   string
+		updatedAtRaw   string
+	)
+	err := s.db.QueryRowContext(ctx, `
+		SELECT
+			id,
+			COALESCE(session_id, ''),
+			COALESCE(episode_version, ''),
+			COALESCE(boundary_key, ''),
+			COALESCE(start_turn_id, ''),
+			COALESCE(end_turn_id, ''),
+			COALESCE(start_turn_index, 0),
+			COALESCE(end_turn_index, 0),
+			COALESCE(topic, ''),
+			COALESCE(summary, ''),
+			COALESCE(salience_score, 0),
+			COALESCE(is_landmark, 0),
+			COALESCE(anchor_refs_json, '[]'),
+			created_at,
+			updated_at
+		FROM v2_episodes
+		WHERE id = $1
+	`, episodeID).Scan(
+		&out.ID,
+		&out.SessionID,
+		&out.EpisodeVersion,
+		&out.BoundaryKey,
+		&out.StartTurnID,
+		&out.EndTurnID,
+		&out.StartTurnIndex,
+		&out.EndTurnIndex,
+		&out.Topic,
+		&out.Summary,
+		&out.SalienceScore,
+		&isLandmarkInt,
+		&anchorRefsJSON,
+		&createdAtRaw,
+		&updatedAtRaw,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		return run.EpisodeRecord{}, run.ErrEpisodeNotFound
+	}
+	if err != nil {
+		return run.EpisodeRecord{}, fmt.Errorf("query episode: %w", err)
+	}
+
+	out.IsLandmark = isLandmarkInt > 0
+	out.SalienceScore = clampUnitFloat(out.SalienceScore)
+	if strings.TrimSpace(anchorRefsJSON) != "" {
+		if unmarshalErr := json.Unmarshal([]byte(anchorRefsJSON), &out.AnchorRefs); unmarshalErr != nil {
+			out.AnchorRefs = nil
+		}
+	}
+	out.AnchorRefs = normalizeAnchorRefs(out.AnchorRefs)
+
+	if out.CreatedAt, err = sqlutil.ScanTimestamp(createdAtRaw); err != nil {
+		return run.EpisodeRecord{}, fmt.Errorf("parse episode.created_at: %w", err)
+	}
+	if out.UpdatedAt, err = sqlutil.ScanTimestamp(updatedAtRaw); err != nil {
+		return run.EpisodeRecord{}, fmt.Errorf("parse episode.updated_at: %w", err)
+	}
+
+	return out.Clone(), nil
+}
+
+// ListEpisodes returns semantic episodes for one session ordered by creation time.
+func (s *Store) ListEpisodes(ctx context.Context, sessionID string, opts run.EpisodeListOptions) ([]run.EpisodeRecord, error) {
+	if s == nil || s.db == nil {
+		return nil, fmt.Errorf("v2 turns list episodes: nil store")
+	}
+
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return nil, nil
+	}
+
+	order := "DESC"
+	if opts.Asc {
+		order = "ASC"
+	}
+	limit := opts.Limit
+	if limit <= 0 {
+		limit = 64
+	}
+
+	since := ""
+	until := ""
+	if !opts.Since.IsZero() {
+		since = sqlutil.FormatTimestamp(opts.Since.UTC())
+	}
+	if !opts.Until.IsZero() {
+		until = sqlutil.FormatTimestamp(opts.Until.UTC())
+	}
+
+	query := fmt.Sprintf(`
+		SELECT id
+		FROM v2_episodes
+		WHERE session_id = $1
+		  AND ($2 = '' OR created_at >= $2)
+		  AND ($3 = '' OR created_at <= $3)
+		  AND ($4 = 0 OR is_landmark = 1)
+		ORDER BY created_at %s, id %s
+		LIMIT $5
+	`, order, order)
+
+	rows, err := s.db.QueryContext(ctx, query, sessionID, since, until, boolToInt(opts.LandmarkOnly), limit)
+	if err != nil {
+		return nil, fmt.Errorf("query episode ids: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	episodeIDs := make([]string, 0, limit)
+	for rows.Next() {
+		var episodeID string
+		if err := rows.Scan(&episodeID); err != nil {
+			return nil, fmt.Errorf("scan episode id: %w", err)
+		}
+		episodeIDs = append(episodeIDs, strings.TrimSpace(episodeID))
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate episode ids: %w", err)
+	}
+
+	out := make([]run.EpisodeRecord, 0, len(episodeIDs))
+	for _, episodeID := range episodeIDs {
+		episode, err := s.GetEpisode(ctx, episodeID)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, episode)
+	}
+	return out, nil
+}
+
 // SaveArtifact upserts one versioned artifact under its idempotency key.
 func (s *Store) SaveArtifact(ctx context.Context, artifact Artifact) error {
 	if s == nil || s.db == nil {
@@ -725,6 +976,162 @@ func (s *Store) ListArtifacts(ctx context.Context, turnID string) ([]Artifact, e
 	return out, nil
 }
 
+// SaveNarrative upserts one session-scoped narrative artifact.
+// Idempotency is keyed by (session first turn id, artifact_type=narrative, artifact_version).
+func (s *Store) SaveNarrative(ctx context.Context, narrative run.NarrativeRecord) error {
+	if s == nil || s.db == nil {
+		return fmt.Errorf("v2 turns save narrative: nil store")
+	}
+	normalized, err := normalizeNarrativeRecord(narrative)
+	if err != nil {
+		return err
+	}
+	if normalized.UpdatedAt.IsZero() {
+		normalized.UpdatedAt = s.now().UTC()
+	}
+	turnID, err := s.resolveNarrativeTurnID(ctx, normalized.SessionID, normalized.TurnID)
+	if err != nil {
+		return err
+	}
+
+	content := narrativeContent{
+		Summary:         strings.TrimSpace(normalized.Summary),
+		Claims:          cloneNarrativeClaims(normalized.Claims),
+		AnchorRefs:      append([]string(nil), normalized.AnchorRefs...),
+		SourceTurnID:    strings.TrimSpace(normalized.SourceTurnID),
+		SourceTurnIndex: normalized.SourceTurnIndex,
+		SourceTurnCount: normalized.SourceTurnCount,
+	}
+	if content.Summary == "" {
+		content.Summary = summaryFromNarrativeClaims(content.Claims)
+	}
+	if strings.TrimSpace(normalized.Summary) == "" {
+		normalized.Summary = content.Summary
+	}
+
+	metadata := map[string]any{
+		"session_id":      normalized.SessionID,
+		"artifact_scope":  "session",
+		"artifact_kind":   "narrative",
+		"claim_count":     len(content.Claims),
+		"anchor_refs":     append([]string(nil), content.AnchorRefs...),
+		"source_turn_id":  content.SourceTurnID,
+		"source_turn_ix":  content.SourceTurnIndex,
+		"source_turn_cnt": content.SourceTurnCount,
+	}
+
+	artifact := Artifact{
+		TurnID:          turnID,
+		ArtifactType:    ArtifactTypeNarrative,
+		ArtifactVersion: normalized.ArtifactVersion,
+		Summary:         strings.TrimSpace(normalized.Summary),
+		ContentJSON:     mustMarshalJSON(content),
+		MetadataJSON:    mustMarshalJSON(metadata),
+		CreatedAt:       normalized.UpdatedAt,
+		UpdatedAt:       normalized.UpdatedAt,
+	}
+	return s.SaveArtifact(ctx, artifact)
+}
+
+// GetNarrative loads the latest narrative artifact for one session/version.
+func (s *Store) GetNarrative(ctx context.Context, sessionID, artifactVersion string) (run.NarrativeRecord, error) {
+	if s == nil || s.db == nil {
+		return run.NarrativeRecord{}, fmt.Errorf("v2 turns get narrative: nil store")
+	}
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return run.NarrativeRecord{}, run.ErrNarrativeNotFound
+	}
+	artifactVersion = strings.TrimSpace(artifactVersion)
+
+	var (
+		turnID      string
+		version     string
+		ref         string
+		summary     string
+		contentJSON []byte
+		updatedAt   string
+	)
+	err := s.db.QueryRowContext(ctx, `
+			SELECT
+				a.turn_id,
+				a.artifact_version,
+			a.ref,
+			COALESCE(a.summary, ''),
+			COALESCE(a.content_json, '{}'),
+			COALESCE(a.updated_at, '')
+		FROM v2_turn_artifacts a
+		JOIN v2_turns t ON t.id = a.turn_id
+			WHERE
+				t.session_id = $1
+				AND a.artifact_type = $2
+				AND ($3 = '' OR a.artifact_version = $3)
+			ORDER BY
+				CASE
+					WHEN a.turn_id = (
+						SELECT t0.id
+						FROM v2_turns t0
+						WHERE t0.session_id = $1
+						ORDER BY t0.turn_index ASC, t0.created_at ASC, t0.id ASC
+						LIMIT 1
+					) THEN 0
+					ELSE 1
+				END ASC,
+				a.updated_at DESC,
+				a.turn_id ASC
+			LIMIT 1
+		`, sessionID, ArtifactTypeNarrative, artifactVersion).Scan(
+		&turnID,
+		&version,
+		&ref,
+		&summary,
+		&contentJSON,
+		&updatedAt,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		return run.NarrativeRecord{}, run.ErrNarrativeNotFound
+	}
+	if err != nil {
+		return run.NarrativeRecord{}, fmt.Errorf("query narrative artifact: %w", err)
+	}
+
+	var content narrativeContent
+	if len(contentJSON) > 0 {
+		if err := json.Unmarshal(contentJSON, &content); err != nil {
+			return run.NarrativeRecord{}, fmt.Errorf("parse narrative content: %w", err)
+		}
+	}
+	content.Summary = strings.TrimSpace(content.Summary)
+	if content.Summary == "" {
+		content.Summary = strings.TrimSpace(summary)
+	}
+	content.SourceTurnID = strings.TrimSpace(content.SourceTurnID)
+	content.AnchorRefs = normalizeAnchorRefs(content.AnchorRefs)
+	if len(content.AnchorRefs) == 0 {
+		content.AnchorRefs = anchorsFromClaims(content.Claims)
+	}
+	if err := validateNarrativeContent(content); err != nil {
+		return run.NarrativeRecord{}, err
+	}
+
+	out := run.NarrativeRecord{
+		SessionID:       sessionID,
+		TurnID:          strings.TrimSpace(turnID),
+		Ref:             strings.TrimSpace(ref),
+		ArtifactVersion: strings.TrimSpace(version),
+		Summary:         content.Summary,
+		Claims:          cloneNarrativeClaims(content.Claims),
+		AnchorRefs:      append([]string(nil), content.AnchorRefs...),
+		SourceTurnID:    content.SourceTurnID,
+		SourceTurnIndex: content.SourceTurnIndex,
+		SourceTurnCount: content.SourceTurnCount,
+	}
+	if ts, parseErr := sqlutil.ScanTimestamp(updatedAt); parseErr == nil {
+		out.UpdatedAt = ts
+	}
+	return out.Clone(), nil
+}
+
 // SearchArtifactsByEmbedding returns top artifacts by embedding similarity.
 // It prefers native libsql vector functions and falls back to in-process cosine
 // scoring when vector SQL is unavailable.
@@ -735,12 +1142,6 @@ func (s *Store) SearchArtifactsByEmbedding(
 ) (run.ArtifactSearchResult, error) {
 	if s == nil || s.db == nil {
 		return run.ArtifactSearchResult{}, fmt.Errorf("v2 turns search artifacts: nil store")
-	}
-	if len(queryEmbedding) == 0 {
-		return run.ArtifactSearchResult{
-			SearchPath:       run.ArtifactSearchPathDisabled,
-			VectorCapability: s.vectorCapability(),
-		}, nil
 	}
 	for i, value := range queryEmbedding {
 		if math.IsNaN(float64(value)) || math.IsInf(float64(value), 0) {
@@ -760,41 +1161,36 @@ func (s *Store) SearchArtifactsByEmbedding(
 	if err != nil {
 		return run.ArtifactSearchResult{}, err
 	}
+	workingAttempts := workingContextAttempts(normalized.Working)
+	if len(workingAttempts) == 0 {
+		return s.searchArtifactsByEmbeddingOnce(ctx, queryEmbedding, normalized, false, 0)
+	}
 
-	if s.vectorEnabled.Load() {
-		candidates, err := s.searchArtifactCandidatesVector(ctx, queryEmbedding, normalized)
-		if err == nil {
-			hits, loadErr := s.loadScoredArtifacts(ctx, candidates)
-			if loadErr != nil {
-				return run.ArtifactSearchResult{}, loadErr
-			}
-			return run.ArtifactSearchResult{
-				Hits:             hits,
-				SearchPath:       run.ArtifactSearchPathVector,
-				VectorCapability: run.ArtifactVectorCapabilityEnabled,
-			}, nil
-		}
-		if !isVectorUnsupported(err) {
+	last := run.ArtifactSearchResult{
+		SearchPath:       run.ArtifactSearchPathDisabled,
+		VectorCapability: s.vectorCapability(),
+		WorkingApplied:   true,
+		FallbackLevel:    3,
+	}
+	for level, attempt := range workingAttempts {
+		attemptOpts := normalized
+		attemptOpts.Working = attempt
+		result, err := s.searchArtifactsByEmbeddingOnce(ctx, queryEmbedding, attemptOpts, true, level)
+		if err != nil {
 			return run.ArtifactSearchResult{}, err
 		}
-		// Disable vector search after first unsupported query to avoid repeated
-		// expensive failures on fallback drivers.
-		s.vectorEnabled.Store(false)
+		last = result
+		if len(result.Hits) > 0 {
+			return result, nil
+		}
 	}
 
-	candidates, err := s.searchArtifactCandidatesFallback(ctx, queryEmbedding, normalized)
-	if err != nil {
-		return run.ArtifactSearchResult{}, err
-	}
-	hits, err := s.loadScoredArtifacts(ctx, candidates)
-	if err != nil {
-		return run.ArtifactSearchResult{}, err
-	}
-	return run.ArtifactSearchResult{
-		Hits:             hits,
-		SearchPath:       run.ArtifactSearchPathFallback,
-		VectorCapability: s.vectorCapability(),
-	}, nil
+	// Level 3: temporal-only fallback. Semantic layer intentionally returns no
+	// hits so callers can fall through to temporal refs.
+	last.Hits = nil
+	last.WorkingApplied = true
+	last.FallbackLevel = 3
+	return last, nil
 }
 
 func (s *Store) vectorCapability() run.ArtifactVectorCapability {
@@ -805,6 +1201,79 @@ func (s *Store) vectorCapability() run.ArtifactVectorCapability {
 		return run.ArtifactVectorCapabilityEnabled
 	}
 	return run.ArtifactVectorCapabilityDisabled
+}
+
+func (s *Store) searchArtifactsByEmbeddingOnce(
+	ctx context.Context,
+	queryEmbedding []float32,
+	opts run.ArtifactSearchOptions,
+	workingApplied bool,
+	fallbackLevel int,
+) (run.ArtifactSearchResult, error) {
+	eligibleCount := 0
+	if workingApplied {
+		count, err := s.countEligibleArtifacts(ctx, opts)
+		if err != nil {
+			return run.ArtifactSearchResult{}, err
+		}
+		eligibleCount = count
+	}
+	if len(queryEmbedding) == 0 {
+		return run.ArtifactSearchResult{
+			SearchPath:       run.ArtifactSearchPathDisabled,
+			VectorCapability: s.vectorCapability(),
+			WorkingApplied:   workingApplied,
+			FallbackLevel:    fallbackLevel,
+			EligibleCount:    eligibleCount,
+		}, nil
+	}
+
+	if s.vectorEnabled.Load() {
+		candidates, err := s.searchArtifactCandidatesVector(ctx, queryEmbedding, opts)
+		if err == nil {
+			hits, loadErr := s.loadScoredArtifacts(ctx, candidates)
+			if loadErr != nil {
+				return run.ArtifactSearchResult{}, loadErr
+			}
+			if workingApplied {
+				hits = rerankWorkingContextHits(hits, opts.Working)
+			}
+			return run.ArtifactSearchResult{
+				Hits:             hits,
+				SearchPath:       run.ArtifactSearchPathVector,
+				VectorCapability: run.ArtifactVectorCapabilityEnabled,
+				WorkingApplied:   workingApplied,
+				FallbackLevel:    fallbackLevel,
+				EligibleCount:    eligibleCount,
+			}, nil
+		}
+		if !isVectorUnsupported(err) {
+			return run.ArtifactSearchResult{}, err
+		}
+		// Disable vector search after first unsupported query to avoid repeated
+		// expensive failures on fallback drivers.
+		s.vectorEnabled.Store(false)
+	}
+
+	candidates, err := s.searchArtifactCandidatesFallback(ctx, queryEmbedding, opts)
+	if err != nil {
+		return run.ArtifactSearchResult{}, err
+	}
+	hits, err := s.loadScoredArtifacts(ctx, candidates)
+	if err != nil {
+		return run.ArtifactSearchResult{}, err
+	}
+	if workingApplied {
+		hits = rerankWorkingContextHits(hits, opts.Working)
+	}
+	return run.ArtifactSearchResult{
+		Hits:             hits,
+		SearchPath:       run.ArtifactSearchPathFallback,
+		VectorCapability: s.vectorCapability(),
+		WorkingApplied:   workingApplied,
+		FallbackLevel:    fallbackLevel,
+		EligibleCount:    eligibleCount,
+	}, nil
 }
 
 type artifactSimilarityCandidate struct {
@@ -850,7 +1319,52 @@ func normalizeArtifactSearchOptions(opts run.ArtifactSearchOptions) (run.Artifac
 	if opts.MinSimilarity > 1 {
 		opts.MinSimilarity = 1
 	}
+	opts.Working = normalizeWorkingContext(opts.Working)
+	if opts.SessionID == "" && opts.Working.SessionID != "" {
+		opts.SessionID = opts.Working.SessionID
+	}
+	if opts.Working.SessionID == "" {
+		opts.Working.SessionID = opts.SessionID
+	}
+	if opts.SessionID != "" && opts.Working.SessionID != "" && opts.SessionID != opts.Working.SessionID {
+		opts.Working.SessionID = opts.SessionID
+	}
 	return opts, nil
+}
+
+func normalizeWorkingContext(ctx run.WorkingContext) run.WorkingContext {
+	ctx.SessionID = strings.TrimSpace(ctx.SessionID)
+	ctx.WorkspaceID = strings.TrimSpace(ctx.WorkspaceID)
+	ctx.ActiveFiles = uniqueSortedStrings(ctx.ActiveFiles, false)
+	ctx.RequiredLabels = uniqueSortedStrings(ctx.RequiredLabels, true)
+	if ctx.MinSalience < 0 {
+		ctx.MinSalience = 0
+	}
+	if ctx.MinSalience > 1 {
+		ctx.MinSalience = 1
+	}
+	return ctx
+}
+
+func workingContextAttempts(ctx run.WorkingContext) []run.WorkingContext {
+	if !workingContextEnabled(ctx) {
+		return nil
+	}
+	strict := normalizeWorkingContext(ctx)
+	level1 := strict
+	level1.RequiredLabels = nil
+	level2 := level1
+	level2.MinSalience = 0
+	return []run.WorkingContext{strict, level1, level2}
+}
+
+func workingContextEnabled(ctx run.WorkingContext) bool {
+	ctx = normalizeWorkingContext(ctx)
+	return ctx.SessionID != "" ||
+		ctx.WorkspaceID != "" ||
+		len(ctx.ActiveFiles) > 0 ||
+		len(ctx.RequiredLabels) > 0 ||
+		ctx.MinSalience > 0
 }
 
 func (s *Store) searchArtifactCandidatesVector(
@@ -861,19 +1375,9 @@ func (s *Store) searchArtifactCandidatesVector(
 	vectorStr := float32sToVectorString(queryEmbedding)
 	vectorTopKExpr := vectorTopKExpression(artifactVectorIndexName, vectorStr, vectorCandidateLimit(opts))
 
-	where := []string{"a.embedding IS NOT NULL"}
-	args := make([]any, 0, 8)
-	if opts.SessionID != "" {
-		args = append(args, opts.SessionID)
-		where = append(where, fmt.Sprintf("t.session_id = $%d", len(args)))
-	}
-	if len(opts.ArtifactTypes) > 0 {
-		typePredicates := make([]string, 0, len(opts.ArtifactTypes))
-		for _, artifactType := range opts.ArtifactTypes {
-			args = append(args, artifactType)
-			typePredicates = append(typePredicates, fmt.Sprintf("$%d", len(args)))
-		}
-		where = append(where, fmt.Sprintf("a.artifact_type IN (%s)", strings.Join(typePredicates, ", ")))
+	where, args, err := buildArtifactSearchWhere(opts, true)
+	if err != nil {
+		return nil, err
 	}
 	args = append(args, opts.Limit)
 
@@ -936,19 +1440,9 @@ func (s *Store) searchArtifactCandidatesFallback(
 	queryEmbedding []float32,
 	opts run.ArtifactSearchOptions,
 ) ([]artifactSimilarityCandidate, error) {
-	where := []string{"COALESCE(a.embedding_json, '[]') <> '[]'"}
-	args := make([]any, 0, 8)
-	if opts.SessionID != "" {
-		args = append(args, opts.SessionID)
-		where = append(where, fmt.Sprintf("t.session_id = $%d", len(args)))
-	}
-	if len(opts.ArtifactTypes) > 0 {
-		typePredicates := make([]string, 0, len(opts.ArtifactTypes))
-		for _, artifactType := range opts.ArtifactTypes {
-			args = append(args, artifactType)
-			typePredicates = append(typePredicates, fmt.Sprintf("$%d", len(args)))
-		}
-		where = append(where, fmt.Sprintf("a.artifact_type IN (%s)", strings.Join(typePredicates, ", ")))
+	where, args, err := buildArtifactSearchWhere(opts, false)
+	if err != nil {
+		return nil, err
 	}
 	candidateLimit := opts.Limit * 12
 	if candidateLimit < opts.Limit {
@@ -1038,6 +1532,288 @@ func (s *Store) searchArtifactCandidatesFallback(
 	return candidates, nil
 }
 
+func (s *Store) countEligibleArtifacts(ctx context.Context, opts run.ArtifactSearchOptions) (int, error) {
+	where, args, err := buildArtifactSearchWhere(opts, false)
+	if err != nil {
+		return 0, err
+	}
+	// Eligible means "has embedding payload available for semantic retrieval".
+	where = append(where, "(a.embedding IS NOT NULL OR COALESCE(a.embedding_json, '[]') <> '[]')")
+
+	query := fmt.Sprintf(`
+		SELECT COUNT(1)
+		FROM v2_turn_artifacts a
+		JOIN v2_turns t ON t.id = a.turn_id
+		WHERE %s
+	`, strings.Join(where, " AND "))
+
+	var count int
+	if err := s.db.QueryRowContext(ctx, query, args...).Scan(&count); err != nil {
+		return 0, fmt.Errorf("count eligible artifacts: %w", err)
+	}
+	return count, nil
+}
+
+func buildArtifactSearchWhere(opts run.ArtifactSearchOptions, vectorOnly bool) ([]string, []any, error) {
+	where := make([]string, 0, 16)
+	if vectorOnly {
+		where = append(where, "a.embedding IS NOT NULL")
+	} else {
+		where = append(where, "COALESCE(a.embedding_json, '[]') <> '[]'")
+	}
+
+	args := make([]any, 0, 24)
+	if opts.SessionID != "" {
+		args = append(args, opts.SessionID)
+		where = append(where, fmt.Sprintf("t.session_id = $%d", len(args)))
+	}
+	if len(opts.ArtifactTypes) > 0 {
+		typePredicates := make([]string, 0, len(opts.ArtifactTypes))
+		for _, artifactType := range opts.ArtifactTypes {
+			args = append(args, artifactType)
+			typePredicates = append(typePredicates, fmt.Sprintf("$%d", len(args)))
+		}
+		where = append(where, fmt.Sprintf("a.artifact_type IN (%s)", strings.Join(typePredicates, ", ")))
+	}
+	where, args = appendWorkingContextFilters(where, args, opts.Working)
+	return where, args, nil
+}
+
+func appendWorkingContextFilters(where []string, args []any, working run.WorkingContext) ([]string, []any) {
+	if !workingContextEnabled(working) {
+		return where, args
+	}
+	working = normalizeWorkingContext(working)
+	if working.WorkspaceID != "" {
+		args = append(args, working.WorkspaceID, working.WorkspaceID)
+		where = append(where, fmt.Sprintf(
+			"(COALESCE(json_extract(a.metadata_json, '$.workspace_id'), '') = $%d OR COALESCE(json_extract(a.metadata_json, '$.workspace'), '') = $%d)",
+			len(args)-1,
+			len(args),
+		))
+	}
+	if len(working.ActiveFiles) > 0 {
+		filePredicates := make([]string, 0, len(working.ActiveFiles))
+		for _, file := range working.ActiveFiles {
+			args = append(args, file)
+			filePredicates = append(filePredicates, fmt.Sprintf("$%d", len(args)))
+		}
+		where = append(where, fmt.Sprintf(`
+			EXISTS (
+				SELECT 1
+				FROM json_each(a.metadata_json, '$.active_files') af
+				WHERE af.value IN (%s)
+			)
+		`, strings.Join(filePredicates, ", ")))
+	}
+	for _, label := range working.RequiredLabels {
+		args = append(args, label, label)
+		where = append(where, fmt.Sprintf(`
+			(
+				EXISTS (
+					SELECT 1 FROM json_each(a.metadata_json, '$.labels') ml
+					WHERE LOWER(CAST(ml.value AS TEXT)) = $%d
+				)
+				OR EXISTS (
+					SELECT 1 FROM json_each(a.content_json, '$.labels') cl
+					WHERE LOWER(CAST(cl.value AS TEXT)) = $%d
+				)
+			)
+		`, len(args)-1, len(args)))
+	}
+	if working.MinSalience > 0 {
+		args = append(args, working.MinSalience)
+		where = append(where, fmt.Sprintf(`
+			COALESCE(
+				CAST(json_extract(a.metadata_json, '$.salience') AS REAL),
+				CAST(json_extract(a.metadata_json, '$.salience_score') AS REAL),
+				CAST(json_extract(a.content_json, '$.salience') AS REAL),
+				CAST(json_extract(a.content_json, '$.salience_score') AS REAL),
+				0
+			) >= $%d
+		`, len(args)))
+	}
+	return where, args
+}
+
+func rerankWorkingContextHits(hits []run.ScoredArtifact, working run.WorkingContext) []run.ScoredArtifact {
+	if len(hits) == 0 {
+		return nil
+	}
+	working = normalizeWorkingContext(working)
+	required := make(map[string]struct{}, len(working.RequiredLabels))
+	for _, label := range working.RequiredLabels {
+		required[label] = struct{}{}
+	}
+
+	type scored struct {
+		hit          run.ScoredArtifact
+		composite    float64
+		salience     float64
+		labelOverlap float64
+	}
+
+	out := make([]scored, 0, len(hits))
+	for _, hit := range hits {
+		meta := decodeArtifactMetadata(hit.MetadataJSON)
+		labels := metadataLabels(meta)
+		salience := metadataSalience(meta)
+		overlap := labelOverlapRatio(required, labels)
+		composite := (hit.Similarity * 0.70) + (salience * 0.20) + (overlap * 0.10)
+		out = append(out, scored{
+			hit:          hit.Clone(),
+			composite:    composite,
+			salience:     salience,
+			labelOverlap: overlap,
+		})
+	}
+
+	sort.SliceStable(out, func(i, j int) bool {
+		left := out[i]
+		right := out[j]
+		if left.composite != right.composite {
+			return left.composite > right.composite
+		}
+		if left.hit.Similarity != right.hit.Similarity {
+			return left.hit.Similarity > right.hit.Similarity
+		}
+		if left.salience != right.salience {
+			return left.salience > right.salience
+		}
+		if left.labelOverlap != right.labelOverlap {
+			return left.labelOverlap > right.labelOverlap
+		}
+		if left.hit.TurnID != right.hit.TurnID {
+			return left.hit.TurnID < right.hit.TurnID
+		}
+		if left.hit.ArtifactType != right.hit.ArtifactType {
+			return left.hit.ArtifactType < right.hit.ArtifactType
+		}
+		return left.hit.ArtifactVersion < right.hit.ArtifactVersion
+	})
+
+	reranked := make([]run.ScoredArtifact, 0, len(out))
+	for _, candidate := range out {
+		reranked = append(reranked, candidate.hit.Clone())
+	}
+	return reranked
+}
+
+func decodeArtifactMetadata(raw json.RawMessage) map[string]any {
+	if len(raw) == 0 {
+		return nil
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		return nil
+	}
+	return payload
+}
+
+func metadataLabels(meta map[string]any) []string {
+	if len(meta) == 0 {
+		return nil
+	}
+	raw, ok := meta["labels"]
+	if !ok {
+		return nil
+	}
+	switch typed := raw.(type) {
+	case []any:
+		out := make([]string, 0, len(typed))
+		for _, value := range typed {
+			if str, ok := value.(string); ok {
+				out = append(out, str)
+			}
+		}
+		return uniqueSortedStrings(out, true)
+	case []string:
+		return uniqueSortedStrings(typed, true)
+	default:
+		return nil
+	}
+}
+
+func metadataSalience(meta map[string]any) float64 {
+	if len(meta) == 0 {
+		return 0
+	}
+	for _, key := range []string{"salience", "salience_score"} {
+		raw, ok := meta[key]
+		if !ok {
+			continue
+		}
+		switch typed := raw.(type) {
+		case float64:
+			return clampUnitFloat(typed)
+		case float32:
+			return clampUnitFloat(float64(typed))
+		case int:
+			return clampUnitFloat(float64(typed))
+		case int64:
+			return clampUnitFloat(float64(typed))
+		case json.Number:
+			f, err := typed.Float64()
+			if err == nil {
+				return clampUnitFloat(f)
+			}
+		case string:
+			if parsed, err := strconv.ParseFloat(strings.TrimSpace(typed), 64); err == nil {
+				return clampUnitFloat(parsed)
+			}
+		}
+	}
+	return 0
+}
+
+func labelOverlapRatio(required map[string]struct{}, labels []string) float64 {
+	if len(required) == 0 || len(labels) == 0 {
+		return 0
+	}
+	unique := make(map[string]struct{}, len(labels))
+	for _, label := range labels {
+		normalized := strings.ToLower(strings.TrimSpace(label))
+		if normalized == "" {
+			continue
+		}
+		unique[normalized] = struct{}{}
+	}
+	if len(unique) == 0 {
+		return 0
+	}
+	overlap := 0
+	for label := range required {
+		if _, ok := unique[label]; ok {
+			overlap++
+		}
+	}
+	return float64(overlap) / float64(len(required))
+}
+
+func uniqueSortedStrings(items []string, lowercase bool) []string {
+	if len(items) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(items))
+	seen := make(map[string]struct{}, len(items))
+	for _, item := range items {
+		item = strings.TrimSpace(item)
+		if lowercase {
+			item = strings.ToLower(item)
+		}
+		if item == "" {
+			continue
+		}
+		if _, ok := seen[item]; ok {
+			continue
+		}
+		seen[item] = struct{}{}
+		out = append(out, item)
+	}
+	sort.Strings(out)
+	return out
+}
+
 func (s *Store) loadScoredArtifacts(
 	ctx context.Context,
 	candidates []artifactSimilarityCandidate,
@@ -1069,6 +1845,52 @@ func (s *Store) loadScoredArtifacts(
 	return out, nil
 }
 
+func (s *Store) normalizeEpisode(episode run.EpisodeRecord) (run.EpisodeRecord, error) {
+	episode = episode.Clone()
+	episode.ID = strings.TrimSpace(episode.ID)
+	episode.SessionID = strings.TrimSpace(episode.SessionID)
+	episode.EpisodeVersion = strings.TrimSpace(episode.EpisodeVersion)
+	episode.BoundaryKey = strings.TrimSpace(episode.BoundaryKey)
+	episode.StartTurnID = strings.TrimSpace(episode.StartTurnID)
+	episode.EndTurnID = strings.TrimSpace(episode.EndTurnID)
+	episode.Topic = strings.TrimSpace(episode.Topic)
+	episode.Summary = strings.TrimSpace(episode.Summary)
+	episode.AnchorRefs = normalizeAnchorRefs(episode.AnchorRefs)
+	episode.SalienceScore = clampUnitFloat(episode.SalienceScore)
+
+	if episode.SessionID == "" {
+		return run.EpisodeRecord{}, fmt.Errorf("v2 turns save episode: session_id is required")
+	}
+	if episode.EpisodeVersion == "" {
+		episode.EpisodeVersion = defaultArtifactVersion
+	}
+	if episode.BoundaryKey == "" {
+		return run.EpisodeRecord{}, fmt.Errorf("v2 turns save episode: boundary_key is required")
+	}
+	if episode.StartTurnID == "" || episode.EndTurnID == "" {
+		return run.EpisodeRecord{}, fmt.Errorf("v2 turns save episode: start_turn_id and end_turn_id are required")
+	}
+	if episode.StartTurnIndex > 0 && episode.EndTurnIndex > 0 && episode.EndTurnIndex < episode.StartTurnIndex {
+		return run.EpisodeRecord{}, fmt.Errorf("v2 turns save episode: end_turn_index must be >= start_turn_index")
+	}
+	if episode.ID == "" {
+		episode.ID = buildEpisodeID(episode.SessionID, episode.EpisodeVersion, episode.BoundaryKey)
+	}
+
+	now := s.now().UTC()
+	if episode.CreatedAt.IsZero() {
+		episode.CreatedAt = now
+	}
+	if episode.UpdatedAt.IsZero() {
+		episode.UpdatedAt = now
+	}
+	if episode.UpdatedAt.Before(episode.CreatedAt) {
+		episode.UpdatedAt = episode.CreatedAt
+	}
+
+	return episode, nil
+}
+
 func (s *Store) normalizeArtifact(artifact Artifact) (Artifact, error) {
 	artifact = artifact.Clone()
 	artifact.TurnID = strings.TrimSpace(artifact.TurnID)
@@ -1092,6 +1914,11 @@ func (s *Store) normalizeArtifact(artifact Artifact) (Artifact, error) {
 	}
 	artifact.ContentJSON = json.RawMessage(normalizeJSON(artifact.ContentJSON, "{}"))
 	artifact.MetadataJSON = json.RawMessage(normalizeJSON(artifact.MetadataJSON, "{}"))
+	if artifact.ArtifactType == ArtifactTypeNarrative {
+		if err := validateNarrativeArtifact(artifact.ContentJSON); err != nil {
+			return Artifact{}, err
+		}
+	}
 	for i, value := range artifact.Embedding {
 		if math.IsNaN(float64(value)) || math.IsInf(float64(value), 0) {
 			return Artifact{}, fmt.Errorf("v2 turns save artifact: embedding contains invalid value at index %d", i)
@@ -1108,6 +1935,169 @@ func (s *Store) normalizeArtifact(artifact Artifact) (Artifact, error) {
 		artifact.UpdatedAt = artifact.CreatedAt
 	}
 	return artifact, nil
+}
+
+func normalizeNarrativeRecord(narrative run.NarrativeRecord) (run.NarrativeRecord, error) {
+	narrative = narrative.Clone()
+	narrative.SessionID = strings.TrimSpace(narrative.SessionID)
+	narrative.TurnID = strings.TrimSpace(narrative.TurnID)
+	narrative.SourceTurnID = strings.TrimSpace(narrative.SourceTurnID)
+	narrative.ArtifactVersion = strings.TrimSpace(narrative.ArtifactVersion)
+	narrative.Summary = strings.TrimSpace(narrative.Summary)
+	narrative.Ref = strings.TrimSpace(narrative.Ref)
+	if narrative.SourceTurnIndex < 0 {
+		narrative.SourceTurnIndex = 0
+	}
+	if narrative.SourceTurnCount < 0 {
+		narrative.SourceTurnCount = 0
+	}
+	narrative.AnchorRefs = normalizeAnchorRefs(narrative.AnchorRefs)
+	for i := range narrative.Claims {
+		narrative.Claims[i].Text = strings.TrimSpace(narrative.Claims[i].Text)
+		narrative.Claims[i].AnchorRefs = normalizeAnchorRefs(narrative.Claims[i].AnchorRefs)
+	}
+	if narrative.SessionID == "" {
+		return run.NarrativeRecord{}, fmt.Errorf("v2 turns save narrative: session_id is required")
+	}
+	if narrative.ArtifactVersion == "" {
+		narrative.ArtifactVersion = defaultArtifactVersion
+	}
+	if len(narrative.AnchorRefs) == 0 {
+		narrative.AnchorRefs = anchorsFromClaims(narrative.Claims)
+	}
+	content := narrativeContent{
+		Summary:         narrative.Summary,
+		Claims:          cloneNarrativeClaims(narrative.Claims),
+		AnchorRefs:      append([]string(nil), narrative.AnchorRefs...),
+		SourceTurnID:    narrative.SourceTurnID,
+		SourceTurnIndex: narrative.SourceTurnIndex,
+		SourceTurnCount: narrative.SourceTurnCount,
+	}
+	if err := validateNarrativeContent(content); err != nil {
+		return run.NarrativeRecord{}, err
+	}
+	if narrative.Summary == "" {
+		narrative.Summary = summaryFromNarrativeClaims(narrative.Claims)
+	}
+	if !narrative.UpdatedAt.IsZero() {
+		narrative.UpdatedAt = narrative.UpdatedAt.UTC()
+	}
+	return narrative, nil
+}
+
+func (s *Store) resolveNarrativeTurnID(ctx context.Context, sessionID, candidateTurnID string) (string, error) {
+	sessionID = strings.TrimSpace(sessionID)
+	candidateTurnID = strings.TrimSpace(candidateTurnID)
+	if candidateTurnID != "" {
+		turn, err := s.GetTurn(ctx, candidateTurnID)
+		if err != nil {
+			return "", err
+		}
+		if strings.TrimSpace(turn.SessionID) != sessionID {
+			return "", fmt.Errorf("v2 turns save narrative: turn %s not in session %s", candidateTurnID, sessionID)
+		}
+	}
+
+	turns, err := s.ListTurns(ctx, sessionID, run.TurnListOptions{
+		Limit: 1,
+		Asc:   true,
+	})
+	if err != nil {
+		return "", err
+	}
+	if len(turns) == 0 {
+		return "", fmt.Errorf("v2 turns save narrative: no turns found for session %s", sessionID)
+	}
+	return strings.TrimSpace(turns[0].ID), nil
+}
+
+func validateNarrativeArtifact(contentJSON json.RawMessage) error {
+	var content narrativeContent
+	if len(contentJSON) > 0 {
+		if err := json.Unmarshal(contentJSON, &content); err != nil {
+			return fmt.Errorf("%w: parse content: %v", ErrInvalidNarrativeClaims, err)
+		}
+	}
+	return validateNarrativeContent(content)
+}
+
+func validateNarrativeContent(content narrativeContent) error {
+	content.Claims = cloneNarrativeClaims(content.Claims)
+	content.AnchorRefs = normalizeAnchorRefs(content.AnchorRefs)
+	if len(content.Claims) == 0 {
+		return fmt.Errorf("%w: narrative claims are required", ErrInvalidNarrativeClaims)
+	}
+	for i, claim := range content.Claims {
+		if strings.TrimSpace(claim.Text) == "" {
+			return fmt.Errorf("%w: claim[%d] text is required", ErrInvalidNarrativeClaims, i)
+		}
+		claimRefs := normalizeAnchorRefs(claim.AnchorRefs)
+		if len(claimRefs) == 0 {
+			return fmt.Errorf("%w: claim[%d] missing anchor refs", ErrInvalidNarrativeClaims, i)
+		}
+		for _, ref := range claimRefs {
+			if !strings.HasPrefix(ref, "turn/") {
+				return fmt.Errorf("%w: claim[%d] invalid anchor ref %q", ErrInvalidNarrativeClaims, i, ref)
+			}
+		}
+	}
+	if len(content.AnchorRefs) > 0 {
+		for _, ref := range content.AnchorRefs {
+			if !strings.HasPrefix(ref, "turn/") {
+				return fmt.Errorf("%w: invalid anchor ref %q", ErrInvalidNarrativeClaims, ref)
+			}
+		}
+	}
+	return nil
+}
+
+func anchorsFromClaims(claims []run.NarrativeClaim) []string {
+	refs := make([]string, 0, len(claims)*2)
+	for _, claim := range claims {
+		refs = append(refs, claim.AnchorRefs...)
+	}
+	return normalizeAnchorRefs(refs)
+}
+
+func cloneNarrativeClaims(claims []run.NarrativeClaim) []run.NarrativeClaim {
+	if len(claims) == 0 {
+		return nil
+	}
+	out := make([]run.NarrativeClaim, len(claims))
+	for i := range claims {
+		out[i] = claims[i].Clone()
+	}
+	return out
+}
+
+func summaryFromNarrativeClaims(claims []run.NarrativeClaim) string {
+	if len(claims) == 0 {
+		return ""
+	}
+	parts := make([]string, 0, 2)
+	for _, claim := range claims {
+		text := strings.TrimSpace(claim.Text)
+		if text == "" {
+			continue
+		}
+		parts = append(parts, truncate(text, 120))
+		if len(parts) >= 2 {
+			break
+		}
+	}
+	return strings.Join(parts, " ")
+}
+
+func truncate(text string, max int) string {
+	text = strings.TrimSpace(text)
+	if max <= 0 || text == "" {
+		return ""
+	}
+	runes := []rune(text)
+	if len(runes) <= max {
+		return text
+	}
+	return string(runes[:max]) + "..."
 }
 
 func (s *Store) insertArtifactWithoutVector(ctx context.Context, artifact Artifact) error {
@@ -1222,6 +2212,14 @@ func ParseArtifactRef(ref string) (turnID, artifactType, artifactVersion string,
 	return turnID, artifactType, artifactVersion, nil
 }
 
+func mustMarshalJSON(value any) json.RawMessage {
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		return json.RawMessage(`{}`)
+	}
+	return json.RawMessage(encoded)
+}
+
 func normalizeJSON(raw json.RawMessage, fallback string) string {
 	value := strings.TrimSpace(string(raw))
 	if value == "" {
@@ -1239,6 +2237,55 @@ func float32sToVectorString(values []float32) string {
 		parts[i] = fmt.Sprintf("%f", v)
 	}
 	return "[" + strings.Join(parts, ",") + "]"
+}
+
+func normalizeAnchorRefs(refs []string) []string {
+	if len(refs) == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(refs))
+	out := make([]string, 0, len(refs))
+	for _, raw := range refs {
+		ref := strings.TrimSpace(raw)
+		if ref == "" {
+			continue
+		}
+		if _, ok := seen[ref]; ok {
+			continue
+		}
+		seen[ref] = struct{}{}
+		out = append(out, ref)
+	}
+	sort.Strings(out)
+	return out
+}
+
+func clampUnitFloat(value float64) float64 {
+	if math.IsNaN(value) || math.IsInf(value, 0) {
+		return 0
+	}
+	if value < 0 {
+		return 0
+	}
+	if value > 1 {
+		return 1
+	}
+	return value
+}
+
+func buildEpisodeID(sessionID, episodeVersion, boundaryKey string) string {
+	normalizedSession := strings.TrimSpace(sessionID)
+	normalizedVersion := strings.TrimSpace(episodeVersion)
+	raw := normalizedSession + "|" + normalizedVersion + "|" + strings.TrimSpace(boundaryKey)
+	sum := sha256.Sum256([]byte(raw))
+	return fmt.Sprintf("episode|%s|%s|%s", normalizedSession, normalizedVersion, hex.EncodeToString(sum[:]))
+}
+
+func boolToInt(v bool) int {
+	if v {
+		return 1
+	}
+	return 0
 }
 
 func vectorTopKExpression(indexName string, vectorString string, k int) string {
@@ -1265,7 +2312,7 @@ func vectorCandidateLimit(opts run.ArtifactSearchOptions) int {
 }
 
 func resolveVectorDimensions(cfg dbdriver.Config) int {
-	dims := dbdriver.GetDefaultVectorDimensions()
+	dims := defaultV2TurnsVectorDimensions()
 	switch cfg.Driver {
 	case dbdriver.DriverLibSQL:
 		if cfg.LibSQL.VectorDimensions > 0 {
@@ -1279,6 +2326,53 @@ func resolveVectorDimensions(cfg dbdriver.Config) int {
 		if cfg.Postgres.VectorDimensions > 0 {
 			dims = cfg.Postgres.VectorDimensions
 		}
+	}
+	return dims
+}
+
+func defaultV2TurnsVectorDimensions() int {
+	if dims, ok := envPositiveInt("AGENTCTL_V2_TURNS_VECTOR_DIMS"); ok {
+		return dims
+	}
+	if dims, ok := envPositiveInt("AGENTCTL_VECTOR_DIMS"); ok {
+		return dims
+	}
+	return defaultV2TurnsVectorDims
+}
+
+func envPositiveInt(name string) (int, bool) {
+	raw := strings.TrimSpace(os.Getenv(name))
+	if raw == "" {
+		return 0, false
+	}
+	value, err := strconv.Atoi(raw)
+	if err != nil || value <= 0 {
+		return 0, false
+	}
+	return value, true
+}
+
+func detectArtifactVectorDimensions(ctx context.Context, db *sql.DB, fallback int) int {
+	if db == nil {
+		return fallback
+	}
+
+	var tableSQL string
+	err := db.QueryRowContext(
+		ctx,
+		`SELECT sql FROM sqlite_master WHERE type='table' AND name='v2_turn_artifacts'`,
+	).Scan(&tableSQL)
+	if err != nil {
+		return fallback
+	}
+
+	match := vectorDimsPattern.FindStringSubmatch(tableSQL)
+	if len(match) != 2 {
+		return fallback
+	}
+	dims, err := strconv.Atoi(match[1])
+	if err != nil || dims <= 0 {
+		return fallback
 	}
 	return dims
 }
@@ -1301,4 +2395,8 @@ var (
 	_ run.TurnReader                = (*Store)(nil)
 	_ run.TurnTimelineReader        = (*Store)(nil)
 	_ run.ArtifactSemanticRetriever = (*Store)(nil)
+	_ run.EpisodeWriter             = (*Store)(nil)
+	_ run.EpisodeReader             = (*Store)(nil)
+	_ run.NarrativeWriter           = (*Store)(nil)
+	_ run.NarrativeReader           = (*Store)(nil)
 )

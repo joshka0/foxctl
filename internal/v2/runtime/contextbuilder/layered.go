@@ -2,6 +2,7 @@ package contextbuilder
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -18,6 +19,8 @@ const (
 	defaultL1BudgetPct       = 25
 	defaultL0BudgetPct       = 45
 	defaultSemanticBudgetPct = 10
+	narrativeMaxAge          = 30 * time.Minute
+	layeredEventMaxRefs      = 24
 )
 
 type semanticEventJob struct {
@@ -51,11 +54,12 @@ type CompanionProvider interface {
 
 // ArtifactSemanticQuery controls optional semantic artifact retrieval.
 type ArtifactSemanticQuery struct {
-	QueryEmbedding []float32 `json:"query_embedding,omitempty"`
-	SessionID      string    `json:"session_id,omitempty"`
-	ArtifactTypes  []string  `json:"artifact_types,omitempty"`
-	Limit          int       `json:"limit,omitempty"`
-	MinSimilarity  float64   `json:"min_similarity,omitempty"`
+	QueryEmbedding []float32          `json:"query_embedding,omitempty"`
+	SessionID      string             `json:"session_id,omitempty"`
+	ArtifactTypes  []string           `json:"artifact_types,omitempty"`
+	Limit          int                `json:"limit,omitempty"`
+	MinSimilarity  float64            `json:"min_similarity,omitempty"`
+	Working        run.WorkingContext `json:"working_context,omitempty"`
 }
 
 // LayerBudget configures per-layer and total character budgets for layered
@@ -85,10 +89,12 @@ type LayeredBundle struct {
 	Content   string            `json:"content"`
 	Layers    map[string]string `json:"layers,omitempty"`
 
-	Refs         []string `json:"refs,omitempty"`
-	TurnRefs     []string `json:"turn_refs,omitempty"`
-	SliceRefs    []string `json:"slice_refs,omitempty"`
-	ArtifactRefs []string `json:"artifact_refs,omitempty"`
+	Refs          []string `json:"refs,omitempty"`
+	TurnRefs      []string `json:"turn_refs,omitempty"`
+	SliceRefs     []string `json:"slice_refs,omitempty"`
+	EpisodeRefs   []string `json:"episode_refs,omitempty"`
+	NarrativeRefs []string `json:"narrative_refs,omitempty"`
+	ArtifactRefs  []string `json:"artifact_refs,omitempty"`
 
 	Meta map[string]any `json:"meta,omitempty"`
 }
@@ -156,6 +162,18 @@ func (b *Builder) BuildLayered(ctx context.Context, req LayeredRequest) (Layered
 	if err != nil {
 		return LayeredBundle{}, err
 	}
+	episodeSince, episodeUntil := temporalBounds(l2Temporal.Buckets)
+	episodeRefs, episodeSection, episodeCount, episodeLandmarkCount := b.resolveEpisodeLayer(
+		ctx,
+		sessionID,
+		monthsLimit,
+		episodeSince,
+		episodeUntil,
+	)
+	narrativeRefs, narrativeSection, narrativePresent, narrativeVersion, narrativeClaimCount, narrativeStale, narrativeAgeSeconds, narrativeMaxAgeSeconds, narrativeErr := b.resolveNarrative(
+		ctx,
+		sessionID,
+	)
 
 	companionCtx := CompanionLayeredContext{}
 	hasSemanticBudget := req.Semantic != nil && len(req.Semantic.QueryEmbedding) > 0 && b.artifactSearcher != nil
@@ -171,6 +189,7 @@ func (b *Builder) BuildLayered(ctx context.Context, req LayeredRequest) (Layered
 
 	l2Section := joinSections(
 		strings.TrimSpace(companionCtx.L2),
+		strings.TrimSpace(episodeSection),
 		strings.TrimSpace(renderTemporalLayer(l2Temporal)),
 	)
 	l1Section := joinSections(
@@ -182,7 +201,7 @@ func (b *Builder) BuildLayered(ctx context.Context, req LayeredRequest) (Layered
 		strings.TrimSpace(renderTemporalLayer(l0Temporal)),
 	)
 
-	semanticRefs, semanticSection, semanticPath, semanticCapability, semanticErr := b.resolveSemanticArtifacts(ctx, sessionID, req.Semantic)
+	semanticRefs, semanticSection, semanticPath, semanticCapability, semanticApplied, semanticFallbackLevel, semanticEligibleCount, semanticErr := b.resolveSemanticArtifacts(ctx, sessionID, req.Semantic)
 	if budget.TotalChars > 0 {
 		if budget.L2Chars > 0 {
 			l2Section = truncateRunes(l2Section, budget.L2Chars)
@@ -208,7 +227,7 @@ func (b *Builder) BuildLayered(ctx context.Context, req LayeredRequest) (Layered
 		}
 	}
 
-	content := renderLayeredContent(l2Section, l1Section, l0Section, semanticSection)
+	content := renderLayeredContent(l2Section, narrativeSection, l1Section, l0Section, semanticSection)
 	if budget.TotalChars > 0 {
 		content = truncateRunes(content, budget.TotalChars)
 	}
@@ -221,31 +240,46 @@ func (b *Builder) BuildLayered(ctx context.Context, req LayeredRequest) (Layered
 			append([]string(nil), companionCtx.Refs...),
 			l2Temporal.ExpandableRefs...,
 		),
-		append(append(append(l1Temporal.ExpandableRefs, l0Temporal.ExpandableRefs...), sliceRefs...), semanticRefs...)...,
+		append(append(append(append(append(l1Temporal.ExpandableRefs, l0Temporal.ExpandableRefs...), sliceRefs...), episodeRefs...), narrativeRefs...), semanticRefs...)...,
 	))
 
 	meta := map[string]any{
-		"session_id":                 sessionID,
-		"has_companion":              b.companion != nil,
-		"l2_bucket_count":            len(l2Temporal.Buckets),
-		"l1_bucket_count":            len(l1Temporal.Buckets),
-		"l0_bucket_count":            len(l0Temporal.Buckets),
-		"expandable_date_cnt":        len(uniqueStrings(append(l1Temporal.ExpandableDates, l2Temporal.ExpandableDates...))),
-		"artifact_search_path":       string(semanticPath),
-		"artifact_vector_capability": string(semanticCapability),
-		"artifact_hit_count":         len(semanticRefs),
-		"artifact_hit_bucket":        semanticHitBucket(len(semanticRefs)),
-		"budget_total_chars":         budget.TotalChars,
-		"budget_l2_chars":            budget.L2Chars,
-		"budget_l1_chars":            budget.L1Chars,
-		"budget_l0_chars":            budget.L0Chars,
-		"budget_semantic_chars":      budget.SemanticChars,
+		"session_id":                     sessionID,
+		"has_companion":                  b.companion != nil,
+		"l2_bucket_count":                len(l2Temporal.Buckets),
+		"l1_bucket_count":                len(l1Temporal.Buckets),
+		"l0_bucket_count":                len(l0Temporal.Buckets),
+		"episode_count":                  episodeCount,
+		"episode_landmark_count":         episodeLandmarkCount,
+		"narrative_present":              narrativePresent,
+		"narrative_version":              narrativeVersion,
+		"narrative_claim_count":          narrativeClaimCount,
+		"narrative_ref_count":            len(narrativeRefs),
+		"narrative_stale":                narrativeStale,
+		"narrative_age_seconds":          narrativeAgeSeconds,
+		"narrative_max_age_seconds":      narrativeMaxAgeSeconds,
+		"expandable_date_cnt":            len(uniqueStrings(append(l1Temporal.ExpandableDates, l2Temporal.ExpandableDates...))),
+		"artifact_search_path":           string(semanticPath),
+		"artifact_vector_capability":     string(semanticCapability),
+		"artifact_hit_count":             len(semanticRefs),
+		"artifact_hit_bucket":            semanticHitBucket(len(semanticRefs)),
+		"working_context_applied":        semanticApplied,
+		"working_context_fallback_level": semanticFallbackLevel,
+		"working_context_eligible_count": semanticEligibleCount,
+		"budget_total_chars":             budget.TotalChars,
+		"budget_l2_chars":                budget.L2Chars,
+		"budget_l1_chars":                budget.L1Chars,
+		"budget_l0_chars":                budget.L0Chars,
+		"budget_semantic_chars":          budget.SemanticChars,
 	}
 	if semanticErr != "" {
 		meta["artifact_search_error"] = semanticErr
 	}
+	if strings.TrimSpace(narrativeErr) != "" {
+		meta["narrative_error"] = strings.TrimSpace(narrativeErr)
+	}
 
-	return LayeredBundle{
+	bundle := LayeredBundle{
 		SessionID: sessionID,
 		Content:   content,
 		Layers: map[string]string{
@@ -253,12 +287,16 @@ func (b *Builder) BuildLayered(ctx context.Context, req LayeredRequest) (Layered
 			"L1": l1Section,
 			"L0": l0Section,
 		},
-		Refs:         refs,
-		TurnRefs:     turnRefs,
-		SliceRefs:    sliceRefs,
-		ArtifactRefs: semanticRefs,
-		Meta:         meta,
-	}, nil
+		Refs:          refs,
+		TurnRefs:      turnRefs,
+		SliceRefs:     sliceRefs,
+		EpisodeRefs:   episodeRefs,
+		NarrativeRefs: narrativeRefs,
+		ArtifactRefs:  semanticRefs,
+		Meta:          meta,
+	}
+	b.emitLayeredBundleEvent(ctx, bundle)
+	return bundle, nil
 }
 
 func collectTurnRefs(temporal ...TemporalBundle) []string {
@@ -291,10 +329,13 @@ func renderTemporalLayer(bundle TemporalBundle) string {
 	return strings.TrimSpace(sb.String())
 }
 
-func renderLayeredContent(l2, l1, l0, semantic string) string {
+func renderLayeredContent(l2, narrative, l1, l0, semantic string) string {
 	var sections []string
 	if strings.TrimSpace(l2) != "" {
 		sections = append(sections, "## L2 History\n"+strings.TrimSpace(l2))
+	}
+	if strings.TrimSpace(narrative) != "" {
+		sections = append(sections, "## Narrative\n"+strings.TrimSpace(narrative))
 	}
 	if strings.TrimSpace(l1) != "" {
 		sections = append(sections, "## L1 Recent\n"+strings.TrimSpace(l1))
@@ -379,11 +420,20 @@ func (b *Builder) resolveSemanticArtifacts(
 	ctx context.Context,
 	defaultSessionID string,
 	query *ArtifactSemanticQuery,
-) (refs []string, section string, path run.ArtifactSearchPath, capability run.ArtifactVectorCapability, errText string) {
+) (
+	refs []string,
+	section string,
+	path run.ArtifactSearchPath,
+	capability run.ArtifactVectorCapability,
+	workingApplied bool,
+	workingFallbackLevel int,
+	workingEligibleCount int,
+	errText string,
+) {
 	path = run.ArtifactSearchPathDisabled
 	capability = run.ArtifactVectorCapabilityUnknown
 	if query == nil || len(query.QueryEmbedding) == 0 {
-		return nil, "", path, capability, ""
+		return nil, "", path, capability, false, 0, 0, ""
 	}
 
 	startedAt := time.Now()
@@ -392,16 +442,37 @@ func (b *Builder) resolveSemanticArtifacts(
 		sessionID = strings.TrimSpace(defaultSessionID)
 	}
 
-	finalize := func(refs []string, section string, path run.ArtifactSearchPath, capability run.ArtifactVectorCapability, errText string) ([]string, string, run.ArtifactSearchPath, run.ArtifactVectorCapability, string) {
+	finalize := func(
+		refs []string,
+		section string,
+		path run.ArtifactSearchPath,
+		capability run.ArtifactVectorCapability,
+		workingApplied bool,
+		workingFallbackLevel int,
+		workingEligibleCount int,
+		errText string,
+	) ([]string, string, run.ArtifactSearchPath, run.ArtifactVectorCapability, bool, int, int, string) {
 		if b != nil {
 			elapsed := time.Since(startedAt)
 			b.recordArtifactSearch(path, capability, len(refs), elapsed)
-			b.emitSemanticArtifactSearchEvent(ctx, sessionID, query, path, capability, len(refs), errText, elapsed)
+			b.emitSemanticArtifactSearchEvent(
+				ctx,
+				sessionID,
+				query,
+				path,
+				capability,
+				workingApplied,
+				workingFallbackLevel,
+				workingEligibleCount,
+				len(refs),
+				errText,
+				elapsed,
+			)
 		}
-		return refs, section, path, capability, errText
+		return refs, section, path, capability, workingApplied, workingFallbackLevel, workingEligibleCount, errText
 	}
 	if b == nil || b.artifactSearcher == nil {
-		return finalize(nil, "", path, run.ArtifactVectorCapabilityDisabled, "")
+		return finalize(nil, "", path, run.ArtifactVectorCapabilityDisabled, false, 0, 0, "")
 	}
 
 	searchResult, err := b.artifactSearcher.SearchArtifactsByEmbedding(ctx, query.QueryEmbedding, run.ArtifactSearchOptions{
@@ -409,9 +480,10 @@ func (b *Builder) resolveSemanticArtifacts(
 		ArtifactTypes: append([]string(nil), query.ArtifactTypes...),
 		Limit:         query.Limit,
 		MinSimilarity: query.MinSimilarity,
+		Working:       query.Working,
 	})
 	if err != nil {
-		return finalize(nil, "", run.ArtifactSearchPathError, capability, strings.TrimSpace(err.Error()))
+		return finalize(nil, "", run.ArtifactSearchPathError, capability, false, 0, 0, strings.TrimSpace(err.Error()))
 	}
 
 	path = searchResult.SearchPath
@@ -425,7 +497,16 @@ func (b *Builder) resolveSemanticArtifacts(
 
 	hits := normalizeSemanticHits(searchResult.Hits, query.MinSimilarity, query.Limit)
 	if len(hits) == 0 {
-		return finalize(nil, "", path, capability, "")
+		return finalize(
+			nil,
+			"",
+			path,
+			capability,
+			searchResult.WorkingApplied,
+			searchResult.FallbackLevel,
+			searchResult.EligibleCount,
+			"",
+		)
 	}
 
 	lines := make([]string, 0, len(hits))
@@ -449,7 +530,16 @@ func (b *Builder) resolveSemanticArtifacts(
 	}
 
 	refs = uniqueStrings(refs)
-	return finalize(refs, strings.Join(lines, "\n"), path, capability, "")
+	return finalize(
+		refs,
+		strings.Join(lines, "\n"),
+		path,
+		capability,
+		searchResult.WorkingApplied,
+		searchResult.FallbackLevel,
+		searchResult.EligibleCount,
+		"",
+	)
 }
 
 func (b *Builder) emitSemanticArtifactSearchEvent(
@@ -458,6 +548,9 @@ func (b *Builder) emitSemanticArtifactSearchEvent(
 	query *ArtifactSemanticQuery,
 	path run.ArtifactSearchPath,
 	capability run.ArtifactVectorCapability,
+	workingApplied bool,
+	workingFallbackLevel int,
+	workingEligibleCount int,
 	hitCount int,
 	errText string,
 	duration time.Duration,
@@ -477,6 +570,9 @@ func (b *Builder) emitSemanticArtifactSearchEvent(
 		WithData("hit_bucket", semanticHitBucket(hitCount)).
 		WithData("session_id", sessionID).
 		WithData("query_dims", len(query.QueryEmbedding)).
+		WithData("working_context_applied", workingApplied).
+		WithData("working_context_fallback_level", workingFallbackLevel).
+		WithData("working_context_eligible_count", workingEligibleCount).
 		EnrichFromContext(ctx)
 
 	if parentID := strings.TrimSpace(observability.SpanIDFromContext(ctx)); parentID != "" {
@@ -562,6 +658,54 @@ func emitWideEventAsync(ctx context.Context, event *observability.WideEvent) {
 	}
 }
 
+func (b *Builder) emitLayeredBundleEvent(ctx context.Context, bundle LayeredBundle) {
+	sessionID := strings.TrimSpace(bundle.SessionID)
+	if sessionID == "" {
+		return
+	}
+
+	event := observability.NewEvent(observability.OpContextLayeredBundle).
+		WithComponent(observability.ComponentContextBuilder).
+		WithCommand("contextbuilder.layered").
+		WithSession(sessionID, "").
+		WithData("session_id", sessionID).
+		WithData("ref_count", len(bundle.Refs)).
+		WithData("turn_ref_count", len(bundle.TurnRefs)).
+		WithData("slice_ref_count", len(bundle.SliceRefs)).
+		WithData("episode_ref_count", len(bundle.EpisodeRefs)).
+		WithData("narrative_ref_count", len(bundle.NarrativeRefs)).
+		WithData("artifact_ref_count", len(bundle.ArtifactRefs)).
+		WithData("refs", clampRefList(bundle.Refs, layeredEventMaxRefs)).
+		WithData("turn_refs", clampRefList(bundle.TurnRefs, layeredEventMaxRefs)).
+		WithData("slice_refs", clampRefList(bundle.SliceRefs, layeredEventMaxRefs)).
+		WithData("episode_refs", clampRefList(bundle.EpisodeRefs, layeredEventMaxRefs)).
+		WithData("narrative_refs", clampRefList(bundle.NarrativeRefs, layeredEventMaxRefs)).
+		WithData("artifact_refs", clampRefList(bundle.ArtifactRefs, layeredEventMaxRefs)).
+		EnrichFromContext(ctx)
+
+	if parentID := strings.TrimSpace(observability.SpanIDFromContext(ctx)); parentID != "" {
+		event.WithParentID(parentID)
+	}
+	if bundle.Meta != nil {
+		if v, ok := bundle.Meta["artifact_search_path"]; ok {
+			event.WithData("artifact_search_path", v)
+		}
+		if v, ok := bundle.Meta["artifact_vector_capability"]; ok {
+			event.WithData("artifact_vector_capability", v)
+		}
+		if v, ok := bundle.Meta["artifact_hit_count"]; ok {
+			event.WithData("artifact_hit_count", v)
+		}
+		if v, ok := bundle.Meta["narrative_stale"]; ok {
+			event.WithData("narrative_stale", v)
+		}
+		if v, ok := bundle.Meta["working_context_applied"]; ok {
+			event.WithData("working_context_applied", v)
+		}
+	}
+	emitWideEventAsync(ctx, event.Success(0))
+}
+
 func normalizeSemanticHits(hits []run.ScoredArtifact, minSimilarity float64, limit int) []run.ScoredArtifact {
 	filtered := make([]run.ScoredArtifact, 0, len(hits))
 	for _, hit := range hits {
@@ -611,6 +755,16 @@ func semanticRef(hit run.ScoredArtifact) string {
 	return fmt.Sprintf("turn/%s/artifact/%s/%s", turnID, artifactType, artifactVersion)
 }
 
+func clampRefList(refs []string, max int) []string {
+	refs = uniqueStrings(refs)
+	if max <= 0 || len(refs) <= max {
+		return append([]string(nil), refs...)
+	}
+	out := make([]string, max)
+	copy(out, refs[:max])
+	return out
+}
+
 func joinSections(parts ...string) string {
 	var out []string
 	for _, part := range parts {
@@ -621,6 +775,174 @@ func joinSections(parts ...string) string {
 		out = append(out, part)
 	}
 	return strings.Join(out, "\n\n")
+}
+
+func (b *Builder) resolveNarrative(
+	ctx context.Context,
+	sessionID string,
+) (
+	refs []string,
+	section string,
+	present bool,
+	version string,
+	claimCount int,
+	stale bool,
+	ageSeconds int64,
+	maxAgeSeconds int64,
+	errText string,
+) {
+	maxAgeSeconds = int64(narrativeMaxAge.Seconds())
+	if b == nil || b.narrativeReader == nil {
+		return nil, "", false, "", 0, false, 0, maxAgeSeconds, ""
+	}
+	narrative, err := b.narrativeReader.GetNarrative(ctx, sessionID, "v1")
+	if errors.Is(err, run.ErrNarrativeNotFound) {
+		return nil, "", false, "", 0, false, 0, maxAgeSeconds, ""
+	}
+	if err != nil {
+		return nil, "", false, "", 0, false, 0, maxAgeSeconds, strings.TrimSpace(err.Error())
+	}
+
+	narrative = narrative.Clone()
+	present = true
+	version = strings.TrimSpace(narrative.ArtifactVersion)
+	claimCount = len(narrative.Claims)
+	now := b.now().UTC()
+	if !narrative.UpdatedAt.IsZero() {
+		age := now.Sub(narrative.UpdatedAt.UTC())
+		if age < 0 {
+			age = 0
+		}
+		ageSeconds = int64(age.Seconds())
+		stale = age >= narrativeMaxAge
+	}
+
+	lines := make([]string, 0, 1+len(narrative.Claims))
+	if summary := strings.TrimSpace(narrative.Summary); summary != "" {
+		lines = append(lines, "- "+truncateRunes(summary, 220))
+	}
+	for _, claim := range narrative.Claims {
+		text := strings.TrimSpace(claim.Text)
+		if text == "" {
+			continue
+		}
+		claimRefs := uniqueStrings(claim.AnchorRefs)
+		line := "- " + truncateRunes(text, 180)
+		if len(claimRefs) > 0 {
+			line += " [" + strings.Join(claimRefs, ", ") + "]"
+		}
+		lines = append(lines, line)
+	}
+
+	if ref := strings.TrimSpace(narrative.Ref); ref != "" {
+		refs = append(refs, ref)
+	}
+	refs = append(refs, uniqueStrings(narrative.AnchorRefs)...)
+	refs = uniqueStrings(refs)
+	if len(lines) == 0 {
+		return refs, "", present, version, claimCount, stale, ageSeconds, maxAgeSeconds, ""
+	}
+	return refs, strings.Join(lines, "\n"), present, version, claimCount, stale, ageSeconds, maxAgeSeconds, ""
+}
+
+func (b *Builder) resolveEpisodeLayer(
+	ctx context.Context,
+	sessionID string,
+	limit int,
+	since time.Time,
+	until time.Time,
+) (refs []string, section string, count int, landmarkCount int) {
+	if b == nil || b.episodeReader == nil {
+		return nil, "", 0, 0
+	}
+	if limit <= 0 {
+		limit = 6
+	}
+	episodes, err := b.episodeReader.ListEpisodes(ctx, sessionID, run.EpisodeListOptions{
+		Limit: limit,
+		Asc:   false,
+		Since: since,
+		Until: until,
+	})
+	if err != nil {
+		event := observability.NewEvent(observability.OpContextLayeredBundle).
+			WithComponent(observability.ComponentContextBuilder).
+			WithCommand("contextbuilder.layered").
+			WithSession(sessionID, "").
+			WithData("session_id", sessionID).
+			WithData("phase", "episode_layer").
+			WithData("limit", limit).
+			EnrichFromContext(ctx)
+		if !since.IsZero() {
+			event.WithData("since", since.UTC().Format(time.RFC3339))
+		}
+		if !until.IsZero() {
+			event.WithData("until", until.UTC().Format(time.RFC3339))
+		}
+		emitWideEventAsync(ctx, event.ErrorWithDetails(
+			"episode_layer",
+			"EEPISODE_LAYER",
+			strings.TrimSpace(err.Error()),
+			true,
+			0))
+		return nil, "", 0, 0
+	}
+	if len(episodes) == 0 {
+		return nil, "", 0, 0
+	}
+
+	lines := make([]string, 0, len(episodes))
+	refs = make([]string, 0, len(episodes)*2)
+	for _, episode := range episodes {
+		episode = episode.Clone()
+		episodeID := strings.TrimSpace(episode.ID)
+		if episodeID == "" {
+			continue
+		}
+		if episode.IsLandmark {
+			landmarkCount++
+		}
+		refs = append(refs, "episode/"+episodeID)
+		refs = append(refs, episode.AnchorRefs...)
+
+		label := strings.TrimSpace(episode.Topic)
+		if label == "" {
+			label = episode.BoundaryKey
+		}
+		line := fmt.Sprintf("- %s [%d-%d]", label, episode.StartTurnIndex, episode.EndTurnIndex)
+		if episode.IsLandmark {
+			line += " [landmark]"
+		}
+		if summary := strings.TrimSpace(episode.Summary); summary != "" {
+			line += ": " + truncateRunes(summary, 140)
+		}
+		lines = append(lines, line)
+	}
+
+	refs = uniqueStrings(refs)
+	count = len(lines)
+	if count == 0 {
+		return refs, "", 0, 0
+	}
+	return refs, strings.Join(lines, "\n"), count, landmarkCount
+}
+
+func temporalBounds(buckets []TemporalBucket) (since time.Time, until time.Time) {
+	if len(buckets) == 0 {
+		return time.Time{}, time.Time{}
+	}
+	for _, bucket := range buckets {
+		if bucket.StartAt.IsZero() && bucket.EndAt.IsZero() {
+			continue
+		}
+		if since.IsZero() || (!bucket.StartAt.IsZero() && bucket.StartAt.Before(since)) {
+			since = bucket.StartAt
+		}
+		if until.IsZero() || (!bucket.EndAt.IsZero() && bucket.EndAt.After(until)) {
+			until = bucket.EndAt
+		}
+	}
+	return since, until
 }
 
 func uniqueStrings(items []string) []string {

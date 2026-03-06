@@ -60,6 +60,10 @@ func DetectProviderFromFile(path string) (Provider, error) {
 
 // ParseClaudeFile converts a Claude JSONL conversation into canonical v2 turns.
 func ParseClaudeFile(path, sessionID, workspacePath, actorID string) (ParsedSession, error) {
+	return parseClaudeFileWithClock(path, sessionID, workspacePath, actorID, func() time.Time { return time.Now().UTC() })
+}
+
+func parseClaudeFileWithClock(path, sessionID, workspacePath, actorID string, now func() time.Time) (ParsedSession, error) {
 	reader, err := claudejsonl.OpenReader(path)
 	if err != nil {
 		return ParsedSession{}, fmt.Errorf("parse claude file: %w", err)
@@ -71,7 +75,7 @@ func ParseClaudeFile(path, sessionID, workspacePath, actorID string) (ParsedSess
 		return ParsedSession{}, fmt.Errorf("parse claude file: missing session_id")
 	}
 
-	asm := newTurnAssembler(ProviderClaude, sessionID, actorID)
+	asm := newTurnAssembler(ProviderClaude, sessionID, actorID, now)
 	for {
 		rm, err := reader.Next()
 		if err != nil {
@@ -128,6 +132,10 @@ func ParseClaudeFile(path, sessionID, workspacePath, actorID string) (ParsedSess
 
 // ParseCodexFile converts a Codex JSONL conversation into canonical v2 turns.
 func ParseCodexFile(path, sessionID, workspacePath, actorID string) (ParsedSession, error) {
+	return parseCodexFileWithClock(path, sessionID, workspacePath, actorID, func() time.Time { return time.Now().UTC() })
+}
+
+func parseCodexFileWithClock(path, sessionID, workspacePath, actorID string, now func() time.Time) (ParsedSession, error) {
 	reader, err := codexjsonl.OpenReader(path)
 	if err != nil {
 		return ParsedSession{}, fmt.Errorf("parse codex file: %w", err)
@@ -142,7 +150,7 @@ func ParseCodexFile(path, sessionID, workspacePath, actorID string) (ParsedSessi
 		return ParsedSession{}, fmt.Errorf("parse codex file: missing session_id")
 	}
 
-	asm := newTurnAssembler(ProviderCodex, sessionID, actorID)
+	asm := newTurnAssembler(ProviderCodex, sessionID, actorID, now)
 	for {
 		rm, err := reader.Next()
 		if err != nil {
@@ -218,12 +226,15 @@ type turnAssembler struct {
 	hasTool  bool
 }
 
-func newTurnAssembler(provider Provider, sessionID, actorID string) *turnAssembler {
+func newTurnAssembler(provider Provider, sessionID, actorID string, now func() time.Time) *turnAssembler {
+	if now == nil {
+		now = func() time.Time { return time.Now().UTC() }
+	}
 	return &turnAssembler{
 		provider:    provider,
 		sessionID:   sanitizeRefSegment(sessionID),
 		actorID:     strings.TrimSpace(actorID),
-		now:         func() time.Time { return time.Now().UTC() },
+		now:         now,
 		nextTurnIdx: 1,
 		toolByID:    make(map[string]toolLocation),
 	}

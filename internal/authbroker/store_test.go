@@ -60,6 +60,7 @@ func TestStore_UpsertTokenAndGetToken(t *testing.T) {
 	}
 	if got == nil {
 		t.Fatalf("GetToken() returned nil")
+		return
 	}
 	if got.ID != row.ID || got.Provider != row.Provider || got.ExpiresAtMS != row.ExpiresAtMS {
 		t.Fatalf("GetToken() unexpected row: %+v", *got)
@@ -224,6 +225,7 @@ func TestStore_CreateAndGetAuthRequest(t *testing.T) {
 	}
 	if got == nil {
 		t.Fatalf("GetAuthRequest() returned nil")
+		return
 	}
 	if got.StateNonce != row.StateNonce || got.ReplyContext != row.ReplyContext || got.Provider != row.Provider {
 		t.Fatalf("GetAuthRequest() unexpected row: %+v", *got)
@@ -256,6 +258,7 @@ func TestStore_GetAuthRequestByNonce(t *testing.T) {
 	}
 	if got == nil {
 		t.Fatalf("GetAuthRequestByNonce() returned nil")
+		return
 	}
 	if got.ID != row.ID {
 		t.Fatalf("expected ID %q, got %q", row.ID, got.ID)
@@ -293,6 +296,7 @@ func TestStore_CompleteAuthRequestSetsCompletedAt(t *testing.T) {
 	}
 	if got == nil {
 		t.Fatalf("GetAuthRequest() returned nil")
+		return
 	}
 	if got.CompletedAtMS == nil || *got.CompletedAtMS != completedAt {
 		t.Fatalf("expected CompletedAtMS=%d, got %+v", completedAt, got.CompletedAtMS)

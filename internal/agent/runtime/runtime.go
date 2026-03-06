@@ -160,6 +160,7 @@ type Session struct {
 	// ConversationHistory accumulates user/assistant messages across engine Run() calls
 	// so that follow-up turns (autonomous continuation, mailbox ask) have full context.
 	ConversationHistory []engine.Message
+	endTickRequested    bool
 	cancel              context.CancelFunc
 	done                chan struct{} // closed when runSession exits
 	mu                  sync.RWMutex
@@ -234,8 +235,11 @@ func (r *Runtime) Spawn(ctx context.Context, cfg types.AgentConfig) (*Session, e
 	if cfg.MaxIterations <= 0 {
 		cfg.MaxIterations = r.config.DefaultMaxIterations
 	}
-	if cfg.Timeout <= 0 {
+	if cfg.Timeout == 0 {
 		cfg.Timeout = r.config.DefaultTimeout
+	}
+	if cfg.Timeout < 0 {
+		cfg.Timeout = 0
 	}
 	if cfg.LLMProvider == "" {
 		cfg.LLMProvider = r.config.LLMProvider
@@ -354,11 +358,17 @@ func (r *Runtime) createEngine(cfg types.AgentConfig, sessionID string) (*engine
 	if provider == "" {
 		provider = r.config.LLMProvider
 	}
+	if cfg.ExecMode == agent.ModeTick {
+		provider = "lmstudio"
+	}
 
 	// Resolve model: agent → runtime → provider-specific default
 	model := cfg.LLMModel
 	if model == "" {
 		model = r.config.LLMModel
+	}
+	if cfg.ExecMode == agent.ModeTick && model == "" {
+		model = llmproviders.DefaultModelForProvider("lmstudio")
 	}
 	if model == "" && provider != "" {
 		model = llmproviders.DefaultModelForProvider(provider)
@@ -434,6 +444,9 @@ func (r *Runtime) createToolExecutor(cfg types.AgentConfig, sessionID string) (e
 		toolDefs:        toolDefs,
 		llmProvider:     cfg.LLMProvider,
 		llmModel:        cfg.LLMModel,
+		endTick: func(ctx context.Context) error {
+			return r.requestEndTick(ctx, sessionID)
+		},
 	}
 
 	// Overseer agents get runtime access for agent management
@@ -461,6 +474,7 @@ type agentToolExecutor struct {
 	toolDefs        []engine.ToolDef
 	llmProvider     string // Agent's configured LLM provider
 	llmModel        string // Agent's configured LLM model
+	endTick         func(context.Context) error
 	// runtime is set for overseer agents to enable agent management
 	runtime *Runtime
 }
@@ -493,6 +507,8 @@ func (e *agentToolExecutor) Execute(ctx context.Context, name string, args json.
 		return e.executeCodeSearch(ctx, argsMap)
 	case "think":
 		return e.executeThink(ctx, argsMap)
+	case "end_tick":
+		return e.executeEndTick(ctx, argsMap)
 	// Mailbox tools
 	case "mail_inbox":
 		return e.executeMailInbox(ctx, argsMap)
@@ -657,6 +673,16 @@ func (e *agentToolExecutor) executeThink(ctx context.Context, args map[string]an
 	thought, _ := args["thought"].(string)
 	// Think is just a reflection tool - return the thought as acknowledgment
 	return fmt.Sprintf("Acknowledged: %s", thought), nil
+}
+
+func (e *agentToolExecutor) executeEndTick(ctx context.Context, _ map[string]any) (string, error) {
+	if e.endTick == nil {
+		return "", fmt.Errorf("end_tick is not available")
+	}
+	if err := e.endTick(ctx); err != nil {
+		return "", err
+	}
+	return `{"status":"requested","ended":true}`, nil
 }
 
 // --- Mailbox tool executors ---
@@ -1231,12 +1257,12 @@ func (e *agentToolExecutor) executeContextFilter(ctx context.Context, args map[s
 		"prompt": prompt,
 	}
 
-	// Use agent's configured LLM provider, falling back to openrouter
+	// Use agent's configured LLM provider, falling back to LM Studio.
 	llmCfg := map[string]any{}
 	if e.llmProvider != "" {
 		llmCfg["provider"] = e.llmProvider
 	} else {
-		llmCfg["provider"] = "openrouter"
+		llmCfg["provider"] = "lmstudio"
 	}
 	if e.llmModel != "" {
 		llmCfg["model"] = e.llmModel
@@ -1550,6 +1576,11 @@ func buildToolDefsForRole(role types.AgentRole, hasMailbox, hasBoard bool, allow
 			Name:        "think",
 			Description: "Record your reasoning or analysis without taking action",
 			Parameters:  json.RawMessage(`{"type":"object","properties":{"thought":{"type":"string","description":"Your reasoning or analysis"}},"required":["thought"]}`),
+		},
+		{
+			Name:        "end_tick",
+			Description: "Gracefully end the current tick-mode agent loop when no further scheduled work is needed.",
+			Parameters:  json.RawMessage(`{"type":"object","properties":{}}`),
 		},
 	}
 
@@ -2015,8 +2046,13 @@ func (r *Runtime) runSession(ctx context.Context, session *Session) {
 		}
 	}()
 
-	// Apply timeout
-	ctx, cancel := context.WithTimeout(ctx, session.Config.Timeout)
+	// Apply session timeout when configured. A zero timeout means no outer session deadline.
+	var cancel context.CancelFunc
+	if session.Config.Timeout > 0 {
+		ctx, cancel = context.WithTimeout(ctx, session.Config.Timeout)
+	} else {
+		ctx, cancel = context.WithCancel(ctx)
+	}
 	defer cancel()
 
 	// Check if context is already canceled
@@ -2252,10 +2288,20 @@ func (r *Runtime) runSession(ctx context.Context, session *Session) {
 		session.mu.Unlock()
 		r.persistSessionStatus(session)
 
-		// Default think interval: 60 seconds
-		thinkInterval := 60 * time.Second
+		thinkInterval := scheduledTickInterval(session.Config.ThinkInterval)
 
 		// Enter message loop with proactive think cycles (blocks until context canceled)
+		r.runMessageLoop(ctx, session, thinkInterval)
+
+	case agent.ModeTick:
+		// Tick mode: stay alive with interval-driven simulation/work cycles + message polling
+		session.mu.Lock()
+		session.Status = types.StatusRunning
+		session.mu.Unlock()
+		r.persistSessionStatus(session)
+
+		thinkInterval := scheduledTickInterval(session.Config.ThinkInterval)
+
 		r.runMessageLoop(ctx, session, thinkInterval)
 
 	default:
@@ -2266,7 +2312,13 @@ func (r *Runtime) runSession(ctx context.Context, session *Session) {
 	session.mu.Lock()
 	now := time.Now()
 	session.EndedAt = &now
-	if ctx.Err() == context.Canceled {
+	if session.endTickRequested {
+		session.Status = types.StatusOK
+		session.Error = ""
+		if bestResult == "" {
+			bestResult = "tick ended"
+		}
+	} else if ctx.Err() == context.Canceled {
 		session.Status = types.StatusCanceled
 		session.Error = "session canceled"
 	} else if ctx.Err() == context.DeadlineExceeded {
@@ -3068,7 +3120,7 @@ func (r *Runtime) continuationPrompt(session *Session) string {
 // - Related: Runtime.processMailboxMessages, Runtime.runProactiveThink
 // - Keywords: mailbox_poll, proactive, think_interval
 func (r *Runtime) runMessageLoop(ctx context.Context, session *Session, thinkInterval time.Duration) {
-	if r.config.MailboxStore == nil {
+	if r.config.MailboxStore == nil && !isTickDrivenMode(session.Config.ExecMode) {
 		return
 	}
 
@@ -3077,9 +3129,9 @@ func (r *Runtime) runMessageLoop(ctx context.Context, session *Session, thinkInt
 
 	var thinkTicker *time.Ticker
 	var thinkChan <-chan time.Time
-	isProactive := session.Config.ExecMode == agent.ModeProactive
+	isTickDriven := isTickDrivenMode(session.Config.ExecMode)
 
-	if isProactive && thinkInterval > 0 {
+	if isTickDriven && thinkInterval > 0 {
 		thinkTicker = time.NewTicker(thinkInterval)
 		thinkChan = thinkTicker.C
 		defer thinkTicker.Stop()
@@ -3089,13 +3141,18 @@ func (r *Runtime) runMessageLoop(ctx context.Context, session *Session, thinkInt
 	actorNS := session.Config.ActorID
 
 	for {
+		if r.endTickRequested(session) {
+			return
+		}
 		select {
 		case <-ctx.Done():
 			return
 		case <-pollTicker.C:
-			r.processMailboxMessages(ctx, session, actorNS)
+			if r.config.MailboxStore != nil {
+				r.processMailboxMessages(ctx, session, actorNS)
+			}
 		case <-thinkChan:
-			r.runProactiveThink(ctx, session)
+			r.runScheduledThink(ctx, session)
 		}
 	}
 }
@@ -3277,14 +3334,9 @@ func extractAskID(msg agent.Message) string {
 // - Observability: emits agent proactive iteration events
 // - Related: Runtime.runMessageLoop
 // - Keywords: proactive, think_prompt, iterations
-func (r *Runtime) runProactiveThink(ctx context.Context, session *Session) {
-	thinkPrompt := `You are in proactive mode. Check if there is any work that needs to be done:
-1. Review any pending tasks or todos
-2. Check for any issues that need attention
-3. Look for opportunities to help
-
-If there is work to do, start working on the highest priority item.
-If there is nothing to do, respond with 'NO_WORK_NEEDED'.`
+func (r *Runtime) runScheduledThink(ctx context.Context, session *Session) {
+	thinkPrompt := scheduledThinkPrompt(session.Config.ExecMode)
+	eventName := scheduledThinkEventName(session.Config.ExecMode)
 
 	// Persist user turn before running engine
 	_ = r.saveTurn(ctx, session.ID, session.nextTurnIndex(), "user", thinkPrompt, nil, 0)
@@ -3301,7 +3353,7 @@ If there is nothing to do, respond with 'NO_WORK_NEEDED'.`
 
 	output, err := session.Engine.Run(ctx, engineInput)
 	if err != nil {
-		observability.Emit(ctx, observability.NewEvent("agent.proactive_think_error").
+		observability.Emit(ctx, observability.NewEvent(eventName+"_error").
 			WithComponent(observability.ComponentAgent).
 			WithSession(session.ID, session.Config.ActorID).
 			WithWorkspace(r.config.WorkspaceRoot).
@@ -3311,6 +3363,10 @@ If there is nothing to do, respond with 'NO_WORK_NEEDED'.`
 
 	// Persist assistant turn after engine run
 	_ = r.saveTurn(ctx, session.ID, session.nextTurnIndex(), "assistant", output.AssistantText, output.ToolCalls, output.Tokens.TotalTokens)
+
+	if r.endTickRequested(session) {
+		return
+	}
 
 	if containsNoWork(output.AssistantText) {
 		return
@@ -3343,11 +3399,10 @@ If there is nothing to do, respond with 'NO_WORK_NEEDED'.`
 		WithData("tool_calls", len(output.ToolCalls)).
 		WithData("tool_names", toolNames).
 		WithData("tokens_used", output.Tokens.TotalTokens).
-		WithData("proactive_think", true).
+		WithData(eventName, true).
 		Success(0))
 
-	// Emit proactive work event
-	observability.Emit(ctx, observability.NewEvent("agent.proactive_work").
+	observability.Emit(ctx, observability.NewEvent("agent."+eventName+"_work").
 		WithComponent(observability.ComponentAgent).
 		WithSession(session.ID, session.Config.ActorID).
 		WithWorkspace(r.config.WorkspaceRoot).
@@ -3357,4 +3412,63 @@ If there is nothing to do, respond with 'NO_WORK_NEEDED'.`
 	if session.Config.MaxAutoTurns > 1 {
 		r.runAutonomousContinuation(ctx, session, output.AssistantText, nil)
 	}
+}
+
+func isTickDrivenMode(mode agent.ExecutionMode) bool {
+	return mode == agent.ModeProactive || mode == agent.ModeTick
+}
+
+func scheduledTickInterval(seconds int) time.Duration {
+	interval := time.Duration(seconds) * time.Second
+	if interval <= 0 {
+		return 60 * time.Second
+	}
+	return interval
+}
+
+func scheduledThinkEventName(mode agent.ExecutionMode) string {
+	if mode == agent.ModeTick {
+		return "tick_cycle"
+	}
+	return "proactive_think"
+}
+
+func scheduledThinkPrompt(mode agent.ExecutionMode) string {
+	if mode == agent.ModeTick {
+		return `You are in tick mode. This is one scheduled simulation/work tick.
+Advance the current work by one step using the latest context.
+If no action is required on this tick, respond with 'NO_WORK_NEEDED'.`
+	}
+	return `You are in proactive mode. Check if there is any work that needs to be done:
+1. Review any pending tasks or todos
+2. Check for any issues that need attention
+3. Look for opportunities to help
+
+If there is work to do, start working on the highest priority item.
+If there is nothing to do, respond with 'NO_WORK_NEEDED'.`
+}
+
+func (r *Runtime) requestEndTick(_ context.Context, sessionID string) error {
+	r.mu.RLock()
+	session, ok := r.sessions[sessionID]
+	r.mu.RUnlock()
+	if !ok {
+		return fmt.Errorf("session not found")
+	}
+	if session.Config.ExecMode != agent.ModeTick {
+		return fmt.Errorf("end_tick is only available in tick mode")
+	}
+	session.mu.Lock()
+	session.endTickRequested = true
+	session.mu.Unlock()
+	return nil
+}
+
+func (r *Runtime) endTickRequested(session *Session) bool {
+	if session == nil {
+		return false
+	}
+	session.mu.RLock()
+	defer session.mu.RUnlock()
+	return session.endTickRequested
 }

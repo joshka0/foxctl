@@ -68,12 +68,6 @@ type ProjectionStore interface {
 	ListRunStates(ctx context.Context, filter RunStateFilter) ([]RunState, error)
 }
 
-// IDMapStore resolves legacy IDs to v2 IDs and writes immutable mappings.
-type IDMapStore interface {
-	Put(ctx context.Context, entityType, legacyID, v2ID string) error
-	ResolveV2ID(ctx context.Context, entityType, legacyID string) (string, error)
-}
-
 // AskPolicyAuthorizer gates ask requests by policy.
 type AskPolicyAuthorizer interface {
 	AuthorizeAsk(ctx context.Context, req ask.Request) error

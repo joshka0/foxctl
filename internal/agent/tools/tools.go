@@ -134,6 +134,10 @@ type Config struct {
 
 	// OpenRepoIndexStore provides access to the repo index store.
 	OpenRepoIndexStore func(context.Context) (*repoindex.Store, error)
+
+	// EndTick requests that a tick-mode agent stop its long-running loop.
+	// When nil, the end-tick tool is unavailable.
+	EndTick func(context.Context) (bool, error)
 }
 
 // TelemetryRecorder records tool usage for observability.

@@ -1,180 +1,247 @@
-import { useState, useMemo, useEffect } from 'react'
-import { useQuery } from '@tanstack/react-query'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { companionChat, listSkills, listWorkspaces, type SpawnAgentParams } from '@/api/client'
-import { Folder } from 'lucide-react'
+import { useState, useMemo, useEffect } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import {
+  companionChat,
+  listSkills,
+  listWorkspaces,
+  type SpawnAgentParams,
+} from "@/api/client";
+import { Folder } from "lucide-react";
 import {
   Plus,
   RefreshCw,
   ChevronDown,
   ChevronRight,
   Sparkles,
-} from 'lucide-react'
-import { RoleSelector } from './RoleSelector'
-import { EXEC_MODES, PROVIDERS, getRoleById, getProviderById } from './spawnFormConstants'
+} from "lucide-react";
+import { RoleSelector } from "./RoleSelector";
+import {
+  EXEC_MODES,
+  PROVIDERS,
+  getRoleById,
+  getProviderById,
+} from "./spawnFormConstants";
+import { humanReadableWorkspacePath } from "@/lib/room-utils";
+import { useViewStore } from "@/stores/viewStore";
 
-export interface SpawnAgentFormCoreProps {
-  onSubmit: (params: SpawnAgentParams) => void
-  onCancel: () => void
-  isPending: boolean
-  error?: Error | null
+function recommendedMemoryScopeForRetention(
+  retention: NonNullable<SpawnAgentParams["memory_retention"]>,
+): NonNullable<SpawnAgentParams["memory_scope"]> {
+  return retention === "task" || retention === "ephemeral"
+    ? "session"
+    : "agent";
 }
 
-export function SpawnAgentFormCore({ onSubmit, onCancel, isPending, error }: SpawnAgentFormCoreProps) {
-  const [showAdvanced, setShowAdvanced] = useState(false)
-  const [showSkills, setShowSkills] = useState(false)
-  const [isEnhancing, setIsEnhancing] = useState(false)
-  const [customModel, setCustomModel] = useState('')
+export interface SpawnAgentFormCoreProps {
+  onSubmit: (params: SpawnAgentParams) => void;
+  onCancel: () => void;
+  isPending: boolean;
+  error?: Error | null;
+}
+
+export function SpawnAgentFormCore({
+  onSubmit,
+  onCancel,
+  isPending,
+  error,
+}: SpawnAgentFormCoreProps) {
+  const spawnRoomID = useViewStore((s) => s.spawnRoomID);
+  const spawnRoomWorkspaceID = useViewStore((s) => s.spawnRoomWorkspaceID);
+  const spawnRoomRole = useViewStore((s) => s.spawnRoomRole);
+  const [showAdvanced, setShowAdvanced] = useState(false);
+  const [showSkills, setShowSkills] = useState(false);
+  const [isEnhancing, setIsEnhancing] = useState(false);
+  const [customModel, setCustomModel] = useState("");
   const [formData, setFormData] = useState<SpawnAgentParams>({
-    role: 'coder',
-    prompt: '',
-    name: '',
-    workspace_id: '',
-    exec_mode: 'reactive',
-    llm_provider: '',
-    llm_model: '',
+    role: "coder",
+    prompt: "",
+    name: "",
+    workspace_id: spawnRoomWorkspaceID || "",
+    memory_scope: "agent",
+    memory_retention: "durable",
+    room_id: spawnRoomID || undefined,
+    room_role: spawnRoomRole || undefined,
+    exec_mode: "reactive",
+    llm_provider: "",
+    llm_model: "",
     max_iterations: 10,
     max_auto_turns: 1,
+    think_interval: 60,
     skills_allow: [],
-  })
+  });
 
   // Fetch available workspaces
   const { data: workspacesData } = useQuery({
-    queryKey: ['workspaces'],
+    queryKey: ["workspaces"],
     queryFn: listWorkspaces,
-  })
+  });
 
-  const workspaces = useMemo(() => workspacesData?.workspaces ?? [], [workspacesData?.workspaces])
-  const currentWorkspace = workspacesData?.current ?? ''
+  const workspaces = useMemo(
+    () => workspacesData?.workspaces ?? [],
+    [workspacesData?.workspaces],
+  );
+  const currentWorkspace = workspacesData?.current ?? "";
 
   // Auto-select current workspace on first load
   useEffect(() => {
     if (currentWorkspace && !formData.workspace_id) {
-      setFormData((prev) => ({ ...prev, workspace_id: currentWorkspace }))
+      setFormData((prev) => ({ ...prev, workspace_id: currentWorkspace }));
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentWorkspace])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentWorkspace]);
+
+  useEffect(() => {
+    if (spawnRoomWorkspaceID && !formData.workspace_id) {
+      setFormData((prev) => ({ ...prev, workspace_id: spawnRoomWorkspaceID }));
+    }
+    if (spawnRoomID) {
+      setFormData((prev) => ({
+        ...prev,
+        room_id: prev.room_id || spawnRoomID,
+        room_role: prev.room_role || spawnRoomRole || prev.role,
+      }));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [spawnRoomID, spawnRoomRole, spawnRoomWorkspaceID]);
 
   // Fetch available skills
   const { data: skillsData } = useQuery({
-    queryKey: ['skills'],
+    queryKey: ["skills"],
     queryFn: listSkills,
-  })
+  });
 
-  const skills = useMemo(() => skillsData?.skills ?? [], [skillsData?.skills])
+  const skills = useMemo(() => skillsData?.skills ?? [], [skillsData?.skills]);
   // Group skills by toolkit (first tag) for easier selection
   const skillsByToolkit = useMemo(() => {
-    const toolkits: Record<string, (typeof skills)[number][]> = {}
-    const seen = new Set<string>()
+    const toolkits: Record<string, (typeof skills)[number][]> = {};
+    const seen = new Set<string>();
     for (const skill of skills) {
       // Deduplicate by skill name
-      if (seen.has(skill.name)) continue
-      seen.add(skill.name)
+      if (seen.has(skill.name)) continue;
+      seen.add(skill.name);
       // Use first tag as toolkit, fall back to name prefix
-      const toolkit = skill.tags?.[0] || skill.name.split('/')[0] || 'other'
-      if (!toolkits[toolkit]) toolkits[toolkit] = []
-      toolkits[toolkit].push(skill)
+      const toolkit = skill.tags?.[0] || skill.name.split("/")[0] || "other";
+      if (!toolkits[toolkit]) toolkits[toolkit] = [];
+      toolkits[toolkit].push(skill);
     }
     // Sort toolkits alphabetically
     return Object.fromEntries(
-      Object.entries(toolkits).sort(([a], [b]) => a.localeCompare(b))
-    )
-  }, [skills])
+      Object.entries(toolkits).sort(([a], [b]) => a.localeCompare(b)),
+    );
+  }, [skills]);
 
   const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault()
-    if (!formData.prompt.trim()) return
+    e.preventDefault();
+    if (!formData.prompt.trim()) return;
     const params: SpawnAgentParams = {
       role: formData.role,
       prompt: formData.prompt,
+    };
+    if (formData.workspace_id?.trim())
+      params.workspace_id = formData.workspace_id.trim();
+    if (formData.name?.trim()) params.name = formData.name.trim();
+    if (formData.memory_scope) params.memory_scope = formData.memory_scope;
+    if (formData.memory_retention)
+      params.memory_retention = formData.memory_retention;
+    if (formData.room_id?.trim()) params.room_id = formData.room_id.trim();
+    if (formData.room_role?.trim())
+      params.room_role = formData.room_role.trim();
+    if (formData.exec_mode && formData.exec_mode !== "reactive") {
+      params.exec_mode = formData.exec_mode;
     }
-    if (formData.workspace_id?.trim()) params.workspace_id = formData.workspace_id.trim()
-    if (formData.name?.trim()) params.name = formData.name.trim()
-    if (formData.exec_mode && formData.exec_mode !== 'reactive') {
-      params.exec_mode = formData.exec_mode
-    }
-    if (formData.llm_provider) params.llm_provider = formData.llm_provider
-    if (formData.llm_model) params.llm_model = formData.llm_model
+    if (formData.llm_provider) params.llm_provider = formData.llm_provider;
+    if (formData.llm_model) params.llm_model = formData.llm_model;
     if (formData.max_iterations && formData.max_iterations !== 10) {
-      params.max_iterations = formData.max_iterations
+      params.max_iterations = formData.max_iterations;
     }
     if (formData.max_auto_turns && formData.max_auto_turns !== 1) {
-      params.max_auto_turns = formData.max_auto_turns
+      params.max_auto_turns = formData.max_auto_turns;
+    }
+    if (formData.think_interval && formData.think_interval !== 60) {
+      params.think_interval = formData.think_interval;
     }
     if (formData.skills_allow && formData.skills_allow.length > 0) {
-      params.skills_allow = formData.skills_allow
+      params.skills_allow = formData.skills_allow;
     }
-    onSubmit(params)
-  }
+    onSubmit(params);
+  };
 
   // Handle role change - auto-fill default prompt if prompt is empty
   const handleRoleChange = (roleId: string) => {
-    const role = getRoleById(roleId)
-    const currentRole = getRoleById(formData.role)
+    const role = getRoleById(roleId);
+    const currentRole = getRoleById(formData.role);
+    const nextRetention =
+      roleId === "companion"
+        ? "companion"
+        : formData.memory_retention || "durable";
 
     // Auto-fill if prompt is empty or matches previous role's default
-    const shouldAutoFill = !formData.prompt.trim() ||
-      (currentRole && formData.prompt.trim() === currentRole.defaultPrompt)
+    const shouldAutoFill =
+      !formData.prompt.trim() ||
+      (currentRole && formData.prompt.trim() === currentRole.defaultPrompt);
 
     setFormData({
       ...formData,
       role: roleId,
+      memory_retention: nextRetention,
+      memory_scope: recommendedMemoryScopeForRetention(nextRetention),
       prompt: shouldAutoFill && role ? role.defaultPrompt : formData.prompt,
-    })
-  }
+    });
+  };
 
   // Use default prompt for current role
   const handleUseDefaultPrompt = () => {
-    const role = getRoleById(formData.role)
+    const role = getRoleById(formData.role);
     if (role) {
-      setFormData({ ...formData, prompt: role.defaultPrompt })
+      setFormData({ ...formData, prompt: role.defaultPrompt });
     }
-  }
+  };
 
   // Enhance prompt with AI
   const handleEnhancePrompt = async () => {
-    if (!formData.prompt.trim()) return
+    if (!formData.prompt.trim()) return;
 
-    setIsEnhancing(true)
+    setIsEnhancing(true);
     try {
       const result = await companionChat({
         conversation_id: `enhance-${Date.now()}`,
         message: `Improve and expand this agent system prompt for a ${formData.role} role. Make it more specific and actionable while keeping the same intent. Return ONLY the improved prompt text, no explanation:\n\n${formData.prompt}`,
-      })
+      });
       if (result.response) {
-        setFormData({ ...formData, prompt: result.response.trim() })
+        setFormData({ ...formData, prompt: result.response.trim() });
       }
     } catch (err) {
-      console.error('Failed to enhance prompt:', err)
+      console.error("Failed to enhance prompt:", err);
     } finally {
-      setIsEnhancing(false)
+      setIsEnhancing(false);
     }
-  }
+  };
 
   // Handle provider change - reset model
   const handleProviderChange = (providerId: string) => {
-    const provider = getProviderById(providerId)
-    const firstModel = provider?.models[0]?.id ?? ''
+    const provider = getProviderById(providerId);
+    const firstModel = provider?.models[0]?.id ?? "";
     setFormData({
       ...formData,
       llm_provider: providerId,
       llm_model: firstModel,
-    })
-    setCustomModel('')
-  }
+    });
+    setCustomModel("");
+  };
 
   // Handle skill toggle
   const handleSkillToggle = (skillName: string) => {
-    const current = formData.skills_allow ?? []
+    const current = formData.skills_allow ?? [];
     const updated = current.includes(skillName)
       ? current.filter((s) => s !== skillName)
-      : [...current, skillName]
-    setFormData({ ...formData, skills_allow: updated })
-  }
+      : [...current, skillName];
+    setFormData({ ...formData, skills_allow: updated });
+  };
 
-  const selectedProvider = getProviderById(formData.llm_provider || '')
-  const availableModels = selectedProvider?.models ?? []
+  const selectedProvider = getProviderById(formData.llm_provider || "");
+  const availableModels = selectedProvider?.models ?? [];
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
@@ -200,13 +267,16 @@ export function SpawnAgentFormCore({ onSubmit, onCancel, isPending, error }: Spa
         </label>
         <select
           value={formData.workspace_id}
-          onChange={(e) => setFormData({ ...formData, workspace_id: e.target.value })}
+          onChange={(e) =>
+            setFormData({ ...formData, workspace_id: e.target.value })
+          }
           className="w-full mt-1 h-9 rounded-md border border-input bg-background px-3 text-sm font-mono"
         >
           <option value="">Default</option>
           {workspaces.map((ws) => (
             <option key={ws.path} value={ws.path}>
-              {ws.name}{ws.is_active ? ' (active)' : ''} — {ws.path}
+              {ws.name}
+              {ws.is_active ? " (active)" : ""} — {humanReadableWorkspacePath(ws.path)}
             </option>
           ))}
         </select>
@@ -215,9 +285,104 @@ export function SpawnAgentFormCore({ onSubmit, onCancel, isPending, error }: Spa
         </p>
       </div>
 
+      {(formData.room_id || spawnRoomID) && (
+        <div className="rounded-lg border border-primary/20 bg-primary/5 p-3 space-y-3">
+          <div>
+            <label className="text-sm font-medium text-foreground">
+              Spawn Into Room
+            </label>
+            <p className="text-xs text-muted-foreground mt-1">
+              This agent will be attached to a room immediately after spawn.
+            </p>
+          </div>
+          <div className="grid gap-3 md:grid-cols-2">
+            <div>
+              <label className="text-xs font-medium text-muted-foreground">
+                Room ID
+              </label>
+              <Input
+                value={formData.room_id || ""}
+                onChange={(e) =>
+                  setFormData({ ...formData, room_id: e.target.value })
+                }
+                placeholder="room id"
+                className="h-9 text-sm mt-1"
+              />
+            </div>
+            <div>
+              <label className="text-xs font-medium text-muted-foreground">
+                Room Role
+              </label>
+              <Input
+                value={formData.room_role || ""}
+                onChange={(e) =>
+                  setFormData({ ...formData, room_role: e.target.value })
+                }
+                placeholder="researcher, coder, reviewer..."
+                className="h-9 text-sm mt-1"
+              />
+            </div>
+          </div>
+        </div>
+      )}
+
+      <div>
+        <label className="text-sm font-medium text-foreground">
+          Memory Retention
+        </label>
+        <select
+          value={formData.memory_retention || "durable"}
+          onChange={(e) => {
+            const retention = (e.target.value || "durable") as NonNullable<
+              SpawnAgentParams["memory_retention"]
+            >;
+            setFormData({
+              ...formData,
+              memory_retention: retention,
+              memory_scope: recommendedMemoryScopeForRetention(retention),
+            });
+          }}
+          className="w-full mt-1 h-9 rounded-md border border-input bg-background px-3 text-sm"
+        >
+          <option value="companion">companion</option>
+          <option value="durable">durable</option>
+          <option value="task">task</option>
+          <option value="ephemeral">ephemeral</option>
+        </select>
+        <p className="text-xs text-muted-foreground mt-1">
+          `companion` and `durable` default to stable agent memory. `task` and
+          `ephemeral` default to detached session memory.
+        </p>
+      </div>
+
+      <div>
+        <label className="text-sm font-medium text-foreground">
+          Workbench Memory
+        </label>
+        <select
+          value={formData.memory_scope || "agent"}
+          onChange={(e) =>
+            setFormData({
+              ...formData,
+              memory_scope: e.target.value === "session" ? "session" : "agent",
+            })
+          }
+          className="w-full mt-1 h-9 rounded-md border border-input bg-background px-3 text-sm"
+        >
+          <option value="agent">agent</option>
+          <option value="session">session</option>
+        </select>
+        <p className="text-xs text-muted-foreground mt-1">
+          `agent` persists a stable conversation lineage. `session` keeps the
+          workbench chat detached.
+        </p>
+      </div>
+
       {/* Role Card Grid */}
       <div>
-        <label className="text-sm font-medium text-foreground mb-2 block">Role</label>
+        <label className="text-sm font-medium text-foreground mb-2 block">
+          Role
+        </label>
         <RoleSelector
           selectedRole={formData.role}
           onSelectRole={handleRoleChange}
@@ -262,10 +427,17 @@ export function SpawnAgentFormCore({ onSubmit, onCancel, isPending, error }: Spa
 
       {/* Execution Mode */}
       <div>
-        <label className="text-sm font-medium text-foreground">Execution Mode</label>
+        <label className="text-sm font-medium text-foreground">
+          Execution Mode
+        </label>
         <select
           value={formData.exec_mode}
-          onChange={(e) => setFormData({ ...formData, exec_mode: e.target.value as SpawnAgentParams['exec_mode'] })}
+          onChange={(e) =>
+            setFormData({
+              ...formData,
+              exec_mode: e.target.value as SpawnAgentParams["exec_mode"],
+            })
+          }
           className="w-full mt-1 h-9 rounded-md border border-input bg-background px-3 text-sm"
         >
           {EXEC_MODES.map((mode) => (
@@ -285,7 +457,11 @@ export function SpawnAgentFormCore({ onSubmit, onCancel, isPending, error }: Spa
         onClick={() => setShowAdvanced(!showAdvanced)}
         className="text-sm text-muted-foreground hover:text-foreground flex items-center gap-1"
       >
-        {showAdvanced ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+        {showAdvanced ? (
+          <ChevronDown className="h-4 w-4" />
+        ) : (
+          <ChevronRight className="h-4 w-4" />
+        )}
         Advanced Options
       </button>
 
@@ -294,7 +470,9 @@ export function SpawnAgentFormCore({ onSubmit, onCancel, isPending, error }: Spa
           {/* Provider & Model Selection */}
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="text-xs font-medium text-muted-foreground">Provider</label>
+              <label className="text-xs font-medium text-muted-foreground">
+                Provider
+              </label>
               <select
                 value={formData.llm_provider}
                 onChange={(e) => handleProviderChange(e.target.value)}
@@ -308,14 +486,16 @@ export function SpawnAgentFormCore({ onSubmit, onCancel, isPending, error }: Spa
               </select>
             </div>
             <div>
-              <label className="text-xs font-medium text-muted-foreground">Model</label>
+              <label className="text-xs font-medium text-muted-foreground">
+                Model
+              </label>
               {selectedProvider?.allowCustom ? (
                 <div className="space-y-1 mt-1">
                   <select
-                    value={customModel ? '' : formData.llm_model}
+                    value={customModel ? "" : formData.llm_model}
                     onChange={(e) => {
-                      setFormData({ ...formData, llm_model: e.target.value })
-                      setCustomModel('')
+                      setFormData({ ...formData, llm_model: e.target.value });
+                      setCustomModel("");
                     }}
                     className="w-full h-8 rounded-md border border-input bg-background px-2 text-sm"
                   >
@@ -326,12 +506,12 @@ export function SpawnAgentFormCore({ onSubmit, onCancel, isPending, error }: Spa
                     ))}
                     <option value="">Custom...</option>
                   </select>
-                  {(customModel || formData.llm_model === '') && (
+                  {(customModel || formData.llm_model === "") && (
                     <Input
                       value={customModel}
                       onChange={(e) => {
-                        setCustomModel(e.target.value)
-                        setFormData({ ...formData, llm_model: e.target.value })
+                        setCustomModel(e.target.value);
+                        setFormData({ ...formData, llm_model: e.target.value });
                       }}
                       placeholder="e.g., anthropic/claude-3-opus"
                       className="h-8 text-sm"
@@ -341,7 +521,9 @@ export function SpawnAgentFormCore({ onSubmit, onCancel, isPending, error }: Spa
               ) : (
                 <select
                   value={formData.llm_model}
-                  onChange={(e) => setFormData({ ...formData, llm_model: e.target.value })}
+                  onChange={(e) =>
+                    setFormData({ ...formData, llm_model: e.target.value })
+                  }
                   className="w-full mt-1 h-8 rounded-md border border-input bg-background px-2 text-sm"
                 >
                   {availableModels.map((model) => (
@@ -357,30 +539,72 @@ export function SpawnAgentFormCore({ onSubmit, onCancel, isPending, error }: Spa
           {/* Iteration Limits */}
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="text-xs font-medium text-muted-foreground">Max Iterations</label>
+              <label className="text-xs font-medium text-muted-foreground">
+                Max Iterations
+              </label>
               <Input
                 type="number"
                 value={formData.max_iterations}
-                onChange={(e) => setFormData({ ...formData, max_iterations: parseInt(e.target.value) || 10 })}
+                onChange={(e) =>
+                  setFormData({
+                    ...formData,
+                    max_iterations: parseInt(e.target.value) || 10,
+                  })
+                }
                 min={1}
                 max={100}
                 className="h-8 text-sm mt-1"
               />
-              <p className="text-xs text-muted-foreground mt-0.5">Tool calls per turn</p>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                Tool calls per turn
+              </p>
             </div>
             <div>
-              <label className="text-xs font-medium text-muted-foreground">Max Auto Turns</label>
+              <label className="text-xs font-medium text-muted-foreground">
+                Max Auto Turns
+              </label>
               <Input
                 type="number"
                 value={formData.max_auto_turns}
-                onChange={(e) => setFormData({ ...formData, max_auto_turns: parseInt(e.target.value) || 1 })}
+                onChange={(e) =>
+                  setFormData({
+                    ...formData,
+                    max_auto_turns: parseInt(e.target.value) || 1,
+                  })
+                }
                 min={1}
                 max={20}
                 className="h-8 text-sm mt-1"
               />
-              <p className="text-xs text-muted-foreground mt-0.5">Autonomous continuations</p>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                Autonomous continuations
+              </p>
             </div>
           </div>
+
+          {(formData.exec_mode === "proactive" || formData.exec_mode === "tick") && (
+            <div>
+              <label className="text-xs font-medium text-muted-foreground">
+                Tick Interval (seconds)
+              </label>
+              <Input
+                type="number"
+                value={formData.think_interval ?? 60}
+                onChange={(e) =>
+                  setFormData({
+                    ...formData,
+                    think_interval: parseInt(e.target.value) || 60,
+                  })
+                }
+                min={1}
+                max={86400}
+                className="h-8 text-sm mt-1"
+              />
+              <p className="text-xs text-muted-foreground mt-0.5">
+                Cadence for proactive or tick-driven runs
+              </p>
+            </div>
+          )}
 
           {/* Skills Section */}
           <div>
@@ -389,8 +613,13 @@ export function SpawnAgentFormCore({ onSubmit, onCancel, isPending, error }: Spa
               onClick={() => setShowSkills(!showSkills)}
               className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1"
             >
-              {showSkills ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
-              Skills ({formData.skills_allow?.length || 0} selected, empty = all)
+              {showSkills ? (
+                <ChevronDown className="h-3 w-3" />
+              ) : (
+                <ChevronRight className="h-3 w-3" />
+              )}
+              Skills ({formData.skills_allow?.length || 0} selected, empty =
+              all)
             </button>
 
             {showSkills && (
@@ -398,71 +627,107 @@ export function SpawnAgentFormCore({ onSubmit, onCancel, isPending, error }: Spa
                 <div className="flex gap-2 mb-2">
                   <button
                     type="button"
-                    onClick={() => setFormData({ ...formData, skills_allow: skills.map((s) => s.name) })}
+                    onClick={() =>
+                      setFormData({
+                        ...formData,
+                        skills_allow: skills.map((s) => s.name),
+                      })
+                    }
                     className="text-xs text-primary hover:underline"
                   >
                     Select All
                   </button>
                   <button
                     type="button"
-                    onClick={() => setFormData({ ...formData, skills_allow: [] })}
+                    onClick={() =>
+                      setFormData({ ...formData, skills_allow: [] })
+                    }
                     className="text-xs text-primary hover:underline"
                   >
                     Clear All
                   </button>
                 </div>
-                {Object.entries(skillsByToolkit).map(([toolkit, toolkitSkills]) => {
-                  const toolkitSkillNames = toolkitSkills.map((s) => s.name)
-                  const selectedInToolkit = toolkitSkillNames.filter((name) => formData.skills_allow?.includes(name))
-                  const allSelected = selectedInToolkit.length === toolkitSkillNames.length
-                  const someSelected = selectedInToolkit.length > 0 && !allSelected
+                {Object.entries(skillsByToolkit).map(
+                  ([toolkit, toolkitSkills]) => {
+                    const toolkitSkillNames = toolkitSkills.map((s) => s.name);
+                    const selectedInToolkit = toolkitSkillNames.filter((name) =>
+                      formData.skills_allow?.includes(name),
+                    );
+                    const allSelected =
+                      selectedInToolkit.length === toolkitSkillNames.length;
+                    const someSelected =
+                      selectedInToolkit.length > 0 && !allSelected;
 
-                  const handleToolkitToggle = () => {
-                    const current = formData.skills_allow ?? []
-                    if (allSelected) {
-                      // Deselect all in this toolkit
-                      setFormData({ ...formData, skills_allow: current.filter((s) => !toolkitSkillNames.includes(s)) })
-                    } else {
-                      // Select all in this toolkit
-                      const newSkills = [...new Set([...current, ...toolkitSkillNames])]
-                      setFormData({ ...formData, skills_allow: newSkills })
-                    }
-                  }
+                    const handleToolkitToggle = () => {
+                      const current = formData.skills_allow ?? [];
+                      if (allSelected) {
+                        // Deselect all in this toolkit
+                        setFormData({
+                          ...formData,
+                          skills_allow: current.filter(
+                            (s) => !toolkitSkillNames.includes(s),
+                          ),
+                        });
+                      } else {
+                        // Select all in this toolkit
+                        const newSkills = [
+                          ...new Set([...current, ...toolkitSkillNames]),
+                        ];
+                        setFormData({ ...formData, skills_allow: newSkills });
+                      }
+                    };
 
-                  return (
-                    <div key={toolkit} className="border border-border rounded-md p-2">
-                      <label className="flex items-center gap-2 mb-2 cursor-pointer">
-                        <input
-                          type="checkbox"
-                          checked={allSelected}
-                          ref={(el) => { if (el) el.indeterminate = someSelected }}
-                          onChange={handleToolkitToggle}
-                          className="h-3.5 w-3.5"
-                        />
-                        <span className="text-xs font-medium text-foreground capitalize">{toolkit}</span>
-                        <span className="text-xs text-muted-foreground">({selectedInToolkit.length}/{toolkitSkillNames.length})</span>
-                      </label>
-                      <div className="grid grid-cols-2 gap-1 pl-5">
-                        {toolkitSkills.map((skill) => (
-                          <label
-                            key={skill.name}
-                            className="flex items-start gap-2 text-xs cursor-pointer hover:bg-accent/50 p-1 rounded"
-                          >
-                            <input
-                              type="checkbox"
-                              checked={formData.skills_allow?.includes(skill.name) ?? false}
-                              onChange={() => handleSkillToggle(skill.name)}
-                              className="mt-0.5"
-                            />
-                            <span className="truncate" title={skill.description}>
-                              {skill.name}
-                            </span>
-                          </label>
-                        ))}
+                    return (
+                      <div
+                        key={toolkit}
+                        className="border border-border rounded-md p-2"
+                      >
+                        <label className="flex items-center gap-2 mb-2 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={allSelected}
+                            ref={(el) => {
+                              if (el) el.indeterminate = someSelected;
+                            }}
+                            onChange={handleToolkitToggle}
+                            className="h-3.5 w-3.5"
+                          />
+                          <span className="text-xs font-medium text-foreground capitalize">
+                            {toolkit}
+                          </span>
+                          <span className="text-xs text-muted-foreground">
+                            ({selectedInToolkit.length}/
+                            {toolkitSkillNames.length})
+                          </span>
+                        </label>
+                        <div className="grid grid-cols-2 gap-1 pl-5">
+                          {toolkitSkills.map((skill) => (
+                            <label
+                              key={skill.name}
+                              className="flex items-start gap-2 text-xs cursor-pointer hover:bg-accent/50 p-1 rounded"
+                            >
+                              <input
+                                type="checkbox"
+                                checked={
+                                  formData.skills_allow?.includes(skill.name) ??
+                                  false
+                                }
+                                onChange={() => handleSkillToggle(skill.name)}
+                                className="mt-0.5"
+                              />
+                              <span
+                                className="truncate"
+                                title={skill.description}
+                              >
+                                {skill.name}
+                              </span>
+                            </label>
+                          ))}
+                        </div>
                       </div>
-                    </div>
-                  )
-                })}
+                    );
+                  },
+                )}
               </div>
             )}
           </div>
@@ -491,9 +756,9 @@ export function SpawnAgentFormCore({ onSubmit, onCancel, isPending, error }: Spa
 
       {error && (
         <p className="text-sm text-red-500">
-          Error: {error.message || 'Unknown error'}
+          Error: {error.message || "Unknown error"}
         </p>
       )}
     </form>
-  )
+  );
 }

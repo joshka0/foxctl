@@ -95,7 +95,7 @@ export const ROLES: RoleConfig[] = [
 ]
 
 export interface ExecModeConfig {
-  id: 'reactive' | 'autonomous' | 'proactive' | 'story'
+  id: 'reactive' | 'autonomous' | 'proactive' | 'tick' | 'story'
   name: string
   description: string
   details: string
@@ -119,6 +119,12 @@ export const EXEC_MODES: ExecModeConfig[] = [
     name: 'Proactive',
     description: 'Self-initiating',
     details: 'Agent can start work on its own based on triggers. Best for monitoring/automation.',
+  },
+  {
+    id: 'tick',
+    name: 'Tick',
+    description: 'Runs on interval',
+    details: 'Agent wakes up on a fixed cadence and advances work or simulations one tick at a time.',
   },
   {
     id: 'story',
@@ -212,6 +218,7 @@ export const PROVIDERS: ProviderConfig[] = [
     id: 'openrouter',
     name: 'OpenRouter',
     models: [
+      { id: 'google/gemini-3.1-flash-lite-preview', name: 'Gemini 3.1 Flash Lite Preview' },
       { id: 'mistralai/devstral-2512', name: 'Devstral' },
       { id: 'anthropic/claude-3-haiku', name: 'Claude 3 Haiku' },
       { id: 'meta-llama/llama-3-70b', name: 'Llama 3 70B' },
@@ -230,6 +237,7 @@ export interface CompanionModelConfig {
 }
 
 export const COMPANION_TOOL_MODELS: CompanionModelConfig[] = [
+  { id: 'google/gemini-3.1-flash-lite-preview', name: 'Gemini 3.1 Flash Lite Preview', provider: 'openrouter' },
   { id: 'z-ai/glm-4.7-flash', name: 'GLM 4.7 Flash', provider: 'openrouter' },
   { id: 'moonshotai/kimi-k2.5', name: 'Kimi K2.5', provider: 'openrouter' },
   { id: 'minimax/minimax-m2.1', name: 'MiniMax M2.1', provider: 'openrouter' },
@@ -237,6 +245,7 @@ export const COMPANION_TOOL_MODELS: CompanionModelConfig[] = [
 ]
 
 export const COMPANION_RESPONSE_MODELS: CompanionModelConfig[] = [
+  { id: 'google/gemini-3.1-flash-lite-preview', name: 'Gemini 3.1 Flash Lite Preview', provider: 'openrouter' },
   { id: 'minimax/minimax-m2-her', name: 'MiniMax M2 Her', provider: 'openrouter' },
   { id: 'mistralai/mistral-small-creative', name: 'Mistral Small Creative', provider: 'openrouter' },
 ]

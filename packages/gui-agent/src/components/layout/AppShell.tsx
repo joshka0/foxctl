@@ -13,6 +13,16 @@ interface AppShellProps {
 
 export function AppShell({ children, activeView, onViewChange }: AppShellProps) {
   const { spawnAgentOpen, setSpawnAgentOpen } = useViewStore()
+  const titles: Record<ViewType, string> = {
+    runtime: 'Runtime',
+    rooms: 'Rooms',
+    orchestration: 'Orchestration',
+    turns: 'Turns',
+    context: 'Context',
+    artifacts: 'Artifacts',
+    events: 'Events',
+    companion: 'Companion',
+  }
 
   // Initialize SSE connection
   useActivityStream()
@@ -26,7 +36,9 @@ export function AppShell({ children, activeView, onViewChange }: AppShellProps) 
       <div className="flex-1 flex flex-col overflow-hidden">
         {/* Top Bar */}
         <header className="h-12 border-b border-border flex items-center justify-between px-4">
-          <h1 className="text-sm font-medium text-foreground">Agent Operations Center</h1>
+          <h1 className="text-sm font-medium text-foreground">
+            Agentctl V2 · {titles[activeView]}
+          </h1>
         </header>
 
         {/* Content Area */}
