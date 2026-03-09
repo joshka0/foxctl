@@ -57,7 +57,7 @@ func finalizeProposals(in []snippetProposal, maxSnippets int) []Snippet {
 
 	out := make([]Snippet, 0, len(unique))
 	for _, p := range unique {
-		p.Snippet.Priority = p.finalScore
+		p.Priority = p.finalScore
 		out = append(out, p.Snippet)
 	}
 	return out

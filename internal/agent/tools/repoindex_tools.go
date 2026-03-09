@@ -342,19 +342,3 @@ func stringSliceFromAny(value any) []string {
 		return nil
 	}
 }
-
-func intArg(args map[string]any, fallback int, keys ...string) int {
-	for _, key := range keys {
-		if v, ok := args[key]; ok {
-			switch val := v.(type) {
-			case int:
-				return val
-			case int64:
-				return int(val)
-			case float64:
-				return int(val)
-			}
-		}
-	}
-	return fallback
-}

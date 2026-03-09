@@ -85,14 +85,15 @@ func (e *Engine) Search(ctx context.Context, req SearchRequest) (SearchResponse,
 		limit := request.Sources.LexicalLimit
 		minScore := request.Sources.LexicalMinScore
 		query := lexicalQuery
-		if sourceID == SourceExact {
+		switch sourceID {
+		case SourceExact:
 			limit = request.Sources.ExactLimit
 			minScore = 0
-		} else if sourceID == SourceVector {
+		case SourceVector:
 			limit = request.Sources.VectorLimit
 			minScore = request.Sources.VectorMinScore
 			query = ""
-		} else if sourceID == SourceRepoIndex {
+		case SourceRepoIndex:
 			limit = request.Sources.RepoIndexLimit
 			minScore = 0
 		}

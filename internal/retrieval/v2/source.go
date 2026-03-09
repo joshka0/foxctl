@@ -247,23 +247,6 @@ func normalizeRepoIndexMode(query, mode string) string {
 	}
 }
 
-func looksStructuralQuery(query string) bool {
-	q := strings.ToLower(strings.TrimSpace(query))
-	if q == "" {
-		return false
-	}
-	structuralTokens := []string{
-		"call", "calls", "caller", "callee", "flow", "graph", "dag", "expand",
-		"relationship", "path", "chain", "refers", "imports", "depends", "where is this used",
-	}
-	for _, token := range structuralTokens {
-		if strings.Contains(q, token) {
-			return true
-		}
-	}
-	return false
-}
-
 func shouldEscalateRepoIndexAuto(query string, nodes []repoindex.Node, limit int) bool {
 	_ = query
 	_ = limit
