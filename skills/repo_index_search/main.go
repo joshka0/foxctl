@@ -28,7 +28,7 @@ func main() {
 
 func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	if strings.TrimSpace(in.Query) == "" {
-		return skillerr.Arg("query is required")
+		return skillerr.Arg("query is required", skillerr.WithHint("provide a non-empty query string, for example \"auth\" or \"repo index dag grep\""))
 	}
 
 	workspaceRoot, err := resolveWorkspace(rc.Workspace, in.Workspace)

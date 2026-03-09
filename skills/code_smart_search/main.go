@@ -15,9 +15,9 @@ import (
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
 	"github.com/jkatigb/agentctl/internal/codecontext"
 	ccadapt "github.com/jkatigb/agentctl/internal/codecontext/adapters"
+	"github.com/jkatigb/agentctl/internal/indexing/repoindex"
 	"github.com/jkatigb/agentctl/internal/indexing/semantic"
 	ws "github.com/jkatigb/agentctl/internal/platform/workspace"
-	"github.com/jkatigb/agentctl/internal/indexing/repoindex"
 	"github.com/jkatigb/agentctl/internal/repoquery"
 	retrievalv2 "github.com/jkatigb/agentctl/internal/retrieval/v2"
 	"github.com/jkatigb/agentctl/internal/searchindex"
@@ -35,11 +35,11 @@ const (
 )
 
 type Input struct {
-	WorkspaceID string   `json:"workspace_id"`
-	Question    string   `json:"question"`
-	Sources     []string `json:"sources"`
-	RepoIndexMode string `json:"repo_index_mode,omitempty"` // off, search, dag
-	Limits      struct {
+	WorkspaceID   string   `json:"workspace_id"`
+	Question      string   `json:"question"`
+	Sources       []string `json:"sources"`
+	RepoIndexMode string   `json:"repo_index_mode,omitempty"` // off, search, dag
+	Limits        struct {
 		MaxCandidates   int `json:"max_candidates"`
 		MaxSnippets     int `json:"max_snippets"`
 		MaxBytesPerFile int `json:"max_bytes_per_file"`
@@ -193,9 +193,9 @@ func searchCode(ctx context.Context, rc *skillmain.RunContext, in Input) ([]Cand
 	repoMode := normalizeRepoIndexMode(in.RepoIndexMode)
 	if repoMode != "off" {
 		if repoStore, err := repoindex.Open(ctx, rc.Config.Storage.Root, rc.PathValidator.Workspace()); err == nil {
-		defer repoStore.Close()
-		engine = engine.WithRepoQueryService(repoquery.NewQueryService(repoindex.NewQueryEngine(repoStore)))
-	}
+			defer repoStore.Close()
+			engine = engine.WithRepoQueryService(repoquery.NewQueryService(repoindex.NewQueryEngine(repoStore)))
+		}
 	}
 	req := retrievalv2.DefaultSearchRequest(in.WorkspaceID, in.Question)
 	req.MaxResults = in.Limits.MaxCandidates

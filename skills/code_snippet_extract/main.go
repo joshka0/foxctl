@@ -66,8 +66,11 @@ type SessionContext struct {
 	KeyFiles  []string `json:"key_files,omitempty"`
 }
 
-func newSkillError(code, message string, opts ...skillerr.Option) *skillerr.Error {
+func newSkillError(code, message, hint string, opts ...skillerr.Option) *skillerr.Error {
 	err := &skillerr.Error{Code: code, Message: message}
+	if strings.TrimSpace(hint) != "" {
+		err.Hint = hint
+	}
 	for _, opt := range opts {
 		opt(err)
 	}
@@ -86,7 +89,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 		query = strings.TrimSpace(in.Query)
 	}
 	if query == "" {
-		return newSkillError(ErrCodeArg, "question or query is required")
+		return newSkillError(ErrCodeArg, "question or query is required", "provide a non-empty question or query to guide snippet extraction")
 	}
 
 	if in.WorkspaceID == "" {
@@ -103,6 +106,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 		return newSkillError(
 			ErrCodeNoCandidates,
 			"no usable candidates provided. Hint: use code/smart_search if you don't have candidates - it auto-generates them from indexes",
+			"pass at least one candidate path or use code/smart_search to generate candidates automatically",
 		)
 	}
 
@@ -195,7 +199,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 
 func fatalErrorForEvidence(evidence *codecontext.Evidence) *skillerr.Error {
 	if evidence == nil {
-		return newSkillError(ErrCodeRuntime, "failed to collect code evidence")
+		return newSkillError(ErrCodeRuntime, "failed to collect code evidence", "")
 	}
 	if evidence.Stats.FilesProcessed > 0 {
 		return nil
@@ -206,20 +210,20 @@ func fatalErrorForEvidence(evidence *codecontext.Evidence) *skillerr.Error {
 
 	for _, fe := range evidence.Stats.FileErrors {
 		if fe.Code == ErrCodePolicy {
-			return newSkillError(ErrCodePolicy, fe.Message)
+			return newSkillError(ErrCodePolicy, fe.Message, "")
 		}
 	}
 	for _, fe := range evidence.Stats.FileErrors {
 		if fe.Code == ErrCodeNotFound {
-			return newSkillError(ErrCodeNotFound, fe.Message)
+			return newSkillError(ErrCodeNotFound, fe.Message, "")
 		}
 	}
 	for _, fe := range evidence.Stats.FileErrors {
 		if fe.Code == ErrCodeIO || fe.Code == "EIO" || fe.Code == ErrCodeCapabilityPolicy {
-			return newSkillError(ErrCodeIO, fe.Message)
+			return newSkillError(ErrCodeIO, fe.Message, "")
 		}
 	}
-	return newSkillError(ErrCodeArg, evidence.Stats.FileErrors[0].Message)
+	return newSkillError(ErrCodeArg, evidence.Stats.FileErrors[0].Message, "")
 }
 
 func applyDefaultLimits(l Limits) Limits {

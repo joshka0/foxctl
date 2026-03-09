@@ -106,14 +106,14 @@ func (e *Engine) Search(ctx context.Context, req SearchRequest) (SearchResponse,
 		stats.Sources[sourceID] = SourceStats{Requested: limit}
 
 		candidates, err := source.Recall(ctx, SourceCall{
-			WorkspaceID: request.WorkspaceID,
-			Query:       query,
-			Limit:       limit,
-			MinScore:    minScore,
-			Index:       e.index,
-			RepoQuery:   e.repo,
-			Embedding:   embedding,
-			Model:       request.Sources.VectorModel,
+			WorkspaceID:   request.WorkspaceID,
+			Query:         query,
+			Limit:         limit,
+			MinScore:      minScore,
+			Index:         e.index,
+			RepoQuery:     e.repo,
+			Embedding:     embedding,
+			Model:         request.Sources.VectorModel,
 			RepoIndexMode: request.Sources.RepoIndexMode,
 		})
 		if err != nil {

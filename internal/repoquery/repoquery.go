@@ -674,7 +674,17 @@ func renderDAGMermaid(result repoindex.DAGGrepResult) string {
 
 	var b strings.Builder
 	b.WriteString("graph TD\n")
-	for _, edge := range result.DAG.Edges {
+	edges := append([]repoindex.Edge(nil), result.DAG.Edges...)
+	sort.Slice(edges, func(i, j int) bool {
+		if edges[i].Src == edges[j].Src {
+			if edges[i].Dst == edges[j].Dst {
+				return edges[i].Type < edges[j].Type
+			}
+			return edges[i].Dst < edges[j].Dst
+		}
+		return edges[i].Src < edges[j].Src
+	})
+	for _, edge := range edges {
 		src := edge.Src
 		dst := edge.Dst
 		srcLabel := nodeLabels[src]

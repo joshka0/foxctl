@@ -1,8 +1,16 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+DEFAULT_HEARTWOOD_ROOT="$(cd "${REPO_ROOT}/../heartwood" 2>/dev/null && pwd || true)"
+
 JIDO_SOCKET="${AGENTCTL_JIDO_SOCKET:-/tmp/agentctl-jido.sock}"
-HEARTWOOD_ROOT="${HEARTWOOD_ROOT:-/Users/joshka/repos/personal/heartwood}"
+HEARTWOOD_ROOT="${HEARTWOOD_ROOT:-${DEFAULT_HEARTWOOD_ROOT}}"
+if [ -z "${HEARTWOOD_ROOT}" ] || [ ! -d "${HEARTWOOD_ROOT}" ]; then
+  echo "HEARTWOOD_ROOT is not set and no sibling heartwood repo was found" >&2
+  exit 1
+fi
 HEARTWOOD_HOST="${HEARTWOOD_HOST:-ws://127.0.0.1:3001}"
 HEARTWOOD_DB_NAME="${HEARTWOOD_DB_NAME:-heartwood}"
 TOKEN_PATH="${TOKEN_PATH:-/tmp/hw-jido-tick-tool.token}"

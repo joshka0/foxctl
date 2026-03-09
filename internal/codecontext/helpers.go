@@ -132,6 +132,28 @@ func dedupeAnchors(in []Anchor) []Anchor {
 	for _, a := range seen {
 		out = append(out, a)
 	}
+	sort.Slice(out, func(i, j int) bool {
+		left := strings.Join([]string{
+			string(out[i].Kind),
+			out[i].SymbolID,
+			out[i].SymbolName,
+			itoa(out[i].Line),
+			itoa(out[i].StartLine),
+			itoa(out[i].EndLine),
+		}, "|")
+		right := strings.Join([]string{
+			string(out[j].Kind),
+			out[j].SymbolID,
+			out[j].SymbolName,
+			itoa(out[j].Line),
+			itoa(out[j].StartLine),
+			itoa(out[j].EndLine),
+		}, "|")
+		if left == right {
+			return out[i].Score > out[j].Score
+		}
+		return left < right
+	})
 	return out
 }
 

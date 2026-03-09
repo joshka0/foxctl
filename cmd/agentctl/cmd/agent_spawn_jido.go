@@ -131,16 +131,24 @@ func spawnJidoManagedAgent(ctx context.Context, storageRoot, workspaceRoot strin
 	if err != nil {
 		return agentmanager.SpawnResponse{}, fmt.Errorf("load created agent: %w", err)
 	}
+	previousRecord := record
 	record.ExecutionLayer = agent.ExecutionLayerJido
 	if err := agentStore.Delete(ctx, record.ID); err != nil {
 		return agentmanager.SpawnResponse{}, fmt.Errorf("reset created agent for jido layer: %w", err)
 	}
 	if err := agentStore.Create(ctx, record); err != nil {
+		restoreErr := agentStore.Create(ctx, previousRecord)
+		if restoreErr != nil {
+			return agentmanager.SpawnResponse{}, fmt.Errorf("persist jido execution layer: %w (restore failed: %v)", err, restoreErr)
+		}
 		return agentmanager.SpawnResponse{}, fmt.Errorf("persist jido execution layer: %w", err)
 	}
 
 	if err := jidoStartAgentForRecord(ctx, record, storageRoot, workspaceRoot); err != nil {
 		_ = agentStore.Delete(ctx, record.ID)
+		if restoreErr := agentStore.Create(ctx, previousRecord); restoreErr != nil {
+			return agentmanager.SpawnResponse{}, fmt.Errorf("%w (restore failed: %v)", err, restoreErr)
+		}
 		return agentmanager.SpawnResponse{}, err
 	}
 	if err := agentStore.UpdateState(ctx, record.ID, agent.StateRunning); err != nil {

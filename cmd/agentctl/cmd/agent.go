@@ -423,7 +423,10 @@ func runAgentSpawnWithRoute(cmd *cobra.Command) error {
 			return writeOK(cmd, "agent/spawn", data, "run", nil)
 		}
 
-		workspaceRoot, _ := filepath.Abs(".")
+		workspaceRoot, err := filepath.Abs(".")
+		if err != nil {
+			return writeErrorEnvelope(cmd, "agent/spawn", string(protocol.ErrorCodeERuntime), fmt.Sprintf("failed to resolve workspace root: %v", err))
+		}
 		resp, err := spawnJidoManagedAgent(ctx, cfg.Storage.Root, workspaceRoot, req)
 		if err != nil {
 			return writeErrorEnvelope(cmd, "agent/spawn", string(protocol.ErrorCodeERuntime), fmt.Sprintf("failed to spawn jido agent: %v", err))

@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
-	"sort"
 	"strings"
 
 	"github.com/jkatigb/agentctl/internal/indexing/codefilter"
@@ -205,6 +204,14 @@ func (g *Generator) storeSummary(ctx context.Context, input symbol.FileSummaryIn
 	if g.embedProvider != nil && summary != "" {
 		embedding, err := g.embedProvider.Embed(ctx, summary)
 		if err != nil {
+			observability.Emit(ctx, observability.NewEvent("file_summary.embedding_error").
+				WithComponent("filesummary").
+				WithWorkspace(g.workspace).
+				WithData("path", input.FilePath).
+				WithData("entry_name", entryName).
+				WithData("provider", providerNameFromModel(g.embedProvider.Model())).
+				WithData("model", g.embedProvider.Model()).
+				Error(err, 0))
 			return nil
 		}
 		dimensions := g.embedProvider.Dimensions()
@@ -213,10 +220,23 @@ func (g *Generator) storeSummary(ctx context.Context, input symbol.FileSummaryIn
 				WithComponent("filesummary").
 				WithWorkspace(g.workspace).
 				WithData("path", input.FilePath).
+				WithData("entry_name", entryName).
+				WithData("provider", providerNameFromModel(g.embedProvider.Model())).
+				WithData("model", g.embedProvider.Model()).
+				WithData("dimensions", dimensions).
 				Error(err, 0))
 			return nil
 		}
 		if err := g.store.UpdateEmbedding(ctx, entryName, g.workspace, embedding); err != nil {
+			observability.Emit(ctx, observability.NewEvent("file_summary.embedding_error").
+				WithComponent("filesummary").
+				WithWorkspace(g.workspace).
+				WithData("path", input.FilePath).
+				WithData("entry_name", entryName).
+				WithData("provider", providerNameFromModel(g.embedProvider.Model())).
+				WithData("model", g.embedProvider.Model()).
+				WithData("dimensions", dimensions).
+				Error(err, 0))
 			return nil
 		}
 		meta := memory.EmbeddingMetadata{
@@ -226,7 +246,15 @@ func (g *Generator) storeSummary(ctx context.Context, input symbol.FileSummaryIn
 			Dimensions: dimensions,
 		}
 		if err := g.store.SetEmbeddingMetadata(ctx, meta); err != nil {
-			_ = err
+			observability.Emit(ctx, observability.NewEvent("file_summary.embedding_error").
+				WithComponent("filesummary").
+				WithWorkspace(g.workspace).
+				WithData("path", input.FilePath).
+				WithData("entry_name", entryName).
+				WithData("provider", meta.Provider).
+				WithData("model", meta.Model).
+				WithData("dimensions", meta.Dimensions).
+				Error(err, 0))
 		}
 	}
 
@@ -405,18 +433,4 @@ func providerNameFromModel(model string) string {
 	default:
 		return "unknown"
 	}
-}
-
-func sortFilePathsBySummaryScore(paths map[string]float64) []string {
-	keys := make([]string, 0, len(paths))
-	for path := range paths {
-		keys = append(keys, path)
-	}
-	sort.Slice(keys, func(i, j int) bool {
-		if paths[keys[i]] == paths[keys[j]] {
-			return keys[i] < keys[j]
-		}
-		return paths[keys[i]] > paths[keys[j]]
-	})
-	return keys
 }

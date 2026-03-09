@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 	"unicode"
+	"unicode/utf8"
 )
 
 // Default minimum query term length for lexical matching.
@@ -335,22 +336,23 @@ func parseTokens(query string) []token {
 		return nil
 	}
 
+	runes := []rune(query)
 	result := make([]token, 0)
-	for i := 0; i < len(query); {
-		if unicode.IsSpace(rune(query[i])) {
+	for i := 0; i < len(runes); {
+		if unicode.IsSpace(runes[i]) {
 			i++
 			continue
 		}
 
-		if query[i] == '"' || query[i] == '\'' {
-			quote := query[i]
+		if runes[i] == '"' || runes[i] == '\'' {
+			quote := runes[i]
 			i++
 			start := i
-			for i < len(query) && query[i] != quote {
+			for i < len(runes) && runes[i] != quote {
 				i++
 			}
-			value := query[start:i]
-			if i < len(query) {
+			value := string(runes[start:i])
+			if i < len(runes) {
 				i++
 			}
 			result = append(result, token{value: value, quoted: true})
@@ -358,10 +360,10 @@ func parseTokens(query string) []token {
 		}
 
 		start := i
-		for i < len(query) && !unicode.IsSpace(rune(query[i])) {
+		for i < len(runes) && !unicode.IsSpace(runes[i]) {
 			i++
 		}
-		result = append(result, token{value: query[start:i], quoted: false})
+		result = append(result, token{value: string(runes[start:i]), quoted: false})
 	}
 
 	return result
@@ -479,18 +481,32 @@ func containsWord(haystack string, needle string) bool {
 	if n == "" {
 		return false
 	}
+	searchFrom := 0
 	for {
-		idx := strings.Index(haystack, n)
-		if idx < 0 {
+		relativeIdx := strings.Index(haystack[searchFrom:], n)
+		if relativeIdx < 0 {
 			return false
 		}
+		idx := searchFrom + relativeIdx
 		right := idx + len(n)
-		leftOk := idx == 0 || !isWordChar(rune(haystack[idx-1]))
-		rightOk := right == len(haystack) || !isWordChar(rune(haystack[right]))
+		leftOk := true
+		if idx > 0 {
+			leftRune, _ := utf8.DecodeLastRuneInString(haystack[:idx])
+			leftOk = !isWordChar(leftRune)
+		}
+		rightOk := true
+		if right < len(haystack) {
+			rightRune, _ := utf8.DecodeRuneInString(haystack[right:])
+			rightOk = !isWordChar(rightRune)
+		}
 		if leftOk && rightOk {
 			return true
 		}
-		haystack = haystack[idx+1:]
+		_, width := utf8.DecodeRuneInString(haystack[idx:])
+		if width <= 0 {
+			width = 1
+		}
+		searchFrom = idx + width
 	}
 }
 

@@ -1,8 +1,29 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-AGENTCTL_BIN="${AGENTCTL_BIN:-/Users/joshka/repos/personal/agentctl/bin/agentctl-cgo}"
-HEARTWOOD_ROOT="${HEARTWOOD_ROOT:-/Users/joshka/repos/personal/heartwood}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+DEFAULT_AGENTCTL_BIN="${REPO_ROOT}/bin/agentctl-cgo"
+DEFAULT_HEARTWOOD_ROOT="$(cd "${REPO_ROOT}/../heartwood" 2>/dev/null && pwd || true)"
+
+if [ -z "${AGENTCTL_BIN:-}" ]; then
+  if [ -x "${DEFAULT_AGENTCTL_BIN}" ]; then
+    AGENTCTL_BIN="${DEFAULT_AGENTCTL_BIN}"
+  else
+    AGENTCTL_BIN="$(command -v agentctl || true)"
+  fi
+fi
+if [ -z "${AGENTCTL_BIN}" ]; then
+  echo "AGENTCTL_BIN is not set and no agentctl binary was found on PATH" >&2
+  exit 1
+fi
+
+HEARTWOOD_ROOT="${HEARTWOOD_ROOT:-${DEFAULT_HEARTWOOD_ROOT}}"
+if [ -z "${HEARTWOOD_ROOT}" ] || [ ! -d "${HEARTWOOD_ROOT}" ]; then
+  echo "HEARTWOOD_ROOT is not set and no sibling heartwood repo was found" >&2
+  exit 1
+fi
+
 HEARTWOOD_HOST="${HEARTWOOD_HOST:-ws://127.0.0.1:3001}"
 HEARTWOOD_DB_NAME="${HEARTWOOD_DB_NAME:-heartwood}"
 TOKEN_PATH="${TOKEN_PATH:-/tmp/hw-classic-agent-smoke.token}"

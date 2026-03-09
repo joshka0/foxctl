@@ -1,6 +1,7 @@
 package codefilter
 
 import (
+	stdpath "path"
 	"path/filepath"
 	"strings"
 
@@ -9,12 +10,12 @@ import (
 
 // ShouldSkipPath reports whether a path should be excluded from app-code indexing.
 // It excludes tests, specs, fixtures, golden files, snapshots, and testdata.
-func ShouldSkipPath(path string) bool {
-	clean := filepath.ToSlash(strings.TrimSpace(path))
+func ShouldSkipPath(filePath string) bool {
+	clean := filepath.ToSlash(strings.TrimSpace(filePath))
 	if clean == "" {
 		return true
 	}
-	base := filepath.Base(clean)
+	base := stdpath.Base(clean)
 	lower := strings.ToLower(clean)
 	baseLower := strings.ToLower(base)
 
