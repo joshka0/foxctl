@@ -29,6 +29,11 @@ signature:
       type: boolean
       required: false
       description: "Enable automatic file selection based on query (default: true)"
+    - name: repo_index_mode
+      type: string
+      required: false
+      default: auto
+      description: "Auto-selection only. Repo-index contribution mode: auto (default, search-first with DAG fallback on zero hits), search (precise structural), dag (broader graph exploration), or off"
     - name: max_files
       type: integer
       required: false
@@ -68,6 +73,7 @@ signature:
 
       1. **Auto-selection**: When auto_files=true (default), uses symbol index,
          semantic search, and ripgrep to find the most relevant files for your query.
+         Repo-index structural recall is available via `repo_index_mode`.
 
       2. **Context-aware extraction**: Extracts only the relevant portions of files
          based on your question, not entire file contents.
@@ -86,6 +92,9 @@ signature:
         # Auto-select files and extract snippets
         agentctl run code/smart_read --input '{"query": "user authentication flow"}'
 
+        # Structural search with precise repo-index mode
+        agentctl run code/smart_read --input '{"query": "repo index dag grep", "repo_index_mode": "search"}'
+
         # Read specific files
         agentctl run code/smart_read --input '{"query": "how does login work", "files": ["auth/login.go"]}'
 
@@ -100,6 +109,12 @@ signature:
           auto_files: true
           max_files: 8
           mode: "general"
+      - id: structural-explore
+        description: "Use repo-index-aware structural file selection."
+        example_input:
+          query: "repo index dag grep"
+          auto_files: true
+          repo_index_mode: "search"
       - id: understand-api
         description: "Get API shape for a module."
         example_input:

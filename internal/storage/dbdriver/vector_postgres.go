@@ -12,10 +12,16 @@ func pgQuoteIdent(name string) string {
 }
 
 // pgCosineSimilarity returns a SQL expression for cosine similarity using pgvector.
-// Returns 1 - distance so higher = more similar (matching libSQL convention).
+// Returns 1 - distance so higher = more similar in the range [-1, 1].
 // pgvector's <=> operator returns cosine distance (0 = identical, 2 = opposite).
 func pgCosineSimilarity(columnName string, queryVector Vector) string {
 	return fmt.Sprintf("(1 - (%s <=> '%s'))", pgQuoteIdent(columnName), queryVector.String())
+}
+
+// pgCosineSimilarityScore returns a SQL expression that maps cosine similarity
+// into a normalized [0,1] similarity score.
+func pgCosineSimilarityScore(columnName string, queryVector Vector) string {
+	return fmt.Sprintf("((1 - (%s <=> '%s')) + 1.0) / 2.0", pgQuoteIdent(columnName), queryVector.String())
 }
 
 // pgEuclideanDistance returns a SQL expression for Euclidean distance using pgvector.

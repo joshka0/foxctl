@@ -237,7 +237,7 @@ func FileSummaryProviders() []Provider {
 // Set to 0.0 for consistent, deterministic outputs.
 const FileSummaryTemperature = 0.0
 
-// SummaryLLM implements the retrieval.SummaryLLM interface for file summaries.
+// SummaryLLM implements the filesummary.SummaryLLM interface for file summaries.
 type SummaryLLM struct {
 	provider Provider
 }
@@ -254,7 +254,7 @@ func NewSummaryLLM(provider Provider) *SummaryLLM {
 	}
 }
 
-// GenerateSummary implements the retrieval.SummaryLLM interface.
+// GenerateSummary implements the filesummary.SummaryLLM interface.
 func (s *SummaryLLM) GenerateSummary(ctx context.Context, prompt string) (string, error) {
 	// Build request body
 	reqBody := map[string]any{

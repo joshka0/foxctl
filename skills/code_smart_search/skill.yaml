@@ -32,6 +32,11 @@ signature:
         enum: ["symbols", "semantic", "ripgrep"]
       default: ["symbols", "ripgrep"]
       description: "Candidate sources to query (symbols, semantic, ripgrep)"
+    - name: repo_index_mode
+      type: string
+      required: false
+      default: auto
+      description: "Repo-index contribution mode: auto (default, search-first with DAG fallback on zero hits), search (precise structural), dag (broader graph exploration), or off"
     - name: limits
       type: object
       required: false
@@ -68,6 +73,7 @@ signature:
          - Symbol index: BM25 search over indexed code symbols
          - Semantic index: Embedding-based similarity (when available)
          - Ripgrep fallback: Keyword grep when indexes are sparse
+         - Repo index (optional): structural search over calls/refers/imports
 
       2. Merges and ranks candidates by relevance score
 
@@ -83,6 +89,12 @@ signature:
           "sources": ["symbols", "ripgrep"],
           "limits": {"max_candidates": 30, "max_snippets": 15}
         }'
+
+      Repo-index modes:
+      - `auto`: precise default. Uses repo-index search first and escalates to DAG only when search returns no hits.
+      - `search`: best for structural queries when you want the most direct entrypoints.
+      - `dag`: best for broader graph exploration when you want neighborhood context.
+      - `off`: disable repo-index contribution.
     workflows:
       - id: auto-search
         description: "Search codebase and extract relevant snippets automatically"
@@ -92,6 +104,11 @@ signature:
           limits:
             max_candidates: 50
             max_snippets: 20
+      - id: structural-search
+        description: "Search repo-index-aware structural code paths"
+        example_input:
+          question: "repo index dag grep"
+          repo_index_mode: "search"
 capabilities:
   network: "none"
   filesystem:

@@ -44,23 +44,37 @@ const DefaultEmbeddingModel = "gemini-embedding-001"
 
 // OpenTurso initializes a memory store using Turso database.
 func OpenTurso(ctx context.Context, cfg dbdriver.TursoConfig) (*TursoStore, error) {
-	// Ensure vector search is enabled
 	cfg.EnableVectorSearch = true
 	if cfg.VectorDimensions == 0 {
 		cfg.VectorDimensions = dbdriver.GetDefaultVectorDimensions()
 	}
-
-	// Create migration function that uses configured dimensions.
-	migrate := func(ctx context.Context, db *sql.DB) error {
-		return migrateTursoWithDimensions(ctx, db, cfg.VectorDimensions)
-	}
-
-	db, err := dbdriver.OpenDB(ctx, dbdriver.Config{
+	return openVectorStore(ctx, dbdriver.Config{
 		Driver: dbdriver.DriverTurso,
 		Turso:  cfg,
-	}, migrate)
+	}, cfg.VectorDimensions, "turso")
+}
+
+// OpenLibSQL initializes a memory store using a local or synced libSQL database.
+func OpenLibSQL(ctx context.Context, cfg dbdriver.LibSQLConfig) (*TursoStore, error) {
+	cfg.EnableVectorSearch = true
+	if cfg.VectorDimensions == 0 {
+		cfg.VectorDimensions = dbdriver.GetDefaultVectorDimensions()
+	}
+	return openVectorStore(ctx, dbdriver.Config{
+		Driver: dbdriver.DriverLibSQL,
+		LibSQL: cfg,
+	}, cfg.VectorDimensions, "libsql")
+}
+
+func openVectorStore(ctx context.Context, cfg dbdriver.Config, vectorDimensions int, backend string) (*TursoStore, error) {
+	// Create migration function that uses configured dimensions.
+	migrate := func(ctx context.Context, db *sql.DB) error {
+		return migrateTursoWithDimensions(ctx, db, vectorDimensions)
+	}
+
+	db, err := dbdriver.OpenDB(ctx, cfg, migrate)
 	if err != nil {
-		return nil, fmt.Errorf("memory: open turso: %w", err)
+		return nil, fmt.Errorf("memory: open %s: %w", backend, err)
 	}
 
 	// Create vector helper
@@ -75,10 +89,10 @@ func OpenTurso(ctx context.Context, cfg dbdriver.TursoConfig) (*TursoStore, erro
 	db.SetConnMaxLifetime(defaultConnMaxLifetime)
 	db.SetConnMaxIdleTime(defaultConnMaxIdleTime)
 
-	store := &TursoStore{db: db, vh: vh, vectorDimension: cfg.VectorDimensions}
+	store := &TursoStore{db: db, vh: vh, vectorDimension: vectorDimensions}
 
 	// Validate dimension metadata matches configuration
-	if err := store.validateDimensions(ctx, cfg.VectorDimensions); err != nil {
+	if err := store.validateDimensions(ctx, vectorDimensions); err != nil {
 		_ = db.Close()
 		return nil, err
 	}

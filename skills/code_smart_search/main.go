@@ -1,62 +1,51 @@
-// Package main implements the code/smart_search skill.
-//
-// This skill combines candidate generation from symbol/semantic indexes
-// with snippet extraction via code/snippet_extract. It's the recommended entry
-// point for code search when you don't have pre-determined candidates.
+// Package main implements the code/smart_search skill as an in-process pipeline:
+// searchindex -> retrieval/v2 -> codecontext.
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"os"
+	"strings"
 	"time"
 
-	"github.com/rs/zerolog"
-
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/executil"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillerr"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
-	errs "github.com/jkatigb/agentctl/internal/platform/errors"
+	"github.com/jkatigb/agentctl/internal/codecontext"
+	ccadapt "github.com/jkatigb/agentctl/internal/codecontext/adapters"
+	"github.com/jkatigb/agentctl/internal/indexing/semantic"
 	ws "github.com/jkatigb/agentctl/internal/platform/workspace"
-	"github.com/jkatigb/agentctl/internal/retrieval"
+	"github.com/jkatigb/agentctl/internal/indexing/repoindex"
+	"github.com/jkatigb/agentctl/internal/repoquery"
+	retrievalv2 "github.com/jkatigb/agentctl/internal/retrieval/v2"
+	"github.com/jkatigb/agentctl/internal/searchindex"
+	"github.com/jkatigb/agentctl/internal/storage"
 	"github.com/jkatigb/agentctl/internal/storage/memory"
 )
 
-// Command is the envelope command for this skill.
 const Command = "code/smart_search"
+const ArtifactKind = "application/x-swe-grep-snippets+ndjson"
 
-// Error codes per Core Profile v1 §13.
-const (
-	ErrCodeArg     = "EARG"
-	ErrCodeRuntime = "ERUNTIME"
-	ErrCodeConfig  = "ERUNTIME"
-)
-
-// Default limits.
 const (
 	DefaultMaxCandidates   = 50
 	DefaultMaxSnippets     = 20
-	DefaultMaxBytesPerFile = 65536
+	DefaultMaxBytesPerFile = 64 * 1024
 )
 
-// Input is the expected JSON input for code/smart_search operations.
 type Input struct {
 	WorkspaceID string   `json:"workspace_id"`
-	Question    string   `json:"question" validate:"required"`
+	Question    string   `json:"question"`
 	Sources     []string `json:"sources"`
-	Limits      Limits   `json:"limits"`
+	RepoIndexMode string `json:"repo_index_mode,omitempty"` // off, search, dag
+	Limits      struct {
+		MaxCandidates   int `json:"max_candidates"`
+		MaxSnippets     int `json:"max_snippets"`
+		MaxBytesPerFile int `json:"max_bytes_per_file"`
+	} `json:"limits,omitempty"`
 }
 
-// Limits controls candidate generation and snippet extraction parameters.
-type Limits struct {
-	MaxCandidates   int `json:"max_candidates"`
-	MaxSnippets     int `json:"max_snippets"`
-	MaxBytesPerFile int `json:"max_bytes_per_file"`
-}
-
-// Output is the skill output structure for code/smart_search results.
 type Output struct {
 	Summary        Summary           `json:"summary"`
 	Candidates     []CandidateOutput `json:"candidates"`
@@ -64,7 +53,6 @@ type Output struct {
 	Artifact       string            `json:"artifact,omitempty"`
 }
 
-// Summary contains aggregated statistics for the smart search operation.
 type Summary struct {
 	CandidatesGenerated   int            `json:"candidates_generated"`
 	CandidatesBySource    map[string]int `json:"candidates_by_source"`
@@ -75,7 +63,6 @@ type Summary struct {
 	SnippetExtractionMS   int64          `json:"snippet_extraction_ms"`
 }
 
-// CandidateOutput is the output representation of a candidate.
 type CandidateOutput struct {
 	Path     string  `json:"path"`
 	SymbolID string  `json:"symbol_id,omitempty"`
@@ -83,23 +70,21 @@ type CandidateOutput struct {
 	Source   string  `json:"source"`
 }
 
-// main is the skill entry point for code/smart_search.
+type ExtractResult struct {
+	FilesRelevant   int
+	SnippetsEmitted int
+	SnippetsInline  []json.RawMessage
+	Artifact        string
+}
+
 func main() {
 	skillmain.Main(Command, run)
 }
 
-// run orchestrates smart code search by combining candidate generation with snippet extraction.
-//
-// Index:
-// - Purpose: Combine candidate generation from symbol/semantic indexes with snippet extraction via code/snippet_extract
-// - Flow: apply defaults → generate candidates from sources → invoke snippet_extract → build output with statistics
-// - SideEffects: database queries; subprocess execution (snippet_extract); artifact persistence; file system reads
-// - FailureModes: invalid workspace, candidate generation errors, snippet_extract execution failures, JSON parsing errors
-// - Observability: emits summary/candidates/snippets_inline/artifact with detailed timing metrics
-// - Related: generateCandidates, invokeSnippetExtract, retrieval.Generator
-// - Keywords: code/smart_search, candidates, snippets, symbols, ripgrep, semantic, extraction
 func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
-	// Apply defaults
+	if in.Question == "" {
+		return skillerr.Validationf("question is required")
+	}
 	if in.WorkspaceID == "" {
 		in.WorkspaceID = ws.ID(rc.PathValidator.Workspace())
 	}
@@ -118,21 +103,13 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 
 	start := time.Now()
 
-	// Step 1: Generate candidates from indexes
 	candidateStart := time.Now()
-	candidates, err := generateCandidates(ctx, rc, in)
+	candidates, ccCandidates, bySource, err := searchCode(ctx, rc, in)
 	if err != nil {
-		return skillerr.WrapRuntime("generate candidates", err)
+		return skillerr.WrapRuntime("search code", err)
 	}
 	candidateDuration := time.Since(candidateStart)
 
-	// Count candidates by source
-	bySource := make(map[string]int)
-	for _, c := range candidates {
-		bySource[c.Source]++
-	}
-
-	// If no candidates, return empty result
 	if len(candidates) == 0 {
 		return skillout.Emit(rc, Command, Output{
 			Summary: Summary{
@@ -148,24 +125,12 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 		})
 	}
 
-	// Step 2: Invoke code/snippet_extract with candidates
 	snippetStart := time.Now()
-	extractResult, err := invokeSnippetExtract(ctx, rc, in, candidates)
+	extractResult, err := collectEvidence(ctx, rc, in, ccCandidates)
 	if err != nil {
-		return skillerr.WrapRuntime("invoke snippet_extract", err)
+		return skillerr.WrapRuntime("collect evidence", err)
 	}
 	snippetDuration := time.Since(snippetStart)
-
-	// Build output
-	candidateOutputs := make([]CandidateOutput, len(candidates))
-	for i, c := range candidates {
-		candidateOutputs[i] = CandidateOutput{
-			Path:     c.Path,
-			SymbolID: c.SymbolID,
-			Score:    c.Score,
-			Source:   c.Source,
-		}
-	}
 
 	output := Output{
 		Summary: Summary{
@@ -177,7 +142,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 			CandidateGenerationMS: candidateDuration.Milliseconds(),
 			SnippetExtractionMS:   snippetDuration.Milliseconds(),
 		},
-		Candidates:     candidateOutputs,
+		Candidates:     candidates,
 		SnippetsInline: extractResult.SnippetsInline,
 		Artifact:       extractResult.Artifact,
 	}
@@ -185,113 +150,178 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	return skillout.Emit(rc, Command, output)
 }
 
-// generateCandidates uses the retrieval package to generate candidates from configured sources.
-func generateCandidates(ctx context.Context, rc *skillmain.RunContext, in Input) ([]retrieval.Candidate, error) {
-	// Open memory store (uses Storage.Root for persistent data)
+func searchCode(ctx context.Context, rc *skillmain.RunContext, in Input) ([]CandidateOutput, []codecontext.Candidate, map[string]int, error) {
 	store, err := memory.OpenWithConfig(ctx, rc.Config)
 	if err != nil {
-		return nil, skillerr.WrapIO("open memory store", err)
+		return nil, nil, nil, skillerr.WrapIO("open memory store", err)
 	}
-	defer func() { errs.Ignore(store.Close(), "close memory store") }()
+	defer store.Close()
 
-	// Create candidate generator with logger
-	workspace := rc.PathValidator.Workspace()
-	logger := zerolog.New(os.Stderr).With().Timestamp().Logger()
-	generator := retrieval.NewGenerator(store, nil, workspace, logger) // nil = no embedding provider
+	indexStore, err := searchindex.Open(ctx, rc.Config.Storage.Root)
+	if err != nil {
+		return nil, nil, nil, skillerr.WrapIO("open search index", err)
+	}
+	defer indexStore.Close()
 
-	// Build options from input
-	opts := retrieval.DefaultOptions()
-	opts.MaxTotalCandidates = in.Limits.MaxCandidates
-
-	// Configure sources
-	opts.EnableSymbols = false
-	opts.EnableSemantic = false
-	opts.EnableRipgrep = false
+	var embedder semantic.EmbeddingProvider
 	for _, src := range in.Sources {
-		switch src {
-		case "symbols":
-			opts.EnableSymbols = true
-		case "semantic":
-			opts.EnableSemantic = true
-		case "ripgrep":
-			opts.EnableRipgrep = true
+		if src == "semantic" {
+			provider, err := semantic.NewProviderForScope(
+				semantic.ScopeSymbols,
+				rc.Config,
+				semantic.WithVoyageKey(os.Getenv("VOYAGE_API_KEY")),
+				semantic.WithGeminiKey(os.Getenv("GEMINI_API_KEY")),
+			)
+			if err == nil {
+				embedder = provider
+			}
+			break
 		}
 	}
 
-	// Generate candidates
-	result, err := generator.Generate(ctx, in.WorkspaceID, in.Question, opts)
-	if err != nil {
-		return nil, skillerr.WrapRuntime("generate candidates", err)
+	if err := indexStore.DeleteWorkspace(ctx, in.WorkspaceID); err != nil {
+		return nil, nil, nil, skillerr.WrapIO("reset search index workspace", err)
 	}
-	return result.Candidates, nil
+	if _, err := searchindex.BuildCodeDocuments(ctx, memoryListByTypeSource{store: store}, indexStore, in.WorkspaceID, searchindex.BuildCodeOptions{
+		Limit:         in.Limits.MaxCandidates * 10,
+		EmbedProvider: embedder,
+	}); err != nil {
+		return nil, nil, nil, skillerr.WrapRuntime("build code search documents", err)
+	}
+
+	engine := retrievalv2.NewEngine(indexStore, embedder)
+	repoMode := normalizeRepoIndexMode(in.RepoIndexMode)
+	if repoMode != "off" {
+		if repoStore, err := repoindex.Open(ctx, rc.Config.Storage.Root, rc.PathValidator.Workspace()); err == nil {
+		defer repoStore.Close()
+		engine = engine.WithRepoQueryService(repoquery.NewQueryService(repoindex.NewQueryEngine(repoStore)))
+	}
+	}
+	req := retrievalv2.DefaultSearchRequest(in.WorkspaceID, in.Question)
+	req.MaxResults = in.Limits.MaxCandidates
+	req.Sources.EnableLexical = true
+	req.Sources.EnableVector = embedder != nil
+	req.Sources.EnableRepoIndex = repoMode != "off"
+	req.Sources.RepoIndexMode = repoMode
+
+	resp, err := engine.Search(ctx, req)
+	if err != nil {
+		return nil, nil, nil, skillerr.WrapRuntime("search retrieval v2", err)
+	}
+
+	bySource := make(map[string]int)
+	for source, stats := range resp.Stats.Sources {
+		if stats.Returned > 0 {
+			bySource[string(source)] = stats.Returned
+		}
+	}
+
+	candidates := make([]CandidateOutput, 0, len(resp.Groups))
+	for _, group := range resp.Groups {
+		symbolID := ""
+		source := ""
+		if len(group.Anchors) > 0 {
+			symbolID = group.Anchors[0].SymbolID
+			source = string(group.Anchors[0].Source)
+		}
+		candidates = append(candidates, CandidateOutput{
+			Path:     group.Path,
+			SymbolID: symbolID,
+			Score:    group.Score,
+			Source:   source,
+		})
+	}
+
+	return candidates, ccadapt.GroupsToCandidates(resp.Groups), bySource, nil
 }
 
-// ExtractResult holds the parsed result from code/snippet_extract skill.
-type ExtractResult struct {
-	FilesRelevant   int
-	SnippetsEmitted int
-	SnippetsInline  []json.RawMessage
-	Artifact        string
-}
-
-// invokeSnippetExtract calls the code/snippet_extract skill with generated candidates.
-func invokeSnippetExtract(ctx context.Context, rc *skillmain.RunContext, in Input, candidates []retrieval.Candidate) (*ExtractResult, error) {
-	// Build snippet_extract input
-	extractCandidates := make([]map[string]any, len(candidates))
-	for i, c := range candidates {
-		extractCandidates[i] = map[string]any{
-			"path":     c.Path,
-			"priority": c.Score,
-		}
-		if c.SymbolID != "" {
-			extractCandidates[i]["symbol_id"] = c.SymbolID
-		}
-	}
-
-	extractInput := map[string]any{
-		"workspace_id": in.WorkspaceID,
-		"question":     in.Question,
-		"candidates":   extractCandidates,
-		"limits": map[string]any{
-			"max_snippets":       in.Limits.MaxSnippets,
-			"max_bytes_per_file": in.Limits.MaxBytesPerFile,
-		},
-	}
-
-	inputJSON, err := json.Marshal(extractInput)
+func collectEvidence(ctx context.Context, rc *skillmain.RunContext, in Input, ccCandidates []codecontext.Candidate) (*ExtractResult, error) {
+	evidence, err := codecontext.Collect(ctx, codecontext.CollectOpts{
+		Candidates:      ccCandidates,
+		Query:           in.Question,
+		PathValidator:   rc.PathValidator,
+		MaxFiles:        in.Limits.MaxCandidates,
+		MaxSnippets:     in.Limits.MaxSnippets,
+		MaxBytesPerFile: in.Limits.MaxBytesPerFile,
+		ContextLines:    3,
+		Mode:            codecontext.ModeSnippets,
+	})
 	if err != nil {
-		return nil, skillerr.WrapRuntime("marshal snippet_extract input", err)
+		return nil, err
 	}
 
-	// Get workspace root for subprocess working directory
-	// This ensures snippet_extract resolves relative paths correctly
-	workspace := rc.PathValidator.Workspace()
-
-	// Execute snippet_extract skill with JSON input via stdin to avoid command-line length limits
-	// (some systems limit argv to ~128KB, but JSON input can be much larger with many candidates)
-	// NOTE: --input-file - is required to read JSON from stdin; without it, agentctl run ignores stdin
-	var data struct {
-		Summary struct {
-			FilesRelevant   int `json:"files_relevant"`
-			SnippetsEmitted int `json:"snippets_emitted"`
-		} `json:"summary"`
-		SnippetsInline []json.RawMessage `json:"snippets_inline"`
-		Artifact       string            `json:"artifact"`
-	}
-
-	result, err := executil.RunAgentctlSkillDecode(ctx, workspace, "code/snippet_extract", inputJSON, &data)
+	output, artifactPayload, err := codecontext.PrepareOutputWithArtifact(
+		evidence,
+		32,
+		512,
+		codecontext.RenderNDJSON,
+	)
 	if err != nil {
-		var decodeErr executil.DecodeError
-		if errors.As(err, &decodeErr) {
-			return nil, skillerr.WrapParse("parse snippet_extract output", decodeErr)
+		return nil, err
+	}
+
+	previews := make([]json.RawMessage, 0, len(output.SnippetsInline))
+	for _, preview := range output.SnippetsInline {
+		b, err := json.Marshal(preview)
+		if err != nil {
+			return nil, skillerr.WrapRuntime("marshal snippet preview", err)
 		}
-		return nil, skillerr.Runtimef("snippet_extract execution failed: %v\nstderr: %s", err, string(result.Stderr))
+		previews = append(previews, json.RawMessage(b))
+	}
+
+	artifactDigest := ""
+	if artifactPayload != nil {
+		artifact, err := skillmain.PersistBuffer(ctx, rc, bytes.NewBuffer(artifactPayload.Data), artifactPayload.Kind, "code_smart_search")
+		if err != nil {
+			return nil, skillerr.WrapIO("persist codecontext artifact", err)
+		}
+		artifactDigest = artifact.Digest
 	}
 
 	return &ExtractResult{
-		FilesRelevant:   data.Summary.FilesRelevant,
-		SnippetsEmitted: data.Summary.SnippetsEmitted,
-		SnippetsInline:  data.SnippetsInline,
-		Artifact:        data.Artifact,
+		FilesRelevant:   evidence.Stats.FilesProcessed,
+		SnippetsEmitted: len(evidence.Snippets),
+		SnippetsInline:  previews,
+		Artifact:        artifactDigest,
 	}, nil
+}
+
+func normalizeRepoIndexMode(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "", "auto":
+		return "auto"
+	case "off", "none", "disabled":
+		return "off"
+	case "dag", "dag_grep", "repo_index_dag":
+		return "dag"
+	case "search":
+		return "search"
+	default:
+		return "auto"
+	}
+}
+
+type memoryListByTypeSource struct {
+	store storage.MemoryStore
+}
+
+func (s memoryListByTypeSource) ListByType(ctx context.Context, workspaceID, entryType string, limit int) ([]storage.NamedEntry, error) {
+	if limit > 0 {
+		entries, _, err := s.store.ListFiltered(ctx, workspaceID, storage.MemoryListFilter{Types: []string{entryType}}, limit, 0)
+		return entries, err
+	}
+	var out []storage.NamedEntry
+	offset := 0
+	for {
+		page, total, err := s.store.ListFiltered(ctx, workspaceID, storage.MemoryListFilter{Types: []string{entryType}}, 200, offset)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, page...)
+		offset += len(page)
+		if len(page) == 0 || offset >= total {
+			break
+		}
+	}
+	return out, nil
 }

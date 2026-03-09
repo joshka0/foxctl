@@ -29,6 +29,11 @@ signature:
       type: boolean
       required: false
       description: "Enable automatic file selection based on query (default: true)"
+    - name: repo_index_mode
+      type: string
+      required: false
+      default: auto
+      description: "Auto-selection only. Repo-index contribution mode: auto (default, search-first with DAG fallback on zero hits), search (precise structural), dag (broader graph exploration), or off"
     - name: evidence
       type: object
       required: false
@@ -80,6 +85,12 @@ signature:
          agentctl run code/counsel --input '{"query": "review auth flow"}'
          ```
 
+      Repo-index modes for auto-selection:
+      - `auto`: precise default. Uses repo-index search first and falls back to DAG only when search returns no hits.
+      - `search`: best for structural queries when you want direct code entrypoints.
+      - `dag`: broader graph exploration.
+      - `off`: disable repo-index contribution.
+
       2. **Specific perspectives:**
          ```bash
          agentctl run code/counsel --input '{
@@ -130,6 +141,12 @@ signature:
           query: "Review this code"
           perspectives: ["security", "performance", "readability", "correctness"]
           auto_files: true
+      - id: structural-review
+        description: "Structural analysis with precise repo-index file selection."
+        example_input:
+          query: "repo index dag grep"
+          auto_files: true
+          repo_index_mode: "search"
 capabilities:
   network: "egress"  # For LLM API calls
   filesystem:

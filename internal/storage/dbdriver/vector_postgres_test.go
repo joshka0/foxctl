@@ -13,6 +13,63 @@ func TestPgCosineSimilarity(t *testing.T) {
 	}
 }
 
+func TestPgCosineSimilarityScore(t *testing.T) {
+	vec := Vector{0.1, 0.2, 0.3}
+	got := pgCosineSimilarityScore("embedding", vec)
+	want := "((1 - (\"embedding\" <=> '[0.100000,0.200000,0.300000]')) + 1.0) / 2.0"
+	if got != want {
+		t.Errorf("pgCosineSimilarityScore()\n  got:  %q\n  want: %q", got, want)
+	}
+}
+
+func TestCosineSimilarityExpr(t *testing.T) {
+	vec := Vector{0.1, 0.2, 0.3}
+	tests := []struct {
+		driver DriverType
+		want   string
+	}{
+		{
+			driver: DriverPostgres,
+			want:   "(1 - (\"embedding\" <=> '[0.100000,0.200000,0.300000]'))",
+		},
+		{
+			driver: DriverLibSQL,
+			want:   "vector_distance_cos(embedding, '[0.100000,0.200000,0.300000]')",
+		},
+	}
+
+	for _, tt := range tests {
+		got := cosineSimilarityExpr(tt.driver, "embedding", vec)
+		if got != tt.want {
+			t.Errorf("cosineSimilarityExpr(%s)\n  got:  %q\n  want: %q", tt.driver, got, tt.want)
+		}
+	}
+}
+
+func TestCosineSimilarityScoreExpr(t *testing.T) {
+	vec := Vector{0.1, 0.2, 0.3}
+	tests := []struct {
+		driver DriverType
+		want   string
+	}{
+		{
+			driver: DriverPostgres,
+			want:   "((1 - (\"embedding\" <=> '[0.100000,0.200000,0.300000]')) + 1.0) / 2.0",
+		},
+		{
+			driver: DriverLibSQL,
+			want:   "(1 - (vector_distance_cos(embedding, '[0.100000,0.200000,0.300000]') / 2.0))",
+		},
+	}
+
+	for _, tt := range tests {
+		got := cosineSimilarityScoreExpr(tt.driver, "embedding", vec)
+		if got != tt.want {
+			t.Errorf("cosineSimilarityScoreExpr(%s)\n  got:  %q\n  want: %q", tt.driver, got, tt.want)
+		}
+	}
+}
+
 func TestPgEuclideanDistance(t *testing.T) {
 	vec := Vector{0.1, 0.2, 0.3}
 	got := pgEuclideanDistance("embedding", vec)

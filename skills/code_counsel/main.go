@@ -24,10 +24,14 @@ import (
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
 	"github.com/jkatigb/agentctl/internal/codecontext"
+	ccadapt "github.com/jkatigb/agentctl/internal/codecontext/adapters"
 	"github.com/jkatigb/agentctl/internal/codecontext/guard"
 	"github.com/jkatigb/agentctl/internal/indexing/semantic"
-	errs "github.com/jkatigb/agentctl/internal/platform/errors"
-	"github.com/jkatigb/agentctl/internal/retrieval"
+	"github.com/jkatigb/agentctl/internal/indexing/repoindex"
+	retrievalv2 "github.com/jkatigb/agentctl/internal/retrieval/v2"
+	"github.com/jkatigb/agentctl/internal/repoquery"
+	"github.com/jkatigb/agentctl/internal/searchindex"
+	"github.com/jkatigb/agentctl/internal/storage"
 	"github.com/jkatigb/agentctl/internal/storage/memory"
 )
 
@@ -79,6 +83,10 @@ type Input struct {
 	// Options: "anthropic", "openai", "cerebras"
 	// If empty, auto-detects from environment.
 	Provider string `json:"provider,omitempty"`
+
+	// RepoIndexMode controls repo-index contribution when auto-selecting files.
+	// Options: auto, search, dag, off.
+	RepoIndexMode string `json:"repo_index_mode,omitempty"`
 }
 
 // Output is the skill output with multi-perspective analysis results and statistics.
@@ -279,7 +287,7 @@ func gatherEvidence(ctx context.Context, rc *skillmain.RunContext, in Input, log
 		}
 	} else if *in.AutoFiles {
 		// Auto-select files
-		selected, err := autoSelectFiles(ctx, rc, in.Query, in.MaxFiles, logger)
+		selected, err := autoSelectFiles(ctx, rc, in.Query, in.MaxFiles, in.RepoIndexMode, logger)
 		if err != nil {
 			return nil, skillerr.WrapRuntime("auto-select files", err)
 		}
@@ -311,50 +319,97 @@ func gatherEvidence(ctx context.Context, rc *skillmain.RunContext, in Input, log
 	return evidence, nil
 }
 
-// autoSelectFiles uses retrieval.Generator to find relevant files based on semantic search.
-func autoSelectFiles(ctx context.Context, rc *skillmain.RunContext, query string, maxFiles int, logger zerolog.Logger) ([]codecontext.Candidate, error) {
+// autoSelectFiles uses searchindex + retrieval/v2 to find relevant files for analysis.
+func autoSelectFiles(ctx context.Context, rc *skillmain.RunContext, query string, maxFiles int, repoIndexMode string, logger zerolog.Logger) ([]codecontext.Candidate, error) {
 	memStore, err := memory.OpenWithConfig(ctx, rc.Config)
 	if err != nil {
 		return nil, skillerr.WrapIO("open memory store", err)
 	}
-	defer func() { errs.Ignore(memStore.Close(), "close memory store") }()
+	defer memStore.Close()
 
-	// Create embedding provider (optional)
+	indexStore, err := searchindex.Open(ctx, rc.Config.Storage.Root)
+	if err != nil {
+		return nil, skillerr.WrapIO("open search index", err)
+	}
+	defer indexStore.Close()
+
+	workspaceID := rc.Workspace
 	var embedProvider semantic.EmbeddingProvider
 	embedder, err := semantic.NewEmbedderFromConfig(semantic.ScopeSymbols, rc.Config, skillmain.EmbeddingGuard(rc))
 	if err == nil {
 		embedProvider = &embedderAdapter{embedder: embedder}
+	} else {
+		logger.Debug().Err(err).Msg("embedding provider unavailable, using lexical retrieval only")
 	}
 
-	// Create generator
-	gen := retrieval.NewGenerator(memStore, embedProvider, rc.Workspace, logger)
+	if err := indexStore.DeleteWorkspace(ctx, workspaceID); err != nil {
+		return nil, skillerr.WrapIO("reset search index workspace", err)
+	}
+	if _, err := searchindex.BuildCodeDocuments(ctx, memoryListByTypeSource{store: memStore}, indexStore, workspaceID, searchindex.BuildCodeOptions{
+		Limit:         maxFiles * 10,
+		EmbedProvider: embedProvider,
+	}); err != nil {
+		return nil, skillerr.WrapRuntime("build code search documents", err)
+	}
 
-	// Generate candidates
-	result, err := gen.Generate(ctx, rc.Workspace, query, retrieval.Options{
-		MaxTotalCandidates:    maxFiles,
-		MaxSymbolCandidates:   maxFiles,
-		MaxSemanticCandidates: maxFiles / 2,
-		MaxRipgrepCandidates:  maxFiles,
-		EnableSymbols:         true,
-		EnableSemantic:        embedProvider != nil,
-		EnableRipgrep:         true,
-		MinTotalCandidates:    3,
-	})
+	engine := retrievalv2.NewEngine(indexStore, embedProvider)
+	if repoStore, err := repoindex.Open(ctx, rc.Config.Storage.Root, rc.PathValidator.Workspace()); err == nil {
+		defer repoStore.Close()
+		engine = engine.WithRepoQueryService(repoquery.NewQueryService(repoindex.NewQueryEngine(repoStore)))
+	}
+	req := retrievalv2.DefaultSearchRequest(workspaceID, query)
+	req.MaxResults = maxFiles
+	req.Sources.EnableLexical = true
+	req.Sources.EnableVector = embedProvider != nil
+	req.Sources.EnableRepoIndex = normalizeRepoIndexMode(repoIndexMode) != "off"
+	req.Sources.RepoIndexMode = normalizeRepoIndexMode(repoIndexMode)
+
+	resp, err := engine.Search(ctx, req)
 	if err != nil {
-		return nil, skillerr.WrapRuntime("generate candidates", err)
+		return nil, skillerr.WrapRuntime("search retrieval v2", err)
 	}
 
-	candidates := make([]codecontext.Candidate, 0, len(result.Candidates))
-	for _, c := range result.Candidates {
-		candidates = append(candidates, codecontext.Candidate{
-			Path:     c.Path,
-			SymbolID: c.SymbolID,
-			LineHint: c.Line,
-			Priority: c.Score,
-		})
-	}
+	return ccadapt.GroupsToCandidates(resp.Groups), nil
+}
 
-	return candidates, nil
+func normalizeRepoIndexMode(mode string) string {
+	switch strings.ToLower(strings.TrimSpace(mode)) {
+	case "", "auto":
+		return "auto"
+	case "search":
+		return "search"
+	case "dag", "dag_grep", "repo_index_dag":
+		return "dag"
+	case "off", "none", "disabled":
+		return "off"
+	default:
+		return "auto"
+	}
+}
+
+type memoryListByTypeSource struct {
+	store storage.MemoryStore
+}
+
+func (s memoryListByTypeSource) ListByType(ctx context.Context, workspaceID, entryType string, limit int) ([]storage.NamedEntry, error) {
+	if limit > 0 {
+		entries, _, err := s.store.ListFiltered(ctx, workspaceID, storage.MemoryListFilter{Types: []string{entryType}}, limit, 0)
+		return entries, err
+	}
+	var out []storage.NamedEntry
+	offset := 0
+	for {
+		page, total, err := s.store.ListFiltered(ctx, workspaceID, storage.MemoryListFilter{Types: []string{entryType}}, 200, offset)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, page...)
+		offset += len(page)
+		if len(page) == 0 || offset >= total {
+			break
+		}
+	}
+	return out, nil
 }
 
 // renderEvidenceForLLM converts evidence to a formatted string suitable for LLM context.

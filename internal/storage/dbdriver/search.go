@@ -330,7 +330,7 @@ func (h *HybridSearcher) Search(
 				%s as vector_sim
 			FROM %s
 		`, textColumn,
-			h.vectorHelper.CosineSimilarity(vectorColumn, queryVector),
+			h.vectorHelper.CosineSimilarityScore(vectorColumn, queryVector),
 			tableName)
 
 		if additionalWhere != "" {
@@ -351,7 +351,7 @@ func (h *HybridSearcher) Search(
 			FROM %s vt
 			JOIN %s t ON t.rowid = vt.id
 		`, textColumn,
-			h.vectorHelper.CosineSimilarity("t."+vectorColumn, queryVector),
+			h.vectorHelper.CosineSimilarityScore("t."+vectorColumn, queryVector),
 			h.vectorHelper.VectorTopK(indexName, queryVector, limit*2),
 			tableName)
 
@@ -408,15 +408,15 @@ func (h *HybridSearcher) Search(
 		return nil, fmt.Errorf("row iteration failed: %w", err)
 	}
 
-	// Phase 3: Normalize and combine scores
+	// Phase 3: Combine scores
 	bm25Scaler := NewMinMaxScaler(bm25Scores)
 
 	for i := range results {
 		// Scale BM25 to [0, 1]
 		bm25Scaled := bm25Scaler.Scale(results[i].BM25Score)
 
-		// Scale cosine similarity from [-1, 1] to [0, 1]
-		vectorScaled := (results[i].VectorScore + 1.0) / 2.0
+		// Vector score is already normalized to [0, 1].
+		vectorScaled := results[i].VectorScore
 
 		// Combine with alpha weighting
 		results[i].Score = h.alpha*bm25Scaled + (1.0-h.alpha)*vectorScaled

@@ -76,9 +76,8 @@ func openTursoFromConfig(ctx context.Context, cfg config.Config) (*TursoStore, e
 	return store, nil
 }
 
-// openLibSQLFromConfig opens a LibSQL store from platform config.
-// This uses the new local-first sync architecture.
-// Falls back to SQLite if no sync URL is configured.
+// openLibSQLFromConfig opens a LibSQL-backed memory store from platform config.
+// It supports both local-only libSQL files and embedded-replica sync mode.
 func openLibSQLFromConfig(ctx context.Context, cfg config.Config) (storage.MemoryStore, error) {
 	// Build LibSQL config from platform config and environment
 	loader := dbdriver.NewConfigLoader(cfg.Storage.Root)
@@ -99,30 +98,12 @@ func openLibSQLFromConfig(ctx context.Context, cfg config.Config) (storage.Memor
 	// Ensure vector search is enabled for memory
 	dbCfg.LibSQL.EnableVectorSearch = true
 
-	// Check for sync URL from environment (already loaded by ConfigLoader)
-	syncEnabled := dbCfg.LibSQL.SyncURL != ""
-
-	// Use TursoConfig which works with embedded replicas (same underlying driver)
-	tursoCfg := dbdriver.TursoConfig{
-		URL:                dbCfg.LibSQL.SyncURL,
-		AuthToken:          dbCfg.LibSQL.AuthToken,
-		ReplicaPath:        dbCfg.LibSQL.Path,
-		EnableVectorSearch: true,
-		VectorDimensions:   dbCfg.LibSQL.VectorDimensions,
-	}
-
-	// If no sync URL, fall back to SQLite (local-only mode)
-	if tursoCfg.URL == "" {
-		logger.Info().Msg("libsql configured but no sync URL, falling back to SQLite")
-		return Open(ctx, cfg.Storage.Root, cfg.Paths.CAS)
-	}
-
-	store, err := OpenTurso(ctx, tursoCfg)
+	store, err := OpenLibSQL(ctx, dbCfg.LibSQL)
 	if err != nil {
 		return nil, fmt.Errorf("memory: open libsql: %w", err)
 	}
 
-	if syncEnabled {
+	if dbCfg.LibSQL.SyncURL != "" {
 		logger.Info().Str("path", dbCfg.LibSQL.Path).Str("sync_url", dbCfg.LibSQL.SyncURL).Msg("opened LibSQL store with sync")
 	} else {
 		logger.Info().Str("path", dbCfg.LibSQL.Path).Msg("opened LibSQL store (local-only)")

@@ -12,7 +12,6 @@ import (
 	"github.com/jkatigb/agentctl/internal/indexing/semantic"
 	"github.com/jkatigb/agentctl/internal/indexing/symbol"
 	"github.com/jkatigb/agentctl/internal/observability"
-	"github.com/jkatigb/agentctl/internal/retrieval"
 	"github.com/jkatigb/agentctl/internal/storage"
 )
 
@@ -59,7 +58,7 @@ func DefaultWorkerConfig() WorkerConfig {
 type Worker struct {
 	config    WorkerConfig
 	store     storage.MemoryStore
-	llm       retrieval.SummaryLLM
+	llm       SummaryLLM
 	embed     semantic.EmbeddingProvider
 	workspace string
 
@@ -78,7 +77,7 @@ type Worker struct {
 func NewWorker(
 	cfg WorkerConfig,
 	store storage.MemoryStore,
-	llm retrieval.SummaryLLM,
+	llm SummaryLLM,
 	embed semantic.EmbeddingProvider,
 	workspace string,
 ) *Worker {
@@ -210,7 +209,7 @@ func (w *Worker) TriggerFullScan(ctx context.Context) (int, error) {
 		Success(0))
 
 	// Process the files immediately (using the same logic as processBatch)
-	generator := retrieval.NewFileSummaryGenerator(
+	generator := NewFileSummaryGenerator(
 		w.store,
 		w.llm,
 		w.embed,
@@ -316,7 +315,7 @@ func (w *Worker) processBatch(ctx context.Context) {
 		files = files[:w.config.BatchSize]
 	}
 
-	generator := retrieval.NewFileSummaryGenerator(
+	generator := NewFileSummaryGenerator(
 		w.store,
 		w.llm,
 		w.embed,

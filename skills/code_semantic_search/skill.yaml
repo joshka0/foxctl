@@ -78,6 +78,11 @@ signature:
       required: false
       default: json
       description: Output format - "json" (default) or "tree" (displays file paths as directory tree)
+    - name: repo_index_mode
+      type: string
+      required: false
+      default: auto
+      description: "Symbol/code scope only. Repo-index contribution mode: auto (default, search-first with DAG fallback on zero hits), search (precise structural), dag (broader graph exploration), or off"
     - name: timeline
       type: boolean
       required: false
@@ -133,6 +138,12 @@ signature:
       5. Combines results using Reciprocal Rank Fusion (RRF)
       6. Extracts context hints from matching sessions
 
+      Repo-index modes for `scope:["symbols"]`:
+      - `auto`: precise default. Uses repo-index search first and only falls back to DAG when search returns no hits.
+      - `search`: best for structural queries when you want direct code entrypoints.
+      - `dag`: broader graph exploration.
+      - `off`: disable repo-index contribution.
+
       Environment Variables:
       - VOYAGE_API_KEY: Enables vector search (required for all scopes)
       - TURSO_DATABASE_URL: Remote Turso database URL (required for remote=true)
@@ -159,6 +170,7 @@ signature:
 
       Example commands:
         agentctl run code/semantic_search --input '{"query":"authentication middleware","scope":["symbols"],"limit":10}'
+        agentctl run code/semantic_search --input '{"query":"repo index dag grep","scope":["symbols"],"repo_index_mode":"search"}'
         agentctl skills run code/semantic_search --query "authentication middleware" --scope symbols --limit 10
         agentctl run code/semantic_search --input '{"query":"database migration issues","scope":["sessions"],"include_context":true}'
         agentctl skills run code/semantic_search --query "database migration issues" --scope sessions --include_context

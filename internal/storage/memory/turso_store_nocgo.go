@@ -29,6 +29,11 @@ func OpenTurso(_ context.Context, _ dbdriver.TursoConfig) (*TursoStore, error) {
 	return nil, errors.New("turso memory store requires CGO (build with CGO_ENABLED=1)")
 }
 
+// OpenLibSQL returns an error when CGO is not available.
+func OpenLibSQL(_ context.Context, _ dbdriver.LibSQLConfig) (*TursoStore, error) {
+	return nil, errors.New("libsql memory store requires CGO (build with CGO_ENABLED=1)")
+}
+
 // Close is a no-op stub.
 func (s *TursoStore) Close() error {
 	return errors.New("turso store not available")

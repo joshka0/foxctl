@@ -246,28 +246,6 @@ func TestTreeBuilder_RenderText_ASCIIIcons(t *testing.T) {
 	}
 }
 
-func TestCandidatesToFileEntries(t *testing.T) {
-	candidates := []Candidate{
-		{Path: "file1.go", Score: 0.85},
-		{Path: "file2.go", Score: 0.75},
-	}
-	summaries := map[string]string{
-		"file1.go": "First file summary",
-	}
-
-	entries := CandidatesToFileEntries(candidates, summaries)
-
-	if len(entries) != 2 {
-		t.Fatalf("expected 2 entries, got %d", len(entries))
-	}
-	if entries[0].Summary != "First file summary" {
-		t.Errorf("expected summary for file1, got %q", entries[0].Summary)
-	}
-	if entries[1].Summary != "" {
-		t.Errorf("expected empty summary for file2, got %q", entries[1].Summary)
-	}
-}
-
 func TestMergeFileEntries(t *testing.T) {
 	primary := []FileEntry{
 		{Path: "a.go", Score: 0.70, Summary: "Primary summary"},

@@ -226,6 +226,46 @@ func TestCollect_DeduplicatesPaths(t *testing.T) {
 	}
 }
 
+func TestCollect_MergesLegacyAnchorsOnDuplicatePath(t *testing.T) {
+	dir := createTestDir(t)
+	content := `package main
+
+func First() {
+	println("first")
+}
+
+func Second() {
+	println("second")
+}
+`
+	createTestFile(t, dir, "main.go", content)
+
+	validator, err := policy.NewPathValidator(dir, nil)
+	if err != nil {
+		t.Fatalf("failed to create validator: %v", err)
+	}
+
+	ctx := context.Background()
+	evidence, err := codecontext.Collect(ctx, codecontext.CollectOpts{
+		Candidates: []codecontext.Candidate{
+			{Path: "main.go", SymbolID: "main.go:First", Priority: 0.8},
+			{Path: "main.go", SymbolID: "main.go:Second", Priority: 0.7},
+		},
+		PathValidator: validator,
+		MaxSnippets:   10,
+	})
+	if err != nil {
+		t.Fatalf("Collect failed: %v", err)
+	}
+
+	if evidence.Stats.FilesProcessed != 1 {
+		t.Fatalf("FilesProcessed = %d, want 1", evidence.Stats.FilesProcessed)
+	}
+	if len(evidence.Snippets) < 2 {
+		t.Fatalf("expected at least 2 snippets from merged anchors, got %d", len(evidence.Snippets))
+	}
+}
+
 func TestCollect_RecordsFileErrors(t *testing.T) {
 	dir := createTestDir(t)
 	createTestFile(t, dir, "exists.txt", "content")

@@ -414,23 +414,6 @@ func (b *TreeBuilder) renderNode(sb *strings.Builder, node *TreeNode, indent int
 	}
 }
 
-// CandidatesToFileEntries converts retrieval candidates to file entries.
-// This is a bridge function for integration with the existing retrieval system.
-func CandidatesToFileEntries(candidates []Candidate, summaries map[string]string) []FileEntry {
-	entries := make([]FileEntry, 0, len(candidates))
-	for _, c := range candidates {
-		entry := FileEntry{
-			Path:  c.Path,
-			Score: c.Score,
-		}
-		if summaries != nil {
-			entry.Summary = summaries[c.Path]
-		}
-		entries = append(entries, entry)
-	}
-	return entries
-}
-
 // MergeFileEntries merges two sets of file entries, keeping the best score per path.
 // Summaries from the primary set are preferred unless missing.
 func MergeFileEntries(primary, secondary []FileEntry) []FileEntry {
