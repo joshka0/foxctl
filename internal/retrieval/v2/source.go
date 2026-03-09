@@ -5,8 +5,8 @@ import (
 	"strings"
 
 	"github.com/jkatigb/agentctl/internal/indexing/repoindex"
-	repoqueryadapters "github.com/jkatigb/agentctl/internal/repoquery/adapters"
 	"github.com/jkatigb/agentctl/internal/repoquery"
+	repoqueryadapters "github.com/jkatigb/agentctl/internal/repoquery/adapters"
 	"github.com/jkatigb/agentctl/internal/searchindex"
 )
 
@@ -19,14 +19,14 @@ type Source interface {
 
 // SourceCall passes required data into a source recall call.
 type SourceCall struct {
-	WorkspaceID string
-	Query       string
-	Limit       int
-	MinScore    float64
-	Index       SearchIndex
-	RepoQuery   RepoQueryService
-	Embedding   []float32
-	Model       string
+	WorkspaceID   string
+	Query         string
+	Limit         int
+	MinScore      float64
+	Index         SearchIndex
+	RepoQuery     RepoQueryService
+	Embedding     []float32
+	Model         string
 	RepoIndexMode string
 }
 

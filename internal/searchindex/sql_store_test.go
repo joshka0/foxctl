@@ -105,7 +105,7 @@ func TestStoreVectorRecall(t *testing.T) {
 		SearchText:     "alpha function",
 		Keywords:       []string{"alpha"},
 		Embedding:      []float32{0.20, 0.90, 0},
-		EmbeddingModel:  "model-a",
+		EmbeddingModel: "model-a",
 	}); err != nil {
 		t.Fatalf("upsert vector doc: %v", err)
 	}
@@ -122,7 +122,7 @@ func TestStoreVectorRecall(t *testing.T) {
 		SearchText:     "beta function",
 		Keywords:       []string{"beta"},
 		Embedding:      []float32{0.90, 0.20, 0},
-		EmbeddingModel:  "model-a",
+		EmbeddingModel: "model-a",
 	}); err != nil {
 		t.Fatalf("upsert vector doc: %v", err)
 	}

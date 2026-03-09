@@ -33,17 +33,17 @@ import (
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
 	"github.com/jkatigb/agentctl/internal/domain/policy"
 	"github.com/jkatigb/agentctl/internal/indexing/filesummary"
-	"github.com/jkatigb/agentctl/internal/indexing/rerank"
 	"github.com/jkatigb/agentctl/internal/indexing/repoindex"
+	"github.com/jkatigb/agentctl/internal/indexing/rerank"
 	"github.com/jkatigb/agentctl/internal/indexing/semantic"
 	"github.com/jkatigb/agentctl/internal/indexing/symbol"
 	"github.com/jkatigb/agentctl/internal/platform/config"
 	errs "github.com/jkatigb/agentctl/internal/platform/errors"
 	"github.com/jkatigb/agentctl/internal/platform/workspace"
 	llmproviders "github.com/jkatigb/agentctl/internal/providers/llm"
+	"github.com/jkatigb/agentctl/internal/repoquery"
 	"github.com/jkatigb/agentctl/internal/retrieval"
 	retrievalv2 "github.com/jkatigb/agentctl/internal/retrieval/v2"
-	"github.com/jkatigb/agentctl/internal/repoquery"
 	"github.com/jkatigb/agentctl/internal/searchindex"
 	"github.com/jkatigb/agentctl/internal/storage"
 	"github.com/jkatigb/agentctl/internal/storage/dbdriver"
@@ -113,9 +113,9 @@ type Input struct {
 	Workspaces []string `json:"workspaces,omitempty"` // Specific workspaces to search (requires remote)
 
 	// Reranking options (requires VOYAGE_API_KEY)
-	RerankEnabled bool   `json:"rerank_enabled,omitempty"` // Enable reranking (default: from env)
-	RerankTopK    int    `json:"rerank_top_k,omitempty"`   // Candidates to rerank (default: 50)
-	RerankModel   string `json:"rerank_model,omitempty"`   // Override model (default: rerank-2.5)
+	RerankEnabled bool   `json:"rerank_enabled,omitempty"`  // Enable reranking (default: from env)
+	RerankTopK    int    `json:"rerank_top_k,omitempty"`    // Candidates to rerank (default: 50)
+	RerankModel   string `json:"rerank_model,omitempty"`    // Override model (default: rerank-2.5)
 	RepoIndexMode string `json:"repo_index_mode,omitempty"` // off, search, dag for symbol/code path
 
 	// Timeline options (enriches session results with chunk summaries and learnings)
@@ -444,16 +444,16 @@ func search(ctx context.Context, rc *skillmain.RunContext, in *Input, voyageKey,
 			sourceCtx, sourceCancel := context.WithTimeout(ctx, DefaultSourceTimeout)
 			defer sourceCancel()
 
-				results, groups, err := searchSymbolsWithRetrieval(
-					sourceCtx,
-					cfg,
-					workspaceID,
-					validator.Workspace(),
-					in.Query,
-					in.RepoIndexMode,
-					embedProvider,
-					queryEmbedding,
-					in.Limit*2,
+			results, groups, err := searchSymbolsWithRetrieval(
+				sourceCtx,
+				cfg,
+				workspaceID,
+				validator.Workspace(),
+				in.Query,
+				in.RepoIndexMode,
+				embedProvider,
+				queryEmbedding,
+				in.Limit*2,
 			)
 			resultsCh <- sourceResults{
 				source:  ScopeSymbols,
@@ -981,9 +981,9 @@ func searchSymbolsWithRetrieval(
 	repoMode := normalizeSkillRepoIndexMode(repoIndexMode)
 	if repoMode != "off" {
 		if repoStore, err := repoindex.Open(ctx, cfg.Storage.Root, workspacePath); err == nil {
-		defer repoStore.Close()
-		engine = engine.WithRepoQueryService(repoquery.NewQueryService(repoindex.NewQueryEngine(repoStore)))
-	}
+			defer repoStore.Close()
+			engine = engine.WithRepoQueryService(repoquery.NewQueryService(repoindex.NewQueryEngine(repoStore)))
+		}
 	}
 	req := retrievalv2.DefaultSearchRequest(workspaceID, query)
 	req.MaxResults = limit * 2

@@ -9,14 +9,14 @@ import (
 	"time"
 
 	"github.com/jkatigb/agentctl/internal/indexing/repoindex"
-	"github.com/jkatigb/agentctl/internal/repoquery"
 	"github.com/jkatigb/agentctl/internal/observability"
+	"github.com/jkatigb/agentctl/internal/repoquery"
 )
 
 // RepoIndexToolExecutor provides repo index tools for LLM access.
 type RepoIndexToolExecutor struct {
 	queryService *repoquery.QueryService
-	workspaceID string
+	workspaceID  string
 }
 
 // NewRepoIndexToolExecutor creates a new repo index tool executor.
@@ -36,7 +36,7 @@ func NewRepoIndexToolExecutor(store *repoindex.Store) *RepoIndexToolExecutor {
 	}
 	return &RepoIndexToolExecutor{
 		queryService: queryService,
-		workspaceID: workspaceID,
+		workspaceID:  workspaceID,
 	}
 }
 

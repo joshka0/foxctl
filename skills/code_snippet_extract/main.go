@@ -22,8 +22,10 @@ import (
 	ws "github.com/jkatigb/agentctl/internal/platform/workspace"
 )
 
-const Command = "code/snippet_extract"
-const ArtifactKind = "application/x-swe-grep-snippets+ndjson"
+const (
+	Command      = "code/snippet_extract"
+	ArtifactKind = "application/x-swe-grep-snippets+ndjson"
+)
 
 // Error codes per Core Profile v1 §13 and spec §5.4.
 const (

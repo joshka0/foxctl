@@ -82,11 +82,11 @@ func (Projector) FromNodeValue(node repoindex.Node) *Anchor {
 			return nil
 		}
 		return &Anchor{
-			Path:    node.File,
+			Path:     node.File,
 			LineHint: firstPositive(node.SpanStart, node.SpanEnd),
-			Score:   1.0,
-			Source:  "repo_index",
-			Summary: node.Summary,
+			Score:    1.0,
+			Source:   "repo_index",
+			Summary:  node.Summary,
 		}
 	default:
 		return nil

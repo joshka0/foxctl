@@ -29,7 +29,7 @@ func (f fakeBootstrapSource) ListByType(_ context.Context, _ string, entryType s
 }
 
 type fakeEmbeddingProvider struct {
-	batchCalls int
+	batchCalls  int
 	singleCalls int
 }
 
@@ -47,7 +47,7 @@ func (f *fakeEmbeddingProvider) EmbedBatch(_ context.Context, texts []string) ([
 	return out, nil
 }
 
-func (f *fakeEmbeddingProvider) Model() string { return "fake-batch-model" }
+func (f *fakeEmbeddingProvider) Model() string   { return "fake-batch-model" }
 func (f *fakeEmbeddingProvider) Dimensions() int { return 1 }
 
 var _ semantic.EmbeddingProvider = (*fakeEmbeddingProvider)(nil)
@@ -70,16 +70,16 @@ func TestBuildCodeDocuments(t *testing.T) {
 		Summary:   "Authenticate user with token",
 	}
 	rawSymbol, err := json.Marshal(symbol.Result{Symbol: symbol.Symbol{
-		ID:          symbol.ID("pkg/main.go", "Authenticate"),
-		FilePath:    "pkg/main.go",
-		Name:        "Authenticate",
-		Language:    "go",
-		Kind:        symbol.KindFunction,
-		StartLine:   1,
-		EndLine:     20,
-		StartByte:   4,
-		EndByte:     32,
-		Signature:   "func Authenticate(ctx context.Context) error",
+		ID:            symbol.ID("pkg/main.go", "Authenticate"),
+		FilePath:      "pkg/main.go",
+		Name:          "Authenticate",
+		Language:      "go",
+		Kind:          symbol.KindFunction,
+		StartLine:     1,
+		EndLine:       20,
+		StartByte:     4,
+		EndByte:       32,
+		Signature:     "func Authenticate(ctx context.Context) error",
 		Documentation: "Auth entrypoint.",
 	}})
 	if err != nil {
@@ -94,10 +94,10 @@ func TestBuildCodeDocuments(t *testing.T) {
 		Summary:   "File summary for login flow",
 	}
 	rawSummary, err := json.Marshal(symbol.FileSummaryResult{
-		FilePath: "pkg/main.go",
-		Package:  "pkg",
-		Symbols:  []string{"Authenticate"},
-		Language: "go",
+		FilePath:  "pkg/main.go",
+		Package:   "pkg",
+		Symbols:   []string{"Authenticate"},
+		Language:  "go",
 		LineCount: 200,
 	})
 	if err != nil {

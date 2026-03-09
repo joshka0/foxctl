@@ -25,8 +25,10 @@ import (
 	"github.com/jkatigb/agentctl/internal/storage/memory"
 )
 
-const Command = "code/smart_search"
-const ArtifactKind = "application/x-swe-grep-snippets+ndjson"
+const (
+	Command      = "code/smart_search"
+	ArtifactKind = "application/x-swe-grep-snippets+ndjson"
+)
 
 const (
 	DefaultMaxCandidates   = 50

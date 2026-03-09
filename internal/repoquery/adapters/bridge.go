@@ -17,14 +17,14 @@ func ToSearchHits(anchors []repoquery.Anchor) []searchindex.SearchHit {
 			continue
 		}
 		doc := searchindex.Document{
-			ID:         id,
+			ID:          id,
 			WorkspaceID: "",
-			Path:       a.Path,
-			GroupKey:   a.Path,
-			SymbolID:   a.SymbolID,
-			SymbolName: a.SymbolName,
-			Title:      firstNonEmpty(a.SymbolName, a.Path),
-			Summary:    a.Summary,
+			Path:        a.Path,
+			GroupKey:    a.Path,
+			SymbolID:    a.SymbolID,
+			SymbolName:  a.SymbolName,
+			Title:       firstNonEmpty(a.SymbolName, a.Path),
+			Summary:     a.Summary,
 			Anchor: searchindex.Anchor{
 				Type:      anchorType(a),
 				Path:      a.Path,

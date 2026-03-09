@@ -62,14 +62,14 @@ type SearchRequest struct {
 
 // SearchSourcesConfig controls recall source behavior.
 type SearchSourcesConfig struct {
-	EnableExact   bool
-	EnableLexical bool
-	EnableVector  bool
+	EnableExact     bool
+	EnableLexical   bool
+	EnableVector    bool
 	EnableRepoIndex bool
 
-	ExactLimit   int
-	LexicalLimit int
-	VectorLimit  int
+	ExactLimit     int
+	LexicalLimit   int
+	VectorLimit    int
 	RepoIndexLimit int
 
 	LexicalMinScore float64
@@ -87,8 +87,10 @@ const (
 )
 
 // FuseOptions controls cross-source fusion.
-type FuseMode = searchrank.FuseMode
-type FuseOptions = searchrank.FuseOptions
+type (
+	FuseMode    = searchrank.FuseMode
+	FuseOptions = searchrank.FuseOptions
+)
 
 // GroupOptions controls final file/group-level grouping.
 type GroupOptions struct {
@@ -97,9 +99,11 @@ type GroupOptions struct {
 	MaxMembers int
 }
 
-type SourceHit = searchrank.SourceHit[searchindex.Document]
-type SourceContribution = searchrank.SourceContribution
-type FusedHit = searchrank.FusedHit[searchindex.Document]
+type (
+	SourceHit          = searchrank.SourceHit[searchindex.Document]
+	SourceContribution = searchrank.SourceContribution
+	FusedHit           = searchrank.FusedHit[searchindex.Document]
+)
 
 // AnchorHit preserves anchor-level detail when grouping file-oriented results.
 type AnchorHit struct {

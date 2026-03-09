@@ -10,7 +10,7 @@ import (
 )
 
 type fakeIndex struct {
-	exact        []searchindex.SearchHit
+	exact          []searchindex.SearchHit
 	lexicalQuery   string
 	vectorQueryLen int
 
@@ -143,7 +143,7 @@ func TestSearch_FallsBackToLexicalWhenVectorFails(t *testing.T) {
 		lexical: []searchindex.SearchHit{
 			{Doc: searchindex.Document{ID: "symbol:user", Path: "auth/user.go", GroupKey: "auth/user.go", Kind: searchindex.KindFile, Title: "user"}, Score: 0.8},
 		},
-		vector:  nil,
+		vector:    nil,
 		vectorErr: errVector,
 	}
 	embed := &fakeEmbedder{}
