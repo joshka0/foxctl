@@ -1,0 +1,49 @@
+apiVersion: agentctl/v1
+kind: Skill
+metadata:
+  name: repo/index_search
+  version: 0.1.0
+  description: "Search the repo index and return matching nodes with projected anchors"
+  tags: ["repoindex", "graph", "search"]
+distribution:
+  type: exec
+  exec:
+    entry: skills/repo_index_search/repo_index_search
+io:
+  format: JSON
+  inline_output_kb: 64
+signature:
+  command: repo/index_search
+  parameters:
+    - name: query
+      type: string
+      required: true
+      description: "Repo-index text query"
+    - name: workspace
+      type: string
+      required: false
+      description: "Workspace root (default: current workspace)"
+    - name: limit
+      type: integer
+      required: false
+      description: "Maximum results (default 20)"
+  returns:
+    - name: count
+      type: integer
+      description: "Number of matching nodes"
+    - name: results
+      type: array
+      description: "Matching repo-index nodes"
+    - name: anchors
+      type: array
+      description: "Projected code anchors for matching nodes"
+capabilities:
+  network: "none"
+  filesystem:
+    - type: workdir
+  pure: true
+openapi:
+  enabled: true
+  methods:
+    GET: "true"
+    POST: "true"

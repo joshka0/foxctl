@@ -1,0 +1,42 @@
+apiVersion: agentctl/v1
+kind: Skill
+metadata:
+  name: repo/index_open
+  version: 0.1.0
+  description: "Open one repo-index node by ID"
+  tags: ["repoindex", "graph", "open"]
+distribution:
+  type: exec
+  exec:
+    entry: skills/repo_index_open/repo_index_open
+io:
+  format: JSON
+  inline_output_kb: 64
+signature:
+  command: repo/index_open
+  parameters:
+    - name: id
+      type: string
+      required: true
+      description: "Node ID"
+    - name: workspace
+      type: string
+      required: false
+      description: "Workspace root (default: current workspace)"
+  returns:
+    - name: node
+      type: object
+      description: "Opened repo-index node"
+    - name: anchor
+      type: object
+      description: "Projected anchor when the node has a code location"
+capabilities:
+  network: "none"
+  filesystem:
+    - type: workdir
+  pure: true
+openapi:
+  enabled: true
+  methods:
+    GET: "true"
+    POST: "true"

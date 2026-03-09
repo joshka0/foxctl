@@ -1,0 +1,66 @@
+apiVersion: agentctl/v1
+kind: Skill
+metadata:
+  name: repo/index_expand
+  version: 0.1.0
+  description: "Expand the repo index graph from seed node IDs"
+  tags: ["repoindex", "graph", "expand"]
+distribution:
+  type: exec
+  exec:
+    entry: skills/repo_index_expand/repo_index_expand
+io:
+  format: JSON
+  inline_output_kb: 64
+signature:
+  command: repo/index_expand
+  parameters:
+    - name: seeds
+      type: array
+      required: true
+      items:
+        type: string
+      description: "Seed node IDs"
+    - name: workspace
+      type: string
+      required: false
+      description: "Workspace root (default: current workspace)"
+    - name: edge_types
+      type: array
+      required: false
+      items:
+        type: string
+      description: "Edge types to traverse"
+    - name: direction
+      type: string
+      required: false
+      description: "Traversal direction: out or in"
+    - name: depth
+      type: integer
+      required: false
+      description: "Traversal depth (default 1)"
+    - name: budget
+      type: integer
+      required: false
+      description: "Maximum nodes to return"
+    - name: per_node_cap
+      type: integer
+      required: false
+      description: "Maximum edges per node per hop"
+  returns:
+    - name: result
+      type: object
+      description: "Expand result"
+    - name: anchors
+      type: array
+      description: "Projected anchors for expanded nodes"
+capabilities:
+  network: "none"
+  filesystem:
+    - type: workdir
+  pure: true
+openapi:
+  enabled: true
+  methods:
+    GET: "true"
+    POST: "true"

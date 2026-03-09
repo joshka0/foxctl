@@ -10,11 +10,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/engine"
 	"github.com/jkatigb/agentctl/internal/indexing/repoindex"
 	"github.com/jkatigb/agentctl/internal/indexing/symbol"
 	"github.com/jkatigb/agentctl/internal/observability"
 	"github.com/jkatigb/agentctl/internal/protocol"
+	"github.com/jkatigb/agentctl/internal/repoquery"
+	repoqueryadapters "github.com/jkatigb/agentctl/internal/repoquery/adapters"
 	"github.com/jkatigb/agentctl/internal/storage/memory"
 	"github.com/spf13/cobra"
 )
@@ -314,17 +315,22 @@ func runIndexRepoSearch(cmd *cobra.Command, workspace, query string, limit int) 
 	}
 	defer store.Close()
 
-	queryEngine := repoindex.NewQueryEngine(store)
-	results, err := queryEngine.Search(ctx, query, limit)
+	service := repoquery.NewQueryService(repoindex.NewQueryEngine(store))
+	req, err := repoquery.NewSearchRequest(query, limit)
 	if err != nil {
-		return fmt.Errorf("queryEngine.Search failed for query=%q limit=%d: %w", query, limit, err)
+		return err
+	}
+	result, err := service.SearchWithProjection(ctx, req)
+	if err != nil {
+		return fmt.Errorf("queryEngine.SearchWithProjection failed for query=%q limit=%d: %w", query, limit, err)
 	}
 
 	data := map[string]any{
 		"workspace": absWorkspace,
 		"query":     query,
-		"count":     len(results),
-		"results":   results,
+		"count":     len(result.Nodes),
+		"results":   result.Nodes,
+		"anchors":   result.Anchors,
 	}
 
 	env := protocol.OK("index.repo.search", data, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
@@ -350,8 +356,8 @@ func runIndexRepoExpand(cmd *cobra.Command, workspace string, seeds, edgeTypes [
 	}
 	defer store.Close()
 
-	edgeTypes = normalizeEdgeTypes(edgeTypes)
-	parsedTypes, err := parseRepoEdgeTypes(edgeTypes)
+	service := repoquery.NewQueryService(repoindex.NewQueryEngine(store))
+	req, err := repoquery.NewExpandRequest(seeds, edgeTypes, direction, depth, budget, perNodeCap)
 	if err != nil {
 		hint := "Use --edge with known types (CONTAINS, IMPORTS, REFERS_TO, CALLS, IMPLEMENTS, EMBEDS, TESTS)."
 		data := protocol.ErrorData{Hint: hint}
@@ -359,31 +365,19 @@ func runIndexRepoExpand(cmd *cobra.Command, workspace string, seeds, edgeTypes [
 		if writeErr := protocol.Write(cmd.OutOrStdout(), env); writeErr != nil {
 			return fmt.Errorf("write repo index expand error envelope: %w", writeErr)
 		}
-		return fmt.Errorf("parse edge types: %w", err)
+		return fmt.Errorf("build expand request: %w", err)
 	}
-	dir := repoindex.Direction(strings.ToLower(direction))
-	if dir != repoindex.DirOut && dir != repoindex.DirIn {
-		return fmt.Errorf("invalid direction: %s", direction)
-	}
-	opts := repoindex.ExpandOptions{
-		Direction:  dir,
-		EdgeTypes:  parsedTypes,
-		Depth:      depth,
-		Budget:     budget,
-		PerNodeCap: perNodeCap,
-	}
-
-	queryEngine := repoindex.NewQueryEngine(store)
-	result, err := queryEngine.Expand(ctx, seeds, opts)
+	result, err := service.ExpandWithProjection(ctx, req)
 	if err != nil {
-		return fmt.Errorf("queryEngine.Expand failed: %w", err)
+		return fmt.Errorf("repo query expand failed: %w", err)
 	}
 
 	data := map[string]any{
 		"workspace": absWorkspace,
-		"seeds":     seeds,
-		"edges":     edgeTypes,
-		"result":    result,
+		"seeds":     req.Seeds,
+		"edges":     repoquery.EdgeTypeValues(req.EdgeTypes),
+		"result":    result.Result,
+		"anchors":   result.Anchors,
 	}
 
 	env := protocol.OK("index.repo.expand", data, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
@@ -409,22 +403,25 @@ func runIndexRepoOpen(cmd *cobra.Command, workspace, id string) error {
 	}
 	defer store.Close()
 
-	queryEngine := repoindex.NewQueryEngine(store)
-	node, err := queryEngine.Open(ctx, id)
+	service := repoquery.NewQueryService(repoindex.NewQueryEngine(store))
+	req, err := repoquery.NewOpenRequest(id)
 	if err != nil {
-		return fmt.Errorf("queryEngine.Open failed for id %q: %w", id, err)
+		return err
+	}
+	result, err := service.OpenWithProjection(ctx, req)
+	if err != nil {
+		return fmt.Errorf("repo query open failed for id %q: %w", id, err)
 	}
 
 	data := map[string]any{
 		"workspace": absWorkspace,
-		"node":      node,
+		"node":      result.Node,
+		"anchor":    result.Anchor,
 	}
 
 	env := protocol.OK("index.repo.open", data, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
 	return protocol.Write(cmd.OutOrStdout(), env)
 }
-
-const repoIndexAskPrompt = "You are a repo index navigator. Use repo_index_search, repo_index_expand, and repo_index_open to answer questions. Prefer search to find seed nodes, expand for relationships, and open nodes for details. Include node IDs and file paths when citing results."
 
 func runIndexRepoAsk(cmd *cobra.Command, workspace, question, provider, model, apiKey string, maxIterations int, timeout time.Duration) error {
 	ctx := cmd.Context()
@@ -479,10 +476,10 @@ func runIndexRepoAsk(cmd *cobra.Command, workspace, question, provider, model, a
 	}
 	defer store.Close()
 
-	askResult, err := engine.RunRepoIndexAsk(ctx, engine.RepoIndexAskConfig{
+	askResult, err := repoqueryadapters.RunAsk(ctx, repoqueryadapters.AskConfig{
 		Store:         store,
 		Question:      question,
-		SystemPrompt:  repoIndexAskPrompt,
+		SystemPrompt:  repoqueryadapters.RepoIndexAskPrompt,
 		Provider:      provider,
 		Model:         model,
 		APIKey:        apiKey,
@@ -506,7 +503,7 @@ func runIndexRepoAsk(cmd *cobra.Command, workspace, question, provider, model, a
 		return fmt.Errorf("engine run: %w", err)
 	}
 	output := askResult.Output
-	if output.StopReason == engine.StopReasonError {
+	if string(output.StopReason) == "error" {
 		if emitErr := observability.WriteRepoIndexEvent(ctx, observability.RepoIndexEvent{
 			Ts:          time.Now().UTC(),
 			Command:     "index.repo.ask",
@@ -575,56 +572,6 @@ func runIndexRepoAsk(cmd *cobra.Command, workspace, question, provider, model, a
 
 	env := protocol.OK("index.repo.ask", data, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
 	return protocol.Write(cmd.OutOrStdout(), env)
-}
-
-func parseRepoEdgeTypes(values []string) ([]repoindex.EdgeType, error) {
-	if len(values) == 0 {
-		return nil, nil
-	}
-
-	allowed := map[string]struct{}{
-		string(repoindex.EdgeContains):        {},
-		string(repoindex.EdgeImports):         {},
-		string(repoindex.EdgeRefersTo):        {},
-		string(repoindex.EdgeCalls):           {},
-		string(repoindex.EdgeImplements):      {},
-		string(repoindex.EdgeEmbeds):          {},
-		string(repoindex.EdgeTests):           {},
-		string(repoindex.EdgeHasKeyword):      {},
-		string(repoindex.EdgeHasOutputField):  {},
-		string(repoindex.EdgeTouchesResource): {},
-		string(repoindex.EdgeEmitsEvent):      {},
-		string(repoindex.EdgeDocRelated):      {},
-		string(repoindex.EdgeDocFlow):         {},
-	}
-
-	var types []repoindex.EdgeType
-	for _, value := range values {
-		if value == "" {
-			continue
-		}
-		value = strings.ToUpper(value)
-		if _, ok := allowed[value]; !ok {
-			return nil, fmt.Errorf("unknown edge type: %s", value)
-		}
-		types = append(types, repoindex.EdgeType(value))
-	}
-
-	return types, nil
-}
-
-func normalizeEdgeTypes(values []string) []string {
-	var result []string
-	for _, value := range values {
-		for _, part := range strings.Split(value, ",") {
-			part = strings.TrimSpace(part)
-			if part == "" {
-				continue
-			}
-			result = append(result, part)
-		}
-	}
-	return result
 }
 
 type memorySummaryProvider struct {
