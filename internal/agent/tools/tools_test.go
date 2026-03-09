@@ -30,6 +30,8 @@ func TestNewRegistry_RegistersAllTools(t *testing.T) {
 		"code.search",
 		"code.symbol_search",
 		"code.snippet_extract",
+		"heartwood.state",
+		"heartwood.action",
 		// Edit tools (PR2)
 		"edit.apply_patch",
 		"edit.apply_structured_diff",
@@ -69,6 +71,8 @@ func TestNewRegistry_CodeToolsPresent(t *testing.T) {
 	codeTools := map[string]bool{
 		"code.symbol_search":   false,
 		"code.snippet_extract": false,
+		"heartwood.state":      false,
+		"heartwood.action":     false,
 	}
 
 	for _, tool := range tools {

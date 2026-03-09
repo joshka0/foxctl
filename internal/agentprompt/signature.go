@@ -29,6 +29,10 @@ Edit Tools:
 Testing:
 - tests.run: Run tests
 
+Heartwood Tools:
+- heartwood.state: Fetch Heartwood participant state from the local SpacetimeDB-backed Heartwood app
+- heartwood.action: Execute a whitelisted Heartwood participant action
+
 Workflow: Use code.symbol_search to find relevant symbols, then code.swe_grep to get detailed context.
 Apply changes with edit.apply_patch for simple edits or edit.apply_structured_diff for complex refactors.`
 	case agenttypes.RolePlanner:
@@ -199,6 +203,8 @@ func InstructionRuntime(role agenttypes.AgentRole) string {
 		"edit.apply_patch", "edit_apply_patch",
 		"edit.apply_structured_diff", "edit_apply_structured_diff",
 		"tests.run", "tests_run",
+		"heartwood.state", "heartwood_state",
+		"heartwood.action", "heartwood_action",
 		"todo.add", "todo_add",
 		"todo.query", "todo_query",
 		"todo.graph_insights", "todo_graph_insights",

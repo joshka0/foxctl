@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os/exec"
 	"path/filepath"
+	"strings"
 
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillerr"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
@@ -84,9 +85,37 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 		return skillerr.Runtime(fmt.Sprintf("heartwood action failed: %s", msg), skillerr.WithCause(err))
 	}
 
+	rawJSON, err := extractJSONPayload(stdout.Bytes())
+	if err != nil {
+		return skillerr.Runtime("parse heartwood action output", skillerr.WithCause(err))
+	}
 	var out map[string]any
-	if err := json.Unmarshal(stdout.Bytes(), &out); err != nil {
+	if err := json.Unmarshal(rawJSON, &out); err != nil {
 		return skillerr.Runtime("parse heartwood action output", skillerr.WithCause(err))
 	}
 	return skillout.Emit(rc, skillName, out)
+}
+
+func extractJSONPayload(raw []byte) ([]byte, error) {
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 {
+		return nil, fmt.Errorf("empty output")
+	}
+	var parsed map[string]any
+	if err := json.Unmarshal(trimmed, &parsed); err == nil {
+		return trimmed, nil
+	}
+
+	lines := strings.Split(string(trimmed), "\n")
+	for i := len(lines) - 1; i >= 0; i-- {
+		line := strings.TrimSpace(lines[i])
+		if line == "" {
+			continue
+		}
+		if err := json.Unmarshal([]byte(line), &parsed); err == nil {
+			return []byte(line), nil
+		}
+	}
+
+	return nil, fmt.Errorf("no JSON object found in output")
 }
