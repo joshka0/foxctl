@@ -62,7 +62,7 @@ CREATE INDEX IF NOT EXISTS idx_search_documents_group_key ON search_documents(wo
 CREATE INDEX IF NOT EXISTS idx_search_documents_path ON search_documents(path);
 CREATE INDEX IF NOT EXISTS idx_search_documents_symbol ON search_documents(workspace_id, kind, symbol_id);
 CREATE INDEX IF NOT EXISTS idx_search_documents_updated_at ON search_documents(workspace_id, updated_at DESC);
-`) 
+`)
 	return m.Migrate(ctx)
 }
 
