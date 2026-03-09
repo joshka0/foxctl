@@ -66,6 +66,9 @@ func TestAgentStore(t *testing.T) {
 		if a.MemoryRetention != agent.MemoryRetentionDurable {
 			t.Errorf("expected default memory retention %q, got %q", agent.MemoryRetentionDurable, a.MemoryRetention)
 		}
+		if a.ExecutionLayer != agent.ExecutionLayerClassic {
+			t.Errorf("expected default execution layer %q, got %q", agent.ExecutionLayerClassic, a.ExecutionLayer)
+		}
 	})
 
 	// Test GetByNamespace
@@ -174,6 +177,43 @@ func TestAgentStore(t *testing.T) {
 			t.Errorf("expected error getting deleted agent")
 		}
 	})
+}
+
+func TestAgentStore_PersistsExecutionLayer(t *testing.T) {
+	ctx := context.Background()
+	tmpDir := t.TempDir()
+
+	store, err := Open(ctx, tmpDir)
+	if err != nil {
+		t.Fatalf("failed to open store: %v", err)
+	}
+	defer store.Close()
+
+	record := agent.Agent{
+		ID:             "agent-jido-1",
+		Namespace:      "agent-jido-1",
+		Role:           "overseer",
+		Prompt:         "test",
+		SkillsAllow:    []string{},
+		Policy:         agent.Policy{},
+		ShareBB:        "scoped",
+		State:          agent.StateRunning,
+		CreatedAt:      time.Now().UTC(),
+		HeartbeatAt:    time.Now().UTC(),
+		ExecutionLayer: agent.ExecutionLayerJido,
+	}
+
+	if err := store.Create(ctx, record); err != nil {
+		t.Fatalf("failed to create agent: %v", err)
+	}
+
+	got, err := store.Get(ctx, record.ID)
+	if err != nil {
+		t.Fatalf("failed to get agent: %v", err)
+	}
+	if got.ExecutionLayer != agent.ExecutionLayerJido {
+		t.Fatalf("execution layer = %q, want %q", got.ExecutionLayer, agent.ExecutionLayerJido)
+	}
 }
 
 func TestAgentStore_AllowsDuplicateNamespaces(t *testing.T) {

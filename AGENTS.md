@@ -26,6 +26,7 @@ contributors
 | [docs/architecture/chat-platform-adapter.md](docs/architecture/chat-platform-adapter.md) | Chat adapter runtime architecture (current) |
 | [docs/architecture/kubernetes-runtime.md](docs/architecture/kubernetes-runtime.md) | Kubernetes runtime architecture (current) |
 | [docs/architecture/postgres-storage.md](docs/architecture/postgres-storage.md) | PostgreSQL + CAS storage architecture |
+| [docs/architecture/simulator-agents.md](docs/architecture/simulator-agents.md) | Simulator agent pattern for app/API integrations |
 | [docs/plans/chat-platform-adapter.md](docs/plans/chat-platform-adapter.md) | Implementation plan + historical notes |
 | [docs/plans/k8s-sql-storage.md](docs/plans/k8s-sql-storage.md) | Historical implementation plan (now partially complete) |
 
@@ -171,6 +172,11 @@ The `agent ask` command sends a `MessageTypeAsk` to the agent's mailbox. After t
 ```
 CLI (agent ask) → mailbox.Send(ask) → daemon polls → engine.Run(with history) → mailbox.Send(reply) → CLI polls → reply received
 ```
+
+Execution-path note:
+- Be explicit about whether a smoke test or bug report is exercising the classic `agent run` runtime path or the Jido-backed ask/dispatch path (`agent ask --dispatcher jido` plus the Jido socket/runtime).
+- Do not treat findings from classic `agent run` as evidence about the Jido bridge unless the Jido dispatcher/runtime was actually used.
+- When debugging nested tool execution, record which binary path invoked `agentctl` and which dispatcher/runtime path was active.
 
 ### LLM Provider Priority
 
