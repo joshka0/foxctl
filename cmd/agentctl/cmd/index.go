@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/jkatigb/agentctl/internal/indexing"
+	"github.com/jkatigb/agentctl/internal/indexing/filesummary"
 	"github.com/jkatigb/agentctl/internal/indexing/semantic"
 	"github.com/jkatigb/agentctl/internal/indexing/symbol"
 	"github.com/jkatigb/agentctl/internal/observability"
@@ -23,7 +24,7 @@ import (
 	workspaceutil "github.com/jkatigb/agentctl/internal/platform/workspace"
 	"github.com/jkatigb/agentctl/internal/protocol"
 	llmproviders "github.com/jkatigb/agentctl/internal/providers/llm"
-	"github.com/jkatigb/agentctl/internal/retrieval"
+	"github.com/jkatigb/agentctl/internal/storage"
 	"github.com/jkatigb/agentctl/internal/storage/dbdriver"
 	"github.com/jkatigb/agentctl/internal/storage/memory"
 	"github.com/jkatigb/agentctl/internal/storage/sessions"
@@ -489,10 +490,6 @@ func runIndexStatus(cmd *cobra.Command, workspace string) error {
 	}
 
 	storageDir := filepath.Join(cfg.Home, "storage")
-	casDir := cfg.Paths.CAS
-	if casDir == "" {
-		casDir = filepath.Join(cfg.Home, "cas")
-	}
 
 	// Get counts from each store
 	status := map[string]any{
@@ -503,7 +500,7 @@ func runIndexStatus(cmd *cobra.Command, workspace string) error {
 	scopes := []map[string]any{}
 
 	// Symbols - check memory store stats
-	memStore, err := memory.Open(ctx, storageDir, casDir)
+	memStore, err := memory.OpenWithConfig(ctx, cfg)
 	if err == nil {
 		defer memStore.Close()
 		stats, _ := memStore.Stats(ctx)
@@ -553,13 +550,7 @@ func runIndexStatus(cmd *cobra.Command, workspace string) error {
 }
 
 func indexSymbols(ctx context.Context, cfg config.Config, workspace, glob string, exclude []string, apiKey string) (int, error) {
-	storageDir := filepath.Join(cfg.Home, "storage")
-	casDir := cfg.Paths.CAS
-	if casDir == "" {
-		casDir = filepath.Join(cfg.Home, "cas")
-	}
-
-	store, err := memory.Open(ctx, storageDir, casDir)
+	store, err := memory.OpenWithConfig(ctx, cfg)
 	if err != nil {
 		return 0, fmt.Errorf("open memory store: %w", err)
 	}
@@ -650,13 +641,7 @@ func runIndexSymbolIndex(cmd *cobra.Command, workspace, glob string, exclude []s
 		return fmt.Errorf("load config: %w", err)
 	}
 
-	storageDir := filepath.Join(cfg.Home, "storage")
-	casDir := cfg.Paths.CAS
-	if casDir == "" {
-		casDir = filepath.Join(cfg.Home, "cas")
-	}
-
-	store, err := memory.Open(ctx, storageDir, casDir)
+	store, err := memory.OpenWithConfig(ctx, cfg)
 	if err != nil {
 		return fmt.Errorf("open memory store: %w", err)
 	}
@@ -724,13 +709,7 @@ func runIndexSymbolIndex(cmd *cobra.Command, workspace, glob string, exclude []s
 }
 
 func reembedMemories(ctx context.Context, cfg config.Config, workspace, apiKey string) (int, error) {
-	storageDir := filepath.Join(cfg.Home, "storage")
-	casDir := cfg.Paths.CAS
-	if casDir == "" {
-		casDir = filepath.Join(cfg.Home, "cas")
-	}
-
-	store, err := memory.Open(ctx, storageDir, casDir)
+	store, err := memory.OpenWithConfig(ctx, cfg)
 	if err != nil {
 		return 0, fmt.Errorf("open memory store: %w", err)
 	}
@@ -795,11 +774,6 @@ func reembedMemories(ctx context.Context, cfg config.Config, workspace, apiKey s
 
 func reembedTasks(ctx context.Context, cfg config.Config, defaultWorkspace, apiKey string) (int, error) {
 	storageDir := filepath.Join(cfg.Home, "storage")
-	casDir := cfg.Paths.CAS
-	if casDir == "" {
-		casDir = filepath.Join(cfg.Home, "cas")
-	}
-
 	store, err := tasks.Open(ctx, storageDir)
 	if err != nil {
 		return 0, fmt.Errorf("open tasks store: %w", err)
@@ -807,7 +781,7 @@ func reembedTasks(ctx context.Context, cfg config.Config, defaultWorkspace, apiK
 	defer store.Close()
 
 	// Also open memory store to store task embeddings for semantic search
-	memStore, err := memory.Open(ctx, storageDir, casDir)
+	memStore, err := memory.OpenWithConfig(ctx, cfg)
 	if err != nil {
 		return 0, fmt.Errorf("open memory store: %w", err)
 	}
@@ -1264,18 +1238,22 @@ func runIndexSyncQuery(cmd *cobra.Command, remoteURL, remoteToken, query string,
 }
 
 func syncMemoryToTurso(ctx context.Context, cfg config.Config, workspace, remoteURL, remoteToken string, dryRun bool) (int, error) {
-	storageDir := filepath.Join(cfg.Home, "storage")
-	casDir := cfg.Paths.CAS
-	if casDir == "" {
-		casDir = filepath.Join(cfg.Home, "cas")
-	}
-
-	// Open local SQLite store
-	localStore, err := memory.Open(ctx, storageDir, casDir)
+	// Open local configured store
+	localStore, err := memory.OpenWithConfig(ctx, cfg)
 	if err != nil {
 		return 0, fmt.Errorf("open local store: %w", err)
 	}
 	defer localStore.Close()
+
+	type embeddingStore interface {
+		storage.MemoryStore
+		GetEmbedding(context.Context, string, string) ([]float32, error)
+		GetEmbeddingMetadata(context.Context, string) (*memory.EmbeddingMetadata, error)
+	}
+	embedStore, ok := localStore.(embeddingStore)
+	if !ok {
+		return 0, fmt.Errorf("configured memory store does not support embedding export")
+	}
 
 	// List memories with embeddings
 	memories, err := localStore.List(ctx, workspace, 10000) // Get all
@@ -1287,7 +1265,7 @@ func syncMemoryToTurso(ctx context.Context, cfg config.Config, workspace, remote
 		// Count memories with embeddings
 		count := 0
 		for _, mem := range memories {
-			emb, err := localStore.GetEmbedding(ctx, mem.Name, workspace)
+			emb, err := embedStore.GetEmbedding(ctx, mem.Name, workspace)
 			if err == nil && len(emb) > 0 {
 				count++
 			}
@@ -1309,14 +1287,14 @@ func syncMemoryToTurso(ctx context.Context, cfg config.Config, workspace, remote
 
 	// Get model from metadata
 	model := "voyage-code-3" // default
-	if meta, _ := localStore.GetEmbeddingMetadata(ctx, workspace); meta != nil && meta.Model != "" {
+	if meta, _ := embedStore.GetEmbeddingMetadata(ctx, workspace); meta != nil && meta.Model != "" {
 		model = meta.Model
 	}
 
 	// Push each memory with embedding
 	count := 0
 	for _, mem := range memories {
-		emb, err := localStore.GetEmbedding(ctx, mem.Name, workspace)
+		emb, err := embedStore.GetEmbedding(ctx, mem.Name, workspace)
 		if err != nil || len(emb) == 0 {
 			continue // Skip memories without embeddings
 		}
@@ -1462,17 +1440,21 @@ func runIndexGitDiff(cmd *cobra.Command, workspace, base, head string, dryRun, e
 		return fmt.Errorf("load config: %w", err)
 	}
 
-	storageDir := filepath.Join(cfg.Home, "storage")
-	casDir := cfg.Paths.CAS
-	if casDir == "" {
-		casDir = filepath.Join(cfg.Home, "cas")
-	}
-
-	store, err := memory.Open(ctx, storageDir, casDir)
+	store, err := memory.OpenWithConfig(ctx, cfg)
 	if err != nil {
 		return fmt.Errorf("open memory store: %w", err)
 	}
 	defer store.Close()
+
+	type indexerStateStore interface {
+		storage.MemoryStore
+		GetIndexerState(context.Context, string, string) (memory.IndexerState, bool, error)
+		SetLastIndexedHeadSHA(context.Context, string, string, string) (memory.IndexerState, error)
+	}
+	indexStateStore, ok := store.(indexerStateStore)
+	if !ok {
+		return fmt.Errorf("configured memory store does not support indexer state")
+	}
 
 	// Resolve base commit:
 	// - "auto" prefers the last successfully indexed HEAD SHA (per workspace+indexer)
@@ -1483,7 +1465,7 @@ func runIndexGitDiff(cmd *cobra.Command, workspace, base, head string, dryRun, e
 	baseSource := "input"
 
 	lastIndexedHeadSHA := ""
-	if st, ok, stateErr := store.GetIndexerState(ctx, workspaceID, symbol.IndexerID); stateErr == nil && ok {
+	if st, ok, stateErr := indexStateStore.GetIndexerState(ctx, workspaceID, symbol.IndexerID); stateErr == nil && ok {
 		lastIndexedHeadSHA = strings.TrimSpace(st.LastIndexedHeadSHA)
 	}
 
@@ -1556,7 +1538,7 @@ func runIndexGitDiff(cmd *cobra.Command, workspace, base, head string, dryRun, e
 		storedLastIndexedHeadSHA := ""
 		stateErr := ""
 		if headSHA != "" {
-			state, err := store.SetLastIndexedHeadSHA(ctx, workspaceID, symbol.IndexerID, headSHA)
+			state, err := indexStateStore.SetLastIndexedHeadSHA(ctx, workspaceID, symbol.IndexerID, headSHA)
 			if err != nil {
 				stateErr = err.Error()
 			} else {
@@ -1627,7 +1609,7 @@ func runIndexGitDiff(cmd *cobra.Command, workspace, base, head string, dryRun, e
 	storedLastIndexedHeadSHA := ""
 	stateErr := ""
 	if res.FilesFailed == 0 && headSHA != "" {
-		state, err := store.SetLastIndexedHeadSHA(ctx, workspaceID, symbol.IndexerID, headSHA)
+		state, err := indexStateStore.SetLastIndexedHeadSHA(ctx, workspaceID, symbol.IndexerID, headSHA)
 		if err != nil {
 			stateErr = err.Error()
 		} else {
@@ -1996,13 +1978,7 @@ func runIndexSummaries(cmd *cobra.Command, workspace string, force, dryRun bool,
 	}
 
 	// Open memory store
-	storageDir := filepath.Join(cfg.Home, "storage")
-	casDir := cfg.Paths.CAS
-	if casDir == "" {
-		casDir = filepath.Join(cfg.Home, "cas")
-	}
-
-	store, err := memory.Open(ctx, storageDir, casDir)
+	store, err := memory.OpenWithConfig(ctx, cfg)
 	if err != nil {
 		return fmt.Errorf("open memory store: %w", err)
 	}
@@ -2102,7 +2078,7 @@ func runIndexSummaries(cmd *cobra.Command, workspace string, force, dryRun bool,
 	}
 
 	// Create summary generator
-	generator := retrieval.NewFileSummaryGenerator(store, llm, embedProvider, absWorkspace)
+	generator := filesummary.NewFileSummaryGenerator(store, llm, embedProvider, absWorkspace)
 
 	// Process files in batches
 	var processed, errors int
@@ -2210,7 +2186,7 @@ func runIndexSymbolSummaries(cmd *cobra.Command, workspace string, force, dryRun
 	var errorsCount int
 	var providerName string
 	var modelName string
-	var llm retrieval.SummaryLLM
+	var llm filesummary.SummaryLLM
 
 	defer func() {
 		if summaryEvent == nil {
@@ -2261,13 +2237,7 @@ func runIndexSymbolSummaries(cmd *cobra.Command, workspace string, force, dryRun
 		return fmt.Errorf("load config: %w", err)
 	}
 
-	storageDir := filepath.Join(cfg.Home, "storage")
-	casDir := cfg.Paths.CAS
-	if casDir == "" {
-		casDir = filepath.Join(cfg.Home, "cas")
-	}
-
-	store, err := memory.Open(ctx, storageDir, casDir)
+	store, err := memory.OpenWithConfig(ctx, cfg)
 	if err != nil {
 		return fmt.Errorf("open memory store: %w", err)
 	}
@@ -2449,7 +2419,7 @@ func runIndexSymbolSummaries(cmd *cobra.Command, workspace string, force, dryRun
 		}
 	}
 
-	generator := retrieval.NewSymbolSummaryGenerator(store, llm, embedProvider, absWorkspace)
+	generator := symbol.NewSymbolSummaryGenerator(store, llm, embedProvider, absWorkspace)
 
 	var processed, errors int
 	for i := 0; i < len(inputs); i += batchSize {

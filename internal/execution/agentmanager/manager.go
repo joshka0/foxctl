@@ -123,16 +123,17 @@ func (m *Manager) Spawn(ctx context.Context, req SpawnRequest) (SpawnResponse, e
 			}
 			return agent.NormalizeMemoryRetention(req.MemoryRetention)
 		}(),
-		State:         agent.StateStarting,
-		CreatedAt:     now,
-		HeartbeatAt:   now,
-		LLMProvider:   req.LLMProvider,
-		LLMModel:      req.LLMModel,
-		LLMAPIKey:     req.LLMAPIKey,
-		ExecMode:      execMode,
-		MaxIterations: maxIterations,
-		MaxAutoTurns:  maxAutoTurns,
-		ThinkInterval: thinkInterval,
+		State:          agent.StateStarting,
+		CreatedAt:      now,
+		HeartbeatAt:    now,
+		LLMProvider:    req.LLMProvider,
+		LLMModel:       req.LLMModel,
+		LLMAPIKey:      req.LLMAPIKey,
+		ExecMode:       execMode,
+		ExecutionLayer: agent.ExecutionLayerClassic,
+		MaxIterations:  maxIterations,
+		MaxAutoTurns:   maxAutoTurns,
+		ThinkInterval:  thinkInterval,
 	}
 
 	if err := m.agentStore.Create(ctx, a); err != nil {

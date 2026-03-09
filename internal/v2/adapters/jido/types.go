@@ -41,12 +41,15 @@ type Signal struct {
 
 // StartAgentRequest starts one runtime agent process.
 type StartAgentRequest struct {
-	RequestID      string          `json:"request_id,omitempty"`
-	IdempotencyKey string          `json:"idempotency_key,omitempty"`
-	AgentID        string          `json:"agent_id"`
-	Profile        string          `json:"profile,omitempty"`
-	InitialState   json.RawMessage `json:"initial_state,omitempty"`
-	Metadata       map[string]any  `json:"metadata,omitempty"`
+	RequestID       string          `json:"request_id,omitempty"`
+	IdempotencyKey  string          `json:"idempotency_key,omitempty"`
+	AgentID         string          `json:"agent_id"`
+	Profile         string          `json:"profile,omitempty"`
+	MemoryRetention string          `json:"memory_retention,omitempty"`
+	ExecMode        string          `json:"exec_mode,omitempty"`
+	ThinkInterval   int             `json:"think_interval,omitempty"`
+	InitialState    json.RawMessage `json:"initial_state,omitempty"`
+	Metadata        map[string]any  `json:"metadata,omitempty"`
 }
 
 // StartAgentResponse contains the runtime start result.

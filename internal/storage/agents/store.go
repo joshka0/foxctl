@@ -86,12 +86,12 @@ func (s *sqlStore) Create(ctx context.Context, a agent.Agent) error {
 	}
 
 	_, err = s.db.ExecContext(ctx, `
-		INSERT INTO agents (id, parent_id, ns, name, slug, role, prompt, skills_allow, policy, share_bb, state, created_at, heartbeat_at, llm_provider, llm_model, llm_api_key, exec_mode, max_iterations, max_auto_turns, think_interval, memory_scope, memory_retention)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22)`,
+		INSERT INTO agents (id, parent_id, ns, name, slug, role, prompt, skills_allow, policy, share_bb, state, created_at, heartbeat_at, llm_provider, llm_model, llm_api_key, exec_mode, execution_layer, max_iterations, max_auto_turns, think_interval, memory_scope, memory_retention)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23)`,
 		a.ID, a.ParentID, a.Namespace, a.Name, slugVal, a.Role, a.Prompt, string(skillsJSON), string(policyJSON), a.ShareBB, a.State,
 		sqlutil.FormatTimestamp(a.CreatedAt), sqlutil.FormatTimestamp(a.HeartbeatAt),
 		a.LLMProvider, a.LLMModel, a.LLMAPIKey,
-		string(a.ExecMode), a.MaxIterations, a.MaxAutoTurns, a.ThinkInterval, string(memoryScope), string(memoryRetention))
+		string(a.ExecMode), string(agent.NormalizeExecutionLayer(a.ExecutionLayer)), a.MaxIterations, a.MaxAutoTurns, a.ThinkInterval, string(memoryScope), string(memoryRetention))
 	if err != nil {
 		return fmt.Errorf("agents: create: %w", err)
 	}
@@ -100,7 +100,7 @@ func (s *sqlStore) Create(ctx context.Context, a agent.Agent) error {
 
 func (s *sqlStore) Get(ctx context.Context, id string) (agent.Agent, error) {
 	row := s.db.QueryRowContext(ctx, `
-		SELECT id, parent_id, ns, name, slug, role, prompt, skills_allow, policy, share_bb, state, created_at, heartbeat_at, llm_provider, llm_model, llm_api_key, exec_mode, max_iterations, max_auto_turns, think_interval, conversation_id, memory_scope, memory_retention
+		SELECT id, parent_id, ns, name, slug, role, prompt, skills_allow, policy, share_bb, state, created_at, heartbeat_at, llm_provider, llm_model, llm_api_key, exec_mode, execution_layer, max_iterations, max_auto_turns, think_interval, conversation_id, memory_scope, memory_retention
 		FROM agents WHERE id = $1 AND deleted_at IS NULL`, id)
 
 	var a agent.Agent
@@ -108,10 +108,10 @@ func (s *sqlStore) Get(ctx context.Context, id string) (agent.Agent, error) {
 	var created string
 	var parentID, name, slug, role, prompt, heartbeat sql.NullString
 	var llmProvider, llmModel, llmAPIKey sql.NullString
-	var execMode sql.NullString
+	var execMode, executionLayer sql.NullString
 	var maxIterations, maxAutoTurns, thinkInterval sql.NullInt64
 	var conversationID, memoryScope, memoryRetention sql.NullString
-	if err := row.Scan(&a.ID, &parentID, &a.Namespace, &name, &slug, &role, &prompt, &skillsJSON, &policyJSON, &a.ShareBB, &a.State, &created, &heartbeat, &llmProvider, &llmModel, &llmAPIKey, &execMode, &maxIterations, &maxAutoTurns, &thinkInterval, &conversationID, &memoryScope, &memoryRetention); err != nil {
+	if err := row.Scan(&a.ID, &parentID, &a.Namespace, &name, &slug, &role, &prompt, &skillsJSON, &policyJSON, &a.ShareBB, &a.State, &created, &heartbeat, &llmProvider, &llmModel, &llmAPIKey, &execMode, &executionLayer, &maxIterations, &maxAutoTurns, &thinkInterval, &conversationID, &memoryScope, &memoryRetention); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return agent.Agent{}, ErrNotFound
 		}
@@ -154,6 +154,7 @@ func (s *sqlStore) Get(ctx context.Context, id string) (agent.Agent, error) {
 
 	// Set execution mode fields
 	a.ExecMode = agent.ExecutionMode(execMode.String)
+	a.ExecutionLayer = agent.NormalizeExecutionLayer(agent.ExecutionLayer(executionLayer.String))
 	a.MaxIterations = int(maxIterations.Int64)
 	a.MaxAutoTurns = int(maxAutoTurns.Int64)
 	a.ThinkInterval = int(thinkInterval.Int64)
@@ -172,7 +173,7 @@ func (s *sqlStore) Get(ctx context.Context, id string) (agent.Agent, error) {
 
 func (s *sqlStore) GetByNamespace(ctx context.Context, ns string) (agent.Agent, error) {
 	row := s.db.QueryRowContext(ctx, `
-		SELECT id, parent_id, ns, name, slug, role, prompt, skills_allow, policy, share_bb, state, created_at, heartbeat_at, llm_provider, llm_model, llm_api_key, exec_mode, max_iterations, max_auto_turns, think_interval, conversation_id, memory_scope, memory_retention
+		SELECT id, parent_id, ns, name, slug, role, prompt, skills_allow, policy, share_bb, state, created_at, heartbeat_at, llm_provider, llm_model, llm_api_key, exec_mode, execution_layer, max_iterations, max_auto_turns, think_interval, conversation_id, memory_scope, memory_retention
 		FROM agents
 		WHERE ns = $1 AND deleted_at IS NULL
 		ORDER BY created_at DESC, id DESC
@@ -183,10 +184,10 @@ func (s *sqlStore) GetByNamespace(ctx context.Context, ns string) (agent.Agent, 
 	var created string
 	var parentID, name, slug, role, prompt, heartbeat sql.NullString
 	var llmProvider, llmModel, llmAPIKey sql.NullString
-	var execMode sql.NullString
+	var execMode, executionLayer sql.NullString
 	var maxIterations, maxAutoTurns, thinkInterval sql.NullInt64
 	var conversationID, memoryScope, memoryRetention sql.NullString
-	if err := row.Scan(&a.ID, &parentID, &a.Namespace, &name, &slug, &role, &prompt, &skillsJSON, &policyJSON, &a.ShareBB, &a.State, &created, &heartbeat, &llmProvider, &llmModel, &llmAPIKey, &execMode, &maxIterations, &maxAutoTurns, &thinkInterval, &conversationID, &memoryScope, &memoryRetention); err != nil {
+	if err := row.Scan(&a.ID, &parentID, &a.Namespace, &name, &slug, &role, &prompt, &skillsJSON, &policyJSON, &a.ShareBB, &a.State, &created, &heartbeat, &llmProvider, &llmModel, &llmAPIKey, &execMode, &executionLayer, &maxIterations, &maxAutoTurns, &thinkInterval, &conversationID, &memoryScope, &memoryRetention); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return agent.Agent{}, ErrNotFound
 		}
@@ -229,6 +230,7 @@ func (s *sqlStore) GetByNamespace(ctx context.Context, ns string) (agent.Agent, 
 
 	// Set execution mode fields
 	a.ExecMode = agent.ExecutionMode(execMode.String)
+	a.ExecutionLayer = agent.NormalizeExecutionLayer(agent.ExecutionLayer(executionLayer.String))
 	a.MaxIterations = int(maxIterations.Int64)
 	a.MaxAutoTurns = int(maxAutoTurns.Int64)
 	a.ThinkInterval = int(thinkInterval.Int64)
@@ -247,7 +249,7 @@ func (s *sqlStore) GetByNamespace(ctx context.Context, ns string) (agent.Agent, 
 
 func (s *sqlStore) GetBySlug(ctx context.Context, slug string) (agent.Agent, error) {
 	row := s.db.QueryRowContext(ctx, `
-		SELECT id, parent_id, ns, name, slug, role, prompt, skills_allow, policy, share_bb, state, created_at, heartbeat_at, llm_provider, llm_model, llm_api_key, exec_mode, max_iterations, max_auto_turns, think_interval, conversation_id, memory_scope, memory_retention
+		SELECT id, parent_id, ns, name, slug, role, prompt, skills_allow, policy, share_bb, state, created_at, heartbeat_at, llm_provider, llm_model, llm_api_key, exec_mode, execution_layer, max_iterations, max_auto_turns, think_interval, conversation_id, memory_scope, memory_retention
 		FROM agents WHERE slug = $1 AND deleted_at IS NULL`, slug)
 
 	var a agent.Agent
@@ -255,10 +257,10 @@ func (s *sqlStore) GetBySlug(ctx context.Context, slug string) (agent.Agent, err
 	var created string
 	var parentID, name, slugVal, role, prompt, heartbeat sql.NullString
 	var llmProvider, llmModel, llmAPIKey sql.NullString
-	var execMode sql.NullString
+	var execMode, executionLayer sql.NullString
 	var maxIterations, maxAutoTurns, thinkInterval sql.NullInt64
 	var conversationID, memoryScope, memoryRetention sql.NullString
-	if err := row.Scan(&a.ID, &parentID, &a.Namespace, &name, &slugVal, &role, &prompt, &skillsJSON, &policyJSON, &a.ShareBB, &a.State, &created, &heartbeat, &llmProvider, &llmModel, &llmAPIKey, &execMode, &maxIterations, &maxAutoTurns, &thinkInterval, &conversationID, &memoryScope, &memoryRetention); err != nil {
+	if err := row.Scan(&a.ID, &parentID, &a.Namespace, &name, &slugVal, &role, &prompt, &skillsJSON, &policyJSON, &a.ShareBB, &a.State, &created, &heartbeat, &llmProvider, &llmModel, &llmAPIKey, &execMode, &executionLayer, &maxIterations, &maxAutoTurns, &thinkInterval, &conversationID, &memoryScope, &memoryRetention); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return agent.Agent{}, ErrNotFound
 		}
@@ -301,6 +303,7 @@ func (s *sqlStore) GetBySlug(ctx context.Context, slug string) (agent.Agent, err
 
 	// Set execution mode fields
 	a.ExecMode = agent.ExecutionMode(execMode.String)
+	a.ExecutionLayer = agent.NormalizeExecutionLayer(agent.ExecutionLayer(executionLayer.String))
 	a.MaxIterations = int(maxIterations.Int64)
 	a.MaxAutoTurns = int(maxAutoTurns.Int64)
 	a.ThinkInterval = int(thinkInterval.Int64)
@@ -330,17 +333,17 @@ func (s *sqlStore) Resolve(ctx context.Context, ref string) (agent.Agent, error)
 
 	// Try by name (case-insensitive)
 	row := s.db.QueryRowContext(ctx, `
-		SELECT id, parent_id, ns, name, slug, role, prompt, skills_allow, policy, share_bb, state, created_at, heartbeat_at, llm_provider, llm_model, llm_api_key, exec_mode, max_iterations, max_auto_turns, think_interval, conversation_id, memory_scope, memory_retention
+		SELECT id, parent_id, ns, name, slug, role, prompt, skills_allow, policy, share_bb, state, created_at, heartbeat_at, llm_provider, llm_model, llm_api_key, exec_mode, execution_layer, max_iterations, max_auto_turns, think_interval, conversation_id, memory_scope, memory_retention
 		FROM agents WHERE LOWER(name) = LOWER($1) AND deleted_at IS NULL LIMIT 1`, ref)
 
 	var skillsJSON, policyJSON string
 	var created string
 	var parentID, name, slugVal, role, prompt, heartbeat sql.NullString
 	var llmProvider, llmModel, llmAPIKey sql.NullString
-	var execMode sql.NullString
+	var execMode, executionLayer sql.NullString
 	var maxIterations, maxAutoTurns, thinkInterval sql.NullInt64
 	var conversationID, memoryScope, memoryRetention sql.NullString
-	scanErr := row.Scan(&a.ID, &parentID, &a.Namespace, &name, &slugVal, &role, &prompt, &skillsJSON, &policyJSON, &a.ShareBB, &a.State, &created, &heartbeat, &llmProvider, &llmModel, &llmAPIKey, &execMode, &maxIterations, &maxAutoTurns, &thinkInterval, &conversationID, &memoryScope, &memoryRetention)
+	scanErr := row.Scan(&a.ID, &parentID, &a.Namespace, &name, &slugVal, &role, &prompt, &skillsJSON, &policyJSON, &a.ShareBB, &a.State, &created, &heartbeat, &llmProvider, &llmModel, &llmAPIKey, &execMode, &executionLayer, &maxIterations, &maxAutoTurns, &thinkInterval, &conversationID, &memoryScope, &memoryRetention)
 	if scanErr == nil {
 		a.ParentID = parentID.String
 		a.Name = name.String
@@ -368,6 +371,7 @@ func (s *sqlStore) Resolve(ctx context.Context, ref string) (agent.Agent, error)
 		a.LLMModel = llmModel.String
 		a.LLMAPIKey = llmAPIKey.String
 		a.ExecMode = agent.ExecutionMode(execMode.String)
+		a.ExecutionLayer = agent.NormalizeExecutionLayer(agent.ExecutionLayer(executionLayer.String))
 		a.MaxIterations = int(maxIterations.Int64)
 		a.MaxAutoTurns = int(maxAutoTurns.Int64)
 		a.ThinkInterval = int(thinkInterval.Int64)
@@ -393,7 +397,7 @@ func (s *sqlStore) List(ctx context.Context, limit int) ([]agent.Agent, error) {
 		limit = 100
 	}
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, parent_id, ns, name, slug, role, prompt, skills_allow, policy, share_bb, state, created_at, heartbeat_at, llm_provider, llm_model, llm_api_key, exec_mode, max_iterations, max_auto_turns, think_interval, conversation_id, memory_scope, memory_retention
+		SELECT id, parent_id, ns, name, slug, role, prompt, skills_allow, policy, share_bb, state, created_at, heartbeat_at, llm_provider, llm_model, llm_api_key, exec_mode, execution_layer, max_iterations, max_auto_turns, think_interval, conversation_id, memory_scope, memory_retention
 		FROM agents
 		WHERE deleted_at IS NULL
 		ORDER BY created_at DESC
@@ -421,7 +425,7 @@ func (s *sqlStore) ListByParent(ctx context.Context, parentID string, limit int)
 		limit = 100
 	}
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, parent_id, ns, name, slug, role, prompt, skills_allow, policy, share_bb, state, created_at, heartbeat_at, llm_provider, llm_model, llm_api_key, exec_mode, max_iterations, max_auto_turns, think_interval, conversation_id, memory_scope, memory_retention
+		SELECT id, parent_id, ns, name, slug, role, prompt, skills_allow, policy, share_bb, state, created_at, heartbeat_at, llm_provider, llm_model, llm_api_key, exec_mode, execution_layer, max_iterations, max_auto_turns, think_interval, conversation_id, memory_scope, memory_retention
 		FROM agents
 		WHERE parent_id = $1 AND deleted_at IS NULL
 		ORDER BY created_at DESC
@@ -633,6 +637,7 @@ CREATE TABLE IF NOT EXISTS agents (
 	llm_provider TEXT,
 	llm_model    TEXT,
 	llm_api_key  TEXT,
+	execution_layer TEXT,
 	memory_scope TEXT,
 	memory_retention TEXT
 );
@@ -654,6 +659,7 @@ CREATE INDEX IF NOT EXISTS idx_agents_state ON agents(state);
 		"ALTER TABLE agents ADD COLUMN name TEXT",
 		"ALTER TABLE agents ADD COLUMN slug TEXT",
 		"ALTER TABLE agents ADD COLUMN exec_mode TEXT",
+		"ALTER TABLE agents ADD COLUMN execution_layer TEXT",
 		"ALTER TABLE agents ADD COLUMN max_iterations INTEGER",
 		"ALTER TABLE agents ADD COLUMN max_auto_turns INTEGER",
 		"ALTER TABLE agents ADD COLUMN think_interval INTEGER",
@@ -734,6 +740,7 @@ CREATE TABLE agents_new (
 	llm_model       TEXT,
 	llm_api_key     TEXT,
 	exec_mode       TEXT,
+	execution_layer TEXT,
 	max_iterations  INTEGER,
 	max_auto_turns  INTEGER,
 	think_interval  INTEGER,
@@ -742,13 +749,13 @@ CREATE TABLE agents_new (
 	memory_scope    TEXT,
 	memory_retention TEXT
 );
-INSERT INTO agents_new (
+		INSERT INTO agents_new (
 	id, parent_id, ns, name, slug, role, prompt, skills_allow, policy, share_bb, state, created_at, heartbeat_at,
-	llm_provider, llm_model, llm_api_key, exec_mode, max_iterations, max_auto_turns, think_interval, deleted_at, conversation_id, memory_scope, memory_retention
+	llm_provider, llm_model, llm_api_key, exec_mode, execution_layer, max_iterations, max_auto_turns, think_interval, deleted_at, conversation_id, memory_scope, memory_retention
 )
 SELECT
 	id, parent_id, ns, name, slug, role, prompt, skills_allow, policy, share_bb, state, created_at, heartbeat_at,
-	llm_provider, llm_model, llm_api_key, exec_mode, max_iterations, max_auto_turns, think_interval, deleted_at, conversation_id, memory_scope, memory_retention
+	llm_provider, llm_model, llm_api_key, exec_mode, execution_layer, max_iterations, max_auto_turns, think_interval, deleted_at, conversation_id, memory_scope, memory_retention
 FROM agents;
 DROP TABLE agents;
 ALTER TABLE agents_new RENAME TO agents;
@@ -773,10 +780,10 @@ func scanAgent(rows *sql.Rows) (agent.Agent, error) {
 	var created string
 	var parentID, name, slug, role, prompt, heartbeat sql.NullString
 	var llmProvider, llmModel, llmAPIKey sql.NullString
-	var execMode sql.NullString
+	var execMode, executionLayer sql.NullString
 	var maxIterations, maxAutoTurns, thinkInterval sql.NullInt64
 	var conversationID, memoryScope, memoryRetention sql.NullString
-	if err := rows.Scan(&a.ID, &parentID, &a.Namespace, &name, &slug, &role, &prompt, &skillsJSON, &policyJSON, &a.ShareBB, &a.State, &created, &heartbeat, &llmProvider, &llmModel, &llmAPIKey, &execMode, &maxIterations, &maxAutoTurns, &thinkInterval, &conversationID, &memoryScope, &memoryRetention); err != nil {
+	if err := rows.Scan(&a.ID, &parentID, &a.Namespace, &name, &slug, &role, &prompt, &skillsJSON, &policyJSON, &a.ShareBB, &a.State, &created, &heartbeat, &llmProvider, &llmModel, &llmAPIKey, &execMode, &executionLayer, &maxIterations, &maxAutoTurns, &thinkInterval, &conversationID, &memoryScope, &memoryRetention); err != nil {
 		return agent.Agent{}, fmt.Errorf("agents: scan: %w", err)
 	}
 
@@ -816,6 +823,7 @@ func scanAgent(rows *sql.Rows) (agent.Agent, error) {
 
 	// Set execution mode fields
 	a.ExecMode = agent.ExecutionMode(execMode.String)
+	a.ExecutionLayer = agent.NormalizeExecutionLayer(agent.ExecutionLayer(executionLayer.String))
 	a.MaxIterations = int(maxIterations.Int64)
 	a.MaxAutoTurns = int(maxAutoTurns.Int64)
 	a.ThinkInterval = int(thinkInterval.Int64)

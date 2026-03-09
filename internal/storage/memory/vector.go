@@ -101,7 +101,7 @@ func (vs *VectorStore) SearchSimilar(
 		JOIN named_memory t ON t.rowid = vt.id
 		WHERE t.workspace = ?
 		ORDER BY similarity DESC
-	`, vs.vectorHelper.CosineSimilarity("t.embedding", queryEmbedding), queryEmbedding.String())
+	`, vs.vectorHelper.CosineSimilarityScore("t.embedding", queryEmbedding), queryEmbedding.String())
 
 	rows, err := vs.db.QueryContext(ctx, query, limit, workspace)
 	if err != nil {

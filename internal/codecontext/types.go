@@ -1,94 +1,87 @@
 package codecontext
 
-// Candidate represents a file or symbol location from upstream retrieval.
-// It is the input to the evidence collection phase.
+import (
+	"context"
+
+	"github.com/jkatigb/agentctl/internal/codecontext/files"
+	"github.com/jkatigb/agentctl/internal/codecontext/guard"
+)
+
+// Candidate is the upstream extraction target.
+// It stays backward-compatible with the existing flow while supporting richer anchors.
 type Candidate struct {
 	// Path is the file path (relative or absolute).
 	Path string `json:"path"`
 
-	// SymbolID identifies a specific symbol within the file (optional).
-	// Format: "file.go:FunctionName" or just symbol name.
-	SymbolID string `json:"symbol_id,omitempty"`
-
-	// LineHint suggests a line number of interest (optional).
-	// Used when SymbolID is not available.
-	LineHint int `json:"line,omitempty"`
-
-	// Priority ranks this candidate relative to others (0.0-1.0).
-	// Higher priority candidates are processed first.
+	// Legacy fields.
+	SymbolID string  `json:"symbol_id,omitempty"`
+	LineHint int     `json:"line,omitempty"`
 	Priority float64 `json:"priority,omitempty"`
+
+	// Optional richer context from newer retrieval pipelines.
+	Summary string   `json:"summary,omitempty"`
+	Anchors []Anchor `json:"anchors,omitempty"`
+}
+
+// AnchorKind tells extraction how to expand.
+type AnchorKind string
+
+const (
+	AnchorSymbol AnchorKind = "symbol"
+	AnchorLine   AnchorKind = "line"
+	AnchorFile   AnchorKind = "file"
+)
+
+// Anchor points to a relevant region in a file.
+type Anchor struct {
+	Kind AnchorKind `json:"kind"`
+
+	SymbolID   string `json:"symbol_id,omitempty"`
+	SymbolName string `json:"symbol_name,omitempty"`
+
+	Line      int `json:"line,omitempty"`
+	StartLine int `json:"start_line,omitempty"`
+	EndLine   int `json:"end_line,omitempty"`
+
+	Score  float64 `json:"score,omitempty"`
+	Source string  `json:"source,omitempty"`
+	Reason string  `json:"reason,omitempty"`
 }
 
 // Snippet represents an extracted code region from evidence collection.
 type Snippet struct {
-	// File is the path to the source file.
-	File string `json:"file"`
-
-	// SymbolID identifies the symbol this snippet belongs to (optional).
-	SymbolID string `json:"symbol_id,omitempty"`
-
-	// StartLine is the 1-indexed first line of the snippet.
-	StartLine int `json:"start_line"`
-
-	// EndLine is the 1-indexed last line of the snippet.
-	EndLine int `json:"end_line"`
-
-	// Text is the actual code content.
-	Text string `json:"text"`
-
-	// Reason explains why this snippet was selected (optional).
-	Reason string `json:"reason,omitempty"`
-
-	// Priority inherited from the source candidate.
-	Priority float64 `json:"priority,omitempty"`
-
-	// Language detected for the file.
-	Language string `json:"language,omitempty"`
+	File      string  `json:"file"`
+	SymbolID  string  `json:"symbol_id,omitempty"`
+	StartLine int     `json:"start_line"`
+	EndLine   int     `json:"end_line"`
+	Text      string  `json:"text"`
+	Reason    string  `json:"reason,omitempty"`
+	Priority  float64 `json:"priority,omitempty"`
+	Language  string  `json:"language,omitempty"`
 }
 
 // Evidence is the output of the collection phase.
-// It contains snippets and metadata about the extraction process.
 type Evidence struct {
-	// Snippets are the extracted code regions.
-	Snippets []Snippet `json:"snippets"`
-
-	// Stats contains metrics about the collection process.
-	Stats EvidenceStats `json:"stats"`
-
-	// Truncated indicates whether results were limited due to constraints.
-	Truncated bool `json:"truncated"`
-
-	// Query is the original question/query used for extraction.
-	Query string `json:"query,omitempty"`
+	Snippets  []Snippet     `json:"snippets"`
+	Stats     EvidenceStats `json:"stats"`
+	Truncated bool          `json:"truncated"`
+	Query     string        `json:"query,omitempty"`
+	Warnings  []string      `json:"warnings,omitempty"`
 }
 
 // EvidenceStats contains metrics about the evidence collection process.
 type EvidenceStats struct {
-	// FilesProcessed is the number of files successfully read.
-	FilesProcessed int `json:"files_processed"`
-
-	// FilesSkipped is the number of files that couldn't be read.
-	FilesSkipped int `json:"files_skipped"`
-
-	// SnippetsExtracted is the total number of snippets found.
-	SnippetsExtracted int `json:"snippets_extracted"`
-
-	// TotalBytes is the total bytes read across all files.
-	TotalBytes int64 `json:"total_bytes"`
-
-	// FileErrors contains per-file error information.
-	FileErrors []FileError `json:"file_errors,omitempty"`
+	FilesProcessed    int         `json:"files_processed"`
+	FilesSkipped      int         `json:"files_skipped"`
+	SnippetsExtracted int         `json:"snippets_extracted"`
+	TotalBytes        int64       `json:"total_bytes"`
+	FileErrors        []FileError `json:"file_errors,omitempty"`
 }
 
 // FileError records why a file couldn't be processed.
 type FileError struct {
-	// Path is the file that had an error.
-	Path string `json:"path"`
-
-	// Code is the error classification (EPOLICY, ENOTFOUND, EIO, etc.).
-	Code string `json:"code"`
-
-	// Message describes the error.
+	Path    string `json:"path"`
+	Code    string `json:"code"`
 	Message string `json:"message"`
 }
 
@@ -96,27 +89,81 @@ type FileError struct {
 type RenderMode string
 
 const (
-	// ModeSnippets renders evidence as disjoint code regions (default).
-	// Each snippet is a separate block with file path and line numbers.
-	ModeSnippets RenderMode = "snippets"
-
-	// ModeMasked renders full file content with irrelevant sections redacted.
-	// Useful for showing file structure while highlighting relevant parts.
-	ModeMasked RenderMode = "masked"
-
-	// ModeStructure renders only signatures, imports, and type definitions.
-	// Useful for understanding API shape without implementation details.
+	ModeSnippets  RenderMode = "snippets"
+	ModeMasked    RenderMode = "masked"
 	ModeStructure RenderMode = "structure"
-
-	// ModeFlow renders control-flow oriented excerpts.
-	// Follows function calls and includes related code paths.
-	ModeFlow RenderMode = "flow"
+	ModeFlow      RenderMode = "flow"
 )
 
 // Default limits when not specified.
 const (
 	DefaultMaxFiles        = 50
 	DefaultMaxSnippets     = 100
-	DefaultMaxBytesPerFile = 64 * 1024 // 64 KB
-	DefaultContextLines    = 3         // Lines before/after match
+	DefaultMaxBytesPerFile = 64 * 1024
+	DefaultContextLines    = 3
+	DefaultMaxAnchorsFile  = 4
 )
+
+// CollectOpts configures the evidence collection process.
+type CollectOpts struct {
+	Candidates []Candidate
+	Query      string
+
+	PathValidator files.PathValidator
+
+	MaxFiles        int
+	MaxSnippets     int
+	MaxBytesPerFile int
+	ContextLines    int
+
+	Mode RenderMode
+
+	// Optional richer extraction controls.
+	MaxAnchorsPerFile int
+	SecretMode        guard.Mode
+}
+
+// SnippetPreview is a truncated version of Snippet for inline responses.
+type SnippetPreview struct {
+	File      string  `json:"file"`
+	SymbolID  string  `json:"symbol_id,omitempty"`
+	StartLine int     `json:"start_line"`
+	EndLine   int     `json:"end_line"`
+	Preview   string  `json:"preview"`
+	Priority  float64 `json:"priority,omitempty"`
+	Language  string  `json:"language,omitempty"`
+}
+
+// OutputPayload is the standard output structure for skills using codecontext.
+type OutputPayload struct {
+	Query          string           `json:"query,omitempty"`
+	SnippetsInline []SnippetPreview `json:"snippets_inline,omitempty"`
+	Artifact       *ArtifactRef     `json:"artifact,omitempty"`
+	Stats          EvidenceStats    `json:"stats"`
+	Truncated      bool             `json:"truncated,omitempty"`
+	Hints          []string         `json:"hints,omitempty"`
+	Warnings       []string         `json:"warnings,omitempty"`
+}
+
+// ArtifactRef references a CAS-stored artifact.
+type ArtifactRef struct {
+	Digest string `json:"digest"`
+	Size   int64  `json:"size"`
+	Kind   string `json:"kind"`
+	Count  int    `json:"count,omitempty"`
+}
+
+// ArtifactSink persists rendered evidence and returns an artifact reference.
+type ArtifactSink interface {
+	Persist(ctx context.Context, baseName, kind string, body []byte) (ArtifactRef, error)
+}
+
+// OutputOpts configures output rendering and persistence thresholds.
+type OutputOpts struct {
+	Mode             RenderMode
+	MaxPreviewBytes  int
+	IncludeStats     bool
+	InlineBytes      int
+	ArtifactKind     string
+	ArtifactBaseName string
+}

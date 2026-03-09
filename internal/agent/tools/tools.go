@@ -15,6 +15,7 @@ import (
 	models "github.com/XiaoConstantine/mcp-go/pkg/model"
 	"github.com/jkatigb/agentctl/internal/tooling"
 
+	"github.com/jkatigb/agentctl/internal/agent/toolnames"
 	"github.com/jkatigb/agentctl/internal/agent/types"
 	"github.com/jkatigb/agentctl/internal/domain/policy"
 	"github.com/jkatigb/agentctl/internal/hooks"
@@ -237,6 +238,9 @@ func NewRegistry(cfg Config, recorder TelemetryRecorder) (*Registry, error) {
 		return nil, err
 	}
 	if err := r.registerCodeTools(); err != nil {
+		return nil, err
+	}
+	if err := r.registerHeartwoodTools(); err != nil {
 		return nil, err
 	}
 	if err := r.registerEditTools(); err != nil {
@@ -775,6 +779,9 @@ func (r *Registry) filterByAllowlist(allowlist []string) error {
 	allowed := make(map[string]bool)
 	for _, name := range allowlist {
 		trimmed := strings.TrimSpace(name)
+		if canonical, ok := toolnames.CanonicalizeToolName(toolnames.ToolModeLegacy, trimmed); ok {
+			allowed[canonical] = true
+		}
 		switch trimmed {
 		case repoindex.ToolSearchLegacy:
 			allowed[repoindex.ToolSearch] = true

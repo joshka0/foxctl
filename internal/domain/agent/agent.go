@@ -37,6 +37,28 @@ const (
 	ModeStory ExecutionMode = "story"
 )
 
+// ExecutionLayer defines which runtime owns agent execution.
+type ExecutionLayer string
+
+const (
+	// ExecutionLayerClassic uses the legacy/classic agent runtime path.
+	ExecutionLayerClassic ExecutionLayer = "classic"
+	// ExecutionLayerJido uses the Jido-backed runtime bridge path.
+	ExecutionLayerJido ExecutionLayer = "jido"
+)
+
+// NormalizeExecutionLayer applies stable defaults for persisted agent metadata.
+func NormalizeExecutionLayer(layer ExecutionLayer) ExecutionLayer {
+	switch layer {
+	case ExecutionLayerJido:
+		return ExecutionLayerJido
+	case ExecutionLayerClassic:
+		fallthrough
+	default:
+		return ExecutionLayerClassic
+	}
+}
+
 // MemoryScope defines how a human-facing agent workbench should scope memory lineage.
 type MemoryScope string
 
@@ -125,10 +147,11 @@ type Agent struct {
 	LLMAPIKey   string `json:"llm_api_key,omitempty"`  // API key (or env var name like $GROQ_API_KEY)
 
 	// Execution mode configuration
-	ExecMode      ExecutionMode `json:"exec_mode,omitempty"`      // reactive|autonomous|autonomous_reactive|proactive|tick|story (default: reactive)
-	MaxIterations int           `json:"max_iterations,omitempty"` // Max tool calls per turn (default: 10)
-	MaxAutoTurns  int           `json:"max_auto_turns,omitempty"` // Max autonomous turns per session (default: 1)
-	ThinkInterval int           `json:"think_interval,omitempty"` // Seconds between proactive/tick cycles (default: 60)
+	ExecMode       ExecutionMode  `json:"exec_mode,omitempty"`       // reactive|autonomous|autonomous_reactive|proactive|tick|story (default: reactive)
+	MaxIterations  int            `json:"max_iterations,omitempty"`  // Max tool calls per turn (default: 10)
+	MaxAutoTurns   int            `json:"max_auto_turns,omitempty"`  // Max autonomous turns per session (default: 1)
+	ThinkInterval  int            `json:"think_interval,omitempty"`  // Seconds between proactive/tick cycles (default: 60)
+	ExecutionLayer ExecutionLayer `json:"execution_layer,omitempty"` // classic|jido
 
 	// Linked companion conversation
 	ConversationID  string          `json:"conversation_id,omitempty"`  // Linked companion conversation ID for chat history

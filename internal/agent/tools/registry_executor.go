@@ -7,6 +7,7 @@ import (
 
 	mcpmodels "github.com/XiaoConstantine/mcp-go/pkg/model"
 
+	"github.com/jkatigb/agentctl/internal/agent/toolnames"
 	"github.com/jkatigb/agentctl/internal/engine"
 	"github.com/jkatigb/agentctl/internal/indexing/repoindex"
 )
@@ -25,6 +26,10 @@ func NewRegistryToolExecutor(registry *Registry) *RegistryToolExecutor {
 func (r *RegistryToolExecutor) Execute(ctx context.Context, name string, args json.RawMessage) (string, error) {
 	if r == nil || r.registry == nil {
 		return "", fmt.Errorf("tool registry not configured")
+	}
+
+	if canonical, ok := toolnames.CanonicalizeToolName(toolnames.ToolModeLegacy, name); ok {
+		name = canonical
 	}
 
 	switch name {
@@ -81,8 +86,12 @@ func (r *RegistryToolExecutor) List() []engine.ToolDef {
 	defs := make([]engine.ToolDef, len(tools))
 	for i, t := range tools {
 		schema, _ := json.Marshal(t.InputSchema())
+		name := t.Name()
+		if canonical, ok := toolnames.CanonicalizeToolName(toolnames.ToolModeRuntime, name); ok {
+			name = canonical
+		}
 		defs[i] = engine.ToolDef{
-			Name:        t.Name(),
+			Name:        name,
 			Description: t.Description(),
 			Parameters:  schema,
 		}

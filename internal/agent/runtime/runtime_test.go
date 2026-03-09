@@ -336,7 +336,7 @@ func TestBuildToolDefsForRole_ResearcherUnchanged(t *testing.T) {
 func TestBuildToolDefsForRole_CoderUnchanged(t *testing.T) {
 	names := toolNamesForRole(types.RoleCoder)
 
-	for _, want := range []string{"fs_read_file", "code_search", "think", "fs_write_file", "fs_list_dir"} {
+	for _, want := range []string{"fs_read_file", "code_search", "think", "fs_write_file", "fs_list_dir", "heartwood_state", "heartwood_action"} {
 		if !hasToolName(names, want) {
 			t.Errorf("coder should still have %q, got %v", want, names)
 		}

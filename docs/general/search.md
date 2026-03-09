@@ -7,15 +7,32 @@ Machine-friendly reference for semantic retrieval, reranking, and repo graph sea
 | Field | Value |
 |------|-------|
 | Status | Current |
-| Canonical packages | `skills/code_semantic_search`, `internal/indexing/semantic`, `internal/indexing/rerank`, `internal/indexing/repoindex`, `internal/storage/dbdriver/search.go` |
-| Last reviewed | 2026-02-17 |
+| Canonical packages | `skills/code_semantic_search`, `skills/code_smart_search`, `skills/code_snippet_extract`, `internal/searchquery`, `internal/searchindex`, `internal/retrieval/v2`, `internal/codecontext`, `internal/indexing/semantic`, `internal/indexing/rerank`, `internal/indexing/repoindex`, `internal/storage/dbdriver/search.go` |
+| Last reviewed | 2026-03-07 |
 
 ## Search Surfaces
 
 | Surface | Command | Best use |
 |--------|---------|----------|
 | Unified semantic search | `agentctl run code/semantic_search --input ...` | Cross-source retrieval (`symbols`, `sessions`, `memories`, `tasks`, `codemaps`) |
+| Smart code search | `agentctl run code/smart_search --input ...` | Code-file retrieval plus evidence extraction |
+| Snippet extraction | `agentctl run code/snippet_extract --input ...` | Anchor-aware code evidence extraction from known candidates |
 | Repo graph index | `agentctl index repo <build|search|expand|open|ask>` | Structural relationships (calls/refers/imports) |
+
+## Code Search Stack
+
+Current code-search flow is layered as:
+
+- `internal/searchquery`
+  Shared query parsing (`terms`, `phrases`, `identifiers`, `path hints`)
+- `internal/searchindex`
+  Typed lexical/vector recall over code documents
+- `internal/retrieval/v2`
+  Fusion and grouped file hits with anchors
+- `internal/codecontext`
+  Anchor-aware snippet extraction and output preparation
+
+`internal/retrieval` is no longer the active code-search engine. It remains only for tree helpers and summary-generation utilities still used elsewhere.
 
 ## `code/semantic_search` Input Contract
 
@@ -32,6 +49,20 @@ Source of truth: `skills/code_semantic_search/main.go`.
 | `rerank_model` | string | Default `rerank-2.5` |
 | `remote` / `global` / `workspaces` | bool/string[] | Cross-workspace remote search mode |
 | `format` | string | `json` or `tree` |
+| `repo_index_mode` | string | Symbol/code scopes only: `auto`, `search`, `dag`, `off` |
+
+`repo_index_mode` guidance:
+
+- `auto`
+  Precise default. Uses repo-index search first and falls back to DAG only when search returns no repo-index hits.
+- `search`
+  Best for structural queries when you want the most direct repo-index entrypoints.
+- `dag`
+  Best for broader graph exploration when you want neighborhood context.
+- `off`
+  Disables repo-index contribution.
+
+For exact symbol lookup, the exact lane should usually dominate regardless of repo-index mode. For structural phrases like `repo index dag grep`, `search` is the preferred precise mode and `dag` is the exploratory mode.
 
 ## Embedding Model Selection
 

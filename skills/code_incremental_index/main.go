@@ -24,6 +24,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillerr"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
+	"github.com/jkatigb/agentctl/internal/indexing/codefilter"
 	"github.com/jkatigb/agentctl/internal/indexing/embedding"
 	"github.com/jkatigb/agentctl/internal/indexing/embeddingtext"
 	"github.com/jkatigb/agentctl/internal/indexing/semantic"
@@ -104,6 +105,14 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 		relPath = in.File
 	}
 	relPath = filepath.ToSlash(relPath)
+	if codefilter.ShouldSkipPath(relPath) {
+		return emit(rc, output{
+			File:       relPath,
+			Skipped:    true,
+			SkipReason: "non-app code path",
+			DurationMS: time.Since(start).Milliseconds(),
+		})
+	}
 
 	// Detect language
 	lang := langutil.DetectAllowed(absPath, langutil.CommonCodeLanguages)

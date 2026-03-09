@@ -481,6 +481,7 @@ type agentToolExecutor struct {
 
 // Execute runs a tool by name with the given arguments.
 func (e *agentToolExecutor) Execute(ctx context.Context, name string, args json.RawMessage) (string, error) {
+	fmt.Fprintf(os.Stderr, "[TOOLEXEC] raw_name=%s raw_args=%s\n", name, strings.TrimSpace(string(args)))
 	// Parse args into map
 	var argsMap map[string]any
 	if len(args) > 0 {
@@ -491,85 +492,101 @@ func (e *agentToolExecutor) Execute(ctx context.Context, name string, args json.
 
 	canonicalName, ok := toolnames.CanonicalizeToolName(toolnames.ToolModeRuntime, name)
 	if !ok {
+		fmt.Fprintf(os.Stderr, "[TOOLEXEC] unknown_tool raw_name=%s\n", name)
 		return "", fmt.Errorf("unknown tool: %s", name)
 	}
 	name = canonicalName
+	fmt.Fprintf(os.Stderr, "[TOOLEXEC] canonical_name=%s\n", name)
 
 	// Execute based on tool name (using underscores for Anthropic API compatibility)
+	var (
+		out string
+		err error
+	)
 	switch name {
 	case "fs_read_file":
-		return e.executeReadFile(ctx, argsMap)
+		out, err = e.executeReadFile(ctx, argsMap)
 	case "fs_list_dir":
-		return e.executeListDir(ctx, argsMap)
+		out, err = e.executeListDir(ctx, argsMap)
 	case "fs_write_file":
-		return e.executeWriteFile(ctx, argsMap)
+		out, err = e.executeWriteFile(ctx, argsMap)
 	case "code_search":
-		return e.executeCodeSearch(ctx, argsMap)
+		out, err = e.executeCodeSearch(ctx, argsMap)
 	case "think":
-		return e.executeThink(ctx, argsMap)
+		out, err = e.executeThink(ctx, argsMap)
 	case "end_tick":
-		return e.executeEndTick(ctx, argsMap)
+		out, err = e.executeEndTick(ctx, argsMap)
 	// Mailbox tools
 	case "mail_inbox":
-		return e.executeMailInbox(ctx, argsMap)
+		out, err = e.executeMailInbox(ctx, argsMap)
 	case "mail_send":
-		return e.executeMailSend(ctx, argsMap)
+		out, err = e.executeMailSend(ctx, argsMap)
 	case "mail_ack":
-		return e.executeMailAck(ctx, argsMap)
+		out, err = e.executeMailAck(ctx, argsMap)
 	// Blackboard tools
 	case "bb_inbox":
-		return e.executeBBInbox(ctx, argsMap)
+		out, err = e.executeBBInbox(ctx, argsMap)
 	case "bb_post":
-		return e.executeBBPost(ctx, argsMap)
+		out, err = e.executeBBPost(ctx, argsMap)
 	case "bb_mark_read":
-		return e.executeBBMarkRead(ctx, argsMap)
+		out, err = e.executeBBMarkRead(ctx, argsMap)
 	// Overseer context gathering tools
 	case "context_search":
-		return e.executeContextSearch(ctx, argsMap)
+		out, err = e.executeContextSearch(ctx, argsMap)
 	case "session_timeline":
-		return e.executeSessionTimeline(ctx, argsMap)
+		out, err = e.executeSessionTimeline(ctx, argsMap)
 	case "smart_search":
-		return e.executeSmartSearch(ctx, argsMap)
+		out, err = e.executeSmartSearch(ctx, argsMap)
 	case "context_grep":
-		return e.executeContextGrep(ctx, argsMap)
+		out, err = e.executeContextGrep(ctx, argsMap)
 	case "code_symbols":
-		return e.executeCodeSymbols(ctx, argsMap)
+		out, err = e.executeCodeSymbols(ctx, argsMap)
 	case "memory_query":
-		return e.executeMemoryQuery(ctx, argsMap)
+		out, err = e.executeMemoryQuery(ctx, argsMap)
 	case "session_recall":
-		return e.executeSessionRecall(ctx, argsMap)
+		out, err = e.executeSessionRecall(ctx, argsMap)
 	case "annotation_recall":
-		return e.executeAnnotationRecall(ctx, argsMap)
+		out, err = e.executeAnnotationRecall(ctx, argsMap)
 	case "annotation_list_sessions":
-		return e.executeAnnotationListSessions(ctx)
+		out, err = e.executeAnnotationListSessions(ctx)
 	case "annotation_category_stats":
-		return e.executeAnnotationCategoryStats(ctx, argsMap)
+		out, err = e.executeAnnotationCategoryStats(ctx, argsMap)
 	case "repo_index_search":
-		return e.executeRepoIndexSearch(ctx, argsMap)
+		out, err = e.executeRepoIndexSearch(ctx, argsMap)
 	case "repo_index_expand":
-		return e.executeRepoIndexExpand(ctx, argsMap)
+		out, err = e.executeRepoIndexExpand(ctx, argsMap)
 	case "repo_index_open":
-		return e.executeRepoIndexOpen(ctx, argsMap)
+		out, err = e.executeRepoIndexOpen(ctx, argsMap)
 	case "repo_index_dag_grep":
-		return e.executeRepoIndexDagGrep(ctx, argsMap)
+		out, err = e.executeRepoIndexDagGrep(ctx, argsMap)
+	case "heartwood_state":
+		out, err = e.executeHeartwoodState(ctx, argsMap)
+	case "heartwood_action":
+		out, err = e.executeHeartwoodAction(ctx, argsMap)
 	case "context_filter":
-		return e.executeContextFilter(ctx, argsMap)
+		out, err = e.executeContextFilter(ctx, argsMap)
 	// Overseer agent management tools
 	case "agent_spawn":
-		return e.executeAgentSpawn(ctx, argsMap)
+		out, err = e.executeAgentSpawn(ctx, argsMap)
 	case "agent_list":
-		return e.executeAgentList(ctx, argsMap)
+		out, err = e.executeAgentList(ctx, argsMap)
 	case "agent_status":
-		return e.executeAgentStatus(ctx, argsMap)
+		out, err = e.executeAgentStatus(ctx, argsMap)
 	case "agent_kill":
-		return e.executeAgentKill(ctx, argsMap)
+		out, err = e.executeAgentKill(ctx, argsMap)
 	case "agent_hierarchy":
-		return e.executeAgentHierarchy(ctx, argsMap)
+		out, err = e.executeAgentHierarchy(ctx, argsMap)
 	case "agent_wait":
-		return e.executeAgentWait(ctx, argsMap)
+		out, err = e.executeAgentWait(ctx, argsMap)
 	default:
-		return "", fmt.Errorf("unknown tool: %s", name)
+		err = fmt.Errorf("unknown tool: %s", name)
 	}
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "[TOOLEXEC] tool=%s err=%v\n", name, err)
+		return "", err
+	}
+	fmt.Fprintf(os.Stderr, "[TOOLEXEC] tool=%s ok output_len=%d\n", name, len(out))
+	return out, nil
 }
 
 // List returns all available tool definitions.
@@ -1210,8 +1227,7 @@ func (e *agentToolExecutor) executeContextSearch(ctx context.Context, args map[s
 
 	// Call agentctl skill
 	input := fmt.Sprintf(`{"query": %q, "format": "tree", "limit": %d}`, query, limit)
-	cmd := exec.CommandContext(ctx, "agentctl", "run", "code/semantic_search", "--input", input)
-	cmd.Dir = e.workspaceRoot
+	cmd := e.newAgentctlCommand(ctx, "run", "code/semantic_search", "--input", input)
 
 	return commandOutput(cmd, "context_search")
 }
@@ -1240,8 +1256,7 @@ func (e *agentToolExecutor) executeSmartSearch(ctx context.Context, args map[str
 		return "", fmt.Errorf("marshal smart_search input: %w", err)
 	}
 
-	cmd := exec.CommandContext(ctx, "agentctl", "run", "code/smart_search", "--input", string(inputBytes))
-	cmd.Dir = e.workspaceRoot
+	cmd := e.newAgentctlCommand(ctx, "run", "code/smart_search", "--input", string(inputBytes))
 
 	return commandOutput(cmd, "smart_search")
 }
@@ -1286,8 +1301,7 @@ func (e *agentToolExecutor) executeContextFilter(ctx context.Context, args map[s
 		return "", fmt.Errorf("marshal context_filter input: %w", err)
 	}
 
-	cmd := exec.CommandContext(ctx, "agentctl", "run", "context/filter", "--input", string(inputBytes))
-	cmd.Dir = e.workspaceRoot
+	cmd := e.newAgentctlCommand(ctx, "run", "context/filter", "--input", string(inputBytes))
 
 	return commandOutput(cmd, "context_filter")
 }
@@ -1305,8 +1319,7 @@ func (e *agentToolExecutor) executeContextGrep(ctx context.Context, args map[str
 	}
 
 	input := fmt.Sprintf(`{"pattern": %q, "path": %q}`, pattern, path)
-	cmd := exec.CommandContext(ctx, "agentctl", "run", "code/context_grep", "--input", input)
-	cmd.Dir = e.workspaceRoot
+	cmd := e.newAgentctlCommand(ctx, "run", "code/context_grep", "--input", input)
 
 	return commandOutput(cmd, "context_grep")
 }
@@ -1326,8 +1339,7 @@ func (e *agentToolExecutor) executeCodeSymbols(ctx context.Context, args map[str
 	}
 
 	inputBytes, _ := json.Marshal(inputMap)
-	cmd := exec.CommandContext(ctx, "agentctl", "run", "code/symbols", "--input", string(inputBytes))
-	cmd.Dir = e.workspaceRoot
+	cmd := e.newAgentctlCommand(ctx, "run", "code/symbols", "--input", string(inputBytes))
 	return commandOutput(cmd, "code_symbols")
 }
 
@@ -1349,8 +1361,7 @@ func (e *agentToolExecutor) executeRepoIndexSearch(ctx context.Context, args map
 		workspace = "."
 	}
 
-	cmd := exec.CommandContext(ctx, "agentctl", "index", "repo", "search", "--workspace", workspace, "--query", query, "--limit", strconv.Itoa(limit))
-	cmd.Dir = e.workspaceRoot
+	cmd := e.newAgentctlCommand(ctx, "index", "repo", "search", "--workspace", workspace, "--query", query, "--limit", strconv.Itoa(limit))
 
 	return commandOutput(cmd, "repo_index_search")
 }
@@ -1383,8 +1394,7 @@ func (e *agentToolExecutor) executeRepoIndexExpand(ctx context.Context, args map
 		argsList = append(argsList, "--edge", edgeType)
 	}
 
-	cmd := exec.CommandContext(ctx, "agentctl", argsList...)
-	cmd.Dir = e.workspaceRoot
+	cmd := e.newAgentctlCommand(ctx, argsList...)
 
 	return commandOutput(cmd, "repo_index_expand")
 }
@@ -1400,8 +1410,7 @@ func (e *agentToolExecutor) executeRepoIndexOpen(ctx context.Context, args map[s
 		workspace = "."
 	}
 
-	cmd := exec.CommandContext(ctx, "agentctl", "index", "repo", "open", "--workspace", workspace, "--id", id)
-	cmd.Dir = e.workspaceRoot
+	cmd := e.newAgentctlCommand(ctx, "index", "repo", "open", "--workspace", workspace, "--id", id)
 
 	return commandOutput(cmd, "repo_index_open")
 }
@@ -1417,10 +1426,29 @@ func (e *agentToolExecutor) executeRepoIndexDagGrep(ctx context.Context, args ma
 		return "", fmt.Errorf("marshal dag_grep args: %w", err)
 	}
 
-	cmd := exec.CommandContext(ctx, "agentctl", "run", "code/dag_grep", "--input", string(inputBytes))
-	cmd.Dir = e.workspaceRoot
+	cmd := e.newAgentctlCommand(ctx, "run", "code/dag_grep", "--input", string(inputBytes))
 
 	return commandOutput(cmd, "repo_index_dag_grep")
+}
+
+func (e *agentToolExecutor) executeHeartwoodState(ctx context.Context, args map[string]any) (string, error) {
+	inputBytes, err := json.Marshal(args)
+	if err != nil {
+		return "", fmt.Errorf("marshal heartwood_state args: %w", err)
+	}
+
+	cmd := e.newAgentctlCommand(ctx, "run", "heartwood/state", "--input", string(inputBytes))
+	return commandOutput(cmd, "heartwood_state")
+}
+
+func (e *agentToolExecutor) executeHeartwoodAction(ctx context.Context, args map[string]any) (string, error) {
+	inputBytes, err := json.Marshal(args)
+	if err != nil {
+		return "", fmt.Errorf("marshal heartwood_action args: %w", err)
+	}
+
+	cmd := e.newAgentctlCommand(ctx, "run", "heartwood/action", "--input", string(inputBytes))
+	return commandOutput(cmd, "heartwood_action")
 }
 
 // executeSessionTimeline calls code/semantic_search with sessions scope and timeline format
@@ -1437,8 +1465,7 @@ func (e *agentToolExecutor) executeSessionTimeline(ctx context.Context, args map
 
 	// Call semantic_search with sessions scope and timeline=true
 	input := fmt.Sprintf(`{"query": %q, "scope": ["sessions"], "timeline": true, "limit": %d}`, query, limit)
-	cmd := exec.CommandContext(ctx, "agentctl", "run", "code/semantic_search", "--input", input)
-	cmd.Dir = e.workspaceRoot
+	cmd := e.newAgentctlCommand(ctx, "run", "code/semantic_search", "--input", input)
 
 	return commandOutput(cmd, "session_timeline")
 }
@@ -1465,8 +1492,7 @@ func (e *agentToolExecutor) executeMemoryQuery(ctx context.Context, args map[str
 		return "", fmt.Errorf("marshal memory_query input: %w", err)
 	}
 
-	cmd := exec.CommandContext(ctx, "agentctl", "run", "memory/query", "--input", string(inputBytes))
-	cmd.Dir = e.workspaceRoot
+	cmd := e.newAgentctlCommand(ctx, "run", "memory/query", "--input", string(inputBytes))
 	return commandOutput(cmd, "memory_query")
 }
 
@@ -1479,8 +1505,7 @@ func (e *agentToolExecutor) executeSessionRecall(ctx context.Context, args map[s
 	limit := intArg(args, 5, "limit")
 
 	input := fmt.Sprintf(`{"query": %q, "scope": ["sessions"], "limit": %d}`, query, limit)
-	cmd := exec.CommandContext(ctx, "agentctl", "run", "code/semantic_search", "--input", input)
-	cmd.Dir = e.workspaceRoot
+	cmd := e.newAgentctlCommand(ctx, "run", "code/semantic_search", "--input", input)
 	return commandOutput(cmd, "session_recall")
 }
 
@@ -1513,8 +1538,7 @@ func (e *agentToolExecutor) executeAnnotationRecall(ctx context.Context, args ma
 		return "", fmt.Errorf("marshal annotation_recall input: %w", err)
 	}
 
-	cmd := exec.CommandContext(ctx, "agentctl", "run", "session/recall", "--input", string(inputBytes))
-	cmd.Dir = e.workspaceRoot
+	cmd := e.newAgentctlCommand(ctx, "run", "session/recall", "--input", string(inputBytes))
 	return commandOutput(cmd, "annotation_recall")
 }
 
@@ -1533,17 +1557,49 @@ func (e *agentToolExecutor) executeAnnotationCategoryStats(ctx context.Context, 
 		return "", fmt.Errorf("marshal annotation_category_stats input: %w", err)
 	}
 
-	cmd := exec.CommandContext(ctx, "agentctl", "run", "session/recall", "--input", string(inputBytes))
-	cmd.Dir = e.workspaceRoot
+	cmd := e.newAgentctlCommand(ctx, "run", "session/recall", "--input", string(inputBytes))
 	return commandOutput(cmd, "annotation_category_stats")
 }
 
 // executeAnnotationListSessions calls session/recall in list_sessions mode
 func (e *agentToolExecutor) executeAnnotationListSessions(ctx context.Context) (string, error) {
 	input := fmt.Sprintf(`{"list_sessions": true, "workspace": %q}`, e.workspaceRoot)
-	cmd := exec.CommandContext(ctx, "agentctl", "run", "session/recall", "--input", input)
-	cmd.Dir = e.workspaceRoot
+	cmd := e.newAgentctlCommand(ctx, "run", "session/recall", "--input", input)
 	return commandOutput(cmd, "annotation_list_sessions")
+}
+
+func (e *agentToolExecutor) newAgentctlCommand(ctx context.Context, args ...string) *exec.Cmd {
+	bin := "agentctl"
+	if exe, err := os.Executable(); err == nil && strings.TrimSpace(exe) != "" {
+		bin = exe
+	}
+	cmd := exec.CommandContext(ctx, bin, args...)
+	cmd.Dir = e.workspaceRoot
+	cmd.Env = filteredAgentctlEnv(os.Environ())
+	return cmd
+}
+
+func filteredAgentctlEnv(in []string) []string {
+	out := make([]string, 0, len(in))
+	for _, kv := range in {
+		switch {
+		case strings.HasPrefix(kv, "AGENTCTL_JIDO_"):
+			continue
+		case strings.HasPrefix(kv, "AGENTCTL_V2_ASK_DISPATCHER="):
+			continue
+		case strings.HasPrefix(kv, "AGENTCTL_JIDO_SOCKET="):
+			continue
+		case strings.HasPrefix(kv, "AGENTCTL_JIDO_RPC_PATH="):
+			continue
+		case strings.HasPrefix(kv, "AGENTCTL_JIDO_RPC_TIMEOUT_MS="):
+			continue
+		case strings.HasPrefix(kv, "AGENTCTL_JIDO_SIGNAL_SOURCE="):
+			continue
+		default:
+			out = append(out, kv)
+		}
+	}
+	return out
 }
 
 func commandOutput(cmd *exec.Cmd, label string) (string, error) {
@@ -1554,6 +1610,7 @@ func commandOutput(cmd *exec.Cmd, label string) (string, error) {
 	err := cmd.Run()
 	out := stdout.String()
 	if err != nil {
+		fmt.Fprintf(os.Stderr, "[TOOLCMD] label=%s path=%s args=%q err=%v stderr=%q stdout=%q\n", label, cmd.Path, cmd.Args, err, strings.TrimSpace(stderr.String()), strings.TrimSpace(out))
 		if strings.TrimSpace(out) != "" {
 			// Preserve tool output for soft-failure paths (e.g., no results).
 			return out, nil
@@ -1608,6 +1665,39 @@ func buildToolDefsForRole(role types.AgentRole, hasMailbox, hasBoard bool, allow
 			Description: "List files and directories in a directory",
 			Parameters:  json.RawMessage(`{"type":"object","properties":{"path":{"type":"string","description":"Directory path to list"}}}`),
 		})
+	}
+
+	// Heartwood tools are available to non-scout agents and can be restricted further by allowlist.
+	if !isScout {
+		tools = append(tools,
+			engine.ToolDef{
+				Name:        "heartwood_state",
+				Description: "Fetch compact Heartwood participant state through the generated SpacetimeDB client.",
+				Parameters: json.RawMessage(`{"type":"object","properties":{
+					"heartwood_root":{"type":"string","description":"Path to the Heartwood repo"},
+					"host":{"type":"string","description":"WebSocket host, e.g. ws://127.0.0.1:3001"},
+					"db_name":{"type":"string","description":"Heartwood database name"},
+					"token":{"type":"string","description":"Optional SpacetimeDB token"},
+					"token_path":{"type":"string","description":"Optional token file path"},
+					"wait_timeout_ms":{"type":"integer","description":"Connection/subscription timeout in milliseconds"},
+					"message_limit":{"type":"integer","description":"Recent message limit"}
+				},"required":["host","db_name"]}`),
+			},
+			engine.ToolDef{
+				Name:        "heartwood_action",
+				Description: "Execute a whitelisted Heartwood participant action through the generated SpacetimeDB client.",
+				Parameters: json.RawMessage(`{"type":"object","properties":{
+					"heartwood_root":{"type":"string","description":"Path to the Heartwood repo"},
+					"host":{"type":"string","description":"WebSocket host, e.g. ws://127.0.0.1:3001"},
+					"db_name":{"type":"string","description":"Heartwood database name"},
+					"token":{"type":"string","description":"Optional SpacetimeDB token"},
+					"token_path":{"type":"string","description":"Optional token file path"},
+					"wait_timeout_ms":{"type":"integer","description":"Connection timeout in milliseconds"},
+					"operation":{"type":"string","description":"Heartwood action name"},
+					"args":{"type":"object","description":"Action arguments"}
+				},"required":["host","db_name","operation"]}`),
+			},
+		)
 	}
 
 	// Add role-specific tools
@@ -1888,6 +1978,39 @@ func buildToolDefsForRole(role types.AgentRole, hasMailbox, hasBoard bool, allow
 				Parameters: json.RawMessage(`{"type":"object","properties":{
 					"query":{"type":"string","description":"Topic to search past sessions for"},
 					"limit":{"type":"integer","description":"Maximum sessions to return (default 5)"}
+				},"required":["query"]}`),
+			},
+			engine.ToolDef{
+				Name:        "repo_index_search",
+				Description: "Search the repo index for nodes that match a text query. USE THIS for precise structural discovery before spawning DAG-focused subagents.",
+				Parameters:  json.RawMessage(`{"type":"object","properties":{"query":{"type":"string","description":"FTS query string"},"limit":{"type":"integer","description":"Maximum results","default":20}},"required":["query"]}`),
+			},
+			engine.ToolDef{
+				Name:        "repo_index_expand",
+				Description: "Expand the repo index graph from seed node IDs.",
+				Parameters:  json.RawMessage(`{"type":"object","properties":{"seeds":{"type":"array","items":{"type":"string"},"description":"Seed node IDs"},"edge_types":{"type":"array","items":{"type":"string"},"description":"Edge types to traverse"},"direction":{"type":"string","enum":["out","in"],"description":"Traversal direction"},"depth":{"type":"integer","description":"Traversal depth","default":1},"budget":{"type":"integer","description":"Max nodes to return","default":50},"per_node_cap":{"type":"integer","description":"Max edges per node per hop","default":50}},"required":["seeds"]}`),
+			},
+			engine.ToolDef{
+				Name:        "repo_index_open",
+				Description: "Open a repo index node by ID.",
+				Parameters:  json.RawMessage(`{"type":"object","properties":{"id":{"type":"string","description":"Node ID"}},"required":["id"]}`),
+			},
+			engine.ToolDef{
+				Name:        "repo_index_dag_grep",
+				Description: "Search and expand the repo index into a compact explanation subgraph.",
+				Parameters: json.RawMessage(`{"type":"object","properties":{
+					"query":{"type":"string","description":"Search query"},
+					"mode":{"type":"string","enum":["fts","semantic","hybrid"]},
+					"k":{"type":"integer","description":"Number of seed nodes (default 10)"},
+					"node_kinds":{"type":"array","items":{"type":"string","enum":["symbol","file","package","concept"]}},
+					"edge_sets":{"type":"array","items":{"type":"string","enum":["structural","doc","all"]}},
+					"edge_types":{"type":"array","items":{"type":"string"}},
+					"direction":{"type":"string","enum":["out","in"]},
+					"depth":{"type":"integer","description":"Traversal depth"},
+					"budget":{"type":"integer","description":"Max nodes to return"},
+					"per_node_cap":{"type":"integer","description":"Max edges per node"},
+					"include_anchors":{"type":"boolean","description":"Include file/package anchors"},
+					"render":{"type":"string","enum":["none","tree","mermaid"]}
 				},"required":["query"]}`),
 			},
 		)

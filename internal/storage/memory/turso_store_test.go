@@ -182,6 +182,54 @@ func TestTursoConnectionFailure(t *testing.T) {
 	t.Logf("Got expected error: %v", err)
 }
 
+func TestLibSQLStoreLocalOnly(t *testing.T) {
+	ctx := context.Background()
+	cfg := dbdriver.LibSQLConfig{
+		Path:               t.TempDir() + "/memory.libsql",
+		EnableVectorSearch: true,
+		VectorDimensions:   1024,
+	}
+
+	store, err := OpenLibSQL(ctx, cfg)
+	if err != nil {
+		t.Fatalf("OpenLibSQL failed: %v", err)
+	}
+	defer store.Close()
+
+	stats, err := store.Stats(ctx)
+	if err != nil {
+		t.Fatalf("Stats failed: %v", err)
+	}
+	if stats.Path != "turso" {
+		t.Fatalf("Stats.Path = %q, want %q", stats.Path, "turso")
+	}
+
+	embedding := make([]float32, 1024)
+	for i := range embedding {
+		embedding[i] = float32(i) * 0.001
+	}
+
+	entry := NamedEntry{
+		Name:      "libsql-local-entry",
+		Type:      "test",
+		Workspace: "test-ws",
+		Summary:   "Local libsql vector smoke test",
+		Result:    []byte(`{"ok": true}`),
+	}
+
+	if _, err := store.SaveWithEmbedding(ctx, entry, embedding, "test-model"); err != nil {
+		t.Fatalf("SaveWithEmbedding failed: %v", err)
+	}
+
+	results, err := store.SearchSimilar(ctx, "test-ws", embedding, 5)
+	if err != nil {
+		t.Fatalf("SearchSimilar failed: %v", err)
+	}
+	if len(results) == 0 {
+		t.Fatalf("SearchSimilar returned no results")
+	}
+}
+
 func TestTursoDefaultDimensions(t *testing.T) {
 	url := os.Getenv("TURSO_DATABASE_URL")
 	token := os.Getenv("TURSO_AUTH_TOKEN")

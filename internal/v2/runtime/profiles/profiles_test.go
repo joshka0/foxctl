@@ -66,3 +66,20 @@ func TestDefaultSpecs_OverseerIncludesTodoTools(t *testing.T) {
 		}
 	}
 }
+
+func TestDefaultSpecs_OverseerIncludesRepoIndexTools(t *testing.T) {
+	t.Parallel()
+
+	specs := profiles.DefaultSpecs()
+	spec, ok := specs[coretool.ProfileOverseer]
+	if !ok {
+		t.Fatalf("missing %q profile", coretool.ProfileOverseer)
+	}
+
+	normalized := profiles.NormalizeAllowedTools(spec.AllowedTools)
+	for _, want := range []string{"repo_index_search", "repo_index_expand", "repo_index_open", "repo_index_dag_grep", "smart_search"} {
+		if !slices.Contains(normalized, want) {
+			t.Fatalf("overseer allowed tools=%v want %s", normalized, want)
+		}
+	}
+}

@@ -202,6 +202,11 @@ var (
 	askDispatcherMode string
 )
 
+// Flags for agent spawn dispatcher/runtime routing.
+var (
+	spawnDispatcher string
+)
+
 // Flags for agent cmd
 var (
 	cmdDryRun bool
@@ -251,6 +256,7 @@ func init() {
 	agentSpawnCmd.Flags().StringVar(&spawnTimeout, "timeout", "", "Session timeout (e.g. 10m, 30m). Default: 30m")
 	agentSpawnCmd.Flags().BoolVar(&spawnDryRun, "dry-run", false, "Preview what would be spawned without creating the agent")
 	agentSpawnCmd.Flags().BoolVar(&spawnChat, "chat", false, "Convenience flag for chat/roleplay companions (sets role=companion, exec-mode=reactive, max-iterations=3)")
+	agentSpawnCmd.Flags().StringVar(&spawnDispatcher, "dispatcher", "", "Execution layer for spawned agents: mailbox|jido (default from AGENTCTL_V2_ASK_DISPATCHER)")
 
 	// Run flags
 	agentRunCmd.Flags().StringVar(&runCompanionMode, "companion-mode", "", "Memory mode for conversation memory: standard (40K tokens) or roleplay (50K tokens)")
@@ -294,6 +300,7 @@ func runAgentSpawn(cmd *cobra.Command, args []string) error {
 func runAgentSpawnWithRoute(cmd *cobra.Command) error {
 	ctx := cmd.Context()
 	cfg := config.MustFromContext(ctx)
+	executionLayer := resolvedSpawnExecutionLayer(spawnDispatcher)
 
 	// Apply chat/roleplay companion defaults if --chat flag is set
 	// These can be overridden by explicit flags
@@ -356,6 +363,86 @@ func runAgentSpawnWithRoute(cmd *cobra.Command) error {
 		llmAPIKey = os.Getenv(strings.TrimPrefix(llmAPIKey, "$"))
 	}
 
+	// Load policy
+	var policy agent.Policy
+	if spawnPolicyFile != "" {
+		data, err := os.ReadFile(spawnPolicyFile)
+		if err != nil {
+			return writeErrorEnvelope(cmd, "agent/spawn", string(protocol.ErrorCodeEARG), fmt.Sprintf("failed to read policy file: %v", err))
+		}
+		if err := json.Unmarshal(data, &policy); err != nil {
+			return writeErrorEnvelope(cmd, "agent/spawn", string(protocol.ErrorCodeEARG), fmt.Sprintf("failed to parse policy JSON: %v", err))
+		}
+	}
+
+	// Jido-managed agents are persisted locally but started in the Jido runtime instead
+	// of the classic daemon/runtime path.
+	if executionLayer == agent.ExecutionLayerJido {
+		req := agentmanager.SpawnRequest{
+			ParentNS:        spawnParentNS,
+			Name:            spawnName,
+			Slug:            spawnSlug,
+			Role:            spawnRole,
+			Prompt:          prompt,
+			SkillsAllow:     skillsAllow,
+			Policy:          policy,
+			ShareBB:         spawnShareBB,
+			MemoryScope:     agent.MemoryScope(strings.TrimSpace(spawnMemoryScope)),
+			MemoryRetention: agent.MemoryRetention(strings.TrimSpace(spawnMemoryRetention)),
+			LLMProvider:     spawnLLMProvider,
+			LLMModel:        spawnLLMModel,
+			LLMAPIKey:       llmAPIKey,
+			ExecMode:        agent.ExecutionMode(spawnExecMode),
+			MaxIterations:   spawnMaxIterations,
+			MaxAutoTurns:    spawnMaxAutoTurns,
+			ThinkInterval:   spawnThinkInterval,
+		}
+
+		if spawnDryRun {
+			data := map[string]any{
+				"dry_run":          true,
+				"would_spawn":      true,
+				"dispatcher":       "jido",
+				"execution_layer":  string(executionLayer),
+				"name":             req.Name,
+				"slug":             req.Slug,
+				"role":             req.Role,
+				"skills_allow":     req.SkillsAllow,
+				"share_bb":         req.ShareBB,
+				"memory_scope":     string(req.MemoryScope),
+				"memory_retention": string(req.MemoryRetention),
+				"llm_provider":     req.LLMProvider,
+				"llm_model":        req.LLMModel,
+				"exec_mode":        string(req.ExecMode),
+				"max_iterations":   req.MaxIterations,
+				"max_auto_turns":   req.MaxAutoTurns,
+				"think_interval":   req.ThinkInterval,
+				"has_prompt":       len(req.Prompt) > 0,
+				"has_policy":       req.Policy.CPU > 0 || req.Policy.MemoryMB > 0 || req.Policy.Timeout != "",
+			}
+			return writeOK(cmd, "agent/spawn", data, "run", nil)
+		}
+
+		workspaceRoot, err := filepath.Abs(".")
+		if err != nil {
+			return writeErrorEnvelope(cmd, "agent/spawn", string(protocol.ErrorCodeERuntime), fmt.Sprintf("failed to resolve workspace root: %v", err))
+		}
+		resp, err := spawnJidoManagedAgent(ctx, cfg.Storage.Root, workspaceRoot, req)
+		if err != nil {
+			return writeErrorEnvelope(cmd, "agent/spawn", string(protocol.ErrorCodeERuntime), fmt.Sprintf("failed to spawn jido agent: %v", err))
+		}
+
+		data := map[string]any{
+			"agent_id":        resp.AgentID,
+			"ns":              resp.NS,
+			"role":            resp.Role,
+			"dispatcher":      "jido",
+			"execution_layer": string(executionLayer),
+			"via_daemon":      false,
+		}
+		return writeOK(cmd, "agent/spawn", data, "run", nil)
+	}
+
 	// Try daemon client first (new runtime with tools like session.recall, memory.query)
 	daemonClient := daemon.NewClient()
 	if daemonClient.IsRunning() {
@@ -400,6 +487,8 @@ func runAgentSpawnWithRoute(cmd *cobra.Command) error {
 				"dry_run":          true,
 				"would_spawn":      true,
 				"via_daemon":       true,
+				"dispatcher":       "mailbox",
+				"execution_layer":  string(executionLayer),
 				"role":             params.Role,
 				"name":             params.Name,
 				"slug":             params.Slug,
@@ -423,31 +512,21 @@ func runAgentSpawnWithRoute(cmd *cobra.Command) error {
 
 		// Write success envelope
 		data := map[string]any{
-			"session_id": result.SessionID,
-			"actor_id":   result.ActorID,
-			"agent_id":   result.AgentID,
-			"name":       result.Name,
-			"status":     result.Status,
-			"role":       result.Role,
-			"ns":         result.NS,
-			"via_daemon": true,
+			"session_id":      result.SessionID,
+			"actor_id":        result.ActorID,
+			"agent_id":        result.AgentID,
+			"name":            result.Name,
+			"status":          result.Status,
+			"role":            result.Role,
+			"ns":              result.NS,
+			"dispatcher":      "mailbox",
+			"execution_layer": string(executionLayer),
+			"via_daemon":      true,
 		}
 		return writeOK(cmd, "agent/spawn", data, "run", nil)
 	}
 
 	// Fall back to old agentmanager (legacy, does not have new tools)
-
-	// Load policy
-	var policy agent.Policy
-	if spawnPolicyFile != "" {
-		data, err := os.ReadFile(spawnPolicyFile)
-		if err != nil {
-			return writeErrorEnvelope(cmd, "agent/spawn", string(protocol.ErrorCodeEARG), fmt.Sprintf("failed to read policy file: %v", err))
-		}
-		if err := json.Unmarshal(data, &policy); err != nil {
-			return writeErrorEnvelope(cmd, "agent/spawn", string(protocol.ErrorCodeEARG), fmt.Sprintf("failed to parse policy JSON: %v", err))
-		}
-	}
 
 	// Open stores
 	agentStore, err := agents.Open(ctx, cfg.Storage.Root)
@@ -492,6 +571,8 @@ func runAgentSpawnWithRoute(cmd *cobra.Command) error {
 			"dry_run":          true,
 			"would_spawn":      true,
 			"via_daemon":       false,
+			"dispatcher":       "mailbox",
+			"execution_layer":  string(executionLayer),
 			"parent_ns":        req.ParentNS,
 			"name":             req.Name,
 			"slug":             req.Slug,
@@ -519,10 +600,12 @@ func runAgentSpawnWithRoute(cmd *cobra.Command) error {
 
 	// Write success envelope
 	data := map[string]any{
-		"agent_id":   resp.AgentID,
-		"ns":         resp.NS,
-		"role":       resp.Role,
-		"via_daemon": false,
+		"agent_id":        resp.AgentID,
+		"ns":              resp.NS,
+		"role":            resp.Role,
+		"dispatcher":      "mailbox",
+		"execution_layer": string(executionLayer),
+		"via_daemon":      false,
 	}
 
 	return writeOK(cmd, "agent/spawn", data, "run", nil)
@@ -582,6 +665,39 @@ func runAgentKillWithRoute(cmd *cobra.Command, args []string) error {
 		return writeErrorEnvelope(cmd, "agent/kill", string(protocol.ErrorCodeERuntime), fmt.Sprintf("failed to open mailbox store: %v", err))
 	}
 	defer func() { errs.Ignore(mailboxStore.Close(), "close mailbox store") }()
+
+	agentRecord, err := agentStore.Get(ctx, agentID)
+	if err != nil {
+		return writeErrorEnvelope(cmd, "agent/kill", string(protocol.ErrorCodeENotFound), fmt.Sprintf("agent not found: %v", err))
+	}
+	if agent.NormalizeExecutionLayer(agentRecord.ExecutionLayer) == agent.ExecutionLayerJido {
+		if killDryRun {
+			data := map[string]any{
+				"dry_run":         true,
+				"would_kill":      true,
+				"agent_id":        agentID,
+				"namespace":       agentRecord.Namespace,
+				"role":            agentRecord.Role,
+				"state":           agentRecord.State,
+				"execution_layer": string(agent.NormalizeExecutionLayer(agentRecord.ExecutionLayer)),
+				"graceful":        killGraceful,
+				"timeout_s":       killTimeoutS,
+			}
+			return writeOK(cmd, "agent/kill", data, "run", nil)
+		}
+		if err := jidoStopAgentForRecord(ctx, agentRecord); err != nil {
+			return writeErrorEnvelope(cmd, "agent/kill", string(protocol.ErrorCodeERuntime), fmt.Sprintf("failed to stop jido agent: %v", err))
+		}
+		if err := agentStore.UpdateState(ctx, agentID, agent.StateStopped); err != nil {
+			return writeErrorEnvelope(cmd, "agent/kill", string(protocol.ErrorCodeERuntime), fmt.Sprintf("failed to update agent state: %v", err))
+		}
+		return writeOK(cmd, "agent/kill", map[string]any{
+			"agent_id":        agentID,
+			"final_status":    agent.StateStopped,
+			"exit_code":       0,
+			"execution_layer": string(agent.NormalizeExecutionLayer(agentRecord.ExecutionLayer)),
+		}, "run", nil)
+	}
 
 	// Create manager
 	mgr := agentmanager.New(agentStore, mailboxStore)
@@ -1047,6 +1163,15 @@ func runAgentRunWithRoute(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("resolve agent %q: %w", agentRef, err)
 	}
+	if agent.NormalizeExecutionLayer(agentRecord.ExecutionLayer) == agent.ExecutionLayerJido {
+		return writeErrorEnvelope(
+			cmd,
+			"agent/run",
+			string(protocol.ErrorCodeEARG),
+			"agent is Jido-managed and cannot be run via the classic foreground runtime",
+			"Use `agent ask --dispatcher jido`, `runtime.signal`, or Jido runtime controls for this agent.",
+		)
+	}
 
 	// Resolve LLM provider - use agent's provider first, then config, then auto-detect
 	provider := agentRecord.LLMProvider
@@ -1145,7 +1270,6 @@ func runAgentAskWithRoute(cmd *cobra.Command, args []string) error {
 	ctx := cmd.Context()
 	cfg := config.MustFromContext(ctx)
 	agentID := args[0]
-	dispatcherMode := resolvedAskDispatcherMode(askDispatcherMode)
 	question, err := cmd.Flags().GetString("question")
 	if err != nil {
 		return fmt.Errorf("get question flag: %w", err)
@@ -1166,14 +1290,7 @@ func runAgentAskWithRoute(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("get conversation-id flag: %w", err)
 	}
-	var mailboxStore mailbox.Store
-	if dispatcherMode == askDispatchModeMailbox {
-		mailboxStore, err = mailbox.Open(ctx, cfg.Storage.Root)
-		if err != nil {
-			return writeErrorEnvelope(cmd, "agent/ask", string(protocol.ErrorCodeERuntime), fmt.Sprintf("failed to open mailbox store: %v", err))
-		}
-		defer func() { errs.Ignore(mailboxStore.Close(), "close mailbox store") }()
-	}
+	dispatcherMode := resolvedAskDispatcherMode(askDispatcherMode)
 
 	// Get agent to find its namespace (supports slug, name, or ID)
 	agentStore, err := agents.Open(ctx, cfg.Storage.Root)
@@ -1184,6 +1301,19 @@ func runAgentAskWithRoute(cmd *cobra.Command, args []string) error {
 	agentRecord, err := agentStore.Resolve(ctx, agentID)
 	if err != nil {
 		return writeErrorEnvelope(cmd, "agent/ask", string(protocol.ErrorCodeENotFound), fmt.Sprintf("agent not found: %v", err))
+	}
+	if !cmd.Flags().Changed("dispatcher") &&
+		strings.TrimSpace(os.Getenv(envAskDispatcherMode)) == "" &&
+		agent.NormalizeExecutionLayer(agentRecord.ExecutionLayer) == agent.ExecutionLayerJido {
+		dispatcherMode = askDispatchModeJido
+	}
+	var mailboxStore mailbox.Store
+	if dispatcherMode == askDispatchModeMailbox {
+		mailboxStore, err = mailbox.Open(ctx, cfg.Storage.Root)
+		if err != nil {
+			return writeErrorEnvelope(cmd, "agent/ask", string(protocol.ErrorCodeERuntime), fmt.Sprintf("failed to open mailbox store: %v", err))
+		}
+		defer func() { errs.Ignore(mailboxStore.Close(), "close mailbox store") }()
 	}
 
 	askID := ulid.Make().String()

@@ -14,6 +14,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/jkatigb/agentctl/internal/indexing"
+	"github.com/jkatigb/agentctl/internal/indexing/codefilter"
 	"github.com/jkatigb/agentctl/internal/indexing/embedding"
 	"github.com/jkatigb/agentctl/internal/indexing/embeddingtext"
 	"github.com/jkatigb/agentctl/internal/indexing/semantic"
@@ -104,6 +105,12 @@ func (idx *Indexer) Index(ctx context.Context, event indexing.PostReviewEvent) (
 		case <-ctx.Done():
 			return result, ctx.Err()
 		default:
+		}
+
+		if codefilter.ShouldSkipPath(file.Path) {
+			idx.logger.Debug().Str("path", file.Path).Msg("skipping non-app code path")
+			result.FilesSkipped++
+			continue
 		}
 
 		// Handle deleted files

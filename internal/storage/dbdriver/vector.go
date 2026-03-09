@@ -110,15 +110,35 @@ func (vh *VectorHelper) VectorExpression(vector Vector) string {
 	return fmt.Sprintf("vector('%s')", vector.String())
 }
 
-// CosineSimilarity returns a SQL expression for cosine similarity/distance between two vectors.
-// PostgreSQL: returns similarity (1 - distance); higher = more similar. Use ORDER BY ... DESC.
-// libSQL: returns distance via vector_distance_cos; lower = more similar. Use ORDER BY ... ASC.
-// Prefer SearchSimilar() for cross-driver queries that handle ordering automatically.
+// CosineSimilarity returns a SQL expression for cosine-based scoring between two vectors.
+// This method has driver-specific semantics:
+//   - PostgreSQL: 1 - distance, where higher values are more similar.
+//   - libSQL/Turso: vector_distance_cos distance, where lower values are more similar.
+//
+// Prefer CosineSimilarityScore() when you need a consistent [0,1] score with
+// higher values meaning more similar across drivers.
 func (vh *VectorHelper) CosineSimilarity(columnName string, queryVector Vector) string {
-	if vh.db.GetDriverType() == DriverPostgres {
+	return cosineSimilarityExpr(vh.db.GetDriverType(), columnName, queryVector)
+}
+
+// CosineSimilarityScore returns a SQL expression for cosine similarity normalized to [0,1]
+// across supported drivers, where higher values are more similar.
+func (vh *VectorHelper) CosineSimilarityScore(columnName string, queryVector Vector) string {
+	return cosineSimilarityScoreExpr(vh.db.GetDriverType(), columnName, queryVector)
+}
+
+func cosineSimilarityExpr(driver DriverType, columnName string, queryVector Vector) string {
+	if driver == DriverPostgres {
 		return pgCosineSimilarity(columnName, queryVector)
 	}
 	return fmt.Sprintf("vector_distance_cos(%s, '%s')", columnName, queryVector.String())
+}
+
+func cosineSimilarityScoreExpr(driver DriverType, columnName string, queryVector Vector) string {
+	if driver == DriverPostgres {
+		return pgCosineSimilarityScore(columnName, queryVector)
+	}
+	return fmt.Sprintf("(1 - (vector_distance_cos(%s, '%s') / 2.0))", columnName, queryVector.String())
 }
 
 // EuclideanDistance calculates Euclidean distance between two vectors
@@ -192,7 +212,7 @@ func (vh *VectorHelper) SearchSimilar(
 			query += " WHERE " + additionalWhere
 		}
 	} else {
-		// Full table scan with exact distance calculation
+		// Full table scan with exact normalized cosine score calculation
 		query = fmt.Sprintf(`
 			SELECT *
 			FROM %s
@@ -203,9 +223,9 @@ func (vh *VectorHelper) SearchSimilar(
 		}
 
 		query += fmt.Sprintf(`
-			ORDER BY %s
+			ORDER BY %s DESC
 			LIMIT %d
-		`, vh.CosineSimilarity(vectorColumn, queryVector), limit)
+		`, vh.CosineSimilarityScore(vectorColumn, queryVector), limit)
 	}
 
 	return vh.db.QueryContext(ctx, query, args...)

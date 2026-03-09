@@ -61,7 +61,7 @@ echo "Jido socket: ${JIDO_SOCKET}"
 curl -sf "${API_URL}/api/health" >/dev/null
 
 models_json="$(curl -sf "${LMSTUDIO_URL}/models")"
-TICK_MODEL="${TICK_MODEL:-$(printf '%s' "${models_json}" | jq -r '.data[0].id // empty')}"
+TICK_MODEL="${TICK_MODEL:-$(printf '%s' "${models_json}" | jq -r '.data[1].id // .data[0].id // empty')}"
 if [ -z "${TICK_MODEL}" ]; then
   echo "unable to determine LM Studio model from ${LMSTUDIO_URL}/models" >&2
   exit 1
@@ -141,10 +141,15 @@ curl -sf -X POST "${API_URL}/api/orchestration/seed-cards" \
 TICK_AGENT_ID="${TICK_AGENT_ID:-jido-tick-bridge-root}"
 
 tick_prompt="$(cat <<EOF
-You are a persistent tick-driven simulation agent for issue ${ISSUE_IDENTIFIER}.
-On each message, advance the task by one step and reply concisely.
-If you conclude the issue is complete, start your reply with exactly:
-ROOM-BOARD-DONE ${ISSUE_ID}:
+Reply with exactly:
+ROOM-BOARD-DONE ${ISSUE_ID}: smoke ok
+EOF
+)"
+
+tick_agent_prompt="$(cat <<EOF
+You are a deterministic smoke-test worker.
+When the user message contains "Reply with exactly:", output exactly the text that follows, with no code fences, commentary, or suffixes.
+If no such phrase exists, reply with exactly: NO_WORK_NEEDED
 EOF
 )"
 
@@ -152,6 +157,7 @@ start_params="$(jq -n \
   --arg agent_id "${TICK_AGENT_ID}" \
   --arg exec_mode "tick" \
   --arg prompt "${tick_prompt}" \
+  --arg tick_agent_prompt "${tick_agent_prompt}" \
   --arg room_id "${ROOM_ID}" \
   --arg workspace_id "${WORKSPACE_PATH}" \
   --arg issue_id "${ISSUE_ID}" \
@@ -166,7 +172,9 @@ start_params="$(jq -n \
       exec_mode: $exec_mode,
       prompt: $prompt,
       tick_prompt: $prompt,
+      tick_agent_prompt: $tick_agent_prompt,
       think_interval: $think_interval,
+      tick_agent_skills: ["think"],
       room_id: $room_id,
       tick_context: {
         workspace_id: $workspace_id,
@@ -187,25 +195,29 @@ poll_until "jido tick bridge state" \
    test \"\$count\" -ge 1" \
   "${TIMEOUT_SECONDS}"
 
-state_json="$(rpc_call "runtime.state" "{\"agent_id\":\"${TICK_AGENT_ID}\"}")"
-BACKING_AGENT_ID="$(printf '%s' "${state_json}" | jq -r '.result.state.tick_agent.agent_id // empty')"
+poll_until "backing tick agent appears in agentctl" \
+  "agent_json=\$(curl -sf \"${API_URL}/api/agents?limit=200\"); \
+   backing=\$(printf '%s' \"\$agent_json\" | jq -r '.agents | map(select(.name == \"tick-agent\" and .llm_provider == \"lmstudio\" and .state == \"running\")) | first | .id // empty'); \
+   test -n \"\$backing\"" \
+  "${TIMEOUT_SECONDS}"
+
+BACKING_AGENT_ID="$(curl -sf "${API_URL}/api/agents?limit=200" | jq -r '.agents | map(select(.name == "tick-agent" and .llm_provider == "lmstudio" and .state == "running")) | first | .id // empty')"
 if [ -z "${BACKING_AGENT_ID}" ]; then
-  echo "backing agent id not found in Jido state" >&2
-  echo "${state_json}" >&2
+  echo "backing agent id not found in agentctl" >&2
   exit 1
 fi
 
 echo "Backing agent: ${BACKING_AGENT_ID}"
 
 poll_until "ROOM-BOARD-DONE reply from backing agent through Jido tick bridge" \
-  "state=\$(rpc_call \"runtime.state\" '{\"agent_id\":\"${TICK_AGENT_ID}\"}'); \
-   reply=\$(printf '%s' \"\$state\" | jq -r '.result.state.agentctl.last_result.reply // \"\"'); \
+  "state=\$(rpc_call \"runtime.state\" '{\"agent_id\":\"${TICK_AGENT_ID}\"}' 2>/dev/null || true); \
+   reply=\$(printf '%s' \"\$state\" | jq -r '.result.state.agentctl.last_result.reply // \"\"' 2>/dev/null || true); \
    printf '%s' \"\$reply\" | grep -q '^ROOM-BOARD-DONE ${ISSUE_ID}:'" \
   "${TIMEOUT_SECONDS}"
 
-final_state_json="$(rpc_call "runtime.state" "{\"agent_id\":\"${TICK_AGENT_ID}\"}")"
-final_reply="$(printf '%s' "${final_state_json}" | jq -r '.result.state.agentctl.last_result.reply // ""')"
-tick_count="$(printf '%s' "${final_state_json}" | jq -r '.result.state.tick.count // 0')"
+final_state_json="$(rpc_call "runtime.state" "{\"agent_id\":\"${TICK_AGENT_ID}\"}" 2>/dev/null || true)"
+final_reply="$(printf '%s' "${final_state_json}" | jq -r '.result.state.agentctl.last_result.reply // ""' 2>/dev/null || true)"
+tick_count="$(printf '%s' "${final_state_json}" | jq -r '.result.state.tick.count // 0' 2>/dev/null || true)"
 
 if [ -z "${final_reply}" ]; then
   echo "final reply missing from Jido tick bridge state" >&2

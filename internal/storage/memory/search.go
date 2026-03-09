@@ -185,7 +185,7 @@ func (ss *SearchableStore) searchVector(
 		JOIN named_memory t ON t.rowid = vt.id
 		WHERE t.workspace = ?
 		ORDER BY similarity DESC
-	`, vectorHelper.CosineSimilarity("t.embedding", queryVector), queryVector.String())
+	`, vectorHelper.CosineSimilarityScore("t.embedding", queryVector), queryVector.String())
 
 	rows, err := ss.db.QueryContext(ctx, searchQuery, limit, workspace)
 	if err != nil {

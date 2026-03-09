@@ -2,7 +2,8 @@
 // Performs unified semantic search across code symbols, sessions, and memories,
 // combining results with Reciprocal Rank Fusion and extracting context hints.
 //
-// Phase 3: Uses internal/retrieval infrastructure for symbol search with BM25 fallback.
+// The code-symbol path uses searchindex + retrieval/v2, while non-code scopes
+// still use their existing stores/search paths.
 // See docs/designs/unified_semantic_search.md and docs/designs/semantic_search_phase3_plan.md.
 package main
 
@@ -31,6 +32,8 @@ import (
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
 	"github.com/jkatigb/agentctl/internal/domain/policy"
+	"github.com/jkatigb/agentctl/internal/indexing/filesummary"
+	"github.com/jkatigb/agentctl/internal/indexing/repoindex"
 	"github.com/jkatigb/agentctl/internal/indexing/rerank"
 	"github.com/jkatigb/agentctl/internal/indexing/semantic"
 	"github.com/jkatigb/agentctl/internal/indexing/symbol"
@@ -38,7 +41,10 @@ import (
 	errs "github.com/jkatigb/agentctl/internal/platform/errors"
 	"github.com/jkatigb/agentctl/internal/platform/workspace"
 	llmproviders "github.com/jkatigb/agentctl/internal/providers/llm"
+	"github.com/jkatigb/agentctl/internal/repoquery"
 	"github.com/jkatigb/agentctl/internal/retrieval"
+	retrievalv2 "github.com/jkatigb/agentctl/internal/retrieval/v2"
+	"github.com/jkatigb/agentctl/internal/searchindex"
 	"github.com/jkatigb/agentctl/internal/storage"
 	"github.com/jkatigb/agentctl/internal/storage/dbdriver"
 	"github.com/jkatigb/agentctl/internal/storage/graph"
@@ -107,9 +113,10 @@ type Input struct {
 	Workspaces []string `json:"workspaces,omitempty"` // Specific workspaces to search (requires remote)
 
 	// Reranking options (requires VOYAGE_API_KEY)
-	RerankEnabled bool   `json:"rerank_enabled,omitempty"` // Enable reranking (default: from env)
-	RerankTopK    int    `json:"rerank_top_k,omitempty"`   // Candidates to rerank (default: 50)
-	RerankModel   string `json:"rerank_model,omitempty"`   // Override model (default: rerank-2.5)
+	RerankEnabled bool   `json:"rerank_enabled,omitempty"`  // Enable reranking (default: from env)
+	RerankTopK    int    `json:"rerank_top_k,omitempty"`    // Candidates to rerank (default: 50)
+	RerankModel   string `json:"rerank_model,omitempty"`    // Override model (default: rerank-2.5)
+	RepoIndexMode string `json:"repo_index_mode,omitempty"` // off, search, dag for symbol/code path
 
 	// Timeline options (enriches session results with chunk summaries and learnings)
 	Timeline      bool     `json:"timeline,omitempty"`       // Enrich session results with timeline data
@@ -426,8 +433,9 @@ func search(ctx context.Context, rc *skillmain.RunContext, in *Input, voyageKey,
 	// Parallel search across enabled scopes
 	var wg sync.WaitGroup
 	resultsCh := make(chan sourceResults, 5) // symbols, sessions, memories, tasks, codemaps
+	var symbolGroups []retrievalv2.Group
 
-	// Search symbols using retrieval.Generator (BM25 + semantic + ripgrep)
+	// Search symbols using searchindex + retrieval/v2.
 	if scopeSet[ScopeSymbols] {
 		wg.Add(1)
 		go func() {
@@ -436,12 +444,13 @@ func search(ctx context.Context, rc *skillmain.RunContext, in *Input, voyageKey,
 			sourceCtx, sourceCancel := context.WithTimeout(ctx, DefaultSourceTimeout)
 			defer sourceCancel()
 
-			results, err := searchSymbolsWithRetrieval(
+			results, groups, err := searchSymbolsWithRetrieval(
 				sourceCtx,
 				cfg,
 				workspaceID,
 				validator.Workspace(),
 				in.Query,
+				in.RepoIndexMode,
 				embedProvider,
 				queryEmbedding,
 				in.Limit*2,
@@ -449,6 +458,7 @@ func search(ctx context.Context, rc *skillmain.RunContext, in *Input, voyageKey,
 			resultsCh <- sourceResults{
 				source:  ScopeSymbols,
 				results: results,
+				groups:  groups,
 				err:     err,
 				latency: time.Since(start),
 			}
@@ -607,6 +617,9 @@ func search(ctx context.Context, rc *skillmain.RunContext, in *Input, voyageKey,
 			allResults[sr.source] = sr.results
 			out.Stats.SourceCounts[sr.source] = len(sr.results)
 		}
+		if sr.source == ScopeSymbols && len(sr.groups) > 0 {
+			symbolGroups = sr.groups
+		}
 	}
 	// Append source hints if main hint not already set
 	if out.Stats.Hint == "" && len(sourceHints) > 0 {
@@ -710,8 +723,11 @@ func search(ctx context.Context, rc *skillmain.RunContext, in *Input, voyageKey,
 			treeOpts.IncludeSummaries = true
 		}
 
-		// Convert results to file entries first
+		// Prefer grouped code hits from retrieval-v2 when symbol scope is active.
 		entries := resultsToFileEntries(fusedResults)
+		if len(symbolGroups) > 0 {
+			entries = symbolGroupsToFileEntries(symbolGroups)
+		}
 
 		// Fetch file_summary entries for broader tree coverage
 		summaryLimit := treeOpts.MaxChildren * 4
@@ -763,6 +779,7 @@ func search(ctx context.Context, rc *skillmain.RunContext, in *Input, voyageKey,
 type sourceResults struct {
 	source  string
 	results []Result
+	groups  []retrievalv2.Group
 	err     error
 	latency time.Duration
 	hint    string // Optional hint when source unavailable but not an error
@@ -938,97 +955,121 @@ func generateScopedEmbeddings(ctx context.Context, cfg config.Config, query stri
 	return emb, nil
 }
 
-// searchSymbolsWithRetrieval uses the retrieval.Generator for symbol search.
-// This provides hybrid search (BM25 + vector when available) with ripgrep fallback.
+// searchSymbolsWithRetrieval uses the searchindex + retrieval/v2 pipeline for code-symbol search.
+// This is intentionally scoped to the symbol/code path only; other semantic_search scopes keep
+// their existing implementation until retrieval-v2 is adopted more broadly.
 func searchSymbolsWithRetrieval(
 	ctx context.Context,
-	cfg config.Config, workspaceID, workspacePath, query string,
+	cfg config.Config, workspaceID, workspacePath, query, repoIndexMode string,
 	embedProvider semantic.EmbeddingProvider,
 	queryEmbedding []float32,
 	limit int,
-) ([]Result, error) {
-	// Open memory store for symbol index access
+) ([]Result, []retrievalv2.Group, error) {
 	memStore, err := memory.OpenWithConfig(ctx, cfg)
 	if err != nil {
-		return nil, skillerr.WrapIO("open memory store", err)
+		return nil, nil, skillerr.WrapIO("open memory store", err)
 	}
-	defer memStore.Close()
+	defer func() { _ = memStore.Close() }()
 
-	// Create logger (silent for skill context)
-	logger := zerolog.Nop()
-
-	// Create generator with embedding provider
-	// The Generator handles hybrid search internally (BM25 + semantic when embedProvider is set)
-	gen := retrieval.NewGenerator(memStore, embedProvider, workspacePath, logger)
-	gen = gen.WithEmbedQueryMode(cfg.Embedding.Flags.QueryMode)
-
-	// Wire up SearchableStore for vector search when embeddings are available
-	if embedProvider != nil && queryEmbedding != nil {
-		// Only available on concrete *memory.Store, not the interface
-		if concreteStore, ok := memStore.(*memory.Store); ok {
-			wrappedDB := dbdriver.WrapSQLDB(concreteStore.DB(), dbdriver.DriverSQLite)
-			searchStore, searchErr := concreteStore.EnableSearch(wrappedDB, workspaceID)
-			if searchErr == nil {
-				gen = gen.WithSearchableStore(searchStore)
-				logger.Debug().Msg("enabled SearchableStore for hybrid search")
-			}
-		}
-		// If type assertion or EnableSearch fails, we fall back to BM25 (no error returned)
-	}
-
-	// Configure options for symbol search
-	opts := retrieval.DefaultOptions()
-	opts.EnableSymbols = true
-	// Enable semantic/vector search when embeddings are available
-	opts.EnableSemantic = queryEmbedding != nil
-	opts.EnableRipgrep = true // Enable ripgrep fallback
-	opts.MaxTotalCandidates = limit * 2
-	opts.MaxSymbolCandidates = limit * 2
-	opts.MaxSemanticCandidates = limit
-	opts.MaxRipgrepCandidates = limit
-
-	// Generate candidates
-	genResult, err := gen.Generate(ctx, workspaceID, query, opts)
+	indexStore, err := searchindex.Open(ctx, cfg.Storage.Root)
 	if err != nil {
-		return nil, skillerr.WrapRuntime("generate candidates", err)
+		return nil, nil, skillerr.WrapIO("open search index", err)
+	}
+	defer func() { _ = indexStore.Close() }()
+
+	engine := retrievalv2.NewEngine(indexStore, embedProvider)
+	repoMode := normalizeSkillRepoIndexMode(repoIndexMode)
+	if repoMode != "off" {
+		if repoStore, err := repoindex.Open(ctx, cfg.Storage.Root, workspacePath); err == nil {
+			defer repoStore.Close()
+			engine = engine.WithRepoQueryService(repoquery.NewQueryService(repoindex.NewQueryEngine(repoStore)))
+		}
+	}
+	req := retrievalv2.DefaultSearchRequest(workspaceID, query)
+	req.MaxResults = limit * 2
+	req.Sources.EnableLexical = true
+	req.Sources.EnableVector = queryEmbedding != nil && embedProvider != nil
+	req.Sources.EnableRepoIndex = repoMode != "off"
+	req.Sources.RepoIndexMode = repoMode
+
+	if err := indexStore.DeleteWorkspace(ctx, workspaceID); err != nil {
+		return nil, nil, skillerr.WrapIO("reset search index workspace", err)
+	}
+	if _, err := searchindex.BuildCodeDocuments(ctx, memoryListByTypeSource{store: memStore}, indexStore, workspaceID, searchindex.BuildCodeOptions{
+		Limit:         limit * 10,
+		EmbedProvider: embedProvider,
+	}); err != nil {
+		return nil, nil, skillerr.WrapRuntime("build code search documents", err)
 	}
 
-	// Convert candidates to results with normalized IDs
-	results := make([]Result, 0, len(genResult.Candidates))
-	for i, candidate := range genResult.Candidates {
+	resp, err := engine.Search(ctx, req)
+	if err != nil {
+		return nil, nil, skillerr.WrapRuntime("search retrieval v2", err)
+	}
+
+	results := make([]Result, 0, len(resp.Hits))
+	for i, hit := range resp.Hits {
+		doc := hit.Document
+		if doc.Kind != searchindex.KindSymbol {
+			continue
+		}
 		result := Result{
 			Source:     "symbol",
-			ID:         normalizeSymbolID(workspaceID, candidate),
-			Name:       candidate.Name,
-			Path:       candidate.Path,
-			Line:       candidate.Line,
-			Similarity: candidate.Score,
+			ID:         normalizeSearchIndexSymbolID(workspaceID, doc),
+			Name:       firstNonEmpty(doc.SymbolName, doc.Title),
+			Path:       doc.Path,
+			Line:       firstPositive(doc.Anchor.Line, doc.Anchor.StartLine, doc.Anchor.EndLine),
+			Similarity: hit.Score,
 			SourceRank: i + 1,
 		}
-
-		// Use SymbolID if Name is empty
-		if result.Name == "" && candidate.SymbolID != "" {
-			result.Name = extractSymbolName(candidate.SymbolID)
+		if result.Name == "" {
+			result.Name = extractSymbolName(doc.SymbolID)
 		}
-
-		if candidate.Documentation != "" {
-			result.Summary = candidate.Documentation
+		if doc.Summary != "" {
+			result.Summary = doc.Summary
 		}
-
-		// Extract code snippet for reranking (reads ~11 lines around the symbol)
-		if candidate.Path != "" && candidate.Line > 0 {
-			fullPath := candidate.Path
-			// If path is relative, join with workspace path
-			if !filepath.IsAbs(candidate.Path) {
-				fullPath = filepath.Join(workspacePath, candidate.Path)
+		if result.Path != "" && result.Line > 0 {
+			fullPath := result.Path
+			if !filepath.IsAbs(result.Path) {
+				fullPath = filepath.Join(workspacePath, result.Path)
 			}
-			result.Snippet = extractSnippet(fullPath, candidate.Line, 5)
+			result.Snippet = extractSnippet(fullPath, result.Line, 5)
 		}
-
 		results = append(results, result)
 	}
 
-	return results, nil
+	return results, resp.Groups, nil
+}
+
+type memoryListByTypeSource struct {
+	store storage.MemoryStore
+}
+
+func (s memoryListByTypeSource) ListByType(ctx context.Context, workspaceID, entryType string, limit int) ([]storage.NamedEntry, error) {
+	if s.store == nil {
+		return nil, fmt.Errorf("memory source unavailable")
+	}
+	if limit > 0 {
+		entries, _, err := s.store.ListFiltered(ctx, workspaceID, storage.MemoryListFilter{Types: []string{entryType}}, limit, 0)
+		if err != nil {
+			return nil, err
+		}
+		return entries, nil
+	}
+	var out []storage.NamedEntry
+	offset := 0
+	for {
+		page, total, err := s.store.ListFiltered(ctx, workspaceID, storage.MemoryListFilter{Types: []string{entryType}}, 200, offset)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, page...)
+		offset += len(page)
+		if len(page) == 0 || offset >= total {
+			break
+		}
+	}
+	return out, nil
 }
 
 // sessionSearcher abstracts the session search interface for both local and Turso stores.
@@ -1395,14 +1436,46 @@ func searchMemoriesVector(
 
 // ID normalization functions for canonical IDs
 
-// normalizeSymbolID creates a canonical ID for symbol results.
-func normalizeSymbolID(workspaceID string, candidate retrieval.Candidate) string {
-	// Format: symbol:<workspace>:<path>#L<line>
-	id := fmt.Sprintf("symbol:%s:%s", workspaceID, candidate.Path)
-	if candidate.Line > 0 {
-		id = fmt.Sprintf("%s#L%d", id, candidate.Line)
+func normalizeSearchIndexSymbolID(workspaceID string, doc searchindex.Document) string {
+	id := fmt.Sprintf("symbol:%s:%s", workspaceID, doc.Path)
+	line := firstPositive(doc.Anchor.Line, doc.Anchor.StartLine, doc.Anchor.EndLine)
+	if line > 0 {
+		id = fmt.Sprintf("%s#L%d", id, line)
 	}
 	return id
+}
+
+func firstPositive(values ...int) int {
+	for _, value := range values {
+		if value > 0 {
+			return value
+		}
+	}
+	return 0
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func normalizeSkillRepoIndexMode(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "", "auto":
+		return "auto"
+	case "off", "none", "disabled":
+		return "off"
+	case "dag", "dag_grep", "repo_index_dag":
+		return "dag"
+	case "search":
+		return "search"
+	default:
+		return "auto"
+	}
 }
 
 // normalizeSessionID creates a canonical ID for session results.
@@ -2230,7 +2303,7 @@ func parseSynthesisResponse(content string) (*SynthesisSummary, error) {
 
 // newSummaryLLM creates a new LLM client for file summaries.
 // Returns nil if no provider is available.
-func newSummaryLLM(logger zerolog.Logger) retrieval.SummaryLLM {
+func newSummaryLLM(logger zerolog.Logger) filesummary.SummaryLLM {
 	providers := llmproviders.FileSummaryProviders()
 	if len(providers) == 0 {
 		return nil
@@ -2273,6 +2346,21 @@ func resultsToFileEntries(results []Result) []retrieval.FileEntry {
 	return entries
 }
 
+func symbolGroupsToFileEntries(groups []retrievalv2.Group) []retrieval.FileEntry {
+	entries := make([]retrieval.FileEntry, 0, len(groups))
+	for _, g := range groups {
+		if strings.TrimSpace(g.Path) == "" {
+			continue
+		}
+		entries = append(entries, retrieval.FileEntry{
+			Path:    g.Path,
+			Score:   g.Score,
+			Summary: g.Summary,
+		})
+	}
+	return entries
+}
+
 // fetchFileSummaryEntries searches file_summary entries for tree coverage.
 func fetchFileSummaryEntries(
 	ctx context.Context,
@@ -2289,7 +2377,7 @@ func fetchFileSummaryEntries(
 	}
 	defer memStore.Close()
 
-	entries, err := retrieval.SearchFileSummaries(ctx, memStore, workspaceID, query, queryEmbedding, limit)
+	entries, err := filesummary.SearchFileSummaries(ctx, memStore, workspaceID, query, queryEmbedding, limit)
 	if err != nil {
 		logger.Debug().Err(err).Msg("file summary search failed")
 		return nil, err
@@ -2487,7 +2575,7 @@ func enrichEntriesWithSummaries(
 
 	// Create LLM client for file summaries (Devstral via OpenRouter)
 	llmClient := newSummaryLLM(logger)
-	gen := retrieval.NewFileSummaryGenerator(memStore, llmClient, embedProvider, workspace)
+	gen := filesummary.NewFileSummaryGenerator(memStore, llmClient, embedProvider, workspace)
 
 	// Collect file paths that need summaries
 	var paths []string
@@ -2616,7 +2704,7 @@ func generateRootSummary(
 
 	// Create generator with LLM client for root summary
 	llmClient := newSummaryLLM(logger)
-	gen := retrieval.NewFileSummaryGenerator(memStore, llmClient, embedProvider, workspace)
+	gen := filesummary.NewFileSummaryGenerator(memStore, llmClient, embedProvider, workspace)
 
 	// Generate root summary
 	rootSummary, err := gen.GenerateRootSummary(ctx, topSummaries)
