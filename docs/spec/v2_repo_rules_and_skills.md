@@ -1,8 +1,8 @@
 # Agentctl V2 Repo Rules and Core Skills
 
-Status: Draft  
+Status: In Progress  
 Owner: Solo maintainer  
-Last Updated: 2026-02-18
+Last Updated: 2026-03-12
 
 ## Purpose
 
@@ -18,11 +18,13 @@ not define v1 fallback routing controls.
 
 - `docs/spec/v2_greenfield_bootstrap.md`
 - `docs/plans/v2-greenfield-bootstrap.md`
+- `docs/plans/features/v2-skills-parity-plan.md`
 - `docs/general/runtime-orchestration.md`
 - `docs/general/agent-daemon.md`
 - `docs/general/memory.md`
 - `docs/general/companion-memory.md`
 - `docs/general/context-and-observability.md`
+- `docs/architecture/context-architecture.md`
 
 ## Non-Negotiable Repo Rules
 
@@ -159,6 +161,67 @@ Rules:
 - read-only from projection/snapshot surfaces
 - must not block turn execution path
 
+### `context/*` (ACA control plane, read-only)
+
+1. `context/show`
+2. `context/retrieve`
+
+Rules:
+
+- read-only access to top-of-mind and blended ACA retrieval state
+- safe for overseer/companion-style orientation flows
+- must not become a second orchestration path for task mutation
+
+### `obsidian/*` (knowledge plane, read-only)
+
+1. `obsidian/index_search`
+2. `obsidian/read`
+3. `obsidian/related`
+
+Rules:
+
+- read-only vault access by default in v2 profiles
+- retrieval over the knowledge layer should remain bounded and deterministic
+- write-side Obsidian flows stay out of the v2 MVP until dry-run/plan-apply semantics are defined cleanly
+
+### Plugin / extension tool families
+
+These are not part of the minimal portable v2 core set. They should be treated as plugin-style or repo-local extension surfaces that are registered intentionally by a project:
+
+1. `heartwood/state`
+2. `heartwood/action`
+
+Rule: extension tools should be documented as project-specific and only added to profile allowlists through an explicit project overlay or plugin registration step.
+
+## Current Parity Gap
+
+The classic agent runtime currently exposes a broader practical tool surface than the v2 runtime governance docs imply.
+
+Today this repo has real, production-facing read-only surfaces for:
+
+- ACA control-plane retrieval
+- Obsidian knowledge-layer retrieval
+- repo-index-era search and DAG traversal
+- project-local Heartwood tooling
+
+So v2 work should track two separate parity concerns:
+
+1. **profile/docs parity**
+   The v2 profile allowlists and skill-governance docs should reflect the read-only ACA/Obsidian surfaces that already exist.
+2. **tool-definition/executor parity**
+   The actual v2 tool catalog still needs a concrete non-test source of `ToolDef` values and delegate wiring for those newer tools.
+
+The first is a low-risk docs/allowlist exercise.
+The second is the real runtime implementation task.
+
+That implementation task now has a canonical assembly path:
+
+- `internal/v2/runtime/tools/default_defs.go` provides the non-test default catalog input
+- `internal/v2/adapters/toolbridge/bridge.go` provides the default delegate/executor bridge
+- `internal/v2/services/default_runtime.go` provides the canonical service-facing builder for the default catalog + delegate + runner stack
+
+The remaining gap is broader adoption of that builder in live v2 runtime entrypoints, not the absence of a production assembly path.
+
 ## Tool Contract Requirements
 
 Every tool definition must include:
@@ -179,11 +242,13 @@ Required policy flags:
 
 MVP profile mapping:
 
-1. `overseer`: `agent/*`, `mail/*`, `code/*`, read-only `fs/*`
+1. `overseer`: `agent/*`, `mail/*`, `code/*`, repo-index search, ACA read-only `context/*`, read-only `obsidian/*`, read-only `fs/*`
 2. `worker`: `fs/*`, `code/*`, `edit/*`, `test/*`, `mail/*`
-3. `companion`: `mail/*`, limited `memory/*`, optional read-only `code/*`
+3. `companion`: `mail/*`, limited `memory/*`, read-only ACA `context/*`, read-only `obsidian/*`, optional read-only `code/*`
 
 Rule: profiles own defaults; per-agent overrides can only narrow, never broaden.
+
+Project-local extensions such as `heartwood/*` should not be assumed by the portable defaults above. They belong in repo-specific overlays.
 
 ## PR Checklist (Required for V2 Changes)
 

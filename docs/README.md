@@ -43,6 +43,8 @@ This is the canonical map for docs in this repository.
 ## Planning Docs
 
 - [docs/plans/README.md](plans/README.md) - Active and current planning docs.
+- [docs/plans/gui-agent-improvement-roadmap.md](plans/gui-agent-improvement-roadmap.md) - Converged roadmap for turning `gui-agent` into a coherent operator control plane.
+- [docs/plans/features/v2-skills-parity-plan.md](plans/features/v2-skills-parity-plan.md) - Bring v2 profiles/tooling up to parity with ACA, Obsidian, and newer retrieval surfaces.
 - [docs/impl_plan/README.md](impl_plan/README.md) - Legacy phased plan stream kept for history.
 
 ## Historical and Generated Material

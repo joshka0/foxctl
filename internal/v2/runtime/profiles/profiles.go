@@ -28,10 +28,15 @@ func DefaultSpecs() map[coretool.ProcessProfile]ProfileSpec {
 				"agent_status",
 				"agent_wait",
 				"code/search",
+				"context/show",
+				"context/retrieve",
 				"context_grep",
 				"context_search",
 				"fs_list_dir",
 				"fs_read_file",
+				"obsidian/index_search",
+				"obsidian/read",
+				"obsidian/related",
 				"repo_index_dag_grep",
 				"repo_index_expand",
 				"repo_index_open",
@@ -59,10 +64,15 @@ func DefaultSpecs() map[coretool.ProcessProfile]ProfileSpec {
 			Profile: coretool.ProfileCompanion,
 			AllowedTools: []string{
 				"code/search",
+				"context/show",
+				"context/retrieve",
 				"context_search",
 				"fs_list_dir",
 				"fs_read_file",
 				"memory/query",
+				"obsidian/index_search",
+				"obsidian/read",
+				"obsidian/related",
 				"session_timeline",
 				"smart_search",
 				"think",
@@ -104,5 +114,33 @@ func NormalizeAllowedTools(in []string) []string {
 		out = append(out, n)
 	}
 	sort.Strings(out)
+	return out
+}
+
+// WithAllowedTools returns a copied profile-spec map with additional allowed
+// tools merged into the selected profiles. This is the intended path for
+// repo-local plugin/extension overlays such as Heartwood.
+func WithAllowedTools(
+	base map[coretool.ProcessProfile]ProfileSpec,
+	additions map[coretool.ProcessProfile][]string,
+) map[coretool.ProcessProfile]ProfileSpec {
+	if len(base) == 0 {
+		base = DefaultSpecs()
+	}
+	out := make(map[coretool.ProcessProfile]ProfileSpec, len(base))
+	for profile, spec := range base {
+		out[profile] = ProfileSpec{
+			Profile:      spec.Profile,
+			AllowedTools: append([]string(nil), spec.AllowedTools...),
+		}
+	}
+	for profile, tools := range additions {
+		spec, ok := out[profile]
+		if !ok {
+			spec = ProfileSpec{Profile: profile}
+		}
+		spec.AllowedTools = NormalizeAllowedTools(append(spec.AllowedTools, tools...))
+		out[profile] = spec
+	}
 	return out
 }

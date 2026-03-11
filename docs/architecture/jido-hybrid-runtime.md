@@ -111,6 +111,22 @@ This separation matters:
 
 Keeping them separate lets you isolate transport failures and keep tool/memory/session execution authoritative on the Go side.
 
+## Tool Policy Hand-off
+
+Jido start/spawn payloads now carry bridge-side tool execution policy through `plugin_config`.
+
+Current shape:
+
+- `plugin_config.binary`
+- `plugin_config.workspace`
+- `plugin_config.transport = daemon_rpc`
+- `plugin_config.daemon = true`
+- `plugin_config.tool_command.profile`
+- `plugin_config.tool_command.allowed_tools`
+- `plugin_config.tool_command.default_timeout_ms`
+
+That payload is derived from the shared v2 catalog/profile model on the Go side, so Jido-facing agent startup inherits the same portable-core vs extension-tool boundary used by v2 runtime governance.
+
 ## Control-Plane Flow
 
 Current intended flow:
