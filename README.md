@@ -1,3 +1,12 @@
+---
+vault_refs:
+  - notes/repo/agentctl/platform-and-web.md
+  - notes/repo/agentctl/semantic-and-memory.md
+  - notes/repo/agentctl/skills-runtime-wiring.md
+  - notes/repo/agentctl/index.md
+  - 00-home/index.md
+---
+
 # agentctl
 
 > **AI Agent Toolkit** — Skills, memory, hooks, and orchestration for AI coding assistants
@@ -54,6 +63,7 @@ flowchart LR
 - **Sessions** — Context preservation across compaction with lineage tracking
 - **Codemaps** — AI-generated semantic code traces with mermaid diagrams
 - **MCP Server** — Expose skills as MCP tools via SSE for any client
+- **ACA + Vault** — Dual-plane context architecture with a workspace control plane and an Obsidian knowledge layer
 
 ---
 
@@ -218,6 +228,19 @@ agentctl memory search "authentication"
 # Generate a codemap
 agentctl codemap generate "trace user authentication flow"
 ```
+
+### ACA / Obsidian Refresh
+
+`agentctl` now includes the ACA *(AgentCTL Context Architecture)* knowledge layer described in [docs/architecture/context-architecture.md](docs/architecture/context-architecture.md). When repo docs or repo structure change, refresh the Obsidian layer with:
+
+```bash
+agentctl obsidian graph build --workspace . --vault-path "/path/to/vault"
+agentctl obsidian graph promote --workspace . --vault-path "/path/to/vault"
+agentctl obsidian bridge reconcile --workspace . --vault-path "/path/to/vault"
+agentctl obsidian index build --vault-path "/path/to/vault"
+```
+
+That regenerates repo graph notes, refreshes docs↔vault bridge drafts, and rebuilds the local vault search index.
 
 ---
 

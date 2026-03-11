@@ -1,3 +1,12 @@
+---
+vault_refs:
+  - notes/repo/agentctl/platform-and-web.md
+  - notes/repo/agentctl/semantic-and-memory.md
+  - notes/repo/agentctl/skills-runtime-wiring.md
+  - notes/repo/agentctl/index.md
+  - 00-home/index.md
+---
+
 # AGENTS.md — AI Assistant Guide
 
 **Target Audience:** AI coding assistants (Claude, Cursor, Copilot) and human
@@ -26,6 +35,7 @@ contributors
 | [docs/architecture/chat-platform-adapter.md](docs/architecture/chat-platform-adapter.md) | Chat adapter runtime architecture (current) |
 | [docs/architecture/kubernetes-runtime.md](docs/architecture/kubernetes-runtime.md) | Kubernetes runtime architecture (current) |
 | [docs/architecture/postgres-storage.md](docs/architecture/postgres-storage.md) | PostgreSQL + CAS storage architecture |
+| [docs/architecture/context-architecture.md](docs/architecture/context-architecture.md) | ACA dual-plane context + Obsidian knowledge layer |
 | [docs/architecture/simulator-agents.md](docs/architecture/simulator-agents.md) | Simulator agent pattern for app/API integrations |
 | [docs/plans/chat-platform-adapter.md](docs/plans/chat-platform-adapter.md) | Implementation plan + historical notes |
 | [docs/plans/k8s-sql-storage.md](docs/plans/k8s-sql-storage.md) | Historical implementation plan (now partially complete) |
@@ -64,6 +74,20 @@ contributors
 10. **Terminology coaching** — when the user asks something technical but uses imprecise language, provide the correct terminology in parentheses as a mini-lesson (e.g., "Fixed. Added scrolling *(in CSS terms: `overflow-y: auto` to handle content overflow)*")
 11. **Docs link hygiene** — run `make check-doc-links` for markdown/doc updates; CI enforces this via `.github/workflows/docs.yml`
 12. **Go-native runtime rules (v2)** — prefer `Run(ctx)` components, bounded channels, single-writer state ownership, and immutable snapshots for high-read paths
+13. **ACA vault refresh** — after repo docs, repo graph, or bridge metadata changes, rebuild the Obsidian layer with `agentctl obsidian graph build`, `graph promote`, `bridge reconcile`, and `index build`
+
+## ACA / Obsidian Refresh
+
+When repo docs or structure change, refresh the ACA knowledge layer *(in this system: graph rebuild + docs bridge reconcile + vault reindex)*:
+
+```bash
+agentctl obsidian graph build --workspace . --vault-path "/path/to/vault"
+agentctl obsidian graph promote --workspace . --vault-path "/path/to/vault"
+agentctl obsidian bridge reconcile --workspace . --vault-path "/path/to/vault"
+agentctl obsidian index build --vault-path "/path/to/vault"
+```
+
+See [docs/architecture/context-architecture.md](docs/architecture/context-architecture.md) for the dual-plane model and the full command surface.
 
 ## Machine-Readable Decision Matrix
 

@@ -43,6 +43,7 @@ const (
 	StorePatterns             StoreName = "PATTERNS"
 	StorePostReview           StoreName = "POST_REVIEW"
 	StoreRepoIndex            StoreName = "REPOINDEX"
+	StoreObsidianIndex        StoreName = "OBSIDIANINDEX"
 	StoreConversationSettings StoreName = "CONVERSATION_SETTINGS"
 	StoreCAS                  StoreName = "CAS"
 	StoreEvents               StoreName = "EVENTS"
@@ -88,6 +89,7 @@ var canonicalStores = []StoreSpec{
 	{Name: StorePostReview, DefaultFile: "post_review_events.db", Class: StoreClassLocalOnly, Notes: "Post-review event tracking"},
 	{Name: StoreConversationSettings, DefaultFile: "conversation_settings.db", Class: StoreClassLocalOnly, Notes: "Per-conversation settings overrides"},
 	{Name: StoreRepoIndex, DefaultFile: "repoindex/<key>.db", Class: StoreClassLocalOnly, Notes: "Per-repo code index (dynamic name)"},
+	{Name: StoreObsidianIndex, DefaultFile: "obsidianindex-<key>.db", Class: StoreClassLocalOnly, Notes: "Per-vault Obsidian note index (dynamic name)"},
 	{Name: StoreCAS, DefaultFile: "cas.db", Class: StoreClassLocalOnly, Notes: "CAS metadata"},
 
 	{Name: StoreEvents, DefaultFile: "events.db", Class: StoreClassObservability, Notes: "Stored under AGENTCTL_OBS_DIR"},

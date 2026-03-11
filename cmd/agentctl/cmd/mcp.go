@@ -26,10 +26,16 @@ import (
 	"github.com/mark3labs/mcp-go/server"
 	"github.com/spf13/cobra"
 
+	"github.com/jkatigb/agentctl/internal/contextplane"
 	"github.com/jkatigb/agentctl/internal/domain/skill"
+	"github.com/jkatigb/agentctl/internal/indexing/repoindex"
 	"github.com/jkatigb/agentctl/internal/observability"
 	"github.com/jkatigb/agentctl/internal/platform/buildinfo"
 	"github.com/jkatigb/agentctl/internal/platform/config"
+	ws "github.com/jkatigb/agentctl/internal/platform/workspace"
+	"github.com/jkatigb/agentctl/internal/storage/obsidianindex"
+	taskstore "github.com/jkatigb/agentctl/internal/storage/tasks"
+	obsidiantool "github.com/jkatigb/agentctl/internal/tools/obsidian"
 )
 
 const (
@@ -1702,6 +1708,197 @@ func registerAgentctlTools(s *server.MCPServer) {
 		),
 		handleAgentctlSkills,
 	)
+
+	s.AddTool(
+		mcp.NewTool("context_show",
+			mcp.WithString("workspace", mcp.Description("Workspace path (optional; defaults to current workspace context)")),
+		),
+		handleContextShow,
+	)
+
+	s.AddTool(
+		mcp.NewTool("context_report",
+			mcp.WithString("workspace", mcp.Description("Workspace path (optional; defaults to current workspace context)")),
+		),
+		handleContextReport,
+	)
+
+	s.AddTool(
+		mcp.NewTool("context_retrieve",
+			mcp.WithString("workspace", mcp.Description("Workspace path (optional; defaults to current workspace context)")),
+			mcp.WithString("vault_path", mcp.Required(), mcp.Description("Vault path")),
+			mcp.WithString("query", mcp.Required(), mcp.Description("Retrieval query")),
+			mcp.WithNumber("limit", mcp.Description("Maximum ranked vault hits")),
+		),
+		handleContextRetrieve,
+	)
+
+	s.AddTool(
+		mcp.NewTool("context_next",
+			mcp.WithString("workspace", mcp.Description("Workspace path (optional; defaults to current workspace context)")),
+		),
+		handleContextNext,
+	)
+
+	s.AddTool(
+		mcp.NewTool("context_dispatch",
+			mcp.WithString("workspace", mcp.Description("Workspace path (optional; defaults to current workspace context)")),
+			mcp.WithString("task_id", mcp.Description("Explicit task ID (optional)")),
+		),
+		handleContextDispatch,
+	)
+
+	s.AddTool(
+		mcp.NewTool("context_contradictions",
+			mcp.WithString("workspace", mcp.Description("Workspace path (optional; defaults to current workspace context)")),
+			mcp.WithString("vault_path", mcp.Required(), mcp.Description("Vault path")),
+			mcp.WithNumber("limit", mcp.Description("Maximum findings")),
+		),
+		handleContextContradictions,
+	)
+
+	s.AddTool(
+		mcp.NewTool("context_handoffs",
+			mcp.WithString("workspace", mcp.Description("Workspace path (optional; defaults to current workspace context)")),
+			mcp.WithString("path", mcp.Description("Specific handoff path or filename (optional)")),
+			mcp.WithNumber("limit", mcp.Description("Maximum handoffs to list (default: 20)")),
+		),
+		handleContextHandoffs,
+	)
+
+	s.AddTool(
+		mcp.NewTool("context_observations",
+			mcp.WithString("workspace", mcp.Description("Workspace path (optional; defaults to current workspace context)")),
+			mcp.WithNumber("limit", mcp.Description("Maximum observations to list (default: 20)")),
+		),
+		handleContextObservations,
+	)
+
+	s.AddTool(
+		mcp.NewTool("context_tensions",
+			mcp.WithString("workspace", mcp.Description("Workspace path (optional; defaults to current workspace context)")),
+			mcp.WithNumber("limit", mcp.Description("Maximum tensions to list (default: 20)")),
+		),
+		handleContextTensions,
+	)
+
+	s.AddTool(
+		mcp.NewTool("context_rethink",
+			mcp.WithString("workspace", mcp.Description("Workspace path (optional; defaults to current workspace context)")),
+			mcp.WithString("vault_path", mcp.Description("Vault path for health-derived maintenance tasks")),
+			mcp.WithNumber("limit", mcp.Description("Maximum maintenance tasks to emit (default: 20)")),
+		),
+		handleContextRethink,
+	)
+
+	s.AddTool(
+		mcp.NewTool("context_promote",
+			mcp.WithString("workspace", mcp.Description("Workspace path (optional; defaults to current workspace context)")),
+			mcp.WithString("source", mcp.Description("Promotion source: handoff or observation")),
+			mcp.WithString("path", mcp.Description("Handoff path or filename when source=handoff")),
+			mcp.WithString("id", mcp.Description("Observation ID when source=observation")),
+			mcp.WithString("type", mcp.Description("Draft note type")),
+			mcp.WithString("title", mcp.Description("Draft note title")),
+		),
+		handleContextPromote,
+	)
+
+	s.AddTool(
+		mcp.NewTool("context_merge_promotion",
+			mcp.WithString("workspace", mcp.Description("Workspace path (optional; defaults to current workspace context)")),
+			mcp.WithString("vault_name", mcp.Description("Vault name")),
+			mcp.WithString("vault_path", mcp.Required(), mcp.Description("Vault path")),
+			mcp.WithString("draft_path", mcp.Description("Promotion draft path (defaults to latest drafted job)")),
+			mcp.WithString("target_path", mcp.Required(), mcp.Description("Canonical target note path inside the vault")),
+			mcp.WithString("heading", mcp.Description("Bounded review heading when appending into an existing note")),
+		),
+		handleContextMergePromotion,
+	)
+
+	s.AddTool(
+		mcp.NewTool("obsidian_read",
+			mcp.WithString("vault_name", mcp.Description("Vault name")),
+			mcp.WithString("vault_path", mcp.Description("Vault path")),
+			mcp.WithString("path", mcp.Required(), mcp.Description("Note path")),
+		),
+		handleObsidianRead,
+	)
+
+	s.AddTool(
+		mcp.NewTool("obsidian_search",
+			mcp.WithString("vault_name", mcp.Description("Vault name")),
+			mcp.WithString("vault_path", mcp.Description("Vault path")),
+			mcp.WithString("query", mcp.Required(), mcp.Description("Search query")),
+			mcp.WithString("scope_path", mcp.Description("Vault subpath filter")),
+			mcp.WithNumber("limit", mcp.Description("Maximum result count")),
+		),
+		handleObsidianSearch,
+	)
+
+	s.AddTool(
+		mcp.NewTool("obsidian_related",
+			mcp.WithString("vault_path", mcp.Required(), mcp.Description("Vault path")),
+			mcp.WithString("path", mcp.Required(), mcp.Description("Note path")),
+			mcp.WithNumber("limit", mcp.Description("Maximum result count")),
+		),
+		handleObsidianRelated,
+	)
+
+	s.AddTool(
+		mcp.NewTool("obsidian_create_note",
+			mcp.WithString("vault_name", mcp.Description("Vault name")),
+			mcp.WithString("vault_path", mcp.Description("Vault path")),
+			mcp.WithString("path", mcp.Required(), mcp.Description("Note path")),
+			mcp.WithString("type", mcp.Description("Note type")),
+			mcp.WithString("project", mcp.Description("Project name")),
+			mcp.WithString("status", mcp.Description("Status")),
+			mcp.WithString("trust", mcp.Description("Trust level")),
+			mcp.WithString("body", mcp.Description("Markdown body")),
+		),
+		handleObsidianCreateNote,
+	)
+
+	s.AddTool(
+		mcp.NewTool("obsidian_append_under_heading",
+			mcp.WithString("vault_name", mcp.Description("Vault name")),
+			mcp.WithString("vault_path", mcp.Description("Vault path")),
+			mcp.WithString("path", mcp.Required(), mcp.Description("Note path")),
+			mcp.WithString("heading", mcp.Required(), mcp.Description("Heading to append under")),
+			mcp.WithString("content", mcp.Required(), mcp.Description("Markdown content")),
+		),
+		handleObsidianAppendUnderHeading,
+	)
+
+	s.AddTool(
+		mcp.NewTool("obsidian_capture_session",
+			mcp.WithString("vault_name", mcp.Description("Vault name")),
+			mcp.WithString("vault_path", mcp.Description("Vault path")),
+			mcp.WithString("slug", mcp.Description("Session note slug")),
+			mcp.WithString("content", mcp.Required(), mcp.Description("Markdown content")),
+		),
+		handleObsidianCaptureSession,
+	)
+
+	s.AddTool(
+		mcp.NewTool("obsidian_promote_to_evergreen",
+			mcp.WithString("vault_name", mcp.Description("Vault name")),
+			mcp.WithString("vault_path", mcp.Description("Vault path")),
+			mcp.WithString("slug", mcp.Description("Draft slug")),
+			mcp.WithString("content", mcp.Required(), mcp.Description("Markdown content")),
+		),
+		handleObsidianPromoteToEvergreen,
+	)
+
+	s.AddTool(
+		mcp.NewTool("obsidian_merge_reviewed_draft",
+			mcp.WithString("vault_name", mcp.Description("Vault name")),
+			mcp.WithString("vault_path", mcp.Required(), mcp.Description("Vault path")),
+			mcp.WithString("draft_path", mcp.Required(), mcp.Description("Local reviewed draft path")),
+			mcp.WithString("target_path", mcp.Required(), mcp.Description("Canonical target note path inside the vault")),
+			mcp.WithString("heading", mcp.Description("Bounded heading for appending into an existing note")),
+		),
+		handleObsidianMergeReviewedDraft,
+	)
 }
 
 // registerSkillGroups registers skills from specified groups as first-class MCP tools.
@@ -2049,6 +2246,502 @@ func handleAgentctlSkills(ctx context.Context, req mcp.CallToolRequest) (*mcp.Ca
 
 	output, _ := json.MarshalIndent(result, "", "  ")
 	return mcp.NewToolResultText(string(output)), nil
+}
+
+func handleContextShow(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	args := getArgs(req)
+	store, target, err := openContextWorkspaceStore(ctx, args)
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+	top, err := store.LoadTopOfMind()
+	if err != nil {
+		return mcp.NewToolResultError("load top_of_mind: " + err.Error()), nil
+	}
+	return mcp.NewToolResultText(mustJSON(map[string]any{
+		"workspace_path": target,
+		"top_of_mind":    top,
+	})), nil
+}
+
+func handleContextHandoffs(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	args := getArgs(req)
+	store, target, err := openContextWorkspaceStore(ctx, args)
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+	if path, _ := args["path"].(string); strings.TrimSpace(path) != "" {
+		handoff, err := store.LoadHandoff(path)
+		if err != nil {
+			return mcp.NewToolResultError("load handoff: " + err.Error()), nil
+		}
+		return mcp.NewToolResultText(mustJSON(map[string]any{
+			"workspace_path": target,
+			"handoff":        handoff,
+			"path":           path,
+		})), nil
+	}
+	limit := 20
+	if raw, ok := args["limit"].(float64); ok && raw > 0 {
+		limit = int(raw)
+	}
+	items, err := store.ListHandoffs(limit)
+	if err != nil {
+		return mcp.NewToolResultError("list handoffs: " + err.Error()), nil
+	}
+	return mcp.NewToolResultText(mustJSON(map[string]any{
+		"workspace_path": target,
+		"handoffs":       items,
+		"count":          len(items),
+	})), nil
+}
+
+func handleContextReport(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	args := getArgs(req)
+	store, target, err := openContextWorkspaceStore(ctx, args)
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+	report, err := store.BuildReport()
+	if err != nil {
+		return mcp.NewToolResultError("build report: " + err.Error()), nil
+	}
+	return mcp.NewToolResultText(mustJSON(map[string]any{
+		"workspace_path": target,
+		"report":         report,
+	})), nil
+}
+
+func handleContextRetrieve(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	args := getArgs(req)
+	store, target, err := openContextWorkspaceStore(ctx, args)
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+	vaultPath := getStringArg(args, "vault_path", "")
+	query := getStringArg(args, "query", "")
+	if strings.TrimSpace(vaultPath) == "" || strings.TrimSpace(query) == "" {
+		return mcp.NewToolResultError("vault_path and query are required"), nil
+	}
+	cfg, err := loadConfig(ctx)
+	if err != nil {
+		return mcp.NewToolResultError("load config: " + err.Error()), nil
+	}
+	index, err := obsidianindex.Open(ctx, cfg.Storage.Root, vaultPath)
+	if err != nil {
+		return mcp.NewToolResultError("open obsidian index: " + err.Error()), nil
+	}
+	defer func() { _ = index.Close() }()
+	repo, err := repoindex.Open(ctx, cfg.Storage.Root, target)
+	if err != nil {
+		return mcp.NewToolResultError("open repo index: " + err.Error()), nil
+	}
+	defer func() { _ = repo.Close() }()
+	limit := 5
+	if raw, ok := args["limit"].(float64); ok && raw > 0 {
+		limit = int(raw)
+	}
+	result, err := store.Retrieve(ctx, index, repo, openObsidianSemanticProvider(cfg), query, limit)
+	if err != nil {
+		return mcp.NewToolResultError("retrieve context: " + err.Error()), nil
+	}
+	return mcp.NewToolResultText(mustJSON(map[string]any{
+		"workspace_path": target,
+		"vault_path":     vaultPath,
+		"result":         result,
+	})), nil
+}
+
+func handleContextNext(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	args := getArgs(req)
+	target := resolveContextWorkspace(getStringArg(args, "workspace", ""))
+	if target == "" {
+		return mcp.NewToolResultError("workspace path required"), nil
+	}
+	cfg, err := loadConfig(ctx)
+	if err != nil {
+		return mcp.NewToolResultError("load config: " + err.Error()), nil
+	}
+	taskDB, err := taskstore.Open(ctx, cfg.Storage.Root)
+	if err != nil {
+		return mcp.NewToolResultError("open task store: " + err.Error()), nil
+	}
+	defer func() { _ = taskDB.Close() }()
+	task, ok, err := contextplane.SelectNextTask(ctx, taskDB, ws.CanonicalID(target))
+	if err != nil {
+		return mcp.NewToolResultError("select next task: " + err.Error()), nil
+	}
+	if !ok {
+		return mcp.NewToolResultError("no eligible task found"), nil
+	}
+	return mcp.NewToolResultText(mustJSON(map[string]any{
+		"workspace_path": target,
+		"task":           task,
+	})), nil
+}
+
+func handleContextDispatch(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	args := getArgs(req)
+	store, target, err := openContextWorkspaceStore(ctx, args)
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+	cfg, err := loadConfig(ctx)
+	if err != nil {
+		return mcp.NewToolResultError("load config: " + err.Error()), nil
+	}
+	taskDB, err := taskstore.Open(ctx, cfg.Storage.Root)
+	if err != nil {
+		return mcp.NewToolResultError("open task store: " + err.Error()), nil
+	}
+	defer func() { _ = taskDB.Close() }()
+	packet, err := store.BuildTaskPacket(ctx, taskDB, ws.CanonicalID(target), getStringArg(args, "task_id", ""))
+	if err != nil {
+		return mcp.NewToolResultError("build task packet: " + err.Error()), nil
+	}
+	return mcp.NewToolResultText(mustJSON(map[string]any{
+		"workspace_path": target,
+		"packet":         packet,
+	})), nil
+}
+
+func handleContextContradictions(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	args := getArgs(req)
+	store, target, err := openContextWorkspaceStore(ctx, args)
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+	vaultPath := getStringArg(args, "vault_path", "")
+	if strings.TrimSpace(vaultPath) == "" {
+		return mcp.NewToolResultError("vault_path is required"), nil
+	}
+	cfg, err := loadConfig(ctx)
+	if err != nil {
+		return mcp.NewToolResultError("load config: " + err.Error()), nil
+	}
+	index, err := obsidianindex.Open(ctx, cfg.Storage.Root, vaultPath)
+	if err != nil {
+		return mcp.NewToolResultError("open obsidian index: " + err.Error()), nil
+	}
+	defer func() { _ = index.Close() }()
+	repo, err := repoindex.Open(ctx, cfg.Storage.Root, target)
+	if err != nil {
+		return mcp.NewToolResultError("open repo index: " + err.Error()), nil
+	}
+	defer func() { _ = repo.Close() }()
+	limit := 10
+	if raw, ok := args["limit"].(float64); ok && raw > 0 {
+		limit = int(raw)
+	}
+	findings, err := store.DetectContradictions(ctx, index, repo, openObsidianSemanticProvider(cfg), limit)
+	if err != nil {
+		return mcp.NewToolResultError("detect contradictions: " + err.Error()), nil
+	}
+	return mcp.NewToolResultText(mustJSON(map[string]any{
+		"workspace_path": target,
+		"vault_path":     vaultPath,
+		"findings":       findings,
+		"count":          len(findings),
+	})), nil
+}
+
+func handleContextObservations(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	args := getArgs(req)
+	store, target, err := openContextWorkspaceStore(ctx, args)
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+	limit := 20
+	if raw, ok := args["limit"].(float64); ok && raw > 0 {
+		limit = int(raw)
+	}
+	items, err := store.ListObservations(limit)
+	if err != nil {
+		return mcp.NewToolResultError("list observations: " + err.Error()), nil
+	}
+	return mcp.NewToolResultText(mustJSON(map[string]any{
+		"workspace_path": target,
+		"observations":   items,
+		"count":          len(items),
+	})), nil
+}
+
+func handleContextTensions(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	args := getArgs(req)
+	store, target, err := openContextWorkspaceStore(ctx, args)
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+	limit := 20
+	if raw, ok := args["limit"].(float64); ok && raw > 0 {
+		limit = int(raw)
+	}
+	items, err := store.ListTensions(limit)
+	if err != nil {
+		return mcp.NewToolResultError("list tensions: " + err.Error()), nil
+	}
+	return mcp.NewToolResultText(mustJSON(map[string]any{
+		"workspace_path": target,
+		"tensions":       items,
+		"count":          len(items),
+	})), nil
+}
+
+func handleContextRethink(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	args := getArgs(req)
+	store, target, err := openContextWorkspaceStore(ctx, args)
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+	limit := 20
+	if raw, ok := args["limit"].(float64); ok && raw > 0 {
+		limit = int(raw)
+	}
+	vaultPath := getStringArg(args, "vault_path", "")
+	var items []contextplane.MaintenanceTask
+	if strings.TrimSpace(vaultPath) != "" {
+		cfg, err := loadConfig(ctx)
+		if err != nil {
+			return mcp.NewToolResultError("load config: " + err.Error()), nil
+		}
+		index, err := obsidianindex.Open(ctx, cfg.Storage.Root, vaultPath)
+		if err != nil {
+			return mcp.NewToolResultError("open obsidian index: " + err.Error()), nil
+		}
+		defer func() { _ = index.Close() }()
+		health, err := index.Health(ctx)
+		if err != nil {
+			return mcp.NewToolResultError("health report: " + err.Error()), nil
+		}
+		items, err = store.GenerateMaintenanceTasksWithHealth(limit, &health)
+		if err != nil {
+			return mcp.NewToolResultError("generate maintenance tasks: " + err.Error()), nil
+		}
+	} else {
+		items, err = store.GenerateMaintenanceTasks(limit)
+		if err != nil {
+			return mcp.NewToolResultError("generate maintenance tasks: " + err.Error()), nil
+		}
+	}
+	return mcp.NewToolResultText(mustJSON(map[string]any{
+		"workspace_path":    target,
+		"vault_path":        vaultPath,
+		"maintenance_tasks": items,
+		"count":             len(items),
+	})), nil
+}
+
+func handleContextPromote(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	args := getArgs(req)
+	store, target, err := openContextWorkspaceStore(ctx, args)
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+	sourceKind := getStringArg(args, "source", "handoff")
+	noteType := getStringArg(args, "type", "investigation")
+	title := getStringArg(args, "title", "")
+	switch sourceKind {
+	case "handoff":
+		path := getStringArg(args, "path", "")
+		result, err := store.DraftPromotionFromHandoff(path, noteType, title)
+		if err != nil {
+			return mcp.NewToolResultError("draft promotion: " + err.Error()), nil
+		}
+		return mcp.NewToolResultText(mustJSON(map[string]any{
+			"workspace_path": target,
+			"draft":          result,
+		})), nil
+	case "observation":
+		id := getStringArg(args, "id", "")
+		result, err := store.DraftPromotionFromObservation(id, noteType, title)
+		if err != nil {
+			return mcp.NewToolResultError("draft promotion: " + err.Error()), nil
+		}
+		return mcp.NewToolResultText(mustJSON(map[string]any{
+			"workspace_path": target,
+			"draft":          result,
+		})), nil
+	default:
+		return mcp.NewToolResultError("unsupported source: " + sourceKind), nil
+	}
+}
+
+func handleContextMergePromotion(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	args := getArgs(req)
+	store, target, err := openContextWorkspaceStore(ctx, args)
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+	vaultPath := getStringArg(args, "vault_path", "")
+	targetPath := getStringArg(args, "target_path", "")
+	if strings.TrimSpace(vaultPath) == "" || strings.TrimSpace(targetPath) == "" {
+		return mcp.NewToolResultError("vault_path and target_path are required"), nil
+	}
+	result, err := store.MergePromotionDraft(
+		ctx,
+		getStringArg(args, "vault_name", ""),
+		vaultPath,
+		getStringArg(args, "draft_path", ""),
+		targetPath,
+		getStringArg(args, "heading", ""),
+	)
+	if err != nil {
+		return mcp.NewToolResultError("merge promotion: " + err.Error()), nil
+	}
+	return mcp.NewToolResultText(mustJSON(map[string]any{
+		"workspace_path": target,
+		"vault_path":     vaultPath,
+		"merge":          result,
+	})), nil
+}
+
+func handleObsidianRead(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	args := getArgs(req)
+	res, err := obsidiantool.Read(ctx, obsidiantool.ReadOptions{
+		VaultName: getStringArg(args, "vault_name", ""),
+		VaultPath: getStringArg(args, "vault_path", ""),
+		NotePath:  getStringArg(args, "path", ""),
+	})
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+	return mcp.NewToolResultText(mustJSON(map[string]any{"result": res})), nil
+}
+
+func handleObsidianSearch(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	args := getArgs(req)
+	limit := 20
+	if raw, ok := args["limit"].(float64); ok && raw > 0 {
+		limit = int(raw)
+	}
+	res, err := obsidiantool.Search(ctx, obsidiantool.SearchOptions{
+		VaultName: getStringArg(args, "vault_name", ""),
+		VaultPath: getStringArg(args, "vault_path", ""),
+		Query:     getStringArg(args, "query", ""),
+		ScopePath: getStringArg(args, "scope_path", ""),
+		Limit:     limit,
+	})
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+	return mcp.NewToolResultText(mustJSON(map[string]any{"result": res})), nil
+}
+
+func handleObsidianRelated(_ context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	args := getArgs(req)
+	limit := 20
+	if raw, ok := args["limit"].(float64); ok && raw > 0 {
+		limit = int(raw)
+	}
+	res, err := obsidiantool.RelatedNotes(
+		getStringArg(args, "vault_path", ""),
+		getStringArg(args, "path", ""),
+		obsidiantool.LinkQueryOptions{Depth: 1, IncludeDirect: true, IncludeBack: true, IncludeAlias: true, Limit: limit},
+	)
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+	return mcp.NewToolResultText(mustJSON(map[string]any{"results": res})), nil
+}
+
+func handleObsidianCreateNote(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	args := getArgs(req)
+	writer := obsidiantool.NewWriter("", getStringArg(args, "vault_name", ""), obsidiantool.DefaultPolicy())
+	writer.VaultPath = getStringArg(args, "vault_path", "")
+	path := getStringArg(args, "path", "")
+	body := buildVaultDraftContent(
+		filepath.Base(path),
+		getStringArg(args, "type", "investigation"),
+		getStringArg(args, "project", ""),
+		getStringArg(args, "status", "draft"),
+		getStringArg(args, "trust", "raw"),
+		getStringArg(args, "body", ""),
+	)
+	if err := writer.CreateNote(ctx, path, body, true); err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+	return mcp.NewToolResultText(mustJSON(map[string]any{"path": path})), nil
+}
+
+func handleObsidianAppendUnderHeading(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	args := getArgs(req)
+	writer := obsidiantool.NewWriter("", getStringArg(args, "vault_name", ""), obsidiantool.DefaultPolicy())
+	writer.VaultPath = getStringArg(args, "vault_path", "")
+	path := getStringArg(args, "path", "")
+	if err := writer.AppendUnderHeading(ctx, path, getStringArg(args, "heading", ""), getStringArg(args, "content", "")); err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+	return mcp.NewToolResultText(mustJSON(map[string]any{"path": path})), nil
+}
+
+func handleObsidianCaptureSession(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	args := getArgs(req)
+	writer := obsidiantool.NewWriter("", getStringArg(args, "vault_name", ""), obsidiantool.DefaultPolicy())
+	writer.VaultPath = getStringArg(args, "vault_path", "")
+	path, err := writer.CaptureSession(ctx, getStringArg(args, "slug", ""), getStringArg(args, "content", ""))
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+	return mcp.NewToolResultText(mustJSON(map[string]any{"path": path})), nil
+}
+
+func handleObsidianPromoteToEvergreen(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	args := getArgs(req)
+	writer := obsidiantool.NewWriter("", getStringArg(args, "vault_name", ""), obsidiantool.DefaultPolicy())
+	writer.VaultPath = getStringArg(args, "vault_path", "")
+	path, err := writer.PromoteToEvergreen(ctx, getStringArg(args, "slug", ""), getStringArg(args, "content", ""))
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+	return mcp.NewToolResultText(mustJSON(map[string]any{"path": path})), nil
+}
+
+func handleObsidianMergeReviewedDraft(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	args := getArgs(req)
+	draftPath := getStringArg(args, "draft_path", "")
+	body, err := os.ReadFile(draftPath)
+	if err != nil {
+		return mcp.NewToolResultError("read draft: " + err.Error()), nil
+	}
+	writer := obsidiantool.NewWriter("", getStringArg(args, "vault_name", ""), obsidiantool.DefaultPolicy())
+	writer.VaultPath = getStringArg(args, "vault_path", "")
+	result, err := writer.MergeReviewedDraftContent(
+		ctx,
+		getStringArg(args, "target_path", ""),
+		getStringArg(args, "heading", ""),
+		string(body),
+		filepath.Base(draftPath),
+	)
+	if err != nil {
+		return mcp.NewToolResultError("merge reviewed draft: " + err.Error()), nil
+	}
+	return mcp.NewToolResultText(mustJSON(map[string]any{
+		"draft_path":  draftPath,
+		"target_path": getStringArg(args, "target_path", ""),
+		"merge":       result,
+	})), nil
+}
+
+func openContextWorkspaceStore(ctx context.Context, args map[string]any) (*contextplane.WorkspaceStore, string, error) {
+	target, _ := args["workspace"].(string)
+	runCtx := resolveWorkspaceContext(ctx, target)
+	target, ok := ws.FromContext(runCtx)
+	if !ok || strings.TrimSpace(target) == "" {
+		target = ws.Detect("")
+	}
+	target = ws.Normalize(target)
+	if target == "" {
+		return nil, "", fmt.Errorf("detect workspace")
+	}
+	return contextplane.NewWorkspaceStore(target), target, nil
+}
+
+func mustJSON(v any) string {
+	body, err := json.MarshalIndent(v, "", "  ")
+	if err != nil {
+		return "{}"
+	}
+	return string(body)
 }
 
 func buildSkillInputSchema(params []skill.Parameter) map[string]any {

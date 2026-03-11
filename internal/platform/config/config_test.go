@@ -101,6 +101,7 @@ func TestLoadWithEnvOverridesAndTildePaths(t *testing.T) {
 	t.Setenv("HOME", tmp)
 
 	t.Setenv("AGENTCTL_INLINE_OUTPUT_KB", "512")
+	t.Setenv("AGENTCTL_EMBEDDING_API_KEY", "embed-key")
 	t.Setenv("AGENTCTL_PATHS_CAS", "~/custom/cas")
 	t.Setenv("AGENTCTL_LOGGING_LEVEL", "DEBUG")
 	t.Setenv("AGENTCTL_LOGGING_FORMAT", "JSON")
@@ -114,6 +115,9 @@ func TestLoadWithEnvOverridesAndTildePaths(t *testing.T) {
 
 	if cfg.InlineOutputKB != 512 {
 		t.Fatalf("expected inline_output_kb env override, got %d", cfg.InlineOutputKB)
+	}
+	if cfg.Embedding.APIKey != "embed-key" {
+		t.Fatalf("expected embedding api key override, got %q", cfg.Embedding.APIKey)
 	}
 	expectedCAS := filepath.Join(tmp, "custom/cas")
 	if cfg.Paths.CAS != expectedCAS {

@@ -57,3 +57,8 @@
   - Cerebras free tier quota exceeded → all agent calls fail silently with empty responses
   - Symptom: engine runs, 0 completion tokens, empty assistant text
   - Fix: switch to openrouter or groq provider
+- 2026-03-11 [gotcha]: Discovered concrete enricher function doesn't exist in production code yet, only in tests
+- 2026-03-11 [gotcha]: Foreign key design needed correction: anchors belong to turns not artifacts
+- 2026-03-11 [gotcha]: Need to handle both file path and function signature detection for code_ref
+- 2026-03-11 [time]: Multiple plan grading iterations (B → A → A+) required refinement
+- 2026-03-11 [time]: Subagent exploration needed to gather comprehensive context for M3/M4

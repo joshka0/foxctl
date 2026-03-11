@@ -1,0 +1,42 @@
+name: agentctl
+queries:
+  - id: repo-graph-root
+    query: "agentctl repo graph"
+    expected_any_of:
+      - notes/repo/agentctl/index.md
+    notes: "Should surface the canonical agentctl repo graph root map."
+  - id: cmd-package
+    query: "cmd agentctl cmd"
+    expected_any_of:
+      - notes/repo/agentctl/packages/cmd-agentctl-cmd.md
+    notes: "Should surface the main command package note."
+  - id: semantic-package
+    query: "semantic indexing package"
+    expected_any_of:
+      - notes/repo/agentctl/packages/internal-indexing-semantic.md
+    notes: "Should land in the semantic indexing package note."
+  - id: skillmain-package
+    query: "skills main runtime wiring"
+    expected_any_of:
+      - notes/repo/agentctl/packages/internal-adapters-skillslib-skillmain.md
+    notes: "Should surface the skillmain adapter package note."
+  - id: skillout-package
+    query: "skill output envelopes cas hints"
+    expected_any_of:
+      - notes/repo/agentctl/packages/internal-adapters-skillslib-skillout.md
+    notes: "Should surface the skillout package note."
+  - id: config-package
+    query: "platform config settings"
+    expected_any_of:
+      - notes/repo/agentctl/packages/internal-platform-config.md
+    notes: "Should find the platform config package note."
+  - id: memory-package
+    query: "storage memory package"
+    expected_any_of:
+      - notes/repo/agentctl/packages/internal-storage-memory.md
+    notes: "Should find the storage memory package note."
+  - id: web-api-package
+    query: "web api handlers transport"
+    expected_any_of:
+      - notes/repo/agentctl/packages/internal-web-api.md
+    notes: "Should surface the internal web API package note."

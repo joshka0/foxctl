@@ -55,6 +55,37 @@ func TestResolveEmbedderConfig_LMStudioFromEnv(t *testing.T) {
 	}
 }
 
+func TestResolveEmbedderConfig_OpenAICompatFromEnv(t *testing.T) {
+	t.Parallel()
+
+	env := map[string]string{
+		"AGENTCTL_OPENAI_COMPAT_EMBEDDING_MODEL": "text-embedding-3-small",
+		"AGENTCTL_OPENAI_COMPAT_BASE_URL":        "http://127.0.0.1:1234/v1",
+		"AGENTCTL_OPENAI_COMPAT_API_KEY":         "compat-key",
+	}
+	got, err := ResolveEmbedderConfig(EmbedderConfig{
+		Provider: EmbeddingProviderOpenAICompat,
+		EnvLookup: func(k string) string {
+			return env[k]
+		},
+	})
+	if err != nil {
+		t.Fatalf("ResolveEmbedderConfig() error = %v", err)
+	}
+	if got.Provider != EmbeddingProviderOpenAICompat {
+		t.Fatalf("provider=%q want %q", got.Provider, EmbeddingProviderOpenAICompat)
+	}
+	if got.Model != "text-embedding-3-small" {
+		t.Fatalf("model=%q want text-embedding-3-small", got.Model)
+	}
+	if got.BaseURL != "http://127.0.0.1:1234/v1" {
+		t.Fatalf("baseURL=%q want compat env", got.BaseURL)
+	}
+	if got.APIKey != "compat-key" {
+		t.Fatalf("apiKey=%q want compat-key", got.APIKey)
+	}
+}
+
 func TestResolveEmbedderConfig_VoyageFallbackChain(t *testing.T) {
 	t.Parallel()
 

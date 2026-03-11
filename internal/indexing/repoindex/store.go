@@ -430,6 +430,25 @@ func (s *Store) GetNodes(ctx context.Context, ids []string) ([]Node, error) {
 	return scanNodes(rows)
 }
 
+// ListNodesByKind returns repo nodes of a specific kind ordered by package, file, and name.
+func (s *Store) ListNodesByKind(ctx context.Context, kind NodeKind, limit int) ([]Node, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT id, kind, pkg, file, name, signature, span_start, span_end, exported, doc, summary, meta_json, hash, updated_at
+		FROM nodes
+		WHERE repo_key = ? AND kind = ?
+		ORDER BY COALESCE(pkg, ''), COALESCE(file, ''), COALESCE(name, ''), id
+		LIMIT ?
+	`, s.repoKey, string(kind), limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanNodes(rows)
+}
+
 // GetOutgoingEdges returns outgoing edges for a node.
 func (s *Store) GetOutgoingEdges(ctx context.Context, srcID string, types []EdgeType, limit int) ([]Edge, error) {
 	return getEdges(ctx, s.db, s.repoKey, "src", srcID, types, limit)

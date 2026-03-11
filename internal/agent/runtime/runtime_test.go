@@ -326,7 +326,7 @@ func TestBuildToolDefsForRole_ResearcherUnchanged(t *testing.T) {
 	names := toolNamesForRole(types.RoleResearcher)
 
 	// Researcher must still have base tools + agentctl tools
-	for _, want := range []string{"fs_read_file", "code_search", "think", "context_search", "smart_search", "context_grep", "code_symbols", "repo_index_search", "annotation_recall"} {
+	for _, want := range []string{"fs_read_file", "code_search", "think", "context_search", "smart_search", "context_grep", "code_symbols", "repo_index_search", "annotation_recall", "context_show", "context_retrieve", "obsidian_index_search", "obsidian_read", "obsidian_related"} {
 		if !hasToolName(names, want) {
 			t.Errorf("researcher should still have %q, got %v", want, names)
 		}

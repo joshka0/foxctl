@@ -1,0 +1,14 @@
+---
+title: ADR-0001 Context Architecture
+type: adr
+project: agentctl
+status: reviewed
+trust: canonical
+provenance_refs:
+  - handoff:T-1042
+updated: 2026-03-09
+---
+
+# ADR-0001 Context Architecture
+
+Adopt the ACA dual-plane model and keep durable knowledge outside the runtime control plane.

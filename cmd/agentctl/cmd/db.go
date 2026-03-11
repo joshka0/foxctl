@@ -22,6 +22,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/storage/graph"
 	"github.com/jkatigb/agentctl/internal/storage/jobs/persist"
 	"github.com/jkatigb/agentctl/internal/storage/memory"
+	"github.com/jkatigb/agentctl/internal/storage/obsidianindex"
 	"github.com/jkatigb/agentctl/internal/storage/sessions"
 	"github.com/jkatigb/agentctl/internal/storage/sqliteutil"
 	"github.com/jkatigb/agentctl/internal/storage/tasks"
@@ -131,6 +132,13 @@ var allStores = []storeSpec{
 		tables:     []string{"companion_turns", "companion_deleted_conversations", "companion_conversation_titles", "companion_characters", "companion_character_overlays", "companion_generated_backgrounds", "companion_generated_voices", "companion_presence_bundles", "companion_events", "companion_hard_state_entries", "companion_soft_episodes", "companion_evidence_snippets", "companion_assumptions_ledger", "companion_memory_mode_state", "companion_open_episode", "companion_open_tool_runs", "companion_extraction_staging", "companion_hard_state_cache", "companion_evidence_fts"},
 		migrate:    companion.MigrateSchema,
 	},
+	{
+		name:       "obsidianindex",
+		sqliteFile: "obsidianindex-template.db",
+		pgSchema:   "obsidianindex",
+		tables:     []string{"obsidian_notes", "obsidian_headings", "obsidian_links", "obsidian_aliases"},
+		migrate:    obsidianindex.MigrateSchema,
+	},
 }
 
 func newDBCommand() *cobra.Command {
@@ -217,9 +225,9 @@ Examples:
 			stores := filterStores(storeNames)
 			if len(stores) == 0 {
 				dbEnvelope(enc, now, "error", map[string]any{
-					"hint": "use --stores with comma-separated names; available: memory, tasks, sessions, graph, jobs, cache, agents, coordination, testwatch, contextbuffer, trajectory, dedupe, companion",
+					"hint": "use --stores with comma-separated names; available: memory, tasks, sessions, graph, jobs, cache, agents, coordination, testwatch, contextbuffer, trajectory, dedupe, companion, obsidianindex",
 				}, "no valid stores specified")
-				return fmt.Errorf("no valid stores specified (hint: use --stores with comma-separated names; available: memory, tasks, sessions, graph, jobs, cache, agents, coordination, testwatch, contextbuffer, trajectory, dedupe, companion)")
+				return fmt.Errorf("no valid stores specified (hint: use --stores with comma-separated names; available: memory, tasks, sessions, graph, jobs, cache, agents, coordination, testwatch, contextbuffer, trajectory, dedupe, companion, obsidianindex)")
 			}
 
 			totalStats := dbdriver.MigrationStats{}
@@ -265,7 +273,7 @@ Examples:
 	}
 
 	cmd.Flags().StringVar(&targetDSN, "target-dsn", "", "PostgreSQL connection string (required)")
-	cmd.Flags().StringVar(&storeNames, "stores", "memory,tasks,sessions,graph,jobs,cache,agents,coordination,testwatch,contextbuffer,trajectory,dedupe,companion", "Comma-separated list of stores to migrate")
+	cmd.Flags().StringVar(&storeNames, "stores", "memory,tasks,sessions,graph,jobs,cache,agents,coordination,testwatch,contextbuffer,trajectory,dedupe,companion,obsidianindex", "Comma-separated list of stores to migrate")
 	cmd.Flags().IntVar(&batchSize, "batch-size", 100, "Number of rows per INSERT batch")
 	cmd.Flags().BoolVar(&continueOnError, "continue-on-error", false, "Continue migrating even if some rows/tables fail")
 	cmd.Flags().BoolVar(&dropTables, "drop", false, "Drop and recreate target tables before migration")

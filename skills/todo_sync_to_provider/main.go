@@ -44,6 +44,9 @@ type input struct {
 
 	// DryRun shows what would be written without making changes
 	DryRun bool `json:"dry_run"`
+
+	// AllowProviderState enables writes without relying solely on process env.
+	AllowProviderState bool `json:"allow_provider_state,omitempty"`
 }
 
 // output contains the skill result data with synchronization statistics and file operation details.
@@ -75,7 +78,7 @@ func main() {
 // - Keywords: todo/sync_to_provider, outbound_sync, provider_integration, task_projection, claude_code_sync
 func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	// Check write permission
-	allowProviderState := os.Getenv("AGENTCTL_ALLOW_PROVIDER_STATE") == "1"
+	allowProviderState := in.AllowProviderState || os.Getenv("AGENTCTL_ALLOW_PROVIDER_STATE") == "1"
 
 	// Open task store
 	taskStore, err := rc.Stores.Tasks(ctx)

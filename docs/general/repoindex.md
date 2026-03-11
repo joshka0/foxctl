@@ -4,6 +4,9 @@ The repo graph index is a local, per-repo SQLite graph for navigating code by
 relationships. It powers `agentctl index repo ...` and the agent tools
 `repo_index_search`, `repo_index_expand`, and `repo_index_open`.
 
+Behavior contract:
+- [docs/spec/repo_graph_index_and_dag_grep.md](../spec/repo_graph_index_and_dag_grep.md)
+
 ---
 
 ## What it stores

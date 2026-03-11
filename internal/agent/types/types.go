@@ -177,6 +177,10 @@ type AgentConfig struct {
 	// WorkspaceID is the workspace this agent operates in.
 	WorkspaceID string `json:"workspace_id"`
 
+	// WorkspaceRoot is the absolute workspace root for filesystem-bound tools.
+	// When empty, the runtime falls back to its default workspace root.
+	WorkspaceRoot string `json:"workspace_root,omitempty"`
+
 	// EpicID is the optional epic scope.
 	EpicID string `json:"epic_id,omitempty"`
 
