@@ -9,9 +9,10 @@ import (
 )
 
 const (
-	EmbeddingProviderHash     = "hash"
-	EmbeddingProviderLMStudio = "lmstudio"
-	EmbeddingProviderVoyage   = "voyage"
+	EmbeddingProviderHash         = "hash"
+	EmbeddingProviderLMStudio     = "lmstudio"
+	EmbeddingProviderOpenAICompat = "openai_compat"
+	EmbeddingProviderVoyage       = "voyage"
 )
 
 // EmbedderConfig controls provider selection and override values.
@@ -70,7 +71,10 @@ func ResolveEmbedderConfig(cfg EmbedderConfig) (ResolvedEmbedderConfig, error) {
 		} else {
 			out.Dimensions = defaultEmbeddingDims
 		}
-	case EmbeddingProviderLMStudio:
+	case EmbeddingProviderLMStudio, EmbeddingProviderOpenAICompat:
+		if out.Model == "" {
+			out.Model = strings.TrimSpace(env("AGENTCTL_OPENAI_COMPAT_EMBEDDING_MODEL"))
+		}
 		if out.Model == "" {
 			out.Model = strings.TrimSpace(env("LMSTUDIO_EMBEDDING_MODEL"))
 		}
@@ -78,11 +82,18 @@ func ResolveEmbedderConfig(cfg EmbedderConfig) (ResolvedEmbedderConfig, error) {
 			out.Model = "text-embedding-nomic-embed-text-v1.5"
 		}
 		if out.BaseURL == "" {
+			out.BaseURL = strings.TrimSpace(env("AGENTCTL_OPENAI_COMPAT_BASE_URL"))
+		}
+		if out.BaseURL == "" {
 			out.BaseURL = strings.TrimSpace(env("LMSTUDIO_BASE_URL"))
+		}
+		if out.APIKey == "" {
+			out.APIKey = strings.TrimSpace(env("AGENTCTL_OPENAI_COMPAT_API_KEY"))
 		}
 		if out.APIKey == "" {
 			out.APIKey = strings.TrimSpace(env("LMSTUDIO_API_KEY"))
 		}
+		out.Provider = EmbeddingProviderOpenAICompat
 	case EmbeddingProviderVoyage:
 		if out.Model == "" {
 			out.Model = strings.TrimSpace(env("VOYAGE_EMBEDDING_MODEL"))
@@ -100,8 +111,8 @@ func ResolveEmbedderConfig(cfg EmbedderConfig) (ResolvedEmbedderConfig, error) {
 			out.APIKey = strings.TrimSpace(env("VOYAGE_API_KEY"))
 		}
 	default:
-		return ResolvedEmbedderConfig{}, fmt.Errorf("embedding provider must be one of: %s, %s, %s",
-			EmbeddingProviderHash, EmbeddingProviderLMStudio, EmbeddingProviderVoyage)
+		return ResolvedEmbedderConfig{}, fmt.Errorf("embedding provider must be one of: %s, %s, %s, %s",
+			EmbeddingProviderHash, EmbeddingProviderLMStudio, EmbeddingProviderOpenAICompat, EmbeddingProviderVoyage)
 	}
 
 	return out, nil
@@ -126,7 +137,7 @@ func NewEmbedderFromResolvedConfig(cfg ResolvedEmbedderConfig) (Embedder, error)
 	switch strings.ToLower(strings.TrimSpace(cfg.Provider)) {
 	case EmbeddingProviderHash:
 		return NewHashEmbedder(cfg.Dimensions), nil
-	case EmbeddingProviderLMStudio:
+	case EmbeddingProviderLMStudio, EmbeddingProviderOpenAICompat:
 		return NewOpenAICompatEmbedder(cfg.BaseURL, cfg.Model, cfg.APIKey, cfg.Timeout)
 	case EmbeddingProviderVoyage:
 		return NewVoyageEmbedder(cfg.BaseURL, cfg.Model, cfg.APIKey, cfg.Timeout)

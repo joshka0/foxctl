@@ -53,6 +53,7 @@ func TestPrepareOutputWithArtifact_ReturnsArtifactWhenLarge(t *testing.T) {
 	}
 	if artifact == nil {
 		t.Fatalf("expected artifact payload")
+		return
 	}
 	if string(artifact.Data) != string(persisted) {
 		t.Fatalf("artifact data = %q, want %q", artifact.Data, persisted)
@@ -97,6 +98,7 @@ func TestPrepareOutputWithArtifact_HonorsRenderDefault(t *testing.T) {
 	}
 	if artifact == nil {
 		t.Fatalf("expected artifact with default render")
+		return
 	}
 	if len(artifact.Data) == 0 {
 		t.Fatal("expected non-empty artifact data")

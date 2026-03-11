@@ -14,12 +14,14 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
 
 	"github.com/jkatigb/agentctl/internal/agent/runtime"
 	"github.com/jkatigb/agentctl/internal/agent/toolnames"
 	"github.com/jkatigb/agentctl/internal/agent/types"
 	"github.com/jkatigb/agentctl/internal/context/updater"
+	"github.com/jkatigb/agentctl/internal/contextplane"
 	"github.com/jkatigb/agentctl/internal/domain/agent"
 	"github.com/jkatigb/agentctl/internal/domain/envelope"
 	"github.com/jkatigb/agentctl/internal/execution/runner"
@@ -29,6 +31,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/lsp/gopls"
 	"github.com/jkatigb/agentctl/internal/platform/config"
 	"github.com/jkatigb/agentctl/internal/platform/deviceid"
+	ws "github.com/jkatigb/agentctl/internal/platform/workspace"
 	llmproviders "github.com/jkatigb/agentctl/internal/providers/llm"
 	"github.com/jkatigb/agentctl/internal/queue"
 	"github.com/jkatigb/agentctl/internal/sessionkit/summary"
@@ -118,6 +121,11 @@ type Service struct {
 	fileSummaryWorkerCancel context.CancelFunc
 	fileSummaryMemoryStore  storage.MemoryStore // Memory store for file summary worker (close on shutdown)
 
+	// ACA maintenance loop
+	acaMaintenanceCtx    context.Context
+	acaMaintenanceCancel context.CancelFunc
+	acaMaintenanceWG     sync.WaitGroup
+
 	// Agent orchestration
 	agentMu           sync.Mutex
 	agentRuntime      *runtime.Runtime
@@ -171,6 +179,7 @@ const (
 	daemonLeaseName     = "agent_daemon"
 	daemonLeaseTTL      = 45 * time.Second
 	daemonLeaseInterval = 15 * time.Second
+	acaMaintenanceTick  = 5 * time.Minute
 )
 
 func coordinationIsShared(cfg dbdriver.Config) bool {
@@ -318,6 +327,12 @@ func (s *Service) startLeaderWorkers(ctx context.Context) error {
 			firstErr = err
 		}
 	}
+	if err := s.startACAMaintenanceLoop(ctx); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: ACA maintenance loop failed to start: %v\n", err)
+		if firstErr == nil {
+			firstErr = err
+		}
+	}
 
 	return firstErr
 }
@@ -327,6 +342,7 @@ func (s *Service) stopLeaderWorkers() {
 	s.stopContextUpdater()
 	s.stopFileSummaryWorker()
 	s.stopAgentOrchestration()
+	s.stopACAMaintenanceLoop()
 }
 
 func (s *Service) stopLeaderLease(ctx context.Context) {
@@ -385,6 +401,7 @@ func (s *Service) Run(ctx context.Context) error {
 		return fmt.Errorf("listen on %s: %w", socketPath, err)
 	}
 	s.listener = listener
+	fmt.Fprintf(os.Stderr, "daemon: listener bound on %s\n", socketPath)
 
 	// Set socket permissions (user-only)
 	if err := os.Chmod(socketPath, 0o600); err != nil {
@@ -496,6 +513,7 @@ func (s *Service) acceptLoop(ctx context.Context) {
 				return
 			default:
 				// Transient error, continue
+				fmt.Fprintf(os.Stderr, "daemon: accept error: %v\n", err)
 				continue
 			}
 		}
@@ -1191,6 +1209,62 @@ func (s *Service) stopContextUpdater() {
 	s.contextUpdaterCtx = nil
 }
 
+func (s *Service) startACAMaintenanceLoop(ctx context.Context) error {
+	if s.acaMaintenanceCancel != nil {
+		return nil
+	}
+	if strings.TrimSpace(s.opts.Workspace) == "" {
+		return nil
+	}
+	workspacePath := ws.Normalize(ws.Detect(strings.TrimSpace(s.opts.Workspace)))
+	if workspacePath == "" {
+		return nil
+	}
+	s.acaMaintenanceCtx, s.acaMaintenanceCancel = context.WithCancel(ctx)
+	worker := contextplane.NewWorker(contextplane.WorkerConfig{
+		Config:    s.cfg,
+		Workspace: workspacePath,
+		VaultPath: acaMaintenanceVaultPath(),
+		Interval:  acaMaintenanceInterval(),
+	})
+	s.acaMaintenanceWG.Add(1)
+	go func() {
+		defer s.acaMaintenanceWG.Done()
+		if err := worker.Run(s.acaMaintenanceCtx); err != nil && !errors.Is(err, context.Canceled) {
+			fmt.Fprintf(os.Stderr, "ACA maintenance: worker stopped with error: %v\n", err)
+		}
+	}()
+	return nil
+}
+
+func (s *Service) stopACAMaintenanceLoop() {
+	if s.acaMaintenanceCancel != nil {
+		s.acaMaintenanceCancel()
+		s.acaMaintenanceCancel = nil
+	}
+	s.acaMaintenanceWG.Wait()
+	s.acaMaintenanceCtx = nil
+}
+
+func acaMaintenanceInterval() time.Duration {
+	raw := strings.TrimSpace(os.Getenv("AGENTCTL_ACA_MAINTENANCE_INTERVAL"))
+	if raw == "" {
+		return acaMaintenanceTick
+	}
+	interval, err := time.ParseDuration(raw)
+	if err != nil || interval <= 0 {
+		return acaMaintenanceTick
+	}
+	return interval
+}
+
+func acaMaintenanceVaultPath() string {
+	if value := strings.TrimSpace(os.Getenv("AGENTCTL_ACA_VAULT_PATH")); value != "" {
+		return value
+	}
+	return strings.TrimSpace(os.Getenv("AGENTCTL_OBSIDIAN_VAULT_PATH"))
+}
+
 // startFileSummaryWorker initializes and starts the background file summary worker.
 //
 // Index:
@@ -1502,6 +1576,7 @@ type AgentSpawnParams struct {
 	Role            string   `json:"role"`
 	AgentID         string   `json:"agent_id,omitempty"` // Agent config ID for session filtering
 	WorkspaceID     string   `json:"workspace_id,omitempty"`
+	WorkspaceRoot   string   `json:"workspace_root,omitempty"`
 	EpicID          string   `json:"epic_id,omitempty"`
 	TaskID          string   `json:"task_id,omitempty"`
 	Prompt          string   `json:"prompt,omitempty"`
@@ -1598,13 +1673,17 @@ func (s *Service) handleAgentSpawnWithRoute(ctx context.Context, params json.Raw
 
 	// Create agent config
 	cfg := types.AgentConfig{
-		Role:        types.AgentRole(p.Role),
-		ActorID:     actorID,
-		WorkspaceID: p.WorkspaceID,
-		EpicID:      p.EpicID,
-		TaskID:      p.TaskID,
-		Prompt:      p.Prompt,
-		SkillsAllow: p.SkillsAllow,
+		Role:          types.AgentRole(p.Role),
+		ActorID:       actorID,
+		WorkspaceID:   p.WorkspaceID,
+		WorkspaceRoot: strings.TrimSpace(p.WorkspaceRoot),
+		EpicID:        p.EpicID,
+		TaskID:        p.TaskID,
+		Prompt:        p.Prompt,
+		SkillsAllow:   p.SkillsAllow,
+	}
+	if cfg.WorkspaceID == "" && cfg.WorkspaceRoot != "" {
+		cfg.WorkspaceID = ws.ID(cfg.WorkspaceRoot)
 	}
 
 	// Apply execution config if provided
@@ -2262,6 +2341,9 @@ func (e *exec) Start() error {
 		Dir:   "/",
 		Env:   e.Env,
 		Files: []*os.File{stdin, stdout, stderr},
+		Sys: &syscall.SysProcAttr{
+			Setsid: true,
+		},
 	}
 
 	_, err := os.StartProcess(e.Path, e.Args, attr)

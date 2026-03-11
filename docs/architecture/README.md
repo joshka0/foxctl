@@ -3,6 +3,7 @@
 This folder contains **architectural** documentation for current in-repo behavior.
 
 - [`system-architecture.md`](./system-architecture.md): canonical architecture map for `cmd/agentctl` + `internal/*`
+- [`context-architecture.md`](./context-architecture.md): workspace-local ACA control plane and computed top-of-mind slice
 - [`jido-hybrid-runtime.md`](./jido-hybrid-runtime.md): canonical hybrid-runtime split between Jido orchestration and `agentctl` semantic ownership
 - [`auth-identity.md`](./auth-identity.md): canonical auth/identity/token-broker/verification architecture
 - [`chat-platform-adapter.md`](./chat-platform-adapter.md): chat adapter runtime
@@ -18,6 +19,7 @@ Operational subsystem references (skills, storage, hooks, runtime details) live 
 Current implementation-reference docs to prefer:
 
 - [docs/architecture/system-architecture.md](./system-architecture.md)
+- [docs/architecture/context-architecture.md](./context-architecture.md)
 - [docs/architecture/jido-hybrid-runtime.md](./jido-hybrid-runtime.md)
 - [docs/architecture/auth-identity.md](./auth-identity.md)
 - [docs/kubernetes.md](../kubernetes.md)

@@ -89,6 +89,51 @@ Core fields include event identity, principal/workspace/session metadata, provid
 
 - Skills are resolved via hook resolver/registry from installed skill paths.
 - Shell-based hooks are supported through shell runner.
+- Lifecycle wrappers can delegate to Go-native entrypoints under `agentctl hooks ...`
+  instead of keeping orchestration in bash.
+- Current first slice:
+  - `agentctl hooks session-start`
+  - `agentctl hooks session-end`
+  - `agentctl hooks subagent-stop`
+  - `agentctl hooks todo-sync`
+  - `agentctl hooks todo-continuation`
+  - `agentctl hooks task-file-link`
+  - `agentctl hooks context-updater-drain`
+  - `agentctl hooks session-restore-postcompact`
+  - `agentctl hooks overseer-inbox`
+  - `agentctl hooks overseer-inbox-post`
+  - `agentctl hooks anchor-detect`
+  - `agentctl hooks memory-detector`
+  - `agentctl hooks memory-recall`
+  - `agentctl hooks memory-lifecycle`
+  - `agentctl hooks code-analysis`
+  - `agentctl hooks live-index`
+  - `agentctl hooks lsp-diagnostics`
+  - `agentctl hooks embedding-flush`
+  - `agentctl hooks plan-sync`
+  - `agentctl hooks graph-maintenance`
+  - `configs/hooks/session-init.sh` is now a thin wrapper over that command.
+  - `configs/hooks/session-end.sh` is now a thin wrapper over that command.
+  - `configs/hooks/subagent-stop.sh` is now a thin wrapper over that command.
+  - `configs/hooks/todo-sync.sh` is now a thin wrapper over that command.
+  - `configs/hooks/todo-continuation.sh` is now a thin wrapper over that command.
+  - `configs/hooks/task-file-link.sh` is now a thin wrapper over that command.
+  - `configs/hooks/context-updater-drain.sh` is now a thin wrapper over that command.
+  - `configs/hooks/session-restore-postcompact.sh` is now a thin wrapper over that command.
+  - `configs/hooks/overseer-inbox.sh` is now a thin wrapper over that command.
+  - `configs/hooks/overseer-inbox-post.sh` is now a thin wrapper over that command.
+  - `configs/hooks/anchor-detect.sh` is now a thin wrapper over that command.
+  - `configs/hooks/memory-detector.sh` is now a thin wrapper over that command.
+  - `configs/hooks/memory-recall.sh` is now a thin wrapper over that command.
+  - `configs/hooks/memory-lifecycle.sh` is now a thin wrapper over that command.
+  - `configs/hooks/code-analysis.sh` is now a thin wrapper over that command.
+  - `configs/hooks/live-index.sh` is now a thin wrapper over that command.
+  - `configs/hooks/lsp-diagnostics.sh` is now a thin wrapper over that command.
+  - `configs/hooks/embedding-flush.sh` is now a thin wrapper over that command.
+  - `configs/hooks/plan-sync.sh` is now a thin wrapper over that command.
+  - `configs/hooks/graph-maintenance.sh` is now a thin wrapper over that command.
+- Remaining shell hooks are now triaged by category in:
+  - `docs/plans/features/hook-shell-triage-plan.md`
 - Prefer structured action outputs over ad-hoc stdout text for reliable automation.
 
 ## Related Docs

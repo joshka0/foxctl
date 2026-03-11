@@ -271,8 +271,11 @@ type LoggingSettings struct {
 
 // EmbeddingSettings configure embedding provider defaults.
 type EmbeddingSettings struct {
-	Provider   string            `mapstructure:"provider" json:"provider"`
-	Model      string            `mapstructure:"model" json:"model"`
+	Provider string `mapstructure:"provider" json:"provider"`
+	Model    string `mapstructure:"model" json:"model"`
+	// APIKey is a generic embedding provider API key (from AGENTCTL_EMBEDDING_API_KEY).
+	// Use this for provider-agnostic or OpenAI-compatible embedding endpoints.
+	APIKey     string            `mapstructure:"api_key" json:"api_key"`
 	Dimensions int               `mapstructure:"dimensions" json:"dimensions"`
 	Models     map[string]string `mapstructure:"models" json:"models"`
 	Flags      EmbeddingFlags    `mapstructure:"flags" json:"flags"`
@@ -888,6 +891,9 @@ func finalizeConfig(cfg Config, home string) Config {
 	}
 
 	// Embedding API key env var overrides (FC/IS compliant)
+	if key := os.Getenv("AGENTCTL_EMBEDDING_API_KEY"); key != "" && cfg.Embedding.APIKey == "" {
+		cfg.Embedding.APIKey = key
+	}
 	if key := os.Getenv("VOYAGE_API_KEY"); key != "" && cfg.Embedding.VoyageAPIKey == "" {
 		cfg.Embedding.VoyageAPIKey = key
 	}

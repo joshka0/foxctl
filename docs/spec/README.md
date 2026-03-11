@@ -12,6 +12,7 @@ Use this folder for canonical behavior and wire-contract specifications.
 - `openapi_skill.md` - `http/openapi` behavior spec.
 - `semantic_file_index.md` - Semantic file indexing spec.
 - `code_symbol_index_and_swe_grep.md` - Symbol index + snippet extraction behavior.
+- `repo_graph_index_and_dag_grep.md` - Repo graph data model and `dag_grep` explanation-query contract.
 
 ## Evolving V2 Design Specs
 

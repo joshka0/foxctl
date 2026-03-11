@@ -1,0 +1,57 @@
+name: praze
+queries:
+  - id: repo-graph-root
+    query: "praze repo graph"
+    expected_any_of:
+      - notes/repo/praze/index.md
+    notes: "Should surface the canonical praze repo graph root map."
+  - id: accounts-domain
+    query: "accounts user relationships"
+    expected_any_of:
+      - notes/repo/praze/packages/accounts.md
+    notes: "Should surface the accounts domain note."
+  - id: api-core
+    query: "praze api core domain"
+    expected_any_of:
+      - notes/repo/praze/packages/apps-praze-api-lib-praze.md
+    notes: "Should surface the core praze API library note."
+  - id: api-controllers
+    query: "api controllers"
+    expected_any_of:
+      - notes/repo/praze/packages/apps-praze-api-lib-prazeweb-controllers-api.md
+    notes: "Should surface the API controllers package note."
+  - id: channels-realtime
+    query: "realtime channels websocket updates"
+    expected_any_of:
+      - notes/repo/praze/packages/apps-praze-api-lib-prazeweb-channels.md
+    notes: "Should surface the channels package note."
+  - id: moderation-rules
+    query: "content moderation rules"
+    expected_any_of:
+      - notes/repo/praze/packages/moderation.md
+    notes: "Should surface the moderation package note."
+  - id: notifications-delivery
+    query: "notifications delivery unread reminders"
+    expected_any_of:
+      - notes/repo/praze/packages/notifications.md
+    notes: "Should surface the notifications package note."
+  - id: group-domain
+    query: "group membership relationships"
+    expected_any_of:
+      - notes/repo/praze/packages/groups.md
+    notes: "Should surface the groups package note."
+  - id: jobs-background
+    query: "background jobs processing"
+    expected_any_of:
+      - notes/repo/praze/packages/jobs.md
+    notes: "Should surface the jobs package note."
+  - id: margin-domain
+    query: "margin calculations thresholds"
+    expected_any_of:
+      - notes/repo/praze/packages/margin.md
+    notes: "Should surface the margin package note."
+  - id: seo-pipeline
+    query: "seo embeddings pipeline"
+    expected_any_of:
+      - notes/repo/praze/packages/praze-website-seo.md
+    notes: "Should surface the SEO package note."

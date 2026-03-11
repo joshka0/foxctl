@@ -126,6 +126,7 @@ pr*.txt
 # OpenCode
 .opencode/
 .fastembed_cache/
+.agentctl/
 
 # Compiled test binaries
 *_test

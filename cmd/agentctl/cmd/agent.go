@@ -21,6 +21,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/observability"
 	"github.com/jkatigb/agentctl/internal/platform/config"
 	errs "github.com/jkatigb/agentctl/internal/platform/errors"
+	ws "github.com/jkatigb/agentctl/internal/platform/workspace"
 	"github.com/jkatigb/agentctl/internal/protocol"
 	llmproviders "github.com/jkatigb/agentctl/internal/providers/llm"
 	"github.com/jkatigb/agentctl/internal/storage/agents"
@@ -159,6 +160,7 @@ var (
 	spawnLLMProvider      string
 	spawnLLMModel         string
 	spawnLLMAPIKey        string
+	spawnWorkspace        string
 	spawnExecMode         string
 	spawnMaxIterations    int
 	spawnMaxContextTokens int
@@ -246,6 +248,7 @@ func init() {
 	agentSpawnCmd.Flags().StringVar(&spawnLLMProvider, "llm-provider", "", "LLM provider (lmstudio|gemini|openai|anthropic|groq|openrouter)")
 	agentSpawnCmd.Flags().StringVar(&spawnLLMModel, "llm-model", "", "LLM model ID (e.g., claude-haiku-4-5)")
 	agentSpawnCmd.Flags().StringVar(&spawnLLMAPIKey, "llm-api-key", "", "LLM API key (or env var like $GROQ_API_KEY)")
+	agentSpawnCmd.Flags().StringVar(&spawnWorkspace, "workspace", "", "Workspace root for filesystem-bound tools (default: current directory)")
 	agentSpawnCmd.Flags().StringVar(&spawnExecMode, "exec-mode", "reactive", "Execution mode (reactive|autonomous|proactive|tick)")
 	agentSpawnCmd.Flags().IntVar(&spawnMaxIterations, "max-iterations", 10, "Max tool calls per turn")
 	agentSpawnCmd.Flags().IntVar(&spawnMaxContextTokens, "max-context-tokens", 0, "Max context tokens before stopping (0=no limit)")
@@ -295,6 +298,30 @@ func init() {
 
 func runAgentSpawn(cmd *cobra.Command, args []string) error {
 	return runAgentSpawnWithRoute(cmd)
+}
+
+func currentSpawnWorkspaceRoot() string {
+	target := strings.TrimSpace(spawnWorkspace)
+	if target == "" {
+		wd, err := os.Getwd()
+		if err != nil {
+			return ""
+		}
+		target = wd
+	}
+	abs, err := filepath.Abs(target)
+	if err != nil {
+		return target
+	}
+	return abs
+}
+
+func currentSpawnWorkspaceID() string {
+	root := currentSpawnWorkspaceRoot()
+	if root == "" {
+		return ""
+	}
+	return ws.ID(root)
 }
 
 func runAgentSpawnWithRoute(cmd *cobra.Command) error {
@@ -464,6 +491,8 @@ func runAgentSpawnWithRoute(cmd *cobra.Command) error {
 
 		params := daemon.AgentSpawnParams{
 			Role:             spawnRole,
+			WorkspaceID:      currentSpawnWorkspaceID(),
+			WorkspaceRoot:    currentSpawnWorkspaceRoot(),
 			Prompt:           prompt,
 			Name:             spawnName,
 			Slug:             spawnSlug,
@@ -487,6 +516,8 @@ func runAgentSpawnWithRoute(cmd *cobra.Command) error {
 				"dry_run":          true,
 				"would_spawn":      true,
 				"via_daemon":       true,
+				"workspace_id":     params.WorkspaceID,
+				"workspace_root":   params.WorkspaceRoot,
 				"dispatcher":       "mailbox",
 				"execution_layer":  string(executionLayer),
 				"role":             params.Role,

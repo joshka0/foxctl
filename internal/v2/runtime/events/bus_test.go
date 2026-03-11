@@ -138,15 +138,19 @@ func TestEventBus_NoSubscriberDeadlock(t *testing.T) {
 		t.Fatal("publish loop blocked; expected non-blocking fanout with slow subscriber")
 	}
 
+	deadline := time.Now().Add(200 * time.Millisecond)
+	for fastReceived.Load() == 0 && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+	if fastReceived.Load() == 0 {
+		t.Fatal("fast subscriber received no events")
+	}
+
 	close(stopReader)
 	select {
 	case <-readerDone:
 	case <-time.After(200 * time.Millisecond):
 		t.Fatal("reader goroutine did not stop")
-	}
-
-	if fastReceived.Load() == 0 {
-		t.Fatal("fast subscriber received no events")
 	}
 
 	stats := bus.Stats()

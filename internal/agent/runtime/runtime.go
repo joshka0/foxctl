@@ -44,6 +44,20 @@ func traceIDFromContext(ctx context.Context) string {
 	return ""
 }
 
+func (r *Runtime) workspaceRootForConfig(cfg types.AgentConfig) string {
+	if strings.TrimSpace(cfg.WorkspaceRoot) != "" {
+		return cfg.WorkspaceRoot
+	}
+	return r.config.WorkspaceRoot
+}
+
+func (r *Runtime) workspaceRootForSession(session *Session) string {
+	if session == nil {
+		return r.config.WorkspaceRoot
+	}
+	return r.workspaceRootForConfig(session.Config)
+}
+
 // Runtime manages agent sessions and lifecycle.
 type Runtime struct {
 	mu       sync.RWMutex
@@ -185,7 +199,7 @@ func (r *Runtime) buildEngineInput(session *Session, userPrompt string) engine.E
 		SystemPrompt: session.SystemPrompt,
 		Messages:     messages,
 		Tools:        session.Tools,
-		Workspace:    r.config.WorkspaceRoot,
+		Workspace:    r.workspaceRootForSession(session),
 		SessionID:    session.ID,
 	}
 }
@@ -228,6 +242,7 @@ func NewRuntime(cfg Config) *Runtime {
 // - Related: Runtime.runSession, Runtime.createEngine
 // - Keywords: agent_spawn, session_id, max_iterations, tools
 func (r *Runtime) Spawn(ctx context.Context, cfg types.AgentConfig) (*Session, error) {
+	workspaceRoot := r.workspaceRootForConfig(cfg)
 	// Generate session ID
 	sessionID := ulid.Make().String()
 
@@ -318,7 +333,7 @@ func (r *Runtime) Spawn(ctx context.Context, cfg types.AgentConfig) (*Session, e
 
 		dbSession := storage.Session{
 			ID:            sessionID,
-			WorkspacePath: r.config.WorkspaceRoot,
+			WorkspacePath: workspaceRoot,
 			AgentID:       cfg.ActorID,
 			AgentType:     string(cfg.Role),
 			Status:        storage.SessionStatusRunning,
@@ -339,7 +354,7 @@ func (r *Runtime) Spawn(ctx context.Context, cfg types.AgentConfig) (*Session, e
 	observability.Emit(ctx, observability.NewEvent(observability.OpAgentSpawn).
 		WithComponent(observability.ComponentAgent).
 		WithSession(sessionID, cfg.ActorID).
-		WithWorkspace(r.config.WorkspaceRoot).
+		WithWorkspace(workspaceRoot).
 		WithData("role", string(cfg.Role)).
 		WithData("depth", cfg.Depth).
 		WithData("max_iterations", cfg.MaxIterations).
@@ -353,6 +368,7 @@ func (r *Runtime) Spawn(ctx context.Context, cfg types.AgentConfig) (*Session, e
 
 // createEngine creates an LLMChatEngine with tools for the given agent configuration.
 func (r *Runtime) createEngine(cfg types.AgentConfig, sessionID string) (*engine.LLMChatEngine, []engine.ToolDef, error) {
+	workspaceRoot := r.workspaceRootForConfig(cfg)
 	// Resolve provider: agent → runtime → auto-detect from env
 	provider := cfg.LLMProvider
 	if provider == "" {
@@ -402,7 +418,7 @@ func (r *Runtime) createEngine(cfg types.AgentConfig, sessionID string) (*engine
 		SessionID:     sessionID,
 		ActorID:       cfg.ActorID,
 		WorkspaceID:   cfg.WorkspaceID,
-		WorkspaceRoot: r.config.WorkspaceRoot,
+		WorkspaceRoot: workspaceRoot,
 	})
 
 	// Create tool executor adapter and get tool definitions
@@ -410,7 +426,7 @@ func (r *Runtime) createEngine(cfg types.AgentConfig, sessionID string) (*engine
 
 	// Create ToolRunner with the executor
 	runnerCfg := engine.ToolRunnerConfig{
-		Workspace:      r.config.WorkspaceRoot,
+		Workspace:      workspaceRoot,
 		WorkspaceID:    cfg.WorkspaceID,
 		SessionID:      sessionID,
 		ActorID:        cfg.ActorID,
@@ -424,12 +440,13 @@ func (r *Runtime) createEngine(cfg types.AgentConfig, sessionID string) (*engine
 
 // createToolExecutor creates a ToolExecutor adapter for the agent tools registry.
 func (r *Runtime) createToolExecutor(cfg types.AgentConfig, sessionID string) (engine.ToolExecutor, []engine.ToolDef) {
+	workspaceRoot := r.workspaceRootForConfig(cfg)
 	// Build tool definitions based on agent role and available stores
 	toolDefs := buildToolDefsForRole(cfg.Role, r.config.MailboxStore != nil, r.config.BoardStore != nil, cfg.SkillsAllow)
 
 	// Create the executor adapter
 	executor := &agentToolExecutor{
-		workspaceRoot:   r.config.WorkspaceRoot,
+		workspaceRoot:   workspaceRoot,
 		workspaceID:     cfg.WorkspaceID,
 		sessionID:       sessionID,
 		actorID:         cfg.ActorID,
@@ -559,6 +576,16 @@ func (e *agentToolExecutor) Execute(ctx context.Context, name string, args json.
 		out, err = e.executeRepoIndexOpen(ctx, argsMap)
 	case "repo_index_dag_grep":
 		out, err = e.executeRepoIndexDagGrep(ctx, argsMap)
+	case "context_show":
+		out, err = e.executeContextShow(ctx, argsMap)
+	case "context_retrieve":
+		out, err = e.executeContextRetrieve(ctx, argsMap)
+	case "obsidian_index_search":
+		out, err = e.executeObsidianIndexSearch(ctx, argsMap)
+	case "obsidian_read":
+		out, err = e.executeObsidianRead(ctx, argsMap)
+	case "obsidian_related":
+		out, err = e.executeObsidianRelated(ctx, argsMap)
 	case "heartwood_state":
 		out, err = e.executeHeartwoodState(ctx, argsMap)
 	case "heartwood_action":
@@ -1431,6 +1458,102 @@ func (e *agentToolExecutor) executeRepoIndexDagGrep(ctx context.Context, args ma
 	return commandOutput(cmd, "repo_index_dag_grep")
 }
 
+func (e *agentToolExecutor) executeContextShow(ctx context.Context, _ map[string]any) (string, error) {
+	workspace := strings.TrimSpace(e.workspaceRoot)
+	if workspace == "" {
+		workspace = "."
+	}
+	cmd := e.newAgentctlCommand(ctx, "context", "show", "--workspace", workspace)
+	return commandOutputData(cmd, "context_show")
+}
+
+func (e *agentToolExecutor) executeContextRetrieve(ctx context.Context, args map[string]any) (string, error) {
+	query, _ := args["query"].(string)
+	if strings.TrimSpace(query) == "" {
+		return "", fmt.Errorf("query is required")
+	}
+	vaultPath := stringArg(args, "vault_path", "")
+	if strings.TrimSpace(vaultPath) == "" {
+		vaultPath = strings.TrimSpace(os.Getenv("AGENTCTL_ACA_VAULT_PATH"))
+	}
+	if strings.TrimSpace(vaultPath) == "" {
+		vaultPath = strings.TrimSpace(os.Getenv("AGENTCTL_OBSIDIAN_VAULT_PATH"))
+	}
+	if strings.TrimSpace(vaultPath) == "" {
+		return "", fmt.Errorf("vault_path is required")
+	}
+	limit := intArg(args, 5, "limit")
+	workspace := strings.TrimSpace(e.workspaceRoot)
+	if workspace == "" {
+		workspace = "."
+	}
+	cmd := e.newAgentctlCommand(ctx, "context", "retrieve", "--workspace", workspace, "--vault-path", vaultPath, "--query", query, "--limit", strconv.Itoa(limit))
+	return commandOutputData(cmd, "context_retrieve")
+}
+
+func (e *agentToolExecutor) executeObsidianIndexSearch(ctx context.Context, args map[string]any) (string, error) {
+	query, _ := args["query"].(string)
+	if strings.TrimSpace(query) == "" {
+		return "", fmt.Errorf("query is required")
+	}
+	vaultPath := stringArg(args, "vault_path", "")
+	if strings.TrimSpace(vaultPath) == "" {
+		vaultPath = strings.TrimSpace(os.Getenv("AGENTCTL_ACA_VAULT_PATH"))
+	}
+	if strings.TrimSpace(vaultPath) == "" {
+		vaultPath = strings.TrimSpace(os.Getenv("AGENTCTL_OBSIDIAN_VAULT_PATH"))
+	}
+	if strings.TrimSpace(vaultPath) == "" {
+		return "", fmt.Errorf("vault_path is required")
+	}
+	limit := intArg(args, 10, "limit")
+	argsList := []string{"obsidian", "index", "search", "--vault-path", vaultPath, "--query", query, "--limit", strconv.Itoa(limit)}
+	if boolArg(args, "semantic") {
+		argsList = append(argsList, "--semantic")
+	}
+	cmd := e.newAgentctlCommand(ctx, argsList...)
+	return commandOutputData(cmd, "obsidian_index_search")
+}
+
+func (e *agentToolExecutor) executeObsidianRead(ctx context.Context, args map[string]any) (string, error) {
+	path := stringArg(args, "path", "")
+	if strings.TrimSpace(path) == "" {
+		return "", fmt.Errorf("path is required")
+	}
+	vaultPath := stringArg(args, "vault_path", "")
+	if strings.TrimSpace(vaultPath) == "" {
+		vaultPath = strings.TrimSpace(os.Getenv("AGENTCTL_ACA_VAULT_PATH"))
+	}
+	if strings.TrimSpace(vaultPath) == "" {
+		vaultPath = strings.TrimSpace(os.Getenv("AGENTCTL_OBSIDIAN_VAULT_PATH"))
+	}
+	if strings.TrimSpace(vaultPath) == "" {
+		return "", fmt.Errorf("vault_path is required")
+	}
+	cmd := e.newAgentctlCommand(ctx, "obsidian", "read", "--vault-path", vaultPath, "--path", path)
+	return commandOutputData(cmd, "obsidian_read")
+}
+
+func (e *agentToolExecutor) executeObsidianRelated(ctx context.Context, args map[string]any) (string, error) {
+	path := stringArg(args, "path", "")
+	if strings.TrimSpace(path) == "" {
+		return "", fmt.Errorf("path is required")
+	}
+	vaultPath := stringArg(args, "vault_path", "")
+	if strings.TrimSpace(vaultPath) == "" {
+		vaultPath = strings.TrimSpace(os.Getenv("AGENTCTL_ACA_VAULT_PATH"))
+	}
+	if strings.TrimSpace(vaultPath) == "" {
+		vaultPath = strings.TrimSpace(os.Getenv("AGENTCTL_OBSIDIAN_VAULT_PATH"))
+	}
+	if strings.TrimSpace(vaultPath) == "" {
+		return "", fmt.Errorf("vault_path is required")
+	}
+	limit := intArg(args, 10, "limit")
+	cmd := e.newAgentctlCommand(ctx, "obsidian", "related", "--vault-path", vaultPath, "--path", path, "--limit", strconv.Itoa(limit))
+	return commandOutputData(cmd, "obsidian_related")
+}
+
 func (e *agentToolExecutor) executeHeartwoodState(ctx context.Context, args map[string]any) (string, error) {
 	inputBytes, err := json.Marshal(args)
 	if err != nil {
@@ -1624,6 +1747,186 @@ func commandOutput(cmd *exec.Cmd, label string) (string, error) {
 	return out, nil
 }
 
+func commandOutputData(cmd *exec.Cmd, label string) (string, error) {
+	output, err := commandOutput(cmd, label)
+	if err != nil {
+		return "", err
+	}
+	var envelope map[string]any
+	if json.Unmarshal([]byte(output), &envelope) != nil {
+		return output, nil
+	}
+	data, ok := envelope["data"]
+	if !ok {
+		return output, nil
+	}
+	if summary := summarizeToolData(label, data); summary != "" {
+		return summary, nil
+	}
+	body, err := json.MarshalIndent(data, "", "  ")
+	if err != nil {
+		return output, nil
+	}
+	return string(body), nil
+}
+
+func summarizeToolData(label string, data any) string {
+	m, ok := data.(map[string]any)
+	if !ok {
+		return ""
+	}
+	switch label {
+	case "context_show":
+		top, ok := m["top_of_mind"].(map[string]any)
+		if !ok {
+			return ""
+		}
+		var b strings.Builder
+		b.WriteString("Top of mind\n")
+		writeKeyValueLine(&b, "Workspace", stringFromMap(top, "workspace_id"))
+		writeKeyValueLine(&b, "Objective", stringFromMap(top, "objective"))
+		writeKeyValueLine(&b, "Phase", stringFromMap(top, "phase"))
+		writeListLine(&b, "Active tasks", stringSliceFromMap(top, "active_task_ids"), 5)
+		writeListLine(&b, "Next actions", stringSliceFromMap(top, "next_actions"), 5)
+		return strings.TrimSpace(b.String())
+	case "context_retrieve":
+		result, ok := m["result"].(map[string]any)
+		if !ok {
+			return ""
+		}
+		var b strings.Builder
+		b.WriteString("Retrieved context\n")
+		writeKeyValueLine(&b, "Query", stringFromMap(result, "query"))
+		if top, ok := result["top_of_mind"].(map[string]any); ok {
+			writeKeyValueLine(&b, "Objective", stringFromMap(top, "objective"))
+			writeKeyValueLine(&b, "Phase", stringFromMap(top, "phase"))
+		}
+		if hits, ok := result["vault_hits"].([]any); ok && len(hits) > 0 {
+			b.WriteString("Vault hits:\n")
+			for _, item := range hits[:minInt(len(hits), 5)] {
+				hit, ok := item.(map[string]any)
+				if !ok {
+					continue
+				}
+				title := stringFromMap(hit, "title")
+				path := stringFromMap(hit, "path")
+				snippet := stringFromMap(hit, "snippet")
+				b.WriteString("- " + firstNonEmptyString(title, path) + " [" + path + "]\n")
+				if snippet != "" {
+					b.WriteString("  " + snippet + "\n")
+				}
+			}
+		}
+		return strings.TrimSpace(b.String())
+	case "obsidian_index_search":
+		var b strings.Builder
+		b.WriteString("Vault index search\n")
+		if query := stringFromMap(m, "query"); query != "" {
+			writeKeyValueLine(&b, "Query", query)
+		}
+		if hits, ok := m["hits"].([]any); ok {
+			if len(hits) == 0 {
+				b.WriteString("No hits.\n")
+				return strings.TrimSpace(b.String())
+			}
+			b.WriteString("Hits:\n")
+			for _, item := range hits[:minInt(len(hits), 5)] {
+				hit, ok := item.(map[string]any)
+				if !ok {
+					continue
+				}
+				title := stringFromMap(hit, "title")
+				path := stringFromMap(hit, "path")
+				snippet := stringFromMap(hit, "snippet")
+				b.WriteString("- " + firstNonEmptyString(title, path) + " [" + path + "]\n")
+				if snippet != "" {
+					b.WriteString("  " + snippet + "\n")
+				}
+			}
+			return strings.TrimSpace(b.String())
+		}
+	case "obsidian_read":
+		if result, ok := m["result"].(map[string]any); ok {
+			content := stringFromMap(result, "content")
+			if content != "" {
+				return content
+			}
+		}
+	case "obsidian_related":
+		var b strings.Builder
+		b.WriteString("Related notes\n")
+		if items, ok := m["results"].([]any); ok {
+			if len(items) == 0 {
+				b.WriteString("No related notes.\n")
+				return strings.TrimSpace(b.String())
+			}
+			for _, item := range items[:minInt(len(items), 5)] {
+				if hit, ok := item.(map[string]any); ok {
+					title := stringFromMap(hit, "title")
+					path := stringFromMap(hit, "path")
+					b.WriteString("- " + firstNonEmptyString(title, path) + " [" + path + "]\n")
+				}
+			}
+			return strings.TrimSpace(b.String())
+		}
+	}
+	return ""
+}
+
+func writeKeyValueLine(b *strings.Builder, label, value string) {
+	if strings.TrimSpace(value) == "" {
+		return
+	}
+	b.WriteString(label + ": " + value + "\n")
+}
+
+func writeListLine(b *strings.Builder, label string, items []string, limit int) {
+	if len(items) == 0 {
+		return
+	}
+	if limit > 0 && len(items) > limit {
+		items = items[:limit]
+	}
+	b.WriteString(label + ": " + strings.Join(items, ", ") + "\n")
+}
+
+func stringFromMap(m map[string]any, key string) string {
+	if v, ok := m[key].(string); ok {
+		return strings.TrimSpace(v)
+	}
+	return ""
+}
+
+func stringSliceFromMap(m map[string]any, key string) []string {
+	raw, ok := m[key].([]any)
+	if !ok {
+		return nil
+	}
+	out := make([]string, 0, len(raw))
+	for _, item := range raw {
+		if v, ok := item.(string); ok && strings.TrimSpace(v) != "" {
+			out = append(out, strings.TrimSpace(v))
+		}
+	}
+	return out
+}
+
+func firstNonEmptyString(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return strings.TrimSpace(value)
+		}
+	}
+	return ""
+}
+
+func minInt(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
 // buildToolDefsForRole returns tool definitions appropriate for the agent role.
 // Tool names use underscores for Anthropic API compatibility (pattern: ^[a-zA-Z0-9_-]{1,128}$).
 func buildToolDefsForRole(role types.AgentRole, hasMailbox, hasBoard bool, allowlist []string) []engine.ToolDef {
@@ -1775,6 +2078,47 @@ func buildToolDefsForRole(role types.AgentRole, hasMailbox, hasBoard bool, allow
 					"include_anchors":{"type":"boolean","description":"Include file/package anchors"},
 					"render":{"type":"string","enum":["none","tree","mermaid"]}
 				},"required":["query"]}`),
+			},
+			engine.ToolDef{
+				Name:        "context_show",
+				Description: "Read the current ACA top-of-mind bundle for the workspace.",
+				Parameters:  json.RawMessage(`{"type":"object","properties":{}}`),
+			},
+			engine.ToolDef{
+				Name:        "context_retrieve",
+				Description: "Blend ACA control-plane state with vault retrieval for a focused question.",
+				Parameters: json.RawMessage(`{"type":"object","properties":{
+					"query":{"type":"string","description":"Question or topic to retrieve context for"},
+					"vault_path":{"type":"string","description":"Vault path (optional if AGENTCTL_ACA_VAULT_PATH or AGENTCTL_OBSIDIAN_VAULT_PATH is set)"},
+					"limit":{"type":"integer","description":"Maximum result count (default 5)"}
+				},"required":["query"]}`),
+			},
+			engine.ToolDef{
+				Name:        "obsidian_index_search",
+				Description: "Search the local Obsidian vault index. Supports optional semantic note search.",
+				Parameters: json.RawMessage(`{"type":"object","properties":{
+					"query":{"type":"string","description":"Vault search query"},
+					"vault_path":{"type":"string","description":"Vault path (optional if AGENTCTL_ACA_VAULT_PATH or AGENTCTL_OBSIDIAN_VAULT_PATH is set)"},
+					"limit":{"type":"integer","description":"Maximum result count (default 10)"},
+					"semantic":{"type":"boolean","description":"Use semantic note search if enabled"}
+				},"required":["query"]}`),
+			},
+			engine.ToolDef{
+				Name:        "obsidian_read",
+				Description: "Read a note from the Obsidian vault.",
+				Parameters: json.RawMessage(`{"type":"object","properties":{
+					"path":{"type":"string","description":"Vault note path"},
+					"vault_path":{"type":"string","description":"Vault path (optional if AGENTCTL_ACA_VAULT_PATH or AGENTCTL_OBSIDIAN_VAULT_PATH is set)"}
+				},"required":["path"]}`),
+			},
+			engine.ToolDef{
+				Name:        "obsidian_related",
+				Description: "List related notes from the Obsidian vault using links, backlinks, aliases, or the local index.",
+				Parameters: json.RawMessage(`{"type":"object","properties":{
+					"path":{"type":"string","description":"Vault note path"},
+					"vault_path":{"type":"string","description":"Vault path (optional if AGENTCTL_ACA_VAULT_PATH or AGENTCTL_OBSIDIAN_VAULT_PATH is set)"},
+					"limit":{"type":"integer","description":"Maximum result count (default 10)"}
+				},"required":["path"]}`),
 			},
 			engine.ToolDef{
 				Name:        "memory_query",
@@ -2140,6 +2484,7 @@ func filterToolDefs(toolDefs []engine.ToolDef, allowlist []string) []engine.Tool
 // - Keywords: agent_session, iterations, tool_calls, tokens_used
 func (r *Runtime) runSession(ctx context.Context, session *Session) {
 	sessionStart := time.Now()
+	workspaceRoot := r.workspaceRootForSession(session)
 
 	defer func() {
 		if session.done != nil {
@@ -2161,7 +2506,7 @@ func (r *Runtime) runSession(ctx context.Context, session *Session) {
 			observability.Emit(ctx, observability.NewEvent(observability.OpAgentComplete).
 				WithComponent(observability.ComponentAgent).
 				WithSession(session.ID, session.Config.ActorID).
-				WithWorkspace(r.config.WorkspaceRoot).
+				WithWorkspace(workspaceRoot).
 				WithData("role", string(session.Config.Role)).
 				WithData("iterations", session.Iterations).
 				WithData("panic", true).
@@ -2226,7 +2571,7 @@ func (r *Runtime) runSession(ctx context.Context, session *Session) {
 				observability.Emit(ctx, observability.NewEvent(observability.OpAgentComplete).
 					WithComponent(observability.ComponentAgent).
 					WithSession(session.ID, session.Config.ActorID).
-					WithWorkspace(r.config.WorkspaceRoot).
+					WithWorkspace(workspaceRoot).
 					WithData("role", string(session.Config.Role)).
 					WithData("iterations", iterations).
 					Error(err, time.Since(sessionStart)))
@@ -2239,7 +2584,7 @@ func (r *Runtime) runSession(ctx context.Context, session *Session) {
 				observability.Emit(ctx, observability.NewEvent(observability.OpAgentIteration).
 					WithComponent(observability.ComponentAgent).
 					WithSession(session.ID, session.Config.ActorID).
-					WithWorkspace(r.config.WorkspaceRoot).
+					WithWorkspace(workspaceRoot).
 					WithData("role", string(session.Config.Role)).
 					WithData("retry", engineRetries).
 					WithData("error", err.Error()).
@@ -2262,7 +2607,7 @@ func (r *Runtime) runSession(ctx context.Context, session *Session) {
 			observability.Emit(ctx, observability.NewEvent(observability.OpAgentComplete).
 				WithComponent(observability.ComponentAgent).
 				WithSession(session.ID, session.Config.ActorID).
-				WithWorkspace(r.config.WorkspaceRoot).
+				WithWorkspace(workspaceRoot).
 				WithData("role", string(session.Config.Role)).
 				WithData("iterations", iterations).
 				WithData("retries_exhausted", true).
@@ -2300,7 +2645,7 @@ func (r *Runtime) runSession(ctx context.Context, session *Session) {
 		observability.Emit(ctx, observability.NewEvent(observability.OpAgentIteration).
 			WithComponent(observability.ComponentAgent).
 			WithSession(session.ID, session.Config.ActorID).
-			WithWorkspace(r.config.WorkspaceRoot).
+			WithWorkspace(workspaceRoot).
 			WithData("role", string(session.Config.Role)).
 			WithData("iteration", currentIterations).
 			WithData("tool_calls", len(output.ToolCalls)).
@@ -2465,7 +2810,7 @@ func (r *Runtime) runSession(ctx context.Context, session *Session) {
 	observability.Emit(ctx, observability.NewEvent(observability.OpAgentComplete).
 		WithComponent(observability.ComponentAgent).
 		WithSession(session.ID, session.Config.ActorID).
-		WithWorkspace(r.config.WorkspaceRoot).
+		WithWorkspace(workspaceRoot).
 		WithData("role", string(session.Config.Role)).
 		WithData("iterations", totalIterations).
 		WithData("tool_calls", totalToolCalls).
@@ -2490,6 +2835,27 @@ func intArg(args map[string]any, fallback int, keys ...string) int {
 		}
 	}
 	return fallback
+}
+
+func stringArg(args map[string]any, fallback string, keys ...string) string {
+	for _, key := range keys {
+		if v, ok := args[key].(string); ok {
+			trimmed := strings.TrimSpace(v)
+			if trimmed != "" {
+				return trimmed
+			}
+		}
+	}
+	return fallback
+}
+
+func boolArg(args map[string]any, keys ...string) bool {
+	for _, key := range keys {
+		if v, ok := args[key].(bool); ok {
+			return v
+		}
+	}
+	return false
 }
 
 func stringSliceArg(args map[string]any, keys ...string) []string {
@@ -2565,7 +2931,7 @@ func (r *Runtime) dispatchStopRequested(ctx context.Context, session *Session, p
 		SessionID:     session.ID,
 		ActorID:       session.Config.ActorID,
 		WorkspaceID:   session.Config.WorkspaceID,
-		WorkspaceRoot: r.config.WorkspaceRoot,
+		WorkspaceRoot: r.workspaceRootForSession(session),
 		TraceID:       traceIDFromContext(ctx),
 	}
 
@@ -2984,6 +3350,7 @@ func (r *Runtime) Resume(ctx context.Context, sessionID string, additionalPrompt
 	cfg := types.AgentConfig{
 		Role:             types.AgentRole(prevSession.AgentType),
 		WorkspaceID:      prevSession.WorkspacePath,
+		WorkspaceRoot:    prevSession.WorkspacePath,
 		Prompt:           promptBuilder.String(),
 		MaxIterations:    10, // Default for continuation
 		MaxContextTokens: 50000,
@@ -3074,7 +3441,7 @@ func (r *Runtime) runAutonomousContinuation(ctx context.Context, session *Sessio
 		observability.Emit(ctx, observability.NewEvent("agent.autonomous_turn").
 			WithComponent(observability.ComponentAgent).
 			WithSession(session.ID, session.Config.ActorID).
-			WithWorkspace(r.config.WorkspaceRoot).
+			WithWorkspace(r.workspaceRootForSession(session)).
 			WithData("turn", turn+1).
 			WithData("max_turns", maxTurns).
 			Success(0))
@@ -3125,7 +3492,7 @@ func (r *Runtime) runAutonomousContinuation(ctx context.Context, session *Sessio
 		observability.Emit(ctx, observability.NewEvent(observability.OpAgentIteration).
 			WithComponent(observability.ComponentAgent).
 			WithSession(session.ID, session.Config.ActorID).
-			WithWorkspace(r.config.WorkspaceRoot).
+			WithWorkspace(r.workspaceRootForSession(session)).
 			WithData("role", string(session.Config.Role)).
 			WithData("iteration", currentIterations).
 			WithData("tool_calls", len(output.ToolCalls)).
@@ -3327,7 +3694,7 @@ func (r *Runtime) processMailboxMessages(ctx context.Context, session *Session, 
 			observability.Emit(ctx, observability.NewEvent("agent.mailbox_error").
 				WithComponent(observability.ComponentAgent).
 				WithSession(session.ID, session.Config.ActorID).
-				WithWorkspace(r.config.WorkspaceRoot).
+				WithWorkspace(r.workspaceRootForSession(session)).
 				Error(err, 0))
 			// Nack with 30s delay to avoid tight retry loops on persistent errors
 			_ = r.config.MailboxStore.Nack(ctx, msg.ID, 30*time.Second)
@@ -3342,7 +3709,7 @@ func (r *Runtime) processMailboxMessages(ctx context.Context, session *Session, 
 				observability.Emit(ctx, observability.NewEvent("agent.mailbox_reply_error").
 					WithComponent(observability.ComponentAgent).
 					WithSession(session.ID, session.Config.ActorID).
-					WithWorkspace(r.config.WorkspaceRoot).
+					WithWorkspace(r.workspaceRootForSession(session)).
 					Error(err, 0))
 			}
 		}
@@ -3368,7 +3735,7 @@ func (r *Runtime) processMailboxMessages(ctx context.Context, session *Session, 
 		observability.Emit(ctx, observability.NewEvent(observability.OpAgentIteration).
 			WithComponent(observability.ComponentAgent).
 			WithSession(session.ID, session.Config.ActorID).
-			WithWorkspace(r.config.WorkspaceRoot).
+			WithWorkspace(r.workspaceRootForSession(session)).
 			WithData("role", string(session.Config.Role)).
 			WithData("iteration", currentIterations).
 			WithData("tool_calls", len(output.ToolCalls)).
@@ -3460,6 +3827,7 @@ func extractAskID(msg agent.Message) string {
 func (r *Runtime) runScheduledThink(ctx context.Context, session *Session) {
 	thinkPrompt := scheduledThinkPrompt(session.Config.ExecMode)
 	eventName := scheduledThinkEventName(session.Config.ExecMode)
+	workspaceRoot := r.workspaceRootForSession(session)
 
 	// Persist user turn before running engine
 	_ = r.saveTurn(ctx, session.ID, session.nextTurnIndex(), "user", thinkPrompt, nil, 0)
@@ -3470,7 +3838,7 @@ func (r *Runtime) runScheduledThink(ctx context.Context, session *Session) {
 			{Role: engine.RoleUser, Content: thinkPrompt},
 		},
 		Tools:     session.Tools,
-		Workspace: r.config.WorkspaceRoot,
+		Workspace: workspaceRoot,
 		SessionID: session.ID,
 	}
 
@@ -3479,7 +3847,7 @@ func (r *Runtime) runScheduledThink(ctx context.Context, session *Session) {
 		observability.Emit(ctx, observability.NewEvent(eventName+"_error").
 			WithComponent(observability.ComponentAgent).
 			WithSession(session.ID, session.Config.ActorID).
-			WithWorkspace(r.config.WorkspaceRoot).
+			WithWorkspace(workspaceRoot).
 			Error(err, 0))
 		return
 	}
@@ -3516,7 +3884,7 @@ func (r *Runtime) runScheduledThink(ctx context.Context, session *Session) {
 	observability.Emit(ctx, observability.NewEvent(observability.OpAgentIteration).
 		WithComponent(observability.ComponentAgent).
 		WithSession(session.ID, session.Config.ActorID).
-		WithWorkspace(r.config.WorkspaceRoot).
+		WithWorkspace(workspaceRoot).
 		WithData("role", string(session.Config.Role)).
 		WithData("iteration", currentIterations).
 		WithData("tool_calls", len(output.ToolCalls)).
@@ -3528,7 +3896,7 @@ func (r *Runtime) runScheduledThink(ctx context.Context, session *Session) {
 	observability.Emit(ctx, observability.NewEvent("agent."+eventName+"_work").
 		WithComponent(observability.ComponentAgent).
 		WithSession(session.ID, session.Config.ActorID).
-		WithWorkspace(r.config.WorkspaceRoot).
+		WithWorkspace(workspaceRoot).
 		Success(0))
 
 	// If work was started and autonomous continuation is enabled

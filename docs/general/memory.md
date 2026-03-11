@@ -1,3 +1,8 @@
+---
+vault_refs:
+  - notes/repo/agentctl/semantic-and-memory.md
+---
+
 # Memory
 
 Machine-friendly reference for named memory persistence and retrieval.
