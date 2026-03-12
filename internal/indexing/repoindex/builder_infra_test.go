@@ -268,6 +268,21 @@ spec:
       valueFiles:
         - config/test/values.yaml
 `)
+	writeFile("argocd/api-sources.yaml", `
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: api-sources
+  namespace: argocd
+spec:
+  sources:
+    - repoURL: git@example.com/repo.git
+      targetRevision: main
+      path: charts/api
+      helm:
+        valueFiles:
+          - config/test/values.yaml
+`)
 
 	store, err := Open(ctx, storageRoot, workspace)
 	if err != nil {
@@ -318,6 +333,7 @@ spec:
 	chartPkgID := infraPackageID(kubernetesPkgPrefix, "charts/api/Chart.yaml")
 	chartNodeID := NamespacedID(repoKey, ConceptChart+chartPkgID+":api")
 	appNodeID := NamespacedID(repoKey, ConceptApp+"argocd/api-test.yaml:"+strings.ToLower("api-test"))
+	appSourcesNodeID := NamespacedID(repoKey, ConceptApp+"argocd/api-sources.yaml:"+strings.ToLower("api-sources"))
 	valueFileID := FileID(repoKey, infraPackageID(kubernetesPkgPrefix, "charts/api/config/test/values.yaml"), "charts/api/config/test/values.yaml")
 	chartValueFileID := FileID(repoKey, infraPackageID(kubernetesPkgPrefix, "charts/api/values.yaml"), "charts/api/values.yaml")
 
@@ -338,6 +354,17 @@ spec:
 	}
 	if !containsEdge(outgoing, appNodeID, valueFileID, EdgeRefersTo) {
 		t.Fatalf("expected application refers to values file")
+	}
+
+	outgoing, err = store.GetOutgoingEdges(ctx, appSourcesNodeID, []EdgeType{EdgeImports, EdgeRefersTo}, 50)
+	if err != nil {
+		t.Fatalf("get sources app outgoing edges: %v", err)
+	}
+	if !containsEdge(outgoing, appSourcesNodeID, chartNodeID, EdgeImports) {
+		t.Fatalf("expected sources application imports chart")
+	}
+	if !containsEdge(outgoing, appSourcesNodeID, valueFileID, EdgeRefersTo) {
+		t.Fatalf("expected sources application refers to values file")
 	}
 }
 

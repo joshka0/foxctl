@@ -501,8 +501,15 @@ func extractArgoApplicationRefs(repoKey, fileRelPath string, content []byte) []a
 				valueFiles = append(valueFiles, yamlSequenceValues(yamlMapping(helmNode, "valueFiles"))...)
 			}
 		}
-		if sources := yamlMapping(spec, "sources"); sources != nil {
-			valueFiles = append(valueFiles, yamlSequenceValues(yamlMapping(sources, "helm"))...)
+		if sources := yamlSequenceNode(yamlMapping(spec, "sources")); len(sources) > 0 {
+			for _, source := range sources {
+				if chartPath == "" {
+					chartPath = strings.TrimSpace(yamlLookupNode(source, "path"))
+				}
+				if helmNode := yamlMapping(source, "helm"); helmNode != nil {
+					valueFiles = append(valueFiles, yamlSequenceValues(yamlMapping(helmNode, "valueFiles"))...)
+				}
+			}
 		}
 		nodeID := NamespacedID(repoKey, ConceptApp+filepath.ToSlash(fileRelPath)+":"+strings.ToLower(name))
 		display := "application " + name
@@ -1294,6 +1301,19 @@ func yamlSequenceValues(node *yaml.Node) []string {
 		value := strings.TrimSpace(item.Value)
 		if value != "" {
 			out = append(out, value)
+		}
+	}
+	return out
+}
+
+func yamlSequenceNode(node *yaml.Node) []*yaml.Node {
+	if node == nil || node.Kind != yaml.SequenceNode {
+		return nil
+	}
+	out := make([]*yaml.Node, 0, len(node.Content))
+	for _, item := range node.Content {
+		if item != nil {
+			out = append(out, item)
 		}
 	}
 	return out
