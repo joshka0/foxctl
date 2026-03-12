@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -245,7 +246,7 @@ func runSemanticSearchEvalMode(ctx context.Context, workspacePath, vaultPath, qu
 	if err != nil {
 		return nil, err
 	}
-	repoRoot, err := os.Getwd()
+	repoRoot, err := resolveAgentctlRepoRoot()
 	if err != nil {
 		return nil, err
 	}
@@ -265,6 +266,31 @@ func runSemanticSearchEvalMode(ctx context.Context, workspacePath, vaultPath, qu
 		return nil, err
 	}
 	return extractSemanticSearchResultPaths(out.Results), nil
+}
+
+func resolveAgentctlRepoRoot() (string, error) {
+	if _, file, _, ok := runtime.Caller(0); ok {
+		candidate := filepath.Clean(filepath.Join(filepath.Dir(file), "..", "..", ".."))
+		if _, err := os.Stat(filepath.Join(candidate, "skills", "code_semantic_search", "main.go")); err == nil {
+			return candidate, nil
+		}
+	}
+	cwd, err := os.Getwd()
+	if err != nil {
+		return "", err
+	}
+	dir := cwd
+	for {
+		if _, err := os.Stat(filepath.Join(dir, "skills", "code_semantic_search", "main.go")); err == nil {
+			return dir, nil
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			break
+		}
+		dir = parent
+	}
+	return "", fmt.Errorf("resolve agentctl repo root: could not locate skills/code_semantic_search/main.go")
 }
 
 func extractSemanticSearchResultPaths(results []struct {
