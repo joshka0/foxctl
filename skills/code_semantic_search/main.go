@@ -18,6 +18,7 @@ import (
 	"go/parser"
 	"go/token"
 	"io"
+	"io/fs"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -34,6 +35,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
 	"github.com/jkatigb/agentctl/internal/contextplane"
 	"github.com/jkatigb/agentctl/internal/domain/policy"
+	"github.com/jkatigb/agentctl/internal/indexing/codefilter"
 	"github.com/jkatigb/agentctl/internal/indexing/filesummary"
 	"github.com/jkatigb/agentctl/internal/indexing/repoindex"
 	"github.com/jkatigb/agentctl/internal/indexing/rerank"
@@ -1051,13 +1053,14 @@ func searchSymbolsWithRetrieval(
 
 	resp, err := engine.Search(ctx, req)
 	if err != nil {
+		fallback := searchPathFallback(ctx, workspacePath, query, limit)
+		if len(fallback) > 0 {
+			return fallback, nil, nil
+		}
 		if bootstrapErr != nil {
 			return nil, nil, bootstrapErr
 		}
 		return nil, nil, skillerr.WrapRuntime("search retrieval v2", err)
-	}
-	if len(resp.Hits) == 0 && bootstrapErr != nil {
-		return nil, nil, bootstrapErr
 	}
 
 	results := make([]Result, 0, len(resp.Hits))
@@ -1091,7 +1094,189 @@ func searchSymbolsWithRetrieval(
 		results = append(results, result)
 	}
 
+	fallback := searchPathFallback(ctx, workspacePath, query, limit)
+	if len(results) == 0 && len(fallback) > 0 {
+		return fallback, nil, nil
+	}
+	if len(fallback) > 0 && shouldUsePathFallback(results) {
+		return mergeSymbolResultsWithFallback(fallback, results, limit), nil, nil
+	}
+	if len(results) == 0 && bootstrapErr != nil {
+		return nil, nil, bootstrapErr
+	}
+
 	return results, resp.Groups, nil
+}
+
+func shouldUsePathFallback(results []Result) bool {
+	if len(results) == 0 {
+		return true
+	}
+	return results[0].Similarity < 0.15
+}
+
+func mergeSymbolResultsWithFallback(fallback, primary []Result, limit int) []Result {
+	seen := map[string]struct{}{}
+	merged := make([]Result, 0, len(fallback)+len(primary))
+	appendResult := func(result Result) {
+		key := strings.TrimSpace(result.Path)
+		if key == "" {
+			key = strings.TrimSpace(result.ID)
+		}
+		if key == "" {
+			return
+		}
+		if _, ok := seen[key]; ok {
+			return
+		}
+		seen[key] = struct{}{}
+		result.Source = ScopeSymbols
+		merged = append(merged, result)
+	}
+	for _, result := range fallback {
+		appendResult(result)
+	}
+	for _, result := range primary {
+		appendResult(result)
+	}
+	if limit > 0 && len(merged) > limit {
+		merged = merged[:limit]
+	}
+	for i := range merged {
+		merged[i].SourceRank = i + 1
+	}
+	return merged
+}
+
+func searchPathFallback(ctx context.Context, workspacePath, query string, limit int) []Result {
+	if strings.TrimSpace(workspacePath) == "" || strings.TrimSpace(query) == "" || limit <= 0 {
+		return nil
+	}
+	tokens := fallbackPathTokens(query)
+	if len(tokens) == 0 {
+		return nil
+	}
+
+	type candidate struct {
+		path  string
+		score int
+	}
+	var candidates []candidate
+	_ = filepath.WalkDir(workspacePath, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		if d.IsDir() {
+			name := strings.TrimSpace(d.Name())
+			if name == ".git" || name == "node_modules" || name == "vendor" || name == ".agentctl" {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		rel, err := filepath.Rel(workspacePath, path)
+		if err != nil {
+			return nil
+		}
+		rel = filepath.ToSlash(rel)
+		if codefilter.ShouldSkipPath(rel) || !looksLikeCodePath(rel) {
+			return nil
+		}
+		score := scorePathFallbackCandidate(rel, tokens)
+		if score <= 0 {
+			return nil
+		}
+		candidates = append(candidates, candidate{path: rel, score: score})
+		return nil
+	})
+	if len(candidates) == 0 {
+		return nil
+	}
+	sort.SliceStable(candidates, func(i, j int) bool {
+		if candidates[i].score != candidates[j].score {
+			return candidates[i].score > candidates[j].score
+		}
+		return candidates[i].path < candidates[j].path
+	})
+	if len(candidates) > limit {
+		candidates = candidates[:limit]
+	}
+	results := make([]Result, 0, len(candidates))
+	for i, candidate := range candidates {
+		results = append(results, Result{
+			Source:     ScopeSymbols,
+			ID:         "symbol:path_fallback:" + candidate.path,
+			Name:       contextResultPathLabel(candidate.path),
+			Path:       candidate.path,
+			Similarity: fallbackSimilarity(i, len(candidates)),
+			SourceRank: i + 1,
+		})
+	}
+	return results
+}
+
+func fallbackPathTokens(query string) []string {
+	parts := strings.FieldsFunc(strings.ToLower(strings.TrimSpace(query)), func(r rune) bool {
+		return !(r >= 'a' && r <= 'z' || r >= '0' && r <= '9')
+	})
+	stop := map[string]struct{}{
+		"the": {}, "and": {}, "for": {}, "with": {}, "from": {}, "into": {}, "how": {}, "what": {}, "does": {}, "work": {},
+	}
+	out := make([]string, 0, len(parts))
+	seen := map[string]struct{}{}
+	for _, part := range parts {
+		if len(part) < 3 {
+			continue
+		}
+		if _, ok := stop[part]; ok {
+			continue
+		}
+		if _, ok := seen[part]; ok {
+			continue
+		}
+		seen[part] = struct{}{}
+		out = append(out, part)
+	}
+	return out
+}
+
+func scorePathFallbackCandidate(path string, tokens []string) int {
+	if strings.TrimSpace(path) == "" || len(tokens) == 0 {
+		return 0
+	}
+	lower := strings.ToLower(filepath.ToSlash(path))
+	base := strings.ToLower(filepath.Base(lower))
+	score := 0
+	for _, token := range tokens {
+		switch {
+		case strings.Contains(base, token):
+			score += 5
+		case strings.Contains(lower, "/"+token+"/"):
+			score += 4
+		case strings.Contains(lower, token):
+			score += 2
+		}
+	}
+	if strings.Contains(lower, "/cmd/") || strings.Contains(lower, "/internal/") {
+		score++
+	}
+	return score
+}
+
+func looksLikeCodePath(path string) bool {
+	switch strings.ToLower(filepath.Ext(path)) {
+	case ".go", ".ts", ".tsx", ".js", ".jsx", ".py", ".ex", ".exs":
+		return true
+	default:
+		return false
+	}
+}
+
+func fallbackSimilarity(index, total int) float64 {
+	if total <= 1 {
+		return 0.6
+	}
+	step := 0.3 / float64(total-1)
+	return 0.6 - (float64(index) * step)
 }
 
 type memoryListByTypeSource struct {

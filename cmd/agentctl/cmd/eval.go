@@ -122,17 +122,14 @@ func newEvalRetrievalCommand() *cobra.Command {
 				}
 				if hasMode(selectedModes, "skill_default") {
 					paths, err := runSemanticSearchEvalMode(ctx, target, vaultPath, q.Query, limit, []string{"symbols", "sessions", "memories", "tasks", "codemaps"})
-					paths = filterEvalPaths(paths, canonicalOnly)
 					qr.Modes["skill_default"] = retrievaleval.EvaluateMode("skill_default", paths, q.ExpectedAnyOf, len(paths), err)
 				}
 				if hasMode(selectedModes, "skill_context") {
 					paths, err := runSemanticSearchEvalMode(ctx, target, vaultPath, q.Query, limit, []string{"context"})
-					paths = filterEvalPaths(paths, canonicalOnly)
 					qr.Modes["skill_context"] = retrievaleval.EvaluateMode("skill_context", paths, q.ExpectedAnyOf, len(paths), err)
 				}
 				if hasMode(selectedModes, "skill_default_plus_context") {
 					paths, err := runSemanticSearchEvalMode(ctx, target, vaultPath, q.Query, limit, []string{"symbols", "sessions", "memories", "tasks", "codemaps", "context"})
-					paths = filterEvalPaths(paths, canonicalOnly)
 					qr.Modes["skill_default_plus_context"] = retrievaleval.EvaluateMode("skill_default_plus_context", paths, q.ExpectedAnyOf, len(paths), err)
 				}
 				results = append(results, qr)

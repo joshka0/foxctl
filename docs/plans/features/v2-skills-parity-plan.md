@@ -151,6 +151,20 @@ Reference eval shapes now in use:
 - `testdata/evals/retrieval/agentctl-mixed.yaml`
 - `testdata/evals/retrieval/praze.yaml`
 
+Most recent mixed-suite comparison (`agentctl-mixed`) after stabilizing the query-time search path:
+
+- `skill_default`: `hit@5 0.86`, `MRR 0.71`
+- `skill_context`: `hit@5 0.86`, `MRR 0.79`
+- `skill_default_plus_context`: `hit@5 1.00`, `MRR 0.76`
+
+Interpretation:
+
+- the default code-oriented path is now competitive again on implementation-flow queries
+- `context` remains valuable
+- `default + context` currently gives the strongest overall recall on the mixed suite
+
+That is stronger evidence for eventually blending `context` into the default search story, but it is still worth keeping the rollout explicit until more suites beyond `agentctl` are measured.
+
 ### Surfaces to review
 
 - `skills/code_semantic_search`

@@ -1,6 +1,9 @@
 package main
 
 import (
+	"context"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/jkatigb/agentctl/internal/contextplane"
@@ -263,5 +266,29 @@ func TestContextRetrievalToResults(t *testing.T) {
 	}
 	if results[2].Path != "notes/repo/agentctl/skills-runtime-wiring.md" {
 		t.Fatalf("vault result path=%q", results[2].Path)
+	}
+}
+
+func TestSearchPathFallback(t *testing.T) {
+	workspace := t.TempDir()
+	mustWrite := func(rel string) {
+		path := filepath.Join(workspace, rel)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", path, err)
+		}
+		if err := os.WriteFile(path, []byte("package main\n"), 0o644); err != nil {
+			t.Fatalf("write %s: %v", path, err)
+		}
+	}
+	mustWrite("cmd/agentctl/cmd/agent.go")
+	mustWrite("internal/platform/config/config.go")
+	mustWrite("internal/adapters/skillslib/skillmain/main.go")
+
+	results := searchPathFallback(context.Background(), workspace, "platform config settings", 5)
+	if len(results) == 0 {
+		t.Fatal("expected path fallback results")
+	}
+	if results[0].Path != "internal/platform/config/config.go" {
+		t.Fatalf("top path=%q want internal/platform/config/config.go", results[0].Path)
 	}
 }
