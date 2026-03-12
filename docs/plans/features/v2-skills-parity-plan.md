@@ -165,6 +165,18 @@ Interpretation:
 
 That is stronger evidence for eventually blending `context` into the default search story, but it is still worth keeping the rollout repo-aware until more suites beyond `agentctl` are measured.
 
+Follow-up `praze-mixed` results show the opposite shape:
+
+- `skill_default`: `hit@5 1.00`, `MRR 0.60`
+- `skill_context`: `hit@5 0.12`, `MRR 0.06`
+- `skill_default_plus_context`: `hit@5 1.00`, `MRR 0.60`
+
+Interpretation:
+
+- `praze` currently wants a code-first default
+- `context` is mostly noise there
+- repo-aware default policy is the right short-term shape, not a universal global default
+
 Current implementation direction:
 
 - `code/semantic_search` reads an optional workspace-local ACA retrieval policy key:
