@@ -25,6 +25,10 @@ Behavior contract:
 **Language coverage**
 - Go: packages/files/symbols, `IMPORTS`, `REFERS_TO`, `CALLS`
 - TypeScript (`.ts`/`.tsx`): packages/files/symbols, `IMPORTS`
+- Elixir (`.ex`/`.exs`): packages/files/symbols, heuristic `REFERS_TO`
+- Terraform (`.tf`): packages/files plus concept nodes for resources/modules/providers/variables/outputs
+- Kubernetes manifests (`.yaml`/`.yml` with `apiVersion` + `kind`): packages/files plus concept nodes for resources
+- Shell (`.sh`): packages/files plus concept nodes for commands and environment variables
 
 ---
 
@@ -32,11 +36,17 @@ Behavior contract:
 
 ```bash
 agentctl index repo build --workspace . --go --typescript
+
+# Infra / config / script indexing
+agentctl index repo build --workspace . --terraform --kubernetes --shell
 ```
 
 Optional flags:
 - `--include-tests` to index test files
 - `--go-pattern ./...` to scope Go packages
+- `--terraform` to include Terraform files
+- `--kubernetes` to include Kubernetes YAML manifests
+- `--shell` to include shell scripts
 
 **Summaries:** repoindex reuses file summaries and symbol summaries. Run file
 summary generation to populate file node summaries and package/repo rollups,

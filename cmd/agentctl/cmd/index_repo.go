@@ -42,6 +42,9 @@ func newIndexRepoBuildCommand() *cobra.Command {
 	var includeGo bool
 	var includeTS bool
 	var includeElixir bool
+	var includeTerraform bool
+	var includeKubernetes bool
+	var includeShell bool
 	var includeTests bool
 	var dryRun bool
 
@@ -49,7 +52,7 @@ func newIndexRepoBuildCommand() *cobra.Command {
 		Use:   "build",
 		Short: "Build the repo graph index",
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			return runIndexRepoBuild(cmd, workspace, patterns, includeGo, includeTS, includeElixir, includeTests, dryRun)
+			return runIndexRepoBuild(cmd, workspace, patterns, includeGo, includeTS, includeElixir, includeTerraform, includeKubernetes, includeShell, includeTests, dryRun)
 		},
 	}
 
@@ -58,6 +61,9 @@ func newIndexRepoBuildCommand() *cobra.Command {
 	cmd.Flags().BoolVar(&includeGo, "go", true, "Include Go sources")
 	cmd.Flags().BoolVar(&includeTS, "typescript", true, "Include TypeScript sources")
 	cmd.Flags().BoolVar(&includeElixir, "elixir", false, "Include Elixir sources")
+	cmd.Flags().BoolVar(&includeTerraform, "terraform", false, "Include Terraform files as file/concept graph components")
+	cmd.Flags().BoolVar(&includeKubernetes, "kubernetes", false, "Include Kubernetes YAML manifests as file/resource graph components")
+	cmd.Flags().BoolVar(&includeShell, "shell", false, "Include shell scripts as file/command graph components")
 	cmd.Flags().BoolVar(&includeTests, "include-tests", false, "Include test files")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Build without writing to the index")
 
@@ -178,7 +184,7 @@ func newIndexRepoAskCommand() *cobra.Command {
 	return cmd
 }
 
-func runIndexRepoBuild(cmd *cobra.Command, workspace string, patterns []string, includeGo, includeTS, includeElixir, includeTests, dryRun bool) error {
+func runIndexRepoBuild(cmd *cobra.Command, workspace string, patterns []string, includeGo, includeTS, includeElixir, includeTerraform, includeKubernetes, includeShell, includeTests, dryRun bool) error {
 	ctx := cmd.Context()
 	start := time.Now()
 
@@ -218,6 +224,9 @@ func runIndexRepoBuild(cmd *cobra.Command, workspace string, patterns []string, 
 		IncludeGo:             includeGo,
 		IncludeTypescript:     includeTS,
 		IncludeElixir:         includeElixir,
+		IncludeTerraform:      includeTerraform,
+		IncludeKubernetes:     includeKubernetes,
+		IncludeShell:          includeShell,
 		DryRun:                dryRun,
 		SummaryProvider:       summaryProvider,
 		SymbolSummaryProvider: symbolSummaryProvider,

@@ -44,6 +44,8 @@ const (
 	ConceptField    = "field:"
 	ConceptResource = "res:"
 	ConceptEvent    = "event:"
+	ConceptCommand  = "cmd:"
+	ConceptEnvVar   = "env:"
 )
 
 const (
@@ -158,6 +160,9 @@ type BuildOptions struct {
 	IncludeGo             bool
 	IncludeTypescript     bool
 	IncludeElixir         bool
+	IncludeTerraform      bool
+	IncludeKubernetes     bool
+	IncludeShell          bool
 	DryRun                bool
 	SummaryProvider       FileSummaryProvider
 	SymbolSummaryProvider SymbolSummaryProvider
