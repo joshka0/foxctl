@@ -35,6 +35,9 @@ var (
 	terraformOutputRefRe = regexp.MustCompile(`\boutput\.([A-Za-z0-9_]+)\b`)
 	terraformDataRefRe = regexp.MustCompile(`\bdata\.([A-Za-z0-9_]+)\.([A-Za-z0-9_]+)\b`)
 	terraformResourceRefRe = regexp.MustCompile(`\b([a-z][A-Za-z0-9_]*)\.([A-Za-z0-9_]+)\b`)
+	helmTemplateKindRe   = regexp.MustCompile(`(?m)^\s*kind:\s*([A-Za-z0-9]+)\s*$`)
+	helmTemplateAPIVerRe = regexp.MustCompile(`(?m)^\s*apiVersion:\s*([A-Za-z0-9./-]+)\s*$`)
+	helmTemplateNameRe   = regexp.MustCompile(`(?m)^\s*name:\s*([^\s{][^\n#]*)$`)
 	shellEnvVarRe    = regexp.MustCompile(`\$\{?([A-Z_][A-Z0-9_]*)\}?`)
 )
 
@@ -83,7 +86,7 @@ func (b *Builder) buildKubernetes(ctx context.Context, opts BuildOptions, nodes 
 		".agentctl/**",
 	}
 	fileSet := map[string]struct{}{}
-	for _, pattern := range []string{"**/*.yaml", "**/*.yml"} {
+	for _, pattern := range []string{"**/*.yaml", "**/*.yml", "**/*.tpl"} {
 		paths, err := fsutil.FindFilesRespectingGitignore(opts.RepoRoot, pattern, exclude)
 		if err != nil {
 			return fmt.Errorf("repoindex: find kubernetes files: %w", err)
@@ -98,15 +101,25 @@ func (b *Builder) buildKubernetes(ctx context.Context, opts BuildOptions, nodes 
 	}
 	sort.Strings(fileList)
 	seenPackages := map[string]bool{}
+	chartRefs := make([]helmChartRef, 0)
+	appRefs := make([]argoApplicationRef, 0)
 	for _, fileRelPath := range fileList {
 		absPath := filepath.Join(opts.RepoRoot, fileRelPath)
 		content, err := os.ReadFile(absPath)
 		if err != nil {
 			return fmt.Errorf("repoindex: read kubernetes file %s: %w", fileRelPath, err)
 		}
+		chartRef, hasChart := extractHelmChartRef(opts.RepoKey, fileRelPath, content)
+		if hasChart {
+			chartRefs = append(chartRefs, chartRef)
+		}
+		apps := extractArgoApplicationRefs(opts.RepoKey, fileRelPath, content)
+		if len(apps) > 0 {
+			appRefs = append(appRefs, apps...)
+		}
 		concepts := extractKubernetesConcepts(opts.RepoKey, fileRelPath, content)
-		if len(concepts) == 0 {
-			continue
+		if len(concepts) == 0 && isHelmTemplateFile(fileRelPath) {
+			concepts = extractHelmTemplateConcepts(opts.RepoKey, fileRelPath, content)
 		}
 		pkgID, pkgNodeID := ensureInfraPackageNode(nodes, kubernetesPkgPrefix, opts.RepoKey, fileRelPath)
 		if !seenPackages[pkgID] {
@@ -115,6 +128,32 @@ func (b *Builder) buildKubernetes(ctx context.Context, opts BuildOptions, nodes 
 		}
 		fileNodeID := addInfraFileNode(ctx, opts, nodes, edges, pkgID, pkgNodeID, fileRelPath, content)
 		result.Files++
+		if hasChart {
+			addNode(nodes, chartRef.node)
+			addEdge(edges, Edge{
+				Src:    pkgNodeID,
+				Dst:    chartRef.node.ID,
+				Type:   EdgeContains,
+				Weight: 1.0,
+			})
+			addEdge(edges, Edge{
+				Src:    fileNodeID,
+				Dst:    chartRef.node.ID,
+				Type:   EdgeContains,
+				Weight: 1.0,
+			})
+			result.Symbols++
+		}
+		for _, app := range apps {
+			addNode(nodes, app.node)
+			addEdge(edges, Edge{
+				Src:    fileNodeID,
+				Dst:    app.node.ID,
+				Type:   EdgeContains,
+				Weight: 1.0,
+			})
+			result.Symbols++
+		}
 		for _, concept := range concepts {
 			addNode(nodes, concept.node)
 			addEdge(edges, Edge{
@@ -127,6 +166,8 @@ func (b *Builder) buildKubernetes(ctx context.Context, opts BuildOptions, nodes 
 			result.Symbols++
 		}
 	}
+	linkHelmCharts(nodes, edges, chartRefs)
+	linkArgoApplications(nodes, edges, chartRefs, appRefs, opts.RepoKey)
 	return nil
 }
 
@@ -296,6 +337,21 @@ type kubeConcept struct {
 	meta json.RawMessage
 }
 
+type helmChartRef struct {
+	dir    string
+	pkgID  string
+	node   Node
+	values []string
+}
+
+type argoApplicationRef struct {
+	node       Node
+	pkgID      string
+	fileRel    string
+	chartPath  string
+	valueFiles []string
+}
+
 type terraformBlock struct {
 	blockType   string
 	typeName    string
@@ -364,6 +420,280 @@ func extractKubernetesConcepts(repoKey, fileRelPath string, content []byte) []ku
 		})
 	}
 	return out
+}
+
+func extractHelmChartRef(repoKey, fileRelPath string, content []byte) (helmChartRef, bool) {
+	if filepath.Base(fileRelPath) != "Chart.yaml" {
+		return helmChartRef{}, false
+	}
+	var chart struct {
+		APIVersion  string   `yaml:"apiVersion"`
+		Name        string   `yaml:"name"`
+		Version     string   `yaml:"version"`
+		AppVersion  string   `yaml:"appVersion"`
+		Type        string   `yaml:"type"`
+		Description string   `yaml:"description"`
+		Keywords    []string `yaml:"keywords"`
+	}
+	if err := yaml.Unmarshal(content, &chart); err != nil {
+		return helmChartRef{}, false
+	}
+	name := strings.TrimSpace(chart.Name)
+	if name == "" {
+		return helmChartRef{}, false
+	}
+	dir := filepath.ToSlash(filepath.Dir(fileRelPath))
+	pkgID := infraPackageID(kubernetesPkgPrefix, fileRelPath)
+	summary := fmt.Sprintf("Helm chart %s in %s.", name, dir)
+	if strings.TrimSpace(chart.Description) != "" {
+		summary = summary + " " + strings.TrimSpace(chart.Description)
+	}
+	node := Node{
+		ID:        NamespacedID(repoKey, ConceptChart+pkgID+":"+strings.ToLower(name)),
+		Kind:      NodeConcept,
+		Pkg:       pkgID,
+		File:      fileRelPath,
+		Name:      "chart " + name,
+		Doc:       fmt.Sprintf("Helm chart path %s.", dir),
+		Summary:   summary,
+		SpanStart: 1,
+		SpanEnd:   1,
+		UpdatedAt: time.Now().UTC(),
+	}
+	return helmChartRef{
+		dir:    dir,
+		pkgID:  pkgID,
+		node:   node,
+		values: []string{filepath.ToSlash(filepath.Join(dir, "values.yaml"))},
+	}, true
+}
+
+func extractArgoApplicationRefs(repoKey, fileRelPath string, content []byte) []argoApplicationRef {
+	decoder := yaml.NewDecoder(strings.NewReader(string(content)))
+	out := []argoApplicationRef{}
+	for {
+		var node yaml.Node
+		if err := decoder.Decode(&node); err != nil {
+			break
+		}
+		if len(node.Content) == 0 {
+			continue
+		}
+		doc := node.Content[0]
+		if yamlLookup(doc, "kind") != "Application" {
+			continue
+		}
+		if !strings.Contains(strings.ToLower(yamlLookup(doc, "apiVersion")), "argoproj.io/") {
+			continue
+		}
+		metadata := yamlMapping(doc, "metadata")
+		name := yamlLookupNode(metadata, "name")
+		if name == "" {
+			name = filepath.Base(strings.TrimSuffix(fileRelPath, filepath.Ext(fileRelPath)))
+		}
+		namespace := yamlLookupNode(metadata, "namespace")
+		spec := yamlMapping(doc, "spec")
+		chartPath := ""
+		valueFiles := []string{}
+		if source := yamlMapping(spec, "source"); source != nil {
+			chartPath = strings.TrimSpace(yamlLookupNode(source, "path"))
+			if helmNode := yamlMapping(source, "helm"); helmNode != nil {
+				valueFiles = append(valueFiles, yamlSequenceValues(yamlMapping(helmNode, "valueFiles"))...)
+			}
+		}
+		if sources := yamlMapping(spec, "sources"); sources != nil {
+			valueFiles = append(valueFiles, yamlSequenceValues(yamlMapping(sources, "helm"))...)
+		}
+		nodeID := NamespacedID(repoKey, ConceptApp+filepath.ToSlash(fileRelPath)+":"+strings.ToLower(name))
+		display := "application " + name
+		if namespace != "" {
+			display = "application " + namespace + "/" + name
+		}
+		out = append(out, argoApplicationRef{
+			node: Node{
+				ID:        nodeID,
+				Kind:      NodeConcept,
+				Pkg:       infraPackageID(kubernetesPkgPrefix, fileRelPath),
+				File:      fileRelPath,
+				Name:      display,
+				Summary:   fmt.Sprintf("ArgoCD Application %s targets chart path %s.", name, firstNonEmptyString(chartPath, "(unspecified)")),
+				SpanStart: doc.Line,
+				SpanEnd:   doc.Line,
+				UpdatedAt: time.Now().UTC(),
+			},
+			pkgID:      infraPackageID(kubernetesPkgPrefix, fileRelPath),
+			fileRel:    fileRelPath,
+			chartPath:  filepath.ToSlash(strings.TrimSpace(chartPath)),
+			valueFiles: append([]string(nil), valueFiles...),
+		})
+	}
+	return out
+}
+
+func extractHelmTemplateConcepts(repoKey, fileRelPath string, content []byte) []kubeConcept {
+	apiVersion := ""
+	if match := helmTemplateAPIVerRe.FindStringSubmatch(string(content)); len(match) > 1 {
+		apiVersion = strings.TrimSpace(match[1])
+	}
+	kind := ""
+	if match := helmTemplateKindRe.FindStringSubmatch(string(content)); len(match) > 1 {
+		kind = strings.TrimSpace(match[1])
+	}
+	if apiVersion == "" || kind == "" {
+		return nil
+	}
+	name := strings.TrimSuffix(filepath.Base(fileRelPath), filepath.Ext(fileRelPath))
+	if match := helmTemplateNameRe.FindStringSubmatch(string(content)); len(match) > 1 {
+		candidate := strings.TrimSpace(match[1])
+		if !strings.Contains(candidate, "{{") {
+			name = candidate
+		}
+	}
+	resourceKey := strings.ToLower(kind) + ":" + name
+	return []kubeConcept{{
+		node: Node{
+			ID:        NamespacedID(repoKey, ConceptResource+resourceKey),
+			Kind:      NodeConcept,
+			Pkg:       infraPackageID(kubernetesPkgPrefix, fileRelPath),
+			File:      fileRelPath,
+			Name:      kind + "/" + name,
+			Summary:   fmt.Sprintf("Kubernetes %s template %s (%s).", kind, name, apiVersion),
+			SpanStart: 1,
+			SpanEnd:   1,
+			UpdatedAt: time.Now().UTC(),
+		},
+	}}
+}
+
+func linkHelmCharts(nodes map[string]Node, edges map[string]Edge, charts []helmChartRef) {
+	if len(charts) == 0 {
+		return
+	}
+	fileNodes := make([]Node, 0, len(nodes))
+	for _, node := range nodes {
+		if node.Kind == NodeFile {
+			fileNodes = append(fileNodes, node)
+		}
+	}
+	for _, chart := range charts {
+		for _, node := range fileNodes {
+			if !strings.HasPrefix(filepath.ToSlash(node.File), chart.dir+"/") {
+				continue
+			}
+			if node.ID == chart.node.ID {
+				continue
+			}
+			addEdge(edges, Edge{
+				Src:    chart.node.ID,
+				Dst:    node.ID,
+				Type:   EdgeContains,
+				Weight: 0.9,
+			})
+		}
+	}
+}
+
+func linkArgoApplications(nodes map[string]Node, edges map[string]Edge, charts []helmChartRef, apps []argoApplicationRef, repoKey string) {
+	if len(apps) == 0 {
+		return
+	}
+	chartByDir := map[string]helmChartRef{}
+	for _, chart := range charts {
+		chartByDir[filepath.ToSlash(chart.dir)] = chart
+	}
+	fileNodes := map[string]string{}
+	for _, node := range nodes {
+		if node.Kind == NodeFile && strings.TrimSpace(node.File) != "" {
+			fileNodes[filepath.ToSlash(node.File)] = node.ID
+		}
+	}
+	for _, app := range apps {
+		resolvedChartDir := ""
+		if chart := resolveArgoChartRef(chartByDir, app.fileRel, app.chartPath); chart != nil {
+			resolvedChartDir = chart.dir
+			addEdge(edges, Edge{
+				Src:    app.node.ID,
+				Dst:    chart.node.ID,
+				Type:   EdgeImports,
+				Weight: 1.0,
+			})
+		}
+		for _, valueFile := range normalizeArgoValueFiles(app.fileRel, resolvedChartDir, app.chartPath, app.valueFiles) {
+			if targetID := fileNodes[valueFile]; targetID != "" {
+				addEdge(edges, Edge{
+					Src:    app.node.ID,
+					Dst:    targetID,
+					Type:   EdgeRefersTo,
+					Weight: 0.8,
+				})
+			}
+		}
+		_ = repoKey
+	}
+}
+
+func resolveArgoChartRef(charts map[string]helmChartRef, appFileRel, chartPath string) *helmChartRef {
+	chartPath = filepath.ToSlash(strings.TrimSpace(chartPath))
+	if chartPath == "" {
+		return nil
+	}
+	if chart, ok := charts[chartPath]; ok {
+		return &chart
+	}
+	parentDir := filepath.ToSlash(filepath.Dir(filepath.Dir(appFileRel)))
+	if parentDir != "." && parentDir != "" {
+		candidate := filepath.ToSlash(filepath.Clean(filepath.Join(parentDir, chartPath)))
+		if chart, ok := charts[candidate]; ok {
+			return &chart
+		}
+	}
+	base := filepath.Base(chartPath)
+	var match *helmChartRef
+	for dir, chart := range charts {
+		if filepath.Base(dir) != base {
+			continue
+		}
+		if match != nil {
+			return nil
+		}
+		c := chart
+		match = &c
+	}
+	return match
+}
+
+func normalizeArgoValueFiles(fileRelPath, resolvedChartDir, chartPath string, values []string) []string {
+	out := make([]string, 0, len(values))
+	seen := map[string]struct{}{}
+	for _, value := range values {
+		value = filepath.ToSlash(strings.TrimSpace(value))
+		if value == "" {
+			continue
+		}
+		candidates := []string{
+			value,
+			filepath.ToSlash(filepath.Join(chartPath, value)),
+			filepath.ToSlash(filepath.Join(resolvedChartDir, value)),
+			filepath.ToSlash(filepath.Join(filepath.Dir(fileRelPath), value)),
+		}
+		for _, candidate := range candidates {
+			candidate = filepath.ToSlash(filepath.Clean(strings.TrimSpace(candidate)))
+			if candidate == "." || candidate == "" {
+				continue
+			}
+			if _, ok := seen[candidate]; ok {
+				continue
+			}
+			seen[candidate] = struct{}{}
+			out = append(out, candidate)
+		}
+	}
+	return out
+}
+
+func isHelmTemplateFile(fileRelPath string) bool {
+	rel := filepath.ToSlash(strings.TrimSpace(fileRelPath))
+	return strings.Contains(rel, "/templates/") && (strings.HasSuffix(rel, ".yaml") || strings.HasSuffix(rel, ".yml") || strings.HasSuffix(rel, ".tpl"))
 }
 
 func terraformConceptMeta(blockType, typeName, name string) (conceptID, displayName, summary string) {
@@ -953,6 +1283,20 @@ func yamlLookupNode(node *yaml.Node, key string) string {
 		}
 	}
 	return ""
+}
+
+func yamlSequenceValues(node *yaml.Node) []string {
+	if node == nil || node.Kind != yaml.SequenceNode {
+		return nil
+	}
+	out := make([]string, 0, len(node.Content))
+	for _, item := range node.Content {
+		value := strings.TrimSpace(item.Value)
+		if value != "" {
+			out = append(out, value)
+		}
+	}
+	return out
 }
 
 func sortedStringKeys(set map[string]struct{}) []string {

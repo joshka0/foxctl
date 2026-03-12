@@ -46,6 +46,8 @@ const (
 	ConceptEvent    = "event:"
 	ConceptCommand  = "cmd:"
 	ConceptEnvVar   = "env:"
+	ConceptChart    = "chart:"
+	ConceptApp      = "app:"
 )
 
 const (
