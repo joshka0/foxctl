@@ -248,6 +248,8 @@ func resolveOpenAICompatDimensions(model string, configured int) int {
 	return DimensionsForModel(model)
 }
 
-var _ EmbeddingProvider = (*OpenAICompatProvider)(nil)
-var _ QueryEmbeddingProvider = (*OpenAICompatProvider)(nil)
-var _ UsageTrackingProvider = (*OpenAICompatProvider)(nil)
+var (
+	_ EmbeddingProvider      = (*OpenAICompatProvider)(nil)
+	_ QueryEmbeddingProvider = (*OpenAICompatProvider)(nil)
+	_ UsageTrackingProvider  = (*OpenAICompatProvider)(nil)
+)
