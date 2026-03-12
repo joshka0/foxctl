@@ -39,13 +39,21 @@ output "bucket_arn" {
   value = aws_s3_bucket.app.arn
 }
 
+output "network_vpc_id" {
+  value = module.network.vpc_id
+}
+
 module "network" {
   source = "./modules/network"
+  cidr   = local.bucket_name
 }
 `)
 	writeFile("infra/modules/network/main.tf", `
 variable "cidr" {}
 resource "aws_vpc" "main" {}
+output "vpc_id" {
+  value = aws_vpc.main.id
+}
 `)
 	writeFile("deploy/api.yaml", `
 apiVersion: apps/v1
@@ -130,10 +138,14 @@ echo "$NAMESPACE"
 	tfPkgID := infraPackageID(terraformPkgPrefix, "infra/main.tf")
 	moduleNetworkID := terraformConceptNodeID(repoKey, tfPkgID, "module:network")
 	networkPkgNodeID := PackageID(repoKey, infraPackageIDFromDir(terraformPkgPrefix, "infra/modules/network"))
+	networkVarCIDRID := terraformConceptNodeID(repoKey, infraPackageIDFromDir(terraformPkgPrefix, "infra/modules/network"), "variable:cidr")
+	networkOutputVpcID := terraformConceptNodeID(repoKey, infraPackageIDFromDir(terraformPkgPrefix, "infra/modules/network"), "output:vpc_id")
+	tfPkgNodeID := PackageID(repoKey, tfPkgID)
 	localBucketID := terraformConceptNodeID(repoKey, tfPkgID, "local:bucket_name")
 	varEnvID := terraformConceptNodeID(repoKey, tfPkgID, "variable:env")
 	resourceBucketID := terraformConceptNodeID(repoKey, tfPkgID, "resource:aws_s3_bucket.app")
 	outputBucketArnID := terraformConceptNodeID(repoKey, tfPkgID, "output:bucket_arn")
+	outputNetworkVpcID := terraformConceptNodeID(repoKey, tfPkgID, "output:network_vpc_id")
 	shPkgID := infraPackageID(shellPkgPrefix, "scripts/deploy.sh")
 	shFileID := FileID(repoKey, shPkgID, "scripts/deploy.sh")
 	kubectlID := NamespacedID(repoKey, ConceptCommand+"kubectl")
@@ -144,6 +156,13 @@ echo "$NAMESPACE"
 	}
 	if !containsEdge(tfEdges, moduleNetworkID, networkPkgNodeID, EdgeImports) {
 		t.Fatalf("expected IMPORTS edge %s -> %s", moduleNetworkID, networkPkgNodeID)
+	}
+	pkgEdges, err := store.GetOutgoingEdges(ctx, tfPkgNodeID, []EdgeType{EdgeImports}, 20)
+	if err != nil {
+		t.Fatalf("get terraform package import edges: %v", err)
+	}
+	if !containsEdge(pkgEdges, tfPkgNodeID, networkPkgNodeID, EdgeImports) {
+		t.Fatalf("expected package IMPORTS edge %s -> %s", tfPkgNodeID, networkPkgNodeID)
 	}
 	refEdges, err := store.GetOutgoingEdges(ctx, localBucketID, []EdgeType{EdgeRefersTo}, 20)
 	if err != nil {
@@ -165,6 +184,20 @@ echo "$NAMESPACE"
 	}
 	if !containsEdge(refEdges, outputBucketArnID, resourceBucketID, EdgeRefersTo) {
 		t.Fatalf("expected REFERS_TO edge %s -> %s", outputBucketArnID, resourceBucketID)
+	}
+	refEdges, err = store.GetOutgoingEdges(ctx, outputNetworkVpcID, []EdgeType{EdgeRefersTo}, 20)
+	if err != nil {
+		t.Fatalf("get module output refs: %v", err)
+	}
+	if !containsEdge(refEdges, outputNetworkVpcID, networkOutputVpcID, EdgeRefersTo) {
+		t.Fatalf("expected REFERS_TO edge %s -> %s", outputNetworkVpcID, networkOutputVpcID)
+	}
+	refEdges, err = store.GetOutgoingEdges(ctx, moduleNetworkID, []EdgeType{EdgeRefersTo}, 20)
+	if err != nil {
+		t.Fatalf("get module refs: %v", err)
+	}
+	if !containsEdge(refEdges, moduleNetworkID, networkVarCIDRID, EdgeRefersTo) {
+		t.Fatalf("expected REFERS_TO edge %s -> %s", moduleNetworkID, networkVarCIDRID)
 	}
 
 	outgoing, err := store.GetOutgoingEdges(ctx, shFileID, []EdgeType{EdgeCalls, EdgeRefersTo}, 20)

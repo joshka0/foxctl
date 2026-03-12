@@ -172,6 +172,9 @@ func normalizeAnchorScore(score float64) float64 {
 	if math.IsNaN(score) || math.IsInf(score, 0) {
 		return 0
 	}
+	if score < 0 {
+		return 1.0 + (-score * 0.0001)
+	}
 	return score
 }
 

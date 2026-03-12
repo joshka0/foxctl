@@ -31,6 +31,7 @@ var (
 	terraformVarRefRe = regexp.MustCompile(`\bvar\.([A-Za-z0-9_]+)\b`)
 	terraformLocalRefRe = regexp.MustCompile(`\blocal\.([A-Za-z0-9_]+)\b`)
 	terraformModuleRefRe = regexp.MustCompile(`\bmodule\.([A-Za-z0-9_-]+)\b`)
+	terraformModuleOutputRefRe = regexp.MustCompile(`\bmodule\.([A-Za-z0-9_-]+)\.([A-Za-z0-9_]+)\b`)
 	terraformOutputRefRe = regexp.MustCompile(`\boutput\.([A-Za-z0-9_]+)\b`)
 	terraformDataRefRe = regexp.MustCompile(`\bdata\.([A-Za-z0-9_]+)\.([A-Za-z0-9_]+)\b`)
 	terraformResourceRefRe = regexp.MustCompile(`\b([a-z][A-Za-z0-9_]*)\.([A-Za-z0-9_]+)\b`)
@@ -50,6 +51,7 @@ func (b *Builder) buildTerraform(ctx context.Context, opts BuildOptions, nodes m
 	}
 	sort.Strings(files)
 	seenPackages := map[string]bool{}
+	allBlocks := make([]terraformBlock, 0)
 	for _, fileRelPath := range files {
 		absPath := filepath.Join(opts.RepoRoot, fileRelPath)
 		content, err := os.ReadFile(absPath)
@@ -63,8 +65,13 @@ func (b *Builder) buildTerraform(ctx context.Context, opts BuildOptions, nodes m
 		}
 		fileNodeID := addInfraFileNode(ctx, opts, nodes, edges, pkgID, pkgNodeID, fileRelPath, content)
 		result.Files++
-		result.Symbols += addTerraformConcepts(opts, nodes, edges, fileNodeID, fileRelPath, content)
+		blocks, added := addTerraformConcepts(opts, nodes, edges, fileNodeID, fileRelPath, content)
+		allBlocks = append(allBlocks, blocks...)
+		result.Symbols += added
 	}
+	addTerraformModuleSourceEdges(opts, nodes, edges, allBlocks)
+	addTerraformReferenceEdges(opts, nodes, edges, allBlocks)
+	addTerraformCrossModuleEdges(opts, nodes, edges, allBlocks)
 	return nil
 }
 
@@ -161,11 +168,14 @@ func ensureInfraPackageNode(nodes map[string]Node, prefix, repoKey, fileRelPath 
 	if display == "" || display == "." {
 		display = "root"
 	}
+	kindLabel := infraKindLabel(prefix)
+	summaryLabel := infraPackageSummaryLabel(prefix, display)
 	addNode(nodes, Node{
 		ID:        pkgNodeID,
 		Kind:      NodePackage,
 		Pkg:       pkgID,
 		Name:      display,
+		Summary:   fmt.Sprintf("%s %s.", kindLabel, summaryLabel),
 		UpdatedAt: time.Now().UTC(),
 	})
 	return pkgID, pkgNodeID
@@ -173,18 +183,25 @@ func ensureInfraPackageNode(nodes map[string]Node, prefix, repoKey, fileRelPath 
 
 func addInfraFileNode(ctx context.Context, opts BuildOptions, nodes map[string]Node, edges map[string]Edge, pkgID, pkgNodeID, fileRelPath string, content []byte) string {
 	fileNodeID := FileID(opts.RepoKey, pkgID, fileRelPath)
+	kindLabel := infraKindLabelFromPkgID(pkgID)
+	pkgDisplay := infraPackageDisplay(pkgID)
+	docLabel := infraFileDocLabel(kindLabel, pkgDisplay)
 	fileNode := Node{
 		ID:        fileNodeID,
 		Kind:      NodeFile,
 		Pkg:       pkgID,
 		File:      fileRelPath,
 		Name:      filepath.Base(fileRelPath),
+		Doc:       fmt.Sprintf("%s path %s package %s.", docLabel, filepath.ToSlash(fileRelPath), pkgDisplay),
 		SpanStart: 1,
 		SpanEnd:   countLines(content),
 		Hash:      symbol.ComputeDigest(content),
 		UpdatedAt: time.Now().UTC(),
 	}
 	applyFileSummary(ctx, opts, &fileNode, fileRelPath)
+	if strings.TrimSpace(fileNode.Summary) == "" {
+		fileNode.Summary = fmt.Sprintf("%s %s in package %s.", docLabel, filepath.Base(fileRelPath), pkgDisplay)
+	}
 	addNode(nodes, fileNode)
 	addEdge(edges, Edge{
 		Src:    pkgNodeID,
@@ -195,7 +212,7 @@ func addInfraFileNode(ctx context.Context, opts BuildOptions, nodes map[string]N
 	return fileNodeID
 }
 
-func addTerraformConcepts(opts BuildOptions, nodes map[string]Node, edges map[string]Edge, fileNodeID, fileRelPath string, content []byte) int {
+func addTerraformConcepts(opts BuildOptions, nodes map[string]Node, edges map[string]Edge, fileNodeID, fileRelPath string, content []byte) ([]terraformBlock, int) {
 	pkgID := infraPackageID(terraformPkgPrefix, fileRelPath)
 	blocks := parseTerraformBlocks(pkgID, fileRelPath, content)
 	added := 0
@@ -227,9 +244,7 @@ func addTerraformConcepts(opts BuildOptions, nodes map[string]Node, edges map[st
 		})
 		added++
 	}
-	addTerraformModuleSourceEdges(opts, nodes, edges, blocks)
-	addTerraformReferenceEdges(opts, nodes, edges, blocks)
-	return added
+	return blocks, added
 }
 
 func addShellConcepts(opts BuildOptions, nodes map[string]Node, edges map[string]Edge, fileNodeID, fileRelPath string, content []byte) int {
@@ -385,6 +400,67 @@ func infraPackageIDFromDir(prefix, dir string) string {
 	return prefix + dir
 }
 
+func infraKindLabel(prefix string) string {
+	switch prefix {
+	case terraformPkgPrefix:
+		return "Terraform"
+	case kubernetesPkgPrefix:
+		return "Kubernetes"
+	case shellPkgPrefix:
+		return "Shell"
+	default:
+		return "Infrastructure"
+	}
+}
+
+func infraKindLabelFromPkgID(pkgID string) string {
+	switch {
+	case strings.HasPrefix(pkgID, terraformPkgPrefix):
+		return "Terraform"
+	case strings.HasPrefix(pkgID, kubernetesPkgPrefix):
+		return "Kubernetes"
+	case strings.HasPrefix(pkgID, shellPkgPrefix):
+		return "Shell"
+	default:
+		return "Infrastructure"
+	}
+}
+
+func infraPackageDisplay(pkgID string) string {
+	switch {
+	case strings.HasPrefix(pkgID, terraformPkgPrefix):
+		return strings.TrimPrefix(pkgID, terraformPkgPrefix)
+	case strings.HasPrefix(pkgID, kubernetesPkgPrefix):
+		return strings.TrimPrefix(pkgID, kubernetesPkgPrefix)
+	case strings.HasPrefix(pkgID, shellPkgPrefix):
+		return strings.TrimPrefix(pkgID, shellPkgPrefix)
+	default:
+		return pkgID
+	}
+}
+
+func infraPackageSummaryLabel(prefix, display string) string {
+	switch prefix {
+	case terraformPkgPrefix:
+		if display == "root" {
+			return "root package"
+		}
+		if strings.HasPrefix(display, "modules/") {
+			return "module package " + display
+		}
+		return "package " + display
+	default:
+		return "package " + display
+	}
+}
+
+func infraFileDocLabel(kindLabel, pkgDisplay string) string {
+	if kindLabel == "Terraform" && strings.HasPrefix(pkgDisplay, "modules/") {
+		return "Terraform module file"
+	}
+	return kindLabel + " file"
+}
+
 func parseTerraformBlocks(pkgID, fileRelPath string, content []byte) []terraformBlock {
 	text := string(content)
 	blocks := make([]terraformBlock, 0)
@@ -533,6 +609,86 @@ func addTerraformModuleSourceEdges(opts BuildOptions, nodes map[string]Node, edg
 	}
 }
 
+func addTerraformCrossModuleEdges(opts BuildOptions, nodes map[string]Node, edges map[string]Edge, blocks []terraformBlock) {
+	varTargets := make(map[string]string)
+	outputTargets := make(map[string]string)
+	moduleTargets := make(map[string]string)
+	for _, block := range blocks {
+		switch block.blockType {
+		case "variable":
+			varTargets[block.pkgID+"|"+block.typeName] = terraformConceptNodeID(opts.RepoKey, block.pkgID, block.conceptID)
+		case "output":
+			outputTargets[block.pkgID+"|"+block.typeName] = terraformConceptNodeID(opts.RepoKey, block.pkgID, block.conceptID)
+		}
+	}
+
+	for _, block := range blocks {
+		if block.blockType != "module" {
+			continue
+		}
+		sourceMatches := terraformSourceRe.FindStringSubmatch(block.body)
+		if len(sourceMatches) < 2 {
+			continue
+		}
+		source := strings.TrimSpace(sourceMatches[1])
+		if !strings.HasPrefix(source, "./") && !strings.HasPrefix(source, "../") {
+			continue
+		}
+		baseDir := filepath.Dir(block.fileRelPath)
+		targetDir := filepath.Clean(filepath.Join(baseDir, source))
+		targetPkgID := infraPackageIDFromDir(terraformPkgPrefix, targetDir)
+		moduleName := firstNonEmptyString(block.name, block.typeName)
+		moduleTargets[block.pkgID+"|"+moduleName] = targetPkgID
+		targetPkgNodeID := PackageID(opts.RepoKey, targetPkgID)
+		srcConceptID := terraformConceptNodeID(opts.RepoKey, block.pkgID, block.conceptID)
+		srcPkgNodeID := PackageID(opts.RepoKey, block.pkgID)
+
+		addEdge(edges, Edge{
+			Src:    srcPkgNodeID,
+			Dst:    targetPkgNodeID,
+			Type:   EdgeImports,
+			Weight: 0.9,
+			Meta:   importMeta(source),
+		})
+
+		for _, inputName := range terraformModuleInputRefs(block.body) {
+			targetID := varTargets[targetPkgID+"|"+inputName]
+			if targetID == "" {
+				continue
+			}
+			addEdge(edges, Edge{
+				Src:    srcConceptID,
+				Dst:    targetID,
+				Type:   EdgeRefersTo,
+				Weight: 0.85,
+			})
+		}
+	}
+
+	for _, block := range blocks {
+		srcConceptID := terraformConceptNodeID(opts.RepoKey, block.pkgID, block.conceptID)
+		for _, ref := range terraformModuleOutputRefs(block.body) {
+			targetPkgID := moduleTargets[block.pkgID+"|"+ref.moduleName]
+			if targetPkgID == "" {
+				continue
+			}
+			targetID := outputTargets[targetPkgID+"|"+ref.outputName]
+			if targetID == "" || targetID == srcConceptID {
+				continue
+			}
+			if _, ok := nodes[targetID]; !ok {
+				continue
+			}
+			addEdge(edges, Edge{
+				Src:    srcConceptID,
+				Dst:    targetID,
+				Type:   EdgeRefersTo,
+				Weight: 0.9,
+			})
+		}
+	}
+}
+
 func addTerraformReferenceEdges(opts BuildOptions, nodes map[string]Node, edges map[string]Edge, blocks []terraformBlock) {
 	for _, block := range blocks {
 		srcID := terraformConceptNodeID(opts.RepoKey, block.pkgID, block.conceptID)
@@ -606,6 +762,67 @@ func terraformReferenceTargets(repoKey, pkgID, body string) []string {
 	}
 
 	return targets
+}
+
+func terraformModuleInputRefs(body string) []string {
+	assignments := terraformLocalAssignRe.FindAllStringSubmatch(body, -1)
+	out := make([]string, 0, len(assignments))
+	seen := map[string]struct{}{}
+	for _, match := range assignments {
+		if len(match) < 2 {
+			continue
+		}
+		name := strings.TrimSpace(match[1])
+		if name == "" || isTerraformReservedModuleArg(name) {
+			continue
+		}
+		if _, ok := seen[name]; ok {
+			continue
+		}
+		seen[name] = struct{}{}
+		out = append(out, name)
+	}
+	return out
+}
+
+type terraformModuleOutputRef struct {
+	moduleName string
+	outputName string
+}
+
+func terraformModuleOutputRefs(body string) []terraformModuleOutputRef {
+	matches := terraformModuleOutputRefRe.FindAllStringSubmatch(body, -1)
+	out := make([]terraformModuleOutputRef, 0, len(matches))
+	seen := map[string]struct{}{}
+	for _, match := range matches {
+		if len(match) < 3 {
+			continue
+		}
+		moduleName := strings.TrimSpace(match[1])
+		outputName := strings.TrimSpace(match[2])
+		if moduleName == "" || outputName == "" {
+			continue
+		}
+		key := moduleName + "|" + outputName
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, terraformModuleOutputRef{
+			moduleName: moduleName,
+			outputName: outputName,
+		})
+	}
+	return out
+}
+
+func isTerraformReservedModuleArg(name string) bool {
+	switch strings.TrimSpace(name) {
+	case "source", "version", "providers", "count", "for_each", "depends_on":
+		return true
+	default:
+		return false
+	}
 }
 
 func infraPackageID(prefix, fileRelPath string) string {

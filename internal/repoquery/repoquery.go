@@ -318,10 +318,12 @@ func rerankSearchNodes(query string, scored []repoindex.ScoredNode) []repoindex.
 	if len(scored) == 0 {
 		return scored
 	}
+	lowerQuery := strings.ToLower(strings.TrimSpace(query))
 	topics := detectInfraTopics(query)
 	if len(topics) == 0 {
 		return scored
 	}
+	terraformHints := detectTerraformIntentHints(lowerQuery)
 	type ranked struct {
 		item     repoindex.ScoredNode
 		adjusted float64
@@ -331,7 +333,7 @@ func rerankSearchNodes(query string, scored []repoindex.ScoredNode) []repoindex.
 	for i, item := range scored {
 		rankedItems = append(rankedItems, ranked{
 			item:     item,
-			adjusted: repoSearchAdjustedScore(item.Node, item.Score, i, topics),
+			adjusted: repoSearchAdjustedScore(item.Node, item.Score, i, topics, terraformHints),
 			index:    i,
 		})
 	}
@@ -352,7 +354,7 @@ func rerankSearchNodes(query string, scored []repoindex.ScoredNode) []repoindex.
 	return out
 }
 
-func repoSearchAdjustedScore(node repoindex.Node, rawBM25 float64, index int, topics map[string]bool) float64 {
+func repoSearchAdjustedScore(node repoindex.Node, rawBM25 float64, index int, topics map[string]bool, terraformHints map[string]bool) float64 {
 	base := 1.0 / float64(index+1)
 	bonus := 0.0
 	if topics["terraform"] && isTerraformRepoNode(node) {
@@ -366,12 +368,15 @@ func repoSearchAdjustedScore(node repoindex.Node, rawBM25 float64, index int, to
 	}
 	lowerName := strings.ToLower(strings.TrimSpace(node.Name))
 	lowerFile := strings.ToLower(strings.TrimSpace(node.File))
+	lowerPkg := strings.ToLower(strings.TrimSpace(node.Pkg))
 	for token := range topics {
 		switch token {
 		case "terraform":
 			if strings.Contains(lowerName, "terraform") || strings.Contains(lowerFile, ".tf") {
 				bonus += 0.5
 			}
+			bonus += terraformIntentBonus(terraformHints, lowerName)
+			bonus += terraformPathQualityBonus(terraformHints, lowerFile, lowerPkg)
 		case "kubernetes":
 			if strings.Contains(lowerName, "deployment/") || strings.Contains(lowerName, "service/") || strings.Contains(lowerName, "ingress/") ||
 				strings.Contains(lowerName, "configmap/") || strings.Contains(lowerName, "secret/") || strings.Contains(lowerFile, ".yaml") || strings.Contains(lowerFile, ".yml") {
@@ -395,6 +400,15 @@ func detectInfraTopics(query string) map[string]bool {
 	if strings.Contains(lower, "terraform") || strings.Contains(lower, "tf ") || strings.HasPrefix(lower, "tf") {
 		topics["terraform"] = true
 	}
+	if strings.Contains(lower, "data source") || strings.Contains(lower, "module path") ||
+		strings.Contains(lower, "terraform module") || strings.Contains(lower, "terraform output") ||
+		strings.Contains(lower, "terraform variable") || strings.Contains(lower, "terraform local") ||
+		(strings.Contains(lower, " module ") && strings.Contains(lower, " path")) ||
+		(strings.Contains(lower, " output") && !strings.Contains(lower, "kubernetes")) ||
+		(strings.Contains(lower, " variable") && !strings.Contains(lower, "environment variable")) ||
+		(strings.Contains(lower, " local") && !strings.Contains(lower, "localhost")) {
+		topics["terraform"] = true
+	}
 	if strings.Contains(lower, "kubernetes") || strings.Contains(lower, "k8s") || strings.Contains(lower, "manifest") ||
 		strings.Contains(lower, "apiversion") || strings.Contains(lower, "kind") ||
 		strings.Contains(lower, "deployment") || strings.Contains(lower, "service") || strings.Contains(lower, "ingress") ||
@@ -406,6 +420,108 @@ func detectInfraTopics(query string) map[string]bool {
 		topics["shell"] = true
 	}
 	return topics
+}
+
+func detectTerraformIntentHints(lowerQuery string) map[string]bool {
+	hints := map[string]bool{}
+	if lowerQuery == "" {
+		return hints
+	}
+	if strings.Contains(lowerQuery, "data source") || strings.Contains(lowerQuery, " data ") || strings.HasPrefix(lowerQuery, "data ") {
+		hints["data"] = true
+	}
+	if strings.Contains(lowerQuery, " resource ") || strings.HasPrefix(lowerQuery, "resource ") {
+		hints["resource"] = true
+	}
+	if strings.Contains(lowerQuery, " module ") || strings.HasPrefix(lowerQuery, "module ") || strings.Contains(lowerQuery, "terraform module") {
+		hints["module"] = true
+	}
+	if strings.Contains(lowerQuery, " output ") || strings.HasPrefix(lowerQuery, "output ") {
+		hints["output"] = true
+	}
+	if strings.Contains(lowerQuery, " variable ") || strings.HasPrefix(lowerQuery, "variable ") {
+		hints["variable"] = true
+	}
+	if strings.Contains(lowerQuery, " local ") || strings.HasPrefix(lowerQuery, "local ") {
+		hints["local"] = true
+	}
+	if strings.Contains(lowerQuery, " path") || strings.Contains(lowerQuery, "source") {
+		hints["path"] = true
+	}
+	if strings.Contains(lowerQuery, "service connection") {
+		hints["service_connection"] = true
+	}
+	if strings.Contains(lowerQuery, "identity center") {
+		hints["identity_center"] = true
+	}
+	return hints
+}
+
+func terraformIntentBonus(hints map[string]bool, lowerName string) float64 {
+	if len(hints) == 0 {
+		return 0
+	}
+	bonus := 0.0
+	if hints["data"] && strings.HasPrefix(lowerName, "data ") {
+		bonus += 2.2
+	} else if hints["data"] && strings.HasPrefix(lowerName, "resource ") {
+		bonus -= 0.6
+	}
+	if hints["resource"] && strings.HasPrefix(lowerName, "resource ") {
+		bonus += 1.0
+	}
+	if hints["module"] && strings.HasPrefix(lowerName, "module ") {
+		bonus += 1.1
+	}
+	if hints["output"] && strings.HasPrefix(lowerName, "output ") {
+		bonus += 1.0
+	}
+	if hints["variable"] && strings.HasPrefix(lowerName, "variable ") {
+		bonus += 0.9
+	}
+	if hints["local"] && strings.HasPrefix(lowerName, "local ") {
+		bonus += 0.9
+	}
+	if hints["service_connection"] && strings.Contains(normalizeTerraformTokenSpace(lowerName), "service connection") {
+		bonus += 0.8
+	}
+	if hints["identity_center"] && strings.Contains(normalizeTerraformTokenSpace(lowerName), "identity center") {
+		bonus += 0.8
+	}
+	return bonus
+}
+
+func terraformPathQualityBonus(hints map[string]bool, lowerFile, lowerPkg string) float64 {
+	if lowerFile == "" && lowerPkg == "" {
+		return 0
+	}
+	bonus := 0.0
+	if strings.Contains(lowerFile, "/test/") || strings.Contains(lowerFile, "/fixtures/") || strings.HasPrefix(lowerFile, "test/") {
+		bonus -= 1.5
+	}
+	if hints["module"] && strings.Contains(lowerPkg, "tf:modules/") {
+		bonus += 1.0
+	}
+	if hints["path"] && strings.Contains(lowerFile, "modules/") {
+		bonus += 0.8
+	}
+	if hints["service_connection"] && strings.Contains(normalizeTerraformTokenSpace(lowerFile), "service connection") {
+		bonus += 1.0
+	}
+	if hints["identity_center"] && strings.Contains(normalizeTerraformTokenSpace(lowerFile), "identity center") {
+		bonus += 1.0
+	}
+	if strings.HasSuffix(lowerFile, "/main.tf") || lowerFile == "main.tf" {
+		bonus += 0.1
+	}
+	return bonus
+}
+
+func normalizeTerraformTokenSpace(value string) string {
+	value = strings.ToLower(strings.TrimSpace(value))
+	replacer := strings.NewReplacer("-", " ", "_", " ", "/", " ", ".", " ", ":", " ")
+	value = replacer.Replace(value)
+	return strings.Join(strings.Fields(value), " ")
 }
 
 func isTerraformRepoNode(node repoindex.Node) bool {
