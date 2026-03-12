@@ -295,7 +295,8 @@ func resolveAgentctlRepoRoot() (string, error) {
 
 func extractSemanticSearchResultPaths(results []struct {
 	Path string `json:"path"`
-}) []string {
+},
+) []string {
 	seen := map[string]struct{}{}
 	out := make([]string, 0, len(results))
 	for _, result := range results {
