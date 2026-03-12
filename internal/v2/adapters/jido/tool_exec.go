@@ -5,6 +5,11 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	toolbridge "github.com/jkatigb/agentctl/internal/v2/adapters/toolbridge"
+	coretool "github.com/jkatigb/agentctl/internal/v2/core/tool"
+	"github.com/jkatigb/agentctl/internal/v2/runtime/profiles"
+	runtimetoolnames "github.com/jkatigb/agentctl/internal/v2/runtime/toolnames"
 )
 
 const (
@@ -86,13 +91,39 @@ func BuildToolCommand(spec ToolCommandSpec, req ToolCommandRequest) (ToolCommand
 	}, nil
 }
 
+// NewDefaultToolCommandSpec derives a Jido-facing allowlist from the real v2
+// default tool catalog for one process profile.
+func NewDefaultToolCommandSpec(
+	profile coretool.ProcessProfile,
+	workspace string,
+	binary string,
+	specs map[coretool.ProcessProfile]profiles.ProfileSpec,
+	includeExtensions bool,
+) (ToolCommandSpec, error) {
+	catalog, err := toolbridge.NewDefaultCatalog(specs, includeExtensions)
+	if err != nil {
+		return ToolCommandSpec{}, err
+	}
+	defs := catalog.ForProfile(profile)
+	allowed := make([]string, 0, len(defs))
+	for _, def := range defs {
+		allowed = append(allowed, def.Name)
+	}
+	return ToolCommandSpec{
+		BinaryPath:     strings.TrimSpace(binary),
+		Workspace:      strings.TrimSpace(workspace),
+		AllowedTools:   allowed,
+		DefaultTimeout: defaultToolCallTimeout,
+	}, nil
+}
+
 func toolAllowed(allowed []string, toolName string) bool {
 	if len(allowed) == 0 {
 		return true
 	}
-	want := strings.ToLower(strings.TrimSpace(toolName))
+	want := runtimetoolnames.Canonical(toolName)
 	for _, name := range allowed {
-		if strings.ToLower(strings.TrimSpace(name)) == want {
+		if runtimetoolnames.Canonical(name) == want {
 			return true
 		}
 	}

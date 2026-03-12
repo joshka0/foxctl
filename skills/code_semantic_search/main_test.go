@@ -1,8 +1,13 @@
 package main
 
 import (
+	"context"
+	"os"
+	"path/filepath"
+	"reflect"
 	"testing"
 
+	"github.com/jkatigb/agentctl/internal/contextplane"
 	"github.com/jkatigb/agentctl/internal/platform/config"
 )
 
@@ -164,6 +169,9 @@ func TestScopeConstants(t *testing.T) {
 	if ScopeMemories != "memories" {
 		t.Errorf("Expected ScopeMemories='memories', got '%s'", ScopeMemories)
 	}
+	if ScopeContext != "context" {
+		t.Errorf("Expected ScopeContext='context', got '%s'", ScopeContext)
+	}
 }
 
 func TestErrorCodeConstants(t *testing.T) {
@@ -224,5 +232,86 @@ func TestEmbeddingModelConfig_GeminiFallback(t *testing.T) {
 	}
 	if textModel != "gemini-embedding-001" {
 		t.Fatalf("text model = %q, want gemini-embedding-001", textModel)
+	}
+}
+
+func TestContextRetrievalToResults(t *testing.T) {
+	retrieved := contextplane.RetrievalResult{
+		WorkspaceID: "agentctl",
+		TopOfMind: &contextplane.TopOfMind{
+			Objective:   "Bring v2 skills to parity",
+			Phase:       "implement",
+			NextActions: []string{"Wire default executor", "Adopt Jido payloads"},
+		},
+		LatestHandoff: &contextplane.HandoffRecord{
+			Handoff: contextplane.Handoff{
+				TaskID:  "T-1",
+				Phase:   "design",
+				Summary: "Defined the first v2 parity slice.",
+			},
+		},
+		VaultHits: []contextplane.RetrievalHit{
+			{Path: "notes/repo/agentctl/skills-runtime-wiring.md", Title: "skills runtime wiring", Snippet: "Bridge delegate and executor wiring"},
+		},
+	}
+
+	results := contextRetrievalToResults(retrieved, 3)
+	if len(results) != 3 {
+		t.Fatalf("len(results)=%d want 3", len(results))
+	}
+	if results[0].Source != ScopeContext {
+		t.Fatalf("top result source=%q want %q", results[0].Source, ScopeContext)
+	}
+	if results[0].Name != "Top of Mind" {
+		t.Fatalf("top result name=%q want Top of Mind", results[0].Name)
+	}
+	if results[2].Path != "notes/repo/agentctl/skills-runtime-wiring.md" {
+		t.Fatalf("vault result path=%q", results[2].Path)
+	}
+}
+
+func TestSearchPathFallback(t *testing.T) {
+	workspace := t.TempDir()
+	mustWrite := func(rel string) {
+		path := filepath.Join(workspace, rel)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", path, err)
+		}
+		if err := os.WriteFile(path, []byte("package main\n"), 0o644); err != nil {
+			t.Fatalf("write %s: %v", path, err)
+		}
+	}
+	mustWrite("cmd/agentctl/cmd/agent.go")
+	mustWrite("internal/platform/config/config.go")
+	mustWrite("internal/adapters/skillslib/skillmain/main.go")
+
+	results := searchPathFallback(context.Background(), workspace, "platform config settings", 5)
+	if len(results) == 0 {
+		t.Fatal("expected path fallback results")
+	}
+	if results[0].Path != "internal/platform/config/config.go" {
+		t.Fatalf("top path=%q want internal/platform/config/config.go", results[0].Path)
+	}
+}
+
+func TestDefaultSemanticSearchScopes(t *testing.T) {
+	workspace := t.TempDir()
+	got := defaultSemanticSearchScopes(workspace)
+	want := []string{ScopeSymbols, ScopeSessions, ScopeMemories, ScopeTasks, ScopeCodemaps}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("default scopes=%v want %v", got, want)
+	}
+
+	policyPath := filepath.Join(workspace, ".agentctl", "policy", "retrieval.yaml")
+	if err := os.MkdirAll(filepath.Dir(policyPath), 0o755); err != nil {
+		t.Fatalf("mkdir policy dir: %v", err)
+	}
+	if err := os.WriteFile(policyPath, []byte("semantic_search_default_scopes:\n  - symbols\n  - context\n  - codemaps\n  - context\n"), 0o644); err != nil {
+		t.Fatalf("write retrieval policy: %v", err)
+	}
+	got = defaultSemanticSearchScopes(workspace)
+	want = []string{ScopeSymbols, ScopeContext, ScopeCodemaps}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("policy scopes=%v want %v", got, want)
 	}
 }

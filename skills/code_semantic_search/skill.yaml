@@ -2,7 +2,7 @@ apiVersion: agentctl/v1
 kind: Skill
 metadata:
   name: code/semantic_search
-  description: Unified semantic search across symbols, sessions, and memories with BM25 fallback
+  description: Unified semantic search across code, session, memory, and ACA context with BM25/vector fallback
   version: 0.2.0
   author: agentctl
   tags: [search, semantic, embedding, symbols, sessions, memories, codemaps]
@@ -24,11 +24,15 @@ signature:
       type: array
       required: false
       default: ["symbols", "sessions", "memories", "tasks", "codemaps"]
-      description: Sources to search (symbols, sessions, memories, tasks, codemaps)
+      description: Sources to search (symbols, sessions, memories, tasks, codemaps, context)
     - name: workspace
       type: string
       required: false
       description: Workspace path (defaults to current directory)
+    - name: vault_path
+      type: string
+      required: false
+      description: Optional vault path override for scope=["context"] (otherwise uses AGENTCTL_ACA_VAULT_PATH or AGENTCTL_OBSIDIAN_VAULT_PATH)
     - name: limit
       type: integer
       required: false
@@ -129,14 +133,16 @@ signature:
       - memories: Named memories with semantic content (BM25 text search)
       - tasks: Task embeddings for work context (vector search)
       - codemaps: Semantic codemaps showing code relationships (vector search)
+      - context: ACA top-of-mind + latest handoff + knowledge-vault retrieval (bounded blended retrieval)
 
       The search:
       1. Generates query embedding once (reused across sources)
       2. Symbols: Uses retrieval.Generator for hybrid search (BM25 + semantic + ripgrep)
       3. Sessions: Performs vector similarity search on session embeddings
       4. Memories: Performs BM25 text search on named memories
-      5. Combines results using Reciprocal Rank Fusion (RRF)
-      6. Extracts context hints from matching sessions
+      5. Context scope can use the ACA control plane and clean Obsidian vault when configured
+      6. Combines results using Reciprocal Rank Fusion (RRF)
+      7. Extracts context hints from matching sessions
 
       Repo-index modes for `scope:["symbols"]`:
       - `auto`: precise default. Uses repo-index search first and only falls back to DAG when search returns no hits.
@@ -148,11 +154,13 @@ signature:
       - VOYAGE_API_KEY: Enables vector search (required for all scopes)
       - TURSO_DATABASE_URL: Remote Turso database URL (required for remote=true)
       - TURSO_AUTH_TOKEN: Remote Turso auth token (required for remote=true)
+      - AGENTCTL_ACA_VAULT_PATH or AGENTCTL_OBSIDIAN_VAULT_PATH: Vault path for scope=["context"]
 
       Without an API key:
       - Symbol search works via BM25 text matching and ripgrep fallback
       - Session search gracefully skipped (hint provided)
       - Memory search works via BM25 text matching
+      - Context scope falls back to control-plane-only results when no vault path is configured
 
       Timeouts:
       - Per-source: 500ms
@@ -204,6 +212,11 @@ signature:
         example_input:
           query: "how does authentication connect to database"
           scope: ["codemaps"]
+      - id: search-context
+        description: "Search the ACA control plane and clean vault context"
+        example_input:
+          query: "v2 tool parity"
+          scope: ["context"]
       - id: search-tree
         description: "Show related files as a directory tree"
         example_input:

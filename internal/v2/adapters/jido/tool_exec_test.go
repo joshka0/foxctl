@@ -3,8 +3,12 @@ package jido
 import (
 	"encoding/json"
 	"reflect"
+	"slices"
 	"testing"
 	"time"
+
+	coretool "github.com/jkatigb/agentctl/internal/v2/core/tool"
+	"github.com/jkatigb/agentctl/internal/v2/runtime/profiles"
 )
 
 func TestBuildToolCommand_WithInputAndWorkspace(t *testing.T) {
@@ -72,5 +76,57 @@ func TestBuildToolCommand_Defaults(t *testing.T) {
 	}
 	if cmd.Timeout != defaultToolCallTimeout {
 		t.Fatalf("timeout=%v want %v", cmd.Timeout, defaultToolCallTimeout)
+	}
+}
+
+func TestBuildToolCommand_AllowlistCanonicalizesAliases(t *testing.T) {
+	t.Parallel()
+
+	_, err := BuildToolCommand(ToolCommandSpec{
+		AllowedTools: []string{"context/show"},
+	}, ToolCommandRequest{
+		ToolName: "context_show",
+	})
+	if err != nil {
+		t.Fatalf("BuildToolCommand() alias error = %v", err)
+	}
+}
+
+func TestNewDefaultToolCommandSpec_CompanionIncludesACAAndObsidian(t *testing.T) {
+	t.Parallel()
+
+	spec, err := NewDefaultToolCommandSpec(coretool.ProfileCompanion, "/repo", "bin/agentctl", nil, false)
+	if err != nil {
+		t.Fatalf("NewDefaultToolCommandSpec() error = %v", err)
+	}
+	for _, want := range []string{"context_show", "context_retrieve", "obsidian_index_search", "obsidian_read", "obsidian_related"} {
+		if !slices.Contains(spec.AllowedTools, want) {
+			t.Fatalf("allowed tools=%v want %s", spec.AllowedTools, want)
+		}
+	}
+}
+
+func TestNewDefaultToolCommandSpec_HeartwoodRequiresExtensions(t *testing.T) {
+	t.Parallel()
+
+	withoutExt, err := NewDefaultToolCommandSpec(coretool.ProfileOverseer, "/repo", "", nil, false)
+	if err != nil {
+		t.Fatalf("NewDefaultToolCommandSpec() error = %v", err)
+	}
+	if slices.Contains(withoutExt.AllowedTools, "heartwood_state") {
+		t.Fatalf("unexpected heartwood tool in default spec: %v", withoutExt.AllowedTools)
+	}
+
+	specs := profiles.WithAllowedTools(nil, map[coretool.ProcessProfile][]string{
+		coretool.ProfileOverseer: {"heartwood/state", "heartwood/action"},
+	})
+	withExt, err := NewDefaultToolCommandSpec(coretool.ProfileOverseer, "/repo", "", specs, true)
+	if err != nil {
+		t.Fatalf("NewDefaultToolCommandSpec() with extensions error = %v", err)
+	}
+	for _, want := range []string{"heartwood_state", "heartwood_action"} {
+		if !slices.Contains(withExt.AllowedTools, want) {
+			t.Fatalf("allowed tools=%v want %s", withExt.AllowedTools, want)
+		}
 	}
 }

@@ -1,0 +1,52 @@
+name: agentctl-mixed
+queries:
+  - id: cmd-runtime
+    query: "cmd agentctl cmd"
+    expected_any_of:
+      - notes/repo/agentctl/packages/cmd-agentctl-cmd.md
+      - cmd/agentctl/cmd/agent.go
+      - cmd/agentctl/cmd/root.go
+    notes: "Accept either the canonical package note or a representative command entrypoint file."
+  - id: skillmain-runtime
+    query: "skills main runtime wiring"
+    expected_any_of:
+      - notes/repo/agentctl/packages/internal-adapters-skillslib-skillmain.md
+      - notes/repo/agentctl/skills-runtime-wiring.md
+      - internal/adapters/skillslib/skillmain/main.go
+    notes: "Accept the package note, runtime-wiring map, or the actual skillmain implementation file."
+  - id: skillout-envelopes
+    query: "skill output envelopes cas hints"
+    expected_any_of:
+      - notes/repo/agentctl/packages/internal-adapters-skillslib-skillout.md
+      - notes/repo/agentctl/skills-runtime-wiring.md
+      - internal/adapters/skillslib/skillout/emit.go
+    notes: "Accept the package note, wiring map, or the output emitter implementation."
+  - id: platform-config
+    query: "platform config settings"
+    expected_any_of:
+      - notes/repo/agentctl/packages/internal-platform-config.md
+      - notes/repo/agentctl/platform-and-web.md
+      - internal/platform/config/config.go
+    notes: "Accept either the package note, broader platform map, or the actual config implementation."
+  - id: semantic-indexing
+    query: "semantic indexing package"
+    expected_any_of:
+      - notes/repo/agentctl/packages/internal-indexing-semantic.md
+      - notes/repo/agentctl/semantic-and-memory.md
+      - internal/indexing/semantic/indexer.go
+    notes: "Accept either the package note, memory/semantic map, or the semantic indexer implementation."
+  - id: storage-memory
+    query: "storage memory package"
+    expected_any_of:
+      - notes/repo/agentctl/packages/internal-storage-memory.md
+      - notes/repo/agentctl/semantic-and-memory.md
+      - internal/storage/memory/store.go
+    notes: "Accept either the package note, semantic/memory map, or the concrete storage implementation."
+  - id: web-api-transport
+    query: "web api handlers transport"
+    expected_any_of:
+      - notes/repo/agentctl/packages/internal-web-api.md
+      - notes/repo/agentctl/platform-and-web.md
+      - internal/web/api/agents.go
+      - internal/web/api/orchestration.go
+    notes: "Accept either the package note, platform map, or a representative web API handler file."

@@ -14,6 +14,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/storage/agents"
 	"github.com/jkatigb/agentctl/internal/storage/mailbox"
 	v2jido "github.com/jkatigb/agentctl/internal/v2/adapters/jido"
+	coretool "github.com/jkatigb/agentctl/internal/v2/core/tool"
 	"github.com/oklog/ulid/v2"
 )
 
@@ -56,6 +57,10 @@ func jidoStartAgentForRecord(ctx context.Context, record agent.Agent, storageRoo
 	if absErr == nil {
 		workspaceRoot = absWorkspace
 	}
+	pluginConfig, err := buildJidoPluginConfig(record.Role, binaryPath, workspaceRoot)
+	if err != nil {
+		return fmt.Errorf("build jido plugin config: %w", err)
+	}
 
 	req := v2jido.StartAgentRequest{
 		RequestID:       ulid.Make().String(),
@@ -67,12 +72,7 @@ func jidoStartAgentForRecord(ctx context.Context, record agent.Agent, storageRoo
 		ThinkInterval:   record.ThinkInterval,
 		InitialState:    initialState,
 		Metadata: map[string]any{
-			"plugin_config": map[string]any{
-				"binary":    binaryPath,
-				"workspace": workspaceRoot,
-				"transport": "daemon_rpc",
-				"daemon":    true,
-			},
+			"plugin_config": pluginConfig,
 		},
 	}
 
@@ -84,6 +84,36 @@ func jidoStartAgentForRecord(ctx context.Context, record agent.Agent, storageRoo
 		return fmt.Errorf("jido runtime.start_agent returned status %q", resp.Status)
 	}
 	return nil
+}
+
+func buildJidoPluginConfig(role, binaryPath, workspaceRoot string) (map[string]any, error) {
+	profile := v2ProcessProfileForAgentRole(role)
+	spec, err := v2jido.NewDefaultToolCommandSpec(profile, workspaceRoot, binaryPath, nil, false)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{
+		"binary":    strings.TrimSpace(binaryPath),
+		"workspace": strings.TrimSpace(workspaceRoot),
+		"transport": "daemon_rpc",
+		"daemon":    true,
+		"tool_command": map[string]any{
+			"profile":            string(profile),
+			"allowed_tools":      append([]string(nil), spec.AllowedTools...),
+			"default_timeout_ms": spec.DefaultTimeout.Milliseconds(),
+		},
+	}, nil
+}
+
+func v2ProcessProfileForAgentRole(role string) coretool.ProcessProfile {
+	switch strings.ToLower(strings.TrimSpace(role)) {
+	case string(coretool.ProfileOverseer):
+		return coretool.ProfileOverseer
+	case string(coretool.ProfileCompanion):
+		return coretool.ProfileCompanion
+	default:
+		return coretool.ProfileWorker
+	}
 }
 
 func jidoStopAgentForRecord(ctx context.Context, record agent.Agent) error {
