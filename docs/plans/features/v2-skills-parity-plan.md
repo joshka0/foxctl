@@ -1,3 +1,11 @@
+---
+vault_refs:
+  - notes/repo/agentctl/skills-runtime-wiring.md
+  - notes/repo/agentctl/packages/internal-adapters-skillslib-skillerr.md
+  - notes/repo/agentctl/packages/internal-adapters-skillslib-skillmain.md
+  - notes/repo/agentctl/packages/internal-adapters-skillslib-skillout.md
+  - notes/repo/agentctl/packages/cmd-agentctl-cmd.md
+---
 # V2 Skills Parity Plan
 
 Status: In Progress  
@@ -123,6 +131,25 @@ Make the v2 tool executor actually run the newer read-only ACA/Obsidian surfaces
 ### Goal
 
 Align the “v2 skills” story with the newer retrieval stack instead of the older `internal/retrieval` mental model.
+
+### Current Eval Findings
+
+Recent eval work on the `agentctl` clean vault shows two important things:
+
+1. `code/semantic_search` with the explicit ACA-backed `context` scope is materially better than the current default skill path for knowledge-oriented repo questions.
+2. That is not enough evidence to make `context` part of the unconditional default yet, because the current default semantic-search path still underperforms badly on implementation-flow queries and needs its own quality work.
+
+Practical decision for now:
+
+- keep `scope:["context"]` additive and explicit
+- keep measuring it with retrieval evals
+- improve the default code-oriented path before changing the default search story
+
+Reference eval shapes now in use:
+
+- `testdata/evals/retrieval/agentctl.yaml`
+- `testdata/evals/retrieval/agentctl-mixed.yaml`
+- `testdata/evals/retrieval/praze.yaml`
 
 ### Surfaces to review
 

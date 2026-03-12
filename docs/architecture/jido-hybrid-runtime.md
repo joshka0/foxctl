@@ -1,3 +1,11 @@
+---
+vault_refs:
+  - notes/repo/agentctl/skills-runtime-wiring.md
+  - notes/repo/agentctl/index.md
+  - notes/repo/agentctl/platform-and-web.md
+  - notes/repo/agentctl/semantic-and-memory.md
+  - 00-home/index.md
+---
 # Jido Hybrid Runtime
 
 This is the canonical architecture note for the current hybrid `agentctl` + Jido runtime shape.

@@ -9,10 +9,12 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/executil"
 	"github.com/jkatigb/agentctl/internal/contextplane"
 	"github.com/jkatigb/agentctl/internal/domain/envelope"
 	"github.com/jkatigb/agentctl/internal/evals/retrievaleval"
 	"github.com/jkatigb/agentctl/internal/indexing/repoindex"
+	"github.com/jkatigb/agentctl/internal/protocol"
 	"github.com/jkatigb/agentctl/internal/storage/obsidianindex"
 	"github.com/jkatigb/agentctl/internal/storage/sessions"
 	"github.com/jkatigb/agentctl/internal/storage/tasks"
@@ -118,6 +120,21 @@ func newEvalRetrievalCommand() *cobra.Command {
 					paths := filterEvalPaths(extractRetrievalHitPaths(result.VaultHits), canonicalOnly)
 					qr.Modes["blended"] = retrievaleval.EvaluateMode("blended", paths, q.ExpectedAnyOf, len(paths), err)
 				}
+				if hasMode(selectedModes, "skill_default") {
+					paths, err := runSemanticSearchEvalMode(ctx, target, vaultPath, q.Query, limit, []string{"symbols", "sessions", "memories", "tasks", "codemaps"})
+					paths = filterEvalPaths(paths, canonicalOnly)
+					qr.Modes["skill_default"] = retrievaleval.EvaluateMode("skill_default", paths, q.ExpectedAnyOf, len(paths), err)
+				}
+				if hasMode(selectedModes, "skill_context") {
+					paths, err := runSemanticSearchEvalMode(ctx, target, vaultPath, q.Query, limit, []string{"context"})
+					paths = filterEvalPaths(paths, canonicalOnly)
+					qr.Modes["skill_context"] = retrievaleval.EvaluateMode("skill_context", paths, q.ExpectedAnyOf, len(paths), err)
+				}
+				if hasMode(selectedModes, "skill_default_plus_context") {
+					paths, err := runSemanticSearchEvalMode(ctx, target, vaultPath, q.Query, limit, []string{"symbols", "sessions", "memories", "tasks", "codemaps", "context"})
+					paths = filterEvalPaths(paths, canonicalOnly)
+					qr.Modes["skill_default_plus_context"] = retrievaleval.EvaluateMode("skill_default_plus_context", paths, q.ExpectedAnyOf, len(paths), err)
+				}
 				results = append(results, qr)
 			}
 			runResult := retrievaleval.RunResult{
@@ -156,7 +173,7 @@ func newEvalRetrievalCommand() *cobra.Command {
 	cmd.Flags().StringVar(&vaultPath, "vault-path", "", "Vault path")
 	cmd.Flags().IntVar(&limit, "limit", 10, "Maximum hits per retrieval mode")
 	cmd.Flags().StringVar(&format, "format", "markdown", "Output companion format: markdown or json")
-	cmd.Flags().StringSliceVar(&modes, "mode", []string{"baseline", "lexical", "semantic", "blended"}, "Retrieval modes to evaluate")
+	cmd.Flags().StringSliceVar(&modes, "mode", []string{"baseline", "lexical", "semantic", "blended"}, "Retrieval modes to evaluate (also available: skill_default, skill_context, skill_default_plus_context)")
 	cmd.Flags().BoolVar(&rebuildIndex, "rebuild-index", true, "Rebuild the vault index before evaluation")
 	cmd.Flags().BoolVar(&canonicalOnly, "canonical-only", true, "Exclude inbox draft hits from evaluation paths")
 	cmd.Flags().BoolVar(&save, "save", false, "Save JSON and Markdown eval outputs under the workspace exports directory")
@@ -209,6 +226,77 @@ func normalizeEvalModes(modes []string) []string {
 		out = append(out, mode)
 	}
 	return out
+}
+
+type semanticSearchEvalOutput struct {
+	Results []struct {
+		Path string `json:"path"`
+	} `json:"results"`
+}
+
+func runSemanticSearchEvalMode(ctx context.Context, workspacePath, vaultPath, query string, limit int, scope []string) ([]string, error) {
+	input := map[string]any{
+		"query":     query,
+		"scope":     scope,
+		"workspace": resolveContextWorkspace(workspacePath),
+		"limit":     limit,
+	}
+	if slicesContain(scope, "context") && strings.TrimSpace(vaultPath) != "" {
+		input["vault_path"] = strings.TrimSpace(vaultPath)
+	}
+	body, err := json.Marshal(input)
+	if err != nil {
+		return nil, err
+	}
+	repoRoot, err := os.Getwd()
+	if err != nil {
+		return nil, err
+	}
+	result := executil.RunWithInput(ctx, repoRoot, "go", body, "run", "./skills/code_semantic_search")
+	if result.Err != nil {
+		return nil, fmt.Errorf("run current code/semantic_search source: %w", result.Err)
+	}
+	env, err := protocol.DecodeEnvelope(result.Stdout)
+	if err != nil {
+		return nil, err
+	}
+	if env.Status == envelope.StatusError {
+		return nil, protocol.EnvelopeStatusErrorFromEnvelope(env)
+	}
+	var out semanticSearchEvalOutput
+	if err := protocol.DecodeEnvelopeDataInto(env, &out); err != nil {
+		return nil, err
+	}
+	return extractSemanticSearchResultPaths(out.Results), nil
+}
+
+func extractSemanticSearchResultPaths(results []struct {
+	Path string `json:"path"`
+}) []string {
+	seen := map[string]struct{}{}
+	out := make([]string, 0, len(results))
+	for _, result := range results {
+		path := filepath.ToSlash(strings.TrimSpace(result.Path))
+		if path == "" {
+			continue
+		}
+		if _, ok := seen[path]; ok {
+			continue
+		}
+		seen[path] = struct{}{}
+		out = append(out, path)
+	}
+	return out
+}
+
+func slicesContain(values []string, target string) bool {
+	target = strings.TrimSpace(target)
+	for _, value := range values {
+		if strings.TrimSpace(value) == target {
+			return true
+		}
+	}
+	return false
 }
 
 func hasMode(modes []string, target string) bool {

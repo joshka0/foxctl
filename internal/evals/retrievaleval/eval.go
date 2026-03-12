@@ -197,7 +197,15 @@ func sortedModeKeys(m map[string]ModeResult) []string {
 		keys = append(keys, key)
 	}
 	// fixed stable order if present
-	order := map[string]int{"baseline": 0, "lexical": 1, "semantic": 2, "blended": 3}
+	order := map[string]int{
+		"baseline":                   0,
+		"lexical":                    1,
+		"semantic":                   2,
+		"blended":                    3,
+		"skill_default":              4,
+		"skill_context":              5,
+		"skill_default_plus_context": 6,
+	}
 	for i := 0; i < len(keys); i++ {
 		for j := i + 1; j < len(keys); j++ {
 			ri, iok := order[keys[i]]

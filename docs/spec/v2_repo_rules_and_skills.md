@@ -1,3 +1,11 @@
+---
+vault_refs:
+  - notes/repo/agentctl/skills-runtime-wiring.md
+  - notes/repo/agentctl/platform-and-web.md
+  - notes/repo/agentctl/semantic-and-memory.md
+  - notes/repo/agentctl/packages/internal-adapters-skillslib-skillerr.md
+  - notes/repo/agentctl/packages/internal-adapters-skillslib-skillmain.md
+---
 # Agentctl V2 Repo Rules and Core Skills
 
 Status: In Progress  

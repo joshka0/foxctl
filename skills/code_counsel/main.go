@@ -24,15 +24,9 @@ import (
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
 	"github.com/jkatigb/agentctl/internal/codecontext"
-	ccadapt "github.com/jkatigb/agentctl/internal/codecontext/adapters"
+	"github.com/jkatigb/agentctl/internal/codecontext/autoselect"
 	"github.com/jkatigb/agentctl/internal/codecontext/guard"
-	"github.com/jkatigb/agentctl/internal/indexing/repoindex"
 	"github.com/jkatigb/agentctl/internal/indexing/semantic"
-	"github.com/jkatigb/agentctl/internal/repoquery"
-	retrievalv2 "github.com/jkatigb/agentctl/internal/retrieval/v2"
-	"github.com/jkatigb/agentctl/internal/searchindex"
-	"github.com/jkatigb/agentctl/internal/storage"
-	"github.com/jkatigb/agentctl/internal/storage/memory"
 )
 
 const command = "code/counsel"
@@ -321,19 +315,6 @@ func gatherEvidence(ctx context.Context, rc *skillmain.RunContext, in Input, log
 
 // autoSelectFiles uses searchindex + retrieval/v2 to find relevant files for analysis.
 func autoSelectFiles(ctx context.Context, rc *skillmain.RunContext, query string, maxFiles int, repoIndexMode string, logger zerolog.Logger) ([]codecontext.Candidate, error) {
-	memStore, err := memory.OpenWithConfig(ctx, rc.Config)
-	if err != nil {
-		return nil, skillerr.WrapIO("open memory store", err)
-	}
-	defer memStore.Close()
-
-	indexStore, err := searchindex.Open(ctx, rc.Config.Storage.Root)
-	if err != nil {
-		return nil, skillerr.WrapIO("open search index", err)
-	}
-	defer indexStore.Close()
-
-	workspaceID := rc.Workspace
 	var embedProvider semantic.EmbeddingProvider
 	embedder, err := semantic.NewEmbedderFromConfig(semantic.ScopeSymbols, rc.Config, skillmain.EmbeddingGuard(rc))
 	if err == nil {
@@ -342,74 +323,18 @@ func autoSelectFiles(ctx context.Context, rc *skillmain.RunContext, query string
 		logger.Debug().Err(err).Msg("embedding provider unavailable, using lexical retrieval only")
 	}
 
-	if err := indexStore.DeleteWorkspace(ctx, workspaceID); err != nil {
-		return nil, skillerr.WrapIO("reset search index workspace", err)
-	}
-	if _, err := searchindex.BuildCodeDocuments(ctx, memoryListByTypeSource{store: memStore}, indexStore, workspaceID, searchindex.BuildCodeOptions{
-		Limit:         maxFiles * 10,
+	selected, err := autoselect.Select(ctx, rc.Config, autoselect.Options{
+		WorkspacePath: rc.PathValidator.Workspace(),
+		Query:         query,
+		MaxFiles:      maxFiles,
+		RepoIndexMode: repoIndexMode,
 		EmbedProvider: embedProvider,
-	}); err != nil {
-		return nil, skillerr.WrapRuntime("build code search documents", err)
-	}
-
-	engine := retrievalv2.NewEngine(indexStore, embedProvider)
-	if repoStore, err := repoindex.Open(ctx, rc.Config.Storage.Root, rc.PathValidator.Workspace()); err == nil {
-		defer repoStore.Close()
-		engine = engine.WithRepoQueryService(repoquery.NewQueryService(repoindex.NewQueryEngine(repoStore)))
-	}
-	req := retrievalv2.DefaultSearchRequest(workspaceID, query)
-	req.MaxResults = maxFiles
-	req.Sources.EnableLexical = true
-	req.Sources.EnableVector = embedProvider != nil
-	req.Sources.EnableRepoIndex = normalizeRepoIndexMode(repoIndexMode) != "off"
-	req.Sources.RepoIndexMode = normalizeRepoIndexMode(repoIndexMode)
-
-	resp, err := engine.Search(ctx, req)
+	})
 	if err != nil {
-		return nil, skillerr.WrapRuntime("search retrieval v2", err)
+		return nil, skillerr.WrapRuntime("auto-select files", err)
 	}
 
-	return ccadapt.GroupsToCandidates(resp.Groups), nil
-}
-
-func normalizeRepoIndexMode(mode string) string {
-	switch strings.ToLower(strings.TrimSpace(mode)) {
-	case "", "auto":
-		return "auto"
-	case "search":
-		return "search"
-	case "dag", "dag_grep", "repo_index_dag":
-		return "dag"
-	case "off", "none", "disabled":
-		return "off"
-	default:
-		return "auto"
-	}
-}
-
-type memoryListByTypeSource struct {
-	store storage.MemoryStore
-}
-
-func (s memoryListByTypeSource) ListByType(ctx context.Context, workspaceID, entryType string, limit int) ([]storage.NamedEntry, error) {
-	if limit > 0 {
-		entries, _, err := s.store.ListFiltered(ctx, workspaceID, storage.MemoryListFilter{Types: []string{entryType}}, limit, 0)
-		return entries, err
-	}
-	var out []storage.NamedEntry
-	offset := 0
-	for {
-		page, total, err := s.store.ListFiltered(ctx, workspaceID, storage.MemoryListFilter{Types: []string{entryType}}, 200, offset)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, page...)
-		offset += len(page)
-		if len(page) == 0 || offset >= total {
-			break
-		}
-	}
-	return out, nil
+	return selected.Candidates, nil
 }
 
 // renderEvidenceForLLM converts evidence to a formatted string suitable for LLM context.

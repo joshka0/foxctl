@@ -12,6 +12,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"go/ast"
 	"go/parser"
@@ -31,6 +32,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillerr"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
+	"github.com/jkatigb/agentctl/internal/contextplane"
 	"github.com/jkatigb/agentctl/internal/domain/policy"
 	"github.com/jkatigb/agentctl/internal/indexing/filesummary"
 	"github.com/jkatigb/agentctl/internal/indexing/repoindex"
@@ -49,8 +51,11 @@ import (
 	"github.com/jkatigb/agentctl/internal/storage/dbdriver"
 	"github.com/jkatigb/agentctl/internal/storage/graph"
 	"github.com/jkatigb/agentctl/internal/storage/memory"
+	"github.com/jkatigb/agentctl/internal/storage/obsidianindex"
 	"github.com/jkatigb/agentctl/internal/storage/sessions"
 )
+
+var semanticSearchMemoryOpenMu sync.Mutex
 
 // Command is the envelope command for this skill.
 const Command = "code/semantic_search"
@@ -93,6 +98,7 @@ const (
 	ScopeMemories = "memories"
 	ScopeTasks    = "tasks"
 	ScopeCodemaps = "codemaps"
+	ScopeContext  = "context"
 )
 
 // Input is the expected JSON input for code/semantic_search operations.
@@ -100,6 +106,7 @@ type Input struct {
 	Query          string   `json:"query,omitempty"`           // Empty query with format=tree returns full repo tree
 	Scope          []string `json:"scope,omitempty"`           // ["symbols", "sessions", "memories", "tasks"]
 	Workspace      string   `json:"workspace,omitempty"`       // Workspace path (defaults to cwd)
+	VaultPath      string   `json:"vault_path,omitempty"`      // Optional knowledge-vault path for context scope
 	Limit          int      `json:"limit,omitempty"`           // Default: 20
 	MinSimilarity  float64  `json:"min_similarity,omitempty"`  // Default: 0.3
 	IncludeContext *bool    `json:"include_context,omitempty"` // Include session context hints (default: true)
@@ -293,10 +300,10 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	}
 
 	// Validate scope values
-	validScopes := map[string]bool{ScopeSymbols: true, ScopeSessions: true, ScopeMemories: true, ScopeTasks: true, ScopeCodemaps: true}
+	validScopes := map[string]bool{ScopeSymbols: true, ScopeSessions: true, ScopeMemories: true, ScopeTasks: true, ScopeCodemaps: true, ScopeContext: true}
 	for _, s := range in.Scope {
 		if !validScopes[s] {
-			return skillerr.Validationf("invalid scope: %s (valid: symbols, sessions, memories, tasks, codemaps)", s)
+			return skillerr.Validationf("invalid scope: %s (valid: symbols, sessions, memories, tasks, codemaps, context)", s)
 		}
 	}
 
@@ -430,6 +437,17 @@ func search(ctx context.Context, rc *skillmain.RunContext, in *Input, voyageKey,
 	memoryEmbedding := scopedEmb.memory // For memories scope (voyage-3.5)
 	textEmbedding := scopedEmb.text     // For tasks, sessions, codemaps scopes (voyage-3.5)
 
+	var sharedMemoryStore storage.MemoryStore
+	if scopeSet[ScopeSymbols] || scopeSet[ScopeMemories] || scopeSet[ScopeTasks] || scopeSet[ScopeCodemaps] {
+		memStore, err := openSemanticSearchMemoryStore(ctx, cfg)
+		if err != nil {
+			logger.Debug().Err(err).Msg("shared memory store unavailable before semantic search fanout")
+		} else {
+			sharedMemoryStore = memStore
+			defer func() { _ = sharedMemoryStore.Close() }()
+		}
+	}
+
 	// Parallel search across enabled scopes
 	var wg sync.WaitGroup
 	resultsCh := make(chan sourceResults, 5) // symbols, sessions, memories, tasks, codemaps
@@ -454,6 +472,7 @@ func search(ctx context.Context, rc *skillmain.RunContext, in *Input, voyageKey,
 				embedProvider,
 				queryEmbedding,
 				in.Limit*2,
+				sharedMemoryStore,
 			)
 			resultsCh <- sourceResults{
 				source:  ScopeSymbols,
@@ -518,7 +537,7 @@ func search(ctx context.Context, rc *skillmain.RunContext, in *Input, voyageKey,
 				return
 			}
 
-			results, hint, err := searchMemories(sourceCtx, cfg, workspaceID, in.Query, memoryEmbedding, in.Limit*2, in)
+			results, hint, err := searchMemories(sourceCtx, cfg, workspaceID, in.Query, memoryEmbedding, in.Limit*2, in, sharedMemoryStore)
 			resultsCh <- sourceResults{
 				source:  ScopeMemories,
 				results: results,
@@ -550,7 +569,7 @@ func search(ctx context.Context, rc *skillmain.RunContext, in *Input, voyageKey,
 				return
 			}
 
-			results, err := searchTasks(sourceCtx, rc, workspaceID, textEmbedding, in.Limit*2)
+			results, err := searchTasks(sourceCtx, rc, workspaceID, textEmbedding, in.Limit*2, sharedMemoryStore)
 			resultsCh <- sourceResults{
 				source:  ScopeTasks,
 				results: results,
@@ -581,12 +600,32 @@ func search(ctx context.Context, rc *skillmain.RunContext, in *Input, voyageKey,
 				return
 			}
 
-			results, err := searchCodemaps(sourceCtx, cfg, workspaceID, textEmbedding, in.Limit*2)
+			results, err := searchCodemaps(sourceCtx, cfg, workspaceID, textEmbedding, in.Limit*2, sharedMemoryStore)
 			resultsCh <- sourceResults{
 				source:  ScopeCodemaps,
 				results: results,
 				err:     err,
 				latency: time.Since(start),
+			}
+		}()
+	}
+
+	// Search ACA blended context (top-of-mind + latest handoff + vault hits)
+	if scopeSet[ScopeContext] {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			start := time.Now()
+			sourceCtx, sourceCancel := context.WithTimeout(ctx, DefaultSourceTimeout)
+			defer sourceCancel()
+
+			results, hint, err := searchContext(sourceCtx, cfg, workspacePath, in.Query, in.VaultPath, nil, in.Limit*2)
+			resultsCh <- sourceResults{
+				source:  ScopeContext,
+				results: results,
+				err:     err,
+				latency: time.Since(start),
+				hint:    hint,
 			}
 		}()
 	}
@@ -955,6 +994,12 @@ func generateScopedEmbeddings(ctx context.Context, cfg config.Config, query stri
 	return emb, nil
 }
 
+func openSemanticSearchMemoryStore(ctx context.Context, cfg config.Config) (storage.MemoryStore, error) {
+	semanticSearchMemoryOpenMu.Lock()
+	defer semanticSearchMemoryOpenMu.Unlock()
+	return memory.OpenWithConfig(ctx, cfg)
+}
+
 // searchSymbolsWithRetrieval uses the searchindex + retrieval/v2 pipeline for code-symbol search.
 // This is intentionally scoped to the symbol/code path only; other semantic_search scopes keep
 // their existing implementation until retrieval-v2 is adopted more broadly.
@@ -964,12 +1009,16 @@ func searchSymbolsWithRetrieval(
 	embedProvider semantic.EmbeddingProvider,
 	queryEmbedding []float32,
 	limit int,
+	memStore storage.MemoryStore,
 ) ([]Result, []retrievalv2.Group, error) {
-	memStore, err := memory.OpenWithConfig(ctx, cfg)
-	if err != nil {
-		return nil, nil, skillerr.WrapIO("open memory store", err)
+	var err error
+	if memStore == nil {
+		memStore, err = openSemanticSearchMemoryStore(ctx, cfg)
+		if err != nil {
+			return nil, nil, skillerr.WrapIO("open memory store", err)
+		}
+		defer func() { _ = memStore.Close() }()
 	}
-	defer func() { _ = memStore.Close() }()
 
 	indexStore, err := searchindex.Open(ctx, cfg.Storage.Root)
 	if err != nil {
@@ -1194,6 +1243,7 @@ func searchMemories(
 	queryEmbedding []float32,
 	limit int,
 	in *Input,
+	memStore storage.MemoryStore,
 ) ([]Result, string, error) {
 	// Check if we should use Turso vector search
 	// Use Turso when remote is requested OR when configured
@@ -1230,7 +1280,7 @@ func searchMemories(
 			}
 			// Fallback to BM25 if Turso fails, with hint about the failure
 			hint := fmt.Sprintf("memory vector search unavailable: %v; using BM25 fallback", err)
-			results, bm25Err := searchMemoriesBM25(ctx, cfg, workspaceID, query, limit)
+			results, bm25Err := searchMemoriesBM25(ctx, cfg, workspaceID, query, limit, memStore)
 			return results, hint, bm25Err
 		}
 		defer func() { errs.Ignore(tursoStore.Close(), "close turso memory store") }()
@@ -1250,7 +1300,7 @@ func searchMemories(
 			}
 			// Fallback to BM25 on error, with hint about the failure
 			hint := fmt.Sprintf("memory vector search failed: %v; using BM25 fallback", err)
-			results, bm25Err := searchMemoriesBM25(ctx, cfg, workspaceID, query, limit)
+			results, bm25Err := searchMemoriesBM25(ctx, cfg, workspaceID, query, limit, memStore)
 			return results, hint, bm25Err
 		}
 
@@ -1258,7 +1308,7 @@ func searchMemories(
 		// Skip fallback for remote mode - empty results are valid
 		if len(scoredEntries) == 0 && !in.Remote {
 			hint := "memory vector search returned no results; trying BM25 fallback"
-			results, bm25Err := searchMemoriesBM25(ctx, cfg, workspaceID, query, limit)
+			results, bm25Err := searchMemoriesBM25(ctx, cfg, workspaceID, query, limit, memStore)
 			if bm25Err != nil {
 				return nil, hint, bm25Err
 			}
@@ -1273,19 +1323,19 @@ func searchMemories(
 		// SQLite store - use vector search if embeddings available, otherwise BM25
 		if queryEmbedding != nil {
 			// Use in-memory cosine similarity search
-			results, err := searchMemoriesVector(ctx, cfg, workspaceID, queryEmbedding, limit)
+			results, err := searchMemoriesVector(ctx, cfg, workspaceID, queryEmbedding, limit, memStore)
 			if err == nil && len(results) > 0 {
 				return results, "", nil
 			}
 			// Fall back to BM25 if vector search fails or returns empty
 			if err != nil {
 				hint := fmt.Sprintf("memory vector search failed: %v; using BM25 fallback", err)
-				results, bm25Err := searchMemoriesBM25(ctx, cfg, workspaceID, query, limit)
+				results, bm25Err := searchMemoriesBM25(ctx, cfg, workspaceID, query, limit, memStore)
 				return results, hint, bm25Err
 			}
 		}
 		// Use SQLite BM25 search (no hint needed - this is expected behavior)
-		results, err := searchMemoriesBM25(ctx, cfg, workspaceID, query, limit)
+		results, err := searchMemoriesBM25(ctx, cfg, workspaceID, query, limit, memStore)
 		return results, "", err
 	}
 
@@ -1324,13 +1374,16 @@ func searchMemoriesBM25(
 	ctx context.Context,
 	cfg config.Config, workspaceID, query string,
 	limit int,
+	memStore storage.MemoryStore,
 ) ([]Result, error) {
-	// Open memory store
-	memStore, err := memory.OpenWithConfig(ctx, cfg)
-	if err != nil {
-		return nil, skillerr.WrapIO("open memory store", err)
+	var err error
+	if memStore == nil {
+		memStore, err = openSemanticSearchMemoryStore(ctx, cfg)
+		if err != nil {
+			return nil, skillerr.WrapIO("open memory store", err)
+		}
+		defer func() { _ = memStore.Close() }()
 	}
-	defer memStore.Close()
 
 	// Request more items than limit to account for type filtering
 	// Code-related types (code_symbol, file_embedding, edit) often dominate the memory store
@@ -1386,13 +1439,16 @@ func searchMemoriesVector(
 	cfg config.Config, workspaceID string,
 	queryEmbedding []float32,
 	limit int,
+	memStore storage.MemoryStore,
 ) ([]Result, error) {
-	// Open memory store
-	memStore, err := memory.OpenWithConfig(ctx, cfg)
-	if err != nil {
-		return nil, skillerr.WrapIO("open memory store", err)
+	var err error
+	if memStore == nil {
+		memStore, err = openSemanticSearchMemoryStore(ctx, cfg)
+		if err != nil {
+			return nil, skillerr.WrapIO("open memory store", err)
+		}
+		defer func() { _ = memStore.Close() }()
 	}
-	defer memStore.Close()
 
 	// Request more items than limit to account for type filtering
 	// Code-related types (code_symbol, file_embedding, edit) often dominate the memory store
@@ -1508,13 +1564,16 @@ func searchTasks(
 	rc *skillmain.RunContext, workspaceID string,
 	queryEmbedding []float32,
 	limit int,
+	memStore storage.MemoryStore,
 ) ([]Result, error) {
-	// Open memory store (task embeddings are stored in named_memory)
-	memStore, err := memory.OpenWithConfig(ctx, rc.Config)
-	if err != nil {
-		return nil, skillerr.WrapIO("open memory store", err)
+	var err error
+	if memStore == nil {
+		memStore, err = openSemanticSearchMemoryStore(ctx, rc.Config)
+		if err != nil {
+			return nil, skillerr.WrapIO("open memory store", err)
+		}
+		defer func() { _ = memStore.Close() }()
 	}
-	defer memStore.Close()
 
 	// Search for similar task entries
 	scoredEntries, err := memStore.SearchSimilarByType(ctx, workspaceID, "task_embedding", queryEmbedding, limit*2)
@@ -1597,13 +1656,16 @@ func searchCodemaps(
 	cfg config.Config, workspaceID string,
 	queryEmbedding []float32,
 	limit int,
+	memStore storage.MemoryStore,
 ) ([]Result, error) {
-	// Open memory store (codemap embeddings are stored in named_memory)
-	memStore, err := memory.OpenWithConfig(ctx, cfg)
-	if err != nil {
-		return nil, skillerr.WrapIO("open memory store", err)
+	var err error
+	if memStore == nil {
+		memStore, err = openSemanticSearchMemoryStore(ctx, cfg)
+		if err != nil {
+			return nil, skillerr.WrapIO("open memory store", err)
+		}
+		defer func() { _ = memStore.Close() }()
 	}
-	defer memStore.Close()
 
 	// Search for similar entries (codemaps + codemap chunks)
 	scoredEntries := make([]storage.ScoredEntry, 0, limit*4)
@@ -1758,6 +1820,7 @@ func reciprocalRankFusion(sourceResults map[string][]Result, minSimilarity float
 	// Optional per-source weights (tune as needed)
 	sourceWeights := map[string]float64{
 		ScopeSymbols:  1.0,
+		ScopeContext:  1.0,
 		ScopeTasks:    0.95, // Tasks are high-value for understanding work context
 		ScopeCodemaps: 0.95, // Codemaps provide rich relationship context
 		ScopeSessions: 0.9,
@@ -1802,6 +1865,137 @@ func reciprocalRankFusion(sourceResults map[string][]Result, minSimilarity float
 	})
 
 	return results
+}
+
+func searchContext(ctx context.Context, cfg config.Config, workspacePath, query, inputVaultPath string, semanticProvider semantic.EmbeddingProvider, limit int) ([]Result, string, error) {
+	if strings.TrimSpace(workspacePath) == "" {
+		return nil, "", fmt.Errorf("workspace path required for context scope")
+	}
+	if limit <= 0 {
+		limit = 5
+	}
+	store := contextplane.NewWorkspaceStore(workspacePath)
+
+	var index obsidianindex.Store
+	hint := ""
+	if vaultPath := resolveSemanticSearchVaultPath(inputVaultPath); vaultPath != "" {
+		idx, err := obsidianindex.Open(ctx, cfg.Storage.Root, vaultPath)
+		if err != nil {
+			hint = fmt.Sprintf("context vault unavailable: %v", err)
+		} else {
+			index = idx
+			defer func() { _ = index.Close() }()
+		}
+	} else {
+		hint = "context scope has no vault configured; using control-plane only"
+	}
+
+	var repoStore *repoindex.Store
+	if repo, err := repoindex.Open(ctx, cfg.Storage.Root, workspacePath); err == nil {
+		repoStore = repo
+		defer func() { _ = repoStore.Close() }()
+	}
+
+	retrieved, err := store.Retrieve(ctx, index, repoStore, semanticProvider, query, limit)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, "context scope unavailable; run `agentctl orient` first", nil
+		}
+		return nil, "", err
+	}
+
+	results := contextRetrievalToResults(retrieved, limit)
+	return results, hint, nil
+}
+
+func contextRetrievalToResults(retrieved contextplane.RetrievalResult, limit int) []Result {
+	if limit <= 0 {
+		limit = 5
+	}
+	results := make([]Result, 0, limit)
+	rank := 1
+
+	if retrieved.TopOfMind != nil {
+		summaryParts := []string{}
+		if objective := strings.TrimSpace(retrieved.TopOfMind.Objective); objective != "" {
+			summaryParts = append(summaryParts, objective)
+		}
+		if phase := strings.TrimSpace(retrieved.TopOfMind.Phase); phase != "" {
+			summaryParts = append(summaryParts, "phase: "+phase)
+		}
+		if len(retrieved.TopOfMind.NextActions) > 0 {
+			summaryParts = append(summaryParts, "next: "+strings.Join(retrieved.TopOfMind.NextActions, "; "))
+		}
+		results = append(results, Result{
+			Source:     ScopeContext,
+			ID:         "context:top_of_mind:" + strings.TrimSpace(retrieved.WorkspaceID),
+			Name:       "Top of Mind",
+			Summary:    strings.Join(summaryParts, " | "),
+			Similarity: 1.0,
+			SourceRank: rank,
+		})
+		rank++
+	}
+
+	if retrieved.LatestHandoff != nil && rank <= limit {
+		handoff := retrieved.LatestHandoff.Handoff
+		results = append(results, Result{
+			Source:     ScopeContext,
+			ID:         "context:handoff:" + strings.TrimSpace(handoff.TaskID),
+			Name:       firstNonEmpty(strings.TrimSpace(handoff.Phase), "Latest Handoff"),
+			Summary:    strings.TrimSpace(handoff.Summary),
+			Similarity: 0.95,
+			SourceRank: rank,
+		})
+		rank++
+	}
+
+	for i, hit := range retrieved.VaultHits {
+		if rank > limit {
+			break
+		}
+		results = append(results, Result{
+			Source:     ScopeContext,
+			ID:         "context:vault:" + strings.TrimSpace(hit.Path),
+			Name:       firstNonEmpty(strings.TrimSpace(hit.Title), contextResultPathLabel(hit.Path)),
+			Path:       strings.TrimSpace(hit.Path),
+			Summary:    strings.TrimSpace(hit.Snippet),
+			Similarity: rankedContextSimilarity(i, len(retrieved.VaultHits)),
+			SourceRank: rank,
+		})
+		rank++
+	}
+
+	return results
+}
+
+func rankedContextSimilarity(index, total int) float64 {
+	if total <= 1 {
+		return 0.9
+	}
+	step := 0.4 / float64(total-1)
+	return 0.9 - (float64(index) * step)
+}
+
+func resolveSemanticSearchVaultPath(explicit string) string {
+	if trimmed := strings.TrimSpace(explicit); trimmed != "" {
+		return trimmed
+	}
+	for _, key := range []string{"AGENTCTL_ACA_VAULT_PATH", "AGENTCTL_OBSIDIAN_VAULT_PATH"} {
+		if value := strings.TrimSpace(os.Getenv(key)); value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func contextResultPathLabel(path string) string {
+	path = strings.TrimSpace(strings.TrimSuffix(path, ".md"))
+	if path == "" {
+		return ""
+	}
+	parts := strings.Split(filepath.ToSlash(path), "/")
+	return parts[len(parts)-1]
 }
 
 // applyPageRankBoost looks up PageRank scores from the dependency graph and applies
@@ -2371,7 +2565,7 @@ func fetchFileSummaryEntries(
 	limit int,
 	logger zerolog.Logger,
 ) ([]retrieval.FileEntry, error) {
-	memStore, err := memory.OpenWithConfig(ctx, cfg)
+	memStore, err := openSemanticSearchMemoryStore(ctx, cfg)
 	if err != nil {
 		return nil, fmt.Errorf("open memory store: %w", err)
 	}
@@ -2567,7 +2761,7 @@ func enrichEntriesWithSummaries(
 	}
 
 	// Open memory store
-	memStore, err := memory.OpenWithConfig(ctx, cfg)
+	memStore, err := openSemanticSearchMemoryStore(ctx, cfg)
 	if err != nil {
 		return 0, fmt.Errorf("open memory store: %w", err)
 	}
@@ -2695,7 +2889,7 @@ func generateRootSummary(
 	}
 
 	// Open memory store for FileSummaryGenerator
-	memStore, err := memory.OpenWithConfig(ctx, cfg)
+	memStore, err := openSemanticSearchMemoryStore(ctx, cfg)
 	if err != nil {
 		logger.Debug().Err(err).Msg("failed to open memory store for root summary")
 		return ""

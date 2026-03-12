@@ -7,22 +7,15 @@ import (
 	"context"
 	"encoding/json"
 	"os"
-	"strings"
 	"time"
 
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillerr"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
 	"github.com/jkatigb/agentctl/internal/codecontext"
-	ccadapt "github.com/jkatigb/agentctl/internal/codecontext/adapters"
-	"github.com/jkatigb/agentctl/internal/indexing/repoindex"
+	"github.com/jkatigb/agentctl/internal/codecontext/autoselect"
 	"github.com/jkatigb/agentctl/internal/indexing/semantic"
 	ws "github.com/jkatigb/agentctl/internal/platform/workspace"
-	"github.com/jkatigb/agentctl/internal/repoquery"
-	retrievalv2 "github.com/jkatigb/agentctl/internal/retrieval/v2"
-	"github.com/jkatigb/agentctl/internal/searchindex"
-	"github.com/jkatigb/agentctl/internal/storage"
-	"github.com/jkatigb/agentctl/internal/storage/memory"
 )
 
 const (
@@ -153,18 +146,6 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 }
 
 func searchCode(ctx context.Context, rc *skillmain.RunContext, in Input) ([]CandidateOutput, []codecontext.Candidate, map[string]int, error) {
-	store, err := memory.OpenWithConfig(ctx, rc.Config)
-	if err != nil {
-		return nil, nil, nil, skillerr.WrapIO("open memory store", err)
-	}
-	defer store.Close()
-
-	indexStore, err := searchindex.Open(ctx, rc.Config.Storage.Root)
-	if err != nil {
-		return nil, nil, nil, skillerr.WrapIO("open search index", err)
-	}
-	defer indexStore.Close()
-
 	var embedder semantic.EmbeddingProvider
 	for _, src := range in.Sources {
 		if src == "semantic" {
@@ -181,60 +162,33 @@ func searchCode(ctx context.Context, rc *skillmain.RunContext, in Input) ([]Cand
 		}
 	}
 
-	if err := indexStore.DeleteWorkspace(ctx, in.WorkspaceID); err != nil {
-		return nil, nil, nil, skillerr.WrapIO("reset search index workspace", err)
-	}
-	if _, err := searchindex.BuildCodeDocuments(ctx, memoryListByTypeSource{store: store}, indexStore, in.WorkspaceID, searchindex.BuildCodeOptions{
-		Limit:         in.Limits.MaxCandidates * 10,
+	selected, err := autoselect.Select(ctx, rc.Config, autoselect.Options{
+		WorkspacePath: rc.PathValidator.Workspace(),
+		WorkspaceID:   in.WorkspaceID,
+		Query:         in.Question,
+		MaxFiles:      in.Limits.MaxCandidates,
+		RepoIndexMode: in.RepoIndexMode,
 		EmbedProvider: embedder,
-	}); err != nil {
-		return nil, nil, nil, skillerr.WrapRuntime("build code search documents", err)
-	}
-
-	engine := retrievalv2.NewEngine(indexStore, embedder)
-	repoMode := normalizeRepoIndexMode(in.RepoIndexMode)
-	if repoMode != "off" {
-		if repoStore, err := repoindex.Open(ctx, rc.Config.Storage.Root, rc.PathValidator.Workspace()); err == nil {
-			defer repoStore.Close()
-			engine = engine.WithRepoQueryService(repoquery.NewQueryService(repoindex.NewQueryEngine(repoStore)))
-		}
-	}
-	req := retrievalv2.DefaultSearchRequest(in.WorkspaceID, in.Question)
-	req.MaxResults = in.Limits.MaxCandidates
-	req.Sources.EnableLexical = true
-	req.Sources.EnableVector = embedder != nil
-	req.Sources.EnableRepoIndex = repoMode != "off"
-	req.Sources.RepoIndexMode = repoMode
-
-	resp, err := engine.Search(ctx, req)
+	})
 	if err != nil {
-		return nil, nil, nil, skillerr.WrapRuntime("search retrieval v2", err)
+		return nil, nil, nil, skillerr.WrapRuntime("auto-select code candidates", err)
 	}
 
 	bySource := make(map[string]int)
-	for source, stats := range resp.Stats.Sources {
-		if stats.Returned > 0 {
-			bySource[string(source)] = stats.Returned
-		}
-	}
-
-	candidates := make([]CandidateOutput, 0, len(resp.Groups))
-	for _, group := range resp.Groups {
-		symbolID := ""
-		source := ""
-		if len(group.Anchors) > 0 {
-			symbolID = group.Anchors[0].SymbolID
-			source = string(group.Anchors[0].Source)
+	candidates := make([]CandidateOutput, 0, len(selected.Matches))
+	for _, match := range selected.Matches {
+		if match.Source != "" {
+			bySource[match.Source]++
 		}
 		candidates = append(candidates, CandidateOutput{
-			Path:     group.Path,
-			SymbolID: symbolID,
-			Score:    group.Score,
-			Source:   source,
+			Path:     match.Path,
+			SymbolID: match.SymbolID,
+			Score:    match.Score,
+			Source:   match.Source,
 		})
 	}
 
-	return candidates, ccadapt.GroupsToCandidates(resp.Groups), bySource, nil
+	return candidates, selected.Candidates, bySource, nil
 }
 
 func collectEvidence(ctx context.Context, rc *skillmain.RunContext, in Input, ccCandidates []codecontext.Candidate) (*ExtractResult, error) {
@@ -286,44 +240,4 @@ func collectEvidence(ctx context.Context, rc *skillmain.RunContext, in Input, cc
 		SnippetsInline:  previews,
 		Artifact:        artifactDigest,
 	}, nil
-}
-
-func normalizeRepoIndexMode(value string) string {
-	switch strings.ToLower(strings.TrimSpace(value)) {
-	case "", "auto":
-		return "auto"
-	case "off", "none", "disabled":
-		return "off"
-	case "dag", "dag_grep", "repo_index_dag":
-		return "dag"
-	case "search":
-		return "search"
-	default:
-		return "auto"
-	}
-}
-
-type memoryListByTypeSource struct {
-	store storage.MemoryStore
-}
-
-func (s memoryListByTypeSource) ListByType(ctx context.Context, workspaceID, entryType string, limit int) ([]storage.NamedEntry, error) {
-	if limit > 0 {
-		entries, _, err := s.store.ListFiltered(ctx, workspaceID, storage.MemoryListFilter{Types: []string{entryType}}, limit, 0)
-		return entries, err
-	}
-	var out []storage.NamedEntry
-	offset := 0
-	for {
-		page, total, err := s.store.ListFiltered(ctx, workspaceID, storage.MemoryListFilter{Types: []string{entryType}}, 200, offset)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, page...)
-		offset += len(page)
-		if len(page) == 0 || offset >= total {
-			break
-		}
-	}
-	return out, nil
 }
