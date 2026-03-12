@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 
 	"github.com/jkatigb/agentctl/internal/contextplane"
@@ -290,5 +291,27 @@ func TestSearchPathFallback(t *testing.T) {
 	}
 	if results[0].Path != "internal/platform/config/config.go" {
 		t.Fatalf("top path=%q want internal/platform/config/config.go", results[0].Path)
+	}
+}
+
+func TestDefaultSemanticSearchScopes(t *testing.T) {
+	workspace := t.TempDir()
+	got := defaultSemanticSearchScopes(workspace)
+	want := []string{ScopeSymbols, ScopeSessions, ScopeMemories, ScopeTasks, ScopeCodemaps}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("default scopes=%v want %v", got, want)
+	}
+
+	policyPath := filepath.Join(workspace, ".agentctl", "policy", "retrieval.yaml")
+	if err := os.MkdirAll(filepath.Dir(policyPath), 0o755); err != nil {
+		t.Fatalf("mkdir policy dir: %v", err)
+	}
+	if err := os.WriteFile(policyPath, []byte("semantic_search_default_scopes:\n  - symbols\n  - context\n  - codemaps\n  - context\n"), 0o644); err != nil {
+		t.Fatalf("write retrieval policy: %v", err)
+	}
+	got = defaultSemanticSearchScopes(workspace)
+	want = []string{ScopeSymbols, ScopeContext, ScopeCodemaps}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("policy scopes=%v want %v", got, want)
 	}
 }

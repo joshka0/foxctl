@@ -1,0 +1,56 @@
+name: praze-mixed
+queries:
+  - id: repo-graph-root
+    query: "praze repo graph"
+    expected_any_of:
+      - notes/repo/praze/index.md
+      - apps/praze-api/lib/praze/repo.ex
+    notes: "Accept either the canonical praze repo graph note or the central repo module."
+  - id: api-controllers
+    query: "api controllers"
+    expected_any_of:
+      - notes/repo/praze/packages/apps-praze-api-lib-prazeweb-controllers-api.md
+      - apps/praze-api/lib/praze_web/controllers/attention_controller.ex
+      - apps/praze-api/lib/praze_web/controllers/circles_controller.ex
+    notes: "Accept either the canonical controllers note or representative controller modules."
+  - id: channels-realtime
+    query: "realtime channels websocket updates"
+    expected_any_of:
+      - notes/repo/praze/packages/apps-praze-api-lib-prazeweb-channels.md
+      - praze-app/lib/api/phoenix-channels.ts
+      - apps/praze-api/lib/praze/realtime.ex
+      - apps/praze-api/lib/praze_web/realtime_adapter.ex
+    notes: "Accept either the channels note or the main realtime/channel code paths."
+  - id: moderation-rules
+    query: "content moderation rules"
+    expected_any_of:
+      - notes/repo/praze/packages/moderation.md
+      - apps/praze-api/lib/praze/trust/moderation_job.ex
+    notes: "Accept either the moderation note or the moderation job implementation."
+  - id: notifications-delivery
+    query: "notifications delivery unread reminders"
+    expected_any_of:
+      - notes/repo/praze/packages/notifications.md
+      - praze-app/lib/notifications/index.ts
+      - praze-app/lib/notifications/use-push-registration.native.ts
+    notes: "Accept either the notifications note or the main notifications delivery files."
+  - id: jobs-background
+    query: "background jobs processing"
+    expected_any_of:
+      - notes/repo/praze/packages/jobs.md
+      - apps/praze-api/priv/repo/migrations/20260113000010_add_oban_jobs.exs
+    notes: "Accept either the jobs note or the core Oban migration anchor."
+  - id: margin-domain
+    query: "margin calculations thresholds"
+    expected_any_of:
+      - notes/repo/praze/packages/margin.md
+      - praze-app/src/features/margin/components/MarginFilterBar.tsx
+      - praze-app/app/margin/[verseId].tsx
+    notes: "Accept either the margin note or representative UI/domain files for margin."
+  - id: seo-pipeline
+    query: "seo embeddings pipeline"
+    expected_any_of:
+      - notes/repo/praze/packages/praze-website-seo.md
+      - praze-website/seo/src/pipeline.ts
+      - praze-website/seo/src/embeddings/voyage.ts
+    notes: "Accept either the SEO note or the concrete SEO pipeline/embedding implementation files."

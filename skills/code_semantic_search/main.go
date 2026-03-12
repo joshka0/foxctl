@@ -55,6 +55,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/storage/memory"
 	"github.com/jkatigb/agentctl/internal/storage/obsidianindex"
 	"github.com/jkatigb/agentctl/internal/storage/sessions"
+	"gopkg.in/yaml.v3"
 )
 
 var semanticSearchMemoryOpenMu sync.Mutex
@@ -137,6 +138,10 @@ type Input struct {
 	TreeMaxChildren         int   `json:"tree_max_children,omitempty"`          // Max children per directory node (default: 10)
 	TreeIncludeSummaries    *bool `json:"tree_include_summaries,omitempty"`     // Include file summaries in tree (default: true, use ptr to detect explicit false)
 	TreeMaxMissingSummaries int   `json:"tree_max_missing_summaries,omitempty"` // Max summaries to generate lazily (default: 20)
+}
+
+type semanticSearchPolicy struct {
+	SemanticSearchDefaultScopes []string `yaml:"semantic_search_default_scopes"`
 }
 
 // Output is the JSON output structure for code/semantic_search results.
@@ -267,7 +272,7 @@ func main() {
 func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	// Apply defaults
 	if len(in.Scope) == 0 {
-		in.Scope = []string{ScopeSymbols, ScopeSessions, ScopeMemories, ScopeTasks, ScopeCodemaps}
+		in.Scope = defaultSemanticSearchScopes(firstNonEmpty(strings.TrimSpace(in.Workspace), rc.PathValidator.Workspace()))
 	}
 	in.Limit = mathutil.DefaultPositiveInt(in.Limit, DefaultLimit)
 	in.MinSimilarity = mathutil.DefaultPositiveFloat(in.MinSimilarity, DefaultMinSimilarity)
@@ -2176,6 +2181,53 @@ func resolveSemanticSearchVaultPath(explicit string) string {
 		}
 	}
 	return ""
+}
+
+func defaultSemanticSearchScopes(workspacePath string) []string {
+	defaults := []string{ScopeSymbols, ScopeSessions, ScopeMemories, ScopeTasks, ScopeCodemaps}
+	workspacePath = strings.TrimSpace(workspacePath)
+	if workspacePath == "" {
+		return defaults
+	}
+	policyPath := filepath.Join(workspacePath, ".agentctl", "policy", "retrieval.yaml")
+	body, err := os.ReadFile(policyPath)
+	if err != nil {
+		return defaults
+	}
+	var policy semanticSearchPolicy
+	if err := yaml.Unmarshal(body, &policy); err != nil {
+		return defaults
+	}
+	scopes := normalizeSemanticSearchScopes(policy.SemanticSearchDefaultScopes)
+	if len(scopes) == 0 {
+		return defaults
+	}
+	return scopes
+}
+
+func normalizeSemanticSearchScopes(scopes []string) []string {
+	valid := map[string]struct{}{
+		ScopeSymbols:  {},
+		ScopeSessions: {},
+		ScopeMemories: {},
+		ScopeTasks:    {},
+		ScopeCodemaps: {},
+		ScopeContext:  {},
+	}
+	out := make([]string, 0, len(scopes))
+	seen := map[string]struct{}{}
+	for _, scope := range scopes {
+		scope = strings.ToLower(strings.TrimSpace(scope))
+		if _, ok := valid[scope]; !ok {
+			continue
+		}
+		if _, ok := seen[scope]; ok {
+			continue
+		}
+		seen[scope] = struct{}{}
+		out = append(out, scope)
+	}
+	return out
 }
 
 func contextResultPathLabel(path string) string {

@@ -163,7 +163,14 @@ Interpretation:
 - `context` remains valuable
 - `default + context` currently gives the strongest overall recall on the mixed suite
 
-That is stronger evidence for eventually blending `context` into the default search story, but it is still worth keeping the rollout explicit until more suites beyond `agentctl` are measured.
+That is stronger evidence for eventually blending `context` into the default search story, but it is still worth keeping the rollout repo-aware until more suites beyond `agentctl` are measured.
+
+Current implementation direction:
+
+- `code/semantic_search` reads an optional workspace-local ACA retrieval policy key:
+  - `semantic_search_default_scopes`
+- `agentctl` can opt into default `context` through that workspace-local policy
+- `praze` can stay code-first by leaving that policy unset
 
 ### Surfaces to review
 
