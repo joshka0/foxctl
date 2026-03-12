@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"sort"
 	"strings"
+	"sync/atomic"
 	"time"
 )
 
@@ -20,7 +21,7 @@ type OpenAICompatProvider struct {
 	apiKey        string
 	model         string
 	baseURL       string
-	dimensions    int
+	dimensions    atomic.Int64
 	httpClient    *http.Client
 	rateLimitWait bool
 	tracker       *usageTracker
@@ -50,15 +51,16 @@ func NewOpenAICompatProvider(cfg OpenAICompatConfig) (*OpenAICompatProvider, err
 	if cfg.RateLimitWait != nil {
 		wait = *cfg.RateLimitWait
 	}
-	return &OpenAICompatProvider{
+	provider := &OpenAICompatProvider{
 		apiKey:        strings.TrimSpace(cfg.APIKey),
 		model:         model,
 		baseURL:       normalizeOpenAICompatBaseURL(cfg.BaseURL),
-		dimensions:    resolveOpenAICompatDimensions(model, cfg.Dimensions),
 		httpClient:    &http.Client{Timeout: timeout},
 		rateLimitWait: wait,
 		tracker:       newUsageTracker("openai_compat", model),
-	}, nil
+	}
+	provider.dimensions.Store(int64(resolveOpenAICompatDimensions(model, cfg.Dimensions)))
+	return provider, nil
 }
 
 type openAICompatEmbedRequest struct {
@@ -155,8 +157,8 @@ func (p *OpenAICompatProvider) EmbedBatch(ctx context.Context, texts []string) (
 	out := make([][]float32, 0, len(res.Data))
 	for _, item := range res.Data {
 		out = append(out, append([]float32(nil), item.Embedding...))
-		if p.dimensions == 0 && len(item.Embedding) > 0 {
-			p.dimensions = len(item.Embedding)
+		if p.dimensions.Load() == 0 && len(item.Embedding) > 0 {
+			p.dimensions.Store(int64(len(item.Embedding)))
 		}
 	}
 
@@ -170,7 +172,7 @@ func (p *OpenAICompatProvider) Model() string {
 }
 
 func (p *OpenAICompatProvider) Dimensions() int {
-	return p.dimensions
+	return int(p.dimensions.Load())
 }
 
 func (p *OpenAICompatProvider) Usage() EmbeddingUsage {
