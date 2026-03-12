@@ -1020,11 +1020,11 @@ func searchSymbolsWithRetrieval(
 		defer func() { _ = memStore.Close() }()
 	}
 
-	indexStore, err := searchindex.Open(ctx, cfg.Storage.Root)
+	indexStore, cleanupIndex, err := searchindex.OpenEphemeral(ctx, cfg.Storage.Root)
 	if err != nil {
-		return nil, nil, skillerr.WrapIO("open search index", err)
+		return nil, nil, skillerr.WrapIO("open ephemeral search index", err)
 	}
-	defer func() { _ = indexStore.Close() }()
+	defer func() { _ = cleanupIndex() }()
 
 	engine := retrievalv2.NewEngine(indexStore, embedProvider)
 	repoMode := normalizeSkillRepoIndexMode(repoIndexMode)
@@ -1041,19 +1041,23 @@ func searchSymbolsWithRetrieval(
 	req.Sources.EnableRepoIndex = repoMode != "off"
 	req.Sources.RepoIndexMode = repoMode
 
-	if err := indexStore.DeleteWorkspace(ctx, workspaceID); err != nil {
-		return nil, nil, skillerr.WrapIO("reset search index workspace", err)
-	}
+	var bootstrapErr error
 	if _, err := searchindex.BuildCodeDocuments(ctx, memoryListByTypeSource{store: memStore}, indexStore, workspaceID, searchindex.BuildCodeOptions{
 		Limit:         limit * 10,
 		EmbedProvider: embedProvider,
 	}); err != nil {
-		return nil, nil, skillerr.WrapRuntime("build code search documents", err)
+		bootstrapErr = skillerr.WrapRuntime("build code search documents", err)
 	}
 
 	resp, err := engine.Search(ctx, req)
 	if err != nil {
+		if bootstrapErr != nil {
+			return nil, nil, bootstrapErr
+		}
 		return nil, nil, skillerr.WrapRuntime("search retrieval v2", err)
+	}
+	if len(resp.Hits) == 0 && bootstrapErr != nil {
+		return nil, nil, bootstrapErr
 	}
 
 	results := make([]Result, 0, len(resp.Hits))

@@ -66,15 +66,12 @@ func Select(ctx context.Context, cfg sysconfig.Config, opts Options) (*Result, e
 	}
 	defer memStore.Close()
 
-	indexStore, err := searchindex.Open(ctx, cfg.Storage.Root)
+	indexStore, cleanup, err := searchindex.OpenEphemeral(ctx, cfg.Storage.Root)
 	if err != nil {
-		return nil, fmt.Errorf("open search index: %w", err)
+		return nil, fmt.Errorf("open ephemeral search index: %w", err)
 	}
-	defer indexStore.Close()
+	defer func() { _ = cleanup() }()
 
-	if err := indexStore.DeleteWorkspace(ctx, workspaceID); err != nil {
-		return nil, fmt.Errorf("reset search index workspace: %w", err)
-	}
 	if _, err := searchindex.BuildCodeDocuments(ctx, memoryListByTypeSource{store: memStore}, indexStore, workspaceID, searchindex.BuildCodeOptions{
 		Limit:         opts.MaxFiles * 10,
 		EmbedProvider: opts.EmbedProvider,
