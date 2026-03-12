@@ -25,11 +25,27 @@ func TestBuilderBuildsTerraformKubernetesAndShellComponents(t *testing.T) {
 	writeFile("infra/main.tf", `
 provider "aws" {}
 
-resource "aws_s3_bucket" "app" {}
+variable "env" {}
+
+locals {
+  bucket_name = var.env
+}
+
+resource "aws_s3_bucket" "app" {
+  bucket = local.bucket_name
+}
+
+output "bucket_arn" {
+  value = aws_s3_bucket.app.arn
+}
 
 module "network" {
   source = "./modules/network"
 }
+`)
+	writeFile("infra/modules/network/main.tf", `
+variable "cidr" {}
+resource "aws_vpc" "main" {}
 `)
 	writeFile("deploy/api.yaml", `
 apiVersion: apps/v1
@@ -70,11 +86,11 @@ echo "$NAMESPACE"
 	if err != nil {
 		t.Fatalf("build: %v", err)
 	}
-	if result.Files != 3 {
-		t.Fatalf("files=%d want 3", result.Files)
+	if result.Files != 4 {
+		t.Fatalf("files=%d want 4", result.Files)
 	}
-	if result.Packages < 3 {
-		t.Fatalf("packages=%d want at least 3", result.Packages)
+	if result.Packages < 4 {
+		t.Fatalf("packages=%d want at least 4", result.Packages)
 	}
 	if result.Symbols < 6 {
 		t.Fatalf("concept count=%d want at least 6", result.Symbols)
@@ -87,6 +103,9 @@ echo "$NAMESPACE"
 	if !containsNodeName(tfHits, "resource aws_s3_bucket.app") {
 		t.Fatalf("expected terraform resource concept in %#v", tfHits)
 	}
+	if !containsNodeFile(tfHits, "infra/main.tf") {
+		t.Fatalf("expected terraform concept to retain file path in %#v", tfHits)
+	}
 
 	k8sHits, err := store.SearchFTS(ctx, "Deployment api", 10)
 	if err != nil {
@@ -94,6 +113,9 @@ echo "$NAMESPACE"
 	}
 	if !containsNodeName(k8sHits, "Deployment/default/api") {
 		t.Fatalf("expected kubernetes deployment concept in %#v", k8sHits)
+	}
+	if !containsNodeFile(k8sHits, "deploy/api.yaml") {
+		t.Fatalf("expected kubernetes concept to retain file path in %#v", k8sHits)
 	}
 
 	cmdHits, err := store.SearchFTS(ctx, "kubectl", 10)
@@ -105,10 +127,45 @@ echo "$NAMESPACE"
 	}
 
 	repoKey := store.RepoKey()
+	tfPkgID := infraPackageID(terraformPkgPrefix, "infra/main.tf")
+	moduleNetworkID := terraformConceptNodeID(repoKey, tfPkgID, "module:network")
+	networkPkgNodeID := PackageID(repoKey, infraPackageIDFromDir(terraformPkgPrefix, "infra/modules/network"))
+	localBucketID := terraformConceptNodeID(repoKey, tfPkgID, "local:bucket_name")
+	varEnvID := terraformConceptNodeID(repoKey, tfPkgID, "variable:env")
+	resourceBucketID := terraformConceptNodeID(repoKey, tfPkgID, "resource:aws_s3_bucket.app")
+	outputBucketArnID := terraformConceptNodeID(repoKey, tfPkgID, "output:bucket_arn")
 	shPkgID := infraPackageID(shellPkgPrefix, "scripts/deploy.sh")
 	shFileID := FileID(repoKey, shPkgID, "scripts/deploy.sh")
 	kubectlID := NamespacedID(repoKey, ConceptCommand+"kubectl")
 	envID := NamespacedID(repoKey, ConceptEnvVar+"NAMESPACE")
+	tfEdges, err := store.GetOutgoingEdges(ctx, moduleNetworkID, []EdgeType{EdgeImports}, 20)
+	if err != nil {
+		t.Fatalf("get terraform module edges: %v", err)
+	}
+	if !containsEdge(tfEdges, moduleNetworkID, networkPkgNodeID, EdgeImports) {
+		t.Fatalf("expected IMPORTS edge %s -> %s", moduleNetworkID, networkPkgNodeID)
+	}
+	refEdges, err := store.GetOutgoingEdges(ctx, localBucketID, []EdgeType{EdgeRefersTo}, 20)
+	if err != nil {
+		t.Fatalf("get local refs: %v", err)
+	}
+	if !containsEdge(refEdges, localBucketID, varEnvID, EdgeRefersTo) {
+		t.Fatalf("expected REFERS_TO edge %s -> %s", localBucketID, varEnvID)
+	}
+	refEdges, err = store.GetOutgoingEdges(ctx, resourceBucketID, []EdgeType{EdgeRefersTo}, 20)
+	if err != nil {
+		t.Fatalf("get resource refs: %v", err)
+	}
+	if !containsEdge(refEdges, resourceBucketID, localBucketID, EdgeRefersTo) {
+		t.Fatalf("expected REFERS_TO edge %s -> %s", resourceBucketID, localBucketID)
+	}
+	refEdges, err = store.GetOutgoingEdges(ctx, outputBucketArnID, []EdgeType{EdgeRefersTo}, 20)
+	if err != nil {
+		t.Fatalf("get output refs: %v", err)
+	}
+	if !containsEdge(refEdges, outputBucketArnID, resourceBucketID, EdgeRefersTo) {
+		t.Fatalf("expected REFERS_TO edge %s -> %s", outputBucketArnID, resourceBucketID)
+	}
 
 	outgoing, err := store.GetOutgoingEdges(ctx, shFileID, []EdgeType{EdgeCalls, EdgeRefersTo}, 20)
 	if err != nil {
@@ -125,6 +182,15 @@ echo "$NAMESPACE"
 func containsNodeName(nodes []Node, want string) bool {
 	for _, node := range nodes {
 		if node.Name == want {
+			return true
+		}
+	}
+	return false
+}
+
+func containsNodeFile(nodes []Node, want string) bool {
+	for _, node := range nodes {
+		if node.File == want {
 			return true
 		}
 	}

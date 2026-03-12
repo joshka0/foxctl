@@ -349,6 +349,12 @@ func obsidianSemanticEnabled(cfg sysconfig.Config) bool {
 	if value, ok := lookupEnvBool("AGENTCTL_OBSIDIAN_SEMANTIC_ENABLED"); ok {
 		return value
 	}
+	if strings.TrimSpace(os.Getenv("AGENTCTL_EMBEDDING_BASE_URL")) != "" {
+		return true
+	}
+	if strings.TrimSpace(os.Getenv("AGENTCTL_EMBEDDING_MODEL")) != "" {
+		return true
+	}
 	if strings.TrimSpace(os.Getenv("AGENTCTL_OPENAI_COMPAT_BASE_URL")) != "" {
 		return true
 	}
@@ -368,9 +374,21 @@ func (d *Delegate) openOpenAICompatSemanticProvider() semantic.EmbeddingProvider
 	}
 	embedder, resolved, err := sourceimport.NewEmbedderFromConfig(sourceimport.EmbedderConfig{
 		Provider: providerNameToSourceImport(providerName),
-		Model:    firstNonEmpty(strings.TrimSpace(d.lookupEnv("AGENTCTL_OPENAI_COMPAT_EMBEDDING_MODEL")), d.cfg.AppConfig.Embedding.Model),
-		BaseURL:  strings.TrimSpace(d.lookupEnv("AGENTCTL_OPENAI_COMPAT_BASE_URL")),
-		APIKey:   strings.TrimSpace(firstNonEmpty(d.lookupEnv("AGENTCTL_OPENAI_COMPAT_API_KEY"), d.cfg.AppConfig.Embedding.APIKey)),
+		Model: firstNonEmpty(
+			strings.TrimSpace(d.lookupEnv("AGENTCTL_EMBEDDING_MODEL")),
+			strings.TrimSpace(d.lookupEnv("AGENTCTL_OPENAI_COMPAT_EMBEDDING_MODEL")),
+			d.cfg.AppConfig.Embedding.Model,
+		),
+		BaseURL: firstNonEmpty(
+			strings.TrimSpace(d.lookupEnv("AGENTCTL_EMBEDDING_BASE_URL")),
+			strings.TrimSpace(d.lookupEnv("AGENTCTL_OPENAI_COMPAT_BASE_URL")),
+			d.cfg.AppConfig.Embedding.BaseURL,
+		),
+		APIKey: strings.TrimSpace(firstNonEmpty(
+			d.lookupEnv("AGENTCTL_EMBEDDING_API_KEY"),
+			d.lookupEnv("AGENTCTL_OPENAI_COMPAT_API_KEY"),
+			d.cfg.AppConfig.Embedding.APIKey,
+		)),
 	})
 	if err != nil {
 		return nil

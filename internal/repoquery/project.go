@@ -88,6 +88,18 @@ func (Projector) FromNodeValue(node repoindex.Node) *Anchor {
 			Source:   "repo_index",
 			Summary:  node.Summary,
 		}
+	case repoindex.NodeConcept:
+		if strings.TrimSpace(node.File) == "" {
+			return nil
+		}
+		return &Anchor{
+			Path:       node.File,
+			SymbolName: strings.TrimSpace(node.Name),
+			LineHint:   firstPositive(node.SpanStart, node.SpanEnd),
+			Score:      1.0,
+			Source:     "repo_index",
+			Summary:    node.Summary,
+		}
 	default:
 		return nil
 	}

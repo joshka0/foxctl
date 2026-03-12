@@ -22,6 +22,11 @@ func NewEmbedderFromConfig(scope EmbeddingScope, cfg config.Config, opts ...Embe
 	if strings.TrimSpace(model) != "" {
 		opts = append(opts, WithModelOverride(model))
 	}
+	opts = append(opts,
+		WithProvider(strings.TrimSpace(cfg.Embedding.Provider)),
+		WithAPIKey(strings.TrimSpace(cfg.Embedding.APIKey)),
+		WithBaseURL(strings.TrimSpace(cfg.Embedding.BaseURL)),
+	)
 	opts = applyProviderPreference(model, cfg, opts)
 	return NewEmbedder(scope, opts...)
 }
@@ -54,11 +59,16 @@ func NewProviderForModel(model string, cfg config.Config, opts ...EmbedderOption
 func applyProviderPreference(model string, cfg config.Config, opts []EmbedderOption) []EmbedderOption {
 	provider := providerFromModel(model)
 	if provider == "" {
-		provider = strings.ToLower(strings.TrimSpace(cfg.Embedding.Provider))
+		provider = normalizeEmbeddingProviderName(cfg.Embedding.Provider)
+	}
+	if provider == "" && strings.TrimSpace(cfg.Embedding.BaseURL) != "" {
+		provider = "openai_compat"
 	}
 	switch provider {
 	case "gemini":
 		opts = append(opts, WithVoyageKey(""))
+	case "openai_compat":
+		opts = append(opts, WithVoyageKey(""), WithGeminiKey(""))
 	case "voyage":
 		// Default selection already prefers Voyage when configured.
 	}
@@ -72,7 +82,18 @@ func providerFromModel(model string) string {
 		return "gemini"
 	case strings.HasPrefix(lower, "voyage-"):
 		return "voyage"
+	case strings.HasPrefix(lower, "text-embedding-"), strings.HasPrefix(lower, "nomic-embed-"), strings.Contains(lower, "embeddinggemma"):
+		return "openai_compat"
 	default:
 		return ""
+	}
+}
+
+func normalizeEmbeddingProviderName(provider string) string {
+	switch strings.ToLower(strings.TrimSpace(provider)) {
+	case "openai_compat", "openai-compatible", "lmstudio":
+		return "openai_compat"
+	default:
+		return strings.ToLower(strings.TrimSpace(provider))
 	}
 }

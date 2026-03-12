@@ -315,7 +315,7 @@ func (s *QueryService) SearchWithProjection(ctx context.Context, req SearchReque
 }
 
 func rerankSearchNodes(query string, scored []repoindex.ScoredNode) []repoindex.ScoredNode {
-	if len(scored) <= 1 {
+	if len(scored) == 0 {
 		return scored
 	}
 	topics := detectInfraTopics(query)
@@ -346,6 +346,7 @@ func rerankSearchNodes(query string, scored []repoindex.ScoredNode) []repoindex.
 	})
 	out := make([]repoindex.ScoredNode, 0, len(rankedItems))
 	for _, item := range rankedItems {
+		item.item.Score = item.adjusted
 		out = append(out, item.item)
 	}
 	return out

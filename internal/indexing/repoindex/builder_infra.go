@@ -25,6 +25,15 @@ const (
 
 var (
 	terraformBlockRe = regexp.MustCompile(`(?m)^\s*(resource|data|module|variable|output|provider)\s+"([^"]+)"(?:\s+"([^"]+)")?\s*\{`)
+	terraformLocalsRe = regexp.MustCompile(`(?m)^\s*locals\s*\{`)
+	terraformLocalAssignRe = regexp.MustCompile(`(?m)^\s*([A-Za-z0-9_]+)\s*=`)
+	terraformSourceRe = regexp.MustCompile(`(?m)^\s*source\s*=\s*"([^"]+)"`)
+	terraformVarRefRe = regexp.MustCompile(`\bvar\.([A-Za-z0-9_]+)\b`)
+	terraformLocalRefRe = regexp.MustCompile(`\blocal\.([A-Za-z0-9_]+)\b`)
+	terraformModuleRefRe = regexp.MustCompile(`\bmodule\.([A-Za-z0-9_-]+)\b`)
+	terraformOutputRefRe = regexp.MustCompile(`\boutput\.([A-Za-z0-9_]+)\b`)
+	terraformDataRefRe = regexp.MustCompile(`\bdata\.([A-Za-z0-9_]+)\.([A-Za-z0-9_]+)\b`)
+	terraformResourceRefRe = regexp.MustCompile(`\b([a-z][A-Za-z0-9_]*)\.([A-Za-z0-9_]+)\b`)
 	shellEnvVarRe    = regexp.MustCompile(`\$\{?([A-Z_][A-Z0-9_]*)\}?`)
 )
 
@@ -187,31 +196,26 @@ func addInfraFileNode(ctx context.Context, opts BuildOptions, nodes map[string]N
 }
 
 func addTerraformConcepts(opts BuildOptions, nodes map[string]Node, edges map[string]Edge, fileNodeID, fileRelPath string, content []byte) int {
-	matches := terraformBlockRe.FindAllStringSubmatchIndex(string(content), -1)
+	pkgID := infraPackageID(terraformPkgPrefix, fileRelPath)
+	blocks := parseTerraformBlocks(pkgID, fileRelPath, content)
 	added := 0
-	for _, match := range matches {
-		blockType := strings.TrimSpace(string(content[match[2]:match[3]]))
-		typeName := strings.TrimSpace(string(content[match[4]:match[5]]))
-		name := ""
-		if match[6] >= 0 && match[7] >= 0 {
-			name = strings.TrimSpace(string(content[match[6]:match[7]]))
-		}
-		line := lineForOffset(content, match[0])
-		conceptID, displayName, summary := terraformConceptMeta(blockType, typeName, name)
+	for _, block := range blocks {
 		node := Node{
-			ID:        NamespacedID(opts.RepoKey, ConceptResource+conceptID),
+			ID:        terraformConceptNodeID(opts.RepoKey, block.pkgID, block.conceptID),
 			Kind:      NodeConcept,
-			Name:      displayName,
-			Summary:   summary,
-			SpanStart: line,
-			SpanEnd:   line,
+			Pkg:       block.pkgID,
+			File:      block.fileRelPath,
+			Name:      block.displayName,
+			Summary:   block.summary,
+			SpanStart: block.startLine,
+			SpanEnd:   block.startLine,
 			UpdatedAt: time.Now().UTC(),
 		}
 		meta, _ := json.Marshal(map[string]any{
-			"block_type": blockType,
-			"type":       typeName,
-			"name":       name,
-			"file":       fileRelPath,
+			"block_type": block.blockType,
+			"type":       block.typeName,
+			"name":       block.name,
+			"file":       block.fileRelPath,
 		})
 		addNode(nodes, node)
 		addEdge(edges, Edge{
@@ -223,6 +227,8 @@ func addTerraformConcepts(opts BuildOptions, nodes map[string]Node, edges map[st
 		})
 		added++
 	}
+	addTerraformModuleSourceEdges(opts, nodes, edges, blocks)
+	addTerraformReferenceEdges(opts, nodes, edges, blocks)
 	return added
 }
 
@@ -233,6 +239,8 @@ func addShellConcepts(opts BuildOptions, nodes map[string]Node, edges map[string
 		node := Node{
 			ID:        NamespacedID(opts.RepoKey, ConceptCommand+cmd),
 			Kind:      NodeConcept,
+			Pkg:       infraPackageID(shellPkgPrefix, fileRelPath),
+			File:      fileRelPath,
 			Name:      cmd,
 			Summary:   fmt.Sprintf("Shell command %s referenced by %s.", cmd, fileRelPath),
 			UpdatedAt: time.Now().UTC(),
@@ -250,6 +258,8 @@ func addShellConcepts(opts BuildOptions, nodes map[string]Node, edges map[string
 		node := Node{
 			ID:        NamespacedID(opts.RepoKey, ConceptEnvVar+envVar),
 			Kind:      NodeConcept,
+			Pkg:       infraPackageID(shellPkgPrefix, fileRelPath),
+			File:      fileRelPath,
 			Name:      envVar,
 			Summary:   fmt.Sprintf("Shell environment variable %s referenced by %s.", envVar, fileRelPath),
 			UpdatedAt: time.Now().UTC(),
@@ -269,6 +279,19 @@ func addShellConcepts(opts BuildOptions, nodes map[string]Node, edges map[string
 type kubeConcept struct {
 	node Node
 	meta json.RawMessage
+}
+
+type terraformBlock struct {
+	blockType   string
+	typeName    string
+	name        string
+	pkgID       string
+	fileRelPath string
+	startLine   int
+	body        string
+	conceptID   string
+	displayName string
+	summary     string
 }
 
 func extractKubernetesConcepts(repoKey, fileRelPath string, content []byte) []kubeConcept {
@@ -314,6 +337,8 @@ func extractKubernetesConcepts(repoKey, fileRelPath string, content []byte) []ku
 			node: Node{
 				ID:        NamespacedID(repoKey, ConceptResource+resourceKey),
 				Kind:      NodeConcept,
+				Pkg:       infraPackageID(kubernetesPkgPrefix, fileRelPath),
+				File:      fileRelPath,
 				Name:      display,
 				Summary:   summary,
 				SpanStart: doc.Line,
@@ -346,6 +371,241 @@ func terraformConceptMeta(blockType, typeName, name string) (conceptID, displayN
 		summary = fmt.Sprintf("Terraform %s %s.", blockType, firstNonEmptyString(name, typeName))
 	}
 	return conceptID, displayName, summary
+}
+
+func terraformConceptNodeID(repoKey, pkgID, conceptID string) string {
+	return NamespacedID(repoKey, ConceptResource+pkgID+":"+conceptID)
+}
+
+func infraPackageIDFromDir(prefix, dir string) string {
+	dir = filepath.ToSlash(filepath.Clean(strings.TrimSpace(dir)))
+	if dir == "." || dir == "" {
+		return prefix + "root"
+	}
+	return prefix + dir
+}
+
+func parseTerraformBlocks(pkgID, fileRelPath string, content []byte) []terraformBlock {
+	text := string(content)
+	blocks := make([]terraformBlock, 0)
+
+	matches := terraformBlockRe.FindAllStringSubmatchIndex(text, -1)
+	for _, match := range matches {
+		blockType := strings.TrimSpace(text[match[2]:match[3]])
+		typeName := strings.TrimSpace(text[match[4]:match[5]])
+		name := ""
+		if match[6] >= 0 && match[7] >= 0 {
+			name = strings.TrimSpace(text[match[6]:match[7]])
+		}
+		openBrace := strings.Index(text[match[0]:match[1]], "{")
+		if openBrace < 0 {
+			continue
+		}
+		openIdx := match[0] + openBrace
+		closeIdx := terraformBlockEnd(text, openIdx)
+		body := ""
+		if closeIdx > openIdx+1 {
+			body = text[openIdx+1 : closeIdx]
+		}
+		conceptID, displayName, summary := terraformConceptMeta(blockType, typeName, name)
+		blocks = append(blocks, terraformBlock{
+			blockType:   blockType,
+			typeName:    typeName,
+			name:        name,
+			pkgID:       pkgID,
+			fileRelPath: fileRelPath,
+			startLine:   lineForOffset(content, match[0]),
+			body:        body,
+			conceptID:   conceptID,
+			displayName: displayName,
+			summary:     summary,
+		})
+	}
+
+	localMatches := terraformLocalsRe.FindAllStringIndex(text, -1)
+	for _, match := range localMatches {
+		openBrace := strings.Index(text[match[0]:match[1]], "{")
+		if openBrace < 0 {
+			continue
+		}
+		openIdx := match[0] + openBrace
+		closeIdx := terraformBlockEnd(text, openIdx)
+		if closeIdx <= openIdx+1 {
+			continue
+		}
+		body := text[openIdx+1 : closeIdx]
+		assignments := terraformLocalAssignRe.FindAllStringSubmatchIndex(body, -1)
+		for i, assign := range assignments {
+			localName := strings.TrimSpace(body[assign[2]:assign[3]])
+			bodyStart := assign[0]
+			bodyEnd := len(body)
+			if i+1 < len(assignments) {
+				bodyEnd = assignments[i+1][0]
+			}
+			localBody := strings.TrimSpace(body[bodyStart:bodyEnd])
+			conceptID, displayName, summary := terraformConceptMeta("local", localName, "")
+			blocks = append(blocks, terraformBlock{
+				blockType:   "local",
+				typeName:    localName,
+				pkgID:       pkgID,
+				fileRelPath: fileRelPath,
+				startLine:   lineForOffset(content, openIdx+1+bodyStart),
+				body:        localBody,
+				conceptID:   conceptID,
+				displayName: displayName,
+				summary:     summary,
+			})
+		}
+	}
+
+	return blocks
+}
+
+func terraformBlockEnd(text string, openIdx int) int {
+	if openIdx < 0 || openIdx >= len(text) || text[openIdx] != '{' {
+		return openIdx
+	}
+	depth := 0
+	inString := false
+	escaped := false
+	for i := openIdx; i < len(text); i++ {
+		ch := text[i]
+		if inString {
+			if escaped {
+				escaped = false
+				continue
+			}
+			if ch == '\\' {
+				escaped = true
+				continue
+			}
+			if ch == '"' {
+				inString = false
+			}
+			continue
+		}
+		switch ch {
+		case '"':
+			inString = true
+		case '{':
+			depth++
+		case '}':
+			depth--
+			if depth == 0 {
+				return i
+			}
+		}
+	}
+	return len(text)
+}
+
+func addTerraformModuleSourceEdges(opts BuildOptions, nodes map[string]Node, edges map[string]Edge, blocks []terraformBlock) {
+	for _, block := range blocks {
+		if block.blockType != "module" {
+			continue
+		}
+		matches := terraformSourceRe.FindStringSubmatch(block.body)
+		if len(matches) < 2 {
+			continue
+		}
+		source := strings.TrimSpace(matches[1])
+		if !strings.HasPrefix(source, "./") && !strings.HasPrefix(source, "../") {
+			continue
+		}
+		baseDir := filepath.Dir(block.fileRelPath)
+		targetDir := filepath.Clean(filepath.Join(baseDir, source))
+		targetPkgID := infraPackageIDFromDir(terraformPkgPrefix, targetDir)
+		targetPkgNodeID := PackageID(opts.RepoKey, targetPkgID)
+		addNode(nodes, Node{
+			ID:        targetPkgNodeID,
+			Kind:      NodePackage,
+			Pkg:       targetPkgID,
+			Name:      strings.TrimPrefix(targetPkgID, terraformPkgPrefix),
+			UpdatedAt: time.Now().UTC(),
+		})
+		addEdge(edges, Edge{
+			Src:    terraformConceptNodeID(opts.RepoKey, block.pkgID, block.conceptID),
+			Dst:    targetPkgNodeID,
+			Type:   EdgeImports,
+			Weight: 1.0,
+			Meta:   importMeta(source),
+		})
+	}
+}
+
+func addTerraformReferenceEdges(opts BuildOptions, nodes map[string]Node, edges map[string]Edge, blocks []terraformBlock) {
+	for _, block := range blocks {
+		srcID := terraformConceptNodeID(opts.RepoKey, block.pkgID, block.conceptID)
+		for _, targetID := range terraformReferenceTargets(opts.RepoKey, block.pkgID, block.body) {
+			if targetID == "" || targetID == srcID {
+				continue
+			}
+			if _, ok := nodes[targetID]; !ok {
+				continue
+			}
+			addEdge(edges, Edge{
+				Src:    srcID,
+				Dst:    targetID,
+				Type:   EdgeRefersTo,
+				Weight: 0.8,
+			})
+		}
+	}
+}
+
+func terraformReferenceTargets(repoKey, pkgID, body string) []string {
+	targets := make([]string, 0)
+	seen := map[string]struct{}{}
+	add := func(id string) {
+		if id == "" {
+			return
+		}
+		if _, ok := seen[id]; ok {
+			return
+		}
+		seen[id] = struct{}{}
+		targets = append(targets, id)
+	}
+
+	for _, match := range terraformVarRefRe.FindAllStringSubmatch(body, -1) {
+		if len(match) > 1 {
+			add(terraformConceptNodeID(repoKey, pkgID, "variable:"+strings.TrimSpace(match[1])))
+		}
+	}
+	for _, match := range terraformLocalRefRe.FindAllStringSubmatch(body, -1) {
+		if len(match) > 1 {
+			add(terraformConceptNodeID(repoKey, pkgID, "local:"+strings.TrimSpace(match[1])))
+		}
+	}
+	for _, match := range terraformModuleRefRe.FindAllStringSubmatch(body, -1) {
+		if len(match) > 1 {
+			add(terraformConceptNodeID(repoKey, pkgID, "module:"+strings.TrimSpace(match[1])))
+		}
+	}
+	for _, match := range terraformOutputRefRe.FindAllStringSubmatch(body, -1) {
+		if len(match) > 1 {
+			add(terraformConceptNodeID(repoKey, pkgID, "output:"+strings.TrimSpace(match[1])))
+		}
+	}
+	for _, match := range terraformDataRefRe.FindAllStringSubmatch(body, -1) {
+		if len(match) > 2 {
+			add(terraformConceptNodeID(repoKey, pkgID, "data:"+strings.TrimSpace(match[1])+"."+strings.TrimSpace(match[2])))
+		}
+	}
+	for _, match := range terraformResourceRefRe.FindAllStringSubmatch(body, -1) {
+		if len(match) < 3 {
+			continue
+		}
+		prefix := strings.TrimSpace(match[1])
+		name := strings.TrimSpace(match[2])
+		switch prefix {
+		case "var", "local", "module", "data", "each", "count", "path", "self", "terraform", "output":
+			continue
+		}
+		add(terraformConceptNodeID(repoKey, pkgID, "resource:"+prefix+"."+name))
+	}
+
+	return targets
 }
 
 func infraPackageID(prefix, fileRelPath string) string {
