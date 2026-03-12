@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -294,6 +295,7 @@ func (s *QueryService) SearchWithProjection(ctx context.Context, req SearchReque
 
 	scored, err := s.Engine.SearchScored(ctx, req.Query, limit)
 	if err == nil {
+		scored = rerankSearchNodes(req.Query, scored)
 		nodes := make([]repoindex.Node, 0, len(scored))
 		scores := make(map[string]float64, len(scored))
 		for _, item := range scored {
@@ -310,6 +312,125 @@ func (s *QueryService) SearchWithProjection(ctx context.Context, req SearchReque
 		return SearchOutput{}, err
 	}
 	return SearchOutput{Nodes: results, Anchors: ProjectAnchors(results, nil)}, nil
+}
+
+func rerankSearchNodes(query string, scored []repoindex.ScoredNode) []repoindex.ScoredNode {
+	if len(scored) <= 1 {
+		return scored
+	}
+	topics := detectInfraTopics(query)
+	if len(topics) == 0 {
+		return scored
+	}
+	type ranked struct {
+		item     repoindex.ScoredNode
+		adjusted float64
+		index    int
+	}
+	rankedItems := make([]ranked, 0, len(scored))
+	for i, item := range scored {
+		rankedItems = append(rankedItems, ranked{
+			item:     item,
+			adjusted: repoSearchAdjustedScore(item.Node, item.Score, i, topics),
+			index:    i,
+		})
+	}
+	sort.SliceStable(rankedItems, func(i, j int) bool {
+		if rankedItems[i].adjusted != rankedItems[j].adjusted {
+			return rankedItems[i].adjusted > rankedItems[j].adjusted
+		}
+		if rankedItems[i].item.Score != rankedItems[j].item.Score {
+			return rankedItems[i].item.Score < rankedItems[j].item.Score
+		}
+		return rankedItems[i].index < rankedItems[j].index
+	})
+	out := make([]repoindex.ScoredNode, 0, len(rankedItems))
+	for _, item := range rankedItems {
+		out = append(out, item.item)
+	}
+	return out
+}
+
+func repoSearchAdjustedScore(node repoindex.Node, rawBM25 float64, index int, topics map[string]bool) float64 {
+	base := 1.0 / float64(index+1)
+	bonus := 0.0
+	if topics["terraform"] && isTerraformRepoNode(node) {
+		bonus += 3.0
+	}
+	if topics["kubernetes"] && isKubernetesRepoNode(node) {
+		bonus += 3.0
+	}
+	if topics["shell"] && isShellRepoNode(node) {
+		bonus += 3.0
+	}
+	lowerName := strings.ToLower(strings.TrimSpace(node.Name))
+	lowerFile := strings.ToLower(strings.TrimSpace(node.File))
+	for token := range topics {
+		switch token {
+		case "terraform":
+			if strings.Contains(lowerName, "terraform") || strings.Contains(lowerFile, ".tf") {
+				bonus += 0.5
+			}
+		case "kubernetes":
+			if strings.Contains(lowerName, "deployment/") || strings.Contains(lowerName, "service/") || strings.Contains(lowerName, "ingress/") ||
+				strings.Contains(lowerName, "configmap/") || strings.Contains(lowerName, "secret/") || strings.Contains(lowerFile, ".yaml") || strings.Contains(lowerFile, ".yml") {
+				bonus += 0.5
+			}
+		case "shell":
+			if strings.Contains(lowerFile, ".sh") || isShellCommandNode(node) || isShellEnvNode(node) {
+				bonus += 0.5
+			}
+		}
+	}
+	return bonus + base - (rawBM25 * 0.0001)
+}
+
+func detectInfraTopics(query string) map[string]bool {
+	topics := map[string]bool{}
+	lower := strings.ToLower(strings.TrimSpace(query))
+	if lower == "" {
+		return topics
+	}
+	if strings.Contains(lower, "terraform") || strings.Contains(lower, "tf ") || strings.HasPrefix(lower, "tf") {
+		topics["terraform"] = true
+	}
+	if strings.Contains(lower, "kubernetes") || strings.Contains(lower, "k8s") || strings.Contains(lower, "manifest") ||
+		strings.Contains(lower, "apiversion") || strings.Contains(lower, "kind") ||
+		strings.Contains(lower, "deployment") || strings.Contains(lower, "service") || strings.Contains(lower, "ingress") ||
+		strings.Contains(lower, "configmap") || strings.Contains(lower, "secret") || strings.Contains(lower, "cronjob") {
+		topics["kubernetes"] = true
+	}
+	if strings.Contains(lower, "shell") || strings.Contains(lower, "bash") || strings.Contains(lower, "script") ||
+		strings.Contains(lower, "env var") || strings.Contains(lower, "environment variable") || strings.Contains(lower, "command") {
+		topics["shell"] = true
+	}
+	return topics
+}
+
+func isTerraformRepoNode(node repoindex.Node) bool {
+	return strings.HasPrefix(node.Pkg, "tf:") || strings.EqualFold(filepath.Ext(node.File), ".tf") || strings.HasPrefix(node.ID, "tf:")
+}
+
+func isKubernetesRepoNode(node repoindex.Node) bool {
+	ext := strings.ToLower(filepath.Ext(node.File))
+	if strings.HasPrefix(node.Pkg, "k8s:") || ext == ".yaml" || ext == ".yml" {
+		return true
+	}
+	lower := strings.ToLower(strings.TrimSpace(node.Name))
+	return strings.Contains(lower, "deployment/") || strings.Contains(lower, "service/") || strings.Contains(lower, "ingress/") ||
+		strings.Contains(lower, "configmap/") || strings.Contains(lower, "secret/") || strings.Contains(lower, "job/") || strings.Contains(lower, "cronjob/")
+}
+
+func isShellRepoNode(node repoindex.Node) bool {
+	return strings.HasPrefix(node.Pkg, "sh:") || strings.EqualFold(filepath.Ext(node.File), ".sh") || isShellCommandNode(node) || isShellEnvNode(node)
+}
+
+func isShellCommandNode(node repoindex.Node) bool {
+	return strings.Contains(node.ID, "::"+string(repoindex.ConceptCommand)) || strings.HasPrefix(node.ID, string(repoindex.ConceptCommand))
+}
+
+func isShellEnvNode(node repoindex.Node) bool {
+	return strings.Contains(node.ID, "::"+string(repoindex.ConceptEnvVar)) || strings.HasPrefix(node.ID, string(repoindex.ConceptEnvVar))
 }
 
 // Expand executes a typed expand request.
