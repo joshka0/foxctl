@@ -40,6 +40,9 @@ type Embedder struct {
 type EmbedderOption func(*embedderConfig)
 
 type embedderConfig struct {
+	provider      string
+	apiKey        string
+	baseURL       string
 	voyageKey     string
 	geminiKey     string
 	modelOverride string
@@ -67,6 +70,27 @@ func newEmbedderConfig(opts ...EmbedderOption) *embedderConfig {
 func WithVoyageKey(key string) EmbedderOption {
 	return func(c *embedderConfig) {
 		c.voyageKey = key
+	}
+}
+
+// WithProvider sets the preferred provider name.
+func WithProvider(provider string) EmbedderOption {
+	return func(c *embedderConfig) {
+		c.provider = strings.TrimSpace(provider)
+	}
+}
+
+// WithAPIKey sets a generic embedding provider API key.
+func WithAPIKey(key string) EmbedderOption {
+	return func(c *embedderConfig) {
+		c.apiKey = key
+	}
+}
+
+// WithBaseURL sets a provider base URL.
+func WithBaseURL(baseURL string) EmbedderOption {
+	return func(c *embedderConfig) {
+		c.baseURL = strings.TrimSpace(baseURL)
 	}
 }
 
@@ -130,6 +154,37 @@ func NewEmbedder(scope EmbeddingScope, opts ...EmbedderOption) (*Embedder, error
 		model = cfg.modelOverride
 	}
 
+	preferredProvider := normalizeEmbeddingProviderName(cfg.provider)
+	if preferredProvider == "" {
+		if inferred := providerFromModel(model); inferred != "" {
+			preferredProvider = inferred
+		} else if strings.TrimSpace(cfg.baseURL) != "" {
+			preferredProvider = "openai_compat"
+		}
+	}
+
+	tryOpenAICompat := func() error {
+		op, err := NewOpenAICompatProvider(OpenAICompatConfig{
+			APIKey:        cfg.apiKey,
+			Model:         model,
+			BaseURL:       cfg.baseURL,
+			RateLimitWait: &cfg.rateLimitWait,
+		})
+		if err != nil {
+			return err
+		}
+		e.provider = op
+		e.providerName = "openai_compat"
+		return nil
+	}
+
+	if preferredProvider == "openai_compat" {
+		if err := tryOpenAICompat(); err != nil {
+			return nil, fmt.Errorf("openai-compatible provider: %w", err)
+		}
+		return e, nil
+	}
+
 	// Try Voyage first (preferred)
 	if cfg.voyageKey != "" {
 		vp, err := NewVoyageProvider(VoyageConfig{
@@ -161,7 +216,14 @@ func NewEmbedder(scope EmbeddingScope, opts ...EmbedderOption) (*Embedder, error
 		return nil, fmt.Errorf("gemini provider: %w", err)
 	}
 
-	return nil, fmt.Errorf("no embedding provider available: set VOYAGE_API_KEY or GEMINI_API_KEY")
+	if strings.TrimSpace(cfg.baseURL) != "" || strings.TrimSpace(cfg.apiKey) != "" {
+		if err := tryOpenAICompat(); err != nil {
+			return nil, fmt.Errorf("openai-compatible provider: %w", err)
+		}
+		return e, nil
+	}
+
+	return nil, fmt.Errorf("no embedding provider available: set AGENTCTL_EMBEDDING_PROVIDER/openai-compatible config, VOYAGE_API_KEY, or GEMINI_API_KEY")
 }
 
 // NewEmbedderWithModel creates an Embedder while honoring a model override.

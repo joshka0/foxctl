@@ -314,7 +314,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 		}
 	}
 
-	// FC/IS: Read API keys at boundary and pass through
+	// FC/IS: Provider config and keys are resolved at the boundary from config/env.
 	voyageKey := os.Getenv("VOYAGE_API_KEY")
 	geminiKey := os.Getenv("GEMINI_API_KEY")
 
@@ -366,14 +366,8 @@ func search(ctx context.Context, rc *skillmain.RunContext, in *Input, voyageKey,
 		scopeSet[s] = true
 	}
 
-	// Detect provider and get scope-specific model configuration
-	// FC/IS: API keys passed from boundary (run function)
-	var providerName string
-	if voyageKey != "" {
-		providerName = "voyage"
-	} else if geminiKey != "" {
-		providerName = "gemini"
-	}
+	// Detect provider and get scope-specific model configuration.
+	providerName := detectEmbeddingProviderName(cfg, voyageKey, geminiKey)
 
 	// Generate scope-specific query embeddings in parallel
 	// Model selection is configurable via EMBEDDING_MODEL_CODE, EMBEDDING_MODEL_MEMORY, EMBEDDING_MODEL_TEXT
@@ -406,7 +400,7 @@ func search(ctx context.Context, rc *skillmain.RunContext, in *Input, voyageKey,
 			}
 		}
 	} else {
-		out.Stats.Hint = "no embedding API key set; set VOYAGE_API_KEY or GEMINI_API_KEY for vector search"
+		out.Stats.Hint = noEmbeddingHint(cfg)
 	}
 
 	var fileSummaryEmbedding []float32
@@ -508,7 +502,7 @@ func search(ctx context.Context, rc *skillmain.RunContext, in *Input, voyageKey,
 					results: nil,
 					err:     nil, // Not an error, just unavailable
 					latency: time.Since(start),
-					hint:    "session search requires embeddings; set VOYAGE_API_KEY or GEMINI_API_KEY",
+					hint:    "session search requires embeddings; " + noEmbeddingHint(cfg),
 				}
 				return
 			}
@@ -539,7 +533,7 @@ func search(ctx context.Context, rc *skillmain.RunContext, in *Input, voyageKey,
 					results: nil,
 					err:     nil,
 					latency: time.Since(start),
-					hint:    "memory search requires embeddings; set VOYAGE_API_KEY or GEMINI_API_KEY",
+					hint:    "memory search requires embeddings; " + noEmbeddingHint(cfg),
 				}
 				return
 			}
@@ -571,7 +565,7 @@ func search(ctx context.Context, rc *skillmain.RunContext, in *Input, voyageKey,
 					results: nil,
 					err:     nil,
 					latency: time.Since(start),
-					hint:    "task search requires embeddings; set VOYAGE_API_KEY or GEMINI_API_KEY",
+					hint:    "task search requires embeddings; " + noEmbeddingHint(cfg),
 				}
 				return
 			}
@@ -602,7 +596,7 @@ func search(ctx context.Context, rc *skillmain.RunContext, in *Input, voyageKey,
 					results: nil,
 					err:     nil,
 					latency: time.Since(start),
-					hint:    "codemap search requires embeddings; set VOYAGE_API_KEY or GEMINI_API_KEY",
+					hint:    "codemap search requires embeddings; " + noEmbeddingHint(cfg),
 				}
 				return
 			}
@@ -839,6 +833,35 @@ type scopedEmbeddings struct {
 	text   []float32 // For tasks, sessions, codemaps (voyage-3.5)
 }
 
+func detectEmbeddingProviderName(cfg config.Config, voyageKey, geminiKey string) string {
+	provider := strings.ToLower(strings.TrimSpace(cfg.Embedding.Provider))
+	switch provider {
+	case "openai_compat", "openai-compatible", "lmstudio":
+		return "openai_compat"
+	case "voyage", "gemini":
+		return provider
+	}
+	if strings.TrimSpace(cfg.Embedding.BaseURL) != "" {
+		return "openai_compat"
+	}
+	if voyageKey != "" {
+		return "voyage"
+	}
+	if geminiKey != "" {
+		return "gemini"
+	}
+	return ""
+}
+
+func noEmbeddingHint(cfg config.Config) string {
+	switch detectEmbeddingProviderName(cfg, os.Getenv("VOYAGE_API_KEY"), os.Getenv("GEMINI_API_KEY")) {
+	case "openai_compat":
+		return "set AGENTCTL_EMBEDDING_PROVIDER=openai_compat with AGENTCTL_EMBEDDING_MODEL and AGENTCTL_EMBEDDING_BASE_URL for vector search"
+	default:
+		return "set AGENTCTL_EMBEDDING_PROVIDER=openai_compat or VOYAGE_API_KEY / GEMINI_API_KEY for vector search"
+	}
+}
+
 // embeddingModelConfig returns the models to use for different scope categories.
 // Configuration priority: config overrides > embedding.model fallback.
 func embeddingModelConfig(providerName string, cfg config.Config) (codeModel, memoryModel, textModel, fileSummaryModel string) {
@@ -874,11 +897,14 @@ func createProviderWithModel(model string, cfg config.Config, voyageKey, geminiK
 	provider, err := semantic.NewProviderForModel(
 		model,
 		cfg,
+		semantic.WithProvider(cfg.Embedding.Provider),
+		semantic.WithAPIKey(cfg.Embedding.APIKey),
+		semantic.WithBaseURL(cfg.Embedding.BaseURL),
 		semantic.WithVoyageKey(voyageKey),
 		semantic.WithGeminiKey(geminiKey),
 	)
 	if err != nil {
-		return nil, skillerr.Auth("no embedding API key available", skillerr.WithHint("Set VOYAGE_API_KEY or GEMINI_API_KEY."))
+		return nil, skillerr.Auth("no embedding provider available", skillerr.WithHint(noEmbeddingHint(cfg)))
 	}
 	return provider, nil
 }
@@ -1034,11 +1060,13 @@ func searchSymbolsWithRetrieval(
 	defer func() { _ = cleanupIndex() }()
 
 	engine := retrievalv2.NewEngine(indexStore, embedProvider)
+	var repoQuerySvc *repoquery.QueryService
 	repoMode := normalizeSkillRepoIndexMode(repoIndexMode)
 	if repoMode != "off" {
 		if repoStore, err := repoindex.Open(ctx, cfg.Storage.Root, workspacePath); err == nil {
 			defer repoStore.Close()
-			engine = engine.WithRepoQueryService(repoquery.NewQueryService(repoindex.NewQueryEngine(repoStore)))
+			repoQuerySvc = repoquery.NewQueryService(repoindex.NewQueryEngine(repoStore))
+			engine = engine.WithRepoQueryService(repoQuerySvc)
 		}
 	}
 	req := retrievalv2.DefaultSearchRequest(workspaceID, query)
@@ -1071,19 +1099,19 @@ func searchSymbolsWithRetrieval(
 	results := make([]Result, 0, len(resp.Hits))
 	for i, hit := range resp.Hits {
 		doc := hit.Document
-		if doc.Kind != searchindex.KindSymbol {
+		if doc.Kind != searchindex.KindSymbol && doc.Kind != searchindex.KindFile {
 			continue
 		}
 		result := Result{
-			Source:     "symbol",
-			ID:         normalizeSearchIndexSymbolID(workspaceID, doc),
-			Name:       firstNonEmpty(doc.SymbolName, doc.Title),
+			Source:     sourceForSearchDocument(doc),
+			ID:         searchDocumentID(workspaceID, doc),
+			Name:       firstNonEmpty(doc.SymbolName, doc.Title, filepath.Base(doc.Path)),
 			Path:       doc.Path,
 			Line:       firstPositive(doc.Anchor.Line, doc.Anchor.StartLine, doc.Anchor.EndLine),
 			Similarity: hit.Score,
 			SourceRank: i + 1,
 		}
-		if result.Name == "" {
+		if result.Name == "" && doc.Kind == searchindex.KindSymbol {
 			result.Name = extractSymbolName(doc.SymbolID)
 		}
 		if doc.Summary != "" {
@@ -1099,6 +1127,13 @@ func searchSymbolsWithRetrieval(
 		results = append(results, result)
 	}
 
+	if len(results) == 0 && repoMode != "off" && repoQuerySvc != nil {
+		projected, err := searchRepoIndexProjectedFallback(ctx, repoQuerySvc, workspaceID, query, limit)
+		if err == nil && len(projected) > 0 {
+			return projected, nil, nil
+		}
+	}
+
 	fallback := searchPathFallback(ctx, workspacePath, query, limit)
 	if len(results) == 0 && len(fallback) > 0 {
 		return fallback, nil, nil
@@ -1111,6 +1146,50 @@ func searchSymbolsWithRetrieval(
 	}
 
 	return results, resp.Groups, nil
+}
+
+func searchRepoIndexProjectedFallback(ctx context.Context, service *repoquery.QueryService, workspaceID, query string, limit int) ([]Result, error) {
+	if service == nil {
+		return nil, nil
+	}
+	out, err := service.SearchWithProjection(ctx, repoquery.SearchRequest{
+		Query: query,
+		Limit: limit,
+	})
+	if err != nil || len(out.Anchors) == 0 {
+		return nil, err
+	}
+	results := make([]Result, 0, len(out.Anchors))
+	for i, anchor := range out.Anchors {
+		results = append(results, Result{
+			Source:     "file",
+			ID:         fmt.Sprintf("file:%s:%s", workspaceID, filepath.ToSlash(strings.TrimSpace(anchor.Path))),
+			Name:       firstNonEmpty(strings.TrimSpace(anchor.SymbolName), filepath.Base(anchor.Path)),
+			Path:       anchor.Path,
+			Line:       anchor.LineHint,
+			Similarity: anchor.Score,
+			SourceRank: i + 1,
+			Summary:    anchor.Summary,
+		})
+	}
+	return results, nil
+}
+
+func sourceForSearchDocument(doc searchindex.Document) string {
+	if doc.Kind == searchindex.KindFile {
+		return "file"
+	}
+	return "symbol"
+}
+
+func searchDocumentID(workspaceID string, doc searchindex.Document) string {
+	if doc.Kind == searchindex.KindFile {
+		if strings.TrimSpace(doc.Path) != "" {
+			return fmt.Sprintf("file:%s:%s", workspaceID, filepath.ToSlash(strings.TrimSpace(doc.Path)))
+		}
+		return strings.TrimSpace(doc.ID)
+	}
+	return normalizeSearchIndexSymbolID(workspaceID, doc)
 }
 
 func shouldUsePathFallback(results []Result) bool {
@@ -1448,7 +1527,7 @@ func searchMemories(
 	if useTurso {
 		// Remote mode requires embeddings
 		if queryEmbedding == nil {
-			return nil, "memory remote search requires embeddings; set VOYAGE_API_KEY or GEMINI_API_KEY", nil
+			return nil, "memory remote search requires embeddings; " + noEmbeddingHint(cfg), nil
 		}
 
 		// Determine vector dimensions from config

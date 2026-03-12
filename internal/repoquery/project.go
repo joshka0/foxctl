@@ -88,6 +88,18 @@ func (Projector) FromNodeValue(node repoindex.Node) *Anchor {
 			Source:   "repo_index",
 			Summary:  node.Summary,
 		}
+	case repoindex.NodeConcept:
+		if strings.TrimSpace(node.File) == "" {
+			return nil
+		}
+		return &Anchor{
+			Path:       node.File,
+			SymbolName: strings.TrimSpace(node.Name),
+			LineHint:   firstPositive(node.SpanStart, node.SpanEnd),
+			Score:      1.0,
+			Source:     "repo_index",
+			Summary:    node.Summary,
+		}
 	default:
 		return nil
 	}
@@ -159,6 +171,9 @@ func scoreFromMap(scores map[string]float64, id string) float64 {
 func normalizeAnchorScore(score float64) float64 {
 	if math.IsNaN(score) || math.IsInf(score, 0) {
 		return 0
+	}
+	if score < 0 {
+		return 1.0 + (-score * 0.0001)
 	}
 	return score
 }

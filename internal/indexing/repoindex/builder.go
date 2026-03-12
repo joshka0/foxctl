@@ -73,8 +73,8 @@ func (b *Builder) Build(ctx context.Context, opts BuildOptions) (BuildResult, er
 	if len(opts.Patterns) == 0 {
 		opts.Patterns = []string{"./..."}
 	}
-	if !opts.IncludeGo && !opts.IncludeTypescript && !opts.IncludeElixir {
-		return result, fmt.Errorf("repoindex: at least one language must be enabled")
+	if !opts.IncludeGo && !opts.IncludeTypescript && !opts.IncludeElixir && !opts.IncludeTerraform && !opts.IncludeKubernetes && !opts.IncludeShell {
+		return result, fmt.Errorf("repoindex: at least one language or config family must be enabled")
 	}
 
 	nodes := make(map[string]Node)
@@ -94,6 +94,21 @@ func (b *Builder) Build(ctx context.Context, opts BuildOptions) (BuildResult, er
 	}
 	if opts.IncludeElixir {
 		if err := b.buildElixir(ctx, opts, nodes, edges, &result, &pending, &locators); err != nil {
+			return result, err
+		}
+	}
+	if opts.IncludeTerraform {
+		if err := b.buildTerraform(ctx, opts, nodes, edges, &result); err != nil {
+			return result, err
+		}
+	}
+	if opts.IncludeKubernetes {
+		if err := b.buildKubernetes(ctx, opts, nodes, edges, &result); err != nil {
+			return result, err
+		}
+	}
+	if opts.IncludeShell {
+		if err := b.buildShell(ctx, opts, nodes, edges, &result); err != nil {
 			return result, err
 		}
 	}

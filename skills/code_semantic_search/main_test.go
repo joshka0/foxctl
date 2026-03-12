@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/jkatigb/agentctl/internal/contextplane"
@@ -232,6 +233,32 @@ func TestEmbeddingModelConfig_GeminiFallback(t *testing.T) {
 	}
 	if textModel != "gemini-embedding-001" {
 		t.Fatalf("text model = %q, want gemini-embedding-001", textModel)
+	}
+}
+
+func TestDetectEmbeddingProviderName_OpenAICompat(t *testing.T) {
+	cfg := config.Config{
+		Embedding: config.EmbeddingSettings{
+			Provider: "openai-compatible",
+			Model:    "text-embedding-embeddinggemma-300m-qat",
+			BaseURL:  "http://127.0.0.1:1234/v1",
+		},
+	}
+	if got := detectEmbeddingProviderName(cfg, "", ""); got != "openai_compat" {
+		t.Fatalf("provider=%q want openai_compat", got)
+	}
+}
+
+func TestNoEmbeddingHint_OpenAICompat(t *testing.T) {
+	cfg := config.Config{
+		Embedding: config.EmbeddingSettings{
+			Provider: "openai_compat",
+			BaseURL:  "http://127.0.0.1:1234/v1",
+		},
+	}
+	hint := noEmbeddingHint(cfg)
+	if !strings.Contains(hint, "AGENTCTL_EMBEDDING_PROVIDER=openai_compat") {
+		t.Fatalf("hint=%q", hint)
 	}
 }
 

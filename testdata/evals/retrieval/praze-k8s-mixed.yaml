@@ -1,0 +1,37 @@
+name: praze-k8s-mixed
+queries:
+  - id: helm-chart-praze-api
+    query: "helm chart praze api"
+    expected_any_of:
+      - apps/praze-api/helm/praze-api/Chart.yaml
+      - platform/90-praze/chart/Chart.yaml
+    notes: "Accept either the app-local API chart or the platform Praze chart."
+  - id: argocd-app-praze-auth
+    query: "argocd application praze auth"
+    expected_any_of:
+      - platform/10-argocd/apps/65-praze-auth.yaml
+      - platform/10-argocd/apps-dev/65-praze-auth.yaml
+    notes: "Accept either the main or dev ArgoCD application for praze-auth."
+  - id: waitlist-ingress
+    query: "praze waitlist ingress"
+    expected_any_of:
+      - infra/k8s/waitlist/ingress.yaml
+    notes: "Should surface the waitlist ingress manifest."
+  - id: waitlist-kustomization
+    query: "waitlist kustomization"
+    expected_any_of:
+      - infra/k8s/waitlist/kustomization.yaml
+    notes: "Should find the waitlist kustomization entrypoint."
+  - id: cert-manager-clusterissuer
+    query: "cert manager clusterissuer"
+    expected_any_of:
+      - infra/k8s/base/cert-manager/clusterissuer-prod.yaml
+      - infra/k8s/base/cert-manager/clusterissuer-staging.yaml
+    notes: "Accept either prod or staging ClusterIssuer."
+  - id: app-web-ingress-route
+    query: "praze app web ingress route"
+    expected_any_of:
+      - platform/91-praze-landing/chart/templates/app-web-ingress.yaml
+      - platform/92-praze-app-web/chart/Chart.yaml
+      - platform/10-argocd/apps/68-praze-app-web.yaml
+    notes: "Accept the ingress template, app-web chart, or ArgoCD app."

@@ -15,6 +15,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/domain/envelope"
 	"github.com/jkatigb/agentctl/internal/evals/retrievaleval"
 	"github.com/jkatigb/agentctl/internal/indexing/repoindex"
+	"github.com/jkatigb/agentctl/internal/indexing/semantic"
 	"github.com/jkatigb/agentctl/internal/protocol"
 	"github.com/jkatigb/agentctl/internal/storage/obsidianindex"
 	"github.com/jkatigb/agentctl/internal/storage/sessions"
@@ -50,7 +51,9 @@ func newEvalRetrievalCommand() *cobra.Command {
 			if strings.TrimSpace(suiteRef) == "" {
 				return fmt.Errorf("--suite is required")
 			}
-			if strings.TrimSpace(vaultPath) == "" {
+			selectedModes := normalizeEvalModes(modes)
+			requiresVault := evalModesRequireVault(selectedModes)
+			if requiresVault && strings.TrimSpace(vaultPath) == "" {
 				return fmt.Errorf("--vault-path is required")
 			}
 			target := resolveContextWorkspace(workspacePath)
@@ -67,27 +70,32 @@ func newEvalRetrievalCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			index, err := obsidianindex.Open(ctx, cfg.Storage.Root, vaultPath)
-			if err != nil {
-				return err
-			}
-			defer func() { _ = index.Close() }()
-			if rebuildIndex {
-				if _, err := index.Rebuild(ctx, vaultPath); err != nil {
+			var index obsidianindex.Store
+			var repo *repoindex.Store
+			var semanticProvider semantic.EmbeddingProvider
+			var workspaceStore *contextplane.WorkspaceStore
+			if requiresVault {
+				index, err = obsidianindex.Open(ctx, cfg.Storage.Root, vaultPath)
+				if err != nil {
+					return err
+				}
+				defer func() { _ = index.Close() }()
+				if rebuildIndex {
+					if _, err := index.Rebuild(ctx, vaultPath); err != nil {
+						return err
+					}
+				}
+				repo, err = repoindex.Open(ctx, cfg.Storage.Root, target)
+				if err != nil {
+					return err
+				}
+				defer func() { _ = repo.Close() }()
+				semanticProvider = openObsidianSemanticProvider(cfg)
+				workspaceStore = contextplane.NewWorkspaceStore(target)
+				if err := ensureTopOfMindForEval(ctx, cfg.Storage.Root, target, workspaceStore); err != nil {
 					return err
 				}
 			}
-			repo, err := repoindex.Open(ctx, cfg.Storage.Root, target)
-			if err != nil {
-				return err
-			}
-			defer func() { _ = repo.Close() }()
-			semanticProvider := openObsidianSemanticProvider(cfg)
-			workspaceStore := contextplane.NewWorkspaceStore(target)
-			if err := ensureTopOfMindForEval(ctx, cfg.Storage.Root, target, workspaceStore); err != nil {
-				return err
-			}
-			selectedModes := normalizeEvalModes(modes)
 			results := make([]retrievaleval.QueryResult, 0, len(suite.Queries))
 			for _, q := range suite.Queries {
 				qr := retrievaleval.QueryResult{
@@ -224,6 +232,16 @@ func normalizeEvalModes(modes []string) []string {
 		out = append(out, mode)
 	}
 	return out
+}
+
+func evalModesRequireVault(modes []string) bool {
+	for _, mode := range modes {
+		switch mode {
+		case "baseline", "lexical", "semantic", "blended":
+			return true
+		}
+	}
+	return false
 }
 
 type semanticSearchEvalOutput struct {

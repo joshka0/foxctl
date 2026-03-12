@@ -1102,6 +1102,9 @@ func registerTools(s *server.MCPServer) {
 			mcp.WithBoolean("include_go", mcp.Description("Include Go sources (default: true)")),
 			mcp.WithBoolean("include_typescript", mcp.Description("Include TypeScript sources (default: true)")),
 			mcp.WithBoolean("include_elixir", mcp.Description("Include Elixir sources (default: false)")),
+			mcp.WithBoolean("include_terraform", mcp.Description("Include Terraform sources (default: false)")),
+			mcp.WithBoolean("include_kubernetes", mcp.Description("Include Kubernetes/Helm manifests (default: false)")),
+			mcp.WithBoolean("include_shell", mcp.Description("Include shell scripts (default: false)")),
 			mcp.WithBoolean("include_tests", mcp.Description("Include test files (default: false)")),
 			mcp.WithBoolean("dry_run", mcp.Description("Build without writing to the index (default: false)")),
 		),
@@ -2835,11 +2838,14 @@ func handleRepoIndexBuild(ctx context.Context, req mcp.CallToolRequest) (*mcp.Ca
 	includeGo := getBoolArg(args, "include_go", true)
 	includeTS := getBoolArg(args, "include_typescript", true)
 	includeElixir := getBoolArg(args, "include_elixir", false)
+	includeTerraform := getBoolArg(args, "include_terraform", false)
+	includeKubernetes := getBoolArg(args, "include_kubernetes", false)
+	includeShell := getBoolArg(args, "include_shell", false)
 	includeTests := getBoolArg(args, "include_tests", false)
 	dryRun := getBoolArg(args, "dry_run", false)
 
 	return runRepoIndexCommand(ctx, func(cmd *cobra.Command) error {
-		return runIndexRepoBuild(cmd, workspace, patterns, includeGo, includeTS, includeElixir, includeTests, dryRun)
+		return runIndexRepoBuild(cmd, workspace, patterns, includeGo, includeTS, includeElixir, includeTerraform, includeKubernetes, includeShell, includeTests, dryRun)
 	})
 }
 

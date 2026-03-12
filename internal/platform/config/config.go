@@ -273,6 +273,7 @@ type LoggingSettings struct {
 type EmbeddingSettings struct {
 	Provider string `mapstructure:"provider" json:"provider"`
 	Model    string `mapstructure:"model" json:"model"`
+	BaseURL  string `mapstructure:"base_url" json:"base_url"`
 	// APIKey is a generic embedding provider API key (from AGENTCTL_EMBEDDING_API_KEY).
 	// Use this for provider-agnostic or OpenAI-compatible embedding endpoints.
 	APIKey     string            `mapstructure:"api_key" json:"api_key"`
@@ -891,8 +892,30 @@ func finalizeConfig(cfg Config, home string) Config {
 	}
 
 	// Embedding API key env var overrides (FC/IS compliant)
+	if provider := os.Getenv("AGENTCTL_EMBEDDING_PROVIDER"); provider != "" && cfg.Embedding.Provider == "" {
+		cfg.Embedding.Provider = strings.TrimSpace(provider)
+	}
+	if model := os.Getenv("AGENTCTL_EMBEDDING_MODEL"); model != "" && cfg.Embedding.Model == "" {
+		cfg.Embedding.Model = strings.TrimSpace(model)
+	}
+	if baseURL := os.Getenv("AGENTCTL_EMBEDDING_BASE_URL"); baseURL != "" && cfg.Embedding.BaseURL == "" {
+		cfg.Embedding.BaseURL = strings.TrimSpace(baseURL)
+	}
 	if key := os.Getenv("AGENTCTL_EMBEDDING_API_KEY"); key != "" && cfg.Embedding.APIKey == "" {
 		cfg.Embedding.APIKey = key
+	}
+	// Backward-compatible aliases for OpenAI-compatible embedding endpoints.
+	if model := os.Getenv("AGENTCTL_OPENAI_COMPAT_EMBEDDING_MODEL"); model != "" && cfg.Embedding.Model == "" {
+		cfg.Embedding.Model = strings.TrimSpace(model)
+	}
+	if baseURL := os.Getenv("AGENTCTL_OPENAI_COMPAT_BASE_URL"); baseURL != "" && cfg.Embedding.BaseURL == "" {
+		cfg.Embedding.BaseURL = strings.TrimSpace(baseURL)
+	}
+	if key := os.Getenv("AGENTCTL_OPENAI_COMPAT_API_KEY"); key != "" && cfg.Embedding.APIKey == "" {
+		cfg.Embedding.APIKey = strings.TrimSpace(key)
+	}
+	if cfg.Embedding.Provider == "" && (cfg.Embedding.BaseURL != "" || strings.EqualFold(os.Getenv("AGENTCTL_OBSIDIAN_SEMANTIC_PROVIDER"), "openai_compat") || strings.EqualFold(os.Getenv("AGENTCTL_OBSIDIAN_SEMANTIC_PROVIDER"), "openai-compatible")) {
+		cfg.Embedding.Provider = "openai_compat"
 	}
 	if key := os.Getenv("VOYAGE_API_KEY"); key != "" && cfg.Embedding.VoyageAPIKey == "" {
 		cfg.Embedding.VoyageAPIKey = key

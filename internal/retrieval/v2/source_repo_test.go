@@ -81,3 +81,28 @@ func TestRepoIndexSource_AutoPrefersSearchBeforeDAG(t *testing.T) {
 		t.Fatalf("path = %q", hits[0].Document.Path)
 	}
 }
+
+func TestRepoIndexSource_AutoFallsBackToDAGWhenSearchProjectsNoAnchors(t *testing.T) {
+	source := RepoIndexSource{}
+	hits, err := source.Recall(context.Background(), SourceCall{
+		Query: "identity center terraform module",
+		Limit: 5,
+		RepoQuery: &fakeRepoQuery{
+			searchNodes: []repoindex.Node{{Kind: repoindex.NodeConcept, Name: "module.identity-center"}},
+			dagNodes: []repoindex.Node{
+				{Kind: repoindex.NodeConcept, Name: "module.identity-center"},
+				{Kind: repoindex.NodeFile, File: "modules/identity-center/main.tf", SpanStart: 1},
+			},
+		},
+		RepoIndexMode: "auto",
+	})
+	if err != nil {
+		t.Fatalf("Recall returned error: %v", err)
+	}
+	if len(hits) != 1 {
+		t.Fatalf("len(hits) = %d, want 1", len(hits))
+	}
+	if hits[0].Document.Path != "modules/identity-center/main.tf" {
+		t.Fatalf("path = %q", hits[0].Document.Path)
+	}
+}

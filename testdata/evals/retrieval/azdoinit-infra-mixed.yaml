@@ -1,0 +1,32 @@
+name: azdoinit-infra-mixed
+queries:
+  - id: identity-center-module
+    query: "identity center terraform module"
+    expected_any_of:
+      - main.tf
+      - modules/identity-center/main.tf
+    notes: "Accept either the top-level module wiring or the concrete identity-center module."
+  - id: service-connection
+    query: "aws service connection terraform"
+    expected_any_of:
+      - modules/service-connection/main.tf
+    notes: "Should surface the service-connection Terraform module."
+  - id: create-config-script
+    query: "create config shell script"
+    expected_any_of:
+      - scripts/create-config.sh
+    notes: "Should find the shell script that bootstraps config."
+  - id: pipeline-templates-module
+    query: "pipeline templates terraform module"
+    expected_any_of:
+      - main.tf
+      - modules/pipeline-templates/main.tf
+    notes: "Accept either the root module wiring or the pipeline-templates module itself."
+  - id: azure-devops-project
+    query: "azure devops project terraform module"
+    expected_any_of:
+      - main.tf
+      - modules/project/main.tf
+      - modules/project/variables.tf
+      - variables.tf
+    notes: "Accept the root terraform entrypoint or project-related module definitions."

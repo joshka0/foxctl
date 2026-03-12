@@ -14,7 +14,16 @@ func DimensionsForModel(model string) int {
 		return 3072
 	case "text-embedding-004":
 		return 768
+	case "text-embedding-3-small", "text-embedding-ada-002":
+		return 1536
+	case "text-embedding-3-large":
+		return 3072
+	case "text-embedding-embeddinggemma-300m-qat":
+		return 768
 	default:
+		if strings.Contains(normalized, "embeddinggemma") {
+			return 768
+		}
 		return dbdriver.GetDefaultVectorDimensions()
 	}
 }

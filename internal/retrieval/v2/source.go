@@ -191,8 +191,11 @@ func (RepoIndexSource) Recall(ctx context.Context, cfg SourceCall) ([]SourceHit,
 	if err != nil {
 		return nil, err
 	}
-	if mode == "auto" && shouldEscalateRepoIndexAuto(cfg.Query, nodes, cfg.Limit) {
-		dagReq, err := repoquery.NewDAGGrepRequest(cfg.Query, "", cfg.Limit, nil, []string{"structural"}, nil, "", 2, 80, 20, nil, "")
+	hits := repoqueryadapters.ToSearchHits((repoquery.Projector{}).FromNodes(nodes))
+	if mode == "auto" && shouldEscalateRepoIndexAuto(cfg.Query, nodes, hits, cfg.Limit) {
+		direction := repoIndexFallbackDirection(nodes)
+		edgeSets := repoIndexFallbackEdgeSets(nodes)
+		dagReq, err := repoquery.NewDAGGrepRequest(cfg.Query, "", cfg.Limit, nil, edgeSets, nil, direction, 2, 80, 20, nil, "")
 		if err != nil {
 			return nil, err
 		}
@@ -206,7 +209,6 @@ func (RepoIndexSource) Recall(ctx context.Context, cfg SourceCall) ([]SourceHit,
 		}
 		return searchHitsToSourceHits(SourceRepoIndex, hits), nil
 	}
-	hits := repoqueryadapters.ToSearchHits((repoquery.Projector{}).FromNodes(nodes))
 	return searchHitsToSourceHits(SourceRepoIndex, hits), nil
 }
 
@@ -247,8 +249,42 @@ func normalizeRepoIndexMode(query, mode string) string {
 	}
 }
 
-func shouldEscalateRepoIndexAuto(query string, nodes []repoindex.Node, limit int) bool {
+func shouldEscalateRepoIndexAuto(query string, nodes []repoindex.Node, hits []searchindex.SearchHit, limit int) bool {
 	_ = query
 	_ = limit
-	return len(nodes) == 0
+	return len(nodes) == 0 || len(hits) == 0
+}
+
+func repoIndexFallbackDirection(nodes []repoindex.Node) string {
+	if len(nodes) == 0 {
+		return ""
+	}
+	allConcept := true
+	for _, node := range nodes {
+		if node.Kind != repoindex.NodeConcept {
+			allConcept = false
+			break
+		}
+	}
+	if allConcept {
+		return string(repoindex.DirIn)
+	}
+	return ""
+}
+
+func repoIndexFallbackEdgeSets(nodes []repoindex.Node) []string {
+	if len(nodes) == 0 {
+		return []string{"structural"}
+	}
+	allConcept := true
+	for _, node := range nodes {
+		if node.Kind != repoindex.NodeConcept {
+			allConcept = false
+			break
+		}
+	}
+	if allConcept {
+		return []string{"all"}
+	}
+	return []string{"structural"}
 }

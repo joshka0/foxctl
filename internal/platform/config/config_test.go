@@ -101,6 +101,9 @@ func TestLoadWithEnvOverridesAndTildePaths(t *testing.T) {
 	t.Setenv("HOME", tmp)
 
 	t.Setenv("AGENTCTL_INLINE_OUTPUT_KB", "512")
+	t.Setenv("AGENTCTL_EMBEDDING_PROVIDER", "openai_compat")
+	t.Setenv("AGENTCTL_EMBEDDING_MODEL", "text-embedding-embeddinggemma-300m-qat")
+	t.Setenv("AGENTCTL_EMBEDDING_BASE_URL", "http://127.0.0.1:1234/v1")
 	t.Setenv("AGENTCTL_EMBEDDING_API_KEY", "embed-key")
 	t.Setenv("AGENTCTL_PATHS_CAS", "~/custom/cas")
 	t.Setenv("AGENTCTL_LOGGING_LEVEL", "DEBUG")
@@ -118,6 +121,15 @@ func TestLoadWithEnvOverridesAndTildePaths(t *testing.T) {
 	}
 	if cfg.Embedding.APIKey != "embed-key" {
 		t.Fatalf("expected embedding api key override, got %q", cfg.Embedding.APIKey)
+	}
+	if cfg.Embedding.Provider != "openai_compat" {
+		t.Fatalf("expected embedding provider override, got %q", cfg.Embedding.Provider)
+	}
+	if cfg.Embedding.Model != "text-embedding-embeddinggemma-300m-qat" {
+		t.Fatalf("expected embedding model override, got %q", cfg.Embedding.Model)
+	}
+	if cfg.Embedding.BaseURL != "http://127.0.0.1:1234/v1" {
+		t.Fatalf("expected embedding base_url override, got %q", cfg.Embedding.BaseURL)
 	}
 	expectedCAS := filepath.Join(tmp, "custom/cas")
 	if cfg.Paths.CAS != expectedCAS {
