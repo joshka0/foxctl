@@ -1,10 +1,16 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  createElement,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
 import {
   Card,
   CardContent,
@@ -31,20 +37,17 @@ import {
   getRoom,
   getSessionMessages,
   listAgents,
+  listCompanionConversations,
   listPersistedSessions,
   listRooms,
   listWorkspaces,
-  listRoomMessages,
   patchAgent,
-  patchRoom,
-  patchRoomMembers,
   spawnAgent,
   type CompanionMessage,
   type CompanionMemoryStats,
   type ConsoleMessage,
   type PersistedSession,
   type SessionMessage,
-  sendRoomMessage,
 } from "@/api/client";
 import type {
   Agent,
@@ -61,6 +64,7 @@ import {
   getPromptSummaryOrSubtitle,
   getRoleIcon,
 } from "@/lib/agent-utils";
+import { resolveConversationIDForAgent } from "@/lib/conversation-utils";
 import { resolveRoomWorkspacePath, roomDisplayName } from "@/lib/room-utils";
 import {
   ArrowLeft,
@@ -98,11 +102,6 @@ type AgentNodeSummary = {
 
 type MemoryScope = "agent" | "session";
 type MemoryRetention = "companion" | "durable" | "task" | "ephemeral";
-type DispatchTargetPolicy =
-  | "all_subtree"
-  | "children_only"
-  | "lead_only"
-  | "selected";
 
 type ChildDraft = {
   name: string;
@@ -118,41 +117,6 @@ type AgentRoomMember = {
   actor_id: string;
   role?: string;
 };
-
-type LiveRoomMessage = {
-  key: string;
-  correlationID?: string;
-  messageID?: string;
-  sender: string;
-  subject?: string;
-  body: string;
-  createdAt: string;
-  pending: boolean;
-  error?: string;
-  toolActivity: string[];
-};
-
-type RoomTimelineMessage = {
-  key: string;
-  id?: string;
-  sender: string;
-  subject?: string;
-  body: string;
-  createdAt: string;
-  pending: boolean;
-  error?: string;
-  toolActivity: string[];
-};
-
-function conversationIDForAgent(agent: Agent): string {
-  const linked = (agent.conversation_id || "").trim();
-  if (linked) return linked;
-  return agent.id;
-}
-
-function isExplicitConversation(agent: Agent): boolean {
-  return (agent.conversation_id || "").trim().length > 0;
-}
 
 function mapCompanionMessage(message: CompanionMessage): ConsoleMessage {
   return {
@@ -304,163 +268,6 @@ function collectSubtreeAgents(agents: Agent[], rootID: string): Agent[] {
   return out;
 }
 
-function arraysEqual(left: string[], right: string[]): boolean {
-  if (left.length !== right.length) return false;
-  return left.every((value, index) => value === right[index]);
-}
-
-function roomEventKey(event: RoomMessageEvent): string {
-  const correlationID = (event.correlation_id || "").trim();
-  if (correlationID) return correlationID;
-  const messageID = (event.message_id || "").trim();
-  if (messageID) return messageID;
-  const agentID = (event.agent_id || event.sender || "room").trim();
-  return `${agentID}:${event.phase || "event"}`;
-}
-
-function applyRoomEvent(
-  liveMessages: Record<string, LiveRoomMessage>,
-  event: RoomMessageEvent,
-  timestamp: string,
-): Record<string, LiveRoomMessage> {
-  if (!event.phase || event.phase === "sent") {
-    return liveMessages;
-  }
-  const key = roomEventKey(event);
-  const existing = liveMessages[key];
-  const next: LiveRoomMessage = existing || {
-    key,
-    correlationID: event.correlation_id,
-    messageID: event.message_id,
-    sender: (event.sender || event.agent_id || "agent").trim() || "agent",
-    subject: (event.subject || "").trim() || undefined,
-    body: "",
-    createdAt: timestamp,
-    pending: true,
-    toolActivity: [],
-  };
-
-  switch (event.phase) {
-    case "agent_started":
-      return {
-        ...liveMessages,
-        [key]: {
-          ...next,
-          correlationID: event.correlation_id || next.correlationID,
-          sender:
-            (event.sender || event.agent_id || next.sender).trim() ||
-            next.sender,
-          subject: (event.subject || next.subject || "").trim() || undefined,
-          pending: true,
-          error: undefined,
-          createdAt: next.createdAt || timestamp,
-        },
-      };
-    case "agent_delta":
-      return {
-        ...liveMessages,
-        [key]: {
-          ...next,
-          body: `${next.body}${event.content_delta || ""}`,
-          pending: true,
-        },
-      };
-    case "agent_tool_call":
-      return {
-        ...liveMessages,
-        [key]: {
-          ...next,
-          toolActivity: [
-            ...next.toolActivity,
-            `Tool call: ${event.tool_name || "tool"}`,
-          ],
-          pending: true,
-        },
-      };
-    case "agent_tool_result":
-      return {
-        ...liveMessages,
-        [key]: {
-          ...next,
-          toolActivity: [
-            ...next.toolActivity,
-            event.tool_output?.trim()
-              ? `Tool result: ${event.tool_name || "tool"}${event.is_error ? " (error)" : ""}\n${event.tool_output}`
-              : `Tool result: ${event.tool_name || "tool"}${event.is_error ? " (error)" : ""}`,
-          ],
-          pending: true,
-        },
-      };
-    case "agent_completed":
-      return {
-        ...liveMessages,
-        [key]: {
-          ...next,
-          messageID: event.message_id || next.messageID,
-          body: (event.content || "").trim() || next.body || "Completed",
-          pending: false,
-          error: undefined,
-        },
-      };
-    case "agent_error":
-      return {
-        ...liveMessages,
-        [key]: {
-          ...next,
-          pending: false,
-          error: event.error || "room dispatch failed",
-        },
-      };
-    default:
-      return liveMessages;
-  }
-}
-
-function mergeRoomTimeline(
-  persistedMessages: Array<{
-    id: string;
-    sender: string;
-    subject?: string;
-    body: string;
-    created_at: string;
-  }>,
-  liveMessages: Record<string, LiveRoomMessage>,
-): RoomTimelineMessage[] {
-  const persistedIDs = new Set(persistedMessages.map((message) => message.id));
-  const persistedTimeline = persistedMessages.map<RoomTimelineMessage>(
-    (message) => ({
-      key: message.id,
-      id: message.id,
-      sender: message.sender,
-      subject: message.subject,
-      body: message.body,
-      createdAt: message.created_at,
-      pending: false,
-      toolActivity: [],
-    }),
-  );
-  const liveTimeline = Object.values(liveMessages)
-    .filter(
-      (message) => !message.messageID || !persistedIDs.has(message.messageID),
-    )
-    .map<RoomTimelineMessage>((message) => ({
-      key: message.key,
-      id: message.messageID,
-      sender: message.sender,
-      subject: message.subject,
-      body: message.body,
-      createdAt: message.createdAt,
-      pending: message.pending,
-      error: message.error,
-      toolActivity: message.toolActivity,
-    }));
-
-  return [...persistedTimeline, ...liveTimeline].sort(
-    (left, right) =>
-      Date.parse(left.createdAt || "") - Date.parse(right.createdAt || ""),
-  );
-}
-
 function localRequestID(prefix: string): string {
   if (
     typeof crypto !== "undefined" &&
@@ -485,6 +292,14 @@ function loadSessionConversationID(agentID: string): string {
   const created = localRequestID(`agent-session-${agentID}`);
   window.sessionStorage.setItem(key, created);
   return created;
+}
+
+function saveSessionConversationID(agentID: string, conversationID: string) {
+  if (typeof window === "undefined") return;
+  window.sessionStorage.setItem(
+    sessionConversationStorageKey(agentID),
+    conversationID,
+  );
 }
 
 function applyStreamMessageUpdate(
@@ -674,7 +489,7 @@ function HierarchyLink({
   label?: string;
   onSelect: (agent: Agent) => void;
 }) {
-  const RoleIcon = getRoleIcon(agent.role);
+  const roleIcon = getRoleIcon(agent.role);
   return (
     <button
       type="button"
@@ -689,7 +504,7 @@ function HierarchyLink({
             : "bg-muted text-muted-foreground",
         )}
       >
-        <RoleIcon className="h-4 w-4" />
+        {createElement(roleIcon, { className: "h-4 w-4" })}
       </div>
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2">
@@ -905,6 +720,9 @@ function RuntimeTreeNodeCard({
 export function AgentDetailView({ agent, onBack }: AgentDetailViewProps) {
   const queryClient = useQueryClient();
   const setSelectedAgent = useViewStore((s) => s.setSelectedAgent);
+  const setSelectedConversationID = useViewStore(
+    (s) => s.setSelectedConversationID,
+  );
   const setActiveView = useViewStore((s) => s.setActiveView);
   const setSelectedRoom = useViewStore((s) => s.setSelectedRoom);
   const eventSourceRef = useRef<EventSource | null>(null);
@@ -936,16 +754,7 @@ export function AgentDetailView({ agent, onBack }: AgentDetailViewProps) {
   const [controlRoomBusyAgentID, setControlRoomBusyAgentID] = useState<
     string | null
   >(null);
-  const [roomDraft, setRoomDraft] = useState("");
   const [roomStatus, setRoomStatus] = useState<string | null>(null);
-  const [liveRoomMessages, setLiveRoomMessages] = useState<
-    Record<string, LiveRoomMessage>
-  >({});
-  const [dispatchTargetPolicy, setDispatchTargetPolicy] =
-    useState<DispatchTargetPolicy>("all_subtree");
-  const [selectedDispatchTargets, setSelectedDispatchTargets] = useState<
-    string[]
-  >([]);
   const [spawnDraft, setSpawnDraft] = useState<ChildDraft>({
     name: "",
     role: "coder",
@@ -976,26 +785,27 @@ export function AgentDetailView({ agent, onBack }: AgentDetailViewProps) {
     trashAgent: trashAgentMutation,
   } = useAgentOperations(resolvedAgent);
   const activeAgent = targetAgent || resolvedAgent;
+  const workspacePaths = useMemo(
+    () => (workspacesData?.workspaces ?? []).map((workspace) => workspace.path),
+    [workspacesData?.workspaces],
+  );
+  const currentWorkspacePath = workspacesData?.current;
   const roomWorkspacePath = useMemo(
     () =>
       resolveRoomWorkspacePath(
         activeAgent.ns,
-        (workspacesData?.workspaces ?? []).map((workspace) => workspace.path),
-        workspacesData?.current,
+        workspacePaths,
+        currentWorkspacePath,
       ),
-    [activeAgent.ns, workspacesData?.current, workspacesData?.workspaces],
+    [activeAgent.ns, currentWorkspacePath, workspacePaths],
   );
   const RoleIcon = getRoleIcon(activeAgent.role);
   const activeMemoryScope = normalizeMemoryScope(activeAgent.memory_scope);
   const activeMemoryRetention = normalizeMemoryRetention(
     activeAgent.memory_retention,
   );
-  const conversationID =
-    activeMemoryScope === "session"
-      ? sessionConversationID
-      : conversationIDForAgent(activeAgent);
-  const conversationExplicit =
-    activeMemoryScope === "agent" && isExplicitConversation(activeAgent);
+  const [agentConversationIDOverride, setAgentConversationIDOverride] =
+    useState<string | null>(null);
 
   const { data: allAgentsData } = useQuery({
     queryKey: ["agents"],
@@ -1032,39 +842,6 @@ export function AgentDetailView({ agent, onBack }: AgentDetailViewProps) {
     () => buildAgentRoomMembers(activeAgent, subtreeAgents),
     [activeAgent, subtreeAgents],
   );
-  const dispatchTargetOptions = useMemo(
-    () => [
-      { actor_id: activeAgent.id, role: activeAgent.role || "lead" },
-      ...subtreeAgents.map((candidate) => ({
-        actor_id: candidate.id,
-        role: candidate.role || "worker",
-      })),
-    ],
-    [activeAgent.id, activeAgent.role, subtreeAgents],
-  );
-  const effectiveDispatchTargets = useMemo(() => {
-    switch (dispatchTargetPolicy) {
-      case "lead_only":
-        return [activeAgent.id];
-      case "children_only":
-        return subtreeAgents.map((candidate) => candidate.id);
-      case "selected":
-        return selectedDispatchTargets.filter(
-          (id, index, values) => id && values.indexOf(id) === index,
-        );
-      case "all_subtree":
-      default:
-        return [
-          activeAgent.id,
-          ...subtreeAgents.map((candidate) => candidate.id),
-        ];
-    }
-  }, [
-    activeAgent.id,
-    dispatchTargetPolicy,
-    selectedDispatchTargets,
-    subtreeAgents,
-  ]);
 
   const {
     data: runtimeData,
@@ -1077,6 +854,29 @@ export function AgentDetailView({ agent, onBack }: AgentDetailViewProps) {
     refetchInterval: activeAgent.state === "running" ? 5000 : 15000,
     refetchOnWindowFocus: false,
   });
+  const { data: companionConversationsData } = useQuery({
+    queryKey: ["companion-conversations", "agent-detail"],
+    queryFn: () => listCompanionConversations(200),
+    staleTime: 30000,
+    refetchInterval: 30000,
+  });
+  const linkedConversations = useMemo(
+    () =>
+      (companionConversationsData?.conversations ?? []).filter(
+        (conversation) => conversation.agent_id === activeAgent.id,
+      ),
+    [activeAgent.id, companionConversationsData?.conversations],
+  );
+  const resolvedAgentConversationID = useMemo(() => {
+    if (agentConversationIDOverride?.trim()) return agentConversationIDOverride;
+    return resolveConversationIDForAgent(activeAgent, linkedConversations);
+  }, [activeAgent, agentConversationIDOverride, linkedConversations]);
+  const conversationID =
+    activeMemoryScope === "session"
+      ? sessionConversationID
+      : resolvedAgentConversationID;
+  const conversationExplicit =
+    activeMemoryScope === "agent" && conversationID !== activeAgent.id;
   const runtimeTree = runtimeData?.runtime;
   const runtimeRoot = runtimeTree?.root;
   const runtimeSummary = useMemo(
@@ -1114,88 +914,26 @@ export function AgentDetailView({ agent, onBack }: AgentDetailViewProps) {
   });
   const controlRoom = controlRoomQuery.data?.room || null;
 
-  const controlRoomMessagesQuery = useQuery({
-    queryKey: ["agent-room-messages", roomWorkspacePath, controlRoomID],
-    enabled: !!roomWorkspacePath && !!controlRoom,
-    retry: false,
-    queryFn: () =>
-      listRoomMessages(controlRoomID, {
-        workspace_id: roomWorkspacePath,
-        limit: 100,
-      }),
-  });
-  const controlRoomTimeline = useMemo(
-    () =>
-      mergeRoomTimeline(
-        controlRoomMessagesQuery.data?.messages || [],
-        liveRoomMessages,
-      ),
-    [controlRoomMessagesQuery.data?.messages, liveRoomMessages],
-  );
-
-  useEffect(() => {
-    const validTargets = new Set(
-      dispatchTargetOptions.map((target) => target.actor_id),
-    );
-    setSelectedDispatchTargets((current) =>
-      current.filter((candidate) => validTargets.has(candidate)),
-    );
-  }, [dispatchTargetOptions]);
-
-  useEffect(() => {
-    const persistedIDs = new Set(
-      (controlRoomMessagesQuery.data?.messages || []).map(
-        (message) => message.id,
-      ),
-    );
-    if (persistedIDs.size === 0) return;
-    setLiveRoomMessages((prev) => {
-      let changed = false;
-      const next: Record<string, LiveRoomMessage> = {};
-      for (const [key, message] of Object.entries(prev)) {
-        if (message.messageID && persistedIDs.has(message.messageID)) {
-          changed = true;
-          continue;
-        }
-        next[key] = message;
-      }
-      return changed ? next : prev;
-    });
-  }, [controlRoomMessagesQuery.data?.messages]);
-
-  useEffect(() => {
-    if (!controlRoom) return;
-    const nextPolicy =
-      controlRoom.dispatch_policy === "children_only" ||
-      controlRoom.dispatch_policy === "lead_only" ||
-      controlRoom.dispatch_policy === "selected"
-        ? controlRoom.dispatch_policy
-        : "all_subtree";
-    setDispatchTargetPolicy(nextPolicy);
-    setSelectedDispatchTargets(controlRoom.dispatch_agent_ids || []);
-  }, [
-    controlRoom?.id,
-    controlRoom?.dispatch_policy,
-    (controlRoom?.dispatch_agent_ids || []).join(","),
-  ]);
-
   useEffect(() => {
     setSessionConversationID(loadSessionConversationID(activeAgent.id));
+    setAgentConversationIDOverride(null);
     setMemoryScopeDraft(normalizeMemoryScope(activeAgent.memory_scope));
     setMemoryRetentionDraft(
       normalizeMemoryRetention(activeAgent.memory_retention),
     );
     setActiveCorrelationID(null);
-    setRoomDraft("");
     setRoomStatus(null);
-    setLiveRoomMessages({});
-    setDispatchTargetPolicy("all_subtree");
-    setSelectedDispatchTargets([]);
     if (eventSourceRef.current) {
       eventSourceRef.current.close();
       eventSourceRef.current = null;
     }
   }, [activeAgent.id, activeAgent.memory_retention, activeAgent.memory_scope]);
+
+  useEffect(() => {
+    if (activeMemoryScope !== "session") return;
+    if (!sessionConversationID.trim()) return;
+    saveSessionConversationID(activeAgent.id, sessionConversationID);
+  }, [activeAgent.id, activeMemoryScope, sessionConversationID]);
 
   const { data: persistedSessionsData } = useQuery({
     queryKey: ["persisted-sessions", activeAgent.id, activeAgent.ns],
@@ -1293,33 +1031,89 @@ export function AgentDetailView({ agent, onBack }: AgentDetailViewProps) {
     setMemoryContextError(null);
   }, [activeAgent.id, conversationID, conversationMessages]);
 
-  const loadMemoryContext = async (force = false) => {
-    if (!force && memoryContextLoading) return;
-    if (!force && memoryContext) return;
-    setMemoryContextLoading(true);
-    setMemoryContextError(null);
-    try {
-      const data = await getCompanionMemoryContext(conversationID);
-      setMemoryContext(data.context || "");
-    } catch (err) {
-      setMemoryContextError(
-        err instanceof Error
-          ? err.message
-          : "Failed to load layered memory context",
-      );
-    } finally {
-      setMemoryContextLoading(false);
-    }
-  };
+  const loadMemoryContext = useCallback(
+    async (force = false) => {
+      if (!force && memoryContextLoading) return;
+      if (!force && memoryContext) return;
+      setMemoryContextLoading(true);
+      setMemoryContextError(null);
+      try {
+        const data = await getCompanionMemoryContext(conversationID);
+        setMemoryContext(data.context || "");
+      } catch (err) {
+        setMemoryContextError(
+          err instanceof Error
+            ? err.message
+            : "Failed to load layered memory context",
+        );
+      } finally {
+        setMemoryContextLoading(false);
+      }
+    },
+    [conversationID, memoryContext, memoryContextLoading],
+  );
+
+  const adoptConversationID = useCallback(
+    async (nextConversationID: string, persistAgentLink = false) => {
+      const normalizedID = nextConversationID.trim();
+      if (!normalizedID) return;
+      setSelectedConversationID(normalizedID);
+      if (activeMemoryScope === "session") {
+        if (normalizedID !== sessionConversationID) {
+          setSessionConversationID(normalizedID);
+          saveSessionConversationID(activeAgent.id, normalizedID);
+        }
+        return;
+      }
+      setAgentConversationIDOverride(normalizedID);
+      if (!persistAgentLink || activeAgent.conversation_id === normalizedID) {
+        return;
+      }
+      try {
+        await patchAgent(activeAgent.id, { conversation_id: normalizedID });
+        await Promise.all([
+          queryClient.invalidateQueries({ queryKey: ["agents"] }),
+          queryClient.invalidateQueries({ queryKey: ["agent", activeAgent.id] }),
+          queryClient.invalidateQueries({
+            queryKey: ["companion-conversations"],
+          }),
+          queryClient.invalidateQueries({
+            queryKey: ["companion-conversations", "agent-detail"],
+          }),
+        ]);
+      } catch (err) {
+        console.warn(
+          "[AgentDetailView] Failed to adopt canonical conversation id:",
+          err,
+        );
+      }
+    },
+    [
+      activeAgent.conversation_id,
+      activeAgent.id,
+      activeMemoryScope,
+      queryClient,
+      sessionConversationID,
+      setSelectedConversationID,
+    ],
+  );
 
   const ensureConversationLink = async () => {
     if (activeMemoryScope === "session") return;
     if (conversationExplicit) return;
     try {
       await patchAgent(activeAgent.id, { conversation_id: conversationID });
+      setAgentConversationIDOverride(conversationID);
+      setSelectedConversationID(conversationID);
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["agents"] }),
         queryClient.invalidateQueries({ queryKey: ["agent", activeAgent.id] }),
+        queryClient.invalidateQueries({
+          queryKey: ["companion-conversations"],
+        }),
+        queryClient.invalidateQueries({
+          queryKey: ["companion-conversations", "agent-detail"],
+        }),
       ]);
     } catch (err) {
       console.warn(
@@ -1357,44 +1151,14 @@ export function AgentDetailView({ agent, onBack }: AgentDetailViewProps) {
         ) {
           return;
         }
-        const timestamp =
-          typeof parsed.ts === "string" && parsed.ts.trim()
-            ? parsed.ts
-            : new Date().toISOString();
-        setLiveRoomMessages((prev) =>
-          applyRoomEvent(prev, roomEvent, timestamp),
-        );
-        if (
-          roomEvent.phase === "sent" ||
-          roomEvent.phase === "agent_completed"
-        ) {
-          void Promise.all([
-            queryClient.invalidateQueries({
-              queryKey: ["rooms", roomWorkspacePath],
-            }),
-            queryClient.invalidateQueries({
-              queryKey: ["agent-room", roomWorkspacePath, controlRoomID],
-            }),
-            queryClient.invalidateQueries({
-              queryKey: ["agent-room-messages", roomWorkspacePath, controlRoomID],
-            }),
-          ]);
-        }
-        if (roomEvent.phase === "agent_started" && roomEvent.agent_id) {
-          setRoomStatus(`Awaiting reply from ${roomEvent.agent_id}`);
-        } else if (roomEvent.phase === "agent_delta" && roomEvent.agent_id) {
-          setRoomStatus(`Streaming reply from ${roomEvent.agent_id}`);
-        } else if (
-          roomEvent.phase === "agent_completed" &&
-          roomEvent.agent_id
-        ) {
-          setRoomStatus(`Reply received from ${roomEvent.agent_id}`);
-        } else if (roomEvent.phase === "agent_error") {
-          setRoomStatus(
-            roomEvent.error ||
-              `Room dispatch failed for ${roomEvent.agent_id || "agent"}`,
-          );
-        }
+        void Promise.all([
+          queryClient.invalidateQueries({
+            queryKey: ["rooms", roomWorkspacePath],
+          }),
+          queryClient.invalidateQueries({
+            queryKey: ["agent-room", roomWorkspacePath, controlRoomID],
+          }),
+        ]);
         return;
       }
       if (parsed.type !== "agent.chat") {
@@ -1484,6 +1248,7 @@ export function AgentDetailView({ agent, onBack }: AgentDetailViewProps) {
     conversationExplicit,
     controlRoomID,
     queryClient,
+    loadMemoryContext,
     refetchConversation,
     refetchMemoryStats,
     refetchRuntime,
@@ -1598,100 +1363,41 @@ export function AgentDetailView({ agent, onBack }: AgentDetailViewProps) {
     },
   });
 
-  const ensureRoomMutation = useMutation({
+  const openControlRoomMutation = useMutation({
     mutationFn: async () => {
       if (!roomWorkspacePath) {
-        throw new Error("Workspace is required to manage control rooms");
+        throw new Error("Workspace is required to open the control room");
       }
-      const dispatchAgentIDs = effectiveDispatchTargets;
       if (controlRoom) {
-        await patchRoom(controlRoomID, {
-          workspace_id: roomWorkspacePath,
-          title: controlRoomTitle,
-          description: `Coordination room for ${getAgentDisplayName(activeAgent)}`,
-          dispatch_policy: dispatchTargetPolicy,
-          dispatch_agent_ids: dispatchAgentIDs,
-        });
-        return patchRoomMembers(controlRoomID, {
-          workspace_id: roomWorkspacePath,
-          members: controlRoomMembers,
-        });
+        return { room: controlRoom, created: false };
       }
-      return createRoom({
+      const result = await createRoom({
         workspace_id: roomWorkspacePath,
         id: controlRoomID,
         title: controlRoomTitle,
         description: `Coordination room for ${getAgentDisplayName(activeAgent)}`,
-        dispatch_policy: dispatchTargetPolicy,
-        dispatch_agent_ids: dispatchAgentIDs,
+        dispatch_policy: "all_subtree",
         members: controlRoomMembers,
       });
-    },
-    onSuccess: async () => {
-      setRoomStatus(
-        "Control room synced with current subtree members and dispatch defaults",
-      );
-      await Promise.all([
-        controlRoomQuery.refetch(),
-        controlRoomMessagesQuery.refetch(),
-      ]);
-    },
-    onError: (error) => {
-      setRoomStatus(
-        error instanceof Error ? error.message : "Failed to sync control room",
-      );
-    },
-  });
-
-  const sendRoomMutation = useMutation({
-    mutationFn: async () => {
-      if (!roomWorkspacePath) {
-        throw new Error("Workspace is required to send room messages");
-      }
-      const body = roomDraft.trim();
-      if (!body) {
-        throw new Error("Room message is required");
-      }
-      if (effectiveDispatchTargets.length === 0) {
-        throw new Error("Select at least one dispatch target");
-      }
-      const persistedTargets = controlRoom?.dispatch_agent_ids || [];
-      const policyUsesExplicitTargets = dispatchTargetPolicy !== "all_subtree";
-      const needsRoomSync =
-        !controlRoom ||
-        (controlRoom.dispatch_policy || "all_subtree") !==
-          dispatchTargetPolicy ||
-        (policyUsesExplicitTargets &&
-          !arraysEqual(persistedTargets, effectiveDispatchTargets));
-      if (needsRoomSync) {
-        await ensureRoomMutation.mutateAsync();
-      }
-      return sendRoomMessage(controlRoomID, {
-        workspace_id: roomWorkspacePath,
-        sender: "human:gui",
-        body,
-        dispatch_agents: true,
-        context: buildAgentContext(activeAgent),
-      });
+      return { room: result.room, created: true };
     },
     onSuccess: async (result) => {
-      setRoomDraft("");
-      const dispatched = result.dispatched || 0;
+      if (result.room) {
+        openRoom(result.room);
+      }
       setRoomStatus(
-        dispatched > 0
-          ? `Control room message sent; queued ${dispatched} agent ${dispatched === 1 ? "reply" : "replies"}`
-          : "Control room message sent",
+        result.created
+          ? "Control room created and opened in Rooms"
+          : "Opened control room in Rooms",
       );
       await Promise.all([
         controlRoomQuery.refetch(),
-        controlRoomMessagesQuery.refetch(),
+        queryClient.invalidateQueries({ queryKey: ["rooms", roomWorkspacePath] }),
       ]);
     },
     onError: (error) => {
       setRoomStatus(
-        error instanceof Error
-          ? error.message
-          : "Failed to send control room message",
+        error instanceof Error ? error.message : "Failed to open control room",
       );
     },
   });
@@ -1768,12 +1474,16 @@ export function AgentDetailView({ agent, onBack }: AgentDetailViewProps) {
         conversation_id: conversationID,
         context: buildAgentContext(activeAgent),
       });
+      await adoptConversationID(
+        response.conversation_id,
+        activeMemoryScope === "agent",
+      );
       setChatStatus(
         response.accepted
           ? "Streaming reply from agent runtime..."
           : "Waiting for agent reply...",
       );
-    } catch (err) {
+    } catch {
       try {
         const response = await companionChat({
           conversation_id: conversationID,
@@ -1783,6 +1493,10 @@ export function AgentDetailView({ agent, onBack }: AgentDetailViewProps) {
           llm_model: activeAgent.llm_model || undefined,
           context: buildAgentContext(activeAgent),
         });
+        await adoptConversationID(
+          response.conversation_id,
+          activeMemoryScope === "agent",
+        );
         setMessages((prev) =>
           applyStreamMessageUpdate(prev, correlationID, (message) => ({
             ...message,
@@ -1856,7 +1570,7 @@ export function AgentDetailView({ agent, onBack }: AgentDetailViewProps) {
   };
 
   const handleOpenGlobalConversation = () => {
-    localStorage.setItem("gui-agent-auto-select-conversation", conversationID);
+    setSelectedConversationID(conversationID);
     setActiveView("companion");
   };
 
@@ -1883,14 +1597,6 @@ export function AgentDetailView({ agent, onBack }: AgentDetailViewProps) {
     } catch {
       // Error state is handled by the mutation callbacks.
     }
-  };
-
-  const toggleDispatchTarget = (agentID: string) => {
-    setSelectedDispatchTargets((current) =>
-      current.includes(agentID)
-        ? current.filter((candidate) => candidate !== agentID)
-        : [...current, agentID],
-    );
   };
 
   const selectedSessionMessages = selectedSessionMessagesData?.messages || [];
@@ -2223,34 +1929,13 @@ export function AgentDetailView({ agent, onBack }: AgentDetailViewProps) {
               <CardHeader className="pb-3">
                 <div className="flex items-start justify-between gap-3">
                   <div>
-                    <CardTitle className="text-sm">Control Room</CardTitle>
+                    <CardTitle className="text-sm">Child Agents</CardTitle>
                     <CardDescription>
                       Spawn child agents and manage immediate workers from this
                       parent surface.
                     </CardDescription>
                   </div>
-                  <div className="flex items-center gap-2">
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      className="h-8 px-2 text-[11px]"
-                      onClick={() => setActiveView("rooms")}
-                    >
-                      Open Rooms
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      className="h-8 px-2 text-[11px]"
-                      onClick={() => ensureRoomMutation.mutate()}
-                      disabled={ensureRoomMutation.isPending || !activeAgent.ns}
-                    >
-                      Sync Room
-                    </Button>
-                    <Workflow className="h-4 w-4 text-muted-foreground" />
-                  </div>
+                  <Workflow className="h-4 w-4 text-muted-foreground" />
                 </div>
               </CardHeader>
               <CardContent className="space-y-3">
@@ -2873,34 +2558,16 @@ export function AgentDetailView({ agent, onBack }: AgentDetailViewProps) {
               <CardHeader className="pb-3">
                 <div className="flex items-start justify-between gap-3">
                   <div>
-                    <CardTitle className="text-sm">
-                      Control Room Stream
-                    </CardTitle>
+                    <CardTitle className="text-sm">Control Room</CardTitle>
                     <CardDescription>
-                      Room-scoped coordination timeline for this agent subtree.
+                      Room coordination lives in the canonical Rooms surface.
                     </CardDescription>
                   </div>
                   <div className="flex items-center gap-2">
                     <Badge variant="outline" className="text-[10px] font-mono">
                       {controlRoomID}
                     </Badge>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon"
-                      className="h-8 w-8"
-                      onClick={() => void controlRoomMessagesQuery.refetch()}
-                      disabled={
-                        controlRoomMessagesQuery.isFetching || !controlRoom
-                      }
-                    >
-                      <RefreshCw
-                        className={cn(
-                          "h-4 w-4",
-                          controlRoomMessagesQuery.isFetching && "animate-spin",
-                        )}
-                      />
-                    </Button>
+                    <Workflow className="h-4 w-4 text-muted-foreground" />
                   </div>
                 </div>
               </CardHeader>
@@ -2915,158 +2582,62 @@ export function AgentDetailView({ agent, onBack }: AgentDetailViewProps) {
                     {controlRoomMembers.length} members
                   </Badge>
                   <Badge variant="outline" className="text-[10px]">
-                    {effectiveDispatchTargets.length} dispatch target
-                    {effectiveDispatchTargets.length === 1 ? "" : "s"}
+                    {(controlRoom?.dispatch_policy || "all_subtree").replace(
+                      /_/g,
+                      " ",
+                    )}
                   </Badge>
-                </div>
-                <div className="rounded-lg border border-border bg-background/60 p-3 space-y-3">
-                  <div className="grid gap-2">
-                    <label className="text-[11px] uppercase tracking-wider text-muted-foreground">
-                      Dispatch Targets
-                    </label>
-                    <select
-                      value={dispatchTargetPolicy}
-                      onChange={(e) =>
-                        setDispatchTargetPolicy(
-                          (e.target.value ||
-                            "all_subtree") as DispatchTargetPolicy,
-                        )
-                      }
-                      className="h-9 rounded-md border border-input bg-background px-3 text-sm"
-                    >
-                      <option value="all_subtree">all subtree</option>
-                      <option value="children_only">children only</option>
-                      <option value="lead_only">lead only</option>
-                      <option value="selected">selected</option>
-                    </select>
-                  </div>
-                  {dispatchTargetPolicy === "selected" && (
-                    <div className="grid gap-2">
-                      <div className="text-[11px] uppercase tracking-wider text-muted-foreground">
-                        Selected Agents
-                      </div>
-                      <div className="max-h-40 space-y-2 overflow-y-auto pr-1">
-                        {dispatchTargetOptions.map((target) => (
-                          <label
-                            key={`dispatch-target-${target.actor_id}`}
-                            className="flex items-center gap-2 rounded border border-border bg-background px-2 py-2 text-xs"
-                          >
-                            <input
-                              type="checkbox"
-                              checked={selectedDispatchTargets.includes(
-                                target.actor_id,
-                              )}
-                              onChange={() =>
-                                toggleDispatchTarget(target.actor_id)
-                              }
-                            />
-                            <span className="truncate font-mono">
-                              {target.actor_id}
-                            </span>
-                            <span className="text-muted-foreground">
-                              {target.role || "agent"}
-                            </span>
-                          </label>
-                        ))}
-                      </div>
-                    </div>
-                  )}
                 </div>
                 <div className="rounded-lg border border-border bg-background/60 p-3">
                   {controlRoom ? (
                     <div className="space-y-2">
-                      {controlRoomTimeline.length ? (
-                        controlRoomTimeline.slice(-8).map((message) => (
-                          <div
-                            key={message.key}
-                            className="rounded bg-background/70 px-2 py-2"
-                          >
-                            <div className="flex items-center justify-between gap-2 text-[10px] uppercase tracking-wider text-muted-foreground">
-                              <span className="truncate">
-                                {message.sender || "unknown"}
-                              </span>
-                              <div className="flex items-center gap-2">
-                                {message.pending && (
-                                  <Badge
-                                    variant="outline"
-                                    className="text-[9px]"
-                                  >
-                                    live
-                                  </Badge>
-                                )}
-                                <span>
-                                  {formatRelativeTime(message.createdAt)}
-                                </span>
-                              </div>
-                            </div>
-                            {message.subject && (
-                              <div className="mt-1 text-xs font-medium text-foreground">
-                                {message.subject}
-                              </div>
-                            )}
-                            <div className="mt-1 whitespace-pre-wrap text-xs text-muted-foreground">
-                              {message.body ||
-                                (message.pending ? "Thinking…" : "")}
-                            </div>
-                            {message.toolActivity.length > 0 && (
-                              <div className="mt-2 space-y-1">
-                                {message.toolActivity
-                                  .slice(-2)
-                                  .map((entry, index) => (
-                                    <div
-                                      key={`${message.key}-tool-${index}`}
-                                      className="whitespace-pre-wrap text-[10px] text-muted-foreground/90"
-                                    >
-                                      {entry}
-                                    </div>
-                                  ))}
-                              </div>
-                            )}
-                            {message.error && (
-                              <div className="mt-2 text-[10px] text-destructive">
-                                {message.error}
-                              </div>
-                            )}
-                          </div>
-                        ))
-                      ) : (
-                        <div className="text-xs text-muted-foreground">
-                          No room messages yet. Use this stream for parent/child
-                          coordination notes.
+                      <div className="text-xs text-muted-foreground">
+                        The control room exists and can be used for subtree coordination,
+                        dispatch policy, and timeline review from the Rooms surface.
+                      </div>
+                      <div className="grid gap-1 text-[11px] text-muted-foreground">
+                        <div>
+                          workspace <code>{controlRoom.workspace_id}</code>
                         </div>
-                      )}
+                        <div>
+                          updated{" "}
+                          {controlRoom.latest_message_at
+                            ? formatRelativeTime(controlRoom.latest_message_at)
+                            : "no messages yet"}
+                        </div>
+                      </div>
                     </div>
                   ) : (
                     <div className="text-xs text-muted-foreground">
-                      No control room exists yet. Sync the room to create a
-                      subtree coordination stream.
+                      No control room exists yet. Create it, then continue
+                      coordination and dispatch management in Rooms.
                     </div>
                   )}
                 </div>
-                <div className="space-y-2">
-                  <Textarea
-                    value={roomDraft}
-                    onChange={(e) => setRoomDraft(e.target.value)}
-                    placeholder="Send a coordination note into the control room..."
-                    className="min-h-[84px]"
-                  />
-                  <div className="flex items-center justify-between gap-2">
-                    <div className="text-[11px] text-muted-foreground">
-                      Sender: `human:gui`
-                    </div>
-                    <Button
-                      type="button"
-                      size="sm"
-                      onClick={() => sendRoomMutation.mutate()}
-                      disabled={
-                        sendRoomMutation.isPending ||
-                        !roomDraft.trim() ||
-                        !activeAgent.ns
-                      }
-                    >
-                      Send To Room
-                    </Button>
-                  </div>
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    type="button"
+                    size="sm"
+                    onClick={() => openControlRoomMutation.mutate()}
+                    disabled={
+                      openControlRoomMutation.isPending || !roomWorkspacePath
+                    }
+                  >
+                    <Hash className="h-4 w-4" />
+                    {controlRoom ? "Open Control Room" : "Create Control Room"}
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setActiveView("rooms")}
+                  >
+                    Open Rooms
+                  </Button>
+                </div>
+                <div className="rounded-lg border border-dashed border-border px-3 py-2 text-xs text-muted-foreground">
+                  Detailed room editing, dispatch policy changes, and coordination
+                  messaging now belong in the Rooms surface, not in this detail view.
                 </div>
               </CardContent>
             </Card>

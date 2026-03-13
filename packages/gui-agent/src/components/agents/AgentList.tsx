@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { createElement, useMemo, useRef, useState } from "react";
 import {
   useQuery,
   useQueries,
@@ -56,7 +56,6 @@ import {
   Folder,
   Hash,
   Calendar,
-  Eye,
   MessageSquare,
   Trash2,
   Wrench,
@@ -98,6 +97,7 @@ export function AgentList() {
   const setActivityFocus = useActivityFocusStore((s) => s.setFocus);
 
   const {
+    selectedAgentID,
     selectedAgent,
     setSelectedAgent,
     setSelectedRoom,
@@ -108,7 +108,7 @@ export function AgentList() {
 
   const { data, isLoading, refetch, isFetching } = useQuery({
     queryKey: ["agents"],
-    queryFn: () => listAgents(50),
+    queryFn: () => listAgents(100),
     refetchInterval: 10000,
   });
   const { data: workspacesData } = useQuery({
@@ -117,7 +117,12 @@ export function AgentList() {
     staleTime: 10000,
   });
 
-  const agents = data?.agents ?? [];
+  const agents = useMemo(() => data?.agents ?? [], [data?.agents]);
+  const workspaceEntries = useMemo(
+    () => workspacesData?.workspaces ?? [],
+    [workspacesData?.workspaces],
+  );
+  const currentWorkspace = workspacesData?.current;
   const normalizedQuery = searchQuery.trim().toLowerCase();
   const matchedAgents = normalizedQuery
     ? agents.filter(
@@ -246,13 +251,16 @@ export function AgentList() {
   const activeCount = agents.filter(
     (agent) => agent.state === "running" || agent.state === "idle",
   ).length;
+  const resolvedSelectedAgent = useMemo(() => {
+    if (selectedAgent) return selectedAgent;
+    if (!selectedAgentID) return null;
+    return agents.find((agent) => agent.id === selectedAgentID) ?? null;
+  }, [agents, selectedAgent, selectedAgentID]);
 
   const roomWorkspaces = useMemo(
     () => {
-      const knownPaths = (workspacesData?.workspaces ?? []).map(
-        (workspace) => workspace.path,
-      );
-      const fallbackCurrent = workspacesData?.current;
+      const knownPaths = workspaceEntries.map((workspace) => workspace.path);
+      const fallbackCurrent = currentWorkspace;
       return [
         ...new Set(
           agents
@@ -263,7 +271,7 @@ export function AgentList() {
         ),
       ];
     },
-    [agents, workspacesData?.current, workspacesData?.workspaces],
+    [agents, currentWorkspace, workspaceEntries],
   );
   const roomQueries = useQueries({
     queries: roomWorkspaces.map((workspaceID) => ({
@@ -283,8 +291,8 @@ export function AgentList() {
     return indexRoomsByActor(allRooms);
   }, [roomQueries]);
 
-  // Handle opening the primary human-facing agent workbench.
-  const handleChat = async (agent: Agent) => {
+  // Runtime is the canonical workbench for agent-focused work in this slice.
+  const handleOpenWorkbench = (agent: Agent) => {
     setSelectedAgent(agent);
     setActiveView("runtime");
   };
@@ -389,10 +397,10 @@ export function AgentList() {
   };
 
   // If an agent is selected, show detail view
-  if (selectedAgent) {
+  if (resolvedSelectedAgent) {
     return (
       <AgentDetailView
-        agent={selectedAgent}
+        agent={resolvedSelectedAgent}
         onBack={() => setSelectedAgent(null)}
       />
     );
@@ -414,7 +422,12 @@ export function AgentList() {
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             <Users className="h-5 w-5" />
-            <h2 className="text-lg font-semibold text-foreground">Runtime</h2>
+            <div>
+              <h2 className="text-lg font-semibold text-foreground">Runtime</h2>
+              <div className="text-xs text-muted-foreground">
+                Primary surface for agent lifecycle, coordination handoffs, and incident follow-up.
+              </div>
+            </div>
           </div>
           <div className="flex items-center gap-2">
             <Button
@@ -433,7 +446,7 @@ export function AgentList() {
               onClick={() => setSpawnAgentOpen(!spawnAgentOpen)}
             >
               <Plus className="h-4 w-4 mr-1" />
-              Spawn
+              Spawn Agent
             </Button>
           </div>
         </div>
@@ -518,11 +531,11 @@ export function AgentList() {
               className="h-7 text-xs"
               onClick={() =>
                 latestConversationalAgent &&
-                handleChat(latestConversationalAgent)
+                handleOpenWorkbench(latestConversationalAgent)
               }
               disabled={!latestConversationalAgent}
             >
-              Continue Latest Chat
+              Open Latest Workbench
             </Button>
           </div>
         )}
@@ -625,11 +638,11 @@ export function AgentList() {
             };
 
             if (resolvedAgent) {
-              handleChat(resolvedAgent);
+              handleOpenWorkbench(resolvedAgent);
               return;
             }
             if (params?.workspace_id) {
-              handleChat(newAgent);
+              handleOpenWorkbench(newAgent);
               return;
             }
             // If namespace is not yet available, avoid opening chat in the wrong workspace.
@@ -725,7 +738,7 @@ export function AgentList() {
                             className="h-7 text-xs"
                             onClick={() => setSelectedAgent(agent)}
                           >
-                            Details
+                            Open Workbench
                           </Button>
                         </div>
                       </CardContent>
@@ -748,9 +761,8 @@ export function AgentList() {
                       key={agent.id}
                       agent={agent}
                       rooms={roomsByAgent.get(agent.id) ?? []}
-                      onViewDetails={setSelectedAgent}
                       onOpenRoom={handleOpenRoom}
-                      onChat={handleChat}
+                      onOpenWorkbench={handleOpenWorkbench}
                       onTrash={handleTrash}
                       onKill={handleKill}
                       onStart={handleStart}
@@ -778,9 +790,8 @@ export function AgentList() {
                       key={agent.id}
                       agent={agent}
                       rooms={roomsByAgent.get(agent.id) ?? []}
-                      onViewDetails={setSelectedAgent}
                       onOpenRoom={handleOpenRoom}
-                      onChat={handleChat}
+                      onOpenWorkbench={handleOpenWorkbench}
                       onTrash={handleTrash}
                       onKill={handleKill}
                       onStart={handleStart}
@@ -802,9 +813,8 @@ export function AgentList() {
 interface AgentCardProps {
   agent: Agent;
   rooms: Room[];
-  onViewDetails: (agent: Agent) => void;
   onOpenRoom: (room: Room) => void;
-  onChat: (agent: Agent) => void;
+  onOpenWorkbench: (agent: Agent) => void;
   onTrash: (agent: Agent) => void;
   onKill: (agent: Agent) => void;
   onStart: (agent: Agent) => void;
@@ -820,8 +830,7 @@ interface AgentCardProps {
  * and exposes controls to open a chat, view details, start, stop (kill), or remove (trash) the agent.
  *
  * @param agent - The agent object to display
- * @param onViewDetails - Callback invoked when the "view details" action is triggered
- * @param onChat - Callback invoked when the "chat" action is triggered
+ * @param onOpenWorkbench - Callback invoked when the workbench action is triggered
  * @param onTrash - Callback invoked when the "remove/trash" action is triggered
  * @param onKill - Callback invoked when the "stop/kill" action is triggered
  * @param onStart - Callback invoked when the "start/resume" action is triggered
@@ -833,9 +842,8 @@ interface AgentCardProps {
 function AgentCard({
   agent,
   rooms,
-  onViewDetails,
   onOpenRoom,
-  onChat,
+  onOpenWorkbench,
   onTrash,
   onKill,
   onStart,
@@ -843,7 +851,7 @@ function AgentCard({
   isKillLoading,
   isStartLoading,
 }: AgentCardProps) {
-  const RoleIcon = getRoleIcon(agent.role);
+  const roleIcon = getRoleIcon(agent.role);
   const stateColors: Record<string, string> = {
     running: "bg-green-500",
     idle: "bg-yellow-500",
@@ -870,20 +878,20 @@ function AgentCard({
         <div className="flex items-start justify-between">
           <div className="flex items-start gap-3 flex-1 min-w-0">
             <div className="relative flex-shrink-0">
-              <div
-                className={cn(
-                  "h-10 w-10 rounded-lg flex items-center justify-center",
-                  agent.state === "running" ? "bg-green-500/10" : "bg-muted",
-                )}
-              >
-                <RoleIcon
+                <div
                   className={cn(
+                    "h-10 w-10 rounded-lg flex items-center justify-center",
+                    agent.state === "running" ? "bg-green-500/10" : "bg-muted",
+                  )}
+                >
+                {createElement(roleIcon, {
+                  className: cn(
                     "h-5 w-5",
                     agent.state === "running"
                       ? "text-green-500"
                       : "text-muted-foreground",
-                  )}
-                />
+                  ),
+                })}
               </div>
               <span
                 className={cn(
@@ -1020,10 +1028,10 @@ function AgentCard({
               size="sm"
               className="h-8 text-xs gap-1.5 text-primary hover:text-primary hover:bg-primary/10"
               title="Open agent workbench"
-              onClick={() => onChat(agent)}
+              onClick={() => onOpenWorkbench(agent)}
             >
               <MessageSquare className="h-3.5 w-3.5" />
-              Open
+              Workbench
             </Button>
             {rooms.length > 0 && (
               <Button
@@ -1034,19 +1042,9 @@ function AgentCard({
                 onClick={() => onOpenRoom(rooms[0])}
               >
                 <Hash className="h-3.5 w-3.5" />
-                Room
+                Open Room
               </Button>
             )}
-            <Button
-              variant="outline"
-              size="sm"
-              className="h-8 text-xs gap-1.5"
-              title="View details"
-              onClick={() => onViewDetails(agent)}
-            >
-              <Eye className="h-3.5 w-3.5" />
-              Details
-            </Button>
             {agent.state === "running" ? (
               <Button
                 variant="outline"
