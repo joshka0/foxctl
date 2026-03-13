@@ -14,7 +14,6 @@ import {
 } from "@/lib/agent-utils";
 import {
   agentOptionLabel,
-  shortAgentID,
   type AgentConversationGroupData,
   type AgentSections,
   type Conversation,
@@ -37,6 +36,30 @@ import {
   Trash2,
   X,
 } from "lucide-react";
+
+const ACTIVE_CONVERSATION_WINDOW_MS = 15 * 60 * 1000;
+const RECENT_CONVERSATION_WINDOW_MS = 2 * 60 * 60 * 1000;
+
+type ConversationActivityState = "active" | "recent" | "quiet";
+
+function conversationTimestamp(conversation: Conversation): number {
+  return (
+    Date.parse(conversation.updated_at || "") ||
+    Date.parse(conversation.created_at || "") ||
+    0
+  );
+}
+
+function getConversationActivityState(
+  conversation?: Conversation | null,
+): ConversationActivityState {
+  if (!conversation) return "quiet";
+
+  const ageMs = Date.now() - conversationTimestamp(conversation);
+  if (ageMs <= ACTIVE_CONVERSATION_WINDOW_MS) return "active";
+  if (ageMs <= RECENT_CONVERSATION_WINDOW_MS) return "recent";
+  return "quiet";
+}
 
 interface AgentConversationGroupProps {
   agent: Agent;
@@ -84,12 +107,36 @@ function AgentConversationGroup({
   onStartRename,
   onDeleteConversation,
 }: AgentConversationGroupProps) {
+  const latestConversation = conversations[0];
+  const latestConversationLabel = latestConversation
+    ? latestConversation.name ||
+      latestConversation.title ||
+      latestConversation.id.slice(0, 12)
+    : null;
+  const latestConversationAge = latestConversation
+    ? formatRelativeTime(
+        latestConversation.updated_at || latestConversation.created_at,
+      )
+    : null;
+  const latestConversationActivity = getConversationActivityState(
+    latestConversation,
+  );
+  const hasFreshConversation = latestConversationActivity !== "quiet";
+
   return (
     <div>
       <div
         className={cn(
-          "flex items-center gap-2 px-2 py-2 rounded-lg cursor-pointer transition-colors group",
+          "flex items-center gap-2 px-2 py-1.5 rounded-lg cursor-pointer transition-colors group",
           "hover:bg-accent/50",
+          hasFreshConversation &&
+            !hasSelectedConversation &&
+            latestConversationActivity === "active" &&
+            "bg-emerald-500/5",
+          hasFreshConversation &&
+            !hasSelectedConversation &&
+            latestConversationActivity === "recent" &&
+            "bg-amber-500/5",
           hasSelectedConversation && "bg-accent/30",
         )}
         onClick={() => {
@@ -125,25 +172,50 @@ function AgentConversationGroup({
               {getAgentDisplayName(agent)}
             </span>
             <Badge
-              variant="outline"
-              className="text-[9px] px-1 py-0 font-mono flex-shrink-0"
-            >
-              {shortAgentID(agent.id)}
-            </Badge>
-            <Badge
               variant="secondary"
               className="text-[9px] px-1 py-0 flex-shrink-0"
             >
               {conversations.length}
             </Badge>
+            {latestConversationActivity !== "quiet" && (
+              <Badge
+                variant="outline"
+                className={cn(
+                  "text-[9px] px-1 py-0 flex-shrink-0",
+                  latestConversationActivity === "active" &&
+                    "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400",
+                  latestConversationActivity === "recent" &&
+                    "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-400",
+                )}
+              >
+                {latestConversationActivity === "active" ? "Active" : "Recent"}
+              </Badge>
+            )}
             {agent.state === "running" && (
               <span className="h-1.5 w-1.5 rounded-full bg-green-500 animate-pulse" />
             )}
           </div>
           <div className="text-[10px] text-muted-foreground truncate">
-            {getPromptSummaryOrSubtitle(agent)}
+            {latestConversationLabel
+              ? `Latest: ${latestConversationLabel}`
+              : getPromptSummaryOrSubtitle(agent)}
           </div>
         </div>
+
+        {latestConversationAge && (
+          <div
+            className={cn(
+              "text-[10px] flex-shrink-0",
+              latestConversationActivity === "active" &&
+                "text-emerald-700 dark:text-emerald-400",
+              latestConversationActivity === "recent" &&
+                "text-amber-700 dark:text-amber-400",
+              latestConversationActivity === "quiet" && "text-muted-foreground",
+            )}
+          >
+            {latestConversationAge}
+          </div>
+        )}
 
         <Button
           variant="ghost"
@@ -173,106 +245,150 @@ function AgentConversationGroup({
               <span className="text-xs">Start a conversation</span>
             </div>
           )}
-          {conversations.map((conversation) => (
-            <div
-              key={conversation.id}
-              className={cn(
-                "flex items-center gap-2 px-2 py-1.5 rounded-md cursor-pointer transition-colors group",
-                "hover:bg-accent/50",
-                selectedConversationId === conversation.id &&
-                  "bg-accent border-l-2 border-primary -ml-0.5 pl-2.5",
-              )}
-              onClick={() => onSelectConversation(conversation)}
-            >
-              <MessageCircle className="h-3 w-3 text-muted-foreground flex-shrink-0" />
-              <div className="flex-1 min-w-0">
-                {editingConversationId === conversation.id ? (
-                  <div
-                    className="space-y-1"
-                    onClick={(e) => e.stopPropagation()}
-                  >
-                    <Input
-                      value={editTitle}
-                      onChange={(e) => onEditTitleChange(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter") onSaveRename(e, conversation.id);
-                        if (e.key === "Escape") onCancelRename(e);
-                      }}
-                      className="h-5 text-xs py-0 px-1"
-                      placeholder="Title..."
-                      autoFocus
-                    />
-                    <div className="flex items-center gap-1">
-                      <select
-                        value={editLinkedAgentId}
-                        onChange={(e) =>
-                          onEditLinkedAgentIdChange(e.target.value)
-                        }
-                        className="flex-1 h-5 text-[10px] bg-muted border border-border rounded px-1"
-                      >
-                        <option value="">No agent</option>
-                        {agents.map((candidate) => (
-                          <option key={candidate.id} value={candidate.id}>
-                            {agentOptionLabel(candidate)}
-                          </option>
-                        ))}
-                      </select>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-5 w-5"
-                        onClick={(e) => onSaveRename(e, conversation.id)}
-                      >
-                        <Check className="h-3 w-3 text-green-500" />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-5 w-5"
-                        onClick={onCancelRename}
-                      >
-                        <X className="h-3 w-3" />
-                      </Button>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="flex items-center gap-1.5">
-                    <span className="text-xs truncate">
-                      {conversation.name || conversation.id.slice(0, 12)}
-                    </span>
-                    <Badge
-                      variant="secondary"
-                      className="text-[9px] px-1 py-0 flex-shrink-0"
+          {conversations.map((conversation, index) => {
+            const conversationActivity = getConversationActivityState(
+              conversation,
+            );
+            const isLatestConversation = index === 0;
+
+            return (
+              <div
+                key={conversation.id}
+                className={cn(
+                  "flex items-center gap-2 px-2 py-1 rounded-md cursor-pointer transition-colors group",
+                  "hover:bg-accent/50",
+                  selectedConversationId === conversation.id &&
+                    "bg-accent border-l-2 border-primary -ml-0.5 pl-2.5",
+                )}
+                onClick={() => onSelectConversation(conversation)}
+              >
+                <span
+                  className={cn(
+                    "h-1.5 w-1.5 rounded-full flex-shrink-0",
+                    isLatestConversation &&
+                      conversationActivity === "active" &&
+                      "bg-emerald-500",
+                    isLatestConversation &&
+                      conversationActivity === "recent" &&
+                      "bg-amber-500",
+                    (!isLatestConversation ||
+                      conversationActivity === "quiet") &&
+                      "bg-border",
+                  )}
+                />
+                <div className="flex-1 min-w-0">
+                  {editingConversationId === conversation.id ? (
+                    <div
+                      className="space-y-1"
+                      onClick={(e) => e.stopPropagation()}
                     >
-                      {conversation.message_count}
-                    </Badge>
+                      <Input
+                        value={editTitle}
+                        onChange={(e) => onEditTitleChange(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter")
+                            onSaveRename(e, conversation.id);
+                          if (e.key === "Escape") onCancelRename(e);
+                        }}
+                        className="h-5 text-xs py-0 px-1"
+                        placeholder="Title..."
+                        autoFocus
+                      />
+                      <div className="flex items-center gap-1">
+                        <select
+                          value={editLinkedAgentId}
+                          onChange={(e) =>
+                            onEditLinkedAgentIdChange(e.target.value)
+                          }
+                          className="flex-1 h-5 text-[10px] bg-muted border border-border rounded px-1"
+                        >
+                          <option value="">No agent</option>
+                          {agents.map((candidate) => (
+                            <option key={candidate.id} value={candidate.id}>
+                              {agentOptionLabel(candidate)}
+                            </option>
+                          ))}
+                        </select>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-5 w-5"
+                          onClick={(e) => onSaveRename(e, conversation.id)}
+                        >
+                          <Check className="h-3 w-3 text-green-500" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-5 w-5"
+                          onClick={onCancelRename}
+                        >
+                          <X className="h-3 w-3" />
+                        </Button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="min-w-0 flex items-center gap-2">
+                      <span
+                        className={cn(
+                          "text-xs truncate flex-1 min-w-0",
+                          isLatestConversation && "font-medium",
+                        )}
+                      >
+                        {conversation.name ||
+                          conversation.title ||
+                          conversation.id.slice(0, 12)}
+                      </span>
+                      <div className="flex items-center gap-1.5 text-[10px] flex-shrink-0">
+                        <span
+                          className={cn(
+                            conversationActivity === "active" &&
+                              "text-emerald-700 dark:text-emerald-400",
+                            conversationActivity === "recent" &&
+                              "text-amber-700 dark:text-amber-400",
+                            conversationActivity === "quiet" &&
+                              "text-muted-foreground",
+                          )}
+                        >
+                          {formatRelativeTime(
+                            conversation.updated_at || conversation.created_at,
+                          )}
+                        </span>
+                        <Badge
+                          variant="secondary"
+                          className="text-[9px] px-1 py-0 flex-shrink-0"
+                        >
+                          {conversation.message_count}
+                        </Badge>
+                      </div>
+                    </div>
+                  )}
+                </div>
+                {editingConversationId !== conversation.id && (
+                  <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-5 w-5"
+                      onClick={(e) => onStartRename(e, conversation)}
+                      title="Rename"
+                    >
+                      <Pencil className="h-2.5 w-2.5 text-muted-foreground" />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-5 w-5"
+                      onClick={(e) => onDeleteConversation(e, conversation.id)}
+                      title="Delete"
+                    >
+                      <Trash2 className="h-2.5 w-2.5 text-muted-foreground" />
+                    </Button>
                   </div>
                 )}
               </div>
-              {editingConversationId !== conversation.id && (
-                <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-5 w-5"
-                    onClick={(e) => onStartRename(e, conversation)}
-                    title="Rename"
-                  >
-                    <Pencil className="h-2.5 w-2.5 text-muted-foreground" />
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-5 w-5"
-                    onClick={(e) => onDeleteConversation(e, conversation.id)}
-                    title="Delete"
-                  >
-                    <Trash2 className="h-2.5 w-2.5 text-muted-foreground" />
-                  </Button>
-                </div>
-              )}
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
     </div>
@@ -281,12 +397,10 @@ function AgentConversationGroup({
 
 function CompanionFeedRow({
   conversation,
-  agent,
   selected,
   onClick,
 }: {
   conversation: Conversation;
-  agent?: Agent;
   selected: boolean;
   onClick: () => void;
 }) {
@@ -294,7 +408,7 @@ function CompanionFeedRow({
     <button
       type="button"
       className={cn(
-        "w-full text-left flex items-center gap-2 px-2 py-2 rounded-md transition-colors",
+        "w-full text-left flex items-center gap-2 px-2 py-1.5 rounded-md transition-colors",
         "hover:bg-accent/50",
         selected && "bg-accent border-l-2 border-primary",
       )}
@@ -316,13 +430,8 @@ function CompanionFeedRow({
           </Badge>
         </div>
         <div className="text-[10px] text-muted-foreground truncate">
-          {agent
-            ? `${getAgentDisplayName(agent)} · #${shortAgentID(agent.id)} · ${
-                agent.state
-              }`
-            : "Companion chat"}{" "}
-          •{" "}
-          {formatRelativeTime(conversation.updated_at)}
+          No agent link •{" "}
+          {formatRelativeTime(conversation.updated_at || conversation.created_at)}
         </div>
       </div>
     </button>
@@ -346,7 +455,7 @@ function SessionFeedRow({
     <button
       type="button"
       className={cn(
-        "w-full text-left flex items-center gap-2 px-2 py-2 rounded-md transition-colors",
+        "w-full text-left flex items-center gap-2 px-2 py-1.5 rounded-md transition-colors",
         "hover:bg-accent/50",
         selected && "bg-accent border-l-2 border-primary",
       )}
@@ -434,15 +543,54 @@ export function ConversationListSidebar({
   selectedPersistedSessionId,
   onSelectSession,
 }: ConversationListSidebarProps) {
+  const agentGroupsByID = new Map(
+    groupedConversations.agentGroups.map((group) => [group.agent.id, group]),
+  );
+  const activeAgentGroups = agentSections.active
+    .map((agent) => agentGroupsByID.get(agent.id))
+    .filter(
+      (group): group is AgentConversationGroupData =>
+        Boolean(group && group.conversations.length > 0),
+    );
+  const erroredAgentGroups = agentSections.errored
+    .map((agent) => agentGroupsByID.get(agent.id))
+    .filter(
+      (group): group is AgentConversationGroupData =>
+        Boolean(group && group.conversations.length > 0),
+    );
+  const groupedConversationIDs = new Set(
+    groupedConversations.agentGroups.flatMap((group) =>
+      group.conversations.map((conversation) => conversation.id),
+    ),
+  );
+  const unassignedCompanionItems = feedItems.filter(
+    (item) =>
+      item.kind === "companion" &&
+      !groupedConversationIDs.has(item.conversation.id),
+  );
+  const historicalSessionItems = feedItems.filter(
+    (item) => item.kind === "session",
+  );
+  const hiddenAgentCount =
+    agentSections.active.length +
+    agentSections.errored.length -
+    activeAgentGroups.length -
+    erroredAgentGroups.length;
+
   return (
     <div className="w-80 border-r border-border flex flex-col">
-      <div className="p-3 border-b border-border space-y-2">
+      <div className="p-2.5 border-b border-border space-y-2">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             <MessagesSquare className="h-4 w-4" />
-            <h2 className="text-sm font-semibold text-foreground">
-              Conversations
-            </h2>
+            <div className="min-w-0">
+              <h2 className="text-sm font-semibold text-foreground">
+                Companion
+              </h2>
+              <p className="text-[10px] text-muted-foreground">
+                Grouped by agent
+              </p>
+            </div>
           </div>
           <div className="flex items-center gap-1">
             <Button
@@ -450,7 +598,7 @@ export function ConversationListSidebar({
               size="icon"
               onClick={onNewConversation}
               className="h-7 w-7"
-              title="New conversation"
+              title="New agent chat"
             >
               <Plus className="h-4 w-4" />
             </Button>
@@ -471,28 +619,48 @@ export function ConversationListSidebar({
         <div className="relative">
           <Search className="absolute left-2 top-2 h-3.5 w-3.5 text-muted-foreground" />
           <Input
-            placeholder="Search..."
+            placeholder="Search agents or chats..."
             value={searchQuery}
             onChange={(e) => onSearchQueryChange(e.target.value)}
             className="pl-7 h-8 text-sm"
           />
         </div>
+        <div className="flex flex-wrap gap-1.5">
+          <Badge variant="secondary" className="text-[10px]">
+            {groupedConversations.agentGroups.length} agent groups
+          </Badge>
+          {unassignedCompanionItems.length > 0 && (
+            <Badge variant="outline" className="text-[10px]">
+              {unassignedCompanionItems.length} without agent link
+            </Badge>
+          )}
+          {historicalSessionItems.length > 0 && (
+            <Badge variant="outline" className="text-[10px]">
+              {historicalSessionItems.length} historical
+            </Badge>
+          )}
+          {hiddenAgentCount > 0 && (
+            <Badge variant="outline" className="text-[10px]">
+              {hiddenAgentCount} agents without visible chats
+            </Badge>
+          )}
+        </div>
       </div>
 
       <ScrollArea className="flex-1">
-        <div className="p-2 space-y-1">
+        <div className="p-2 space-y-0.5">
           {isLoading ? (
             <div className="text-center py-8 text-muted-foreground">
               <RefreshCw className="h-5 w-5 mx-auto mb-2 animate-spin" />
               <p className="text-xs">Loading...</p>
             </div>
-          ) : agentSections.active.length === 0 &&
-            agentSections.errored.length === 0 &&
+          ) : activeAgentGroups.length === 0 &&
+            erroredAgentGroups.length === 0 &&
             feedItems.length === 0 ? (
             <div className="text-center py-8 text-muted-foreground">
               <Bot className="h-8 w-8 mx-auto mb-2 opacity-40" />
               <p className="text-sm">
-                {searchQuery ? "No matches" : "No agents yet"}
+                {searchQuery ? "No agent groups in this view" : "No agent chats yet"}
               </p>
               <Button
                 variant="outline"
@@ -501,34 +669,29 @@ export function ConversationListSidebar({
                 onClick={onNewConversation}
               >
                 <Plus className="h-3 w-3 mr-1" />
-                New Chat
+                New Agent Chat
               </Button>
             </div>
           ) : (
             <>
-              {agentSections.active.length > 0 && (
+              {activeAgentGroups.length > 0 && (
                 <CollapsibleSection
-                  title="Active"
+                  title="Active Agent Groups"
                   icon={<Play className="h-3.5 w-3.5" />}
                   defaultOpen
-                  badge={String(agentSections.active.length)}
+                  badge={String(activeAgentGroups.length)}
                 >
-                  <div className="space-y-1">
-                    {agentSections.active.map((agent) => (
+                  <div className="space-y-0.5">
+                    {activeAgentGroups.map((group) => (
                       <AgentConversationGroup
-                        key={agent.id}
-                        agent={agent}
-                        conversations={
-                          groupedConversations.agentGroups.find(
-                            (group) => group.agent.id === agent.id,
-                          )?.conversations || []
-                        }
-                        isExpanded={expandedAgents.has(agent.id)}
-                        hasSelectedConversation={(
-                          groupedConversations.agentGroups.find(
-                            (group) => group.agent.id === agent.id,
-                          )?.conversations || []
-                        ).some((conversation) => conversation.id === selectedConversationId)}
+                        key={group.agent.id}
+                        agent={group.agent}
+                        conversations={group.conversations}
+                        isExpanded={expandedAgents.has(group.agent.id)}
+                        hasSelectedConversation={group.conversations.some(
+                          (conversation) =>
+                            conversation.id === selectedConversationId,
+                        )}
                         selectedConversationId={selectedConversationId}
                         agents={linkableAgents}
                         editingConversationId={editingConversationId}
@@ -550,29 +713,24 @@ export function ConversationListSidebar({
                 </CollapsibleSection>
               )}
 
-              {agentSections.errored.length > 0 && (
+              {erroredAgentGroups.length > 0 && (
                 <CollapsibleSection
-                  title="Errors"
+                  title="Error-State Agent Groups"
                   icon={<Bug className="h-3.5 w-3.5" />}
                   defaultOpen
-                  badge={String(agentSections.errored.length)}
+                  badge={String(erroredAgentGroups.length)}
                 >
-                  <div className="space-y-1">
-                    {agentSections.errored.map((agent) => (
+                  <div className="space-y-0.5">
+                    {erroredAgentGroups.map((group) => (
                       <AgentConversationGroup
-                        key={agent.id}
-                        agent={agent}
-                        conversations={
-                          groupedConversations.agentGroups.find(
-                            (group) => group.agent.id === agent.id,
-                          )?.conversations || []
-                        }
-                        isExpanded={expandedAgents.has(agent.id)}
-                        hasSelectedConversation={(
-                          groupedConversations.agentGroups.find(
-                            (group) => group.agent.id === agent.id,
-                          )?.conversations || []
-                        ).some((conversation) => conversation.id === selectedConversationId)}
+                        key={group.agent.id}
+                        agent={group.agent}
+                        conversations={group.conversations}
+                        isExpanded={expandedAgents.has(group.agent.id)}
+                        hasSelectedConversation={group.conversations.some(
+                          (conversation) =>
+                            conversation.id === selectedConversationId,
+                        )}
                         selectedConversationId={selectedConversationId}
                         agents={linkableAgents}
                         editingConversationId={editingConversationId}
@@ -595,37 +753,53 @@ export function ConversationListSidebar({
               )}
 
               <CollapsibleSection
-                title="All Conversations"
+                title="Unassigned / No Agent Link"
                 icon={<MessagesSquare className="h-3.5 w-3.5" />}
-                defaultOpen
-                badge={String(feedItems.length)}
+                defaultOpen={unassignedCompanionItems.length > 0}
+                badge={String(unassignedCompanionItems.length)}
               >
-                <div className="space-y-1">
-                  {feedItems.length === 0 ? (
+                <div className="space-y-0.5">
+                  {unassignedCompanionItems.length === 0 ? (
                     <div className="px-2 py-2 text-xs text-muted-foreground">
                       {searchQuery
-                        ? "No matching conversations"
-                        : "No conversations with messages yet"}
+                        ? "No unassigned chats in this view"
+                        : "No chats without an agent link in this view"}
                     </div>
                   ) : (
-                    feedItems.map((item) =>
-                      item.kind === "companion" ? (
-                        <CompanionFeedRow
-                          key={`companion-${item.conversation.id}`}
-                          conversation={item.conversation}
-                          agent={item.agent}
-                          selected={selectedConversationId === item.conversation.id}
-                          onClick={() => onSelectConversation(item.conversation)}
-                        />
-                      ) : (
-                        <SessionFeedRow
-                          key={`session-${item.session.id}`}
-                          session={item.session}
-                          selected={selectedPersistedSessionId === item.session.id}
-                          onClick={() => onSelectSession(item.session)}
-                        />
-                      ),
-                    )
+                    unassignedCompanionItems.map((item) => (
+                      <CompanionFeedRow
+                        key={`companion-${item.conversation.id}`}
+                        conversation={item.conversation}
+                        selected={selectedConversationId === item.conversation.id}
+                        onClick={() => onSelectConversation(item.conversation)}
+                      />
+                    ))
+                  )}
+                </div>
+              </CollapsibleSection>
+
+              <CollapsibleSection
+                title="Historical Sessions"
+                icon={<FileText className="h-3.5 w-3.5" />}
+                defaultOpen={historicalSessionItems.length > 0}
+                badge={String(historicalSessionItems.length)}
+              >
+                <div className="space-y-0.5">
+                  {historicalSessionItems.length === 0 ? (
+                    <div className="px-2 py-2 text-xs text-muted-foreground">
+                      {searchQuery
+                        ? "No historical sessions in this view"
+                        : "No historical sessions in this view"}
+                    </div>
+                  ) : (
+                    historicalSessionItems.map((item) => (
+                      <SessionFeedRow
+                        key={`session-${item.session.id}`}
+                        session={item.session}
+                        selected={selectedPersistedSessionId === item.session.id}
+                        onClick={() => onSelectSession(item.session)}
+                      />
+                    ))
                   )}
                 </div>
               </CollapsibleSection>

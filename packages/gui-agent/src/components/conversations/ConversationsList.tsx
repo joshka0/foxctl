@@ -245,8 +245,8 @@ export function ConversationsList() {
   }, [agents]);
 
   const filteredConversations = useMemo(
-    () => filterConversationsBySearch(conversations, searchQuery),
-    [conversations, searchQuery],
+    () => filterConversationsBySearch(conversations, searchQuery, agents),
+    [conversations, searchQuery, agents],
   );
 
   const groupedConversations = useMemo(

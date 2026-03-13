@@ -41,6 +41,36 @@ export interface AgentSections {
 
 export const shortAgentID = (id: string) => id.slice(0, 8);
 
+function conversationSortTimestamp(conversation: Conversation): number {
+  return (
+    Date.parse(conversation.updated_at || "") ||
+    Date.parse(conversation.created_at || "") ||
+    0
+  );
+}
+
+function matchesConversationSearch(
+  conversation: Conversation,
+  searchQuery: string,
+  agents: Agent[],
+): boolean {
+  if (!searchQuery) return true;
+
+  const lower = searchQuery.trim().toLowerCase();
+  const matchedAgent = matchAgentToConversation(conversation, agents);
+  const values = [
+    conversation.id,
+    conversation.title,
+    conversation.name,
+    matchedAgent ? getAgentDisplayName(matchedAgent) : undefined,
+    matchedAgent?.slug,
+    matchedAgent?.role,
+    matchedAgent?.state,
+  ];
+
+  return values.some((value) => (value || "").toLowerCase().includes(lower));
+}
+
 export function agentOptionLabel(agent: Agent): string {
   return `${getAgentDisplayName(agent)} · #${shortAgentID(agent.id)} · ${
     agent.role || "agent"
@@ -50,13 +80,10 @@ export function agentOptionLabel(agent: Agent): string {
 export function filterConversationsBySearch(
   conversations: Conversation[],
   searchQuery: string,
+  agents: Agent[],
 ): Conversation[] {
-  if (!searchQuery) return conversations;
-  const lower = searchQuery.toLowerCase();
-  return conversations.filter(
-    (conversation) =>
-      conversation.id.toLowerCase().includes(lower) ||
-      conversation.title?.toLowerCase().includes(lower),
+  return conversations.filter((conversation) =>
+    matchesConversationSearch(conversation, searchQuery, agents),
   );
 }
 
@@ -113,8 +140,28 @@ export function buildGroupedConversations(params: {
     agentGroups.get(matchedAgent.id)!.conversations.push(conversation);
   }
 
+  const sortedGroups = Array.from(agentGroups.values())
+    .map((group) => ({
+      ...group,
+      conversations: [...group.conversations].sort(
+        (left, right) =>
+          conversationSortTimestamp(right) - conversationSortTimestamp(left),
+      ),
+    }))
+    .sort((left, right) => {
+      const leftLatest = left.conversations[0];
+      const rightLatest = right.conversations[0];
+      const byRecent =
+        conversationSortTimestamp(rightLatest) -
+        conversationSortTimestamp(leftLatest);
+      if (byRecent !== 0) return byRecent;
+      return getAgentDisplayName(left.agent).localeCompare(
+        getAgentDisplayName(right.agent),
+      );
+    });
+
   return {
-    agentGroups: Array.from(agentGroups.values()),
+    agentGroups: sortedGroups,
   };
 }
 
@@ -160,14 +207,7 @@ export function buildFeedItems(params: {
   for (const conversation of conversations) {
     if (conversation.message_count <= 0) continue;
     const agent = matchAgentToConversation(conversation, agents) || undefined;
-    if (
-      !matchesQuery(
-        conversation.id,
-        conversation.name,
-        conversation.title,
-        agent ? getAgentDisplayName(agent) : undefined,
-      )
-    ) {
+    if (!matchesConversationSearch(conversation, searchQuery, agents)) {
       continue;
     }
     items.push({
