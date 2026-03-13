@@ -27,15 +27,12 @@ import {
   askAgentStream,
   cancelAgentStream,
   companionChat,
-  compressAgentMemory,
   createRoom,
   getAgent,
   getAgentRuntime,
   getCompanionConversationMessages,
-  getCompanionMemoryContext,
   getCompanionMemoryStats,
   getRoom,
-  getSessionMessages,
   listAgents,
   listCompanionConversations,
   listPersistedSessions,
@@ -47,7 +44,6 @@ import {
   type CompanionMemoryStats,
   type ConsoleMessage,
   type PersistedSession,
-  type SessionMessage,
 } from "@/api/client";
 import type {
   Agent,
@@ -221,24 +217,6 @@ function recommendedMemoryScopeForRetention(
   return retention === "task" || retention === "ephemeral"
     ? "session"
     : "agent";
-}
-
-function defaultDistillForRetention(retention: MemoryRetention): boolean {
-  return retention !== "task" && retention !== "ephemeral";
-}
-
-function describeMemoryRetention(retention: MemoryRetention): string {
-  switch (retention) {
-    case "companion":
-      return "Long-lived layered memory for companion-style agents.";
-    case "task":
-      return "Task-scoped memory that stays useful for a unit of work.";
-    case "ephemeral":
-      return "Scratch memory with minimal persistence.";
-    case "durable":
-    default:
-      return "Stable memory for long-running agents without companion semantics.";
-  }
 }
 
 function collectSubtreeAgents(agents: Agent[], rootID: string): Agent[] {
@@ -444,19 +422,6 @@ function filterPersistedSessions(
       return false;
     })
     .sort((a, b) => Date.parse(b.started_at) - Date.parse(a.started_at));
-}
-
-function sessionMessageSummary(message: SessionMessage): string {
-  const summary = (message.summary || "").trim();
-  if (summary) return summary;
-  if (message.error) return `Error: ${message.error}`;
-  const content = message.message?.content;
-  if (typeof content === "string" && content.trim()) return content;
-  if (content !== undefined) return JSON.stringify(content);
-  if (message.tool_calls && message.tool_calls.length > 0) {
-    return `Used ${message.tool_calls.length} tool${message.tool_calls.length > 1 ? "s" : ""}`;
-  }
-  return message.type || "message";
 }
 
 function MemoryStat({
@@ -728,29 +693,14 @@ export function AgentDetailView({ agent, onBack }: AgentDetailViewProps) {
   const eventSourceRef = useRef<EventSource | null>(null);
   const [messages, setMessages] = useState<ConsoleMessage[]>([]);
   const [messageError, setMessageError] = useState<string | null>(null);
-  const [showMemoryContext, setShowMemoryContext] = useState(false);
-  const [memoryContext, setMemoryContext] = useState("");
-  const [memoryContextError, setMemoryContextError] = useState<string | null>(
-    null,
-  );
-  const [memoryContextLoading, setMemoryContextLoading] = useState(false);
-  const [selectedSessionID, setSelectedSessionID] = useState<string | null>(
-    null,
-  );
   const [chatSending, setChatSending] = useState(false);
   const [chatStatus, setChatStatus] = useState<string | null>(null);
-  const [compressing, setCompressing] = useState(false);
   const [activeCorrelationID, setActiveCorrelationID] = useState<string | null>(
     null,
   );
   const [sessionConversationID, setSessionConversationID] = useState(() =>
     loadSessionConversationID(agent.id),
   );
-  const [memoryScopeDraft, setMemoryScopeDraft] = useState<MemoryScope>(
-    normalizeMemoryScope(agent.memory_scope),
-  );
-  const [memoryRetentionDraft, setMemoryRetentionDraft] =
-    useState<MemoryRetention>(normalizeMemoryRetention(agent.memory_retention));
   const [controlRoomBusyAgentID, setControlRoomBusyAgentID] = useState<
     string | null
   >(null);
@@ -952,25 +902,6 @@ export function AgentDetailView({ agent, onBack }: AgentDetailViewProps) {
     [activeAgent, persistedSessionsData?.sessions],
   );
 
-  useEffect(() => {
-    setSelectedSessionID((current) => {
-      if (
-        current &&
-        persistedSessions.some((session) => session.id === current)
-      ) {
-        return current;
-      }
-      return persistedSessions[0]?.id || null;
-    });
-  }, [persistedSessions]);
-
-  const selectedSession = useMemo(
-    () =>
-      persistedSessions.find((session) => session.id === selectedSessionID) ||
-      null,
-    [persistedSessions, selectedSessionID],
-  );
-
   const agentRoomsQuery = useQuery({
     queryKey: ["agent-rooms", roomWorkspacePath, activeAgent.id],
     enabled: !!roomWorkspacePath,
@@ -987,12 +918,6 @@ export function AgentDetailView({ agent, onBack }: AgentDetailViewProps) {
       );
     },
     staleTime: 5000,
-  });
-
-  const { data: selectedSessionMessagesData } = useQuery({
-    queryKey: ["persisted-session-messages", selectedSessionID],
-    queryFn: () => getSessionMessages(selectedSessionID!, { limit: 40 }),
-    enabled: !!selectedSessionID,
   });
 
   const {
@@ -1026,32 +951,7 @@ export function AgentDetailView({ agent, onBack }: AgentDetailViewProps) {
     setMessages(conversationMessages || []);
     setMessageError(null);
     setChatStatus(null);
-    setShowMemoryContext(false);
-    setMemoryContext("");
-    setMemoryContextError(null);
   }, [activeAgent.id, conversationID, conversationMessages]);
-
-  const loadMemoryContext = useCallback(
-    async (force = false) => {
-      if (!force && memoryContextLoading) return;
-      if (!force && memoryContext) return;
-      setMemoryContextLoading(true);
-      setMemoryContextError(null);
-      try {
-        const data = await getCompanionMemoryContext(conversationID);
-        setMemoryContext(data.context || "");
-      } catch (err) {
-        setMemoryContextError(
-          err instanceof Error
-            ? err.message
-            : "Failed to load layered memory context",
-        );
-      } finally {
-        setMemoryContextLoading(false);
-      }
-    },
-    [conversationID, memoryContext, memoryContextLoading],
-  );
 
   const adoptConversationID = useCallback(
     async (nextConversationID: string, persistAgentLink = false) => {
@@ -1204,12 +1104,7 @@ export function AgentDetailView({ agent, onBack }: AgentDetailViewProps) {
           queryClient.invalidateQueries({
             queryKey: ["agent", activeAgent.id],
           }),
-        ]).then(async () => {
-          if (showMemoryContext) {
-            setMemoryContext("");
-            await loadMemoryContext(true);
-          }
-        });
+        ]);
         return;
       }
       if (event.phase === "cancelled") {
@@ -1248,61 +1143,11 @@ export function AgentDetailView({ agent, onBack }: AgentDetailViewProps) {
     conversationExplicit,
     controlRoomID,
     queryClient,
-    loadMemoryContext,
     refetchConversation,
     refetchMemoryStats,
     refetchRuntime,
-    showMemoryContext,
     roomWorkspacePath,
   ]);
-
-  const memoryScopeMutation = useMutation({
-    mutationFn: async (scope: MemoryScope) =>
-      patchAgent(activeAgent.id, { memory_scope: scope }),
-    onSuccess: async ({ agent: updated }) => {
-      const scope = normalizeMemoryScope(updated.memory_scope);
-      setMemoryScopeDraft(scope);
-      setChatStatus(
-        scope === "session"
-          ? "Agent workbench now uses detached session memory"
-          : "Agent workbench now uses stable agent memory",
-      );
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ["agents"] }),
-        queryClient.invalidateQueries({ queryKey: ["agent", activeAgent.id] }),
-      ]);
-    },
-    onError: (error) => {
-      setMemoryScopeDraft(activeMemoryScope);
-      setMemoryContextError(
-        error instanceof Error
-          ? error.message
-          : "Failed to update memory scope",
-      );
-    },
-  });
-
-  const memoryRetentionMutation = useMutation({
-    mutationFn: async (retention: MemoryRetention) =>
-      patchAgent(activeAgent.id, { memory_retention: retention }),
-    onSuccess: async ({ agent: updated }) => {
-      const retention = normalizeMemoryRetention(updated.memory_retention);
-      setMemoryRetentionDraft(retention);
-      setChatStatus(`Agent memory retention is now ${retention}`);
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ["agents"] }),
-        queryClient.invalidateQueries({ queryKey: ["agent", activeAgent.id] }),
-      ]);
-    },
-    onError: (error) => {
-      setMemoryRetentionDraft(activeMemoryRetention);
-      setMemoryContextError(
-        error instanceof Error
-          ? error.message
-          : "Failed to update memory retention",
-      );
-    },
-  });
 
   const spawnChildMutation = useMutation({
     mutationFn: async () => {
@@ -1540,66 +1385,16 @@ export function AgentDetailView({ agent, onBack }: AgentDetailViewProps) {
     }
   };
 
-  const handleCompressMemory = async () => {
-    if (compressing) return;
-    setCompressing(true);
-    setMemoryContextError(null);
-    try {
-      await ensureConversationLink();
-      const result = await compressAgentMemory(activeAgent.id, {
-        conversation_id: conversationID,
-        distill: defaultDistillForRetention(activeMemoryRetention),
-      });
-      await refetchMemoryStats();
-      if (showMemoryContext) {
-        setMemoryContext("");
-        await loadMemoryContext(true);
-      }
-      setChatStatus(
-        result.distilled
-          ? "Agent memory compressed, distilled, and refreshed"
-          : "Agent memory compressed and refreshed",
-      );
-    } catch (err) {
-      setMemoryContextError(
-        err instanceof Error ? err.message : "Failed to compress memory",
-      );
-    } finally {
-      setCompressing(false);
-    }
-  };
-
   const handleOpenGlobalConversation = () => {
     setSelectedConversationID(conversationID);
     setActiveView("companion");
   };
 
-  const handleApplyMemoryScope = async () => {
-    if (memoryScopeDraft === activeMemoryScope || memoryScopeMutation.isPending)
-      return;
-    setMemoryContextError(null);
-    try {
-      await memoryScopeMutation.mutateAsync(memoryScopeDraft);
-    } catch {
-      // Error state is handled by the mutation callbacks.
-    }
+  const handleOpenCompanionHistory = () => {
+    setSelectedConversationID(null);
+    setActiveView("companion");
   };
 
-  const handleApplyMemoryRetention = async () => {
-    if (
-      memoryRetentionDraft === activeMemoryRetention ||
-      memoryRetentionMutation.isPending
-    )
-      return;
-    setMemoryContextError(null);
-    try {
-      await memoryRetentionMutation.mutateAsync(memoryRetentionDraft);
-    } catch {
-      // Error state is handled by the mutation callbacks.
-    }
-  };
-
-  const selectedSessionMessages = selectedSessionMessagesData?.messages || [];
   const currentSession = daemonSessions[0];
 
   return (
@@ -2374,8 +2169,8 @@ export function AgentDetailView({ agent, onBack }: AgentDetailViewProps) {
                   <div>
                     <CardTitle className="text-sm">Layered Memory</CardTitle>
                     <CardDescription>
-                      L0/L1/L2 context, summary coverage, and compaction
-                      controls.
+                      Summary only. Detailed memory controls live in the
+                      Companion surface.
                     </CardDescription>
                   </div>
                   <Layers className="h-4 w-4 text-muted-foreground" />
@@ -2416,141 +2211,53 @@ export function AgentDetailView({ agent, onBack }: AgentDetailViewProps) {
                   <div className="flex items-center justify-between gap-3">
                     <div>
                       <div className="text-[11px] uppercase tracking-wider text-muted-foreground">
-                        Workbench Memory Policy
+                        Current Policy
                       </div>
                       <div className="mt-1 text-xs text-muted-foreground">
-                        Retention presets shape how long memory should live.
-                        Lineage scope stays explicitly overridable.
+                        Workbench memory currently follows the agent-level
+                        retention and lineage policy shown below.
                       </div>
                     </div>
                     <Badge variant="outline" className="text-[10px]">
                       {activeMemoryRetention}
                     </Badge>
                   </div>
-                  <div className="flex items-center gap-2">
-                    <select
-                      value={memoryRetentionDraft}
-                      onChange={(e) => {
-                        const retention = normalizeMemoryRetention(
-                          e.target.value,
-                        );
-                        setMemoryRetentionDraft(retention);
-                        setMemoryScopeDraft(
-                          recommendedMemoryScopeForRetention(retention),
-                        );
-                      }}
-                      className="h-9 flex-1 rounded-md border border-input bg-background px-3 text-sm"
-                      disabled={memoryRetentionMutation.isPending}
-                    >
-                      <option value="companion">companion</option>
-                      <option value="durable">durable</option>
-                      <option value="task">task</option>
-                      <option value="ephemeral">ephemeral</option>
-                    </select>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      onClick={() => void handleApplyMemoryRetention()}
-                      disabled={
-                        memoryRetentionMutation.isPending ||
-                        memoryRetentionDraft === activeMemoryRetention
-                      }
-                    >
-                      Apply
-                    </Button>
-                  </div>
-                  <div className="text-[11px] text-muted-foreground">
-                    {describeMemoryRetention(memoryRetentionDraft)}
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <select
-                      value={memoryScopeDraft}
-                      onChange={(e) =>
-                        setMemoryScopeDraft(
-                          e.target.value === "session" ? "session" : "agent",
-                        )
-                      }
-                      className="h-9 flex-1 rounded-md border border-input bg-background px-3 text-sm"
-                      disabled={memoryScopeMutation.isPending}
-                    >
-                      <option value="agent">agent</option>
-                      <option value="session">session</option>
-                    </select>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      onClick={() => void handleApplyMemoryScope()}
-                      disabled={
-                        memoryScopeMutation.isPending ||
-                        memoryScopeDraft === activeMemoryScope
-                      }
-                    >
-                      Apply
-                    </Button>
+                  <div className="grid gap-1 text-[11px] text-muted-foreground">
+                    <div>
+                      retention <code>{activeMemoryRetention}</code>
+                    </div>
+                    <div>
+                      lineage{" "}
+                      <code>
+                        {activeMemoryScope === "session"
+                          ? "session"
+                          : conversationExplicit
+                            ? "explicit"
+                            : "implicit"}
+                      </code>
+                    </div>
+                    {memoryStats?.last_summarized_date && (
+                      <div>
+                        last summarized <code>{memoryStats.last_summarized_date}</code>
+                      </div>
+                    )}
                   </div>
                 </div>
                 <div className="flex flex-wrap gap-2">
                   <Button
+                    type="button"
                     variant="outline"
                     size="sm"
-                    onClick={() => {
-                      if (showMemoryContext) {
-                        setShowMemoryContext(false);
-                        return;
-                      }
-                      setShowMemoryContext(true);
-                      void loadMemoryContext();
-                    }}
+                    onClick={handleOpenGlobalConversation}
                   >
                     <Brain className="h-4 w-4" />
-                    {showMemoryContext ? "Hide Context" : "Show Context"}
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => void loadMemoryContext(true)}
-                    disabled={memoryContextLoading}
-                  >
-                    <RefreshCw
-                      className={cn(
-                        "h-4 w-4",
-                        memoryContextLoading && "animate-spin",
-                      )}
-                    />
-                    Refresh
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => void handleCompressMemory()}
-                    disabled={compressing}
-                  >
-                    <Sparkles
-                      className={cn("h-4 w-4", compressing && "animate-pulse")}
-                    />
-                    Compress
+                    Open In Companion
                   </Button>
                 </div>
-                {(memoryContextError || showMemoryContext) && (
-                  <div className="rounded-lg border border-border bg-background/60 p-3">
-                    {memoryContextError ? (
-                      <div className="text-xs text-destructive">
-                        {memoryContextError}
-                      </div>
-                    ) : memoryContextLoading ? (
-                      <div className="text-xs text-muted-foreground">
-                        Loading layered memory context...
-                      </div>
-                    ) : (
-                      <pre className="max-h-[420px] whitespace-pre-wrap text-xs text-muted-foreground">
-                        {memoryContext ||
-                          "No layered memory context has been materialized yet."}
-                      </pre>
-                    )}
-                  </div>
-                )}
+                <div className="rounded-lg border border-dashed border-border px-3 py-2 text-xs text-muted-foreground">
+                  Layered memory inspection, policy changes, and compaction now
+                  belong in the Companion surface, not in this detail view.
+                </div>
               </CardContent>
             </Card>
 
@@ -2650,7 +2357,8 @@ export function AgentDetailView({ agent, onBack }: AgentDetailViewProps) {
                       Persisted Sessions
                     </CardTitle>
                     <CardDescription>
-                      Durable session history tied to this agent and workspace.
+                      Summary only. Full archive browsing lives in the
+                      Companion surface.
                     </CardDescription>
                   </div>
                   <FileText className="h-4 w-4 text-muted-foreground" />
@@ -2659,129 +2367,56 @@ export function AgentDetailView({ agent, onBack }: AgentDetailViewProps) {
               <CardContent className="space-y-3">
                 {persistedSessions.length > 0 ? (
                   <>
-                    <div className="space-y-2">
-                      {persistedSessions.slice(0, 6).map((session) => (
-                        <button
-                          key={session.id}
-                          type="button"
-                          onClick={() => setSelectedSessionID(session.id)}
-                          className={cn(
-                            "flex w-full items-start justify-between gap-3 rounded-lg border px-3 py-2 text-left transition-colors",
-                            selectedSessionID === session.id
-                              ? "border-primary bg-primary/5"
-                              : "border-border bg-background/60 hover:bg-accent/40",
-                          )}
-                        >
-                          <div className="min-w-0">
-                            <div className="truncate text-sm font-medium text-foreground">
-                              {session.id}
-                            </div>
-                            <div className="truncate text-xs text-muted-foreground">
-                              {formatRelativeTime(session.started_at)} ·{" "}
-                              {session.message_count} messages ·{" "}
-                              {session.total_tokens} tokens
-                            </div>
+                    <div className="rounded-lg border border-border bg-background/60 p-3 space-y-3">
+                      <div className="flex items-center justify-between gap-3">
+                        <div>
+                          <div className="text-[11px] uppercase tracking-wider text-muted-foreground">
+                            Recent History
                           </div>
-                          <Badge variant="outline">{session.status}</Badge>
-                        </button>
-                      ))}
-                    </div>
-
-                    {selectedSession && (
-                      <div className="rounded-lg border border-border bg-background/60 p-3">
-                        <div className="flex items-center justify-between gap-3">
-                          <div className="min-w-0">
-                            <div className="truncate text-sm font-medium text-foreground">
-                              Session Detail
-                            </div>
-                            <div className="text-xs text-muted-foreground">
-                              {selectedSession.agent_type ||
-                                activeAgent.role ||
-                                "agent"}{" "}
-                              · {selectedSession.status}
-                            </div>
+                          <div className="mt-1 text-xs text-muted-foreground">
+                            {persistedSessions.length} persisted sessions tied
+                            to this agent or role.
                           </div>
-                          <Badge variant="secondary" className="text-[10px]">
-                            {selectedSession.user_turns} user turns
-                          </Badge>
                         </div>
-                        <div className="mt-3 space-y-2 text-xs text-muted-foreground">
-                          {selectedSession.summary && (
-                            <div>
-                              <div className="mb-1 text-[11px] uppercase tracking-wider">
-                                Summary
-                              </div>
-                              <div>{selectedSession.summary}</div>
-                            </div>
-                          )}
-                          {selectedSession.decisions &&
-                            selectedSession.decisions.length > 0 && (
-                              <div>
-                                <div className="mb-1 text-[11px] uppercase tracking-wider">
-                                  Decisions
-                                </div>
-                                <ul className="space-y-1">
-                                  {selectedSession.decisions
-                                    .slice(0, 4)
-                                    .map((item) => (
-                                      <li
-                                        key={item}
-                                        className="rounded bg-background/70 px-2 py-1"
-                                      >
-                                        {item}
-                                      </li>
-                                    ))}
-                                </ul>
-                              </div>
-                            )}
-                          {selectedSession.gotchas &&
-                            selectedSession.gotchas.length > 0 && (
-                              <div>
-                                <div className="mb-1 text-[11px] uppercase tracking-wider">
-                                  Gotchas
-                                </div>
-                                <ul className="space-y-1">
-                                  {selectedSession.gotchas
-                                    .slice(0, 4)
-                                    .map((item) => (
-                                      <li
-                                        key={item}
-                                        className="rounded bg-background/70 px-2 py-1"
-                                      >
-                                        {item}
-                                      </li>
-                                    ))}
-                                </ul>
-                              </div>
-                            )}
-                          {selectedSessionMessages.length > 0 && (
-                            <div>
-                              <div className="mb-1 text-[11px] uppercase tracking-wider">
-                                Recent Transcript
-                              </div>
-                              <div className="space-y-1">
-                                {selectedSessionMessages
-                                  .slice(-6)
-                                  .map((message) => (
-                                    <div
-                                      key={`${selectedSession.id}-${message.index}`}
-                                      className="rounded bg-background/70 px-2 py-1"
-                                    >
-                                      <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
-                                        {message.type} ·{" "}
-                                        {formatRelativeTime(message.timestamp)}
-                                      </div>
-                                      <div className="mt-1 line-clamp-3 text-xs text-foreground">
-                                        {sessionMessageSummary(message)}
-                                      </div>
-                                    </div>
-                                  ))}
-                              </div>
-                            </div>
-                          )}
-                        </div>
+                        <Badge variant="outline" className="text-[10px]">
+                          {persistedSessions.length}
+                        </Badge>
                       </div>
-                    )}
+
+                      {persistedSessions[0] && (
+                        <div className="space-y-2 text-xs text-muted-foreground">
+                          <div>
+                            latest{" "}
+                            <code>{formatRelativeTime(persistedSessions[0].started_at)}</code>
+                          </div>
+                          <div>
+                            status <code>{persistedSessions[0].status}</code> ·{" "}
+                            {persistedSessions[0].message_count} messages
+                          </div>
+                          {persistedSessions[0].summary && (
+                            <div className="rounded bg-background/70 px-2 py-2 text-foreground">
+                              {persistedSessions[0].summary}
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={handleOpenCompanionHistory}
+                      >
+                        <FileText className="h-4 w-4" />
+                        Open History In Companion
+                      </Button>
+                    </div>
+                    <div className="rounded-lg border border-dashed border-border px-3 py-2 text-xs text-muted-foreground">
+                      Detailed session history, transcript browsing, and
+                      follow-up continuation now belong in the Companion
+                      surface.
+                    </div>
                   </>
                 ) : (
                   <div className="rounded-lg border border-dashed border-border px-3 py-2 text-xs text-muted-foreground">

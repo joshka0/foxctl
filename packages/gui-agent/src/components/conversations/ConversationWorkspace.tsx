@@ -25,6 +25,7 @@ import {
   PanelRightClose,
   PanelRightOpen,
   Play,
+  Plus,
   RefreshCw,
   Settings2,
   Sparkles,

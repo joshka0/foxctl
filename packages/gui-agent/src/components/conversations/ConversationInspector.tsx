@@ -12,7 +12,6 @@ import type {
   CompanionCompressionResult,
   CompanionMemoryStats,
   ConsoleMessage,
-  ConsoleSession,
   ConversationSettings,
   ConversationSettingsPatch,
   PersonalityInfo,
@@ -22,10 +21,7 @@ import type { Conversation } from "@/lib/conversation-list-models";
 import type { ContextInfo, ExecMode } from "@/components/conversations/types";
 import { useAgentOperations } from "@/hooks/useAgentOperations";
 import { cn, formatRelativeTime } from "@/lib/utils";
-import {
-  getAgentDisplayName,
-  getRoleIcon,
-} from "@/lib/agent-utils";
+import { getAgentDisplayName, getRoleIcon } from "@/lib/agent-utils";
 import {
   PROVIDERS,
   getModelsForProvider,
@@ -62,10 +58,13 @@ interface ConversationInspectorProps {
   onAgentSectionOpenChange: (open: boolean) => void;
   agentOps: ReturnType<typeof useAgentOperations>;
   chatModelDisplay: string;
-  session: ConsoleSession | null;
   conversationSettings: ConversationSettings | null;
   defaultProvider: string;
-  linkedAgent: { llm_provider?: string; llm_model?: string; exec_mode?: string } | null;
+  linkedAgent: {
+    llm_provider?: string;
+    llm_model?: string;
+    exec_mode?: string;
+  } | null;
   providerAvailability: Map<string, boolean>;
   selectedProvider: string;
   setSelectedProvider: React.Dispatch<React.SetStateAction<string>>;
@@ -95,7 +94,9 @@ interface ConversationInspectorProps {
   setToolModel: React.Dispatch<React.SetStateAction<string>>;
   responseModel: string;
   setResponseModel: React.Dispatch<React.SetStateAction<string>>;
-  patchConversationSettings: (patch: ConversationSettingsPatch) => Promise<void>;
+  patchConversationSettings: (
+    patch: ConversationSettingsPatch,
+  ) => Promise<void>;
   toolsAllowDraft: string[];
   setToolsAllowDraft: React.Dispatch<React.SetStateAction<string[]>>;
   settingsError: string | null;
@@ -124,7 +125,6 @@ export function ConversationInspector({
   onAgentSectionOpenChange,
   agentOps,
   chatModelDisplay,
-  session,
   conversationSettings,
   defaultProvider,
   linkedAgent,
@@ -354,9 +354,7 @@ export function ConversationInspector({
                     <Activity className="h-3 w-3" />
                     <span className="text-[10px]">Sessions</span>
                   </div>
-                  <p className="text-xs font-medium">
-                    {agentOps.sessions.length}
-                  </p>
+                  <p className="text-xs font-medium">{agentOps.sessions.length}</p>
                 </div>
                 <div className="bg-muted/30 rounded-md p-2">
                   <div className="flex items-center gap-1.5 text-muted-foreground mb-0.5">
@@ -376,24 +374,24 @@ export function ConversationInspector({
                   <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">
                     Active Sessions
                   </span>
-                  {agentOps.sessions.slice(0, 5).map((sess: AgentSession) => (
-                    <Card key={sess.session_id} className="p-2 bg-muted/30">
+                  {agentOps.sessions.slice(0, 5).map((session: AgentSession) => (
+                    <Card key={session.session_id} className="p-2 bg-muted/30">
                       <div className="flex items-center justify-between mb-0.5">
                         <span className="text-[10px] font-mono text-muted-foreground">
-                          {sess.session_id.slice(0, 12)}...
+                          {session.session_id.slice(0, 12)}...
                         </span>
                         <Badge
                           variant={
-                            sess.status === "running" ? "default" : "outline"
+                            session.status === "running" ? "default" : "outline"
                           }
                           className="text-[9px]"
                         >
-                          {sess.status}
+                          {session.status}
                         </Badge>
                       </div>
                       <div className="flex items-center gap-3 text-[10px] text-muted-foreground">
-                        <span>Iters: {sess.iterations || 0}</span>
-                        <span>{sess.role}</span>
+                        <span>Iters: {session.iterations || 0}</span>
+                        <span>{session.role}</span>
                       </div>
                     </Card>
                   ))}
@@ -417,7 +415,6 @@ export function ConversationInspector({
               Settings saved {formatRelativeTime(conversationSettings.updated_at)}
             </div>
           )}
-
           <div className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider mb-1">
             Chat
           </div>
@@ -432,7 +429,9 @@ export function ConversationInspector({
                 setCustomModel("");
 
                 const nextModel =
-                  nextProvider === "openrouter" ? "google/gemini-3.1-flash-lite-preview" : "";
+                  nextProvider === "openrouter"
+                    ? "google/gemini-3.1-flash-lite-preview"
+                    : "";
                 setSelectedModel(nextModel);
                 void patchConversationSettings({
                   llm_provider: nextProvider,
@@ -474,9 +473,7 @@ export function ConversationInspector({
                     setCustomModelEnabled(false);
                     setCustomModel("");
                     setSelectedModel(nextModel);
-                    void patchConversationSettings({
-                      llm_model: nextModel,
-                    });
+                    void patchConversationSettings({ llm_model: nextModel });
                   }}
                   className="text-xs bg-muted border border-border rounded-md px-2 py-1 font-mono focus:outline-none focus:ring-1 focus:ring-ring max-w-[160px]"
                 >
@@ -857,13 +854,13 @@ export function ConversationInspector({
             </div>
           </div>
 
-              <Card className="p-3 space-y-2 text-xs">
-                <div className="flex items-center justify-between">
-                  <span className="text-muted-foreground">Profile</span>
-                  <Badge variant="secondary" className="text-[10px]">
-                    {contextInfo.profile || session?.profile || "companion"}
-                  </Badge>
-                </div>
+          <Card className="p-3 space-y-2 text-xs">
+            <div className="flex items-center justify-between">
+              <span className="text-muted-foreground">Profile</span>
+              <Badge variant="secondary" className="text-[10px]">
+                {contextInfo.profile || "companion"}
+              </Badge>
+            </div>
             <div className="flex items-center justify-between">
               <span className="text-muted-foreground">Workspace</span>
               <span

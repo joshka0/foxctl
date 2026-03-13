@@ -40,8 +40,6 @@ import {
   PROVIDERS,
   getModelsForProvider,
 } from "@/components/agents/spawnFormConstants";
-import {
-} from "lucide-react";
 import { ConversationInspector } from "@/components/conversations/ConversationInspector";
 import { ConversationListSidebar } from "@/components/conversations/ConversationListSidebar";
 import { ConversationWorkspace } from "@/components/conversations/ConversationWorkspace";
@@ -52,6 +50,7 @@ import { useViewStore } from "@/stores/viewStore";
 import { useAgentOperations } from "@/hooks/useAgentOperations";
 import {
   getAgentDisplayName,
+  isWorkerAgent,
 } from "@/lib/agent-utils";
 import {
   findAgentForConversationID,
