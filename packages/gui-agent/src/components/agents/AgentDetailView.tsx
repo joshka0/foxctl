@@ -255,23 +255,64 @@ function sessionConversationStorageKey(agentID: string): string {
   return `gui-agent-workbench-session:${agentID}`;
 }
 
-function loadSessionConversationID(agentID: string): string {
-  const key = sessionConversationStorageKey(agentID);
-  if (typeof window === "undefined") {
-    return `agent-session-${agentID}`;
-  }
-  const existing = window.sessionStorage.getItem(key);
-  if (existing && existing.trim()) return existing;
-  const created = localRequestID(`agent-session-${agentID}`);
-  window.sessionStorage.setItem(key, created);
-  return created;
+function sessionConversationReadyStorageKey(agentID: string): string {
+  return `${sessionConversationStorageKey(agentID)}:ready`;
 }
 
-function saveSessionConversationID(agentID: string, conversationID: string) {
+function isBootstrapSessionConversationID(
+  agentID: string,
+  conversationID: string,
+): boolean {
+  return conversationID.startsWith(`agent-session-${agentID}`);
+}
+
+function loadSessionConversationState(agentID: string): {
+  conversationID: string;
+  ready: boolean;
+} {
+  const key = sessionConversationStorageKey(agentID);
+  const readyKey = sessionConversationReadyStorageKey(agentID);
+  if (typeof window === "undefined") {
+    const conversationID = `agent-session-${agentID}`;
+    return {
+      conversationID,
+      ready: !isBootstrapSessionConversationID(agentID, conversationID),
+    };
+  }
+  const existing = window.sessionStorage.getItem(key);
+  const conversationID =
+    existing && existing.trim()
+      ? existing
+      : localRequestID(`agent-session-${agentID}`);
+  if (!existing || !existing.trim()) {
+    window.sessionStorage.setItem(key, conversationID);
+  }
+  const storedReady = window.sessionStorage.getItem(readyKey);
+  if (storedReady === "1") {
+    return { conversationID, ready: true };
+  }
+  if (storedReady === "0") {
+    return { conversationID, ready: false };
+  }
+  return {
+    conversationID,
+    ready: !isBootstrapSessionConversationID(agentID, conversationID),
+  };
+}
+
+function saveSessionConversationState(
+  agentID: string,
+  conversationID: string,
+  ready: boolean,
+) {
   if (typeof window === "undefined") return;
   window.sessionStorage.setItem(
     sessionConversationStorageKey(agentID),
     conversationID,
+  );
+  window.sessionStorage.setItem(
+    sessionConversationReadyStorageKey(agentID),
+    ready ? "1" : "0",
   );
 }
 
@@ -693,9 +734,11 @@ export function AgentDetailView({ agent, onBack }: AgentDetailViewProps) {
   const [activeCorrelationID, setActiveCorrelationID] = useState<string | null>(
     null,
   );
-  const [sessionConversationID, setSessionConversationID] = useState(() =>
-    loadSessionConversationID(agent.id),
+  const [sessionConversation, setSessionConversation] = useState(() =>
+    loadSessionConversationState(agent.id),
   );
+  const sessionConversationID = sessionConversation.conversationID;
+  const sessionConversationReady = sessionConversation.ready;
   const [controlRoomBusyAgentID, setControlRoomBusyAgentID] = useState<
     string | null
   >(null);
@@ -860,12 +903,8 @@ export function AgentDetailView({ agent, onBack }: AgentDetailViewProps) {
   const controlRoom = controlRoomQuery.data?.room || null;
 
   useEffect(() => {
-    setSessionConversationID(loadSessionConversationID(activeAgent.id));
+    setSessionConversation(loadSessionConversationState(activeAgent.id));
     setAgentConversationIDOverride(null);
-    setMemoryScopeDraft(normalizeMemoryScope(activeAgent.memory_scope));
-    setMemoryRetentionDraft(
-      normalizeMemoryRetention(activeAgent.memory_retention),
-    );
     setActiveCorrelationID(null);
     setRoomStatus(null);
     if (eventSourceRef.current) {
@@ -877,8 +916,17 @@ export function AgentDetailView({ agent, onBack }: AgentDetailViewProps) {
   useEffect(() => {
     if (activeMemoryScope !== "session") return;
     if (!sessionConversationID.trim()) return;
-    saveSessionConversationID(activeAgent.id, sessionConversationID);
-  }, [activeAgent.id, activeMemoryScope, sessionConversationID]);
+    saveSessionConversationState(
+      activeAgent.id,
+      sessionConversationID,
+      sessionConversationReady,
+    );
+  }, [
+    activeAgent.id,
+    activeMemoryScope,
+    sessionConversationID,
+    sessionConversationReady,
+  ]);
 
   const { data: persistedSessionsData } = useQuery({
     queryKey: ["persisted-sessions", activeAgent.id, activeAgent.ns],
@@ -921,6 +969,7 @@ export function AgentDetailView({ agent, onBack }: AgentDetailViewProps) {
     refetch: refetchConversation,
   } = useQuery({
     queryKey: ["agent-conversation", conversationID],
+    enabled: activeMemoryScope !== "session" || sessionConversationReady,
     queryFn: async () => {
       const data = await getCompanionConversationMessages(conversationID, 200);
       return data.messages.map(mapCompanionMessage);
@@ -938,6 +987,7 @@ export function AgentDetailView({ agent, onBack }: AgentDetailViewProps) {
     refetch: refetchMemoryStats,
   } = useQuery<CompanionMemoryStats>({
     queryKey: ["agent-memory-stats", conversationID],
+    enabled: activeMemoryScope !== "session" || sessionConversationReady,
     queryFn: () => getCompanionMemoryStats(conversationID),
     retry: false,
   });
@@ -954,9 +1004,15 @@ export function AgentDetailView({ agent, onBack }: AgentDetailViewProps) {
       if (!normalizedID) return;
       setSelectedConversationID(normalizedID);
       if (activeMemoryScope === "session") {
-        if (normalizedID !== sessionConversationID) {
-          setSessionConversationID(normalizedID);
-          saveSessionConversationID(activeAgent.id, normalizedID);
+        if (
+          normalizedID !== sessionConversationID ||
+          !sessionConversationReady
+        ) {
+          setSessionConversation({
+            conversationID: normalizedID,
+            ready: true,
+          });
+          saveSessionConversationState(activeAgent.id, normalizedID, true);
         }
         return;
       }
@@ -989,6 +1045,7 @@ export function AgentDetailView({ agent, onBack }: AgentDetailViewProps) {
       activeMemoryScope,
       queryClient,
       sessionConversationID,
+      sessionConversationReady,
       setSelectedConversationID,
     ],
   );
@@ -1318,11 +1375,22 @@ export function AgentDetailView({ agent, onBack }: AgentDetailViewProps) {
         response.conversation_id,
         activeMemoryScope === "agent",
       );
-      setChatStatus(
-        response.accepted
-          ? "Streaming reply from agent runtime..."
-          : "Waiting for agent reply...",
-      );
+      if (!response.accepted) {
+        setMessages((prev) =>
+          applyStreamMessageUpdate(prev, correlationID, (message) => ({
+            ...message,
+            content:
+              message.content?.trim() ||
+              "[Pending reply. Live stream updates were not available.]",
+            timestamp: new Date().toISOString(),
+          })),
+        );
+        setChatSending(false);
+        setActiveCorrelationID(null);
+        setChatStatus("Agent reply queued without live stream updates");
+        return;
+      }
+      setChatStatus("Streaming reply from agent runtime...");
     } catch {
       try {
         const response = await companionChat({
@@ -2161,7 +2229,7 @@ export function AgentDetailView({ agent, onBack }: AgentDetailViewProps) {
           activeMemoryScope={activeMemoryScope}
           activeMemoryRetention={activeMemoryRetention}
           conversationExplicit={conversationExplicit}
-          memoryStats={memoryStats}
+          memoryStats={memoryStats ?? null}
           loadingMemoryStats={loadingMemoryStats}
           controlRoom={controlRoom}
           controlRoomID={controlRoomID}

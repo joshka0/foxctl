@@ -10,6 +10,7 @@ import {
 } from "@/components/ui/card";
 import type { CompanionMemoryStats, PersistedSession } from "@/api/client";
 import type { Agent, Room } from "@/api/types";
+import { getAgentDisplayName } from "@/lib/agent-utils";
 import { formatRelativeTime } from "@/lib/utils";
 import {
   Brain,

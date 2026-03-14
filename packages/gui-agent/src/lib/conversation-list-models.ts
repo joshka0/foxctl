@@ -1,10 +1,10 @@
-import type { PersistedSession } from "@/api/client";
-import type { Agent } from "@/api/types";
+import type { PersistedSession } from "../api/client";
+import type { Agent } from "../api/types";
 import {
   getAgentDisplayName,
   isWorkerAgent,
-} from "@/lib/agent-utils";
-import { matchAgentToConversation } from "@/lib/conversation-utils";
+} from "./agent-utils";
+import { matchAgentToConversation } from "./conversation-utils";
 
 export interface Conversation {
   id: string;

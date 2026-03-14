@@ -1,4 +1,4 @@
-import type { Agent } from "@/api/types";
+import type { Agent } from "../api/types";
 
 export interface ConversationLinkRecord {
   id: string;

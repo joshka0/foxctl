@@ -86,7 +86,7 @@ export function ConversationsList() {
   const [messages, setMessages] = useState<ConsoleMessage[]>([]);
   const [inflight, setInflight] = useState(false);
   const [sessionId, setSessionId] = useState<string | null>(null);
-  const [session, setSession] = useState<ConsoleSession | null>(null);
+  const [, setSession] = useState<ConsoleSession | null>(null);
   const [isLoadingMessages, setIsLoadingMessages] = useState(false);
   const [linkedAgent, setLinkedAgent] = useState<Agent | null>(null);
   const [showContextPanel, setShowContextPanel] = useState(false);
@@ -1295,7 +1295,6 @@ Help the user understand and interact with this agent's work.`,
           onAgentSectionOpenChange={setAgentSectionOpen}
           agentOps={agentOps}
           chatModelDisplay={chatModelDisplay}
-          session={session}
           conversationSettings={conversationSettings}
           defaultProvider={defaultProvider}
           linkedAgent={linkedAgent}

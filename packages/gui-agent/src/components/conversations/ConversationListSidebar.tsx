@@ -564,12 +564,13 @@ export function ConversationListSidebar({
     ),
   );
   const unassignedCompanionItems = feedItems.filter(
-    (item) =>
+    (item): item is Extract<FeedItem, { kind: "companion" }> =>
       item.kind === "companion" &&
       !groupedConversationIDs.has(item.conversation.id),
   );
   const historicalSessionItems = feedItems.filter(
-    (item) => item.kind === "session",
+    (item): item is Extract<FeedItem, { kind: "session" }> =>
+      item.kind === "session",
   );
   const hiddenAgentCount =
     agentSections.active.length +
@@ -788,7 +789,7 @@ export function ConversationListSidebar({
                   {historicalSessionItems.length === 0 ? (
                     <div className="px-2 py-2 text-xs text-muted-foreground">
                       {searchQuery
-                        ? "No historical sessions in this view"
+                        ? "No matching historical sessions"
                         : "No historical sessions in this view"}
                     </div>
                   ) : (

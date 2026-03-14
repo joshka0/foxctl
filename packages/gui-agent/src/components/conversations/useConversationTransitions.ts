@@ -9,6 +9,7 @@ import {
   getSessionMessages,
   renameCompanionConversation,
   type ConsoleMessage,
+  type ConsoleSession,
   type PersistedSession,
   type PersonalityInfo,
 } from "@/api/client";
@@ -57,15 +58,7 @@ interface UseConversationTransitionsParams {
     preserveInflight?: boolean;
   }) => void;
   activateConsoleSession: (
-    sessionData: {
-      session: {
-        id: string;
-        workspace: string;
-        profile: string;
-        created: string;
-        last_activity?: string;
-      };
-    },
+    sessionData: { session: ConsoleSession },
     nextContext?: Partial<ContextInfo>,
   ) => void;
   refetch: () => Promise<unknown>;
@@ -79,11 +72,11 @@ export function useConversationTransitions({
   selectedConversation,
   setSelectedConversation,
   selectedPersistedSession,
-    setSelectedPersistedSession,
-    conversations,
-    agents,
-    setLinkedAgent,
-    messages,
+  setSelectedPersistedSession,
+  conversations,
+  agents,
+  setLinkedAgent,
+  messages,
   setMessages,
   setContextInfo,
   setPersonalityInfo,
