@@ -1,12 +1,44 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { Suspense, lazy, startTransition } from 'react'
 import { AppShell } from '@/components/layout/AppShell'
-import { LogsViewer } from '@/components/actions'
 import { AgentList } from '@/components/agents'
-import { ConversationsList } from '@/components/conversations'
-import { RoomsView } from '@/components/rooms/RoomsView'
-import { ArtifactsExplorer, ContextExplorer, TurnsExplorer } from '@/components/v2/V2Explorers'
-import { OrchestrationBoardScreen } from '@/components/v2/OrchestrationBoardScreen'
 import { useViewStore, type ViewType } from '@/stores/viewStore'
+
+const RoomsView = lazy(() =>
+  import('@/components/rooms/RoomsView').then((module) => ({
+    default: module.RoomsView,
+  })),
+)
+const ConversationsList = lazy(() =>
+  import('@/components/conversations').then((module) => ({
+    default: module.ConversationsList,
+  })),
+)
+const LogsViewer = lazy(() =>
+  import('@/components/actions').then((module) => ({
+    default: module.LogsViewer,
+  })),
+)
+const OrchestrationBoardScreen = lazy(() =>
+  import('@/components/v2/OrchestrationBoardScreen').then((module) => ({
+    default: module.OrchestrationBoardScreen,
+  })),
+)
+const TurnsExplorer = lazy(() =>
+  import('@/components/v2/V2Explorers').then((module) => ({
+    default: module.TurnsExplorer,
+  })),
+)
+const ContextExplorer = lazy(() =>
+  import('@/components/v2/V2Explorers').then((module) => ({
+    default: module.ContextExplorer,
+  })),
+)
+const ArtifactsExplorer = lazy(() =>
+  import('@/components/v2/V2Explorers').then((module) => ({
+    default: module.ArtifactsExplorer,
+  })),
+)
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -26,13 +58,33 @@ const queryClient = new QueryClient({
  */
 export function App() {
   const { activeView, setActiveView } = useViewStore()
+  const handleViewChange = (nextView: ViewType) => {
+    startTransition(() => {
+      setActiveView(nextView)
+    })
+  }
 
   return (
     <QueryClientProvider client={queryClient}>
-      <AppShell activeView={activeView} onViewChange={setActiveView}>
-        <MainContent view={activeView} />
+      <AppShell activeView={activeView} onViewChange={handleViewChange}>
+        <Suspense fallback={<ViewLoadingFallback view={activeView} />}>
+          <MainContent view={activeView} />
+        </Suspense>
       </AppShell>
     </QueryClientProvider>
+  )
+}
+
+function ViewLoadingFallback({ view }: { view: ViewType }) {
+  return (
+    <div className="flex h-full min-h-[320px] items-center justify-center px-6 text-center">
+      <div className="space-y-1">
+        <div className="text-sm font-medium text-foreground">Loading {view}</div>
+        <div className="text-xs text-muted-foreground">
+          Preparing the next control-plane surface.
+        </div>
+      </div>
+    </div>
   )
 }
 
