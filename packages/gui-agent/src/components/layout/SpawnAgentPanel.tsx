@@ -24,6 +24,9 @@ export function SpawnAgentPanel({
 }: SpawnAgentPanelProps) {
   const queryClient = useQueryClient();
   const setSelectedAgent = useViewStore((s) => s.setSelectedAgent);
+  const setSelectedConversationID = useViewStore(
+    (s) => s.setSelectedConversationID,
+  );
   const clearSpawnRoomDraft = useViewStore((s) => s.clearSpawnRoomDraft);
 
   useEffect(() => {
@@ -37,12 +40,12 @@ export function SpawnAgentPanel({
   const mutation = useMutation({
     mutationFn: async (params: SpawnAgentParams) => {
       const spawnResult = await spawnAgent(params);
+      let linkedConversationID: string | null = null;
 
       // Auto-create a companion conversation linked to the new agent
       try {
         if (params.memory_scope === "session") {
-          localStorage.removeItem("gui-agent-auto-select-conversation");
-          return spawnResult;
+          return { spawnResult, linkedConversationID };
         }
         const sessionData = await createConsoleSession({
           workspace: params.workspace_id || "/",
@@ -51,25 +54,21 @@ export function SpawnAgentPanel({
         await patchAgent(spawnResult.actor_id, {
           conversation_id: sessionData.session.id,
         });
-        // Store the conversation ID for auto-select after navigation
-        localStorage.setItem(
-          "gui-agent-auto-select-conversation",
-          sessionData.session.id,
-        );
+        linkedConversationID = sessionData.session.id;
       } catch (err) {
         console.warn(
           "[SpawnAgentPanel] Failed to create linked conversation:",
           err,
         );
-        localStorage.removeItem("gui-agent-auto-select-conversation");
       }
 
-      return spawnResult;
+      return { spawnResult, linkedConversationID };
     },
-    onSuccess: async (spawnResult, variables) => {
+    onSuccess: async ({ spawnResult, linkedConversationID }, variables) => {
       clearSpawnRoomDraft();
       queryClient.invalidateQueries({ queryKey: ["agents"] });
       queryClient.invalidateQueries({ queryKey: ["companion-conversations"] });
+      setSelectedConversationID(linkedConversationID);
       try {
         const detail = await getAgent(spawnResult.actor_id);
         setSelectedAgent(detail.agent);

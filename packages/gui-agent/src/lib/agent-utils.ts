@@ -12,7 +12,7 @@ import {
   Bug,
   Users,
 } from "lucide-react";
-import type { Agent } from "@/api/types";
+import type { Agent } from "../api/types";
 
 const ZERO_TIME_PREFIX = "0001-01-01T";
 
