@@ -2,6 +2,7 @@ package contextplane
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"runtime"
 	"testing"
@@ -114,6 +115,103 @@ func TestRetrieveBoostsCodeLinkedNotesFromRepoIndex(t *testing.T) {
 	if withRepo.VaultHits[0].Score <= noRepo.VaultHits[0].Score {
 		t.Fatalf("expected repo-aware retrieval to boost score: without=%d with=%d", noRepo.VaultHits[0].Score, withRepo.VaultHits[0].Score)
 	}
+}
+
+func TestRetrieveWithOptions_ControlOnlySkipsVaultHits(t *testing.T) {
+	ctx := context.Background()
+	workspace := t.TempDir()
+	storageRoot := t.TempDir()
+	store := NewWorkspaceStore(workspace)
+	if _, err := store.SaveTopOfMind(TopOfMind{
+		WorkspaceID:  "ws-test",
+		Objective:    "Compact handoff work",
+		Phase:        "design",
+		RelevantRefs: []string{"path:notes/patterns/compact-handoff-pattern.md"},
+		UpdatedAt:    time.Date(2026, 3, 10, 0, 0, 0, 0, time.UTC),
+	}); err != nil {
+		t.Fatalf("SaveTopOfMind: %v", err)
+	}
+	index, err := obsidianindex.Open(ctx, storageRoot, retrievalFixtureVaultRoot(t))
+	if err != nil {
+		t.Fatalf("Open index: %v", err)
+	}
+	defer index.Close()
+	if _, err := index.Rebuild(ctx, retrievalFixtureVaultRoot(t)); err != nil {
+		t.Fatalf("Rebuild: %v", err)
+	}
+	result, err := store.RetrieveWithOptions(ctx, index, nil, nil, "Compact Handoff Pattern", 5, RetrievalOptions{
+		IncludeTopOfMindResult:  true,
+		IncludeLatestHandoff:    true,
+		IncludeVaultHits:        false,
+		UseRelevantRefBoost:     false,
+		UseHandoffRefBoost:      false,
+		UseCodeHints:            false,
+		UseSemanticVaultSearch:  false,
+		IncludeControlPlaneRefs: true,
+	})
+	if err != nil {
+		t.Fatalf("RetrieveWithOptions: %v", err)
+	}
+	if len(result.VaultHits) != 0 {
+		t.Fatalf("expected no vault hits, got %d", len(result.VaultHits))
+	}
+}
+
+func TestRetrieveWithOptions_CanonicalOnlyFiltersRawHits(t *testing.T) {
+	ctx := context.Background()
+	workspace := t.TempDir()
+	storageRoot := t.TempDir()
+	store := NewWorkspaceStore(workspace)
+	if _, err := store.SaveTopOfMind(TopOfMind{
+		WorkspaceID: "ws-test",
+		Objective:   "Compact handoff work",
+		Phase:       "design",
+		UpdatedAt:   time.Date(2026, 3, 10, 0, 0, 0, 0, time.UTC),
+	}); err != nil {
+		t.Fatalf("SaveTopOfMind: %v", err)
+	}
+	index, err := obsidianindex.Open(ctx, storageRoot, retrievalFixtureVaultRoot(t))
+	if err != nil {
+		t.Fatalf("Open index: %v", err)
+	}
+	defer index.Close()
+	if _, err := index.Rebuild(ctx, retrievalFixtureVaultRoot(t)); err != nil {
+		t.Fatalf("Rebuild: %v", err)
+	}
+	result, err := store.RetrieveWithOptions(ctx, index, nil, nil, "Compact Handoff Pattern", 5, RetrievalOptions{
+		IncludeTopOfMindResult: false,
+		IncludeLatestHandoff:   false,
+		IncludeVaultHits:       true,
+		UseSemanticVaultSearch: true,
+		AllowedTrusts:          []string{"canonical", "reviewed"},
+	})
+	if err != nil {
+		t.Fatalf("RetrieveWithOptions: %v", err)
+	}
+	for _, hit := range result.VaultHits {
+		if hit.Trust != "canonical" && hit.Trust != "reviewed" {
+			t.Fatalf("unexpected trust %q in hit %s", hit.Trust, hit.Path)
+		}
+	}
+}
+
+func TestLoadRetrievalOptions_PackageFallbackFromPolicy(t *testing.T) {
+	ctx := context.Background()
+	workspace := t.TempDir()
+	store := NewWorkspaceStore(workspace)
+	layout, err := store.EnsureLayout()
+	if err != nil {
+		t.Fatalf("EnsureLayout: %v", err)
+	}
+	body := []byte("aca:\n  package_note_fallback: true\n")
+	if err := os.WriteFile(layout.RetrievalPolicyPath, body, 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	opts := store.loadRetrievalOptions()
+	if !opts.UsePackageNoteFallback {
+		t.Fatalf("expected package_note_fallback to be enabled from retrieval policy")
+	}
+	_ = ctx
 }
 
 func TestDetectContradictions(t *testing.T) {

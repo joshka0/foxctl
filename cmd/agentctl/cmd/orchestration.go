@@ -12,6 +12,7 @@ import (
 	"github.com/rs/zerolog"
 	"github.com/spf13/cobra"
 
+	"github.com/jkatigb/agentctl/internal/contextplane/taskhistory"
 	"github.com/jkatigb/agentctl/internal/domain/envelope"
 	"github.com/jkatigb/agentctl/internal/platform/config"
 	"github.com/jkatigb/agentctl/internal/platform/logging"
@@ -382,7 +383,7 @@ func runOrchestrationCardRuntimeCLI(
 
 	return orchestrationBoardCardRuntimeDataCLI{
 		Card:    resp.Card,
-		Runtime: loadOrchestrationCardRuntimeTreeCLI(ctx, log, resp.Card, depth),
+		Runtime: loadOrchestrationCardRuntimeTreeCLI(ctx, cfg, log, resp.Card, depth),
 	}, nil
 }
 
@@ -444,7 +445,7 @@ func runOrchestrationDispatchIssueCLI(
 	return dispatchService.DispatchIssue(ctx, req)
 }
 
-func loadOrchestrationCardRuntimeTreeCLI(ctx context.Context, log zerolog.Logger, card coreorchestration.Card, depth int) *orchestrationRuntimeTreeDataCLI {
+func loadOrchestrationCardRuntimeTreeCLI(ctx context.Context, cfg config.Config, log zerolog.Logger, card coreorchestration.Card, depth int) *orchestrationRuntimeTreeDataCLI {
 	runtime := &orchestrationRuntimeTreeDataCLI{
 		Enabled: strings.TrimSpace(card.AgentID) != "",
 		AgentID: strings.TrimSpace(card.AgentID),
@@ -462,7 +463,7 @@ func loadOrchestrationCardRuntimeTreeCLI(ctx context.Context, log zerolog.Logger
 	}
 
 	visited := map[string]struct{}{}
-	runtime.Root = loadOrchestrationRuntimeTreeNodeCLI(ctx, log, client, v2jido.ChildRef{
+	runtime.Root = loadOrchestrationRuntimeTreeNodeCLI(ctx, cfg, log, client, v2jido.ChildRef{
 		Tag:      runtime.AgentID,
 		AgentID:  runtime.AgentID,
 		Metadata: map[string]any{"workspace_id": card.WorkspaceID, "issue_id": card.IssueID},
@@ -475,6 +476,7 @@ func loadOrchestrationCardRuntimeTreeCLI(ctx context.Context, log zerolog.Logger
 
 func loadOrchestrationRuntimeTreeNodeCLI(
 	ctx context.Context,
+	cfg config.Config,
 	log zerolog.Logger,
 	client v2jido.Client,
 	ref v2jido.ChildRef,
@@ -511,6 +513,9 @@ func loadOrchestrationRuntimeTreeNodeCLI(
 			node.State = string(stateResp.State)
 			log.Debug().Err(err).Str("agent_id", agentID).Msg("failed to decode orchestration runtime node state; returning raw payload")
 		} else {
+			if stateMap, ok := state.(map[string]any); ok {
+				state = taskhistory.RefreshJidoRuntimeState(ctx, cfg.Storage.Root, cfg.Paths.CAS, stateMap)
+			}
 			node.State = state
 		}
 	}
@@ -524,7 +529,7 @@ func loadOrchestrationRuntimeTreeNodeCLI(
 		return node
 	}
 	for _, child := range sortedChildRefsCLI(childrenResp.Children) {
-		node.Children = append(node.Children, loadOrchestrationRuntimeTreeNodeCLI(ctx, log, client, child, depth-1, visited))
+		node.Children = append(node.Children, loadOrchestrationRuntimeTreeNodeCLI(ctx, cfg, log, client, child, depth-1, visited))
 	}
 	return node
 }

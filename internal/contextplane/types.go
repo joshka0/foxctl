@@ -124,14 +124,45 @@ type MaintenanceTask struct {
 	CreatedAt  time.Time `json:"created_at"`
 }
 
+// RetrievalCorrectionRun records one persisted ACA retrieval correction report.
+type RetrievalCorrectionRun struct {
+	ID              string                          `json:"id"`
+	Suite           string                          `json:"suite"`
+	ControlSuite    string                          `json:"control_suite,omitempty"`
+	ArtifactDigest  string                          `json:"artifact_digest"`
+	Summary         RetrievalInspectionBatchSummary `json:"summary"`
+	PolicyCandidate bool                            `json:"policy_candidate"`
+	PolicyApplied   bool                            `json:"policy_applied"`
+	PolicyAccepted  bool                            `json:"policy_accepted"`
+	PolicyReverted  bool                            `json:"policy_reverted"`
+	DraftCount      int                             `json:"draft_count"`
+	CreatedAt       time.Time                       `json:"created_at"`
+}
+
+// GraphCorrectionRun records one persisted repoindex search or DAG correction report.
+type GraphCorrectionRun struct {
+	ID             string    `json:"id"`
+	Method         string    `json:"method"`
+	Suite          string    `json:"suite"`
+	ArtifactDigest string    `json:"artifact_digest"`
+	Queries        int       `json:"queries"`
+	Matched        int       `json:"matched"`
+	Misses         int       `json:"misses"`
+	Classification string    `json:"classification,omitempty"`
+	RecommendedFix string    `json:"recommended_fix,omitempty"`
+	CreatedAt      time.Time `json:"created_at"`
+}
+
 // RetrievalHit is one ranked durable-knowledge candidate.
 type RetrievalHit struct {
-	Path    string `json:"path"`
-	Title   string `json:"title"`
-	Type    string `json:"type,omitempty"`
-	Trust   string `json:"trust,omitempty"`
-	Score   int    `json:"score"`
-	Snippet string `json:"snippet,omitempty"`
+	Path      string   `json:"path"`
+	Title     string   `json:"title"`
+	Type      string   `json:"type,omitempty"`
+	Trust     string   `json:"trust,omitempty"`
+	Score     int      `json:"score"`
+	Snippet   string   `json:"snippet,omitempty"`
+	RepoPaths []string `json:"repo_paths,omitempty"`
+	Symbols   []string `json:"symbols,omitempty"`
 }
 
 // RetrievalWeights documents the scoring inputs for blended retrieval.
@@ -150,6 +181,22 @@ type RetrievalWeights struct {
 	CodePath       int `json:"code_path"`
 	CodeSymbol     int `json:"code_symbol"`
 	SemanticMatch  int `json:"semantic_match"`
+}
+
+// RetrievalOptions controls which ACA retrieval components participate in one query.
+// The default path should remain behavior-compatible with existing Retrieve().
+type RetrievalOptions struct {
+	IncludeTopOfMindResult  bool     `json:"include_top_of_mind_result"`
+	IncludeLatestHandoff    bool     `json:"include_latest_handoff"`
+	IncludeVaultHits        bool     `json:"include_vault_hits"`
+	UseRelevantRefBoost     bool     `json:"use_relevant_ref_boost"`
+	UseHandoffRefBoost      bool     `json:"use_handoff_ref_boost"`
+	UseCodeHints            bool     `json:"use_code_hints"`
+	UseSemanticVaultSearch  bool     `json:"use_semantic_vault_search"`
+	UsePackageNoteFallback  bool     `json:"use_package_note_fallback"`
+	UseQueryTypeBias        bool     `json:"use_query_type_bias"`
+	AllowedTrusts           []string `json:"allowed_trusts,omitempty"`
+	IncludeControlPlaneRefs bool     `json:"include_control_plane_refs"`
 }
 
 // RetrievalResult blends control-plane state with ranked vault hits.
@@ -185,6 +232,7 @@ type TaskCandidate struct {
 	DependsOn   []string `json:"depends_on,omitempty"`
 	PlanFile    string   `json:"plan_file,omitempty"`
 	PlanSection string   `json:"plan_section,omitempty"`
+	SessionID   string   `json:"session_id,omitempty"`
 }
 
 // TaskPacket is the bounded dispatch payload for a worker phase.

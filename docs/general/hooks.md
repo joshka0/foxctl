@@ -112,6 +112,8 @@ Core fields include event identity, principal/workspace/session metadata, provid
   - `agentctl hooks embedding-flush`
   - `agentctl hooks plan-sync`
   - `agentctl hooks graph-maintenance`
+  - `configs/hooks/task-continuity-summary.sh` is the prompt-ready wrapper for
+    `agentctl context task-history-summary`
   - `configs/hooks/session-init.sh` is now a thin wrapper over that command.
   - `configs/hooks/session-end.sh` is now a thin wrapper over that command.
   - `configs/hooks/subagent-stop.sh` is now a thin wrapper over that command.
@@ -135,6 +137,16 @@ Core fields include event identity, principal/workspace/session metadata, provid
 - Remaining shell hooks are now triaged by category in:
   - `docs/plans/features/hook-shell-triage-plan.md`
 - Prefer structured action outputs over ad-hoc stdout text for reliable automation.
+
+## Task Continuity Usage
+
+Use the structured command for Codex, scripts, and agent runtimes:
+
+- `agentctl context task-history-summary`
+
+Use the shell wrapper only when a hook needs prompt-ready JSON:
+
+- `configs/hooks/task-continuity-summary.sh`
 
 ## Related Docs
 

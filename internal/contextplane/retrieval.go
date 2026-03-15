@@ -3,8 +3,10 @@ package contextplane
 import (
 	"context"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
+	"unicode"
 
 	"github.com/jkatigb/agentctl/internal/indexing/repoindex"
 	"github.com/jkatigb/agentctl/internal/indexing/rerank"
@@ -34,12 +36,31 @@ func defaultRetrievalWeights() RetrievalWeights {
 
 type retrievalPolicyFile struct {
 	RankingWeights map[string]int `yaml:"ranking_weights"`
+	ACA            struct {
+		PackageNoteFallback bool `yaml:"package_note_fallback"`
+	} `yaml:"aca"`
+}
+
+func DefaultRetrievalOptions() RetrievalOptions {
+	return RetrievalOptions{
+		IncludeTopOfMindResult:  true,
+		IncludeLatestHandoff:    true,
+		IncludeVaultHits:        true,
+		UseRelevantRefBoost:     true,
+		UseHandoffRefBoost:      true,
+		UseCodeHints:            true,
+		UseSemanticVaultSearch:  true,
+		UsePackageNoteFallback:  false,
+		UseQueryTypeBias:        false,
+		IncludeControlPlaneRefs: true,
+	}
 }
 
 type scoredVaultHit struct {
 	hit           obsidianindex.SearchHit
 	lexicalScore  int
 	semanticScore int
+	packageBoost  int
 }
 
 func (s *WorkspaceStore) loadRetrievalWeights() RetrievalWeights {
@@ -68,8 +89,27 @@ func (s *WorkspaceStore) loadRetrievalWeights() RetrievalWeights {
 	return weights
 }
 
+func (s *WorkspaceStore) loadRetrievalOptions() RetrievalOptions {
+	opts := DefaultRetrievalOptions()
+	body, err := os.ReadFile(s.layout.RetrievalPolicyPath)
+	if err != nil {
+		return opts
+	}
+	var policy retrievalPolicyFile
+	if err := yaml.Unmarshal(body, &policy); err != nil {
+		return opts
+	}
+	opts.UsePackageNoteFallback = policy.ACA.PackageNoteFallback
+	return opts
+}
+
 // Retrieve blends ACA state with ranked vault hits.
 func (s *WorkspaceStore) Retrieve(ctx context.Context, index obsidianindex.Store, repo *repoindex.Store, semanticProvider semantic.EmbeddingProvider, query string, limit int) (RetrievalResult, error) {
+	return s.RetrieveWithOptions(ctx, index, repo, semanticProvider, query, limit, s.loadRetrievalOptions())
+}
+
+// RetrieveWithOptions blends ACA state with ranked vault hits under explicit retrieval options.
+func (s *WorkspaceStore) RetrieveWithOptions(ctx context.Context, index obsidianindex.Store, repo *repoindex.Store, semanticProvider semantic.EmbeddingProvider, query string, limit int, opts RetrievalOptions) (RetrievalResult, error) {
 	if limit <= 0 {
 		limit = 5
 	}
@@ -91,10 +131,13 @@ func (s *WorkspaceStore) Retrieve(ctx context.Context, index obsidianindex.Store
 		Weights:       s.loadRetrievalWeights(),
 		GeneratedAt:   report.GeneratedAt,
 	}
-	if index == nil || strings.TrimSpace(query) == "" {
+	if !opts.IncludeVaultHits || index == nil || strings.TrimSpace(query) == "" {
 		return result, nil
 	}
-	codeHints := deriveCodeHints(ctx, repo, query, result.TopOfMind, report.LatestHandoff)
+	codeHints := retrievalCodeHints{}
+	if opts.UseCodeHints {
+		codeHints = deriveCodeHints(ctx, repo, query, result.TopOfMind, report.LatestHandoff)
+	}
 	hits, err := index.SearchNotes(ctx, query, limit*3)
 	if err != nil {
 		return RetrievalResult{}, err
@@ -104,7 +147,7 @@ func (s *WorkspaceStore) Retrieve(ctx context.Context, index obsidianindex.Store
 		byPath[hit.Path] = &scoredVaultHit{hit: hit, lexicalScore: hit.Score}
 	}
 	maxSemantic := 0
-	if semanticProvider != nil {
+	if semanticProvider != nil && opts.UseSemanticVaultSearch {
 		if semanticHits, err := index.SearchNotesSemantic(ctx, query, semanticProvider, limit*3); err == nil {
 			result.SemanticUsed = true
 			result.SemanticModel = semanticProvider.Model()
@@ -133,11 +176,15 @@ func (s *WorkspaceStore) Retrieve(ctx context.Context, index obsidianindex.Store
 			}
 		}
 	}
+	if opts.UsePackageNoteFallback && index != nil && len(codeHints.Paths) > 0 {
+		mergePackageFallbackHits(ctx, index, s.layout.WorkspacePath, codeHints, byPath)
+	}
 	vaultHits := make([]RetrievalHit, 0, len(byPath))
 	codeCentric := queryLooksCodeCentric(query)
 	for _, hit := range byPath {
-		vaultHits = append(vaultHits, scoreVaultHit(*hit, maxSemantic, codeCentric, result, report, codeHints))
+		vaultHits = append(vaultHits, scoreVaultHit(*hit, maxSemantic, codeCentric, result, report, codeHints, query, opts))
 	}
+	vaultHits = filterRetrievalHitsByTrust(vaultHits, opts.AllowedTrusts)
 	sort.SliceStable(vaultHits, func(i, j int) bool {
 		if vaultHits[i].Score != vaultHits[j].Score {
 			return vaultHits[i].Score > vaultHits[j].Score
@@ -247,7 +294,7 @@ func (s *WorkspaceStore) DetectContradictions(ctx context.Context, index obsidia
 	return out, nil
 }
 
-func scoreVaultHit(entry scoredVaultHit, maxSemantic int, codeCentric bool, result RetrievalResult, report Report, codeHints retrievalCodeHints) RetrievalHit {
+func scoreVaultHit(entry scoredVaultHit, maxSemantic int, codeCentric bool, result RetrievalResult, report Report, codeHints retrievalCodeHints, query string, opts RetrievalOptions) RetrievalHit {
 	hit := entry.hit
 	score := entry.lexicalScore * result.Weights.BaseIndexScore
 	if entry.semanticScore > 0 && maxSemantic > 0 {
@@ -258,26 +305,212 @@ func scoreVaultHit(entry scoredVaultHit, maxSemantic int, codeCentric bool, resu
 	}
 	score += noteTypeWeight(hit.Type, result.Weights)
 	score += trustWeight(hit.Trust, result.Weights)
-	if result.TopOfMind != nil && matchesRefs(hit.Path, result.TopOfMind.RelevantRefs) {
+	if opts.UseRelevantRefBoost && result.TopOfMind != nil && matchesRefs(hit.Path, result.TopOfMind.RelevantRefs) {
 		score += result.Weights.RelevantRef
 	}
-	if report.LatestHandoff != nil && matchesRefs(hit.Path, append(report.LatestHandoff.Handoff.EvidenceRefs, report.LatestHandoff.Handoff.FilesTouched...)) {
+	if opts.UseHandoffRefBoost && report.LatestHandoff != nil && matchesRefs(hit.Path, append(report.LatestHandoff.Handoff.EvidenceRefs, report.LatestHandoff.Handoff.FilesTouched...)) {
 		score += result.Weights.HandoffRef
 	}
-	if codeCentric && matchesCodePaths(hit.RepoPaths, codeHints.Paths) {
+	if opts.UseCodeHints && codeCentric && matchesCodePaths(hit.RepoPaths, codeHints.Paths) {
 		score += result.Weights.CodePath
 	}
-	if codeCentric && matchesCodeSymbols(hit.Symbols, codeHints.Symbols) {
+	if opts.UseCodeHints && codeCentric && matchesCodeSymbols(hit.Symbols, codeHints.Symbols) {
 		score += result.Weights.CodeSymbol
 	}
-	return RetrievalHit{
-		Path:    hit.Path,
-		Title:   hit.Title,
-		Type:    hit.Type,
-		Trust:   hit.Trust,
-		Score:   score,
-		Snippet: hit.Snippet,
+	if opts.UseQueryTypeBias {
+		score += queryTypeBias(query, hit, result.Weights)
 	}
+	score += entry.packageBoost
+	return RetrievalHit{
+		Path:      hit.Path,
+		Title:     hit.Title,
+		Type:      hit.Type,
+		Trust:     hit.Trust,
+		Score:     score,
+		Snippet:   hit.Snippet,
+		RepoPaths: append([]string(nil), hit.RepoPaths...),
+		Symbols:   append([]string(nil), hit.Symbols...),
+	}
+}
+
+func filterRetrievalHitsByTrust(hits []RetrievalHit, allowed []string) []RetrievalHit {
+	if len(allowed) == 0 {
+		return hits
+	}
+	allow := make(map[string]struct{}, len(allowed))
+	for _, trust := range allowed {
+		trust = strings.ToLower(strings.TrimSpace(trust))
+		if trust == "" {
+			continue
+		}
+		allow[trust] = struct{}{}
+	}
+	if len(allow) == 0 {
+		return hits
+	}
+	out := make([]RetrievalHit, 0, len(hits))
+	for _, hit := range hits {
+		if _, ok := allow[strings.ToLower(strings.TrimSpace(hit.Trust))]; ok {
+			out = append(out, hit)
+		}
+	}
+	return out
+}
+
+func mergePackageFallbackHits(ctx context.Context, index obsidianindex.Store, workspacePath string, codeHints retrievalCodeHints, byPath map[string]*scoredVaultHit) {
+	repoName := filepath.Base(strings.TrimSpace(workspacePath))
+	if repoName == "" {
+		return
+	}
+	candidates := packageNotePathCandidates(repoName, codeHints.Paths)
+	for i, candidate := range candidates {
+		hit, ok := findExactCandidateNote(ctx, index, candidate)
+		if !ok {
+			continue
+		}
+		boost := maxInt(0, 30-(i*3))
+		existing, ok := byPath[hit.Path]
+		if !ok {
+			byPath[hit.Path] = &scoredVaultHit{
+				hit:          hit,
+				lexicalScore: hit.Score,
+				packageBoost: boost,
+			}
+			continue
+		}
+		if existing.lexicalScore < hit.Score {
+			existing.lexicalScore = hit.Score
+		}
+		if existing.packageBoost < boost {
+			existing.packageBoost = boost
+		}
+		if existing.hit.Snippet == "" {
+			existing.hit.Snippet = hit.Snippet
+		}
+		if existing.hit.Title == "" {
+			existing.hit.Title = hit.Title
+		}
+		if existing.hit.Trust == "" {
+			existing.hit.Trust = hit.Trust
+		}
+		if existing.hit.Type == "" {
+			existing.hit.Type = hit.Type
+		}
+	}
+}
+
+func packageNotePathCandidates(repoName string, paths []string) []string {
+	seen := map[string]struct{}{}
+	out := make([]string, 0, len(paths))
+	for _, path := range paths {
+		path = filepath.ToSlash(strings.TrimSpace(path))
+		if path == "" {
+			continue
+		}
+		dir := path
+		if ext := filepath.Ext(dir); ext != "" {
+			dir = filepath.Dir(dir)
+		}
+		dir = filepath.ToSlash(strings.Trim(strings.TrimSpace(dir), "/"))
+		if dir == "." || dir == "" {
+			continue
+		}
+		slug := packageNoteSlug(dir)
+		if slug == "" {
+			continue
+		}
+		candidate := filepath.ToSlash(filepath.Join("notes", "repo", repoName, "packages", slug+".md"))
+		if _, ok := seen[candidate]; ok {
+			continue
+		}
+		seen[candidate] = struct{}{}
+		out = append(out, candidate)
+	}
+	return out
+}
+
+func packageNoteSlug(path string) string {
+	path = strings.Trim(filepath.ToSlash(strings.TrimSpace(path)), "/")
+	if path == "" {
+		return ""
+	}
+	var b strings.Builder
+	lastDash := false
+	for _, r := range path {
+		switch {
+		case unicode.IsLetter(r), unicode.IsNumber(r):
+			b.WriteRune(unicode.ToLower(r))
+			lastDash = false
+		case r == '/':
+			if !lastDash {
+				b.WriteRune('-')
+				lastDash = true
+			}
+		case r == '-', r == '.':
+			if !lastDash {
+				b.WriteRune('-')
+				lastDash = true
+			}
+		case r == '_':
+			// Drop underscores so praze_web -> prazeweb, matching current package-note naming.
+		}
+	}
+	return strings.Trim(b.String(), "-")
+}
+
+func maxInt(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
+}
+
+func queryTypeBias(query string, hit obsidianindex.SearchHit, weights RetrievalWeights) int {
+	q := strings.ToLower(strings.TrimSpace(query))
+	bonus := 0
+	if containsAll(q, "package") || containsAny(q, "runtime", "transport", "platform", "config", "api", "web", "semantic", "memory") {
+		if strings.EqualFold(hit.Trust, "canonical") {
+			bonus += weights.Canonical
+		}
+		if strings.EqualFold(hit.Type, "map") {
+			bonus += weights.Map
+		}
+	}
+	if containsAny(q, "decision", "policy", "contract", "why") {
+		if strings.EqualFold(hit.Type, "adr") {
+			bonus += weights.ADR
+		}
+		if strings.EqualFold(hit.Type, "pattern") {
+			bonus += weights.Pattern
+		}
+	}
+	if containsAny(q, "incident", "bug", "failure", "outage", "contradiction", "gotcha") {
+		if strings.EqualFold(hit.Type, "incident") {
+			bonus += weights.Incident
+		}
+		if strings.EqualFold(hit.Type, "investigation") {
+			bonus += weights.Investigation
+		}
+	}
+	return bonus
+}
+
+func containsAny(parts string, options ...string) bool {
+	for _, option := range options {
+		if strings.Contains(parts, option) {
+			return true
+		}
+	}
+	return false
+}
+
+func containsAll(query string, parts ...string) bool {
+	for _, part := range parts {
+		if !strings.Contains(query, part) {
+			return false
+		}
+	}
+	return true
 }
 
 func queryLooksCodeCentric(query string) bool {

@@ -10,16 +10,18 @@ import (
 
 // RuntimeAdapterConfig configures a RuntimeAdapter.
 type RuntimeAdapterConfig struct {
-	Client       Client
-	SignalSource string
-	OnSignalAck  func(ctx context.Context, req SignalRequest, resp SignalResponse) error
+	Client        Client
+	SignalSource  string
+	OnSignalAck   func(ctx context.Context, req SignalRequest, resp SignalResponse) error
+	PrepareSignal func(ctx context.Context, msg ask.Message, req *SignalRequest) error
 }
 
 // RuntimeAdapter maps v2 service contracts onto bridge client calls.
 type RuntimeAdapter struct {
-	client       Client
-	signalSource string
-	onSignalAck  func(ctx context.Context, req SignalRequest, resp SignalResponse) error
+	client        Client
+	signalSource  string
+	onSignalAck   func(ctx context.Context, req SignalRequest, resp SignalResponse) error
+	prepareSignal func(ctx context.Context, msg ask.Message, req *SignalRequest) error
 }
 
 // NewRuntimeAdapter builds a bridge adapter for v2 services.
@@ -32,9 +34,10 @@ func NewRuntimeAdapter(cfg RuntimeAdapterConfig) (*RuntimeAdapter, error) {
 		src = DefaultSignalSource
 	}
 	return &RuntimeAdapter{
-		client:       cfg.Client,
-		signalSource: src,
-		onSignalAck:  cfg.OnSignalAck,
+		client:        cfg.Client,
+		signalSource:  src,
+		onSignalAck:   cfg.OnSignalAck,
+		prepareSignal: cfg.PrepareSignal,
 	}, nil
 }
 
@@ -47,6 +50,11 @@ func (a *RuntimeAdapter) Send(ctx context.Context, msg ask.Message) (string, err
 	req, err := AskMessageToSignalRequest(msg, a.signalSource)
 	if err != nil {
 		return "", err
+	}
+	if a.prepareSignal != nil {
+		if err := a.prepareSignal(ctx, msg, &req); err != nil {
+			return "", err
+		}
 	}
 	req.Mode = NormalizeSignalMode(req.Mode)
 

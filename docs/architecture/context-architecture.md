@@ -32,6 +32,8 @@ Command:
 - `agentctl context show`
 - `agentctl context report`
 - `agentctl context retrieve`
+- `agentctl context retrieve-inspect`
+- `agentctl context retrieve-inspect-suite`
 - `agentctl context contradictions`
 - `agentctl context rethink`
 - `agentctl context handoffs`
@@ -40,6 +42,8 @@ Command:
 - `agentctl context infer`
 - `agentctl context promote`
 - `agentctl context merge-promotion`
+- `agentctl context task-history`
+- `agentctl context task-history-summary`
 - `agentctl context hooks install`
 - `agentctl obsidian read`
 - `agentctl obsidian search`
@@ -72,6 +76,7 @@ Behavior:
 - reads persisted runtime artifacts back out through a stable CLI surface
 - builds a synthesized current-state report from top-of-mind, latest handoff, merged observations, and open tensions
 - blends ACA control-plane state with ranked vault-index hits through `context retrieve`
+- can inspect one ACA retrieval miss, or a full retrieval suite, record misses as observations, propose deterministic corrective actions, and persist suite reports to CAS through `context retrieve-inspect*`
 - boosts vault hits with repo-index-derived file and symbol hints when the workspace repo index is available
 - optionally reranks top vault hits semantically when rerank is enabled through environment configuration
 - links open tensions to relevant indexed notes through `context contradictions`
@@ -146,6 +151,16 @@ Current hook behavior:
   - writes a bounded ACA handoff for subagent completion
   - can emit structured observations or tensions through `agentctl context infer --apply`
   - can draft a promotion automatically when `AGENTCTL_ACA_AUTO_PROMOTE=1`
+- task continuity hook wrapper via `configs/hooks/task-continuity-summary.sh`
+  - uses `agentctl context task-history-summary`
+  - emits prompt-ready continuity context plus `task_continuity_artifact`
+
+Task continuity delivery split:
+
+- `agentctl context task-history-summary`
+  - structured command for Codex, scripts, and agent runtimes
+- `configs/hooks/task-continuity-summary.sh`
+  - thinner wrapper for hook injection payloads
 
 ## MCP Read Surface
 
@@ -319,6 +334,27 @@ Persistence split:
   - promotion jobs
   - maintenance tasks
 - legacy NDJSON files remain part of the scaffold, but mutable ACA state is now loaded into the dedicated store and updated there
+
+## Retrieval Policy Note
+
+ACA retrieval policy lives in `.agentctl/policy/retrieval.yaml`.
+
+One useful opt-in setting is:
+
+```yaml
+aca:
+  package_note_fallback: true
+```
+
+Enable this when:
+
+- the repo has strong canonical package-note coverage
+- package/runtime/controller queries are common
+- agents need deterministic ACA retrieval behavior rather than prompt-only note targeting
+
+This helped on `praze`-style package queries, where deterministic mapping from repo paths to canonical package-note paths improved ACA retrieval. It is less necessary on `agentctl`, where the default ACA vault lane is already strong.
+
+A concrete example policy file is available at [docs/examples/aca-retrieval-policy-package-fallback.yaml](../examples/aca-retrieval-policy-package-fallback.yaml).
 
 ## Obsidian CLI Convention
 

@@ -130,10 +130,20 @@ and idling forever.
 - Overseer orchestration uses a Jido runtime bridge plus v2 projections.
 - Companion context can optionally fetch layered context from Jido when
   `AGENTCTL_COMPANION_CONTEXT_PROVIDER=jido`.
+- Jido-backed agents now receive deterministic `task_continuity` at spawn and
+  ask time, and runtime-state inspection can refresh that continuity when the
+  Jido state includes `workspace_root`.
 - The Jido bridge now supports tick-driven bridge agents:
   - bridge children can start with `exec_mode=tick` and `think_interval`
   - the Jido side schedules recurring `agentctl.tick` signals
   - each tick drives a persistent backing `agentctl` worker through daemon RPC
+
+Task continuity surfaces:
+
+- structured command for agents/scripts:
+  - `agentctl context task-history-summary`
+- hook wrapper for prompt injection:
+  - `configs/hooks/task-continuity-summary.sh`
 
 ## Code References
 

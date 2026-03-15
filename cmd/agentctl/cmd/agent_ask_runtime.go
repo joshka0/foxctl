@@ -8,9 +8,12 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jkatigb/agentctl/internal/contextplane/taskhistory"
+	ws "github.com/jkatigb/agentctl/internal/platform/workspace"
 	v2jido "github.com/jkatigb/agentctl/internal/v2/adapters/jido"
 	libsqlevents "github.com/jkatigb/agentctl/internal/v2/adapters/libsql/events"
 	libsqlprojections "github.com/jkatigb/agentctl/internal/v2/adapters/libsql/projections"
+	v2ask "github.com/jkatigb/agentctl/internal/v2/core/ask"
 	v2events "github.com/jkatigb/agentctl/internal/v2/core/events"
 	v2services "github.com/jkatigb/agentctl/internal/v2/services"
 )
@@ -42,6 +45,7 @@ func resolvedAskDispatcherMode(override string) string {
 func newJidoAskRuntime(
 	ctx context.Context,
 	storageRoot string,
+	workspaceRoot string,
 	nowFn func() time.Time,
 	newID func() string,
 ) (v2services.AskDispatcher, v2events.Appender, v2services.AskProjectionApplier, func(), error) {
@@ -91,6 +95,9 @@ func newJidoAskRuntime(
 	adapter, err := v2jido.NewRuntimeAdapter(v2jido.RuntimeAdapterConfig{
 		Client:       client,
 		SignalSource: signalSource,
+		PrepareSignal: func(ctx context.Context, msg v2ask.Message, req *v2jido.SignalRequest) error {
+			return attachTaskContinuityToSignal(ctx, storageRoot, workspaceRoot, req)
+		},
 		OnSignalAck: func(ctx context.Context, req v2jido.SignalRequest, resp v2jido.SignalResponse) error {
 			cb := v2jido.SignalAckToCallback(req, resp)
 			_, reconcileErr := reconciler.ReconcileSignalCallback(ctx, cb)
@@ -103,6 +110,38 @@ func newJidoAskRuntime(
 	}
 
 	return adapter, eventStore, projectionStore, cleanup, nil
+}
+
+func attachTaskContinuityToSignal(ctx context.Context, storageRoot, workspaceRoot string, req *v2jido.SignalRequest) error {
+	if req == nil {
+		return nil
+	}
+	if workspaceRoot == "" {
+		return nil
+	}
+	collector, cleanup, err := taskhistory.OpenCollector(ctx, storageRoot, workspaceRoot, "")
+	if err != nil {
+		return nil
+	}
+	defer cleanup()
+	pack, err := collector.Collect(ctx, taskhistory.Options{
+		WorkspacePath: workspaceRoot,
+		WorkspaceID:   ws.CanonicalID(workspaceRoot),
+	})
+	if err != nil {
+		return nil
+	}
+	artifact := ""
+	if cfg, err := loadConfig(ctx); err == nil {
+		if digest, persistErr := taskhistory.PersistPack(ctx, cfg.Paths.CAS, pack); persistErr == nil {
+			artifact = digest
+		}
+	}
+	if req.Signal.Metadata == nil {
+		req.Signal.Metadata = map[string]any{}
+	}
+	req.Signal.Metadata["task_continuity"] = taskhistory.RenderJidoStateWithArtifact(pack, artifact)
+	return nil
 }
 
 func parseDurationMillisEnv(key string, fallback time.Duration) time.Duration {

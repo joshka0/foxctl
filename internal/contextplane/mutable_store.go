@@ -82,6 +82,37 @@ CREATE TABLE IF NOT EXISTS aca_maintenance_tasks (
 	created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_aca_maintenance_tasks_priority ON aca_maintenance_tasks(priority DESC, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS aca_retrieval_correction_runs (
+	id TEXT PRIMARY KEY,
+	suite TEXT NOT NULL,
+	control_suite TEXT,
+	artifact_digest TEXT NOT NULL,
+	summary_json TEXT NOT NULL,
+	policy_candidate INTEGER NOT NULL DEFAULT 0,
+	policy_applied INTEGER NOT NULL DEFAULT 0,
+	policy_accepted INTEGER NOT NULL DEFAULT 0,
+	policy_reverted INTEGER NOT NULL DEFAULT 0,
+	draft_count INTEGER NOT NULL DEFAULT 0,
+	created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_aca_retrieval_correction_runs_created_at ON aca_retrieval_correction_runs(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_aca_retrieval_correction_runs_suite ON aca_retrieval_correction_runs(suite, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS aca_graph_correction_runs (
+	id TEXT PRIMARY KEY,
+	method TEXT NOT NULL,
+	suite TEXT NOT NULL,
+	artifact_digest TEXT NOT NULL,
+	queries INTEGER NOT NULL DEFAULT 0,
+	matched INTEGER NOT NULL DEFAULT 0,
+	misses INTEGER NOT NULL DEFAULT 0,
+	classification TEXT,
+	recommended_fix TEXT,
+	created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_aca_graph_correction_runs_created_at ON aca_graph_correction_runs(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_aca_graph_correction_runs_method ON aca_graph_correction_runs(method, created_at DESC);
 `
 	if _, err := db.ExecContext(ctx, ddl); err != nil {
 		return fmt.Errorf("contextplane: migrate mutable store: %w", err)
@@ -187,7 +218,7 @@ func importLegacyMaintenanceTasks(ctx context.Context, db *sql.DB, path string) 
 
 func tableEmpty(ctx context.Context, db *sql.DB, table string) (bool, error) {
 	switch table {
-	case "aca_observations", "aca_tensions", "aca_promotion_jobs", "aca_maintenance_tasks":
+	case "aca_observations", "aca_tensions", "aca_promotion_jobs", "aca_maintenance_tasks", "aca_retrieval_correction_runs", "aca_graph_correction_runs":
 	default:
 		return false, fmt.Errorf("contextplane: unsupported table %q", table)
 	}
@@ -196,6 +227,13 @@ func tableEmpty(ctx context.Context, db *sql.DB, table string) (bool, error) {
 		return false, err
 	}
 	return count == 0, nil
+}
+
+func boolToInt(v bool) int {
+	if v {
+		return 1
+	}
+	return 0
 }
 
 func upsertObservationRow(ctx context.Context, db *sql.DB, obs Observation) error {
@@ -533,6 +571,144 @@ ORDER BY priority DESC, created_at DESC`
 	return out, rows.Err()
 }
 
+func insertRetrievalCorrectionRunRow(ctx context.Context, db *sql.DB, run RetrievalCorrectionRun) error {
+	summaryJSON, err := json.Marshal(run.Summary)
+	if err != nil {
+		return fmt.Errorf("marshal retrieval correction summary: %w", err)
+	}
+	_, err = db.ExecContext(ctx, `
+INSERT INTO aca_retrieval_correction_runs (
+	id, suite, control_suite, artifact_digest, summary_json,
+	policy_candidate, policy_applied, policy_accepted, policy_reverted, draft_count, created_at
+)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+`,
+		run.ID,
+		run.Suite,
+		nullableString(run.ControlSuite),
+		run.ArtifactDigest,
+		string(summaryJSON),
+		boolToInt(run.PolicyCandidate),
+		boolToInt(run.PolicyApplied),
+		boolToInt(run.PolicyAccepted),
+		boolToInt(run.PolicyReverted),
+		run.DraftCount,
+		timeutil.FormatRFC3339Nano(run.CreatedAt),
+	)
+	return err
+}
+
+func listRetrievalCorrectionRunRows(ctx context.Context, db *sql.DB, limit int) ([]RetrievalCorrectionRun, error) {
+	query := `
+SELECT id, suite, control_suite, artifact_digest, summary_json,
+       policy_candidate, policy_applied, policy_accepted, policy_reverted, draft_count, created_at
+FROM aca_retrieval_correction_runs
+ORDER BY created_at DESC`
+	var rows *sql.Rows
+	var err error
+	if limit > 0 {
+		rows, err = db.QueryContext(ctx, query+` LIMIT ?`, limit)
+	} else {
+		rows, err = db.QueryContext(ctx, query)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("query retrieval correction runs: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	var out []RetrievalCorrectionRun
+	for rows.Next() {
+		item, err := scanRetrievalCorrectionRunRow(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, item)
+	}
+	return out, rows.Err()
+}
+
+func findRetrievalCorrectionRunRow(ctx context.Context, db *sql.DB, id string) (*RetrievalCorrectionRun, error) {
+	row := db.QueryRowContext(ctx, `
+SELECT id, suite, control_suite, artifact_digest, summary_json,
+       policy_candidate, policy_applied, policy_accepted, policy_reverted, draft_count, created_at
+FROM aca_retrieval_correction_runs
+WHERE id = ?
+LIMIT 1
+`, strings.TrimSpace(id))
+	item, err := scanRetrievalCorrectionRunRow(row)
+	if err != nil {
+		if dbutil.IsNoRows(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &item, nil
+}
+
+func insertGraphCorrectionRunRow(ctx context.Context, db *sql.DB, run GraphCorrectionRun) error {
+	_, err := db.ExecContext(ctx, `
+INSERT INTO aca_graph_correction_runs (
+	id, method, suite, artifact_digest, queries, matched, misses, classification, recommended_fix, created_at
+)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+`,
+		run.ID,
+		run.Method,
+		run.Suite,
+		run.ArtifactDigest,
+		run.Queries,
+		run.Matched,
+		run.Misses,
+		nullableString(run.Classification),
+		nullableString(run.RecommendedFix),
+		timeutil.FormatRFC3339Nano(run.CreatedAt),
+	)
+	return err
+}
+
+func listGraphCorrectionRunRows(ctx context.Context, db *sql.DB, limit int) ([]GraphCorrectionRun, error) {
+	query := `
+SELECT id, method, suite, artifact_digest, queries, matched, misses, classification, recommended_fix, created_at
+FROM aca_graph_correction_runs
+ORDER BY created_at DESC`
+	var rows *sql.Rows
+	var err error
+	if limit > 0 {
+		rows, err = db.QueryContext(ctx, query+` LIMIT ?`, limit)
+	} else {
+		rows, err = db.QueryContext(ctx, query)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("query graph correction runs: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	var out []GraphCorrectionRun
+	for rows.Next() {
+		item, err := scanGraphCorrectionRunRow(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, item)
+	}
+	return out, rows.Err()
+}
+
+func findGraphCorrectionRunRow(ctx context.Context, db *sql.DB, id string) (*GraphCorrectionRun, error) {
+	row := db.QueryRowContext(ctx, `
+SELECT id, method, suite, artifact_digest, queries, matched, misses, classification, recommended_fix, created_at
+FROM aca_graph_correction_runs
+WHERE id = ?
+LIMIT 1
+`, strings.TrimSpace(id))
+	item, err := scanGraphCorrectionRunRow(row)
+	if err != nil {
+		if dbutil.IsNoRows(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &item, nil
+}
+
 func scanObservationRow(scanner interface{ Scan(dest ...any) error }) (Observation, error) {
 	var item Observation
 	var project, area sql.NullString
@@ -585,6 +761,71 @@ func scanMaintenanceTaskRow(scanner interface{ Scan(dest ...any) error }) (Maint
 		if err := json.Unmarshal([]byte(refsJSON), &item.SourceRefs); err != nil {
 			return MaintenanceTask{}, fmt.Errorf("decode maintenance refs: %w", err)
 		}
+	}
+	item.CreatedAt = timeutil.MustParseRFC3339Nano(createdAt)
+	return item, nil
+}
+
+func scanRetrievalCorrectionRunRow(scanner interface{ Scan(dest ...any) error }) (RetrievalCorrectionRun, error) {
+	var item RetrievalCorrectionRun
+	var controlSuite sql.NullString
+	var summaryJSON string
+	var policyCandidate, policyApplied, policyAccepted, policyReverted int
+	var createdAt string
+	if err := scanner.Scan(
+		&item.ID,
+		&item.Suite,
+		&controlSuite,
+		&item.ArtifactDigest,
+		&summaryJSON,
+		&policyCandidate,
+		&policyApplied,
+		&policyAccepted,
+		&policyReverted,
+		&item.DraftCount,
+		&createdAt,
+	); err != nil {
+		return RetrievalCorrectionRun{}, fmt.Errorf("scan retrieval correction run: %w", err)
+	}
+	if controlSuite.Valid {
+		item.ControlSuite = controlSuite.String
+	}
+	if summaryJSON != "" {
+		if err := json.Unmarshal([]byte(summaryJSON), &item.Summary); err != nil {
+			return RetrievalCorrectionRun{}, fmt.Errorf("decode retrieval correction summary: %w", err)
+		}
+	}
+	item.PolicyCandidate = policyCandidate != 0
+	item.PolicyApplied = policyApplied != 0
+	item.PolicyAccepted = policyAccepted != 0
+	item.PolicyReverted = policyReverted != 0
+	item.CreatedAt = timeutil.MustParseRFC3339Nano(createdAt)
+	return item, nil
+}
+
+func scanGraphCorrectionRunRow(scanner interface{ Scan(dest ...any) error }) (GraphCorrectionRun, error) {
+	var item GraphCorrectionRun
+	var classification, recommendedFix sql.NullString
+	var createdAt string
+	if err := scanner.Scan(
+		&item.ID,
+		&item.Method,
+		&item.Suite,
+		&item.ArtifactDigest,
+		&item.Queries,
+		&item.Matched,
+		&item.Misses,
+		&classification,
+		&recommendedFix,
+		&createdAt,
+	); err != nil {
+		return GraphCorrectionRun{}, fmt.Errorf("scan graph correction run: %w", err)
+	}
+	if classification.Valid {
+		item.Classification = classification.String
+	}
+	if recommendedFix.Valid {
+		item.RecommendedFix = recommendedFix.String
 	}
 	item.CreatedAt = timeutil.MustParseRFC3339Nano(createdAt)
 	return item, nil

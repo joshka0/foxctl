@@ -1381,8 +1381,9 @@ func runAgentAskWithRoute(cmd *cobra.Command, args []string) error {
 	case askDispatchModeMailbox:
 		dispatcher = newMailboxAskDispatcher(mailboxStore, nowFn, newID)
 	case askDispatchModeJido:
+		workspaceRoot := resolveContextWorkspace("")
 		var runtimeErr error
-		dispatcher, eventStore, projections, cleanupFn, runtimeErr = newJidoAskRuntime(ctx, cfg.Storage.Root, nowFn, newID)
+		dispatcher, eventStore, projections, cleanupFn, runtimeErr = newJidoAskRuntime(ctx, cfg.Storage.Root, workspaceRoot, nowFn, newID)
 		if runtimeErr != nil {
 			return writeErrorEnvelope(cmd, "agent/ask", string(protocol.ErrorCodeERuntime), runtimeErr.Error())
 		}

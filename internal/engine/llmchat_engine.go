@@ -70,6 +70,10 @@ type LLMChatConfig struct {
 	// ResponseFormat enforces structured outputs when supported by the provider.
 	ResponseFormat json.RawMessage
 
+	// ToolChoice forwards an OpenAI-compatible tool_choice override when tools
+	// are present, for example `"auto"` or `"required"`.
+	ToolChoice json.RawMessage
+
 	// HookDispatcher for pre/post tool use hooks (optional).
 	HookDispatcher hooks.Dispatcher
 
@@ -625,6 +629,9 @@ func (e *LLMChatEngine) callLLM(ctx context.Context, messages []oaiMessage, tool
 
 	if len(tools) > 0 {
 		reqBody.Tools = tools
+		if len(e.config.ToolChoice) > 0 {
+			reqBody.ToolChoice = e.config.ToolChoice
+		}
 	}
 	if len(e.config.ResponseFormat) > 0 {
 		reqBody.ResponseFormat = e.config.ResponseFormat
@@ -711,6 +718,7 @@ type oaiRequest struct {
 	Model          string          `json:"model"`
 	Messages       []oaiMessage    `json:"messages"`
 	Tools          []oaiTool       `json:"tools,omitempty"`
+	ToolChoice     json.RawMessage `json:"tool_choice,omitempty"`
 	Temperature    float64         `json:"temperature,omitempty"`
 	MaxTokens      int             `json:"max_tokens,omitempty"`
 	ResponseFormat json.RawMessage `json:"response_format,omitempty"`

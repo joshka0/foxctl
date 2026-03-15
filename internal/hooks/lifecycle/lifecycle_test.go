@@ -135,6 +135,9 @@ func TestRestorePostcompactConsumesMarker(t *testing.T) {
 			target.Data.HookOutput.Context = "Recovered post-compact context"
 			return nil
 		},
+		TaskContinuity: func(ctx context.Context, workspace string) (string, error) {
+			return "## Task Continuity\n\nTask continuity summary", nil
+		},
 	}
 
 	response, err := RestorePostcompact(context.Background(), deps, PostcompactRestoreRequest{
@@ -148,6 +151,9 @@ func TestRestorePostcompactConsumesMarker(t *testing.T) {
 	}
 	if !strings.Contains(response.Context, "Recovered post-compact context") {
 		t.Fatalf("context = %q", response.Context)
+	}
+	if !strings.Contains(response.Context, "Task continuity summary") {
+		t.Fatalf("context continuity = %q", response.Context)
 	}
 	if _, err := os.Stat(markerPath); err == nil {
 		t.Fatalf("expected marker to be deleted")

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/jkatigb/agentctl/internal/contextplane"
+	"github.com/jkatigb/agentctl/internal/contextplane/taskhistory"
 	"github.com/jkatigb/agentctl/internal/daemon"
 	"github.com/jkatigb/agentctl/internal/domain/skill"
 	"github.com/jkatigb/agentctl/internal/platform/config"
@@ -86,6 +87,7 @@ type (
 	SummaryAppender  func(workspace string, prefs, gotchas, timeSinks []string) bool
 	DaemonEnsurer    func(ctx context.Context, workspace string) bool
 	WarmupFunc       func(ctx context.Context, workspace string)
+	TaskContinuity   func(ctx context.Context, workspace string) (string, error)
 )
 
 type Dependencies struct {
@@ -95,6 +97,7 @@ type Dependencies struct {
 	DetectIdentity IdentityDetector
 	RunSkill       SkillRunner
 	AppendSummary  SummaryAppender
+	TaskContinuity TaskContinuity
 }
 
 type sessionRestoreEnvelope struct {
@@ -150,6 +153,25 @@ func NewDependencies(cfg config.Config) Dependencies {
 			return RunSkill(ctx, cfg, client, skillName, input, workspace, out)
 		},
 		AppendSummary: AppendSummaryNotes,
+		TaskContinuity: func(ctx context.Context, workspace string) (string, error) {
+			collector, cleanup, err := taskhistory.OpenCollector(ctx, cfg.Storage.Root, workspace, "")
+			if err != nil {
+				return "", err
+			}
+			defer cleanup()
+			pack, err := collector.Collect(ctx, taskhistory.Options{
+				WorkspacePath: workspace,
+				WorkspaceID:   workspaceID(workspace),
+			})
+			if err != nil {
+				return "", err
+			}
+			artifact, err := taskhistory.PersistPack(ctx, cfg.Paths.CAS, pack)
+			if err != nil {
+				return "", err
+			}
+			return taskhistory.RenderHookContextWithArtifact(pack, artifact), nil
+		},
 	}
 }
 
@@ -586,6 +608,11 @@ func RestorePostcompact(ctx context.Context, deps Dependencies, req PostcompactR
 		return response, nil
 	}
 	response.Context = strings.TrimSpace(restore.Data.HookOutput.Context)
+	if deps.TaskContinuity != nil {
+		if continuity, err := deps.TaskContinuity(ctx, target); err == nil && strings.TrimSpace(continuity) != "" {
+			response.Context = joinContext(response.Context, continuity)
+		}
+	}
 	return response, nil
 }
 
@@ -746,6 +773,10 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
+}
+
+func workspaceID(path string) string {
+	return workspace.CanonicalID(path)
 }
 
 func nullableString(value string) any {
