@@ -19,6 +19,7 @@ import (
 	"github.com/rs/zerolog"
 
 	"github.com/jkatigb/agentctl/internal/companion"
+	"github.com/jkatigb/agentctl/internal/contextplane/taskhistory"
 	"github.com/jkatigb/agentctl/internal/daemon"
 	agenttypes "github.com/jkatigb/agentctl/internal/domain/agent"
 	"github.com/jkatigb/agentctl/internal/indexing/semantic"
@@ -1305,7 +1306,7 @@ func handleAgentRuntimeGet(w http.ResponseWriter, r *http.Request, cfg config.Co
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
-		"runtime": loadAgentRuntimeTree(r.Context(), log, agent, depth),
+		"runtime": loadAgentRuntimeTree(r.Context(), cfg, log, agent, depth),
 	})
 }
 
@@ -1969,7 +1970,7 @@ func handleAgentPatch(w http.ResponseWriter, r *http.Request, cfg config.Config,
 	})
 }
 
-func loadAgentRuntimeTree(ctx context.Context, log zerolog.Logger, agent agenttypes.Agent, depth int) *agentRuntimeTreeData {
+func loadAgentRuntimeTree(ctx context.Context, cfg config.Config, log zerolog.Logger, agent agenttypes.Agent, depth int) *agentRuntimeTreeData {
 	runtime := &agentRuntimeTreeData{
 		Enabled: strings.TrimSpace(agent.ID) != "",
 		AgentID: strings.TrimSpace(agent.ID),
@@ -1987,7 +1988,7 @@ func loadAgentRuntimeTree(ctx context.Context, log zerolog.Logger, agent agentty
 	}
 
 	visited := map[string]struct{}{}
-	root := loadAgentRuntimeTreeNode(ctx, log, client, v2jido.ChildRef{
+	root := loadAgentRuntimeTreeNode(ctx, cfg, log, client, v2jido.ChildRef{
 		Tag:     runtime.AgentID,
 		AgentID: runtime.AgentID,
 		Metadata: map[string]any{
@@ -2006,6 +2007,7 @@ func loadAgentRuntimeTree(ctx context.Context, log zerolog.Logger, agent agentty
 
 func loadAgentRuntimeTreeNode(
 	ctx context.Context,
+	cfg config.Config,
 	log zerolog.Logger,
 	client v2jido.Client,
 	ref v2jido.ChildRef,
@@ -2042,6 +2044,9 @@ func loadAgentRuntimeTreeNode(
 			node.State = string(stateResp.State)
 			log.Debug().Err(err).Str("agent_id", agentID).Msg("failed to decode agent runtime state; returning raw payload")
 		} else {
+			if stateMap, ok := state.(map[string]any); ok {
+				state = taskhistory.RefreshJidoRuntimeState(ctx, cfg.Storage.Root, cfg.Paths.CAS, stateMap)
+			}
 			node.State = state
 		}
 	}
@@ -2055,7 +2060,7 @@ func loadAgentRuntimeTreeNode(
 		return node
 	}
 	for _, child := range sortedAgentChildRefs(childrenResp.Children) {
-		node.Children = append(node.Children, loadAgentRuntimeTreeNode(ctx, log, client, child, depth-1, visited))
+		node.Children = append(node.Children, loadAgentRuntimeTreeNode(ctx, cfg, log, client, child, depth-1, visited))
 	}
 	return node
 }

@@ -12,6 +12,7 @@ This is the canonical map for docs in this repository.
 ## Current Reference Docs
 
 - [docs/general/](general/) - Core subsystem guides (skills, hooks, memory, storage, sessions).
+- [docs/general/task-continuity.md](general/task-continuity.md) - Deterministic task continuity pack, command/wrapper split, and artifact-backed delivery.
 - [docs/general/core-package-coverage.md](general/core-package-coverage.md) - Machine-friendly core package coverage matrix.
 - [docs/architecture/](architecture/) - Current runtime architecture docs.
 - [docs/architecture/context-architecture.md](architecture/context-architecture.md) - Workspace-local ACA control plane and top-of-mind slice.
@@ -27,6 +28,7 @@ This is the canonical map for docs in this repository.
 - [docs/spec/agent_hierarchy.md](spec/agent_hierarchy.md) - Current hierarchy and spawn protocol.
 - [docs/spec/overseer_profile.md](spec/overseer_profile.md) - Overseer coordination profile.
 - [docs/spec/repo_graph_index_and_dag_grep.md](spec/repo_graph_index_and_dag_grep.md) - Canonical repo graph schema and `dag_grep` behavior contract.
+- [docs/spec/rlm_query_runtime.md](spec/rlm_query_runtime.md) - Experimental RLM query-time runtime contract over ACA, companion memory, and external state.
 - [docs/spec/v2_greenfield_bootstrap.md](spec/v2_greenfield_bootstrap.md) - Evolving target-state v2 design spec, not the canonical as-built runtime map.
 - [docs/spec/v2_repo_rules_and_skills.md](spec/v2_repo_rules_and_skills.md) - v2 repo rules and core skills governance.
 
@@ -45,6 +47,12 @@ This is the canonical map for docs in this repository.
 - [docs/plans/README.md](plans/README.md) - Active and current planning docs.
 - [docs/plans/gui-agent-improvement-roadmap.md](plans/gui-agent-improvement-roadmap.md) - Converged roadmap for turning `gui-agent` into a coherent operator control plane.
 - [docs/plans/features/v2-skills-parity-plan.md](plans/features/v2-skills-parity-plan.md) - Bring v2 profiles/tooling up to parity with ACA, Obsidian, and newer retrieval surfaces.
+- [docs/plans/features/agentctl-rlm-integration-outline.md](plans/features/agentctl-rlm-integration-outline.md) - Concrete outline for adding an RLM query-time runtime over ACA, companion memory, and repo/vault state.
+- [docs/plans/features/agentctl-rlm-next-steps.md](plans/features/agentctl-rlm-next-steps.md) - Routed and staged next-step plan for turning the experimental RLM runtime into a practical retrieval/controller layer.
+- [docs/plans/features/rlm-retrieval-findings.md](plans/features/rlm-retrieval-findings.md) - Current benchmark snapshot comparing ACA, direct repoindex lanes, and RLM retrieval modes.
+- [docs/plans/features/aca-retrieval-hypotheses.md](plans/features/aca-retrieval-hypotheses.md) - Deterministic ACA retrieval hypotheses and eval modes for testing control-plane, vault, trust, and repo-hint improvements.
+- [docs/plans/features/aca-self-corrective-loop.md](plans/features/aca-self-corrective-loop.md) - First slice for observing ACA retrieval misses, classifying them, and proposing deterministic corrections.
+- [docs/plans/features/generic-agent-experiment-loop.md](plans/features/generic-agent-experiment-loop.md) - Design for turning long-running agents into hypothesis-driven, evaluator-bounded experiment loops.
 - [docs/impl_plan/README.md](impl_plan/README.md) - Legacy phased plan stream kept for history.
 
 ## Historical and Generated Material

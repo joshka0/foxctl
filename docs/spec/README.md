@@ -13,6 +13,7 @@ Use this folder for canonical behavior and wire-contract specifications.
 - `semantic_file_index.md` - Semantic file indexing spec.
 - `code_symbol_index_and_swe_grep.md` - Symbol index + snippet extraction behavior.
 - `repo_graph_index_and_dag_grep.md` - Repo graph data model and `dag_grep` explanation-query contract.
+- `rlm_query_runtime.md` - Experimental RLM query-time runtime contract over ACA, companion memory, and external state.
 
 ## Evolving V2 Design Specs
 

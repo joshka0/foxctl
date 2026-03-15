@@ -4,6 +4,7 @@ import (
 	"slices"
 	"testing"
 
+	"github.com/jkatigb/agentctl/internal/domain/agent"
 	coretool "github.com/jkatigb/agentctl/internal/v2/core/tool"
 	runtimetoolnames "github.com/jkatigb/agentctl/internal/v2/runtime/toolnames"
 )
@@ -79,5 +80,36 @@ func TestBuildJidoPluginConfig_UsesSharedDefaultToolSpec(t *testing.T) {
 	}
 	if got := toolCmd["default_timeout_ms"]; got != int64(120000) {
 		t.Fatalf("tool_command.default_timeout_ms=%v want 120000", got)
+	}
+}
+
+func TestBuildJidoInitialState_IncludesTaskContinuity(t *testing.T) {
+	t.Parallel()
+
+	state := buildJidoInitialState(agent.Agent{
+		Prompt:          "Investigate storage",
+		MaxIterations:   7,
+		MaxAutoTurns:    2,
+		ThinkInterval:   30,
+		MemoryRetention: "workspace",
+		ExecutionLayer:  "jido",
+	}, "/repo", map[string]any{
+		"task_id":    "T-1",
+		"task_title": "Investigate storage",
+		"summary":    "Task continuity summary",
+	})
+
+	if got := state["prompt"]; got != "Investigate storage" {
+		t.Fatalf("prompt=%v", got)
+	}
+	if got := state["workspace_root"]; got != "/repo" {
+		t.Fatalf("workspace_root=%v", got)
+	}
+	continuity, ok := state["task_continuity"].(map[string]any)
+	if !ok {
+		t.Fatalf("task_continuity=%T", state["task_continuity"])
+	}
+	if got := continuity["task_id"]; got != "T-1" {
+		t.Fatalf("task_id=%v", got)
 	}
 }

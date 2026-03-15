@@ -1,0 +1,61 @@
+name: agentctl-inspectors
+cases:
+  - id: aca-storage-memory
+    method: aca_retrieve
+    query: "storage memory package"
+    expected_any_of:
+      - internal/storage/memory/store.go
+    expected_classification: "package_note_fallback_disabled"
+    expected_fix_contains: "package-note fallback"
+    notes: "ACA currently finds the broader semantic/memory map first and proposes enabling package-note fallback."
+
+  - id: aca-skillmain
+    method: aca_retrieve
+    query: "skills main runtime wiring"
+    expected_any_of:
+      - internal/adapters/skillslib/skillmain/main.go
+    expected_classification: "missing_vault_coverage"
+    expected_fix_contains: "durable note coverage"
+    notes: "ACA currently has no useful durable note hit for this query family."
+
+  - id: dag-web-api
+    method: repoindex_dag
+    query: "web api transport"
+    expected_any_of:
+      - internal/web/api/agents.go
+    expected_classification: "anchor_mismatch"
+    expected_fix_contains: "anchor projection"
+    notes: "DAG currently returns structural anchors, but not the expected web API handler file first."
+
+  - id: dag-storage-memory
+    method: repoindex_dag
+    query: "storage memory package"
+    expected_any_of:
+      - internal/storage/memory/store.go
+    expected_classification: "matched"
+    notes: "DAG currently lands on the storage memory implementation for this query."
+
+  - id: search-storage-memory
+    method: repoindex_search
+    query: "storage memory package"
+    expected_any_of:
+      - internal/storage/memory/store.go
+    expected_classification: "matched"
+    notes: "Repoindex search currently surfaces the storage memory implementation correctly."
+
+  - id: semantic-storage-memory
+    method: semantic_search
+    query: "storage memory package"
+    expected_any_of:
+      - internal/storage/memory/store.go
+    expected_classification: "matched"
+    notes: "Semantic/code search currently hits the storage memory implementation on this query."
+
+  - id: semantic-imaginary
+    method: semantic_search
+    query: "completely imaginary package phrase"
+    expected_any_of:
+      - internal/does/not/exist.go
+    expected_classification: "anchor_mismatch"
+    expected_fix_contains: "fallback ordering"
+    notes: "Semantic/code search returns unrelated candidates rather than no results for this synthetic miss."

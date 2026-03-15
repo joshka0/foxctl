@@ -578,6 +578,78 @@ func (s *WorkspaceStore) ListMaintenanceTasks(limit int) ([]MaintenanceTask, err
 	return listMaintenanceTaskRows(context.Background(), db, limit)
 }
 
+// RecordRetrievalCorrectionRun persists one ACA retrieval correction run summary.
+func (s *WorkspaceStore) RecordRetrievalCorrectionRun(run RetrievalCorrectionRun) error {
+	db, closeFn, err := s.openMutableDB(context.Background())
+	if err != nil {
+		return err
+	}
+	defer func() { _ = closeFn() }()
+	if run.ID == "" {
+		run.ID = buildRecordID("R", timeutil.NowUTC())
+	}
+	if run.CreatedAt.IsZero() {
+		run.CreatedAt = timeutil.NowUTC()
+	}
+	return insertRetrievalCorrectionRunRow(context.Background(), db, run)
+}
+
+// ListRetrievalCorrectionRuns returns persisted ACA retrieval correction runs, newest first.
+func (s *WorkspaceStore) ListRetrievalCorrectionRuns(limit int) ([]RetrievalCorrectionRun, error) {
+	db, closeFn, err := s.openMutableDB(context.Background())
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = closeFn() }()
+	return listRetrievalCorrectionRunRows(context.Background(), db, limit)
+}
+
+// GetRetrievalCorrectionRun returns one persisted ACA retrieval correction run by ID.
+func (s *WorkspaceStore) GetRetrievalCorrectionRun(id string) (*RetrievalCorrectionRun, error) {
+	db, closeFn, err := s.openMutableDB(context.Background())
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = closeFn() }()
+	return findRetrievalCorrectionRunRow(context.Background(), db, id)
+}
+
+// RecordGraphCorrectionRun persists one repoindex search or DAG correction run summary.
+func (s *WorkspaceStore) RecordGraphCorrectionRun(run GraphCorrectionRun) error {
+	db, closeFn, err := s.openMutableDB(context.Background())
+	if err != nil {
+		return err
+	}
+	defer func() { _ = closeFn() }()
+	if run.ID == "" {
+		run.ID = buildRecordID("G", timeutil.NowUTC())
+	}
+	if run.CreatedAt.IsZero() {
+		run.CreatedAt = timeutil.NowUTC()
+	}
+	return insertGraphCorrectionRunRow(context.Background(), db, run)
+}
+
+// ListGraphCorrectionRuns returns persisted repoindex graph correction runs, newest first.
+func (s *WorkspaceStore) ListGraphCorrectionRuns(limit int) ([]GraphCorrectionRun, error) {
+	db, closeFn, err := s.openMutableDB(context.Background())
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = closeFn() }()
+	return listGraphCorrectionRunRows(context.Background(), db, limit)
+}
+
+// GetGraphCorrectionRun returns one persisted repoindex graph correction run by ID.
+func (s *WorkspaceStore) GetGraphCorrectionRun(id string) (*GraphCorrectionRun, error) {
+	db, closeFn, err := s.openMutableDB(context.Background())
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = closeFn() }()
+	return findGraphCorrectionRunRow(context.Background(), db, id)
+}
+
 // ListPromotionJobs returns recorded promotion jobs, newest first.
 func (s *WorkspaceStore) ListPromotionJobs(limit int) ([]PromotionJob, error) {
 	db, closeFn, err := s.openMutableDB(context.Background())
@@ -928,6 +1000,9 @@ ranking_weights:
   semantic_match: 2
   recency: 1
   reuse_frequency: 1
+
+aca:
+  package_note_fallback: false
 `
 
 const defaultPromotionPolicy = `trust_levels:

@@ -1,0 +1,35 @@
+retrieval_order:
+  - top_of_mind
+  - active_task_packet
+  - latest_handoff
+  - procedural_memory
+  - vault_retrieval
+  - external_sources
+
+semantic_search_default_scopes:
+  - symbols
+  - sessions
+  - memories
+  - tasks
+  - codemaps
+  - context
+
+budgets:
+  top_of_mind_tokens: 1000
+  task_packet_tokens: 500
+  handoff_tokens: 400
+  evidence_snippets_min: 3
+  evidence_snippets_max: 7
+
+ranking_weights:
+  project_match: 4
+  trust_level: 3
+  note_type_weight: 3
+  link_proximity: 2
+  lexical_match: 2
+  semantic_match: 2
+  recency: 1
+  reuse_frequency: 1
+
+aca:
+  package_note_fallback: true

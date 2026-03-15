@@ -106,6 +106,7 @@ func toTaskCandidate(task taskstore.Task) TaskCandidate {
 		DependsOn:   append([]string(nil), task.DependsOn...),
 		PlanFile:    task.PlanFile,
 		PlanSection: task.PlanSection,
+		SessionID:   task.SessionID,
 	}
 }
 

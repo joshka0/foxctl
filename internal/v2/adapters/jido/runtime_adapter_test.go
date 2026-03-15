@@ -160,6 +160,57 @@ func TestRuntimeAdapter_SendInvokesSignalAckHook(t *testing.T) {
 	}
 }
 
+func TestRuntimeAdapter_SendInvokesPrepareSignalHook(t *testing.T) {
+	t.Parallel()
+
+	client := &fakeClient{
+		signalResp: SignalResponse{
+			Status:    "sent",
+			MessageID: "msg-prep-1",
+		},
+	}
+
+	adapter, err := NewRuntimeAdapter(RuntimeAdapterConfig{
+		Client: client,
+		PrepareSignal: func(_ context.Context, msg ask.Message, req *SignalRequest) error {
+			if msg.ToNS != "agent:prep" {
+				t.Fatalf("msg.to_ns=%q want agent:prep", msg.ToNS)
+			}
+			if req.Signal.Metadata == nil {
+				req.Signal.Metadata = map[string]any{}
+			}
+			req.Signal.Metadata["task_continuity"] = map[string]any{
+				"task_id":  "T-1",
+				"artifact": "sha256:test",
+			}
+			return nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewRuntimeAdapter() error = %v", err)
+	}
+
+	_, err = adapter.Send(context.Background(), ask.Message{
+		AskID:    "ask-prep",
+		Kind:     "context",
+		Question: "refresh continuity",
+		FromNS:   "caller:prep",
+		ToNS:     "agent:prep",
+		TTLMS:    1000,
+	})
+	if err != nil {
+		t.Fatalf("Send() error = %v", err)
+	}
+
+	meta, ok := client.signalReq.Signal.Metadata["task_continuity"].(map[string]any)
+	if !ok {
+		t.Fatalf("task_continuity=%T", client.signalReq.Signal.Metadata["task_continuity"])
+	}
+	if got := meta["task_id"]; got != "T-1" {
+		t.Fatalf("task_id=%v want T-1", got)
+	}
+}
+
 func TestRuntimeAdapter_SpawnChildForwardsRequest(t *testing.T) {
 	t.Parallel()
 

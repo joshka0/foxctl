@@ -17,6 +17,7 @@ import (
 
 	"github.com/rs/zerolog"
 
+	"github.com/jkatigb/agentctl/internal/contextplane/taskhistory"
 	"github.com/jkatigb/agentctl/internal/domain/envelope"
 	"github.com/jkatigb/agentctl/internal/observability"
 	"github.com/jkatigb/agentctl/internal/platform/config"
@@ -247,7 +248,7 @@ func OrchestrationBoardCardGetHandler(cfg config.Config, log zerolog.Logger) htt
 		}
 		data := orchestrationBoardCardData{Card: resp.Card}
 		if includeRuntime {
-			data.Runtime = loadOrchestrationCardRuntime(r.Context(), log, resp.Card)
+			data.Runtime = loadOrchestrationCardRuntime(r.Context(), cfg, log, resp.Card)
 			if data.Runtime != nil {
 				event.WithData("runtime_enabled", data.Runtime.Enabled).
 					WithData("runtime_agent_id", data.Runtime.AgentID).
@@ -321,7 +322,7 @@ func OrchestrationBoardCardRuntimeGetHandler(cfg config.Config, log zerolog.Logg
 
 		data := orchestrationBoardCardRuntimeData{
 			Card:    resp.Card,
-			Runtime: loadOrchestrationCardRuntimeTree(r.Context(), log, resp.Card, depth),
+			Runtime: loadOrchestrationCardRuntimeTree(r.Context(), cfg, log, resp.Card, depth),
 		}
 		if data.Runtime != nil {
 			event.WithData("runtime_enabled", data.Runtime.Enabled).
@@ -1245,7 +1246,7 @@ func normalizeOrchestrationCardAction(action string) string {
 	}
 }
 
-func loadOrchestrationCardRuntime(ctx context.Context, log zerolog.Logger, card coreorchestration.Card) *orchestrationCardRuntimeData {
+func loadOrchestrationCardRuntime(ctx context.Context, cfg config.Config, log zerolog.Logger, card coreorchestration.Card) *orchestrationCardRuntimeData {
 	runtime := &orchestrationCardRuntimeData{
 		Enabled: strings.TrimSpace(card.AgentID) != "",
 		AgentID: strings.TrimSpace(card.AgentID),
@@ -1273,6 +1274,9 @@ func loadOrchestrationCardRuntime(ctx context.Context, log zerolog.Logger, card 
 			runtime.State = string(stateResp.State)
 			log.Debug().Err(err).Str("agent_id", runtime.AgentID).Msg("failed to decode orchestration runtime state; returning raw payload")
 		} else {
+			if stateMap, ok := state.(map[string]any); ok {
+				state = taskhistory.RefreshJidoRuntimeState(ctx, cfg.Storage.Root, cfg.Paths.CAS, stateMap)
+			}
 			runtime.State = state
 		}
 	}
@@ -1288,7 +1292,7 @@ func loadOrchestrationCardRuntime(ctx context.Context, log zerolog.Logger, card 
 	return runtime
 }
 
-func loadOrchestrationCardRuntimeTree(ctx context.Context, log zerolog.Logger, card coreorchestration.Card, depth int) *orchestrationRuntimeTreeData {
+func loadOrchestrationCardRuntimeTree(ctx context.Context, cfg config.Config, log zerolog.Logger, card coreorchestration.Card, depth int) *orchestrationRuntimeTreeData {
 	runtime := &orchestrationRuntimeTreeData{
 		Enabled: strings.TrimSpace(card.AgentID) != "",
 		AgentID: strings.TrimSpace(card.AgentID),
@@ -1306,7 +1310,7 @@ func loadOrchestrationCardRuntimeTree(ctx context.Context, log zerolog.Logger, c
 	}
 
 	visited := map[string]struct{}{}
-	root := loadOrchestrationRuntimeTreeNode(ctx, log, client, v2jido.ChildRef{
+	root := loadOrchestrationRuntimeTreeNode(ctx, cfg, log, client, v2jido.ChildRef{
 		Tag:      runtime.AgentID,
 		AgentID:  runtime.AgentID,
 		Metadata: map[string]any{"workspace_id": card.WorkspaceID, "issue_id": card.IssueID},
@@ -1320,6 +1324,7 @@ func loadOrchestrationCardRuntimeTree(ctx context.Context, log zerolog.Logger, c
 
 func loadOrchestrationRuntimeTreeNode(
 	ctx context.Context,
+	cfg config.Config,
 	log zerolog.Logger,
 	client v2jido.Client,
 	ref v2jido.ChildRef,
@@ -1356,6 +1361,9 @@ func loadOrchestrationRuntimeTreeNode(
 			node.State = string(stateResp.State)
 			log.Debug().Err(err).Str("agent_id", agentID).Msg("failed to decode orchestration runtime node state; returning raw payload")
 		} else {
+			if stateMap, ok := state.(map[string]any); ok {
+				state = taskhistory.RefreshJidoRuntimeState(ctx, cfg.Storage.Root, cfg.Paths.CAS, stateMap)
+			}
 			node.State = state
 		}
 	}
@@ -1369,7 +1377,7 @@ func loadOrchestrationRuntimeTreeNode(
 		return node
 	}
 	for _, child := range sortedChildRefs(childrenResp.Children) {
-		node.Children = append(node.Children, loadOrchestrationRuntimeTreeNode(ctx, log, client, child, depth-1, visited))
+		node.Children = append(node.Children, loadOrchestrationRuntimeTreeNode(ctx, cfg, log, client, child, depth-1, visited))
 	}
 	return node
 }

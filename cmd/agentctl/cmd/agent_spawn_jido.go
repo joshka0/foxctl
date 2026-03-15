@@ -8,9 +8,11 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/jkatigb/agentctl/internal/contextplane/taskhistory"
 	"github.com/jkatigb/agentctl/internal/domain/agent"
 	"github.com/jkatigb/agentctl/internal/execution/agentmanager"
 	errs "github.com/jkatigb/agentctl/internal/platform/errors"
+	ws "github.com/jkatigb/agentctl/internal/platform/workspace"
 	"github.com/jkatigb/agentctl/internal/storage/agents"
 	"github.com/jkatigb/agentctl/internal/storage/mailbox"
 	v2jido "github.com/jkatigb/agentctl/internal/v2/adapters/jido"
@@ -33,18 +35,6 @@ func jidoStartAgentForRecord(ctx context.Context, record agent.Agent, storageRoo
 		return fmt.Errorf("configure jido client: %w", err)
 	}
 
-	initialState, err := json.Marshal(map[string]any{
-		"prompt":           strings.TrimSpace(record.Prompt),
-		"max_iterations":   record.MaxIterations,
-		"max_auto_turns":   record.MaxAutoTurns,
-		"think_interval":   record.ThinkInterval,
-		"memory_retention": string(record.MemoryRetention),
-		"execution_layer":  string(record.ExecutionLayer),
-	})
-	if err != nil {
-		return fmt.Errorf("marshal jido initial state: %w", err)
-	}
-
 	binaryPath, err := os.Executable()
 	if err != nil {
 		binaryPath = "agentctl"
@@ -56,6 +46,14 @@ func jidoStartAgentForRecord(ctx context.Context, record agent.Agent, storageRoo
 	absWorkspace, absErr := filepath.Abs(workspaceRoot)
 	if absErr == nil {
 		workspaceRoot = absWorkspace
+	}
+	initialStateMap := buildJidoInitialState(record, workspaceRoot, nil)
+	if continuity := taskContinuityState(ctx, storageRoot, workspaceRoot); len(continuity) > 0 {
+		initialStateMap["task_continuity"] = continuity
+	}
+	initialState, err := json.Marshal(initialStateMap)
+	if err != nil {
+		return fmt.Errorf("marshal jido initial state: %w", err)
 	}
 	pluginConfig, err := buildJidoPluginConfig(record.Role, binaryPath, workspaceRoot)
 	if err != nil {
@@ -84,6 +82,46 @@ func jidoStartAgentForRecord(ctx context.Context, record agent.Agent, storageRoo
 		return fmt.Errorf("jido runtime.start_agent returned status %q", resp.Status)
 	}
 	return nil
+}
+
+func buildJidoInitialState(record agent.Agent, workspaceRoot string, continuity map[string]any) map[string]any {
+	state := map[string]any{
+		"prompt":           strings.TrimSpace(record.Prompt),
+		"max_iterations":   record.MaxIterations,
+		"max_auto_turns":   record.MaxAutoTurns,
+		"think_interval":   record.ThinkInterval,
+		"memory_retention": string(record.MemoryRetention),
+		"execution_layer":  string(record.ExecutionLayer),
+	}
+	if root := strings.TrimSpace(workspaceRoot); root != "" {
+		state["workspace_root"] = root
+	}
+	if len(continuity) > 0 {
+		state["task_continuity"] = continuity
+	}
+	return state
+}
+
+func taskContinuityState(ctx context.Context, storageRoot, workspaceRoot string) map[string]any {
+	collector, cleanup, err := taskhistory.OpenCollector(ctx, storageRoot, workspaceRoot, "")
+	if err != nil {
+		return nil
+	}
+	defer cleanup()
+	pack, err := collector.Collect(ctx, taskhistory.Options{
+		WorkspacePath: workspaceRoot,
+		WorkspaceID:   ws.CanonicalID(workspaceRoot),
+	})
+	if err != nil {
+		return nil
+	}
+	artifact := ""
+	if cfg, err := loadConfig(ctx); err == nil {
+		if digest, persistErr := taskhistory.PersistPack(ctx, cfg.Paths.CAS, pack); persistErr == nil {
+			artifact = digest
+		}
+	}
+	return taskhistory.RenderJidoStateWithArtifact(pack, artifact)
 }
 
 func buildJidoPluginConfig(role, binaryPath, workspaceRoot string) (map[string]any, error) {

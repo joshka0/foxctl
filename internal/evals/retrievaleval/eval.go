@@ -205,6 +205,17 @@ func sortedModeKeys(m map[string]ModeResult) []string {
 		"skill_default":              4,
 		"skill_context":              5,
 		"skill_default_plus_context": 6,
+		"aca_control_only":           7,
+		"aca_vault_only":             8,
+		"aca_repo_hints":             9,
+		"aca_canonical_only":         10,
+		"aca_package_fallback":       11,
+		"aca_query_typed":            12,
+		"repoindex_search":           13,
+		"repoindex_dag":              14,
+		"rlm_llm":                    15,
+		"rlm_llm_codeintel":          16,
+		"rlm_llm_code_staged":        17,
 	}
 	for i := 0; i < len(keys); i++ {
 		for j := i + 1; j < len(keys); j++ {
