@@ -506,6 +506,7 @@ func (s *Server) Handler() http.Handler {
 	// lock instance providing zero mutual exclusion.
 	skillRunner := api.NewSkillRunner(s.cfg)
 	apiMux.HandleFunc("/api/companion/providers", api.CompanionProvidersHandler(s.cfg, s.log))
+	apiMux.HandleFunc("/api/companion/cochange", api.CompanionCoChangeHandler(s.cfg, s.log))
 	apiMux.HandleFunc("/api/companion/chat", api.CompanionChatHandler(s.cfg, s.log, s.turnLock, skillRunner))
 	apiMux.HandleFunc("/api/companion/conversations", api.CompanionConversationsHandler(s.cfg, s.log))
 	apiMux.HandleFunc("/api/companion/conversations/", func(w http.ResponseWriter, r *http.Request) {

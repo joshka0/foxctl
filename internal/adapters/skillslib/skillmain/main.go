@@ -88,7 +88,11 @@ func Main[I any](command string, run RunFunc[I]) {
 // Bootstrap loads .env/config and builds a RunContext for custom skill entrypoints.
 func Bootstrap(ctx context.Context, stdout io.Writer) (*RunContext, error) {
 	config.LoadDotEnv()
-	cfg, err := config.Load(ctx)
+	workspacePath, err := resolveWorkspaceForConfig()
+	if err != nil {
+		return nil, err
+	}
+	cfg, err := config.Load(ctx, config.WithWorkspacePath(workspacePath))
 	if err != nil {
 		return nil, err
 	}
@@ -119,7 +123,13 @@ func mainWithCode[I any](command string, run RunFunc[I], stdin io.Reader, stdout
 	defer func() { done(runErr) }()
 
 	// Load configuration
-	cfg, err := config.Load(ctx)
+	workspacePath, err := resolveWorkspaceForConfig()
+	if err != nil {
+		runErr = err
+		emitError(stdout, command, skillerr.WrapRuntime("resolve workspace", err))
+		return 1
+	}
+	cfg, err := config.Load(ctx, config.WithWorkspacePath(workspacePath))
 	if err != nil {
 		runErr = err
 		emitError(stdout, command, skillerr.WrapRuntime("load config", err))
@@ -295,6 +305,18 @@ func buildRunContext(cfg config.Config, stdout io.Writer) (*RunContext, error) {
 		MaxPreview:    5,
 		NoCAS:         noCAS,
 	}, nil
+}
+
+func resolveWorkspaceForConfig() (string, error) {
+	workspacePath := workspace.Detect("")
+	if strings.TrimSpace(workspacePath) != "" {
+		return workspacePath, nil
+	}
+	cwd, err := os.Getwd()
+	if err != nil {
+		return "", fmt.Errorf("resolve workspace: %w", err)
+	}
+	return cwd, nil
 }
 
 // resolveSessionIDWithFallback obtains the session ID by checking known environment variables and falling back to the workspace identity manager.

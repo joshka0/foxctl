@@ -168,13 +168,13 @@ type SynthesisSummary struct {
 
 // Result represents a single search result from any source.
 type Result struct {
-	Source      string           `json:"source"`                 // "symbol", "session", "memory"
+	Source      string           `json:"source"`                 // "symbol", "session", "memory", "cochange"
 	ID          string           `json:"id"`                     // Unique identifier (normalized)
 	Name        string           `json:"name"`                   // Display name
 	Path        string           `json:"path,omitempty"`         // File path (for symbols)
 	Line        int              `json:"line,omitempty"`         // Line number (for symbols)
 	Snippet     string           `json:"snippet,omitempty"`      // Code snippet (for symbols)
-	Summary     string           `json:"summary,omitempty"`      // Summary text (for sessions/memories)
+	Summary     string           `json:"summary,omitempty"`      // Summary text (for sessions/memories/cochange)
 	Similarity  float64          `json:"similarity"`             // Similarity score (0-1)
 	Rank        int              `json:"rank"`                   // Final rank after fusion
 	RRFScore    float64          `json:"rrf_score,omitempty"`    // RRF score used for ranking
@@ -299,6 +299,11 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 			return skillerr.WrapArg("invalid workspace path", err)
 		}
 		in.Workspace = workspacePath
+		cfg, err := config.Load(ctx, config.WithWorkspacePath(workspacePath))
+		if err != nil {
+			return skillerr.WrapIO("load workspace config", err)
+		}
+		rc.Config = cfg
 		out, err := buildFullRepoTree(ctx, rc.Logger, rc.Config, &in)
 		if err != nil {
 			return err
@@ -313,6 +318,12 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 			return skillerr.Validationf("invalid scope: %s (valid: symbols, sessions, memories, tasks, codemaps, context)", s)
 		}
 	}
+
+	cfg, err := config.Load(ctx, config.WithWorkspacePath(in.Workspace))
+	if err != nil {
+		return skillerr.WrapIO("load workspace config", err)
+	}
+	rc.Config = cfg
 
 	// FC/IS: Provider config and keys are resolved at the boundary from config/env.
 	voyageKey := os.Getenv("VOYAGE_API_KEY")
@@ -1678,6 +1689,12 @@ func searchMemoriesBM25(
 		if entry.Type == "code_symbol" || entry.Type == "symbol" || entry.Type == "file_embedding" || entry.Type == "edit" {
 			continue
 		}
+		source := "memory"
+		resultPath := ""
+		if entry.Type == contextplane.CoChangeClusterType {
+			source = "cochange"
+			resultPath = strings.TrimPrefix(entry.Name, "cochange://")
+		}
 
 		// BM25 scores are based on recency/frequency (0-1 range, typically <0.3)
 		// Normalize to 0.3-1.0 range so results pass min_similarity filter
@@ -1688,9 +1705,10 @@ func searchMemoriesBM25(
 		}
 
 		result := Result{
-			Source:     "memory",
+			Source:     source,
 			ID:         normalizeMemoryID(entry.Name),
 			Name:       entry.Name,
+			Path:       resultPath,
 			Summary:    skillout.TruncateString(entry.Summary, 200),
 			Similarity: normalizedScore,
 			SourceRank: rank,
@@ -1743,11 +1761,18 @@ func searchMemoriesVector(
 		if entry.Type == "code_symbol" || entry.Type == "symbol" || entry.Type == "file_embedding" || entry.Type == "edit" {
 			continue
 		}
+		source := "memory"
+		resultPath := ""
+		if entry.Type == contextplane.CoChangeClusterType {
+			source = "cochange"
+			resultPath = strings.TrimPrefix(entry.Name, "cochange://")
+		}
 
 		result := Result{
-			Source:     "memory",
+			Source:     source,
 			ID:         normalizeMemoryID(entry.Name),
 			Name:       entry.Name,
+			Path:       resultPath,
 			Summary:    skillout.TruncateString(entry.Summary, 200),
 			Similarity: scored.Score,
 			SourceRank: rank,

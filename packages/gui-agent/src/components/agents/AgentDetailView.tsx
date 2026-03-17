@@ -31,6 +31,7 @@ import {
   createRoom,
   getAgent,
   getAgentRuntime,
+  getCompanionCoChange,
   getCompanionConversationMessages,
   getCompanionMemoryStats,
   getRoom,
@@ -989,6 +990,24 @@ export function AgentDetailView({ agent, onBack }: AgentDetailViewProps) {
     queryKey: ["agent-memory-stats", conversationID],
     enabled: activeMemoryScope !== "session" || sessionConversationReady,
     queryFn: () => getCompanionMemoryStats(conversationID),
+    retry: false,
+  });
+
+  const cochangeQuery = (activeAgent.prompt_summary || activeAgent.role || "")
+    .trim()
+    .slice(0, 120);
+  const {
+    data: cochangeData,
+    isLoading: loadingCoChange,
+  } = useQuery({
+    queryKey: ["agent-cochange", activeAgent.id, activeAgent.ns, cochangeQuery],
+    enabled: Boolean(activeAgent.ns && cochangeQuery),
+    queryFn: () =>
+      getCompanionCoChange({
+        workspace: activeAgent.ns || "",
+        query: cochangeQuery,
+        limit: 5,
+      }),
     retry: false,
   });
 
@@ -2231,6 +2250,8 @@ export function AgentDetailView({ agent, onBack }: AgentDetailViewProps) {
           conversationExplicit={conversationExplicit}
           memoryStats={memoryStats ?? null}
           loadingMemoryStats={loadingMemoryStats}
+          cochangeHits={cochangeData?.cochange_hits ?? []}
+          cochangeLoading={loadingCoChange}
           controlRoom={controlRoom}
           controlRoomID={controlRoomID}
           controlRoomMembersCount={controlRoomMembers.length}

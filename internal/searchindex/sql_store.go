@@ -62,6 +62,15 @@ CREATE INDEX IF NOT EXISTS idx_search_documents_group_key ON search_documents(wo
 CREATE INDEX IF NOT EXISTS idx_search_documents_path ON search_documents(path);
 CREATE INDEX IF NOT EXISTS idx_search_documents_symbol ON search_documents(workspace_id, kind, symbol_id);
 CREATE INDEX IF NOT EXISTS idx_search_documents_updated_at ON search_documents(workspace_id, updated_at DESC);
+
+CREATE TABLE IF NOT EXISTS search_embedding_metadata (
+    workspace_id TEXT PRIMARY KEY,
+    model TEXT NOT NULL,
+    dimensions INTEGER NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_search_embedding_metadata_workspace ON search_embedding_metadata(workspace_id);
 `)
 	return m.Migrate(ctx)
 }
@@ -146,6 +155,14 @@ ON CONFLICT(id) DO UPDATE SET
 		if prepared.ID == "" || prepared.WorkspaceID == "" {
 			return count, errInvalidDocument
 		}
+		if len(prepared.Embedding) > 0 {
+			if prepared.EmbeddingModel == "" {
+				return count, fmt.Errorf("searchindex: embedding model required when embedding is present")
+			}
+			if err := validateOrPersistEmbeddingMetadataTx(ctx, tx, prepared.WorkspaceID, prepared.EmbeddingModel, len(prepared.Embedding)); err != nil {
+				return count, err
+			}
+		}
 
 		if prepared.SearchText == "" {
 			prepared.SearchText = encodeSearchText(prepared.Title, prepared.Summary, prepared.Path)
@@ -218,6 +235,9 @@ func (s *sqlStore) DeleteWorkspace(ctx context.Context, workspaceID string) erro
 	if err != nil {
 		return fmt.Errorf("searchindex: delete workspace: %w", err)
 	}
+	if _, err := s.db.ExecContext(ctx, `DELETE FROM search_embedding_metadata WHERE workspace_id = $1`, workspaceID); err != nil {
+		return fmt.Errorf("searchindex: delete workspace metadata: %w", err)
+	}
 	return nil
 }
 
@@ -229,6 +249,45 @@ func (s *sqlStore) CountWorkspace(ctx context.Context, workspaceID string) (int,
 		return 0, fmt.Errorf("searchindex: count workspace: %w", err)
 	}
 	return count, nil
+}
+
+// GetEmbeddingMetadata returns the persisted embedding contract for a workspace.
+func (s *sqlStore) GetEmbeddingMetadata(ctx context.Context, workspaceID string) (*EmbeddingMetadata, error) {
+	workspaceID = workspace.CanonicalID(workspaceID)
+	var meta EmbeddingMetadata
+	var createdAt, updatedAt string
+	err := s.db.QueryRowContext(ctx, `
+SELECT workspace_id, model, dimensions, created_at, updated_at
+FROM search_embedding_metadata
+WHERE workspace_id = $1
+`, workspaceID).Scan(&meta.WorkspaceID, &meta.Model, &meta.Dimensions, &createdAt, &updatedAt)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("searchindex: get embedding metadata: %w", err)
+	}
+	return &meta, nil
+}
+
+// ValidateEmbeddingMetadata checks model and dimensions for a workspace.
+func (s *sqlStore) ValidateEmbeddingMetadata(ctx context.Context, workspaceID, model string, dimensions int) error {
+	workspaceID = workspace.CanonicalID(workspaceID)
+	model = stringsTrimSpace(model)
+	meta, err := s.GetEmbeddingMetadata(ctx, workspaceID)
+	if err != nil {
+		return err
+	}
+	if meta == nil {
+		return nil
+	}
+	if dimensions > 0 && meta.Dimensions != dimensions {
+		return fmt.Errorf("searchindex: embedding dimension mismatch: workspace %q expects model %q with %d dimensions, got %d; run `agentctl index init --workspace <workspace-path> --scope symbols` to rebuild symbol/search embeddings", workspaceID, meta.Model, meta.Dimensions, dimensions)
+	}
+	if model != "" && meta.Model != "" && meta.Model != model {
+		return fmt.Errorf("searchindex: embedding model mismatch: workspace %q expects model %q with %d dimensions, got model %q; run `agentctl index init --workspace <workspace-path> --scope symbols` to rebuild symbol/search embeddings", workspaceID, meta.Model, meta.Dimensions, model)
+	}
+	return nil
 }
 
 // LexicalRecall performs in-process lexical recall scoring.
@@ -339,6 +398,9 @@ func (s *sqlStore) VectorRecall(ctx context.Context, workspaceID string, embeddi
 	workspaceID = workspace.CanonicalID(workspaceID)
 	if len(embedding) == 0 {
 		return nil, errors.New("searchindex: vector recall requires a non-empty embedding")
+	}
+	if err := s.ValidateEmbeddingMetadata(ctx, workspaceID, opts.EmbeddingModel, len(embedding)); err != nil {
+		return nil, err
 	}
 	if opts.Limit <= 0 {
 		opts.Limit = defaultSearchIndexLimit
@@ -504,6 +566,40 @@ func normalizeDocument(doc Document) Document {
 	doc.Keywords = normalizeKeywords(doc.Keywords)
 
 	return doc
+}
+
+func validateOrPersistEmbeddingMetadataTx(ctx context.Context, tx *sql.Tx, workspaceID, model string, dimensions int) error {
+	workspaceID = workspace.CanonicalID(workspaceID)
+	model = stringsTrimSpace(model)
+	if workspaceID == "" || model == "" || dimensions <= 0 {
+		return nil
+	}
+	var existingModel string
+	var existingDims int
+	err := tx.QueryRowContext(ctx, `
+SELECT model, dimensions FROM search_embedding_metadata WHERE workspace_id = $1
+`, workspaceID).Scan(&existingModel, &existingDims)
+	switch {
+	case errors.Is(err, sql.ErrNoRows):
+		now := timeutil.FormatRFC3339Nano(timeutil.NowUTC())
+		_, err = tx.ExecContext(ctx, `
+INSERT INTO search_embedding_metadata (workspace_id, model, dimensions, created_at, updated_at)
+VALUES ($1, $2, $3, $4, $5)
+`, workspaceID, model, dimensions, now, now)
+		if err != nil {
+			return fmt.Errorf("searchindex: insert embedding metadata: %w", err)
+		}
+		return nil
+	case err != nil:
+		return fmt.Errorf("searchindex: read embedding metadata: %w", err)
+	}
+	if existingDims != dimensions {
+		return fmt.Errorf("searchindex: embedding dimension mismatch: workspace %q expects model %q with %d dimensions, got %d; run `agentctl index init --workspace <workspace-path> --scope symbols` to rebuild symbol/search embeddings", workspaceID, existingModel, existingDims, dimensions)
+	}
+	if existingModel != "" && existingModel != model {
+		return fmt.Errorf("searchindex: embedding model mismatch: workspace %q expects model %q with %d dimensions, got model %q; run `agentctl index init --workspace <workspace-path> --scope symbols` to rebuild symbol/search embeddings", workspaceID, existingModel, existingDims, model)
+	}
+	return nil
 }
 
 func lexicalScore(haystack string, terms []string) float64 {

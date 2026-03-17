@@ -211,11 +211,15 @@ func sortedModeKeys(m map[string]ModeResult) []string {
 		"aca_canonical_only":         10,
 		"aca_package_fallback":       11,
 		"aca_query_typed":            12,
-		"repoindex_search":           13,
-		"repoindex_dag":              14,
-		"rlm_llm":                    15,
-		"rlm_llm_codeintel":          16,
-		"rlm_llm_code_staged":        17,
+		"aca_default":                13,
+		"aca_cochange":               14,
+		"aca_cochange_continuity":    15,
+		"cochange_artifacts":         16,
+		"repoindex_search":           17,
+		"repoindex_dag":              18,
+		"rlm_llm":                    19,
+		"rlm_llm_codeintel":          20,
+		"rlm_llm_code_staged":        21,
 	}
 	for i := 0; i < len(keys); i++ {
 		for j := i + 1; j < len(keys); j++ {

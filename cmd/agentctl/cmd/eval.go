@@ -22,6 +22,8 @@ import (
 	"github.com/jkatigb/agentctl/internal/repoquery"
 	"github.com/jkatigb/agentctl/internal/rlm"
 	rlmenv "github.com/jkatigb/agentctl/internal/rlm/env"
+	"github.com/jkatigb/agentctl/internal/storage"
+	memorystore "github.com/jkatigb/agentctl/internal/storage/memory"
 	"github.com/jkatigb/agentctl/internal/storage/obsidianindex"
 	"github.com/jkatigb/agentctl/internal/storage/sessions"
 	"github.com/jkatigb/agentctl/internal/storage/tasks"
@@ -244,6 +246,25 @@ func newEvalRetrievalCommand() *cobra.Command {
 			var repo *repoindex.Store
 			var semanticProvider semantic.EmbeddingProvider
 			var workspaceStore *contextplane.WorkspaceStore
+			var cochangeMemStore storage.MemoryStore
+			var cochangeProvider semantic.EmbeddingProvider
+			if hasMode(selectedModes, "cochange_artifacts") {
+				memStore, err := memorystore.OpenWithConfig(ctx, cfg)
+				if err != nil {
+					return err
+				}
+				cochangeMemStore = memStore
+				defer cochangeMemStore.Close()
+				cochangeProvider, _ = semantic.NewProviderForScope(
+					semantic.ScopeMemory,
+					cfg,
+					semantic.WithVoyageKey(os.Getenv("VOYAGE_API_KEY")),
+					semantic.WithGeminiKey(os.Getenv("GEMINI_API_KEY")),
+				)
+				if _, err := contextplane.BuildCoChangeArtifacts(ctx, target, memStore, cochangeProvider, contextplane.DefaultCoChangeArtifactBuildOptions()); err != nil {
+					return err
+				}
+			}
 			if requiresVault {
 				index, err = obsidianindex.Open(ctx, cfg.Storage.Root, vaultPath)
 				if err != nil {
@@ -394,6 +415,28 @@ func newEvalRetrievalCommand() *cobra.Command {
 					})
 					qr.Modes["aca_query_typed"] = retrievaleval.EvaluateMode("aca_query_typed", paths, q.ExpectedAnyOf, len(paths), err)
 				}
+				if hasMode(selectedModes, "aca_default") {
+					paths, err := runACAEvalMode(ctx, workspaceStore, index, repo, semanticProvider, q.Query, limit, acaDefaultEvalOptions())
+					qr.Modes["aca_default"] = retrievaleval.EvaluateMode("aca_default", paths, q.ExpectedAnyOf, len(paths), err)
+				}
+				if hasMode(selectedModes, "aca_cochange") {
+					opts := acaDefaultEvalOptions()
+					opts.UseCoChangePrior = true
+					opts.UseContinuityBundles = false
+					paths, err := runACAEvalMode(ctx, workspaceStore, index, repo, semanticProvider, q.Query, limit, opts)
+					qr.Modes["aca_cochange"] = retrievaleval.EvaluateMode("aca_cochange", paths, q.ExpectedAnyOf, len(paths), err)
+				}
+				if hasMode(selectedModes, "aca_cochange_continuity") {
+					opts := acaDefaultEvalOptions()
+					opts.UseCoChangePrior = true
+					opts.UseContinuityBundles = true
+					paths, err := runACAEvalMode(ctx, workspaceStore, index, repo, semanticProvider, q.Query, limit, opts)
+					qr.Modes["aca_cochange_continuity"] = retrievaleval.EvaluateMode("aca_cochange_continuity", paths, q.ExpectedAnyOf, len(paths), err)
+				}
+				if hasMode(selectedModes, "cochange_artifacts") {
+					paths, err := runCoChangeArtifactEvalMode(ctx, target, q.Query, limit, cochangeMemStore, cochangeProvider)
+					qr.Modes["cochange_artifacts"] = retrievaleval.EvaluateMode("cochange_artifacts", paths, q.ExpectedAnyOf, len(paths), err)
+				}
 				if hasMode(selectedModes, "repoindex_search") {
 					paths, err := runRepoIndexSearchEvalMode(ctx, cfg.Storage.Root, target, q.Query, limit)
 					qr.Modes["repoindex_search"] = retrievaleval.EvaluateMode("repoindex_search", paths, q.ExpectedAnyOf, len(paths), err)
@@ -452,7 +495,7 @@ func newEvalRetrievalCommand() *cobra.Command {
 	cmd.Flags().StringVar(&vaultPath, "vault-path", "", "Vault path")
 	cmd.Flags().IntVar(&limit, "limit", 10, "Maximum hits per retrieval mode")
 	cmd.Flags().StringVar(&format, "format", "markdown", "Output companion format: markdown or json")
-	cmd.Flags().StringSliceVar(&modes, "mode", []string{"baseline", "lexical", "semantic", "blended"}, "Retrieval modes to evaluate (also available: skill_default, skill_context, skill_default_plus_context, aca_control_only, aca_vault_only, aca_repo_hints, aca_canonical_only, aca_package_fallback, aca_query_typed, repoindex_search, repoindex_dag, rlm_llm, rlm_llm_codeintel, rlm_llm_code_staged)")
+	cmd.Flags().StringSliceVar(&modes, "mode", []string{"baseline", "lexical", "semantic", "blended"}, "Retrieval modes to evaluate (also available: skill_default, skill_context, skill_default_plus_context, aca_control_only, aca_vault_only, aca_repo_hints, aca_canonical_only, aca_package_fallback, aca_query_typed, aca_default, aca_cochange, aca_cochange_continuity, cochange_artifacts, repoindex_search, repoindex_dag, rlm_llm, rlm_llm_codeintel, rlm_llm_code_staged)")
 	cmd.Flags().BoolVar(&rebuildIndex, "rebuild-index", true, "Rebuild the vault index before evaluation")
 	cmd.Flags().BoolVar(&canonicalOnly, "canonical-only", true, "Exclude inbox draft hits from evaluation paths")
 	cmd.Flags().BoolVar(&save, "save", false, "Save JSON and Markdown eval outputs under the workspace exports directory")
@@ -532,7 +575,8 @@ func evalModesRequireVault(modes []string) bool {
 	for _, mode := range modes {
 		switch mode {
 		case "baseline", "lexical", "semantic", "blended",
-			"aca_control_only", "aca_vault_only", "aca_repo_hints", "aca_canonical_only", "aca_query_typed":
+			"aca_control_only", "aca_vault_only", "aca_repo_hints", "aca_canonical_only", "aca_package_fallback", "aca_query_typed",
+			"aca_default", "aca_cochange", "aca_cochange_continuity":
 			return true
 		}
 	}
@@ -643,6 +687,43 @@ func runACAEvalMode(
 		return nil, err
 	}
 	return extractACAResultPaths(result, limit, opts), nil
+}
+
+func runCoChangeArtifactEvalMode(ctx context.Context, workspacePath, query string, limit int, memStore storage.MemoryStore, provider semantic.EmbeddingProvider) ([]string, error) {
+	if memStore == nil {
+		return nil, fmt.Errorf("cochange memory store unavailable")
+	}
+	hits, err := contextplane.SearchCoChangeArtifacts(ctx, workspacePath, query, limit, memStore, provider)
+	if err != nil {
+		return nil, err
+	}
+	seen := map[string]struct{}{}
+	out := make([]string, 0, len(hits))
+	for _, hit := range hits {
+		path := filepath.ToSlash(strings.TrimSpace(hit.AnchorPath))
+		if path == "" {
+			continue
+		}
+		if _, ok := seen[path]; ok {
+			continue
+		}
+		seen[path] = struct{}{}
+		out = append(out, path)
+	}
+	return out, nil
+}
+
+func acaDefaultEvalOptions() contextplane.RetrievalOptions {
+	opts := contextplane.DefaultRetrievalOptions()
+	opts.IncludeTopOfMindResult = true
+	opts.IncludeLatestHandoff = true
+	opts.IncludeVaultHits = true
+	opts.UseRelevantRefBoost = true
+	opts.UseHandoffRefBoost = true
+	opts.UseCodeHints = true
+	opts.UseSemanticVaultSearch = true
+	opts.IncludeControlPlaneRefs = false
+	return opts
 }
 
 func runRLMEvalMode(ctx context.Context, cfg config.Config, workspacePath, vaultPath, query string, limit int, toolProfile string) ([]string, error) {

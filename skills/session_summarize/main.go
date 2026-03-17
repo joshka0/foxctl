@@ -614,11 +614,13 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 
 				// Record embedding metadata for dimension validation on future opens
 				meta := sessions.EmbeddingMetadata{
-					TableName:  "sessions",
-					ColumnName: "embedding",
-					Provider:   embeddingResult.Provider,
-					Model:      embeddingResult.Model,
-					Dimensions: embeddingResult.Dims,
+					WorkspaceID:   session.WorkspaceID,
+					WorkspacePath: session.WorkspacePath,
+					TableName:     "sessions",
+					ColumnName:    "embedding",
+					Provider:      embeddingResult.Provider,
+					Model:         embeddingResult.Model,
+					Dimensions:    embeddingResult.Dims,
 				}
 				if err := sessionStore.SetEmbeddingMetadata(ctx, meta); err != nil {
 					logger.Warn("failed to set embedding metadata", obs.Err(err))

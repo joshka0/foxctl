@@ -7,10 +7,10 @@ import (
 )
 
 func loadConfig(ctx context.Context, opts ...config.Option) (config.Config, error) {
-	if cfg, ok := config.FromContext(ctx); ok {
+	if cfg, ok := config.FromContext(ctx); ok && len(opts) == 0 {
 		return cfg, nil
 	}
-	if configPath != "" && len(opts) == 0 {
+	if configPath != "" {
 		opts = append(opts, config.WithConfigFile(configPath))
 	}
 	return config.Load(ctx, opts...)

@@ -2,7 +2,9 @@ package contextplane
 
 import (
 	"context"
+	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"testing"
@@ -203,7 +205,7 @@ func TestLoadRetrievalOptions_PackageFallbackFromPolicy(t *testing.T) {
 	if err != nil {
 		t.Fatalf("EnsureLayout: %v", err)
 	}
-	body := []byte("aca:\n  package_note_fallback: true\n")
+	body := []byte("aca:\n  package_note_fallback: true\n  co_change_prior: true\n  co_change_commit_limit: 12\n  co_change_max_files_per_commit: 7\n  co_change_half_life_days: 45\n  continuity_bundles: false\n")
 	if err := os.WriteFile(layout.RetrievalPolicyPath, body, 0o644); err != nil {
 		t.Fatalf("WriteFile: %v", err)
 	}
@@ -211,7 +213,132 @@ func TestLoadRetrievalOptions_PackageFallbackFromPolicy(t *testing.T) {
 	if !opts.UsePackageNoteFallback {
 		t.Fatalf("expected package_note_fallback to be enabled from retrieval policy")
 	}
+	if !opts.UseCoChangePrior {
+		t.Fatalf("expected co_change_prior to be enabled from retrieval policy")
+	}
+	if opts.CoChangeCommitLimit != 12 {
+		t.Fatalf("expected co_change_commit_limit=12, got %d", opts.CoChangeCommitLimit)
+	}
+	if opts.CoChangeMaxFilesPerCommit != 7 {
+		t.Fatalf("expected co_change_max_files_per_commit=7, got %d", opts.CoChangeMaxFilesPerCommit)
+	}
+	if opts.CoChangeHalfLifeDays != 45 {
+		t.Fatalf("expected co_change_half_life_days=45, got %d", opts.CoChangeHalfLifeDays)
+	}
+	if opts.UseContinuityBundles {
+		t.Fatalf("expected continuity_bundles=false from retrieval policy")
+	}
 	_ = ctx
+}
+
+func TestFilterNoisyPaths(t *testing.T) {
+	got := filterNoisyPaths([]string{
+		"internal/contextplane/store.go",
+		"bun.lock",
+		"vendor/github.com/x/y.go",
+		"node_modules/pkg/index.js",
+		"go.sum",
+		"internal/contextplane/dispatch.go",
+	})
+	if len(got) != 2 {
+		t.Fatalf("filtered paths=%v", got)
+	}
+	if got[0] != "internal/contextplane/store.go" || got[1] != "internal/contextplane/dispatch.go" {
+		t.Fatalf("unexpected filtered paths=%v", got)
+	}
+}
+
+func TestContinuityBundlePaths(t *testing.T) {
+	top := &TopOfMind{
+		RelevantRefs: []string{
+			"path:internal/contextplane/store.go",
+			"note:ignored",
+		},
+	}
+	handoff := &HandoffRecord{
+		Handoff: Handoff{
+			FilesTouched: []string{"internal/contextplane/dispatch.go"},
+			EvidenceRefs: []string{"path:internal/contextplane/retrieval.go"},
+		},
+	}
+	opts := DefaultRetrievalOptions()
+	opts.UseContinuityBundles = true
+	paths := continuityBundlePaths(top, handoff, opts)
+	if len(paths) != 3 {
+		t.Fatalf("continuity paths=%v", paths)
+	}
+}
+
+func TestRetrieveWithOptions_CoChangePriorBoostsRelatedRepoPaths(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+
+	ctx := context.Background()
+	workspace := t.TempDir()
+	initCoChangeGitRepo(t, workspace)
+
+	store := NewWorkspaceStore(workspace)
+	if _, err := store.SaveTopOfMind(TopOfMind{
+		WorkspaceID:  "ws-test",
+		Objective:    "Refine ACA retrieval",
+		Phase:        "design",
+		RelevantRefs: []string{"path:internal/contextplane/store.go"},
+		UpdatedAt:    time.Date(2026, 3, 10, 0, 0, 0, 0, time.UTC),
+	}); err != nil {
+		t.Fatalf("SaveTopOfMind: %v", err)
+	}
+
+	vaultRoot := createCoChangeVault(t)
+	storageRoot := t.TempDir()
+	index, err := obsidianindex.Open(ctx, storageRoot, vaultRoot)
+	if err != nil {
+		t.Fatalf("Open index: %v", err)
+	}
+	defer index.Close()
+	if _, err := index.Rebuild(ctx, vaultRoot); err != nil {
+		t.Fatalf("Rebuild vault: %v", err)
+	}
+
+	baseOpts := RetrievalOptions{
+		IncludeTopOfMindResult: true,
+		IncludeLatestHandoff:   true,
+		IncludeVaultHits:       true,
+		UseRelevantRefBoost:    false,
+		UseHandoffRefBoost:     false,
+		UseCodeHints:           true,
+		UseSemanticVaultSearch: false,
+		UseCoChangePrior:       false,
+		UseQueryTypeBias:       false,
+	}
+	base, err := store.RetrieveWithOptions(ctx, index, nil, nil, "retrieval cluster", 5, baseOpts)
+	if err != nil {
+		t.Fatalf("RetrieveWithOptions base: %v", err)
+	}
+
+	boostedOpts := baseOpts
+	boostedOpts.UseCoChangePrior = true
+	boostedOpts.CoChangeCommitLimit = 20
+	boosted, err := store.RetrieveWithOptions(ctx, index, nil, nil, "retrieval cluster", 5, boostedOpts)
+	if err != nil {
+		t.Fatalf("RetrieveWithOptions boosted: %v", err)
+	}
+
+	baseScores := map[string]int{}
+	for _, hit := range base.VaultHits {
+		baseScores[filepath.Base(hit.Path)] = hit.Score
+	}
+	boostedScores := map[string]int{}
+	for _, hit := range boosted.VaultHits {
+		boostedScores[filepath.Base(hit.Path)] = hit.Score
+	}
+
+	if boostedScores["dispatch-note.md"] <= baseScores["dispatch-note.md"] {
+		t.Fatalf("expected dispatch note score to increase: base=%d boosted=%d", baseScores["dispatch-note.md"], boostedScores["dispatch-note.md"])
+	}
+	if boostedScores["dispatch-note.md"] <= boostedScores["other-note.md"] {
+		t.Fatalf("expected co-changed note to outrank unrelated note: dispatch=%d other=%d", boostedScores["dispatch-note.md"], boostedScores["other-note.md"])
+	}
 }
 
 func TestDetectContradictions(t *testing.T) {
@@ -295,6 +422,89 @@ func retrievalFixtureVaultRoot(t *testing.T) string {
 		t.Fatalf("runtime caller unavailable")
 	}
 	return filepath.Clean(filepath.Join(filepath.Dir(file), "..", "tools", "obsidian", "testdata", "vaults", "basic"))
+}
+
+func createCoChangeVault(t *testing.T) string {
+	t.Helper()
+	vault := t.TempDir()
+	writeNote := func(rel, body string) {
+		t.Helper()
+		path := filepath.Join(vault, rel)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatalf("mkdir note dir: %v", err)
+		}
+		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+			t.Fatalf("write note %s: %v", rel, err)
+		}
+	}
+	writeNote("notes/patterns/dispatch-note.md", `---
+type: pattern
+trust: canonical
+paths:
+  - internal/contextplane/dispatch.go
+---
+# Retrieval Cluster Dispatch
+
+retrieval cluster
+`)
+	writeNote("notes/patterns/other-note.md", `---
+type: pattern
+trust: canonical
+paths:
+  - internal/other/other.go
+---
+# Retrieval Cluster Other
+
+retrieval cluster
+`)
+	return vault
+}
+
+func initCoChangeGitRepo(t *testing.T, workspace string) {
+	t.Helper()
+	runGit := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", append([]string{"-C", workspace}, args...)...)
+		cmd.Env = append(os.Environ(),
+			"GIT_AUTHOR_NAME=Test User",
+			"GIT_AUTHOR_EMAIL=test@example.com",
+			"GIT_COMMITTER_NAME=Test User",
+			"GIT_COMMITTER_EMAIL=test@example.com",
+		)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v: %v (%s)", args, err, string(out))
+		}
+	}
+	writeFile := func(rel, body string) {
+		t.Helper()
+		path := filepath.Join(workspace, rel)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatalf("mkdir repo dir: %v", err)
+		}
+		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+			t.Fatalf("write file %s: %v", rel, err)
+		}
+	}
+
+	runGit("init", "-b", "main")
+
+	writeFile("internal/contextplane/store.go", "package contextplane\n\nvar StoreSeed = 1\n")
+	writeFile("internal/contextplane/dispatch.go", "package contextplane\n\nvar DispatchSeed = 1\n")
+	writeFile("internal/other/other.go", "package other\n\nvar OtherSeed = 1\n")
+	runGit("add", ".")
+	runGit("commit", "-m", "initial graph")
+
+	for i := 2; i <= 3; i++ {
+		writeFile("internal/contextplane/store.go", fmt.Sprintf("package contextplane\n\nvar StoreSeed = %d\n", i))
+		writeFile("internal/contextplane/dispatch.go", fmt.Sprintf("package contextplane\n\nvar DispatchSeed = %d\n", i))
+		runGit("add", "internal/contextplane/store.go", "internal/contextplane/dispatch.go")
+		runGit("commit", "-m", fmt.Sprintf("couple store and dispatch %d", i))
+	}
+
+	writeFile("internal/other/other.go", "package other\n\nvar OtherSeed = 2\n")
+	runGit("add", "internal/other/other.go")
+	runGit("commit", "-m", "touch unrelated file")
 }
 
 type fakeReranker struct {

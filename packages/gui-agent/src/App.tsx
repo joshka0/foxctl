@@ -1,7 +1,10 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { Suspense, lazy, startTransition } from 'react'
+import { Suspense, lazy, startTransition, type ReactNode } from 'react'
 import { AppShell } from '@/components/layout/AppShell'
 import { AgentList } from '@/components/agents'
+import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import { useAuthSession, useAuthSignOut } from '@/hooks/useAuthSession'
 import { useViewStore, type ViewType } from '@/stores/viewStore'
 
 const RoomsView = lazy(() =>
@@ -57,21 +60,136 @@ const queryClient = new QueryClient({
  * @returns A JSX element that supplies the configured QueryClientProvider and renders AppShell with the current active view
  */
 export function App() {
+  return (
+    <QueryClientProvider client={queryClient}>
+      <AuthenticatedApp />
+    </QueryClientProvider>
+  )
+}
+
+function AuthenticatedApp() {
   const { activeView, setActiveView } = useViewStore()
+  const authSession = useAuthSession()
+  const signOut = useAuthSignOut()
+
   const handleViewChange = (nextView: ViewType) => {
     startTransition(() => {
       setActiveView(nextView)
     })
   }
 
+  if (authSession.isLoading) {
+    return (
+      <SessionStateScreen
+        eyebrow="Session"
+        title="Checking access"
+        body="Validating your gui-agent session before the control plane starts."
+      />
+    )
+  }
+
+  if (authSession.error) {
+    return (
+      <SessionStateScreen
+        eyebrow="Session Error"
+        title="Could not verify your sign-in"
+        body={
+          authSession.error instanceof Error
+            ? authSession.error.message
+            : "The gateway did not return a valid auth session."
+        }
+        actions={
+          <>
+            <Button variant="outline" onClick={() => authSession.refetch()}>
+              Retry
+            </Button>
+            <Button onClick={() => window.location.assign('/login')}>
+              Return to login
+            </Button>
+          </>
+        }
+      />
+    )
+  }
+
+  if (!authSession.data) {
+    return (
+      <SessionStateScreen
+        eyebrow="Signed Out"
+        title="Your gui-agent session is not active"
+        body="This public control plane requires an active Better Auth session. Use the magic-link flow to sign in again."
+        actions={
+          <Button onClick={() => window.location.assign('/login')}>
+            Sign in
+          </Button>
+        }
+      />
+    )
+  }
+
   return (
-    <QueryClientProvider client={queryClient}>
-      <AppShell activeView={activeView} onViewChange={handleViewChange}>
-        <Suspense fallback={<ViewLoadingFallback view={activeView} />}>
-          <MainContent view={activeView} />
-        </Suspense>
-      </AppShell>
-    </QueryClientProvider>
+    <AppShell
+      activeView={activeView}
+      onViewChange={handleViewChange}
+      authSession={authSession.data}
+      onSignOut={() => signOut.mutate()}
+      signingOut={signOut.isPending}
+    >
+      <Suspense fallback={<ViewLoadingFallback view={activeView} />}>
+        <MainContent view={activeView} />
+      </Suspense>
+    </AppShell>
+  )
+}
+
+function SessionStateScreen({
+  eyebrow,
+  title,
+  body,
+  actions,
+}: {
+  eyebrow: string
+  title: string
+  body: string
+  actions?: ReactNode
+}) {
+  return (
+    <div className="min-h-screen w-screen bg-background text-foreground">
+      <div className="mx-auto flex min-h-screen w-full max-w-5xl items-center px-6 py-12">
+        <div className="grid gap-6 rounded-3xl border border-border bg-card/90 p-8 shadow-2xl shadow-black/20 md:grid-cols-[1.4fr_0.8fr] md:p-10">
+          <div className="space-y-4">
+            <Badge variant="outline" className="text-[10px] uppercase tracking-[0.18em]">
+              {eyebrow}
+            </Badge>
+            <div className="space-y-2">
+              <h1 className="text-3xl font-semibold tracking-tight md:text-4xl">
+                {title}
+              </h1>
+              <p className="max-w-2xl text-sm leading-6 text-muted-foreground md:text-base">
+                {body}
+              </p>
+            </div>
+            {actions && <div className="flex flex-wrap items-center gap-3">{actions}</div>}
+          </div>
+          <div className="rounded-2xl border border-border bg-background/70 p-5">
+            <p className="text-xs uppercase tracking-[0.18em] text-muted-foreground">
+              Public GUI
+            </p>
+            <div className="mt-4 space-y-3 text-sm text-muted-foreground">
+              <p>Authentication is handled by the public Better Auth gateway.</p>
+              <p>
+                After sign-in, the gateway proxies authenticated <code>/api</code> and{' '}
+                <code>/ws</code> traffic to the private <code>agentctl</code> service.
+              </p>
+              <p>
+                If this screen appears unexpectedly, your session likely expired or the
+                gateway could not verify it.
+              </p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
   )
 }
 

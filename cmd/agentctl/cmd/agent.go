@@ -160,6 +160,10 @@ var (
 	spawnLLMProvider      string
 	spawnLLMModel         string
 	spawnLLMAPIKey        string
+	spawnLLMBaseURL       string
+	spawnLLMAuthMode      string
+	spawnLLMAuthHeader    string
+	spawnLLMAuthPrefix    string
 	spawnWorkspace        string
 	spawnExecMode         string
 	spawnMaxIterations    int
@@ -248,6 +252,10 @@ func init() {
 	agentSpawnCmd.Flags().StringVar(&spawnLLMProvider, "llm-provider", "", "LLM provider (lmstudio|gemini|openai|anthropic|groq|openrouter)")
 	agentSpawnCmd.Flags().StringVar(&spawnLLMModel, "llm-model", "", "LLM model ID (e.g., claude-haiku-4-5)")
 	agentSpawnCmd.Flags().StringVar(&spawnLLMAPIKey, "llm-api-key", "", "LLM API key (or env var like $GROQ_API_KEY)")
+	agentSpawnCmd.Flags().StringVar(&spawnLLMBaseURL, "llm-base-url", "", "LLM base URL override for OpenAI-compatible/self-hosted backends")
+	agentSpawnCmd.Flags().StringVar(&spawnLLMAuthMode, "llm-auth-mode", "", "LLM auth mode: auto, none, bearer, header")
+	agentSpawnCmd.Flags().StringVar(&spawnLLMAuthHeader, "llm-auth-header", "", "LLM auth header name when --llm-auth-mode=header")
+	agentSpawnCmd.Flags().StringVar(&spawnLLMAuthPrefix, "llm-auth-prefix", "", "LLM auth prefix for bearer/header auth (e.g. 'Bearer ' or 'Token ')")
 	agentSpawnCmd.Flags().StringVar(&spawnWorkspace, "workspace", "", "Workspace root for filesystem-bound tools (default: current directory)")
 	agentSpawnCmd.Flags().StringVar(&spawnExecMode, "exec-mode", "reactive", "Execution mode (reactive|autonomous|proactive|tick)")
 	agentSpawnCmd.Flags().IntVar(&spawnMaxIterations, "max-iterations", 10, "Max tool calls per turn")
@@ -419,6 +427,10 @@ func runAgentSpawnWithRoute(cmd *cobra.Command) error {
 			LLMProvider:     spawnLLMProvider,
 			LLMModel:        spawnLLMModel,
 			LLMAPIKey:       llmAPIKey,
+			LLMBaseURL:      spawnLLMBaseURL,
+			LLMAuthMode:     spawnLLMAuthMode,
+			LLMAuthHeader:   spawnLLMAuthHeader,
+			LLMAuthPrefix:   spawnLLMAuthPrefix,
 			ExecMode:        agent.ExecutionMode(spawnExecMode),
 			MaxIterations:   spawnMaxIterations,
 			MaxAutoTurns:    spawnMaxAutoTurns,
@@ -508,6 +520,10 @@ func runAgentSpawnWithRoute(cmd *cobra.Command) error {
 			LLMProvider:      spawnLLMProvider,
 			LLMModel:         spawnLLMModel,
 			LLMAPIKey:        llmAPIKey,
+			LLMBaseURL:       spawnLLMBaseURL,
+			LLMAuthMode:      spawnLLMAuthMode,
+			LLMAuthHeader:    spawnLLMAuthHeader,
+			LLMAuthPrefix:    spawnLLMAuthPrefix,
 		}
 
 		// Dry-run mode: show what would be spawned via daemon
@@ -590,6 +606,10 @@ func runAgentSpawnWithRoute(cmd *cobra.Command) error {
 		LLMProvider:     spawnLLMProvider,
 		LLMModel:        spawnLLMModel,
 		LLMAPIKey:       llmAPIKey,
+		LLMBaseURL:      spawnLLMBaseURL,
+		LLMAuthMode:     spawnLLMAuthMode,
+		LLMAuthHeader:   spawnLLMAuthHeader,
+		LLMAuthPrefix:   spawnLLMAuthPrefix,
 		ExecMode:        agent.ExecutionMode(spawnExecMode),
 		MaxIterations:   spawnMaxIterations,
 		MaxAutoTurns:    spawnMaxAutoTurns,
@@ -1246,6 +1266,10 @@ func runAgentRunWithRoute(cmd *cobra.Command, args []string) error {
 		LLMProvider:           provider,
 		LLMModel:              model,
 		LLMAPIKey:             cfg.LLM.ResolveAPIKey(provider),
+		LLMBaseURL:            firstNonEmpty(agentRecord.LLMBaseURL, cfg.LLM.ResolveBaseURL(provider)),
+		LLMAuthMode:           firstNonEmpty(agentRecord.LLMAuthMode, cfg.LLM.ResolveAuthMode(provider)),
+		LLMAuthHeader:         firstNonEmpty(agentRecord.LLMAuthHeader, cfg.LLM.ResolveAuthHeader(provider)),
+		LLMAuthPrefix:         firstNonEmpty(agentRecord.LLMAuthPrefix, cfg.LLM.ResolveAuthPrefix(provider)),
 		EnableCompanionMemory: enableCompanionMemory,
 		CompanionMode:         companionMode,
 	}

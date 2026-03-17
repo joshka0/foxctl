@@ -149,7 +149,9 @@ agentctl run memory/query --input '{"workspace": "/path/to/project"}'
 | Gemini | 3072 |
 | Mistral/Codestral | 1024 |
 
-**Solution:** Use same provider for storage and query.
+**Solution:** Use the same provider for storage and query, then rebuild the
+affected scope. See [docs/general/embedding-rebuilds.md](embedding-rebuilds.md)
+for the exact commands.
 
 ---
 

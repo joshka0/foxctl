@@ -5,7 +5,11 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"testing"
+
+	"github.com/jkatigb/agentctl/internal/platform/config"
 )
 
 func TestOpenAICompatProviderEmbedBatch(t *testing.T) {
@@ -73,5 +77,55 @@ func TestNormalizeEmbeddingProviderName(t *testing.T) {
 		if got := normalizeEmbeddingProviderName(input); got != want {
 			t.Fatalf("normalizeEmbeddingProviderName(%q)=%q want %q", input, got, want)
 		}
+	}
+}
+
+func TestNewProviderForModel_WorkspaceVoyageOverrideWins(t *testing.T) {
+	tmp := t.TempDir()
+	oldHome := os.Getenv("HOME")
+	t.Setenv("HOME", tmp)
+	t.Cleanup(func() {
+		if oldHome == "" {
+			_ = os.Unsetenv("HOME")
+		} else {
+			_ = os.Setenv("HOME", oldHome)
+		}
+	})
+
+	home := filepath.Join(tmp, ".agentctl")
+	if err := os.MkdirAll(home, 0o755); err != nil {
+		t.Fatalf("mkdir home: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(home, "config.yaml"), []byte(`
+embedding:
+  provider: lmstudio
+  model: text-embedding-embeddinggemma-300m-qat
+  base_url: http://127.0.0.1:1234/v1
+`), 0o644); err != nil {
+		t.Fatalf("write global config: %v", err)
+	}
+
+	workspace := filepath.Join(tmp, "agentctl")
+	if err := os.MkdirAll(filepath.Join(workspace, ".agentctl"), 0o755); err != nil {
+		t.Fatalf("mkdir workspace config dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(workspace, ".agentctl", "config.yaml"), []byte(`
+embedding:
+  provider: voyage
+  model: voyage-3.5
+`), 0o644); err != nil {
+		t.Fatalf("write workspace config: %v", err)
+	}
+
+	cfg, err := config.Load(context.Background(), config.WithWorkspacePath(workspace))
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+	provider, err := NewProviderForModel("voyage-3.5", cfg, WithProvider(cfg.Embedding.Provider), WithAPIKey(cfg.Embedding.APIKey), WithBaseURL(cfg.Embedding.BaseURL), WithVoyageKey("test-voyage-key"))
+	if err != nil {
+		t.Fatalf("NewProviderForModel: %v", err)
+	}
+	if _, ok := provider.(*VoyageProvider); !ok {
+		t.Fatalf("expected VoyageProvider, got %T", provider)
 	}
 }

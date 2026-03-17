@@ -44,6 +44,9 @@ func init() {
 		if configPath != "" {
 			opts = append(opts, config.WithConfigFile(configPath))
 		}
+		if flag := cmd.Flags().Lookup("workspace"); flag != nil && flag.Changed {
+			opts = append(opts, config.WithWorkspacePath(flag.Value.String()))
+		}
 		cfg, err := config.Load(cmd.Context(), opts...)
 		if err != nil {
 			return err

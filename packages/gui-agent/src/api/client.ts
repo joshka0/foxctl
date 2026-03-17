@@ -2,6 +2,7 @@ import type {
   AgentsListResponse,
   AgentRuntimeTree,
   AgentSpawnResponse,
+  CoChangeHit,
   MailboxListResponse,
   Room,
   BlackboardListResponse,
@@ -21,6 +22,15 @@ import type {
 } from "./types";
 
 const API_BASE = "/api";
+
+export class APIUnauthorizedError extends Error {
+  readonly status = 401;
+
+  constructor(message = "Authentication required") {
+    super(message);
+    this.name = "APIUnauthorizedError";
+  }
+}
 
 function mergeHeaders(
   defaults: Record<string, string>,
@@ -81,6 +91,9 @@ async function request<T>(
 
   const text = await response.text();
   if (!response.ok) {
+    if (response.status === 401 && !text) {
+      throw new APIUnauthorizedError();
+    }
     if (text) {
       try {
         const parsed = JSON.parse(text) as {
@@ -89,6 +102,9 @@ async function request<T>(
         };
         const envelopeMessage = parsed?.error?.message || parsed?.message;
         if (envelopeMessage) {
+          if (response.status === 401) {
+            throw new APIUnauthorizedError(envelopeMessage);
+          }
           throw new Error(envelopeMessage);
         }
       } catch (parseErr) {
@@ -98,6 +114,9 @@ async function request<T>(
           throw parseErr;
         }
       }
+    }
+    if (response.status === 401) {
+      throw new APIUnauthorizedError();
     }
     throw new Error(text || `Request failed: ${response.status}`);
   }
@@ -126,6 +145,45 @@ function unwrapEnvelope<T>(env: ApiEnvelope<T>): T {
     throw new Error(env.error?.message || "Request failed");
   }
   return env.data;
+}
+
+export interface AuthSessionResponse {
+  session: {
+    id: string;
+    expiresAt?: string;
+  };
+  user: {
+    id: string;
+    email: string;
+    name?: string;
+    image?: string | null;
+    emailVerified?: boolean;
+  };
+}
+
+export async function getAuthSession(): Promise<AuthSessionResponse | null> {
+  try {
+    return await request<AuthSessionResponse>("/auth/session");
+  } catch (error) {
+    if (error instanceof APIUnauthorizedError) {
+      return null;
+    }
+    throw error;
+  }
+}
+
+export async function signOutAuthSession(): Promise<void> {
+  const response = await fetch("/logout", {
+    method: "POST",
+    headers: {
+      Accept: "application/json",
+    },
+  });
+
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(text || `Sign out failed: ${response.status}`);
+  }
 }
 
 export interface OrchestrationBoardResult {
@@ -1340,6 +1398,18 @@ export async function getCompanionMemoryContext(
   return request<{ context: string }>(
     `/companion/memory/${conversationId}/context`,
   );
+}
+
+export async function getCompanionCoChange(params: {
+  workspace: string;
+  query: string;
+  limit?: number;
+}): Promise<{ cochange_hits: CoChangeHit[]; count: number }> {
+  const query = new URLSearchParams();
+  query.set("workspace", params.workspace);
+  query.set("query", params.query);
+  if (params.limit) query.set("limit", String(params.limit));
+  return request(`/companion/cochange?${query.toString()}`);
 }
 
 // Companion Chat

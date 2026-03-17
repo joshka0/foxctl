@@ -8,7 +8,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import type { CompanionMemoryStats, PersistedSession } from "@/api/client";
+import type { CoChangeHit, CompanionMemoryStats, PersistedSession } from "@/api/client";
 import type { Agent, Room } from "@/api/types";
 import { getAgentDisplayName } from "@/lib/agent-utils";
 import { formatRelativeTime } from "@/lib/utils";
@@ -62,6 +62,8 @@ interface AgentDetailSupportRailProps {
   onOpenCompanionMemory: () => void;
   persistedSessions: PersistedSession[];
   onOpenCompanionHistory: () => void;
+  cochangeHits: CoChangeHit[];
+  cochangeLoading: boolean;
 }
 
 export function AgentDetailSupportRail({
@@ -81,10 +83,58 @@ export function AgentDetailSupportRail({
   onOpenCompanionMemory,
   persistedSessions,
   onOpenCompanionHistory,
+  cochangeHits,
+  cochangeLoading,
 }: AgentDetailSupportRailProps) {
   return (
     <ScrollArea className="min-h-0 pr-2">
       <div className="space-y-4">
+        <Card>
+          <CardHeader className="pb-3">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <CardTitle className="text-sm">Co-change</CardTitle>
+                <CardDescription>
+                  What usually changes with this agent/runtime area.
+                </CardDescription>
+              </div>
+              <Hash className="h-4 w-4 text-muted-foreground" />
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {cochangeLoading ? (
+              <div className="rounded-lg border border-dashed border-border px-3 py-2 text-xs text-muted-foreground">
+                Loading co-change clusters...
+              </div>
+            ) : cochangeHits.length > 0 ? (
+              <div className="space-y-2">
+                {cochangeHits.slice(0, 3).map((hit) => (
+                  <div
+                    key={hit.name}
+                    className="rounded-lg border border-border bg-background/60 p-3"
+                  >
+                    <div className="text-xs font-medium text-foreground">
+                      {hit.anchor_path}
+                    </div>
+                    <div className="mt-1 text-xs text-muted-foreground">
+                      {hit.summary}
+                    </div>
+                    {hit.neighbors && hit.neighbors.length > 0 && (
+                      <div className="mt-2 text-[11px] text-muted-foreground">
+                        with {hit.neighbors.slice(0, 3).join(", ")}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="rounded-lg border border-dashed border-border px-3 py-2 text-xs text-muted-foreground">
+                No co-change clusters found for this agent yet.
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
         <Card>
           <CardHeader className="pb-3">
             <div className="flex items-start justify-between gap-3">

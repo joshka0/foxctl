@@ -180,23 +180,29 @@ type RetrievalWeights struct {
 	HandoffRef     int `json:"handoff_ref"`
 	CodePath       int `json:"code_path"`
 	CodeSymbol     int `json:"code_symbol"`
+	CoChange       int `json:"co_change"`
 	SemanticMatch  int `json:"semantic_match"`
 }
 
 // RetrievalOptions controls which ACA retrieval components participate in one query.
 // The default path should remain behavior-compatible with existing Retrieve().
 type RetrievalOptions struct {
-	IncludeTopOfMindResult  bool     `json:"include_top_of_mind_result"`
-	IncludeLatestHandoff    bool     `json:"include_latest_handoff"`
-	IncludeVaultHits        bool     `json:"include_vault_hits"`
-	UseRelevantRefBoost     bool     `json:"use_relevant_ref_boost"`
-	UseHandoffRefBoost      bool     `json:"use_handoff_ref_boost"`
-	UseCodeHints            bool     `json:"use_code_hints"`
-	UseSemanticVaultSearch  bool     `json:"use_semantic_vault_search"`
-	UsePackageNoteFallback  bool     `json:"use_package_note_fallback"`
-	UseQueryTypeBias        bool     `json:"use_query_type_bias"`
-	AllowedTrusts           []string `json:"allowed_trusts,omitempty"`
-	IncludeControlPlaneRefs bool     `json:"include_control_plane_refs"`
+	IncludeTopOfMindResult    bool     `json:"include_top_of_mind_result"`
+	IncludeLatestHandoff      bool     `json:"include_latest_handoff"`
+	IncludeVaultHits          bool     `json:"include_vault_hits"`
+	UseRelevantRefBoost       bool     `json:"use_relevant_ref_boost"`
+	UseHandoffRefBoost        bool     `json:"use_handoff_ref_boost"`
+	UseCodeHints              bool     `json:"use_code_hints"`
+	UseSemanticVaultSearch    bool     `json:"use_semantic_vault_search"`
+	UsePackageNoteFallback    bool     `json:"use_package_note_fallback"`
+	UseCoChangePrior          bool     `json:"use_co_change_prior"`
+	CoChangeCommitLimit       int      `json:"co_change_commit_limit,omitempty"`
+	CoChangeMaxFilesPerCommit int      `json:"co_change_max_files_per_commit,omitempty"`
+	CoChangeHalfLifeDays      int      `json:"co_change_half_life_days,omitempty"`
+	UseContinuityBundles      bool     `json:"use_continuity_bundles,omitempty"`
+	UseQueryTypeBias          bool     `json:"use_query_type_bias"`
+	AllowedTrusts             []string `json:"allowed_trusts,omitempty"`
+	IncludeControlPlaneRefs   bool     `json:"include_control_plane_refs"`
 }
 
 // RetrievalResult blends control-plane state with ranked vault hits.

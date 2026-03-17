@@ -1397,7 +1397,7 @@ func (s *Service) startAgentOrchestration(ctx context.Context) error {
 	// Priority: configured provider > OPENROUTER > CEREBRAS > GROQ > GEMINI
 	llmProvider, llmAPIKey, llmModel := s.resolveLLMConfig()
 
-	if llmAPIKey == "" {
+	if llmAPIKey == "" && !strings.EqualFold(s.cfg.LLM.ResolveAuthMode(llmProvider), "none") {
 		fmt.Fprintf(os.Stderr, "agent orchestration: skipped (no LLM API key configured)\n")
 		return nil
 	}
@@ -1469,6 +1469,10 @@ func (s *Service) startAgentOrchestration(ctx context.Context) error {
 		LLMProvider:          llmProvider,
 		LLMModel:             llmModel,
 		LLMAPIKey:            llmAPIKey,
+		LLMBaseURL:           s.cfg.LLM.ResolveBaseURL(llmProvider),
+		LLMAuthMode:          s.cfg.LLM.ResolveAuthMode(llmProvider),
+		LLMAuthHeader:        s.cfg.LLM.ResolveAuthHeader(llmProvider),
+		LLMAuthPrefix:        s.cfg.LLM.ResolveAuthPrefix(llmProvider),
 		WorkspaceRoot:        s.opts.Workspace,
 		DefaultMaxDepth:      3,
 		OpenMemoryStore:      openMemoryStore,
@@ -1599,9 +1603,13 @@ type AgentSpawnParams struct {
 	Timeout string `json:"timeout,omitempty"` // e.g. "10m", "30m"
 
 	// LLM override
-	LLMProvider string `json:"llm_provider,omitempty"`
-	LLMModel    string `json:"llm_model,omitempty"`
-	LLMAPIKey   string `json:"llm_api_key,omitempty"`
+	LLMProvider   string `json:"llm_provider,omitempty"`
+	LLMModel      string `json:"llm_model,omitempty"`
+	LLMAPIKey     string `json:"llm_api_key,omitempty"`
+	LLMBaseURL    string `json:"llm_base_url,omitempty"`
+	LLMAuthMode   string `json:"llm_auth_mode,omitempty"`
+	LLMAuthHeader string `json:"llm_auth_header,omitempty"`
+	LLMAuthPrefix string `json:"llm_auth_prefix,omitempty"`
 }
 
 // AgentSpawnResult is the result of spawning an agent.
@@ -1739,6 +1747,18 @@ func (s *Service) handleAgentSpawnWithRoute(ctx context.Context, params json.Raw
 	if p.LLMAPIKey != "" {
 		cfg.LLMAPIKey = p.LLMAPIKey
 	}
+	if p.LLMBaseURL != "" {
+		cfg.LLMBaseURL = p.LLMBaseURL
+	}
+	if p.LLMAuthMode != "" {
+		cfg.LLMAuthMode = p.LLMAuthMode
+	}
+	if p.LLMAuthHeader != "" {
+		cfg.LLMAuthHeader = p.LLMAuthHeader
+	}
+	if p.LLMAuthPrefix != "" {
+		cfg.LLMAuthPrefix = p.LLMAuthPrefix
+	}
 
 	// Spawn the agent
 	session, err := s.agentRuntime.Spawn(ctx, cfg)
@@ -1773,6 +1793,10 @@ func (s *Service) handleAgentSpawnWithRoute(ctx context.Context, params json.Raw
 		LLMProvider:    p.LLMProvider,
 		LLMModel:       p.LLMModel,
 		LLMAPIKey:      p.LLMAPIKey,
+		LLMBaseURL:     p.LLMBaseURL,
+		LLMAuthMode:    p.LLMAuthMode,
+		LLMAuthHeader:  p.LLMAuthHeader,
+		LLMAuthPrefix:  p.LLMAuthPrefix,
 		ExecMode:       execMode,
 		ExecutionLayer: agent.ExecutionLayerClassic,
 		MaxIterations:  p.MaxIterations,

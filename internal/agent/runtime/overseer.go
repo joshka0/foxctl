@@ -160,6 +160,10 @@ func (o *Overseer) HandleSpawnRequest(ctx context.Context, req types.SpawnReques
 			LocalMaxDepth: childLocalMaxDepth,
 			LLMProvider:   sub.LLMProvider, // Pass LLM config from spawn request
 			LLMModel:      sub.LLMModel,
+			LLMBaseURL:    sub.LLMBaseURL,
+			LLMAuthMode:   sub.LLMAuthMode,
+			LLMAuthHeader: sub.LLMAuthHeader,
+			LLMAuthPrefix: sub.LLMAuthPrefix,
 		}
 
 		// Spawn the child session

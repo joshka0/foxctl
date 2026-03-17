@@ -243,6 +243,18 @@ type AgentConfig struct {
 
 	// LLMAPIKey is the API key for the LLM provider.
 	LLMAPIKey string `json:"-"` // Never serialize API keys
+
+	// LLMBaseURL overrides the base URL for OpenAI-compatible/self-hosted backends.
+	LLMBaseURL string `json:"llm_base_url,omitempty"`
+
+	// LLMAuthMode controls auth mode: auto, none, bearer, header.
+	LLMAuthMode string `json:"llm_auth_mode,omitempty"`
+
+	// LLMAuthHeader names the header when auth_mode=header.
+	LLMAuthHeader string `json:"llm_auth_header,omitempty"`
+
+	// LLMAuthPrefix prefixes the API key for bearer/header auth.
+	LLMAuthPrefix string `json:"llm_auth_prefix,omitempty"`
 }
 
 // AgentSession represents a running or completed agent session.
@@ -365,6 +377,18 @@ type SubagentRequest struct {
 
 	// LLMModel specifies the model name.
 	LLMModel string `json:"llm_model,omitempty"`
+
+	// LLMBaseURL overrides the base URL for OpenAI-compatible/self-hosted backends.
+	LLMBaseURL string `json:"llm_base_url,omitempty"`
+
+	// LLMAuthMode controls auth mode: auto, none, bearer, header.
+	LLMAuthMode string `json:"llm_auth_mode,omitempty"`
+
+	// LLMAuthHeader names the header when auth_mode=header.
+	LLMAuthHeader string `json:"llm_auth_header,omitempty"`
+
+	// LLMAuthPrefix prefixes the API key for bearer/header auth.
+	LLMAuthPrefix string `json:"llm_auth_prefix,omitempty"`
 }
 
 // SpawnResponse is the overseer's response to a spawn request.

@@ -7,6 +7,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/jkatigb/agentctl/internal/platform/config"
 )
 
 func TestIndexCommand_Init(t *testing.T) {
@@ -91,5 +93,30 @@ func TestIndexInit_DryRun(t *testing.T) {
 	}
 	if !foundSymbols {
 		t.Fatal("symbols scope not found in output")
+	}
+}
+
+func TestCreateIndexEmbeddingProviderForScope_OpenAICompat(t *testing.T) {
+	t.Setenv("VOYAGE_API_KEY", "")
+	t.Setenv("GEMINI_API_KEY", "")
+
+	cfg := config.Config{
+		Embedding: config.EmbeddingSettings{
+			Provider: "openai_compat",
+			Model:    "text-embedding-embeddinggemma-300m-qat",
+			BaseURL:  "http://127.0.0.1:1234/v1",
+			APIKey:   "lm-studio",
+		},
+	}
+
+	provider, err := createIndexEmbeddingProviderForScope(cfg, "symbols")
+	if err != nil {
+		t.Fatalf("createIndexEmbeddingProviderForScope: %v", err)
+	}
+	if provider == nil {
+		t.Fatal("expected provider")
+	}
+	if provider.Model() == "" {
+		t.Fatal("expected provider model")
 	}
 }

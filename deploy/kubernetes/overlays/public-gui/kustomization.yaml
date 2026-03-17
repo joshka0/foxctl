@@ -1,0 +1,27 @@
+# Public gui-agent overlay with Better Auth gateway in front of agentctl.
+# Usage: kubectl apply -k deploy/kubernetes/overlays/public-gui/
+
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+- ../postgres
+- gateway-configmap.yaml
+- gateway-secrets.yaml
+- gateway-deployment.yaml
+- gateway-service.yaml
+- gateway-network-policy.yaml
+
+patches:
+- path: ingress-patch.yaml
+  target:
+    kind: Ingress
+    name: agentctl
+- path: agentctl-deployment-patch.yaml
+  target:
+    kind: Deployment
+    name: agentctl
+- path: agentctl-hpa-patch.yaml
+  target:
+    kind: HorizontalPodAutoscaler
+    name: agentctl

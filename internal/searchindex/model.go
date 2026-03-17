@@ -75,6 +75,13 @@ type SearchHit struct {
 	Score float64  `json:"score"`
 }
 
+// EmbeddingMetadata captures the expected embedding contract for one workspace.
+type EmbeddingMetadata struct {
+	WorkspaceID string `json:"workspace_id"`
+	Model       string `json:"model"`
+	Dimensions  int    `json:"dimensions"`
+}
+
 func normalizeKeywords(values []string) []string {
 	if len(values) == 0 {
 		return nil

@@ -299,6 +299,10 @@ func buildAgentMemoryService(ctx context.Context, cfg config.Config, agentRecord
 	serviceCfg.LLMProvider = llmProvider
 	serviceCfg.LLMAPIKey = llmAPIKey
 	serviceCfg.LLMModel = llmModel
+	serviceCfg.LLMBaseURL = cfg.LLM.ResolveBaseURL(llmProvider)
+	serviceCfg.LLMAuthMode = cfg.LLM.ResolveAuthMode(llmProvider)
+	serviceCfg.LLMAuthHeader = cfg.LLM.ResolveAuthHeader(llmProvider)
+	serviceCfg.LLMAuthPrefix = cfg.LLM.ResolveAuthPrefix(llmProvider)
 
 	if enableSearch {
 		memStore, err := memorystore.OpenFromConfig(ctx, cfg)

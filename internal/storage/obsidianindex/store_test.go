@@ -130,6 +130,10 @@ func TestRebuildSearchRelatedAndStats(t *testing.T) {
 	if stats.ChunkSemanticEmbeddings == 0 {
 		t.Fatalf("expected chunk semantic embedding count in stats")
 	}
+
+	if _, err := store.SearchNotesSemantic(ctx, "compact handoff pattern", fakeEmbeddingProviderDifferentDims{}, 10); err == nil {
+		t.Fatalf("expected dimension mismatch error")
+	}
 }
 
 func fixtureVaultRoot(t *testing.T) string {
@@ -161,6 +165,28 @@ func (fakeEmbeddingProvider) Model() string {
 
 func (fakeEmbeddingProvider) Dimensions() int {
 	return 3
+}
+
+type fakeEmbeddingProviderDifferentDims struct{}
+
+func (fakeEmbeddingProviderDifferentDims) Embed(_ context.Context, text string) ([]float32, error) {
+	return fakeEmbeddingForText(text), nil
+}
+
+func (fakeEmbeddingProviderDifferentDims) EmbedBatch(_ context.Context, texts []string) ([][]float32, error) {
+	out := make([][]float32, 0, len(texts))
+	for _, text := range texts {
+		out = append(out, fakeEmbeddingForText(text))
+	}
+	return out, nil
+}
+
+func (fakeEmbeddingProviderDifferentDims) Model() string {
+	return "fake-obsidian-semantic"
+}
+
+func (fakeEmbeddingProviderDifferentDims) Dimensions() int {
+	return 4
 }
 
 func fakeEmbeddingForText(text string) []float32 {

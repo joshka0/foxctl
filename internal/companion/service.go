@@ -58,6 +58,18 @@ type ServiceConfig struct {
 	// LLMModel is the model to use.
 	LLMModel string
 
+	// LLMBaseURL overrides the API base URL for self-hosted or OpenAI-compatible backends.
+	LLMBaseURL string
+
+	// LLMAuthMode controls authentication for LLM requests: auto, none, bearer, header.
+	LLMAuthMode string
+
+	// LLMAuthHeader names the header when auth mode is header.
+	LLMAuthHeader string
+
+	// LLMAuthPrefix prefixes the API key for bearer/header auth.
+	LLMAuthPrefix string
+
 	// StoryGatherModel overrides LLMModel for story gather stage (optional).
 	StoryGatherModel string
 
@@ -236,9 +248,13 @@ func NewService(store contextvar.Store, cfg ServiceConfig, turnLock Locker) *Ser
 		// Create LLM summarizer only if credentials are available
 		if cfg.LLMProvider != "" && cfg.LLMAPIKey != "" {
 			summarizer := NewLLMSummarizer(LLMSummarizerConfig{
-				Provider: cfg.LLMProvider,
-				APIKey:   cfg.LLMAPIKey,
-				Model:    cfg.LLMModel,
+				Provider:   cfg.LLMProvider,
+				APIKey:     cfg.LLMAPIKey,
+				Model:      cfg.LLMModel,
+				BaseURL:    cfg.LLMBaseURL,
+				AuthMode:   cfg.LLMAuthMode,
+				AuthHeader: cfg.LLMAuthHeader,
+				AuthPrefix: cfg.LLMAuthPrefix,
 			})
 			opts = append(opts, WithSummarizer(summarizer))
 		} else {
@@ -711,6 +727,10 @@ func (s *Service) chatWithLLMChat(ctx context.Context, req ChatRequest, rlmExecu
 	engineCfg := engine.LLMChatConfig{
 		Provider:              s.config.LLMProvider,
 		APIKey:                s.config.LLMAPIKey,
+		BaseURL:               s.config.LLMBaseURL,
+		AuthMode:              s.config.LLMAuthMode,
+		AuthHeader:            s.config.LLMAuthHeader,
+		AuthPrefix:            s.config.LLMAuthPrefix,
 		Model:                 s.config.LLMModel,
 		MaxIterations:         s.config.MaxIterations,
 		Timeout:               s.config.Timeout,
@@ -1175,6 +1195,10 @@ func (s *Service) recoverEmptyAssistantText(ctx context.Context, systemPrompt st
 	recoveryCfg := engine.LLMChatConfig{
 		Provider:            s.config.LLMProvider,
 		APIKey:              s.config.LLMAPIKey,
+		BaseURL:             s.config.LLMBaseURL,
+		AuthMode:            s.config.LLMAuthMode,
+		AuthHeader:          s.config.LLMAuthHeader,
+		AuthPrefix:          s.config.LLMAuthPrefix,
 		Model:               s.config.LLMModel,
 		MaxIterations:       2,
 		Timeout:             s.config.Timeout,
@@ -1341,6 +1365,10 @@ func (s *Service) chatWithStoryLoop(ctx context.Context, req ChatRequest, rlmExe
 	gatherCfg := engine.LLMChatConfig{
 		Provider:              s.config.LLMProvider,
 		APIKey:                s.config.LLMAPIKey,
+		BaseURL:               s.config.LLMBaseURL,
+		AuthMode:              s.config.LLMAuthMode,
+		AuthHeader:            s.config.LLMAuthHeader,
+		AuthPrefix:            s.config.LLMAuthPrefix,
 		Model:                 gatherModel,
 		MaxIterations:         s.config.MaxIterations,
 		Timeout:               s.config.Timeout,
@@ -1388,6 +1416,10 @@ func (s *Service) chatWithStoryLoop(ctx context.Context, req ChatRequest, rlmExe
 	dialogueCfg := engine.LLMChatConfig{
 		Provider:              s.config.LLMProvider,
 		APIKey:                s.config.LLMAPIKey,
+		BaseURL:               s.config.LLMBaseURL,
+		AuthMode:              s.config.LLMAuthMode,
+		AuthHeader:            s.config.LLMAuthHeader,
+		AuthPrefix:            s.config.LLMAuthPrefix,
 		Model:                 dialogueModel,
 		MaxIterations:         s.config.MaxIterations,
 		Timeout:               s.config.Timeout,

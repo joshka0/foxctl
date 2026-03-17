@@ -566,6 +566,33 @@ func TestEmbeddingMetadata(t *testing.T) {
 	}
 }
 
+func TestSearchSimilar_DimensionMismatchFails(t *testing.T) {
+	ctx := context.Background()
+	store, err := Open(ctx, t.TempDir(), "")
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := store.Close(); err != nil {
+			t.Fatalf("close store: %v", err)
+		}
+	})
+
+	result := []byte(`{"version":1,"status":"ok","command":"test","data":{},"meta":{"ts":"2025-01-01T00:00:00Z"},"error":{}}`)
+	if _, err := store.SaveFromResult(ctx, "doc1", "result", "ws", "document 1", result); err != nil {
+		t.Fatalf("save doc1: %v", err)
+	}
+	if err := store.UpdateEmbedding(ctx, "doc1", "ws", []float32{1, 0, 0}); err != nil {
+		t.Fatalf("embed doc1: %v", err)
+	}
+	if _, err := store.SearchSimilar(ctx, "ws", []float32{1, 0}, 3); err == nil {
+		t.Fatal("expected dimension mismatch error")
+	}
+	if _, err := store.SearchSimilarByType(ctx, "ws", "result", []float32{1, 0}, 3); err == nil {
+		t.Fatal("expected dimension mismatch error")
+	}
+}
+
 func TestGetNotFound(t *testing.T) {
 	ctx := context.Background()
 	store, err := Open(ctx, t.TempDir(), "")

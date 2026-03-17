@@ -30,6 +30,7 @@ func defaultRetrievalWeights() RetrievalWeights {
 		HandoffRef:     2,
 		CodePath:       4,
 		CodeSymbol:     4,
+		CoChange:       3,
 		SemanticMatch:  2,
 	}
 }
@@ -37,22 +38,32 @@ func defaultRetrievalWeights() RetrievalWeights {
 type retrievalPolicyFile struct {
 	RankingWeights map[string]int `yaml:"ranking_weights"`
 	ACA            struct {
-		PackageNoteFallback bool `yaml:"package_note_fallback"`
+		PackageNoteFallback       bool `yaml:"package_note_fallback"`
+		CoChangePrior             bool `yaml:"co_change_prior"`
+		CoChangeCommitLimit       int  `yaml:"co_change_commit_limit"`
+		CoChangeMaxFilesPerCommit int  `yaml:"co_change_max_files_per_commit"`
+		CoChangeHalfLifeDays      int  `yaml:"co_change_half_life_days"`
+		ContinuityBundles         bool `yaml:"continuity_bundles"`
 	} `yaml:"aca"`
 }
 
 func DefaultRetrievalOptions() RetrievalOptions {
 	return RetrievalOptions{
-		IncludeTopOfMindResult:  true,
-		IncludeLatestHandoff:    true,
-		IncludeVaultHits:        true,
-		UseRelevantRefBoost:     true,
-		UseHandoffRefBoost:      true,
-		UseCodeHints:            true,
-		UseSemanticVaultSearch:  true,
-		UsePackageNoteFallback:  false,
-		UseQueryTypeBias:        false,
-		IncludeControlPlaneRefs: true,
+		IncludeTopOfMindResult:    true,
+		IncludeLatestHandoff:      true,
+		IncludeVaultHits:          true,
+		UseRelevantRefBoost:       true,
+		UseHandoffRefBoost:        true,
+		UseCodeHints:              true,
+		UseSemanticVaultSearch:    true,
+		UsePackageNoteFallback:    false,
+		UseCoChangePrior:          false,
+		CoChangeCommitLimit:       40,
+		CoChangeMaxFilesPerCommit: 20,
+		CoChangeHalfLifeDays:      90,
+		UseContinuityBundles:      true,
+		UseQueryTypeBias:          false,
+		IncludeControlPlaneRefs:   true,
 	}
 }
 
@@ -85,6 +96,7 @@ func (s *WorkspaceStore) loadRetrievalWeights() RetrievalWeights {
 	override("recency", &weights.Raw)
 	override("code_path", &weights.CodePath)
 	override("code_symbol", &weights.CodeSymbol)
+	override("co_change", &weights.CoChange)
 	override("semantic_match", &weights.SemanticMatch)
 	return weights
 }
@@ -100,6 +112,17 @@ func (s *WorkspaceStore) loadRetrievalOptions() RetrievalOptions {
 		return opts
 	}
 	opts.UsePackageNoteFallback = policy.ACA.PackageNoteFallback
+	opts.UseCoChangePrior = policy.ACA.CoChangePrior
+	if policy.ACA.CoChangeCommitLimit > 0 {
+		opts.CoChangeCommitLimit = policy.ACA.CoChangeCommitLimit
+	}
+	if policy.ACA.CoChangeMaxFilesPerCommit > 0 {
+		opts.CoChangeMaxFilesPerCommit = policy.ACA.CoChangeMaxFilesPerCommit
+	}
+	if policy.ACA.CoChangeHalfLifeDays > 0 {
+		opts.CoChangeHalfLifeDays = policy.ACA.CoChangeHalfLifeDays
+	}
+	opts.UseContinuityBundles = policy.ACA.ContinuityBundles
 	return opts
 }
 
@@ -137,6 +160,12 @@ func (s *WorkspaceStore) RetrieveWithOptions(ctx context.Context, index obsidian
 	codeHints := retrievalCodeHints{}
 	if opts.UseCodeHints {
 		codeHints = deriveCodeHints(ctx, repo, query, result.TopOfMind, report.LatestHandoff)
+	}
+	cochange := emptyCoChangePrior()
+	if opts.UseCoChangePrior {
+		seedPaths := append([]string(nil), codeHints.Paths...)
+		seedPaths = append(seedPaths, continuityBundlePaths(result.TopOfMind, report.LatestHandoff, opts)...)
+		cochange, _ = buildCoChangePrior(ctx, s.layout.WorkspacePath, seedPaths, coChangeConfigFromOptions(opts))
 	}
 	hits, err := index.SearchNotes(ctx, query, limit*3)
 	if err != nil {
@@ -182,7 +211,7 @@ func (s *WorkspaceStore) RetrieveWithOptions(ctx context.Context, index obsidian
 	vaultHits := make([]RetrievalHit, 0, len(byPath))
 	codeCentric := queryLooksCodeCentric(query)
 	for _, hit := range byPath {
-		vaultHits = append(vaultHits, scoreVaultHit(*hit, maxSemantic, codeCentric, result, report, codeHints, query, opts))
+		vaultHits = append(vaultHits, scoreVaultHit(*hit, maxSemantic, codeCentric, result, report, codeHints, cochange, query, opts))
 	}
 	vaultHits = filterRetrievalHitsByTrust(vaultHits, opts.AllowedTrusts)
 	sort.SliceStable(vaultHits, func(i, j int) bool {
@@ -294,7 +323,7 @@ func (s *WorkspaceStore) DetectContradictions(ctx context.Context, index obsidia
 	return out, nil
 }
 
-func scoreVaultHit(entry scoredVaultHit, maxSemantic int, codeCentric bool, result RetrievalResult, report Report, codeHints retrievalCodeHints, query string, opts RetrievalOptions) RetrievalHit {
+func scoreVaultHit(entry scoredVaultHit, maxSemantic int, codeCentric bool, result RetrievalResult, report Report, codeHints retrievalCodeHints, cochange coChangePrior, query string, opts RetrievalOptions) RetrievalHit {
 	hit := entry.hit
 	score := entry.lexicalScore * result.Weights.BaseIndexScore
 	if entry.semanticScore > 0 && maxSemantic > 0 {
@@ -316,6 +345,9 @@ func scoreVaultHit(entry scoredVaultHit, maxSemantic int, codeCentric bool, resu
 	}
 	if opts.UseCodeHints && codeCentric && matchesCodeSymbols(hit.Symbols, codeHints.Symbols) {
 		score += result.Weights.CodeSymbol
+	}
+	if opts.UseCoChangePrior {
+		score += coChangeBoostForHit(hit.RepoPaths, cochange, result.Weights)
 	}
 	if opts.UseQueryTypeBias {
 		score += queryTypeBias(query, hit, result.Weights)
@@ -570,6 +602,29 @@ func deriveCodeHints(ctx context.Context, repo *repoindex.Store, query string, t
 	hints.Paths = uniqueStrings(hints.Paths)
 	hints.Symbols = uniqueStrings(hints.Symbols)
 	return hints
+}
+
+func continuityBundlePaths(top *TopOfMind, latest *HandoffRecord, opts RetrievalOptions) []string {
+	if !opts.UseContinuityBundles {
+		return nil
+	}
+	var paths []string
+	if top != nil {
+		for _, ref := range top.RelevantRefs {
+			if trimmed, ok := trimPathRef(ref); ok {
+				paths = append(paths, trimmed)
+			}
+		}
+	}
+	if latest != nil {
+		paths = append(paths, latest.Handoff.FilesTouched...)
+		for _, ref := range latest.Handoff.EvidenceRefs {
+			if trimmed, ok := trimPathRef(ref); ok {
+				paths = append(paths, trimmed)
+			}
+		}
+	}
+	return uniqueStrings(paths)
 }
 
 func trimPathRef(ref string) (string, bool) {

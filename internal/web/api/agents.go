@@ -52,6 +52,10 @@ type AgentResponse struct {
 	HeartbeatAt     string   `json:"heartbeat_at,omitempty"`
 	LLMProvider     string   `json:"llm_provider,omitempty"`
 	LLMModel        string   `json:"llm_model,omitempty"`
+	LLMBaseURL      string   `json:"llm_base_url,omitempty"`
+	LLMAuthMode     string   `json:"llm_auth_mode,omitempty"`
+	LLMAuthHeader   string   `json:"llm_auth_header,omitempty"`
+	LLMAuthPrefix   string   `json:"llm_auth_prefix,omitempty"`
 	ExecMode        string   `json:"exec_mode,omitempty"`        // reactive|autonomous|proactive|tick|story
 	ThinkInterval   int      `json:"think_interval,omitempty"`   // Seconds between proactive/tick cycles
 	ConversationID  string   `json:"conversation_id,omitempty"`  // Linked companion conversation ID
@@ -83,8 +87,12 @@ type AgentSpawnRequest struct {
 	MaxAutoTurns     int    `json:"max_auto_turns,omitempty"`     // Max autonomous continuations
 
 	// LLM override
-	LLMProvider string `json:"llm_provider,omitempty"`
-	LLMModel    string `json:"llm_model,omitempty"`
+	LLMProvider   string `json:"llm_provider,omitempty"`
+	LLMModel      string `json:"llm_model,omitempty"`
+	LLMBaseURL    string `json:"llm_base_url,omitempty"`
+	LLMAuthMode   string `json:"llm_auth_mode,omitempty"`
+	LLMAuthHeader string `json:"llm_auth_header,omitempty"`
+	LLMAuthPrefix string `json:"llm_auth_prefix,omitempty"`
 }
 
 // AgentSpawnResponse is the response for spawning a new agent.
@@ -263,6 +271,16 @@ func normalizeSpawnMemoryRetention(req AgentSpawnRequest) agenttypes.MemoryReten
 	return agenttypes.DefaultMemoryRetentionForScope(scope)
 }
 
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
 // AgentsListHandler provides an HTTP handler for listing agents at GET /api/agents.
 //
 // The handler accepts an optional `limit` query parameter (1–500, default 100) to cap
@@ -319,6 +337,10 @@ func AgentsListHandler(cfg config.Config, log zerolog.Logger) http.HandlerFunc {
 				State:           string(a.State),
 				LLMProvider:     a.LLMProvider,
 				LLMModel:        a.LLMModel,
+				LLMBaseURL:      a.LLMBaseURL,
+				LLMAuthMode:     a.LLMAuthMode,
+				LLMAuthHeader:   a.LLMAuthHeader,
+				LLMAuthPrefix:   a.LLMAuthPrefix,
 				ExecMode:        string(a.ExecMode),
 				ThinkInterval:   a.ThinkInterval,
 				ConversationID:  a.ConversationID,
@@ -487,6 +509,10 @@ func AgentDetailHandler(cfg config.Config, log zerolog.Logger, events agentEvent
 			State:           string(agent.State),
 			LLMProvider:     agent.LLMProvider,
 			LLMModel:        agent.LLMModel,
+			LLMBaseURL:      agent.LLMBaseURL,
+			LLMAuthMode:     agent.LLMAuthMode,
+			LLMAuthHeader:   agent.LLMAuthHeader,
+			LLMAuthPrefix:   agent.LLMAuthPrefix,
 			ExecMode:        string(agent.ExecMode),
 			ThinkInterval:   agent.ThinkInterval,
 			ConversationID:  agent.ConversationID,
@@ -882,6 +908,10 @@ func handleAgentSpawnWithRoute(w http.ResponseWriter, r *http.Request, cfg confi
 		CreatedAt:       time.Now().UTC(),
 		LLMProvider:     req.LLMProvider,
 		LLMModel:        req.LLMModel,
+		LLMBaseURL:      req.LLMBaseURL,
+		LLMAuthMode:     req.LLMAuthMode,
+		LLMAuthHeader:   req.LLMAuthHeader,
+		LLMAuthPrefix:   req.LLMAuthPrefix,
 		ExecMode:        execMode,
 		ThinkInterval:   req.ThinkInterval,
 		MaxIterations:   req.MaxIterations,
@@ -918,6 +948,10 @@ func handleAgentSpawnWithRoute(w http.ResponseWriter, r *http.Request, cfg confi
 		MaxAutoTurns:     req.MaxAutoTurns,
 		LLMProvider:      req.LLMProvider,
 		LLMModel:         req.LLMModel,
+		LLMBaseURL:       req.LLMBaseURL,
+		LLMAuthMode:      req.LLMAuthMode,
+		LLMAuthHeader:    req.LLMAuthHeader,
+		LLMAuthPrefix:    req.LLMAuthPrefix,
 	}
 
 	result, err := client.AgentSpawn(params)
@@ -1389,6 +1423,10 @@ func buildAgentCompanionService(ctx context.Context, cfg config.Config, log zero
 		LLMProvider:           llmProvider,
 		LLMAPIKey:             llmAPIKey,
 		LLMModel:              llmModel,
+		LLMBaseURL:            firstNonEmpty(agent.LLMBaseURL, cfg.LLM.ResolveBaseURL(llmProvider)),
+		LLMAuthMode:           firstNonEmpty(agent.LLMAuthMode, cfg.LLM.ResolveAuthMode(llmProvider)),
+		LLMAuthHeader:         firstNonEmpty(agent.LLMAuthHeader, cfg.LLM.ResolveAuthHeader(llmProvider)),
+		LLMAuthPrefix:         firstNonEmpty(agent.LLMAuthPrefix, cfg.LLM.ResolveAuthPrefix(llmProvider)),
 		MemoryStore:           memStore,
 		MemoryWorkspace:       workspace.CanonicalID(cfg.Storage.Root),
 		Config:                &cfg,
@@ -1475,6 +1513,10 @@ func buildAgentCompanionSearchService(ctx context.Context, cfg config.Config, lo
 		LLMProvider:           llmProvider,
 		LLMAPIKey:             llmAPIKey,
 		LLMModel:              llmModel,
+		LLMBaseURL:            firstNonEmpty(agent.LLMBaseURL, cfg.LLM.ResolveBaseURL(llmProvider)),
+		LLMAuthMode:           firstNonEmpty(agent.LLMAuthMode, cfg.LLM.ResolveAuthMode(llmProvider)),
+		LLMAuthHeader:         firstNonEmpty(agent.LLMAuthHeader, cfg.LLM.ResolveAuthHeader(llmProvider)),
+		LLMAuthPrefix:         firstNonEmpty(agent.LLMAuthPrefix, cfg.LLM.ResolveAuthPrefix(llmProvider)),
 		MemoryStore:           memStore,
 		MemoryWorkspace:       workspaceID,
 		Config:                &cfg,

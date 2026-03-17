@@ -40,6 +40,10 @@ type SpawnRequest struct {
 	LLMProvider     string // Per-agent LLM provider override
 	LLMModel        string // Per-agent LLM model override
 	LLMAPIKey       string // Per-agent LLM API key override
+	LLMBaseURL      string // Per-agent LLM base URL override
+	LLMAuthMode     string // Per-agent LLM auth mode override
+	LLMAuthHeader   string // Per-agent LLM auth header override
+	LLMAuthPrefix   string // Per-agent LLM auth prefix override
 
 	// Execution mode configuration
 	ExecMode      agent.ExecutionMode // reactive|autonomous|proactive|tick (default: reactive)
@@ -129,6 +133,10 @@ func (m *Manager) Spawn(ctx context.Context, req SpawnRequest) (SpawnResponse, e
 		LLMProvider:    req.LLMProvider,
 		LLMModel:       req.LLMModel,
 		LLMAPIKey:      req.LLMAPIKey,
+		LLMBaseURL:     req.LLMBaseURL,
+		LLMAuthMode:    req.LLMAuthMode,
+		LLMAuthHeader:  req.LLMAuthHeader,
+		LLMAuthPrefix:  req.LLMAuthPrefix,
 		ExecMode:       execMode,
 		ExecutionLayer: agent.ExecutionLayerClassic,
 		MaxIterations:  maxIterations,
