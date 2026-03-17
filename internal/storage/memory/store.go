@@ -898,6 +898,9 @@ func (s *Store) UpdateEmbedding(ctx context.Context, name, workspace string, emb
 	if err != nil {
 		return err
 	}
+	if err := s.ensureEmbeddingMetadata(ctx, workspace, "", len(embedding)); err != nil {
+		return err
+	}
 
 	// Marshal embedding to JSON
 	embeddingJSON, err := json.Marshal(embedding)
@@ -1007,6 +1010,24 @@ WHERE %s
 	if err != nil {
 		return 0, fmt.Errorf("memory: sync embeddings: rows affected: %w", err)
 	}
+	if updated > 0 {
+		var model sql.NullString
+		var dimensions sql.NullInt64
+		err := conn.QueryRowContext(ctx, `
+SELECT model, dimensions
+FROM embeddb.symbol_embeddings
+WHERE workspace_id = $1
+LIMIT 1
+`, workspaceID).Scan(&model, &dimensions)
+		if err != nil && !dbutil.IsNoRows(err) {
+			return 0, fmt.Errorf("memory: sync embeddings metadata: %w", err)
+		}
+		if err == nil && dimensions.Valid {
+			if err := s.ensureEmbeddingMetadata(ctx, workspaceID, strings.TrimSpace(model.String), int(dimensions.Int64)); err != nil {
+				return 0, err
+			}
+		}
+	}
 	return int(updated), nil
 }
 
@@ -1089,6 +1110,38 @@ func (s *Store) SetEmbeddingMetadata(ctx context.Context, meta EmbeddingMetadata
 	return nil
 }
 
+func (s *Store) ensureEmbeddingMetadata(ctx context.Context, workspace, model string, dimensions int) error {
+	workspace = ws.CanonicalID(workspace)
+	model = strings.TrimSpace(model)
+	if workspace == "" || dimensions <= 0 {
+		return nil
+	}
+	meta, err := s.GetEmbeddingMetadata(ctx, workspace)
+	if err != nil {
+		return err
+	}
+	if meta == nil {
+		return s.SetEmbeddingMetadata(ctx, EmbeddingMetadata{
+			Workspace:  workspace,
+			Model:      model,
+			Dimensions: dimensions,
+		})
+	}
+	if meta.Dimensions != dimensions {
+		return fmt.Errorf("memory: embedding dimension mismatch: workspace %q expects %d dimensions (model: %s), got %d; run `agentctl index init --workspace <workspace-path> --scope memory` to rebuild memory embeddings",
+			workspace, meta.Dimensions, meta.Model, dimensions)
+	}
+	if meta.Model != "" && model != "" && meta.Model != model {
+		return fmt.Errorf("memory: embedding model mismatch: workspace %q expects model %q with %d dimensions, got %q; run `agentctl index init --workspace <workspace-path> --scope memory` to rebuild memory embeddings",
+			workspace, meta.Model, meta.Dimensions, model)
+	}
+	if meta.Model == "" && model != "" {
+		meta.Model = model
+		return s.SetEmbeddingMetadata(ctx, *meta)
+	}
+	return nil
+}
+
 // ValidateEmbeddingDimensions checks if embedding dimensions match stored metadata.
 // Returns an error if there's a dimension mismatch. Returns nil if no metadata exists.
 func (s *Store) ValidateEmbeddingDimensions(ctx context.Context, workspace string, dimensions int) error {
@@ -1101,7 +1154,7 @@ func (s *Store) ValidateEmbeddingDimensions(ctx context.Context, workspace strin
 		return nil // No metadata, allow any dimensions
 	}
 	if meta.Dimensions != dimensions {
-		return fmt.Errorf("memory: embedding dimension mismatch: workspace %q expects %d dimensions (model: %s), got %d",
+		return fmt.Errorf("memory: embedding dimension mismatch: workspace %q expects %d dimensions (model: %s), got %d; run `agentctl index init --workspace <workspace-path> --scope memory` to rebuild memory embeddings",
 			workspace, meta.Dimensions, meta.Model, dimensions)
 	}
 	return nil
@@ -1159,6 +1212,9 @@ func (s *Store) SearchSimilar(ctx context.Context, workspace string, queryEmbedd
 		limit = 20
 	}
 	workspace = ws.CanonicalID(workspace)
+	if err := s.ValidateEmbeddingDimensions(ctx, workspace, len(queryEmbedding)); err != nil {
+		return nil, err
+	}
 
 	// Load entries with embeddings from this workspace
 	rows, err := s.db.QueryContext(ctx, `
@@ -1251,6 +1307,9 @@ func (s *Store) SearchSimilarByType(ctx context.Context, workspace, entryType st
 		limit = 20
 	}
 	workspace = ws.CanonicalID(workspace)
+	if err := s.ValidateEmbeddingDimensions(ctx, workspace, len(queryEmbedding)); err != nil {
+		return nil, err
+	}
 	if entryType == "" {
 		return nil, fmt.Errorf("memory: search similar by type: entry type required")
 	}

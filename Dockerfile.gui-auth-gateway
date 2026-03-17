@@ -1,0 +1,28 @@
+# Multi-stage build for the public gui-agent auth gateway.
+
+FROM oven/bun:1 AS builder
+
+WORKDIR /app
+
+COPY package.json bun.lock tsconfig.json ./
+COPY packages/gui-agent ./packages/gui-agent
+COPY packages/gui-auth-gateway ./packages/gui-auth-gateway
+
+RUN bun install --frozen-lockfile
+RUN bun run --cwd packages/gui-agent build
+RUN bun run --cwd packages/gui-auth-gateway build
+
+FROM oven/bun:1-slim
+
+WORKDIR /app
+
+COPY --from=builder /app/node_modules ./node_modules
+COPY --from=builder /app/package.json ./package.json
+COPY --from=builder /app/packages/gui-agent/dist ./packages/gui-agent/dist
+COPY --from=builder /app/packages/gui-auth-gateway/package.json ./packages/gui-auth-gateway/package.json
+COPY --from=builder /app/packages/gui-auth-gateway/dist ./packages/gui-auth-gateway/dist
+
+ENV PORT=8080
+EXPOSE 8080
+
+CMD ["bun", "run", "/app/packages/gui-auth-gateway/dist/server.js"]

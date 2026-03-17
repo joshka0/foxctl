@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"os"
@@ -266,6 +267,14 @@ CREATE TABLE IF NOT EXISTS obsidian_chunk_embeddings (
 );
 CREATE INDEX IF NOT EXISTS idx_obsidian_chunk_embeddings_path ON obsidian_chunk_embeddings(path);
 CREATE INDEX IF NOT EXISTS idx_obsidian_chunk_embeddings_model ON obsidian_chunk_embeddings(model);
+
+CREATE TABLE IF NOT EXISTS obsidian_embedding_metadata (
+	model TEXT PRIMARY KEY,
+	dimensions INTEGER NOT NULL,
+	created_at TEXT NOT NULL,
+	updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_obsidian_embedding_metadata_model ON obsidian_embedding_metadata(model);
 `
 	if _, err := db.ExecContext(ctx, ddl); err != nil {
 		return fmt.Errorf("obsidianindex: migrate: %w", err)
@@ -540,6 +549,9 @@ func (s *sqlStore) EnsureSemanticEmbeddings(ctx context.Context, provider semant
 	if provider == nil {
 		return 0, fmt.Errorf("obsidianindex: embedding provider required")
 	}
+	if err := s.validateEmbeddingMetadata(ctx, provider); err != nil {
+		return 0, err
+	}
 	rows, err := s.db.QueryContext(ctx, `
 SELECT n.path, n.title, n.search_text, n.hash
 FROM obsidian_notes n
@@ -589,6 +601,9 @@ ORDER BY n.path ASC
 	}
 	defer func() { _ = tx.Rollback() }()
 	now := timeutil.NowUTC()
+	if err := upsertObsidianEmbeddingMetadataTx(ctx, tx, provider.Model(), provider.Dimensions(), now); err != nil {
+		return 0, err
+	}
 	for i, candidate := range candidates {
 		body, err := json.Marshal(embeddings[i])
 		if err != nil {
@@ -621,6 +636,9 @@ func (s *sqlStore) SearchNotesSemantic(ctx context.Context, query string, provid
 	}
 	if limit <= 0 {
 		limit = 20
+	}
+	if err := s.validateEmbeddingMetadata(ctx, provider); err != nil {
+		return nil, err
 	}
 	if _, err := s.EnsureSemanticEmbeddings(ctx, provider); err != nil {
 		return nil, err
@@ -1112,6 +1130,9 @@ func (s *sqlStore) ensureChunkSemanticEmbeddings(ctx context.Context, provider s
 	if provider == nil {
 		return 0, fmt.Errorf("obsidianindex: embedding provider required")
 	}
+	if err := s.validateEmbeddingMetadata(ctx, provider); err != nil {
+		return 0, err
+	}
 	type chunkCandidate struct {
 		Path       string
 		ChunkIndex int
@@ -1177,6 +1198,9 @@ ORDER BY n.path ASC, c.rowid ASC
 		return 0, fmt.Errorf("obsidianindex: embed chunks: %w", err)
 	}
 	now := timeutil.NowUTC()
+	if err := upsertObsidianEmbeddingMetadataTx(ctx, tx, provider.Model(), provider.Dimensions(), now); err != nil {
+		return 0, err
+	}
 	for i, candidate := range candidates {
 		body, err := json.Marshal(embeddings[i])
 		if err != nil {
@@ -1211,4 +1235,42 @@ func cosineSimilarity(a, b []float32) float64 {
 		return 0
 	}
 	return dot / (math.Sqrt(normA) * math.Sqrt(normB))
+}
+
+func (s *sqlStore) validateEmbeddingMetadata(ctx context.Context, provider semantic.EmbeddingProvider) error {
+	if provider == nil {
+		return nil
+	}
+	var dims int
+	err := s.db.QueryRowContext(ctx, `
+SELECT dimensions
+FROM obsidian_embedding_metadata
+WHERE model = ?
+`, provider.Model()).Scan(&dims)
+	switch {
+	case errors.Is(err, sql.ErrNoRows):
+		return nil
+	case err != nil:
+		return fmt.Errorf("obsidianindex: embedding metadata lookup: %w", err)
+	}
+	if dims != provider.Dimensions() {
+		return fmt.Errorf("obsidianindex: embedding dimension mismatch for model %q: stored=%d, provider=%d; run `agentctl obsidian index build --vault-path <vault-path>` to rebuild vault semantic embeddings", provider.Model(), dims, provider.Dimensions())
+	}
+	return nil
+}
+
+func upsertObsidianEmbeddingMetadataTx(ctx context.Context, tx *sql.Tx, model string, dimensions int, now time.Time) error {
+	if strings.TrimSpace(model) == "" || dimensions <= 0 {
+		return nil
+	}
+	_, err := tx.ExecContext(ctx, `
+INSERT INTO obsidian_embedding_metadata (model, dimensions, created_at, updated_at)
+VALUES (?, ?, ?, ?)
+ON CONFLICT(model) DO UPDATE SET
+	updated_at = excluded.updated_at
+`, model, dimensions, timeutil.FormatRFC3339Nano(now), timeutil.FormatRFC3339Nano(now))
+	if err != nil {
+		return fmt.Errorf("obsidianindex: upsert embedding metadata: %w", err)
+	}
+	return nil
 }

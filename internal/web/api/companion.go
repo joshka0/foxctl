@@ -13,8 +13,10 @@ import (
 	"github.com/rs/zerolog"
 
 	"github.com/jkatigb/agentctl/internal/companion"
+	"github.com/jkatigb/agentctl/internal/contextplane"
 	agentdomain "github.com/jkatigb/agentctl/internal/domain/agent"
 	"github.com/jkatigb/agentctl/internal/domain/envelope"
+	"github.com/jkatigb/agentctl/internal/indexing/semantic"
 	"github.com/jkatigb/agentctl/internal/platform/config"
 	ws "github.com/jkatigb/agentctl/internal/platform/workspace"
 	"github.com/jkatigb/agentctl/internal/storage/agents"
@@ -57,6 +59,56 @@ func CompanionProvidersHandler(cfg config.Config, log zerolog.Logger) http.Handl
 			"providers":        providers,
 			"default_provider": cfg.LLM.Provider,
 			"voyage_available": cfg.Embedding.VoyageAPIKey != "",
+		})
+	}
+}
+
+// CompanionCoChangeHandler returns a handler for GET /api/companion/cochange?workspace=...&query=....
+func CompanionCoChangeHandler(cfg config.Config, log zerolog.Logger) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			httpError(w, http.StatusMethodNotAllowed, "method not allowed")
+			return
+		}
+
+		query := strings.TrimSpace(r.URL.Query().Get("query"))
+		workspacePath := strings.TrimSpace(r.URL.Query().Get("workspace"))
+		if workspacePath == "" {
+			workspacePath = cfg.Storage.Root
+		}
+		limit := 10
+		if raw := strings.TrimSpace(r.URL.Query().Get("limit")); raw != "" {
+			if parsed, err := strconv.Atoi(raw); err == nil && parsed > 0 {
+				limit = parsed
+			}
+		}
+
+		memStore, err := memorystore.OpenFromConfig(r.Context(), cfg)
+		if err != nil {
+			log.Error().Err(err).Msg("failed to open memory store")
+			httpError(w, http.StatusInternalServerError, "failed to open memory store")
+			return
+		}
+		defer memStore.Close()
+
+		provider, _ := semantic.NewProviderForScope(
+			semantic.ScopeMemory,
+			cfg,
+			semantic.WithVoyageKey(cfg.Embedding.VoyageAPIKey),
+			semantic.WithGeminiKey(cfg.LLM.GeminiAPIKey),
+		)
+
+		hits, err := contextplane.SearchCoChangeArtifacts(r.Context(), workspacePath, query, limit, memStore, provider)
+		if err != nil {
+			httpError(w, http.StatusInternalServerError, "cochange search failed: "+err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{
+			"ok":            true,
+			"workspace":     workspacePath,
+			"query":         query,
+			"cochange_hits": hits,
+			"count":         len(hits),
 		})
 	}
 }
@@ -198,12 +250,16 @@ func CompanionChatHandler(cfg config.Config, log zerolog.Logger, turnLock compan
 		// across all HTTP requests (not just within a single Service instance).
 		presenceEnabled := settings.IsPresenceEnabled()
 		svcCfg := companion.ServiceConfig{
-			Logger:      log,
-			MemoryDB:    memoryDB,
-			LLMProvider: llmProvider,
-			LLMAPIKey:   llmAPIKey,
-			LLMModel:    llmModel,
-			ToolsAllow:  settings.ToolsAllow,
+			Logger:        log,
+			MemoryDB:      memoryDB,
+			LLMProvider:   llmProvider,
+			LLMAPIKey:     llmAPIKey,
+			LLMModel:      llmModel,
+			LLMBaseURL:    cfg.LLM.ResolveBaseURL(llmProvider),
+			LLMAuthMode:   cfg.LLM.ResolveAuthMode(llmProvider),
+			LLMAuthHeader: cfg.LLM.ResolveAuthHeader(llmProvider),
+			LLMAuthPrefix: cfg.LLM.ResolveAuthPrefix(llmProvider),
+			ToolsAllow:    settings.ToolsAllow,
 		}
 		if presenceEnabled {
 			svcCfg.PresenceConfig = &companion.PresenceConfig{

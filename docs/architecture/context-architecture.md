@@ -92,6 +92,8 @@ Behavior:
   - `paths`
   - `symbols`
 - uses repo index search results to strengthen retrieval ranking for notes whose `paths` or `symbols` match code-relevant files or symbols
+- can optionally add a git co-change prior, using files commonly committed together as a task/query-conditioned ranking boost for notes whose `paths` land in the same change neighborhood
+- can materialize `cochange_cluster` memory artifacts from recent git history through `agentctl context cochange build`, making those file-neighborhood summaries searchable through memory and semantic retrieval paths
 - supports direct semantic note search from stored note embeddings through `agentctl obsidian index search --semantic`
 - can generate an inbox-first repo graph draft bundle from the repo index through `agentctl obsidian graph build`
 - can review-merge a generated graph draft bundle into canonical repo notes through `agentctl obsidian graph promote`

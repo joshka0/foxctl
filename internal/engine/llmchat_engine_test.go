@@ -124,6 +124,96 @@ func TestLLMChatEngine_Run_NoToolCalls(t *testing.T) {
 	}
 }
 
+func TestLLMChatEngine_Run_NoAuthHeaderWhenAuthModeNone(t *testing.T) {
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := strings.TrimSpace(r.Header.Get("Authorization")); got != "" {
+			t.Fatalf("unexpected Authorization header: %q", got)
+		}
+		resp := oaiResponse{
+			ID: "test-noauth",
+			Choices: []struct {
+				Message      oaiMessage `json:"message"`
+				FinishReason string     `json:"finish_reason"`
+			}{
+				{
+					Message:      oaiMessage{Role: "assistant", Content: "ok"},
+					FinishReason: "stop",
+				},
+			},
+		}
+		_ = json.NewEncoder(w).Encode(resp)
+	})
+
+	engine := &LLMChatEngine{
+		config: LLMChatConfig{
+			Provider:      "openai_compat",
+			BaseURL:       "http://mock",
+			Model:         "demo-model",
+			AuthMode:      "none",
+			MaxIterations: 1,
+		},
+		client: &http.Client{Transport: &handlerTransport{handler: handler}},
+	}
+
+	output, err := engine.Run(context.Background(), EngineInput{
+		Messages: []Message{{Role: RoleUser, Content: "Hi"}},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if output.AssistantText != "ok" {
+		t.Fatalf("response = %q, want ok", output.AssistantText)
+	}
+}
+
+func TestLLMChatEngine_Run_CustomHeaderAuth(t *testing.T) {
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("X-Demo-Key"); got != "Token demo-secret" {
+			t.Fatalf("X-Demo-Key = %q, want %q", got, "Token demo-secret")
+		}
+		if got := strings.TrimSpace(r.Header.Get("Authorization")); got != "" {
+			t.Fatalf("unexpected Authorization header: %q", got)
+		}
+		resp := oaiResponse{
+			ID: "test-header-auth",
+			Choices: []struct {
+				Message      oaiMessage `json:"message"`
+				FinishReason string     `json:"finish_reason"`
+			}{
+				{
+					Message:      oaiMessage{Role: "assistant", Content: "ok"},
+					FinishReason: "stop",
+				},
+			},
+		}
+		_ = json.NewEncoder(w).Encode(resp)
+	})
+
+	engine := &LLMChatEngine{
+		config: LLMChatConfig{
+			Provider:      "openai_compat",
+			APIKey:        "demo-secret",
+			BaseURL:       "http://mock",
+			Model:         "demo-model",
+			AuthMode:      "header",
+			AuthHeader:    "X-Demo-Key",
+			AuthPrefix:    "Token ",
+			MaxIterations: 1,
+		},
+		client: &http.Client{Transport: &handlerTransport{handler: handler}},
+	}
+
+	output, err := engine.Run(context.Background(), EngineInput{
+		Messages: []Message{{Role: RoleUser, Content: "Hi"}},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if output.AssistantText != "ok" {
+		t.Fatalf("response = %q, want ok", output.AssistantText)
+	}
+}
+
 func TestLLMChatEngine_Run_EmptyFinalResponseForcesFinalize(t *testing.T) {
 	callCount := 0
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -663,6 +753,7 @@ func TestBaseURLForProvider(t *testing.T) {
 		{"openrouter", "https://openrouter.ai/api/v1"},
 		{"groq", "https://api.groq.com/openai/v1"},
 		{"openai", "https://api.openai.com/v1"},
+		{"openai_compat", "https://api.openai.com/v1"},
 		{"", "https://api.openai.com/v1"},
 	}
 
@@ -673,6 +764,21 @@ func TestBaseURLForProvider(t *testing.T) {
 				t.Errorf("baseURLForProvider(%q) = %q, want %q", tt.provider, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestNewLLMChatEngine_AllowsExplicitNoAuthWithoutAPIKey(t *testing.T) {
+	eng, err := NewLLMChatEngine(LLMChatConfig{
+		Provider: "openai_compat",
+		BaseURL:  "http://localhost:8080/v1",
+		Model:    "demo-model",
+		AuthMode: "none",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if eng.config.AuthMode != "none" {
+		t.Fatalf("auth mode = %q, want none", eng.config.AuthMode)
 	}
 }
 

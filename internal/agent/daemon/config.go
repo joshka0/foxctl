@@ -54,6 +54,18 @@ type Options struct {
 	// LLMAPIKey is the API key for the LLM provider.
 	LLMAPIKey string
 
+	// LLMBaseURL overrides the base URL for OpenAI-compatible/self-hosted backends.
+	LLMBaseURL string
+
+	// LLMAuthMode controls auth mode: auto, none, bearer, header.
+	LLMAuthMode string
+
+	// LLMAuthHeader names the header when auth mode is header.
+	LLMAuthHeader string
+
+	// LLMAuthPrefix prefixes the API key for bearer/header auth.
+	LLMAuthPrefix string
+
 	// EnableCompanionMemory enables L0/L1/L2 conversation memory for agents.
 	// When enabled, the daemon injects memory context into prompts and stores turns.
 	EnableCompanionMemory bool

@@ -12,6 +12,7 @@ This is the canonical map for docs in this repository.
 ## Current Reference Docs
 
 - [docs/general/](general/) - Core subsystem guides (skills, hooks, memory, storage, sessions).
+- [docs/general/embedding-rebuilds.md](general/embedding-rebuilds.md) - Canonical rebuild commands for embedding-backed stores after provider/model changes.
 - [docs/general/task-continuity.md](general/task-continuity.md) - Deterministic task continuity pack, command/wrapper split, and artifact-backed delivery.
 - [docs/general/core-package-coverage.md](general/core-package-coverage.md) - Machine-friendly core package coverage matrix.
 - [docs/architecture/](architecture/) - Current runtime architecture docs.
@@ -53,6 +54,7 @@ This is the canonical map for docs in this repository.
 - [docs/plans/features/aca-retrieval-hypotheses.md](plans/features/aca-retrieval-hypotheses.md) - Deterministic ACA retrieval hypotheses and eval modes for testing control-plane, vault, trust, and repo-hint improvements.
 - [docs/plans/features/aca-self-corrective-loop.md](plans/features/aca-self-corrective-loop.md) - First slice for observing ACA retrieval misses, classifying them, and proposing deterministic corrections.
 - [docs/plans/features/generic-agent-experiment-loop.md](plans/features/generic-agent-experiment-loop.md) - Design for turning long-running agents into hypothesis-driven, evaluator-bounded experiment loops.
+- [docs/plans/features/workspace-embedding-overrides-research.md](plans/features/workspace-embedding-overrides-research.md) - Checklist for enabling workspace-local embedding overrides safely without dimension drift.
 - [docs/impl_plan/README.md](impl_plan/README.md) - Legacy phased plan stream kept for history.
 
 ## Historical and Generated Material
@@ -65,6 +67,7 @@ This is the canonical map for docs in this repository.
 ## Additional Topic Areas
 
 - [docs/examples/README.md](examples/README.md) - Example workflows.
+- [docs/examples/public-openai-compat-demo-config.yaml](examples/public-openai-compat-demo-config.yaml) - Example config for a public/demo OpenAI-compatible backend.
 - [docs/ci/README.md](ci/README.md) - CI-specific docs.
 - [docs/guides/README.md](guides/README.md) - How-to guides.
 - [docs/research/README.md](research/README.md) - Exploratory research notes.

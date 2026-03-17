@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -220,6 +222,69 @@ func TestFlexString(t *testing.T) {
 				t.Errorf("got %q, want %q", f.String(), tt.want)
 			}
 		})
+	}
+}
+
+func TestBootstrap_LoadsWorkspaceConfigOverride(t *testing.T) {
+	tmp := t.TempDir()
+	oldHome := os.Getenv("HOME")
+	t.Setenv("HOME", tmp)
+	t.Cleanup(func() {
+		if oldHome == "" {
+			_ = os.Unsetenv("HOME")
+		} else {
+			_ = os.Setenv("HOME", oldHome)
+		}
+	})
+
+	home := filepath.Join(tmp, ".agentctl")
+	if err := os.MkdirAll(home, 0o755); err != nil {
+		t.Fatalf("mkdir home: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(home, "config.yaml"), []byte(`
+embedding:
+  provider: lmstudio
+  model: text-embedding-embeddinggemma-300m-qat
+  base_url: http://127.0.0.1:1234/v1
+`), 0o644); err != nil {
+		t.Fatalf("write global config: %v", err)
+	}
+
+	workspaceDir := filepath.Join(tmp, "agentctl")
+	if err := os.MkdirAll(filepath.Join(workspaceDir, ".agentctl"), 0o755); err != nil {
+		t.Fatalf("mkdir workspace config dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(workspaceDir, ".agentctl", "config.yaml"), []byte(`
+embedding:
+  provider: voyage
+  model: voyage-3.5
+`), 0o644); err != nil {
+		t.Fatalf("write workspace config: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(workspaceDir, ".git"), 0o755); err != nil {
+		t.Fatalf("mkdir git dir: %v", err)
+	}
+
+	oldwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	if err := os.Chdir(workspaceDir); err != nil {
+		t.Fatalf("chdir: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(oldwd) })
+
+	rc, err := Bootstrap(context.Background(), &bytes.Buffer{})
+	if err != nil {
+		t.Fatalf("Bootstrap: %v", err)
+	}
+	defer func() { _ = rc.Close() }()
+
+	if rc.Config.Embedding.Provider != "voyage" {
+		t.Fatalf("embedding provider = %q, want voyage", rc.Config.Embedding.Provider)
+	}
+	if rc.Config.Embedding.Model != "voyage-3.5" {
+		t.Fatalf("embedding model = %q, want voyage-3.5", rc.Config.Embedding.Model)
 	}
 }
 

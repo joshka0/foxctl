@@ -38,7 +38,8 @@ type LLMChatEngine struct {
 
 // LLMChatConfig configures the LLM chat engine.
 type LLMChatConfig struct {
-	// Provider is the LLM provider: "openrouter", "groq", "openai"
+	// Provider is the LLM provider: "openrouter", "groq", "openai",
+	// "openai_compat", "lmstudio", or "bedrock".
 	Provider string
 
 	// APIKey is the API key for the provider.
@@ -46,6 +47,15 @@ type LLMChatConfig struct {
 
 	// BaseURL is the API base URL. Auto-detected if empty.
 	BaseURL string
+
+	// AuthMode controls authentication: auto, none, bearer, header.
+	AuthMode string
+
+	// AuthHeader is used when AuthMode=header.
+	AuthHeader string
+
+	// AuthPrefix is prepended to APIKey for bearer/header auth.
+	AuthPrefix string
 
 	// Model is the model name. Auto-detected if empty.
 	Model string
@@ -124,20 +134,24 @@ func DefaultLLMChatConfig() LLMChatConfig {
 // - Related: DefaultLLMChatConfig, apiKeyForProvider, detectProvider
 // - Keywords: llm_chat, provider, api_key, base_url, model
 func NewLLMChatEngine(cfg LLMChatConfig) (*LLMChatEngine, error) {
+	cfg.Provider = normalizeEngineProvider(cfg.Provider)
+
+	if cfg.Provider == "" && strings.TrimSpace(cfg.BaseURL) != "" {
+		cfg.Provider = "openai_compat"
+	}
+
 	// Resolve API key: if provider is specified, get key for that provider
-	if cfg.APIKey == "" && cfg.Provider != "" {
+	if authRequiresCredential(cfg.AuthMode) && cfg.APIKey == "" && cfg.Provider != "" {
 		cfg.APIKey = apiKeyForProvider(cfg.Provider)
 		// Error if explicit provider but no key found - don't auto-detect
 		if cfg.APIKey == "" {
-			return nil, fmt.Errorf("no API key configured for provider %q (set the appropriate env var)", cfg.Provider)
+			return nil, fmt.Errorf("no API key configured for provider %q (set the appropriate env var or use auth_mode=none)", cfg.Provider)
 		}
 	}
+	// Resolve API key: if provider is specified, get key for that provider
 	// Fall back to auto-detect only if no provider specified
 	if cfg.APIKey == "" && cfg.Provider == "" {
 		cfg.APIKey, cfg.Provider = detectProvider()
-	}
-	if cfg.APIKey == "" {
-		return nil, fmt.Errorf("no API key configured (set LMSTUDIO_API_KEY or provider-specific API keys)")
 	}
 
 	// Set base URL based on provider
@@ -148,6 +162,19 @@ func NewLLMChatEngine(cfg LLMChatConfig) (*LLMChatEngine, error) {
 	// Set default model based on provider
 	if cfg.Model == "" {
 		cfg.Model = llmproviders.DefaultModelForProvider(cfg.Provider)
+	}
+
+	if cfg.AuthMode == "" {
+		cfg.AuthMode = defaultAuthModeForProvider(cfg.Provider, cfg.APIKey)
+	}
+	if cfg.AuthHeader == "" {
+		cfg.AuthHeader = defaultAuthHeader(cfg.AuthMode)
+	}
+	if cfg.AuthPrefix == "" && cfg.AuthMode == "bearer" {
+		cfg.AuthPrefix = "Bearer "
+	}
+	if authRequiresCredential(cfg.AuthMode) && cfg.APIKey == "" {
+		return nil, fmt.Errorf("auth mode %q requires an API key", cfg.AuthMode)
 	}
 
 	// Apply defaults
@@ -648,7 +675,7 @@ func (e *LLMChatEngine) callLLM(ctx context.Context, messages []oaiMessage, tool
 	}
 
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+e.config.APIKey)
+	applyAuthHeader(req, e.config)
 
 	// OpenRouter-specific headers
 	if e.config.Provider == "openrouter" {
@@ -915,6 +942,7 @@ func buildResearchSummary(toolCalls []ToolCall) string {
 // apiKeyForProvider returns the API key for a specific provider.
 // Only includes providers that have full support (baseURL, defaultModel, detectProvider).
 func apiKeyForProvider(provider string) string {
+	provider = normalizeEngineProvider(provider)
 	switch provider {
 	case "cerebras":
 		return os.Getenv("CEREBRAS_API_KEY")
@@ -966,6 +994,7 @@ func detectProvider() (apiKey, provider string) {
 }
 
 func baseURLForProvider(provider string) string {
+	provider = normalizeEngineProvider(provider)
 	switch provider {
 	case "cerebras":
 		return "https://api.cerebras.ai/v1"
@@ -982,6 +1011,62 @@ func baseURLForProvider(provider string) string {
 		return "" // Uses AWS SDK, not HTTP base URL
 	default:
 		return "https://api.openai.com/v1"
+	}
+}
+
+func normalizeEngineProvider(provider string) string {
+	switch strings.ToLower(strings.TrimSpace(provider)) {
+	case "openai-compatible", "openai_compat":
+		return "openai_compat"
+	default:
+		return strings.ToLower(strings.TrimSpace(provider))
+	}
+}
+
+func defaultAuthModeForProvider(provider, apiKey string) string {
+	switch normalizeEngineProvider(provider) {
+	case "bedrock":
+		return "none"
+	case "lmstudio", "openai_compat":
+		if strings.TrimSpace(apiKey) == "" {
+			return "none"
+		}
+		return "bearer"
+	default:
+		return "bearer"
+	}
+}
+
+func defaultAuthHeader(mode string) string {
+	if strings.EqualFold(strings.TrimSpace(mode), "header") {
+		return "X-API-Key"
+	}
+	return "Authorization"
+}
+
+func authRequiresCredential(mode string) bool {
+	switch strings.ToLower(strings.TrimSpace(mode)) {
+	case "", "auto":
+		return false
+	case "none":
+		return false
+	default:
+		return true
+	}
+}
+
+func applyAuthHeader(req *http.Request, cfg LLMChatConfig) {
+	switch strings.ToLower(strings.TrimSpace(cfg.AuthMode)) {
+	case "", "none":
+		return
+	case "bearer":
+		req.Header.Set("Authorization", cfg.AuthPrefix+cfg.APIKey)
+	case "header":
+		header := cfg.AuthHeader
+		if header == "" {
+			header = "X-API-Key"
+		}
+		req.Header.Set(header, cfg.AuthPrefix+cfg.APIKey)
 	}
 }
 

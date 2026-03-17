@@ -1,0 +1,15 @@
+llm:
+  provider: openai_compat
+  model: qwen/qwen3-32b
+  base_url: https://demo.example.com/v1
+  api_key: ${DEMO_PROXY_TOKEN}
+  auth_mode: header
+  auth_header: X-Demo-Key
+  auth_prefix: "Token "
+
+embedding:
+  provider: openai_compat
+  model: text-embedding-3-small
+  base_url: https://demo.example.com/v1
+  api_key: ${DEMO_PROXY_TOKEN}
+  dimensions: 1536

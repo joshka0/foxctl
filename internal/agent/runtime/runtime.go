@@ -58,6 +58,16 @@ func (r *Runtime) workspaceRootForSession(session *Session) string {
 	return r.workspaceRootForConfig(session.Config)
 }
 
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
 // Runtime manages agent sessions and lifecycle.
 type Runtime struct {
 	mu       sync.RWMutex
@@ -90,6 +100,18 @@ type Config struct {
 
 	// LLMAPIKey is the API key for the LLM provider.
 	LLMAPIKey string
+
+	// LLMBaseURL overrides the base URL for OpenAI-compatible/self-hosted backends.
+	LLMBaseURL string
+
+	// LLMAuthMode controls auth mode: auto, none, bearer, header.
+	LLMAuthMode string
+
+	// LLMAuthHeader names the auth header when auth mode is header.
+	LLMAuthHeader string
+
+	// LLMAuthPrefix prefixes the API key for bearer/header auth.
+	LLMAuthPrefix string
 
 	// WorkspaceRoot is the workspace root directory.
 	WorkspaceRoot string
@@ -262,6 +284,18 @@ func (r *Runtime) Spawn(ctx context.Context, cfg types.AgentConfig) (*Session, e
 	if cfg.LLMModel == "" {
 		cfg.LLMModel = r.config.LLMModel
 	}
+	if cfg.LLMBaseURL == "" {
+		cfg.LLMBaseURL = r.config.LLMBaseURL
+	}
+	if cfg.LLMAuthMode == "" {
+		cfg.LLMAuthMode = r.config.LLMAuthMode
+	}
+	if cfg.LLMAuthHeader == "" {
+		cfg.LLMAuthHeader = r.config.LLMAuthHeader
+	}
+	if cfg.LLMAuthPrefix == "" {
+		cfg.LLMAuthPrefix = r.config.LLMAuthPrefix
+	}
 
 	// Initialize hierarchy fields if not set
 	if cfg.MaxDepth <= 0 {
@@ -399,6 +433,11 @@ func (r *Runtime) createEngine(cfg types.AgentConfig, sessionID string) (*engine
 	// Create LLMChatEngine config - it will auto-detect provider/key from env if not specified
 	engineCfg := engine.LLMChatConfig{
 		Provider:         provider,
+		APIKey:           firstNonEmpty(cfg.LLMAPIKey, r.config.LLMAPIKey),
+		BaseURL:          firstNonEmpty(cfg.LLMBaseURL, r.config.LLMBaseURL),
+		AuthMode:         firstNonEmpty(cfg.LLMAuthMode, r.config.LLMAuthMode),
+		AuthHeader:       firstNonEmpty(cfg.LLMAuthHeader, r.config.LLMAuthHeader),
+		AuthPrefix:       firstNonEmpty(cfg.LLMAuthPrefix, r.config.LLMAuthPrefix),
 		Model:            model,
 		MaxIterations:    cfg.MaxIterations,
 		MaxContextTokens: maxContextTokens,
@@ -965,6 +1004,10 @@ func (e *agentToolExecutor) executeAgentSpawn(ctx context.Context, args map[stri
 	// Optional LLM configuration
 	llmProvider, _ := args["llm_provider"].(string)
 	llmModel, _ := args["llm_model"].(string)
+	llmBaseURL, _ := args["llm_base_url"].(string)
+	llmAuthMode, _ := args["llm_auth_mode"].(string)
+	llmAuthHeader, _ := args["llm_auth_header"].(string)
+	llmAuthPrefix, _ := args["llm_auth_prefix"].(string)
 
 	// Start timing for observability
 	spawnStart := time.Now()
@@ -982,7 +1025,9 @@ func (e *agentToolExecutor) executeAgentSpawn(ctx context.Context, args map[stri
 		WithData("task_hash", taskHash).
 		WithData("caller_depth", e.depth).
 		WithData("llm_provider", llmProvider).
-		WithData("llm_model", llmModel)
+		WithData("llm_model", llmModel).
+		WithData("llm_base_url", llmBaseURL).
+		WithData("llm_auth_mode", llmAuthMode)
 
 	localMaxDepth := e.localMaxDepth
 	if lmd, ok := args["local_max_depth"].(float64); ok && int(lmd) > 0 {
@@ -1006,6 +1051,10 @@ func (e *agentToolExecutor) executeAgentSpawn(ctx context.Context, args map[stri
 				LocalMaxDepth: localMaxDepth,
 				LLMProvider:   llmProvider,
 				LLMModel:      llmModel,
+				LLMBaseURL:    llmBaseURL,
+				LLMAuthMode:   llmAuthMode,
+				LLMAuthHeader: llmAuthHeader,
+				LLMAuthPrefix: llmAuthPrefix,
 			},
 		},
 	}
@@ -2368,8 +2417,12 @@ func buildToolDefsForRole(role types.AgentRole, hasMailbox, hasBoard bool, allow
 					"role":{"type":"string","description":"Agent role: coder, researcher, reviewer, planner","enum":["coder","researcher","reviewer","planner"]},
 					"task":{"type":"string","description":"DETAILED task with: specific files, which tools to use, what to look for, success criteria"},
 					"local_max_depth":{"type":"integer","description":"Maximum depth for this subtree (optional)"},
-					"llm_provider":{"type":"string","description":"LLM provider: cerebras, openrouter, groq, gemini, anthropic (optional, inherits from parent)"},
-					"llm_model":{"type":"string","description":"Model name (optional, uses provider default)"}
+					"llm_provider":{"type":"string","description":"LLM provider: cerebras, openrouter, groq, gemini, anthropic, openai_compat (optional, inherits from parent)"},
+					"llm_model":{"type":"string","description":"Model name (optional, uses provider default)"},
+					"llm_base_url":{"type":"string","description":"Custom base URL for OpenAI-compatible/self-hosted backends (optional)"},
+					"llm_auth_mode":{"type":"string","description":"Auth mode: auto, none, bearer, header (optional)"},
+					"llm_auth_header":{"type":"string","description":"Auth header name when llm_auth_mode=header (optional)"},
+					"llm_auth_prefix":{"type":"string","description":"Auth prefix for bearer/header mode, e.g. 'Bearer ' or 'Token ' (optional)"}
 				},"required":["role","task"]}`),
 			},
 			engine.ToolDef{

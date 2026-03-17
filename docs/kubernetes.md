@@ -15,6 +15,7 @@ This document now points to the current architecture docs and the manifest reali
 - `base/` — legacy defaults (Turso-oriented, exec probes, older CAS key names).
 - `overlays/postgres/` — production-oriented PostgreSQL runtime with HTTP probes and CAS driver keys.
 - `overlays/local/` — single-node/dev layout.
+- `overlays/public-gui/` — Better Auth gateway in front of `agentctl web serve` for public `gui-agent` hosting.
 
 Use the overlay that matches your control-plane strategy.
 
@@ -31,6 +32,7 @@ Use the overlay that matches your control-plane strategy.
 
 - For local/manual deploy: use `deploy/kubernetes/base` and `deploy/kubernetes/overlays/local`.
 - For shared state production: apply `deploy/kubernetes/overlays/postgres` and pair with an external PostgreSQL + S3-compatible object store.
+- For public `gui-agent` hosting: apply `deploy/kubernetes/overlays/public-gui`, which composes the PostgreSQL overlay and fronts the private `agentctl` service with `gui-auth-gateway`.
 - For implementation backlog and historical migration tasks, see:
   - [docs/plans/chat-platform-adapter.md](./plans/chat-platform-adapter.md)
   - [docs/plans/k8s-sql-storage.md](./plans/k8s-sql-storage.md)

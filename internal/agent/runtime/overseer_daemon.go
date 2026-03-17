@@ -136,15 +136,19 @@ func handleOverseerCmd(ctx context.Context, msg agent.Message, mgr *agentmanager
 		}
 		prompt := buildSpawnPrompt(req, sub)
 		spawnResp, err := mgr.Spawn(ctx, agentmanager.SpawnRequest{
-			ParentNS:    msg.FromNS,
-			Role:        string(sub.Role),
-			Prompt:      prompt,
-			SkillsAllow: parentAgent.SkillsAllow,
-			Policy:      parentAgent.Policy,
-			ShareBB:     "scoped",
-			LLMProvider: parentAgent.LLMProvider,
-			LLMModel:    parentAgent.LLMModel,
-			LLMAPIKey:   parentAgent.LLMAPIKey,
+			ParentNS:      msg.FromNS,
+			Role:          string(sub.Role),
+			Prompt:        prompt,
+			SkillsAllow:   parentAgent.SkillsAllow,
+			Policy:        parentAgent.Policy,
+			ShareBB:       "scoped",
+			LLMProvider:   parentAgent.LLMProvider,
+			LLMModel:      parentAgent.LLMModel,
+			LLMAPIKey:     parentAgent.LLMAPIKey,
+			LLMBaseURL:    parentAgent.LLMBaseURL,
+			LLMAuthMode:   parentAgent.LLMAuthMode,
+			LLMAuthHeader: parentAgent.LLMAuthHeader,
+			LLMAuthPrefix: parentAgent.LLMAuthPrefix,
 		})
 		if err != nil {
 			resp.DeniedAgents = append(resp.DeniedAgents, types.DeniedAgent{

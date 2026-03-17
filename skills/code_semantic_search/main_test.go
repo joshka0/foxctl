@@ -10,6 +10,7 @@ import (
 
 	"github.com/jkatigb/agentctl/internal/contextplane"
 	"github.com/jkatigb/agentctl/internal/platform/config"
+	"github.com/jkatigb/agentctl/internal/storage/memory"
 )
 
 func TestDimensionValidation(t *testing.T) {
@@ -233,6 +234,35 @@ func TestEmbeddingModelConfig_GeminiFallback(t *testing.T) {
 	}
 	if textModel != "gemini-embedding-001" {
 		t.Fatalf("text model = %q, want gemini-embedding-001", textModel)
+	}
+}
+
+func TestSearchMemoriesBM25_LabelsCoChangeArtifacts(t *testing.T) {
+	ctx := context.Background()
+	cfg := config.Config{}
+	store, err := memory.Open(ctx, t.TempDir(), "")
+	if err != nil {
+		t.Fatalf("open memory: %v", err)
+	}
+	defer store.Close()
+
+	payload := []byte(`{"anchor_path":"internal/contextplane/dispatch.go","neighbor_paths":["internal/contextplane/store.go"],"summary":"dispatch cluster"}`)
+	if _, err := store.SaveFromResult(ctx, "cochange://internal/contextplane/dispatch.go", contextplane.CoChangeClusterType, "ws", "dispatch changes with store", payload); err != nil {
+		t.Fatalf("save cochange artifact: %v", err)
+	}
+
+	results, err := searchMemoriesBM25(ctx, cfg, "ws", "dispatch", 5, store)
+	if err != nil {
+		t.Fatalf("searchMemoriesBM25: %v", err)
+	}
+	if len(results) == 0 {
+		t.Fatalf("expected results")
+	}
+	if results[0].Source != "cochange" {
+		t.Fatalf("source=%q want cochange", results[0].Source)
+	}
+	if results[0].Path != "internal/contextplane/dispatch.go" {
+		t.Fatalf("path=%q want internal/contextplane/dispatch.go", results[0].Path)
 	}
 }
 

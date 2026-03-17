@@ -48,11 +48,48 @@ func modelForScope(scope string) string {
 		s = semantic.ScopeTasks
 	case "sessions":
 		s = semantic.ScopeSessions
+	case "file_summaries":
+		s = semantic.ScopeFileSummaries
 	default:
 		s = semantic.ScopeDefault
 	}
 	model, _ := semantic.ScopeModelRecommendation(s)
 	return model
+}
+
+func indexEmbeddingProviderHint(cfg config.Config) string {
+	provider := strings.ToLower(strings.TrimSpace(cfg.Embedding.Provider))
+	switch provider {
+	case "openai_compat", "openai-compatible", "lmstudio":
+		return "set AGENTCTL_EMBEDDING_PROVIDER=openai_compat with AGENTCTL_EMBEDDING_MODEL and AGENTCTL_EMBEDDING_BASE_URL for embeddings"
+	default:
+		return "set AGENTCTL_EMBEDDING_PROVIDER=openai_compat or VOYAGE_API_KEY / GEMINI_API_KEY for embeddings"
+	}
+}
+
+func createIndexEmbeddingProviderForScope(cfg config.Config, scope string) (semantic.EmbeddingProvider, error) {
+	model := modelForScope(scope)
+	provider, err := semantic.NewProviderForModel(
+		model,
+		cfg,
+		semantic.WithProvider(cfg.Embedding.Provider),
+		semantic.WithAPIKey(cfg.Embedding.APIKey),
+		semantic.WithBaseURL(cfg.Embedding.BaseURL),
+		semantic.WithVoyageKey(os.Getenv("VOYAGE_API_KEY")),
+		semantic.WithGeminiKey(os.Getenv("GEMINI_API_KEY")),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("create embedding provider for %s: %w (%s)", scope, err, indexEmbeddingProviderHint(cfg))
+	}
+	return provider, nil
+}
+
+func maybeIndexEmbeddingProviderForScope(cfg config.Config, scope string) semantic.EmbeddingProvider {
+	provider, err := createIndexEmbeddingProviderForScope(cfg, scope)
+	if err != nil {
+		return nil
+	}
+	return provider
 }
 
 // formatSessionEmbeddingText enriches session summary with date and activity type.
@@ -184,8 +221,8 @@ Scopes (model selection via semantic.ScopeModelRecommendation):
   sessions  - Session context (voyage-3.5)
 
 Override with AGENTCTL_EMBEDDING_MODEL_<SCOPE> or _CODE/_TEXT env vars.
-
-All Voyage models use 1024 dimensions.
+Provider selection follows the configured embedding provider and supports
+OpenAI-compatible endpoints as well as Voyage/Gemini.
 
 Remote sync:
   Use 'index sync push' to push local embeddings to remote Turso for
@@ -218,14 +255,15 @@ func newIndexInitCommand() *cobra.Command {
 		Long: `Initialize embeddings for the entire repository across all scopes.
 
 This command performs one-time full embedding generation using the
-recommended Voyage AI models for each scope (see semantic.ScopeModelRecommendation):
+recommended models for each scope (see semantic.ScopeModelRecommendation):
 
   symbols   → voyage-code-3   (code files)
   memory    → voyage-3.5      (gotchas, notes)
   tasks     → voyage-3.5      (task descriptions)
   sessions  → voyage-3.5      (session summaries)
 
-Requires VOYAGE_API_KEY environment variable.
+Provider selection follows the configured embedding provider and supports
+OpenAI-compatible endpoints as well as Voyage/Gemini.
 Override with AGENTCTL_EMBEDDING_MODEL_<SCOPE> or _CODE/_TEXT env vars.`,
 		Example: `  # Index everything (all scopes)
   agentctl index init
@@ -333,12 +371,6 @@ func runIndexInit(cmd *cobra.Command, workspace string, scopes []string, glob st
 	start := time.Now()
 	ctx := cmd.Context()
 
-	// Check for API key
-	voyageKey := os.Getenv("VOYAGE_API_KEY")
-	if voyageKey == "" && !dryRun {
-		return fmt.Errorf("VOYAGE_API_KEY environment variable required for embedding generation")
-	}
-
 	// Resolve workspace
 	absWorkspace, err := filepath.Abs(workspace)
 	if err != nil {
@@ -346,7 +378,7 @@ func runIndexInit(cmd *cobra.Command, workspace string, scopes []string, glob st
 	}
 
 	// Load config
-	cfg, err := loadConfig(ctx)
+	cfg, err := loadConfig(ctx, config.WithWorkspacePath(absWorkspace))
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
 	}
@@ -373,7 +405,7 @@ func runIndexInit(cmd *cobra.Command, workspace string, scopes []string, glob st
 		switch scope {
 		case "symbols":
 			result.Model = modelForScope("symbols")
-			count, err := indexSymbols(ctx, cfg, absWorkspace, glob, exclude, voyageKey)
+			count, err := indexSymbols(ctx, cfg, absWorkspace, glob, exclude)
 			result.Count = count
 			if err != nil {
 				result.Error = err.Error()
@@ -381,7 +413,7 @@ func runIndexInit(cmd *cobra.Command, workspace string, scopes []string, glob st
 
 		case "memory":
 			result.Model = modelForScope("memory")
-			count, err := reembedMemories(ctx, cfg, absWorkspace, voyageKey)
+			count, err := reembedMemories(ctx, cfg, absWorkspace)
 			result.Count = count
 			if err != nil {
 				result.Error = err.Error()
@@ -389,7 +421,7 @@ func runIndexInit(cmd *cobra.Command, workspace string, scopes []string, glob st
 
 		case "tasks":
 			result.Model = modelForScope("tasks")
-			count, err := reembedTasks(ctx, cfg, absWorkspace, voyageKey)
+			count, err := reembedTasks(ctx, cfg, absWorkspace)
 			result.Count = count
 			if err != nil {
 				result.Error = err.Error()
@@ -397,7 +429,7 @@ func runIndexInit(cmd *cobra.Command, workspace string, scopes []string, glob st
 
 		case "sessions":
 			result.Model = modelForScope("sessions")
-			count, err := reembedSessions(ctx, cfg, voyageKey)
+			count, err := reembedSessions(ctx, cfg)
 			result.Count = count
 			if err != nil {
 				result.Error = err.Error()
@@ -484,7 +516,7 @@ func runIndexStatus(cmd *cobra.Command, workspace string) error {
 		return fmt.Errorf("resolve workspace: %w", err)
 	}
 
-	cfg, err := loadConfig(ctx)
+	cfg, err := loadConfig(ctx, config.WithWorkspacePath(absWorkspace))
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
 	}
@@ -549,19 +581,16 @@ func runIndexStatus(cmd *cobra.Command, workspace string) error {
 	return protocol.Write(cmd.OutOrStdout(), env)
 }
 
-func indexSymbols(ctx context.Context, cfg config.Config, workspace, glob string, exclude []string, apiKey string) (int, error) {
+func indexSymbols(ctx context.Context, cfg config.Config, workspace, glob string, exclude []string) (int, error) {
 	store, err := memory.OpenWithConfig(ctx, cfg)
 	if err != nil {
 		return 0, fmt.Errorf("open memory store: %w", err)
 	}
 	defer store.Close()
 
-	provider, err := semantic.NewVoyageProvider(semantic.VoyageConfig{
-		APIKey: apiKey,
-		Model:  modelForScope("symbols"),
-	})
+	provider, err := createIndexEmbeddingProviderForScope(cfg, "symbols")
 	if err != nil {
-		return 0, fmt.Errorf("create voyage provider: %w", err)
+		return 0, err
 	}
 
 	files, err := fsutil.FindFilesMatchingGlob(workspace, glob, exclude)
@@ -636,7 +665,7 @@ func runIndexSymbolIndex(cmd *cobra.Command, workspace, glob string, exclude []s
 		return protocol.Write(cmd.OutOrStdout(), env)
 	}
 
-	cfg, err := loadConfig(ctx)
+	cfg, err := loadConfig(ctx, config.WithWorkspacePath(absWorkspace))
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
 	}
@@ -708,19 +737,16 @@ func runIndexSymbolIndex(cmd *cobra.Command, workspace, glob string, exclude []s
 	return protocol.Write(cmd.OutOrStdout(), env)
 }
 
-func reembedMemories(ctx context.Context, cfg config.Config, workspace, apiKey string) (int, error) {
+func reembedMemories(ctx context.Context, cfg config.Config, workspace string) (int, error) {
 	store, err := memory.OpenWithConfig(ctx, cfg)
 	if err != nil {
 		return 0, fmt.Errorf("open memory store: %w", err)
 	}
 	defer store.Close()
 
-	provider, err := semantic.NewVoyageProvider(semantic.VoyageConfig{
-		APIKey: apiKey,
-		Model:  modelForScope("memory"),
-	})
+	provider, err := createIndexEmbeddingProviderForScope(cfg, "memory")
 	if err != nil {
-		return 0, fmt.Errorf("create voyage provider: %w", err)
+		return 0, err
 	}
 
 	// Get memories without embeddings and generate them
@@ -772,7 +798,7 @@ func reembedMemories(ctx context.Context, cfg config.Config, workspace, apiKey s
 	return totalCount, nil
 }
 
-func reembedTasks(ctx context.Context, cfg config.Config, defaultWorkspace, apiKey string) (int, error) {
+func reembedTasks(ctx context.Context, cfg config.Config, defaultWorkspace string) (int, error) {
 	storageDir := filepath.Join(cfg.Home, "storage")
 	store, err := tasks.Open(ctx, storageDir)
 	if err != nil {
@@ -787,12 +813,9 @@ func reembedTasks(ctx context.Context, cfg config.Config, defaultWorkspace, apiK
 	}
 	defer memStore.Close()
 
-	provider, err := semantic.NewVoyageProvider(semantic.VoyageConfig{
-		APIKey: apiKey,
-		Model:  modelForScope("tasks"),
-	})
+	provider, err := createIndexEmbeddingProviderForScope(cfg, "tasks")
 	if err != nil {
-		return 0, fmt.Errorf("create voyage provider: %w", err)
+		return 0, err
 	}
 
 	allTasks, err := store.ListAll(ctx, 1000)
@@ -879,7 +902,7 @@ func reembedTasks(ctx context.Context, cfg config.Config, defaultWorkspace, apiK
 	return count, nil
 }
 
-func reembedSessions(ctx context.Context, cfg config.Config, apiKey string) (int, error) {
+func reembedSessions(ctx context.Context, cfg config.Config) (int, error) {
 	storageDir := filepath.Join(cfg.Home, "storage")
 
 	store, err := sessions.Open(ctx, storageDir)
@@ -888,12 +911,9 @@ func reembedSessions(ctx context.Context, cfg config.Config, apiKey string) (int
 	}
 	defer store.Close()
 
-	provider, err := semantic.NewVoyageProvider(semantic.VoyageConfig{
-		APIKey: apiKey,
-		Model:  modelForScope("sessions"),
-	})
+	provider, err := createIndexEmbeddingProviderForScope(cfg, "sessions")
 	if err != nil {
-		return 0, fmt.Errorf("create voyage provider: %w", err)
+		return 0, err
 	}
 
 	opts := sessions.ListOptions{Limit: 1000}
@@ -1071,7 +1091,7 @@ func runIndexSyncPush(cmd *cobra.Command, workspace, remoteURL, remoteToken stri
 	}
 
 	// Load config
-	cfg, err := loadConfig(ctx)
+	cfg, err := loadConfig(ctx, config.WithWorkspacePath(absWorkspace))
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
 	}
@@ -1163,25 +1183,20 @@ func runIndexSyncQuery(cmd *cobra.Command, remoteURL, remoteToken, query string,
 		return fmt.Errorf("either --global or --workspaces is required")
 	}
 
-	// Check for Voyage API key for query embedding
-	voyageKey := os.Getenv("VOYAGE_API_KEY")
-	if voyageKey == "" {
-		return fmt.Errorf("VOYAGE_API_KEY required for generating query embedding")
-	}
-
 	// Load config for dimensions
-	cfg, err := loadConfig(ctx)
+	loadOpts := []config.Option{}
+	if !global && len(workspaces) == 1 {
+		loadOpts = append(loadOpts, config.WithWorkspacePath(workspaces[0]))
+	}
+	cfg, err := loadConfig(ctx, loadOpts...)
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
 	}
 
 	// Generate query embedding
-	provider, err := semantic.NewVoyageProvider(semantic.VoyageConfig{
-		APIKey: voyageKey,
-		Model:  modelForScope("memory"),
-	})
+	provider, err := createIndexEmbeddingProviderForScope(cfg, "memory")
 	if err != nil {
-		return fmt.Errorf("create voyage provider: %w", err)
+		return err
 	}
 
 	embedding, err := provider.Embed(ctx, query)
@@ -1435,7 +1450,7 @@ func runIndexGitDiff(cmd *cobra.Command, workspace, base, head string, dryRun, e
 	workspaceID := workspaceutil.ID(absWorkspace)
 
 	// Load config (needed to access the local index state store).
-	cfg, err := loadConfig(ctx)
+	cfg, err := loadConfig(ctx, config.WithWorkspacePath(absWorkspace))
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
 	}
@@ -1954,7 +1969,7 @@ func runIndexSummaries(cmd *cobra.Command, workspace string, force, dryRun bool,
 		EnrichFromContext(ctx)
 
 	// Load config
-	cfg, err := loadConfig(ctx)
+	cfg, err := loadConfig(ctx, config.WithWorkspacePath(absWorkspace))
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
 	}
@@ -2066,16 +2081,7 @@ func runIndexSummaries(cmd *cobra.Command, workspace string, force, dryRun bool,
 		Success(0))
 
 	// Get optional embedding provider
-	var embedProvider semantic.EmbeddingProvider
-	if key := os.Getenv("VOYAGE_API_KEY"); key != "" {
-		provider, err := semantic.NewVoyageProvider(semantic.VoyageConfig{
-			APIKey: key,
-			Model:  "voyage-code-3",
-		})
-		if err == nil {
-			embedProvider = provider
-		}
-	}
+	embedProvider := maybeIndexEmbeddingProviderForScope(cfg, "file_summaries")
 
 	// Create summary generator
 	generator := filesummary.NewFileSummaryGenerator(store, llm, embedProvider, absWorkspace)
@@ -2232,7 +2238,7 @@ func runIndexSymbolSummaries(cmd *cobra.Command, workspace string, force, dryRun
 		EnrichFromEnv().
 		EnrichFromContext(ctx)
 
-	cfg, err := loadConfig(ctx)
+	cfg, err := loadConfig(ctx, config.WithWorkspacePath(absWorkspace))
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
 	}
@@ -2408,16 +2414,7 @@ func runIndexSymbolSummaries(cmd *cobra.Command, workspace string, force, dryRun
 		WithData("symbols_skipped", skippedCount).
 		Success(0))
 
-	var embedProvider semantic.EmbeddingProvider
-	if key := os.Getenv("VOYAGE_API_KEY"); key != "" {
-		provider, embedErr := semantic.NewVoyageProvider(semantic.VoyageConfig{
-			APIKey: key,
-			Model:  "voyage-code-3",
-		})
-		if embedErr == nil {
-			embedProvider = provider
-		}
-	}
+	embedProvider := maybeIndexEmbeddingProviderForScope(cfg, "symbols")
 
 	generator := symbol.NewSymbolSummaryGenerator(store, llm, embedProvider, absWorkspace)
 

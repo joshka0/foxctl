@@ -4,27 +4,39 @@ import "github.com/rs/zerolog"
 
 // LLMSummarizer holds provider credentials used by hybrid episode summarization.
 type LLMSummarizer struct {
-	provider string
-	apiKey   string
-	model    string
-	logger   zerolog.Logger
+	provider   string
+	apiKey     string
+	model      string
+	baseURL    string
+	authMode   string
+	authHeader string
+	authPrefix string
+	logger     zerolog.Logger
 }
 
 // LLMSummarizerConfig configures the hybrid episode LLM summarizer.
 type LLMSummarizerConfig struct {
-	Provider string
-	APIKey   string
-	Model    string
-	Logger   zerolog.Logger
+	Provider   string
+	APIKey     string
+	Model      string
+	BaseURL    string
+	AuthMode   string
+	AuthHeader string
+	AuthPrefix string
+	Logger     zerolog.Logger
 }
 
 // NewLLMSummarizer creates an LLM summarizer descriptor used by hybrid episode summarization.
 func NewLLMSummarizer(cfg LLMSummarizerConfig) *LLMSummarizer {
 	return &LLMSummarizer{
-		provider: cfg.Provider,
-		apiKey:   cfg.APIKey,
-		model:    cfg.Model,
-		logger:   cfg.Logger,
+		provider:   cfg.Provider,
+		apiKey:     cfg.APIKey,
+		model:      cfg.Model,
+		baseURL:    cfg.BaseURL,
+		authMode:   cfg.AuthMode,
+		authHeader: cfg.AuthHeader,
+		authPrefix: cfg.AuthPrefix,
+		logger:     cfg.Logger,
 	}
 }
 

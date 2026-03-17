@@ -120,7 +120,7 @@ agentctl index repo expand --workspace . --seed "<node-id>" --edge CALLS --edge 
 | Symptom | Likely cause |
 |--------|---------------|
 | Empty semantic matches for vector-only scopes | Missing embedding provider key (`VOYAGE_API_KEY` / `GEMINI_API_KEY`) |
-| Dimension mismatch | Model/store dimension drift; rebuild/reindex with consistent config |
+| Dimension mismatch | Model/store dimension drift; rebuild the affected scope using [docs/general/embedding-rebuilds.md](embedding-rebuilds.md) |
 | Rerank unavailable | Missing key or `AGENTCTL_RERANK_ENABLED` not enabled |
 | Remote/global search unavailable | Missing Turso remote configuration |
 

@@ -601,6 +601,89 @@ func TestSession_SearchSimilar(t *testing.T) {
 	}
 }
 
+func TestSession_SearchSimilar_DimensionMismatchFails(t *testing.T) {
+	ctx := context.Background()
+	store := openTestStore(t)
+	defer store.Close()
+
+	session := storage.Session{
+		ID:             "sess-sim-meta",
+		WorkspacePath:  "/workspace",
+		Summary:        "Session about authentication",
+		Embedding:      serializeEmbedding([]float32{1, 0, 0, 0}),
+		EmbeddingModel: "voyage-3.5",
+		Status:         storage.SessionStatusOK,
+	}
+	if _, err := store.Save(ctx, session); err != nil {
+		t.Fatalf("save session: %v", err)
+	}
+
+	if _, err := store.SearchSimilar(ctx, "/workspace", []float32{1, 0}, 10); err == nil {
+		t.Fatal("expected dimension mismatch error")
+	}
+}
+
+func TestSession_SearchSimilar_AllowsMixedWorkspaceDimensions(t *testing.T) {
+	ctx := context.Background()
+	store := openTestStore(t)
+	defer store.Close()
+
+	sessionsData := []storage.Session{
+		{
+			ID:             "sess-mixed-a",
+			WorkspacePath:  "/workspace/a",
+			Summary:        "Workspace A session",
+			Embedding:      serializeEmbedding([]float32{1, 0, 0, 0}),
+			EmbeddingModel: "voyage-3.5",
+			Status:         storage.SessionStatusOK,
+		},
+		{
+			ID:             "sess-mixed-b",
+			WorkspacePath:  "/workspace/b",
+			Summary:        "Workspace B session",
+			Embedding:      serializeEmbedding([]float32{1, 0}),
+			EmbeddingModel: "embeddinggemma",
+			Status:         storage.SessionStatusOK,
+		},
+	}
+	for _, session := range sessionsData {
+		if _, err := store.Save(ctx, session); err != nil {
+			t.Fatalf("save session %s: %v", session.ID, err)
+		}
+	}
+
+	metaA, err := store.GetEmbeddingMetadata(ctx, "/workspace/a")
+	if err != nil {
+		t.Fatalf("get metadata A: %v", err)
+	}
+	if metaA == nil || metaA.Dimensions != 4 {
+		t.Fatalf("workspace A metadata dims = %v, want 4", metaA)
+	}
+	metaB, err := store.GetEmbeddingMetadata(ctx, "/workspace/b")
+	if err != nil {
+		t.Fatalf("get metadata B: %v", err)
+	}
+	if metaB == nil || metaB.Dimensions != 2 {
+		t.Fatalf("workspace B metadata dims = %v, want 2", metaB)
+	}
+
+	resultsA, err := store.SearchSimilar(ctx, "/workspace/a", []float32{1, 0, 0, 0}, 10)
+	if err != nil {
+		t.Fatalf("search workspace A: %v", err)
+	}
+	if len(resultsA) != 1 || resultsA[0].Session.ID != "sess-mixed-a" {
+		t.Fatalf("workspace A results = %+v, want sess-mixed-a", resultsA)
+	}
+
+	resultsGlobal, err := store.SearchSimilar(ctx, "", []float32{1, 0}, 10)
+	if err != nil {
+		t.Fatalf("global search: %v", err)
+	}
+	if len(resultsGlobal) != 1 || resultsGlobal[0].Session.ID != "sess-mixed-b" {
+		t.Fatalf("global results = %+v, want sess-mixed-b", resultsGlobal)
+	}
+}
+
 func TestSearchWithNoEmbeddings(t *testing.T) {
 	ctx := context.Background()
 	store := openTestStore(t)
@@ -645,6 +728,85 @@ func TestSearchWithNoEmbeddings(t *testing.T) {
 	}
 	if len(windowResults) != 0 {
 		t.Errorf("window results: got %d, want 0", len(windowResults))
+	}
+}
+
+func TestContextWindow_SearchSimilar_DimensionMismatchSkips(t *testing.T) {
+	ctx := context.Background()
+	store := openTestStore(t)
+	defer store.Close()
+
+	session := storage.Session{
+		ID:            "sess-embed",
+		WorkspacePath: "/workspace",
+		Summary:       "Parent session for embedded window",
+		Status:        storage.SessionStatusOK,
+	}
+	if _, err := store.Save(ctx, session); err != nil {
+		t.Fatalf("save session: %v", err)
+	}
+
+	window := storage.ContextWindow{
+		ID:               "cw-embed",
+		SessionID:        "sess-embed",
+		WindowIndex:      0,
+		Summary:          "Window with embedding",
+		Embedding:        serializeEmbedding([]float32{1, 0, 0, 0}),
+		EmbeddingModel:   "voyage-3.5",
+		PreCompactTokens: 10,
+	}
+	if _, err := store.SaveContextWindow(ctx, window); err != nil {
+		t.Fatalf("save window: %v", err)
+	}
+
+	results, err := store.SearchContextWindows(ctx, []float32{1, 0}, 10)
+	if err != nil {
+		t.Fatalf("search context windows: %v", err)
+	}
+	if len(results) != 0 {
+		t.Fatalf("expected no results for mismatched global query, got %d", len(results))
+	}
+}
+
+func TestChunk_SearchSimilar_DimensionMismatchScopedFails(t *testing.T) {
+	ctx := context.Background()
+	store := openTestStore(t)
+	defer store.Close()
+
+	session := storage.Session{
+		ID:            "sess-chunk-embed",
+		WorkspacePath: "/workspace",
+		Summary:       "Parent session for embedded chunk",
+		Status:        storage.SessionStatusOK,
+	}
+	if _, err := store.Save(ctx, session); err != nil {
+		t.Fatalf("save session: %v", err)
+	}
+
+	chunk := storage.SessionChunk{
+		ID:             "chunk-embed",
+		SessionID:      "sess-chunk-embed",
+		ChunkIndex:     0,
+		ChunkType:      "summary",
+		ContentHash:    "hash-1",
+		ContentPreview: "chunk with embedding",
+		Embedding:      serializeEmbedding([]float32{1, 0, 0, 0}),
+		EmbeddingModel: "voyage-3.5",
+	}
+	if _, err := store.SaveChunk(ctx, chunk); err != nil {
+		t.Fatalf("save chunk: %v", err)
+	}
+
+	if _, err := store.SearchChunksWithOptions(ctx, []float32{1, 0}, 10, storage.ChunkSearchOptions{Workspace: "/workspace"}); err == nil {
+		t.Fatal("expected dimension mismatch error")
+	}
+
+	results, err := store.SearchChunks(ctx, []float32{1, 0}, 10)
+	if err != nil {
+		t.Fatalf("global chunk search: %v", err)
+	}
+	if len(results) != 0 {
+		t.Fatalf("expected no global chunk results for mismatched query, got %d", len(results))
 	}
 }
 

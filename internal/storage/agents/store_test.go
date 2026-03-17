@@ -36,10 +36,16 @@ func TestAgentStore(t *testing.T) {
 				MemoryMB: 1024,
 				Network:  "none",
 			},
-			ShareBB:     "scoped",
-			State:       agent.StateStarting,
-			CreatedAt:   time.Now().UTC(),
-			HeartbeatAt: time.Now().UTC(),
+			ShareBB:       "scoped",
+			State:         agent.StateStarting,
+			CreatedAt:     time.Now().UTC(),
+			HeartbeatAt:   time.Now().UTC(),
+			LLMProvider:   "openai_compat",
+			LLMModel:      "demo-model",
+			LLMBaseURL:    "https://demo.example.com/v1",
+			LLMAuthMode:   "header",
+			LLMAuthHeader: "X-Demo-Key",
+			LLMAuthPrefix: "Token ",
 		}
 
 		if err := store.Create(ctx, a); err != nil {
@@ -59,6 +65,18 @@ func TestAgentStore(t *testing.T) {
 		}
 		if a.Role != "test-role" {
 			t.Errorf("expected role test-role, got %s", a.Role)
+		}
+		if a.LLMBaseURL != "https://demo.example.com/v1" {
+			t.Errorf("expected llm_base_url round-trip, got %q", a.LLMBaseURL)
+		}
+		if a.LLMAuthMode != "header" {
+			t.Errorf("expected llm_auth_mode round-trip, got %q", a.LLMAuthMode)
+		}
+		if a.LLMAuthHeader != "X-Demo-Key" {
+			t.Errorf("expected llm_auth_header round-trip, got %q", a.LLMAuthHeader)
+		}
+		if a.LLMAuthPrefix != "Token " {
+			t.Errorf("expected llm_auth_prefix round-trip, got %q", a.LLMAuthPrefix)
 		}
 		if a.MemoryScope != agent.MemoryScopeAgent {
 			t.Errorf("expected default memory scope %q, got %q", agent.MemoryScopeAgent, a.MemoryScope)

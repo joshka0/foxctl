@@ -32,6 +32,7 @@ func newContextCommand() *cobra.Command {
 		newContextSemanticSearchInspectSuiteCommand(),
 		newContextTaskHistoryCommand(),
 		newContextTaskHistorySummaryCommand(),
+		newContextCoChangeCommand(),
 		newContextNextCommand(),
 		newContextDispatchCommand(),
 		newContextContradictionsCommand(),

@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	ws "github.com/jkatigb/agentctl/internal/platform/workspace"
 	"github.com/spf13/viper"
 
 	"github.com/jkatigb/agentctl/internal/storage/dbdriver"
@@ -412,14 +413,29 @@ type PostReviewSettings struct {
 // LLMSettings configures LLM providers for planning and agent operations.
 // Environment variables are loaded at config time (FC/IS compliant).
 type LLMSettings struct {
-	// Provider is the preferred LLM provider: cerebras, openrouter, groq, openai, gemini, anthropic
+	// Provider is the preferred LLM provider: cerebras, openrouter, groq, openai,
+	// gemini, anthropic, lmstudio, openai_compat, or bedrock.
 	Provider string `mapstructure:"provider" json:"provider"`
 
 	// Model is the model name to use (provider-specific)
 	Model string `mapstructure:"model" json:"model"`
 
+	// BaseURL is the API base URL for OpenAI-compatible or self-hosted backends.
+	BaseURL string `mapstructure:"base_url" json:"base_url"`
+
 	// APIKey is the API key for the selected provider (from AGENTCTL_LLM_API_KEY or provider-specific vars)
 	APIKey string `mapstructure:"api_key" json:"api_key"`
+
+	// AuthMode controls how chat requests are authenticated.
+	// Supported values: auto, none, bearer, header.
+	AuthMode string `mapstructure:"auth_mode" json:"auth_mode"`
+
+	// AuthHeader is the header name to use when auth_mode=header.
+	AuthHeader string `mapstructure:"auth_header" json:"auth_header"`
+
+	// AuthPrefix is prepended to APIKey when auth_mode=bearer or auth_mode=header.
+	// Example: "Bearer " or "Token ".
+	AuthPrefix string `mapstructure:"auth_prefix" json:"auth_prefix"`
 
 	// CerebrasAPIKey is the Cerebras API key (from CEREBRAS_API_KEY)
 	// Cerebras is preferred for background tasks due to low cost (~$0.10/M tokens)
@@ -470,6 +486,7 @@ type LLMSettings struct {
 // ResolveAPIKey returns the API key for the given provider.
 // It checks the provider-specific key first, then falls back to the generic APIKey.
 func (l LLMSettings) ResolveAPIKey(provider string) string {
+	provider = normalizeLLMProviderName(provider)
 	// Check provider-specific key first
 	switch provider {
 	case "openrouter":
@@ -514,6 +531,7 @@ func (l LLMSettings) ResolveAPIKey(provider string) string {
 // ResolveModel returns the model for the given provider.
 // It checks the provider-specific model first, then falls back to the generic Model.
 func (l LLMSettings) ResolveModel(provider string) string {
+	provider = normalizeLLMProviderName(provider)
 	switch provider {
 	case "openrouter":
 		if l.OpenRouterModel != "" {
@@ -533,6 +551,79 @@ func (l LLMSettings) ResolveModel(provider string) string {
 		return "anthropic.claude-3-5-sonnet-20241022-v2:0"
 	}
 	return l.Model
+}
+
+// ResolveBaseURL returns the configured or provider-default base URL.
+func (l LLMSettings) ResolveBaseURL(provider string) string {
+	if strings.TrimSpace(l.BaseURL) != "" {
+		return strings.TrimSpace(l.BaseURL)
+	}
+	switch normalizeLLMProviderName(provider) {
+	case "cerebras":
+		return "https://api.cerebras.ai/v1"
+	case "openrouter":
+		return "https://openrouter.ai/api/v1"
+	case "groq":
+		return "https://api.groq.com/openai/v1"
+	case "lmstudio":
+		if baseURL := os.Getenv("LMSTUDIO_BASE_URL"); baseURL != "" {
+			return baseURL
+		}
+		return "http://localhost:1234/v1"
+	case "bedrock":
+		return ""
+	default:
+		return "https://api.openai.com/v1"
+	}
+}
+
+// ResolveAuthMode returns the effective auth mode.
+func (l LLMSettings) ResolveAuthMode(provider string) string {
+	if mode := strings.ToLower(strings.TrimSpace(l.AuthMode)); mode != "" {
+		return mode
+	}
+	switch normalizeLLMProviderName(provider) {
+	case "bedrock":
+		return "none"
+	case "lmstudio", "openai_compat":
+		if strings.TrimSpace(l.ResolveAPIKey(provider)) == "" {
+			return "none"
+		}
+		return "bearer"
+	default:
+		return "bearer"
+	}
+}
+
+// ResolveAuthHeader returns the header name for auth_mode=header.
+func (l LLMSettings) ResolveAuthHeader(provider string) string {
+	if header := strings.TrimSpace(l.AuthHeader); header != "" {
+		return header
+	}
+	if l.ResolveAuthMode(provider) == "header" {
+		return "X-API-Key"
+	}
+	return "Authorization"
+}
+
+// ResolveAuthPrefix returns the value prefix for auth headers.
+func (l LLMSettings) ResolveAuthPrefix(provider string) string {
+	if prefix := l.AuthPrefix; prefix != "" {
+		return prefix
+	}
+	if l.ResolveAuthMode(provider) == "bearer" {
+		return "Bearer "
+	}
+	return ""
+}
+
+func normalizeLLMProviderName(provider string) string {
+	switch strings.ToLower(strings.TrimSpace(provider)) {
+	case "openai-compatible", "openai_compat":
+		return "openai_compat"
+	default:
+		return strings.ToLower(strings.TrimSpace(provider))
+	}
 }
 
 // IndexerSettings defines the configuration for a single indexer.
@@ -560,13 +651,22 @@ type IndexerSettings struct {
 type Option func(*loader)
 
 type loader struct {
-	configFile string
+	configFile    string
+	workspacePath string
 }
 
 // WithConfigFile instructs the loader to read the specified file explicitly.
 func WithConfigFile(path string) Option {
 	return func(l *loader) {
 		l.configFile = path
+	}
+}
+
+// WithWorkspacePath instructs the loader to merge workspace-local config from
+// <workspace>/.agentctl/config.yaml after the global config file.
+func WithWorkspacePath(path string) Option {
+	return func(l *loader) {
+		l.workspacePath = strings.TrimSpace(path)
 	}
 }
 
@@ -613,9 +713,11 @@ func Load(_ context.Context, opts ...Option) (Config, error) {
 	if err := readConfig(v, l.configFile); err != nil {
 		return Config{}, err
 	}
-
 	cfg, err := decodeConfig(v)
 	if err != nil {
+		return Config{}, err
+	}
+	if err := applyWorkspaceOverrides(&cfg, l.workspacePath); err != nil {
 		return Config{}, err
 	}
 
@@ -694,6 +796,115 @@ func readConfig(v *viper.Viper, explicit string) error {
 		}
 	}
 	return nil
+}
+
+func applyWorkspaceOverrides(cfg *Config, workspacePath string) error {
+	if cfg == nil {
+		return nil
+	}
+	workspacePath = strings.TrimSpace(workspacePath)
+	if workspacePath == "" {
+		workspacePath = ws.Detect("")
+	}
+	workspacePath = ws.Normalize(workspacePath)
+	if workspacePath == "" {
+		return nil
+	}
+	configPath := filepath.Join(workspacePath, ".agentctl", "config.yaml")
+	if _, err := os.Stat(configPath); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		return fmt.Errorf("config: stat workspace config: %w", err)
+	}
+	wv := viper.New()
+	wv.SetConfigFile(configPath)
+	wv.SetConfigType("yaml")
+	if err := wv.ReadInConfig(); err != nil {
+		return fmt.Errorf("config: read workspace config: %w", err)
+	}
+	var workspaceCfg Config
+	if err := wv.Unmarshal(&workspaceCfg); err != nil {
+		return fmt.Errorf("config: decode workspace config: %w", err)
+	}
+	overlayLLMSettings(&cfg.LLM, workspaceCfg.LLM)
+	overlayEmbeddingSettings(&cfg.Embedding, workspaceCfg.Embedding)
+	return nil
+}
+
+func overlayLLMSettings(dst *LLMSettings, src LLMSettings) {
+	if dst == nil {
+		return
+	}
+	overlayString := func(target *string, value string) {
+		value = strings.TrimSpace(value)
+		if value != "" {
+			*target = value
+		}
+	}
+	overlayString(&dst.Provider, src.Provider)
+	overlayString(&dst.Model, src.Model)
+	overlayString(&dst.BaseURL, src.BaseURL)
+	overlayString(&dst.APIKey, src.APIKey)
+	overlayString(&dst.AuthMode, src.AuthMode)
+	overlayString(&dst.AuthHeader, src.AuthHeader)
+	if src.AuthPrefix != "" {
+		dst.AuthPrefix = src.AuthPrefix
+	}
+	overlayString(&dst.CerebrasAPIKey, src.CerebrasAPIKey)
+	overlayString(&dst.OpenRouterAPIKey, src.OpenRouterAPIKey)
+	overlayString(&dst.OpenRouterModel, src.OpenRouterModel)
+	overlayString(&dst.GroqAPIKey, src.GroqAPIKey)
+	overlayString(&dst.OpenAIAPIKey, src.OpenAIAPIKey)
+	overlayString(&dst.GeminiAPIKey, src.GeminiAPIKey)
+	overlayString(&dst.AnthropicAPIKey, src.AnthropicAPIKey)
+	overlayString(&dst.CerebrasModel, src.CerebrasModel)
+	overlayString(&dst.AtomicAPIKey, src.AtomicAPIKey)
+	overlayString(&dst.AtomicEndpoint, src.AtomicEndpoint)
+	overlayString(&dst.AtomicModel, src.AtomicModel)
+	overlayString(&dst.ElevenLabsAPIKey, src.ElevenLabsAPIKey)
+	overlayString(&dst.BedrockRegion, src.BedrockRegion)
+}
+
+func overlayEmbeddingSettings(dst *EmbeddingSettings, src EmbeddingSettings) {
+	if dst == nil {
+		return
+	}
+	overlayString := func(target *string, value string) {
+		value = strings.TrimSpace(value)
+		if value != "" {
+			*target = value
+		}
+	}
+	overlayString(&dst.Provider, src.Provider)
+	overlayString(&dst.Model, src.Model)
+	overlayString(&dst.BaseURL, src.BaseURL)
+	overlayString(&dst.APIKey, src.APIKey)
+	overlayString(&dst.VoyageAPIKey, src.VoyageAPIKey)
+	if src.Dimensions > 0 {
+		dst.Dimensions = src.Dimensions
+	}
+	if len(src.Models) > 0 {
+		if dst.Models == nil {
+			dst.Models = map[string]string{}
+		}
+		for key, value := range src.Models {
+			value = strings.TrimSpace(value)
+			if strings.TrimSpace(key) == "" || value == "" {
+				continue
+			}
+			dst.Models[key] = value
+		}
+	}
+	if src.Flags.QueryMode != "" {
+		dst.Flags.QueryMode = src.Flags.QueryMode
+	}
+	if src.Flags.SymbolTextMode != "" {
+		dst.Flags.SymbolTextMode = src.Flags.SymbolTextMode
+	}
+	if src.Flags.FileTextMode != "" {
+		dst.Flags.FileTextMode = src.Flags.FileTextMode
+	}
 }
 
 func decodeConfig(v *viper.Viper) (Config, error) {
@@ -866,6 +1077,18 @@ func finalizeConfig(cfg Config, home string) Config {
 	}
 	if model := os.Getenv("AGENTCTL_LLM_MODEL"); model != "" && cfg.LLM.Model == "" {
 		cfg.LLM.Model = model
+	}
+	if baseURL := os.Getenv("AGENTCTL_LLM_BASE_URL"); baseURL != "" && cfg.LLM.BaseURL == "" {
+		cfg.LLM.BaseURL = strings.TrimSpace(baseURL)
+	}
+	if mode := os.Getenv("AGENTCTL_LLM_AUTH_MODE"); mode != "" && cfg.LLM.AuthMode == "" {
+		cfg.LLM.AuthMode = strings.TrimSpace(mode)
+	}
+	if header := os.Getenv("AGENTCTL_LLM_AUTH_HEADER"); header != "" && cfg.LLM.AuthHeader == "" {
+		cfg.LLM.AuthHeader = strings.TrimSpace(header)
+	}
+	if prefix := os.Getenv("AGENTCTL_LLM_AUTH_PREFIX"); prefix != "" && cfg.LLM.AuthPrefix == "" {
+		cfg.LLM.AuthPrefix = prefix
 	}
 	if region := os.Getenv("BEDROCK_REGION"); region != "" && cfg.LLM.BedrockRegion == "" {
 		cfg.LLM.BedrockRegion = region

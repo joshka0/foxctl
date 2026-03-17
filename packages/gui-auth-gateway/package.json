@@ -1,0 +1,29 @@
+{
+  "name": "@agentctl/gui-auth-gateway",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "bun --watch src/server.ts",
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "start": "bun run dist/server.js"
+  },
+  "dependencies": {
+    "better-auth": "1.5.5",
+    "express": "4.22.1",
+    "http-proxy": "1.18.1",
+    "http-proxy-middleware": "3.0.5",
+    "nodemailer": "8.0.2",
+    "pg": "8.20.0"
+  },
+  "devDependencies": {
+    "@types/bun": "1.2.0",
+    "@types/express": "5.0.6",
+    "@types/http-proxy": "1.17.17",
+    "@types/node": "25.5.0",
+    "@types/nodemailer": "7.0.11",
+    "@types/pg": "8.18.0",
+    "typescript": "5.9.3"
+  }
+}

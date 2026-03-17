@@ -45,6 +45,12 @@ type Store interface {
 	// CountWorkspace returns the number of persisted documents for a workspace.
 	CountWorkspace(ctx context.Context, workspaceID string) (int, error)
 
+	// GetEmbeddingMetadata returns the persisted embedding contract for a workspace.
+	GetEmbeddingMetadata(ctx context.Context, workspaceID string) (*EmbeddingMetadata, error)
+
+	// ValidateEmbeddingMetadata checks model and dimensions for a workspace.
+	ValidateEmbeddingMetadata(ctx context.Context, workspaceID, model string, dimensions int) error
+
 	// LexicalRecall returns raw scored matches scored by basic lexical matching.
 	LexicalRecall(ctx context.Context, workspaceID, query string, opts RecallOptions) ([]SearchHit, error)
 

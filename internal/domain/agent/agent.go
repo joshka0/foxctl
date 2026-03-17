@@ -142,9 +142,13 @@ type Agent struct {
 	HeartbeatAt time.Time `json:"heartbeat_at,omitempty"`
 
 	// LLM configuration (per-agent, overrides environment defaults)
-	LLMProvider string `json:"llm_provider,omitempty"` // gemini|openai|anthropic|groq|openrouter
-	LLMModel    string `json:"llm_model,omitempty"`    // Model ID (e.g., claude-haiku-4-5)
-	LLMAPIKey   string `json:"llm_api_key,omitempty"`  // API key (or env var name like $GROQ_API_KEY)
+	LLMProvider   string `json:"llm_provider,omitempty"`    // gemini|openai|anthropic|groq|openrouter|openai_compat
+	LLMModel      string `json:"llm_model,omitempty"`       // Model ID (e.g., claude-haiku-4-5)
+	LLMAPIKey     string `json:"llm_api_key,omitempty"`     // API key (or env var name like $GROQ_API_KEY)
+	LLMBaseURL    string `json:"llm_base_url,omitempty"`    // Base URL for OpenAI-compatible/self-hosted backends
+	LLMAuthMode   string `json:"llm_auth_mode,omitempty"`   // auto|none|bearer|header
+	LLMAuthHeader string `json:"llm_auth_header,omitempty"` // Header name when auth_mode=header
+	LLMAuthPrefix string `json:"llm_auth_prefix,omitempty"` // Prefix for bearer/header auth
 
 	// Execution mode configuration
 	ExecMode       ExecutionMode  `json:"exec_mode,omitempty"`       // reactive|autonomous|autonomous_reactive|proactive|tick|story (default: reactive)

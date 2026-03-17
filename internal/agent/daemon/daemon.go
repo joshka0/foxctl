@@ -165,12 +165,16 @@ func openDaemonStores(ctx context.Context, root string, opts Options) (*daemonSt
 
 		// Create summarizer if LLM is configured (enables hybrid episode summaries)
 		enableCompression := false
-		if opts.LLMAPIKey != "" && opts.LLMProvider != "" {
+		if opts.LLMProvider != "" && (opts.LLMAPIKey != "" || strings.EqualFold(opts.LLMAuthMode, "none")) {
 			summarizer := companion.NewLLMSummarizer(companion.LLMSummarizerConfig{
-				Provider: opts.LLMProvider,
-				APIKey:   opts.LLMAPIKey,
-				Model:    opts.LLMModel,
-				Logger:   log.Logger,
+				Provider:   opts.LLMProvider,
+				APIKey:     opts.LLMAPIKey,
+				Model:      opts.LLMModel,
+				BaseURL:    opts.LLMBaseURL,
+				AuthMode:   opts.LLMAuthMode,
+				AuthHeader: opts.LLMAuthHeader,
+				AuthPrefix: opts.LLMAuthPrefix,
+				Logger:     log.Logger,
 			})
 			memOpts = append(memOpts, companion.WithSummarizer(summarizer))
 			enableCompression = true
@@ -332,7 +336,8 @@ func Run(ctx context.Context, opts Options) error {
 		if apiKey == "" && provider == "lmstudio" {
 			apiKey = "lm-studio"
 		}
-		if apiKey == "" {
+		authMode := firstNonEmpty(agentRecord.LLMAuthMode, opts.LLMAuthMode)
+		if apiKey == "" && !strings.EqualFold(authMode, "none") {
 			return fmt.Errorf("LLM API key required for companion service (set AGENTCTL_LLM_API_KEY or provider-specific key)")
 		}
 
@@ -366,6 +371,10 @@ func Run(ctx context.Context, opts Options) error {
 			LLMProvider:         provider,
 			LLMAPIKey:           apiKey,
 			LLMModel:            model,
+			LLMBaseURL:          firstNonEmpty(agentRecord.LLMBaseURL, opts.LLMBaseURL),
+			LLMAuthMode:         firstNonEmpty(agentRecord.LLMAuthMode, opts.LLMAuthMode),
+			LLMAuthHeader:       firstNonEmpty(agentRecord.LLMAuthHeader, opts.LLMAuthHeader),
+			LLMAuthPrefix:       firstNonEmpty(agentRecord.LLMAuthPrefix, opts.LLMAuthPrefix),
 			DefaultPersonality:  agentRecord.Prompt,
 			MaxIterations:       agentRecord.MaxIterations,
 			Timeout:             90 * time.Second,
@@ -484,6 +493,16 @@ func loadAgentRecord(ctx context.Context, store storagents.Store, agentID string
 		return agent.Agent{}, errors.New("agent is stopped")
 	}
 	return agentRecord, nil
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func buildToolsConfig(opts Options, agentRecord agent.Agent, traceID string, stores *daemonStores, endTick func(context.Context) (bool, error)) tools.Config {

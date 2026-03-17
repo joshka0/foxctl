@@ -1,0 +1,11 @@
+llm:
+  provider: openai_compat
+  model: qwen/qwen3-32b
+  base_url: https://demo.example.com/v1
+  auth_mode: none
+
+embedding:
+  provider: openai_compat
+  model: text-embedding-3-small
+  base_url: https://demo.example.com/v1
+  dimensions: 1536

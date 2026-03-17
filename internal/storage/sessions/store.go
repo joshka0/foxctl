@@ -177,6 +177,9 @@ func (s *Store) Save(ctx context.Context, session Session) (Session, error) {
 	if session.WorkspaceID == "" && session.WorkspacePath != "" {
 		session.WorkspaceID = ws.ID(session.WorkspacePath)
 	}
+	if err := s.ensureEmbeddingMetadata(ctx, session.WorkspaceID, session.WorkspacePath, session.Embedding, session.EmbeddingModel); err != nil {
+		return Session{}, err
+	}
 
 	// Format JSON arrays
 	accomplishedJSON, err := sqlutil.FormatJSON(session.Accomplished)
@@ -486,6 +489,13 @@ func (s *Store) UpdateSummaryWithQuestions(ctx context.Context, id string, summa
 
 // SetEmbedding updates the embedding for a session.
 func (s *Store) SetEmbedding(ctx context.Context, id string, embedding []byte, model string) error {
+	workspaceID, workspacePath, err := s.resolveSessionWorkspace(ctx, id)
+	if err != nil {
+		return err
+	}
+	if err := s.ensureEmbeddingMetadata(ctx, workspaceID, workspacePath, embedding, model); err != nil {
+		return err
+	}
 	result, err := s.db.ExecContext(ctx, `
 		UPDATE sessions SET
 			embedding = $1,
@@ -510,6 +520,12 @@ func (s *Store) SetEmbedding(ctx context.Context, id string, embedding []byte, m
 func (s *Store) SearchSimilar(ctx context.Context, workspace string, queryEmbedding []float32, limit int) ([]storage.SimilarSession, error) {
 	if limit <= 0 {
 		limit = 10
+	}
+	expectedDims := len(queryEmbedding)
+	if expectedDims > 0 && strings.TrimSpace(workspace) != "" {
+		if err := s.ValidateDimensions(ctx, workspace, expectedDims); err != nil {
+			return nil, err
+		}
 	}
 
 	// Load sessions with embeddings, filtered by workspace if provided
@@ -576,6 +592,9 @@ func (s *Store) SearchSimilar(ctx context.Context, workspace string, queryEmbedd
 		// Deserialize embedding
 		sessionEmb := vector.DeserializeF32(session.Embedding)
 		if len(sessionEmb) == 0 {
+			continue
+		}
+		if len(sessionEmb) != len(queryEmbedding) {
 			continue
 		}
 
@@ -1281,6 +1300,13 @@ func (s *Store) SaveChunk(ctx context.Context, chunk SessionChunk) (SessionChunk
 	if chunk.CreatedAt.IsZero() {
 		chunk.CreatedAt = now
 	}
+	workspaceID, workspacePath, err := s.resolveSessionWorkspace(ctx, chunk.SessionID)
+	if err != nil {
+		return SessionChunk{}, err
+	}
+	if err := s.ensureEmbeddingMetadata(ctx, workspaceID, workspacePath, chunk.Embedding, chunk.EmbeddingModel); err != nil {
+		return SessionChunk{}, err
+	}
 
 	toolsUsedJSON, err := sqlutil.FormatJSON(chunk.ToolsUsed)
 	if err != nil {
@@ -1331,6 +1357,21 @@ ON CONFLICT(id) DO UPDATE SET
 // - Related: SaveChunk
 // - Keywords: session_chunks, batch, upsert, transaction
 func (s *Store) SaveChunks(ctx context.Context, chunks []SessionChunk) error {
+	workspaceCache := make(map[string][2]string)
+	for _, chunk := range chunks {
+		scope, ok := workspaceCache[chunk.SessionID]
+		if !ok {
+			workspaceID, workspacePath, err := s.resolveSessionWorkspace(ctx, chunk.SessionID)
+			if err != nil {
+				return err
+			}
+			scope = [2]string{workspaceID, workspacePath}
+			workspaceCache[chunk.SessionID] = scope
+		}
+		if err := s.ensureEmbeddingMetadata(ctx, scope[0], scope[1], chunk.Embedding, chunk.EmbeddingModel); err != nil {
+			return err
+		}
+	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("sessions: begin chunk tx: %w", err)
@@ -1430,6 +1471,11 @@ func (s *Store) SearchChunksWithOptions(ctx context.Context, embedding []float32
 	if limit <= 0 {
 		limit = 20
 	}
+	if len(embedding) > 0 && strings.TrimSpace(opts.Workspace) != "" {
+		if err := s.ValidateDimensions(ctx, opts.Workspace, len(embedding)); err != nil {
+			return nil, err
+		}
+	}
 
 	var query strings.Builder
 	query.WriteString(`
@@ -1481,6 +1527,9 @@ JOIN sessions s ON s.id = sc.session_id`)
 		}
 		chunkEmb := vector.DeserializeF32(chunk.Embedding)
 		if len(chunkEmb) == 0 {
+			continue
+		}
+		if len(chunkEmb) != len(embedding) {
 			continue
 		}
 		sim := vector.Cosine(embedding, chunkEmb)
@@ -1722,8 +1771,15 @@ func (s *Store) SaveContextWindow(ctx context.Context, window ContextWindow) (Co
 	if window.CreatedAt.IsZero() {
 		window.CreatedAt = now
 	}
+	workspaceID, workspacePath, err := s.resolveSessionWorkspace(ctx, window.SessionID)
+	if err != nil {
+		return ContextWindow{}, err
+	}
+	if err := s.ensureEmbeddingMetadata(ctx, workspaceID, workspacePath, window.Embedding, window.EmbeddingModel); err != nil {
+		return ContextWindow{}, err
+	}
 
-	_, err := s.db.ExecContext(ctx, `
+	_, err = s.db.ExecContext(ctx, `
 INSERT INTO session_context_windows (
 	id, session_id, window_index, started_at, ended_at, pre_compact_tokens,
 	trigger, chunk_start, chunk_end, message_count, summary, embedding, embedding_model, created_at
@@ -1763,6 +1819,21 @@ ON CONFLICT(session_id, window_index) DO UPDATE SET
 func (s *Store) SaveContextWindows(ctx context.Context, windows []ContextWindow) error {
 	if len(windows) == 0 {
 		return nil
+	}
+	workspaceCache := make(map[string][2]string)
+	for _, window := range windows {
+		scope, ok := workspaceCache[window.SessionID]
+		if !ok {
+			workspaceID, workspacePath, err := s.resolveSessionWorkspace(ctx, window.SessionID)
+			if err != nil {
+				return err
+			}
+			scope = [2]string{workspaceID, workspacePath}
+			workspaceCache[window.SessionID] = scope
+		}
+		if err := s.ensureEmbeddingMetadata(ctx, scope[0], scope[1], window.Embedding, window.EmbeddingModel); err != nil {
+			return err
+		}
 	}
 
 	tx, err := s.db.BeginTx(ctx, nil)
@@ -1853,6 +1924,13 @@ func (s *Store) UpdateWindowSummary(ctx context.Context, windowID string, summar
 	if len(embedding) == 0 {
 		embedding = nil
 	}
+	workspaceID, workspacePath, err := s.resolveWindowWorkspace(ctx, windowID)
+	if err != nil {
+		return err
+	}
+	if err := s.ensureEmbeddingMetadata(ctx, workspaceID, workspacePath, embedding, model); err != nil {
+		return err
+	}
 	summary = strings.TrimSpace(summary)
 	model = strings.TrimSpace(model)
 
@@ -1906,6 +1984,13 @@ func (s *Store) SetContextWindowEmbedding(ctx context.Context, windowID string, 
 		return nil // No-op for empty embedding
 	}
 	model = strings.TrimSpace(model)
+	workspaceID, workspacePath, err := s.resolveWindowWorkspace(ctx, windowID)
+	if err != nil {
+		return err
+	}
+	if err := s.ensureEmbeddingMetadata(ctx, workspaceID, workspacePath, embedding, model); err != nil {
+		return err
+	}
 
 	result, err := s.db.ExecContext(ctx, `
 UPDATE session_context_windows SET embedding = $1, embedding_model = $2
@@ -1952,6 +2037,9 @@ WHERE embedding IS NOT NULL AND LENGTH(embedding) > 0`)
 		}
 		windowEmb := vector.DeserializeF32(window.Embedding)
 		if len(windowEmb) == 0 {
+			continue
+		}
+		if len(windowEmb) != len(queryEmbedding) {
 			continue
 		}
 		sim := vector.Cosine(queryEmbedding, windowEmb)
@@ -2050,29 +2138,40 @@ func scanContextWindows(rows *sql.Rows) ([]ContextWindow, error) {
 
 // EmbeddingMetadata tracks embedding configuration for sessions.
 type EmbeddingMetadata struct {
-	TableName  string    `json:"table_name"`
-	ColumnName string    `json:"column_name"`
-	Provider   string    `json:"provider"`
-	Model      string    `json:"model"`
-	Dimensions int       `json:"dimensions"`
-	CreatedAt  time.Time `json:"created_at"`
-	UpdatedAt  time.Time `json:"updated_at"`
+	WorkspaceID   string    `json:"workspace_id,omitempty"`
+	WorkspacePath string    `json:"workspace_path,omitempty"`
+	TableName     string    `json:"table_name"`
+	ColumnName    string    `json:"column_name"`
+	Provider      string    `json:"provider"`
+	Model         string    `json:"model"`
+	Dimensions    int       `json:"dimensions"`
+	CreatedAt     time.Time `json:"created_at"`
+	UpdatedAt     time.Time `json:"updated_at"`
 }
 
-// GetEmbeddingMetadata retrieves embedding metadata for sessions.
-// Returns nil if no metadata exists (embeddings never stored).
-func (s *Store) GetEmbeddingMetadata(ctx context.Context) (*EmbeddingMetadata, error) {
+// GetEmbeddingMetadata retrieves embedding metadata for a workspace's session embeddings.
+// Returns nil if no metadata exists (embeddings never stored for that workspace).
+func (s *Store) GetEmbeddingMetadata(ctx context.Context, workspace string) (*EmbeddingMetadata, error) {
+	workspaceID, workspacePath := resolveWorkspaceSelector(workspace)
+	if workspaceID == "" {
+		return nil, nil
+	}
+
 	var meta EmbeddingMetadata
 	var createdAt, updatedAt string
 	err := s.db.QueryRowContext(ctx, `
-		SELECT table_name, column_name, provider, model, dimensions, created_at, updated_at
-		FROM embedding_metadata WHERE table_name = 'sessions'
-	`).Scan(&meta.TableName, &meta.ColumnName, &meta.Provider, &meta.Model, &meta.Dimensions, &createdAt, &updatedAt)
+		SELECT workspace_id, workspace_path, table_name, column_name, provider, model, dimensions, created_at, updated_at
+		FROM session_embedding_metadata
+		WHERE workspace_id = $1
+	`, workspaceID).Scan(&meta.WorkspaceID, &meta.WorkspacePath, &meta.TableName, &meta.ColumnName, &meta.Provider, &meta.Model, &meta.Dimensions, &createdAt, &updatedAt)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			return nil, nil // No metadata yet
+			return nil, nil
 		}
 		return nil, fmt.Errorf("sessions: get embedding metadata: %w", err)
+	}
+	if meta.WorkspacePath == "" {
+		meta.WorkspacePath = workspacePath
 	}
 
 	meta.CreatedAt, _ = sqlutil.ScanTimestamp(createdAt)
@@ -2088,17 +2187,24 @@ func (s *Store) SetEmbeddingMetadata(ctx context.Context, meta EmbeddingMetadata
 		meta.CreatedAt = now
 	}
 	meta.UpdatedAt = now
+	meta.TableName = "sessions"
+	meta.ColumnName = "embedding"
+	meta.WorkspaceID, meta.WorkspacePath = resolveEmbeddingMetadataWorkspace(meta.WorkspaceID, meta.WorkspacePath)
+	if meta.WorkspaceID == "" {
+		return fmt.Errorf("sessions: set embedding metadata: workspace required")
+	}
 
 	_, err := s.db.ExecContext(ctx, `
-		INSERT INTO embedding_metadata (table_name, column_name, provider, model, dimensions, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7)
-		ON CONFLICT(table_name) DO UPDATE SET
+		INSERT INTO session_embedding_metadata (workspace_id, workspace_path, table_name, column_name, provider, model, dimensions, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+		ON CONFLICT(workspace_id) DO UPDATE SET
+			workspace_path = excluded.workspace_path,
 			column_name = excluded.column_name,
 			provider = excluded.provider,
 			model = excluded.model,
 			dimensions = excluded.dimensions,
 			updated_at = excluded.updated_at
-	`, meta.TableName, meta.ColumnName, meta.Provider, meta.Model, meta.Dimensions,
+	`, meta.WorkspaceID, meta.WorkspacePath, meta.TableName, meta.ColumnName, meta.Provider, meta.Model, meta.Dimensions,
 		sqlutil.FormatTimestamp(meta.CreatedAt), sqlutil.FormatTimestamp(meta.UpdatedAt))
 	if err != nil {
 		return fmt.Errorf("sessions: set embedding metadata: %w", err)
@@ -2106,11 +2212,56 @@ func (s *Store) SetEmbeddingMetadata(ctx context.Context, meta EmbeddingMetadata
 	return nil
 }
 
+func (s *Store) ensureEmbeddingMetadata(ctx context.Context, workspaceID, workspacePath string, embedding []byte, model string) error {
+	if len(embedding) == 0 {
+		return nil
+	}
+	vectorData := vector.DeserializeF32(embedding)
+	if len(vectorData) == 0 {
+		return nil
+	}
+	model = strings.TrimSpace(model)
+	workspaceID, workspacePath = resolveEmbeddingMetadataWorkspace(workspaceID, workspacePath)
+	if workspaceID == "" {
+		return fmt.Errorf("sessions: embedding metadata requires a workspace")
+	}
+	meta, err := s.GetEmbeddingMetadata(ctx, workspaceID)
+	if err != nil {
+		return err
+	}
+	if meta == nil {
+		return s.SetEmbeddingMetadata(ctx, EmbeddingMetadata{
+			WorkspaceID:   workspaceID,
+			WorkspacePath: workspacePath,
+			TableName:     "sessions",
+			ColumnName:    "embedding",
+			Model:         model,
+			Dimensions:    len(vectorData),
+		})
+	}
+	if meta.Dimensions != len(vectorData) {
+		return fmt.Errorf("sessions: embedding dimension mismatch: workspace %q stores %d dimensions, got %d; run `agentctl index init --workspace <workspace-path> --scope sessions` to rebuild session embeddings for that workspace",
+			workspaceID, meta.Dimensions, len(vectorData))
+	}
+	if meta.Model != "" && model != "" && meta.Model != model {
+		return fmt.Errorf("sessions: embedding model mismatch: workspace %q expects model %q with %d dimensions, got %q; run `agentctl index init --workspace <workspace-path> --scope sessions` to rebuild session embeddings for that workspace",
+			workspaceID, meta.Model, meta.Dimensions, model)
+	}
+	if (meta.Model == "" && model != "") || (meta.WorkspacePath == "" && workspacePath != "") {
+		meta.Model = model
+		if meta.WorkspacePath == "" {
+			meta.WorkspacePath = workspacePath
+		}
+		return s.SetEmbeddingMetadata(ctx, *meta)
+	}
+	return nil
+}
+
 // ValidateDimensions checks if stored embedding dimensions match the expected value.
 // Returns an error with reindex guidance if there's a mismatch.
 // Returns nil if no metadata exists (no embeddings stored yet) or if dimensions match.
-func (s *Store) ValidateDimensions(ctx context.Context, expectedDims int) error {
-	meta, err := s.GetEmbeddingMetadata(ctx)
+func (s *Store) ValidateDimensions(ctx context.Context, workspace string, expectedDims int) error {
+	meta, err := s.GetEmbeddingMetadata(ctx, workspace)
 	if err != nil {
 		return err
 	}
@@ -2120,9 +2271,9 @@ func (s *Store) ValidateDimensions(ctx context.Context, expectedDims int) error 
 	}
 
 	if meta.Dimensions != expectedDims {
-		return fmt.Errorf("sessions: embedding dimension mismatch: stored %d, config expects %d; "+
-			"delete sessions.db to rebuild with new dimensions or update embedding.dimensions in config.yaml",
-			meta.Dimensions, expectedDims)
+		return fmt.Errorf("sessions: embedding dimension mismatch for workspace %q: stored %d, config expects %d; "+
+			"run `agentctl index init --workspace <workspace-path> --scope sessions` to rebuild session embeddings or update embedding.dimensions in config.yaml",
+			meta.WorkspaceID, meta.Dimensions, expectedDims)
 	}
 	return nil
 }
@@ -2141,7 +2292,16 @@ func (s *Store) validateDimensionsOnOpen(ctx context.Context) {
 		expectedDims = dbdriver.GetDefaultVectorDimensions()
 	}
 
-	if err := s.ValidateDimensions(ctx, expectedDims); err != nil {
+	metas, err := s.listEmbeddingMetadata(ctx)
+	if err != nil {
+		logger.Warn().Err(err).Msg("failed to read session embedding metadata")
+		return
+	}
+	if len(metas) != 1 {
+		return
+	}
+
+	if err := s.ValidateDimensions(ctx, metas[0].WorkspaceID, expectedDims); err != nil {
 		logger.Warn().Err(err).Msg("dimension validation warning")
 	}
 }
@@ -2598,6 +2758,22 @@ CREATE TABLE IF NOT EXISTS embedding_metadata (
 	if _, err := db.ExecContext(ctx, metadataDDL); err != nil {
 		return fmt.Errorf("sessions: create embedding_metadata: %w", err)
 	}
+	if _, err := db.ExecContext(ctx, `
+CREATE TABLE IF NOT EXISTS session_embedding_metadata (
+	workspace_id TEXT PRIMARY KEY,
+	workspace_path TEXT,
+	table_name TEXT NOT NULL,
+	column_name TEXT NOT NULL,
+	provider TEXT NOT NULL,
+	model TEXT NOT NULL,
+	dimensions INTEGER NOT NULL,
+	created_at TEXT NOT NULL,
+	updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_session_embedding_metadata_path ON session_embedding_metadata(workspace_path);
+`); err != nil {
+		return fmt.Errorf("sessions: create session embedding metadata: %w", err)
+	}
 
 	// Create context_windows table for granular sub-session retrieval
 	// Each window represents work between compaction boundaries
@@ -2687,6 +2863,9 @@ CREATE INDEX IF NOT EXISTS idx_context_windows_ended ON session_context_windows(
 	if err := dbutil.AddColumnIfNotExists(ctx, db, "sessions", "error_message", "TEXT", ""); err != nil {
 		return fmt.Errorf("sessions: add error_message column: %w", err)
 	}
+	if err := backfillSessionEmbeddingMetadata(ctx, db); err != nil {
+		return fmt.Errorf("sessions: backfill session embedding metadata: %w", err)
+	}
 
 	return nil
 }
@@ -2700,6 +2879,126 @@ func resolveWorkspaceSelector(workspace string) (workspaceID string, workspacePa
 		return workspace, ""
 	}
 	return ws.ID(workspace), workspace
+}
+
+func resolveEmbeddingMetadataWorkspace(workspaceID, workspacePath string) (string, string) {
+	workspaceID = strings.TrimSpace(workspaceID)
+	workspacePath = strings.TrimSpace(workspacePath)
+	if workspaceID == "" && workspacePath != "" {
+		workspaceID = ws.ID(workspacePath)
+	}
+	return workspaceID, workspacePath
+}
+
+func (s *Store) resolveSessionWorkspace(ctx context.Context, sessionID string) (string, string, error) {
+	var workspaceID, workspacePath string
+	err := s.db.QueryRowContext(ctx, `
+SELECT workspace_id, workspace_path
+FROM sessions
+WHERE id = $1
+`, sessionID).Scan(&workspaceID, &workspacePath)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return "", "", ErrNotFound
+		}
+		return "", "", fmt.Errorf("sessions: resolve session workspace: %w", err)
+	}
+	workspaceID, workspacePath = resolveEmbeddingMetadataWorkspace(workspaceID, workspacePath)
+	return workspaceID, workspacePath, nil
+}
+
+func (s *Store) resolveWindowWorkspace(ctx context.Context, windowID string) (string, string, error) {
+	var workspaceID, workspacePath string
+	err := s.db.QueryRowContext(ctx, `
+SELECT s.workspace_id, s.workspace_path
+FROM session_context_windows w
+JOIN sessions s ON s.id = w.session_id
+WHERE w.id = $1
+`, windowID).Scan(&workspaceID, &workspacePath)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return "", "", ErrNotFound
+		}
+		return "", "", fmt.Errorf("sessions: resolve window workspace: %w", err)
+	}
+	workspaceID, workspacePath = resolveEmbeddingMetadataWorkspace(workspaceID, workspacePath)
+	return workspaceID, workspacePath, nil
+}
+
+func (s *Store) listEmbeddingMetadata(ctx context.Context) ([]EmbeddingMetadata, error) {
+	rows, err := s.db.QueryContext(ctx, `
+SELECT workspace_id, workspace_path, table_name, column_name, provider, model, dimensions, created_at, updated_at
+FROM session_embedding_metadata
+ORDER BY workspace_id ASC
+`)
+	if err != nil {
+		return nil, fmt.Errorf("sessions: list embedding metadata: %w", err)
+	}
+	defer rows.Close()
+
+	var items []EmbeddingMetadata
+	for rows.Next() {
+		var meta EmbeddingMetadata
+		var createdAt, updatedAt string
+		if err := rows.Scan(&meta.WorkspaceID, &meta.WorkspacePath, &meta.TableName, &meta.ColumnName, &meta.Provider, &meta.Model, &meta.Dimensions, &createdAt, &updatedAt); err != nil {
+			return nil, fmt.Errorf("sessions: list embedding metadata scan: %w", err)
+		}
+		meta.CreatedAt, _ = sqlutil.ScanTimestamp(createdAt)
+		meta.UpdatedAt, _ = sqlutil.ScanTimestamp(updatedAt)
+		items = append(items, meta)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("sessions: list embedding metadata rows: %w", err)
+	}
+	return items, nil
+}
+
+func backfillSessionEmbeddingMetadata(ctx context.Context, db *sql.DB) error {
+	var legacyProvider, legacyModel, createdAt, updatedAt string
+	var legacyDims int
+	err := db.QueryRowContext(ctx, `
+SELECT provider, model, dimensions, created_at, updated_at
+FROM embedding_metadata
+WHERE table_name = 'sessions'
+`).Scan(&legacyProvider, &legacyModel, &legacyDims, &createdAt, &updatedAt)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil
+		}
+		return fmt.Errorf("sessions: load legacy embedding metadata: %w", err)
+	}
+
+	rows, err := db.QueryContext(ctx, `
+SELECT DISTINCT workspace_id, workspace_path
+FROM sessions
+WHERE workspace_id != '' OR workspace_path != ''
+`)
+	if err != nil {
+		return fmt.Errorf("sessions: list workspaces for metadata backfill: %w", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var workspaceID, workspacePath string
+		if err := rows.Scan(&workspaceID, &workspacePath); err != nil {
+			return fmt.Errorf("sessions: scan workspaces for metadata backfill: %w", err)
+		}
+		workspaceID, workspacePath = resolveEmbeddingMetadataWorkspace(workspaceID, workspacePath)
+		if workspaceID == "" {
+			continue
+		}
+		if _, err := db.ExecContext(ctx, `
+INSERT INTO session_embedding_metadata (workspace_id, workspace_path, table_name, column_name, provider, model, dimensions, created_at, updated_at)
+VALUES ($1, $2, 'sessions', 'embedding', $3, $4, $5, $6, $7)
+ON CONFLICT(workspace_id) DO NOTHING
+`, workspaceID, workspacePath, legacyProvider, legacyModel, legacyDims, createdAt, updatedAt); err != nil {
+			return fmt.Errorf("sessions: upsert backfilled session embedding metadata: %w", err)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("sessions: iterate workspaces for metadata backfill: %w", err)
+	}
+	return nil
 }
 
 type scannable interface {

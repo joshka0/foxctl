@@ -154,24 +154,127 @@ func TestStoreVectorRecall(t *testing.T) {
 		t.Fatalf("expected alpha hit first, got %s", hits[0].Doc.ID)
 	}
 
-	filtered, err := store.VectorRecall(testCtx, workspace, []float32{0.9, 0.2, 0}, VectorRecallOptions{EmbeddingModel: "other-model"})
-	if err != nil {
-		t.Fatalf("vector recall with model filter: %v", err)
-	}
-	if len(filtered) != 0 {
-		t.Fatalf("expected model filter to remove all hits")
+	_, err = store.VectorRecall(testCtx, workspace, []float32{0.9, 0.2, 0}, VectorRecallOptions{EmbeddingModel: "other-model"})
+	if err == nil {
+		t.Fatalf("expected model mismatch error")
 	}
 
-	filtered, err = store.VectorRecall(testCtx, workspace, []float32{1, 0}, VectorRecallOptions{})
-	if err != nil {
-		t.Fatalf("vector recall with mismatched dimensions: %v", err)
-	}
-	if len(filtered) != 0 {
-		t.Fatalf("expected no hits with mismatched dimensions, got %d", len(filtered))
+	_, err = store.VectorRecall(testCtx, workspace, []float32{1, 0}, VectorRecallOptions{})
+	if err == nil {
+		t.Fatalf("expected dimension mismatch error")
 	}
 
 	if _, err := store.VectorRecall(testCtx, workspace, []float32{}, VectorRecallOptions{}); err == nil {
 		t.Fatalf("expected empty embedding error")
+	}
+}
+
+func TestStoreEmbeddingMetadataValidation(t *testing.T) {
+	testCtx := context.Background()
+
+	store, err := Open(testCtx, t.TempDir())
+	if err != nil {
+		t.Fatalf("open search index: %v", err)
+	}
+	defer func() { _ = store.Close() }()
+
+	workspace := "ws-vector-meta"
+	if err := store.Upsert(testCtx, Document{
+		ID:             "search://ws-vector-meta/symbol/a",
+		WorkspaceID:    workspace,
+		Scope:          ScopeCode,
+		Kind:           KindSymbol,
+		GroupKey:       "alpha.go",
+		Path:           "alpha.go",
+		Title:          "alpha",
+		Summary:        "alpha document",
+		SearchText:     "alpha function",
+		Embedding:      []float32{0.1, 0.2, 0.3},
+		EmbeddingModel: "model-a",
+	}); err != nil {
+		t.Fatalf("upsert vector doc: %v", err)
+	}
+
+	meta, err := store.GetEmbeddingMetadata(testCtx, workspace)
+	if err != nil {
+		t.Fatalf("GetEmbeddingMetadata: %v", err)
+	}
+	if meta == nil || meta.Model != "model-a" || meta.Dimensions != 3 {
+		t.Fatalf("metadata=%+v", meta)
+	}
+
+	if err := store.Upsert(testCtx, Document{
+		ID:             "search://ws-vector-meta/symbol/b",
+		WorkspaceID:    workspace,
+		Scope:          ScopeCode,
+		Kind:           KindSymbol,
+		GroupKey:       "beta.go",
+		Path:           "beta.go",
+		Title:          "beta",
+		Summary:        "beta document",
+		SearchText:     "beta function",
+		Embedding:      []float32{0.1, 0.2},
+		EmbeddingModel: "model-a",
+	}); err == nil {
+		t.Fatal("expected dimension mismatch error")
+	}
+
+	if err := store.Upsert(testCtx, Document{
+		ID:             "search://ws-vector-meta/symbol/c",
+		WorkspaceID:    workspace,
+		Scope:          ScopeCode,
+		Kind:           KindSymbol,
+		GroupKey:       "gamma.go",
+		Path:           "gamma.go",
+		Title:          "gamma",
+		Summary:        "gamma document",
+		SearchText:     "gamma function",
+		Embedding:      []float32{0.1, 0.2, 0.3},
+		EmbeddingModel: "model-b",
+	}); err == nil {
+		t.Fatal("expected model mismatch error")
+	}
+
+	if _, err := store.VectorRecall(testCtx, workspace, []float32{1, 0}, VectorRecallOptions{EmbeddingModel: "model-a"}); err == nil {
+		t.Fatal("expected vector recall dimension mismatch error")
+	}
+}
+
+func TestStoreDeleteWorkspaceRemovesEmbeddingMetadata(t *testing.T) {
+	testCtx := context.Background()
+
+	store, err := Open(testCtx, t.TempDir())
+	if err != nil {
+		t.Fatalf("open search index: %v", err)
+	}
+	defer func() { _ = store.Close() }()
+
+	workspace := "ws-delete-meta"
+	if err := store.Upsert(testCtx, Document{
+		ID:             "search://ws-delete-meta/symbol/a",
+		WorkspaceID:    workspace,
+		Scope:          ScopeCode,
+		Kind:           KindSymbol,
+		GroupKey:       "alpha.go",
+		Path:           "alpha.go",
+		Title:          "alpha",
+		Summary:        "alpha document",
+		SearchText:     "alpha function",
+		Embedding:      []float32{0.1, 0.2, 0.3},
+		EmbeddingModel: "model-a",
+	}); err != nil {
+		t.Fatalf("upsert vector doc: %v", err)
+	}
+
+	if err := store.DeleteWorkspace(testCtx, workspace); err != nil {
+		t.Fatalf("DeleteWorkspace: %v", err)
+	}
+	meta, err := store.GetEmbeddingMetadata(testCtx, workspace)
+	if err != nil {
+		t.Fatalf("GetEmbeddingMetadata: %v", err)
+	}
+	if meta != nil {
+		t.Fatalf("expected metadata to be removed, got %+v", meta)
 	}
 }
 

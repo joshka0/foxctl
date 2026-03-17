@@ -1,20 +1,32 @@
 import { type ReactNode, useMemo } from 'react'
 import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
 import { AgentSidebar } from './AgentSidebar'
 import { SpawnAgentPanel } from './SpawnAgentPanel'
 import { useActivityStream } from '@/hooks/useActivityStream'
 import { useActivityStore } from '@/stores/activityStore'
 import { useViewStore } from '@/stores/viewStore'
 import { getAgentDisplayName } from '@/lib/agent-utils'
+import type { AuthSessionResponse } from '@/api/client'
 import type { ViewType } from '@/stores/viewStore'
 
 interface AppShellProps {
   children: ReactNode
   activeView: ViewType
   onViewChange: (view: ViewType) => void
+  authSession: AuthSessionResponse
+  onSignOut: () => void
+  signingOut?: boolean
 }
 
-export function AppShell({ children, activeView, onViewChange }: AppShellProps) {
+export function AppShell({
+  children,
+  activeView,
+  onViewChange,
+  authSession,
+  onSignOut,
+  signingOut = false,
+}: AppShellProps) {
   const {
     spawnAgentOpen,
     setSpawnAgentOpen,
@@ -131,6 +143,25 @@ export function AppShell({ children, activeView, onViewChange }: AppShellProps) 
                 </span>
               </div>
             )}
+            <div className="hidden lg:flex flex-col min-w-0 text-right border-l border-border pl-3">
+              <span className="text-xs font-medium text-foreground truncate">
+                {authSession.user.name || authSession.user.email}
+              </span>
+              <span className="text-[11px] text-muted-foreground truncate">
+                {authSession.user.email}
+              </span>
+            </div>
+            <Badge variant="outline" className="text-[10px] hidden sm:inline-flex">
+              Signed in
+            </Badge>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={onSignOut}
+              disabled={signingOut}
+            >
+              {signingOut ? 'Signing out…' : 'Sign out'}
+            </Button>
           </div>
         </header>
 

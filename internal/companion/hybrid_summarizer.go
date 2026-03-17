@@ -127,6 +127,10 @@ func (m *ConversationMemory) SummarizeEpisodePlan(ctx context.Context, conversat
 	cfg := engine.LLMChatConfig{
 		Provider:      llmSummarizer.provider,
 		APIKey:        llmSummarizer.apiKey,
+		BaseURL:       llmSummarizer.baseURL,
+		AuthMode:      llmSummarizer.authMode,
+		AuthHeader:    llmSummarizer.authHeader,
+		AuthPrefix:    llmSummarizer.authPrefix,
 		Model:         llmSummarizer.model,
 		MaxIterations: 1,
 		Temperature:   0.2,

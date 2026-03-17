@@ -12,8 +12,8 @@ import (
 func TestNormalizeEvalModes_IncludesSkillModesWhenRequested(t *testing.T) {
 	t.Parallel()
 
-	got := normalizeEvalModes([]string{"baseline", "skill_context", "skill_default_plus_context", "aca_package_fallback", "aca_query_typed", "repoindex_search", "repoindex_dag", "rlm_llm_codeintel", "rlm_llm_code_staged", "skill_context"})
-	want := []string{"baseline", "skill_context", "skill_default_plus_context", "aca_package_fallback", "aca_query_typed", "repoindex_search", "repoindex_dag", "rlm_llm_codeintel", "rlm_llm_code_staged"}
+	got := normalizeEvalModes([]string{"baseline", "skill_context", "skill_default_plus_context", "aca_package_fallback", "aca_query_typed", "aca_default", "aca_cochange", "aca_cochange_continuity", "cochange_artifacts", "repoindex_search", "repoindex_dag", "rlm_llm_codeintel", "rlm_llm_code_staged", "skill_context"})
+	want := []string{"baseline", "skill_context", "skill_default_plus_context", "aca_package_fallback", "aca_query_typed", "aca_default", "aca_cochange", "aca_cochange_continuity", "cochange_artifacts", "repoindex_search", "repoindex_dag", "rlm_llm_codeintel", "rlm_llm_code_staged"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("normalizeEvalModes()=%v want %v", got, want)
 	}

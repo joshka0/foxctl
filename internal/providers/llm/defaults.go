@@ -32,6 +32,17 @@ func DefaultModelForProvider(provider string) string {
 			return model
 		}
 		return "gpt-4.1-mini"
+	case "openai_compat", "openai-compatible":
+		if model := os.Getenv("AGENTCTL_LLM_MODEL"); model != "" {
+			return model
+		}
+		if model := os.Getenv("OPENAI_MODEL"); model != "" {
+			return model
+		}
+		if model := os.Getenv("LMSTUDIO_MODEL"); model != "" {
+			return model
+		}
+		return "gpt-4.1-mini"
 	case "anthropic":
 		if model := os.Getenv("ANTHROPIC_MODEL"); model != "" {
 			return model

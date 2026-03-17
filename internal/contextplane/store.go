@@ -997,12 +997,18 @@ ranking_weights:
   note_type_weight: 3
   link_proximity: 2
   lexical_match: 2
+  co_change: 3
   semantic_match: 2
   recency: 1
   reuse_frequency: 1
 
 aca:
   package_note_fallback: false
+  co_change_prior: false
+  co_change_commit_limit: 40
+  co_change_max_files_per_commit: 20
+  co_change_half_life_days: 90
+  continuity_bundles: true
 `
 
 const defaultPromotionPolicy = `trust_levels:

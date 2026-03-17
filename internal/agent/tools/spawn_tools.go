@@ -147,6 +147,10 @@ func (r *Registry) executeSpawn(ctx context.Context, args map[string]any, cfg Sp
 		}
 
 		suggestedActorID, _ := subMap["suggested_actor_id"].(string)
+		llmBaseURL, _ := subMap["llm_base_url"].(string)
+		llmAuthMode, _ := subMap["llm_auth_mode"].(string)
+		llmAuthHeader, _ := subMap["llm_auth_header"].(string)
+		llmAuthPrefix, _ := subMap["llm_auth_prefix"].(string)
 		localMaxDepth := 0
 		if lmd, ok := subMap["local_max_depth"].(float64); ok {
 			localMaxDepth = int(lmd)
@@ -162,6 +166,10 @@ func (r *Registry) executeSpawn(ctx context.Context, args map[string]any, cfg Sp
 			Task:             task,
 			SuggestedActorID: suggestedActorID,
 			LocalMaxDepth:    localMaxDepth,
+			LLMBaseURL:       llmBaseURL,
+			LLMAuthMode:      llmAuthMode,
+			LLMAuthHeader:    llmAuthHeader,
+			LLMAuthPrefix:    llmAuthPrefix,
 		})
 	}
 

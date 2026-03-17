@@ -22,6 +22,15 @@ export interface Agent {
   memory_retention?: "companion" | "durable" | "task" | "ephemeral" | string;
 }
 
+export interface CoChangeHit {
+  name: string;
+  anchor_path: string;
+  summary: string;
+  score: number;
+  neighbors?: string[];
+  updated_at?: string;
+}
+
 export interface AgentSession {
   session_id: string;
   actor_id: string;
