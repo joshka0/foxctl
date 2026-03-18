@@ -1256,9 +1256,12 @@ func loadOrchestrationCardRuntime(ctx context.Context, cfg config.Config, log ze
 		return runtime
 	}
 
-	client, err := v2jido.NewEnvJSONRPCClient()
+	client, available, err := loadOptionalJidoClient()
 	if err != nil {
 		runtime.Error = err.Error()
+		return runtime
+	}
+	if !available {
 		return runtime
 	}
 
@@ -1303,9 +1306,12 @@ func loadOrchestrationCardRuntimeTree(ctx context.Context, cfg config.Config, lo
 		return runtime
 	}
 
-	client, err := v2jido.NewEnvJSONRPCClient()
+	client, available, err := loadOptionalJidoClient()
 	if err != nil {
 		runtime.Error = err.Error()
+		return runtime
+	}
+	if !available {
 		return runtime
 	}
 

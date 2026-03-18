@@ -383,6 +383,116 @@ func TestLLMChatEngine_Run_WithToolCall(t *testing.T) {
 	}
 }
 
+func TestExtractFinalAnswerJSONPayload(t *testing.T) {
+	tests := []struct {
+		name string
+		args string
+		want string
+	}{
+		{
+			name: "payload field",
+			args: `{"payload":{"owner":"Mina","codename":"amber-river-19"}}`,
+			want: `{"codename":"amber-river-19","owner":"Mina"}`,
+		},
+		{
+			name: "json alias",
+			args: `{"json":{"status":"ok"}}`,
+			want: `{"status":"ok"}`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := extractFinalAnswerJSONPayload(json.RawMessage(tt.args))
+			if err != nil {
+				t.Fatalf("extractFinalAnswerJSONPayload() error = %v", err)
+			}
+
+			var gotJSON any
+			var wantJSON any
+			if err := json.Unmarshal([]byte(got), &gotJSON); err != nil {
+				t.Fatalf("unmarshal got: %v", err)
+			}
+			if err := json.Unmarshal([]byte(tt.want), &wantJSON); err != nil {
+				t.Fatalf("unmarshal want: %v", err)
+			}
+			gotBytes, _ := json.Marshal(gotJSON)
+			wantBytes, _ := json.Marshal(wantJSON)
+			if string(gotBytes) != string(wantBytes) {
+				t.Fatalf("extractFinalAnswerJSONPayload() = %s, want %s", gotBytes, wantBytes)
+			}
+		})
+	}
+}
+
+func TestLLMChatEngine_Run_WithFinalAnswerJSONTool(t *testing.T) {
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		resp := oaiResponse{
+			ID: "test-final-json",
+			Choices: []struct {
+				Message      oaiMessage `json:"message"`
+				FinishReason string     `json:"finish_reason"`
+			}{
+				{
+					Message: oaiMessage{
+						Role: "assistant",
+						ToolCalls: []oaiToolCall{
+							{
+								ID:   "call_final_json",
+								Type: "function",
+								Function: oaiFunction{
+									Name:      FinalAnswerJSONToolName,
+									Arguments: `{"payload":{"owner":"Mina","codename":"amber-river-19"}}`,
+								},
+							},
+						},
+					},
+					FinishReason: "tool_calls",
+				},
+			},
+		}
+		_ = json.NewEncoder(w).Encode(resp)
+	})
+
+	engine := &LLMChatEngine{
+		config: LLMChatConfig{
+			APIKey:        "test-key",
+			BaseURL:       "http://mock",
+			Model:         "test-model",
+			MaxIterations: 10,
+		},
+		client: &http.Client{Transport: &handlerTransport{handler: handler}},
+	}
+
+	output, err := engine.Run(context.Background(), EngineInput{
+		Messages: []Message{{Role: RoleUser, Content: "Return exact JSON."}},
+		Tools:    []ToolDef{FinalAnswerJSONToolDef()},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if output.StopReason != StopReasonEndTurn {
+		t.Fatalf("stop reason = %q, want %q", output.StopReason, StopReasonEndTurn)
+	}
+	if output.AssistantText == "" {
+		t.Fatal("assistant text should be populated")
+	}
+	var got map[string]string
+	if err := json.Unmarshal([]byte(output.AssistantText), &got); err != nil {
+		t.Fatalf("assistant text should be valid json: %v", err)
+	}
+	if got["owner"] != "Mina" || got["codename"] != "amber-river-19" {
+		t.Fatalf("assistant payload = %+v", got)
+	}
+	if len(output.ToolCalls) != 1 || output.ToolCalls[0].Name != FinalAnswerJSONToolName {
+		t.Fatalf("tool calls = %+v", output.ToolCalls)
+	}
+	if len(output.ToolResults) != 1 || output.ToolResults[0].IsError {
+		t.Fatalf("tool results = %+v", output.ToolResults)
+	}
+}
+
 // --- buildResearchSummary Tests ---
 
 func TestBuildResearchSummary_Mixed(t *testing.T) {

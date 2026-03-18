@@ -175,6 +175,99 @@ func TestAppendTurnExtractsPreferencesImmediately(t *testing.T) {
 	}
 }
 
+func TestExtractExplicitFacts(t *testing.T) {
+	got := extractExplicitFacts("Remember these facts: owner Mina, codename cedar-planet-42, deploy window Tuesday 14:00 UTC, rollback color is amber.")
+	if len(got) < 4 {
+		t.Fatalf("explicit facts=%d want at least 4", len(got))
+	}
+
+	byKey := make(map[string]ExtractedEntry, len(got))
+	for _, entry := range got {
+		byKey[entry.Key] = entry
+	}
+
+	if byKey["owner"].Value != "Mina" {
+		t.Fatalf("owner value=%q want Mina", byKey["owner"].Value)
+	}
+	if byKey["codename"].Value != "cedar-planet-42" {
+		t.Fatalf("codename value=%q want cedar-planet-42", byKey["codename"].Value)
+	}
+	if byKey["deploy_window"].Value != "Tuesday 14:00 UTC" {
+		t.Fatalf("deploy_window value=%q want Tuesday 14:00 UTC", byKey["deploy_window"].Value)
+	}
+	if byKey["rollback_color"].Value != "amber" {
+		t.Fatalf("rollback_color value=%q want amber", byKey["rollback_color"].Value)
+	}
+}
+
+func TestExtractExplicitFacts_CutsOffChainedUpdateClauses(t *testing.T) {
+	got := extractExplicitFacts("Update the codename from cedar-planet-42 to amber-river-19 and change the deploy window to Thursday 09:30 UTC.")
+	byKey := make(map[string]ExtractedEntry, len(got))
+	for _, entry := range got {
+		byKey[entry.Key] = entry
+	}
+
+	if byKey["codename"].Value != "amber-river-19" {
+		t.Fatalf("codename value=%q want amber-river-19", byKey["codename"].Value)
+	}
+	if byKey["deploy_window"].Value != "Thursday 09:30 UTC" {
+		t.Fatalf("deploy_window value=%q want Thursday 09:30 UTC", byKey["deploy_window"].Value)
+	}
+}
+
+func TestAppendTurnExtractsTechnicalFactsImmediately(t *testing.T) {
+	ctx := context.Background()
+	db, err := sql.Open("sqlite", ":memory:")
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	defer db.Close()
+
+	mem, err := NewConversationMemory(db)
+	if err != nil {
+		t.Fatalf("new conversation memory: %v", err)
+	}
+
+	if err := mem.AppendTurn(ctx, ConversationTurn{
+		ConversationID: "conv-tech-facts",
+		Role:           "user",
+		Content:        "Remember these facts: owner Mina, codename cedar-planet-42, deploy window Tuesday 14:00 UTC.",
+	}); err != nil {
+		t.Fatalf("append initial facts: %v", err)
+	}
+	if err := mem.AppendTurn(ctx, ConversationTurn{
+		ConversationID: "conv-tech-facts",
+		Role:           "user",
+		Content:        "Update the codename from cedar-planet-42 to amber-river-19 and change the deploy window to Thursday 09:30 UTC.",
+	}); err != nil {
+		t.Fatalf("append updated facts: %v", err)
+	}
+
+	hardState, err := mem.GetCachedHardState(ctx, "conv-tech-facts")
+	if err != nil {
+		t.Fatalf("get cached hard state: %v", err)
+	}
+
+	assertValue := func(mapKey, want string) {
+		t.Helper()
+		entry, ok := hardState[mapKey]
+		if !ok {
+			t.Fatalf("missing hard state key %q", mapKey)
+		}
+		var got string
+		if err := json.Unmarshal([]byte(entry.ValueJSON), &got); err != nil {
+			got = entry.ValueJSON
+		}
+		if got != want {
+			t.Fatalf("%s=%q want %q", mapKey, got, want)
+		}
+	}
+
+	assertValue("technical_context:tech:owner", "Mina")
+	assertValue("technical_context:tech:codename", "amber-river-19")
+	assertValue("technical_context:tech:deploy_window", "Thursday 09:30 UTC")
+}
+
 func TestAppendTurnAlwaysBridgesToHybridEvents(t *testing.T) {
 	ctx := context.Background()
 	db, err := sql.Open("sqlite", ":memory:")

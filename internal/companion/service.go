@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -336,6 +337,12 @@ type ChatRequest struct {
 	// - 0: use default (currently 50)
 	// - -1: disable history injection
 	MaxHistoryTurns int `json:"max_history_turns,omitempty"`
+
+	// ResponseSchema is an optional JSON Schema describing the exact final user-facing structure.
+	ResponseSchema json.RawMessage `json:"response_schema,omitempty"`
+
+	// ResponseKeys is an optional ordered list of expected top-level JSON keys.
+	ResponseKeys []string `json:"response_keys,omitempty"`
 }
 
 type memoryPromptMetadata struct {
@@ -855,6 +862,20 @@ func (s *Service) chatWithLLMChat(ctx context.Context, req ChatRequest, rlmExecu
 			}
 		}
 	}
+	if shouldRecoverContextToolLeak(responseText, rawAssistantText, output.ToolCalls) {
+		recoveredText, recoveredTokens, recoverErr := s.synthesizeContextToolAnswer(
+			ctx, req, engineCfg, systemPrompt, messages, rawAssistantText, output.ToolCalls, output.ToolResults,
+		)
+		if recoverErr != nil {
+			s.logger.Warn().
+				Err(recoverErr).
+				Str("conversation_id", req.ConversationID).
+				Msg("context-tool synthesis recovery failed")
+		} else if strings.TrimSpace(recoveredText) != "" {
+			responseText = strings.TrimSpace(recoveredText)
+			output.Tokens.Add(recoveredTokens.InputTokens, recoveredTokens.OutputTokens)
+		}
+	}
 	if enforceGrounded && len(output.ToolCalls) == 0 {
 		forcedCalls, forcedResults, forcedEvidence := s.collectForcedResearchEvidence(ctx, toolExecutor, toolDefs, req.Message)
 		if len(forcedCalls) > 0 {
@@ -1234,6 +1255,275 @@ func (s *Service) recoverEmptyAssistantText(ctx context.Context, systemPrompt st
 	return strings.TrimSpace(stripThinkTags(recoveryOutput.AssistantText)), recoveryOutput.Tokens
 }
 
+func shouldRecoverContextToolLeak(responseText string, rawAssistantText string, calls []engine.ToolCall) bool {
+	responseText = strings.TrimSpace(responseText)
+	rawAssistantText = strings.TrimSpace(rawAssistantText)
+	hasContextCalls := hasContextToolCalls(calls)
+	hasRawContextSyntax := strings.Contains(rawAssistantText, "rlm_context_") || strings.Contains(responseText, "rlm_context_")
+	if !hasContextCalls && !hasRawContextSyntax && !looksLikeContextMutationJSON(responseText) {
+		return false
+	}
+	if responseText == "" {
+		return true
+	}
+	if strings.Contains(rawAssistantText, "<|tool_call_end|>") {
+		return true
+	}
+	if strings.HasPrefix(responseText, "[rlm_context_") || strings.Contains(responseText, "rlm_context_") {
+		return true
+	}
+	if looksLikeContextMutationJSON(responseText) {
+		return true
+	}
+	return false
+}
+
+func hasContextToolCalls(calls []engine.ToolCall) bool {
+	for _, call := range calls {
+		if strings.HasPrefix(strings.TrimSpace(call.Name), "rlm_context_") {
+			return true
+		}
+	}
+	return false
+}
+
+func looksLikeContextMutationJSON(text string) bool {
+	lines := strings.Split(strings.TrimSpace(text), "\n")
+	valid := 0
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		if !strings.HasPrefix(line, "{") || !strings.HasSuffix(line, "}") {
+			return false
+		}
+		if !strings.Contains(line, `"key"`) || !strings.Contains(line, `"value"`) {
+			return false
+		}
+		valid++
+	}
+	return valid > 0
+}
+
+func (s *Service) synthesizeContextToolAnswer(
+	ctx context.Context,
+	req ChatRequest,
+	engineCfg engine.LLMChatConfig,
+	systemPrompt string,
+	messages []engine.Message,
+	rawAssistantText string,
+	calls []engine.ToolCall,
+	results []engine.ToolResult,
+) (string, engine.TokenUsage, error) {
+	synthCfg := engineCfg
+	synthCfg.MaxIterations = 2
+	synthCfg.RequireContextQuery = false
+	synthCfg.RLMSystemPromptSuffix = ""
+	synthCfg.ResponseFormat = nil
+
+	synthEngine, err := engine.NewLLMChatEngine(synthCfg)
+	if err != nil {
+		return "", engine.TokenUsage{}, fmt.Errorf("create context synthesis engine: %w", err)
+	}
+
+	resultByCallID := make(map[string]engine.ToolResult, len(results))
+	for _, result := range results {
+		resultByCallID[result.ToolCallID] = result
+	}
+
+	var evidence strings.Builder
+	for _, call := range calls {
+		if !strings.HasPrefix(strings.TrimSpace(call.Name), "rlm_context_") {
+			continue
+		}
+		evidence.WriteString("## ")
+		evidence.WriteString(strings.TrimSpace(call.Name))
+		evidence.WriteString("\n")
+		if args := strings.TrimSpace(string(call.Arguments)); args != "" {
+			evidence.WriteString("arguments: ")
+			evidence.WriteString(truncateForPrompt(args, 800))
+			evidence.WriteString("\n")
+		}
+		if result, ok := resultByCallID[call.ID]; ok {
+			if result.IsError {
+				evidence.WriteString("result: ERROR: ")
+			} else {
+				evidence.WriteString("result: ")
+			}
+			evidence.WriteString(truncateForPrompt(strings.TrimSpace(result.Content), 3000))
+			evidence.WriteString("\n")
+		}
+		evidence.WriteString("\n")
+	}
+
+	evidenceText := strings.TrimSpace(evidence.String())
+	recoveryMessages := append([]engine.Message{}, messages...)
+	if strings.TrimSpace(rawAssistantText) != "" {
+		recoveryMessages = append(recoveryMessages, engine.NewAssistantMessage(rawAssistantText))
+	}
+	formatInstruction, formatMode := requestedOutputFormat(req.Message)
+	formatKeys := requestedResponseKeys(req)
+	instruction := "The previous draft exposed internal context-tool artifacts instead of a user-facing answer.\n\n"
+	if evidenceText != "" {
+		instruction += "Internal context tool results:\n" + evidenceText + "\n\n"
+	} else {
+		instruction += "No structured tool results were captured. Use the conversation memory already present in the system prompt and the previous draft only as hints.\n\n"
+	}
+	instruction += "Now answer the user's last request cleanly.\n" +
+		"- Do not mention tool names.\n" +
+		"- Do not emit raw tool-call syntax.\n" +
+		"- Match the user's requested output format exactly.\n"
+	if formatInstruction != "" {
+		instruction += "- " + formatInstruction + "\n"
+	}
+	if schemaHint := requestedResponseSchemaHint(req); schemaHint != "" {
+		instruction += "- " + schemaHint + "\n"
+	}
+	if formatMode == requestedOutputFormatCompactJSON && len(formatKeys) > 0 {
+		instruction += "- Use exactly these JSON keys when applicable: " + strings.Join(formatKeys, ", ") + ".\n"
+	}
+	if formatMode == requestedOutputFormatCompactJSON {
+		instruction += "- Prefer the final_answer_json tool for the final response.\n"
+	}
+	recoveryMessages = append(recoveryMessages, engine.NewUserMessage(
+		instruction,
+	))
+
+	recoveryInput := engine.EngineInput{
+		SystemPrompt: strings.TrimSpace(systemPrompt) + "\n\nReturn only the final user-facing answer.",
+		Messages:     recoveryMessages,
+	}
+	if formatMode == requestedOutputFormatCompactJSON {
+		recoveryInput.Tools = []engine.ToolDef{engine.FinalAnswerJSONToolDef()}
+	}
+
+	recoveryOutput, err := synthEngine.Run(ctx, recoveryInput)
+	if err != nil {
+		return "", engine.TokenUsage{}, fmt.Errorf("run context synthesis engine: %w", err)
+	}
+	text := strings.TrimSpace(stripThinkTags(recoveryOutput.AssistantText))
+	text = applyRequestedOutputFormat(text, formatMode)
+	return text, recoveryOutput.Tokens, nil
+}
+
+type requestedOutputFormatMode int
+
+const (
+	requestedOutputFormatNone requestedOutputFormatMode = iota
+	requestedOutputFormatCompactJSON
+	requestedOutputFormatOnlyValue
+)
+
+var replyOnlyPattern = regexp.MustCompile(`(?i)\breply\s+(?:only\s+)?with\b`)
+
+func requestedOutputFormat(question string) (string, requestedOutputFormatMode) {
+	lower := strings.ToLower(strings.TrimSpace(question))
+	switch {
+	case strings.Contains(lower, "compact json"),
+		strings.Contains(lower, "reply as json"),
+		strings.Contains(lower, "reply with json"),
+		strings.Contains(lower, "return json"),
+		strings.Contains(lower, "json object"):
+		return "Return a single compact JSON object and nothing else.", requestedOutputFormatCompactJSON
+	case replyOnlyPattern.MatchString(lower),
+		strings.Contains(lower, "reply with exactly"),
+		strings.Contains(lower, "respond only with"),
+		strings.Contains(lower, "answer only with"):
+		return "Return only the requested value or token with no explanation, labels, markdown, or extra punctuation.", requestedOutputFormatOnlyValue
+	default:
+		return "", requestedOutputFormatNone
+	}
+}
+
+func requestedResponseKeys(req ChatRequest) []string {
+	keys := make([]string, 0, len(req.ResponseKeys)+4)
+	add := func(key string) {
+		key = strings.TrimSpace(key)
+		if key == "" {
+			return
+		}
+		for _, existing := range keys {
+			if existing == key {
+				return
+			}
+		}
+		keys = append(keys, key)
+	}
+	for _, key := range req.ResponseKeys {
+		add(key)
+	}
+	if len(keys) > 0 {
+		return keys
+	}
+	for _, key := range schemaTopLevelKeys(req.ResponseSchema) {
+		add(key)
+	}
+	return keys
+}
+
+func schemaTopLevelKeys(schema json.RawMessage) []string {
+	schema = json.RawMessage(strings.TrimSpace(string(schema)))
+	if len(schema) == 0 || string(schema) == "null" {
+		return nil
+	}
+
+	var raw map[string]any
+	if err := json.Unmarshal(schema, &raw); err != nil {
+		return nil
+	}
+	properties, ok := raw["properties"].(map[string]any)
+	if !ok || len(properties) == 0 {
+		return nil
+	}
+
+	keys := make([]string, 0, len(properties))
+	for key := range properties {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+func requestedResponseSchemaHint(req ChatRequest) string {
+	schema := strings.TrimSpace(string(req.ResponseSchema))
+	if schema == "" || schema == "null" {
+		return ""
+	}
+	return "Return JSON that matches this schema exactly: " + truncateForPrompt(schema, 1200)
+}
+
+func applyRequestedOutputFormat(text string, mode requestedOutputFormatMode) string {
+	text = strings.TrimSpace(text)
+	switch mode {
+	case requestedOutputFormatCompactJSON:
+		if extracted, ok := extractJSONObject(text); ok {
+			var payload any
+			if err := json.Unmarshal([]byte(extracted), &payload); err == nil {
+				if compact, err := json.Marshal(payload); err == nil {
+					return string(compact)
+				}
+			}
+			return strings.TrimSpace(extracted)
+		}
+		return text
+	case requestedOutputFormatOnlyValue:
+		text = strings.Trim(text, "`")
+		text = strings.TrimSpace(text)
+		if strings.Contains(text, "\n") {
+			for _, line := range strings.Split(text, "\n") {
+				line = strings.TrimSpace(line)
+				if line != "" {
+					return strings.Trim(line, `"'`)
+				}
+			}
+		}
+		return strings.Trim(text, `"'`)
+	default:
+		return text
+	}
+}
+
 // buildChatMessages constructs the message list for a turn by injecting recent conversation
 // history from companion memory (when enabled), followed by the current user message.
 //
@@ -1314,7 +1604,21 @@ func (s *Service) buildTooling(rlmExecutor *engine.RLMToolExecutor) (engine.Tool
 		}
 	}
 
+	if !containsToolDef(toolDefs, engine.FinalAnswerJSONToolName) {
+		toolDefs = append(toolDefs, engine.FinalAnswerJSONToolDef())
+	}
+
 	return toolExecutor, toolDefs, usesRLM
+}
+
+func containsToolDef(toolDefs []engine.ToolDef, name string) bool {
+	name = strings.TrimSpace(name)
+	for _, toolDef := range toolDefs {
+		if strings.TrimSpace(toolDef.Name) == name {
+			return true
+		}
+	}
+	return false
 }
 
 type storyContextBundle struct {
@@ -1852,6 +2156,16 @@ func (s *Service) buildSystemPrompt(ctx context.Context, req ChatRequest) (strin
 
 	if len(req.Context) > 0 {
 		systemPrompt = systemPrompt + "\n\n" + formatRequestContext(req.Context)
+	}
+	if _, formatMode := requestedOutputFormat(req.Message); formatMode == requestedOutputFormatCompactJSON {
+		systemPrompt += "\n\n# Output Format\nWhen the user explicitly asks for JSON, prefer the final_answer_json tool for the final response.\n"
+		if schemaHint := requestedResponseSchemaHint(req); schemaHint != "" {
+			systemPrompt += schemaHint + "\n"
+		}
+		if keys := requestedResponseKeys(req); len(keys) > 0 {
+			systemPrompt += "Use exactly these JSON keys when applicable: " + strings.Join(keys, ", ") + ".\n"
+		}
+		systemPrompt += "Do not wrap the payload in a generic top-level `answer` field unless the user explicitly asked for that key."
 	}
 
 	return systemPrompt, meta, nil

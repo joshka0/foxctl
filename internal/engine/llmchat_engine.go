@@ -397,6 +397,13 @@ func (e *LLMChatEngine) Run(ctx context.Context, input EngineInput) (EngineOutpu
 				}
 				output.ToolCalls = append(output.ToolCalls, toolCall)
 
+				if result, finalText, handled := maybeHandleFinalAnswerJSONTool(toolCall); handled {
+					output.ToolResults = append(output.ToolResults, result)
+					output.AssistantText = finalText
+					output.StopReason = StopReasonEndTurn
+					return output, nil
+				}
+
 				var result ToolResult
 				start := time.Now()
 

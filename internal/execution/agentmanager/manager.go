@@ -3,6 +3,7 @@ package agentmanager
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/jkatigb/agentctl/internal/domain/agent"
@@ -28,6 +29,8 @@ func New(agentStore agents.Store, mailboxStore mailbox.Store) *Manager {
 // SpawnRequest contains parameters for spawning a new agent.
 type SpawnRequest struct {
 	ParentNS        string
+	WorkspaceRoot   string
+	WorkspaceSource string
 	Name            string // Human name (e.g., "Luna", "Atlas")
 	Slug            string // Human-readable handle for referencing (e.g., "researcher", "companion")
 	Role            string
@@ -44,6 +47,10 @@ type SpawnRequest struct {
 	LLMAuthMode     string // Per-agent LLM auth mode override
 	LLMAuthHeader   string // Per-agent LLM auth header override
 	LLMAuthPrefix   string // Per-agent LLM auth prefix override
+	SandboxProvider string
+	SandboxID       string
+	RepoURL         string
+	RepoRef         string
 
 	// Execution mode configuration
 	ExecMode      agent.ExecutionMode // reactive|autonomous|proactive|tick (default: reactive)
@@ -110,38 +117,44 @@ func (m *Manager) Spawn(ctx context.Context, req SpawnRequest) (SpawnResponse, e
 	}
 
 	a := agent.Agent{
-		ID:          agentID,
-		ParentID:    parentID,
-		Namespace:   ns,
-		Name:        req.Name,
-		Slug:        req.Slug,
-		Role:        req.Role,
-		Prompt:      req.Prompt,
-		SkillsAllow: req.SkillsAllow,
-		Policy:      req.Policy,
-		ShareBB:     req.ShareBB,
-		MemoryScope: agent.NormalizeMemoryScope(req.MemoryScope),
+		ID:              agentID,
+		ParentID:        parentID,
+		Namespace:       ns,
+		WorkspaceRoot:   strings.TrimSpace(req.WorkspaceRoot),
+		WorkspaceSource: strings.TrimSpace(req.WorkspaceSource),
+		Name:            req.Name,
+		Slug:            req.Slug,
+		Role:            req.Role,
+		Prompt:          req.Prompt,
+		SkillsAllow:     req.SkillsAllow,
+		Policy:          req.Policy,
+		ShareBB:         req.ShareBB,
+		MemoryScope:     agent.NormalizeMemoryScope(req.MemoryScope),
 		MemoryRetention: func() agent.MemoryRetention {
 			if req.MemoryRetention == "" {
 				return agent.DefaultMemoryRetentionForScope(agent.NormalizeMemoryScope(req.MemoryScope))
 			}
 			return agent.NormalizeMemoryRetention(req.MemoryRetention)
 		}(),
-		State:          agent.StateStarting,
-		CreatedAt:      now,
-		HeartbeatAt:    now,
-		LLMProvider:    req.LLMProvider,
-		LLMModel:       req.LLMModel,
-		LLMAPIKey:      req.LLMAPIKey,
-		LLMBaseURL:     req.LLMBaseURL,
-		LLMAuthMode:    req.LLMAuthMode,
-		LLMAuthHeader:  req.LLMAuthHeader,
-		LLMAuthPrefix:  req.LLMAuthPrefix,
-		ExecMode:       execMode,
-		ExecutionLayer: agent.ExecutionLayerClassic,
-		MaxIterations:  maxIterations,
-		MaxAutoTurns:   maxAutoTurns,
-		ThinkInterval:  thinkInterval,
+		State:           agent.StateStarting,
+		CreatedAt:       now,
+		HeartbeatAt:     now,
+		LLMProvider:     req.LLMProvider,
+		LLMModel:        req.LLMModel,
+		LLMAPIKey:       req.LLMAPIKey,
+		LLMBaseURL:      req.LLMBaseURL,
+		LLMAuthMode:     req.LLMAuthMode,
+		LLMAuthHeader:   req.LLMAuthHeader,
+		LLMAuthPrefix:   req.LLMAuthPrefix,
+		SandboxProvider: strings.TrimSpace(req.SandboxProvider),
+		SandboxID:       strings.TrimSpace(req.SandboxID),
+		RepoURL:         strings.TrimSpace(req.RepoURL),
+		RepoRef:         strings.TrimSpace(req.RepoRef),
+		ExecMode:        execMode,
+		ExecutionLayer:  agent.ExecutionLayerClassic,
+		MaxIterations:   maxIterations,
+		MaxAutoTurns:    maxAutoTurns,
+		ThinkInterval:   thinkInterval,
 	}
 
 	if err := m.agentStore.Create(ctx, a); err != nil {

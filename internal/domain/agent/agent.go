@@ -127,19 +127,21 @@ func RecommendedMemoryScopeForRetention(retention MemoryRetention) MemoryScope {
 
 // Agent represents an autonomous actor in the multi-agent system.
 type Agent struct {
-	ID          string    `json:"id"`
-	ParentID    string    `json:"parent_id,omitempty"`
-	Namespace   string    `json:"ns"`
-	Name        string    `json:"name,omitempty"` // Human name (e.g., "Luna", "Atlas")
-	Slug        string    `json:"slug,omitempty"` // Human-readable handle for referencing (e.g., "researcher", "companion")
-	Role        string    `json:"role,omitempty"`
-	Prompt      string    `json:"prompt,omitempty"`
-	SkillsAllow []string  `json:"skills_allow"`
-	Policy      Policy    `json:"policy"`
-	ShareBB     string    `json:"share_bb"` // all|scoped|none
-	State       State     `json:"state"`
-	CreatedAt   time.Time `json:"created_at"`
-	HeartbeatAt time.Time `json:"heartbeat_at,omitempty"`
+	ID              string    `json:"id"`
+	ParentID        string    `json:"parent_id,omitempty"`
+	Namespace       string    `json:"ns"`
+	WorkspaceRoot   string    `json:"workspace_root,omitempty"`   // Absolute workspace path used by filesystem-bound tools
+	WorkspaceSource string    `json:"workspace_source,omitempty"` // local|sandbox|mounted
+	Name            string    `json:"name,omitempty"`             // Human name (e.g., "Luna", "Atlas")
+	Slug            string    `json:"slug,omitempty"`             // Human-readable handle for referencing (e.g., "researcher", "companion")
+	Role            string    `json:"role,omitempty"`
+	Prompt          string    `json:"prompt,omitempty"`
+	SkillsAllow     []string  `json:"skills_allow"`
+	Policy          Policy    `json:"policy"`
+	ShareBB         string    `json:"share_bb"` // all|scoped|none
+	State           State     `json:"state"`
+	CreatedAt       time.Time `json:"created_at"`
+	HeartbeatAt     time.Time `json:"heartbeat_at,omitempty"`
 
 	// LLM configuration (per-agent, overrides environment defaults)
 	LLMProvider   string `json:"llm_provider,omitempty"`    // gemini|openai|anthropic|groq|openrouter|openai_compat
@@ -161,6 +163,12 @@ type Agent struct {
 	ConversationID  string          `json:"conversation_id,omitempty"`  // Linked companion conversation ID for chat history
 	MemoryScope     MemoryScope     `json:"memory_scope,omitempty"`     // agent|session for human-facing memory lineage
 	MemoryRetention MemoryRetention `json:"memory_retention,omitempty"` // companion|durable|task|ephemeral retention preset
+
+	// Optional sandbox-backed workspace metadata.
+	SandboxProvider string `json:"sandbox_provider,omitempty"` // opensandbox|...
+	SandboxID       string `json:"sandbox_id,omitempty"`       // Provider sandbox identifier
+	RepoURL         string `json:"repo_url,omitempty"`         // Source repository URL for cloned workspaces
+	RepoRef         string `json:"repo_ref,omitempty"`         // Source repository ref for cloned workspaces
 }
 
 // Policy defines execution constraints and capabilities for an agent.

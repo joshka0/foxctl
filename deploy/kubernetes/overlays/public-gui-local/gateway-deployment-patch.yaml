@@ -1,0 +1,8 @@
+- op: replace
+  path: /spec/replicas
+  value: 1
+- op: replace
+  path: /spec/template/spec/containers/0/imagePullPolicy
+  value: Never
+- op: remove
+  path: /spec/template/spec/containers/0/env/3

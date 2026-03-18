@@ -1,0 +1,43 @@
+# Local OrbStack overlay for public gui-agent testing.
+# Usage: kubectl apply -k deploy/kubernetes/overlays/public-gui-local/
+
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: agentctl-public-gui
+
+resources:
+- ../local
+- gateway-configmap.yaml
+- gateway-secrets.yaml
+- gateway-deployment.yaml
+- gateway-service.yaml
+- gateway-network-policy.yaml
+- llm-egress-network-policy.yaml
+
+patches:
+- path: agentctl-deployment-patch.yaml
+  target:
+    kind: Deployment
+    name: agentctl
+- path: gateway-configmap-patch.yaml
+  target:
+    kind: ConfigMap
+    name: gui-auth-gateway-config
+- path: gateway-secrets-patch.yaml
+  target:
+    kind: Secret
+    name: gui-auth-gateway-secrets
+- path: gateway-deployment-patch.yaml
+  target:
+    kind: Deployment
+    name: gui-auth-gateway
+- target:
+    kind: Ingress
+    name: agentctl
+  patch: |
+    $patch: delete
+    apiVersion: networking.k8s.io/v1
+    kind: Ingress
+    metadata:
+      name: agentctl

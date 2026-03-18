@@ -8,14 +8,19 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import type { CoChangeHit, CompanionMemoryStats, PersistedSession } from "@/api/client";
-import type { Agent, Room } from "@/api/types";
-import { getAgentDisplayName } from "@/lib/agent-utils";
+import type { CompanionMemoryStats, PersistedSession } from "@/api/client";
+import type { Agent, CoChangeHit, Room } from "@/api/types";
+import {
+  getAgentDisplayName,
+  getAgentRepoDisplayName,
+  isSandboxBackedAgent,
+} from "@/lib/agent-utils";
 import { formatRelativeTime } from "@/lib/utils";
 import {
   Brain,
   Cpu,
   FileText,
+  Folder,
   Hash,
   Layers,
   Network,
@@ -86,6 +91,9 @@ export function AgentDetailSupportRail({
   cochangeHits,
   cochangeLoading,
 }: AgentDetailSupportRailProps) {
+  const sandboxBacked = isSandboxBackedAgent(activeAgent);
+  const repoLabel = getAgentRepoDisplayName(activeAgent.repo_url);
+
   return (
     <ScrollArea className="min-h-0 pr-2">
       <div className="space-y-4">
@@ -132,6 +140,70 @@ export function AgentDetailSupportRail({
                 No co-change clusters found for this agent yet.
               </div>
             )}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="pb-3">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <CardTitle className="text-sm">Execution Workspace</CardTitle>
+                <CardDescription>
+                  Where this agent runs code and what repo context it carries.
+                </CardDescription>
+              </div>
+              <Folder className="h-4 w-4 text-muted-foreground" />
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <div className="flex flex-wrap gap-2">
+              <Badge
+                variant="outline"
+                className={
+                  sandboxBacked
+                    ? "border-sky-500/30 bg-sky-500/5 text-sky-600"
+                    : undefined
+                }
+              >
+                {sandboxBacked ? "sandbox clone" : "local runtime"}
+              </Badge>
+              {sandboxBacked && activeAgent.sandbox_provider && (
+                <Badge variant="secondary">{activeAgent.sandbox_provider}</Badge>
+              )}
+              {repoLabel && (
+                <Badge variant="outline">
+                  {repoLabel}
+                  {activeAgent.repo_ref ? ` @ ${activeAgent.repo_ref}` : ""}
+                </Badge>
+              )}
+            </div>
+            <div className="rounded-lg border border-border bg-background/60 p-3 space-y-2 text-xs text-muted-foreground">
+              <div>
+                {sandboxBacked
+                  ? "Sandbox-backed agents keep their repo clone and prompt execution context outside the local agentctl pod runtime."
+                  : "Local agents read and write against the runtime workspace managed by the current agentctl deployment."}
+              </div>
+              <div className="grid gap-1 text-[11px]">
+                <div>
+                  workspace <code>{activeAgent.ns || "/"}</code>
+                </div>
+                {activeAgent.workspace_root && (
+                  <div>
+                    root <code>{activeAgent.workspace_root}</code>
+                  </div>
+                )}
+                {activeAgent.sandbox_id && (
+                  <div>
+                    sandbox <code>{activeAgent.sandbox_id}</code>
+                  </div>
+                )}
+                {activeAgent.repo_url && (
+                  <div>
+                    remote <code>{activeAgent.repo_url}</code>
+                  </div>
+                )}
+              </div>
+            </div>
           </CardContent>
         </Card>
 
@@ -398,7 +470,7 @@ export function AgentDetailSupportRail({
               </div>
               <div className="flex items-center gap-2">
                 <Network className="h-3.5 w-3.5" />
-                Workspace: {activeAgent.ns || "/"}
+                Workspace: {activeAgent.ns || "/"} ({sandboxBacked ? "sandbox" : "local"})
               </div>
               <div className="flex items-center gap-2">
                 <Cpu className="h-3.5 w-3.5" />

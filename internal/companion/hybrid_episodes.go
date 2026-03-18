@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
 	"unicode"
@@ -20,6 +21,64 @@ const (
 	topicDriftThreshold    = 0.15
 	episodeTopicTokenLimit = 12
 )
+
+type explicitFactPattern struct {
+	Key       string
+	EntryType string
+	Regexps   []*regexp.Regexp
+}
+
+var explicitFactPatterns = []explicitFactPattern{
+	{
+		Key:       "owner",
+		EntryType: EntryTypeTechnicalContext,
+		Regexps: []*regexp.Regexp{
+			regexp.MustCompile(`(?i)\bupdate (?:the )?owner from [^.\n]+? to ([^,.;\n]+)`),
+			regexp.MustCompile(`(?i)\bchange (?:the )?owner to ([^,.;\n]+)`),
+			regexp.MustCompile(`(?i)\bset (?:the )?owner to ([^,.;\n]+)`),
+			regexp.MustCompile(`(?i)\bowner(?:\s+is|:)?\s+([^,.;\n]+)`),
+		},
+	},
+	{
+		Key:       "codename",
+		EntryType: EntryTypeTechnicalContext,
+		Regexps: []*regexp.Regexp{
+			regexp.MustCompile(`(?i)\bupdate (?:the )?codename from [^.\n]+? to ([^,.;\n]+)`),
+			regexp.MustCompile(`(?i)\bchange (?:the )?codename to ([^,.;\n]+)`),
+			regexp.MustCompile(`(?i)\bset (?:the )?codename to ([^,.;\n]+)`),
+			regexp.MustCompile(`(?i)\bcodename(?:\s+is|:)?\s+([^,.;\n]+)`),
+		},
+	},
+	{
+		Key:       "deploy_window",
+		EntryType: EntryTypeTechnicalContext,
+		Regexps: []*regexp.Regexp{
+			regexp.MustCompile(`(?i)\bupdate (?:the )?deploy window from [^.\n]+? to ([^.\n]+)`),
+			regexp.MustCompile(`(?i)\bchange (?:the )?deploy window to ([^.\n]+)`),
+			regexp.MustCompile(`(?i)\bset (?:the )?deploy window to ([^.\n]+)`),
+			regexp.MustCompile(`(?i)\bdeploy window(?:\s+is|:)?\s+([^,.;\n]+(?:\s+[^,.;\n]+){0,4})`),
+		},
+	},
+	{
+		Key:       "rollback_color",
+		EntryType: EntryTypeTechnicalContext,
+		Regexps: []*regexp.Regexp{
+			regexp.MustCompile(`(?i)\bupdate (?:the )?rollback color from [^.\n]+? to ([^,.;\n]+)`),
+			regexp.MustCompile(`(?i)\bchange (?:the )?rollback color to ([^,.;\n]+)`),
+			regexp.MustCompile(`(?i)\bset (?:the )?rollback color to ([^,.;\n]+)`),
+			regexp.MustCompile(`(?i)\brollback color(?:\s+is|:)?\s+([^,.;\n]+)`),
+		},
+	},
+	{
+		Key:       "code_word",
+		EntryType: EntryTypeTechnicalContext,
+		Regexps: []*regexp.Regexp{
+			regexp.MustCompile(`(?i)\bupdate (?:the )?code word from [^.\n]+? to ([^,.;\n]+)`),
+			regexp.MustCompile(`(?i)\bchange (?:the )?code word to ([^,.;\n]+)`),
+			regexp.MustCompile(`(?i)\bcode word(?:\s+is|:)?\s+([^,.;\n]+)`),
+		},
+	},
+}
 
 // updateOpenEpisodeState updates the open episode's event count, topic signature,
 // and manages tool runs. This runs on EVERY event (Tier 0).
@@ -439,6 +498,20 @@ func normalizeEntryKey(ctx context.Context, tx *sql.Tx, convID, entryType, rawTe
 			return "", true
 		}
 		return "policy:" + policy, false
+
+	case EntryTypeTechnicalContext:
+		key := toSnakeCase(rawText)
+		if key == "" {
+			return "", true
+		}
+		return "tech:" + key, false
+
+	case EntryTypeIdentity:
+		key := toSnakeCase(rawText)
+		if key == "" {
+			return "", true
+		}
+		return "identity:" + key, false
 	}
 
 	return "", true
@@ -547,6 +620,47 @@ func extractRetractions(text string) []ExtractedEntry {
 		Value:      strings.TrimSpace(text),
 		Confidence: 0.93,
 	}}
+}
+
+func extractExplicitFacts(text string) []ExtractedEntry {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return nil
+	}
+
+	seen := make(map[string]struct{}, len(explicitFactPatterns))
+	out := make([]ExtractedEntry, 0, len(explicitFactPatterns))
+	for _, pattern := range explicitFactPatterns {
+		for _, re := range pattern.Regexps {
+			matches := re.FindAllStringSubmatch(text, -1)
+			if len(matches) == 0 {
+				continue
+			}
+			for _, match := range matches {
+				if len(match) < 2 {
+					continue
+				}
+				value := cleanExplicitFactValue(match[1])
+				if value == "" {
+					continue
+				}
+				dedupeKey := pattern.EntryType + ":" + pattern.Key + ":" + strings.ToLower(value)
+				if _, ok := seen[dedupeKey]; ok {
+					continue
+				}
+				seen[dedupeKey] = struct{}{}
+				out = append(out, ExtractedEntry{
+					EntryType:  pattern.EntryType,
+					Key:        pattern.Key,
+					RawText:    strings.TrimSpace(match[0]),
+					Value:      value,
+					Confidence: 0.94,
+				})
+			}
+			break
+		}
+	}
+	return out
 }
 
 // stageAmbiguousEntry queues an entry that couldn't be normalized deterministically.
@@ -695,7 +809,11 @@ func (m *ConversationMemory) persistDeterministicExtraction(ctx context.Context,
 		return nil
 	}
 
-	key, ambiguous := normalizeEntryKey(ctx, tx, convID, entry.EntryType, value)
+	keySource := value
+	if strings.TrimSpace(entry.Key) != "" {
+		keySource = strings.TrimSpace(entry.Key)
+	}
+	key, ambiguous := normalizeEntryKey(ctx, tx, convID, entry.EntryType, keySource)
 	if ambiguous {
 		return m.stageAmbiguousEntry(ctx, tx, convID, sourceEventID, entry, "deterministic_ambiguity")
 	}
@@ -784,6 +902,39 @@ func extractByPatterns(text string, patterns []string, entryType string, confide
 		})
 	}
 	return out
+}
+
+func cleanExplicitFactValue(value string) string {
+	value = strings.Trim(strings.TrimSpace(value), `"'`)
+	if value == "" {
+		return ""
+	}
+
+	lower := strings.ToLower(value)
+	for _, marker := range []string{
+		" reply only",
+		" reply with",
+		" respond only",
+		" respond with",
+		" answer only",
+		" answer with",
+		" and change",
+		" and update",
+		" and set",
+		" and add",
+		" and reply",
+		" and respond",
+		" and answer",
+	} {
+		if idx := strings.Index(lower, marker); idx >= 0 {
+			value = value[:idx]
+			lower = lower[:idx]
+		}
+	}
+
+	value = strings.Trim(strings.TrimSpace(value), `"'`)
+	value = strings.TrimSuffix(value, ".")
+	return strings.TrimSpace(value)
 }
 
 func firstMatchAfterPattern(text string, patterns []string) string {

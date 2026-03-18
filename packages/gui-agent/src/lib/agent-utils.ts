@@ -56,6 +56,41 @@ export function getAgentSubtitle(agent: Agent): string {
   );
 }
 
+export function isSandboxBackedAgent(agent: Agent): boolean {
+  return (
+    agent.workspace_source === "sandbox" ||
+    !!agent.sandbox_id ||
+    !!agent.sandbox_provider
+  );
+}
+
+export function getAgentWorkspaceSource(agent: Agent): "local" | "sandbox" {
+  return isSandboxBackedAgent(agent) ? "sandbox" : "local";
+}
+
+export function getAgentRepoDisplayName(repoURL?: string): string | null {
+  const raw = (repoURL || "").trim();
+  if (!raw) return null;
+
+  let repoPath = raw;
+  try {
+    if (/^[a-z][a-z0-9+.-]*:\/\//i.test(raw)) {
+      repoPath = new URL(raw).pathname;
+    } else if (/^[^@]+@[^:]+:.+/.test(raw)) {
+      repoPath = raw.slice(raw.indexOf(":") + 1);
+    }
+  } catch {
+    repoPath = raw;
+  }
+
+  const normalized = repoPath.replace(/\/+$/, "").replace(/\.git$/i, "");
+  const segments = normalized.split("/").filter(Boolean);
+  if (segments.length >= 2) {
+    return `${segments[segments.length - 2]}/${segments[segments.length - 1]}`;
+  }
+  return segments[segments.length - 1] || normalized || null;
+}
+
 export function getPromptSummaryOrSubtitle(agent: Agent, maxLen = 120): string {
   const summary = (agent.prompt_summary || "").trim();
   if (summary) return truncate(summary, maxLen);

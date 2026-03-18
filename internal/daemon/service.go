@@ -63,6 +63,7 @@ type Service struct {
 	cfg        config.Config
 	opts       ServiceOptions
 	listener   net.Listener
+	listenerMu sync.RWMutex
 	started    time.Time
 	socketPath string
 
@@ -400,7 +401,7 @@ func (s *Service) Run(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("listen on %s: %w", socketPath, err)
 	}
-	s.listener = listener
+	s.setListener(listener)
 	fmt.Fprintf(os.Stderr, "daemon: listener bound on %s\n", socketPath)
 
 	// Set socket permissions (user-only)
@@ -424,7 +425,7 @@ func (s *Service) Run(ctx context.Context) error {
 	}
 
 	// Accept connections
-	go s.acceptLoop(ctx)
+	go s.acceptLoop(ctx, listener)
 
 	// Wait for shutdown signal
 	select {
@@ -452,8 +453,8 @@ func (s *Service) Shutdown(ctx context.Context) error {
 		close(s.shutdownCh)
 	})
 
-	if s.listener != nil {
-		s.listener.Close()
+	if listener := s.clearListener(); listener != nil {
+		listener.Close()
 	}
 
 	// Wait for in-flight requests with timeout
@@ -504,9 +505,9 @@ func (s *Service) Shutdown(ctx context.Context) error {
 // - FailureModes: accept errors ignored unless shutting down
 // - Related: Service.handleConnection
 // - Keywords: accept_loop, unix_socket, goroutine, shutdown
-func (s *Service) acceptLoop(ctx context.Context) {
+func (s *Service) acceptLoop(ctx context.Context, listener net.Listener) {
 	for {
-		conn, err := s.listener.Accept()
+		conn, err := listener.Accept()
 		if err != nil {
 			select {
 			case <-s.shutdownCh:
@@ -533,6 +534,20 @@ func (s *Service) acceptLoop(ctx context.Context) {
 			s.handleConnection(ctx, conn)
 		}()
 	}
+}
+
+func (s *Service) setListener(listener net.Listener) {
+	s.listenerMu.Lock()
+	defer s.listenerMu.Unlock()
+	s.listener = listener
+}
+
+func (s *Service) clearListener() net.Listener {
+	s.listenerMu.Lock()
+	defer s.listenerMu.Unlock()
+	listener := s.listener
+	s.listener = nil
+	return listener
 }
 
 // Request is the JSON-RPC-like request format.

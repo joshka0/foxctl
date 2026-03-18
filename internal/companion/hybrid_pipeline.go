@@ -406,6 +406,7 @@ func (m *ConversationMemory) processEventTier1(ctx context.Context, tx *sql.Tx, 
 	}
 
 	extractions := extractProfileClaims(text)
+	extractions = append(extractions, extractExplicitFacts(text)...)
 	extractions = append(extractions, extractDecisions(text)...)
 	extractions = append(extractions, extractOpenQuestions(text)...)
 	if goal := extractGoalChange(text); goal != nil {

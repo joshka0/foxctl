@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
 	"sync/atomic"
@@ -595,6 +596,28 @@ func defaultTemporalLimit(view TemporalView) int {
 	}
 }
 
+func isLowSignalTemporalSample(text string) bool {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return true
+	}
+	if strings.Contains(text, "rlm_context_") || strings.Contains(text, "<|tool_call_end|>") {
+		return true
+	}
+	if strings.HasPrefix(text, "{") && strings.HasSuffix(text, "}") &&
+		strings.Contains(text, `"key"`) && strings.Contains(text, `"value"`) {
+		return true
+	}
+	switch strings.ToLower(text) {
+	case "stored", "remembered", "ack", "ok", "okay", "done", "saved", "noted":
+		return true
+	}
+	if matched, _ := regexp.MatchString(`(?i)^stored-\d+$|^updated(?:-[a-z0-9_]+)?$`, text); matched {
+		return true
+	}
+	return false
+}
+
 func groupTemporalBuckets(view TemporalView, turns []run.TurnRecord) []TemporalBucket {
 	byKey := make(map[string]*temporalAgg, len(turns))
 	order := make([]string, 0, len(turns))
@@ -623,10 +646,12 @@ func groupTemporalBuckets(view TemporalView, turns []run.TurnRecord) []TemporalB
 		}
 		if ts.After(agg.EndAt) {
 			agg.EndAt = ts
-			agg.SampleFinal = strings.TrimSpace(turn.FinalOutput.Text)
+			if candidate := strings.TrimSpace(turn.FinalOutput.Text); !isLowSignalTemporalSample(candidate) {
+				agg.SampleFinal = candidate
+			}
 		}
-		if agg.SamplePrompt == "" {
-			agg.SamplePrompt = strings.TrimSpace(turn.Prompt)
+		if candidate := strings.TrimSpace(turn.Prompt); candidate != "" && !isLowSignalTemporalSample(candidate) {
+			agg.SamplePrompt = candidate
 		}
 		agg.TurnCount++
 		agg.ToolCalls += countToolCalls(turn)

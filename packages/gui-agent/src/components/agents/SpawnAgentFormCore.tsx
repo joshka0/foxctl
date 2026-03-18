@@ -15,6 +15,7 @@ import {
   ChevronDown,
   ChevronRight,
   Sparkles,
+  Globe,
 } from "lucide-react";
 import { RoleSelector } from "./RoleSelector";
 import {
@@ -59,6 +60,12 @@ export function SpawnAgentFormCore({
     prompt: "",
     name: "",
     workspace_id: spawnRoomWorkspaceID || "",
+    workspace_source: "local",
+    sandbox_provider: "opensandbox",
+    repo_url: "",
+    repo_ref: "main",
+    sandbox_timeout_s: 3600,
+    allow_egress: [],
     memory_scope: "agent",
     memory_retention: "durable",
     room_id: spawnRoomID || undefined,
@@ -141,6 +148,21 @@ export function SpawnAgentFormCore({
     };
     if (formData.workspace_id?.trim())
       params.workspace_id = formData.workspace_id.trim();
+    if (formData.workspace_root?.trim())
+      params.workspace_root = formData.workspace_root.trim();
+    if (formData.workspace_source) params.workspace_source = formData.workspace_source;
+    if (formData.workspace_source === "sandbox") {
+      if (formData.sandbox_provider) params.sandbox_provider = formData.sandbox_provider;
+      if (formData.repo_url?.trim()) params.repo_url = formData.repo_url.trim();
+      if (formData.repo_ref?.trim()) params.repo_ref = formData.repo_ref.trim();
+      if (formData.sandbox_image?.trim()) params.sandbox_image = formData.sandbox_image.trim();
+      if (formData.sandbox_timeout_s && formData.sandbox_timeout_s > 0) {
+        params.sandbox_timeout_s = formData.sandbox_timeout_s;
+      }
+      if (formData.allow_egress && formData.allow_egress.length > 0) {
+        params.allow_egress = formData.allow_egress;
+      }
+    }
     if (formData.name?.trim()) params.name = formData.name.trim();
     if (formData.memory_scope) params.memory_scope = formData.memory_scope;
     if (formData.memory_retention)
@@ -283,6 +305,126 @@ export function SpawnAgentFormCore({
         <p className="text-xs text-muted-foreground mt-1">
           The repo/directory this agent operates in and calls tools from
         </p>
+      </div>
+
+      <div className="rounded-lg border border-border bg-card/60 p-3 space-y-3">
+        <div className="flex items-center gap-2">
+          <Globe className="h-4 w-4 text-muted-foreground" />
+          <div>
+            <label className="text-sm font-medium text-foreground">
+              Execution Workspace
+            </label>
+            <p className="text-xs text-muted-foreground">
+              Run this agent against the local runtime workspace or provision an isolated sandbox clone.
+            </p>
+          </div>
+        </div>
+        <div className="grid grid-cols-2 gap-2">
+          <button
+            type="button"
+            onClick={() =>
+              setFormData((prev) => ({
+                ...prev,
+                workspace_source: "local",
+              }))
+            }
+            className={`rounded-md border px-3 py-2 text-sm text-left ${
+              formData.workspace_source !== "sandbox"
+                ? "border-primary bg-primary/10 text-foreground"
+                : "border-border bg-background text-muted-foreground"
+            }`}
+          >
+            Local Runtime
+          </button>
+          <button
+            type="button"
+            onClick={() =>
+              setFormData((prev) => ({
+                ...prev,
+                workspace_source: "sandbox",
+                sandbox_provider: prev.sandbox_provider || "opensandbox",
+              }))
+            }
+            className={`rounded-md border px-3 py-2 text-sm text-left ${
+              formData.workspace_source === "sandbox"
+                ? "border-primary bg-primary/10 text-foreground"
+                : "border-border bg-background text-muted-foreground"
+            }`}
+          >
+            Sandbox Clone
+          </button>
+        </div>
+        {formData.workspace_source === "sandbox" && (
+          <div className="grid gap-3">
+            <div>
+              <label className="text-xs font-medium text-muted-foreground">
+                Repository URL
+              </label>
+              <Input
+                value={formData.repo_url || ""}
+                onChange={(e) =>
+                  setFormData({ ...formData, repo_url: e.target.value })
+                }
+                placeholder="https://github.com/org/repo.git"
+                className="h-9 text-sm mt-1"
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-xs font-medium text-muted-foreground">
+                  Ref
+                </label>
+                <Input
+                  value={formData.repo_ref || ""}
+                  onChange={(e) =>
+                    setFormData({ ...formData, repo_ref: e.target.value })
+                  }
+                  placeholder="main"
+                  className="h-9 text-sm mt-1"
+                />
+              </div>
+              <div>
+                <label className="text-xs font-medium text-muted-foreground">
+                  Sandbox Timeout (s)
+                </label>
+                <Input
+                  type="number"
+                  min={60}
+                  value={formData.sandbox_timeout_s || 3600}
+                  onChange={(e) =>
+                    setFormData({
+                      ...formData,
+                      sandbox_timeout_s: Number.parseInt(e.target.value || "0", 10) || 3600,
+                    })
+                  }
+                  className="h-9 text-sm mt-1"
+                />
+              </div>
+            </div>
+            <div>
+              <label className="text-xs font-medium text-muted-foreground">
+                Allowed Egress Domains
+              </label>
+              <Input
+                value={(formData.allow_egress || []).join(", ")}
+                onChange={(e) =>
+                  setFormData({
+                    ...formData,
+                    allow_egress: e.target.value
+                      .split(",")
+                      .map((value) => value.trim())
+                      .filter(Boolean),
+                  })
+                }
+                placeholder="api.github.com, codeload.github.com"
+                className="h-9 text-sm mt-1"
+              />
+              <p className="text-[11px] text-muted-foreground mt-1">
+                Extra FQDNs allowed from the sandbox in addition to the repo host.
+              </p>
+            </div>
+          </div>
+        )}
       </div>
 
       {(formData.room_id || spawnRoomID) && (

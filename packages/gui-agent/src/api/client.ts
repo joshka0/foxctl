@@ -366,6 +366,15 @@ export interface SpawnAgentParams {
   role: string;
   prompt: string;
   workspace_id?: string;
+  workspace_root?: string;
+  workspace_source?: "local" | "sandbox";
+  sandbox_provider?: string;
+  sandbox_id?: string;
+  repo_url?: string;
+  repo_ref?: string;
+  sandbox_image?: string;
+  sandbox_timeout_s?: number;
+  allow_egress?: string[];
   skills_allow?: string[];
   parent_id?: string;
   memory_scope?: "agent" | "session";
@@ -484,6 +493,8 @@ export async function askAgentStream(
     correlation_id?: string;
     conversation_id?: string;
     context?: Record<string, unknown>;
+    response_schema?: Record<string, unknown>;
+    response_keys?: string[];
   },
 ): Promise<{
   accepted: boolean;
@@ -1458,6 +1469,8 @@ export async function companionChat(params: {
   story_gather_model?: string;
   story_dialogue_model?: string;
   context?: Record<string, unknown>;
+  response_schema?: Record<string, unknown>;
+  response_keys?: string[];
 }): Promise<CompanionChatResponse> {
   return request("/companion/chat", {
     method: "POST",

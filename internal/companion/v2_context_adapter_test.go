@@ -212,3 +212,104 @@ func TestService_GetLayeredMemoryContext_UsesContextBuilder(t *testing.T) {
 		t.Fatalf("layered context missing L0 section: %q", got)
 	}
 }
+
+func TestCompanionLayerProvider_FiltersLowSignalAssistantTurnsAndSuppressesSamples(t *testing.T) {
+	ctx := context.Background()
+	db, err := sql.Open("sqlite", ":memory:")
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+
+	mem, err := NewConversationMemory(db)
+	if err != nil {
+		t.Fatalf("new conversation memory: %v", err)
+	}
+	convID := "conv-layered-filter"
+	turns := []ConversationTurn{
+		{ID: "turn-1", ConversationID: convID, Role: "user", Content: "Remember codename cedar-planet-42 and owner Mina.", CreatedAt: time.Date(2026, 3, 3, 9, 0, 0, 0, time.UTC)},
+		{ID: "turn-2", ConversationID: convID, Role: "assistant", Content: "stored-1", CreatedAt: time.Date(2026, 3, 3, 9, 0, 1, 0, time.UTC)},
+		{ID: "turn-3", ConversationID: convID, Role: "user", Content: "Update the codename from cedar-planet-42 to amber-river-19.", CreatedAt: time.Date(2026, 3, 3, 9, 0, 2, 0, time.UTC)},
+		{ID: "turn-4", ConversationID: convID, Role: "assistant", Content: "{\"key\":\"tech:codename\",\"value\":\"amber-river-19\",\"scope\":\"global\"}", CreatedAt: time.Date(2026, 3, 3, 9, 0, 3, 0, time.UTC)},
+		{ID: "turn-5", ConversationID: convID, Role: "user", Content: "What is the current codename?", CreatedAt: time.Date(2026, 3, 3, 9, 0, 4, 0, time.UTC)},
+		{ID: "turn-6", ConversationID: convID, Role: "assistant", Content: "[rlm_context_query(key=\"tech:codename\")]<|tool_call_end|>", CreatedAt: time.Date(2026, 3, 3, 9, 0, 5, 0, time.UTC)},
+	}
+	for _, turn := range turns {
+		if err := mem.AppendTurn(ctx, turn); err != nil {
+			t.Fatalf("append turn %s: %v", turn.ID, err)
+		}
+	}
+	if err := mem.EnsureHybridMode(ctx, convID); err != nil {
+		t.Fatalf("ensure hybrid mode: %v", err)
+	}
+	if err := mem.BuildHybridContextLayers(ctx, convID); err != nil {
+		t.Fatalf("build hybrid context layers: %v", err)
+	}
+
+	provider := companionLayerProvider{memory: mem}
+	layered, err := provider.GetLayeredContext(ctx, convID, contextbuilder.CompanionRequest{})
+	if err != nil {
+		t.Fatalf("GetLayeredContext: %v", err)
+	}
+	if !strings.Contains(layered.L2, "amber-river-19") {
+		t.Fatalf("L2 missing canonical codename: %q", layered.L2)
+	}
+	if strings.Contains(layered.L0, "stored-1") {
+		t.Fatalf("L0 should not include low-signal acknowledgement: %q", layered.L0)
+	}
+	if strings.Contains(layered.L0, "rlm_context_query") {
+		t.Fatalf("L0 should not include raw context tool syntax: %q", layered.L0)
+	}
+	if got := layered.Meta["suppress_temporal_samples"]; got != true {
+		t.Fatalf("meta suppress_temporal_samples=%v want true", got)
+	}
+}
+
+func TestService_GetLayeredMemoryContext_TenTurnFactSequencePrefersCanonicalHardState(t *testing.T) {
+	ctx := context.Background()
+	db, err := sql.Open("sqlite", ":memory:")
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+
+	mem, err := NewConversationMemory(db)
+	if err != nil {
+		t.Fatalf("new conversation memory: %v", err)
+	}
+	convID := "conv-ten-turn-regression"
+	turns := []ConversationTurn{
+		{ID: "t01", ConversationID: convID, Role: "user", Content: "For this test, remember three facts: owner Mina, codename cedar-planet-42, deploy window Tuesday 14:00 UTC. Reply only with stored-1", CreatedAt: time.Date(2026, 3, 4, 10, 0, 0, 0, time.UTC)},
+		{ID: "t02", ConversationID: convID, Role: "assistant", Content: "stored-1", CreatedAt: time.Date(2026, 3, 4, 10, 0, 1, 0, time.UTC)},
+		{ID: "t03", ConversationID: convID, Role: "user", Content: "Add a fourth fact: rollback color is amber. Reply only with stored-2", CreatedAt: time.Date(2026, 3, 4, 10, 0, 2, 0, time.UTC)},
+		{ID: "t04", ConversationID: convID, Role: "assistant", Content: "stored-2", CreatedAt: time.Date(2026, 3, 4, 10, 0, 3, 0, time.UTC)},
+		{ID: "t05", ConversationID: convID, Role: "user", Content: "Update the codename from cedar-planet-42 to amber-river-19. Reply only with updated-codename", CreatedAt: time.Date(2026, 3, 4, 10, 0, 4, 0, time.UTC)},
+		{ID: "t06", ConversationID: convID, Role: "assistant", Content: "updated-codename", CreatedAt: time.Date(2026, 3, 4, 10, 0, 5, 0, time.UTC)},
+		{ID: "t07", ConversationID: convID, Role: "user", Content: "Change the deploy window to Thursday 09:30 UTC. Reply only with updated-window", CreatedAt: time.Date(2026, 3, 4, 10, 0, 6, 0, time.UTC)},
+		{ID: "t08", ConversationID: convID, Role: "assistant", Content: "updated-window", CreatedAt: time.Date(2026, 3, 4, 10, 0, 7, 0, time.UTC)},
+		{ID: "t09", ConversationID: convID, Role: "user", Content: "What is the current codename, deploy window, owner, and rollback color? Reply as compact JSON.", CreatedAt: time.Date(2026, 3, 4, 10, 0, 8, 0, time.UTC)},
+		{ID: "t10", ConversationID: convID, Role: "assistant", Content: "{\"answer\":\"The codename is now amber-river-19, with a new deployment window set for Thursday at 09:30 UTC.\"}", CreatedAt: time.Date(2026, 3, 4, 10, 0, 9, 0, time.UTC)},
+	}
+	for _, turn := range turns {
+		if err := mem.AppendTurn(ctx, turn); err != nil {
+			t.Fatalf("append turn %s: %v", turn.ID, err)
+		}
+	}
+
+	svc := &Service{
+		memory:     mem,
+		layeredCtx: newCompanionContextBuilder(mem),
+	}
+	got, err := svc.getLayeredMemoryContext(ctx, convID)
+	if err != nil {
+		t.Fatalf("getLayeredMemoryContext: %v", err)
+	}
+	if !strings.Contains(got, "amber-river-19") || !strings.Contains(got, "Thursday 09:30 UTC") {
+		t.Fatalf("layered context missing final canonical facts: %q", got)
+	}
+	for _, noisy := range []string{"stored-1", "stored-2", "updated-window", "sample \""} {
+		if strings.Contains(got, noisy) {
+			t.Fatalf("layered context should suppress noisy marker %q: %q", noisy, got)
+		}
+	}
+}
