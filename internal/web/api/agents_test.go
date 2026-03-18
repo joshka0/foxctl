@@ -160,6 +160,70 @@ func TestAgentRuntimeGetHandler_ReturnsRuntimeTree(t *testing.T) {
 	}
 }
 
+func TestAgentRuntimeGetHandler_ReturnsSandboxRuntimeSummary(t *testing.T) {
+	t.Setenv("AGENTCTL_DB_DRIVER", "")
+
+	cfg := orchestrationTestConfig(t.TempDir())
+	store, err := agents.Open(context.Background(), cfg.Storage.Root)
+	if err != nil {
+		t.Fatalf("open agents store: %v", err)
+	}
+	defer func() {
+		if closeErr := store.Close(); closeErr != nil {
+			t.Fatalf("close agents store: %v", closeErr)
+		}
+	}()
+
+	err = store.Create(context.Background(), agentdomain.Agent{
+		ID:              "agent-sandbox-runtime-1",
+		Namespace:       "ws-sandbox",
+		Name:            "Sandbox Runtime",
+		Role:            "coder",
+		SkillsAllow:     []string{},
+		Policy:          agentdomain.Policy{},
+		ShareBB:         "scoped",
+		State:           agentdomain.StateRunning,
+		CreatedAt:       time.Date(2026, time.March, 6, 12, 0, 0, 0, time.UTC),
+		ExecMode:        agentdomain.ModeReactive,
+		WorkspaceRoot:   "/workspace/repo",
+		WorkspaceSource: "sandbox",
+		SandboxProvider: "opensandbox",
+		SandboxID:       "sbx-runtime-1",
+		RepoURL:         "https://github.com/example/repo.git",
+		RepoRef:         "main",
+	})
+	if err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/agents/agent-sandbox-runtime-1/runtime?depth=2", nil)
+	rr := httptest.NewRecorder()
+	AgentDetailHandler(cfg, zerolog.Nop(), nil).ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rr.Code, rr.Body.String())
+	}
+
+	body := decodeResponseBody(t, rr)
+	runtimeWrap, _ := body["runtime"].(map[string]any)
+	root, _ := runtimeWrap["root"].(map[string]any)
+	if got := strings.TrimSpace(fmt.Sprint(root["status"])); got != "sandbox" {
+		t.Fatalf("root.status=%q want sandbox", got)
+	}
+	metadata, _ := root["metadata"].(map[string]any)
+	if got := strings.TrimSpace(fmt.Sprint(metadata["sandbox_id"])); got != "sbx-runtime-1" {
+		t.Fatalf("metadata.sandbox_id=%q want sbx-runtime-1", got)
+	}
+	state, _ := root["state"].(map[string]any)
+	if got := strings.TrimSpace(fmt.Sprint(state["profile"])); got != "sandbox" {
+		t.Fatalf("state.profile=%q want sandbox", got)
+	}
+	agentctlState, _ := state["agentctl"].(map[string]any)
+	if got := strings.TrimSpace(fmt.Sprint(agentctlState["status"])); got != "running" {
+		t.Fatalf("state.agentctl.status=%q want running", got)
+	}
+}
+
 func TestAgentPatchHandler_UpdatesMemoryScope(t *testing.T) {
 	t.Setenv("AGENTCTL_DB_DRIVER", "")
 	resetAgentStreamRegistry()
@@ -270,6 +334,107 @@ func TestAgentPatchHandler_UpdatesMemoryRetention(t *testing.T) {
 	}
 }
 
+func TestPrepareSandboxBackedSpawn_OpenSandbox(t *testing.T) {
+	var deleteCalls int
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v1/sandboxes", func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("OPEN-SANDBOX-API-KEY"); got != "test-key" {
+			t.Fatalf("api key header=%q", got)
+		}
+		if r.Method != http.MethodPost {
+			t.Fatalf("create method=%s", r.Method)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"id": "sbx-prepare-1",
+			"status": map[string]any{
+				"state": "Pending",
+			},
+		})
+	})
+	mux.HandleFunc("/v1/sandboxes/sbx-prepare-1/endpoints/44772", func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"endpoint": r.Host + "/sandboxes/sbx-prepare-1/proxy/44772",
+			"headers": map[string]string{
+				"X-EXECD-ACCESS-TOKEN": "execd-token",
+			},
+		})
+	})
+	mux.HandleFunc("/sandboxes/sbx-prepare-1/proxy/44772/command", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: {\"type\":\"stdout\",\"text\":\"clone ok\"}\n\n"))
+	})
+	mux.HandleFunc("/v1/sandboxes/sbx-prepare-1", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodDelete {
+			deleteCalls++
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		t.Fatalf("unexpected method for sandbox detail: %s", r.Method)
+	})
+
+	server := httptest.NewServer(mux)
+	defer server.Close()
+	t.Setenv("OPEN_SANDBOX_BASE_URL", server.URL)
+	t.Setenv("OPEN_SANDBOX_API_KEY", "test-key")
+
+	prepared, err := prepareSandboxBackedSpawn(context.Background(), AgentSpawnRequest{
+		SandboxProvider: "opensandbox",
+		RepoURL:         "https://github.com/example/repo.git",
+		RepoRef:         "main",
+		AllowEgress:     []string{"api.github.com"},
+	})
+	if err != nil {
+		t.Fatalf("prepareSandboxBackedSpawn() error = %v", err)
+	}
+	if prepared == nil {
+		t.Fatal("prepareSandboxBackedSpawn() returned nil")
+		return
+	}
+	if prepared.workspaceSource != "sandbox" {
+		t.Fatalf("workspaceSource=%q", prepared.workspaceSource)
+	}
+	if prepared.workspaceRoot != "/workspace/repo" {
+		t.Fatalf("workspaceRoot=%q", prepared.workspaceRoot)
+	}
+	if prepared.workspaceID != "sandbox-sbx-prepare-1" {
+		t.Fatalf("workspaceID=%q", prepared.workspaceID)
+	}
+	if prepared.sandboxID != "sbx-prepare-1" {
+		t.Fatalf("sandboxID=%q", prepared.sandboxID)
+	}
+	prepared.cleanup(context.Background())
+	if deleteCalls != 1 {
+		t.Fatalf("deleteCalls=%d want 1", deleteCalls)
+	}
+
+	prepared2, err := prepareSandboxBackedSpawn(context.Background(), AgentSpawnRequest{
+		SandboxProvider: "opensandbox",
+		RepoURL:         "https://github.com/example/repo.git",
+		RepoRef:         "main",
+	})
+	if err != nil {
+		t.Fatalf("prepareSandboxBackedSpawn() second call error = %v", err)
+	}
+	prepared2.release()
+	prepared2.cleanup(context.Background())
+	if deleteCalls != 1 {
+		t.Fatalf("deleteCalls after release=%d want 1", deleteCalls)
+	}
+}
+
+func TestPrepareSandboxBackedSpawn_RequiresRepoURL(t *testing.T) {
+	prepared, err := prepareSandboxBackedSpawn(context.Background(), AgentSpawnRequest{
+		SandboxProvider: "opensandbox",
+	})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if prepared != nil {
+		t.Fatalf("prepared=%v want nil", prepared)
+	}
+}
+
 func TestAgentAskStreamHandler_AcceptsAndPublishesStartedEvent(t *testing.T) {
 	t.Setenv("AGENTCTL_DB_DRIVER", "")
 	resetAgentStreamRegistry()
@@ -339,6 +504,159 @@ func TestAgentAskStreamHandler_AcceptsAndPublishesStartedEvent(t *testing.T) {
 	}
 	if got := fmt.Sprint(pub.events[0].Metadata["memory_retention"]); got != "task" {
 		t.Fatalf("memory_retention metadata=%q want task", got)
+	}
+}
+
+func TestAgentAskStreamHandler_SandboxBackedCancelPublishesCancelledEvent(t *testing.T) {
+	t.Setenv("AGENTCTL_DB_DRIVER", "")
+	resetAgentStreamRegistry()
+
+	commandStarted := make(chan struct{}, 1)
+	cancelObserved := make(chan struct{}, 1)
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v1/sandboxes/sbx-stream-1/endpoints/44772", func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"endpoint": r.Host + "/sandboxes/sbx-stream-1/proxy/44772",
+			"headers": map[string]string{
+				"X-EXECD-ACCESS-TOKEN": "execd-token",
+			},
+		})
+	})
+	mux.HandleFunc("/sandboxes/sbx-stream-1/proxy/44772/command", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		if flusher, ok := w.(http.Flusher); ok {
+			flusher.Flush()
+		}
+		select {
+		case commandStarted <- struct{}{}:
+		default:
+		}
+		<-r.Context().Done()
+		select {
+		case cancelObserved <- struct{}{}:
+		default:
+		}
+	})
+	server := httptest.NewServer(mux)
+	defer server.Close()
+	t.Setenv("OPEN_SANDBOX_BASE_URL", server.URL)
+	t.Setenv("OPEN_SANDBOX_API_KEY", "test-key")
+
+	cfg := orchestrationTestConfig(t.TempDir())
+	store, err := agents.Open(context.Background(), cfg.Storage.Root)
+	if err != nil {
+		t.Fatalf("open agents store: %v", err)
+	}
+	defer func() {
+		if closeErr := store.Close(); closeErr != nil {
+			t.Fatalf("close agents store: %v", closeErr)
+		}
+	}()
+
+	err = store.Create(context.Background(), agentdomain.Agent{
+		ID:              "agent-sandbox-stream-1",
+		Namespace:       "ws-stream",
+		Name:            "Sandbox Streaming Agent",
+		Role:            "companion",
+		SkillsAllow:     []string{},
+		Policy:          agentdomain.Policy{Timeout: "1m"},
+		ShareBB:         "scoped",
+		State:           agentdomain.StateRunning,
+		CreatedAt:       time.Date(2026, time.March, 6, 12, 0, 0, 0, time.UTC),
+		ExecMode:        agentdomain.ModeReactive,
+		MemoryScope:     agentdomain.MemoryScopeSession,
+		MemoryRetention: agentdomain.MemoryRetentionTask,
+		WorkspaceSource: "sandbox",
+		SandboxProvider: "opensandbox",
+		SandboxID:       "sbx-stream-1",
+		RepoURL:         "https://github.com/example/repo.git",
+		RepoRef:         "main",
+	})
+	if err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+
+	pub := &testAgentEventPublisher{}
+	req := httptest.NewRequest(http.MethodPost, "/api/agents/agent-sandbox-stream-1/ask-stream", strings.NewReader(`{"message":"hello from sandbox"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+
+	AgentDetailHandler(cfg, zerolog.Nop(), pub).ServeHTTP(rr, req)
+	if rr.Code != http.StatusAccepted {
+		t.Fatalf("status=%d body=%s", rr.Code, rr.Body.String())
+	}
+
+	payload := decodeResponseBody(t, rr)
+	correlationID := strings.TrimSpace(fmt.Sprint(payload["correlation_id"]))
+	if correlationID == "" {
+		t.Fatal("expected correlation_id")
+	}
+
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		activeAgentStreams.mu.Lock()
+		children := activeAgentStreams.inflight["agent-sandbox-stream-1"]
+		_, ok := children[correlationID]
+		activeAgentStreams.mu.Unlock()
+		if ok {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("sandbox-backed stream was not registered for cancellation")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	select {
+	case <-commandStarted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("expected sandbox exec request to start")
+	}
+
+	cancelReq := httptest.NewRequest(http.MethodPost, "/api/agents/agent-sandbox-stream-1/ask-stream/cancel", strings.NewReader(fmt.Sprintf(`{"correlation_id":%q}`, correlationID)))
+	cancelReq.Header.Set("Content-Type", "application/json")
+	cancelRR := httptest.NewRecorder()
+	AgentDetailHandler(cfg, zerolog.Nop(), pub).ServeHTTP(cancelRR, cancelReq)
+	if cancelRR.Code != http.StatusOK {
+		t.Fatalf("cancel status=%d body=%s", cancelRR.Code, cancelRR.Body.String())
+	}
+
+	select {
+	case <-cancelObserved:
+	case <-time.After(2 * time.Second):
+		t.Fatal("expected sandbox exec request to observe cancellation")
+	}
+
+	deadline = time.Now().Add(2 * time.Second)
+	for {
+		pub.mu.Lock()
+		events := append([]agentChatEvent(nil), pub.events...)
+		pub.mu.Unlock()
+		if len(events) >= 2 {
+			if events[0].Phase != "started" {
+				t.Fatalf("first phase=%q want started", events[0].Phase)
+			}
+			if got := fmt.Sprint(events[0].Metadata["workspace_source"]); got != "sandbox" {
+				t.Fatalf("workspace_source metadata=%q want sandbox", got)
+			}
+			if got := fmt.Sprint(events[0].Metadata["sandbox_provider"]); got != "opensandbox" {
+				t.Fatalf("sandbox_provider metadata=%q want opensandbox", got)
+			}
+			if got := fmt.Sprint(events[0].Metadata["sandbox_id"]); got != "sbx-stream-1" {
+				t.Fatalf("sandbox_id metadata=%q want sbx-stream-1", got)
+			}
+			if got := fmt.Sprint(events[0].Metadata["memory_scope"]); got != "session" {
+				t.Fatalf("memory_scope metadata=%q want session", got)
+			}
+			if got := fmt.Sprint(events[1].Phase); got != "cancelled" {
+				t.Fatalf("second phase=%q want cancelled", got)
+			}
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("expected cancelled event, got %d events", len(events))
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 }
 

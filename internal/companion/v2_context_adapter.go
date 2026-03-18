@@ -303,6 +303,11 @@ func (p companionLayerProvider) GetLayeredContext(ctx context.Context, sessionID
 		L1:   l1,
 		L0:   l0,
 		Refs: dedupeStrings(refs),
+		Meta: map[string]any{
+			"suppress_temporal_samples": true,
+			"suppress_l0_temporal":      strings.TrimSpace(l0) != "",
+			"has_canonical_hard_state":  strings.TrimSpace(sections["hard_state"]) != "" && strings.TrimSpace(sections["hard_state"]) != "{}",
+		},
 	}, nil
 }
 

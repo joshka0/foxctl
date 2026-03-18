@@ -26,6 +26,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/platform/config"
 	"github.com/jkatigb/agentctl/internal/platform/workspace"
 	llmproviders "github.com/jkatigb/agentctl/internal/providers/llm"
+	sandboxopensandbox "github.com/jkatigb/agentctl/internal/sandbox/opensandbox"
 	"github.com/jkatigb/agentctl/internal/storage"
 	"github.com/jkatigb/agentctl/internal/storage/agents"
 	"github.com/jkatigb/agentctl/internal/storage/blackboard"
@@ -41,6 +42,8 @@ type AgentResponse struct {
 	ID              string   `json:"id"`
 	ParentID        string   `json:"parent_id,omitempty"`
 	Namespace       string   `json:"ns"`
+	WorkspaceRoot   string   `json:"workspace_root,omitempty"`
+	WorkspaceSource string   `json:"workspace_source,omitempty"`
 	Name            string   `json:"name,omitempty"` // Human name (e.g., "Luna", "Atlas")
 	Slug            string   `json:"slug,omitempty"` // Human-readable handle (e.g., "researcher")
 	Role            string   `json:"role,omitempty"`
@@ -61,6 +64,10 @@ type AgentResponse struct {
 	ConversationID  string   `json:"conversation_id,omitempty"`  // Linked companion conversation ID
 	MemoryScope     string   `json:"memory_scope,omitempty"`     // agent|session
 	MemoryRetention string   `json:"memory_retention,omitempty"` // companion|durable|task|ephemeral
+	SandboxProvider string   `json:"sandbox_provider,omitempty"`
+	SandboxID       string   `json:"sandbox_id,omitempty"`
+	RepoURL         string   `json:"repo_url,omitempty"`
+	RepoRef         string   `json:"repo_ref,omitempty"`
 }
 
 // AgentSpawnRequest is the request body for spawning a new agent.
@@ -68,6 +75,15 @@ type AgentSpawnRequest struct {
 	Role            string   `json:"role"`
 	Prompt          string   `json:"prompt"`
 	WorkspaceID     string   `json:"workspace_id,omitempty"`
+	WorkspaceRoot   string   `json:"workspace_root,omitempty"`
+	WorkspaceSource string   `json:"workspace_source,omitempty"`
+	SandboxProvider string   `json:"sandbox_provider,omitempty"`
+	SandboxID       string   `json:"sandbox_id,omitempty"`
+	RepoURL         string   `json:"repo_url,omitempty"`
+	RepoRef         string   `json:"repo_ref,omitempty"`
+	SandboxImage    string   `json:"sandbox_image,omitempty"`
+	SandboxTimeoutS int      `json:"sandbox_timeout_s,omitempty"`
+	AllowEgress     []string `json:"allow_egress,omitempty"`
 	SkillsAllow     []string `json:"skills_allow,omitempty"`
 	ParentID        string   `json:"parent_id,omitempty"`
 	MemoryScope     string   `json:"memory_scope,omitempty"`
@@ -97,10 +113,17 @@ type AgentSpawnRequest struct {
 
 // AgentSpawnResponse is the response for spawning a new agent.
 type AgentSpawnResponse struct {
-	SessionID string `json:"session_id"`
-	ActorID   string `json:"actor_id"`
-	Status    string `json:"status"`
-	Name      string `json:"name,omitempty"` // Generated or provided name
+	SessionID       string `json:"session_id"`
+	ActorID         string `json:"actor_id"`
+	Status          string `json:"status"`
+	Name            string `json:"name,omitempty"` // Generated or provided name
+	WorkspaceID     string `json:"workspace_id,omitempty"`
+	WorkspaceRoot   string `json:"workspace_root,omitempty"`
+	WorkspaceSource string `json:"workspace_source,omitempty"`
+	SandboxProvider string `json:"sandbox_provider,omitempty"`
+	SandboxID       string `json:"sandbox_id,omitempty"`
+	RepoURL         string `json:"repo_url,omitempty"`
+	RepoRef         string `json:"repo_ref,omitempty"`
 }
 
 type agentEventPublisher interface {
@@ -108,10 +131,12 @@ type agentEventPublisher interface {
 }
 
 type AgentAskStreamRequest struct {
-	Message        string         `json:"message"`
-	CorrelationID  string         `json:"correlation_id,omitempty"`
-	ConversationID string         `json:"conversation_id,omitempty"`
-	Context        map[string]any `json:"context,omitempty"`
+	Message        string          `json:"message"`
+	CorrelationID  string          `json:"correlation_id,omitempty"`
+	ConversationID string          `json:"conversation_id,omitempty"`
+	Context        map[string]any  `json:"context,omitempty"`
+	ResponseSchema json.RawMessage `json:"response_schema,omitempty"`
+	ResponseKeys   []string        `json:"response_keys,omitempty"`
 }
 
 type AgentAskStreamResponse struct {
@@ -174,6 +199,18 @@ type agentStreamRegistry struct {
 
 func newAgentStreamRegistry() *agentStreamRegistry {
 	return &agentStreamRegistry{inflight: make(map[string]map[string]context.CancelFunc)}
+}
+
+type preparedSandboxSpawn struct {
+	workspaceID     string
+	workspaceRoot   string
+	workspaceSource string
+	sandboxProvider string
+	sandboxID       string
+	repoURL         string
+	repoRef         string
+	cleanup         func(context.Context)
+	release         func()
 }
 
 func (r *agentStreamRegistry) Put(agentID, correlationID string, cancel context.CancelFunc) {
@@ -328,6 +365,8 @@ func AgentsListHandler(cfg config.Config, log zerolog.Logger) http.HandlerFunc {
 				ID:              a.ID,
 				ParentID:        a.ParentID,
 				Namespace:       a.Namespace,
+				WorkspaceRoot:   a.WorkspaceRoot,
+				WorkspaceSource: a.WorkspaceSource,
 				Name:            a.Name,
 				Slug:            a.Slug,
 				Role:            a.Role,
@@ -346,6 +385,10 @@ func AgentsListHandler(cfg config.Config, log zerolog.Logger) http.HandlerFunc {
 				ConversationID:  a.ConversationID,
 				MemoryScope:     string(agenttypes.NormalizeMemoryScope(a.MemoryScope)),
 				MemoryRetention: string(agenttypes.NormalizeMemoryRetention(a.MemoryRetention)),
+				SandboxProvider: a.SandboxProvider,
+				SandboxID:       a.SandboxID,
+				RepoURL:         a.RepoURL,
+				RepoRef:         a.RepoRef,
 			}
 			if !a.CreatedAt.IsZero() {
 				ar.CreatedAt = a.CreatedAt.Format("2006-01-02T15:04:05Z07:00")
@@ -500,6 +543,8 @@ func AgentDetailHandler(cfg config.Config, log zerolog.Logger, events agentEvent
 			ID:              agent.ID,
 			ParentID:        agent.ParentID,
 			Namespace:       agent.Namespace,
+			WorkspaceRoot:   agent.WorkspaceRoot,
+			WorkspaceSource: agent.WorkspaceSource,
 			Name:            agent.Name,
 			Slug:            agent.Slug,
 			Role:            agent.Role,
@@ -518,6 +563,10 @@ func AgentDetailHandler(cfg config.Config, log zerolog.Logger, events agentEvent
 			ConversationID:  agent.ConversationID,
 			MemoryScope:     string(agenttypes.NormalizeMemoryScope(agent.MemoryScope)),
 			MemoryRetention: string(agenttypes.NormalizeMemoryRetention(agent.MemoryRetention)),
+			SandboxProvider: agent.SandboxProvider,
+			SandboxID:       agent.SandboxID,
+			RepoURL:         agent.RepoURL,
+			RepoRef:         agent.RepoRef,
 		}
 		if !agent.CreatedAt.IsZero() {
 			ar.CreatedAt = agent.CreatedAt.Format("2006-01-02T15:04:05Z07:00")
@@ -839,12 +888,52 @@ func handleAgentSpawnWithRoute(w http.ResponseWriter, r *http.Request, cfg confi
 		return
 	}
 
+	workspaceRoot := strings.TrimSpace(req.WorkspaceRoot)
+	if workspaceRoot != "" {
+		cleanRoot := filepath.Clean(workspaceRoot)
+		if !filepath.IsAbs(cleanRoot) {
+			httpError(w, http.StatusBadRequest, "workspace_root must be absolute")
+			return
+		}
+		workspaceRoot = cleanRoot
+	}
+	workspaceSource := strings.TrimSpace(req.WorkspaceSource)
+
 	// Connect to daemon, auto-start if not running
 	client := daemon.NewClient()
 	if err := client.EnsureRunning(); err != nil {
 		log.Error().Err(err).Msg("failed to start daemon")
 		httpError(w, http.StatusServiceUnavailable, "failed to start daemon: "+err.Error())
 		return
+	}
+
+	preparedSandbox, err := prepareSandboxBackedSpawn(r.Context(), req)
+	if err != nil {
+		httpError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if preparedSandbox != nil {
+		defer preparedSandbox.cleanup(context.Background())
+		if strings.TrimSpace(req.WorkspaceID) == "" {
+			req.WorkspaceID = preparedSandbox.workspaceID
+		}
+		workspaceRoot = preparedSandbox.workspaceRoot
+		workspaceSource = preparedSandbox.workspaceSource
+		req.SandboxProvider = preparedSandbox.sandboxProvider
+		req.SandboxID = preparedSandbox.sandboxID
+		req.RepoURL = preparedSandbox.repoURL
+		req.RepoRef = preparedSandbox.repoRef
+	}
+
+	namespace := strings.TrimSpace(req.WorkspaceID)
+	if namespace == "" {
+		if workspaceRoot != "" {
+			namespace = workspace.CanonicalID(workspaceRoot)
+		} else {
+			namespace = "default"
+		}
+	} else {
+		namespace = workspace.Normalize(namespace)
 	}
 
 	// Generate name if not provided
@@ -855,14 +944,6 @@ func handleAgentSpawnWithRoute(w http.ResponseWriter, r *http.Request, cfg confi
 
 	// Generate agent ID
 	agentID := ulid.Make().String()
-
-	// Determine workspace/namespace (normalize path)
-	namespace := req.WorkspaceID
-	if namespace == "" {
-		namespace = "default"
-	} else {
-		namespace = workspace.Normalize(namespace)
-	}
 
 	// Determine and validate exec mode
 	execMode := agenttypes.ExecutionMode(req.ExecMode)
@@ -897,6 +978,8 @@ func handleAgentSpawnWithRoute(w http.ResponseWriter, r *http.Request, cfg confi
 		ID:              agentID,
 		ParentID:        strings.TrimSpace(req.ParentID),
 		Namespace:       namespace,
+		WorkspaceRoot:   workspaceRoot,
+		WorkspaceSource: workspaceSource,
 		Name:            name,
 		Slug:            req.Slug,
 		Role:            req.Role,
@@ -918,6 +1001,10 @@ func handleAgentSpawnWithRoute(w http.ResponseWriter, r *http.Request, cfg confi
 		MaxAutoTurns:    req.MaxAutoTurns,
 		MemoryScope:     normalizeSpawnMemoryScope(req),
 		MemoryRetention: normalizeSpawnMemoryRetention(req),
+		SandboxProvider: strings.TrimSpace(req.SandboxProvider),
+		SandboxID:       strings.TrimSpace(req.SandboxID),
+		RepoURL:         strings.TrimSpace(req.RepoURL),
+		RepoRef:         strings.TrimSpace(req.RepoRef),
 	}
 
 	if agent.SkillsAllow == nil {
@@ -932,9 +1019,18 @@ func handleAgentSpawnWithRoute(w http.ResponseWriter, r *http.Request, cfg confi
 
 	// Spawn agent via daemon - use normalized/validated values
 	params := daemon.AgentSpawnParams{
-		Role:             req.Role,
-		AgentID:          agentID,   // Pass agent ID for linking
-		WorkspaceID:      namespace, // Use normalized workspace
+		Role:        req.Role,
+		AgentID:     agentID,   // Pass agent ID for linking
+		WorkspaceID: namespace, // Use normalized workspace
+		WorkspaceRoot: func() string {
+			// Sandbox-backed agents currently persist their sandbox workspace
+			// metadata but still execute in the local runtime until the
+			// runtime-in-sandbox path is wired.
+			if workspaceSource == "sandbox" {
+				return ""
+			}
+			return workspaceRoot
+		}(),
 		Prompt:           req.Prompt,
 		SkillsAllow:      req.SkillsAllow,
 		MemoryScope:      string(normalizeSpawnMemoryScope(req)),
@@ -977,11 +1073,73 @@ func handleAgentSpawnWithRoute(w http.ResponseWriter, r *http.Request, cfg confi
 	}
 
 	writeJSON(w, http.StatusOK, AgentSpawnResponse{
-		SessionID: result.SessionID,
-		ActorID:   agentID, // Return our persisted agent ID, not the daemon's actor ID
-		Status:    result.Status,
-		Name:      name,
+		SessionID:       result.SessionID,
+		ActorID:         agentID, // Return our persisted agent ID, not the daemon's actor ID
+		Status:          result.Status,
+		Name:            name,
+		WorkspaceID:     namespace,
+		WorkspaceRoot:   workspaceRoot,
+		WorkspaceSource: workspaceSource,
+		SandboxProvider: strings.TrimSpace(req.SandboxProvider),
+		SandboxID:       strings.TrimSpace(req.SandboxID),
+		RepoURL:         strings.TrimSpace(req.RepoURL),
+		RepoRef:         strings.TrimSpace(req.RepoRef),
 	})
+	if preparedSandbox != nil && preparedSandbox.release != nil {
+		preparedSandbox.release()
+	}
+}
+
+func prepareSandboxBackedSpawn(ctx context.Context, req AgentSpawnRequest) (*preparedSandboxSpawn, error) {
+	provider := strings.TrimSpace(req.SandboxProvider)
+	if provider == "" {
+		return nil, nil
+	}
+	if provider != "opensandbox" {
+		return nil, fmt.Errorf("unsupported sandbox_provider %q", provider)
+	}
+	repoURL := strings.TrimSpace(req.RepoURL)
+	if repoURL == "" {
+		return nil, fmt.Errorf("repo_url is required when sandbox_provider=opensandbox")
+	}
+	timeout := time.Hour
+	if req.SandboxTimeoutS > 0 {
+		timeout = time.Duration(req.SandboxTimeoutS) * time.Second
+	}
+	client := sandboxopensandbox.New(sandboxopensandbox.ConfigFromEnv())
+	result, err := client.ProvisionShallowCloneWorkspace(ctx, sandboxopensandbox.ProvisionWorkspaceRequest{
+		RepoURL:       repoURL,
+		RepoRef:       strings.TrimSpace(req.RepoRef),
+		Image:         strings.TrimSpace(req.SandboxImage),
+		Name:          strings.TrimSpace(req.Name),
+		WorkspaceRoot: strings.TrimSpace(req.WorkspaceRoot),
+		Timeout:       timeout,
+		AllowEgress:   req.AllowEgress,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("opensandbox provision failed: %w", err)
+	}
+	workspaceID := strings.TrimSpace(req.WorkspaceID)
+	if workspaceID == "" {
+		workspaceID = "sandbox-" + strings.TrimSpace(result.SandboxID)
+	}
+	keep := false
+	return &preparedSandboxSpawn{
+		workspaceID:     workspaceID,
+		workspaceRoot:   result.WorkspaceRoot,
+		workspaceSource: "sandbox",
+		sandboxProvider: "opensandbox",
+		sandboxID:       result.SandboxID,
+		repoURL:         result.RepoURL,
+		repoRef:         result.RepoRef,
+		cleanup: func(ctx context.Context) {
+			if keep {
+				return
+			}
+			_ = client.DeleteSandbox(ctx, result.SandboxID)
+		},
+		release: func() { keep = true },
+	}, nil
 }
 
 func updateAgentStateAfterSpawn(ctx context.Context, store agents.Store, agentID string) error {
@@ -1054,13 +1212,25 @@ func attachSpawnedAgentToRoom(ctx context.Context, cfg config.Config, workspaceI
 
 // AgentAskRequest is the request body for POST /api/agents/{id}/ask.
 type AgentAskRequest struct {
-	Message string `json:"message"`
+	Message        string          `json:"message"`
+	ResponseSchema json.RawMessage `json:"response_schema,omitempty"`
+	ResponseKeys   []string        `json:"response_keys,omitempty"`
 }
 
 // AgentAskResponse is the response for POST /api/agents/{id}/ask.
 type AgentAskResponse struct {
 	Reply          string `json:"reply"`
 	ConversationID string `json:"conversation_id"`
+}
+
+type sandboxAgentLLMConfig struct {
+	Provider   string
+	Model      string
+	BaseURL    string
+	APIKey     string
+	AuthMode   string
+	AuthHeader string
+	AuthPrefix string
 }
 
 // handleAgentAsk sends a message to an agent via companion chat.
@@ -1100,6 +1270,20 @@ func handleAgentAsk(w http.ResponseWriter, r *http.Request, cfg config.Config, l
 		return
 	}
 
+	if isSandboxBackedAgent(agent) {
+		reply, err := runSandboxBackedAgentAsk(r.Context(), cfg, agent, req.Message)
+		if err != nil {
+			log.Error().Err(err).Str("agent_id", agentID).Msg("sandbox-backed ask failed")
+			httpError(w, http.StatusInternalServerError, "sandbox ask failed: "+err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, AgentAskResponse{
+			Reply:          reply,
+			ConversationID: resolveAgentConversationID(agent, ""),
+		})
+		return
+	}
+
 	conversationID := resolveAgentConversationID(agent, "")
 	svc, cleanup, err := buildAgentCompanionService(r.Context(), cfg, log, agent)
 	if err != nil {
@@ -1113,6 +1297,8 @@ func handleAgentAsk(w http.ResponseWriter, r *http.Request, cfg config.Config, l
 	resp, err := svc.Chat(r.Context(), companion.ChatRequest{
 		ConversationID: conversationID,
 		Message:        req.Message,
+		ResponseSchema: req.ResponseSchema,
+		ResponseKeys:   req.ResponseKeys,
 	})
 	if err != nil {
 		log.Error().Err(err).Str("agent_id", agentID).Msg("companion chat failed")
@@ -1166,6 +1352,66 @@ func handleAgentAskStream(w http.ResponseWriter, r *http.Request, cfg config.Con
 		correlationID = ulid.Make().String()
 	}
 	conversationID := resolveAgentConversationID(agent, req.ConversationID)
+	timeout := agentAskStreamTimeout(agent)
+
+	if isSandboxBackedAgent(agent) {
+		ctx, cancel := context.WithTimeout(context.Background(), timeout)
+		activeAgentStreams.Put(agentID, correlationID, cancel)
+
+		writeJSON(w, http.StatusAccepted, AgentAskStreamResponse{
+			Accepted:       true,
+			AgentID:        agentID,
+			CorrelationID:  correlationID,
+			ConversationID: conversationID,
+		})
+		publishAgentChatEvent(events, agentChatEvent{
+			AgentID:        agentID,
+			ConversationID: conversationID,
+			CorrelationID:  correlationID,
+			Phase:          "started",
+			Metadata: map[string]any{
+				"memory_scope":     string(agenttypes.NormalizeMemoryScope(agent.MemoryScope)),
+				"memory_retention": string(agenttypes.NormalizeMemoryRetention(agent.MemoryRetention)),
+				"workspace_source": agent.WorkspaceSource,
+				"sandbox_provider": agent.SandboxProvider,
+				"sandbox_id":       agent.SandboxID,
+			},
+		})
+		go func() {
+			defer activeAgentStreams.Delete(agentID, correlationID)
+			defer cancel()
+
+			reply, err := runSandboxBackedAgentAsk(ctx, cfg, agent, req.Message)
+			if err != nil {
+				if errors.Is(err, context.Canceled) {
+					publishAgentChatEvent(events, agentChatEvent{
+						AgentID:        agentID,
+						ConversationID: conversationID,
+						CorrelationID:  correlationID,
+						Phase:          "cancelled",
+						Error:          "cancelled",
+					})
+					return
+				}
+				publishAgentChatEvent(events, agentChatEvent{
+					AgentID:        agentID,
+					ConversationID: conversationID,
+					CorrelationID:  correlationID,
+					Phase:          "error",
+					Error:          err.Error(),
+				})
+				return
+			}
+			publishAgentChatEvent(events, agentChatEvent{
+				AgentID:        agentID,
+				ConversationID: conversationID,
+				CorrelationID:  correlationID,
+				Phase:          "completed",
+				Content:        reply,
+			})
+		}()
+		return
+	}
 
 	svc, cleanup, err := buildAgentCompanionService(r.Context(), cfg, log, agent)
 	if err != nil {
@@ -1181,12 +1427,6 @@ func handleAgentAskStream(w http.ResponseWriter, r *http.Request, cfg config.Con
 		ConversationID: conversationID,
 	})
 
-	timeout := 30 * time.Minute
-	if agent.Policy.Timeout != "" {
-		if d, err := time.ParseDuration(agent.Policy.Timeout); err == nil && d > 0 {
-			timeout = d
-		}
-	}
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	activeAgentStreams.Put(agentID, correlationID, cancel)
 
@@ -1210,6 +1450,8 @@ func handleAgentAskStream(w http.ResponseWriter, r *http.Request, cfg config.Con
 			ConversationID: conversationID,
 			Message:        req.Message,
 			Context:        req.Context,
+			ResponseSchema: req.ResponseSchema,
+			ResponseKeys:   req.ResponseKeys,
 		}, companion.ChatStreamCallbacks{
 			OnDelta: func(delta companion.ChatStreamDelta) {
 				if strings.TrimSpace(delta.ContentDelta) == "" {
@@ -1279,6 +1521,16 @@ func handleAgentAskStream(w http.ResponseWriter, r *http.Request, cfg config.Con
 			ContextQueries: resp.ContextQueries,
 		})
 	}()
+}
+
+func agentAskStreamTimeout(agent agenttypes.Agent) time.Duration {
+	timeout := 30 * time.Minute
+	if agent.Policy.Timeout != "" {
+		if d, err := time.ParseDuration(agent.Policy.Timeout); err == nil && d > 0 {
+			timeout = d
+		}
+	}
+	return timeout
 }
 
 func handleAgentAskStreamCancel(w http.ResponseWriter, r *http.Request, log zerolog.Logger, agentID string) {
@@ -1420,6 +1672,7 @@ func buildAgentCompanionService(ctx context.Context, cfg config.Config, log zero
 		MemoryDB:              memoryDB,
 		MemoryConfig:          &memoryCfg,
 		MemoryBehavior:        memoryBehavior,
+		RequireContextQuery:   false,
 		LLMProvider:           llmProvider,
 		LLMAPIKey:             llmAPIKey,
 		LLMModel:              llmModel,
@@ -1510,6 +1763,7 @@ func buildAgentCompanionSearchService(ctx context.Context, cfg config.Config, lo
 		MemoryDB:              memoryDB,
 		MemoryConfig:          &memoryCfg,
 		MemoryBehavior:        memoryBehavior,
+		RequireContextQuery:   false,
 		LLMProvider:           llmProvider,
 		LLMAPIKey:             llmAPIKey,
 		LLMModel:              llmModel,
@@ -1615,6 +1869,143 @@ func resolveAgentConversationID(agent agenttypes.Agent, requested string) string
 		return trimmed
 	}
 	return strings.TrimSpace(agent.ID)
+}
+
+func isSandboxBackedAgent(agent agenttypes.Agent) bool {
+	return strings.TrimSpace(agent.WorkspaceSource) == "sandbox" &&
+		strings.TrimSpace(agent.SandboxProvider) == "opensandbox" &&
+		strings.TrimSpace(agent.SandboxID) != ""
+}
+
+func resolveSandboxAgentLLMConfig(cfg config.Config, agent agenttypes.Agent) (sandboxAgentLLMConfig, error) {
+	provider := strings.TrimSpace(agent.LLMProvider)
+	if provider == "" {
+		provider = cfg.LLM.Provider
+	}
+	if provider == "" {
+		provider = "openai_compat"
+	}
+	normalizedProvider := strings.ToLower(strings.TrimSpace(provider))
+	switch normalizedProvider {
+	case "openai", "openai_compat", "openai-compatible", "openrouter", "groq", "cerebras", "lmstudio":
+	default:
+		return sandboxAgentLLMConfig{}, fmt.Errorf("sandbox-backed asks currently support only OpenAI-compatible providers; got %q", provider)
+	}
+
+	model := strings.TrimSpace(agent.LLMModel)
+	if model == "" {
+		model = cfg.LLM.ResolveModel(provider)
+	}
+	baseURL := strings.TrimSpace(agent.LLMBaseURL)
+	if baseURL == "" {
+		baseURL = cfg.LLM.ResolveBaseURL(provider)
+	}
+	authMode := strings.TrimSpace(agent.LLMAuthMode)
+	if authMode == "" {
+		authMode = cfg.LLM.ResolveAuthMode(provider)
+	}
+	authHeader := strings.TrimSpace(agent.LLMAuthHeader)
+	if authHeader == "" {
+		authHeader = cfg.LLM.ResolveAuthHeader(provider)
+	}
+	authPrefix := agent.LLMAuthPrefix
+	if authPrefix == "" {
+		authPrefix = cfg.LLM.ResolveAuthPrefix(provider)
+	}
+
+	return sandboxAgentLLMConfig{
+		Provider:   normalizedProvider,
+		Model:      model,
+		BaseURL:    baseURL,
+		APIKey:     cfg.LLM.ResolveAPIKey(provider),
+		AuthMode:   authMode,
+		AuthHeader: authHeader,
+		AuthPrefix: authPrefix,
+	}, nil
+}
+
+func runSandboxBackedAgentAsk(ctx context.Context, cfg config.Config, agent agenttypes.Agent, message string) (string, error) {
+	llmCfg, err := resolveSandboxAgentLLMConfig(cfg, agent)
+	if err != nil {
+		return "", err
+	}
+	client := sandboxopensandbox.New(sandboxopensandbox.ConfigFromEnv())
+	command, envs := buildSandboxPromptCommand(agent, llmCfg, message)
+	result, err := client.RunSandboxCommand(ctx, sandboxopensandbox.RunSandboxCommandRequest{
+		SandboxID: agent.SandboxID,
+		Command:   command,
+		Cwd:       firstNonEmpty(agent.WorkspaceRoot, sandboxopensandbox.DefaultWorkspaceRoot),
+		Timeout:   5 * time.Minute,
+		Envs:      envs,
+	})
+	if err != nil {
+		return "", err
+	}
+	reply := strings.TrimSpace(result.Stdout)
+	if reply == "" {
+		reply = strings.TrimSpace(result.Result)
+	}
+	if reply == "" && strings.TrimSpace(result.Error) != "" {
+		return "", errors.New(strings.TrimSpace(result.Error))
+	}
+	if reply == "" && strings.TrimSpace(result.Stderr) != "" {
+		return "", errors.New(strings.TrimSpace(result.Stderr))
+	}
+	if reply == "" {
+		return "", fmt.Errorf("sandbox execution completed without visible output")
+	}
+	return reply, nil
+}
+
+func buildSandboxPromptCommand(agent agenttypes.Agent, llmCfg sandboxAgentLLMConfig, message string) (string, map[string]string) {
+	systemPrompt := strings.TrimSpace(agent.Prompt)
+	payload := map[string]any{
+		"model": llmCfg.Model,
+		"messages": []map[string]string{
+			{"role": "system", "content": systemPrompt},
+			{"role": "user", "content": message},
+		},
+		"temperature": 0,
+	}
+	payloadJSON, _ := json.Marshal(payload)
+	command := fmt.Sprintf(`python3 - <<'PY'
+import json, os, sys, urllib.request
+base_url = os.environ["AGENTCTL_SANDBOX_LLM_BASE_URL"].rstrip("/")
+payload = %s
+headers = {"Content-Type": "application/json"}
+auth_mode = os.environ.get("AGENTCTL_SANDBOX_LLM_AUTH_MODE", "")
+api_key = os.environ.get("AGENTCTL_SANDBOX_LLM_API_KEY", "")
+auth_header = os.environ.get("AGENTCTL_SANDBOX_LLM_AUTH_HEADER", "Authorization")
+auth_prefix = os.environ.get("AGENTCTL_SANDBOX_LLM_AUTH_PREFIX", "")
+if auth_mode in ("bearer", "header") and api_key:
+    headers[auth_header] = auth_prefix + api_key
+req = urllib.request.Request(base_url + "/chat/completions", data=json.dumps(payload).encode("utf-8"), headers=headers)
+with urllib.request.urlopen(req, timeout=180) as resp:
+    body = json.load(resp)
+choice = body.get("choices", [{}])[0]
+message = choice.get("message", {}) if isinstance(choice, dict) else {}
+content = message.get("content", "") if isinstance(message, dict) else ""
+if isinstance(content, list):
+    parts = []
+    for item in content:
+        if isinstance(item, dict):
+            text = item.get("text")
+            if text:
+                parts.append(text)
+    content = "".join(parts)
+if not content:
+    print(json.dumps(body), file=sys.stderr)
+    sys.exit(2)
+print(content)
+PY`, string(payloadJSON))
+	envs := map[string]string{
+		"AGENTCTL_SANDBOX_LLM_BASE_URL":    llmCfg.BaseURL,
+		"AGENTCTL_SANDBOX_LLM_API_KEY":     llmCfg.APIKey,
+		"AGENTCTL_SANDBOX_LLM_AUTH_MODE":   llmCfg.AuthMode,
+		"AGENTCTL_SANDBOX_LLM_AUTH_HEADER": llmCfg.AuthHeader,
+		"AGENTCTL_SANDBOX_LLM_AUTH_PREFIX": llmCfg.AuthPrefix,
+	}
+	return command, envs
 }
 
 func handleAgentMemoryCompress(w http.ResponseWriter, r *http.Request, cfg config.Config, log zerolog.Logger, agentID string) {
@@ -1985,6 +2376,8 @@ func handleAgentPatch(w http.ResponseWriter, r *http.Request, cfg config.Config,
 		ID:              agent.ID,
 		ParentID:        agent.ParentID,
 		Namespace:       agent.Namespace,
+		WorkspaceRoot:   agent.WorkspaceRoot,
+		WorkspaceSource: agent.WorkspaceSource,
 		Name:            agent.Name,
 		Slug:            agent.Slug,
 		Role:            agent.Role,
@@ -1999,6 +2392,10 @@ func handleAgentPatch(w http.ResponseWriter, r *http.Request, cfg config.Config,
 		ConversationID:  agent.ConversationID,
 		MemoryScope:     string(agenttypes.NormalizeMemoryScope(agent.MemoryScope)),
 		MemoryRetention: string(agenttypes.NormalizeMemoryRetention(agent.MemoryRetention)),
+		SandboxProvider: agent.SandboxProvider,
+		SandboxID:       agent.SandboxID,
+		RepoURL:         agent.RepoURL,
+		RepoRef:         agent.RepoRef,
 	}
 	if !agent.CreatedAt.IsZero() {
 		ar.CreatedAt = agent.CreatedAt.Format("2006-01-02T15:04:05Z07:00")
@@ -2022,10 +2419,17 @@ func loadAgentRuntimeTree(ctx context.Context, cfg config.Config, log zerolog.Lo
 		runtime.Error = "agent has no id"
 		return runtime
 	}
+	if isSandboxBackedAgent(agent) {
+		runtime.Root = loadSandboxRuntimeTree(agent)
+		return runtime
+	}
 
-	client, err := v2jido.NewEnvJSONRPCClient()
+	client, available, err := loadOptionalJidoClient()
 	if err != nil {
 		runtime.Error = err.Error()
+		return runtime
+	}
+	if !available {
 		return runtime
 	}
 
@@ -2045,6 +2449,40 @@ func loadAgentRuntimeTree(ctx context.Context, cfg config.Config, log zerolog.Lo
 		runtime.Error = root.Error
 	}
 	return runtime
+}
+
+func loadSandboxRuntimeTree(agent agenttypes.Agent) *agentRuntimeTreeNode {
+	return &agentRuntimeTreeNode{
+		Tag:     strings.TrimSpace(agent.ID),
+		AgentID: strings.TrimSpace(agent.ID),
+		Status:  "sandbox",
+		Metadata: map[string]any{
+			"workspace_id":     strings.TrimSpace(agent.Namespace),
+			"workspace_root":   strings.TrimSpace(agent.WorkspaceRoot),
+			"workspace_source": strings.TrimSpace(agent.WorkspaceSource),
+			"role":             strings.TrimSpace(agent.Role),
+			"name":             strings.TrimSpace(agent.Name),
+			"slug":             strings.TrimSpace(agent.Slug),
+			"sandbox_provider": strings.TrimSpace(agent.SandboxProvider),
+			"sandbox_id":       strings.TrimSpace(agent.SandboxID),
+			"repo_url":         strings.TrimSpace(agent.RepoURL),
+			"repo_ref":         strings.TrimSpace(agent.RepoRef),
+		},
+		State: map[string]any{
+			"profile": "sandbox",
+			"agentctl": map[string]any{
+				"status":           strings.TrimSpace(string(agent.State)),
+				"workspace_source": strings.TrimSpace(agent.WorkspaceSource),
+			},
+			"sandbox": map[string]any{
+				"provider":       strings.TrimSpace(agent.SandboxProvider),
+				"id":             strings.TrimSpace(agent.SandboxID),
+				"workspace_root": strings.TrimSpace(agent.WorkspaceRoot),
+				"repo_url":       strings.TrimSpace(agent.RepoURL),
+				"repo_ref":       strings.TrimSpace(agent.RepoRef),
+			},
+		},
+	}
 }
 
 func loadAgentRuntimeTreeNode(

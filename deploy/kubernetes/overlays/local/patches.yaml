@@ -14,22 +14,32 @@ spec:
       - name: agentctl
         # Use locally-built image (OrbStack k3s shares Docker daemon)
         imagePullPolicy: Never
-        # Create storage dirs in emptyDir volumes, then start web server
+        # Create storage dirs in the local PVC, then start the web server.
         command: ["sh", "-c"]
         args:
         - |
           mkdir -p /var/cache/agentctl/storage /var/cache/agentctl/cas
-          exec agentctl web serve --port=8080
+          exec agentctl-cgo web serve --port=8080
         # Override CAS to use file-based (emptyDir) instead of S3
         env:
+        - name: HOME
+          value: "/var/cache/agentctl"
         - name: AGENTCTL_HOME
           value: "/var/cache/agentctl"
         - name: AGENTCTL_STORAGE_ROOT
           value: "/var/cache/agentctl/storage"
+        - name: AGENTCTL_DB_DRIVER
+          value: "sqlite"
+        - name: AGENTCTL_V2_EVENTS_DB_DRIVER
+          value: "sqlite"
         - name: AGENTCTL_CAS_BACKEND
           value: "file"
         - name: AGENTCTL_CAS_ROOT
           value: "/var/cache/agentctl/cas"
+        lifecycle:
+          preStop:
+            exec:
+              command: ["agentctl-cgo", "drain"]
         resources:
           requests:
             memory: "128Mi"

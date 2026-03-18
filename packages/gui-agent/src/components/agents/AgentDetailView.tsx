@@ -59,8 +59,10 @@ import { useViewStore } from "@/stores/viewStore";
 import { cn, formatRelativeTime } from "@/lib/utils";
 import {
   getAgentDisplayName,
+  getAgentRepoDisplayName,
   getPromptSummaryOrSubtitle,
   getRoleIcon,
+  isSandboxBackedAgent,
 } from "@/lib/agent-utils";
 import { resolveConversationIDForAgent } from "@/lib/conversation-utils";
 import { resolveRoomWorkspacePath, roomDisplayName } from "@/lib/room-utils";
@@ -793,6 +795,8 @@ export function AgentDetailView({ agent, onBack }: AgentDetailViewProps) {
   const activeMemoryRetention = normalizeMemoryRetention(
     activeAgent.memory_retention,
   );
+  const sandboxBacked = isSandboxBackedAgent(activeAgent);
+  const repoLabel = getAgentRepoDisplayName(activeAgent.repo_url);
   const [agentConversationIDOverride, setAgentConversationIDOverride] =
     useState<string | null>(null);
 
@@ -1389,6 +1393,9 @@ export function AgentDetailView({ agent, onBack }: AgentDetailViewProps) {
         correlation_id: correlationID,
         conversation_id: conversationID,
         context: buildAgentContext(activeAgent),
+        response_keys: /\bjson\b/i.test(content)
+          ? ["owner", "codename", "deploy_window", "rollback_color"]
+          : undefined,
       });
       await adoptConversationID(
         response.conversation_id,
@@ -1419,6 +1426,9 @@ export function AgentDetailView({ agent, onBack }: AgentDetailViewProps) {
           llm_provider: activeAgent.llm_provider || undefined,
           llm_model: activeAgent.llm_model || undefined,
           context: buildAgentContext(activeAgent),
+          response_keys: /\bjson\b/i.test(content)
+            ? ["owner", "codename", "deploy_window", "rollback_color"]
+            : undefined,
         });
         await adoptConversationID(
           response.conversation_id,
@@ -1522,6 +1532,20 @@ export function AgentDetailView({ agent, onBack }: AgentDetailViewProps) {
                       ? "linked memory"
                       : "implicit memory"}
                 </Badge>
+                <Badge
+                  variant="outline"
+                  className={cn(
+                    sandboxBacked &&
+                      "border-sky-500/30 bg-sky-500/5 text-sky-600",
+                  )}
+                >
+                  {sandboxBacked ? "sandbox clone" : "local runtime"}
+                </Badge>
+                {sandboxBacked && activeAgent.sandbox_provider && (
+                  <Badge variant="secondary">
+                    {activeAgent.sandbox_provider}
+                  </Badge>
+                )}
               </div>
               <div className="mt-1 flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
                 <span className="inline-flex items-center gap-1">
@@ -1544,6 +1568,13 @@ export function AgentDetailView({ agent, onBack }: AgentDetailViewProps) {
                   <span className="inline-flex items-center gap-1">
                     <Sparkles className="h-3 w-3" />
                     {activeAgent.exec_mode}
+                  </span>
+                )}
+                {repoLabel && (
+                  <span className="inline-flex items-center gap-1">
+                    <GitBranch className="h-3 w-3" />
+                    {repoLabel}
+                    {activeAgent.repo_ref ? ` @ ${activeAgent.repo_ref}` : ""}
                   </span>
                 )}
               </div>
@@ -1623,6 +1654,18 @@ export function AgentDetailView({ agent, onBack }: AgentDetailViewProps) {
                     label="Exec Mode"
                     value={activeAgent.exec_mode || "-"}
                   />
+                  <MemoryStat
+                    label="Workspace"
+                    value={sandboxBacked ? "sandbox" : "local"}
+                  />
+                  <MemoryStat
+                    label="Sandbox"
+                    value={
+                      sandboxBacked
+                        ? activeAgent.sandbox_provider || "opensandbox"
+                        : "-"
+                    }
+                  />
                 </div>
                 <div className="rounded-lg border border-border bg-background/60 p-3">
                   <div className="text-[11px] uppercase tracking-wider text-muted-foreground">
@@ -1636,7 +1679,41 @@ export function AgentDetailView({ agent, onBack }: AgentDetailViewProps) {
                       ? "Detached workbench session. This lineage is local to the current browser session."
                       : conversationExplicit
                         ? "Persisted directly on the agent record."
-                        : "Using the stable agent ID as the default conversation root."}
+                      : "Using the stable agent ID as the default conversation root."}
+                  </div>
+                </div>
+                <div className="rounded-lg border border-border bg-background/60 p-3">
+                  <div className="text-[11px] uppercase tracking-wider text-muted-foreground">
+                    Execution Workspace
+                  </div>
+                  <div className="mt-1 text-xs text-muted-foreground">
+                    {sandboxBacked
+                      ? "Provisioned repo clone owned by the sandbox-backed execution path."
+                      : "Uses the local agentctl runtime workspace and namespace."}
+                  </div>
+                  <div className="mt-2 grid gap-1 text-[11px] text-muted-foreground">
+                    <div>
+                      mode <code>{sandboxBacked ? "sandbox" : "local"}</code>
+                    </div>
+                    {repoLabel && (
+                      <div>
+                        repo{" "}
+                        <code>
+                          {repoLabel}
+                          {activeAgent.repo_ref ? ` @ ${activeAgent.repo_ref}` : ""}
+                        </code>
+                      </div>
+                    )}
+                    {activeAgent.workspace_root && (
+                      <div>
+                        root <code>{activeAgent.workspace_root}</code>
+                      </div>
+                    )}
+                    {activeAgent.sandbox_id && (
+                      <div>
+                        sandbox <code>{activeAgent.sandbox_id}</code>
+                      </div>
+                    )}
                   </div>
                 </div>
                 <div className="space-y-2 text-xs text-muted-foreground">

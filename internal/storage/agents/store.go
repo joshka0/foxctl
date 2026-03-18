@@ -41,6 +41,15 @@ type sqlStore struct {
 	close func() error
 }
 
+type rowScanner interface {
+	Scan(dest ...any) error
+}
+
+const agentSelectColumns = `
+		id, parent_id, ns, workspace_root, workspace_source, name, slug, role, prompt, skills_allow, policy, share_bb, state, created_at, heartbeat_at,
+		llm_provider, llm_model, llm_api_key, llm_base_url, llm_auth_mode, llm_auth_header, llm_auth_prefix, exec_mode, execution_layer,
+		max_iterations, max_auto_turns, think_interval, conversation_id, memory_scope, memory_retention, sandbox_provider, sandbox_id, repo_url, repo_ref`
+
 // Open opens the agents store rooted at the given storage root directory.
 // The database driver is selected via the dbdriver env var conventions (e.g., AGENTCTL_AGENTS_DB_DRIVER).
 func Open(ctx context.Context, root string) (Store, error) {
@@ -86,12 +95,21 @@ func (s *sqlStore) Create(ctx context.Context, a agent.Agent) error {
 	}
 
 	_, err = s.db.ExecContext(ctx, `
-		INSERT INTO agents (id, parent_id, ns, name, slug, role, prompt, skills_allow, policy, share_bb, state, created_at, heartbeat_at, llm_provider, llm_model, llm_api_key, llm_base_url, llm_auth_mode, llm_auth_header, llm_auth_prefix, exec_mode, execution_layer, max_iterations, max_auto_turns, think_interval, memory_scope, memory_retention)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27)`,
-		a.ID, a.ParentID, a.Namespace, a.Name, slugVal, a.Role, a.Prompt, string(skillsJSON), string(policyJSON), a.ShareBB, a.State,
+		INSERT INTO agents (
+			id, parent_id, ns, workspace_root, workspace_source, name, slug, role, prompt, skills_allow, policy, share_bb, state, created_at, heartbeat_at,
+			llm_provider, llm_model, llm_api_key, llm_base_url, llm_auth_mode, llm_auth_header, llm_auth_prefix, exec_mode, execution_layer,
+			max_iterations, max_auto_turns, think_interval, memory_scope, memory_retention, sandbox_provider, sandbox_id, repo_url, repo_ref
+		)
+		VALUES (
+			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
+			$16, $17, $18, $19, $20, $21, $22, $23, $24,
+			$25, $26, $27, $28, $29, $30, $31, $32, $33
+		)`,
+		a.ID, a.ParentID, a.Namespace, a.WorkspaceRoot, a.WorkspaceSource, a.Name, slugVal, a.Role, a.Prompt, string(skillsJSON), string(policyJSON), a.ShareBB, a.State,
 		sqlutil.FormatTimestamp(a.CreatedAt), sqlutil.FormatTimestamp(a.HeartbeatAt),
 		a.LLMProvider, a.LLMModel, a.LLMAPIKey, a.LLMBaseURL, a.LLMAuthMode, a.LLMAuthHeader, a.LLMAuthPrefix,
-		string(a.ExecMode), string(agent.NormalizeExecutionLayer(a.ExecutionLayer)), a.MaxIterations, a.MaxAutoTurns, a.ThinkInterval, string(memoryScope), string(memoryRetention))
+		string(a.ExecMode), string(agent.NormalizeExecutionLayer(a.ExecutionLayer)), a.MaxIterations, a.MaxAutoTurns, a.ThinkInterval, string(memoryScope), string(memoryRetention),
+		a.SandboxProvider, a.SandboxID, a.RepoURL, a.RepoRef)
 	if err != nil {
 		return fmt.Errorf("agents: create: %w", err)
 	}
@@ -99,239 +117,42 @@ func (s *sqlStore) Create(ctx context.Context, a agent.Agent) error {
 }
 
 func (s *sqlStore) Get(ctx context.Context, id string) (agent.Agent, error) {
-	row := s.db.QueryRowContext(ctx, `
-		SELECT id, parent_id, ns, name, slug, role, prompt, skills_allow, policy, share_bb, state, created_at, heartbeat_at, llm_provider, llm_model, llm_api_key, llm_base_url, llm_auth_mode, llm_auth_header, llm_auth_prefix, exec_mode, execution_layer, max_iterations, max_auto_turns, think_interval, conversation_id, memory_scope, memory_retention
-		FROM agents WHERE id = $1 AND deleted_at IS NULL`, id)
-
-	var a agent.Agent
-	var skillsJSON, policyJSON string
-	var created string
-	var parentID, name, slug, role, prompt, heartbeat sql.NullString
-	var llmProvider, llmModel, llmAPIKey sql.NullString
-	var llmBaseURL, llmAuthMode, llmAuthHeader, llmAuthPrefix sql.NullString
-	var execMode, executionLayer sql.NullString
-	var maxIterations, maxAutoTurns, thinkInterval sql.NullInt64
-	var conversationID, memoryScope, memoryRetention sql.NullString
-	if err := row.Scan(&a.ID, &parentID, &a.Namespace, &name, &slug, &role, &prompt, &skillsJSON, &policyJSON, &a.ShareBB, &a.State, &created, &heartbeat, &llmProvider, &llmModel, &llmAPIKey, &llmBaseURL, &llmAuthMode, &llmAuthHeader, &llmAuthPrefix, &execMode, &executionLayer, &maxIterations, &maxAutoTurns, &thinkInterval, &conversationID, &memoryScope, &memoryRetention); err != nil {
+	row := s.db.QueryRowContext(ctx, `SELECT `+agentSelectColumns+` FROM agents WHERE id = $1 AND deleted_at IS NULL`, id)
+	a, err := scanAgent(row)
+	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return agent.Agent{}, ErrNotFound
 		}
 		return agent.Agent{}, fmt.Errorf("agents: get: %w", err)
 	}
-
-	a.ParentID = parentID.String
-	a.Name = name.String
-	a.Slug = slug.String
-	a.Role = role.String
-	a.Prompt = prompt.String
-
-	// Parse skills_allow
-	if err := json.Unmarshal([]byte(skillsJSON), &a.SkillsAllow); err != nil {
-		return agent.Agent{}, fmt.Errorf("agents: unmarshal skills_allow: %w", err)
-	}
-
-	// Parse policy
-	if err := json.Unmarshal([]byte(policyJSON), &a.Policy); err != nil {
-		return agent.Agent{}, fmt.Errorf("agents: unmarshal policy: %w", err)
-	}
-
-	// Parse timestamps
-	var err error
-	a.CreatedAt, err = sqlutil.ScanTimestamp(created)
-	if err != nil {
-		return agent.Agent{}, fmt.Errorf("agents: scan created_at: %w", err)
-	}
-	if heartbeat.Valid && heartbeat.String != "" {
-		a.HeartbeatAt, err = sqlutil.ScanTimestamp(heartbeat.String)
-		if err != nil {
-			return agent.Agent{}, fmt.Errorf("agents: scan heartbeat_at: %w", err)
-		}
-	}
-
-	// Set LLM fields
-	a.LLMProvider = llmProvider.String
-	a.LLMModel = llmModel.String
-	a.LLMAPIKey = llmAPIKey.String
-	a.LLMBaseURL = llmBaseURL.String
-	a.LLMAuthMode = llmAuthMode.String
-	a.LLMAuthHeader = llmAuthHeader.String
-	a.LLMAuthPrefix = llmAuthPrefix.String
-
-	// Set execution mode fields
-	a.ExecMode = agent.ExecutionMode(execMode.String)
-	a.ExecutionLayer = agent.NormalizeExecutionLayer(agent.ExecutionLayer(executionLayer.String))
-	a.MaxIterations = int(maxIterations.Int64)
-	a.MaxAutoTurns = int(maxAutoTurns.Int64)
-	a.ThinkInterval = int(thinkInterval.Int64)
-
-	// Set conversation ID
-	a.ConversationID = conversationID.String
-	a.MemoryScope = agent.NormalizeMemoryScope(agent.MemoryScope(memoryScope.String))
-	if memoryRetention.Valid && strings.TrimSpace(memoryRetention.String) != "" {
-		a.MemoryRetention = agent.NormalizeMemoryRetention(agent.MemoryRetention(memoryRetention.String))
-	} else {
-		a.MemoryRetention = agent.DefaultMemoryRetentionForScope(a.MemoryScope)
-	}
-
 	return a, nil
 }
 
 func (s *sqlStore) GetByNamespace(ctx context.Context, ns string) (agent.Agent, error) {
-	row := s.db.QueryRowContext(ctx, `
-		SELECT id, parent_id, ns, name, slug, role, prompt, skills_allow, policy, share_bb, state, created_at, heartbeat_at, llm_provider, llm_model, llm_api_key, llm_base_url, llm_auth_mode, llm_auth_header, llm_auth_prefix, exec_mode, execution_layer, max_iterations, max_auto_turns, think_interval, conversation_id, memory_scope, memory_retention
+	row := s.db.QueryRowContext(ctx, `SELECT `+agentSelectColumns+`
 		FROM agents
 		WHERE ns = $1 AND deleted_at IS NULL
 		ORDER BY created_at DESC, id DESC
 		LIMIT 1`, ns)
-
-	var a agent.Agent
-	var skillsJSON, policyJSON string
-	var created string
-	var parentID, name, slug, role, prompt, heartbeat sql.NullString
-	var llmProvider, llmModel, llmAPIKey sql.NullString
-	var llmBaseURL, llmAuthMode, llmAuthHeader, llmAuthPrefix sql.NullString
-	var execMode, executionLayer sql.NullString
-	var maxIterations, maxAutoTurns, thinkInterval sql.NullInt64
-	var conversationID, memoryScope, memoryRetention sql.NullString
-	if err := row.Scan(&a.ID, &parentID, &a.Namespace, &name, &slug, &role, &prompt, &skillsJSON, &policyJSON, &a.ShareBB, &a.State, &created, &heartbeat, &llmProvider, &llmModel, &llmAPIKey, &llmBaseURL, &llmAuthMode, &llmAuthHeader, &llmAuthPrefix, &execMode, &executionLayer, &maxIterations, &maxAutoTurns, &thinkInterval, &conversationID, &memoryScope, &memoryRetention); err != nil {
+	a, err := scanAgent(row)
+	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return agent.Agent{}, ErrNotFound
 		}
 		return agent.Agent{}, fmt.Errorf("agents: get by ns: %w", err)
 	}
-
-	a.ParentID = parentID.String
-	a.Name = name.String
-	a.Slug = slug.String
-	a.Role = role.String
-	a.Prompt = prompt.String
-
-	// Parse skills_allow
-	if err := json.Unmarshal([]byte(skillsJSON), &a.SkillsAllow); err != nil {
-		return agent.Agent{}, fmt.Errorf("agents: unmarshal skills_allow: %w", err)
-	}
-
-	// Parse policy
-	if err := json.Unmarshal([]byte(policyJSON), &a.Policy); err != nil {
-		return agent.Agent{}, fmt.Errorf("agents: unmarshal policy: %w", err)
-	}
-
-	// Parse timestamps
-	var err error
-	a.CreatedAt, err = sqlutil.ScanTimestamp(created)
-	if err != nil {
-		return agent.Agent{}, fmt.Errorf("agents: scan created_at: %w", err)
-	}
-	if heartbeat.Valid && heartbeat.String != "" {
-		a.HeartbeatAt, err = sqlutil.ScanTimestamp(heartbeat.String)
-		if err != nil {
-			return agent.Agent{}, fmt.Errorf("agents: scan heartbeat_at: %w", err)
-		}
-	}
-
-	// Set LLM fields
-	a.LLMProvider = llmProvider.String
-	a.LLMModel = llmModel.String
-	a.LLMAPIKey = llmAPIKey.String
-	a.LLMBaseURL = llmBaseURL.String
-	a.LLMAuthMode = llmAuthMode.String
-	a.LLMAuthHeader = llmAuthHeader.String
-	a.LLMAuthPrefix = llmAuthPrefix.String
-
-	// Set execution mode fields
-	a.ExecMode = agent.ExecutionMode(execMode.String)
-	a.ExecutionLayer = agent.NormalizeExecutionLayer(agent.ExecutionLayer(executionLayer.String))
-	a.MaxIterations = int(maxIterations.Int64)
-	a.MaxAutoTurns = int(maxAutoTurns.Int64)
-	a.ThinkInterval = int(thinkInterval.Int64)
-
-	// Set conversation ID
-	a.ConversationID = conversationID.String
-	a.MemoryScope = agent.NormalizeMemoryScope(agent.MemoryScope(memoryScope.String))
-	if memoryRetention.Valid && strings.TrimSpace(memoryRetention.String) != "" {
-		a.MemoryRetention = agent.NormalizeMemoryRetention(agent.MemoryRetention(memoryRetention.String))
-	} else {
-		a.MemoryRetention = agent.DefaultMemoryRetentionForScope(a.MemoryScope)
-	}
-
 	return a, nil
 }
 
 func (s *sqlStore) GetBySlug(ctx context.Context, slug string) (agent.Agent, error) {
-	row := s.db.QueryRowContext(ctx, `
-		SELECT id, parent_id, ns, name, slug, role, prompt, skills_allow, policy, share_bb, state, created_at, heartbeat_at, llm_provider, llm_model, llm_api_key, llm_base_url, llm_auth_mode, llm_auth_header, llm_auth_prefix, exec_mode, execution_layer, max_iterations, max_auto_turns, think_interval, conversation_id, memory_scope, memory_retention
-		FROM agents WHERE slug = $1 AND deleted_at IS NULL`, slug)
-
-	var a agent.Agent
-	var skillsJSON, policyJSON string
-	var created string
-	var parentID, name, slugVal, role, prompt, heartbeat sql.NullString
-	var llmProvider, llmModel, llmAPIKey sql.NullString
-	var llmBaseURL, llmAuthMode, llmAuthHeader, llmAuthPrefix sql.NullString
-	var execMode, executionLayer sql.NullString
-	var maxIterations, maxAutoTurns, thinkInterval sql.NullInt64
-	var conversationID, memoryScope, memoryRetention sql.NullString
-	if err := row.Scan(&a.ID, &parentID, &a.Namespace, &name, &slugVal, &role, &prompt, &skillsJSON, &policyJSON, &a.ShareBB, &a.State, &created, &heartbeat, &llmProvider, &llmModel, &llmAPIKey, &llmBaseURL, &llmAuthMode, &llmAuthHeader, &llmAuthPrefix, &execMode, &executionLayer, &maxIterations, &maxAutoTurns, &thinkInterval, &conversationID, &memoryScope, &memoryRetention); err != nil {
+	row := s.db.QueryRowContext(ctx, `SELECT `+agentSelectColumns+` FROM agents WHERE slug = $1 AND deleted_at IS NULL`, slug)
+	a, err := scanAgent(row)
+	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return agent.Agent{}, ErrNotFound
 		}
 		return agent.Agent{}, fmt.Errorf("agents: get by slug: %w", err)
 	}
-
-	a.ParentID = parentID.String
-	a.Name = name.String
-	a.Slug = slugVal.String
-	a.Role = role.String
-	a.Prompt = prompt.String
-
-	// Parse skills_allow
-	if err := json.Unmarshal([]byte(skillsJSON), &a.SkillsAllow); err != nil {
-		return agent.Agent{}, fmt.Errorf("agents: unmarshal skills_allow: %w", err)
-	}
-
-	// Parse policy
-	if err := json.Unmarshal([]byte(policyJSON), &a.Policy); err != nil {
-		return agent.Agent{}, fmt.Errorf("agents: unmarshal policy: %w", err)
-	}
-
-	// Parse timestamps
-	var err error
-	a.CreatedAt, err = sqlutil.ScanTimestamp(created)
-	if err != nil {
-		return agent.Agent{}, fmt.Errorf("agents: scan created_at: %w", err)
-	}
-	if heartbeat.Valid && heartbeat.String != "" {
-		a.HeartbeatAt, err = sqlutil.ScanTimestamp(heartbeat.String)
-		if err != nil {
-			return agent.Agent{}, fmt.Errorf("agents: scan heartbeat_at: %w", err)
-		}
-	}
-
-	// Set LLM fields
-	a.LLMProvider = llmProvider.String
-	a.LLMModel = llmModel.String
-	a.LLMAPIKey = llmAPIKey.String
-	a.LLMBaseURL = llmBaseURL.String
-	a.LLMAuthMode = llmAuthMode.String
-	a.LLMAuthHeader = llmAuthHeader.String
-	a.LLMAuthPrefix = llmAuthPrefix.String
-
-	// Set execution mode fields
-	a.ExecMode = agent.ExecutionMode(execMode.String)
-	a.ExecutionLayer = agent.NormalizeExecutionLayer(agent.ExecutionLayer(executionLayer.String))
-	a.MaxIterations = int(maxIterations.Int64)
-	a.MaxAutoTurns = int(maxAutoTurns.Int64)
-	a.ThinkInterval = int(thinkInterval.Int64)
-
-	// Set conversation ID
-	a.ConversationID = conversationID.String
-	a.MemoryScope = agent.NormalizeMemoryScope(agent.MemoryScope(memoryScope.String))
-	if memoryRetention.Valid && strings.TrimSpace(memoryRetention.String) != "" {
-		a.MemoryRetention = agent.NormalizeMemoryRetention(agent.MemoryRetention(memoryRetention.String))
-	} else {
-		a.MemoryRetention = agent.DefaultMemoryRetentionForScope(a.MemoryScope)
-	}
-
 	return a, nil
 }
 
@@ -347,61 +168,9 @@ func (s *sqlStore) Resolve(ctx context.Context, ref string) (agent.Agent, error)
 	}
 
 	// Try by name (case-insensitive)
-	row := s.db.QueryRowContext(ctx, `
-		SELECT id, parent_id, ns, name, slug, role, prompt, skills_allow, policy, share_bb, state, created_at, heartbeat_at, llm_provider, llm_model, llm_api_key, llm_base_url, llm_auth_mode, llm_auth_header, llm_auth_prefix, exec_mode, execution_layer, max_iterations, max_auto_turns, think_interval, conversation_id, memory_scope, memory_retention
-		FROM agents WHERE LOWER(name) = LOWER($1) AND deleted_at IS NULL LIMIT 1`, ref)
-
-	var skillsJSON, policyJSON string
-	var created string
-	var parentID, name, slugVal, role, prompt, heartbeat sql.NullString
-	var llmProvider, llmModel, llmAPIKey sql.NullString
-	var llmBaseURL, llmAuthMode, llmAuthHeader, llmAuthPrefix sql.NullString
-	var execMode, executionLayer sql.NullString
-	var maxIterations, maxAutoTurns, thinkInterval sql.NullInt64
-	var conversationID, memoryScope, memoryRetention sql.NullString
-	scanErr := row.Scan(&a.ID, &parentID, &a.Namespace, &name, &slugVal, &role, &prompt, &skillsJSON, &policyJSON, &a.ShareBB, &a.State, &created, &heartbeat, &llmProvider, &llmModel, &llmAPIKey, &llmBaseURL, &llmAuthMode, &llmAuthHeader, &llmAuthPrefix, &execMode, &executionLayer, &maxIterations, &maxAutoTurns, &thinkInterval, &conversationID, &memoryScope, &memoryRetention)
+	row := s.db.QueryRowContext(ctx, `SELECT `+agentSelectColumns+` FROM agents WHERE LOWER(name) = LOWER($1) AND deleted_at IS NULL LIMIT 1`, ref)
+	a, scanErr := scanAgent(row)
 	if scanErr == nil {
-		a.ParentID = parentID.String
-		a.Name = name.String
-		a.Slug = slugVal.String
-		a.Role = role.String
-		a.Prompt = prompt.String
-		if err := json.Unmarshal([]byte(skillsJSON), &a.SkillsAllow); err != nil {
-			return agent.Agent{}, fmt.Errorf("agents: unmarshal skills_allow: %w", err)
-		}
-		if err := json.Unmarshal([]byte(policyJSON), &a.Policy); err != nil {
-			return agent.Agent{}, fmt.Errorf("agents: unmarshal policy: %w", err)
-		}
-		var err error
-		a.CreatedAt, err = sqlutil.ScanTimestamp(created)
-		if err != nil {
-			return agent.Agent{}, fmt.Errorf("agents: scan created_at: %w", err)
-		}
-		if heartbeat.Valid && heartbeat.String != "" {
-			a.HeartbeatAt, err = sqlutil.ScanTimestamp(heartbeat.String)
-			if err != nil {
-				return agent.Agent{}, fmt.Errorf("agents: scan heartbeat_at: %w", err)
-			}
-		}
-		a.LLMProvider = llmProvider.String
-		a.LLMModel = llmModel.String
-		a.LLMAPIKey = llmAPIKey.String
-		a.LLMBaseURL = llmBaseURL.String
-		a.LLMAuthMode = llmAuthMode.String
-		a.LLMAuthHeader = llmAuthHeader.String
-		a.LLMAuthPrefix = llmAuthPrefix.String
-		a.ExecMode = agent.ExecutionMode(execMode.String)
-		a.ExecutionLayer = agent.NormalizeExecutionLayer(agent.ExecutionLayer(executionLayer.String))
-		a.MaxIterations = int(maxIterations.Int64)
-		a.MaxAutoTurns = int(maxAutoTurns.Int64)
-		a.ThinkInterval = int(thinkInterval.Int64)
-		a.ConversationID = conversationID.String
-		a.MemoryScope = agent.NormalizeMemoryScope(agent.MemoryScope(memoryScope.String))
-		if memoryRetention.Valid && strings.TrimSpace(memoryRetention.String) != "" {
-			a.MemoryRetention = agent.NormalizeMemoryRetention(agent.MemoryRetention(memoryRetention.String))
-		} else {
-			a.MemoryRetention = agent.DefaultMemoryRetentionForScope(a.MemoryScope)
-		}
 		return a, nil
 	}
 	if !errors.Is(scanErr, sql.ErrNoRows) {
@@ -416,8 +185,7 @@ func (s *sqlStore) List(ctx context.Context, limit int) ([]agent.Agent, error) {
 	if limit <= 0 {
 		limit = 100
 	}
-	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, parent_id, ns, name, slug, role, prompt, skills_allow, policy, share_bb, state, created_at, heartbeat_at, llm_provider, llm_model, llm_api_key, llm_base_url, llm_auth_mode, llm_auth_header, llm_auth_prefix, exec_mode, execution_layer, max_iterations, max_auto_turns, think_interval, conversation_id, memory_scope, memory_retention
+	rows, err := s.db.QueryContext(ctx, `SELECT `+agentSelectColumns+`
 		FROM agents
 		WHERE deleted_at IS NULL
 		ORDER BY created_at DESC
@@ -444,8 +212,7 @@ func (s *sqlStore) ListByParent(ctx context.Context, parentID string, limit int)
 	if limit <= 0 {
 		limit = 100
 	}
-	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, parent_id, ns, name, slug, role, prompt, skills_allow, policy, share_bb, state, created_at, heartbeat_at, llm_provider, llm_model, llm_api_key, llm_base_url, llm_auth_mode, llm_auth_header, llm_auth_prefix, exec_mode, execution_layer, max_iterations, max_auto_turns, think_interval, conversation_id, memory_scope, memory_retention
+	rows, err := s.db.QueryContext(ctx, `SELECT `+agentSelectColumns+`
 		FROM agents
 		WHERE parent_id = $1 AND deleted_at IS NULL
 		ORDER BY created_at DESC
@@ -644,6 +411,8 @@ CREATE TABLE IF NOT EXISTS agents (
 	id           TEXT PRIMARY KEY,
 	parent_id    TEXT,
 	ns           TEXT NOT NULL,
+	workspace_root TEXT,
+	workspace_source TEXT,
 	name         TEXT,
 	slug         TEXT UNIQUE,
 	role         TEXT,
@@ -663,7 +432,11 @@ CREATE TABLE IF NOT EXISTS agents (
 	llm_auth_prefix TEXT,
 	execution_layer TEXT,
 	memory_scope TEXT,
-	memory_retention TEXT
+	memory_retention TEXT,
+	sandbox_provider TEXT,
+	sandbox_id TEXT,
+	repo_url TEXT,
+	repo_ref TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_agents_ns ON agents(ns);
 CREATE INDEX IF NOT EXISTS idx_agents_parent ON agents(parent_id);
@@ -695,6 +468,12 @@ CREATE INDEX IF NOT EXISTS idx_agents_state ON agents(state);
 		"ALTER TABLE agents ADD COLUMN conversation_id TEXT", // Linked companion conversation ID
 		"ALTER TABLE agents ADD COLUMN memory_scope TEXT",
 		"ALTER TABLE agents ADD COLUMN memory_retention TEXT",
+		"ALTER TABLE agents ADD COLUMN workspace_root TEXT",
+		"ALTER TABLE agents ADD COLUMN workspace_source TEXT",
+		"ALTER TABLE agents ADD COLUMN sandbox_provider TEXT",
+		"ALTER TABLE agents ADD COLUMN sandbox_id TEXT",
+		"ALTER TABLE agents ADD COLUMN repo_url TEXT",
+		"ALTER TABLE agents ADD COLUMN repo_ref TEXT",
 	}
 	for _, stmt := range alterStmts {
 		// SQLite will error if column already exists, which is fine
@@ -754,6 +533,8 @@ CREATE TABLE agents_new (
 	id              TEXT PRIMARY KEY,
 	parent_id       TEXT,
 	ns              TEXT NOT NULL,
+	workspace_root  TEXT,
+	workspace_source TEXT,
 	name            TEXT,
 	slug            TEXT,
 	role            TEXT,
@@ -779,15 +560,19 @@ CREATE TABLE agents_new (
 	deleted_at      TEXT,
 	conversation_id TEXT,
 	memory_scope    TEXT,
-	memory_retention TEXT
+	memory_retention TEXT,
+	sandbox_provider TEXT,
+	sandbox_id      TEXT,
+	repo_url        TEXT,
+	repo_ref        TEXT
 );
 		INSERT INTO agents_new (
-	id, parent_id, ns, name, slug, role, prompt, skills_allow, policy, share_bb, state, created_at, heartbeat_at,
-	llm_provider, llm_model, llm_api_key, llm_base_url, llm_auth_mode, llm_auth_header, llm_auth_prefix, exec_mode, execution_layer, max_iterations, max_auto_turns, think_interval, deleted_at, conversation_id, memory_scope, memory_retention
+	id, parent_id, ns, workspace_root, workspace_source, name, slug, role, prompt, skills_allow, policy, share_bb, state, created_at, heartbeat_at,
+	llm_provider, llm_model, llm_api_key, llm_base_url, llm_auth_mode, llm_auth_header, llm_auth_prefix, exec_mode, execution_layer, max_iterations, max_auto_turns, think_interval, deleted_at, conversation_id, memory_scope, memory_retention, sandbox_provider, sandbox_id, repo_url, repo_ref
 )
 SELECT
-	id, parent_id, ns, name, slug, role, prompt, skills_allow, policy, share_bb, state, created_at, heartbeat_at,
-	llm_provider, llm_model, llm_api_key, llm_base_url, llm_auth_mode, llm_auth_header, llm_auth_prefix, exec_mode, execution_layer, max_iterations, max_auto_turns, think_interval, deleted_at, conversation_id, memory_scope, memory_retention
+	id, parent_id, ns, workspace_root, workspace_source, name, slug, role, prompt, skills_allow, policy, share_bb, state, created_at, heartbeat_at,
+	llm_provider, llm_model, llm_api_key, llm_base_url, llm_auth_mode, llm_auth_header, llm_auth_prefix, exec_mode, execution_layer, max_iterations, max_auto_turns, think_interval, deleted_at, conversation_id, memory_scope, memory_retention, sandbox_provider, sandbox_id, repo_url, repo_ref
 FROM agents;
 DROP TABLE agents;
 ALTER TABLE agents_new RENAME TO agents;
@@ -806,21 +591,23 @@ CREATE UNIQUE INDEX idx_agents_slug_unique ON agents(slug) WHERE slug IS NOT NUL
 	return nil
 }
 
-func scanAgent(rows *sql.Rows) (agent.Agent, error) {
+func scanAgent(scanner rowScanner) (agent.Agent, error) {
 	var a agent.Agent
 	var skillsJSON, policyJSON string
 	var created string
-	var parentID, name, slug, role, prompt, heartbeat sql.NullString
+	var parentID, workspaceRoot, workspaceSource, name, slug, role, prompt, heartbeat sql.NullString
 	var llmProvider, llmModel, llmAPIKey sql.NullString
 	var llmBaseURL, llmAuthMode, llmAuthHeader, llmAuthPrefix sql.NullString
 	var execMode, executionLayer sql.NullString
 	var maxIterations, maxAutoTurns, thinkInterval sql.NullInt64
-	var conversationID, memoryScope, memoryRetention sql.NullString
-	if err := rows.Scan(&a.ID, &parentID, &a.Namespace, &name, &slug, &role, &prompt, &skillsJSON, &policyJSON, &a.ShareBB, &a.State, &created, &heartbeat, &llmProvider, &llmModel, &llmAPIKey, &llmBaseURL, &llmAuthMode, &llmAuthHeader, &llmAuthPrefix, &execMode, &executionLayer, &maxIterations, &maxAutoTurns, &thinkInterval, &conversationID, &memoryScope, &memoryRetention); err != nil {
+	var conversationID, memoryScope, memoryRetention, sandboxProvider, sandboxID, repoURL, repoRef sql.NullString
+	if err := scanner.Scan(&a.ID, &parentID, &a.Namespace, &workspaceRoot, &workspaceSource, &name, &slug, &role, &prompt, &skillsJSON, &policyJSON, &a.ShareBB, &a.State, &created, &heartbeat, &llmProvider, &llmModel, &llmAPIKey, &llmBaseURL, &llmAuthMode, &llmAuthHeader, &llmAuthPrefix, &execMode, &executionLayer, &maxIterations, &maxAutoTurns, &thinkInterval, &conversationID, &memoryScope, &memoryRetention, &sandboxProvider, &sandboxID, &repoURL, &repoRef); err != nil {
 		return agent.Agent{}, fmt.Errorf("agents: scan: %w", err)
 	}
 
 	a.ParentID = parentID.String
+	a.WorkspaceRoot = workspaceRoot.String
+	a.WorkspaceSource = workspaceSource.String
 	a.Name = name.String
 	a.Slug = slug.String
 	a.Role = role.String
@@ -873,6 +660,10 @@ func scanAgent(rows *sql.Rows) (agent.Agent, error) {
 	} else {
 		a.MemoryRetention = agent.DefaultMemoryRetentionForScope(a.MemoryScope)
 	}
+	a.SandboxProvider = sandboxProvider.String
+	a.SandboxID = sandboxID.String
+	a.RepoURL = repoURL.String
+	a.RepoRef = repoRef.String
 
 	return a, nil
 }

@@ -343,6 +343,19 @@ export function RuntimeSummaryPanel({
           `Maximum cards: ${Math.max(1, Math.min(20, aiCount))}.`,
           `Goal: ${aiGoal.trim()}`,
         ].join('\n'),
+        response_schema: {
+          type: 'array',
+          items: {
+            type: 'object',
+            additionalProperties: false,
+            properties: {
+              issue_identifier: { type: 'string' },
+              title: { type: 'string' },
+            },
+            required: ['title'],
+          },
+        },
+        response_keys: ['issue_identifier', 'title'],
       })
       const parsed = parseAISuggestedCards(response.response)
       if (parsed.length === 0) {

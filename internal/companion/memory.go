@@ -713,27 +713,28 @@ func (m *ConversationMemory) AppendTurn(ctx context.Context, turn ConversationTu
 			Err(evErr).
 			Msg("hybrid bridge: failed to insert event")
 	} else if turn.Role == "user" && event.ID > 0 {
-		// Capture explicit preference signals immediately so they are available
+		// Capture deterministic user facts immediately so they are available
 		// even if async pipeline work is delayed.
-		if prefErr := m.extractUserPreferencesFromTurn(ctx, turn.ConversationID, event.ID, turn.Content); prefErr != nil {
+		if prefErr := m.extractUserFactsFromTurn(ctx, turn.ConversationID, event.ID, turn.Content); prefErr != nil {
 			zerolog.Ctx(ctx).Warn().
 				Str("conversation_id", turn.ConversationID).
 				Str("turn_id", turn.ID).
 				Err(prefErr).
-				Msg("hybrid bridge: failed to extract preferences from turn")
+				Msg("hybrid bridge: failed to extract deterministic facts from turn")
 		}
 	}
 
 	return nil
 }
 
-func (m *ConversationMemory) extractUserPreferencesFromTurn(ctx context.Context, conversationID string, sourceEventID int64, content string) error {
+func (m *ConversationMemory) extractUserFactsFromTurn(ctx context.Context, conversationID string, sourceEventID int64, content string) error {
 	content = strings.TrimSpace(content)
 	if conversationID == "" || sourceEventID <= 0 || content == "" {
 		return nil
 	}
 
 	extractions := extractProfileClaims(content)
+	extractions = append(extractions, extractExplicitFacts(content)...)
 	if len(extractions) == 0 {
 		return nil
 	}
@@ -745,11 +746,13 @@ func (m *ConversationMemory) extractUserPreferencesFromTurn(ctx context.Context,
 	defer tx.Rollback()
 
 	for _, entry := range extractions {
-		if entry.EntryType != EntryTypePreference {
+		switch entry.EntryType {
+		case EntryTypePreference, EntryTypeTechnicalContext, EntryTypeIdentity:
+			if err := m.persistDeterministicExtraction(ctx, tx, conversationID, sourceEventID, entry); err != nil {
+				return fmt.Errorf("persist deterministic extraction: %w", err)
+			}
+		default:
 			continue
-		}
-		if err := m.persistDeterministicExtraction(ctx, tx, conversationID, sourceEventID, entry); err != nil {
-			return fmt.Errorf("persist preference extraction: %w", err)
 		}
 	}
 
@@ -758,7 +761,7 @@ func (m *ConversationMemory) extractUserPreferencesFromTurn(ctx context.Context,
 	}
 
 	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("commit preference extraction tx: %w", err)
+		return fmt.Errorf("commit deterministic extraction tx: %w", err)
 	}
 
 	return nil

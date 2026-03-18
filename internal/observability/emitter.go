@@ -12,23 +12,26 @@ import (
 const WideEventFileName = "wide_events"
 
 var (
-	emitterSampler     Sampler = nil
-	emitterSamplerOnce sync.Once
+	emitterSampler   Sampler
+	emitterSamplerMu sync.RWMutex
 )
 
 // SetSamplerForTesting overrides the sampler for testing purposes.
 // This should only be called from tests.
 func SetSamplerForTesting(s Sampler) {
+	emitterSamplerMu.Lock()
+	defer emitterSamplerMu.Unlock()
 	emitterSampler = s
 }
 
 func getSampler() Sampler {
-	emitterSamplerOnce.Do(func() {
-		if emitterSampler == nil {
-			emitterSampler = DefaultSampler()
-		}
-	})
-	return emitterSampler
+	emitterSamplerMu.RLock()
+	sampler := emitterSampler
+	emitterSamplerMu.RUnlock()
+	if sampler != nil {
+		return sampler
+	}
+	return DefaultSampler()
 }
 
 // Emit writes a WideEvent to the observability stream if:

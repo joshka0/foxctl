@@ -25,27 +25,33 @@ func TestAgentStore(t *testing.T) {
 	// Test Create
 	t.Run("Create", func(t *testing.T) {
 		a := agent.Agent{
-			ID:          "test-agent-001",
-			ParentID:    "",
-			Namespace:   "org/test",
-			Role:        "test-role",
-			Prompt:      "You are a test agent",
-			SkillsAllow: []string{"test/skill"},
+			ID:              "test-agent-001",
+			ParentID:        "",
+			Namespace:       "org/test",
+			WorkspaceRoot:   "/sandbox/repo",
+			WorkspaceSource: "sandbox",
+			Role:            "test-role",
+			Prompt:          "You are a test agent",
+			SkillsAllow:     []string{"test/skill"},
 			Policy: agent.Policy{
 				CPU:      2,
 				MemoryMB: 1024,
 				Network:  "none",
 			},
-			ShareBB:       "scoped",
-			State:         agent.StateStarting,
-			CreatedAt:     time.Now().UTC(),
-			HeartbeatAt:   time.Now().UTC(),
-			LLMProvider:   "openai_compat",
-			LLMModel:      "demo-model",
-			LLMBaseURL:    "https://demo.example.com/v1",
-			LLMAuthMode:   "header",
-			LLMAuthHeader: "X-Demo-Key",
-			LLMAuthPrefix: "Token ",
+			ShareBB:         "scoped",
+			State:           agent.StateStarting,
+			CreatedAt:       time.Now().UTC(),
+			HeartbeatAt:     time.Now().UTC(),
+			LLMProvider:     "openai_compat",
+			LLMModel:        "demo-model",
+			LLMBaseURL:      "https://demo.example.com/v1",
+			LLMAuthMode:     "header",
+			LLMAuthHeader:   "X-Demo-Key",
+			LLMAuthPrefix:   "Token ",
+			SandboxProvider: "opensandbox",
+			SandboxID:       "sbx-123",
+			RepoURL:         "https://github.com/example/repo.git",
+			RepoRef:         "main",
 		}
 
 		if err := store.Create(ctx, a); err != nil {
@@ -65,6 +71,12 @@ func TestAgentStore(t *testing.T) {
 		}
 		if a.Role != "test-role" {
 			t.Errorf("expected role test-role, got %s", a.Role)
+		}
+		if a.WorkspaceRoot != "/sandbox/repo" {
+			t.Errorf("expected workspace_root round-trip, got %q", a.WorkspaceRoot)
+		}
+		if a.WorkspaceSource != "sandbox" {
+			t.Errorf("expected workspace_source round-trip, got %q", a.WorkspaceSource)
 		}
 		if a.LLMBaseURL != "https://demo.example.com/v1" {
 			t.Errorf("expected llm_base_url round-trip, got %q", a.LLMBaseURL)
@@ -86,6 +98,18 @@ func TestAgentStore(t *testing.T) {
 		}
 		if a.ExecutionLayer != agent.ExecutionLayerClassic {
 			t.Errorf("expected default execution layer %q, got %q", agent.ExecutionLayerClassic, a.ExecutionLayer)
+		}
+		if a.SandboxProvider != "opensandbox" {
+			t.Errorf("expected sandbox_provider round-trip, got %q", a.SandboxProvider)
+		}
+		if a.SandboxID != "sbx-123" {
+			t.Errorf("expected sandbox_id round-trip, got %q", a.SandboxID)
+		}
+		if a.RepoURL != "https://github.com/example/repo.git" {
+			t.Errorf("expected repo_url round-trip, got %q", a.RepoURL)
+		}
+		if a.RepoRef != "main" {
+			t.Errorf("expected repo_ref round-trip, got %q", a.RepoRef)
 		}
 	})
 

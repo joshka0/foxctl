@@ -186,19 +186,25 @@ func (b *Builder) BuildLayered(ctx context.Context, req LayeredRequest) (Layered
 			return LayeredBundle{}, err
 		}
 	}
+	suppressTemporalSamples := companionMetaBool(companionCtx.Meta, "suppress_temporal_samples")
+	suppressL0Temporal := companionMetaBool(companionCtx.Meta, "suppress_l0_temporal")
 
 	l2Section := joinSections(
 		strings.TrimSpace(companionCtx.L2),
 		strings.TrimSpace(episodeSection),
-		strings.TrimSpace(renderTemporalLayer(l2Temporal)),
+		strings.TrimSpace(renderTemporalLayerWithOptions(l2Temporal, !suppressTemporalSamples)),
 	)
 	l1Section := joinSections(
 		strings.TrimSpace(companionCtx.L1),
-		strings.TrimSpace(renderTemporalLayer(l1Temporal)),
+		strings.TrimSpace(renderTemporalLayerWithOptions(l1Temporal, !suppressTemporalSamples)),
 	)
+	l0TemporalSection := ""
+	if !(suppressL0Temporal && strings.TrimSpace(companionCtx.L0) != "") {
+		l0TemporalSection = strings.TrimSpace(renderTemporalLayerWithOptions(l0Temporal, !suppressTemporalSamples))
+	}
 	l0Section := joinSections(
 		strings.TrimSpace(companionCtx.L0),
-		strings.TrimSpace(renderTemporalLayer(l0Temporal)),
+		l0TemporalSection,
 	)
 
 	semanticRefs, semanticSection, semanticPath, semanticCapability, semanticApplied, semanticFallbackLevel, semanticEligibleCount, semanticErr := b.resolveSemanticArtifacts(ctx, sessionID, req.Semantic)
@@ -309,7 +315,7 @@ func collectTurnRefs(temporal ...TemporalBundle) []string {
 	return uniqueStrings(refs)
 }
 
-func renderTemporalLayer(bundle TemporalBundle) string {
+func renderTemporalLayerWithOptions(bundle TemporalBundle, includeSample bool) string {
 	if len(bundle.Buckets) == 0 {
 		return ""
 	}
@@ -319,14 +325,42 @@ func renderTemporalLayer(bundle TemporalBundle) string {
 		sb.WriteString(bucket.Key)
 		sb.WriteString(": ")
 		sb.WriteString(fmt.Sprintf("%d turns, %d tool calls", bucket.TurnCount, bucket.ToolCalls))
-		if strings.TrimSpace(bucket.Summary) != "" {
+		summary := strings.TrimSpace(bucket.Summary)
+		if !includeSample {
+			summary = stripTemporalSample(summary)
+		}
+		if strings.TrimSpace(summary) != "" {
 			sb.WriteString(" (")
-			sb.WriteString(strings.TrimSpace(bucket.Summary))
+			sb.WriteString(strings.TrimSpace(summary))
 			sb.WriteString(")")
 		}
 		sb.WriteString("\n")
 	}
 	return strings.TrimSpace(sb.String())
+}
+
+func companionMetaBool(meta map[string]any, key string) bool {
+	if len(meta) == 0 {
+		return false
+	}
+	raw, ok := meta[key]
+	if !ok {
+		return false
+	}
+	value, ok := raw.(bool)
+	return ok && value
+}
+
+func stripTemporalSample(summary string) string {
+	summary = strings.TrimSpace(summary)
+	if summary == "" {
+		return ""
+	}
+	idx := strings.Index(summary, `; sample "`)
+	if idx >= 0 {
+		return strings.TrimSpace(summary[:idx])
+	}
+	return summary
 }
 
 func renderLayeredContent(l2, narrative, l1, l0, semantic string) string {

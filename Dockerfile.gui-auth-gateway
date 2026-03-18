@@ -1,18 +1,17 @@
 # Multi-stage build for the public gui-agent auth gateway.
 
-FROM oven/bun:1 AS builder
+FROM oven/bun:1.2.18 AS builder
 
 WORKDIR /app
 
 COPY package.json bun.lock tsconfig.json ./
-COPY packages/gui-agent ./packages/gui-agent
-COPY packages/gui-auth-gateway ./packages/gui-auth-gateway
+COPY packages ./packages
 
 RUN bun install --frozen-lockfile
 RUN bun run --cwd packages/gui-agent build
 RUN bun run --cwd packages/gui-auth-gateway build
 
-FROM oven/bun:1-slim
+FROM oven/bun:1.2.18-slim
 
 WORKDIR /app
 

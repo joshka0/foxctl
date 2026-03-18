@@ -18,6 +18,12 @@ export interface Agent {
   exec_mode?: "reactive" | "autonomous" | "proactive" | "tick" | "story";
   think_interval?: number;
   conversation_id?: string; // Linked companion conversation ID
+  workspace_root?: string;
+  workspace_source?: "local" | "sandbox" | string;
+  sandbox_provider?: string;
+  sandbox_id?: string;
+  repo_url?: string;
+  repo_ref?: string;
   memory_scope?: "agent" | "session" | string;
   memory_retention?: "companion" | "durable" | "task" | "ephemeral" | string;
 }
@@ -377,6 +383,13 @@ export interface AgentSpawnResponse {
   actor_id: string;
   status: string;
   name?: string; // Generated or provided name
+  workspace_id?: string;
+  workspace_root?: string;
+  workspace_source?: "local" | "sandbox" | string;
+  sandbox_provider?: string;
+  sandbox_id?: string;
+  repo_url?: string;
+  repo_ref?: string;
 }
 
 export interface MailboxListResponse {

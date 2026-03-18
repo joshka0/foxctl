@@ -138,9 +138,11 @@ const apiProxy = createProxyMiddleware({
   changeOrigin: true,
   xfwd: true,
   ws: false,
+  pathFilter: "/api",
 });
 
-app.use("/api", requireSession(), apiProxy);
+app.use("/api", requireSession());
+app.use(apiProxy);
 
 app.use(
   "/assets",
@@ -194,8 +196,20 @@ server.on("upgrade", async (req, socket, head) => {
   }
 });
 
-server.listen(config.port, () => {
-  console.info(
-    `[gui-auth-gateway] listening on http://0.0.0.0:${config.port} -> ${config.upstreamURL}`,
-  );
-});
+async function main() {
+  try {
+    const ctx = await auth.$context;
+    await ctx.runMigrations();
+  } catch (error) {
+    console.error("[gui-auth-gateway] failed to run auth migrations", error);
+    process.exit(1);
+  }
+
+  server.listen(config.port, () => {
+    console.info(
+      `[gui-auth-gateway] listening on http://0.0.0.0:${config.port} -> ${config.upstreamURL}`,
+    );
+  });
+}
+
+void main();

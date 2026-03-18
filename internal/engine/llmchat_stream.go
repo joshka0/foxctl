@@ -137,6 +137,19 @@ func (e *LLMChatEngine) RunStreaming(ctx context.Context, input EngineInput, str
 				toolCall := ToolCall(tc)
 				output.ToolCalls = append(output.ToolCalls, toolCall)
 
+				if result, finalText, handled := maybeHandleFinalAnswerJSONTool(toolCall); handled {
+					output.ToolResults = append(output.ToolResults, result)
+					if streamCfg.OnToolCall != nil {
+						streamCfg.OnToolCall(toolCall)
+					}
+					if streamCfg.OnToolResult != nil {
+						streamCfg.OnToolResult(toolCall, result)
+					}
+					output.AssistantText = finalText
+					output.StopReason = StopReasonEndTurn
+					return output, nil
+				}
+
 				// Notify callback
 				if streamCfg.OnToolCall != nil {
 					streamCfg.OnToolCall(toolCall)

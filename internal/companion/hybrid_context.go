@@ -365,9 +365,12 @@ func formatTrustLabeledContext(
 		role := "assistant"
 		if strings.EqualFold(t.Role, "user") {
 			role = "user"
+		} else if isLowSignalAssistantTurnText(t.Content) {
+			continue
 		}
-		if strings.TrimSpace(t.Content) != "" {
-			turnLines = append(turnLines, fmt.Sprintf("- %s: %s", role, t.Content))
+		content := sanitizeTurnContentForMemoryLayer(role, t.Content)
+		if strings.TrimSpace(content) != "" {
+			turnLines = append(turnLines, fmt.Sprintf("- %s: %s", role, content))
 		}
 	}
 	if len(turnLines) == 0 {

@@ -35,6 +35,8 @@ import {
   getPromptSummaryOrSubtitle,
   isWorkerAgent,
   getAgentActivityTimestamp,
+  getAgentRepoDisplayName,
+  isSandboxBackedAgent,
 } from "@/lib/agent-utils";
 import {
   indexRoomsByActor,
@@ -176,6 +178,10 @@ export function AgentList() {
     [agents],
   );
   const workerTotal = agents.length - conversationalTotal;
+  const sandboxBackedCount = useMemo(
+    () => agents.filter((agent) => isSandboxBackedAgent(agent)).length,
+    [agents],
+  );
   const latestStoppedAgent = useMemo(() => {
     return [...agents]
       .filter((agent) => agent.state === "stopped")
@@ -463,6 +469,14 @@ export function AgentList() {
             <Badge variant="secondary" className="text-xs">
               {workerTotal} workers
             </Badge>
+            {sandboxBackedCount > 0 && (
+              <Badge
+                variant="outline"
+                className="text-xs border-sky-500/30 bg-sky-500/5 text-sky-600"
+              >
+                {sandboxBackedCount} sandbox-backed
+              </Badge>
+            )}
             {agentCounts.running > 0 && (
               <Badge className="text-xs bg-green-500/10 text-green-500 border-green-500/20">
                 {agentCounts.running} running
@@ -852,6 +866,8 @@ function AgentCard({
   isStartLoading,
 }: AgentCardProps) {
   const roleIcon = getRoleIcon(agent.role);
+  const sandboxBacked = isSandboxBackedAgent(agent);
+  const repoLabel = getAgentRepoDisplayName(agent.repo_url);
   const stateColors: Record<string, string> = {
     running: "bg-green-500",
     idle: "bg-yellow-500",
@@ -870,6 +886,13 @@ function AgentCard({
     if (!ns || ns === "/") return "root";
     const parts = ns.split("/");
     return parts[parts.length - 1] || ns;
+  };
+
+  const getWorkspaceRootDisplayName = (workspaceRoot?: string) => {
+    if (!workspaceRoot) return null;
+    const segments = workspaceRoot.split("/").filter(Boolean);
+    const leaf = segments[segments.length - 1];
+    return leaf || workspaceRoot;
   };
 
   return (
@@ -921,6 +944,21 @@ function AgentCard({
                 >
                   {stateLabels[agent.state] || agent.state}
                 </Badge>
+                <Badge
+                  variant="outline"
+                  className={cn(
+                    "text-xs",
+                    sandboxBacked &&
+                      "border-sky-500/30 bg-sky-500/5 text-sky-600",
+                  )}
+                >
+                  {sandboxBacked ? "sandbox clone" : "local runtime"}
+                </Badge>
+                {sandboxBacked && agent.sandbox_provider && (
+                  <Badge variant="secondary" className="text-xs">
+                    {agent.sandbox_provider}
+                  </Badge>
+                )}
               </div>
 
               {/* ID and Namespace */}
@@ -938,6 +976,15 @@ function AgentCard({
                     {getWorkspaceDisplayName(agent.ns)}
                   </span>
                 )}
+                {agent.workspace_root && (
+                  <span
+                    className="flex items-center gap-1"
+                    title={agent.workspace_root}
+                  >
+                    <Folder className="h-3 w-3" />
+                    {getWorkspaceRootDisplayName(agent.workspace_root)}
+                  </span>
+                )}
               </div>
 
               {/* Prompt Summary */}
@@ -945,6 +992,22 @@ function AgentCard({
                 <p className="mt-1 text-xs text-muted-foreground line-clamp-1">
                   {getPromptSummaryOrSubtitle(agent)}
                 </p>
+              )}
+
+              {(repoLabel || agent.sandbox_id) && (
+                <div className="mt-2 flex items-center gap-1 flex-wrap">
+                  {repoLabel && (
+                    <Badge variant="outline" className="text-xs">
+                      {repoLabel}
+                      {agent.repo_ref ? ` @ ${agent.repo_ref}` : ""}
+                    </Badge>
+                  )}
+                  {agent.sandbox_id && (
+                    <Badge variant="secondary" className="text-xs font-mono">
+                      sbx:{agent.sandbox_id.slice(0, 10)}
+                    </Badge>
+                  )}
+                </div>
               )}
 
               {/* Model and Timing info */}
