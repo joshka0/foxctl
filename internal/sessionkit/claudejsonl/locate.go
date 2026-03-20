@@ -111,7 +111,7 @@ func LocateAllSessionJSONLs(workspacePath string) []struct {
 func ClaudeProjectDir(workspacePath string) string {
 	homeDir, _ := os.UserHomeDir()
 	// Claude Code uses dash-separated path format
-	dashPath := strings.ReplaceAll(workspacePath, "/", "-")
+	dashPath := strings.ReplaceAll(workspacePath, string(filepath.Separator), "-")
 	projectDir := filepath.Join(homeDir, ".claude", "projects", dashPath)
 	if _, err := os.Stat(projectDir); err == nil {
 		return projectDir

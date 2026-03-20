@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"os"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -221,6 +222,20 @@ func TestResolveWorkspaceCandidates_CleanedPath(t *testing.T) {
 	assert.NotEmpty(t, result)
 	// Should be cleaned
 	assert.NotContains(t, result[0], "..")
+}
+
+func TestNormalizeWorkspacePath_Relative(t *testing.T) {
+	cwd := t.TempDir()
+	oldWD, err := os.Getwd()
+	assert.NoError(t, err)
+	err = os.Chdir(cwd)
+	assert.NoError(t, err)
+	t.Cleanup(func() {
+		_ = os.Chdir(oldWD)
+	})
+
+	got := normalizeWorkspacePath(".")
+	assert.Equal(t, normalizeWorkspacePath(cwd), got)
 }
 
 // Edge case tests

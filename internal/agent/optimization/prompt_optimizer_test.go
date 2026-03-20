@@ -2,6 +2,7 @@ package optimization_test
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/jkatigb/agentctl/internal/agent/optimization"
@@ -283,6 +284,235 @@ func TestPromptOptimizer_WithTrajectoryData(t *testing.T) {
 	// Should complete without error even with trajectory data
 	if result == nil {
 		t.Fatal("expected result")
+	}
+}
+
+func TestPromptOptimizer_GEPAModeUsesReflectionSignals(t *testing.T) {
+	ctx := context.Background()
+	trajStore := openTestTrajStore(t)
+	defer trajStore.Close() //nolint:errcheck
+
+	patternStore := openTestPatternStore(t)
+	defer patternStore.Close() //nolint:errcheck
+
+	insertTrajectory := func(rating int, feedback string, success bool, toolName string, toolError string) {
+		t.Helper()
+
+		outcome := &trajectory.Outcome{
+			Success:  success,
+			Feedback: feedback,
+		}
+		outcome.HumanRating = &rating
+
+		traj, err := trajStore.InsertTrajectory(ctx, trajectory.Trajectory{
+			WorkspaceID: "ws-test",
+			AgentRole:   "coder",
+			Status:      trajectory.StatusOK,
+			Outcome:     outcome,
+		})
+		if err != nil {
+			t.Fatalf("insert trajectory: %v", err)
+		}
+
+		events := []trajectory.Event{
+			{TrajectoryID: traj.ID, Kind: trajectory.EventKindUserRequest, DataInline: map[string]any{"text": "Fix auth regression"}},
+			{TrajectoryID: traj.ID, Kind: trajectory.EventKindAgentThought, DataInline: map[string]any{"thought": "Inspecting issue"}},
+			{TrajectoryID: traj.ID, Kind: trajectory.EventKindToolCall, DataInline: map[string]any{"tool": toolName}},
+			{TrajectoryID: traj.ID, Kind: trajectory.EventKindToolResult, DataInline: map[string]any{"error": toolError}},
+			{TrajectoryID: traj.ID, Kind: trajectory.EventKindToolCall, DataInline: map[string]any{"tool": "edit"}},
+			{TrajectoryID: traj.ID, Kind: trajectory.EventKindAgentThought, DataInline: map[string]any{"result": "done"}},
+		}
+		for idx, event := range events {
+			if _, err := trajStore.InsertEvent(ctx, event); err != nil {
+				t.Fatalf("insert event %d: %v", idx, err)
+			}
+		}
+	}
+
+	insertTrajectory(1, "Missed explicit output format and retried too often.", false, "read", "file not found")
+	insertTrajectory(2, "Tool selection was noisy and result formatting was unclear.", false, "grep", "syntax error")
+	insertTrajectory(5, "Clear final result and efficient workflow with strong verification.", true, "read", "")
+	insertTrajectory(4, "Produced a clear final result and verified the fix quickly.", true, "edit", "")
+
+	config := optimization.PromptOptimizerConfig{
+		Mode:              "gepa",
+		Backend:           "agentctl",
+		BreadthCandidates: 4,
+		DepthIterations:   1,
+		MinImprovement:    0.01,
+		LookbackDays:      30,
+	}
+	optimizer := optimization.NewPromptOptimizer(trajStore, patternStore, config)
+	optimizer.SetEvalFunc(func(ctx context.Context, prompt string) (float64, error) {
+		score := 0.5
+		if strings.Contains(prompt, "Address recurring failure modes observed in past trajectories") {
+			score += 0.2
+		}
+		if strings.Contains(prompt, "Reflection-driven improvements to apply") {
+			score += 0.2
+		}
+		if strings.Contains(prompt, "Preserve these high-confidence strengths from successful runs") {
+			score += 0.1
+		}
+		return score, nil
+	})
+
+	result, err := optimizer.OptimizeInstruction(ctx, "ws-test", "coder", "You are a careful coding assistant.")
+	if err != nil {
+		t.Fatalf("optimize instruction: %v", err)
+	}
+
+	if result == nil {
+		t.Fatal("expected result")
+	}
+	if result.Mode != "gepa" {
+		t.Fatalf("mode=%q want gepa", result.Mode)
+	}
+	if len(result.Candidates) == 0 {
+		t.Fatal("expected GEPA candidates")
+	}
+	if !strings.Contains(result.OptimizedPrompt, "Address recurring failure modes observed in past trajectories") &&
+		!strings.Contains(result.OptimizedPrompt, "Reflection-driven improvements to apply") {
+		t.Fatalf("optimized prompt missing GEPA reflection content: %q", result.OptimizedPrompt)
+	}
+}
+
+func TestPromptOptimizer_GEPAModeUsesDatasetExamples(t *testing.T) {
+	ctx := context.Background()
+	trajStore := openTestTrajStore(t)
+	defer trajStore.Close() //nolint:errcheck
+
+	patternStore := openTestPatternStore(t)
+	defer patternStore.Close() //nolint:errcheck
+
+	optimizer := optimization.NewPromptOptimizer(trajStore, patternStore, optimization.PromptOptimizerConfig{
+		Mode:              "gepa",
+		Backend:           "agentctl",
+		BreadthCandidates: 5,
+		DepthIterations:   1,
+		MinImprovement:    0.01,
+		LookbackDays:      30,
+	})
+	optimizer.SetTranscriptExamples([]optimization.TranscriptTrainingExample{
+		{
+			Input: optimization.TranscriptTrainingInput{
+				UserRequest: "Investigate the failing integration test",
+			},
+			Output: optimization.TranscriptTrainingOutput{
+				Response:  "I inspected the test output, isolated the regression, and verified the fix.",
+				ToolsUsed: []string{"read", "edit"},
+			},
+			Metadata: optimization.TranscriptTrainingMetadata{
+				Rating:  5,
+				Outcome: "success",
+				Notes:   "Strong structured debugging",
+			},
+		},
+	})
+	optimizer.SetPreferenceExamples([]optimization.PromptPreferenceExample{
+		{
+			RecordType: "prompt_preference",
+			Input: optimization.PromptPreferenceInput{
+				Question: "Fix the failing test",
+			},
+			Chosen: optimization.PromptPreferenceCandidate{
+				VariantID: "chosen-1",
+				AgentRole: "coder",
+				Mode:      "gepa",
+				Prompt:    "Always inspect failures first.\nVerify the fix before finishing.",
+			},
+			Rejected: optimization.PromptPreferenceCandidate{
+				VariantID: "rejected-1",
+				AgentRole: "coder",
+				Mode:      "copro",
+				Prompt:    "Try random fixes quickly.",
+			},
+		},
+	})
+	optimizer.SetEvalFunc(func(ctx context.Context, prompt string) (float64, error) {
+		score := 0.5
+		if strings.Contains(prompt, "High-rated transcript examples to emulate") {
+			score += 0.2
+		}
+		if strings.Contains(prompt, "Preferred directives from winning prompt variants") {
+			score += 0.2
+		}
+		return score, nil
+	})
+
+	result, err := optimizer.OptimizeInstruction(ctx, "ws-test", "coder", "You are a coding assistant.")
+	if err != nil {
+		t.Fatalf("OptimizeInstruction: %v", err)
+	}
+	if result == nil {
+		t.Fatal("expected result")
+	}
+	if !strings.Contains(result.OptimizedPrompt, "High-rated transcript examples to emulate") &&
+		!strings.Contains(result.OptimizedPrompt, "Preferred directives from winning prompt variants") {
+		t.Fatalf("optimized prompt missing dataset-driven content: %q", result.OptimizedPrompt)
+	}
+}
+
+func TestPromptOptimizer_ProposeCandidates(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	trajStore := openTestTrajStore(t)
+	defer trajStore.Close() //nolint:errcheck
+
+	patternStore := openTestPatternStore(t)
+	defer patternStore.Close() //nolint:errcheck
+
+	optimizer := optimization.NewPromptOptimizer(trajStore, patternStore, optimization.PromptOptimizerConfig{
+		Mode:              "gepa",
+		Backend:           "agentctl",
+		BreadthCandidates: 4,
+		DepthIterations:   2,
+		MinImprovement:    0.01,
+		LookbackDays:      30,
+	})
+	optimizer.SetTranscriptExamples([]optimization.TranscriptTrainingExample{
+		{
+			Input: optimization.TranscriptTrainingInput{UserRequest: "Inspect the failing test"},
+			Output: optimization.TranscriptTrainingOutput{
+				Response: "I inspected the failure first and verified the fix.",
+			},
+			Metadata: optimization.TranscriptTrainingMetadata{
+				Rating:  5,
+				Outcome: "success",
+			},
+		},
+	})
+	optimizer.SetPreferenceExamples([]optimization.PromptPreferenceExample{
+		{
+			Chosen: optimization.PromptPreferenceCandidate{
+				Prompt: "Inspect failures before editing.\nVerify the fix after changes.",
+			},
+			Rejected: optimization.PromptPreferenceCandidate{
+				Prompt: "Guess and patch quickly.",
+			},
+		},
+	})
+	optimizer.SetEvalFunc(func(ctx context.Context, prompt string) (float64, error) {
+		score := 0.2 + float64(len(prompt))/1000
+		if strings.Contains(prompt, "High-rated transcript examples to emulate") {
+			score += 0.2
+		}
+		if strings.Contains(prompt, "Preferred directives from winning prompt variants") {
+			score += 0.2
+		}
+		return score, nil
+	})
+
+	candidates, err := optimizer.ProposeCandidates(ctx, "ws-test", "coder", "You are a coding assistant.", 3)
+	if err != nil {
+		t.Fatalf("ProposeCandidates: %v", err)
+	}
+	if len(candidates) != 3 {
+		t.Fatalf("len(candidates)=%d want 3", len(candidates))
+	}
+	if candidates[0].Score < candidates[1].Score {
+		t.Fatalf("expected sorted candidates by score: %+v", candidates)
 	}
 }
 

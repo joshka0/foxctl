@@ -141,6 +141,21 @@ func TestAgentStore(t *testing.T) {
 		}
 	})
 
+	// Test UpdatePrompt
+	t.Run("UpdatePrompt", func(t *testing.T) {
+		if err := store.UpdatePrompt(ctx, "test-agent-001", "You are an optimized test agent"); err != nil {
+			t.Fatalf("failed to update prompt: %v", err)
+		}
+
+		a, err := store.Get(ctx, "test-agent-001")
+		if err != nil {
+			t.Fatalf("failed to get agent: %v", err)
+		}
+		if a.Prompt != "You are an optimized test agent" {
+			t.Errorf("expected updated prompt, got %q", a.Prompt)
+		}
+	})
+
 	// Test UpdateMemoryScope
 	t.Run("UpdateMemoryScope", func(t *testing.T) {
 		if err := store.UpdateMemoryScope(ctx, "test-agent-001", agent.MemoryScopeSession); err != nil {

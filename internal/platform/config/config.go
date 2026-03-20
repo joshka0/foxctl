@@ -1115,16 +1115,16 @@ func finalizeConfig(cfg Config, home string) Config {
 	}
 
 	// Embedding API key env var overrides (FC/IS compliant)
-	if provider := os.Getenv("AGENTCTL_EMBEDDING_PROVIDER"); provider != "" && cfg.Embedding.Provider == "" {
+	if provider := os.Getenv("AGENTCTL_EMBEDDING_PROVIDER"); provider != "" {
 		cfg.Embedding.Provider = strings.TrimSpace(provider)
 	}
-	if model := os.Getenv("AGENTCTL_EMBEDDING_MODEL"); model != "" && cfg.Embedding.Model == "" {
+	if model := os.Getenv("AGENTCTL_EMBEDDING_MODEL"); model != "" {
 		cfg.Embedding.Model = strings.TrimSpace(model)
 	}
-	if baseURL := os.Getenv("AGENTCTL_EMBEDDING_BASE_URL"); baseURL != "" && cfg.Embedding.BaseURL == "" {
+	if baseURL := os.Getenv("AGENTCTL_EMBEDDING_BASE_URL"); baseURL != "" {
 		cfg.Embedding.BaseURL = strings.TrimSpace(baseURL)
 	}
-	if key := os.Getenv("AGENTCTL_EMBEDDING_API_KEY"); key != "" && cfg.Embedding.APIKey == "" {
+	if key := os.Getenv("AGENTCTL_EMBEDDING_API_KEY"); key != "" {
 		cfg.Embedding.APIKey = key
 	}
 	// Backward-compatible aliases for OpenAI-compatible embedding endpoints.

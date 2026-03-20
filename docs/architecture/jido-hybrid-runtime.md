@@ -16,7 +16,7 @@ This is the canonical architecture note for the current hybrid `agentctl` + Jido
 |------|-------|
 | Status | Current |
 | Canonical scope | Ownership split between `agentctl` and Jido, transport boundaries, deployment shape |
-| Last reviewed | 2026-03-06 |
+| Last reviewed | 2026-03-20 |
 
 ## Why This Exists
 
@@ -147,6 +147,75 @@ Current intended flow:
 
 This is why kanban, overseer policy, and Jido runtime fit together without collapsing into one implementation layer.
 
+## Recommended Jido Patterns
+
+The Jido learning guides point to four patterns that fit the current hybrid
+architecture well, as long as the ownership split above remains intact.
+
+### Sensors and real-time signals
+
+Use Jido sensors and direct signal injection for runtime reactivity, but only
+after `agentctl` has normalized external inputs into canonical domain events.
+
+Good fit:
+
+- Teams or other chat/webhook ingress handled in Go, then converted into
+  canonical runtime signals
+- cloud alert fan-in such as CloudWatch, Grafana, or deployment webhooks
+- connector health and cluster status updates
+
+Recommended signal shape:
+
+- domain-prefixed and portable, for example:
+  - `ops.teams.message`
+  - `ops.alert.cloudwatch`
+  - `ops.alert.grafana`
+  - `ops.webhook.azuredevops`
+  - `ops.connector.k8s.status`
+
+That keeps webhook parsing, auth, and boundary validation on the Go side while
+still letting Jido supervise reactive flows and context-aware routing.
+
+### Plugins and composable agents
+
+Use Jido plugins for reusable runtime-local capability packs:
+
+- isolated state slices
+- signal routes
+- per-agent runtime config
+- action bundles that orchestrate existing `agentctl` semantics
+
+Good examples for future work:
+
+- investigation run plugin
+- approval gate plugin
+- observability ingress plugin
+- Kubernetes connector plugin
+- email thread plugin
+- document workflow plugin
+
+Do not use plugins as a substitute for canonical Go-side stores such as
+bindings, durable run history, approval records, or semantic retrieval state.
+
+### Workflows and directives
+
+Use Jido workflows when a domain needs deterministic multi-step execution with
+shared runtime state and directive output.
+
+Good fit:
+
+1. resolve binding
+2. create or resume run
+3. retrieve context
+4. collect bounded evidence
+5. synthesize result
+6. emit approval directive if a mutation is required
+7. resume after approval and capture outcome evidence
+
+The actions in those workflows should remain thin: they should call back into
+`agentctl` services, tools, or APIs instead of reimplementing cloud- or
+retrieval-specific semantics inside Elixir.
+
 ## Memory and Retention
 
 The hybrid shape also preserves retention policy on the semantic side.
@@ -156,6 +225,32 @@ The hybrid shape also preserves retention policy on the semantic side.
 - `agentctl` remains the place where retrieval quality evolves, including vector search, semantic recall, and timeline shaping.
 
 That is important because retention behavior is not just runtime state. It depends on the retrieval stack you already have in Go.
+
+Practical rule:
+
+- Jido memory is runtime-local, checkpoint-oriented, and useful for transient
+  working state
+- `agentctl` memory remains the durable semantic system of record
+
+That means Jido memory, thread, and lightweight retrieval features are useful
+for live workflows and restores, but long-lived organization-facing knowledge
+should continue to live in `agentctl` memory/session surfaces and ACA / Obsidian.
+
+## Future Workflow Domains
+
+The same split that works for SRE workflows should also work for later workflow
+domains such as:
+
+- email agents
+- document or Microsoft Word agents
+- approval-driven business workflows
+
+The runtime pattern should stay the same:
+
+1. `agentctl` owns ingress normalization, policy, storage, and semantic tools
+2. Jido owns live workflow execution, signals, parent/child trees, and
+   directives
+3. durable outcomes reconcile back into Go-side events, stores, and ACA notes
 
 ## Deployment Shape
 

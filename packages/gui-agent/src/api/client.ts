@@ -22,6 +22,19 @@ import type {
 } from "./types";
 
 const API_BASE = "/api";
+const IS_DEV = import.meta.env.DEV;
+
+const DEV_AUTH_SESSION: AuthSessionResponse = {
+  session: {
+    id: "dev-local-session",
+  },
+  user: {
+    id: "dev-local-user",
+    email: "local@agentctl.dev",
+    name: "Local Dev",
+    emailVerified: true,
+  },
+};
 
 export class APIUnauthorizedError extends Error {
   readonly status = 401;
@@ -168,6 +181,9 @@ export async function getAuthSession(): Promise<AuthSessionResponse | null> {
     if (error instanceof APIUnauthorizedError) {
       return null;
     }
+    if (IS_DEV && error instanceof Error && error.message.includes("404")) {
+      return DEV_AUTH_SESSION;
+    }
     throw error;
   }
 }
@@ -181,6 +197,9 @@ export async function signOutAuthSession(): Promise<void> {
   });
 
   if (!response.ok) {
+    if (IS_DEV && response.status === 404) {
+      return;
+    }
     const text = await response.text();
     throw new Error(text || `Sign out failed: ${response.status}`);
   }

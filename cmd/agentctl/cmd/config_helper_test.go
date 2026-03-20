@@ -48,6 +48,9 @@ embedding:
 		t.Fatalf("write workspace config: %v", err)
 	}
 
+	// Keep base load isolated from the repository's own workspace-local config.
+	t.Chdir(tmp)
+
 	baseCfg, err := config.Load(context.Background())
 	if err != nil {
 		t.Fatalf("load base config: %v", err)

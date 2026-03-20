@@ -16,8 +16,10 @@ This directory contains active planning documents and implementation roadmaps.
 - `v2-symphony-kanban-implementation.md`
 - `gui-agent-improvement-roadmap.md`
 - `features/opensandbox-sandbox-workspace-integration.md`
+- `features/aca-self-evolving-memory-layer.md`
 - `jidoctl-v2-hybrid-interface.md`
 - `chat-platform-adapter.md`
+- `teams-sre-integrations-plan.md`
 - `k8s-sql-storage.md`
 - `embedding-quality-roadmap/README.md`
 - `k8s/00-overview.md`

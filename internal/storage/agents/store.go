@@ -27,6 +27,7 @@ type Store interface {
 	List(ctx context.Context, limit int) ([]agent.Agent, error)
 	ListByParent(ctx context.Context, parentID string, limit int) ([]agent.Agent, error)
 	UpdateIdentity(ctx context.Context, id, name, slug string) error
+	UpdatePrompt(ctx context.Context, id, prompt string) error
 	UpdateState(ctx context.Context, id string, state agent.State) error
 	UpdateHeartbeat(ctx context.Context, id string) error
 	Delete(ctx context.Context, id string) error
@@ -286,6 +287,22 @@ func (s *sqlStore) UpdateIdentity(ctx context.Context, id, name, slug string) er
 	rows, err := res.RowsAffected()
 	if err != nil {
 		return fmt.Errorf("agents: update identity rows affected: %w", err)
+	}
+	if rows == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+func (s *sqlStore) UpdatePrompt(ctx context.Context, id, prompt string) error {
+	res, err := s.db.ExecContext(ctx, `
+		UPDATE agents SET prompt = $1 WHERE id = $2 AND deleted_at IS NULL`, strings.TrimSpace(prompt), id)
+	if err != nil {
+		return fmt.Errorf("agents: update prompt: %w", err)
+	}
+	rows, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("agents: update prompt rows affected: %w", err)
 	}
 	if rows == 0 {
 		return ErrNotFound

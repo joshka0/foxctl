@@ -23,13 +23,13 @@ func TestContextRetrieveInspect_AppliesPolicyPatch(t *testing.T) {
 	noteRelPath := filepath.Join("notes", "repo", filepath.Base(h.workspacePath), "packages", "internal-storage-memory.md")
 	notePath := filepath.Join(h.vaultRoot, noteRelPath)
 	writeTestVaultNote(t, notePath, `---
-title: Storage Memory
+title: Canonical Package Anchor
 type: map
 trust: canonical
 paths:
   - internal/storage/memory/store.go
 ---
-Canonical package note for storage memory.
+Reference anchor for package coverage.
 `)
 	rebuildTestVaultIndex(t, h)
 
@@ -41,7 +41,7 @@ Canonical package note for storage memory.
 	cmd.SetArgs([]string{
 		"--workspace", h.workspacePath,
 		"--vault-path", h.vaultRoot,
-		"--query", "storage memory package",
+		"--query", "durable retention package",
 		"--expected-path", expectedPath,
 		"--apply",
 		"--apply-policy-patch",
@@ -77,13 +77,13 @@ func TestContextRetrieveInspectSuite_EmitsArtifactAndAcceptsControlSuite(t *test
 	h := newACAInspectHarness(t)
 	noteRelPath := filepath.Join("notes", "repo", filepath.Base(h.workspacePath), "packages", "internal-storage-memory.md")
 	writeTestVaultNote(t, filepath.Join(h.vaultRoot, noteRelPath), `---
-title: Storage Memory
+title: Canonical Package Anchor
 type: map
 trust: canonical
 paths:
   - internal/storage/memory/store.go
 ---
-Canonical package note for storage memory.
+Reference anchor for package coverage.
 `)
 	rebuildTestVaultIndex(t, h)
 
@@ -91,7 +91,7 @@ Canonical package note for storage memory.
 	if err := os.WriteFile(targetSuitePath, []byte(`name: target
 queries:
   - id: storage-memory
-    query: storage memory package
+    query: durable retention package
     expected_any_of:
       - internal/storage/memory/store.go
 `), 0o644); err != nil {
@@ -101,7 +101,7 @@ queries:
 	controlSuiteBody := fmt.Sprintf(`name: control
 queries:
   - id: storage-note
-    query: storage memory package
+    query: durable retention package
     expected_any_of:
       - %s
 `, filepath.ToSlash(noteRelPath))
@@ -214,13 +214,13 @@ func TestContextRetrieveInspectRunsAndArtifactCommands(t *testing.T) {
 	h := newACAInspectHarness(t)
 	noteRelPath := filepath.Join("notes", "repo", filepath.Base(h.workspacePath), "packages", "internal-storage-memory.md")
 	writeTestVaultNote(t, filepath.Join(h.vaultRoot, noteRelPath), `---
-title: Storage Memory
+title: Canonical Package Anchor
 type: map
 trust: canonical
 paths:
   - internal/storage/memory/store.go
 ---
-Canonical package note for storage memory.
+Reference anchor for package coverage.
 `)
 	rebuildTestVaultIndex(t, h)
 
@@ -228,7 +228,7 @@ Canonical package note for storage memory.
 	if err := os.WriteFile(targetSuitePath, []byte(`name: target
 queries:
   - id: storage-memory
-    query: storage memory package
+    query: durable retention package
     expected_any_of:
       - internal/storage/memory/store.go
 `), 0o644); err != nil {
@@ -320,6 +320,7 @@ func newACAInspectHarness(t *testing.T) acaInspectHarness {
 	t.Helper()
 	tmp := t.TempDir()
 	t.Setenv("HOME", tmp)
+	t.Setenv("AGENTCTL_OBSIDIAN_SEMANTIC_ENABLED", "0")
 	cfg, err := config.Load(context.Background())
 	if err != nil {
 		t.Fatalf("config load: %v", err)

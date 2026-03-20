@@ -76,6 +76,7 @@ func main() {
 func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	// Default workspace
 	in.Workspace = workspaceutil.Resolve(in.Workspace, "", rc.Workspace)
+	in.Workspace = normalizeWorkspacePath(in.Workspace)
 
 	source := strings.ToLower(strings.TrimSpace(in.Source))
 	if source == "" {
@@ -588,6 +589,20 @@ func resolveWorkspaceCandidates(path string) []string {
 		candidates = append(candidates, resolved)
 	}
 	return candidates
+}
+
+func normalizeWorkspacePath(path string) string {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return ""
+	}
+	if abs, err := filepath.Abs(path); err == nil && abs != "" {
+		path = abs
+	}
+	if resolved, err := filepath.EvalSymlinks(path); err == nil && resolved != "" {
+		path = resolved
+	}
+	return filepath.Clean(path)
 }
 
 // matchesCodexWorkspace determines if a Codex session matches the target workspace using path and repository URL comparison.
