@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
 import { Checkbox } from '@/components/ui/checkbox'
+import { HelpTooltip, Tooltip } from '@/components/ui/tooltip'
 import { cn, formatRelativeTime } from '@/lib/utils'
 import { useActivityStore } from '@/stores/activityStore'
 import { useActivityFocusStore } from '@/stores/activityFocusStore'
@@ -525,16 +526,17 @@ export function LogsViewer() {
                   Back to {formatSurfaceLabel(focus.sourceSurface)}
                 </Button>
               )}
-              <Button
-                variant="ghost"
-                size="sm"
-                className="h-7 text-[11px] px-2"
-                onClick={clearFocus}
-                title="Clear focus (Esc)"
-              >
-                <X className="h-3 w-3 mr-1" />
-                Clear focus (Esc)
-              </Button>
+              <Tooltip content="Clear the current event focus and return to the full stream. Shortcut: Esc.">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 text-[11px] px-2"
+                  onClick={clearFocus}
+                >
+                  <X className="h-3 w-3 mr-1" />
+                  Clear focus (Esc)
+                </Button>
+              </Tooltip>
             </div>
           </div>
         )}
@@ -550,30 +552,33 @@ export function LogsViewer() {
               className="pl-9 h-9"
             />
           </div>
-          <Button
-            variant={hiddenCommands.length > 0 ? 'default' : 'outline'}
-            size="sm"
-            onClick={() => setShowFilterPanel(!showFilterPanel)}
-            className="h-9"
-            title="Filter commands"
-          >
-            <Filter className="h-4 w-4 mr-1" />
-            {hiddenCommands.length > 0 ? `${hiddenCommands.length} hidden` : 'Filter'}
-            {showFilterPanel ? (
-              <ChevronUp className="h-3 w-3 ml-1" />
-            ) : (
-              <ChevronDown className="h-3 w-3 ml-1" />
-            )}
-          </Button>
-          <Button
-            variant={errorsOnly ? 'destructive' : 'outline'}
-            size="sm"
-            onClick={() => setErrorsOnly(!errorsOnly)}
-            className="h-9"
-          >
-            <AlertCircle className="h-4 w-4 mr-1" />
-            Errors
-          </Button>
+          <Tooltip content="Hide noisy command names from the event list so you can focus on what matters.">
+            <Button
+              variant={hiddenCommands.length > 0 ? 'default' : 'outline'}
+              size="sm"
+              onClick={() => setShowFilterPanel(!showFilterPanel)}
+              className="h-9"
+            >
+              <Filter className="h-4 w-4 mr-1" />
+              {hiddenCommands.length > 0 ? `${hiddenCommands.length} hidden` : 'Filter'}
+              {showFilterPanel ? (
+                <ChevronUp className="h-3 w-3 ml-1" />
+              ) : (
+                <ChevronDown className="h-3 w-3 ml-1" />
+              )}
+            </Button>
+          </Tooltip>
+          <Tooltip content="Show only error events in the current stream.">
+            <Button
+              variant={errorsOnly ? 'destructive' : 'outline'}
+              size="sm"
+              onClick={() => setErrorsOnly(!errorsOnly)}
+              className="h-9"
+            >
+              <AlertCircle className="h-4 w-4 mr-1" />
+              Errors
+            </Button>
+          </Tooltip>
           <select
             value={componentFilter}
             onChange={(e) => setComponentFilter(e.target.value)}
@@ -587,19 +592,20 @@ export function LogsViewer() {
             ))}
           </select>
           {uniqueWorkspaces.length > 1 && (
-            <select
-              value={workspaceFilter}
-              onChange={(e) => setWorkspaceFilter(e.target.value)}
-              className="h-9 rounded-md border border-input bg-background px-3 text-sm max-w-[200px]"
-              title={workspaceFilter || 'All Workspaces'}
-            >
-              <option value="">All Workspaces</option>
-              {uniqueWorkspaces.map((ws) => (
-                <option key={ws} value={ws} title={ws}>
-                  {getWorkspaceDisplayName(ws)}
-                </option>
-              ))}
-            </select>
+            <Tooltip content={workspaceFilter || 'All workspaces'}>
+              <select
+                value={workspaceFilter}
+                onChange={(e) => setWorkspaceFilter(e.target.value)}
+                className="h-9 rounded-md border border-input bg-background px-3 text-sm max-w-[200px]"
+              >
+                <option value="">All Workspaces</option>
+                {uniqueWorkspaces.map((ws) => (
+                  <option key={ws} value={ws}>
+                    {getWorkspaceDisplayName(ws)}
+                  </option>
+                ))}
+              </select>
+            </Tooltip>
           )}
         </div>
 
@@ -607,7 +613,13 @@ export function LogsViewer() {
         {showFilterPanel && (
           <div className="border border-border rounded-lg p-3 bg-muted/30">
             <div className="flex items-center justify-between mb-2">
-              <span className="text-sm font-medium">Hide Commands</span>
+              <div className="inline-flex items-center gap-1.5">
+                <span className="text-sm font-medium">Hide Commands</span>
+                <HelpTooltip
+                  side="top"
+                  content="Disable specific command names below to reduce noise in the event stream."
+                />
+              </div>
               <div className="flex items-center gap-2">
                 <Button
                   variant="ghost"

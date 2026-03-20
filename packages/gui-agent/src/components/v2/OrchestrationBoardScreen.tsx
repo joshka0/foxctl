@@ -5,6 +5,7 @@ import { RuntimeSummaryPanel } from '@/components/v2/RuntimeSummaryPanel'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
+import { HelpTooltip, Tooltip } from '@/components/ui/tooltip'
 import { LayoutGrid, RefreshCw } from 'lucide-react'
 
 function workspaceBadgeLabel(workspace: string): string {
@@ -22,13 +23,11 @@ export function OrchestrationBoardScreen() {
     queryFn: listWorkspaces,
     staleTime: 15_000,
   })
+  const currentWorkspace = (workspaceData?.current ?? '').trim()
 
   const workspaceID = useMemo(() => {
-    const current = workspaceData?.current
-    if (typeof current !== 'string') return undefined
-    const trimmed = current.trim()
-    return trimmed.length > 0 ? trimmed : undefined
-  }, [workspaceData?.current])
+    return currentWorkspace.length > 0 ? currentWorkspace : undefined
+  }, [currentWorkspace])
 
   const [activeWorkspace, setActiveWorkspace] = useState('')
   const [switchingWorkspace, setSwitchingWorkspace] = useState(false)
@@ -46,6 +45,7 @@ export function OrchestrationBoardScreen() {
   )
 
   const workspaceOptions = useMemo(() => {
+    const workspaceEntries = workspaceData?.workspaces ?? []
     const seen = new Set<string>()
     const ordered: string[] = []
     const current = (activeWorkspace.trim() || workspaceID || '').trim()
@@ -53,7 +53,7 @@ export function OrchestrationBoardScreen() {
       seen.add(current)
       ordered.push(current)
     }
-    for (const ws of workspaceData?.workspaces ?? []) {
+    for (const ws of workspaceEntries) {
       const path = (ws.path ?? '').trim()
       if (!path || seen.has(path)) continue
       seen.add(path)
@@ -84,36 +84,44 @@ export function OrchestrationBoardScreen() {
         <div className="flex items-center gap-2 min-w-0">
           <LayoutGrid className="h-5 w-5" />
           <h2 className="text-lg font-semibold text-foreground">Orchestration</h2>
+          <HelpTooltip
+            side="bottom"
+            content="Orchestration shows the active project board, issue flow, and runtime summary for the selected workspace."
+          />
         </div>
         <div className="flex items-center gap-2 min-w-0">
           {workspaceOptions.length > 0 && (
-            <select
-              value={resolvedWorkspaceID ?? ''}
-              onChange={(event) => void handleWorkspaceSwitch(event.target.value)}
-              className="h-8 rounded-md border border-input bg-background px-2 text-xs font-mono max-w-[28rem]"
-              disabled={switchingWorkspace}
-              title={resolvedWorkspaceID || 'unscoped'}
-            >
-              {workspaceOptions.map((path) => (
-                <option key={path} value={path}>
-                  {workspaceBadgeLabel(path)} — {path}
-                </option>
-              ))}
-            </select>
+            <Tooltip content="Choose which workspace board and runtime summary to inspect.">
+              <select
+                value={resolvedWorkspaceID ?? ''}
+                onChange={(event) => void handleWorkspaceSwitch(event.target.value)}
+                className="h-8 rounded-md border border-input bg-background px-2 text-xs font-mono max-w-[28rem]"
+                disabled={switchingWorkspace}
+              >
+                {workspaceOptions.map((path) => (
+                  <option key={path} value={path}>
+                    {workspaceBadgeLabel(path)} — {path}
+                  </option>
+                ))}
+              </select>
+            </Tooltip>
           )}
-          <Button
-            variant="outline"
-            size="sm"
-            className="h-8"
-            onClick={() => void queryClient.invalidateQueries({ queryKey: ['workspaces'] })}
-            disabled={switchingWorkspace}
-            title="Reload workspace list"
-          >
-            <RefreshCw className={`h-3.5 w-3.5 ${switchingWorkspace ? 'animate-spin' : ''}`} />
-          </Button>
-          <Badge variant="outline" className="max-w-[50%] truncate" title={resolvedWorkspaceID || 'unscoped'}>
-            workspace: {workspaceLabel}
-          </Badge>
+          <Tooltip content="Reload the workspace list from the backend.">
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-8"
+              onClick={() => void queryClient.invalidateQueries({ queryKey: ['workspaces'] })}
+              disabled={switchingWorkspace}
+            >
+              <RefreshCw className={`h-3.5 w-3.5 ${switchingWorkspace ? 'animate-spin' : ''}`} />
+            </Button>
+          </Tooltip>
+          <Tooltip content={resolvedWorkspaceID || 'unscoped'}>
+            <Badge variant="outline" className="max-w-[50%] truncate">
+              workspace: {workspaceLabel}
+            </Badge>
+          </Tooltip>
         </div>
       </div>
       {switchError && (

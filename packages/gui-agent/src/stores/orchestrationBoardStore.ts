@@ -68,14 +68,14 @@ export const useOrchestrationBoardStore = create<OrchestrationBoardState>((set) 
     const loadSeq = ++boardLoadSeq
     const dataSeq = ++boardDataSeq
     cardLoadSeq++
-      set({
-        loadingBoard: true,
-        error: null,
-        board: null,
-        artifact: null,
-        selectedCard: null,
-        selectedCardRuntime: null,
-      })
+    set({
+      loadingBoard: true,
+      error: null,
+      board: null,
+      artifact: null,
+      selectedCard: null,
+      selectedCardRuntime: null,
+    })
     try {
       const result = await getOrchestrationBoard({
         request_id: requestID('board'),
@@ -92,8 +92,9 @@ export const useOrchestrationBoardStore = create<OrchestrationBoardState>((set) 
         error: error instanceof Error ? error.message : 'Failed to load orchestration board',
       })
     } finally {
-      if (loadSeq !== boardLoadSeq) return
-      set({ loadingBoard: false })
+      if (loadSeq === boardLoadSeq) {
+        set({ loadingBoard: false })
+      }
     }
   },
   refreshBoard: async (workspaceID) => {
@@ -120,8 +121,9 @@ export const useOrchestrationBoardStore = create<OrchestrationBoardState>((set) 
         error: error instanceof Error ? error.message : 'Failed to refresh orchestration board',
       })
     } finally {
-      if (refreshSeq !== boardRefreshSeq) return
-      set({ refreshing: false })
+      if (refreshSeq === boardRefreshSeq) {
+        set({ refreshing: false })
+      }
     }
   },
   loadCard: async (issueID, workspaceID) => {
@@ -145,8 +147,9 @@ export const useOrchestrationBoardStore = create<OrchestrationBoardState>((set) 
         error: error instanceof Error ? error.message : 'Failed to load board card',
       })
     } finally {
-      if (seq !== cardLoadSeq) return
-      set({ loadingCard: false })
+      if (seq === cardLoadSeq) {
+        set({ loadingCard: false })
+      }
     }
   },
   applyCardAction: async (issueID, action, workspaceID) => {
@@ -184,8 +187,9 @@ export const useOrchestrationBoardStore = create<OrchestrationBoardState>((set) 
         error: error instanceof Error ? error.message : 'Failed to apply orchestration card action',
       })
     } finally {
-      if (seq !== cardActionSeq) return
-      set({ actingOnCard: false })
+      if (seq === cardActionSeq) {
+        set({ actingOnCard: false })
+      }
     }
   },
   clearSelectedCard: () => {

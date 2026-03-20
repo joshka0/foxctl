@@ -7,6 +7,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Slider } from "@/components/ui/slider";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { CollapsibleSection } from "@/components/ui/collapsible-section";
+import { HelpTooltip, Tooltip } from "@/components/ui/tooltip";
 import { ToolAllowlistEditor } from "@/components/conversations/ToolAllowlistEditor";
 import type {
   CompanionCompressionResult,
@@ -186,15 +187,21 @@ export function ConversationInspector({
         <div className="flex items-center gap-2">
           <Settings2 className="h-4 w-4" />
           <span className="text-sm font-medium">Inspector</span>
+          <HelpTooltip
+            side="bottom"
+            content="Inspector explains the current conversation, linked agent, model settings, memory controls, and debug state."
+          />
         </div>
-        <Button
-          variant="ghost"
-          size="icon"
-          className="h-7 w-7"
-          onClick={onClose}
-        >
-          <X className="h-4 w-4" />
-        </Button>
+        <Tooltip content="Close the inspector and return to the main conversation view.">
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-7 w-7"
+            onClick={onClose}
+          >
+            <X className="h-4 w-4" />
+          </Button>
+        </Tooltip>
       </div>
 
       <ScrollArea className="flex-1">
@@ -251,71 +258,82 @@ export function ConversationInspector({
 
               <div className="flex gap-2">
                 {agentOps.targetAgent.state === "running" ? (
+                  <Tooltip content="Stop the linked agent. Use this when you want to halt active work without deleting the agent.">
+                    <Button
+                      variant="destructive"
+                      size="sm"
+                      className="flex-1 gap-1"
+                      onClick={() => {
+                        if (
+                          window.confirm(
+                            `Stop "${getAgentDisplayName(agentOps.targetAgent!)}"?`,
+                          )
+                        ) {
+                          agentOps.killAgent.mutate(agentOps.targetAgent!.id);
+                        }
+                      }}
+                      disabled={agentOps.killAgent.isPending}
+                    >
+                      <Square className="h-3 w-3" />
+                      {agentOps.killAgent.isPending ? "Stopping..." : "Stop"}
+                    </Button>
+                  </Tooltip>
+                ) : (
+                  <Tooltip content="Start the linked agent and return it to active work.">
+                    <Button
+                      variant="default"
+                      size="sm"
+                      className="flex-1 gap-1"
+                      onClick={() =>
+                        agentOps.startAgent.mutate(agentOps.targetAgent!.id)
+                      }
+                      disabled={agentOps.startAgent.isPending}
+                    >
+                      <Play className="h-3 w-3" />
+                      {agentOps.startAgent.isPending ? "Starting..." : "Start"}
+                    </Button>
+                  </Tooltip>
+                )}
+                <Tooltip
+                  content={
+                    agentOps.targetAgent.state === "running"
+                      ? "Stop the agent before removing it from the runtime list."
+                      : "Remove this agent from the runtime list."
+                  }
+                >
                   <Button
-                    variant="destructive"
+                    variant="outline"
                     size="sm"
-                    className="flex-1 gap-1"
+                    className="gap-1"
                     onClick={() => {
                       if (
                         window.confirm(
-                          `Stop "${getAgentDisplayName(agentOps.targetAgent!)}"?`,
+                          `Remove "${getAgentDisplayName(agentOps.targetAgent!)}"? This cannot be undone.`,
                         )
                       ) {
-                        agentOps.killAgent.mutate(agentOps.targetAgent!.id);
+                        agentOps.trashAgent.mutate(agentOps.targetAgent!.id);
                       }
                     }}
-                    disabled={agentOps.killAgent.isPending}
-                  >
-                    <Square className="h-3 w-3" />
-                    {agentOps.killAgent.isPending ? "Stopping..." : "Stop"}
-                  </Button>
-                ) : (
-                  <Button
-                    variant="default"
-                    size="sm"
-                    className="flex-1 gap-1"
-                    onClick={() =>
-                      agentOps.startAgent.mutate(agentOps.targetAgent!.id)
+                    disabled={
+                      agentOps.trashAgent.isPending ||
+                      agentOps.targetAgent.state === "running"
                     }
-                    disabled={agentOps.startAgent.isPending}
                   >
-                    <Play className="h-3 w-3" />
-                    {agentOps.startAgent.isPending ? "Starting..." : "Start"}
+                    <Trash2 className="h-3 w-3" />
                   </Button>
-                )}
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="gap-1"
-                  onClick={() => {
-                    if (
-                      window.confirm(
-                        `Remove "${getAgentDisplayName(agentOps.targetAgent!)}"? This cannot be undone.`,
-                      )
-                    ) {
-                      agentOps.trashAgent.mutate(agentOps.targetAgent!.id);
-                    }
-                  }}
-                  disabled={
-                    agentOps.trashAgent.isPending ||
-                    agentOps.targetAgent.state === "running"
-                  }
-                  title={
-                    agentOps.targetAgent.state === "running"
-                      ? "Stop agent before trashing"
-                      : "Delete agent"
-                  }
-                >
-                  <Trash2 className="h-3 w-3" />
-                </Button>
+                </Tooltip>
               </div>
 
               {agentOps.targetAgent.ns && (
                 <div className="flex items-center gap-2 p-2 rounded-md bg-muted/30">
                   <Folder className="h-3.5 w-3.5 text-muted-foreground flex-shrink-0" />
                   <div className="min-w-0">
-                    <span className="text-[10px] text-muted-foreground">
-                      Workspace
+                    <span className="inline-flex items-center gap-1 text-[10px] text-muted-foreground">
+                      <span>Workspace</span>
+                      <HelpTooltip
+                        content="The workspace path linked to this conversation or agent."
+                        side="top"
+                      />
                     </span>
                     <p
                       className="text-xs font-mono truncate"
@@ -419,7 +437,13 @@ export function ConversationInspector({
             Chat
           </div>
           <div className="flex items-center justify-between">
-            <span className="text-xs font-medium">Provider</span>
+            <span className="inline-flex items-center gap-1 text-xs font-medium">
+              <span>Provider</span>
+              <HelpTooltip
+                side="top"
+                content="The model provider used for this conversation's main responses."
+              />
+            </span>
             <select
               value={selectedProvider}
               onChange={(e) => {
@@ -457,7 +481,13 @@ export function ConversationInspector({
               </div>
             )}
           <div className="flex items-center justify-between">
-            <span className="text-xs font-medium">Model</span>
+            <span className="inline-flex items-center gap-1 text-xs font-medium">
+              <span>Model</span>
+              <HelpTooltip
+                side="top"
+                content="The specific model used for chat responses. Custom models let you enter an exact provider/model string."
+              />
+            </span>
             {PROVIDERS.find((provider) => provider.id === selectedProvider)
               ?.allowCustom ? (
               <div className="space-y-1">
@@ -501,17 +531,18 @@ export function ConversationInspector({
                       placeholder="e.g., openrouter/deepseek-r1"
                       className="h-7 text-xs font-mono flex-1"
                     />
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      className="h-7 px-2 text-[10px]"
-                      disabled={!customModelValue || isCustomSaved}
-                      onClick={saveCustomModel}
-                      title={isCustomSaved ? "Saved" : "Save custom model"}
-                    >
-                      Save
-                    </Button>
+                    <Tooltip content={isCustomSaved ? "This custom model is already saved." : "Save this custom model value for the current conversation."}>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="h-7 px-2 text-[10px]"
+                        disabled={!customModelValue || isCustomSaved}
+                        onClick={saveCustomModel}
+                      >
+                        Save
+                      </Button>
+                    </Tooltip>
                     {customModelEnabled &&
                       (customModelValue ? (
                         <Badge
@@ -555,7 +586,13 @@ export function ConversationInspector({
             )}
           </div>
           <div className="flex items-center justify-between">
-            <span className="text-xs font-medium">History Turns</span>
+            <span className="inline-flex items-center gap-1 text-xs font-medium">
+              <span>History Turns</span>
+              <HelpTooltip
+                side="top"
+                content="How many prior turns should be kept in the active chat context. Higher values preserve more history but use more context budget."
+              />
+            </span>
             <select
               value={maxHistoryTurns}
               onChange={(e) => setMaxHistoryTurns(Number(e.target.value))}
@@ -574,7 +611,13 @@ export function ConversationInspector({
               Compression
             </div>
             <div className="flex items-center justify-between">
-              <span className="text-xs font-medium">Provider</span>
+              <span className="inline-flex items-center gap-1 text-xs font-medium">
+                <span>Provider</span>
+                <HelpTooltip
+                  side="top"
+                  content="Optional provider override for memory compression runs."
+                />
+              </span>
               <select
                 value={compressionProvider}
                 onChange={(e) => {
@@ -595,7 +638,13 @@ export function ConversationInspector({
             </div>
             {compressionProvider !== "" && (
               <div className="flex items-center justify-between">
-                <span className="text-xs font-medium">Model</span>
+                <span className="inline-flex items-center gap-1 text-xs font-medium">
+                  <span>Model</span>
+                  <HelpTooltip
+                    side="top"
+                    content="Optional model override for memory compression."
+                  />
+                </span>
                 <select
                   value={compressionModel}
                   onChange={(e) => setCompressionModel(e.target.value)}
@@ -611,17 +660,25 @@ export function ConversationInspector({
               </div>
             )}
             <div className="flex items-center justify-between">
-              <span className="text-xs font-medium">Compress</span>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                className="h-7 text-xs"
-                disabled={isCompressing}
-                onClick={onCompressMemory}
-              >
-                {isCompressing ? "Running..." : "Run"}
-              </Button>
+              <span className="inline-flex items-center gap-1 text-xs font-medium">
+                <span>Compress</span>
+                <HelpTooltip
+                  side="top"
+                  content="Run memory compression to summarize older material and reduce context load."
+                />
+              </span>
+              <Tooltip content="Start a compression pass over this conversation's memory.">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-7 text-xs"
+                  disabled={isCompressing}
+                  onClick={onCompressMemory}
+                >
+                  {isCompressing ? "Running..." : "Run"}
+                </Button>
+              </Tooltip>
             </div>
             {lastCompression && (
               <div className="text-[10px] text-muted-foreground">
@@ -645,7 +702,13 @@ export function ConversationInspector({
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
                   <Search className="h-4 w-4 text-orange-500" />
-                  <span className="text-xs font-medium">Gather Model</span>
+                  <span className="inline-flex items-center gap-1 text-xs font-medium">
+                    <span>Gather Model</span>
+                    <HelpTooltip
+                      side="top"
+                      content="Model used for the structured gathering stage in story mode."
+                    />
+                  </span>
                 </div>
                 <select
                   value={toolModel}
@@ -673,7 +736,13 @@ export function ConversationInspector({
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
                   <MessageCircle className="h-4 w-4 text-purple-500" />
-                  <span className="text-xs font-medium">Dialogue Model</span>
+                  <span className="inline-flex items-center gap-1 text-xs font-medium">
+                    <span>Dialogue Model</span>
+                    <HelpTooltip
+                      side="top"
+                      content="Model used for the narrative or dialogue stage in story mode."
+                    />
+                  </span>
                 </div>
                 <select
                   value={responseModel}
@@ -703,7 +772,13 @@ export function ConversationInspector({
 
           <div className="pt-2 border-t border-border space-y-1.5">
             <div className="flex items-center justify-between">
-              <span className="text-xs font-medium">Exec Mode</span>
+              <span className="inline-flex items-center gap-1 text-xs font-medium">
+                <span>Exec Mode</span>
+                <HelpTooltip
+                  side="top"
+                  content="How the linked agent behaves between messages: single-turn, self-directed, scheduled, or story-oriented."
+                />
+              </span>
               <select
                 value={execModeOverride}
                 onChange={(e) => {
@@ -948,7 +1023,13 @@ export function ConversationInspector({
         >
           <div className="space-y-2">
             <div className="flex items-center justify-between">
-              <span className="text-xs font-medium">System Prompt</span>
+              <span className="inline-flex items-center gap-1 text-xs font-medium">
+                <span>System Prompt</span>
+                <HelpTooltip
+                  content="The system prompt sets the assistant's instructions, boundaries, and behavior for this conversation."
+                  side="top"
+                />
+              </span>
               {!editingSystemPrompt ? (
                 <Button
                   variant="ghost"
@@ -1025,14 +1106,16 @@ export function ConversationInspector({
             <div className="space-y-2">
               <div className="flex items-center justify-between">
                 <span className="text-xs font-medium">Selected Message</span>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="h-6 text-xs"
-                  onClick={() => setSelectedMessage(null)}
-                >
-                  Clear
-                </Button>
+                <Tooltip content="Clear the currently selected debug message.">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-6 text-xs"
+                    onClick={() => setSelectedMessage(null)}
+                  >
+                    Clear
+                  </Button>
+                </Tooltip>
               </div>
               <Card className="p-3 space-y-3">
                 <div className="flex items-center justify-between text-xs">

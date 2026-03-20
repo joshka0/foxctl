@@ -1,6 +1,7 @@
 import { type ReactNode, useMemo } from 'react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { HelpTooltip, Tooltip } from '@/components/ui/tooltip'
 import { AgentSidebar } from './AgentSidebar'
 import { SpawnAgentPanel } from './SpawnAgentPanel'
 import { useActivityStream } from '@/hooks/useActivityStream'
@@ -45,10 +46,20 @@ export function AppShell({
     rooms: 'Rooms',
     orchestration: 'Orchestration',
     turns: 'Turns',
-    context: 'Context',
+    context: 'Memory',
     artifacts: 'Artifacts',
     events: 'Events',
     companion: 'Companion',
+  }
+  const descriptions: Record<ViewType, string> = {
+    runtime: 'Live agent operations, lifecycle state, and current work.',
+    rooms: 'Shared discussion spaces for coordinated multi-agent work.',
+    orchestration: 'Planning boards and coordinated issue execution.',
+    turns: 'How agent turns were assembled, tooled, and completed.',
+    context: 'Project memory, remembered sources, and suggested updates.',
+    artifacts: 'Retrieved files, embeddings, and artifact search behavior.',
+    events: 'Operational logs and diagnostics across the control plane.',
+    companion: 'Conversation view for chatting with agents and reviewing context.',
   }
   const surfaceTier = useMemo(
     () =>
@@ -110,28 +121,43 @@ export function AppShell({
               <span className="text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
                 Control Plane
               </span>
-              <Badge variant="outline" className="text-[10px]">
-                {surfaceTier}
-              </Badge>
-              <Badge
-                variant="outline"
-                className="text-[10px] gap-1 inline-flex items-center"
+              <Tooltip content="Surface group. Primary covers live operations, while Evidence covers what agents saw, used, and remembered.">
+                <Badge variant="outline" className="text-[10px]">
+                  {surfaceTier}
+                </Badge>
+              </Tooltip>
+              <Tooltip
+                content={
+                  connected
+                    ? 'The GUI is receiving the live activity stream.'
+                    : 'The live activity stream is disconnected. Some views may be stale.'
+                }
               >
-                <span
-                  className={`h-1.5 w-1.5 rounded-full ${connected ? 'bg-green-500' : 'bg-red-500'}`}
-                />
-                activity
-              </Badge>
+                <Badge
+                  variant="outline"
+                  className="text-[10px] gap-1 inline-flex items-center"
+                >
+                  <span
+                    className={`h-1.5 w-1.5 rounded-full ${connected ? 'bg-green-500' : 'bg-red-500'}`}
+                  />
+                  activity
+                </Badge>
+              </Tooltip>
             </div>
-            <h1 className="text-sm font-semibold text-foreground">
-              {titles[activeView]}
-            </h1>
+            <div className="flex items-center gap-1.5">
+              <h1 className="text-sm font-semibold text-foreground">
+                {titles[activeView]}
+              </h1>
+              <HelpTooltip content={descriptions[activeView]} side="bottom" />
+            </div>
           </div>
           <div className="flex items-center gap-2 min-w-0">
             {activityErrorCount > 0 && (
-              <Badge className="text-[10px] bg-red-500/10 text-red-500 border-red-500/20">
-                {activityErrorCount} errors
-              </Badge>
+              <Tooltip content="The number of error events currently visible in the live event stream.">
+                <Badge className="text-[10px] bg-red-500/10 text-red-500 border-red-500/20">
+                  {activityErrorCount} errors
+                </Badge>
+              </Tooltip>
             )}
             {focusLabel && (
               <div className="hidden md:flex flex-col min-w-0 text-right">
@@ -151,17 +177,21 @@ export function AppShell({
                 {authSession.user.email}
               </span>
             </div>
-            <Badge variant="outline" className="text-[10px] hidden sm:inline-flex">
-              Signed in
-            </Badge>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={onSignOut}
-              disabled={signingOut}
-            >
-              {signingOut ? 'Signing out…' : 'Sign out'}
-            </Button>
+            <Tooltip content="Current GUI session state. Local development uses a fallback session when the public auth gateway is absent.">
+              <Badge variant="outline" className="text-[10px] hidden sm:inline-flex">
+                Signed in
+              </Badge>
+            </Tooltip>
+            <Tooltip content="End the current GUI session.">
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={onSignOut}
+                disabled={signingOut}
+              >
+                {signingOut ? 'Signing out…' : 'Sign out'}
+              </Button>
+            </Tooltip>
           </div>
         </header>
 

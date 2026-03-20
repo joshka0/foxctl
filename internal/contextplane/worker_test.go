@@ -59,12 +59,58 @@ func TestWorkerRunOnce(t *testing.T) {
 	if top.Objective == "" {
 		t.Fatalf("expected non-empty objective")
 	}
-	tasks, err := store.ListMaintenanceTasks(10)
+	tasks, err := store.ListMaintenanceTasks(context.Background(), 10)
 	if err != nil {
 		t.Fatalf("ListMaintenanceTasks: %v", err)
 	}
 	if len(tasks) == 0 {
 		t.Fatalf("expected maintenance tasks")
+	}
+}
+
+func TestWorkerRunOnceGeneratesProposalMergeMaintenanceTasks(t *testing.T) {
+	workspace := t.TempDir()
+	storageRoot := t.TempDir()
+	cfg := config.Config{Storage: config.StorageSettings{Root: storageRoot}}
+	store := NewWorkspaceStore(workspace)
+	if _, err := store.RecordMemoryProposal(context.Background(), MemoryProposal{
+		DedupeKey:      "external_evidence_import|aca-vocabulary",
+		Kind:           "external_evidence_import",
+		Classification: "external_evidence",
+		Status:         "prepared",
+		ReviewRequired: true,
+		Confidence:     0.72,
+		BlastRadius:    "medium",
+		Summary:        "Review imported evidence draft for merge consideration: ACA Vocabulary Review. Suggested target: notes/repo/aca-inspect/semantic-and-memory.md.",
+		ProposedChange: map[string]any{
+			"draft_path":                 "inbox/drafted-from-agentctl/external-evidence/aca-inspect/aca-vocabulary-review.md",
+			"suggested_target_note_path": "notes/repo/aca-inspect/semantic-and-memory.md",
+			"suggested_target_heading":   "Review",
+		},
+		EvaluationStatus: "accepted",
+		ApplyStatus:      "review_prepared",
+		CreatedAt:        time.Now().UTC(),
+		UpdatedAt:        time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("RecordMemoryProposal: %v", err)
+	}
+
+	worker := NewWorker(WorkerConfig{
+		Config:    cfg,
+		Workspace: workspace,
+	})
+	if err := worker.RunOnce(context.Background()); err != nil {
+		t.Fatalf("RunOnce: %v", err)
+	}
+	tasks, err := store.ListMaintenanceTasks(context.Background(), 10)
+	if err != nil {
+		t.Fatalf("ListMaintenanceTasks: %v", err)
+	}
+	if len(tasks) != 1 {
+		t.Fatalf("tasks=%d want 1", len(tasks))
+	}
+	if tasks[0].Kind != "proposal_merge" || tasks[0].WorkPacket == nil {
+		t.Fatalf("unexpected task=%+v", tasks[0])
 	}
 }
 
@@ -84,7 +130,7 @@ func TestWorkerRunOnceWithVaultHealth(t *testing.T) {
 	}
 
 	store := NewWorkspaceStore(workspace)
-	tasks, err := store.ListMaintenanceTasks(50)
+	tasks, err := store.ListMaintenanceTasks(context.Background(), 50)
 	if err != nil {
 		t.Fatalf("ListMaintenanceTasks: %v", err)
 	}

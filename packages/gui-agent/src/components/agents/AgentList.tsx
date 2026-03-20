@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { HelpTooltip, Tooltip } from "@/components/ui/tooltip";
 import { cn, formatRelativeTime } from "@/lib/utils";
 import {
   listAgents,
@@ -429,31 +430,41 @@ export function AgentList() {
           <div className="flex items-center gap-2">
             <Users className="h-5 w-5" />
             <div>
-              <h2 className="text-lg font-semibold text-foreground">Runtime</h2>
+              <div className="flex items-center gap-1.5">
+                <h2 className="text-lg font-semibold text-foreground">Runtime</h2>
+                <HelpTooltip
+                  side="bottom"
+                  content="Runtime is the main operations surface for starting, stopping, resuming, and inspecting agents."
+                />
+              </div>
               <div className="text-xs text-muted-foreground">
                 Primary surface for agent lifecycle, coordination handoffs, and incident follow-up.
               </div>
             </div>
           </div>
           <div className="flex items-center gap-2">
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={() => refetch()}
-              disabled={isFetching}
-              className="h-8 w-8"
-            >
-              <RefreshCw
-                className={cn("h-4 w-4", isFetching && "animate-spin")}
-              />
-            </Button>
-            <Button
-              size="sm"
-              onClick={() => setSpawnAgentOpen(!spawnAgentOpen)}
-            >
-              <Plus className="h-4 w-4 mr-1" />
-              Spawn Agent
-            </Button>
+            <Tooltip content="Reload the runtime agent list and current activity state.">
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => refetch()}
+                disabled={isFetching}
+                className="h-8 w-8"
+              >
+                <RefreshCw
+                  className={cn("h-4 w-4", isFetching && "animate-spin")}
+                />
+              </Button>
+            </Tooltip>
+            <Tooltip content="Open the new-agent form and create another worker or conversational agent.">
+              <Button
+                size="sm"
+                onClick={() => setSpawnAgentOpen(!spawnAgentOpen)}
+              >
+                <Plus className="h-4 w-4 mr-1" />
+                Spawn Agent
+              </Button>
+            </Tooltip>
           </div>
         </div>
 
@@ -516,41 +527,47 @@ export function AgentList() {
             <span className="text-xs text-muted-foreground uppercase tracking-wider">
               Quick Actions
             </span>
-            <Button
-              size="sm"
-              variant="outline"
-              className="h-7 text-xs"
-              onClick={() =>
-                latestStoppedAgent && handleStart(latestStoppedAgent)
-              }
-              disabled={!latestStoppedAgent || !!startLoadingAgentId}
-            >
-              Resume Last Stopped
-            </Button>
-            <Button
-              size="sm"
-              variant="outline"
-              className="h-7 text-xs"
-              onClick={() => handleOpenLatestErrorTrace(latestErrorEvent)}
-              disabled={
-                !latestErrorEvent ||
-                (!latestErrorEvent.trace_id && !latestErrorEvent.session_id)
-              }
-            >
-              Open Latest Error Trace
-            </Button>
-            <Button
-              size="sm"
-              variant="outline"
-              className="h-7 text-xs"
-              onClick={() =>
-                latestConversationalAgent &&
-                handleOpenWorkbench(latestConversationalAgent)
-              }
-              disabled={!latestConversationalAgent}
-            >
-              Open Latest Workbench
-            </Button>
+            <Tooltip content="Restart the most recently stopped agent without searching through the full list.">
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-7 text-xs"
+                onClick={() =>
+                  latestStoppedAgent && handleStart(latestStoppedAgent)
+                }
+                disabled={!latestStoppedAgent || !!startLoadingAgentId}
+              >
+                Resume Last Stopped
+              </Button>
+            </Tooltip>
+            <Tooltip content="Jump directly to the newest error trace so you can inspect what failed.">
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-7 text-xs"
+                onClick={() => handleOpenLatestErrorTrace(latestErrorEvent)}
+                disabled={
+                  !latestErrorEvent ||
+                  (!latestErrorEvent.trace_id && !latestErrorEvent.session_id)
+                }
+              >
+                Open Latest Error Trace
+              </Button>
+            </Tooltip>
+            <Tooltip content="Open the newest conversational agent workbench for a fast handoff into active work.">
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-7 text-xs"
+                onClick={() =>
+                  latestConversationalAgent &&
+                  handleOpenWorkbench(latestConversationalAgent)
+                }
+                disabled={!latestConversationalAgent}
+              >
+                Open Latest Workbench
+              </Button>
+            </Tooltip>
           </div>
         )}
         {normalizedQuery.length === 0 && (
@@ -921,7 +938,7 @@ function AgentCard({
                   "absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full border-2 border-card",
                   stateColors[agent.state] || "bg-gray-500",
                 )}
-                title={stateLabels[agent.state] || agent.state}
+                aria-label={stateLabels[agent.state] || agent.state}
               />
             </div>
             <div className="flex-1 min-w-0">
@@ -1086,54 +1103,95 @@ function AgentCard({
 
           {/* Actions */}
           <div className="flex items-center gap-1 flex-shrink-0 flex-wrap justify-end">
-            <Button
-              variant="outline"
-              size="sm"
-              className="h-8 text-xs gap-1.5 text-primary hover:text-primary hover:bg-primary/10"
-              title="Open agent workbench"
-              onClick={() => onOpenWorkbench(agent)}
-            >
-              <MessageSquare className="h-3.5 w-3.5" />
-              Workbench
-            </Button>
-            {rooms.length > 0 && (
+            <Tooltip content="Open this agent's workbench to inspect its runtime, rooms, and conversation context.">
               <Button
                 variant="outline"
                 size="sm"
-                className="h-8 text-xs gap-1.5"
-                title="Open first affiliated room"
-                onClick={() => onOpenRoom(rooms[0])}
+                className="h-8 text-xs gap-1.5 text-primary hover:text-primary hover:bg-primary/10"
+                onClick={() => onOpenWorkbench(agent)}
               >
-                <Hash className="h-3.5 w-3.5" />
-                Open Room
+                <MessageSquare className="h-3.5 w-3.5" />
+                Workbench
               </Button>
+            </Tooltip>
+            {rooms.length > 0 && (
+              <Tooltip content="Jump straight into the first room currently linked to this agent.">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-8 text-xs gap-1.5"
+                  onClick={() => onOpenRoom(rooms[0])}
+                >
+                  <Hash className="h-3.5 w-3.5" />
+                  Open Room
+                </Button>
+              </Tooltip>
             )}
             {agent.state === "running" ? (
-              <Button
-                variant="outline"
-                size="sm"
-                className="h-8 text-xs gap-1.5 text-orange-500 hover:text-orange-600 hover:bg-orange-500/10"
-                title="Stop agent"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onKill(agent);
-                }}
-                disabled={isKillLoading}
-              >
-                {isKillLoading ? (
-                  <RefreshCw className="h-3.5 w-3.5 animate-spin" />
-                ) : (
-                  <Square className="h-3.5 w-3.5" />
-                )}
-                Stop
-              </Button>
+              <Tooltip content="Stop the running agent. Use this when you want to halt work without deleting the agent record.">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-8 text-xs gap-1.5 text-orange-500 hover:text-orange-600 hover:bg-orange-500/10"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onKill(agent);
+                  }}
+                  disabled={isKillLoading}
+                >
+                  {isKillLoading ? (
+                    <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <Square className="h-3.5 w-3.5" />
+                  )}
+                  Stop
+                </Button>
+              </Tooltip>
             ) : agent.state === "stopped" ? (
               <>
+                <Tooltip content="Start this stopped agent again and return it to active work.">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-8 text-xs gap-1.5 text-green-500 hover:text-green-600 hover:bg-green-500/10"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onStart(agent);
+                    }}
+                    disabled={isStartLoading}
+                  >
+                    {isStartLoading ? (
+                      <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <Play className="h-3.5 w-3.5" />
+                    )}
+                    Start
+                  </Button>
+                </Tooltip>
+                <Tooltip content="Delete this stopped agent from the runtime list. This does not preserve the agent as an active worker.">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-8 text-xs gap-1.5 text-red-500 hover:text-red-600 hover:bg-red-500/10"
+                    onClick={() => onTrash(agent)}
+                    disabled={isTrashLoading}
+                  >
+                    <Trash2
+                      className={cn(
+                        "h-3.5 w-3.5",
+                        isTrashLoading && "animate-pulse",
+                      )}
+                    />
+                    Remove
+                  </Button>
+                </Tooltip>
+              </>
+            ) : (
+              <Tooltip content="Start or resume this agent so it can begin handling work again.">
                 <Button
                   variant="outline"
                   size="sm"
                   className="h-8 text-xs gap-1.5 text-green-500 hover:text-green-600 hover:bg-green-500/10"
-                  title="Resume agent"
                   onClick={(e) => {
                     e.stopPropagation();
                     onStart(agent);
@@ -1147,42 +1205,7 @@ function AgentCard({
                   )}
                   Start
                 </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="h-8 text-xs gap-1.5 text-red-500 hover:text-red-600 hover:bg-red-500/10"
-                  title="Remove agent"
-                  onClick={() => onTrash(agent)}
-                  disabled={isTrashLoading}
-                >
-                  <Trash2
-                    className={cn(
-                      "h-3.5 w-3.5",
-                      isTrashLoading && "animate-pulse",
-                    )}
-                  />
-                  Remove
-                </Button>
-              </>
-            ) : (
-              <Button
-                variant="outline"
-                size="sm"
-                className="h-8 text-xs gap-1.5 text-green-500 hover:text-green-600 hover:bg-green-500/10"
-                title="Resume agent"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onStart(agent);
-                }}
-                disabled={isStartLoading}
-              >
-                {isStartLoading ? (
-                  <RefreshCw className="h-3.5 w-3.5 animate-spin" />
-                ) : (
-                  <Play className="h-3.5 w-3.5" />
-                )}
-                Start
-              </Button>
+              </Tooltip>
             )}
           </div>
         </div>

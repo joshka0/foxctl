@@ -1,20 +1,16 @@
 import { useMemo } from 'react'
+import { ACAContextRail } from '@/components/v2/ACAContextRail'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader } from '@/components/ui/card'
+import { CollapsibleSection } from '@/components/ui/collapsible-section'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { formatRelativeTime } from '@/lib/utils'
 import { useActivityStore } from '@/stores/activityStore'
 import { useActivityFocusStore } from '@/stores/activityFocusStore'
 import { useViewStore } from '@/stores/viewStore'
 import type { ActivityEvent } from '@/api/types'
-import {
-  Activity,
-  ArrowRight,
-  FileSearch,
-  Layers,
-  Workflow,
-} from 'lucide-react'
+import { Activity, ArrowRight, FileSearch, Layers, Workflow } from 'lucide-react'
 
 type ActivityData = Record<string, unknown>
 type SurfaceMode = 'turn' | 'context' | 'artifact'
@@ -615,10 +611,12 @@ export function TurnsExplorer() {
 
 export function ContextExplorer() {
   const setActiveView = useViewStore((s) => s.setActiveView)
+  const selectedAgent = useViewStore((s) => s.selectedAgent)
   const setActivityFocus = useActivityFocusStore((s) => s.setFocus)
   const events = useActivityStore((s) => s.events)
   const connected = useActivityStore((s) => s.connected)
   const initialLoaded = useActivityStore((s) => s.initialLoaded)
+  const workspaceRoot = selectedAgent?.workspace_root?.trim() ?? ''
   const contextEvents = useMemo(() => {
     return events.filter((event) => {
       const data = eventData(event)
@@ -717,7 +715,12 @@ export function ContextExplorer() {
       <div className="p-4 border-b border-border flex items-center justify-between">
         <div className="flex items-center gap-2">
           <Layers className="h-5 w-5" />
-          <h2 className="text-lg font-semibold text-foreground">Context</h2>
+          <div>
+            <h2 className="text-lg font-semibold text-foreground">Project Memory</h2>
+            <div className="text-xs text-muted-foreground">
+              Review what should be remembered, then open diagnostics only when needed.
+            </div>
+          </div>
         </div>
         <div className="flex items-center gap-2">
           <div className="text-[10px] text-muted-foreground text-right leading-tight">
@@ -728,61 +731,75 @@ export function ContextExplorer() {
                 : 'no updates yet'}
             </div>
           </div>
-          <Badge variant="secondary">{contextEvents.length} context events</Badge>
+          <Badge variant="outline">advanced diagnostics below</Badge>
         </div>
       </div>
       <ScrollArea className="flex-1">
         <div className="p-4 space-y-3">
-          <SurfaceStats
-            items={[
-              { label: 'context events', value: contextEvents.length },
-              { label: 'prebuilt traces', value: contextTraces.length },
-              { label: 'working context', value: contextStats.workingContextApplied },
-              { label: 'query events', value: contextStats.queryEvents },
-              { label: 'errors', value: contextStats.errorCount },
-            ]}
-          />
+          <ACAContextRail selectedAgentWorkspaceRoot={workspaceRoot} />
           <Card>
-            <CardHeader className="py-3">
-              <div className="text-sm font-medium">Observed search paths</div>
-            </CardHeader>
-            <CardContent className="pt-0 pb-3">
-              {contextTraceSignals.length > 0 ? (
-                <RefBadges refs={contextTraceSignals} />
-              ) : contextStats.searchPaths.length > 0 ? (
-                <RefBadges refs={contextStats.searchPaths} />
-              ) : (
-                <div className="text-xs text-muted-foreground">
-                  No search paths observed yet.
-                </div>
-              )}
-              {contextStats.totalHits > 0 && (
-                <div className="text-xs text-muted-foreground mt-2">
-                  Total artifact hits observed: {contextStats.totalHits}
-                </div>
-              )}
-            </CardContent>
-          </Card>
-          <div className="text-xs uppercase tracking-wider text-muted-foreground px-1">
-            Prebuilt context traces
-          </div>
-          {contextTraces.length === 0 ? (
-            <EmptyState
-              title="No context traces yet"
-              description="Run a context-heavy command (restore/search) to build context trace flows."
-              ctaLabel="Open Companion"
-              onCTA={() => setActiveView('companion')}
-            />
-          ) : (
-            contextTraces.map((trace) => (
-              <TraceFlowCard
-                key={trace.id}
-                trace={trace}
-                mode="context"
-                onOpenEvents={openContextTraceInEvents}
+            <CollapsibleSection
+              title="Context Diagnostics"
+              icon={<Layers className="h-3.5 w-3.5" />}
+              defaultOpen={false}
+              badge={`${contextEvents.length} events`}
+            >
+              <div className="text-xs text-muted-foreground">
+                Use this section to debug retrieval and working-context behavior.
+                Most users can ignore it unless something looks wrong.
+              </div>
+              <SurfaceStats
+                items={[
+                  { label: 'context events', value: contextEvents.length },
+                  { label: 'prebuilt traces', value: contextTraces.length },
+                  { label: 'working context', value: contextStats.workingContextApplied },
+                  { label: 'query events', value: contextStats.queryEvents },
+                  { label: 'errors', value: contextStats.errorCount },
+                ]}
               />
-            ))
-          )}
+              <Card>
+                <CardHeader className="py-3">
+                  <div className="text-sm font-medium">Observed search paths</div>
+                </CardHeader>
+                <CardContent className="pt-0 pb-3">
+                  {contextTraceSignals.length > 0 ? (
+                    <RefBadges refs={contextTraceSignals} />
+                  ) : contextStats.searchPaths.length > 0 ? (
+                    <RefBadges refs={contextStats.searchPaths} />
+                  ) : (
+                    <div className="text-xs text-muted-foreground">
+                      No search paths observed yet.
+                    </div>
+                  )}
+                  {contextStats.totalHits > 0 && (
+                    <div className="text-xs text-muted-foreground mt-2">
+                      Total artifact hits observed: {contextStats.totalHits}
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+              <div className="text-xs uppercase tracking-wider text-muted-foreground px-1">
+                Recent context traces
+              </div>
+              {contextTraces.length === 0 ? (
+                <EmptyState
+                  title="No context traces yet"
+                  description="Run a context-heavy command (restore/search) to build trace flows for debugging."
+                  ctaLabel="Open Companion"
+                  onCTA={() => setActiveView('companion')}
+                />
+              ) : (
+                contextTraces.map((trace) => (
+                  <TraceFlowCard
+                    key={trace.id}
+                    trace={trace}
+                    mode="context"
+                    onOpenEvents={openContextTraceInEvents}
+                  />
+                ))
+              )}
+            </CollapsibleSection>
+          </Card>
         </div>
       </ScrollArea>
     </div>

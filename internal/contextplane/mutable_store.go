@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"path/filepath"
 	"strings"
 
 	"github.com/jkatigb/agentctl/internal/platform/timeutil"
@@ -78,6 +79,7 @@ CREATE TABLE IF NOT EXISTS aca_maintenance_tasks (
 	priority INTEGER NOT NULL,
 	reason TEXT NOT NULL,
 	source_refs TEXT NOT NULL DEFAULT '[]',
+	work_packet_json TEXT NOT NULL DEFAULT '{}',
 	status TEXT NOT NULL,
 	created_at TEXT NOT NULL
 );
@@ -113,9 +115,48 @@ CREATE TABLE IF NOT EXISTS aca_graph_correction_runs (
 );
 CREATE INDEX IF NOT EXISTS idx_aca_graph_correction_runs_created_at ON aca_graph_correction_runs(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_aca_graph_correction_runs_method ON aca_graph_correction_runs(method, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS aca_memory_proposals (
+	id TEXT PRIMARY KEY,
+	dedupe_key TEXT NOT NULL UNIQUE,
+	kind TEXT NOT NULL,
+	classification TEXT,
+	status TEXT NOT NULL,
+	review_required INTEGER NOT NULL DEFAULT 0,
+	confidence REAL NOT NULL DEFAULT 0,
+	blast_radius TEXT NOT NULL DEFAULT 'medium',
+	summary TEXT NOT NULL,
+	source_refs TEXT NOT NULL DEFAULT '[]',
+	proposed_change_json TEXT NOT NULL DEFAULT '{}',
+	evaluation_status TEXT NOT NULL DEFAULT 'not_evaluated',
+	apply_status TEXT NOT NULL DEFAULT 'pending',
+	count INTEGER NOT NULL DEFAULT 1,
+	created_at TEXT NOT NULL,
+	updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_aca_memory_proposals_updated_at ON aca_memory_proposals(updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_aca_memory_proposals_status ON aca_memory_proposals(status, updated_at DESC);
+
+CREATE TABLE IF NOT EXISTS aca_evidence_import_runs (
+	id TEXT PRIMARY KEY,
+	source_kind TEXT NOT NULL,
+	source_ref TEXT NOT NULL,
+	title TEXT NOT NULL,
+	draft_path TEXT NOT NULL,
+	artifact_digest TEXT,
+	processor_kind TEXT,
+	processor_model TEXT,
+	summary TEXT NOT NULL,
+	status TEXT NOT NULL,
+	created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_aca_evidence_import_runs_created_at ON aca_evidence_import_runs(created_at DESC);
 `
 	if _, err := db.ExecContext(ctx, ddl); err != nil {
 		return fmt.Errorf("contextplane: migrate mutable store: %w", err)
+	}
+	if err := dbutil.AddColumnIfNotExists(ctx, db, "aca_maintenance_tasks", "work_packet_json", "TEXT NOT NULL", "'{}'"); err != nil {
+		return fmt.Errorf("contextplane: add work_packet_json column: %w", err)
 	}
 	return nil
 }
@@ -218,7 +259,7 @@ func importLegacyMaintenanceTasks(ctx context.Context, db *sql.DB, path string) 
 
 func tableEmpty(ctx context.Context, db *sql.DB, table string) (bool, error) {
 	switch table {
-	case "aca_observations", "aca_tensions", "aca_promotion_jobs", "aca_maintenance_tasks", "aca_retrieval_correction_runs", "aca_graph_correction_runs":
+	case "aca_observations", "aca_tensions", "aca_promotion_jobs", "aca_maintenance_tasks", "aca_retrieval_correction_runs", "aca_graph_correction_runs", "aca_memory_proposals", "aca_evidence_import_runs":
 	default:
 		return false, fmt.Errorf("contextplane: unsupported table %q", table)
 	}
@@ -339,6 +380,43 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 	return err
 }
 
+func ensurePromotionJobRow(ctx context.Context, db *sql.DB, sourceRef, sourceKind, noteType, title, draftPath string) (PromotionJob, error) {
+	existing, err := findPromotionJobRow(ctx, db, draftPath)
+	if err != nil {
+		return PromotionJob{}, err
+	}
+	if existing != nil {
+		return *existing, nil
+	}
+	now := timeutil.NowUTC()
+	job := PromotionJob{
+		ID:         buildRecordID("P", now),
+		SourceRef:  strings.TrimSpace(sourceRef),
+		SourceKind: strings.TrimSpace(sourceKind),
+		NoteType:   strings.TrimSpace(noteType),
+		Title:      strings.TrimSpace(title),
+		DraftPath:  strings.TrimSpace(draftPath),
+		Status:     "drafted",
+		CreatedAt:  now,
+	}
+	if job.SourceRef == "" {
+		job.SourceRef = "draft:" + job.DraftPath
+	}
+	if job.SourceKind == "" {
+		job.SourceKind = "draft"
+	}
+	if job.NoteType == "" {
+		job.NoteType = "evidence"
+	}
+	if job.Title == "" {
+		job.Title = filepath.Base(job.DraftPath)
+	}
+	if err := insertPromotionJobRow(ctx, db, job); err != nil {
+		return PromotionJob{}, err
+	}
+	return job, nil
+}
+
 func insertMaintenanceTaskRow(ctx context.Context, db *sql.DB, task MaintenanceTask) error {
 	if task.CreatedAt.IsZero() {
 		task.CreatedAt = timeutil.NowUTC()
@@ -350,10 +428,14 @@ func insertMaintenanceTaskRow(ctx context.Context, db *sql.DB, task MaintenanceT
 	if err != nil {
 		return fmt.Errorf("marshal maintenance refs: %w", err)
 	}
+	workPacketJSON, err := json.Marshal(task.WorkPacket)
+	if err != nil {
+		return fmt.Errorf("marshal maintenance work packet: %w", err)
+	}
 	_, err = db.ExecContext(ctx, `
-INSERT OR REPLACE INTO aca_maintenance_tasks (id, title, kind, priority, reason, source_refs, status, created_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-`, task.ID, task.Title, task.Kind, task.Priority, task.Reason, string(sourceJSON), task.Status, timeutil.FormatRFC3339Nano(task.CreatedAt))
+INSERT OR REPLACE INTO aca_maintenance_tasks (id, title, kind, priority, reason, source_refs, work_packet_json, status, created_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+`, task.ID, task.Title, task.Kind, task.Priority, task.Reason, string(sourceJSON), string(workPacketJSON), task.Status, timeutil.FormatRFC3339Nano(task.CreatedAt))
 	return err
 }
 
@@ -528,6 +610,10 @@ func replaceMaintenanceTaskRows(ctx context.Context, db *sql.DB, tasks []Mainten
 		if err != nil {
 			return fmt.Errorf("marshal maintenance refs: %w", err)
 		}
+		workPacketJSON, err := json.Marshal(task.WorkPacket)
+		if err != nil {
+			return fmt.Errorf("marshal maintenance work packet: %w", err)
+		}
 		if task.CreatedAt.IsZero() {
 			task.CreatedAt = timeutil.NowUTC()
 		}
@@ -535,9 +621,9 @@ func replaceMaintenanceTaskRows(ctx context.Context, db *sql.DB, tasks []Mainten
 			task.ID = buildRecordID("M", task.CreatedAt)
 		}
 		if _, err := tx.ExecContext(ctx, `
-INSERT INTO aca_maintenance_tasks (id, title, kind, priority, reason, source_refs, status, created_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-`, task.ID, task.Title, task.Kind, task.Priority, task.Reason, string(sourceJSON), task.Status, timeutil.FormatRFC3339Nano(task.CreatedAt)); err != nil {
+INSERT INTO aca_maintenance_tasks (id, title, kind, priority, reason, source_refs, work_packet_json, status, created_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+`, task.ID, task.Title, task.Kind, task.Priority, task.Reason, string(sourceJSON), string(workPacketJSON), task.Status, timeutil.FormatRFC3339Nano(task.CreatedAt)); err != nil {
 			return fmt.Errorf("insert maintenance task: %w", err)
 		}
 	}
@@ -546,7 +632,7 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 
 func listMaintenanceTaskRows(ctx context.Context, db *sql.DB, limit int) ([]MaintenanceTask, error) {
 	query := `
-SELECT id, title, kind, priority, reason, source_refs, status, created_at
+SELECT id, title, kind, priority, reason, source_refs, work_packet_json, status, created_at
 FROM aca_maintenance_tasks
 ORDER BY priority DESC, created_at DESC`
 	var rows *sql.Rows
@@ -709,6 +795,228 @@ LIMIT 1
 	return &item, nil
 }
 
+func upsertMemoryProposalRow(ctx context.Context, db *sql.DB, proposal MemoryProposal) error {
+	now := timeutil.NowUTC()
+	if proposal.CreatedAt.IsZero() {
+		proposal.CreatedAt = now
+	}
+	if proposal.UpdatedAt.IsZero() {
+		proposal.UpdatedAt = proposal.CreatedAt
+	}
+	if proposal.ID == "" {
+		proposal.ID = buildRecordID("Q", proposal.CreatedAt)
+	}
+	if proposal.Count <= 0 {
+		proposal.Count = 1
+	}
+	sourceJSON, err := json.Marshal(uniqueStrings(proposal.SourceRefs))
+	if err != nil {
+		return fmt.Errorf("marshal proposal source refs: %w", err)
+	}
+	changeJSON, err := json.Marshal(proposal.ProposedChange)
+	if err != nil {
+		return fmt.Errorf("marshal proposal change: %w", err)
+	}
+	_, err = db.ExecContext(ctx, `
+INSERT INTO aca_memory_proposals (
+	id, dedupe_key, kind, classification, status, review_required, confidence,
+	blast_radius, summary, source_refs, proposed_change_json, evaluation_status,
+	apply_status, count, created_at, updated_at
+)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+ON CONFLICT(dedupe_key) DO UPDATE SET
+	status = 'open',
+	review_required = CASE
+		WHEN excluded.review_required != 0 THEN excluded.review_required
+		ELSE aca_memory_proposals.review_required
+	END,
+	confidence = CASE
+		WHEN excluded.confidence > aca_memory_proposals.confidence THEN excluded.confidence
+		ELSE aca_memory_proposals.confidence
+	END,
+	blast_radius = excluded.blast_radius,
+	summary = excluded.summary,
+	source_refs = CASE
+		WHEN aca_memory_proposals.source_refs = '[]' THEN excluded.source_refs
+		ELSE aca_memory_proposals.source_refs
+	END,
+	proposed_change_json = excluded.proposed_change_json,
+	evaluation_status = excluded.evaluation_status,
+	apply_status = 'pending',
+	count = aca_memory_proposals.count + excluded.count,
+	updated_at = excluded.updated_at
+`,
+		proposal.ID,
+		effectiveMemoryProposalKey(proposal),
+		proposal.Kind,
+		nullableString(proposal.Classification),
+		proposal.Status,
+		boolToInt(proposal.ReviewRequired),
+		proposal.Confidence,
+		firstNonEmpty(strings.TrimSpace(proposal.BlastRadius), "medium"),
+		proposal.Summary,
+		string(sourceJSON),
+		string(changeJSON),
+		firstNonEmpty(strings.TrimSpace(proposal.EvaluationStatus), "not_evaluated"),
+		firstNonEmpty(strings.TrimSpace(proposal.ApplyStatus), "pending"),
+		proposal.Count,
+		timeutil.FormatRFC3339Nano(proposal.CreatedAt),
+		timeutil.FormatRFC3339Nano(proposal.UpdatedAt),
+	)
+	return err
+}
+
+func listMemoryProposalRows(ctx context.Context, db *sql.DB, limit int) ([]MemoryProposal, error) {
+	query := `
+SELECT id, kind, classification, status, review_required, confidence, blast_radius,
+       dedupe_key, summary, source_refs, proposed_change_json, evaluation_status, apply_status,
+       count, created_at, updated_at
+FROM aca_memory_proposals
+ORDER BY updated_at DESC`
+	var rows *sql.Rows
+	var err error
+	if limit > 0 {
+		rows, err = db.QueryContext(ctx, query+` LIMIT ?`, limit)
+	} else {
+		rows, err = db.QueryContext(ctx, query)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("query memory proposals: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	var out []MemoryProposal
+	for rows.Next() {
+		item, err := scanMemoryProposalRow(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, item)
+	}
+	return out, rows.Err()
+}
+
+func findMemoryProposalRow(ctx context.Context, db *sql.DB, id string) (*MemoryProposal, error) {
+	row := db.QueryRowContext(ctx, `
+SELECT id, kind, classification, status, review_required, confidence, blast_radius,
+       dedupe_key, summary, source_refs, proposed_change_json, evaluation_status, apply_status,
+       count, created_at, updated_at
+FROM aca_memory_proposals
+WHERE id = ?
+LIMIT 1
+`, strings.TrimSpace(id))
+	item, err := scanMemoryProposalRow(row)
+	if err != nil {
+		if dbutil.IsNoRows(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &item, nil
+}
+
+func findMemoryProposalRowByKey(ctx context.Context, db *sql.DB, key string) (*MemoryProposal, error) {
+	row := db.QueryRowContext(ctx, `
+SELECT id, kind, classification, status, review_required, confidence, blast_radius,
+       dedupe_key, summary, source_refs, proposed_change_json, evaluation_status, apply_status,
+       count, created_at, updated_at
+FROM aca_memory_proposals
+WHERE dedupe_key = ?
+LIMIT 1
+`, strings.TrimSpace(key))
+	item, err := scanMemoryProposalRow(row)
+	if err != nil {
+		if dbutil.IsNoRows(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &item, nil
+}
+
+func updateMemoryProposalRowStatus(ctx context.Context, db *sql.DB, id, status, evaluationStatus, applyStatus string) error {
+	_, err := db.ExecContext(ctx, `
+UPDATE aca_memory_proposals
+SET status = ?, evaluation_status = ?, apply_status = ?, updated_at = ?
+WHERE id = ?
+`,
+		status,
+		firstNonEmpty(strings.TrimSpace(evaluationStatus), "not_evaluated"),
+		firstNonEmpty(strings.TrimSpace(applyStatus), "pending"),
+		timeutil.FormatRFC3339Nano(timeutil.NowUTC()),
+		strings.TrimSpace(id),
+	)
+	return err
+}
+
+func updateMaintenanceTaskStatus(ctx context.Context, db *sql.DB, id, status string) error {
+	_, err := db.ExecContext(ctx, `
+UPDATE aca_maintenance_tasks
+SET status = ?
+WHERE id = ?
+`,
+		strings.TrimSpace(status),
+		strings.TrimSpace(id),
+	)
+	return err
+}
+
+func insertEvidenceImportRunRow(ctx context.Context, db *sql.DB, run EvidenceImportRun) error {
+	if run.CreatedAt.IsZero() {
+		run.CreatedAt = timeutil.NowUTC()
+	}
+	if run.ID == "" {
+		run.ID = buildRecordID("E", run.CreatedAt)
+	}
+	_, err := db.ExecContext(ctx, `
+INSERT INTO aca_evidence_import_runs (
+	id, source_kind, source_ref, title, draft_path, artifact_digest,
+	processor_kind, processor_model, summary, status, created_at
+)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+`,
+		run.ID,
+		run.SourceKind,
+		run.SourceRef,
+		run.Title,
+		run.DraftPath,
+		nullableString(run.ArtifactDigest),
+		nullableString(run.ProcessorKind),
+		nullableString(run.ProcessorModel),
+		run.Summary,
+		run.Status,
+		timeutil.FormatRFC3339Nano(run.CreatedAt),
+	)
+	return err
+}
+
+func listEvidenceImportRunRows(ctx context.Context, db *sql.DB, limit int) ([]EvidenceImportRun, error) {
+	query := `
+SELECT id, source_kind, source_ref, title, draft_path, artifact_digest,
+	processor_kind, processor_model, summary, status, created_at
+FROM aca_evidence_import_runs
+ORDER BY created_at DESC`
+	var rows *sql.Rows
+	var err error
+	if limit > 0 {
+		rows, err = db.QueryContext(ctx, query+` LIMIT ?`, limit)
+	} else {
+		rows, err = db.QueryContext(ctx, query)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("query evidence import runs: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	var out []EvidenceImportRun
+	for rows.Next() {
+		item, err := scanEvidenceImportRunRow(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, item)
+	}
+	return out, rows.Err()
+}
+
 func scanObservationRow(scanner interface{ Scan(dest ...any) error }) (Observation, error) {
 	var item Observation
 	var project, area sql.NullString
@@ -753,14 +1061,22 @@ func scanTensionRow(scanner interface{ Scan(dest ...any) error }) (Tension, erro
 func scanMaintenanceTaskRow(scanner interface{ Scan(dest ...any) error }) (MaintenanceTask, error) {
 	var item MaintenanceTask
 	var refsJSON string
+	var workPacketJSON string
 	var createdAt string
-	if err := scanner.Scan(&item.ID, &item.Title, &item.Kind, &item.Priority, &item.Reason, &refsJSON, &item.Status, &createdAt); err != nil {
+	if err := scanner.Scan(&item.ID, &item.Title, &item.Kind, &item.Priority, &item.Reason, &refsJSON, &workPacketJSON, &item.Status, &createdAt); err != nil {
 		return MaintenanceTask{}, fmt.Errorf("scan maintenance task: %w", err)
 	}
 	if refsJSON != "" {
 		if err := json.Unmarshal([]byte(refsJSON), &item.SourceRefs); err != nil {
 			return MaintenanceTask{}, fmt.Errorf("decode maintenance refs: %w", err)
 		}
+	}
+	if strings.TrimSpace(workPacketJSON) != "" && strings.TrimSpace(workPacketJSON) != "null" && strings.TrimSpace(workPacketJSON) != "{}" {
+		var packet ProposalWorkPacket
+		if err := json.Unmarshal([]byte(workPacketJSON), &packet); err != nil {
+			return MaintenanceTask{}, fmt.Errorf("decode maintenance work packet: %w", err)
+		}
+		item.WorkPacket = &packet
 	}
 	item.CreatedAt = timeutil.MustParseRFC3339Nano(createdAt)
 	return item, nil
@@ -836,6 +1152,87 @@ func scanPromotionJobRow(scanner interface{ Scan(dest ...any) error }) (Promotio
 	var createdAt string
 	if err := scanner.Scan(&item.ID, &item.SourceRef, &item.SourceKind, &item.NoteType, &item.Title, &item.DraftPath, &item.Status, &createdAt); err != nil {
 		return PromotionJob{}, fmt.Errorf("scan promotion job: %w", err)
+	}
+	item.CreatedAt = timeutil.MustParseRFC3339Nano(createdAt)
+	return item, nil
+}
+
+func scanMemoryProposalRow(scanner interface{ Scan(dest ...any) error }) (MemoryProposal, error) {
+	var item MemoryProposal
+	var classification sql.NullString
+	var sourceJSON string
+	var changeJSON string
+	var createdAt string
+	var updatedAt string
+	var reviewRequired int
+	if err := scanner.Scan(
+		&item.ID,
+		&item.Kind,
+		&classification,
+		&item.Status,
+		&reviewRequired,
+		&item.Confidence,
+		&item.BlastRadius,
+		&item.DedupeKey,
+		&item.Summary,
+		&sourceJSON,
+		&changeJSON,
+		&item.EvaluationStatus,
+		&item.ApplyStatus,
+		&item.Count,
+		&createdAt,
+		&updatedAt,
+	); err != nil {
+		return MemoryProposal{}, fmt.Errorf("scan memory proposal: %w", err)
+	}
+	if classification.Valid {
+		item.Classification = classification.String
+	}
+	if sourceJSON != "" {
+		if err := json.Unmarshal([]byte(sourceJSON), &item.SourceRefs); err != nil {
+			return MemoryProposal{}, fmt.Errorf("decode memory proposal refs: %w", err)
+		}
+	}
+	if changeJSON != "" {
+		if err := json.Unmarshal([]byte(changeJSON), &item.ProposedChange); err != nil {
+			return MemoryProposal{}, fmt.Errorf("decode memory proposal change: %w", err)
+		}
+	}
+	item.ReviewRequired = reviewRequired != 0
+	item.CreatedAt = timeutil.MustParseRFC3339Nano(createdAt)
+	item.UpdatedAt = timeutil.MustParseRFC3339Nano(updatedAt)
+	return item, nil
+}
+
+func scanEvidenceImportRunRow(scanner interface{ Scan(dest ...any) error }) (EvidenceImportRun, error) {
+	var item EvidenceImportRun
+	var artifactDigest sql.NullString
+	var processorKind sql.NullString
+	var processorModel sql.NullString
+	var createdAt string
+	if err := scanner.Scan(
+		&item.ID,
+		&item.SourceKind,
+		&item.SourceRef,
+		&item.Title,
+		&item.DraftPath,
+		&artifactDigest,
+		&processorKind,
+		&processorModel,
+		&item.Summary,
+		&item.Status,
+		&createdAt,
+	); err != nil {
+		return EvidenceImportRun{}, fmt.Errorf("scan evidence import run: %w", err)
+	}
+	if artifactDigest.Valid {
+		item.ArtifactDigest = artifactDigest.String
+	}
+	if processorKind.Valid {
+		item.ProcessorKind = processorKind.String
+	}
+	if processorModel.Valid {
+		item.ProcessorModel = processorModel.String
 	}
 	item.CreatedAt = timeutil.MustParseRFC3339Nano(createdAt)
 	return item, nil

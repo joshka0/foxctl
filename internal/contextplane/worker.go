@@ -86,7 +86,7 @@ func (w *Worker) RunOnce(ctx context.Context) error {
 	}
 
 	if strings.TrimSpace(w.cfg.VaultPath) == "" {
-		_, err = store.GenerateMaintenanceTasks(50)
+		_, err = store.GenerateMaintenanceTasks(ctx, 50)
 		return err
 	}
 
@@ -102,6 +102,6 @@ func (w *Worker) RunOnce(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("obsidian health: %w", err)
 	}
-	_, err = store.GenerateMaintenanceTasksWithHealth(50, &health)
+	_, err = store.GenerateMaintenanceTasksWithHealth(ctx, 50, &health)
 	return err
 }

@@ -1,4 +1,7 @@
 import type {
+  ACAMemoryProposal,
+  ACAOverview,
+  ACANextProposalMergeResult,
   AgentsListResponse,
   AgentRuntimeTree,
   AgentSpawnResponse,
@@ -174,6 +177,26 @@ export interface AuthSessionResponse {
   };
 }
 
+function isLocalDevAuthFallbackEligible(): boolean {
+  if (typeof window === "undefined") return false;
+  const host = window.location.hostname.trim().toLowerCase();
+  return host === "localhost" || host === "127.0.0.1" || host === "0.0.0.0";
+}
+
+function localDevAuthSession(): AuthSessionResponse {
+  return {
+    session: {
+      id: "local-dev-session",
+    },
+    user: {
+      id: "local-dev-user",
+      email: "local@agentctl.dev",
+      name: "Local Dev",
+      emailVerified: true,
+    },
+  };
+}
+
 export async function getAuthSession(): Promise<AuthSessionResponse | null> {
   try {
     return await request<AuthSessionResponse>("/auth/session");
@@ -201,6 +224,12 @@ export async function signOutAuthSession(): Promise<void> {
       return;
     }
     const text = await response.text();
+    if (
+      isLocalDevAuthFallbackEligible() &&
+      (response.status === 404 || /page not found/i.test(text))
+    ) {
+      return;
+    }
     throw new Error(text || `Sign out failed: ${response.status}`);
   }
 }
@@ -344,6 +373,114 @@ export async function seedOrchestrationCards(params: {
       body: JSON.stringify(params),
     },
   );
+  return unwrapEnvelope(env);
+}
+
+export async function getContextOverview(params: {
+  workspace: string;
+  vault_path?: string;
+  limit?: number;
+  maintenance_limit?: number;
+}): Promise<ACAOverview> {
+  const query = new URLSearchParams();
+  query.set("workspace", params.workspace);
+  if (params.vault_path) query.set("vault_path", params.vault_path);
+  if (typeof params.limit === "number" && Number.isFinite(params.limit)) {
+    query.set("limit", String(params.limit));
+  }
+  if (
+    typeof params.maintenance_limit === "number" &&
+    Number.isFinite(params.maintenance_limit)
+  ) {
+    query.set("maintenance_limit", String(params.maintenance_limit));
+  }
+  const env = await request<ApiEnvelope<ACAOverview>>(
+    `/context/overview?${query.toString()}`,
+  );
+  return unwrapEnvelope(env);
+}
+
+export async function getContextNextProposalMerge(params: {
+  workspace: string;
+  vault_path?: string;
+  limit?: number;
+  claim?: boolean;
+}): Promise<ACANextProposalMergeResult> {
+  if (params.claim) {
+    const env = await request<ApiEnvelope<ACANextProposalMergeResult>>(
+      "/context/next-proposal-merge/claim",
+      {
+        method: "POST",
+        body: JSON.stringify({
+          workspace: params.workspace,
+          vault_path: params.vault_path,
+          limit: params.limit,
+        }),
+      },
+    );
+    return unwrapEnvelope(env);
+  }
+  const query = new URLSearchParams();
+  query.set("workspace", params.workspace);
+  if (params.vault_path) query.set("vault_path", params.vault_path);
+  if (typeof params.limit === "number" && Number.isFinite(params.limit)) {
+    query.set("limit", String(params.limit));
+  }
+  const env = await request<ApiEnvelope<ACANextProposalMergeResult>>(
+    `/context/next-proposal-merge?${query.toString()}`,
+  );
+  return unwrapEnvelope(env);
+}
+
+export async function releaseContextProposalMerge(params: {
+  workspace: string;
+  proposal_id: string;
+}): Promise<{ workspace_path: string; proposal: ACAMemoryProposal }> {
+  const env = await request<
+    ApiEnvelope<{ workspace_path: string; proposal: ACAMemoryProposal }>
+  >(`/context/proposals/${params.proposal_id}/release-merge`, {
+    method: "POST",
+    body: JSON.stringify({
+      workspace: params.workspace,
+    }),
+  });
+  return unwrapEnvelope(env);
+}
+
+export async function mergeContextProposal(params: {
+  workspace: string;
+  proposal_id: string;
+  vault_path?: string;
+  vault_name?: string;
+  draft_path?: string;
+  target_path?: string;
+  heading?: string;
+}): Promise<{
+  workspace_path: string;
+  vault_path: string;
+  proposal: ACAMemoryProposal;
+  merge: Record<string, unknown>;
+  work_packet: Record<string, unknown>;
+}> {
+  const env = await request<
+    ApiEnvelope<{
+      workspace_path: string;
+      vault_path: string;
+      proposal: ACAMemoryProposal;
+      merge: Record<string, unknown>;
+      work_packet: Record<string, unknown>;
+    }>
+  >(`/context/proposals/${params.proposal_id}/merge`, {
+    method: "POST",
+    body: JSON.stringify({
+      workspace: params.workspace,
+      vault_path: params.vault_path,
+      vault_name: params.vault_name,
+      draft_path: params.draft_path,
+      target_path: params.target_path,
+      heading: params.heading,
+    }),
+  });
   return unwrapEnvelope(env);
 }
 

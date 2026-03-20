@@ -11,6 +11,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
+import { HelpTooltip, Tooltip } from "@/components/ui/tooltip";
 import {
   Card,
   CardContent,
@@ -1633,7 +1634,13 @@ export function AgentDetailView({ agent, onBack }: AgentDetailViewProps) {
           <div className="space-y-4">
             <Card>
               <CardHeader className="pb-3">
-                <CardTitle className="text-sm">Agent Snapshot</CardTitle>
+                <div className="flex items-center gap-1.5">
+                  <CardTitle className="text-sm">Agent Snapshot</CardTitle>
+                  <HelpTooltip
+                    side="top"
+                    content="Quick summary of the agent's state, execution mode, workspace, and conversation lineage."
+                  />
+                </div>
                 <CardDescription>
                   Stored agent metadata, daemon presence, and conversation
                   lineage.
@@ -1668,8 +1675,12 @@ export function AgentDetailView({ agent, onBack }: AgentDetailViewProps) {
                   />
                 </div>
                 <div className="rounded-lg border border-border bg-background/60 p-3">
-                  <div className="text-[11px] uppercase tracking-wider text-muted-foreground">
-                    Conversation Lineage
+                  <div className="inline-flex items-center gap-1 text-[11px] uppercase tracking-wider text-muted-foreground">
+                    <span>Conversation Lineage</span>
+                    <HelpTooltip
+                      side="top"
+                      content="The conversation ID root this workbench uses for companion chat and memory continuity."
+                    />
                   </div>
                   <div className="mt-1 font-mono text-xs text-foreground">
                     {conversationID}
@@ -1741,26 +1752,34 @@ export function AgentDetailView({ agent, onBack }: AgentDetailViewProps) {
               <CardHeader className="pb-3">
                 <div className="flex items-start justify-between gap-3">
                   <div>
-                    <CardTitle className="text-sm">Live Runtime</CardTitle>
+                    <div className="flex items-center gap-1.5">
+                      <CardTitle className="text-sm">Live Runtime</CardTitle>
+                      <HelpTooltip
+                        side="top"
+                        content="Live runtime subtree from the Jido bridge, including child agents and current execution state."
+                      />
+                    </div>
                     <CardDescription>
                       Jido runtime tree, child hierarchy, and current bridge
                       state.
                     </CardDescription>
                   </div>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-8 w-8"
-                    onClick={() => void refetchRuntime()}
-                    disabled={refreshingRuntime}
-                  >
-                    <RefreshCw
-                      className={cn(
-                        "h-4 w-4",
-                        refreshingRuntime && "animate-spin",
-                      )}
-                    />
-                  </Button>
+                  <Tooltip content="Refresh the live runtime subtree for this agent.">
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8"
+                      onClick={() => void refetchRuntime()}
+                      disabled={refreshingRuntime}
+                    >
+                      <RefreshCw
+                        className={cn(
+                          "h-4 w-4",
+                          refreshingRuntime && "animate-spin",
+                        )}
+                      />
+                    </Button>
+                  </Tooltip>
                 </div>
               </CardHeader>
               <CardContent className="space-y-3">
@@ -1816,7 +1835,13 @@ export function AgentDetailView({ agent, onBack }: AgentDetailViewProps) {
 
             <Card>
               <CardHeader className="pb-3">
-                <CardTitle className="text-sm">Hierarchy</CardTitle>
+                <div className="flex items-center gap-1.5">
+                  <CardTitle className="text-sm">Hierarchy</CardTitle>
+                  <HelpTooltip
+                    side="top"
+                    content="Shows where this agent sits in the parent/child tree and which immediate workers are attached."
+                  />
+                </div>
                 <CardDescription>
                   Agent tree position and immediate worker lineage.
                 </CardDescription>
@@ -1883,7 +1908,13 @@ export function AgentDetailView({ agent, onBack }: AgentDetailViewProps) {
               <CardHeader className="pb-3">
                 <div className="flex items-start justify-between gap-3">
                   <div>
-                    <CardTitle className="text-sm">Child Agents</CardTitle>
+                    <div className="flex items-center gap-1.5">
+                      <CardTitle className="text-sm">Child Agents</CardTitle>
+                      <HelpTooltip
+                        side="top"
+                        content="Spawn and manage immediate child agents from this parent workbench."
+                      />
+                    </div>
                     <CardDescription>
                       Spawn child agents and manage immediate workers from this
                       parent surface.
@@ -2255,7 +2286,13 @@ export function AgentDetailView({ agent, onBack }: AgentDetailViewProps) {
           <CardHeader className="border-b border-border pb-4">
             <div className="flex items-center justify-between gap-3">
               <div>
-                <CardTitle className="text-sm">Agent Conversation</CardTitle>
+                <div className="flex items-center gap-1.5">
+                  <CardTitle className="text-sm">Agent Conversation</CardTitle>
+                  <HelpTooltip
+                    side="top"
+                    content="Human-facing chat thread for this agent. Depending on memory scope, it uses either a detached session thread or the agent's stable conversation lineage."
+                  />
+                </div>
                 <CardDescription>
                   {activeMemoryScope === "session"
                     ? "Human-facing chat backed by a detached workbench memory thread."

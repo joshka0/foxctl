@@ -6,6 +6,7 @@ import { Card } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Textarea } from '@/components/ui/textarea'
+import { HelpTooltip, Tooltip } from '@/components/ui/tooltip'
 import {
   createRoom,
   listAgents,
@@ -37,11 +38,14 @@ export function RoomsView() {
   const selectedRoomID = useViewStore((s) => s.selectedRoomID)
   const selectedRoomWorkspaceID = useViewStore((s) => s.selectedRoomWorkspaceID)
   const setSelectedRoom = useViewStore((s) => s.setSelectedRoom)
-  const [workspaceID, setWorkspaceID] = useState('')
+  const [workspaceOverrideID, setWorkspaceOverrideID] = useState('')
   const [pendingRoomID, setPendingRoomID] = useState('')
-  const [roomTitle, setRoomTitle] = useState('')
-  const [roomDescription, setRoomDescription] = useState('')
-  const [memberText, setMemberText] = useState('')
+  const [roomDraftState, setRoomDraftState] = useState({
+    roomID: '',
+    title: '',
+    description: '',
+    memberText: '',
+  })
   const [draft, setDraft] = useState('')
   const [roomError, setRoomError] = useState<string | null>(null)
   const [sendError, setSendError] = useState<string | null>(null)
@@ -56,6 +60,7 @@ export function RoomsView() {
     queryFn: listWorkspaces,
     staleTime: 10000,
   })
+  const currentWorkspace = (workspacesData?.current ?? '').trim()
 
   const derivedWorkspaceID = useMemo(() => {
     const isPathLike = (value: string) => value.startsWith('/')
@@ -73,9 +78,10 @@ export function RoomsView() {
   }, [agentsData?.agents, selectedAgent?.ns, selectedRoomWorkspaceID])
 
   const workspaceOptions = useMemo(() => {
+    const workspaceEntries = workspacesData?.workspaces ?? []
     const seen = new Set<string>()
     const ordered: string[] = []
-    const preferred = [selectedRoomWorkspaceID, workspaceID, workspacesData?.current, derivedWorkspaceID]
+    const preferred = [selectedRoomWorkspaceID, workspaceOverrideID, currentWorkspace, derivedWorkspaceID]
       .map((value) => (value || '').trim())
       .filter((value) => isPathWorkspace(value))
     for (const value of preferred) {
@@ -83,14 +89,32 @@ export function RoomsView() {
       seen.add(value)
       ordered.push(value)
     }
-    for (const workspace of workspacesData?.workspaces ?? []) {
+    for (const workspace of workspaceEntries) {
       const path = (workspace.path || '').trim()
       if (!isPathWorkspace(path) || seen.has(path)) continue
       seen.add(path)
       ordered.push(path)
     }
     return ordered
-  }, [derivedWorkspaceID, selectedRoomWorkspaceID, workspaceID, workspacesData?.current, workspacesData?.workspaces])
+  }, [currentWorkspace, derivedWorkspaceID, selectedRoomWorkspaceID, workspaceOverrideID, workspacesData?.workspaces])
+
+  const workspaceID = useMemo(() => {
+    const explicit = workspaceOverrideID.trim()
+    if (explicit) return explicit
+    const selectedWorkspace = (selectedRoomWorkspaceID || '').trim()
+    if (selectedRoomID && isPathWorkspace(selectedWorkspace)) return selectedWorkspace
+    if (isPathWorkspace(selectedWorkspace)) return selectedWorkspace
+    if (isPathWorkspace(currentWorkspace)) return currentWorkspace
+    if (derivedWorkspaceID) return derivedWorkspaceID
+    return workspaceOptions[0] || ''
+  }, [
+    currentWorkspace,
+    derivedWorkspaceID,
+    selectedRoomID,
+    selectedRoomWorkspaceID,
+    workspaceOptions,
+    workspaceOverrideID,
+  ])
 
   const workspaceLabel = (workspace: string): string => {
     const trimmed = workspace.trim()
@@ -109,34 +133,6 @@ export function RoomsView() {
     }
     return out
   }, [agentsData?.agents])
-
-  useEffect(() => {
-    const selectedWorkspace = (selectedRoomWorkspaceID || '').trim()
-    if (selectedRoomID && isPathWorkspace(selectedWorkspace) && selectedWorkspace !== workspaceID.trim()) {
-      setWorkspaceID(selectedWorkspace)
-      return
-    }
-    if (workspaceID.trim().length > 0) return
-    if (isPathWorkspace(selectedWorkspace)) {
-      setWorkspaceID(selectedWorkspace)
-      return
-    }
-    const currentWorkspace = (workspacesData?.current || '').trim()
-    if (isPathWorkspace(currentWorkspace)) {
-      setWorkspaceID(currentWorkspace)
-      return
-    }
-    if (derivedWorkspaceID) {
-      setWorkspaceID(derivedWorkspaceID)
-    }
-  }, [derivedWorkspaceID, selectedRoomID, selectedRoomWorkspaceID, workspaceID, workspacesData?.current])
-
-  useEffect(() => {
-    if (workspaceID.trim().length > 0) return
-    if (workspaceOptions[0]) {
-      setWorkspaceID(workspaceOptions[0])
-    }
-  }, [workspaceID, workspaceOptions])
 
   const roomsQuery = useQuery({
     queryKey: ['rooms', workspaceID],
@@ -162,22 +158,18 @@ export function RoomsView() {
     () => rooms.find((room) => room.id === selectedRoomID) ?? null,
     [rooms, selectedRoomID],
   )
-
-  useEffect(() => {
-    const activeRoomID = (selectedRoom?.id || selectedRoomID || pendingRoomID).trim()
-    if (selectedRoom) {
-      setRoomTitle(selectedRoom.title || selectedRoom.id)
-      setRoomDescription(selectedRoom.description || '')
-      setMemberText(formatMembersText(selectedRoom.members || []))
-      setPendingRoomID(activeRoomID)
-      return
-    }
-    if (activeRoomID) {
-      setRoomTitle(activeRoomID)
-      setRoomDescription('')
-      setMemberText('')
-    }
-  }, [pendingRoomID, selectedRoom, selectedRoomID])
+  const activeRoomID = (selectedRoom?.id || selectedRoomID || pendingRoomID).trim()
+  const roomDraftBase = useMemo(
+    () => ({
+      roomID: activeRoomID,
+      title: selectedRoom ? selectedRoom.title || selectedRoom.id : activeRoomID,
+      description: selectedRoom?.description || '',
+      memberText: selectedRoom ? formatMembersText(selectedRoom.members || []) : '',
+    }),
+    [activeRoomID, selectedRoom],
+  )
+  const roomDraft =
+    roomDraftState.roomID === roomDraftBase.roomID ? roomDraftState : roomDraftBase
 
   const roomMessagesQuery = useQuery({
     queryKey: ['room-messages', workspaceID, selectedRoomID],
@@ -225,9 +217,9 @@ export function RoomsView() {
       const roomID = (selectedRoomID || pendingRoomID).trim()
       if (!workspaceID.trim()) throw new Error('Workspace is required')
       if (!roomID) throw new Error('Room ID is required')
-      const title = roomTitle.trim() || roomID
-      const description = roomDescription.trim()
-      const members = parseMembersText(memberText)
+      const title = roomDraft.title.trim() || roomID
+      const description = roomDraft.description.trim()
+      const members = parseMembersText(roomDraft.memberText)
 
       if (selectedRoom?.id === roomID) {
         await patchRoom(roomID, {
@@ -318,39 +310,54 @@ export function RoomsView() {
         <div className="border-b border-border px-4 py-3 space-y-3">
           <div className="flex items-center justify-between gap-2">
             <div>
-              <div className="text-sm font-medium text-foreground">Rooms</div>
+              <div className="flex items-center gap-1.5">
+                <div className="text-sm font-medium text-foreground">Rooms</div>
+                <HelpTooltip
+                  side="bottom"
+                  content="Rooms are shared work threads for agents. Use them to organize conversations, dispatch work, and keep related messages together."
+                />
+              </div>
               <div className="text-xs text-muted-foreground">Derived from `room:*` board streams</div>
             </div>
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={() => roomsQuery.refetch()}
-              disabled={roomsQuery.isFetching || workspaceID.trim().length === 0}
-            >
-              <RefreshCw className={cn('h-4 w-4', roomsQuery.isFetching && 'animate-spin')} />
-            </Button>
+            <Tooltip content="Reload the room list for the selected workspace.">
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => roomsQuery.refetch()}
+                disabled={roomsQuery.isFetching || workspaceID.trim().length === 0}
+              >
+                <RefreshCw className={cn('h-4 w-4', roomsQuery.isFetching && 'animate-spin')} />
+              </Button>
+            </Tooltip>
           </div>
 
           <div className="space-y-2">
-            <label className="text-[11px] uppercase tracking-wide text-muted-foreground">Workspace</label>
+            <div className="text-[11px] uppercase tracking-wide text-muted-foreground inline-flex items-center gap-1">
+              <span>Workspace</span>
+              <HelpTooltip
+                side="top"
+                content="Choose which workspace's rooms and room messages you want to inspect."
+              />
+            </div>
             {workspaceOptions.length > 0 ? (
-              <select
-                value={workspaceID}
-                onChange={(e) => setWorkspaceID(e.target.value)}
-                className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm font-mono"
-                title={workspaceID || 'Select workspace'}
-              >
-                <option value="">Select workspace</option>
-                {workspaceOptions.map((workspace) => (
-                  <option key={workspace} value={workspace}>
-                    {workspaceLabel(workspace)}
-                  </option>
-                ))}
-              </select>
+              <Tooltip content={workspaceID || 'Select a workspace to load rooms.'}>
+                <select
+                  value={workspaceID}
+                  onChange={(e) => setWorkspaceOverrideID(e.target.value)}
+                  className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm font-mono"
+                >
+                  <option value="">Select workspace</option>
+                  {workspaceOptions.map((workspace) => (
+                    <option key={workspace} value={workspace}>
+                      {workspaceLabel(workspace)}
+                    </option>
+                  ))}
+                </select>
+              </Tooltip>
             ) : (
               <Input
                 value={workspaceID}
-                onChange={(e) => setWorkspaceID(e.target.value)}
+                onChange={(e) => setWorkspaceOverrideID(e.target.value)}
                 placeholder="workspace path"
                 className="h-9"
               />
@@ -358,7 +365,13 @@ export function RoomsView() {
           </div>
 
           <div className="space-y-2">
-            <label className="text-[11px] uppercase tracking-wide text-muted-foreground">Open Or Create Room</label>
+            <div className="text-[11px] uppercase tracking-wide text-muted-foreground inline-flex items-center gap-1">
+              <span>Open Or Create Room</span>
+              <HelpTooltip
+                side="top"
+                content="Enter a room ID to open an existing room or create a new one in this workspace."
+              />
+            </div>
             <div className="flex gap-2">
               <Input
                 value={pendingRoomID}
@@ -366,17 +379,19 @@ export function RoomsView() {
                 placeholder="room id"
                 className="h-9"
               />
-              <Button
-                variant="secondary"
-                onClick={() => {
-                  const nextID = pendingRoomID.trim()
-                  if (!nextID) return
-                  setSelectedRoom(nextID, workspaceID.trim() || selectedRoomWorkspaceID)
-                  setSendError(null)
-                }}
-              >
-                Open
-              </Button>
+              <Tooltip content="Open this room if it already exists, or prepare to create it if it does not.">
+                <Button
+                  variant="secondary"
+                  onClick={() => {
+                    const nextID = pendingRoomID.trim()
+                    if (!nextID) return
+                    setSelectedRoom(nextID, workspaceID.trim() || selectedRoomWorkspaceID)
+                    setSendError(null)
+                  }}
+                >
+                  Open
+                </Button>
+              </Tooltip>
             </div>
           </div>
         </div>
@@ -468,40 +483,78 @@ export function RoomsView() {
           ) : null}
           <div className="mt-4 grid gap-3 md:grid-cols-2">
             <div className="space-y-2">
-              <label className="text-[11px] uppercase tracking-wide text-muted-foreground">Room Title</label>
+              <div className="text-[11px] uppercase tracking-wide text-muted-foreground inline-flex items-center gap-1">
+                <span>Room Title</span>
+                <HelpTooltip
+                  side="top"
+                  content="Human-friendly display name for the room. Leave it close to the room ID if you want a simple operational label."
+                />
+              </div>
               <Input
-                value={roomTitle}
-                onChange={(e) => setRoomTitle(e.target.value)}
+                value={roomDraft.title}
+                onChange={(e) =>
+                  setRoomDraftState({
+                    ...roomDraft,
+                    roomID: roomDraftBase.roomID,
+                    title: e.target.value,
+                  })
+                }
                 placeholder="Room title"
               />
             </div>
             <div className="space-y-2">
-              <label className="text-[11px] uppercase tracking-wide text-muted-foreground">Members</label>
+              <div className="text-[11px] uppercase tracking-wide text-muted-foreground inline-flex items-center gap-1">
+                <span>Members</span>
+                <HelpTooltip
+                  side="top"
+                  content="Comma-separated room participants. You can optionally append roles like actor:agent:a:role=owner."
+                />
+              </div>
               <Input
-                value={memberText}
-                onChange={(e) => setMemberText(e.target.value)}
+                value={roomDraft.memberText}
+                onChange={(e) =>
+                  setRoomDraftState({
+                    ...roomDraft,
+                    roomID: roomDraftBase.roomID,
+                    memberText: e.target.value,
+                  })
+                }
                 placeholder="actor:agent:a:role=owner, actor:agent:b"
               />
             </div>
           </div>
           <div className="mt-3 space-y-2">
-            <label className="text-[11px] uppercase tracking-wide text-muted-foreground">Description</label>
+            <div className="text-[11px] uppercase tracking-wide text-muted-foreground inline-flex items-center gap-1">
+              <span>Description</span>
+              <HelpTooltip
+                side="top"
+                content="Short purpose statement for the room so people know what work belongs here."
+              />
+            </div>
             <Textarea
-              value={roomDescription}
-              onChange={(e) => setRoomDescription(e.target.value)}
+              value={roomDraft.description}
+              onChange={(e) =>
+                setRoomDraftState({
+                  ...roomDraft,
+                  roomID: roomDraftBase.roomID,
+                  description: e.target.value,
+                })
+              }
               rows={2}
               placeholder="What this room is for"
             />
           </div>
           <div className="mt-3 flex items-center justify-between gap-3">
             {roomError ? <div className="text-sm text-red-400">{roomError}</div> : <div />}
-            <Button
-              variant="secondary"
-              onClick={() => saveRoomMutation.mutate()}
-              disabled={saveRoomMutation.isPending || workspaceID.trim().length === 0 || (selectedRoomID || pendingRoomID).trim().length === 0}
-            >
-              {selectedRoom ? 'Update Room' : 'Create Room'}
-            </Button>
+            <Tooltip content={selectedRoom ? 'Save room changes, including title, description, and members.' : 'Create a new room in the current workspace with the values above.'}>
+              <Button
+                variant="secondary"
+                onClick={() => saveRoomMutation.mutate()}
+                disabled={saveRoomMutation.isPending || workspaceID.trim().length === 0 || (selectedRoomID || pendingRoomID).trim().length === 0}
+              >
+                {selectedRoom ? 'Update Room' : 'Create Room'}
+              </Button>
+            </Tooltip>
           </div>
         </div>
 
@@ -566,13 +619,15 @@ export function RoomsView() {
             <div className="text-xs text-muted-foreground">
               Sender <code>{DEFAULT_SENDER}</code>
             </div>
-            <Button
-              onClick={() => sendMutation.mutate()}
-              disabled={sendMutation.isPending || workspaceID.trim().length === 0 || (selectedRoomID || pendingRoomID).trim().length === 0}
-            >
-              <SendHorizonal className="mr-2 h-4 w-4" />
-              Send
-            </Button>
+            <Tooltip content="Send the draft message into the currently selected room.">
+              <Button
+                onClick={() => sendMutation.mutate()}
+                disabled={sendMutation.isPending || workspaceID.trim().length === 0 || (selectedRoomID || pendingRoomID).trim().length === 0}
+              >
+                <SendHorizonal className="mr-2 h-4 w-4" />
+                Send
+              </Button>
+            </Tooltip>
           </div>
         </div>
       </div>

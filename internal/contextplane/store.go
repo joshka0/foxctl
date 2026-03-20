@@ -455,8 +455,11 @@ func (s *WorkspaceStore) DraftPromotionFromObservation(id, noteType, title strin
 }
 
 // GenerateMaintenanceTasks derives maintenance queue items from repeated or high-impact tensions.
-func (s *WorkspaceStore) GenerateMaintenanceTasks(limit int) ([]MaintenanceTask, error) {
+func (s *WorkspaceStore) GenerateMaintenanceTasks(ctx context.Context, limit int) ([]MaintenanceTask, error) {
 	if _, err := s.EnsureLayout(); err != nil {
+		return nil, err
+	}
+	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
 	tensions, err := s.ListTensions(0)
@@ -491,6 +494,36 @@ func (s *WorkspaceStore) GenerateMaintenanceTasks(limit int) ([]MaintenanceTask,
 		}
 		out = append(out, task)
 	}
+	proposals, err := s.ListMemoryProposals(ctx, 0)
+	if err != nil {
+		return nil, err
+	}
+	for _, proposal := range proposals {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		packet, ok := buildStoredPreparedProposalWorkPacket(&proposal)
+		if !ok || !isLowRiskPreparedProposal(&proposal) {
+			continue
+		}
+		stamp := nextStamp()
+		task := MaintenanceTask{
+			ID:       buildRecordID("M", stamp),
+			Title:    summarizeProposalMaintenanceTitle(proposal, packet),
+			Kind:     "proposal_merge",
+			Priority: proposalMaintenancePriority(proposal),
+			Reason:   proposal.Summary,
+			SourceRefs: uniqueStrings([]string{
+				"proposal:" + proposal.ID,
+				"draft:" + packet.DraftPath,
+				"target:" + packet.TargetPath,
+			}),
+			WorkPacket: &packet,
+			Status:     "open",
+			CreatedAt:  stamp,
+		}
+		out = append(out, task)
+	}
 	sort.SliceStable(out, func(i, j int) bool {
 		if out[i].Priority != out[j].Priority {
 			return out[i].Priority > out[j].Priority
@@ -500,20 +533,20 @@ func (s *WorkspaceStore) GenerateMaintenanceTasks(limit int) ([]MaintenanceTask,
 	if limit > 0 && len(out) > limit {
 		out = out[:limit]
 	}
-	db, closeFn, err := s.openMutableDB(context.Background())
+	db, closeFn, err := s.openMutableDB(ctx)
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = closeFn() }()
-	if err := replaceMaintenanceTaskRows(context.Background(), db, out); err != nil {
+	if err := replaceMaintenanceTaskRows(ctx, db, out); err != nil {
 		return nil, err
 	}
 	return out, nil
 }
 
 // GenerateMaintenanceTasksWithHealth extends maintenance generation with vault-health findings.
-func (s *WorkspaceStore) GenerateMaintenanceTasksWithHealth(limit int, health *obsidianindex.HealthReport) ([]MaintenanceTask, error) {
-	tasks, err := s.GenerateMaintenanceTasks(0)
+func (s *WorkspaceStore) GenerateMaintenanceTasksWithHealth(ctx context.Context, limit int, health *obsidianindex.HealthReport) ([]MaintenanceTask, error) {
+	tasks, err := s.GenerateMaintenanceTasks(ctx, 0)
 	if err != nil {
 		return nil, err
 	}
@@ -557,25 +590,51 @@ func (s *WorkspaceStore) GenerateMaintenanceTasksWithHealth(limit int, health *o
 	if limit > 0 && len(tasks) > limit {
 		tasks = tasks[:limit]
 	}
-	db, closeFn, err := s.openMutableDB(context.Background())
+	db, closeFn, err := s.openMutableDB(ctx)
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = closeFn() }()
-	if err := replaceMaintenanceTaskRows(context.Background(), db, tasks); err != nil {
+	if err := replaceMaintenanceTaskRows(ctx, db, tasks); err != nil {
 		return nil, err
 	}
 	return tasks, nil
 }
 
 // ListMaintenanceTasks returns generated maintenance tasks.
-func (s *WorkspaceStore) ListMaintenanceTasks(limit int) ([]MaintenanceTask, error) {
-	db, closeFn, err := s.openMutableDB(context.Background())
+func (s *WorkspaceStore) ListMaintenanceTasks(ctx context.Context, limit int) ([]MaintenanceTask, error) {
+	db, closeFn, err := s.openMutableDB(ctx)
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = closeFn() }()
-	return listMaintenanceTaskRows(context.Background(), db, limit)
+	return listMaintenanceTaskRows(ctx, db, limit)
+}
+
+// NextProposalMergeTask returns the highest-priority open proposal-merge maintenance task, if any.
+func (s *WorkspaceStore) NextProposalMergeTask(ctx context.Context, limit int) (*MaintenanceTask, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	items, err := s.ListMaintenanceTasks(ctx, limit)
+	if err != nil {
+		return nil, err
+	}
+	for _, item := range items {
+		if item.Kind != "proposal_merge" {
+			continue
+		}
+		switch strings.ToLower(strings.TrimSpace(item.Status)) {
+		case "closed", "claimed":
+			continue
+		}
+		if item.WorkPacket == nil {
+			continue
+		}
+		copyItem := item
+		return &copyItem, nil
+	}
+	return nil, nil
 }
 
 // RecordRetrievalCorrectionRun persists one ACA retrieval correction run summary.
@@ -660,6 +719,16 @@ func (s *WorkspaceStore) ListPromotionJobs(limit int) ([]PromotionJob, error) {
 	return listPromotionJobRows(context.Background(), db, limit)
 }
 
+// ListEvidenceImportRuns returns recorded external-evidence intake runs, newest first.
+func (s *WorkspaceStore) ListEvidenceImportRuns(limit int) ([]EvidenceImportRun, error) {
+	db, closeFn, err := s.openMutableDB(context.Background())
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = closeFn() }()
+	return listEvidenceImportRunRows(context.Background(), db, limit)
+}
+
 // MergePromotionDraft performs an explicit reviewed merge from a local draft into a canonical vault note.
 func (s *WorkspaceStore) MergePromotionDraft(ctx context.Context, vaultName, vaultPath, draftPath, targetPath, heading string) (PromotionMergeResult, error) {
 	layout, err := s.EnsureLayout()
@@ -684,7 +753,11 @@ func (s *WorkspaceStore) MergePromotionDraft(ctx context.Context, vaultName, vau
 	if strings.TrimSpace(job.DraftPath) == "" {
 		return PromotionMergeResult{}, fmt.Errorf("promotion job has no draft path")
 	}
-	body, err := os.ReadFile(job.DraftPath)
+	draftReadPath := strings.TrimSpace(job.DraftPath)
+	if !filepath.IsAbs(draftReadPath) && strings.TrimSpace(vaultPath) != "" {
+		draftReadPath = filepath.Join(vaultPath, filepath.FromSlash(draftReadPath))
+	}
+	body, err := os.ReadFile(draftReadPath)
 	if err != nil {
 		return PromotionMergeResult{}, fmt.Errorf("read draft %s: %w", job.DraftPath, err)
 	}
@@ -936,6 +1009,17 @@ func maintenancePriority(t Tension) int {
 	return (impactRank(t.Impact) * 10) + t.Count
 }
 
+func proposalMaintenancePriority(proposal MemoryProposal) int {
+	base := 18
+	switch strings.ToLower(strings.TrimSpace(proposal.BlastRadius)) {
+	case "low", "":
+		base = 22
+	case "medium":
+		base = 18
+	}
+	return base + proposal.Count
+}
+
 func summarizeMaintenanceTitle(t Tension) string {
 	statement := strings.TrimSpace(t.Statement)
 	if statement == "" {
@@ -945,6 +1029,17 @@ func summarizeMaintenanceTitle(t Tension) string {
 		statement = statement[:69] + "..."
 	}
 	return "Resolve tension: " + statement
+}
+
+func summarizeProposalMaintenanceTitle(proposal MemoryProposal, packet ProposalWorkPacket) string {
+	target := strings.TrimSpace(packet.TargetPath)
+	if target == "" {
+		target = strings.TrimSpace(proposal.Summary)
+	}
+	if len(target) > 72 {
+		target = target[:69] + "..."
+	}
+	return "Merge prepared proposal: " + target
 }
 
 func safeFileSlug(value, fallback string) string {

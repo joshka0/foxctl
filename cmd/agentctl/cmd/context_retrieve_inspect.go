@@ -69,12 +69,20 @@ func newContextRetrieveInspectCommand() *cobra.Command {
 
 			appliedObservation := false
 			observationPath := ""
+			var recordedProposal any
 			if apply {
 				observationPath, err = store.AppendObservation(inspection.Observation)
 				if err != nil {
 					return fmt.Errorf("append observation: %w", err)
 				}
 				appliedObservation = true
+				if !inspection.Matched && inspection.Proposal.Kind != "none" {
+					proposal, err := store.RecordRetrievalProposal(ctx, inspection)
+					if err != nil {
+						return fmt.Errorf("record proposal: %w", err)
+					}
+					recordedProposal = proposal
+				}
 			}
 
 			policyPatchApplied := false
@@ -124,6 +132,7 @@ func newContextRetrieveInspectCommand() *cobra.Command {
 				"inspection":            inspection,
 				"applied_observation":   appliedObservation,
 				"observation_path":      observationPath,
+				"proposal":              recordedProposal,
 				"policy_patch_applied":  policyPatchApplied,
 				"policy_path":           policyPath,
 				"rechecked":             rechecked,
@@ -139,7 +148,7 @@ func newContextRetrieveInspectCommand() *cobra.Command {
 	cmd.Flags().StringVar(&query, "query", "", "Retrieval query")
 	cmd.Flags().StringSliceVar(&expectedPaths, "expected-path", nil, "Expected repo or note path (repeatable)")
 	cmd.Flags().IntVar(&limit, "limit", 5, "Maximum ranked vault hits")
-	cmd.Flags().BoolVar(&apply, "apply", false, "Persist the generated ACA observation")
+	cmd.Flags().BoolVar(&apply, "apply", false, "Persist the generated ACA observation and proposal")
 	cmd.Flags().BoolVar(&applyPolicyPatch, "apply-policy-patch", false, "Apply the suggested retrieval policy patch when safe")
 	cmd.Flags().BoolVar(&draftWhenPromotable, "draft-when-promotable", false, "Draft a promotion note when the generated observation is promotable")
 	return cmd

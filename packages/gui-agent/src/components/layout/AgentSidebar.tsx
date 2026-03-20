@@ -4,9 +4,10 @@ import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { ScrollArea } from '@/components/ui/scroll-area'
+import { Tooltip } from '@/components/ui/tooltip'
 import { useActivityStore } from '@/stores/activityStore'
 import { useViewStore, type ViewType } from '@/stores/viewStore'
-import { listAgents } from '@/api/client'
+import { getContextOverview, listAgents, listWorkspaces } from '@/api/client'
 import { getAgentDisplayName, isWorkerAgent } from '@/lib/agent-utils'
 import {
   Activity,
@@ -27,6 +28,7 @@ interface SidebarItem {
   icon: React.ReactNode
   label: string
   badge?: number
+  tooltip?: string
 }
 
 interface AgentSidebarProps {
@@ -39,26 +41,31 @@ const PRIMARY_SURFACES: SidebarItem[] = [
     id: 'runtime',
     icon: <Cpu className="h-4 w-4" />,
     label: 'Runtime',
+    tooltip: 'Watch agents, sessions, and live runtime state.',
   },
   {
     id: 'companion',
     icon: <MessagesSquare className="h-4 w-4" />,
     label: 'Companion',
+    tooltip: 'Chat with agents and inspect conversation context.',
   },
   {
     id: 'events',
     icon: <Activity className="h-4 w-4" />,
     label: 'Events',
+    tooltip: 'Inspect logs, errors, and event-level diagnostics.',
   },
   {
     id: 'rooms',
     icon: <Hash className="h-4 w-4" />,
     label: 'Rooms',
+    tooltip: 'Coordinate work in shared rooms and message streams.',
   },
   {
     id: 'orchestration',
     icon: <LayoutGrid className="h-4 w-4" />,
     label: 'Orchestration',
+    tooltip: 'Manage issue flow, boards, and coordinated execution.',
   },
 ]
 
@@ -67,16 +74,19 @@ const EVIDENCE_SURFACES: SidebarItem[] = [
     id: 'turns',
     icon: <Workflow className="h-4 w-4" />,
     label: 'Turns',
+    tooltip: 'Understand how agent turns were built and resolved.',
   },
   {
     id: 'context',
     icon: <Layers className="h-4 w-4" />,
-    label: 'Context',
+    label: 'Memory',
+    tooltip: 'Review project memory, suggested updates, and remembered sources.',
   },
   {
     id: 'artifacts',
     icon: <FileSearch className="h-4 w-4" />,
     label: 'Artifacts',
+    tooltip: 'Inspect retrieved artifacts, embeddings, and search results.',
   },
 ]
 
@@ -87,6 +97,7 @@ export function AgentSidebar({ activeView, onViewChange }: AgentSidebarProps) {
   const {
     selectedAgentID,
     selectedAgent,
+    selectedContextWorkspace,
     selectedConversationID,
     selectedRoomID,
     selectedRoomWorkspaceID,
@@ -98,11 +109,18 @@ export function AgentSidebar({ activeView, onViewChange }: AgentSidebarProps) {
     () => activityEvents.filter((event) => event.status === 'error').length,
     [activityEvents],
   )
+  const selectedWorkspaceRoot = selectedAgent?.workspace_root?.trim() ?? ''
 
   const { data: agentsData } = useQuery({
     queryKey: ['agents'],
     queryFn: () => listAgents(100),
     refetchInterval: 10000,
+  })
+
+  const { data: workspacesData } = useQuery({
+    queryKey: ['workspaces'],
+    queryFn: listWorkspaces,
+    staleTime: 10000,
   })
 
   const agents = useMemo(() => agentsData?.agents ?? [], [agentsData?.agents])
@@ -140,6 +158,31 @@ export function AgentSidebar({ activeView, onViewChange }: AgentSidebarProps) {
       ),
     [activityErrorCount],
   )
+
+  const contextWorkspaceRoot =
+    selectedContextWorkspace?.trim() ||
+    selectedWorkspaceRoot ||
+    workspacesData?.current?.trim() ||
+    ''
+
+  const { data: acaOverview } = useQuery({
+    queryKey: ['aca-overview', contextWorkspaceRoot],
+    queryFn: () =>
+      getContextOverview({
+        workspace: contextWorkspaceRoot,
+      }),
+    enabled: contextWorkspaceRoot.length > 0,
+    staleTime: 5000,
+    refetchInterval: 15000,
+    refetchOnWindowFocus: false,
+  })
+
+  const preparedMergeBadge = useMemo(() => {
+    const total =
+      (acaOverview?.stats.prepared_merge_count ?? 0) +
+      (acaOverview?.stats.claimed_merge_count ?? 0)
+    return total > 0 ? Math.min(total, 99) : undefined
+  }, [acaOverview?.stats.claimed_merge_count, acaOverview?.stats.prepared_merge_count])
 
   const focusContext = useMemo(() => {
     if (selectedAgent) {
@@ -317,7 +360,17 @@ export function AgentSidebar({ activeView, onViewChange }: AgentSidebarProps) {
         )}
 
         {renderSection('Primary', primaryItems)}
-        {renderSection('Evidence', EVIDENCE_SURFACES)}
+        {renderSection(
+          'Evidence',
+          EVIDENCE_SURFACES.map((item) =>
+            item.id === 'context'
+              ? {
+                  ...item,
+                  badge: preparedMergeBadge,
+                }
+              : item,
+          ),
+        )}
 
         {!collapsed && focusContext && (
           <div className="px-2">
@@ -363,32 +416,40 @@ function SidebarButton({
   connected,
 }: SidebarButtonProps) {
   return (
-    <Button
-      variant={active ? 'secondary' : 'ghost'}
-      className={cn('w-full justify-start mb-1 relative px-2', collapsed && 'justify-center')}
-      onClick={onClick}
+    <Tooltip
+      content={item.tooltip || item.label}
+      side={collapsed ? 'right' : 'top'}
+      className="w-full"
+      bubbleClassName={collapsed ? 'w-56' : 'w-64'}
+      disabled={!item.tooltip}
     >
-      <span className="relative">
-        {item.icon}
-        {connected !== undefined && (
-          <span
-            className={cn(
-              'absolute -top-1 -right-1 h-2 w-2 rounded-full',
-              connected ? 'bg-green-500' : 'bg-red-500',
-            )}
-          />
-        )}
-      </span>
-      {!collapsed && (
-        <>
-          <span className="ml-2 truncate">{item.label}</span>
-          {item.badge !== undefined && item.badge > 0 && (
-            <Badge variant="secondary" className="ml-auto">
-              {item.badge}
-            </Badge>
+      <Button
+        variant={active ? 'secondary' : 'ghost'}
+        className={cn('w-full justify-start mb-1 relative px-2', collapsed && 'justify-center')}
+        onClick={onClick}
+      >
+        <span className="relative">
+          {item.icon}
+          {connected !== undefined && (
+            <span
+              className={cn(
+                'absolute -top-1 -right-1 h-2 w-2 rounded-full',
+                connected ? 'bg-green-500' : 'bg-red-500',
+              )}
+            />
           )}
-        </>
-      )}
-    </Button>
+        </span>
+        {!collapsed && (
+          <>
+            <span className="ml-2 truncate">{item.label}</span>
+            {item.badge !== undefined && item.badge > 0 && (
+              <Badge variant="secondary" className="ml-auto">
+                {item.badge}
+              </Badge>
+            )}
+          </>
+        )}
+      </Button>
+    </Tooltip>
   )
 }

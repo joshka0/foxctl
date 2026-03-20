@@ -207,6 +207,158 @@ func TestHandleContextObservations(t *testing.T) {
 	}
 }
 
+func TestHandleContextProposals(t *testing.T) {
+	workspace := t.TempDir()
+	store := contextplane.NewWorkspaceStore(workspace)
+	proposal, err := store.RecordMemoryProposal(context.Background(), contextplane.MemoryProposal{
+		Kind:           "retrieval_policy_patch",
+		Classification: "package_note_fallback_disabled",
+		Status:         "open",
+		Confidence:     0.82,
+		BlastRadius:    "low",
+		Summary:        "Enable deterministic ACA package-note fallback for this workspace.",
+		ProposedChange: map[string]any{
+			"policy_patch":          "aca:\n  package_note_fallback: true\n",
+			"package_note_fallback": true,
+		},
+		CreatedAt: time.Now().UTC(),
+		UpdatedAt: time.Now().UTC(),
+	})
+	if err != nil {
+		t.Fatalf("RecordMemoryProposal: %v", err)
+	}
+
+	req := mcp.CallToolRequest{}
+	req.Params.Arguments = map[string]any{"workspace": workspace, "id": proposal.ID}
+	result, err := handleContextProposals(context.Background(), req)
+	if err != nil {
+		t.Fatalf("handleContextProposals: %v", err)
+	}
+	text := firstTextContent(result)
+	if text == "" || !strings.Contains(text, proposal.ID) {
+		t.Fatalf("unexpected result text: %s", text)
+	}
+}
+
+func TestHandleContextProposalMerge(t *testing.T) {
+	workspace := t.TempDir()
+	store := contextplane.NewWorkspaceStore(workspace)
+	vaultRoot := filepath.Join(t.TempDir(), "vault")
+	if err := os.MkdirAll(filepath.Join(vaultRoot, "notes", "repo", "aca-inspect"), 0o755); err != nil {
+		t.Fatalf("mkdir vault: %v", err)
+	}
+	targetPath := filepath.Join(vaultRoot, "notes", "repo", "aca-inspect", "semantic-and-memory.md")
+	if err := os.WriteFile(targetPath, []byte(`---
+title: semantic and memory
+type: map
+status: reviewed
+trust: canonical
+---
+
+# semantic and memory
+
+## Review
+
+Existing review block.
+`), 0o644); err != nil {
+		t.Fatalf("write target note: %v", err)
+	}
+	draftRel := "inbox/drafted-from-agentctl/external-evidence/aca-inspect/aca-vocabulary-review.md"
+	draftAbs := filepath.Join(vaultRoot, filepath.FromSlash(draftRel))
+	if err := os.MkdirAll(filepath.Dir(draftAbs), 0o755); err != nil {
+		t.Fatalf("mkdir draft dir: %v", err)
+	}
+	if err := os.WriteFile(draftAbs, []byte(`---
+title: ACA Vocabulary Review
+type: evidence
+status: draft
+trust: raw
+---
+
+# ACA Vocabulary Review
+
+Imported evidence says we should unify ACA vocabulary.
+`), 0o644); err != nil {
+		t.Fatalf("write draft note: %v", err)
+	}
+	proposal, err := store.RecordMemoryProposal(context.Background(), contextplane.MemoryProposal{
+		DedupeKey:      "methodology_draft|aca-vocabulary-mcp",
+		Kind:           "methodology_draft",
+		Classification: "external_evidence",
+		Status:         "prepared",
+		ReviewRequired: true,
+		Confidence:     0.72,
+		BlastRadius:    "high",
+		Summary:        "Review imported evidence for a methodology or doctrine update: ACA Vocabulary Review. Suggested target: notes/repo/aca-inspect/semantic-and-memory.md.",
+		ProposedChange: map[string]any{
+			"evidence_import_id":         "E-999",
+			"title":                      "ACA Vocabulary Review",
+			"draft_path":                 draftRel,
+			"suggested_target_note_path": "notes/repo/aca-inspect/semantic-and-memory.md",
+			"suggested_target_heading":   "Review",
+		},
+		EvaluationStatus: "accepted",
+		ApplyStatus:      "review_prepared",
+		CreatedAt:        time.Now().UTC(),
+		UpdatedAt:        time.Now().UTC(),
+	})
+	if err != nil {
+		t.Fatalf("RecordMemoryProposal: %v", err)
+	}
+
+	req := mcp.CallToolRequest{}
+	req.Params.Arguments = map[string]any{
+		"workspace":  workspace,
+		"id":         proposal.ID,
+		"vault_path": vaultRoot,
+	}
+	result, err := handleContextProposalMerge(context.Background(), req)
+	if err != nil {
+		t.Fatalf("handleContextProposalMerge: %v", err)
+	}
+	text := firstTextContent(result)
+	if text == "" || !strings.Contains(text, "reviewed_merged") || !strings.Contains(text, "\"work_packet\"") {
+		t.Fatalf("unexpected merge result text: %s", text)
+	}
+}
+
+func TestHandleContextNextProposalMerge(t *testing.T) {
+	workspace := t.TempDir()
+	store := contextplane.NewWorkspaceStore(workspace)
+	if _, err := store.RecordMemoryProposal(context.Background(), contextplane.MemoryProposal{
+		DedupeKey:      "external_evidence_import|aca-vocabulary-mcp-next",
+		Kind:           "external_evidence_import",
+		Classification: "external_evidence",
+		Status:         "prepared",
+		ReviewRequired: true,
+		Confidence:     0.72,
+		BlastRadius:    "medium",
+		Summary:        "Review imported evidence draft for merge consideration: ACA Vocabulary Review. Suggested target: notes/repo/aca-inspect/semantic-and-memory.md.",
+		ProposedChange: map[string]any{
+			"draft_path":                 "inbox/drafted-from-agentctl/external-evidence/aca-inspect/aca-vocabulary-review.md",
+			"suggested_target_note_path": "notes/repo/aca-inspect/semantic-and-memory.md",
+			"suggested_target_heading":   "Review",
+		},
+		EvaluationStatus: "accepted",
+		ApplyStatus:      "review_prepared",
+		CreatedAt:        time.Now().UTC(),
+		UpdatedAt:        time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("RecordMemoryProposal: %v", err)
+	}
+
+	req := mcp.CallToolRequest{}
+	req.Params.Arguments = map[string]any{"workspace": workspace}
+	result, err := handleContextNextProposalMerge(context.Background(), req)
+	if err != nil {
+		t.Fatalf("handleContextNextProposalMerge: %v", err)
+	}
+	text := firstTextContent(result)
+	if text == "" || !strings.Contains(text, "\"found\": true") || !strings.Contains(text, "\"work_packet\"") || !strings.Contains(text, "\"target_path\": \"notes/repo/aca-inspect/semantic-and-memory.md\"") {
+		t.Fatalf("unexpected result text: %s", text)
+	}
+}
+
 func TestHandleContextHandoffs(t *testing.T) {
 	workspace := t.TempDir()
 	store := contextplane.NewWorkspaceStore(workspace)

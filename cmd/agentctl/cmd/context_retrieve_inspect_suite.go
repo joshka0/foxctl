@@ -31,6 +31,7 @@ type retrievalInspectionSuiteSection struct {
 	Inspections      []contextplane.RetrievalInspection           `json:"inspections"`
 	Summary          contextplane.RetrievalInspectionBatchSummary `json:"summary"`
 	ObservationPaths []string                                     `json:"observation_paths,omitempty"`
+	ProposalIDs      []string                                     `json:"proposal_ids,omitempty"`
 	Drafts           []contextplane.PromotionDraftResult          `json:"drafts,omitempty"`
 }
 
@@ -219,6 +220,7 @@ func newContextRetrieveInspectSuiteCommand() *cobra.Command {
 				"run_id":              run.ID,
 				"summary":             summary,
 				"recommended_actions": report.Baseline.Summary.RecommendedActions,
+				"proposal_ids":        report.Baseline.ProposalIDs,
 				"drafts":              report.Baseline.Drafts,
 				"policy_patch":        report.PolicyPatch,
 				"control_patch":       report.ControlPatch,
@@ -253,6 +255,7 @@ func collectInspectionSuiteSection(
 ) (retrievalInspectionSuiteSection, error) {
 	inspections := make([]contextplane.RetrievalInspection, 0, len(suite.Queries))
 	observationPaths := []string{}
+	proposalIDs := []string{}
 	drafts := []contextplane.PromotionDraftResult{}
 	for _, query := range suite.Queries {
 		result, err := store.RetrieveWithOptions(ctx, index, repo, semanticProvider, query.Query, limit, opts)
@@ -270,6 +273,13 @@ func collectInspectionSuiteSection(
 				return retrievalInspectionSuiteSection{}, fmt.Errorf("append observation for %s: %w", query.ID, err)
 			}
 			observationPaths = append(observationPaths, path)
+			if inspection.Proposal.Kind != "none" {
+				proposal, err := store.RecordRetrievalProposal(ctx, inspection)
+				if err != nil {
+					return retrievalInspectionSuiteSection{}, fmt.Errorf("record proposal for %s: %w", query.ID, err)
+				}
+				proposalIDs = append(proposalIDs, proposal.ID)
+			}
 			if draftWhenPromotable && inspection.Classification == "missing_package_note" && inspection.Proposal.Kind == "draft_package_note" {
 				if promoted := findObservationByStatement(store, inspection.Observation.Statement); promoted != nil && promoted.Count >= 2 && !hasPromotionJobForObservation(store, promoted.ID) {
 					draft, err := store.DraftPromotionFromObservation(promoted.ID, inspection.Proposal.NoteType, inspection.Proposal.NoteTitle)
@@ -285,6 +295,7 @@ func collectInspectionSuiteSection(
 		Inspections:      inspections,
 		Summary:          contextplane.SummarizeRetrievalInspections(inspections),
 		ObservationPaths: observationPaths,
+		ProposalIDs:      proposalIDs,
 		Drafts:           drafts,
 	}, nil
 }

@@ -289,8 +289,28 @@ Each ingest run should produce:
 ### Acceptance
 
 - external evidence lands in the inbox with provenance
+- evidence imports also seed typed proposals, so repeated topic imports can converge on merge-oriented or methodology-oriented review work
+- evidence proposals should suggest likely canonical landing notes when the vault already contains a strong match, so review starts from a proposed merge target instead of a raw draft only
+- applying an evidence proposal should prepare a reviewed-merge job for that target, not directly rewrite the canonical note
 - promotion preserves source references
 - vault index rebuild makes imported notes retrievable through ACA
+
+### Local summarizer lane
+
+A lightweight local-model summarizer is useful here, but it should not be
+treated as a new durable memory tier.
+
+The better shape is:
+
+- `L5` remains the external evidence layer
+- an optional local `L6` acts only as a synthesis lane that cheaply extracts
+  summaries, claims, frameworks, and routing hints before review/promotion
+
+That keeps the architecture honest:
+
+- `L5` stores evidence
+- `L6` processes evidence
+- `L3` keeps durable promoted knowledge
 
 ## Phase 3: Session Routing Note
 

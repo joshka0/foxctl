@@ -2,6 +2,7 @@ import React from "react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Tooltip } from "@/components/ui/tooltip";
 import { ChatInput } from "@/components/chat/ChatInput";
 import {
   MessageBubble,
@@ -188,19 +189,20 @@ export function ConversationWorkspace({
                   </Button>
                 )}
                 {!isHistoricalSessionView && (
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-8 w-8"
-                    onClick={onToggleContextPanel}
-                    title={showContextPanel ? "Hide context" : "Show context"}
-                  >
-                    {showContextPanel ? (
-                      <PanelRightClose className="h-4 w-4" />
-                    ) : (
-                      <PanelRightOpen className="h-4 w-4" />
-                    )}
-                  </Button>
+                  <Tooltip content={showContextPanel ? "Hide the conversation inspector." : "Show the conversation inspector."}>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8"
+                      onClick={onToggleContextPanel}
+                    >
+                      {showContextPanel ? (
+                        <PanelRightClose className="h-4 w-4" />
+                      ) : (
+                        <PanelRightOpen className="h-4 w-4" />
+                      )}
+                    </Button>
+                  </Tooltip>
                 )}
               </div>
             </div>

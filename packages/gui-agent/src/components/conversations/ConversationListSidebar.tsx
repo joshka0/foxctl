@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { CollapsibleSection } from "@/components/ui/collapsible-section";
+import { HelpTooltip, Tooltip } from "@/components/ui/tooltip";
 import { cn, formatRelativeTime } from "@/lib/utils";
 import type { Agent } from "@/api/types";
 import type { PersistedSession } from "@/api/client";
@@ -217,18 +218,19 @@ function AgentConversationGroup({
           </div>
         )}
 
-        <Button
-          variant="ghost"
-          size="icon"
-          className="h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0"
-          onClick={(e) => {
-            e.stopPropagation();
-            onNewConversationWithAgent(agent);
-          }}
-          title="New chat with this agent"
-        >
-          <Plus className="h-3.5 w-3.5" />
-        </Button>
+        <Tooltip content="Start a new chat thread linked to this agent.">
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0"
+            onClick={(e) => {
+              e.stopPropagation();
+              onNewConversationWithAgent(agent);
+            }}
+          >
+            <Plus className="h-3.5 w-3.5" />
+          </Button>
+        </Tooltip>
       </div>
 
       {isExpanded && (
@@ -366,24 +368,26 @@ function AgentConversationGroup({
                 </div>
                 {editingConversationId !== conversation.id && (
                   <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-5 w-5"
-                      onClick={(e) => onStartRename(e, conversation)}
-                      title="Rename"
-                    >
-                      <Pencil className="h-2.5 w-2.5 text-muted-foreground" />
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-5 w-5"
-                      onClick={(e) => onDeleteConversation(e, conversation.id)}
-                      title="Delete"
-                    >
-                      <Trash2 className="h-2.5 w-2.5 text-muted-foreground" />
-                    </Button>
+                    <Tooltip content="Rename this conversation or change its linked agent.">
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-5 w-5"
+                        onClick={(e) => onStartRename(e, conversation)}
+                      >
+                        <Pencil className="h-2.5 w-2.5 text-muted-foreground" />
+                      </Button>
+                    </Tooltip>
+                    <Tooltip content="Delete this conversation from the sidebar list.">
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-5 w-5"
+                        onClick={(e) => onDeleteConversation(e, conversation.id)}
+                      >
+                        <Trash2 className="h-2.5 w-2.5 text-muted-foreground" />
+                      </Button>
+                    </Tooltip>
                   </div>
                 )}
               </div>
@@ -585,24 +589,31 @@ export function ConversationListSidebar({
           <div className="flex items-center gap-2">
             <MessagesSquare className="h-4 w-4" />
             <div className="min-w-0">
-              <h2 className="text-sm font-semibold text-foreground">
-                Companion
-              </h2>
+              <div className="flex items-center gap-1.5">
+                <h2 className="text-sm font-semibold text-foreground">
+                  Companion
+                </h2>
+                <HelpTooltip
+                  side="bottom"
+                  content="Companion groups conversations by agent so you can jump between active chats, unassigned threads, and historical sessions."
+                />
+              </div>
               <p className="text-[10px] text-muted-foreground">
                 Grouped by agent
               </p>
             </div>
           </div>
           <div className="flex items-center gap-1">
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={onNewConversation}
-              className="h-7 w-7"
-              title="New agent chat"
-            >
-              <Plus className="h-4 w-4" />
-            </Button>
+            <Tooltip content="Start a new companion chat and link it to an agent later if needed.">
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={onNewConversation}
+                className="h-7 w-7"
+              >
+                <Plus className="h-4 w-4" />
+              </Button>
+            </Tooltip>
             <Button
               variant="ghost"
               size="icon"
@@ -678,7 +689,11 @@ export function ConversationListSidebar({
               {activeAgentGroups.length > 0 && (
                 <CollapsibleSection
                   title="Active Agent Groups"
-                  icon={<Play className="h-3.5 w-3.5" />}
+                  icon={
+                    <Tooltip content="Agents with chats that are currently active or recently active.">
+                      <Play className="h-3.5 w-3.5" />
+                    </Tooltip>
+                  }
                   defaultOpen
                   badge={String(activeAgentGroups.length)}
                 >
@@ -717,7 +732,11 @@ export function ConversationListSidebar({
               {erroredAgentGroups.length > 0 && (
                 <CollapsibleSection
                   title="Error-State Agent Groups"
-                  icon={<Bug className="h-3.5 w-3.5" />}
+                  icon={
+                    <Tooltip content="Agents whose linked chats are associated with an agent currently in an error state.">
+                      <Bug className="h-3.5 w-3.5" />
+                    </Tooltip>
+                  }
                   defaultOpen
                   badge={String(erroredAgentGroups.length)}
                 >
@@ -755,7 +774,11 @@ export function ConversationListSidebar({
 
               <CollapsibleSection
                 title="Unassigned / No Agent Link"
-                icon={<MessagesSquare className="h-3.5 w-3.5" />}
+                icon={
+                  <Tooltip content="Chats that exist but are not currently linked to a specific agent.">
+                    <MessagesSquare className="h-3.5 w-3.5" />
+                  </Tooltip>
+                }
                 defaultOpen={unassignedCompanionItems.length > 0}
                 badge={String(unassignedCompanionItems.length)}
               >
@@ -781,7 +804,11 @@ export function ConversationListSidebar({
 
               <CollapsibleSection
                 title="Historical Sessions"
-                icon={<FileText className="h-3.5 w-3.5" />}
+                icon={
+                  <Tooltip content="Older persisted sessions that are not part of the current active companion chat list.">
+                    <FileText className="h-3.5 w-3.5" />
+                  </Tooltip>
+                }
                 defaultOpen={historicalSessionItems.length > 0}
                 badge={String(historicalSessionItems.length)}
               >
