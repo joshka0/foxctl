@@ -4,6 +4,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
+import { HelpTooltip, Tooltip } from '@/components/ui/tooltip'
 import { listRooms, listWorkspaces } from '@/api/client'
 import type { Agent } from '@/api/types'
 import {
@@ -127,7 +128,13 @@ export function RuntimeRoomPanel({ agents }: RuntimeRoomPanelProps) {
       <CardHeader className="pb-3">
         <div className="flex items-center justify-between gap-3">
           <div>
-            <CardTitle className="text-sm">Rooms Shortcut</CardTitle>
+            <div className="flex items-center gap-1.5">
+              <CardTitle className="text-sm">Rooms Shortcut</CardTitle>
+              <HelpTooltip
+                side="top"
+                content="Use this shortcut to jump into an existing room from Runtime or start a new agent directly inside one."
+              />
+            </div>
             <div className="mt-1 text-xs text-muted-foreground">
               Use Runtime to jump into an existing room or spawn into one. Create
               and edit rooms in the dedicated Rooms surface.
@@ -142,7 +149,13 @@ export function RuntimeRoomPanel({ agents }: RuntimeRoomPanelProps) {
         <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_auto]">
           <div className="space-y-2">
             <label className="text-xs font-medium text-muted-foreground">
-              Workspace
+              <span className="inline-flex items-center gap-1">
+                Workspace
+                <HelpTooltip
+                  content="Choose which workspace's rooms should be listed here."
+                  side="top"
+                />
+              </span>
             </label>
             {workspaceOptions.length > 0 ? (
               <select
@@ -169,25 +182,29 @@ export function RuntimeRoomPanel({ agents }: RuntimeRoomPanelProps) {
             )}
           </div>
           <div className="flex items-end gap-2">
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className="h-9"
-              onClick={() => roomsQuery.refetch()}
-              disabled={roomsQuery.isFetching || !workspaceID.trim()}
-            >
-              Refresh
-            </Button>
-            <Button
-              type="button"
-              size="sm"
-              className="h-9"
-              onClick={() => openRoom(null, workspaceID.trim())}
-              disabled={!workspaceID.trim()}
-            >
-              Open Rooms
-            </Button>
+            <Tooltip content="Reload the room list for the selected workspace.">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="h-9"
+                onClick={() => roomsQuery.refetch()}
+                disabled={roomsQuery.isFetching || !workspaceID.trim()}
+              >
+                Refresh
+              </Button>
+            </Tooltip>
+            <Tooltip content="Open the full Rooms surface for this workspace.">
+              <Button
+                type="button"
+                size="sm"
+                className="h-9"
+                onClick={() => openRoom(null, workspaceID.trim())}
+                disabled={!workspaceID.trim()}
+              >
+                Open Rooms
+              </Button>
+            </Tooltip>
           </div>
         </div>
 
@@ -206,27 +223,31 @@ export function RuntimeRoomPanel({ agents }: RuntimeRoomPanelProps) {
                 </div>
               </div>
               <div className="flex gap-2">
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  className="h-8"
-                  onClick={() => openRoom(selectedRoom.id, selectedRoom.workspace_id)}
-                >
-                  <ArrowRight className="mr-1 h-3.5 w-3.5" />
-                  Open
-                </Button>
-                <Button
-                  type="button"
-                  size="sm"
-                  className="h-8"
-                  onClick={() =>
-                    spawnIntoRoom(selectedRoom.id, selectedRoom.workspace_id)
-                  }
-                >
-                  <SendHorizonal className="mr-1 h-3.5 w-3.5" />
-                  Spawn Into
-                </Button>
+                <Tooltip content="Open this room in the dedicated Rooms surface.">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="h-8"
+                    onClick={() => openRoom(selectedRoom.id, selectedRoom.workspace_id)}
+                  >
+                    <ArrowRight className="mr-1 h-3.5 w-3.5" />
+                    Open
+                  </Button>
+                </Tooltip>
+                <Tooltip content="Spawn a new agent and connect it directly to this room.">
+                  <Button
+                    type="button"
+                    size="sm"
+                    className="h-8"
+                    onClick={() =>
+                      spawnIntoRoom(selectedRoom.id, selectedRoom.workspace_id)
+                    }
+                  >
+                    <SendHorizonal className="mr-1 h-3.5 w-3.5" />
+                    Spawn Into
+                  </Button>
+                </Tooltip>
               </div>
             </div>
           </div>

@@ -3,6 +3,7 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
+import { HelpTooltip, Tooltip } from '@/components/ui/tooltip'
 import { Plus, Save, RotateCcw, X } from 'lucide-react'
 
 export interface ToolCatalogEntry {
@@ -148,33 +149,41 @@ export function ToolAllowlistEditor({
   return (
     <div className="space-y-2">
       <div className="flex items-center justify-between">
-        <span className="text-xs font-medium">Tools Access</span>
+        <span className="inline-flex items-center gap-1 text-xs font-medium">
+          <span>Tools Access</span>
+          <HelpTooltip
+            side="top"
+            content="Limit which tools the companion can use in this conversation. Leave the list empty to allow all available tools."
+          />
+        </span>
         <div className="flex items-center gap-1">
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            className="h-6 px-2 text-[10px]"
-            onClick={onSave}
-            title="Save tool access settings"
-          >
-            <Save className="h-3 w-3 mr-1" />
-            Save
-          </Button>
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            className="h-6 px-2 text-[10px]"
-            onClick={() => {
-              onChange([])
-              onClear()
-            }}
-            title="Allow all tools"
-          >
-            <RotateCcw className="h-3 w-3 mr-1" />
-            Allow All
-          </Button>
+          <Tooltip content="Save the current tool access list for this conversation.">
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="h-6 px-2 text-[10px]"
+              onClick={onSave}
+            >
+              <Save className="h-3 w-3 mr-1" />
+              Save
+            </Button>
+          </Tooltip>
+          <Tooltip content="Clear the list and allow every available tool.">
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="h-6 px-2 text-[10px]"
+              onClick={() => {
+                onChange([])
+                onClear()
+              }}
+            >
+              <RotateCcw className="h-3 w-3 mr-1" />
+              Allow All
+            </Button>
+          </Tooltip>
         </div>
       </div>
 
@@ -185,21 +194,19 @@ export function ToolAllowlistEditor({
       ) : (
         <div className="flex flex-wrap gap-1">
           {normalizedValue.map((t) => (
-            <div
-              key={t}
-              className="inline-flex items-center gap-1 rounded-md border bg-muted/40 px-2 py-0.5"
-              title={t}
-            >
-              <span className="text-[10px] font-mono">{t}</span>
-              <button
-                type="button"
-                className="text-muted-foreground hover:text-foreground"
-                onClick={() => removeTool(t)}
-                aria-label={`Remove ${t}`}
-              >
-                <X className="h-3 w-3" />
-              </button>
-            </div>
+            <Tooltip key={t} content={t}>
+              <div className="inline-flex items-center gap-1 rounded-md border bg-muted/40 px-2 py-0.5">
+                <span className="text-[10px] font-mono">{t}</span>
+                <button
+                  type="button"
+                  className="text-muted-foreground hover:text-foreground"
+                  onClick={() => removeTool(t)}
+                  aria-label={`Remove ${t}`}
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              </div>
+            </Tooltip>
           ))}
         </div>
       )}
@@ -262,17 +269,20 @@ export function ToolAllowlistEditor({
                   {tools.map((t) => {
                     const selected = normalizedValue.includes(t.name)
                     return (
-                      <Button
+                      <Tooltip
                         key={t.name}
-                        type="button"
-                        variant={selected ? 'secondary' : 'outline'}
-                        size="sm"
-                        className="h-7 px-2 text-[10px]"
-                        onClick={() => (selected ? removeTool(t.name) : addTool(t.name))}
-                        title={t.description ? `${t.name}: ${t.description}` : t.name}
+                        content={t.description ? `${t.name}: ${t.description}` : t.name}
                       >
-                        {t.label}
-                      </Button>
+                        <Button
+                          type="button"
+                          variant={selected ? 'secondary' : 'outline'}
+                          size="sm"
+                          className="h-7 px-2 text-[10px]"
+                          onClick={() => (selected ? removeTool(t.name) : addTool(t.name))}
+                        >
+                          {t.label}
+                        </Button>
+                      </Tooltip>
                     )
                   })}
                 </div>
@@ -291,14 +301,15 @@ export function ToolAllowlistEditor({
           {showAdvanced ? 'Hide advanced' : 'Advanced (paste list)'}
         </button>
         {!allowAll && (
-          <button
-            type="button"
-            className="text-[10px] text-muted-foreground hover:text-foreground underline underline-offset-2"
-            onClick={() => onChange(['rlm_context_query', 'rlm_context_put', 'rlm_context_list', 'rlm_personality_adjust'])}
-            title="Replace selection with recommended companion tools"
-          >
-            Use recommended
-          </button>
+          <Tooltip content="Replace the current list with a small recommended set for companion conversations.">
+            <button
+              type="button"
+              className="text-[10px] text-muted-foreground hover:text-foreground underline underline-offset-2"
+              onClick={() => onChange(['rlm_context_query', 'rlm_context_put', 'rlm_context_list', 'rlm_personality_adjust'])}
+            >
+              Use recommended
+            </button>
+          </Tooltip>
         )}
       </div>
 
@@ -315,4 +326,3 @@ export function ToolAllowlistEditor({
     </div>
   )
 }
-

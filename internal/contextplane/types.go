@@ -114,14 +114,15 @@ type Report struct {
 
 // MaintenanceTask captures a generated maintenance action derived from control-plane drift.
 type MaintenanceTask struct {
-	ID         string    `json:"id"`
-	Title      string    `json:"title"`
-	Kind       string    `json:"kind"`
-	Priority   int       `json:"priority"`
-	Reason     string    `json:"reason"`
-	SourceRefs []string  `json:"source_refs,omitempty"`
-	Status     string    `json:"status"`
-	CreatedAt  time.Time `json:"created_at"`
+	ID         string              `json:"id"`
+	Title      string              `json:"title"`
+	Kind       string              `json:"kind"`
+	Priority   int                 `json:"priority"`
+	Reason     string              `json:"reason"`
+	SourceRefs []string            `json:"source_refs,omitempty"`
+	WorkPacket *ProposalWorkPacket `json:"work_packet,omitempty"`
+	Status     string              `json:"status"`
+	CreatedAt  time.Time           `json:"created_at"`
 }
 
 // RetrievalCorrectionRun records one persisted ACA retrieval correction report.
@@ -151,6 +152,58 @@ type GraphCorrectionRun struct {
 	Classification string    `json:"classification,omitempty"`
 	RecommendedFix string    `json:"recommended_fix,omitempty"`
 	CreatedAt      time.Time `json:"created_at"`
+}
+
+// MemoryProposal records one typed, deduped suggestion for evolving ACA memory state.
+type MemoryProposal struct {
+	ID               string         `json:"id"`
+	DedupeKey        string         `json:"dedupe_key,omitempty"`
+	Kind             string         `json:"kind"`
+	Classification   string         `json:"classification,omitempty"`
+	Status           string         `json:"status"`
+	ReviewRequired   bool           `json:"review_required"`
+	Confidence       float64        `json:"confidence"`
+	BlastRadius      string         `json:"blast_radius,omitempty"`
+	Summary          string         `json:"summary"`
+	SourceRefs       []string       `json:"source_refs,omitempty"`
+	ProposedChange   map[string]any `json:"proposed_change,omitempty"`
+	EvaluationStatus string         `json:"evaluation_status,omitempty"`
+	ApplyStatus      string         `json:"apply_status,omitempty"`
+	Count            int            `json:"count"`
+	CreatedAt        time.Time      `json:"created_at"`
+	UpdatedAt        time.Time      `json:"updated_at"`
+}
+
+// EvidenceImportRun records one external-evidence intake into the ACA inbox.
+type EvidenceImportRun struct {
+	ID             string    `json:"id"`
+	SourceKind     string    `json:"source_kind"`
+	SourceRef      string    `json:"source_ref"`
+	Title          string    `json:"title"`
+	DraftPath      string    `json:"draft_path"`
+	ArtifactDigest string    `json:"artifact_digest,omitempty"`
+	ProcessorKind  string    `json:"processor_kind,omitempty"`
+	ProcessorModel string    `json:"processor_model,omitempty"`
+	Summary        string    `json:"summary"`
+	Status         string    `json:"status"`
+	CreatedAt      time.Time `json:"created_at"`
+}
+
+// ProposalWorkPacket is a stable machine-readable next-action packet for agents/hooks.
+type ProposalWorkPacket struct {
+	ProposalID        string `json:"proposal_id"`
+	ProposalKind      string `json:"proposal_kind"`
+	Action            string `json:"action"`
+	Status            string `json:"status"`
+	ReviewRequired    bool   `json:"review_required"`
+	DraftPath         string `json:"draft_path,omitempty"`
+	TargetPath        string `json:"target_path,omitempty"`
+	Heading           string `json:"heading,omitempty"`
+	PolicyPath        string `json:"policy_path,omitempty"`
+	PromotionJobID    string `json:"promotion_job_id,omitempty"`
+	RequiresVaultPath bool   `json:"requires_vault_path,omitempty"`
+	VaultPath         string `json:"vault_path,omitempty"`
+	NextCommand       string `json:"next_command,omitempty"`
 }
 
 // RetrievalHit is one ranked durable-knowledge candidate.

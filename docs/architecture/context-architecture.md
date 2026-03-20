@@ -39,11 +39,16 @@ Command:
 - `agentctl context handoffs`
 - `agentctl context observations`
 - `agentctl context tensions`
+- `agentctl context proposals`
+- `agentctl context proposal`
+- `agentctl context proposal merge`
+- `agentctl context import-evidence`
 - `agentctl context infer`
 - `agentctl context promote`
 - `agentctl context merge-promotion`
 - `agentctl context task-history`
 - `agentctl context task-history-summary`
+- `agentctl context next-proposal-merge`
 - `agentctl context hooks install`
 - `agentctl obsidian read`
 - `agentctl obsidian search`
@@ -83,8 +88,17 @@ Behavior:
 - generates maintenance tasks from repeated or high-impact tensions
 - infers structured observations and tensions from stop/subagent summaries
 - drafts promotion notes into the vault inbox from handoff records or repeated observations
+- can import transcript/text evidence into the vault inbox through `context import-evidence`, using deterministic extraction or an optional local OpenAI-compatible summarizer lane
+- evidence imports now seed the ACA proposal lane, so repeated topic imports dedupe into one proposal record instead of only accumulating isolated inbox drafts
+- evidence-backed proposals can include a suggested canonical target note and bounded review heading when ACA finds a credible landing note in the existing vault graph
+- applying an evidence-backed proposal now prepares a reviewed-merge job toward that suggested target instead of merging canonical notes automatically
+- `context proposal apply|merge` now return a stable `work_packet` object so hooks and agents can consume merge intent without re-parsing proposal payloads
+- daemon maintenance now projects prepared low-risk proposal work packets into `proposal_merge` maintenance tasks, so the next merge step is surfaced automatically
+- `context next-proposal-merge --claim` and `hooks proposal-next-merge` now claim the selected packet in proposal state, keeping it hidden until `proposal merge` or `proposal release-merge`
+- the GUI Context explorer now surfaces the next prepared ACA merge packet for the selected agent workspace, with claim/release/merge actions and a small sidebar badge when work is pending
 - explicitly review-merges promotion drafts into canonical vault notes through a bounded merge path
 - merges repeated observations and tensions into stable records instead of blindly appending duplicates
+- can persist deduped ACA memory proposals from retrieval-inspection flows and expose low-risk apply/reject surfaces for proposal review
 - refreshes top-of-mind and rethink state in a leader-safe daemon maintenance loop when the daemon is running with a workspace
 - exposes a first Phase 1 Obsidian adapter through CLI and MCP
 - includes an initial Phase 2 vault index for note/headings/links/aliases
@@ -156,6 +170,13 @@ Current hook behavior:
 - task continuity hook wrapper via `configs/hooks/task-continuity-summary.sh`
   - uses `agentctl context task-history-summary`
   - emits prompt-ready continuity context plus `task_continuity_artifact`
+- proposal work-packet hook wrapper via `configs/hooks/proposal-work-packet.sh`
+  - uses `agentctl hooks proposal-packet`
+  - emits prompt-ready proposal context plus `proposal_work_packet`
+- next prepared proposal-merge hook wrapper via `configs/hooks/proposal-next-merge.sh`
+  - uses `agentctl hooks proposal-next-merge`
+  - emits prompt-ready next-merge context plus `proposal_work_packet`
+  - claims the selected packet by default so it is not re-offered until merged or released
 
 Task continuity delivery split:
 
@@ -171,10 +192,14 @@ The MCP facade now exposes first-class ACA read tools:
 - `context_show`
 - `context_report`
 - `context_retrieve`
+- `context_next_proposal_merge`
 - `context_contradictions`
 - `context_handoffs`
 - `context_observations`
 - `context_tensions`
+- `context_proposals`
+- `context_next_proposal_merge`
+- `context_proposal_merge`
 - `context_rethink`
 - `context_promote`
 - `context_merge_promotion`
@@ -335,6 +360,8 @@ Persistence split:
   - tensions
   - promotion jobs
   - maintenance tasks
+  - memory proposals
+  - evidence import runs
 - legacy NDJSON files remain part of the scaffold, but mutable ACA state is now loaded into the dedicated store and updated there
 
 ## Retrieval Policy Note

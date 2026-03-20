@@ -278,7 +278,7 @@ func TestBuildReportAndGenerateMaintenanceTasks(t *testing.T) {
 		t.Fatalf("expected top observations")
 	}
 
-	tasks, err := store.GenerateMaintenanceTasks(10)
+	tasks, err := store.GenerateMaintenanceTasks(context.Background(), 10)
 	if err != nil {
 		t.Fatalf("GenerateMaintenanceTasks: %v", err)
 	}
@@ -287,6 +287,71 @@ func TestBuildReportAndGenerateMaintenanceTasks(t *testing.T) {
 	}
 	if tasks[0].Priority <= 0 {
 		t.Fatalf("priority=%d", tasks[0].Priority)
+	}
+}
+
+func TestGenerateMaintenanceTasksIncludesPreparedLowRiskProposalMerge(t *testing.T) {
+	store := NewWorkspaceStore(t.TempDir())
+	if _, err := store.RecordMemoryProposal(context.Background(), MemoryProposal{
+		DedupeKey:      "external_evidence_import|aca-vocabulary",
+		Kind:           "external_evidence_import",
+		Classification: "external_evidence",
+		Status:         "prepared",
+		ReviewRequired: true,
+		Confidence:     0.72,
+		BlastRadius:    "medium",
+		Summary:        "Review imported evidence draft for merge consideration: ACA Vocabulary Review. Suggested target: notes/repo/aca-inspect/semantic-and-memory.md.",
+		ProposedChange: map[string]any{
+			"draft_path":                 "inbox/drafted-from-agentctl/external-evidence/aca-inspect/aca-vocabulary-review.md",
+			"suggested_target_note_path": "notes/repo/aca-inspect/semantic-and-memory.md",
+			"suggested_target_heading":   "Review",
+		},
+		EvaluationStatus: "accepted",
+		ApplyStatus:      "review_prepared",
+		Count:            2,
+		CreatedAt:        time.Now().UTC(),
+		UpdatedAt:        time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("RecordMemoryProposal: %v", err)
+	}
+	if _, err := store.RecordMemoryProposal(context.Background(), MemoryProposal{
+		DedupeKey:      "methodology_draft|aca-doctrine",
+		Kind:           "methodology_draft",
+		Classification: "external_evidence",
+		Status:         "prepared",
+		ReviewRequired: true,
+		Confidence:     0.72,
+		BlastRadius:    "high",
+		Summary:        "Review imported evidence for a methodology or doctrine update: ACA Doctrine Review.",
+		ProposedChange: map[string]any{
+			"draft_path":                 "inbox/drafted-from-agentctl/external-evidence/aca-inspect/aca-doctrine-review.md",
+			"suggested_target_note_path": "notes/repo/aca-inspect/semantic-and-memory.md",
+			"suggested_target_heading":   "Review",
+		},
+		EvaluationStatus: "accepted",
+		ApplyStatus:      "review_prepared",
+		CreatedAt:        time.Now().UTC(),
+		UpdatedAt:        time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("RecordMemoryProposal high-risk: %v", err)
+	}
+
+	tasks, err := store.GenerateMaintenanceTasks(context.Background(), 10)
+	if err != nil {
+		t.Fatalf("GenerateMaintenanceTasks: %v", err)
+	}
+	if len(tasks) != 1 {
+		t.Fatalf("maintenance tasks=%d want 1", len(tasks))
+	}
+	task := tasks[0]
+	if task.Kind != "proposal_merge" {
+		t.Fatalf("kind=%q want proposal_merge", task.Kind)
+	}
+	if task.WorkPacket == nil {
+		t.Fatal("expected work packet")
+	}
+	if task.WorkPacket.TargetPath != "notes/repo/aca-inspect/semantic-and-memory.md" {
+		t.Fatalf("target=%q", task.WorkPacket.TargetPath)
 	}
 }
 

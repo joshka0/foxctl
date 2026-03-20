@@ -34,12 +34,16 @@ func newContextCommand() *cobra.Command {
 		newContextTaskHistorySummaryCommand(),
 		newContextCoChangeCommand(),
 		newContextNextCommand(),
+		newContextNextProposalMergeCommand(),
 		newContextDispatchCommand(),
 		newContextContradictionsCommand(),
 		newContextRethinkCommand(),
 		newContextHandoffsCommand(),
 		newContextObservationsCommand(),
 		newContextTensionsCommand(),
+		newContextProposalsCommand(),
+		newContextProposalCommand(),
+		newContextImportEvidenceCommand(),
 		newContextInferCommand(),
 		newContextPromoteCommand(),
 		newContextMergePromotionCommand(),
@@ -298,7 +302,7 @@ func newContextRethinkCommand() *cobra.Command {
 				if err != nil {
 					return err
 				}
-				tasks, err := store.GenerateMaintenanceTasksWithHealth(limit, &health)
+				tasks, err := store.GenerateMaintenanceTasksWithHealth(cmd.Context(), limit, &health)
 				if err != nil {
 					return fmt.Errorf("generate maintenance tasks: %w", err)
 				}
@@ -310,7 +314,7 @@ func newContextRethinkCommand() *cobra.Command {
 				}, envelope.WithMeta(envelope.Meta{Source: "cli"}))
 				return envelope.Write(cmd.OutOrStdout(), env)
 			}
-			tasks, err := store.GenerateMaintenanceTasks(limit)
+			tasks, err := store.GenerateMaintenanceTasks(cmd.Context(), limit)
 			if err != nil {
 				return fmt.Errorf("generate maintenance tasks: %w", err)
 			}

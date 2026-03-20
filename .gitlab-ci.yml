@@ -37,6 +37,12 @@ build-ci-image:
   image: docker:27
   services:
     - docker:27-dind
+  retry:
+    max: 2
+    when:
+      - script_failure
+      - runner_system_failure
+      - stuck_or_timeout_failure
   variables:
     DOCKER_HOST: tcp://localhost:2376
     DOCKER_TLS_CERTDIR: "/certs"
@@ -44,10 +50,28 @@ build-ci-image:
     DOCKER_TLS_VERIFY: "1"
   before_script: []
   script:
+    - |
+      retry_cmd() {
+        attempts="$1"
+        sleep_seconds="$2"
+        shift 2
+        count=1
+        while true; do
+          if "$@"; then
+            return 0
+          fi
+          if [ "$count" -ge "$attempts" ]; then
+            return 1
+          fi
+          echo "command failed; retrying in ${sleep_seconds}s (${count}/${attempts})"
+          sleep "$sleep_seconds"
+          count=$((count + 1))
+        done
+      }
     - until docker info; do sleep 1; done
-    - echo "$CI_REGISTRY_PASSWORD" | docker login -u "$CI_REGISTRY_USER" --password-stdin "$CI_REGISTRY"
-    - docker build --pull -t ${CI_IMAGE} -f Dockerfile.ci .
-    - docker push ${CI_IMAGE}
+    - retry_cmd 5 5 sh -lc 'echo "$CI_REGISTRY_PASSWORD" | docker login -u "$CI_REGISTRY_USER" --password-stdin "$CI_REGISTRY"'
+    - retry_cmd 3 10 docker build --pull -t ${CI_IMAGE} -f Dockerfile.ci .
+    - retry_cmd 3 10 docker push ${CI_IMAGE}
 
 # --- Stage: check (all jobs run in parallel via DAG) ---
 static-analysis:

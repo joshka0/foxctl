@@ -2,6 +2,7 @@ import { useEffect, useRef, useCallback, useState } from 'react'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
+import { HelpTooltip, Tooltip } from '@/components/ui/tooltip'
 import { useChatStore } from '@/stores/chatStore'
 import { useActivityStore } from '@/stores/activityStore'
 import { ChatInput } from './ChatInput'
@@ -376,6 +377,10 @@ export function CompanionChat() {
               <h2 className="text-sm font-semibold text-foreground">
                 {sourceAgent?.name || sourceAgent?.role ? `Companion • ${sourceAgent?.name || sourceAgent?.role}` : 'Companion'}
               </h2>
+              <HelpTooltip
+                side="bottom"
+                content="Companion is the human-facing chat surface for talking to an agent or its detached session thread."
+              />
             </div>
             {session && (
               <>
@@ -397,19 +402,20 @@ export function CompanionChat() {
               </Badge>
             )}
             <div className="relative" ref={sessionPickerRef}>
-              <Button
-                variant="ghost"
-                size="sm"
-                className="h-7 text-xs gap-1"
-                title="Switch session"
-                onClick={() => {
-                  loadSessions()
-                  setShowSessionPicker(!showSessionPicker)
-                }}
-              >
-                <History className="h-3.5 w-3.5" />
-                <ChevronDown className="h-3 w-3" />
-              </Button>
+              <Tooltip content="Open the session picker to switch chat history or start a new companion session.">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 text-xs gap-1"
+                  onClick={() => {
+                    loadSessions()
+                    setShowSessionPicker(!showSessionPicker)
+                  }}
+                >
+                  <History className="h-3.5 w-3.5" />
+                  <ChevronDown className="h-3 w-3" />
+                </Button>
+              </Tooltip>
 
               {/* Session picker dropdown */}
               {showSessionPicker && (
@@ -470,15 +476,16 @@ export function CompanionChat() {
                 </div>
               )}
             </div>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-7 w-7"
-              title="Session details"
-              onClick={() => setShowSessionInfo(!showSessionInfo)}
-            >
-              <Folder className="h-4 w-4" />
-            </Button>
+            <Tooltip content="Show or hide session details such as workspace, timestamps, and IDs.">
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-7 w-7"
+                onClick={() => setShowSessionInfo(!showSessionInfo)}
+              >
+                <Folder className="h-4 w-4" />
+              </Button>
+            </Tooltip>
           </div>
         </div>
 
@@ -489,19 +496,20 @@ export function CompanionChat() {
               <span className="text-muted-foreground">Session ID:</span>
               <div className="flex items-center gap-1">
                 <code className="font-mono text-foreground">{sessionId?.slice(0, 16)}...</code>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-5 w-5"
-                  onClick={handleCopySessionId}
-                  title="Copy session ID"
-                >
-                  {copiedId ? (
-                    <Check className="h-3 w-3 text-green-500" />
-                  ) : (
-                    <Copy className="h-3 w-3" />
-                  )}
-                </Button>
+                <Tooltip content="Copy the full session ID to the clipboard.">
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-5 w-5"
+                    onClick={handleCopySessionId}
+                  >
+                    {copiedId ? (
+                      <Check className="h-3 w-3 text-green-500" />
+                    ) : (
+                      <Copy className="h-3 w-3" />
+                    )}
+                  </Button>
+                </Tooltip>
               </div>
             </div>
             <div className="flex items-center justify-between">

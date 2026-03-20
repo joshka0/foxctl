@@ -487,6 +487,21 @@ func (s *Server) Handler() http.Handler {
 	// --- Search (Phase 11) ---
 	apiMux.HandleFunc("/api/search", api.SearchHandler(s.cfg, s.log))
 
+	// --- ACA Context / Proposal Merge ---
+	apiMux.HandleFunc("/api/context/overview", api.ContextOverviewHandler(s.cfg, s.log))
+	apiMux.HandleFunc("/api/context/next-proposal-merge", api.ContextNextProposalMergeHandler(s.cfg, s.log))
+	apiMux.HandleFunc("/api/context/next-proposal-merge/claim", api.ContextNextProposalMergeHandler(s.cfg, s.log))
+	apiMux.HandleFunc("/api/context/proposals/", func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/release-merge"):
+			api.ContextProposalReleaseMergeHandler(s.cfg, s.log).ServeHTTP(w, r)
+		case strings.HasSuffix(r.URL.Path, "/merge"):
+			api.ContextProposalMergeHandler(s.cfg, s.log).ServeHTTP(w, r)
+		default:
+			http.Error(w, "not found", http.StatusNotFound)
+		}
+	})
+
 	// --- Codemaps (Phase 11) ---
 	apiMux.HandleFunc("/api/codemaps", api.CodemapsListHandler(s.cfg, s.log))
 	apiMux.HandleFunc("/api/codemaps/", api.CodemapDetailHandler(s.cfg, s.log))

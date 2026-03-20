@@ -106,6 +106,9 @@ export interface ViewState {
   // Selected companion conversation for cross-surface handoff
   selectedConversationID: string | null
   setSelectedConversationID: (conversationID: string | null) => void
+  // Explicit ACA workspace override for Context surface; null means follow current agent/current workspace
+  selectedContextWorkspace: string | null
+  setSelectedContextWorkspace: (workspacePath: string | null) => void
   // Spawn-room defaults for "spawn into room" flows
   spawnRoomID: string | null
   spawnRoomWorkspaceID: string | null
@@ -175,6 +178,9 @@ export const useViewStore = create<ViewState>((set, get) => ({
     })
     set({ selectedConversationID })
   },
+  selectedContextWorkspace: null,
+  setSelectedContextWorkspace: (selectedContextWorkspace) =>
+    set({ selectedContextWorkspace: selectedContextWorkspace?.trim() || null }),
   spawnRoomID: null,
   spawnRoomWorkspaceID: null,
   spawnRoomRole: null,

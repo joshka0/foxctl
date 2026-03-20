@@ -2,6 +2,7 @@ import { useState, useMemo, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { HelpTooltip, Tooltip } from "@/components/ui/tooltip";
 import {
   companionChat,
   listSkills,
@@ -269,7 +270,13 @@ export function SpawnAgentFormCore({
     <form onSubmit={handleSubmit} className="space-y-4">
       {/* Name */}
       <div>
-        <label className="text-sm font-medium text-foreground">Name</label>
+        <div className="text-sm font-medium text-foreground inline-flex items-center gap-1.5">
+          <span>Name</span>
+          <HelpTooltip
+            content="Optional human-friendly name for this agent. Leave blank to auto-generate one."
+            side="top"
+          />
+        </div>
         <Input
           value={formData.name}
           onChange={(e) => setFormData({ ...formData, name: e.target.value })}
@@ -283,10 +290,14 @@ export function SpawnAgentFormCore({
 
       {/* Workspace */}
       <div>
-        <label className="text-sm font-medium text-foreground flex items-center gap-1.5">
+        <div className="text-sm font-medium text-foreground flex items-center gap-1.5">
           <Folder className="h-3.5 w-3.5" />
-          Workspace
-        </label>
+          <span>Workspace</span>
+          <HelpTooltip
+            content="The project directory this agent reads from, writes to, and uses as its default tool context."
+            side="top"
+          />
+        </div>
         <select
           value={formData.workspace_id}
           onChange={(e) =>
@@ -311,48 +322,56 @@ export function SpawnAgentFormCore({
         <div className="flex items-center gap-2">
           <Globe className="h-4 w-4 text-muted-foreground" />
           <div>
-            <label className="text-sm font-medium text-foreground">
-              Execution Workspace
-            </label>
+            <div className="text-sm font-medium text-foreground inline-flex items-center gap-1.5">
+              <span>Execution Workspace</span>
+              <HelpTooltip
+                content="Choose whether the agent should work in the live local workspace or in an isolated sandbox clone."
+                side="top"
+              />
+            </div>
             <p className="text-xs text-muted-foreground">
               Run this agent against the local runtime workspace or provision an isolated sandbox clone.
             </p>
           </div>
         </div>
         <div className="grid grid-cols-2 gap-2">
-          <button
-            type="button"
-            onClick={() =>
-              setFormData((prev) => ({
-                ...prev,
-                workspace_source: "local",
-              }))
-            }
-            className={`rounded-md border px-3 py-2 text-sm text-left ${
-              formData.workspace_source !== "sandbox"
-                ? "border-primary bg-primary/10 text-foreground"
-                : "border-border bg-background text-muted-foreground"
-            }`}
-          >
-            Local Runtime
-          </button>
-          <button
-            type="button"
-            onClick={() =>
-              setFormData((prev) => ({
-                ...prev,
-                workspace_source: "sandbox",
-                sandbox_provider: prev.sandbox_provider || "opensandbox",
-              }))
-            }
-            className={`rounded-md border px-3 py-2 text-sm text-left ${
-              formData.workspace_source === "sandbox"
-                ? "border-primary bg-primary/10 text-foreground"
-                : "border-border bg-background text-muted-foreground"
-            }`}
-          >
-            Sandbox Clone
-          </button>
+          <Tooltip content="Use the live local project directory. Best when you want the agent working directly against your current checkout.">
+            <button
+              type="button"
+              onClick={() =>
+                setFormData((prev) => ({
+                  ...prev,
+                  workspace_source: "local",
+                }))
+              }
+              className={`w-full rounded-md border px-3 py-2 text-sm text-left ${
+                formData.workspace_source !== "sandbox"
+                  ? "border-primary bg-primary/10 text-foreground"
+                  : "border-border bg-background text-muted-foreground"
+              }`}
+            >
+              Local Runtime
+            </button>
+          </Tooltip>
+          <Tooltip content="Create an isolated clone for the agent. Best when you want safer parallel work without touching the local checkout directly.">
+            <button
+              type="button"
+              onClick={() =>
+                setFormData((prev) => ({
+                  ...prev,
+                  workspace_source: "sandbox",
+                  sandbox_provider: prev.sandbox_provider || "opensandbox",
+                }))
+              }
+              className={`w-full rounded-md border px-3 py-2 text-sm text-left ${
+                formData.workspace_source === "sandbox"
+                  ? "border-primary bg-primary/10 text-foreground"
+                  : "border-border bg-background text-muted-foreground"
+              }`}
+            >
+              Sandbox Clone
+            </button>
+          </Tooltip>
         </div>
         {formData.workspace_source === "sandbox" && (
           <div className="grid gap-3">
@@ -498,9 +517,13 @@ export function SpawnAgentFormCore({
       </div>
 
       <div>
-        <label className="text-sm font-medium text-foreground">
-          Workbench Memory
-        </label>
+        <div className="text-sm font-medium text-foreground inline-flex items-center gap-1.5">
+          <span>Workbench Memory</span>
+          <HelpTooltip
+            content="Choose whether this workbench keeps a stable agent-level memory thread or a detached session-level memory thread."
+            side="top"
+          />
+        </div>
         <select
           value={formData.memory_scope || "agent"}
           onChange={(e) =>
@@ -548,7 +571,6 @@ export function SpawnAgentFormCore({
               onClick={handleEnhancePrompt}
               disabled={isEnhancing || !formData.prompt.trim()}
               className="text-xs text-primary hover:underline flex items-center gap-1 disabled:opacity-50"
-              title="Enhance prompt with AI"
             >
               {isEnhancing ? (
                 <RefreshCw className="h-3 w-3 animate-spin" />
@@ -569,9 +591,13 @@ export function SpawnAgentFormCore({
 
       {/* Execution Mode */}
       <div>
-        <label className="text-sm font-medium text-foreground">
-          Execution Mode
-        </label>
+        <div className="text-sm font-medium text-foreground inline-flex items-center gap-1.5">
+          <span>Execution Mode</span>
+          <HelpTooltip
+            content="Controls whether the agent responds once, continues autonomously, or keeps running on a cadence."
+            side="top"
+          />
+        </div>
         <select
           value={formData.exec_mode}
           onChange={(e) =>
@@ -857,12 +883,11 @@ export function SpawnAgentFormCore({
                                 onChange={() => handleSkillToggle(skill.name)}
                                 className="mt-0.5"
                               />
-                              <span
-                                className="truncate"
-                                title={skill.description}
-                              >
-                                {skill.name}
-                              </span>
+                              <Tooltip content={skill.description || skill.name}>
+                                <span className="truncate">
+                                  {skill.name}
+                                </span>
+                              </Tooltip>
                             </label>
                           ))}
                         </div>

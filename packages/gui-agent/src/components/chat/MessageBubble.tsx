@@ -1,5 +1,6 @@
 import { cn, formatRelativeTime } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
+import { Tooltip } from "@/components/ui/tooltip";
 import {
   Bot,
   User,
@@ -89,14 +90,15 @@ export function MessageBubble({
           <>
             <Bot className="h-4 w-4" />
             {emotion && emotion !== "neutral" && (
-              <span
-                className={cn(
-                  "absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full border border-background",
-                  emotionColors[emotion] ?? "bg-muted-foreground",
-                )}
-                title={`${emotion} (${intensity.toFixed(2)})`}
-                aria-label={`presence emotion ${emotion}`}
-              />
+              <Tooltip content={`${emotion} (${intensity.toFixed(2)})`} side="top">
+                <span
+                  className={cn(
+                    "absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full border border-background",
+                    emotionColors[emotion] ?? "bg-muted-foreground",
+                  )}
+                  aria-label={`presence emotion ${emotion}`}
+                />
+              </Tooltip>
             )}
           </>
         )}
@@ -147,15 +149,16 @@ export function MessageBubble({
 
       {/* Delete button - shown on hover */}
       {onDelete && message.id && (
-        <button
-          type="button"
-          onClick={handleDelete}
-          className="opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0 self-start mt-1 p-1 rounded hover:bg-destructive/10 text-muted-foreground hover:text-destructive"
-          title="Delete message"
-          aria-label="Delete message"
-        >
-          <Trash2 className="h-3.5 w-3.5" />
-        </button>
+        <Tooltip content="Delete this message from the current conversation." side="top">
+          <button
+            type="button"
+            onClick={handleDelete}
+            className="opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0 self-start mt-1 p-1 rounded hover:bg-destructive/10 text-muted-foreground hover:text-destructive"
+            aria-label="Delete message"
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+          </button>
+        </Tooltip>
       )}
     </div>
   );

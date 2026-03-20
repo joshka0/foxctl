@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jkatigb/agentctl/internal/contextplane"
 	"github.com/jkatigb/agentctl/internal/domain/envelope"
 	"github.com/jkatigb/agentctl/internal/hooks/analysisflow"
 	"github.com/jkatigb/agentctl/internal/hooks/contextflow"
@@ -19,6 +20,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/hooks/operationalflow"
 	"github.com/jkatigb/agentctl/internal/hooks/promptflow"
 	"github.com/jkatigb/agentctl/internal/hooks/taskflow"
+	"github.com/jkatigb/agentctl/internal/storage/obsidianindex"
 	"github.com/spf13/cobra"
 )
 
@@ -113,12 +115,43 @@ type hookPlanSyncPayload struct {
 	SessionCwd string `json:"session_cwd,omitempty"`
 }
 
+type hookProposalPacketPayload struct {
+	ProposalID    string `json:"proposal_id,omitempty"`
+	AltProposalID string `json:"proposalID,omitempty"`
+	Action        string `json:"action,omitempty"`
+	VaultName     string `json:"vault_name,omitempty"`
+	VaultPath     string `json:"vault_path,omitempty"`
+	DraftPath     string `json:"draft_path,omitempty"`
+	TargetPath    string `json:"target_path,omitempty"`
+	Heading       string `json:"heading,omitempty"`
+}
+
+type hookProposalPacketResponse struct {
+	Context    string         `json:"context,omitempty"`
+	Workspace  string         `json:"workspace"`
+	ProposalID string         `json:"proposal_id,omitempty"`
+	Action     string         `json:"action,omitempty"`
+	Metadata   map[string]any `json:"metadata,omitempty"`
+}
+
+type hookProposalNextMergePayload struct {
+	VaultPath string `json:"vault_path,omitempty"`
+	Limit     int    `json:"limit,omitempty"`
+	Claim     bool   `json:"claim,omitempty"`
+}
+
+type hookProposalNextMergeResponse struct {
+	Context   string         `json:"context,omitempty"`
+	Workspace string         `json:"workspace"`
+	Metadata  map[string]any `json:"metadata,omitempty"`
+}
+
 func newHooksCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "hooks",
 		Short: "Go-native lifecycle entrypoints for provider hook wrappers",
 	}
-	cmd.AddCommand(newHooksSessionStartCommand(), newHooksSessionEndCommand(), newHooksSubagentStopCommand(), newHooksTodoSyncCommand(), newHooksTodoContinuationCommand(), newHooksTaskFileLinkCommand(), newHooksContextUpdaterDrainCommand(), newHooksSessionRestorePostcompactCommand(), newHooksOverseerInboxCommand(), newHooksOverseerInboxPostCommand(), newHooksAnchorDetectCommand(), newHooksMemoryDetectorCommand(), newHooksMemoryRecallCommand(), newHooksMemoryLifecycleCommand(), newHooksCodeAnalysisCommand(), newHooksLiveIndexCommand(), newHooksLSPDiagnosticsCommand(), newHooksEmbeddingFlushCommand(), newHooksPlanSyncCommand(), newHooksGraphMaintenanceCommand())
+	cmd.AddCommand(newHooksSessionStartCommand(), newHooksSessionEndCommand(), newHooksSubagentStopCommand(), newHooksTodoSyncCommand(), newHooksTodoContinuationCommand(), newHooksTaskFileLinkCommand(), newHooksContextUpdaterDrainCommand(), newHooksSessionRestorePostcompactCommand(), newHooksOverseerInboxCommand(), newHooksOverseerInboxPostCommand(), newHooksAnchorDetectCommand(), newHooksMemoryDetectorCommand(), newHooksMemoryRecallCommand(), newHooksMemoryLifecycleCommand(), newHooksCodeAnalysisCommand(), newHooksLiveIndexCommand(), newHooksLSPDiagnosticsCommand(), newHooksEmbeddingFlushCommand(), newHooksPlanSyncCommand(), newHooksGraphMaintenanceCommand(), newHooksProposalPacketCommand(), newHooksProposalNextMergeCommand())
 	return cmd
 }
 
@@ -815,6 +848,170 @@ func newHooksPlanSyncCommand() *cobra.Command {
 	return cmd
 }
 
+func newHooksProposalPacketCommand() *cobra.Command {
+	var workspacePath string
+	var proposalID string
+	var action string
+	var vaultName string
+	var vaultPath string
+	var draftPath string
+	var targetPath string
+	var heading string
+
+	cmd := &cobra.Command{
+		Use:   "proposal-packet",
+		Short: "Resolve an ACA proposal into hook-ready context and metadata",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			payload, err := readOptionalProposalPacketPayload(cmd)
+			if err != nil {
+				return err
+			}
+			target := resolveContextWorkspace(workspacePath)
+			store := contextplane.NewWorkspaceStore(target)
+			resolvedID := firstNonEmpty(proposalID, payload.ProposalID, payload.AltProposalID)
+			resolvedAction := strings.ToLower(strings.TrimSpace(firstNonEmpty(action, payload.Action, "apply")))
+			if strings.TrimSpace(resolvedID) == "" {
+				return envelope.Write(cmd.OutOrStdout(), envelope.OK("hooks/proposal-packet", map[string]any{
+					"response": hookProposalPacketResponse{
+						Workspace: target,
+						Action:    resolvedAction,
+					},
+				}, envelope.WithMeta(envelope.Meta{Source: "cli"})))
+			}
+
+			resolvedVaultName := firstNonEmpty(vaultName, payload.VaultName)
+			resolvedVaultPath := firstNonEmpty(vaultPath, payload.VaultPath)
+			resolvedDraftPath := firstNonEmpty(draftPath, payload.DraftPath)
+			resolvedTargetPath := firstNonEmpty(targetPath, payload.TargetPath)
+			resolvedHeading := firstNonEmpty(heading, payload.Heading)
+
+			var packet contextplane.ProposalWorkPacket
+			switch resolvedAction {
+			case "merge":
+				_, _, workPacket, err := store.MergeMemoryProposal(cmd.Context(), resolvedVaultName, resolvedVaultPath, resolvedID, resolvedDraftPath, resolvedTargetPath, resolvedHeading)
+				if err != nil {
+					return err
+				}
+				packet = workPacket
+			default:
+				_, _, workPacket, err := store.ApplyMemoryProposal(cmd.Context(), resolvedID)
+				if err != nil {
+					return err
+				}
+				packet = workPacket
+				if strings.TrimSpace(resolvedVaultPath) != "" {
+					packet.VaultPath = strings.TrimSpace(resolvedVaultPath)
+				}
+			}
+
+			response := hookProposalPacketResponse{
+				Context:    contextplane.RenderHookContextForProposalPacket(packet),
+				Workspace:  target,
+				ProposalID: resolvedID,
+				Action:     resolvedAction,
+				Metadata: map[string]any{
+					"proposal_work_packet": packet,
+				},
+			}
+			return envelope.Write(cmd.OutOrStdout(), envelope.OK("hooks/proposal-packet", map[string]any{
+				"response": response,
+			}, envelope.WithMeta(envelope.Meta{Source: "cli"})))
+		},
+	}
+
+	cmd.Flags().StringVar(&workspacePath, "workspace", "", "Workspace path (default: auto-detect from cwd)")
+	cmd.Flags().StringVar(&proposalID, "proposal-id", "", "Proposal ID")
+	cmd.Flags().StringVar(&action, "action", "apply", "Proposal action: apply or merge")
+	cmd.Flags().StringVar(&vaultName, "vault-name", "", "Vault name for merge actions")
+	cmd.Flags().StringVar(&vaultPath, "vault-path", "", "Vault path for merge or packet enrichment")
+	cmd.Flags().StringVar(&draftPath, "draft-path", "", "Optional draft path override")
+	cmd.Flags().StringVar(&targetPath, "target-path", "", "Optional target path override")
+	cmd.Flags().StringVar(&heading, "heading", "", "Optional heading override")
+	return cmd
+}
+
+func newHooksProposalNextMergeCommand() *cobra.Command {
+	var workspacePath string
+	var vaultPath string
+	var limit int
+	var claim bool
+
+	cmd := &cobra.Command{
+		Use:   "proposal-next-merge",
+		Short: "Resolve the next prepared proposal-merge task into hook-ready context and metadata",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			payload, err := readOptionalProposalNextMergePayload(cmd)
+			if err != nil {
+				return err
+			}
+			target := resolveContextWorkspace(workspacePath)
+			resolvedVaultPath := firstNonEmpty(vaultPath, payload.VaultPath)
+			resolvedLimit := limit
+			if resolvedLimit <= 0 {
+				resolvedLimit = payload.Limit
+			}
+			if resolvedLimit <= 0 {
+				resolvedLimit = 50
+			}
+			store := contextplane.NewWorkspaceStore(target)
+			if strings.TrimSpace(resolvedVaultPath) != "" {
+				cfg, err := loadConfig(cmd.Context())
+				if err != nil {
+					return err
+				}
+				index, err := obsidianindex.Open(cmd.Context(), cfg.Storage.Root, resolvedVaultPath)
+				if err != nil {
+					return err
+				}
+				defer func() { _ = index.Close() }()
+				health, err := index.Health(cmd.Context())
+				if err != nil {
+					return err
+				}
+				if _, err := store.GenerateMaintenanceTasksWithHealth(cmd.Context(), resolvedLimit, &health); err != nil {
+					return err
+				}
+			} else {
+				if _, err := store.GenerateMaintenanceTasks(cmd.Context(), resolvedLimit); err != nil {
+					return err
+				}
+			}
+			resolvedClaim := claim || payload.Claim
+			var task *contextplane.MaintenanceTask
+			if resolvedClaim {
+				task, err = store.ClaimNextProposalMergeTask(cmd.Context(), resolvedLimit)
+			} else {
+				task, err = store.NextProposalMergeTask(cmd.Context(), resolvedLimit)
+			}
+			if err != nil {
+				return err
+			}
+			response := hookProposalNextMergeResponse{
+				Workspace: target,
+				Metadata:  map[string]any{},
+			}
+			if task != nil && task.WorkPacket != nil {
+				packet := *task.WorkPacket
+				if packet.VaultPath == "" && strings.TrimSpace(resolvedVaultPath) != "" {
+					packet.VaultPath = strings.TrimSpace(resolvedVaultPath)
+				}
+				response.Context = contextplane.RenderHookContextForProposalPacket(packet)
+				response.Metadata["proposal_work_packet"] = packet
+				response.Metadata["maintenance_task_id"] = task.ID
+			}
+			return envelope.Write(cmd.OutOrStdout(), envelope.OK("hooks/proposal-next-merge", map[string]any{
+				"response": response,
+			}, envelope.WithMeta(envelope.Meta{Source: "cli"})))
+		},
+	}
+
+	cmd.Flags().StringVar(&workspacePath, "workspace", "", "Workspace path (default: auto-detect from cwd)")
+	cmd.Flags().StringVar(&vaultPath, "vault-path", "", "Optional vault path for health refresh before selection")
+	cmd.Flags().IntVar(&limit, "limit", 50, "Maintenance-task scan limit")
+	cmd.Flags().BoolVar(&claim, "claim", false, "Claim the selected proposal-merge task so it is not re-offered")
+	return cmd
+}
+
 func newHooksGraphMaintenanceCommand() *cobra.Command {
 	var workspacePath string
 	var syncMode bool
@@ -1137,6 +1334,44 @@ func readOptionalPlanSyncPayload(cmd *cobra.Command) (hookPlanSyncPayload, error
 	var payload hookPlanSyncPayload
 	if err := json.Unmarshal(body, &payload); err != nil {
 		return hookPlanSyncPayload{}, err
+	}
+	return payload, nil
+}
+
+func readOptionalProposalPacketPayload(cmd *cobra.Command) (hookProposalPacketPayload, error) {
+	in := cmd.InOrStdin()
+	if isTerminalReader(in) {
+		return hookProposalPacketPayload{}, nil
+	}
+	data, err := io.ReadAll(in)
+	if err != nil {
+		return hookProposalPacketPayload{}, err
+	}
+	if len(bytes.TrimSpace(data)) == 0 {
+		return hookProposalPacketPayload{}, nil
+	}
+	var payload hookProposalPacketPayload
+	if err := json.Unmarshal(data, &payload); err != nil {
+		return hookProposalPacketPayload{}, err
+	}
+	return payload, nil
+}
+
+func readOptionalProposalNextMergePayload(cmd *cobra.Command) (hookProposalNextMergePayload, error) {
+	in := cmd.InOrStdin()
+	if isTerminalReader(in) {
+		return hookProposalNextMergePayload{}, nil
+	}
+	data, err := io.ReadAll(in)
+	if err != nil {
+		return hookProposalNextMergePayload{}, err
+	}
+	if len(bytes.TrimSpace(data)) == 0 {
+		return hookProposalNextMergePayload{}, nil
+	}
+	var payload hookProposalNextMergePayload
+	if err := json.Unmarshal(data, &payload); err != nil {
+		return hookProposalNextMergePayload{}, err
 	}
 	return payload, nil
 }

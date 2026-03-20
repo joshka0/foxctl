@@ -1744,6 +1744,16 @@ func registerAgentctlTools(s *server.MCPServer) {
 	)
 
 	s.AddTool(
+		mcp.NewTool("context_next_proposal_merge",
+			mcp.WithString("workspace", mcp.Description("Workspace path (optional; defaults to current workspace context)")),
+			mcp.WithString("vault_path", mcp.Description("Optional vault path for health refresh before selection")),
+			mcp.WithNumber("limit", mcp.Description("Maintenance-task scan limit (default: 50)")),
+			mcp.WithBoolean("claim", mcp.Description("Claim the selected proposal-merge task so it is not re-offered")),
+		),
+		handleContextNextProposalMerge,
+	)
+
+	s.AddTool(
 		mcp.NewTool("context_dispatch",
 			mcp.WithString("workspace", mcp.Description("Workspace path (optional; defaults to current workspace context)")),
 			mcp.WithString("task_id", mcp.Description("Explicit task ID (optional)")),
@@ -1783,6 +1793,52 @@ func registerAgentctlTools(s *server.MCPServer) {
 			mcp.WithNumber("limit", mcp.Description("Maximum tensions to list (default: 20)")),
 		),
 		handleContextTensions,
+	)
+
+	s.AddTool(
+		mcp.NewTool("context_proposals",
+			mcp.WithString("workspace", mcp.Description("Workspace path (optional; defaults to current workspace context)")),
+			mcp.WithString("id", mcp.Description("Specific proposal ID (optional)")),
+			mcp.WithNumber("limit", mcp.Description("Maximum proposals to list (default: 20)")),
+		),
+		handleContextProposals,
+	)
+
+	s.AddTool(
+		mcp.NewTool("context_proposal_apply",
+			mcp.WithString("workspace", mcp.Description("Workspace path (optional; defaults to current workspace context)")),
+			mcp.WithString("id", mcp.Required(), mcp.Description("Proposal ID")),
+		),
+		handleContextProposalApply,
+	)
+
+	s.AddTool(
+		mcp.NewTool("context_proposal_reject",
+			mcp.WithString("workspace", mcp.Description("Workspace path (optional; defaults to current workspace context)")),
+			mcp.WithString("id", mcp.Required(), mcp.Description("Proposal ID")),
+		),
+		handleContextProposalReject,
+	)
+
+	s.AddTool(
+		mcp.NewTool("context_proposal_release_merge",
+			mcp.WithString("workspace", mcp.Description("Workspace path (optional; defaults to current workspace context)")),
+			mcp.WithString("id", mcp.Required(), mcp.Description("Proposal ID")),
+		),
+		handleContextProposalReleaseMerge,
+	)
+
+	s.AddTool(
+		mcp.NewTool("context_proposal_merge",
+			mcp.WithString("workspace", mcp.Description("Workspace path (optional; defaults to current workspace context)")),
+			mcp.WithString("id", mcp.Required(), mcp.Description("Proposal ID")),
+			mcp.WithString("vault_name", mcp.Description("Vault name")),
+			mcp.WithString("vault_path", mcp.Required(), mcp.Description("Vault path")),
+			mcp.WithString("draft_path", mcp.Description("Optional draft path override")),
+			mcp.WithString("target_path", mcp.Description("Optional canonical target note path override")),
+			mcp.WithString("heading", mcp.Description("Optional bounded review heading override")),
+		),
+		handleContextProposalMerge,
 	)
 
 	s.AddTool(
@@ -2383,6 +2439,66 @@ func handleContextNext(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallT
 	})), nil
 }
 
+func handleContextNextProposalMerge(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	args := getArgs(req)
+	store, target, err := openContextWorkspaceStore(ctx, args)
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+	limit := 50
+	if raw, ok := args["limit"].(float64); ok && raw > 0 {
+		limit = int(raw)
+	}
+	vaultPath := getStringArg(args, "vault_path", "")
+	if strings.TrimSpace(vaultPath) != "" {
+		cfg, err := loadConfig(ctx)
+		if err != nil {
+			return mcp.NewToolResultError("load config: " + err.Error()), nil
+		}
+		index, err := obsidianindex.Open(ctx, cfg.Storage.Root, vaultPath)
+		if err != nil {
+			return mcp.NewToolResultError("open obsidian index: " + err.Error()), nil
+		}
+		defer func() { _ = index.Close() }()
+		health, err := index.Health(ctx)
+		if err != nil {
+			return mcp.NewToolResultError("health report: " + err.Error()), nil
+		}
+		if _, err := store.GenerateMaintenanceTasksWithHealth(ctx, limit, &health); err != nil {
+			return mcp.NewToolResultError("generate maintenance tasks: " + err.Error()), nil
+		}
+	} else {
+		if _, err := store.GenerateMaintenanceTasks(ctx, limit); err != nil {
+			return mcp.NewToolResultError("generate maintenance tasks: " + err.Error()), nil
+		}
+	}
+	claim := false
+	if raw, ok := args["claim"].(bool); ok {
+		claim = raw
+	}
+	var task *contextplane.MaintenanceTask
+	if claim {
+		task, err = store.ClaimNextProposalMergeTask(ctx, limit)
+	} else {
+		task, err = store.NextProposalMergeTask(ctx, limit)
+	}
+	if err != nil {
+		return mcp.NewToolResultError("select next proposal merge: " + err.Error()), nil
+	}
+	found := task != nil
+	var packet *contextplane.ProposalWorkPacket
+	if task != nil {
+		packet = task.WorkPacket
+	}
+	return mcp.NewToolResultText(mustJSON(map[string]any{
+		"workspace_path": target,
+		"vault_path":     vaultPath,
+		"found":          found,
+		"task":           task,
+		"work_packet":    packet,
+	})), nil
+}
+
 func handleContextDispatch(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	args := getArgs(req)
 	store, target, err := openContextWorkspaceStore(ctx, args)
@@ -2490,6 +2606,134 @@ func handleContextTensions(ctx context.Context, req mcp.CallToolRequest) (*mcp.C
 	})), nil
 }
 
+func handleContextProposals(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	args := getArgs(req)
+	store, target, err := openContextWorkspaceStore(ctx, args)
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+	if id := getStringArg(args, "id", ""); strings.TrimSpace(id) != "" {
+		item, err := store.GetMemoryProposal(ctx, id)
+		if err != nil {
+			return mcp.NewToolResultError("get proposal: " + err.Error()), nil
+		}
+		if item == nil {
+			return mcp.NewToolResultError("no proposal found for " + strings.TrimSpace(id)), nil
+		}
+		return mcp.NewToolResultText(mustJSON(map[string]any{
+			"workspace_path": target,
+			"proposal":       item,
+		})), nil
+	}
+	limit := 20
+	if raw, ok := args["limit"].(float64); ok && raw > 0 {
+		limit = int(raw)
+	}
+	items, err := store.ListMemoryProposals(ctx, limit)
+	if err != nil {
+		return mcp.NewToolResultError("list proposals: " + err.Error()), nil
+	}
+	return mcp.NewToolResultText(mustJSON(map[string]any{
+		"workspace_path": target,
+		"proposals":      items,
+		"count":          len(items),
+	})), nil
+}
+
+func handleContextProposalApply(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	args := getArgs(req)
+	store, target, err := openContextWorkspaceStore(ctx, args)
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+	id := getStringArg(args, "id", "")
+	if strings.TrimSpace(id) == "" {
+		return mcp.NewToolResultError("id is required"), nil
+	}
+	proposal, result, packet, err := store.ApplyMemoryProposal(ctx, id)
+	if err != nil {
+		return mcp.NewToolResultError("apply proposal: " + err.Error()), nil
+	}
+	return mcp.NewToolResultText(mustJSON(map[string]any{
+		"workspace_path": target,
+		"proposal":       proposal,
+		"result":         result,
+		"work_packet":    packet,
+	})), nil
+}
+
+func handleContextProposalReject(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	args := getArgs(req)
+	store, target, err := openContextWorkspaceStore(ctx, args)
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+	id := getStringArg(args, "id", "")
+	if strings.TrimSpace(id) == "" {
+		return mcp.NewToolResultError("id is required"), nil
+	}
+	proposal, err := store.RejectMemoryProposal(ctx, id)
+	if err != nil {
+		return mcp.NewToolResultError("reject proposal: " + err.Error()), nil
+	}
+	return mcp.NewToolResultText(mustJSON(map[string]any{
+		"workspace_path": target,
+		"proposal":       proposal,
+	})), nil
+}
+
+func handleContextProposalReleaseMerge(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	args := getArgs(req)
+	store, target, err := openContextWorkspaceStore(ctx, args)
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+	id := getStringArg(args, "id", "")
+	if strings.TrimSpace(id) == "" {
+		return mcp.NewToolResultError("id is required"), nil
+	}
+	proposal, err := store.ReleaseProposalMergeClaim(ctx, id)
+	if err != nil {
+		return mcp.NewToolResultError("release proposal merge: " + err.Error()), nil
+	}
+	return mcp.NewToolResultText(mustJSON(map[string]any{
+		"workspace_path": target,
+		"proposal":       proposal,
+	})), nil
+}
+
+func handleContextProposalMerge(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	args := getArgs(req)
+	store, target, err := openContextWorkspaceStore(ctx, args)
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+	id := getStringArg(args, "id", "")
+	vaultPath := getStringArg(args, "vault_path", "")
+	if strings.TrimSpace(id) == "" || strings.TrimSpace(vaultPath) == "" {
+		return mcp.NewToolResultError("id and vault_path are required"), nil
+	}
+	proposal, merge, packet, err := store.MergeMemoryProposal(
+		ctx,
+		getStringArg(args, "vault_name", ""),
+		vaultPath,
+		id,
+		getStringArg(args, "draft_path", ""),
+		getStringArg(args, "target_path", ""),
+		getStringArg(args, "heading", ""),
+	)
+	if err != nil {
+		return mcp.NewToolResultError("merge proposal: " + err.Error()), nil
+	}
+	return mcp.NewToolResultText(mustJSON(map[string]any{
+		"workspace_path": target,
+		"vault_path":     vaultPath,
+		"proposal":       proposal,
+		"merge":          merge,
+		"work_packet":    packet,
+	})), nil
+}
+
 func handleContextRethink(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	args := getArgs(req)
 	store, target, err := openContextWorkspaceStore(ctx, args)
@@ -2516,12 +2760,12 @@ func handleContextRethink(ctx context.Context, req mcp.CallToolRequest) (*mcp.Ca
 		if err != nil {
 			return mcp.NewToolResultError("health report: " + err.Error()), nil
 		}
-		items, err = store.GenerateMaintenanceTasksWithHealth(limit, &health)
+		items, err = store.GenerateMaintenanceTasksWithHealth(ctx, limit, &health)
 		if err != nil {
 			return mcp.NewToolResultError("generate maintenance tasks: " + err.Error()), nil
 		}
 	} else {
-		items, err = store.GenerateMaintenanceTasks(limit)
+		items, err = store.GenerateMaintenanceTasks(ctx, limit)
 		if err != nil {
 			return mcp.NewToolResultError("generate maintenance tasks: " + err.Error()), nil
 		}
