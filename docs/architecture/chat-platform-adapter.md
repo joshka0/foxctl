@@ -107,6 +107,29 @@ API surface:
   - companion context building
   - orchestration/event surfaces exposed elsewhere in the web server
 
+## Extension Boundary
+
+If chat adapters are later used for domain-specific workflows such as SRE
+investigations, email handling, or document review, the boundary should remain:
+
+- platform-native webhook parsing and auth stay in the Go adapter layer
+- the adapter normalizes inbound messages or events into canonical Go-side
+  commands or domain requests
+- only after that normalization may the runtime forward canonical signals into
+  Jido-backed orchestration
+
+For example:
+
+- Teams chat can continue to use `SessionBridge` for generic natural-language
+  chat
+- a bound Teams channel for investigations can route into a dedicated
+  investigation controller or run service
+- that controller may then emit runtime signals or workflow requests into Jido
+  without teaching the chat adapter about cloud-specific logic
+
+This keeps chat-platform ingress conservative while allowing richer workflow
+engines behind the boundary.
+
 ## Operational characteristics
 
 - Adapter startup is platform-specific; only one adapter is selected per

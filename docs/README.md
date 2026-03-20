@@ -53,6 +53,7 @@ This is the canonical map for docs in this repository.
 - [docs/plans/features/rlm-retrieval-findings.md](plans/features/rlm-retrieval-findings.md) - Current benchmark snapshot comparing ACA, direct repoindex lanes, and RLM retrieval modes.
 - [docs/plans/features/aca-retrieval-hypotheses.md](plans/features/aca-retrieval-hypotheses.md) - Deterministic ACA retrieval hypotheses and eval modes for testing control-plane, vault, trust, and repo-hint improvements.
 - [docs/plans/features/aca-self-corrective-loop.md](plans/features/aca-self-corrective-loop.md) - First slice for observing ACA retrieval misses, classifying them, and proposing deterministic corrections.
+- [docs/plans/features/aca-self-evolving-memory-layer.md](plans/features/aca-self-evolving-memory-layer.md) - Plan for turning ACA into a proposal-driven, eval-gated memory control loop with `L5` external evidence intake.
 - [docs/plans/features/generic-agent-experiment-loop.md](plans/features/generic-agent-experiment-loop.md) - Design for turning long-running agents into hypothesis-driven, evaluator-bounded experiment loops.
 - [docs/plans/features/workspace-embedding-overrides-research.md](plans/features/workspace-embedding-overrides-research.md) - Checklist for enabling workspace-local embedding overrides safely without dimension drift.
 - [docs/plans/features/opensandbox-sandbox-workspace-integration.md](plans/features/opensandbox-sandbox-workspace-integration.md) - Plan for running public-GUI agents in isolated OpenSandbox workspaces with shallow clones and controlled retrieval access.

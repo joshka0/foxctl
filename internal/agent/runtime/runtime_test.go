@@ -10,9 +10,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jkatigb/agentctl/internal/agent/optimization"
 	"github.com/jkatigb/agentctl/internal/agent/types"
 	"github.com/jkatigb/agentctl/internal/agentprompt"
 	"github.com/jkatigb/agentctl/internal/engine"
+	"github.com/jkatigb/agentctl/internal/storage/sessions"
 )
 
 func TestAgentInstruction_CoderRole(t *testing.T) {
@@ -58,6 +60,162 @@ func TestAgentInstruction_CoderRole(t *testing.T) {
 	// Verify workflow guidance is present
 	if !strings.Contains(instruction, "code.symbol_search to find relevant symbols") {
 		t.Error("Coder signature should include workflow guidance for symbol_search")
+	}
+}
+
+func TestBuildTaskPromptPrefersTargetProfileVariant(t *testing.T) {
+	ctx := context.Background()
+	store, err := optimization.OpenPromptVariantStore(ctx, t.TempDir())
+	if err != nil {
+		t.Fatalf("open prompt variant store: %v", err)
+	}
+	defer store.Close() //nolint:errcheck
+
+	if _, err := store.Save(ctx, optimization.PromptVariant{
+		WorkspaceID:    "/tmp/ws",
+		AgentRole:      "coder",
+		TargetProfile:  "generic",
+		Mode:           "gepa",
+		OriginalPrompt: "base",
+		Prompt:         "generic runtime prompt",
+	}); err != nil {
+		t.Fatalf("save generic variant: %v", err)
+	}
+	if _, err := store.Save(ctx, optimization.PromptVariant{
+		WorkspaceID:    "/tmp/ws",
+		AgentRole:      "coder",
+		TargetProfile:  "local_lmstudio",
+		Mode:           "gepa",
+		OriginalPrompt: "base",
+		Prompt:         "local runtime prompt",
+	}); err != nil {
+		t.Fatalf("save local variant: %v", err)
+	}
+
+	rt := NewRuntime(Config{
+		LLMProvider:        "lmstudio",
+		PromptVariantStore: store,
+	})
+	prompt := rt.buildTaskPrompt(ctx, types.AgentConfig{
+		Role:        types.RoleCoder,
+		WorkspaceID: "/tmp/ws",
+		LLMProvider: "lmstudio",
+		LLMModel:    "liquid/lfm2.5-1.2b",
+	})
+	if prompt != "local runtime prompt" {
+		t.Fatalf("prompt=%q want local runtime prompt", prompt)
+	}
+}
+
+func TestBuildTaskPromptVariantAppendsTaskContext(t *testing.T) {
+	ctx := context.Background()
+	store, err := optimization.OpenPromptVariantStore(ctx, t.TempDir())
+	if err != nil {
+		t.Fatalf("open prompt variant store: %v", err)
+	}
+	defer store.Close() //nolint:errcheck
+
+	if _, err := store.Save(ctx, optimization.PromptVariant{
+		WorkspaceID:    "/tmp/ws",
+		AgentRole:      "coder",
+		TargetProfile:  "local_lmstudio",
+		Mode:           "gepa",
+		OriginalPrompt: "base",
+		Prompt:         "local runtime prompt",
+	}); err != nil {
+		t.Fatalf("save local variant: %v", err)
+	}
+
+	rt := NewRuntime(Config{
+		LLMProvider:        "lmstudio",
+		PromptVariantStore: store,
+	})
+	prompt := rt.buildTaskPrompt(ctx, types.AgentConfig{
+		Role:        types.RoleCoder,
+		WorkspaceID: "/tmp/ws",
+		LLMProvider: "lmstudio",
+		LLMModel:    "liquid/lfm2.5-1.2b",
+		TaskID:      "task-123",
+		EpicID:      "epic-9",
+	})
+	if !strings.Contains(prompt, "local runtime prompt") {
+		t.Fatalf("prompt=%q missing variant prompt", prompt)
+	}
+	if !strings.Contains(prompt, "Assigned task: task-123") {
+		t.Fatalf("prompt=%q missing task context", prompt)
+	}
+	if !strings.Contains(prompt, "Epic: epic-9") {
+		t.Fatalf("prompt=%q missing epic context", prompt)
+	}
+}
+
+func TestSpawnPersistsResolvedPromptVariant(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+
+	sessionStore, err := sessions.Open(ctx, root)
+	if err != nil {
+		t.Fatalf("open session store: %v", err)
+	}
+	defer sessionStore.Close() //nolint:errcheck
+
+	variantStore, err := optimization.OpenPromptVariantStore(ctx, t.TempDir())
+	if err != nil {
+		t.Fatalf("open prompt variant store: %v", err)
+	}
+	defer variantStore.Close() //nolint:errcheck
+
+	if _, err := variantStore.Save(ctx, optimization.PromptVariant{
+		WorkspaceID:    "ws-test",
+		AgentRole:      "coder",
+		TargetProfile:  "local_lmstudio",
+		Mode:           "gepa",
+		OriginalPrompt: "base",
+		Prompt:         "resolved runtime prompt",
+	}); err != nil {
+		t.Fatalf("save prompt variant: %v", err)
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(mockLLMResponse("done"))
+	}))
+	defer server.Close()
+
+	rt := NewRuntime(Config{
+		DefaultMaxIterations: 1,
+		DefaultTimeout:       5 * time.Second,
+		SessionStore:         sessionStore,
+		PromptVariantStore:   variantStore,
+		WorkspaceRoot:        root,
+		LLMProvider:          "lmstudio",
+		LLMModel:             "liquid/lfm2.5-1.2b",
+		LLMAPIKey:            "test-key",
+		LLMBaseURL:           server.URL,
+	})
+
+	session, err := rt.Spawn(ctx, types.AgentConfig{
+		Role:        types.RoleCoder,
+		ActorID:     "actor:test:coder",
+		WorkspaceID: "ws-test",
+	})
+	if err != nil {
+		t.Fatalf("Spawn() error = %v", err)
+	}
+	defer func() {
+		session.cancel()
+		<-session.done
+	}()
+
+	stored, err := sessionStore.Get(ctx, session.ID)
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	if stored.Prompt != "resolved runtime prompt" {
+		t.Fatalf("stored.Prompt=%q want resolved runtime prompt", stored.Prompt)
+	}
+	if stored.PromptHash == "" {
+		t.Fatal("stored.PromptHash is empty")
 	}
 }
 

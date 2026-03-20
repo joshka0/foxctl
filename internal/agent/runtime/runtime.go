@@ -18,6 +18,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/jkatigb/agentctl/internal/agent/optimization"
 	"github.com/oklog/ulid/v2"
 
 	"github.com/jkatigb/agentctl/internal/agent/toolnames"
@@ -68,6 +69,25 @@ func firstNonEmpty(values ...string) string {
 	return ""
 }
 
+func (r *Runtime) resolveEffectiveLLMTarget(cfg types.AgentConfig) (string, string) {
+	provider := strings.TrimSpace(cfg.LLMProvider)
+	if provider == "" {
+		provider = strings.TrimSpace(r.config.LLMProvider)
+	}
+	if cfg.ExecMode == agent.ModeTick {
+		provider = "lmstudio"
+	}
+
+	model := strings.TrimSpace(cfg.LLMModel)
+	if model == "" {
+		model = strings.TrimSpace(r.config.LLMModel)
+	}
+	if model == "" && provider != "" {
+		model = llmproviders.DefaultModelForProvider(provider)
+	}
+	return provider, model
+}
+
 // Runtime manages agent sessions and lifecycle.
 type Runtime struct {
 	mu       sync.RWMutex
@@ -91,6 +111,9 @@ type Config struct {
 	// SessionStore persists agent sessions to database.
 	// When nil, sessions are only kept in memory.
 	SessionStore storage.SessionStore
+
+	// PromptVariantStore resolves target-profile-specific optimized prompts when no explicit prompt is set.
+	PromptVariantStore optimization.PromptVariantStore
 
 	// LLMProvider is the default LLM provider (e.g., "gemini", "openai").
 	LLMProvider string
@@ -318,6 +341,9 @@ func (r *Runtime) Spawn(ctx context.Context, cfg types.AgentConfig) (*Session, e
 	// Create session context with cancellation
 	sessionCtx, cancel := context.WithCancel(ctx)
 
+	resolvedPrompt := r.buildTaskPrompt(ctx, cfg)
+	cfg.Prompt = resolvedPrompt
+
 	session := &Session{
 		ID:        sessionID,
 		Config:    cfg,
@@ -346,8 +372,8 @@ func (r *Runtime) Spawn(ctx context.Context, cfg types.AgentConfig) (*Session, e
 	if r.config.SessionStore != nil {
 		// Compute prompt hash for correlation with wide events
 		var promptHash string
-		if cfg.Prompt != "" {
-			h := sha256.Sum256([]byte(cfg.Prompt))
+		if resolvedPrompt != "" {
+			h := sha256.Sum256([]byte(resolvedPrompt))
 			promptHash = "sha256:" + hex.EncodeToString(h[:])
 		}
 
@@ -372,7 +398,7 @@ func (r *Runtime) Spawn(ctx context.Context, cfg types.AgentConfig) (*Session, e
 			AgentType:     string(cfg.Role),
 			Status:        storage.SessionStatusRunning,
 			StartedAt:     session.StartedAt,
-			Prompt:        cfg.Prompt,
+			Prompt:        resolvedPrompt,
 			PromptHash:    promptHash,
 			LLMProvider:   provider,
 			LLMModel:      model,
@@ -403,26 +429,7 @@ func (r *Runtime) Spawn(ctx context.Context, cfg types.AgentConfig) (*Session, e
 // createEngine creates an LLMChatEngine with tools for the given agent configuration.
 func (r *Runtime) createEngine(cfg types.AgentConfig, sessionID string) (*engine.LLMChatEngine, []engine.ToolDef, error) {
 	workspaceRoot := r.workspaceRootForConfig(cfg)
-	// Resolve provider: agent → runtime → auto-detect from env
-	provider := cfg.LLMProvider
-	if provider == "" {
-		provider = r.config.LLMProvider
-	}
-	if cfg.ExecMode == agent.ModeTick {
-		provider = "lmstudio"
-	}
-
-	// Resolve model: agent → runtime → provider-specific default
-	model := cfg.LLMModel
-	if model == "" {
-		model = r.config.LLMModel
-	}
-	if cfg.ExecMode == agent.ModeTick && model == "" {
-		model = llmproviders.DefaultModelForProvider("lmstudio")
-	}
-	if model == "" && provider != "" {
-		model = llmproviders.DefaultModelForProvider(provider)
-	}
+	provider, model := r.resolveEffectiveLLMTarget(cfg)
 
 	// Resolve max context tokens: agent → runtime default
 	maxContextTokens := cfg.MaxContextTokens
@@ -2589,8 +2596,19 @@ func (r *Runtime) runSession(ctx context.Context, session *Session) {
 	}
 
 	// Build the system prompt and task message
+	session.mu.Lock()
 	session.SystemPrompt = agentprompt.InstructionRuntime(session.Config.Role)
-	taskPrompt := buildTaskPrompt(session.Config)
+	taskPrompt := strings.TrimSpace(session.Config.Prompt)
+	session.mu.Unlock()
+	if taskPrompt == "" {
+		resolvedPrompt := r.buildTaskPrompt(ctx, session.Config)
+		session.mu.Lock()
+		if strings.TrimSpace(session.Config.Prompt) == "" {
+			session.Config.Prompt = resolvedPrompt
+		}
+		taskPrompt = strings.TrimSpace(session.Config.Prompt)
+		session.mu.Unlock()
+	}
 	var result string
 	var bestResult string // Track most substantive response for summary
 	var engineRetries int
@@ -2949,10 +2967,20 @@ func normalizeStringSlice(value any) []string {
 }
 
 // buildTaskPrompt creates the prompt for the agent from config.
-func buildTaskPrompt(cfg types.AgentConfig) string {
+func (r *Runtime) buildTaskPrompt(ctx context.Context, cfg types.AgentConfig) string {
 	// If a specific prompt is provided, use it directly
-	if cfg.Prompt != "" {
-		return cfg.Prompt
+	if prompt := strings.TrimSpace(cfg.Prompt); prompt != "" {
+		return prompt
+	}
+
+	if r != nil && r.config.PromptVariantStore != nil && strings.TrimSpace(cfg.WorkspaceID) != "" && strings.TrimSpace(string(cfg.Role)) != "" {
+		provider, model := r.resolveEffectiveLLMTarget(cfg)
+		cfg.LLMProvider = provider
+		cfg.LLMModel = model
+		targetProfile := optimization.DerivePromptTargetProfile("", provider, model)
+		if variant, err := r.config.PromptVariantStore.ResolveLatestCompatible(ctx, strings.TrimSpace(cfg.WorkspaceID), strings.TrimSpace(string(cfg.Role)), targetProfile); err == nil && strings.TrimSpace(variant.Prompt) != "" {
+			return appendTaskPromptContext(strings.TrimSpace(variant.Prompt), cfg)
+		}
 	}
 
 	// Otherwise, build a generic task prompt
@@ -2970,6 +2998,20 @@ func buildTaskPrompt(cfg types.AgentConfig) string {
 	prompt += "Please analyze the workspace and complete your assigned work."
 
 	return prompt
+}
+
+func appendTaskPromptContext(prompt string, cfg types.AgentConfig) string {
+	sections := make([]string, 0, 2)
+	if strings.TrimSpace(cfg.TaskID) != "" {
+		sections = append(sections, fmt.Sprintf("Assigned task: %s", strings.TrimSpace(cfg.TaskID)))
+	}
+	if strings.TrimSpace(cfg.EpicID) != "" {
+		sections = append(sections, fmt.Sprintf("Epic: %s", strings.TrimSpace(cfg.EpicID)))
+	}
+	if len(sections) == 0 {
+		return prompt
+	}
+	return strings.TrimSpace(prompt) + "\n\nSession context:\n" + strings.Join(sections, "\n")
 }
 
 func (r *Runtime) dispatchStopRequested(ctx context.Context, session *Session, prompt, assistantText string) hooks.Result {

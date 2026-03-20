@@ -21,7 +21,7 @@ SKILL_DIRS := $(shell find skills -mindepth 1 -maxdepth 1 -type d)
 # Skills requiring CGO (excluded from non-CGO builds)
 CGO_SKILLS := libsql_migrate
 
-.PHONY: fmt lint typecheck lsp-check vet test test-cgo test-cgo-short test-race test-integration test-integration-cmd cover check-coverage check-doc-links build build-cgo build-all viewer snapshot tidy check skill skills-build skills-build-cgo skills-build-all skills-install skills-install-cgo skills-install-all skills-test completions init ts-install ts-dev-tui ts-dev-gui ts-build-tui ts-tui ts-build ts-typecheck env-sync env-watch env-watch-stop db-backup db-backup-list db-backup-clean
+.PHONY: fmt lint typecheck lsp-check vet test test-cgo test-cgo-short test-race test-integration test-integration-cmd cover check-coverage check-doc-links build build-cgo build-all viewer snapshot tidy check skill skills-build skills-build-cgo skills-build-all skills-install skills-install-cgo skills-install-all skills-test completions init ts-install ts-dev-tui ts-dev-gui ts-build-tui ts-tui ts-build ts-typecheck env-sync env-watch env-watch-stop db-backup db-backup-list db-backup-clean gepa-prompt gepa-cycle gepa-dataset-export gepa-dataset-export-ranked gepa-claude-export gepa-claude-rewrite gepa-leaderboard gepa-compare-batch gepa-judge-baseline
 
 fmt:
 	@echo "Running gofumpt"
@@ -74,6 +74,33 @@ test-cgo:
 
 test-cgo-short:
 	@$(GO_CMD_CGO) test -short -tags=libsqlite3 ./...
+
+gepa-prompt:
+	@$(GO_CMD_CGO) run -tags=libsqlite3 ./cmd/agentctl optimize prompt $(ARGS)
+
+gepa-cycle:
+	@$(GO_CMD_CGO) run -tags=libsqlite3 ./cmd/agentctl optimize prompt cycle $(ARGS)
+
+gepa-compare-batch:
+	@$(GO_CMD_CGO) run -tags=libsqlite3 ./cmd/agentctl optimize prompts compare-batch $(ARGS)
+
+gepa-judge-baseline:
+	@python3 scripts/preference_judge_baseline.py $(ARGS)
+
+gepa-dataset-export:
+	@$(GO_CMD_CGO) run -tags=libsqlite3 ./cmd/agentctl optimize dataset export $(ARGS)
+
+gepa-dataset-export-ranked:
+	@$(GO_CMD_CGO) run -tags=libsqlite3 ./cmd/agentctl optimize dataset export-ranked $(ARGS)
+
+gepa-claude-export:
+	@$(GO_CMD_CGO) run -tags=libsqlite3 ./cmd/agentctl optimize dataset claude export $(ARGS)
+
+gepa-claude-rewrite:
+	@$(GO_CMD_CGO) run -tags=libsqlite3 ./cmd/agentctl optimize dataset claude rewrite $(ARGS)
+
+gepa-leaderboard:
+	@$(GO_CMD_CGO) run -tags=libsqlite3 ./cmd/agentctl optimize dataset claude leaderboard $(ARGS)
 
 test-race:
 	@$(GO_CMD_CGO) test -race -short $(RACE_PKGS)

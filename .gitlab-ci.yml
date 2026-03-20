@@ -105,5 +105,4 @@ build:
   artifacts:
     paths:
       - bin/agentctl
-      - dist/skills/
     expire_in: 7 days

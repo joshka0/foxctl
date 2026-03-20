@@ -437,10 +437,3 @@ func normalizeTableName(table string) (string, error) {
 	}
 	return table, nil
 }
-
-func max(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
-}

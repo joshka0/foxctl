@@ -12,6 +12,7 @@ import (
 	"time"
 
 	agentdaemon "github.com/jkatigb/agentctl/internal/agent/daemon"
+	"github.com/jkatigb/agentctl/internal/agent/optimization"
 	"github.com/jkatigb/agentctl/internal/agent/prompts"
 	"github.com/jkatigb/agentctl/internal/agent/toolnames"
 	"github.com/jkatigb/agentctl/internal/daemon"
@@ -332,6 +333,25 @@ func currentSpawnWorkspaceID() string {
 	return ws.ID(root)
 }
 
+func resolveSpawnPromptVariantTarget(cfg config.Config, executionLayer agent.ExecutionLayer) (string, string) {
+	provider := strings.TrimSpace(spawnLLMProvider)
+	if provider == "" {
+		provider = strings.TrimSpace(cfg.LLM.Provider)
+	}
+	if executionLayer == agent.ExecutionLayerClassic && provider == "" {
+		provider = "lmstudio"
+	}
+
+	model := strings.TrimSpace(spawnLLMModel)
+	if model == "" {
+		model = strings.TrimSpace(cfg.LLM.Model)
+	}
+	if model == "" && provider != "" {
+		model = llmproviders.DefaultModelForProvider(provider)
+	}
+	return provider, model
+}
+
 func runAgentSpawnWithRoute(cmd *cobra.Command) error {
 	ctx := cmd.Context()
 	cfg := config.MustFromContext(ctx)
@@ -369,8 +389,19 @@ func runAgentSpawnWithRoute(cmd *cobra.Command) error {
 		prompt = string(data)
 	}
 	if prompt == "" && spawnRole != "" {
-		if defaultPrompt, ok := prompts.DefaultPrompt(spawnRole); ok {
-			prompt = defaultPrompt
+		workspaceID := currentSpawnWorkspaceID()
+		effectiveProvider, effectiveModel := resolveSpawnPromptVariantTarget(cfg, executionLayer)
+		targetProfile := optimization.DerivePromptTargetProfile(string(executionLayer), effectiveProvider, effectiveModel)
+		if variantStore, err := optimization.OpenPromptVariantStore(ctx, cfg.Storage.Root); err == nil {
+			if variant, resolveErr := variantStore.ResolveLatestCompatible(ctx, workspaceID, spawnRole, targetProfile); resolveErr == nil && strings.TrimSpace(variant.Prompt) != "" {
+				prompt = variant.Prompt
+			}
+			variantStore.Close() //nolint:errcheck
+		}
+		if prompt == "" {
+			if defaultPrompt, ok := prompts.DefaultPrompt(spawnRole); ok {
+				prompt = defaultPrompt
+			}
 		}
 	}
 

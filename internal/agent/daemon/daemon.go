@@ -43,6 +43,7 @@ const messageLeaseDuration = 30 * time.Second
 
 type daemonStores struct {
 	agentStore           storagents.Store
+	promptVariantStore   optimization.PromptVariantStore
 	mailboxStore         mailbox.Store
 	tasksStore           tasks.Store
 	boardStore           blackboard.BoardStore
@@ -125,6 +126,13 @@ func openDaemonStores(ctx context.Context, root string, opts Options) (*daemonSt
 		return nil, fmt.Errorf("open sessions store: %w", err)
 	}
 	stores.sessionsStore = sessionsStore
+
+	promptVariantStore, err := optimization.OpenPromptVariantStore(ctx, root)
+	if err != nil {
+		log.Warn().Err(err).Msg("open prompt variant store failed; continuing without optimized prompt variants")
+	} else {
+		stores.promptVariantStore = promptVariantStore
+	}
 
 	// Open companion memory if enabled
 	if opts.EnableCompanionMemory {
@@ -233,6 +241,9 @@ func (s *daemonStores) Close() {
 	}
 	if s.sessionsStore != nil {
 		_ = s.sessionsStore.Close()
+	}
+	if s.promptVariantStore != nil {
+		_ = s.promptVariantStore.Close()
 	}
 	if s.bbStore != nil {
 		_ = s.bbStore.Close()
@@ -346,6 +357,14 @@ func Run(ctx context.Context, opts Options) error {
 			Str("model", model).
 			Msg("companion service LLM config")
 
+		defaultPersonality := agentRecord.Prompt
+		targetProfile := optimization.DerivePromptTargetProfile(string(agent.NormalizeExecutionLayer(agentRecord.ExecutionLayer)), provider, model)
+		if stores.promptVariantStore != nil {
+			if variant, err := stores.promptVariantStore.ResolveLatestCompatible(ctx, agentRecord.Namespace, agentRecord.Role, targetProfile); err == nil && strings.TrimSpace(variant.Prompt) != "" {
+				defaultPersonality = variant.Prompt
+			}
+		}
+
 		toolsCfg := buildToolsConfig(opts, agentRecord, traceID, stores, func(ctx context.Context) (bool, error) {
 			if agentRecord.ExecMode != agent.ModeTick {
 				return false, fmt.Errorf("end_tick is only available in tick mode")
@@ -375,7 +394,7 @@ func Run(ctx context.Context, opts Options) error {
 			LLMAuthMode:         firstNonEmpty(agentRecord.LLMAuthMode, opts.LLMAuthMode),
 			LLMAuthHeader:       firstNonEmpty(agentRecord.LLMAuthHeader, opts.LLMAuthHeader),
 			LLMAuthPrefix:       firstNonEmpty(agentRecord.LLMAuthPrefix, opts.LLMAuthPrefix),
-			DefaultPersonality:  agentRecord.Prompt,
+			DefaultPersonality:  defaultPersonality,
 			MaxIterations:       agentRecord.MaxIterations,
 			Timeout:             90 * time.Second,
 			ExecMode:            agentRecord.ExecMode,

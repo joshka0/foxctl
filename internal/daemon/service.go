@@ -17,6 +17,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/jkatigb/agentctl/internal/agent/optimization"
 	"github.com/jkatigb/agentctl/internal/agent/runtime"
 	"github.com/jkatigb/agentctl/internal/agent/toolnames"
 	"github.com/jkatigb/agentctl/internal/agent/types"
@@ -128,15 +129,16 @@ type Service struct {
 	acaMaintenanceWG     sync.WaitGroup
 
 	// Agent orchestration
-	agentMu           sync.Mutex
-	agentRuntime      *runtime.Runtime
-	agentOverseer     *runtime.Overseer
-	agentCtx          context.Context
-	agentCancel       context.CancelFunc
-	agentSessionStore *sessions.Store       // Session store for agent persistence (close on shutdown)
-	agentMailboxStore mailbox.Store         // Mailbox store for agent messaging (close on shutdown)
-	agentBoardStore   blackboard.BoardStore // Blackboard store for agent coordination (close on shutdown)
-	agentSessionMap   map[string]string     // agentID (agents.db) → sessionID (runtime); protected by agentMu
+	agentMu             sync.Mutex
+	agentRuntime        *runtime.Runtime
+	agentOverseer       *runtime.Overseer
+	agentCtx            context.Context
+	agentCancel         context.CancelFunc
+	agentPromptVariants optimization.PromptVariantStore
+	agentSessionStore   *sessions.Store       // Session store for agent persistence (close on shutdown)
+	agentMailboxStore   mailbox.Store         // Mailbox store for agent messaging (close on shutdown)
+	agentBoardStore     blackboard.BoardStore // Blackboard store for agent coordination (close on shutdown)
+	agentSessionMap     map[string]string     // agentID (agents.db) → sessionID (runtime); protected by agentMu
 }
 
 // NewService creates a new daemon service.
@@ -1460,6 +1462,14 @@ func (s *Service) startAgentOrchestration(ctx context.Context) error {
 		return memory.OpenWithConfig(ctx, s.cfg)
 	}
 
+	var promptVariantStore optimization.PromptVariantStore
+	if pvs, err := optimization.OpenPromptVariantStore(ctx, s.cfg.Storage.Root); err != nil {
+		fmt.Fprintf(os.Stderr, "agent orchestration: prompt variant store open failed: %v\n", err)
+	} else {
+		s.agentPromptVariants = pvs
+		promptVariantStore = pvs
+	}
+
 	// Load hook configuration and create dispatcher for agent tools
 	var hookDispatcher hooks.Dispatcher
 	hookCfg, err := hooks.LoadConfigWithDefaults(s.opts.Workspace)
@@ -1490,6 +1500,7 @@ func (s *Service) startAgentOrchestration(ctx context.Context) error {
 		LLMAuthPrefix:        s.cfg.LLM.ResolveAuthPrefix(llmProvider),
 		WorkspaceRoot:        s.opts.Workspace,
 		DefaultMaxDepth:      3,
+		PromptVariantStore:   promptVariantStore,
 		OpenMemoryStore:      openMemoryStore,
 		SessionStore:         sessionStore,
 		MailboxStore:         mailboxStore,
@@ -1566,6 +1577,10 @@ func (s *Service) stopAgentOrchestration() {
 	if s.agentBoardStore != nil {
 		s.agentBoardStore.Close()
 		s.agentBoardStore = nil
+	}
+	if s.agentPromptVariants != nil {
+		s.agentPromptVariants.Close()
+		s.agentPromptVariants = nil
 	}
 
 	s.agentRuntime = nil

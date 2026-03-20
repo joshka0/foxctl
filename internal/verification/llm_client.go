@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jkatigb/agentctl/internal/llmcompat"
 	llmproviders "github.com/jkatigb/agentctl/internal/providers/llm"
 )
 
@@ -67,10 +68,11 @@ func NewOpenAIClient(cfg OpenAIConfig) (*OpenAIClient, error) {
 }
 
 type openAIRequest struct {
-	Model       string          `json:"model"`
-	Messages    []openAIMessage `json:"messages"`
-	Temperature float64         `json:"temperature,omitempty"`
-	MaxTokens   int             `json:"max_tokens,omitempty"`
+	Model              string          `json:"model"`
+	Messages           []openAIMessage `json:"messages"`
+	Temperature        float64         `json:"temperature,omitempty"`
+	MaxTokens          int             `json:"max_tokens,omitempty"`
+	ChatTemplateKwargs map[string]any  `json:"chat_template_kwargs,omitempty"`
 }
 
 type openAIMessage struct {
@@ -81,7 +83,8 @@ type openAIMessage struct {
 type openAIResponse struct {
 	Choices []struct {
 		Message struct {
-			Content string `json:"content"`
+			Content          string `json:"content"`
+			ReasoningContent string `json:"reasoning_content"`
 		} `json:"message"`
 	} `json:"choices"`
 	Error *struct {
@@ -97,6 +100,7 @@ func (c *OpenAIClient) Chat(ctx context.Context, systemPrompt, userPrompt string
 	}
 	messages := make([]openAIMessage, 0, 2)
 	if strings.TrimSpace(systemPrompt) != "" {
+		systemPrompt = llmcompat.ApplySystemPromptDefaults(c.cfg.Model, systemPrompt)
 		messages = append(messages, openAIMessage{Role: "system", Content: systemPrompt})
 	}
 	messages = append(messages, openAIMessage{Role: "user", Content: userPrompt})
@@ -110,6 +114,9 @@ func (c *OpenAIClient) Chat(ctx context.Context, systemPrompt, userPrompt string
 	}
 	if opts.Temperature > 0 {
 		reqBody.Temperature = opts.Temperature
+	}
+	if llmcompat.IsQwenModel(c.cfg.Model) {
+		reqBody.ChatTemplateKwargs = map[string]any{"enable_thinking": false}
 	}
 
 	payload, err := json.Marshal(reqBody)
@@ -149,7 +156,15 @@ func (c *OpenAIClient) Chat(ctx context.Context, systemPrompt, userPrompt string
 	if len(out.Choices) == 0 {
 		return "", fmt.Errorf("no completion returned")
 	}
-	return out.Choices[0].Message.Content, nil
+	content := strings.TrimSpace(out.Choices[0].Message.Content)
+	if content != "" {
+		return content, nil
+	}
+	reasoning := strings.TrimSpace(out.Choices[0].Message.ReasoningContent)
+	if reasoning != "" {
+		return reasoning, nil
+	}
+	return "", nil
 }
 
 func baseURLForProvider(provider string) string {
