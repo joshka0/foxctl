@@ -181,6 +181,7 @@ func (r LLMRunner) runSinglePass(ctx context.Context, task Task, env Environment
 	}
 	evidence := collectEvidenceRefs(env)
 	retrievedPaths := collectRetrievedPaths(output.ToolResults, task.WorkspaceRoot, answer)
+	parentUsage := summarizeParentToolUsage(output.Iterations, "code_search_ensemble")
 	return Result{
 		Answer:         answer,
 		EvidenceRefs:   evidence,
@@ -188,14 +189,19 @@ func (r LLMRunner) runSinglePass(ctx context.Context, task Task, env Environment
 		Iterations:     1,
 		Subcalls:       len(output.ToolCalls),
 		Metadata: map[string]any{
-			"stop_reason":      output.StopReason,
-			"provider":         llmCfg.Provider,
-			"model":            llmCfg.Model,
-			"tool_calls":       len(output.ToolCalls),
-			"tool_names":       toolCallNames(output.ToolCalls),
-			"llm_error":        output.Error,
-			"require_tool_use": pass.RequireToolUse,
-			"retrieved_paths":  retrievedPaths,
+			"stop_reason":            output.StopReason,
+			"provider":               llmCfg.Provider,
+			"model":                  llmCfg.Model,
+			"tool_calls":             len(output.ToolCalls),
+			"tool_names":             toolCallNames(output.ToolCalls),
+			"llm_error":              output.Error,
+			"require_tool_use":       pass.RequireToolUse,
+			"retrieved_paths":        retrievedPaths,
+			"parent_input_tokens":    output.Tokens.InputTokens,
+			"parent_output_tokens":   output.Tokens.OutputTokens,
+			"parent_total_tokens":    output.Tokens.TotalTokens,
+			"parent_iteration_count": len(output.Iterations),
+			"parent_tool_usage":      parentUsage,
 		},
 	}, nil
 }
@@ -206,7 +212,7 @@ func buildRLMSystemPrompt(env Environment, task Task) string {
 	b.WriteString("Use tools to inspect external state before answering. Do not invent unavailable evidence.\n")
 	b.WriteString("Prefer repo, scene, vault, and artifact handles already present in the environment.\n")
 	b.WriteString("If the prompt is about the current workspace, inspect with at least one tool before writing the final synthesis.\n")
-	b.WriteString("For repo questions, start with semantic_search_code or smart_search_code. Use search_repo only as a shallow fallback, then load_file for exact verification, and ripgrep_code for literal patterns.\n")
+	b.WriteString("For repo questions, start with code_search_ensemble. Use semantic_search_code or smart_search_code only as follow-up discovery lanes when the ensemble leaves uncertainty. Use search_repo only as a shallow fallback, then load_file for exact verification, and ripgrep_code for literal patterns.\n")
 	b.WriteString("Cite exact relative repo file paths you inspected. Do not cite .agentctl or .claude runtime files as repository evidence.\n")
 	b.WriteString("Return a concise synthesis with supporting evidence.\n")
 	if len(env.Tools) > 0 {
@@ -308,10 +314,14 @@ func (r LLMRunner) runStaged(ctx context.Context, task Task, env Environment, pl
 			}
 		}
 		phaseMeta = append(phaseMeta, map[string]any{
-			"name":            phase.Name,
-			"tool_names":      toolNames,
-			"retrieved_paths": append([]string(nil), phaseResult.RetrievedPaths...),
-			"answer":          phaseResult.Answer,
+			"name":                 phase.Name,
+			"tool_names":           toolNames,
+			"retrieved_paths":      append([]string(nil), phaseResult.RetrievedPaths...),
+			"answer":               phaseResult.Answer,
+			"parent_input_tokens":  intFromAny(phaseResult.Metadata["parent_input_tokens"]),
+			"parent_output_tokens": intFromAny(phaseResult.Metadata["parent_output_tokens"]),
+			"parent_total_tokens":  intFromAny(phaseResult.Metadata["parent_total_tokens"]),
+			"parent_tool_usage":    phaseResult.Metadata["parent_tool_usage"],
 		})
 	}
 
@@ -343,6 +353,12 @@ func (r LLMRunner) runStaged(ctx context.Context, task Task, env Environment, pl
 	finalResult.Metadata["phases"] = phaseMeta
 	finalResult.Metadata["tool_calls"] = totalToolCalls
 	finalResult.Metadata["retrieved_paths"] = finalResult.RetrievedPaths
+	finalResult.Metadata["parent_input_tokens_total"] = sumIntMetadata(phaseMeta, "parent_input_tokens")
+	finalResult.Metadata["parent_output_tokens_total"] = sumIntMetadata(phaseMeta, "parent_output_tokens")
+	finalResult.Metadata["parent_total_tokens_total"] = sumIntMetadata(phaseMeta, "parent_total_tokens")
+	finalResult.Metadata["parent_code_search_ensemble_prompt_delta_total"] = sumNestedIntMetadata(phaseMeta, "parent_tool_usage", "target_tool_prompt_delta_total")
+	finalResult.Metadata["parent_code_search_ensemble_invocations_total"] = sumNestedIntMetadata(phaseMeta, "parent_tool_usage", "target_tool_invocations")
+	finalResult.Metadata["parent_code_search_ensemble_result_token_estimate_total"] = sumNestedIntMetadata(phaseMeta, "parent_tool_usage", "target_tool_result_token_estimate_total")
 	return finalResult, nil
 }
 
@@ -515,6 +531,52 @@ func collectRetrievedPaths(results []engine.ToolResult, workspaceRoot, answer st
 	return uniqueStringsRLM(out)
 }
 
+func summarizeParentToolUsage(iterations []engine.IterationUsage, toolName string) map[string]any {
+	toolName = strings.TrimSpace(toolName)
+	out := map[string]any{
+		"target_tool":                             toolName,
+		"target_tool_invocations":                 0,
+		"target_tool_prompt_delta_total":          0,
+		"target_tool_result_token_estimate_total": 0,
+		"target_tool_invocation_details":          []map[string]any{},
+	}
+	if toolName == "" || len(iterations) == 0 {
+		return out
+	}
+	details := make([]map[string]any, 0, 4)
+	invocations := 0
+	promptDeltaTotal := 0
+	resultEstimateTotal := 0
+	for i, iter := range iterations {
+		if !containsString(iter.ToolNames, toolName) {
+			continue
+		}
+		invocations++
+		resultEstimateTotal += iter.ToolResultTokenEstimate
+		detail := map[string]any{
+			"iteration":                  iter.Iteration,
+			"prompt_tokens_before":       iter.PromptTokens,
+			"completion_tokens":          iter.CompletionTokens,
+			"tool_result_token_estimate": iter.ToolResultTokenEstimate,
+			"tool_calls":                 iter.ToolCalls,
+			"tool_names":                 append([]string(nil), iter.ToolNames...),
+			"mixed_tool_iteration":       iter.ToolCalls > 1,
+		}
+		if i+1 < len(iterations) {
+			delta := iterations[i+1].PromptTokens - iter.PromptTokens
+			detail["prompt_tokens_after"] = iterations[i+1].PromptTokens
+			detail["prompt_token_delta"] = delta
+			promptDeltaTotal += delta
+		}
+		details = append(details, detail)
+	}
+	out["target_tool_invocations"] = invocations
+	out["target_tool_prompt_delta_total"] = promptDeltaTotal
+	out["target_tool_result_token_estimate_total"] = resultEstimateTotal
+	out["target_tool_invocation_details"] = details
+	return out
+}
+
 func collectPathsRecursive(value any, workspaceRoot string, out *[]string) {
 	switch v := value.(type) {
 	case map[string]any:
@@ -654,6 +716,36 @@ func intFromAny(value any) int {
 	default:
 		return 0
 	}
+}
+
+func sumIntMetadata(items []map[string]any, key string) int {
+	total := 0
+	for _, item := range items {
+		total += intFromAny(item[key])
+	}
+	return total
+}
+
+func sumNestedIntMetadata(items []map[string]any, parentKey, childKey string) int {
+	total := 0
+	for _, item := range items {
+		parent, ok := item[parentKey].(map[string]any)
+		if !ok {
+			continue
+		}
+		total += intFromAny(parent[childKey])
+	}
+	return total
+}
+
+func containsString(values []string, target string) bool {
+	target = strings.TrimSpace(target)
+	for _, value := range values {
+		if strings.TrimSpace(value) == target {
+			return true
+		}
+	}
+	return false
 }
 
 func truncateRLMText(value string, max int) string {

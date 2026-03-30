@@ -388,9 +388,9 @@ func extractKubernetesConcepts(repoKey, fileRelPath string, content []byte) []ku
 			name = filepath.Base(strings.TrimSuffix(fileRelPath, filepath.Ext(fileRelPath)))
 		}
 		namespace := yamlLookupNode(metadata, "namespace")
-		resourceKey := strings.ToLower(kind) + ":" + name
+		resourceKey := filepath.ToSlash(fileRelPath) + ":" + strings.ToLower(kind) + ":" + name
 		if namespace != "" {
-			resourceKey = strings.ToLower(kind) + ":" + namespace + "/" + name
+			resourceKey = filepath.ToSlash(fileRelPath) + ":" + strings.ToLower(kind) + ":" + namespace + "/" + name
 		}
 		summary := fmt.Sprintf("Kubernetes %s %s (%s).", kind, name, apiVersion)
 		display := kind + "/" + name
@@ -556,7 +556,7 @@ func extractHelmTemplateConcepts(repoKey, fileRelPath string, content []byte) []
 			name = candidate
 		}
 	}
-	resourceKey := strings.ToLower(kind) + ":" + name
+	resourceKey := filepath.ToSlash(fileRelPath) + ":" + strings.ToLower(kind) + ":" + name
 	return []kubeConcept{{
 		node: Node{
 			ID:        NamespacedID(repoKey, ConceptResource+resourceKey),

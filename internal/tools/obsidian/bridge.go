@@ -1175,7 +1175,7 @@ func parseBridgeFrontmatter(text string) (map[string][]string, map[string]string
 			values[key] = strings.Trim(value, `"'`)
 		}
 		switch key {
-		case "repo_docs", "vault_refs", "suggested_vault_refs":
+		case "repo_docs", "vault_refs", "suggested_vault_refs", "paths", "symbols", "anchor_paths", "impl_anchor_paths", "support_anchor_paths", "resource_anchor_paths":
 			if value == "" {
 				current = key
 				continue

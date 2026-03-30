@@ -80,6 +80,7 @@ func (b *Builder) Build(ctx context.Context, opts BuildOptions) (BuildResult, er
 	nodes := make(map[string]Node)
 	edges := make(map[string]Edge)
 	var pending []pendingNameEdge
+	var pendingFileSymbols []pendingFileSymbolEdge
 	var locators []LocatorEntry
 
 	if opts.IncludeGo {
@@ -88,7 +89,7 @@ func (b *Builder) Build(ctx context.Context, opts BuildOptions) (BuildResult, er
 		}
 	}
 	if opts.IncludeTypescript {
-		if err := b.buildTS(ctx, opts, nodes, edges, &result, &pending, &locators); err != nil {
+		if err := b.buildTS(ctx, opts, nodes, edges, &result, &pending, &pendingFileSymbols, &locators); err != nil {
 			return result, err
 		}
 	}
@@ -114,6 +115,7 @@ func (b *Builder) Build(ctx context.Context, opts BuildOptions) (BuildResult, er
 	}
 
 	applyPendingNameEdges(nodes, edges, pending)
+	applyPendingFileSymbolEdges(nodes, edges, pendingFileSymbols)
 
 	localPackages := collectLocalPackages(nodes, opts.RepoKey)
 	applyPackageRollups(nodes, localPackages)
@@ -262,7 +264,7 @@ func (b *Builder) buildGo(ctx context.Context, opts BuildOptions, nodes map[stri
 	return nil
 }
 
-func (b *Builder) buildTS(ctx context.Context, opts BuildOptions, nodes map[string]Node, edges map[string]Edge, result *BuildResult, pending *[]pendingNameEdge, locators *[]LocatorEntry) error {
+func (b *Builder) buildTS(ctx context.Context, opts BuildOptions, nodes map[string]Node, edges map[string]Edge, result *BuildResult, pending *[]pendingNameEdge, pendingFileSymbols *[]pendingFileSymbolEdge, locators *[]LocatorEntry) error {
 	extractor := b.registry.Get("typescript")
 	if extractor == nil {
 		return fmt.Errorf("repoindex: no typescript extractor registered")
@@ -274,7 +276,15 @@ func (b *Builder) buildTS(ctx context.Context, opts BuildOptions, nodes map[stri
 		"dist/**",
 		"build/**",
 		"out/**",
+		"coverage/**",
+		".pnpm-patches/**",
+		".turbo/**",
+		".next/**",
+		".expo/**",
+		"tmp/**",
+		"temp/**",
 		".git/**",
+		"**/*.d.ts",
 	}
 
 	patterns := []string{"**/*.ts", "**/*.tsx"}
@@ -377,7 +387,7 @@ func (b *Builder) buildTS(ctx context.Context, opts BuildOptions, nodes map[stri
 			}
 		}
 
-		imports := extractTSImports(string(content))
+		imports := extractTSImports(fileRelPath, content)
 		sort.Strings(imports)
 		for _, imp := range imports {
 			impPkg := b.tsResolver.ResolveImportPackage(absPath, imp)
@@ -399,6 +409,49 @@ func (b *Builder) buildTS(ctx context.Context, opts BuildOptions, nodes map[stri
 				Weight: 0.7,
 				Meta:   importMeta(imp),
 			})
+
+			if targetFile := b.tsResolver.ResolveImportFile(absPath, imp); targetFile != "" {
+				targetRelPath, ok := relPath(opts.RepoRoot, targetFile)
+				if ok && files[targetRelPath] {
+					targetPkgID := b.tsResolver.packageForFile(targetFile)
+					if targetPkgID != "" {
+						targetFileNodeID := FileID(opts.RepoKey, targetPkgID, targetRelPath)
+						addEdge(edges, Edge{
+							Src:    fileNode.ID,
+							Dst:    targetFileNodeID,
+							Type:   EdgeImports,
+							Weight: 0.85,
+							Meta:   importMeta(imp),
+						})
+					}
+				}
+			}
+		}
+
+		if pendingFileSymbols != nil {
+			bindings := extractTSImportBindings(fileRelPath, content)
+			for _, binding := range bindings {
+				targetFile := b.tsResolver.ResolveImportFile(absPath, binding.ImportPath)
+				if targetFile == "" {
+					continue
+				}
+				targetRelPath, ok := relPath(opts.RepoRoot, targetFile)
+				if !ok || !files[targetRelPath] {
+					continue
+				}
+				targetPkgID := b.tsResolver.packageForFile(targetFile)
+				if targetPkgID == "" {
+					continue
+				}
+				*pendingFileSymbols = append(*pendingFileSymbols, pendingFileSymbolEdge{
+					SrcID:      fileNode.ID,
+					TargetPkg:  targetPkgID,
+					TargetFile: targetRelPath,
+					TargetName: binding.TargetName,
+					Type:       EdgeUsesSymbol,
+					Weight:     0.95,
+				})
+			}
 		}
 	}
 
@@ -517,6 +570,20 @@ func (b *Builder) buildElixir(ctx context.Context, opts BuildOptions, nodes map[
 						Weight:     0.85, // heuristic for Elixir refs
 					})
 				}
+			}
+		}
+
+		relations := extractElixirFileRelations(content)
+		if pending != nil && len(relations) > 0 {
+			for _, relation := range relations {
+				*pending = append(*pending, pendingNameEdge{
+					SrcID:      fileNode.ID,
+					SrcPkg:     pkgID,
+					SrcFile:    fileRelPath,
+					TargetName: relation.TargetName,
+					Type:       relation.Type,
+					Weight:     relation.Weight,
+				})
 			}
 		}
 	}

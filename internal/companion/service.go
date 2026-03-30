@@ -31,7 +31,10 @@ const (
 	EngineTypeLLMChat EngineType = "llmchat"
 )
 
-const defaultMaxHistoryTurns = 50
+const (
+	defaultMaxHistoryTurns   = 50
+	DefaultSubcallWorkerRole = "subcall_worker"
+)
 
 // Service is the companion chat service.
 type Service struct {
@@ -124,6 +127,15 @@ type ServiceConfig struct {
 
 	// SessionRecallProvider injects related prior sessions into the prompt when configured.
 	SessionRecallProvider SessionRecallProvider
+
+	// TopOfMindProvider returns compact ACA top-of-mind context for the current workspace.
+	TopOfMindProvider func(ctx context.Context, workspace string) (HarnessLayer, error)
+
+	// TaskContinuityProvider returns compact task continuity context for the current workspace.
+	TaskContinuityProvider func(ctx context.Context, workspace string) (HarnessLayer, error)
+
+	// SubcallProvider executes one bounded recursive subcall, typically via Jido runtime children.
+	SubcallProvider func(ctx context.Context, req CompanionSubcallRequest) (CompanionSubcallResult, error)
 
 	// HookDispatcher for pre/post tool use hooks (optional).
 	// When set, hooks will be invoked around tool execution.
@@ -349,6 +361,54 @@ type memoryPromptMetadata struct {
 	HasLayeredContext   bool
 	ImplicitRecallCount int
 	SessionRecallCount  int
+	HasTopOfMind        bool
+	HasTaskContinuity   bool
+}
+
+type HarnessLayer struct {
+	Content     string   `json:"content,omitempty"`
+	Refs        []string `json:"refs,omitempty"`
+	ArtifactRef string   `json:"artifact_ref,omitempty"`
+}
+
+type conversationContextFrame struct {
+	Messages          []engine.Message
+	Turns             []ConversationTurn
+	HistoryRecap      string
+	HasHistory        bool
+	ContinuationQuery string
+	WorkspaceState    string
+	ArtifactRefs      []string
+}
+
+type CompanionSubcallRequest struct {
+	ParentAgentID  string
+	Workspace      string
+	ConversationID string
+	Prompt         string
+	HarnessState   string
+	Role           string
+	LLMProvider    string
+	LLMModel       string
+	MaxDepth       int
+	MaxIterations  int
+	MaxSubcalls    int
+}
+
+type CompanionSubcallResult struct {
+	Summary        string         `json:"summary,omitempty"`
+	EvidenceRefs   []string       `json:"evidence_refs,omitempty"`
+	RetrievedPaths []string       `json:"retrieved_paths,omitempty"`
+	ArtifactRef    string         `json:"artifact_ref,omitempty"`
+	Metadata       map[string]any `json:"metadata,omitempty"`
+}
+
+func resolveCompanionSubcallRole(role string) string {
+	role = strings.TrimSpace(role)
+	if role == "" {
+		return DefaultSubcallWorkerRole
+	}
+	return role
 }
 
 // ChatTone captures structured emotion metadata for responses.
@@ -455,6 +515,16 @@ type InjectedContextDetail struct {
 	Content string `json:"content"`
 }
 
+type ContinuityDetail struct {
+	Source         string   `json:"source,omitempty"`
+	VisibleSummary string   `json:"visible_summary,omitempty"`
+	MemoryQuery    string   `json:"memory_query,omitempty"`
+	SubcallPrompt  string   `json:"subcall_prompt,omitempty"`
+	LayerHits      []string `json:"layer_hits,omitempty"`
+	SubcallCount   int      `json:"subcall_count,omitempty"`
+	ArtifactRefs   []string `json:"artifact_refs,omitempty"`
+}
+
 // ChatResponse is the response from the companion.
 type ChatResponse struct {
 	// Response is the assistant's response text.
@@ -493,6 +563,9 @@ type ChatResponse struct {
 
 	// Error contains error details if the request failed.
 	Error string `json:"error,omitempty"`
+
+	// Continuity describes how the RLM-style controller decided to source this answer.
+	Continuity *ContinuityDetail `json:"continuity,omitempty"`
 }
 
 // ChatStreamDelta is one streamed text/tool delta for a companion turn.
@@ -603,7 +676,8 @@ func (s *Service) Chat(ctx context.Context, req ChatRequest) (*ChatResponse, err
 	}
 
 	// Build system prompt
-	systemPrompt, promptMeta, err := s.buildSystemPrompt(ctx, req)
+	frame := s.buildConversationContextFrame(ctx, req)
+	systemPrompt, promptMeta, err := s.buildSystemPromptWithFrame(ctx, req, frame)
 	if err != nil {
 		return nil, fmt.Errorf("build system prompt: %w", err)
 	}
@@ -617,9 +691,9 @@ func (s *Service) Chat(ctx context.Context, req ChatRequest) (*ChatResponse, err
 
 	// Route to appropriate engine
 	if execMode == agent.ModeStory {
-		resp, err = s.chatWithStoryLoop(ctx, req, rlmExecutor, systemPrompt, promptMeta, start)
+		resp, err = s.chatWithStoryLoop(ctx, req, frame, rlmExecutor, systemPrompt, promptMeta, start)
 	} else {
-		resp, err = s.chatWithLLMChat(ctx, req, rlmExecutor, systemPrompt, promptMeta, start, nil)
+		resp, err = s.chatWithLLMChat(ctx, req, frame, rlmExecutor, systemPrompt, promptMeta, start, nil)
 	}
 
 	if err != nil {
@@ -694,7 +768,8 @@ func (s *Service) ChatStreaming(ctx context.Context, req ChatRequest, callbacks 
 		}
 	}
 
-	systemPrompt, promptMeta, err := s.buildSystemPrompt(ctx, req)
+	frame := s.buildConversationContextFrame(ctx, req)
+	systemPrompt, promptMeta, err := s.buildSystemPromptWithFrame(ctx, req, frame)
 	if err != nil {
 		return nil, fmt.Errorf("build system prompt: %w", err)
 	}
@@ -702,7 +777,7 @@ func (s *Service) ChatStreaming(ctx context.Context, req ChatRequest, callbacks 
 		systemPrompt = s.addAutonomousInstructions(systemPrompt, execMode)
 	}
 
-	resp, err := s.chatWithLLMChat(ctx, req, rlmExecutor, systemPrompt, promptMeta, start, &callbacks)
+	resp, err := s.chatWithLLMChat(ctx, req, frame, rlmExecutor, systemPrompt, promptMeta, start, &callbacks)
 	if err != nil {
 		return nil, err
 	}
@@ -727,9 +802,49 @@ func (s *Service) ChatStreaming(ctx context.Context, req ChatRequest, callbacks 
 // - FailureModes: engine init errors, engine run errors
 // - Related: engine.NewLLMChatEngine, engine.LLMChatEngine.Run, buildTooling
 // - Keywords: llmchat, provider, model, tool_calls, conversation_id, tools_used
-func (s *Service) chatWithLLMChat(ctx context.Context, req ChatRequest, rlmExecutor *engine.RLMToolExecutor, systemPrompt string, promptMeta memoryPromptMetadata, start time.Time, stream *ChatStreamCallbacks) (*ChatResponse, error) {
-	messages, hasHistory := s.buildChatMessages(ctx, req)
-
+func (s *Service) chatWithLLMChat(ctx context.Context, req ChatRequest, frame conversationContextFrame, rlmExecutor *engine.RLMToolExecutor, systemPrompt string, promptMeta memoryPromptMetadata, start time.Time, stream *ChatStreamCallbacks) (*ChatResponse, error) {
+	if strings.TrimSpace(frame.HistoryRecap) != "" {
+		systemPrompt = systemPrompt + "\n\n# Conversation State (Machine Generated)\n" + buildStructuredConversationState(frame)
+	}
+	controllerPlan, controllerTokens := s.planConversationAnswerSource(ctx, req, frame)
+	if strings.TrimSpace(controllerPlan.VisibleSummary) != "" {
+		systemPrompt = systemPrompt + "\n\n# Continuity Controller\nsource: " + controllerPlan.Source + "\nvisible_summary: " + controllerPlan.VisibleSummary
+		if strings.TrimSpace(controllerPlan.MemoryQuery) != "" {
+			systemPrompt = systemPrompt + "\nmemory_query: " + controllerPlan.MemoryQuery
+		}
+		if strings.TrimSpace(controllerPlan.SubcallPrompt) != "" {
+			systemPrompt = systemPrompt + "\nsubcall_prompt: " + controllerPlan.SubcallPrompt
+		}
+	}
+	var subcallResult CompanionSubcallResult
+	var subcallErr error
+	if controllerPlan.Source == "subcall" && s.config.SubcallProvider != nil {
+		subcallResult, subcallErr = s.config.SubcallProvider(ctx, CompanionSubcallRequest{
+			ParentAgentID:  resolveCompanionParentAgentID(req),
+			Workspace:      resolveCompanionWorkspace(req, s.config.HookContext.WorkspaceRoot),
+			ConversationID: req.ConversationID,
+			Prompt:         chooseFirstNonEmpty(controllerPlan.SubcallPrompt, controllerPlan.MemoryQuery, req.Message),
+			HarnessState:   frame.WorkspaceState,
+			Role:           DefaultSubcallWorkerRole,
+			LLMProvider:    s.config.LLMProvider,
+			LLMModel:       s.config.LLMModel,
+			MaxDepth:       1,
+			MaxIterations:  4,
+			MaxSubcalls:    0,
+		})
+		if subcallErr != nil {
+			s.logger.Warn().
+				Err(subcallErr).
+				Str("conversation_id", req.ConversationID).
+				Msg("companion subcall failed")
+		}
+		if strings.TrimSpace(subcallResult.Summary) != "" {
+			systemPrompt = systemPrompt + "\n\n# Subcall Result\n" + strings.TrimSpace(subcallResult.Summary)
+		}
+		if strings.TrimSpace(subcallResult.ArtifactRef) != "" {
+			frame.ArtifactRefs = append(frame.ArtifactRefs, strings.TrimSpace(subcallResult.ArtifactRef))
+		}
+	}
 	// Create LLM engine in stateless mode
 	engineCfg := engine.LLMChatConfig{
 		Provider:              s.config.LLMProvider,
@@ -748,7 +863,15 @@ func (s *Service) chatWithLLMChat(ctx context.Context, req ChatRequest, rlmExecu
 		ActionExecutor:        s.config.ActionExecutor,
 	}
 
-	s.applyRetentionAwareContextPolicy(&engineCfg, req, hasHistory, promptMeta, true)
+	s.applyRetentionAwareContextPolicy(&engineCfg, req, frame.HasHistory, promptMeta, true)
+	toolExecutor, toolDefs, usesRLM := s.buildTooling(rlmExecutor)
+	if controllerPlan.Source == "visible_history" || controllerPlan.Source == "subcall" {
+		toolExecutor = nil
+		toolDefs = nil
+		usesRLM = false
+		engineCfg.RequireContextQuery = false
+		engineCfg.RLMSystemPromptSuffix = ""
+	}
 
 	llmEngine, err := engine.NewLLMChatEngine(engineCfg)
 	if err != nil {
@@ -767,17 +890,17 @@ func (s *Service) chatWithLLMChat(ctx context.Context, req ChatRequest, rlmExecu
 	}
 	llmEngine.SetHookContext(hookCtx)
 
-	toolExecutor, toolDefs, usesRLM := s.buildTooling(rlmExecutor)
-
-	toolRunner := engine.NewToolRunner(toolExecutor, nil, engine.DefaultToolRunnerConfig())
-	llmEngine.SetToolRunner(toolRunner)
+	if toolExecutor != nil && len(toolDefs) > 0 {
+		toolRunner := engine.NewToolRunner(toolExecutor, nil, engine.DefaultToolRunnerConfig())
+		llmEngine.SetToolRunner(toolRunner)
+	}
 	if usesRLM {
 		llmEngine.SetRLMExecutor(rlmExecutor)
 	}
 
 	input := engine.EngineInput{
 		SystemPrompt: systemPrompt,
-		Messages:     messages,
+		Messages:     frame.Messages,
 		Tools:        toolDefs,
 	}
 
@@ -820,6 +943,9 @@ func (s *Service) chatWithLLMChat(ctx context.Context, req ChatRequest, rlmExecu
 	if err != nil {
 		return nil, fmt.Errorf("engine run: %w", err)
 	}
+	if controllerTokens.InputTokens > 0 || controllerTokens.OutputTokens > 0 {
+		output.Tokens.Add(controllerTokens.InputTokens, controllerTokens.OutputTokens)
+	}
 
 	enforceGrounded := req.RequireContextQuery != nil && *req.RequireContextQuery
 
@@ -853,7 +979,7 @@ func (s *Service) chatWithLLMChat(ctx context.Context, req ChatRequest, rlmExecu
 
 	if responseText == "" {
 		if !enforceGrounded {
-			recoveredText, recoveredTokens := s.recoverEmptyAssistantText(ctx, systemPrompt, messages, rawAssistantText)
+			recoveredText, recoveredTokens := s.recoverEmptyAssistantText(ctx, systemPrompt, frame.Messages, rawAssistantText)
 			if recoveredText != "" {
 				responseText = recoveredText
 			}
@@ -864,7 +990,7 @@ func (s *Service) chatWithLLMChat(ctx context.Context, req ChatRequest, rlmExecu
 	}
 	if shouldRecoverContextToolLeak(responseText, rawAssistantText, output.ToolCalls) {
 		recoveredText, recoveredTokens, recoverErr := s.synthesizeContextToolAnswer(
-			ctx, req, engineCfg, systemPrompt, messages, rawAssistantText, output.ToolCalls, output.ToolResults,
+			ctx, req, engineCfg, systemPrompt, frame.Messages, rawAssistantText, output.ToolCalls, output.ToolResults,
 		)
 		if recoverErr != nil {
 			s.logger.Warn().
@@ -905,7 +1031,9 @@ func (s *Service) chatWithLLMChat(ctx context.Context, req ChatRequest, rlmExecu
 	if enforceGrounded && len(output.ToolCalls) == 0 && strings.TrimSpace(responseText) == "" {
 		responseText = "I could not complete a tool-grounded research pass in this turn. Retry with a narrower target (path/function) or use a model with stronger tool-calling support."
 	}
+	diagnosticError := ""
 	if responseText == "" {
+		diagnosticError = explainInvisibleResponse(output, rawAssistantText, enforceGrounded)
 		responseText = "I couldn't generate a visible response. Please try again."
 	}
 
@@ -920,6 +1048,28 @@ func (s *Service) chatWithLLMChat(ctx context.Context, req ChatRequest, rlmExecu
 			OutputTokens: output.Tokens.OutputTokens,
 			TotalTokens:  output.Tokens.TotalTokens,
 		},
+		Error: diagnosticError,
+	}
+	if controllerPlan.Source != "" || controllerPlan.VisibleSummary != "" || controllerPlan.MemoryQuery != "" {
+		resp.Continuity = &ContinuityDetail{
+			Source:         controllerPlan.Source,
+			VisibleSummary: controllerPlan.VisibleSummary,
+			MemoryQuery:    controllerPlan.MemoryQuery,
+			SubcallPrompt:  controllerPlan.SubcallPrompt,
+			LayerHits:      continuityLayerHits(frame, promptMeta, rlmExecutor.QueryCount(), continuitySubcallCount(controllerPlan, subcallResult) > 0),
+			SubcallCount:   continuitySubcallCount(controllerPlan, subcallResult),
+			ArtifactRefs:   continuityArtifactRefs(frame, subcallResult),
+		}
+	} else {
+		layerHits := continuityLayerHits(frame, promptMeta, rlmExecutor.QueryCount(), continuitySubcallCount(controllerPlan, subcallResult) > 0)
+		if len(layerHits) > 0 || len(frame.ArtifactRefs) > 0 {
+			resp.Continuity = &ContinuityDetail{
+				Source:       "workspace_harness",
+				LayerHits:    layerHits,
+				SubcallCount: 0,
+				ArtifactRefs: continuityArtifactRefs(frame, subcallResult),
+			}
+		}
 	}
 
 	// Collect tools used (names only for backwards compatibility)
@@ -965,6 +1115,90 @@ func (s *Service) chatWithLLMChat(ctx context.Context, req ChatRequest, rlmExecu
 	// to avoid duplicate entries.
 
 	return resp, nil
+}
+
+func explainInvisibleResponse(output engine.EngineOutput, rawAssistantText string, enforceGrounded bool) string {
+	reasons := make([]string, 0, 5)
+	if msg := strings.TrimSpace(output.Error); msg != "" {
+		reasons = append(reasons, msg)
+	}
+
+	visibleAssistantText := strings.TrimSpace(stripThinkTags(rawAssistantText))
+	switch {
+	case strings.TrimSpace(rawAssistantText) == "":
+		reasons = append(reasons, "model returned no assistant text")
+	case visibleAssistantText == "":
+		reasons = append(reasons, "model returned only hidden reasoning or non-visible content")
+	}
+
+	if toolIssue := summarizeInvisibleResponseToolIssues(output); toolIssue != "" {
+		reasons = append(reasons, toolIssue)
+	}
+	if enforceGrounded && len(output.ToolCalls) == 0 {
+		reasons = append(reasons, "no grounded tool call completed")
+	}
+
+	switch output.StopReason {
+	case engine.StopReasonMaxIterations:
+		reasons = append(reasons, "iteration budget was exhausted before a final answer")
+	case engine.StopReasonContextBudget:
+		reasons = append(reasons, "context budget was exceeded before a final answer")
+	case engine.StopReasonMaxTokens:
+		reasons = append(reasons, "token limit was reached before a final answer")
+	case engine.StopReasonCancelled:
+		reasons = append(reasons, "request was cancelled before a final answer")
+	case engine.StopReasonError:
+		reasons = append(reasons, "engine stopped with an error before a final answer")
+	}
+
+	seen := map[string]struct{}{}
+	unique := make([]string, 0, len(reasons))
+	for _, reason := range reasons {
+		reason = strings.TrimSpace(reason)
+		if reason == "" {
+			continue
+		}
+		if _, ok := seen[reason]; ok {
+			continue
+		}
+		seen[reason] = struct{}{}
+		unique = append(unique, reason)
+	}
+	return strings.Join(unique, "; ")
+}
+
+func summarizeInvisibleResponseToolIssues(output engine.EngineOutput) string {
+	if len(output.ToolCalls) == 0 {
+		return ""
+	}
+	toolNames := make(map[string]string, len(output.ToolCalls))
+	for _, call := range output.ToolCalls {
+		toolNames[call.ID] = call.Name
+	}
+
+	failures := make([]string, 0, len(output.ToolResults))
+	for _, result := range output.ToolResults {
+		if !result.IsError {
+			continue
+		}
+		name := strings.TrimSpace(toolNames[result.ToolCallID])
+		if name == "" {
+			name = "tool"
+		}
+		msg := strings.TrimSpace(result.Content)
+		if msg == "" {
+			failures = append(failures, name+" failed")
+			continue
+		}
+		if len(msg) > 120 {
+			msg = msg[:120] + "..."
+		}
+		failures = append(failures, fmt.Sprintf("%s failed: %s", name, msg))
+	}
+	if len(failures) > 0 {
+		return strings.Join(failures, "; ")
+	}
+	return "tool calls completed but no final text answer was produced"
 }
 
 func shouldRetryGroundedTurn(enforceGrounded bool, output engine.EngineOutput, responseText string, contextQueries int) bool {
@@ -1534,7 +1768,12 @@ func applyRequestedOutputFormat(text string, mode requestedOutputFormatMode) str
 // - FailureModes: memory query errors or scan issues yield best-effort/no history injection
 // - Related: ConversationMemory.GetConversationMessages
 // - Keywords: history_injection, max_history_turns, companion_turns
-func (s *Service) buildChatMessages(ctx context.Context, req ChatRequest) ([]engine.Message, bool) {
+func (s *Service) buildChatMessages(ctx context.Context, req ChatRequest) ([]engine.Message, string, bool) {
+	frame := s.buildConversationContextFrame(ctx, req)
+	return frame.Messages, frame.HistoryRecap, frame.HasHistory
+}
+
+func (s *Service) buildConversationContextFrame(ctx context.Context, req ChatRequest) conversationContextFrame {
 	historyLimit := req.MaxHistoryTurns
 	switch {
 	case historyLimit == 0:
@@ -1543,8 +1782,9 @@ func (s *Service) buildChatMessages(ctx context.Context, req ChatRequest) ([]eng
 		historyLimit = 0
 	}
 
-	var messages []engine.Message
-	hasHistory := false
+	frame := conversationContextFrame{
+		ContinuationQuery: strings.TrimSpace(req.Message),
+	}
 
 	if s.memory != nil && historyLimit > 0 {
 		turns, err := s.memory.GetConversationMessages(ctx, req.ConversationID, historyLimit)
@@ -1554,15 +1794,18 @@ func (s *Service) buildChatMessages(ctx context.Context, req ChatRequest) ([]eng
 				Str("conversation_id", req.ConversationID).
 				Msg("Conversation history injection skipped")
 		} else if len(turns) > 0 {
+			frame.Turns = append(frame.Turns, turns...)
 			for _, t := range turns {
 				switch t.Role {
 				case "user":
-					messages = append(messages, engine.NewUserMessage(t.Content))
+					frame.Messages = append(frame.Messages, engine.NewUserMessage(t.Content))
 				case "assistant":
-					messages = append(messages, engine.NewAssistantMessage(t.Content))
+					frame.Messages = append(frame.Messages, engine.NewAssistantMessage(t.Content))
 				}
 			}
-			hasHistory = len(turns) >= 2
+			frame.HasHistory = len(turns) >= 2
+			frame.HistoryRecap = buildRecentConversationRecap(turns)
+			frame.ContinuationQuery = buildContinuationRecallQuery(req.Message, turns)
 			s.logger.Debug().
 				Str("conversation_id", req.ConversationID).
 				Int("history_turns", len(turns)).
@@ -1571,8 +1814,344 @@ func (s *Service) buildChatMessages(ctx context.Context, req ChatRequest) ([]eng
 		}
 	}
 
-	messages = append(messages, engine.NewUserMessage(req.Message))
-	return messages, hasHistory
+	if workspace := resolveCompanionWorkspace(req, s.config.HookContext.WorkspaceRoot); workspace != "" {
+		var sections []string
+		if topOfMind := s.getTopOfMindContext(ctx, workspace); strings.TrimSpace(topOfMind.Content) != "" {
+			sections = append(sections, "# Top Of Mind\n"+topOfMind.Content)
+			if strings.TrimSpace(topOfMind.ArtifactRef) != "" {
+				frame.ArtifactRefs = append(frame.ArtifactRefs, strings.TrimSpace(topOfMind.ArtifactRef))
+			}
+		}
+		if continuity := s.getTaskContinuityContext(ctx, workspace); strings.TrimSpace(continuity.Content) != "" {
+			sections = append(sections, continuity.Content)
+			if strings.TrimSpace(continuity.ArtifactRef) != "" {
+				frame.ArtifactRefs = append(frame.ArtifactRefs, strings.TrimSpace(continuity.ArtifactRef))
+			}
+		}
+		frame.WorkspaceState = strings.Join(sections, "\n\n")
+	}
+
+	frame.Messages = append(frame.Messages, engine.NewUserMessage(augmentChatInputWithConversationState(req.Message, frame)))
+	if strings.TrimSpace(frame.ContinuationQuery) == "" {
+		frame.ContinuationQuery = strings.TrimSpace(req.Message)
+	}
+	return frame
+}
+
+func buildRecentConversationRecap(turns []ConversationTurn) string {
+	if len(turns) == 0 {
+		return ""
+	}
+	const maxTurns = 6
+	start := 0
+	if len(turns) > maxTurns {
+		start = len(turns) - maxTurns
+	}
+
+	lines := make([]string, 0, maxTurns+2)
+	var lastUser, lastAssistant string
+	for _, turn := range turns[start:] {
+		content := strings.TrimSpace(turn.Content)
+		if content == "" {
+			continue
+		}
+		if len(content) > 180 {
+			content = content[:180] + "..."
+		}
+		switch turn.Role {
+		case "user":
+			lastUser = content
+			lines = append(lines, "- user: "+content)
+		case "assistant":
+			lastAssistant = content
+			lines = append(lines, "- assistant: "+content)
+		}
+	}
+	if len(lines) == 0 {
+		return ""
+	}
+	if lastUser != "" {
+		lines = append(lines, "Most recent user ask: "+lastUser)
+	}
+	if lastAssistant != "" {
+		lines = append(lines, "Most recent assistant reply: "+lastAssistant)
+	}
+	return strings.Join(lines, "\n")
+}
+
+func buildContinuationRecallQuery(currentMessage string, turns []ConversationTurn) string {
+	currentMessage = strings.TrimSpace(currentMessage)
+	if len(turns) == 0 {
+		return currentMessage
+	}
+
+	currentTokens := tokenizeForGrounding(currentMessage)
+	if len(currentTokens) >= 8 && len(strings.Fields(currentMessage)) >= 10 {
+		return currentMessage
+	}
+
+	type recallSnippet struct {
+		label   string
+		content string
+	}
+
+	snippets := []recallSnippet{{label: "Current user ask", content: currentMessage}}
+	appendSnippet := func(label, content string) {
+		content = strings.TrimSpace(content)
+		if content == "" {
+			return
+		}
+		if len(content) > 220 {
+			content = content[:220] + "..."
+		}
+		tokens := tokenizeForGrounding(content)
+		newTokens := 0
+		for token := range tokens {
+			if _, ok := currentTokens[token]; !ok {
+				newTokens++
+			}
+		}
+		if newTokens < 2 && len(currentTokens) > 0 {
+			return
+		}
+		snippets = append(snippets, recallSnippet{label: label, content: content})
+	}
+
+	for i := len(turns) - 1; i >= 0; i-- {
+		turn := turns[i]
+		switch turn.Role {
+		case "user":
+			appendSnippet("Previous user ask", turn.Content)
+		case "assistant":
+			appendSnippet("Previous assistant reply", turn.Content)
+		}
+		if len(snippets) >= 3 {
+			break
+		}
+	}
+
+	lines := make([]string, 0, len(snippets))
+	for _, snippet := range snippets {
+		lines = append(lines, snippet.label+": "+snippet.content)
+	}
+	return strings.Join(lines, "\n")
+}
+
+func buildStructuredConversationState(frame conversationContextFrame) string {
+	type stateTurn struct {
+		Role    string `json:"role"`
+		Content string `json:"content"`
+	}
+	if !frame.HasHistory || len(frame.Turns) == 0 {
+		return ""
+	}
+
+	turns := make([]stateTurn, 0, min(len(frame.Turns), 6))
+	start := 0
+	if len(frame.Turns) > 6 {
+		start = len(frame.Turns) - 6
+	}
+
+	var lastUser string
+	var lastAssistant string
+	for _, turn := range frame.Turns[start:] {
+		content := strings.TrimSpace(turn.Content)
+		if content == "" {
+			continue
+		}
+		content = truncateInlineForPrompt(content, 220)
+		turns = append(turns, stateTurn{Role: turn.Role, Content: content})
+		switch turn.Role {
+		case "user":
+			lastUser = content
+		case "assistant":
+			lastAssistant = content
+		}
+	}
+
+	payload := map[string]any{
+		"ongoing_conversation": true,
+		"recent_turns":         turns,
+		"history_recap":        strings.TrimSpace(frame.HistoryRecap),
+	}
+	if lastUser != "" {
+		payload["last_user_ask"] = lastUser
+	}
+	if lastAssistant != "" {
+		payload["last_assistant_reply"] = lastAssistant
+	}
+	if strings.TrimSpace(frame.ContinuationQuery) != "" {
+		payload["continuation_query"] = strings.TrimSpace(frame.ContinuationQuery)
+	}
+
+	body, err := json.MarshalIndent(payload, "", "  ")
+	if err != nil {
+		return strings.TrimSpace(frame.HistoryRecap)
+	}
+	return string(body)
+}
+
+func augmentChatInputWithConversationState(userMessage string, frame conversationContextFrame) string {
+	userMessage = strings.TrimSpace(userMessage)
+	sections := make([]string, 0, 2)
+	if state := strings.TrimSpace(buildStructuredConversationState(frame)); state != "" {
+		sections = append(sections, "[Machine-generated conversation state]\n"+state)
+	}
+	if workspaceState := strings.TrimSpace(frame.WorkspaceState); workspaceState != "" {
+		sections = append(sections, "[Machine-generated harness state]\n"+workspaceState)
+	}
+	if len(sections) == 0 {
+		return userMessage
+	}
+	return userMessage + "\n\n" + strings.Join(sections, "\n\n")
+}
+
+func continuityLayerHits(frame conversationContextFrame, meta memoryPromptMetadata, contextQueries int, subcallUsed bool) []string {
+	hits := make([]string, 0, 6)
+	add := func(hit string) {
+		for _, existing := range hits {
+			if existing == hit {
+				return
+			}
+		}
+		hits = append(hits, hit)
+	}
+	if frame.HasHistory {
+		add("L0")
+	}
+	if strings.TrimSpace(frame.HistoryRecap) != "" {
+		add("L1")
+	}
+	if meta.HasLayeredContext {
+		add("L2")
+	}
+	if meta.HasTopOfMind {
+		add("L3")
+	}
+	if meta.HasTaskContinuity {
+		add("L4")
+	}
+	if meta.ImplicitRecallCount > 0 || meta.SessionRecallCount > 0 || contextQueries > 0 || subcallUsed {
+		add("L5")
+	}
+	return hits
+}
+
+func continuitySubcallCount(plan continuityControllerPlan, result CompanionSubcallResult) int {
+	if strings.TrimSpace(plan.Source) != "subcall" {
+		return 0
+	}
+	if strings.TrimSpace(result.Summary) == "" && strings.TrimSpace(result.ArtifactRef) == "" && len(result.EvidenceRefs) == 0 && len(result.RetrievedPaths) == 0 {
+		return 0
+	}
+	return 1
+}
+
+func continuityArtifactRefs(frame conversationContextFrame, result CompanionSubcallResult) []string {
+	refs := append([]string(nil), frame.ArtifactRefs...)
+	if strings.TrimSpace(result.ArtifactRef) != "" {
+		refs = append(refs, strings.TrimSpace(result.ArtifactRef))
+	}
+	return uniqueTrimmedStrings(refs)
+}
+
+func uniqueTrimmedStrings(values []string) []string {
+	if len(values) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(values))
+	seen := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		out = append(out, value)
+	}
+	return out
+}
+
+func (s *Service) planConversationAnswerSource(ctx context.Context, req ChatRequest, frame conversationContextFrame) (continuityControllerPlan, engine.TokenUsage) {
+	if !frame.HasHistory || len(frame.Turns) == 0 {
+		return continuityControllerPlan{}, engine.TokenUsage{}
+	}
+
+	controllerCfg := engine.LLMChatConfig{
+		Provider:            s.config.LLMProvider,
+		APIKey:              s.config.LLMAPIKey,
+		BaseURL:             s.config.LLMBaseURL,
+		AuthMode:            s.config.LLMAuthMode,
+		AuthHeader:          s.config.LLMAuthHeader,
+		AuthPrefix:          s.config.LLMAuthPrefix,
+		Model:               s.config.LLMModel,
+		MaxIterations:       1,
+		Timeout:             s.config.Timeout,
+		StatelessMode:       true,
+		RequireContextQuery: false,
+		ResponseFormat:      continuityControllerResponseFormat(),
+	}
+
+	output, err := s.runLLMChatWithResponseFormatFallback(
+		ctx,
+		req,
+		controllerCfg,
+		engine.EngineInput{
+			SystemPrompt: "You are a bounded RLM controller deciding where the next answer should come from.\n" +
+				"`visible_history` means the visible recent conversation state already contains enough information to answer.\n" +
+				"`durable_memory` means the answer depends on stored memory or older sessions beyond the visible turns.\n" +
+				"`combined` means both are needed.\n" +
+				"`subcall` means the parent should delegate a smaller bounded retrieval/research task to a child agent and use only the compact child summary.\n" +
+				"If the user explicitly asks for a child agent, subagent, recursive subcall, or bounded subcall, choose `subcall`.\n" +
+				"If the user can be answered from visible recent turns alone, choose `visible_history` even if extra memory might also be helpful.\n" +
+				"Return JSON only.",
+			Messages: []engine.Message{
+				engine.NewUserMessage(
+					"Current user message:\n" + strings.TrimSpace(req.Message) + "\n\n" +
+						"Conversation state:\n" + buildStructuredConversationState(frame),
+				),
+			},
+		},
+		nil,
+		nil,
+		nil,
+		false,
+	)
+	if err != nil {
+		return continuityControllerPlan{}, engine.TokenUsage{}
+	}
+
+	plan, ok := parseContinuityControllerPlan(output.AssistantText)
+	if !ok {
+		return continuityControllerPlan{}, output.Tokens
+	}
+	if shouldForceSubcall(req, s.config.SubcallProvider != nil) {
+		plan.Source = "subcall"
+		if strings.TrimSpace(plan.SubcallPrompt) == "" {
+			plan.SubcallPrompt = chooseFirstNonEmpty(plan.MemoryQuery, req.Message)
+		}
+	}
+	return plan, output.Tokens
+}
+
+func shouldForceSubcall(req ChatRequest, available bool) bool {
+	if !available {
+		return false
+	}
+	if strings.TrimSpace(resolveCompanionParentAgentID(req)) == "" {
+		return false
+	}
+	lower := strings.ToLower(strings.TrimSpace(req.Message))
+	if lower == "" {
+		return false
+	}
+	return strings.Contains(lower, "child agent") ||
+		strings.Contains(lower, "subagent") ||
+		strings.Contains(lower, "subcall") ||
+		strings.Contains(lower, "recursive subcall")
 }
 
 func (s *Service) buildTooling(rlmExecutor *engine.RLMToolExecutor) (engine.ToolExecutor, []engine.ToolDef, bool) {
@@ -1636,6 +2215,13 @@ type dialogueEnvelope struct {
 	Action *ChatAction `json:"action,omitempty"`
 }
 
+type continuityControllerPlan struct {
+	Source         string `json:"source"`
+	VisibleSummary string `json:"visible_summary"`
+	MemoryQuery    string `json:"memory_query"`
+	SubcallPrompt  string `json:"subcall_prompt"`
+}
+
 // chatWithStoryLoop runs the story-mode gather + dialogue loop.
 //
 // Index:
@@ -1645,8 +2231,10 @@ type dialogueEnvelope struct {
 // - FailureModes: gather/dialogue errors, response format parsing failures
 // - Related: runLLMChatWithResponseFormatFallback, parseStoryContextBundle, parseDialogueEnvelope
 // - Keywords: story_mode, gather_model, dialogue_model, response_format, tools_used, conversation_id
-func (s *Service) chatWithStoryLoop(ctx context.Context, req ChatRequest, rlmExecutor *engine.RLMToolExecutor, systemPrompt string, promptMeta memoryPromptMetadata, start time.Time) (*ChatResponse, error) {
-	messages, hasHistory := s.buildChatMessages(ctx, req)
+func (s *Service) chatWithStoryLoop(ctx context.Context, req ChatRequest, frame conversationContextFrame, rlmExecutor *engine.RLMToolExecutor, systemPrompt string, promptMeta memoryPromptMetadata, start time.Time) (*ChatResponse, error) {
+	if strings.TrimSpace(frame.HistoryRecap) != "" {
+		systemPrompt = systemPrompt + "\n\n# Conversation State (Machine Generated)\n" + buildStructuredConversationState(frame)
+	}
 
 	gatherModel := s.config.StoryGatherModel
 	if req.StoryGatherModel != "" {
@@ -1683,11 +2271,11 @@ func (s *Service) chatWithStoryLoop(ctx context.Context, req ChatRequest, rlmExe
 		ActionExecutor:        s.config.ActionExecutor,
 		ResponseFormat:        storyGatherResponseFormat(),
 	}
-	s.applyRetentionAwareContextPolicy(&gatherCfg, req, hasHistory, promptMeta, usesRLM)
+	s.applyRetentionAwareContextPolicy(&gatherCfg, req, frame.HasHistory, promptMeta, usesRLM)
 
 	gatherInput := engine.EngineInput{
 		SystemPrompt: buildStoryGatherPrompt(systemPrompt),
-		Messages:     messages,
+		Messages:     frame.Messages,
 	}
 
 	gatherOutput, err := s.runLLMChatWithResponseFormatFallback(
@@ -1737,7 +2325,7 @@ func (s *Service) chatWithStoryLoop(ctx context.Context, req ChatRequest, rlmExe
 
 	dialogueInput := engine.EngineInput{
 		SystemPrompt: buildStoryDialoguePrompt(systemPrompt, storyContextJSON),
-		Messages:     messages,
+		Messages:     frame.Messages,
 	}
 
 	dialogueOutput, err := s.runLLMChatWithResponseFormatFallback(
@@ -1973,6 +2561,31 @@ func parseDialogueEnvelope(raw string) (dialogueEnvelope, bool) {
 	return dialogueEnvelope{}, false
 }
 
+func parseContinuityControllerPlan(raw string) (continuityControllerPlan, bool) {
+	var plan continuityControllerPlan
+	if err := json.Unmarshal([]byte(raw), &plan); err == nil {
+		plan.Source = strings.TrimSpace(plan.Source)
+		plan.VisibleSummary = strings.TrimSpace(plan.VisibleSummary)
+		plan.MemoryQuery = strings.TrimSpace(plan.MemoryQuery)
+		plan.SubcallPrompt = strings.TrimSpace(plan.SubcallPrompt)
+		if plan.Source != "" {
+			return plan, true
+		}
+	}
+	if extracted, ok := extractJSONObject(raw); ok {
+		if err := json.Unmarshal([]byte(extracted), &plan); err == nil {
+			plan.Source = strings.TrimSpace(plan.Source)
+			plan.VisibleSummary = strings.TrimSpace(plan.VisibleSummary)
+			plan.MemoryQuery = strings.TrimSpace(plan.MemoryQuery)
+			plan.SubcallPrompt = strings.TrimSpace(plan.SubcallPrompt)
+			if plan.Source != "" {
+				return plan, true
+			}
+		}
+	}
+	return continuityControllerPlan{}, false
+}
+
 func normalizeChatTone(tone *ChatTone) {
 	if tone == nil {
 		return
@@ -2084,12 +2697,38 @@ const storyDialogueResponseFormatJSON = `{
   }
 }`
 
+const continuityControllerResponseFormatJSON = `{
+  "type": "json_schema",
+  "json_schema": {
+    "name": "continuity_controller_plan",
+    "strict": true,
+    "schema": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "source": {
+          "type": "string",
+          "enum": ["visible_history", "durable_memory", "combined", "subcall"]
+        },
+        "visible_summary": { "type": "string" },
+        "memory_query": { "type": "string" },
+        "subcall_prompt": { "type": "string" }
+      },
+      "required": ["source", "visible_summary", "memory_query", "subcall_prompt"]
+    }
+  }
+}`
+
 func storyGatherResponseFormat() json.RawMessage {
 	return json.RawMessage(storyGatherResponseFormatJSON)
 }
 
 func storyDialogueResponseFormat() json.RawMessage {
 	return json.RawMessage(storyDialogueResponseFormatJSON)
+}
+
+func continuityControllerResponseFormat() json.RawMessage {
+	return json.RawMessage(continuityControllerResponseFormatJSON)
 }
 
 // buildSystemPrompt constructs the system prompt with personality, hybrid memory context, and agent identity.
@@ -2102,6 +2741,10 @@ func storyDialogueResponseFormat() json.RawMessage {
 // - Related: EvolvingPersonality.BuildSystemPrompt, ConversationMemory.GetHybridContext, formatRequestContext
 // - Keywords: system_prompt, personality, memory_context, request_context, agent_identity
 func (s *Service) buildSystemPrompt(ctx context.Context, req ChatRequest) (string, memoryPromptMetadata, error) {
+	return s.buildSystemPromptWithFrame(ctx, req, s.buildConversationContextFrame(ctx, req))
+}
+
+func (s *Service) buildSystemPromptWithFrame(ctx context.Context, req ChatRequest, frame conversationContextFrame) (string, memoryPromptMetadata, error) {
 	meta := memoryPromptMetadata{}
 	basePersonality := req.Personality
 	if basePersonality == "" {
@@ -2139,7 +2782,7 @@ func (s *Service) buildSystemPrompt(ctx context.Context, req ChatRequest) (strin
 		} else {
 			s.logger.Debug().Msg("Layered memory context is empty")
 		}
-		recalled := s.getImplicitMemoryRecalls(ctx, req)
+		recalled := s.getImplicitMemoryRecalls(ctx, req, frame.ContinuationQuery)
 		if len(recalled) > 0 {
 			systemPrompt = systemPrompt + "\n\n# Relevant Recalled Memory\n" + formatImplicitMemoryRecalls(recalled)
 			meta.ImplicitRecallCount = len(recalled)
@@ -2148,7 +2791,7 @@ func (s *Service) buildSystemPrompt(ctx context.Context, req ChatRequest) (strin
 		s.logger.Debug().Msg("Memory is nil, skipping context injection")
 	}
 
-	sessionMatches := s.getImplicitSessionRecalls(ctx, req)
+	sessionMatches := s.getImplicitSessionRecalls(ctx, req, frame.ContinuationQuery)
 	if len(sessionMatches) > 0 {
 		systemPrompt = systemPrompt + "\n\n# Related Past Sessions\n" + formatSessionRecallMatches(sessionMatches)
 		meta.SessionRecallCount = len(sessionMatches)
@@ -2156,6 +2799,11 @@ func (s *Service) buildSystemPrompt(ctx context.Context, req ChatRequest) (strin
 
 	if len(req.Context) > 0 {
 		systemPrompt = systemPrompt + "\n\n" + formatRequestContext(req.Context)
+	}
+	if strings.TrimSpace(frame.WorkspaceState) != "" {
+		systemPrompt = systemPrompt + "\n\n# Harness State\n" + strings.TrimSpace(frame.WorkspaceState)
+		meta.HasTopOfMind = strings.Contains(frame.WorkspaceState, "# Top Of Mind")
+		meta.HasTaskContinuity = strings.Contains(frame.WorkspaceState, "# Task Continuity")
 	}
 	if _, formatMode := requestedOutputFormat(req.Message); formatMode == requestedOutputFormatCompactJSON {
 		systemPrompt += "\n\n# Output Format\nWhen the user explicitly asks for JSON, prefer the final_answer_json tool for the final response.\n"
@@ -2234,8 +2882,76 @@ func formatRequestContext(ctx map[string]any) string {
 	return strings.Join(sections, "\n\n")
 }
 
-func (s *Service) getImplicitMemoryRecalls(ctx context.Context, req ChatRequest) []storage.ScoredEntry {
-	if s.memory == nil || !shouldInjectImplicitRecall(req.Message, s.config.MemoryBehavior) {
+func resolveCompanionWorkspace(req ChatRequest, fallback string) string {
+	if workspace := strings.TrimSpace(fallback); workspace != "" {
+		return workspace
+	}
+	if req.Context == nil {
+		return ""
+	}
+	for _, key := range []string{"agent_workspace", "workspace_root", "workspace"} {
+		if value, ok := req.Context[key]; ok {
+			if workspace := strings.TrimSpace(fmt.Sprintf("%v", value)); workspace != "" {
+				return workspace
+			}
+		}
+	}
+	return ""
+}
+
+func resolveCompanionParentAgentID(req ChatRequest) string {
+	if req.Context == nil {
+		return ""
+	}
+	if value, ok := req.Context["agent_id"]; ok {
+		return strings.TrimSpace(fmt.Sprintf("%v", value))
+	}
+	return ""
+}
+
+func chooseFirstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if trimmed := strings.TrimSpace(value); trimmed != "" {
+			return trimmed
+		}
+	}
+	return ""
+}
+
+func (s *Service) getTopOfMindContext(ctx context.Context, workspace string) HarnessLayer {
+	if s.config.TopOfMindProvider == nil || strings.TrimSpace(workspace) == "" {
+		return HarnessLayer{}
+	}
+	layer, err := s.config.TopOfMindProvider(ctx, workspace)
+	if err != nil {
+		s.logger.Debug().Err(err).Str("workspace", workspace).Msg("Top-of-mind context skipped")
+		return HarnessLayer{}
+	}
+	layer.Content = strings.TrimSpace(layer.Content)
+	layer.ArtifactRef = strings.TrimSpace(layer.ArtifactRef)
+	return layer
+}
+
+func (s *Service) getTaskContinuityContext(ctx context.Context, workspace string) HarnessLayer {
+	if s.config.TaskContinuityProvider == nil || strings.TrimSpace(workspace) == "" {
+		return HarnessLayer{}
+	}
+	layer, err := s.config.TaskContinuityProvider(ctx, workspace)
+	if err != nil {
+		s.logger.Debug().Err(err).Str("workspace", workspace).Msg("Task continuity context skipped")
+		return HarnessLayer{}
+	}
+	layer.Content = strings.TrimSpace(layer.Content)
+	layer.ArtifactRef = strings.TrimSpace(layer.ArtifactRef)
+	return layer
+}
+
+func (s *Service) getImplicitMemoryRecalls(ctx context.Context, req ChatRequest, query string) []storage.ScoredEntry {
+	query = strings.TrimSpace(query)
+	if query == "" {
+		query = strings.TrimSpace(req.Message)
+	}
+	if s.memory == nil || !shouldInjectImplicitRecall(query, s.config.MemoryBehavior) {
 		return nil
 	}
 
@@ -2252,8 +2968,8 @@ func (s *Service) getImplicitMemoryRecalls(ctx context.Context, req ChatRequest)
 		}
 	}
 
-	addResults(s.getImplicitConversationRecalls(ctx, req))
-	addResults(s.getImplicitWorkspaceMemoryRecalls(ctx, req))
+	addResults(s.getImplicitConversationRecalls(ctx, req.ConversationID, query))
+	addResults(s.getImplicitWorkspaceMemoryRecalls(ctx, req, query))
 
 	if len(merged) == 0 {
 		return nil
@@ -2275,16 +2991,16 @@ func (s *Service) getImplicitMemoryRecalls(ctx context.Context, req ChatRequest)
 	return results
 }
 
-func (s *Service) getImplicitConversationRecalls(ctx context.Context, req ChatRequest) []storage.ScoredEntry {
-	results, err := s.memory.SearchCompanionMemories(ctx, req.ConversationID, req.Message, s.config.MemoryBehavior.ImplicitRecallLimit*2)
+func (s *Service) getImplicitConversationRecalls(ctx context.Context, conversationID, query string) []storage.ScoredEntry {
+	results, err := s.memory.SearchCompanionMemories(ctx, conversationID, query, s.config.MemoryBehavior.ImplicitRecallLimit*2)
 	if err != nil {
-		s.logger.Debug().Err(err).Str("conversation_id", req.ConversationID).Msg("Conversation-local implicit recall skipped")
+		s.logger.Debug().Err(err).Str("conversation_id", conversationID).Msg("Conversation-local implicit recall skipped")
 		return nil
 	}
 	return results
 }
 
-func (s *Service) getImplicitWorkspaceMemoryRecalls(ctx context.Context, req ChatRequest) []storage.ScoredEntry {
+func (s *Service) getImplicitWorkspaceMemoryRecalls(ctx context.Context, req ChatRequest, query string) []storage.ScoredEntry {
 	if s.config.MemoryBehavior.SemanticRecallLimit <= 0 {
 		return nil
 	}
@@ -2297,7 +3013,7 @@ func (s *Service) getImplicitWorkspaceMemoryRecalls(ctx context.Context, req Cha
 		fetchLimit = 8
 	}
 
-	query := semantic.EnrichQuery(req.Message)
+	query = semantic.EnrichQuery(query)
 	results, usedBM25, err := s.searchImplicitWorkspaceMemories(ctx, query, fetchLimit)
 	if err != nil {
 		s.logger.Debug().Err(err).Str("conversation_id", req.ConversationID).Msg("Workspace implicit recall skipped")
@@ -2333,16 +3049,20 @@ func (s *Service) getImplicitWorkspaceMemoryRecalls(ctx context.Context, req Cha
 	return filtered
 }
 
-func (s *Service) getImplicitSessionRecalls(ctx context.Context, req ChatRequest) []SessionRecallMatch {
+func (s *Service) getImplicitSessionRecalls(ctx context.Context, req ChatRequest, query string) []SessionRecallMatch {
+	query = strings.TrimSpace(query)
+	if query == "" {
+		query = strings.TrimSpace(req.Message)
+	}
 	if s.config.SessionRecallProvider == nil {
 		return nil
 	}
-	if !shouldInjectSessionRecall(req.Message, s.config.MemoryBehavior) {
+	if !shouldInjectSessionRecall(query, s.config.MemoryBehavior) {
 		return nil
 	}
 
 	matches, err := s.config.SessionRecallProvider.RecallSessions(ctx, SessionRecallRequest{
-		Query:                 req.Message,
+		Query:                 query,
 		Workspace:             s.config.MemoryWorkspace,
 		Limit:                 s.config.MemoryBehavior.SessionRecallLimit,
 		MinSimilarity:         s.config.MemoryBehavior.SessionRecallMinScore,

@@ -269,6 +269,18 @@ func TestRunWithInput(t *testing.T) {
 	}
 }
 
+func TestRunWithInputEnv(t *testing.T) {
+	ctx := context.Background()
+
+	result := RunWithInputEnv(ctx, "", "sh", []string{"MY_VAR=test_value"}, []byte("stdin content"), "-c", "printf '%s:%s' \"$MY_VAR\" \"$(cat)\"")
+	if !result.Success() {
+		t.Errorf("RunWithInputEnv() failed: %v", result.Err)
+	}
+	if result.String() != "test_value:stdin content" {
+		t.Errorf("RunWithInputEnv() output = %q, want %q", result.String(), "test_value:stdin content")
+	}
+}
+
 func TestGit(t *testing.T) {
 	if !HasTool("git") {
 		t.Skip("git not available")

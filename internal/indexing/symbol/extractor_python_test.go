@@ -63,3 +63,53 @@ def add(a, b):
 		t.Errorf("unexpected doc for add: %q", docs["add"])
 	}
 }
+
+func TestPythonExtractorExtractCalls(t *testing.T) {
+	source := `def helper():
+    return None
+
+def add(a, b):
+    helper()
+    client.run()
+    return a + b
+`
+
+	extractor := NewPythonExtractor()
+	syms, err := extractor.Extract(context.Background(), "app.py", []byte(source))
+	if err != nil {
+		t.Fatalf("extract: %v", err)
+	}
+
+	var add Symbol
+	for _, sym := range syms {
+		if sym.Name == "add" {
+			add = sym
+			break
+		}
+	}
+	if add.Name == "" {
+		t.Fatalf("missing add symbol")
+	}
+
+	calls, err := extractor.ExtractCalls(context.Background(), add, []byte(source))
+	if err != nil {
+		t.Fatalf("extract calls: %v", err)
+	}
+
+	want := map[string]bool{
+		"helper": true,
+		"run":    true,
+	}
+	for name := range want {
+		found := false
+		for _, call := range calls {
+			if call == name {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("expected call %q in %v", name, calls)
+		}
+	}
+}

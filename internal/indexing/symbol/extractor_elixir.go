@@ -21,8 +21,8 @@ func (e *ElixirExtractor) SupportedLanguages() []string {
 
 // Elixir declaration patterns
 var (
-	// defmodule ModuleName do
-	elixirModulePattern = regexp.MustCompile(`^\s*defmodule\s+([A-Z][A-Za-z0-9_.]*)\s+do`)
+	// defmodule ModuleName do / defprotocol ModuleName do
+	elixirModulePattern = regexp.MustCompile(`^\s*(?:defmodule|defprotocol)\s+([A-Z][A-Za-z0-9_.]*)\s+do`)
 
 	// def func_name(args) do  OR  def func_name(args), do:
 	elixirDefPattern = regexp.MustCompile(`^\s*def\s+([a-z_][a-z0-9_?!]*)\s*(?:\(|,|\s+do)`)
@@ -51,7 +51,14 @@ var (
 )
 
 // Extract parses Elixir source and returns top-level symbols.
-func (e *ElixirExtractor) Extract(_ context.Context, filePath string, content []byte) ([]Symbol, error) {
+func (e *ElixirExtractor) Extract(ctx context.Context, filePath string, content []byte) ([]Symbol, error) {
+	if symbols, ok, err := extractElixirSymbolsWithTreeSitter(ctx, filePath, content); ok || err != nil {
+		return symbols, err
+	}
+	return e.extractHeuristic(filePath, content)
+}
+
+func (e *ElixirExtractor) extractHeuristic(filePath string, content []byte) ([]Symbol, error) {
 	lines := strings.Split(string(content), "\n")
 	lineOffsets := computeLineOffsets(lines)
 
@@ -146,7 +153,10 @@ func (e *ElixirExtractor) Extract(_ context.Context, filePath string, content []
 // In practice, this is more useful than trying to resolve local function calls,
 // because Elixir frequently omits parentheses and functions are not namespaced in
 // the v1 symbol model.
-func (e *ElixirExtractor) ExtractCalls(_ context.Context, symbol Symbol, content []byte) ([]string, error) {
+func (e *ElixirExtractor) ExtractCalls(ctx context.Context, symbol Symbol, content []byte) ([]string, error) {
+	if refs, ok, err := extractElixirCallsWithTreeSitter(ctx, symbol, content); ok || err != nil {
+		return refs, err
+	}
 	if symbol.StartByte < 0 || symbol.EndByte > len(content) || symbol.StartByte >= symbol.EndByte {
 		return nil, nil
 	}

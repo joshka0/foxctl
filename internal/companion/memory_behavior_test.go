@@ -14,10 +14,14 @@ import (
 )
 
 type fakeSessionRecallProvider struct {
-	matches []SessionRecallMatch
+	matches     []SessionRecallMatch
+	lastRequest *SessionRecallRequest
 }
 
-func (f fakeSessionRecallProvider) RecallSessions(context.Context, SessionRecallRequest) ([]SessionRecallMatch, error) {
+func (f fakeSessionRecallProvider) RecallSessions(_ context.Context, req SessionRecallRequest) ([]SessionRecallMatch, error) {
+	if f.lastRequest != nil {
+		*f.lastRequest = req
+	}
 	return append([]SessionRecallMatch(nil), f.matches...), nil
 }
 
@@ -97,18 +101,24 @@ func TestBuildChatMessages_UsesRetentionHistoryLimit(t *testing.T) {
 		},
 	}
 
-	messages, hasHistory := svc.buildChatMessages(ctx, ChatRequest{
+	messages, recap, hasHistory := svc.buildChatMessages(ctx, ChatRequest{
 		ConversationID: "conv-history",
 		Message:        "current",
 	})
 	if !hasHistory {
 		t.Fatal("expected history flag to be true")
 	}
+	if !strings.Contains(recap, "Most recent user ask: third") {
+		t.Fatalf("recap=%q missing last user ask", recap)
+	}
 	if len(messages) != 3 {
 		t.Fatalf("messages=%d want 3", len(messages))
 	}
 	if messages[0].Content != "second" || messages[1].Content != "third" {
 		t.Fatalf("history contents=%q, %q want second, third", messages[0].Content, messages[1].Content)
+	}
+	if !strings.Contains(messages[2].Content, "[Machine-generated conversation state]") {
+		t.Fatalf("current message missing structured conversation state: %q", messages[2].Content)
 	}
 }
 
@@ -222,5 +232,123 @@ func TestBuildSystemPrompt_InjectsSessionRecall(t *testing.T) {
 	}
 	if !strings.Contains(prompt, "runtime.spawn_child") {
 		t.Fatalf("prompt missing session timeline tools: %s", prompt)
+	}
+}
+
+func TestBuildSystemPrompt_InjectsTopOfMindAndTaskContinuity(t *testing.T) {
+	ctx := context.Background()
+	tmp := t.TempDir()
+
+	store, err := contextvar.Open(ctx, tmp)
+	if err != nil {
+		t.Fatalf("open context store: %v", err)
+	}
+	defer store.Close()
+
+	svc := NewService(store, ServiceConfig{
+		TopOfMindProvider: func(context.Context, string) (HarnessLayer, error) {
+			return HarnessLayer{Content: `{"objective":"Stabilize companion continuity","phase":"execute"}`}, nil
+		},
+		TaskContinuityProvider: func(context.Context, string) (HarnessLayer, error) {
+			return HarnessLayer{Content: "## Task Continuity\n\nTask continuity summary", ArtifactRef: "sha256:task-pack"}, nil
+		},
+	}, nil)
+
+	prompt, meta, err := svc.buildSystemPrompt(ctx, ChatRequest{
+		ConversationID: "conv-top",
+		Message:        "what are we doing?",
+		Context: map[string]any{
+			"agent_workspace": "/tmp/workspace",
+		},
+	})
+	if err != nil {
+		t.Fatalf("build system prompt: %v", err)
+	}
+	if !meta.HasTopOfMind {
+		t.Fatal("expected top-of-mind metadata to be set")
+	}
+	if !meta.HasTaskContinuity {
+		t.Fatal("expected task continuity metadata to be set")
+	}
+	if !strings.Contains(prompt, "# Top Of Mind") {
+		t.Fatalf("prompt missing top of mind section: %s", prompt)
+	}
+	if !strings.Contains(prompt, "Stabilize companion continuity") {
+		t.Fatalf("prompt missing top of mind content: %s", prompt)
+	}
+	if !strings.Contains(prompt, "# Task Continuity") {
+		t.Fatalf("prompt missing task continuity section: %s", prompt)
+	}
+	if !strings.Contains(prompt, "Task continuity summary") {
+		t.Fatalf("prompt missing task continuity content: %s", prompt)
+	}
+}
+
+func TestBuildSystemPrompt_ExpandsWeakContinuationQueryForSessionRecall(t *testing.T) {
+	ctx := context.Background()
+	tmp := t.TempDir()
+
+	store, err := contextvar.Open(ctx, tmp)
+	if err != nil {
+		t.Fatalf("open context store: %v", err)
+	}
+	defer store.Close()
+
+	db, err := sql.Open("sqlite", ":memory:")
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	defer db.Close()
+
+	var captured SessionRecallRequest
+	svc := NewService(store, ServiceConfig{
+		MemoryDB: db,
+		MemoryBehavior: MemoryBehavior{
+			HistoryTurnLimit:      4,
+			SessionRecallLimit:    2,
+			SessionRecallMinScore: 0.2,
+		},
+		SessionRecallProvider: fakeSessionRecallProvider{
+			lastRequest: &captured,
+			matches: []SessionRecallMatch{
+				{
+					SessionID:   "sess-travel",
+					ProjectName: "travel",
+					Summary:     "Earlier session captured the Japan travel itinerary and hotel shortlist.",
+					Similarity:  0.91,
+					StartedAt:   time.Date(2026, time.March, 1, 10, 0, 0, 0, time.UTC),
+				},
+			},
+		},
+	}, nil)
+	if svc.memory == nil {
+		t.Fatal("expected memory to be initialized")
+	}
+
+	turns := []ConversationTurn{
+		{ConversationID: "conv-continue", Role: "user", Content: "Can you help me plan our Japan travel for May?", CreatedAt: time.Date(2026, time.March, 6, 10, 0, 0, 0, time.UTC)},
+		{ConversationID: "conv-continue", Role: "assistant", Content: "Yes, we talked about Tokyo, Kyoto, and comparing hotel options near the train lines.", CreatedAt: time.Date(2026, time.March, 6, 10, 1, 0, 0, time.UTC)},
+	}
+	for _, turn := range turns {
+		if err := svc.memory.AppendTurn(ctx, turn); err != nil {
+			t.Fatalf("append turn: %v", err)
+		}
+	}
+
+	prompt, meta, err := svc.buildSystemPrompt(ctx, ChatRequest{
+		ConversationID: "conv-continue",
+		Message:        "do you see our previous conversation?",
+	})
+	if err != nil {
+		t.Fatalf("build system prompt: %v", err)
+	}
+	if meta.SessionRecallCount != 1 {
+		t.Fatalf("session recall count=%d want 1", meta.SessionRecallCount)
+	}
+	if !strings.Contains(strings.ToLower(captured.Query), "travel") {
+		t.Fatalf("captured query=%q want travel context", captured.Query)
+	}
+	if !strings.Contains(prompt, "Japan travel itinerary") {
+		t.Fatalf("prompt missing expanded session recall summary: %s", prompt)
 	}
 }

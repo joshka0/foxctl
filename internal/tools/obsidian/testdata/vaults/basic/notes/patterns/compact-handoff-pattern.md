@@ -9,6 +9,7 @@ tags:
   - handoff
 paths:
   - internal/contextplane/
+primary_anchor_path: internal/contextplane/store.go
 symbols:
   - WorkspaceStore
 provenance_refs:

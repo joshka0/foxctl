@@ -16,6 +16,15 @@ type pendingNameEdge struct {
 	Weight     float64
 }
 
+type pendingFileSymbolEdge struct {
+	SrcID      string
+	TargetPkg  string
+	TargetFile string
+	TargetName string
+	Type       EdgeType
+	Weight     float64
+}
+
 type symbolNameIndex struct {
 	byPkgFile map[string]map[string]map[string][]string
 	byPkg     map[string]map[string][]string
@@ -129,6 +138,36 @@ func applyPendingNameEdges(nodes map[string]Node, edges map[string]Edge, pending
 		}
 		for _, candidate := range resolveCandidateNames(item.TargetName) {
 			dstID := resolveSymbolName(idx, item.SrcPkg, item.SrcFile, candidate)
+			if dstID == "" || dstID == item.SrcID {
+				continue
+			}
+			weight := item.Weight
+			if weight <= 0 {
+				weight = 1.0
+			}
+			addEdge(edges, Edge{
+				Src:    item.SrcID,
+				Dst:    dstID,
+				Type:   item.Type,
+				Weight: weight,
+			})
+			break
+		}
+	}
+}
+
+func applyPendingFileSymbolEdges(nodes map[string]Node, edges map[string]Edge, pending []pendingFileSymbolEdge) {
+	if len(pending) == 0 {
+		return
+	}
+	idx := buildSymbolNameIndex(nodes)
+
+	for _, item := range pending {
+		if item.SrcID == "" || strings.TrimSpace(item.TargetPkg) == "" || strings.TrimSpace(item.TargetFile) == "" || strings.TrimSpace(item.TargetName) == "" || item.Type == "" {
+			continue
+		}
+		for _, candidate := range resolveCandidateNames(item.TargetName) {
+			dstID := resolveSymbolName(idx, item.TargetPkg, item.TargetFile, candidate)
 			if dstID == "" || dstID == item.SrcID {
 				continue
 			}

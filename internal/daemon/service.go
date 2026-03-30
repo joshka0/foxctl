@@ -1655,19 +1655,22 @@ type AgentSpawnResult struct {
 
 // AgentAskParams are the parameters for agent.ask.
 type AgentAskParams struct {
-	AgentID   string         `json:"agent_id"`
-	Message   string         `json:"message"`
-	Kind      string         `json:"kind,omitempty"`
-	Context   map[string]any `json:"context,omitempty"`
-	TimeoutMS int            `json:"timeout_ms,omitempty"`
+	AgentID        string          `json:"agent_id"`
+	Message        string          `json:"message"`
+	Kind           string          `json:"kind,omitempty"`
+	Context        map[string]any  `json:"context,omitempty"`
+	ResponseSchema json.RawMessage `json:"response_schema,omitempty"`
+	ResponseKeys   []string        `json:"response_keys,omitempty"`
+	TimeoutMS      int             `json:"timeout_ms,omitempty"`
 }
 
 // AgentAskResult is the result of asking a running agent.
 type AgentAskResult struct {
-	AgentID string `json:"agent_id"`
-	AskID   string `json:"ask_id"`
-	Reply   string `json:"reply"`
-	Status  string `json:"status"`
+	AgentID   string         `json:"agent_id"`
+	AskID     string         `json:"ask_id"`
+	Reply     string         `json:"reply"`
+	ReplyData map[string]any `json:"reply_data,omitempty"`
+	Status    string         `json:"status"`
 }
 
 func (s *Service) handleAgentSpawnV2(ctx context.Context, params json.RawMessage) (*AgentSpawnResult, error) {
@@ -1770,6 +1773,14 @@ func (s *Service) handleAgentSpawnWithRoute(ctx context.Context, params json.Raw
 	// Apply LLM override if provided
 	if p.LLMProvider != "" {
 		cfg.LLMProvider = p.LLMProvider
+		cfg.LLMAPIKey = s.cfg.LLM.ResolveAPIKey(cfg.LLMProvider)
+		cfg.LLMBaseURL = s.cfg.LLM.ResolveBaseURL(cfg.LLMProvider)
+		cfg.LLMAuthMode = s.cfg.LLM.ResolveAuthMode(cfg.LLMProvider)
+		cfg.LLMAuthHeader = s.cfg.LLM.ResolveAuthHeader(cfg.LLMProvider)
+		cfg.LLMAuthPrefix = s.cfg.LLM.ResolveAuthPrefix(cfg.LLMProvider)
+		if strings.TrimSpace(cfg.LLMModel) == "" {
+			cfg.LLMModel = llmproviders.DefaultModelForProvider(cfg.LLMProvider)
+		}
 	}
 	if p.LLMModel != "" {
 		cfg.LLMModel = p.LLMModel
@@ -1820,13 +1831,13 @@ func (s *Service) handleAgentSpawnWithRoute(ctx context.Context, params json.Raw
 		ShareBB:        "scoped",
 		State:          agent.StateRunning,
 		CreatedAt:      time.Now().UTC(),
-		LLMProvider:    p.LLMProvider,
-		LLMModel:       p.LLMModel,
-		LLMAPIKey:      p.LLMAPIKey,
-		LLMBaseURL:     p.LLMBaseURL,
-		LLMAuthMode:    p.LLMAuthMode,
-		LLMAuthHeader:  p.LLMAuthHeader,
-		LLMAuthPrefix:  p.LLMAuthPrefix,
+		LLMProvider:    cfg.LLMProvider,
+		LLMModel:       cfg.LLMModel,
+		LLMAPIKey:      cfg.LLMAPIKey,
+		LLMBaseURL:     cfg.LLMBaseURL,
+		LLMAuthMode:    cfg.LLMAuthMode,
+		LLMAuthHeader:  cfg.LLMAuthHeader,
+		LLMAuthPrefix:  cfg.LLMAuthPrefix,
 		ExecMode:       execMode,
 		ExecutionLayer: agent.ExecutionLayerClassic,
 		MaxIterations:  p.MaxIterations,
@@ -2011,6 +2022,8 @@ func (s *Service) handleAgentAskRPC(ctx context.Context, params json.RawMessage)
 		agent.WithAskTTL(timeout),
 		agent.WithAskKind(strings.TrimSpace(p.Kind)),
 		agent.WithAskContext(p.Context),
+		agent.WithAskResponseSchema(p.ResponseSchema),
+		agent.WithAskResponseKeys(p.ResponseKeys),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("send ask: %w", err)
@@ -2050,10 +2063,11 @@ func (s *Service) handleAgentAskRPC(ctx context.Context, params json.RawMessage)
 			}
 			replyText := strings.TrimSpace(fmt.Sprint(replyData.Answer["response"]))
 			return &AgentAskResult{
-				AgentID: agentID,
-				AskID:   askID,
-				Reply:   replyText,
-				Status:  "replied",
+				AgentID:   agentID,
+				AskID:     askID,
+				Reply:     replyText,
+				ReplyData: replyData.Answer,
+				Status:    "replied",
 			}, nil
 		}
 

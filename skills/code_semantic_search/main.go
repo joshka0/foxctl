@@ -104,10 +104,17 @@ const (
 	ScopeContext  = "context"
 )
 
+// Retrieval profiles.
+const (
+	ProfileDefault = "default"
+	ProfileCode    = "code"
+)
+
 // Input is the expected JSON input for code/semantic_search operations.
 type Input struct {
 	Query          string   `json:"query,omitempty"`           // Empty query with format=tree returns full repo tree
 	Scope          []string `json:"scope,omitempty"`           // ["symbols", "sessions", "memories", "tasks"]
+	Profile        string   `json:"profile,omitempty"`         // "default" or "code"
 	Workspace      string   `json:"workspace,omitempty"`       // Workspace path (defaults to cwd)
 	VaultPath      string   `json:"vault_path,omitempty"`      // Optional knowledge-vault path for context scope
 	Limit          int      `json:"limit,omitempty"`           // Default: 20
@@ -146,14 +153,15 @@ type semanticSearchPolicy struct {
 
 // Output is the JSON output structure for code/semantic_search results.
 type Output struct {
-	Query        string                `json:"query"`
-	Results      []Result              `json:"results"`
-	ContextHints []ContextHint         `json:"context_hints,omitempty"`
-	Timelines    []SessionTimeline     `json:"timelines,omitempty"` // Present when timeline=true
-	Stats        SearchStats           `json:"stats"`
-	Summary      *SynthesisSummary     `json:"summary,omitempty"`   // Present when summarize=true
-	TreeText     string                `json:"tree_text,omitempty"` // Present when format=tree
-	Tree         *retrieval.TreeOutput `json:"tree,omitempty"`      // Structured tree output when format=tree
+	Query            string                `json:"query"`
+	Results          []Result              `json:"results"`
+	CandidateBundles []CandidateBundle     `json:"candidate_bundles,omitempty"`
+	ContextHints     []ContextHint         `json:"context_hints,omitempty"`
+	Timelines        []SessionTimeline     `json:"timelines,omitempty"` // Present when timeline=true
+	Stats            SearchStats           `json:"stats"`
+	Summary          *SynthesisSummary     `json:"summary,omitempty"`   // Present when summarize=true
+	TreeText         string                `json:"tree_text,omitempty"` // Present when format=tree
+	Tree             *retrieval.TreeOutput `json:"tree,omitempty"`      // Structured tree output when format=tree
 }
 
 // SynthesisSummary contains the LLM-generated synthesis of search results.
@@ -183,6 +191,19 @@ type Result struct {
 	RerankScore float64          `json:"rerank_score,omitempty"` // Reranker relevance score (0-1)
 	SourceRank  int              `json:"source_rank,omitempty"`  // Rank within source
 	Timeline    *SessionTimeline `json:"timeline,omitempty"`     // Timeline data (for sessions when timeline=true)
+}
+
+// CandidateBundle is a machine-usable grouping of related code candidates.
+// This keeps semantic_search wide and recall-oriented while making narrowing easier downstream.
+type CandidateBundle struct {
+	Key          string   `json:"key"`
+	PrimaryPath  string   `json:"primary_path"`
+	RelatedPaths []string `json:"related_paths,omitempty"`
+	Symbols      []string `json:"symbols,omitempty"`
+	Sources      []string `json:"sources,omitempty"`
+	Score        float64  `json:"score"`
+	MatchReason  string   `json:"match_reason,omitempty"`
+	Ambiguity    string   `json:"ambiguity,omitempty"`
 }
 
 // ContextHint represents a hint from related sessions for context enrichment.
@@ -271,8 +292,9 @@ func main() {
 // - Keywords: code/semantic_search, unified, symbols, sessions, memories, tasks, codemaps, rrf, pagerank, rerank, synthesis, tree
 func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	// Apply defaults
+	in.Profile = normalizeSemanticSearchProfile(in.Profile)
 	if len(in.Scope) == 0 {
-		in.Scope = defaultSemanticSearchScopes(firstNonEmpty(strings.TrimSpace(in.Workspace), rc.PathValidator.Workspace()))
+		in.Scope = defaultSemanticSearchScopes(firstNonEmpty(strings.TrimSpace(in.Workspace), rc.PathValidator.Workspace()), in.Profile)
 	}
 	in.Limit = mathutil.DefaultPositiveInt(in.Limit, DefaultLimit)
 	in.MinSimilarity = mathutil.DefaultPositiveFloat(in.MinSimilarity, DefaultMinSimilarity)
@@ -317,6 +339,9 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 		if !validScopes[s] {
 			return skillerr.Validationf("invalid scope: %s (valid: symbols, sessions, memories, tasks, codemaps, context)", s)
 		}
+	}
+	if in.Profile != ProfileDefault && in.Profile != ProfileCode {
+		return skillerr.Validationf("invalid profile: %s (valid: default, code)", in.Profile)
 	}
 
 	cfg, err := config.Load(ctx, config.WithWorkspacePath(in.Workspace))
@@ -691,6 +716,14 @@ func search(ctx context.Context, rc *skillmain.RunContext, in *Input, voyageKey,
 		out.Stats.RerankLatencyMS = rerankStats.latencyMS
 		out.Stats.RerankCount = rerankStats.count
 	}
+
+	// Build grouped candidate bundles before truncating flat results.
+	// This keeps the wide stage recall-oriented while giving downstream tools a better narrowing surface.
+	bundleSource := fusedResults
+	if len(bundleSource) > maxInt(in.Limit*3, 24) {
+		bundleSource = bundleSource[:maxInt(in.Limit*3, 24)]
+	}
+	out.CandidateBundles = buildCandidateBundles(workspacePath, bundleSource, minInt(maxInt(in.Limit, 6), 12))
 
 	// Limit results
 	if len(fusedResults) > in.Limit {
@@ -1262,8 +1295,7 @@ func searchPathFallback(ctx context.Context, workspacePath, query string, limit 
 			return nil
 		}
 		if d.IsDir() {
-			name := strings.TrimSpace(d.Name())
-			if name == ".git" || name == "node_modules" || name == "vendor" || name == ".agentctl" {
+			if shouldSkipFallbackDir(d.Name()) {
 				return filepath.SkipDir
 			}
 			return nil
@@ -1273,7 +1305,7 @@ func searchPathFallback(ctx context.Context, workspacePath, query string, limit 
 			return nil
 		}
 		rel = filepath.ToSlash(rel)
-		if codefilter.ShouldSkipPath(rel) || !looksLikeCodePath(rel) {
+		if codefilter.ShouldSkipPath(rel) || !looksLikeSearchableFallbackPath(rel) {
 			return nil
 		}
 		score := scorePathFallbackCandidate(rel, tokens)
@@ -1354,16 +1386,58 @@ func scorePathFallbackCandidate(path string, tokens []string) int {
 	if strings.Contains(lower, "/cmd/") || strings.Contains(lower, "/internal/") {
 		score++
 	}
+	if looksLikeDeclarativeArtifactPath(path) && querySuggestsDeclarativeArtifact(tokens) {
+		score += 6
+	}
+	if looksLikeCodeLikePath(path) && querySuggestsImplementation(tokens) {
+		score += 2
+	}
 	return score
 }
 
-func looksLikeCodePath(path string) bool {
+func shouldSkipFallbackDir(name string) bool {
+	switch strings.TrimSpace(strings.ToLower(name)) {
+	case ".git", "node_modules", "vendor", ".agentctl", "dist", "build", "tmp", "deps", "_build":
+		return true
+	default:
+		return false
+	}
+}
+
+func looksLikeSearchableFallbackPath(path string) bool {
+	if looksLikeDeclarativeArtifactPath(path) {
+		return true
+	}
+	return looksLikeCodeLikePath(path)
+}
+
+func looksLikeCodeLikePath(path string) bool {
 	switch strings.ToLower(filepath.Ext(path)) {
 	case ".go", ".ts", ".tsx", ".js", ".jsx", ".py", ".ex", ".exs":
 		return true
 	default:
 		return false
 	}
+}
+
+func querySuggestsDeclarativeArtifact(tokens []string) bool {
+	for _, token := range tokens {
+		switch token {
+		case "manifest", "config", "configuration", "declarative", "declaration", "metadata", "schema":
+			return true
+		}
+	}
+	return false
+}
+
+func querySuggestsImplementation(tokens []string) bool {
+	for _, token := range tokens {
+		switch token {
+		case "implementation", "implement", "implemented", "entrypoint", "code", "runtime":
+			return true
+		}
+	}
+	return false
 }
 
 func fallbackSimilarity(index, total int) float64 {
@@ -2287,7 +2361,11 @@ func resolveSemanticSearchVaultPath(explicit string) string {
 	return ""
 }
 
-func defaultSemanticSearchScopes(workspacePath string) []string {
+func defaultSemanticSearchScopes(workspacePath, profile string) []string {
+	profile = normalizeSemanticSearchProfile(profile)
+	if profile == ProfileCode {
+		return []string{ScopeSymbols, ScopeCodemaps}
+	}
 	defaults := []string{ScopeSymbols, ScopeSessions, ScopeMemories, ScopeTasks, ScopeCodemaps}
 	workspacePath = strings.TrimSpace(workspacePath)
 	if workspacePath == "" {
@@ -2307,6 +2385,18 @@ func defaultSemanticSearchScopes(workspacePath string) []string {
 		return defaults
 	}
 	return scopes
+}
+
+func normalizeSemanticSearchProfile(profile string) string {
+	profile = strings.ToLower(strings.TrimSpace(profile))
+	switch profile {
+	case "", ProfileDefault:
+		return ProfileDefault
+	case ProfileCode:
+		return ProfileCode
+	default:
+		return profile
+	}
 }
 
 func normalizeSemanticSearchScopes(scopes []string) []string {
@@ -2883,6 +2973,253 @@ func resultsToFileEntries(results []Result) []retrieval.FileEntry {
 	}
 
 	return entries
+}
+
+func buildCandidateBundles(workspacePath string, results []Result, limit int) []CandidateBundle {
+	if len(results) == 0 {
+		return nil
+	}
+	type bundleBuilder struct {
+		key          string
+		primaryPath  string
+		primaryScore float64
+		matchReason  string
+		paths        []string
+		symbols      []string
+		sources      []string
+	}
+	builders := map[string]*bundleBuilder{}
+	order := make([]string, 0, len(results))
+	for _, r := range results {
+		if strings.TrimSpace(r.Path) == "" {
+			continue
+		}
+		key := bundleKeyForPath(r.Path)
+		if key == "" {
+			continue
+		}
+		builder, ok := builders[key]
+		if !ok {
+			builder = &bundleBuilder{key: key}
+			builders[key] = builder
+			order = append(order, key)
+		}
+		score := r.FinalScore
+		if score <= 0 {
+			score = r.Similarity
+		}
+		if score > builder.primaryScore {
+			builder.primaryScore = score
+			builder.primaryPath = r.Path
+			builder.matchReason = firstNonEmpty(strings.TrimSpace(r.Summary), strings.TrimSpace(r.Name))
+		}
+		builder.paths = appendIfMissing(builder.paths, r.Path)
+		if name := strings.TrimSpace(r.Name); name != "" {
+			builder.symbols = appendIfMissing(builder.symbols, name)
+		}
+		if src := strings.TrimSpace(r.Source); src != "" {
+			builder.sources = appendIfMissing(builder.sources, src)
+		}
+	}
+
+	out := make([]CandidateBundle, 0, len(builders))
+	for _, key := range order {
+		builder := builders[key]
+		if builder == nil || strings.TrimSpace(builder.primaryPath) == "" {
+			continue
+		}
+		related := make([]string, 0, len(builder.paths))
+		for _, path := range builder.paths {
+			if path == builder.primaryPath {
+				continue
+			}
+			related = append(related, path)
+		}
+		ambiguity := "single_file_bundle"
+		if len(builder.paths) > 1 {
+			ambiguity = "co_located_bundle"
+		}
+		out = append(out, CandidateBundle{
+			Key:          builder.key,
+			PrimaryPath:  builder.primaryPath,
+			RelatedPaths: related,
+			Symbols:      builder.symbols,
+			Sources:      builder.sources,
+			Score:        builder.primaryScore,
+			MatchReason:  builder.matchReason,
+			Ambiguity:    ambiguity,
+		})
+	}
+	out = enrichCandidateBundlesWithCompanions(workspacePath, out)
+	sort.SliceStable(out, func(i, j int) bool {
+		if out[i].Score != out[j].Score {
+			return out[i].Score > out[j].Score
+		}
+		return out[i].PrimaryPath < out[j].PrimaryPath
+	})
+	if limit > 0 && len(out) > limit {
+		out = out[:limit]
+	}
+	return out
+}
+
+func enrichCandidateBundlesWithCompanions(workspacePath string, bundles []CandidateBundle) []CandidateBundle {
+	workspacePath = strings.TrimSpace(workspacePath)
+	if workspacePath == "" || len(bundles) == 0 {
+		return bundles
+	}
+	for i := range bundles {
+		companions := findCompanionArtifacts(workspacePath, bundles[i].PrimaryPath, 4)
+		for _, companion := range companions {
+			if companion == bundles[i].PrimaryPath {
+				continue
+			}
+			bundles[i].RelatedPaths = appendIfMissing(bundles[i].RelatedPaths, companion)
+		}
+		if len(companions) > 0 && bundles[i].Ambiguity == "single_file_bundle" {
+			bundles[i].Ambiguity = "single_file_with_companions"
+		}
+	}
+	return bundles
+}
+
+func findCompanionArtifacts(workspacePath, primaryPath string, limit int) []string {
+	if limit <= 0 {
+		limit = 3
+	}
+	primaryPath = filepath.ToSlash(strings.TrimSpace(primaryPath))
+	if primaryPath == "" {
+		return nil
+	}
+	dir := filepath.Dir(primaryPath)
+	if dir == "." || dir == "/" {
+		return nil
+	}
+	fullDir := filepath.Join(workspacePath, filepath.FromSlash(dir))
+	entries, err := os.ReadDir(fullDir)
+	if err != nil {
+		return nil
+	}
+	candidates := make([]string, 0, limit)
+	basePrefix := strings.TrimSuffix(filepath.Base(primaryPath), filepath.Ext(primaryPath))
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		name := strings.TrimSpace(entry.Name())
+		if name == "" {
+			continue
+		}
+		rel := filepath.ToSlash(filepath.Join(dir, name))
+		if rel == primaryPath {
+			continue
+		}
+		if !looksLikeCompanionArtifactPath(primaryPath, rel) {
+			continue
+		}
+		if basePrefix != "" && strings.HasPrefix(strings.TrimSuffix(name, filepath.Ext(name)), basePrefix) {
+			candidates = append(candidates, rel)
+		} else {
+			candidates = append(candidates, rel)
+		}
+		if len(candidates) >= limit {
+			break
+		}
+	}
+	sort.Strings(candidates)
+	return uniqueStrings(candidates)
+}
+
+func looksLikeCompanionArtifactPath(primaryPath, candidatePath string) bool {
+	primaryPath = filepath.ToSlash(strings.TrimSpace(primaryPath))
+	candidatePath = filepath.ToSlash(strings.TrimSpace(candidatePath))
+	if primaryPath == "" || candidatePath == "" || primaryPath == candidatePath {
+		return false
+	}
+	if looksLikeDeclarativeArtifactPath(primaryPath) {
+		return looksLikeCodeLikePath(candidatePath)
+	}
+	if looksLikeCodeLikePath(primaryPath) {
+		return looksLikeDeclarativeArtifactPath(candidatePath)
+	}
+	return false
+}
+
+func looksLikeDeclarativeArtifactPath(path string) bool {
+	path = filepath.ToSlash(strings.TrimSpace(path))
+	if path == "" {
+		return false
+	}
+	base := strings.ToLower(filepath.Base(path))
+	switch base {
+	case "package.json", "go.mod", "cargo.toml", "pyproject.toml", "dockerfile", "docker-compose.yml", "docker-compose.yaml", "compose.yml", "compose.yaml", "makefile", "taskfile.yml", "taskfile.yaml", "skill.yaml", "skill.yml":
+		return true
+	}
+	switch strings.ToLower(filepath.Ext(base)) {
+	case ".yaml", ".yml", ".toml", ".json", ".ini", ".cfg", ".conf":
+		return true
+	default:
+		return false
+	}
+}
+
+func bundleKeyForPath(path string) string {
+	path = filepath.ToSlash(strings.TrimSpace(path))
+	if path == "" {
+		return ""
+	}
+	dir := filepath.ToSlash(filepath.Dir(path))
+	if dir == "." || dir == "/" {
+		return path
+	}
+	return dir
+}
+
+func appendIfMissing(items []string, value string) []string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return items
+	}
+	for _, item := range items {
+		if item == value {
+			return items
+		}
+	}
+	return append(items, value)
+}
+
+func uniqueStrings(items []string) []string {
+	if len(items) == 0 {
+		return nil
+	}
+	seen := map[string]struct{}{}
+	out := make([]string, 0, len(items))
+	for _, item := range items {
+		item = strings.TrimSpace(item)
+		if item == "" {
+			continue
+		}
+		if _, ok := seen[item]; ok {
+			continue
+		}
+		seen[item] = struct{}{}
+		out = append(out, item)
+	}
+	return out
+}
+
+func minInt(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
+func maxInt(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
 }
 
 func symbolGroupsToFileEntries(groups []retrievalv2.Group) []retrieval.FileEntry {

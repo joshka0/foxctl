@@ -19,6 +19,11 @@ Detailed documentation for agentctl subsystems. For quick reference, see:
 | [Agent Policy & Prompts](agent-policy-and-prompts.md) | Capability profiles and role instruction model |
 | [Context & Observability](context-and-observability.md) | Context updater and observability primitives |
 | [Core Package Coverage](core-package-coverage.md) | Coverage matrix for core `internal/*` concepts |
+| [Refactor Scout](refactor-scout.md) | Local refactor scout/advisor workflow, seam vocabulary, language support, and ACA fit |
+| [Code Search Evals](code-search-evals.md) | Stable code-search eval suites, policies, and wrapper commands |
+| [Retrieval Evals](retrieval-evals.md) | Stable ACA retrieval suites, wrapper commands, and expected metric bands |
+| [Retrieval Stack Snapshot](retrieval-stack-snapshot.md) | Compact current benchmark view across route-aware code search and ACA retrieval |
+| [Tmux Collaboration](tmux-collaboration.md) | Live tmux coordination surface, bridge workflow, and ACA promotion path |
 | [Skills](skills.md) | Skill system, runners, manifest format |
 | [Hooks](hooks.md) | Claude Code hook system, events, configuration |
 | [Memory](memory.md) | Memory types, storage, vector search |

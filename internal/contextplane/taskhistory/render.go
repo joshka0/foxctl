@@ -27,6 +27,38 @@ func RenderHookContextWithArtifact(pack Pack, artifactDigest string) string {
 		b.WriteString("\n\n**Recent session:** ")
 		b.WriteString(strings.TrimSpace(pack.Sessions[0].Summary))
 	}
+	if pack.Transcript != nil && strings.TrimSpace(pack.Transcript.AgentBrief) != "" {
+		b.WriteString("\n\n**Transcript history:**\n")
+		b.WriteString(strings.TrimSpace(pack.Transcript.AgentBrief))
+	}
+	if pack.Transcript != nil && len(pack.Transcript.ContinueWith) > 0 {
+		b.WriteString("\n\n**Transcript next work:** ")
+		b.WriteString(strings.Join(shortenStrings(pack.Transcript.ContinueWith, 3), " | "))
+	}
+	if pack.Transcript != nil && len(pack.Transcript.WatchOutFor) > 0 {
+		b.WriteString("\n\n**Transcript watch-outs:** ")
+		b.WriteString(strings.Join(shortenStrings(pack.Transcript.WatchOutFor, 3), " | "))
+	}
+	if pack.Transcript != nil && len(pack.Transcript.Regressions) > 0 {
+		b.WriteString("\n\n**Transcript regressions:** ")
+		b.WriteString(strings.Join(shortenStrings(pack.Transcript.Regressions, 3), " | "))
+	}
+	if pack.Transcript != nil && len(pack.Transcript.RecurringMistakes) > 0 {
+		b.WriteString("\n\n**Recurring mistakes:** ")
+		b.WriteString(strings.Join(shortenStrings(pack.Transcript.RecurringMistakes, 3), " | "))
+	}
+	if pack.Transcript != nil && len(pack.Transcript.RecentLearnings) > 0 {
+		b.WriteString("\n\n**Transcript learnings:** ")
+		b.WriteString(strings.Join(shortenStrings(pack.Transcript.RecentLearnings, 3), " | "))
+	}
+	if pack.Transcript != nil && len(pack.Transcript.RecentSurprises) > 0 {
+		b.WriteString("\n\n**Transcript surprises:** ")
+		b.WriteString(strings.Join(shortenStrings(pack.Transcript.RecentSurprises, 3), " | "))
+	}
+	if pack.Transcript != nil && len(pack.Transcript.RetrievedHighlights) > 0 {
+		b.WriteString("\n\n**Transcript highlights:** ")
+		b.WriteString(strings.Join(shortenStrings(pack.Transcript.RetrievedHighlights, 3), " | "))
+	}
 	if len(pack.FilesTouched) > 0 {
 		b.WriteString("\n\n**Files:** ")
 		b.WriteString(strings.Join(shortenStrings(pack.FilesTouched, 4), ", "))
@@ -81,6 +113,47 @@ func RenderJidoStateWithArtifact(pack Pack, artifactDigest string) map[string]an
 	if len(pack.Sessions) > 0 {
 		state["recent_session_summaries"] = collectSessionSummaries(pack.Sessions, 2)
 	}
+	if pack.Transcript != nil {
+		if strings.TrimSpace(pack.Transcript.ObjectiveLabel) != "" {
+			state["transcript_history_objective_label"] = strings.TrimSpace(pack.Transcript.ObjectiveLabel)
+		}
+		if strings.TrimSpace(pack.Transcript.Overview) != "" {
+			state["transcript_history_overview"] = strings.TrimSpace(pack.Transcript.Overview)
+		}
+		if strings.TrimSpace(pack.Transcript.AgentBrief) != "" {
+			state["transcript_history_agent_brief"] = strings.TrimSpace(pack.Transcript.AgentBrief)
+		}
+		if len(pack.Transcript.ContinueWith) > 0 {
+			state["transcript_history_continue_with"] = append([]string(nil), shortenStrings(pack.Transcript.ContinueWith, 3)...)
+		}
+		if len(pack.Transcript.WatchOutFor) > 0 {
+			state["transcript_history_watch_out_for"] = append([]string(nil), shortenStrings(pack.Transcript.WatchOutFor, 3)...)
+		}
+		if len(pack.Transcript.Regressions) > 0 {
+			state["transcript_history_regressions"] = append([]string(nil), shortenStrings(pack.Transcript.Regressions, 3)...)
+		}
+		if len(pack.Transcript.RecurringMistakes) > 0 {
+			state["transcript_history_recurring_mistakes"] = append([]string(nil), shortenStrings(pack.Transcript.RecurringMistakes, 3)...)
+		}
+		if len(pack.Transcript.RecentLearnings) > 0 {
+			state["transcript_history_recent_learnings"] = append([]string(nil), shortenStrings(pack.Transcript.RecentLearnings, 3)...)
+		}
+		if len(pack.Transcript.RecentSurprises) > 0 {
+			state["transcript_history_recent_surprises"] = append([]string(nil), shortenStrings(pack.Transcript.RecentSurprises, 3)...)
+		}
+		if strings.TrimSpace(pack.Transcript.RetrievedBrief) != "" {
+			state["transcript_history_retrieved_brief"] = strings.TrimSpace(pack.Transcript.RetrievedBrief)
+		}
+		if len(pack.Transcript.RetrievedHighlights) > 0 {
+			state["transcript_history_retrieved_highlights"] = append([]string(nil), shortenStrings(pack.Transcript.RetrievedHighlights, 3)...)
+		}
+		if len(pack.Transcript.EvidenceRefs) > 0 {
+			state["transcript_history_evidence_refs"] = append([]string(nil), shortenStrings(pack.Transcript.EvidenceRefs, 4)...)
+		}
+		if len(pack.Transcript.SourceNames) > 0 {
+			state["transcript_history_sources"] = append([]string(nil), shortenStrings(pack.Transcript.SourceNames, 3)...)
+		}
+	}
 	if strings.TrimSpace(artifactDigest) != "" {
 		state["artifact"] = strings.TrimSpace(artifactDigest)
 	}
@@ -111,4 +184,117 @@ func minInt(a, b int) int {
 
 func RenderHookArtifactHint(pack Pack) string {
 	return fmt.Sprintf("Task continuity pack ready: %s", strings.TrimSpace(pack.Summary))
+}
+
+func RenderTranscriptFamilyOverview(overview TranscriptFamilyOverview, artifactDigest string) string {
+	var b strings.Builder
+	b.WriteString("## Transcript Family Overview\n")
+	if strings.TrimSpace(overview.SummaryMode) != "" {
+		b.WriteString("\n**Summary mode:** ")
+		b.WriteString(strings.TrimSpace(overview.SummaryMode))
+		if strings.TrimSpace(overview.SummaryModel) != "" {
+			b.WriteString(" (")
+			b.WriteString(strings.TrimSpace(overview.SummaryModel))
+			b.WriteString(")")
+		}
+	}
+	if strings.TrimSpace(overview.Overview) != "" {
+		b.WriteString("\n**Overview:** ")
+		b.WriteString(strings.TrimSpace(overview.Overview))
+	}
+	if strings.TrimSpace(overview.DateFrom) != "" || strings.TrimSpace(overview.DateTo) != "" {
+		b.WriteString("\n**Date range:** ")
+		switch {
+		case strings.TrimSpace(overview.DateFrom) != "" && strings.TrimSpace(overview.DateTo) != "":
+			b.WriteString(strings.TrimSpace(overview.DateFrom))
+			b.WriteString(" to ")
+			b.WriteString(strings.TrimSpace(overview.DateTo))
+		case strings.TrimSpace(overview.DateFrom) != "":
+			b.WriteString("from ")
+			b.WriteString(strings.TrimSpace(overview.DateFrom))
+		default:
+			b.WriteString("through ")
+			b.WriteString(strings.TrimSpace(overview.DateTo))
+		}
+	}
+	if len(overview.CurrentFocus) > 0 {
+		b.WriteString("\n\n**Current focus:** ")
+		b.WriteString(strings.Join(shortenStrings(overview.CurrentFocus, 4), " | "))
+	}
+	if len(overview.RecentChanges) > 0 {
+		b.WriteString("\n\n**Recent changes:** ")
+		b.WriteString(strings.Join(shortenStrings(overview.RecentChanges, 4), " | "))
+	}
+	if len(overview.TopLearnings) > 0 {
+		b.WriteString("\n\n**Top learnings:** ")
+		b.WriteString(strings.Join(shortenStrings(overview.TopLearnings, 4), " | "))
+	}
+	if len(overview.RecurringLearnings) > 0 {
+		b.WriteString("\n\n**Recurring learnings:** ")
+		b.WriteString(strings.Join(shortenStrings(overview.RecurringLearnings, 4), " | "))
+	}
+	if len(overview.TopRisks) > 0 {
+		b.WriteString("\n\n**Top risks:** ")
+		b.WriteString(strings.Join(shortenStrings(overview.TopRisks, 4), " | "))
+	}
+	if len(overview.TopSurprises) > 0 {
+		b.WriteString("\n\n**Top surprises:** ")
+		b.WriteString(strings.Join(shortenStrings(overview.TopSurprises, 4), " | "))
+	}
+	if len(overview.NextWork) > 0 {
+		b.WriteString("\n\n**Next work:** ")
+		b.WriteString(strings.Join(shortenStrings(overview.NextWork, 4), " | "))
+	}
+	if len(overview.RecurringMistakes) > 0 {
+		b.WriteString("\n\n**Recurring mistakes:** ")
+		b.WriteString(strings.Join(shortenStrings(overview.RecurringMistakes, 4), " | "))
+	}
+	if len(overview.SupportMetadata) > 0 {
+		b.WriteString("\n\n**Support metadata:** ")
+		b.WriteString(strings.Join(shortenStrings(renderTranscriptFamilySupportMetadata(overview.SupportMetadata), 4), " | "))
+	}
+	if len(overview.SourceOwners) > 0 {
+		b.WriteString("\n\n**Source owners:** ")
+		b.WriteString(strings.Join(shortenStrings(overview.SourceOwners, 6), ", "))
+	}
+	if strings.TrimSpace(artifactDigest) != "" {
+		b.WriteString("\n\n**Artifact:** ")
+		b.WriteString(strings.TrimSpace(artifactDigest))
+	}
+	return strings.TrimSpace(b.String())
+}
+
+func RenderTranscriptFamilyOverviewHint(overview TranscriptFamilyOverview) string {
+	if strings.TrimSpace(overview.Overview) != "" {
+		return fmt.Sprintf("Transcript family overview ready: %s", strings.TrimSpace(overview.Overview))
+	}
+	if len(overview.CurrentFocus) > 0 {
+		return fmt.Sprintf("Transcript family overview ready: focus=%s", strings.Join(shortenStrings(overview.CurrentFocus, 2), " | "))
+	}
+	return "Transcript family overview ready"
+}
+
+func renderTranscriptFamilySupportMetadata(items []TranscriptFamilySupportMetadata) []string {
+	if len(items) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(items))
+	for _, item := range items {
+		if strings.TrimSpace(item.Text) == "" || strings.TrimSpace(item.Category) == "" {
+			continue
+		}
+		text := item.Category + ": " + item.Text
+		details := make([]string, 0, 2)
+		if item.OwnerCount > 0 {
+			details = append(details, fmt.Sprintf("owners=%d", item.OwnerCount))
+		}
+		if item.LatestAgeDays >= 0 && strings.TrimSpace(item.LatestUpdatedAt) != "" {
+			details = append(details, fmt.Sprintf("age=%dd", item.LatestAgeDays))
+		}
+		if len(details) > 0 {
+			text += " [" + strings.Join(details, ", ") + "]"
+		}
+		out = append(out, text)
+	}
+	return out
 }

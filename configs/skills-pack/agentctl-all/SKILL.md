@@ -61,6 +61,19 @@ List: `agentctl skills list`
 | `mailbox/manage` | Actor messaging (overseer inbox) |
 | `graph/manage`, `graph/pagerank` | Task dependency graph |
 
+### Context Architecture & History
+For the bundled ACA/context-history workflow pack, see:
+
+- `configs/skills-pack/agentctl-context/SKILL.md`
+
+That pack covers:
+
+- `agentctl context task-history-summary`
+- `agentctl context family-history-summary`
+- transcript-history persistence via `sessions derive-memory --memory-lane insight --persist-history`
+- ACA / Obsidian bridge and graph flows
+- `agentctl refactor scout` / `agentctl refactor advisor` when refactor discovery is part of the same context-workstream
+
 ### Codemaps & Indexing
 | Skill | Purpose |
 |-------|---------|

@@ -19,9 +19,10 @@ func TestErrorsCommandUsesObservabilityEvents(t *testing.T) {
 	obsDir := t.TempDir()
 	workspaceRoot := t.TempDir()
 	workspaceID := workspace.ID(workspaceRoot)
+	now := time.Now().UTC()
 	observabilityEvents := []observability.WideEvent{
 		{
-			Ts:           time.Date(2026, 3, 20, 9, 0, 0, 0, time.UTC),
+			Ts:           now.Add(-2 * time.Hour),
 			TraceID:      "trace-a",
 			SpanID:       "span-a",
 			Service:      "agentctl",
@@ -33,7 +34,7 @@ func TestErrorsCommandUsesObservabilityEvents(t *testing.T) {
 			ErrorMessage: "agent blew up",
 		},
 		{
-			Ts:          time.Date(2026, 3, 20, 10, 0, 0, 0, time.UTC),
+			Ts:          now.Add(-90 * time.Minute),
 			TraceID:     "trace-b",
 			SpanID:      "span-b",
 			Service:     "agentctl",
@@ -43,7 +44,7 @@ func TestErrorsCommandUsesObservabilityEvents(t *testing.T) {
 			Status:      observability.StatusOK,
 		},
 		{
-			Ts:           time.Date(2026, 3, 20, 11, 0, 0, 0, time.UTC),
+			Ts:           now.Add(-30 * time.Minute),
 			TraceID:      "trace-c",
 			SpanID:       "span-c",
 			Service:      "agentctl",

@@ -28,6 +28,7 @@ type RepoGraphBuildOptions struct {
 type RepoGraphBuildResult struct {
 	RootNotePath  string   `json:"root_note_path"`
 	PackageNotes  []string `json:"package_notes"`
+	ConceptNotes  []string `json:"concept_notes,omitempty"`
 	PackagesBuilt int      `json:"packages_built"`
 	Folder        string   `json:"folder"`
 }
@@ -60,12 +61,21 @@ func DefaultRepoGraphCanonicalFolder(project string) string {
 type packageDraft struct {
 	node          repoindex.Node
 	files         []repoindex.Node
+	concepts      []repoindex.Node
 	symbols       []repoindex.Node
+	anchorPaths   []string
 	relatedTitles []string
 	relatedIDs    []string
 	title         string
 	path          string
 	score         int
+}
+
+type conceptDraft struct {
+	packageTitle string
+	concept      repoindex.Node
+	path         string
+	title        string
 }
 
 // BuildRepoGraphDrafts creates an inbox-first Obsidian graph layer draft bundle from the repo index.
@@ -118,6 +128,7 @@ func BuildRepoGraphDrafts(ctx context.Context, writer *Writer, repo *repoindex.S
 	rootWiki := rootTitle
 
 	var drafts []packageDraft
+	var conceptDrafts []conceptDraft
 	packageTitleByID := map[string]string{}
 	packagePaths := []string{}
 
@@ -125,7 +136,11 @@ func BuildRepoGraphDrafts(ctx context.Context, writer *Writer, repo *repoindex.S
 		if !packageAllowed(pkg, opts.IncludePackagePrefixes, opts.ExcludePackagePrefixes) {
 			continue
 		}
-		fileNodes, relatedIDs, err := collectPackageGraph(ctx, repo, pkg, opts.MaxFilesPerPackage)
+		fileBudget := opts.MaxFilesPerPackage
+		if strings.HasPrefix(strings.ToLower(strings.TrimSpace(pkg.Pkg)), "k8s:") && fileBudget < 64 {
+			fileBudget = 64
+		}
+		fileNodes, conceptNodes, relatedIDs, err := collectPackageGraph(ctx, repo, pkg, fileBudget)
 		if err != nil {
 			return RepoGraphBuildResult{}, fmt.Errorf("obsidian graph: collect package graph %s: %w", pkg.ID, err)
 		}
@@ -145,11 +160,12 @@ func BuildRepoGraphDrafts(ctx context.Context, writer *Writer, repo *repoindex.S
 		drafts = append(drafts, packageDraft{
 			node:       pkg,
 			files:      fileNodes,
+			concepts:   conceptNodes,
 			symbols:    symbolNodes,
 			relatedIDs: uniqueStrings(relatedIDs),
 			title:      title,
 			path:       path,
-			score:      packageGraphScore(fileNodes, symbolNodes, relatedIDs),
+			score:      packageGraphScore(fileNodes, conceptNodes, symbolNodes, relatedIDs),
 		})
 		packageTitleByID[pkg.ID] = title
 	}
@@ -171,8 +187,53 @@ func BuildRepoGraphDrafts(ctx context.Context, writer *Writer, repo *repoindex.S
 	for i := range drafts {
 		drafts[i].title = friendlyPackageTitle(drafts[i].node, trimPrefix, repoTrimPrefix)
 		drafts[i].path = filepath.ToSlash(filepath.Join(folder, "packages", safeSlug(drafts[i].title)+".md"))
+		drafts[i].anchorPaths = buildPackageDraftAnchorPaths(drafts[i])
 		packageTitleByID[drafts[i].node.ID] = drafts[i].title
 	}
+	for _, draft := range drafts {
+		for _, concept := range limitConceptDrafts(draft.concepts, 6) {
+			title := conceptDraftTitle(draft.title, concept)
+			if title == "" {
+				title = strings.TrimSpace(concept.File)
+			}
+			if title == "" {
+				continue
+			}
+			conceptDrafts = append(conceptDrafts, conceptDraft{
+				packageTitle: draft.title,
+				concept:      concept,
+				title:        title,
+				path:         filepath.ToSlash(filepath.Join(folder, "concepts", safeSlug(title)+".md")),
+			})
+		}
+	}
+	conceptNodes, err := repo.ListNodesByKind(ctx, repoindex.NodeConcept, opts.MaxPackages*200)
+	if err != nil {
+		return RepoGraphBuildResult{}, fmt.Errorf("obsidian graph: list concepts: %w", err)
+	}
+	for _, concept := range conceptNodes {
+		if !infraConceptAllowed(concept) {
+			continue
+		}
+		if !packageAllowed(concept, opts.IncludePackagePrefixes, opts.ExcludePackagePrefixes) {
+			continue
+		}
+		pkgTitle := packageTitleByID[repoindex.PackageID(repo.RepoKey(), concept.Pkg)]
+		if strings.TrimSpace(pkgTitle) == "" {
+			pkgTitle = friendlyPackageTitle(concept, trimPrefix, repoTrimPrefix)
+		}
+		title := conceptDraftTitle(pkgTitle, concept)
+		if title == "" {
+			continue
+		}
+		conceptDrafts = append(conceptDrafts, conceptDraft{
+			packageTitle: pkgTitle,
+			concept:      concept,
+			title:        title,
+			path:         filepath.ToSlash(filepath.Join(folder, "concepts", safeSlug(title)+".md")),
+		})
+	}
+	conceptDrafts = dedupeConceptDrafts(conceptDrafts)
 
 	for i := range drafts {
 		drafts[i].relatedTitles = resolveImportedPackageTitles(drafts[i].relatedIDs, packageTitleByID)
@@ -181,9 +242,15 @@ func BuildRepoGraphDrafts(ctx context.Context, writer *Writer, repo *repoindex.S
 			return RepoGraphBuildResult{}, fmt.Errorf("obsidian graph: write package note %s: %w", drafts[i].path, err)
 		}
 	}
+	for _, draft := range conceptDrafts {
+		body := renderConceptGraphNote(rootWiki, draft)
+		if err := writer.CreateNote(ctx, draft.path, body, true); err != nil {
+			return RepoGraphBuildResult{}, fmt.Errorf("obsidian graph: write concept note %s: %w", draft.path, err)
+		}
+	}
 
 	rootPath := filepath.ToSlash(filepath.Join(folder, "index.md"))
-	rootBody := renderRepoGraphRoot(rootTitle, drafts, opts.WorkspaceRoot)
+	rootBody := renderRepoGraphRoot(rootTitle, drafts, conceptDrafts, opts.WorkspaceRoot)
 	if err := writer.CreateNote(ctx, rootPath, rootBody, true); err != nil {
 		return RepoGraphBuildResult{}, fmt.Errorf("obsidian graph: write root note: %w", err)
 	}
@@ -195,6 +262,9 @@ func BuildRepoGraphDrafts(ctx context.Context, writer *Writer, repo *repoindex.S
 	}
 	for _, draft := range drafts {
 		result.PackageNotes = append(result.PackageNotes, draft.path)
+	}
+	for _, draft := range conceptDrafts {
+		result.ConceptNotes = append(result.ConceptNotes, draft.path)
 	}
 	return result, nil
 }
@@ -246,17 +316,17 @@ func PromoteRepoGraphDrafts(ctx context.Context, writer *Writer, sourceFolder, t
 	return result, nil
 }
 
-func collectPackageGraph(ctx context.Context, repo *repoindex.Store, pkg repoindex.Node, maxFiles int) ([]repoindex.Node, []string, error) {
+func collectPackageGraph(ctx context.Context, repo *repoindex.Store, pkg repoindex.Node, maxFiles int) ([]repoindex.Node, []repoindex.Node, []string, error) {
 	edges, err := repo.GetOutgoingEdges(ctx, pkg.ID, []repoindex.EdgeType{repoindex.EdgeContains, repoindex.EdgeImports}, 200)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
-	fileIDs := []string{}
+	containedIDs := []string{}
 	importedPkgs := []string{}
 	for _, edge := range edges {
 		switch edge.Type {
 		case repoindex.EdgeContains:
-			fileIDs = append(fileIDs, edge.Dst)
+			containedIDs = append(containedIDs, edge.Dst)
 		case repoindex.EdgeImports:
 			importedPkgs = append(importedPkgs, edge.Dst)
 		}
@@ -267,23 +337,67 @@ func collectPackageGraph(ctx context.Context, repo *repoindex.Store, pkg repoind
 			importedPkgs = append(importedPkgs, edge.Src)
 		}
 	}
-	nodes, err := repo.GetNodes(ctx, uniqueStrings(fileIDs))
+	nodes, err := repo.GetNodes(ctx, uniqueStrings(containedIDs))
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
-	files := make([]repoindex.Node, 0, len(nodes))
+	allFiles := make([]repoindex.Node, 0, len(nodes))
+	concepts := make([]repoindex.Node, 0, len(nodes))
 	for _, node := range nodes {
-		if node.Kind == repoindex.NodeFile {
-			files = append(files, node)
+		switch node.Kind {
+		case repoindex.NodeFile:
+			allFiles = append(allFiles, node)
+		case repoindex.NodeConcept:
+			concepts = append(concepts, node)
 		}
 	}
-	sort.SliceStable(files, func(i, j int) bool {
-		return files[i].File < files[j].File
+	sort.SliceStable(allFiles, func(i, j int) bool {
+		return allFiles[i].File < allFiles[j].File
 	})
+	sort.SliceStable(concepts, func(i, j int) bool {
+		if concepts[i].Name != concepts[j].Name {
+			return concepts[i].Name < concepts[j].Name
+		}
+		return concepts[i].File < concepts[j].File
+	})
+	if len(allFiles) > 0 {
+		fileConceptIDs := []string{}
+		for _, file := range allFiles {
+			outgoing, err := repo.GetOutgoingEdges(ctx, file.ID, []repoindex.EdgeType{repoindex.EdgeContains, repoindex.EdgeTouchesResource}, 200)
+			if err != nil {
+				return nil, nil, nil, err
+			}
+			for _, edge := range outgoing {
+				fileConceptIDs = append(fileConceptIDs, edge.Dst)
+			}
+		}
+		if len(fileConceptIDs) > 0 {
+			nodes, err := repo.GetNodes(ctx, uniqueStrings(fileConceptIDs))
+			if err != nil {
+				return nil, nil, nil, err
+			}
+			for _, node := range nodes {
+				if node.Kind == repoindex.NodeConcept {
+					concepts = append(concepts, node)
+				}
+			}
+			concepts = dedupeRepoNodes(concepts)
+			sort.SliceStable(concepts, func(i, j int) bool {
+				if concepts[i].Name != concepts[j].Name {
+					return concepts[i].Name < concepts[j].Name
+				}
+				return concepts[i].File < concepts[j].File
+			})
+		}
+	}
+	files := allFiles
 	if len(files) > maxFiles {
 		files = files[:maxFiles]
 	}
-	return files, importedPkgs, nil
+	if len(concepts) > maxFiles {
+		concepts = concepts[:maxFiles]
+	}
+	return files, concepts, importedPkgs, nil
 }
 
 func collectPackageSymbols(ctx context.Context, repo *repoindex.Store, files []repoindex.Node, maxSymbols int) ([]repoindex.Node, error) {
@@ -366,7 +480,7 @@ func resolveImportedPackageTitles(importedIDs []string, byID map[string]string) 
 	return uniqueStrings(out)
 }
 
-func renderRepoGraphRoot(title string, drafts []packageDraft, workspaceRoot string) string {
+func renderRepoGraphRoot(title string, drafts []packageDraft, conceptDrafts []conceptDraft, workspaceRoot string) string {
 	var b strings.Builder
 	b.WriteString("---\n")
 	b.WriteString("title: " + title + "\n")
@@ -383,6 +497,12 @@ func renderRepoGraphRoot(title string, drafts []packageDraft, workspaceRoot stri
 	b.WriteString("## Packages\n\n")
 	for _, draft := range drafts {
 		b.WriteString("- [[" + draft.title + "]]\n")
+	}
+	if len(conceptDrafts) > 0 {
+		b.WriteString("\n## Concepts\n\n")
+		for _, draft := range conceptDrafts {
+			b.WriteString("- [[" + draft.title + "]]\n")
+		}
 	}
 	b.WriteString("\n## Notes\n\n")
 	b.WriteString("- Review package notes before merging into canonical repo maps.\n")
@@ -403,12 +523,47 @@ func renderPackageGraphNote(rootWiki string, draft packageDraft) string {
 			b.WriteString("  - " + filepath.ToSlash(file.File) + "\n")
 		}
 	}
-	if len(draft.symbols) > 0 {
-		b.WriteString("symbols:\n")
-		for _, symbol := range draft.symbols {
-			if strings.TrimSpace(symbol.Name) != "" {
-				b.WriteString("  - " + symbol.Name + "\n")
+	if len(draft.anchorPaths) > 0 {
+		b.WriteString("primary_anchor_path: " + filepath.ToSlash(draft.anchorPaths[0]) + "\n")
+		b.WriteString("impl_anchor_paths:\n")
+		b.WriteString("  - " + filepath.ToSlash(draft.anchorPaths[0]) + "\n")
+	}
+	if len(draft.anchorPaths) > 0 {
+		b.WriteString("anchor_paths:\n")
+		for _, pathValue := range draft.anchorPaths {
+			b.WriteString("  - " + filepath.ToSlash(pathValue) + "\n")
+		}
+		if len(draft.anchorPaths) > 1 {
+			b.WriteString("support_anchor_paths:\n")
+			for _, pathValue := range draft.anchorPaths[1:] {
+				b.WriteString("  - " + filepath.ToSlash(pathValue) + "\n")
 			}
+		}
+	}
+	if len(draft.symbols) > 0 || len(draft.concepts) > 0 {
+		b.WriteString("symbols:\n")
+		seen := map[string]struct{}{}
+		for _, symbol := range draft.symbols {
+			name := strings.TrimSpace(symbol.Name)
+			if name == "" {
+				continue
+			}
+			if _, ok := seen[name]; ok {
+				continue
+			}
+			seen[name] = struct{}{}
+			b.WriteString("  - " + name + "\n")
+		}
+		for _, concept := range draft.concepts {
+			name := strings.TrimSpace(concept.Name)
+			if name == "" {
+				continue
+			}
+			if _, ok := seen[name]; ok {
+				continue
+			}
+			seen[name] = struct{}{}
+			b.WriteString("  - " + name + "\n")
 		}
 	}
 	b.WriteString(fmt.Sprintf("updated: %s\n", time.Now().UTC().Format("2006-01-02")))
@@ -433,6 +588,19 @@ func renderPackageGraphNote(rootWiki string, draft packageDraft) string {
 			b.WriteString("- " + label + "\n")
 		}
 	}
+	if len(draft.concepts) > 0 {
+		b.WriteString("\n## Concepts\n\n")
+		for _, concept := range draft.concepts {
+			label := strings.TrimSpace(concept.Name)
+			if label == "" {
+				label = strings.TrimSpace(concept.File)
+			}
+			if concept.File != "" {
+				label += " (`" + concept.File + "`)"
+			}
+			b.WriteString("- " + label + "\n")
+		}
+	}
 	if len(draft.relatedTitles) > 0 {
 		b.WriteString("\n## Related Packages\n\n")
 		for _, title := range draft.relatedTitles {
@@ -440,6 +608,164 @@ func renderPackageGraphNote(rootWiki string, draft packageDraft) string {
 		}
 	}
 	return b.String()
+}
+
+func renderConceptGraphNote(rootWiki string, draft conceptDraft) string {
+	var b strings.Builder
+	b.WriteString("---\n")
+	b.WriteString("title: " + draft.title + "\n")
+	b.WriteString("type: investigation\n")
+	b.WriteString("status: draft\n")
+	b.WriteString("trust: reviewed\n")
+	if strings.TrimSpace(draft.concept.File) != "" {
+		b.WriteString("paths:\n")
+		b.WriteString("  - " + filepath.ToSlash(draft.concept.File) + "\n")
+		b.WriteString("primary_anchor_path: " + filepath.ToSlash(draft.concept.File) + "\n")
+		b.WriteString("resource_anchor_paths:\n")
+		b.WriteString("  - " + filepath.ToSlash(draft.concept.File) + "\n")
+		b.WriteString("anchor_paths:\n")
+		b.WriteString("  - " + filepath.ToSlash(draft.concept.File) + "\n")
+	}
+	b.WriteString("symbols:\n")
+	b.WriteString("  - " + draft.title + "\n")
+	b.WriteString(fmt.Sprintf("updated: %s\n", time.Now().UTC().Format("2006-01-02")))
+	b.WriteString("---\n\n")
+	b.WriteString("# " + draft.title + "\n\n")
+	b.WriteString("- Back to [[" + rootWiki + "]]\n")
+	if strings.TrimSpace(draft.packageTitle) != "" {
+		b.WriteString("- Package: [[" + draft.packageTitle + "]]\n")
+	}
+	b.WriteString("\n## Resource\n\n")
+	if strings.TrimSpace(draft.concept.File) != "" {
+		b.WriteString("- File: `" + filepath.ToSlash(draft.concept.File) + "`\n")
+	}
+	if strings.TrimSpace(draft.concept.Summary) != "" {
+		b.WriteString("- Summary: " + draft.concept.Summary + "\n")
+	}
+	return b.String()
+}
+
+func buildPackageDraftAnchorPaths(draft packageDraft) []string {
+	if len(draft.files) == 0 {
+		return nil
+	}
+	titleTerms := packageDraftTitleTerms(draft.title)
+	type scoredFile struct {
+		path  string
+		score float64
+	}
+	scored := make([]scoredFile, 0, len(draft.files))
+	for _, file := range draft.files {
+		pathValue := strings.TrimSpace(filepath.ToSlash(file.File))
+		if pathValue == "" {
+			continue
+		}
+		base := strings.ToLower(strings.TrimSuffix(filepath.Base(pathValue), filepath.Ext(pathValue)))
+		score := packageDraftTitleAffinity(base, titleTerms)*2.0 + packageDraftRoleScore(base)
+		score += packageDraftSymbolFileScore(pathValue, draft.symbols)
+		score -= float64(strings.Count(pathValue, "/")) * 0.03
+		scored = append(scored, scoredFile{path: pathValue, score: score})
+	}
+	sort.SliceStable(scored, func(i, j int) bool {
+		if scored[i].score != scored[j].score {
+			return scored[i].score > scored[j].score
+		}
+		return scored[i].path < scored[j].path
+	})
+	if len(scored) > 2 {
+		scored = scored[:2]
+	}
+	out := make([]string, 0, len(scored))
+	for _, item := range scored {
+		out = append(out, item.path)
+	}
+	return uniqueStrings(out)
+}
+
+func packageDraftTitleTerms(title string) []string {
+	seen := map[string]struct{}{}
+	out := make([]string, 0, 6)
+	for _, field := range strings.FieldsFunc(strings.ToLower(strings.TrimSpace(title)), func(r rune) bool {
+		return !((r >= 'a' && r <= 'z') || (r >= '0' && r <= '9'))
+	}) {
+		field = strings.TrimSpace(field)
+		if len(field) < 3 {
+			continue
+		}
+		if _, ok := seen[field]; ok {
+			continue
+		}
+		seen[field] = struct{}{}
+		out = append(out, field)
+	}
+	return out
+}
+
+func packageDraftTitleAffinity(base string, titleTerms []string) float64 {
+	if base == "" || len(titleTerms) == 0 {
+		return 0
+	}
+	best := 0.0
+	for _, term := range titleTerms {
+		switch {
+		case base == term:
+			if best < 1.0 {
+				best = 1.0
+			}
+		case strings.Contains(base, term), strings.Contains(term, base):
+			if best < 0.55 {
+				best = 0.55
+			}
+		}
+	}
+	return best
+}
+
+func packageDraftRoleScore(base string) float64 {
+	switch {
+	case strings.HasSuffix(base, "_exec"):
+		return 0.45
+	case base == "ets":
+		return 0.4
+	}
+	switch base {
+	case "main", "config", "store", "index", "indexer", "runtime", "router", "provider", "plugin", "registry":
+		return 0.35
+	default:
+		return 0
+	}
+}
+
+func packageDraftSymbolFileScore(pathValue string, symbols []repoindex.Node) float64 {
+	base := strings.ToLower(strings.TrimSuffix(filepath.Base(pathValue), filepath.Ext(pathValue)))
+	if base == "" || len(symbols) == 0 {
+		return 0
+	}
+	score := 0.0
+	for _, symbol := range symbols {
+		if strings.TrimSpace(filepath.ToSlash(symbol.File)) != pathValue {
+			continue
+		}
+		name := strings.TrimSpace(symbol.Name)
+		if name == "" {
+			continue
+		}
+		parts := strings.FieldsFunc(strings.ToLower(name), func(r rune) bool {
+			return !((r >= 'a' && r <= 'z') || (r >= '0' && r <= '9'))
+		})
+		if len(parts) > 0 {
+			last := parts[len(parts)-1]
+			switch {
+			case last == base:
+				score += 0.8
+			case strings.Contains(last, base), strings.Contains(base, last):
+				score += 0.4
+			default:
+				score += 0.1
+			}
+		}
+	}
+	return score
 }
 
 func friendlyPackageTitle(node repoindex.Node, trimPrefix, repoTrimPrefix string) string {
@@ -571,6 +897,60 @@ func repoScopedTrimPrefix(items []string, workspaceRoot string) string {
 	return best
 }
 
-func packageGraphScore(files, symbols []repoindex.Node, relatedIDs []string) int {
-	return len(files)*5 + len(symbols)*2 + len(uniqueStrings(relatedIDs))*3
+func packageGraphScore(files, concepts, symbols []repoindex.Node, relatedIDs []string) int {
+	return len(files)*5 + len(concepts)*4 + len(symbols)*2 + len(uniqueStrings(relatedIDs))*3
+}
+
+func limitConceptDrafts(items []repoindex.Node, maxItems int) []repoindex.Node {
+	if maxItems <= 0 {
+		maxItems = 20
+	}
+	if len(items) <= maxItems {
+		return items
+	}
+	return items[:maxItems]
+}
+
+func dedupeConceptDrafts(items []conceptDraft) []conceptDraft {
+	seen := map[string]struct{}{}
+	out := make([]conceptDraft, 0, len(items))
+	for _, item := range items {
+		key := strings.ToLower(strings.TrimSpace(item.title)) + "::" + strings.ToLower(strings.TrimSpace(item.concept.File))
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, item)
+	}
+	return out
+}
+
+func conceptDraftTitle(packageTitle string, concept repoindex.Node) string {
+	base := strings.TrimSpace(concept.Name)
+	if base == "" {
+		return ""
+	}
+	pkg := strings.TrimSpace(packageTitle)
+	if pkg == "" {
+		return base
+	}
+	return base + " in " + pkg
+}
+
+func dedupeRepoNodes(items []repoindex.Node) []repoindex.Node {
+	seen := map[string]struct{}{}
+	out := make([]repoindex.Node, 0, len(items))
+	for _, item := range items {
+		if _, ok := seen[item.ID]; ok {
+			continue
+		}
+		seen[item.ID] = struct{}{}
+		out = append(out, item)
+	}
+	return out
+}
+
+func infraConceptAllowed(node repoindex.Node) bool {
+	pkg := strings.ToLower(strings.TrimSpace(node.Pkg))
+	return strings.HasPrefix(pkg, "k8s:") || strings.HasPrefix(pkg, "tf:") || strings.HasPrefix(pkg, "sh:")
 }

@@ -6,7 +6,10 @@ import (
 	"strings"
 )
 
-var pythonIdentPattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*`)
+var (
+	pythonIdentPattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*`)
+	pythonCallPattern  = regexp.MustCompile(`([A-Za-z_][A-Za-z0-9_]*)(?:\.([A-Za-z_][A-Za-z0-9_]*))?\s*\(`)
+)
 
 // PythonExtractor extracts symbols from Python sources using line-based heuristics.
 type PythonExtractor struct{}
@@ -22,7 +25,14 @@ func (e *PythonExtractor) SupportedLanguages() []string {
 }
 
 // Extract parses Python source and returns top-level symbols.
-func (e *PythonExtractor) Extract(_ context.Context, filePath string, content []byte) ([]Symbol, error) {
+func (e *PythonExtractor) Extract(ctx context.Context, filePath string, content []byte) ([]Symbol, error) {
+	if symbols, ok, err := extractPythonSymbolsWithTreeSitter(ctx, filePath, content); ok || err != nil {
+		return symbols, err
+	}
+	return e.extractHeuristic(filePath, content)
+}
+
+func (e *PythonExtractor) extractHeuristic(filePath string, content []byte) ([]Symbol, error) {
 	lines := strings.Split(string(content), "\n")
 	lineOffsets := computeLineOffsets(lines)
 
@@ -73,9 +83,16 @@ func (e *PythonExtractor) Extract(_ context.Context, filePath string, content []
 	return symbols, nil
 }
 
-// ExtractCalls returns nil because Python call extraction is not implemented yet.
-func (e *PythonExtractor) ExtractCalls(_ context.Context, _ Symbol, _ []byte) ([]string, error) {
-	return nil, nil
+// ExtractCalls extracts best-effort call identifiers from a symbol body.
+func (e *PythonExtractor) ExtractCalls(ctx context.Context, symbol Symbol, content []byte) ([]string, error) {
+	if calls, ok, err := extractPythonCallsWithTreeSitter(ctx, symbol, content); ok || err != nil {
+		return calls, err
+	}
+	body := extractSymbolBody(content, symbol)
+	if strings.TrimSpace(body) == "" {
+		return nil, nil
+	}
+	return extractPythonCallNames(body), nil
 }
 
 func parsePythonDeclaration(line string) (string, Kind, string, bool) {
@@ -212,4 +229,31 @@ func leadingIndent(line string) int {
 		break
 	}
 	return count
+}
+
+func extractPythonCallNames(body string) []string {
+	matches := pythonCallPattern.FindAllStringSubmatch(body, -1)
+	if len(matches) == 0 {
+		return nil
+	}
+	seen := make(map[string]bool)
+	out := make([]string, 0, len(matches))
+	for _, match := range matches {
+		name := strings.TrimSpace(match[1])
+		if strings.TrimSpace(match[2]) != "" {
+			name = strings.TrimSpace(match[2])
+		}
+		switch name {
+		case "", "def", "class", "if", "for", "while", "return", "with":
+			continue
+		}
+		if !seen[name] {
+			seen[name] = true
+			out = append(out, name)
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }

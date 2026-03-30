@@ -1821,12 +1821,19 @@ type promptComparisonRequest struct {
 }
 
 type promptEvalCase struct {
-	ID             string `json:"id,omitempty"`
-	Question       string `json:"question"`
-	Context        string `json:"context,omitempty"`
-	TargetResponse string `json:"target_response,omitempty"`
-	Category       string `json:"category,omitempty"`
-	SessionID      string `json:"session_id,omitempty"`
+	ID               string              `json:"id,omitempty"`
+	Question         string              `json:"question"`
+	Context          string              `json:"context,omitempty"`
+	TargetResponse   string              `json:"target_response,omitempty"`
+	ExpectedPaths    []string            `json:"expected_paths,omitempty"`
+	ExpectedSymbols  []string            `json:"expected_symbols,omitempty"`
+	ExpectedSnippets []promptEvalSnippet `json:"expected_snippets,omitempty"`
+	RequiredFacts    []string            `json:"required_facts,omitempty"`
+	ExcludedPaths    []string            `json:"excluded_paths,omitempty"`
+	TaskType         string              `json:"task_type,omitempty"`
+	RequireGrounding bool                `json:"requires_grounding,omitempty"`
+	Category         string              `json:"category,omitempty"`
+	SessionID        string              `json:"session_id,omitempty"`
 }
 
 type promptComparisonTargetConfig struct {

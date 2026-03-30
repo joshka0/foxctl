@@ -382,6 +382,16 @@ func (e *LLMChatEngine) Run(ctx context.Context, input EngineInput) (EngineOutpu
 		}
 
 		choice := resp.Choices[0]
+		output.Iterations = append(output.Iterations, IterationUsage{
+			Iteration:        iteration,
+			MessageCount:     len(messages),
+			PromptTokens:     resp.Usage.PromptTokens,
+			CompletionTokens: resp.Usage.CompletionTokens,
+			TotalTokens:      resp.Usage.PromptTokens + resp.Usage.CompletionTokens,
+			FinishReason:     choice.FinishReason,
+			ToolCalls:        len(choice.Message.ToolCalls),
+			ToolNames:        oaiToolCallNames(choice.Message.ToolCalls),
+		})
 
 		// If tool calls present, execute them
 		if len(choice.Message.ToolCalls) > 0 {
@@ -389,6 +399,7 @@ func (e *LLMChatEngine) Run(ctx context.Context, input EngineInput) (EngineOutpu
 			messages = append(messages, choice.Message)
 
 			// Execute each tool call
+			totalToolResultChars := 0
 			for _, tc := range choice.Message.ToolCalls {
 				toolCall := ToolCall{
 					ID:        tc.ID,
@@ -479,6 +490,7 @@ func (e *LLMChatEngine) Run(ctx context.Context, input EngineInput) (EngineOutpu
 				}
 
 				output.ToolResults = append(output.ToolResults, result)
+				totalToolResultChars += len(result.Content)
 
 				// Add tool result to messages
 				messages = append(messages, oaiMessage{
@@ -486,6 +498,11 @@ func (e *LLMChatEngine) Run(ctx context.Context, input EngineInput) (EngineOutpu
 					ToolCallID: tc.ID,
 					Content:    result.Content,
 				})
+			}
+			if len(output.Iterations) > 0 {
+				idx := len(output.Iterations) - 1
+				output.Iterations[idx].ToolResultChars = totalToolResultChars
+				output.Iterations[idx].ToolResultTokenEstimate = estimateEngineTokens(totalToolResultChars)
 			}
 
 			// Synthesis transition: strip tools N iterations before exhaustion
@@ -558,6 +575,30 @@ func (e *LLMChatEngine) Run(ctx context.Context, input EngineInput) (EngineOutpu
 
 		return output, nil
 	}
+}
+
+func oaiToolCallNames(calls []oaiToolCall) []string {
+	names := make([]string, 0, len(calls))
+	seen := map[string]struct{}{}
+	for _, call := range calls {
+		name := strings.TrimSpace(call.Function.Name)
+		if name == "" {
+			continue
+		}
+		if _, ok := seen[name]; ok {
+			continue
+		}
+		seen[name] = struct{}{}
+		names = append(names, name)
+	}
+	return names
+}
+
+func estimateEngineTokens(chars int) int {
+	if chars <= 0 {
+		return 0
+	}
+	return chars / 4
 }
 
 // buildMessages converts EngineInput messages to OpenAI format.

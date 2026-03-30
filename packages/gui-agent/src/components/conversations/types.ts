@@ -20,6 +20,15 @@ export interface ContextInfo {
   createdAt?: string;
   lastActivity?: string;
   toolCalls?: ToolCallInfo[];
+  continuity?: {
+    source?: string;
+    visibleSummary?: string;
+    memoryQuery?: string;
+    subcallPrompt?: string;
+    layerHits?: string[];
+    subcallCount?: number;
+    artifactRefs?: string[];
+  };
   injectedContexts?: Array<{
     source: string;
     content: string;

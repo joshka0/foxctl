@@ -1,0 +1,3 @@
+min_primary_anchor: 1.0
+min_infra_declarative_companion: 2.0
+fail_on_route_alerts: true

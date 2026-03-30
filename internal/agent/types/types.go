@@ -25,6 +25,8 @@ const (
 	RoleVerifier AgentRole = "verifier"
 	// RoleResearcher is a research agent for information gathering and analysis.
 	RoleResearcher AgentRole = "researcher"
+	// RoleSubcallWorker is a deterministic bounded worker for recursive subcalls.
+	RoleSubcallWorker AgentRole = "subcall_worker"
 	// RoleSemanticScout discovers files and symbols by concept using semantic search.
 	RoleSemanticScout AgentRole = "semantic_scout"
 	// RoleDAGScout traces call/reference relationships using the repo index graph.
@@ -33,6 +35,12 @@ const (
 	RoleSymbolScout AgentRole = "symbol_scout"
 	// RoleAnnotationScout searches past session annotations for decisions, errors, and code changes.
 	RoleAnnotationScout AgentRole = "annotation_scout"
+	// RoleMemoryFactScout searches current memory artifacts for explicit facts and decisions.
+	RoleMemoryFactScout AgentRole = "memory_fact_scout"
+	// RoleMemoryTimelineScout reconstructs updates and supersession across memory and sessions.
+	RoleMemoryTimelineScout AgentRole = "memory_timeline_scout"
+	// RoleACAContextScout gathers ACA, task continuity, and vault-backed durable context.
+	RoleACAContextScout AgentRole = "aca_context_scout"
 
 	// RoleOverseer is a coordination agent that manages agent hierarchies.
 	// It handles spawn requests, enforces depth limits, and coordinates multi-agent workflows.
@@ -235,6 +243,10 @@ type AgentConfig struct {
 	// Timeout is the maximum execution time.
 	Timeout time.Duration `json:"timeout,omitempty,format:units"`
 
+	// ForceToolUse requires the engine to make at least one tool call before answering.
+	// Useful for evaluation or constrained retrieval modes.
+	ForceToolUse bool `json:"force_tool_use,omitempty"`
+
 	// LLMProvider specifies which LLM to use (e.g., "gemini", "openai").
 	LLMProvider string `json:"llm_provider,omitempty"`
 
@@ -279,6 +291,18 @@ type AgentSession struct {
 
 	// Iterations is the number of ReAct loops completed.
 	Iterations int `json:"iterations"`
+
+	// InputTokens is the accumulated parent prompt token count.
+	InputTokens int `json:"input_tokens,omitempty"`
+
+	// OutputTokens is the accumulated parent completion token count.
+	OutputTokens int `json:"output_tokens,omitempty"`
+
+	// TotalTokens is the accumulated parent total token count.
+	TotalTokens int `json:"total_tokens,omitempty"`
+
+	// ParentToolUsage aggregates parent-side prompt deltas for special tool paths.
+	ParentToolUsage map[string]any `json:"parent_tool_usage,omitempty"`
 
 	// Summary is the final output summary.
 	Summary string `json:"summary,omitempty"`

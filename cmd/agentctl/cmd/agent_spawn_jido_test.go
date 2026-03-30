@@ -19,6 +19,7 @@ func TestV2ProcessProfileForAgentRole(t *testing.T) {
 		{role: "overseer", want: coretool.ProfileOverseer},
 		{role: "companion", want: coretool.ProfileCompanion},
 		{role: "researcher", want: coretool.ProfileWorker},
+		{role: "subcall_worker", want: coretool.ProfileWorker},
 		{role: "coder", want: coretool.ProfileWorker},
 		{role: "reviewer", want: coretool.ProfileWorker},
 	}

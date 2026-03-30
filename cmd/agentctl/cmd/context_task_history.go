@@ -26,11 +26,25 @@ func newContextTaskHistoryCommand() *cobra.Command {
 	var gitCommitLimit int
 	var anchorLimit int
 	var noteLimit int
+	var transcriptHistoryScope string
 
 	cmd := &cobra.Command{
 		Use:   "task-history",
 		Short: "Build a deterministic continuity pack for a task",
+		Long: `Build a deterministic continuity pack for one task.
+
+Transcript history scope controls how transcript-derived continuity is filtered:
+- workspace: exact checkout only
+- family: any worktree in the same repo family
+- auto: try workspace first, then family fallback
+
+Use workspace when parallel worktrees are noisy. Use family when compare/research
+work across sibling worktrees should share transcript continuity.`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			scope, err := taskhistory.ParseTranscriptHistoryScope(transcriptHistoryScope)
+			if err != nil {
+				return err
+			}
 			target := resolveContextWorkspace(workspacePath)
 			ctx := cmd.Context()
 			cfg, err := loadConfig(ctx)
@@ -76,15 +90,16 @@ func newContextTaskHistoryCommand() *cobra.Command {
 				GitRunner:        taskhistory.DefaultGitRunner{},
 			}
 			pack, err := collector.Collect(ctx, taskhistory.Options{
-				WorkspacePath:  target,
-				WorkspaceID:    workspace.CanonicalID(target),
-				TaskID:         strings.TrimSpace(taskID),
-				SessionLimit:   sessionLimit,
-				HandoffLimit:   handoffLimit,
-				FileLimit:      fileLimit,
-				GitCommitLimit: gitCommitLimit,
-				AnchorLimit:    anchorLimit,
-				NoteLimit:      noteLimit,
+				WorkspacePath:          target,
+				WorkspaceID:            workspace.CanonicalID(target),
+				TaskID:                 strings.TrimSpace(taskID),
+				SessionLimit:           sessionLimit,
+				HandoffLimit:           handoffLimit,
+				FileLimit:              fileLimit,
+				GitCommitLimit:         gitCommitLimit,
+				AnchorLimit:            anchorLimit,
+				NoteLimit:              noteLimit,
+				TranscriptHistoryScope: scope,
 			})
 			if err != nil {
 				return err
@@ -94,11 +109,13 @@ func newContextTaskHistoryCommand() *cobra.Command {
 				return err
 			}
 			return envelope.Write(cmd.OutOrStdout(), envelope.OK("context/task_history", map[string]any{
-				"workspace_path": target,
-				"vault_path":     strings.TrimSpace(vaultPath),
-				"pack":           pack,
-				"artifact":       artifact,
-				"summary":        taskhistory.RenderHookArtifactHint(pack),
+				"workspace_path":                     target,
+				"vault_path":                         strings.TrimSpace(vaultPath),
+				"pack":                               pack,
+				"artifact":                           artifact,
+				"summary":                            taskhistory.RenderHookArtifactHint(pack),
+				"transcript_history_scope_requested": scope,
+				"transcript_history_scope_applied":   transcriptHistoryScopeApplied(pack),
 			}, envelope.WithMeta(envelope.Meta{Source: "cli"})))
 		},
 	}
@@ -112,6 +129,7 @@ func newContextTaskHistoryCommand() *cobra.Command {
 	cmd.Flags().IntVar(&gitCommitLimit, "git-limit", 3, "Maximum git commits per file")
 	cmd.Flags().IntVar(&anchorLimit, "anchor-limit", 8, "Maximum repo anchors to include")
 	cmd.Flags().IntVar(&noteLimit, "note-limit", 5, "Maximum ACA notes to include")
+	cmd.Flags().StringVar(&transcriptHistoryScope, "transcript-history-scope", string(taskhistory.TranscriptHistoryScopeAuto), "Transcript history scope: auto, workspace, or family")
 	return cmd
 }
 
@@ -127,11 +145,25 @@ func newContextTaskHistorySummaryCommand() *cobra.Command {
 	var gitCommitLimit int
 	var anchorLimit int
 	var noteLimit int
+	var transcriptHistoryScope string
 
 	cmd := &cobra.Command{
 		Use:   "task-history-summary",
 		Short: "Build a compact task continuity summary with artifact pointer",
+		Long: `Build a compact task continuity summary with artifact pointer.
+
+Transcript history scope controls how transcript-derived continuity is filtered:
+- workspace: exact checkout only
+- family: any worktree in the same repo family
+- auto: try workspace first, then family fallback
+
+Use workspace when parallel worktrees are noisy. Use family when compare/research
+work across sibling worktrees should share transcript continuity.`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			scope, err := taskhistory.ParseTranscriptHistoryScope(transcriptHistoryScope)
+			if err != nil {
+				return err
+			}
 			target := resolveContextWorkspace(workspacePath)
 			ctx := cmd.Context()
 			cfg, err := loadConfig(ctx)
@@ -139,20 +171,22 @@ func newContextTaskHistorySummaryCommand() *cobra.Command {
 				return err
 			}
 
-			pack, artifact, err := collectTaskHistoryPack(ctx, cfg, target, strings.TrimSpace(taskID), strings.TrimSpace(vaultPath), sessionLimit, handoffLimit, fileLimit, gitCommitLimit, anchorLimit, noteLimit)
+			pack, artifact, err := collectTaskHistoryPack(ctx, cfg, target, strings.TrimSpace(taskID), strings.TrimSpace(vaultPath), sessionLimit, handoffLimit, fileLimit, gitCommitLimit, anchorLimit, noteLimit, scope)
 			if err != nil {
 				return err
 			}
 
 			rendered := taskhistory.RenderHookContextWithArtifact(pack, artifact)
 			return envelope.Write(cmd.OutOrStdout(), envelope.OK("context/task_history_summary", map[string]any{
-				"workspace_path": target,
-				"vault_path":     strings.TrimSpace(vaultPath),
-				"summary":        taskhistory.RenderHookArtifactHint(pack),
-				"rendered":       rendered,
-				"artifact":       artifact,
-				"task_id":        pack.Task.ID,
-				"task_title":     strings.TrimSpace(pack.Task.Title),
+				"workspace_path":                     target,
+				"vault_path":                         strings.TrimSpace(vaultPath),
+				"summary":                            taskhistory.RenderHookArtifactHint(pack),
+				"rendered":                           rendered,
+				"artifact":                           artifact,
+				"task_id":                            pack.Task.ID,
+				"task_title":                         strings.TrimSpace(pack.Task.Title),
+				"transcript_history_scope_requested": scope,
+				"transcript_history_scope_applied":   transcriptHistoryScopeApplied(pack),
 			}, envelope.WithMeta(envelope.Meta{Source: "cli"})))
 		},
 	}
@@ -166,6 +200,7 @@ func newContextTaskHistorySummaryCommand() *cobra.Command {
 	cmd.Flags().IntVar(&gitCommitLimit, "git-limit", 3, "Maximum git commits per file")
 	cmd.Flags().IntVar(&anchorLimit, "anchor-limit", 8, "Maximum repo anchors to include")
 	cmd.Flags().IntVar(&noteLimit, "note-limit", 5, "Maximum ACA notes to include")
+	cmd.Flags().StringVar(&transcriptHistoryScope, "transcript-history-scope", string(taskhistory.TranscriptHistoryScopeAuto), "Transcript history scope: auto, workspace, or family")
 	return cmd
 }
 
@@ -174,6 +209,7 @@ func collectTaskHistoryPack(
 	cfg config.Config,
 	workspacePath, taskID, vaultPath string,
 	sessionLimit, handoffLimit, fileLimit, gitCommitLimit, anchorLimit, noteLimit int,
+	transcriptHistoryScope taskhistory.TranscriptHistoryScope,
 ) (taskhistory.Pack, string, error) {
 	collector, cleanup, err := taskhistory.OpenCollector(ctx, cfg.Storage.Root, workspacePath, vaultPath)
 	if err != nil {
@@ -181,15 +217,16 @@ func collectTaskHistoryPack(
 	}
 	defer cleanup()
 	pack, err := collector.Collect(ctx, taskhistory.Options{
-		WorkspacePath:  workspacePath,
-		WorkspaceID:    workspace.CanonicalID(workspacePath),
-		TaskID:         taskID,
-		SessionLimit:   sessionLimit,
-		HandoffLimit:   handoffLimit,
-		FileLimit:      fileLimit,
-		GitCommitLimit: gitCommitLimit,
-		AnchorLimit:    anchorLimit,
-		NoteLimit:      noteLimit,
+		WorkspacePath:          workspacePath,
+		WorkspaceID:            workspace.CanonicalID(workspacePath),
+		TaskID:                 taskID,
+		SessionLimit:           sessionLimit,
+		HandoffLimit:           handoffLimit,
+		FileLimit:              fileLimit,
+		GitCommitLimit:         gitCommitLimit,
+		AnchorLimit:            anchorLimit,
+		NoteLimit:              noteLimit,
+		TranscriptHistoryScope: transcriptHistoryScope,
 	})
 	if err != nil {
 		return taskhistory.Pack{}, "", err
@@ -199,4 +236,11 @@ func collectTaskHistoryPack(
 		return taskhistory.Pack{}, "", err
 	}
 	return pack, artifact, nil
+}
+
+func transcriptHistoryScopeApplied(pack taskhistory.Pack) any {
+	if pack.Transcript == nil || pack.Transcript.AppliedScope == "" {
+		return nil
+	}
+	return pack.Transcript.AppliedScope
 }

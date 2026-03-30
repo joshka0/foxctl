@@ -593,7 +593,7 @@ func indexSymbols(ctx context.Context, cfg config.Config, workspace, glob string
 		return 0, err
 	}
 
-	files, err := fsutil.FindFilesMatchingGlob(workspace, glob, exclude)
+	files, err := fsutil.FindFilesRespectingGitignore(workspace, glob, exclude)
 	if err != nil {
 		return 0, fmt.Errorf("find files: %w", err)
 	}

@@ -208,14 +208,17 @@ type ProposalWorkPacket struct {
 
 // RetrievalHit is one ranked durable-knowledge candidate.
 type RetrievalHit struct {
-	Path      string   `json:"path"`
-	Title     string   `json:"title"`
-	Type      string   `json:"type,omitempty"`
-	Trust     string   `json:"trust,omitempty"`
-	Score     int      `json:"score"`
-	Snippet   string   `json:"snippet,omitempty"`
-	RepoPaths []string `json:"repo_paths,omitempty"`
-	Symbols   []string `json:"symbols,omitempty"`
+	Path              string              `json:"path"`
+	Title             string              `json:"title"`
+	Type              string              `json:"type,omitempty"`
+	Trust             string              `json:"trust,omitempty"`
+	Score             int                 `json:"score"`
+	Snippet           string              `json:"snippet,omitempty"`
+	PrimaryAnchorPath string              `json:"primary_anchor_path,omitempty"`
+	RepoPaths         []string            `json:"repo_paths,omitempty"`
+	AnchorPaths       []string            `json:"anchor_paths,omitempty"`
+	AnchorRoles       map[string][]string `json:"anchor_roles,omitempty"`
+	Symbols           []string            `json:"symbols,omitempty"`
 }
 
 // RetrievalWeights documents the scoring inputs for blended retrieval.
@@ -233,6 +236,7 @@ type RetrievalWeights struct {
 	HandoffRef     int `json:"handoff_ref"`
 	CodePath       int `json:"code_path"`
 	CodeSymbol     int `json:"code_symbol"`
+	RepoMotif      int `json:"repo_motif"`
 	CoChange       int `json:"co_change"`
 	SemanticMatch  int `json:"semantic_match"`
 }
@@ -248,6 +252,7 @@ type RetrievalOptions struct {
 	UseCodeHints              bool     `json:"use_code_hints"`
 	UseSemanticVaultSearch    bool     `json:"use_semantic_vault_search"`
 	UsePackageNoteFallback    bool     `json:"use_package_note_fallback"`
+	UseRepoMotifPrior         bool     `json:"use_repo_motif_prior"`
 	UseCoChangePrior          bool     `json:"use_co_change_prior"`
 	CoChangeCommitLimit       int      `json:"co_change_commit_limit,omitempty"`
 	CoChangeMaxFilesPerCommit int      `json:"co_change_max_files_per_commit,omitempty"`
@@ -260,17 +265,18 @@ type RetrievalOptions struct {
 
 // RetrievalResult blends control-plane state with ranked vault hits.
 type RetrievalResult struct {
-	WorkspaceID   string           `json:"workspace_id"`
-	Query         string           `json:"query"`
-	TopOfMind     *TopOfMind       `json:"top_of_mind,omitempty"`
-	LatestHandoff *HandoffRecord   `json:"latest_handoff,omitempty"`
-	Observations  []Observation    `json:"observations,omitempty"`
-	Tensions      []Tension        `json:"tensions,omitempty"`
-	VaultHits     []RetrievalHit   `json:"vault_hits,omitempty"`
-	Weights       RetrievalWeights `json:"weights"`
-	SemanticModel string           `json:"semantic_model,omitempty"`
-	SemanticUsed  bool             `json:"semantic_used"`
-	GeneratedAt   time.Time        `json:"generated_at"`
+	WorkspaceID   string               `json:"workspace_id"`
+	Query         string               `json:"query"`
+	TopOfMind     *TopOfMind           `json:"top_of_mind,omitempty"`
+	LatestHandoff *HandoffRecord       `json:"latest_handoff,omitempty"`
+	Observations  []Observation        `json:"observations,omitempty"`
+	Tensions      []Tension            `json:"tensions,omitempty"`
+	VaultHits     []RetrievalHit       `json:"vault_hits,omitempty"`
+	RepoMotifHits []RepoMotifSearchHit `json:"repo_motif_hits,omitempty"`
+	Weights       RetrievalWeights     `json:"weights"`
+	SemanticModel string               `json:"semantic_model,omitempty"`
+	SemanticUsed  bool                 `json:"semantic_used"`
+	GeneratedAt   time.Time            `json:"generated_at"`
 }
 
 // ContradictionFinding links an open tension to potentially conflicting or relevant durable notes.

@@ -88,20 +88,36 @@ func (r *tsResolver) ResolveImportPackage(filePath, importPath string) string {
 		return ""
 	}
 
-	if isRelativeImport(importPath) || strings.HasPrefix(importPath, "/") {
-		if target := r.resolveLocalImport(absPath, importPath); target != "" {
-			return r.packageForFile(target)
-		}
+	if target := r.ResolveImportFile(absPath, importPath); target != "" {
+		return r.packageForFile(target)
+	}
+
+	return npmPackageID(importPath)
+}
+
+// ResolveImportFile resolves a TypeScript import to a concrete local file path.
+// It returns an absolute path when the import maps into the workspace.
+func (r *tsResolver) ResolveImportFile(filePath, importPath string) string {
+	if importPath == "" {
 		return ""
+	}
+
+	absPath, err := r.absPath(filePath)
+	if err != nil {
+		return ""
+	}
+
+	if isRelativeImport(importPath) || strings.HasPrefix(importPath, "/") {
+		return r.resolveLocalImport(absPath, importPath)
 	}
 
 	if cfg := r.configForFile(absPath); cfg != nil {
 		if target := cfg.ResolveImport(importPath); target != "" {
-			return r.packageForFile(target)
+			return target
 		}
 	}
 
-	return npmPackageID(importPath)
+	return ""
 }
 
 func (r *tsResolver) configForFile(absFile string) *tsConfigResolved {

@@ -419,7 +419,18 @@ func runIndexRepoOpen(cmd *cobra.Command, workspace, id string) error {
 	}
 	result, err := service.OpenWithProjection(ctx, req)
 	if err != nil {
-		return fmt.Errorf("repo query open failed for id %q: %w", id, err)
+		resolvedID, resolveErr := resolveRepoOpenFallbackID(ctx, absWorkspace, service, id)
+		if resolveErr != nil {
+			return fmt.Errorf("repo query open failed for id %q: %w", id, err)
+		}
+		req, err = repoquery.NewOpenRequest(resolvedID)
+		if err != nil {
+			return fmt.Errorf("repo query open failed for id %q: %w", id, err)
+		}
+		result, err = service.OpenWithProjection(ctx, req)
+		if err != nil {
+			return fmt.Errorf("repo query open failed for id %q (fallback %q): %w", id, resolvedID, err)
+		}
 	}
 
 	data := map[string]any{
@@ -430,6 +441,109 @@ func runIndexRepoOpen(cmd *cobra.Command, workspace, id string) error {
 
 	env := protocol.OK("index.repo.open", data, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
 	return protocol.Write(cmd.OutOrStdout(), env)
+}
+
+func resolveRepoOpenFallbackID(ctx context.Context, workspace string, service *repoquery.QueryService, id string) (string, error) {
+	candidates := repoOpenFallbackQueries(workspace, id)
+	for _, candidate := range candidates {
+		result, err := service.SearchWithProjection(ctx, repoquery.SearchRequest{
+			Query: candidate,
+			Limit: 10,
+		})
+		if err != nil || len(result.Nodes) == 0 {
+			continue
+		}
+		if node, ok := pickBestRepoOpenFallbackNode(result.Nodes, candidate); ok {
+			return node.ID, nil
+		}
+	}
+	return "", errors.New("fallback open candidate not found")
+}
+
+func repoOpenFallbackQueries(workspace, id string) []string {
+	trimmed := strings.TrimSpace(filepath.ToSlash(id))
+	if trimmed == "" {
+		return nil
+	}
+	repoBase := filepath.Base(strings.TrimSpace(workspace))
+	candidates := make([]string, 0, 8)
+	add := func(value string) {
+		value = strings.TrimSpace(filepath.ToSlash(value))
+		if value == "" {
+			return
+		}
+		for _, existing := range candidates {
+			if existing == value {
+				return
+			}
+		}
+		candidates = append(candidates, value)
+	}
+	parts := strings.FieldsFunc(trimmed, func(r rune) bool {
+		return r == ':' || r == ' ' || r == '\t' || r == '\n'
+	})
+	for _, part := range parts {
+		part = strings.TrimSpace(filepath.ToSlash(part))
+		if part == "" {
+			continue
+		}
+		if repoBase != "" {
+			if idx := strings.Index(part, repoBase+"/"); idx >= 0 {
+				add(part[idx+len(repoBase)+1:])
+			}
+		}
+		for _, marker := range []string{"internal/", "cmd/", "docs/", "deploy/", "configs/", "scripts/", "skills/", "testdata/"} {
+			if idx := strings.Index(part, marker); idx >= 0 {
+				add(part[idx:])
+			}
+		}
+		if strings.Contains(part, "/") {
+			add(part)
+			add(filepath.Base(part))
+		}
+	}
+	add(filepath.Base(trimmed))
+	return candidates
+}
+
+func pickBestRepoOpenFallbackNode(nodes []repoindex.Node, query string) (repoindex.Node, bool) {
+	query = filepath.ToSlash(strings.TrimSpace(query))
+	if query == "" || len(nodes) == 0 {
+		return repoindex.Node{}, false
+	}
+	bestIdx := -1
+	bestScore := -1
+	for i, node := range nodes {
+		score := repoOpenFallbackScore(node, query)
+		if score > bestScore {
+			bestIdx = i
+			bestScore = score
+		}
+	}
+	if bestIdx < 0 {
+		return repoindex.Node{}, false
+	}
+	return nodes[bestIdx], true
+}
+
+func repoOpenFallbackScore(node repoindex.Node, query string) int {
+	file := filepath.ToSlash(strings.TrimSpace(node.File))
+	id := filepath.ToSlash(strings.TrimSpace(node.ID))
+	base := filepath.Base(query)
+	switch {
+	case file == query:
+		return 5
+	case strings.HasSuffix(file, "/"+query):
+		return 4
+	case strings.HasSuffix(id, query):
+		return 3
+	case base != "" && filepath.Base(file) == base:
+		return 2
+	case base != "" && filepath.Base(id) == base:
+		return 1
+	default:
+		return 0
+	}
 }
 
 func runIndexRepoAsk(cmd *cobra.Command, workspace, question, provider, model, apiKey string, maxIterations int, timeout time.Duration) error {

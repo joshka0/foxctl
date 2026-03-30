@@ -91,3 +91,28 @@ func TestStoreReplaceAllAndSearch(t *testing.T) {
 		t.Fatalf("expected 1 edge, got %d", len(edges))
 	}
 }
+
+func TestOpenContextExtendsShortDeadlines(t *testing.T) {
+	parent, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+
+	time.Sleep(40 * time.Millisecond)
+
+	derived, derivedCancel := openContext(parent, 500*time.Millisecond)
+	defer derivedCancel()
+
+	parentDeadline, ok := parent.Deadline()
+	if !ok {
+		t.Fatalf("expected parent deadline")
+	}
+	derivedDeadline, ok := derived.Deadline()
+	if !ok {
+		t.Fatalf("expected derived deadline")
+	}
+	if !derivedDeadline.After(parentDeadline) {
+		t.Fatalf("expected derived deadline %v to extend beyond parent deadline %v", derivedDeadline, parentDeadline)
+	}
+	if err := derived.Err(); err != nil {
+		t.Fatalf("expected derived context to remain usable, got %v", err)
+	}
+}

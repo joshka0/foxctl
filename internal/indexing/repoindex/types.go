@@ -23,6 +23,7 @@ type EdgeType string
 const (
 	EdgeContains   EdgeType = "CONTAINS"
 	EdgeImports    EdgeType = "IMPORTS"
+	EdgeUsesSymbol EdgeType = "USES_SYMBOL"
 	EdgeRefersTo   EdgeType = "REFERS_TO"
 	EdgeCalls      EdgeType = "CALLS"
 	EdgeImplements EdgeType = "IMPLEMENTS"
@@ -68,6 +69,7 @@ var (
 	EdgeSetStructural = []EdgeType{
 		EdgeContains,
 		EdgeImports,
+		EdgeUsesSymbol,
 		EdgeRefersTo,
 		EdgeCalls,
 		EdgeImplements,

@@ -338,6 +338,44 @@ func RunWithInput(ctx context.Context, dir, name string, input []byte, args ...s
 	return result
 }
 
+// RunWithInputEnv executes a command with stdin input and additional environment variables.
+func RunWithInputEnv(ctx context.Context, dir, name string, env []string, input []byte, args ...string) CmdResult {
+	start := time.Now()
+
+	cmd := exec.CommandContext(ctx, name, args...)
+	if dir != "" {
+		cmd.Dir = dir
+	}
+	if len(env) > 0 {
+		cmd.Env = append(cmd.Environ(), env...)
+	}
+	cmd.Stdin = bytes.NewReader(input)
+
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	err := cmd.Run()
+	duration := time.Since(start)
+
+	result := CmdResult{
+		Stdout:   stdout.Bytes(),
+		Stderr:   stderr.Bytes(),
+		Duration: duration,
+		Err:      err,
+	}
+
+	if err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			result.ExitCode = exitErr.ExitCode()
+		} else {
+			result.ExitCode = -1
+		}
+	}
+
+	return result
+}
+
 // Git runs a git command in the given directory.
 func Git(ctx context.Context, dir string, args ...string) CmdResult {
 	return Run(ctx, dir, "git", args...)

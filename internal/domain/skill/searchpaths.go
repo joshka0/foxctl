@@ -25,7 +25,15 @@ func UserSearchPaths() []string {
 // BuiltinSearchPaths returns the built-in skills directory relative to the executable.
 func BuiltinSearchPaths() []string {
 	if exePath, err := os.Executable(); err == nil {
-		return []string{filepath.Join(filepath.Dir(exePath), "skills")}
+		if resolved, resolveErr := filepath.EvalSymlinks(exePath); resolveErr == nil {
+			exePath = resolved
+		}
+		exeDir := filepath.Dir(exePath)
+		paths := []string{filepath.Join(exeDir, "skills")}
+		if filepath.Base(exeDir) == "bin" {
+			paths = append(paths, filepath.Join(filepath.Dir(exeDir), "skills"))
+		}
+		return NormalizeSearchPaths(paths)
 	}
 	return nil
 }
@@ -34,8 +42,8 @@ func BuiltinSearchPaths() []string {
 func DevSearchPaths() []string {
 	if pwd, err := os.Getwd(); err == nil {
 		return []string{
-			filepath.Join(pwd, "dist", "skills"),
 			filepath.Join(pwd, "skills"),
+			filepath.Join(pwd, "dist", "skills"),
 		}
 	}
 	return nil
@@ -46,7 +54,7 @@ func DevSearchPaths() []string {
 // 1. AGENTCTL_SKILLS_PATH environment variable (can be multiple paths)
 // 2. User skills directory (~/.agentctl/skills)
 // 3. Built-in skills (relative to executable)
-// 4. Development paths (./dist/skills, ./skills)
+// 4. Development paths (./skills, ./dist/skills)
 func DefaultSearchPaths() []string {
 	paths := append([]string{}, EnvSearchPaths()...)
 	paths = append(paths, UserSearchPaths()...)

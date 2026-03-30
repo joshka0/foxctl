@@ -396,9 +396,11 @@ func TestResolveClaudeRewriteTargetsDefaultsToRemoteBestWithFallback(t *testing.
 	}
 	if fallback == nil {
 		t.Fatal("expected fallback target")
+		return
 	}
-	if fallback.Provider != "lmstudio" || fallback.Model != "liquid/lfm2.5-1.2b" {
-		t.Fatalf("unexpected fallback target: %+v", *fallback)
+	got := *fallback
+	if got.Provider != "lmstudio" || got.Model != "liquid/lfm2.5-1.2b" {
+		t.Fatalf("unexpected fallback target: %+v", got)
 	}
 }
 

@@ -15,6 +15,7 @@ This directory contains active planning documents and implementation roadmaps.
 - `v2-greenfield-bootstrap.md`
 - `v2-symphony-kanban-implementation.md`
 - `gui-agent-improvement-roadmap.md`
+- `features/slop-function-detection.md`
 - `features/opensandbox-sandbox-workspace-integration.md`
 - `features/aca-self-evolving-memory-layer.md`
 - `jidoctl-v2-hybrid-interface.md`

@@ -1,11 +1,15 @@
 package api
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
 	"net/http"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -14,6 +18,7 @@ import (
 
 	"github.com/jkatigb/agentctl/internal/companion"
 	"github.com/jkatigb/agentctl/internal/contextplane"
+	"github.com/jkatigb/agentctl/internal/contextplane/taskhistory"
 	agentdomain "github.com/jkatigb/agentctl/internal/domain/agent"
 	"github.com/jkatigb/agentctl/internal/domain/envelope"
 	"github.com/jkatigb/agentctl/internal/indexing/semantic"
@@ -24,34 +29,97 @@ import (
 	"github.com/jkatigb/agentctl/internal/storage/conversationsettings"
 	"github.com/jkatigb/agentctl/internal/storage/dbutil"
 	memorystore "github.com/jkatigb/agentctl/internal/storage/memory"
+	"github.com/jkatigb/agentctl/internal/storage/sessions"
+	taskstore "github.com/jkatigb/agentctl/internal/storage/tasks"
 )
+
+type companionProviderModel struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
+type companionProviderAvailability struct {
+	ID         string                   `json:"id"`
+	Available  bool                     `json:"available"`
+	Configured bool                     `json:"configured"`
+	Reachable  *bool                    `json:"reachable,omitempty"`
+	Message    string                   `json:"message,omitempty"`
+	BaseURL    string                   `json:"base_url,omitempty"`
+	Models     []companionProviderModel `json:"models,omitempty"`
+}
+
+func renderTopOfMindPrompt(top contextplane.TopOfMind) string {
+	lines := make([]string, 0, 8)
+	if objective := strings.TrimSpace(top.Objective); objective != "" {
+		lines = append(lines, "- objective: "+objective)
+	}
+	if phase := strings.TrimSpace(top.Phase); phase != "" {
+		lines = append(lines, "- phase: "+phase)
+	}
+	if len(top.ActiveTaskIDs) > 0 {
+		lines = append(lines, "- active_tasks: "+strings.Join(top.ActiveTaskIDs, ", "))
+	}
+	if len(top.NextActions) > 0 {
+		lines = append(lines, "- next_actions: "+strings.Join(top.NextActions, "; "))
+	}
+	if len(top.OpenLoops) > 0 {
+		lines = append(lines, "- open_loops: "+strings.Join(top.OpenLoops, "; "))
+	}
+	if len(top.Blockers) > 0 {
+		lines = append(lines, "- blockers: "+strings.Join(top.Blockers, "; "))
+	}
+	if len(top.RecentDecisions) > 0 {
+		decisions := make([]string, 0, min(3, len(top.RecentDecisions)))
+		for _, decision := range top.RecentDecisions[:min(3, len(top.RecentDecisions))] {
+			if text := strings.TrimSpace(decision.Text); text != "" {
+				decisions = append(decisions, text)
+			}
+		}
+		if len(decisions) > 0 {
+			lines = append(lines, "- recent_decisions: "+strings.Join(decisions, "; "))
+		}
+	}
+	return strings.Join(lines, "\n")
+}
 
 // CompanionProvidersHandler returns a handler for GET /api/companion/providers.
 // It reports which LLM providers have API keys configured, the default provider, and Voyage availability.
 func CompanionProvidersHandler(cfg config.Config, log zerolog.Logger) http.HandlerFunc {
-	type providerAvailability struct {
-		ID        string `json:"id"`
-		Available bool   `json:"available"`
-	}
-
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			httpError(w, http.StatusMethodNotAllowed, "method not allowed")
 			return
 		}
 
+		lmStudioBaseURL := cfg.LLM.ResolveBaseURL("lmstudio")
+		lmStudioReachable, lmStudioMessage, lmStudioModels := probeOpenAICompatibleModels(
+			r.Context(),
+			lmStudioBaseURL,
+			cfg.LLM.ResolveAPIKey("lmstudio"),
+			cfg.LLM.ResolveAuthMode("lmstudio"),
+			cfg.LLM.ResolveAuthHeader("lmstudio"),
+			cfg.LLM.ResolveAuthPrefix("lmstudio"),
+		)
+
 		// Check provider-specific keys directly. ResolveAPIKey falls back to the
 		// generic APIKey which would make every provider look "available".
-		// lmstudio is always available (no real API key needed).
-		providers := []providerAvailability{
-			{ID: "anthropic", Available: cfg.LLM.AnthropicAPIKey != ""},
-			{ID: "openai", Available: cfg.LLM.OpenAIAPIKey != ""},
-			{ID: "openrouter", Available: cfg.LLM.OpenRouterAPIKey != ""},
-			{ID: "groq", Available: cfg.LLM.GroqAPIKey != ""},
-			{ID: "gemini", Available: cfg.LLM.GeminiAPIKey != ""},
-			{ID: "cerebras", Available: cfg.LLM.CerebrasAPIKey != ""},
-			{ID: "lmstudio", Available: true},
-			{ID: "bedrock", Available: cfg.LLM.BedrockRegion != ""},
+		providers := []companionProviderAvailability{
+			{ID: "anthropic", Available: cfg.LLM.AnthropicAPIKey != "", Configured: cfg.LLM.AnthropicAPIKey != ""},
+			{ID: "openai", Available: cfg.LLM.OpenAIAPIKey != "", Configured: cfg.LLM.OpenAIAPIKey != ""},
+			{ID: "openrouter", Available: cfg.LLM.OpenRouterAPIKey != "", Configured: cfg.LLM.OpenRouterAPIKey != ""},
+			{ID: "groq", Available: cfg.LLM.GroqAPIKey != "", Configured: cfg.LLM.GroqAPIKey != ""},
+			{ID: "gemini", Available: cfg.LLM.GeminiAPIKey != "", Configured: cfg.LLM.GeminiAPIKey != ""},
+			{ID: "cerebras", Available: cfg.LLM.CerebrasAPIKey != "", Configured: cfg.LLM.CerebrasAPIKey != ""},
+			{
+				ID:         "lmstudio",
+				Available:  lmStudioReachable,
+				Configured: true,
+				Reachable:  boolPtr(lmStudioReachable),
+				Message:    lmStudioMessage,
+				BaseURL:    lmStudioBaseURL,
+				Models:     lmStudioModels,
+			},
+			{ID: "bedrock", Available: cfg.LLM.BedrockRegion != "", Configured: cfg.LLM.BedrockRegion != ""},
 		}
 
 		writeJSON(w, http.StatusOK, map[string]any{
@@ -61,6 +129,72 @@ func CompanionProvidersHandler(cfg config.Config, log zerolog.Logger) http.Handl
 			"voyage_available": cfg.Embedding.VoyageAPIKey != "",
 		})
 	}
+}
+
+func boolPtr(v bool) *bool {
+	return &v
+}
+
+func probeOpenAICompatibleModels(ctx context.Context, baseURL, apiKey, authMode, authHeader, authPrefix string) (bool, string, []companionProviderModel) {
+	baseURL = strings.TrimSpace(baseURL)
+	if baseURL == "" {
+		return false, "No base URL configured", nil
+	}
+
+	probeCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(probeCtx, http.MethodGet, strings.TrimRight(baseURL, "/")+"/models", nil)
+	if err != nil {
+		return false, err.Error(), nil
+	}
+	if strings.EqualFold(strings.TrimSpace(authMode), "header") {
+		headerName := strings.TrimSpace(authHeader)
+		if headerName == "" {
+			headerName = "X-API-Key"
+		}
+		if strings.TrimSpace(apiKey) != "" {
+			req.Header.Set(headerName, authPrefix+apiKey)
+		}
+	} else if !strings.EqualFold(strings.TrimSpace(authMode), "none") && strings.TrimSpace(apiKey) != "" {
+		req.Header.Set("Authorization", authPrefix+apiKey)
+	}
+
+	resp, err := (&http.Client{Timeout: 3 * time.Second}).Do(req)
+	if err != nil {
+		return false, err.Error(), nil
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
+		msg := strings.TrimSpace(string(body))
+		if msg == "" {
+			msg = fmt.Sprintf("HTTP %d", resp.StatusCode)
+		}
+		return false, msg, nil
+	}
+
+	var payload struct {
+		Data []struct {
+			ID string `json:"id"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		return false, err.Error(), nil
+	}
+	models := make([]companionProviderModel, 0, len(payload.Data))
+	for _, item := range payload.Data {
+		id := strings.TrimSpace(item.ID)
+		if id == "" {
+			continue
+		}
+		models = append(models, companionProviderModel{ID: id, Name: id})
+	}
+	sort.Slice(models, func(i, j int) bool {
+		return models[i].ID < models[j].ID
+	})
+	return true, "", models
 }
 
 // CompanionCoChangeHandler returns a handler for GET /api/companion/cochange?workspace=...&query=....
@@ -260,6 +394,55 @@ func CompanionChatHandler(cfg config.Config, log zerolog.Logger, turnLock compan
 			LLMAuthHeader: cfg.LLM.ResolveAuthHeader(llmProvider),
 			LLMAuthPrefix: cfg.LLM.ResolveAuthPrefix(llmProvider),
 			ToolsAllow:    settings.ToolsAllow,
+			TopOfMindProvider: func(ctx context.Context, workspace string) (companion.HarnessLayer, error) {
+				store := contextplane.NewWorkspaceStore(workspace)
+				top, err := store.LoadTopOfMind()
+				if err != nil {
+					tasksDB, taskErr := taskstore.Open(ctx, cfg.Storage.Root)
+					if taskErr != nil {
+						return companion.HarnessLayer{}, err
+					}
+					defer tasksDB.Close()
+
+					sessionDB, sessionErr := sessions.Open(ctx, cfg.Storage.Root)
+					if sessionErr != nil {
+						return companion.HarnessLayer{}, err
+					}
+					defer sessionDB.Close()
+
+					top, err = contextplane.NewOrienter(tasksDB, sessionDB).Build(ctx, workspace)
+					if err != nil {
+						return companion.HarnessLayer{}, err
+					}
+				}
+				return companion.HarnessLayer{
+					Content: renderTopOfMindPrompt(top),
+				}, nil
+			},
+			TaskContinuityProvider: func(ctx context.Context, workspace string) (companion.HarnessLayer, error) {
+				collector, cleanup, err := taskhistory.OpenCollector(ctx, cfg.Storage.Root, workspace, "")
+				if err != nil {
+					return companion.HarnessLayer{}, err
+				}
+				defer cleanup()
+				pack, err := collector.Collect(ctx, taskhistory.Options{
+					WorkspacePath:          workspace,
+					WorkspaceID:            ws.CanonicalID(workspace),
+					TranscriptHistoryScope: taskhistory.DefaultTranscriptHistoryScope(),
+				})
+				if err != nil {
+					return companion.HarnessLayer{}, err
+				}
+				artifact, err := taskhistory.PersistPack(ctx, cfg.Paths.CAS, pack)
+				if err != nil {
+					return companion.HarnessLayer{}, err
+				}
+				return companion.HarnessLayer{
+					Content:     taskhistory.RenderHookContextWithArtifact(pack, artifact),
+					ArtifactRef: strings.TrimSpace(artifact),
+				}, nil
+			},
+			SubcallProvider: makeCompanionJidoSubcallProvider(log),
 		}
 		if presenceEnabled {
 			svcCfg.PresenceConfig = &companion.PresenceConfig{

@@ -48,12 +48,14 @@ type Message struct {
 
 // AskData represents the data payload for an agent.ask message.
 type AskData struct {
-	AskID          string         `json:"ask_id"`
-	Kind           string         `json:"kind"` // context|secret|approval|toolhint|other
-	Question       string         `json:"question"`
-	NeedsByMS      int64          `json:"needs_by_ms,omitempty"`
-	Context        map[string]any `json:"context,omitempty"`
-	ConversationID string         `json:"conversation_id,omitempty"` // For memory continuity across messages
+	AskID          string          `json:"ask_id"`
+	Kind           string          `json:"kind"` // context|secret|approval|toolhint|other
+	Question       string          `json:"question"`
+	NeedsByMS      int64           `json:"needs_by_ms,omitempty"`
+	Context        map[string]any  `json:"context,omitempty"`
+	ConversationID string          `json:"conversation_id,omitempty"` // For memory continuity across messages
+	ResponseSchema json.RawMessage `json:"response_schema,omitempty"`
+	ResponseKeys   []string        `json:"response_keys,omitempty"`
 }
 
 // ReplyData represents the data payload for an agent.reply message.

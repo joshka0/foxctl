@@ -1,0 +1,6 @@
+suite: agentctl-mixed
+limit: 10
+format: markdown
+modes:
+  - aca_default
+  - aca_query_typed

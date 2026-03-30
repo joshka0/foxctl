@@ -125,8 +125,9 @@ func attachTaskContinuityToSignal(ctx context.Context, storageRoot, workspaceRoo
 	}
 	defer cleanup()
 	pack, err := collector.Collect(ctx, taskhistory.Options{
-		WorkspacePath: workspaceRoot,
-		WorkspaceID:   ws.CanonicalID(workspaceRoot),
+		WorkspacePath:          workspaceRoot,
+		WorkspaceID:            ws.CanonicalID(workspaceRoot),
+		TranscriptHistoryScope: taskhistory.DefaultTranscriptHistoryScope(),
 	})
 	if err != nil {
 		return nil

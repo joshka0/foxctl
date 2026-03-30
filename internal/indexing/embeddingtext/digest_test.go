@@ -63,6 +63,25 @@ func TestBuildSymbolContentDigestChangesOnDoc(t *testing.T) {
 	}
 }
 
+func TestBuildSymbolContentDigestChangesOnAliases(t *testing.T) {
+	base := SymbolDigestInput{
+		Model:      "model-x",
+		Kind:       "class",
+		Name:       "Jido.AgentServer.SignalRouter",
+		FilePath:   "lib/jido/agent_server/signal_router.ex",
+		Signature:  "defmodule Jido.AgentServer.SignalRouter do",
+		BodyDigest: "sha256:abc123",
+	}
+
+	withAliases := base
+	withAliases.Aliases = []string{"jido agent server signal router", "signal_router"}
+	withoutAliases := base
+
+	if BuildSymbolContentDigest(withAliases) == BuildSymbolContentDigest(withoutAliases) {
+		t.Fatalf("expected digest to change when aliases change")
+	}
+}
+
 func TestBuildSymbolContentDigest_V2SymbolKey(t *testing.T) {
 	// Ensure v2 format is used for content digests.
 	digest := BuildSymbolContentDigest(SymbolDigestInput{

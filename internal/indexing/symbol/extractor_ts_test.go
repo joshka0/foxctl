@@ -150,6 +150,67 @@ func TestTypeScriptExtractorDocs(t *testing.T) {
 	}
 }
 
+func TestTypeScriptExtractorExtractTSX(t *testing.T) {
+	source := `export interface Props {
+  title: string
+}
+
+export const View = ({ title }: Props) => <div>{title}</div>
+`
+
+	extractor := NewTypeScriptExtractor()
+	syms, err := extractor.Extract(context.Background(), "src/view.tsx", []byte(source))
+	if err != nil {
+		t.Fatalf("extract: %v", err)
+	}
+
+	expected := map[string]Kind{
+		"Props": KindInterface,
+		"View":  KindConstant,
+	}
+	if len(syms) != len(expected) {
+		t.Fatalf("expected %d symbols, got %d", len(expected), len(syms))
+	}
+	for _, sym := range syms {
+		kind, ok := expected[sym.Name]
+		if !ok {
+			t.Fatalf("unexpected symbol: %s", sym.Name)
+		}
+		if sym.Kind != kind {
+			t.Fatalf("symbol %s kind: expected %s, got %s", sym.Name, kind, sym.Kind)
+		}
+		if sym.Language != "typescript" {
+			t.Fatalf("symbol %s language: expected typescript, got %s", sym.Name, sym.Language)
+		}
+	}
+}
+
+func TestTypeScriptExtractorExtractMultilineConstArrowSpan(t *testing.T) {
+	source := `export const View = (
+  { title }: { title: string },
+) => {
+  return <div>{title}</div>
+}
+`
+
+	extractor := NewTypeScriptExtractor()
+	syms, err := extractor.Extract(context.Background(), "src/view.tsx", []byte(source))
+	if err != nil {
+		t.Fatalf("extract: %v", err)
+	}
+
+	for _, sym := range syms {
+		if sym.Name != "View" {
+			continue
+		}
+		if sym.EndLine <= sym.StartLine {
+			t.Fatalf("expected multiline const arrow span, got start=%d end=%d", sym.StartLine, sym.EndLine)
+		}
+		return
+	}
+	t.Fatal("missing View symbol")
+}
+
 func TestTypeScriptExtractorExtractCalls(t *testing.T) {
 	source := `export function bar() { return 1 }
 export class Zoo {}

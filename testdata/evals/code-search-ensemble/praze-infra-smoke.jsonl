@@ -1,0 +1,2 @@
+{"id":"praze-auth-argocd","question":"Which file defines the argocd application for praze auth?","expected_paths":["platform/10-argocd/apps/65-praze-auth.yaml"],"task_type":"file_locate","requires_grounding":true,"category":"infra-smoke"}
+{"id":"praze-waitlist-ingress","question":"Which file defines the praze waitlist ingress?","expected_paths":["infra/k8s/waitlist/ingress.yaml"],"task_type":"file_locate","requires_grounding":true,"category":"infra-smoke"}

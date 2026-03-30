@@ -130,6 +130,12 @@ func (s *Sender) SendAsk(ctx context.Context, toNS, question string, opts ...Ask
 	if cfg.Kind != "" {
 		msg = msg.WithKind(cfg.Kind)
 	}
+	if len(cfg.ResponseSchema) > 0 {
+		msg = msg.WithResponseSchema(cfg.ResponseSchema)
+	}
+	if len(cfg.ResponseKeys) > 0 {
+		msg = msg.WithResponseKeys(cfg.ResponseKeys)
+	}
 
 	built, err := msg.Build()
 	if err != nil {
@@ -278,12 +284,14 @@ type AskOpt func(*AskConfig)
 
 // AskConfig holds configuration for Ask messages.
 type AskConfig struct {
-	TTL         time.Duration
-	Kind        string
-	SessionID   string
-	Workspace   string
-	Context     map[string]any
-	Correlation string
+	TTL            time.Duration
+	Kind           string
+	SessionID      string
+	Workspace      string
+	Context        map[string]any
+	Correlation    string
+	ResponseSchema json.RawMessage
+	ResponseKeys   []string
 }
 
 // WithAskTTL sets the TTL for an Ask message.
@@ -325,6 +333,20 @@ func WithAskContext(context map[string]any) AskOpt {
 func WithAskCorrelation(correlation string) AskOpt {
 	return func(cfg *AskConfig) {
 		cfg.Correlation = correlation
+	}
+}
+
+// WithAskResponseSchema sets the response schema for an Ask message.
+func WithAskResponseSchema(schema json.RawMessage) AskOpt {
+	return func(cfg *AskConfig) {
+		cfg.ResponseSchema = append(json.RawMessage(nil), schema...)
+	}
+}
+
+// WithAskResponseKeys sets the expected response keys for an Ask message.
+func WithAskResponseKeys(keys []string) AskOpt {
+	return func(cfg *AskConfig) {
+		cfg.ResponseKeys = append([]string(nil), keys...)
 	}
 }
 

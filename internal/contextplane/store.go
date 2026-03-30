@@ -254,8 +254,17 @@ func (s *WorkspaceStore) LoadHandoff(path string) (Handoff, error) {
 	if _, err := s.EnsureLayout(); err != nil {
 		return Handoff{}, err
 	}
+	path = filepath.Clean(strings.TrimSpace(path))
+	if path == "." {
+		return Handoff{}, fmt.Errorf("handoff path required")
+	}
 	if !filepath.IsAbs(path) {
-		path = filepath.Join(s.layout.HandoffsDir, path)
+		handoffsDir := filepath.Clean(s.layout.HandoffsDir)
+		if filepath.Base(path) == path {
+			path = filepath.Join(handoffsDir, path)
+		} else if path != handoffsDir && !strings.HasPrefix(path, handoffsDir+string(os.PathSeparator)) {
+			path = filepath.Join(s.layout.WorkspacePath, path)
+		}
 	}
 	body, err := os.ReadFile(path)
 	if err != nil {

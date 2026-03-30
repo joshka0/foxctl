@@ -17,6 +17,9 @@ args=(context task-history-summary --workspace "$workspace")
 if [[ -n "${vault_path}" ]]; then
   args+=(--vault-path "$vault_path")
 fi
+if [[ -n "${AGENTCTL_TRANSCRIPT_HISTORY_SCOPE:-}" ]]; then
+  args+=(--transcript-history-scope "$AGENTCTL_TRANSCRIPT_HISTORY_SCOPE")
+fi
 
 if ! output="$("$AGENTCTL_BIN" "${args[@]}" 2>/dev/null)"; then
   echo '{}'

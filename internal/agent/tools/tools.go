@@ -237,6 +237,9 @@ func NewRegistry(cfg Config, recorder TelemetryRecorder) (*Registry, error) {
 	if err := r.registerContextGrepTool(); err != nil {
 		return nil, err
 	}
+	if err := r.registerRefactorScoutTool(); err != nil {
+		return nil, err
+	}
 	if err := r.registerCodeTools(); err != nil {
 		return nil, err
 	}

@@ -19,13 +19,14 @@ import (
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/sliceutil"
+	symindex "github.com/jkatigb/agentctl/internal/indexing/symbol"
 )
 
 // Input defines the input parameters for code/symbols operations.
 type Input struct {
 	Path           string `json:"path"`
 	SymbolType     string `json:"symbol_type" validate:"omitempty,oneof=all function method struct interface type const var"`
-	Language       string `json:"language" validate:"omitempty,oneof=auto go python javascript typescript"`
+	Language       string `json:"language" validate:"omitempty,oneof=auto go python javascript typescript elixir"`
 	IncludePrivate bool   `json:"include_private"`
 	IncludeDocs    bool   `json:"include_docs"`
 	MaxResults     int    `json:"max_results" validate:"gte=0"`
@@ -203,6 +204,8 @@ func extractFromFile(path, workspace string, in Input) ([]symbol, error) {
 		return extractPythonSymbols(path, workspace, in)
 	case "javascript", "typescript":
 		return extractJSSymbols(path, workspace, in)
+	case "elixir":
+		return extractElixirSymbols(path, workspace, in)
 	default:
 		return nil, skillerr.Validationf("language not supported: %s", lang)
 	}
@@ -548,4 +551,68 @@ func extractJSSymbols(path, workspace string, _ Input) ([]symbol, error) {
 	}
 
 	return symbols, nil
+}
+
+// extractElixirSymbols reuses the shared Elixir extractor used by the symbol indexer.
+func extractElixirSymbols(path, workspace string, in Input) ([]symbol, error) {
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return nil, skillerr.WrapIO("read elixir file", err)
+	}
+
+	extractor := symindex.NewElixirExtractor()
+	syms, err := extractor.Extract(context.Background(), pathutil.RelTo(workspace, path), content)
+	if err != nil {
+		return nil, skillerr.WrapParse("parse elixir file", err)
+	}
+
+	out := make([]symbol, 0, len(syms))
+	for _, item := range syms {
+		out = append(out, symbolFromIndexedElixir(item, in.IncludeDocs))
+	}
+	return out, nil
+}
+
+func symbolFromIndexedElixir(item symindex.Symbol, includeDocs bool) symbol {
+	out := symbol{
+		Name:      item.Name,
+		Type:      codeSymbolsTypeFromKind(item.Kind),
+		File:      item.FilePath,
+		Line:      item.StartLine,
+		Signature: item.Signature,
+		Exported:  isPublicElixirSymbol(item),
+	}
+	if includeDocs {
+		out.Doc = item.Documentation
+	}
+	return out
+}
+
+func codeSymbolsTypeFromKind(kind symindex.Kind) string {
+	switch kind {
+	case symindex.KindMethod:
+		return "method"
+	case symindex.KindStruct:
+		return "struct"
+	case symindex.KindInterface:
+		return "interface"
+	case symindex.KindType, symindex.KindClass:
+		return "type"
+	case symindex.KindConstant:
+		return "const"
+	case symindex.KindVariable:
+		return "var"
+	default:
+		return "function"
+	}
+}
+
+func isPublicElixirSymbol(item symindex.Symbol) bool {
+	sig := strings.TrimSpace(item.Signature)
+	switch {
+	case strings.HasPrefix(sig, "defp "), strings.HasPrefix(sig, "defmacrop "), strings.HasPrefix(sig, "@typep "):
+		return false
+	default:
+		return true
+	}
 }

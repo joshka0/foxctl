@@ -25,6 +25,7 @@ import {
   compressCompanionConversation,
   type CompanionCompressionResult,
   getProviderAvailability,
+  type ProviderAvailability,
   getCompanionMemoryStats,
   getCompanionMemoryContext,
   type CompanionMemoryStats,
@@ -38,7 +39,7 @@ import {
 import type { Agent } from "@/api/types";
 import {
   PROVIDERS,
-  getModelsForProvider,
+  mergeModelsForProvider,
 } from "@/components/agents/spawnFormConstants";
 import { ConversationInspector } from "@/components/conversations/ConversationInspector";
 import { ConversationListSidebar } from "@/components/conversations/ConversationListSidebar";
@@ -140,7 +141,7 @@ export function ConversationsList() {
   const [compressionModel, setCompressionModel] = useState("");
   // Provider availability from server
   const [providerAvailability, setProviderAvailability] = useState<
-    Map<string, boolean>
+    Map<string, ProviderAvailability>
   >(new Map());
   const [defaultProvider, setDefaultProvider] = useState<string>("");
   // Memory stats
@@ -185,12 +186,21 @@ export function ConversationsList() {
   useEffect(() => {
     getProviderAvailability()
       .then((data) => {
-        const map = new Map(data.providers.map((p) => [p.id, p.available]));
+        const map = new Map(data.providers.map((p) => [p.id, p]));
         setProviderAvailability(map);
         setDefaultProvider(data.default_provider);
       })
-      .catch(() => {}); // silent fail - all providers shown as available if endpoint unreachable
+      .catch(() => {}); // silent fail - static provider catalog remains available
   }, []);
+
+  const getKnownModelsForProvider = useCallback(
+    (provider: string) =>
+      mergeModelsForProvider(
+        provider,
+        providerAvailability.get(provider)?.models ?? [],
+      ),
+    [providerAvailability],
+  );
 
   const conversations = useMemo(
     () => data?.conversations ?? [],
@@ -325,7 +335,7 @@ export function ConversationsList() {
 
       const initProviderModel = (provider: string, model: string) => {
         const providerCfg = PROVIDERS.find((p) => p.id === provider);
-        const knownModels = getModelsForProvider(provider);
+        const knownModels = getKnownModelsForProvider(provider);
 
         setSelectedProvider(provider);
 
@@ -823,7 +833,7 @@ Help the user understand and interact with this agent's work.`,
       const provider = linkedAgent?.llm_provider || "";
       const model = linkedAgent?.llm_model || "";
       const providerCfg = PROVIDERS.find((p) => p.id === provider);
-      const knownModels = getModelsForProvider(provider);
+      const knownModels = getKnownModelsForProvider(provider);
 
       setSelectedProvider(provider);
       if (
@@ -912,6 +922,18 @@ Help the user understand and interact with this agent's work.`,
           context: agentContext,
         });
 
+        const assistantContent =
+          response.error &&
+          (response.response.trim() === "" ||
+            response.response.includes(
+              "I couldn't generate a visible response",
+            ) ||
+            response.response.includes(
+              "I could not complete a tool-grounded research pass",
+            ))
+            ? `${response.response}\n\nReason: ${response.error}`
+            : response.response;
+
         // Add the response with attached tool calls (for inline display)
         const toolCallsForMessage =
           response.tool_calls?.map((tc) => ({
@@ -925,15 +947,20 @@ Help the user understand and interact with this agent's work.`,
           ...prev,
           {
             role: "assistant",
-            content: response.response,
+            content: assistantContent,
             timestamp: new Date().toISOString(),
             tool_calls:
               toolCallsForMessage.length > 0 ? toolCallsForMessage : undefined,
+            metadata: response.continuity
+              ? {
+                  continuity: response.continuity,
+                }
+              : undefined,
           },
         ]);
 
         // Also update context panel for quick reference
-        if (response.tool_calls || response.injected_contexts) {
+        if (response.tool_calls || response.injected_contexts || response.continuity) {
           setContextInfo((prev) => ({
             ...prev,
             toolCalls:
@@ -942,6 +969,17 @@ Help the user understand and interact with this agent's work.`,
                 args: tc.arguments ? JSON.stringify(tc.arguments) : undefined,
                 result: tc.output,
               })) || [],
+                continuity: response.continuity
+                  ? {
+                      source: response.continuity.source,
+                      visibleSummary: response.continuity.visible_summary,
+                      memoryQuery: response.continuity.memory_query,
+                      subcallPrompt: response.continuity.subcall_prompt,
+                      layerHits: response.continuity.layer_hits,
+                      subcallCount: response.continuity.subcall_count,
+                      artifactRefs: response.continuity.artifact_refs,
+                }
+              : prev.continuity,
             injectedContexts:
               response.injected_contexts?.map((ic) => ({
                 source: ic.source || "hook",
@@ -1299,6 +1337,7 @@ Help the user understand and interact with this agent's work.`,
           defaultProvider={defaultProvider}
           linkedAgent={linkedAgent}
           providerAvailability={providerAvailability}
+          getKnownModelsForProvider={getKnownModelsForProvider}
           selectedProvider={selectedProvider}
           setSelectedProvider={setSelectedProvider}
           maxHistoryTurns={maxHistoryTurns}

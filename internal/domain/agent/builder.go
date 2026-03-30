@@ -234,6 +234,22 @@ func (b *Builder) WithContext(ctx map[string]any) *Builder {
 	return b
 }
 
+// WithResponseSchema sets the ResponseSchema field (for Ask messages).
+func (b *Builder) WithResponseSchema(schema json.RawMessage) *Builder {
+	if ask, ok := b.data.(*AskData); ok {
+		ask.ResponseSchema = append(json.RawMessage(nil), schema...)
+	}
+	return b
+}
+
+// WithResponseKeys sets the ResponseKeys field (for Ask messages).
+func (b *Builder) WithResponseKeys(keys []string) *Builder {
+	if ask, ok := b.data.(*AskData); ok {
+		ask.ResponseKeys = append([]string(nil), keys...)
+	}
+	return b
+}
+
 // Answer sets the Answer field (for Reply messages).
 func (b *Builder) Answer(answer map[string]any) *Builder {
 	if reply, ok := b.data.(*ReplyData); ok {

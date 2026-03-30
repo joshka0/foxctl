@@ -215,6 +215,12 @@ export const PROVIDERS: ProviderConfig[] = [
     ],
   },
   {
+    id: 'lmstudio',
+    name: 'LM Studio',
+    models: [{ id: '', name: 'Default model' }],
+    allowCustom: true,
+  },
+  {
     id: 'openrouter',
     name: 'OpenRouter',
     models: [
@@ -279,4 +285,23 @@ export function getProviderById(id: string): ProviderConfig | undefined {
 export function getModelsForProvider(providerId: string): ModelConfig[] {
   const provider = getProviderById(providerId)
   return provider?.models ?? []
+}
+
+export function mergeModelsForProvider(
+  providerId: string,
+  discoveredModels: ModelConfig[] = [],
+): ModelConfig[] {
+  const merged = new globalThis.Map<string, ModelConfig>()
+  for (const model of getModelsForProvider(providerId)) {
+    merged.set(model.id, model)
+  }
+  for (const model of discoveredModels) {
+    if (!model?.id) continue
+    merged.set(model.id, { id: model.id, name: model.name || model.id })
+  }
+  return Array.from(merged.values()).sort((a, b) => {
+    if (a.id === '') return -1
+    if (b.id === '') return 1
+    return a.name.localeCompare(b.name)
+  })
 }

@@ -16,12 +16,13 @@ RACE_PKGS := $(shell $(GO_CMD_CGO) list ./... | grep -v 'github.com/jkatigb/agen
 BINARY ?= agentctl
 GOFUMPT ?= gofumpt
 GOLANGCI ?= golangci-lint
+GOLANGCI_TIMEOUT ?= 10m
 GOFILES := $(shell find cmd internal skills -name '*.go')
 SKILL_DIRS := $(shell find skills -mindepth 1 -maxdepth 1 -type d)
 # Skills requiring CGO (excluded from non-CGO builds)
 CGO_SKILLS := libsql_migrate
 
-.PHONY: fmt lint typecheck lsp-check vet test test-cgo test-cgo-short test-race test-integration test-integration-cmd cover check-coverage check-doc-links build build-cgo build-all viewer snapshot tidy check skill skills-build skills-build-cgo skills-build-all skills-install skills-install-cgo skills-install-all skills-test completions init ts-install ts-dev-tui ts-dev-gui ts-build-tui ts-tui ts-build ts-typecheck env-sync env-watch env-watch-stop db-backup db-backup-list db-backup-clean gepa-prompt gepa-cycle gepa-dataset-export gepa-dataset-export-ranked gepa-claude-export gepa-claude-rewrite gepa-leaderboard gepa-compare-batch gepa-judge-baseline
+.PHONY: fmt lint typecheck lsp-check vet test test-cgo test-cgo-short test-race test-integration test-integration-cmd cover check-coverage check-doc-links build build-cgo build-all viewer snapshot tidy check skill skills-build skills-build-cgo skills-build-all skills-install skills-install-cgo skills-install-all skills-test completions init ts-install ts-dev-tui ts-dev-gui ts-build-tui ts-tui ts-build ts-typecheck env-sync env-watch env-watch-stop db-backup db-backup-list db-backup-clean gepa-prompt gepa-cycle gepa-dataset-export gepa-dataset-export-ranked gepa-claude-export gepa-claude-rewrite gepa-leaderboard gepa-compare-batch gepa-judge-baseline eval-code-search-agentctl-package eval-code-search-praze-infra eval-code-search-agentctl-repo-grounded eval-code-search-agentctl-change-impact eval-code-search-agentctl-trace-symbol eval-code-search-agentctl-bridge-esoteric eval-retrieval-agentctl eval-retrieval-agentctl-mixed eval-retrieval-agentctl-cochange eval-retrieval-jido eval-retrieval-praze eval-retrieval-praze-mixed eval-retrieval-praze-k8s
 
 fmt:
 	@echo "Running gofumpt"
@@ -29,7 +30,7 @@ fmt:
 
 lint:
 	@echo "Running golangci-lint"
-	@GOFLAGS=-buildvcs=false $(GOLANGCI) run ./...
+	@GOFLAGS=-buildvcs=false $(GOLANGCI) run --timeout $(GOLANGCI_TIMEOUT) ./...
 
 # Type-check all packages (faster than gopls per-file, catches type errors)
 # This is essentially what the compiler does during build
@@ -101,6 +102,45 @@ gepa-claude-rewrite:
 
 gepa-leaderboard:
 	@$(GO_CMD_CGO) run -tags=libsqlite3 ./cmd/agentctl optimize dataset claude leaderboard $(ARGS)
+
+eval-code-search-agentctl-package:
+	@bash ./scripts/eval_code_search_agentctl_package.sh $(ARGS)
+
+eval-code-search-praze-infra:
+	@bash ./scripts/eval_code_search_praze_infra.sh $(ARGS)
+
+eval-code-search-agentctl-repo-grounded:
+	@bash ./scripts/eval_code_search_agentctl_repo_grounded.sh $(ARGS)
+
+eval-code-search-agentctl-change-impact:
+	@bash ./scripts/eval_code_search_agentctl_change_impact.sh $(ARGS)
+
+eval-code-search-agentctl-trace-symbol:
+	@bash ./scripts/eval_code_search_agentctl_trace_symbol.sh $(ARGS)
+
+eval-code-search-agentctl-bridge-esoteric:
+	@bash ./scripts/eval_code_search_agentctl_bridge_esoteric.sh $(ARGS)
+
+eval-retrieval-agentctl:
+	@bash ./scripts/eval_retrieval_agentctl.sh $(ARGS)
+
+eval-retrieval-agentctl-mixed:
+	@bash ./scripts/eval_retrieval_agentctl_mixed.sh $(ARGS)
+
+eval-retrieval-agentctl-cochange:
+	@bash ./scripts/eval_retrieval_agentctl_cochange.sh $(ARGS)
+
+eval-retrieval-jido:
+	@bash ./scripts/eval_retrieval_jido.sh $(ARGS)
+
+eval-retrieval-praze:
+	@bash ./scripts/eval_retrieval_praze.sh $(ARGS)
+
+eval-retrieval-praze-mixed:
+	@bash ./scripts/eval_retrieval_praze_mixed.sh $(ARGS)
+
+eval-retrieval-praze-k8s:
+	@bash ./scripts/eval_retrieval_praze_k8s.sh $(ARGS)
 
 test-race:
 	@$(GO_CMD_CGO) test -race -short $(RACE_PKGS)

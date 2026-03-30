@@ -97,6 +97,8 @@ func handleAsk(ctx context.Context, logger zerolog.Logger, msg agent.Message, co
 		ConversationID:      conversationID,
 		Message:             question,
 		Context:             askData.Context,
+		ResponseSchema:      askData.ResponseSchema,
+		ResponseKeys:        askData.ResponseKeys,
 		RequireContextQuery: requireContextQueryPtr,
 	}
 	if execMode != "" {
@@ -120,6 +122,12 @@ func handleAsk(ctx context.Context, logger zerolog.Logger, msg agent.Message, co
 
 	// 6. Build reply payload
 	answer := map[string]any{"response": result}
+	if len(askData.ResponseSchema) > 0 {
+		var payload any
+		if err := json.Unmarshal([]byte(result), &payload); err == nil {
+			answer["response_json"] = payload
+		}
+	}
 	if resp.Presence != nil {
 		answer["presence"] = resp.Presence
 	}
@@ -154,7 +162,7 @@ func handleAsk(ctx context.Context, logger zerolog.Logger, msg agent.Message, co
 func shouldEnforceResearchExecution(agentRole, question string) bool {
 	role := strings.ToLower(strings.TrimSpace(agentRole))
 	switch role {
-	case "researcher", "semantic_scout", "dag_scout", "symbol_scout", "annotation_scout":
+	case "researcher", "semantic_scout", "dag_scout", "symbol_scout", "annotation_scout", "memory_fact_scout", "memory_timeline_scout", "aca_context_scout":
 		// Skip strict enforcement for very short conversational asks.
 		q := strings.ToLower(strings.TrimSpace(question))
 		if q == "" {

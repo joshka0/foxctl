@@ -3,7 +3,7 @@ kind: Skill
 metadata:
   name: code/symbols
   version: 0.1.0
-  description: "Extract code symbols: functions, types, interfaces, structs, methods (Go, Python, JS/TS)"
+  description: "Extract code symbols: functions, types, interfaces, structs, methods (Go, Python, JS/TS, Elixir)"
   tags: ["code", "symbols", "ast", "functions", "types"]
 distribution:
   type: exec
@@ -28,7 +28,7 @@ signature:
     - name: language
       type: string
       required: false
-      enum: ["go", "python", "javascript", "typescript", "auto"]
+      enum: ["go", "python", "javascript", "typescript", "elixir", "auto"]
       default: "auto"
       description: "Programming language (auto-detect from extension)"
     - name: include_private

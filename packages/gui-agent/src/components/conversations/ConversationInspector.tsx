@@ -16,6 +16,7 @@ import type {
   ConversationSettings,
   ConversationSettingsPatch,
   PersonalityInfo,
+  ProviderAvailability,
 } from "@/api/client";
 import type { AgentSession } from "@/api/types";
 import type { Conversation } from "@/lib/conversation-list-models";
@@ -25,7 +26,6 @@ import { cn, formatRelativeTime } from "@/lib/utils";
 import { getAgentDisplayName, getRoleIcon } from "@/lib/agent-utils";
 import {
   PROVIDERS,
-  getModelsForProvider,
   COMPANION_TOOL_MODELS,
   COMPANION_RESPONSE_MODELS,
 } from "@/components/agents/spawnFormConstants";
@@ -66,7 +66,8 @@ interface ConversationInspectorProps {
     llm_model?: string;
     exec_mode?: string;
   } | null;
-  providerAvailability: Map<string, boolean>;
+  providerAvailability: Map<string, ProviderAvailability>;
+  getKnownModelsForProvider: (provider: string) => { id: string; name: string }[];
   selectedProvider: string;
   setSelectedProvider: React.Dispatch<React.SetStateAction<string>>;
   maxHistoryTurns: number;
@@ -130,6 +131,7 @@ export function ConversationInspector({
   defaultProvider,
   linkedAgent,
   providerAvailability,
+  getKnownModelsForProvider,
   selectedProvider,
   setSelectedProvider,
   maxHistoryTurns,
@@ -180,6 +182,8 @@ export function ConversationInspector({
   setSelectedMessage,
 }: ConversationInspectorProps) {
   const inspectorRoleIcon = getRoleIcon(agentOps.targetAgent?.role);
+  const selectedProviderStatus = providerAvailability.get(selectedProvider);
+  const selectedProviderModels = getKnownModelsForProvider(selectedProvider);
 
   return (
     <div className="w-80 border-l border-border flex flex-col bg-muted/20">
@@ -468,16 +472,28 @@ export function ConversationInspector({
                 <option key={provider.id} value={provider.id}>
                   {provider.id === ""
                     ? `Default (${defaultProvider || linkedAgent?.llm_provider || "openai"})`
-                    : `${provider.name}${providerAvailability.has(provider.id) && !providerAvailability.get(provider.id) ? " \u26A0" : ""}`}
+                    : `${provider.name}${providerAvailability.get(provider.id)?.available === false ? " \u26A0" : ""}`}
                 </option>
               ))}
             </select>
           </div>
           {selectedProvider !== "" &&
-            providerAvailability.has(selectedProvider) &&
-            !providerAvailability.get(selectedProvider) && (
+            selectedProviderStatus?.available === false && (
               <div className="text-[10px] text-destructive">
-                No API key configured for this provider
+                {selectedProviderStatus.reachable === false
+                  ? `Provider unreachable${selectedProviderStatus.base_url ? ` at ${selectedProviderStatus.base_url}` : ""}${selectedProviderStatus.message ? `: ${selectedProviderStatus.message}` : ""}`
+                  : "No API key configured for this provider"}
+              </div>
+            )}
+          {selectedProvider !== "" &&
+            selectedProviderStatus?.reachable &&
+            (selectedProviderStatus.models?.length ?? 0) > 0 && (
+              <div className="text-[10px] text-muted-foreground">
+                Discovered {selectedProviderStatus.models?.length} model
+                {(selectedProviderStatus.models?.length ?? 0) === 1 ? "" : "s"}
+                {selectedProviderStatus.base_url
+                  ? ` from ${selectedProviderStatus.base_url}`
+                  : ""}
               </div>
             )}
           <div className="flex items-center justify-between">
@@ -508,7 +524,7 @@ export function ConversationInspector({
                   className="text-xs bg-muted border border-border rounded-md px-2 py-1 font-mono focus:outline-none focus:ring-1 focus:ring-ring max-w-[160px]"
                 >
                   <option value="">Default</option>
-                  {getModelsForProvider(selectedProvider).map((model) => (
+                  {selectedProviderModels.map((model) => (
                     <option key={model.id} value={model.id}>
                       {model.name}
                     </option>
@@ -575,7 +591,7 @@ export function ConversationInspector({
                 }}
                 className="text-xs bg-muted border border-border rounded-md px-2 py-1 font-mono focus:outline-none focus:ring-1 focus:ring-ring max-w-[160px]"
               >
-                {getModelsForProvider(selectedProvider).map((model) => (
+                {selectedProviderModels.map((model) => (
                   <option key={model.id} value={model.id}>
                     {model.id === ""
                       ? `Default (${linkedAgent?.llm_model || "gpt-4o-mini"})`
@@ -630,7 +646,7 @@ export function ConversationInspector({
                 {PROVIDERS.filter((provider) => provider.id !== "").map(
                   (provider) => (
                     <option key={provider.id} value={provider.id}>
-                      {`${provider.name}${providerAvailability.has(provider.id) && !providerAvailability.get(provider.id) ? " \u26A0" : ""}`}
+                      {`${provider.name}${providerAvailability.get(provider.id)?.available === false ? " \u26A0" : ""}`}
                     </option>
                   ),
                 )}
@@ -651,7 +667,7 @@ export function ConversationInspector({
                   className="text-xs bg-muted border border-border rounded-md px-2 py-1 font-mono focus:outline-none focus:ring-1 focus:ring-ring max-w-[160px]"
                 >
                   <option value="">Default</option>
-                  {getModelsForProvider(compressionProvider).map((model) => (
+                  {getKnownModelsForProvider(compressionProvider).map((model) => (
                     <option key={model.id} value={model.id}>
                       {model.name}
                     </option>
@@ -694,7 +710,7 @@ export function ConversationInspector({
                 Story Pipeline
               </div>
               {providerAvailability.size > 0 &&
-                !providerAvailability.get("openrouter") && (
+                providerAvailability.get("openrouter")?.available === false && (
                   <div className="text-[10px] text-destructive">
                     OpenRouter key not configured
                   </div>
@@ -1148,6 +1164,156 @@ export function ConversationInspector({
                     </p>
                   </div>
                 )}
+                {selectedMessage.metadata &&
+                  typeof selectedMessage.metadata === "object" &&
+                  "continuity" in selectedMessage.metadata && (
+                    <div className="pt-2 border-t border-border space-y-2">
+                      <span className="text-xs font-medium text-muted-foreground">
+                        Continuity
+                      </span>
+                      {(() => {
+                        const continuity = (
+                          selectedMessage.metadata as {
+                            continuity?: {
+                              source?: unknown;
+                              visible_summary?: unknown;
+                              memory_query?: unknown;
+                              subcall_prompt?: unknown;
+                              layer_hits?: unknown;
+                              subcall_count?: unknown;
+                              artifact_refs?: unknown;
+                            };
+                          }
+                        ).continuity;
+                        if (!continuity || typeof continuity !== "object") {
+                          return null;
+                        }
+                        const source =
+                          typeof continuity.source === "string"
+                            ? continuity.source
+                            : "";
+                        const visibleSummary =
+                          typeof continuity.visible_summary === "string"
+                            ? continuity.visible_summary
+                            : "";
+                        const memoryQuery =
+                          typeof continuity.memory_query === "string"
+                            ? continuity.memory_query
+                            : "";
+                        const layerHits = Array.isArray(continuity.layer_hits)
+                          ? continuity.layer_hits.filter(
+                              (value): value is string =>
+                                typeof value === "string" && value.length > 0,
+                            )
+                          : [];
+                        const subcallCount =
+                          typeof continuity.subcall_count === "number"
+                            ? continuity.subcall_count
+                            : null;
+                        const artifactRefs = Array.isArray(
+                          continuity.artifact_refs,
+                        )
+                          ? continuity.artifact_refs.filter(
+                              (value): value is string =>
+                                typeof value === "string" && value.length > 0,
+                            )
+                          : [];
+                        const subcallPrompt =
+                          typeof continuity.subcall_prompt === "string"
+                            ? continuity.subcall_prompt
+                            : "";
+                        return (
+                          <div className="space-y-1 text-xs">
+                            {source && (
+                              <div className="flex items-center justify-between gap-2">
+                                <span className="text-muted-foreground">
+                                  Source
+                                </span>
+                                <Badge variant="outline" className="text-[10px]">
+                                  {source}
+                                </Badge>
+                              </div>
+                            )}
+                            {visibleSummary && (
+                              <div>
+                                <span className="text-muted-foreground">
+                                  Visible Summary
+                                </span>
+                                <p className="mt-1 text-foreground">
+                                  {visibleSummary}
+                                </p>
+                              </div>
+                            )}
+                            {memoryQuery && (
+                              <div>
+                                <span className="text-muted-foreground">
+                                  Memory Query
+                                </span>
+                                <p className="mt-1 font-mono text-[11px] text-foreground break-words">
+                                  {memoryQuery}
+                                </p>
+                              </div>
+                            )}
+                            {subcallPrompt && (
+                              <div>
+                                <span className="text-muted-foreground">
+                                  Subcall Prompt
+                                </span>
+                                <p className="mt-1 font-mono text-[11px] text-foreground break-words">
+                                  {subcallPrompt}
+                                </p>
+                              </div>
+                            )}
+                            {layerHits.length > 0 && (
+                              <div>
+                                <span className="text-muted-foreground">
+                                  Layer Hits
+                                </span>
+                                <div className="mt-1 flex flex-wrap gap-1">
+                                  {layerHits.map((hit) => (
+                                    <Badge
+                                      key={hit}
+                                      variant="outline"
+                                      className="text-[10px]"
+                                    >
+                                      {hit}
+                                    </Badge>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+                            {subcallCount !== null && (
+                              <div className="flex items-center justify-between gap-2">
+                                <span className="text-muted-foreground">
+                                  Subcalls
+                                </span>
+                                <span className="text-foreground">
+                                  {subcallCount}
+                                </span>
+                              </div>
+                            )}
+                            {artifactRefs.length > 0 && (
+                              <div>
+                                <span className="text-muted-foreground">
+                                  Artifact Refs
+                                </span>
+                                <div className="mt-1 space-y-1">
+                                  {artifactRefs.map((ref) => (
+                                    <p
+                                      key={ref}
+                                      className="font-mono text-[11px] text-foreground break-words"
+                                    >
+                                      {ref}
+                                    </p>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })()}
+                    </div>
+                  )}
               </Card>
             </div>
           ) : (

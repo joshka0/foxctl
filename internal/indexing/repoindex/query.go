@@ -89,19 +89,63 @@ func buildFallbackCandidates(query string) []string {
 	if trimmed == "" {
 		return nil
 	}
-	candidates := []string{trimmed}
+	candidates := make([]string, 0, 6)
+	addCandidate := func(candidate string) {
+		candidate = strings.TrimSpace(candidate)
+		if candidate == "" {
+			return
+		}
+		for _, existing := range candidates {
+			if existing == candidate {
+				return
+			}
+		}
+		candidates = append(candidates, candidate)
+	}
+	addCandidate(trimmed)
 
 	quoted := quoteFTSQuery(trimmed)
-	if quoted != "" && quoted != trimmed {
-		candidates = append(candidates, quoted)
-	}
+	addCandidate(quoted)
 
 	if isMultiWordQuery(trimmed) {
 		if orQuery := buildOrFallbackQuery(trimmed); orQuery != "" && orQuery != trimmed && orQuery != quoted {
-			candidates = append(candidates, orQuery)
+			addCandidate(orQuery)
+		}
+	}
+
+	sanitized := sanitizeFTSQuery(trimmed)
+	if sanitized != "" && sanitized != trimmed {
+		addCandidate(sanitized)
+		addCandidate(quoteFTSQuery(sanitized))
+		if isMultiWordQuery(sanitized) {
+			addCandidate(buildOrFallbackQuery(sanitized))
 		}
 	}
 	return candidates
+}
+
+func sanitizeFTSQuery(query string) string {
+	query = strings.TrimSpace(query)
+	if query == "" {
+		return ""
+	}
+	var b strings.Builder
+	b.Grow(len(query))
+	for _, r := range query {
+		switch {
+		case r >= 'a' && r <= 'z':
+			b.WriteRune(r)
+		case r >= 'A' && r <= 'Z':
+			b.WriteRune(r)
+		case r >= '0' && r <= '9':
+			b.WriteRune(r)
+		case r == '_' || r == '-':
+			b.WriteRune(r)
+		default:
+			b.WriteByte(' ')
+		}
+	}
+	return strings.Join(strings.Fields(b.String()), " ")
 }
 
 // isMultiWordQuery returns true if the query contains more than one word.

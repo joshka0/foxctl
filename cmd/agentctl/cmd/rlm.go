@@ -76,6 +76,7 @@ func newRLMRunCommand() *cobra.Command {
 			env.Tools = rlmenv.FilterTools(env.Tools, toolProfile)
 			var runRecursive func(context.Context, rlm.Task, rlm.Environment) (rlm.Result, error)
 			runRecursive = func(ctx context.Context, currentTask rlm.Task, currentEnv rlm.Environment) (rlm.Result, error) {
+				currentTask, currentEnv = applyRLMScoutRole(currentTask, currentEnv)
 				currentAdapter := rlmenv.NewReadOnlyAdapter(cfg, currentTask.WorkspaceRoot, strings.TrimSpace(vaultPath), companionDB, currentEnv)
 				currentAdapter.SetSubcall(runRecursive)
 				runner := chooseRLMRunner(executor, currentAdapter, currentTask, currentEnv, llmProvider, llmModel, llmBaseURL, llmAPIKey, llmTimeout, requireToolUse, routeProfile, planMode)
@@ -153,6 +154,17 @@ func chooseRLMRunner(
 	default:
 		return rlm.InspectRunner{Tools: adapter}
 	}
+}
+
+func applyRLMScoutRole(task rlm.Task, env rlm.Environment) (rlm.Task, rlm.Environment) {
+	role := rlmenv.NormalizeScoutRole(task.Role)
+	if role == "" {
+		return task, env
+	}
+	task.Role = role
+	task.Prompt = rlmenv.DecoratePromptForScoutRole(role, task.Prompt)
+	env.Tools = rlmenv.FilterToolsForScoutRole(env.Tools, role)
+	return task, env
 }
 
 func init() {

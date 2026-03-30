@@ -86,6 +86,7 @@ func newDoctorCommand() *cobra.Command {
 				},
 				"workspace": map[string]any{
 					"path":          wsInfo.Path,
+					"family_path":   wsInfo.FamilyPath,
 					"id":            wsID,
 					"repo_identity": wsInfo.RepoIdentity,
 				},

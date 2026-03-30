@@ -2,10 +2,12 @@ package obsidianindex
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestRebuildSearchRelatedAndStats(t *testing.T) {
@@ -64,6 +66,19 @@ func TestRebuildSearchRelatedAndStats(t *testing.T) {
 	}
 	if repoPathHits[0].Path != "notes/patterns/compact-handoff-pattern.md" {
 		t.Fatalf("repo path hit=%q want compact handoff pattern", repoPathHits[0].Path)
+	}
+	primaryAnchorHits, err := store.SearchNotes(ctx, "store.go", 10)
+	if err != nil {
+		t.Fatalf("SearchNotes primary anchor: %v", err)
+	}
+	if len(primaryAnchorHits) == 0 {
+		t.Fatalf("expected primary-anchor-aware search hits")
+	}
+	if primaryAnchorHits[0].PrimaryAnchorPath != "internal/contextplane/store.go" {
+		t.Fatalf("primary anchor=%q want internal/contextplane/store.go", primaryAnchorHits[0].PrimaryAnchorPath)
+	}
+	if got := primaryAnchorHits[0].AnchorRoles["impl"]; len(got) != 0 {
+		t.Fatalf("unexpected impl anchor roles in fixture hit: %v", got)
 	}
 	repoSymbolHits, err := store.SearchNotes(ctx, "WorkspaceStore", 10)
 	if err != nil {
@@ -133,6 +148,39 @@ func TestRebuildSearchRelatedAndStats(t *testing.T) {
 
 	if _, err := store.SearchNotesSemantic(ctx, "compact handoff pattern", fakeEmbeddingProviderDifferentDims{}, 10); err == nil {
 		t.Fatalf("expected dimension mismatch error")
+	}
+}
+
+func TestRetryObsidianBusyRetriesLockedErrors(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	attempts := 0
+	err := retryObsidianBusy(ctx, func() error {
+		attempts++
+		if attempts < 3 {
+			return errors.New("database is locked")
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("retryObsidianBusy() error = %v", err)
+	}
+	if attempts != 3 {
+		t.Fatalf("attempts=%d want 3", attempts)
+	}
+}
+
+func TestRetryObsidianBusyHonorsContextDeadline(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	err := retryObsidianBusy(ctx, func() error {
+		return errors.New("SQLITE_BUSY")
+	})
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("retryObsidianBusy() error = %v want deadline exceeded", err)
 	}
 }
 

@@ -104,8 +104,8 @@ func BuildPlan(prompt string, requestedRoute RouteProfile, requestedMode PlanMod
 			{
 				Name:           "discovery",
 				Objective:      "Find likely repository files or canonical notes that answer the query.",
-				AllowedTools:   []string{"semantic_search_code", "smart_search_code", "search_repo", "search_vault"},
-				RequireOneOf:   []string{"semantic_search_code", "smart_search_code"},
+				AllowedTools:   []string{"code_search_ensemble", "semantic_search_code", "smart_search_code", "search_repo", "search_vault"},
+				RequireOneOf:   []string{"code_search_ensemble"},
 				MaxIterations:  3,
 				RequireToolUse: true,
 			},

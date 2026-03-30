@@ -22,6 +22,11 @@ import (
 	"github.com/oklog/ulid/v2"
 )
 
+const (
+	obsidianBusyRetryWindow = 15 * time.Second
+	obsidianBusyRetryStep   = 50 * time.Millisecond
+)
+
 type Store interface {
 	Close() error
 	Rebuild(ctx context.Context, vaultRoot string) (*BuildResult, error)
@@ -81,16 +86,19 @@ type Chunk struct {
 }
 
 type SearchHit struct {
-	Path      string   `json:"path"`
-	Title     string   `json:"title"`
-	Type      string   `json:"type,omitempty"`
-	Project   string   `json:"project,omitempty"`
-	Status    string   `json:"status,omitempty"`
-	Trust     string   `json:"trust,omitempty"`
-	Score     int      `json:"score"`
-	Snippet   string   `json:"snippet,omitempty"`
-	RepoPaths []string `json:"repo_paths,omitempty"`
-	Symbols   []string `json:"symbols,omitempty"`
+	Path              string              `json:"path"`
+	Title             string              `json:"title"`
+	Type              string              `json:"type,omitempty"`
+	Project           string              `json:"project,omitempty"`
+	Status            string              `json:"status,omitempty"`
+	Trust             string              `json:"trust,omitempty"`
+	Score             int                 `json:"score"`
+	Snippet           string              `json:"snippet,omitempty"`
+	PrimaryAnchorPath string              `json:"primary_anchor_path,omitempty"`
+	RepoPaths         []string            `json:"repo_paths,omitempty"`
+	AnchorPaths       []string            `json:"anchor_paths,omitempty"`
+	AnchorRoles       map[string][]string `json:"anchor_roles,omitempty"`
+	Symbols           []string            `json:"symbols,omitempty"`
 }
 
 type RelatedHit struct {
@@ -180,6 +188,8 @@ CREATE TABLE IF NOT EXISTS obsidian_notes (
 	project TEXT,
 	status TEXT,
 	trust TEXT,
+	primary_anchor_path TEXT,
+	anchor_roles_json TEXT NOT NULL DEFAULT '',
 	updated_at TEXT NOT NULL,
 	hash TEXT NOT NULL
 );
@@ -236,6 +246,13 @@ CREATE TABLE IF NOT EXISTS obsidian_repo_paths (
 CREATE INDEX IF NOT EXISTS idx_obsidian_repo_paths_note ON obsidian_repo_paths(note_id);
 CREATE INDEX IF NOT EXISTS idx_obsidian_repo_paths_path ON obsidian_repo_paths(path);
 
+CREATE TABLE IF NOT EXISTS obsidian_anchor_paths (
+	note_id TEXT NOT NULL,
+	path TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_obsidian_anchor_paths_note ON obsidian_anchor_paths(note_id);
+CREATE INDEX IF NOT EXISTS idx_obsidian_anchor_paths_path ON obsidian_anchor_paths(path);
+
 CREATE TABLE IF NOT EXISTS obsidian_repo_symbols (
 	note_id TEXT NOT NULL,
 	symbol TEXT NOT NULL
@@ -279,6 +296,9 @@ CREATE INDEX IF NOT EXISTS idx_obsidian_embedding_metadata_model ON obsidian_emb
 	if _, err := db.ExecContext(ctx, ddl); err != nil {
 		return fmt.Errorf("obsidianindex: migrate: %w", err)
 	}
+	_, _ = db.ExecContext(ctx, `ALTER TABLE obsidian_notes ADD COLUMN primary_anchor_path TEXT`)
+	_, _ = db.ExecContext(ctx, `ALTER TABLE obsidian_notes ADD COLUMN anchor_roles_json TEXT NOT NULL DEFAULT ''`)
+	_, _ = db.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS idx_obsidian_notes_primary_anchor_path ON obsidian_notes(primary_anchor_path)`)
 	return nil
 }
 
@@ -289,15 +309,29 @@ func MigrateSchema(ctx context.Context, db *sql.DB) error {
 
 func (s *sqlStore) Rebuild(ctx context.Context, vaultRoot string) (*BuildResult, error) {
 	vaultRoot = filepath.Clean(vaultRoot)
-	tx, err := s.db.BeginTx(ctx, nil)
+	var tx *sql.Tx
+	err := retryObsidianBusy(ctx, func() error {
+		var beginErr error
+		tx, beginErr = s.db.BeginTx(ctx, nil)
+		if beginErr != nil {
+			return fmt.Errorf("obsidianindex: begin tx: %w", beginErr)
+		}
+		return nil
+	})
 	if err != nil {
-		return nil, fmt.Errorf("obsidianindex: begin tx: %w", err)
+		return nil, err
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	for _, table := range []string{"obsidian_repo_symbols", "obsidian_repo_paths", "obsidian_chunks", "obsidian_tags", "obsidian_aliases", "obsidian_links", "obsidian_headings", "obsidian_notes"} {
-		if _, err := tx.ExecContext(ctx, "DELETE FROM "+table); err != nil {
-			return nil, fmt.Errorf("obsidianindex: clear %s: %w", table, err)
+	for _, table := range []string{"obsidian_repo_symbols", "obsidian_anchor_paths", "obsidian_repo_paths", "obsidian_chunks", "obsidian_tags", "obsidian_aliases", "obsidian_links", "obsidian_headings", "obsidian_notes"} {
+		tableName := table
+		if err := retryObsidianBusy(ctx, func() error {
+			if _, execErr := tx.ExecContext(ctx, "DELETE FROM "+tableName); execErr != nil {
+				return fmt.Errorf("obsidianindex: clear %s: %w", tableName, execErr)
+			}
+			return nil
+		}); err != nil {
+			return nil, err
 		}
 	}
 
@@ -332,13 +366,25 @@ func (s *sqlStore) Rebuild(ctx context.Context, vaultRoot string) (*BuildResult,
 		}
 		tags := uniqueStrings(append(fm.Tags, extractInlineTags(string(body))...))
 		repoPaths := uniqueStrings(fm.Paths)
+		anchorPaths := uniqueStrings(fm.AnchorPaths)
+		primaryAnchorPath := strings.TrimSpace(fm.Values["primary_anchor_path"])
+		if primaryAnchorPath == "" && len(anchorPaths) > 0 {
+			primaryAnchorPath = anchorPaths[0]
+		}
+		anchorRoles := normalizeAnchorRoles(fm.AnchorRoles)
+		anchorRolesJSON := ""
+		if len(anchorRoles) > 0 {
+			if body, err := json.Marshal(anchorRoles); err == nil {
+				anchorRolesJSON = string(body)
+			}
+		}
 		repoSymbols := uniqueStrings(fm.Symbols)
 		noteID := ulid.Make().String()
 		now := timeutil.NowUTC()
 		if _, err := tx.ExecContext(ctx, `
-INSERT INTO obsidian_notes (id, vault_root, path, title, search_text, type, project, status, trust, updated_at, hash)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-`, noteID, vaultRoot, filepath.ToSlash(rel), title, buildSearchText(parsed, tags), nullable(fm.Values["type"]), nullable(fm.Values["project"]), nullable(fm.Values["status"]), nullable(fm.Values["trust"]), timeutil.FormatRFC3339Nano(now), "sha256:"+hex.EncodeToString(hash[:])); err != nil {
+INSERT INTO obsidian_notes (id, vault_root, path, title, search_text, type, project, status, trust, primary_anchor_path, anchor_roles_json, updated_at, hash)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+`, noteID, vaultRoot, filepath.ToSlash(rel), title, buildSearchText(parsed, tags), nullable(fm.Values["type"]), nullable(fm.Values["project"]), nullable(fm.Values["status"]), nullable(fm.Values["trust"]), nullable(filepath.ToSlash(primaryAnchorPath)), anchorRolesJSON, timeutil.FormatRFC3339Nano(now), "sha256:"+hex.EncodeToString(hash[:])); err != nil {
 			return fmt.Errorf("insert note %s: %w", rel, err)
 		}
 		result.Notes++
@@ -396,6 +442,14 @@ VALUES (?, ?)
 			}
 			result.RepoPaths++
 		}
+		for _, p := range anchorPaths {
+			if _, err := tx.ExecContext(ctx, `
+INSERT INTO obsidian_anchor_paths (note_id, path)
+VALUES (?, ?)
+`, noteID, p); err != nil {
+				return err
+			}
+		}
 		for _, sym := range repoSymbols {
 			if _, err := tx.ExecContext(ctx, `
 INSERT INTO obsidian_repo_symbols (note_id, symbol)
@@ -410,14 +464,29 @@ VALUES (?, ?)
 	if err != nil {
 		return nil, err
 	}
-	if _, err := tx.ExecContext(ctx, `DELETE FROM obsidian_note_embeddings WHERE path NOT IN (SELECT path FROM obsidian_notes)`); err != nil {
-		return nil, fmt.Errorf("obsidianindex: prune embeddings: %w", err)
+	if err := retryObsidianBusy(ctx, func() error {
+		if _, execErr := tx.ExecContext(ctx, `DELETE FROM obsidian_note_embeddings WHERE path NOT IN (SELECT path FROM obsidian_notes)`); execErr != nil {
+			return fmt.Errorf("obsidianindex: prune embeddings: %w", execErr)
+		}
+		return nil
+	}); err != nil {
+		return nil, err
 	}
-	if _, err := tx.ExecContext(ctx, `DELETE FROM obsidian_chunk_embeddings`); err != nil {
-		return nil, fmt.Errorf("obsidianindex: clear chunk embeddings: %w", err)
+	if err := retryObsidianBusy(ctx, func() error {
+		if _, execErr := tx.ExecContext(ctx, `DELETE FROM obsidian_chunk_embeddings`); execErr != nil {
+			return fmt.Errorf("obsidianindex: clear chunk embeddings: %w", execErr)
+		}
+		return nil
+	}); err != nil {
+		return nil, err
 	}
-	if err := tx.Commit(); err != nil {
-		return nil, fmt.Errorf("obsidianindex: commit: %w", err)
+	if err := retryObsidianBusy(ctx, func() error {
+		if commitErr := tx.Commit(); commitErr != nil {
+			return fmt.Errorf("obsidianindex: commit: %w", commitErr)
+		}
+		return nil
+	}); err != nil {
+		return nil, err
 	}
 	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM obsidian_note_embeddings`).Scan(&result.SemanticEmbeddings); err != nil {
 		return nil, fmt.Errorf("obsidianindex: count embeddings: %w", err)
@@ -438,29 +507,34 @@ func (s *sqlStore) SearchNotes(ctx context.Context, query string, limit int) ([]
 	}
 	q := "%" + strings.ToLower(query) + "%"
 	args := []any{
-		q, q, q, q, q, q, q, q,
+		q, q, q, q, q, q, q, q, q, q,
 		q,
-		q, q, q, q, q, q, q, q,
+		q, q, q, q, q, q, q, q, q, q,
 		limit,
 	}
 	rows, err := s.db.QueryContext(ctx, `
-SELECT path, title, COALESCE(type,''), COALESCE(project,''), COALESCE(status,''), COALESCE(trust,''),
+SELECT path, title, COALESCE(type,''), COALESCE(project,''), COALESCE(status,''), COALESCE(trust,''), COALESCE(primary_anchor_path,''), COALESCE(anchor_roles_json,''),
        (CASE WHEN lower(title) LIKE ? THEN 5 ELSE 0 END) +
        (CASE WHEN lower(path) LIKE ? THEN 4 ELSE 0 END) +
        (CASE WHEN lower(search_text) LIKE ? THEN 2 ELSE 0 END) +
        (CASE WHEN EXISTS (SELECT 1 FROM obsidian_chunks c WHERE c.note_id = obsidian_notes.id AND lower(c.text) LIKE ?) THEN 3 ELSE 0 END) +
        (CASE WHEN EXISTS (SELECT 1 FROM obsidian_repo_paths rp WHERE rp.note_id = obsidian_notes.id AND lower(rp.path) LIKE ?) THEN 4 ELSE 0 END) +
+       (CASE WHEN lower(COALESCE(primary_anchor_path,'')) LIKE ? THEN 6 ELSE 0 END) +
+       (CASE WHEN EXISTS (SELECT 1 FROM obsidian_anchor_paths ap WHERE ap.note_id = obsidian_notes.id AND lower(ap.path) LIKE ?) THEN 5 ELSE 0 END) +
        (CASE WHEN EXISTS (SELECT 1 FROM obsidian_repo_symbols rs WHERE rs.note_id = obsidian_notes.id AND lower(rs.symbol) LIKE ?) THEN 4 ELSE 0 END) +
        (CASE WHEN EXISTS (SELECT 1 FROM obsidian_tags t JOIN obsidian_notes n3 ON t.note_id = n3.id WHERE n3.path = obsidian_notes.path AND lower(t.tag) LIKE ?) THEN 3 ELSE 0 END) +
        (CASE WHEN EXISTS (SELECT 1 FROM obsidian_aliases a JOIN obsidian_notes n2 ON a.note_id = n2.id WHERE n2.path = obsidian_notes.path AND lower(a.alias) LIKE ?) THEN 3 ELSE 0 END) AS score,
        COALESCE((SELECT c.text FROM obsidian_chunks c WHERE c.note_id = obsidian_notes.id AND lower(c.text) LIKE ? ORDER BY length(c.text) ASC LIMIT 1), ''),
        COALESCE((SELECT GROUP_CONCAT(DISTINCT rp.path) FROM obsidian_repo_paths rp WHERE rp.note_id = obsidian_notes.id), ''),
+       COALESCE((SELECT GROUP_CONCAT(DISTINCT ap.path) FROM obsidian_anchor_paths ap WHERE ap.note_id = obsidian_notes.id), ''),
        COALESCE((SELECT GROUP_CONCAT(DISTINCT rs.symbol) FROM obsidian_repo_symbols rs WHERE rs.note_id = obsidian_notes.id), '')
 FROM obsidian_notes
-WHERE lower(title) LIKE ? OR lower(path) LIKE ? OR lower(search_text) LIKE ? OR EXISTS (
+WHERE lower(title) LIKE ? OR lower(path) LIKE ? OR lower(search_text) LIKE ? OR lower(COALESCE(primary_anchor_path,'')) LIKE ? OR EXISTS (
   SELECT 1 FROM obsidian_chunks c WHERE c.note_id = obsidian_notes.id AND lower(c.text) LIKE ?
 ) OR EXISTS (
   SELECT 1 FROM obsidian_repo_paths rp WHERE rp.note_id = obsidian_notes.id AND lower(rp.path) LIKE ?
+) OR EXISTS (
+  SELECT 1 FROM obsidian_anchor_paths ap WHERE ap.note_id = obsidian_notes.id AND lower(ap.path) LIKE ?
 ) OR EXISTS (
   SELECT 1 FROM obsidian_repo_symbols rs WHERE rs.note_id = obsidian_notes.id AND lower(rs.symbol) LIKE ?
 ) OR EXISTS (
@@ -478,16 +552,215 @@ LIMIT ?
 	var out []SearchHit
 	for rows.Next() {
 		var hit SearchHit
-		var repoPathsCSV, symbolsCSV string
-		if err := rows.Scan(&hit.Path, &hit.Title, &hit.Type, &hit.Project, &hit.Status, &hit.Trust, &hit.Score, &hit.Snippet, &repoPathsCSV, &symbolsCSV); err != nil {
+		var repoPathsCSV, anchorPathsCSV, anchorRolesJSON, symbolsCSV string
+		if err := rows.Scan(&hit.Path, &hit.Title, &hit.Type, &hit.Project, &hit.Status, &hit.Trust, &hit.PrimaryAnchorPath, &anchorRolesJSON, &hit.Score, &hit.Snippet, &repoPathsCSV, &anchorPathsCSV, &symbolsCSV); err != nil {
 			return nil, fmt.Errorf("obsidianindex: scan search hit: %w", err)
 		}
 		hit.Snippet = compactSnippet(hit.Snippet)
 		hit.RepoPaths = splitCSV(repoPathsCSV)
+		hit.AnchorPaths = splitCSV(anchorPathsCSV)
+		hit.AnchorRoles = decodeAnchorRolesJSON(anchorRolesJSON)
 		hit.Symbols = splitCSV(symbolsCSV)
 		out = append(out, hit)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	tokenHits, err := s.searchNotesByTerms(ctx, query, limit)
+	if err != nil {
+		return nil, err
+	}
+	if len(tokenHits) > 0 {
+		out = mergeSearchHits(out, tokenHits)
+		sort.SliceStable(out, func(i, j int) bool {
+			if out[i].Score != out[j].Score {
+				return out[i].Score > out[j].Score
+			}
+			return out[i].Path < out[j].Path
+		})
+		if len(out) > limit {
+			out = out[:limit]
+		}
+	}
+	return out, nil
+}
+
+func (s *sqlStore) searchNotesByTerms(ctx context.Context, query string, limit int) ([]SearchHit, error) {
+	terms := noteSearchTerms(query)
+	if len(terms) == 0 {
+		return nil, nil
+	}
+	rows, err := s.db.QueryContext(ctx, `
+SELECT path, title, COALESCE(type,''), COALESCE(project,''), COALESCE(status,''), COALESCE(trust,''), COALESCE(primary_anchor_path,''), COALESCE(anchor_roles_json,''),
+       COALESCE(search_text, ''),
+       COALESCE((SELECT c.text FROM obsidian_chunks c WHERE c.note_id = obsidian_notes.id ORDER BY length(c.text) ASC LIMIT 1), ''),
+       COALESCE((SELECT GROUP_CONCAT(DISTINCT rp.path) FROM obsidian_repo_paths rp WHERE rp.note_id = obsidian_notes.id), ''),
+       COALESCE((SELECT GROUP_CONCAT(DISTINCT ap.path) FROM obsidian_anchor_paths ap WHERE ap.note_id = obsidian_notes.id), ''),
+       COALESCE((SELECT GROUP_CONCAT(DISTINCT rs.symbol) FROM obsidian_repo_symbols rs WHERE rs.note_id = obsidian_notes.id), '')
+FROM obsidian_notes
+ORDER BY path ASC
+`)
+	if err != nil {
+		return nil, fmt.Errorf("obsidianindex: token note query: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	var hits []SearchHit
+	for rows.Next() {
+		var hit SearchHit
+		var searchText, repoPathsCSV, anchorPathsCSV, anchorRolesJSON, symbolsCSV string
+		if err := rows.Scan(&hit.Path, &hit.Title, &hit.Type, &hit.Project, &hit.Status, &hit.Trust, &hit.PrimaryAnchorPath, &anchorRolesJSON, &searchText, &hit.Snippet, &repoPathsCSV, &anchorPathsCSV, &symbolsCSV); err != nil {
+			return nil, fmt.Errorf("obsidianindex: scan token note hit: %w", err)
+		}
+		hit.RepoPaths = splitCSV(repoPathsCSV)
+		hit.AnchorPaths = splitCSV(anchorPathsCSV)
+		hit.AnchorRoles = decodeAnchorRolesJSON(anchorRolesJSON)
+		hit.Symbols = splitCSV(symbolsCSV)
+		hit.Snippet = compactSnippet(hit.Snippet)
+		hit.Score = scoreTokenizedNoteHit(hit, searchText, terms)
+		if hit.Score <= 0 {
+			continue
+		}
+		hits = append(hits, hit)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	sort.SliceStable(hits, func(i, j int) bool {
+		if hits[i].Score != hits[j].Score {
+			return hits[i].Score > hits[j].Score
+		}
+		return hits[i].Path < hits[j].Path
+	})
+	if len(hits) > limit {
+		hits = hits[:limit]
+	}
+	return hits, nil
+}
+
+func scoreTokenizedNoteHit(hit SearchHit, searchText string, terms []string) int {
+	title := strings.ToLower(strings.TrimSpace(hit.Title))
+	path := strings.ToLower(strings.TrimSpace(hit.Path))
+	primaryAnchorPath := strings.ToLower(strings.TrimSpace(hit.PrimaryAnchorPath))
+	searchText = strings.ToLower(strings.TrimSpace(searchText))
+	repoPaths := splitCSV(strings.ToLower(strings.Join(hit.RepoPaths, ",")))
+	symbols := splitCSV(strings.ToLower(strings.Join(hit.Symbols, ",")))
+	score := 0
+	matches := 0
+	for _, term := range terms {
+		termMatched := false
+		if strings.Contains(title, term) {
+			score += 5
+			termMatched = true
+		}
+		if strings.Contains(path, term) {
+			score += 4
+			termMatched = true
+		}
+		if primaryAnchorPath != "" && strings.Contains(primaryAnchorPath, term) {
+			score += 6
+			termMatched = true
+		}
+		if strings.Contains(searchText, term) {
+			score += 2
+			termMatched = true
+		}
+		for _, value := range repoPaths {
+			if strings.Contains(value, term) {
+				score += 4
+				termMatched = true
+				break
+			}
+		}
+		for _, value := range symbols {
+			if strings.Contains(value, term) {
+				score += 4
+				termMatched = true
+				break
+			}
+		}
+		if termMatched {
+			matches++
+		}
+	}
+	if matches >= 2 {
+		score += matches * 2
+	}
+	return score
+}
+
+func noteSearchTerms(query string) []string {
+	seen := map[string]struct{}{}
+	out := make([]string, 0, 8)
+	for _, field := range strings.FieldsFunc(strings.ToLower(strings.TrimSpace(query)), func(r rune) bool {
+		return !((r >= 'a' && r <= 'z') || (r >= '0' && r <= '9'))
+	}) {
+		field = strings.TrimSpace(field)
+		if len(field) < 3 {
+			continue
+		}
+		if _, ok := seen[field]; ok {
+			continue
+		}
+		seen[field] = struct{}{}
+		out = append(out, field)
+	}
+	return out
+}
+
+func mergeSearchHits(primary, secondary []SearchHit) []SearchHit {
+	byPath := make(map[string]SearchHit, len(primary)+len(secondary))
+	for _, hit := range primary {
+		byPath[hit.Path] = hit
+	}
+	for _, hit := range secondary {
+		existing, ok := byPath[hit.Path]
+		if !ok {
+			byPath[hit.Path] = hit
+			continue
+		}
+		if hit.Score > existing.Score {
+			existing.Score = hit.Score
+		}
+		if existing.Snippet == "" {
+			existing.Snippet = hit.Snippet
+		}
+		if existing.Title == "" {
+			existing.Title = hit.Title
+		}
+		if existing.Type == "" {
+			existing.Type = hit.Type
+		}
+		if existing.Project == "" {
+			existing.Project = hit.Project
+		}
+		if existing.Status == "" {
+			existing.Status = hit.Status
+		}
+		if existing.Trust == "" {
+			existing.Trust = hit.Trust
+		}
+		if existing.PrimaryAnchorPath == "" {
+			existing.PrimaryAnchorPath = hit.PrimaryAnchorPath
+		}
+		if len(existing.AnchorRoles) == 0 {
+			existing.AnchorRoles = hit.AnchorRoles
+		}
+		if len(existing.RepoPaths) == 0 {
+			existing.RepoPaths = hit.RepoPaths
+		}
+		if len(existing.AnchorPaths) == 0 {
+			existing.AnchorPaths = hit.AnchorPaths
+		}
+		if len(existing.Symbols) == 0 {
+			existing.Symbols = hit.Symbols
+		}
+		byPath[hit.Path] = existing
+	}
+	out := make([]SearchHit, 0, len(byPath))
+	for _, hit := range byPath {
+		out = append(out, hit)
+	}
+	return out
 }
 
 func (s *sqlStore) RelatedNotes(ctx context.Context, notePath string, limit int) ([]RelatedHit, error) {
@@ -595,9 +868,17 @@ ORDER BY n.path ASC
 	if err != nil {
 		return 0, fmt.Errorf("obsidianindex: embed notes: %w", err)
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
+	var tx *sql.Tx
+	err = retryObsidianBusy(ctx, func() error {
+		var beginErr error
+		tx, beginErr = s.db.BeginTx(ctx, nil)
+		if beginErr != nil {
+			return fmt.Errorf("obsidianindex: begin semantic tx: %w", beginErr)
+		}
+		return nil
+	})
 	if err != nil {
-		return 0, fmt.Errorf("obsidianindex: begin semantic tx: %w", err)
+		return 0, err
 	}
 	defer func() { _ = tx.Rollback() }()
 	now := timeutil.NowUTC()
@@ -620,8 +901,13 @@ ON CONFLICT(path, model) DO UPDATE SET
 			return 0, fmt.Errorf("obsidianindex: upsert embedding: %w", err)
 		}
 	}
-	if err := tx.Commit(); err != nil {
-		return 0, fmt.Errorf("obsidianindex: commit semantic tx: %w", err)
+	if err := retryObsidianBusy(ctx, func() error {
+		if commitErr := tx.Commit(); commitErr != nil {
+			return fmt.Errorf("obsidianindex: commit semantic tx: %w", commitErr)
+		}
+		return nil
+	}); err != nil {
+		return 0, err
 	}
 	return len(candidates), nil
 }
@@ -658,9 +944,10 @@ func (s *sqlStore) SearchNotesSemantic(ctx context.Context, query string, provid
 		}
 	}
 	rows, err := s.db.QueryContext(ctx, `
-SELECT n.path, n.title, COALESCE(n.type,''), COALESCE(n.project,''), COALESCE(n.status,''), COALESCE(n.trust,''),
+SELECT n.path, n.title, COALESCE(n.type,''), COALESCE(n.project,''), COALESCE(n.status,''), COALESCE(n.trust,''), COALESCE(n.primary_anchor_path,''), COALESCE(n.anchor_roles_json,''),
        COALESCE((SELECT c.text FROM obsidian_chunks c WHERE c.note_id = n.id ORDER BY length(c.text) ASC LIMIT 1), ''),
        COALESCE((SELECT GROUP_CONCAT(DISTINCT rp.path) FROM obsidian_repo_paths rp WHERE rp.note_id = n.id), ''),
+       COALESCE((SELECT GROUP_CONCAT(DISTINCT ap.path) FROM obsidian_anchor_paths ap WHERE ap.note_id = n.id), ''),
        COALESCE((SELECT GROUP_CONCAT(DISTINCT rs.symbol) FROM obsidian_repo_symbols rs WHERE rs.note_id = n.id), ''),
        e.embedding_json
 FROM obsidian_notes n
@@ -674,8 +961,8 @@ ORDER BY n.path ASC
 	hitByPath := map[string]SearchHit{}
 	for rows.Next() {
 		var hit SearchHit
-		var repoPathsCSV, symbolsCSV, embeddingJSON string
-		if err := rows.Scan(&hit.Path, &hit.Title, &hit.Type, &hit.Project, &hit.Status, &hit.Trust, &hit.Snippet, &repoPathsCSV, &symbolsCSV, &embeddingJSON); err != nil {
+		var repoPathsCSV, anchorPathsCSV, anchorRolesJSON, symbolsCSV, embeddingJSON string
+		if err := rows.Scan(&hit.Path, &hit.Title, &hit.Type, &hit.Project, &hit.Status, &hit.Trust, &hit.PrimaryAnchorPath, &anchorRolesJSON, &hit.Snippet, &repoPathsCSV, &anchorPathsCSV, &symbolsCSV, &embeddingJSON); err != nil {
 			return nil, fmt.Errorf("obsidianindex: scan semantic hit: %w", err)
 		}
 		var embedding []float32
@@ -685,6 +972,8 @@ ORDER BY n.path ASC
 		hit.Score = int(cosineSimilarity(queryEmbedding, embedding) * 1000)
 		hit.Snippet = compactSnippet(hit.Snippet)
 		hit.RepoPaths = splitCSV(repoPathsCSV)
+		hit.AnchorPaths = splitCSV(anchorPathsCSV)
+		hit.AnchorRoles = decodeAnchorRolesJSON(anchorRolesJSON)
 		hit.Symbols = splitCSV(symbolsCSV)
 		hitByPath[hit.Path] = hit
 	}
@@ -890,10 +1179,12 @@ ORDER BY path ASC
 }
 
 type frontmatter struct {
-	Values  map[string]string
-	Tags    []string
-	Paths   []string
-	Symbols []string
+	Values      map[string]string
+	Tags        []string
+	Paths       []string
+	AnchorPaths []string
+	AnchorRoles map[string][]string
+	Symbols     []string
 }
 
 func parseFrontmatter(body []byte) frontmatter {
@@ -905,7 +1196,7 @@ func parseFrontmatter(body []byte) frontmatter {
 	if len(parts) != 2 {
 		return frontmatter{}
 	}
-	out := frontmatter{Values: map[string]string{}}
+	out := frontmatter{Values: map[string]string{}, AnchorRoles: map[string][]string{}}
 	currentList := ""
 	for _, line := range strings.Split(parts[0], "\n") {
 		rawLine := strings.TrimRight(line, "\r")
@@ -945,7 +1236,7 @@ func parseFrontmatter(body []byte) frontmatter {
 
 func isFrontmatterListKey(key string) bool {
 	switch key {
-	case "tags", "paths", "symbols":
+	case "tags", "paths", "anchor_paths", "symbols", "impl_anchor_paths", "support_anchor_paths", "resource_anchor_paths":
 		return true
 	default:
 		return false
@@ -983,9 +1274,80 @@ func appendFrontmatterList(out *frontmatter, key, item string) {
 		out.Tags = append(out.Tags, normalizeTag(item))
 	case "paths":
 		out.Paths = append(out.Paths, filepath.ToSlash(item))
+	case "anchor_paths":
+		out.AnchorPaths = append(out.AnchorPaths, filepath.ToSlash(item))
+	case "impl_anchor_paths":
+		appendAnchorRole(out, "impl", filepath.ToSlash(item))
+	case "support_anchor_paths":
+		appendAnchorRole(out, "support", filepath.ToSlash(item))
+	case "resource_anchor_paths":
+		appendAnchorRole(out, "resource", filepath.ToSlash(item))
 	case "symbols":
 		out.Symbols = append(out.Symbols, item)
 	}
+}
+
+func appendAnchorRole(out *frontmatter, role, item string) {
+	if out.AnchorRoles == nil {
+		out.AnchorRoles = map[string][]string{}
+	}
+	role = strings.TrimSpace(strings.ToLower(role))
+	item = filepath.ToSlash(strings.TrimSpace(item))
+	if role == "" || item == "" {
+		return
+	}
+	out.AnchorRoles[role] = append(out.AnchorRoles[role], item)
+}
+
+func normalizeAnchorRoles(raw map[string][]string) map[string][]string {
+	if len(raw) == 0 {
+		return nil
+	}
+	out := make(map[string][]string, len(raw))
+	for role, paths := range raw {
+		role = strings.TrimSpace(strings.ToLower(role))
+		if role == "" {
+			continue
+		}
+		normalized := normalizeUniqueFrontmatterPaths(paths)
+		if len(normalized) == 0 {
+			continue
+		}
+		out[role] = normalized
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+func normalizeUniqueFrontmatterPaths(paths []string) []string {
+	seen := map[string]struct{}{}
+	out := make([]string, 0, len(paths))
+	for _, pathValue := range paths {
+		pathValue = filepath.ToSlash(strings.TrimSpace(pathValue))
+		if pathValue == "" {
+			continue
+		}
+		if _, ok := seen[pathValue]; ok {
+			continue
+		}
+		seen[pathValue] = struct{}{}
+		out = append(out, pathValue)
+	}
+	return out
+}
+
+func decodeAnchorRolesJSON(raw string) map[string][]string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil
+	}
+	var decoded map[string][]string
+	if err := json.Unmarshal([]byte(raw), &decoded); err != nil {
+		return nil
+	}
+	return normalizeAnchorRoles(decoded)
 }
 
 func nullable(v string) any {
@@ -1133,6 +1495,20 @@ func (s *sqlStore) ensureChunkSemanticEmbeddings(ctx context.Context, provider s
 	if err := s.validateEmbeddingMetadata(ctx, provider); err != nil {
 		return 0, err
 	}
+	var totalChunks int
+	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM obsidian_chunks`).Scan(&totalChunks); err != nil {
+		return 0, fmt.Errorf("obsidianindex: count chunks: %w", err)
+	}
+	if totalChunks == 0 {
+		return 0, nil
+	}
+	var existingCount int
+	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM obsidian_chunk_embeddings WHERE model = ?`, provider.Model()).Scan(&existingCount); err != nil {
+		return 0, fmt.Errorf("obsidianindex: count chunk embeddings: %w", err)
+	}
+	if existingCount == totalChunks {
+		return 0, nil
+	}
 	type chunkCandidate struct {
 		Path       string
 		ChunkIndex int
@@ -1181,13 +1557,26 @@ ORDER BY n.path ASC, c.rowid ASC
 	if len(candidates) == 0 {
 		return 0, nil
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
+	var tx *sql.Tx
+	err = retryObsidianBusy(ctx, func() error {
+		var beginErr error
+		tx, beginErr = s.db.BeginTx(ctx, nil)
+		if beginErr != nil {
+			return fmt.Errorf("obsidianindex: begin chunk semantic tx: %w", beginErr)
+		}
+		return nil
+	})
 	if err != nil {
-		return 0, fmt.Errorf("obsidianindex: begin chunk semantic tx: %w", err)
+		return 0, err
 	}
 	defer func() { _ = tx.Rollback() }()
-	if _, err := tx.ExecContext(ctx, `DELETE FROM obsidian_chunk_embeddings WHERE model = ?`, provider.Model()); err != nil {
-		return 0, fmt.Errorf("obsidianindex: clear chunk embeddings: %w", err)
+	if err := retryObsidianBusy(ctx, func() error {
+		if _, execErr := tx.ExecContext(ctx, `DELETE FROM obsidian_chunk_embeddings WHERE model = ?`, provider.Model()); execErr != nil {
+			return fmt.Errorf("obsidianindex: clear chunk embeddings: %w", execErr)
+		}
+		return nil
+	}); err != nil {
+		return 0, err
 	}
 	texts := make([]string, 0, len(candidates))
 	for _, candidate := range candidates {
@@ -1213,10 +1602,48 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 			return 0, fmt.Errorf("obsidianindex: insert chunk embedding: %w", err)
 		}
 	}
-	if err := tx.Commit(); err != nil {
-		return 0, fmt.Errorf("obsidianindex: commit chunk semantic tx: %w", err)
+	if err := retryObsidianBusy(ctx, func() error {
+		if commitErr := tx.Commit(); commitErr != nil {
+			return fmt.Errorf("obsidianindex: commit chunk semantic tx: %w", commitErr)
+		}
+		return nil
+	}); err != nil {
+		return 0, err
 	}
 	return len(candidates), nil
+}
+
+func retryObsidianBusy(ctx context.Context, fn func() error) error {
+	deadline := time.Now().Add(obsidianBusyRetryWindow)
+	var lastErr error
+	for {
+		err := fn()
+		if err == nil || !isObsidianBusyErr(err) {
+			return err
+		}
+		lastErr = err
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		if time.Now().After(deadline) {
+			return lastErr
+		}
+		timer := time.NewTimer(obsidianBusyRetryStep)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return ctx.Err()
+		case <-timer.C:
+		}
+	}
+}
+
+func isObsidianBusyErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "database is locked") || strings.Contains(msg, "sqlite_busy")
 }
 
 func cosineSimilarity(a, b []float32) float64 {

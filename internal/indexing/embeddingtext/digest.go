@@ -57,6 +57,9 @@ type SymbolDigestInput struct {
 
 	// Calls lists related call targets (optional).
 	Calls []string
+
+	// Aliases lists normalized alternate forms used in embedding text.
+	Aliases []string
 }
 
 // BuildSymbolContentDigest returns a stable digest for symbol embeddings.
@@ -103,6 +106,13 @@ func BuildSymbolContentDigest(input SymbolDigestInput) string {
 		if len(calls) > 0 {
 			builder.WriteString("\ncalls:")
 			builder.WriteString(strings.Join(calls, ","))
+		}
+	}
+	if len(input.Aliases) > 0 {
+		aliases := sortDedupStrings(input.Aliases)
+		if len(aliases) > 0 {
+			builder.WriteString("\naliases:")
+			builder.WriteString(strings.Join(aliases, ","))
 		}
 	}
 

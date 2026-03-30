@@ -1,0 +1,25 @@
+name: march25-root
+cases:
+  - id: march25-root
+    mode: single
+    provider: codex
+    source_file: ~/.codex/sessions/2026/03/25/rollout-2026-03-25T11-32-39-019d2456-c302-71e3-af47-4f58795e7622.jsonl
+    expected_durable_claims:
+      - text: Use a classifier layer in the transcript-memory pipeline.
+        kind: architecture
+        aliases:
+          - include classification layer in pipeline
+      - text: Avoid brittle text-canonicalization; prefer abstracted classifier-based logic.
+        kind: workflow_rule
+        aliases:
+          - avoid brittle text-canonicalization path
+          - no brittle text-specific coding where we can use an explicit classifier
+    forbidden_claims:
+      - text: The remaining import/bootstrap shell is out of the CLI now.
+      - text: The smaller-grained classifier works better.
+    expected_kinds:
+      - architecture
+      - workflow_rule
+    min_persisted: 1
+    max_persisted: 3
+    notes: Root March 25 Codex session should converge on classifier-layer doctrine, not implementation-status memories.

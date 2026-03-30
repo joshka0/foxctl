@@ -1,0 +1,30 @@
+name: march25-group
+cases:
+  - id: march25-group
+    mode: grouped
+    source_files:
+      - ~/.codex/sessions/2026/03/25/rollout-2026-03-25T11-32-39-019d2456-c302-71e3-af47-4f58795e7622.jsonl
+      - ~/.codex/sessions/2026/03/25/rollout-2026-03-25T11-38-02-019d245b-b3d7-7ea1-bf57-30b954e9bfe8.jsonl
+      - ~/.codex/sessions/2026/03/25/rollout-2026-03-25T11-38-06-019d245b-c11f-7910-9aa6-07e0178e0d96.jsonl
+      - ~/.codex/sessions/2026/03/25/rollout-2026-03-25T11-38-08-019d245b-c9bc-7ca3-a64c-989e959c41bc.jsonl
+    expected_durable_claims:
+      - text: The companion hybrid runtime already exists and should remain the substrate for transcript memory.
+        kind: architecture
+        aliases:
+          - The companion hybrid pipeline supports event sourcing, typed hard state, active assumptions, soft episodes, evidence, and recent turns.
+      - text: Avoid brittle text-canonicalization; prefer abstracted classifier-based logic.
+        kind: workflow_rule
+        aliases:
+          - avoid this type of coding, brittle text over things that can be abstracted more effectively
+          - Avoid brittle text-canonicalization path; prefer abstractable approaches.
+    forbidden_claims:
+      - text: The remaining import/bootstrap shell is out of the CLI now.
+      - text: I added import.go to /Users/joshka/repos/personal/agentctl/internal/transcriptpipeline/
+      - text: experiment loop is built and working
+      - text: The smaller-grained classifier works better.
+    expected_kinds:
+      - architecture
+      - workflow_rule
+    min_persisted: 2
+    max_persisted: 4
+    notes: Grouped March 25 lineage should preserve hybrid-runtime doctrine and anti-brittleness rule, not refactor narration.
