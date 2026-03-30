@@ -159,12 +159,12 @@ func findSkill(cfg config.Config, requested string) (SkillHandle, error) {
 // createSkillResolver creates a resolver with paths from config.
 func createSkillResolver(cfg config.Config) *skill.Resolver {
 	searchPaths := append([]string{}, skill.EnvSearchPaths()...)
+	searchPaths = append(searchPaths, skill.DevSearchPaths()...)
 	if cfg.Paths.Skills != "" {
 		searchPaths = append(searchPaths, cfg.Paths.Skills)
 	}
 	searchPaths = append(searchPaths, skill.UserSearchPaths()...)
 	searchPaths = append(searchPaths, skill.BuiltinSearchPaths()...)
-	searchPaths = append(searchPaths, skill.DevSearchPaths()...)
 	return skill.NewResolver(skill.WithSearchPaths(skill.NormalizeSearchPaths(searchPaths)...))
 }
 

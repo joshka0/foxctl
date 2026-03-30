@@ -22,7 +22,7 @@ func (r *Registry) registerRepoIndexTools() error {
 
 	searchTool := tooling.NewFuncTool(
 		repoindex.ToolSearch,
-		"Search the repo index for nodes that match a text query.",
+		"Search the repo index for nodes that match a short natural-language or symbol-name query. Avoid slash-heavy path strings.",
 		models.InputSchema{
 			Type: "object",
 			Properties: map[string]models.ParameterSchema{
@@ -103,7 +103,7 @@ func (r *Registry) registerRepoIndexTools() error {
 
 	dagGrepTool := tooling.NewFuncTool(
 		repoindex.ToolDAGGrep,
-		"Search and expand the repo index into a compact explanation subgraph.",
+		"Search and expand the repo index into a compact explanation subgraph using short natural-language or symbol-name queries. Avoid slash-heavy path strings.",
 		models.InputSchema{
 			Type: "object",
 			Properties: map[string]models.ParameterSchema{

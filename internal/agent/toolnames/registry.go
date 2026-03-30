@@ -20,8 +20,10 @@ var (
 
 var runtimeToolNames = []string{
 	"fs_read_file", "fs_list_dir", "fs_write_file", "code_search", "think",
-	"context_search", "smart_search", "context_grep", "code_symbols", "context_filter", "session_timeline",
+	"context_search", "semantic_search_code", "semantic_search_sessions", "semantic_search_memories", "semantic_search_context",
+	"smart_search", "code_search_ensemble", "context_grep", "code_symbols", "refactor_scout", "context_filter", "session_timeline",
 	"memory_query", "session_recall", "annotation_recall", "annotation_list_sessions", "annotation_category_stats",
+	"agent_memory_context", "agent_memory_search",
 	"repo_index_search", "repo_index_expand", "repo_index_open", "repo_index_dag_grep",
 	"context_show", "context_retrieve", "obsidian_index_search", "obsidian_read", "obsidian_related",
 	"heartwood_state", "heartwood_action",

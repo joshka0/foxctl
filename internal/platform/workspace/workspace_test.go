@@ -245,6 +245,67 @@ func TestCanonicalIDFromPath(t *testing.T) {
 	}
 }
 
+func TestFamilyPathFromWorktreeGitFile(t *testing.T) {
+	mainRepo := filepath.Join(t.TempDir(), "praze")
+	worktree := filepath.Join(t.TempDir(), "praze-v2-compare")
+	if err := os.MkdirAll(mainRepo, 0o755); err != nil {
+		t.Fatalf("mkdir main repo: %v", err)
+	}
+	if err := os.MkdirAll(worktree, 0o755); err != nil {
+		t.Fatalf("mkdir worktree: %v", err)
+	}
+	gitFile := filepath.Join(worktree, ".git")
+	content := []byte("gitdir: " + filepath.Join(mainRepo, ".git", "worktrees", "praze-v2-compare") + "\n")
+	if err := os.WriteFile(gitFile, content, 0o644); err != nil {
+		t.Fatalf("write .git file: %v", err)
+	}
+
+	got := FamilyPath(worktree)
+	if got != mainRepo {
+		t.Fatalf("FamilyPath(%q) = %q, want %q", worktree, got, mainRepo)
+	}
+}
+
+func TestIDUsesFamilyPathForWorktreeWithoutRemote(t *testing.T) {
+	mainRepo := filepath.Join(t.TempDir(), "praze")
+	worktree := filepath.Join(t.TempDir(), "praze-v2-compare")
+	if err := os.MkdirAll(mainRepo, 0o755); err != nil {
+		t.Fatalf("mkdir main repo: %v", err)
+	}
+	if err := os.MkdirAll(worktree, 0o755); err != nil {
+		t.Fatalf("mkdir worktree: %v", err)
+	}
+	gitFile := filepath.Join(worktree, ".git")
+	content := []byte("gitdir: " + filepath.Join(mainRepo, ".git", "worktrees", "praze-v2-compare") + "\n")
+	if err := os.WriteFile(gitFile, content, 0o644); err != nil {
+		t.Fatalf("write .git file: %v", err)
+	}
+
+	got := ID(worktree)
+	want := PathIdentity(mainRepo)
+	if got != want {
+		t.Fatalf("ID(%q) = %q, want %q", worktree, got, want)
+	}
+}
+
+func TestFamilyPathFromDeletedWorktreeConvention(t *testing.T) {
+	root := t.TempDir()
+	mainRepo := filepath.Join(root, "praze")
+	worktreesDir := filepath.Join(root, "praze-worktrees")
+	if err := os.MkdirAll(mainRepo, 0o755); err != nil {
+		t.Fatalf("mkdir main repo: %v", err)
+	}
+	if err := os.MkdirAll(worktreesDir, 0o755); err != nil {
+		t.Fatalf("mkdir worktrees dir: %v", err)
+	}
+	deletedWorktreePath := filepath.Join(worktreesDir, "prayer-needs")
+
+	got := FamilyPath(deletedWorktreePath)
+	if got != mainRepo {
+		t.Fatalf("FamilyPath(%q) = %q, want %q", deletedWorktreePath, got, mainRepo)
+	}
+}
+
 func TestRepoIdentityEmptyWorkspace(t *testing.T) {
 	// Empty workspace should return empty identity
 	if got := RepoIdentity(""); got != "" {
@@ -271,6 +332,9 @@ func TestDetectWithIdentityStructure(t *testing.T) {
 	info := DetectWithIdentity(root)
 	if info.Path != root {
 		t.Errorf("DetectWithIdentity().Path = %q, want %q", info.Path, root)
+	}
+	if info.FamilyPath != root {
+		t.Errorf("DetectWithIdentity().FamilyPath = %q, want %q", info.FamilyPath, root)
 	}
 	// RepoIdentity will be empty since there's no git remote configured
 	// but the structure should be valid

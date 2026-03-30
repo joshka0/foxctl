@@ -21,7 +21,10 @@ import (
 	_ "modernc.org/sqlite" // register sqlite driver
 )
 
-const defaultBusyTimeoutMs = 5000
+const (
+	defaultBusyTimeoutMs = 5000
+	openBusyRetryStep    = 50 * time.Millisecond
+)
 
 type migrateOnceEntry struct {
 	once sync.Once
@@ -74,24 +77,36 @@ func sleepWithContext(ctx context.Context, d time.Duration) bool {
 	}
 }
 
-func retryBusy(ctx context.Context, attempts int, baseDelay time.Duration, fn func() error) error {
-	if attempts <= 0 {
-		attempts = 1
+func retryBusyUntil(ctx context.Context, maxWait time.Duration, stepDelay time.Duration, fn func() error) error {
+	if maxWait <= 0 {
+		return fn()
 	}
-	for i := 0; i < attempts; i++ {
+	if stepDelay <= 0 {
+		stepDelay = 25 * time.Millisecond
+	}
+	deadline := time.Now().Add(maxWait)
+	var lastErr error
+	for {
 		err := fn()
 		if err == nil || !isSQLiteBusy(err) {
 			return err
 		}
+		lastErr = err
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
-		delay := baseDelay * time.Duration(i+1)
+		remaining := time.Until(deadline)
+		if remaining <= 0 {
+			return lastErr
+		}
+		delay := stepDelay
+		if remaining < delay {
+			delay = remaining
+		}
 		if !sleepWithContext(ctx, delay) {
 			return ctx.Err()
 		}
 	}
-	return fn()
 }
 
 // validateDBPath reports an error if the provided filesystem path is unsafe or invalid
@@ -203,13 +218,21 @@ func OpenDB(ctx context.Context, path string, migrate func(context.Context, *sql
 		return nil, fmt.Errorf("sqliteutil: empty path")
 	}
 	if !isInMemoryPath(path) {
-		fsPath := path
+		var fsPath, resolvedPath string
 		if strings.HasPrefix(path, "file:") {
 			u, err := url.Parse(path)
 			if err != nil {
 				return nil, fmt.Errorf("sqliteutil: parse dsn: %w", err)
 			}
 			fsPath = filepath.FromSlash(u.Path)
+			resolvedPath = path
+		} else {
+			absPath, err := filepath.Abs(path)
+			if err != nil {
+				return nil, fmt.Errorf("sqliteutil: cannot resolve path: %w", err)
+			}
+			fsPath = absPath
+			resolvedPath = absPath
 		}
 		// Validate path before creating directories
 		if err := validateDBPath(fsPath); err != nil {
@@ -219,6 +242,7 @@ func OpenDB(ctx context.Context, path string, migrate func(context.Context, *sql
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			return nil, fmt.Errorf("sqliteutil: ensure dir: %w", err)
 		}
+		path = resolvedPath
 	}
 
 	dsn, err := buildSQLiteDSN(path, defaultBusyTimeoutMs, true)
@@ -234,14 +258,14 @@ func OpenDB(ctx context.Context, path string, migrate func(context.Context, *sql
 		// Check if WAL is already enabled to avoid acquiring exclusive lock unnecessarily.
 		// This prevents blocking for busy_timeout if the DB is held open by readers.
 		var mode string
-		if err := retryBusy(ctx, 6, 25*time.Millisecond, func() error {
+		if err := retryBusyUntil(ctx, defaultBusyTimeoutMs*time.Millisecond, openBusyRetryStep, func() error {
 			return db.QueryRowContext(ctx, "PRAGMA journal_mode;").Scan(&mode)
 		}); err != nil {
 			errs.Ignore(db.Close(), "close sqlite db after journal_mode check failure")
 			return nil, fmt.Errorf("sqliteutil: check journal_mode: %w", err)
 		}
 		if !strings.EqualFold(mode, "wal") {
-			if err := retryBusy(ctx, 6, 25*time.Millisecond, func() error {
+			if err := retryBusyUntil(ctx, defaultBusyTimeoutMs*time.Millisecond, openBusyRetryStep, func() error {
 				_, execErr := db.ExecContext(ctx, `PRAGMA journal_mode=WAL;`)
 				return execErr
 			}); err != nil {

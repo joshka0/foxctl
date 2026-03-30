@@ -25,8 +25,9 @@ func RefreshJidoRuntimeState(ctx context.Context, storageRoot, casRoot string, s
 	defer cleanup()
 
 	pack, err := collector.Collect(ctx, Options{
-		WorkspacePath: workspaceRoot,
-		WorkspaceID:   ws.CanonicalID(workspaceRoot),
+		WorkspacePath:          workspaceRoot,
+		WorkspaceID:            ws.CanonicalID(workspaceRoot),
+		TranscriptHistoryScope: DefaultTranscriptHistoryScope(),
 	})
 	if err != nil {
 		return state

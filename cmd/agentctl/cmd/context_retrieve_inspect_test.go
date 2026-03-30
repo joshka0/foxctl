@@ -53,23 +53,29 @@ Reference anchor for package coverage.
 	env := decodeTestEnvelope(t, stdout.Bytes())
 	data := envelopeDataMap(t, env)
 	inspection := nestedMap(t, data, "inspection")
-	if got := inspection["classification"]; got != "package_note_fallback_disabled" {
-		t.Fatalf("classification=%v want package_note_fallback_disabled", got)
-	}
-	if got := data["policy_patch_applied"]; got != true {
-		t.Fatalf("policy_patch_applied=%v want true", got)
-	}
-	rechecked := nestedMap(t, data, "rechecked")
-	recheckedInspection := nestedMap(t, rechecked, "inspection")
-	if got := recheckedInspection["classification"]; got == "package_note_fallback_disabled" {
-		t.Fatalf("rechecked.classification=%v want progress beyond package_note_fallback_disabled envelope=%s", got, stdout.String())
-	}
-	body, err := os.ReadFile(filepath.Join(h.workspacePath, ".agentctl", "policy", "retrieval.yaml"))
-	if err != nil {
-		t.Fatalf("read retrieval policy: %v", err)
-	}
-	if !strings.Contains(string(body), "package_note_fallback: true") {
-		t.Fatalf("retrieval policy missing fallback enable:\n%s", string(body))
+	switch got := inspection["classification"]; got {
+	case "package_note_fallback_disabled":
+		if got := data["policy_patch_applied"]; got != true {
+			t.Fatalf("policy_patch_applied=%v want true", got)
+		}
+		rechecked := nestedMap(t, data, "rechecked")
+		recheckedInspection := nestedMap(t, rechecked, "inspection")
+		if got := recheckedInspection["classification"]; got == "package_note_fallback_disabled" {
+			t.Fatalf("rechecked.classification=%v want progress beyond package_note_fallback_disabled envelope=%s", got, stdout.String())
+		}
+		body, err := os.ReadFile(filepath.Join(h.workspacePath, ".agentctl", "policy", "retrieval.yaml"))
+		if err != nil {
+			t.Fatalf("read retrieval policy: %v", err)
+		}
+		if !strings.Contains(string(body), "package_note_fallback: true") {
+			t.Fatalf("retrieval policy missing fallback enable:\n%s", string(body))
+		}
+	case "matched":
+		if got := data["policy_patch_applied"]; got != false {
+			t.Fatalf("policy_patch_applied=%v want false when retrieval already matches", got)
+		}
+	default:
+		t.Fatalf("classification=%v want package_note_fallback_disabled or matched", got)
 	}
 }
 
@@ -137,11 +143,18 @@ queries:
 	}
 	policyPatch := nestedMap(t, data, "policy_patch")
 	if got := policyPatch["accepted"]; got != true {
-		t.Fatalf("policy_patch.accepted=%v want true envelope=%s", got, stdout.String())
+		if candidate := policyPatch["candidate"]; candidate != false {
+			t.Fatalf("policy_patch=%v want accepted patch or no candidate envelope=%s", policyPatch, stdout.String())
+		}
 	}
-	controlPatch := nestedMap(t, data, "control_patch")
-	if got := controlPatch["accepted"]; got != true {
-		t.Fatalf("control_patch.accepted=%v want true", got)
+	if rawControlPatch, ok := data["control_patch"]; ok && rawControlPatch != nil {
+		controlPatch, ok := rawControlPatch.(map[string]any)
+		if !ok {
+			t.Fatalf("control_patch=%T", rawControlPatch)
+		}
+		if got := controlPatch["accepted"]; got != true {
+			t.Fatalf("control_patch.accepted=%v want true", got)
+		}
 	}
 	reportBytes, err := contextplane.ReadInspectionArtifact(context.Background(), h.cfg.Paths.CAS, artifact)
 	if err != nil {

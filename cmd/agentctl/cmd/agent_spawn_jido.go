@@ -109,8 +109,9 @@ func taskContinuityState(ctx context.Context, storageRoot, workspaceRoot string)
 	}
 	defer cleanup()
 	pack, err := collector.Collect(ctx, taskhistory.Options{
-		WorkspacePath: workspaceRoot,
-		WorkspaceID:   ws.CanonicalID(workspaceRoot),
+		WorkspacePath:          workspaceRoot,
+		WorkspaceID:            ws.CanonicalID(workspaceRoot),
+		TranscriptHistoryScope: taskhistory.DefaultTranscriptHistoryScope(),
 	})
 	if err != nil {
 		return nil

@@ -15,6 +15,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
 	"github.com/jkatigb/agentctl/internal/indexing/repoindex"
 	"github.com/jkatigb/agentctl/internal/platform/errors"
+	"github.com/jkatigb/agentctl/internal/repoquery"
 )
 
 // Command is the skill name used in envelopes.
@@ -55,8 +56,7 @@ func main() {
 }
 
 func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
-	query := strings.TrimSpace(in.Query)
-	if query == "" {
+	if strings.TrimSpace(in.Query) == "" {
 		return skillerr.Arg("query is required")
 	}
 
@@ -73,39 +73,35 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 
 	engine := repoindex.NewQueryEngine(store)
 
-	nodeKinds, err := parseNodeKinds(in.NodeKinds)
+	req, err := repoquery.NewDAGGrepRequest(
+		in.Query,
+		in.Mode,
+		in.K,
+		in.NodeKinds,
+		in.EdgeSets,
+		in.EdgeTypes,
+		in.Direction,
+		in.Depth,
+		in.Budget,
+		in.PerNodeCap,
+		in.IncludeAnchors,
+		in.Render,
+	)
 	if err != nil {
 		return skillerr.Arg(err.Error())
-	}
-	edgeTypes, err := mergeEdgeTypes(in.EdgeSets, in.EdgeTypes)
-	if err != nil {
-		return skillerr.Arg(err.Error())
-	}
-
-	direction := repoindex.DirOut
-	if dir := strings.ToLower(strings.TrimSpace(in.Direction)); dir != "" {
-		direction = repoindex.Direction(dir)
-		if direction != repoindex.DirOut && direction != repoindex.DirIn {
-			return skillerr.Arg(fmt.Sprintf("invalid direction: %s", in.Direction))
-		}
-	}
-
-	includeAnchors := true
-	if in.IncludeAnchors != nil {
-		includeAnchors = *in.IncludeAnchors
 	}
 
 	result, err := engine.DAGGrep(ctx, repoindex.DAGGrepRequest{
-		Query:          query,
-		Mode:           in.Mode,
-		K:              in.K,
-		NodeKinds:      nodeKinds,
-		EdgeTypes:      edgeTypes,
-		Direction:      direction,
-		Depth:          in.Depth,
-		Budget:         in.Budget,
-		PerNodeCap:     in.PerNodeCap,
-		IncludeAnchors: includeAnchors,
+		Query:          req.Query,
+		Mode:           req.Mode,
+		K:              req.K,
+		NodeKinds:      req.NodeKinds,
+		EdgeTypes:      req.EdgeTypes,
+		Direction:      req.Direction,
+		Depth:          req.Depth,
+		Budget:         req.Budget,
+		PerNodeCap:     req.PerNodeCap,
+		IncludeAnchors: req.IncludeAnchors,
 	})
 	if err != nil {
 		return skillerr.WrapIO("dag_grep", err)
@@ -167,122 +163,6 @@ func resolveWorkspace(base, override string) (string, error) {
 		}
 	}
 	return filepath.Abs(workspace)
-}
-
-func parseNodeKinds(values []string) ([]repoindex.NodeKind, error) {
-	if len(values) == 0 {
-		return nil, nil
-	}
-	kinds := make([]repoindex.NodeKind, 0, len(values))
-	for _, value := range values {
-		trimmed := strings.ToLower(strings.TrimSpace(value))
-		if trimmed == "" {
-			continue
-		}
-		switch trimmed {
-		case "symbol":
-			kinds = append(kinds, repoindex.NodeSymbol)
-		case "file":
-			kinds = append(kinds, repoindex.NodeFile)
-		case "package":
-			kinds = append(kinds, repoindex.NodePackage)
-		case "concept":
-			kinds = append(kinds, repoindex.NodeConcept)
-		default:
-			return nil, fmt.Errorf("unknown node kind: %s", value)
-		}
-	}
-	return kinds, nil
-}
-
-func mergeEdgeTypes(edgeSets, edgeTypes []string) ([]repoindex.EdgeType, error) {
-	fromSets, err := edgeTypesFromSets(edgeSets)
-	if err != nil {
-		return nil, err
-	}
-	fromTypes, err := parseEdgeTypes(edgeTypes)
-	if err != nil {
-		return nil, err
-	}
-	if len(fromSets) == 0 && len(fromTypes) == 0 {
-		return repoindex.EdgeSetStructural, nil
-	}
-	return uniqueEdgeTypes(append(fromSets, fromTypes...)), nil
-}
-
-func edgeTypesFromSets(values []string) ([]repoindex.EdgeType, error) {
-	if len(values) == 0 {
-		return nil, nil
-	}
-	var types []repoindex.EdgeType
-	for _, value := range values {
-		trimmed := strings.ToLower(strings.TrimSpace(value))
-		if trimmed == "" {
-			continue
-		}
-		switch trimmed {
-		case "structural":
-			types = append(types, repoindex.EdgeSetStructural...)
-		case "doc":
-			types = append(types, repoindex.EdgeSetDoc...)
-		case "all":
-			types = append(types, repoindex.EdgeSetStructural...)
-			types = append(types, repoindex.EdgeSetDoc...)
-		default:
-			return nil, fmt.Errorf("unknown edge set: %s", value)
-		}
-	}
-	return uniqueEdgeTypes(types), nil
-}
-
-func parseEdgeTypes(values []string) ([]repoindex.EdgeType, error) {
-	if len(values) == 0 {
-		return nil, nil
-	}
-	allowed := map[string]repoindex.EdgeType{
-		string(repoindex.EdgeContains):        repoindex.EdgeContains,
-		string(repoindex.EdgeImports):         repoindex.EdgeImports,
-		string(repoindex.EdgeRefersTo):        repoindex.EdgeRefersTo,
-		string(repoindex.EdgeCalls):           repoindex.EdgeCalls,
-		string(repoindex.EdgeImplements):      repoindex.EdgeImplements,
-		string(repoindex.EdgeEmbeds):          repoindex.EdgeEmbeds,
-		string(repoindex.EdgeTests):           repoindex.EdgeTests,
-		string(repoindex.EdgeHasKeyword):      repoindex.EdgeHasKeyword,
-		string(repoindex.EdgeHasOutputField):  repoindex.EdgeHasOutputField,
-		string(repoindex.EdgeTouchesResource): repoindex.EdgeTouchesResource,
-		string(repoindex.EdgeEmitsEvent):      repoindex.EdgeEmitsEvent,
-		string(repoindex.EdgeDocRelated):      repoindex.EdgeDocRelated,
-		string(repoindex.EdgeDocFlow):         repoindex.EdgeDocFlow,
-	}
-	var types []repoindex.EdgeType
-	for _, value := range values {
-		trimmed := strings.ToUpper(strings.TrimSpace(value))
-		if trimmed == "" {
-			continue
-		}
-		ed, ok := allowed[trimmed]
-		if !ok {
-			return nil, fmt.Errorf("unknown edge type: %s", value)
-		}
-		types = append(types, ed)
-	}
-	return types, nil
-}
-
-func uniqueEdgeTypes(values []repoindex.EdgeType) []repoindex.EdgeType {
-	if len(values) == 0 {
-		return nil
-	}
-	seen := make(map[repoindex.EdgeType]struct{}, len(values))
-	out := make([]repoindex.EdgeType, 0, len(values))
-	for _, value := range values {
-		if _, ok := seen[value]; ok {
-			continue
-		}
-		seen[value] = struct{}{}
-		out = append(out, value)
-	}
-	return out
 }
 
 func renderDAG(result repoindex.DAGGrepResult, mode string) string {

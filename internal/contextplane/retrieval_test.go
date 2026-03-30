@@ -2,6 +2,7 @@ package contextplane
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/jkatigb/agentctl/internal/indexing/repoindex"
 	"github.com/jkatigb/agentctl/internal/indexing/rerank"
+	"github.com/jkatigb/agentctl/internal/storage/memory"
 	"github.com/jkatigb/agentctl/internal/storage/obsidianindex"
 )
 
@@ -116,6 +118,228 @@ func TestRetrieveBoostsCodeLinkedNotesFromRepoIndex(t *testing.T) {
 	}
 	if withRepo.VaultHits[0].Score <= noRepo.VaultHits[0].Score {
 		t.Fatalf("expected repo-aware retrieval to boost score: without=%d with=%d", noRepo.VaultHits[0].Score, withRepo.VaultHits[0].Score)
+	}
+}
+
+func TestRetrieveBoostsCodeLinkedNotesFromRepoMotifs(t *testing.T) {
+	ctx := context.Background()
+	workspace := t.TempDir()
+	storageRoot := t.TempDir()
+	store := NewWorkspaceStore(workspace)
+	if _, err := store.SaveTopOfMind(TopOfMind{
+		WorkspaceID: "ws-test",
+		Objective:   "WorkspaceStore work",
+		Phase:       "design",
+		UpdatedAt:   time.Date(2026, 3, 10, 0, 0, 0, 0, time.UTC),
+	}); err != nil {
+		t.Fatalf("SaveTopOfMind: %v", err)
+	}
+	index, err := obsidianindex.Open(ctx, storageRoot, retrievalFixtureVaultRoot(t))
+	if err != nil {
+		t.Fatalf("Open index: %v", err)
+	}
+	defer index.Close()
+	if _, err := index.Rebuild(ctx, retrievalFixtureVaultRoot(t)); err != nil {
+		t.Fatalf("Rebuild vault: %v", err)
+	}
+
+	opts := DefaultRetrievalOptions()
+	opts.UseCodeHints = false
+	opts.UseRepoMotifPrior = false
+	base, err := store.RetrieveWithOptionsAndMemory(ctx, index, nil, nil, nil, "WorkspaceStore", 5, opts)
+	if err != nil {
+		t.Fatalf("RetrieveWithOptionsAndMemory baseline: %v", err)
+	}
+
+	memStore, err := memory.Open(ctx, t.TempDir(), "")
+	if err != nil {
+		t.Fatalf("open memory: %v", err)
+	}
+	defer memStore.Close()
+	motif := RepoMotif{
+		Signature:    "call_path|internal/contextplane/store.go|internal/contextplane/dispatch.go|CALLS",
+		MotifType:    "call_path",
+		AnchorPath:   "internal/contextplane/store.go",
+		Paths:        []string{"internal/contextplane/store.go", "internal/contextplane/dispatch.go"},
+		RelatedPaths: []string{"internal/contextplane/dispatch.go"},
+		Symbols:      []string{"WorkspaceStore"},
+		EdgeTypes:    []string{"CALLS"},
+		Summary:      "call_path motif linking WorkspaceStore to dispatch flow",
+		GeneratedAt:  time.Now().UTC(),
+	}
+	payload, err := json.Marshal(motif)
+	if err != nil {
+		t.Fatalf("marshal motif: %v", err)
+	}
+	if _, err := memStore.SaveFromResult(ctx, "repo-motif://workspace-store", RepoMotifType, workspace, motif.Summary, payload); err != nil {
+		t.Fatalf("save motif: %v", err)
+	}
+
+	opts.UseRepoMotifPrior = true
+	withMotif, err := store.RetrieveWithOptionsAndMemory(ctx, index, nil, nil, memStore, "WorkspaceStore", 5, opts)
+	if err != nil {
+		t.Fatalf("RetrieveWithOptionsAndMemory with motif: %v", err)
+	}
+	if len(base.VaultHits) == 0 || len(withMotif.VaultHits) == 0 {
+		t.Fatalf("expected vault hits in both retrieval runs")
+	}
+	if withMotif.VaultHits[0].Score <= base.VaultHits[0].Score {
+		t.Fatalf("expected motif-aware retrieval to boost score: without=%d with=%d", base.VaultHits[0].Score, withMotif.VaultHits[0].Score)
+	}
+	if len(withMotif.RepoMotifHits) == 0 {
+		t.Fatalf("expected repo motif hits in retrieval result")
+	}
+}
+
+func TestConceptNoteSpecificityBias_PrefersMatchingConceptNotes(t *testing.T) {
+	workspace := "/tmp/praze"
+	query := "praze waitlist ingress"
+	concept := obsidianindex.SearchHit{
+		Path:      "notes/repo/praze/concepts/ingressprazewaitlist-api.md",
+		Title:     "Ingress/praze/waitlist-api",
+		RepoPaths: []string{"infra/k8s/waitlist/ingress.yaml"},
+		Symbols:   []string{"Ingress/praze/waitlist-api"},
+	}
+	pkg := obsidianindex.SearchHit{
+		Path:      "notes/repo/praze/packages/k8sinfra-k8s-waitlist.md",
+		Title:     "k8s:infra k8s waitlist",
+		RepoPaths: []string{"infra/k8s/waitlist/ingress.yaml", "infra/k8s/waitlist/kustomization.yaml"},
+	}
+	conceptScore := conceptNoteSpecificityBias(workspace, query, concept)
+	pkgScore := conceptNoteSpecificityBias(workspace, query, pkg)
+	if conceptScore <= pkgScore {
+		t.Fatalf("expected concept note bias > package note bias, got concept=%d package=%d", conceptScore, pkgScore)
+	}
+}
+
+func TestConceptNoteSpecificityBias_IgnoresNonConceptNotes(t *testing.T) {
+	workspace := "/tmp/praze"
+	query := "argocd application praze auth"
+	hit := obsidianindex.SearchHit{
+		Path:    "notes/repo/praze/packages/apps-praze-auth.md",
+		Title:   "apps praze-auth",
+		Symbols: []string{"AuthConfig"},
+	}
+	if got := conceptNoteSpecificityBias(workspace, query, hit); got != 0 {
+		t.Fatalf("expected no concept bias for package note, got %d", got)
+	}
+}
+
+func TestWorkspaceProjectNoteBias_UsesAbsoluteRepoNameForDotWorkspace(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "agentctl")
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatalf("mkdir root: %v", err)
+	}
+	t.Chdir(root)
+
+	agentctlHit := obsidianindex.SearchHit{
+		Path: "notes/repo/agentctl/packages/internal-web-api.md",
+	}
+	prazeHit := obsidianindex.SearchHit{
+		Path: "notes/repo/praze/packages/apps-praze-api-lib-prazeweb-api.md",
+	}
+
+	agentctlBias := workspaceProjectNoteBias(".", "web api handlers transport", agentctlHit)
+	prazeBias := workspaceProjectNoteBias(".", "web api handlers transport", prazeHit)
+	if agentctlBias <= prazeBias {
+		t.Fatalf("expected local project bias > cross-project bias, got local=%d cross=%d", agentctlBias, prazeBias)
+	}
+}
+
+func TestPackageNoteSpecificityBias_UsesAbsoluteRepoNameForDotWorkspace(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "agentctl")
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatalf("mkdir root: %v", err)
+	}
+	t.Chdir(root)
+
+	rootHit := obsidianindex.SearchHit{
+		Path:  "notes/repo/agentctl/index.md",
+		Title: "agentctl Repo Graph",
+	}
+	packageHit := obsidianindex.SearchHit{
+		Path:  "notes/repo/agentctl/packages/cmd-agentctl-cmd.md",
+		Title: "cmd agentctl cmd",
+	}
+
+	rootBias := packageNoteSpecificityBias(".", "agentctl repo graph", rootHit)
+	packageBias := packageNoteSpecificityBias(".", "agentctl repo graph", packageHit)
+	if rootBias <= packageBias {
+		t.Fatalf("expected root bias > package bias for repo graph query, got root=%d package=%d", rootBias, packageBias)
+	}
+}
+
+func TestNoteQueryCoverageBias_PrefersCurrentProjectRootNote(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "agentctl")
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatalf("mkdir root: %v", err)
+	}
+	t.Chdir(root)
+
+	rootHit := obsidianindex.SearchHit{
+		Path:  "notes/repo/agentctl/index.md",
+		Title: "agentctl Repo Graph",
+	}
+	packageHit := obsidianindex.SearchHit{
+		Path:  "notes/repo/agentctl/packages/cmd-agentctl-cmd.md",
+		Title: "cmd agentctl cmd",
+	}
+
+	rootBias := noteQueryCoverageBias(".", "agentctl repo graph", rootHit)
+	packageBias := noteQueryCoverageBias(".", "agentctl repo graph", packageHit)
+	if rootBias <= packageBias {
+		t.Fatalf("expected root coverage bias > package coverage bias, got root=%d package=%d", rootBias, packageBias)
+	}
+}
+
+func TestNoteQueryCoverageBias_PrefersMatchingPackageOverNeighbor(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "agentctl")
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatalf("mkdir root: %v", err)
+	}
+	t.Chdir(root)
+
+	webHit := obsidianindex.SearchHit{
+		Path:      "notes/repo/agentctl/packages/internal-web-api.md",
+		Title:     "internal web api",
+		RepoPaths: []string{"internal/web/api/agents.go"},
+		Symbols:   []string{"AgentDetailHandler"},
+	}
+	configHit := obsidianindex.SearchHit{
+		Path:      "notes/repo/agentctl/packages/internal-platform-config.md",
+		Title:     "internal platform config",
+		RepoPaths: []string{"internal/platform/config/config.go"},
+		Symbols:   []string{"Config"},
+	}
+
+	webBias := noteQueryCoverageBias(".", "web api handlers transport", webHit)
+	configBias := noteQueryCoverageBias(".", "web api handlers transport", configHit)
+	if webBias <= configBias {
+		t.Fatalf("expected web/api package coverage bias > config package bias, got web=%d config=%d", webBias, configBias)
+	}
+}
+
+func TestRetrievalTermsOverlap_MatchesCompoundAndPluralForms(t *testing.T) {
+	if !retrievalTermsOverlap("main", "skillmain") {
+		t.Fatalf("expected compound term overlap")
+	}
+	if !retrievalTermsOverlap("handlers", "handler") {
+		t.Fatalf("expected plural/singular overlap")
+	}
+	if retrievalTermsOverlap("web", "config") {
+		t.Fatalf("did not expect unrelated term overlap")
+	}
+}
+
+func TestScaledPackageFallbackBoost_DropsMisalignedCandidates(t *testing.T) {
+	if got := scaledPackageFallbackBoost(30, 0); got != 0 {
+		t.Fatalf("expected zero boost for zero coverage, got %d", got)
+	}
+	if got := scaledPackageFallbackBoost(30, 8); got != 6 {
+		t.Fatalf("expected capped low boost for weak coverage, got %d", got)
+	}
+	if got := scaledPackageFallbackBoost(30, 32); got != 30 {
+		t.Fatalf("expected full boost for strong coverage, got %d", got)
 	}
 }
 

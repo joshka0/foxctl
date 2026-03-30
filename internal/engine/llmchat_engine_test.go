@@ -378,6 +378,15 @@ func TestLLMChatEngine_Run_WithToolCall(t *testing.T) {
 	if output.ToolCalls[0].Name != "get_weather" {
 		t.Errorf("expected get_weather, got %s", output.ToolCalls[0].Name)
 	}
+	if len(output.Iterations) != 2 {
+		t.Fatalf("iterations=%d want 2", len(output.Iterations))
+	}
+	if output.Iterations[0].ToolCalls != 1 || len(output.Iterations[0].ToolNames) != 1 || output.Iterations[0].ToolNames[0] != "get_weather" {
+		t.Fatalf("iteration[0]=%+v", output.Iterations[0])
+	}
+	if output.Iterations[0].ToolResultTokenEstimate == 0 {
+		t.Fatalf("iteration[0]=%+v expected tool result token estimate", output.Iterations[0])
+	}
 	if callCount != 2 {
 		t.Errorf("expected 2 API calls, got %d", callCount)
 	}

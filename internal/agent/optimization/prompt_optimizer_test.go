@@ -364,16 +364,18 @@ func TestPromptOptimizer_GEPAModeUsesReflectionSignals(t *testing.T) {
 
 	if result == nil {
 		t.Fatal("expected result")
+		return
 	}
-	if result.Mode != "gepa" {
-		t.Fatalf("mode=%q want gepa", result.Mode)
+	got := *result
+	if got.Mode != "gepa" {
+		t.Fatalf("mode=%q want gepa", got.Mode)
 	}
-	if len(result.Candidates) == 0 {
+	if len(got.Candidates) == 0 {
 		t.Fatal("expected GEPA candidates")
 	}
-	if !strings.Contains(result.OptimizedPrompt, "Address recurring failure modes observed in past trajectories") &&
-		!strings.Contains(result.OptimizedPrompt, "Reflection-driven improvements to apply") {
-		t.Fatalf("optimized prompt missing GEPA reflection content: %q", result.OptimizedPrompt)
+	if !strings.Contains(got.OptimizedPrompt, "Address recurring failure modes observed in past trajectories") &&
+		!strings.Contains(got.OptimizedPrompt, "Reflection-driven improvements to apply") {
+		t.Fatalf("optimized prompt missing GEPA reflection content: %q", got.OptimizedPrompt)
 	}
 }
 
@@ -446,10 +448,12 @@ func TestPromptOptimizer_GEPAModeUsesDatasetExamples(t *testing.T) {
 	}
 	if result == nil {
 		t.Fatal("expected result")
+		return
 	}
-	if !strings.Contains(result.OptimizedPrompt, "High-rated transcript examples to emulate") &&
-		!strings.Contains(result.OptimizedPrompt, "Preferred directives from winning prompt variants") {
-		t.Fatalf("optimized prompt missing dataset-driven content: %q", result.OptimizedPrompt)
+	got := *result
+	if !strings.Contains(got.OptimizedPrompt, "High-rated transcript examples to emulate") &&
+		!strings.Contains(got.OptimizedPrompt, "Preferred directives from winning prompt variants") {
+		t.Fatalf("optimized prompt missing dataset-driven content: %q", got.OptimizedPrompt)
 	}
 }
 

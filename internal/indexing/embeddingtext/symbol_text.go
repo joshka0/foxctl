@@ -2,6 +2,7 @@ package embeddingtext
 
 import (
 	"fmt"
+	"path/filepath"
 	"sort"
 	"strings"
 )
@@ -98,6 +99,9 @@ type SymbolInfo struct {
 
 	// ImplementedBy lists types that implement this interface
 	ImplementedBy []string
+
+	// Aliases are normalized or canonical alternate forms that help semantic retrieval.
+	Aliases []string
 }
 
 // BuildSymbolEmbeddingText creates the text to embed for a symbol.
@@ -152,6 +156,13 @@ func BuildSymbolEmbeddingText(info SymbolInfo, opts SymbolTextOptions) string {
 		}
 	}
 
+	if len(info.Aliases) > 0 {
+		aliases := truncateList(sortDedup(info.Aliases), opts.MaxRelationships)
+		if len(aliases) > 0 {
+			parts = append(parts, "Aliases: "+strings.Join(aliases, ", "))
+		}
+	}
+
 	// Optional: Include code
 	if opts.IncludeCode && info.Code != "" {
 		code := truncateCode(info.Code, opts.MaxCodeLines)
@@ -159,6 +170,99 @@ func BuildSymbolEmbeddingText(info SymbolInfo, opts SymbolTextOptions) string {
 	}
 
 	return strings.Join(parts, "\n")
+}
+
+// BuildSymbolAliases derives normalized alternate forms for semantic retrieval.
+func BuildSymbolAliases(info SymbolInfo) []string {
+	seen := map[string]struct{}{}
+	out := make([]string, 0, 8)
+	add := func(value string) {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			return
+		}
+		if _, ok := seen[value]; ok {
+			return
+		}
+		seen[value] = struct{}{}
+		out = append(out, value)
+	}
+
+	for _, part := range splitSymbolParts(info.Name) {
+		snake := toEmbeddingSnake(part)
+		add(strings.ReplaceAll(snake, "_", " "))
+		add(snake)
+	}
+	if len(splitSymbolParts(info.Name)) > 1 {
+		add(strings.Join(splitSymbolParts(info.Name), " "))
+	}
+
+	base := strings.TrimSuffix(filepath.Base(info.FilePath), filepath.Ext(info.FilePath))
+	if base != "" {
+		snake := toEmbeddingSnake(base)
+		add(strings.ReplaceAll(snake, "_", " "))
+		add(snake)
+	}
+	dir := strings.TrimSpace(filepath.ToSlash(filepath.Dir(info.FilePath)))
+	if dir != "" && dir != "." {
+		parts := strings.Split(dir, "/")
+		if len(parts) > 0 {
+			last := toEmbeddingSnake(parts[len(parts)-1])
+			if last != "" && base != "" {
+				baseSnake := toEmbeddingSnake(base)
+				add(strings.TrimSpace(strings.ReplaceAll(last+" "+baseSnake, "_", " ")))
+				add(strings.TrimSpace(last + " " + baseSnake))
+			}
+		}
+	}
+
+	return sortDedup(out)
+}
+
+func splitSymbolParts(value string) []string {
+	fields := strings.FieldsFunc(strings.TrimSpace(value), func(r rune) bool {
+		return r == '.' || r == '/' || r == ':' || r == '\\'
+	})
+	out := make([]string, 0, len(fields))
+	for _, field := range fields {
+		field = strings.TrimSpace(field)
+		if field == "" {
+			continue
+		}
+		out = append(out, toEmbeddingWords(field))
+	}
+	return out
+}
+
+func toEmbeddingWords(value string) string {
+	snake := toEmbeddingSnake(value)
+	return strings.ReplaceAll(snake, "_", " ")
+}
+
+func toEmbeddingSnake(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+	var out []rune
+	var prev rune
+	for i, r := range value {
+		switch {
+		case r >= 'A' && r <= 'Z':
+			if i > 0 && ((prev >= 'a' && prev <= 'z') || (prev >= '0' && prev <= '9')) {
+				out = append(out, '_')
+			}
+			out = append(out, r+('a'-'A'))
+		case (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9'):
+			out = append(out, r)
+		default:
+			if len(out) > 0 && out[len(out)-1] != '_' {
+				out = append(out, '_')
+			}
+		}
+		prev = r
+	}
+	return strings.Trim(strings.ReplaceAll(string(out), "__", "_"), "_")
 }
 
 // sortDedup sorts and deduplicates a list for deterministic output.

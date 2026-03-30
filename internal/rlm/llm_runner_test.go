@@ -238,6 +238,36 @@ func TestCollectRetrievedPaths(t *testing.T) {
 	}
 }
 
+func TestSummarizeParentToolUsage(t *testing.T) {
+	t.Parallel()
+
+	got := summarizeParentToolUsage([]engine.IterationUsage{
+		{
+			Iteration:               1,
+			PromptTokens:            100,
+			CompletionTokens:        10,
+			ToolCalls:               1,
+			ToolNames:               []string{"code_search_ensemble"},
+			ToolResultTokenEstimate: 42,
+		},
+		{
+			Iteration:        2,
+			PromptTokens:     145,
+			CompletionTokens: 20,
+		},
+	}, "code_search_ensemble")
+
+	if intFromAny(got["target_tool_invocations"]) != 1 {
+		t.Fatalf("usage=%v", got)
+	}
+	if intFromAny(got["target_tool_prompt_delta_total"]) != 45 {
+		t.Fatalf("usage=%v", got)
+	}
+	if intFromAny(got["target_tool_result_token_estimate_total"]) != 42 {
+		t.Fatalf("usage=%v", got)
+	}
+}
+
 func TestRerankCandidatePaths(t *testing.T) {
 	t.Parallel()
 

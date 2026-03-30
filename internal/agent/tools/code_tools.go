@@ -26,7 +26,7 @@ func (r *Registry) registerCodeTools() error {
 	// code.search - uses ripgrep for code search
 	searchTool := tooling.NewFuncTool(
 		"code.search",
-		"Search for patterns in code files using ripgrep. Returns matching lines with context.",
+		"Search for simple literal or single-line regex patterns in code files using ripgrep. Returns matching lines with context. Multiline regex such as \\n or [\\s\\S] is not supported.",
 		models.InputSchema{
 			Type: "object",
 			Properties: map[string]models.ParameterSchema{

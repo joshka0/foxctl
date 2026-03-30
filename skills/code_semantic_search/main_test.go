@@ -341,6 +341,7 @@ func TestSearchPathFallback(t *testing.T) {
 	mustWrite("cmd/agentctl/cmd/agent.go")
 	mustWrite("internal/platform/config/config.go")
 	mustWrite("internal/adapters/skillslib/skillmain/main.go")
+	mustWrite("skills/code_semantic_search/skill.yaml")
 
 	results := searchPathFallback(context.Background(), workspace, "platform config settings", 5)
 	if len(results) == 0 {
@@ -349,14 +350,40 @@ func TestSearchPathFallback(t *testing.T) {
 	if results[0].Path != "internal/platform/config/config.go" {
 		t.Fatalf("top path=%q want internal/platform/config/config.go", results[0].Path)
 	}
+
+	results = searchPathFallback(context.Background(), workspace, "code semantic search skill manifest", 10)
+	foundManifest := false
+	for _, item := range results {
+		if item.Path == "skills/code_semantic_search/skill.yaml" {
+			foundManifest = true
+			break
+		}
+	}
+	if !foundManifest {
+		t.Fatalf("expected skill manifest in results: %v", results)
+	}
+}
+
+func TestScorePathFallbackCandidateBoostsDeclarativeArtifactsForManifestQueries(t *testing.T) {
+	scoreManifest := scorePathFallbackCandidate("skills/code_semantic_search/skill.yaml", []string{"code", "semantic", "search", "skill", "manifest"})
+	scoreRuntime := scorePathFallbackCandidate("internal/agent/runtime/runtime.go", []string{"code", "semantic", "search", "skill", "manifest"})
+	if scoreManifest <= scoreRuntime {
+		t.Fatalf("manifest score=%d runtime score=%d", scoreManifest, scoreRuntime)
+	}
 }
 
 func TestDefaultSemanticSearchScopes(t *testing.T) {
 	workspace := t.TempDir()
-	got := defaultSemanticSearchScopes(workspace)
+	got := defaultSemanticSearchScopes(workspace, "")
 	want := []string{ScopeSymbols, ScopeSessions, ScopeMemories, ScopeTasks, ScopeCodemaps}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("default scopes=%v want %v", got, want)
+	}
+
+	got = defaultSemanticSearchScopes(workspace, ProfileCode)
+	want = []string{ScopeSymbols, ScopeCodemaps}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("code profile scopes=%v want %v", got, want)
 	}
 
 	policyPath := filepath.Join(workspace, ".agentctl", "policy", "retrieval.yaml")
@@ -366,9 +393,91 @@ func TestDefaultSemanticSearchScopes(t *testing.T) {
 	if err := os.WriteFile(policyPath, []byte("semantic_search_default_scopes:\n  - symbols\n  - context\n  - codemaps\n  - context\n"), 0o644); err != nil {
 		t.Fatalf("write retrieval policy: %v", err)
 	}
-	got = defaultSemanticSearchScopes(workspace)
+	got = defaultSemanticSearchScopes(workspace, "")
 	want = []string{ScopeSymbols, ScopeContext, ScopeCodemaps}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("policy scopes=%v want %v", got, want)
+	}
+
+	got = defaultSemanticSearchScopes(workspace, ProfileCode)
+	want = []string{ScopeSymbols, ScopeCodemaps}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("code profile should ignore broad policy scopes, got %v want %v", got, want)
+	}
+}
+
+func TestNormalizeSemanticSearchProfile(t *testing.T) {
+	if got := normalizeSemanticSearchProfile(""); got != ProfileDefault {
+		t.Fatalf("empty profile=%q want %q", got, ProfileDefault)
+	}
+	if got := normalizeSemanticSearchProfile(" CODE "); got != ProfileCode {
+		t.Fatalf("normalized code profile=%q want %q", got, ProfileCode)
+	}
+	if got := normalizeSemanticSearchProfile("weird"); got != "weird" {
+		t.Fatalf("unknown profile=%q want weird", got)
+	}
+}
+
+func TestBuildCandidateBundlesGroupsCoLocatedPaths(t *testing.T) {
+	workspace := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(workspace, "skills", "code_semantic_search"), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(workspace, "skills", "code_semantic_search", "skill.yaml"), []byte("kind: Skill\n"), 0o644); err != nil {
+		t.Fatalf("write skill.yaml: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(workspace, "skills", "code_semantic_search", "main.go"), []byte("package main\n"), 0o644); err != nil {
+		t.Fatalf("write main.go: %v", err)
+	}
+
+	results := []Result{
+		{Path: "skills/code_semantic_search/skill.yaml", Name: "skill.yaml", FinalScore: 0.92, Source: ScopeSymbols, Summary: "semantic search manifest"},
+		{Path: "internal/agent/runtime/runtime.go", Name: "executeSmartSearch", FinalScore: 0.81, Source: ScopeSymbols},
+	}
+
+	bundles := buildCandidateBundles(workspace, results, 8)
+	if len(bundles) != 2 {
+		t.Fatalf("len(bundles)=%d want 2 (%v)", len(bundles), bundles)
+	}
+	if bundles[0].PrimaryPath != "skills/code_semantic_search/skill.yaml" {
+		t.Fatalf("primary=%q", bundles[0].PrimaryPath)
+	}
+	if !reflect.DeepEqual(bundles[0].RelatedPaths, []string{"skills/code_semantic_search/main.go"}) {
+		t.Fatalf("related=%v", bundles[0].RelatedPaths)
+	}
+	if bundles[0].Ambiguity != "single_file_with_companions" {
+		t.Fatalf("ambiguity=%q", bundles[0].Ambiguity)
+	}
+}
+
+func TestSearchPathFallbackSkipsDependencyAndBuildDirs(t *testing.T) {
+	workspace := t.TempDir()
+	for _, dir := range []string{
+		filepath.Join(workspace, "deps", "pkg"),
+		filepath.Join(workspace, "_build", "prod"),
+		filepath.Join(workspace, "apps", "real"),
+	} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", dir, err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(workspace, "deps", "pkg", "session_restore.ex"), []byte("defmodule Dep.SessionRestore do\nend\n"), 0o644); err != nil {
+		t.Fatalf("write deps file: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(workspace, "_build", "prod", "session_restore.ex"), []byte("defmodule Build.SessionRestore do\nend\n"), 0o644); err != nil {
+		t.Fatalf("write build file: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(workspace, "apps", "real", "session_restore.ex"), []byte("defmodule Real.SessionRestore do\nend\n"), 0o644); err != nil {
+		t.Fatalf("write real file: %v", err)
+	}
+
+	results := searchPathFallback(context.Background(), workspace, "session restore", 10)
+	if len(results) == 0 {
+		t.Fatal("expected fallback results")
+	}
+	for _, result := range results {
+		if strings.HasPrefix(result.Path, "deps/") || strings.HasPrefix(result.Path, "_build/") {
+			t.Fatalf("unexpected dependency/build fallback hit: %v", results)
+		}
 	}
 }

@@ -76,6 +76,7 @@ contributors
 12. **Go-native runtime rules (v2)** — prefer `Run(ctx)` components, bounded channels, single-writer state ownership, and immutable snapshots for high-read paths
 13. **ACA vault refresh** — after repo docs, repo graph, or bridge metadata changes, rebuild the Obsidian layer with `agentctl obsidian graph build`, `graph promote`, `bridge reconcile`, and `index build`
 14. **Task continuity split** — use `agentctl context task-history-summary` for Codex/agents/scripts *(structured summary + artifact pointer)* and `configs/hooks/task-continuity-summary.sh` for hook injection *(prompt-ready wrapper output)*
+15. **Never use keyword heuristics** — do not route, classify, promote, or suppress behavior using ad hoc substring/keyword matching; these heuristics are brittle. Prefer explicit schemas, typed signals, scored features, tests, or learned policies.
 
 ## ACA / Obsidian Refresh
 
@@ -99,6 +100,7 @@ Use this table as the deterministic execution contract.
 | Exploring unfamiliar code | Run semantic tree and (when needed) repo graph index before deep edits | `agentctl run code/semantic_search --input '{"format":"tree"}'` and relevant `agentctl index repo ...` command succeeds |
 | Any state-changing command (DB writes, workspace edits, CAS writes, agent spawn, task edits) | Prefer feature-flagged rollout + idempotency keys + append-only writes for safety | Rollout can be scoped/rolled back and repeated requests are safe |
 | Editing envelope/protocol behavior | Preserve `version/status/command/data/meta/error` shape; do not change `meta.*` without spec update | Existing envelope tests or golden files still pass |
+| Routing, classification, or memory-promotion logic | Do **not** use keyword heuristics *(ad hoc substring matching)* for behavior decisions; use explicit fields, typed signals, scoring, or learned policies instead | Behavior is driven by structured inputs/tests rather than string-trigger lists |
 | WASI skill manifest or runtime change | Keep `capabilities.network: "none"` | Manifest validation (`ValidateWASIPolicy`) continues to pass |
 | Large output result (>64KB or blob-like) | Persist to CAS and return `data.summary` + `data.artifact` pointer | Output envelope contains artifact digest instead of large inline payload |
 | Documentation changed (`*.md`) | Run doc link checker | `make check-doc-links` passes |

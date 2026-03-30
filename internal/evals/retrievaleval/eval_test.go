@@ -1,6 +1,7 @@
 package retrievaleval
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 )
@@ -38,6 +39,52 @@ func TestEvaluateModeAndSummarize(t *testing.T) {
 	}
 	if summaries[0].MeanReciprocalRank != 0.5 {
 		t.Fatalf("mrr=%.2f want 0.5", summaries[0].MeanReciprocalRank)
+	}
+}
+
+func TestLoadPolicyAndBuildAlerts(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "policy.yaml")
+	body := []byte(`
+suite: agentctl
+limit: 10
+format: markdown
+modes:
+  - aca_default
+  - aca_query_typed
+fail_on_alerts: true
+thresholds:
+  aca_default:
+    min_hit_rate_at_5: 0.80
+    min_hit_rate_at_10: 0.90
+    min_mrr: 0.75
+`)
+	if err := os.WriteFile(path, body, 0o644); err != nil {
+		t.Fatalf("write policy: %v", err)
+	}
+
+	policy, err := LoadPolicy(path)
+	if err != nil {
+		t.Fatalf("LoadPolicy() error = %v", err)
+	}
+	if policy.Suite != "agentctl" {
+		t.Fatalf("suite=%q want agentctl", policy.Suite)
+	}
+	if !policy.FailOnAlerts {
+		t.Fatalf("FailOnAlerts=false want true")
+	}
+	if got := policy.Thresholds["aca_default"].MinMeanReciprocalRank; got != 0.75 {
+		t.Fatalf("min_mrr=%.2f want 0.75", got)
+	}
+
+	alerts := BuildAlerts([]Summary{{
+		Mode:               "aca_default",
+		HitRateAt5:         0.70,
+		HitRateAt10:        0.85,
+		MeanReciprocalRank: 0.60,
+	}}, policy)
+	if len(alerts) != 3 {
+		t.Fatalf("len(alerts)=%d want 3", len(alerts))
 	}
 }
 

@@ -115,6 +115,36 @@ func TestBuildFallbackCandidates_Order(t *testing.T) {
 	}
 }
 
+func TestBuildFallbackCandidates_AddsSanitizedPathQuery(t *testing.T) {
+	candidates := buildFallbackCandidates("internal/agent/types RoleScout")
+	found := false
+	for _, candidate := range candidates {
+		if candidate == "internal agent types RoleScout" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected sanitized candidate in %v", candidates)
+	}
+}
+
+func TestSanitizeFTSQuery(t *testing.T) {
+	got := sanitizeFTSQuery(`internal/agent/types RoleScout:"foo"`)
+	want := "internal agent types RoleScout foo"
+	if got != want {
+		t.Fatalf("sanitizeFTSQuery()=%q want %q", got, want)
+	}
+}
+
+func TestSanitizeFTSQuery_StripsDots(t *testing.T) {
+	got := sanitizeFTSQuery(`types.RoleSemanticScout types.go`)
+	want := "types RoleSemanticScout types go"
+	if got != want {
+		t.Fatalf("sanitizeFTSQuery()=%q want %q", got, want)
+	}
+}
+
 // --- Unit Tests: Search Integration ---
 
 func TestSearch_ZeroResultMultiWord_UsesOr(t *testing.T) {

@@ -8,6 +8,7 @@ import (
 // Task describes one bounded RLM run request.
 type Task struct {
 	Prompt        string `json:"prompt"`
+	Role          string `json:"role,omitempty"`
 	WorkspaceID   string `json:"workspace_id,omitempty"`
 	WorkspaceRoot string `json:"workspace_root,omitempty"`
 	MaxDepth      int    `json:"max_depth,omitempty"`

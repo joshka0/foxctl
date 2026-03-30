@@ -17,6 +17,7 @@ web-ui/.vite/
 *.out
 
 .gomodcache/
+.gocache/
 
 # SQLite databases (except test fixtures)
 *.db

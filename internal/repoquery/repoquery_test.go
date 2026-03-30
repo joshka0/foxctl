@@ -113,3 +113,51 @@ func TestRerankSearchNodes_PrioritizesRealModulesOverFixtures(t *testing.T) {
 		t.Fatalf("top file=%q want real module path", got[0].Node.File)
 	}
 }
+
+func TestNormalizeNaturalQuery(t *testing.T) {
+	t.Parallel()
+
+	got := NormalizeNaturalQuery("internal/ composite\\function\nentrypoint\trefactor")
+	if got != "internal composite function entrypoint refactor" {
+		t.Fatalf("got %q", got)
+	}
+}
+
+func TestNewSearchRequestSanitizesNaturalQuery(t *testing.T) {
+	t.Parallel()
+
+	req, err := NewSearchRequest("internal/ actor/agent", 5)
+	if err != nil {
+		t.Fatalf("NewSearchRequest error = %v", err)
+	}
+	if req.Query != "internal actor agent" {
+		t.Fatalf("query=%q", req.Query)
+	}
+}
+
+func TestNewDAGGrepRequestSanitizesNaturalQuery(t *testing.T) {
+	t.Parallel()
+
+	req, err := NewDAGGrepRequest("internal/ composite function", "", 0, nil, nil, nil, "", 0, 0, 0, nil, "")
+	if err != nil {
+		t.Fatalf("NewDAGGrepRequest error = %v", err)
+	}
+	if req.Query != "internal composite function" {
+		t.Fatalf("query=%q", req.Query)
+	}
+}
+
+func TestParseEdgeTypesAcceptsNaturalAliases(t *testing.T) {
+	t.Parallel()
+
+	got, err := ParseEdgeTypes([]string{"references", "defines"})
+	if err != nil {
+		t.Fatalf("ParseEdgeTypes error = %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("len(got)=%d", len(got))
+	}
+	if got[0] != repoindex.EdgeRefersTo || got[1] != repoindex.EdgeContains {
+		t.Fatalf("got %#v", got)
+	}
+}

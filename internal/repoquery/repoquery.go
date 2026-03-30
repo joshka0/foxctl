@@ -23,6 +23,14 @@ const (
 	defaultDAGK             = 1
 )
 
+var naturalQueryReplacer = strings.NewReplacer(
+	"/", " ",
+	"\\", " ",
+	"\n", " ",
+	"\r", " ",
+	"\t", " ",
+)
+
 // SearchRequest captures a typed repo-index search request.
 type SearchRequest struct {
 	Query string `json:"query"`
@@ -41,7 +49,7 @@ func ParseSearchRequest(raw json.RawMessage) (SearchRequest, error) {
 // NewSearchRequest builds and validates a search request.
 func NewSearchRequest(query string, limit int) (SearchRequest, error) {
 	req := SearchRequest{
-		Query: strings.TrimSpace(query),
+		Query: NormalizeNaturalQuery(query),
 		Limit: limit,
 	}
 	if req.Limit <= 0 {
@@ -201,7 +209,7 @@ func ParseDAGGrepRequest(raw json.RawMessage) (DAGGrepRequest, error) {
 
 // NewDAGGrepRequest builds and validates a DAG request.
 func NewDAGGrepRequest(query, mode string, k int, nodeKinds, edgeSets, edgeTypes []string, direction string, depth, budget, perNodeCap int, includeAnchors *bool, render string) (DAGGrepRequest, error) {
-	query = strings.TrimSpace(query)
+	query = NormalizeNaturalQuery(query)
 	if query == "" {
 		return DAGGrepRequest{}, errors.New("query is required")
 	}
@@ -252,6 +260,14 @@ func NewDAGGrepRequest(query, mode string, k int, nodeKinds, edgeSets, edgeTypes
 		IncludeAnchors: anchors,
 		Render:         strings.TrimSpace(render),
 	}, nil
+}
+
+// NormalizeNaturalQuery flattens path separators and control whitespace so
+// natural-language repoindex queries do not trip FTS parsing on characters
+// like "/" that models commonly emit in path-scoped prompts.
+func NormalizeNaturalQuery(query string) string {
+	query = naturalQueryReplacer.Replace(query)
+	return strings.Join(strings.Fields(strings.TrimSpace(query)), " ")
 }
 
 // QueryService is a shared typed query adapter over repoindex.QueryEngine.
@@ -717,6 +733,7 @@ func ParseEdgeTypes(values []string) ([]repoindex.EdgeType, error) {
 	allowed := map[string]repoindex.EdgeType{
 		string(repoindex.EdgeContains):        repoindex.EdgeContains,
 		string(repoindex.EdgeImports):         repoindex.EdgeImports,
+		string(repoindex.EdgeUsesSymbol):      repoindex.EdgeUsesSymbol,
 		string(repoindex.EdgeRefersTo):        repoindex.EdgeRefersTo,
 		string(repoindex.EdgeCalls):           repoindex.EdgeCalls,
 		string(repoindex.EdgeImplements):      repoindex.EdgeImplements,
@@ -728,6 +745,8 @@ func ParseEdgeTypes(values []string) ([]repoindex.EdgeType, error) {
 		string(repoindex.EdgeEmitsEvent):      repoindex.EdgeEmitsEvent,
 		string(repoindex.EdgeDocRelated):      repoindex.EdgeDocRelated,
 		string(repoindex.EdgeDocFlow):         repoindex.EdgeDocFlow,
+		"REFERENCES":                          repoindex.EdgeRefersTo,
+		"DEFINES":                             repoindex.EdgeContains,
 	}
 
 	var parsed []repoindex.EdgeType

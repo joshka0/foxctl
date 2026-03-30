@@ -18,7 +18,7 @@ import (
 func (r *Registry) registerContextGrepTool() error {
 	tool := tooling.NewFuncTool(
 		"context_grep",
-		"Search code with context expansion (ripgrep, ast-grep, or line expansion).",
+		"Search code with context expansion (ripgrep, ast-grep, or line expansion). Use simple single-line patterns only; multiline regex such as \\n or [\\s\\S] is not supported.",
 		models.InputSchema{
 			Type: "object",
 			Properties: map[string]models.ParameterSchema{

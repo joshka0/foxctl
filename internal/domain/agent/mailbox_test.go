@@ -74,11 +74,13 @@ func TestMessage_JSONSerialization(t *testing.T) {
 
 func TestAskData_JSONSerialization(t *testing.T) {
 	ask := AskData{
-		AskID:     "ask-123",
-		Kind:      "context",
-		Question:  "What is the project structure?",
-		NeedsByMS: 30000,
-		Context:   map[string]any{"workspace": "/home/user/project", "depth": 2},
+		AskID:          "ask-123",
+		Kind:           "context",
+		Question:       "What is the project structure?",
+		NeedsByMS:      30000,
+		Context:        map[string]any{"workspace": "/home/user/project", "depth": 2},
+		ResponseSchema: json.RawMessage(`{"type":"object","properties":{"summary":{"type":"string"}}}`),
+		ResponseKeys:   []string{"summary", "next_action"},
 	}
 
 	data, err := json.Marshal(ask)
@@ -102,6 +104,12 @@ func TestAskData_JSONSerialization(t *testing.T) {
 	}
 	if got.NeedsByMS != ask.NeedsByMS {
 		t.Errorf("NeedsByMS = %d, want %d", got.NeedsByMS, ask.NeedsByMS)
+	}
+	if string(got.ResponseSchema) != string(ask.ResponseSchema) {
+		t.Errorf("ResponseSchema = %s, want %s", got.ResponseSchema, ask.ResponseSchema)
+	}
+	if len(got.ResponseKeys) != 2 || got.ResponseKeys[0] != "summary" || got.ResponseKeys[1] != "next_action" {
+		t.Errorf("ResponseKeys = %v, want [summary next_action]", got.ResponseKeys)
 	}
 }
 

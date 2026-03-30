@@ -35,6 +35,16 @@ func TestRunOverseer_Spawn(t *testing.T) {
 	require.NoError(t, agentStore.Create(ctx, parentAgent))
 	require.NoError(t, agentStore.Close())
 
+	// Initialize mailbox store before starting the daemon so migrations complete
+	// on a single connection and race tests do not contend on first open.
+	mailboxStore, err := mailbox.Open(ctx, tmpDir)
+	require.NoError(t, err)
+	defer func() {
+		if err := mailboxStore.Close(); err != nil {
+			t.Errorf("close mailbox store: %v", err)
+		}
+	}()
+
 	// Create overseer options
 	opts := OverseerDaemonOptions{
 		StorageRoot:  tmpDir,
@@ -47,22 +57,8 @@ func TestRunOverseer_Spawn(t *testing.T) {
 		errCh <- RunOverseer(ctx, opts)
 	}()
 
-	// Wait for startup and open mailbox with retry (SQLite WAL can cause brief locks)
-	var mailboxStore mailbox.Store
-	for i := 0; i < 10; i++ {
-		time.Sleep(100 * time.Millisecond)
-		mailboxStore, err = mailbox.Open(ctx, tmpDir)
-		if err == nil {
-			break
-		}
-		t.Logf("retry %d: mailbox open: %v", i+1, err)
-	}
-	require.NoError(t, err, "failed to open mailbox after retries")
-	defer func() {
-		if err := mailboxStore.Close(); err != nil {
-			t.Errorf("close mailbox store: %v", err)
-		}
-	}()
+	// Give the overseer loop time to start polling before sending the command.
+	time.Sleep(100 * time.Millisecond)
 
 	// Send spawn request
 	cmdID := ulid.Make().String()

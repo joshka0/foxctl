@@ -190,3 +190,46 @@ func MyFunc() {}
 		t.Error("Parser failed to find MyFunc")
 	}
 }
+
+func TestExtractElixirSymbols(t *testing.T) {
+	work := t.TempDir()
+	path := filepath.Join(work, "sample.ex")
+	code := `defmodule MyApp.Users do
+  @doc "Creates a user."
+  def create(name), do: {:ok, name}
+
+  defp hidden(), do: :ok
+end
+`
+	if err := os.WriteFile(path, []byte(code), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	syms, err := extractElixirSymbols(path, work, Input{IncludeDocs: true})
+	if err != nil {
+		t.Fatalf("extractElixirSymbols failed: %v", err)
+	}
+
+	foundModule := false
+	foundCreate := false
+	foundHidden := false
+	for _, sym := range syms {
+		switch sym.Name {
+		case "MyApp.Users":
+			foundModule = sym.Type == "type" && sym.Exported
+		case "create":
+			foundCreate = sym.Type == "function" && sym.Exported && sym.Doc == "Creates a user."
+		case "hidden":
+			foundHidden = !sym.Exported
+		}
+	}
+	if !foundModule {
+		t.Fatal("expected MyApp.Users module symbol")
+	}
+	if !foundCreate {
+		t.Fatal("expected public create/1 symbol with docs")
+	}
+	if !foundHidden {
+		t.Fatal("expected private hidden/0 symbol")
+	}
+}

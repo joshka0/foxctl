@@ -403,14 +403,21 @@ func (idx *Indexer) buildEmbeddingPayload(sym Symbol, calls []string, fileConten
 
 	switch mode {
 	case config.EmbedSymbolTextModeDocEnriched:
+		aliases := embeddingtext.BuildSymbolAliases(embeddingtext.SymbolInfo{
+			Name:     sym.Name,
+			FilePath: sym.FilePath,
+			Package:  filepath.ToSlash(filepath.Dir(sym.FilePath)),
+		})
 		info := embeddingtext.SymbolInfo{
 			Name:      sym.Name,
 			Kind:      string(sym.Kind),
+			Package:   filepath.ToSlash(filepath.Dir(sym.FilePath)),
 			FilePath:  sym.FilePath,
 			Signature: sym.Signature,
 			Doc:       sym.Documentation,
 			Code:      body,
 			Calls:     calls,
+			Aliases:   aliases,
 		}
 		content := embeddingtext.BuildSymbolEmbeddingText(info, embeddingtext.DefaultSymbolTextOptionsDocEnriched())
 		digest := embeddingtext.BuildSymbolContentDigest(embeddingtext.SymbolDigestInput{
@@ -423,6 +430,7 @@ func (idx *Indexer) buildEmbeddingPayload(sym Symbol, calls []string, fileConten
 			Doc:        sym.Documentation,
 			BodyDigest: sym.BodyDigest,
 			Calls:      calls,
+			Aliases:    aliases,
 		})
 		return content, digest
 	default:

@@ -155,7 +155,8 @@ func (w *Writer) MergeReviewedDraftContent(ctx context.Context, targetPath, head
 	if section == "" {
 		section = "Review"
 	}
-	merged := appendMarkdownUnderHeading(existing, section, renderReviewedMergeBlock(draftContent, sourceRef))
+	merged := mergeReviewedFrontmatter(existing, draftContent)
+	merged = appendMarkdownUnderHeading(merged, section, renderReviewedMergeBlock(draftContent, sourceRef))
 	if err := w.writeNoteDirectOrCLI(ctx, targetPath, merged, true); err != nil {
 		return ReviewedMergeResult{}, err
 	}
@@ -164,6 +165,24 @@ func (w *Writer) MergeReviewedDraftContent(ctx context.Context, targetPath, head
 		Heading:    section,
 		MergedAs:   "append",
 	}, nil
+}
+
+func mergeReviewedFrontmatter(existing, draftContent string) string {
+	frontLists, frontValues, _, _ := parseBridgeFrontmatter(draftContent)
+	merged := existing
+	for _, key := range []string{"paths", "symbols", "anchor_paths", "impl_anchor_paths", "support_anchor_paths", "resource_anchor_paths"} {
+		updated, _ := mergeMarkdownFrontmatterList(merged, key, frontLists[key])
+		merged = updated
+	}
+	values := map[string]string{
+		"status": "reviewed",
+		"trust":  "canonical",
+	}
+	if primaryAnchorPath := strings.TrimSpace(frontValues["primary_anchor_path"]); primaryAnchorPath != "" {
+		values["primary_anchor_path"] = primaryAnchorPath
+	}
+	merged = setMarkdownFrontmatterValues(merged, values)
+	return merged
 }
 
 // Read fetches note contents through the CLI.

@@ -114,7 +114,7 @@ esac
 		t.Fatalf("read package note: %v", err)
 	}
 	text := string(packageBody)
-	if !strings.Contains(text, "paths:") || !strings.Contains(text, "symbols:") || !strings.Contains(text, "WorkspaceStore") {
+	if !strings.Contains(text, "paths:") || !strings.Contains(text, "primary_anchor_path:") || !strings.Contains(text, "impl_anchor_paths:") || !strings.Contains(text, "symbols:") || !strings.Contains(text, "WorkspaceStore") {
 		t.Fatalf("expected repo graph metadata in package note:\n%s", text)
 	}
 	if !strings.Contains(text, "[[storage obsidianindex]]") {

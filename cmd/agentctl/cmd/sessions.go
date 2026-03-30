@@ -53,6 +53,10 @@ manually with:
 		newSessionsSummarizeCommand(),
 		newSessionsImportCommand(),
 		newSessionsResynthesizeV2Command(),
+		newSessionsDeriveMemoryCommand(),
+		newSessionsDeriveMemoryGroupCommand(),
+		newSessionsConsolidateDoctrineCommand(),
+		newSessionsConsolidateDoctrineGroupCommand(),
 		newSessionsWindowsCommand(),
 		newSessionsExportCommand(),
 		// Lineage commands

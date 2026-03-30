@@ -1,0 +1,26 @@
+name: march25-group-doctrine
+cases:
+  - id: march25-group-doctrine
+    mode: grouped_doctrine
+    source_files:
+      - ~/.codex/sessions/2026/03/25/rollout-2026-03-25T11-32-39-019d2456-c302-71e3-af47-4f58795e7622.jsonl
+      - ~/.codex/sessions/2026/03/25/rollout-2026-03-25T11-38-02-019d245b-b3d7-7ea1-bf57-30b954e9bfe8.jsonl
+      - ~/.codex/sessions/2026/03/25/rollout-2026-03-25T11-38-06-019d245b-c11f-7910-9aa6-07e0178e0d96.jsonl
+      - ~/.codex/sessions/2026/03/25/rollout-2026-03-25T11-38-08-019d245b-c9bc-7ca3-a64c-989e959c41bc.jsonl
+    expected_durable_claims:
+      - text: The companion hybrid pipeline supports event sourcing, typed hard state, active assumptions, soft episodes, evidence, and recent turns.
+        kind: architecture
+      - text: Avoid brittle text-canonicalization; prefer abstracted classifier-based logic.
+        kind: workflow_rule
+        aliases:
+          - can we not do brittle decision texts, we need a classifier here instead
+          - not do brittle decision texts
+    forbidden_claims:
+      - text: only be relying on the lmstudio agents in the future, ideally running as a daemon
+      - text: The objective-aware negative filter is functioning as intended.
+    expected_kinds:
+      - architecture
+      - workflow_rule
+    min_persisted: 0
+    max_persisted: 3
+    notes: Doctrine-only grouped mode should combine hybrid-runtime consensus with anti-brittleness workflow doctrine.

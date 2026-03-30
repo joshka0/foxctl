@@ -1,0 +1,52 @@
+name: jido
+queries:
+  - id: repo-graph-root
+    query: "jido repo graph"
+    expected_any_of:
+      - notes/repo/jido/index.md
+    notes: "Should surface the canonical jido repo graph root map."
+  - id: agent-core
+    query: "agent core runtime directives"
+    expected_any_of:
+      - notes/repo/jido/packages/agent.md
+    notes: "Should surface the core agent package note."
+  - id: agent-server
+    query: "agent server lifecycle routing executors"
+    expected_any_of:
+      - notes/repo/jido/packages/agentserver.md
+    notes: "Should surface the agent server package note."
+  - id: plugin-system
+    query: "plugin manifests routes requirements"
+    expected_any_of:
+      - notes/repo/jido/packages/plugin.md
+    notes: "Should surface the plugin package note."
+  - id: observe-runtime
+    query: "observe tracing span context"
+    expected_any_of:
+      - notes/repo/jido/packages/observe.md
+    notes: "Should surface the observe package note."
+  - id: sensor-runtime
+    query: "sensor runtime spec heartbeat"
+    expected_any_of:
+      - notes/repo/jido/packages/sensor.md
+    notes: "Should surface the sensor package note."
+  - id: storage-adapters
+    query: "storage file ets persistence"
+    expected_any_of:
+      - notes/repo/jido/packages/storage.md
+    notes: "Should surface the storage package note."
+  - id: thread-history
+    query: "thread store history adapters"
+    expected_any_of:
+      - notes/repo/jido/packages/thread.md
+    notes: "Should surface the thread package note."
+  - id: memory-space
+    query: "memory space agent recall"
+    expected_any_of:
+      - notes/repo/jido/packages/memory.md
+    notes: "Should surface the memory package note."
+  - id: identity-profile
+    query: "identity profile actor metadata"
+    expected_any_of:
+      - notes/repo/jido/packages/identity.md
+    notes: "Should surface the identity package note."

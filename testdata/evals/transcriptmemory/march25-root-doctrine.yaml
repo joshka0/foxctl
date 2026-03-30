@@ -1,0 +1,25 @@
+name: march25-root-doctrine
+cases:
+  - id: march25-root-doctrine
+    mode: single_doctrine
+    provider: codex
+    source_file: ~/.codex/sessions/2026/03/25/rollout-2026-03-25T11-32-39-019d2456-c302-71e3-af47-4f58795e7622.jsonl
+    expected_durable_claims:
+      - text: Use anchor_state_t + user_t -> assistant_t -> user_t+1 as the evaluation unit for transcript-memory derivation.
+        kind: architecture
+        aliases:
+          - persistence_user + user_t -> assistant_t -> user_t+1
+      - text: Avoid brittle text-canonicalization; prefer abstracted classifier-based logic.
+        kind: workflow_rule
+        aliases:
+          - can we not do brittle decision texts, we need a classifier here instead
+          - not do brittle decision texts
+    forbidden_claims:
+      - text: only be relying on the lmstudio agents in the future, ideally running as a daemon
+      - text: The objective-aware negative filter is functioning as intended.
+    expected_kinds:
+      - architecture
+      - workflow_rule
+    min_persisted: 0
+    max_persisted: 2
+    notes: Doctrine-only root mode should surface the evaluation-unit architecture and anti-brittleness rule from cached bridge seeds.

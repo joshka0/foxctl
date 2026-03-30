@@ -153,6 +153,137 @@ func TestShouldRecoverContextToolLeak(t *testing.T) {
 	}
 }
 
+func TestBuildStructuredConversationState(t *testing.T) {
+	frame := conversationContextFrame{
+		HasHistory:        true,
+		HistoryRecap:      "- user: Can you help me plan our Japan trip?\nMost recent user ask: Can you help me plan our Japan trip?",
+		ContinuationQuery: "Current user ask: do you see our previous conversation?\nPrevious user ask: Can you help me plan our Japan trip?",
+		Turns: []ConversationTurn{
+			{Role: "user", Content: "Can you help me plan our Japan trip?"},
+			{Role: "assistant", Content: "Yes, we were comparing Tokyo and Kyoto hotels."},
+		},
+	}
+
+	got := buildStructuredConversationState(frame)
+	if !strings.Contains(got, `"ongoing_conversation": true`) {
+		t.Fatalf("structured state=%q missing ongoing flag", got)
+	}
+	if !strings.Contains(got, `"last_user_ask": "Can you help me plan our Japan trip?"`) {
+		t.Fatalf("structured state=%q missing last user ask", got)
+	}
+	if !strings.Contains(got, `"last_assistant_reply": "Yes, we were comparing Tokyo and Kyoto hotels."`) {
+		t.Fatalf("structured state=%q missing last assistant reply", got)
+	}
+	if !strings.Contains(got, `"continuation_query": "Current user ask: do you see our previous conversation?\nPrevious user ask: Can you help me plan our Japan trip?"`) {
+		t.Fatalf("structured state=%q missing continuation query", got)
+	}
+}
+
+func TestParseContinuityControllerPlan(t *testing.T) {
+	raw := `{"source":"visible_history","visible_summary":"We were discussing Japan travel planning.","memory_query":"Japan travel May hotels"}`
+	plan, ok := parseContinuityControllerPlan(raw)
+	if !ok {
+		t.Fatal("expected continuity controller plan to parse")
+	}
+	if plan.Source != "visible_history" {
+		t.Fatalf("source=%q want visible_history", plan.Source)
+	}
+	if plan.VisibleSummary != "We were discussing Japan travel planning." {
+		t.Fatalf("visible_summary=%q", plan.VisibleSummary)
+	}
+	if plan.MemoryQuery != "Japan travel May hotels" {
+		t.Fatalf("memory_query=%q", plan.MemoryQuery)
+	}
+}
+
+func TestResolveCompanionSubcallRole(t *testing.T) {
+	tests := []struct {
+		name string
+		role string
+		want string
+	}{
+		{name: "default", role: "", want: DefaultSubcallWorkerRole},
+		{name: "trimmed explicit role", role: "  researcher  ", want: "researcher"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := resolveCompanionSubcallRole(tt.role); got != tt.want {
+				t.Fatalf("resolveCompanionSubcallRole(%q)=%q want %q", tt.role, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestContinuityLayerHits(t *testing.T) {
+	frame := conversationContextFrame{
+		HasHistory:     true,
+		HistoryRecap:   "recent recap",
+		ArtifactRefs:   []string{"sha256:abc"},
+		WorkspaceState: "# Top Of Mind\nobjective: ship harness\n\n# Task Continuity\nTask continuity summary",
+	}
+	meta := memoryPromptMetadata{
+		HasLayeredContext:  true,
+		HasTopOfMind:       true,
+		HasTaskContinuity:  true,
+		SessionRecallCount: 1,
+	}
+	got := continuityLayerHits(frame, meta, 1, false)
+	want := []string{"L0", "L1", "L2", "L3", "L4", "L5"}
+	if len(got) != len(want) {
+		t.Fatalf("layer hits=%v want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("layer hits=%v want %v", got, want)
+		}
+	}
+}
+
+func TestExplainInvisibleResponse(t *testing.T) {
+	tests := []struct {
+		name  string
+		input engine.EngineOutput
+		raw   string
+		need  []string
+	}{
+		{
+			name: "reasoning only with tool error",
+			input: engine.EngineOutput{
+				StopReason: engine.StopReasonMaxIterations,
+				ToolCalls:  []engine.ToolCall{{ID: "call-1", Name: "repo_index_search"}},
+				ToolResults: []engine.ToolResult{{
+					ToolCallID: "call-1",
+					Content:    "timeout while indexing",
+					IsError:    true,
+				}},
+			},
+			raw:  "<think>reasoning</think>",
+			need: []string{"hidden reasoning", "repo_index_search failed", "iteration budget"},
+		},
+		{
+			name: "no assistant text",
+			input: engine.EngineOutput{
+				StopReason: engine.StopReasonError,
+				Error:      "upstream failed",
+			},
+			raw:  "",
+			need: []string{"upstream failed", "no assistant text", "engine stopped with an error"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := explainInvisibleResponse(tt.input, tt.raw, false)
+			for _, part := range tt.need {
+				if !strings.Contains(got, part) {
+					t.Fatalf("explainInvisibleResponse()=%q missing %q", got, part)
+				}
+			}
+		})
+	}
+}
+
 func TestRequestedOutputFormat(t *testing.T) {
 	tests := []struct {
 		name        string
@@ -189,6 +320,37 @@ func TestRequestedOutputFormat(t *testing.T) {
 				t.Fatalf("requestedOutputFormat() instruction = %q, want snippet %q", gotInstruction, tt.wantSnippet)
 			}
 		})
+	}
+}
+
+func TestBuildContinuationRecallQuery_ExpandsLowInformationFollowUp(t *testing.T) {
+	turns := []ConversationTurn{
+		{Role: "user", Content: "Can you help me plan our Japan travel for May?"},
+		{Role: "assistant", Content: "Yes, we narrowed it to Tokyo and Kyoto and compared hotels near the train stations."},
+	}
+
+	got := buildContinuationRecallQuery("do you see our previous conversation?", turns)
+	if !strings.Contains(got, "Current user ask: do you see our previous conversation?") {
+		t.Fatalf("continuation query=%q missing current ask", got)
+	}
+	if !strings.Contains(got, "Previous user ask: Can you help me plan our Japan travel for May?") {
+		t.Fatalf("continuation query=%q missing previous user context", got)
+	}
+	if !strings.Contains(got, "Previous assistant reply: Yes, we narrowed it to Tokyo and Kyoto") {
+		t.Fatalf("continuation query=%q missing previous assistant context", got)
+	}
+}
+
+func TestBuildContinuationRecallQuery_PreservesSpecificQuestion(t *testing.T) {
+	turns := []ConversationTurn{
+		{Role: "user", Content: "We were comparing LMStudio and OpenRouter latency yesterday."},
+		{Role: "assistant", Content: "We found LMStudio was unreachable from the inspector path."},
+	}
+
+	input := "Why is LMStudio unreachable from the inspector panel even though the model is loaded locally?"
+	got := buildContinuationRecallQuery(input, turns)
+	if got != input {
+		t.Fatalf("continuation query=%q want original specific question %q", got, input)
 	}
 }
 

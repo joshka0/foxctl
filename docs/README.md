@@ -15,6 +15,11 @@ This is the canonical map for docs in this repository.
 - [docs/general/embedding-rebuilds.md](general/embedding-rebuilds.md) - Canonical rebuild commands for embedding-backed stores after provider/model changes.
 - [docs/general/task-continuity.md](general/task-continuity.md) - Deterministic task continuity pack, command/wrapper split, and artifact-backed delivery.
 - [docs/general/core-package-coverage.md](general/core-package-coverage.md) - Machine-friendly core package coverage matrix.
+- [docs/general/refactor-scout.md](general/refactor-scout.md) - Local refactor scout/advisor workflow, seam vocabulary, language coverage, and ACA fit.
+- [docs/general/code-search-evals.md](general/code-search-evals.md) - Stable code-search eval suites, checked-in policies, and wrapper commands.
+- [docs/general/retrieval-evals.md](general/retrieval-evals.md) - Stable ACA retrieval eval suites, wrapper commands, and current expected bands.
+- [docs/general/retrieval-stack-snapshot.md](general/retrieval-stack-snapshot.md) - Compact current benchmark snapshot across code-search and ACA retrieval.
+- [docs/general/tmux-collaboration.md](general/tmux-collaboration.md) - tmux-based live collaboration setup, structured pane inspection, and ACA promotion flow.
 - [docs/architecture/](architecture/) - Current runtime architecture docs.
 - [docs/architecture/context-architecture.md](architecture/context-architecture.md) - Workspace-local ACA control plane and top-of-mind slice.
 - [docs/architecture/jido-hybrid-runtime.md](architecture/jido-hybrid-runtime.md) - Canonical hybrid-runtime split for Jido orchestration + `agentctl` semantics.
@@ -50,6 +55,7 @@ This is the canonical map for docs in this repository.
 - [docs/plans/features/v2-skills-parity-plan.md](plans/features/v2-skills-parity-plan.md) - Bring v2 profiles/tooling up to parity with ACA, Obsidian, and newer retrieval surfaces.
 - [docs/plans/features/agentctl-rlm-integration-outline.md](plans/features/agentctl-rlm-integration-outline.md) - Concrete outline for adding an RLM query-time runtime over ACA, companion memory, and repo/vault state.
 - [docs/plans/features/agentctl-rlm-next-steps.md](plans/features/agentctl-rlm-next-steps.md) - Routed and staged next-step plan for turning the experimental RLM runtime into a practical retrieval/controller layer.
+- [docs/plans/features/slop-function-detection.md](plans/features/slop-function-detection.md) - Plan for treating "slop" as deterministic structural findings on top of refactor scout, with optional advisor reranking.
 - [docs/plans/features/rlm-retrieval-findings.md](plans/features/rlm-retrieval-findings.md) - Current benchmark snapshot comparing ACA, direct repoindex lanes, and RLM retrieval modes.
 - [docs/plans/features/aca-retrieval-hypotheses.md](plans/features/aca-retrieval-hypotheses.md) - Deterministic ACA retrieval hypotheses and eval modes for testing control-plane, vault, trust, and repo-hint improvements.
 - [docs/plans/features/aca-self-corrective-loop.md](plans/features/aca-self-corrective-loop.md) - First slice for observing ACA retrieval misses, classifying them, and proposing deterministic corrections.

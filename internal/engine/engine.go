@@ -60,6 +60,9 @@ type EngineOutput struct {
 	// ToolResults are the results from tool execution.
 	ToolResults []ToolResult `json:"tool_results,omitempty"`
 
+	// Iterations captures per-LLM-call token and tool usage within the turn.
+	Iterations []IterationUsage `json:"iterations,omitempty"`
+
 	// InjectedContexts tracks context injected by hooks for tool calls.
 	// Entries include ToolCallID for correlation; order is insertion order.
 	InjectedContexts []InjectedContext `json:"injected_contexts,omitempty"`
@@ -72,6 +75,20 @@ type EngineOutput struct {
 
 	// Error contains error details if StopReason is Error.
 	Error string `json:"error,omitempty"`
+}
+
+// IterationUsage captures one model iteration inside a turn.
+type IterationUsage struct {
+	Iteration               int      `json:"iteration,omitempty"`
+	MessageCount            int      `json:"message_count,omitempty"`
+	PromptTokens            int      `json:"prompt_tokens,omitempty"`
+	CompletionTokens        int      `json:"completion_tokens,omitempty"`
+	TotalTokens             int      `json:"total_tokens,omitempty"`
+	FinishReason            string   `json:"finish_reason,omitempty"`
+	ToolCalls               int      `json:"tool_calls,omitempty"`
+	ToolNames               []string `json:"tool_names,omitempty"`
+	ToolResultChars         int      `json:"tool_result_chars,omitempty"`
+	ToolResultTokenEstimate int      `json:"tool_result_token_estimate,omitempty"`
 }
 
 // InjectedContext tracks context injected by hooks during tool execution.

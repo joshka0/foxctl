@@ -64,6 +64,78 @@ func Normalize(path string) string {
 	return filepath.Clean(path)
 }
 
+// FamilyPath returns a stable repo-family root for a workspace path.
+// For normal repositories this is the detected workspace root itself.
+// For git worktrees, this resolves to the main repository root so related
+// worktrees share one family path even without a configured remote.
+func FamilyPath(path string) string {
+	if strings.TrimSpace(path) == "" {
+		return ""
+	}
+	clean := Normalize(strings.TrimSpace(path))
+	if !pathExists(clean) {
+		if candidate := familyPathFromWorktreeConvention(clean); candidate != "" {
+			return candidate
+		}
+		return clean
+	}
+	root := Normalize(Detect(clean))
+	if root == "" {
+		return ""
+	}
+	gitMeta := filepath.Join(root, ".git")
+	info, err := os.Stat(gitMeta)
+	if err != nil {
+		return root
+	}
+	if info.IsDir() {
+		return root
+	}
+	data, err := os.ReadFile(gitMeta)
+	if err != nil {
+		return root
+	}
+	line := strings.TrimSpace(string(data))
+	if !strings.HasPrefix(strings.ToLower(line), "gitdir:") {
+		return root
+	}
+	gitdir := strings.TrimSpace(line[len("gitdir:"):])
+	if gitdir == "" {
+		return root
+	}
+	if !filepath.IsAbs(gitdir) {
+		gitdir = filepath.Join(root, gitdir)
+	}
+	gitdir = filepath.Clean(gitdir)
+	marker := string(filepath.Separator) + ".git" + string(filepath.Separator) + "worktrees" + string(filepath.Separator)
+	idx := strings.LastIndex(gitdir, marker)
+	if idx < 0 {
+		return root
+	}
+	family := filepath.Clean(gitdir[:idx])
+	if family == "" {
+		return root
+	}
+	return family
+}
+
+func familyPathFromWorktreeConvention(path string) string {
+	parent := filepath.Dir(path)
+	base := filepath.Base(parent)
+	if !strings.HasSuffix(base, "-worktrees") {
+		return ""
+	}
+	repoName := strings.TrimSuffix(base, "-worktrees")
+	if repoName == "" {
+		return ""
+	}
+	candidate := filepath.Join(filepath.Dir(parent), repoName)
+	if !pathExists(candidate) {
+		return ""
+	}
+	return Normalize(candidate)
+}
+
 // PathIdentity returns a stable identifier derived from a workspace path.
 // This is used when a repo identity is unavailable.
 func PathIdentity(path string) string {
@@ -181,10 +253,14 @@ func ID(path string) string {
 	if path == "" {
 		return ""
 	}
-	if repo := RepoIdentity(path); repo != "" {
+	family := FamilyPath(path)
+	if family == "" {
+		family = path
+	}
+	if repo := RepoIdentity(family); repo != "" {
 		return repo
 	}
-	return PathIdentity(path)
+	return PathIdentity(family)
 }
 
 func hasMarker(dir, name string) bool {
@@ -204,6 +280,9 @@ func hasMarker(dir, name string) bool {
 type WorkspaceInfo struct {
 	// Path is the filesystem path to the workspace root.
 	Path string
+	// FamilyPath is the canonical repo-family root. For worktrees this points at
+	// the main repository checkout rather than the individual worktree path.
+	FamilyPath string
 	// RepoIdentity is a stable identifier for the git repository.
 	// For worktrees, this returns the same identity since they share the same remote.
 	// Empty if not in a git repo or no remote configured.
@@ -216,7 +295,8 @@ func DetectWithIdentity(start string) WorkspaceInfo {
 	path := Detect(start)
 	return WorkspaceInfo{
 		Path:         path,
-		RepoIdentity: RepoIdentity(path),
+		FamilyPath:   FamilyPath(path),
+		RepoIdentity: RepoIdentity(FamilyPath(path)),
 	}
 }
 

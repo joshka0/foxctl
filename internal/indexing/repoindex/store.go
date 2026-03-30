@@ -16,7 +16,10 @@ import (
 	"github.com/jkatigb/agentctl/internal/storage/dbutil"
 )
 
-const schemaVersion = 3
+const (
+	schemaVersion            = 3
+	openContextMinimumBudget = 10 * time.Second
+)
 
 // ErrNotFound indicates the requested node or edge was not found.
 var ErrNotFound = errors.New("not found")
@@ -75,20 +78,39 @@ func Open(ctx context.Context, storageRoot, repoRoot string) (*Store, error) {
 		}
 	}
 
-	db, closeFn, err := dbutil.OpenSQLiteDBShared(ctx, dbPath, migrate)
+	openCtx, cancelOpen := openContext(ctx, openContextMinimumBudget)
+	defer cancelOpen()
+
+	db, closeFn, err := dbutil.OpenSQLiteDBShared(openCtx, dbPath, migrate)
 	if err != nil {
 		return nil, fmt.Errorf("repoindex: open db: %w", err)
 	}
-	if _, err := db.ExecContext(ctx, "PRAGMA synchronous=NORMAL;"); err != nil {
+	if _, err := db.ExecContext(openCtx, "PRAGMA synchronous=NORMAL;"); err != nil {
 		_ = closeFn()
 		return nil, fmt.Errorf("repoindex: set synchronous: %w", err)
 	}
-	if _, err := db.ExecContext(ctx, "PRAGMA temp_store=MEMORY;"); err != nil {
+	if _, err := db.ExecContext(openCtx, "PRAGMA temp_store=MEMORY;"); err != nil {
 		_ = closeFn()
 		return nil, fmt.Errorf("repoindex: set temp_store: %w", err)
 	}
 
 	return &Store{db: db, path: dbPath, repoRoot: absoluteRoot, repoKey: key, close: closeFn}, nil
+}
+
+func openContext(ctx context.Context, minimumBudget time.Duration) (context.Context, context.CancelFunc) {
+	if ctx == nil {
+		return context.WithTimeout(context.Background(), minimumBudget)
+	}
+	if err := ctx.Err(); err != nil {
+		return ctx, func() {}
+	}
+	if minimumBudget <= 0 {
+		return ctx, func() {}
+	}
+	if deadline, ok := ctx.Deadline(); ok && time.Until(deadline) < minimumBudget {
+		return context.WithTimeout(context.WithoutCancel(ctx), minimumBudget)
+	}
+	return ctx, func() {}
 }
 
 // Close closes the underlying database.

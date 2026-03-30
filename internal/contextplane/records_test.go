@@ -290,6 +290,35 @@ func TestBuildReportAndGenerateMaintenanceTasks(t *testing.T) {
 	}
 }
 
+func TestLoadHandoffAcceptsWorkspaceRelativePath(t *testing.T) {
+	workspace := t.TempDir()
+	t.Chdir(workspace)
+
+	store := NewWorkspaceStore(".")
+	handoffPath, err := store.SaveHandoff(Handoff{
+		TaskID:  "T-2048",
+		Phase:   "formalize",
+		Outcome: "complete",
+		Summary: "Validated relative handoff loading.",
+	})
+	if err != nil {
+		t.Fatalf("SaveHandoff: %v", err)
+	}
+
+	relativePath, err := filepath.Rel(".", handoffPath)
+	if err != nil {
+		t.Fatalf("filepath.Rel: %v", err)
+	}
+
+	handoff, err := store.LoadHandoff(relativePath)
+	if err != nil {
+		t.Fatalf("LoadHandoff: %v", err)
+	}
+	if handoff.TaskID != "T-2048" {
+		t.Fatalf("task_id=%q want T-2048", handoff.TaskID)
+	}
+}
+
 func TestGenerateMaintenanceTasksIncludesPreparedLowRiskProposalMerge(t *testing.T) {
 	store := NewWorkspaceStore(t.TempDir())
 	if _, err := store.RecordMemoryProposal(context.Background(), MemoryProposal{

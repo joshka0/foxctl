@@ -48,6 +48,7 @@ Command:
 - `agentctl context merge-promotion`
 - `agentctl context task-history`
 - `agentctl context task-history-summary`
+- `agentctl context family-history-summary`
 - `agentctl context next-proposal-merge`
 - `agentctl context hooks install`
 - `agentctl obsidian read`
@@ -182,6 +183,14 @@ Task continuity delivery split:
 
 - `agentctl context task-history-summary`
   - structured command for Codex, scripts, and agent runtimes
+- `agentctl context family-history-summary`
+  - structured repo-family transcript summary over persisted transcript-history records
+  - supports:
+    - `--focus-query` to bias selection toward one transcript lane
+    - `--date-from YYYY-MM-DD`
+    - `--date-to YYYY-MM-DD`
+  - filters by transcript/session time *(stored as `source_started_at`)* before owner selection and recurring aggregation
+  - returns per-item `support_metadata` for trust/debugging (`owner_count`, `latest_updated_at`, `latest_age_days`, `source_owners`)
 - `configs/hooks/task-continuity-summary.sh`
   - thinner wrapper for hook injection payloads
 
@@ -205,6 +214,38 @@ The MCP facade now exposes first-class ACA read tools:
 - `context_merge_promotion`
 
 These provide direct ACA access without routing through generic `agentctl_run`.
+
+## Transcript Family History
+
+The transcript-family surface is a repo-family continuity layer built on top of persisted transcript-history records.
+
+Precondition:
+
+- transcript history must be persisted first, usually through:
+  - `agentctl sessions derive-memory --memory-lane insight --persist-history`
+  - `agentctl sessions derive-memory-group --memory-lane insight --persist-history`
+
+Selection model:
+
+- scope first (`workspace`, `family`, `auto`)
+- optional transcript-time date window (`--date-from` / `--date-to`)
+- optional semantic lane bias (`--focus-query`)
+- then recent/support-aware owner ranking
+
+Summary modes:
+
+- `deterministic`
+  - ranked directly from persisted transcript-history records
+- `llm`
+  - full-family summary pass succeeded
+- `llm_cleanup`
+  - shortlist cleanup succeeded even when the broader family summary needed fallback/help
+
+This is the surface to use when you want:
+
+- “what has this repo family been doing recently?”
+- “what happened in this one workstream last week?”
+- “what keeps recurring across related worktrees?”
 
 ## Obsidian Adapter
 

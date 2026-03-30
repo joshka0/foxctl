@@ -1,0 +1,15 @@
+suite: praze
+limit: 10
+format: markdown
+modes:
+  - aca_default
+  - aca_query_typed
+thresholds:
+  aca_default:
+    min_hit_rate_at_5: 0.70
+    min_hit_rate_at_10: 0.80
+    min_mrr: 0.65
+  aca_query_typed:
+    min_hit_rate_at_5: 0.70
+    min_hit_rate_at_10: 0.80
+    min_mrr: 0.65

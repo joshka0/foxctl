@@ -107,6 +107,35 @@ func TestBuildTaskPromptPrefersTargetProfileVariant(t *testing.T) {
 	}
 }
 
+func TestShouldPreferRawToolDataForMemoryScouts(t *testing.T) {
+	t.Parallel()
+
+	if !shouldPreferRawToolData(string(types.RoleMemoryFactScout), "agent_memory_search") {
+		t.Fatal("memory_fact_scout should prefer raw agent_memory_search payloads")
+	}
+	if !shouldPreferRawToolData(string(types.RoleACAContextScout), "context_retrieve") {
+		t.Fatal("aca_context_scout should prefer raw context_retrieve payloads")
+	}
+	if shouldPreferRawToolData(string(types.RoleDAGScout), "agent_memory_search") {
+		t.Fatal("dag_scout should not prefer raw memory payloads")
+	}
+}
+
+func TestBuildContextSearchInputUsesCodeProfile(t *testing.T) {
+	t.Parallel()
+
+	got := buildContextSearchInput("legacy agent runtime scout role", 7)
+	if !strings.Contains(got, `"profile": "code"`) {
+		t.Fatalf("input=%q missing code profile", got)
+	}
+	if !strings.Contains(got, `"include_context": false`) {
+		t.Fatalf("input=%q missing include_context false", got)
+	}
+	if !strings.Contains(got, `"limit": 7`) {
+		t.Fatalf("input=%q missing limit", got)
+	}
+}
+
 func TestBuildTaskPromptVariantAppendsTaskContext(t *testing.T) {
 	ctx := context.Background()
 	store, err := optimization.OpenPromptVariantStore(ctx, t.TempDir())
@@ -416,7 +445,7 @@ func TestBuildToolDefsForRole_SemanticScout(t *testing.T) {
 	names := toolNamesForRole(types.RoleSemanticScout)
 
 	// Must have
-	for _, want := range []string{"think", "context_search", "smart_search", "memory_query"} {
+	for _, want := range []string{"think", "context_search", "semantic_search_code", "smart_search", "memory_query"} {
 		if !hasToolName(names, want) {
 			t.Errorf("semantic_scout should have %q, got %v", want, names)
 		}
@@ -449,7 +478,7 @@ func TestBuildToolDefsForRole_DAGScout(t *testing.T) {
 func TestBuildToolDefsForRole_SymbolScout(t *testing.T) {
 	names := toolNamesForRole(types.RoleSymbolScout)
 
-	for _, want := range []string{"think", "code_symbols", "context_grep", "code_search"} {
+	for _, want := range []string{"think", "code_symbols", "context_grep", "code_search", "refactor_scout"} {
 		if !hasToolName(names, want) {
 			t.Errorf("symbol_scout should have %q, got %v", want, names)
 		}
@@ -480,14 +509,144 @@ func TestBuildToolDefsForRole_AnnotationScout(t *testing.T) {
 	}
 }
 
+func TestBuildToolDefsForRole_MemoryFactScout(t *testing.T) {
+	names := toolNamesForRole(types.RoleMemoryFactScout)
+
+	for _, want := range []string{"think", "semantic_search_memories", "agent_memory_search", "agent_memory_context", "memory_query", "session_recall", "annotation_recall", "context_filter"} {
+		if !hasToolName(names, want) {
+			t.Errorf("memory_fact_scout should have %q, got %v", want, names)
+		}
+	}
+
+	for _, deny := range []string{"fs_read_file", "code_search", "fs_list_dir", "fs_write_file"} {
+		if hasToolName(names, deny) {
+			t.Errorf("memory_fact_scout should NOT have %q", deny)
+		}
+	}
+}
+
+func TestBuildToolDefsForRole_MemoryTimelineScout(t *testing.T) {
+	names := toolNamesForRole(types.RoleMemoryTimelineScout)
+
+	for _, want := range []string{"think", "semantic_search_sessions", "session_timeline", "session_recall", "agent_memory_search", "agent_memory_context", "context_filter"} {
+		if !hasToolName(names, want) {
+			t.Errorf("memory_timeline_scout should have %q, got %v", want, names)
+		}
+	}
+
+	for _, deny := range []string{"fs_read_file", "code_search", "fs_list_dir", "fs_write_file", "annotation_recall", "annotation_category_stats"} {
+		if hasToolName(names, deny) {
+			t.Errorf("memory_timeline_scout should NOT have %q", deny)
+		}
+	}
+}
+
+func TestBuildToolDefsForRole_ACAContextScout(t *testing.T) {
+	names := toolNamesForRole(types.RoleACAContextScout)
+
+	for _, want := range []string{"think", "semantic_search_context", "context_show", "context_retrieve", "obsidian_index_search", "obsidian_read", "obsidian_related", "context_filter"} {
+		if !hasToolName(names, want) {
+			t.Errorf("aca_context_scout should have %q, got %v", want, names)
+		}
+	}
+
+	for _, deny := range []string{"fs_read_file", "code_search", "fs_list_dir", "fs_write_file", "memory_query"} {
+		if hasToolName(names, deny) {
+			t.Errorf("aca_context_scout should NOT have %q", deny)
+		}
+	}
+}
+
 func TestBuildToolDefsForRole_ResearcherUnchanged(t *testing.T) {
 	names := toolNamesForRole(types.RoleResearcher)
 
 	// Researcher must still have base tools + agentctl tools
-	for _, want := range []string{"fs_read_file", "code_search", "think", "context_search", "smart_search", "context_grep", "code_symbols", "repo_index_search", "annotation_recall", "context_show", "context_retrieve", "obsidian_index_search", "obsidian_read", "obsidian_related"} {
+	for _, want := range []string{"fs_read_file", "code_search", "think", "context_search", "semantic_search_code", "semantic_search_sessions", "semantic_search_memories", "semantic_search_context", "smart_search", "refactor_scout", "code_search_ensemble", "context_grep", "code_symbols", "repo_index_search", "annotation_recall", "context_show", "context_retrieve", "obsidian_index_search", "obsidian_read", "obsidian_related"} {
 		if !hasToolName(names, want) {
 			t.Errorf("researcher should still have %q, got %v", want, names)
 		}
+	}
+}
+
+func TestBuildToolDefsForRole_SubcallWorker(t *testing.T) {
+	names := toolNamesForRole(types.RoleSubcallWorker)
+
+	for _, want := range []string{"fs_read_file", "code_search", "think", "context_search", "smart_search", "refactor_scout", "code_search_ensemble", "context_grep", "code_symbols", "repo_index_search", "memory_query", "session_recall", "context_show", "context_retrieve"} {
+		if !hasToolName(names, want) {
+			t.Errorf("subcall_worker should have %q, got %v", want, names)
+		}
+	}
+
+	for _, deny := range []string{"fs_list_dir", "fs_write_file", "heartwood_state", "heartwood_action"} {
+		if hasToolName(names, deny) {
+			t.Errorf("subcall_worker should NOT have %q, got %v", deny, names)
+		}
+	}
+}
+
+func TestIsRefactorEntryPrompt(t *testing.T) {
+	if !isRefactorEntryPrompt("Find the strongest refactor entrypoints in Go") {
+		t.Fatal("expected refactor-entrypoint prompt to match")
+	}
+	if isRefactorEntryPrompt("Summarize the current architecture") {
+		t.Fatal("did not expect non-refactor prompt to match")
+	}
+}
+
+func TestInferRefactorScoutLanguage(t *testing.T) {
+	if got := inferRefactorScoutLanguage("In the Go code under internal/ find refactor hotspots"); got != "go" {
+		t.Fatalf("got %q want go", got)
+	}
+	if got := inferRefactorScoutLanguage("In the TypeScript code under packages/ find refactor hotspots"); got != "typescript" {
+		t.Fatalf("got %q want typescript", got)
+	}
+}
+
+func TestInferRefactorScoutPath(t *testing.T) {
+	if got := inferRefactorScoutPath("In the Go code under internal/ find refactor hotspots"); got != "internal" {
+		t.Fatalf("got %q want internal", got)
+	}
+	if got := inferRefactorScoutPath("In the Go code under cmd/agentctl/cmd find refactor hotspots"); got != "cmd/agentctl/cmd" {
+		t.Fatalf("got %q want cmd/agentctl/cmd", got)
+	}
+}
+
+func TestApplyRefactorRouteToolSubset_Researcher(t *testing.T) {
+	r := NewRuntime(Config{})
+	tools := []engine.ToolDef{
+		{Name: "think"},
+		{Name: "refactor_scout"},
+		{Name: "semantic_search_code"},
+		{Name: "smart_search"},
+		{Name: "repo_index_search"},
+		{Name: "code_symbols"},
+		{Name: "fs_read_file"},
+		{Name: "context_search"},
+		{Name: "code_search"},
+		{Name: "context_grep"},
+	}
+	got := r.applyRefactorRouteToolSubset(types.RoleResearcher, "Find the strongest refactor entrypoints in the Go code under internal/", tools)
+	names := make([]string, 0, len(got))
+	for _, tool := range got {
+		names = append(names, tool.Name)
+	}
+	if hasToolName(names, "code_search") {
+		t.Fatalf("code_search should be filtered for refactor route, got %v", names)
+	}
+	for _, want := range []string{"refactor_scout", "semantic_search_code", "smart_search", "repo_index_search", "code_symbols", "fs_read_file"} {
+		if !hasToolName(names, want) {
+			t.Fatalf("missing %s in %v", want, names)
+		}
+	}
+}
+
+func TestMergeRefactorScoutTaskPrompt(t *testing.T) {
+	got := mergeRefactorScoutTaskPrompt("Find refactor entrypoints.", "Scout says: use foo.go::Bar")
+	if !strings.Contains(got, "Scout says: use foo.go::Bar") {
+		t.Fatalf("preface missing: %q", got)
+	}
+	if !strings.Contains(got, "Original task:\nFind refactor entrypoints.") {
+		t.Fatalf("original task missing: %q", got)
 	}
 }
 

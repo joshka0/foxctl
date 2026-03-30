@@ -9,11 +9,16 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sort"
+	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/executil"
+	skillobs "github.com/jkatigb/agentctl/internal/adapters/skillslib/obs"
 	"github.com/jkatigb/agentctl/internal/domain/envelope"
+	"github.com/jkatigb/agentctl/internal/domain/skill"
 	"github.com/jkatigb/agentctl/internal/indexing/repoindex"
 	"github.com/jkatigb/agentctl/internal/platform/config"
 	ws "github.com/jkatigb/agentctl/internal/platform/workspace"
@@ -33,6 +38,7 @@ type ReadOnlyAdapter struct {
 	companionDB   *sql.DB
 	environment   rlm.Environment
 	subcall       func(context.Context, rlm.Task, rlm.Environment) (rlm.Result, error)
+	telemetry     adapterTelemetry
 }
 
 // NewReadOnlyAdapter creates a read-only adapter for one workspace/environment.
@@ -49,6 +55,78 @@ func NewReadOnlyAdapter(cfg config.Config, workspaceRoot, vaultPath string, comp
 // SetSubcall configures the bounded recursive callback for the experimental subcall tool.
 func (a *ReadOnlyAdapter) SetSubcall(fn func(context.Context, rlm.Task, rlm.Environment) (rlm.Result, error)) {
 	a.subcall = fn
+}
+
+type adapterTelemetry struct {
+	mu           sync.Mutex
+	toolCalls    map[string]int
+	toolDuration map[string]int64
+	models       map[string]struct{}
+	inputTokens  int
+	outputTokens int
+	totalTokens  int
+	totalCostUSD float64
+}
+
+func (t *adapterTelemetry) record(name string, duration time.Duration, usage *skillobs.TokenUsage) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.toolCalls == nil {
+		t.toolCalls = make(map[string]int)
+	}
+	if t.toolDuration == nil {
+		t.toolDuration = make(map[string]int64)
+	}
+	name = strings.TrimSpace(name)
+	if name != "" {
+		t.toolCalls[name]++
+		t.toolDuration[name] += duration.Milliseconds()
+	}
+	if usage == nil {
+		return
+	}
+	if t.models == nil {
+		t.models = make(map[string]struct{})
+	}
+	if model := strings.TrimSpace(usage.Model); model != "" {
+		t.models[model] = struct{}{}
+	}
+	t.inputTokens += usage.InputTokens
+	t.outputTokens += usage.OutputTokens
+	t.totalTokens += usage.TotalTokens
+	t.totalCostUSD += usage.TotalCostUSD
+}
+
+func (t *adapterTelemetry) snapshot() map[string]any {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	toolUsage := make(map[string]int, len(t.toolCalls))
+	for key, value := range t.toolCalls {
+		toolUsage[key] = value
+	}
+	toolDuration := make(map[string]int64, len(t.toolDuration))
+	for key, value := range t.toolDuration {
+		toolDuration[key] = value
+	}
+	models := make([]string, 0, len(t.models))
+	for model := range t.models {
+		models = append(models, model)
+	}
+	sort.Strings(models)
+	totalToolCalls := 0
+	for _, count := range t.toolCalls {
+		totalToolCalls += count
+	}
+	return map[string]any{
+		"tool_usage":       toolUsage,
+		"tool_duration_ms": toolDuration,
+		"total_tool_calls": totalToolCalls,
+		"input_tokens":     t.inputTokens,
+		"output_tokens":    t.outputTokens,
+		"total_tokens":     t.totalTokens,
+		"total_cost_usd":   t.totalCostUSD,
+		"models":           models,
+	}
 }
 
 // Execute runs one read-only tool call and returns a typed JSON-like payload.
@@ -78,6 +156,10 @@ func (a *ReadOnlyAdapter) Execute(ctx context.Context, name string, args json.Ra
 		return a.searchVault(ctx, args)
 	case "read_note":
 		return a.readNote(args)
+	case "memory_ensemble_retrieve":
+		return a.memoryEnsembleRetrieve(ctx, args)
+	case "code_search_ensemble":
+		return a.codeSearchEnsemble(ctx, args)
 	case "search_scenes":
 		return a.searchScenes(ctx, args)
 	case "get_scene":
@@ -97,6 +179,16 @@ type semanticSearchToolOutput struct {
 		Summary    string  `json:"summary"`
 		Similarity float64 `json:"similarity"`
 	} `json:"results"`
+	CandidateBundles []struct {
+		Key          string   `json:"key"`
+		PrimaryPath  string   `json:"primary_path"`
+		RelatedPaths []string `json:"related_paths"`
+		Symbols      []string `json:"symbols"`
+		Sources      []string `json:"sources"`
+		Score        float64  `json:"score"`
+		MatchReason  string   `json:"match_reason"`
+		Ambiguity    string   `json:"ambiguity"`
+	} `json:"candidate_bundles"`
 }
 
 type smartSearchToolOutput struct {
@@ -258,6 +350,7 @@ func (a *ReadOnlyAdapter) semanticSearchCode(ctx context.Context, args json.RawM
 	var input struct {
 		Query         string   `json:"query"`
 		Scope         []string `json:"scope"`
+		Profile       string   `json:"profile"`
 		Limit         int      `json:"limit"`
 		RepoIndexMode string   `json:"repo_index_mode"`
 	}
@@ -269,6 +362,9 @@ func (a *ReadOnlyAdapter) semanticSearchCode(ctx context.Context, args json.RawM
 		"workspace":       a.workspaceRoot,
 		"limit":           input.Limit,
 		"repo_index_mode": strings.TrimSpace(input.RepoIndexMode),
+	}
+	if strings.TrimSpace(input.Profile) != "" {
+		payload["profile"] = strings.TrimSpace(input.Profile)
 	}
 	if len(input.Scope) > 0 {
 		payload["scope"] = input.Scope
@@ -294,9 +390,23 @@ func (a *ReadOnlyAdapter) semanticSearchCode(ctx context.Context, args json.RawM
 			"similarity": result.Similarity,
 		})
 	}
+	candidateBundles := make([]map[string]any, 0, len(out.CandidateBundles))
+	for _, bundle := range out.CandidateBundles {
+		candidateBundles = append(candidateBundles, map[string]any{
+			"key":           bundle.Key,
+			"primary_path":  bundle.PrimaryPath,
+			"related_paths": append([]string(nil), bundle.RelatedPaths...),
+			"symbols":       append([]string(nil), bundle.Symbols...),
+			"sources":       append([]string(nil), bundle.Sources...),
+			"score":         bundle.Score,
+			"match_reason":  bundle.MatchReason,
+			"ambiguity":     bundle.Ambiguity,
+		})
+	}
 	return map[string]any{
-		"query":   input.Query,
-		"results": results,
+		"query":             input.Query,
+		"results":           results,
+		"candidate_bundles": candidateBundles,
 	}, nil
 }
 
@@ -735,6 +845,7 @@ func (a *ReadOnlyAdapter) subcallTool(ctx context.Context, args json.RawMessage)
 	}
 	var input struct {
 		Prompt          string   `json:"prompt"`
+		Role            string   `json:"role"`
 		RepoHandles     []string `json:"repo_handles"`
 		VaultHandles    []string `json:"vault_handles"`
 		SceneHandles    []string `json:"scene_handles"`
@@ -761,6 +872,7 @@ func (a *ReadOnlyAdapter) subcallTool(ctx context.Context, args json.RawMessage)
 	}
 	result, err := a.subcall(ctx, rlm.Task{
 		Prompt:        strings.TrimSpace(input.Prompt),
+		Role:          NormalizeScoutRole(input.Role),
 		WorkspaceRoot: a.workspaceRoot,
 		MaxDepth:      input.MaxDepth,
 		MaxIterations: input.MaxIterations,
@@ -782,31 +894,216 @@ func (a *ReadOnlyAdapter) runCurrentSkillDecode(ctx context.Context, skill strin
 	if err != nil {
 		return err
 	}
-	repoRoot, err := resolveAgentctlRepoRoot()
-	if err != nil {
-		return err
-	}
-	executable, err := os.Executable()
-	if err != nil {
-		executable = "agentctl"
-	}
 	runCtx, cancel := context.WithTimeout(ctx, 45*time.Second)
 	defer cancel()
-	result := executil.RunWithInput(runCtx, repoRoot, executable, body, "run", skill, "--input-file", "-")
+	start := time.Now()
+	result := a.runSkillDirect(runCtx, skill, body)
 	if result.Err != nil {
-		return fmt.Errorf("run %s: %w", skill, result.Err)
+		repoRoot, repoErr := resolveAgentctlRepoRoot()
+		if repoErr != nil {
+			a.telemetry.record(skill, time.Since(start), nil)
+			return fmt.Errorf("run %s: %w%s", skill, result.Err, formatCmdFailureStderr(result))
+		}
+		executable, execErr := os.Executable()
+		if execErr != nil {
+			executable = "agentctl"
+		}
+		searchPaths := resolveSkillSearchPaths(a.cfg, a.workspaceRoot)
+		env := []string{}
+		if len(searchPaths) > 0 {
+			env = append(env, "AGENTCTL_SKILLS_PATH="+strings.Join(searchPaths, string(os.PathListSeparator)))
+		}
+		result = executil.RunWithInputEnv(runCtx, repoRoot, executable, env, body, "run", skill, "--input-file", "-")
+		if result.Err != nil {
+			a.telemetry.record(skill, time.Since(start), nil)
+			return fmt.Errorf("run %s: %w%s", skill, result.Err, formatCmdFailureStderr(result))
+		}
 	}
 	env, err := protocol.DecodeEnvelope(result.Stdout)
 	if err != nil {
+		a.telemetry.record(skill, time.Since(start), nil)
 		return err
 	}
 	if env.Status == envelope.StatusError {
+		a.telemetry.record(skill, time.Since(start), extractSkillTokenUsage(env.Data))
 		return protocol.EnvelopeStatusErrorFromEnvelope(env)
 	}
+	a.telemetry.record(skill, time.Since(start), extractSkillTokenUsage(env.Data))
 	if err := protocol.DecodeEnvelopeDataInto(env, dst); err != nil {
 		return err
 	}
 	return nil
+}
+
+func (a *ReadOnlyAdapter) runSkillDirect(ctx context.Context, skillName string, input []byte) executil.CmdResult {
+	manifestPath, artifact, err := a.resolvePreferredSkillArtifact(skillName)
+	if err != nil {
+		return executil.CmdResult{Err: err, ExitCode: -1}
+	}
+	return executil.RunWithInput(ctx, filepath.Dir(manifestPath), artifact, input)
+}
+
+func resolveSkillSearchPaths(cfg config.Config, workspaceRoot string) []string {
+	paths := append([]string{}, skill.EnvSearchPaths()...)
+	paths = append(paths, workspaceSkillSearchPaths(workspaceRoot)...)
+	if strings.TrimSpace(cfg.Paths.Skills) != "" {
+		paths = append(paths, cfg.Paths.Skills)
+	}
+	paths = append(paths, skill.UserSearchPaths()...)
+	paths = append(paths, skill.BuiltinSearchPaths()...)
+	paths = append(paths, skill.DevSearchPaths()...)
+	return skill.NormalizeSearchPaths(paths)
+}
+
+func workspaceSkillSearchPaths(workspaceRoot string) []string {
+	root := strings.TrimSpace(workspaceRoot)
+	if root == "" {
+		return nil
+	}
+	return skill.NormalizeSearchPaths([]string{
+		filepath.Join(root, "skills"),
+		filepath.Join(root, "dist", "skills"),
+	})
+}
+
+func (a *ReadOnlyAdapter) resolvePreferredSkillArtifact(skillName string) (string, string, error) {
+	skillName = strings.TrimSpace(skillName)
+	if skillName == "" {
+		return "", "", fmt.Errorf("skill name is required")
+	}
+	normalized := skill.NormalizeSkillName(skillName)
+	preferredRoots := []string{}
+	preferredRoots = append(preferredRoots, skill.EnvSearchPaths()...)
+	preferredRoots = append(preferredRoots, workspaceSkillSearchPaths(a.workspaceRoot)...)
+	if strings.TrimSpace(a.cfg.Paths.Skills) != "" {
+		preferredRoots = append(preferredRoots, a.cfg.Paths.Skills)
+	}
+	preferredRoots = append(preferredRoots, skill.UserSearchPaths()...)
+	for _, root := range skill.NormalizeSearchPaths(preferredRoots) {
+		dir := filepath.Join(root, normalized)
+		manifestPath := filepath.Join(dir, "skill.yaml")
+		if _, err := os.Stat(manifestPath); err != nil {
+			continue
+		}
+		manifest, artifact, err := skill.LoadManifestAndArtifact(manifestPath, skill.ArtifactOptions{PreferCGO: true})
+		if err != nil {
+			continue
+		}
+		if manifest.Distribution.Type != "exec" {
+			continue
+		}
+		return manifestPath, artifact, nil
+	}
+
+	resolver := skill.NewResolver(skill.WithSearchPaths(resolveSkillSearchPaths(a.cfg, a.workspaceRoot)...))
+	handle, err := resolver.Resolve(skillName)
+	if err != nil {
+		return "", "", err
+	}
+	manifest, artifact, err := skill.LoadManifestAndArtifact(handle.ManifestPath, skill.ArtifactOptions{PreferCGO: true})
+	if err != nil {
+		return "", "", err
+	}
+	if manifest.Distribution.Type != "exec" {
+		return "", "", fmt.Errorf("unsupported non-exec skill %q", skillName)
+	}
+	return handle.ManifestPath, artifact, nil
+}
+
+func extractSkillTokenUsage(data any) *skillobs.TokenUsage {
+	if data == nil {
+		return nil
+	}
+	body, err := json.Marshal(data)
+	if err != nil {
+		return nil
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return nil
+	}
+	if usage := usageFromMap(payload); usage != nil {
+		return usage
+	}
+	if summary, ok := payload["summary"].(map[string]any); ok {
+		model := stringValue(summary["model"])
+		tokens := intValue(summary["tokens_used"])
+		if tokens > 0 || model != "" {
+			return &skillobs.TokenUsage{
+				Model:       model,
+				TotalTokens: tokens,
+			}
+		}
+	}
+	if stats, ok := payload["stats"].(map[string]any); ok {
+		if usage := usageFromMap(stats); usage != nil {
+			return usage
+		}
+	}
+	return nil
+}
+
+func formatCmdFailureStderr(result executil.CmdResult) string {
+	stderr := strings.TrimSpace(string(result.Stderr))
+	if stderr == "" {
+		return ""
+	}
+	if len(stderr) > 240 {
+		stderr = stderr[:240] + "..."
+	}
+	return ": stderr=" + strconv.Quote(stderr)
+}
+
+func usageFromMap(m map[string]any) *skillobs.TokenUsage {
+	if m == nil {
+		return nil
+	}
+	if raw, ok := m["token_usage"].(map[string]any); ok {
+		return buildTokenUsage(raw)
+	}
+	if raw, ok := m["usage"].(map[string]any); ok {
+		return buildTokenUsage(raw)
+	}
+	return nil
+}
+
+func buildTokenUsage(m map[string]any) *skillobs.TokenUsage {
+	if m == nil {
+		return nil
+	}
+	usage := &skillobs.TokenUsage{
+		Model:         stringValue(m["model"]),
+		InputTokens:   intValue(m["input_tokens"]),
+		OutputTokens:  intValue(m["output_tokens"]),
+		TotalTokens:   intValue(m["total_tokens"]),
+		InputCostUSD:  floatValue(m["input_cost_usd"]),
+		OutputCostUSD: floatValue(m["output_cost_usd"]),
+		TotalCostUSD:  floatValue(m["total_cost_usd"]),
+	}
+	if usage.TotalTokens == 0 {
+		usage.TotalTokens = usage.InputTokens + usage.OutputTokens
+	}
+	if usage.Model == "" && usage.TotalTokens == 0 && usage.TotalCostUSD == 0 {
+		return nil
+	}
+	return usage
+}
+
+func floatValue(v any) float64 {
+	switch value := v.(type) {
+	case float64:
+		return value
+	case float32:
+		return float64(value)
+	case int:
+		return float64(value)
+	case int32:
+		return float64(value)
+	case int64:
+		return float64(value)
+	default:
+		return 0
+	}
 }
 
 func resolveAgentctlRepoRoot() (string, error) {

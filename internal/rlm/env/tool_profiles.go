@@ -21,6 +21,7 @@ func FilterTools(tools []rlm.Tool, profile string) []rlm.Tool {
 			"semantic_search_code": {},
 			"smart_search_code":    {},
 			"ripgrep_code":         {},
+			"code_search_ensemble": {},
 			"load_file":            {},
 			"search_vault":         {},
 			"read_note":            {},

@@ -202,20 +202,24 @@ type SpawnHandler interface {
 
 // Session represents a running agent session.
 type Session struct {
-	ID           string
-	Config       types.AgentConfig
-	Status       types.AgentStatus
-	Engine       *engine.LLMChatEngine
-	Tools        []engine.ToolDef
-	StartedAt    time.Time
-	EndedAt      *time.Time
-	Iterations   int
-	Summary      string
-	Error        string
-	ToolCalls    []types.ToolCall
-	Children     []string // IDs of spawned child sessions
-	SystemPrompt string   // Role-specific system prompt
-	TurnCounter  uint64   // Monotonically increasing turn index
+	ID              string
+	Config          types.AgentConfig
+	Status          types.AgentStatus
+	Engine          *engine.LLMChatEngine
+	Tools           []engine.ToolDef
+	StartedAt       time.Time
+	EndedAt         *time.Time
+	Iterations      int
+	Summary         string
+	Error           string
+	ToolCalls       []types.ToolCall
+	Children        []string       // IDs of spawned child sessions
+	SystemPrompt    string         // Role-specific system prompt
+	TurnCounter     uint64         // Monotonically increasing turn index
+	InputTokens     int            // Accumulated prompt/input tokens across completed turns
+	OutputTokens    int            // Accumulated completion/output tokens across completed turns
+	TotalTokens     int            // Accumulated total tokens across completed turns
+	ParentToolUsage map[string]any // Aggregated parent-side tool prompt delta telemetry
 	// ConversationHistory accumulates user/assistant messages across engine Run() calls
 	// so that follow-up turns (autonomous continuation, mailbox ask) have full context.
 	ConversationHistory []engine.Message
@@ -345,17 +349,19 @@ func (r *Runtime) Spawn(ctx context.Context, cfg types.AgentConfig) (*Session, e
 	cfg.Prompt = resolvedPrompt
 
 	session := &Session{
-		ID:        sessionID,
-		Config:    cfg,
-		Status:    types.StatusRunning,
-		Engine:    llmEngine,
-		Tools:     tools,
-		StartedAt: time.Now(),
-		ToolCalls: []types.ToolCall{},
-		Children:  []string{},
-		cancel:    cancel,
-		done:      make(chan struct{}),
+		ID:              sessionID,
+		Config:          cfg,
+		Status:          types.StatusRunning,
+		Engine:          llmEngine,
+		Tools:           tools,
+		StartedAt:       time.Now(),
+		ToolCalls:       []types.ToolCall{},
+		Children:        []string{},
+		ParentToolUsage: map[string]any{},
+		cancel:          cancel,
+		done:            make(chan struct{}),
 	}
+	session.Tools = r.applyRefactorRouteToolSubset(cfg.Role, resolvedPrompt, session.Tools)
 
 	// Store session (atomic with limit check to avoid TOCTOU race)
 	r.mu.Lock()
@@ -452,6 +458,9 @@ func (r *Runtime) createEngine(cfg types.AgentConfig, sessionID string) (*engine
 		SynthesisReserve: 2,
 		HookDispatcher:   r.config.HookDispatcher,
 		ActionExecutor:   r.config.ActionExecutor,
+	}
+	if cfg.ForceToolUse {
+		engineCfg.ToolChoice = json.RawMessage(`"required"`)
 	}
 
 	llmEngine, err := engine.NewLLMChatEngine(engineCfg)
@@ -596,16 +605,32 @@ func (e *agentToolExecutor) Execute(ctx context.Context, name string, args json.
 	// Overseer context gathering tools
 	case "context_search":
 		out, err = e.executeContextSearch(ctx, argsMap)
+	case "semantic_search_code":
+		out, err = e.executeSemanticSearchCode(ctx, argsMap)
+	case "semantic_search_sessions":
+		out, err = e.executeSemanticSearchSessions(ctx, argsMap)
+	case "semantic_search_memories":
+		out, err = e.executeSemanticSearchMemories(ctx, argsMap)
+	case "semantic_search_context":
+		out, err = e.executeSemanticSearchContext(ctx, argsMap)
 	case "session_timeline":
 		out, err = e.executeSessionTimeline(ctx, argsMap)
 	case "smart_search":
 		out, err = e.executeSmartSearch(ctx, argsMap)
+	case "code_search_ensemble":
+		out, err = e.executeCodeSearchEnsemble(ctx, argsMap)
 	case "context_grep":
 		out, err = e.executeContextGrep(ctx, argsMap)
 	case "code_symbols":
 		out, err = e.executeCodeSymbols(ctx, argsMap)
+	case "refactor_scout":
+		out, err = e.executeRefactorScout(ctx, argsMap)
 	case "memory_query":
 		out, err = e.executeMemoryQuery(ctx, argsMap)
+	case "agent_memory_context":
+		out, err = e.executeAgentMemoryContext(ctx, argsMap)
+	case "agent_memory_search":
+		out, err = e.executeAgentMemorySearch(ctx, argsMap)
 	case "session_recall":
 		out, err = e.executeSessionRecall(ctx, argsMap)
 	case "annotation_recall":
@@ -1298,8 +1323,65 @@ func (e *agentToolExecutor) executeAgentWait(ctx context.Context, args map[strin
 
 // executeContextSearch calls code/semantic_search skill with tree format
 func (e *agentToolExecutor) executeContextSearch(ctx context.Context, args map[string]any) (string, error) {
+	return e.executeSemanticSearchScoped(ctx, "context_search", args, semanticSearchOptions{
+		Profile:        "code",
+		Format:         "tree",
+		IncludeContext: boolPtr(false),
+	})
+}
+
+func buildContextSearchInput(query string, limit int) string {
+	return fmt.Sprintf(`{"query": %q, "format": "tree", "limit": %d, "profile": "code", "include_context": false}`, query, limit)
+}
+
+type semanticSearchOptions struct {
+	Profile        string
+	Scopes         []string
+	Format         string
+	IncludeContext *bool
+}
+
+func boolPtr(v bool) *bool {
+	return &v
+}
+
+func (e *agentToolExecutor) executeSemanticSearchCode(ctx context.Context, args map[string]any) (string, error) {
+	return e.executeSemanticSearchScoped(ctx, "semantic_search_code", args, semanticSearchOptions{
+		Profile:        "code",
+		Format:         "tree",
+		IncludeContext: boolPtr(false),
+	})
+}
+
+func (e *agentToolExecutor) executeSemanticSearchSessions(ctx context.Context, args map[string]any) (string, error) {
+	return e.executeSemanticSearchScoped(ctx, "semantic_search_sessions", args, semanticSearchOptions{
+		Scopes:         []string{"sessions"},
+		IncludeContext: boolPtr(false),
+	})
+}
+
+func (e *agentToolExecutor) executeSemanticSearchMemories(ctx context.Context, args map[string]any) (string, error) {
+	return e.executeSemanticSearchScoped(ctx, "semantic_search_memories", args, semanticSearchOptions{
+		Scopes:         []string{"memories"},
+		IncludeContext: boolPtr(false),
+	})
+}
+
+func (e *agentToolExecutor) executeSemanticSearchContext(ctx context.Context, args map[string]any) (string, error) {
+	return e.executeSemanticSearchScoped(ctx, "semantic_search_context", args, semanticSearchOptions{
+		Scopes:         []string{"context"},
+		IncludeContext: boolPtr(false),
+	})
+}
+
+func (e *agentToolExecutor) executeSemanticSearchScoped(ctx context.Context, label string, args map[string]any, opts semanticSearchOptions) (string, error) {
 	query, _ := args["query"].(string)
 	if query == "" {
+		if q, ok := args["question"].(string); ok {
+			query = q
+		}
+	}
+	if strings.TrimSpace(query) == "" {
 		return "", fmt.Errorf("query is required")
 	}
 
@@ -1307,12 +1389,34 @@ func (e *agentToolExecutor) executeContextSearch(ctx context.Context, args map[s
 	if l, ok := args["limit"].(float64); ok && l > 0 {
 		limit = int(l)
 	}
+	if l, ok := args["max_results"].(float64); ok && l > 0 {
+		limit = int(l)
+	}
 
-	// Call agentctl skill
-	input := fmt.Sprintf(`{"query": %q, "format": "tree", "limit": %d}`, query, limit)
-	cmd := e.newAgentctlCommand(ctx, "run", "code/semantic_search", "--input", input)
+	inputMap := map[string]any{
+		"query": query,
+		"limit": limit,
+	}
+	if strings.TrimSpace(opts.Profile) != "" {
+		inputMap["profile"] = strings.TrimSpace(opts.Profile)
+	}
+	if len(opts.Scopes) > 0 {
+		inputMap["scope"] = append([]string(nil), opts.Scopes...)
+	}
+	if strings.TrimSpace(opts.Format) != "" {
+		inputMap["format"] = strings.TrimSpace(opts.Format)
+	}
+	if opts.IncludeContext != nil {
+		inputMap["include_context"] = *opts.IncludeContext
+	}
 
-	return commandOutput(cmd, "context_search")
+	inputBytes, err := json.Marshal(inputMap)
+	if err != nil {
+		return "", fmt.Errorf("marshal %s input: %w", label, err)
+	}
+
+	cmd := e.newAgentctlCommand(ctx, "run", "code/semantic_search", "--input", string(inputBytes))
+	return commandOutput(cmd, label)
 }
 
 // executeSmartSearch calls code/smart_search skill for all-in-one search + extract
@@ -1342,6 +1446,97 @@ func (e *agentToolExecutor) executeSmartSearch(ctx context.Context, args map[str
 	cmd := e.newAgentctlCommand(ctx, "run", "code/smart_search", "--input", string(inputBytes))
 
 	return commandOutput(cmd, "smart_search")
+}
+
+func (e *agentToolExecutor) executeCodeSearchEnsemble(ctx context.Context, args map[string]any) (string, error) {
+	query, _ := args["query"].(string)
+	if query == "" {
+		if q, ok := args["question"].(string); ok {
+			query = q
+		}
+	}
+	query = strings.TrimSpace(query)
+	if query == "" {
+		return "", fmt.Errorf("query is required")
+	}
+
+	taskType, _ := args["task_type"].(string)
+	taskType = strings.TrimSpace(taskType)
+	if taskType == "" {
+		taskType = "file_locate"
+	}
+
+	tmpDir, err := os.MkdirTemp("", "agentctl-code-search-ensemble-*")
+	if err != nil {
+		return "", fmt.Errorf("create temp dir: %w", err)
+	}
+	defer func() { _ = os.RemoveAll(tmpDir) }()
+
+	datasetPath := filepath.Join(tmpDir, "case.jsonl")
+	reportPath := filepath.Join(tmpDir, "report.json")
+	casePayload := map[string]any{
+		"id":                 "runtime-case",
+		"question":           query,
+		"task_type":          taskType,
+		"requires_grounding": true,
+	}
+	if contextText, ok := args["context"].(string); ok && strings.TrimSpace(contextText) != "" {
+		casePayload["context"] = strings.TrimSpace(contextText)
+	}
+	if excluded := stringSliceArg(args, "exclude_paths"); len(excluded) > 0 {
+		casePayload["excluded_paths"] = excluded
+	}
+	body, err := json.Marshal(casePayload)
+	if err != nil {
+		return "", fmt.Errorf("marshal code_search_ensemble case: %w", err)
+	}
+	if err := os.WriteFile(datasetPath, append(body, '\n'), 0o644); err != nil {
+		return "", fmt.Errorf("write code_search_ensemble case: %w", err)
+	}
+
+	workspace := strings.TrimSpace(e.workspaceRoot)
+	if workspace == "" {
+		workspace = "."
+	}
+	argsList := []string{
+		"eval", "code-search-ensemble",
+		"--workspace", workspace,
+		"--eval-dataset-file", datasetPath,
+		"--tool-profile", "code-intel",
+		"--report-file", reportPath,
+	}
+	if maxCandidates := intArg(args, 0, "max_candidates"); maxCandidates > 0 {
+		argsList = append(argsList, "--max-candidates", strconv.Itoa(maxCandidates))
+	}
+	if maxFiles := intArg(args, 0, "max_files"); maxFiles > 0 {
+		argsList = append(argsList, "--max-files", strconv.Itoa(maxFiles))
+	}
+	if maxSnippets := intArg(args, 0, "max_snippets"); maxSnippets > 0 {
+		argsList = append(argsList, "--max-snippets", strconv.Itoa(maxSnippets))
+	}
+
+	cmd := e.newAgentctlCommand(ctx, argsList...)
+	if _, err := commandOutput(cmd, "code_search_ensemble"); err != nil {
+		return "", err
+	}
+	reportBytes, err := os.ReadFile(reportPath)
+	if err != nil {
+		return "", fmt.Errorf("read code_search_ensemble report: %w", err)
+	}
+	var report struct {
+		Results []map[string]any `json:"results"`
+	}
+	if err := json.Unmarshal(reportBytes, &report); err != nil {
+		return "", fmt.Errorf("decode code_search_ensemble report: %w", err)
+	}
+	if len(report.Results) == 0 {
+		return "{}", nil
+	}
+	resultBytes, err := json.Marshal(report.Results[0])
+	if err != nil {
+		return "", fmt.Errorf("marshal code_search_ensemble result: %w", err)
+	}
+	return string(resultBytes), nil
 }
 
 // executeContextFilter calls context/filter skill for LLM-powered chunk selection
@@ -1424,6 +1619,41 @@ func (e *agentToolExecutor) executeCodeSymbols(ctx context.Context, args map[str
 	inputBytes, _ := json.Marshal(inputMap)
 	cmd := e.newAgentctlCommand(ctx, "run", "code/symbols", "--input", string(inputBytes))
 	return commandOutput(cmd, "code_symbols")
+}
+
+func (e *agentToolExecutor) executeRefactorScout(ctx context.Context, args map[string]any) (string, error) {
+	language, _ := args["language"].(string)
+	language = strings.TrimSpace(language)
+	if language == "" {
+		return "", fmt.Errorf("language is required")
+	}
+
+	path, _ := args["path"].(string)
+	if strings.TrimSpace(path) == "" {
+		path = "."
+	}
+
+	inputMap := map[string]any{
+		"path":     path,
+		"language": language,
+	}
+	if minScore := intArg(args, 0, "min_score"); minScore > 0 {
+		inputMap["min_score"] = minScore
+	}
+	if maxResults := intArg(args, 0, "max_results", "limit"); maxResults > 0 {
+		inputMap["max_results"] = maxResults
+	}
+	if ruleSet, ok := args["rule_set"].(string); ok && strings.TrimSpace(ruleSet) != "" {
+		inputMap["rule_set"] = strings.TrimSpace(ruleSet)
+	}
+
+	inputBytes, err := json.Marshal(inputMap)
+	if err != nil {
+		return "", fmt.Errorf("marshal refactor_scout input: %w", err)
+	}
+
+	cmd := e.newAgentctlCommand(ctx, "run", "code/refactor_scout", "--input", string(inputBytes))
+	return commandOutput(cmd, "refactor_scout")
 }
 
 func (e *agentToolExecutor) executeRepoIndexSearch(ctx context.Context, args map[string]any) (string, error) {
@@ -1520,7 +1750,7 @@ func (e *agentToolExecutor) executeContextShow(ctx context.Context, _ map[string
 		workspace = "."
 	}
 	cmd := e.newAgentctlCommand(ctx, "context", "show", "--workspace", workspace)
-	return commandOutputData(cmd, "context_show")
+	return e.commandOutputData(cmd, "context_show")
 }
 
 func (e *agentToolExecutor) executeContextRetrieve(ctx context.Context, args map[string]any) (string, error) {
@@ -1544,7 +1774,7 @@ func (e *agentToolExecutor) executeContextRetrieve(ctx context.Context, args map
 		workspace = "."
 	}
 	cmd := e.newAgentctlCommand(ctx, "context", "retrieve", "--workspace", workspace, "--vault-path", vaultPath, "--query", query, "--limit", strconv.Itoa(limit))
-	return commandOutputData(cmd, "context_retrieve")
+	return e.commandOutputData(cmd, "context_retrieve")
 }
 
 func (e *agentToolExecutor) executeObsidianIndexSearch(ctx context.Context, args map[string]any) (string, error) {
@@ -1568,7 +1798,7 @@ func (e *agentToolExecutor) executeObsidianIndexSearch(ctx context.Context, args
 		argsList = append(argsList, "--semantic")
 	}
 	cmd := e.newAgentctlCommand(ctx, argsList...)
-	return commandOutputData(cmd, "obsidian_index_search")
+	return e.commandOutputData(cmd, "obsidian_index_search")
 }
 
 func (e *agentToolExecutor) executeObsidianRead(ctx context.Context, args map[string]any) (string, error) {
@@ -1587,7 +1817,7 @@ func (e *agentToolExecutor) executeObsidianRead(ctx context.Context, args map[st
 		return "", fmt.Errorf("vault_path is required")
 	}
 	cmd := e.newAgentctlCommand(ctx, "obsidian", "read", "--vault-path", vaultPath, "--path", path)
-	return commandOutputData(cmd, "obsidian_read")
+	return e.commandOutputData(cmd, "obsidian_read")
 }
 
 func (e *agentToolExecutor) executeObsidianRelated(ctx context.Context, args map[string]any) (string, error) {
@@ -1607,7 +1837,7 @@ func (e *agentToolExecutor) executeObsidianRelated(ctx context.Context, args map
 	}
 	limit := intArg(args, 10, "limit")
 	cmd := e.newAgentctlCommand(ctx, "obsidian", "related", "--vault-path", vaultPath, "--path", path, "--limit", strconv.Itoa(limit))
-	return commandOutputData(cmd, "obsidian_related")
+	return e.commandOutputData(cmd, "obsidian_related")
 }
 
 func (e *agentToolExecutor) executeHeartwoodState(ctx context.Context, args map[string]any) (string, error) {
@@ -1673,6 +1903,43 @@ func (e *agentToolExecutor) executeMemoryQuery(ctx context.Context, args map[str
 
 	cmd := e.newAgentctlCommand(ctx, "run", "memory/query", "--input", string(inputBytes))
 	return commandOutput(cmd, "memory_query")
+}
+
+func (e *agentToolExecutor) executeAgentMemoryContext(ctx context.Context, args map[string]any) (string, error) {
+	agentRef := stringArg(args, "", "agent_ref")
+	if strings.TrimSpace(agentRef) == "" {
+		return "", fmt.Errorf("agent_ref is required")
+	}
+
+	argsList := []string{"agent", "memory", "context", agentRef}
+	if conversationID := stringArg(args, "", "conversation_id"); strings.TrimSpace(conversationID) != "" {
+		argsList = append(argsList, "--conversation-id", conversationID)
+	}
+
+	cmd := e.newAgentctlCommand(ctx, argsList...)
+	return e.commandOutputData(cmd, "agent_memory_context")
+}
+
+func (e *agentToolExecutor) executeAgentMemorySearch(ctx context.Context, args map[string]any) (string, error) {
+	agentRef := stringArg(args, "", "agent_ref")
+	if strings.TrimSpace(agentRef) == "" {
+		return "", fmt.Errorf("agent_ref is required")
+	}
+	query := stringArg(args, "", "query")
+	if strings.TrimSpace(query) == "" {
+		return "", fmt.Errorf("query is required")
+	}
+
+	argsList := []string{"agent", "memory", "search", agentRef, "--query", strings.TrimSpace(query)}
+	if conversationID := stringArg(args, "", "conversation_id"); strings.TrimSpace(conversationID) != "" {
+		argsList = append(argsList, "--conversation-id", conversationID)
+	}
+	if limit := intArg(args, 0, "limit"); limit > 0 {
+		argsList = append(argsList, "--limit", strconv.Itoa(limit))
+	}
+
+	cmd := e.newAgentctlCommand(ctx, argsList...)
+	return e.commandOutputData(cmd, "agent_memory_search")
 }
 
 // executeSessionRecall calls code/semantic_search with sessions scope
@@ -1803,7 +2070,11 @@ func commandOutput(cmd *exec.Cmd, label string) (string, error) {
 	return out, nil
 }
 
-func commandOutputData(cmd *exec.Cmd, label string) (string, error) {
+func (e *agentToolExecutor) commandOutputData(cmd *exec.Cmd, label string) (string, error) {
+	return commandOutputDataForRole(cmd, label, e.agentRole)
+}
+
+func commandOutputDataForRole(cmd *exec.Cmd, label, role string) (string, error) {
 	output, err := commandOutput(cmd, label)
 	if err != nil {
 		return "", err
@@ -1816,6 +2087,13 @@ func commandOutputData(cmd *exec.Cmd, label string) (string, error) {
 	if !ok {
 		return output, nil
 	}
+	if shouldPreferRawToolData(role, label) {
+		body, err := json.MarshalIndent(data, "", "  ")
+		if err != nil {
+			return output, nil
+		}
+		return string(body), nil
+	}
 	if summary := summarizeToolData(label, data); summary != "" {
 		return summary, nil
 	}
@@ -1824,6 +2102,205 @@ func commandOutputData(cmd *exec.Cmd, label string) (string, error) {
 		return output, nil
 	}
 	return string(body), nil
+}
+
+func hasToolDef(toolDefs []engine.ToolDef, name string) bool {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return false
+	}
+	for _, tool := range toolDefs {
+		if strings.TrimSpace(tool.Name) == name {
+			return true
+		}
+	}
+	return false
+}
+
+func refactorRouteAllowlist(role types.AgentRole) []string {
+	switch role {
+	case types.RoleResearcher, types.RoleSubcallWorker:
+		return []string{
+			"think", "refactor_scout", "semantic_search_code", "smart_search",
+			"repo_index_search", "code_symbols", "fs_read_file", "context_search",
+		}
+	case types.RoleSymbolScout:
+		return []string{
+			"think", "refactor_scout", "code_symbols", "context_grep",
+		}
+	case types.RoleSemanticScout:
+		return []string{
+			"think", "refactor_scout", "semantic_search_code", "smart_search", "context_search",
+		}
+	case types.RoleDAGScout:
+		return []string{
+			"think", "refactor_scout", "repo_index_search", "repo_index_open", "repo_index_dag_grep",
+		}
+	default:
+		return nil
+	}
+}
+
+func (r *Runtime) applyRefactorRouteToolSubset(role types.AgentRole, taskPrompt string, toolDefs []engine.ToolDef) []engine.ToolDef {
+	if !isRefactorEntryPrompt(taskPrompt) {
+		return toolDefs
+	}
+	if inferRefactorScoutLanguage(taskPrompt) == "" {
+		return toolDefs
+	}
+	if !hasToolDef(toolDefs, "refactor_scout") {
+		return toolDefs
+	}
+	allowlist := refactorRouteAllowlist(role)
+	if len(allowlist) == 0 {
+		return toolDefs
+	}
+	return filterToolDefs(toolDefs, toolnames.NormalizeAllowlist(toolnames.ToolModeRuntime, allowlist))
+}
+
+func isRefactorEntryPrompt(prompt string) bool {
+	lower := strings.ToLower(strings.TrimSpace(prompt))
+	if lower == "" {
+		return false
+	}
+	return strings.Contains(lower, "refactor") &&
+		(strings.Contains(lower, "entrypoint") || strings.Contains(lower, "hotspot"))
+}
+
+func inferRefactorScoutLanguage(prompt string) string {
+	lower := strings.ToLower(prompt)
+	switch {
+	case strings.Contains(lower, "golang"), strings.Contains(lower, " go "), strings.Contains(lower, "go code"):
+		return "go"
+	case strings.Contains(lower, "typescript"), strings.Contains(lower, " ts "), strings.Contains(lower, "ts code"):
+		return "typescript"
+	case strings.Contains(lower, "javascript"), strings.Contains(lower, " js "), strings.Contains(lower, "js code"):
+		return "javascript"
+	case strings.Contains(lower, "python"):
+		return "python"
+	case strings.Contains(lower, "elixir"):
+		return "elixir"
+	default:
+		return ""
+	}
+}
+
+func inferRefactorScoutPath(prompt string) string {
+	lower := strings.ToLower(prompt)
+	for _, marker := range []string{"under ", "in "} {
+		idx := strings.Index(lower, marker)
+		if idx < 0 {
+			continue
+		}
+		rest := strings.TrimSpace(prompt[idx+len(marker):])
+		if rest == "" {
+			continue
+		}
+		fields := strings.Fields(rest)
+		if len(fields) == 0 {
+			continue
+		}
+		candidate := strings.Trim(fields[0], ".,:;`\"'")
+		candidate = strings.TrimSpace(candidate)
+		if candidate == "" {
+			continue
+		}
+		candidate = strings.TrimSuffix(candidate, "/")
+		if candidate == "" {
+			continue
+		}
+		if strings.HasPrefix(candidate, "internal") || strings.HasPrefix(candidate, "cmd") || strings.HasPrefix(candidate, "pkg") || strings.HasPrefix(candidate, "skills") {
+			return candidate
+		}
+	}
+	return "."
+}
+
+func (r *Runtime) buildRefactorScoutPreface(ctx context.Context, session *Session, taskPrompt string) (string, bool) {
+	if r == nil || session == nil {
+		return "", false
+	}
+	if !hasToolDef(session.Tools, "refactor_scout") {
+		return "", false
+	}
+	if !isRefactorEntryPrompt(taskPrompt) {
+		return "", false
+	}
+	language := inferRefactorScoutLanguage(taskPrompt)
+	if language == "" {
+		return "", false
+	}
+	path := inferRefactorScoutPath(taskPrompt)
+
+	inputMap := map[string]any{
+		"path":        path,
+		"language":    language,
+		"rule_set":    "default",
+		"min_score":   70,
+		"max_results": 8,
+	}
+	inputBytes, err := json.Marshal(inputMap)
+	if err != nil {
+		return "", false
+	}
+
+	workspaceRoot := r.workspaceRootForSession(session)
+	if strings.TrimSpace(workspaceRoot) == "" {
+		workspaceRoot = "."
+	}
+	cmd := exec.CommandContext(ctx, agentctlExecutablePath(), "run", "code/refactor_scout", "--input", string(inputBytes))
+	cmd.Dir = workspaceRoot
+	cmd.Env = filteredAgentctlEnv(os.Environ())
+	output, err := commandOutputDataForRole(cmd, "refactor_scout", string(session.Config.Role))
+	if err != nil {
+		return "", false
+	}
+	output = strings.TrimSpace(output)
+	if output == "" {
+		return "", false
+	}
+
+	var b strings.Builder
+	b.WriteString("Runtime-prefetched refactor scout evidence for this refactor-entrypoint task.\n")
+	b.WriteString("Treat this as grounded evidence to narrow your search before using other repo tools.\n")
+	b.WriteString("Language: " + language + "\n")
+	b.WriteString("Path scope: " + path + "\n")
+	b.WriteString("Refactor scout result:\n")
+	b.WriteString(output)
+	return b.String(), true
+}
+
+func mergeRefactorScoutTaskPrompt(taskPrompt, preface string) string {
+	taskPrompt = strings.TrimSpace(taskPrompt)
+	preface = strings.TrimSpace(preface)
+	if preface == "" {
+		return taskPrompt
+	}
+	if taskPrompt == "" {
+		return preface
+	}
+	return "You are answering a refactor-entrypoint task.\n" +
+		"Use the grounded refactor_scout evidence below as your first source of truth and verify only the most relevant files.\n\n" +
+		preface + "\n\nOriginal task:\n" + taskPrompt
+}
+
+func agentctlExecutablePath() string {
+	bin := "agentctl"
+	if exe, err := os.Executable(); err == nil && strings.TrimSpace(exe) != "" {
+		bin = exe
+	}
+	return bin
+}
+
+func shouldPreferRawToolData(role, label string) bool {
+	switch strings.TrimSpace(role) {
+	case string(types.RoleMemoryFactScout), string(types.RoleMemoryTimelineScout), string(types.RoleACAContextScout), string(types.RoleAnnotationScout):
+		switch strings.TrimSpace(label) {
+		case "context_show", "context_retrieve", "obsidian_index_search", "obsidian_related", "agent_memory_context", "agent_memory_search":
+			return true
+		}
+	}
+	return false
 }
 
 func summarizeToolData(label string, data any) string {
@@ -1925,6 +2402,39 @@ func summarizeToolData(label string, data any) string {
 			}
 			return strings.TrimSpace(b.String())
 		}
+	case "agent_memory_context":
+		if text := stringFromMap(m, "context"); text != "" {
+			return text
+		}
+	case "agent_memory_search":
+		results, ok := m["results"].([]any)
+		if !ok {
+			return ""
+		}
+		var b strings.Builder
+		b.WriteString("Memory search\n")
+		writeKeyValueLine(&b, "Query", stringFromMap(m, "query"))
+		for _, item := range results[:minInt(len(results), 5)] {
+			row, ok := item.(map[string]any)
+			if !ok {
+				continue
+			}
+			name := stringFromMap(row, "name")
+			typ := stringFromMap(row, "type")
+			summary := stringFromMap(row, "summary")
+			if name == "" && summary == "" {
+				continue
+			}
+			line := "- " + name
+			if typ != "" {
+				line += " [" + typ + "]"
+			}
+			if summary != "" {
+				line += ": " + summary
+			}
+			b.WriteString(line + "\n")
+		}
+		return strings.TrimSpace(b.String())
 	}
 	return ""
 }
@@ -2001,7 +2511,13 @@ func buildToolDefsForRole(role types.AgentRole, hasMailbox, hasBoard bool, allow
 	}
 
 	// Scout roles only get their specialized tools — no base file tools
-	isScout := role == types.RoleSemanticScout || role == types.RoleDAGScout || role == types.RoleSymbolScout || role == types.RoleAnnotationScout
+	isScout := role == types.RoleSemanticScout ||
+		role == types.RoleDAGScout ||
+		role == types.RoleSymbolScout ||
+		role == types.RoleAnnotationScout ||
+		role == types.RoleMemoryFactScout ||
+		role == types.RoleMemoryTimelineScout ||
+		role == types.RoleACAContextScout
 	if !isScout {
 		tools = append(tools,
 			engine.ToolDef{
@@ -2011,14 +2527,14 @@ func buildToolDefsForRole(role types.AgentRole, hasMailbox, hasBoard bool, allow
 			},
 			engine.ToolDef{
 				Name:        "code_search",
-				Description: "Search for patterns in the codebase using regex",
+				Description: "Search for simple literal or single-line regex patterns in the codebase. Do not use multiline regex such as \\n or [\\s\\S].",
 				Parameters:  json.RawMessage(`{"type":"object","properties":{"pattern":{"type":"string","description":"Regex pattern to search for"}},"required":["pattern"]}`),
 			},
 		)
 	}
 
-	// fs_list_dir for roles that benefit from directory browsing (not researcher or scouts — wastes iterations)
-	if role != types.RoleResearcher && !isScout {
+	// fs_list_dir for roles that benefit from directory browsing (not researcher/subcall_worker or scouts — wastes iterations)
+	if role != types.RoleResearcher && role != types.RoleSubcallWorker && !isScout {
 		tools = append(tools, engine.ToolDef{
 			Name:        "fs_list_dir",
 			Description: "List files and directories in a directory",
@@ -2026,8 +2542,8 @@ func buildToolDefsForRole(role types.AgentRole, hasMailbox, hasBoard bool, allow
 		})
 	}
 
-	// Heartwood tools are available to non-scout agents and can be restricted further by allowlist.
-	if !isScout {
+	// Heartwood tools are available to non-scout agents except bounded subcall workers.
+	if !isScout && role != types.RoleSubcallWorker {
 		tools = append(tools,
 			engine.ToolDef{
 				Name:        "heartwood_state",
@@ -2068,7 +2584,7 @@ func buildToolDefsForRole(role types.AgentRole, hasMailbox, hasBoard bool, allow
 			Description: "Write content to a file",
 			Parameters:  json.RawMessage(`{"type":"object","properties":{"path":{"type":"string","description":"File path to write"},"content":{"type":"string","description":"Content to write"}},"required":["path","content"]}`),
 		})
-	case types.RoleResearcher:
+	case types.RoleResearcher, types.RoleSubcallWorker:
 		tools = append(tools,
 			engine.ToolDef{
 				Name:        "context_search",
@@ -2076,7 +2592,39 @@ func buildToolDefsForRole(role types.AgentRole, hasMailbox, hasBoard bool, allow
 				Parameters: json.RawMessage(`{"type":"object","properties":{
 					"query":{"type":"string","description":"Natural language query describing what to find (e.g., 'hook dispatcher implementation')"},
 					"limit":{"type":"integer","description":"Maximum results to return (default 20)"}
-				},"required":["query"]}`),
+					},"required":["query"]}`),
+			},
+			engine.ToolDef{
+				Name:        "semantic_search_code",
+				Description: "Code-only semantic search over symbols and codemaps. Use this when you need file discovery without session, memory, or ACA noise.",
+				Parameters: json.RawMessage(`{"type":"object","properties":{
+						"query":{"type":"string","description":"Natural language query describing what code to find"},
+						"limit":{"type":"integer","description":"Maximum results to return (default 20)"}
+					},"required":["query"]}`),
+			},
+			engine.ToolDef{
+				Name:        "semantic_search_sessions",
+				Description: "Session-only semantic search over prior session summaries and related session context.",
+				Parameters: json.RawMessage(`{"type":"object","properties":{
+						"query":{"type":"string","description":"Natural language query describing what session history to find"},
+						"limit":{"type":"integer","description":"Maximum results to return (default 20)"}
+					},"required":["query"]}`),
+			},
+			engine.ToolDef{
+				Name:        "semantic_search_memories",
+				Description: "Memory-only semantic search over named memories and durable memory entries.",
+				Parameters: json.RawMessage(`{"type":"object","properties":{
+						"query":{"type":"string","description":"Natural language query describing what memory facts to find"},
+						"limit":{"type":"integer","description":"Maximum results to return (default 20)"}
+					},"required":["query"]}`),
+			},
+			engine.ToolDef{
+				Name:        "semantic_search_context",
+				Description: "ACA/context-only semantic retrieval over top-of-mind, handoffs, and configured vault context.",
+				Parameters: json.RawMessage(`{"type":"object","properties":{
+						"query":{"type":"string","description":"Natural language query describing what context to retrieve"},
+						"limit":{"type":"integer","description":"Maximum results to return (default 20)"}
+					},"required":["query"]}`),
 			},
 			engine.ToolDef{
 				Name:        "smart_search",
@@ -2087,8 +2635,32 @@ func buildToolDefsForRole(role types.AgentRole, hasMailbox, hasBoard bool, allow
 				},"required":["question"]}`),
 			},
 			engine.ToolDef{
+				Name:        "refactor_scout",
+				Description: "Rank likely refactor hotspots and entrypoints for a single language. Prefer this first for refactor-entrypoint questions.",
+				Parameters: json.RawMessage(`{"type":"object","properties":{
+						"path":{"type":"string","description":"File or directory to analyze (default workspace root)"},
+						"language":{"type":"string","description":"Single language to analyze: go, python, javascript, typescript, or elixir"},
+						"min_score":{"type":"integer","description":"Minimum finding score (default 60)"},
+						"max_results":{"type":"integer","description":"Maximum findings to return (default 20)"},
+						"rule_set":{"type":"string","enum":["conservative","default","aggressive"],"description":"Threshold profile"}
+					},"required":["language"]}`),
+			},
+			engine.ToolDef{
+				Name:        "code_search_ensemble",
+				Description: "Run the direct code-search ensemble. Prefer this first for repo-grounded locate/trace/symbol questions when you need compact grounded evidence.",
+				Parameters: json.RawMessage(`{"type":"object","properties":{
+					"query":{"type":"string","description":"Repo-grounded code question"},
+					"task_type":{"type":"string","description":"Optional: file_locate, execution_trace, symbol_inspect, change_impact, registration_trace"},
+					"context":{"type":"string","description":"Optional extra task context"},
+					"exclude_paths":{"type":"array","items":{"type":"string"},"description":"Optional out-of-scope path globs"},
+					"max_candidates":{"type":"integer","description":"Optional candidate budget"},
+					"max_files":{"type":"integer","description":"Optional grounded file budget"},
+					"max_snippets":{"type":"integer","description":"Optional snippet budget"}
+				},"required":["query"]}`),
+			},
+			engine.ToolDef{
 				Name:        "context_grep",
-				Description: "Search with regex pattern, returns full function/block bodies (not just matching lines). Good for finding specific patterns with surrounding context.",
+				Description: "Search with simple single-line regex or literal-like patterns and return full function/block bodies. Do not use multiline regex such as \\n or [\\s\\S].",
 				Parameters: json.RawMessage(`{"type":"object","properties":{
 					"pattern":{"type":"string","description":"Regex pattern to search for"},
 					"path":{"type":"string","description":"Path to search in (default: workspace root)"}
@@ -2104,7 +2676,7 @@ func buildToolDefsForRole(role types.AgentRole, hasMailbox, hasBoard bool, allow
 			},
 			engine.ToolDef{
 				Name:        "repo_index_search",
-				Description: "Search the repo index for nodes that match a text query.",
+				Description: "Search the repo index for nodes that match a short natural-language or symbol-name query. Avoid slash-heavy path strings.",
 				Parameters:  json.RawMessage(`{"type":"object","properties":{"query":{"type":"string","description":"FTS query string"},"limit":{"type":"integer","description":"Maximum results","default":20}},"required":["query"]}`),
 			},
 			engine.ToolDef{
@@ -2119,7 +2691,7 @@ func buildToolDefsForRole(role types.AgentRole, hasMailbox, hasBoard bool, allow
 			},
 			engine.ToolDef{
 				Name:        "repo_index_dag_grep",
-				Description: "Search and expand the repo index into a compact explanation subgraph.",
+				Description: "Search and expand the repo index into a compact explanation subgraph using short natural-language or symbol-name queries. Avoid slash-heavy path strings.",
 				Parameters: json.RawMessage(`{"type":"object","properties":{
 					"query":{"type":"string","description":"Search query"},
 					"mode":{"type":"string","enum":["fts","semantic","hybrid"]},
@@ -2230,7 +2802,15 @@ func buildToolDefsForRole(role types.AgentRole, hasMailbox, hasBoard bool, allow
 				Parameters: json.RawMessage(`{"type":"object","properties":{
 					"query":{"type":"string","description":"Natural language query describing what to find (e.g., 'hook dispatcher implementation')"},
 					"limit":{"type":"integer","description":"Maximum results to return (default 20)"}
-				},"required":["query"]}`),
+					},"required":["query"]}`),
+			},
+			engine.ToolDef{
+				Name:        "semantic_search_code",
+				Description: "Code-only semantic search over symbols and codemaps. Prefer this for scout discovery.",
+				Parameters: json.RawMessage(`{"type":"object","properties":{
+						"query":{"type":"string","description":"Natural language query describing what code to find"},
+						"limit":{"type":"integer","description":"Maximum results to return (default 20)"}
+					},"required":["query"]}`),
 			},
 			engine.ToolDef{
 				Name:        "smart_search",
@@ -2254,7 +2834,7 @@ func buildToolDefsForRole(role types.AgentRole, hasMailbox, hasBoard bool, allow
 		tools = append(tools,
 			engine.ToolDef{
 				Name:        "repo_index_search",
-				Description: "Search the repo index for nodes that match a text query.",
+				Description: "Search the repo index for nodes that match a short natural-language or symbol-name query. Avoid slash-heavy path strings.",
 				Parameters:  json.RawMessage(`{"type":"object","properties":{"query":{"type":"string","description":"FTS query string"},"limit":{"type":"integer","description":"Maximum results","default":20}},"required":["query"]}`),
 			},
 			engine.ToolDef{
@@ -2269,7 +2849,7 @@ func buildToolDefsForRole(role types.AgentRole, hasMailbox, hasBoard bool, allow
 			},
 			engine.ToolDef{
 				Name:        "repo_index_dag_grep",
-				Description: "Search and expand the repo index into a compact explanation subgraph.",
+				Description: "Search and expand the repo index into a compact explanation subgraph using short natural-language or symbol-name queries. Avoid slash-heavy path strings.",
 				Parameters: json.RawMessage(`{"type":"object","properties":{
 					"query":{"type":"string","description":"Search query"},
 					"mode":{"type":"string","enum":["fts","semantic","hybrid"]},
@@ -2289,6 +2869,17 @@ func buildToolDefsForRole(role types.AgentRole, hasMailbox, hasBoard bool, allow
 	case types.RoleSymbolScout:
 		tools = append(tools,
 			engine.ToolDef{
+				Name:        "refactor_scout",
+				Description: "Rank likely refactor hotspots and entrypoints for a single language. Prefer this first for refactor-entrypoint questions.",
+				Parameters: json.RawMessage(`{"type":"object","properties":{
+						"path":{"type":"string","description":"File or directory to analyze (default workspace root)"},
+						"language":{"type":"string","description":"Single language to analyze: go, python, javascript, typescript, or elixir"},
+						"min_score":{"type":"integer","description":"Minimum finding score (default 60)"},
+						"max_results":{"type":"integer","description":"Maximum findings to return (default 20)"},
+						"rule_set":{"type":"string","enum":["conservative","default","aggressive"],"description":"Threshold profile"}
+					},"required":["language"]}`),
+			},
+			engine.ToolDef{
 				Name:        "code_symbols",
 				Description: "Extract function/type/method signatures from a file with line numbers. Use this to see what's in a file before reading specific sections.",
 				Parameters: json.RawMessage(`{"type":"object","properties":{
@@ -2298,7 +2889,7 @@ func buildToolDefsForRole(role types.AgentRole, hasMailbox, hasBoard bool, allow
 			},
 			engine.ToolDef{
 				Name:        "context_grep",
-				Description: "Search with regex pattern, returns full function/block bodies (not just matching lines). Good for finding specific patterns with surrounding context.",
+				Description: "Search with simple single-line regex or literal-like patterns and return full function/block bodies. Do not use multiline regex such as \\n or [\\s\\S].",
 				Parameters: json.RawMessage(`{"type":"object","properties":{
 					"pattern":{"type":"string","description":"Regex pattern to search for"},
 					"path":{"type":"string","description":"Path to search in (default: workspace root)"}
@@ -2306,7 +2897,7 @@ func buildToolDefsForRole(role types.AgentRole, hasMailbox, hasBoard bool, allow
 			},
 			engine.ToolDef{
 				Name:        "code_search",
-				Description: "Search for patterns in the codebase using regex",
+				Description: "Search for simple literal or single-line regex patterns in the codebase. Do not use multiline regex such as \\n or [\\s\\S].",
 				Parameters:  json.RawMessage(`{"type":"object","properties":{"pattern":{"type":"string","description":"Regex pattern to search for"}},"required":["pattern"]}`),
 			},
 		)
@@ -2345,6 +2936,187 @@ func buildToolDefsForRole(role types.AgentRole, hasMailbox, hasBoard bool, allow
 				},"required":["query"]}`),
 			},
 		)
+	case types.RoleMemoryFactScout:
+		tools = append(tools,
+			engine.ToolDef{
+				Name:        "semantic_search_memories",
+				Description: "Memory-only semantic search over named memories and durable memory entries.",
+				Parameters: json.RawMessage(`{"type":"object","properties":{
+						"query":{"type":"string","description":"Natural language query describing what memory facts to find"},
+						"limit":{"type":"integer","description":"Maximum results to return (default 20)"}
+					},"required":["query"]}`),
+			},
+			engine.ToolDef{
+				Name:        "agent_memory_search",
+				Description: "Search persistent layered memory artifacts for an agent or conversation lineage.",
+				Parameters: json.RawMessage(`{"type":"object","properties":{
+					"agent_ref":{"type":"string","description":"Agent ID, slug, or name to inspect"},
+					"query":{"type":"string","description":"Memory search query"},
+					"conversation_id":{"type":"string","description":"Optional conversation lineage override"},
+					"limit":{"type":"integer","description":"Max results (default retention-aware)"}
+				},"required":["agent_ref","query"]}`),
+			},
+			engine.ToolDef{
+				Name:        "agent_memory_context",
+				Description: "Read the current layered memory context for an agent or conversation lineage.",
+				Parameters: json.RawMessage(`{"type":"object","properties":{
+					"agent_ref":{"type":"string","description":"Agent ID, slug, or name to inspect"},
+					"conversation_id":{"type":"string","description":"Optional conversation lineage override"}
+				},"required":["agent_ref"]}`),
+			},
+			engine.ToolDef{
+				Name:        "memory_query",
+				Description: "Search stored memories (gotchas, decisions, learnings) for relevant context about the codebase.",
+				Parameters: json.RawMessage(`{"type":"object","properties":{
+					"query":{"type":"string","description":"What to search for"},
+					"types":{"type":"string","description":"Filter: gotcha,decision,learning,pattern (default: all)"},
+					"limit":{"type":"integer","description":"Max results (default 10)"}
+				},"required":["query"]}`),
+			},
+			engine.ToolDef{
+				Name:        "session_recall",
+				Description: "Search past agent sessions for relevant context, summaries, and findings.",
+				Parameters: json.RawMessage(`{"type":"object","properties":{
+					"query":{"type":"string","description":"Topic to search past sessions for"},
+					"limit":{"type":"integer","description":"Max results (default 5)"}
+				},"required":["query"]}`),
+			},
+			engine.ToolDef{
+				Name:        "annotation_recall",
+				Description: "Search past session annotations using semantic similarity.",
+				Parameters: json.RawMessage(`{"type":"object","properties":{
+					"query":{"type":"string","description":"Natural language query to find relevant annotations"},
+					"filter_category":{"type":"string","description":"Optional annotation category filter"},
+					"sort_by":{"type":"string","description":"Comma-separated sort keys: similarity, date, recent"},
+					"limit":{"type":"integer","description":"Maximum results (default 10)"},
+					"session_id":{"type":"string","description":"Restrict search to a specific session ID"}
+				},"required":["query"]}`),
+			},
+			engine.ToolDef{
+				Name:        "context_filter",
+				Description: "LLM-powered context filtering for noisy memory results.",
+				Parameters: json.RawMessage(`{"type":"object","properties":{
+					"prompt":{"type":"string","description":"What context to select"},
+					"source":{"type":"object","properties":{"text":{"type":"string"},"chunks":{"type":"array","items":{"type":"object","properties":{"id":{"type":"string"},"text":{"type":"string"}}}}}},
+					"budget":{"type":"object","properties":{"target_tokens":{"type":"integer"},"max_chunks":{"type":"integer"}}}
+				},"required":["prompt","source"]}`),
+			},
+		)
+	case types.RoleMemoryTimelineScout:
+		tools = append(tools,
+			engine.ToolDef{
+				Name:        "semantic_search_sessions",
+				Description: "Session-only semantic search over prior session summaries and related session context.",
+				Parameters: json.RawMessage(`{"type":"object","properties":{
+						"query":{"type":"string","description":"Natural language query describing what session history to find"},
+						"limit":{"type":"integer","description":"Maximum results to return (default 20)"}
+					},"required":["query"]}`),
+			},
+			engine.ToolDef{
+				Name:        "session_timeline",
+				Description: "Get past session learnings as a timeline.",
+				Parameters: json.RawMessage(`{"type":"object","properties":{
+					"query":{"type":"string","description":"Topic to search past sessions for"},
+					"limit":{"type":"integer","description":"Max sessions (default 5)"}
+				},"required":["query"]}`),
+			},
+			engine.ToolDef{
+				Name:        "session_recall",
+				Description: "Search past agent sessions for relevant context, summaries, and findings.",
+				Parameters: json.RawMessage(`{"type":"object","properties":{
+					"query":{"type":"string","description":"Topic to search past sessions for"},
+					"limit":{"type":"integer","description":"Max results (default 5)"}
+				},"required":["query"]}`),
+			},
+			engine.ToolDef{
+				Name:        "agent_memory_search",
+				Description: "Search persistent layered memory artifacts for an agent or conversation lineage.",
+				Parameters: json.RawMessage(`{"type":"object","properties":{
+					"agent_ref":{"type":"string","description":"Agent ID, slug, or name to inspect"},
+					"query":{"type":"string","description":"Memory search query"},
+					"conversation_id":{"type":"string","description":"Optional conversation lineage override"},
+					"limit":{"type":"integer","description":"Max results (default retention-aware)"}
+				},"required":["agent_ref","query"]}`),
+			},
+			engine.ToolDef{
+				Name:        "agent_memory_context",
+				Description: "Read the current layered memory context for an agent or conversation lineage.",
+				Parameters: json.RawMessage(`{"type":"object","properties":{
+					"agent_ref":{"type":"string","description":"Agent ID, slug, or name to inspect"},
+					"conversation_id":{"type":"string","description":"Optional conversation lineage override"}
+				},"required":["agent_ref"]}`),
+			},
+			engine.ToolDef{
+				Name:        "context_filter",
+				Description: "LLM-powered context filtering for noisy timeline evidence.",
+				Parameters: json.RawMessage(`{"type":"object","properties":{
+					"prompt":{"type":"string","description":"What context to select"},
+					"source":{"type":"object","properties":{"text":{"type":"string"},"chunks":{"type":"array","items":{"type":"object","properties":{"id":{"type":"string"},"text":{"type":"string"}}}}}},
+					"budget":{"type":"object","properties":{"target_tokens":{"type":"integer"},"max_chunks":{"type":"integer"}}}
+				},"required":["prompt","source"]}`),
+			},
+		)
+	case types.RoleACAContextScout:
+		tools = append(tools,
+			engine.ToolDef{
+				Name:        "semantic_search_context",
+				Description: "ACA/context-only semantic retrieval over top-of-mind, handoffs, and configured vault context.",
+				Parameters: json.RawMessage(`{"type":"object","properties":{
+						"query":{"type":"string","description":"Natural language query describing what context to retrieve"},
+						"limit":{"type":"integer","description":"Maximum results to return (default 20)"}
+					},"required":["query"]}`),
+			},
+			engine.ToolDef{
+				Name:        "context_show",
+				Description: "Read the current ACA top-of-mind bundle for the workspace.",
+				Parameters:  json.RawMessage(`{"type":"object","properties":{}}`),
+			},
+			engine.ToolDef{
+				Name:        "context_retrieve",
+				Description: "Blend ACA control-plane state with vault retrieval for a focused question.",
+				Parameters: json.RawMessage(`{"type":"object","properties":{
+					"query":{"type":"string","description":"Question or topic to retrieve context for"},
+					"vault_path":{"type":"string","description":"Vault path (optional if AGENTCTL_ACA_VAULT_PATH or AGENTCTL_OBSIDIAN_VAULT_PATH is set)"},
+					"limit":{"type":"integer","description":"Maximum result count (default 5)"}
+				},"required":["query"]}`),
+			},
+			engine.ToolDef{
+				Name:        "obsidian_index_search",
+				Description: "Search the local Obsidian vault index. Supports optional semantic note search.",
+				Parameters: json.RawMessage(`{"type":"object","properties":{
+					"query":{"type":"string","description":"Vault search query"},
+					"vault_path":{"type":"string","description":"Vault path (optional if AGENTCTL_ACA_VAULT_PATH or AGENTCTL_OBSIDIAN_VAULT_PATH is set)"},
+					"limit":{"type":"integer","description":"Maximum result count (default 10)"},
+					"semantic":{"type":"boolean","description":"Use semantic note search if enabled"}
+				},"required":["query"]}`),
+			},
+			engine.ToolDef{
+				Name:        "obsidian_read",
+				Description: "Read a note from the Obsidian vault.",
+				Parameters: json.RawMessage(`{"type":"object","properties":{
+					"path":{"type":"string","description":"Vault note path"},
+					"vault_path":{"type":"string","description":"Vault path (optional if AGENTCTL_ACA_VAULT_PATH or AGENTCTL_OBSIDIAN_VAULT_PATH is set)"}
+				},"required":["path"]}`),
+			},
+			engine.ToolDef{
+				Name:        "obsidian_related",
+				Description: "List related notes from the Obsidian vault using links, backlinks, aliases, or the local index.",
+				Parameters: json.RawMessage(`{"type":"object","properties":{
+					"path":{"type":"string","description":"Vault note path"},
+					"vault_path":{"type":"string","description":"Vault path (optional if AGENTCTL_ACA_VAULT_PATH or AGENTCTL_OBSIDIAN_VAULT_PATH is set)"},
+					"limit":{"type":"integer","description":"Maximum result count (default 10)"}
+				},"required":["path"]}`),
+			},
+			engine.ToolDef{
+				Name:        "context_filter",
+				Description: "LLM-powered context filtering for ACA and vault retrieval output.",
+				Parameters: json.RawMessage(`{"type":"object","properties":{
+					"prompt":{"type":"string","description":"What context to select"},
+					"source":{"type":"object","properties":{"text":{"type":"string"},"chunks":{"type":"array","items":{"type":"object","properties":{"id":{"type":"string"},"text":{"type":"string"}}}}}},
+					"budget":{"type":"object","properties":{"target_tokens":{"type":"integer"},"max_chunks":{"type":"integer"}}}
+				},"required":["prompt","source"]}`),
+			},
+		)
 	case types.RoleOverseer:
 		// Overseer gets context gathering tools FIRST (for spawn prep)
 		tools = append(tools,
@@ -2363,6 +3135,19 @@ func buildToolDefsForRole(role types.AgentRole, hasMailbox, hasBoard bool, allow
 					"question":{"type":"string","description":"Natural language query describing what code to find"},
 					"max_snippets":{"type":"integer","description":"Maximum snippets to return (default 20)"}
 				},"required":["question"]}`),
+			},
+			engine.ToolDef{
+				Name:        "code_search_ensemble",
+				Description: "Run the direct code-search ensemble. Prefer this first for repo-grounded locate/trace/symbol/impact questions when you want compact grounded evidence.",
+				Parameters: json.RawMessage(`{"type":"object","properties":{
+					"query":{"type":"string","description":"Repo-grounded code question"},
+					"task_type":{"type":"string","description":"Optional: file_locate, execution_trace, symbol_inspect, change_impact, registration_trace"},
+					"context":{"type":"string","description":"Optional extra task context"},
+					"exclude_paths":{"type":"array","items":{"type":"string"},"description":"Optional out-of-scope path globs"},
+					"max_candidates":{"type":"integer","description":"Optional candidate budget"},
+					"max_files":{"type":"integer","description":"Optional grounded file budget"},
+					"max_snippets":{"type":"integer","description":"Optional snippet budget"}
+				},"required":["query"]}`),
 			},
 			engine.ToolDef{
 				Name:        "context_grep",
@@ -2421,7 +3206,7 @@ func buildToolDefsForRole(role types.AgentRole, hasMailbox, hasBoard bool, allow
 				Name:        "agent_spawn",
 				Description: "Spawn subagents with DETAILED prompts. Include specific file paths, tool instructions, and context from context_search/session_timeline results.",
 				Parameters: json.RawMessage(`{"type":"object","properties":{
-					"role":{"type":"string","description":"Agent role: coder, researcher, reviewer, planner","enum":["coder","researcher","reviewer","planner"]},
+					"role":{"type":"string","description":"Agent role: coder, researcher, reviewer, planner, subcall_worker","enum":["coder","researcher","reviewer","planner","subcall_worker"]},
 					"task":{"type":"string","description":"DETAILED task with: specific files, which tools to use, what to look for, success criteria"},
 					"local_max_depth":{"type":"integer","description":"Maximum depth for this subtree (optional)"},
 					"llm_provider":{"type":"string","description":"LLM provider: cerebras, openrouter, groq, gemini, anthropic, openai_compat (optional, inherits from parent)"},
@@ -2609,6 +3394,9 @@ func (r *Runtime) runSession(ctx context.Context, session *Session) {
 		taskPrompt = strings.TrimSpace(session.Config.Prompt)
 		session.mu.Unlock()
 	}
+	if preface, ok := r.buildRefactorScoutPreface(ctx, session, taskPrompt); ok {
+		taskPrompt = mergeRefactorScoutTaskPrompt(taskPrompt, preface)
+	}
 	var result string
 	var bestResult string // Track most substantive response for summary
 	var engineRetries int
@@ -2695,24 +3483,8 @@ func (r *Runtime) runSession(ctx context.Context, session *Session) {
 		// Accumulate conversation history for cross-turn context
 		appendToHistory(session, taskPrompt, result)
 
-		// Record tool calls
-		session.mu.Lock()
-		for _, tc := range output.ToolCalls {
-			session.ToolCalls = append(session.ToolCalls, types.ToolCall{
-				ToolName:  tc.Name,
-				Args:      parseJSONToMap(tc.Arguments),
-				Timestamp: time.Now(),
-			})
-		}
-		session.Iterations = len(session.ToolCalls)
-		currentIterations := session.Iterations
-		session.mu.Unlock()
+		currentIterations, toolNames, parentUsage := applyEngineOutputToSession(session, output)
 
-		// Emit iteration event for real-time activity tracking
-		toolNames := make([]string, len(output.ToolCalls))
-		for i, tc := range output.ToolCalls {
-			toolNames[i] = tc.Name
-		}
 		observability.Emit(ctx, observability.NewEvent(observability.OpAgentIteration).
 			WithComponent(observability.ComponentAgent).
 			WithSession(session.ID, session.Config.ActorID).
@@ -2722,6 +3494,8 @@ func (r *Runtime) runSession(ctx context.Context, session *Session) {
 			WithData("tool_calls", len(output.ToolCalls)).
 			WithData("tool_names", toolNames).
 			WithData("tokens_used", output.Tokens.TotalTokens).
+			WithData("parent_tool_usage", parentUsage).
+			WithData("parent_code_search_ensemble_prompt_delta_total", intFromAny(parentUsage["target_tool_prompt_delta_total"])).
 			WithData("stop_reason", string(output.StopReason)).
 			Success(0))
 
@@ -2873,6 +3647,7 @@ func (r *Runtime) runSession(ctx context.Context, session *Session) {
 	}
 	totalIterations := session.Iterations
 	totalToolCalls := len(session.ToolCalls)
+	parentUsage := cloneAnyMap(session.ParentToolUsage)
 	session.mu.Unlock()
 
 	r.persistSessionStatus(session)
@@ -2885,6 +3660,8 @@ func (r *Runtime) runSession(ctx context.Context, session *Session) {
 		WithData("role", string(session.Config.Role)).
 		WithData("iterations", totalIterations).
 		WithData("tool_calls", totalToolCalls).
+		WithData("parent_tool_usage", parentUsage).
+		WithData("parent_code_search_ensemble_prompt_delta_total", intFromAny(parentUsage["target_tool_prompt_delta_total"])).
 		WithData("summary_len", len(result)).
 		WithData("exec_mode", string(session.Config.ExecMode)).
 		Success(time.Since(sessionStart)))
@@ -2897,6 +3674,87 @@ func parseJSONToMap(data json.RawMessage) map[string]any {
 		return nil
 	}
 	return result
+}
+
+func cloneAnyMap(in map[string]any) map[string]any {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make(map[string]any, len(in))
+	for key, value := range in {
+		out[key] = value
+	}
+	return out
+}
+
+func summarizeRuntimeParentToolUsage(iterations []engine.IterationUsage, toolName string) map[string]any {
+	toolName = strings.TrimSpace(toolName)
+	out := map[string]any{
+		"target_tool":                             toolName,
+		"target_tool_invocations":                 0,
+		"target_tool_prompt_delta_total":          0,
+		"target_tool_result_token_estimate_total": 0,
+	}
+	if toolName == "" || len(iterations) == 0 {
+		return out
+	}
+	invocations := 0
+	promptDeltaTotal := 0
+	resultEstimateTotal := 0
+	for i, iter := range iterations {
+		if !containsRuntimeString(iter.ToolNames, toolName) {
+			continue
+		}
+		invocations++
+		resultEstimateTotal += iter.ToolResultTokenEstimate
+		if i+1 < len(iterations) {
+			promptDeltaTotal += iterations[i+1].PromptTokens - iter.PromptTokens
+		}
+	}
+	out["target_tool_invocations"] = invocations
+	out["target_tool_prompt_delta_total"] = promptDeltaTotal
+	out["target_tool_result_token_estimate_total"] = resultEstimateTotal
+	return out
+}
+
+func mergeRuntimeParentToolUsage(existing, update map[string]any) map[string]any {
+	if len(existing) == 0 && len(update) == 0 {
+		return nil
+	}
+	out := cloneAnyMap(existing)
+	if out == nil {
+		out = map[string]any{}
+	}
+	if target, ok := update["target_tool"].(string); ok && strings.TrimSpace(target) != "" {
+		out["target_tool"] = target
+	}
+	for _, key := range []string{"target_tool_invocations", "target_tool_prompt_delta_total", "target_tool_result_token_estimate_total"} {
+		out[key] = intFromAny(out[key]) + intFromAny(update[key])
+	}
+	return out
+}
+
+func intFromAny(value any) int {
+	switch v := value.(type) {
+	case int:
+		return v
+	case int64:
+		return int(v)
+	case float64:
+		return int(v)
+	default:
+		return 0
+	}
+}
+
+func containsRuntimeString(values []string, target string) bool {
+	target = strings.TrimSpace(target)
+	for _, value := range values {
+		if strings.TrimSpace(value) == target {
+			return true
+		}
+	}
+	return false
 }
 
 func intArg(args map[string]any, fallback int, keys ...string) int {
@@ -3230,16 +4088,44 @@ func (s *Session) GetSession() types.AgentSession {
 	defer s.mu.RUnlock()
 
 	return types.AgentSession{
-		ID:         s.ID,
-		JobID:      "", // TODO: link to jobs store
-		Config:     s.Config,
-		Status:     s.Status,
-		StartedAt:  s.StartedAt,
-		EndedAt:    s.EndedAt,
-		Iterations: s.Iterations,
-		Summary:    s.Summary,
-		Error:      s.Error,
+		ID:              s.ID,
+		JobID:           "", // TODO: link to jobs store
+		Config:          s.Config,
+		Status:          s.Status,
+		StartedAt:       s.StartedAt,
+		EndedAt:         s.EndedAt,
+		Iterations:      s.Iterations,
+		InputTokens:     s.InputTokens,
+		OutputTokens:    s.OutputTokens,
+		TotalTokens:     s.TotalTokens,
+		ParentToolUsage: cloneAnyMap(s.ParentToolUsage),
+		Summary:         s.Summary,
+		Error:           s.Error,
 	}
+}
+
+func applyEngineOutputToSession(session *Session, output engine.EngineOutput) (int, []string, map[string]any) {
+	session.mu.Lock()
+	defer session.mu.Unlock()
+
+	for _, tc := range output.ToolCalls {
+		session.ToolCalls = append(session.ToolCalls, types.ToolCall{
+			ToolName:  tc.Name,
+			Args:      parseJSONToMap(tc.Arguments),
+			Timestamp: time.Now(),
+		})
+	}
+	session.Iterations = len(session.ToolCalls)
+	session.InputTokens += output.Tokens.InputTokens
+	session.OutputTokens += output.Tokens.OutputTokens
+	session.TotalTokens += output.Tokens.TotalTokens
+	parentUsage := summarizeRuntimeParentToolUsage(output.Iterations, "code_search_ensemble")
+	session.ParentToolUsage = mergeRuntimeParentToolUsage(session.ParentToolUsage, parentUsage)
+	toolNames := make([]string, len(output.ToolCalls))
+	for i, tc := range output.ToolCalls {
+		toolNames[i] = tc.Name
+	}
+	return session.Iterations, toolNames, cloneAnyMap(session.ParentToolUsage)
 }
 
 // GetToolCalls returns a copy of tool calls.
@@ -3566,24 +4452,8 @@ func (r *Runtime) runAutonomousContinuation(ctx context.Context, session *Sessio
 		// Accumulate conversation history
 		appendToHistory(session, continuePrompt, result)
 
-		// Record tool calls for this continuation turn
-		session.mu.Lock()
-		for _, tc := range output.ToolCalls {
-			session.ToolCalls = append(session.ToolCalls, types.ToolCall{
-				ToolName:  tc.Name,
-				Args:      parseJSONToMap(tc.Arguments),
-				Timestamp: time.Now(),
-			})
-		}
-		session.Iterations = len(session.ToolCalls)
-		currentIterations := session.Iterations
-		session.mu.Unlock()
+		currentIterations, toolNames, parentUsage := applyEngineOutputToSession(session, output)
 
-		// Emit iteration event for real-time activity tracking
-		toolNames := make([]string, len(output.ToolCalls))
-		for i, tc := range output.ToolCalls {
-			toolNames[i] = tc.Name
-		}
 		observability.Emit(ctx, observability.NewEvent(observability.OpAgentIteration).
 			WithComponent(observability.ComponentAgent).
 			WithSession(session.ID, session.Config.ActorID).
@@ -3593,6 +4463,8 @@ func (r *Runtime) runAutonomousContinuation(ctx context.Context, session *Sessio
 			WithData("tool_calls", len(output.ToolCalls)).
 			WithData("tool_names", toolNames).
 			WithData("tokens_used", output.Tokens.TotalTokens).
+			WithData("parent_tool_usage", parentUsage).
+			WithData("parent_code_search_ensemble_prompt_delta_total", intFromAny(parentUsage["target_tool_prompt_delta_total"])).
 			WithData("autonomous_turn", turn+1).
 			Success(0))
 
@@ -3686,7 +4558,7 @@ func (r *Runtime) continuationPrompt(session *Session) string {
 			"Prior research this session:\n" + summary + "\n\n" +
 			"If you HAVE already produced a report, deepen it:\n" +
 			"1. Read files you referenced but haven't read (schemas, configs, tests)\n" +
-			"2. Find alternative code paths (code_search for callers you missed)\n" +
+			"2. Find alternative code paths (prefer simple symbol-name searches or repo-index lookups; avoid multiline regex)\n" +
 			"3. Verify claims by reading actual source — never paraphrase from memory\n" +
 			"4. Append a '## Deepening' section with new findings and code snippets\n\n" +
 			"Respond with 'TASK_COMPLETE' only if your report is already comprehensive."
@@ -3809,24 +4681,8 @@ func (r *Runtime) processMailboxMessages(ctx context.Context, session *Session, 
 			}
 		}
 
-		// Record tool calls
-		session.mu.Lock()
-		for _, tc := range output.ToolCalls {
-			session.ToolCalls = append(session.ToolCalls, types.ToolCall{
-				ToolName:  tc.Name,
-				Args:      parseJSONToMap(tc.Arguments),
-				Timestamp: time.Now(),
-			})
-		}
-		session.Iterations = len(session.ToolCalls)
-		currentIterations := session.Iterations
-		session.mu.Unlock()
+		currentIterations, toolNames, parentUsage := applyEngineOutputToSession(session, output)
 
-		// Emit iteration event for real-time activity tracking
-		toolNames := make([]string, len(output.ToolCalls))
-		for i, tc := range output.ToolCalls {
-			toolNames[i] = tc.Name
-		}
 		observability.Emit(ctx, observability.NewEvent(observability.OpAgentIteration).
 			WithComponent(observability.ComponentAgent).
 			WithSession(session.ID, session.Config.ActorID).
@@ -3836,6 +4692,8 @@ func (r *Runtime) processMailboxMessages(ctx context.Context, session *Session, 
 			WithData("tool_calls", len(output.ToolCalls)).
 			WithData("tool_names", toolNames).
 			WithData("tokens_used", output.Tokens.TotalTokens).
+			WithData("parent_tool_usage", parentUsage).
+			WithData("parent_code_search_ensemble_prompt_delta_total", intFromAny(parentUsage["target_tool_prompt_delta_total"])).
 			WithData("message_source", "mailbox").
 			Success(0))
 
@@ -3857,9 +4715,21 @@ func (r *Runtime) sendAskReply(ctx context.Context, session *Session, msg agent.
 		return fmt.Errorf("missing ask correlation")
 	}
 
+	answer := map[string]any{"response": response}
+	var askEnv struct {
+		Data agent.AskData `json:"data"`
+	}
+	if err := json.Unmarshal(msg.Payload, &askEnv); err == nil {
+		if len(askEnv.Data.ResponseSchema) > 0 {
+			var payload any
+			if err := json.Unmarshal([]byte(response), &payload); err == nil {
+				answer["response_json"] = payload
+			}
+		}
+	}
 	replyData := agent.ReplyData{
 		AskID:  askID,
-		Answer: map[string]any{"response": response},
+		Answer: answer,
 	}
 	replyEnv := envelope.OK("agent.reply", replyData)
 	replyPayload, err := json.Marshal(replyEnv)
@@ -3958,24 +4828,8 @@ func (r *Runtime) runScheduledThink(ctx context.Context, session *Session) {
 		return
 	}
 
-	// Record tool calls
-	session.mu.Lock()
-	for _, tc := range output.ToolCalls {
-		session.ToolCalls = append(session.ToolCalls, types.ToolCall{
-			ToolName:  tc.Name,
-			Args:      parseJSONToMap(tc.Arguments),
-			Timestamp: time.Now(),
-		})
-	}
-	session.Iterations = len(session.ToolCalls)
-	currentIterations := session.Iterations
-	session.mu.Unlock()
+	currentIterations, toolNames, parentUsage := applyEngineOutputToSession(session, output)
 
-	// Emit iteration event for real-time activity tracking
-	toolNames := make([]string, len(output.ToolCalls))
-	for i, tc := range output.ToolCalls {
-		toolNames[i] = tc.Name
-	}
 	observability.Emit(ctx, observability.NewEvent(observability.OpAgentIteration).
 		WithComponent(observability.ComponentAgent).
 		WithSession(session.ID, session.Config.ActorID).
@@ -3985,6 +4839,8 @@ func (r *Runtime) runScheduledThink(ctx context.Context, session *Session) {
 		WithData("tool_calls", len(output.ToolCalls)).
 		WithData("tool_names", toolNames).
 		WithData("tokens_used", output.Tokens.TotalTokens).
+		WithData("parent_tool_usage", parentUsage).
+		WithData("parent_code_search_ensemble_prompt_delta_total", intFromAny(parentUsage["target_tool_prompt_delta_total"])).
 		WithData(eventName, true).
 		Success(0))
 

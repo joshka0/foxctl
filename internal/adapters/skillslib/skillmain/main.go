@@ -259,10 +259,17 @@ func buildRunContext(cfg config.Config, stdout io.Writer) (*RunContext, error) {
 	// On macOS, /tmp symlinks to /private/tmp which differs from os.TempDir()
 	// ($TMPDIR, typically /var/folders/.../T). Claude Code sandboxes create
 	// dirs like /tmp/agentctl-* and /tmp/plan-build-*. Add only those specific
-	// sandbox dirs rather than all of /tmp.
+	// sandbox dirs rather than all of /tmp. Ignore socket/files that happen to
+	// match the prefix.
 	for _, pattern := range []string{"/tmp/agentctl-*", "/tmp/plan-build-*"} {
 		if matches, _ := filepath.Glob(pattern); len(matches) > 0 {
-			allowedRoots = append(allowedRoots, matches...)
+			for _, match := range matches {
+				info, err := os.Stat(match)
+				if err != nil || info == nil || !info.IsDir() {
+					continue
+				}
+				allowedRoots = append(allowedRoots, match)
+			}
 		}
 	}
 

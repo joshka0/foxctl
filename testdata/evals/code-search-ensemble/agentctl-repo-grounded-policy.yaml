@@ -1,0 +1,5 @@
+min_primary_anchor: 0.0
+max_secondary_anchor: 1.0
+min_package_repo_evidence: 0.0
+min_infra_declarative_companion: 0.0
+fail_on_route_alerts: true

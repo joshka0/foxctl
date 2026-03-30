@@ -1,0 +1,130 @@
+apiVersion: agentctl/v1
+kind: Skill
+metadata:
+  name: code/refactor_advisor
+  version: 0.1.0
+  description: "Two-stage refactor workflow: local scout retrieval plus LLM shortlist ranking"
+  tags: ["code", "refactor", "llm", "ranking", "minimax"]
+distribution:
+  type: exec
+  exec:
+    entry: skills/code_refactor_advisor/code_refactor_advisor
+io:
+  format: JSON
+  inline_output_kb: 64
+signature:
+  command: code/refactor_advisor
+  parameters:
+    - name: path
+      type: string
+      required: false
+      description: "File or directory to analyze (default .)"
+    - name: language
+      type: string
+      required: true
+      enum: ["go", "python", "javascript", "typescript", "elixir"]
+      description: "Single language to analyze"
+    - name: rule_set
+      type: string
+      required: false
+      enum: ["conservative", "default", "aggressive"]
+      default: "default"
+      description: "Threshold profile passed to the local scout"
+    - name: min_score
+      type: integer
+      required: false
+      default: 70
+      description: "Minimum scout score to include"
+    - name: max_findings
+      type: integer
+      required: false
+      default: 8
+      description: "Maximum scout findings to send to the advisor model"
+    - name: shortlist_size
+      type: integer
+      required: false
+      default: 3
+      description: "Maximum number of prioritized recommendations to return"
+    - name: provider
+      type: string
+      required: false
+      enum: ["openrouter", "openai", "groq", "cerebras"]
+      default: "openrouter"
+      description: "OpenAI-compatible provider for the second-stage model"
+    - name: model
+      type: string
+      required: false
+      default: "google/gemini-3.1-flash-lite-preview"
+      description: "Model name for the second-stage ranking pass"
+    - name: base_url
+      type: string
+      required: false
+      description: "Optional OpenAI-compatible base URL override"
+    - name: api_key
+      type: string
+      required: false
+      description: "Optional API key override"
+    - name: timeout_sec
+      type: integer
+      required: false
+      default: 120
+      description: "Second-stage request timeout in seconds"
+    - name: temperature
+      type: number
+      required: false
+      default: 0.1
+      description: "Second-stage sampling temperature"
+    - name: max_tokens
+      type: integer
+      required: false
+      default: 900
+      description: "Maximum output tokens for the advisor model"
+  returns:
+    - name: prioritized
+      type: array
+      description: "Best shortlist of refactor starting points"
+    - name: defer
+      type: array
+      description: "Candidates to defer"
+    - name: sequence
+      type: array
+      description: "Suggested safe order of refactors"
+    - name: scout_findings
+      type: array
+      description: "Local scout findings provided to the advisor model"
+    - name: provider
+      type: string
+    - name: model
+      type: string
+  help:
+    short: "Rank local refactor hotspots with a second-stage LLM."
+    long: |
+      code/refactor_advisor runs the local code/refactor_scout skill first, then
+      asks an OpenAI-compatible model to choose the best refactor starting points
+      from the local findings.
+
+      This is intended for:
+      - strict single-language refactor entrypoint tasks
+      - using local deterministic retrieval for hotspot discovery
+      - using a remote model only for shortlist ranking and explanation
+
+      Default second-stage target:
+      - provider: openrouter
+      - model: google/gemini-3.1-flash-lite-preview
+
+      Example:
+        agentctl run code/refactor_advisor --input '{
+          "path":"./internal",
+          "language":"go",
+          "shortlist_size":3
+        }'
+capabilities:
+  network: "egress"
+  filesystem:
+    - type: workdir
+  pure: false
+openapi:
+  enabled: true
+  methods:
+    GET: "true"
+    POST: "true"

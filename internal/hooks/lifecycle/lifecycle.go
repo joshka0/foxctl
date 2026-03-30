@@ -160,8 +160,9 @@ func NewDependencies(cfg config.Config) Dependencies {
 			}
 			defer cleanup()
 			pack, err := collector.Collect(ctx, taskhistory.Options{
-				WorkspacePath: workspace,
-				WorkspaceID:   workspaceID(workspace),
+				WorkspacePath:          workspace,
+				WorkspaceID:            workspaceID(workspace),
+				TranscriptHistoryScope: taskhistory.DefaultTranscriptHistoryScope(),
 			})
 			if err != nil {
 				return "", err

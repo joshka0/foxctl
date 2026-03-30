@@ -20,6 +20,8 @@ func TestAgentAskBuilder(t *testing.T) {
 			ToNS("agent:b").
 			Question("What is 2+2?").
 			WithKind("question").
+			WithResponseSchema(json.RawMessage(`{"type":"object","properties":{"summary":{"type":"string"}}}`)).
+			WithResponseKeys([]string{"summary", "next_action"}).
 			WithSessionID("session-123").
 			WithWorkspace("/path/to/project").
 			WithTTL(10 * time.Minute).
@@ -42,6 +44,8 @@ func TestAgentAskBuilder(t *testing.T) {
 		assert.Equal(t, "What is 2+2?", data.Question)
 		assert.Equal(t, "question", data.Kind)
 		assert.NotEmpty(t, data.AskID)
+		assert.JSONEq(t, `{"type":"object","properties":{"summary":{"type":"string"}}}`, string(data.ResponseSchema))
+		assert.Equal(t, []string{"summary", "next_action"}, data.ResponseKeys)
 	})
 
 	t.Run("envelope format", func(t *testing.T) {

@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 	"time"
 
@@ -15,6 +16,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/domain/envelope"
 	"github.com/jkatigb/agentctl/internal/evals/correctioneval"
 	"github.com/jkatigb/agentctl/internal/evals/retrievaleval"
+	"github.com/jkatigb/agentctl/internal/evals/transcriptmemoryeval"
 	"github.com/jkatigb/agentctl/internal/indexing/repoindex"
 	"github.com/jkatigb/agentctl/internal/indexing/semantic"
 	"github.com/jkatigb/agentctl/internal/platform/config"
@@ -27,6 +29,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/storage/obsidianindex"
 	"github.com/jkatigb/agentctl/internal/storage/sessions"
 	"github.com/jkatigb/agentctl/internal/storage/tasks"
+	"github.com/jkatigb/agentctl/internal/transcriptpipeline"
 	"github.com/spf13/cobra"
 )
 
@@ -37,7 +40,240 @@ func newEvalCommand() *cobra.Command {
 	}
 	cmd.AddCommand(newEvalRetrievalCommand())
 	cmd.AddCommand(newEvalCorrectionsCommand())
+	cmd.AddCommand(newEvalTranscriptMemoryCommand())
+	cmd.AddCommand(newEvalAgentsCommand())
+	cmd.AddCommand(newEvalCodeSearchEnsembleCommand())
 	return cmd
+}
+
+func newEvalTranscriptMemoryCommand() *cobra.Command {
+	var suiteRef string
+	var format string
+	var blobSummaryMode string
+	var blobSummaryModel string
+	var blobSummaryTimeout time.Duration
+
+	cmd := &cobra.Command{
+		Use:   "transcript-memory",
+		Short: "Evaluate transcript-memory claim quality against a fixed suite",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			if strings.TrimSpace(suiteRef) == "" {
+				return fmt.Errorf("--suite is required")
+			}
+			ctx := cmd.Context()
+			cfg, err := loadConfig(ctx)
+			if err != nil {
+				return err
+			}
+			suitePath, err := resolveTranscriptMemorySuitePath(suiteRef)
+			if err != nil {
+				return err
+			}
+			runtimeCfg := transcriptpipeline.NewLocalModelRuntime(strings.TrimSpace(blobSummaryMode), strings.TrimSpace(blobSummaryModel), cfg.LLM.ResolveBaseURL("lmstudio"), blobSummaryTimeout)
+			runResult, markdown, err := runTranscriptMemoryEval(ctx, suitePath, runtimeCfg)
+			if err != nil {
+				return err
+			}
+			switch strings.ToLower(strings.TrimSpace(format)) {
+			case "", "markdown", "md":
+			default:
+				return fmt.Errorf("unsupported --format %q", format)
+			}
+			return envelope.Write(cmd.OutOrStdout(), envelope.OK("eval/transcript-memory", map[string]any{
+				"markdown":   markdown,
+				"result":     runResult,
+				"suite_path": suitePath,
+			}, envelope.WithMeta(envelope.Meta{Source: "cli"})))
+		},
+	}
+	cmd.AddCommand(newEvalTranscriptMemoryExperimentCommand())
+
+	cmd.Flags().StringVar(&suiteRef, "suite", "", "Transcript-memory eval suite name or path")
+	cmd.Flags().StringVar(&format, "format", "markdown", "Output format: markdown")
+	cmd.Flags().StringVar(&blobSummaryMode, "blob-summary-mode", "auto", "Blob summary mode: auto, deterministic, or lmstudio")
+	cmd.Flags().StringVar(&blobSummaryModel, "blob-summary-model", "nvidia/nemotron-3-nano-4b", "Model to use for LMStudio transcript-memory eval stages")
+	cmd.Flags().DurationVar(&blobSummaryTimeout, "blob-summary-timeout", 45*time.Second, "Timeout for LMStudio transcript-memory eval stages")
+	return cmd
+}
+
+func newEvalTranscriptMemoryExperimentCommand() *cobra.Command {
+	var suiteRefs []string
+	var blobSummaryMode string
+	var blobSummaryModel string
+	var blobSummaryTimeout time.Duration
+	var classificationPromptVersions []string
+	var claimReviewPromptVersions []string
+	var includeBaseline bool
+	var saveDir string
+	var logFile string
+	var label string
+	var description string
+
+	cmd := &cobra.Command{
+		Use:   "experiment",
+		Short: "Run transcript-memory eval suites and append an experiment record",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			if len(suiteRefs) == 0 {
+				return fmt.Errorf("--suite is required")
+			}
+			ctx := cmd.Context()
+			cfg, err := loadConfig(ctx)
+			if err != nil {
+				return err
+			}
+			baseRuntime := transcriptpipeline.NewLocalModelRuntime(strings.TrimSpace(blobSummaryMode), strings.TrimSpace(blobSummaryModel), cfg.LLM.ResolveBaseURL("lmstudio"), blobSummaryTimeout)
+			runtimes := expandTranscriptMemoryVariants(baseRuntime, classificationPromptVersions, claimReviewPromptVersions, includeBaseline)
+
+			resolvedSaveDir := strings.TrimSpace(saveDir)
+			if resolvedSaveDir == "" {
+				resolvedSaveDir = filepath.Join(resolveContextWorkspace(""), ".agentctl", "exports", "evals", "transcript-memory")
+			}
+			resolvedLogFile := strings.TrimSpace(logFile)
+			if resolvedLogFile == "" {
+				resolvedLogFile = filepath.Join(resolveContextWorkspace(""), ".agentctl", "runtime", "transcript_memory_experiments.ndjson")
+			}
+
+			type variantRun struct {
+				Record  transcriptmemoryeval.ExperimentRecord `json:"record"`
+				Results []transcriptmemoryeval.RunResult      `json:"results"`
+			}
+			variantRuns := make([]variantRun, 0, len(runtimes))
+			for _, runtimeCfg := range runtimes {
+				runResults := make([]transcriptmemoryeval.RunResult, 0, len(suiteRefs))
+				artifacts := make([]transcriptmemoryeval.SavedArtifact, 0, len(suiteRefs))
+				configID := transcriptMemoryConfigID(runtimeCfg)
+				variantDir := filepath.Join(resolvedSaveDir, configID)
+				for _, suiteRef := range suiteRefs {
+					suitePath, err := resolveTranscriptMemorySuitePath(suiteRef)
+					if err != nil {
+						return err
+					}
+					runResult, markdown, err := runTranscriptMemoryEval(ctx, suitePath, runtimeCfg)
+					if err != nil {
+						return err
+					}
+					jsonPath, markdownPath, err := transcriptmemoryeval.SaveRunOutputs(variantDir, runResult.Suite, runResult, markdown)
+					if err != nil {
+						return err
+					}
+					runResults = append(runResults, runResult)
+					artifacts = append(artifacts, transcriptmemoryeval.SavedArtifact{
+						Suite:        runResult.Suite,
+						JSONPath:     jsonPath,
+						MarkdownPath: markdownPath,
+					})
+				}
+				record := transcriptmemoryeval.BuildExperimentRecord(label, description, configID, runResults, artifacts)
+				if err := transcriptmemoryeval.AppendExperimentRecord(resolvedLogFile, record); err != nil {
+					return err
+				}
+				variantRuns = append(variantRuns, variantRun{Record: record, Results: runResults})
+			}
+			sort.SliceStable(variantRuns, func(i, j int) bool {
+				return variantRuns[i].Record.Score > variantRuns[j].Record.Score
+			})
+
+			return envelope.Write(cmd.OutOrStdout(), envelope.OK("eval/transcript-memory-experiment", map[string]any{
+				"records":  variantRuns,
+				"best":     variantRuns[0],
+				"log_file": resolvedLogFile,
+				"save_dir": resolvedSaveDir,
+				"variants": len(variantRuns),
+			}, envelope.WithMeta(envelope.Meta{Source: "cli"})))
+		},
+	}
+
+	cmd.Flags().StringSliceVar(&suiteRefs, "suite", nil, "Transcript-memory eval suite name or path (repeatable)")
+	cmd.Flags().StringVar(&blobSummaryMode, "blob-summary-mode", "auto", "Blob summary mode: auto, deterministic, or lmstudio")
+	cmd.Flags().StringVar(&blobSummaryModel, "blob-summary-model", "nvidia/nemotron-3-nano-4b", "Model to use for LMStudio transcript-memory experiment stages")
+	cmd.Flags().DurationVar(&blobSummaryTimeout, "blob-summary-timeout", 45*time.Second, "Timeout for LMStudio transcript-memory experiment stages")
+	cmd.Flags().StringSliceVar(&classificationPromptVersions, "classification-prompt-version", nil, "Classification prompt version(s) to compare")
+	cmd.Flags().StringSliceVar(&claimReviewPromptVersions, "claim-review-prompt-version", nil, "Claim review prompt version(s) to compare")
+	cmd.Flags().BoolVar(&includeBaseline, "include-baseline", true, "Include the default runtime config as a baseline variant")
+	cmd.Flags().StringVar(&saveDir, "save-dir", "", "Directory for saved eval artifacts")
+	cmd.Flags().StringVar(&logFile, "log-file", "", "NDJSON experiment log file")
+	cmd.Flags().StringVar(&label, "label", "", "Short label for this experiment run")
+	cmd.Flags().StringVar(&description, "description", "", "Short description of what this run is testing")
+	return cmd
+}
+
+func runTranscriptMemoryEval(ctx context.Context, suitePath string, runtimeCfg transcriptpipeline.LocalModelRuntime) (transcriptmemoryeval.RunResult, string, error) {
+	suite, err := transcriptmemoryeval.LoadSuite(suitePath)
+	if err != nil {
+		return transcriptmemoryeval.RunResult{}, "", err
+	}
+	runResult, err := transcriptmemoryeval.RunSuite(ctx, suite, transcriptmemoryeval.RunOptions{Runtime: runtimeCfg})
+	if err != nil {
+		return transcriptmemoryeval.RunResult{}, "", err
+	}
+	return runResult, transcriptmemoryeval.RenderMarkdown(runResult), nil
+}
+
+func transcriptMemoryConfigID(runtimeCfg transcriptpipeline.LocalModelRuntime) string {
+	raw := strings.Join([]string{
+		runtimeCfg.Mode,
+		runtimeCfg.Provider,
+		runtimeCfg.Model,
+		runtimeCfg.DoctrineBridgeModel,
+		runtimeCfg.DoctrineDistillModel,
+		runtimeCfg.ReferencePromptVersion,
+		runtimeCfg.ToolOutputPromptVersion,
+		runtimeCfg.ObjectivePromptVersion,
+		runtimeCfg.DoctrineBridgePromptVersion,
+		runtimeCfg.DoctrineDistillPromptVersion,
+		runtimeCfg.ObjectiveAlignmentPromptVersion,
+		runtimeCfg.GroupToplinePromptVersion,
+		runtimeCfg.GroupClaimsPromptVersion,
+		runtimeCfg.ClassificationPromptVersion,
+		runtimeCfg.ClaimReviewPromptVersion,
+		fmt.Sprintf("%d", runtimeCfg.MaxContextTokens),
+	}, "|")
+	return sanitizeEvalName(transcriptpipeline.BoundArtifactText(raw, 400))
+}
+
+func expandTranscriptMemoryVariants(base transcriptpipeline.LocalModelRuntime, classificationPromptVersions, claimReviewPromptVersions []string, includeBaseline bool) []transcriptpipeline.LocalModelRuntime {
+	variants := make([]transcriptpipeline.LocalModelRuntime, 0, 4)
+	seen := make(map[string]struct{})
+	appendVariant := func(rt transcriptpipeline.LocalModelRuntime) {
+		key := transcriptMemoryConfigID(rt)
+		if _, ok := seen[key]; ok {
+			return
+		}
+		seen[key] = struct{}{}
+		variants = append(variants, rt)
+	}
+	if includeBaseline {
+		appendVariant(base)
+	}
+	maxLen := maxInt(1, len(classificationPromptVersions), len(claimReviewPromptVersions))
+	for i := 0; i < maxLen; i++ {
+		rt := base
+		if len(classificationPromptVersions) > 0 {
+			rt.ClassificationPromptVersion = classificationPromptVersions[minIntEval(i, len(classificationPromptVersions)-1)]
+		}
+		if len(claimReviewPromptVersions) > 0 {
+			rt.ClaimReviewPromptVersion = claimReviewPromptVersions[minIntEval(i, len(claimReviewPromptVersions)-1)]
+		}
+		appendVariant(rt)
+	}
+	return variants
+}
+
+func maxInt(first int, rest ...int) int {
+	best := first
+	for _, item := range rest {
+		if item > best {
+			best = item
+		}
+	}
+	return best
+}
+
+func minIntEval(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }
 
 func newEvalCorrectionsCommand() *cobra.Command {
@@ -211,6 +447,8 @@ func newEvalRetrievalCommand() *cobra.Command {
 	var limit int
 	var format string
 	var modes []string
+	var policyFile string
+	var failOnAlerts bool
 	var rebuildIndex bool
 	var canonicalOnly bool
 	var save bool
@@ -220,8 +458,31 @@ func newEvalRetrievalCommand() *cobra.Command {
 		Use:   "retrieval",
 		Short: "Evaluate lexical, semantic, and blended retrieval against a curated query suite",
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			policy := retrievaleval.Policy{}
+			if strings.TrimSpace(policyFile) != "" {
+				loadedPolicy, err := retrievaleval.LoadPolicy(policyFile)
+				if err != nil {
+					return fmt.Errorf("load policy file: %w", err)
+				}
+				policy = loadedPolicy
+			}
 			if strings.TrimSpace(suiteRef) == "" {
-				return fmt.Errorf("--suite is required")
+				suiteRef = strings.TrimSpace(policy.Suite)
+			}
+			if !cmd.Flags().Changed("limit") && policy.Limit > 0 {
+				limit = policy.Limit
+			}
+			if !cmd.Flags().Changed("format") && strings.TrimSpace(policy.Format) != "" {
+				format = strings.TrimSpace(policy.Format)
+			}
+			if !cmd.Flags().Changed("mode") && len(policy.Modes) > 0 {
+				modes = append([]string(nil), policy.Modes...)
+			}
+			if !cmd.Flags().Changed("fail-on-alerts") && policy.FailOnAlerts {
+				failOnAlerts = true
+			}
+			if strings.TrimSpace(suiteRef) == "" {
+				return fmt.Errorf("--suite is required (or provide it via --policy-file)")
 			}
 			selectedModes := normalizeEvalModes(modes)
 			requiresVault := evalModesRequireVault(selectedModes)
@@ -246,6 +507,7 @@ func newEvalRetrievalCommand() *cobra.Command {
 			var repo *repoindex.Store
 			var semanticProvider semantic.EmbeddingProvider
 			var workspaceStore *contextplane.WorkspaceStore
+			var acaMemStore storage.MemoryStore
 			var cochangeMemStore storage.MemoryStore
 			var cochangeProvider semantic.EmbeddingProvider
 			if hasMode(selectedModes, "cochange_artifacts") {
@@ -266,6 +528,12 @@ func newEvalRetrievalCommand() *cobra.Command {
 				}
 			}
 			if requiresVault {
+				memStore, err := memorystore.OpenWithConfig(ctx, cfg)
+				if err != nil {
+					return err
+				}
+				acaMemStore = memStore
+				defer acaMemStore.Close()
 				index, err = obsidianindex.Open(ctx, cfg.Storage.Root, vaultPath)
 				if err != nil {
 					return err
@@ -332,105 +600,110 @@ func newEvalRetrievalCommand() *cobra.Command {
 					paths, err := runSemanticSearchEvalMode(ctx, target, vaultPath, q.Query, limit, []string{"symbols", "sessions", "memories", "tasks", "codemaps", "context"})
 					qr.Modes["skill_default_plus_context"] = retrievaleval.EvaluateMode("skill_default_plus_context", paths, q.ExpectedAnyOf, len(paths), err)
 				}
+				baseACAOpts := workspaceStore.CurrentRetrievalOptions()
 				if hasMode(selectedModes, "aca_control_only") {
-					paths, err := runACAEvalMode(ctx, workspaceStore, index, repo, semanticProvider, q.Query, limit, contextplane.RetrievalOptions{
-						IncludeTopOfMindResult:  true,
-						IncludeLatestHandoff:    true,
-						IncludeVaultHits:        false,
-						UseRelevantRefBoost:     false,
-						UseHandoffRefBoost:      false,
-						UseCodeHints:            false,
-						UseSemanticVaultSearch:  false,
-						IncludeControlPlaneRefs: true,
-					})
+					opts := baseACAOpts
+					opts.IncludeTopOfMindResult = true
+					opts.IncludeLatestHandoff = true
+					opts.IncludeVaultHits = false
+					opts.UseRelevantRefBoost = false
+					opts.UseHandoffRefBoost = false
+					opts.UseCodeHints = false
+					opts.UseSemanticVaultSearch = false
+					opts.IncludeControlPlaneRefs = true
+					paths, err := runACAEvalMode(ctx, workspaceStore, index, repo, semanticProvider, acaMemStore, q.Query, limit, opts)
 					qr.Modes["aca_control_only"] = retrievaleval.EvaluateMode("aca_control_only", paths, q.ExpectedAnyOf, len(paths), err)
 				}
 				if hasMode(selectedModes, "aca_vault_only") {
-					paths, err := runACAEvalMode(ctx, workspaceStore, index, repo, semanticProvider, q.Query, limit, contextplane.RetrievalOptions{
-						IncludeTopOfMindResult:  false,
-						IncludeLatestHandoff:    false,
-						IncludeVaultHits:        true,
-						UseRelevantRefBoost:     false,
-						UseHandoffRefBoost:      false,
-						UseCodeHints:            false,
-						UseSemanticVaultSearch:  true,
-						IncludeControlPlaneRefs: false,
-					})
+					opts := baseACAOpts
+					opts.IncludeTopOfMindResult = false
+					opts.IncludeLatestHandoff = false
+					opts.IncludeVaultHits = true
+					opts.UseRelevantRefBoost = false
+					opts.UseHandoffRefBoost = false
+					opts.UseCodeHints = false
+					opts.UseSemanticVaultSearch = true
+					opts.IncludeControlPlaneRefs = false
+					paths, err := runACAEvalMode(ctx, workspaceStore, index, repo, semanticProvider, acaMemStore, q.Query, limit, opts)
 					qr.Modes["aca_vault_only"] = retrievaleval.EvaluateMode("aca_vault_only", paths, q.ExpectedAnyOf, len(paths), err)
 				}
 				if hasMode(selectedModes, "aca_repo_hints") {
-					paths, err := runACAEvalMode(ctx, workspaceStore, index, repo, semanticProvider, q.Query, limit, contextplane.RetrievalOptions{
-						IncludeTopOfMindResult:  false,
-						IncludeLatestHandoff:    false,
-						IncludeVaultHits:        true,
-						UseRelevantRefBoost:     false,
-						UseHandoffRefBoost:      false,
-						UseCodeHints:            true,
-						UseSemanticVaultSearch:  true,
-						IncludeControlPlaneRefs: false,
-					})
+					opts := baseACAOpts
+					opts.IncludeTopOfMindResult = false
+					opts.IncludeLatestHandoff = false
+					opts.IncludeVaultHits = true
+					opts.UseRelevantRefBoost = false
+					opts.UseHandoffRefBoost = false
+					opts.UseCodeHints = true
+					opts.UseSemanticVaultSearch = true
+					opts.IncludeControlPlaneRefs = false
+					paths, err := runACAEvalMode(ctx, workspaceStore, index, repo, semanticProvider, acaMemStore, q.Query, limit, opts)
 					qr.Modes["aca_repo_hints"] = retrievaleval.EvaluateMode("aca_repo_hints", paths, q.ExpectedAnyOf, len(paths), err)
 				}
 				if hasMode(selectedModes, "aca_canonical_only") {
-					paths, err := runACAEvalMode(ctx, workspaceStore, index, repo, semanticProvider, q.Query, limit, contextplane.RetrievalOptions{
-						IncludeTopOfMindResult:  false,
-						IncludeLatestHandoff:    false,
-						IncludeVaultHits:        true,
-						UseRelevantRefBoost:     false,
-						UseHandoffRefBoost:      false,
-						UseCodeHints:            true,
-						UseSemanticVaultSearch:  true,
-						AllowedTrusts:           []string{"canonical", "reviewed"},
-						IncludeControlPlaneRefs: false,
-					})
+					opts := baseACAOpts
+					opts.IncludeTopOfMindResult = false
+					opts.IncludeLatestHandoff = false
+					opts.IncludeVaultHits = true
+					opts.UseRelevantRefBoost = false
+					opts.UseHandoffRefBoost = false
+					opts.UseCodeHints = true
+					opts.UseSemanticVaultSearch = true
+					opts.AllowedTrusts = []string{"canonical", "reviewed"}
+					opts.IncludeControlPlaneRefs = false
+					paths, err := runACAEvalMode(ctx, workspaceStore, index, repo, semanticProvider, acaMemStore, q.Query, limit, opts)
 					qr.Modes["aca_canonical_only"] = retrievaleval.EvaluateMode("aca_canonical_only", paths, q.ExpectedAnyOf, len(paths), err)
 				}
 				if hasMode(selectedModes, "aca_package_fallback") {
-					paths, err := runACAEvalMode(ctx, workspaceStore, index, repo, semanticProvider, q.Query, limit, contextplane.RetrievalOptions{
-						IncludeTopOfMindResult:  false,
-						IncludeLatestHandoff:    false,
-						IncludeVaultHits:        true,
-						UseRelevantRefBoost:     false,
-						UseHandoffRefBoost:      false,
-						UseCodeHints:            true,
-						UseSemanticVaultSearch:  true,
-						UsePackageNoteFallback:  true,
-						AllowedTrusts:           []string{"canonical", "reviewed"},
-						IncludeControlPlaneRefs: false,
-					})
+					opts := baseACAOpts
+					opts.IncludeTopOfMindResult = false
+					opts.IncludeLatestHandoff = false
+					opts.IncludeVaultHits = true
+					opts.UseRelevantRefBoost = false
+					opts.UseHandoffRefBoost = false
+					opts.UseCodeHints = true
+					opts.UseSemanticVaultSearch = true
+					opts.UsePackageNoteFallback = true
+					opts.AllowedTrusts = []string{"canonical", "reviewed"}
+					opts.IncludeControlPlaneRefs = false
+					paths, err := runACAEvalMode(ctx, workspaceStore, index, repo, semanticProvider, acaMemStore, q.Query, limit, opts)
 					qr.Modes["aca_package_fallback"] = retrievaleval.EvaluateMode("aca_package_fallback", paths, q.ExpectedAnyOf, len(paths), err)
 				}
 				if hasMode(selectedModes, "aca_query_typed") {
-					paths, err := runACAEvalMode(ctx, workspaceStore, index, repo, semanticProvider, q.Query, limit, contextplane.RetrievalOptions{
-						IncludeTopOfMindResult:  false,
-						IncludeLatestHandoff:    false,
-						IncludeVaultHits:        true,
-						UseRelevantRefBoost:     false,
-						UseHandoffRefBoost:      false,
-						UseCodeHints:            true,
-						UseSemanticVaultSearch:  true,
-						AllowedTrusts:           []string{"canonical", "reviewed"},
-						UseQueryTypeBias:        true,
-						IncludeControlPlaneRefs: false,
-					})
+					opts := baseACAOpts
+					opts.IncludeTopOfMindResult = false
+					opts.IncludeLatestHandoff = false
+					opts.IncludeVaultHits = true
+					opts.UseRelevantRefBoost = false
+					opts.UseHandoffRefBoost = false
+					opts.UseCodeHints = true
+					opts.UseSemanticVaultSearch = true
+					opts.AllowedTrusts = []string{"canonical", "reviewed"}
+					opts.UseQueryTypeBias = true
+					opts.IncludeControlPlaneRefs = false
+					paths, err := runACAEvalMode(ctx, workspaceStore, index, repo, semanticProvider, acaMemStore, q.Query, limit, opts)
 					qr.Modes["aca_query_typed"] = retrievaleval.EvaluateMode("aca_query_typed", paths, q.ExpectedAnyOf, len(paths), err)
 				}
 				if hasMode(selectedModes, "aca_default") {
-					paths, err := runACAEvalMode(ctx, workspaceStore, index, repo, semanticProvider, q.Query, limit, acaDefaultEvalOptions())
+					opts := baseACAOpts
+					opts.IncludeControlPlaneRefs = false
+					paths, err := runACAEvalMode(ctx, workspaceStore, index, repo, semanticProvider, acaMemStore, q.Query, limit, opts)
 					qr.Modes["aca_default"] = retrievaleval.EvaluateMode("aca_default", paths, q.ExpectedAnyOf, len(paths), err)
 				}
 				if hasMode(selectedModes, "aca_cochange") {
-					opts := acaDefaultEvalOptions()
+					opts := baseACAOpts
+					opts.IncludeControlPlaneRefs = false
 					opts.UseCoChangePrior = true
 					opts.UseContinuityBundles = false
-					paths, err := runACAEvalMode(ctx, workspaceStore, index, repo, semanticProvider, q.Query, limit, opts)
+					paths, err := runACAEvalMode(ctx, workspaceStore, index, repo, semanticProvider, acaMemStore, q.Query, limit, opts)
 					qr.Modes["aca_cochange"] = retrievaleval.EvaluateMode("aca_cochange", paths, q.ExpectedAnyOf, len(paths), err)
 				}
 				if hasMode(selectedModes, "aca_cochange_continuity") {
-					opts := acaDefaultEvalOptions()
+					opts := baseACAOpts
+					opts.IncludeControlPlaneRefs = false
 					opts.UseCoChangePrior = true
 					opts.UseContinuityBundles = true
-					paths, err := runACAEvalMode(ctx, workspaceStore, index, repo, semanticProvider, q.Query, limit, opts)
+					paths, err := runACAEvalMode(ctx, workspaceStore, index, repo, semanticProvider, acaMemStore, q.Query, limit, opts)
 					qr.Modes["aca_cochange_continuity"] = retrievaleval.EvaluateMode("aca_cochange_continuity", paths, q.ExpectedAnyOf, len(paths), err)
 				}
 				if hasMode(selectedModes, "cochange_artifacts") {
@@ -468,11 +741,20 @@ func newEvalRetrievalCommand() *cobra.Command {
 				Summaries:   retrievaleval.Summarize(results, selectedModes),
 				GeneratedAt: time.Now().UTC(),
 			}
+			policy.Suite = suite.Name
+			policy.Limit = limit
+			policy.Format = format
+			policy.Modes = append([]string(nil), selectedModes...)
+			policy.FailOnAlerts = failOnAlerts
+			alerts := retrievaleval.BuildAlerts(runResult.Summaries, policy)
 			data := map[string]any{
-				"suite_path": suitePath,
-				"result":     runResult,
+				"suite_path":  suitePath,
+				"policy_file": strings.TrimSpace(policyFile),
+				"policy":      policy,
+				"alerts":      alerts,
+				"result":      runResult,
 			}
-			markdown := retrievaleval.RenderMarkdown(runResult)
+			markdown := renderRetrievalEvalMarkdown(runResult, policy, alerts, strings.TrimSpace(policyFile))
 			if strings.EqualFold(format, "markdown") {
 				data["markdown"] = markdown
 			}
@@ -486,6 +768,13 @@ func newEvalRetrievalCommand() *cobra.Command {
 					"markdown_path": markdownPath,
 				}
 			}
+			if failOnAlerts && len(alerts) > 0 {
+				messages := make([]string, 0, len(alerts))
+				for _, alert := range alerts {
+					messages = append(messages, alert.Message)
+				}
+				return fmt.Errorf("retrieval alerts: %s", strings.Join(messages, "; "))
+			}
 			return envelope.Write(cmd.OutOrStdout(), envelope.OK("eval/retrieval", data, envelope.WithMeta(envelope.Meta{Source: "cli"})))
 		},
 	}
@@ -496,11 +785,54 @@ func newEvalRetrievalCommand() *cobra.Command {
 	cmd.Flags().IntVar(&limit, "limit", 10, "Maximum hits per retrieval mode")
 	cmd.Flags().StringVar(&format, "format", "markdown", "Output companion format: markdown or json")
 	cmd.Flags().StringSliceVar(&modes, "mode", []string{"baseline", "lexical", "semantic", "blended"}, "Retrieval modes to evaluate (also available: skill_default, skill_context, skill_default_plus_context, aca_control_only, aca_vault_only, aca_repo_hints, aca_canonical_only, aca_package_fallback, aca_query_typed, aca_default, aca_cochange, aca_cochange_continuity, cochange_artifacts, repoindex_search, repoindex_dag, rlm_llm, rlm_llm_codeintel, rlm_llm_code_staged)")
+	cmd.Flags().StringVar(&policyFile, "policy-file", "", "Optional YAML file with retrieval suite defaults and metric thresholds")
+	cmd.Flags().BoolVar(&failOnAlerts, "fail-on-alerts", false, "Exit with an error when any retrieval metric alert is present")
 	cmd.Flags().BoolVar(&rebuildIndex, "rebuild-index", true, "Rebuild the vault index before evaluation")
 	cmd.Flags().BoolVar(&canonicalOnly, "canonical-only", true, "Exclude inbox draft hits from evaluation paths")
 	cmd.Flags().BoolVar(&save, "save", false, "Save JSON and Markdown eval outputs under the workspace exports directory")
 	cmd.Flags().StringVar(&saveDir, "save-dir", "", "Override save directory (default: <workspace>/.agentctl/exports/evals)")
 	return cmd
+}
+
+func renderRetrievalEvalMarkdown(result retrievaleval.RunResult, policy retrievaleval.Policy, alerts []retrievaleval.Alert, policyFile string) string {
+	var b strings.Builder
+	b.WriteString(retrievaleval.RenderMarkdown(result))
+	if strings.TrimSpace(policyFile) != "" || len(policy.Thresholds) > 0 {
+		b.WriteString("\n## Policy\n\n")
+		if strings.TrimSpace(policyFile) != "" {
+			b.WriteString(fmt.Sprintf("- Policy file: `%s`\n", strings.TrimSpace(policyFile)))
+		}
+		b.WriteString(fmt.Sprintf("- Fail on alerts: `%t`\n", policy.FailOnAlerts))
+		if len(policy.Thresholds) > 0 {
+			modes := make([]string, 0, len(policy.Thresholds))
+			for mode := range policy.Thresholds {
+				modes = append(modes, mode)
+			}
+			sort.Strings(modes)
+			b.WriteString("- Thresholds:\n")
+			for _, mode := range modes {
+				threshold := policy.Thresholds[mode]
+				parts := make([]string, 0, 3)
+				if threshold.MinHitRateAt5 > 0 {
+					parts = append(parts, fmt.Sprintf("hit@5>=%.2f", threshold.MinHitRateAt5))
+				}
+				if threshold.MinHitRateAt10 > 0 {
+					parts = append(parts, fmt.Sprintf("hit@10>=%.2f", threshold.MinHitRateAt10))
+				}
+				if threshold.MinMeanReciprocalRank > 0 {
+					parts = append(parts, fmt.Sprintf("MRR>=%.2f", threshold.MinMeanReciprocalRank))
+				}
+				b.WriteString(fmt.Sprintf("  - `%s`: %s\n", mode, strings.Join(parts, ", ")))
+			}
+		}
+	}
+	if len(alerts) > 0 {
+		b.WriteString("\n## Alerts\n\n")
+		for _, alert := range alerts {
+			b.WriteString("- " + alert.Message + "\n")
+		}
+	}
+	return b.String()
 }
 
 func resolveEvalSuitePath(ref string) (string, error) {
@@ -545,6 +877,21 @@ func resolveCorrectionSuitePath(ref string) (string, error) {
 		return ref, nil
 	}
 	baseDir := filepath.Join("testdata", "evals", "corrections")
+	if strings.Contains(ref, string(filepath.Separator)) || strings.Contains(ref, "/") || strings.HasSuffix(ref, ".yaml") || strings.HasSuffix(ref, ".yml") {
+		return filepath.Abs(filepath.Clean(ref))
+	}
+	return filepath.Join(baseDir, ref+".yaml"), nil
+}
+
+func resolveTranscriptMemorySuitePath(ref string) (string, error) {
+	ref = strings.TrimSpace(ref)
+	if ref == "" {
+		return "", fmt.Errorf("suite reference required")
+	}
+	if filepath.IsAbs(ref) {
+		return ref, nil
+	}
+	baseDir := filepath.Join("testdata", "evals", "transcriptmemory")
 	if strings.Contains(ref, string(filepath.Separator)) || strings.Contains(ref, "/") || strings.HasSuffix(ref, ".yaml") || strings.HasSuffix(ref, ".yml") {
 		return filepath.Abs(filepath.Clean(ref))
 	}
@@ -675,6 +1022,7 @@ func runACAEvalMode(
 	index obsidianindex.Store,
 	repo *repoindex.Store,
 	semanticProvider semantic.EmbeddingProvider,
+	memStore storage.MemoryStore,
 	query string,
 	limit int,
 	opts contextplane.RetrievalOptions,
@@ -682,7 +1030,7 @@ func runACAEvalMode(
 	if store == nil {
 		return nil, fmt.Errorf("workspace store unavailable")
 	}
-	result, err := store.RetrieveWithOptions(ctx, index, repo, semanticProvider, query, limit, opts)
+	result, err := store.RetrieveWithOptionsAndMemory(ctx, index, repo, semanticProvider, memStore, query, limit, opts)
 	if err != nil {
 		return nil, err
 	}
@@ -711,19 +1059,6 @@ func runCoChangeArtifactEvalMode(ctx context.Context, workspacePath, query strin
 		out = append(out, path)
 	}
 	return out, nil
-}
-
-func acaDefaultEvalOptions() contextplane.RetrievalOptions {
-	opts := contextplane.DefaultRetrievalOptions()
-	opts.IncludeTopOfMindResult = true
-	opts.IncludeLatestHandoff = true
-	opts.IncludeVaultHits = true
-	opts.UseRelevantRefBoost = true
-	opts.UseHandoffRefBoost = true
-	opts.UseCodeHints = true
-	opts.UseSemanticVaultSearch = true
-	opts.IncludeControlPlaneRefs = false
-	return opts
 }
 
 func runRLMEvalMode(ctx context.Context, cfg config.Config, workspacePath, vaultPath, query string, limit int, toolProfile string) ([]string, error) {
@@ -756,6 +1091,7 @@ func runRLMEvalMode(ctx context.Context, cfg config.Config, workspacePath, vault
 
 	var runRecursive func(context.Context, rlm.Task, rlm.Environment) (rlm.Result, error)
 	runRecursive = func(runCtx context.Context, currentTask rlm.Task, currentEnv rlm.Environment) (rlm.Result, error) {
+		currentTask, currentEnv = applyRLMScoutRole(currentTask, currentEnv)
 		currentAdapter := rlmenv.NewReadOnlyAdapter(cfg, currentTask.WorkspaceRoot, strings.TrimSpace(vaultPath), companionDB, currentEnv)
 		currentAdapter.SetSubcall(runRecursive)
 		runner := chooseRLMRunner("llm", currentAdapter, currentTask, currentEnv, "", "", "", "", 0, true, string(rlm.RouteProfileAuto), string(rlm.PlanModeFree))
@@ -802,6 +1138,7 @@ func runRLMStagedEvalMode(ctx context.Context, cfg config.Config, workspacePath,
 
 	var runRecursive func(context.Context, rlm.Task, rlm.Environment) (rlm.Result, error)
 	runRecursive = func(runCtx context.Context, currentTask rlm.Task, currentEnv rlm.Environment) (rlm.Result, error) {
+		currentTask, currentEnv = applyRLMScoutRole(currentTask, currentEnv)
 		currentAdapter := rlmenv.NewReadOnlyAdapter(cfg, currentTask.WorkspaceRoot, strings.TrimSpace(vaultPath), companionDB, currentEnv)
 		currentAdapter.SetSubcall(runRecursive)
 		runner := chooseRLMRunner("llm", currentAdapter, currentTask, currentEnv, "", "", "", "", 0, true, string(rlm.RouteProfileCodeRetrieval), string(rlm.PlanModeStaged))
@@ -923,6 +1260,9 @@ func extractACAResultPaths(result contextplane.RetrievalResult, limit int, opts 
 	if opts.IncludeVaultHits {
 		for _, hit := range result.VaultHits {
 			appendPath(hit.Path)
+			for _, repoPath := range hit.RepoPaths {
+				appendPath(repoPath)
+			}
 		}
 	}
 	if limit > 0 && len(out) > limit {

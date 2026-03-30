@@ -15,6 +15,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/platform/secrets"
 	"github.com/jkatigb/agentctl/internal/platform/timeutil"
 	"github.com/jkatigb/agentctl/internal/protocol"
+	"github.com/jkatigb/agentctl/internal/storage/cas"
 	"github.com/jkatigb/agentctl/internal/storage/trajectory"
 	"github.com/spf13/cobra"
 )
@@ -287,24 +288,6 @@ func newTrajectoryExportCommand() *cobra.Command {
 				return writeTrajectoryExportError(out, "format must be 'ndjson'")
 			}
 
-			if toCAS {
-				return runTrajectoryExportSkill(cmd, cfg, map[string]any{
-					"workspace_id":       absWorkspace,
-					"task_id":            filter.TaskID,
-					"epic_id":            filter.EpicID,
-					"agent_role":         filter.AgentRole,
-					"trace_id":           filter.TraceID,
-					"status":             strings.TrimSpace(status),
-					"since":              strings.TrimSpace(since),
-					"until":              strings.TrimSpace(until),
-					"limit":              filter.Limit,
-					"include_raw_traces": includeRawTraces,
-					"pin":                pin,
-					"dry_run":            dryRun,
-					"cli_command":        cmd.CommandPath(),
-				}, absWorkspace)
-			}
-
 			trajStore, err := trajectory.Open(ctx, cfg.Storage.Root)
 			if err != nil {
 				return writeTrajectoryExportError(out, fmt.Sprintf("open trajectory store: %v", err))
@@ -315,6 +298,10 @@ func newTrajectoryExportCommand() *cobra.Command {
 			}()
 
 			exporter := trajectoryExporter{store: trajStore, includeRawTraces: includeRawTraces}
+
+			if toCAS {
+				return exportTrajectoryEpisodesToCAS(ctx, out, cfg, exporter, filter, absWorkspace, start, pin, dryRun)
+			}
 
 			if dryRun {
 				result, err := runTrajectoryExportDryRun(ctx, exporter, filter)
@@ -389,21 +376,77 @@ func runTrajectoryExportDryRun(ctx context.Context, exporter trajectoryExporter,
 	return data, nil
 }
 
-func runTrajectoryExportSkill(cmd *cobra.Command, cfg config.Config, payload map[string]any, workspaceFlag string) error {
-	_, err := findSkill(cfg, "trajectory/export")
-	if err != nil {
-		return fmt.Errorf("trajectory/export skill not found (run make skills-build or agentctl skills install): %w", err)
+func exportTrajectoryEpisodesToCAS(ctx context.Context, out io.Writer, cfg config.Config, exporter trajectoryExporter, filter trajectory.ListFilter, workspace string, start time.Time, pin, dryRun bool) error {
+	jobID := fmt.Sprintf("trajectory-export-%d", start.UTC().UnixNano())
+	if dryRun {
+		result, err := runTrajectoryExportDryRun(ctx, exporter, filter)
+		if err != nil {
+			return writeTrajectoryExportError(out, err.Error())
+		}
+		result["duration_ms"] = time.Since(start).Milliseconds()
+		return protocol.WriteOK(out, trajectoryExportCommand, result, protocol.WithSource("run"), protocol.WithWorkspace(workspace), protocol.WithJobID(jobID))
 	}
-	input, err := json.Marshal(payload)
+
+	casStore, err := cas.NewStore(cfg.Paths.CAS)
 	if err != nil {
-		return err
+		return writeTrajectoryExportError(out, fmt.Sprintf("open cas store: %v", err))
 	}
-	runCmd := newRunCommand()
-	runCmd.SetContext(cmd.Context())
-	runCmd.SetOut(cmd.OutOrStdout())
-	runCmd.SetErr(cmd.ErrOrStderr())
-	runCmd.SetArgs([]string{"--input", string(input), "--cache", "off", "--workspace", workspaceFlag, "trajectory/export"})
-	return runCmd.Execute()
+	count, digest, err := writeTrajectoryEpisodesToCAS(ctx, exporter, filter, casStore)
+	if err != nil {
+		return writeTrajectoryExportError(out, err.Error())
+	}
+	if pin {
+		if err := casStore.Pin(ctx, digest); err != nil {
+			return writeTrajectoryExportError(out, fmt.Sprintf("pin cas artifact: %v", err))
+		}
+	}
+	data := map[string]any{
+		"summary": map[string]any{
+			"count":  count,
+			"format": "ndjson",
+		},
+		"artifact":    digest,
+		"duration_ms": time.Since(start).Milliseconds(),
+	}
+	return protocol.WriteOK(out, trajectoryExportCommand, data, protocol.WithSource("run"), protocol.WithWorkspace(workspace), protocol.WithJobID(jobID), protocol.WithCASDigest(digest))
+}
+
+func writeTrajectoryEpisodesToCAS(ctx context.Context, exporter trajectoryExporter, filter trajectory.ListFilter, store interface {
+	Put(ctx context.Context, r io.Reader, kind string, tags []string) (cas.Object, error)
+},
+) (int, string, error) {
+	pr, pw := io.Pipe()
+	type result struct {
+		count int
+		err   error
+	}
+	resCh := make(chan result, 1)
+
+	go func() {
+		enc := json.NewEncoder(pw)
+		enc.SetEscapeHTML(false)
+		count, err := exporter.forEachEpisode(ctx, filter, func(ep trajectoryEpisode) error {
+			return enc.Encode(ep)
+		})
+		if err != nil {
+			_ = pw.CloseWithError(err)
+			resCh <- result{count: count, err: err}
+			return
+		}
+		_ = pw.Close()
+		resCh <- result{count: count, err: nil}
+	}()
+
+	obj, err := store.Put(ctx, pr, "application/x-ndjson", []string{"trajectory.export"})
+	_ = pr.Close()
+	res := <-resCh
+	if err != nil {
+		return res.count, "", err
+	}
+	if res.err != nil {
+		return res.count, "", res.err
+	}
+	return res.count, obj.Digest, nil
 }
 
 func streamEpisodesInline(ctx context.Context, out io.Writer, exporter trajectoryExporter, filter trajectory.ListFilter, workspace string, start time.Time) error {

@@ -1516,6 +1516,11 @@ export async function getConsoleMessages(sessionId: string): Promise<{
 export interface ProviderAvailability {
   id: string;
   available: boolean;
+  configured?: boolean;
+  reachable?: boolean;
+  message?: string;
+  base_url?: string;
+  models?: { id: string; name: string }[];
 }
 
 export interface ProvidersResponse {
@@ -1604,6 +1609,16 @@ export interface CompanionChatResponse {
   tool_calls?: ToolCallDetail[];
   injected_contexts?: InjectedContextDetail[];
   presence?: PresenceBundle;
+  error?: string;
+  continuity?: {
+    source?: string;
+    visible_summary?: string;
+    memory_query?: string;
+    subcall_prompt?: string;
+    layer_hits?: string[];
+    subcall_count?: number;
+    artifact_refs?: string[];
+  };
 }
 
 /**

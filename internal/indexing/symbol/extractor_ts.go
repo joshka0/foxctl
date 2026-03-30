@@ -24,7 +24,14 @@ func (e *TypeScriptExtractor) SupportedLanguages() []string {
 }
 
 // Extract parses TypeScript source and returns top-level symbols.
-func (e *TypeScriptExtractor) Extract(_ context.Context, filePath string, content []byte) ([]Symbol, error) {
+func (e *TypeScriptExtractor) Extract(ctx context.Context, filePath string, content []byte) ([]Symbol, error) {
+	if symbols, ok, err := extractTypeScriptSymbolsWithTreeSitter(ctx, filePath, content); ok || err != nil {
+		return symbols, err
+	}
+	return e.extractHeuristic(filePath, content)
+}
+
+func (e *TypeScriptExtractor) extractHeuristic(filePath string, content []byte) ([]Symbol, error) {
 	lines := strings.Split(string(content), "\n")
 	lineOffsets := computeLineOffsets(lines)
 	lang := "typescript"
@@ -42,7 +49,7 @@ func (e *TypeScriptExtractor) Extract(_ context.Context, filePath string, conten
 
 		startLine := i + 1
 		endLine := startLine
-		if kind == KindFunction || kind == KindClass || kind == KindInterface || kind == KindType {
+		if kind == KindFunction || kind == KindClass || kind == KindInterface || kind == KindType || tsVariableLooksCallable(lines, i, kind) {
 			braceLine := i
 			if !strings.Contains(line, "{") {
 				braceLine = findTSBraceLine(lines, i)
@@ -94,7 +101,10 @@ func (e *TypeScriptExtractor) Extract(_ context.Context, filePath string, conten
 
 // ExtractCalls extracts best-effort call identifiers from a symbol body.
 // This is heuristic and intentionally conservative (no type-checking).
-func (e *TypeScriptExtractor) ExtractCalls(_ context.Context, symbol Symbol, content []byte) ([]string, error) {
+func (e *TypeScriptExtractor) ExtractCalls(ctx context.Context, symbol Symbol, content []byte) ([]string, error) {
+	if calls, ok, err := extractTypeScriptCallsWithTreeSitter(ctx, symbol, content); ok || err != nil {
+		return calls, err
+	}
 	if symbol.StartByte < 0 || symbol.EndByte > len(content) || symbol.StartByte >= symbol.EndByte {
 		return nil, nil
 	}
@@ -178,6 +188,21 @@ func extractName(input string) string {
 	input = strings.TrimSpace(input)
 	match := identPattern.FindString(input)
 	return match
+}
+
+func tsVariableLooksCallable(lines []string, declIdx int, kind Kind) bool {
+	if declIdx < 0 || declIdx >= len(lines) {
+		return false
+	}
+	if kind != KindConstant && kind != KindVariable {
+		return false
+	}
+	windowEnd := declIdx + 5
+	if windowEnd > len(lines) {
+		windowEnd = len(lines)
+	}
+	window := strings.Join(lines[declIdx:windowEnd], "\n")
+	return strings.Contains(window, "=>") || strings.Contains(window, "function(") || strings.Contains(window, "function ")
 }
 
 func extractTSLeadingDoc(lines []string, declIdx int) string {

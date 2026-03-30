@@ -47,6 +47,43 @@ That returns:
 - `data.summary`
 - `data.artifact`
 
+### Repo-family transcript summary
+
+Use this when you want a repo-family or lane-specific transcript-history view
+rather than one active task:
+
+```bash
+agentctl context family-history-summary --workspace .
+```
+
+Useful filters:
+
+```bash
+agentctl context family-history-summary --workspace . \
+  --focus-query "recursive memory second-pass consolidation"
+
+agentctl context family-history-summary --workspace . \
+  --date-from 2026-03-25 \
+  --date-to 2026-03-25
+```
+
+This surface:
+
+- summarizes persisted transcript-history records across the repo family
+- can bias toward one coherent lane with `--focus-query`
+- can bound selection by transcript/session date with `--date-from` / `--date-to`
+- returns `support_metadata` so callers can inspect:
+  - `owner_count`
+  - `latest_updated_at`
+  - `latest_age_days`
+  - `source_owners`
+
+Precondition:
+
+- transcript history must have been persisted first through:
+  - `agentctl sessions derive-memory --memory-lane insight --persist-history`
+  - or `agentctl sessions derive-memory-group --memory-lane insight --persist-history`
+
 ## Hook Wrapper
 
 Use the thin shell wrapper when a hook needs prompt-ready JSON:
@@ -98,6 +135,18 @@ Jido-backed agents get task continuity in three places:
 Runtime-state refresh depends on `workspace_root` being present in the Jido
 agent state. When available, the inspection path recomputes `task_continuity`
 instead of relying only on the original spawn-time snapshot.
+
+## Family-history notes
+
+`family-history-summary` is deterministic first and model-assisted second, the
+same as task continuity:
+
+- owner selection happens before summarization
+- transcript-time windows apply before owner selection
+- summary modes may be:
+  - `deterministic`
+  - `llm`
+  - `llm_cleanup`
 
 ## Related Docs
 

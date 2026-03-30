@@ -233,12 +233,121 @@ func DefaultTools() []rlm.Tool {
 			ReadOnly: true,
 		},
 		{
+			Name:        "memory_ensemble_retrieve",
+			Description: "Run one bounded memory scout ensemble over the current environment using focused scout roles.",
+			Parameters: objectSchema(map[string]any{
+				"query": map[string]any{
+					"type":        "string",
+					"description": "The memory question or retrieval objective.",
+				},
+				"lanes": map[string]any{
+					"type":        "array",
+					"description": "Optional lane hints: facts, timeline, aca.",
+					"items":       map[string]any{"type": "string"},
+				},
+				"max_scouts": map[string]any{
+					"type":        "integer",
+					"description": "Maximum number of scout subcalls to run.",
+				},
+				"max_iterations_per_scout": map[string]any{
+					"type":        "integer",
+					"description": "Maximum iteration budget per scout subcall.",
+				},
+				"max_subcalls_per_scout": map[string]any{
+					"type":        "integer",
+					"description": "Maximum subcall budget per scout subcall.",
+				},
+				"limit_per_lane": map[string]any{
+					"type":        "integer",
+					"description": "Optional result limit hint carried into scout prompts.",
+				},
+			}, "query"),
+			ReadOnly: true,
+		},
+		{
+			Name:        "code_search_ensemble",
+			Description: "Run a staged code-search ensemble that finds candidate files, grounds them with repo evidence, and returns a compact evidence pack.",
+			Parameters: objectSchema(map[string]any{
+				"query": map[string]any{
+					"type":        "string",
+					"description": "The code-search question or retrieval objective.",
+				},
+				"task_type": map[string]any{
+					"type":        "string",
+					"description": "Optional task type: file_locate, execution_trace, symbol_inspect, change_impact, or registration_trace. Defaults to file_locate when omitted.",
+				},
+				"candidate_paths": map[string]any{
+					"type":        "array",
+					"description": "Optional repo-relative candidate files to treat as already known.",
+					"items":       map[string]any{"type": "string"},
+				},
+				"constraints": map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"exclude_paths": map[string]any{
+							"type":        "array",
+							"description": "Optional repo-relative glob-style exclusions.",
+							"items":       map[string]any{"type": "string"},
+						},
+						"include_history": map[string]any{
+							"type":        "boolean",
+							"description": "Reserved for later historical augmentation. Ignored in the first slice.",
+						},
+						"include_aca": map[string]any{
+							"type":        "boolean",
+							"description": "Reserved for later ACA augmentation. Ignored in the first slice.",
+						},
+						"require_grounding": map[string]any{
+							"type":        "boolean",
+							"description": "Whether the ensemble should require at least one grounded file/snippet before returning a confident answer. Defaults to true.",
+						},
+					},
+					"additionalProperties": false,
+				},
+				"budget": map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"max_steps": map[string]any{
+							"type":        "integer",
+							"description": "Reserved step budget placeholder for later staged planning.",
+						},
+						"max_candidates": map[string]any{
+							"type":        "integer",
+							"description": "Maximum candidate files to keep during candidate generation.",
+						},
+						"max_files": map[string]any{
+							"type":        "integer",
+							"description": "Maximum grounded files to return.",
+						},
+						"max_snippets": map[string]any{
+							"type":        "integer",
+							"description": "Maximum snippets to return.",
+						},
+						"max_tokens_out": map[string]any{
+							"type":        "integer",
+							"description": "Reserved output-budget placeholder for later compaction policies.",
+						},
+						"allow_scouts": map[string]any{
+							"type":        "boolean",
+							"description": "Reserved for later scout escalation. Ignored in the first slice.",
+						},
+					},
+					"additionalProperties": false,
+				},
+			}, "query"),
+			ReadOnly: true,
+		},
+		{
 			Name:        "subcall",
 			Description: "Issue one bounded recursive subcall over selected repo, vault, scene, or artifact handles.",
 			Parameters: objectSchema(map[string]any{
 				"prompt": map[string]any{
 					"type":        "string",
 					"description": "Focused child prompt for the recursive subcall.",
+				},
+				"role": map[string]any{
+					"type":        "string",
+					"description": "Optional specialized child scout role such as memory_fact_scout, memory_timeline_scout, or aca_context_scout.",
 				},
 				"repo_handles": map[string]any{
 					"type":        "array",

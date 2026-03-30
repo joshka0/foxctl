@@ -9,6 +9,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/domain/envelope"
 	"github.com/jkatigb/agentctl/internal/indexing/repoindex"
 	"github.com/jkatigb/agentctl/internal/platform/workspace"
+	memorystore "github.com/jkatigb/agentctl/internal/storage/memory"
 	"github.com/jkatigb/agentctl/internal/storage/obsidianindex"
 	taskstore "github.com/jkatigb/agentctl/internal/storage/tasks"
 	"github.com/spf13/cobra"
@@ -32,7 +33,9 @@ func newContextCommand() *cobra.Command {
 		newContextSemanticSearchInspectSuiteCommand(),
 		newContextTaskHistoryCommand(),
 		newContextTaskHistorySummaryCommand(),
+		newContextFamilyHistorySummaryCommand(),
 		newContextCoChangeCommand(),
+		newContextMotifsCommand(),
 		newContextNextCommand(),
 		newContextNextProposalMergeCommand(),
 		newContextDispatchCommand(),
@@ -130,12 +133,17 @@ func newContextRetrieveCommand() *cobra.Command {
 				return err
 			}
 			defer func() { _ = index.Close() }()
+			memStore, err := memorystore.OpenWithConfig(ctx, cfg)
+			if err != nil {
+				return err
+			}
+			defer func() { _ = memStore.Close() }()
 			repo, err := repoindex.Open(ctx, cfg.Storage.Root, target)
 			if err != nil {
 				return err
 			}
 			defer func() { _ = repo.Close() }()
-			result, err := store.Retrieve(ctx, index, repo, openObsidianSemanticProvider(cfg), query, limit)
+			result, err := store.RetrieveWithOptionsAndMemory(ctx, index, repo, openObsidianSemanticProvider(cfg), memStore, query, limit, store.CurrentRetrievalOptions())
 			if err != nil {
 				return err
 			}

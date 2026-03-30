@@ -29,6 +29,9 @@ func TestBuildPlanStagedCodeRetrieval(t *testing.T) {
 	if plan.Phases[0].Name != "discovery" {
 		t.Fatalf("phase0=%s", plan.Phases[0].Name)
 	}
+	if !reflect.DeepEqual(plan.Phases[0].RequireOneOf, []string{"code_search_ensemble"}) {
+		t.Fatalf("discovery require_one_of=%v", plan.Phases[0].RequireOneOf)
+	}
 	if !reflect.DeepEqual(plan.Phases[1].RequireOneOf, []string{"load_file", "read_note"}) {
 		t.Fatalf("inspection require_one_of=%v", plan.Phases[1].RequireOneOf)
 	}

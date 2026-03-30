@@ -1,0 +1,128 @@
+apiVersion: agentctl/v1
+kind: Skill
+metadata:
+  name: code/refactor_scout
+  version: 0.1.0
+  description: "Structural refactoring scout using signatures, call extraction, and Go AST metrics"
+  tags: ["code", "refactor", "quality", "structure", "treesitter"]
+distribution:
+  type: exec
+  exec:
+    entry: skills/code_refactor_scout/code_refactor_scout
+io:
+  format: JSON
+  inline_output_kb: 32
+signature:
+  command: code/refactor_scout
+  parameters:
+    - name: path
+      type: string
+      required: false
+      description: "File or directory to analyze (default .)"
+    - name: language
+      type: string
+      required: false
+      enum: ["auto", "go", "python", "javascript", "typescript", "elixir"]
+      default: "auto"
+      description: "Restrict analysis to one language or auto-detect by extension"
+    - name: include_tests
+      type: boolean
+      required: false
+      default: false
+      description: "Include test files in analysis"
+    - name: max_results
+      type: integer
+      required: false
+      default: 100
+      description: "Maximum number of findings to return"
+    - name: min_score
+      type: integer
+      required: false
+      default: 50
+      description: "Minimum finding score (0-100)"
+    - name: rule_set
+      type: string
+      required: false
+      enum: ["conservative", "default", "aggressive"]
+      default: "default"
+      description: "Sensitivity profile for thresholds"
+  returns:
+    - name: findings
+      type: array
+      description: "Ranked refactoring findings"
+    - name: summary
+      type: object
+      description: "Scan counters and severity totals"
+    - name: signals
+      type: object
+      description: "Signal families used during the scan"
+  help:
+    short: "Surface structural refactoring hotspots from signatures and AST signals."
+    long: |
+      code/refactor_scout is a read-only analysis skill that ranks likely
+      refactoring hotspots.
+
+      Current signal sources:
+      - Symbol signatures and spans from the existing symbol extractors
+      - Per-symbol call extraction across Go, TypeScript, Python, and Elixir
+      - Tree-sitter-backed extraction for TypeScript, Python, and Elixir when available
+      - Go AST metrics for stronger function and interface findings
+
+      Language scope is intentionally strict:
+      - File targets may use language=auto
+      - Directory targets must resolve to exactly one language in auto mode
+      - Mixed-language directories require an explicit --language selection
+
+      Current rule families:
+      - long_parameter_list
+      - boolean_parameter
+      - wide_return_tuple
+      - oversized_function
+      - high_cyclomatic_complexity
+      - deep_nesting
+      - fan_out_dependency_spread
+      - duplicate_orchestration_fingerprint
+      - structural_similarity_cluster
+      - structural_similarity_module_cluster
+      - call_family_cluster
+      - call_family_module_cluster
+      - same_file_extraction_candidate
+      - wide_interface
+      - receiver_hotspot
+      - god_file
+
+      The scout is still local and deterministic. It uses extractor-level call
+      relationships rather than repoindex fan-in/fan-out, so current dependency
+      spread signals are strongest in Go and best-effort in TypeScript, Python,
+      and Elixir. Go duplicate-orchestration findings now use deterministic
+      structural similarity rather than exact fingerprint equality, and cluster
+      findings are classified into seam types such as workflow abstractions and
+      thin wrapper API layers from structural metrics.
+
+      Example commands:
+        agentctl run code/refactor_scout --input '{"path":"./internal","rule_set":"default"}'
+        agentctl run code/refactor_scout --input '{"path":"./internal/indexing","language":"go","min_score":60}'
+        agentctl skills run code/refactor_scout --path ./internal --rule_set aggressive
+    workflows:
+      - id: go-hotspots
+        description: "Find likely Go refactor hotspots with AST-backed scoring"
+        example_input:
+          path: "./internal"
+          language: "go"
+          rule_set: "default"
+      - id: mixed-signature-scan
+        description: "Run a signature-first scan across supported languages"
+        example_input:
+          path: "."
+          language: "auto"
+          min_score: 55
+capabilities:
+  network: "none"
+  filesystem:
+    - type: workdir
+  pure: true
+openapi:
+  enabled: true
+  methods:
+    GET: "true"
+    POST: "true"
