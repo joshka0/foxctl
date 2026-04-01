@@ -17,7 +17,9 @@ import (
 	"github.com/jkatigb/agentctl/internal/platform/buildinfo"
 	"github.com/jkatigb/agentctl/internal/platform/config"
 	"github.com/jkatigb/agentctl/internal/protocol"
+	refchanges "github.com/jkatigb/agentctl/internal/refactor/changes"
 	refdeps "github.com/jkatigb/agentctl/internal/refactor/deps"
+	refhot "github.com/jkatigb/agentctl/internal/refactor/hot"
 	refscope "github.com/jkatigb/agentctl/internal/refactor/scope"
 	refsnapshot "github.com/jkatigb/agentctl/internal/refactor/snapshot"
 	refsnapshotstore "github.com/jkatigb/agentctl/internal/refactor/snapshotstore"
@@ -40,6 +42,8 @@ func newRefactorCommand() *cobra.Command {
 		newRefactorStatusCommand(),
 		newRefactorSnapshotCommand(),
 		newRefactorDepsCommand(),
+		newRefactorChangesCommand(),
+		newRefactorHotCommand(),
 		newRefactorScoutCommand(),
 		newRefactorAdvisorCommand(),
 	)
@@ -127,6 +131,62 @@ func newRefactorDepsCommand() *cobra.Command {
 	cmd.Flags().IntVar(&depth, "depth", 1, "Traversal depth")
 	cmd.Flags().IntVar(&budget, "budget", 50, "Maximum nodes to retain in the traversal")
 	cmd.Flags().IntVar(&perNodeCap, "per-node-cap", 50, "Maximum edges to follow per frontier node")
+	return cmd
+}
+
+func newRefactorChangesCommand() *cobra.Command {
+	var (
+		path         string
+		workspace    string
+		language     string
+		includeTests bool
+		since        string
+		maxFiles     int
+		maxSymbols   int
+	)
+
+	cmd := &cobra.Command{
+		Use:   "changes",
+		Short: "Show changed files and symbols since a git ref or refactor snapshot",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			return runRefactorChanges(cmd, workspace, path, language, includeTests, since, maxFiles, maxSymbols)
+		},
+	}
+	cmd.Flags().StringVar(&path, "path", ".", "File or directory scope used for the change comparison")
+	cmd.Flags().StringVar(&workspace, "workspace", ".", "Workspace root override")
+	cmd.Flags().StringVar(&language, "language", "auto", "Single language to analyze (auto|go|python|javascript|typescript|elixir)")
+	cmd.Flags().BoolVar(&includeTests, "include-tests", false, "Include test files")
+	cmd.Flags().StringVar(&since, "since", "", "Git ref or refactor snapshot id (refsnap-...) to compare against")
+	cmd.Flags().IntVar(&maxFiles, "max-files", 200, "Maximum changed files to return inline")
+	cmd.Flags().IntVar(&maxSymbols, "max-symbols", 200, "Maximum changed symbols to return inline")
+	return cmd
+}
+
+func newRefactorHotCommand() *cobra.Command {
+	var (
+		path         string
+		workspace    string
+		language     string
+		includeTests bool
+		since        string
+		maxResults   int
+		halfLifeDays int
+	)
+
+	cmd := &cobra.Command{
+		Use:   "hot",
+		Short: "Rank recently hot files in a scoped path from git churn",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			return runRefactorHot(cmd, workspace, path, language, includeTests, since, maxResults, halfLifeDays)
+		},
+	}
+	cmd.Flags().StringVar(&path, "path", ".", "File or directory scope used for the hot ranking")
+	cmd.Flags().StringVar(&workspace, "workspace", ".", "Workspace root override")
+	cmd.Flags().StringVar(&language, "language", "auto", "Single language to analyze (auto|go|python|javascript|typescript|elixir)")
+	cmd.Flags().BoolVar(&includeTests, "include-tests", false, "Include test files")
+	cmd.Flags().StringVar(&since, "since", "HEAD~20", "Git ref or refactor snapshot id (refsnap-...) used as the hot baseline")
+	cmd.Flags().IntVar(&maxResults, "max-results", 20, "Maximum hot files to return")
+	cmd.Flags().IntVar(&halfLifeDays, "half-life-days", 90, "Recency half-life in days for hot-file weighting")
 	return cmd
 }
 
@@ -453,6 +513,106 @@ func runRefactorDeps(cmd *cobra.Command, workspace, path, language string, inclu
 		"anchors":         result.Anchors,
 	}
 	env := protocol.OK("refactor.deps", data, protocol.WithSource("cli"), protocol.WithWorkspace(scope.Workspace))
+	return protocol.Write(cmd.OutOrStdout(), env)
+}
+
+func runRefactorChanges(cmd *cobra.Command, workspace, path, language string, includeTests bool, since string, maxFiles, maxSymbols int) error {
+	ctx := cmd.Context()
+
+	cfg, err := loadConfig(ctx)
+	if err != nil {
+		return fmt.Errorf("load config: %w", err)
+	}
+
+	scope, err := refscope.Resolve(refscope.Input{
+		Workspace:    workspace,
+		Path:         path,
+		Language:     language,
+		IncludeTests: includeTests,
+	})
+	if err != nil {
+		return writeRefactorScopeError(cmd, "refactor.changes", workspace, err)
+	}
+
+	status := refstatus.Evaluate(ctx, cfg.Storage.Root, scope)
+	result, err := refchanges.Build(ctx, cfg.Storage.Root, cfg.Paths.CAS, time.Now().UTC(), refchanges.Options{
+		Scope:        scope,
+		IncludeTests: includeTests,
+		Since:        since,
+		MaxFiles:     maxFiles,
+		MaxSymbols:   maxSymbols,
+	})
+	if err != nil {
+		if buildErr, ok := err.(*refchanges.BuildError); ok {
+			env := protocol.Error("refactor.changes", protocol.ErrorCodeEARG, buildErr.Message, protocol.ErrorData{Hint: buildErr.Hint}, protocol.WithSource("cli"), protocol.WithWorkspace(scope.Workspace))
+			if writeErr := protocol.Write(cmd.OutOrStdout(), env); writeErr != nil {
+				return fmt.Errorf("write refactor changes error envelope: %w", writeErr)
+			}
+			return fmt.Errorf("build refactor changes: %w", err)
+		}
+		return fmt.Errorf("build refactor changes: %w", err)
+	}
+
+	data := map[string]any{
+		"scope":      scope,
+		"index_mode": string(status.Mode),
+		"reasons":    status.Reasons,
+		"since":      result.Since,
+		"summary":    result.Summary,
+		"files":      result.Files,
+		"symbols":    result.Symbols,
+	}
+	env := protocol.OK("refactor.changes", data, protocol.WithSource("cli"), protocol.WithWorkspace(scope.Workspace))
+	return protocol.Write(cmd.OutOrStdout(), env)
+}
+
+func runRefactorHot(cmd *cobra.Command, workspace, path, language string, includeTests bool, since string, maxResults, halfLifeDays int) error {
+	ctx := cmd.Context()
+
+	cfg, err := loadConfig(ctx)
+	if err != nil {
+		return fmt.Errorf("load config: %w", err)
+	}
+
+	scope, err := refscope.Resolve(refscope.Input{
+		Workspace:    workspace,
+		Path:         path,
+		Language:     language,
+		IncludeTests: includeTests,
+	})
+	if err != nil {
+		return writeRefactorScopeError(cmd, "refactor.hot", workspace, err)
+	}
+
+	status := refstatus.Evaluate(ctx, cfg.Storage.Root, scope)
+	result, err := refhot.Build(ctx, cfg.Storage.Root, refhot.Options{
+		Scope:        scope,
+		IncludeTests: includeTests,
+		Since:        since,
+		MaxResults:   maxResults,
+		HalfLifeDays: halfLifeDays,
+		Now:          time.Now().UTC(),
+	})
+	if err != nil {
+		if buildErr, ok := err.(*refhot.BuildError); ok {
+			env := protocol.Error("refactor.hot", protocol.ErrorCodeEARG, buildErr.Message, protocol.ErrorData{Hint: buildErr.Hint}, protocol.WithSource("cli"), protocol.WithWorkspace(scope.Workspace))
+			if writeErr := protocol.Write(cmd.OutOrStdout(), env); writeErr != nil {
+				return fmt.Errorf("write refactor hot error envelope: %w", writeErr)
+			}
+			return fmt.Errorf("build refactor hot: %w", err)
+		}
+		return fmt.Errorf("build refactor hot: %w", err)
+	}
+
+	data := map[string]any{
+		"scope":      scope,
+		"index_mode": string(status.Mode),
+		"reasons":    status.Reasons,
+		"since":      result.Since,
+		"summary":    result.Summary,
+		"files":      result.Files,
+	}
+	env := protocol.OK("refactor.hot", data, protocol.WithSource("cli"), protocol.WithWorkspace(scope.Workspace))
 	return protocol.Write(cmd.OutOrStdout(), env)
 }
 

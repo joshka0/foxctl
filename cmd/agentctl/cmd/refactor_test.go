@@ -12,7 +12,7 @@ func TestNewRefactorCommandHasSubcommands(t *testing.T) {
 	if cmd.Use != "refactor" {
 		t.Fatalf("Use=%q", cmd.Use)
 	}
-	var hasStatus, hasSnapshot, hasDeps, hasScout, hasAdvisor bool
+	var hasStatus, hasSnapshot, hasDeps, hasChanges, hasHot, hasScout, hasAdvisor bool
 	for _, child := range cmd.Commands() {
 		switch child.Name() {
 		case "status":
@@ -21,14 +21,18 @@ func TestNewRefactorCommandHasSubcommands(t *testing.T) {
 			hasSnapshot = true
 		case "deps":
 			hasDeps = true
+		case "changes":
+			hasChanges = true
+		case "hot":
+			hasHot = true
 		case "scout":
 			hasScout = true
 		case "advisor":
 			hasAdvisor = true
 		}
 	}
-	if !hasStatus || !hasSnapshot || !hasDeps || !hasScout || !hasAdvisor {
-		t.Fatalf("expected status/snapshot/deps/scout/advisor subcommands, got status=%v snapshot=%v deps=%v scout=%v advisor=%v", hasStatus, hasSnapshot, hasDeps, hasScout, hasAdvisor)
+	if !hasStatus || !hasSnapshot || !hasDeps || !hasChanges || !hasHot || !hasScout || !hasAdvisor {
+		t.Fatalf("expected status/snapshot/deps/changes/hot/scout/advisor subcommands, got status=%v snapshot=%v deps=%v changes=%v hot=%v scout=%v advisor=%v", hasStatus, hasSnapshot, hasDeps, hasChanges, hasHot, hasScout, hasAdvisor)
 	}
 }
 
@@ -71,6 +75,34 @@ func TestRefactorDepsCommandDefaults(t *testing.T) {
 		t.Fatal("deps command missing edge-set flag")
 	} else if flag.DefValue != "[structural]" {
 		t.Fatalf("deps edge-set default=%q want [structural]", flag.DefValue)
+	}
+}
+
+func TestRefactorChangesCommandDefaults(t *testing.T) {
+	cmd := newRefactorChangesCommand()
+	if flag := cmd.Flags().Lookup("since"); flag == nil {
+		t.Fatal("changes command missing since flag")
+	} else if flag.DefValue != "" {
+		t.Fatalf("changes since default=%q want empty", flag.DefValue)
+	}
+	if flag := cmd.Flags().Lookup("max-files"); flag == nil {
+		t.Fatal("changes command missing max-files flag")
+	} else if flag.DefValue != "200" {
+		t.Fatalf("changes max-files default=%q want 200", flag.DefValue)
+	}
+}
+
+func TestRefactorHotCommandDefaults(t *testing.T) {
+	cmd := newRefactorHotCommand()
+	if flag := cmd.Flags().Lookup("since"); flag == nil {
+		t.Fatal("hot command missing since flag")
+	} else if flag.DefValue != "HEAD~20" {
+		t.Fatalf("hot since default=%q want HEAD~20", flag.DefValue)
+	}
+	if flag := cmd.Flags().Lookup("max-results"); flag == nil {
+		t.Fatal("hot command missing max-results flag")
+	} else if flag.DefValue != "20" {
+		t.Fatalf("hot max-results default=%q want 20", flag.DefValue)
 	}
 }
 

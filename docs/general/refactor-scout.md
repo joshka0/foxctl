@@ -10,6 +10,8 @@ There are two entrypoints:
 - `agentctl refactor status`
 - `agentctl refactor snapshot`
 - `agentctl refactor deps`
+- `agentctl refactor changes`
+- `agentctl refactor hot`
 - `agentctl refactor scout`
 - `agentctl refactor advisor`
 
@@ -23,6 +25,14 @@ artifact-backed payload and records a small metadata row for later lookup.
 `refactor deps` expands forward or reverse dependencies from a scoped repoindex
 seed. It is repoindex-backed rather than parser-backed, so it surfaces
 `index_mode` and freshness reasons directly in the output.
+
+`refactor changes` reports changed files and current symbol surfaces since a git
+ref or refactor snapshot. Snapshot comparisons are structural diffs over stored
+snapshot payloads; git-ref comparisons use the current workspace plus git
+status/diff data scoped to the requested path.
+
+`refactor hot` ranks recently hot files from git churn within the scoped path.
+The first version is file-level only and weights touches by recency.
 
 `refactor scout` is the primary deterministic retrieval lane. It ranks likely
 refactor seams and hotspots from local code structure.
@@ -38,6 +48,8 @@ Run the scout directly:
 agentctl refactor status --path ./internal --language go
 agentctl refactor snapshot --path ./internal --language go
 agentctl refactor deps --path ./internal --language go --query "Builder.Build" --direction in
+agentctl refactor changes --path ./internal --language go --since HEAD~5
+agentctl refactor hot --path ./internal --language go --since HEAD~20
 agentctl refactor scout --path . --language go
 agentctl refactor scout --path ./packages --language typescript
 agentctl refactor scout --path ./scripts --language python
@@ -80,6 +92,18 @@ Typical `refactor deps` reads:
   downstream fan-out
 - rebuild the repo index when `index_mode` comes back with freshness or coverage
   reasons you do not want to ignore
+
+Typical `refactor changes` reads:
+
+- use `--since HEAD~N` or another git ref for working-tree-relative change reads
+- use `--since refsnap-...` for deterministic snapshot-to-current comparisons
+- keep `--max-files` and `--max-symbols` bounded when scanning broad scopes
+
+Typical `refactor hot` reads:
+
+- use `--since HEAD~N` to define the commit window
+- use a `refsnap-...` id when you want the baseline commit from a saved snapshot
+- treat this first version as churn ranking, not a full co-change graph
 
 Important operating rules:
 
@@ -128,6 +152,16 @@ Focused usage:
   related extraction candidates)*.
 - `refactor scout` now also emits `data.index_mode` so downstream review flows
   can tell whether a run was parser-only or index-backed.
+- successful scout runs now emit `data.snapshot_id` and
+  `data.snapshot_artifact`
+- `data.signals.evidence_backed` tells you whether the snapshot/evidence layer
+  completed, independent of whether repoindex was fresh
+- parser-only runs still attach scope snapshot evidence and recent churn data
+  like `recent_change_count` and `hot_score` on `function_hotspot` findings
+- index-backed runs additionally attach repo-graph evidence such as
+  `seed_node_id`, reverse/forward dependency counts, and `suggested_reads`
+- when hotspot evidence rows are persisted, scout also emits
+  `data.evidence_artifact`
 
 ## Language Read
 

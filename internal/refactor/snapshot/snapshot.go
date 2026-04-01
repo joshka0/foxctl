@@ -67,6 +67,7 @@ type SymbolSnapshot struct {
 	SymbolID  string        `json:"symbol_id"`
 	Name      string        `json:"name"`
 	Kind      symindex.Kind `json:"kind"`
+	Hash      string        `json:"hash,omitempty"`
 	LineStart int           `json:"line_start,omitempty"`
 	LineEnd   int           `json:"line_end,omitempty"`
 	Signature string        `json:"signature,omitempty"`
@@ -185,6 +186,7 @@ func (b Builder) Build(ctx context.Context, in Input) (Payload, error) {
 				SymbolID:  symbol.EffectiveID(),
 				Name:      strings.TrimSpace(symbol.Name),
 				Kind:      symbol.Kind,
+				Hash:      strings.TrimSpace(symbol.BodyDigest),
 				LineStart: symbol.StartLine,
 				LineEnd:   symbol.EndLine,
 				Signature: strings.TrimSpace(symbol.Signature),

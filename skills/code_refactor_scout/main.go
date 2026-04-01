@@ -217,12 +217,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 		limitedByMaxResults = true
 	}
 
-	previewResult, err := skillout.PreviewAndPersistNDJSON(ctx, rc, filtered, rc.MaxPreview, "code_refactor_scout", true)
-	if err != nil {
-		return err
-	}
-
-	indexStatus := refstatus.Evaluate(ctx, rc.Config.Storage.Root, refscope.Scope{
+	statusScope := refscope.Scope{
 		Workspace: workspace,
 		RepoRoot:  workspace,
 		Path:      pathutil.RelativePath(workspace, searchPath),
@@ -231,7 +226,17 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 		Language:  scope.Language,
 		Detected:  append([]string(nil), scope.Detected...),
 		IsDir:     info.IsDir(),
-	})
+	}
+	indexStatus := refstatus.Evaluate(ctx, rc.Config.Storage.Root, statusScope)
+
+	evidence, evidenceErr := buildScoutEvidence(ctx, rc, in, statusScope, indexStatus, filtered)
+	if evidenceErr == nil {
+		filtered = evidence.Findings
+	}
+	previewResult, err := skillout.PreviewAndPersistNDJSON(ctx, rc, filtered, rc.MaxPreview, "code_refactor_scout", true)
+	if err != nil {
+		return err
+	}
 
 	data := map[string]any{
 		"findings":       previewResult.Preview,
@@ -254,7 +259,17 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 			"call_extraction":   true,
 			"slop_focus":        in.Focus == "slop",
 			"repo_graph":        indexStatus.Mode == refstatus.ModeIndexBacked,
+			"evidence_backed":   evidenceErr == nil,
 		},
+	}
+	if evidenceErr == nil {
+		data["snapshot_id"] = evidence.SnapshotID
+		data["snapshot_artifact"] = evidence.SnapshotArtifact
+		if strings.TrimSpace(evidence.EvidenceArtifact) != "" {
+			data["evidence_artifact"] = evidence.EvidenceArtifact
+		}
+	} else {
+		data["evidence_error"] = evidenceErr.Error()
 	}
 	skillout.AddArtifact(data, previewResult.Artifact)
 
