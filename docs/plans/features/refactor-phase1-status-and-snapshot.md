@@ -198,7 +198,8 @@ Envelope `data` shape:
     "mode": "explicit",
     "language": "go",
     "detected": ["go"],
-    "is_dir": true
+    "is_dir": true,
+    "include_tests": false
   },
   "mode": "index_backed",
   "reasons": [],
@@ -225,7 +226,15 @@ Envelope `data` shape:
         "concept": 58
       }
     },
-    "languages": ["go", "typescript", "elixir"]
+    "languages": ["go", "typescript", "elixir"],
+    "scope_covered": true,
+    "coverage": {
+      "discovered_file_count": 128,
+      "indexed_file_count": 128,
+      "matched_file_count": 128,
+      "missing_file_count": 0,
+      "extra_indexed_file_count": 0
+    }
   }
 }
 ```

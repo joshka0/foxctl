@@ -18,7 +18,8 @@ There are two entrypoints:
 
 `refactor status` reports whether a given refactor scope will run
 `index_backed` or fall back to `parser_only`, along with the concrete reason
-codes for that decision.
+codes for that decision and a file-level coverage summary for the requested
+scope.
 
 `refactor snapshot` freezes a single-language scope into a deterministic
 artifact-backed payload and records a small metadata row for later lookup.
@@ -78,7 +79,8 @@ Typical `refactor status` reads:
   language and path coverage
 - `parser_only`:
   the refactor run will still work, but it will not attach repo-index evidence
-  such as freshness-checked graph support
+  such as freshness-checked graph support; check `repo_index.coverage` for file
+  counts and missing-path samples
 
 Current reason codes include:
 

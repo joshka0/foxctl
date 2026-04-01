@@ -545,13 +545,13 @@ func (s *Store) ListFilesInScope(ctx context.Context, scopePath string, isDir bo
 	)
 	switch {
 	case scopePath == "" || scopePath == ".":
-		query = `SELECT file FROM nodes WHERE repo_key = ? AND kind = ? AND file IS NOT NULL`
+		query = `SELECT file FROM nodes WHERE repo_key = ? AND kind = ? AND file IS NOT NULL ORDER BY file ASC`
 		args = []any{s.repoKey, string(NodeFile)}
 	case isDir:
-		query = `SELECT file FROM nodes WHERE repo_key = ? AND kind = ? AND (file = ? OR file LIKE ?)`
+		query = `SELECT file FROM nodes WHERE repo_key = ? AND kind = ? AND (file = ? OR file LIKE ?) ORDER BY file ASC`
 		args = []any{s.repoKey, string(NodeFile), scopePath, scopePath + "/%"}
 	default:
-		query = `SELECT file FROM nodes WHERE repo_key = ? AND kind = ? AND file = ?`
+		query = `SELECT file FROM nodes WHERE repo_key = ? AND kind = ? AND file = ? ORDER BY file ASC`
 		args = []any{s.repoKey, string(NodeFile), scopePath}
 	}
 	rows, err = s.db.QueryContext(ctx, query, args...)

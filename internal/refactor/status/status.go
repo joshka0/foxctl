@@ -33,9 +33,20 @@ const (
 	ReasonScopePathNotIndexed       = "scope_path_not_indexed"
 )
 
+const coverageSampleLimit = 5
+
 type GitStatus struct {
 	Available bool   `json:"available"`
 	HeadSHA   string `json:"head_sha,omitempty"`
+}
+
+type ScopeCoverage struct {
+	DiscoveredFileCount   int      `json:"discovered_file_count"`
+	IndexedFileCount      int      `json:"indexed_file_count"`
+	MatchedFileCount      int      `json:"matched_file_count"`
+	MissingFileCount      int      `json:"missing_file_count"`
+	ExtraIndexedFileCount int      `json:"extra_indexed_file_count"`
+	MissingFilesSample    []string `json:"missing_files_sample,omitempty"`
 }
 
 type RepoIndexStatus struct {
@@ -45,6 +56,7 @@ type RepoIndexStatus struct {
 	Stats        repoindex.Stats     `json:"stats,omitempty"`
 	Languages    []string            `json:"languages,omitempty"`
 	ScopeCovered bool                `json:"scope_covered"`
+	Coverage     ScopeCoverage       `json:"coverage"`
 }
 
 type Status struct {
@@ -109,9 +121,10 @@ func Evaluate(ctx context.Context, storageRoot string, scope refscope.Scope) Sta
 	if !languageIndexed(scope.Language, meta.Languages) {
 		out.Reasons = append(out.Reasons, ReasonScopeLanguageNotIndexed)
 	}
-	if covered, err := scopeCovered(ctx, store, scope); err == nil {
-		out.RepoIndex.ScopeCovered = covered
-		if !covered {
+	if coverage, err := scopeCoverage(ctx, store, scope); err == nil {
+		out.RepoIndex.Coverage = coverage
+		out.RepoIndex.ScopeCovered = coverageComplete(coverage)
+		if !out.RepoIndex.ScopeCovered {
 			out.Reasons = append(out.Reasons, ReasonScopePathNotIndexed)
 		}
 	} else {
@@ -158,31 +171,44 @@ func normalizeIndexedLanguage(language string) string {
 	}
 }
 
-func scopeCovered(ctx context.Context, store *repoindex.Store, scope refscope.Scope) (bool, error) {
+func scopeCoverage(ctx context.Context, store *repoindex.Store, scope refscope.Scope) (ScopeCoverage, error) {
 	indexedFiles, err := store.ListFilesInScope(ctx, scope.Path, scope.IsDir)
 	if err != nil {
-		return false, err
-	}
-	if len(indexedFiles) == 0 {
-		return false, nil
+		return ScopeCoverage{}, err
 	}
 	actualFiles, err := collectScopeFiles(scope)
 	if err != nil {
-		return false, err
-	}
-	if len(actualFiles) == 0 {
-		return false, nil
+		return ScopeCoverage{}, err
 	}
 	indexedSet := make(map[string]struct{}, len(indexedFiles))
 	for _, file := range indexedFiles {
 		indexedSet[file] = struct{}{}
 	}
-	for _, file := range actualFiles {
-		if _, ok := indexedSet[file]; !ok {
-			return false, nil
-		}
+	coverage := ScopeCoverage{
+		DiscoveredFileCount: len(actualFiles),
+		IndexedFileCount:    len(indexedSet),
 	}
-	return true, nil
+	missing := make([]string, 0)
+	for _, file := range actualFiles {
+		if _, ok := indexedSet[file]; ok {
+			coverage.MatchedFileCount++
+			continue
+		}
+		missing = append(missing, file)
+	}
+	coverage.MissingFileCount = len(missing)
+	if coverage.IndexedFileCount > coverage.MatchedFileCount {
+		coverage.ExtraIndexedFileCount = coverage.IndexedFileCount - coverage.MatchedFileCount
+	}
+	if len(missing) > coverageSampleLimit {
+		missing = missing[:coverageSampleLimit]
+	}
+	coverage.MissingFilesSample = append([]string(nil), missing...)
+	return coverage, nil
+}
+
+func coverageComplete(coverage ScopeCoverage) bool {
+	return coverage.DiscoveredFileCount > 0 && coverage.MissingFileCount == 0
 }
 
 func collectScopeFiles(scope refscope.Scope) ([]string, error) {
@@ -207,7 +233,7 @@ func collectScopeFiles(scope refscope.Scope) ([]string, error) {
 		if d.IsDir() {
 			return nil
 		}
-		if fsutil.IsTestFile(d.Name()) {
+		if !scope.IncludeTests && fsutil.IsTestFile(d.Name()) {
 			return nil
 		}
 		if !scopeFileEligible(scope.Language, path) {

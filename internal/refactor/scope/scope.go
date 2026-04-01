@@ -22,14 +22,15 @@ type Input struct {
 
 // Scope is the canonical resolved refactor scope.
 type Scope struct {
-	Workspace string   `json:"workspace"`
-	RepoRoot  string   `json:"repo_root"`
-	Path      string   `json:"path"`
-	Absolute  string   `json:"absolute_path"`
-	Mode      string   `json:"mode"`
-	Language  string   `json:"language"`
-	Detected  []string `json:"detected,omitempty"`
-	IsDir     bool     `json:"is_dir"`
+	Workspace    string   `json:"workspace"`
+	RepoRoot     string   `json:"repo_root"`
+	Path         string   `json:"path"`
+	Absolute     string   `json:"absolute_path"`
+	Mode         string   `json:"mode"`
+	Language     string   `json:"language"`
+	Detected     []string `json:"detected,omitempty"`
+	IsDir        bool     `json:"is_dir"`
+	IncludeTests bool     `json:"include_tests"`
 }
 
 // ResolveError is a typed validation error for scope resolution.
@@ -108,11 +109,12 @@ func ResolveResolvedPath(workspace, absPath string, info fs.FileInfo, language s
 	}
 
 	scope := Scope{
-		Workspace: absWorkspace,
-		RepoRoot:  absWorkspace,
-		Path:      workspaceRelativePath(absWorkspace, absPath),
-		Absolute:  absPath,
-		IsDir:     info.IsDir(),
+		Workspace:    absWorkspace,
+		RepoRoot:     absWorkspace,
+		Path:         workspaceRelativePath(absWorkspace, absPath),
+		Absolute:     absPath,
+		IsDir:        info.IsDir(),
+		IncludeTests: includeTests,
 	}
 
 	if strings.TrimSpace(language) == "" {

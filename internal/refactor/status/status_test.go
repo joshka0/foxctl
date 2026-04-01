@@ -22,14 +22,15 @@ func TestEvaluateParserOnlyWhenIndexMissing(t *testing.T) {
 	_ = root
 
 	scope := refscope.Scope{
-		Workspace: workspace,
-		RepoRoot:  workspace,
-		Path:      ".",
-		Absolute:  workspace,
-		Mode:      "explicit",
-		Language:  "go",
-		Detected:  []string{"go"},
-		IsDir:     true,
+		Workspace:    workspace,
+		RepoRoot:     workspace,
+		Path:         ".",
+		Absolute:     workspace,
+		Mode:         "explicit",
+		Language:     "go",
+		Detected:     []string{"go"},
+		IsDir:        true,
+		IncludeTests: false,
 	}
 
 	got := Evaluate(ctx, storageRoot, scope)
@@ -99,6 +100,12 @@ func TestEvaluateIndexBackedWhenHeadAndLanguageMatch(t *testing.T) {
 	}
 	if !got.RepoIndex.ScopeCovered {
 		t.Fatal("expected scope_covered=true")
+	}
+	if got.RepoIndex.Coverage.DiscoveredFileCount != 1 || got.RepoIndex.Coverage.IndexedFileCount != 1 || got.RepoIndex.Coverage.MatchedFileCount != 1 {
+		t.Fatalf("coverage=%+v want discovered=1 indexed=1 matched=1", got.RepoIndex.Coverage)
+	}
+	if got.RepoIndex.Coverage.MissingFileCount != 0 || got.RepoIndex.Coverage.ExtraIndexedFileCount != 0 {
+		t.Fatalf("coverage=%+v want no missing or extra files", got.RepoIndex.Coverage)
 	}
 	if got.Git.HeadSHA != head {
 		t.Fatalf("git head=%q want %q", got.Git.HeadSHA, head)
@@ -298,14 +305,15 @@ func TestEvaluateParserOnlyWhenScopePathNotFullyIndexed(t *testing.T) {
 	}
 
 	internalScope := refscope.Scope{
-		Workspace: workspace,
-		RepoRoot:  workspace,
-		Path:      "internal",
-		Absolute:  filepath.Join(workspace, "internal"),
-		Mode:      "explicit",
-		Language:  "go",
-		Detected:  []string{"go"},
-		IsDir:     true,
+		Workspace:    workspace,
+		RepoRoot:     workspace,
+		Path:         "internal",
+		Absolute:     filepath.Join(workspace, "internal"),
+		Mode:         "explicit",
+		Language:     "go",
+		Detected:     []string{"go"},
+		IsDir:        true,
+		IncludeTests: false,
 	}
 	gotInternal := Evaluate(ctx, storageRoot, internalScope)
 	if gotInternal.Mode != ModeParserOnly {
@@ -317,16 +325,26 @@ func TestEvaluateParserOnlyWhenScopePathNotFullyIndexed(t *testing.T) {
 	if !containsReason(gotInternal.Reasons, ReasonScopePathNotIndexed) {
 		t.Fatalf("internal reasons=%v want %s", gotInternal.Reasons, ReasonScopePathNotIndexed)
 	}
+	if gotInternal.RepoIndex.Coverage.DiscoveredFileCount != 2 || gotInternal.RepoIndex.Coverage.IndexedFileCount != 1 || gotInternal.RepoIndex.Coverage.MatchedFileCount != 1 {
+		t.Fatalf("internal coverage=%+v want discovered=2 indexed=1 matched=1", gotInternal.RepoIndex.Coverage)
+	}
+	if gotInternal.RepoIndex.Coverage.MissingFileCount != 1 {
+		t.Fatalf("internal coverage=%+v want missing=1", gotInternal.RepoIndex.Coverage)
+	}
+	if len(gotInternal.RepoIndex.Coverage.MissingFilesSample) != 1 || gotInternal.RepoIndex.Coverage.MissingFilesSample[0] != "internal/other/other.go" {
+		t.Fatalf("internal missing_files_sample=%v want [internal/other/other.go]", gotInternal.RepoIndex.Coverage.MissingFilesSample)
+	}
 
 	actorScope := refscope.Scope{
-		Workspace: workspace,
-		RepoRoot:  workspace,
-		Path:      "internal/actor",
-		Absolute:  filepath.Join(workspace, "internal", "actor"),
-		Mode:      "explicit",
-		Language:  "go",
-		Detected:  []string{"go"},
-		IsDir:     true,
+		Workspace:    workspace,
+		RepoRoot:     workspace,
+		Path:         "internal/actor",
+		Absolute:     filepath.Join(workspace, "internal", "actor"),
+		Mode:         "explicit",
+		Language:     "go",
+		Detected:     []string{"go"},
+		IsDir:        true,
+		IncludeTests: false,
 	}
 	gotActor := Evaluate(ctx, storageRoot, actorScope)
 	if gotActor.Mode != ModeIndexBacked {
@@ -334,6 +352,109 @@ func TestEvaluateParserOnlyWhenScopePathNotFullyIndexed(t *testing.T) {
 	}
 	if !gotActor.RepoIndex.ScopeCovered {
 		t.Fatal("expected actor scope_covered=true")
+	}
+	if gotActor.RepoIndex.Coverage.DiscoveredFileCount != 1 || gotActor.RepoIndex.Coverage.IndexedFileCount != 1 || gotActor.RepoIndex.Coverage.MatchedFileCount != 1 {
+		t.Fatalf("actor coverage=%+v want discovered=1 indexed=1 matched=1", gotActor.RepoIndex.Coverage)
+	}
+}
+
+func TestEvaluateCoverageIncludesTestsWhenRequested(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	_, storageRoot, workspace := setupGitWorkspace(t, ctx)
+	if err := os.MkdirAll(filepath.Join(workspace, "internal", "actor"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(workspace, "internal", "actor", "actor.go"), []byte("package actor\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(workspace, "internal", "actor", "actor_test.go"), []byte("package actor\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, ctx, workspace, "add", "internal/actor/actor.go", "internal/actor/actor_test.go")
+	runGit(t, ctx, workspace, "-c", "user.email=test@example.com", "-c", "user.name=Test", "commit", "-m", "add actor files")
+
+	store, err := repoindex.Open(ctx, storageRoot, workspace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	head := gitHead(t, ctx, workspace)
+	if err := store.SetMeta(ctx, repoindex.IndexMeta{
+		RepoRoot:      workspace,
+		HeadSHA:       head,
+		SchemaVersion: 3,
+		IndexedAt:     time.Now().UTC(),
+		Languages:     []string{"go"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.ReplaceAll(ctx, []repoindex.Node{
+		{
+			ID:        repoindex.PackageID(store.RepoKey(), "go:example/internal/actor"),
+			Kind:      repoindex.NodePackage,
+			Pkg:       "go:example/internal/actor",
+			Name:      "internal/actor",
+			UpdatedAt: time.Now().UTC(),
+		},
+		{
+			ID:        repoindex.FileID(store.RepoKey(), "go:example/internal/actor", "internal/actor/actor.go"),
+			Kind:      repoindex.NodeFile,
+			Pkg:       "go:example/internal/actor",
+			File:      "internal/actor/actor.go",
+			Name:      "actor.go",
+			UpdatedAt: time.Now().UTC(),
+		},
+	}, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	scopeWithoutTests := refscope.Scope{
+		Workspace:    workspace,
+		RepoRoot:     workspace,
+		Path:         "internal/actor",
+		Absolute:     filepath.Join(workspace, "internal", "actor"),
+		Mode:         "explicit",
+		Language:     "go",
+		Detected:     []string{"go"},
+		IsDir:        true,
+		IncludeTests: false,
+	}
+	gotWithoutTests := Evaluate(ctx, storageRoot, scopeWithoutTests)
+	if gotWithoutTests.Mode != ModeIndexBacked {
+		t.Fatalf("without tests mode=%q want %q", gotWithoutTests.Mode, ModeIndexBacked)
+	}
+	if gotWithoutTests.RepoIndex.Coverage.DiscoveredFileCount != 1 {
+		t.Fatalf("without tests coverage=%+v want discovered=1", gotWithoutTests.RepoIndex.Coverage)
+	}
+
+	scopeWithTests := refscope.Scope{
+		Workspace:    workspace,
+		RepoRoot:     workspace,
+		Path:         "internal/actor",
+		Absolute:     filepath.Join(workspace, "internal", "actor"),
+		Mode:         "explicit",
+		Language:     "go",
+		Detected:     []string{"go"},
+		IsDir:        true,
+		IncludeTests: true,
+	}
+	gotWithTests := Evaluate(ctx, storageRoot, scopeWithTests)
+	if gotWithTests.Mode != ModeParserOnly {
+		t.Fatalf("with tests mode=%q want %q", gotWithTests.Mode, ModeParserOnly)
+	}
+	if !containsReason(gotWithTests.Reasons, ReasonScopePathNotIndexed) {
+		t.Fatalf("with tests reasons=%v want %s", gotWithTests.Reasons, ReasonScopePathNotIndexed)
+	}
+	if gotWithTests.RepoIndex.Coverage.DiscoveredFileCount != 2 || gotWithTests.RepoIndex.Coverage.IndexedFileCount != 1 {
+		t.Fatalf("with tests coverage=%+v want discovered=2 indexed=1", gotWithTests.RepoIndex.Coverage)
+	}
+	if gotWithTests.RepoIndex.Coverage.MissingFileCount != 1 {
+		t.Fatalf("with tests coverage=%+v want missing=1", gotWithTests.RepoIndex.Coverage)
+	}
+	if len(gotWithTests.RepoIndex.Coverage.MissingFilesSample) != 1 || gotWithTests.RepoIndex.Coverage.MissingFilesSample[0] != "internal/actor/actor_test.go" {
+		t.Fatalf("with tests missing_files_sample=%v want [internal/actor/actor_test.go]", gotWithTests.RepoIndex.Coverage.MissingFilesSample)
 	}
 }
 
