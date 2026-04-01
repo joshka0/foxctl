@@ -8,7 +8,9 @@ import (
 
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skilltest"
 	"github.com/jkatigb/agentctl/internal/indexing/repoindex"
+	refevidence "github.com/jkatigb/agentctl/internal/refactor/evidence"
 	refhot "github.com/jkatigb/agentctl/internal/refactor/hot"
+	refstatus "github.com/jkatigb/agentctl/internal/refactor/status"
 	"github.com/jkatigb/agentctl/internal/repoquery"
 )
 
@@ -74,7 +76,7 @@ func TestAttachEvidenceToHotspotsAddsSnapshotAndHotFieldsWithoutRepoGraph(t *tes
 			Symbol: "*AgentActor.handleAsk",
 		},
 	}
-	pack := scoutHotspotEvidencePack{}
+	pack := refevidence.HotspotPack{}
 	got := attachEvidenceToHotspots(context.Background(), findings, nil, map[string]refhot.FileHotspot{
 		"internal/actor/agent_actor.go": {
 			Path:       "internal/actor/agent_actor.go",
@@ -135,9 +137,9 @@ func TestPersistScoutEvidencePackAddsArtifactToHotspots(t *testing.T) {
 			},
 		},
 	}
-	got, err := persistScoutEvidencePack(context.Background(), rc, current, scoutHotspotEvidencePack{
+	got, err := persistScoutEvidencePack(context.Background(), rc, current, refevidence.HotspotPack{
 		SnapshotID: "refsnap-1",
-		Hotspots: []scoutHotspotEvidenceRow{
+		Hotspots: []refevidence.HotspotRow{
 			{
 				File:              "internal/actor/agent_actor.go",
 				Symbol:            "*AgentActor.handleAsk",
@@ -158,5 +160,70 @@ func TestPersistScoutEvidencePackAddsArtifactToHotspots(t *testing.T) {
 	}
 	if _, exists := got.Findings[1].Evidence["evidence_artifact"]; exists {
 		t.Fatalf("non-hotspot unexpectedly received evidence_artifact: %#v", got.Findings[1].Evidence)
+	}
+}
+
+func TestRerankScoutFindingsBoostsIndexBackedHotspots(t *testing.T) {
+	findings := []finding{
+		{
+			RuleID:   "function_hotspot",
+			File:     "a.go",
+			Symbol:   "Alpha",
+			Score:    94,
+			Severity: "high",
+			Evidence: map[string]any{},
+		},
+		{
+			RuleID:   "function_hotspot",
+			File:     "b.go",
+			Symbol:   "Beta",
+			Score:    90,
+			Severity: "high",
+			Evidence: map[string]any{
+				"reverse_dep_count": 13,
+				"forward_dep_count": 11,
+				"hot_score":         3.2,
+			},
+		},
+	}
+
+	got := rerankScoutFindings(findings, refstatus.ModeIndexBacked)
+	sortFindings(got)
+	if got[0].Symbol != "Beta" {
+		t.Fatalf("top symbol=%q want Beta after rerank", got[0].Symbol)
+	}
+	if got[0].Score <= 90 {
+		t.Fatalf("reranked score=%d want above base 90", got[0].Score)
+	}
+	if got[0].Evidence["base_score"] != 90 {
+		t.Fatalf("base_score=%v want 90", got[0].Evidence["base_score"])
+	}
+	if got[0].Evidence["index_rerank_bonus"] != 15 {
+		t.Fatalf("index_rerank_bonus=%v want 15", got[0].Evidence["index_rerank_bonus"])
+	}
+}
+
+func TestRerankScoutFindingsSkipsParserOnlyMode(t *testing.T) {
+	findings := []finding{
+		{
+			RuleID:   "function_hotspot",
+			File:     "a.go",
+			Symbol:   "Alpha",
+			Score:    90,
+			Severity: "high",
+			Evidence: map[string]any{
+				"reverse_dep_count": 99,
+				"forward_dep_count": 99,
+				"hot_score":         10.0,
+			},
+		},
+	}
+
+	got := rerankScoutFindings(findings, refstatus.ModeParserOnly)
+	if got[0].Score != 90 {
+		t.Fatalf("score=%d want unchanged 90", got[0].Score)
+	}
+	if _, ok := got[0].Evidence["index_rerank_bonus"]; ok {
+		t.Fatalf("unexpected rerank evidence in parser_only mode: %#v", got[0].Evidence)
 	}
 }

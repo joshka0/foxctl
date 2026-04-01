@@ -209,14 +209,6 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	sortFindings(filtered)
 	filtered = diversifyFindings(filtered, maxInt(headDiversifyMinItems, in.MaxResults*3), headMaxPerRule, headMaxPerFile, headMaxPerSymbol)
 
-	totalFindings := len(filtered)
-	summary := buildSummary(filtered)
-	limitedByMaxResults := false
-	if len(filtered) > in.MaxResults {
-		filtered = filtered[:in.MaxResults]
-		limitedByMaxResults = true
-	}
-
 	statusScope := refscope.Scope{
 		Workspace: workspace,
 		RepoRoot:  workspace,
@@ -231,7 +223,16 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 
 	evidence, evidenceErr := buildScoutEvidence(ctx, rc, in, statusScope, indexStatus, filtered)
 	if evidenceErr == nil {
-		filtered = evidence.Findings
+		filtered = rerankScoutFindings(evidence.Findings, indexStatus.Mode)
+	}
+	sortFindings(filtered)
+
+	totalFindings := len(filtered)
+	summary := buildSummary(filtered)
+	limitedByMaxResults := false
+	if len(filtered) > in.MaxResults {
+		filtered = filtered[:in.MaxResults]
+		limitedByMaxResults = true
 	}
 	previewResult, err := skillout.PreviewAndPersistNDJSON(ctx, rc, filtered, rc.MaxPreview, "code_refactor_scout", true)
 	if err != nil {

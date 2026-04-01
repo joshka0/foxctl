@@ -12,6 +12,7 @@ There are two entrypoints:
 - `agentctl refactor deps`
 - `agentctl refactor changes`
 - `agentctl refactor hot`
+- `agentctl refactor evidence`
 - `agentctl refactor scout`
 - `agentctl refactor advisor`
 
@@ -34,6 +35,10 @@ status/diff data scoped to the requested path.
 `refactor hot` ranks recently hot files from git churn within the scoped path.
 The first version is file-level only and weights touches by recency.
 
+`refactor evidence` reads persisted refactor artifacts back out of CAS. It can
+load either a stored snapshot by `snapshot_id` or a scout-produced evidence
+artifact by digest.
+
 `refactor scout` is the primary deterministic retrieval lane. It ranks likely
 refactor seams and hotspots from local code structure.
 
@@ -50,6 +55,8 @@ agentctl refactor snapshot --path ./internal --language go
 agentctl refactor deps --path ./internal --language go --query "Builder.Build" --direction in
 agentctl refactor changes --path ./internal --language go --since HEAD~5
 agentctl refactor hot --path ./internal --language go --since HEAD~20
+agentctl refactor evidence --snapshot-id refsnap-1775053803740
+agentctl refactor evidence --artifact sha256:54cc680432b307307d524d7c857fcd179749a4f3fac30560f27c41f4d82e4ecf
 agentctl refactor scout --path . --language go
 agentctl refactor scout --path ./packages --language typescript
 agentctl refactor scout --path ./scripts --language python
@@ -104,6 +111,14 @@ Typical `refactor hot` reads:
 - use `--since HEAD~N` to define the commit window
 - use a `refsnap-...` id when you want the baseline commit from a saved snapshot
 - treat this first version as churn ranking, not a full co-change graph
+
+Typical `refactor evidence` reads:
+
+- use `--snapshot-id refsnap-...` for a compact view of one stored scope snapshot
+- add `--full` when you want the snapshot's file and symbol lists inline
+- use `--artifact sha256:...` for a scout `data.evidence_artifact` or
+  `data.snapshot_artifact`
+- treat this command as artifact inspection, not a fresh scout run
 
 Important operating rules:
 
@@ -160,6 +175,9 @@ Focused usage:
   like `recent_change_count` and `hot_score` on `function_hotspot` findings
 - index-backed runs additionally attach repo-graph evidence such as
   `seed_node_id`, reverse/forward dependency counts, and `suggested_reads`
+- when repoindex is fresh, scout now also uses reverse deps, forward deps, and
+  hot-score evidence to rerank `function_hotspot` findings rather than treating
+  that evidence as display-only
 - when hotspot evidence rows are persisted, scout also emits
   `data.evidence_artifact`
 

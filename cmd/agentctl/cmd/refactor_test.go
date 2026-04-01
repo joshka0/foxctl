@@ -12,7 +12,7 @@ func TestNewRefactorCommandHasSubcommands(t *testing.T) {
 	if cmd.Use != "refactor" {
 		t.Fatalf("Use=%q", cmd.Use)
 	}
-	var hasStatus, hasSnapshot, hasDeps, hasChanges, hasHot, hasScout, hasAdvisor bool
+	var hasStatus, hasSnapshot, hasDeps, hasChanges, hasHot, hasEvidence, hasScout, hasAdvisor bool
 	for _, child := range cmd.Commands() {
 		switch child.Name() {
 		case "status":
@@ -25,14 +25,16 @@ func TestNewRefactorCommandHasSubcommands(t *testing.T) {
 			hasChanges = true
 		case "hot":
 			hasHot = true
+		case "evidence":
+			hasEvidence = true
 		case "scout":
 			hasScout = true
 		case "advisor":
 			hasAdvisor = true
 		}
 	}
-	if !hasStatus || !hasSnapshot || !hasDeps || !hasChanges || !hasHot || !hasScout || !hasAdvisor {
-		t.Fatalf("expected status/snapshot/deps/changes/hot/scout/advisor subcommands, got status=%v snapshot=%v deps=%v changes=%v hot=%v scout=%v advisor=%v", hasStatus, hasSnapshot, hasDeps, hasChanges, hasHot, hasScout, hasAdvisor)
+	if !hasStatus || !hasSnapshot || !hasDeps || !hasChanges || !hasHot || !hasEvidence || !hasScout || !hasAdvisor {
+		t.Fatalf("expected status/snapshot/deps/changes/hot/evidence/scout/advisor subcommands, got status=%v snapshot=%v deps=%v changes=%v hot=%v evidence=%v scout=%v advisor=%v", hasStatus, hasSnapshot, hasDeps, hasChanges, hasHot, hasEvidence, hasScout, hasAdvisor)
 	}
 }
 
@@ -103,6 +105,25 @@ func TestRefactorHotCommandDefaults(t *testing.T) {
 		t.Fatal("hot command missing max-results flag")
 	} else if flag.DefValue != "20" {
 		t.Fatalf("hot max-results default=%q want 20", flag.DefValue)
+	}
+}
+
+func TestRefactorEvidenceCommandDefaults(t *testing.T) {
+	cmd := newRefactorEvidenceCommand()
+	if flag := cmd.Flags().Lookup("artifact"); flag == nil {
+		t.Fatal("evidence command missing artifact flag")
+	} else if flag.DefValue != "" {
+		t.Fatalf("evidence artifact default=%q want empty", flag.DefValue)
+	}
+	if flag := cmd.Flags().Lookup("snapshot-id"); flag == nil {
+		t.Fatal("evidence command missing snapshot-id flag")
+	} else if flag.DefValue != "" {
+		t.Fatalf("evidence snapshot-id default=%q want empty", flag.DefValue)
+	}
+	if flag := cmd.Flags().Lookup("full"); flag == nil {
+		t.Fatal("evidence command missing full flag")
+	} else if flag.DefValue != "false" {
+		t.Fatalf("evidence full default=%q want false", flag.DefValue)
 	}
 }
 

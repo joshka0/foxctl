@@ -19,6 +19,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/protocol"
 	refchanges "github.com/jkatigb/agentctl/internal/refactor/changes"
 	refdeps "github.com/jkatigb/agentctl/internal/refactor/deps"
+	refevidence "github.com/jkatigb/agentctl/internal/refactor/evidence"
 	refhot "github.com/jkatigb/agentctl/internal/refactor/hot"
 	refscope "github.com/jkatigb/agentctl/internal/refactor/scope"
 	refsnapshot "github.com/jkatigb/agentctl/internal/refactor/snapshot"
@@ -44,6 +45,7 @@ func newRefactorCommand() *cobra.Command {
 		newRefactorDepsCommand(),
 		newRefactorChangesCommand(),
 		newRefactorHotCommand(),
+		newRefactorEvidenceCommand(),
 		newRefactorScoutCommand(),
 		newRefactorAdvisorCommand(),
 	)
@@ -187,6 +189,26 @@ func newRefactorHotCommand() *cobra.Command {
 	cmd.Flags().StringVar(&since, "since", "HEAD~20", "Git ref or refactor snapshot id (refsnap-...) used as the hot baseline")
 	cmd.Flags().IntVar(&maxResults, "max-results", 20, "Maximum hot files to return")
 	cmd.Flags().IntVar(&halfLifeDays, "half-life-days", 90, "Recency half-life in days for hot-file weighting")
+	return cmd
+}
+
+func newRefactorEvidenceCommand() *cobra.Command {
+	var (
+		artifact   string
+		snapshotID string
+		full       bool
+	)
+
+	cmd := &cobra.Command{
+		Use:   "evidence",
+		Short: "Read a persisted refactor snapshot or scout evidence artifact",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			return runRefactorEvidence(cmd, snapshotID, artifact, full)
+		},
+	}
+	cmd.Flags().StringVar(&artifact, "artifact", "", "CAS digest for a refactor snapshot or scout evidence artifact")
+	cmd.Flags().StringVar(&snapshotID, "snapshot-id", "", "Refactor snapshot id to inspect")
+	cmd.Flags().BoolVar(&full, "full", false, "Include full snapshot file and symbol lists")
 	return cmd
 }
 
@@ -616,6 +638,68 @@ func runRefactorHot(cmd *cobra.Command, workspace, path, language string, includ
 	return protocol.Write(cmd.OutOrStdout(), env)
 }
 
+func runRefactorEvidence(cmd *cobra.Command, snapshotID, artifact string, full bool) error {
+	ctx := cmd.Context()
+
+	cfg, err := loadConfig(ctx)
+	if err != nil {
+		return fmt.Errorf("load config: %w", err)
+	}
+
+	result, err := refevidence.Load(ctx, cfg.Storage.Root, cfg.Paths.CAS, refevidence.Options{
+		SnapshotID: snapshotID,
+		Artifact:   artifact,
+	})
+	if err != nil {
+		if loadErr, ok := err.(*refevidence.LoadError); ok {
+			code := protocol.ErrorCodeEARG
+			if loadErr.Kind == refevidence.ErrorKindNotFound {
+				code = protocol.ErrorCodeENotFound
+			}
+			env := protocol.Error("refactor.evidence", code, loadErr.Message, protocol.ErrorData{Hint: loadErr.Hint}, protocol.WithSource("cli"), protocol.WithWorkspace(refactorEvidenceWorkspace(result, ".")))
+			if writeErr := protocol.Write(cmd.OutOrStdout(), env); writeErr != nil {
+				return fmt.Errorf("write refactor evidence error envelope: %w", writeErr)
+			}
+			return fmt.Errorf("load refactor evidence: %w", err)
+		}
+		return fmt.Errorf("load refactor evidence: %w", err)
+	}
+
+	data := map[string]any{
+		"kind":     result.Kind,
+		"artifact": result.Artifact,
+	}
+	if result.SnapshotRecord != nil {
+		data["snapshot_record"] = result.SnapshotRecord
+	}
+	switch result.Kind {
+	case refevidence.ArtifactKindSnapshot:
+		payload := result.Snapshot
+		data["snapshot_id"] = payload.SnapshotID
+		data["mode"] = payload.Mode
+		data["scope"] = payload.Scope
+		data["summary"] = payload.Summary
+		data["git"] = payload.Git
+		data["repo_index"] = payload.RepoIndex
+		if full {
+			data["files"] = payload.Files
+			data["symbols"] = payload.Symbols
+		}
+	case refevidence.ArtifactKindHotspotPack:
+		pack := result.HotspotPack
+		data["snapshot_id"] = pack.SnapshotID
+		data["snapshot_artifact"] = pack.SnapshotArtifact
+		data["index_mode"] = pack.IndexMode
+		data["reasons"] = pack.Reasons
+		data["summary"] = map[string]any{
+			"hotspot_count": len(pack.Hotspots),
+		}
+		data["hotspots"] = pack.Hotspots
+	}
+	env := protocol.OK("refactor.evidence", data, protocol.WithSource("cli"), protocol.WithWorkspace(refactorEvidenceWorkspace(result, ".")), protocol.WithCASDigest(result.Artifact))
+	return protocol.Write(cmd.OutOrStdout(), env)
+}
+
 func refactorWorkspaceValue(workspace string) string {
 	workspace = strings.TrimSpace(workspace)
 	if workspace == "" {
@@ -626,6 +710,17 @@ func refactorWorkspaceValue(workspace string) string {
 		return workspace
 	}
 	return absWorkspace
+}
+
+func refactorEvidenceWorkspace(result refevidence.Result, fallback string) string {
+	switch {
+	case result.Snapshot != nil && strings.TrimSpace(result.Snapshot.Scope.Workspace) != "":
+		return result.Snapshot.Scope.Workspace
+	case result.SnapshotRecord != nil && strings.TrimSpace(result.SnapshotRecord.Workspace) != "":
+		return result.SnapshotRecord.Workspace
+	default:
+		return refactorWorkspaceValue(fallback)
+	}
 }
 
 func writeRefactorScopeError(cmd *cobra.Command, commandName, workspace string, err error) error {

@@ -2,12 +2,14 @@ package main
 
 import (
 	"context"
+	"math"
 	"sort"
 	"strings"
 	"time"
 
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
 	"github.com/jkatigb/agentctl/internal/indexing/repoindex"
+	refevidence "github.com/jkatigb/agentctl/internal/refactor/evidence"
 	refhot "github.com/jkatigb/agentctl/internal/refactor/hot"
 	refscope "github.com/jkatigb/agentctl/internal/refactor/scope"
 	refsnapshot "github.com/jkatigb/agentctl/internal/refactor/snapshot"
@@ -17,33 +19,13 @@ import (
 )
 
 const maxEvidenceHotspots = 5
+const maxIndexedHotspotEvidence = 20
 
 type scoutEvidenceResult struct {
 	SnapshotID       string
 	SnapshotArtifact string
 	EvidenceArtifact string
 	Findings         []finding
-}
-
-type scoutHotspotEvidencePack struct {
-	SnapshotID       string                    `json:"snapshot_id"`
-	SnapshotArtifact string                    `json:"snapshot_artifact,omitempty"`
-	IndexMode        string                    `json:"index_mode"`
-	Reasons          []string                  `json:"reasons,omitempty"`
-	Hotspots         []scoutHotspotEvidenceRow `json:"hotspots,omitempty"`
-}
-
-type scoutHotspotEvidenceRow struct {
-	File              string   `json:"file"`
-	Symbol            string   `json:"symbol"`
-	RuleID            string   `json:"rule_id"`
-	SeedNodeID        string   `json:"seed_node_id,omitempty"`
-	SeedQuery         string   `json:"seed_query,omitempty"`
-	ReverseDepCount   int      `json:"reverse_dep_count"`
-	ForwardDepCount   int      `json:"forward_dep_count"`
-	RecentChangeCount int      `json:"recent_change_count"`
-	HotScore          float64  `json:"hot_score"`
-	SuggestedReads    []string `json:"suggested_reads,omitempty"`
 }
 
 func buildScoutEvidence(ctx context.Context, rc *skillmain.RunContext, in input, scope refscope.Scope, status refstatus.Status, findings []finding) (scoutEvidenceResult, error) {
@@ -94,7 +76,7 @@ func buildScoutEvidence(ctx context.Context, rc *skillmain.RunContext, in input,
 
 	hotIndex := buildScoutHotIndex(ctx, rc, scope, in.IncludeTests, now)
 
-	pack := scoutHotspotEvidencePack{
+	pack := refevidence.HotspotPack{
 		SnapshotID:       snapshotPayload.SnapshotID,
 		SnapshotArtifact: snapshotArtifact.Digest,
 		IndexMode:        string(status.Mode),
@@ -118,7 +100,7 @@ func buildScoutEvidence(ctx context.Context, rc *skillmain.RunContext, in input,
 	return persistScoutEvidencePack(ctx, rc, result, pack)
 }
 
-func persistScoutEvidencePack(ctx context.Context, rc *skillmain.RunContext, current scoutEvidenceResult, pack scoutHotspotEvidencePack) (scoutEvidenceResult, error) {
+func persistScoutEvidencePack(ctx context.Context, rc *skillmain.RunContext, current scoutEvidenceResult, pack refevidence.HotspotPack) (scoutEvidenceResult, error) {
 	if len(pack.Hotspots) == 0 {
 		return current, nil
 	}
@@ -139,8 +121,9 @@ func persistScoutEvidencePack(ctx context.Context, rc *skillmain.RunContext, cur
 	return current, nil
 }
 
-func attachEvidenceToHotspots(ctx context.Context, findings []finding, service *repoquery.QueryService, hotIndex map[string]refhot.FileHotspot, snapshotID, snapshotArtifact string, pack *scoutHotspotEvidencePack) []finding {
+func attachEvidenceToHotspots(ctx context.Context, findings []finding, service *repoquery.QueryService, hotIndex map[string]refhot.FileHotspot, snapshotID, snapshotArtifact string, pack *refevidence.HotspotPack) []finding {
 	out := append([]finding(nil), findings...)
+	graphEnriched := 0
 	for i := range out {
 		if out[i].RuleID != "function_hotspot" {
 			continue
@@ -154,35 +137,122 @@ func attachEvidenceToHotspots(ctx context.Context, findings []finding, service *
 			out[i].Evidence["recent_change_count"] = hot.TouchCount
 			out[i].Evidence["hot_score"] = hot.Score
 		}
-		if pack == nil || len(pack.Hotspots) >= maxEvidenceHotspots {
-			continue
-		}
-		row := scoutHotspotEvidenceRow{
+		row := refevidence.HotspotRow{
 			File:              out[i].File,
 			Symbol:            out[i].Symbol,
 			RuleID:            out[i].RuleID,
 			RecentChangeCount: evidenceInt(out[i].Evidence["recent_change_count"]),
 			HotScore:          evidenceFloat(out[i].Evidence["hot_score"]),
 		}
-		if seed, seedQuery := resolveFindingSeedNode(ctx, service, out[i]); seed != nil {
-			reverse, reverseAnchors := expandFindingNeighbors(ctx, service, seed.ID, repoindex.DirIn)
-			forward, forwardAnchors := expandFindingNeighbors(ctx, service, seed.ID, repoindex.DirOut)
-			suggestedReads := suggestedReadPaths(out[i].File, reverseAnchors, forwardAnchors)
+		shouldAttachGraph := service != nil && graphEnriched < maxIndexedHotspotEvidence
+		if shouldAttachGraph {
+			if seed, seedQuery := resolveFindingSeedNode(ctx, service, out[i]); seed != nil {
+				reverse, reverseAnchors := expandFindingNeighbors(ctx, service, seed.ID, repoindex.DirIn)
+				forward, forwardAnchors := expandFindingNeighbors(ctx, service, seed.ID, repoindex.DirOut)
+				suggestedReads := suggestedReadPaths(out[i].File, reverseAnchors, forwardAnchors)
 
-			out[i].Evidence["seed_node_id"] = seed.ID
-			out[i].Evidence["seed_query"] = seedQuery
-			out[i].Evidence["reverse_dep_count"] = reverse
-			out[i].Evidence["forward_dep_count"] = forward
-			out[i].Evidence["suggested_reads"] = suggestedReads
-			row.SeedNodeID = seed.ID
-			row.SeedQuery = seedQuery
-			row.ReverseDepCount = reverse
-			row.ForwardDepCount = forward
-			row.SuggestedReads = suggestedReads
+				out[i].Evidence["seed_node_id"] = seed.ID
+				out[i].Evidence["seed_query"] = seedQuery
+				out[i].Evidence["reverse_dep_count"] = reverse
+				out[i].Evidence["forward_dep_count"] = forward
+				out[i].Evidence["suggested_reads"] = suggestedReads
+				row.SeedNodeID = seed.ID
+				row.SeedQuery = seedQuery
+				row.ReverseDepCount = reverse
+				row.ForwardDepCount = forward
+				row.SuggestedReads = suggestedReads
+				graphEnriched++
+			}
 		}
-		pack.Hotspots = append(pack.Hotspots, row)
+		if pack != nil && len(pack.Hotspots) < maxEvidenceHotspots {
+			pack.Hotspots = append(pack.Hotspots, row)
+		}
 	}
 	return out
+}
+
+func rerankScoutFindings(findings []finding, mode refstatus.Mode) []finding {
+	out := append([]finding(nil), findings...)
+	if mode != refstatus.ModeIndexBacked {
+		return out
+	}
+	for i := range out {
+		if out[i].RuleID != "function_hotspot" || out[i].Evidence == nil {
+			continue
+		}
+		reverseDepCount := evidenceInt(out[i].Evidence["reverse_dep_count"])
+		forwardDepCount := evidenceInt(out[i].Evidence["forward_dep_count"])
+		hotScore := evidenceFloat(out[i].Evidence["hot_score"])
+
+		reverseBonus := scoreReverseDependencyBonus(reverseDepCount)
+		forwardBonus := scoreForwardDependencyBonus(forwardDepCount)
+		hotBonus := scoreHotEvidenceBonus(hotScore)
+		totalBonus := reverseBonus + forwardBonus + hotBonus
+		if totalBonus == 0 {
+			continue
+		}
+
+		baseScore := out[i].Score
+		out[i].Score = clampScore(baseScore + totalBonus)
+		out[i].Severity = severityFor(out[i].Score)
+		out[i].Evidence["base_score"] = baseScore
+		out[i].Evidence["index_rerank_bonus"] = totalBonus
+		out[i].Evidence["index_rerank_score"] = out[i].Score
+		out[i].Evidence["index_rerank_factors"] = map[string]int{
+			"reverse_deps": reverseBonus,
+			"forward_deps": forwardBonus,
+			"hot_score":    hotBonus,
+		}
+	}
+	return out
+}
+
+func scoreReverseDependencyBonus(count int) int {
+	switch {
+	case count >= 12:
+		return 8
+	case count >= 6:
+		return 6
+	case count >= 3:
+		return 4
+	case count >= 1:
+		return 2
+	default:
+		return 0
+	}
+}
+
+func scoreForwardDependencyBonus(count int) int {
+	switch {
+	case count >= 20:
+		return 4
+	case count >= 10:
+		return 3
+	case count >= 4:
+		return 2
+	case count >= 1:
+		return 1
+	default:
+		return 0
+	}
+}
+
+func scoreHotEvidenceBonus(score float64) int {
+	rounded := math.Round(score*100) / 100
+	switch {
+	case rounded >= 6:
+		return 6
+	case rounded >= 3:
+		return 4
+	case rounded >= 1.5:
+		return 3
+	case rounded >= 0.75:
+		return 2
+	case rounded > 0:
+		return 1
+	default:
+		return 0
+	}
 }
 
 func buildScoutHotIndex(ctx context.Context, rc *skillmain.RunContext, scope refscope.Scope, includeTests bool, now time.Time) map[string]refhot.FileHotspot {
