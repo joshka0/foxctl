@@ -9,6 +9,7 @@ There are two entrypoints:
 
 - `agentctl refactor status`
 - `agentctl refactor snapshot`
+- `agentctl refactor deps`
 - `agentctl refactor scout`
 - `agentctl refactor advisor`
 
@@ -18,6 +19,10 @@ codes for that decision.
 
 `refactor snapshot` freezes a single-language scope into a deterministic
 artifact-backed payload and records a small metadata row for later lookup.
+
+`refactor deps` expands forward or reverse dependencies from a scoped repoindex
+seed. It is repoindex-backed rather than parser-backed, so it surfaces
+`index_mode` and freshness reasons directly in the output.
 
 `refactor scout` is the primary deterministic retrieval lane. It ranks likely
 refactor seams and hotspots from local code structure.
@@ -32,6 +37,7 @@ Run the scout directly:
 ```bash
 agentctl refactor status --path ./internal --language go
 agentctl refactor snapshot --path ./internal --language go
+agentctl refactor deps --path ./internal --language go --query "Builder.Build" --direction in
 agentctl refactor scout --path . --language go
 agentctl refactor scout --path ./packages --language typescript
 agentctl refactor scout --path ./scripts --language python
@@ -65,6 +71,15 @@ Current reason codes include:
 - `repoindex_head_mismatch`
 - `git_head_unavailable`
 - `scope_language_not_indexed`
+
+Typical `refactor deps` reads:
+
+- use `--query` to resolve seeds from repoindex search within the scoped path
+- use repeated `--seed` values when you already have repoindex node IDs
+- keep `--direction in` for reverse dependencies and `--direction out` for
+  downstream fan-out
+- rebuild the repo index when `index_mode` comes back with freshness or coverage
+  reasons you do not want to ignore
 
 Important operating rules:
 

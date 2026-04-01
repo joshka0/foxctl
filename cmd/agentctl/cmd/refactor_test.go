@@ -12,21 +12,23 @@ func TestNewRefactorCommandHasSubcommands(t *testing.T) {
 	if cmd.Use != "refactor" {
 		t.Fatalf("Use=%q", cmd.Use)
 	}
-	var hasStatus, hasSnapshot, hasScout, hasAdvisor bool
+	var hasStatus, hasSnapshot, hasDeps, hasScout, hasAdvisor bool
 	for _, child := range cmd.Commands() {
 		switch child.Name() {
 		case "status":
 			hasStatus = true
 		case "snapshot":
 			hasSnapshot = true
+		case "deps":
+			hasDeps = true
 		case "scout":
 			hasScout = true
 		case "advisor":
 			hasAdvisor = true
 		}
 	}
-	if !hasStatus || !hasSnapshot || !hasScout || !hasAdvisor {
-		t.Fatalf("expected status/snapshot/scout/advisor subcommands, got status=%v snapshot=%v scout=%v advisor=%v", hasStatus, hasSnapshot, hasScout, hasAdvisor)
+	if !hasStatus || !hasSnapshot || !hasDeps || !hasScout || !hasAdvisor {
+		t.Fatalf("expected status/snapshot/deps/scout/advisor subcommands, got status=%v snapshot=%v deps=%v scout=%v advisor=%v", hasStatus, hasSnapshot, hasDeps, hasScout, hasAdvisor)
 	}
 }
 
@@ -55,6 +57,20 @@ func TestRefactorSnapshotCommandDefaults(t *testing.T) {
 		t.Fatal("snapshot command missing workspace flag")
 	} else if flag.DefValue != "." {
 		t.Fatalf("snapshot workspace default=%q want .", flag.DefValue)
+	}
+}
+
+func TestRefactorDepsCommandDefaults(t *testing.T) {
+	cmd := newRefactorDepsCommand()
+	if flag := cmd.Flags().Lookup("direction"); flag == nil {
+		t.Fatal("deps command missing direction flag")
+	} else if flag.DefValue != "out" {
+		t.Fatalf("deps direction default=%q want out", flag.DefValue)
+	}
+	if flag := cmd.Flags().Lookup("edge-set"); flag == nil {
+		t.Fatal("deps command missing edge-set flag")
+	} else if flag.DefValue != "[structural]" {
+		t.Fatalf("deps edge-set default=%q want [structural]", flag.DefValue)
 	}
 }
 

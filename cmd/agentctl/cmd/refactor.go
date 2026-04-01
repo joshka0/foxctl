@@ -13,13 +13,16 @@ import (
 
 	"github.com/jkatigb/agentctl/cmd/agentctl/cmd/memorycmd"
 	"github.com/jkatigb/agentctl/internal/domain/skill"
+	"github.com/jkatigb/agentctl/internal/indexing/repoindex"
 	"github.com/jkatigb/agentctl/internal/platform/buildinfo"
 	"github.com/jkatigb/agentctl/internal/platform/config"
 	"github.com/jkatigb/agentctl/internal/protocol"
+	refdeps "github.com/jkatigb/agentctl/internal/refactor/deps"
 	refscope "github.com/jkatigb/agentctl/internal/refactor/scope"
 	refsnapshot "github.com/jkatigb/agentctl/internal/refactor/snapshot"
 	refsnapshotstore "github.com/jkatigb/agentctl/internal/refactor/snapshotstore"
 	refstatus "github.com/jkatigb/agentctl/internal/refactor/status"
+	"github.com/jkatigb/agentctl/internal/repoquery"
 	"github.com/jkatigb/agentctl/internal/storage/cas"
 	"github.com/spf13/cobra"
 )
@@ -36,6 +39,7 @@ func newRefactorCommand() *cobra.Command {
 	cmd.AddCommand(
 		newRefactorStatusCommand(),
 		newRefactorSnapshotCommand(),
+		newRefactorDepsCommand(),
 		newRefactorScoutCommand(),
 		newRefactorAdvisorCommand(),
 	)
@@ -83,6 +87,46 @@ func newRefactorSnapshotCommand() *cobra.Command {
 	cmd.Flags().StringVar(&workspace, "workspace", ".", "Workspace root override")
 	cmd.Flags().StringVar(&language, "language", "auto", "Single language to analyze (auto|go|python|javascript|typescript|elixir)")
 	cmd.Flags().BoolVar(&includeTests, "include-tests", false, "Include test files")
+	return cmd
+}
+
+func newRefactorDepsCommand() *cobra.Command {
+	var (
+		path         string
+		workspace    string
+		language     string
+		includeTests bool
+		seeds        []string
+		query        string
+		seedLimit    int
+		edgeSets     []string
+		edgeTypes    []string
+		direction    string
+		depth        int
+		budget       int
+		perNodeCap   int
+	)
+
+	cmd := &cobra.Command{
+		Use:   "deps",
+		Short: "Expand forward or reverse repoindex dependencies for a scoped seed",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			return runRefactorDeps(cmd, workspace, path, language, includeTests, seeds, query, seedLimit, edgeSets, edgeTypes, direction, depth, budget, perNodeCap)
+		},
+	}
+	cmd.Flags().StringVar(&path, "path", ".", "File or directory scope used for seed resolution and reporting")
+	cmd.Flags().StringVar(&workspace, "workspace", ".", "Workspace root override")
+	cmd.Flags().StringVar(&language, "language", "auto", "Single language to analyze (auto|go|python|javascript|typescript|elixir)")
+	cmd.Flags().BoolVar(&includeTests, "include-tests", false, "Include test files")
+	cmd.Flags().StringArrayVar(&seeds, "seed", nil, "Explicit repoindex node ID seed (repeatable)")
+	cmd.Flags().StringVar(&query, "query", "", "Search query used to resolve seed nodes within the scoped path")
+	cmd.Flags().IntVar(&seedLimit, "seed-limit", 5, "Maximum resolved seed nodes when using --query")
+	cmd.Flags().StringArrayVar(&edgeSets, "edge-set", []string{"structural"}, "Named edge set to traverse (structural|doc|all)")
+	cmd.Flags().StringArrayVar(&edgeTypes, "edge", nil, "Explicit edge types to traverse (repeatable)")
+	cmd.Flags().StringVar(&direction, "direction", "out", "Traversal direction (out|in)")
+	cmd.Flags().IntVar(&depth, "depth", 1, "Traversal depth")
+	cmd.Flags().IntVar(&budget, "budget", 50, "Maximum nodes to retain in the traversal")
+	cmd.Flags().IntVar(&perNodeCap, "per-node-cap", 50, "Maximum edges to follow per frontier node")
 	return cmd
 }
 
@@ -321,6 +365,94 @@ func runRefactorSnapshot(cmd *cobra.Command, workspace, path, language string, i
 		"created_at":  payload.CreatedAt,
 	}
 	env := protocol.OK("refactor.snapshot", data, protocol.WithSource("cli"), protocol.WithWorkspace(scope.Workspace), protocol.WithCASDigest(artifact))
+	return protocol.Write(cmd.OutOrStdout(), env)
+}
+
+func runRefactorDeps(cmd *cobra.Command, workspace, path, language string, includeTests bool, seeds []string, query string, seedLimit int, edgeSets, edgeTypes []string, direction string, depth, budget, perNodeCap int) error {
+	ctx := cmd.Context()
+
+	cfg, err := loadConfig(ctx)
+	if err != nil {
+		return fmt.Errorf("load config: %w", err)
+	}
+
+	scope, err := refscope.Resolve(refscope.Input{
+		Workspace:    workspace,
+		Path:         path,
+		Language:     language,
+		IncludeTests: includeTests,
+	})
+	if err != nil {
+		return writeRefactorScopeError(cmd, "refactor.deps", workspace, err)
+	}
+
+	status := refstatus.Evaluate(ctx, cfg.Storage.Root, scope)
+	if !status.RepoIndex.Available {
+		hint := fmt.Sprintf("Build the repo index first, for example: agentctl index repo build --workspace %s", scope.Workspace)
+		env := protocol.Error("refactor.deps", protocol.ErrorCodeERuntime, "refactor deps requires an available repo index", protocol.ErrorData{Hint: hint}, protocol.WithSource("cli"), protocol.WithWorkspace(scope.Workspace))
+		if writeErr := protocol.Write(cmd.OutOrStdout(), env); writeErr != nil {
+			return fmt.Errorf("write refactor deps error envelope: %w", writeErr)
+		}
+		return fmt.Errorf("refactor deps requires repo index")
+	}
+
+	store, err := repoindex.Open(ctx, cfg.Storage.Root, scope.Workspace)
+	if err != nil {
+		return fmt.Errorf("open repoindex store: %w", err)
+	}
+	defer store.Close()
+
+	service := repoquery.NewQueryService(repoindex.NewQueryEngine(store))
+	request, err := refdeps.BuildRequest(ctx, service, refdeps.Input{
+		Scope:      scope,
+		Status:     status,
+		Seeds:      seeds,
+		Query:      query,
+		SeedLimit:  seedLimit,
+		EdgeSets:   edgeSets,
+		EdgeTypes:  edgeTypes,
+		Direction:  direction,
+		Depth:      depth,
+		Budget:     budget,
+		PerNodeCap: perNodeCap,
+	})
+	if err != nil {
+		if buildErr, ok := err.(*refdeps.BuildError); ok {
+			env := protocol.Error("refactor.deps", protocol.ErrorCodeEARG, buildErr.Message, protocol.ErrorData{Hint: buildErr.Hint}, protocol.WithSource("cli"), protocol.WithWorkspace(scope.Workspace))
+			if writeErr := protocol.Write(cmd.OutOrStdout(), env); writeErr != nil {
+				return fmt.Errorf("write refactor deps error envelope: %w", writeErr)
+			}
+			return fmt.Errorf("build refactor deps request: %w", err)
+		}
+		env := protocol.Error("refactor.deps", protocol.ErrorCodeEARG, err.Error(), protocol.ErrorData{Hint: "Use --direction in|out, --edge-set structural|doc|all, or explicit repoindex edge types with --edge."}, protocol.WithSource("cli"), protocol.WithWorkspace(scope.Workspace))
+		if writeErr := protocol.Write(cmd.OutOrStdout(), env); writeErr != nil {
+			return fmt.Errorf("write refactor deps error envelope: %w", writeErr)
+		}
+		return fmt.Errorf("build refactor deps request: %w", err)
+	}
+
+	result, err := service.ExpandWithProjection(ctx, request.Request)
+	if err != nil {
+		return fmt.Errorf("expand refactor deps graph: %w", err)
+	}
+
+	data := map[string]any{
+		"scope":           scope,
+		"index_mode":      string(request.IndexMode),
+		"reasons":         request.Reasons,
+		"seed_query":      request.SeedQuery,
+		"seed_candidates": request.SeedCandidates,
+		"seeds":           request.Request.Seeds,
+		"edge_sets":       edgeSets,
+		"edges":           repoquery.EdgeTypeValues(request.Request.EdgeTypes),
+		"direction":       string(request.Request.Direction),
+		"depth":           request.Request.Depth,
+		"budget":          request.Request.Budget,
+		"per_node_cap":    request.Request.PerNodeCap,
+		"result":          result.Result,
+		"anchors":         result.Anchors,
+	}
+	env := protocol.OK("refactor.deps", data, protocol.WithSource("cli"), protocol.WithWorkspace(scope.Workspace))
 	return protocol.Write(cmd.OutOrStdout(), env)
 }
 
