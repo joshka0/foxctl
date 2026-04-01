@@ -152,6 +152,7 @@ func (b *Builder) Build(ctx context.Context, opts BuildOptions) (BuildResult, er
 		HeadSHA:       resolveGitHead(ctx, opts.RepoRoot),
 		SchemaVersion: schemaVersion,
 		IndexedAt:     time.Now().UTC(),
+		Languages:     buildLanguages(opts),
 	}
 	if err := b.store.SetMeta(ctx, meta); err != nil {
 		return result, err
@@ -1309,4 +1310,27 @@ func resolveGitHead(ctx context.Context, repoRoot string) string {
 		return ""
 	}
 	return strings.TrimSpace(string(output))
+}
+
+func buildLanguages(opts BuildOptions) []string {
+	languages := make([]string, 0, 6)
+	if opts.IncludeGo {
+		languages = append(languages, "go")
+	}
+	if opts.IncludeTypescript {
+		languages = append(languages, "typescript")
+	}
+	if opts.IncludeElixir {
+		languages = append(languages, "elixir")
+	}
+	if opts.IncludeTerraform {
+		languages = append(languages, "terraform")
+	}
+	if opts.IncludeKubernetes {
+		languages = append(languages, "kubernetes")
+	}
+	if opts.IncludeShell {
+		languages = append(languages, "shell")
+	}
+	return languages
 }

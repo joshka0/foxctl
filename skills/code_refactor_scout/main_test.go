@@ -96,6 +96,56 @@ func DoThing(a int, b int, c int, d bool, e string, f string) (int, string, erro
 	}
 }
 
+func TestAnalyzeGoFuncDeclFindsDuplicateRecoveryBlock(t *testing.T) {
+	src := `package sample
+
+func recoverThing(a, b bool) error {
+	if a {
+		logFailure()
+		return errRetry
+	}
+	if b {
+		logFailure()
+		return errRetry
+	}
+	return nil
+}
+`
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, "sample.go", src, parser.ParseComments)
+	if err != nil {
+		t.Fatalf("parse go file: %v", err)
+	}
+
+	state := &scoutState{
+		Thresholds: thresholdsFor("default"),
+	}
+
+	var got []finding
+	for _, decl := range file.Decls {
+		fn, ok := decl.(*ast.FuncDecl)
+		if !ok {
+			continue
+		}
+		got = append(got, analyzeGoFuncDecl(fn, fset, "sample.go", state)...)
+	}
+
+	for _, item := range got {
+		if item.RuleID != "duplicate_recovery_block" {
+			continue
+		}
+		if item.Symbol != "recoverThing" {
+			t.Fatalf("symbol=%q want recoverThing", item.Symbol)
+		}
+		if gotLines, ok := item.Evidence["duplicate_span_lines"].([]int); !ok || len(gotLines) != 2 || gotLines[0] != 4 || gotLines[1] != 8 {
+			t.Fatalf("duplicate_span_lines=%#v", item.Evidence["duplicate_span_lines"])
+		}
+		return
+	}
+
+	t.Fatalf("expected duplicate_recovery_block finding, got %#v", got)
+}
+
 func TestFinalizeReceiverHotspots(t *testing.T) {
 	state := &scoutState{
 		Thresholds: thresholdsFor("default"),
@@ -125,7 +175,7 @@ func TestResolveLanguageScopeRejectsMixedDirectoryAuto(t *testing.T) {
 		t.Fatalf("stat dir: %v", err)
 	}
 
-	_, err = resolveLanguageScope(dir, info, input{Language: "auto"})
+	_, err = resolveLanguageScope(dir, dir, info, input{Language: "auto"})
 	if err == nil {
 		t.Fatal("expected mixed-language auto scope to fail")
 	}
@@ -141,7 +191,7 @@ func TestResolveLanguageScopeInfersSingleDirectoryLanguage(t *testing.T) {
 		t.Fatalf("stat dir: %v", err)
 	}
 
-	scope, err := resolveLanguageScope(dir, info, input{Language: "auto"})
+	scope, err := resolveLanguageScope(dir, dir, info, input{Language: "auto"})
 	if err != nil {
 		t.Fatalf("resolve scope: %v", err)
 	}
@@ -216,6 +266,41 @@ func TestSynthesizeCompositeFindingsAddsFunctionHotspot(t *testing.T) {
 	}
 	if !found {
 		t.Fatal("expected function_hotspot finding")
+	}
+}
+
+func TestApplyFocusSlopFiltersToSlopFindings(t *testing.T) {
+	items := []finding{
+		{RuleID: "duplicate_recovery_block", Symbol: "Recover", Score: 84},
+		{RuleID: "duplicated_error_remap", Symbol: "Recover", Score: 83},
+		{RuleID: "repeated_guard_ladder", Symbol: "Recover", Score: 82},
+		{RuleID: "high_cyclomatic_complexity", Symbol: "Complex", Score: 88},
+		{
+			RuleID: "function_hotspot",
+			Symbol: "Recover",
+			Evidence: map[string]any{
+				"rules": []string{"repeated_guard_ladder", "high_cyclomatic_complexity"},
+			},
+		},
+	}
+
+	got := applyFocus(items, "slop")
+	if len(got) != 4 {
+		t.Fatalf("len(got)=%d want 4 (%#v)", len(got), got)
+	}
+	for _, item := range got {
+		if item.RuleID == "high_cyclomatic_complexity" {
+			t.Fatalf("non-slop finding survived focus filter: %#v", item)
+		}
+	}
+}
+
+func TestShouldSuppressConstituentFindings(t *testing.T) {
+	if shouldSuppressConstituentFindings("slop") {
+		t.Fatal("slop focus should keep constituent findings visible")
+	}
+	if !shouldSuppressConstituentFindings("all") {
+		t.Fatal("all focus should suppress constituent findings behind hotspots")
 	}
 }
 

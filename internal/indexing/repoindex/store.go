@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
@@ -20,6 +21,11 @@ const (
 	schemaVersion            = 3
 	openContextMinimumBudget = 10 * time.Second
 )
+
+// SchemaVersion returns the current repoindex schema version.
+func SchemaVersion() int {
+	return schemaVersion
+}
 
 // ErrNotFound indicates the requested node or edge was not found.
 var ErrNotFound = errors.New("not found")
@@ -163,6 +169,15 @@ func (s *Store) SetMeta(ctx context.Context, meta IndexMeta) error {
 	if err := setMetaValue(ctx, tx, "indexed_at_unix", fmt.Sprintf("%d", meta.IndexedAt.Unix())); err != nil {
 		return err
 	}
+	if meta.Languages != nil {
+		data, err := json.Marshal(meta.Languages)
+		if err != nil {
+			return err
+		}
+		if err := setMetaValue(ctx, tx, "languages_json", string(data)); err != nil {
+			return err
+		}
+	}
 
 	return tx.Commit()
 }
@@ -193,6 +208,13 @@ func (s *Store) GetMeta(ctx context.Context) (IndexMeta, error) {
 		case "indexed_at_unix":
 			if parsed, err := parseInt64(value); err == nil {
 				meta.IndexedAt = time.Unix(parsed, 0).UTC()
+			}
+		case "languages_json":
+			if strings.TrimSpace(value) != "" {
+				var languages []string
+				if err := json.Unmarshal([]byte(value), &languages); err == nil {
+					meta.Languages = languages
+				}
 			}
 		}
 	}

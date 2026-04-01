@@ -24,6 +24,12 @@ signature:
       required: true
       enum: ["go", "python", "javascript", "typescript", "elixir"]
       description: "Single language to analyze"
+    - name: focus
+      type: string
+      required: false
+      enum: ["all", "slop"]
+      default: "all"
+      description: "Optional focus filter passed through to the local scout"
     - name: rule_set
       type: string
       required: false
@@ -116,6 +122,7 @@ signature:
         agentctl run code/refactor_advisor --input '{
           "path":"./internal",
           "language":"go",
+          "focus":"slop",
           "shortlist_size":3
         }'
 capabilities:

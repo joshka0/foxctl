@@ -7,8 +7,17 @@ hotspot discovery and shortlist planning.
 
 There are two entrypoints:
 
+- `agentctl refactor status`
+- `agentctl refactor snapshot`
 - `agentctl refactor scout`
 - `agentctl refactor advisor`
+
+`refactor status` reports whether a given refactor scope will run
+`index_backed` or fall back to `parser_only`, along with the concrete reason
+codes for that decision.
+
+`refactor snapshot` freezes a single-language scope into a deterministic
+artifact-backed payload and records a small metadata row for later lookup.
 
 `refactor scout` is the primary deterministic retrieval lane. It ranks likely
 refactor seams and hotspots from local code structure.
@@ -21,17 +30,41 @@ or sequence the findings. The scout remains the source of discovery truth.
 Run the scout directly:
 
 ```bash
+agentctl refactor status --path ./internal --language go
+agentctl refactor snapshot --path ./internal --language go
 agentctl refactor scout --path . --language go
 agentctl refactor scout --path ./packages --language typescript
 agentctl refactor scout --path ./scripts --language python
 agentctl refactor scout --path apps/praze-api/lib --language elixir
+agentctl refactor scout --path ./internal --language go --focus slop
 ```
 
 Run the two-stage advisor:
 
 ```bash
 agentctl refactor advisor --path ./internal --language go
+agentctl refactor advisor --path ./internal --language go --focus slop
 ```
+
+Typical `refactor status` reads:
+
+- `index_backed`:
+  the repo index exists, matches the current Git HEAD, and includes the scoped
+  language
+- `parser_only`:
+  the refactor run will still work, but it will not attach repo-index evidence
+  such as freshness-checked graph support
+
+Current reason codes include:
+
+- `repoindex_missing`
+- `repoindex_open_failed`
+- `repoindex_meta_unavailable`
+- `repoindex_stats_unavailable`
+- `repoindex_schema_mismatch`
+- `repoindex_head_mismatch`
+- `git_head_unavailable`
+- `scope_language_not_indexed`
 
 Important operating rules:
 
@@ -47,6 +80,9 @@ Current rule families include:
 - function hotspots:
   - `function_hotspot`
   - `fan_out_dependency_spread`
+  - `duplicate_recovery_block`
+  - `duplicated_error_remap`
+  - `repeated_guard_ladder`
   - `duplicate_orchestration_fingerprint`
   - `same_file_extraction_candidate`
 - file and module seams:
@@ -69,6 +105,15 @@ Cluster findings are classified into seam kinds:
 - `thin_wrapper_api_layer`
 - `shared_operation_family`
 
+Focused usage:
+
+- `--focus slop` filters the scout/advisor view toward slop-shaped cleanup
+  findings *(in this repo's terms: duplicated recovery blocks, duplicate
+  error remaps, repeated guard predicates, duplicate orchestration, and closely
+  related extraction candidates)*.
+- `refactor scout` now also emits `data.index_mode` so downstream review flows
+  can tell whether a run was parser-only or index-backed.
+
 ## Language Read
 
 Current confidence by language:
@@ -82,7 +127,9 @@ Current confidence by language:
   useful for function hotspots and smaller operation families, but weaker than
   Go and TS
 - Elixir:
-  now useful for namespace-scoped module seams and file seams, but still more
+  now useful for namespace-scoped module seams, file seams, and first-pass slop
+  detection on repeated `if` guards, duplicated guarded recovery blocks, and
+  repeated rescue-side or tuple-style clause error remaps, but still more
   sensitive to broad helper families than Go
 
 ## ACA Fit

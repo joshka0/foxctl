@@ -25,6 +25,12 @@ signature:
       enum: ["auto", "go", "python", "javascript", "typescript", "elixir"]
       default: "auto"
       description: "Restrict analysis to one language or auto-detect by extension"
+    - name: focus
+      type: string
+      required: false
+      enum: ["all", "slop"]
+      default: "all"
+      description: "Optional focus filter for one finding family"
     - name: include_tests
       type: boolean
       required: false
@@ -74,6 +80,9 @@ signature:
       - Mixed-language directories require an explicit --language selection
 
       Current rule families:
+      - duplicate_recovery_block
+      - duplicated_error_remap
+      - repeated_guard_ladder
       - long_parameter_list
       - boolean_parameter
       - wide_return_tuple
@@ -102,6 +111,7 @@ signature:
       Example commands:
         agentctl run code/refactor_scout --input '{"path":"./internal","rule_set":"default"}'
         agentctl run code/refactor_scout --input '{"path":"./internal/indexing","language":"go","min_score":60}'
+        agentctl run code/refactor_scout --input '{"path":"./internal","language":"go","focus":"slop"}'
         agentctl skills run code/refactor_scout --path ./internal --rule_set aggressive
     workflows:
       - id: go-hotspots

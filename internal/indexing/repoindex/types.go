@@ -135,6 +135,7 @@ type IndexMeta struct {
 	HeadSHA       string    `json:"head_sha,omitempty"`
 	SchemaVersion int       `json:"schema_version"`
 	IndexedAt     time.Time `json:"indexed_at"`
+	Languages     []string  `json:"languages,omitempty"`
 }
 
 // Stats summarizes node and edge counts.

@@ -14,12 +14,15 @@ import (
 	"strings"
 
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/fsutil"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/hashutil"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/langutil"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/pathutil"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillerr"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
 	symindex "github.com/jkatigb/agentctl/internal/indexing/symbol"
+	refscope "github.com/jkatigb/agentctl/internal/refactor/scope"
+	refstatus "github.com/jkatigb/agentctl/internal/refactor/status"
 )
 
 const command = "code/refactor_scout"
@@ -34,6 +37,7 @@ const (
 type input struct {
 	Path         string `json:"path"`
 	Language     string `json:"language" validate:"omitempty,oneof=auto go python javascript typescript elixir"`
+	Focus        string `json:"focus" validate:"omitempty,oneof=all slop"`
 	IncludeTests bool   `json:"include_tests"`
 	MaxResults   int    `json:"max_results" validate:"gte=0"`
 	MinScore     int    `json:"min_score" validate:"gte=0,lte=100"`
@@ -138,6 +142,9 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	if in.Language == "" {
 		in.Language = "auto"
 	}
+	if in.Focus == "" {
+		in.Focus = "all"
+	}
 	if in.MaxResults <= 0 {
 		in.MaxResults = 100
 	}
@@ -158,7 +165,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 		return skillerr.WrapIO("stat path", err)
 	}
 
-	scope, err := resolveLanguageScope(searchPath, info, in)
+	scope, err := resolveLanguageScope(workspace, searchPath, info, in)
 	if err != nil {
 		return err
 	}
@@ -188,7 +195,10 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	finalizeObservationFindings(state)
 	finalizeReceiverHotspots(state)
 	hotspotSymbols := synthesizeCompositeFindings(state)
-	suppressConstituentFindings(state, hotspotSymbols)
+	if shouldSuppressConstituentFindings(in.Focus) {
+		suppressConstituentFindings(state, hotspotSymbols)
+	}
+	state.Findings = applyFocus(state.Findings, in.Focus)
 
 	filtered := make([]finding, 0, len(state.Findings))
 	for _, item := range state.Findings {
@@ -212,9 +222,21 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 		return err
 	}
 
+	indexStatus := refstatus.Evaluate(ctx, rc.Config.Storage.Root, refscope.Scope{
+		Workspace: workspace,
+		RepoRoot:  workspace,
+		Path:      pathutil.RelativePath(workspace, searchPath),
+		Absolute:  searchPath,
+		Mode:      scope.Mode,
+		Language:  scope.Language,
+		Detected:  append([]string(nil), scope.Detected...),
+		IsDir:     info.IsDir(),
+	})
+
 	data := map[string]any{
 		"findings":       previewResult.Preview,
 		"language_scope": scope,
+		"index_mode":     string(indexStatus.Mode),
 		"summary": map[string]any{
 			"scanned_files":      state.ScannedFiles,
 			"scanned_symbols":    state.ScannedSymbols,
@@ -225,11 +247,13 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 			"limited_by_results": limitedByMaxResults,
 		},
 		"rule_set": in.RuleSet,
+		"focus":    in.Focus,
 		"signals": map[string]any{
 			"symbol_signatures": true,
 			"go_ast":            true,
 			"call_extraction":   true,
-			"repo_graph":        false,
+			"slop_focus":        in.Focus == "slop",
+			"repo_graph":        indexStatus.Mode == refstatus.ModeIndexBacked,
 		},
 	}
 	skillout.AddArtifact(data, previewResult.Artifact)
@@ -237,85 +261,42 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	return skillout.Emit(rc, command, data)
 }
 
-func resolveLanguageScope(searchPath string, info fs.FileInfo, in input) (languageScope, error) {
-	if strings.TrimSpace(in.Language) != "" && in.Language != "auto" {
-		return languageScope{
-			Mode:     "explicit",
-			Language: in.Language,
-			Detected: []string{in.Language},
-		}, nil
-	}
-
-	if !info.IsDir() {
-		lang := langutil.DetectAllowed(searchPath, langutil.CommonCodeLanguages)
-		if lang == "" {
-			return languageScope{}, skillerr.Validation("unsupported file type",
-				skillerr.WithHint("Pass a supported source file or specify --language for a supported code family."),
-			)
-		}
-		return languageScope{
-			Mode:     "auto_file",
-			Language: lang,
-			Detected: []string{lang},
-		}, nil
-	}
-
-	detected, err := discoverLanguages(searchPath, in.IncludeTests)
+func resolveLanguageScope(workspace, searchPath string, info fs.FileInfo, in input) (languageScope, error) {
+	resolved, err := refscope.ResolveResolvedPath(workspace, searchPath, info, in.Language, in.IncludeTests)
 	if err != nil {
-		return languageScope{}, err
+		if resolveErr, ok := err.(*refscope.ResolveError); ok {
+			return languageScope{}, skillerr.Validation(resolveErr.Message, skillerr.WithHint(resolveErr.Hint))
+		}
+		return languageScope{}, skillerr.WrapIO("resolve language scope", err)
 	}
-	switch len(detected) {
-	case 0:
-		return languageScope{}, skillerr.Validation("no supported source files found",
-			skillerr.WithHint("Point the scout at a source directory or set --language to the language you want to refactor."),
-		)
-	case 1:
-		return languageScope{
-			Mode:     "auto_directory_single_language",
-			Language: detected[0],
-			Detected: detected,
-		}, nil
-	default:
-		return languageScope{}, skillerr.Validation(
-			fmt.Sprintf("multiple languages detected in %s: %s", searchPath, strings.Join(detected, ", ")),
-			skillerr.WithHint("Refactor scouting is intentionally single-language per run. Re-run with --language set to one language."),
-		)
-	}
+	return languageScope{
+		Mode:     resolved.Mode,
+		Language: resolved.Language,
+		Detected: resolved.Detected,
+	}, nil
 }
 
 func discoverLanguages(dir string, includeTests bool) ([]string, error) {
-	found := make(map[string]struct{})
-	err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, walkErr error) error {
-		if walkErr != nil {
-			return nil
-		}
-		if fsutil.ShouldSkipHiddenOrCommon(d.Name()) {
-			if d.IsDir() {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		if d.IsDir() {
-			return nil
-		}
-		if !includeTests && fsutil.IsTestFile(d.Name()) {
-			return nil
-		}
-		lang := langutil.DetectAllowed(path, langutil.CommonCodeLanguages)
-		if lang != "" {
-			found[lang] = struct{}{}
-		}
-		return nil
-	})
+	info, err := os.Stat(dir)
 	if err != nil {
 		return nil, skillerr.WrapIO("discover languages", err)
 	}
-	out := make([]string, 0, len(found))
-	for lang := range found {
-		out = append(out, lang)
+	resolved, err := refscope.ResolveResolvedPath(dir, dir, info, "auto", includeTests)
+	if err != nil {
+		if resolveErr, ok := err.(*refscope.ResolveError); ok {
+			if strings.Contains(resolveErr.Message, "multiple languages detected") {
+				parts := strings.Split(resolveErr.Message, ": ")
+				if len(parts) == 2 {
+					return strings.Split(parts[1], ", "), nil
+				}
+			}
+			if strings.Contains(resolveErr.Message, "no supported source files found") {
+				return nil, nil
+			}
+		}
+		return nil, skillerr.WrapIO("discover languages", err)
 	}
-	sort.Strings(out)
-	return out, nil
+	return resolved.Detected, nil
 }
 
 func analyzeDirectory(ctx context.Context, dir string, in input, state *scoutState) error {
@@ -376,6 +357,16 @@ func analyzeFile(ctx context.Context, path, workspace string, in input, state *s
 	switch lang {
 	case "go":
 		return analyzeGoFile(path, relPath, content, state)
+	case "typescript", "javascript":
+		applySignatureFindings(relPath, lang, symbols, state)
+		state.Findings = append(state.Findings, analyzeTypeScriptDuplicateRecoveryBlocks(path, relPath, lang, content, symbols)...)
+		state.Findings = append(state.Findings, analyzeTypeScriptDuplicatedErrorRemaps(path, relPath, lang, content, symbols)...)
+		state.Findings = append(state.Findings, analyzeTypeScriptRepeatedGuardLadders(path, relPath, lang, content, symbols)...)
+	case "elixir":
+		applySignatureFindings(relPath, lang, symbols, state)
+		state.Findings = append(state.Findings, analyzeElixirDuplicateRecoveryBlocks(path, relPath, lang, content, symbols)...)
+		state.Findings = append(state.Findings, analyzeElixirDuplicatedErrorRemaps(path, relPath, lang, content, symbols)...)
+		state.Findings = append(state.Findings, analyzeElixirRepeatedGuardLadders(path, relPath, lang, content, symbols)...)
 	default:
 		applySignatureFindings(relPath, lang, symbols, state)
 	}
@@ -781,6 +772,8 @@ func analyzeGoFuncDecl(fn *ast.FuncDecl, fset *token.FileSet, relPath string, st
 			},
 		})
 	}
+
+	findings = append(findings, analyzeDuplicateRecoveryBlocks(fn, fset, relPath, name)...)
 
 	return findings
 }
@@ -2916,7 +2909,7 @@ func isFunctionConstituent(item finding) bool {
 	switch item.RuleID {
 	case "long_parameter_list", "boolean_parameter", "wide_return_tuple",
 		"oversized_function", "high_cyclomatic_complexity", "deep_nesting", "oversized_symbol",
-		"fan_out_dependency_spread", "duplicate_orchestration_fingerprint", "same_file_extraction_candidate":
+		"fan_out_dependency_spread", "duplicate_orchestration_fingerprint", "duplicate_recovery_block", "duplicated_error_remap", "repeated_guard_ladder", "same_file_extraction_candidate":
 		return strings.TrimSpace(item.Symbol) != ""
 	default:
 		return false
@@ -2939,11 +2932,15 @@ func suppressConstituentFindings(state *scoutState, hotspotSymbols map[string]st
 	state.Findings = filtered
 }
 
+func shouldSuppressConstituentFindings(focus string) bool {
+	return strings.TrimSpace(focus) != "slop"
+}
+
 func hotspotRuleMix(rules map[string]finding) (structural, signature, supportive int) {
 	for ruleID := range rules {
 		switch ruleID {
 		case "high_cyclomatic_complexity", "oversized_function", "deep_nesting",
-			"fan_out_dependency_spread", "duplicate_orchestration_fingerprint":
+			"fan_out_dependency_spread", "duplicate_orchestration_fingerprint", "duplicate_recovery_block", "duplicated_error_remap", "repeated_guard_ladder":
 			structural++
 		case "long_parameter_list", "boolean_parameter", "wide_return_tuple":
 			signature++
@@ -3464,26 +3461,32 @@ func rulePriority(ruleID string) int {
 	switch ruleID {
 	case "function_hotspot":
 		return 0
-	case "duplicate_orchestration_fingerprint":
+	case "duplicated_error_remap":
 		return 1
-	case "structural_similarity_module_cluster":
+	case "duplicate_recovery_block":
 		return 2
-	case "structural_similarity_cluster":
+	case "repeated_guard_ladder":
 		return 3
-	case "call_family_module_cluster":
+	case "duplicate_orchestration_fingerprint":
 		return 4
-	case "call_family_cluster":
+	case "structural_similarity_module_cluster":
 		return 5
-	case "same_file_extraction_candidate":
+	case "structural_similarity_cluster":
 		return 6
-	case "fan_out_dependency_spread":
+	case "call_family_module_cluster":
 		return 7
-	case "complexity_cluster":
+	case "call_family_cluster":
 		return 8
-	case "receiver_hotspot":
+	case "same_file_extraction_candidate":
 		return 9
-	case "god_file":
+	case "fan_out_dependency_spread":
 		return 10
+	case "complexity_cluster":
+		return 11
+	case "receiver_hotspot":
+		return 12
+	case "god_file":
+		return 13
 	default:
 		return 10
 	}
@@ -3878,7 +3881,9 @@ func goStmtFingerprint(stmt ast.Stmt, metrics *goOrchestrationMetrics) string {
 		}
 		return "return(" + strings.Join(parts, ",") + ")"
 	case *ast.IfStmt:
-		metrics.BranchCount++
+		if metrics != nil {
+			metrics.BranchCount++
+		}
 		body := goBlockFingerprint(node.Body, metrics)
 		elseShape := ""
 		if node.Else != nil {
@@ -3886,19 +3891,29 @@ func goStmtFingerprint(stmt ast.Stmt, metrics *goOrchestrationMetrics) string {
 		}
 		return "if(" + goExprFingerprint(node.Cond, metrics) + "){" + body + "}" + elseShape
 	case *ast.ForStmt:
-		metrics.BranchCount++
+		if metrics != nil {
+			metrics.BranchCount++
+		}
 		return "for{" + goBlockFingerprint(node.Body, metrics) + "}"
 	case *ast.RangeStmt:
-		metrics.BranchCount++
+		if metrics != nil {
+			metrics.BranchCount++
+		}
 		return "range(" + goExprFingerprint(node.X, metrics) + "){" + goBlockFingerprint(node.Body, metrics) + "}"
 	case *ast.SwitchStmt:
-		metrics.BranchCount++
+		if metrics != nil {
+			metrics.BranchCount++
+		}
 		return "switch{" + goCaseBlockFingerprint(node.Body, metrics) + "}"
 	case *ast.TypeSwitchStmt:
-		metrics.BranchCount++
+		if metrics != nil {
+			metrics.BranchCount++
+		}
 		return "typeswitch{" + goCaseBlockFingerprint(node.Body, metrics) + "}"
 	case *ast.SelectStmt:
-		metrics.BranchCount++
+		if metrics != nil {
+			metrics.BranchCount++
+		}
 		return "select{" + goCaseBlockFingerprint(node.Body, metrics) + "}"
 	case *ast.DeferStmt:
 		return "defer(" + goExprFingerprint(node.Call, metrics) + ")"
@@ -3973,7 +3988,9 @@ func goCaseBlockFingerprint(block *ast.BlockStmt, metrics *goOrchestrationMetric
 func goExprFingerprint(expr ast.Expr, metrics *goOrchestrationMetrics) string {
 	switch node := expr.(type) {
 	case *ast.CallExpr:
-		metrics.CallSiteCount++
+		if metrics != nil {
+			metrics.CallSiteCount++
+		}
 		return goCallFingerprint(node)
 	case *ast.BinaryExpr:
 		return "bin(" + strings.ToLower(node.Op.String()) + "," + goExprFingerprint(node.X, metrics) + "," + goExprFingerprint(node.Y, metrics) + ")"
@@ -4004,6 +4021,201 @@ func goExprFingerprint(expr ast.Expr, metrics *goOrchestrationMetrics) string {
 	default:
 		return fmt.Sprintf("%T", expr)
 	}
+}
+
+type duplicateRecoveryCandidate struct {
+	Fingerprint      string
+	StartLine        int
+	Lines            []int
+	StatementCount   int
+	ControlTransfers int
+}
+
+func analyzeDuplicateRecoveryBlocks(fn *ast.FuncDecl, fset *token.FileSet, relPath, name string) []finding {
+	groups := findDuplicateRecoveryBlocks(fn, fset)
+	if len(groups) == 0 {
+		return nil
+	}
+	findings := make([]finding, 0, len(groups))
+	for _, group := range groups {
+		score := scoreDuplicateRecoveryBlock(len(group.Lines), group.StatementCount)
+		findings = append(findings, finding{
+			RuleID:            "duplicate_recovery_block",
+			Category:          "function",
+			Severity:          severityFor(score),
+			Score:             score,
+			Title:             "Function repeats the same guarded recovery block",
+			Detail:            fmt.Sprintf("%s repeats a normalized guarded block %d times, which is a strong signal that the recovery or fallback path wants one helper instead of copy-pasted branches.", name, len(group.Lines)),
+			SuggestedRefactor: "Extract the repeated guarded recovery/remap path into a local helper or small policy function, then keep each branch focused on the condition that differs.",
+			File:              relPath,
+			Line:              group.Lines[0],
+			Symbol:            name,
+			Language:          "go",
+			Confidence:        "high",
+			Signals:           []string{"go_ast", "normalized_recovery_block"},
+			Evidence: map[string]any{
+				"normalized_block_hash": hashutil.ShortHash(group.Fingerprint),
+				"duplicate_count":       len(group.Lines),
+				"duplicate_span_lines":  group.Lines,
+				"statement_count":       group.StatementCount,
+				"control_transfers":     group.ControlTransfers,
+			},
+		})
+	}
+	return findings
+}
+
+func findDuplicateRecoveryBlocks(fn *ast.FuncDecl, fset *token.FileSet) []duplicateRecoveryCandidate {
+	if fn == nil || fn.Body == nil || fset == nil {
+		return nil
+	}
+	groups := make(map[string]*duplicateRecoveryCandidate)
+	linesByFingerprint := make(map[string][]int)
+	ast.Inspect(fn.Body, func(n ast.Node) bool {
+		switch node := n.(type) {
+		case *ast.IfStmt:
+			recordDuplicateRecoveryCandidate(groups, linesByFingerprint, blockRecoveryCandidate(node.Body, fset))
+			if block, ok := node.Else.(*ast.BlockStmt); ok {
+				recordDuplicateRecoveryCandidate(groups, linesByFingerprint, blockRecoveryCandidate(block, fset))
+			}
+		}
+		return true
+	})
+	out := make([]duplicateRecoveryCandidate, 0, len(groups))
+	for _, candidate := range groups {
+		if candidate == nil || len(candidate.Fingerprint) == 0 {
+			continue
+		}
+		if candidate.ControlTransfers <= 0 || candidate.StatementCount < 2 {
+			continue
+		}
+		if lines, ok := linesByFingerprint[candidate.Fingerprint]; ok && len(lines) >= 2 {
+			item := *candidate
+			item.Lines = append([]int(nil), lines...)
+			item.StartLine = item.Lines[0]
+			out = append(out, item)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].StartLine != out[j].StartLine {
+			return out[i].StartLine < out[j].StartLine
+		}
+		return out[i].Fingerprint < out[j].Fingerprint
+	})
+	return out
+}
+
+func recordDuplicateRecoveryCandidate(groups map[string]*duplicateRecoveryCandidate, linesByFingerprint map[string][]int, candidate *duplicateRecoveryCandidate) {
+	if groups == nil || candidate == nil || strings.TrimSpace(candidate.Fingerprint) == "" {
+		return
+	}
+	lines := append(linesByFingerprint[candidate.Fingerprint], candidate.StartLine)
+	sort.Ints(lines)
+	linesByFingerprint[candidate.Fingerprint] = lines
+	if existing, ok := groups[candidate.Fingerprint]; ok {
+		existing.ControlTransfers = maxInt(existing.ControlTransfers, candidate.ControlTransfers)
+		existing.StatementCount = maxInt(existing.StatementCount, candidate.StatementCount)
+		return
+	}
+	copyCandidate := *candidate
+	groups[candidate.Fingerprint] = &copyCandidate
+}
+
+func blockRecoveryCandidate(block *ast.BlockStmt, fset *token.FileSet) *duplicateRecoveryCandidate {
+	if block == nil || len(block.List) < 2 {
+		return nil
+	}
+	fingerprint := goBlockFingerprint(block, nil)
+	if strings.TrimSpace(fingerprint) == "" {
+		return nil
+	}
+	if len(tokenizeStructuralFingerprint(fingerprint)) < 3 {
+		return nil
+	}
+	controlTransfers := blockControlTransfers(block)
+	if controlTransfers == 0 {
+		return nil
+	}
+	return &duplicateRecoveryCandidate{
+		Fingerprint:      fingerprint,
+		StartLine:        fset.Position(block.Pos()).Line,
+		StatementCount:   len(block.List),
+		ControlTransfers: controlTransfers,
+	}
+}
+
+func blockControlTransfers(block *ast.BlockStmt) int {
+	if block == nil {
+		return 0
+	}
+	count := 0
+	ast.Inspect(block, func(n ast.Node) bool {
+		switch n.(type) {
+		case *ast.ReturnStmt, *ast.BranchStmt:
+			count++
+		}
+		return true
+	})
+	return count
+}
+
+func scoreDuplicateRecoveryBlock(duplicateCount, stmtCount int) int {
+	score := 74 + minInt(12, maxInt(0, duplicateCount-2)*6) + minInt(8, maxInt(0, stmtCount-2)*2)
+	return clampScore(score)
+}
+
+func applyFocus(items []finding, focus string) []finding {
+	if focus == "" || focus == "all" || len(items) == 0 {
+		return items
+	}
+	filtered := make([]finding, 0, len(items))
+	for _, item := range items {
+		if focusAllowsFinding(item, focus) {
+			filtered = append(filtered, item)
+		}
+	}
+	return filtered
+}
+
+func focusAllowsFinding(item finding, focus string) bool {
+	switch focus {
+	case "slop":
+		return isSlopFinding(item)
+	default:
+		return true
+	}
+}
+
+func isSlopFinding(item finding) bool {
+	switch item.RuleID {
+	case "duplicate_recovery_block", "duplicated_error_remap", "repeated_guard_ladder", "duplicate_orchestration_fingerprint", "same_file_extraction_candidate":
+		return true
+	case "function_hotspot":
+		return compositeIncludesSlopRule(item)
+	default:
+		return false
+	}
+}
+
+func compositeIncludesSlopRule(item finding) bool {
+	if item.Evidence == nil {
+		return false
+	}
+	switch rules := item.Evidence["rules"].(type) {
+	case []string:
+		for _, ruleID := range rules {
+			if isSlopFinding(finding{RuleID: ruleID}) {
+				return true
+			}
+		}
+	case []any:
+		for _, value := range rules {
+			if ruleID, ok := value.(string); ok && isSlopFinding(finding{RuleID: ruleID}) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func goCallFingerprint(call *ast.CallExpr) string {
