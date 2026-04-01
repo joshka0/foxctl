@@ -157,6 +157,7 @@ Recommended internal package:
 3. repoindex schema version matches current schema
 4. repoindex `head_sha` matches current git HEAD
 5. requested scope language is covered by the built index
+6. requested scope path is covered by indexed file nodes for that language
 
 Otherwise:
 
@@ -173,6 +174,7 @@ These are machine-oriented codes, not free-form strings:
 - `repoindex_head_mismatch`
 - `git_head_unavailable`
 - `scope_language_not_indexed`
+- `scope_path_not_indexed`
 - `scope_resolution_failed`
 
 Only the first blocking reason needs to be primary, but the response may include

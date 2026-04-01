@@ -68,6 +68,13 @@ func TestEvaluateIndexBackedWhenHeadAndLanguageMatch(t *testing.T) {
 		Pkg:       "go:example",
 		Name:      "example",
 		UpdatedAt: time.Now().UTC(),
+	}, {
+		ID:        repoindex.FileID(store.RepoKey(), "go:example", "main.go"),
+		Kind:      repoindex.NodeFile,
+		Pkg:       "go:example",
+		File:      "main.go",
+		Name:      "main.go",
+		UpdatedAt: time.Now().UTC(),
 	}}, nil); err != nil {
 		t.Fatal(err)
 	}
@@ -89,6 +96,9 @@ func TestEvaluateIndexBackedWhenHeadAndLanguageMatch(t *testing.T) {
 	}
 	if !got.RepoIndex.Available {
 		t.Fatalf("expected repo index available")
+	}
+	if !got.RepoIndex.ScopeCovered {
+		t.Fatal("expected scope_covered=true")
 	}
 	if got.Git.HeadSHA != head {
 		t.Fatalf("git head=%q want %q", got.Git.HeadSHA, head)
@@ -229,6 +239,101 @@ func TestEvaluateParserOnlyWhenLanguageNotIndexed(t *testing.T) {
 	}
 	if !containsReason(got.Reasons, ReasonScopeLanguageNotIndexed) {
 		t.Fatalf("reasons=%v want %s", got.Reasons, ReasonScopeLanguageNotIndexed)
+	}
+}
+
+func TestEvaluateParserOnlyWhenScopePathNotFullyIndexed(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	_, storageRoot, workspace := setupGitWorkspace(t, ctx)
+	if err := os.MkdirAll(filepath.Join(workspace, "internal", "actor"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(workspace, "internal", "other"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(workspace, "internal", "actor", "actor.go"), []byte("package actor\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(workspace, "internal", "other", "other.go"), []byte("package other\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, ctx, workspace, "add", "internal/actor/actor.go", "internal/other/other.go")
+	runGit(t, ctx, workspace, "-c", "user.email=test@example.com", "-c", "user.name=Test", "commit", "-m", "add internal files")
+
+	store, err := repoindex.Open(ctx, storageRoot, workspace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	head := gitHead(t, ctx, workspace)
+	if err := store.SetMeta(ctx, repoindex.IndexMeta{
+		RepoRoot:      workspace,
+		HeadSHA:       head,
+		SchemaVersion: 3,
+		IndexedAt:     time.Now().UTC(),
+		Languages:     []string{"go"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.ReplaceAll(ctx, []repoindex.Node{
+		{
+			ID:        repoindex.PackageID(store.RepoKey(), "go:example/internal/actor"),
+			Kind:      repoindex.NodePackage,
+			Pkg:       "go:example/internal/actor",
+			Name:      "internal/actor",
+			UpdatedAt: time.Now().UTC(),
+		},
+		{
+			ID:        repoindex.FileID(store.RepoKey(), "go:example/internal/actor", "internal/actor/actor.go"),
+			Kind:      repoindex.NodeFile,
+			Pkg:       "go:example/internal/actor",
+			File:      "internal/actor/actor.go",
+			Name:      "actor.go",
+			UpdatedAt: time.Now().UTC(),
+		},
+	}, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	internalScope := refscope.Scope{
+		Workspace: workspace,
+		RepoRoot:  workspace,
+		Path:      "internal",
+		Absolute:  filepath.Join(workspace, "internal"),
+		Mode:      "explicit",
+		Language:  "go",
+		Detected:  []string{"go"},
+		IsDir:     true,
+	}
+	gotInternal := Evaluate(ctx, storageRoot, internalScope)
+	if gotInternal.Mode != ModeParserOnly {
+		t.Fatalf("internal mode=%q want %q", gotInternal.Mode, ModeParserOnly)
+	}
+	if gotInternal.RepoIndex.ScopeCovered {
+		t.Fatal("expected internal scope_covered=false")
+	}
+	if !containsReason(gotInternal.Reasons, ReasonScopePathNotIndexed) {
+		t.Fatalf("internal reasons=%v want %s", gotInternal.Reasons, ReasonScopePathNotIndexed)
+	}
+
+	actorScope := refscope.Scope{
+		Workspace: workspace,
+		RepoRoot:  workspace,
+		Path:      "internal/actor",
+		Absolute:  filepath.Join(workspace, "internal", "actor"),
+		Mode:      "explicit",
+		Language:  "go",
+		Detected:  []string{"go"},
+		IsDir:     true,
+	}
+	gotActor := Evaluate(ctx, storageRoot, actorScope)
+	if gotActor.Mode != ModeIndexBacked {
+		t.Fatalf("actor mode=%q want %q (reasons=%v)", gotActor.Mode, ModeIndexBacked, gotActor.Reasons)
+	}
+	if !gotActor.RepoIndex.ScopeCovered {
+		t.Fatal("expected actor scope_covered=true")
 	}
 }
 

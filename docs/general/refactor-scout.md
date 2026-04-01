@@ -75,7 +75,7 @@ Typical `refactor status` reads:
 
 - `index_backed`:
   the repo index exists, matches the current Git HEAD, and includes the scoped
-  language
+  language and path coverage
 - `parser_only`:
   the refactor run will still work, but it will not attach repo-index evidence
   such as freshness-checked graph support
@@ -90,6 +90,7 @@ Current reason codes include:
 - `repoindex_head_mismatch`
 - `git_head_unavailable`
 - `scope_language_not_indexed`
+- `scope_path_not_indexed`
 
 Typical `refactor deps` reads:
 

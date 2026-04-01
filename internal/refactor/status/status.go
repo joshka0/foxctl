@@ -2,9 +2,14 @@ package status
 
 import (
 	"context"
+	"io/fs"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/fsutil"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/langutil"
 	"github.com/jkatigb/agentctl/internal/indexing/repoindex"
 	refscope "github.com/jkatigb/agentctl/internal/refactor/scope"
 )
@@ -25,6 +30,7 @@ const (
 	ReasonRepoIndexHeadMismatch     = "repoindex_head_mismatch"
 	ReasonGitHeadUnavailable        = "git_head_unavailable"
 	ReasonScopeLanguageNotIndexed   = "scope_language_not_indexed"
+	ReasonScopePathNotIndexed       = "scope_path_not_indexed"
 )
 
 type GitStatus struct {
@@ -33,11 +39,12 @@ type GitStatus struct {
 }
 
 type RepoIndexStatus struct {
-	Available bool                `json:"available"`
-	StorePath string              `json:"store_path,omitempty"`
-	Meta      repoindex.IndexMeta `json:"meta,omitempty"`
-	Stats     repoindex.Stats     `json:"stats,omitempty"`
-	Languages []string            `json:"languages,omitempty"`
+	Available    bool                `json:"available"`
+	StorePath    string              `json:"store_path,omitempty"`
+	Meta         repoindex.IndexMeta `json:"meta,omitempty"`
+	Stats        repoindex.Stats     `json:"stats,omitempty"`
+	Languages    []string            `json:"languages,omitempty"`
+	ScopeCovered bool                `json:"scope_covered"`
 }
 
 type Status struct {
@@ -102,6 +109,14 @@ func Evaluate(ctx context.Context, storageRoot string, scope refscope.Scope) Sta
 	if !languageIndexed(scope.Language, meta.Languages) {
 		out.Reasons = append(out.Reasons, ReasonScopeLanguageNotIndexed)
 	}
+	if covered, err := scopeCovered(ctx, store, scope); err == nil {
+		out.RepoIndex.ScopeCovered = covered
+		if !covered {
+			out.Reasons = append(out.Reasons, ReasonScopePathNotIndexed)
+		}
+	} else {
+		out.Reasons = append(out.Reasons, ReasonScopePathNotIndexed)
+	}
 
 	if len(out.Reasons) == 0 {
 		out.Mode = ModeIndexBacked
@@ -141,4 +156,83 @@ func normalizeIndexedLanguage(language string) string {
 	default:
 		return strings.TrimSpace(language)
 	}
+}
+
+func scopeCovered(ctx context.Context, store *repoindex.Store, scope refscope.Scope) (bool, error) {
+	indexedFiles, err := store.ListFilesInScope(ctx, scope.Path, scope.IsDir)
+	if err != nil {
+		return false, err
+	}
+	if len(indexedFiles) == 0 {
+		return false, nil
+	}
+	actualFiles, err := collectScopeFiles(scope)
+	if err != nil {
+		return false, err
+	}
+	if len(actualFiles) == 0 {
+		return false, nil
+	}
+	indexedSet := make(map[string]struct{}, len(indexedFiles))
+	for _, file := range indexedFiles {
+		indexedSet[file] = struct{}{}
+	}
+	for _, file := range actualFiles {
+		if _, ok := indexedSet[file]; !ok {
+			return false, nil
+		}
+	}
+	return true, nil
+}
+
+func collectScopeFiles(scope refscope.Scope) ([]string, error) {
+	if !scope.IsDir {
+		if !scopeFileEligible(scope.Language, scope.Absolute) {
+			return nil, nil
+		}
+		return []string{filepath.ToSlash(strings.TrimSpace(scope.Path))}, nil
+	}
+
+	files := make([]string, 0, 32)
+	err := filepath.WalkDir(scope.Absolute, func(path string, d fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return nil
+		}
+		if fsutil.ShouldSkipHiddenOrCommon(d.Name()) {
+			if d.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if d.IsDir() {
+			return nil
+		}
+		if fsutil.IsTestFile(d.Name()) {
+			return nil
+		}
+		if !scopeFileEligible(scope.Language, path) {
+			return nil
+		}
+		rel, err := filepath.Rel(scope.Workspace, path)
+		if err != nil {
+			return nil
+		}
+		files = append(files, filepath.ToSlash(rel))
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return files, nil
+}
+
+func scopeFileEligible(language, path string) bool {
+	if strings.TrimSpace(path) == "" {
+		return false
+	}
+	info, err := os.Stat(path)
+	if err != nil || info.IsDir() {
+		return false
+	}
+	return langutil.DetectAllowedWithHint(language, path, langutil.CommonCodeLanguages) != ""
 }

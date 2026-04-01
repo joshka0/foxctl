@@ -16,14 +16,17 @@ import (
 
 func TestFindingSeedQueriesNormalizesMethodNames(t *testing.T) {
 	got := findingSeedQueries("*AgentActor.handleAsk")
-	if len(got) < 2 {
-		t.Fatalf("queries=%v want at least 2 candidates", got)
+	if len(got) < 3 {
+		t.Fatalf("queries=%v want at least 3 candidates", got)
 	}
 	if got[0] != "*AgentActor.handleAsk" {
 		t.Fatalf("first query=%q want raw symbol", got[0])
 	}
-	if got[1] != "handleAsk" {
-		t.Fatalf("second query=%q want handleAsk", got[1])
+	if got[1] != "AgentActor.handleAsk" {
+		t.Fatalf("second query=%q want AgentActor.handleAsk", got[1])
+	}
+	if got[2] != "handleAsk" {
+		t.Fatalf("third query=%q want handleAsk", got[2])
 	}
 }
 
@@ -34,7 +37,7 @@ func TestPickFindingSeedNodeMatchesExactFileAndNormalizedName(t *testing.T) {
 	}
 	node, ok := pickFindingSeedNode([]repoindex.Node{
 		{ID: "wrong-file", Kind: repoindex.NodeSymbol, File: "internal/other.go", Name: "handleAsk"},
-		{ID: "target", Kind: repoindex.NodeSymbol, File: "internal/actor/agent_actor.go", Name: "handleAsk"},
+		{ID: "target", Kind: repoindex.NodeSymbol, File: "internal/actor/agent_actor.go", Name: "AgentActor.handleAsk"},
 	}, item)
 	if !ok {
 		t.Fatal("expected match")

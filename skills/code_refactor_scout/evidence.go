@@ -324,7 +324,7 @@ func pickFindingSeedNode(nodes []repoindex.Node, item finding) (repoindex.Node, 
 	if targetFile == "" {
 		return repoindex.Node{}, false
 	}
-	names := findingSeedQueries(item.Symbol)
+	names := findingSeedVariants(item.Symbol)
 	nameSet := make(map[string]struct{}, len(names))
 	for _, name := range names {
 		nameSet[strings.TrimSpace(name)] = struct{}{}
@@ -336,19 +336,28 @@ func pickFindingSeedNode(nodes []repoindex.Node, item finding) (repoindex.Node, 
 		if strings.TrimSpace(node.File) != targetFile {
 			continue
 		}
-		if _, ok := nameSet[strings.TrimSpace(node.Name)]; ok {
-			return node, true
+		for _, candidate := range findingSeedVariants(node.Name) {
+			if _, ok := nameSet[strings.TrimSpace(candidate)]; ok {
+				return node, true
+			}
 		}
 	}
 	return repoindex.Node{}, false
 }
 
 func findingSeedQueries(symbol string) []string {
+	return findingSeedVariants(symbol)
+}
+
+func findingSeedVariants(symbol string) []string {
 	symbol = strings.TrimSpace(symbol)
 	if symbol == "" {
 		return nil
 	}
 	values := []string{symbol}
+	if trimmed := strings.TrimPrefix(symbol, "*"); strings.TrimSpace(trimmed) != "" && trimmed != symbol {
+		values = append(values, trimmed)
+	}
 	if idx := strings.LastIndex(symbol, "."); idx >= 0 && idx+1 < len(symbol) {
 		values = append(values, symbol[idx+1:])
 	}

@@ -534,6 +534,48 @@ func (s *Store) Stats(ctx context.Context) (Stats, error) {
 	return stats, nil
 }
 
+// ListFilesInScope returns indexed file node paths within the requested relative scope path.
+func (s *Store) ListFilesInScope(ctx context.Context, scopePath string, isDir bool) ([]string, error) {
+	scopePath = filepath.ToSlash(strings.TrimSpace(scopePath))
+	var (
+		query string
+		args  []any
+		rows  *sql.Rows
+		err   error
+	)
+	switch {
+	case scopePath == "" || scopePath == ".":
+		query = `SELECT file FROM nodes WHERE repo_key = ? AND kind = ? AND file IS NOT NULL`
+		args = []any{s.repoKey, string(NodeFile)}
+	case isDir:
+		query = `SELECT file FROM nodes WHERE repo_key = ? AND kind = ? AND (file = ? OR file LIKE ?)`
+		args = []any{s.repoKey, string(NodeFile), scopePath, scopePath + "/%"}
+	default:
+		query = `SELECT file FROM nodes WHERE repo_key = ? AND kind = ? AND file = ?`
+		args = []any{s.repoKey, string(NodeFile), scopePath}
+	}
+	rows, err = s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	files := make([]string, 0)
+	for rows.Next() {
+		var file string
+		if err := rows.Scan(&file); err != nil {
+			return nil, err
+		}
+		file = filepath.ToSlash(strings.TrimSpace(file))
+		if file != "" {
+			files = append(files, file)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return files, nil
+}
+
 func migrate(ctx context.Context, db *sql.DB) error {
 	if _, err := db.ExecContext(ctx, `
 		CREATE TABLE IF NOT EXISTS index_meta (
