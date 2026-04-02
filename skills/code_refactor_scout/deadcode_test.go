@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -511,6 +512,84 @@ func TestBuildDeadCodeFindingsDoesNotMisclassifyElixirTypeAsFunction(t *testing.
 	for _, item := range got {
 		if item.Symbol == "config" {
 			t.Fatalf("type/function name collision should not produce config dead-code finding: %#v", got)
+		}
+	}
+}
+
+func TestBuildDeadCodeFindingsKeepsTypeScriptReducerHelpersLive(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	storageRoot := t.TempDir()
+	workspace := t.TempDir()
+
+	if err := os.WriteFile(filepath.Join(workspace, "package.json"), []byte("{}\n"), 0o644); err != nil {
+		t.Fatalf("write package.json: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(workspace, "src"), 0o755); err != nil {
+		t.Fatalf("mkdir src: %v", err)
+	}
+
+	source := `import { useReducer } from "react"
+
+type State = { count: number }
+type Action = { type: "reset" }
+
+const INITIAL_STATE: State = { count: 0 }
+
+function authPromptReducer(state: State, action: Action): State {
+  switch (action.type) {
+    case "reset":
+      return INITIAL_STATE
+  }
+}
+
+export function useAuthPromptController() {
+  const [state, dispatch] = useReducer(authPromptReducer, INITIAL_STATE)
+  return { state, dispatch }
+}
+`
+	if err := os.WriteFile(filepath.Join(workspace, "src", "controller.ts"), []byte(source), 0o644); err != nil {
+		t.Fatalf("write controller.ts: %v", err)
+	}
+
+	store, err := repoindex.Open(ctx, storageRoot, workspace)
+	if err != nil {
+		t.Fatalf("open repoindex store: %v", err)
+	}
+	defer store.Close()
+
+	builder := repoindex.NewBuilder(store, workspace)
+	if _, err := builder.Build(ctx, repoindex.BuildOptions{
+		RepoRoot:          workspace,
+		IncludeGo:         false,
+		IncludeTypescript: true,
+		IncludeElixir:     false,
+	}); err != nil {
+		t.Fatalf("build repoindex graph: %v", err)
+	}
+
+	scope := refscope.Scope{
+		Workspace:    workspace,
+		RepoRoot:     workspace,
+		Path:         "src",
+		Absolute:     filepath.Join(workspace, "src"),
+		Mode:         "explicit",
+		Language:     "typescript",
+		Detected:     []string{"typescript"},
+		IsDir:        true,
+		IncludeTests: false,
+	}
+	status := refstatus.Status{Mode: refstatus.ModeIndexBacked}
+
+	got, err := buildDeadCodeFindings(ctx, storageRoot, scope, status, "dead")
+	if err != nil {
+		t.Fatalf("buildDeadCodeFindings: %v", err)
+	}
+
+	for _, item := range got {
+		if item.Symbol == "authPromptReducer" {
+			t.Fatalf("reducer helper should stay live when referenced by exported hook: %#v", got)
 		}
 	}
 }
