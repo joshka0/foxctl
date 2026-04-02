@@ -3,6 +3,7 @@ package symbol
 import (
 	"context"
 	"regexp"
+	"sort"
 	"strings"
 )
 
@@ -161,7 +162,7 @@ func (e *ElixirExtractor) ExtractCalls(ctx context.Context, symbol Symbol, conte
 		return nil, nil
 	}
 	body := string(content[symbol.StartByte:symbol.EndByte])
-	refs := extractElixirModuleRefs(body)
+	refs := mergeElixirRefs(extractElixirModuleRefs(body), extractElixirLocalCallRefs(body))
 	if len(refs) > 50 {
 		refs = refs[:50]
 	}
@@ -236,6 +237,7 @@ var (
 	elixirDepLinePattern   = regexp.MustCompile(`^\s*(?:alias|import|require|use|@behaviour)\s+(.+)$`)
 	elixirRemoteCallModule = regexp.MustCompile(`\b([A-Z][A-Za-z0-9_]*(?:\.[A-Z][A-Za-z0-9_]*)*)\s*\.`)
 	elixirStructModule     = regexp.MustCompile(`%\s*([A-Z][A-Za-z0-9_]*(?:\.[A-Z][A-Za-z0-9_]*)*)\s*\{`)
+	elixirLocalCallPattern = regexp.MustCompile(`\b([a-z_][a-z0-9_?!]*)\s*\(`)
 )
 
 func extractElixirModuleRefs(body string) []string {
@@ -289,6 +291,67 @@ func extractElixirModuleRefs(body string) []string {
 		return nil
 	}
 	return out
+}
+
+func mergeElixirRefs(groups ...[]string) []string {
+	seen := make(map[string]struct{})
+	out := make([]string, 0, 16)
+	for _, group := range groups {
+		for _, item := range group {
+			item = strings.TrimSpace(item)
+			if item == "" {
+				continue
+			}
+			if _, ok := seen[item]; ok {
+				continue
+			}
+			seen[item] = struct{}{}
+			out = append(out, item)
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	sort.Strings(out)
+	return out
+}
+
+func extractElixirLocalCallRefs(body string) []string {
+	if strings.TrimSpace(body) == "" {
+		return nil
+	}
+	seen := make(map[string]struct{})
+	out := make([]string, 0, 16)
+	for _, match := range elixirLocalCallPattern.FindAllStringSubmatch(body, -1) {
+		if len(match) < 2 {
+			continue
+		}
+		name := strings.TrimSpace(match[1])
+		if !isElixirLocalCallCandidate(name) {
+			continue
+		}
+		if _, ok := seen[name]; ok {
+			continue
+		}
+		seen[name] = struct{}{}
+		out = append(out, name)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	sort.Strings(out)
+	return out
+}
+
+func isElixirLocalCallCandidate(name string) bool {
+	switch strings.TrimSpace(name) {
+	case "", "def", "defp", "defmacro", "defmacrop", "defmodule", "defprotocol", "defimpl",
+		"if", "unless", "case", "cond", "with", "for", "quote", "unquote", "alias",
+		"import", "require", "use", "raise", "try", "catch", "rescue", "receive", "super":
+		return false
+	default:
+		return true
+	}
 }
 
 func stripElixirLineComment(line string) string {

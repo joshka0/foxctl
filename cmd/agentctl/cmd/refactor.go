@@ -360,6 +360,7 @@ func runRefactorStatus(cmd *cobra.Command, workspace, path, language string, inc
 	}
 
 	status := refstatus.Evaluate(ctx, cfg.Storage.Root, scope)
+	scope = status.Scope
 	data := map[string]any{
 		"scope":      status.Scope,
 		"mode":       status.Mode,
@@ -390,6 +391,7 @@ func runRefactorSnapshot(cmd *cobra.Command, workspace, path, language string, i
 	}
 
 	status := refstatus.Evaluate(ctx, cfg.Storage.Root, scope)
+	scope = status.Scope
 	createdAt := time.Now().UTC()
 	snapshotID := refsnapshot.GenerateID(createdAt)
 	payload, err := refsnapshot.Builder{}.Build(ctx, refsnapshot.Input{
@@ -469,6 +471,7 @@ func runRefactorDeps(cmd *cobra.Command, workspace, path, language string, inclu
 	}
 
 	status := refstatus.Evaluate(ctx, cfg.Storage.Root, scope)
+	scope = status.Scope
 	if !status.RepoIndex.Available {
 		hint := fmt.Sprintf("Build the repo index first, for example: agentctl index repo build --workspace %s", scope.Workspace)
 		env := protocol.Error("refactor.deps", protocol.ErrorCodeERuntime, "refactor deps requires an available repo index", protocol.ErrorData{Hint: hint}, protocol.WithSource("cli"), protocol.WithWorkspace(scope.Workspace))
@@ -557,6 +560,7 @@ func runRefactorChanges(cmd *cobra.Command, workspace, path, language string, in
 	}
 
 	status := refstatus.Evaluate(ctx, cfg.Storage.Root, scope)
+	scope = status.Scope
 	result, err := refchanges.Build(ctx, cfg.Storage.Root, cfg.Paths.CAS, time.Now().UTC(), refchanges.Options{
 		Scope:        scope,
 		IncludeTests: includeTests,
@@ -607,6 +611,7 @@ func runRefactorHot(cmd *cobra.Command, workspace, path, language string, includ
 	}
 
 	status := refstatus.Evaluate(ctx, cfg.Storage.Root, scope)
+	scope = status.Scope
 	result, err := refhot.Build(ctx, cfg.Storage.Root, refhot.Options{
 		Scope:        scope,
 		IncludeTests: includeTests,

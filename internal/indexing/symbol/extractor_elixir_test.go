@@ -584,3 +584,55 @@ end
 		}
 	}
 }
+
+func TestElixirExtractorExtractCalls_LocalFunctionRefs(t *testing.T) {
+	source := `defmodule MyApp.Users do
+  def foo(data) do
+    validate(data)
+    helper(data)
+  end
+
+  defp validate(data) do
+    helper(data)
+  end
+
+  defp helper(data), do: data
+end
+`
+
+	extractor := NewElixirExtractor()
+	syms, err := extractor.Extract(context.Background(), "lib/app.ex", []byte(source))
+	if err != nil {
+		t.Fatalf("extract: %v", err)
+	}
+
+	var foo Symbol
+	for _, sym := range syms {
+		if sym.Name == "foo" {
+			foo = sym
+			break
+		}
+	}
+	if foo.Name == "" {
+		t.Fatalf("missing foo function symbol")
+	}
+
+	calls, err := extractor.ExtractCalls(context.Background(), foo, []byte(source))
+	if err != nil {
+		t.Fatalf("extract calls: %v", err)
+	}
+
+	want := map[string]bool{"validate": true, "helper": true}
+	for name := range want {
+		found := false
+		for _, call := range calls {
+			if call == name {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("expected local call %q in %v", name, calls)
+		}
+	}
+}

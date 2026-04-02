@@ -46,6 +46,28 @@ refactor seams and hotspots from local code structure.
 `refactor advisor` runs the scout first, then uses a second-stage model to rank
 or sequence the findings. The scout remains the source of discovery truth.
 
+## At A Glance
+
+The current refactor surface is:
+
+- `status`:
+  decide `parser_only` vs `index_backed`, with reason codes and coverage detail
+- `snapshot`:
+  freeze one language scope into a deterministic artifact-backed record
+- `deps`:
+  inspect reverse or forward graph context from repoindex seeds
+- `changes`:
+  compare the current scope against a git ref or saved snapshot
+- `hot`:
+  rank recently changed files within scope from git churn
+- `evidence`:
+  reopen saved snapshot and hotspot artifacts from CAS
+- `scout`:
+  produce deterministic structural findings, slop findings, and dead-code
+  candidates
+- `advisor`:
+  consume scout output and rank a shorter action sequence with an LLM
+
 ## Commands
 
 Run the scout directly:
@@ -63,6 +85,7 @@ agentctl refactor scout --path ./packages --language typescript
 agentctl refactor scout --path ./scripts --language python
 agentctl refactor scout --path apps/praze-api/lib --language elixir
 agentctl refactor scout --path ./internal --language go --focus slop
+agentctl refactor scout --path ./internal/actor --language go --focus dead
 ```
 
 Run the two-stage advisor:
@@ -129,11 +152,44 @@ Important operating rules:
 - run from the target repo workspace
 - prefer narrow paths over repo-root scans when the repo is large
 - for Elixir, prefer app `lib/` roots over `apps/` or repo root
+- for TS/Elixir monorepos, build repoindex from the app root you actually care
+  about *(for example `praze/`, `apps/praze-api/`, `apps/praze-presence/`)*
+  rather than indexing the whole monorepo by default
+- treat `--focus dead` as advisory and only trust it when `refactor status`
+  reports a fully `index_backed` scope
 
 ## What It Surfaces
 
 Current rule families include:
 
+- dead-code candidates:
+  - `unreachable_private_symbol`
+  - `test_only_helper`
+  - `stale_export_candidate`
+  - `orphan_file`
+  - `test_only_file`
+  - `stale_package_candidate`
+  - `test_only_package`
+  - dead-code reachability now follows private method chains and treats files
+    with repoindex `IMPLEMENTS` / `EMBEDS` edges as structural roots for
+    method dispatch, which keeps interface-backed methods from being
+    misclassified as dead
+  - Go package-scope initializer references now produce file-level graph edges,
+    so registrations like Cobra `RunE: runFoo` or similar top-level handler
+    tables count as live roots for dead-code analysis
+  - broad `all` runs now suppress child dead-code rows when a file or package
+    dead family already summarizes the same seam; `focus=dead` keeps the full
+    detail
+  - Elixir call extraction now includes local helper calls as well as module
+    references, which materially improves `defp` reachability in index-backed
+    dead-code scans
+  - Elixir dead-code reachability now also treats callback implementations from
+    known framework behaviours and `use` targets *(Application, GenServer,
+    Supervisor, Plug, Phoenix Channel/LiveView, Ecto type behaviours)* as live
+    structural roots
+  - Elixir dead-code candidate generation now avoids same-name type/function
+    collisions, so declarations like `@type config` are not misclassified as
+    dead functions just because the file also defines `defp config`
 - function hotspots:
   - `function_hotspot`
   - `fan_out_dependency_spread`
@@ -168,6 +224,10 @@ Focused usage:
   findings *(in this repo's terms: duplicated recovery blocks, duplicate
   error remaps, repeated guard predicates, duplicate orchestration, and closely
   related extraction candidates)*.
+- `--focus dead` filters toward conservative dead-code candidates backed by
+  repoindex reachability, starting with private unreachable helpers, test-only
+  helpers, stale exported functions, and narrowly classified dead-ish files and
+  packages.
 - `refactor scout` now also emits `data.index_mode` so downstream review flows
   can tell whether a run was parser-only or index-backed.
 - successful scout runs now emit `data.snapshot_id` and
@@ -176,13 +236,53 @@ Focused usage:
   completed, independent of whether repoindex was fresh
 - parser-only runs still attach scope snapshot evidence and recent churn data
   like `recent_change_count` and `hot_score` on `function_hotspot` findings
+- when recent diff ranges overlap the hotspot body, scout now also attaches
+  symbol-level churn evidence such as `symbol_hot_score`,
+  `symbol_recent_change_count`, and `symbol_changed_line_count`
+- scout also attaches file-level co-change evidence such as `cochange_paths`,
+  `cochange_count`, and `cochange_strength` when nearby files repeatedly move
+  with the hotspot inside the observed git window
+- hotspots now also carry a deterministic `suggested_boundary_kind` such as
+  `extract_workflow_step` or `extract_error_normalizer` when the rule mix is
+  strong enough to name the likely seam
 - index-backed runs additionally attach repo-graph evidence such as
   `seed_node_id`, reverse/forward dependency counts, and `suggested_reads`
 - when repoindex is fresh, scout now also uses reverse deps, forward deps, and
-  hot-score evidence to rerank `function_hotspot` findings rather than treating
-  that evidence as display-only
+  symbol/file hotness plus co-change pressure to compute an explicit `opportunity_score` for
+  `function_hotspot` findings rather than treating that evidence as display-only
 - when hotspot evidence rows are persisted, scout also emits
   `data.evidence_artifact`
+
+## Scout Output Contract
+
+The scout's top-level output now carries:
+
+- `data.index_mode`:
+  `parser_only` or `index_backed` for the requested scope
+- `data.snapshot_id`:
+  stable refactor snapshot handle like `refsnap-...`
+- `data.snapshot_artifact`:
+  CAS digest for the stored scope snapshot
+- `data.evidence_artifact`:
+  CAS digest for persisted hotspot evidence when emitted
+- `data.signals.evidence_backed`:
+  whether the snapshot/evidence pass completed for the run
+- `finding.evidence.opportunity_score`:
+  deterministic final hotspot score after dependency and churn pressure are
+  folded into the structural base score
+- `finding.evidence.opportunity_factors`:
+  visible bonus breakdown for reverse deps, forward deps, symbol hotness, file
+  hotness, co-change pressure, and recent change pressure
+- `finding.evidence.suggested_boundary_kind`:
+  deterministic seam label inferred from the hotspot's constituent rule family
+- `finding.evidence.confidence_score`:
+  explicit numeric trust score for the finding, derived from mode, evidence
+  completeness, and rule-family-specific factors
+- `finding.evidence.confidence_factors`:
+  visible confidence contributions so downstream review flows can sort or filter
+  without re-deriving trust locally
+- `data.dead_code_error`:
+  optional advisory error if dead-code candidate generation could not complete
 
 ## Language Read
 
@@ -199,8 +299,10 @@ Current confidence by language:
 - Elixir:
   now useful for namespace-scoped module seams, file seams, and first-pass slop
   detection on repeated `if` guards, duplicated guarded recovery blocks, and
-  repeated rescue-side or tuple-style clause error remaps, but still more
-  sensitive to broad helper families than Go
+  repeated rescue-side or tuple-style clause error remaps. Dead-code reads are
+  materially better after local helper-call extraction, callback-root modeling,
+  and symbol-kind disambiguation, but they still trail Go on framework-aware
+  reachability precision
 
 ## ACA Fit
 

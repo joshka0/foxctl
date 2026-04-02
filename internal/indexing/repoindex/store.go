@@ -57,19 +57,10 @@ func Open(ctx context.Context, storageRoot, repoRoot string) (*Store, error) {
 	if repoRoot == "" {
 		return nil, fmt.Errorf("repoindex: repo root is required")
 	}
-	absoluteRoot, err := filepath.Abs(repoRoot)
+	absoluteRoot, dbPath, legacyPath, key, err := resolveStorePaths(storageRoot, repoRoot)
 	if err != nil {
-		return nil, fmt.Errorf("repoindex: resolve repo root: %w", err)
+		return nil, err
 	}
-	absoluteRoot = filepath.Clean(absoluteRoot)
-
-	key := repoKey(absoluteRoot)
-	dir := strings.TrimSpace(os.Getenv("AGENTCTL_REPOINDEX_DB_DIR"))
-	if dir == "" {
-		dir = filepath.Join(storageRoot, "repoindex")
-	}
-	dbPath := filepath.Join(dir, key+".db")
-	legacyPath := filepath.Join(dir, legacyRepoKey(absoluteRoot)+".db")
 	if dbPath != legacyPath {
 		if _, err := os.Stat(dbPath); err != nil {
 			if os.IsNotExist(err) {
@@ -101,6 +92,49 @@ func Open(ctx context.Context, storageRoot, repoRoot string) (*Store, error) {
 	}
 
 	return &Store{db: db, path: dbPath, repoRoot: absoluteRoot, repoKey: key, close: closeFn}, nil
+}
+
+// StoreExists reports whether a repoindex store already exists for repoRoot.
+// It checks both the current deterministic path and the legacy path without
+// creating a new database.
+func StoreExists(storageRoot, repoRoot string) (bool, error) {
+	_, dbPath, legacyPath, _, err := resolveStorePaths(storageRoot, repoRoot)
+	if err != nil {
+		return false, err
+	}
+	if _, err := os.Stat(dbPath); err == nil {
+		return true, nil
+	} else if !os.IsNotExist(err) {
+		return false, err
+	}
+	if legacyPath != dbPath {
+		if _, err := os.Stat(legacyPath); err == nil {
+			return true, nil
+		} else if !os.IsNotExist(err) {
+			return false, err
+		}
+	}
+	return false, nil
+}
+
+func resolveStorePaths(storageRoot, repoRoot string) (absoluteRoot, dbPath, legacyPath, key string, err error) {
+	if repoRoot == "" {
+		return "", "", "", "", fmt.Errorf("repoindex: repo root is required")
+	}
+	absoluteRoot, err = filepath.Abs(repoRoot)
+	if err != nil {
+		return "", "", "", "", fmt.Errorf("repoindex: resolve repo root: %w", err)
+	}
+	absoluteRoot = filepath.Clean(absoluteRoot)
+
+	key = repoKey(absoluteRoot)
+	dir := strings.TrimSpace(os.Getenv("AGENTCTL_REPOINDEX_DB_DIR"))
+	if dir == "" {
+		dir = filepath.Join(storageRoot, "repoindex")
+	}
+	dbPath = filepath.Join(dir, key+".db")
+	legacyPath = filepath.Join(dir, legacyRepoKey(absoluteRoot)+".db")
+	return absoluteRoot, dbPath, legacyPath, key, nil
 }
 
 func openContext(ctx context.Context, minimumBudget time.Duration) (context.Context, context.CancelFunc) {

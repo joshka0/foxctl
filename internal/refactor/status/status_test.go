@@ -458,6 +458,87 @@ func TestEvaluateCoverageIncludesTestsWhenRequested(t *testing.T) {
 	}
 }
 
+func TestEvaluateRebasesToDeepestIndexedWorkspace(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	_, storageRoot, workspace := setupGitWorkspace(t, ctx)
+	appRoot := filepath.Join(workspace, "apps", "praze-api")
+	libDir := filepath.Join(appRoot, "lib")
+	if err := os.MkdirAll(libDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(libDir, "accounts.ex"), []byte("defmodule Praze.Accounts do\nend\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, ctx, workspace, "add", "apps/praze-api/lib/accounts.ex")
+	runGit(t, ctx, workspace, "-c", "user.email=test@example.com", "-c", "user.name=Test", "commit", "-m", "add nested elixir app")
+
+	store, err := repoindex.Open(ctx, storageRoot, appRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	head := gitHead(t, ctx, workspace)
+	if err := store.SetMeta(ctx, repoindex.IndexMeta{
+		RepoRoot:      appRoot,
+		HeadSHA:       head,
+		SchemaVersion: repoindex.SchemaVersion(),
+		IndexedAt:     time.Now().UTC(),
+		Languages:     []string{"elixir"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.ReplaceAll(ctx, []repoindex.Node{
+		{
+			ID:        repoindex.PackageID(store.RepoKey(), "ex:lib"),
+			Kind:      repoindex.NodePackage,
+			Pkg:       "ex:lib",
+			Name:      "lib",
+			UpdatedAt: time.Now().UTC(),
+		},
+		{
+			ID:        repoindex.FileID(store.RepoKey(), "ex:lib", "lib/accounts.ex"),
+			Kind:      repoindex.NodeFile,
+			Pkg:       "ex:lib",
+			File:      "lib/accounts.ex",
+			Name:      "accounts.ex",
+			UpdatedAt: time.Now().UTC(),
+		},
+	}, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	scope := refscope.Scope{
+		Workspace:    workspace,
+		RepoRoot:     workspace,
+		Path:         "apps/praze-api/lib",
+		Absolute:     filepath.Join(workspace, "apps", "praze-api", "lib"),
+		Mode:         "explicit",
+		Language:     "elixir",
+		Detected:     []string{"elixir"},
+		IsDir:        true,
+		IncludeTests: false,
+	}
+
+	got := Evaluate(ctx, storageRoot, scope)
+	if got.Mode != ModeIndexBacked {
+		t.Fatalf("mode=%q want %q (reasons=%v)", got.Mode, ModeIndexBacked, got.Reasons)
+	}
+	if got.Scope.Workspace != appRoot {
+		t.Fatalf("workspace=%q want %q", got.Scope.Workspace, appRoot)
+	}
+	if got.Scope.RepoRoot != appRoot {
+		t.Fatalf("repo_root=%q want %q", got.Scope.RepoRoot, appRoot)
+	}
+	if got.Scope.Path != "lib" {
+		t.Fatalf("path=%q want lib", got.Scope.Path)
+	}
+	if !got.RepoIndex.ScopeCovered {
+		t.Fatal("expected scope_covered=true")
+	}
+}
+
 func setupGitWorkspace(t *testing.T, ctx context.Context) (string, string, string) {
 	t.Helper()
 

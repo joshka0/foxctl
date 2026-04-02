@@ -77,6 +77,11 @@ func extractElixirCallsWithTreeSitter(_ context.Context, symbol Symbol, content 
 						elixirEmitModuleRefs(args, body, emit)
 					}
 				default:
+					if target.Kind() == "identifier" {
+						if isElixirLocalCallCandidate(targetName) {
+							emit(targetName)
+						}
+					}
 					if target.Kind() == "dot" {
 						if left := target.ChildByFieldName("left"); left != nil && left.Kind() == "alias" {
 							emit(strings.TrimSpace(treeSitterNodeText(left, body)))

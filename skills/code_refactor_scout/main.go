@@ -37,7 +37,7 @@ const (
 type input struct {
 	Path         string `json:"path"`
 	Language     string `json:"language" validate:"omitempty,oneof=auto go python javascript typescript elixir"`
-	Focus        string `json:"focus" validate:"omitempty,oneof=all slop"`
+	Focus        string `json:"focus" validate:"omitempty,oneof=all slop dead"`
 	IncludeTests bool   `json:"include_tests"`
 	MaxResults   int    `json:"max_results" validate:"gte=0"`
 	MinScore     int    `json:"min_score" validate:"gte=0,lte=100"`
@@ -198,10 +198,20 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	if shouldSuppressConstituentFindings(in.Focus) {
 		suppressConstituentFindings(state, hotspotSymbols)
 	}
-	state.Findings = applyFocus(state.Findings, in.Focus)
 
-	filtered := make([]finding, 0, len(state.Findings))
-	for _, item := range state.Findings {
+	statusScope := buildScoutStatusScope(workspace, searchPath, info, scope, in.IncludeTests)
+	indexStatus := refstatus.Evaluate(ctx, rc.Config.Storage.Root, statusScope)
+	effectiveScope := indexStatus.Scope
+
+	allFindings := append([]finding(nil), state.Findings...)
+	deadCodeFindings, deadCodeErr := buildDeadCodeFindings(ctx, rc.Config.Storage.Root, effectiveScope, indexStatus, in.Focus)
+	if deadCodeErr == nil {
+		allFindings = append(allFindings, deadCodeFindings...)
+	}
+	allFindings = applyFocus(allFindings, in.Focus)
+
+	filtered := make([]finding, 0, len(allFindings))
+	for _, item := range allFindings {
 		if item.Score >= in.MinScore {
 			filtered = append(filtered, item)
 		}
@@ -209,22 +219,11 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	sortFindings(filtered)
 	filtered = diversifyFindings(filtered, maxInt(headDiversifyMinItems, in.MaxResults*3), headMaxPerRule, headMaxPerFile, headMaxPerSymbol)
 
-	statusScope := refscope.Scope{
-		Workspace: workspace,
-		RepoRoot:  workspace,
-		Path:      pathutil.RelativePath(workspace, searchPath),
-		Absolute:  searchPath,
-		Mode:      scope.Mode,
-		Language:  scope.Language,
-		Detected:  append([]string(nil), scope.Detected...),
-		IsDir:     info.IsDir(),
-	}
-	indexStatus := refstatus.Evaluate(ctx, rc.Config.Storage.Root, statusScope)
-
-	evidence, evidenceErr := buildScoutEvidence(ctx, rc, in, statusScope, indexStatus, filtered)
+	evidence, evidenceErr := buildScoutEvidence(ctx, rc, in, effectiveScope, indexStatus, filtered)
 	if evidenceErr == nil {
-		filtered = rerankScoutFindings(evidence.Findings, indexStatus.Mode)
+		filtered = evidence.Findings
 	}
+	filtered = applyConfidenceScores(filtered, indexStatus.Mode)
 	sortFindings(filtered)
 
 	totalFindings := len(filtered)
@@ -259,9 +258,13 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 			"go_ast":            true,
 			"call_extraction":   true,
 			"slop_focus":        in.Focus == "slop",
+			"dead_focus":        in.Focus == "dead",
 			"repo_graph":        indexStatus.Mode == refstatus.ModeIndexBacked,
 			"evidence_backed":   evidenceErr == nil,
 		},
+	}
+	if deadCodeErr != nil {
+		data["dead_code_error"] = deadCodeErr.Error()
 	}
 	if evidenceErr == nil {
 		data["snapshot_id"] = evidence.SnapshotID
@@ -290,6 +293,20 @@ func resolveLanguageScope(workspace, searchPath string, info fs.FileInfo, in inp
 		Language: resolved.Language,
 		Detected: resolved.Detected,
 	}, nil
+}
+
+func buildScoutStatusScope(workspace, searchPath string, info fs.FileInfo, scope languageScope, includeTests bool) refscope.Scope {
+	return refscope.Scope{
+		Workspace:    workspace,
+		RepoRoot:     workspace,
+		Path:         pathutil.RelativePath(searchPath, workspace),
+		Absolute:     searchPath,
+		Mode:         scope.Mode,
+		Language:     scope.Language,
+		Detected:     append([]string(nil), scope.Detected...),
+		IsDir:        info != nil && info.IsDir(),
+		IncludeTests: includeTests,
+	}
 }
 
 func discoverLanguages(dir string, includeTests bool) ([]string, error) {
@@ -3477,32 +3494,46 @@ func rulePriority(ruleID string) int {
 	switch ruleID {
 	case "function_hotspot":
 		return 0
-	case "duplicated_error_remap":
+	case "unreachable_private_symbol":
 		return 1
-	case "duplicate_recovery_block":
+	case "test_only_helper":
 		return 2
-	case "repeated_guard_ladder":
+	case "stale_export_candidate":
 		return 3
-	case "duplicate_orchestration_fingerprint":
+	case "orphan_file":
 		return 4
-	case "structural_similarity_module_cluster":
+	case "test_only_file":
 		return 5
-	case "structural_similarity_cluster":
+	case "stale_package_candidate":
 		return 6
-	case "call_family_module_cluster":
+	case "test_only_package":
 		return 7
-	case "call_family_cluster":
+	case "duplicated_error_remap":
 		return 8
-	case "same_file_extraction_candidate":
+	case "duplicate_recovery_block":
 		return 9
-	case "fan_out_dependency_spread":
+	case "repeated_guard_ladder":
 		return 10
-	case "complexity_cluster":
+	case "duplicate_orchestration_fingerprint":
 		return 11
-	case "receiver_hotspot":
+	case "structural_similarity_module_cluster":
+		return 8
+	case "structural_similarity_cluster":
+		return 9
+	case "call_family_module_cluster":
+		return 10
+	case "call_family_cluster":
+		return 11
+	case "same_file_extraction_candidate":
 		return 12
-	case "god_file":
+	case "fan_out_dependency_spread":
 		return 13
+	case "complexity_cluster":
+		return 14
+	case "receiver_hotspot":
+		return 15
+	case "god_file":
+		return 16
 	default:
 		return 10
 	}
@@ -4197,6 +4228,8 @@ func focusAllowsFinding(item finding, focus string) bool {
 	switch focus {
 	case "slop":
 		return isSlopFinding(item)
+	case "dead":
+		return isDeadFinding(item)
 	default:
 		return true
 	}
@@ -4208,6 +4241,15 @@ func isSlopFinding(item finding) bool {
 		return true
 	case "function_hotspot":
 		return compositeIncludesSlopRule(item)
+	default:
+		return false
+	}
+}
+
+func isDeadFinding(item finding) bool {
+	switch item.RuleID {
+	case "unreachable_private_symbol", "test_only_helper", "stale_export_candidate", "orphan_file", "test_only_file", "stale_package_candidate", "test_only_package":
+		return true
 	default:
 		return false
 	}
