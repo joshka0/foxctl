@@ -163,6 +163,7 @@ type BuildOptions struct {
 	Patterns              []string
 	IncludeTests          bool
 	IncludeGo             bool
+	IncludePython         bool
 	IncludeTypescript     bool
 	IncludeElixir         bool
 	IncludeTerraform      bool

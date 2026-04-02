@@ -46,6 +46,11 @@ refactor seams and hotspots from local code structure.
 `refactor advisor` runs the scout first, then uses a second-stage model to rank
 or sequence the findings. The scout remains the source of discovery truth.
 
+Python is now part of the repoindex-backed refactor lane as well. If you build
+repoindex with `--python`, `refactor status` and `refactor scout --focus dead`
+can run `index_backed` on Python package or script scopes instead of falling
+back to parser-only mode.
+
 ## At A Glance
 
 The current refactor surface is:
@@ -155,6 +160,9 @@ Important operating rules:
 - for TS/Elixir monorepos, build repoindex from the app root you actually care
   about *(for example `praze/`, `apps/praze-api/`, `apps/praze-presence/`)*
   rather than indexing the whole monorepo by default
+- for Python, build repoindex with `--python` on the package root or scripts
+  root you actually want to analyze rather than indexing unrelated monorepo
+  siblings by default
 - treat `--focus dead` as advisory and only trust it when `refactor status`
   reports a fully `index_backed` scope
 
@@ -194,6 +202,10 @@ Current rule families include:
     `REFERS_TO` edges for bare identifier usage inside symbol bodies, so cases
     like `useReducer(authPromptReducer, ...)` no longer rely on call-only edges
     to keep reducer-style helpers live
+  - Python dead-code analysis is now repoindex-backed on scopes indexed with
+    `agentctl index repo build --python`; the first version uses module/file
+    reachability plus same-file Python call edges, so it is useful for package
+    helpers and script surfaces but still less framework-aware than Go
 - function hotspots:
   - `function_hotspot`
   - `fan_out_dependency_spread`

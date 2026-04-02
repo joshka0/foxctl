@@ -25,6 +25,7 @@ import (
 
 const (
 	goPkgPrefix         = "go:"
+	pythonPkgPrefix     = "py:"
 	tsLocalPrefix       = "ts:local:"
 	tsNpmPrefix         = "ts:npm:"
 	elixirPkgPrefix     = "ex:"
@@ -73,7 +74,7 @@ func (b *Builder) Build(ctx context.Context, opts BuildOptions) (BuildResult, er
 	if len(opts.Patterns) == 0 {
 		opts.Patterns = []string{"./..."}
 	}
-	if !opts.IncludeGo && !opts.IncludeTypescript && !opts.IncludeElixir && !opts.IncludeTerraform && !opts.IncludeKubernetes && !opts.IncludeShell {
+	if !opts.IncludeGo && !opts.IncludePython && !opts.IncludeTypescript && !opts.IncludeElixir && !opts.IncludeTerraform && !opts.IncludeKubernetes && !opts.IncludeShell {
 		return result, fmt.Errorf("repoindex: at least one language or config family must be enabled")
 	}
 
@@ -85,6 +86,11 @@ func (b *Builder) Build(ctx context.Context, opts BuildOptions) (BuildResult, er
 
 	if opts.IncludeGo {
 		if err := b.buildGo(ctx, opts, nodes, edges, &result, &locators); err != nil {
+			return result, err
+		}
+	}
+	if opts.IncludePython {
+		if err := b.buildPython(ctx, opts, nodes, edges, &result, &pending, &locators); err != nil {
 			return result, err
 		}
 	}
@@ -471,6 +477,112 @@ func (b *Builder) buildTS(ctx context.Context, opts BuildOptions, nodes map[stri
 					Type:       EdgeUsesSymbol,
 					Weight:     0.95,
 				})
+			}
+		}
+	}
+
+	return nil
+}
+
+func (b *Builder) buildPython(ctx context.Context, opts BuildOptions, nodes map[string]Node, edges map[string]Edge, result *BuildResult, pending *[]pendingNameEdge, locators *[]LocatorEntry) error {
+	extractor := b.registry.Get("python")
+	if extractor == nil {
+		return fmt.Errorf("repoindex: no python extractor registered")
+	}
+
+	exclude := []string{
+		"__pycache__/**",
+		".pytest_cache/**",
+		".venv/**",
+		"venv/**",
+		"node_modules/**",
+		"vendor/**",
+		"dist/**",
+		"build/**",
+		".git/**",
+	}
+
+	files, err := fsutil.FindFilesRespectingGitignore(opts.RepoRoot, "**/*.py", exclude)
+	if err != nil {
+		return fmt.Errorf("repoindex: find python files: %w", err)
+	}
+	sort.Strings(files)
+
+	seenPackages := make(map[string]bool)
+	for _, fileRelPath := range files {
+		if !opts.IncludeTests && fsutil.IsTestFile(fileRelPath) {
+			continue
+		}
+		absPath := filepath.Join(opts.RepoRoot, fileRelPath)
+		content, err := os.ReadFile(absPath)
+		if err != nil {
+			return fmt.Errorf("repoindex: read python file %s: %w", fileRelPath, err)
+		}
+
+		pkgID := pythonModuleID(fileRelPath)
+		pkgNodeID := PackageID(opts.RepoKey, pkgID)
+		addNode(nodes, Node{
+			ID:        pkgNodeID,
+			Kind:      NodePackage,
+			Pkg:       pkgID,
+			Name:      strings.TrimPrefix(pkgID, pythonPkgPrefix),
+			UpdatedAt: time.Now().UTC(),
+		})
+		if !seenPackages[pkgID] {
+			result.Packages++
+			seenPackages[pkgID] = true
+		}
+
+		lineCount := countLines(content)
+		fileNodeID := FileID(opts.RepoKey, pkgID, fileRelPath)
+		fileNode := Node{
+			ID:        fileNodeID,
+			Kind:      NodeFile,
+			Pkg:       pkgID,
+			File:      fileRelPath,
+			Name:      filepath.Base(fileRelPath),
+			SpanStart: 1,
+			SpanEnd:   lineCount,
+			Hash:      symbol.ComputeDigest(content),
+			UpdatedAt: time.Now().UTC(),
+		}
+		applyFileSummary(ctx, opts, &fileNode, fileRelPath)
+		addNode(nodes, fileNode)
+		addEdge(edges, Edge{
+			Src:    pkgNodeID,
+			Dst:    fileNode.ID,
+			Type:   EdgeContains,
+			Weight: 1.0,
+		})
+		result.Files++
+
+		syms, err := extractor.Extract(ctx, fileRelPath, content)
+		if err != nil {
+			return fmt.Errorf("repoindex: extract python symbols %s: %w", fileRelPath, err)
+		}
+		for _, sym := range syms {
+			sym.Key = symbol.PythonSymbolKey(sym.Name)
+			srcID := SymbolID(opts.RepoKey, pkgID, sym.EffectiveID())
+			addSymbol(ctx, opts, nodes, edges, pkgID, fileNode.ID, sym, locators)
+			result.Symbols++
+
+			callNames, err := extractor.ExtractCalls(ctx, sym, content)
+			if err == nil && len(callNames) > 0 && pending != nil {
+				callNames = capList(callNames, 50)
+				for _, callName := range callNames {
+					callName = strings.TrimSpace(callName)
+					if callName == "" {
+						continue
+					}
+					*pending = append(*pending, pendingNameEdge{
+						SrcID:      srcID,
+						SrcPkg:     pkgID,
+						SrcFile:    fileRelPath,
+						TargetName: callName,
+						Type:       EdgeCalls,
+						Weight:     0.9,
+					})
+				}
 			}
 		}
 	}
@@ -1331,6 +1443,13 @@ func isExportedSymbol(sym symbol.Symbol) bool {
 		// Private: defp, defmacrop, @typep
 		return false
 	}
+	if sym.Language == "python" {
+		name := strings.TrimSpace(sym.Name)
+		if name == "" {
+			return false
+		}
+		return !strings.HasPrefix(name, "_")
+	}
 	name := strings.TrimSpace(sym.Name)
 	if sym.Language == "go" && sym.Kind == symbol.KindMethod {
 		if idx := strings.LastIndex(name, "."); idx >= 0 && idx+1 < len(name) {
@@ -1363,6 +1482,8 @@ func languageFromPackageID(pkgID string) string {
 		return "typescript"
 	case strings.HasPrefix(pkgID, tsNpmPrefix):
 		return "typescript"
+	case strings.HasPrefix(pkgID, pythonPkgPrefix):
+		return "python"
 	case strings.HasPrefix(pkgID, elixirPkgPrefix):
 		return "elixir"
 	default:
@@ -1395,6 +1516,9 @@ func buildLanguages(opts BuildOptions) []string {
 	if opts.IncludeGo {
 		languages = append(languages, "go")
 	}
+	if opts.IncludePython {
+		languages = append(languages, "python")
+	}
 	if opts.IncludeTypescript {
 		languages = append(languages, "typescript")
 	}
@@ -1411,4 +1535,19 @@ func buildLanguages(opts BuildOptions) []string {
 		languages = append(languages, "shell")
 	}
 	return languages
+}
+
+func pythonModuleID(filePath string) string {
+	trimmed := strings.TrimSpace(filepath.ToSlash(filePath))
+	if trimmed == "" {
+		return pythonPkgPrefix + "root"
+	}
+	withoutExt := strings.TrimSuffix(trimmed, filepath.Ext(trimmed))
+	if strings.HasSuffix(withoutExt, "/__init__") {
+		withoutExt = strings.TrimSuffix(withoutExt, "/__init__")
+	}
+	if withoutExt == "" || withoutExt == "." {
+		return pythonPkgPrefix + "root"
+	}
+	return pythonPkgPrefix + withoutExt
 }

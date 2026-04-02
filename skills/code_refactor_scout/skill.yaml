@@ -140,7 +140,11 @@ signature:
         behaviours and `use` targets *(Application, GenServer, Supervisor, Plug,
         Phoenix LiveView/Channel, Ecto types)* as structural roots, and avoids
         misclassifying same-name type/function pairs like `@type config` versus
-        `defp config`.
+        `defp config`. Python dead-code analysis is now also available on fully
+        `index_backed` scopes after building repoindex with `--python`; the
+        first version relies on module/file reachability plus same-file call
+        edges from extracted Python calls, so framework-specific roots may
+        still lag Go.
 
       Current rule families:
       - dead-code candidates:
@@ -161,8 +165,10 @@ signature:
 
       The scout remains deterministic and local-first. Go currently has the
       strongest AST support. TypeScript and Elixir now have parser-backed slop
-      rules for repeated guarded recovery and error-remap patterns. Dead-code
-      findings require repoindex coverage and use conservative reachability
+      rules for repeated guarded recovery and error-remap patterns. Python now
+      also supports repoindex-backed refactor status and dead-code analysis on
+      indexed scopes. Dead-code findings require repoindex coverage and use
+      conservative reachability
       rather than keyword heuristics. Go dead-code analysis now includes
       private methods and structural roots from `IMPLEMENTS` / `EMBEDS`
       file edges to reduce false positives around interface-backed dispatch.
@@ -182,6 +188,9 @@ signature:
       Monorepo indexing guidance:
       - prefer indexing the smallest workspace root that contains the app or
         package you want to refactor
+      - for Python package trees, build repoindex with `--python` on the
+        package root or scripts root you actually want to analyze instead of
+        indexing unrelated monorepo siblings
       - for TypeScript and Elixir monorepos, that usually means indexing the
         app root *(for example `praze/`, `apps/praze-api/`, or
         `apps/praze-presence/`)* rather than the repo root

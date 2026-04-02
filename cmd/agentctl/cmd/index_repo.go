@@ -40,6 +40,7 @@ func newIndexRepoBuildCommand() *cobra.Command {
 	var workspace string
 	var patterns []string
 	var includeGo bool
+	var includePython bool
 	var includeTS bool
 	var includeElixir bool
 	var includeTerraform bool
@@ -52,13 +53,14 @@ func newIndexRepoBuildCommand() *cobra.Command {
 		Use:   "build",
 		Short: "Build the repo graph index",
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			return runIndexRepoBuild(cmd, workspace, patterns, includeGo, includeTS, includeElixir, includeTerraform, includeKubernetes, includeShell, includeTests, dryRun)
+			return runIndexRepoBuild(cmd, workspace, patterns, includeGo, includePython, includeTS, includeElixir, includeTerraform, includeKubernetes, includeShell, includeTests, dryRun)
 		},
 	}
 
 	cmd.Flags().StringVar(&workspace, "workspace", ".", "Workspace root directory")
 	cmd.Flags().StringSliceVar(&patterns, "go-pattern", []string{"./..."}, "Go package patterns to index")
 	cmd.Flags().BoolVar(&includeGo, "go", true, "Include Go sources")
+	cmd.Flags().BoolVar(&includePython, "python", false, "Include Python sources")
 	cmd.Flags().BoolVar(&includeTS, "typescript", true, "Include TypeScript sources")
 	cmd.Flags().BoolVar(&includeElixir, "elixir", false, "Include Elixir sources")
 	cmd.Flags().BoolVar(&includeTerraform, "terraform", false, "Include Terraform files as file/concept graph components")
@@ -184,7 +186,7 @@ func newIndexRepoAskCommand() *cobra.Command {
 	return cmd
 }
 
-func runIndexRepoBuild(cmd *cobra.Command, workspace string, patterns []string, includeGo, includeTS, includeElixir, includeTerraform, includeKubernetes, includeShell, includeTests, dryRun bool) error {
+func runIndexRepoBuild(cmd *cobra.Command, workspace string, patterns []string, includeGo, includePython, includeTS, includeElixir, includeTerraform, includeKubernetes, includeShell, includeTests, dryRun bool) error {
 	ctx := cmd.Context()
 	start := time.Now()
 
@@ -222,6 +224,7 @@ func runIndexRepoBuild(cmd *cobra.Command, workspace string, patterns []string, 
 		Patterns:              patterns,
 		IncludeTests:          includeTests,
 		IncludeGo:             includeGo,
+		IncludePython:         includePython,
 		IncludeTypescript:     includeTS,
 		IncludeElixir:         includeElixir,
 		IncludeTerraform:      includeTerraform,

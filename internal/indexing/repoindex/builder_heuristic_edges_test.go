@@ -343,6 +343,7 @@ export function useAuthPromptController() {
 	if _, err := builder.Build(ctx, BuildOptions{
 		RepoRoot:          workspace,
 		IncludeGo:         false,
+		IncludePython:     false,
 		IncludeTypescript: true,
 		IncludeElixir:     false,
 	}); err != nil {
@@ -360,6 +361,56 @@ export function useAuthPromptController() {
 	}
 	if !containsEdge(outgoing, controllerID, reducerID, EdgeRefersTo) {
 		t.Fatalf("expected symbol REFERS_TO edge %s -> %s", controllerID, reducerID)
+	}
+}
+
+func TestBuilderAddsPythonCallEdges(t *testing.T) {
+	ctx := context.Background()
+	workspace := t.TempDir()
+	storageRoot := t.TempDir()
+
+	if err := os.MkdirAll(filepath.Join(workspace, "scripts"), 0o755); err != nil {
+		t.Fatalf("mkdir scripts: %v", err)
+	}
+	source := `def helper():
+    return None
+
+def run():
+    helper()
+    return 1
+`
+	if err := os.WriteFile(filepath.Join(workspace, "scripts", "worker.py"), []byte(source), 0o644); err != nil {
+		t.Fatalf("write worker.py: %v", err)
+	}
+
+	store, err := Open(ctx, storageRoot, workspace)
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer store.Close()
+
+	builder := NewBuilder(store, workspace)
+	if _, err := builder.Build(ctx, BuildOptions{
+		RepoRoot:          workspace,
+		IncludeGo:         false,
+		IncludePython:     true,
+		IncludeTypescript: false,
+		IncludeElixir:     false,
+	}); err != nil {
+		t.Fatalf("build: %v", err)
+	}
+
+	repoKey := store.RepoKey()
+	pkgID := pythonModuleID("scripts/worker.py")
+	runID := SymbolID(repoKey, pkgID, symbol.PythonSymbolKey("run").String())
+	helperID := SymbolID(repoKey, pkgID, symbol.PythonSymbolKey("helper").String())
+
+	outgoing, err := store.GetOutgoingEdges(ctx, runID, []EdgeType{EdgeCalls}, 100)
+	if err != nil {
+		t.Fatalf("get outgoing edges: %v", err)
+	}
+	if !containsEdge(outgoing, runID, helperID, EdgeCalls) {
+		t.Fatalf("expected CALLS edge %s -> %s", runID, helperID)
 	}
 }
 
