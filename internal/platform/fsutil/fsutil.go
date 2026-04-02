@@ -288,6 +288,16 @@ func FindFilesRespectingGitignore(root, pattern string, excludePatterns []string
 		return FindFilesMatchingGlob(root, pattern, excludePatterns)
 	}
 
+	// If the requested root is nested beneath a larger git top-level, a parent
+	// repo's ignore rules can accidentally hide real source files inside the
+	// nested workspace (for example "ios/" at the monorepo root hiding
+	// src/features/widgets/ios/*.ts inside an app workspace). In that case,
+	// prefer workspace-local glob discovery over parent-repo gitignore
+	// resolution.
+	if topLevel, err := gitTopLevel(root); err == nil && isNestedWorkspace(root, topLevel) {
+		return FindFilesMatchingGlob(root, pattern, excludePatterns)
+	}
+
 	// Use git ls-files to get all tracked + untracked (but not ignored) files
 	// --cached: tracked files
 	// --others: untracked files
@@ -340,4 +350,39 @@ func FindFilesRespectingGitignore(root, pattern string, excludePatterns []string
 	}
 
 	return files, nil
+}
+
+func gitTopLevel(root string) (string, error) {
+	cmd := exec.Command("git", "-C", root, "rev-parse", "--show-toplevel")
+	output, err := cmd.Output()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Clean(strings.TrimSpace(string(output))), nil
+}
+
+func isNestedWorkspace(root, topLevel string) bool {
+	if root == "" || topLevel == "" {
+		return false
+	}
+	absRoot, err := canonicalPath(root)
+	if err != nil {
+		return false
+	}
+	absTop, err := canonicalPath(topLevel)
+	if err != nil {
+		return false
+	}
+	return filepath.Clean(absRoot) != filepath.Clean(absTop)
+}
+
+func canonicalPath(path string) (string, error) {
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		return "", err
+	}
+	if evalPath, err := filepath.EvalSymlinks(absPath); err == nil && strings.TrimSpace(evalPath) != "" {
+		return evalPath, nil
+	}
+	return absPath, nil
 }

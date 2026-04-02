@@ -386,6 +386,25 @@ func (b *Builder) buildTS(ctx context.Context, opts BuildOptions, nodes map[stri
 					})
 				}
 			}
+
+			refNames, err := symbol.ExtractTypeScriptReferences(ctx, sym, content)
+			if err == nil && len(refNames) > 0 && pending != nil {
+				refNames = capList(refNames, 100)
+				for _, refName := range refNames {
+					refName = strings.TrimSpace(refName)
+					if refName == "" {
+						continue
+					}
+					*pending = append(*pending, pendingNameEdge{
+						SrcID:      srcID,
+						SrcPkg:     pkgID,
+						SrcFile:    fileRelPath,
+						TargetName: refName,
+						Type:       EdgeRefersTo,
+						Weight:     0.8,
+					})
+				}
+			}
 		}
 
 		imports := extractTSImports(fileRelPath, content)
@@ -623,6 +642,10 @@ func (b *Builder) addGoReferenceEdges(opts BuildOptions, pkgs []*packages.Packag
 			if !ok {
 				continue
 			}
+			fileNodeID := FileID(opts.RepoKey, pkgID, fileRelPath)
+			if _, ok := nodes[fileNodeID]; !ok {
+				continue
+			}
 			for _, decl := range file.Decls {
 				fn, ok := decl.(*ast.FuncDecl)
 				if !ok || fn.Body == nil {
@@ -672,9 +695,58 @@ func (b *Builder) addGoReferenceEdges(opts BuildOptions, pkgs []*packages.Packag
 					return true
 				})
 			}
+			addGoFileRootReferenceEdges(opts, pkg, file, fileNodeID, nodes, edges)
 		}
 	}
 	return nil
+}
+
+func addGoFileRootReferenceEdges(opts BuildOptions, pkg *packages.Package, file *ast.File, fileNodeID string, nodes map[string]Node, edges map[string]Edge) {
+	if pkg == nil || pkg.TypesInfo == nil || file == nil || fileNodeID == "" {
+		return
+	}
+	for _, decl := range file.Decls {
+		gen, ok := decl.(*ast.GenDecl)
+		if !ok {
+			continue
+		}
+		for _, spec := range gen.Specs {
+			valueSpec, ok := spec.(*ast.ValueSpec)
+			if !ok {
+				continue
+			}
+			for _, value := range valueSpec.Values {
+				if value == nil {
+					continue
+				}
+				ast.Inspect(value, func(n ast.Node) bool {
+					switch expr := n.(type) {
+					case *ast.Ident:
+						dstID := goObjectNodeID(opts, pkg, pkg.TypesInfo.Uses[expr], nodes)
+						if dstID != "" {
+							addEdge(edges, Edge{
+								Src:    fileNodeID,
+								Dst:    dstID,
+								Type:   EdgeRefersTo,
+								Weight: 1.0,
+							})
+						}
+					case *ast.SelectorExpr:
+						dstID := goObjectNodeID(opts, pkg, goSelectorObject(pkg.TypesInfo, expr), nodes)
+						if dstID != "" {
+							addEdge(edges, Edge{
+								Src:    fileNodeID,
+								Dst:    dstID,
+								Type:   EdgeRefersTo,
+								Weight: 1.0,
+							})
+						}
+					}
+					return true
+				})
+			}
+		}
+	}
 }
 
 func goFuncDeclSymbolName(fn *ast.FuncDecl) string {
@@ -1259,7 +1331,13 @@ func isExportedSymbol(sym symbol.Symbol) bool {
 		// Private: defp, defmacrop, @typep
 		return false
 	}
-	return isExportedName(sym.Name)
+	name := strings.TrimSpace(sym.Name)
+	if sym.Language == "go" && sym.Kind == symbol.KindMethod {
+		if idx := strings.LastIndex(name, "."); idx >= 0 && idx+1 < len(name) {
+			name = name[idx+1:]
+		}
+	}
+	return isExportedName(name)
 }
 
 func relPath(root, path string) (string, bool) {

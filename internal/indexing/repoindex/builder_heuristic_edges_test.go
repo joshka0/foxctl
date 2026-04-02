@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/jkatigb/agentctl/internal/indexing/symbol"
 )
 
 func TestBuilderAddsTypeScriptCallEdges(t *testing.T) {
@@ -249,6 +251,115 @@ end
 	}
 	if !containsEdge(outgoing, fileID, directiveID, EdgeUsesSymbol) {
 		t.Fatalf("expected USES_SYMBOL edge %s -> %s", fileID, directiveID)
+	}
+}
+
+func TestBuilderAddsGoFileRootReferenceEdges(t *testing.T) {
+	ctx := context.Background()
+	workspace := t.TempDir()
+	storageRoot := t.TempDir()
+
+	source := `package sample
+
+type route struct {
+	handler func()
+}
+
+var routes = []route{
+	{handler: registeredHandler},
+}
+
+func registeredHandler() {}
+`
+	if err := os.WriteFile(filepath.Join(workspace, "go.mod"), []byte("module sample\n\ngo 1.25\n"), 0o644); err != nil {
+		t.Fatalf("write go.mod: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(workspace, "routes.go"), []byte(source), 0o644); err != nil {
+		t.Fatalf("write routes.go: %v", err)
+	}
+
+	store, err := Open(ctx, storageRoot, workspace)
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer store.Close()
+
+	builder := NewBuilder(store, workspace)
+	if _, err := builder.Build(ctx, BuildOptions{
+		RepoRoot:          workspace,
+		IncludeGo:         true,
+		IncludeTypescript: false,
+		IncludeElixir:     false,
+	}); err != nil {
+		t.Fatalf("build: %v", err)
+	}
+
+	repoKey := store.RepoKey()
+	pkgID := goPackageID("sample")
+	fileID := FileID(repoKey, pkgID, "routes.go")
+	handlerID := SymbolID(repoKey, pkgID, goSymbolKeyFromName("registeredHandler", "routes.go").String())
+
+	outgoing, err := store.GetOutgoingEdges(ctx, fileID, []EdgeType{EdgeRefersTo}, 100)
+	if err != nil {
+		t.Fatalf("get outgoing edges: %v", err)
+	}
+	if !containsEdge(outgoing, fileID, handlerID, EdgeRefersTo) {
+		t.Fatalf("expected file REFERS_TO edge %s -> %s", fileID, handlerID)
+	}
+}
+
+func TestBuilderAddsTypeScriptSymbolReferenceEdges(t *testing.T) {
+	ctx := context.Background()
+	workspace := t.TempDir()
+	storageRoot := t.TempDir()
+
+	source := `import { useReducer } from "react"
+
+const INITIAL_STATE = { count: 0 }
+
+function authPromptReducer(state: number, action: { type: string }) {
+  return state
+}
+
+export function useAuthPromptController() {
+  const [state, dispatch] = useReducer(authPromptReducer, INITIAL_STATE)
+  return { state, dispatch }
+}
+`
+	if err := os.MkdirAll(filepath.Join(workspace, "src"), 0o755); err != nil {
+		t.Fatalf("mkdir src: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(workspace, "src", "controller.ts"), []byte(source), 0o644); err != nil {
+		t.Fatalf("write controller.ts: %v", err)
+	}
+
+	store, err := Open(ctx, storageRoot, workspace)
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer store.Close()
+
+	builder := NewBuilder(store, workspace)
+	if _, err := builder.Build(ctx, BuildOptions{
+		RepoRoot:          workspace,
+		IncludeGo:         false,
+		IncludeTypescript: true,
+		IncludeElixir:     false,
+	}); err != nil {
+		t.Fatalf("build: %v", err)
+	}
+
+	repoKey := store.RepoKey()
+	pkgID := tsLocalPrefix + "."
+	controllerID := SymbolID(repoKey, pkgID, symbol.TSSymbolKey("useAuthPromptController", true, "controller.ts").String())
+	reducerID := SymbolID(repoKey, pkgID, symbol.TSSymbolKey("authPromptReducer", false, "controller.ts").String())
+
+	outgoing, err := store.GetOutgoingEdges(ctx, controllerID, []EdgeType{EdgeRefersTo}, 100)
+	if err != nil {
+		t.Fatalf("get outgoing edges: %v", err)
+	}
+	if !containsEdge(outgoing, controllerID, reducerID, EdgeRefersTo) {
+		t.Fatalf("expected symbol REFERS_TO edge %s -> %s", controllerID, reducerID)
 	}
 }
 

@@ -190,6 +190,10 @@ Current rule families include:
   - Elixir dead-code candidate generation now avoids same-name type/function
     collisions, so declarations like `@type config` are not misclassified as
     dead functions just because the file also defines `defp config`
+  - TypeScript dead-code reachability now includes same-file symbol
+    `REFERS_TO` edges for bare identifier usage inside symbol bodies, so cases
+    like `useReducer(authPromptReducer, ...)` no longer rely on call-only edges
+    to keep reducer-style helpers live
 - function hotspots:
   - `function_hotspot`
   - `fan_out_dependency_spread`
@@ -303,6 +307,11 @@ Current confidence by language:
   materially better after local helper-call extraction, callback-root modeling,
   and symbol-kind disambiguation, but they still trail Go on framework-aware
   reachability precision
+- TypeScript:
+  slop detection is strong on duplicated recovery and repeated guard/remap
+  patterns. Dead-code reads are now materially better for reducer/callback
+  helpers and nested app workspaces, but they still trail Go on richer
+  framework-root modeling
 
 ## ACA Fit
 

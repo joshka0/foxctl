@@ -56,6 +56,10 @@ func extractTypeScriptCallsWithTreeSitter(_ context.Context, symbol Symbol, cont
 	return calls, true, nil
 }
 
+func extractTypeScriptRefsWithTreeSitter(_ context.Context, _ Symbol, _ []byte) ([]string, bool, error) {
+	return nil, false, nil
+}
+
 func extractPythonSymbolsWithTreeSitter(_ context.Context, filePath string, content []byte) ([]Symbol, bool, error) {
 	if strings.ToLower(filepath.Ext(filePath)) != ".py" {
 		return nil, false, nil

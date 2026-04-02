@@ -274,3 +274,58 @@ export function foo(
 		}
 	}
 }
+
+func TestTypeScriptExtractReferences(t *testing.T) {
+	source := `import { useReducer } from "react"
+
+const INITIAL_STATE = { count: 0 }
+
+function authPromptReducer(state, action) {
+  return state
+}
+
+export function useAuthPromptController() {
+  const [state, dispatch] = useReducer(authPromptReducer, INITIAL_STATE)
+  return { state, dispatch }
+}`
+
+	extractor := NewTypeScriptExtractor()
+	syms, err := extractor.Extract(context.Background(), "src/controller.ts", []byte(source))
+	if err != nil {
+		t.Fatalf("extract: %v", err)
+	}
+
+	var hook Symbol
+	for _, sym := range syms {
+		if sym.Name == "useAuthPromptController" {
+			hook = sym
+			break
+		}
+	}
+	if hook.Name == "" {
+		t.Fatalf("missing useAuthPromptController symbol")
+	}
+
+	refs, err := ExtractTypeScriptReferences(context.Background(), hook, []byte(source))
+	if err != nil {
+		t.Fatalf("extract refs: %v", err)
+	}
+
+	for _, want := range []string{"authPromptReducer", "INITIAL_STATE"} {
+		found := false
+		for _, ref := range refs {
+			if ref == want {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("expected ref %q in %v", want, refs)
+		}
+	}
+	for _, ref := range refs {
+		if ref == "const" || ref == "function" || ref == "return" {
+			t.Errorf("unexpected keyword in refs: %q (refs=%v)", ref, refs)
+		}
+	}
+}

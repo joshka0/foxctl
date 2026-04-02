@@ -173,7 +173,11 @@ signature:
       improves dead-code reachability for `defp` helper chains in fully indexed
       scopes. Elixir dead-code analysis now also keeps common framework callback
       implementations live and disambiguates same-name non-function symbols from
-      real functions before emitting candidates.
+      real functions before emitting candidates. TypeScript repoindex now also
+      emits same-file symbol `REFERS_TO` edges for bare identifier usage inside
+      symbol bodies, which keeps reducer-style and callback-style helper chains
+      from being misclassified as dead just because they were passed by
+      reference instead of called directly.
 
       Monorepo indexing guidance:
       - prefer indexing the smallest workspace root that contains the app or
@@ -181,6 +185,9 @@ signature:
       - for TypeScript and Elixir monorepos, that usually means indexing the
         app root *(for example `praze/`, `apps/praze-api/`, or
         `apps/praze-presence/`)* rather than the repo root
+      - nested workspace indexing now falls back to workspace-local file
+        discovery when a parent repo's gitignore would otherwise hide real app
+        source files
       - rerun `refactor status` after indexing; `focus=dead` should be trusted
         only when the target scope is fully `index_backed`
 
