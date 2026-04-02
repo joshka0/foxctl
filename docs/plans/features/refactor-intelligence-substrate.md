@@ -224,6 +224,17 @@ Target scout flow becomes:
 This means local AST/tree-sitter rules continue to matter, but the final finding
 quality improves because each score is no longer context-blind.
 
+## Follow-On Detection Backlog
+
+The substrate work in this plan is now complemented by a detection-focused
+backlog in:
+
+- [Refactor Deterministic Detection Backlog](./refactor-deterministic-detection-backlog.md)
+
+That backlog is the right place for follow-on work such as symbol-level
+hotness, opportunity scoring, co-change clustering, stronger dead-code roots,
+and other deterministic detection improvements on top of this substrate.
+
 ## Evidence Model
 
 Each major finding should be able to attach:

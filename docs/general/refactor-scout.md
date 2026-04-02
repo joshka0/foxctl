@@ -51,6 +51,11 @@ repoindex with `--python`, `refactor status` and `refactor scout --focus dead`
 can run `index_backed` on Python package or script scopes instead of falling
 back to parser-only mode.
 
+Rust is now part of the repoindex-backed refactor lane too. If you build
+repoindex with `--rust`, `refactor status` and `refactor scout --focus dead`
+can run `index_backed` on Rust crate or module scopes instead of falling back
+to parser-only mode.
+
 ## At A Glance
 
 The current refactor surface is:
@@ -88,6 +93,7 @@ agentctl refactor evidence --artifact sha256:54cc680432b307307d524d7c857fcd17974
 agentctl refactor scout --path . --language go
 agentctl refactor scout --path ./packages --language typescript
 agentctl refactor scout --path ./scripts --language python
+agentctl refactor scout --path ./crates/my-crate/src --language rust
 agentctl refactor scout --path apps/praze-api/lib --language elixir
 agentctl refactor scout --path ./internal --language go --focus slop
 agentctl refactor scout --path ./internal/actor --language go --focus dead
@@ -163,6 +169,8 @@ Important operating rules:
 - for Python, build repoindex with `--python` on the package root or scripts
   root you actually want to analyze rather than indexing unrelated monorepo
   siblings by default
+- for Rust, build repoindex with `--rust` on the crate root you actually want
+  to analyze rather than indexing unrelated monorepo siblings by default
 - treat `--focus dead` as advisory and only trust it when `refactor status`
   reports a fully `index_backed` scope
 
@@ -206,6 +214,10 @@ Current rule families include:
     `agentctl index repo build --python`; the first version uses module/file
     reachability plus same-file Python call edges, so it is useful for package
     helpers and script surfaces but still less framework-aware than Go
+  - Rust dead-code analysis is now repoindex-backed on scopes indexed with
+    `agentctl index repo build --rust`; the first version uses tree-sitter-backed
+    Rust symbols when available plus same-file call edges, so crate-wide
+    `use`/module reachability still lags Go
 - function hotspots:
   - `function_hotspot`
   - `fan_out_dependency_spread`

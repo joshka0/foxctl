@@ -240,6 +240,10 @@ func (idx *Indexer) indexFile(ctx context.Context, event indexing.PostReviewEven
 			symbols[i].Key = ElixirSymbolKey(symbols[i].Name)
 		case "python":
 			symbols[i].Key = PythonSymbolKey(symbols[i].Name)
+		case "rust":
+			exported := strings.HasPrefix(strings.TrimSpace(symbols[i].Signature), "pub ") ||
+				strings.HasPrefix(strings.TrimSpace(symbols[i].Signature), "pub(")
+			symbols[i].Key = RustSymbolKey(symbols[i].Name, exported, filepath.Base(symbols[i].FilePath))
 		}
 	}
 
@@ -876,6 +880,8 @@ func normalizeLanguageHint(hint string) string {
 		return "javascript"
 	case "elixir", "ex", "exs":
 		return "elixir"
+	case "rust", "rs":
+		return "rust"
 	default:
 		return strings.ToLower(strings.TrimSpace(hint))
 	}

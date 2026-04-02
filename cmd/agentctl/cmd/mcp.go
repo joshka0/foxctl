@@ -3081,6 +3081,7 @@ func handleRepoIndexBuild(ctx context.Context, req mcp.CallToolRequest) (*mcp.Ca
 	}
 	includeGo := getBoolArg(args, "include_go", true)
 	includePython := getBoolArg(args, "include_python", false)
+	includeRust := getBoolArg(args, "include_rust", false)
 	includeTS := getBoolArg(args, "include_typescript", true)
 	includeElixir := getBoolArg(args, "include_elixir", false)
 	includeTerraform := getBoolArg(args, "include_terraform", false)
@@ -3090,7 +3091,7 @@ func handleRepoIndexBuild(ctx context.Context, req mcp.CallToolRequest) (*mcp.Ca
 	dryRun := getBoolArg(args, "dry_run", false)
 
 	return runRepoIndexCommand(ctx, func(cmd *cobra.Command) error {
-		return runIndexRepoBuild(cmd, workspace, patterns, includeGo, includePython, includeTS, includeElixir, includeTerraform, includeKubernetes, includeShell, includeTests, dryRun)
+		return runIndexRepoBuild(cmd, workspace, patterns, includeGo, includePython, includeRust, includeTS, includeElixir, includeTerraform, includeKubernetes, includeShell, includeTests, dryRun)
 	})
 }
 

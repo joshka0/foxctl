@@ -254,6 +254,59 @@ end
 	}
 }
 
+func TestBuilderAddsRustCallEdges(t *testing.T) {
+	ctx := context.Background()
+	workspace := t.TempDir()
+	storageRoot := t.TempDir()
+
+	if err := os.WriteFile(filepath.Join(workspace, "Cargo.toml"), []byte("[package]\nname = \"sample\"\nversion = \"0.1.0\"\n"), 0o644); err != nil {
+		t.Fatalf("write Cargo.toml: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(workspace, "src"), 0o755); err != nil {
+		t.Fatalf("mkdir src: %v", err)
+	}
+	source := `pub fn api() {
+    helper();
+}
+
+fn helper() {}
+`
+	if err := os.WriteFile(filepath.Join(workspace, "src", "lib.rs"), []byte(source), 0o644); err != nil {
+		t.Fatalf("write lib.rs: %v", err)
+	}
+
+	store, err := Open(ctx, storageRoot, workspace)
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer store.Close()
+
+	builder := NewBuilder(store, workspace)
+	if _, err := builder.Build(ctx, BuildOptions{
+		RepoRoot:          workspace,
+		IncludeGo:         false,
+		IncludePython:     false,
+		IncludeRust:       true,
+		IncludeTypescript: false,
+		IncludeElixir:     false,
+	}); err != nil {
+		t.Fatalf("build: %v", err)
+	}
+
+	repoKey := store.RepoKey()
+	pkgID := rustModuleID("src/lib.rs")
+	apiID := SymbolID(repoKey, pkgID, "api")
+	helperID := SymbolID(repoKey, pkgID, "lib.rs/helper")
+
+	outgoing, err := store.GetOutgoingEdges(ctx, apiID, []EdgeType{EdgeCalls}, 100)
+	if err != nil {
+		t.Fatalf("get outgoing edges: %v", err)
+	}
+	if !containsEdge(outgoing, apiID, helperID, EdgeCalls) {
+		t.Fatalf("expected CALLS edge %s -> %s", apiID, helperID)
+	}
+}
+
 func TestBuilderAddsGoFileRootReferenceEdges(t *testing.T) {
 	ctx := context.Background()
 	workspace := t.TempDir()

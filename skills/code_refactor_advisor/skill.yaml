@@ -3,8 +3,8 @@ kind: Skill
 metadata:
   name: code/refactor_advisor
   version: 0.1.0
-  description: "Two-stage refactor workflow: local scout retrieval plus LLM shortlist ranking"
-  tags: ["code", "refactor", "llm", "ranking", "minimax"]
+  description: "Two-stage refactor workflow: deterministic scout retrieval plus LLM ranking and sequencing"
+  tags: ["code", "refactor", "llm", "ranking", "scout", "shortlist"]
 distribution:
   type: exec
   exec:
@@ -22,7 +22,7 @@ signature:
     - name: language
       type: string
       required: true
-      enum: ["go", "python", "javascript", "typescript", "elixir"]
+      enum: ["go", "python", "javascript", "typescript", "elixir", "rust"]
       description: "Single language to analyze"
     - name: focus
       type: string
@@ -109,10 +109,25 @@ signature:
       asks an OpenAI-compatible model to choose the best refactor starting points
       from the local findings.
 
+      It sits on top of the wider refactor workflow:
+      - refactor status tells you whether the target scope is parser_only or
+        index_backed
+      - refactor snapshot, deps, changes, hot, and evidence provide the
+        deterministic context that scout can attach to findings
+      - refactor scout remains the source of discovery truth, including slop
+        and dead-code detection, snapshot IDs, and evidence artifacts
+
       This is intended for:
       - strict single-language refactor entrypoint tasks
       - using local deterministic retrieval for hotspot discovery
-      - using a remote model only for shortlist ranking and explanation
+      - using a remote model only for shortlist ranking, sequencing, and
+        explanation
+
+      Current advisor behavior:
+      - the advisor forwards the local scout's findings rather than replacing them
+      - the advisor currently supports the scout's all and slop views
+      - if you want conservative dead-code candidates, run code/refactor_scout
+        directly with focus=dead before asking the advisor to sequence cleanup
 
       Default second-stage target:
       - provider: openrouter

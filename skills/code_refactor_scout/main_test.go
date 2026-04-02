@@ -5,6 +5,7 @@ import (
 	"go/parser"
 	"go/token"
 	"os"
+	"path/filepath"
 	"testing"
 
 	symindex "github.com/jkatigb/agentctl/internal/indexing/symbol"
@@ -146,6 +147,121 @@ func recoverThing(a, b bool) error {
 	t.Fatalf("expected duplicate_recovery_block finding, got %#v", got)
 }
 
+func TestAnalyzeGoFuncDeclFindsSemanticSimplificationForBoolWrapper(t *testing.T) {
+	src := `package sample
+
+func isPresent(value *Item) bool {
+	if value == nil {
+		return false
+	}
+	return true
+}
+`
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, "sample.go", src, parser.ParseComments)
+	if err != nil {
+		t.Fatalf("parse go file: %v", err)
+	}
+
+	state := &scoutState{Thresholds: thresholdsFor("default")}
+	var got []finding
+	for _, decl := range file.Decls {
+		fn, ok := decl.(*ast.FuncDecl)
+		if !ok {
+			continue
+		}
+		got = append(got, analyzeGoFuncDecl(fn, fset, "sample.go", state)...)
+	}
+
+	for _, item := range got {
+		if item.RuleID != "semantic_simplification_candidate" {
+			continue
+		}
+		if item.Symbol != "isPresent" {
+			t.Fatalf("symbol=%q want isPresent", item.Symbol)
+		}
+		if item.Evidence["simplified_form"] != "return value != nil" {
+			t.Fatalf("simplified_form=%#v", item.Evidence["simplified_form"])
+		}
+		patterns, ok := item.Evidence["pattern_ids"].([]string)
+		if !ok || len(patterns) == 0 {
+			t.Fatalf("pattern_ids=%#v", item.Evidence["pattern_ids"])
+		}
+		if patterns[0] != "inverted_boolean_return_wrapper" {
+			t.Fatalf("pattern_ids=%#v want inverted wrapper first", patterns)
+		}
+		return
+	}
+
+	t.Fatalf("expected semantic_simplification_candidate, got %#v", got)
+}
+
+func TestAnalyzeGoFuncDeclFindsSemanticSimplificationForBooleanLiteralComparison(t *testing.T) {
+	src := `package sample
+
+func shouldRun(flag bool) bool {
+	return flag == true
+}
+`
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, "sample.go", src, parser.ParseComments)
+	if err != nil {
+		t.Fatalf("parse go file: %v", err)
+	}
+
+	state := &scoutState{Thresholds: thresholdsFor("default")}
+	var got []finding
+	for _, decl := range file.Decls {
+		fn, ok := decl.(*ast.FuncDecl)
+		if !ok {
+			continue
+		}
+		got = append(got, analyzeGoFuncDecl(fn, fset, "sample.go", state)...)
+	}
+
+	for _, item := range got {
+		if item.RuleID != "semantic_simplification_candidate" {
+			continue
+		}
+		if item.Evidence["simplified_form"] != "return flag" {
+			t.Fatalf("simplified_form=%#v", item.Evidence["simplified_form"])
+		}
+		return
+	}
+
+	t.Fatalf("expected semantic_simplification_candidate, got %#v", got)
+}
+
+func TestAnalyzeGoFuncDeclSkipsUnsafeSemanticSimplification(t *testing.T) {
+	src := `package sample
+
+func keepCall() bool {
+	return expensive() || true
+}
+`
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, "sample.go", src, parser.ParseComments)
+	if err != nil {
+		t.Fatalf("parse go file: %v", err)
+	}
+
+	state := &scoutState{Thresholds: thresholdsFor("default")}
+	var got []finding
+	for _, decl := range file.Decls {
+		fn, ok := decl.(*ast.FuncDecl)
+		if !ok {
+			continue
+		}
+		got = append(got, analyzeGoFuncDecl(fn, fset, "sample.go", state)...)
+	}
+
+	for _, item := range got {
+		if item.RuleID == "semantic_simplification_candidate" {
+			t.Fatalf("unexpected semantic simplification finding: %#v", item)
+		}
+	}
+}
+
 func TestFinalizeReceiverHotspots(t *testing.T) {
 	state := &scoutState{
 		Thresholds: thresholdsFor("default"),
@@ -197,6 +313,37 @@ func TestResolveLanguageScopeInfersSingleDirectoryLanguage(t *testing.T) {
 	}
 	if scope.Language != "go" {
 		t.Fatalf("expected go, got %s", scope.Language)
+	}
+}
+
+func TestBuildScoutStatusScopeUsesWorkspaceRelativePath(t *testing.T) {
+	workspace := t.TempDir()
+	searchPath := filepath.Join(workspace, "internal", "actor")
+	if err := os.MkdirAll(searchPath, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	info, err := os.Stat(searchPath)
+	if err != nil {
+		t.Fatalf("stat dir: %v", err)
+	}
+
+	scope := buildScoutStatusScope(workspace, searchPath, info, languageScope{
+		Mode:     "explicit",
+		Language: "go",
+		Detected: []string{"go"},
+	}, false)
+
+	if scope.Path != "internal/actor" {
+		t.Fatalf("scope path=%q want internal/actor", scope.Path)
+	}
+	if scope.Absolute != searchPath {
+		t.Fatalf("scope absolute=%q want %q", scope.Absolute, searchPath)
+	}
+	if !scope.IsDir {
+		t.Fatal("expected scope IsDir=true")
+	}
+	if scope.IncludeTests {
+		t.Fatal("expected include_tests=false")
 	}
 }
 
@@ -274,19 +421,20 @@ func TestApplyFocusSlopFiltersToSlopFindings(t *testing.T) {
 		{RuleID: "duplicate_recovery_block", Symbol: "Recover", Score: 84},
 		{RuleID: "duplicated_error_remap", Symbol: "Recover", Score: 83},
 		{RuleID: "repeated_guard_ladder", Symbol: "Recover", Score: 82},
+		{RuleID: "semantic_simplification_candidate", Symbol: "Recover", Score: 81},
 		{RuleID: "high_cyclomatic_complexity", Symbol: "Complex", Score: 88},
 		{
 			RuleID: "function_hotspot",
 			Symbol: "Recover",
 			Evidence: map[string]any{
-				"rules": []string{"repeated_guard_ladder", "high_cyclomatic_complexity"},
+				"rules": []string{"semantic_simplification_candidate", "high_cyclomatic_complexity"},
 			},
 		},
 	}
 
 	got := applyFocus(items, "slop")
-	if len(got) != 4 {
-		t.Fatalf("len(got)=%d want 4 (%#v)", len(got), got)
+	if len(got) != 5 {
+		t.Fatalf("len(got)=%d want 5 (%#v)", len(got), got)
 	}
 	for _, item := range got {
 		if item.RuleID == "high_cyclomatic_complexity" {

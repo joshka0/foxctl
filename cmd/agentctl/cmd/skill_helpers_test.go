@@ -41,10 +41,10 @@ func TestCreateSkillResolver_EnvPrecedence(t *testing.T) {
 	paths := resolver.SearchPaths()
 
 	expected := append([]string{}, skill.EnvSearchPaths()...)
-	expected = append(expected, skill.DevSearchPaths()...)
 	expected = append(expected, cfgSkills)
 	expected = append(expected, skill.UserSearchPaths()...)
 	expected = append(expected, skill.BuiltinSearchPaths()...)
+	expected = append(expected, skill.DevSearchPaths()...)
 	expected = skill.NormalizeSearchPaths(expected)
 	require.Equal(t, expected, paths)
 }

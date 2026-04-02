@@ -5,8 +5,8 @@ Status: current first slice
 This document defines the first tmux collaboration surface for `agentctl`:
 
 - tmux is the live coordination plane
-- `agentctl tmux` is the structured read surface
-- `tmux-bridge` is the write/send helper
+- `agentctl tmux` is the native create/read/send surface
+- `tmux-bridge` is an optional low-level helper
 - ACA and the Obsidian vault remain the durable continuity layers
 
 The point is to let multiple Codex or Claude panes interact while the TUI stays open, without turning tmux scrollback into canonical state.
@@ -28,47 +28,60 @@ But tmux is still a terminal substrate, not a durable protocol. That means:
 
 ### Structured Reads
 
-`agentctl` exposes read-only tmux inspection:
+`agentctl` exposes native tmux setup and messaging:
 
 ```bash
-agentctl tmux prepare --session agentctl-collab --panes 3 --attach
+agentctl tmux create --session agentctl-collab --panes 3 --attach
 agentctl tmux list
 agentctl tmux read agent-b --lines 80
+agentctl tmux send agent-b "Review internal/storage/mailbox/store.go for lease races." --sender agent-a
 agentctl tmux observe agent-b --lines 80
 agentctl tmux doctor
 ```
 
-`prepare` creates or extends a detached tmux session, tiles it, and returns an attach command plus bridge examples.
+`create` creates or extends a detached tmux session, tiles it, and returns an attach command plus native send examples. `prepare` remains as a compatibility alias.
 
 Without `--agent`, panes default to labels like `agent-a`, `agent-b`, `agent-c`.
-With `--agent claude`, `--agent codex`, or `--agent gemini`, the default labels become `claude-a`, `codex-a`, or `gemini-a`.
+With `--agent claude`, `--agent codex`, `--agent gemini`, `--agent agent`, or `--agent droid`, the default labels become `claude-a`, `codex-a`, `gemini-a`, `agent-a`, or `droid-a`.
 
 With `--attach`, `agentctl` jumps directly into the prepared session. Outside tmux it uses `attach-session`; inside tmux it uses `switch-client`.
 
 To launch a specific agent CLI in each pane, use `--agent` plus repeated `--agent-arg` flags:
 
 ```bash
-agentctl tmux prepare --session claude-collab --panes 3 \
+agentctl tmux create --session claude-collab --panes 3 \
   --agent claude \
   --agent-arg=--model \
   --agent-arg=sonnet \
   --agent-arg=--permission-mode \
   --agent-arg=default \
   --attach
+
+agentctl tmux create --session cursor-collab --panes 3 \
+  --agent agent \
+  --agent-arg=--model \
+  --agent-arg=claude-sonnet-4 \
+  --attach
+
+agentctl tmux create --session droid-collab --panes 3 \
+  --agent droid \
+  --attach
 ```
+
+For Cursor CLI (`agent`) and Droid (`droid`), model selection can happen inside the interactive session with their native slash commands such as `/model`.
 
 This keeps `agentctl` neutral while still letting each CLI use its own option surface.
 
 To resume an existing Codex or Claude session in tmux:
 
 ```bash
-agentctl tmux prepare --session codex-resume \
+agentctl tmux create --session codex-resume \
   --panes 1 \
   --agent codex \
   --agent-session-id 123e4567-e89b-12d3-a456-426614174000 \
   --attach
 
-agentctl tmux prepare --session claude-resume \
+agentctl tmux create --session claude-resume \
   --panes 1 \
   --agent claude \
   --agent-session-id 123e4567-e89b-12d3-a456-426614174000 \
@@ -79,22 +92,25 @@ agentctl tmux prepare --session claude-resume \
 
 The other commands return structured envelopes with pane metadata and bounded scrollback captures.
 
-### Interactive Sends
+### Native Sends
 
-The bundled tmux skill includes `scripts/tmux-bridge` for pane-to-pane interaction:
-
-```bash
-agentctl tmux prepare --session agentctl-collab --panes 3 --pane-command codex --attach
-```
-
-After the session is attached, the bundled tmux skill includes `scripts/tmux-bridge` for pane-to-pane interaction:
+Prefer the native CLI for pane-to-pane interaction:
 
 ```bash
-./scripts/tmux-bridge read agent-b 40
-./scripts/tmux-bridge send agent-b "Review internal/storage/mailbox/store.go for lease races."
+agentctl tmux create --session agentctl-collab --panes 3 --agent codex --attach
+agentctl tmux send agent-b "Review internal/storage/mailbox/store.go for lease races."
 ```
 
-`send` enforces read-before-send per sender pane. One agent reading a target pane does not satisfy the guard for another agent.
+When invoking `send` from outside tmux, provide the sender pane label explicitly:
+
+```bash
+agentctl tmux create --session praze-collab --panes 2 --label-prefix praze
+agentctl tmux send praze-b "Please review this path." --sender praze-a
+```
+
+This means external callers such as Praze can create their own tmux session and send as one of their labeled panes without depending on a repo-local script.
+
+The bundled `tmux-bridge` helper is still available for lower-level workflows such as `type`, `keys`, or read-before-send guardrails, but it is no longer required for the core create/send path.
 
 ## Message Shape
 

@@ -26,6 +26,7 @@ import (
 const (
 	goPkgPrefix         = "go:"
 	pythonPkgPrefix     = "py:"
+	rustPkgPrefix       = "rs:"
 	tsLocalPrefix       = "ts:local:"
 	tsNpmPrefix         = "ts:npm:"
 	elixirPkgPrefix     = "ex:"
@@ -74,7 +75,7 @@ func (b *Builder) Build(ctx context.Context, opts BuildOptions) (BuildResult, er
 	if len(opts.Patterns) == 0 {
 		opts.Patterns = []string{"./..."}
 	}
-	if !opts.IncludeGo && !opts.IncludePython && !opts.IncludeTypescript && !opts.IncludeElixir && !opts.IncludeTerraform && !opts.IncludeKubernetes && !opts.IncludeShell {
+	if !opts.IncludeGo && !opts.IncludePython && !opts.IncludeRust && !opts.IncludeTypescript && !opts.IncludeElixir && !opts.IncludeTerraform && !opts.IncludeKubernetes && !opts.IncludeShell {
 		return result, fmt.Errorf("repoindex: at least one language or config family must be enabled")
 	}
 
@@ -91,6 +92,11 @@ func (b *Builder) Build(ctx context.Context, opts BuildOptions) (BuildResult, er
 	}
 	if opts.IncludePython {
 		if err := b.buildPython(ctx, opts, nodes, edges, &result, &pending, &locators); err != nil {
+			return result, err
+		}
+	}
+	if opts.IncludeRust {
+		if err := b.buildRust(ctx, opts, nodes, edges, &result, &pending, &locators); err != nil {
 			return result, err
 		}
 	}
@@ -562,6 +568,110 @@ func (b *Builder) buildPython(ctx context.Context, opts BuildOptions, nodes map[
 		}
 		for _, sym := range syms {
 			sym.Key = symbol.PythonSymbolKey(sym.Name)
+			srcID := SymbolID(opts.RepoKey, pkgID, sym.EffectiveID())
+			addSymbol(ctx, opts, nodes, edges, pkgID, fileNode.ID, sym, locators)
+			result.Symbols++
+
+			callNames, err := extractor.ExtractCalls(ctx, sym, content)
+			if err == nil && len(callNames) > 0 && pending != nil {
+				callNames = capList(callNames, 50)
+				for _, callName := range callNames {
+					callName = strings.TrimSpace(callName)
+					if callName == "" {
+						continue
+					}
+					*pending = append(*pending, pendingNameEdge{
+						SrcID:      srcID,
+						SrcPkg:     pkgID,
+						SrcFile:    fileRelPath,
+						TargetName: callName,
+						Type:       EdgeCalls,
+						Weight:     0.9,
+					})
+				}
+			}
+		}
+	}
+
+	return nil
+}
+
+func (b *Builder) buildRust(ctx context.Context, opts BuildOptions, nodes map[string]Node, edges map[string]Edge, result *BuildResult, pending *[]pendingNameEdge, locators *[]LocatorEntry) error {
+	extractor := b.registry.Get("rust")
+	if extractor == nil {
+		return fmt.Errorf("repoindex: no rust extractor registered")
+	}
+
+	exclude := []string{
+		"target/**",
+		".cargo/**",
+		"node_modules/**",
+		"vendor/**",
+		"dist/**",
+		"build/**",
+		".git/**",
+	}
+
+	files, err := fsutil.FindFilesRespectingGitignore(opts.RepoRoot, "**/*.rs", exclude)
+	if err != nil {
+		return fmt.Errorf("repoindex: find rust files: %w", err)
+	}
+	sort.Strings(files)
+
+	seenPackages := make(map[string]bool)
+	for _, fileRelPath := range files {
+		if !opts.IncludeTests && fsutil.IsTestFile(fileRelPath) {
+			continue
+		}
+		absPath := filepath.Join(opts.RepoRoot, fileRelPath)
+		content, err := os.ReadFile(absPath)
+		if err != nil {
+			return fmt.Errorf("repoindex: read rust file %s: %w", fileRelPath, err)
+		}
+
+		pkgID := rustModuleID(fileRelPath)
+		pkgNodeID := PackageID(opts.RepoKey, pkgID)
+		addNode(nodes, Node{
+			ID:        pkgNodeID,
+			Kind:      NodePackage,
+			Pkg:       pkgID,
+			Name:      strings.TrimPrefix(pkgID, rustPkgPrefix),
+			UpdatedAt: time.Now().UTC(),
+		})
+		if !seenPackages[pkgID] {
+			result.Packages++
+			seenPackages[pkgID] = true
+		}
+
+		lineCount := countLines(content)
+		fileNodeID := FileID(opts.RepoKey, pkgID, fileRelPath)
+		fileNode := Node{
+			ID:        fileNodeID,
+			Kind:      NodeFile,
+			Pkg:       pkgID,
+			File:      fileRelPath,
+			Name:      filepath.Base(fileRelPath),
+			SpanStart: 1,
+			SpanEnd:   lineCount,
+			Hash:      symbol.ComputeDigest(content),
+			UpdatedAt: time.Now().UTC(),
+		}
+		applyFileSummary(ctx, opts, &fileNode, fileRelPath)
+		addNode(nodes, fileNode)
+		addEdge(edges, Edge{
+			Src:    pkgNodeID,
+			Dst:    fileNode.ID,
+			Type:   EdgeContains,
+			Weight: 1.0,
+		})
+		result.Files++
+
+		syms, err := extractor.Extract(ctx, fileRelPath, content)
+		if err != nil {
+			return fmt.Errorf("repoindex: extract rust symbols %s: %w", fileRelPath, err)
+		}
+		for _, sym := range syms {
+			sym.Key = symbol.RustSymbolKey(sym.Name, isExportedSymbol(sym), filepath.Base(fileRelPath))
 			srcID := SymbolID(opts.RepoKey, pkgID, sym.EffectiveID())
 			addSymbol(ctx, opts, nodes, edges, pkgID, fileNode.ID, sym, locators)
 			result.Symbols++
@@ -1450,6 +1560,10 @@ func isExportedSymbol(sym symbol.Symbol) bool {
 		}
 		return !strings.HasPrefix(name, "_")
 	}
+	if sym.Language == "rust" {
+		signature := strings.TrimSpace(sym.Signature)
+		return strings.HasPrefix(signature, "pub ") || strings.HasPrefix(signature, "pub(")
+	}
 	name := strings.TrimSpace(sym.Name)
 	if sym.Language == "go" && sym.Kind == symbol.KindMethod {
 		if idx := strings.LastIndex(name, "."); idx >= 0 && idx+1 < len(name) {
@@ -1484,6 +1598,8 @@ func languageFromPackageID(pkgID string) string {
 		return "typescript"
 	case strings.HasPrefix(pkgID, pythonPkgPrefix):
 		return "python"
+	case strings.HasPrefix(pkgID, rustPkgPrefix):
+		return "rust"
 	case strings.HasPrefix(pkgID, elixirPkgPrefix):
 		return "elixir"
 	default:
@@ -1512,12 +1628,15 @@ func resolveGitHead(ctx context.Context, repoRoot string) string {
 }
 
 func buildLanguages(opts BuildOptions) []string {
-	languages := make([]string, 0, 6)
+	languages := make([]string, 0, 7)
 	if opts.IncludeGo {
 		languages = append(languages, "go")
 	}
 	if opts.IncludePython {
 		languages = append(languages, "python")
+	}
+	if opts.IncludeRust {
+		languages = append(languages, "rust")
 	}
 	if opts.IncludeTypescript {
 		languages = append(languages, "typescript")
@@ -1550,4 +1669,19 @@ func pythonModuleID(filePath string) string {
 		return pythonPkgPrefix + "root"
 	}
 	return pythonPkgPrefix + withoutExt
+}
+
+func rustModuleID(filePath string) string {
+	trimmed := strings.TrimSpace(filepath.ToSlash(filePath))
+	if trimmed == "" {
+		return rustPkgPrefix + "root"
+	}
+	withoutExt := strings.TrimSuffix(trimmed, filepath.Ext(trimmed))
+	if strings.HasSuffix(withoutExt, "/mod") {
+		withoutExt = strings.TrimSuffix(withoutExt, "/mod")
+	}
+	if withoutExt == "" || withoutExt == "." {
+		return rustPkgPrefix + "root"
+	}
+	return rustPkgPrefix + withoutExt
 }

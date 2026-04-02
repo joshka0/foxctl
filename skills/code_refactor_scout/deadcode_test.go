@@ -247,6 +247,75 @@ func TestBuildDeadCodeFindingsMarksDeadMethodChains(t *testing.T) {
 	}
 }
 
+func TestBuildDeadCodeFindingsClassifiesRustCandidates(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	storageRoot := t.TempDir()
+	workspace := t.TempDir()
+
+	store, err := repoindex.Open(ctx, storageRoot, workspace)
+	if err != nil {
+		t.Fatalf("open repoindex store: %v", err)
+	}
+	defer store.Close()
+
+	pkg := "rs:src/lib"
+	now := time.Now().UTC()
+	nodes := []repoindex.Node{
+		{ID: repoindex.PackageID(store.RepoKey(), pkg), Kind: repoindex.NodePackage, Pkg: pkg, Name: "src/lib", UpdatedAt: now},
+		{ID: repoindex.FileID(store.RepoKey(), pkg, "src/lib.rs"), Kind: repoindex.NodeFile, Pkg: pkg, File: "src/lib.rs", Name: "lib.rs", SpanStart: 1, SpanEnd: 20, UpdatedAt: now},
+		{ID: repoindex.SymbolID(store.RepoKey(), pkg, "lib.rs/helper"), Kind: repoindex.NodeSymbol, Pkg: pkg, File: "src/lib.rs", Name: "helper", Signature: "fn helper()", SpanStart: 10, SpanEnd: 12, UpdatedAt: now},
+		{ID: repoindex.SymbolID(store.RepoKey(), pkg, "api"), Kind: repoindex.NodeSymbol, Pkg: pkg, File: "src/lib.rs", Name: "api", Signature: "pub fn api()", SpanStart: 2, SpanEnd: 6, Exported: true, UpdatedAt: now},
+	}
+	edges := []repoindex.Edge{
+		{Src: repoindex.PackageID(store.RepoKey(), pkg), Dst: repoindex.FileID(store.RepoKey(), pkg, "src/lib.rs"), Type: repoindex.EdgeContains, Weight: 1.0},
+		{Src: repoindex.FileID(store.RepoKey(), pkg, "src/lib.rs"), Dst: repoindex.SymbolID(store.RepoKey(), pkg, "lib.rs/helper"), Type: repoindex.EdgeContains, Weight: 1.0},
+		{Src: repoindex.FileID(store.RepoKey(), pkg, "src/lib.rs"), Dst: repoindex.SymbolID(store.RepoKey(), pkg, "api"), Type: repoindex.EdgeContains, Weight: 1.0},
+	}
+	if err := store.ReplaceAll(ctx, nodes, edges); err != nil {
+		t.Fatalf("replace repoindex graph: %v", err)
+	}
+	locators := []repoindex.LocatorEntry{
+		{SymbolKey: "lib.rs/helper", Pkg: pkg, FilePath: "src/lib.rs", Name: "helper", Kind: "function", SpanStart: 10, SpanEnd: 12, UpdatedAt: now.Format(time.RFC3339Nano)},
+		{SymbolKey: "api", Pkg: pkg, FilePath: "src/lib.rs", Name: "api", Kind: "function", Exported: true, SpanStart: 2, SpanEnd: 6, UpdatedAt: now.Format(time.RFC3339Nano)},
+	}
+	for _, loc := range locators {
+		if err := store.UpsertLocator(ctx, loc); err != nil {
+			t.Fatalf("upsert locator: %v", err)
+		}
+	}
+
+	scope := refscope.Scope{
+		Workspace:    workspace,
+		RepoRoot:     workspace,
+		Path:         "src",
+		Absolute:     filepath.Join(workspace, "src"),
+		Mode:         "explicit",
+		Language:     "rust",
+		Detected:     []string{"rust"},
+		IsDir:        true,
+		IncludeTests: false,
+	}
+	status := refstatus.Status{Mode: refstatus.ModeIndexBacked}
+
+	got, err := buildDeadCodeFindings(ctx, storageRoot, scope, status, "dead")
+	if err != nil {
+		t.Fatalf("buildDeadCodeFindings: %v", err)
+	}
+
+	bySymbol := make(map[string]string, len(got))
+	for _, item := range got {
+		bySymbol[item.Symbol] = item.RuleID
+	}
+	if bySymbol["helper"] != "unreachable_private_symbol" {
+		t.Fatalf("helper rule=%q want unreachable_private_symbol (all=%#v)", bySymbol["helper"], got)
+	}
+	if bySymbol["api"] != "stale_export_candidate" {
+		t.Fatalf("api rule=%q want stale_export_candidate (all=%#v)", bySymbol["api"], got)
+	}
+}
+
 func TestBuildDeadCodeFindingsKeepsInterfaceBackedMethodsLive(t *testing.T) {
 	t.Parallel()
 

@@ -164,6 +164,7 @@ type BuildOptions struct {
 	IncludeTests          bool
 	IncludeGo             bool
 	IncludePython         bool
+	IncludeRust           bool
 	IncludeTypescript     bool
 	IncludeElixir         bool
 	IncludeTerraform      bool

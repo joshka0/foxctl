@@ -434,17 +434,11 @@ bun run dev:gui
 ### Terminal UI
 
 ```bash
-# Start TUI (requires API server)
-AGENTCTL_API_URL=http://localhost:8090 bun run --cwd packages/tui dev
+# Start the new TUI control-plane shell (requires API server)
+bun run dev:tui
 ```
 
-| Key | View | Description |
-|-----|------|-------------|
-| 1 | Jobs | Job queue with status |
-| 2 | Tasks | Task list with dependencies |
-| 3 | Insights | PageRank, critical path |
-| 4 | Mailbox | Actor messages |
-| 5 | Search | Full-text search |
+The legacy diagnostics-first TUI has been archived. Active terminal work now targets `packages/tui-agent`, which is being rebuilt as an operator control plane alongside `gui-agent`.
 
 ---
 

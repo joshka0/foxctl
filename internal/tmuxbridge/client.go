@@ -16,6 +16,8 @@ import (
 
 const (
 	defaultSocketSentinel = "__default__"
+	defaultSessionName    = "agentctl-collab"
+	defaultLabelPrefix    = "agent"
 	fieldSep              = "\x1f"
 	listFormat            = "#{pane_id}" + fieldSep + "#{session_name}" + fieldSep + "#{window_index}" + fieldSep + "#{pane_index}" + fieldSep + "#{window_name}" + fieldSep + "#{pane_pid}" + fieldSep + "#{pane_width}" + fieldSep + "#{pane_height}" + fieldSep + "#{@name}" + fieldSep + "#{pane_current_path}" + fieldSep + "#{pane_current_command}" + fieldSep + "#{pane_active}"
 	labelFormat           = "#{pane_id}" + fieldSep + "#{@name}"
@@ -125,10 +127,30 @@ type BridgeMessage struct {
 	Content string `json:"content"`
 }
 
+// SendResult describes one bridge message injected into a target pane.
+type SendResult struct {
+	Target         string        `json:"target"`
+	ResolvedTarget string        `json:"resolved_target"`
+	Pane           Pane          `json:"pane"`
+	Sender         Pane          `json:"sender"`
+	BridgeMessage  BridgeMessage `json:"bridge_message"`
+}
+
 // Client exposes read-only access to a reachable tmux server.
 type Client struct {
 	runner Runner
 	env    map[string]string
+}
+
+type preparePlan struct {
+	session        string
+	panes          int
+	paneCommand    string
+	agent          string
+	agentArgs      []string
+	agentSessionID string
+	cwd            string
+	labelPrefix    string
 }
 
 // New returns a client using the process environment and OS runner.
@@ -162,35 +184,129 @@ func (c *Client) List(ctx context.Context) ([]Pane, error) {
 
 // ResolveTarget maps a label or direct pane target to a tmux pane target.
 func (c *Client) ResolveTarget(ctx context.Context, target string) (string, error) {
-	target = strings.TrimSpace(target)
+	target = normalizeTarget(target)
 	if target == "" {
 		return "", fmt.Errorf("target is required")
 	}
-	if paneIDPattern.MatchString(target) || digitsPattern.MatchString(target) || strings.Contains(target, ":") || strings.Contains(target, ".") {
+	if isDirectTarget(target) {
 		if err := c.validateTarget(ctx, target); err != nil {
 			return "", err
 		}
 		return target, nil
 	}
 
+	resolved, err := c.resolveTargetByLabel(ctx, target)
+	if err != nil {
+		return "", err
+	}
+	if err := c.validateTarget(ctx, resolved); err != nil {
+		return "", err
+	}
+	return resolved, nil
+}
+
+func normalizeTarget(target string) string {
+	return strings.TrimSpace(target)
+}
+
+func isDirectTarget(target string) bool {
+	return paneIDPattern.MatchString(target) ||
+		digitsPattern.MatchString(target) ||
+		strings.Contains(target, ":") ||
+		strings.Contains(target, ".")
+}
+
+func (c *Client) resolveTargetByLabel(ctx context.Context, label string) (string, error) {
 	stdout, err := c.runTmux(ctx, "list-panes", "-a", "-F", labelFormat)
 	if err != nil {
 		return "", err
 	}
-	for _, line := range splitNonEmptyLines(stdout) {
+	for _, pane := range parseLabelLines(stdout) {
+		if pane.Label == label {
+			return pane.ID, nil
+		}
+	}
+	return "", fmt.Errorf("no pane found with label %q", label)
+}
+
+func parseLabelLines(raw string) []Pane {
+	lines := splitNonEmptyLines(raw)
+	panes := make([]Pane, 0, len(lines))
+	for _, line := range lines {
 		fields := strings.Split(line, fieldSep)
 		if len(fields) < 2 {
 			continue
 		}
-		if fields[1] == target {
-			if err := c.validateTarget(ctx, fields[0]); err != nil {
-				return "", err
-			}
-			return fields[0], nil
-		}
+		panes = append(panes, Pane{
+			ID:    fields[0],
+			Label: fields[1],
+		})
 	}
+	return panes
+}
 
-	return "", fmt.Errorf("no pane found with label %q", target)
+func labelForIndex(prefix string, idx int) string {
+	if idx < 26 {
+		return fmt.Sprintf("%s-%c", prefix, rune('a'+idx))
+	}
+	return fmt.Sprintf("%s-%d", prefix, idx+1)
+}
+
+func agentLabelPrefix(agent string) string {
+	base := strings.TrimSpace(filepath.Base(agent))
+	base = strings.TrimSuffix(base, filepath.Ext(base))
+	base = strings.ToLower(base)
+	base = regexp.MustCompile(`[^a-z0-9._-]+`).ReplaceAllString(base, "-")
+	base = strings.Trim(base, "-")
+	if base == "" {
+		return "agent"
+	}
+	return base
+}
+
+func (c *Client) attachCommand(session, socket string) string {
+	return "tmux " + strings.Join(c.attachArgs(session, socket), " ")
+}
+
+func (c *Client) attachArgs(session, socket string) []string {
+	args := make([]string, 0, 4)
+	if socket != "" && socket != defaultSocketSentinel {
+		args = append(args, "-S", socket)
+	}
+	if strings.TrimSpace(c.env["TMUX"]) != "" {
+		args = append(args, "switch-client", "-t", session)
+		return args
+	}
+	args = append(args, "attach-session", "-t", session)
+	return args
+}
+
+func socketMode(socket string) string {
+	if socket == defaultSocketSentinel {
+		return "default"
+	}
+	if strings.TrimSpace(socket) == "" {
+		return "unknown"
+	}
+	return "explicit"
+}
+
+func shellQuoteArgs(parts []string) string {
+	quoted := make([]string, 0, len(parts))
+	for _, part := range parts {
+		quoted = append(quoted, shellQuote(part))
+	}
+	return strings.Join(quoted, " ")
+}
+
+func shellQuote(value string) string {
+	if value == "" {
+		return "''"
+	}
+	if !strings.ContainsAny(value, " \t\n'\"\\$`()[]{}*?!&;|<>") {
+		return value
+	}
+	return "'" + strings.ReplaceAll(value, "'", `'"'"'`) + "'"
 }
 
 // Read returns a bounded scrollback capture for one pane.
@@ -223,6 +339,56 @@ func (c *Client) Read(ctx context.Context, target string, lines int) (ReadResult
 	}, nil
 }
 
+// Send injects one structured bridge message into the target pane and presses Enter.
+// When running outside tmux, sender must resolve to an existing pane label or target.
+func (c *Client) Send(ctx context.Context, sender string, target string, text string) (SendResult, error) {
+	content := strings.TrimSpace(text)
+	if content == "" {
+		return SendResult{}, fmt.Errorf("message text is required")
+	}
+
+	resolvedTarget, err := c.ResolveTarget(ctx, target)
+	if err != nil {
+		return SendResult{}, err
+	}
+	targetPane, err := c.describePane(ctx, resolvedTarget)
+	if err != nil {
+		return SendResult{}, err
+	}
+
+	senderPane, err := c.resolveSenderPane(ctx, sender)
+	if err != nil {
+		return SendResult{}, err
+	}
+	from := strings.TrimSpace(senderPane.Label)
+	if from == "" {
+		from = senderPane.ID
+	}
+	header := fmt.Sprintf("[tmux-bridge from=%s pane=%s reply_to=%s]", from, senderPane.ID, from)
+	raw := header + " " + content
+
+	if _, err := c.runTmux(ctx, "send-keys", "-t", resolvedTarget, "-l", "--", raw); err != nil {
+		return SendResult{}, err
+	}
+	if _, err := c.runTmux(ctx, "send-keys", "-t", resolvedTarget, "Enter"); err != nil {
+		return SendResult{}, err
+	}
+
+	return SendResult{
+		Target:         target,
+		ResolvedTarget: resolvedTarget,
+		Pane:           targetPane,
+		Sender:         senderPane,
+		BridgeMessage: BridgeMessage{
+			Raw:     raw,
+			From:    from,
+			Pane:    senderPane.ID,
+			ReplyTo: from,
+			Content: content,
+		},
+	}, nil
+}
+
 // Doctor inspects tmux reachability and reports likely issues.
 func (c *Client) Doctor(ctx context.Context) (DoctorReport, error) {
 	report := DoctorReport{
@@ -246,25 +412,16 @@ func (c *Client) Doctor(ctx context.Context) (DoctorReport, error) {
 		report.DefaultReachable = true
 	}
 
-	if socket != "" && socket != defaultSocketSentinel && report.TmuxPane != "" {
-		if _, err := c.runTmuxWithSocket(ctx, socket, "display-message", "-t", report.TmuxPane, "-p", "#{pane_id}"); err == nil {
-			report.CurrentPaneSeen = true
-		} else {
-			report.Issues = append(report.Issues, fmt.Sprintf("current pane %s is not visible to detected server", report.TmuxPane))
-		}
-	} else if socket == defaultSocketSentinel && report.TmuxPane != "" {
-		if _, err := c.runTmuxWithSocket(ctx, socket, "display-message", "-t", report.TmuxPane, "-p", "#{pane_id}"); err == nil {
-			report.CurrentPaneSeen = true
+	if socket != "" && report.TmuxPane != "" {
+		currentPaneSeen, currentPaneIssue := c.inspectCurrentPane(ctx, socket, report.TmuxPane)
+		report.CurrentPaneSeen = currentPaneSeen
+		if currentPaneIssue != "" {
+			report.Issues = append(report.Issues, currentPaneIssue)
 		}
 	}
 
 	if panes, listErr := c.List(ctx); listErr == nil {
-		report.TotalPanes = len(panes)
-		for _, pane := range panes {
-			if strings.TrimSpace(pane.Label) != "" {
-				report.LabeledPanes++
-			}
-		}
+		report.TotalPanes, report.LabeledPanes = summarizePaneLabels(panes)
 	} else {
 		report.Issues = append(report.Issues, listErr.Error())
 	}
@@ -275,95 +432,43 @@ func (c *Client) Doctor(ctx context.Context) (DoctorReport, error) {
 
 // PrepareSession creates or extends a tmux session for live multi-agent work.
 func (c *Client) PrepareSession(ctx context.Context, opts PrepareOptions) (PrepareResult, error) {
-	if opts.Panes <= 0 {
-		return PrepareResult{}, fmt.Errorf("panes must be positive")
-	}
-	session := strings.TrimSpace(opts.Session)
-	if session == "" {
-		session = "agentctl-collab"
-	}
-	paneCommand := strings.TrimSpace(opts.PaneCommand)
-	agentName := strings.TrimSpace(opts.Agent)
-	agentSessionID := strings.TrimSpace(opts.AgentSessionID)
-	if paneCommand != "" && agentName != "" {
-		return PrepareResult{}, fmt.Errorf("pane_command and agent are mutually exclusive")
-	}
-	if agentSessionID != "" && agentName == "" {
-		return PrepareResult{}, fmt.Errorf("agent_session_id requires agent")
-	}
-	if agentSessionID != "" && opts.Panes != 1 {
-		return PrepareResult{}, fmt.Errorf("agent_session_id currently requires panes=1")
-	}
-	if agentName != "" {
-		var buildErr error
-		paneCommand, buildErr = buildAgentPaneCommand(agentName, opts.AgentArgs, agentSessionID)
-		if buildErr != nil {
-			return PrepareResult{}, buildErr
-		}
-	} else if paneCommand == "" {
-		paneCommand = defaultPaneCommand()
-	}
-	labelPrefix := strings.TrimSpace(opts.LabelPrefix)
-	if labelPrefix == "" {
-		if agentName != "" {
-			labelPrefix = agentLabelPrefix(agentName)
-		} else {
-			labelPrefix = "agent"
-		}
+	plan, err := normalizePrepareOptions(opts)
+	if err != nil {
+		return PrepareResult{}, err
 	}
 
 	socket := c.socketForCreate()
-	created, err := c.createSessionIfNeeded(ctx, socket, session, opts.CWD, paneCommand)
+	created, err := c.createSessionIfNeeded(ctx, socket, plan.session, plan.cwd, plan.paneCommand)
 	if err != nil {
 		return PrepareResult{}, err
 	}
 
-	panes, err := c.listPanesForSession(ctx, socket, session)
+	panes, err := c.ensureSessionPaneCount(ctx, socket, plan)
 	if err != nil {
 		return PrepareResult{}, err
 	}
-	for len(panes) < opts.Panes {
-		args := []string{"split-window", "-d", "-t", session}
-		if strings.TrimSpace(opts.CWD) != "" {
-			args = append(args, "-c", opts.CWD)
-		}
-		args = append(args, paneCommand)
-		if _, err := c.runTmuxWithSocket(ctx, socket, args...); err != nil {
-			return PrepareResult{}, err
-		}
-		panes, err = c.listPanesForSession(ctx, socket, session)
-		if err != nil {
-			return PrepareResult{}, err
-		}
-	}
-
-	if _, err := c.runTmuxWithSocket(ctx, socket, "select-layout", "-t", session, "tiled"); err != nil {
+	if _, err := c.runTmuxWithSocket(ctx, socket, "select-layout", "-t", plan.session, "tiled"); err != nil {
 		return PrepareResult{}, err
 	}
-
-	panes, err = c.listPanesForSession(ctx, socket, session)
+	panes, err = c.listPanesForSession(ctx, socket, plan.session)
 	if err != nil {
 		return PrepareResult{}, err
 	}
-	for i := range panes {
-		label := labelForIndex(labelPrefix, i)
-		if _, err := c.runTmuxWithSocket(ctx, socket, "set-option", "-p", "-t", panes[i].ID, "@name", label); err != nil {
-			return PrepareResult{}, err
-		}
-		panes[i].Label = label
+	if err := c.labelSessionPanes(ctx, socket, panes, plan.labelPrefix); err != nil {
+		return PrepareResult{}, err
 	}
 
 	return PrepareResult{
-		Session:        session,
+		Session:        plan.session,
 		Created:        created,
-		PanesRequested: opts.Panes,
-		PaneCommand:    paneCommand,
-		Agent:          agentName,
-		AgentArgs:      append([]string(nil), opts.AgentArgs...),
-		AgentSessionID: agentSessionID,
-		CWD:            strings.TrimSpace(opts.CWD),
-		LabelPrefix:    labelPrefix,
-		AttachCommand:  c.attachCommand(session, socket),
+		PanesRequested: plan.panes,
+		PaneCommand:    plan.paneCommand,
+		Agent:          plan.agent,
+		AgentArgs:      append([]string(nil), plan.agentArgs...),
+		AgentSessionID: plan.agentSessionID,
+		CWD:            plan.cwd,
+		LabelPrefix:    plan.labelPrefix,
+		AttachCommand:  c.attachCommand(plan.session, socket),
 		SocketMode:     socketMode(socket),
 		Panes:          panes,
 	}, nil
@@ -428,6 +533,26 @@ func (c *Client) describePane(ctx context.Context, target string) (Pane, error) 
 	return panes[0], nil
 }
 
+func (c *Client) resolveSenderPane(ctx context.Context, sender string) (Pane, error) {
+	explicit := strings.TrimSpace(sender)
+	if explicit == "" {
+		explicit = strings.TrimSpace(c.env["TMUX_BRIDGE_SENDER"])
+	}
+	if explicit != "" {
+		resolved, err := c.ResolveTarget(ctx, explicit)
+		if err != nil {
+			return Pane{}, fmt.Errorf("resolve sender %q: %w", explicit, err)
+		}
+		return c.describePane(ctx, resolved)
+	}
+
+	currentPane := strings.TrimSpace(c.env["TMUX_PANE"])
+	if currentPane == "" {
+		return Pane{}, fmt.Errorf("sender is required when not running inside tmux; pass --sender <pane-label>")
+	}
+	return c.describePane(ctx, currentPane)
+}
+
 func (c *Client) runTmux(ctx context.Context, args ...string) (string, error) {
 	socket, err := c.detectSocket(ctx)
 	if err != nil {
@@ -457,55 +582,112 @@ func (c *Client) runTmuxWithSocket(ctx context.Context, socket string, args ...s
 }
 
 func (c *Client) detectSocket(ctx context.Context) (string, error) {
-	if explicit := strings.TrimSpace(c.env["TMUX_BRIDGE_SOCKET"]); explicit != "" {
-		if !isSocket(explicit) {
-			return "", fmt.Errorf("TMUX_BRIDGE_SOCKET=%s is not a valid socket", explicit)
-		}
-		if _, err := c.runTmuxWithSocket(ctx, explicit, "list-sessions"); err != nil {
-			return "", err
-		}
-		return explicit, nil
+	if socket, err := c.detectSocketFromBridgeEnv(ctx); socket != "" || err != nil {
+		return socket, err
 	}
-
-	if tmuxEnv := strings.TrimSpace(c.env["TMUX"]); tmuxEnv != "" {
-		socket := strings.SplitN(tmuxEnv, ",", 2)[0]
-		if isSocket(socket) {
-			if _, err := c.runTmuxWithSocket(ctx, socket, "list-sessions"); err == nil {
-				return socket, nil
-			}
-		}
+	if socket := c.detectSocketFromTmuxEnv(ctx); socket != "" {
+		return socket, nil
 	}
-
-	if pane := strings.TrimSpace(c.env["TMUX_PANE"]); pane != "" {
-		uid := os.Getuid()
-		for _, dir := range []string{
-			filepath.Join("/tmp", fmt.Sprintf("tmux-%d", uid)),
-			filepath.Join("/private/tmp", fmt.Sprintf("tmux-%d", uid)),
-		} {
-			entries, err := os.ReadDir(dir)
-			if err != nil {
-				continue
-			}
-			for _, entry := range entries {
-				socket := filepath.Join(dir, entry.Name())
-				if !isSocket(socket) {
-					continue
-				}
-				if _, err := c.runTmuxWithSocket(ctx, socket, "display-message", "-t", pane, "-p", "#{pane_id}"); err == nil {
-					return socket, nil
-				}
-			}
-		}
-		if _, err := c.runTmuxWithSocket(ctx, defaultSocketSentinel, "display-message", "-t", pane, "-p", "#{pane_id}"); err == nil {
-			return defaultSocketSentinel, nil
-		}
+	if socket := c.detectSocketFromPaneEnv(ctx); socket != "" {
+		return socket, nil
 	}
-
-	if _, err := c.runTmuxWithSocket(ctx, defaultSocketSentinel, "list-sessions"); err == nil {
+	if c.isDefaultSocketReachable(ctx) {
 		return defaultSocketSentinel, nil
 	}
 
 	return "", errors.New("cannot find a reachable tmux server")
+}
+
+func (c *Client) inspectCurrentPane(ctx context.Context, socket, tmuxPane string) (bool, string) {
+	if tmuxPane == "" {
+		return false, ""
+	}
+	if _, err := c.runTmuxWithSocket(ctx, socket, "display-message", "-t", tmuxPane, "-p", "#{pane_id}"); err == nil {
+		return true, ""
+	}
+	if socket != defaultSocketSentinel {
+		return false, fmt.Sprintf("current pane %s is not visible to detected server", tmuxPane)
+	}
+	return false, ""
+}
+
+func summarizePaneLabels(panes []Pane) (total int, labeled int) {
+	for _, pane := range panes {
+		if strings.TrimSpace(pane.Label) != "" {
+			labeled++
+		}
+	}
+	return len(panes), labeled
+}
+
+func (c *Client) detectSocketFromBridgeEnv(ctx context.Context) (string, error) {
+	explicit := strings.TrimSpace(c.env["TMUX_BRIDGE_SOCKET"])
+	if explicit == "" {
+		return "", nil
+	}
+	if !isSocket(explicit) {
+		return "", fmt.Errorf("TMUX_BRIDGE_SOCKET=%s is not a valid socket", explicit)
+	}
+	if _, err := c.runTmuxWithSocket(ctx, explicit, "list-sessions"); err != nil {
+		return "", err
+	}
+	return explicit, nil
+}
+
+func (c *Client) detectSocketFromTmuxEnv(ctx context.Context) string {
+	tmuxEnv := strings.TrimSpace(c.env["TMUX"])
+	if tmuxEnv == "" {
+		return ""
+	}
+	socket := strings.SplitN(tmuxEnv, ",", 2)[0]
+	if !isSocket(socket) {
+		return ""
+	}
+	if _, err := c.runTmuxWithSocket(ctx, socket, "list-sessions"); err == nil {
+		return socket
+	}
+	return ""
+}
+
+func (c *Client) detectSocketFromPaneEnv(ctx context.Context) string {
+	pane := strings.TrimSpace(c.env["TMUX_PANE"])
+	if pane == "" {
+		return ""
+	}
+	for _, socket := range candidateSocketsForUID(os.Getuid()) {
+		if _, err := c.runTmuxWithSocket(ctx, socket, "display-message", "-t", pane, "-p", "#{pane_id}"); err == nil {
+			return socket
+		}
+	}
+	if _, err := c.runTmuxWithSocket(ctx, defaultSocketSentinel, "display-message", "-t", pane, "-p", "#{pane_id}"); err == nil {
+		return defaultSocketSentinel
+	}
+	return ""
+}
+
+func candidateSocketsForUID(uid int) []string {
+	candidates := make([]string, 0)
+	for _, dir := range []string{
+		filepath.Join("/tmp", fmt.Sprintf("tmux-%d", uid)),
+		filepath.Join("/private/tmp", fmt.Sprintf("tmux-%d", uid)),
+	} {
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			continue
+		}
+		for _, entry := range entries {
+			socket := filepath.Join(dir, entry.Name())
+			if isSocket(socket) {
+				candidates = append(candidates, socket)
+			}
+		}
+	}
+	return candidates
+}
+
+func (c *Client) isDefaultSocketReachable(ctx context.Context) bool {
+	_, err := c.runTmuxWithSocket(ctx, defaultSocketSentinel, "list-sessions")
+	return err == nil
 }
 
 func (c *Client) socketForCreate() string {
@@ -534,6 +716,44 @@ func (c *Client) createSessionIfNeeded(ctx context.Context, socket, session, cwd
 		return false, err
 	}
 	return true, nil
+}
+
+func (c *Client) ensureSessionPaneCount(ctx context.Context, socket string, plan preparePlan) ([]Pane, error) {
+	panes, err := c.listPanesForSession(ctx, socket, plan.session)
+	if err != nil {
+		return nil, err
+	}
+	for len(panes) < plan.panes {
+		if err := c.splitSessionPane(ctx, socket, plan); err != nil {
+			return nil, err
+		}
+		panes, err = c.listPanesForSession(ctx, socket, plan.session)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return panes, nil
+}
+
+func (c *Client) splitSessionPane(ctx context.Context, socket string, plan preparePlan) error {
+	args := []string{"split-window", "-d", "-t", plan.session}
+	if plan.cwd != "" {
+		args = append(args, "-c", plan.cwd)
+	}
+	args = append(args, plan.paneCommand)
+	_, err := c.runTmuxWithSocket(ctx, socket, args...)
+	return err
+}
+
+func (c *Client) labelSessionPanes(ctx context.Context, socket string, panes []Pane, labelPrefix string) error {
+	for i := range panes {
+		label := labelForIndex(labelPrefix, i)
+		if _, err := c.runTmuxWithSocket(ctx, socket, "set-option", "-p", "-t", panes[i].ID, "@name", label); err != nil {
+			return err
+		}
+		panes[i].Label = label
+	}
+	return nil
 }
 
 func (c *Client) listPanesForSession(ctx context.Context, socket string, session string) ([]Pane, error) {
@@ -658,6 +878,55 @@ func defaultPaneCommand() string {
 	return "/bin/sh"
 }
 
+func normalizePrepareOptions(opts PrepareOptions) (preparePlan, error) {
+	if opts.Panes <= 0 {
+		return preparePlan{}, fmt.Errorf("panes must be positive")
+	}
+
+	plan := preparePlan{
+		session:        strings.TrimSpace(opts.Session),
+		panes:          opts.Panes,
+		paneCommand:    strings.TrimSpace(opts.PaneCommand),
+		agent:          strings.TrimSpace(opts.Agent),
+		agentArgs:      append([]string(nil), opts.AgentArgs...),
+		agentSessionID: strings.TrimSpace(opts.AgentSessionID),
+		cwd:            strings.TrimSpace(opts.CWD),
+		labelPrefix:    strings.TrimSpace(opts.LabelPrefix),
+	}
+	if plan.session == "" {
+		plan.session = defaultSessionName
+	}
+
+	if plan.paneCommand != "" && plan.agent != "" {
+		return preparePlan{}, fmt.Errorf("pane_command and agent are mutually exclusive")
+	}
+	if plan.agentSessionID != "" && plan.agent == "" {
+		return preparePlan{}, fmt.Errorf("agent_session_id requires agent")
+	}
+	if plan.agentSessionID != "" && plan.panes != 1 {
+		return preparePlan{}, fmt.Errorf("agent_session_id currently requires panes=1")
+	}
+
+	if plan.agent != "" {
+		paneCommand, err := buildAgentPaneCommand(plan.agent, plan.agentArgs, plan.agentSessionID)
+		if err != nil {
+			return preparePlan{}, err
+		}
+		plan.paneCommand = paneCommand
+	} else if plan.paneCommand == "" {
+		plan.paneCommand = defaultPaneCommand()
+	}
+
+	if plan.labelPrefix == "" {
+		if plan.agent != "" {
+			plan.labelPrefix = agentLabelPrefix(plan.agent)
+		} else {
+			plan.labelPrefix = defaultLabelPrefix
+		}
+	}
+	return plan, nil
+}
+
 func buildAgentPaneCommand(agent string, args []string, sessionID string) (string, error) {
 	resolved, err := resolveAgentCommand(agent)
 	if err != nil {
@@ -705,68 +974,4 @@ func resolveAgentCommand(agent string) (string, error) {
 		return "", err
 	}
 	return agent, nil
-}
-
-func labelForIndex(prefix string, idx int) string {
-	if idx < 26 {
-		return fmt.Sprintf("%s-%c", prefix, rune('a'+idx))
-	}
-	return fmt.Sprintf("%s-%d", prefix, idx+1)
-}
-
-func agentLabelPrefix(agent string) string {
-	base := strings.TrimSpace(filepath.Base(agent))
-	base = strings.TrimSuffix(base, filepath.Ext(base))
-	base = strings.ToLower(base)
-	base = regexp.MustCompile(`[^a-z0-9._-]+`).ReplaceAllString(base, "-")
-	base = strings.Trim(base, "-")
-	if base == "" {
-		return "agent"
-	}
-	return base
-}
-
-func (c *Client) attachCommand(session, socket string) string {
-	return "tmux " + strings.Join(c.attachArgs(session, socket), " ")
-}
-
-func (c *Client) attachArgs(session, socket string) []string {
-	args := make([]string, 0, 4)
-	if socket != "" && socket != defaultSocketSentinel {
-		args = append(args, "-S", socket)
-	}
-	if strings.TrimSpace(c.env["TMUX"]) != "" {
-		args = append(args, "switch-client", "-t", session)
-		return args
-	}
-	args = append(args, "attach-session", "-t", session)
-	return args
-}
-
-func socketMode(socket string) string {
-	if socket == defaultSocketSentinel {
-		return "default"
-	}
-	if strings.TrimSpace(socket) == "" {
-		return "unknown"
-	}
-	return "explicit"
-}
-
-func shellQuoteArgs(parts []string) string {
-	quoted := make([]string, 0, len(parts))
-	for _, part := range parts {
-		quoted = append(quoted, shellQuote(part))
-	}
-	return strings.Join(quoted, " ")
-}
-
-func shellQuote(value string) string {
-	if value == "" {
-		return "''"
-	}
-	if !strings.ContainsAny(value, " \t\n'\"\\$`()[]{}*?!&;|<>") {
-		return value
-	}
-	return "'" + strings.ReplaceAll(value, "'", `'"'"'`) + "'"
 }

@@ -2,10 +2,12 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"go/ast"
 	"go/parser"
+	"go/printer"
 	"go/token"
 	"io/fs"
 	"os"
@@ -36,7 +38,7 @@ const (
 
 type input struct {
 	Path         string `json:"path"`
-	Language     string `json:"language" validate:"omitempty,oneof=auto go python javascript typescript elixir"`
+	Language     string `json:"language" validate:"omitempty,oneof=auto go python javascript typescript elixir rust"`
 	Focus        string `json:"focus" validate:"omitempty,oneof=all slop dead"`
 	IncludeTests bool   `json:"include_tests"`
 	MaxResults   int    `json:"max_results" validate:"gte=0"`
@@ -806,6 +808,7 @@ func analyzeGoFuncDecl(fn *ast.FuncDecl, fset *token.FileSet, relPath string, st
 		})
 	}
 
+	findings = append(findings, analyzeGoSemanticSimplification(fn, fset, relPath, name)...)
 	findings = append(findings, analyzeDuplicateRecoveryBlocks(fn, fset, relPath, name)...)
 
 	return findings
@@ -2942,7 +2945,7 @@ func isFunctionConstituent(item finding) bool {
 	switch item.RuleID {
 	case "long_parameter_list", "boolean_parameter", "wide_return_tuple",
 		"oversized_function", "high_cyclomatic_complexity", "deep_nesting", "oversized_symbol",
-		"fan_out_dependency_spread", "duplicate_orchestration_fingerprint", "duplicate_recovery_block", "duplicated_error_remap", "repeated_guard_ladder", "same_file_extraction_candidate":
+		"fan_out_dependency_spread", "duplicate_orchestration_fingerprint", "duplicate_recovery_block", "duplicated_error_remap", "repeated_guard_ladder", "semantic_simplification_candidate", "same_file_extraction_candidate":
 		return strings.TrimSpace(item.Symbol) != ""
 	default:
 		return false
@@ -2973,7 +2976,7 @@ func hotspotRuleMix(rules map[string]finding) (structural, signature, supportive
 	for ruleID := range rules {
 		switch ruleID {
 		case "high_cyclomatic_complexity", "oversized_function", "deep_nesting",
-			"fan_out_dependency_spread", "duplicate_orchestration_fingerprint", "duplicate_recovery_block", "duplicated_error_remap", "repeated_guard_ladder":
+			"fan_out_dependency_spread", "duplicate_orchestration_fingerprint", "duplicate_recovery_block", "duplicated_error_remap", "repeated_guard_ladder", "semantic_simplification_candidate":
 			structural++
 		case "long_parameter_list", "boolean_parameter", "wide_return_tuple":
 			signature++
@@ -3084,6 +3087,8 @@ func parseSignatureMetrics(signature, lang string) signatureMetrics {
 		metrics.ReturnCount = parseTSReturnCount(rest)
 	case "python":
 		metrics.ReturnCount = parsePythonReturnCount(rest)
+	case "rust":
+		metrics.ReturnCount = parseRustReturnCount(rest)
 	}
 
 	return metrics
@@ -3147,6 +3152,30 @@ func parsePythonReturnCount(rest string) int {
 	return 1
 }
 
+func parseRustReturnCount(rest string) int {
+	idx := strings.LastIndex(rest, "->")
+	if idx < 0 {
+		return 0
+	}
+	ret := strings.TrimSpace(rest[idx+2:])
+	if ret == "" {
+		return 0
+	}
+	if idx := strings.Index(ret, "{"); idx >= 0 {
+		ret = strings.TrimSpace(ret[:idx])
+	}
+	if ret == "" || ret == "!" {
+		return 0
+	}
+	if strings.HasPrefix(ret, "(") {
+		end := findMatching(ret, 0, '(', ')')
+		if end >= 0 {
+			return countNonEmpty(splitTopLevel(ret[1:end]))
+		}
+	}
+	return 1
+}
+
 func isTypedBooleanParam(lang, param string) bool {
 	value := strings.ToLower(strings.TrimSpace(param))
 	if value == "" {
@@ -3158,6 +3187,8 @@ func isTypedBooleanParam(lang, param string) bool {
 	case "typescript", "javascript":
 		return strings.Contains(value, ": boolean") || strings.HasSuffix(value, ":bool")
 	case "python":
+		return strings.Contains(value, ": bool")
+	case "rust":
 		return strings.Contains(value, ": bool")
 	default:
 		return false
@@ -3404,6 +3435,16 @@ func scoreFanOutDependencySpread(fanOut int, th thresholds) int {
 	return clampScore(67 + minInt(18, extra*3))
 }
 
+func scoreSemanticSimplification(patternCount, simplificationGain int, fullWrapper bool) int {
+	score := 72 +
+		minInt(10, maxInt(0, patternCount-1)*4) +
+		minInt(12, maxInt(0, simplificationGain)*3)
+	if fullWrapper {
+		score += 6
+	}
+	return clampScore(score)
+}
+
 func scoreDuplicateOrchestration(clusterSize, branchCount, callSites, similarity int) int {
 	return clampScore(70 + minInt(8, (clusterSize-2)*4) + minInt(8, maxInt(0, branchCount-1)*2) + minInt(6, maxInt(0, callSites-4)) + minInt(10, maxInt(0, similarity-70)/2))
 }
@@ -3514,8 +3555,10 @@ func rulePriority(ruleID string) int {
 		return 9
 	case "repeated_guard_ladder":
 		return 10
-	case "duplicate_orchestration_fingerprint":
+	case "semantic_simplification_candidate":
 		return 11
+	case "duplicate_orchestration_fingerprint":
+		return 12
 	case "structural_similarity_module_cluster":
 		return 8
 	case "structural_similarity_cluster":
@@ -4070,6 +4113,406 @@ func goExprFingerprint(expr ast.Expr, metrics *goOrchestrationMetrics) string {
 	}
 }
 
+type semanticSimplificationCandidate struct {
+	Kind               string
+	PatternIDs         []string
+	OriginalForm       string
+	SimplifiedForm     string
+	OriginalTokenCount int
+	SimplifiedTokens   int
+}
+
+func analyzeGoSemanticSimplification(fn *ast.FuncDecl, fset *token.FileSet, relPath, name string) []finding {
+	candidate := detectGoSemanticSimplification(fn)
+	if candidate == nil {
+		return nil
+	}
+	line := 0
+	if fset != nil && fn != nil {
+		line = fset.Position(fn.Pos()).Line
+	}
+	return []finding{emitSemanticSimplificationFinding(candidate, relPath, name, line, "go")}
+}
+
+func emitSemanticSimplificationFinding(candidate *semanticSimplificationCandidate, relPath, name string, line int, language string) finding {
+	simplificationGain := maxInt(1, candidate.OriginalTokenCount-candidate.SimplifiedTokens)
+	score := scoreSemanticSimplification(len(candidate.PatternIDs), simplificationGain, candidate.Kind == "boolean_return_wrapper")
+	signals := []string{"semantic_simplification"}
+	if language == "go" {
+		signals = append([]string{"go_ast"}, signals...)
+	}
+	return finding{
+		RuleID:            "semantic_simplification_candidate",
+		Category:          "function",
+		Severity:          severityFor(score),
+		Score:             score,
+		Title:             "Function reduces to a much simpler boolean predicate",
+		Detail:            fmt.Sprintf("%s has a deterministic boolean simplification path. The current body collapses to `%s`, which means the extra wrapper logic is carrying noise more than behavior.", name, candidate.SimplifiedForm),
+		SuggestedRefactor: "Collapse the boolean wrapper or redundant predicate logic into the simpler return form, then keep any remaining guard logic only when it adds real behavior.",
+		File:              relPath,
+		Line:              line,
+		Symbol:            name,
+		Language:          language,
+		Confidence:        "high",
+		Signals:           signals,
+		Evidence: map[string]any{
+			"simplification_kind":  candidate.Kind,
+			"pattern_ids":          candidate.PatternIDs,
+			"original_form":        skillout.TruncateSingleLine(candidate.OriginalForm, 220),
+			"simplified_form":      candidate.SimplifiedForm,
+			"original_token_count": candidate.OriginalTokenCount,
+			"simplified_tokens":    candidate.SimplifiedTokens,
+			"simplification_gain":  simplificationGain,
+		},
+	}
+}
+
+func detectGoSemanticSimplification(fn *ast.FuncDecl) *semanticSimplificationCandidate {
+	if fn == nil || fn.Body == nil || len(fn.Body.List) == 0 {
+		return nil
+	}
+	if wrapper := detectGoBoolReturnWrapper(fn.Body.List); wrapper != nil {
+		return wrapper
+	}
+	if len(fn.Body.List) != 1 {
+		return nil
+	}
+	ret, ok := fn.Body.List[0].(*ast.ReturnStmt)
+	if !ok || len(ret.Results) != 1 {
+		return nil
+	}
+	simplified, patterns, changed := simplifyGoBoolExpr(ret.Results[0])
+	if !changed {
+		return nil
+	}
+	original := "return " + renderGoExpr(ret.Results[0])
+	simplifiedText := "return " + renderGoExpr(simplified)
+	if original == simplifiedText {
+		return nil
+	}
+	return &semanticSimplificationCandidate{
+		Kind:               "boolean_expr_identity",
+		PatternIDs:         appendUniquePatternStrings(nil, patterns...),
+		OriginalForm:       original,
+		SimplifiedForm:     simplifiedText,
+		OriginalTokenCount: goSourceTokenCount(original),
+		SimplifiedTokens:   goSourceTokenCount(simplifiedText),
+	}
+}
+
+func detectGoBoolReturnWrapper(stmts []ast.Stmt) *semanticSimplificationCandidate {
+	if len(stmts) == 0 {
+		return nil
+	}
+	var (
+		cond      ast.Expr
+		invert    bool
+		patternID string
+	)
+	switch len(stmts) {
+	case 1:
+		ifStmt, ok := stmts[0].(*ast.IfStmt)
+		if !ok || ifStmt.Else == nil {
+			return nil
+		}
+		bodyValue, bodyOK := singleBlockBooleanReturnValue(ifStmt.Body)
+		elseBlock, elseOK := ifStmt.Else.(*ast.BlockStmt)
+		elseValue, elseReturnOK := singleBlockBooleanReturnValue(elseBlock)
+		if !bodyOK || !elseOK || !elseReturnOK || bodyValue == elseValue {
+			return nil
+		}
+		cond = ifStmt.Cond
+		invert = !bodyValue && elseValue
+		if invert {
+			patternID = "inverted_boolean_return_wrapper"
+		} else {
+			patternID = "boolean_return_wrapper"
+		}
+	case 2:
+		ifStmt, ok := stmts[0].(*ast.IfStmt)
+		if !ok || ifStmt.Else != nil {
+			return nil
+		}
+		bodyValue, bodyOK := singleBlockBooleanReturnValue(ifStmt.Body)
+		tailValue, tailOK := booleanReturnValue(stmts[1])
+		if !bodyOK || !tailOK || bodyValue == tailValue {
+			return nil
+		}
+		cond = ifStmt.Cond
+		invert = !bodyValue && tailValue
+		if invert {
+			patternID = "inverted_boolean_return_wrapper"
+		} else {
+			patternID = "boolean_return_wrapper"
+		}
+	default:
+		return nil
+	}
+	if cond == nil {
+		return nil
+	}
+	simplifiedExpr := cond
+	patterns := []string{patternID}
+	if invert {
+		simplifiedExpr = negateGoExpr(simplifiedExpr)
+	}
+	if expr, exprPatterns, changed := simplifyGoBoolExpr(simplifiedExpr); changed {
+		simplifiedExpr = expr
+		patterns = append(patterns, exprPatterns...)
+	}
+	original := renderGoStmtList(stmts)
+	simplifiedText := "return " + renderGoExpr(simplifiedExpr)
+	if original == simplifiedText {
+		return nil
+	}
+	return &semanticSimplificationCandidate{
+		Kind:               "boolean_return_wrapper",
+		PatternIDs:         appendUniquePatternStrings(nil, patterns...),
+		OriginalForm:       original,
+		SimplifiedForm:     simplifiedText,
+		OriginalTokenCount: goSourceTokenCount(original),
+		SimplifiedTokens:   goSourceTokenCount(simplifiedText),
+	}
+}
+
+func singleBlockBooleanReturnValue(block *ast.BlockStmt) (bool, bool) {
+	if block == nil || len(block.List) != 1 {
+		return false, false
+	}
+	return booleanReturnValue(block.List[0])
+}
+
+func booleanReturnValue(stmt ast.Stmt) (bool, bool) {
+	ret, ok := stmt.(*ast.ReturnStmt)
+	if !ok || len(ret.Results) != 1 {
+		return false, false
+	}
+	return boolLiteralValue(ret.Results[0])
+}
+
+func simplifyGoBoolExpr(expr ast.Expr) (ast.Expr, []string, bool) {
+	expr = unwrapParenExpr(expr)
+	switch node := expr.(type) {
+	case *ast.ParenExpr:
+		return simplifyGoBoolExpr(node.X)
+	case *ast.UnaryExpr:
+		if node.Op != token.NOT {
+			return expr, nil, false
+		}
+		inner, patterns, changed := simplifyGoBoolExpr(node.X)
+		inner = unwrapParenExpr(inner)
+		if nested, ok := inner.(*ast.UnaryExpr); ok && nested.Op == token.NOT {
+			return unwrapParenExpr(nested.X), appendUniquePatternStrings(patterns, "double_negation"), true
+		}
+		if changed {
+			return &ast.UnaryExpr{Op: token.NOT, X: wrapNegationOperand(inner)}, patterns, true
+		}
+		return expr, nil, false
+	case *ast.BinaryExpr:
+		left, leftPatterns, leftChanged := simplifyGoBoolExpr(node.X)
+		if !leftChanged {
+			left = node.X
+		}
+		right, rightPatterns, rightChanged := simplifyGoBoolExpr(node.Y)
+		if !rightChanged {
+			right = node.Y
+		}
+		patterns := appendUniquePatternStrings(nil, leftPatterns...)
+		patterns = appendUniquePatternStrings(patterns, rightPatterns...)
+		switch node.Op {
+		case token.EQL, token.NEQ:
+			if lit, ok := boolLiteralValue(right); ok {
+				return simplifyBooleanLiteralComparison(left, node.Op, lit, patterns)
+			}
+			if lit, ok := boolLiteralValue(left); ok {
+				return simplifyBooleanLiteralComparison(right, node.Op, lit, patterns)
+			}
+		case token.LAND:
+			if lit, ok := boolLiteralValue(left); ok {
+				if lit {
+					return unwrapParenExpr(right), appendUniquePatternStrings(patterns, "left_true_and"), true
+				}
+				return ast.NewIdent("false"), appendUniquePatternStrings(patterns, "left_false_and"), true
+			}
+			if lit, ok := boolLiteralValue(right); ok && lit {
+				return unwrapParenExpr(left), appendUniquePatternStrings(patterns, "right_true_and"), true
+			}
+		case token.LOR:
+			if lit, ok := boolLiteralValue(left); ok {
+				if lit {
+					return ast.NewIdent("true"), appendUniquePatternStrings(patterns, "left_true_or"), true
+				}
+				return unwrapParenExpr(right), appendUniquePatternStrings(patterns, "left_false_or"), true
+			}
+			if lit, ok := boolLiteralValue(right); ok && !lit {
+				return unwrapParenExpr(left), appendUniquePatternStrings(patterns, "right_false_or"), true
+			}
+		}
+		if leftChanged || rightChanged {
+			return &ast.BinaryExpr{X: left, Op: node.Op, Y: right}, patterns, true
+		}
+	}
+	return expr, nil, false
+}
+
+func simplifyBooleanLiteralComparison(expr ast.Expr, op token.Token, lit bool, patterns []string) (ast.Expr, []string, bool) {
+	switch op {
+	case token.EQL:
+		if lit {
+			return unwrapParenExpr(expr), appendUniquePatternStrings(patterns, "boolean_literal_comparison"), true
+		}
+		return negateGoExpr(expr), appendUniquePatternStrings(patterns, "boolean_literal_comparison"), true
+	case token.NEQ:
+		if lit {
+			return negateGoExpr(expr), appendUniquePatternStrings(patterns, "boolean_literal_comparison"), true
+		}
+		return unwrapParenExpr(expr), appendUniquePatternStrings(patterns, "boolean_literal_comparison"), true
+	default:
+		return expr, patterns, false
+	}
+}
+
+func negateGoExpr(expr ast.Expr) ast.Expr {
+	expr = unwrapParenExpr(expr)
+	switch node := expr.(type) {
+	case *ast.UnaryExpr:
+		if node.Op == token.NOT {
+			return unwrapParenExpr(node.X)
+		}
+	case *ast.BinaryExpr:
+		if inverse, ok := inverseComparisonToken(node.Op); ok {
+			return &ast.BinaryExpr{X: node.X, Op: inverse, Y: node.Y}
+		}
+	}
+	return &ast.UnaryExpr{Op: token.NOT, X: wrapNegationOperand(expr)}
+}
+
+func inverseComparisonToken(op token.Token) (token.Token, bool) {
+	switch op {
+	case token.EQL:
+		return token.NEQ, true
+	case token.NEQ:
+		return token.EQL, true
+	case token.GTR:
+		return token.LEQ, true
+	case token.GEQ:
+		return token.LSS, true
+	case token.LSS:
+		return token.GEQ, true
+	case token.LEQ:
+		return token.GTR, true
+	default:
+		return token.ILLEGAL, false
+	}
+}
+
+func wrapNegationOperand(expr ast.Expr) ast.Expr {
+	expr = unwrapParenExpr(expr)
+	switch expr.(type) {
+	case *ast.BinaryExpr:
+		return &ast.ParenExpr{X: expr}
+	default:
+		return expr
+	}
+}
+
+func unwrapParenExpr(expr ast.Expr) ast.Expr {
+	for {
+		paren, ok := expr.(*ast.ParenExpr)
+		if !ok {
+			return expr
+		}
+		expr = paren.X
+	}
+}
+
+func boolLiteralValue(expr ast.Expr) (bool, bool) {
+	ident, ok := unwrapParenExpr(expr).(*ast.Ident)
+	if !ok {
+		return false, false
+	}
+	switch ident.Name {
+	case "true":
+		return true, true
+	case "false":
+		return false, true
+	default:
+		return false, false
+	}
+}
+
+func renderGoExpr(expr ast.Expr) string {
+	return renderGoNode(expr)
+}
+
+func renderGoStmtList(stmts []ast.Stmt) string {
+	if len(stmts) == 0 {
+		return ""
+	}
+	parts := make([]string, 0, len(stmts))
+	for _, stmt := range stmts {
+		parts = append(parts, renderGoNode(stmt))
+	}
+	return strings.Join(parts, " ")
+}
+
+func renderGoNode(node any) string {
+	if node == nil {
+		return ""
+	}
+	var buf bytes.Buffer
+	if err := printer.Fprint(&buf, token.NewFileSet(), node); err != nil {
+		return ""
+	}
+	return strings.Join(strings.Fields(buf.String()), " ")
+}
+
+func goSourceTokenCount(value string) int {
+	replacer := strings.NewReplacer(
+		"(", " ",
+		")", " ",
+		"{", " ",
+		"}", " ",
+		",", " ",
+		";", " ",
+		"!", " ! ",
+		"&", " & ",
+		"|", " | ",
+		"=", " = ",
+		"<", " < ",
+		">", " > ",
+	)
+	return len(strings.Fields(replacer.Replace(value)))
+}
+
+func appendUniquePatternStrings(base []string, values ...string) []string {
+	seen := make(map[string]struct{}, len(base)+len(values))
+	out := make([]string, 0, len(base)+len(values))
+	for _, item := range base {
+		item = strings.TrimSpace(item)
+		if item == "" {
+			continue
+		}
+		if _, ok := seen[item]; ok {
+			continue
+		}
+		seen[item] = struct{}{}
+		out = append(out, item)
+	}
+	for _, item := range values {
+		item = strings.TrimSpace(item)
+		if item == "" {
+			continue
+		}
+		if _, ok := seen[item]; ok {
+			continue
+		}
+		seen[item] = struct{}{}
+		out = append(out, item)
+	}
+	return out
+}
+
 type duplicateRecoveryCandidate struct {
 	Fingerprint      string
 	StartLine        int
@@ -4237,7 +4680,7 @@ func focusAllowsFinding(item finding, focus string) bool {
 
 func isSlopFinding(item finding) bool {
 	switch item.RuleID {
-	case "duplicate_recovery_block", "duplicated_error_remap", "repeated_guard_ladder", "duplicate_orchestration_fingerprint", "same_file_extraction_candidate":
+	case "duplicate_recovery_block", "duplicated_error_remap", "repeated_guard_ladder", "semantic_simplification_candidate", "duplicate_orchestration_fingerprint", "same_file_extraction_candidate":
 		return true
 	case "function_hotspot":
 		return compositeIncludesSlopRule(item)

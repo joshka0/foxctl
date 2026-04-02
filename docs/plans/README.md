@@ -19,6 +19,7 @@ This directory contains active planning documents and implementation roadmaps.
 - `features/slop-function-detection.md`
 - `features/refactor-intelligence-substrate.md`
 - `features/refactor-phase1-status-and-snapshot.md`
+- `features/refactor-deterministic-detection-backlog.md`
 - `features/opensandbox-sandbox-workspace-integration.md`
 - `features/aca-self-evolving-memory-layer.md`
 - `jidoctl-v2-hybrid-interface.md`

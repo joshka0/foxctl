@@ -2,13 +2,14 @@ package langutil
 
 import "github.com/jkatigb/agentctl/internal/adapters/skillslib/fsutil"
 
-// CommonCodeLanguages covers Go, Python, JS, TS, and Elixir.
+// CommonCodeLanguages covers Go, Python, JS, TS, Elixir, and Rust.
 var CommonCodeLanguages = map[string]struct{}{
 	"go":         {},
 	"python":     {},
 	"javascript": {},
 	"typescript": {},
 	"elixir":     {},
+	"rust":       {},
 }
 
 // SnippetLanguages covers languages supported by code_snippet_extract.

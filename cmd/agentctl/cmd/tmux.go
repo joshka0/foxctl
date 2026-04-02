@@ -19,9 +19,10 @@ func newTmuxCommand() *cobra.Command {
 	cmd.AddCommand(
 		newTmuxListCommand(),
 		newTmuxReadCommand(),
+		newTmuxSendCommand(),
 		newTmuxObserveCommand(),
 		newTmuxDoctorCommand(),
-		newTmuxPrepareCommand(),
+		newTmuxCreateCommand(),
 	)
 	return cmd
 }
@@ -90,7 +91,7 @@ func newTmuxDoctorCommand() *cobra.Command {
 	}
 }
 
-func newTmuxPrepareCommand() *cobra.Command {
+func newTmuxCreateCommand() *cobra.Command {
 	var (
 		session        string
 		panes          int
@@ -104,11 +105,12 @@ func newTmuxPrepareCommand() *cobra.Command {
 	)
 
 	cmd := &cobra.Command{
-		Use:   "prepare",
-		Short: "Create or extend a tmux collaboration session and label its panes",
+		Use:     "create",
+		Aliases: []string{"prepare"},
+		Short:   "Create or extend a tmux collaboration session and label its panes",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if panes <= 0 {
-				return protocol.WriteError(cmd.OutOrStdout(), "agentctl.tmux.prepare", protocol.ErrorCodeEARG, "panes must be positive", map[string]any{
+				return protocol.WriteError(cmd.OutOrStdout(), "agentctl.tmux.create", protocol.ErrorCodeEARG, "panes must be positive", map[string]any{
 					"hint": "Use --panes with a value greater than zero.",
 				}, protocol.WithSource("cli"))
 			}
@@ -129,25 +131,27 @@ func newTmuxPrepareCommand() *cobra.Command {
 				LabelPrefix:    labelPrefix,
 			})
 			if err != nil {
-				return protocol.WriteError(cmd.OutOrStdout(), "agentctl.tmux.prepare", protocol.ErrorCodeERuntime, err.Error(), map[string]any{
-					"hint": "Ensure tmux is installed and the target socket is writable. Use --agent plus repeated --agent-arg values for claude/codex/gemini, and use --agent-session-id for codex/claude resume launches.",
+				return protocol.WriteError(cmd.OutOrStdout(), "agentctl.tmux.create", protocol.ErrorCodeERuntime, err.Error(), map[string]any{
+					"hint": "Ensure tmux is installed and the target socket is writable. Use --agent plus repeated --agent-arg values for claude/codex/gemini/agent/droid, and use --agent-session-id for codex/claude resume launches.",
 				}, protocol.WithSource("cli"))
 			}
 			if attach {
 				if err := client.AttachOrSwitch(cmd.Context(), result.Session); err != nil {
-					return protocol.WriteError(cmd.OutOrStdout(), "agentctl.tmux.prepare", protocol.ErrorCodeERuntime, err.Error(), map[string]any{
+					return protocol.WriteError(cmd.OutOrStdout(), "agentctl.tmux.create", protocol.ErrorCodeERuntime, err.Error(), map[string]any{
 						"hint":   "Prepare succeeded, but the attach/switch step failed. Try the returned attach command manually.",
 						"result": result,
 					}, protocol.WithSource("cli"))
 				}
 				return nil
 			}
-			return protocol.WriteOK(cmd.OutOrStdout(), "agentctl.tmux.prepare", map[string]any{
+			senderExample := tmuxbridgeSenderExample(result.Panes)
+			targetExample := tmuxbridgeLabelExample(result.Panes)
+			return protocol.WriteOK(cmd.OutOrStdout(), "agentctl.tmux.create", map[string]any{
 				"result": result,
 				"hints": map[string]any{
 					"attach":       result.AttachCommand,
 					"read_example": "agentctl tmux read " + tmuxbridgeLabelExample(result.Panes) + " --lines 80",
-					"send_example": "./configs/skills-pack/agentctl-tmux/scripts/tmux-bridge read " + tmuxbridgeLabelExample(result.Panes) + " 40 && ./configs/skills-pack/agentctl-tmux/scripts/tmux-bridge send " + tmuxbridgeLabelExample(result.Panes) + " \"review this pane\"",
+					"send_example": "agentctl tmux send " + targetExample + " \"review this pane\" --sender " + senderExample,
 				},
 			}, protocol.WithSource("cli"))
 		},
@@ -156,12 +160,37 @@ func newTmuxPrepareCommand() *cobra.Command {
 	cmd.Flags().StringVar(&session, "session", "agentctl-collab", "tmux session name")
 	cmd.Flags().IntVar(&panes, "panes", 3, "Number of panes to prepare")
 	cmd.Flags().StringVar(&paneCommand, "pane-command", "", "Command to launch in each pane (default: current shell)")
-	cmd.Flags().StringVar(&agent, "agent", "", "Agent CLI to launch in each pane (for example: claude, codex, gemini)")
+	cmd.Flags().StringVar(&agent, "agent", "", "Agent CLI to launch in each pane (for example: claude, codex, gemini, agent, droid)")
 	cmd.Flags().StringArrayVar(&agentArgs, "agent-arg", nil, "Agent CLI argument (repeatable, preserves order)")
 	cmd.Flags().StringVar(&agentSessionID, "agent-session-id", "", "Resume the given agent session id (supported for codex and claude; currently requires --panes 1)")
 	cmd.Flags().StringVar(&cwd, "cwd", "", "Working directory for new panes (default: current directory)")
 	cmd.Flags().StringVar(&labelPrefix, "label-prefix", "", "Pane label prefix (default: derived from --agent, otherwise agent)")
 	cmd.Flags().BoolVar(&attach, "attach", false, "Attach or switch to the prepared session after setup")
+	return cmd
+}
+
+func newTmuxSendCommand() *cobra.Command {
+	var sender string
+
+	cmd := &cobra.Command{
+		Use:   "send <target> <text>",
+		Short: "Send a structured bridge message into a tmux pane",
+		Args:  cobra.MinimumNArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			client := tmuxbridge.New()
+			result, err := client.Send(cmd.Context(), sender, args[0], strings.Join(args[1:], " "))
+			if err != nil {
+				return protocol.WriteError(cmd.OutOrStdout(), "agentctl.tmux.send", protocol.ErrorCodeERuntime, err.Error(), map[string]any{
+					"hint": "Use a pane id like %3 or a pane label like agent-b. When invoking outside tmux, pass --sender <pane-label> so replies can route back to your pane.",
+				}, protocol.WithSource("cli"))
+			}
+			return protocol.WriteOK(cmd.OutOrStdout(), "agentctl.tmux.send", map[string]any{
+				"result": result,
+			}, protocol.WithSource("cli"))
+		},
+	}
+
+	cmd.Flags().StringVar(&sender, "sender", "", "Sender pane label or pane id when invoking outside tmux or overriding the current pane")
 	return cmd
 }
 
@@ -171,6 +200,16 @@ func tmuxbridgeLabelExample(panes []tmuxbridge.Pane) string {
 	}
 	if len(panes) > 1 && strings.TrimSpace(panes[1].Label) != "" {
 		return panes[1].Label
+	}
+	if strings.TrimSpace(panes[0].Label) != "" {
+		return panes[0].Label
+	}
+	return panes[0].ID
+}
+
+func tmuxbridgeSenderExample(panes []tmuxbridge.Pane) string {
+	if len(panes) == 0 {
+		return "agent-a"
 	}
 	if strings.TrimSpace(panes[0].Label) != "" {
 		return panes[0].Label

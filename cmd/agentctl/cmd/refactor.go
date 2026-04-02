@@ -69,7 +69,7 @@ func newRefactorStatusCommand() *cobra.Command {
 	}
 	cmd.Flags().StringVar(&path, "path", ".", "File or directory to analyze")
 	cmd.Flags().StringVar(&workspace, "workspace", ".", "Workspace root override")
-	cmd.Flags().StringVar(&language, "language", "auto", "Single language to analyze (auto|go|python|javascript|typescript|elixir)")
+	cmd.Flags().StringVar(&language, "language", "auto", "Single language to analyze (auto|go|python|javascript|typescript|elixir|rust)")
 	cmd.Flags().BoolVar(&includeTests, "include-tests", false, "Include test files")
 	return cmd
 }
@@ -91,7 +91,7 @@ func newRefactorSnapshotCommand() *cobra.Command {
 	}
 	cmd.Flags().StringVar(&path, "path", ".", "File or directory to analyze")
 	cmd.Flags().StringVar(&workspace, "workspace", ".", "Workspace root override")
-	cmd.Flags().StringVar(&language, "language", "auto", "Single language to analyze (auto|go|python|javascript|typescript|elixir)")
+	cmd.Flags().StringVar(&language, "language", "auto", "Single language to analyze (auto|go|python|javascript|typescript|elixir|rust)")
 	cmd.Flags().BoolVar(&includeTests, "include-tests", false, "Include test files")
 	return cmd
 }
@@ -122,7 +122,7 @@ func newRefactorDepsCommand() *cobra.Command {
 	}
 	cmd.Flags().StringVar(&path, "path", ".", "File or directory scope used for seed resolution and reporting")
 	cmd.Flags().StringVar(&workspace, "workspace", ".", "Workspace root override")
-	cmd.Flags().StringVar(&language, "language", "auto", "Single language to analyze (auto|go|python|javascript|typescript|elixir)")
+	cmd.Flags().StringVar(&language, "language", "auto", "Single language to analyze (auto|go|python|javascript|typescript|elixir|rust)")
 	cmd.Flags().BoolVar(&includeTests, "include-tests", false, "Include test files")
 	cmd.Flags().StringArrayVar(&seeds, "seed", nil, "Explicit repoindex node ID seed (repeatable)")
 	cmd.Flags().StringVar(&query, "query", "", "Search query used to resolve seed nodes within the scoped path")
@@ -156,7 +156,7 @@ func newRefactorChangesCommand() *cobra.Command {
 	}
 	cmd.Flags().StringVar(&path, "path", ".", "File or directory scope used for the change comparison")
 	cmd.Flags().StringVar(&workspace, "workspace", ".", "Workspace root override")
-	cmd.Flags().StringVar(&language, "language", "auto", "Single language to analyze (auto|go|python|javascript|typescript|elixir)")
+	cmd.Flags().StringVar(&language, "language", "auto", "Single language to analyze (auto|go|python|javascript|typescript|elixir|rust)")
 	cmd.Flags().BoolVar(&includeTests, "include-tests", false, "Include test files")
 	cmd.Flags().StringVar(&since, "since", "", "Git ref or refactor snapshot id (refsnap-...) to compare against")
 	cmd.Flags().IntVar(&maxFiles, "max-files", 200, "Maximum changed files to return inline")
@@ -184,7 +184,7 @@ func newRefactorHotCommand() *cobra.Command {
 	}
 	cmd.Flags().StringVar(&path, "path", ".", "File or directory scope used for the hot ranking")
 	cmd.Flags().StringVar(&workspace, "workspace", ".", "Workspace root override")
-	cmd.Flags().StringVar(&language, "language", "auto", "Single language to analyze (auto|go|python|javascript|typescript|elixir)")
+	cmd.Flags().StringVar(&language, "language", "auto", "Single language to analyze (auto|go|python|javascript|typescript|elixir|rust)")
 	cmd.Flags().BoolVar(&includeTests, "include-tests", false, "Include test files")
 	cmd.Flags().StringVar(&since, "since", "HEAD~20", "Git ref or refactor snapshot id (refsnap-...) used as the hot baseline")
 	cmd.Flags().IntVar(&maxResults, "max-results", 20, "Maximum hot files to return")

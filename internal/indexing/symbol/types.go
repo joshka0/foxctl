@@ -458,6 +458,8 @@ func ExtractSymbolSignatures(content []byte, filePath string) []string {
 		return extractPythonSymbolSignatures(content)
 	case ".ex", ".exs":
 		return extractElixirSymbolSignatures(content)
+	case ".rs":
+		return extractRustSymbolSignatures(content)
 	default:
 		return extractGenericSymbolSignatures(content)
 	}
@@ -690,6 +692,41 @@ func extractElixirSymbolSignatures(content []byte) []string {
 			symbols = append(symbols, m[1]+":type")
 		} else if m := callbackDef.FindStringSubmatch(line); m != nil {
 			symbols = append(symbols, m[1]+":callback")
+		}
+	}
+
+	return symbols
+}
+
+// extractRustSymbolSignatures extracts public symbols from Rust source.
+func extractRustSymbolSignatures(content []byte) []string {
+	var symbols []string
+	lines := strings.Split(string(content), "\n")
+
+	pubFn := regexp.MustCompile(`^\s*pub(?:\([^)]*\))?\s+(?:async\s+)?(?:const\s+)?fn\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(`)
+	pubStruct := regexp.MustCompile(`^\s*pub(?:\([^)]*\))?\s+struct\s+([A-Za-z_][A-Za-z0-9_]*)`)
+	pubEnum := regexp.MustCompile(`^\s*pub(?:\([^)]*\))?\s+enum\s+([A-Za-z_][A-Za-z0-9_]*)`)
+	pubTrait := regexp.MustCompile(`^\s*pub(?:\([^)]*\))?\s+trait\s+([A-Za-z_][A-Za-z0-9_]*)`)
+	pubType := regexp.MustCompile(`^\s*pub(?:\([^)]*\))?\s+type\s+([A-Za-z_][A-Za-z0-9_]*)`)
+	pubConst := regexp.MustCompile(`^\s*pub(?:\([^)]*\))?\s+const\s+([A-Za-z_][A-Za-z0-9_]*)`)
+	pubStatic := regexp.MustCompile(`^\s*pub(?:\([^)]*\))?\s+static\s+(?:mut\s+)?([A-Za-z_][A-Za-z0-9_]*)`)
+
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if m := pubFn.FindStringSubmatch(line); m != nil {
+			symbols = append(symbols, m[1]+":function")
+		} else if m := pubStruct.FindStringSubmatch(line); m != nil {
+			symbols = append(symbols, m[1]+":struct")
+		} else if m := pubEnum.FindStringSubmatch(line); m != nil {
+			symbols = append(symbols, m[1]+":type")
+		} else if m := pubTrait.FindStringSubmatch(line); m != nil {
+			symbols = append(symbols, m[1]+":interface")
+		} else if m := pubType.FindStringSubmatch(line); m != nil {
+			symbols = append(symbols, m[1]+":type")
+		} else if m := pubConst.FindStringSubmatch(line); m != nil {
+			symbols = append(symbols, m[1]+":const")
+		} else if m := pubStatic.FindStringSubmatch(line); m != nil {
+			symbols = append(symbols, m[1]+":var")
 		}
 	}
 

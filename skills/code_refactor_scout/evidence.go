@@ -74,7 +74,7 @@ func buildScoutEvidence(ctx context.Context, rc *skillmain.RunContext, in input,
 		return result, err
 	}
 
-	hotIndex := buildScoutHotIndex(ctx, rc, scope, in.IncludeTests, now)
+	hotIndex, symbolHotIndex, cochangeIndex := buildScoutHotIndexes(ctx, rc, scope, snapshotPayload, in.IncludeTests, now)
 
 	pack := refevidence.HotspotPack{
 		SnapshotID:       snapshotPayload.SnapshotID,
@@ -84,19 +84,25 @@ func buildScoutEvidence(ctx context.Context, rc *skillmain.RunContext, in input,
 	}
 
 	if status.Mode != refstatus.ModeIndexBacked {
-		result.Findings = attachEvidenceToHotspots(ctx, result.Findings, nil, hotIndex, snapshotPayload.SnapshotID, snapshotArtifact.Digest, &pack)
+		result.Findings = attachEvidenceToHotspots(ctx, result.Findings, nil, hotIndex, symbolHotIndex, cochangeIndex, snapshotPayload.SnapshotID, snapshotArtifact.Digest, &pack)
+		result.Findings = rerankScoutFindings(result.Findings, status.Mode)
+		applyOpportunityScoresToPack(&pack, result.Findings)
 		return persistScoutEvidencePack(ctx, rc, result, pack)
 	}
 
 	store, err := repoindex.Open(ctx, rc.Config.Storage.Root, scope.Workspace)
 	if err != nil {
-		result.Findings = attachEvidenceToHotspots(ctx, result.Findings, nil, hotIndex, snapshotPayload.SnapshotID, snapshotArtifact.Digest, &pack)
+		result.Findings = attachEvidenceToHotspots(ctx, result.Findings, nil, hotIndex, symbolHotIndex, cochangeIndex, snapshotPayload.SnapshotID, snapshotArtifact.Digest, &pack)
+		result.Findings = rerankScoutFindings(result.Findings, status.Mode)
+		applyOpportunityScoresToPack(&pack, result.Findings)
 		return persistScoutEvidencePack(ctx, rc, result, pack)
 	}
 	defer store.Close()
 
 	service := repoquery.NewQueryService(repoindex.NewQueryEngine(store))
-	result.Findings = attachEvidenceToHotspots(ctx, result.Findings, service, hotIndex, snapshotPayload.SnapshotID, snapshotArtifact.Digest, &pack)
+	result.Findings = attachEvidenceToHotspots(ctx, result.Findings, service, hotIndex, symbolHotIndex, cochangeIndex, snapshotPayload.SnapshotID, snapshotArtifact.Digest, &pack)
+	result.Findings = rerankScoutFindings(result.Findings, status.Mode)
+	applyOpportunityScoresToPack(&pack, result.Findings)
 	return persistScoutEvidencePack(ctx, rc, result, pack)
 }
 
@@ -121,7 +127,7 @@ func persistScoutEvidencePack(ctx context.Context, rc *skillmain.RunContext, cur
 	return current, nil
 }
 
-func attachEvidenceToHotspots(ctx context.Context, findings []finding, service *repoquery.QueryService, hotIndex map[string]refhot.FileHotspot, snapshotID, snapshotArtifact string, pack *refevidence.HotspotPack) []finding {
+func attachEvidenceToHotspots(ctx context.Context, findings []finding, service *repoquery.QueryService, hotIndex map[string]refhot.FileHotspot, symbolHotIndex map[string]refhot.SymbolHotspot, cochangeIndex map[string][]refhot.CochangeNeighbor, snapshotID, snapshotArtifact string, pack *refevidence.HotspotPack) []finding {
 	out := append([]finding(nil), findings...)
 	graphEnriched := 0
 	for i := range out {
@@ -137,12 +143,32 @@ func attachEvidenceToHotspots(ctx context.Context, findings []finding, service *
 			out[i].Evidence["recent_change_count"] = hot.TouchCount
 			out[i].Evidence["hot_score"] = hot.Score
 		}
+		if symbolHot, ok := lookupFindingSymbolHotspot(symbolHotIndex, out[i]); ok {
+			out[i].Evidence["symbol_recent_change_count"] = symbolHot.TouchCount
+			out[i].Evidence["symbol_hot_score"] = symbolHot.Score
+			out[i].Evidence["symbol_changed_line_count"] = symbolHot.ChangedLineCount
+		}
+		if cochange := lookupFindingCochange(cochangeIndex, out[i]); len(cochange) > 0 {
+			out[i].Evidence["cochange_count"] = len(cochange)
+			out[i].Evidence["cochange_strength"] = cochange[0].Score
+			out[i].Evidence["cochange_paths"] = cochangeNeighborPaths(cochange)
+		}
+		if boundary := classifySuggestedBoundary(out[i]); boundary != "" {
+			out[i].Evidence["suggested_boundary_kind"] = boundary
+		}
 		row := refevidence.HotspotRow{
 			File:              out[i].File,
 			Symbol:            out[i].Symbol,
 			RuleID:            out[i].RuleID,
 			RecentChangeCount: evidenceInt(out[i].Evidence["recent_change_count"]),
 			HotScore:          evidenceFloat(out[i].Evidence["hot_score"]),
+			SymbolTouchCount:  evidenceInt(out[i].Evidence["symbol_recent_change_count"]),
+			SymbolHotScore:    evidenceFloat(out[i].Evidence["symbol_hot_score"]),
+			SymbolChangedLine: evidenceInt(out[i].Evidence["symbol_changed_line_count"]),
+			CochangeStrength:  evidenceFloat(out[i].Evidence["cochange_strength"]),
+			CochangeCount:     evidenceInt(out[i].Evidence["cochange_count"]),
+			CochangePaths:     evidenceStrings(out[i].Evidence["cochange_paths"]),
+			SuggestedBoundary: evidenceString(out[i].Evidence["suggested_boundary_kind"]),
 		}
 		shouldAttachGraph := service != nil && graphEnriched < maxIndexedHotspotEvidence
 		if shouldAttachGraph {
@@ -164,6 +190,7 @@ func attachEvidenceToHotspots(ctx context.Context, findings []finding, service *
 				graphEnriched++
 			}
 		}
+		row.OpportunityScore = evidenceInt(out[i].Evidence["opportunity_score"])
 		if pack != nil && len(pack.Hotspots) < maxEvidenceHotspots {
 			pack.Hotspots = append(pack.Hotspots, row)
 		}
@@ -173,35 +200,59 @@ func attachEvidenceToHotspots(ctx context.Context, findings []finding, service *
 
 func rerankScoutFindings(findings []finding, mode refstatus.Mode) []finding {
 	out := append([]finding(nil), findings...)
-	if mode != refstatus.ModeIndexBacked {
-		return out
-	}
 	for i := range out {
 		if out[i].RuleID != "function_hotspot" || out[i].Evidence == nil {
 			continue
 		}
+		baseScore := out[i].Score
 		reverseDepCount := evidenceInt(out[i].Evidence["reverse_dep_count"])
 		forwardDepCount := evidenceInt(out[i].Evidence["forward_dep_count"])
 		hotScore := evidenceFloat(out[i].Evidence["hot_score"])
+		recentChangeCount := evidenceInt(out[i].Evidence["recent_change_count"])
+		symbolHotScore := evidenceFloat(out[i].Evidence["symbol_hot_score"])
+		symbolTouchCount := evidenceInt(out[i].Evidence["symbol_recent_change_count"])
+		symbolChangedLines := evidenceInt(out[i].Evidence["symbol_changed_line_count"])
+		cochangeStrength := evidenceFloat(out[i].Evidence["cochange_strength"])
+		cochangeCount := evidenceInt(out[i].Evidence["cochange_count"])
 
-		reverseBonus := scoreReverseDependencyBonus(reverseDepCount)
-		forwardBonus := scoreForwardDependencyBonus(forwardDepCount)
-		hotBonus := scoreHotEvidenceBonus(hotScore)
-		totalBonus := reverseBonus + forwardBonus + hotBonus
-		if totalBonus == 0 {
-			continue
+		reverseBonus := 0
+		forwardBonus := 0
+		if mode == refstatus.ModeIndexBacked {
+			reverseBonus = scoreReverseDependencyBonus(reverseDepCount)
+			forwardBonus = scoreForwardDependencyBonus(forwardDepCount)
 		}
-
-		baseScore := out[i].Score
+		symbolHotBonus := scoreSymbolHotEvidenceBonus(symbolHotScore, symbolChangedLines)
+		fileHotBonus := 0
+		if symbolHotBonus == 0 {
+			fileHotBonus = scoreHotEvidenceBonus(hotScore)
+		}
+		cochangeBonus := scoreCochangeBonus(cochangeStrength, cochangeCount)
+		recentBonus := scoreRecentChangeCountBonus(maxEvidenceInt(recentChangeCount, symbolTouchCount))
+		totalBonus := reverseBonus + forwardBonus + symbolHotBonus + fileHotBonus + cochangeBonus + recentBonus
 		out[i].Score = clampScore(baseScore + totalBonus)
 		out[i].Severity = severityFor(out[i].Score)
 		out[i].Evidence["base_score"] = baseScore
-		out[i].Evidence["index_rerank_bonus"] = totalBonus
-		out[i].Evidence["index_rerank_score"] = out[i].Score
-		out[i].Evidence["index_rerank_factors"] = map[string]int{
+		out[i].Evidence["opportunity_score"] = out[i].Score
+		out[i].Evidence["opportunity_bonus"] = totalBonus
+		out[i].Evidence["opportunity_factors"] = map[string]int{
 			"reverse_deps": reverseBonus,
 			"forward_deps": forwardBonus,
-			"hot_score":    hotBonus,
+			"symbol_hot":   symbolHotBonus,
+			"file_hot":     fileHotBonus,
+			"cochange":     cochangeBonus,
+			"recent":       recentBonus,
+		}
+		if mode == refstatus.ModeIndexBacked && totalBonus > 0 {
+			out[i].Evidence["index_rerank_bonus"] = totalBonus
+			out[i].Evidence["index_rerank_score"] = out[i].Score
+			out[i].Evidence["index_rerank_factors"] = map[string]int{
+				"reverse_deps": reverseBonus,
+				"forward_deps": forwardBonus,
+				"symbol_hot":   symbolHotBonus,
+				"file_hot":     fileHotBonus,
+				"cochange":     cochangeBonus,
+				"recent":       recentBonus,
+			}
 		}
 	}
 	return out
@@ -255,7 +306,84 @@ func scoreHotEvidenceBonus(score float64) int {
 	}
 }
 
-func buildScoutHotIndex(ctx context.Context, rc *skillmain.RunContext, scope refscope.Scope, includeTests bool, now time.Time) map[string]refhot.FileHotspot {
+func scoreSymbolHotEvidenceBonus(score float64, changedLines int) int {
+	rounded := math.Round(score*100) / 100
+	bonus := 0
+	switch {
+	case rounded >= 4:
+		bonus = 6
+	case rounded >= 2:
+		bonus = 4
+	case rounded > 0:
+		bonus = 2
+	}
+	switch {
+	case changedLines >= 20:
+		bonus += 3
+	case changedLines >= 8:
+		bonus += 2
+	case changedLines >= 1:
+		bonus++
+	}
+	if bonus > 8 {
+		return 8
+	}
+	return bonus
+}
+
+func scoreRecentChangeCountBonus(count int) int {
+	switch {
+	case count >= 10:
+		return 2
+	case count >= 5:
+		return 1
+	default:
+		return 0
+	}
+}
+
+func scoreCochangeBonus(strength float64, count int) int {
+	bonus := 0
+	rounded := math.Round(strength*100) / 100
+	switch {
+	case rounded >= 1.5:
+		bonus = 3
+	case rounded >= 0.75:
+		bonus = 2
+	case rounded > 0:
+		bonus = 1
+	}
+	switch {
+	case count >= 4:
+		bonus += 2
+	case count >= 2:
+		bonus++
+	}
+	if bonus > 4 {
+		return 4
+	}
+	return bonus
+}
+
+func applyOpportunityScoresToPack(pack *refevidence.HotspotPack, findings []finding) {
+	if pack == nil || len(pack.Hotspots) == 0 || len(findings) == 0 {
+		return
+	}
+	byKey := make(map[string]int, len(findings))
+	for _, item := range findings {
+		if item.RuleID != "function_hotspot" || item.Evidence == nil {
+			continue
+		}
+		byKey[findingSymbolHotKey(item.File, item.Symbol)] = evidenceInt(item.Evidence["opportunity_score"])
+	}
+	for i := range pack.Hotspots {
+		if score, ok := byKey[findingSymbolHotKey(pack.Hotspots[i].File, pack.Hotspots[i].Symbol)]; ok {
+			pack.Hotspots[i].OpportunityScore = score
+		}
+	}
+}
+
+func buildScoutHotIndexes(ctx context.Context, rc *skillmain.RunContext, scope refscope.Scope, snapshot refsnapshot.Payload, includeTests bool, now time.Time) (map[string]refhot.FileHotspot, map[string]refhot.SymbolHotspot, map[string][]refhot.CochangeNeighbor) {
 	for _, baseline := range []string{"HEAD~20", "HEAD~5", "HEAD"} {
 		result, err := refhot.Build(ctx, rc.Config.Storage.Root, refhot.Options{
 			Scope:        scope,
@@ -268,13 +396,156 @@ func buildScoutHotIndex(ctx context.Context, rc *skillmain.RunContext, scope ref
 		if err != nil {
 			continue
 		}
-		out := make(map[string]refhot.FileHotspot, len(result.Files))
+		fileIndex := make(map[string]refhot.FileHotspot, len(result.Files))
 		for _, file := range result.Files {
-			out[file.Path] = file
+			fileIndex[file.Path] = file
+		}
+		symbolHotspots, err := refhot.BuildSymbolHotspots(ctx, scope, baseline, snapshot, fileIndex, now)
+		if err != nil {
+			return fileIndex, nil, nil
+		}
+		symbolIndex := buildFindingSymbolHotIndex(symbolHotspots)
+		cochangeIndex, err := refhot.BuildCochangeIndex(ctx, scope, includeTests, baseline, 90, now, 3)
+		if err != nil {
+			return fileIndex, symbolIndex, nil
+		}
+		return fileIndex, symbolIndex, cochangeIndex
+	}
+	return nil, nil, nil
+}
+
+func buildFindingSymbolHotIndex(items []refhot.SymbolHotspot) map[string]refhot.SymbolHotspot {
+	if len(items) == 0 {
+		return nil
+	}
+	index := make(map[string]refhot.SymbolHotspot, len(items)*2)
+	for _, item := range items {
+		for _, variant := range findingSeedVariants(item.Name) {
+			key := findingSymbolHotKey(item.Path, variant)
+			prev, ok := index[key]
+			if !ok || item.Score > prev.Score || (item.Score == prev.Score && item.ChangedLineCount > prev.ChangedLineCount) {
+				index[key] = item
+			}
+		}
+	}
+	return index
+}
+
+func lookupFindingSymbolHotspot(index map[string]refhot.SymbolHotspot, item finding) (refhot.SymbolHotspot, bool) {
+	if len(index) == 0 {
+		return refhot.SymbolHotspot{}, false
+	}
+	best := refhot.SymbolHotspot{}
+	found := false
+	for _, variant := range findingSeedVariants(item.Symbol) {
+		key := findingSymbolHotKey(item.File, variant)
+		hot, ok := index[key]
+		if !ok {
+			continue
+		}
+		if item.Line > 0 && hot.LineStart > 0 && hot.LineEnd > 0 {
+			if item.Line < hot.LineStart || item.Line > hot.LineEnd {
+				continue
+			}
+		}
+		if !found || hot.Score > best.Score || (hot.Score == best.Score && hot.ChangedLineCount > best.ChangedLineCount) {
+			best = hot
+			found = true
+		}
+	}
+	return best, found
+}
+
+func findingSymbolHotKey(path, symbol string) string {
+	return strings.TrimSpace(path) + "\x00" + strings.TrimSpace(symbol)
+}
+
+func maxEvidenceInt(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
+}
+
+func lookupFindingCochange(index map[string][]refhot.CochangeNeighbor, item finding) []refhot.CochangeNeighbor {
+	if len(index) == 0 {
+		return nil
+	}
+	return index[strings.TrimSpace(item.File)]
+}
+
+func cochangeNeighborPaths(items []refhot.CochangeNeighbor) []string {
+	out := make([]string, 0, len(items))
+	for _, item := range items {
+		path := strings.TrimSpace(item.Path)
+		if path == "" {
+			continue
+		}
+		out = append(out, path)
+	}
+	return out
+}
+
+func classifySuggestedBoundary(item finding) string {
+	if item.RuleID != "function_hotspot" || item.Evidence == nil {
+		return ""
+	}
+	rules := evidenceStrings(item.Evidence["rules"])
+	if len(rules) == 0 {
+		return ""
+	}
+	set := make(map[string]struct{}, len(rules))
+	for _, rule := range rules {
+		set[strings.TrimSpace(rule)] = struct{}{}
+	}
+	if hasAnyRule(set, "duplicate_recovery_block", "duplicated_error_remap", "repeated_guard_ladder") {
+		if hasAnyRule(set, "duplicate_recovery_block", "duplicated_error_remap") {
+			return "extract_error_normalizer"
+		}
+	}
+	if hasAnyRule(set, "semantic_simplification_candidate") {
+		return "simplify_boolean_surface"
+	}
+	if hasAnyRule(set, "duplicate_orchestration_fingerprint") && hasAnyRule(set, "fan_out_dependency_spread", "same_file_extraction_candidate") {
+		return "extract_workflow_step"
+	}
+	if hasAnyRule(set, "same_file_extraction_candidate") && hasAnyRule(set, "high_cyclomatic_complexity", "deep_nesting", "oversized_function") {
+		return "extract_branch_core"
+	}
+	return ""
+}
+
+func hasAnyRule(set map[string]struct{}, names ...string) bool {
+	for _, name := range names {
+		if _, ok := set[strings.TrimSpace(name)]; ok {
+			return true
+		}
+	}
+	return false
+}
+
+func evidenceStrings(value any) []string {
+	switch v := value.(type) {
+	case []string:
+		return append([]string(nil), v...)
+	case []any:
+		out := make([]string, 0, len(v))
+		for _, item := range v {
+			if s, ok := item.(string); ok && strings.TrimSpace(s) != "" {
+				out = append(out, strings.TrimSpace(s))
+			}
 		}
 		return out
+	default:
+		return nil
 	}
-	return nil
+}
+
+func evidenceString(value any) string {
+	if s, ok := value.(string); ok {
+		return strings.TrimSpace(s)
+	}
+	return ""
 }
 
 func resolveFindingSeedNode(ctx context.Context, service *repoquery.QueryService, item finding) (*repoindex.Node, string) {

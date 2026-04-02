@@ -63,6 +63,14 @@ type HotspotRow struct {
 	ForwardDepCount   int      `json:"forward_dep_count"`
 	RecentChangeCount int      `json:"recent_change_count"`
 	HotScore          float64  `json:"hot_score"`
+	SymbolTouchCount  int      `json:"symbol_touch_count,omitempty"`
+	SymbolHotScore    float64  `json:"symbol_hot_score,omitempty"`
+	SymbolChangedLine int      `json:"symbol_changed_line_count,omitempty"`
+	CochangeStrength  float64  `json:"cochange_strength,omitempty"`
+	CochangeCount     int      `json:"cochange_count,omitempty"`
+	CochangePaths     []string `json:"cochange_paths,omitempty"`
+	SuggestedBoundary string   `json:"suggested_boundary_kind,omitempty"`
+	OpportunityScore  int      `json:"opportunity_score,omitempty"`
 	SuggestedReads    []string `json:"suggested_reads,omitempty"`
 }
 

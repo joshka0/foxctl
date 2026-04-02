@@ -80,11 +80,27 @@ func TestAttachEvidenceToHotspotsAddsSnapshotAndHotFieldsWithoutRepoGraph(t *tes
 		},
 	}
 	pack := refevidence.HotspotPack{}
+	symbolHotIndex := buildFindingSymbolHotIndex([]refhot.SymbolHotspot{
+		{
+			Path:             "internal/actor/agent_actor.go",
+			Name:             "AgentActor.handleAsk",
+			Score:            5.5,
+			TouchCount:       3,
+			ChangedLineCount: 12,
+			LineStart:        302,
+			LineEnd:          464,
+		},
+	})
 	got := attachEvidenceToHotspots(context.Background(), findings, nil, map[string]refhot.FileHotspot{
 		"internal/actor/agent_actor.go": {
 			Path:       "internal/actor/agent_actor.go",
 			TouchCount: 7,
 			Score:      42.5,
+		},
+	}, symbolHotIndex, map[string][]refhot.CochangeNeighbor{
+		"internal/actor/agent_actor.go": {
+			{Path: "internal/actor/base_actor.go", Count: 2, Score: 1.75},
+			{Path: "internal/actor/actor.go", Count: 1, Score: 0.9},
 		},
 	}, "refsnap-1", "sha256:test", &pack)
 
@@ -104,6 +120,21 @@ func TestAttachEvidenceToHotspotsAddsSnapshotAndHotFieldsWithoutRepoGraph(t *tes
 	if evidence["hot_score"] != 42.5 {
 		t.Fatalf("hot_score=%v want 42.5", evidence["hot_score"])
 	}
+	if evidence["symbol_recent_change_count"] != 3 {
+		t.Fatalf("symbol_recent_change_count=%v want 3", evidence["symbol_recent_change_count"])
+	}
+	if evidence["symbol_hot_score"] != 5.5 {
+		t.Fatalf("symbol_hot_score=%v want 5.5", evidence["symbol_hot_score"])
+	}
+	if evidence["symbol_changed_line_count"] != 12 {
+		t.Fatalf("symbol_changed_line_count=%v want 12", evidence["symbol_changed_line_count"])
+	}
+	if evidence["cochange_count"] != 2 {
+		t.Fatalf("cochange_count=%v want 2", evidence["cochange_count"])
+	}
+	if evidence["cochange_strength"] != 1.75 {
+		t.Fatalf("cochange_strength=%v want 1.75", evidence["cochange_strength"])
+	}
 	if len(pack.Hotspots) != 1 {
 		t.Fatalf("hotspots=%d want 1", len(pack.Hotspots))
 	}
@@ -113,8 +144,107 @@ func TestAttachEvidenceToHotspotsAddsSnapshotAndHotFieldsWithoutRepoGraph(t *tes
 	if pack.Hotspots[0].HotScore != 42.5 {
 		t.Fatalf("pack hot_score=%v want 42.5", pack.Hotspots[0].HotScore)
 	}
+	if pack.Hotspots[0].SymbolTouchCount != 3 {
+		t.Fatalf("pack symbol_touch_count=%d want 3", pack.Hotspots[0].SymbolTouchCount)
+	}
+	if pack.Hotspots[0].SymbolHotScore != 5.5 {
+		t.Fatalf("pack symbol_hot_score=%v want 5.5", pack.Hotspots[0].SymbolHotScore)
+	}
+	if pack.Hotspots[0].SymbolChangedLine != 12 {
+		t.Fatalf("pack symbol_changed_line_count=%d want 12", pack.Hotspots[0].SymbolChangedLine)
+	}
+	if pack.Hotspots[0].CochangeCount != 2 {
+		t.Fatalf("pack cochange_count=%d want 2", pack.Hotspots[0].CochangeCount)
+	}
+	if pack.Hotspots[0].CochangeStrength != 1.75 {
+		t.Fatalf("pack cochange_strength=%v want 1.75", pack.Hotspots[0].CochangeStrength)
+	}
+	if len(pack.Hotspots[0].CochangePaths) != 2 {
+		t.Fatalf("pack cochange_paths=%v want 2 paths", pack.Hotspots[0].CochangePaths)
+	}
 	if pack.Hotspots[0].SeedNodeID != "" {
 		t.Fatalf("seed_node_id=%q want empty", pack.Hotspots[0].SeedNodeID)
+	}
+}
+
+func TestLookupFindingSymbolHotspotNormalizesReceiverNames(t *testing.T) {
+	index := buildFindingSymbolHotIndex([]refhot.SymbolHotspot{
+		{
+			Path:             "internal/actor/agent_actor.go",
+			Name:             "AgentActor.handleAsk",
+			Score:            4.2,
+			ChangedLineCount: 9,
+			LineStart:        302,
+			LineEnd:          464,
+		},
+	})
+	got, ok := lookupFindingSymbolHotspot(index, finding{
+		File:   "internal/actor/agent_actor.go",
+		Symbol: "*AgentActor.handleAsk",
+		Line:   320,
+	})
+	if !ok {
+		t.Fatal("expected symbol hotspot match")
+	}
+	if got.Name != "AgentActor.handleAsk" {
+		t.Fatalf("name=%q want AgentActor.handleAsk", got.Name)
+	}
+}
+
+func TestClassifySuggestedBoundary(t *testing.T) {
+	cases := []struct {
+		name string
+		item finding
+		want string
+	}{
+		{
+			name: "error normalizer",
+			item: finding{
+				RuleID: "function_hotspot",
+				Evidence: map[string]any{
+					"rules": []string{"duplicate_recovery_block", "duplicated_error_remap"},
+				},
+			},
+			want: "extract_error_normalizer",
+		},
+		{
+			name: "boolean surface",
+			item: finding{
+				RuleID: "function_hotspot",
+				Evidence: map[string]any{
+					"rules": []string{"semantic_simplification_candidate", "high_cyclomatic_complexity"},
+				},
+			},
+			want: "simplify_boolean_surface",
+		},
+		{
+			name: "workflow step",
+			item: finding{
+				RuleID: "function_hotspot",
+				Evidence: map[string]any{
+					"rules": []string{"duplicate_orchestration_fingerprint", "fan_out_dependency_spread"},
+				},
+			},
+			want: "extract_workflow_step",
+		},
+		{
+			name: "branch core",
+			item: finding{
+				RuleID: "function_hotspot",
+				Evidence: map[string]any{
+					"rules": []string{"same_file_extraction_candidate", "high_cyclomatic_complexity"},
+				},
+			},
+			want: "extract_branch_core",
+		},
+	}
+
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := classifySuggestedBoundary(tt.item); got != tt.want {
+				t.Fatalf("boundary=%q want %q", got, tt.want)
+			}
+		})
 	}
 }
 
@@ -217,7 +347,6 @@ func TestRerankScoutFindingsSkipsParserOnlyMode(t *testing.T) {
 			Evidence: map[string]any{
 				"reverse_dep_count": 99,
 				"forward_dep_count": 99,
-				"hot_score":         10.0,
 			},
 		},
 	}
@@ -228,5 +357,61 @@ func TestRerankScoutFindingsSkipsParserOnlyMode(t *testing.T) {
 	}
 	if _, ok := got[0].Evidence["index_rerank_bonus"]; ok {
 		t.Fatalf("unexpected rerank evidence in parser_only mode: %#v", got[0].Evidence)
+	}
+}
+
+func TestRerankScoutFindingsUsesParserOnlyOpportunityScoreFromSymbolHotness(t *testing.T) {
+	findings := []finding{
+		{
+			RuleID:   "function_hotspot",
+			File:     "a.go",
+			Symbol:   "Alpha",
+			Score:    90,
+			Severity: "high",
+			Evidence: map[string]any{
+				"symbol_hot_score":           5.2,
+				"symbol_recent_change_count": 6,
+				"symbol_changed_line_count":  11,
+			},
+		},
+	}
+
+	got := rerankScoutFindings(findings, refstatus.ModeParserOnly)
+	if got[0].Score <= 90 {
+		t.Fatalf("score=%d want parser_only opportunity boost", got[0].Score)
+	}
+	if got[0].Evidence["opportunity_score"] != got[0].Score {
+		t.Fatalf("opportunity_score=%v want %d", got[0].Evidence["opportunity_score"], got[0].Score)
+	}
+	if _, ok := got[0].Evidence["index_rerank_bonus"]; ok {
+		t.Fatalf("unexpected index_rerank_bonus in parser_only mode: %#v", got[0].Evidence)
+	}
+}
+
+func TestRerankScoutFindingsUsesCochangePressure(t *testing.T) {
+	findings := []finding{
+		{
+			RuleID:   "function_hotspot",
+			File:     "a.go",
+			Symbol:   "Alpha",
+			Score:    90,
+			Severity: "high",
+			Evidence: map[string]any{
+				"cochange_strength": 1.8,
+				"cochange_count":    3,
+			},
+		},
+	}
+
+	got := rerankScoutFindings(findings, refstatus.ModeParserOnly)
+	if got[0].Score <= 90 {
+		t.Fatalf("score=%d want cochange boost", got[0].Score)
+	}
+	factors, ok := got[0].Evidence["opportunity_factors"].(map[string]int)
+	if !ok {
+		t.Fatalf("opportunity_factors=%T want map[string]int", got[0].Evidence["opportunity_factors"])
+	}
+	if factors["cochange"] == 0 {
+		t.Fatalf("cochange factor=%d want positive", factors["cochange"])
 	}
 }

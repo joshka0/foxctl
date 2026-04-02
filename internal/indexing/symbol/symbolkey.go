@@ -86,3 +86,21 @@ func ElixirSymbolKey(name string) SymbolKey {
 func PythonSymbolKey(name string) SymbolKey {
 	return SymbolKey(strings.TrimSpace(name))
 }
+
+// RustSymbolKey creates a SymbolKey for a Rust symbol.
+// Public symbols use their qualified name directly; private symbols are
+// disambiguated by file basename.
+func RustSymbolKey(name string, exported bool, fileBasename string) SymbolKey {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return ""
+	}
+	if exported {
+		return SymbolKey(name)
+	}
+	fileBasename = strings.TrimSpace(fileBasename)
+	if fileBasename == "" {
+		return SymbolKey(name)
+	}
+	return SymbolKey(fmt.Sprintf("%s/%s", fileBasename, name))
+}

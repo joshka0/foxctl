@@ -56,6 +56,8 @@ require (
 	mvdan.cc/gofumpt v0.8.0
 )
 
+require github.com/tree-sitter/tree-sitter-rust v0.24.2 // indirect
+
 require (
 	4d63.com/gocheckcompilerdirectives v1.3.0 // indirect
 	4d63.com/gochecknoglobals v0.2.2 // indirect

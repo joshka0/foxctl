@@ -64,7 +64,10 @@ while IFS= read -r file; do
       continue
     fi
 
-    if ! (cd "$(dirname "$file")" && [[ -e "$base" ]]); then
+    file_dir="$(dirname "$file")"
+    candidate="$ROOT_DIR/$file_dir/$base"
+
+    if [[ ! -e "$candidate" ]]; then
       printf '%s:%s -> %s\n' "$file" "$line" "$base" >> "$TMP_ERRORS"
     fi
   done < <(grep -nEo '\[[^][]+\]\([^)]+\)' "$tmp_stripped" || true)

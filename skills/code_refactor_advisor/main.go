@@ -24,7 +24,7 @@ const command = "code/refactor_advisor"
 
 type input struct {
 	Path          string  `json:"path"`
-	Language      string  `json:"language" validate:"required,oneof=go python javascript typescript elixir"`
+	Language      string  `json:"language" validate:"required,oneof=go python javascript typescript elixir rust"`
 	Focus         string  `json:"focus" validate:"omitempty,oneof=all slop"`
 	RuleSet       string  `json:"rule_set" validate:"omitempty,oneof=conservative default aggressive"`
 	MinScore      int     `json:"min_score" validate:"gte=0,lte=100"`

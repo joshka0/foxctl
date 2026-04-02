@@ -22,7 +22,7 @@ signature:
     - name: language
       type: string
       required: false
-      enum: ["auto", "go", "python", "javascript", "typescript", "elixir"]
+      enum: ["auto", "go", "python", "javascript", "typescript", "elixir", "rust"]
       default: "auto"
       description: "Restrict analysis to one language or auto-detect by extension"
     - name: focus
@@ -92,8 +92,8 @@ signature:
 
       Current signal sources:
       - Symbol signatures and spans from the existing symbol extractors
-      - Per-symbol call extraction across Go, TypeScript, Python, and Elixir
-      - Tree-sitter-backed extraction for TypeScript, Python, and Elixir when available
+      - Per-symbol call extraction across Go, TypeScript, Python, Elixir, and Rust
+      - Tree-sitter-backed extraction for TypeScript, Python, Elixir, and Rust when available
       - Go AST metrics for stronger function and interface findings
       - Repoindex-backed reachability, reverse deps, forward deps, and suggested
         reads when the scope is index_backed
@@ -144,7 +144,11 @@ signature:
         `index_backed` scopes after building repoindex with `--python`; the
         first version relies on module/file reachability plus same-file call
         edges from extracted Python calls, so framework-specific roots may
-        still lag Go.
+        still lag Go. Rust dead-code analysis is now also available on fully
+        `index_backed` scopes after building repoindex with `--rust`; the
+        first version uses tree-sitter-backed Rust symbols when available plus
+        same-file call edges, so crate-wide module/use reachability still lags
+        Go.
 
       Current rule families:
       - dead-code candidates:
@@ -153,6 +157,7 @@ signature:
         test_only_package
       - slop and hotspot signals:
         duplicate_recovery_block, duplicated_error_remap, repeated_guard_ladder,
+        semantic_simplification_candidate,
         duplicate_orchestration_fingerprint, same_file_extraction_candidate,
         fan_out_dependency_spread, function_hotspot
       - signature and size signals:
@@ -165,9 +170,9 @@ signature:
 
       The scout remains deterministic and local-first. Go currently has the
       strongest AST support. TypeScript and Elixir now have parser-backed slop
-      rules for repeated guarded recovery and error-remap patterns. Python now
-      also supports repoindex-backed refactor status and dead-code analysis on
-      indexed scopes. Dead-code findings require repoindex coverage and use
+      rules for repeated guarded recovery and error-remap patterns. Python and
+      Rust now also support repoindex-backed refactor status and dead-code
+      analysis on indexed scopes. Dead-code findings require repoindex coverage and use
       conservative reachability
       rather than keyword heuristics. Go dead-code analysis now includes
       private methods and structural roots from `IMPLEMENTS` / `EMBEDS`
@@ -191,6 +196,8 @@ signature:
       - for Python package trees, build repoindex with `--python` on the
         package root or scripts root you actually want to analyze instead of
         indexing unrelated monorepo siblings
+      - for Rust crates, build repoindex with `--rust` on the crate root you
+        actually want to analyze instead of indexing unrelated monorepo siblings
       - for TypeScript and Elixir monorepos, that usually means indexing the
         app root *(for example `praze/`, `apps/praze-api/`, or
         `apps/praze-presence/`)* rather than the repo root
@@ -203,6 +210,7 @@ signature:
       Example commands:
         agentctl run code/refactor_scout --input '{"path":"./internal","rule_set":"default"}'
         agentctl run code/refactor_scout --input '{"path":"./internal/indexing","language":"go","min_score":60}'
+        agentctl run code/refactor_scout --input '{"path":"./crates/my-crate/src","language":"rust","focus":"dead"}'
         agentctl run code/refactor_scout --input '{"path":"./internal","language":"go","focus":"slop"}'
         agentctl run code/refactor_scout --input '{"path":"./internal/actor","language":"go","focus":"dead"}'
         agentctl run code/refactor_scout --input '{"path":"./internal/actor","language":"go","focus":"slop","min_score":80,"max_results":8}'
@@ -226,6 +234,12 @@ signature:
         example_input:
           path: "./internal/actor"
           language: "go"
+          focus: "dead"
+      - id: rust-dead-code-candidates
+        description: "Find conservative Rust dead-code candidates on a fully index-backed crate scope"
+        example_input:
+          path: "./crates/my-crate/src"
+          language: "rust"
           focus: "dead"
           min_score: 0
       - id: mixed-signature-scan

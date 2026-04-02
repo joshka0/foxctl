@@ -5,10 +5,12 @@ package symbol
 import (
 	"context"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	sitter "github.com/tree-sitter/go-tree-sitter"
 	py "github.com/tree-sitter/tree-sitter-python/bindings/go"
+	rust "github.com/tree-sitter/tree-sitter-rust/bindings/go"
 	ts "github.com/tree-sitter/tree-sitter-typescript/bindings/go"
 )
 
@@ -109,6 +111,49 @@ func extractPythonCallsWithTreeSitter(_ context.Context, symbol Symbol, content 
 	defer tree.Close()
 
 	calls := collectTreeSitterCallNames(tree.RootNode(), body, pythonCallNameFromNode)
+	return calls, true, nil
+}
+
+func extractRustSymbolsWithTreeSitter(_ context.Context, filePath string, content []byte) ([]Symbol, bool, error) {
+	if strings.ToLower(filepath.Ext(filePath)) != ".rs" {
+		return nil, false, nil
+	}
+	grammar := sitter.NewLanguage(rust.Language())
+	tree, ok := parseTreeSitterContent(grammar, content)
+	if !ok {
+		return nil, false, nil
+	}
+	defer tree.Close()
+
+	lines := strings.Split(string(content), "\n")
+	root := tree.RootNode()
+	cursor := root.Walk()
+	children := root.NamedChildren(cursor)
+	symbols := make([]Symbol, 0, len(children))
+	for i := range children {
+		child := children[i]
+		symbols = append(symbols, extractTopLevelRustSymbols(filePath, content, lines, &child)...)
+	}
+	return symbols, true, nil
+}
+
+func extractRustCallsWithTreeSitter(_ context.Context, symbol Symbol, content []byte) ([]string, bool, error) {
+	if strings.ToLower(filepath.Ext(symbol.FilePath)) != ".rs" {
+		return nil, false, nil
+	}
+	body, ok := extractSymbolBodyBytes(symbol, content)
+	if !ok {
+		return nil, true, nil
+	}
+
+	grammar := sitter.NewLanguage(rust.Language())
+	tree, ok := parseTreeSitterContent(grammar, body)
+	if !ok {
+		return nil, false, nil
+	}
+	defer tree.Close()
+
+	calls := collectRustTreeSitterCallNames(tree.RootNode(), body)
 	return calls, true, nil
 }
 
@@ -396,6 +441,148 @@ func pythonCallNameFromNode(node *sitter.Node, content []byte) string {
 	}
 	if fn := node.ChildByFieldName("function"); fn != nil {
 		return treeSitterCallableName(fn, content)
+	}
+	return ""
+}
+
+func extractTopLevelRustSymbols(filePath string, content []byte, lines []string, node *sitter.Node) []Symbol {
+	if node == nil {
+		return nil
+	}
+	switch node.Kind() {
+	case "function_item":
+		return singleTreeSitterSymbol(filePath, "rust", content, lines, node, treeSitterNodeName(node, content), KindFunction, extractRustLeadingDoc)
+	case "struct_item":
+		return singleTreeSitterSymbol(filePath, "rust", content, lines, node, treeSitterNodeName(node, content), KindStruct, extractRustLeadingDoc)
+	case "enum_item":
+		return singleTreeSitterSymbol(filePath, "rust", content, lines, node, treeSitterNodeName(node, content), KindType, extractRustLeadingDoc)
+	case "trait_item":
+		return singleTreeSitterSymbol(filePath, "rust", content, lines, node, treeSitterNodeName(node, content), KindInterface, extractRustLeadingDoc)
+	case "type_item":
+		return singleTreeSitterSymbol(filePath, "rust", content, lines, node, treeSitterNodeName(node, content), KindType, extractRustLeadingDoc)
+	case "const_item":
+		return singleTreeSitterSymbol(filePath, "rust", content, lines, node, treeSitterNodeName(node, content), KindConstant, extractRustLeadingDoc)
+	case "static_item":
+		return singleTreeSitterSymbol(filePath, "rust", content, lines, node, treeSitterNodeName(node, content), KindVariable, extractRustLeadingDoc)
+	case "impl_item":
+		return rustImplSymbols(filePath, content, lines, node)
+	default:
+		return nil
+	}
+}
+
+func rustImplSymbols(filePath string, content []byte, lines []string, node *sitter.Node) []Symbol {
+	if node == nil {
+		return nil
+	}
+	implType := rustImplTypeName(node, content)
+	if implType == "" {
+		return nil
+	}
+	cursor := node.Walk()
+	children := node.NamedChildren(cursor)
+	symbols := make([]Symbol, 0, len(children))
+	for _, child := range children {
+		if child.Kind() != "function_item" {
+			continue
+		}
+		c := child
+		name := treeSitterNodeName(&c, content)
+		if strings.TrimSpace(name) == "" {
+			continue
+		}
+		symbolName := implType + "." + name
+		if sym, ok := buildTreeSitterSymbol(filePath, "rust", content, lines, &c, symbolName, KindMethod, extractRustLeadingDoc); ok {
+			symbols = append(symbols, sym)
+		}
+	}
+	return symbols
+}
+
+var rustImplHeaderPattern = regexp.MustCompile(`^impl(?:<[^>]*>\s*)?(?:.+\s+for\s+)?(.+)$`)
+
+func rustImplTypeName(node *sitter.Node, content []byte) string {
+	if node == nil {
+		return ""
+	}
+	header := strings.TrimSpace(treeSitterNodeSignature(node, content))
+	if idx := strings.Index(header, "{"); idx >= 0 {
+		header = strings.TrimSpace(header[:idx])
+	}
+	matches := rustImplHeaderPattern.FindStringSubmatch(header)
+	if len(matches) != 2 {
+		return ""
+	}
+	return rustLastIdentifier(matches[1])
+}
+
+func collectRustTreeSitterCallNames(root *sitter.Node, content []byte) []string {
+	if root == nil {
+		return nil
+	}
+	seen := map[string]bool{}
+	out := make([]string, 0, 16)
+	var walk func(*sitter.Node)
+	walk = func(node *sitter.Node) {
+		if node == nil {
+			return
+		}
+		switch node.Kind() {
+		case "call_expression":
+			if fn := node.ChildByFieldName("function"); fn != nil {
+				if name := strings.TrimSpace(treeSitterCallableName(fn, content)); name != "" && !seen[name] {
+					seen[name] = true
+					out = append(out, name)
+				}
+			}
+		case "method_call_expression":
+			if name := rustMethodCallName(node, content); name != "" && !seen[name] {
+				seen[name] = true
+				out = append(out, name)
+			}
+		case "macro_invocation":
+			if macro := node.ChildByFieldName("macro"); macro != nil {
+				if name := strings.TrimSpace(treeSitterCallableName(macro, content)); name != "" && !seen[name] {
+					seen[name] = true
+					out = append(out, name)
+				}
+			}
+		}
+		cursor := node.Walk()
+		for _, child := range node.NamedChildren(cursor) {
+			c := child
+			walk(&c)
+		}
+	}
+	walk(root)
+	if len(out) == 0 {
+		return nil
+	}
+	if len(out) > 50 {
+		return out[:50]
+	}
+	return out
+}
+
+func rustMethodCallName(node *sitter.Node, content []byte) string {
+	if node == nil {
+		return ""
+	}
+	if method := node.ChildByFieldName("method"); method != nil {
+		return strings.TrimSpace(treeSitterNodeText(method, content))
+	}
+	if name := node.ChildByFieldName("name"); name != nil {
+		return strings.TrimSpace(treeSitterNodeText(name, content))
+	}
+	for i := int(node.NamedChildCount()) - 1; i >= 0; i-- {
+		child := node.NamedChild(uint(i))
+		if child == nil {
+			continue
+		}
+		c := *child
+		if c.Kind() == "identifier" || c.Kind() == "field_identifier" {
+			return strings.TrimSpace(treeSitterNodeText(&c, content))
+		}
 	}
 	return ""
 }

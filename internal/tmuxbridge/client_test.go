@@ -3,6 +3,9 @@ package tmuxbridge
 import (
 	"context"
 	"fmt"
+	"net"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -52,6 +55,42 @@ func TestResolveTargetByLabel(t *testing.T) {
 	}
 	if got != "%2" {
 		t.Fatalf("ResolveTarget() = %q, want %q", got, "%2")
+	}
+}
+
+func TestResolveTargetDirectTarget(t *testing.T) {
+	client := NewWithRunner(fakeRunner{
+		responses: map[string]fakeResponse{
+			"tmux list-sessions": {stdout: "ok\n"},
+			"tmux display-message -t %7 -p #{pane_id}": {stdout: "%7\n"},
+		},
+	}, map[string]string{})
+
+	got, err := client.ResolveTarget(context.Background(), " %7 ")
+	if err != nil {
+		t.Fatalf("ResolveTarget() error = %v", err)
+	}
+	if got != "%7" {
+		t.Fatalf("ResolveTarget() = %q, want %q", got, "%7")
+	}
+}
+
+func TestResolveTargetMissingLabel(t *testing.T) {
+	client := NewWithRunner(fakeRunner{
+		responses: map[string]fakeResponse{
+			"tmux list-sessions": {stdout: "ok\n"},
+			"tmux list-panes -a -F " + labelFormat: {
+				stdout: "%1" + fieldSep + "codex-a\n",
+			},
+		},
+	}, map[string]string{})
+
+	_, err := client.ResolveTarget(context.Background(), "unknown-pane")
+	if err == nil {
+		t.Fatal("ResolveTarget() error = nil, want error")
+	}
+	if !strings.Contains(err.Error(), `no pane found with label "unknown-pane"`) {
+		t.Fatalf("ResolveTarget() error = %v", err)
 	}
 }
 
@@ -192,6 +231,207 @@ func TestPrepareSessionCreatesAndLabelsPanes(t *testing.T) {
 	}
 }
 
+func TestNormalizePrepareOptionsDefaults(t *testing.T) {
+	got, err := normalizePrepareOptions(PrepareOptions{Panes: 2})
+	if err != nil {
+		t.Fatalf("normalizePrepareOptions() error = %v", err)
+	}
+	if got.session != defaultSessionName {
+		t.Fatalf("session = %q, want %q", got.session, defaultSessionName)
+	}
+	if got.labelPrefix != defaultLabelPrefix {
+		t.Fatalf("labelPrefix = %q, want %q", got.labelPrefix, defaultLabelPrefix)
+	}
+	if got.paneCommand == "" {
+		t.Fatal("paneCommand should default to a shell")
+	}
+}
+
+func TestNormalizePrepareOptionsAgentDefaultsLabelPrefix(t *testing.T) {
+	got, err := normalizePrepareOptions(PrepareOptions{
+		Panes: 1,
+		Agent: "droid",
+	})
+	if err != nil {
+		t.Fatalf("normalizePrepareOptions() error = %v", err)
+	}
+	if got.agent != "droid" {
+		t.Fatalf("agent = %q, want %q", got.agent, "droid")
+	}
+	if got.labelPrefix != "droid" {
+		t.Fatalf("labelPrefix = %q, want %q", got.labelPrefix, "droid")
+	}
+	if !strings.Contains(got.paneCommand, "droid") {
+		t.Fatalf("paneCommand = %q, want command containing droid", got.paneCommand)
+	}
+}
+
+func TestNormalizePrepareOptionsRejectsInvalidCombinations(t *testing.T) {
+	tests := []struct {
+		name string
+		opts PrepareOptions
+		want string
+	}{
+		{
+			name: "mutually exclusive command and agent",
+			opts: PrepareOptions{Panes: 1, PaneCommand: "/bin/zsh", Agent: "codex"},
+			want: "pane_command and agent are mutually exclusive",
+		},
+		{
+			name: "agent session requires agent",
+			opts: PrepareOptions{Panes: 1, AgentSessionID: "abc"},
+			want: "agent_session_id requires agent",
+		},
+		{
+			name: "agent session requires single pane",
+			opts: PrepareOptions{Panes: 2, Agent: "claude", AgentSessionID: "abc"},
+			want: "agent_session_id currently requires panes=1",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := normalizePrepareOptions(tt.opts)
+			if err == nil {
+				t.Fatal("normalizePrepareOptions() error = nil, want error")
+			}
+			if !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("normalizePrepareOptions() error = %v, want substring %q", err, tt.want)
+			}
+		})
+	}
+}
+
+func TestDetectSocketFromBridgeEnv(t *testing.T) {
+	socket := createTestUnixSocket(t)
+	client := NewWithRunner(fakeRunner{
+		responses: map[string]fakeResponse{
+			fmt.Sprintf("tmux -S %s list-sessions", socket): {stdout: "ok\n"},
+		},
+	}, map[string]string{
+		"TMUX_BRIDGE_SOCKET": socket,
+	})
+
+	got, err := client.detectSocket(context.Background())
+	if err != nil {
+		t.Fatalf("detectSocket() error = %v", err)
+	}
+	if got != socket {
+		t.Fatalf("detectSocket() = %q, want %q", got, socket)
+	}
+}
+
+func TestDetectSocketFromTmuxEnv(t *testing.T) {
+	socket := createTestUnixSocket(t)
+	client := NewWithRunner(fakeRunner{
+		responses: map[string]fakeResponse{
+			fmt.Sprintf("tmux -S %s list-sessions", socket): {stdout: "ok\n"},
+		},
+	}, map[string]string{
+		"TMUX": socket + ",123,0",
+	})
+
+	got, err := client.detectSocket(context.Background())
+	if err != nil {
+		t.Fatalf("detectSocket() error = %v", err)
+	}
+	if got != socket {
+		t.Fatalf("detectSocket() = %q, want %q", got, socket)
+	}
+}
+
+func TestDoctorSummarizesReachableSocket(t *testing.T) {
+	socket := createTestUnixSocket(t)
+	paneList := strings.Join([]string{
+		"%7" + fieldSep + "work" + fieldSep + "0" + fieldSep + "0" + fieldSep + "main" + fieldSep + "1234" + fieldSep + "120" + fieldSep + "30" + fieldSep + "praze-a" + fieldSep + "/repo" + fieldSep + "zsh" + fieldSep + "1",
+		"%8" + fieldSep + "work" + fieldSep + "0" + fieldSep + "1" + fieldSep + "main" + fieldSep + "1235" + fieldSep + "120" + fieldSep + "30" + fieldSep + "" + fieldSep + "/repo" + fieldSep + "zsh" + fieldSep + "0",
+	}, "\n") + "\n"
+	client := NewWithRunner(fakeRunner{
+		responses: map[string]fakeResponse{
+			"tmux -V": {stdout: "tmux 3.4\n"},
+			fmt.Sprintf("tmux -S %s list-sessions", socket): {stdout: "ok\n"},
+			fmt.Sprintf("tmux -S %s display-message -t %%7 -p #{pane_id}", socket): {stdout: "%7\n"},
+			fmt.Sprintf("tmux -S %s list-panes -a -F %s", socket, listFormat): {stdout: paneList},
+			"tmux list-sessions": {stderr: "failed to connect", err: fmt.Errorf("exit status 1")},
+		},
+	}, map[string]string{
+		"TMUX_BRIDGE_SOCKET": socket,
+		"TMUX_PANE":          "%7",
+	})
+
+	got, err := client.Doctor(context.Background())
+	if err != nil {
+		t.Fatalf("Doctor() error = %v", err)
+	}
+	if !got.CurrentPaneSeen {
+		t.Fatal("CurrentPaneSeen = false, want true")
+	}
+	if got.TotalPanes != 2 || got.LabeledPanes != 1 {
+		t.Fatalf("pane summary = (%d,%d), want (2,1)", got.TotalPanes, got.LabeledPanes)
+	}
+	if !got.Healthy {
+		t.Fatalf("Healthy = false, issues = %#v", got.Issues)
+	}
+}
+
+func TestSendWithExplicitSenderLabel(t *testing.T) {
+	client := NewWithRunner(fakeRunner{
+		responses: map[string]fakeResponse{
+			"tmux list-sessions": {stdout: "ok\n"},
+			"tmux list-panes -a -F " + labelFormat: {
+				stdout: "%1" + fieldSep + "praze-a\n%2" + fieldSep + "agent-b\n",
+			},
+			"tmux display-message -t %2 -p #{pane_id}": {stdout: "%2\n"},
+			"tmux display-message -t %2 -p " + listFormat: {
+				stdout: "%2" + fieldSep + "agentctl-collab" + fieldSep + "0" + fieldSep + "1" + fieldSep + "zsh" + fieldSep + "222" + fieldSep + "80" + fieldSep + "24" + fieldSep + "agent-b" + fieldSep + "/repo" + fieldSep + "zsh" + fieldSep + "0\n",
+			},
+			"tmux display-message -t %1 -p #{pane_id}": {stdout: "%1\n"},
+			"tmux display-message -t %1 -p " + listFormat: {
+				stdout: "%1" + fieldSep + "agentctl-collab" + fieldSep + "0" + fieldSep + "0" + fieldSep + "zsh" + fieldSep + "111" + fieldSep + "80" + fieldSep + "24" + fieldSep + "praze-a" + fieldSep + "/repo" + fieldSep + "zsh" + fieldSep + "1\n",
+			},
+			"tmux send-keys -t %2 -l -- [tmux-bridge from=praze-a pane=%1 reply_to=praze-a] review mailbox": {},
+			"tmux send-keys -t %2 Enter": {},
+		},
+	}, map[string]string{})
+
+	got, err := client.Send(context.Background(), "praze-a", "agent-b", "review mailbox")
+	if err != nil {
+		t.Fatalf("Send() error = %v", err)
+	}
+	if got.ResolvedTarget != "%2" {
+		t.Fatalf("ResolvedTarget = %q, want %q", got.ResolvedTarget, "%2")
+	}
+	if got.Sender.ID != "%1" {
+		t.Fatalf("Sender.ID = %q, want %q", got.Sender.ID, "%1")
+	}
+	if got.BridgeMessage.From != "praze-a" {
+		t.Fatalf("BridgeMessage.From = %q, want %q", got.BridgeMessage.From, "praze-a")
+	}
+	if got.BridgeMessage.Pane != "%1" {
+		t.Fatalf("BridgeMessage.Pane = %q, want %q", got.BridgeMessage.Pane, "%1")
+	}
+}
+
+func TestSendRequiresSenderOutsideTmux(t *testing.T) {
+	client := NewWithRunner(fakeRunner{
+		responses: map[string]fakeResponse{
+			"tmux list-sessions":                       {stdout: "ok\n"},
+			"tmux display-message -t %2 -p #{pane_id}": {stdout: "%2\n"},
+			"tmux display-message -t %2 -p " + listFormat: {
+				stdout: "%2" + fieldSep + "agentctl-collab" + fieldSep + "0" + fieldSep + "1" + fieldSep + "zsh" + fieldSep + "222" + fieldSep + "80" + fieldSep + "24" + fieldSep + "agent-b" + fieldSep + "/repo" + fieldSep + "zsh" + fieldSep + "0\n",
+			},
+		},
+	}, map[string]string{})
+
+	_, err := client.Send(context.Background(), "", "%2", "review mailbox")
+	if err == nil {
+		t.Fatal("Send() error = nil, want error")
+	}
+	if !strings.Contains(err.Error(), "sender is required when not running inside tmux") {
+		t.Fatalf("Send() error = %v", err)
+	}
+}
+
 type fakeRunner struct {
 	responses map[string]fakeResponse
 }
@@ -234,4 +474,24 @@ func (s *sequenceRunner) Run(_ context.Context, name string, args ...string) (st
 		return "", "", fmt.Errorf("unexpected command at step %d: got %s want %s", s.pos, key, step.key)
 	}
 	return step.stdout, step.stderr, step.err
+}
+
+func createTestUnixSocket(t *testing.T) string {
+	t.Helper()
+	dir, err := os.MkdirTemp("/tmp", "tmuxbridge-")
+	if err != nil {
+		t.Fatalf("os.MkdirTemp() error = %v", err)
+	}
+	t.Cleanup(func() {
+		_ = os.RemoveAll(dir)
+	})
+	socket := filepath.Join(dir, "s")
+	listener, err := net.Listen("unix", socket)
+	if err != nil {
+		t.Fatalf("net.Listen(unix) error = %v", err)
+	}
+	t.Cleanup(func() {
+		_ = listener.Close()
+	})
+	return socket
 }
