@@ -36,6 +36,7 @@ func newRoomCommand() *cobra.Command {
 		newRoomInboxCommand(),
 		newRoomSendCommand(),
 		newRoomAckCommand(),
+		newRoomResolveCommand(),
 		newRoomJoinCommand(),
 		newRoomLeaveCommand(),
 		newRoomTaskCommand(),
@@ -208,6 +209,26 @@ func newRoomAckCommand() *cobra.Command {
 	}
 	cmd.Flags().StringVar(&workspace, "workspace", ".", "Workspace root override")
 	cmd.Flags().StringVar(&actorID, "actor", "", "Actor or participant id acknowledging the messages (defaults to current tmux/zellij pane)")
+	return cmd
+}
+
+func newRoomResolveCommand() *cobra.Command {
+	var (
+		workspace string
+		actorID   string
+		mode      string
+	)
+	cmd := &cobra.Command{
+		Use:   "resolve <room-id> <message-id>...",
+		Short: "Coordinator-only cleanup for stale room messages",
+		Args:  cobra.MinimumNArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runRoomResolve(cmd, workspace, args[0], actorID, mode, args[1:])
+		},
+	}
+	cmd.Flags().StringVar(&workspace, "workspace", ".", "Workspace root override")
+	cmd.Flags().StringVar(&actorID, "actor", "", "Coordinator actor or participant id (defaults to current tmux/zellij pane)")
+	cmd.Flags().StringVar(&mode, "mode", "acked", "Resolution mode (acked|read)")
 	return cmd
 }
 
@@ -710,6 +731,84 @@ func runRoomAck(cmd *cobra.Command, workspace, roomID, actorID string, messageID
 		"message_ids":    trimmedIDs,
 		"updated":        updated,
 		"acker_identity": identity,
+	}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+}
+
+func runRoomResolve(cmd *cobra.Command, workspace, roomID, actorID, mode string, messageIDs []string) error {
+	absWorkspace, err := resolveRoomWorkspace(workspace)
+	if err != nil {
+		return err
+	}
+	identity, err := resolveRoomSender(cmd.Context(), actorID)
+	if err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.resolve", protocol.ErrorCodeEARG, err.Error(), map[string]any{
+			"hint": "Pass --actor when outside tmux/zellij, or run inside a prepared pane so agentctl can derive the participant id.",
+		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	store, err := openRoomBoardStore(cmd.Context())
+	if err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.resolve", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	defer store.Close()
+
+	roomID = strings.TrimSpace(roomID)
+	summary, err := store.GetRoom(cmd.Context(), absWorkspace, roomID, identity.Sender)
+	if err != nil {
+		code := protocol.ErrorCodeERuntime
+		if errors.Is(err, blackboard.ErrRoomNotFound) {
+			code = protocol.ErrorCodeENotFound
+		}
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.resolve", code, err.Error(), map[string]any{
+			"hint": "Create the room first or check the room id.",
+		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	if !roomMemberHasRole(summary.Members, identity.Sender, "coordinator") {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.resolve", protocol.ErrorCodeEARG, "room resolve requires coordinator role", map[string]any{
+			"hint": "Run the command as the room coordinator, or join the room with role=coordinator first.",
+		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	trimmedIDs := make([]string, 0, len(messageIDs))
+	for _, id := range messageIDs {
+		id = strings.TrimSpace(id)
+		if id == "" {
+			continue
+		}
+		trimmedIDs = append(trimmedIDs, id)
+	}
+	if len(trimmedIDs) == 0 {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.resolve", protocol.ErrorCodeEARG, "at least one non-empty message id is required", nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+
+	var (
+		updated        int
+		resolvedStatus agent.BoardMessageStatus
+	)
+	switch strings.TrimSpace(strings.ToLower(mode)) {
+	case "", "acked", "ack":
+		updated, err = store.AckMessages(cmd.Context(), absWorkspace, identity.Sender, trimmedIDs)
+		resolvedStatus = agent.BoardMessageStatusAcked
+	case "read":
+		updated, err = store.MarkRead(cmd.Context(), absWorkspace, identity.Sender, trimmedIDs)
+		resolvedStatus = agent.BoardMessageStatusRead
+	default:
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.resolve", protocol.ErrorCodeEARG, fmt.Sprintf("unsupported resolve mode %q", mode), map[string]any{
+			"hint": "Use --mode acked or --mode read.",
+		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	if err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.resolve", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	if updated == 0 {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.resolve", protocol.ErrorCodeENotFound, "no room messages were resolved", map[string]any{
+			"hint": "Check the message ids and ensure they belong to this workspace.",
+		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	return protocol.WriteOK(cmd.OutOrStdout(), "agentctl.room.resolve", map[string]any{
+		"room_id":           roomID,
+		"message_ids":       trimmedIDs,
+		"updated":           updated,
+		"resolved_status":   resolvedStatus,
+		"resolver_identity": identity,
 	}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
 }
 

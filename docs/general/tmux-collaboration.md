@@ -318,6 +318,7 @@ The intended model is:
 - `--reply-expected` is for direct requests only; broadcasts stay FYI by default
 - `--ack-required` marks a message as requiring an explicit acknowledgment
 - `room ack` marks one or more room messages as `acked` in the durable log
+- `room resolve` lets the coordinator clear stale handled reminders from the room surface
 - `room inbox` shows the actionable queue for one participant instead of the full room archive
 - `room status` shows the coordinator-facing pulse for participants, task state, stale owned work, and compact actionable backlog summaries
 - `room status --only blocked,stale,reply` narrows the summary to the exact coordination lane you want to inspect

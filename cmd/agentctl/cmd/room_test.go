@@ -901,6 +901,81 @@ func TestRunRoomStatusOnlyFiltersActionRequired(t *testing.T) {
 	}
 }
 
+func TestRunRoomResolveRequiresCoordinator(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	ctx := context.Background()
+	workspace := t.TempDir()
+
+	cmd, _ := newRoomTestCommand(ctx)
+	if err := runRoomCreate(cmd, workspace, "alpha", "Alpha", "", []string{"human-a=coordinator", "gemini-a=reviewer"}); err != nil {
+		t.Fatalf("runRoomCreate: %v", err)
+	}
+	cmd, _ = newRoomTestCommand(ctx)
+	if err := runRoomSend(cmd, workspace, "alpha", "human-a", "gemini-a", "", "please ack", "info", "", 0, true, false, true); err != nil {
+		t.Fatalf("runRoomSend: %v", err)
+	}
+	cmd, out := newRoomTestCommand(ctx)
+	if err := runRoomShow(cmd, workspace, "alpha", "", 20); err != nil {
+		t.Fatalf("runRoomShow: %v", err)
+	}
+	data := decodeRoomEnvelope(t, out)
+	messages := data["messages"].([]any)
+	msgID := messages[0].(map[string]any)["id"].(string)
+
+	cmd, out = newRoomTestCommand(ctx)
+	err := runRoomResolve(cmd, workspace, "alpha", "gemini-a", "acked", []string{msgID})
+	if err != nil {
+		t.Fatalf("runRoomResolve returned error: %v", err)
+	}
+	if !strings.Contains(out.String(), `"status":"error"`) {
+		t.Fatalf("expected error envelope, got %s", out.String())
+	}
+	if !strings.Contains(out.String(), "room resolve requires coordinator role") {
+		t.Fatalf("expected coordinator error, got %s", out.String())
+	}
+}
+
+func TestRunRoomResolveMarksMessageResolved(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	ctx := context.Background()
+	workspace := t.TempDir()
+
+	cmd, _ := newRoomTestCommand(ctx)
+	if err := runRoomCreate(cmd, workspace, "alpha", "Alpha", "", []string{"human-a=coordinator", "gemini-a=reviewer"}); err != nil {
+		t.Fatalf("runRoomCreate: %v", err)
+	}
+	cmd, _ = newRoomTestCommand(ctx)
+	if err := runRoomSend(cmd, workspace, "alpha", "human-a", "gemini-a", "", "please ack", "info", "", 0, true, false, true); err != nil {
+		t.Fatalf("runRoomSend: %v", err)
+	}
+	cmd, out := newRoomTestCommand(ctx)
+	if err := runRoomShow(cmd, workspace, "alpha", "", 20); err != nil {
+		t.Fatalf("runRoomShow: %v", err)
+	}
+	data := decodeRoomEnvelope(t, out)
+	messages := data["messages"].([]any)
+	msgID := messages[0].(map[string]any)["id"].(string)
+
+	cmd, out = newRoomTestCommand(ctx)
+	if err := runRoomResolve(cmd, workspace, "alpha", "human-a", "acked", []string{msgID}); err != nil {
+		t.Fatalf("runRoomResolve: %v", err)
+	}
+	data = decodeRoomEnvelope(t, out)
+	if got := data["resolved_status"]; got != string(agent.BoardMessageStatusAcked) {
+		t.Fatalf("resolved_status=%v want acked", got)
+	}
+
+	cmd, out = newRoomTestCommand(ctx)
+	if err := runRoomStatus(cmd, workspace, "alpha", 20, 5*time.Minute, nil, false); err != nil {
+		t.Fatalf("runRoomStatus: %v", err)
+	}
+	data = decodeRoomEnvelope(t, out)
+	actionRequired := data["action_required"].(map[string]any)
+	if got := actionRequired["participants_with_pending"]; got != float64(0) {
+		t.Fatalf("participants_with_pending=%v want 0", got)
+	}
+}
+
 func TestRunRoomInboxFiltersActionableMessages(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	ctx := context.Background()
