@@ -506,6 +506,15 @@ func classifySuggestedBoundary(item finding) string {
 	if hasAnyRule(set, "semantic_simplification_candidate") {
 		return "simplify_boolean_surface"
 	}
+	if hasAnyRule(set, "preload_after_get_chain") {
+		return "extract_repo_loader"
+	}
+	if hasAnyRule(set, "post_transaction_preload") {
+		return "split_transaction_loader"
+	}
+	if hasAnyRule(set, "transaction_script_hotspot") {
+		return "extract_transaction_script"
+	}
 	if hasAnyRule(set, "duplicate_orchestration_fingerprint") && hasAnyRule(set, "fan_out_dependency_spread", "same_file_extraction_candidate") {
 		return "extract_workflow_step"
 	}

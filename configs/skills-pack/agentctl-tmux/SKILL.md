@@ -1,20 +1,24 @@
 ---
 name: agentctl-tmux
-description: "Live tmux collaboration for multiple Codex/Claude panes: inspect panes with agentctl, send bounded pane-to-pane messages, and promote durable facts into ACA."
+description: "Live terminal collaboration for multiple Codex/Claude panes: tmux native messaging, durable room timelines, plugin-backed zellij relay, and room-scoped task broadcasts."
 ---
 
 # Tmux Collaboration
 
-Use this skill when multiple AI agents are open in one tmux session and need to:
+Use this skill when multiple AI agents are open in tmux or zellij and need to:
 
 - inspect other panes without leaving the TUI open
 - send direct pane-to-pane messages
+- keep a shared durable room log
+- track shared room tasks and broadcast completion updates
 - keep tmux as the live coordination plane and ACA as the durable continuity plane
 
 ## Mental Model
 
 - `tmux` is the live coordination plane
 - `agentctl tmux` is the native create/read/send surface
+- `agentctl room` is the durable shared room surface
+- `room relay` and `room loop` fan room events back into terminal panes
 - `tmux-bridge` is an optional low-level helper
 - ACA and the vault keep only promoted observations, tensions, and handoffs
 
@@ -40,6 +44,17 @@ Send a message natively:
 
 ```bash
 agentctl tmux send agent-b "Review internal/actor/supervisor.go for mailbox ack risks."
+```
+
+Use a durable shared room when more than two agents need the same timeline:
+
+```bash
+agentctl room create alpha --title "Alpha Room"
+agentctl room join alpha agent-a --role lead
+agentctl room join alpha agent-b --role reviewer
+agentctl room send alpha "Review the retry path in client.ts" --sender agent-a
+agentctl room task add alpha --sender agent-a --title "Refactor retry path"
+agentctl room loop alpha --backend tmux
 ```
 
 If you are invoking from outside tmux, pass your sender pane label explicitly:
@@ -81,6 +96,24 @@ Common agent launches include `--agent codex`, `--agent claude`, `--agent gemini
 ```
 
 Use `agentctl tmux send` for standard agent-to-agent messages. Use `type` and `keys` only when you intentionally need lower-level control.
+
+### Durable room surface
+
+```bash
+agentctl room create <room-id> --title "..."
+agentctl room join <room-id> <actor-id> --role lead
+agentctl room subscribe <room-id> --follow
+agentctl room relay <room-id> --backend tmux
+agentctl room relay <room-id> --backend zellij --session <session-name>
+agentctl room loop <room-id> --backend tmux
+agentctl room task add <room-id> --sender <actor-id> --title "..."
+agentctl room task list <room-id>
+agentctl room task complete <room-id> --sender <actor-id> --id <task-id>
+```
+
+Use `room relay` for pure room-message fanout.
+Use `room loop` when you also want room-associated task status transitions to be
+broadcast back into the room and then relayed to participants.
 
 ## Message Format
 

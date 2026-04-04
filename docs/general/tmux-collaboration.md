@@ -1,12 +1,12 @@
 # Tmux Collaboration
 
-Status: current first slice
+Status: current room + tmux + zellij slice
 
 This document defines the first tmux collaboration surface for `agentctl`:
 
 - tmux is the live coordination plane
 - `agentctl tmux` is the native create/read/send surface
-- `agentctl room` is the durable room timeline and relay surface
+- `agentctl room` is the durable room timeline, task, and relay surface
 - `tmux-bridge` is an optional low-level helper
 - ACA and the Obsidian vault remain the durable continuity layers
 
@@ -126,9 +126,12 @@ agentctl room create alpha --title "Agent Alpha"
 agentctl room join alpha agent-a --role lead
 agentctl room join alpha agent-b --role reviewer
 agentctl room send alpha "Review the retry branch in client.ts" --sender agent-a
+agentctl room task add alpha --sender agent-a --title "Refactor retry path"
+agentctl room task complete alpha --sender agent-b --id <task-id> --notes "Retry ladder flattened"
 agentctl room show alpha
 agentctl room subscribe alpha --follow
 agentctl room relay alpha --backend tmux
+agentctl room loop alpha --backend zellij --session alpha-room
 ```
 
 The intended model is:
@@ -139,6 +142,41 @@ The intended model is:
   matching room member ids to tmux pane labels
 
 This keeps room history durable while still allowing live terminal delivery.
+
+### Room Tasks
+
+Rooms can now carry shared task state on top of the existing task store:
+
+```bash
+agentctl room task add alpha \
+  --sender agent-a \
+  --title "Refactor retry path" \
+  --description "Flatten duplicate recovery blocks in client.ts"
+
+agentctl room task list alpha
+
+agentctl room task complete alpha \
+  --sender agent-b \
+  --id <task-id> \
+  --notes "Retry helper extracted"
+```
+
+`room task add` and `room task complete` both write a durable room message with a
+`task_id`, so every participant sees the task lifecycle in the same shared room
+timeline.
+
+### Room Loop
+
+`room relay` is a pure message fanout loop.
+
+`room loop` is the higher-level room coordinator:
+
+- relays new room messages into member panes
+- watches room-associated tasks for status transitions
+- broadcasts task completion or status updates back into the room
+
+That gives the room a central coordination loop without making terminal
+scrollback the source of truth.
 
 ### Join vs Subscribe
 
@@ -152,10 +190,30 @@ Use `join` when a pane or agent should be a room recipient for relay. Use
 
 `room subscribe` works in zellij because it only tails the durable room log.
 
-Live relay injection is tmux-first right now. The current zellij CLI can write
-or dump only the focused pane from the current session, which is not enough for
-safe arbitrary-pane room fanout from a central relay process. A real zellij
-relay should use a plugin-backed bridge or another session-aware control layer.
+Live relay injection for zellij is now plugin-backed:
+
+```bash
+agentctl room relay alpha --backend zellij --session alpha-room
+agentctl room loop alpha --backend zellij --session alpha-room
+```
+
+The zellij backend uses a session-local plugin that maps room member ids to pane
+titles and writes messages into those panes. The first run needs a zellij
+permission grant for:
+
+- `ReadApplicationState`
+- `WriteToStdin`
+- `ReadCliPipes`
+
+By default the Go relay looks for the plugin in:
+
+- `--plugin-path`
+- `AGENTCTL_ZELLIJ_ROOM_PLUGIN`
+- `~/.agentctl/plugins/zellij_room_relay.wasm`
+- a repo-local build at `plugins/zellij-room-relay/...`
+
+When run from the `agentctl` repo, it can auto-build the plugin source if the
+wasm artifact is missing.
 
 ## Message Shape
 

@@ -1,6 +1,6 @@
 ---
 name: tmux-bridge
-description: Cross-pane communication for Codex, Claude, and other terminal agents in tmux. Use `agentctl tmux create/read/send/observe` for native access and `./scripts/tmux-bridge` only for optional low-level pane control.
+description: Cross-pane communication for Codex, Claude, and other terminal agents. Use `agentctl tmux create/read/send/observe` for tmux, `agentctl room` for durable room chat, and the plugin-backed zellij room relay for session-aware fanout.
 metadata:
   openclaw:
     emoji: "🌉"
@@ -21,6 +21,7 @@ Use this skill when multiple terminal agents are running in tmux and need to:
 - inspect another pane with structured `agentctl` output
 - send a direct message into another pane without depending on a repo-local shell script
 - promote a bridge exchange into ACA as an observation
+- share a durable room timeline or room-scoped tasks across panes
 
 ## Default Flow
 
@@ -116,6 +117,30 @@ agentctl tmux send agent-b "Please review internal/storage/mailbox/store.go for 
 ```
 
 Use `agentctl tmux observe` when a tmux exchange should become a durable ACA observation.
+
+## Durable Rooms
+
+Use rooms when the shared state should outlive pane scrollback:
+
+```bash
+agentctl room create alpha --title "Alpha Room"
+agentctl room join alpha agent-a --role lead
+agentctl room join alpha agent-b --role reviewer
+agentctl room send alpha "Review mailbox retries." --sender agent-a
+agentctl room task add alpha --sender agent-a --title "Refactor mailbox retries"
+agentctl room subscribe alpha --follow
+```
+
+Relay room messages back into panes with:
+
+```bash
+agentctl room relay alpha --backend tmux
+agentctl room relay alpha --backend zellij --session alpha-room
+agentctl room loop alpha --backend tmux
+```
+
+`room loop` extends relay with a central task/status loop, so room-associated
+task completion gets broadcast to the whole room.
 
 ## Direct Messaging
 

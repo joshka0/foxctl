@@ -218,6 +218,36 @@ func TestClassifySuggestedBoundary(t *testing.T) {
 			want: "simplify_boolean_surface",
 		},
 		{
+			name: "repo loader",
+			item: finding{
+				RuleID: "function_hotspot",
+				Evidence: map[string]any{
+					"rules": []string{"preload_after_get_chain", "same_file_extraction_candidate"},
+				},
+			},
+			want: "extract_repo_loader",
+		},
+		{
+			name: "post transaction loader",
+			item: finding{
+				RuleID: "function_hotspot",
+				Evidence: map[string]any{
+					"rules": []string{"post_transaction_preload", "transaction_script_hotspot"},
+				},
+			},
+			want: "split_transaction_loader",
+		},
+		{
+			name: "transaction script",
+			item: finding{
+				RuleID: "function_hotspot",
+				Evidence: map[string]any{
+					"rules": []string{"transaction_script_hotspot", "fan_out_dependency_spread"},
+				},
+			},
+			want: "extract_transaction_script",
+		},
+		{
 			name: "workflow step",
 			item: finding{
 				RuleID: "function_hotspot",

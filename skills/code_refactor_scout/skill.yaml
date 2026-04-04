@@ -31,6 +31,12 @@ signature:
       enum: ["all", "slop", "dead"]
       default: "all"
       description: "Optional focus filter for one finding family"
+    - name: view
+      type: string
+      required: false
+      enum: ["raw", "grouped", "entrypoints", "summary"]
+      default: "grouped"
+      description: "Optional presentation view for grouped output lanes; raw findings are still included"
     - name: include_tests
       type: boolean
       required: false
@@ -59,6 +65,9 @@ signature:
     - name: summary
       type: object
       description: "Scan counters and severity totals"
+    - name: presentation
+      type: object
+      description: "Grouped overview and lane summaries for broader scopes"
     - name: index_mode
       type: string
       description: "Whether the run was parser_only or index_backed for the requested scope"
@@ -100,6 +109,9 @@ signature:
 
       Current output contract:
       - data.index_mode reports parser_only or index_backed
+      - data.view reports the requested presentation mode
+      - data.presentation adds grouped overview lanes while preserving the raw
+        data.findings list for compatibility
       - data.snapshot_id and data.snapshot_artifact identify the captured scope
       - data.evidence_artifact points at persisted hotspot evidence when emitted
       - data.signals.evidence_backed tells downstream tooling whether the
@@ -158,6 +170,7 @@ signature:
       - slop and hotspot signals:
         duplicate_recovery_block, duplicated_error_remap, repeated_guard_ladder,
         semantic_simplification_candidate,
+        preload_after_get_chain, post_transaction_preload, transaction_script_hotspot,
         duplicate_orchestration_fingerprint, same_file_extraction_candidate,
         fan_out_dependency_spread, function_hotspot
       - signature and size signals:

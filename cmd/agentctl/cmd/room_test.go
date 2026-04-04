@@ -96,6 +96,87 @@ func TestRoomCommandFlow_CreateJoinSendShow(t *testing.T) {
 	}
 }
 
+func TestRoomTaskFlow_AddListComplete(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	ctx := context.Background()
+	workspace := t.TempDir()
+
+	cmd, _ := newRoomTestCommand(ctx)
+	if err := runRoomCreate(cmd, workspace, "alpha", "Alpha", "", []string{"agent-a=lead"}); err != nil {
+		t.Fatalf("runRoomCreate: %v", err)
+	}
+
+	cmd, out := newRoomTestCommand(ctx)
+	if err := runRoomTaskAdd(cmd, workspace, "alpha", "agent-a", "Review retry path", "Inspect fallback retry flow", "src/api/client.ts", "", nil, true); err != nil {
+		t.Fatalf("runRoomTaskAdd: %v", err)
+	}
+	data := decodeRoomEnvelope(t, out)
+	taskRaw, ok := data["task"].(map[string]any)
+	if !ok {
+		t.Fatalf("task payload type=%T", data["task"])
+	}
+	taskID, ok := taskRaw["ID"].(string)
+	if !ok || taskID == "" {
+		taskID, ok = taskRaw["id"].(string)
+		if !ok || taskID == "" {
+			t.Fatalf("task id missing in payload=%v", taskRaw)
+		}
+	}
+
+	cmd, out = newRoomTestCommand(ctx)
+	if err := runRoomTaskList(cmd, workspace, "alpha", ""); err != nil {
+		t.Fatalf("runRoomTaskList: %v", err)
+	}
+	data = decodeRoomEnvelope(t, out)
+	tasksRaw, ok := data["tasks"].([]any)
+	if !ok || len(tasksRaw) != 1 {
+		t.Fatalf("tasks=%T/%v want 1 entry", data["tasks"], data["tasks"])
+	}
+
+	cmd, out = newRoomTestCommand(ctx)
+	if err := runRoomTaskComplete(cmd, workspace, "alpha", "agent-b", taskID, "Retry path simplified", "Watch auth fallback regressions"); err != nil {
+		t.Fatalf("runRoomTaskComplete: %v", err)
+	}
+	data = decodeRoomEnvelope(t, out)
+	taskRaw, ok = data["task"].(map[string]any)
+	if !ok {
+		t.Fatalf("task payload type=%T", data["task"])
+	}
+	status := taskRaw["status"]
+	if status == nil {
+		status = taskRaw["Status"]
+	}
+	if status != "completed" {
+		t.Fatalf("status=%v want completed", status)
+	}
+
+	cmd, out = newRoomTestCommand(ctx)
+	if err := runRoomShow(cmd, workspace, "alpha", "", 20); err != nil {
+		t.Fatalf("runRoomShow: %v", err)
+	}
+	data = decodeRoomEnvelope(t, out)
+	messages, ok := data["messages"].([]any)
+	if !ok || len(messages) != 2 {
+		t.Fatalf("messages=%T/%v want 2 entries", data["messages"], data["messages"])
+	}
+}
+
+func TestCollectRoomRelayTargetsSkipsSender(t *testing.T) {
+	targets, skipped := collectRoomRelayTargets(agent.RoomSummary{
+		Members: []agent.RoomMember{
+			{ActorID: "agent-a"},
+			{ActorID: "agent-b"},
+			{ActorID: "agent-c"},
+		},
+	}, "agent-b")
+	if len(targets) != 2 || targets[0] != "agent-a" || targets[1] != "agent-c" {
+		t.Fatalf("targets=%v want [agent-a agent-c]", targets)
+	}
+	if len(skipped) != 1 || skipped[0] != "agent-b" {
+		t.Fatalf("skipped=%v want [agent-b]", skipped)
+	}
+}
+
 func newRoomTestCommand(ctx context.Context) (*cobra.Command, *bytes.Buffer) {
 	buf := &bytes.Buffer{}
 	cmd := &cobra.Command{}

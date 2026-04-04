@@ -30,6 +30,15 @@ import (
 	"github.com/spf13/cobra"
 )
 
+var (
+	refactorLanguages = []string{"auto", "go", "python", "javascript", "typescript", "elixir", "rust"}
+	refactorFocuses   = []string{"all", "slop", "dead"}
+	refactorViews     = []string{"raw", "grouped", "entrypoints", "summary"}
+	refactorRuleSets  = []string{"conservative", "default", "aggressive"}
+	refactorDirs      = []string{"out", "in"}
+	refactorEdgeSets  = []string{"structural", "doc", "all"}
+)
+
 func init() {
 	rootCmd.AddCommand(newRefactorCommand())
 }
@@ -38,6 +47,39 @@ func newRefactorCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "refactor",
 		Short: "Single-language refactor hotspot analysis and shortlist advice",
+		Long: `Refactor commands help you inspect one language scope at a time.
+
+Use the deterministic local scout first, then add graph, churn, snapshots, or
+LLM shortlist ranking only when needed.
+
+Most useful entrypoints:
+  refactor status    Check whether a scope is parser_only or index_backed
+  refactor scout     Surface deterministic hotspots and anti-pattern candidates
+  refactor advisor   Ask a remote model to rank the local scout shortlist
+  refactor evidence  Read persisted snapshot and hotspot evidence artifacts
+
+Grouped scout output also includes focused lanes such as:
+  best_entrypoints     Top function/module starting points
+  db_access_patterns   DB and persistence anti-pattern candidates when detected
+  repeated_pattern_families  Repeated slop families collapsed for review
+
+Common flag patterns:
+  --language      Required for scout/advisor on mixed repos
+  --focus         all|slop|dead
+  --view          raw|grouped|entrypoints|summary
+  --rule-set      conservative|default|aggressive
+  --path          File or directory scope relative to the workspace`,
+		Example: `  # Check whether a scope is parser_only or index_backed
+  agentctl refactor status --path ./internal --language go
+
+  # Run the local scout with grouped output
+  agentctl refactor scout --path ./internal --language go --focus slop --view grouped
+
+  # Review DB and persistence anti-pattern candidates on an Ecto scope
+  agentctl refactor scout --path apps/praze-api/lib --language elixir --focus slop --view grouped
+
+  # Ask the advisor to rank a shortlist from the local scout
+  agentctl refactor advisor --path ./internal --language go --focus slop --shortlist-size 5`,
 	}
 	cmd.AddCommand(
 		newRefactorStatusCommand(),
@@ -63,14 +105,23 @@ func newRefactorStatusCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "status",
 		Short: "Show refactor index/fallback status for a scoped path",
+		Long: `Status reports whether the requested refactor scope can use index-backed
+analysis or must fall back to parser-only mode.
+
+Use this before deeper refactor commands when you want to know whether repo
+graph evidence, dead-code analysis, and dependency expansion will be available.`,
+		Example: `  agentctl refactor status --path ./internal --language go
+  agentctl refactor status --path apps/praze-api/lib --language elixir --include-tests`,
+		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return runRefactorStatus(cmd, workspace, path, language, includeTests)
 		},
 	}
 	cmd.Flags().StringVar(&path, "path", ".", "File or directory to analyze")
 	cmd.Flags().StringVar(&workspace, "workspace", ".", "Workspace root override")
-	cmd.Flags().StringVar(&language, "language", "auto", "Single language to analyze (auto|go|python|javascript|typescript|elixir|rust)")
+	cmd.Flags().StringVar(&language, "language", "auto", "Single language scope to analyze")
 	cmd.Flags().BoolVar(&includeTests, "include-tests", false, "Include test files")
+	registerFlagCompletions(cmd, "language", refactorLanguages)
 	return cmd
 }
 
@@ -85,14 +136,23 @@ func newRefactorSnapshotCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "snapshot",
 		Short: "Persist a deterministic refactor scope snapshot",
+		Long: `Snapshot freezes the current scoped file set, index status, and metadata into
+a durable refactor artifact.
+
+Use snapshots before diffing, evidence inspection, or repeated review passes
+when you want a stable reference point.`,
+		Example: `  agentctl refactor snapshot --path ./internal --language go
+  agentctl refactor snapshot --path apps/praze-api/lib --language elixir --include-tests`,
+		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return runRefactorSnapshot(cmd, workspace, path, language, includeTests)
 		},
 	}
 	cmd.Flags().StringVar(&path, "path", ".", "File or directory to analyze")
 	cmd.Flags().StringVar(&workspace, "workspace", ".", "Workspace root override")
-	cmd.Flags().StringVar(&language, "language", "auto", "Single language to analyze (auto|go|python|javascript|typescript|elixir|rust)")
+	cmd.Flags().StringVar(&language, "language", "auto", "Single language scope to analyze")
 	cmd.Flags().BoolVar(&includeTests, "include-tests", false, "Include test files")
+	registerFlagCompletions(cmd, "language", refactorLanguages)
 	return cmd
 }
 
@@ -116,23 +176,38 @@ func newRefactorDepsCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "deps",
 		Short: "Expand forward or reverse repoindex dependencies for a scoped seed",
+		Long: `Deps expands repoindex relationships from one or more seed nodes within the
+requested refactor scope.
+
+Use --query for ad hoc seed resolution or --seed for explicit repoindex node
+IDs. This command is most useful after repoindex has been built for the
+workspace.`,
+		Example: `  # Resolve seeds from a query, then expand outgoing structural edges
+  agentctl refactor deps --path ./internal --language go --query handleAsk --depth 2
+
+  # Expand incoming dependencies from an explicit seed
+  agentctl refactor deps --path ./internal --language go --seed symbol:go:internal/actor/agent_actor.go:*AgentActor.handleAsk --direction in`,
+		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return runRefactorDeps(cmd, workspace, path, language, includeTests, seeds, query, seedLimit, edgeSets, edgeTypes, direction, depth, budget, perNodeCap)
 		},
 	}
 	cmd.Flags().StringVar(&path, "path", ".", "File or directory scope used for seed resolution and reporting")
 	cmd.Flags().StringVar(&workspace, "workspace", ".", "Workspace root override")
-	cmd.Flags().StringVar(&language, "language", "auto", "Single language to analyze (auto|go|python|javascript|typescript|elixir|rust)")
+	cmd.Flags().StringVar(&language, "language", "auto", "Single language scope to analyze")
 	cmd.Flags().BoolVar(&includeTests, "include-tests", false, "Include test files")
 	cmd.Flags().StringArrayVar(&seeds, "seed", nil, "Explicit repoindex node ID seed (repeatable)")
 	cmd.Flags().StringVar(&query, "query", "", "Search query used to resolve seed nodes within the scoped path")
 	cmd.Flags().IntVar(&seedLimit, "seed-limit", 5, "Maximum resolved seed nodes when using --query")
-	cmd.Flags().StringArrayVar(&edgeSets, "edge-set", []string{"structural"}, "Named edge set to traverse (structural|doc|all)")
+	cmd.Flags().StringArrayVar(&edgeSets, "edge-set", []string{"structural"}, "Named edge set to traverse")
 	cmd.Flags().StringArrayVar(&edgeTypes, "edge", nil, "Explicit edge types to traverse (repeatable)")
 	cmd.Flags().StringVar(&direction, "direction", "out", "Traversal direction (out|in)")
 	cmd.Flags().IntVar(&depth, "depth", 1, "Traversal depth")
 	cmd.Flags().IntVar(&budget, "budget", 50, "Maximum nodes to retain in the traversal")
 	cmd.Flags().IntVar(&perNodeCap, "per-node-cap", 50, "Maximum edges to follow per frontier node")
+	registerFlagCompletions(cmd, "language", refactorLanguages)
+	registerFlagCompletions(cmd, "edge-set", refactorEdgeSets)
+	registerFlagCompletions(cmd, "direction", refactorDirs)
 	return cmd
 }
 
@@ -150,17 +225,26 @@ func newRefactorChangesCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "changes",
 		Short: "Show changed files and symbols since a git ref or refactor snapshot",
+		Long: `Changes compares the requested scope against a git ref or a stored refactor
+snapshot.
+
+Use this when you want to see what moved since a baseline before rerunning the
+scout or reviewing evidence artifacts.`,
+		Example: `  agentctl refactor changes --path ./internal --language go --since HEAD~10
+  agentctl refactor changes --path ./internal --language go --since refsnap-123456`,
+		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return runRefactorChanges(cmd, workspace, path, language, includeTests, since, maxFiles, maxSymbols)
 		},
 	}
 	cmd.Flags().StringVar(&path, "path", ".", "File or directory scope used for the change comparison")
 	cmd.Flags().StringVar(&workspace, "workspace", ".", "Workspace root override")
-	cmd.Flags().StringVar(&language, "language", "auto", "Single language to analyze (auto|go|python|javascript|typescript|elixir|rust)")
+	cmd.Flags().StringVar(&language, "language", "auto", "Single language scope to analyze")
 	cmd.Flags().BoolVar(&includeTests, "include-tests", false, "Include test files")
 	cmd.Flags().StringVar(&since, "since", "", "Git ref or refactor snapshot id (refsnap-...) to compare against")
 	cmd.Flags().IntVar(&maxFiles, "max-files", 200, "Maximum changed files to return inline")
 	cmd.Flags().IntVar(&maxSymbols, "max-symbols", 200, "Maximum changed symbols to return inline")
+	registerFlagCompletions(cmd, "language", refactorLanguages)
 	return cmd
 }
 
@@ -178,17 +262,25 @@ func newRefactorHotCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "hot",
 		Short: "Rank recently hot files in a scoped path from git churn",
+		Long: `Hot ranks files in the requested scope by recent git churn.
+
+Use it when you want a deterministic “where change pressure lives” signal to
+combine with structural scout findings.`,
+		Example: `  agentctl refactor hot --path ./internal --language go
+  agentctl refactor hot --path apps/praze-api/lib --language elixir --since HEAD~50 --max-results 30`,
+		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return runRefactorHot(cmd, workspace, path, language, includeTests, since, maxResults, halfLifeDays)
 		},
 	}
 	cmd.Flags().StringVar(&path, "path", ".", "File or directory scope used for the hot ranking")
 	cmd.Flags().StringVar(&workspace, "workspace", ".", "Workspace root override")
-	cmd.Flags().StringVar(&language, "language", "auto", "Single language to analyze (auto|go|python|javascript|typescript|elixir|rust)")
+	cmd.Flags().StringVar(&language, "language", "auto", "Single language scope to analyze")
 	cmd.Flags().BoolVar(&includeTests, "include-tests", false, "Include test files")
 	cmd.Flags().StringVar(&since, "since", "HEAD~20", "Git ref or refactor snapshot id (refsnap-...) used as the hot baseline")
 	cmd.Flags().IntVar(&maxResults, "max-results", 20, "Maximum hot files to return")
 	cmd.Flags().IntVar(&halfLifeDays, "half-life-days", 90, "Recency half-life in days for hot-file weighting")
+	registerFlagCompletions(cmd, "language", refactorLanguages)
 	return cmd
 }
 
@@ -202,6 +294,14 @@ func newRefactorEvidenceCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "evidence",
 		Short: "Read a persisted refactor snapshot or scout evidence artifact",
+		Long: `Evidence reads persisted refactor snapshot and hotspot evidence artifacts from
+CAS or snapshot metadata.
+
+Use this after running scout or snapshot when you want the stored deterministic
+context again without rerunning the analysis.`,
+		Example: `  agentctl refactor evidence --snapshot-id refsnap-123456
+  agentctl refactor evidence --artifact sha256:abcd... --full`,
+		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return runRefactorEvidence(cmd, snapshotID, artifact, full)
 		},
@@ -218,6 +318,7 @@ func newRefactorScoutCommand() *cobra.Command {
 		workspace    string
 		language     string
 		focus        string
+		view         string
 		ruleSet      string
 		minScore     int
 		maxResults   int
@@ -227,11 +328,45 @@ func newRefactorScoutCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "scout",
 		Short: "Run the local structural refactor scout",
+		Long: `Scout runs the local deterministic refactor analysis for one language scope.
+
+Required flag combinations:
+  --language     One language only for each run
+  --path         File or directory scope (defaults to .)
+
+Most important knobs:
+  --focus        all|slop|dead
+  --view         raw|grouped|entrypoints|summary
+  --rule-set     conservative|default|aggressive
+  --min-score    Filter low-confidence or low-severity findings
+  --max-results  Limit inline returned findings
+
+The output always keeps raw findings in data.findings. --view changes the
+grouped presentation section for easier reading on broader scopes.
+
+For DB/persistence review:
+  use --focus slop --view grouped
+  then inspect data.presentation.lanes.db_access_patterns for Ecto/Repo
+  anti-pattern candidates such as loader chains, transaction scripts, and
+  post-transaction preloads.`,
+		Example: `  # General grouped scout output
+  agentctl refactor scout --path ./internal --language go --view grouped
+
+  # Narrow to anti-pattern candidates
+  agentctl refactor scout --path apps/praze-api/lib --language elixir --focus slop --view entrypoints
+
+  # Show grouped DB/persistence candidates on an Elixir scope
+  agentctl refactor scout --path apps/praze-api/lib --language elixir --focus slop --view grouped
+
+  # Raw machine-oriented output
+  agentctl refactor scout --path ./internal/actor --language go --focus dead --view raw --min-score 0`,
+		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			input := map[string]any{
 				"path":          path,
 				"language":      language,
 				"focus":         focus,
+				"view":          view,
 				"rule_set":      ruleSet,
 				"min_score":     minScore,
 				"max_results":   maxResults,
@@ -241,14 +376,19 @@ func newRefactorScoutCommand() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&path, "path", ".", "File or directory to analyze")
-	cmd.Flags().StringVar(&workspace, "workspace", "", "Workspace root override")
-	cmd.Flags().StringVar(&language, "language", "", "Single language to analyze (required)")
-	cmd.Flags().StringVar(&focus, "focus", "all", "Finding focus (all|slop)")
-	cmd.Flags().StringVar(&ruleSet, "rule-set", "default", "Threshold profile (conservative|default|aggressive)")
-	cmd.Flags().IntVar(&minScore, "min-score", 70, "Minimum finding score")
-	cmd.Flags().IntVar(&maxResults, "max-results", 20, "Maximum findings to return")
+	cmd.Flags().StringVar(&workspace, "workspace", ".", "Workspace root override")
+	cmd.Flags().StringVar(&language, "language", "", "Single language scope to analyze (required)")
+	cmd.Flags().StringVar(&focus, "focus", "all", "Finding family focus")
+	cmd.Flags().StringVar(&view, "view", "grouped", "Grouped presentation mode")
+	cmd.Flags().StringVar(&ruleSet, "rule-set", "default", "Threshold sensitivity profile")
+	cmd.Flags().IntVar(&minScore, "min-score", 70, "Minimum finding score to keep inline")
+	cmd.Flags().IntVar(&maxResults, "max-results", 20, "Maximum findings to return inline")
 	cmd.Flags().BoolVar(&includeTests, "include-tests", false, "Include test files")
 	_ = cmd.MarkFlagRequired("language")
+	registerFlagCompletions(cmd, "language", refactorLanguages)
+	registerFlagCompletions(cmd, "focus", refactorFocuses)
+	registerFlagCompletions(cmd, "view", refactorViews)
+	registerFlagCompletions(cmd, "rule-set", refactorRuleSets)
 	return cmd
 }
 
@@ -272,6 +412,29 @@ func newRefactorAdvisorCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "advisor",
 		Short: "Run the two-stage refactor advisor (local scout + remote shortlist ranking)",
+		Long: `Advisor runs the local scout first, then sends a shortlist to a remote model
+for ranking and explanation.
+
+Required flag combinations:
+  --language        One language only for each run
+  --path            File or directory scope
+
+Most important knobs:
+  --focus           all|slop
+  --rule-set        conservative|default|aggressive
+  --max-findings    How many scout findings to send to the advisor
+  --shortlist-size  Final ranked recommendations to return
+  --provider        Remote provider name
+  --model           Remote model override`,
+		Example: `  # Default advisor flow
+  agentctl refactor advisor --path ./internal --language go
+
+  # Slop-focused shortlist on Elixir
+  agentctl refactor advisor --path apps/praze-api/lib --language elixir --focus slop --max-findings 10 --shortlist-size 5
+
+  # Override the second-stage model
+  agentctl refactor advisor --path ./internal --language go --provider openrouter --model google/gemini-3.1-flash-lite-preview`,
+		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			input := map[string]any{
 				"path":           path,
@@ -291,10 +454,10 @@ func newRefactorAdvisorCommand() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&path, "path", ".", "File or directory to analyze")
-	cmd.Flags().StringVar(&workspace, "workspace", "", "Workspace root override")
-	cmd.Flags().StringVar(&language, "language", "", "Single language to analyze (required)")
-	cmd.Flags().StringVar(&focus, "focus", "all", "Finding focus (all|slop)")
-	cmd.Flags().StringVar(&ruleSet, "rule-set", "default", "Threshold profile (conservative|default|aggressive)")
+	cmd.Flags().StringVar(&workspace, "workspace", ".", "Workspace root override")
+	cmd.Flags().StringVar(&language, "language", "", "Single language scope to analyze (required)")
+	cmd.Flags().StringVar(&focus, "focus", "all", "Finding family focus")
+	cmd.Flags().StringVar(&ruleSet, "rule-set", "default", "Threshold sensitivity profile")
 	cmd.Flags().IntVar(&minScore, "min-score", 70, "Minimum scout score")
 	cmd.Flags().IntVar(&maxFindings, "max-findings", 8, "Maximum scout findings to send to the advisor")
 	cmd.Flags().IntVar(&shortlistSize, "shortlist-size", 3, "Maximum prioritized recommendations to return")
@@ -304,7 +467,19 @@ func newRefactorAdvisorCommand() *cobra.Command {
 	cmd.Flags().IntVar(&maxTokens, "max-tokens", 900, "Second-stage max output tokens")
 	cmd.Flags().Float64Var(&temperature, "temperature", 0.1, "Second-stage sampling temperature")
 	_ = cmd.MarkFlagRequired("language")
+	registerFlagCompletions(cmd, "language", refactorLanguages)
+	registerFlagCompletions(cmd, "focus", []string{"all", "slop"})
+	registerFlagCompletions(cmd, "rule-set", refactorRuleSets)
 	return cmd
+}
+
+func registerFlagCompletions(cmd *cobra.Command, flag string, values []string) {
+	if cmd == nil || len(values) == 0 {
+		return
+	}
+	_ = cmd.RegisterFlagCompletionFunc(flag, func(*cobra.Command, []string, string) ([]string, cobra.ShellCompDirective) {
+		return values, cobra.ShellCompDirectiveNoFileComp
+	})
 }
 
 func runRefactorSkill(cmd *cobra.Command, workspace, skillName string, input map[string]any) error {

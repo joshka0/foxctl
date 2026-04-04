@@ -654,6 +654,155 @@ func TestSortFindingsPrefersModuleClusterOverFileClusterAtEqualScore(t *testing.
 	}
 }
 
+func TestBuildScoutPresentationAggregatesRepeatedPatternFamilies(t *testing.T) {
+	items := []finding{
+		{
+			RuleID:   "repeated_guard_ladder",
+			Category: "function",
+			File:     "reader/index.ts",
+			Line:     10,
+			Symbol:   "readerApi",
+			Score:    84,
+			Detail:   "readerApi repeats the same guard predicate 4 times.",
+			Evidence: map[string]any{"guard_preview": "value !== null"},
+		},
+		{
+			RuleID:   "repeated_guard_ladder",
+			Category: "function",
+			File:     "reader/index.ts",
+			Line:     10,
+			Symbol:   "readerApi",
+			Score:    84,
+			Detail:   "readerApi repeats the same guard predicate 4 times.",
+			Evidence: map[string]any{"guard_preview": "value !== undefined"},
+		},
+		{
+			RuleID:   "function_hotspot",
+			Category: "function",
+			File:     "reader/index.ts",
+			Line:     10,
+			Symbol:   "readerApi",
+			Score:    94,
+			Detail:   "readerApi triggers multiple refactoring signals.",
+			Evidence: map[string]any{"rules": []string{"repeated_guard_ladder", "fan_out_dependency_spread"}},
+		},
+	}
+
+	presentation := buildScoutPresentation(items, "grouped")
+	if presentation.ActiveLane != "best_entrypoints" {
+		t.Fatalf("active lane=%q want best_entrypoints", presentation.ActiveLane)
+	}
+	if len(presentation.Lanes.BestEntrypoints) != 1 {
+		t.Fatalf("entrypoints=%#v want 1", presentation.Lanes.BestEntrypoints)
+	}
+	if presentation.Lanes.BestEntrypoints[0].RepresentativeRule != "function_hotspot" {
+		t.Fatalf("representative rule=%q want function_hotspot", presentation.Lanes.BestEntrypoints[0].RepresentativeRule)
+	}
+	if len(presentation.Lanes.RepeatedPatternFamily) != 1 {
+		t.Fatalf("pattern families=%#v want 1", presentation.Lanes.RepeatedPatternFamily)
+	}
+	if presentation.Lanes.RepeatedPatternFamily[0].FindingCount != 2 {
+		t.Fatalf("pattern family count=%d want 2", presentation.Lanes.RepeatedPatternFamily[0].FindingCount)
+	}
+	if len(presentation.Lanes.RepeatedPatternFamily[0].Samples) != 2 {
+		t.Fatalf("pattern family samples=%#v want 2", presentation.Lanes.RepeatedPatternFamily[0].Samples)
+	}
+}
+
+func TestBuildScoutPresentationSummaryViewUsesOverviewLane(t *testing.T) {
+	items := []finding{{RuleID: "god_file", Category: "file", File: "a.go", Score: 81, Detail: "large file"}}
+	presentation := buildScoutPresentation(items, "summary")
+	if presentation.ActiveLane != "overview" {
+		t.Fatalf("active lane=%q want overview", presentation.ActiveLane)
+	}
+	if len(presentation.Overview.TopRuleFamilies) != 1 {
+		t.Fatalf("top rule families=%#v want 1", presentation.Overview.TopRuleFamilies)
+	}
+}
+
+func TestBuildScoutPresentationIncludesDBAccessLane(t *testing.T) {
+	items := []finding{
+		{
+			RuleID:   "preload_after_get_chain",
+			Category: "function",
+			File:     "praze/moderation/content_report_triage.ex",
+			Line:     104,
+			Symbol:   "resolve_source",
+			Score:    74,
+			Detail:   "resolve_source uses Repo.get/get_by and then immediately pipes into Repo.preload.",
+			Evidence: map[string]any{
+				"chain_samples": []string{"Repo.get(Offering, target_id) |> Repo.preload(:media_assets)"},
+			},
+		},
+		{
+			RuleID:   "transaction_script_hotspot",
+			Category: "function",
+			File:     "praze/bible.ex",
+			Line:     238,
+			Symbol:   "stream_version_verses",
+			Score:    82,
+			Detail:   "stream_version_verses runs a multi-step anonymous transaction body.",
+			Evidence: map[string]any{
+				"repo_calls":     []string{"Repo.stream", "Repo.rollback"},
+				"script_preview": "Repo.transaction(fn -> ... end)",
+			},
+		},
+	}
+
+	presentation := buildScoutPresentation(items, "grouped")
+	if len(presentation.Lanes.DBAccessPatterns) != 2 {
+		t.Fatalf("db access lane=%#v want 2 items", presentation.Lanes.DBAccessPatterns)
+	}
+	if presentation.Lanes.DBAccessPatterns[0].RepresentativeRule != "transaction_script_hotspot" {
+		t.Fatalf("top db lane rule=%q want transaction_script_hotspot", presentation.Lanes.DBAccessPatterns[0].RepresentativeRule)
+	}
+	if len(presentation.Lanes.DBAccessPatterns[0].Samples) == 0 {
+		t.Fatalf("expected db lane samples, got %#v", presentation.Lanes.DBAccessPatterns[0])
+	}
+}
+
+func TestBuildDBAccessLaneCollapsesTransactionVariantsPerFunction(t *testing.T) {
+	items := []finding{
+		{
+			RuleID:   "transaction_script_hotspot",
+			Category: "function",
+			File:     "praze/trust.ex",
+			Line:     140,
+			Symbol:   "request_export",
+			Score:    90,
+			Detail:   "request_export runs a multi-step anonymous transaction body.",
+			Evidence: map[string]any{
+				"script_preview": "Multi.new() |> Multi.insert(...) |> Repo.transaction()",
+				"repo_calls":     []string{"Repo.transaction"},
+			},
+		},
+		{
+			RuleID:   "transaction_script_hotspot",
+			Category: "function",
+			File:     "praze/trust.ex",
+			Line:     198,
+			Symbol:   "request_export",
+			Score:    88,
+			Detail:   "request_export runs a second transaction-like pipeline.",
+			Evidence: map[string]any{
+				"script_preview": "Multi.new() |> Multi.update(...) |> Repo.transaction()",
+				"repo_calls":     []string{"Repo.transaction"},
+			},
+		},
+	}
+
+	lane := buildDBAccessLane(items, 10)
+	if len(lane) != 1 {
+		t.Fatalf("lane=%#v want 1 item", lane)
+	}
+	if lane[0].FindingCount != 1 {
+		t.Fatalf("finding_count=%d want 1 representative candidate", lane[0].FindingCount)
+	}
+	if len(lane[0].Samples) < 2 {
+		t.Fatalf("samples=%#v want both transaction previews retained", lane[0].Samples)
+	}
+}
+
 func TestClassifyStructuralClusterWorkflowAbstraction(t *testing.T) {
 	profile := classifyStructuralCluster(structuralSimilarityCluster{
 		AverageBranches:  3,

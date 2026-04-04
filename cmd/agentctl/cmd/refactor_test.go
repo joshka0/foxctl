@@ -1,7 +1,9 @@
 package cmd
 
 import (
+	"bytes"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/spf13/cobra"
@@ -155,6 +157,80 @@ func TestRefactorCommandsExposeFocusFlag(t *testing.T) {
 		}
 		if flag.DefValue != "all" {
 			t.Fatalf("%s focus default=%q want all", tc.name, flag.DefValue)
+		}
+	}
+}
+
+func TestRefactorScoutCommandExposesViewFlag(t *testing.T) {
+	cmd := newRefactorScoutCommand()
+	flag := cmd.Flags().Lookup("view")
+	if flag == nil {
+		t.Fatal("scout command missing view flag")
+	}
+	if flag.DefValue != "grouped" {
+		t.Fatalf("view default=%q want grouped", flag.DefValue)
+	}
+}
+
+func TestRefactorScoutAndAdvisorWorkspaceDefaultToDot(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		cmd  *cobra.Command
+	}{
+		{name: "scout", cmd: newRefactorScoutCommand()},
+		{name: "advisor", cmd: newRefactorAdvisorCommand()},
+	} {
+		flag := tc.cmd.Flags().Lookup("workspace")
+		if flag == nil {
+			t.Fatalf("%s command missing workspace flag", tc.name)
+		}
+		if flag.DefValue != "." {
+			t.Fatalf("%s workspace default=%q want .", tc.name, flag.DefValue)
+		}
+	}
+}
+
+func TestRefactorScoutHelpDocumentsKeyFlags(t *testing.T) {
+	cmd := newRefactorScoutCommand()
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+	cmd.SetErr(buf)
+	if err := cmd.Help(); err != nil {
+		t.Fatalf("help: %v", err)
+	}
+	got := buf.String()
+	for _, want := range []string{
+		"--language",
+		"--focus",
+		"--view",
+		"--rule-set",
+		"all|slop|dead",
+		"raw|grouped|entrypoints|summary",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("help missing %q\n%s", want, got)
+		}
+	}
+}
+
+func TestRefactorRootHelpDocumentsWorkflow(t *testing.T) {
+	cmd := newRefactorCommand()
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+	cmd.SetErr(buf)
+	if err := cmd.Help(); err != nil {
+		t.Fatalf("help: %v", err)
+	}
+	got := buf.String()
+	for _, want := range []string{
+		"refactor status",
+		"refactor scout",
+		"refactor advisor",
+		"--focus",
+		"--view",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("help missing %q\n%s", want, got)
 		}
 	}
 }

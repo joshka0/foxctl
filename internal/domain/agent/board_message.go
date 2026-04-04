@@ -21,6 +21,8 @@ const (
 	BoardMessageKindAlert BoardMessageKind = "alert"
 	// BoardMessageKindReviewRequest represents a code or work review request.
 	BoardMessageKindReviewRequest BoardMessageKind = "review_request"
+	// BoardMessageKindTaskUpdate represents a task lifecycle update shared through a room.
+	BoardMessageKindTaskUpdate BoardMessageKind = "task_update"
 )
 
 // BoardMessageStatus defines the read/ack status of a message.

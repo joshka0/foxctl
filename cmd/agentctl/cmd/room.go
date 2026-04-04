@@ -32,8 +32,10 @@ func newRoomCommand() *cobra.Command {
 		newRoomSendCommand(),
 		newRoomJoinCommand(),
 		newRoomLeaveCommand(),
+		newRoomTaskCommand(),
 		newRoomSubscribeCommand(),
 		newRoomRelayCommand(),
+		newRoomLoopCommand(),
 	)
 	return cmd
 }
@@ -101,14 +103,14 @@ func newRoomShowCommand() *cobra.Command {
 
 func newRoomSendCommand() *cobra.Command {
 	var (
-		workspace    string
-		sender       string
-		subject      string
-		kind         string
-		taskID       string
-		priority     int
-		ackRequired  bool
-		autoCreate   bool
+		workspace   string
+		sender      string
+		subject     string
+		kind        string
+		taskID      string
+		priority    int
+		ackRequired bool
+		autoCreate  bool
 	)
 	cmd := &cobra.Command{
 		Use:   "send <room-id> <text>",
@@ -194,6 +196,8 @@ func newRoomRelayCommand() *cobra.Command {
 	var (
 		workspace string
 		backend   string
+		session   string
+		plugin    string
 		poll      time.Duration
 		history   int
 	)
@@ -202,11 +206,17 @@ func newRoomRelayCommand() *cobra.Command {
 		Short: "Fan out room messages into live terminal panes for room members",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runRoomRelay(cmd, workspace, args[0], backend, poll, history)
+			return runRoomRelay(cmd, workspace, args[0], roomRelayOptions{
+				Backend:          backend,
+				ZellijSession:    session,
+				ZellijPluginPath: plugin,
+			}, poll, history)
 		},
 	}
 	cmd.Flags().StringVar(&workspace, "workspace", ".", "Workspace root override")
 	cmd.Flags().StringVar(&backend, "backend", "tmux", "Terminal backend (tmux|zellij)")
+	cmd.Flags().StringVar(&session, "session", "", "Zellij session name (defaults to ZELLIJ_SESSION_NAME when inside zellij)")
+	cmd.Flags().StringVar(&plugin, "plugin-path", "", "Path to the zellij room relay plugin wasm")
 	cmd.Flags().DurationVar(&poll, "poll", 2*time.Second, "Polling interval")
 	cmd.Flags().IntVar(&history, "history", 0, "Number of most recent messages to replay into members before following")
 	return cmd
@@ -507,15 +517,10 @@ func runRoomSubscribe(cmd *cobra.Command, workspace, roomID, actorID string, lim
 	}
 }
 
-func runRoomRelay(cmd *cobra.Command, workspace, roomID, backend string, poll time.Duration, history int) error {
+func runRoomRelay(cmd *cobra.Command, workspace, roomID string, relay roomRelayOptions, poll time.Duration, history int) error {
 	absWorkspace, err := resolveRoomWorkspace(workspace)
 	if err != nil {
 		return err
-	}
-	if strings.TrimSpace(strings.ToLower(backend)) == "zellij" {
-		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.relay", protocol.ErrorCodeEARG, "zellij relay is not implemented yet", map[string]any{
-			"hint": "Zellij CLI actions can write or dump only the focused pane from the current session. Use `agentctl room subscribe` inside zellij panes for now; a plugin-backed relay is the next step.",
-		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
 	}
 	client := tmuxbridge.New()
 	store, err := openRoomBoardStore(cmd.Context())
@@ -542,7 +547,7 @@ func runRoomRelay(cmd *cobra.Command, workspace, roomID, backend string, poll ti
 	initial := trimRoomHistory(messages, history)
 	for _, msg := range initial {
 		seq++
-		result := relayRoomMessage(cmd.Context(), client, summary, msg)
+		result := relayRoomMessage(cmd.Context(), client, summary, msg, relay)
 		if err := writer.Write(roomProgressEnvelope("agentctl.room.relay", seq, false, map[string]any{
 			"event":   "room_relay",
 			"room_id": roomID,
@@ -577,7 +582,7 @@ func runRoomRelay(cmd *cobra.Command, workspace, roomID, backend string, poll ti
 				}
 				seen[msg.ID] = struct{}{}
 				seq++
-				result := relayRoomMessage(cmd.Context(), client, summary, msg)
+				result := relayRoomMessage(cmd.Context(), client, summary, msg, relay)
 				if err := writer.Write(roomProgressEnvelope("agentctl.room.relay", seq, false, map[string]any{
 					"event":   "room_relay",
 					"room_id": roomID,
@@ -713,15 +718,36 @@ func normalizeRoomPoll(value time.Duration) time.Duration {
 }
 
 type roomRelayResult struct {
-	Backend         string   `json:"backend"`
-	DeliveredCount  int      `json:"delivered_count"`
-	FailedCount     int      `json:"failed_count"`
-	DeliveredTo     []string `json:"delivered_to,omitempty"`
-	FailedMembers   []string `json:"failed_members,omitempty"`
-	SkippedMembers  []string `json:"skipped_members,omitempty"`
+	Backend        string   `json:"backend"`
+	DeliveredCount int      `json:"delivered_count"`
+	FailedCount    int      `json:"failed_count"`
+	DeliveredTo    []string `json:"delivered_to,omitempty"`
+	FailedMembers  []string `json:"failed_members,omitempty"`
+	SkippedMembers []string `json:"skipped_members,omitempty"`
+	Error          string   `json:"error,omitempty"`
 }
 
-func relayRoomMessage(ctx context.Context, client *tmuxbridge.Client, room agent.RoomSummary, msg agent.BoardMessage) roomRelayResult {
+type roomRelayOptions struct {
+	Backend          string
+	ZellijSession    string
+	ZellijPluginPath string
+}
+
+func relayRoomMessage(ctx context.Context, client *tmuxbridge.Client, room agent.RoomSummary, msg agent.BoardMessage, relay roomRelayOptions) roomRelayResult {
+	switch strings.TrimSpace(strings.ToLower(relay.Backend)) {
+	case "", "tmux":
+		return relayRoomMessageTmux(ctx, client, room, msg)
+	case "zellij":
+		return relayRoomMessageZellij(ctx, room, msg, relay)
+	default:
+		return roomRelayResult{
+			Backend: "unknown",
+			Error:   fmt.Sprintf("unsupported relay backend %q", relay.Backend),
+		}
+	}
+}
+
+func relayRoomMessageTmux(ctx context.Context, client *tmuxbridge.Client, room agent.RoomSummary, msg agent.BoardMessage) roomRelayResult {
 	result := roomRelayResult{Backend: "tmux"}
 	sender := strings.TrimSpace(msg.Sender)
 	for _, member := range room.Members {
