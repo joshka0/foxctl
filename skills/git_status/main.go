@@ -28,6 +28,7 @@ type input struct {
 	Commit    string `json:"commit"`
 	Limit     int    `json:"limit"`
 	Stat      bool   `json:"stat"`
+	NameOnly  bool   `json:"name_only"`
 }
 
 // fileStatus represents the status of a file in the working directory.
@@ -157,6 +158,9 @@ func getDiff(ctx context.Context, rc *skillmain.RunContext, gitPath, repoPath st
 	if in.Stat {
 		args = append(args, "--stat")
 	}
+	if in.NameOnly {
+		args = append(args, "--name-only")
+	}
 
 	result := executil.Run(ctx, "", gitPath, args...)
 	if result.Err != nil {
@@ -170,6 +174,7 @@ func getDiff(ctx context.Context, rc *skillmain.RunContext, gitPath, repoPath st
 		"staged":    in.Staged,
 		"commit":    in.Commit,
 		"diff_size": len(diff),
+		"name_only": in.NameOnly,
 	}
 
 	// Add preview or full diff
@@ -195,6 +200,11 @@ func getDiff(ctx context.Context, rc *skillmain.RunContext, gitPath, repoPath st
 		stats := parseDiffStat(diff)
 		data["files_changed"] = len(stats)
 		data["stats"] = stats
+	}
+	if in.NameOnly {
+		files := parseDiffNameOnly(diff)
+		data["files_changed"] = len(files)
+		data["files"] = files
 	}
 
 	return data, nil
@@ -321,6 +331,20 @@ func parseDiffStat(diff string) map[string]map[string]int {
 	}
 
 	return stats
+}
+
+// parseDiffNameOnly extracts changed file paths from git diff --name-only output.
+func parseDiffNameOnly(diff string) []string {
+	var files []string
+	scanner := bufio.NewScanner(strings.NewReader(diff))
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			continue
+		}
+		files = append(files, line)
+	}
+	return files
 }
 
 // countByStatus counts files by their status code.

@@ -561,7 +561,7 @@ func TestBuildToolDefsForRole_ResearcherUnchanged(t *testing.T) {
 	names := toolNamesForRole(types.RoleResearcher)
 
 	// Researcher must still have base tools + agentctl tools
-	for _, want := range []string{"fs_read_file", "code_search", "think", "context_search", "semantic_search_code", "semantic_search_sessions", "semantic_search_memories", "semantic_search_context", "smart_search", "refactor_scout", "code_search_ensemble", "context_grep", "code_symbols", "repo_index_search", "annotation_recall", "context_show", "context_retrieve", "obsidian_index_search", "obsidian_read", "obsidian_related"} {
+	for _, want := range []string{"fs_read_file", "code_search", "think", "shell", "context_search", "semantic_search_code", "semantic_search_sessions", "semantic_search_memories", "semantic_search_context", "smart_search", "refactor_scout", "code_search_ensemble", "context_grep", "code_symbols", "repo_index_search", "annotation_recall", "context_show", "context_retrieve", "obsidian_index_search", "obsidian_read", "obsidian_related"} {
 		if !hasToolName(names, want) {
 			t.Errorf("researcher should still have %q, got %v", want, names)
 		}
@@ -571,7 +571,7 @@ func TestBuildToolDefsForRole_ResearcherUnchanged(t *testing.T) {
 func TestBuildToolDefsForRole_SubcallWorker(t *testing.T) {
 	names := toolNamesForRole(types.RoleSubcallWorker)
 
-	for _, want := range []string{"fs_read_file", "code_search", "think", "context_search", "smart_search", "refactor_scout", "code_search_ensemble", "context_grep", "code_symbols", "repo_index_search", "memory_query", "session_recall", "context_show", "context_retrieve"} {
+	for _, want := range []string{"fs_read_file", "code_search", "think", "shell", "context_search", "smart_search", "refactor_scout", "code_search_ensemble", "context_grep", "code_symbols", "repo_index_search", "memory_query", "session_recall", "context_show", "context_retrieve"} {
 		if !hasToolName(names, want) {
 			t.Errorf("subcall_worker should have %q, got %v", want, names)
 		}
@@ -653,9 +653,47 @@ func TestMergeRefactorScoutTaskPrompt(t *testing.T) {
 func TestBuildToolDefsForRole_CoderUnchanged(t *testing.T) {
 	names := toolNamesForRole(types.RoleCoder)
 
-	for _, want := range []string{"fs_read_file", "code_search", "think", "fs_write_file", "fs_list_dir", "heartwood_state", "heartwood_action"} {
+	for _, want := range []string{"fs_read_file", "code_search", "think", "shell", "fs_write_file", "fs_list_dir", "heartwood_state", "heartwood_action"} {
 		if !hasToolName(names, want) {
 			t.Errorf("coder should still have %q, got %v", want, names)
+		}
+	}
+}
+
+func TestBuildToolDefsForRole_OverseerIncludesShell(t *testing.T) {
+	names := toolNamesForRole(types.RoleOverseer)
+
+	for _, want := range []string{"think", "shell", "context_search", "smart_search", "code_search_ensemble", "agent_spawn"} {
+		if !hasToolName(names, want) {
+			t.Errorf("overseer should have %q, got %v", want, names)
+		}
+	}
+}
+
+func TestSummarizeToolData_Shell(t *testing.T) {
+	got := summarizeToolData("shell", map[string]any{
+		"summary": "abc123 fix foo\nabc456 add bar",
+		"route": map[string]any{
+			"skill":  "git/status",
+			"intent": "git_log",
+			"notes":  []any{"ignored --stat and returned compact commit log output"},
+		},
+		"measure": map[string]any{
+			"raw":     map[string]any{"combined_tokens": 200.0, "combined_bytes": 800.0},
+			"reduced": map[string]any{"tokens": 20.0, "bytes": 120.0},
+			"savings": map[string]any{"tokens_saved_percent": 90.0, "bytes_saved_percent": 85.0},
+		},
+	})
+	for _, want := range []string{
+		"Structured shell",
+		"Backend: git/status",
+		"Intent: git_log",
+		"Notes: ignored --stat and returned compact commit log output",
+		"abc123 fix foo",
+		"raw 200 -> reduced 20",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("summary missing %q\n%s", want, got)
 		}
 	}
 }

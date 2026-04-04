@@ -51,3 +51,17 @@ func TestParseDiffStat(t *testing.T) {
 		t.Errorf("expected 5 insertions for file2.go, got %d", stats["file2.go"]["additions"])
 	}
 }
+
+func TestParseDiffNameOnly(t *testing.T) {
+	output := `file1.go
+dir/file2.go
+
+`
+	files := parseDiffNameOnly(output)
+	if len(files) != 2 {
+		t.Fatalf("expected 2 files, got %d", len(files))
+	}
+	if files[0] != "file1.go" || files[1] != "dir/file2.go" {
+		t.Fatalf("unexpected files: %v", files)
+	}
+}

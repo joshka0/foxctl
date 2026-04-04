@@ -44,6 +44,11 @@ signature:
       required: false
       default: false
       description: "Show stat summary (for diff operation)"
+    - name: name_only
+      type: boolean
+      required: false
+      default: false
+      description: "Return changed file names only (for diff operation)"
   help:
     short: "Inspect git status, diffs, or recent commits."
     long: |

@@ -13,6 +13,7 @@ func TestCanonicalizeToolName(t *testing.T) {
 		{name: "runtime slash", mode: ToolModeRuntime, expected: "code_search", expectedOK: true},
 		{name: "runtime multi-part dotted", mode: ToolModeRuntime, expected: "repo_index_search", expectedOK: true},
 		{name: "runtime multi-part slash", mode: ToolModeRuntime, expected: "repo_index_dag_grep", expectedOK: true},
+		{name: "runtime single word", mode: ToolModeRuntime, expected: "shell", expectedOK: true},
 		{name: "legacy underscore", mode: ToolModeLegacy, expected: "context.grep", expectedOK: true},
 		{name: "legacy multi-part underscore", mode: ToolModeLegacy, expected: "repo.index.search", expectedOK: true},
 		{name: "legacy multi-part first-dot", mode: ToolModeLegacy, expected: "repo.index.search", expectedOK: true},
@@ -31,6 +32,8 @@ func TestCanonicalizeToolName(t *testing.T) {
 			input = "repo.index.search"
 		case "runtime multi-part slash":
 			input = "repo/index/dag/grep"
+		case "runtime single word":
+			input = "shell"
 		case "legacy underscore":
 			input = "context.grep"
 		case "legacy multi-part underscore":

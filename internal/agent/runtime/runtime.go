@@ -29,7 +29,9 @@ import (
 	"github.com/jkatigb/agentctl/internal/engine"
 	"github.com/jkatigb/agentctl/internal/hooks"
 	"github.com/jkatigb/agentctl/internal/observability"
+	"github.com/jkatigb/agentctl/internal/protocol"
 	llmproviders "github.com/jkatigb/agentctl/internal/providers/llm"
+	"github.com/jkatigb/agentctl/internal/shellreduce"
 	"github.com/jkatigb/agentctl/internal/storage"
 )
 
@@ -584,6 +586,8 @@ func (e *agentToolExecutor) Execute(ctx context.Context, name string, args json.
 		out, err = e.executeWriteFile(ctx, argsMap)
 	case "code_search":
 		out, err = e.executeCodeSearch(ctx, argsMap)
+	case "shell":
+		out, err = e.executeShell(ctx, argsMap)
 	case "think":
 		out, err = e.executeThink(ctx, argsMap)
 	case "end_tick":
@@ -782,6 +786,57 @@ func (e *agentToolExecutor) executeCodeSearch(ctx context.Context, args map[stri
 	}
 
 	return results, nil
+}
+
+func (e *agentToolExecutor) executeShell(ctx context.Context, args map[string]any) (string, error) {
+	var argv []string
+	command := stringArg(args, "", "command")
+	if strings.TrimSpace(command) == "" {
+		argv = stringSliceArg(args, "argv")
+		if len(argv) == 0 {
+			return "", fmt.Errorf("command is required")
+		}
+	} else {
+		var err error
+		argv, err = shellreduce.SplitCommand(command)
+		if err != nil {
+			return "", fmt.Errorf("parse command: %w", err)
+		}
+	}
+	if _, err := shellreduce.RouteArgv(argv); err != nil {
+		return "", err
+	}
+	command = shellreduce.JoinCommand(argv)
+
+	cmdArgs := []string{"shell", "--command", command}
+	if boolArg(args, "measure_raw") {
+		cmdArgs = append(cmdArgs, "--measure")
+		if tokenModel := stringArg(args, "", "token_model"); strings.TrimSpace(tokenModel) != "" {
+			cmdArgs = append(cmdArgs, "--token-model", tokenModel)
+		}
+	}
+	cmd := e.newAgentctlCommand(ctx, cmdArgs...)
+	output, err := commandOutput(cmd, "shell")
+	if err != nil {
+		return "", err
+	}
+
+	env, err := protocol.DecodeEnvelope([]byte(output))
+	if err != nil {
+		return output, nil
+	}
+	if env.Status == envelope.StatusError {
+		return "", protocol.EnvelopeStatusErrorFromEnvelope(env)
+	}
+
+	if summary := summarizeToolData("shell", env.Data); summary != "" {
+		return summary, nil
+	}
+	body, err := json.MarshalIndent(env.Data, "", "  ")
+	if err != nil {
+		return output, nil
+	}
+	return string(body), nil
 }
 
 func (e *agentToolExecutor) executeThink(ctx context.Context, args map[string]any) (string, error) {
@@ -2309,6 +2364,23 @@ func summarizeToolData(label string, data any) string {
 		return ""
 	}
 	switch label {
+	case "shell":
+		route, _ := m["route"].(map[string]any)
+		summary := stringFromMap(m, "summary")
+		if summary == "" {
+			return ""
+		}
+		var b strings.Builder
+		b.WriteString("Structured shell\n")
+		writeKeyValueLine(&b, "Backend", firstNonEmptyString(stringFromMap(route, "skill"), stringFromMap(route, "native")))
+		writeKeyValueLine(&b, "Intent", stringFromMap(route, "intent"))
+		writeListLine(&b, "Notes", stringSliceFromMap(route, "notes"), 4)
+		b.WriteString(strings.TrimSpace(summary))
+		if measure := shellreduce.MeasureSummaryLine(asStringMap(m["measure"])); measure != "" {
+			b.WriteString("\n")
+			b.WriteString(measure)
+		}
+		return strings.TrimSpace(b.String())
 	case "context_show":
 		top, ok := m["top_of_mind"].(map[string]any)
 		if !ok {
@@ -2463,6 +2535,13 @@ func stringFromMap(m map[string]any, key string) string {
 	return ""
 }
 
+func asStringMap(value any) map[string]any {
+	if m, ok := value.(map[string]any); ok {
+		return m
+	}
+	return nil
+}
+
 func stringSliceFromMap(m map[string]any, key string) []string {
 	raw, ok := m[key].([]any)
 	if !ok {
@@ -2491,6 +2570,15 @@ func minInt(a, b int) int {
 		return a
 	}
 	return b
+}
+
+func roleSupportsStructuredShell(role types.AgentRole) bool {
+	switch role {
+	case types.RoleCoder, types.RoleReviewer, types.RoleFixer, types.RoleVerifier, types.RoleResearcher, types.RoleSubcallWorker, types.RoleOverseer:
+		return true
+	default:
+		return false
+	}
 }
 
 // buildToolDefsForRole returns tool definitions appropriate for the agent role.
@@ -2539,6 +2627,14 @@ func buildToolDefsForRole(role types.AgentRole, hasMailbox, hasBoard bool, allow
 			Name:        "fs_list_dir",
 			Description: "List files and directories in a directory",
 			Parameters:  json.RawMessage(`{"type":"object","properties":{"path":{"type":"string","description":"Directory path to list"}}}`),
+		})
+	}
+
+	if roleSupportsStructuredShell(role) {
+		tools = append(tools, engine.ToolDef{
+			Name:        "shell",
+			Description: "Route supported shell-style commands through structured reducers. Supported families: ls, tree, find, cat/read, grep/rg, git status/diff/log, go/cargo test, pytest, npm/pnpm/yarn test, ruff check, and docker ps. Returns compact summaries instead of raw shell output. This is not an arbitrary shell executor.",
+			Parameters:  json.RawMessage(`{"type":"object","properties":{"command":{"type":"string","description":"Supported shell-style command string, e.g. 'git log --stat -5', 'cargo test parser', 'pytest -k unit tests/', 'npm test --prefix packages/gui-agent', or 'docker ps'"},"measure_raw":{"type":"boolean","description":"Measure raw command output bytes and token estimates against the reduced summary"},"token_model":{"type":"string","description":"Tokenizer model or encoding for measurement (default cl100k_base)"}},"required":["command"]}`),
 		})
 	}
 
