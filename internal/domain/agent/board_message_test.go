@@ -15,6 +15,8 @@ func TestBoardMessageKind_Constants(t *testing.T) {
 		{BoardMessageKindInfo, "info"},
 		{BoardMessageKindAlert, "alert"},
 		{BoardMessageKindReviewRequest, "review_request"},
+		{BoardMessageKindTaskUpdate, "task_update"},
+		{BoardMessageKindLeadChange, "lead_change"},
 	}
 
 	for _, tt := range tests {

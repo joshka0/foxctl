@@ -412,7 +412,7 @@ func handleRoomMembersPatch(w http.ResponseWriter, r *http.Request, cfg config.C
 	})
 }
 
-// RoomDetailHandler serves /api/rooms/{id} and /api/rooms/{id}/messages.
+// RoomDetailHandler serves /api/rooms/{id} and room control subroutes.
 func RoomDetailHandler(cfg config.Config, log zerolog.Logger, events roomEventPublisher) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		path := strings.TrimPrefix(r.URL.Path, "/api/rooms/")
@@ -423,7 +423,78 @@ func RoomDetailHandler(cfg config.Config, log zerolog.Logger, events roomEventPu
 		}
 		roomID := strings.TrimSpace(parts[0])
 
+		if len(parts) >= 2 && parts[1] == "status" {
+			if r.Method != http.MethodGet {
+				httpError(w, http.StatusMethodNotAllowed, "method not allowed")
+				return
+			}
+			handleRoomStatusGet(w, r, cfg, log, roomID)
+			return
+		}
+
+		if len(parts) >= 2 && parts[1] == "inbox" {
+			if r.Method != http.MethodGet {
+				httpError(w, http.StatusMethodNotAllowed, "method not allowed")
+				return
+			}
+			handleRoomInboxGet(w, r, cfg, log, roomID)
+			return
+		}
+
+		if len(parts) >= 2 && parts[1] == "tasks" {
+			if len(parts) >= 4 {
+				switch r.Method {
+				case http.MethodPost:
+					handleRoomTaskAction(w, r, cfg, log, roomID, strings.TrimSpace(parts[2]), strings.TrimSpace(parts[3]))
+				default:
+					httpError(w, http.StatusMethodNotAllowed, "method not allowed")
+				}
+				return
+			}
+			if r.Method != http.MethodGet {
+				httpError(w, http.StatusMethodNotAllowed, "method not allowed")
+				return
+			}
+			handleRoomTasksGet(w, r, cfg, log, roomID)
+			return
+		}
+
+		if len(parts) >= 2 && parts[1] == "loop" {
+			if r.Method != http.MethodGet {
+				httpError(w, http.StatusMethodNotAllowed, "method not allowed")
+				return
+			}
+			handleRoomLoopGet(w, r, cfg, log, roomID)
+			return
+		}
+
+		if len(parts) >= 2 && parts[1] == "coordinator" {
+			if r.Method != http.MethodPost {
+				httpError(w, http.StatusMethodNotAllowed, "method not allowed")
+				return
+			}
+			handleRoomCoordinatorSet(w, r, cfg, log, roomID)
+			return
+		}
+
 		if len(parts) >= 2 && parts[1] == "messages" {
+			if len(parts) >= 3 && parts[2] == "resolve" {
+				if r.Method != http.MethodPost {
+					httpError(w, http.StatusMethodNotAllowed, "method not allowed")
+					return
+				}
+				handleRoomMessagesResolveBulk(w, r, cfg, log, roomID)
+				return
+			}
+			if len(parts) >= 4 {
+				switch r.Method {
+				case http.MethodPost:
+					handleRoomMessageAction(w, r, cfg, log, roomID, strings.TrimSpace(parts[2]), strings.TrimSpace(parts[3]))
+				default:
+					httpError(w, http.StatusMethodNotAllowed, "method not allowed")
+				}
+				return
+			}
 			switch r.Method {
 			case http.MethodGet:
 				handleRoomMessagesGet(w, r, cfg, log, roomID)
@@ -1184,10 +1255,11 @@ func normalizeBoardMessageKind(raw string) (agent.BoardMessageKind, error) {
 	}
 	switch kind {
 	case agent.BoardMessageKindInstruction, agent.BoardMessageKindInfo,
-		agent.BoardMessageKindAlert, agent.BoardMessageKindReviewRequest:
+		agent.BoardMessageKindAlert, agent.BoardMessageKindReviewRequest,
+		agent.BoardMessageKindTaskUpdate, agent.BoardMessageKindLeadChange:
 		return kind, nil
 	default:
-		return "", errors.New("invalid kind: must be one of instruction, info, alert, review_request")
+		return "", errors.New("invalid kind: must be one of instruction, info, alert, review_request, task_update, lead_change")
 	}
 }
 

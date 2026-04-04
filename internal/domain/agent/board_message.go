@@ -23,6 +23,8 @@ const (
 	BoardMessageKindReviewRequest BoardMessageKind = "review_request"
 	// BoardMessageKindTaskUpdate represents a task lifecycle update shared through a room.
 	BoardMessageKindTaskUpdate BoardMessageKind = "task_update"
+	// BoardMessageKindLeadChange represents a durable coordinator handoff event.
+	BoardMessageKindLeadChange BoardMessageKind = "lead_change"
 )
 
 // BoardMessageStatus defines the read/ack status of a message.
