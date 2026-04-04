@@ -685,8 +685,12 @@ func TestRunRoomStatusIncludesPulseAndBacklog(t *testing.T) {
 		if participant["actionable_inbox_count"] != float64(1) {
 			t.Fatalf("actionable_inbox_count=%v want 1", participant["actionable_inbox_count"])
 		}
-		if _, ok := participant["latest_actionable"].(map[string]any); !ok {
+		latestActionable, ok := participant["latest_actionable"].(map[string]any)
+		if !ok {
 			t.Fatalf("latest_actionable missing for gemini-a participant=%v", participant)
+		}
+		if _, ok := latestActionable["message"]; ok {
+			t.Fatalf("latest_actionable unexpectedly contains full message payload: %v", latestActionable)
 		}
 		foundLatest = true
 	}
@@ -739,6 +743,33 @@ func TestBuildRoomStatusEntriesCollapsesHistoricalBacklogBySender(t *testing.T) 
 	}
 	if entries[1].ID != "m3" {
 		t.Fatalf("entries[1].ID=%q want m3", entries[1].ID)
+	}
+}
+
+func TestRoomStatusEntryFromInboxOmitsFullMessagePayload(t *testing.T) {
+	entry := roomStatusEntryFromInbox(roomInboxEntry{
+		ID:        "m1",
+		Sender:    "human-a",
+		Recipient: "gemini-a",
+		Subject:   "Need review",
+		Priority:  2,
+		Status:    agent.BoardMessageStatusUnread,
+		CreatedAt: time.Date(2026, 4, 4, 20, 0, 0, 0, time.UTC),
+		Category:  "direct",
+		Flags:     []string{"REPLY-EXPECTED"},
+		Preview:   "Need review",
+		Message: agent.BoardMessage{
+			ID:      "m1",
+			Body:    "full body",
+			Subject: "Need review",
+		},
+	})
+	raw, err := json.Marshal(entry)
+	if err != nil {
+		t.Fatalf("json.Marshal: %v", err)
+	}
+	if bytes.Contains(raw, []byte(`"message"`)) {
+		t.Fatalf("unexpected message payload in %s", raw)
 	}
 }
 

@@ -411,14 +411,14 @@ func runRoomShow(cmd *cobra.Command, workspace, roomID, actorID string, limit in
 }
 
 type roomStatusParticipant struct {
-	ActorID              string          `json:"actor_id"`
-	Role                 string          `json:"role,omitempty"`
-	LastActiveAt         *time.Time      `json:"last_active_at,omitempty"`
-	Status               string          `json:"status"`
-	AssignedTaskCount    int             `json:"assigned_task_count"`
-	OwnedTaskCount       int             `json:"owned_task_count"`
-	ActionableInboxCount int             `json:"actionable_inbox_count"`
-	LatestActionable     *roomInboxEntry `json:"latest_actionable,omitempty"`
+	ActorID              string           `json:"actor_id"`
+	Role                 string           `json:"role,omitempty"`
+	LastActiveAt         *time.Time       `json:"last_active_at,omitempty"`
+	Status               string           `json:"status"`
+	AssignedTaskCount    int              `json:"assigned_task_count"`
+	OwnedTaskCount       int              `json:"owned_task_count"`
+	ActionableInboxCount int              `json:"actionable_inbox_count"`
+	LatestActionable     *roomStatusEntry `json:"latest_actionable,omitempty"`
 }
 
 type roomTaskPulseSummary struct {
@@ -431,10 +431,23 @@ type roomTaskPulseSummary struct {
 }
 
 type roomStatusBacklog struct {
-	ParticipantsWithPending int              `json:"participants_with_pending"`
-	PendingAcks             int              `json:"pending_acks"`
-	PendingReplies          int              `json:"pending_replies"`
-	LatestByParticipant     []roomInboxEntry `json:"latest_by_participant,omitempty"`
+	ParticipantsWithPending int               `json:"participants_with_pending"`
+	PendingAcks             int               `json:"pending_acks"`
+	PendingReplies          int               `json:"pending_replies"`
+	LatestByParticipant     []roomStatusEntry `json:"latest_by_participant,omitempty"`
+}
+
+type roomStatusEntry struct {
+	ID        string                   `json:"id"`
+	Sender    string                   `json:"sender"`
+	Recipient string                   `json:"recipient"`
+	Subject   string                   `json:"subject"`
+	Priority  int                      `json:"priority"`
+	Status    agent.BoardMessageStatus `json:"status"`
+	CreatedAt time.Time                `json:"created_at"`
+	Category  string                   `json:"category"`
+	Flags     []string                 `json:"flags,omitempty"`
+	Preview   string                   `json:"preview,omitempty"`
 }
 
 func runRoomStatus(cmd *cobra.Command, workspace, roomID string, limit int, staleAfter time.Duration) error {
@@ -1305,7 +1318,8 @@ func buildRoomStatusParticipants(room agent.RoomSummary, messages []agent.BoardM
 		p.ActionableInboxCount = len(entries)
 		if len(entries) > 0 {
 			entry := entries[0]
-			p.LatestActionable = &entry
+			actionable := roomStatusEntryFromInbox(entry)
+			p.LatestActionable = &actionable
 		}
 		participants = append(participants, p)
 	}
@@ -1349,7 +1363,7 @@ func buildRoomStatusBacklog(room agent.RoomSummary, messages []agent.BoardMessag
 			continue
 		}
 		backlog.ParticipantsWithPending++
-		backlog.LatestByParticipant = append(backlog.LatestByParticipant, entries[0])
+		backlog.LatestByParticipant = append(backlog.LatestByParticipant, roomStatusEntryFromInbox(entries[0]))
 		for _, entry := range entries {
 			for _, flag := range entry.Flags {
 				switch flag {
@@ -1410,6 +1424,21 @@ func roomStatusEntryMoreRecent(left, right roomInboxEntry) bool {
 		return left.Priority < right.Priority
 	}
 	return left.ID < right.ID
+}
+
+func roomStatusEntryFromInbox(entry roomInboxEntry) roomStatusEntry {
+	return roomStatusEntry{
+		ID:        entry.ID,
+		Sender:    entry.Sender,
+		Recipient: entry.Recipient,
+		Subject:   entry.Subject,
+		Priority:  entry.Priority,
+		Status:    entry.Status,
+		CreatedAt: entry.CreatedAt,
+		Category:  entry.Category,
+		Flags:     append([]string(nil), entry.Flags...),
+		Preview:   entry.Preview,
+	}
 }
 
 func roomMemberRole(members []agent.RoomMember, actorID string) string {

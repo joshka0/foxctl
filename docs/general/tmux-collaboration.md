@@ -319,7 +319,7 @@ The intended model is:
 - `--ack-required` marks a message as requiring an explicit acknowledgment
 - `room ack` marks one or more room messages as `acked` in the durable log
 - `room inbox` shows the actionable queue for one participant instead of the full room archive
-- `room status` shows the coordinator-facing pulse for participants, task state, stale owned work, and backlog
+- `room status` shows the coordinator-facing pulse for participants, task state, stale owned work, and compact actionable backlog summaries
 - `room subscribe` reads or tails the room log in any terminal
 - `room relay --backend tmux` fans new room messages into tmux member panes by
   matching room member ids to tmux pane labels
