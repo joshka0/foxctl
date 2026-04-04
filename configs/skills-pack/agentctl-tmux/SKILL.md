@@ -132,6 +132,18 @@ Child panes can send a private message to the configured parent with:
 agentctl tmux send-parent "Need clarification on the retry helper extraction."
 ```
 
+For internal `agentctl` agents, you can also allocate a dedicated tmux pane at
+spawn time and have it switch into `agentctl agent watch` after the spawn:
+
+```bash
+agentctl agent spawn \
+  --role researcher \
+  --prompt "Inspect mailbox ack behavior" \
+  --mux-backend tmux \
+  --mux-session collab-runtime \
+  --spawn-in-pane
+```
+
 ### Interactive bridge
 
 `tmux-bridge` remains available for lower-level control:

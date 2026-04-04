@@ -339,6 +339,75 @@ func TestPrepareSessionInjectsDirectRoomEnvForTopLevelPanes(t *testing.T) {
 	}
 }
 
+func TestCreatePaneAllocatesAndRespawnsExactPane(t *testing.T) {
+	shell := defaultPaneCommand()
+	runner := &sequenceRunner{
+		steps: []sequenceStep{
+			{key: "tmux new-session -d -P -F #{pane_id} -s pane-smoke -c /repo " + shell, stdout: "%51\n"},
+			{key: "tmux set-option -p -t %51 @name worker-a"},
+			{key: "tmux select-layout -t pane-smoke tiled"},
+			{key: "tmux respawn-pane -k -t %51 -c /repo env AGENTCTL_PARTICIPANT_ID=tmux:pane-smoke:%51 AGENTCTL_MUX_BACKEND=tmux AGENTCTL_MUX_SESSION=pane-smoke AGENTCTL_MUX_PANE_ID=%51 AGENTCTL_PARENT_PARTICIPANT_ID=parent-a AGENTCTL_PARENT_AGENT_ID=agent:parent-1 watch-cmd"},
+			{key: "tmux display-message -t %51 -p " + listFormat, stdout: "%51" + fieldSep + "pane-smoke" + fieldSep + "0" + fieldSep + "0" + fieldSep + "main" + fieldSep + "111" + fieldSep + "80" + fieldSep + "24" + fieldSep + "worker-a" + fieldSep + "/repo" + fieldSep + "watch-cmd" + fieldSep + "1\n"},
+			{key: "tmux display-message -t %51 -p " + listFormat, stdout: "%51" + fieldSep + "pane-smoke" + fieldSep + "0" + fieldSep + "0" + fieldSep + "main" + fieldSep + "111" + fieldSep + "80" + fieldSep + "24" + fieldSep + "worker-a" + fieldSep + "/repo" + fieldSep + "watch-cmd" + fieldSep + "1\n"},
+		},
+	}
+	client := NewWithRunner(runner, map[string]string{})
+
+	got, err := client.CreatePane(context.Background(), CreatePaneOptions{
+		Session:           "pane-smoke",
+		CWD:               "/repo",
+		Label:             "worker-a",
+		Command:           "watch-cmd",
+		ParticipantID:     "tmux:pane-smoke:%51",
+		ParentParticipant: "parent-a",
+		ParentAgentID:     "agent:parent-1",
+	})
+	if err != nil {
+		t.Fatalf("CreatePane() error = %v", err)
+	}
+	if !got.Created {
+		t.Fatal("expected Created = true")
+	}
+	if got.Pane.ID != "%51" {
+		t.Fatalf("Pane.ID = %q, want %%51", got.Pane.ID)
+	}
+	if got.Pane.Label != "worker-a" {
+		t.Fatalf("Pane.Label = %q, want worker-a", got.Pane.Label)
+	}
+}
+
+func TestRespawnPaneReplacesExactTarget(t *testing.T) {
+	runner := &sequenceRunner{
+		steps: []sequenceStep{
+			{key: "tmux list-sessions", stdout: "ok\n"},
+			{key: "tmux display-message -t %61 -p #{pane_id}", stdout: "%61\n"},
+			{key: "tmux list-sessions", stdout: "ok\n"},
+			{key: "tmux display-message -t %61 -p " + listFormat, stdout: "%61" + fieldSep + "collab" + fieldSep + "0" + fieldSep + "0" + fieldSep + "main" + fieldSep + "111" + fieldSep + "80" + fieldSep + "24" + fieldSep + "worker-b" + fieldSep + "/repo" + fieldSep + "zsh" + fieldSep + "1\n"},
+			{key: "tmux respawn-pane -k -t %61 -c /repo env AGENTCTL_PARTICIPANT_ID=tmux:collab:%61 AGENTCTL_MUX_BACKEND=tmux AGENTCTL_MUX_SESSION=collab AGENTCTL_MUX_PANE_ID=%61 AGENTCTL_PARENT_PARTICIPANT_ID=parent-a AGENTCTL_PARENT_AGENT_ID=agent:parent-1 watch-cmd"},
+			{key: "tmux display-message -t %61 -p " + listFormat, stdout: "%61" + fieldSep + "collab" + fieldSep + "0" + fieldSep + "0" + fieldSep + "main" + fieldSep + "111" + fieldSep + "80" + fieldSep + "24" + fieldSep + "worker-b" + fieldSep + "/repo" + fieldSep + "watch-cmd" + fieldSep + "1\n"},
+		},
+	}
+	client := NewWithRunner(runner, map[string]string{})
+
+	got, err := client.RespawnPane(context.Background(), RespawnPaneOptions{
+		Target:            "%61",
+		CWD:               "/repo",
+		Command:           "watch-cmd",
+		ParticipantID:     "tmux:collab:%61",
+		ParentParticipant: "parent-a",
+		ParentAgentID:     "agent:parent-1",
+	})
+	if err != nil {
+		t.Fatalf("RespawnPane() error = %v", err)
+	}
+	if got.ResolvedTarget != "%61" {
+		t.Fatalf("ResolvedTarget = %q, want %%61", got.ResolvedTarget)
+	}
+	if got.Pane.CurrentCommand != "watch-cmd" {
+		t.Fatalf("Pane.CurrentCommand = %q, want watch-cmd", got.Pane.CurrentCommand)
+	}
+}
+
 func TestNormalizePrepareOptionsDefaults(t *testing.T) {
 	got, err := normalizePrepareOptions(PrepareOptions{Panes: 2})
 	if err != nil {

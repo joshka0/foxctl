@@ -370,6 +370,7 @@ Implemented in the launcher and room/tmux surfaces:
 4. `agentctl tmux send-parent` gives child panes a direct parent path without joining rooms
 5. `agentctl agent spawn` / daemon spawn / persisted agent metadata now carry a typed `terminal_binding` object
 6. overseer child sessions inherit backend/session/parent-private defaults from the parent session binding
+7. `agentctl agent spawn --spawn-in-pane --mux-backend tmux` can allocate an exact tmux pane, derive a canonical participant id from that pane, and repurpose it into `agentctl agent watch <agent-id>`
 
 Still pending:
 

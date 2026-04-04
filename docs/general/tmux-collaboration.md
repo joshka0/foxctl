@@ -195,6 +195,47 @@ agentctl tmux send-parent "Blocked on the mailbox retry path."
 
 `send-parent` resolves the target from `AGENTCTL_PARENT_PARTICIPANT_ID`.
 
+### Agent spawn into a tmux pane
+
+`agentctl agent spawn` can now allocate a dedicated tmux pane, bind a durable
+canonical participant id from the real pane id, and repurpose that pane into an
+`agentctl agent watch` stream after the spawn succeeds.
+
+Example:
+
+```bash
+agentctl agent spawn \
+  --role researcher \
+  --prompt "Inspect mailbox ack behavior" \
+  --mux-backend tmux \
+  --mux-session collab-runtime \
+  --spawn-in-pane
+```
+
+This currently supports `tmux` only. The pane is allocated first, the binding is
+persisted as typed `terminal_binding` metadata on the spawned agent, and the
+pane is then respawned into:
+
+```bash
+agentctl agent watch <agent-id>
+```
+
+For child agents, combine it with parent-private metadata:
+
+```bash
+agentctl agent spawn \
+  --role coder \
+  --prompt "Extract retry helper" \
+  --mux-backend tmux \
+  --mux-session collab-runtime \
+  --parent-participant codex-a \
+  --parent-agent-id agent:parent-1 \
+  --spawn-in-pane
+```
+
+That keeps the child parent-private by default while still giving it a dedicated
+tmux presence and durable terminal binding metadata.
+
 ## Room Surface
 
 Rooms are durable coordination timelines backed by the blackboard store. They

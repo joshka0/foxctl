@@ -130,6 +130,47 @@ type PrepareResult struct {
 	Panes             []Pane   `json:"panes"`
 }
 
+// CreatePaneOptions describes an exact single-pane allocation request.
+type CreatePaneOptions struct {
+	Session           string `json:"session"`
+	CWD               string `json:"cwd,omitempty"`
+	Label             string `json:"label,omitempty"`
+	Command           string `json:"command,omitempty"`
+	ParticipantID     string `json:"participant_id,omitempty"`
+	ParentParticipant string `json:"parent_participant,omitempty"`
+	ParentAgentID     string `json:"parent_agent_id,omitempty"`
+	RoomID            string `json:"room_id,omitempty"`
+	RoomAccess        string `json:"room_access,omitempty"`
+}
+
+// CreatePaneResult describes one newly allocated pane.
+type CreatePaneResult struct {
+	Session       string `json:"session"`
+	Created       bool   `json:"created"`
+	Pane          Pane   `json:"pane"`
+	AttachCommand string `json:"attach_command"`
+	SocketMode    string `json:"socket_mode"`
+}
+
+// RespawnPaneOptions describes one exact pane respawn request.
+type RespawnPaneOptions struct {
+	Target            string `json:"target"`
+	CWD               string `json:"cwd,omitempty"`
+	Command           string `json:"command"`
+	ParticipantID     string `json:"participant_id,omitempty"`
+	ParentParticipant string `json:"parent_participant,omitempty"`
+	ParentAgentID     string `json:"parent_agent_id,omitempty"`
+	RoomID            string `json:"room_id,omitempty"`
+	RoomAccess        string `json:"room_access,omitempty"`
+}
+
+// RespawnPaneResult describes one pane after respawn.
+type RespawnPaneResult struct {
+	Target         string `json:"target"`
+	ResolvedTarget string `json:"resolved_target"`
+	Pane           Pane   `json:"pane"`
+}
+
 // BridgeMessage is one structured tmux-bridge line parsed from pane scrollback.
 type BridgeMessage struct {
 	Raw     string `json:"raw"`
@@ -587,6 +628,79 @@ func (c *Client) AttachOrSwitch(ctx context.Context, session string) error {
 	return cmd.Run()
 }
 
+// CreatePane allocates one pane in a tmux session, labels it, and optionally
+// respawns it with injected AGENTCTL_* identity metadata.
+func (c *Client) CreatePane(ctx context.Context, opts CreatePaneOptions) (CreatePaneResult, error) {
+	session := strings.TrimSpace(opts.Session)
+	if session == "" {
+		session = defaultSessionName
+	}
+	socket := c.socketForCreate()
+	command := strings.TrimSpace(opts.Command)
+	if command == "" {
+		command = defaultPaneCommand()
+	}
+	cwd := strings.TrimSpace(opts.CWD)
+	created, paneID, err := c.createSinglePane(ctx, socket, session, cwd, defaultPaneCommand())
+	if err != nil {
+		return CreatePaneResult{}, err
+	}
+	label := strings.TrimSpace(opts.Label)
+	if label != "" {
+		if _, err := c.runTmuxWithSocket(ctx, socket, "set-option", "-p", "-t", paneID, "@name", label); err != nil {
+			return CreatePaneResult{}, err
+		}
+	}
+	if _, err := c.runTmuxWithSocket(ctx, socket, "select-layout", "-t", session, "tiled"); err != nil {
+		return CreatePaneResult{}, err
+	}
+	if strings.TrimSpace(command) != defaultPaneCommand() || hasPaneIdentityEnv(opts.ParticipantID, opts.ParentParticipant, opts.ParentAgentID, opts.RoomID) {
+		if _, err := c.respawnPaneWithSocket(ctx, socket, paneID, session, cwd, command, opts.ParticipantID, opts.ParentParticipant, opts.ParentAgentID, opts.RoomID, opts.RoomAccess); err != nil {
+			return CreatePaneResult{}, err
+		}
+	}
+	pane, err := c.describePaneWithSocket(ctx, socket, paneID)
+	if err != nil {
+		return CreatePaneResult{}, err
+	}
+	return CreatePaneResult{
+		Session:       session,
+		Created:       created,
+		Pane:          pane,
+		AttachCommand: c.attachCommand(session, socket),
+		SocketMode:    socketMode(socket),
+	}, nil
+}
+
+// RespawnPane replaces an exact pane command while preserving pane identity metadata.
+func (c *Client) RespawnPane(ctx context.Context, opts RespawnPaneOptions) (RespawnPaneResult, error) {
+	command := strings.TrimSpace(opts.Command)
+	if command == "" {
+		return RespawnPaneResult{}, fmt.Errorf("command is required")
+	}
+	resolved, err := c.ResolveTarget(ctx, opts.Target)
+	if err != nil {
+		return RespawnPaneResult{}, err
+	}
+	socket, err := c.detectSocket(ctx)
+	if err != nil {
+		return RespawnPaneResult{}, err
+	}
+	currentPane, err := c.describePaneWithSocket(ctx, socket, resolved)
+	if err != nil {
+		return RespawnPaneResult{}, err
+	}
+	pane, err := c.respawnPaneWithSocket(ctx, socket, resolved, currentPane.Session, strings.TrimSpace(opts.CWD), command, opts.ParticipantID, opts.ParentParticipant, opts.ParentAgentID, opts.RoomID, opts.RoomAccess)
+	if err != nil {
+		return RespawnPaneResult{}, err
+	}
+	return RespawnPaneResult{
+		Target:         opts.Target,
+		ResolvedTarget: resolved,
+		Pane:           pane,
+	}, nil
+}
+
 func (c *Client) validateTarget(ctx context.Context, target string) error {
 	_, err := c.runTmux(ctx, "display-message", "-t", target, "-p", "#{pane_id}")
 	if err != nil {
@@ -596,7 +710,15 @@ func (c *Client) validateTarget(ctx context.Context, target string) error {
 }
 
 func (c *Client) describePane(ctx context.Context, target string) (Pane, error) {
-	stdout, err := c.runTmux(ctx, "display-message", "-t", target, "-p", listFormat)
+	socket, err := c.detectSocket(ctx)
+	if err != nil {
+		return Pane{}, err
+	}
+	return c.describePaneWithSocket(ctx, socket, target)
+}
+
+func (c *Client) describePaneWithSocket(ctx context.Context, socket, target string) (Pane, error) {
+	stdout, err := c.runTmuxWithSocket(ctx, socket, "display-message", "-t", target, "-p", listFormat)
 	if err != nil {
 		return Pane{}, err
 	}
@@ -901,6 +1023,31 @@ func (c *Client) createSessionIfNeeded(ctx context.Context, socket, session, cwd
 	return true, nil
 }
 
+func (c *Client) createSinglePane(ctx context.Context, socket, session, cwd, paneCommand string) (bool, string, error) {
+	args := []string{"new-session", "-d", "-P", "-F", "#{pane_id}", "-s", session}
+	if strings.TrimSpace(cwd) != "" {
+		args = append(args, "-c", cwd)
+	}
+	args = append(args, paneCommand)
+	stdout, err := c.runTmuxWithSocket(ctx, socket, args...)
+	if err == nil {
+		return true, strings.TrimSpace(stdout), nil
+	}
+	if !strings.Contains(err.Error(), "duplicate session") {
+		return false, "", err
+	}
+	args = []string{"split-window", "-d", "-P", "-F", "#{pane_id}", "-t", session}
+	if strings.TrimSpace(cwd) != "" {
+		args = append(args, "-c", cwd)
+	}
+	args = append(args, paneCommand)
+	stdout, err = c.runTmuxWithSocket(ctx, socket, args...)
+	if err != nil {
+		return false, "", err
+	}
+	return false, strings.TrimSpace(stdout), nil
+}
+
 func (c *Client) ensureSessionPaneCount(ctx context.Context, socket string, plan preparePlan) ([]Pane, error) {
 	panes, err := c.listPanesForSession(ctx, socket, plan.session)
 	if err != nil {
@@ -949,29 +1096,64 @@ func (c *Client) ensurePaneCommands(ctx context.Context, socket string, panes []
 	return nil
 }
 
+func hasPaneIdentityEnv(participantID, parentParticipant, parentAgentID, roomID string) bool {
+	return strings.TrimSpace(participantID) != "" ||
+		strings.TrimSpace(parentParticipant) != "" ||
+		strings.TrimSpace(parentAgentID) != "" ||
+		strings.TrimSpace(roomID) != ""
+}
+
+func (c *Client) respawnPaneWithSocket(ctx context.Context, socket, target, session, cwd, command, participantID, parentParticipant, parentAgentID, roomID, roomAccess string) (Pane, error) {
+	args := []string{"respawn-pane", "-k", "-t", target}
+	if strings.TrimSpace(cwd) != "" {
+		args = append(args, "-c", cwd)
+	}
+	args = append(args, paneCommandForIdentity(command, participantID, parentParticipant, parentAgentID, roomID, roomAccess, session, target))
+	if _, err := c.runTmuxWithSocket(ctx, socket, args...); err != nil {
+		return Pane{}, err
+	}
+	return c.describePaneWithSocket(ctx, socket, target)
+}
+
 func (p preparePlan) hasInjectedEnv() bool {
 	return p.parentParticipant != "" || p.parentAgentID != "" || p.roomID != ""
 }
 
 func paneCommandForPane(plan preparePlan, pane Pane) string {
+	return paneCommandForIdentity(
+		plan.paneCommand,
+		strings.TrimSpace(pane.Label),
+		plan.parentParticipant,
+		plan.parentAgentID,
+		plan.roomID,
+		plan.roomAccess,
+		plan.session,
+		pane.ID,
+	)
+}
+
+func paneCommandForIdentity(command, participantID, parentParticipant, parentAgentID, roomID, roomAccess, session, paneID string) string {
 	env := []string{
-		"AGENTCTL_PARTICIPANT_ID=" + shellQuote(strings.TrimSpace(pane.Label)),
+		"AGENTCTL_PARTICIPANT_ID=" + shellQuote(strings.TrimSpace(participantID)),
 		"AGENTCTL_MUX_BACKEND=tmux",
-		"AGENTCTL_MUX_SESSION=" + shellQuote(strings.TrimSpace(plan.session)),
-		"AGENTCTL_MUX_PANE_ID=" + shellQuote(strings.TrimSpace(pane.ID)),
+		"AGENTCTL_MUX_SESSION=" + shellQuote(strings.TrimSpace(session)),
+		"AGENTCTL_MUX_PANE_ID=" + shellQuote(strings.TrimSpace(paneID)),
 	}
-	if value := strings.TrimSpace(plan.parentParticipant); value != "" {
+	if value := strings.TrimSpace(parentParticipant); value != "" {
 		env = append(env, "AGENTCTL_PARENT_PARTICIPANT_ID="+shellQuote(value))
 	}
-	if value := strings.TrimSpace(plan.parentAgentID); value != "" {
+	if value := strings.TrimSpace(parentAgentID); value != "" {
 		env = append(env, "AGENTCTL_PARENT_AGENT_ID="+shellQuote(value))
 	}
-	if strings.TrimSpace(plan.roomAccess) == "direct" {
-		if value := strings.TrimSpace(plan.roomID); value != "" {
+	if strings.TrimSpace(roomAccess) == "direct" {
+		if value := strings.TrimSpace(roomID); value != "" {
 			env = append(env, "AGENTCTL_ROOM_ID="+shellQuote(value))
 		}
 	}
-	return "env " + strings.Join(env, " ") + " " + plan.paneCommand
+	if strings.TrimSpace(command) == "" {
+		command = defaultPaneCommand()
+	}
+	return "env " + strings.Join(env, " ") + " " + command
 }
 
 func (c *Client) labelSessionPanes(ctx context.Context, socket string, panes []Pane, labelPrefix string) error {

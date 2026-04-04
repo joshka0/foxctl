@@ -28,6 +28,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/storage/agents"
 	"github.com/jkatigb/agentctl/internal/storage/mailbox"
 	"github.com/jkatigb/agentctl/internal/storage/sessions"
+	"github.com/jkatigb/agentctl/internal/tmuxbridge"
 	libsqlevents "github.com/jkatigb/agentctl/internal/v2/adapters/libsql/events"
 	libsqlprojections "github.com/jkatigb/agentctl/internal/v2/adapters/libsql/projections"
 	v2ask "github.com/jkatigb/agentctl/internal/v2/core/ask"
@@ -184,6 +185,7 @@ var (
 	spawnParentAgentID     string
 	spawnRoomID            string
 	spawnRoomAccess        string
+	spawnInPane            bool
 )
 
 // Flags for agent run
@@ -285,6 +287,7 @@ func init() {
 	agentSpawnCmd.Flags().StringVar(&spawnParentAgentID, "parent-agent-id", "", "Parent agent id for parent-private child agents")
 	agentSpawnCmd.Flags().StringVar(&spawnRoomID, "room-id", "", "Room id for directly room-visible agents")
 	agentSpawnCmd.Flags().StringVar(&spawnRoomAccess, "room-access", "default", "Room access policy for this agent: default|direct|none")
+	agentSpawnCmd.Flags().BoolVar(&spawnInPane, "spawn-in-pane", false, "Allocate a dedicated tmux pane for the agent and repurpose it into agent watch output")
 
 	// Run flags
 	agentRunCmd.Flags().StringVar(&runCompanionMode, "companion-mode", "", "Memory mode for conversation memory: standard (40K tokens) or roleplay (50K tokens)")
@@ -362,6 +365,84 @@ func currentSpawnTerminalBinding() agent.TerminalBinding {
 	})
 }
 
+func deriveSpawnPaneLabel() string {
+	for _, value := range []string{spawnSlug, spawnName, spawnRole} {
+		value = strings.TrimSpace(strings.ToLower(value))
+		if value == "" {
+			continue
+		}
+		value = strings.ReplaceAll(value, " ", "-")
+		value = strings.ReplaceAll(value, "/", "-")
+		value = strings.ReplaceAll(value, ":", "-")
+		value = strings.Trim(value, "-")
+		if value != "" {
+			return value
+		}
+	}
+	return "agent"
+}
+
+func maybePrepareSpawnPane(ctx context.Context, binding agent.TerminalBinding) (agent.TerminalBinding, map[string]any, error) {
+	if !spawnInPane {
+		return binding, nil, nil
+	}
+	binding = agent.NormalizeTerminalBinding(binding)
+	if strings.TrimSpace(binding.Backend) == "" {
+		binding.Backend = "tmux"
+	}
+	if binding.Backend != "tmux" {
+		return binding, nil, fmt.Errorf("spawn-in-pane currently supports only tmux")
+	}
+	client := tmuxbridge.New()
+	result, err := client.CreatePane(ctx, tmuxbridge.CreatePaneOptions{
+		Session: strings.TrimSpace(binding.Session),
+		CWD:     currentSpawnWorkspaceRoot(),
+		Label:   deriveSpawnPaneLabel(),
+	})
+	if err != nil {
+		return binding, nil, err
+	}
+	binding.Backend = "tmux"
+	binding.Session = result.Session
+	binding.PaneID = result.Pane.ID
+	if strings.TrimSpace(binding.ParticipantID) == "" {
+		binding.ParticipantID = "tmux:" + result.Session + ":" + result.Pane.ID
+	}
+	binding = agent.NormalizeTerminalBinding(binding)
+	return binding, map[string]any{
+		"pane":           result.Pane,
+		"attach_command": result.AttachCommand,
+		"socket_mode":    result.SocketMode,
+	}, nil
+}
+
+func maybeRespawnSpawnPane(ctx context.Context, binding agent.TerminalBinding, agentID string) (map[string]any, error) {
+	if !spawnInPane {
+		return nil, nil
+	}
+	binding = agent.NormalizeTerminalBinding(binding)
+	if binding.Backend != "tmux" || strings.TrimSpace(binding.PaneID) == "" {
+		return nil, nil
+	}
+	client := tmuxbridge.New()
+	result, err := client.RespawnPane(ctx, tmuxbridge.RespawnPaneOptions{
+		Target:            binding.PaneID,
+		CWD:               currentSpawnWorkspaceRoot(),
+		Command:           "agentctl agent watch " + strings.TrimSpace(agentID),
+		ParticipantID:     binding.ParticipantID,
+		ParentParticipant: binding.ParentParticipantID,
+		ParentAgentID:     binding.ParentAgentID,
+		RoomID:            binding.RoomID,
+		RoomAccess:        binding.RoomAccess,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{
+		"pane": result.Pane,
+	}, nil
+}
+
 func resolveSpawnPromptVariantTarget(cfg config.Config, executionLayer agent.ExecutionLayer) (string, string) {
 	provider := strings.TrimSpace(spawnLLMProvider)
 	if provider == "" {
@@ -386,6 +467,7 @@ func runAgentSpawnWithRoute(cmd *cobra.Command) error {
 	cfg := config.MustFromContext(ctx)
 	executionLayer := resolvedSpawnExecutionLayer(spawnDispatcher)
 	terminalBinding := currentSpawnTerminalBinding()
+	var spawnPaneMetadata map[string]any
 
 	// Apply chat/roleplay companion defaults if --chat flag is set
 	// These can be overridden by explicit flags
@@ -473,6 +555,13 @@ func runAgentSpawnWithRoute(cmd *cobra.Command) error {
 
 	// Jido-managed agents are persisted locally but started in the Jido runtime instead
 	// of the classic daemon/runtime path.
+	if !spawnDryRun {
+		var err error
+		terminalBinding, spawnPaneMetadata, err = maybePrepareSpawnPane(ctx, terminalBinding)
+		if err != nil {
+			return writeErrorEnvelope(cmd, "agent/spawn", string(protocol.ErrorCodeERuntime), fmt.Sprintf("failed to prepare tmux pane: %v", err))
+		}
+	}
 	if executionLayer == agent.ExecutionLayerJido {
 		req := agentmanager.SpawnRequest{
 			ParentNS:        spawnParentNS,
@@ -501,26 +590,27 @@ func runAgentSpawnWithRoute(cmd *cobra.Command) error {
 
 		if spawnDryRun {
 			data := map[string]any{
-				"dry_run":          true,
-				"would_spawn":      true,
-				"dispatcher":       "jido",
-				"execution_layer":  string(executionLayer),
-				"name":             req.Name,
-				"slug":             req.Slug,
-				"role":             req.Role,
-				"skills_allow":     req.SkillsAllow,
-				"share_bb":         req.ShareBB,
-				"memory_scope":     string(req.MemoryScope),
-				"memory_retention": string(req.MemoryRetention),
-				"llm_provider":     req.LLMProvider,
-				"llm_model":        req.LLMModel,
-				"exec_mode":        string(req.ExecMode),
-				"max_iterations":   req.MaxIterations,
-				"max_auto_turns":   req.MaxAutoTurns,
-				"think_interval":   req.ThinkInterval,
-				"terminal_binding": req.TerminalBinding,
-				"has_prompt":       len(req.Prompt) > 0,
-				"has_policy":       req.Policy.CPU > 0 || req.Policy.MemoryMB > 0 || req.Policy.Timeout != "",
+				"dry_run":             true,
+				"would_spawn":         true,
+				"dispatcher":          "jido",
+				"execution_layer":     string(executionLayer),
+				"name":                req.Name,
+				"slug":                req.Slug,
+				"role":                req.Role,
+				"skills_allow":        req.SkillsAllow,
+				"share_bb":            req.ShareBB,
+				"memory_scope":        string(req.MemoryScope),
+				"memory_retention":    string(req.MemoryRetention),
+				"llm_provider":        req.LLMProvider,
+				"llm_model":           req.LLMModel,
+				"exec_mode":           string(req.ExecMode),
+				"max_iterations":      req.MaxIterations,
+				"max_auto_turns":      req.MaxAutoTurns,
+				"think_interval":      req.ThinkInterval,
+				"terminal_binding":    req.TerminalBinding,
+				"would_spawn_in_pane": spawnInPane,
+				"has_prompt":          len(req.Prompt) > 0,
+				"has_policy":          req.Policy.CPU > 0 || req.Policy.MemoryMB > 0 || req.Policy.Timeout != "",
 			}
 			return writeOK(cmd, "agent/spawn", data, "run", nil)
 		}
@@ -533,6 +623,10 @@ func runAgentSpawnWithRoute(cmd *cobra.Command) error {
 		if err != nil {
 			return writeErrorEnvelope(cmd, "agent/spawn", string(protocol.ErrorCodeERuntime), fmt.Sprintf("failed to spawn jido agent: %v", err))
 		}
+		watchPane, err := maybeRespawnSpawnPane(ctx, terminalBinding, resp.AgentID)
+		if err != nil {
+			return writeErrorEnvelope(cmd, "agent/spawn", string(protocol.ErrorCodeERuntime), fmt.Sprintf("failed to attach tmux pane watcher: %v", err))
+		}
 
 		data := map[string]any{
 			"agent_id":         resp.AgentID,
@@ -542,6 +636,8 @@ func runAgentSpawnWithRoute(cmd *cobra.Command) error {
 			"execution_layer":  string(executionLayer),
 			"via_daemon":       false,
 			"terminal_binding": terminalBinding,
+			"spawn_pane":       spawnPaneMetadata,
+			"watch_pane":       watchPane,
 		}
 		return writeOK(cmd, "agent/spawn", data, "run", nil)
 	}
@@ -594,26 +690,27 @@ func runAgentSpawnWithRoute(cmd *cobra.Command) error {
 		// Dry-run mode: show what would be spawned via daemon
 		if spawnDryRun {
 			data := map[string]any{
-				"dry_run":          true,
-				"would_spawn":      true,
-				"via_daemon":       true,
-				"workspace_id":     params.WorkspaceID,
-				"workspace_root":   params.WorkspaceRoot,
-				"dispatcher":       "mailbox",
-				"execution_layer":  string(executionLayer),
-				"role":             params.Role,
-				"name":             params.Name,
-				"slug":             params.Slug,
-				"llm_provider":     params.LLMProvider,
-				"llm_model":        params.LLMModel,
-				"exec_mode":        params.ExecMode,
-				"memory_scope":     params.MemoryScope,
-				"memory_retention": params.MemoryRetention,
-				"max_iterations":   params.MaxIterations,
-				"max_auto_turns":   params.MaxAutoTurns,
-				"think_interval":   params.ThinkInterval,
-				"terminal_binding": params.TerminalBinding,
-				"has_prompt":       len(params.Prompt) > 0,
+				"dry_run":             true,
+				"would_spawn":         true,
+				"via_daemon":          true,
+				"workspace_id":        params.WorkspaceID,
+				"workspace_root":      params.WorkspaceRoot,
+				"dispatcher":          "mailbox",
+				"execution_layer":     string(executionLayer),
+				"role":                params.Role,
+				"name":                params.Name,
+				"slug":                params.Slug,
+				"llm_provider":        params.LLMProvider,
+				"llm_model":           params.LLMModel,
+				"exec_mode":           params.ExecMode,
+				"memory_scope":        params.MemoryScope,
+				"memory_retention":    params.MemoryRetention,
+				"max_iterations":      params.MaxIterations,
+				"max_auto_turns":      params.MaxAutoTurns,
+				"think_interval":      params.ThinkInterval,
+				"terminal_binding":    params.TerminalBinding,
+				"would_spawn_in_pane": spawnInPane,
+				"has_prompt":          len(params.Prompt) > 0,
 			}
 			return writeOK(cmd, "agent/spawn", data, "run", nil)
 		}
@@ -621,6 +718,10 @@ func runAgentSpawnWithRoute(cmd *cobra.Command) error {
 		result, err := daemonClient.AgentSpawn(params)
 		if err != nil {
 			return writeErrorEnvelope(cmd, "agent/spawn", string(protocol.ErrorCodeERuntime), fmt.Sprintf("daemon spawn failed: %v", err))
+		}
+		watchPane, err := maybeRespawnSpawnPane(ctx, terminalBinding, result.AgentID)
+		if err != nil {
+			return writeErrorEnvelope(cmd, "agent/spawn", string(protocol.ErrorCodeERuntime), fmt.Sprintf("failed to attach tmux pane watcher: %v", err))
 		}
 
 		// Write success envelope
@@ -636,6 +737,8 @@ func runAgentSpawnWithRoute(cmd *cobra.Command) error {
 			"execution_layer":  string(executionLayer),
 			"via_daemon":       true,
 			"terminal_binding": terminalBinding,
+			"spawn_pane":       spawnPaneMetadata,
+			"watch_pane":       watchPane,
 		}
 		return writeOK(cmd, "agent/spawn", data, "run", nil)
 	}
@@ -687,28 +790,29 @@ func runAgentSpawnWithRoute(cmd *cobra.Command) error {
 	// Dry-run mode: show what would be spawned
 	if spawnDryRun {
 		data := map[string]any{
-			"dry_run":          true,
-			"would_spawn":      true,
-			"via_daemon":       false,
-			"dispatcher":       "mailbox",
-			"execution_layer":  string(executionLayer),
-			"parent_ns":        req.ParentNS,
-			"name":             req.Name,
-			"slug":             req.Slug,
-			"role":             req.Role,
-			"skills_allow":     req.SkillsAllow,
-			"share_bb":         req.ShareBB,
-			"memory_scope":     string(req.MemoryScope),
-			"memory_retention": string(req.MemoryRetention),
-			"llm_provider":     req.LLMProvider,
-			"llm_model":        req.LLMModel,
-			"exec_mode":        string(req.ExecMode),
-			"max_iterations":   req.MaxIterations,
-			"max_auto_turns":   req.MaxAutoTurns,
-			"think_interval":   req.ThinkInterval,
-			"terminal_binding": req.TerminalBinding,
-			"has_prompt":       len(req.Prompt) > 0,
-			"has_policy":       req.Policy.CPU > 0 || req.Policy.MemoryMB > 0 || req.Policy.Timeout != "",
+			"dry_run":             true,
+			"would_spawn":         true,
+			"via_daemon":          false,
+			"dispatcher":          "mailbox",
+			"execution_layer":     string(executionLayer),
+			"parent_ns":           req.ParentNS,
+			"name":                req.Name,
+			"slug":                req.Slug,
+			"role":                req.Role,
+			"skills_allow":        req.SkillsAllow,
+			"share_bb":            req.ShareBB,
+			"memory_scope":        string(req.MemoryScope),
+			"memory_retention":    string(req.MemoryRetention),
+			"llm_provider":        req.LLMProvider,
+			"llm_model":           req.LLMModel,
+			"exec_mode":           string(req.ExecMode),
+			"max_iterations":      req.MaxIterations,
+			"max_auto_turns":      req.MaxAutoTurns,
+			"think_interval":      req.ThinkInterval,
+			"terminal_binding":    req.TerminalBinding,
+			"would_spawn_in_pane": spawnInPane,
+			"has_prompt":          len(req.Prompt) > 0,
+			"has_policy":          req.Policy.CPU > 0 || req.Policy.MemoryMB > 0 || req.Policy.Timeout != "",
 		}
 		return writeOK(cmd, "agent/spawn", data, "run", nil)
 	}
@@ -716,6 +820,10 @@ func runAgentSpawnWithRoute(cmd *cobra.Command) error {
 	resp, err := mgr.Spawn(ctx, req)
 	if err != nil {
 		return writeErrorEnvelope(cmd, "agent/spawn", string(protocol.ErrorCodeERuntime), fmt.Sprintf("failed to spawn agent: %v", err))
+	}
+	watchPane, err := maybeRespawnSpawnPane(ctx, terminalBinding, resp.AgentID)
+	if err != nil {
+		return writeErrorEnvelope(cmd, "agent/spawn", string(protocol.ErrorCodeERuntime), fmt.Sprintf("failed to attach tmux pane watcher: %v", err))
 	}
 
 	// Write success envelope
@@ -727,6 +835,8 @@ func runAgentSpawnWithRoute(cmd *cobra.Command) error {
 		"execution_layer":  string(executionLayer),
 		"via_daemon":       false,
 		"terminal_binding": terminalBinding,
+		"spawn_pane":       spawnPaneMetadata,
+		"watch_pane":       watchPane,
 	}
 
 	return writeOK(cmd, "agent/spawn", data, "run", nil)
