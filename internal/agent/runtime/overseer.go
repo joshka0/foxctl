@@ -8,6 +8,7 @@ import (
 
 	agenttools "github.com/jkatigb/agentctl/internal/agent/tools"
 	"github.com/jkatigb/agentctl/internal/agent/types"
+	"github.com/jkatigb/agentctl/internal/agentpane"
 	domainagent "github.com/jkatigb/agentctl/internal/domain/agent"
 )
 
@@ -214,17 +215,7 @@ func (o *Overseer) HandleSpawnRequest(ctx context.Context, req types.SpawnReques
 }
 
 func inheritChildTerminalBinding(parent domainagent.TerminalBinding, parentActorID string) domainagent.TerminalBinding {
-	parent = domainagent.NormalizeTerminalBinding(parent)
-	if parent == (domainagent.TerminalBinding{}) {
-		return domainagent.TerminalBinding{}
-	}
-	return domainagent.NormalizeTerminalBinding(domainagent.TerminalBinding{
-		Backend:             parent.Backend,
-		Session:             parent.Session,
-		ParentParticipantID: parent.ParticipantID,
-		ParentAgentID:       parentActorID,
-		RoomAccess:          "none",
-	})
+	return agentpane.InheritChildBinding(parent, "", parentActorID)
 }
 
 // SpawnOverseerAgent spawns the root overseer agent session.

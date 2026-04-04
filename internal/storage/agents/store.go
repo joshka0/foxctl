@@ -35,6 +35,7 @@ type Store interface {
 	UpdateConversationID(ctx context.Context, id, conversationID string) error // Link agent to conversation
 	UpdateMemoryScope(ctx context.Context, id string, scope agent.MemoryScope) error
 	UpdateMemoryRetention(ctx context.Context, id string, retention agent.MemoryRetention) error
+	UpdateTerminalBinding(ctx context.Context, id string, binding agent.TerminalBinding) error
 }
 
 type sqlStore struct {
@@ -357,6 +358,22 @@ func (s *sqlStore) UpdateMemoryRetention(ctx context.Context, id string, retenti
 	rows, err := res.RowsAffected()
 	if err != nil {
 		return fmt.Errorf("agents: update memory_retention rows affected: %w", err)
+	}
+	if rows == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+func (s *sqlStore) UpdateTerminalBinding(ctx context.Context, id string, binding agent.TerminalBinding) error {
+	res, err := s.db.ExecContext(ctx, `
+		UPDATE agents SET terminal_binding = $1 WHERE id = $2 AND deleted_at IS NULL`, marshalTerminalBinding(binding), id)
+	if err != nil {
+		return fmt.Errorf("agents: update terminal binding: %w", err)
+	}
+	rows, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("agents: update terminal binding rows affected: %w", err)
 	}
 	if rows == 0 {
 		return ErrNotFound

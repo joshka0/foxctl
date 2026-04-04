@@ -203,6 +203,30 @@ func TestAgentStore(t *testing.T) {
 		}
 	})
 
+	// Test UpdateTerminalBinding
+	t.Run("UpdateTerminalBinding", func(t *testing.T) {
+		binding := agent.TerminalBinding{
+			Backend:       "zellij",
+			Session:       "alpha",
+			PaneID:        "researcher-a1b2",
+			ParticipantID: "researcher-a1b2",
+			RoomAccess:    "none",
+		}
+		if err := store.UpdateTerminalBinding(ctx, "test-agent-001", binding); err != nil {
+			t.Fatalf("failed to update terminal binding: %v", err)
+		}
+		a, err := store.Get(ctx, "test-agent-001")
+		if err != nil {
+			t.Fatalf("failed to get agent: %v", err)
+		}
+		if a.TerminalBinding.Backend != "zellij" {
+			t.Fatalf("expected updated terminal binding backend, got %q", a.TerminalBinding.Backend)
+		}
+		if a.TerminalBinding.PaneID != "researcher-a1b2" {
+			t.Fatalf("expected updated terminal binding pane id, got %q", a.TerminalBinding.PaneID)
+		}
+	})
+
 	// Test UpdateHeartbeat
 	t.Run("UpdateHeartbeat", func(t *testing.T) {
 		time.Sleep(100 * time.Millisecond)

@@ -651,11 +651,15 @@ func (c *Client) CreatePane(ctx context.Context, opts CreatePaneOptions) (Create
 			return CreatePaneResult{}, err
 		}
 	}
+	participantID := strings.TrimSpace(opts.ParticipantID)
+	if participantID == "" {
+		participantID = formatTmuxParticipantID(session, paneID)
+	}
 	if _, err := c.runTmuxWithSocket(ctx, socket, "select-layout", "-t", session, "tiled"); err != nil {
 		return CreatePaneResult{}, err
 	}
-	if strings.TrimSpace(command) != defaultPaneCommand() || hasPaneIdentityEnv(opts.ParticipantID, opts.ParentParticipant, opts.ParentAgentID, opts.RoomID) {
-		if _, err := c.respawnPaneWithSocket(ctx, socket, paneID, session, cwd, command, opts.ParticipantID, opts.ParentParticipant, opts.ParentAgentID, opts.RoomID, opts.RoomAccess); err != nil {
+	if strings.TrimSpace(command) != defaultPaneCommand() || hasPaneIdentityEnv(participantID, opts.ParentParticipant, opts.ParentAgentID, opts.RoomID) {
+		if _, err := c.respawnPaneWithSocket(ctx, socket, paneID, session, cwd, command, participantID, opts.ParentParticipant, opts.ParentAgentID, opts.RoomID, opts.RoomAccess); err != nil {
 			return CreatePaneResult{}, err
 		}
 	}
