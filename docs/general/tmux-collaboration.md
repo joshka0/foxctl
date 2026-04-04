@@ -6,10 +6,14 @@ This document defines the first tmux collaboration surface for `agentctl`:
 
 - tmux is the live coordination plane
 - `agentctl tmux` is the native create/read/send surface
+- `agentctl room` is the durable room timeline and relay surface
 - `tmux-bridge` is an optional low-level helper
 - ACA and the Obsidian vault remain the durable continuity layers
 
 The point is to let multiple Codex or Claude panes interact while the TUI stays open, without turning tmux scrollback into canonical state.
+
+Rooms are now the canonical shared chat substrate. tmux relay is the live
+fanout layer on top of room messages rather than the source of truth.
 
 ## Why This Exists
 
@@ -111,6 +115,47 @@ agentctl tmux send praze-b "Please review this path." --sender praze-a
 This means external callers such as Praze can create their own tmux session and send as one of their labeled panes without depending on a repo-local script.
 
 The bundled `tmux-bridge` helper is still available for lower-level workflows such as `type`, `keys`, or read-before-send guardrails, but it is no longer required for the core create/send path.
+
+## Room Surface
+
+Rooms are durable coordination timelines backed by the blackboard store. They
+are independent of tmux and can be used from any terminal, including zellij.
+
+```bash
+agentctl room create alpha --title "Agent Alpha"
+agentctl room join alpha agent-a --role lead
+agentctl room join alpha agent-b --role reviewer
+agentctl room send alpha "Review the retry branch in client.ts" --sender agent-a
+agentctl room show alpha
+agentctl room subscribe alpha --follow
+agentctl room relay alpha --backend tmux
+```
+
+The intended model is:
+
+- `room send` writes the canonical message into the durable room log
+- `room subscribe` reads or tails the room log in any terminal
+- `room relay --backend tmux` fans new room messages into tmux member panes by
+  matching room member ids to tmux pane labels
+
+This keeps room history durable while still allowing live terminal delivery.
+
+### Join vs Subscribe
+
+- `room join` adds a participant id to the room membership set
+- `room subscribe` reads the room, optionally in follow mode
+
+Use `join` when a pane or agent should be a room recipient for relay. Use
+`subscribe` when a human or agent just wants to watch the room timeline.
+
+### Zellij
+
+`room subscribe` works in zellij because it only tails the durable room log.
+
+Live relay injection is tmux-first right now. The current zellij CLI can write
+or dump only the focused pane from the current session, which is not enough for
+safe arbitrary-pane room fanout from a central relay process. A real zellij
+relay should use a plugin-backed bridge or another session-aware control layer.
 
 ## Message Shape
 
