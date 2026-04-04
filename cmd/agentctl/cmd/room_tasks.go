@@ -1283,16 +1283,17 @@ func detectRoomPulseMessages(roomID string, messages []agent.BoardMessage, now t
 		out = append(out, roomPulseMessage{
 			Key: msg.ID,
 			Message: agent.BoardMessage{
-				WorkspaceID: msg.WorkspaceID,
-				TaskID:      msg.TaskID,
-				Stream:      msg.Stream,
-				Sender:      roomLoopSender(roomID),
-				Recipient:   recipient,
-				Kind:        agent.BoardMessageKindAlert,
-				Priority:    2,
-				Subject:     subject,
-				Body:        body,
-				CreatedAt:   now,
+				WorkspaceID:      msg.WorkspaceID,
+				TaskID:           msg.TaskID,
+				RelatedMessageID: roomMessageChainKey(msg),
+				Stream:           msg.Stream,
+				Sender:           roomLoopSender(roomID),
+				Recipient:        recipient,
+				Kind:             agent.BoardMessageKindAlert,
+				Priority:         2,
+				Subject:          subject,
+				Body:             body,
+				CreatedAt:        now,
 			},
 		})
 	}

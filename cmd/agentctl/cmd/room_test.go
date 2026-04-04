@@ -717,40 +717,43 @@ func TestRunRoomStatusIncludesPulseAndBacklog(t *testing.T) {
 	}
 }
 
-func TestBuildRoomStatusEntriesCollapsesHistoricalBacklogBySender(t *testing.T) {
+func TestBuildRoomStatusEntriesCollapsesHistoricalBacklogByChain(t *testing.T) {
 	now := time.Date(2026, 4, 4, 20, 0, 0, 0, time.UTC)
 	entries := buildRoomStatusEntries("gemini-a", []agent.BoardMessage{
 		{
-			ID:            "m1",
-			Sender:        "actor:system:room:alpha",
-			Recipient:     "gemini-a",
-			Subject:       "old reminder",
-			Body:          "old reminder",
-			CreatedAt:     now,
-			Priority:      2,
-			Status:        agent.BoardMessageStatusUnread,
-			ReplyExpected: true,
+			ID:               "m1",
+			Sender:           "actor:system:room:alpha",
+			Recipient:        "gemini-a",
+			RelatedMessageID: "orig-1",
+			Subject:          "old reminder",
+			Body:             "old reminder",
+			CreatedAt:        now,
+			Priority:         2,
+			Status:           agent.BoardMessageStatusUnread,
+			ReplyExpected:    true,
 		},
 		{
-			ID:            "m2",
-			Sender:        "actor:system:room:alpha",
-			Recipient:     "gemini-a",
-			Subject:       "new reminder",
-			Body:          "new reminder",
-			CreatedAt:     now.Add(2 * time.Minute),
-			Priority:      2,
-			Status:        agent.BoardMessageStatusUnread,
-			ReplyExpected: true,
+			ID:               "m2",
+			Sender:           "actor:system:room:alpha",
+			Recipient:        "gemini-a",
+			RelatedMessageID: "orig-1",
+			Subject:          "new reminder",
+			Body:             "new reminder",
+			CreatedAt:        now.Add(2 * time.Minute),
+			Priority:         2,
+			Status:           agent.BoardMessageStatusUnread,
+			ReplyExpected:    true,
 		},
 		{
-			ID:        "m3",
-			Sender:    "human-a",
-			Recipient: "gemini-a",
-			Subject:   "human request",
-			Body:      "human request",
-			CreatedAt: now.Add(1 * time.Minute),
-			Priority:  2,
-			Status:    agent.BoardMessageStatusUnread,
+			ID:               "m3",
+			Sender:           "actor:system:room:alpha",
+			Recipient:        "gemini-a",
+			RelatedMessageID: "orig-2",
+			Subject:          "other reminder",
+			Body:             "other reminder",
+			CreatedAt:        now.Add(1 * time.Minute),
+			Priority:         2,
+			Status:           agent.BoardMessageStatusUnread,
 		},
 	})
 	if len(entries) != 2 {
@@ -967,6 +970,71 @@ func TestRunRoomResolveMarksMessageResolved(t *testing.T) {
 
 	cmd, out = newRoomTestCommand(ctx)
 	if err := runRoomStatus(cmd, workspace, "alpha", 20, 5*time.Minute, nil, false); err != nil {
+		t.Fatalf("runRoomStatus: %v", err)
+	}
+	data = decodeRoomEnvelope(t, out)
+	actionRequired := data["action_required"].(map[string]any)
+	if got := actionRequired["participants_with_pending"]; got != float64(0) {
+		t.Fatalf("participants_with_pending=%v want 0", got)
+	}
+}
+
+func TestRunRoomResolveMarksRelatedReminderChainResolved(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	ctx := context.Background()
+	workspace := t.TempDir()
+
+	cmd, _ := newRoomTestCommand(ctx)
+	if err := runRoomCreate(cmd, workspace, "alpha", "Alpha", "", []string{"human-a=coordinator", "gemini-a=reviewer"}); err != nil {
+		t.Fatalf("runRoomCreate: %v", err)
+	}
+	cmd, _ = newRoomTestCommand(ctx)
+	if err := runRoomSend(cmd, workspace, "alpha", "human-a", "gemini-a", "", "please ack", "info", "", 0, true, false, true); err != nil {
+		t.Fatalf("runRoomSend: %v", err)
+	}
+	cmd, out := newRoomTestCommand(ctx)
+	if err := runRoomShow(cmd, workspace, "alpha", "", 20); err != nil {
+		t.Fatalf("runRoomShow: %v", err)
+	}
+	data := decodeRoomEnvelope(t, out)
+	messages := data["messages"].([]any)
+	originalID := messages[0].(map[string]any)["id"].(string)
+
+	store, err := openRoomBoardStore(ctx)
+	if err != nil {
+		t.Fatalf("openRoomBoardStore: %v", err)
+	}
+	defer store.Close()
+	for _, id := range []string{"r1", "r2"} {
+		msg := &agent.BoardMessage{
+			ID:               id,
+			WorkspaceID:      workspace,
+			RelatedMessageID: originalID,
+			Stream:           agent.RoomStreamName("alpha"),
+			Sender:           roomLoopSender("alpha"),
+			Recipient:        "gemini-a",
+			Kind:             agent.BoardMessageKindAlert,
+			Priority:         2,
+			Subject:          "reminder",
+			Body:             "reminder",
+			CreatedAt:        time.Now().UTC(),
+		}
+		if err := store.SendMessage(ctx, msg); err != nil {
+			t.Fatalf("SendMessage reminder %s: %v", id, err)
+		}
+	}
+
+	cmd, out = newRoomTestCommand(ctx)
+	if err := runRoomResolve(cmd, workspace, "alpha", "human-a", "acked", []string{"r2"}); err != nil {
+		t.Fatalf("runRoomResolve: %v", err)
+	}
+	data = decodeRoomEnvelope(t, out)
+	if got := data["updated"]; got != float64(3) {
+		t.Fatalf("updated=%v want 3", got)
+	}
+
+	cmd, out = newRoomTestCommand(ctx)
+	if err := runRoomStatus(cmd, workspace, "alpha", 50, 5*time.Minute, nil, false); err != nil {
 		t.Fatalf("runRoomStatus: %v", err)
 	}
 	data = decodeRoomEnvelope(t, out)

@@ -778,6 +778,10 @@ func runRoomResolve(cmd *cobra.Command, workspace, roomID, actorID, mode string,
 	if len(trimmedIDs) == 0 {
 		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.resolve", protocol.ErrorCodeEARG, "at least one non-empty message id is required", nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
 	}
+	trimmedIDs, err = expandRoomResolveMessageIDs(cmd.Context(), store, absWorkspace, roomID, trimmedIDs)
+	if err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.resolve", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
 
 	var (
 		updated        int
@@ -1747,19 +1751,19 @@ func buildRoomStatusEntries(actorID string, messages []agent.BoardMessage) []roo
 	if len(entries) == 0 {
 		return nil
 	}
-	latestBySender := make(map[string]roomInboxEntry, len(entries))
+	latestByChain := make(map[string]roomInboxEntry, len(entries))
 	for _, entry := range entries {
-		key := strings.TrimSpace(entry.Sender)
+		key := roomMessageChainKey(entry.Message)
 		if key == "" {
-			key = "unknown"
+			key = entry.ID
 		}
-		current, ok := latestBySender[key]
+		current, ok := latestByChain[key]
 		if !ok || roomStatusEntryMoreRecent(entry, current) {
-			latestBySender[key] = entry
+			latestByChain[key] = entry
 		}
 	}
-	out := make([]roomInboxEntry, 0, len(latestBySender))
-	for _, entry := range latestBySender {
+	out := make([]roomInboxEntry, 0, len(latestByChain))
+	for _, entry := range latestByChain {
 		out = append(out, entry)
 	}
 	sort.SliceStable(out, func(i, j int) bool {
@@ -1797,6 +1801,51 @@ func roomStatusEntryFromInbox(entry roomInboxEntry) roomStatusEntry {
 		Flags:     append([]string(nil), entry.Flags...),
 		Preview:   entry.Preview,
 	}
+}
+
+func expandRoomResolveMessageIDs(ctx context.Context, store blackboard.BoardStore, workspaceID, roomID string, messageIDs []string) ([]string, error) {
+	messages, err := store.ListRoomMessages(ctx, workspaceID, roomID, roomTaskScanLimit)
+	if err != nil {
+		return nil, fmt.Errorf("list room messages: %w", err)
+	}
+	byID := make(map[string]agent.BoardMessage, len(messages))
+	for _, msg := range messages {
+		byID[msg.ID] = msg
+	}
+	seen := make(map[string]struct{})
+	out := make([]string, 0, len(messageIDs))
+	for _, id := range messageIDs {
+		msg, ok := byID[id]
+		if !ok {
+			if _, exists := seen[id]; !exists {
+				seen[id] = struct{}{}
+				out = append(out, id)
+			}
+			continue
+		}
+		chain := roomMessageChainKey(msg)
+		if chain == "" {
+			chain = msg.ID
+		}
+		for _, candidate := range messages {
+			if roomMessageChainKey(candidate) != chain {
+				continue
+			}
+			if _, exists := seen[candidate.ID]; exists {
+				continue
+			}
+			seen[candidate.ID] = struct{}{}
+			out = append(out, candidate.ID)
+		}
+	}
+	return out, nil
+}
+
+func roomMessageChainKey(msg agent.BoardMessage) string {
+	if strings.TrimSpace(msg.RelatedMessageID) != "" {
+		return strings.TrimSpace(msg.RelatedMessageID)
+	}
+	return strings.TrimSpace(msg.ID)
 }
 
 func roomMemberRole(members []agent.RoomMember, actorID string) string {

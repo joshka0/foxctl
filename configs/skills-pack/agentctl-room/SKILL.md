@@ -22,7 +22,7 @@ description: "Durable multi-agent room coordination with shared chat, direct req
 - `room send` writes durable chat messages.
 - `room send --to <participant>` writes a direct room request instead of a broadcast.
 - `room ack` marks a specific room message as acknowledged.
-- `room resolve` lets the coordinator clear stale room messages once they have been handled out-of-band.
+- `room resolve` lets the coordinator clear stale room messages once they have been handled out-of-band, and it resolves reminder chains by the original request id.
 - `room inbox` shows actionable direct requests and pending ack/reply work for one participant.
 - `room status` shows the coordinator-facing room pulse: participants, task counts, stale work, and compact actionable backlog summaries.
 - `room status --only blocked,stale,reply` narrows the action summary to the coordinator lane you care about right now.

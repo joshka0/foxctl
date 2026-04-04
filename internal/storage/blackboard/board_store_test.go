@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/jkatigb/agentctl/internal/domain/agent"
+	"github.com/jkatigb/agentctl/internal/storage/sqliteutil"
 )
 
 func TestBoardStore_SendAndInbox(t *testing.T) {
@@ -141,6 +142,58 @@ func TestBoardStore_AckMessages(t *testing.T) {
 	}
 	if count != 1 {
 		t.Errorf("expected 1 acked, got %d", count)
+	}
+}
+
+func TestOpenBoardStore_MigratesLegacyBoardMessagesRelatedMessageID(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	path := filepath.Join(root, "board.db")
+	db, err := sqliteutil.OpenDB(ctx, path, nil)
+	if err != nil {
+		t.Fatalf("sqliteutil.OpenDB legacy schema: %v", err)
+	}
+	defer db.Close()
+	if _, err := db.ExecContext(ctx, `
+CREATE TABLE IF NOT EXISTS board_messages (
+	id           TEXT PRIMARY KEY,
+	workspace_id TEXT NOT NULL,
+	task_id      TEXT,
+	stream       TEXT NOT NULL DEFAULT 'coordination',
+	sender       TEXT NOT NULL,
+	recipient    TEXT NOT NULL,
+	kind         TEXT NOT NULL DEFAULT 'info',
+	priority     INTEGER NOT NULL DEFAULT 3,
+	ack_required INTEGER NOT NULL DEFAULT 0,
+	reply_expected INTEGER NOT NULL DEFAULT 0,
+	status       TEXT NOT NULL DEFAULT 'unread',
+	subject      TEXT NOT NULL,
+	body         TEXT NOT NULL,
+	created_at   INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_board_msg_workspace_recipient ON board_messages(workspace_id, recipient);
+CREATE INDEX IF NOT EXISTS idx_board_msg_workspace_task ON board_messages(workspace_id, task_id);
+CREATE INDEX IF NOT EXISTS idx_board_msg_priority_created ON board_messages(priority, created_at);
+`); err != nil {
+		t.Fatalf("legacy schema exec: %v", err)
+	}
+
+	store, err := OpenBoardStore(ctx, root)
+	if err != nil {
+		t.Fatalf("OpenBoardStore migrated legacy schema: %v", err)
+	}
+	defer store.Close()
+
+	msg := agent.BoardMessage{
+		WorkspaceID:      "ws1",
+		RelatedMessageID: "orig-1",
+		Sender:           "admin",
+		Recipient:        "actor:agent:coder",
+		Subject:          "legacy migrated",
+		Body:             "legacy migrated body",
+	}
+	if err := store.SendMessage(ctx, &msg); err != nil {
+		t.Fatalf("SendMessage after migration: %v", err)
 	}
 }
 
