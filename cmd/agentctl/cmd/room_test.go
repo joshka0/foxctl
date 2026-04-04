@@ -7,9 +7,11 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jkatigb/agentctl/internal/domain/agent"
 	"github.com/jkatigb/agentctl/internal/domain/envelope"
+	taskstore "github.com/jkatigb/agentctl/internal/storage/tasks"
 	"github.com/jkatigb/agentctl/internal/tmuxbridge"
 	"github.com/spf13/cobra"
 )
@@ -208,6 +210,27 @@ func TestRoomTaskFlow_ClaimBlockUnblockAbandon(t *testing.T) {
 	if got := taskRaw["OwnerActorID"]; got != "agent-a" {
 		t.Fatalf("owner=%v want agent-a", got)
 	}
+	heartbeatBefore, _ := taskRaw["HeartbeatAt"].(string)
+	if heartbeatBefore == "" {
+		t.Fatalf("heartbeat missing after claim: %v", taskRaw)
+	}
+
+	cmd, out = newRoomTestCommand(ctx)
+	if err := runRoomTaskTouch(cmd, workspace, "alpha", "agent-a", taskID); err != nil {
+		t.Fatalf("runRoomTaskTouch: %v", err)
+	}
+	data = decodeRoomEnvelope(t, out)
+	taskRaw, ok = data["task"].(map[string]any)
+	if !ok {
+		t.Fatalf("task payload type=%T", data["task"])
+	}
+	heartbeatAfter, _ := taskRaw["HeartbeatAt"].(string)
+	if heartbeatAfter == "" {
+		t.Fatalf("heartbeat missing after touch: %v", taskRaw)
+	}
+	if heartbeatAfter == heartbeatBefore {
+		t.Fatalf("heartbeat=%q want refreshed value different from %q", heartbeatAfter, heartbeatBefore)
+	}
 
 	cmd, out = newRoomTestCommand(ctx)
 	if err := runRoomTaskBlock(cmd, workspace, "alpha", "agent-a", taskID, "Waiting on human"); err != nil {
@@ -349,6 +372,154 @@ func TestRunRoomInboxFiltersActionableMessages(t *testing.T) {
 	}
 	if len(entries) != 1 {
 		t.Fatalf("entries=%d want 1 actionable entry after ack", len(entries))
+	}
+
+	cmd, _ = newRoomTestCommand(ctx)
+	if err := runRoomSend(cmd, workspace, "alpha", "agent-a", "", "", "done", "info", "", 0, false, false, true); err != nil {
+		t.Fatalf("runRoomSend response: %v", err)
+	}
+
+	cmd, out = newRoomTestCommand(ctx)
+	if err := runRoomInbox(cmd, workspace, "alpha", "agent-a", 20, "all", false, false, false); err != nil {
+		t.Fatalf("runRoomInbox after reply: %v", err)
+	}
+	data = decodeRoomEnvelope(t, out)
+	entries, ok = data["entries"].([]any)
+	if !ok {
+		t.Fatalf("entries type=%T", data["entries"])
+	}
+	if len(entries) != 0 {
+		t.Fatalf("entries=%d want 0 actionable entries after ack and reply", len(entries))
+	}
+}
+
+func TestDetectRoomPulseMessagesEmitsReminderForStaleReplyExpected(t *testing.T) {
+	now := time.Date(2026, 4, 4, 19, 0, 0, 0, time.UTC)
+	pulses := detectRoomPulseMessages("alpha", []agent.BoardMessage{
+		{
+			ID:            "msg-1",
+			WorkspaceID:   "/repo",
+			Stream:        "room:alpha",
+			Sender:        "human-a",
+			Recipient:     "gemini-a",
+			ReplyExpected: true,
+			Subject:       "Please respond",
+			CreatedAt:     now.Add(-3 * time.Minute),
+		},
+	}, now, roomPulseConfig{ReplyStaleAfter: 2 * time.Minute}, map[string]time.Time{})
+	if len(pulses) != 1 {
+		t.Fatalf("len(pulses)=%d want 1", len(pulses))
+	}
+	if pulses[0].Key != "msg-1" {
+		t.Fatalf("key=%q want msg-1", pulses[0].Key)
+	}
+	if pulses[0].Message.Recipient != "gemini-a" {
+		t.Fatalf("recipient=%q want gemini-a", pulses[0].Message.Recipient)
+	}
+}
+
+func TestDetectRoomPulseMessagesSkipsSatisfiedReplyExpected(t *testing.T) {
+	now := time.Date(2026, 4, 4, 19, 0, 0, 0, time.UTC)
+	pulses := detectRoomPulseMessages("alpha", []agent.BoardMessage{
+		{
+			ID:            "msg-1",
+			WorkspaceID:   "/repo",
+			Stream:        "room:alpha",
+			Sender:        "human-a",
+			Recipient:     "gemini-a",
+			ReplyExpected: true,
+			Subject:       "Please respond",
+			CreatedAt:     now.Add(-3 * time.Minute),
+		},
+		{
+			ID:          "msg-2",
+			WorkspaceID: "/repo",
+			Stream:      "room:alpha",
+			Sender:      "gemini-a",
+			Recipient:   "*",
+			Body:        "I replied",
+			CreatedAt:   now.Add(-2 * time.Minute),
+		},
+	}, now, roomPulseConfig{ReplyStaleAfter: 2 * time.Minute}, map[string]time.Time{})
+	if len(pulses) != 0 {
+		t.Fatalf("len(pulses)=%d want 0", len(pulses))
+	}
+}
+
+func TestDetectRoomPulseMessagesKeepsOnlyLatestOutstandingPerRecipient(t *testing.T) {
+	now := time.Date(2026, 4, 4, 19, 0, 0, 0, time.UTC)
+	pulses := detectRoomPulseMessages("alpha", []agent.BoardMessage{
+		{
+			ID:            "msg-1",
+			WorkspaceID:   "/repo",
+			Stream:        "room:alpha",
+			Sender:        "human-a",
+			Recipient:     "gemini-a",
+			ReplyExpected: true,
+			Subject:       "Older request",
+			CreatedAt:     now.Add(-4 * time.Minute),
+		},
+		{
+			ID:            "msg-2",
+			WorkspaceID:   "/repo",
+			Stream:        "room:alpha",
+			Sender:        "human-a",
+			Recipient:     "gemini-a",
+			ReplyExpected: true,
+			Subject:       "Latest request",
+			CreatedAt:     now.Add(-3 * time.Minute),
+		},
+	}, now, roomPulseConfig{ReplyStaleAfter: 2 * time.Minute}, map[string]time.Time{})
+	if len(pulses) != 1 {
+		t.Fatalf("len(pulses)=%d want 1", len(pulses))
+	}
+	if pulses[0].Key != "msg-2" {
+		t.Fatalf("key=%q want msg-2", pulses[0].Key)
+	}
+}
+
+func TestDetectRoomTaskPulseMessagesEmitsReminderForStaleClaimedTask(t *testing.T) {
+	now := time.Date(2026, 4, 4, 19, 0, 0, 0, time.UTC)
+	claimedAt := now.Add(-10 * time.Minute)
+	pulses := detectRoomTaskPulseMessages("/repo", "alpha", []taskstore.Task{
+		{
+			ID:           "task-1",
+			Title:        "Review retry path",
+			Status:       taskstore.StatusInProgress,
+			OwnerActorID: "claude-a",
+			ClaimedAt:    &claimedAt,
+		},
+	}, now, roomPulseConfig{TaskStaleAfter: 5 * time.Minute}, map[string]time.Time{})
+	if len(pulses) != 1 {
+		t.Fatalf("len(pulses)=%d want 1", len(pulses))
+	}
+	if pulses[0].Key != "task-1" {
+		t.Fatalf("key=%q want task-1", pulses[0].Key)
+	}
+	if pulses[0].Message.Recipient != "claude-a" {
+		t.Fatalf("recipient=%q want claude-a", pulses[0].Message.Recipient)
+	}
+	if pulses[0].Message.WorkspaceID != "/repo" {
+		t.Fatalf("workspace=%q want /repo", pulses[0].Message.WorkspaceID)
+	}
+}
+
+func TestDetectRoomTaskPulseMessagesSkipsRecentlyTouchedTask(t *testing.T) {
+	now := time.Date(2026, 4, 4, 19, 0, 0, 0, time.UTC)
+	claimedAt := now.Add(-10 * time.Minute)
+	heartbeatAt := now.Add(-30 * time.Second)
+	pulses := detectRoomTaskPulseMessages("/repo", "alpha", []taskstore.Task{
+		{
+			ID:           "task-1",
+			Title:        "Review retry path",
+			Status:       taskstore.StatusInProgress,
+			OwnerActorID: "claude-a",
+			ClaimedAt:    &claimedAt,
+			HeartbeatAt:  &heartbeatAt,
+		},
+	}, now, roomPulseConfig{TaskStaleAfter: 5 * time.Minute}, map[string]time.Time{})
+	if len(pulses) != 0 {
+		t.Fatalf("len(pulses)=%d want 0", len(pulses))
 	}
 }
 

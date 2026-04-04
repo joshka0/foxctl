@@ -29,6 +29,7 @@ description: "Durable multi-agent room coordination with shared chat, direct req
   - relay new messages
   - watch room tasks
   - broadcast task status changes back into the room
+  - nudge stale direct requests and stale claimed tasks with reminder pulses
 
 Do not rely on scrollback as canonical history. The room log is canonical.
 
@@ -61,6 +62,7 @@ agentctl room task add alpha \
 agentctl room task list alpha
 
 agentctl room task claim alpha --id <task-id>
+agentctl room task touch alpha --id <task-id>
 agentctl room task block alpha --id <task-id> --reason "waiting on benchmark data"
 agentctl room task unblock alpha --id <task-id>
 
@@ -76,6 +78,7 @@ Task lifecycle is intentionally lightweight:
 - `pending -> in_progress -> blocked -> completed`
 - `abandon` returns a task to `pending`
 - `complete` requires the current participant to claim the task first
+- `touch` refreshes the owner heartbeat without changing task state
 - `block` / `unblock` preserve ownership while making the stall visible to everyone
 
 Use `room task claim` before doing real work. That is the guardrail that keeps multiple top-level agents from stepping on the same task.
@@ -86,7 +89,7 @@ Use `room task claim` before doing real work. That is the guardrail that keeps m
 
 ```bash
 agentctl room relay alpha --backend tmux
-agentctl room loop alpha --backend tmux
+agentctl room loop alpha --backend tmux --pulse 30s --reply-stale 2m --task-stale 5m
 ```
 
 ### zellij
@@ -137,7 +140,7 @@ agentctl room send review "Please check the 401 fallback branch."
 
 - The room log is durable, but relay delivery is best-effort.
 - `room relay` only mirrors messages; it does not infer task changes.
-- `room loop` is the higher-level coordinator when you want automatic task broadcasts.
+- `room loop` is the higher-level coordinator when you want automatic task broadcasts and reminder pulses.
 - The zellij path requires the room relay plugin to be available and permission-granted.
 
 ## Related

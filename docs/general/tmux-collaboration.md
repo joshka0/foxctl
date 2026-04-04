@@ -296,6 +296,7 @@ agentctl room ack alpha <message-id>
 agentctl room inbox alpha --actor claude-a
 agentctl room task add alpha --title "Refactor retry path"
 agentctl room task claim alpha --id <task-id>
+agentctl room task touch alpha --id <task-id>
 agentctl room task block alpha --id <task-id> --reason "waiting on benchmark data"
 agentctl room task unblock alpha --id <task-id>
 agentctl room task complete alpha --id <task-id> --notes "Retry ladder flattened"
@@ -339,7 +340,7 @@ agentctl room task complete alpha \
   --notes "Retry helper extracted"
 ```
 
-`room task add`, `claim`, `block`, `unblock`, `abandon`, and `complete` all
+`room task add`, `claim`, `touch`, `block`, `unblock`, `abandon`, and `complete` all
 write durable room messages with a `task_id`, so every participant sees the
 task lifecycle in the same shared room timeline.
 
@@ -348,6 +349,7 @@ The intended lightweight lifecycle is:
 - `pending -> in_progress -> blocked -> completed`
 - `abandon` returns a task to `pending`
 - `complete` requires the current participant to claim the task first
+- `touch` refreshes the task heartbeat without changing state
 - `block` / `unblock` keep ownership while making the stall visible
 
 ### Room Loop
@@ -359,9 +361,27 @@ The intended lightweight lifecycle is:
 - relays new room messages into member panes
 - watches room-associated tasks for status transitions
 - broadcasts task completion or status updates back into the room
+- emits direct reminder pulses for stale `ack_required` / `reply_expected` requests
+- emits direct reminder pulses for claimed or blocked tasks whose heartbeat has gone stale
 
 That gives the room a central coordination loop without making terminal
 scrollback the source of truth.
+
+Useful flags:
+
+```bash
+agentctl room loop alpha --backend tmux \
+  --pulse 30s \
+  --reply-stale 2m \
+  --task-stale 5m
+```
+
+`room inbox` is the per-participant actionable view that pairs with this pulse
+behavior:
+
+- already-acked messages are hidden
+- direct `reply_expected` requests disappear once the recipient has spoken later in the room
+- the result is a queue of unresolved asks rather than a full transcript
 
 ### Join vs Subscribe
 

@@ -29,6 +29,7 @@ func newRoomTaskCommand() *cobra.Command {
 		newRoomTaskAddCommand(),
 		newRoomTaskListCommand(),
 		newRoomTaskClaimCommand(),
+		newRoomTaskTouchCommand(),
 		newRoomTaskBlockCommand(),
 		newRoomTaskUnblockCommand(),
 		newRoomTaskAbandonCommand(),
@@ -156,6 +157,27 @@ func newRoomTaskBlockCommand() *cobra.Command {
 	return cmd
 }
 
+func newRoomTaskTouchCommand() *cobra.Command {
+	var (
+		workspace string
+		sender    string
+		taskID    string
+	)
+	cmd := &cobra.Command{
+		Use:   "touch <room-id>",
+		Short: "Refresh the heartbeat on a claimed or blocked room task",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runRoomTaskTouch(cmd, workspace, args[0], sender, taskID)
+		},
+	}
+	cmd.Flags().StringVar(&workspace, "workspace", ".", "Workspace root override")
+	cmd.Flags().StringVar(&sender, "sender", "", "Sender actor or participant id (defaults to current tmux/zellij pane)")
+	cmd.Flags().StringVar(&taskID, "id", "", "Task id to refresh")
+	_ = cmd.MarkFlagRequired("id")
+	return cmd
+}
+
 func newRoomTaskUnblockCommand() *cobra.Command {
 	var (
 		workspace string
@@ -202,13 +224,16 @@ func newRoomTaskAbandonCommand() *cobra.Command {
 
 func newRoomLoopCommand() *cobra.Command {
 	var (
-		workspace string
-		backend   string
-		session   string
-		plugin    string
-		poll      time.Duration
-		taskPoll  time.Duration
-		history   int
+		workspace          string
+		backend            string
+		session            string
+		plugin             string
+		poll               time.Duration
+		taskPoll           time.Duration
+		history            int
+		pulse              time.Duration
+		replyStale         time.Duration
+		taskHeartbeatStale time.Duration
 	)
 	cmd := &cobra.Command{
 		Use:   "loop <room-id>",
@@ -219,7 +244,11 @@ func newRoomLoopCommand() *cobra.Command {
 				Backend:          backend,
 				ZellijSession:    session,
 				ZellijPluginPath: plugin,
-			}, poll, taskPoll, history)
+			}, poll, taskPoll, history, roomPulseConfig{
+				Interval:        pulse,
+				ReplyStaleAfter: replyStale,
+				TaskStaleAfter:  taskHeartbeatStale,
+			})
 		},
 	}
 	cmd.Flags().StringVar(&workspace, "workspace", ".", "Workspace root override")
@@ -229,6 +258,9 @@ func newRoomLoopCommand() *cobra.Command {
 	cmd.Flags().DurationVar(&poll, "poll", 2*time.Second, "Room message polling interval")
 	cmd.Flags().DurationVar(&taskPoll, "task-poll", 3*time.Second, "Room task polling interval")
 	cmd.Flags().IntVar(&history, "history", 0, "Number of most recent room messages to replay into participants on startup")
+	cmd.Flags().DurationVar(&pulse, "pulse", 30*time.Second, "Reminder pulse interval (0 disables reminders)")
+	cmd.Flags().DurationVar(&replyStale, "reply-stale", 2*time.Minute, "Reminder threshold for direct ack/reply requests")
+	cmd.Flags().DurationVar(&taskHeartbeatStale, "task-stale", 5*time.Minute, "Reminder threshold for claimed or blocked tasks without task heartbeat movement")
 	return cmd
 }
 
@@ -419,6 +451,10 @@ func runRoomTaskClaim(cmd *cobra.Command, workspace, roomID, sender, taskID stri
 	return runRoomTaskTransition(cmd, workspace, roomID, sender, taskID, "", "claim")
 }
 
+func runRoomTaskTouch(cmd *cobra.Command, workspace, roomID, sender, taskID string) error {
+	return runRoomTaskTransition(cmd, workspace, roomID, sender, taskID, "", "touch")
+}
+
 func runRoomTaskBlock(cmd *cobra.Command, workspace, roomID, sender, taskID, reason string) error {
 	return runRoomTaskTransition(cmd, workspace, roomID, sender, taskID, reason, "block")
 }
@@ -476,6 +512,21 @@ func runRoomTaskTransition(cmd *cobra.Command, workspace, roomID, sender, taskID
 		task.HeartbeatAt = &now
 		task.BlockedReason = ""
 		task.BlockedAt = nil
+	case "touch":
+		if task.OwnerActorID == "" {
+			return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.task.touch", protocol.ErrorCodeEARG, "task must be claimed before its heartbeat can be refreshed", nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+		}
+		if task.OwnerActorID != identity.Sender {
+			return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.task.touch", protocol.ErrorCodeEARG, "only the current owner can refresh this task heartbeat", map[string]any{
+				"owner_actor_id": task.OwnerActorID,
+			}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+		}
+		if task.Status != taskstore.StatusInProgress && task.Status != taskstore.StatusBlocked {
+			return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.task.touch", protocol.ErrorCodeEARG, "only in-progress or blocked tasks can be refreshed", map[string]any{
+				"status": task.Status,
+			}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+		}
+		task.HeartbeatAt = &now
 	case "block":
 		if strings.TrimSpace(reason) == "" {
 			return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.task.block", protocol.ErrorCodeEARG, "block reason is required", nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
@@ -558,7 +609,13 @@ func runRoomTaskTransition(cmd *cobra.Command, workspace, roomID, sender, taskID
 	}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
 }
 
-func runRoomLoop(cmd *cobra.Command, workspace, roomID string, relay roomRelayOptions, poll, taskPoll time.Duration, history int) error {
+type roomPulseConfig struct {
+	Interval        time.Duration
+	ReplyStaleAfter time.Duration
+	TaskStaleAfter  time.Duration
+}
+
+func runRoomLoop(cmd *cobra.Command, workspace, roomID string, relay roomRelayOptions, poll, taskPoll time.Duration, history int, pulse roomPulseConfig) error {
 	absWorkspace, err := resolveRoomWorkspace(workspace)
 	if err != nil {
 		return err
@@ -620,6 +677,13 @@ func runRoomLoop(cmd *cobra.Command, workspace, roomID string, relay roomRelayOp
 	defer messageTicker.Stop()
 	taskTicker := time.NewTicker(normalizeRoomPoll(taskPoll))
 	defer taskTicker.Stop()
+	var pulseTicker *time.Ticker
+	if pulse.Interval > 0 {
+		pulseTicker = time.NewTicker(pulse.Interval)
+		defer pulseTicker.Stop()
+	}
+	remindedMessages := map[string]time.Time{}
+	remindedTasks := map[string]time.Time{}
 
 	for {
 		select {
@@ -690,14 +754,71 @@ func runRoomLoop(cmd *cobra.Command, workspace, roomID string, relay roomRelayOp
 					return fmt.Errorf("write room loop task envelope: %w", err)
 				}
 			}
+		case <-roomPulseChan(pulseTicker):
+			summary, current, err := loadRoomState(cmd.Context(), boardStore, absWorkspace, roomID, "", roomTaskScanLimit)
+			if err != nil {
+				return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.loop", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+			}
+			roomTasks, err := listRoomTasks(cmd.Context(), taskStore, ws.CanonicalID(absWorkspace), current, "")
+			if err != nil {
+				return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.loop", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+			}
+			for _, pulseMsg := range detectRoomPulseMessages(roomID, current, time.Now().UTC(), pulse, remindedMessages) {
+				msg := pulseMsg.Message
+				if err := boardStore.SendMessage(cmd.Context(), &msg); err != nil {
+					return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.loop", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+				}
+				remindedMessages[pulseMsg.Key] = msg.CreatedAt
+				seenMessages[msg.ID] = struct{}{}
+				seq++
+				result := relayRoomMessage(cmd.Context(), client, summary, msg, relay)
+				if err := writer.Write(roomProgressEnvelope("agentctl.room.loop", seq, false, map[string]any{
+					"event":   "room_pulse",
+					"room_id": roomID,
+					"message": msg,
+					"relay":   result,
+				}, absWorkspace)); err != nil {
+					return fmt.Errorf("write room loop pulse envelope: %w", err)
+				}
+			}
+			for _, pulseMsg := range detectRoomTaskPulseMessages(absWorkspace, roomID, roomTasks, time.Now().UTC(), pulse, remindedTasks) {
+				msg := pulseMsg.Message
+				if err := boardStore.SendMessage(cmd.Context(), &msg); err != nil {
+					return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.loop", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+				}
+				remindedTasks[pulseMsg.Key] = msg.CreatedAt
+				seenMessages[msg.ID] = struct{}{}
+				seq++
+				result := relayRoomMessage(cmd.Context(), client, summary, msg, relay)
+				if err := writer.Write(roomProgressEnvelope("agentctl.room.loop", seq, false, map[string]any{
+					"event":   "task_pulse",
+					"room_id": roomID,
+					"message": msg,
+					"relay":   result,
+				}, absWorkspace)); err != nil {
+					return fmt.Errorf("write room loop task pulse envelope: %w", err)
+				}
+			}
 		}
 	}
+}
+
+func roomPulseChan(t *time.Ticker) <-chan time.Time {
+	if t == nil {
+		return nil
+	}
+	return t.C
 }
 
 type roomTaskTransition struct {
 	Task    taskstore.Task
 	Subject string
 	Body    string
+}
+
+type roomPulseMessage struct {
+	Key     string
+	Message agent.BoardMessage
 }
 
 func openRoomTaskStore(ctx context.Context) (taskstore.Store, error) {
@@ -793,6 +914,115 @@ func detectRoomTaskTransitions(ctx context.Context, store taskstore.Store, state
 		})
 	}
 	return out, nil
+}
+
+func detectRoomPulseMessages(roomID string, messages []agent.BoardMessage, now time.Time, cfg roomPulseConfig, reminded map[string]time.Time) []roomPulseMessage {
+	if cfg.ReplyStaleAfter <= 0 {
+		return nil
+	}
+	latestBySender := latestRoomSenderActivity(messages)
+	latestOutstanding := make(map[string]agent.BoardMessage)
+	for _, msg := range messages {
+		recipient := normalizeRoomRecipient(msg.Recipient)
+		if recipient == agent.BroadcastRecipient || recipient == "" {
+			continue
+		}
+		if strings.HasPrefix(strings.TrimSpace(msg.Sender), roomLoopSender(roomID)) {
+			continue
+		}
+		if !msg.AckRequired && !msg.ReplyExpected {
+			continue
+		}
+		if msg.AckRequired && msg.Status == agent.BoardMessageStatusAcked {
+			continue
+		}
+		if msg.ReplyExpected && !messageStillAwaitsReply(msg, latestBySender) {
+			continue
+		}
+		if now.Sub(msg.CreatedAt) < cfg.ReplyStaleAfter {
+			continue
+		}
+		if last, ok := reminded[msg.ID]; ok && now.Sub(last) < cfg.ReplyStaleAfter {
+			continue
+		}
+		if existing, ok := latestOutstanding[recipient]; ok && !msg.CreatedAt.After(existing.CreatedAt) {
+			continue
+		}
+		latestOutstanding[recipient] = msg
+	}
+
+	out := make([]roomPulseMessage, 0, len(latestOutstanding))
+	for recipient, msg := range latestOutstanding {
+		subject := fmt.Sprintf("Reminder: pending response for %s", deriveRoomSubject(msg.Subject))
+		body := fmt.Sprintf("No room acknowledgement or reply has been observed yet for message %s.\nOriginal sender: %s\nOriginal request: %s", msg.ID, strings.TrimSpace(msg.Sender), strings.TrimSpace(msg.Subject))
+		if strings.TrimSpace(msg.Body) != "" && strings.TrimSpace(msg.Body) != strings.TrimSpace(msg.Subject) {
+			body += "\nOriginal body: " + strings.TrimSpace(msg.Body)
+		}
+		out = append(out, roomPulseMessage{
+			Key: msg.ID,
+			Message: agent.BoardMessage{
+				WorkspaceID: msg.WorkspaceID,
+				TaskID:      msg.TaskID,
+				Stream:      msg.Stream,
+				Sender:      roomLoopSender(roomID),
+				Recipient:   recipient,
+				Kind:        agent.BoardMessageKindAlert,
+				Priority:    2,
+				Subject:     subject,
+				Body:        body,
+				CreatedAt:   now,
+			},
+		})
+	}
+	return out
+}
+
+func detectRoomTaskPulseMessages(workspace, roomID string, tasks []taskstore.Task, now time.Time, cfg roomPulseConfig, reminded map[string]time.Time) []roomPulseMessage {
+	if cfg.TaskStaleAfter <= 0 {
+		return nil
+	}
+	out := make([]roomPulseMessage, 0)
+	for _, task := range tasks {
+		if task.OwnerActorID == "" {
+			continue
+		}
+		if task.Status != taskstore.StatusInProgress && task.Status != taskstore.StatusBlocked {
+			continue
+		}
+		reference := task.CreatedAt
+		if task.HeartbeatAt != nil {
+			reference = *task.HeartbeatAt
+		} else if task.ClaimedAt != nil {
+			reference = *task.ClaimedAt
+		}
+		if now.Sub(reference) < cfg.TaskStaleAfter {
+			continue
+		}
+		if last, ok := reminded[task.ID]; ok && now.Sub(last) < cfg.TaskStaleAfter {
+			continue
+		}
+		subject := fmt.Sprintf("Reminder: task awaiting update: %s", task.Title)
+		body := fmt.Sprintf("Task %s is still %s with no recent task heartbeat.\nOwner: %s", task.ID, task.Status, task.OwnerActorID)
+		if strings.TrimSpace(task.BlockedReason) != "" {
+			body += "\nBlocked reason: " + strings.TrimSpace(task.BlockedReason)
+		}
+		out = append(out, roomPulseMessage{
+			Key: task.ID,
+			Message: agent.BoardMessage{
+				WorkspaceID: workspace,
+				TaskID:      task.ID,
+				Stream:      agent.RoomStreamName(strings.TrimSpace(roomID)),
+				Sender:      roomLoopSender(roomID),
+				Recipient:   task.OwnerActorID,
+				Kind:        agent.BoardMessageKindAlert,
+				Priority:    2,
+				Subject:     subject,
+				Body:        body,
+				CreatedAt:   now,
+			},
+		})
+	}
+	return out
 }
 
 func roomLoopSender(roomID string) string {
