@@ -647,7 +647,7 @@ func TestRunRoomStatusIncludesPulseAndBacklog(t *testing.T) {
 	}
 
 	cmd, out = newRoomTestCommand(ctx)
-	if err := runRoomStatus(cmd, workspace, "alpha", 50, 5*time.Minute); err != nil {
+	if err := runRoomStatus(cmd, workspace, "alpha", 50, 5*time.Minute, false); err != nil {
 		t.Fatalf("runRoomStatus: %v", err)
 	}
 	data = decodeRoomEnvelope(t, out)
@@ -696,6 +696,24 @@ func TestRunRoomStatusIncludesPulseAndBacklog(t *testing.T) {
 	}
 	if !foundLatest {
 		t.Fatalf("expected gemini-a participant with latest actionable entry in participants=%v", participants)
+	}
+	actionRequired, ok := data["action_required"].(map[string]any)
+	if !ok {
+		t.Fatalf("action_required type=%T", data["action_required"])
+	}
+	if got := actionRequired["assigned_unclaimed"]; got != float64(1) {
+		t.Fatalf("assigned_unclaimed action=%v want 1", got)
+	}
+	topEntries, ok := actionRequired["top_entries"].([]any)
+	if !ok || len(topEntries) != 1 {
+		t.Fatalf("top_entries=%T/%v want 1 entry", actionRequired["top_entries"], actionRequired["top_entries"])
+	}
+	topEntry, ok := topEntries[0].(map[string]any)
+	if !ok {
+		t.Fatalf("top_entry type=%T", topEntries[0])
+	}
+	if _, ok := topEntry["message"]; ok {
+		t.Fatalf("top_entry unexpectedly contains full message payload: %v", topEntry)
 	}
 }
 
@@ -770,6 +788,42 @@ func TestRoomStatusEntryFromInboxOmitsFullMessagePayload(t *testing.T) {
 	}
 	if bytes.Contains(raw, []byte(`"message"`)) {
 		t.Fatalf("unexpected message payload in %s", raw)
+	}
+}
+
+func TestRunRoomStatusVerboseIncludesVerboseTopEntries(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	ctx := context.Background()
+	workspace := t.TempDir()
+
+	cmd, _ := newRoomTestCommand(ctx)
+	if err := runRoomCreate(cmd, workspace, "alpha", "Alpha", "", []string{"human-a=coordinator", "gemini-a=reviewer"}); err != nil {
+		t.Fatalf("runRoomCreate: %v", err)
+	}
+	cmd, _ = newRoomTestCommand(ctx)
+	if err := runRoomSend(cmd, workspace, "alpha", "human-a", "gemini-a", "", "please reply", "info", "", 0, false, true, true); err != nil {
+		t.Fatalf("runRoomSend: %v", err)
+	}
+
+	cmd, out := newRoomTestCommand(ctx)
+	if err := runRoomStatus(cmd, workspace, "alpha", 50, 5*time.Minute, true); err != nil {
+		t.Fatalf("runRoomStatus verbose: %v", err)
+	}
+	data := decodeRoomEnvelope(t, out)
+	actionRequired, ok := data["action_required"].(map[string]any)
+	if !ok {
+		t.Fatalf("action_required type=%T", data["action_required"])
+	}
+	verboseTopEntries, ok := actionRequired["verbose_top_entries"].([]any)
+	if !ok || len(verboseTopEntries) != 1 {
+		t.Fatalf("verbose_top_entries=%T/%v want 1 entry", actionRequired["verbose_top_entries"], actionRequired["verbose_top_entries"])
+	}
+	entry, ok := verboseTopEntries[0].(map[string]any)
+	if !ok {
+		t.Fatalf("verbose entry type=%T", verboseTopEntries[0])
+	}
+	if _, ok := entry["message"].(map[string]any); !ok {
+		t.Fatalf("verbose entry missing full message payload: %v", entry)
 	}
 }
 
