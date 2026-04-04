@@ -477,6 +477,108 @@ func TestRunRoomTaskAssignPersistsAssignmentAndNotifiesRecipient(t *testing.T) {
 	}
 }
 
+func TestRunRoomTaskReassignResetsOwnershipAndRetargetsAssignee(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	ctx := context.Background()
+	workspace := t.TempDir()
+
+	cmd, _ := newRoomTestCommand(ctx)
+	if err := runRoomCreate(cmd, workspace, "alpha", "Alpha", "", []string{"human-a=coordinator", "gemini-a=reviewer", "claude-a=reviewer"}); err != nil {
+		t.Fatalf("runRoomCreate: %v", err)
+	}
+	cmd, out := newRoomTestCommand(ctx)
+	if err := runRoomTaskAdd(cmd, workspace, "alpha", "human-a", "Reassign me", "Please reassign this", "", "", nil, true); err != nil {
+		t.Fatalf("runRoomTaskAdd: %v", err)
+	}
+	data := decodeRoomEnvelope(t, out)
+	taskRaw, ok := data["task"].(map[string]any)
+	if !ok {
+		t.Fatalf("task payload type=%T", data["task"])
+	}
+	taskID, _ := taskRaw["id"].(string)
+	if taskID == "" {
+		taskID, _ = taskRaw["ID"].(string)
+	}
+	cmd, _ = newRoomTestCommand(ctx)
+	if err := runRoomTaskAssign(cmd, workspace, "alpha", "human-a", taskID, "gemini-a", "take this"); err != nil {
+		t.Fatalf("runRoomTaskAssign: %v", err)
+	}
+	cmd, _ = newRoomTestCommand(ctx)
+	if err := runRoomTaskClaim(cmd, workspace, "alpha", "gemini-a", taskID); err != nil {
+		t.Fatalf("runRoomTaskClaim: %v", err)
+	}
+
+	cmd, out = newRoomTestCommand(ctx)
+	if err := runRoomTaskReassign(cmd, workspace, "alpha", "human-a", taskID, "claude-a", "switch reviewer"); err != nil {
+		t.Fatalf("runRoomTaskReassign: %v", err)
+	}
+	data = decodeRoomEnvelope(t, out)
+	taskRaw, ok = data["task"].(map[string]any)
+	if !ok {
+		t.Fatalf("task payload type=%T", data["task"])
+	}
+	if got := taskRaw["AssignedActorID"]; got != "claude-a" {
+		t.Fatalf("assigned=%v want claude-a", got)
+	}
+	if got := taskRaw["OwnerActorID"]; got != "" {
+		t.Fatalf("owner=%v want empty after reassign", got)
+	}
+	if got := taskRaw["Status"]; got != "pending" {
+		t.Fatalf("status=%v want pending after reassign", got)
+	}
+}
+
+func TestRunRoomTaskReclaimReturnsTaskToPool(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	ctx := context.Background()
+	workspace := t.TempDir()
+
+	cmd, _ := newRoomTestCommand(ctx)
+	if err := runRoomCreate(cmd, workspace, "alpha", "Alpha", "", []string{"human-a=coordinator", "gemini-a=reviewer"}); err != nil {
+		t.Fatalf("runRoomCreate: %v", err)
+	}
+	cmd, out := newRoomTestCommand(ctx)
+	if err := runRoomTaskAdd(cmd, workspace, "alpha", "human-a", "Reclaim me", "Please reclaim this", "", "", nil, true); err != nil {
+		t.Fatalf("runRoomTaskAdd: %v", err)
+	}
+	data := decodeRoomEnvelope(t, out)
+	taskRaw, ok := data["task"].(map[string]any)
+	if !ok {
+		t.Fatalf("task payload type=%T", data["task"])
+	}
+	taskID, _ := taskRaw["id"].(string)
+	if taskID == "" {
+		taskID, _ = taskRaw["ID"].(string)
+	}
+	cmd, _ = newRoomTestCommand(ctx)
+	if err := runRoomTaskAssign(cmd, workspace, "alpha", "human-a", taskID, "gemini-a", "take this"); err != nil {
+		t.Fatalf("runRoomTaskAssign: %v", err)
+	}
+	cmd, _ = newRoomTestCommand(ctx)
+	if err := runRoomTaskClaim(cmd, workspace, "alpha", "gemini-a", taskID); err != nil {
+		t.Fatalf("runRoomTaskClaim: %v", err)
+	}
+
+	cmd, out = newRoomTestCommand(ctx)
+	if err := runRoomTaskReclaim(cmd, workspace, "alpha", "human-a", taskID, "stale owner"); err != nil {
+		t.Fatalf("runRoomTaskReclaim: %v", err)
+	}
+	data = decodeRoomEnvelope(t, out)
+	taskRaw, ok = data["task"].(map[string]any)
+	if !ok {
+		t.Fatalf("task payload type=%T", data["task"])
+	}
+	if got := taskRaw["AssignedActorID"]; got != "" {
+		t.Fatalf("assigned=%v want empty after reclaim", got)
+	}
+	if got := taskRaw["OwnerActorID"]; got != "" {
+		t.Fatalf("owner=%v want empty after reclaim", got)
+	}
+	if got := taskRaw["Status"]; got != "pending" {
+		t.Fatalf("status=%v want pending after reclaim", got)
+	}
+}
+
 func TestRunRoomTaskClaimRejectsDifferentAssignee(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	ctx := context.Background()
