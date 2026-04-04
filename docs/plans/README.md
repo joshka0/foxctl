@@ -16,6 +16,7 @@ This directory contains active planning documents and implementation roadmaps.
 - `v2-greenfield-bootstrap.md`
 - `v2-symphony-kanban-implementation.md`
 - `gui-agent-improvement-roadmap.md`
+- `gui-agent-room-control-center.md`
 - `features/slop-function-detection.md`
 - `features/refactor-intelligence-substrate.md`
 - `features/refactor-phase1-status-and-snapshot.md`
