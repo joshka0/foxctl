@@ -138,6 +138,15 @@ type SendResult struct {
 	BridgeMessage  BridgeMessage `json:"bridge_message"`
 }
 
+// DeliverResult describes one plain-text delivery into a pane.
+type DeliverResult struct {
+	Target         string `json:"target"`
+	ResolvedTarget string `json:"resolved_target"`
+	Pane           Pane   `json:"pane"`
+	Mode           string `json:"mode"`
+	Payload        string `json:"payload"`
+}
+
 // Client exposes read-only access to a reachable tmux server.
 type Client struct {
 	runner Runner
@@ -400,6 +409,37 @@ func (c *Client) Send(ctx context.Context, sender string, target string, text st
 	}, nil
 }
 
+// DeliverText injects plain text into a target pane. Shell-like panes receive a
+// shell-safe printf payload; non-shell panes receive the raw text.
+func (c *Client) DeliverText(ctx context.Context, target string, text string) (DeliverResult, error) {
+	content := strings.TrimSpace(text)
+	if content == "" {
+		return DeliverResult{}, fmt.Errorf("message text is required")
+	}
+	resolvedTarget, err := c.ResolveTarget(ctx, target)
+	if err != nil {
+		return DeliverResult{}, err
+	}
+	targetPane, err := c.describePane(ctx, resolvedTarget)
+	if err != nil {
+		return DeliverResult{}, err
+	}
+	payload, mode := relayPayloadForPane(targetPane, content)
+	if _, err := c.runTmux(ctx, "send-keys", "-t", resolvedTarget, "-l", "--", payload); err != nil {
+		return DeliverResult{}, err
+	}
+	if _, err := c.runTmux(ctx, "send-keys", "-t", resolvedTarget, "Enter"); err != nil {
+		return DeliverResult{}, err
+	}
+	return DeliverResult{
+		Target:         target,
+		ResolvedTarget: resolvedTarget,
+		Pane:           targetPane,
+		Mode:           mode,
+		Payload:        payload,
+	}, nil
+}
+
 // Doctor inspects tmux reachability and reports likely issues.
 func (c *Client) Doctor(ctx context.Context) (DoctorReport, error) {
 	report := DoctorReport{
@@ -589,6 +629,26 @@ func (c *Client) CurrentParticipantID(ctx context.Context) (string, Pane, error)
 
 func formatTmuxParticipantID(session, paneID string) string {
 	return "tmux:" + strings.TrimSpace(session) + ":" + strings.TrimSpace(paneID)
+}
+
+func relayPayloadForPane(pane Pane, content string) (string, string) {
+	if isShellCommand(pane.CurrentCommand) {
+		return shellPrintfCommand(content), "shell_printf"
+	}
+	return content, "raw"
+}
+
+func isShellCommand(command string) bool {
+	switch strings.TrimSpace(command) {
+	case "bash", "zsh", "sh", "fish", "nu", "dash", "ksh", "tcsh", "csh":
+		return true
+	default:
+		return false
+	}
+}
+
+func shellPrintfCommand(content string) string {
+	return "printf '%s\\n' " + shellQuote(content)
 }
 
 // ParseParticipantID parses a canonical tmux participant identifier.

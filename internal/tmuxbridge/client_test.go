@@ -489,6 +489,50 @@ func TestSendRequiresSenderOutsideTmux(t *testing.T) {
 	}
 }
 
+func TestDeliverTextUsesPrintfForShellPane(t *testing.T) {
+	client := NewWithRunner(fakeRunner{
+		responses: map[string]fakeResponse{
+			"tmux list-sessions":                       {stdout: "ok\n"},
+			"tmux display-message -t %2 -p #{pane_id}": {stdout: "%2\n"},
+			"tmux display-message -t %2 -p " + listFormat: {
+				stdout: "%2" + fieldSep + "collab" + fieldSep + "0" + fieldSep + "1" + fieldSep + "main" + fieldSep + "222" + fieldSep + "80" + fieldSep + "24" + fieldSep + "smoke-b" + fieldSep + "/repo" + fieldSep + "zsh" + fieldSep + "0\n",
+			},
+			"tmux send-keys -t %2 -l -- printf '%s\\n' '[room alpha] relay smoke'": {},
+			"tmux send-keys -t %2 Enter": {},
+		},
+	}, map[string]string{})
+
+	got, err := client.DeliverText(context.Background(), "%2", "[room alpha] relay smoke")
+	if err != nil {
+		t.Fatalf("DeliverText() error = %v", err)
+	}
+	if got.Mode != "shell_printf" {
+		t.Fatalf("DeliverText() mode = %q, want shell_printf", got.Mode)
+	}
+}
+
+func TestDeliverTextUsesRawForAgentPane(t *testing.T) {
+	client := NewWithRunner(fakeRunner{
+		responses: map[string]fakeResponse{
+			"tmux list-sessions":                       {stdout: "ok\n"},
+			"tmux display-message -t %2 -p #{pane_id}": {stdout: "%2\n"},
+			"tmux display-message -t %2 -p " + listFormat: {
+				stdout: "%2" + fieldSep + "collab" + fieldSep + "0" + fieldSep + "1" + fieldSep + "main" + fieldSep + "222" + fieldSep + "80" + fieldSep + "24" + fieldSep + "codex-b" + fieldSep + "/repo" + fieldSep + "codex" + fieldSep + "0\n",
+			},
+			"tmux send-keys -t %2 -l -- [room alpha] relay smoke": {},
+			"tmux send-keys -t %2 Enter":                          {},
+		},
+	}, map[string]string{})
+
+	got, err := client.DeliverText(context.Background(), "%2", "[room alpha] relay smoke")
+	if err != nil {
+		t.Fatalf("DeliverText() error = %v", err)
+	}
+	if got.Mode != "raw" {
+		t.Fatalf("DeliverText() mode = %q, want raw", got.Mode)
+	}
+}
+
 func TestCurrentParticipantIDPrefersLabel(t *testing.T) {
 	client := NewWithRunner(fakeRunner{
 		responses: map[string]fakeResponse{

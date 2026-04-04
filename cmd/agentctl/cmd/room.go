@@ -770,17 +770,16 @@ func relayRoomMessage(ctx context.Context, client *tmuxbridge.Client, room agent
 
 func relayRoomMessageTmux(ctx context.Context, client *tmuxbridge.Client, room agent.RoomSummary, msg agent.BoardMessage) roomRelayResult {
 	result := roomRelayResult{Backend: "tmux"}
-	sender := strings.TrimSpace(msg.Sender)
 	for _, member := range room.Members {
 		target := strings.TrimSpace(member.ActorID)
 		if target == "" {
 			continue
 		}
-		if sameRoomParticipant(target, sender) {
+		if sameRoomParticipant(target, strings.TrimSpace(msg.Sender)) {
 			result.SkippedMembers = append(result.SkippedMembers, target)
 			continue
 		}
-		_, err := client.Send(ctx, sender, target, formatRoomRelayContent(room, msg))
+		_, err := client.DeliverText(ctx, target, formatRoomRelayContent(room, msg))
 		if err != nil {
 			result.FailedCount++
 			result.FailedMembers = append(result.FailedMembers, target)
