@@ -926,7 +926,7 @@ func TestRunRoomResolveRequiresCoordinator(t *testing.T) {
 	msgID := messages[0].(map[string]any)["id"].(string)
 
 	cmd, out = newRoomTestCommand(ctx)
-	err := runRoomResolve(cmd, workspace, "alpha", "gemini-a", "acked", []string{msgID})
+	err := runRoomResolve(cmd, workspace, "alpha", "gemini-a", "acked", false, nil, []string{msgID})
 	if err != nil {
 		t.Fatalf("runRoomResolve returned error: %v", err)
 	}
@@ -960,7 +960,7 @@ func TestRunRoomResolveMarksMessageResolved(t *testing.T) {
 	msgID := messages[0].(map[string]any)["id"].(string)
 
 	cmd, out = newRoomTestCommand(ctx)
-	if err := runRoomResolve(cmd, workspace, "alpha", "human-a", "acked", []string{msgID}); err != nil {
+	if err := runRoomResolve(cmd, workspace, "alpha", "human-a", "acked", false, nil, []string{msgID}); err != nil {
 		t.Fatalf("runRoomResolve: %v", err)
 	}
 	data = decodeRoomEnvelope(t, out)
@@ -1025,7 +1025,7 @@ func TestRunRoomResolveMarksRelatedReminderChainResolved(t *testing.T) {
 	}
 
 	cmd, out = newRoomTestCommand(ctx)
-	if err := runRoomResolve(cmd, workspace, "alpha", "human-a", "acked", []string{"r2"}); err != nil {
+	if err := runRoomResolve(cmd, workspace, "alpha", "human-a", "acked", false, nil, []string{"r2"}); err != nil {
 		t.Fatalf("runRoomResolve: %v", err)
 	}
 	data = decodeRoomEnvelope(t, out)
@@ -1041,6 +1041,122 @@ func TestRunRoomResolveMarksRelatedReminderChainResolved(t *testing.T) {
 	actionRequired := data["action_required"].(map[string]any)
 	if got := actionRequired["participants_with_pending"]; got != float64(0) {
 		t.Fatalf("participants_with_pending=%v want 0", got)
+	}
+}
+
+func TestRunRoomResolveAllByFilter(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	ctx := context.Background()
+	workspace := t.TempDir()
+
+	cmd, _ := newRoomTestCommand(ctx)
+	if err := runRoomCreate(cmd, workspace, "alpha", "Alpha", "", []string{"human-a=coordinator", "gemini-a=reviewer", "claude-a=reviewer"}); err != nil {
+		t.Fatalf("runRoomCreate: %v", err)
+	}
+	for _, recipient := range []string{"gemini-a", "claude-a"} {
+		cmd, _ = newRoomTestCommand(ctx)
+		if err := runRoomSend(cmd, workspace, "alpha", "human-a", recipient, "", "please ack", "info", "", 0, true, false, true); err != nil {
+			t.Fatalf("runRoomSend(%s): %v", recipient, err)
+		}
+	}
+
+	cmd, out := newRoomTestCommand(ctx)
+	if err := runRoomResolve(cmd, workspace, "alpha", "human-a", "acked", true, []string{"ack"}, nil); err != nil {
+		t.Fatalf("runRoomResolve all: %v", err)
+	}
+	data := decodeRoomEnvelope(t, out)
+	if got := data["updated"]; got != float64(2) {
+		t.Fatalf("updated=%v want 2", got)
+	}
+}
+
+func TestRunRoomSendResolvesCoordinatorAlias(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	ctx := context.Background()
+	workspace := t.TempDir()
+
+	cmd, _ := newRoomTestCommand(ctx)
+	if err := runRoomCreate(cmd, workspace, "alpha", "Alpha", "", []string{"human-a=coordinator", "gemini-a=reviewer"}); err != nil {
+		t.Fatalf("runRoomCreate: %v", err)
+	}
+	cmd, out := newRoomTestCommand(ctx)
+	if err := runRoomSend(cmd, workspace, "alpha", "gemini-a", "@coordinator", "", "please take a look", "info", "", 0, false, false, true); err != nil {
+		t.Fatalf("runRoomSend: %v", err)
+	}
+	data := decodeRoomEnvelope(t, out)
+	message := data["message"].(map[string]any)
+	if got := message["recipient"]; got != "human-a" {
+		t.Fatalf("recipient=%v want human-a", got)
+	}
+}
+
+func TestRunRoomCoordinatorSetTransfersRole(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	ctx := context.Background()
+	workspace := t.TempDir()
+
+	cmd, _ := newRoomTestCommand(ctx)
+	if err := runRoomCreate(cmd, workspace, "alpha", "Alpha", "", []string{"human-a=coordinator", "gemini-a=reviewer"}); err != nil {
+		t.Fatalf("runRoomCreate: %v", err)
+	}
+	cmd, out := newRoomTestCommand(ctx)
+	if err := runRoomCoordinatorSet(cmd, workspace, "alpha", "human-a", "gemini-a"); err != nil {
+		t.Fatalf("runRoomCoordinatorSet: %v", err)
+	}
+	data := decodeRoomEnvelope(t, out)
+	if got := data["coordinator"]; got != "gemini-a" {
+		t.Fatalf("coordinator=%v want gemini-a", got)
+	}
+	room := data["room"].(map[string]any)
+	members := room["members"].([]any)
+	foundNew := false
+	for _, raw := range members {
+		member := raw.(map[string]any)
+		if member["actor_id"] == "gemini-a" && member["role"] == "coordinator" {
+			foundNew = true
+		}
+		if member["actor_id"] == "human-a" && member["role"] == "coordinator" {
+			t.Fatalf("human-a still coordinator: %v", member)
+		}
+	}
+	if !foundNew {
+		t.Fatalf("expected gemini-a coordinator in members=%v", members)
+	}
+}
+
+func TestDetectRoomCoordinatorPulseMessagesEmitsReminder(t *testing.T) {
+	now := time.Date(2026, 4, 5, 12, 0, 0, 0, time.UTC)
+	room := agent.RoomSummary{
+		ID:          "alpha",
+		WorkspaceID: "ws1",
+		Stream:      agent.RoomStreamName("alpha"),
+		Members: []agent.RoomMember{
+			{ActorID: "human-a", Role: "coordinator"},
+			{ActorID: "gemini-a", Role: "reviewer"},
+		},
+		Participants: []string{"human-a", "gemini-a"},
+	}
+	messages := []agent.BoardMessage{{
+		ID:          "m1",
+		WorkspaceID: "ws1",
+		Stream:      room.Stream,
+		Sender:      "gemini-a",
+		Recipient:   "human-a",
+		Kind:        agent.BoardMessageKindInstruction,
+		Priority:    2,
+		Subject:     "Need unblock",
+		Body:        "Need unblock",
+		CreatedAt:   now.Add(-10 * time.Minute),
+	}}
+	pulses := detectRoomCoordinatorPulseMessages(room, messages, nil, now, roomPulseConfig{Interval: 30 * time.Second, TaskStaleAfter: 5 * time.Minute}, map[string]time.Time{})
+	if len(pulses) != 1 {
+		t.Fatalf("len(pulses)=%d want 1", len(pulses))
+	}
+	if got := pulses[0].Message.Recipient; got != "human-a" {
+		t.Fatalf("recipient=%q want human-a", got)
+	}
+	if !strings.Contains(pulses[0].Message.Body, "keep the room on track") {
+		t.Fatalf("body missing coordinator responsibility: %q", pulses[0].Message.Body)
 	}
 }
 

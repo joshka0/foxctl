@@ -27,6 +27,8 @@ description: "Durable multi-agent room coordination with shared chat, direct req
 - `room status` shows the coordinator-facing room pulse: participants, task counts, stale work, and compact actionable backlog summaries.
 - `room status --only blocked,stale,reply` narrows the action summary to the coordinator lane you care about right now.
 - `room status --verbose` includes richer top-entry detail for debugging without making the default coordinator view noisy.
+- `room coordinator set` transfers coordinator ownership to another room participant.
+- `room send --to @coordinator` resolves to the current coordinator without hard-coding an actor id.
 - `room relay` mirrors room messages into terminal panes.
 - `room task` links shared tasks to the room.
 - `room loop` runs the central coordination loop:
@@ -34,6 +36,7 @@ description: "Durable multi-agent room coordination with shared chat, direct req
   - watch room tasks
   - broadcast task status changes back into the room
   - nudge stale direct requests and stale claimed tasks with reminder pulses
+  - nudge the coordinator when unresolved work still needs oversight
 
 Do not rely on scrollback as canonical history. The room log is canonical.
 
@@ -43,6 +46,7 @@ Default room policy:
 - top-level agents may join the room
 - child panes stay parent-private by default
 - parents forward child summaries or task results into the room when appropriate
+- the coordinator is responsible for keeping assignments, replies, and stale work on track
 
 ## Quick start
 
@@ -52,8 +56,11 @@ agentctl room join alpha agent-a --role lead
 agentctl room join alpha agent-b --role reviewer
 agentctl room send alpha "Review the retry path in client.ts"
 agentctl room send alpha "Claude, please review the retry path." --to claude-a --reply-expected
+agentctl room send alpha "Coordinator, please reassign the blocked task." --to @coordinator
 agentctl room ack alpha <message-id>
 agentctl room resolve alpha <message-id> --mode acked
+agentctl room resolve alpha --all --only ack
+agentctl room coordinator set alpha gemini-a
 agentctl room inbox alpha --actor claude-a
 agentctl room status alpha
 agentctl room subscribe alpha --follow

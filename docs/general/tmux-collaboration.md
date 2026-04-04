@@ -315,10 +315,12 @@ The intended model is:
 
 - `room send` writes the canonical message into the durable room log
 - `room send --to <participant>` writes a direct room message and only relays it to the targeted participant
+- `room send --to @coordinator` resolves to the current room coordinator
 - `--reply-expected` is for direct requests only; broadcasts stay FYI by default
 - `--ack-required` marks a message as requiring an explicit acknowledgment
 - `room ack` marks one or more room messages as `acked` in the durable log
 - `room resolve` lets the coordinator clear stale handled reminders from the room surface and resolves reminder chains by original request
+- `room coordinator set` transfers coordinator ownership to another room participant
 - `room inbox` shows the actionable queue for one participant instead of the full room archive
 - `room status` shows the coordinator-facing pulse for participants, task state, stale owned work, and compact actionable backlog summaries
 - `room status --only blocked,stale,reply` narrows the summary to the exact coordination lane you want to inspect
@@ -328,6 +330,12 @@ The intended model is:
   matching room member ids to tmux pane labels
 
 This keeps room history durable while still allowing live terminal delivery.
+
+The coordinator owns room flow by default:
+
+- participants can nudge the coordinator directly with `--to @coordinator`
+- the room loop can remind the coordinator when unresolved work still needs oversight
+- coordinator handoff is explicit via `room coordinator set`
 
 ### Room Tasks
 
