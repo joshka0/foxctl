@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -27,6 +28,7 @@ var (
 	paneIDPattern     = regexp.MustCompile(`^%[0-9]+$`)
 	digitsPattern     = regexp.MustCompile(`^[0-9]+$`)
 	bridgeLinePattern = regexp.MustCompile(`^\[tmux-bridge\s+from=([^\s\]]+)\s+pane=([^\s\]]+)\s+reply_to=([^\s\]]+)\]\s*(.*)$`)
+	writePaneTTY      = defaultWritePaneTTY
 )
 
 // Runner executes subprocesses for tmuxbridge operations.
@@ -424,11 +426,8 @@ func (c *Client) DeliverText(ctx context.Context, target string, text string) (D
 	if err != nil {
 		return DeliverResult{}, err
 	}
-	payload, mode := relayPayloadForPane(targetPane, content)
-	if _, err := c.runTmux(ctx, "send-keys", "-t", resolvedTarget, "-l", "--", payload); err != nil {
-		return DeliverResult{}, err
-	}
-	if _, err := c.runTmux(ctx, "send-keys", "-t", resolvedTarget, "Enter"); err != nil {
+	payload, mode, err := c.deliverPayload(ctx, resolvedTarget, targetPane, content)
+	if err != nil {
 		return DeliverResult{}, err
 	}
 	return DeliverResult{
@@ -631,6 +630,24 @@ func formatTmuxParticipantID(session, paneID string) string {
 	return "tmux:" + strings.TrimSpace(session) + ":" + strings.TrimSpace(paneID)
 }
 
+func (c *Client) deliverPayload(ctx context.Context, resolvedTarget string, pane Pane, content string) (string, string, error) {
+	if isShellCommand(pane.CurrentCommand) {
+		if tty, err := c.paneTTY(ctx, resolvedTarget); err == nil && strings.TrimSpace(tty) != "" {
+			if err := writePaneTTY(tty, formatTTYRelayWrite(content)); err == nil {
+				return content, "tty_write", nil
+			}
+		}
+	}
+	payload, mode := relayPayloadForPane(pane, content)
+	if _, err := c.runTmux(ctx, "send-keys", "-t", resolvedTarget, "-l", "--", payload); err != nil {
+		return "", "", err
+	}
+	if _, err := c.runTmux(ctx, "send-keys", "-t", resolvedTarget, "Enter"); err != nil {
+		return "", "", err
+	}
+	return payload, mode, nil
+}
+
 func relayPayloadForPane(pane Pane, content string) (string, string) {
 	if isShellCommand(pane.CurrentCommand) {
 		return shellPrintfCommand(content), "shell_printf"
@@ -649,6 +666,30 @@ func isShellCommand(command string) bool {
 
 func shellPrintfCommand(content string) string {
 	return "printf '%s\\n' " + shellQuote(content)
+}
+
+func (c *Client) paneTTY(ctx context.Context, target string) (string, error) {
+	stdout, err := c.runTmux(ctx, "display-message", "-t", target, "-p", "#{pane_tty}")
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(stdout), nil
+}
+
+func defaultWritePaneTTY(path, content string) error {
+	f, err := os.OpenFile(path, os.O_WRONLY, 0)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		_ = f.Close()
+	}()
+	_, err = io.WriteString(f, content)
+	return err
+}
+
+func formatTTYRelayWrite(content string) string {
+	return "\r\x1b[2K" + content + "\r\n"
 }
 
 // ParseParticipantID parses a canonical tmux participant identifier.

@@ -725,7 +725,10 @@ func loadRoomState(ctx context.Context, store blackboard.BoardStore, workspaceID
 }
 
 func trimRoomHistory(messages []agent.BoardMessage, history int) []agent.BoardMessage {
-	if history <= 0 || len(messages) <= history {
+	if history <= 0 {
+		return []agent.BoardMessage{}
+	}
+	if len(messages) <= history {
 		return messages
 	}
 	return append([]agent.BoardMessage(nil), messages[len(messages)-history:]...)
