@@ -320,6 +320,7 @@ The intended model is:
 - `room ack` marks one or more room messages as `acked` in the durable log
 - `room inbox` shows the actionable queue for one participant instead of the full room archive
 - `room status` shows the coordinator-facing pulse for participants, task state, stale owned work, and compact actionable backlog summaries
+- `room status --only blocked,stale,reply` narrows the summary to the exact coordination lane you want to inspect
 - `room status --verbose` keeps the compact default but adds richer actionable entry detail when you need to debug the underlying room traffic
 - `room subscribe` reads or tails the room log in any terminal
 - `room relay --backend tmux` fans new room messages into tmux member panes by

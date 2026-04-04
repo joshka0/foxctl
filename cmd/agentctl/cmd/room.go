@@ -112,6 +112,7 @@ func newRoomStatusCommand() *cobra.Command {
 		workspace  string
 		limit      int
 		staleAfter time.Duration
+		only       []string
 		verbose    bool
 	)
 	cmd := &cobra.Command{
@@ -119,12 +120,13 @@ func newRoomStatusCommand() *cobra.Command {
 		Short: "Show a coordinator-facing room summary",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runRoomStatus(cmd, workspace, args[0], limit, staleAfter, verbose)
+			return runRoomStatus(cmd, workspace, args[0], limit, staleAfter, only, verbose)
 		},
 	}
 	cmd.Flags().StringVar(&workspace, "workspace", ".", "Workspace root override")
 	cmd.Flags().IntVar(&limit, "limit", 200, "Maximum room messages to inspect for status derivation")
 	cmd.Flags().DurationVar(&staleAfter, "stale-after", 5*time.Minute, "Participant idle threshold")
+	cmd.Flags().StringSliceVar(&only, "only", nil, "Filter coordinator action summary (ack,reply,assigned,blocked,stale,all)")
 	cmd.Flags().BoolVar(&verbose, "verbose", false, "Include verbose actionable entry detail for debugging")
 	return cmd
 }
@@ -459,11 +461,24 @@ type roomStatusActionRequired struct {
 	AssignedUnclaimed       int               `json:"assigned_unclaimed"`
 	BlockedTasks            int               `json:"blocked_tasks"`
 	StaleTasks              int               `json:"stale_tasks"`
+	Filter                  []string          `json:"filter,omitempty"`
 	TopEntries              []roomStatusEntry `json:"top_entries,omitempty"`
+	TopTasks                []roomStatusTask  `json:"top_tasks,omitempty"`
 	VerboseTopEntries       []roomInboxEntry  `json:"verbose_top_entries,omitempty"`
 }
 
-func runRoomStatus(cmd *cobra.Command, workspace, roomID string, limit int, staleAfter time.Duration, verbose bool) error {
+type roomStatusTask struct {
+	ID              string     `json:"id"`
+	Title           string     `json:"title"`
+	Status          string     `json:"status"`
+	AssignedActorID string     `json:"assigned_actor_id,omitempty"`
+	OwnerActorID    string     `json:"owner_actor_id,omitempty"`
+	BlockedReason   string     `json:"blocked_reason,omitempty"`
+	HeartbeatAt     *time.Time `json:"heartbeat_at,omitempty"`
+	Signals         []string   `json:"signals,omitempty"`
+}
+
+func runRoomStatus(cmd *cobra.Command, workspace, roomID string, limit int, staleAfter time.Duration, only []string, verbose bool) error {
 	absWorkspace, err := resolveRoomWorkspace(workspace)
 	if err != nil {
 		return err
@@ -490,14 +505,21 @@ func runRoomStatus(cmd *cobra.Command, workspace, roomID string, limit int, stal
 	if err != nil {
 		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.status", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
 	}
-	taskPulse := buildRoomTaskPulseSummary(tasks, time.Now().UTC(), staleAfter)
+	now := time.Now().UTC()
+	taskPulse := buildRoomTaskPulseSummary(tasks, now, staleAfter)
 	backlog := buildRoomStatusBacklog(summary, messages)
+	filters, err := normalizeRoomStatusFilters(only)
+	if err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.status", protocol.ErrorCodeEARG, err.Error(), map[string]any{
+			"hint": "Use comma-separated or repeated --only values from: ack, reply, assigned, blocked, stale, all.",
+		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
 	return protocol.WriteOK(cmd.OutOrStdout(), "agentctl.room.status", map[string]any{
 		"room":            summary,
 		"participants":    buildRoomStatusParticipants(summary, messages, tasks, staleAfter),
 		"task_pulse":      taskPulse,
 		"backlog":         backlog,
-		"action_required": buildRoomStatusActionRequired(summary, messages, backlog, taskPulse, verbose),
+		"action_required": buildRoomStatusActionRequired(summary, messages, tasks, backlog, taskPulse, filters, staleAfter, now, verbose),
 	}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
 }
 
@@ -1400,20 +1422,22 @@ func buildRoomStatusBacklog(room agent.RoomSummary, messages []agent.BoardMessag
 	return backlog
 }
 
-func buildRoomStatusActionRequired(room agent.RoomSummary, messages []agent.BoardMessage, backlog roomStatusBacklog, taskPulse roomTaskPulseSummary, verbose bool) roomStatusActionRequired {
+func buildRoomStatusActionRequired(room agent.RoomSummary, messages []agent.BoardMessage, tasks []taskstore.Task, backlog roomStatusBacklog, taskPulse roomTaskPulseSummary, filters map[string]struct{}, staleAfter time.Duration, now time.Time, verbose bool) roomStatusActionRequired {
 	summary := roomStatusActionRequired{
-		ParticipantsWithPending: backlog.ParticipantsWithPending,
-		PendingAcks:             backlog.PendingAcks,
-		PendingReplies:          backlog.PendingReplies,
-		AssignedUnclaimed:       taskPulse.AssignedUnclaimed,
-		BlockedTasks:            taskPulse.Blocked,
-		StaleTasks:              taskPulse.Stale,
-		TopEntries:              append([]roomStatusEntry(nil), backlog.LatestByParticipant...),
+		Filter:                  sortedRoomStatusFilters(filters),
+		ParticipantsWithPending: roomStatusFilteredCount(filters, "ack", "reply", backlog.ParticipantsWithPending),
+		PendingAcks:             roomStatusFilteredCount(filters, "ack", "", backlog.PendingAcks),
+		PendingReplies:          roomStatusFilteredCount(filters, "reply", "", backlog.PendingReplies),
+		AssignedUnclaimed:       roomStatusFilteredCount(filters, "assigned", "", taskPulse.AssignedUnclaimed),
+		BlockedTasks:            roomStatusFilteredCount(filters, "blocked", "", taskPulse.Blocked),
+		StaleTasks:              roomStatusFilteredCount(filters, "stale", "", taskPulse.Stale),
+		TopEntries:              filterRoomStatusEntries(backlog.LatestByParticipant, filters),
+		TopTasks:                buildRoomStatusTaskEntries(tasks, filters, now, staleAfter),
 	}
 	if !verbose {
 		return summary
 	}
-	summary.VerboseTopEntries = buildRoomStatusVerboseEntries(room, messages)
+	summary.VerboseTopEntries = filterRoomStatusVerboseEntries(buildRoomStatusVerboseEntries(room, messages), filters)
 	return summary
 }
 
@@ -1436,6 +1460,187 @@ func buildRoomStatusVerboseEntries(room agent.RoomSummary, messages []agent.Boar
 		return out[i].Recipient < out[j].Recipient
 	})
 	return out
+}
+
+func buildRoomStatusTaskEntries(tasks []taskstore.Task, filters map[string]struct{}, now time.Time, staleAfter time.Duration) []roomStatusTask {
+	out := make([]roomStatusTask, 0, len(tasks))
+	for _, task := range tasks {
+		signals := roomStatusTaskSignals(task, now, staleAfter)
+		if len(signals) == 0 {
+			continue
+		}
+		filteredSignals := filterRoomStatusTaskSignals(signals, filters)
+		if len(filteredSignals) == 0 {
+			continue
+		}
+		out = append(out, roomStatusTask{
+			ID:              task.ID,
+			Title:           task.Title,
+			Status:          task.Status,
+			AssignedActorID: task.AssignedActorID,
+			OwnerActorID:    task.OwnerActorID,
+			BlockedReason:   task.BlockedReason,
+			HeartbeatAt:     task.HeartbeatAt,
+			Signals:         filteredSignals,
+		})
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		leftRank := roomStatusTaskPriority(out[i].Signals)
+		rightRank := roomStatusTaskPriority(out[j].Signals)
+		if leftRank != rightRank {
+			return leftRank < rightRank
+		}
+		return out[i].ID < out[j].ID
+	})
+	return out
+}
+
+func roomStatusTaskSignals(task taskstore.Task, now time.Time, staleAfter time.Duration) []string {
+	signals := make([]string, 0, 3)
+	if task.Status == taskstore.StatusPending && strings.TrimSpace(task.AssignedActorID) != "" {
+		signals = append(signals, "assigned")
+	}
+	if task.Status == taskstore.StatusBlocked {
+		signals = append(signals, "blocked")
+	}
+	if taskIsStale(task, now, staleAfter) {
+		signals = append(signals, "stale")
+	}
+	return signals
+}
+
+func filterRoomStatusTaskSignals(signals []string, filters map[string]struct{}) []string {
+	if roomStatusIncludesAll(filters) {
+		return append([]string(nil), signals...)
+	}
+	out := make([]string, 0, len(signals))
+	for _, signal := range signals {
+		if _, ok := filters[signal]; ok {
+			out = append(out, signal)
+		}
+	}
+	return out
+}
+
+func roomStatusTaskPriority(signals []string) int {
+	for _, signal := range signals {
+		if signal == "stale" {
+			return 0
+		}
+	}
+	for _, signal := range signals {
+		if signal == "blocked" {
+			return 1
+		}
+	}
+	return 2
+}
+
+func filterRoomStatusEntries(entries []roomStatusEntry, filters map[string]struct{}) []roomStatusEntry {
+	if roomStatusIncludesAll(filters) {
+		return append([]roomStatusEntry(nil), entries...)
+	}
+	out := make([]roomStatusEntry, 0, len(entries))
+	for _, entry := range entries {
+		if roomStatusEntryMatchesFilters(entry, filters) {
+			out = append(out, entry)
+		}
+	}
+	return out
+}
+
+func filterRoomStatusVerboseEntries(entries []roomInboxEntry, filters map[string]struct{}) []roomInboxEntry {
+	if roomStatusIncludesAll(filters) {
+		return append([]roomInboxEntry(nil), entries...)
+	}
+	out := make([]roomInboxEntry, 0, len(entries))
+	for _, entry := range entries {
+		if roomStatusEntryMatchesFilters(roomStatusEntryFromInbox(entry), filters) {
+			out = append(out, entry)
+		}
+	}
+	return out
+}
+
+func roomStatusEntryMatchesFilters(entry roomStatusEntry, filters map[string]struct{}) bool {
+	if roomStatusIncludesAll(filters) {
+		return true
+	}
+	for _, flag := range entry.Flags {
+		switch flag {
+		case "ACK-REQUIRED":
+			if _, ok := filters["ack"]; ok {
+				return true
+			}
+		case "REPLY-EXPECTED":
+			if _, ok := filters["reply"]; ok {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func normalizeRoomStatusFilters(values []string) (map[string]struct{}, error) {
+	allowed := map[string]struct{}{
+		"all":      {},
+		"ack":      {},
+		"reply":    {},
+		"assigned": {},
+		"blocked":  {},
+		"stale":    {},
+	}
+	filters := make(map[string]struct{})
+	for _, raw := range values {
+		for _, part := range strings.Split(raw, ",") {
+			value := strings.TrimSpace(strings.ToLower(part))
+			if value == "" {
+				continue
+			}
+			if _, ok := allowed[value]; !ok {
+				return nil, fmt.Errorf("unsupported room status filter %q", value)
+			}
+			if value == "all" {
+				return map[string]struct{}{"all": {}}, nil
+			}
+			filters[value] = struct{}{}
+		}
+	}
+	if len(filters) == 0 {
+		return map[string]struct{}{"all": {}}, nil
+	}
+	return filters, nil
+}
+
+func sortedRoomStatusFilters(filters map[string]struct{}) []string {
+	out := make([]string, 0, len(filters))
+	for key := range filters {
+		out = append(out, key)
+	}
+	sort.Strings(out)
+	return out
+}
+
+func roomStatusIncludesAll(filters map[string]struct{}) bool {
+	_, ok := filters["all"]
+	return ok
+}
+
+func roomStatusFilteredCount(filters map[string]struct{}, primary string, secondary string, value int) int {
+	if roomStatusIncludesAll(filters) {
+		return value
+	}
+	if primary != "" {
+		if _, ok := filters[primary]; ok {
+			return value
+		}
+	}
+	if secondary != "" {
+		if _, ok := filters[secondary]; ok {
+			return value
+		}
+	}
+	return 0
 }
 
 func buildRoomStatusEntries(actorID string, messages []agent.BoardMessage) []roomInboxEntry {

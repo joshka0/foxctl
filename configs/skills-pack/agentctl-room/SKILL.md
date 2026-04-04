@@ -24,6 +24,7 @@ description: "Durable multi-agent room coordination with shared chat, direct req
 - `room ack` marks a specific room message as acknowledged.
 - `room inbox` shows actionable direct requests and pending ack/reply work for one participant.
 - `room status` shows the coordinator-facing room pulse: participants, task counts, stale work, and compact actionable backlog summaries.
+- `room status --only blocked,stale,reply` narrows the action summary to the coordinator lane you care about right now.
 - `room status --verbose` includes richer top-entry detail for debugging without making the default coordinator view noisy.
 - `room relay` mirrors room messages into terminal panes.
 - `room task` links shared tasks to the room.

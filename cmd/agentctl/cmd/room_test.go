@@ -647,7 +647,7 @@ func TestRunRoomStatusIncludesPulseAndBacklog(t *testing.T) {
 	}
 
 	cmd, out = newRoomTestCommand(ctx)
-	if err := runRoomStatus(cmd, workspace, "alpha", 50, 5*time.Minute, false); err != nil {
+	if err := runRoomStatus(cmd, workspace, "alpha", 50, 5*time.Minute, nil, false); err != nil {
 		t.Fatalf("runRoomStatus: %v", err)
 	}
 	data = decodeRoomEnvelope(t, out)
@@ -806,7 +806,7 @@ func TestRunRoomStatusVerboseIncludesVerboseTopEntries(t *testing.T) {
 	}
 
 	cmd, out := newRoomTestCommand(ctx)
-	if err := runRoomStatus(cmd, workspace, "alpha", 50, 5*time.Minute, true); err != nil {
+	if err := runRoomStatus(cmd, workspace, "alpha", 50, 5*time.Minute, nil, true); err != nil {
 		t.Fatalf("runRoomStatus verbose: %v", err)
 	}
 	data := decodeRoomEnvelope(t, out)
@@ -824,6 +824,80 @@ func TestRunRoomStatusVerboseIncludesVerboseTopEntries(t *testing.T) {
 	}
 	if _, ok := entry["message"].(map[string]any); !ok {
 		t.Fatalf("verbose entry missing full message payload: %v", entry)
+	}
+}
+
+func TestRunRoomStatusOnlyFiltersActionRequired(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	ctx := context.Background()
+	workspace := t.TempDir()
+
+	cmd, _ := newRoomTestCommand(ctx)
+	if err := runRoomCreate(cmd, workspace, "alpha", "Alpha", "", []string{"human-a=coordinator", "gemini-a=reviewer"}); err != nil {
+		t.Fatalf("runRoomCreate: %v", err)
+	}
+	cmd, out := newRoomTestCommand(ctx)
+	if err := runRoomTaskAdd(cmd, workspace, "alpha", "human-a", "Blocked task", "Inspect blockage", "", "", nil, true); err != nil {
+		t.Fatalf("runRoomTaskAdd: %v", err)
+	}
+	data := decodeRoomEnvelope(t, out)
+	taskRaw, ok := data["task"].(map[string]any)
+	if !ok {
+		t.Fatalf("task payload type=%T", data["task"])
+	}
+	taskID, _ := taskRaw["id"].(string)
+	if taskID == "" {
+		taskID, _ = taskRaw["ID"].(string)
+	}
+	cmd, _ = newRoomTestCommand(ctx)
+	if err := runRoomTaskAssign(cmd, workspace, "alpha", "human-a", taskID, "gemini-a", "take this"); err != nil {
+		t.Fatalf("runRoomTaskAssign: %v", err)
+	}
+	cmd, _ = newRoomTestCommand(ctx)
+	if err := runRoomTaskClaim(cmd, workspace, "alpha", "gemini-a", taskID); err != nil {
+		t.Fatalf("runRoomTaskClaim: %v", err)
+	}
+	cmd, _ = newRoomTestCommand(ctx)
+	if err := runRoomTaskBlock(cmd, workspace, "alpha", "gemini-a", taskID, "waiting"); err != nil {
+		t.Fatalf("runRoomTaskBlock: %v", err)
+	}
+	cmd, _ = newRoomTestCommand(ctx)
+	if err := runRoomSend(cmd, workspace, "alpha", "human-a", "gemini-a", "", "please ack", "info", "", 0, true, false, true); err != nil {
+		t.Fatalf("runRoomSend: %v", err)
+	}
+
+	cmd, out = newRoomTestCommand(ctx)
+	if err := runRoomStatus(cmd, workspace, "alpha", 50, 5*time.Minute, []string{"blocked"}, false); err != nil {
+		t.Fatalf("runRoomStatus blocked: %v", err)
+	}
+	data = decodeRoomEnvelope(t, out)
+	actionRequired, ok := data["action_required"].(map[string]any)
+	if !ok {
+		t.Fatalf("action_required type=%T", data["action_required"])
+	}
+	if got := actionRequired["blocked_tasks"]; got != float64(1) {
+		t.Fatalf("blocked_tasks=%v want 1", got)
+	}
+	if got := actionRequired["pending_acks"]; got != float64(0) {
+		t.Fatalf("pending_acks=%v want 0", got)
+	}
+	if rawTopEntries, exists := actionRequired["top_entries"]; exists {
+		topEntries, ok := rawTopEntries.([]any)
+		if !ok || len(topEntries) != 0 {
+			t.Fatalf("top_entries=%T/%v want empty", rawTopEntries, rawTopEntries)
+		}
+	}
+	topTasks, ok := actionRequired["top_tasks"].([]any)
+	if !ok || len(topTasks) != 1 {
+		t.Fatalf("top_tasks=%T/%v want 1", actionRequired["top_tasks"], actionRequired["top_tasks"])
+	}
+	taskEntry, ok := topTasks[0].(map[string]any)
+	if !ok {
+		t.Fatalf("taskEntry type=%T", topTasks[0])
+	}
+	signals, ok := taskEntry["signals"].([]any)
+	if !ok || len(signals) != 1 || signals[0] != "blocked" {
+		t.Fatalf("signals=%v want [blocked]", taskEntry["signals"])
 	}
 }
 
