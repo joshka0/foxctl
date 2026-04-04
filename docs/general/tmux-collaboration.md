@@ -264,4 +264,5 @@ What tmux should not replace:
 
 - [docs/architecture/context-architecture.md](../architecture/context-architecture.md)
 - [docs/general/runtime-orchestration.md](runtime-orchestration.md)
+- [configs/skills-pack/agentctl-room/SKILL.md](../../configs/skills-pack/agentctl-room/SKILL.md)
 - [configs/skills-pack/agentctl-tmux/SKILL.md](../../configs/skills-pack/agentctl-tmux/SKILL.md)

@@ -11,6 +11,7 @@ description: "Orchestration: tasks/todos, sessions, mailbox/inbox, agent spawn/a
 - You're doing multi-step work and don't want to lose state.
 - You want human-in-the-loop messaging ("overseer inbox").
 - You need to spawn research/coder/overseer agents and query their results.
+- You need a durable multi-agent room rather than only direct inbox messages.
 
 ## Tasks (todo)
 ```bash
@@ -30,6 +31,21 @@ agentctl run session/restore --input '{"name":"<short-name>"}'
 ```bash
 agentctl run mailbox/manage --input '{"operation":"inbox","inbox":{"actor_id":"overseer","limit":20}}'
 agentctl run mailbox/manage --input '{"operation":"send","send":{"recipient":"overseer","subject":"<subject>","body":"<body>","priority":2}}'
+```
+
+## Durable room coordination
+
+For shared multi-agent chat and room task broadcasts, use the dedicated room pack:
+
+- `configs/skills-pack/agentctl-room/SKILL.md`
+
+Typical flow:
+
+```bash
+agentctl room create alpha --title "Alpha Room"
+agentctl room join alpha agent-a --role lead
+agentctl room task add alpha --sender agent-a --title "Refactor retry path"
+agentctl room loop alpha --backend tmux
 ```
 
 ## Agent orchestration

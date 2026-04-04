@@ -1,6 +1,6 @@
 ---
 name: agentctl-all
-description: "Single condensed entrypoint for all agentctl workflows (core, code, dev, orchestrate, integrations, mobile)."
+description: "Single condensed entrypoint for all agentctl workflows (core, code, dev, orchestrate, room collaboration, integrations, mobile)."
 ---
 
 ## Quick Reference
@@ -60,6 +60,11 @@ List: `agentctl skills list`
 | `session/anchor` | Set durable session goal |
 | `mailbox/manage` | Actor messaging (overseer inbox) |
 | `graph/manage`, `graph/pagerank` | Task dependency graph |
+
+### Room Coordination
+| Skill | Purpose |
+|-------|---------|
+| `configs/skills-pack/agentctl-room/SKILL.md` | Durable shared room chat, room relay, room loop, room tasks |
 
 ### Context Architecture & History
 For the bundled ACA/context-history workflow pack, see:
