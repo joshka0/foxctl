@@ -236,6 +236,26 @@ agentctl agent spawn \
 That keeps the child parent-private by default while still giving it a dedicated
 tmux presence and durable terminal binding metadata.
 
+Zellij now supports the same `agent spawn --spawn-in-pane` shape, using a named
+pane created with `zellij run --name ...`:
+
+```bash
+agentctl agent spawn \
+  --role reviewer \
+  --prompt "Review mailbox ack behavior" \
+  --mux-backend zellij \
+  --mux-session collab-runtime \
+  --spawn-in-pane
+```
+
+Important nuance:
+
+- tmux uses a real pane id and can derive a canonical `tmux:<session>:%pane`
+  participant
+- zellij currently uses a generated pane title as the durable participant id for
+  spawned agents, because the CLI exposes reliable named-pane creation but not
+  the same exact respawn-by-pane-id flow
+
 ## Room Surface
 
 Rooms are durable coordination timelines backed by the blackboard store. They

@@ -371,6 +371,7 @@ Implemented in the launcher and room/tmux surfaces:
 5. `agentctl agent spawn` / daemon spawn / persisted agent metadata now carry a typed `terminal_binding` object
 6. overseer child sessions inherit backend/session/parent-private defaults from the parent session binding
 7. `agentctl agent spawn --spawn-in-pane --mux-backend tmux` can allocate an exact tmux pane, derive a canonical participant id from that pane, and repurpose it into `agentctl agent watch <agent-id>`
+8. `agentctl agent spawn --spawn-in-pane --mux-backend zellij` can create a named zellij pane for the agent watch stream, using the pane title as the durable participant id
 
 Still pending:
 

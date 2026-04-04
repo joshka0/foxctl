@@ -35,6 +35,7 @@ import (
 	v2errors "github.com/jkatigb/agentctl/internal/v2/core/errors"
 	"github.com/jkatigb/agentctl/internal/v2/core/events"
 	v2services "github.com/jkatigb/agentctl/internal/v2/services"
+	"github.com/jkatigb/agentctl/internal/zellijbridge"
 	"github.com/oklog/ulid/v2"
 	"github.com/spf13/cobra"
 )
@@ -382,6 +383,17 @@ func deriveSpawnPaneLabel() string {
 	return "agent"
 }
 
+func deriveZellijParticipantID(binding agent.TerminalBinding) string {
+	if value := strings.TrimSpace(binding.ParticipantID); value != "" {
+		return value
+	}
+	label := deriveSpawnPaneLabel()
+	if strings.TrimSpace(binding.Session) == "" {
+		return label
+	}
+	return label
+}
+
 func maybePrepareSpawnPane(ctx context.Context, binding agent.TerminalBinding) (agent.TerminalBinding, map[string]any, error) {
 	if !spawnInPane {
 		return binding, nil, nil
@@ -390,8 +402,27 @@ func maybePrepareSpawnPane(ctx context.Context, binding agent.TerminalBinding) (
 	if strings.TrimSpace(binding.Backend) == "" {
 		binding.Backend = "tmux"
 	}
-	if binding.Backend != "tmux" {
-		return binding, nil, fmt.Errorf("spawn-in-pane currently supports only tmux")
+	switch binding.Backend {
+	case "tmux":
+	case "zellij":
+		if strings.TrimSpace(binding.Session) == "" {
+			if value := strings.TrimSpace(os.Getenv("ZELLIJ_SESSION_NAME")); value != "" {
+				binding.Session = value
+			}
+		}
+		if strings.TrimSpace(binding.Session) == "" {
+			return binding, nil, fmt.Errorf("zellij spawn-in-pane requires --mux-session or ZELLIJ_SESSION_NAME")
+		}
+		if strings.TrimSpace(binding.ParticipantID) == "" {
+			binding.ParticipantID = deriveZellijParticipantID(binding)
+		}
+		if strings.TrimSpace(binding.PaneID) == "" {
+			binding.PaneID = binding.ParticipantID
+		}
+		binding = agent.NormalizeTerminalBinding(binding)
+		return binding, nil, nil
+	default:
+		return binding, nil, fmt.Errorf("spawn-in-pane currently supports only tmux and zellij")
 	}
 	client := tmuxbridge.New()
 	result, err := client.CreatePane(ctx, tmuxbridge.CreatePaneOptions{
@@ -421,26 +452,52 @@ func maybeRespawnSpawnPane(ctx context.Context, binding agent.TerminalBinding, a
 		return nil, nil
 	}
 	binding = agent.NormalizeTerminalBinding(binding)
-	if binding.Backend != "tmux" || strings.TrimSpace(binding.PaneID) == "" {
+	if strings.TrimSpace(binding.PaneID) == "" {
 		return nil, nil
 	}
-	client := tmuxbridge.New()
-	result, err := client.RespawnPane(ctx, tmuxbridge.RespawnPaneOptions{
-		Target:            binding.PaneID,
-		CWD:               currentSpawnWorkspaceRoot(),
-		Command:           "agentctl agent watch " + strings.TrimSpace(agentID),
-		ParticipantID:     binding.ParticipantID,
-		ParentParticipant: binding.ParentParticipantID,
-		ParentAgentID:     binding.ParentAgentID,
-		RoomID:            binding.RoomID,
-		RoomAccess:        binding.RoomAccess,
-	})
-	if err != nil {
-		return nil, err
+	switch binding.Backend {
+	case "tmux":
+		client := tmuxbridge.New()
+		result, err := client.RespawnPane(ctx, tmuxbridge.RespawnPaneOptions{
+			Target:            binding.PaneID,
+			CWD:               currentSpawnWorkspaceRoot(),
+			Command:           "agentctl agent watch " + strings.TrimSpace(agentID),
+			ParticipantID:     binding.ParticipantID,
+			ParentParticipant: binding.ParentParticipantID,
+			ParentAgentID:     binding.ParentAgentID,
+			RoomID:            binding.RoomID,
+			RoomAccess:        binding.RoomAccess,
+		})
+		if err != nil {
+			return nil, err
+		}
+		return map[string]any{
+			"pane": result.Pane,
+		}, nil
+	case "zellij":
+		client := zellijbridge.New()
+		result, err := client.CreatePane(ctx, zellijbridge.CreatePaneOptions{
+			Session:           binding.Session,
+			CWD:               currentSpawnWorkspaceRoot(),
+			Name:              binding.PaneID,
+			Command:           "agentctl agent watch " + strings.TrimSpace(agentID),
+			ParticipantID:     binding.ParticipantID,
+			ParentParticipant: binding.ParentParticipantID,
+			ParentAgentID:     binding.ParentAgentID,
+			RoomID:            binding.RoomID,
+			RoomAccess:        binding.RoomAccess,
+		})
+		if err != nil {
+			return nil, err
+		}
+		return map[string]any{
+			"session":        result.Session,
+			"pane_name":      result.PaneName,
+			"participant_id": result.ParticipantID,
+		}, nil
+	default:
+		return nil, nil
 	}
-	return map[string]any{
-		"pane": result.Pane,
-	}, nil
 }
 
 func resolveSpawnPromptVariantTarget(cfg config.Config, executionLayer agent.ExecutionLayer) (string, string) {

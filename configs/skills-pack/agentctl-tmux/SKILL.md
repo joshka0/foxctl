@@ -144,6 +144,10 @@ agentctl agent spawn \
   --spawn-in-pane
 ```
 
+For zellij, the same command shape works with `--mux-backend zellij` and an
+explicit `--mux-session`. The current zellij path uses a named pane as the
+durable participant identity for the spawned agent.
+
 ### Interactive bridge
 
 `tmux-bridge` remains available for lower-level control:
