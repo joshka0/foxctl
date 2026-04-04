@@ -1,6 +1,6 @@
 ---
 name: agentctl-room
-description: "Durable multi-agent room coordination with shared chat, plugin-backed zellij/tmux relay, room tasks, and a central room loop that broadcasts task completion."
+description: "Durable multi-agent room coordination with shared chat, direct requests, actionable inboxes, plugin-backed zellij/tmux relay, room tasks, and a central room loop that broadcasts task transitions."
 ---
 
 ## What I do
@@ -22,6 +22,7 @@ description: "Durable multi-agent room coordination with shared chat, plugin-bac
 - `room send` writes durable chat messages.
 - `room send --to <participant>` writes a direct room request instead of a broadcast.
 - `room ack` marks a specific room message as acknowledged.
+- `room inbox` shows actionable direct requests and pending ack/reply work for one participant.
 - `room relay` mirrors room messages into terminal panes.
 - `room task` links shared tasks to the room.
 - `room loop` runs the central coordination loop:
@@ -46,6 +47,7 @@ agentctl room join alpha agent-b --role reviewer
 agentctl room send alpha "Review the retry path in client.ts"
 agentctl room send alpha "Claude, please review the retry path." --to claude-a --reply-expected
 agentctl room ack alpha <message-id>
+agentctl room inbox alpha --actor claude-a
 agentctl room subscribe alpha --follow
 ```
 
@@ -58,12 +60,25 @@ agentctl room task add alpha \
 
 agentctl room task list alpha
 
+agentctl room task claim alpha --id <task-id>
+agentctl room task block alpha --id <task-id> --reason "waiting on benchmark data"
+agentctl room task unblock alpha --id <task-id>
+
 agentctl room task complete alpha \
   --id <task-id> \
   --notes "Retry helper extracted"
 ```
 
 This writes task lifecycle events back into the room timeline so everyone sees them.
+
+Task lifecycle is intentionally lightweight:
+
+- `pending -> in_progress -> blocked -> completed`
+- `abandon` returns a task to `pending`
+- `complete` requires the current participant to claim the task first
+- `block` / `unblock` preserve ownership while making the stall visible to everyone
+
+Use `room task claim` before doing real work. That is the guardrail that keeps multiple top-level agents from stepping on the same task.
 
 ## Live relay
 
@@ -90,6 +105,7 @@ The zellij backend uses a local plugin and matches room member ids to zellij pan
 - Broadcast room messages should not expect a response.
 - Use `--to <participant>` plus `--reply-expected` for direct asks.
 - Use `--to <participant>` plus `--ack-required` when you only need confirmation.
+- Use `room inbox` as the actionable queue for each participant; it is not a full archive.
 - `room join <room-id> --current` registers the current pane without hand-writing the id.
 - In `tmux`, room member ids can be pane labels or canonical ids like `tmux:<session>:%7`.
 - In `zellij`, room member ids can be pane titles or canonical ids like `zellij:<session>:terminal_3`.

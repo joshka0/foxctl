@@ -137,6 +137,11 @@ func TestRoomTaskFlow_AddListComplete(t *testing.T) {
 	}
 
 	cmd, out = newRoomTestCommand(ctx)
+	if err := runRoomTaskClaim(cmd, workspace, "alpha", "agent-b", taskID); err != nil {
+		t.Fatalf("runRoomTaskClaim: %v", err)
+	}
+
+	cmd, out = newRoomTestCommand(ctx)
 	if err := runRoomTaskComplete(cmd, workspace, "alpha", "agent-b", taskID, "Retry path simplified", "Watch auth fallback regressions"); err != nil {
 		t.Fatalf("runRoomTaskComplete: %v", err)
 	}
@@ -159,8 +164,191 @@ func TestRoomTaskFlow_AddListComplete(t *testing.T) {
 	}
 	data = decodeRoomEnvelope(t, out)
 	messages, ok := data["messages"].([]any)
-	if !ok || len(messages) != 2 {
-		t.Fatalf("messages=%T/%v want 2 entries", data["messages"], data["messages"])
+	if !ok || len(messages) != 3 {
+		t.Fatalf("messages=%T/%v want 3 entries", data["messages"], data["messages"])
+	}
+}
+
+func TestRoomTaskFlow_ClaimBlockUnblockAbandon(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	ctx := context.Background()
+	workspace := t.TempDir()
+
+	cmd, _ := newRoomTestCommand(ctx)
+	if err := runRoomCreate(cmd, workspace, "alpha", "Alpha", "", []string{"agent-a=lead"}); err != nil {
+		t.Fatalf("runRoomCreate: %v", err)
+	}
+
+	cmd, out := newRoomTestCommand(ctx)
+	if err := runRoomTaskAdd(cmd, workspace, "alpha", "agent-a", "Task claim flow", "Inspect claim flow", "", "", nil, true); err != nil {
+		t.Fatalf("runRoomTaskAdd: %v", err)
+	}
+	data := decodeRoomEnvelope(t, out)
+	taskRaw, ok := data["task"].(map[string]any)
+	if !ok {
+		t.Fatalf("task payload type=%T", data["task"])
+	}
+	taskID, _ := taskRaw["id"].(string)
+	if taskID == "" {
+		taskID, _ = taskRaw["ID"].(string)
+	}
+	if taskID == "" {
+		t.Fatalf("task id missing in payload=%v", taskRaw)
+	}
+
+	cmd, out = newRoomTestCommand(ctx)
+	if err := runRoomTaskClaim(cmd, workspace, "alpha", "agent-a", taskID); err != nil {
+		t.Fatalf("runRoomTaskClaim: %v", err)
+	}
+	data = decodeRoomEnvelope(t, out)
+	taskRaw, ok = data["task"].(map[string]any)
+	if !ok {
+		t.Fatalf("task payload type=%T", data["task"])
+	}
+	if got := taskRaw["OwnerActorID"]; got != "agent-a" {
+		t.Fatalf("owner=%v want agent-a", got)
+	}
+
+	cmd, out = newRoomTestCommand(ctx)
+	if err := runRoomTaskBlock(cmd, workspace, "alpha", "agent-a", taskID, "Waiting on human"); err != nil {
+		t.Fatalf("runRoomTaskBlock: %v", err)
+	}
+	data = decodeRoomEnvelope(t, out)
+	taskRaw, ok = data["task"].(map[string]any)
+	if !ok {
+		t.Fatalf("task payload type=%T", data["task"])
+	}
+	if got := taskRaw["Status"]; got != "blocked" {
+		t.Fatalf("status=%v want blocked", got)
+	}
+
+	cmd, out = newRoomTestCommand(ctx)
+	if err := runRoomTaskUnblock(cmd, workspace, "alpha", "agent-a", taskID); err != nil {
+		t.Fatalf("runRoomTaskUnblock: %v", err)
+	}
+	data = decodeRoomEnvelope(t, out)
+	taskRaw, ok = data["task"].(map[string]any)
+	if !ok {
+		t.Fatalf("task payload type=%T", data["task"])
+	}
+	if got := taskRaw["Status"]; got != "in_progress" {
+		t.Fatalf("status=%v want in_progress", got)
+	}
+
+	cmd, out = newRoomTestCommand(ctx)
+	if err := runRoomTaskAbandon(cmd, workspace, "alpha", "agent-a", taskID, "Releasing back to queue"); err != nil {
+		t.Fatalf("runRoomTaskAbandon: %v", err)
+	}
+	data = decodeRoomEnvelope(t, out)
+	taskRaw, ok = data["task"].(map[string]any)
+	if !ok {
+		t.Fatalf("task payload type=%T", data["task"])
+	}
+	if got := taskRaw["Status"]; got != "pending" {
+		t.Fatalf("status=%v want pending", got)
+	}
+	if got := taskRaw["OwnerActorID"]; got != "" {
+		t.Fatalf("owner=%v want empty", got)
+	}
+}
+
+func TestRunRoomTaskCompleteRequiresClaim(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	ctx := context.Background()
+	workspace := t.TempDir()
+
+	cmd, _ := newRoomTestCommand(ctx)
+	if err := runRoomCreate(cmd, workspace, "alpha", "Alpha", "", []string{"agent-a=lead"}); err != nil {
+		t.Fatalf("runRoomCreate: %v", err)
+	}
+	cmd, out := newRoomTestCommand(ctx)
+	if err := runRoomTaskAdd(cmd, workspace, "alpha", "agent-a", "Must claim first", "No direct complete", "", "", nil, true); err != nil {
+		t.Fatalf("runRoomTaskAdd: %v", err)
+	}
+	data := decodeRoomEnvelope(t, out)
+	taskRaw, ok := data["task"].(map[string]any)
+	if !ok {
+		t.Fatalf("task payload type=%T", data["task"])
+	}
+	taskID, _ := taskRaw["id"].(string)
+	if taskID == "" {
+		taskID, _ = taskRaw["ID"].(string)
+	}
+
+	cmd, out = newRoomTestCommand(ctx)
+	if err := runRoomTaskComplete(cmd, workspace, "alpha", "agent-a", taskID, "should fail", ""); err != nil {
+		t.Fatalf("runRoomTaskComplete returned error instead of envelope: %v", err)
+	}
+	var env envelope.Envelope
+	if err := json.Unmarshal(out.Bytes(), &env); err != nil {
+		t.Fatalf("decode envelope: %v", err)
+	}
+	if env.Status != "error" {
+		t.Fatalf("status=%q want error body=%s", env.Status, out.String())
+	}
+}
+
+func TestRunRoomInboxFiltersActionableMessages(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	ctx := context.Background()
+	workspace := t.TempDir()
+
+	cmd, _ := newRoomTestCommand(ctx)
+	if err := runRoomCreate(cmd, workspace, "alpha", "Alpha", "", []string{"agent-a=lead", "agent-b=reviewer"}); err != nil {
+		t.Fatalf("runRoomCreate: %v", err)
+	}
+	cmd, _ = newRoomTestCommand(ctx)
+	if err := runRoomSend(cmd, workspace, "alpha", "human-a", "agent-a", "", "please ack", "info", "", 0, true, false, true); err != nil {
+		t.Fatalf("runRoomSend ack: %v", err)
+	}
+	cmd, _ = newRoomTestCommand(ctx)
+	if err := runRoomSend(cmd, workspace, "alpha", "human-a", "agent-a", "", "please reply", "info", "", 0, false, true, true); err != nil {
+		t.Fatalf("runRoomSend reply: %v", err)
+	}
+	cmd, _ = newRoomTestCommand(ctx)
+	if err := runRoomSend(cmd, workspace, "alpha", "human-a", "", "", "plain broadcast", "info", "", 0, false, false, true); err != nil {
+		t.Fatalf("runRoomSend broadcast: %v", err)
+	}
+
+	cmd, out := newRoomTestCommand(ctx)
+	if err := runRoomInbox(cmd, workspace, "alpha", "agent-a", 20, "all", false, false, false); err != nil {
+		t.Fatalf("runRoomInbox: %v", err)
+	}
+	data := decodeRoomEnvelope(t, out)
+	entries, ok := data["entries"].([]any)
+	if !ok {
+		t.Fatalf("entries type=%T", data["entries"])
+	}
+	if len(entries) != 2 {
+		t.Fatalf("entries=%d want 2 actionable entries", len(entries))
+	}
+
+	cmd, out = newRoomTestCommand(ctx)
+	if err := runRoomInbox(cmd, workspace, "alpha", "agent-a", 20, "ack-required", false, true, false); err != nil {
+		t.Fatalf("runRoomInbox ids-only: %v", err)
+	}
+	data = decodeRoomEnvelope(t, out)
+	ids, ok := data["ids"].([]any)
+	if !ok || len(ids) != 1 {
+		t.Fatalf("ids=%v want one ack-required id", data["ids"])
+	}
+
+	cmd, _ = newRoomTestCommand(ctx)
+	if err := runRoomAck(cmd, workspace, "alpha", "agent-a", []string{ids[0].(string)}); err != nil {
+		t.Fatalf("runRoomAck: %v", err)
+	}
+
+	cmd, out = newRoomTestCommand(ctx)
+	if err := runRoomInbox(cmd, workspace, "alpha", "agent-a", 20, "all", false, false, false); err != nil {
+		t.Fatalf("runRoomInbox after ack: %v", err)
+	}
+	data = decodeRoomEnvelope(t, out)
+	entries, ok = data["entries"].([]any)
+	if !ok {
+		t.Fatalf("entries type=%T", data["entries"])
+	}
+	if len(entries) != 1 {
+		t.Fatalf("entries=%d want 1 actionable entry after ack", len(entries))
 	}
 }
 

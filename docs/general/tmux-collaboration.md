@@ -293,7 +293,11 @@ agentctl room send alpha "Review the retry branch in client.ts"
 agentctl room send alpha "Claude, please review the retry branch." --to claude-a --reply-expected
 agentctl room send alpha "Gemini, confirm receipt." --to gemini-a --ack-required
 agentctl room ack alpha <message-id>
+agentctl room inbox alpha --actor claude-a
 agentctl room task add alpha --title "Refactor retry path"
+agentctl room task claim alpha --id <task-id>
+agentctl room task block alpha --id <task-id> --reason "waiting on benchmark data"
+agentctl room task unblock alpha --id <task-id>
 agentctl room task complete alpha --id <task-id> --notes "Retry ladder flattened"
 agentctl room show alpha
 agentctl room subscribe alpha --follow
@@ -308,6 +312,7 @@ The intended model is:
 - `--reply-expected` is for direct requests only; broadcasts stay FYI by default
 - `--ack-required` marks a message as requiring an explicit acknowledgment
 - `room ack` marks one or more room messages as `acked` in the durable log
+- `room inbox` shows the actionable queue for one participant instead of the full room archive
 - `room subscribe` reads or tails the room log in any terminal
 - `room relay --backend tmux` fans new room messages into tmux member panes by
   matching room member ids to tmux pane labels
@@ -325,14 +330,25 @@ agentctl room task add alpha \
 
 agentctl room task list alpha
 
+agentctl room task claim alpha --id <task-id>
+agentctl room task block alpha --id <task-id> --reason "waiting on benchmark data"
+agentctl room task unblock alpha --id <task-id>
+
 agentctl room task complete alpha \
   --id <task-id> \
   --notes "Retry helper extracted"
 ```
 
-`room task add` and `room task complete` both write a durable room message with a
-`task_id`, so every participant sees the task lifecycle in the same shared room
-timeline.
+`room task add`, `claim`, `block`, `unblock`, `abandon`, and `complete` all
+write durable room messages with a `task_id`, so every participant sees the
+task lifecycle in the same shared room timeline.
+
+The intended lightweight lifecycle is:
+
+- `pending -> in_progress -> blocked -> completed`
+- `abandon` returns a task to `pending`
+- `complete` requires the current participant to claim the task first
+- `block` / `unblock` keep ownership while making the stall visible
 
 ### Room Loop
 

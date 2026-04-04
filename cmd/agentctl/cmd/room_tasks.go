@@ -28,6 +28,10 @@ func newRoomTaskCommand() *cobra.Command {
 	cmd.AddCommand(
 		newRoomTaskAddCommand(),
 		newRoomTaskListCommand(),
+		newRoomTaskClaimCommand(),
+		newRoomTaskBlockCommand(),
+		newRoomTaskUnblockCommand(),
+		newRoomTaskAbandonCommand(),
 		newRoomTaskCompleteCommand(),
 	)
 	return cmd
@@ -103,6 +107,95 @@ func newRoomTaskCompleteCommand() *cobra.Command {
 	cmd.Flags().StringVar(&taskID, "id", "", "Task id to complete")
 	cmd.Flags().StringVar(&notes, "notes", "", "Completion notes")
 	cmd.Flags().StringVar(&gotchas, "gotchas", "", "Completion gotchas")
+	_ = cmd.MarkFlagRequired("id")
+	return cmd
+}
+
+func newRoomTaskClaimCommand() *cobra.Command {
+	var (
+		workspace string
+		sender    string
+		taskID    string
+	)
+	cmd := &cobra.Command{
+		Use:   "claim <room-id>",
+		Short: "Claim a room-associated task for one participant",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runRoomTaskClaim(cmd, workspace, args[0], sender, taskID)
+		},
+	}
+	cmd.Flags().StringVar(&workspace, "workspace", ".", "Workspace root override")
+	cmd.Flags().StringVar(&sender, "sender", "", "Sender actor or participant id (defaults to current tmux/zellij pane)")
+	cmd.Flags().StringVar(&taskID, "id", "", "Task id to claim")
+	_ = cmd.MarkFlagRequired("id")
+	return cmd
+}
+
+func newRoomTaskBlockCommand() *cobra.Command {
+	var (
+		workspace string
+		sender    string
+		taskID    string
+		reason    string
+	)
+	cmd := &cobra.Command{
+		Use:   "block <room-id>",
+		Short: "Mark a claimed room task as blocked",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runRoomTaskBlock(cmd, workspace, args[0], sender, taskID, reason)
+		},
+	}
+	cmd.Flags().StringVar(&workspace, "workspace", ".", "Workspace root override")
+	cmd.Flags().StringVar(&sender, "sender", "", "Sender actor or participant id (defaults to current tmux/zellij pane)")
+	cmd.Flags().StringVar(&taskID, "id", "", "Task id to block")
+	cmd.Flags().StringVar(&reason, "reason", "", "Block reason")
+	_ = cmd.MarkFlagRequired("id")
+	_ = cmd.MarkFlagRequired("reason")
+	return cmd
+}
+
+func newRoomTaskUnblockCommand() *cobra.Command {
+	var (
+		workspace string
+		sender    string
+		taskID    string
+	)
+	cmd := &cobra.Command{
+		Use:   "unblock <room-id>",
+		Short: "Move a blocked task back to claimed/in-progress",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runRoomTaskUnblock(cmd, workspace, args[0], sender, taskID)
+		},
+	}
+	cmd.Flags().StringVar(&workspace, "workspace", ".", "Workspace root override")
+	cmd.Flags().StringVar(&sender, "sender", "", "Sender actor or participant id (defaults to current tmux/zellij pane)")
+	cmd.Flags().StringVar(&taskID, "id", "", "Task id to unblock")
+	_ = cmd.MarkFlagRequired("id")
+	return cmd
+}
+
+func newRoomTaskAbandonCommand() *cobra.Command {
+	var (
+		workspace string
+		sender    string
+		taskID    string
+		reason    string
+	)
+	cmd := &cobra.Command{
+		Use:   "abandon <room-id>",
+		Short: "Release a claimed or blocked task back to pending",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runRoomTaskAbandon(cmd, workspace, args[0], sender, taskID, reason)
+		},
+	}
+	cmd.Flags().StringVar(&workspace, "workspace", ".", "Workspace root override")
+	cmd.Flags().StringVar(&sender, "sender", "", "Sender actor or participant id (defaults to current tmux/zellij pane)")
+	cmd.Flags().StringVar(&taskID, "id", "", "Task id to abandon")
+	cmd.Flags().StringVar(&reason, "reason", "", "Optional abandon reason")
 	_ = cmd.MarkFlagRequired("id")
 	return cmd
 }
@@ -266,10 +359,27 @@ func runRoomTaskComplete(cmd *cobra.Command, workspace, roomID, sender, taskID, 
 			"hint": "Use the same workspace used when the task was created.",
 		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
 	}
+	if task.Status == taskstore.StatusPending && strings.TrimSpace(task.OwnerActorID) == "" {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.task.complete", protocol.ErrorCodeEARG, "task must be claimed before completion", map[string]any{
+			"hint": "Run 'agentctl room task claim <room-id> --id <task-id>' before completing the task.",
+		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	if strings.TrimSpace(task.OwnerActorID) != "" && task.OwnerActorID != identity.Sender {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.task.complete", protocol.ErrorCodeEARG, "only the current owner can complete this task", map[string]any{
+			"owner_actor_id": task.OwnerActorID,
+		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	if task.Status == taskstore.StatusBlocked {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.task.complete", protocol.ErrorCodeEARG, "blocked tasks must be unblocked before completion", nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
 
 	now := time.Now().UTC()
 	task.Status = taskstore.StatusCompleted
 	task.CompletedAt = &now
+	task.OwnerActorID = ""
+	task.HeartbeatAt = &now
+	task.BlockedReason = ""
+	task.BlockedAt = nil
 	task.Notes = strings.TrimSpace(notes)
 	task.Gotchas = strings.TrimSpace(gotchas)
 	task, err = taskStore.Update(cmd.Context(), task)
@@ -298,6 +408,149 @@ func runRoomTaskComplete(cmd *cobra.Command, workspace, roomID, sender, taskID, 
 		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.task.complete", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
 	}
 	return protocol.WriteOK(cmd.OutOrStdout(), "agentctl.room.task.complete", map[string]any{
+		"room_id":         strings.TrimSpace(roomID),
+		"task":            task,
+		"message_id":      msg.ID,
+		"sender_identity": identity,
+	}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+}
+
+func runRoomTaskClaim(cmd *cobra.Command, workspace, roomID, sender, taskID string) error {
+	return runRoomTaskTransition(cmd, workspace, roomID, sender, taskID, "", "claim")
+}
+
+func runRoomTaskBlock(cmd *cobra.Command, workspace, roomID, sender, taskID, reason string) error {
+	return runRoomTaskTransition(cmd, workspace, roomID, sender, taskID, reason, "block")
+}
+
+func runRoomTaskUnblock(cmd *cobra.Command, workspace, roomID, sender, taskID string) error {
+	return runRoomTaskTransition(cmd, workspace, roomID, sender, taskID, "", "unblock")
+}
+
+func runRoomTaskAbandon(cmd *cobra.Command, workspace, roomID, sender, taskID, reason string) error {
+	return runRoomTaskTransition(cmd, workspace, roomID, sender, taskID, reason, "abandon")
+}
+
+func runRoomTaskTransition(cmd *cobra.Command, workspace, roomID, sender, taskID, reason, action string) error {
+	absWorkspace, err := resolveRoomWorkspace(workspace)
+	if err != nil {
+		return err
+	}
+	identity, err := resolveRoomSender(cmd.Context(), sender)
+	if err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.task."+action, protocol.ErrorCodeEARG, err.Error(), map[string]any{
+			"hint": "Pass --sender when outside tmux/zellij, or run inside a prepared pane so agentctl can derive the participant id.",
+		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	taskWorkspaceID := ws.CanonicalID(absWorkspace)
+	taskStore, err := openRoomTaskStore(cmd.Context())
+	if err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.task."+action, protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	defer taskStore.Close()
+
+	task, err := taskStore.Get(cmd.Context(), strings.TrimSpace(taskID))
+	if err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.task."+action, protocol.ErrorCodeENotFound, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	if task.WorkspaceID != taskWorkspaceID {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.task."+action, protocol.ErrorCodeEARG, "task does not belong to this workspace", map[string]any{
+			"hint": "Use the same workspace used when the task was created.",
+		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+
+	now := time.Now().UTC()
+	switch action {
+	case "claim":
+		if task.Status == taskstore.StatusCompleted {
+			return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.task.claim", protocol.ErrorCodeEARG, "completed tasks cannot be claimed", nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+		}
+		if task.OwnerActorID != "" && task.OwnerActorID != identity.Sender && task.Status != taskstore.StatusPending && task.Status != taskstore.StatusCanceled {
+			return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.task.claim", protocol.ErrorCodeEARG, "task is already claimed by another participant", map[string]any{
+				"owner_actor_id": task.OwnerActorID,
+			}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+		}
+		task.Status = taskstore.StatusInProgress
+		task.OwnerActorID = identity.Sender
+		task.ClaimedAt = &now
+		task.HeartbeatAt = &now
+		task.BlockedReason = ""
+		task.BlockedAt = nil
+	case "block":
+		if strings.TrimSpace(reason) == "" {
+			return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.task.block", protocol.ErrorCodeEARG, "block reason is required", nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+		}
+		if task.OwnerActorID == "" {
+			return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.task.block", protocol.ErrorCodeEARG, "task must be claimed before it can be blocked", nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+		}
+		if task.OwnerActorID != identity.Sender {
+			return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.task.block", protocol.ErrorCodeEARG, "only the current owner can block this task", map[string]any{
+				"owner_actor_id": task.OwnerActorID,
+			}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+		}
+		task.Status = taskstore.StatusBlocked
+		task.BlockedReason = strings.TrimSpace(reason)
+		task.BlockedAt = &now
+		task.HeartbeatAt = &now
+	case "unblock":
+		if task.OwnerActorID == "" {
+			return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.task.unblock", protocol.ErrorCodeEARG, "task is not currently claimed", nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+		}
+		if task.OwnerActorID != identity.Sender {
+			return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.task.unblock", protocol.ErrorCodeEARG, "only the current owner can unblock this task", map[string]any{
+				"owner_actor_id": task.OwnerActorID,
+			}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+		}
+		task.Status = taskstore.StatusInProgress
+		task.BlockedReason = ""
+		task.BlockedAt = nil
+		task.HeartbeatAt = &now
+	case "abandon":
+		if task.OwnerActorID != "" && task.OwnerActorID != identity.Sender {
+			return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.task.abandon", protocol.ErrorCodeEARG, "only the current owner can abandon this task", map[string]any{
+				"owner_actor_id": task.OwnerActorID,
+			}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+		}
+		task.Status = taskstore.StatusPending
+		task.OwnerActorID = ""
+		task.ClaimedAt = nil
+		task.HeartbeatAt = nil
+		task.BlockedReason = ""
+		task.BlockedAt = nil
+		if strings.TrimSpace(reason) != "" {
+			task.Notes = strings.TrimSpace(reason)
+		}
+	default:
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.task."+action, protocol.ErrorCodeEARG, "unsupported room task action", nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+
+	task, err = taskStore.Update(cmd.Context(), task)
+	if err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.task."+action, protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+
+	boardStore, err := openRoomBoardStore(cmd.Context())
+	if err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.task."+action, protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	defer boardStore.Close()
+
+	subject, body := formatRoomTaskTransitionMessage(action, task)
+	msg := &agent.BoardMessage{
+		WorkspaceID: absWorkspace,
+		TaskID:      task.ID,
+		Stream:      agent.RoomStreamName(strings.TrimSpace(roomID)),
+		Sender:      identity.Sender,
+		Recipient:   agent.BroadcastRecipient,
+		Kind:        agent.BoardMessageKindTaskUpdate,
+		Priority:    agent.DefaultPriority,
+		Subject:     subject,
+		Body:        body,
+	}
+	if err := boardStore.SendMessage(cmd.Context(), msg); err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.task."+action, protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	return protocol.WriteOK(cmd.OutOrStdout(), "agentctl.room.task."+action, map[string]any{
 		"room_id":         strings.TrimSpace(roomID),
 		"task":            task,
 		"message_id":      msg.ID,
@@ -571,6 +824,24 @@ func formatRoomTaskCompletionBody(task taskstore.Task) string {
 	return strings.Join(lines, "\n")
 }
 
+func formatRoomTaskTransitionMessage(action string, task taskstore.Task) (string, string) {
+	subject := fmt.Sprintf("Task %s: %s", action, task.Title)
+	lines := []string{
+		fmt.Sprintf("Task ID: %s", task.ID),
+		fmt.Sprintf("Status: %s", task.Status),
+	}
+	if strings.TrimSpace(task.OwnerActorID) != "" {
+		lines = append(lines, "Owner: "+task.OwnerActorID)
+	}
+	if strings.TrimSpace(task.BlockedReason) != "" {
+		lines = append(lines, "Blocked reason: "+task.BlockedReason)
+	}
+	if strings.TrimSpace(task.Notes) != "" {
+		lines = append(lines, "Notes: "+task.Notes)
+	}
+	return subject, strings.Join(lines, "\n")
+}
+
 func roomTaskStatusSubject(task taskstore.Task, previousStatus string) string {
 	if task.Status == taskstore.StatusCompleted {
 		return fmt.Sprintf("Task completed: %s", task.Title)
@@ -583,6 +854,12 @@ func roomTaskStatusBody(task taskstore.Task, previousStatus string) string {
 		fmt.Sprintf("Task ID: %s", task.ID),
 		fmt.Sprintf("Previous status: %s", previousStatus),
 		fmt.Sprintf("Current status: %s", task.Status),
+	}
+	if strings.TrimSpace(task.OwnerActorID) != "" {
+		lines = append(lines, "Owner: "+task.OwnerActorID)
+	}
+	if strings.TrimSpace(task.BlockedReason) != "" {
+		lines = append(lines, "Blocked reason: "+task.BlockedReason)
 	}
 	if strings.TrimSpace(task.Notes) != "" {
 		lines = append(lines, "Notes: "+task.Notes)

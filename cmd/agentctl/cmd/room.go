@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -29,6 +30,7 @@ func newRoomCommand() *cobra.Command {
 		newRoomCreateCommand(),
 		newRoomListCommand(),
 		newRoomShowCommand(),
+		newRoomInboxCommand(),
 		newRoomSendCommand(),
 		newRoomAckCommand(),
 		newRoomJoinCommand(),
@@ -99,6 +101,34 @@ func newRoomShowCommand() *cobra.Command {
 	cmd.Flags().StringVar(&workspace, "workspace", ".", "Workspace root override")
 	cmd.Flags().StringVar(&actorID, "actor", "", "Actor id used for unread counts")
 	cmd.Flags().IntVar(&limit, "limit", 100, "Maximum messages to return")
+	return cmd
+}
+
+func newRoomInboxCommand() *cobra.Command {
+	var (
+		workspace         string
+		actorID           string
+		limit             int
+		filter            string
+		grouped           bool
+		idsOnly           bool
+		includeBroadcasts bool
+	)
+	cmd := &cobra.Command{
+		Use:   "inbox <room-id>",
+		Short: "Show actionable room messages for one participant",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runRoomInbox(cmd, workspace, args[0], actorID, limit, filter, grouped, idsOnly, includeBroadcasts)
+		},
+	}
+	cmd.Flags().StringVar(&workspace, "workspace", ".", "Workspace root override")
+	cmd.Flags().StringVar(&actorID, "actor", "", "Actor id used for inbox filtering (defaults to current tmux/zellij pane)")
+	cmd.Flags().IntVar(&limit, "limit", 100, "Maximum room messages to inspect")
+	cmd.Flags().StringVar(&filter, "filter", "all", "Filter entries (all|ack-required|reply-expected|direct|broadcast)")
+	cmd.Flags().BoolVar(&grouped, "grouped", false, "Group entries by category")
+	cmd.Flags().BoolVar(&idsOnly, "ids-only", false, "Return only matching message ids")
+	cmd.Flags().BoolVar(&includeBroadcasts, "include-broadcasts", false, "Include plain broadcast messages in the default all filter")
 	return cmd
 }
 
@@ -333,6 +363,73 @@ func runRoomShow(cmd *cobra.Command, workspace, roomID, actorID string, limit in
 		"room":     summary,
 		"messages": messages,
 	}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+}
+
+type roomInboxEntry struct {
+	ID        string                   `json:"id"`
+	Sender    string                   `json:"sender"`
+	Recipient string                   `json:"recipient"`
+	Subject   string                   `json:"subject"`
+	Priority  int                      `json:"priority"`
+	Status    agent.BoardMessageStatus `json:"status"`
+	CreatedAt time.Time                `json:"created_at"`
+	Category  string                   `json:"category"`
+	Flags     []string                 `json:"flags,omitempty"`
+	Preview   string                   `json:"preview,omitempty"`
+	Message   agent.BoardMessage       `json:"message"`
+}
+
+func runRoomInbox(cmd *cobra.Command, workspace, roomID, actorID string, limit int, filter string, grouped, idsOnly, includeBroadcasts bool) error {
+	absWorkspace, err := resolveRoomWorkspace(workspace)
+	if err != nil {
+		return err
+	}
+	identity, err := resolveRoomSender(cmd.Context(), actorID)
+	if err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.inbox", protocol.ErrorCodeEARG, err.Error(), map[string]any{
+			"hint": "Pass --actor when outside tmux/zellij, or run inside a prepared pane so agentctl can derive the participant id.",
+		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	store, err := openRoomBoardStore(cmd.Context())
+	if err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.inbox", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	defer store.Close()
+
+	summary, messages, err := loadRoomState(cmd.Context(), store, absWorkspace, roomID, identity.Sender, limit)
+	if err != nil {
+		code := protocol.ErrorCodeERuntime
+		if errors.Is(err, blackboard.ErrRoomNotFound) {
+			code = protocol.ErrorCodeENotFound
+		}
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.inbox", code, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+
+	entries := buildRoomInboxEntries(identity.Sender, messages, strings.TrimSpace(filter), includeBroadcasts)
+	if idsOnly {
+		ids := make([]string, 0, len(entries))
+		for _, entry := range entries {
+			ids = append(ids, entry.ID)
+		}
+		return protocol.WriteOK(cmd.OutOrStdout(), "agentctl.room.inbox", map[string]any{
+			"room":   summary,
+			"actor":  identity.Sender,
+			"filter": normalizeRoomInboxFilter(filter),
+			"ids":    ids,
+			"count":  len(ids),
+		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	data := map[string]any{
+		"room":    summary,
+		"actor":   identity.Sender,
+		"filter":  normalizeRoomInboxFilter(filter),
+		"count":   len(entries),
+		"entries": entries,
+	}
+	if grouped {
+		data["groups"] = groupRoomInboxEntries(entries)
+	}
+	return protocol.WriteOK(cmd.OutOrStdout(), "agentctl.room.inbox", data, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
 }
 
 func runRoomSend(cmd *cobra.Command, workspace, roomID, sender, recipient, subject, body, kind, taskID string, priority int, ackRequired, replyExpected, autoCreate bool) error {
@@ -898,6 +995,100 @@ func formatRoomRelayContent(room agent.RoomSummary, msg agent.BoardMessage) stri
 		return fmt.Sprintf("%s %s\n%s", prefix, subject, body)
 	}
 	return fmt.Sprintf("%s %s", prefix, body)
+}
+
+func buildRoomInboxEntries(actorID string, messages []agent.BoardMessage, filter string, includeBroadcasts bool) []roomInboxEntry {
+	normalized := normalizeRoomInboxFilter(filter)
+	entries := make([]roomInboxEntry, 0, len(messages))
+	for _, msg := range messages {
+		entry, ok := roomInboxEntryForActor(actorID, msg, includeBroadcasts)
+		if !ok {
+			continue
+		}
+		if normalized != "all" && entry.Category != normalized {
+			continue
+		}
+		entries = append(entries, entry)
+	}
+	sort.SliceStable(entries, func(i, j int) bool {
+		if entries[i].Priority != entries[j].Priority {
+			return entries[i].Priority < entries[j].Priority
+		}
+		if !entries[i].CreatedAt.Equal(entries[j].CreatedAt) {
+			return entries[i].CreatedAt.Before(entries[j].CreatedAt)
+		}
+		return entries[i].ID < entries[j].ID
+	})
+	return entries
+}
+
+func roomInboxEntryForActor(actorID string, msg agent.BoardMessage, includeBroadcasts bool) (roomInboxEntry, bool) {
+	recipient := normalizeRoomRecipient(msg.Recipient)
+	isDirect := sameRoomParticipant(recipient, actorID)
+	isBroadcast := recipient == agent.BroadcastRecipient
+	if !isDirect && !isBroadcast {
+		return roomInboxEntry{}, false
+	}
+	if msg.Status == agent.BoardMessageStatusAcked {
+		return roomInboxEntry{}, false
+	}
+
+	flags := make([]string, 0, 2)
+	if msg.AckRequired && msg.Status != agent.BoardMessageStatusAcked {
+		flags = append(flags, "ACK-REQUIRED")
+	}
+	if msg.ReplyExpected && msg.Status != agent.BoardMessageStatusAcked {
+		flags = append(flags, "REPLY-EXPECTED")
+	}
+	category := "direct"
+	if msg.AckRequired && msg.Status != agent.BoardMessageStatusAcked {
+		category = "ack-required"
+	} else if msg.ReplyExpected && msg.Status != agent.BoardMessageStatusAcked {
+		category = "reply-expected"
+	} else if isBroadcast {
+		category = "broadcast"
+	}
+	if isBroadcast && !includeBroadcasts && category == "broadcast" {
+		return roomInboxEntry{}, false
+	}
+	return roomInboxEntry{
+		ID:        msg.ID,
+		Sender:    msg.Sender,
+		Recipient: recipient,
+		Subject:   msg.Subject,
+		Priority:  msg.Priority,
+		Status:    msg.Status,
+		CreatedAt: msg.CreatedAt,
+		Category:  category,
+		Flags:     flags,
+		Preview:   summarizeRoomPreview(msg.Body),
+		Message:   msg,
+	}, true
+}
+
+func normalizeRoomInboxFilter(filter string) string {
+	switch strings.TrimSpace(strings.ToLower(filter)) {
+	case "ack-required", "reply-expected", "direct", "broadcast":
+		return strings.TrimSpace(strings.ToLower(filter))
+	default:
+		return "all"
+	}
+}
+
+func groupRoomInboxEntries(entries []roomInboxEntry) map[string][]roomInboxEntry {
+	grouped := make(map[string][]roomInboxEntry)
+	for _, entry := range entries {
+		grouped[entry.Category] = append(grouped[entry.Category], entry)
+	}
+	return grouped
+}
+
+func summarizeRoomPreview(body string) string {
+	body = strings.TrimSpace(body)
+	if len(body) <= 140 {
+		return body
+	}
+	return body[:140] + "..."
 }
 
 func collectRoomRelayTargets(room agent.RoomSummary, msg agent.BoardMessage) ([]string, []string) {
