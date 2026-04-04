@@ -164,6 +164,7 @@ type preparePlan struct {
 	session        string
 	panes          int
 	paneCommand    string
+	explicitPane   bool
 	agent          string
 	agentMode      string
 	agentArgs      []string
@@ -496,6 +497,11 @@ func (c *Client) PrepareSession(ctx context.Context, opts PrepareOptions) (Prepa
 	panes, err := c.ensureSessionPaneCount(ctx, socket, plan)
 	if err != nil {
 		return PrepareResult{}, err
+	}
+	if !created {
+		if err := c.ensurePaneCommands(ctx, socket, panes, plan); err != nil {
+			return PrepareResult{}, err
+		}
 	}
 	if _, err := c.runTmuxWithSocket(ctx, socket, "select-layout", "-t", plan.session, "tiled"); err != nil {
 		return PrepareResult{}, err
@@ -902,6 +908,26 @@ func (c *Client) splitSessionPane(ctx context.Context, socket string, plan prepa
 	return err
 }
 
+func (c *Client) ensurePaneCommands(ctx context.Context, socket string, panes []Pane, plan preparePlan) error {
+	if plan.agent == "" && !plan.explicitPane {
+		return nil
+	}
+	for _, pane := range panes {
+		if !isShellCommand(pane.CurrentCommand) {
+			continue
+		}
+		args := []string{"respawn-pane", "-k", "-t", pane.ID}
+		if plan.cwd != "" {
+			args = append(args, "-c", plan.cwd)
+		}
+		args = append(args, plan.paneCommand)
+		if _, err := c.runTmuxWithSocket(ctx, socket, args...); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (c *Client) labelSessionPanes(ctx context.Context, socket string, panes []Pane, labelPrefix string) error {
 	for i := range panes {
 		label := labelForIndex(labelPrefix, i)
@@ -1044,6 +1070,7 @@ func normalizePrepareOptions(opts PrepareOptions) (preparePlan, error) {
 		session:        strings.TrimSpace(opts.Session),
 		panes:          opts.Panes,
 		paneCommand:    strings.TrimSpace(opts.PaneCommand),
+		explicitPane:   strings.TrimSpace(opts.PaneCommand) != "",
 		agent:          strings.TrimSpace(opts.Agent),
 		agentMode:      normalizeAgentMode(opts.AgentMode),
 		agentArgs:      append([]string(nil), opts.AgentArgs...),

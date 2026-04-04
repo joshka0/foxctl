@@ -231,6 +231,49 @@ func TestPrepareSessionCreatesAndLabelsPanes(t *testing.T) {
 	}
 }
 
+func TestPrepareSessionRespawnsExistingShellPanesForAgent(t *testing.T) {
+	cmd, err := buildAgentPaneCommand("codex", "auto", nil, "")
+	if err != nil {
+		t.Fatalf("buildAgentPaneCommand() error = %v", err)
+	}
+	runner := &sequenceRunner{
+		steps: []sequenceStep{
+			{key: "tmux new-session -d -s agentctl-agent-smoke " + cmd, stderr: "duplicate session", err: fmt.Errorf("exit status 1")},
+			{key: "tmux list-panes -t agentctl-agent-smoke -F " + listFormat, stdout: "%21" + fieldSep + "agentctl-agent-smoke" + fieldSep + "0" + fieldSep + "0" + fieldSep + "main" + fieldSep + "111" + fieldSep + "80" + fieldSep + "24" + fieldSep + "" + fieldSep + "/repo" + fieldSep + "zsh" + fieldSep + "1\n"},
+			{key: "tmux split-window -d -t agentctl-agent-smoke " + cmd},
+			{key: "tmux list-panes -t agentctl-agent-smoke -F " + listFormat, stdout: strings.Join([]string{
+				"%21" + fieldSep + "agentctl-agent-smoke" + fieldSep + "0" + fieldSep + "0" + fieldSep + "main" + fieldSep + "111" + fieldSep + "80" + fieldSep + "12" + fieldSep + "" + fieldSep + "/repo" + fieldSep + "zsh" + fieldSep + "1",
+				"%22" + fieldSep + "agentctl-agent-smoke" + fieldSep + "0" + fieldSep + "1" + fieldSep + "main" + fieldSep + "222" + fieldSep + "80" + fieldSep + "12" + fieldSep + "" + fieldSep + "/repo" + fieldSep + "node" + fieldSep + "0",
+			}, "\n") + "\n"},
+			{key: "tmux respawn-pane -k -t %21 " + cmd},
+			{key: "tmux select-layout -t agentctl-agent-smoke tiled"},
+			{key: "tmux list-panes -t agentctl-agent-smoke -F " + listFormat, stdout: strings.Join([]string{
+				"%21" + fieldSep + "agentctl-agent-smoke" + fieldSep + "0" + fieldSep + "0" + fieldSep + "main" + fieldSep + "111" + fieldSep + "39" + fieldSep + "11" + fieldSep + "" + fieldSep + "/repo" + fieldSep + "node" + fieldSep + "1",
+				"%22" + fieldSep + "agentctl-agent-smoke" + fieldSep + "0" + fieldSep + "1" + fieldSep + "main" + fieldSep + "222" + fieldSep + "40" + fieldSep + "11" + fieldSep + "" + fieldSep + "/repo" + fieldSep + "node" + fieldSep + "0",
+			}, "\n") + "\n"},
+			{key: "tmux set-option -p -t %21 @name codex-a"},
+			{key: "tmux set-option -p -t %22 @name codex-b"},
+		},
+	}
+	client := NewWithRunner(runner, map[string]string{})
+
+	got, err := client.PrepareSession(context.Background(), PrepareOptions{
+		Session:   "agentctl-agent-smoke",
+		Panes:     2,
+		Agent:     "codex",
+		AgentMode: "auto",
+	})
+	if err != nil {
+		t.Fatalf("PrepareSession() error = %v", err)
+	}
+	if got.Created {
+		t.Fatal("expected Created = false for duplicate session")
+	}
+	if got.Panes[0].Label != "codex-a" || got.Panes[1].Label != "codex-b" {
+		t.Fatalf("labels = %#v", []string{got.Panes[0].Label, got.Panes[1].Label})
+	}
+}
+
 func TestNormalizePrepareOptionsDefaults(t *testing.T) {
 	got, err := normalizePrepareOptions(PrepareOptions{Panes: 2})
 	if err != nil {
