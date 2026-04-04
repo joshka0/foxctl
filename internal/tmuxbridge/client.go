@@ -94,32 +94,40 @@ type DoctorReport struct {
 
 // PrepareOptions describes a tmux session preparation request.
 type PrepareOptions struct {
-	Session        string   `json:"session"`
-	Panes          int      `json:"panes"`
-	PaneCommand    string   `json:"pane_command,omitempty"`
-	Agent          string   `json:"agent,omitempty"`
-	AgentMode      string   `json:"agent_mode,omitempty"`
-	AgentArgs      []string `json:"agent_args,omitempty"`
-	AgentSessionID string   `json:"agent_session_id,omitempty"`
-	CWD            string   `json:"cwd,omitempty"`
-	LabelPrefix    string   `json:"label_prefix,omitempty"`
+	Session           string   `json:"session"`
+	Panes             int      `json:"panes"`
+	PaneCommand       string   `json:"pane_command,omitempty"`
+	Agent             string   `json:"agent,omitempty"`
+	AgentMode         string   `json:"agent_mode,omitempty"`
+	AgentArgs         []string `json:"agent_args,omitempty"`
+	AgentSessionID    string   `json:"agent_session_id,omitempty"`
+	CWD               string   `json:"cwd,omitempty"`
+	LabelPrefix       string   `json:"label_prefix,omitempty"`
+	ParentParticipant string   `json:"parent_participant,omitempty"`
+	ParentAgentID     string   `json:"parent_agent_id,omitempty"`
+	RoomID            string   `json:"room_id,omitempty"`
+	RoomAccess        string   `json:"room_access,omitempty"`
 }
 
 // PrepareResult describes one prepared tmux collaboration session.
 type PrepareResult struct {
-	Session        string   `json:"session"`
-	Created        bool     `json:"created"`
-	PanesRequested int      `json:"panes_requested"`
-	PaneCommand    string   `json:"pane_command,omitempty"`
-	Agent          string   `json:"agent,omitempty"`
-	AgentMode      string   `json:"agent_mode,omitempty"`
-	AgentArgs      []string `json:"agent_args,omitempty"`
-	AgentSessionID string   `json:"agent_session_id,omitempty"`
-	CWD            string   `json:"cwd,omitempty"`
-	LabelPrefix    string   `json:"label_prefix,omitempty"`
-	AttachCommand  string   `json:"attach_command"`
-	SocketMode     string   `json:"socket_mode"`
-	Panes          []Pane   `json:"panes"`
+	Session           string   `json:"session"`
+	Created           bool     `json:"created"`
+	PanesRequested    int      `json:"panes_requested"`
+	PaneCommand       string   `json:"pane_command,omitempty"`
+	Agent             string   `json:"agent,omitempty"`
+	AgentMode         string   `json:"agent_mode,omitempty"`
+	AgentArgs         []string `json:"agent_args,omitempty"`
+	AgentSessionID    string   `json:"agent_session_id,omitempty"`
+	CWD               string   `json:"cwd,omitempty"`
+	LabelPrefix       string   `json:"label_prefix,omitempty"`
+	ParentParticipant string   `json:"parent_participant,omitempty"`
+	ParentAgentID     string   `json:"parent_agent_id,omitempty"`
+	RoomID            string   `json:"room_id,omitempty"`
+	RoomAccess        string   `json:"room_access,omitempty"`
+	AttachCommand     string   `json:"attach_command"`
+	SocketMode        string   `json:"socket_mode"`
+	Panes             []Pane   `json:"panes"`
 }
 
 // BridgeMessage is one structured tmux-bridge line parsed from pane scrollback.
@@ -161,16 +169,20 @@ type ParticipantRef struct {
 }
 
 type preparePlan struct {
-	session        string
-	panes          int
-	paneCommand    string
-	explicitPane   bool
-	agent          string
-	agentMode      string
-	agentArgs      []string
-	agentSessionID string
-	cwd            string
-	labelPrefix    string
+	session           string
+	panes             int
+	paneCommand       string
+	explicitPane      bool
+	agent             string
+	agentMode         string
+	agentArgs         []string
+	agentSessionID    string
+	cwd               string
+	labelPrefix       string
+	parentParticipant string
+	parentAgentID     string
+	roomID            string
+	roomAccess        string
 }
 
 // New returns a client using the process environment and OS runner.
@@ -498,11 +510,6 @@ func (c *Client) PrepareSession(ctx context.Context, opts PrepareOptions) (Prepa
 	if err != nil {
 		return PrepareResult{}, err
 	}
-	if !created {
-		if err := c.ensurePaneCommands(ctx, socket, panes, plan); err != nil {
-			return PrepareResult{}, err
-		}
-	}
 	if _, err := c.runTmuxWithSocket(ctx, socket, "select-layout", "-t", plan.session, "tiled"); err != nil {
 		return PrepareResult{}, err
 	}
@@ -513,21 +520,34 @@ func (c *Client) PrepareSession(ctx context.Context, opts PrepareOptions) (Prepa
 	if err := c.labelSessionPanes(ctx, socket, panes, plan.labelPrefix); err != nil {
 		return PrepareResult{}, err
 	}
+	if !created || plan.hasInjectedEnv() {
+		if err := c.ensurePaneCommands(ctx, socket, panes, plan); err != nil {
+			return PrepareResult{}, err
+		}
+		panes, err = c.listPanesForSession(ctx, socket, plan.session)
+		if err != nil {
+			return PrepareResult{}, err
+		}
+	}
 
 	return PrepareResult{
-		Session:        plan.session,
-		Created:        created,
-		PanesRequested: plan.panes,
-		PaneCommand:    plan.paneCommand,
-		Agent:          plan.agent,
-		AgentMode:      plan.agentMode,
-		AgentArgs:      append([]string(nil), plan.agentArgs...),
-		AgentSessionID: plan.agentSessionID,
-		CWD:            plan.cwd,
-		LabelPrefix:    plan.labelPrefix,
-		AttachCommand:  c.attachCommand(plan.session, socket),
-		SocketMode:     socketMode(socket),
-		Panes:          panes,
+		Session:           plan.session,
+		Created:           created,
+		PanesRequested:    plan.panes,
+		PaneCommand:       plan.paneCommand,
+		Agent:             plan.agent,
+		AgentMode:         plan.agentMode,
+		AgentArgs:         append([]string(nil), plan.agentArgs...),
+		AgentSessionID:    plan.agentSessionID,
+		CWD:               plan.cwd,
+		LabelPrefix:       plan.labelPrefix,
+		ParentParticipant: plan.parentParticipant,
+		ParentAgentID:     plan.parentAgentID,
+		RoomID:            plan.roomID,
+		RoomAccess:        plan.roomAccess,
+		AttachCommand:     c.attachCommand(plan.session, socket),
+		SocketMode:        socketMode(socket),
+		Panes:             panes,
 	}, nil
 }
 
@@ -909,23 +929,49 @@ func (c *Client) splitSessionPane(ctx context.Context, socket string, plan prepa
 }
 
 func (c *Client) ensurePaneCommands(ctx context.Context, socket string, panes []Pane, plan preparePlan) error {
-	if plan.agent == "" && !plan.explicitPane {
+	if plan.agent == "" && !plan.explicitPane && !plan.hasInjectedEnv() {
 		return nil
 	}
 	for _, pane := range panes {
 		if !isShellCommand(pane.CurrentCommand) {
 			continue
 		}
+		command := paneCommandForPane(plan, pane)
 		args := []string{"respawn-pane", "-k", "-t", pane.ID}
 		if plan.cwd != "" {
 			args = append(args, "-c", plan.cwd)
 		}
-		args = append(args, plan.paneCommand)
+		args = append(args, command)
 		if _, err := c.runTmuxWithSocket(ctx, socket, args...); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+func (p preparePlan) hasInjectedEnv() bool {
+	return p.parentParticipant != "" || p.parentAgentID != "" || p.roomID != ""
+}
+
+func paneCommandForPane(plan preparePlan, pane Pane) string {
+	env := []string{
+		"AGENTCTL_PARTICIPANT_ID=" + shellQuote(strings.TrimSpace(pane.Label)),
+		"AGENTCTL_MUX_BACKEND=tmux",
+		"AGENTCTL_MUX_SESSION=" + shellQuote(strings.TrimSpace(plan.session)),
+		"AGENTCTL_MUX_PANE_ID=" + shellQuote(strings.TrimSpace(pane.ID)),
+	}
+	if value := strings.TrimSpace(plan.parentParticipant); value != "" {
+		env = append(env, "AGENTCTL_PARENT_PARTICIPANT_ID="+shellQuote(value))
+	}
+	if value := strings.TrimSpace(plan.parentAgentID); value != "" {
+		env = append(env, "AGENTCTL_PARENT_AGENT_ID="+shellQuote(value))
+	}
+	if strings.TrimSpace(plan.roomAccess) == "direct" {
+		if value := strings.TrimSpace(plan.roomID); value != "" {
+			env = append(env, "AGENTCTL_ROOM_ID="+shellQuote(value))
+		}
+	}
+	return "env " + strings.Join(env, " ") + " " + plan.paneCommand
 }
 
 func (c *Client) labelSessionPanes(ctx context.Context, socket string, panes []Pane, labelPrefix string) error {
@@ -1067,16 +1113,20 @@ func normalizePrepareOptions(opts PrepareOptions) (preparePlan, error) {
 	}
 
 	plan := preparePlan{
-		session:        strings.TrimSpace(opts.Session),
-		panes:          opts.Panes,
-		paneCommand:    strings.TrimSpace(opts.PaneCommand),
-		explicitPane:   strings.TrimSpace(opts.PaneCommand) != "",
-		agent:          strings.TrimSpace(opts.Agent),
-		agentMode:      normalizeAgentMode(opts.AgentMode),
-		agentArgs:      append([]string(nil), opts.AgentArgs...),
-		agentSessionID: strings.TrimSpace(opts.AgentSessionID),
-		cwd:            strings.TrimSpace(opts.CWD),
-		labelPrefix:    strings.TrimSpace(opts.LabelPrefix),
+		session:           strings.TrimSpace(opts.Session),
+		panes:             opts.Panes,
+		paneCommand:       strings.TrimSpace(opts.PaneCommand),
+		explicitPane:      strings.TrimSpace(opts.PaneCommand) != "",
+		agent:             strings.TrimSpace(opts.Agent),
+		agentMode:         normalizeAgentMode(opts.AgentMode),
+		agentArgs:         append([]string(nil), opts.AgentArgs...),
+		agentSessionID:    strings.TrimSpace(opts.AgentSessionID),
+		cwd:               strings.TrimSpace(opts.CWD),
+		labelPrefix:       strings.TrimSpace(opts.LabelPrefix),
+		parentParticipant: strings.TrimSpace(opts.ParentParticipant),
+		parentAgentID:     strings.TrimSpace(opts.ParentAgentID),
+		roomID:            strings.TrimSpace(opts.RoomID),
+		roomAccess:        normalizeRoomAccess(opts.RoomAccess, strings.TrimSpace(opts.ParentParticipant)),
 	}
 	if plan.session == "" {
 		plan.session = defaultSessionName
@@ -1110,6 +1160,22 @@ func normalizePrepareOptions(opts PrepareOptions) (preparePlan, error) {
 		}
 	}
 	return plan, nil
+}
+
+func normalizeRoomAccess(value, parentParticipant string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "", "default":
+		if strings.TrimSpace(parentParticipant) != "" {
+			return "none"
+		}
+		return "direct"
+	case "direct":
+		return "direct"
+	case "none":
+		return "none"
+	default:
+		return strings.ToLower(strings.TrimSpace(value))
+	}
 }
 
 func normalizeAgentMode(mode string) string {

@@ -29,6 +29,12 @@ description: "Durable multi-agent room coordination with shared chat, plugin-bac
 
 Do not rely on scrollback as canonical history. The room log is canonical.
 
+Default room policy:
+
+- top-level agents may join the room
+- child panes stay parent-private by default
+- parents forward child summaries or task results into the room when appropriate
+
 ## Quick start
 
 ```bash
@@ -81,6 +87,7 @@ The zellij backend uses a local plugin and matches room member ids to zellij pan
 - In `tmux`, room member ids can be pane labels or canonical ids like `tmux:<session>:%7`.
 - In `zellij`, room member ids can be pane titles or canonical ids like `zellij:<session>:terminal_3`.
 - The sender should also be a room member if you want them excluded from fanout.
+- Child panes launched with `agentctl tmux create --parent-participant ...` should usually use `agentctl tmux send-parent ...` instead of joining the room directly.
 
 ## Typical pattern
 

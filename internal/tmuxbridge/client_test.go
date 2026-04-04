@@ -245,14 +245,18 @@ func TestPrepareSessionRespawnsExistingShellPanesForAgent(t *testing.T) {
 				"%21" + fieldSep + "agentctl-agent-smoke" + fieldSep + "0" + fieldSep + "0" + fieldSep + "main" + fieldSep + "111" + fieldSep + "80" + fieldSep + "12" + fieldSep + "" + fieldSep + "/repo" + fieldSep + "zsh" + fieldSep + "1",
 				"%22" + fieldSep + "agentctl-agent-smoke" + fieldSep + "0" + fieldSep + "1" + fieldSep + "main" + fieldSep + "222" + fieldSep + "80" + fieldSep + "12" + fieldSep + "" + fieldSep + "/repo" + fieldSep + "node" + fieldSep + "0",
 			}, "\n") + "\n"},
-			{key: "tmux respawn-pane -k -t %21 " + cmd},
 			{key: "tmux select-layout -t agentctl-agent-smoke tiled"},
 			{key: "tmux list-panes -t agentctl-agent-smoke -F " + listFormat, stdout: strings.Join([]string{
-				"%21" + fieldSep + "agentctl-agent-smoke" + fieldSep + "0" + fieldSep + "0" + fieldSep + "main" + fieldSep + "111" + fieldSep + "39" + fieldSep + "11" + fieldSep + "" + fieldSep + "/repo" + fieldSep + "node" + fieldSep + "1",
-				"%22" + fieldSep + "agentctl-agent-smoke" + fieldSep + "0" + fieldSep + "1" + fieldSep + "main" + fieldSep + "222" + fieldSep + "40" + fieldSep + "11" + fieldSep + "" + fieldSep + "/repo" + fieldSep + "node" + fieldSep + "0",
+				"%21" + fieldSep + "agentctl-agent-smoke" + fieldSep + "0" + fieldSep + "0" + fieldSep + "main" + fieldSep + "111" + fieldSep + "80" + fieldSep + "12" + fieldSep + "" + fieldSep + "/repo" + fieldSep + "zsh" + fieldSep + "1",
+				"%22" + fieldSep + "agentctl-agent-smoke" + fieldSep + "0" + fieldSep + "1" + fieldSep + "main" + fieldSep + "222" + fieldSep + "80" + fieldSep + "12" + fieldSep + "" + fieldSep + "/repo" + fieldSep + "node" + fieldSep + "0",
 			}, "\n") + "\n"},
 			{key: "tmux set-option -p -t %21 @name codex-a"},
 			{key: "tmux set-option -p -t %22 @name codex-b"},
+			{key: "tmux respawn-pane -k -t %21 env AGENTCTL_PARTICIPANT_ID=codex-a AGENTCTL_MUX_BACKEND=tmux AGENTCTL_MUX_SESSION=agentctl-agent-smoke AGENTCTL_MUX_PANE_ID=%21 " + cmd},
+			{key: "tmux list-panes -t agentctl-agent-smoke -F " + listFormat, stdout: strings.Join([]string{
+				"%21" + fieldSep + "agentctl-agent-smoke" + fieldSep + "0" + fieldSep + "0" + fieldSep + "main" + fieldSep + "111" + fieldSep + "39" + fieldSep + "11" + fieldSep + "codex-a" + fieldSep + "/repo" + fieldSep + "node" + fieldSep + "1",
+				"%22" + fieldSep + "agentctl-agent-smoke" + fieldSep + "0" + fieldSep + "1" + fieldSep + "main" + fieldSep + "222" + fieldSep + "40" + fieldSep + "11" + fieldSep + "codex-b" + fieldSep + "/repo" + fieldSep + "node" + fieldSep + "0",
+			}, "\n") + "\n"},
 		},
 	}
 	client := NewWithRunner(runner, map[string]string{})
@@ -271,6 +275,67 @@ func TestPrepareSessionRespawnsExistingShellPanesForAgent(t *testing.T) {
 	}
 	if got.Panes[0].Label != "codex-a" || got.Panes[1].Label != "codex-b" {
 		t.Fatalf("labels = %#v", []string{got.Panes[0].Label, got.Panes[1].Label})
+	}
+}
+
+func TestPrepareSessionInjectsHierarchyEnvForRespawnedPanes(t *testing.T) {
+	cmd, err := buildAgentPaneCommand("codex", "auto", nil, "")
+	if err != nil {
+		t.Fatalf("buildAgentPaneCommand() error = %v", err)
+	}
+	runner := &sequenceRunner{
+		steps: []sequenceStep{
+			{key: "tmux new-session -d -s hierarchy-smoke " + cmd, stderr: "duplicate session", err: fmt.Errorf("exit status 1")},
+			{key: "tmux list-panes -t hierarchy-smoke -F " + listFormat, stdout: "%31" + fieldSep + "hierarchy-smoke" + fieldSep + "0" + fieldSep + "0" + fieldSep + "main" + fieldSep + "111" + fieldSep + "80" + fieldSep + "24" + fieldSep + "" + fieldSep + "/repo" + fieldSep + "zsh" + fieldSep + "1\n"},
+			{key: "tmux select-layout -t hierarchy-smoke tiled"},
+			{key: "tmux list-panes -t hierarchy-smoke -F " + listFormat, stdout: "%31" + fieldSep + "hierarchy-smoke" + fieldSep + "0" + fieldSep + "0" + fieldSep + "main" + fieldSep + "111" + fieldSep + "80" + fieldSep + "24" + fieldSep + "" + fieldSep + "/repo" + fieldSep + "zsh" + fieldSep + "1\n"},
+			{key: "tmux set-option -p -t %31 @name codex-a"},
+			{key: "tmux respawn-pane -k -t %31 env AGENTCTL_PARTICIPANT_ID=codex-a AGENTCTL_MUX_BACKEND=tmux AGENTCTL_MUX_SESSION=hierarchy-smoke AGENTCTL_MUX_PANE_ID=%31 AGENTCTL_PARENT_PARTICIPANT_ID=parent-a AGENTCTL_PARENT_AGENT_ID=agent:parent-1 " + cmd},
+			{key: "tmux list-panes -t hierarchy-smoke -F " + listFormat, stdout: "%31" + fieldSep + "hierarchy-smoke" + fieldSep + "0" + fieldSep + "0" + fieldSep + "main" + fieldSep + "111" + fieldSep + "80" + fieldSep + "24" + fieldSep + "codex-a" + fieldSep + "/repo" + fieldSep + "node" + fieldSep + "1\n"},
+		},
+	}
+	client := NewWithRunner(runner, map[string]string{})
+
+	_, err = client.PrepareSession(context.Background(), PrepareOptions{
+		Session:           "hierarchy-smoke",
+		Panes:             1,
+		Agent:             "codex",
+		AgentMode:         "auto",
+		ParentParticipant: "parent-a",
+		ParentAgentID:     "agent:parent-1",
+	})
+	if err != nil {
+		t.Fatalf("PrepareSession() error = %v", err)
+	}
+}
+
+func TestPrepareSessionInjectsDirectRoomEnvForTopLevelPanes(t *testing.T) {
+	cmd, err := buildAgentPaneCommand("codex", "auto", nil, "")
+	if err != nil {
+		t.Fatalf("buildAgentPaneCommand() error = %v", err)
+	}
+	runner := &sequenceRunner{
+		steps: []sequenceStep{
+			{key: "tmux new-session -d -s room-smoke " + cmd, stderr: "duplicate session", err: fmt.Errorf("exit status 1")},
+			{key: "tmux list-panes -t room-smoke -F " + listFormat, stdout: "%41" + fieldSep + "room-smoke" + fieldSep + "0" + fieldSep + "0" + fieldSep + "main" + fieldSep + "111" + fieldSep + "80" + fieldSep + "24" + fieldSep + "" + fieldSep + "/repo" + fieldSep + "zsh" + fieldSep + "1\n"},
+			{key: "tmux select-layout -t room-smoke tiled"},
+			{key: "tmux list-panes -t room-smoke -F " + listFormat, stdout: "%41" + fieldSep + "room-smoke" + fieldSep + "0" + fieldSep + "0" + fieldSep + "main" + fieldSep + "111" + fieldSep + "80" + fieldSep + "24" + fieldSep + "" + fieldSep + "/repo" + fieldSep + "zsh" + fieldSep + "1\n"},
+			{key: "tmux set-option -p -t %41 @name codex-a"},
+			{key: "tmux respawn-pane -k -t %41 env AGENTCTL_PARTICIPANT_ID=codex-a AGENTCTL_MUX_BACKEND=tmux AGENTCTL_MUX_SESSION=room-smoke AGENTCTL_MUX_PANE_ID=%41 AGENTCTL_ROOM_ID=room-alpha " + cmd},
+			{key: "tmux list-panes -t room-smoke -F " + listFormat, stdout: "%41" + fieldSep + "room-smoke" + fieldSep + "0" + fieldSep + "0" + fieldSep + "main" + fieldSep + "111" + fieldSep + "80" + fieldSep + "24" + fieldSep + "codex-a" + fieldSep + "/repo" + fieldSep + "node" + fieldSep + "1\n"},
+		},
+	}
+	client := NewWithRunner(runner, map[string]string{})
+
+	_, err = client.PrepareSession(context.Background(), PrepareOptions{
+		Session:   "room-smoke",
+		Panes:     1,
+		Agent:     "codex",
+		AgentMode: "auto",
+		RoomID:    "room-alpha",
+	})
+	if err != nil {
+		t.Fatalf("PrepareSession() error = %v", err)
 	}
 }
 

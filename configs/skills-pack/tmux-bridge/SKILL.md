@@ -112,6 +112,30 @@ agentctl tmux create --session claude-resume \
 
 `--agent-session-id` currently supports `codex` and `claude` only, and requires `--panes 1` so one resumed session is not duplicated across multiple panes.
 
+For child agents, launch panes with parent metadata instead of adding them to a
+shared room directly:
+
+```bash
+agentctl tmux create --session codex-tree \
+  --panes 1 \
+  --agent codex \
+  --mode auto \
+  --label-prefix child \
+  --parent-participant codex-a \
+  --parent-agent-id agent:parent-1
+```
+
+That exports stable mux identity into the pane environment:
+
+- `AGENTCTL_PARTICIPANT_ID`
+- `AGENTCTL_PARENT_PARTICIPANT_ID`
+- `AGENTCTL_PARENT_AGENT_ID`
+- `AGENTCTL_MUX_BACKEND`
+- `AGENTCTL_MUX_SESSION`
+- `AGENTCTL_MUX_PANE_ID`
+
+If `--room-access direct` is used, the pane also gets `AGENTCTL_ROOM_ID`.
+
 ## Structured Access
 
 Prefer `agentctl` when you want machine-friendly envelopes:
@@ -131,6 +155,14 @@ agentctl tmux send agent-b "Please review internal/storage/mailbox/store.go for 
 ```
 
 Use `agentctl tmux observe` when a tmux exchange should become a durable ACA observation.
+
+When a child pane needs to talk upward, prefer the private parent path:
+
+```bash
+agentctl tmux send-parent "Need a decision on the retry backoff helper."
+```
+
+That uses `AGENTCTL_PARENT_PARTICIPANT_ID` instead of guessing who the parent is.
 
 ## Durable Rooms
 
@@ -175,6 +207,12 @@ The bundled script is optional for lower-level pane control:
 `agentctl room ...` now follows the same identity rule: derive the current pane
 participant first, then fall back to canonical ids like `tmux:<session>:%7` or
 `zellij:<session>:terminal_3` when no human-friendly pane name is present.
+
+Room policy is intentionally asymmetric:
+
+- top-level panes can join rooms
+- child panes should stay parent-private by default
+- parents decide what gets promoted into the room
 
 Use `type` plus `keys` only when you intentionally need manual control, such as interacting with a non-agent prompt.
 

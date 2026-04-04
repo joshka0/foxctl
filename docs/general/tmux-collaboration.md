@@ -15,6 +15,13 @@ The point is to let multiple Codex or Claude panes interact while the TUI stays 
 Rooms are now the canonical shared chat substrate. tmux relay is the live
 fanout layer on top of room messages rather than the source of truth.
 
+The current hierarchy rule is:
+
+- top-level panes may join rooms directly
+- child panes stay parent-private by default
+- child panes message their parent, not the room
+- parents decide what to summarize or promote back into the room
+
 ## Why This Exists
 
 Opening several AI agents in one tmux session is useful because:
@@ -117,6 +124,46 @@ agentctl tmux create --session claude-resume \
 
 `--agent-session-id` currently supports `codex` and `claude` only, and requires `--panes 1`.
 
+### Child panes and parent-private routing
+
+`agentctl tmux create` can now stamp child-pane metadata into the launched pane
+environment:
+
+```bash
+agentctl tmux create --session codex-tree \
+  --panes 1 \
+  --agent codex \
+  --mode auto \
+  --label-prefix child \
+  --parent-participant codex-a \
+  --parent-agent-id agent:parent-1
+```
+
+Relevant flags:
+
+- `--parent-participant` marks the launched pane as a child of a parent participant
+- `--parent-agent-id` exports the durable parent agent id
+- `--room-id` exports a room id when room access is direct
+- `--room-access default|direct|none` controls whether the pane sees room metadata
+
+Default policy:
+
+- top-level panes: `room-access=direct`
+- child panes with `--parent-participant`: `room-access=none`
+
+That means child panes get stable mux identity without automatically joining the
+room.
+
+Exported environment includes:
+
+- `AGENTCTL_PARTICIPANT_ID`
+- `AGENTCTL_PARENT_PARTICIPANT_ID`
+- `AGENTCTL_PARENT_AGENT_ID`
+- `AGENTCTL_MUX_BACKEND`
+- `AGENTCTL_MUX_SESSION`
+- `AGENTCTL_MUX_PANE_ID`
+- `AGENTCTL_ROOM_ID` when room access is direct
+
 The other commands return structured envelopes with pane metadata and bounded scrollback captures.
 
 ### Native Sends
@@ -138,6 +185,15 @@ agentctl tmux send praze-b "Please review this path." --sender praze-a
 This means external callers such as Praze can create their own tmux session and send as one of their labeled panes without depending on a repo-local script.
 
 The bundled `tmux-bridge` helper is still available for lower-level workflows such as `type`, `keys`, or read-before-send guardrails, but it is no longer required for the core create/send path.
+
+Child panes can send directly to their configured parent without guessing a
+sender or target:
+
+```bash
+agentctl tmux send-parent "Blocked on the mailbox retry path."
+```
+
+`send-parent` resolves the target from `AGENTCTL_PARENT_PARTICIPANT_ID`.
 
 ## Room Surface
 
@@ -206,6 +262,13 @@ scrollback the source of truth.
 
 Use `join` when a pane or agent should be a room recipient for relay. Use
 `subscribe` when a human or agent just wants to watch the room timeline.
+
+In the intended hierarchy:
+
+- top-level panes use `room join`
+- child panes usually do not join the room
+- child progress goes to the parent first
+- parent summaries and task updates go to the room
 
 Inside tmux, room commands derive the sender from the current pane label. If the
 pane has no label, `agentctl` falls back to a canonical id like

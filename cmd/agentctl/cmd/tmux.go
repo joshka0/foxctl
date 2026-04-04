@@ -20,6 +20,7 @@ func newTmuxCommand() *cobra.Command {
 		newTmuxListCommand(),
 		newTmuxReadCommand(),
 		newTmuxSendCommand(),
+		newTmuxSendParentCommand(),
 		newTmuxObserveCommand(),
 		newTmuxDoctorCommand(),
 		newTmuxCreateCommand(),
@@ -93,16 +94,20 @@ func newTmuxDoctorCommand() *cobra.Command {
 
 func newTmuxCreateCommand() *cobra.Command {
 	var (
-		session        string
-		panes          int
-		paneCommand    string
-		agent          string
-		agentMode      string
-		agentArgs      []string
-		agentSessionID string
-		cwd            string
-		labelPrefix    string
-		attach         bool
+		session           string
+		panes             int
+		paneCommand       string
+		agent             string
+		agentMode         string
+		agentArgs         []string
+		agentSessionID    string
+		cwd               string
+		labelPrefix       string
+		parentParticipant string
+		parentAgentID     string
+		roomID            string
+		roomAccess        string
+		attach            bool
 	)
 
 	cmd := &cobra.Command{
@@ -122,15 +127,19 @@ func newTmuxCreateCommand() *cobra.Command {
 			}
 			client := tmuxbridge.New()
 			result, err := client.PrepareSession(cmd.Context(), tmuxbridge.PrepareOptions{
-				Session:        session,
-				Panes:          panes,
-				PaneCommand:    paneCommand,
-				Agent:          agent,
-				AgentMode:      agentMode,
-				AgentArgs:      append([]string(nil), agentArgs...),
-				AgentSessionID: agentSessionID,
-				CWD:            cwd,
-				LabelPrefix:    labelPrefix,
+				Session:           session,
+				Panes:             panes,
+				PaneCommand:       paneCommand,
+				Agent:             agent,
+				AgentMode:         agentMode,
+				AgentArgs:         append([]string(nil), agentArgs...),
+				AgentSessionID:    agentSessionID,
+				CWD:               cwd,
+				LabelPrefix:       labelPrefix,
+				ParentParticipant: parentParticipant,
+				ParentAgentID:     parentAgentID,
+				RoomID:            roomID,
+				RoomAccess:        roomAccess,
 			})
 			if err != nil {
 				return protocol.WriteError(cmd.OutOrStdout(), "agentctl.tmux.create", protocol.ErrorCodeERuntime, err.Error(), map[string]any{
@@ -168,6 +177,10 @@ func newTmuxCreateCommand() *cobra.Command {
 	cmd.Flags().StringVar(&agentSessionID, "agent-session-id", "", "Resume the given agent session id (supported for codex and claude; currently requires --panes 1)")
 	cmd.Flags().StringVar(&cwd, "cwd", "", "Working directory for new panes (default: current directory)")
 	cmd.Flags().StringVar(&labelPrefix, "label-prefix", "", "Pane label prefix (default: derived from --agent, otherwise agent)")
+	cmd.Flags().StringVar(&parentParticipant, "parent-participant", "", "Parent participant id for child panes; implies room access none by default")
+	cmd.Flags().StringVar(&parentAgentID, "parent-agent-id", "", "Parent agent id exported into launched panes")
+	cmd.Flags().StringVar(&roomID, "room-id", "", "Room id exported into launched panes when room access is direct")
+	cmd.Flags().StringVar(&roomAccess, "room-access", "default", "Room access policy for launched panes: default|direct|none")
 	cmd.Flags().BoolVar(&attach, "attach", false, "Attach or switch to the prepared session after setup")
 	return cmd
 }
@@ -195,6 +208,47 @@ func newTmuxSendCommand() *cobra.Command {
 
 	cmd.Flags().StringVar(&sender, "sender", "", "Sender pane label or pane id when invoking outside tmux or overriding the current pane")
 	return cmd
+}
+
+func newTmuxSendParentCommand() *cobra.Command {
+	var sender string
+
+	cmd := &cobra.Command{
+		Use:   "send-parent <text>",
+		Short: "Send a private message to the parent participant from the current pane",
+		Args:  cobra.MinimumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			parent, err := resolveParentParticipantID()
+			if err != nil {
+				return protocol.WriteError(cmd.OutOrStdout(), "agentctl.tmux.send-parent", protocol.ErrorCodeEARG, "AGENTCTL_PARENT_PARTICIPANT_ID is not set", map[string]any{
+					"hint": "Launch the pane with --parent-participant or pass the parent explicitly with agentctl tmux send --sender ... <target>.",
+				}, protocol.WithSource("cli"))
+			}
+			client := tmuxbridge.New()
+			result, err := client.Send(cmd.Context(), sender, parent, strings.Join(args, " "))
+			if err != nil {
+				return protocol.WriteError(cmd.OutOrStdout(), "agentctl.tmux.send-parent", protocol.ErrorCodeERuntime, err.Error(), map[string]any{
+					"hint":   "Ensure the current pane is inside tmux and the parent participant pane label is reachable.",
+					"parent": parent,
+				}, protocol.WithSource("cli"))
+			}
+			return protocol.WriteOK(cmd.OutOrStdout(), "agentctl.tmux.send-parent", map[string]any{
+				"parent": parent,
+				"result": result,
+			}, protocol.WithSource("cli"))
+		},
+	}
+
+	cmd.Flags().StringVar(&sender, "sender", "", "Override the sender pane label or pane id")
+	return cmd
+}
+
+func resolveParentParticipantID() (string, error) {
+	parent := strings.TrimSpace(os.Getenv("AGENTCTL_PARENT_PARTICIPANT_ID"))
+	if parent == "" {
+		return "", fmt.Errorf("AGENTCTL_PARENT_PARTICIPANT_ID is not set")
+	}
+	return parent, nil
 }
 
 func tmuxbridgeLabelExample(panes []tmuxbridge.Pane) string {

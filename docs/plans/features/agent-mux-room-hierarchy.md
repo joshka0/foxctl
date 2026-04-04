@@ -1,6 +1,6 @@
 # Agent Mux + Room Hierarchy
 
-Status: proposed next slice
+Status: partial implementation; launcher identity + parent-private defaults landed
 
 This design defines how terminal panes *(in practical terms: tmux panes or zellij panes)*,
 agent hierarchy, room membership, and sender identity should work together.
@@ -188,6 +188,7 @@ Resolution order should be:
 - `AGENTCTL_AGENT_ID`
 - `AGENTCTL_PARENT_AGENT_ID`
 - `AGENTCTL_PARTICIPANT_ID`
+- `AGENTCTL_PARENT_PARTICIPANT_ID`
 - `AGENTCTL_ROOM_ID`
 - `AGENTCTL_MUX_BACKEND`
 - `AGENTCTL_MUX_SESSION`
@@ -282,6 +283,7 @@ Subagents should:
 ### child spawn
 
 - `--parent-agent-id <id>`
+- `--parent-participant <id>`
 - `--mux-parent-pane <id>`
 - `--room-access none|direct|inherited`
 - `--spawn-in-pane`
@@ -358,15 +360,22 @@ layer, not just at the UX layer.
 - `tmux` path supports full hierarchy + room flow
 - `zellij` path supports the same policy with plugin-backed delivery
 
-## Implementation order
+## Current state
 
-1. Add durable `AgentTerminalBinding` storage and runtime structs.
-2. Add sender resolution from mux/session binding for `agentctl room`.
-3. Add spawn-time pane allocation for child agents.
-4. Add parent-private child channel.
-5. Enforce `top_level_only` room membership by default.
-6. Add live parent/child pane relay helpers.
-7. Add zellij parity checks for child-pane tenancy.
+Implemented in the launcher and room/tmux surfaces:
+
+1. room sender identity resolves from tmux/zellij pane bindings and canonical pane ids
+2. `agentctl tmux create` can inject child-pane hierarchy env into launched panes
+3. child-pane default policy is parent-private when `--parent-participant` is set
+4. `agentctl tmux send-parent` gives child panes a direct parent path without joining rooms
+
+Still pending:
+
+1. durable `AgentTerminalBinding` storage and runtime structs
+2. spawn-time pane allocation for real runtime subagent spawn flows
+3. a durable parent-private child channel beyond the pane-message helper
+4. explicit enforcement of top-level-only room membership in runtime spawn policy
+5. zellij parity checks for child-pane tenancy
 
 ## Related
 

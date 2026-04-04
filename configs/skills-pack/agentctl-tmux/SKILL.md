@@ -77,6 +77,25 @@ agentctl room task add alpha --title "Refactor retry path"
 agentctl room loop alpha --backend tmux
 ```
 
+For child panes, keep room access private by default and give them an explicit
+parent:
+
+```bash
+agentctl tmux create --session collab \
+  --panes 1 \
+  --agent codex \
+  --mode auto \
+  --label-prefix child \
+  --parent-participant codex-a \
+  --parent-agent-id agent:parent-1
+
+agentctl tmux send-parent "Blocked on the mailbox retry path."
+```
+
+When `--parent-participant` is set, `agentctl` defaults `--room-access` to
+`none`. That means child panes can talk to their parent, but they do not join
+the room unless you explicitly promote them with `--room-access direct`.
+
 If you are invoking from outside tmux, pass your sender pane label explicitly:
 
 ```bash
@@ -99,6 +118,19 @@ agentctl tmux doctor
 Use `agentctl tmux ...` when you want machine-friendly envelopes, pane metadata, and a native send path that does not depend on repo-local scripts.
 
 Common agent launches include `--agent codex`, `--agent claude`, `--agent gemini`, `--agent agent` for Cursor CLI, and `--agent droid` for Factory Droid.
+
+Useful hierarchy flags on `tmux create`:
+
+- `--parent-participant` marks the launched panes as children of a parent participant
+- `--parent-agent-id` exports the durable parent agent id into the pane env
+- `--room-id` exports a room id when room access is direct
+- `--room-access default|direct|none` controls whether the pane should see room metadata
+
+Child panes can send a private message to the configured parent with:
+
+```bash
+agentctl tmux send-parent "Need clarification on the retry helper extraction."
+```
 
 ### Interactive bridge
 
@@ -139,6 +171,12 @@ Room commands derive the sender from the current tmux pane label when possible,
 with canonical fallbacks like `tmux:<session>:%7` or
 `zellij:<session>:terminal_3`. Use `--sender` only when overriding or when
 running outside a mux session.
+
+The intended room policy is:
+
+- top-level panes may join rooms directly
+- child panes stay parent-private by default
+- parents summarize child work back into the room when needed
 
 ## Message Format
 
