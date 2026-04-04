@@ -35,6 +35,7 @@ Do not rely on scrollback as canonical history. The room log is canonical.
 
 Default room policy:
 
+- the participant who creates the room becomes `coordinator` when agentctl can derive the current pane identity
 - top-level agents may join the room
 - child panes stay parent-private by default
 - parents forward child summaries or task results into the room when appropriate

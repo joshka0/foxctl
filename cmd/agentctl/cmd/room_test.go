@@ -45,6 +45,75 @@ func TestMergeRoomMembersUpdatesRole(t *testing.T) {
 	}
 }
 
+func TestEnsureRoomCoordinatorAddsCreatorWhenMissing(t *testing.T) {
+	got := ensureRoomCoordinator(parseMembersForTest("agent-a=lead"), "human-a")
+	if len(got) != 2 {
+		t.Fatalf("len(got)=%d want 2", len(got))
+	}
+	last := got[len(got)-1]
+	if last.ActorID != "human-a" || last.Role != "coordinator" {
+		t.Fatalf("last=%+v want human-a coordinator", last)
+	}
+}
+
+func TestEnsureRoomCoordinatorPreservesExplicitRole(t *testing.T) {
+	got := ensureRoomCoordinator(parseMembersForTest("human-a=lead"), "human-a")
+	if len(got) != 1 {
+		t.Fatalf("len(got)=%d want 1", len(got))
+	}
+	if got[0].Role != "lead" {
+		t.Fatalf("role=%q want lead", got[0].Role)
+	}
+}
+
+func TestRunRoomCreateDerivesCurrentParticipantAsCoordinator(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("TMUX", "/tmp/tmux.sock,1,0")
+	t.Setenv("TMUX_PANE", "%18")
+	restore := swapRoomTmuxClientForTest(func() *tmuxbridge.Client {
+		return tmuxbridge.NewWithRunner(roomFakeRunner{responses: map[string]roomFakeResponse{
+			"tmux list-sessions": {stdout: "ok\n"},
+			"tmux display-message -t %18 -p " + roomListFormat(): {
+				stdout: "%18" + roomFieldSep() + "14" + roomFieldSep() + "0" + roomFieldSep() + "0" + roomFieldSep() + "main" + roomFieldSep() + "111" + roomFieldSep() + "120" + roomFieldSep() + "30" + roomFieldSep() + "human-a" + roomFieldSep() + "/repo" + roomFieldSep() + "zsh" + roomFieldSep() + "1\n",
+			},
+		}}, map[string]string{
+			"TMUX":      "/tmp/tmux.sock,1,0",
+			"TMUX_PANE": "%18",
+		})
+	})
+	defer restore()
+
+	ctx := context.Background()
+	workspace := t.TempDir()
+	cmd, out := newRoomTestCommand(ctx)
+	if err := runRoomCreate(cmd, workspace, "alpha", "Alpha", "", []string{"agent-a=lead"}); err != nil {
+		t.Fatalf("runRoomCreate: %v", err)
+	}
+	data := decodeRoomEnvelope(t, out)
+	roomRaw, ok := data["room"].(map[string]any)
+	if !ok {
+		t.Fatalf("room payload type=%T", data["room"])
+	}
+	members, ok := roomRaw["members"].([]any)
+	if !ok || len(members) != 2 {
+		t.Fatalf("members=%T/%v want 2 entries", roomRaw["members"], roomRaw["members"])
+	}
+	foundCoordinator := false
+	for _, raw := range members {
+		member, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		if member["actor_id"] == "human-a" && member["role"] == "coordinator" {
+			foundCoordinator = true
+			break
+		}
+	}
+	if !foundCoordinator {
+		t.Fatalf("expected derived coordinator in members=%v", members)
+	}
+}
+
 func TestRoomCommandFlow_CreateJoinSendShow(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	ctx := context.Background()

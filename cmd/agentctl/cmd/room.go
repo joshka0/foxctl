@@ -299,6 +299,9 @@ func runRoomCreate(cmd *cobra.Command, workspace, roomID, title, description str
 			"hint": "Members must use actor or actor=role form.",
 		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
 	}
+	if identity, err := resolveRoomSender(cmd.Context(), ""); err == nil {
+		members = ensureRoomCoordinator(members, identity.Sender)
+	}
 
 	room, err := store.UpsertRoom(cmd.Context(), agent.Room{
 		ID:          strings.TrimSpace(roomID),
@@ -315,6 +318,25 @@ func runRoomCreate(cmd *cobra.Command, workspace, roomID, title, description str
 	return protocol.WriteOK(cmd.OutOrStdout(), "agentctl.room.create", map[string]any{
 		"room": room,
 	}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+}
+
+func ensureRoomCoordinator(existing []agent.RoomMember, actorID string) []agent.RoomMember {
+	actorID = strings.TrimSpace(actorID)
+	if actorID == "" {
+		return existing
+	}
+	out := make([]agent.RoomMember, len(existing))
+	copy(out, existing)
+	for i := range out {
+		if strings.TrimSpace(out[i].ActorID) != actorID {
+			continue
+		}
+		if strings.TrimSpace(out[i].Role) == "" {
+			out[i].Role = "coordinator"
+		}
+		return out
+	}
+	return append(out, agent.RoomMember{ActorID: actorID, Role: "coordinator"})
 }
 
 func runRoomList(cmd *cobra.Command, workspace, actorID string, limit int) error {
@@ -999,9 +1021,10 @@ func formatRoomRelayContent(room agent.RoomSummary, msg agent.BoardMessage) stri
 
 func buildRoomInboxEntries(actorID string, messages []agent.BoardMessage, filter string, includeBroadcasts bool) []roomInboxEntry {
 	normalized := normalizeRoomInboxFilter(filter)
+	latestBySender := latestRoomSenderActivity(messages)
 	entries := make([]roomInboxEntry, 0, len(messages))
 	for _, msg := range messages {
-		entry, ok := roomInboxEntryForActor(actorID, msg, includeBroadcasts)
+		entry, ok := roomInboxEntryForActor(actorID, msg, includeBroadcasts, latestBySender)
 		if !ok {
 			continue
 		}
@@ -1022,7 +1045,7 @@ func buildRoomInboxEntries(actorID string, messages []agent.BoardMessage, filter
 	return entries
 }
 
-func roomInboxEntryForActor(actorID string, msg agent.BoardMessage, includeBroadcasts bool) (roomInboxEntry, bool) {
+func roomInboxEntryForActor(actorID string, msg agent.BoardMessage, includeBroadcasts bool, latestBySender map[string]time.Time) (roomInboxEntry, bool) {
 	recipient := normalizeRoomRecipient(msg.Recipient)
 	isDirect := sameRoomParticipant(recipient, actorID)
 	isBroadcast := recipient == agent.BroadcastRecipient
@@ -1030,6 +1053,9 @@ func roomInboxEntryForActor(actorID string, msg agent.BoardMessage, includeBroad
 		return roomInboxEntry{}, false
 	}
 	if msg.Status == agent.BoardMessageStatusAcked {
+		return roomInboxEntry{}, false
+	}
+	if msg.ReplyExpected && !messageStillAwaitsReply(msg, latestBySender) {
 		return roomInboxEntry{}, false
 	}
 
@@ -1064,6 +1090,35 @@ func roomInboxEntryForActor(actorID string, msg agent.BoardMessage, includeBroad
 		Preview:   summarizeRoomPreview(msg.Body),
 		Message:   msg,
 	}, true
+}
+
+func latestRoomSenderActivity(messages []agent.BoardMessage) map[string]time.Time {
+	latest := make(map[string]time.Time, len(messages))
+	for _, msg := range messages {
+		sender := strings.TrimSpace(msg.Sender)
+		if sender == "" {
+			continue
+		}
+		if ts, ok := latest[sender]; !ok || msg.CreatedAt.After(ts) {
+			latest[sender] = msg.CreatedAt
+		}
+	}
+	return latest
+}
+
+func messageStillAwaitsReply(msg agent.BoardMessage, latestBySender map[string]time.Time) bool {
+	if !msg.ReplyExpected {
+		return false
+	}
+	recipient := normalizeRoomRecipient(msg.Recipient)
+	if recipient == agent.BroadcastRecipient {
+		return false
+	}
+	latestReply, ok := latestBySender[recipient]
+	if !ok {
+		return true
+	}
+	return latestReply.Before(msg.CreatedAt)
 }
 
 func normalizeRoomInboxFilter(filter string) string {

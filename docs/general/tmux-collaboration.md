@@ -285,6 +285,10 @@ agentctl tmux list --backend zellij --session collab-runtime
 Rooms are durable coordination timelines backed by the blackboard store. They
 are independent of tmux and can be used from any terminal, including zellij.
 
+When `agentctl room create` can derive the current tmux/zellij participant, it
+automatically adds that creator as a room member with role `coordinator`
+without overwriting any explicit role you already supplied for the same actor.
+
 ```bash
 agentctl room create alpha --title "Agent Alpha"
 agentctl room join alpha agent-a --role lead
