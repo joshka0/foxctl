@@ -29,7 +29,7 @@ type zellijRelayRequest struct {
 
 func relayRoomMessageZellij(ctx context.Context, room agent.RoomSummary, msg agent.BoardMessage, relay roomRelayOptions) roomRelayResult {
 	result := roomRelayResult{Backend: "zellij"}
-	targets, skipped := collectRoomRelayTargets(room, msg.Sender)
+	targets, skipped := collectRoomRelayTargets(room, msg)
 	result.SkippedMembers = append(result.SkippedMembers, skipped...)
 	if len(targets) == 0 {
 		return result
@@ -98,24 +98,6 @@ func relayRoomMessageZellij(ctx context.Context, room agent.RoomSummary, msg age
 		result.Backend = "zellij"
 	}
 	return result
-}
-
-func collectRoomRelayTargets(room agent.RoomSummary, sender string) ([]string, []string) {
-	sender = strings.TrimSpace(sender)
-	targets := make([]string, 0, len(room.Members))
-	skipped := make([]string, 0, 1)
-	for _, member := range room.Members {
-		target := strings.TrimSpace(member.ActorID)
-		if target == "" {
-			continue
-		}
-		if sameRoomParticipant(target, sender) {
-			skipped = append(skipped, target)
-			continue
-		}
-		targets = append(targets, target)
-	}
-	return targets, skipped
 }
 
 func resolveZellijSession(explicit string) (string, error) {

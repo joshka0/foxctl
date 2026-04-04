@@ -30,6 +30,7 @@ func newRoomCommand() *cobra.Command {
 		newRoomListCommand(),
 		newRoomShowCommand(),
 		newRoomSendCommand(),
+		newRoomAckCommand(),
 		newRoomJoinCommand(),
 		newRoomLeaveCommand(),
 		newRoomTaskCommand(),
@@ -103,31 +104,53 @@ func newRoomShowCommand() *cobra.Command {
 
 func newRoomSendCommand() *cobra.Command {
 	var (
-		workspace   string
-		sender      string
-		subject     string
-		kind        string
-		taskID      string
-		priority    int
-		ackRequired bool
-		autoCreate  bool
+		workspace     string
+		sender        string
+		recipient     string
+		subject       string
+		kind          string
+		taskID        string
+		priority      int
+		ackRequired   bool
+		replyExpected bool
+		autoCreate    bool
 	)
 	cmd := &cobra.Command{
 		Use:   "send <room-id> <text>",
 		Short: "Append a durable message to a room timeline",
 		Args:  cobra.MinimumNArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runRoomSend(cmd, workspace, args[0], sender, subject, strings.Join(args[1:], " "), kind, taskID, priority, ackRequired, autoCreate)
+			return runRoomSend(cmd, workspace, args[0], sender, recipient, subject, strings.Join(args[1:], " "), kind, taskID, priority, ackRequired, replyExpected, autoCreate)
 		},
 	}
 	cmd.Flags().StringVar(&workspace, "workspace", ".", "Workspace root override")
 	cmd.Flags().StringVar(&sender, "sender", "", "Sender actor or participant id (defaults to current tmux/zellij pane)")
+	cmd.Flags().StringVar(&recipient, "to", "", "Target room participant id (defaults to broadcast)")
 	cmd.Flags().StringVar(&subject, "subject", "", "Optional subject line")
 	cmd.Flags().StringVar(&kind, "kind", string(agent.BoardMessageKindInfo), "Message kind (info|instruction|alert|review_request)")
 	cmd.Flags().StringVar(&taskID, "task-id", "", "Optional task id")
 	cmd.Flags().IntVar(&priority, "priority", agent.DefaultPriority, "Priority from 1 (highest) to 5 (lowest)")
 	cmd.Flags().BoolVar(&ackRequired, "ack-required", false, "Require explicit acknowledgment")
+	cmd.Flags().BoolVar(&replyExpected, "reply-expected", false, "Mark the message as expecting a response (direct messages only)")
 	cmd.Flags().BoolVar(&autoCreate, "auto-create", true, "Create the room if it does not exist")
+	return cmd
+}
+
+func newRoomAckCommand() *cobra.Command {
+	var (
+		workspace string
+		actorID   string
+	)
+	cmd := &cobra.Command{
+		Use:   "ack <room-id> <message-id>...",
+		Short: "Mark one or more room messages as acknowledged",
+		Args:  cobra.MinimumNArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runRoomAck(cmd, workspace, args[0], actorID, args[1:])
+		},
+	}
+	cmd.Flags().StringVar(&workspace, "workspace", ".", "Workspace root override")
+	cmd.Flags().StringVar(&actorID, "actor", "", "Actor or participant id acknowledging the messages (defaults to current tmux/zellij pane)")
 	return cmd
 }
 
@@ -312,7 +335,7 @@ func runRoomShow(cmd *cobra.Command, workspace, roomID, actorID string, limit in
 	}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
 }
 
-func runRoomSend(cmd *cobra.Command, workspace, roomID, sender, subject, body, kind, taskID string, priority int, ackRequired, autoCreate bool) error {
+func runRoomSend(cmd *cobra.Command, workspace, roomID, sender, recipient, subject, body, kind, taskID string, priority int, ackRequired, replyExpected, autoCreate bool) error {
 	absWorkspace, err := resolveRoomWorkspace(workspace)
 	if err != nil {
 		return err
@@ -330,6 +353,12 @@ func runRoomSend(cmd *cobra.Command, workspace, roomID, sender, subject, body, k
 	defer store.Close()
 
 	roomID = strings.TrimSpace(roomID)
+	recipient = normalizeRoomRecipient(recipient)
+	if replyExpected && recipient == agent.BroadcastRecipient {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.send", protocol.ErrorCodeEARG, "reply_expected requires a direct recipient", map[string]any{
+			"hint": "Pass --to <participant-id> for direct requests. Broadcast room messages should not expect a response.",
+		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
 	if autoCreate {
 		if _, err := store.EnsureRoom(cmd.Context(), absWorkspace, roomID, roomID); err != nil {
 			return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.send", protocol.ErrorCodeERuntime, err.Error(), map[string]any{
@@ -342,16 +371,17 @@ func runRoomSend(cmd *cobra.Command, workspace, roomID, sender, subject, body, k
 	}
 
 	msg := &agent.BoardMessage{
-		WorkspaceID: absWorkspace,
-		TaskID:      strings.TrimSpace(taskID),
-		Stream:      agent.RoomStreamName(roomID),
-		Sender:      identity.Sender,
-		Recipient:   agent.BroadcastRecipient,
-		Kind:        agent.BoardMessageKind(strings.TrimSpace(kind)),
-		Priority:    priority,
-		AckRequired: ackRequired,
-		Subject:     subject,
-		Body:        strings.TrimSpace(body),
+		WorkspaceID:   absWorkspace,
+		TaskID:        strings.TrimSpace(taskID),
+		Stream:        agent.RoomStreamName(roomID),
+		Sender:        identity.Sender,
+		Recipient:     recipient,
+		Kind:          agent.BoardMessageKind(strings.TrimSpace(kind)),
+		Priority:      priority,
+		AckRequired:   ackRequired,
+		ReplyExpected: replyExpected,
+		Subject:       subject,
+		Body:          strings.TrimSpace(body),
 	}
 	if msg.Kind == "" {
 		msg.Kind = agent.BoardMessageKindInfo
@@ -368,6 +398,63 @@ func runRoomSend(cmd *cobra.Command, workspace, roomID, sender, subject, body, k
 		"message_id":      msg.ID,
 		"message":         msg,
 		"sender_identity": identity,
+	}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+}
+
+func runRoomAck(cmd *cobra.Command, workspace, roomID, actorID string, messageIDs []string) error {
+	absWorkspace, err := resolveRoomWorkspace(workspace)
+	if err != nil {
+		return err
+	}
+	identity, err := resolveRoomSender(cmd.Context(), actorID)
+	if err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.ack", protocol.ErrorCodeEARG, err.Error(), map[string]any{
+			"hint": "Pass --actor when outside tmux/zellij, or run inside a prepared pane so agentctl can derive the participant id.",
+		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	store, err := openRoomBoardStore(cmd.Context())
+	if err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.ack", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	defer store.Close()
+
+	roomID = strings.TrimSpace(roomID)
+	if _, err := store.GetRoom(cmd.Context(), absWorkspace, roomID, identity.Sender); err != nil {
+		code := protocol.ErrorCodeERuntime
+		if errors.Is(err, blackboard.ErrRoomNotFound) {
+			code = protocol.ErrorCodeENotFound
+		}
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.ack", code, err.Error(), map[string]any{
+			"hint": "Create the room first or check the room id.",
+		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+
+	trimmedIDs := make([]string, 0, len(messageIDs))
+	for _, id := range messageIDs {
+		id = strings.TrimSpace(id)
+		if id == "" {
+			continue
+		}
+		trimmedIDs = append(trimmedIDs, id)
+	}
+	if len(trimmedIDs) == 0 {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.ack", protocol.ErrorCodeEARG, "at least one non-empty message id is required", nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+
+	updated, err := store.AckMessages(cmd.Context(), absWorkspace, identity.Sender, trimmedIDs)
+	if err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.ack", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	if updated == 0 {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.ack", protocol.ErrorCodeENotFound, "no room messages were acknowledged", map[string]any{
+			"hint": "Check the message ids and ensure they belong to this workspace.",
+		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	return protocol.WriteOK(cmd.OutOrStdout(), "agentctl.room.ack", map[string]any{
+		"room_id":        roomID,
+		"message_ids":    trimmedIDs,
+		"updated":        updated,
+		"acker_identity": identity,
 	}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
 }
 
@@ -773,15 +860,9 @@ func relayRoomMessage(ctx context.Context, client *tmuxbridge.Client, room agent
 
 func relayRoomMessageTmux(ctx context.Context, client *tmuxbridge.Client, room agent.RoomSummary, msg agent.BoardMessage) roomRelayResult {
 	result := roomRelayResult{Backend: "tmux"}
-	for _, member := range room.Members {
-		target := strings.TrimSpace(member.ActorID)
-		if target == "" {
-			continue
-		}
-		if sameRoomParticipant(target, strings.TrimSpace(msg.Sender)) {
-			result.SkippedMembers = append(result.SkippedMembers, target)
-			continue
-		}
+	targets, skipped := collectRoomRelayTargets(room, msg)
+	result.SkippedMembers = append(result.SkippedMembers, skipped...)
+	for _, target := range targets {
 		_, err := client.DeliverText(ctx, target, formatRoomRelayContent(room, msg))
 		if err != nil {
 			result.FailedCount++
@@ -797,13 +878,56 @@ func relayRoomMessageTmux(ctx context.Context, client *tmuxbridge.Client, room a
 func formatRoomRelayContent(room agent.RoomSummary, msg agent.BoardMessage) string {
 	body := strings.TrimSpace(msg.Body)
 	subject := strings.TrimSpace(msg.Subject)
+	sender := strings.TrimSpace(msg.Sender)
+	recipient := normalizeRoomRecipient(msg.Recipient)
+	if sender == "" {
+		sender = "unknown"
+	}
 	if body == "" {
 		body = subject
 	}
-	if subject != "" && body != subject {
-		return fmt.Sprintf("[room %s] %s\n%s", room.ID, subject, body)
+	prefix := fmt.Sprintf("[room %s from=%s to=%s", room.ID, sender, recipient)
+	if msg.AckRequired {
+		prefix += " ack"
 	}
-	return fmt.Sprintf("[room %s] %s", room.ID, body)
+	if msg.ReplyExpected {
+		prefix += " reply"
+	}
+	prefix += "]"
+	if subject != "" && body != subject {
+		return fmt.Sprintf("%s %s\n%s", prefix, subject, body)
+	}
+	return fmt.Sprintf("%s %s", prefix, body)
+}
+
+func collectRoomRelayTargets(room agent.RoomSummary, msg agent.BoardMessage) ([]string, []string) {
+	targets := make([]string, 0, len(room.Members))
+	skipped := make([]string, 0, len(room.Members))
+	recipient := normalizeRoomRecipient(msg.Recipient)
+	for _, member := range room.Members {
+		target := strings.TrimSpace(member.ActorID)
+		if target == "" {
+			continue
+		}
+		if sameRoomParticipant(target, strings.TrimSpace(msg.Sender)) {
+			skipped = append(skipped, target)
+			continue
+		}
+		if recipient != agent.BroadcastRecipient && !sameRoomParticipant(target, recipient) {
+			skipped = append(skipped, target)
+			continue
+		}
+		targets = append(targets, target)
+	}
+	return targets, skipped
+}
+
+func normalizeRoomRecipient(recipient string) string {
+	recipient = strings.TrimSpace(recipient)
+	if recipient == "" {
+		return agent.BroadcastRecipient
+	}
+	return recipient
 }
 
 func roomProgressEnvelope(command string, seq int, final bool, data map[string]any, workspace string) envelope.Envelope {

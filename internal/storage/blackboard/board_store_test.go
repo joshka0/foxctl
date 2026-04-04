@@ -2,8 +2,10 @@ package blackboard
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -28,12 +30,13 @@ func TestBoardStore_SendAndInbox(t *testing.T) {
 
 	// Send a message
 	msg := agent.BoardMessage{
-		WorkspaceID: "ws1",
-		Sender:      "admin",
-		Recipient:   "actor:agent:coder",
-		Subject:     "Test message",
-		Body:        "This is a test",
-		Priority:    1,
+		WorkspaceID:   "ws1",
+		Sender:        "admin",
+		Recipient:     "actor:agent:coder",
+		Subject:       "Test message",
+		Body:          "This is a test",
+		Priority:      1,
+		ReplyExpected: true,
 	}
 	if err := store.SendMessage(ctx, &msg); err != nil {
 		t.Fatalf("SendMessage: %v", err)
@@ -57,6 +60,9 @@ func TestBoardStore_SendAndInbox(t *testing.T) {
 	}
 	if messages[0].Sender != "admin" {
 		t.Errorf("expected sender 'admin', got %q", messages[0].Sender)
+	}
+	if !messages[0].ReplyExpected {
+		t.Errorf("expected reply_expected=true, got false")
 	}
 }
 
@@ -712,6 +718,37 @@ func TestCountMessagesByTaskCountsSurfaced(t *testing.T) {
 	}
 	if total != 2 {
 		t.Fatalf("expected total=2 (unread+surfaced), got %d (admin=%d overseer=%d)", total, admin, overseer)
+	}
+}
+
+func TestRetryBoardBusyRetriesBusyErrors(t *testing.T) {
+	var calls int32
+	err := retryBoardBusy(context.Background(), func() error {
+		if atomic.AddInt32(&calls, 1) < 3 {
+			return errors.New("database is locked")
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("retryBoardBusy: %v", err)
+	}
+	if got := atomic.LoadInt32(&calls); got != 3 {
+		t.Fatalf("calls=%d want 3", got)
+	}
+}
+
+func TestRetryBoardBusyDoesNotRetryNonBusyErrors(t *testing.T) {
+	var calls int32
+	want := errors.New("boom")
+	err := retryBoardBusy(context.Background(), func() error {
+		atomic.AddInt32(&calls, 1)
+		return want
+	})
+	if !errors.Is(err, want) {
+		t.Fatalf("err=%v want %v", err, want)
+	}
+	if got := atomic.LoadInt32(&calls); got != 1 {
+		t.Fatalf("calls=%d want 1", got)
 	}
 }
 

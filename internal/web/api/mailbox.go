@@ -16,18 +16,19 @@ import (
 
 // MailboxMessageResponse represents a mailbox message in API responses.
 type MailboxMessageResponse struct {
-	ID          string `json:"id"`
-	Sender      string `json:"sender"`
-	Recipient   string `json:"recipient"`
-	Subject     string `json:"subject"`
-	Body        string `json:"body"`
-	Kind        string `json:"kind"`
-	Priority    int    `json:"priority"`
-	Status      string `json:"status"`
-	AckRequired bool   `json:"ack_required,omitempty"`
-	CreatedAt   string `json:"created_at"`
-	TaskID      string `json:"task_id,omitempty"`
-	Stream      string `json:"stream,omitempty"`
+	ID            string `json:"id"`
+	Sender        string `json:"sender"`
+	Recipient     string `json:"recipient"`
+	Subject       string `json:"subject"`
+	Body          string `json:"body"`
+	Kind          string `json:"kind"`
+	Priority      int    `json:"priority"`
+	Status        string `json:"status"`
+	AckRequired   bool   `json:"ack_required,omitempty"`
+	ReplyExpected bool   `json:"reply_expected,omitempty"`
+	CreatedAt     string `json:"created_at"`
+	TaskID        string `json:"task_id,omitempty"`
+	Stream        string `json:"stream,omitempty"`
 }
 
 // MailboxSendRequest is the request body for sending a mailbox message.
@@ -163,18 +164,19 @@ func convertBoardMessages(msgs []agent.BoardMessage) []MailboxMessageResponse {
 	resp := make([]MailboxMessageResponse, 0, len(msgs))
 	for _, m := range msgs {
 		resp = append(resp, MailboxMessageResponse{
-			ID:          m.ID,
-			Sender:      m.Sender,
-			Recipient:   m.Recipient,
-			Subject:     m.Subject,
-			Body:        m.Body,
-			Kind:        string(m.Kind),
-			Priority:    m.Priority,
-			Status:      string(m.Status),
-			AckRequired: m.AckRequired,
-			CreatedAt:   m.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
-			TaskID:      m.TaskID,
-			Stream:      m.Stream,
+			ID:            m.ID,
+			Sender:        m.Sender,
+			Recipient:     m.Recipient,
+			Subject:       m.Subject,
+			Body:          m.Body,
+			Kind:          string(m.Kind),
+			Priority:      m.Priority,
+			Status:        string(m.Status),
+			AckRequired:   m.AckRequired,
+			ReplyExpected: m.ReplyExpected,
+			CreatedAt:     m.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
+			TaskID:        m.TaskID,
+			Stream:        m.Stream,
 		})
 	}
 	return resp

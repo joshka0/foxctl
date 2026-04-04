@@ -79,6 +79,7 @@ type RoomMessageSendRequest struct {
 	Kind             string         `json:"kind,omitempty"`
 	Priority         int            `json:"priority,omitempty"`
 	AckRequired      bool           `json:"ack_required,omitempty"`
+	ReplyExpected    bool           `json:"reply_expected,omitempty"`
 	TaskID           string         `json:"task_id,omitempty"`
 	DispatchAgents   bool           `json:"dispatch_agents,omitempty"`
 	DispatchAgentIDs []string       `json:"dispatch_agent_ids,omitempty"`
@@ -588,6 +589,10 @@ func handleRoomMessagesPost(w http.ResponseWriter, r *http.Request, cfg config.C
 	if req.Recipient == "" {
 		req.Recipient = agent.BroadcastRecipient
 	}
+	if req.ReplyExpected && req.Recipient == agent.BroadcastRecipient {
+		httpError(w, http.StatusBadRequest, "reply_expected requires a direct recipient")
+		return
+	}
 	if req.Subject == "" {
 		req.Subject = agent.RoomStreamName(roomID)
 	}
@@ -598,19 +603,20 @@ func handleRoomMessagesPost(w http.ResponseWriter, r *http.Request, cfg config.C
 	}
 
 	msg := &agent.BoardMessage{
-		ID:          uuid.New().String(),
-		WorkspaceID: req.WorkspaceID,
-		TaskID:      req.TaskID,
-		Stream:      agent.RoomStreamName(roomID),
-		Sender:      req.Sender,
-		Recipient:   req.Recipient,
-		Subject:     req.Subject,
-		Body:        req.Body,
-		Kind:        kind,
-		Priority:    priority,
-		Status:      agent.BoardMessageStatusUnread,
-		AckRequired: req.AckRequired,
-		CreatedAt:   time.Now(),
+		ID:            uuid.New().String(),
+		WorkspaceID:   req.WorkspaceID,
+		TaskID:        req.TaskID,
+		Stream:        agent.RoomStreamName(roomID),
+		Sender:        req.Sender,
+		Recipient:     req.Recipient,
+		Subject:       req.Subject,
+		Body:          req.Body,
+		Kind:          kind,
+		Priority:      priority,
+		Status:        agent.BoardMessageStatusUnread,
+		AckRequired:   req.AckRequired,
+		ReplyExpected: req.ReplyExpected,
+		CreatedAt:     time.Now(),
 	}
 	if err := store.SendMessage(r.Context(), msg); err != nil {
 		log.Error().Err(err).Str("room_id", roomID).Msg("failed to send room message")

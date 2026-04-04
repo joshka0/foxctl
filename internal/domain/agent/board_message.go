@@ -43,19 +43,20 @@ const (
 // BoardMessage represents a workspace-scoped message for coordination.
 // This is the richer message type per mailbox_blackboard.md spec.
 type BoardMessage struct {
-	ID          string             `json:"id"`
-	WorkspaceID string             `json:"workspace_id"`
-	TaskID      string             `json:"task_id,omitempty"`
-	Stream      string             `json:"stream"`
-	Sender      string             `json:"sender"`
-	Recipient   string             `json:"recipient"` // Actor ID or "*" for broadcast
-	Kind        BoardMessageKind   `json:"kind"`
-	Priority    int                `json:"priority"` // 1 (highest) .. 5 (lowest)
-	AckRequired bool               `json:"ack_required"`
-	Status      BoardMessageStatus `json:"status"`
-	Subject     string             `json:"subject"`
-	Body        string             `json:"body"`
-	CreatedAt   time.Time          `json:"created_at"`
+	ID            string             `json:"id"`
+	WorkspaceID   string             `json:"workspace_id"`
+	TaskID        string             `json:"task_id,omitempty"`
+	Stream        string             `json:"stream"`
+	Sender        string             `json:"sender"`
+	Recipient     string             `json:"recipient"` // Actor ID or "*" for broadcast
+	Kind          BoardMessageKind   `json:"kind"`
+	Priority      int                `json:"priority"` // 1 (highest) .. 5 (lowest)
+	AckRequired   bool               `json:"ack_required"`
+	ReplyExpected bool               `json:"reply_expected,omitempty"`
+	Status        BoardMessageStatus `json:"status"`
+	Subject       string             `json:"subject"`
+	Body          string             `json:"body"`
+	CreatedAt     time.Time          `json:"created_at"`
 }
 
 // ReservationMode defines the locking mode for file reservations.

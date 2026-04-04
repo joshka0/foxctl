@@ -51,6 +51,8 @@ type boardSQLStore struct {
 
 const (
 	defaultRoomDispatchPolicy = "all_subtree"
+	boardBusyRetryWindow      = 2 * time.Second
+	boardBusyRetryStep        = 50 * time.Millisecond
 )
 
 // OpenBoardStore initializes a BoardStore backed by a SQLite database stored at
@@ -90,13 +92,16 @@ func (s *boardSQLStore) SendMessage(ctx context.Context, msg *agent.BoardMessage
 		msg.Priority = agent.DefaultPriority
 	}
 
-	_, err := s.db.ExecContext(ctx, `
+	err := retryBoardBusy(ctx, func() error {
+		_, execErr := s.db.ExecContext(ctx, `
 		INSERT INTO board_messages 
-		(id, workspace_id, task_id, stream, sender, recipient, kind, priority, ack_required, status, subject, body, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		msg.ID, msg.WorkspaceID, msg.TaskID, msg.Stream, msg.Sender, msg.Recipient,
-		msg.Kind, msg.Priority, msg.AckRequired, msg.Status, msg.Subject, msg.Body,
-		msg.CreatedAt.Unix())
+		(id, workspace_id, task_id, stream, sender, recipient, kind, priority, ack_required, reply_expected, status, subject, body, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			msg.ID, msg.WorkspaceID, msg.TaskID, msg.Stream, msg.Sender, msg.Recipient,
+			msg.Kind, msg.Priority, msg.AckRequired, msg.ReplyExpected, msg.Status, msg.Subject, msg.Body,
+			msg.CreatedAt.Unix())
+		return execErr
+	})
 	if err != nil {
 		return fmt.Errorf("board: send message: %w", err)
 	}
@@ -132,7 +137,8 @@ func (s *boardSQLStore) UpsertRoom(ctx context.Context, room agent.Room) (agent.
 	}
 	room.UpdatedAt = now
 
-	_, err = s.db.ExecContext(ctx, `
+	err = retryBoardBusy(ctx, func() error {
+		_, execErr := s.db.ExecContext(ctx, `
 		INSERT INTO room_metadata (workspace_id, room_id, stream, title, description, dispatch_policy, dispatch_agent_ids, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(workspace_id, room_id) DO UPDATE SET
@@ -142,9 +148,11 @@ func (s *boardSQLStore) UpsertRoom(ctx context.Context, room agent.Room) (agent.
 			dispatch_policy = excluded.dispatch_policy,
 			dispatch_agent_ids = excluded.dispatch_agent_ids,
 			updated_at = excluded.updated_at`,
-		room.WorkspaceID, room.ID, room.Stream, room.Title, room.Description,
-		room.DispatchPolicy, string(dispatchAgentIDsJSON), room.CreatedAt.Unix(), room.UpdatedAt.Unix(),
-	)
+			room.WorkspaceID, room.ID, room.Stream, room.Title, room.Description,
+			room.DispatchPolicy, string(dispatchAgentIDsJSON), room.CreatedAt.Unix(), room.UpdatedAt.Unix(),
+		)
+		return execErr
+	})
 	if err != nil {
 		return agent.Room{}, fmt.Errorf("board: upsert room: %w", err)
 	}
@@ -180,13 +188,16 @@ func (s *boardSQLStore) EnsureRoom(ctx context.Context, workspaceID, roomID, tit
 		title = roomID
 	}
 
-	_, err := s.db.ExecContext(ctx, `
+	err := retryBoardBusy(ctx, func() error {
+		_, execErr := s.db.ExecContext(ctx, `
 		INSERT INTO room_metadata (workspace_id, room_id, stream, title, description, dispatch_policy, dispatch_agent_ids, created_at, updated_at)
 		VALUES (?, ?, ?, ?, '', ?, '[]', ?, ?)
 		ON CONFLICT(workspace_id, room_id) DO UPDATE SET
 			updated_at = excluded.updated_at`,
-		workspaceID, roomID, stream, title, defaultRoomDispatchPolicy, now.Unix(), now.Unix(),
-	)
+			workspaceID, roomID, stream, title, defaultRoomDispatchPolicy, now.Unix(), now.Unix(),
+		)
+		return execErr
+	})
 	if err != nil {
 		return agent.Room{}, fmt.Errorf("board: ensure room: %w", err)
 	}
@@ -207,7 +218,12 @@ func (s *boardSQLStore) ReplaceRoomMembers(ctx context.Context, workspaceID, roo
 		return nil, fmt.Errorf("board: replace room members: room id is required")
 	}
 
-	tx, err := s.db.BeginTx(ctx, nil)
+	var tx *sql.Tx
+	err := retryBoardBusy(ctx, func() error {
+		var beginErr error
+		tx, beginErr = s.db.BeginTx(ctx, nil)
+		return beginErr
+	})
 	if err != nil {
 		return nil, fmt.Errorf("board: replace room members begin tx: %w", err)
 	}
@@ -215,7 +231,10 @@ func (s *boardSQLStore) ReplaceRoomMembers(ctx context.Context, workspaceID, roo
 		errs.Ignore(tx.Rollback(), "rollback replace room members")
 	}()
 
-	if _, err := tx.ExecContext(ctx, `DELETE FROM room_members WHERE workspace_id = ? AND room_id = ?`, workspaceID, roomID); err != nil {
+	if err := retryBoardBusy(ctx, func() error {
+		_, execErr := tx.ExecContext(ctx, `DELETE FROM room_members WHERE workspace_id = ? AND room_id = ?`, workspaceID, roomID)
+		return execErr
+	}); err != nil {
 		return nil, fmt.Errorf("board: delete room members: %w", err)
 	}
 
@@ -234,24 +253,30 @@ func (s *boardSQLStore) ReplaceRoomMembers(ctx context.Context, workspaceID, roo
 		if member.JoinedAt.IsZero() {
 			member.JoinedAt = time.Now().UTC()
 		}
-		if _, err := tx.ExecContext(ctx, `
+		if err := retryBoardBusy(ctx, func() error {
+			_, execErr := tx.ExecContext(ctx, `
 			INSERT INTO room_members (workspace_id, room_id, actor_id, role, joined_at)
 			VALUES (?, ?, ?, ?, ?)`,
-			workspaceID, roomID, member.ActorID, member.Role, member.JoinedAt.Unix(),
-		); err != nil {
+				workspaceID, roomID, member.ActorID, member.Role, member.JoinedAt.Unix(),
+			)
+			return execErr
+		}); err != nil {
 			return nil, fmt.Errorf("board: insert room member: %w", err)
 		}
 		out = append(out, member)
 	}
 
-	if _, err := tx.ExecContext(ctx, `
+	if err := retryBoardBusy(ctx, func() error {
+		_, execErr := tx.ExecContext(ctx, `
 		UPDATE room_metadata
 		SET updated_at = ?
-		WHERE workspace_id = ? AND room_id = ?`, time.Now().UTC().Unix(), workspaceID, roomID); err != nil {
+		WHERE workspace_id = ? AND room_id = ?`, time.Now().UTC().Unix(), workspaceID, roomID)
+		return execErr
+	}); err != nil {
 		return nil, fmt.Errorf("board: touch room metadata after members replace: %w", err)
 	}
 
-	if err := tx.Commit(); err != nil {
+	if err := retryBoardBusy(ctx, func() error { return tx.Commit() }); err != nil {
 		return nil, fmt.Errorf("board: replace room members commit: %w", err)
 	}
 	return out, nil
@@ -266,7 +291,7 @@ func (s *boardSQLStore) Inbox(ctx context.Context, filter agent.InboxFilter) ([]
 
 	// Build query with optional filters
 	query := `
-		SELECT id, workspace_id, task_id, stream, sender, recipient, kind, priority, ack_required, status, subject, body, created_at
+		SELECT id, workspace_id, task_id, stream, sender, recipient, kind, priority, ack_required, reply_expected, status, subject, body, created_at
 		FROM board_messages
 		WHERE workspace_id = ?`
 	args := []any{filter.WorkspaceID}
@@ -385,7 +410,7 @@ func (s *boardSQLStore) ListRoomMessages(ctx context.Context, workspaceID, roomI
 	stream := agent.RoomStreamName(roomID)
 
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, workspace_id, task_id, stream, sender, recipient, kind, priority, ack_required, status, subject, body, created_at
+		SELECT id, workspace_id, task_id, stream, sender, recipient, kind, priority, ack_required, reply_expected, status, subject, body, created_at
 		FROM board_messages
 		WHERE workspace_id = ? AND stream = ?
 		ORDER BY created_at DESC, id DESC
@@ -701,6 +726,7 @@ CREATE TABLE IF NOT EXISTS board_messages (
 	kind         TEXT NOT NULL DEFAULT 'info',
 	priority     INTEGER NOT NULL DEFAULT 3,
 	ack_required INTEGER NOT NULL DEFAULT 0,
+	reply_expected INTEGER NOT NULL DEFAULT 0,
 	status       TEXT NOT NULL DEFAULT 'unread',
 	subject      TEXT NOT NULL,
 	body         TEXT NOT NULL,
@@ -755,6 +781,7 @@ CREATE INDEX IF NOT EXISTS idx_res_expires ON file_reservations(expires_at);
 	for _, stmt := range []string{
 		`ALTER TABLE room_metadata ADD COLUMN dispatch_policy TEXT NOT NULL DEFAULT 'all_subtree'`,
 		`ALTER TABLE room_metadata ADD COLUMN dispatch_agent_ids TEXT NOT NULL DEFAULT '[]'`,
+		`ALTER TABLE board_messages ADD COLUMN reply_expected INTEGER NOT NULL DEFAULT 0`,
 	} {
 		if _, err := db.ExecContext(ctx, stmt); err != nil {
 			errMsg := strings.ToLower(strings.TrimSpace(err.Error()))
@@ -770,12 +797,14 @@ func scanBoardMessage(rows *sql.Rows) (agent.BoardMessage, error) {
 	var msg agent.BoardMessage
 	var createdAt int64
 	var ackRequired int
+	var replyExpected int
 	if err := rows.Scan(&msg.ID, &msg.WorkspaceID, &msg.TaskID, &msg.Stream, &msg.Sender, &msg.Recipient,
-		&msg.Kind, &msg.Priority, &ackRequired, &msg.Status, &msg.Subject, &msg.Body, &createdAt); err != nil {
+		&msg.Kind, &msg.Priority, &ackRequired, &replyExpected, &msg.Status, &msg.Subject, &msg.Body, &createdAt); err != nil {
 		return agent.BoardMessage{}, fmt.Errorf("board: scan message: %w", err)
 	}
 	msg.CreatedAt = time.Unix(createdAt, 0).UTC()
 	msg.AckRequired = ackRequired != 0
+	msg.ReplyExpected = replyExpected != 0
 	return msg, nil
 }
 
@@ -835,6 +864,39 @@ func normalizeRoomDispatchAgentIDs(ids []string) []string {
 		out = append(out, id)
 	}
 	return out
+}
+
+func retryBoardBusy(ctx context.Context, fn func() error) error {
+	deadline := time.Now().Add(boardBusyRetryWindow)
+	var lastErr error
+	for {
+		err := fn()
+		if err == nil || !isBoardBusyErr(err) {
+			return err
+		}
+		lastErr = err
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		if time.Now().After(deadline) {
+			return lastErr
+		}
+		timer := time.NewTimer(boardBusyRetryStep)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return ctx.Err()
+		case <-timer.C:
+		}
+	}
+}
+
+func isBoardBusyErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "database is locked") || strings.Contains(msg, "sqlite_busy")
 }
 
 // CountMessagesByTask counts unread messages per task grouped by sender type.
@@ -951,7 +1013,7 @@ func (s *boardSQLStore) roomSummary(ctx context.Context, workspaceID, stream, ac
 
 func (s *boardSQLStore) lastRoomMessage(ctx context.Context, workspaceID, stream string) (agent.BoardMessage, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, workspace_id, task_id, stream, sender, recipient, kind, priority, ack_required, status, subject, body, created_at
+		SELECT id, workspace_id, task_id, stream, sender, recipient, kind, priority, ack_required, reply_expected, status, subject, body, created_at
 		FROM board_messages
 		WHERE workspace_id = ? AND stream = ?
 		ORDER BY created_at DESC, id DESC

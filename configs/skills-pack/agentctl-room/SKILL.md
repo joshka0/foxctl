@@ -20,6 +20,8 @@ description: "Durable multi-agent room coordination with shared chat, plugin-bac
 
 - `agentctl room` is the source of truth.
 - `room send` writes durable chat messages.
+- `room send --to <participant>` writes a direct room request instead of a broadcast.
+- `room ack` marks a specific room message as acknowledged.
 - `room relay` mirrors room messages into terminal panes.
 - `room task` links shared tasks to the room.
 - `room loop` runs the central coordination loop:
@@ -42,6 +44,8 @@ agentctl room create alpha --title "Alpha Room"
 agentctl room join alpha agent-a --role lead
 agentctl room join alpha agent-b --role reviewer
 agentctl room send alpha "Review the retry path in client.ts"
+agentctl room send alpha "Claude, please review the retry path." --to claude-a --reply-expected
+agentctl room ack alpha <message-id>
 agentctl room subscribe alpha --follow
 ```
 
@@ -83,6 +87,9 @@ The zellij backend uses a local plugin and matches room member ids to zellij pan
 
 - Use stable actor ids like `agent-a`, `agent-b`, `reviewer`, `planner` when you want human-friendly names.
 - `room send` and `room task` derive the sender from the current tmux/zellij pane when possible.
+- Broadcast room messages should not expect a response.
+- Use `--to <participant>` plus `--reply-expected` for direct asks.
+- Use `--to <participant>` plus `--ack-required` when you only need confirmation.
 - `room join <room-id> --current` registers the current pane without hand-writing the id.
 - In `tmux`, room member ids can be pane labels or canonical ids like `tmux:<session>:%7`.
 - In `zellij`, room member ids can be pane titles or canonical ids like `zellij:<session>:terminal_3`.

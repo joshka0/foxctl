@@ -59,7 +59,7 @@ func TestRoomCommandFlow_CreateJoinSendShow(t *testing.T) {
 	}
 
 	cmd, out = newRoomTestCommand(ctx)
-	if err := runRoomSend(cmd, workspace, "alpha", "agent-a", "", "hello room", "info", "", 0, false, true); err != nil {
+	if err := runRoomSend(cmd, workspace, "alpha", "agent-a", "", "", "hello room", "info", "", 0, false, false, true); err != nil {
 		t.Fatalf("runRoomSend: %v", err)
 	}
 
@@ -171,12 +171,92 @@ func TestCollectRoomRelayTargetsSkipsSender(t *testing.T) {
 			{ActorID: "agent-b"},
 			{ActorID: "agent-c"},
 		},
-	}, "agent-b")
+	}, agent.BoardMessage{Sender: "agent-b"})
 	if len(targets) != 2 || targets[0] != "agent-a" || targets[1] != "agent-c" {
 		t.Fatalf("targets=%v want [agent-a agent-c]", targets)
 	}
 	if len(skipped) != 1 || skipped[0] != "agent-b" {
 		t.Fatalf("skipped=%v want [agent-b]", skipped)
+	}
+}
+
+func TestFormatRoomRelayContentIncludesSender(t *testing.T) {
+	room := agent.RoomSummary{ID: "alpha"}
+	msg := agent.BoardMessage{
+		Sender:  "claude-a",
+		Subject: "Short hello",
+		Body:    "Hello from Claude",
+	}
+	got := formatRoomRelayContent(room, msg)
+	want := "[room alpha from=claude-a to=*] Short hello\nHello from Claude"
+	if got != want {
+		t.Fatalf("formatRoomRelayContent() = %q, want %q", got, want)
+	}
+}
+
+func TestFormatRoomRelayContentFallsBackToUnknownSender(t *testing.T) {
+	room := agent.RoomSummary{ID: "alpha"}
+	msg := agent.BoardMessage{
+		Body: "Hello room",
+	}
+	got := formatRoomRelayContent(room, msg)
+	want := "[room alpha from=unknown to=*] Hello room"
+	if got != want {
+		t.Fatalf("formatRoomRelayContent() = %q, want %q", got, want)
+	}
+}
+
+func TestFormatRoomRelayContentIncludesRecipientAndFlags(t *testing.T) {
+	room := agent.RoomSummary{ID: "alpha"}
+	msg := agent.BoardMessage{
+		Sender:        "human-a",
+		Recipient:     "claude-a",
+		Subject:       "Review needed",
+		Body:          "Please review the spawn flow.",
+		AckRequired:   true,
+		ReplyExpected: true,
+	}
+	got := formatRoomRelayContent(room, msg)
+	want := "[room alpha from=human-a to=claude-a ack reply] Review needed\nPlease review the spawn flow."
+	if got != want {
+		t.Fatalf("formatRoomRelayContent() = %q, want %q", got, want)
+	}
+}
+
+func TestCollectRoomRelayTargetsDirectRecipient(t *testing.T) {
+	targets, skipped := collectRoomRelayTargets(agent.RoomSummary{
+		Members: []agent.RoomMember{
+			{ActorID: "human-a"},
+			{ActorID: "claude-a"},
+			{ActorID: "gemini-a"},
+		},
+	}, agent.BoardMessage{
+		Sender:    "human-a",
+		Recipient: "claude-a",
+	})
+	if len(targets) != 1 || targets[0] != "claude-a" {
+		t.Fatalf("targets=%v want [claude-a]", targets)
+	}
+	if len(skipped) != 2 {
+		t.Fatalf("skipped=%v want 2 entries", skipped)
+	}
+}
+
+func TestRunRoomSendRejectsReplyExpectedBroadcast(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	ctx := context.Background()
+	workspace := t.TempDir()
+
+	cmd, out := newRoomTestCommand(ctx)
+	if err := runRoomSend(cmd, workspace, "alpha", "human-a", "", "", "hello room", "info", "", 0, false, true, true); err != nil {
+		t.Fatalf("runRoomSend returned error instead of envelope: %v", err)
+	}
+	var env envelope.Envelope
+	if err := json.Unmarshal(out.Bytes(), &env); err != nil {
+		t.Fatalf("decode envelope: %v", err)
+	}
+	if env.Status != "error" {
+		t.Fatalf("status=%q want error body=%s", env.Status, out.String())
 	}
 }
 
@@ -205,7 +285,7 @@ func TestRunRoomSendDerivesSenderFromCurrentTmuxPane(t *testing.T) {
 	}
 
 	cmd, out := newRoomTestCommand(ctx)
-	if err := runRoomSend(cmd, workspace, "alpha", "", "", "hello room", "info", "", 0, false, true); err != nil {
+	if err := runRoomSend(cmd, workspace, "alpha", "", "", "", "hello room", "info", "", 0, false, false, true); err != nil {
 		t.Fatalf("runRoomSend: %v", err)
 	}
 	data := decodeRoomEnvelope(t, out)
@@ -215,6 +295,109 @@ func TestRunRoomSendDerivesSenderFromCurrentTmuxPane(t *testing.T) {
 	}
 	if got := msg["sender"]; got != "codex-a" {
 		t.Fatalf("sender=%v want codex-a", got)
+	}
+}
+
+func TestRunRoomAckMarksMessageAcked(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	ctx := context.Background()
+	workspace := t.TempDir()
+
+	cmd, _ := newRoomTestCommand(ctx)
+	if err := runRoomCreate(cmd, workspace, "alpha", "Alpha", "", []string{"agent-a=lead", "agent-b=reviewer"}); err != nil {
+		t.Fatalf("runRoomCreate: %v", err)
+	}
+
+	cmd, out := newRoomTestCommand(ctx)
+	if err := runRoomSend(cmd, workspace, "alpha", "agent-a", "agent-b", "", "please ack", "info", "", 0, true, false, true); err != nil {
+		t.Fatalf("runRoomSend: %v", err)
+	}
+	data := decodeRoomEnvelope(t, out)
+	msg, ok := data["message"].(map[string]any)
+	if !ok {
+		t.Fatalf("message type=%T", data["message"])
+	}
+	msgID, _ := msg["id"].(string)
+	if msgID == "" {
+		t.Fatalf("message id missing in payload=%v", msg)
+	}
+
+	cmd, out = newRoomTestCommand(ctx)
+	if err := runRoomAck(cmd, workspace, "alpha", "agent-b", []string{msgID}); err != nil {
+		t.Fatalf("runRoomAck: %v", err)
+	}
+	data = decodeRoomEnvelope(t, out)
+	if got := data["updated"]; got != float64(1) {
+		t.Fatalf("updated=%v want 1", got)
+	}
+
+	cmd, out = newRoomTestCommand(ctx)
+	if err := runRoomShow(cmd, workspace, "alpha", "", 20); err != nil {
+		t.Fatalf("runRoomShow: %v", err)
+	}
+	data = decodeRoomEnvelope(t, out)
+	messages, ok := data["messages"].([]any)
+	if !ok || len(messages) != 1 {
+		t.Fatalf("messages=%T/%v want 1 entry", data["messages"], data["messages"])
+	}
+	gotMsg, ok := messages[0].(map[string]any)
+	if !ok {
+		t.Fatalf("message type=%T", messages[0])
+	}
+	if got := gotMsg["status"]; got != "acked" {
+		t.Fatalf("status=%v want acked", got)
+	}
+}
+
+func TestRunRoomAckDerivesActorFromCurrentTmuxPane(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("TMUX", "/tmp/tmux.sock,1,0")
+	t.Setenv("TMUX_PANE", "%7")
+	restore := swapRoomTmuxClientForTest(func() *tmuxbridge.Client {
+		return tmuxbridge.NewWithRunner(roomFakeRunner{responses: map[string]roomFakeResponse{
+			"tmux list-sessions": {stdout: "ok\n"},
+			"tmux display-message -t %7 -p " + roomListFormat(): {
+				stdout: "%7" + roomFieldSep() + "collab" + roomFieldSep() + "0" + roomFieldSep() + "0" + roomFieldSep() + "main" + roomFieldSep() + "111" + roomFieldSep() + "120" + roomFieldSep() + "30" + roomFieldSep() + "codex-a" + roomFieldSep() + "/repo" + roomFieldSep() + "zsh" + roomFieldSep() + "1\n",
+			},
+		}}, map[string]string{
+			"TMUX":      "/tmp/tmux.sock,1,0",
+			"TMUX_PANE": "%7",
+		})
+	})
+	defer restore()
+
+	ctx := context.Background()
+	workspace := t.TempDir()
+
+	cmd, _ := newRoomTestCommand(ctx)
+	if err := runRoomCreate(cmd, workspace, "alpha", "Alpha", "", []string{"codex-a=lead"}); err != nil {
+		t.Fatalf("runRoomCreate: %v", err)
+	}
+	cmd, out := newRoomTestCommand(ctx)
+	if err := runRoomSend(cmd, workspace, "alpha", "agent-a", "codex-a", "", "please ack", "info", "", 0, true, false, true); err != nil {
+		t.Fatalf("runRoomSend: %v", err)
+	}
+	data := decodeRoomEnvelope(t, out)
+	msg, ok := data["message"].(map[string]any)
+	if !ok {
+		t.Fatalf("message type=%T", data["message"])
+	}
+	msgID, _ := msg["id"].(string)
+	if msgID == "" {
+		t.Fatalf("message id missing in payload=%v", msg)
+	}
+
+	cmd, out = newRoomTestCommand(ctx)
+	if err := runRoomAck(cmd, workspace, "alpha", "", []string{msgID}); err != nil {
+		t.Fatalf("runRoomAck: %v", err)
+	}
+	data = decodeRoomEnvelope(t, out)
+	identity, ok := data["acker_identity"].(map[string]any)
+	if !ok {
+		t.Fatalf("acker_identity type=%T", data["acker_identity"])
+	}
+	if got := identity["Sender"]; got != "codex-a" {
+		t.Fatalf("acker sender=%v want codex-a", got)
 	}
 }
 

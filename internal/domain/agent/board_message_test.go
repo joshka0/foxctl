@@ -166,19 +166,20 @@ func TestRoomStreamHelpers(t *testing.T) {
 func TestBoardMessage_JSONSerialization(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Second)
 	msg := BoardMessage{
-		ID:          "msg-123",
-		WorkspaceID: "ws-456",
-		TaskID:      "task-789",
-		Stream:      "coordination",
-		Sender:      "actor:system:overseer",
-		Recipient:   "*",
-		Kind:        BoardMessageKindInstruction,
-		Priority:    1,
-		AckRequired: true,
-		Status:      BoardMessageStatusUnread,
-		Subject:     "Task Assignment",
-		Body:        "Please review PR #42",
-		CreatedAt:   now,
+		ID:            "msg-123",
+		WorkspaceID:   "ws-456",
+		TaskID:        "task-789",
+		Stream:        "coordination",
+		Sender:        "actor:system:overseer",
+		Recipient:     "*",
+		Kind:          BoardMessageKindInstruction,
+		Priority:      1,
+		AckRequired:   true,
+		ReplyExpected: true,
+		Status:        BoardMessageStatusUnread,
+		Subject:       "Task Assignment",
+		Body:          "Please review PR #42",
+		CreatedAt:     now,
 	}
 
 	data, err := json.Marshal(msg)
@@ -202,6 +203,9 @@ func TestBoardMessage_JSONSerialization(t *testing.T) {
 	}
 	if got.AckRequired != msg.AckRequired {
 		t.Errorf("AckRequired = %v, want %v", got.AckRequired, msg.AckRequired)
+	}
+	if got.ReplyExpected != msg.ReplyExpected {
+		t.Errorf("ReplyExpected = %v, want %v", got.ReplyExpected, msg.ReplyExpected)
 	}
 }
 

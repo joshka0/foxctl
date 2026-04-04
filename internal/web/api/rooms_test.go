@@ -204,6 +204,24 @@ func TestRoomDetailHandler_GetAndPostMessages(t *testing.T) {
 	}
 }
 
+func TestRoomDetailHandler_PostMessageRejectsBroadcastReplyExpected(t *testing.T) {
+	cfg := orchestrationTestConfig(t.TempDir())
+	h := RoomDetailHandler(cfg, zerolog.Nop(), nil)
+
+	postReq := httptest.NewRequest(http.MethodPost, "/api/rooms/alpha/messages", strings.NewReader(`{
+		"workspace_id":"ws1",
+		"sender":"actor:agent:a",
+		"body":"please review",
+		"reply_expected":true
+	}`))
+	postRR := httptest.NewRecorder()
+	h.ServeHTTP(postRR, postReq)
+
+	if postRR.Code != http.StatusBadRequest {
+		t.Fatalf("status=%d body=%s", postRR.Code, postRR.Body.String())
+	}
+}
+
 func TestRoomDetailHandler_PostMessageDispatchesAgentReplies(t *testing.T) {
 	cfg := orchestrationTestConfig(t.TempDir())
 	listHandler := RoomsListHandler(cfg, zerolog.Nop())

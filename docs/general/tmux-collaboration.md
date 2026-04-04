@@ -15,6 +15,11 @@ The point is to let multiple Codex or Claude panes interact while the TUI stays 
 Rooms are now the canonical shared chat substrate. tmux relay is the live
 fanout layer on top of room messages rather than the source of truth.
 
+Room traffic now supports both:
+
+- broadcast messages to the whole room
+- direct requests to one participant with optional `ack` and `reply` markers
+
 The current hierarchy rule is:
 
 - top-level panes may join rooms directly
@@ -285,6 +290,9 @@ agentctl room create alpha --title "Agent Alpha"
 agentctl room join alpha agent-a --role lead
 agentctl room join alpha agent-b --role reviewer
 agentctl room send alpha "Review the retry branch in client.ts"
+agentctl room send alpha "Claude, please review the retry branch." --to claude-a --reply-expected
+agentctl room send alpha "Gemini, confirm receipt." --to gemini-a --ack-required
+agentctl room ack alpha <message-id>
 agentctl room task add alpha --title "Refactor retry path"
 agentctl room task complete alpha --id <task-id> --notes "Retry ladder flattened"
 agentctl room show alpha
@@ -296,6 +304,10 @@ agentctl room loop alpha --backend zellij --session alpha-room
 The intended model is:
 
 - `room send` writes the canonical message into the durable room log
+- `room send --to <participant>` writes a direct room message and only relays it to the targeted participant
+- `--reply-expected` is for direct requests only; broadcasts stay FYI by default
+- `--ack-required` marks a message as requiring an explicit acknowledgment
+- `room ack` marks one or more room messages as `acked` in the durable log
 - `room subscribe` reads or tails the room log in any terminal
 - `room relay --backend tmux` fans new room messages into tmux member panes by
   matching room member ids to tmux pane labels
