@@ -411,13 +411,14 @@ func runRoomShow(cmd *cobra.Command, workspace, roomID, actorID string, limit in
 }
 
 type roomStatusParticipant struct {
-	ActorID              string     `json:"actor_id"`
-	Role                 string     `json:"role,omitempty"`
-	LastActiveAt         *time.Time `json:"last_active_at,omitempty"`
-	Status               string     `json:"status"`
-	AssignedTaskCount    int        `json:"assigned_task_count"`
-	OwnedTaskCount       int        `json:"owned_task_count"`
-	ActionableInboxCount int        `json:"actionable_inbox_count"`
+	ActorID              string          `json:"actor_id"`
+	Role                 string          `json:"role,omitempty"`
+	LastActiveAt         *time.Time      `json:"last_active_at,omitempty"`
+	Status               string          `json:"status"`
+	AssignedTaskCount    int             `json:"assigned_task_count"`
+	OwnedTaskCount       int             `json:"owned_task_count"`
+	ActionableInboxCount int             `json:"actionable_inbox_count"`
+	LatestActionable     *roomInboxEntry `json:"latest_actionable,omitempty"`
 }
 
 type roomTaskPulseSummary struct {
@@ -427,6 +428,13 @@ type roomTaskPulseSummary struct {
 	Blocked           int `json:"blocked"`
 	Stale             int `json:"stale"`
 	Completed         int `json:"completed"`
+}
+
+type roomStatusBacklog struct {
+	ParticipantsWithPending int              `json:"participants_with_pending"`
+	PendingAcks             int              `json:"pending_acks"`
+	PendingReplies          int              `json:"pending_replies"`
+	LatestByParticipant     []roomInboxEntry `json:"latest_by_participant,omitempty"`
 }
 
 func runRoomStatus(cmd *cobra.Command, workspace, roomID string, limit int, staleAfter time.Duration) error {
@@ -1293,7 +1301,12 @@ func buildRoomStatusParticipants(room agent.RoomSummary, messages []agent.BoardM
 				p.OwnedTaskCount++
 			}
 		}
-		p.ActionableInboxCount = len(buildRoomInboxEntries(actorID, messages, "all", false))
+		entries := buildRoomStatusEntries(actorID, messages)
+		p.ActionableInboxCount = len(entries)
+		if len(entries) > 0 {
+			entry := entries[0]
+			p.LatestActionable = &entry
+		}
 		participants = append(participants, p)
 	}
 	sort.SliceStable(participants, func(i, j int) bool {
@@ -1325,30 +1338,78 @@ func buildRoomTaskPulseSummary(tasks []taskstore.Task, now time.Time, staleAfter
 	return pulse
 }
 
-func buildRoomStatusBacklog(room agent.RoomSummary, messages []agent.BoardMessage) map[string]int {
-	backlog := map[string]int{
-		"pending_direct_requests": 0,
-		"pending_acks":            0,
-		"pending_replies":         0,
-	}
+func buildRoomStatusBacklog(room agent.RoomSummary, messages []agent.BoardMessage) roomStatusBacklog {
+	backlog := roomStatusBacklog{}
 	for _, participant := range room.Participants {
 		if strings.HasPrefix(strings.TrimSpace(participant), "actor:system:room:") {
 			continue
 		}
-		entries := buildRoomInboxEntries(participant, messages, "all", false)
-		backlog["pending_direct_requests"] += len(entries)
+		entries := buildRoomStatusEntries(participant, messages)
+		if len(entries) == 0 {
+			continue
+		}
+		backlog.ParticipantsWithPending++
+		backlog.LatestByParticipant = append(backlog.LatestByParticipant, entries[0])
 		for _, entry := range entries {
 			for _, flag := range entry.Flags {
 				switch flag {
 				case "ACK-REQUIRED":
-					backlog["pending_acks"]++
+					backlog.PendingAcks++
 				case "REPLY-EXPECTED":
-					backlog["pending_replies"]++
+					backlog.PendingReplies++
 				}
 			}
 		}
 	}
+	sort.SliceStable(backlog.LatestByParticipant, func(i, j int) bool {
+		if !backlog.LatestByParticipant[i].CreatedAt.Equal(backlog.LatestByParticipant[j].CreatedAt) {
+			return backlog.LatestByParticipant[i].CreatedAt.After(backlog.LatestByParticipant[j].CreatedAt)
+		}
+		return backlog.LatestByParticipant[i].Recipient < backlog.LatestByParticipant[j].Recipient
+	})
 	return backlog
+}
+
+func buildRoomStatusEntries(actorID string, messages []agent.BoardMessage) []roomInboxEntry {
+	entries := buildRoomInboxEntries(actorID, messages, "all", false)
+	if len(entries) == 0 {
+		return nil
+	}
+	latestBySender := make(map[string]roomInboxEntry, len(entries))
+	for _, entry := range entries {
+		key := strings.TrimSpace(entry.Sender)
+		if key == "" {
+			key = "unknown"
+		}
+		current, ok := latestBySender[key]
+		if !ok || roomStatusEntryMoreRecent(entry, current) {
+			latestBySender[key] = entry
+		}
+	}
+	out := make([]roomInboxEntry, 0, len(latestBySender))
+	for _, entry := range latestBySender {
+		out = append(out, entry)
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		if !out[i].CreatedAt.Equal(out[j].CreatedAt) {
+			return out[i].CreatedAt.After(out[j].CreatedAt)
+		}
+		if out[i].Priority != out[j].Priority {
+			return out[i].Priority < out[j].Priority
+		}
+		return out[i].ID < out[j].ID
+	})
+	return out
+}
+
+func roomStatusEntryMoreRecent(left, right roomInboxEntry) bool {
+	if !left.CreatedAt.Equal(right.CreatedAt) {
+		return left.CreatedAt.After(right.CreatedAt)
+	}
+	if left.Priority != right.Priority {
+		return left.Priority < right.Priority
+	}
+	return left.ID < right.ID
 }
 
 func roomMemberRole(members []agent.RoomMember, actorID string) string {

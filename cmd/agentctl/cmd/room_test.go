@@ -662,12 +662,83 @@ func TestRunRoomStatusIncludesPulseAndBacklog(t *testing.T) {
 	if !ok {
 		t.Fatalf("backlog type=%T", data["backlog"])
 	}
-	if got := backlog["pending_direct_requests"]; got == nil {
-		t.Fatalf("pending_direct_requests missing in backlog=%v", backlog)
+	if got := backlog["participants_with_pending"]; got != float64(1) {
+		t.Fatalf("participants_with_pending=%v want 1", got)
+	}
+	latestByParticipant, ok := backlog["latest_by_participant"].([]any)
+	if !ok || len(latestByParticipant) != 1 {
+		t.Fatalf("latest_by_participant=%T/%v want 1 entry", backlog["latest_by_participant"], backlog["latest_by_participant"])
 	}
 	participants, ok := data["participants"].([]any)
 	if !ok || len(participants) == 0 {
 		t.Fatalf("participants=%T/%v want entries", data["participants"], data["participants"])
+	}
+	foundLatest := false
+	for _, raw := range participants {
+		participant, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		if participant["actor_id"] != "gemini-a" {
+			continue
+		}
+		if participant["actionable_inbox_count"] != float64(1) {
+			t.Fatalf("actionable_inbox_count=%v want 1", participant["actionable_inbox_count"])
+		}
+		if _, ok := participant["latest_actionable"].(map[string]any); !ok {
+			t.Fatalf("latest_actionable missing for gemini-a participant=%v", participant)
+		}
+		foundLatest = true
+	}
+	if !foundLatest {
+		t.Fatalf("expected gemini-a participant with latest actionable entry in participants=%v", participants)
+	}
+}
+
+func TestBuildRoomStatusEntriesCollapsesHistoricalBacklogBySender(t *testing.T) {
+	now := time.Date(2026, 4, 4, 20, 0, 0, 0, time.UTC)
+	entries := buildRoomStatusEntries("gemini-a", []agent.BoardMessage{
+		{
+			ID:            "m1",
+			Sender:        "actor:system:room:alpha",
+			Recipient:     "gemini-a",
+			Subject:       "old reminder",
+			Body:          "old reminder",
+			CreatedAt:     now,
+			Priority:      2,
+			Status:        agent.BoardMessageStatusUnread,
+			ReplyExpected: true,
+		},
+		{
+			ID:            "m2",
+			Sender:        "actor:system:room:alpha",
+			Recipient:     "gemini-a",
+			Subject:       "new reminder",
+			Body:          "new reminder",
+			CreatedAt:     now.Add(2 * time.Minute),
+			Priority:      2,
+			Status:        agent.BoardMessageStatusUnread,
+			ReplyExpected: true,
+		},
+		{
+			ID:        "m3",
+			Sender:    "human-a",
+			Recipient: "gemini-a",
+			Subject:   "human request",
+			Body:      "human request",
+			CreatedAt: now.Add(1 * time.Minute),
+			Priority:  2,
+			Status:    agent.BoardMessageStatusUnread,
+		},
+	})
+	if len(entries) != 2 {
+		t.Fatalf("len(entries)=%d want 2", len(entries))
+	}
+	if entries[0].ID != "m2" {
+		t.Fatalf("entries[0].ID=%q want m2", entries[0].ID)
+	}
+	if entries[1].ID != "m3" {
+		t.Fatalf("entries[1].ID=%q want m3", entries[1].ID)
 	}
 }
 
