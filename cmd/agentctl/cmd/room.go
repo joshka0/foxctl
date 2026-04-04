@@ -11,8 +11,10 @@ import (
 
 	"github.com/jkatigb/agentctl/internal/domain/agent"
 	"github.com/jkatigb/agentctl/internal/domain/envelope"
+	ws "github.com/jkatigb/agentctl/internal/platform/workspace"
 	"github.com/jkatigb/agentctl/internal/protocol"
 	"github.com/jkatigb/agentctl/internal/storage/blackboard"
+	taskstore "github.com/jkatigb/agentctl/internal/storage/tasks"
 	"github.com/jkatigb/agentctl/internal/tmuxbridge"
 	"github.com/spf13/cobra"
 )
@@ -30,6 +32,7 @@ func newRoomCommand() *cobra.Command {
 		newRoomCreateCommand(),
 		newRoomListCommand(),
 		newRoomShowCommand(),
+		newRoomStatusCommand(),
 		newRoomInboxCommand(),
 		newRoomSendCommand(),
 		newRoomAckCommand(),
@@ -101,6 +104,26 @@ func newRoomShowCommand() *cobra.Command {
 	cmd.Flags().StringVar(&workspace, "workspace", ".", "Workspace root override")
 	cmd.Flags().StringVar(&actorID, "actor", "", "Actor id used for unread counts")
 	cmd.Flags().IntVar(&limit, "limit", 100, "Maximum messages to return")
+	return cmd
+}
+
+func newRoomStatusCommand() *cobra.Command {
+	var (
+		workspace  string
+		limit      int
+		staleAfter time.Duration
+	)
+	cmd := &cobra.Command{
+		Use:   "status <room-id>",
+		Short: "Show a coordinator-facing room summary",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runRoomStatus(cmd, workspace, args[0], limit, staleAfter)
+		},
+	}
+	cmd.Flags().StringVar(&workspace, "workspace", ".", "Workspace root override")
+	cmd.Flags().IntVar(&limit, "limit", 200, "Maximum room messages to inspect for status derivation")
+	cmd.Flags().DurationVar(&staleAfter, "stale-after", 5*time.Minute, "Participant idle threshold")
 	return cmd
 }
 
@@ -384,6 +407,60 @@ func runRoomShow(cmd *cobra.Command, workspace, roomID, actorID string, limit in
 	return protocol.WriteOK(cmd.OutOrStdout(), "agentctl.room.show", map[string]any{
 		"room":     summary,
 		"messages": messages,
+	}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+}
+
+type roomStatusParticipant struct {
+	ActorID              string     `json:"actor_id"`
+	Role                 string     `json:"role,omitempty"`
+	LastActiveAt         *time.Time `json:"last_active_at,omitempty"`
+	Status               string     `json:"status"`
+	AssignedTaskCount    int        `json:"assigned_task_count"`
+	OwnedTaskCount       int        `json:"owned_task_count"`
+	ActionableInboxCount int        `json:"actionable_inbox_count"`
+}
+
+type roomTaskPulseSummary struct {
+	Pending           int `json:"pending"`
+	AssignedUnclaimed int `json:"assigned_unclaimed"`
+	InProgress        int `json:"in_progress"`
+	Blocked           int `json:"blocked"`
+	Stale             int `json:"stale"`
+	Completed         int `json:"completed"`
+}
+
+func runRoomStatus(cmd *cobra.Command, workspace, roomID string, limit int, staleAfter time.Duration) error {
+	absWorkspace, err := resolveRoomWorkspace(workspace)
+	if err != nil {
+		return err
+	}
+	store, err := openRoomBoardStore(cmd.Context())
+	if err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.status", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	defer store.Close()
+	summary, messages, err := loadRoomState(cmd.Context(), store, absWorkspace, roomID, "", limit)
+	if err != nil {
+		code := protocol.ErrorCodeERuntime
+		if errors.Is(err, blackboard.ErrRoomNotFound) {
+			code = protocol.ErrorCodeENotFound
+		}
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.status", code, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	taskStore, err := openRoomTaskStore(cmd.Context())
+	if err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.status", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	defer taskStore.Close()
+	tasks, err := listRoomTasks(cmd.Context(), taskStore, ws.CanonicalID(absWorkspace), messages, "")
+	if err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.status", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	return protocol.WriteOK(cmd.OutOrStdout(), "agentctl.room.status", map[string]any{
+		"room":         summary,
+		"participants": buildRoomStatusParticipants(summary, messages, tasks, staleAfter),
+		"task_pulse":   buildRoomTaskPulseSummary(tasks, time.Now().UTC(), staleAfter),
+		"backlog":      buildRoomStatusBacklog(summary, messages),
 	}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
 }
 
@@ -1176,6 +1253,127 @@ func summarizeRoomPreview(body string) string {
 		return body
 	}
 	return body[:140] + "..."
+}
+
+func buildRoomStatusParticipants(room agent.RoomSummary, messages []agent.BoardMessage, tasks []taskstore.Task, staleAfter time.Duration) []roomStatusParticipant {
+	latestBySender := latestRoomSenderActivity(messages)
+	participantSet := map[string]struct{}{}
+	for _, member := range room.Members {
+		if id := strings.TrimSpace(member.ActorID); id != "" {
+			participantSet[id] = struct{}{}
+		}
+	}
+	for _, participant := range room.Participants {
+		if id := strings.TrimSpace(participant); id != "" && !strings.HasPrefix(id, "actor:system:room:") {
+			participantSet[id] = struct{}{}
+		}
+	}
+	participants := make([]roomStatusParticipant, 0, len(participantSet))
+	now := time.Now().UTC()
+	for actorID := range participantSet {
+		p := roomStatusParticipant{
+			ActorID: actorID,
+			Role:    roomMemberRole(room.Members, actorID),
+			Status:  "idle",
+		}
+		if ts, ok := latestBySender[actorID]; ok {
+			tsCopy := ts
+			p.LastActiveAt = &tsCopy
+			if staleAfter > 0 && now.Sub(ts) > staleAfter {
+				p.Status = "stale"
+			} else {
+				p.Status = "active"
+			}
+		}
+		for _, task := range tasks {
+			if sameRoomParticipant(task.AssignedActorID, actorID) {
+				p.AssignedTaskCount++
+			}
+			if sameRoomParticipant(task.OwnerActorID, actorID) {
+				p.OwnedTaskCount++
+			}
+		}
+		p.ActionableInboxCount = len(buildRoomInboxEntries(actorID, messages, "all", false))
+		participants = append(participants, p)
+	}
+	sort.SliceStable(participants, func(i, j int) bool {
+		return participants[i].ActorID < participants[j].ActorID
+	})
+	return participants
+}
+
+func buildRoomTaskPulseSummary(tasks []taskstore.Task, now time.Time, staleAfter time.Duration) roomTaskPulseSummary {
+	var pulse roomTaskPulseSummary
+	for _, task := range tasks {
+		switch task.Status {
+		case taskstore.StatusPending:
+			pulse.Pending++
+			if strings.TrimSpace(task.AssignedActorID) != "" {
+				pulse.AssignedUnclaimed++
+			}
+		case taskstore.StatusInProgress:
+			pulse.InProgress++
+		case taskstore.StatusBlocked:
+			pulse.Blocked++
+		case taskstore.StatusCompleted:
+			pulse.Completed++
+		}
+		if taskIsStale(task, now, staleAfter) {
+			pulse.Stale++
+		}
+	}
+	return pulse
+}
+
+func buildRoomStatusBacklog(room agent.RoomSummary, messages []agent.BoardMessage) map[string]int {
+	backlog := map[string]int{
+		"pending_direct_requests": 0,
+		"pending_acks":            0,
+		"pending_replies":         0,
+	}
+	for _, participant := range room.Participants {
+		if strings.HasPrefix(strings.TrimSpace(participant), "actor:system:room:") {
+			continue
+		}
+		entries := buildRoomInboxEntries(participant, messages, "all", false)
+		backlog["pending_direct_requests"] += len(entries)
+		for _, entry := range entries {
+			for _, flag := range entry.Flags {
+				switch flag {
+				case "ACK-REQUIRED":
+					backlog["pending_acks"]++
+				case "REPLY-EXPECTED":
+					backlog["pending_replies"]++
+				}
+			}
+		}
+	}
+	return backlog
+}
+
+func roomMemberRole(members []agent.RoomMember, actorID string) string {
+	for _, member := range members {
+		if sameRoomParticipant(member.ActorID, actorID) {
+			return strings.TrimSpace(member.Role)
+		}
+	}
+	return ""
+}
+
+func taskIsStale(task taskstore.Task, now time.Time, staleAfter time.Duration) bool {
+	if staleAfter <= 0 || strings.TrimSpace(task.OwnerActorID) == "" {
+		return false
+	}
+	if task.Status != taskstore.StatusInProgress && task.Status != taskstore.StatusBlocked {
+		return false
+	}
+	reference := task.CreatedAt
+	if task.HeartbeatAt != nil {
+		reference = *task.HeartbeatAt
+	} else if task.ClaimedAt != nil {
+		reference = *task.ClaimedAt
+	}
+	return now.Sub(reference) > staleAfter
 }
 
 func collectRoomRelayTargets(room agent.RoomSummary, msg agent.BoardMessage) ([]string, []string) {

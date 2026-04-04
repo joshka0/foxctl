@@ -298,6 +298,7 @@ agentctl room send alpha "Claude, please review the retry branch." --to claude-a
 agentctl room send alpha "Gemini, confirm receipt." --to gemini-a --ack-required
 agentctl room ack alpha <message-id>
 agentctl room inbox alpha --actor claude-a
+agentctl room status alpha
 agentctl room task add alpha --title "Refactor retry path"
 agentctl room task claim alpha --id <task-id>
 agentctl room task touch alpha --id <task-id>
@@ -318,6 +319,7 @@ The intended model is:
 - `--ack-required` marks a message as requiring an explicit acknowledgment
 - `room ack` marks one or more room messages as `acked` in the durable log
 - `room inbox` shows the actionable queue for one participant instead of the full room archive
+- `room status` shows the coordinator-facing pulse for participants, task state, stale owned work, and backlog
 - `room subscribe` reads or tails the room log in any terminal
 - `room relay --backend tmux` fans new room messages into tmux member panes by
   matching room member ids to tmux pane labels
@@ -354,6 +356,7 @@ The intended lightweight lifecycle is:
 
 - `pending -> in_progress -> blocked -> completed`
 - `assign` records intended ownership and sends a direct request, but the assignee still claims the task explicitly
+- assigned tasks are claimable only by the assignee until they are reassigned, reclaimed, or abandoned
 - `abandon` returns a task to `pending`
 - `complete` requires the current participant to claim the task first
 - `touch` refreshes the task heartbeat without changing state

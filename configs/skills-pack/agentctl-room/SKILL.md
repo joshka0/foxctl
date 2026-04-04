@@ -23,6 +23,7 @@ description: "Durable multi-agent room coordination with shared chat, direct req
 - `room send --to <participant>` writes a direct room request instead of a broadcast.
 - `room ack` marks a specific room message as acknowledged.
 - `room inbox` shows actionable direct requests and pending ack/reply work for one participant.
+- `room status` shows the coordinator-facing room pulse: participants, task counts, stale work, and backlog.
 - `room relay` mirrors room messages into terminal panes.
 - `room task` links shared tasks to the room.
 - `room loop` runs the central coordination loop:
@@ -50,6 +51,7 @@ agentctl room send alpha "Review the retry path in client.ts"
 agentctl room send alpha "Claude, please review the retry path." --to claude-a --reply-expected
 agentctl room ack alpha <message-id>
 agentctl room inbox alpha --actor claude-a
+agentctl room status alpha
 agentctl room subscribe alpha --follow
 ```
 
@@ -79,6 +81,7 @@ Task lifecycle is intentionally lightweight:
 
 - `pending -> in_progress -> blocked -> completed`
 - `assign` records intended ownership and sends a direct task request, but the assignee still claims the task explicitly
+- assigned tasks are claimable only by the assignee until they are reassigned, reclaimed, or abandoned
 - `abandon` returns a task to `pending`
 - `complete` requires the current participant to claim the task first
 - `touch` refreshes the owner heartbeat without changing task state

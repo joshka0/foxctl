@@ -477,6 +477,98 @@ func TestRunRoomTaskAssignPersistsAssignmentAndNotifiesRecipient(t *testing.T) {
 	}
 }
 
+func TestRunRoomTaskClaimRejectsDifferentAssignee(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	ctx := context.Background()
+	workspace := t.TempDir()
+
+	cmd, _ := newRoomTestCommand(ctx)
+	if err := runRoomCreate(cmd, workspace, "alpha", "Alpha", "", []string{"human-a=coordinator", "gemini-a=reviewer", "claude-a=reviewer"}); err != nil {
+		t.Fatalf("runRoomCreate: %v", err)
+	}
+	cmd, out := newRoomTestCommand(ctx)
+	if err := runRoomTaskAdd(cmd, workspace, "alpha", "human-a", "Assign me", "Please assign this", "", "", nil, true); err != nil {
+		t.Fatalf("runRoomTaskAdd: %v", err)
+	}
+	data := decodeRoomEnvelope(t, out)
+	taskRaw, ok := data["task"].(map[string]any)
+	if !ok {
+		t.Fatalf("task payload type=%T", data["task"])
+	}
+	taskID, _ := taskRaw["id"].(string)
+	if taskID == "" {
+		taskID, _ = taskRaw["ID"].(string)
+	}
+	cmd, _ = newRoomTestCommand(ctx)
+	if err := runRoomTaskAssign(cmd, workspace, "alpha", "human-a", taskID, "gemini-a", "take this"); err != nil {
+		t.Fatalf("runRoomTaskAssign: %v", err)
+	}
+
+	cmd, out = newRoomTestCommand(ctx)
+	if err := runRoomTaskClaim(cmd, workspace, "alpha", "claude-a", taskID); err != nil {
+		t.Fatalf("runRoomTaskClaim returned error instead of envelope: %v", err)
+	}
+	var env envelope.Envelope
+	if err := json.Unmarshal(out.Bytes(), &env); err != nil {
+		t.Fatalf("decode envelope: %v", err)
+	}
+	if env.Status != "error" {
+		t.Fatalf("status=%q want error body=%s", env.Status, out.String())
+	}
+}
+
+func TestRunRoomStatusIncludesPulseAndBacklog(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	ctx := context.Background()
+	workspace := t.TempDir()
+
+	cmd, _ := newRoomTestCommand(ctx)
+	if err := runRoomCreate(cmd, workspace, "alpha", "Alpha", "", []string{"human-a=coordinator", "gemini-a=reviewer"}); err != nil {
+		t.Fatalf("runRoomCreate: %v", err)
+	}
+	cmd, out := newRoomTestCommand(ctx)
+	if err := runRoomTaskAdd(cmd, workspace, "alpha", "human-a", "Status task", "Inspect status", "", "", nil, true); err != nil {
+		t.Fatalf("runRoomTaskAdd: %v", err)
+	}
+	data := decodeRoomEnvelope(t, out)
+	taskRaw, ok := data["task"].(map[string]any)
+	if !ok {
+		t.Fatalf("task payload type=%T", data["task"])
+	}
+	taskID, _ := taskRaw["id"].(string)
+	if taskID == "" {
+		taskID, _ = taskRaw["ID"].(string)
+	}
+	cmd, _ = newRoomTestCommand(ctx)
+	if err := runRoomTaskAssign(cmd, workspace, "alpha", "human-a", taskID, "gemini-a", "take this"); err != nil {
+		t.Fatalf("runRoomTaskAssign: %v", err)
+	}
+
+	cmd, out = newRoomTestCommand(ctx)
+	if err := runRoomStatus(cmd, workspace, "alpha", 50, 5*time.Minute); err != nil {
+		t.Fatalf("runRoomStatus: %v", err)
+	}
+	data = decodeRoomEnvelope(t, out)
+	taskPulse, ok := data["task_pulse"].(map[string]any)
+	if !ok {
+		t.Fatalf("task_pulse type=%T", data["task_pulse"])
+	}
+	if got := taskPulse["assigned_unclaimed"]; got != float64(1) {
+		t.Fatalf("assigned_unclaimed=%v want 1", got)
+	}
+	backlog, ok := data["backlog"].(map[string]any)
+	if !ok {
+		t.Fatalf("backlog type=%T", data["backlog"])
+	}
+	if got := backlog["pending_direct_requests"]; got == nil {
+		t.Fatalf("pending_direct_requests missing in backlog=%v", backlog)
+	}
+	participants, ok := data["participants"].([]any)
+	if !ok || len(participants) == 0 {
+		t.Fatalf("participants=%T/%v want entries", data["participants"], data["participants"])
+	}
+}
+
 func TestRunRoomInboxFiltersActionableMessages(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	ctx := context.Background()

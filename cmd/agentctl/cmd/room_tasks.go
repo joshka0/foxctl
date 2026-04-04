@@ -29,9 +29,11 @@ func newRoomTaskCommand() *cobra.Command {
 		newRoomTaskAddCommand(),
 		newRoomTaskListCommand(),
 		newRoomTaskAssignCommand(),
+		newRoomTaskReassignCommand(),
 		newRoomTaskClaimCommand(),
 		newRoomTaskTouchCommand(),
 		newRoomTaskBlockCommand(),
+		newRoomTaskReclaimCommand(),
 		newRoomTaskUnblockCommand(),
 		newRoomTaskAbandonCommand(),
 		newRoomTaskCompleteCommand(),
@@ -60,6 +62,32 @@ func newRoomTaskAssignCommand() *cobra.Command {
 	cmd.Flags().StringVar(&taskID, "id", "", "Task id to assign")
 	cmd.Flags().StringVar(&recipient, "to", "", "Assigned participant id")
 	cmd.Flags().StringVar(&notes, "notes", "", "Optional assignment note")
+	_ = cmd.MarkFlagRequired("id")
+	_ = cmd.MarkFlagRequired("to")
+	return cmd
+}
+
+func newRoomTaskReassignCommand() *cobra.Command {
+	var (
+		workspace string
+		sender    string
+		taskID    string
+		recipient string
+		reason    string
+	)
+	cmd := &cobra.Command{
+		Use:   "reassign <room-id>",
+		Short: "Coordinator-only reassignment that moves a task back to pending for a new assignee",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runRoomTaskReassign(cmd, workspace, args[0], sender, taskID, recipient, reason)
+		},
+	}
+	cmd.Flags().StringVar(&workspace, "workspace", ".", "Workspace root override")
+	cmd.Flags().StringVar(&sender, "sender", "", "Sender actor or participant id (defaults to current tmux/zellij pane)")
+	cmd.Flags().StringVar(&taskID, "id", "", "Task id to reassign")
+	cmd.Flags().StringVar(&recipient, "to", "", "New assignee participant id")
+	cmd.Flags().StringVar(&reason, "reason", "", "Reassignment reason")
 	_ = cmd.MarkFlagRequired("id")
 	_ = cmd.MarkFlagRequired("to")
 	return cmd
@@ -223,6 +251,30 @@ func newRoomTaskUnblockCommand() *cobra.Command {
 	cmd.Flags().StringVar(&sender, "sender", "", "Sender actor or participant id (defaults to current tmux/zellij pane)")
 	cmd.Flags().StringVar(&taskID, "id", "", "Task id to unblock")
 	_ = cmd.MarkFlagRequired("id")
+	return cmd
+}
+
+func newRoomTaskReclaimCommand() *cobra.Command {
+	var (
+		workspace string
+		sender    string
+		taskID    string
+		reason    string
+	)
+	cmd := &cobra.Command{
+		Use:   "reclaim <room-id>",
+		Short: "Coordinator-only force reclaim that returns a task to pending",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runRoomTaskReclaim(cmd, workspace, args[0], sender, taskID, reason)
+		},
+	}
+	cmd.Flags().StringVar(&workspace, "workspace", ".", "Workspace root override")
+	cmd.Flags().StringVar(&sender, "sender", "", "Sender actor or participant id (defaults to current tmux/zellij pane)")
+	cmd.Flags().StringVar(&taskID, "id", "", "Task id to reclaim")
+	cmd.Flags().StringVar(&reason, "reason", "", "Reclaim reason")
+	_ = cmd.MarkFlagRequired("id")
+	_ = cmd.MarkFlagRequired("reason")
 	return cmd
 }
 
@@ -526,6 +578,9 @@ func runRoomTaskAssign(cmd *cobra.Command, workspace, roomID, sender, taskID, re
 	if task.WorkspaceID != taskWorkspaceID {
 		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.task.assign", protocol.ErrorCodeEARG, "task does not belong to this workspace", nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
 	}
+	if task.Status == taskstore.StatusCompleted {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.task.assign", protocol.ErrorCodeEARG, "completed tasks cannot be assigned", nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
 	now := time.Now().UTC()
 	task.AssignedActorID = recipient
 	task.AssignedAt = &now
@@ -589,6 +644,120 @@ func runRoomTaskAssign(cmd *cobra.Command, workspace, roomID, sender, taskID, re
 	}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
 }
 
+func runRoomTaskReassign(cmd *cobra.Command, workspace, roomID, sender, taskID, recipient, reason string) error {
+	absWorkspace, identity, summary, task, boardStore, taskStore, err := loadCoordinatorTaskContext(cmd, workspace, roomID, sender, taskID)
+	if err != nil {
+		return err
+	}
+	defer boardStore.Close()
+	defer taskStore.Close()
+
+	recipient = normalizeRoomRecipient(recipient)
+	if recipient == agent.BroadcastRecipient {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.task.reassign", protocol.ErrorCodeEARG, "reassign requires a direct participant recipient", nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	if !roomHasParticipant(summary, recipient) {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.task.reassign", protocol.ErrorCodeEARG, "assignee is not a room participant", map[string]any{
+			"recipient": recipient,
+		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	if task.Status == taskstore.StatusCompleted {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.task.reassign", protocol.ErrorCodeEARG, "completed tasks cannot be reassigned", nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	previousOwner := strings.TrimSpace(task.OwnerActorID)
+	previousAssignee := strings.TrimSpace(task.AssignedActorID)
+	now := time.Now().UTC()
+	task.Status = taskstore.StatusPending
+	task.AssignedActorID = recipient
+	task.AssignedAt = &now
+	task.OwnerActorID = ""
+	task.ClaimedAt = nil
+	task.HeartbeatAt = nil
+	task.BlockedReason = ""
+	task.BlockedAt = nil
+	task, err = taskStore.Update(cmd.Context(), task)
+	if err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.task.reassign", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	subject := fmt.Sprintf("Task reassigned: %s", task.Title)
+	lines := []string{
+		fmt.Sprintf("Task ID: %s", task.ID),
+		fmt.Sprintf("Reassigned by: %s", identity.Sender),
+		fmt.Sprintf("Assigned to: %s", recipient),
+		fmt.Sprintf("Previous owner: %s", fallbackRoomValue(previousOwner)),
+		fmt.Sprintf("Previous assignee: %s", fallbackRoomValue(previousAssignee)),
+		"Status reset to pending. New assignee must claim the task explicitly.",
+	}
+	if strings.TrimSpace(reason) != "" {
+		lines = append(lines, "Reason: "+strings.TrimSpace(reason))
+	}
+	if err := sendRoomTaskCoordinatorMessages(cmd.Context(), absWorkspace, strings.TrimSpace(roomID), boardStore, identity.Sender, recipient, task, subject, strings.Join(lines, "\n")); err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.task.reassign", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	return protocol.WriteOK(cmd.OutOrStdout(), "agentctl.room.task.reassign", map[string]any{
+		"room_id":         strings.TrimSpace(roomID),
+		"task":            task,
+		"assignee":        recipient,
+		"sender_identity": identity,
+	}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+}
+
+func runRoomTaskReclaim(cmd *cobra.Command, workspace, roomID, sender, taskID, reason string) error {
+	absWorkspace, identity, _, task, boardStore, taskStore, err := loadCoordinatorTaskContext(cmd, workspace, roomID, sender, taskID)
+	if err != nil {
+		return err
+	}
+	defer boardStore.Close()
+	defer taskStore.Close()
+
+	previousOwner := strings.TrimSpace(task.OwnerActorID)
+	if previousOwner == "" {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.task.reclaim", protocol.ErrorCodeEARG, "task has no current owner to reclaim", nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	if task.Status == taskstore.StatusCompleted {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.task.reclaim", protocol.ErrorCodeEARG, "completed tasks cannot be reclaimed", nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	task.Status = taskstore.StatusPending
+	task.AssignedActorID = ""
+	task.AssignedAt = nil
+	task.OwnerActorID = ""
+	task.ClaimedAt = nil
+	task.HeartbeatAt = nil
+	task.BlockedReason = ""
+	task.BlockedAt = nil
+	task, err = taskStore.Update(cmd.Context(), task)
+	if err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.task.reclaim", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	subject := fmt.Sprintf("Task force-reclaimed: %s", task.Title)
+	body := strings.Join([]string{
+		fmt.Sprintf("Task ID: %s", task.ID),
+		fmt.Sprintf("Previous owner: %s", previousOwner),
+		fmt.Sprintf("Reclaimed by: %s", identity.Sender),
+		"Status reset to pending.",
+		"Reason: " + strings.TrimSpace(reason),
+	}, "\n")
+	msg := &agent.BoardMessage{
+		WorkspaceID: absWorkspace,
+		TaskID:      task.ID,
+		Stream:      agent.RoomStreamName(strings.TrimSpace(roomID)),
+		Sender:      identity.Sender,
+		Recipient:   agent.BroadcastRecipient,
+		Kind:        agent.BoardMessageKindTaskUpdate,
+		Priority:    agent.DefaultPriority,
+		Subject:     subject,
+		Body:        body,
+	}
+	if err := boardStore.SendMessage(cmd.Context(), msg); err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.task.reclaim", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	return protocol.WriteOK(cmd.OutOrStdout(), "agentctl.room.task.reclaim", map[string]any{
+		"room_id":         strings.TrimSpace(roomID),
+		"task":            task,
+		"sender_identity": identity,
+	}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+}
+
 func runRoomTaskClaim(cmd *cobra.Command, workspace, roomID, sender, taskID string) error {
 	return runRoomTaskTransition(cmd, workspace, roomID, sender, taskID, "", "claim")
 }
@@ -643,12 +812,21 @@ func runRoomTaskTransition(cmd *cobra.Command, workspace, roomID, sender, taskID
 		if task.Status == taskstore.StatusCompleted {
 			return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.task.claim", protocol.ErrorCodeEARG, "completed tasks cannot be claimed", nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
 		}
+		if assigned := strings.TrimSpace(task.AssignedActorID); assigned != "" && !sameRoomParticipant(assigned, identity.Sender) {
+			return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.task.claim", protocol.ErrorCodeEARG, "task is assigned to another participant", map[string]any{
+				"assigned_actor_id": task.AssignedActorID,
+			}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+		}
 		if task.OwnerActorID != "" && task.OwnerActorID != identity.Sender && task.Status != taskstore.StatusPending && task.Status != taskstore.StatusCanceled {
 			return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.task.claim", protocol.ErrorCodeEARG, "task is already claimed by another participant", map[string]any{
 				"owner_actor_id": task.OwnerActorID,
 			}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
 		}
 		task.Status = taskstore.StatusInProgress
+		if strings.TrimSpace(task.AssignedActorID) == "" {
+			task.AssignedActorID = identity.Sender
+			task.AssignedAt = &now
+		}
 		task.OwnerActorID = identity.Sender
 		task.ClaimedAt = &now
 		task.HeartbeatAt = &now
@@ -705,6 +883,8 @@ func runRoomTaskTransition(cmd *cobra.Command, workspace, roomID, sender, taskID
 			}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
 		}
 		task.Status = taskstore.StatusPending
+		task.AssignedActorID = ""
+		task.AssignedAt = nil
 		task.OwnerActorID = ""
 		task.ClaimedAt = nil
 		task.HeartbeatAt = nil
@@ -1169,6 +1349,94 @@ func detectRoomTaskPulseMessages(workspace, roomID string, tasks []taskstore.Tas
 
 func roomLoopSender(roomID string) string {
 	return "actor:system:room:" + strings.TrimSpace(roomID)
+}
+
+func loadCoordinatorTaskContext(cmd *cobra.Command, workspace, roomID, sender, taskID string) (string, roomIdentity, agent.RoomSummary, taskstore.Task, blackboard.BoardStore, taskstore.Store, error) {
+	absWorkspace, err := resolveRoomWorkspace(workspace)
+	if err != nil {
+		return "", roomIdentity{}, agent.RoomSummary{}, taskstore.Task{}, nil, nil, err
+	}
+	identity, err := resolveRoomSender(cmd.Context(), sender)
+	if err != nil {
+		writeErr := protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.task", protocol.ErrorCodeEARG, err.Error(), map[string]any{
+			"hint": "Pass --sender when outside tmux/zellij, or run inside a prepared pane so agentctl can derive the participant id.",
+		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+		return "", roomIdentity{}, agent.RoomSummary{}, taskstore.Task{}, nil, nil, writeErr
+	}
+	boardStore, err := openRoomBoardStore(cmd.Context())
+	if err != nil {
+		writeErr := protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.task", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+		return "", roomIdentity{}, agent.RoomSummary{}, taskstore.Task{}, nil, nil, writeErr
+	}
+	summary, err := boardStore.GetRoom(cmd.Context(), absWorkspace, strings.TrimSpace(roomID), "")
+	if err != nil {
+		code := protocol.ErrorCodeERuntime
+		if errors.Is(err, blackboard.ErrRoomNotFound) {
+			code = protocol.ErrorCodeENotFound
+		}
+		writeErr := protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.task", code, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+		return "", roomIdentity{}, agent.RoomSummary{}, taskstore.Task{}, boardStore, nil, writeErr
+	}
+	if !roomMemberHasRole(summary.Members, identity.Sender, "coordinator") {
+		writeErr := protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.task", protocol.ErrorCodeEARG, "only room coordinators can perform this action", map[string]any{
+			"sender": identity.Sender,
+		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+		return "", roomIdentity{}, agent.RoomSummary{}, taskstore.Task{}, boardStore, nil, writeErr
+	}
+	taskStore, err := openRoomTaskStore(cmd.Context())
+	if err != nil {
+		writeErr := protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.task", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+		return "", roomIdentity{}, agent.RoomSummary{}, taskstore.Task{}, boardStore, nil, writeErr
+	}
+	task, err := taskStore.Get(cmd.Context(), strings.TrimSpace(taskID))
+	if err != nil {
+		writeErr := protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.task", protocol.ErrorCodeENotFound, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+		return "", roomIdentity{}, agent.RoomSummary{}, taskstore.Task{}, boardStore, taskStore, writeErr
+	}
+	if task.WorkspaceID != ws.CanonicalID(absWorkspace) {
+		writeErr := protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.task", protocol.ErrorCodeEARG, "task does not belong to this workspace", nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+		return "", roomIdentity{}, agent.RoomSummary{}, taskstore.Task{}, boardStore, taskStore, writeErr
+	}
+	return absWorkspace, identity, summary, task, boardStore, taskStore, nil
+}
+
+func sendRoomTaskCoordinatorMessages(ctx context.Context, workspace, roomID string, boardStore blackboard.BoardStore, sender, recipient string, task taskstore.Task, subject, body string) error {
+	broadcast := &agent.BoardMessage{
+		WorkspaceID: workspace,
+		TaskID:      task.ID,
+		Stream:      agent.RoomStreamName(strings.TrimSpace(roomID)),
+		Sender:      sender,
+		Recipient:   agent.BroadcastRecipient,
+		Kind:        agent.BoardMessageKindTaskUpdate,
+		Priority:    agent.DefaultPriority,
+		Subject:     subject,
+		Body:        body,
+	}
+	if err := boardStore.SendMessage(ctx, broadcast); err != nil {
+		return err
+	}
+	direct := &agent.BoardMessage{
+		WorkspaceID:   workspace,
+		TaskID:        task.ID,
+		Stream:        agent.RoomStreamName(strings.TrimSpace(roomID)),
+		Sender:        sender,
+		Recipient:     recipient,
+		Kind:          agent.BoardMessageKindInstruction,
+		Priority:      agent.DefaultPriority,
+		AckRequired:   true,
+		ReplyExpected: true,
+		Subject:       subject,
+		Body:          body,
+	}
+	return boardStore.SendMessage(ctx, direct)
+}
+
+func fallbackRoomValue(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "none"
+	}
+	return value
 }
 
 func formatRoomTaskAddedBody(task taskstore.Task) string {
