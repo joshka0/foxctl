@@ -4,10 +4,13 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/jkatigb/agentctl/internal/domain/agent"
 	"github.com/jkatigb/agentctl/internal/domain/envelope"
+	"github.com/jkatigb/agentctl/internal/tmuxbridge"
 	"github.com/spf13/cobra"
 )
 
@@ -51,7 +54,7 @@ func TestRoomCommandFlow_CreateJoinSendShow(t *testing.T) {
 	}
 
 	cmd, out = newRoomTestCommand(ctx)
-	if err := runRoomJoin(cmd, workspace, "alpha", "agent-b", "reviewer", true); err != nil {
+	if err := runRoomJoin(cmd, workspace, "alpha", "agent-b", "reviewer", true, false); err != nil {
 		t.Fatalf("runRoomJoin: %v", err)
 	}
 
@@ -177,6 +180,103 @@ func TestCollectRoomRelayTargetsSkipsSender(t *testing.T) {
 	}
 }
 
+func TestRunRoomSendDerivesSenderFromCurrentTmuxPane(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("TMUX", "/tmp/tmux.sock,1,0")
+	t.Setenv("TMUX_PANE", "%7")
+	restore := swapRoomTmuxClientForTest(func() *tmuxbridge.Client {
+		return tmuxbridge.NewWithRunner(roomFakeRunner{responses: map[string]roomFakeResponse{
+			"tmux list-sessions": {stdout: "ok\n"},
+			"tmux display-message -t %7 -p " + roomListFormat(): {
+				stdout: "%7" + roomFieldSep() + "collab" + roomFieldSep() + "0" + roomFieldSep() + "0" + roomFieldSep() + "main" + roomFieldSep() + "111" + roomFieldSep() + "120" + roomFieldSep() + "30" + roomFieldSep() + "codex-a" + roomFieldSep() + "/repo" + roomFieldSep() + "zsh" + roomFieldSep() + "1\n",
+			},
+		}}, map[string]string{
+			"TMUX":      "/tmp/tmux.sock,1,0",
+			"TMUX_PANE": "%7",
+		})
+	})
+	defer restore()
+
+	ctx := context.Background()
+	workspace := t.TempDir()
+	cmd, _ := newRoomTestCommand(ctx)
+	if err := runRoomCreate(cmd, workspace, "alpha", "Alpha", "", []string{"codex-a=lead"}); err != nil {
+		t.Fatalf("runRoomCreate: %v", err)
+	}
+
+	cmd, out := newRoomTestCommand(ctx)
+	if err := runRoomSend(cmd, workspace, "alpha", "", "", "hello room", "info", "", 0, false, true); err != nil {
+		t.Fatalf("runRoomSend: %v", err)
+	}
+	data := decodeRoomEnvelope(t, out)
+	msg, ok := data["message"].(map[string]any)
+	if !ok {
+		t.Fatalf("message type=%T", data["message"])
+	}
+	if got := msg["sender"]; got != "codex-a" {
+		t.Fatalf("sender=%v want codex-a", got)
+	}
+}
+
+func TestRunRoomJoinCurrentDerivesCanonicalTmuxParticipant(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("TMUX", "/tmp/tmux.sock,1,0")
+	t.Setenv("TMUX_PANE", "%9")
+	restore := swapRoomTmuxClientForTest(func() *tmuxbridge.Client {
+		return tmuxbridge.NewWithRunner(roomFakeRunner{responses: map[string]roomFakeResponse{
+			"tmux list-sessions": {stdout: "ok\n"},
+			"tmux display-message -t %9 -p " + roomListFormat(): {
+				stdout: "%9" + roomFieldSep() + "collab" + roomFieldSep() + "0" + roomFieldSep() + "1" + roomFieldSep() + "main" + roomFieldSep() + "111" + roomFieldSep() + "120" + roomFieldSep() + "30" + roomFieldSep() + "" + roomFieldSep() + "/repo" + roomFieldSep() + "zsh" + roomFieldSep() + "1\n",
+			},
+		}}, map[string]string{
+			"TMUX":      "/tmp/tmux.sock,1,0",
+			"TMUX_PANE": "%9",
+		})
+	})
+	defer restore()
+
+	ctx := context.Background()
+	workspace := t.TempDir()
+
+	cmd, _ := newRoomTestCommand(ctx)
+	if err := runRoomCreate(cmd, workspace, "alpha", "Alpha", "", nil); err != nil {
+		t.Fatalf("runRoomCreate: %v", err)
+	}
+
+	cmd, out := newRoomTestCommand(ctx)
+	if err := runRoomJoin(cmd, workspace, "alpha", "", "worker", true, true); err != nil {
+		t.Fatalf("runRoomJoin: %v", err)
+	}
+	data := decodeRoomEnvelope(t, out)
+	roomRaw, ok := data["room"].(map[string]any)
+	if !ok {
+		t.Fatalf("room type=%T", data["room"])
+	}
+	members, ok := roomRaw["members"].([]any)
+	if !ok || len(members) != 1 {
+		t.Fatalf("members=%v want 1", roomRaw["members"])
+	}
+	member, ok := members[0].(map[string]any)
+	if !ok {
+		t.Fatalf("member type=%T", members[0])
+	}
+	if got := member["actor_id"]; got != "tmux:collab:%9" {
+		t.Fatalf("actor_id=%v want tmux:collab:%%9", got)
+	}
+}
+
+func TestSameRoomParticipantRecognizesCanonicalIDs(t *testing.T) {
+	if !sameRoomParticipant("tmux:collab:%1", "tmux:collab:%1") {
+		t.Fatal("sameRoomParticipant false, want true for matching tmux ids")
+	}
+	if !sameRoomParticipant("zellij:alpha:terminal_3", "zellij:alpha:3") {
+		t.Fatal("sameRoomParticipant false, want true for matching zellij ids")
+	}
+	if sameRoomParticipant("codex-a", "tmux:collab:%1") {
+		t.Fatal("sameRoomParticipant true, want false for unrelated ids")
+	}
+}
+
 func newRoomTestCommand(ctx context.Context) (*cobra.Command, *bytes.Buffer) {
 	buf := &bytes.Buffer{}
 	cmd := &cobra.Command{}
@@ -207,4 +307,48 @@ func parseMembersForTest(raw ...string) []agent.RoomMember {
 		panic(err)
 	}
 	return members
+}
+
+func swapRoomTmuxClientForTest(fn func() *tmuxbridge.Client) func() {
+	prev := newRoomTmuxClient
+	newRoomTmuxClient = fn
+	return func() { newRoomTmuxClient = prev }
+}
+
+type roomFakeRunner struct {
+	responses map[string]roomFakeResponse
+}
+
+type roomFakeResponse struct {
+	stdout string
+	stderr string
+	err    error
+}
+
+func (f roomFakeRunner) Run(_ context.Context, name string, args ...string) (string, string, error) {
+	key := strings.TrimSpace(name + " " + strings.Join(args, " "))
+	resp, ok := f.responses[key]
+	if !ok {
+		return "", "", fmt.Errorf("unexpected command: %s", key)
+	}
+	return resp.stdout, resp.stderr, resp.err
+}
+
+func roomFieldSep() string {
+	return "\x1f"
+}
+
+func roomListFormat() string {
+	return "#{pane_id}" + roomFieldSep() +
+		"#{session_name}" + roomFieldSep() +
+		"#{window_index}" + roomFieldSep() +
+		"#{pane_index}" + roomFieldSep() +
+		"#{window_name}" + roomFieldSep() +
+		"#{pane_pid}" + roomFieldSep() +
+		"#{pane_width}" + roomFieldSep() +
+		"#{pane_height}" + roomFieldSep() +
+		"#{@name}" + roomFieldSep() +
+		"#{pane_current_path}" + roomFieldSep() +
+		"#{pane_current_command}" + roomFieldSep() +
+		"#{pane_active}"
 }

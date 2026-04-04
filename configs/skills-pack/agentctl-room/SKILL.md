@@ -35,7 +35,7 @@ Do not rely on scrollback as canonical history. The room log is canonical.
 agentctl room create alpha --title "Alpha Room"
 agentctl room join alpha agent-a --role lead
 agentctl room join alpha agent-b --role reviewer
-agentctl room send alpha "Review the retry path in client.ts" --sender agent-a
+agentctl room send alpha "Review the retry path in client.ts"
 agentctl room subscribe alpha --follow
 ```
 
@@ -43,14 +43,12 @@ agentctl room subscribe alpha --follow
 
 ```bash
 agentctl room task add alpha \
-  --sender agent-a \
   --title "Refactor retry path" \
   --description "Flatten duplicate recovery branches"
 
 agentctl room task list alpha
 
 agentctl room task complete alpha \
-  --sender agent-b \
   --id <task-id> \
   --notes "Retry helper extracted"
 ```
@@ -73,13 +71,15 @@ agentctl room relay alpha --backend zellij --session alpha-room
 agentctl room loop alpha --backend zellij --session alpha-room
 ```
 
-The zellij backend uses a local plugin and matches room member ids to zellij pane titles.
+The zellij backend uses a local plugin and matches room member ids to zellij pane titles or canonical pane ids.
 
 ## Conventions
 
-- Use stable actor ids like `agent-a`, `agent-b`, `reviewer`, `planner`.
-- In `tmux`, room member ids should match pane labels.
-- In `zellij`, room member ids should match pane titles.
+- Use stable actor ids like `agent-a`, `agent-b`, `reviewer`, `planner` when you want human-friendly names.
+- `room send` and `room task` derive the sender from the current tmux/zellij pane when possible.
+- `room join <room-id> --current` registers the current pane without hand-writing the id.
+- In `tmux`, room member ids can be pane labels or canonical ids like `tmux:<session>:%7`.
+- In `zellij`, room member ids can be pane titles or canonical ids like `zellij:<session>:terminal_3`.
 - The sender should also be a room member if you want them excluded from fanout.
 
 ## Typical pattern
@@ -97,10 +97,10 @@ agentctl room join review gemini-c --role observer
 agentctl room loop review --backend tmux
 
 # add shared work
-agentctl room task add review --sender codex-a --title "Audit retry ladder"
+agentctl room task add review --title "Audit retry ladder"
 
 # chat in the room
-agentctl room send review "Please check the 401 fallback branch." --sender codex-a
+agentctl room send review "Please check the 401 fallback branch."
 ```
 
 ## Limits / caveats

@@ -53,14 +53,13 @@ func newRoomTaskAddCommand() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&workspace, "workspace", ".", "Workspace root override")
-	cmd.Flags().StringVar(&sender, "sender", "", "Sender actor or pane label")
+	cmd.Flags().StringVar(&sender, "sender", "", "Sender actor or participant id (defaults to current tmux/zellij pane)")
 	cmd.Flags().StringVar(&title, "title", "", "Task title")
 	cmd.Flags().StringVar(&desc, "description", "", "Task description")
 	cmd.Flags().StringVar(&scopePath, "scope", "", "Scope path for the task")
 	cmd.Flags().StringVar(&parentID, "parent", "", "Parent task id")
 	cmd.Flags().StringSliceVar(&dependsOn, "depends-on", nil, "Dependency task ids")
 	cmd.Flags().BoolVar(&autoCreate, "create-room", true, "Create the room if it does not exist")
-	_ = cmd.MarkFlagRequired("sender")
 	_ = cmd.MarkFlagRequired("title")
 	return cmd
 }
@@ -100,11 +99,10 @@ func newRoomTaskCompleteCommand() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&workspace, "workspace", ".", "Workspace root override")
-	cmd.Flags().StringVar(&sender, "sender", "", "Sender actor or pane label")
+	cmd.Flags().StringVar(&sender, "sender", "", "Sender actor or participant id (defaults to current tmux/zellij pane)")
 	cmd.Flags().StringVar(&taskID, "id", "", "Task id to complete")
 	cmd.Flags().StringVar(&notes, "notes", "", "Completion notes")
 	cmd.Flags().StringVar(&gotchas, "gotchas", "", "Completion gotchas")
-	_ = cmd.MarkFlagRequired("sender")
 	_ = cmd.MarkFlagRequired("id")
 	return cmd
 }
@@ -146,6 +144,12 @@ func runRoomTaskAdd(cmd *cobra.Command, workspace, roomID, sender, title, desc, 
 	if err != nil {
 		return err
 	}
+	identity, err := resolveRoomSender(cmd.Context(), sender)
+	if err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.task.add", protocol.ErrorCodeEARG, err.Error(), map[string]any{
+			"hint": "Pass --sender when outside tmux/zellij, or run inside a prepared pane so agentctl can derive the participant id.",
+		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
 	taskWorkspaceID := ws.CanonicalID(absWorkspace)
 	boardStore, err := openRoomBoardStore(cmd.Context())
 	if err != nil {
@@ -179,7 +183,7 @@ func runRoomTaskAdd(cmd *cobra.Command, workspace, roomID, sender, title, desc, 
 		WorkspaceID: absWorkspace,
 		TaskID:      task.ID,
 		Stream:      agent.RoomStreamName(strings.TrimSpace(roomID)),
-		Sender:      strings.TrimSpace(sender),
+		Sender:      identity.Sender,
 		Recipient:   agent.BroadcastRecipient,
 		Kind:        agent.BoardMessageKindTaskUpdate,
 		Priority:    agent.DefaultPriority,
@@ -190,9 +194,10 @@ func runRoomTaskAdd(cmd *cobra.Command, workspace, roomID, sender, title, desc, 
 		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.task.add", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
 	}
 	return protocol.WriteOK(cmd.OutOrStdout(), "agentctl.room.task.add", map[string]any{
-		"room_id":    strings.TrimSpace(roomID),
-		"task":       task,
-		"message_id": msg.ID,
+		"room_id":         strings.TrimSpace(roomID),
+		"task":            task,
+		"message_id":      msg.ID,
+		"sender_identity": identity,
 	}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
 }
 
@@ -239,6 +244,12 @@ func runRoomTaskComplete(cmd *cobra.Command, workspace, roomID, sender, taskID, 
 	if err != nil {
 		return err
 	}
+	identity, err := resolveRoomSender(cmd.Context(), sender)
+	if err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.task.complete", protocol.ErrorCodeEARG, err.Error(), map[string]any{
+			"hint": "Pass --sender when outside tmux/zellij, or run inside a prepared pane so agentctl can derive the participant id.",
+		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
 	taskWorkspaceID := ws.CanonicalID(absWorkspace)
 	taskStore, err := openRoomTaskStore(cmd.Context())
 	if err != nil {
@@ -276,7 +287,7 @@ func runRoomTaskComplete(cmd *cobra.Command, workspace, roomID, sender, taskID, 
 		WorkspaceID: absWorkspace,
 		TaskID:      task.ID,
 		Stream:      agent.RoomStreamName(strings.TrimSpace(roomID)),
-		Sender:      strings.TrimSpace(sender),
+		Sender:      identity.Sender,
 		Recipient:   agent.BroadcastRecipient,
 		Kind:        agent.BoardMessageKindTaskUpdate,
 		Priority:    agent.DefaultPriority,
@@ -287,9 +298,10 @@ func runRoomTaskComplete(cmd *cobra.Command, workspace, roomID, sender, taskID, 
 		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.task.complete", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
 	}
 	return protocol.WriteOK(cmd.OutOrStdout(), "agentctl.room.task.complete", map[string]any{
-		"room_id":    strings.TrimSpace(roomID),
-		"task":       task,
-		"message_id": msg.ID,
+		"room_id":         strings.TrimSpace(roomID),
+		"task":            task,
+		"message_id":      msg.ID,
+		"sender_identity": identity,
 	}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
 }
 

@@ -72,8 +72,8 @@ Use a durable shared room when more than two agents need the same timeline:
 agentctl room create alpha --title "Alpha Room"
 agentctl room join alpha agent-a --role lead
 agentctl room join alpha agent-b --role reviewer
-agentctl room send alpha "Review the retry path in client.ts" --sender agent-a
-agentctl room task add alpha --sender agent-a --title "Refactor retry path"
+agentctl room send alpha "Review the retry path in client.ts"
+agentctl room task add alpha --title "Refactor retry path"
 agentctl room loop alpha --backend tmux
 ```
 
@@ -121,19 +121,24 @@ Use `agentctl tmux send` for standard agent-to-agent messages. Use `type` and `k
 
 ```bash
 agentctl room create <room-id> --title "..."
-agentctl room join <room-id> <actor-id> --role lead
+agentctl room join <room-id> --current --role lead
 agentctl room subscribe <room-id> --follow
 agentctl room relay <room-id> --backend tmux
 agentctl room relay <room-id> --backend zellij --session <session-name>
 agentctl room loop <room-id> --backend tmux
-agentctl room task add <room-id> --sender <actor-id> --title "..."
+agentctl room task add <room-id> --title "..."
 agentctl room task list <room-id>
-agentctl room task complete <room-id> --sender <actor-id> --id <task-id>
+agentctl room task complete <room-id> --id <task-id>
 ```
 
 Use `room relay` for pure room-message fanout.
 Use `room loop` when you also want room-associated task status transitions to be
 broadcast back into the room and then relayed to participants.
+
+Room commands derive the sender from the current tmux pane label when possible,
+with canonical fallbacks like `tmux:<session>:%7` or
+`zellij:<session>:terminal_3`. Use `--sender` only when overriding or when
+running outside a mux session.
 
 ## Message Format
 

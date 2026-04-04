@@ -109,7 +109,7 @@ func collectRoomRelayTargets(room agent.RoomSummary, sender string) ([]string, [
 		if target == "" {
 			continue
 		}
-		if target == sender {
+		if sameRoomParticipant(target, sender) {
 			skipped = append(skipped, target)
 			continue
 		}

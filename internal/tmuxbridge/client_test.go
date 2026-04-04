@@ -489,6 +489,61 @@ func TestSendRequiresSenderOutsideTmux(t *testing.T) {
 	}
 }
 
+func TestCurrentParticipantIDPrefersLabel(t *testing.T) {
+	client := NewWithRunner(fakeRunner{
+		responses: map[string]fakeResponse{
+			"tmux list-sessions": {stdout: "ok\n"},
+			"tmux display-message -t %7 -p " + listFormat: {
+				stdout: "%7" + fieldSep + "collab" + fieldSep + "0" + fieldSep + "0" + fieldSep + "main" + fieldSep + "111" + fieldSep + "120" + fieldSep + "30" + fieldSep + "codex-a" + fieldSep + "/repo" + fieldSep + "zsh" + fieldSep + "1\n",
+			},
+		},
+	}, map[string]string{
+		"TMUX":      "/tmp/tmux.sock,1,0",
+		"TMUX_PANE": "%7",
+	})
+	got, pane, err := client.CurrentParticipantID(context.Background())
+	if err != nil {
+		t.Fatalf("CurrentParticipantID() error = %v", err)
+	}
+	if got != "codex-a" {
+		t.Fatalf("CurrentParticipantID() = %q, want codex-a", got)
+	}
+	if pane.ID != "%7" {
+		t.Fatalf("pane.ID = %q, want %%7", pane.ID)
+	}
+}
+
+func TestCurrentParticipantIDFallsBackToCanonical(t *testing.T) {
+	client := NewWithRunner(fakeRunner{
+		responses: map[string]fakeResponse{
+			"tmux list-sessions": {stdout: "ok\n"},
+			"tmux display-message -t %9 -p " + listFormat: {
+				stdout: "%9" + fieldSep + "collab" + fieldSep + "0" + fieldSep + "1" + fieldSep + "main" + fieldSep + "111" + fieldSep + "120" + fieldSep + "30" + fieldSep + "" + fieldSep + "/repo" + fieldSep + "zsh" + fieldSep + "1\n",
+			},
+		},
+	}, map[string]string{
+		"TMUX":      "/tmp/tmux.sock,1,0",
+		"TMUX_PANE": "%9",
+	})
+	got, _, err := client.CurrentParticipantID(context.Background())
+	if err != nil {
+		t.Fatalf("CurrentParticipantID() error = %v", err)
+	}
+	if got != "tmux:collab:%9" {
+		t.Fatalf("CurrentParticipantID() = %q, want tmux:collab:%%9", got)
+	}
+}
+
+func TestParseParticipantID(t *testing.T) {
+	got, ok := ParseParticipantID("tmux:collab:%7")
+	if !ok {
+		t.Fatal("ParseParticipantID() ok = false, want true")
+	}
+	if got.Session != "collab" || got.Target != "%7" {
+		t.Fatalf("ParseParticipantID() = %+v, want collab/%%7", got)
+	}
+}
+
 type fakeRunner struct {
 	responses map[string]fakeResponse
 }

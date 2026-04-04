@@ -140,8 +140,8 @@ Use rooms when the shared state should outlive pane scrollback:
 agentctl room create alpha --title "Alpha Room"
 agentctl room join alpha agent-a --role lead
 agentctl room join alpha agent-b --role reviewer
-agentctl room send alpha "Review mailbox retries." --sender agent-a
-agentctl room task add alpha --sender agent-a --title "Refactor mailbox retries"
+agentctl room send alpha "Review mailbox retries."
+agentctl room task add alpha --title "Refactor mailbox retries"
 agentctl room subscribe alpha --follow
 ```
 
@@ -171,6 +171,10 @@ The bundled script is optional for lower-level pane control:
 - it resolves the sender pane from the current tmux pane or `--sender`
 - it prepends the stable `[tmux-bridge from=...]` header
 - it presses Enter for you
+
+`agentctl room ...` now follows the same identity rule: derive the current pane
+participant first, then fall back to canonical ids like `tmux:<session>:%7` or
+`zellij:<session>:terminal_3` when no human-friendly pane name is present.
 
 Use `type` plus `keys` only when you intentionally need manual control, such as interacting with a non-agent prompt.
 

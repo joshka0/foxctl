@@ -148,9 +148,9 @@ are independent of tmux and can be used from any terminal, including zellij.
 agentctl room create alpha --title "Agent Alpha"
 agentctl room join alpha agent-a --role lead
 agentctl room join alpha agent-b --role reviewer
-agentctl room send alpha "Review the retry branch in client.ts" --sender agent-a
-agentctl room task add alpha --sender agent-a --title "Refactor retry path"
-agentctl room task complete alpha --sender agent-b --id <task-id> --notes "Retry ladder flattened"
+agentctl room send alpha "Review the retry branch in client.ts"
+agentctl room task add alpha --title "Refactor retry path"
+agentctl room task complete alpha --id <task-id> --notes "Retry ladder flattened"
 agentctl room show alpha
 agentctl room subscribe alpha --follow
 agentctl room relay alpha --backend tmux
@@ -172,14 +172,12 @@ Rooms can now carry shared task state on top of the existing task store:
 
 ```bash
 agentctl room task add alpha \
-  --sender agent-a \
   --title "Refactor retry path" \
   --description "Flatten duplicate recovery blocks in client.ts"
 
 agentctl room task list alpha
 
 agentctl room task complete alpha \
-  --sender agent-b \
   --id <task-id> \
   --notes "Retry helper extracted"
 ```
@@ -209,6 +207,21 @@ scrollback the source of truth.
 Use `join` when a pane or agent should be a room recipient for relay. Use
 `subscribe` when a human or agent just wants to watch the room timeline.
 
+Inside tmux, room commands derive the sender from the current pane label. If the
+pane has no label, `agentctl` falls back to a canonical id like
+`tmux:<session>:%7`.
+
+Inside zellij, room commands derive the sender from
+`AGENTCTL_ZELLIJ_PARTICIPANT` when present, otherwise they fall back to a
+canonical id like `zellij:<session>:terminal_3` using
+`ZELLIJ_SESSION_NAME` and `ZELLIJ_PANE_ID`.
+
+So:
+
+- `--sender` is the override path, not the default path
+- `room join <room-id> --current` registers the current pane as a room member
+- relay accepts both human-friendly pane names and canonical pane ids
+
 ### Zellij
 
 `room subscribe` works in zellij because it only tails the durable room log.
@@ -221,7 +234,7 @@ agentctl room loop alpha --backend zellij --session alpha-room
 ```
 
 The zellij backend uses a session-local plugin that maps room member ids to pane
-titles and writes messages into those panes. The first run needs a zellij
+titles or canonical pane ids and writes messages into those panes. The first run needs a zellij
 permission grant for:
 
 - `ReadApplicationState`

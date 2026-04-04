@@ -195,10 +195,30 @@ fn find_terminal_pane_by_title(pane_manifest: &PaneManifest, title: &str) -> Opt
             if pane.is_plugin {
                 continue;
             }
+            if pane_target_matches(&target_key(title), pane.id) {
+                return Some(PaneId::Terminal(pane.id));
+            }
             if pane.title == title {
                 return Some(PaneId::Terminal(pane.id));
             }
         }
     }
     None
+}
+
+fn target_key(target: &str) -> String {
+    target.trim().to_string()
+}
+
+fn pane_target_matches(target: &str, pane_id: u32) -> bool {
+    let terminal = format!("terminal_{pane_id}");
+    if target == terminal || target == pane_id.to_string() {
+        return true;
+    }
+    if let Some(rest) = target.strip_prefix("zellij:") {
+        if let Some((_, pane_part)) = rest.split_once(':') {
+            return pane_part == terminal || pane_part == pane_id.to_string();
+        }
+    }
+    false
 }

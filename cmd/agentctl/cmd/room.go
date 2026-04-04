@@ -121,14 +121,13 @@ func newRoomSendCommand() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&workspace, "workspace", ".", "Workspace root override")
-	cmd.Flags().StringVar(&sender, "sender", "", "Sender actor or pane label")
+	cmd.Flags().StringVar(&sender, "sender", "", "Sender actor or participant id (defaults to current tmux/zellij pane)")
 	cmd.Flags().StringVar(&subject, "subject", "", "Optional subject line")
 	cmd.Flags().StringVar(&kind, "kind", string(agent.BoardMessageKindInfo), "Message kind (info|instruction|alert|review_request)")
 	cmd.Flags().StringVar(&taskID, "task-id", "", "Optional task id")
 	cmd.Flags().IntVar(&priority, "priority", agent.DefaultPriority, "Priority from 1 (highest) to 5 (lowest)")
 	cmd.Flags().BoolVar(&ackRequired, "ack-required", false, "Require explicit acknowledgment")
 	cmd.Flags().BoolVar(&autoCreate, "auto-create", true, "Create the room if it does not exist")
-	_ = cmd.MarkFlagRequired("sender")
 	return cmd
 }
 
@@ -137,18 +136,24 @@ func newRoomJoinCommand() *cobra.Command {
 		workspace string
 		role      string
 		create    bool
+		current   bool
 	)
 	cmd := &cobra.Command{
-		Use:   "join <room-id> <actor-id>",
+		Use:   "join <room-id> [actor-id]",
 		Short: "Add or update a room member",
-		Args:  cobra.ExactArgs(2),
+		Args:  cobra.RangeArgs(1, 2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runRoomJoin(cmd, workspace, args[0], args[1], role, create)
+			actorID := ""
+			if len(args) > 1 {
+				actorID = args[1]
+			}
+			return runRoomJoin(cmd, workspace, args[0], actorID, role, create, current)
 		},
 	}
 	cmd.Flags().StringVar(&workspace, "workspace", ".", "Workspace root override")
 	cmd.Flags().StringVar(&role, "role", "", "Optional member role")
 	cmd.Flags().BoolVar(&create, "create", true, "Create the room if it does not exist")
+	cmd.Flags().BoolVar(&current, "current", false, "Join the current tmux/zellij participant when actor-id is omitted")
 	return cmd
 }
 
@@ -312,6 +317,12 @@ func runRoomSend(cmd *cobra.Command, workspace, roomID, sender, subject, body, k
 	if err != nil {
 		return err
 	}
+	identity, err := resolveRoomSender(cmd.Context(), sender)
+	if err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.send", protocol.ErrorCodeEARG, err.Error(), map[string]any{
+			"hint": "Pass --sender when outside tmux/zellij, or run inside a prepared pane so agentctl can derive the participant id.",
+		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
 	store, err := openRoomBoardStore(cmd.Context())
 	if err != nil {
 		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.send", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
@@ -334,7 +345,7 @@ func runRoomSend(cmd *cobra.Command, workspace, roomID, sender, subject, body, k
 		WorkspaceID: absWorkspace,
 		TaskID:      strings.TrimSpace(taskID),
 		Stream:      agent.RoomStreamName(roomID),
-		Sender:      strings.TrimSpace(sender),
+		Sender:      identity.Sender,
 		Recipient:   agent.BroadcastRecipient,
 		Kind:        agent.BoardMessageKind(strings.TrimSpace(kind)),
 		Priority:    priority,
@@ -352,17 +363,27 @@ func runRoomSend(cmd *cobra.Command, workspace, roomID, sender, subject, body, k
 		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.send", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
 	}
 	return protocol.WriteOK(cmd.OutOrStdout(), "agentctl.room.send", map[string]any{
-		"room_id":    roomID,
-		"stream":     msg.Stream,
-		"message_id": msg.ID,
-		"message":    msg,
+		"room_id":         roomID,
+		"stream":          msg.Stream,
+		"message_id":      msg.ID,
+		"message":         msg,
+		"sender_identity": identity,
 	}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
 }
 
-func runRoomJoin(cmd *cobra.Command, workspace, roomID, actorID, role string, create bool) error {
+func runRoomJoin(cmd *cobra.Command, workspace, roomID, actorID, role string, create, current bool) error {
 	absWorkspace, err := resolveRoomWorkspace(workspace)
 	if err != nil {
 		return err
+	}
+	if current || strings.TrimSpace(actorID) == "" {
+		identity, resolveErr := resolveRoomSender(cmd.Context(), actorID)
+		if resolveErr != nil {
+			return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.join", protocol.ErrorCodeEARG, resolveErr.Error(), map[string]any{
+				"hint": "Pass an explicit actor id, or run inside tmux/zellij with --current so agentctl can derive the participant id.",
+			}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+		}
+		actorID = identity.Sender
 	}
 	store, err := openRoomBoardStore(cmd.Context())
 	if err != nil {
@@ -755,7 +776,7 @@ func relayRoomMessageTmux(ctx context.Context, client *tmuxbridge.Client, room a
 		if target == "" {
 			continue
 		}
-		if target == sender {
+		if sameRoomParticipant(target, sender) {
 			result.SkippedMembers = append(result.SkippedMembers, target)
 			continue
 		}
@@ -802,4 +823,26 @@ func roomMaxInt(a, b int) int {
 		return a
 	}
 	return b
+}
+
+func sameRoomParticipant(a, b string) bool {
+	a = strings.TrimSpace(a)
+	b = strings.TrimSpace(b)
+	if a == "" || b == "" {
+		return false
+	}
+	if a == b {
+		return true
+	}
+	if aRef, ok := tmuxbridge.ParseParticipantID(a); ok {
+		if bRef, ok := tmuxbridge.ParseParticipantID(b); ok {
+			return aRef.Session == bRef.Session && aRef.Target == bRef.Target
+		}
+	}
+	if aSession, aPaneID, ok := parseZellijParticipantID(a); ok {
+		if bSession, bPaneID, ok := parseZellijParticipantID(b); ok {
+			return aSession == bSession && aPaneID == bPaneID
+		}
+	}
+	return false
 }

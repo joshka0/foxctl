@@ -144,6 +144,11 @@ type Client struct {
 	env    map[string]string
 }
 
+type ParticipantRef struct {
+	Session string
+	Target  string
+}
+
 type preparePlan struct {
 	session        string
 	panes          int
@@ -190,6 +195,9 @@ func (c *Client) ResolveTarget(ctx context.Context, target string) (string, erro
 	target = normalizeTarget(target)
 	if target == "" {
 		return "", fmt.Errorf("target is required")
+	}
+	if ref, ok := ParseParticipantID(target); ok {
+		target = ref.Target
 	}
 	if isDirectTarget(target) {
 		if err := c.validateTarget(ctx, target); err != nil {
@@ -543,6 +551,9 @@ func (c *Client) resolveSenderPane(ctx context.Context, sender string) (Pane, er
 		explicit = strings.TrimSpace(c.env["TMUX_BRIDGE_SENDER"])
 	}
 	if explicit != "" {
+		if ref, ok := ParseParticipantID(explicit); ok {
+			return c.describePane(ctx, ref.Target)
+		}
 		resolved, err := c.ResolveTarget(ctx, explicit)
 		if err != nil {
 			return Pane{}, fmt.Errorf("resolve sender %q: %w", explicit, err)
@@ -555,6 +566,47 @@ func (c *Client) resolveSenderPane(ctx context.Context, sender string) (Pane, er
 		return Pane{}, fmt.Errorf("sender is required when not running inside tmux; pass --sender <pane-label>")
 	}
 	return c.describePane(ctx, currentPane)
+}
+
+// CurrentPane returns metadata for the current pane when running inside tmux.
+func (c *Client) CurrentPane(ctx context.Context) (Pane, error) {
+	return c.resolveSenderPane(ctx, "")
+}
+
+// CurrentParticipantID returns a stable tmux participant identifier for the current pane.
+// If the pane has a label, the label is preferred for human-friendly routing.
+// Otherwise a canonical tmux:<session>:<pane> identifier is returned.
+func (c *Client) CurrentParticipantID(ctx context.Context) (string, Pane, error) {
+	pane, err := c.CurrentPane(ctx)
+	if err != nil {
+		return "", Pane{}, err
+	}
+	if label := strings.TrimSpace(pane.Label); label != "" {
+		return label, pane, nil
+	}
+	return formatTmuxParticipantID(pane.Session, pane.ID), pane, nil
+}
+
+func formatTmuxParticipantID(session, paneID string) string {
+	return "tmux:" + strings.TrimSpace(session) + ":" + strings.TrimSpace(paneID)
+}
+
+// ParseParticipantID parses a canonical tmux participant identifier.
+func ParseParticipantID(value string) (ParticipantRef, bool) {
+	value = strings.TrimSpace(value)
+	if !strings.HasPrefix(value, "tmux:") {
+		return ParticipantRef{}, false
+	}
+	parts := strings.SplitN(value, ":", 3)
+	if len(parts) != 3 {
+		return ParticipantRef{}, false
+	}
+	session := strings.TrimSpace(parts[1])
+	target := strings.TrimSpace(parts[2])
+	if session == "" || target == "" {
+		return ParticipantRef{}, false
+	}
+	return ParticipantRef{Session: session, Target: target}, true
 }
 
 func (c *Client) runTmux(ctx context.Context, args ...string) (string, error) {
