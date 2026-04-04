@@ -77,6 +77,20 @@ agentctl tmux create --session droid-collab \
   --attach
 ```
 
+For known autonomous mappings, use `--mode auto` instead of hand-writing the
+provider flag:
+
+```bash
+agentctl tmux create --session codex-auto --panes 2 --agent codex --mode auto --attach
+agentctl tmux create --session claude-auto --panes 2 --agent claude --mode auto --attach
+agentctl tmux create --session gemini-auto --panes 2 --agent gemini --mode auto --attach
+agentctl tmux create --session cursor-auto --panes 2 --agent agent --mode auto --attach
+```
+
+This changes autonomy/approval flags only. It does not inject `--model`; the
+provider CLI keeps its current configured default model unless you explicitly
+override it with repeated `--agent-arg` values.
+
 `--agent-arg` is repeatable and preserves order, so it works with each CLI’s own flags instead of forcing one shared option schema.
 For Cursor CLI (`agent`) and Droid (`droid`), you can also switch models from inside the session using their own slash commands such as `/model`.
 

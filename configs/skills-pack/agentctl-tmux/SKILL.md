@@ -46,6 +46,26 @@ Send a message natively:
 agentctl tmux send agent-b "Review internal/actor/supervisor.go for mailbox ack risks."
 ```
 
+For autonomous panes, prefer `--mode auto`:
+
+```bash
+agentctl tmux create --session codex-auto --panes 2 --agent codex --mode auto --attach
+agentctl tmux create --session claude-auto --panes 2 --agent claude --mode auto --attach
+agentctl tmux create --session gemini-auto --panes 2 --agent gemini --mode auto --attach
+agentctl tmux create --session cursor-auto --panes 2 --agent agent --mode auto --attach
+```
+
+Current auto mappings:
+
+- `codex` -> `--full-auto`
+- `claude` -> `--dangerously-skip-permissions`
+- `gemini` -> `--yolo`
+- `agent` -> `--yolo`
+
+`agentctl` does not force `--model` by default. The provider CLI keeps its own
+current default model unless you explicitly pass repeated `--agent-arg`
+overrides.
+
 Use a durable shared room when more than two agents need the same timeline:
 
 ```bash

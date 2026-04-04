@@ -61,7 +61,7 @@ func TestResolveTargetByLabel(t *testing.T) {
 func TestResolveTargetDirectTarget(t *testing.T) {
 	client := NewWithRunner(fakeRunner{
 		responses: map[string]fakeResponse{
-			"tmux list-sessions": {stdout: "ok\n"},
+			"tmux list-sessions":                       {stdout: "ok\n"},
 			"tmux display-message -t %7 -p #{pane_id}": {stdout: "%7\n"},
 		},
 	}, map[string]string{})
@@ -162,7 +162,7 @@ func TestShellQuoteArgs(t *testing.T) {
 }
 
 func TestBuildAgentPaneCommandResume(t *testing.T) {
-	codexCmd, err := buildAgentPaneCommand("codex", []string{"--model", "gpt-5"}, "session-123")
+	codexCmd, err := buildAgentPaneCommand("codex", "interactive", []string{"--model", "gpt-5"}, "session-123")
 	if err != nil {
 		t.Fatalf("buildAgentPaneCommand(codex) error = %v", err)
 	}
@@ -170,7 +170,7 @@ func TestBuildAgentPaneCommandResume(t *testing.T) {
 		t.Fatalf("codex resume command = %q", codexCmd)
 	}
 
-	claudeCmd, err := buildAgentPaneCommand("claude", []string{"--model", "sonnet"}, "session-abc")
+	claudeCmd, err := buildAgentPaneCommand("claude", "interactive", []string{"--model", "sonnet"}, "session-abc")
 	if err != nil {
 		t.Fatalf("buildAgentPaneCommand(claude) error = %v", err)
 	}
@@ -266,6 +266,58 @@ func TestNormalizePrepareOptionsAgentDefaultsLabelPrefix(t *testing.T) {
 	}
 }
 
+func TestNormalizePrepareOptionsAgentModeAuto(t *testing.T) {
+	got, err := normalizePrepareOptions(PrepareOptions{
+		Panes:     1,
+		Agent:     "claude",
+		AgentMode: "auto",
+	})
+	if err != nil {
+		t.Fatalf("normalizePrepareOptions() error = %v", err)
+	}
+	if got.agentMode != "auto" {
+		t.Fatalf("agentMode = %q, want auto", got.agentMode)
+	}
+	if !strings.Contains(got.paneCommand, "--dangerously-skip-permissions") {
+		t.Fatalf("paneCommand = %q, want auto-mode flag", got.paneCommand)
+	}
+}
+
+func TestBuildAgentPaneCommandAutoMappings(t *testing.T) {
+	tests := []struct {
+		name     string
+		agent    string
+		mode     string
+		wantFrag string
+	}{
+		{name: "codex", agent: "codex", mode: "auto", wantFrag: "--full-auto"},
+		{name: "claude", agent: "claude", mode: "auto", wantFrag: "--dangerously-skip-permissions"},
+		{name: "gemini", agent: "gemini", mode: "auto", wantFrag: "--yolo"},
+		{name: "cursor-agent", agent: "agent", mode: "auto", wantFrag: "--yolo"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := buildAgentPaneCommand(tt.agent, tt.mode, nil, "")
+			if err != nil {
+				t.Fatalf("buildAgentPaneCommand() error = %v", err)
+			}
+			if !strings.Contains(got, tt.wantFrag) {
+				t.Fatalf("buildAgentPaneCommand() = %q, want fragment %q", got, tt.wantFrag)
+			}
+		})
+	}
+}
+
+func TestBuildAgentPaneCommandAutoRejectsUnknownAgent(t *testing.T) {
+	_, err := buildAgentPaneCommand("droid", "auto", nil, "")
+	if err == nil {
+		t.Fatal("buildAgentPaneCommand() error = nil, want error")
+	}
+	if !strings.Contains(err.Error(), "not mapped") {
+		t.Fatalf("buildAgentPaneCommand() error = %v, want not mapped", err)
+	}
+}
+
 func TestNormalizePrepareOptionsRejectsInvalidCombinations(t *testing.T) {
 	tests := []struct {
 		name string
@@ -286,6 +338,11 @@ func TestNormalizePrepareOptionsRejectsInvalidCombinations(t *testing.T) {
 			name: "agent session requires single pane",
 			opts: PrepareOptions{Panes: 2, Agent: "claude", AgentSessionID: "abc"},
 			want: "agent_session_id currently requires panes=1",
+		},
+		{
+			name: "unsupported agent mode",
+			opts: PrepareOptions{Panes: 1, Agent: "codex", AgentMode: "turbo"},
+			want: "unsupported agent mode",
 		},
 	}
 
@@ -349,9 +406,9 @@ func TestDoctorSummarizesReachableSocket(t *testing.T) {
 	client := NewWithRunner(fakeRunner{
 		responses: map[string]fakeResponse{
 			"tmux -V": {stdout: "tmux 3.4\n"},
-			fmt.Sprintf("tmux -S %s list-sessions", socket): {stdout: "ok\n"},
+			fmt.Sprintf("tmux -S %s list-sessions", socket):                        {stdout: "ok\n"},
 			fmt.Sprintf("tmux -S %s display-message -t %%7 -p #{pane_id}", socket): {stdout: "%7\n"},
-			fmt.Sprintf("tmux -S %s list-panes -a -F %s", socket, listFormat): {stdout: paneList},
+			fmt.Sprintf("tmux -S %s list-panes -a -F %s", socket, listFormat):      {stdout: paneList},
 			"tmux list-sessions": {stderr: "failed to connect", err: fmt.Errorf("exit status 1")},
 		},
 	}, map[string]string{

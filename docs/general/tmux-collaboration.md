@@ -72,6 +72,29 @@ agentctl tmux create --session droid-collab --panes 3 \
   --attach
 ```
 
+By default, `agentctl` does not inject `--model`. The provider CLI keeps its
+current configured default model unless you explicitly add `--agent-arg=--model`
+and a value.
+
+For provider-specific autonomous launches, prefer `--mode auto` over manually
+remembering the raw permission flags:
+
+```bash
+agentctl tmux create --session codex-auto --panes 2 --agent codex --mode auto --attach
+agentctl tmux create --session claude-auto --panes 2 --agent claude --mode auto --attach
+agentctl tmux create --session gemini-auto --panes 2 --agent gemini --mode auto --attach
+agentctl tmux create --session cursor-auto --panes 2 --agent agent --mode auto --attach
+```
+
+Current `--mode auto` mappings:
+
+- `codex` -> `--full-auto`
+- `claude` -> `--dangerously-skip-permissions`
+- `gemini` -> `--yolo`
+- `agent` *(Cursor CLI)* -> `--yolo`
+
+Agents without a known safe mapping still require explicit `--agent-arg` values.
+
 For Cursor CLI (`agent`) and Droid (`droid`), model selection can happen inside the interactive session with their native slash commands such as `/model`.
 
 This keeps `agentctl` neutral while still letting each CLI use its own option surface.

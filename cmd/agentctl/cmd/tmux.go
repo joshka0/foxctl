@@ -97,6 +97,7 @@ func newTmuxCreateCommand() *cobra.Command {
 		panes          int
 		paneCommand    string
 		agent          string
+		agentMode      string
 		agentArgs      []string
 		agentSessionID string
 		cwd            string
@@ -125,6 +126,7 @@ func newTmuxCreateCommand() *cobra.Command {
 				Panes:          panes,
 				PaneCommand:    paneCommand,
 				Agent:          agent,
+				AgentMode:      agentMode,
 				AgentArgs:      append([]string(nil), agentArgs...),
 				AgentSessionID: agentSessionID,
 				CWD:            cwd,
@@ -132,7 +134,7 @@ func newTmuxCreateCommand() *cobra.Command {
 			})
 			if err != nil {
 				return protocol.WriteError(cmd.OutOrStdout(), "agentctl.tmux.create", protocol.ErrorCodeERuntime, err.Error(), map[string]any{
-					"hint": "Ensure tmux is installed and the target socket is writable. Use --agent plus repeated --agent-arg values for claude/codex/gemini/agent/droid, and use --agent-session-id for codex/claude resume launches.",
+					"hint": "Ensure tmux is installed and the target socket is writable. Use --agent plus repeated --agent-arg values, --mode auto for known autonomous mappings, and --agent-session-id for codex/claude resume launches.",
 				}, protocol.WithSource("cli"))
 			}
 			if attach {
@@ -161,6 +163,7 @@ func newTmuxCreateCommand() *cobra.Command {
 	cmd.Flags().IntVar(&panes, "panes", 3, "Number of panes to prepare")
 	cmd.Flags().StringVar(&paneCommand, "pane-command", "", "Command to launch in each pane (default: current shell)")
 	cmd.Flags().StringVar(&agent, "agent", "", "Agent CLI to launch in each pane (for example: claude, codex, gemini, agent, droid)")
+	cmd.Flags().StringVar(&agentMode, "mode", "interactive", "Agent launch mode: interactive or auto")
 	cmd.Flags().StringArrayVar(&agentArgs, "agent-arg", nil, "Agent CLI argument (repeatable, preserves order)")
 	cmd.Flags().StringVar(&agentSessionID, "agent-session-id", "", "Resume the given agent session id (supported for codex and claude; currently requires --panes 1)")
 	cmd.Flags().StringVar(&cwd, "cwd", "", "Working directory for new panes (default: current directory)")

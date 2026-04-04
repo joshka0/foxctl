@@ -96,6 +96,7 @@ type PrepareOptions struct {
 	Panes          int      `json:"panes"`
 	PaneCommand    string   `json:"pane_command,omitempty"`
 	Agent          string   `json:"agent,omitempty"`
+	AgentMode      string   `json:"agent_mode,omitempty"`
 	AgentArgs      []string `json:"agent_args,omitempty"`
 	AgentSessionID string   `json:"agent_session_id,omitempty"`
 	CWD            string   `json:"cwd,omitempty"`
@@ -109,6 +110,7 @@ type PrepareResult struct {
 	PanesRequested int      `json:"panes_requested"`
 	PaneCommand    string   `json:"pane_command,omitempty"`
 	Agent          string   `json:"agent,omitempty"`
+	AgentMode      string   `json:"agent_mode,omitempty"`
 	AgentArgs      []string `json:"agent_args,omitempty"`
 	AgentSessionID string   `json:"agent_session_id,omitempty"`
 	CWD            string   `json:"cwd,omitempty"`
@@ -147,6 +149,7 @@ type preparePlan struct {
 	panes          int
 	paneCommand    string
 	agent          string
+	agentMode      string
 	agentArgs      []string
 	agentSessionID string
 	cwd            string
@@ -464,6 +467,7 @@ func (c *Client) PrepareSession(ctx context.Context, opts PrepareOptions) (Prepa
 		PanesRequested: plan.panes,
 		PaneCommand:    plan.paneCommand,
 		Agent:          plan.agent,
+		AgentMode:      plan.agentMode,
 		AgentArgs:      append([]string(nil), plan.agentArgs...),
 		AgentSessionID: plan.agentSessionID,
 		CWD:            plan.cwd,
@@ -888,6 +892,7 @@ func normalizePrepareOptions(opts PrepareOptions) (preparePlan, error) {
 		panes:          opts.Panes,
 		paneCommand:    strings.TrimSpace(opts.PaneCommand),
 		agent:          strings.TrimSpace(opts.Agent),
+		agentMode:      normalizeAgentMode(opts.AgentMode),
 		agentArgs:      append([]string(nil), opts.AgentArgs...),
 		agentSessionID: strings.TrimSpace(opts.AgentSessionID),
 		cwd:            strings.TrimSpace(opts.CWD),
@@ -908,7 +913,7 @@ func normalizePrepareOptions(opts PrepareOptions) (preparePlan, error) {
 	}
 
 	if plan.agent != "" {
-		paneCommand, err := buildAgentPaneCommand(plan.agent, plan.agentArgs, plan.agentSessionID)
+		paneCommand, err := buildAgentPaneCommand(plan.agent, plan.agentMode, plan.agentArgs, plan.agentSessionID)
 		if err != nil {
 			return preparePlan{}, err
 		}
@@ -927,7 +932,19 @@ func normalizePrepareOptions(opts PrepareOptions) (preparePlan, error) {
 	return plan, nil
 }
 
-func buildAgentPaneCommand(agent string, args []string, sessionID string) (string, error) {
+func normalizeAgentMode(mode string) string {
+	mode = strings.ToLower(strings.TrimSpace(mode))
+	switch mode {
+	case "", "interactive":
+		return "interactive"
+	case "auto":
+		return "auto"
+	default:
+		return mode
+	}
+}
+
+func buildAgentPaneCommand(agent, mode string, args []string, sessionID string) (string, error) {
 	resolved, err := resolveAgentCommand(agent)
 	if err != nil {
 		return "", fmt.Errorf("resolve agent %q: %w", agent, err)
@@ -936,10 +953,15 @@ func buildAgentPaneCommand(agent string, args []string, sessionID string) (strin
 	label := agentLabelPrefix(agent)
 	parts := make([]string, 0, len(args)+1)
 	parts = append(parts, resolved)
+	autoArgs, err := agentAutoModeArgs(label, mode)
+	if err != nil {
+		return "", err
+	}
 	switch label {
 	case "codex":
 		if sessionID != "" {
 			parts = append(parts, "resume")
+			parts = append(parts, autoArgs...)
 			parts = append(parts, args...)
 			parts = append(parts, sessionID)
 			return shellQuoteArgs(parts), nil
@@ -957,8 +979,30 @@ func buildAgentPaneCommand(agent string, args []string, sessionID string) (strin
 			return "", fmt.Errorf("agent_session_id is only supported for codex and claude")
 		}
 	}
+	parts = append(parts, autoArgs...)
 	parts = append(parts, args...)
 	return shellQuoteArgs(parts), nil
+}
+
+func agentAutoModeArgs(label, mode string) ([]string, error) {
+	if mode == "" || mode == "interactive" {
+		return nil, nil
+	}
+	if mode != "auto" {
+		return nil, fmt.Errorf("unsupported agent mode %q", mode)
+	}
+	switch label {
+	case "codex":
+		return []string{"--full-auto"}, nil
+	case "claude":
+		return []string{"--dangerously-skip-permissions"}, nil
+	case "gemini":
+		return []string{"--yolo"}, nil
+	case "agent":
+		return []string{"--yolo"}, nil
+	default:
+		return nil, fmt.Errorf("agent mode auto is not mapped for %s yet", label)
+	}
 }
 
 func resolveAgentCommand(agent string) (string, error) {
