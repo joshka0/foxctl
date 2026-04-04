@@ -380,6 +380,103 @@ func TestRunRoomTaskCompleteRequiresClaim(t *testing.T) {
 	}
 }
 
+func TestRunRoomTaskAssignRequiresCoordinator(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	ctx := context.Background()
+	workspace := t.TempDir()
+
+	cmd, _ := newRoomTestCommand(ctx)
+	if err := runRoomCreate(cmd, workspace, "alpha", "Alpha", "", []string{"human-a=coordinator", "gemini-a=reviewer"}); err != nil {
+		t.Fatalf("runRoomCreate: %v", err)
+	}
+	cmd, out := newRoomTestCommand(ctx)
+	if err := runRoomTaskAdd(cmd, workspace, "alpha", "human-a", "Assign me", "Please assign this", "", "", nil, true); err != nil {
+		t.Fatalf("runRoomTaskAdd: %v", err)
+	}
+	data := decodeRoomEnvelope(t, out)
+	taskRaw, ok := data["task"].(map[string]any)
+	if !ok {
+		t.Fatalf("task payload type=%T", data["task"])
+	}
+	taskID, _ := taskRaw["id"].(string)
+	if taskID == "" {
+		taskID, _ = taskRaw["ID"].(string)
+	}
+
+	cmd, out = newRoomTestCommand(ctx)
+	if err := runRoomTaskAssign(cmd, workspace, "alpha", "gemini-a", taskID, "gemini-a", "take this"); err != nil {
+		t.Fatalf("runRoomTaskAssign returned error instead of envelope: %v", err)
+	}
+	var env envelope.Envelope
+	if err := json.Unmarshal(out.Bytes(), &env); err != nil {
+		t.Fatalf("decode envelope: %v", err)
+	}
+	if env.Status != "error" {
+		t.Fatalf("status=%q want error body=%s", env.Status, out.String())
+	}
+}
+
+func TestRunRoomTaskAssignPersistsAssignmentAndNotifiesRecipient(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	ctx := context.Background()
+	workspace := t.TempDir()
+
+	cmd, _ := newRoomTestCommand(ctx)
+	if err := runRoomCreate(cmd, workspace, "alpha", "Alpha", "", []string{"human-a=coordinator", "gemini-a=reviewer"}); err != nil {
+		t.Fatalf("runRoomCreate: %v", err)
+	}
+	cmd, out := newRoomTestCommand(ctx)
+	if err := runRoomTaskAdd(cmd, workspace, "alpha", "human-a", "Assign me", "Please assign this", "", "", nil, true); err != nil {
+		t.Fatalf("runRoomTaskAdd: %v", err)
+	}
+	data := decodeRoomEnvelope(t, out)
+	taskRaw, ok := data["task"].(map[string]any)
+	if !ok {
+		t.Fatalf("task payload type=%T", data["task"])
+	}
+	taskID, _ := taskRaw["id"].(string)
+	if taskID == "" {
+		taskID, _ = taskRaw["ID"].(string)
+	}
+
+	cmd, out = newRoomTestCommand(ctx)
+	if err := runRoomTaskAssign(cmd, workspace, "alpha", "human-a", taskID, "gemini-a", "please pick this up"); err != nil {
+		t.Fatalf("runRoomTaskAssign: %v", err)
+	}
+	data = decodeRoomEnvelope(t, out)
+	taskRaw, ok = data["task"].(map[string]any)
+	if !ok {
+		t.Fatalf("task payload type=%T", data["task"])
+	}
+	if got := taskRaw["AssignedActorID"]; got != "gemini-a" {
+		t.Fatalf("assigned=%v want gemini-a", got)
+	}
+
+	cmd, out = newRoomTestCommand(ctx)
+	if err := runRoomShow(cmd, workspace, "alpha", "", 20); err != nil {
+		t.Fatalf("runRoomShow: %v", err)
+	}
+	data = decodeRoomEnvelope(t, out)
+	messages, ok := data["messages"].([]any)
+	if !ok || len(messages) < 3 {
+		t.Fatalf("messages=%T/%v want at least 3 entries", data["messages"], data["messages"])
+	}
+	foundDirect := false
+	for _, raw := range messages {
+		msg, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		if msg["recipient"] == "gemini-a" && msg["task_id"] == taskID {
+			foundDirect = true
+			break
+		}
+	}
+	if !foundDirect {
+		t.Fatalf("expected direct assignment message for gemini-a in messages=%v", messages)
+	}
+}
+
 func TestRunRoomInboxFiltersActionableMessages(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	ctx := context.Background()

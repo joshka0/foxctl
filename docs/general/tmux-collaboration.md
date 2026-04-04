@@ -335,7 +335,9 @@ agentctl room task add alpha \
 
 agentctl room task list alpha
 
+agentctl room task assign alpha --id <task-id> --to gemini-a --notes "Take first pass"
 agentctl room task claim alpha --id <task-id>
+agentctl room task touch alpha --id <task-id>
 agentctl room task block alpha --id <task-id> --reason "waiting on benchmark data"
 agentctl room task unblock alpha --id <task-id>
 
@@ -351,6 +353,7 @@ task lifecycle in the same shared room timeline.
 The intended lightweight lifecycle is:
 
 - `pending -> in_progress -> blocked -> completed`
+- `assign` records intended ownership and sends a direct request, but the assignee still claims the task explicitly
 - `abandon` returns a task to `pending`
 - `complete` requires the current participant to claim the task first
 - `touch` refreshes the task heartbeat without changing state

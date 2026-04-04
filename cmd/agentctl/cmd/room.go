@@ -902,6 +902,38 @@ func removeRoomMember(existing []agent.RoomMember, actorID string) []agent.RoomM
 	return out
 }
 
+func roomMemberHasRole(members []agent.RoomMember, actorID, role string) bool {
+	actorID = strings.TrimSpace(actorID)
+	role = strings.TrimSpace(role)
+	if actorID == "" || role == "" {
+		return false
+	}
+	for _, member := range members {
+		if sameRoomParticipant(member.ActorID, actorID) && strings.EqualFold(strings.TrimSpace(member.Role), role) {
+			return true
+		}
+	}
+	return false
+}
+
+func roomHasParticipant(room agent.RoomSummary, actorID string) bool {
+	actorID = strings.TrimSpace(actorID)
+	if actorID == "" {
+		return false
+	}
+	for _, participant := range room.Participants {
+		if sameRoomParticipant(participant, actorID) {
+			return true
+		}
+	}
+	for _, member := range room.Members {
+		if sameRoomParticipant(member.ActorID, actorID) {
+			return true
+		}
+	}
+	return false
+}
+
 func deriveRoomSubject(body string) string {
 	body = strings.TrimSpace(body)
 	if body == "" {

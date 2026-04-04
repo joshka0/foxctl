@@ -114,6 +114,34 @@ func TestStore_PersistsClaimAndBlockMetadata(t *testing.T) {
 	}
 }
 
+func TestStore_PersistsAssignmentMetadata(t *testing.T) {
+	ctx := context.Background()
+	store := setupTestStore(t)
+
+	task, err := store.Add(ctx, Task{
+		WorkspaceID: "ws-1",
+		Title:       "Assigned task",
+	})
+	if err != nil {
+		t.Fatalf("Add failed: %v", err)
+	}
+
+	now := time.Now().UTC()
+	task.AssignedActorID = "gemini-a"
+	task.AssignedAt = &now
+
+	updated, err := store.Update(ctx, task)
+	if err != nil {
+		t.Fatalf("Update failed: %v", err)
+	}
+	if updated.AssignedActorID != "gemini-a" {
+		t.Fatalf("assigned=%q want gemini-a", updated.AssignedActorID)
+	}
+	if updated.AssignedAt == nil {
+		t.Fatal("expected assigned_at to be persisted")
+	}
+}
+
 func TestStore_ListByWorkspace(t *testing.T) {
 	ctx := context.Background()
 	store := setupTestStore(t)
