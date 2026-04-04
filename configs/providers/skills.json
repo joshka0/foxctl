@@ -13,6 +13,12 @@
       "sources": ["configs/skills-pack"],
       "prune_sources": ["configs/skills-condensed"]
     },
+    "gemini": {
+      "target_dir": "~/.gemini/antigravity/skills",
+      "legacy_dir": "~/.gemini/antigravity/skills-legacy",
+      "sources": ["configs/skills-pack"],
+      "prune_sources": ["configs/skills-condensed"]
+    },
     "opencode": {
       "target_dir": "~/.config/opencode/skill",
       "legacy_dir": "~/.config/opencode/skill-legacy",
