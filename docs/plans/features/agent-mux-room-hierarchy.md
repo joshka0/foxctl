@@ -368,14 +368,15 @@ Implemented in the launcher and room/tmux surfaces:
 2. `agentctl tmux create` can inject child-pane hierarchy env into launched panes
 3. child-pane default policy is parent-private when `--parent-participant` is set
 4. `agentctl tmux send-parent` gives child panes a direct parent path without joining rooms
+5. `agentctl agent spawn` / daemon spawn / persisted agent metadata now carry a typed `terminal_binding` object
+6. overseer child sessions inherit backend/session/parent-private defaults from the parent session binding
 
 Still pending:
 
-1. durable `AgentTerminalBinding` storage and runtime structs
-2. spawn-time pane allocation for real runtime subagent spawn flows
-3. a durable parent-private child channel beyond the pane-message helper
-4. explicit enforcement of top-level-only room membership in runtime spawn policy
-5. zellij parity checks for child-pane tenancy
+1. spawn-time pane allocation for real runtime subagent spawn flows
+2. a durable parent-private child channel beyond the pane-message helper
+3. explicit enforcement of top-level-only room membership in runtime spawn policy
+4. zellij parity checks for child-pane tenancy
 
 ## Related
 

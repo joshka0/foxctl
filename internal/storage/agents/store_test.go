@@ -52,6 +52,15 @@ func TestAgentStore(t *testing.T) {
 			SandboxID:       "sbx-123",
 			RepoURL:         "https://github.com/example/repo.git",
 			RepoRef:         "main",
+			TerminalBinding: agent.TerminalBinding{
+				Backend:             "tmux",
+				Session:             "collab",
+				PaneID:              "%7",
+				ParticipantID:       "agent-a",
+				ParentParticipantID: "parent-a",
+				ParentAgentID:       "agent:parent-1",
+				RoomAccess:          "none",
+			},
 		}
 
 		if err := store.Create(ctx, a); err != nil {
@@ -110,6 +119,12 @@ func TestAgentStore(t *testing.T) {
 		}
 		if a.RepoRef != "main" {
 			t.Errorf("expected repo_ref round-trip, got %q", a.RepoRef)
+		}
+		if a.TerminalBinding.ParticipantID != "agent-a" {
+			t.Errorf("expected terminal binding participant round-trip, got %q", a.TerminalBinding.ParticipantID)
+		}
+		if a.TerminalBinding.RoomAccess != "none" {
+			t.Errorf("expected terminal binding room access round-trip, got %q", a.TerminalBinding.RoomAccess)
 		}
 	})
 

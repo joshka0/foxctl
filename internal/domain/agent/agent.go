@@ -2,6 +2,7 @@ package agent
 
 import (
 	"encoding/json"
+	"strings"
 	"time"
 )
 
@@ -165,10 +166,55 @@ type Agent struct {
 	MemoryRetention MemoryRetention `json:"memory_retention,omitempty"` // companion|durable|task|ephemeral retention preset
 
 	// Optional sandbox-backed workspace metadata.
-	SandboxProvider string `json:"sandbox_provider,omitempty"` // opensandbox|...
-	SandboxID       string `json:"sandbox_id,omitempty"`       // Provider sandbox identifier
-	RepoURL         string `json:"repo_url,omitempty"`         // Source repository URL for cloned workspaces
-	RepoRef         string `json:"repo_ref,omitempty"`         // Source repository ref for cloned workspaces
+	SandboxProvider string          `json:"sandbox_provider,omitempty"` // opensandbox|...
+	SandboxID       string          `json:"sandbox_id,omitempty"`       // Provider sandbox identifier
+	RepoURL         string          `json:"repo_url,omitempty"`         // Source repository URL for cloned workspaces
+	RepoRef         string          `json:"repo_ref,omitempty"`         // Source repository ref for cloned workspaces
+	TerminalBinding TerminalBinding `json:"terminal_binding,omitempty"`
+}
+
+// TerminalBinding captures mux/room identity for an agent or pane-backed worker.
+type TerminalBinding struct {
+	Backend             string `json:"backend,omitempty"`               // tmux|zellij
+	Session             string `json:"session,omitempty"`               // mux session name
+	PaneID              string `json:"pane_id,omitempty"`               // pane or terminal id
+	ParticipantID       string `json:"participant_id,omitempty"`        // durable sender identity
+	ParentParticipantID string `json:"parent_participant_id,omitempty"` // direct parent participant for private child traffic
+	ParentAgentID       string `json:"parent_agent_id,omitempty"`       // direct parent agent id
+	RoomID              string `json:"room_id,omitempty"`               // shared room id when directly room-visible
+	RoomAccess          string `json:"room_access,omitempty"`           // direct|none
+}
+
+// NormalizeTerminalBinding trims fields and applies stable room-access defaults.
+func NormalizeTerminalBinding(binding TerminalBinding) TerminalBinding {
+	binding.Backend = strings.ToLower(strings.TrimSpace(binding.Backend))
+	binding.Session = strings.TrimSpace(binding.Session)
+	binding.PaneID = strings.TrimSpace(binding.PaneID)
+	binding.ParticipantID = strings.TrimSpace(binding.ParticipantID)
+	binding.ParentParticipantID = strings.TrimSpace(binding.ParentParticipantID)
+	binding.ParentAgentID = strings.TrimSpace(binding.ParentAgentID)
+	binding.RoomID = strings.TrimSpace(binding.RoomID)
+	binding.RoomAccess = normalizeRoomAccess(binding.RoomAccess, binding.ParentParticipantID)
+	if binding.RoomAccess != "direct" {
+		binding.RoomID = ""
+	}
+	return binding
+}
+
+func normalizeRoomAccess(value, parentParticipant string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "", "default":
+		if strings.TrimSpace(parentParticipant) != "" {
+			return "none"
+		}
+		return "direct"
+	case "direct":
+		return "direct"
+	case "none":
+		return "none"
+	default:
+		return strings.ToLower(strings.TrimSpace(value))
+	}
 }
 
 // Policy defines execution constraints and capabilities for an agent.

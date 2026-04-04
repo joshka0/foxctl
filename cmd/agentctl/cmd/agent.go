@@ -149,33 +149,41 @@ var (
 
 // Flags for agent spawn
 var (
-	spawnParentNS         string
-	spawnName             string
-	spawnSlug             string
-	spawnRole             string
-	spawnPrompt           string
-	spawnPromptFile       string
-	spawnSkillsAllow      string
-	spawnPolicyFile       string
-	spawnShareBB          string
-	spawnLLMProvider      string
-	spawnLLMModel         string
-	spawnLLMAPIKey        string
-	spawnLLMBaseURL       string
-	spawnLLMAuthMode      string
-	spawnLLMAuthHeader    string
-	spawnLLMAuthPrefix    string
-	spawnWorkspace        string
-	spawnExecMode         string
-	spawnMaxIterations    int
-	spawnMaxContextTokens int
-	spawnMaxAutoTurns     int
-	spawnThinkInterval    int
-	spawnMemoryScope      string
-	spawnMemoryRetention  string
-	spawnTimeout          string // Session timeout (e.g. "10m", "30m")
-	spawnDryRun           bool
-	spawnChat             bool // Convenience flag for chat/roleplay companions
+	spawnParentNS          string
+	spawnName              string
+	spawnSlug              string
+	spawnRole              string
+	spawnPrompt            string
+	spawnPromptFile        string
+	spawnSkillsAllow       string
+	spawnPolicyFile        string
+	spawnShareBB           string
+	spawnLLMProvider       string
+	spawnLLMModel          string
+	spawnLLMAPIKey         string
+	spawnLLMBaseURL        string
+	spawnLLMAuthMode       string
+	spawnLLMAuthHeader     string
+	spawnLLMAuthPrefix     string
+	spawnWorkspace         string
+	spawnExecMode          string
+	spawnMaxIterations     int
+	spawnMaxContextTokens  int
+	spawnMaxAutoTurns      int
+	spawnThinkInterval     int
+	spawnMemoryScope       string
+	spawnMemoryRetention   string
+	spawnTimeout           string // Session timeout (e.g. "10m", "30m")
+	spawnDryRun            bool
+	spawnChat              bool // Convenience flag for chat/roleplay companions
+	spawnMuxBackend        string
+	spawnMuxSession        string
+	spawnMuxPaneID         string
+	spawnParticipantID     string
+	spawnParentParticipant string
+	spawnParentAgentID     string
+	spawnRoomID            string
+	spawnRoomAccess        string
 )
 
 // Flags for agent run
@@ -269,6 +277,14 @@ func init() {
 	agentSpawnCmd.Flags().BoolVar(&spawnDryRun, "dry-run", false, "Preview what would be spawned without creating the agent")
 	agentSpawnCmd.Flags().BoolVar(&spawnChat, "chat", false, "Convenience flag for chat/roleplay companions (sets role=companion, exec-mode=reactive, max-iterations=3)")
 	agentSpawnCmd.Flags().StringVar(&spawnDispatcher, "dispatcher", "", "Execution layer for spawned agents: mailbox|jido (default from AGENTCTL_V2_ASK_DISPATCHER)")
+	agentSpawnCmd.Flags().StringVar(&spawnMuxBackend, "mux-backend", "", "Mux backend for terminal binding metadata (for example: tmux or zellij)")
+	agentSpawnCmd.Flags().StringVar(&spawnMuxSession, "mux-session", "", "Mux session name for terminal binding metadata")
+	agentSpawnCmd.Flags().StringVar(&spawnMuxPaneID, "mux-pane-id", "", "Mux pane id for terminal binding metadata")
+	agentSpawnCmd.Flags().StringVar(&spawnParticipantID, "participant-id", "", "Participant id for room or direct parent-child routing")
+	agentSpawnCmd.Flags().StringVar(&spawnParentParticipant, "parent-participant", "", "Parent participant id for parent-private child agents")
+	agentSpawnCmd.Flags().StringVar(&spawnParentAgentID, "parent-agent-id", "", "Parent agent id for parent-private child agents")
+	agentSpawnCmd.Flags().StringVar(&spawnRoomID, "room-id", "", "Room id for directly room-visible agents")
+	agentSpawnCmd.Flags().StringVar(&spawnRoomAccess, "room-access", "default", "Room access policy for this agent: default|direct|none")
 
 	// Run flags
 	agentRunCmd.Flags().StringVar(&runCompanionMode, "companion-mode", "", "Memory mode for conversation memory: standard (40K tokens) or roleplay (50K tokens)")
@@ -333,6 +349,19 @@ func currentSpawnWorkspaceID() string {
 	return ws.ID(root)
 }
 
+func currentSpawnTerminalBinding() agent.TerminalBinding {
+	return agent.NormalizeTerminalBinding(agent.TerminalBinding{
+		Backend:             spawnMuxBackend,
+		Session:             spawnMuxSession,
+		PaneID:              spawnMuxPaneID,
+		ParticipantID:       spawnParticipantID,
+		ParentParticipantID: spawnParentParticipant,
+		ParentAgentID:       spawnParentAgentID,
+		RoomID:              spawnRoomID,
+		RoomAccess:          spawnRoomAccess,
+	})
+}
+
 func resolveSpawnPromptVariantTarget(cfg config.Config, executionLayer agent.ExecutionLayer) (string, string) {
 	provider := strings.TrimSpace(spawnLLMProvider)
 	if provider == "" {
@@ -356,6 +385,7 @@ func runAgentSpawnWithRoute(cmd *cobra.Command) error {
 	ctx := cmd.Context()
 	cfg := config.MustFromContext(ctx)
 	executionLayer := resolvedSpawnExecutionLayer(spawnDispatcher)
+	terminalBinding := currentSpawnTerminalBinding()
 
 	// Apply chat/roleplay companion defaults if --chat flag is set
 	// These can be overridden by explicit flags
@@ -466,6 +496,7 @@ func runAgentSpawnWithRoute(cmd *cobra.Command) error {
 			MaxIterations:   spawnMaxIterations,
 			MaxAutoTurns:    spawnMaxAutoTurns,
 			ThinkInterval:   spawnThinkInterval,
+			TerminalBinding: terminalBinding,
 		}
 
 		if spawnDryRun {
@@ -487,6 +518,7 @@ func runAgentSpawnWithRoute(cmd *cobra.Command) error {
 				"max_iterations":   req.MaxIterations,
 				"max_auto_turns":   req.MaxAutoTurns,
 				"think_interval":   req.ThinkInterval,
+				"terminal_binding": req.TerminalBinding,
 				"has_prompt":       len(req.Prompt) > 0,
 				"has_policy":       req.Policy.CPU > 0 || req.Policy.MemoryMB > 0 || req.Policy.Timeout != "",
 			}
@@ -503,12 +535,13 @@ func runAgentSpawnWithRoute(cmd *cobra.Command) error {
 		}
 
 		data := map[string]any{
-			"agent_id":        resp.AgentID,
-			"ns":              resp.NS,
-			"role":            resp.Role,
-			"dispatcher":      "jido",
-			"execution_layer": string(executionLayer),
-			"via_daemon":      false,
+			"agent_id":         resp.AgentID,
+			"ns":               resp.NS,
+			"role":             resp.Role,
+			"dispatcher":       "jido",
+			"execution_layer":  string(executionLayer),
+			"via_daemon":       false,
+			"terminal_binding": terminalBinding,
 		}
 		return writeOK(cmd, "agent/spawn", data, "run", nil)
 	}
@@ -555,6 +588,7 @@ func runAgentSpawnWithRoute(cmd *cobra.Command) error {
 			LLMAuthMode:      spawnLLMAuthMode,
 			LLMAuthHeader:    spawnLLMAuthHeader,
 			LLMAuthPrefix:    spawnLLMAuthPrefix,
+			TerminalBinding:  terminalBinding,
 		}
 
 		// Dry-run mode: show what would be spawned via daemon
@@ -578,6 +612,7 @@ func runAgentSpawnWithRoute(cmd *cobra.Command) error {
 				"max_iterations":   params.MaxIterations,
 				"max_auto_turns":   params.MaxAutoTurns,
 				"think_interval":   params.ThinkInterval,
+				"terminal_binding": params.TerminalBinding,
 				"has_prompt":       len(params.Prompt) > 0,
 			}
 			return writeOK(cmd, "agent/spawn", data, "run", nil)
@@ -590,16 +625,17 @@ func runAgentSpawnWithRoute(cmd *cobra.Command) error {
 
 		// Write success envelope
 		data := map[string]any{
-			"session_id":      result.SessionID,
-			"actor_id":        result.ActorID,
-			"agent_id":        result.AgentID,
-			"name":            result.Name,
-			"status":          result.Status,
-			"role":            result.Role,
-			"ns":              result.NS,
-			"dispatcher":      "mailbox",
-			"execution_layer": string(executionLayer),
-			"via_daemon":      true,
+			"session_id":       result.SessionID,
+			"actor_id":         result.ActorID,
+			"agent_id":         result.AgentID,
+			"name":             result.Name,
+			"status":           result.Status,
+			"role":             result.Role,
+			"ns":               result.NS,
+			"dispatcher":       "mailbox",
+			"execution_layer":  string(executionLayer),
+			"via_daemon":       true,
+			"terminal_binding": terminalBinding,
 		}
 		return writeOK(cmd, "agent/spawn", data, "run", nil)
 	}
@@ -645,6 +681,7 @@ func runAgentSpawnWithRoute(cmd *cobra.Command) error {
 		MaxIterations:   spawnMaxIterations,
 		MaxAutoTurns:    spawnMaxAutoTurns,
 		ThinkInterval:   spawnThinkInterval,
+		TerminalBinding: terminalBinding,
 	}
 
 	// Dry-run mode: show what would be spawned
@@ -669,6 +706,7 @@ func runAgentSpawnWithRoute(cmd *cobra.Command) error {
 			"max_iterations":   req.MaxIterations,
 			"max_auto_turns":   req.MaxAutoTurns,
 			"think_interval":   req.ThinkInterval,
+			"terminal_binding": req.TerminalBinding,
 			"has_prompt":       len(req.Prompt) > 0,
 			"has_policy":       req.Policy.CPU > 0 || req.Policy.MemoryMB > 0 || req.Policy.Timeout != "",
 		}
@@ -682,12 +720,13 @@ func runAgentSpawnWithRoute(cmd *cobra.Command) error {
 
 	// Write success envelope
 	data := map[string]any{
-		"agent_id":        resp.AgentID,
-		"ns":              resp.NS,
-		"role":            resp.Role,
-		"dispatcher":      "mailbox",
-		"execution_layer": string(executionLayer),
-		"via_daemon":      false,
+		"agent_id":         resp.AgentID,
+		"ns":               resp.NS,
+		"role":             resp.Role,
+		"dispatcher":       "mailbox",
+		"execution_layer":  string(executionLayer),
+		"via_daemon":       false,
+		"terminal_binding": terminalBinding,
 	}
 
 	return writeOK(cmd, "agent/spawn", data, "run", nil)

@@ -205,6 +205,9 @@ type AgentConfig struct {
 	// TeamID is the optional team this agent belongs to.
 	TeamID string `json:"team_id,omitempty"`
 
+	// TerminalBinding captures optional mux/room identity for pane-backed agents.
+	TerminalBinding agent.TerminalBinding `json:"terminal_binding,omitempty"`
+
 	// --- Hierarchy fields (see agent_hierarchy.md) ---
 
 	// RootActorID is the tree root (usually actor:system:overseer).

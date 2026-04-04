@@ -1640,6 +1640,8 @@ type AgentSpawnParams struct {
 	LLMAuthMode   string `json:"llm_auth_mode,omitempty"`
 	LLMAuthHeader string `json:"llm_auth_header,omitempty"`
 	LLMAuthPrefix string `json:"llm_auth_prefix,omitempty"`
+
+	TerminalBinding agent.TerminalBinding `json:"terminal_binding,omitempty"`
 }
 
 // AgentSpawnResult is the result of spawning an agent.
@@ -1714,14 +1716,15 @@ func (s *Service) handleAgentSpawnWithRoute(ctx context.Context, params json.Raw
 
 	// Create agent config
 	cfg := types.AgentConfig{
-		Role:          types.AgentRole(p.Role),
-		ActorID:       actorID,
-		WorkspaceID:   p.WorkspaceID,
-		WorkspaceRoot: strings.TrimSpace(p.WorkspaceRoot),
-		EpicID:        p.EpicID,
-		TaskID:        p.TaskID,
-		Prompt:        p.Prompt,
-		SkillsAllow:   p.SkillsAllow,
+		Role:            types.AgentRole(p.Role),
+		ActorID:         actorID,
+		WorkspaceID:     p.WorkspaceID,
+		WorkspaceRoot:   strings.TrimSpace(p.WorkspaceRoot),
+		EpicID:          p.EpicID,
+		TaskID:          p.TaskID,
+		Prompt:          p.Prompt,
+		SkillsAllow:     p.SkillsAllow,
+		TerminalBinding: agent.NormalizeTerminalBinding(p.TerminalBinding),
 	}
 	if cfg.WorkspaceID == "" && cfg.WorkspaceRoot != "" {
 		cfg.WorkspaceID = ws.ID(cfg.WorkspaceRoot)
@@ -1820,30 +1823,31 @@ func (s *Service) handleAgentSpawnWithRoute(ctx context.Context, params json.Raw
 	}
 
 	agentRecord := agent.Agent{
-		ID:             agentID,
-		Namespace:      actorID,
-		Name:           agentName,
-		Slug:           p.Slug,
-		Role:           p.Role,
-		Prompt:         p.Prompt,
-		SkillsAllow:    p.SkillsAllow,
-		Policy:         agent.Policy{},
-		ShareBB:        "scoped",
-		State:          agent.StateRunning,
-		CreatedAt:      time.Now().UTC(),
-		LLMProvider:    cfg.LLMProvider,
-		LLMModel:       cfg.LLMModel,
-		LLMAPIKey:      cfg.LLMAPIKey,
-		LLMBaseURL:     cfg.LLMBaseURL,
-		LLMAuthMode:    cfg.LLMAuthMode,
-		LLMAuthHeader:  cfg.LLMAuthHeader,
-		LLMAuthPrefix:  cfg.LLMAuthPrefix,
-		ExecMode:       execMode,
-		ExecutionLayer: agent.ExecutionLayerClassic,
-		MaxIterations:  p.MaxIterations,
-		MaxAutoTurns:   p.MaxAutoTurns,
-		ThinkInterval:  p.ThinkInterval,
-		MemoryScope:    agent.NormalizeMemoryScope(agent.MemoryScope(strings.TrimSpace(p.MemoryScope))),
+		ID:              agentID,
+		Namespace:       actorID,
+		Name:            agentName,
+		Slug:            p.Slug,
+		Role:            p.Role,
+		Prompt:          p.Prompt,
+		SkillsAllow:     p.SkillsAllow,
+		Policy:          agent.Policy{},
+		ShareBB:         "scoped",
+		State:           agent.StateRunning,
+		CreatedAt:       time.Now().UTC(),
+		LLMProvider:     cfg.LLMProvider,
+		LLMModel:        cfg.LLMModel,
+		LLMAPIKey:       cfg.LLMAPIKey,
+		LLMBaseURL:      cfg.LLMBaseURL,
+		LLMAuthMode:     cfg.LLMAuthMode,
+		LLMAuthHeader:   cfg.LLMAuthHeader,
+		LLMAuthPrefix:   cfg.LLMAuthPrefix,
+		ExecMode:        execMode,
+		ExecutionLayer:  agent.ExecutionLayerClassic,
+		MaxIterations:   p.MaxIterations,
+		MaxAutoTurns:    p.MaxAutoTurns,
+		ThinkInterval:   p.ThinkInterval,
+		MemoryScope:     agent.NormalizeMemoryScope(agent.MemoryScope(strings.TrimSpace(p.MemoryScope))),
+		TerminalBinding: cfg.TerminalBinding,
 		MemoryRetention: func() agent.MemoryRetention {
 			if strings.TrimSpace(p.MemoryRetention) == "" {
 				return agent.DefaultMemoryRetentionForScope(agent.NormalizeMemoryScope(agent.MemoryScope(strings.TrimSpace(p.MemoryScope))))

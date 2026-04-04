@@ -51,6 +51,7 @@ type SpawnRequest struct {
 	SandboxID       string
 	RepoURL         string
 	RepoRef         string
+	TerminalBinding agent.TerminalBinding
 
 	// Execution mode configuration
 	ExecMode      agent.ExecutionMode // reactive|autonomous|proactive|tick (default: reactive)
@@ -150,6 +151,7 @@ func (m *Manager) Spawn(ctx context.Context, req SpawnRequest) (SpawnResponse, e
 		SandboxID:       strings.TrimSpace(req.SandboxID),
 		RepoURL:         strings.TrimSpace(req.RepoURL),
 		RepoRef:         strings.TrimSpace(req.RepoRef),
+		TerminalBinding: agent.NormalizeTerminalBinding(req.TerminalBinding),
 		ExecMode:        execMode,
 		ExecutionLayer:  agent.ExecutionLayerClassic,
 		MaxIterations:   maxIterations,
