@@ -142,6 +142,7 @@ Prefer `agentctl` when you want machine-friendly envelopes:
 
 ```bash
 agentctl tmux list
+agentctl tmux list --backend zellij --session alpha-room
 agentctl tmux read agent-b --lines 80
 agentctl tmux send agent-b "Please review internal/storage/mailbox/store.go for lease races."
 agentctl tmux observe agent-b --lines 80
@@ -207,6 +208,10 @@ The bundled script is optional for lower-level pane control:
 `agentctl room ...` now follows the same identity rule: derive the current pane
 participant first, then fall back to canonical ids like `tmux:<session>:%7` or
 `zellij:<session>:terminal_3` when no human-friendly pane name is present.
+
+For spawned zellij panes, prefer `agentctl tmux list --backend zellij --session <session-name>`.
+That view is driven by persisted `terminal_binding` metadata and is more
+reliable than trying to infer pane names from non-interactive layout dumps.
 
 Room policy is intentionally asymmetric:
 

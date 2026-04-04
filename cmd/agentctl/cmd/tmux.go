@@ -14,7 +14,7 @@ import (
 func newTmuxCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "tmux",
-		Short: "Inspect tmux panes for live multi-agent collaboration",
+		Short: "Inspect terminal panes for live multi-agent collaboration",
 	}
 	cmd.AddCommand(
 		newTmuxListCommand(),
@@ -29,23 +29,74 @@ func newTmuxCommand() *cobra.Command {
 }
 
 func newTmuxListCommand() *cobra.Command {
-	return &cobra.Command{
+	var (
+		backend string
+		session string
+		limit   int
+	)
+
+	cmd := &cobra.Command{
 		Use:   "list",
-		Short: "List panes from the reachable tmux server",
+		Short: "List tmux panes or agent-owned zellij panes",
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			client := tmuxbridge.New()
-			panes, err := client.List(cmd.Context())
-			if err != nil {
-				return protocol.WriteError(cmd.OutOrStdout(), "agentctl.tmux.list", protocol.ErrorCodeERuntime, err.Error(), map[string]any{
-					"hint": "Run `agentctl tmux doctor` to inspect connectivity, or set TMUX_BRIDGE_SOCKET if the tmux env is stale.",
+			switch strings.TrimSpace(backend) {
+			case "", "tmux":
+				client := tmuxbridge.New()
+				panes, err := client.List(cmd.Context())
+				if err != nil {
+					return protocol.WriteError(cmd.OutOrStdout(), "agentctl.tmux.list", protocol.ErrorCodeERuntime, err.Error(), map[string]any{
+						"hint": "Run `agentctl tmux doctor` to inspect connectivity, or set TMUX_BRIDGE_SOCKET if the tmux env is stale.",
+					}, protocol.WithSource("cli"))
+				}
+				return protocol.WriteOK(cmd.OutOrStdout(), "agentctl.tmux.list", map[string]any{
+					"backend": "tmux",
+					"panes":   panes,
+					"count":   len(panes),
+				}, protocol.WithSource("cli"))
+			case "zellij":
+				cfg, err := loadConfig(cmd.Context())
+				if err != nil {
+					return protocol.WriteError(cmd.OutOrStdout(), "agentctl.tmux.list", protocol.ErrorCodeERuntime, fmt.Sprintf("load config: %v", err), map[string]any{
+						"hint": "Ensure agentctl configuration is readable before inspecting zellij-owned panes.",
+					}, protocol.WithSource("cli"))
+				}
+				store, err := openAgentStore(cmd.Context(), cfg.Storage.Root)
+				if err != nil {
+					return protocol.WriteError(cmd.OutOrStdout(), "agentctl.tmux.list", protocol.ErrorCodeERuntime, fmt.Sprintf("open agent store: %v", err), map[string]any{
+						"hint": "Ensure the storage root is initialized and readable.",
+					}, protocol.WithSource("cli"))
+				}
+				defer func() { _ = store.Close() }()
+				resolvedSession := strings.TrimSpace(session)
+				if resolvedSession == "" {
+					resolvedSession = strings.TrimSpace(os.Getenv("ZELLIJ_SESSION_NAME"))
+				}
+				agentsList, err := store.List(cmd.Context(), limit)
+				if err != nil {
+					return protocol.WriteError(cmd.OutOrStdout(), "agentctl.tmux.list", protocol.ErrorCodeERuntime, fmt.Sprintf("list agents: %v", err), map[string]any{
+						"hint": "Verify the agent store is healthy and readable.",
+					}, protocol.WithSource("cli"))
+				}
+				panes := listZellijBoundPanes(agentsList, resolvedSession)
+				return protocol.WriteOK(cmd.OutOrStdout(), "agentctl.tmux.list", map[string]any{
+					"backend": "zellij",
+					"mode":    "agent_bindings",
+					"session": resolvedSession,
+					"panes":   panes,
+					"count":   len(panes),
+				}, protocol.WithSource("cli"))
+			default:
+				return protocol.WriteError(cmd.OutOrStdout(), "agentctl.tmux.list", protocol.ErrorCodeEARG, fmt.Sprintf("unsupported backend %q", backend), map[string]any{
+					"hint": "Use --backend tmux or --backend zellij.",
 				}, protocol.WithSource("cli"))
 			}
-			return protocol.WriteOK(cmd.OutOrStdout(), "agentctl.tmux.list", map[string]any{
-				"panes": panes,
-				"count": len(panes),
-			}, protocol.WithSource("cli"))
 		},
 	}
+
+	cmd.Flags().StringVar(&backend, "backend", "tmux", "Terminal backend to inspect (tmux|zellij)")
+	cmd.Flags().StringVar(&session, "session", "", "Zellij session name when --backend zellij (defaults to ZELLIJ_SESSION_NAME)")
+	cmd.Flags().IntVar(&limit, "limit", 500, "Maximum agents to scan when --backend zellij")
+	return cmd
 }
 
 func newTmuxReadCommand() *cobra.Command {

@@ -52,6 +52,19 @@ agentctl tmux doctor
 
 `create` creates or extends a detached tmux session, tiles it, and returns an attach command plus native send examples. `prepare` remains as a compatibility alias.
 
+For zellij-backed agent panes, `list` can inspect persisted agent-owned
+bindings instead of scraping the live session layout:
+
+```bash
+agentctl tmux list --backend zellij --session agentctl-zellij-smoke
+```
+
+This zellij mode is intentionally narrower than tmux:
+
+- it lists `agentctl`-owned panes from durable `terminal_binding` metadata
+- it does not attempt to enumerate arbitrary non-agent panes in the session
+- it is the preferred observability path for spawned parent/child agent panes
+
 Without `--agent`, panes default to labels like `agent-a`, `agent-b`, `agent-c`.
 With `--agent claude`, `--agent codex`, `--agent gemini`, `--agent agent`, or `--agent droid`, the default labels become `claude-a`, `codex-a`, `gemini-a`, `agent-a`, or `droid-a`.
 
@@ -255,6 +268,12 @@ Important nuance:
 - zellij currently uses a generated pane title as the durable participant id for
   spawned agents, because the CLI exposes reliable named-pane creation but not
   the same exact respawn-by-pane-id flow
+
+For those spawned zellij panes, the recommended inspection path is:
+
+```bash
+agentctl tmux list --backend zellij --session collab-runtime
+```
 
 ## Room Surface
 

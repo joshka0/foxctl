@@ -36,6 +36,7 @@ Inspect panes with structured output:
 
 ```bash
 agentctl tmux list
+agentctl tmux list --backend zellij --session alpha-room
 agentctl tmux read agent-b --lines 80
 agentctl tmux doctor
 ```
@@ -147,6 +148,13 @@ agentctl agent spawn \
 For zellij, the same command shape works with `--mux-backend zellij` and an
 explicit `--mux-session`. The current zellij path uses a named pane as the
 durable participant identity for the spawned agent.
+
+For spawned zellij panes, inspect the current session through persisted
+`terminal_binding` metadata rather than raw layout scraping:
+
+```bash
+agentctl tmux list --backend zellij --session <session-name>
+```
 
 ### Interactive bridge
 
