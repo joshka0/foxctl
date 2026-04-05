@@ -3,8 +3,7 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import type { RoomMember } from '@/api/types'
 import { cn } from '@/lib/utils'
-import { formatRelativeTime } from '@/lib/time'
-import { Monitor, Cpu, ShieldAlert, Link2Off, Power, PowerOff } from 'lucide-react'
+import { Monitor, Cpu, Link2Off } from 'lucide-react'
 
 interface ParticipantListProps {
   participants: RoomMember[]

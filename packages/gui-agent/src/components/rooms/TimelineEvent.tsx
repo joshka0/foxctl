@@ -1,8 +1,7 @@
-import { Badge } from '@/components/ui/badge'
 import { cn } from '@/lib/utils'
 import { formatRelativeTime } from '@/lib/time'
-import { MessageSquare, ClipboardList, Crown, AlertTriangle, UserPlus, ShieldCheck } from 'lucide-react'
-import type { MailboxMessage, LeadChangeEvent } from '@/api/types'
+import { MessageSquare, ClipboardList, Crown, AlertTriangle, ShieldCheck } from 'lucide-react'
+import type { LeadChangeEvent } from '@/api/types'
 
 interface TimelineEventProps {
   event: any // Can be MailboxMessage or LeadChangeEvent

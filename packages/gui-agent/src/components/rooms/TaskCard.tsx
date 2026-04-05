@@ -5,7 +5,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import type { RoomTask } from '@/api/types'
 import { cn } from '@/lib/utils'
 import { formatRelativeTime } from '@/lib/time'
-import { AlertCircle, Clock, CheckCircle2, Ban, User, MoreHorizontal, HandMetal, RotateCcw, UserPlus } from 'lucide-react'
+import { Clock, Ban, User, MoreHorizontal, HandMetal, RotateCcw, UserPlus } from 'lucide-react'
 
 interface TaskCardProps {
   task: RoomTask
@@ -126,21 +126,21 @@ export function TaskCard({
         <div className="flex items-center gap-1">
           {task.status === 'pending' && (
             <>
-              {isCoordinator && <Button variant="outline" size="xs" onClick={onReassign} className="h-6 px-2 text-[10px]">Assign</Button>}
-              <Button size="xs" onClick={onClaim} className="h-6 px-2 text-[10px] font-bold">Claim</Button>
+              {isCoordinator && <Button variant="outline" size="xs" onClick={onReassign} className="h-6">Assign</Button>}
+              <Button size="xs" onClick={onClaim} className="h-6 font-bold">Claim</Button>
             </>
           )}
           {task.status === 'in_progress' && (
             <>
-              <Button variant="ghost" size="xs" onClick={onTouch} className="h-6 px-2 text-[10px] hover:bg-slate-100">Touch</Button>
-              <Button variant="outline" size="xs" onClick={onBlock} className="h-6 px-2 text-[10px] text-red-600 hover:text-red-700 hover:bg-red-50">Block</Button>
-              <Button size="xs" onClick={onComplete} className="h-6 px-2 text-[10px] bg-green-600 hover:bg-green-700">Done</Button>
+              <Button variant="ghost" size="xs" onClick={onTouch} className="h-6 hover:bg-slate-100">Touch</Button>
+              <Button variant="outline" size="xs" onClick={onBlock} className="h-6 text-red-600 hover:text-red-700 hover:bg-red-50">Block</Button>
+              <Button size="xs" onClick={onComplete} className="h-6 bg-green-600 hover:bg-green-700">Done</Button>
             </>
           )}
           {task.status === 'blocked' && (
             <>
-              <Button variant="ghost" size="xs" onClick={onTouch} className="h-6 px-2 text-[10px]">Unblock</Button>
-              <Button variant="outline" size="xs" onClick={onAbandon} className="h-6 px-2 text-[10px]">Abandon</Button>
+              <Button variant="ghost" size="xs" onClick={onTouch} className="h-6">Unblock</Button>
+              <Button variant="outline" size="xs" onClick={onAbandon} className="h-6">Abandon</Button>
             </>
           )}
           {isCoordinator && (task.stale || task.status === 'in_progress' || task.status === 'blocked') && (

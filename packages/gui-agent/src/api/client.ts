@@ -7,6 +7,7 @@ import type {
   AgentSpawnResponse,
   CoChangeHit,
   MailboxListResponse,
+  BulkResolveRequest,
   Room,
   RoomStatus,
   RoomInbox,
@@ -185,20 +186,6 @@ function isLocalDevAuthFallbackEligible(): boolean {
   if (typeof window === "undefined") return false;
   const host = window.location.hostname.trim().toLowerCase();
   return host === "localhost" || host === "127.0.0.1" || host === "0.0.0.0";
-}
-
-function localDevAuthSession(): AuthSessionResponse {
-  return {
-    session: {
-      id: "local-dev-session",
-    },
-    user: {
-      id: "local-dev-user",
-      email: "local@agentctl.dev",
-      name: "Local Dev",
-      emailVerified: true,
-    },
-  };
 }
 
 export async function getAuthSession(): Promise<AuthSessionResponse | null> {
@@ -889,6 +876,7 @@ export async function sendRoomMessage(
     kind?: string;
     priority?: number;
     ack_required?: boolean;
+    related_message_id?: string;
     task_id?: string;
     dispatch_agents?: boolean;
     dispatch_agent_ids?: string[];

@@ -6,12 +6,11 @@ import { SendHorizonal, X } from 'lucide-react'
 interface ReplyComposerProps {
   recipient: string
   subject: string
-  relatedMessageId: string
   onSend: (body: string) => void
   onCancel: () => void
 }
 
-export function ReplyComposer({ recipient, subject, relatedMessageId, onSend, onCancel }: ReplyComposerProps) {
+export function ReplyComposer({ recipient, subject, onSend, onCancel }: ReplyComposerProps) {
   const [body, setBody] = useState('')
 
   return (

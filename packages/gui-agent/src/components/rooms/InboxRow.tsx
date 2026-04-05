@@ -77,7 +77,7 @@ export function InboxRow({
           {message.ack_required && (
             <Tooltip>
               <TooltipTrigger asChild>
-                <Button size="xs" onClick={onAck} className="h-7 px-2 text-[10px] bg-amber-600 hover:bg-amber-700">
+                <Button size="xs" onClick={onAck} className="bg-amber-600 hover:bg-amber-700">
                   <Check className="w-3 h-3 mr-1" /> Ack
                 </Button>
               </TooltipTrigger>
@@ -85,14 +85,14 @@ export function InboxRow({
             </Tooltip>
           )}
           {message.reply_expected && (
-            <Button size="xs" variant="secondary" onClick={onReply} className="h-7 px-2 text-[10px]">
+            <Button size="xs" variant="secondary" onClick={onReply}>
               <CornerDownRight className="w-3 h-3 mr-1" /> Reply
             </Button>
           )}
           {isCoordinator && (
             <Tooltip>
               <TooltipTrigger asChild>
-                <Button size="xs" variant="outline" onClick={onResolve} className="h-7 px-2 text-[10px] hover:text-green-600 hover:bg-green-50">
+                <Button size="xs" variant="outline" onClick={onResolve} className="hover:text-green-600 hover:bg-green-50">
                   <CheckCircle2 className="w-3.5 h-3.5 mr-1" /> Resolve
                 </Button>
               </TooltipTrigger>
@@ -101,7 +101,7 @@ export function InboxRow({
           )}
           <Tooltip>
             <TooltipTrigger asChild>
-              <Button size="xs" variant="ghost" onClick={onNudge} className="h-7 w-7 p-0 hover:bg-primary/5 hover:text-primary transition-colors">
+              <Button size="xs" variant="ghost" onClick={onNudge} className="w-7 p-0 hover:bg-primary/5 hover:text-primary transition-colors">
                 <HandMetal className="w-3.5 h-3.5" />
               </Button>
             </TooltipTrigger>

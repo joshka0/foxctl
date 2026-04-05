@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { RoomTask, MailboxMessage } from '@/api/types'
+import type { RoomTask } from '@/api/types'
 
 export type ObligationLane = 'ready to claim' | 'awaiting ack' | 'awaiting reply' | 'assigned' | 'blocked' | 'stale' | 'all'
 
@@ -116,6 +116,6 @@ export const useRoomControlStore = create<RoomControlState>((set) => ({
     dialogs: { ...state.dialogs, confirmAction: { isOpen: true, title, message, onConfirm } } 
   })),
   closeConfirm: () => set((state) => ({ 
-    dialogs: { ...state.dialogs, confirmAction: { isOpen: false } } 
+    dialogs: { ...state.dialogs, confirmAction: { isOpen: false, title: '', message: '', onConfirm: undefined } } 
   })),
 }))

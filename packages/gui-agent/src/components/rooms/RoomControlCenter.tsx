@@ -19,8 +19,7 @@ import {
   touchRoomTask,
   completeRoomTask,
   sendRoomMessage,
-  unblockRoomTask,
-  abandonRoomTask
+  unblockRoomTask
 } from '@/api/client'
 import { useRoomControlStore } from '@/stores/roomControlStore'
 import { useAuthSession } from '@/hooks/useAuthSession'
@@ -33,7 +32,7 @@ import { TimelineEvent } from './TimelineEvent'
 import { ParticipantList } from './ParticipantList'
 import { ReplyComposer } from './ReplyComposer'
 import { LoopPolicyEditor } from './LoopPolicyEditor'
-import { Hash, MessageSquare, ShieldAlert, Zap, X, CheckSquare, Bell, RefreshCw, CheckCircle2, UserCircle, Users } from 'lucide-react'
+import { Hash, MessageSquare, ShieldAlert, Zap, X, RefreshCw, CheckCircle2, UserCircle, Users, Bell } from 'lucide-react'
 import type { MailboxMessage } from '@/api/types'
 
 export function RoomControlCenter({ roomId }: { roomId: string }) {
@@ -132,6 +131,11 @@ export function RoomControlCenter({ roomId }: { roomId: string }) {
 
   const unblockMutation = useMutation({
     mutationFn: (taskId: string) => unblockRoomTask(roomId, taskId, { workspace_id: workspaceId, actor: currentActorID }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['room', roomId] }),
+  })
+
+  const completeMutation = useMutation({
+    mutationFn: (taskId: string) => completeRoomTask(roomId, taskId, { workspace_id: workspaceId, actor: currentActorID }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['room', roomId] }),
   })
 
@@ -257,17 +261,17 @@ export function RoomControlCenter({ roomId }: { roomId: string }) {
               </span>
             </div>
             {isCoordinator && (
-              <Button variant="outline" size="xs" className="text-[10px] h-7 font-black border-primary/20 hover:bg-primary/5 uppercase tracking-tighter" onClick={() => openTransferLead()}>
+              <Button variant="outline" size="xs" className="font-black border-primary/20 hover:bg-primary/5 uppercase tracking-tighter" onClick={() => openTransferLead()}>
                 Transfer Lead
               </Button>
             )}
-            <Button variant="outline" size="xs" className="text-[10px] h-7 font-bold px-2" onClick={() => setIsParticipantsOpen(!isParticipantsOpen)}>
+            <Button variant="outline" size="xs" className="font-bold" onClick={() => setIsParticipantsOpen(!isParticipantsOpen)}>
               <Users className="w-3.5 h-3.5 mr-1.5" /> {status.participants.length}
             </Button>
             <Button 
               variant={isTimelineOpen ? 'secondary' : 'outline'} 
               size="xs"
-              className="text-[10px] h-7 font-bold px-2"
+              className="font-bold"
               onClick={() => setTimelineOpen(!isTimelineOpen)}
             >
               {isTimelineOpen ? 'Close Timeline' : 'Timeline'}
@@ -325,7 +329,7 @@ export function RoomControlCenter({ roomId }: { roomId: string }) {
               variant="ghost" 
               size="xs" 
               onClick={() => setActiveLane('all')} 
-              className="text-[10px] uppercase font-black h-7 hover:bg-red-50 hover:text-red-600 text-muted-foreground ml-2"
+              className="uppercase font-black hover:bg-red-50 hover:text-red-600 text-muted-foreground ml-2"
             >
               <X className="w-3 h-3 mr-1" /> Clear Filter
             </Button>
@@ -434,7 +438,7 @@ export function RoomControlCenter({ roomId }: { roomId: string }) {
                       <span className="text-[9px] font-black text-muted-foreground uppercase mr-1">Bulk Resolve:</span>
                       <BulkActionButton label="INFO" onClick={() => openConfirm("Bulk Resolve: INFO", "Resolve all informational broadcasts?", () => bulkResolveMutation.mutate('info'))} />
                       <BulkActionButton label="ACKS" onClick={() => openConfirm("Bulk Resolve: ACKS", "Force-resolve all pending acknowledgements?", () => bulkResolveMutation.mutate('ack'))} />
-                      <BulkActionButton label="ALL" onClick={() => openConfirm("Bulk Resolve: ALL", "Danger: Resolve every actionable item in the inbox?", () => bulkResolveMutation.mutate())} variant="destructive" />
+                      <BulkActionButton label="ALL" onClick={() => openConfirm("Bulk Resolve: ALL", "Danger: Resolve every actionable item in the inbox?", () => bulkResolveMutation.mutate(undefined))} variant="destructive" />
                     </div>
                   )}
                 </div>
@@ -445,7 +449,6 @@ export function RoomControlCenter({ roomId }: { roomId: string }) {
                     <ReplyComposer 
                       recipient={replyTarget.sender}
                       subject={replyTarget.subject}
-                      relatedMessageId={replyTarget.id}
                       onSend={(body) => sendReplyMutation.mutate({ body, relatedId: replyTarget.id, recipient: replyTarget.sender })}
                       onCancel={() => setReplyTarget(null)}
                     />
