@@ -1329,6 +1329,67 @@ func TestDetectRoomPulseMessagesSkipsReadReplyExpected(t *testing.T) {
 	}
 }
 
+func TestDetectRoomPulseMessagesHonorsMinimumPulseFloor(t *testing.T) {
+	now := time.Date(2026, 4, 5, 12, 0, 0, 0, time.UTC)
+	pulses := detectRoomPulseMessages("alpha", []agent.BoardMessage{
+		{
+			ID:            "msg-1",
+			WorkspaceID:   "/repo",
+			Stream:        "room:alpha",
+			Sender:        "human-a",
+			Recipient:     "gemini-a",
+			ReplyExpected: true,
+			Subject:       "Need reply",
+			CreatedAt:     now.Add(-26 * time.Hour),
+		},
+	}, now, roomPulseConfig{
+		Enabled:         true,
+		ReplyStaleAfter: 2 * time.Hour,
+		MinPulseFloor:   24 * time.Hour,
+	}, map[string]time.Time{
+		"msg-1": now.Add(-3 * time.Hour),
+	})
+	if len(pulses) != 0 {
+		t.Fatalf("len(pulses)=%d want 0", len(pulses))
+	}
+}
+
+func TestDetectRoomCoordinatorPulseMessagesHonorsCoordinatorToggle(t *testing.T) {
+	now := time.Date(2026, 4, 5, 12, 0, 0, 0, time.UTC)
+	room := agent.RoomSummary{
+		ID:          "alpha",
+		WorkspaceID: "ws1",
+		Stream:      agent.RoomStreamName("alpha"),
+		Members: []agent.RoomMember{
+			{ActorID: "human-a", Role: "coordinator"},
+			{ActorID: "gemini-a", Role: "reviewer"},
+		},
+		Participants: []string{"human-a", "gemini-a"},
+	}
+	messages := []agent.BoardMessage{{
+		ID:          "m1",
+		WorkspaceID: "ws1",
+		Stream:      room.Stream,
+		Sender:      "gemini-a",
+		Recipient:   "human-a",
+		Kind:        agent.BoardMessageKindInstruction,
+		Priority:    2,
+		Subject:     "Need unblock",
+		Body:        "Need unblock",
+		CreatedAt:   now.Add(-10 * time.Minute),
+	}}
+	pulses := detectRoomCoordinatorPulseMessages(room, messages, nil, now, roomPulseConfig{
+		Enabled:                 true,
+		Interval:                30 * time.Minute,
+		TaskStaleAfter:          5 * time.Minute,
+		MinPulseFloor:           24 * time.Hour,
+		CoordinatorPulseEnabled: false,
+	}, map[string]time.Time{})
+	if len(pulses) != 0 {
+		t.Fatalf("len(pulses)=%d want 0", len(pulses))
+	}
+}
+
 func TestDetectRoomPulseMessagesKeepsOnlyLatestOutstandingPerRecipient(t *testing.T) {
 	now := time.Date(2026, 4, 4, 19, 0, 0, 0, time.UTC)
 	pulses := detectRoomPulseMessages("alpha", []agent.BoardMessage{
@@ -1374,15 +1435,15 @@ func TestBuildRoomStatusEntriesSkipsSystemReminderMessages(t *testing.T) {
 			CreatedAt: time.Date(2026, 4, 4, 19, 0, 0, 0, time.UTC),
 		},
 		{
-			ID:        "msg-1",
-			Stream:    "room:alpha",
-			Sender:    "cursor-a",
-			Recipient: "human-a",
-			Subject:   "Re: smoke",
-			Body:      "yes",
-			Status:    agent.BoardMessageStatusUnread,
+			ID:            "msg-1",
+			Stream:        "room:alpha",
+			Sender:        "cursor-a",
+			Recipient:     "human-a",
+			Subject:       "Re: smoke",
+			Body:          "yes",
+			Status:        agent.BoardMessageStatusUnread,
 			ReplyExpected: true,
-			CreatedAt: time.Date(2026, 4, 4, 19, 1, 0, 0, time.UTC),
+			CreatedAt:     time.Date(2026, 4, 4, 19, 1, 0, 0, time.UTC),
 		},
 	})
 	if len(entries) != 1 {

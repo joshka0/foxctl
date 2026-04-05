@@ -468,11 +468,14 @@ func RoomDetailHandler(cfg config.Config, log zerolog.Logger, events roomEventPu
 		}
 
 		if len(parts) >= 2 && parts[1] == "loop" {
-			if r.Method != http.MethodGet {
+			switch r.Method {
+			case http.MethodGet:
+				handleRoomLoopGet(w, r, cfg, log, roomID)
+			case http.MethodPatch:
+				handleRoomLoopPatch(w, r, cfg, log, roomID)
+			default:
 				httpError(w, http.StatusMethodNotAllowed, "method not allowed")
-				return
 			}
-			handleRoomLoopGet(w, r, cfg, log, roomID)
 			return
 		}
 

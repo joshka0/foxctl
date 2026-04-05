@@ -247,7 +247,7 @@ export interface RoomStatus {
     blocked_tasks: number;
   };
 }
-...
+
 export interface LeadChangeEvent {
   room_id: string;
   previous_lead: string;

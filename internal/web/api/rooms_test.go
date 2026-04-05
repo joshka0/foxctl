@@ -17,6 +17,7 @@ import (
 	ws "github.com/jkatigb/agentctl/internal/platform/workspace"
 	"github.com/jkatigb/agentctl/internal/storage/agents"
 	"github.com/jkatigb/agentctl/internal/storage/blackboard"
+	"github.com/jkatigb/agentctl/internal/storage/coordination"
 	taskstore "github.com/jkatigb/agentctl/internal/storage/tasks"
 )
 
@@ -730,6 +731,170 @@ func TestRoomDetailHandler_CoordinatorSetTransfersRole(t *testing.T) {
 	messages, _ := msgBody["messages"].([]any)
 	if got := strings.TrimSpace(messages[0].(map[string]any)["kind"].(string)); got != "lead_change" {
 		t.Fatalf("message kind=%q want lead_change", got)
+	}
+}
+
+func TestRoomDetailHandler_GetLoopReturnsPersistedState(t *testing.T) {
+	cfg := orchestrationTestConfig(t.TempDir())
+	listHandler := RoomsListHandler(cfg, zerolog.Nop())
+	roomHandler := RoomDetailHandler(cfg, zerolog.Nop(), nil)
+
+	createReq := httptest.NewRequest(http.MethodPost, "/api/rooms", strings.NewReader(`{
+		"workspace_id":"ws1",
+		"id":"alpha",
+		"title":"Alpha",
+		"members":[
+			{"actor_id":"human-a","role":"coordinator"},
+			{"actor_id":"gemini-a","role":"reviewer"}
+		]
+	}`))
+	createRR := httptest.NewRecorder()
+	listHandler.ServeHTTP(createRR, createReq)
+	if createRR.Code != http.StatusCreated {
+		t.Fatalf("create status=%d body=%s", createRR.Code, createRR.Body.String())
+	}
+
+	loopStore, err := coordination.Open(context.Background(), cfg.Storage.Root)
+	if err != nil {
+		t.Fatalf("open coordination store: %v", err)
+	}
+	defer loopStore.Close()
+	lastTick := time.Now().UTC().Add(-5 * time.Minute).Truncate(time.Second)
+	_, err = loopStore.UpsertRoomLoop(context.Background(), coordination.RoomLoop{
+		WorkspaceID:             "ws1",
+		RoomID:                  "alpha",
+		Enabled:                 true,
+		ManagedBy:               "agentctl.room.loop/test",
+		LastTickAt:              &lastTick,
+		PulseInterval:           45 * time.Minute,
+		ReplyStaleAfter:         90 * time.Minute,
+		TaskStaleAfter:          6 * time.Hour,
+		MinPulseFloor:           24 * time.Hour,
+		CoordinatorPulseEnabled: true,
+	})
+	if err != nil {
+		t.Fatalf("upsert room loop: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/rooms/alpha/loop?workspace_id=ws1&actor_id=gemini-a", nil)
+	rr := httptest.NewRecorder()
+	roomHandler.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	body := decodeResponseBody(t, rr)
+	loop := body["loop"].(map[string]any)
+	if got := strings.TrimSpace(loop["managed_by"].(string)); got != "agentctl.room.loop/test" {
+		t.Fatalf("managed_by=%q want agentctl.room.loop/test", got)
+	}
+	if got := strings.TrimSpace(loop["pulse_interval"].(string)); got != "45m0s" {
+		t.Fatalf("pulse_interval=%q want 45m0s", got)
+	}
+	if got := strings.TrimSpace(loop["reply_stale_after"].(string)); got != "1h30m0s" {
+		t.Fatalf("reply_stale_after=%q want 1h30m0s", got)
+	}
+	if got := strings.TrimSpace(loop["task_stale_after"].(string)); got != "6h0m0s" {
+		t.Fatalf("task_stale_after=%q want 6h0m0s", got)
+	}
+	if got := strings.TrimSpace(loop["min_pulse_floor"].(string)); got != "24h0m0s" {
+		t.Fatalf("min_pulse_floor=%q want 24h0m0s", got)
+	}
+	if _, ok := loop["last_tick_at"].(string); !ok {
+		t.Fatalf("last_tick_at type=%T want string", loop["last_tick_at"])
+	}
+}
+
+func TestRoomDetailHandler_PatchLoopRequiresCoordinator(t *testing.T) {
+	cfg := orchestrationTestConfig(t.TempDir())
+	listHandler := RoomsListHandler(cfg, zerolog.Nop())
+	roomHandler := RoomDetailHandler(cfg, zerolog.Nop(), nil)
+
+	createReq := httptest.NewRequest(http.MethodPost, "/api/rooms", strings.NewReader(`{
+		"workspace_id":"ws1",
+		"id":"alpha",
+		"title":"Alpha",
+		"members":[
+			{"actor_id":"human-a","role":"coordinator"},
+			{"actor_id":"gemini-a","role":"reviewer"}
+		]
+	}`))
+	createRR := httptest.NewRecorder()
+	listHandler.ServeHTTP(createRR, createReq)
+	if createRR.Code != http.StatusCreated {
+		t.Fatalf("create status=%d body=%s", createRR.Code, createRR.Body.String())
+	}
+
+	req := httptest.NewRequest(http.MethodPatch, "/api/rooms/alpha/loop", strings.NewReader(`{
+		"workspace_id":"ws1",
+		"actor_id":"gemini-a",
+		"pulse_interval":"15m"
+	}`))
+	rr := httptest.NewRecorder()
+	roomHandler.ServeHTTP(rr, req)
+	if rr.Code != http.StatusForbidden {
+		t.Fatalf("status=%d body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestRoomDetailHandler_PatchLoopPersistsPolicy(t *testing.T) {
+	cfg := orchestrationTestConfig(t.TempDir())
+	listHandler := RoomsListHandler(cfg, zerolog.Nop())
+	roomHandler := RoomDetailHandler(cfg, zerolog.Nop(), nil)
+
+	createReq := httptest.NewRequest(http.MethodPost, "/api/rooms", strings.NewReader(`{
+		"workspace_id":"ws1",
+		"id":"alpha",
+		"title":"Alpha",
+		"members":[
+			{"actor_id":"human-a","role":"coordinator"},
+			{"actor_id":"gemini-a","role":"reviewer"}
+		]
+	}`))
+	createRR := httptest.NewRecorder()
+	listHandler.ServeHTTP(createRR, createReq)
+	if createRR.Code != http.StatusCreated {
+		t.Fatalf("create status=%d body=%s", createRR.Code, createRR.Body.String())
+	}
+
+	patchReq := httptest.NewRequest(http.MethodPatch, "/api/rooms/alpha/loop", strings.NewReader(`{
+		"workspace_id":"ws1",
+		"actor_id":"human-a",
+		"enabled": true,
+		"pulse_interval":"15m",
+		"reply_stale_after":"20m",
+		"task_stale_after":"45m",
+		"coordinator_pulse_enabled": false
+	}`))
+	patchRR := httptest.NewRecorder()
+	roomHandler.ServeHTTP(patchRR, patchReq)
+	if patchRR.Code != http.StatusOK {
+		t.Fatalf("patch status=%d body=%s", patchRR.Code, patchRR.Body.String())
+	}
+	body := decodeResponseBody(t, patchRR)
+	loop := body["loop"].(map[string]any)
+	if got := strings.TrimSpace(loop["pulse_interval"].(string)); got != "15m0s" {
+		t.Fatalf("pulse_interval=%q want 15m0s", got)
+	}
+	if got := strings.TrimSpace(loop["reply_stale_after"].(string)); got != "20m0s" {
+		t.Fatalf("reply_stale_after=%q want 20m0s", got)
+	}
+	if got := strings.TrimSpace(loop["task_stale_after"].(string)); got != "45m0s" {
+		t.Fatalf("task_stale_after=%q want 45m0s", got)
+	}
+	if got := loop["coordinator_pulse_enabled"].(bool); got {
+		t.Fatalf("coordinator_pulse_enabled=%v want false", got)
+	}
+
+	getReq := httptest.NewRequest(http.MethodGet, "/api/rooms/alpha/loop?workspace_id=ws1&actor_id=human-a", nil)
+	getRR := httptest.NewRecorder()
+	roomHandler.ServeHTTP(getRR, getReq)
+	if getRR.Code != http.StatusOK {
+		t.Fatalf("get status=%d body=%s", getRR.Code, getRR.Body.String())
+	}
+	getBody := decodeResponseBody(t, getRR)
+	gotLoop := getBody["loop"].(map[string]any)
+	if got := strings.TrimSpace(gotLoop["pulse_interval"].(string)); got != "15m0s" {
+		t.Fatalf("persisted pulse_interval=%q want 15m0s", got)
 	}
 }
 

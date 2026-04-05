@@ -24,6 +24,21 @@ type Lease struct {
 	UpdatedAt time.Time
 }
 
+// RoomLoop stores persisted runtime/policy state for one room loop.
+type RoomLoop struct {
+	WorkspaceID              string
+	RoomID                   string
+	Enabled                  bool
+	ManagedBy                string
+	LastTickAt               *time.Time
+	PulseInterval            time.Duration
+	ReplyStaleAfter          time.Duration
+	TaskStaleAfter           time.Duration
+	MinPulseFloor            time.Duration
+	CoordinatorPulseEnabled  bool
+	UpdatedAt                time.Time
+}
+
 // Open opens the coordination store rooted at storageRoot/coordination.db.
 // The database driver is selected via the dbdriver env var conventions (e.g., AGENTCTL_COORDINATION_DB_DRIVER).
 //
@@ -65,11 +80,178 @@ CREATE TABLE IF NOT EXISTS daemon_leases (
 	created_at_ms  INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_daemon_leases_expires ON daemon_leases(expires_at_ms);
+
+CREATE TABLE IF NOT EXISTS room_loops (
+	workspace_id                TEXT NOT NULL,
+	room_id                     TEXT NOT NULL,
+	enabled                     INTEGER NOT NULL DEFAULT 1,
+	managed_by                  TEXT NOT NULL DEFAULT '',
+	last_tick_at_ms             INTEGER,
+	pulse_interval_ms           INTEGER NOT NULL,
+	reply_stale_after_ms        INTEGER NOT NULL,
+	task_stale_after_ms         INTEGER NOT NULL,
+	min_pulse_floor_ms          INTEGER NOT NULL,
+	coordinator_pulse_enabled   INTEGER NOT NULL DEFAULT 1,
+	updated_at_ms               INTEGER NOT NULL,
+	created_at_ms               INTEGER NOT NULL,
+	PRIMARY KEY (workspace_id, room_id)
+);
 `
 	if _, err := db.ExecContext(ctx, ddl); err != nil {
 		return fmt.Errorf("coordination: migrate: %w", err)
 	}
 	return nil
+}
+
+// GetRoomLoop returns the persisted loop policy/runtime state for one room.
+func (s *Store) GetRoomLoop(ctx context.Context, workspaceID, roomID string) (*RoomLoop, error) {
+	if s == nil || s.db == nil {
+		return nil, fmt.Errorf("coordination: store not initialized")
+	}
+	workspaceID = strings.TrimSpace(workspaceID)
+	roomID = strings.TrimSpace(roomID)
+	if workspaceID == "" || roomID == "" {
+		return nil, fmt.Errorf("coordination: workspace_id and room_id are required")
+	}
+
+	var loop RoomLoop
+	var (
+		lastTickMS sql.NullInt64
+		updatedMS  int64
+	)
+	err := s.db.QueryRowContext(ctx, `
+		SELECT workspace_id, room_id, enabled, managed_by, last_tick_at_ms,
+		       pulse_interval_ms, reply_stale_after_ms, task_stale_after_ms,
+		       min_pulse_floor_ms, coordinator_pulse_enabled, updated_at_ms
+		FROM room_loops
+		WHERE workspace_id = $1 AND room_id = $2
+	`, workspaceID, roomID).Scan(
+		&loop.WorkspaceID,
+		&loop.RoomID,
+		(*intBool)(&loop.Enabled),
+		&loop.ManagedBy,
+		&lastTickMS,
+		(*durationMillis)(&loop.PulseInterval),
+		(*durationMillis)(&loop.ReplyStaleAfter),
+		(*durationMillis)(&loop.TaskStaleAfter),
+		(*durationMillis)(&loop.MinPulseFloor),
+		(*intBool)(&loop.CoordinatorPulseEnabled),
+		&updatedMS,
+	)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("coordination: get room loop: %w", err)
+	}
+	if lastTickMS.Valid {
+		ts := time.UnixMilli(lastTickMS.Int64).UTC()
+		loop.LastTickAt = &ts
+	}
+	loop.UpdatedAt = time.UnixMilli(updatedMS).UTC()
+	return &loop, nil
+}
+
+// UpsertRoomLoop inserts or updates the persisted loop state for a room.
+func (s *Store) UpsertRoomLoop(ctx context.Context, loop RoomLoop) (RoomLoop, error) {
+	if s == nil || s.db == nil {
+		return RoomLoop{}, fmt.Errorf("coordination: store not initialized")
+	}
+	loop.WorkspaceID = strings.TrimSpace(loop.WorkspaceID)
+	loop.RoomID = strings.TrimSpace(loop.RoomID)
+	loop.ManagedBy = strings.TrimSpace(loop.ManagedBy)
+	if loop.WorkspaceID == "" || loop.RoomID == "" {
+		return RoomLoop{}, fmt.Errorf("coordination: workspace_id and room_id are required")
+	}
+	now := time.Now().UTC()
+	loop.UpdatedAt = now
+
+	var lastTick any
+	if loop.LastTickAt != nil && !loop.LastTickAt.IsZero() {
+		lastTick = loop.LastTickAt.UnixMilli()
+	}
+	_, err := s.db.ExecContext(ctx, `
+		INSERT INTO room_loops (
+			workspace_id, room_id, enabled, managed_by, last_tick_at_ms,
+			pulse_interval_ms, reply_stale_after_ms, task_stale_after_ms,
+			min_pulse_floor_ms, coordinator_pulse_enabled, updated_at_ms, created_at_ms
+		)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+		ON CONFLICT(workspace_id, room_id) DO UPDATE SET
+			enabled = excluded.enabled,
+			managed_by = excluded.managed_by,
+			last_tick_at_ms = excluded.last_tick_at_ms,
+			pulse_interval_ms = excluded.pulse_interval_ms,
+			reply_stale_after_ms = excluded.reply_stale_after_ms,
+			task_stale_after_ms = excluded.task_stale_after_ms,
+			min_pulse_floor_ms = excluded.min_pulse_floor_ms,
+			coordinator_pulse_enabled = excluded.coordinator_pulse_enabled,
+			updated_at_ms = excluded.updated_at_ms
+	`,
+		loop.WorkspaceID,
+		loop.RoomID,
+		boolToIntCoord(loop.Enabled),
+		loop.ManagedBy,
+		lastTick,
+		loop.PulseInterval.Milliseconds(),
+		loop.ReplyStaleAfter.Milliseconds(),
+		loop.TaskStaleAfter.Milliseconds(),
+		loop.MinPulseFloor.Milliseconds(),
+		boolToIntCoord(loop.CoordinatorPulseEnabled),
+		now.UnixMilli(),
+		now.UnixMilli(),
+	)
+	if err != nil {
+		return RoomLoop{}, fmt.Errorf("coordination: upsert room loop: %w", err)
+	}
+	return loop, nil
+}
+
+type durationMillis time.Duration
+
+func (d *durationMillis) Scan(src any) error {
+	switch v := src.(type) {
+	case int64:
+		*d = durationMillis(time.Duration(v) * time.Millisecond)
+		return nil
+	case int:
+		*d = durationMillis(time.Duration(v) * time.Millisecond)
+		return nil
+	case []byte:
+		parsed, err := time.ParseDuration(string(v) + "ms")
+		if err != nil {
+			return err
+		}
+		*d = durationMillis(parsed)
+		return nil
+	default:
+		return fmt.Errorf("coordination: unsupported duration scan type %T", src)
+	}
+}
+
+type intBool bool
+
+func (b *intBool) Scan(src any) error {
+	switch v := src.(type) {
+	case int64:
+		*b = intBool(v != 0)
+		return nil
+	case int:
+		*b = intBool(v != 0)
+		return nil
+	case bool:
+		*b = intBool(v)
+		return nil
+	default:
+		return fmt.Errorf("coordination: unsupported bool scan type %T", src)
+	}
+}
+
+func boolToIntCoord(v bool) int {
+	if v {
+		return 1
+	}
+	return 0
 }
 
 // TryAcquireLease attempts to acquire or renew a lease for leaseName.

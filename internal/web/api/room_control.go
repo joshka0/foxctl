@@ -16,6 +16,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/platform/config"
 	ws "github.com/jkatigb/agentctl/internal/platform/workspace"
 	"github.com/jkatigb/agentctl/internal/storage/blackboard"
+	"github.com/jkatigb/agentctl/internal/storage/coordination"
 	taskstore "github.com/jkatigb/agentctl/internal/storage/tasks"
 )
 
@@ -96,14 +97,24 @@ type roomInboxEntryResponse struct {
 }
 
 type roomLoopResponse struct {
-	Enabled                 bool          `json:"enabled"`
-	ManagedBy               string        `json:"managed_by"`
-	LastTickAt              *time.Time    `json:"last_tick_at,omitempty"`
-	PulseInterval           time.Duration `json:"pulse_interval"`
-	ReplyStaleAfter         time.Duration `json:"reply_stale_after"`
-	TaskStaleAfter          time.Duration `json:"task_stale_after"`
-	MinPulseFloor           time.Duration `json:"min_pulse_floor"`
-	CoordinatorPulseEnabled bool          `json:"coordinator_pulse_enabled"`
+	Enabled                 bool       `json:"enabled"`
+	ManagedBy               string     `json:"managed_by"`
+	LastTickAt              *time.Time `json:"last_tick_at,omitempty"`
+	PulseInterval           string     `json:"pulse_interval"`
+	ReplyStaleAfter         string     `json:"reply_stale_after"`
+	TaskStaleAfter          string     `json:"task_stale_after"`
+	MinPulseFloor           string     `json:"min_pulse_floor"`
+	CoordinatorPulseEnabled bool       `json:"coordinator_pulse_enabled"`
+}
+
+type roomLoopPatchRequest struct {
+	WorkspaceID             string  `json:"workspace_id"`
+	ActorID                 string  `json:"actor_id"`
+	Enabled                 *bool   `json:"enabled,omitempty"`
+	PulseInterval           *string `json:"pulse_interval,omitempty"`
+	ReplyStaleAfter         *string `json:"reply_stale_after,omitempty"`
+	TaskStaleAfter          *string `json:"task_stale_after,omitempty"`
+	CoordinatorPulseEnabled *bool   `json:"coordinator_pulse_enabled,omitempty"`
 }
 
 type roomCoordinatorSetRequest struct {
@@ -305,15 +316,127 @@ func handleRoomTasksGet(w http.ResponseWriter, r *http.Request, cfg config.Confi
 	})
 }
 
-func handleRoomLoopGet(w http.ResponseWriter, r *http.Request, _ config.Config, _ zerolog.Logger, roomID string) {
+func handleRoomLoopGet(w http.ResponseWriter, r *http.Request, cfg config.Config, log zerolog.Logger, roomID string) {
 	workspaceID := roomWorkspaceID(r)
 	if workspaceID == "" {
 		httpError(w, http.StatusBadRequest, "workspace_id required")
 		return
 	}
+	actorID := strings.TrimSpace(r.URL.Query().Get("actor_id"))
+	if actorID == "" {
+		httpError(w, http.StatusBadRequest, "actor_id required")
+		return
+	}
+	store, err := blackboard.OpenBoardStore(r.Context(), cfg.Storage.Root)
+	if err != nil {
+		log.Error().Err(err).Msg("failed to open board store")
+		httpError(w, http.StatusInternalServerError, "failed to open board store")
+		return
+	}
+	defer store.Close()
+	summary, err := store.GetRoom(r.Context(), workspaceID, roomID, actorID)
+	if err != nil {
+		if errors.Is(err, blackboard.ErrRoomNotFound) {
+			httpError(w, http.StatusNotFound, "room not found")
+			return
+		}
+		log.Error().Err(err).Str("room_id", roomID).Msg("failed to load room for loop get")
+		httpError(w, http.StatusInternalServerError, "failed to load room")
+		return
+	}
+	if !apiRoomHasParticipant(summary, actorID) {
+		httpError(w, http.StatusForbidden, "only current room members can inspect loop state")
+		return
+	}
+	loopStore, err := coordination.Open(r.Context(), cfg.Storage.Root)
+	if err != nil {
+		log.Error().Err(err).Msg("failed to open coordination store")
+		httpError(w, http.StatusInternalServerError, "failed to open coordination store")
+		return
+	}
+	defer loopStore.Close()
+	loop, err := apiLoadRoomLoop(r.Context(), loopStore, workspaceID, roomID)
+	if err != nil {
+		log.Error().Err(err).Str("room_id", roomID).Msg("failed to load room loop")
+		httpError(w, http.StatusInternalServerError, "failed to load room loop")
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"room_id": roomID,
-		"loop":    defaultRoomLoopResponse(),
+		"loop":    apiConvertRoomLoop(loop),
+	})
+}
+
+func handleRoomLoopPatch(w http.ResponseWriter, r *http.Request, cfg config.Config, log zerolog.Logger, roomID string) {
+	var req roomLoopPatchRequest
+	if err := readJSON(w, r, &req); err != nil {
+		httpError(w, http.StatusBadRequest, "invalid request body: "+err.Error())
+		return
+	}
+	req.WorkspaceID = strings.TrimSpace(req.WorkspaceID)
+	req.ActorID = strings.TrimSpace(req.ActorID)
+	if req.WorkspaceID == "" {
+		httpError(w, http.StatusBadRequest, "workspace_id is required")
+		return
+	}
+	if req.ActorID == "" {
+		httpError(w, http.StatusBadRequest, "actor_id is required")
+		return
+	}
+
+	boardStore, err := blackboard.OpenBoardStore(r.Context(), cfg.Storage.Root)
+	if err != nil {
+		log.Error().Err(err).Msg("failed to open board store")
+		httpError(w, http.StatusInternalServerError, "failed to open board store")
+		return
+	}
+	defer boardStore.Close()
+	summary, err := boardStore.GetRoom(r.Context(), req.WorkspaceID, roomID, req.ActorID)
+	if err != nil {
+		if errors.Is(err, blackboard.ErrRoomNotFound) {
+			httpError(w, http.StatusNotFound, "room not found")
+			return
+		}
+		log.Error().Err(err).Str("room_id", roomID).Msg("failed to load room for loop patch")
+		httpError(w, http.StatusInternalServerError, "failed to update room loop")
+		return
+	}
+	if !apiRoomMemberHasRole(summary.Members, req.ActorID, "coordinator") {
+		httpError(w, http.StatusForbidden, "only room coordinators can update loop policy")
+		return
+	}
+
+	loopStore, err := coordination.Open(r.Context(), cfg.Storage.Root)
+	if err != nil {
+		log.Error().Err(err).Msg("failed to open coordination store")
+		httpError(w, http.StatusInternalServerError, "failed to open coordination store")
+		return
+	}
+	defer loopStore.Close()
+	current, err := apiLoadRoomLoop(r.Context(), loopStore, req.WorkspaceID, roomID)
+	if err != nil {
+		log.Error().Err(err).Str("room_id", roomID).Msg("failed to load room loop for patch")
+		httpError(w, http.StatusInternalServerError, "failed to update room loop")
+		return
+	}
+	updated, err := apiApplyRoomLoopPatch(current, req)
+	if err != nil {
+		httpError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	updated.ManagedBy = strings.TrimSpace(current.ManagedBy)
+	if updated.ManagedBy == "" {
+		updated.ManagedBy = apiRoomLoopManager
+	}
+	persisted, err := loopStore.UpsertRoomLoop(r.Context(), updated)
+	if err != nil {
+		log.Error().Err(err).Str("room_id", roomID).Msg("failed to persist room loop")
+		httpError(w, http.StatusInternalServerError, "failed to update room loop")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"room_id": roomID,
+		"loop":    apiConvertRoomLoop(persisted),
 	})
 }
 
@@ -958,12 +1081,116 @@ func defaultRoomLoopResponse() roomLoopResponse {
 	return roomLoopResponse{
 		Enabled:                 true,
 		ManagedBy:               apiRoomLoopManager,
+		PulseInterval:           apiRoomPulseInterval.String(),
+		ReplyStaleAfter:         apiRoomReplyStaleAfter.String(),
+		TaskStaleAfter:          apiRoomTaskStaleAfter.String(),
+		MinPulseFloor:           apiRoomMinimumPulseFloor.String(),
+		CoordinatorPulseEnabled: true,
+	}
+}
+
+func defaultRoomLoopState(workspaceID, roomID string) coordination.RoomLoop {
+	return coordination.RoomLoop{
+		WorkspaceID:             strings.TrimSpace(workspaceID),
+		RoomID:                  strings.TrimSpace(roomID),
+		Enabled:                 true,
+		ManagedBy:               apiRoomLoopManager,
 		PulseInterval:           apiRoomPulseInterval,
 		ReplyStaleAfter:         apiRoomReplyStaleAfter,
 		TaskStaleAfter:          apiRoomTaskStaleAfter,
 		MinPulseFloor:           apiRoomMinimumPulseFloor,
 		CoordinatorPulseEnabled: true,
 	}
+}
+
+func apiLoadRoomLoop(ctx context.Context, store *coordination.Store, workspaceID, roomID string) (coordination.RoomLoop, error) {
+	loop, err := store.GetRoomLoop(ctx, workspaceID, roomID)
+	if err != nil {
+		return coordination.RoomLoop{}, err
+	}
+	if loop == nil {
+		def := defaultRoomLoopState(workspaceID, roomID)
+		return def, nil
+	}
+	if loop.MinPulseFloor <= 0 {
+		loop.MinPulseFloor = apiRoomMinimumPulseFloor
+	}
+	if loop.PulseInterval <= 0 {
+		loop.PulseInterval = apiRoomPulseInterval
+	}
+	if loop.ReplyStaleAfter <= 0 {
+		loop.ReplyStaleAfter = apiRoomReplyStaleAfter
+	}
+	if loop.TaskStaleAfter <= 0 {
+		loop.TaskStaleAfter = apiRoomTaskStaleAfter
+	}
+	if strings.TrimSpace(loop.ManagedBy) == "" {
+		loop.ManagedBy = apiRoomLoopManager
+	}
+	return *loop, nil
+}
+
+func apiConvertRoomLoop(loop coordination.RoomLoop) roomLoopResponse {
+	return roomLoopResponse{
+		Enabled:                 loop.Enabled,
+		ManagedBy:               loop.ManagedBy,
+		LastTickAt:              loop.LastTickAt,
+		PulseInterval:           loop.PulseInterval.String(),
+		ReplyStaleAfter:         loop.ReplyStaleAfter.String(),
+		TaskStaleAfter:          loop.TaskStaleAfter.String(),
+		MinPulseFloor:           loop.MinPulseFloor.String(),
+		CoordinatorPulseEnabled: loop.CoordinatorPulseEnabled,
+	}
+}
+
+func apiApplyRoomLoopPatch(current coordination.RoomLoop, req roomLoopPatchRequest) (coordination.RoomLoop, error) {
+	updated := current
+	if req.Enabled != nil {
+		updated.Enabled = *req.Enabled
+	}
+	if req.CoordinatorPulseEnabled != nil {
+		updated.CoordinatorPulseEnabled = *req.CoordinatorPulseEnabled
+	}
+	if req.PulseInterval != nil {
+		d, err := apiParsePositiveDuration(*req.PulseInterval, "pulse_interval")
+		if err != nil {
+			return coordination.RoomLoop{}, err
+		}
+		updated.PulseInterval = d
+	}
+	if req.ReplyStaleAfter != nil {
+		d, err := apiParsePositiveDuration(*req.ReplyStaleAfter, "reply_stale_after")
+		if err != nil {
+			return coordination.RoomLoop{}, err
+		}
+		updated.ReplyStaleAfter = d
+	}
+	if req.TaskStaleAfter != nil {
+		d, err := apiParsePositiveDuration(*req.TaskStaleAfter, "task_stale_after")
+		if err != nil {
+			return coordination.RoomLoop{}, err
+		}
+		updated.TaskStaleAfter = d
+	}
+	if updated.MinPulseFloor <= 0 {
+		updated.MinPulseFloor = apiRoomMinimumPulseFloor
+	}
+	if !updated.Enabled && !updated.CoordinatorPulseEnabled {
+		return coordination.RoomLoop{}, fmt.Errorf("disable everything forever is not allowed")
+	}
+	return updated, nil
+}
+
+func apiParsePositiveDuration(raw string, field string) (time.Duration, error) {
+	value := strings.TrimSpace(raw)
+	if value == "" {
+		return 0, fmt.Errorf("%s is required", field)
+	}
+	d, err := time.ParseDuration(value)
+	if err != nil || d <= 0 {
+		return 0, fmt.Errorf("invalid %s duration", field)
+	}
+	return d, nil
 }
 
 func apiRoomCoordinatorActorID(members []agent.RoomMember) string {

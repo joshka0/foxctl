@@ -2,6 +2,8 @@ import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { Label } from '@/components/ui/label'
+import { Switch } from '@/components/ui/switch'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { TooltipProvider, Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
 import { 
@@ -30,6 +32,7 @@ import { RoomDialogs } from './RoomDialogs'
 import { TimelineEvent } from './TimelineEvent'
 import { ParticipantList } from './ParticipantList'
 import { ReplyComposer } from './ReplyComposer'
+import { LoopPolicyEditor } from './LoopPolicyEditor'
 import { Hash, MessageSquare, ShieldAlert, Zap, X, CheckSquare, Bell, RefreshCw, CheckCircle2, UserCircle, Users } from 'lucide-react'
 import type { MailboxMessage } from '@/api/types'
 
@@ -53,11 +56,13 @@ export function RoomControlCenter({ roomId }: { roomId: string }) {
     openBlockTask,
     openAbandonTask,
     openReassignTask,
-    openConfirm
+    openConfirm,
+    setTaskFilters
   } = useRoomControlStore()
 
   const [timelineFilter, setTimelineFilter] = useState<'all' | 'messages' | 'reclaims' | 'handoffs' | 'reminders' | 'reassignments'>('all')
   const [isParticipantsOpen, setIsParticipantsOpen] = useState(false)
+  const [isLoopEditorOpen, setIsLoopEditorOpen] = useState(false)
   const [replyTarget, setReplyTarget] = useState<MailboxMessage | null>(null)
 
   // Queries
@@ -92,7 +97,7 @@ export function RoomControlCenter({ roomId }: { roomId: string }) {
 
   const { data: loop } = useQuery({
     queryKey: ['room', roomId, 'loop'],
-    queryFn: () => getRoomLoop(roomId, workspaceId),
+    queryFn: () => getRoomLoop(roomId, workspaceId, currentActorID),
   })
 
   // Mutations
@@ -159,7 +164,7 @@ export function RoomControlCenter({ roomId }: { roomId: string }) {
   const isCoordinator = status?.coordinator_actor_id === currentActorID
   const userRole = status?.participants.find(p => p.actor_id === currentActorID)?.role || 'member'
 
-  if (!status) return <div className="p-8 text-center text-muted-foreground animate-pulse text-sm font-mono">LOADING ROOM_CONTROL_PLANE...</div>
+  if (!status) return <div className="p-8 text-center text-muted-foreground animate-pulse text-sm font-mono tracking-tighter">LOADING ROOM_CONTROL_PLANE...</div>
 
   // Lane filtering logic
   const filteredTasks = tasks?.filter(t => {
@@ -202,22 +207,43 @@ export function RoomControlCenter({ roomId }: { roomId: string }) {
             <div className="flex items-center gap-1 shrink-0">
               <Badge variant="outline" className="text-[9px] py-0 px-1.5 h-4 opacity-70 border-muted">WS: {workspaceId}</Badge>
               <Badge variant="outline" className="text-[9px] py-0 px-1.5 h-4 opacity-70 border-muted">POLICY: {status.room.dispatch_policy}</Badge>
-              <Badge variant="secondary" className="text-[9px] py-0 px-1.5 h-4 bg-primary/10 text-primary border-primary/20 font-black uppercase">{userRole}</Badge>
-            </div>
-            {loop?.enabled && (
+            <Badge variant="secondary" className="text-[9px] py-0 px-1.5 h-4 bg-primary/10 text-primary border-primary/20 font-black uppercase">{userRole}</Badge>
+            {loop ? (
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <Badge variant="secondary" className="bg-green-500/10 text-green-600 border-green-500/20 text-[9px] py-0 h-4 flex items-center gap-1 shrink-0 cursor-help">
-                    <Zap className="w-2 h-2 fill-current" /> LOOP: {loop.pulse_interval}
+                  <Badge 
+                    variant="secondary" 
+                    className={cn(
+                      "text-[9px] py-0 h-4 flex items-center gap-1 shrink-0 transition-colors",
+                      loop.enabled 
+                        ? "bg-green-500/10 text-green-600 border-green-500/20" 
+                        : "bg-muted text-muted-foreground border-muted",
+                      isCoordinator && "cursor-pointer hover:opacity-80"
+                    )}
+                    onClick={() => isCoordinator && setIsLoopEditorOpen(true)}
+                  >
+                    <Zap className={cn("w-2 h-2", loop.enabled ? "fill-current" : "opacity-50")} /> 
+                    LOOP: {loop.enabled ? loop.pulse_interval : 'OFF'}
                   </Badge>
                 </TooltipTrigger>
                 <TooltipContent side="bottom" className="text-[10px] space-y-1">
-                  <p>Managed by: <span className="font-bold">{loop.managed_by}</span></p>
-                  <p>Last tick: <span className="font-mono">{loop.last_tick_at ? new Date(loop.last_tick_at).toLocaleTimeString() : 'never'}</span></p>
+                  <p>Managed by: <span className="font-bold">{loop.managed_by || 'none'}</span></p>
+                  {loop.enabled && <p>Last tick: <span className="font-mono">{loop.last_tick_at ? new Date(loop.last_tick_at).toLocaleTimeString() : 'never'}</span></p>}
                   <p>Stale thresholds: task={loop.task_stale_after}, reply={loop.reply_stale_after}</p>
+                  {isCoordinator && <p className="text-[9px] text-primary/70 italic pt-1 font-bold">Click to edit loop policy</p>}
                 </TooltipContent>
               </Tooltip>
+            ) : isCoordinator && (
+              <Button 
+                variant="ghost" 
+                size="xs" 
+                className="h-4 px-1.5 text-[9px] font-black text-muted-foreground hover:text-primary"
+                onClick={() => setIsLoopEditorOpen(true)}
+              >
+                + CONFIGURE LOOP
+              </Button>
             )}
+            </div>
           </div>
           <div className="flex items-center gap-2 shrink-0 ml-4">
             <div className="text-[10px] text-muted-foreground flex items-center gap-1.5 mr-2">
@@ -319,11 +345,19 @@ export function RoomControlCenter({ roomId }: { roomId: string }) {
             {/* 3. Task Board */}
             <div className="flex-1 min-h-0 flex flex-col border-b">
               <div className="px-4 py-1.5 bg-muted/5 border-b flex items-center justify-between">
-                <div className="flex items-center gap-2 text-muted-foreground">
+                <div className="flex items-center gap-2 text-muted-foreground text-left">
                   <ShieldAlert className="w-3.5 h-3.5" />
                   <h2 className="text-[10px] font-black uppercase tracking-widest">Task Board</h2>
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-3">
+                  <div className="flex items-center gap-1.5 mr-2">
+                    <Switch 
+                      id="show-completed" 
+                      checked={taskFilters.includeCompleted} 
+                      onCheckedChange={(checked) => setTaskFilters({ includeCompleted: checked })} 
+                    />
+                    <Label htmlFor="show-completed" className="text-[9px] font-bold uppercase text-muted-foreground cursor-pointer">Show Done</Label>
+                  </div>
                   <Badge variant="outline" className="text-[9px] h-4 py-0 cursor-pointer hover:bg-muted font-bold" onClick={() => queryClient.invalidateQueries({ queryKey: ['room', roomId, 'tasks'] })}>
                     <RefreshCw className="w-2.5 h-2.5 mr-1" /> REFRESH
                   </Badge>
@@ -385,9 +419,9 @@ export function RoomControlCenter({ roomId }: { roomId: string }) {
             {/* 4. Inbox */}
             <div className="h-1/3 min-h-[240px] flex flex-col shrink-0">
               <div className="px-4 py-1.5 bg-muted/5 border-b flex items-center justify-between">
-                <div className="flex items-center gap-2 text-muted-foreground">
+                <div className="flex items-center gap-2 text-muted-foreground text-left">
                   <MessageSquare className="w-3.5 h-3.5" />
-                  <h2 className="text-[10px] font-black uppercase tracking-widest">Inbox</h2>
+                  <h2 className="text-[10px] font-bold uppercase tracking-widest">Inbox</h2>
                 </div>
                 <div className="flex gap-1.5 items-center">
                   <InboxFilterButton active={inboxFilters.only === 'all'} label="All" onClick={() => setInboxFilters({ only: 'all' })} />
@@ -471,6 +505,16 @@ export function RoomControlCenter({ roomId }: { roomId: string }) {
         
         {/* Dialogs */}
         <RoomDialogs roomId={roomId} />
+        {loop && (
+          <LoopPolicyEditor 
+            roomId={roomId} 
+            workspaceId={workspaceId} 
+            actorId={currentActorID}
+            loop={loop} 
+            isOpen={isLoopEditorOpen} 
+            onClose={() => setIsLoopEditorOpen(false)} 
+          />
+        )}
       </div>
     </TooltipProvider>
   )
@@ -506,8 +550,8 @@ function RibbonChip({ label, count, color, animatePulse, active, onClick }: {
 function TaskColumn({ title, count, children }: { title: string, count: number, children: React.ReactNode }) {
   return (
     <div className="w-72 shrink-0 flex flex-col gap-2.5">
-      <div className="flex items-center justify-between px-1.5 text-left">
-        <h3 className="text-[10px] font-black uppercase tracking-widest text-muted-foreground/60 font-mono">{title}</h3>
+      <div className="flex items-center justify-between px-1.5 text-left font-mono">
+        <h3 className="text-[10px] font-black uppercase tracking-widest text-muted-foreground/60">{title}</h3>
         <Badge variant="secondary" className="text-[9px] h-4 px-1.5 font-bold tabular-nums">{count}</Badge>
       </div>
       <ScrollArea className="flex-1 rounded-xl border border-muted/40 bg-muted/5 p-2.5 shadow-inner">

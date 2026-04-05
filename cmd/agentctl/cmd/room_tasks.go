@@ -13,12 +13,17 @@ import (
 	ws "github.com/jkatigb/agentctl/internal/platform/workspace"
 	"github.com/jkatigb/agentctl/internal/protocol"
 	"github.com/jkatigb/agentctl/internal/storage/blackboard"
+	"github.com/jkatigb/agentctl/internal/storage/coordination"
 	taskstore "github.com/jkatigb/agentctl/internal/storage/tasks"
 	"github.com/jkatigb/agentctl/internal/tmuxbridge"
 	"github.com/spf13/cobra"
 )
 
-const roomTaskScanLimit = 1000
+const (
+	roomTaskScanLimit         = 1000
+	roomLoopManagedBy         = "agentctl.room.loop"
+	roomLoopMinimumPulseFloor = 24 * time.Hour
+)
 
 func newRoomTaskCommand() *cobra.Command {
 	cmd := &cobra.Command{
@@ -324,9 +329,12 @@ func newRoomLoopCommand() *cobra.Command {
 				ZellijSession:    session,
 				ZellijPluginPath: plugin,
 			}, poll, taskPoll, history, roomPulseConfig{
-				Interval:        pulse,
-				ReplyStaleAfter: replyStale,
-				TaskStaleAfter:  taskHeartbeatStale,
+				Enabled:                 pulse > 0,
+				Interval:                pulse,
+				ReplyStaleAfter:         replyStale,
+				TaskStaleAfter:          taskHeartbeatStale,
+				MinPulseFloor:           roomLoopMinimumPulseFloor,
+				CoordinatorPulseEnabled: true,
 			})
 		},
 	}
@@ -932,15 +940,22 @@ func runRoomTaskTransition(cmd *cobra.Command, workspace, roomID, sender, taskID
 }
 
 type roomPulseConfig struct {
-	Interval        time.Duration
-	ReplyStaleAfter time.Duration
-	TaskStaleAfter  time.Duration
+	Enabled                 bool
+	Interval                time.Duration
+	ReplyStaleAfter         time.Duration
+	TaskStaleAfter          time.Duration
+	MinPulseFloor           time.Duration
+	CoordinatorPulseEnabled bool
 }
 
 func runRoomLoop(cmd *cobra.Command, workspace, roomID string, relay roomRelayOptions, poll, taskPoll time.Duration, history int, pulse roomPulseConfig) error {
 	absWorkspace, err := resolveRoomWorkspace(workspace)
 	if err != nil {
 		return err
+	}
+	cfg, err := loadConfig(cmd.Context())
+	if err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.loop", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
 	}
 	boardStore, err := openRoomBoardStore(cmd.Context())
 	if err != nil {
@@ -952,10 +967,21 @@ func runRoomLoop(cmd *cobra.Command, workspace, roomID string, relay roomRelayOp
 		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.loop", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
 	}
 	defer taskStore.Close()
+	coordStore, err := coordination.Open(cmd.Context(), cfg.Storage.Root)
+	if err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.loop", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	defer coordStore.Close()
 
 	client := tmuxbridge.New()
 	writer := envelope.NewWriter(cmd.OutOrStdout())
 	seq := 0
+
+	persistedLoop, err := syncRoomLoopState(cmd.Context(), coordStore, absWorkspace, roomID, pulse, time.Now().UTC())
+	if err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.loop", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	pulse = persistedLoop
 
 	summary, messages, err := loadRoomState(cmd.Context(), boardStore, absWorkspace, roomID, "", roomTaskScanLimit)
 	if err != nil {
@@ -999,8 +1025,10 @@ func runRoomLoop(cmd *cobra.Command, workspace, roomID string, relay roomRelayOp
 	defer messageTicker.Stop()
 	taskTicker := time.NewTicker(normalizeRoomPoll(taskPoll))
 	defer taskTicker.Stop()
+	configTicker := time.NewTicker(5 * time.Second)
+	defer configTicker.Stop()
 	var pulseTicker *time.Ticker
-	if pulse.Interval > 0 {
+	if pulse.Enabled && pulse.Interval > 0 {
 		pulseTicker = time.NewTicker(pulse.Interval)
 		defer pulseTicker.Stop()
 	}
@@ -1020,6 +1048,14 @@ func runRoomLoop(cmd *cobra.Command, workspace, roomID string, relay roomRelayOp
 				m.Final = &final
 			})))
 		case <-messageTicker.C:
+			updatedPulse, pulseChanged, err := refreshRoomLoopPolicy(cmd.Context(), coordStore, absWorkspace, roomID, pulse, time.Now().UTC())
+			if err != nil {
+				return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.loop", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+			}
+			if pulseChanged {
+				pulse = updatedPulse
+				pulseTicker = resetRoomPulseTicker(pulseTicker, pulse)
+			}
 			summary, current, err := loadRoomState(cmd.Context(), boardStore, absWorkspace, roomID, "", roomTaskScanLimit)
 			if err != nil {
 				return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.loop", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
@@ -1047,6 +1083,14 @@ func runRoomLoop(cmd *cobra.Command, workspace, roomID string, relay roomRelayOp
 				}
 			}
 		case <-taskTicker.C:
+			updatedPulse, pulseChanged, err := refreshRoomLoopPolicy(cmd.Context(), coordStore, absWorkspace, roomID, pulse, time.Now().UTC())
+			if err != nil {
+				return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.loop", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+			}
+			if pulseChanged {
+				pulse = updatedPulse
+				pulseTicker = resetRoomPulseTicker(pulseTicker, pulse)
+			}
 			updates, err := detectRoomTaskTransitions(cmd.Context(), taskStore, taskStates, announcedStates)
 			if err != nil {
 				return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.loop", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
@@ -1076,6 +1120,15 @@ func runRoomLoop(cmd *cobra.Command, workspace, roomID string, relay roomRelayOp
 				}, absWorkspace)); err != nil {
 					return fmt.Errorf("write room loop task envelope: %w", err)
 				}
+			}
+		case <-configTicker.C:
+			updatedPulse, pulseChanged, err := refreshRoomLoopPolicy(cmd.Context(), coordStore, absWorkspace, roomID, pulse, time.Now().UTC())
+			if err != nil {
+				return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.loop", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+			}
+			if pulseChanged {
+				pulse = updatedPulse
+				pulseTicker = resetRoomPulseTicker(pulseTicker, pulse)
 			}
 		case <-roomPulseChan(pulseTicker):
 			summary, current, err := loadRoomState(cmd.Context(), boardStore, absWorkspace, roomID, "", roomTaskScanLimit)
@@ -1149,6 +1202,106 @@ func roomPulseChan(t *time.Ticker) <-chan time.Time {
 		return nil
 	}
 	return t.C
+}
+
+func defaultRoomLoopPolicy(workspaceID, roomID string, pulse roomPulseConfig) coordination.RoomLoop {
+	if pulse.MinPulseFloor <= 0 {
+		pulse.MinPulseFloor = roomLoopMinimumPulseFloor
+	}
+	if pulse.Interval <= 0 {
+		pulse.Enabled = false
+	}
+	return coordination.RoomLoop{
+		WorkspaceID:             strings.TrimSpace(workspaceID),
+		RoomID:                  strings.TrimSpace(roomID),
+		Enabled:                 pulse.Enabled,
+		ManagedBy:               roomLoopManagedBy,
+		PulseInterval:           pulse.Interval,
+		ReplyStaleAfter:         pulse.ReplyStaleAfter,
+		TaskStaleAfter:          pulse.TaskStaleAfter,
+		MinPulseFloor:           pulse.MinPulseFloor,
+		CoordinatorPulseEnabled: pulse.CoordinatorPulseEnabled,
+	}
+}
+
+func syncRoomLoopState(ctx context.Context, store *coordination.Store, workspaceID, roomID string, current roomPulseConfig, tickAt time.Time) (roomPulseConfig, error) {
+	loop, err := store.GetRoomLoop(ctx, workspaceID, roomID)
+	if err != nil {
+		return roomPulseConfig{}, err
+	}
+	if loop == nil {
+		seed := defaultRoomLoopPolicy(workspaceID, roomID, current)
+		seed.LastTickAt = &tickAt
+		persisted, err := store.UpsertRoomLoop(ctx, seed)
+		if err != nil {
+			return roomPulseConfig{}, err
+		}
+		return roomPulseConfigFromStore(persisted), nil
+	}
+	changed := false
+	if strings.TrimSpace(loop.ManagedBy) != roomLoopManagedBy {
+		loop.ManagedBy = roomLoopManagedBy
+		changed = true
+	}
+	if loop.MinPulseFloor <= 0 {
+		loop.MinPulseFloor = roomLoopMinimumPulseFloor
+		changed = true
+	}
+	loop.LastTickAt = &tickAt
+	changed = true
+	if changed {
+		persisted, err := store.UpsertRoomLoop(ctx, *loop)
+		if err != nil {
+			return roomPulseConfig{}, err
+		}
+		return roomPulseConfigFromStore(persisted), nil
+	}
+	return roomPulseConfigFromStore(*loop), nil
+}
+
+func refreshRoomLoopPolicy(ctx context.Context, store *coordination.Store, workspaceID, roomID string, current roomPulseConfig, tickAt time.Time) (roomPulseConfig, bool, error) {
+	next, err := syncRoomLoopState(ctx, store, workspaceID, roomID, current, tickAt)
+	if err != nil {
+		return roomPulseConfig{}, false, err
+	}
+	return next, !sameRoomPulseConfig(current, next), nil
+}
+
+func sameRoomPulseConfig(a, b roomPulseConfig) bool {
+	return a.Enabled == b.Enabled &&
+		a.Interval == b.Interval &&
+		a.ReplyStaleAfter == b.ReplyStaleAfter &&
+		a.TaskStaleAfter == b.TaskStaleAfter &&
+		a.MinPulseFloor == b.MinPulseFloor &&
+		a.CoordinatorPulseEnabled == b.CoordinatorPulseEnabled
+}
+
+func roomPulseConfigFromStore(loop coordination.RoomLoop) roomPulseConfig {
+	return roomPulseConfig{
+		Enabled:                 loop.Enabled,
+		Interval:                loop.PulseInterval,
+		ReplyStaleAfter:         loop.ReplyStaleAfter,
+		TaskStaleAfter:          loop.TaskStaleAfter,
+		MinPulseFloor:           loop.MinPulseFloor,
+		CoordinatorPulseEnabled: loop.CoordinatorPulseEnabled,
+	}
+}
+
+func resetRoomPulseTicker(current *time.Ticker, pulse roomPulseConfig) *time.Ticker {
+	if current != nil {
+		current.Stop()
+	}
+	if !roomPulseEnabled(pulse) || pulse.Interval <= 0 {
+		return nil
+	}
+	return time.NewTicker(pulse.Interval)
+}
+
+func roomPulseEnabled(cfg roomPulseConfig) bool {
+	if cfg.Enabled {
+		return true
+	}
+	return cfg.Interval > 0 || cfg.ReplyStaleAfter > 0 || cfg.TaskStaleAfter > 0 || cfg.CoordinatorPulseEnabled
 }
 
 type roomTaskTransition struct {
@@ -1258,8 +1411,12 @@ func detectRoomTaskTransitions(ctx context.Context, store taskstore.Store, state
 }
 
 func detectRoomPulseMessages(roomID string, messages []agent.BoardMessage, now time.Time, cfg roomPulseConfig, reminded map[string]time.Time) []roomPulseMessage {
-	if cfg.ReplyStaleAfter <= 0 {
+	if !roomPulseEnabled(cfg) || cfg.ReplyStaleAfter <= 0 {
 		return nil
+	}
+	reminderFloor := cfg.ReplyStaleAfter
+	if cfg.MinPulseFloor > reminderFloor {
+		reminderFloor = cfg.MinPulseFloor
 	}
 	latestBySender := latestRoomSenderActivity(messages)
 	latestOutstanding := make(map[string]agent.BoardMessage)
@@ -1283,7 +1440,7 @@ func detectRoomPulseMessages(roomID string, messages []agent.BoardMessage, now t
 		if now.Sub(msg.CreatedAt) < cfg.ReplyStaleAfter {
 			continue
 		}
-		if last, ok := reminded[msg.ID]; ok && now.Sub(last) < cfg.ReplyStaleAfter {
+		if last, ok := reminded[msg.ID]; ok && now.Sub(last) < reminderFloor {
 			continue
 		}
 		if existing, ok := latestOutstanding[recipient]; ok && !msg.CreatedAt.After(existing.CreatedAt) {
@@ -1320,8 +1477,12 @@ func detectRoomPulseMessages(roomID string, messages []agent.BoardMessage, now t
 }
 
 func detectRoomTaskPulseMessages(workspace, roomID string, tasks []taskstore.Task, now time.Time, cfg roomPulseConfig, reminded map[string]time.Time) []roomPulseMessage {
-	if cfg.TaskStaleAfter <= 0 {
+	if !roomPulseEnabled(cfg) || cfg.TaskStaleAfter <= 0 {
 		return nil
+	}
+	reminderFloor := cfg.TaskStaleAfter
+	if cfg.MinPulseFloor > reminderFloor {
+		reminderFloor = cfg.MinPulseFloor
 	}
 	out := make([]roomPulseMessage, 0)
 	for _, task := range tasks {
@@ -1340,7 +1501,7 @@ func detectRoomTaskPulseMessages(workspace, roomID string, tasks []taskstore.Tas
 		if now.Sub(reference) < cfg.TaskStaleAfter {
 			continue
 		}
-		if last, ok := reminded[task.ID]; ok && now.Sub(last) < cfg.TaskStaleAfter {
+		if last, ok := reminded[task.ID]; ok && now.Sub(last) < reminderFloor {
 			continue
 		}
 		subject := fmt.Sprintf("Reminder: task awaiting update: %s", task.Title)
@@ -1368,7 +1529,7 @@ func detectRoomTaskPulseMessages(workspace, roomID string, tasks []taskstore.Tas
 }
 
 func detectRoomCoordinatorPulseMessages(room agent.RoomSummary, messages []agent.BoardMessage, tasks []taskstore.Task, now time.Time, cfg roomPulseConfig, reminded map[string]time.Time) []roomPulseMessage {
-	if cfg.Interval <= 0 {
+	if !roomPulseEnabled(cfg) || !cfg.CoordinatorPulseEnabled || cfg.Interval <= 0 {
 		return nil
 	}
 	coordinator := roomCoordinatorActorID(room.Members)
@@ -1382,7 +1543,11 @@ func detectRoomCoordinatorPulseMessages(room agent.RoomSummary, messages []agent
 		return nil
 	}
 	key := fmt.Sprintf("%s|%d|%d|%d|%d|%d|%d", coordinator, action.ParticipantsWithPending, action.PendingAcks, action.PendingReplies, action.AssignedUnclaimed, action.BlockedTasks, action.StaleTasks)
-	if last, ok := reminded[key]; ok && now.Sub(last) < cfg.Interval {
+	reminderFloor := cfg.Interval
+	if cfg.MinPulseFloor > reminderFloor {
+		reminderFloor = cfg.MinPulseFloor
+	}
+	if last, ok := reminded[key]; ok && now.Sub(last) < reminderFloor {
 		return nil
 	}
 	subject := fmt.Sprintf("Coordinator pulse: %d pending participants, %d blocked, %d stale", action.ParticipantsWithPending, action.BlockedTasks, action.StaleTasks)

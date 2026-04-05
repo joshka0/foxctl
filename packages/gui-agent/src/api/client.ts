@@ -972,9 +972,11 @@ export async function getRoomTasks(
 export async function getRoomLoop(
   roomId: string,
   workspaceId: string,
+  actorId: string,
 ): Promise<RoomLoop> {
   const query = new URLSearchParams();
   query.set("workspace_id", workspaceId);
+  query.set("actor_id", actorId);
   return request<RoomLoop>(
     `/rooms/${encodeURIComponent(roomId)}/loop?${query}`,
   );
@@ -1133,7 +1135,7 @@ export async function reclaimRoomTask(
 
 export async function patchRoomLoop(
   roomId: string,
-  params: { workspace_id: string } & Partial<RoomLoop>,
+  params: { workspace_id: string; actor_id: string } & Partial<RoomLoop>,
 ): Promise<RoomLoop> {
   return request<RoomLoop>(`/rooms/${encodeURIComponent(roomId)}/loop`, {
     method: "PATCH",
