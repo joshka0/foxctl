@@ -10,6 +10,7 @@ import (
 type fakeRunner struct {
 	lastName string
 	lastArgs []string
+	calls    []string
 	stderr   string
 	err      error
 }
@@ -17,6 +18,7 @@ type fakeRunner struct {
 func (f *fakeRunner) Run(_ context.Context, name string, args ...string) (string, string, error) {
 	f.lastName = name
 	f.lastArgs = append([]string(nil), args...)
+	f.calls = append(f.calls, name+" "+strings.Join(args, " "))
 	return "", f.stderr, f.err
 }
 
@@ -61,6 +63,29 @@ func TestCreatePaneBuildsNamedZellijRunCommand(t *testing.T) {
 	}
 	if strings.Contains(cmd, "AGENTCTL_ROOM_ID=") {
 		t.Fatalf("command %q unexpectedly contains AGENTCTL_ROOM_ID", cmd)
+	}
+}
+
+func TestCreatePaneEnsuresSessionBeforeRun(t *testing.T) {
+	runner := &fakeRunner{}
+	client := NewWithRunner(runner)
+
+	_, err := client.CreatePane(context.Background(), CreatePaneOptions{
+		Session: "collab",
+		Name:    "pane-a",
+		Command: "echo ok",
+	})
+	if err != nil {
+		t.Fatalf("CreatePane() error = %v", err)
+	}
+	if len(runner.calls) != 2 {
+		t.Fatalf("calls=%v want 2 invocations", runner.calls)
+	}
+	if !strings.Contains(runner.calls[0], "zellij attach --create-background collab") {
+		t.Fatalf("first call=%q want attach --create-background", runner.calls[0])
+	}
+	if !strings.Contains(runner.calls[1], "zellij --session collab run") {
+		t.Fatalf("second call=%q want session run", runner.calls[1])
 	}
 }
 

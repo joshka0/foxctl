@@ -61,6 +61,13 @@ func relayRoomMessageZellijTargets(ctx context.Context, room agent.RoomSummary, 
 		return result
 	}
 
+	if err := ensureZellijRelaySessionReady(ctx, session, pluginPath); err != nil {
+		result.Error = err.Error()
+		result.FailedCount = len(targets)
+		result.FailedMembers = append(result.FailedMembers, targets...)
+		return result
+	}
+
 	payload, err := json.Marshal(zellijRelayRequest{
 		RoomID:  room.ID,
 		Sender:  strings.TrimSpace(msg.Sender),
@@ -73,43 +80,83 @@ func relayRoomMessageZellijTargets(ctx context.Context, room agent.RoomSummary, 
 		result.FailedMembers = append(result.FailedMembers, targets...)
 		return result
 	}
-
 	pipeName := fmt.Sprintf("%s-%d", zellijRelayPipePrefix, time.Now().UnixNano())
-	args := []string{"--session", session, "pipe", "--plugin", "file:" + pluginPath, "--name", pipeName, "--", string(payload)}
-	cmd := exec.CommandContext(ctx, "zellij", args...)
-	var stdout bytes.Buffer
+	pipeCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	args := []string{"--session", session, "action", "pipe", "--plugin", "file:" + pluginPath, "--name", pipeName, "--", string(payload)}
+	cmd := exec.CommandContext(pipeCtx, "zellij", args...)
 	var stderr bytes.Buffer
-	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
 		result.Error = strings.TrimSpace(stderr.String())
 		if result.Error == "" {
-			result.Error = err.Error()
+			if pipeCtx.Err() == context.DeadlineExceeded {
+				result.Error = "zellij relay timed out while waiting for plugin action"
+			} else {
+				result.Error = err.Error()
+			}
+		}
+		if hasPendingZellijRelayPermissionPrompt(ctx, session) {
+			result.Error = "zellij relay plugin is waiting for permission approval in the attached zellij session; approve the prompt once and retry"
 		}
 		result.FailedCount = len(targets)
 		result.FailedMembers = append(result.FailedMembers, targets...)
 		return result
 	}
-
-	out := bytes.TrimSpace(stdout.Bytes())
-	if len(out) == 0 {
-		result.Error = "zellij relay plugin returned no response"
-		result.FailedCount = len(targets)
-		result.FailedMembers = append(result.FailedMembers, targets...)
-		return result
-	}
-	if err := json.Unmarshal(out, &result); err != nil {
-		result = roomRelayResult{
-			Backend:       "zellij",
-			Error:         fmt.Sprintf("parse zellij relay response: %v", err),
-			FailedCount:   len(targets),
-			FailedMembers: append([]string(nil), targets...),
-		}
-	}
-	if result.Backend == "" {
-		result.Backend = "zellij"
-	}
+	result.DeliveredCount = len(targets)
+	result.DeliveredTo = append(result.DeliveredTo, targets...)
 	return result
+}
+
+func ensureZellijRelaySessionReady(ctx context.Context, session, pluginPath string) error {
+	if !zellijSessionHasConnectedClients(ctx, session) {
+		return fmt.Errorf("zellij relay requires at least one attached client in session %s", session)
+	}
+	cmd := exec.CommandContext(ctx, "zellij", "--session", session, "action", "start-or-reload-plugin", "file:"+pluginPath)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		msg := strings.TrimSpace(stderr.String())
+		if msg == "" {
+			msg = err.Error()
+		}
+		return fmt.Errorf("zellij relay bootstrap: %s", msg)
+	}
+	if hasPendingZellijRelayPermissionPrompt(ctx, session) {
+		return fmt.Errorf("zellij relay plugin is waiting for permission approval in session %s", session)
+	}
+	return nil
+}
+
+func zellijSessionHasConnectedClients(ctx context.Context, session string) bool {
+	cmd := exec.CommandContext(ctx, "zellij", "--session", session, "action", "list-clients")
+	var stdout bytes.Buffer
+	cmd.Stdout = &stdout
+	if err := cmd.Run(); err != nil {
+		return false
+	}
+	lines := strings.Split(strings.TrimSpace(stdout.String()), "\n")
+	return len(lines) > 1
+}
+
+func hasPendingZellijRelayPermissionPrompt(ctx context.Context, session string) bool {
+	tmp, err := os.CreateTemp("", "agentctl-zellij-dump-*.txt")
+	if err != nil {
+		return false
+	}
+	path := tmp.Name()
+	_ = tmp.Close()
+	defer os.Remove(path)
+	cmd := exec.CommandContext(ctx, "zellij", "--session", session, "action", "dump-screen", path)
+	if err := cmd.Run(); err != nil {
+		return false
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return false
+	}
+	screen := string(data)
+	return strings.Contains(screen, "asks permission to:") && strings.Contains(screen, "Allow? (y/n)")
 }
 
 func relayRoomMessageZellijSingleton(ctx context.Context, room agent.RoomSummary, msg agent.BoardMessage, session string) roomRelayResult {

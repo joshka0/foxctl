@@ -40,6 +40,88 @@ description: "Durable multi-agent room coordination with shared chat, direct req
 
 Do not rely on scrollback as canonical history. The room log is canonical.
 
+## Operating contract
+
+When you are working inside an active room, follow this behavior by default:
+
+- Read `room status` first to understand the current coordinator, pending work, and stale lanes.
+- Read `room inbox --actor <you>` before starting new work; direct requests and ack/reply obligations take priority over browsing the whole timeline.
+- If a task is assigned to you, `claim` it before starting real work.
+- If a task is in progress for a while, `touch` it instead of posting vague “still working” chat updates.
+- If you are blocked, use `room task block` with a concrete reason instead of only chatting about the problem.
+- When work is done, use `room task complete --notes ...` so the outcome is durable and visible in the room.
+- Use `room send --to @coordinator` when you need escalation, reassignment, or a decision from the coordinator.
+- Do not duplicate work on a task that is already claimed unless the coordinator explicitly reassigns or reclaims it.
+- Treat the room timeline as the durable audit trail; use direct room messages for requests, not ad hoc pane-only chat.
+
+Role expectations:
+
+- `coordinator`
+  - keeps assignments, replies, and stale work moving
+  - uses `room status`, `room resolve`, `room coordinator set`, and coordinator-only task actions
+  - is the final authority on task routing and review closure
+- `reviewer`
+  - posts findings first, then approval or block verdict
+  - uses room tasks and direct requests instead of passive observation
+- general participant
+  - claims assigned work explicitly
+  - keeps task heartbeat current
+  - escalates blockers through the room instead of assuming others noticed
+
+## Default room workflow
+
+Use this sequence unless the room already has a more specific protocol:
+
+```bash
+# 1. orient
+agentctl room status <room-id>
+agentctl room inbox <room-id> --actor <you>
+
+# 2. take work
+agentctl room task claim <room-id> --id <task-id>
+
+# 3. keep heartbeat current during longer work
+agentctl room task touch <room-id> --id <task-id>
+
+# 4. escalate or ask for a decision
+agentctl room send <room-id> "Need coordinator input on <issue>" --to @coordinator --reply-expected
+
+# 5. close with durable notes
+agentctl room task complete <room-id> --id <task-id> --notes "..."
+```
+
+## Task note format
+
+Use consistent completion and review notes so other agents do not need to reread the whole room.
+
+Implementation/completion notes should include:
+
+- `changed`: what was implemented
+- `verified`: what commands/tests/manual checks were run
+- `remaining`: any known gaps or follow-up items
+
+Review notes should include:
+
+- `result`: `approved` or `blocked`
+- `findings`: count and severity summary
+- `scope`: files/components/behavior reviewed
+
+Example completion note:
+
+```text
+changed: wired durable loop GET/PATCH and runtime persistence
+verified: go test -tags=libsqlite3 ./internal/web/api ./cmd/agentctl/cmd -run '...'; go build -tags=libsqlite3 ./cmd/agentctl
+remaining: gui-agent auth still uses local dev identity in local mode
+```
+
+Example review note:
+
+```text
+result: approved
+findings: 0 blocking, 1 non-blocking follow-up
+scope: /loop API, coordinator gating, reminder floor behavior
+```
+
 Default room policy:
 
 - the participant who creates the room becomes `coordinator` when agentctl can derive the current pane identity
@@ -118,6 +200,23 @@ agentctl room loop alpha --backend zellij --session alpha-room
 
 The zellij backend uses a local plugin and matches room member ids to zellij pane titles or canonical pane ids.
 
+Important restart rule for zellij:
+
+- an existing zellij pane is not room-bound just because it lives in session
+  `alpha-room`
+- for reliable delivery, each pane that should participate must run:
+
+```bash
+agentctl room join alpha --current --role <room-role>
+```
+
+- this captures the current zellij pane binding so direct and broadcast room
+  relay can target that pane correctly
+- if `AGENTCTL_ROOM_ID` is missing in the pane environment, the pane was not
+  launched with room metadata and must be joined explicitly
+- session-only assumptions are unsafe for multi-pane zellij rooms; pane binding
+  is the correct unit of room membership
+
 ## Conventions
 
 - Use stable actor ids like `agent-a`, `agent-b`, `reviewer`, `planner` when you want human-friendly names.
@@ -131,6 +230,9 @@ The zellij backend uses a local plugin and matches room member ids to zellij pan
 - In `zellij`, room member ids can be pane titles or canonical ids like `zellij:<session>:terminal_3`.
 - The sender should also be a room member if you want them excluded from fanout.
 - Child panes launched with `agentctl tmux create --parent-participant ...` should usually use `agentctl tmux send-parent ...` instead of joining the room directly.
+- Coordinator-only actions include `room resolve`, `room coordinator set`, `room task assign`, `room task reassign`, and `room task reclaim`.
+- `room send --to @coordinator` is preferred over hard-coding the coordinator actor id.
+- Direct room requests should usually carry either `--ack-required` or `--reply-expected`; broadcasts usually should not.
 
 ## Typical pattern
 
@@ -162,6 +264,7 @@ agentctl room send review "Please check the 401 fallback branch."
 
 ## Related
 
+- `configs/skills-pack/agentctl-room-operator/SKILL.md`
 - `configs/skills-pack/agentctl-orchestrate/SKILL.md`
 - `configs/skills-pack/agentctl-tmux/SKILL.md`
 - `docs/general/tmux-collaboration.md`

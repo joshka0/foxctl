@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -16,6 +18,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/storage/blackboard"
 	taskstore "github.com/jkatigb/agentctl/internal/storage/tasks"
 	"github.com/jkatigb/agentctl/internal/tmuxbridge"
+	"github.com/jkatigb/agentctl/internal/zellijbridge"
 	"github.com/spf13/cobra"
 )
 
@@ -79,23 +82,51 @@ func newRoomCoordinatorSetCommand() *cobra.Command {
 
 func newRoomCreateCommand() *cobra.Command {
 	var (
-		workspace   string
-		title       string
-		description string
-		members     []string
+		workspace     string
+		title         string
+		description   string
+		members       []string
+	provision     bool
+	muxBackend    string
+	muxSession    string
+	paneCommand   string
+	agentCLI      string
+	agentMode     string
+	agentArgs     []string
+	memberArgs    []string
+	attach        bool
 	)
 	cmd := &cobra.Command{
 		Use:   "create <room-id>",
 		Short: "Create or update a durable room",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runRoomCreate(cmd, workspace, args[0], title, description, members)
+			return runRoomCreateWithProvision(cmd, workspace, args[0], title, description, members, roomCreateProvisionOptions{
+				Enabled:     provision,
+				MuxBackend:  muxBackend,
+				MuxSession:  muxSession,
+				PaneCommand: paneCommand,
+				AgentCLI:    agentCLI,
+				AgentMode:   agentMode,
+				AgentArgs:   append([]string(nil), agentArgs...),
+				MemberArgs:  append([]string(nil), memberArgs...),
+				Attach:      attach,
+			})
 		},
 	}
 	cmd.Flags().StringVar(&workspace, "workspace", ".", "Workspace root override")
 	cmd.Flags().StringVar(&title, "title", "", "Room title")
 	cmd.Flags().StringVar(&description, "description", "", "Room description")
-	cmd.Flags().StringArrayVar(&members, "member", nil, "Room member in actor or actor=role form (repeatable)")
+	cmd.Flags().StringArrayVar(&members, "member", nil, "Room member in actor, actor=role, actor@agent, actor=role@agent, or actor=role@agent:mode form (repeatable)")
+	cmd.Flags().BoolVar(&provision, "provision", false, "Provision one live mux pane per explicit --member and bind it to this room")
+	cmd.Flags().StringVar(&muxBackend, "mux-backend", "auto", "Mux backend for provisioning (auto|tmux|zellij)")
+	cmd.Flags().StringVar(&muxSession, "mux-session", "", "Mux session name for provisioning (defaults to current zellij session when inside zellij, otherwise agentctl-collab)")
+	cmd.Flags().StringVar(&paneCommand, "pane-command", "", "Command to launch in each provisioned pane (default: current shell)")
+	cmd.Flags().StringVar(&agentCLI, "agent", "", "Agent CLI to launch in each provisioned pane (for example: claude, codex, gemini, agent, droid)")
+	cmd.Flags().StringVar(&agentMode, "mode", "interactive", "Provisioned agent launch mode: interactive or auto")
+	cmd.Flags().StringArrayVar(&agentArgs, "agent-arg", nil, "Provisioned agent CLI argument (repeatable, preserves order)")
+	cmd.Flags().StringArrayVar(&memberArgs, "member-arg", nil, "Per-member provisioned CLI arg in actor=arg form (repeatable, supports multiple args per actor)")
+	cmd.Flags().BoolVar(&attach, "attach", false, "Attach or switch to the provisioned mux session after setup")
 	return cmd
 }
 
@@ -370,7 +401,29 @@ func newRoomRelayCommand() *cobra.Command {
 	return cmd
 }
 
+type roomCreateProvisionOptions struct {
+	Enabled     bool
+	MuxBackend  string
+	MuxSession  string
+	PaneCommand string
+	AgentCLI    string
+	AgentMode   string
+	AgentArgs   []string
+	MemberArgs  []string
+	Attach      bool
+}
+
+type roomProvisionMemberSpec struct {
+	Member   agent.RoomMember
+	AgentCLI string
+	AgentMode string
+}
+
 func runRoomCreate(cmd *cobra.Command, workspace, roomID, title, description string, rawMembers []string) error {
+	return runRoomCreateWithProvision(cmd, workspace, roomID, title, description, rawMembers, roomCreateProvisionOptions{})
+}
+
+func runRoomCreateWithProvision(cmd *cobra.Command, workspace, roomID, title, description string, rawMembers []string, provision roomCreateProvisionOptions) error {
 	absWorkspace, err := resolveRoomWorkspace(workspace)
 	if err != nil {
 		return err
@@ -383,15 +436,17 @@ func runRoomCreate(cmd *cobra.Command, workspace, roomID, title, description str
 	}
 	defer store.Close()
 
-	members, err := parseRoomMembers(rawMembers)
+	memberSpecs, err := parseRoomMemberSpecs(rawMembers)
 	if err != nil {
 		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.create", protocol.ErrorCodeEARG, err.Error(), map[string]any{
-			"hint": "Members must use actor or actor=role form.",
+			"hint": "Members must use actor, actor=role, actor@agent, actor=role@agent, or actor=role@agent:mode form.",
 		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
 	}
+	members := roomMembersFromSpecs(memberSpecs)
 	if identity, err := resolveRoomSender(cmd.Context(), ""); err == nil {
 		members = ensureRoomCoordinator(members, identity.Sender)
 	}
+	memberSpecs = mergeProvisionSpecsWithMembers(memberSpecs, members)
 
 	room, err := store.UpsertRoom(cmd.Context(), agent.Room{
 		ID:          strings.TrimSpace(roomID),
@@ -405,8 +460,25 @@ func runRoomCreate(cmd *cobra.Command, workspace, roomID, title, description str
 			"hint": "Provide a room id and ensure the board store is writable.",
 		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
 	}
+	var provisioned map[string]any
+	if provision.Enabled {
+		provisioned, err = provisionRoomMembers(cmd.Context(), absWorkspace, room, memberSpecs, provision)
+		if err != nil {
+			return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.create", protocol.ErrorCodeERuntime, err.Error(), map[string]any{
+				"hint": "Ensure the mux backend is available, the target session exists or can be created, and each explicit --member has a distinct actor id.",
+			}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+		}
+		room, err = store.UpsertRoom(cmd.Context(), room)
+		if err != nil {
+			return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.create", protocol.ErrorCodeERuntime, err.Error(), map[string]any{
+				"hint": "Room was provisioned, but persisting updated pane bindings failed.",
+				"provisioned": provisioned,
+			}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+		}
+	}
 	return protocol.WriteOK(cmd.OutOrStdout(), "agentctl.room.create", map[string]any{
-		"room": room,
+		"room":        room,
+		"provisioned": provisioned,
 	}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
 }
 
@@ -1210,25 +1282,111 @@ func openRoomBoardStore(ctx context.Context) (blackboard.BoardStore, error) {
 }
 
 func parseRoomMembers(values []string) ([]agent.RoomMember, error) {
-	out := make([]agent.RoomMember, 0, len(values))
+	specs, err := parseRoomMemberSpecs(values)
+	if err != nil {
+		return nil, err
+	}
+	return roomMembersFromSpecs(specs), nil
+}
+
+func parseRoomMemberSpecs(values []string) ([]roomProvisionMemberSpec, error) {
+	out := make([]roomProvisionMemberSpec, 0, len(values))
 	for _, raw := range values {
 		raw = strings.TrimSpace(raw)
 		if raw == "" {
 			continue
 		}
-		member := agent.RoomMember{}
-		if idx := strings.LastIndex(raw, "="); idx >= 0 {
-			member.ActorID = strings.TrimSpace(raw[:idx])
-			member.Role = strings.TrimSpace(raw[idx+1:])
-		} else {
-			member.ActorID = raw
+		spec := roomProvisionMemberSpec{}
+		body := raw
+		if idx := strings.LastIndex(body, "@"); idx >= 0 {
+			agentSpec := strings.TrimSpace(body[idx+1:])
+			body = strings.TrimSpace(body[:idx])
+			if agentSpec == "" {
+				return nil, fmt.Errorf("member agent is required after @ in %q", raw)
+			}
+			if modeIdx := strings.Index(agentSpec, ":"); modeIdx >= 0 {
+				spec.AgentCLI = strings.TrimSpace(agentSpec[:modeIdx])
+				spec.AgentMode = strings.TrimSpace(agentSpec[modeIdx+1:])
+				if spec.AgentMode == "" {
+					return nil, fmt.Errorf("member mode is required after : in %q", raw)
+				}
+			} else {
+				spec.AgentCLI = agentSpec
+			}
+			if spec.AgentCLI == "" {
+				return nil, fmt.Errorf("member agent is required after @ in %q", raw)
+			}
 		}
-		if member.ActorID == "" {
+		if idx := strings.LastIndex(body, "="); idx >= 0 {
+			spec.Member.ActorID = strings.TrimSpace(body[:idx])
+			spec.Member.Role = strings.TrimSpace(body[idx+1:])
+		} else {
+			spec.Member.ActorID = strings.TrimSpace(body)
+		}
+		if spec.Member.ActorID == "" {
 			return nil, fmt.Errorf("member actor id is required")
 		}
-		out = append(out, normalizeRoomMember(member))
+		spec.Member = normalizeRoomMember(spec.Member)
+		out = append(out, spec)
 	}
 	return out, nil
+}
+
+func parseRoomMemberArgMap(values []string) (map[string][]string, error) {
+	if len(values) == 0 {
+		return nil, nil
+	}
+	out := make(map[string][]string, len(values))
+	for _, raw := range values {
+		raw = strings.TrimSpace(raw)
+		if raw == "" {
+			continue
+		}
+		idx := strings.Index(raw, "=")
+		if idx <= 0 || idx == len(raw)-1 {
+			return nil, fmt.Errorf("member arg must use actor=arg form")
+		}
+		actorID := strings.TrimSpace(raw[:idx])
+		arg := strings.TrimSpace(raw[idx+1:])
+		if actorID == "" || arg == "" {
+			return nil, fmt.Errorf("member arg must use actor=arg form")
+		}
+		out[actorID] = append(out[actorID], arg)
+	}
+	return out, nil
+}
+
+func roomMembersFromSpecs(specs []roomProvisionMemberSpec) []agent.RoomMember {
+	out := make([]agent.RoomMember, 0, len(specs))
+	for _, spec := range specs {
+		if spec.Member.ActorID == "" {
+			continue
+		}
+		out = append(out, normalizeRoomMember(spec.Member))
+	}
+	return out
+}
+
+func mergeProvisionSpecsWithMembers(specs []roomProvisionMemberSpec, members []agent.RoomMember) []roomProvisionMemberSpec {
+	if len(specs) == 0 {
+		return nil
+	}
+	index := make(map[string]agent.RoomMember, len(members))
+	for _, member := range members {
+		member = normalizeRoomMember(member)
+		if member.ActorID != "" {
+			index[member.ActorID] = member
+		}
+	}
+	merged := make([]roomProvisionMemberSpec, 0, len(specs))
+	for _, spec := range specs {
+		spec.Member = normalizeRoomMember(spec.Member)
+		if updated, ok := index[spec.Member.ActorID]; ok {
+			spec.Member = updated
+		}
+		merged = append(merged, spec)
+	}
+	return merged
 }
 
 func mergeRoomMembers(existing []agent.RoomMember, additions ...agent.RoomMember) []agent.RoomMember {
@@ -1276,6 +1434,148 @@ func normalizeRoomMember(member agent.RoomMember) agent.RoomMember {
 	member.Session = strings.TrimSpace(member.Session)
 	member.PaneID = strings.TrimSpace(member.PaneID)
 	return member
+}
+
+func provisionRoomMembers(ctx context.Context, workspace string, room agent.Room, specs []roomProvisionMemberSpec, opts roomCreateProvisionOptions) (map[string]any, error) {
+	if len(specs) == 0 {
+		return nil, fmt.Errorf("room provisioning requires at least one explicit --member")
+	}
+	backend := resolveMuxCreateBackend(opts.MuxBackend)
+	if backend == "" {
+		return nil, fmt.Errorf("unsupported mux backend %q", opts.MuxBackend)
+	}
+	session := resolveMuxCreateSession(nil, backend, opts.MuxSession)
+	memberArgMap, err := parseRoomMemberArgMap(opts.MemberArgs)
+	if err != nil {
+		return nil, err
+	}
+	baseCommand, err := resolveMuxCreateCommand(strings.TrimSpace(opts.PaneCommand), strings.TrimSpace(opts.AgentCLI), strings.TrimSpace(opts.AgentMode), append([]string(nil), opts.AgentArgs...), "")
+	if err != nil {
+		return nil, err
+	}
+	provisioned := make([]map[string]any, 0, len(specs))
+	updatedMembers := make([]agent.RoomMember, 0, len(specs))
+	for _, spec := range specs {
+		member := normalizeRoomMember(spec.Member)
+		if member.ActorID == "" {
+			continue
+		}
+		memberAgent := strings.TrimSpace(spec.AgentCLI)
+		memberMode := firstNonEmpty(strings.TrimSpace(spec.AgentMode), strings.TrimSpace(opts.AgentMode))
+		command := baseCommand
+		memberArgs := append([]string(nil), opts.AgentArgs...)
+		if extra := memberArgMap[member.ActorID]; len(extra) > 0 {
+			memberArgs = append(memberArgs, extra...)
+		}
+		if memberAgent != "" || strings.TrimSpace(spec.AgentMode) != "" || len(memberArgs) != len(opts.AgentArgs) {
+			resolvedAgent := firstNonEmpty(memberAgent, strings.TrimSpace(opts.AgentCLI))
+			command, err = resolveMuxCreateCommand("", resolvedAgent, memberMode, memberArgs, "")
+			if err != nil {
+				return nil, fmt.Errorf("member %s: %w", member.ActorID, err)
+			}
+		}
+		switch backend {
+		case "tmux":
+			client := tmuxbridge.New()
+			result, createErr := client.CreatePane(ctx, tmuxbridge.CreatePaneOptions{
+				Session:       session,
+				CWD:           workspace,
+				Label:         member.ActorID,
+				Command:       command,
+				ParticipantID: member.ActorID,
+				RoomID:        room.ID,
+				RoomRole:      member.Role,
+				RoomAccess:    "direct",
+			})
+			if createErr != nil {
+				return nil, createErr
+			}
+			member.Backend = "tmux"
+			member.Session = result.Session
+			member.PaneID = result.Pane.ID
+			updatedMembers = append(updatedMembers, member)
+			provisioned = append(provisioned, map[string]any{
+				"actor_id":       member.ActorID,
+				"role":           member.Role,
+				"agent":          firstNonEmpty(memberAgent, strings.TrimSpace(opts.AgentCLI)),
+				"mode":           memberMode,
+				"agent_args":     memberArgs,
+				"backend":        "tmux",
+				"session":        result.Session,
+				"pane_id":        result.Pane.ID,
+				"attach_command": result.AttachCommand,
+			})
+		case "zellij":
+			client := zellijbridge.New()
+			result, createErr := client.CreatePane(ctx, zellijbridge.CreatePaneOptions{
+				Session:       session,
+				CWD:           workspace,
+				Name:          member.ActorID,
+				Command:       command,
+				ParticipantID: member.ActorID,
+				RoomID:        room.ID,
+				RoomRole:      member.Role,
+				RoomAccess:    "direct",
+			})
+			if createErr != nil {
+				return nil, createErr
+			}
+			member.Backend = "zellij"
+			member.Session = result.Session
+			member.PaneID = result.PaneName
+			updatedMembers = append(updatedMembers, member)
+			provisioned = append(provisioned, map[string]any{
+				"actor_id":       member.ActorID,
+				"role":           member.Role,
+				"agent":          firstNonEmpty(memberAgent, strings.TrimSpace(opts.AgentCLI)),
+				"mode":           memberMode,
+				"agent_args":     memberArgs,
+				"backend":        "zellij",
+				"session":        result.Session,
+				"pane_id":        result.PaneName,
+				"attach_command": "zellij attach " + shellQuoteZshSafe(result.Session),
+			})
+		default:
+			return nil, fmt.Errorf("unsupported mux backend %q", backend)
+		}
+	}
+	room.Members = mergeRoomMembers(room.Members, updatedMembers...)
+	if opts.Attach {
+		switch backend {
+		case "tmux":
+			if err := tmuxbridge.New().AttachOrSwitch(ctx, session); err != nil {
+				return nil, err
+			}
+		case "zellij":
+			if strings.TrimSpace(os.Getenv("ZELLIJ_SESSION_NAME")) == "" {
+				attachCmd := exec.CommandContext(ctx, "zellij", "attach", session)
+				attachCmd.Stdin = os.Stdin
+				attachCmd.Stdout = os.Stdout
+				attachCmd.Stderr = os.Stdout
+				if err := attachCmd.Run(); err != nil {
+					return nil, err
+				}
+			}
+		}
+	}
+	return map[string]any{
+		"backend":        backend,
+		"session":        session,
+		"pane_command":   baseCommand,
+		"attach_command": provisionAttachCommand(backend, session),
+		"panes":          provisioned,
+	}, nil
+}
+
+func provisionAttachCommand(backend, session string) string {
+	switch strings.TrimSpace(backend) {
+	case "tmux":
+		return "tmux attach-session -t " + shellQuoteZshSafe(session)
+	case "zellij":
+		return "zellij attach " + shellQuoteZshSafe(session)
+	default:
+		return ""
+	}
 }
 
 func removeRoomMember(existing []agent.RoomMember, actorID string) []agent.RoomMember {
@@ -2254,7 +2554,10 @@ func resolveRoomMemberZellijTarget(member agent.RoomMember) (string, string, boo
 	if paneID := normalizeZellijPaneID(member.PaneID); paneID != "" {
 		return session, formatZellijParticipantID(session, paneID), true
 	}
-	return session, zellijRelaySingletonTarget, true
+	if actorID := strings.TrimSpace(member.ActorID); actorID != "" {
+		return session, actorID, true
+	}
+	return "", "", false
 }
 
 func normalizeRoomRecipient(recipient string) string {

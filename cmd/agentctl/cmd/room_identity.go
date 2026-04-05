@@ -55,14 +55,15 @@ func resolveCurrentZellijRoomSender() (roomIdentity, error) {
 	if session == "" {
 		return roomIdentity{}, fmt.Errorf("cannot derive zellij sender without ZELLIJ_SESSION_NAME; pass --sender")
 	}
+	paneID := strings.TrimSpace(os.Getenv("ZELLIJ_PANE_ID"))
 	if participant := strings.TrimSpace(os.Getenv("AGENTCTL_ZELLIJ_PARTICIPANT")); participant != "" {
 		return roomIdentity{
 			Sender:  participant,
 			Backend: "zellij",
 			Session: session,
+			PaneID:  paneID,
 		}, nil
 	}
-	paneID := strings.TrimSpace(os.Getenv("ZELLIJ_PANE_ID"))
 	if paneID == "" {
 		return roomIdentity{}, fmt.Errorf("cannot derive zellij sender without ZELLIJ_PANE_ID; pass --sender or set AGENTCTL_ZELLIJ_PARTICIPANT")
 	}

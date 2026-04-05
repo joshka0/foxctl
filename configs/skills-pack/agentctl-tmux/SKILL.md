@@ -3,7 +3,7 @@ name: agentctl-tmux
 description: "Live terminal collaboration for multiple Codex/Claude panes: tmux native messaging, durable room timelines, plugin-backed zellij relay, and room-scoped task broadcasts."
 ---
 
-# Tmux Collaboration
+# Mux Collaboration
 
 Use this skill when multiple AI agents are open in tmux or zellij and need to:
 
@@ -15,8 +15,8 @@ Use this skill when multiple AI agents are open in tmux or zellij and need to:
 
 ## Mental Model
 
-- `tmux` is the live coordination plane
-- `agentctl tmux` is the native create/read/send surface
+- the live mux pane layer can be `tmux` or `zellij`
+- `agentctl mux` is the backend-neutral create/read/send surface
 - `agentctl room` is the durable shared room surface
 - `room relay` and `room loop` fan room events back into terminal panes
 - `tmux-bridge` is an optional low-level helper
@@ -24,36 +24,52 @@ Use this skill when multiple AI agents are open in tmux or zellij and need to:
 
 Do not treat tmux scrollback as canonical history. It is pane state, not durable conversation state.
 
+When a room is active, the default rule is:
+
+- use `agentctl room` for durable coordination
+- use `agentctl mux send` for one-off live pane nudges
+- do not treat pane reads as the source of truth for task state or coordinator decisions
+
+If you are an agent entering an existing collaboration session, start with:
+
+```bash
+agentctl room status <room-id>
+agentctl room inbox <room-id> --actor <you>
+agentctl mux list
+```
+
+That gives you the durable room state first, then the live pane state.
+
 ## Quick Start
 
 Label each pane once:
 
 ```bash
-agentctl tmux create --session agentctl-collab --panes 3 --attach
+agentctl mux create --session agentctl-collab --panes 3 --attach
 ```
 
 Inspect panes with structured output:
 
 ```bash
-agentctl tmux list
-agentctl tmux list --backend zellij --session alpha-room
-agentctl tmux read agent-b --lines 80
-agentctl tmux doctor
+agentctl mux list
+agentctl mux list --backend zellij --session alpha-room
+agentctl mux read agent-b --lines 80
+agentctl mux doctor
 ```
 
 Send a message natively:
 
 ```bash
-agentctl tmux send agent-b "Review internal/actor/supervisor.go for mailbox ack risks."
+agentctl mux send agent-b "Review internal/actor/supervisor.go for mailbox ack risks."
 ```
 
 For autonomous panes, prefer `--mode auto`:
 
 ```bash
-agentctl tmux create --session codex-auto --panes 2 --agent codex --mode auto --attach
-agentctl tmux create --session claude-auto --panes 2 --agent claude --mode auto --attach
-agentctl tmux create --session gemini-auto --panes 2 --agent gemini --mode auto --attach
-agentctl tmux create --session cursor-auto --panes 2 --agent agent --mode auto --attach
+agentctl mux create --session codex-auto --panes 2 --agent codex --mode auto --attach
+agentctl mux create --session claude-auto --panes 2 --agent claude --mode auto --attach
+agentctl mux create --session gemini-auto --panes 2 --agent gemini --mode auto --attach
+agentctl mux create --session cursor-auto --panes 2 --agent agent --mode auto --attach
 ```
 
 Current auto mappings:
@@ -82,7 +98,7 @@ For child panes, keep room access private by default and give them an explicit
 parent:
 
 ```bash
-agentctl tmux create --session collab \
+agentctl mux create --session collab \
   --panes 1 \
   --agent codex \
   --mode auto \
@@ -90,7 +106,7 @@ agentctl tmux create --session collab \
   --parent-participant codex-a \
   --parent-agent-id agent:parent-1
 
-agentctl tmux send-parent "Blocked on the mailbox retry path."
+agentctl mux send-parent "Blocked on the mailbox retry path."
 ```
 
 When `--parent-participant` is set, `agentctl` defaults `--room-access` to
@@ -100,7 +116,7 @@ the room unless you explicitly promote them with `--room-access direct`.
 If you are invoking from outside tmux, pass your sender pane label explicitly:
 
 ```bash
-agentctl tmux send agent-b "Review internal/actor/supervisor.go for mailbox ack risks." --sender agent-a
+agentctl mux send agent-b "Review internal/actor/supervisor.go for mailbox ack risks." --sender agent-a
 ```
 
 ## Commands
@@ -108,19 +124,19 @@ agentctl tmux send agent-b "Review internal/actor/supervisor.go for mailbox ack 
 ### Structured read surface
 
 ```bash
-agentctl tmux create --session agentctl-collab --panes 3 --pane-command codex
-agentctl tmux list
-agentctl tmux read <target> --lines 50
-agentctl tmux send <target> "review this pane" [--sender <pane-label>]
-agentctl tmux observe <target> --lines 80
-agentctl tmux doctor
+agentctl mux create --session agentctl-collab --panes 3 --pane-command codex
+agentctl mux list
+agentctl mux read <target> --lines 50
+agentctl mux send <target> "review this pane" [--sender <pane-label>]
+agentctl mux observe <target> --lines 80
+agentctl mux doctor
 ```
 
-Use `agentctl tmux ...` when you want machine-friendly envelopes, pane metadata, and a native send path that does not depend on repo-local scripts.
+Use `agentctl mux ...` when you want machine-friendly envelopes, pane metadata, and a native send path that does not depend on repo-local scripts. `agentctl tmux ...` remains as a compatibility alias.
 
 Common agent launches include `--agent codex`, `--agent claude`, `--agent gemini`, `--agent agent` for Cursor CLI, and `--agent droid` for Factory Droid.
 
-Useful hierarchy flags on `tmux create`:
+Useful hierarchy flags on `mux create`:
 
 - `--parent-participant` marks the launched panes as children of a parent participant
 - `--parent-agent-id` exports the durable parent agent id into the pane env
@@ -130,7 +146,7 @@ Useful hierarchy flags on `tmux create`:
 Child panes can send a private message to the configured parent with:
 
 ```bash
-agentctl tmux send-parent "Need clarification on the retry helper extraction."
+agentctl mux send-parent "Need clarification on the retry helper extraction."
 ```
 
 For internal `agentctl` agents, you can also allocate a dedicated tmux pane at
@@ -153,7 +169,7 @@ For spawned zellij panes, inspect the current session through persisted
 `terminal_binding` metadata rather than raw layout scraping:
 
 ```bash
-agentctl tmux list --backend zellij --session <session-name>
+agentctl mux list --backend zellij --session <session-name>
 ```
 
 ### Interactive bridge
@@ -171,7 +187,7 @@ agentctl tmux list --backend zellij --session <session-name>
 ./scripts/tmux-bridge id
 ```
 
-Use `agentctl tmux send` for standard agent-to-agent messages. Use `type` and `keys` only when you intentionally need lower-level control.
+Use `agentctl mux send` for standard agent-to-agent messages. Use `type` and `keys` only when you intentionally need lower-level control.
 
 ### Durable room surface
 
@@ -191,10 +207,42 @@ Use `room relay` for pure room-message fanout.
 Use `room loop` when you also want room-associated task status transitions to be
 broadcast back into the room and then relayed to participants.
 
+Operational rule:
+
+- top-level agents coordinate through the room
+- child panes coordinate upward through `send-parent`
+- reviewers should post findings in the room, not only in pane-local chat
+- coordinators should prefer `room status` / `room resolve` / `room task ...` over manual pane polling
+
 Room commands derive the sender from the current tmux pane label when possible,
 with canonical fallbacks like `tmux:<session>:%7` or
 `zellij:<session>:terminal_3`. Use `--sender` only when overriding or when
 running outside a mux session.
+
+### Restarting an existing zellij session
+
+If you reopened or manually created a zellij session, do not assume the panes
+are already room-bound just because they share a session name.
+
+Check first:
+
+```bash
+printf 'ROOM=%s ACTOR=%s ROLE=%s SESSION=%s PANE=%s\n' \
+  "$AGENTCTL_ROOM_ID" \
+  "$AGENTCTL_PARTICIPANT" \
+  "$AGENTCTL_ROOM_ROLE" \
+  "$ZELLIJ_SESSION_NAME" \
+  "$ZELLIJ_PANE_ID"
+```
+
+If `ROOM` / `ACTOR` are empty, bind the pane explicitly:
+
+```bash
+agentctl room join <room-id> --current --role <room-role>
+```
+
+Use that in each zellij pane that should receive room traffic. For zellij,
+room membership is pane-bound, not merely session-bound.
 
 The intended room policy is:
 
@@ -217,8 +265,8 @@ That keeps replies human-readable and parseable without depending on fragile pro
 Promote only derived facts, not raw pane dumps. Good examples:
 
 ```bash
-agentctl tmux observe agent-b --lines 80
-agentctl tmux observe agent-b \
+agentctl mux observe agent-b --lines 80
+agentctl mux observe agent-b \
   --statement "agent-b is reviewing mailbox ack semantics in internal/actor/supervisor.go"
 ```
 

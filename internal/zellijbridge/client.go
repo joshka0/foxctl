@@ -35,6 +35,7 @@ type CreatePaneOptions struct {
 	ParentParticipant string
 	ParentAgentID     string
 	RoomID            string
+	RoomRole          string
 	RoomAccess        string
 }
 
@@ -69,6 +70,9 @@ func (c *Client) CreatePane(ctx context.Context, opts CreatePaneOptions) (Create
 	if session == "" {
 		return CreatePaneResult{}, fmt.Errorf("session is required")
 	}
+	if err := c.ensureSession(ctx, session); err != nil {
+		return CreatePaneResult{}, err
+	}
 	name := strings.TrimSpace(opts.Name)
 	if name == "" {
 		return CreatePaneResult{}, fmt.Errorf("pane name is required")
@@ -86,7 +90,7 @@ func (c *Client) CreatePane(ctx context.Context, opts CreatePaneOptions) (Create
 		args = append(args, "--cwd", cwd)
 	}
 	args = append(args, "--name", name, "--")
-	args = append(args, buildEnvCommand(command, participantID, opts.ParentParticipant, opts.ParentAgentID, opts.RoomID, opts.RoomAccess)...)
+	args = append(args, buildEnvCommand(command, participantID, opts.ParentParticipant, opts.ParentAgentID, opts.RoomID, opts.RoomRole, opts.RoomAccess)...)
 	if _, stderr, err := c.runner.Run(ctx, "zellij", args...); err != nil {
 		if strings.TrimSpace(stderr) == "" {
 			return CreatePaneResult{}, err
@@ -100,7 +104,26 @@ func (c *Client) CreatePane(ctx context.Context, opts CreatePaneOptions) (Create
 	}, nil
 }
 
-func buildEnvCommand(command, participantID, parentParticipant, parentAgentID, roomID, roomAccess string) []string {
+func (c *Client) ensureSession(ctx context.Context, session string) error {
+	session = strings.TrimSpace(session)
+	if session == "" {
+		return fmt.Errorf("session is required")
+	}
+	if _, stderr, err := c.runner.Run(ctx, "zellij", "attach", "--create-background", session); err != nil {
+		msg := strings.TrimSpace(stderr)
+		lower := strings.ToLower(msg)
+		if strings.Contains(lower, "session already exists") {
+			return nil
+		}
+		if msg == "" {
+			msg = err.Error()
+		}
+		return fmt.Errorf("zellij ensure session: %s", msg)
+	}
+	return nil
+}
+
+func buildEnvCommand(command, participantID, parentParticipant, parentAgentID, roomID, roomRole, roomAccess string) []string {
 	args := []string{
 		"env",
 		"AGENTCTL_PARTICIPANT_ID=" + strings.TrimSpace(participantID),
@@ -116,6 +139,9 @@ func buildEnvCommand(command, participantID, parentParticipant, parentAgentID, r
 	if strings.TrimSpace(roomAccess) == "direct" {
 		if value := strings.TrimSpace(roomID); value != "" {
 			args = append(args, "AGENTCTL_ROOM_ID="+value)
+		}
+		if value := strings.TrimSpace(roomRole); value != "" {
+			args = append(args, "AGENTCTL_ROOM_ROLE="+value)
 		}
 	}
 	args = append(args, "sh", "-lc", command)

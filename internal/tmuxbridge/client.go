@@ -140,6 +140,7 @@ type CreatePaneOptions struct {
 	ParentParticipant string `json:"parent_participant,omitempty"`
 	ParentAgentID     string `json:"parent_agent_id,omitempty"`
 	RoomID            string `json:"room_id,omitempty"`
+	RoomRole          string `json:"room_role,omitempty"`
 	RoomAccess        string `json:"room_access,omitempty"`
 }
 
@@ -161,6 +162,7 @@ type RespawnPaneOptions struct {
 	ParentParticipant string `json:"parent_participant,omitempty"`
 	ParentAgentID     string `json:"parent_agent_id,omitempty"`
 	RoomID            string `json:"room_id,omitempty"`
+	RoomRole          string `json:"room_role,omitempty"`
 	RoomAccess        string `json:"room_access,omitempty"`
 }
 
@@ -658,8 +660,8 @@ func (c *Client) CreatePane(ctx context.Context, opts CreatePaneOptions) (Create
 	if _, err := c.runTmuxWithSocket(ctx, socket, "select-layout", "-t", session, "tiled"); err != nil {
 		return CreatePaneResult{}, err
 	}
-	if strings.TrimSpace(command) != defaultPaneCommand() || hasPaneIdentityEnv(participantID, opts.ParentParticipant, opts.ParentAgentID, opts.RoomID) {
-		if _, err := c.respawnPaneWithSocket(ctx, socket, paneID, session, cwd, command, participantID, opts.ParentParticipant, opts.ParentAgentID, opts.RoomID, opts.RoomAccess); err != nil {
+	if strings.TrimSpace(command) != defaultPaneCommand() || hasPaneIdentityEnv(participantID, opts.ParentParticipant, opts.ParentAgentID, opts.RoomID, opts.RoomRole) {
+		if _, err := c.respawnPaneWithSocket(ctx, socket, paneID, session, cwd, command, participantID, opts.ParentParticipant, opts.ParentAgentID, opts.RoomID, opts.RoomRole, opts.RoomAccess); err != nil {
 			return CreatePaneResult{}, err
 		}
 	}
@@ -694,7 +696,7 @@ func (c *Client) RespawnPane(ctx context.Context, opts RespawnPaneOptions) (Resp
 	if err != nil {
 		return RespawnPaneResult{}, err
 	}
-	pane, err := c.respawnPaneWithSocket(ctx, socket, resolved, currentPane.Session, strings.TrimSpace(opts.CWD), command, opts.ParticipantID, opts.ParentParticipant, opts.ParentAgentID, opts.RoomID, opts.RoomAccess)
+	pane, err := c.respawnPaneWithSocket(ctx, socket, resolved, currentPane.Session, strings.TrimSpace(opts.CWD), command, opts.ParticipantID, opts.ParentParticipant, opts.ParentAgentID, opts.RoomID, opts.RoomRole, opts.RoomAccess)
 	if err != nil {
 		return RespawnPaneResult{}, err
 	}
@@ -791,6 +793,11 @@ func (c *Client) deliverPayload(ctx context.Context, resolvedTarget string, pane
 		}
 	}
 	payload, mode := relayPayloadForPane(pane, content)
+	if relayNeedsEscape(pane) {
+		if _, err := c.runTmux(ctx, "send-keys", "-t", resolvedTarget, "Escape"); err != nil {
+			return "", "", err
+		}
+	}
 	if _, err := c.runTmux(ctx, "send-keys", "-t", resolvedTarget, "-l", "--", payload); err != nil {
 		return "", "", err
 	}
@@ -805,6 +812,11 @@ func relayPayloadForPane(pane Pane, content string) (string, string) {
 		return shellPrintfCommand(content), "shell_printf"
 	}
 	return content, "raw"
+}
+
+func relayNeedsEscape(pane Pane) bool {
+	label := strings.ToLower(strings.TrimSpace(pane.Label))
+	return strings.HasPrefix(label, "gemini")
 }
 
 func isShellCommand(command string) bool {
@@ -1100,19 +1112,20 @@ func (c *Client) ensurePaneCommands(ctx context.Context, socket string, panes []
 	return nil
 }
 
-func hasPaneIdentityEnv(participantID, parentParticipant, parentAgentID, roomID string) bool {
+func hasPaneIdentityEnv(participantID, parentParticipant, parentAgentID, roomID, roomRole string) bool {
 	return strings.TrimSpace(participantID) != "" ||
 		strings.TrimSpace(parentParticipant) != "" ||
 		strings.TrimSpace(parentAgentID) != "" ||
-		strings.TrimSpace(roomID) != ""
+		strings.TrimSpace(roomID) != "" ||
+		strings.TrimSpace(roomRole) != ""
 }
 
-func (c *Client) respawnPaneWithSocket(ctx context.Context, socket, target, session, cwd, command, participantID, parentParticipant, parentAgentID, roomID, roomAccess string) (Pane, error) {
+func (c *Client) respawnPaneWithSocket(ctx context.Context, socket, target, session, cwd, command, participantID, parentParticipant, parentAgentID, roomID, roomRole, roomAccess string) (Pane, error) {
 	args := []string{"respawn-pane", "-k", "-t", target}
 	if strings.TrimSpace(cwd) != "" {
 		args = append(args, "-c", cwd)
 	}
-	args = append(args, paneCommandForIdentity(command, participantID, parentParticipant, parentAgentID, roomID, roomAccess, session, target))
+	args = append(args, paneCommandForIdentity(command, participantID, parentParticipant, parentAgentID, roomID, roomRole, roomAccess, session, target))
 	if _, err := c.runTmuxWithSocket(ctx, socket, args...); err != nil {
 		return Pane{}, err
 	}
@@ -1130,13 +1143,14 @@ func paneCommandForPane(plan preparePlan, pane Pane) string {
 		plan.parentParticipant,
 		plan.parentAgentID,
 		plan.roomID,
+		"",
 		plan.roomAccess,
 		plan.session,
 		pane.ID,
 	)
 }
 
-func paneCommandForIdentity(command, participantID, parentParticipant, parentAgentID, roomID, roomAccess, session, paneID string) string {
+func paneCommandForIdentity(command, participantID, parentParticipant, parentAgentID, roomID, roomRole, roomAccess, session, paneID string) string {
 	env := []string{
 		"AGENTCTL_PARTICIPANT_ID=" + shellQuote(strings.TrimSpace(participantID)),
 		"AGENTCTL_MUX_BACKEND=tmux",
@@ -1152,6 +1166,9 @@ func paneCommandForIdentity(command, participantID, parentParticipant, parentAge
 	if strings.TrimSpace(roomAccess) == "direct" {
 		if value := strings.TrimSpace(roomID); value != "" {
 			env = append(env, "AGENTCTL_ROOM_ID="+shellQuote(value))
+		}
+		if value := strings.TrimSpace(roomRole); value != "" {
+			env = append(env, "AGENTCTL_ROOM_ROLE="+shellQuote(value))
 		}
 	}
 	if strings.TrimSpace(command) == "" {

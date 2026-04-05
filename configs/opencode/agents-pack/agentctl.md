@@ -52,6 +52,12 @@ Help: `--help` | Examples: `--examples` | List: `agentctl skills list`
 | `mailbox/manage` | Overseer inbox |
 | `memory/query` | Gotchas/decisions by file |
 
+### Room Coordination
+| Skill | Purpose |
+|-------|---------|
+| `configs/skills-pack/agentctl-room/SKILL.md` | Durable room chat, relay, room loop, room tasks |
+| `configs/skills-pack/agentctl-room-operator/SKILL.md` | Room operating protocol for participants, reviewers, and coordinators |
+
 ### Codemaps & Indexing
 | Skill | Purpose |
 |-------|---------|

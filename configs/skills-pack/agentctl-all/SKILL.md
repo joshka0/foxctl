@@ -65,6 +65,7 @@ List: `agentctl skills list`
 | Skill | Purpose |
 |-------|---------|
 | `configs/skills-pack/agentctl-room/SKILL.md` | Durable shared room chat, room relay, room loop, room tasks |
+| `configs/skills-pack/agentctl-room-operator/SKILL.md` | How to operate inside an active room: status, inbox, task claim/touch/block/complete, coordinator escalation, review notes |
 
 ### Context Architecture & History
 For the bundled ACA/context-history workflow pack, see:

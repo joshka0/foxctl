@@ -32,6 +32,65 @@ func TestParseRoomMembers(t *testing.T) {
 	}
 }
 
+func TestParseRoomMemberSpecsSupportsPerMemberAgent(t *testing.T) {
+	got, err := parseRoomMemberSpecs([]string{"gemini-a=reviewer@gemini", "cursor-a@agent", "human-a=coordinator"})
+	if err != nil {
+		t.Fatalf("parseRoomMemberSpecs: %v", err)
+	}
+	if len(got) != 3 {
+		t.Fatalf("len(got)=%d want 3", len(got))
+	}
+	if got[0].Member.ActorID != "gemini-a" || got[0].Member.Role != "reviewer" || got[0].AgentCLI != "gemini" {
+		t.Fatalf("got[0]=%+v want gemini-a reviewer@gemini", got[0])
+	}
+	if got[1].Member.ActorID != "cursor-a" || got[1].Member.Role != "" || got[1].AgentCLI != "agent" {
+		t.Fatalf("got[1]=%+v want cursor-a @agent", got[1])
+	}
+	if got[2].Member.ActorID != "human-a" || got[2].Member.Role != "coordinator" || got[2].AgentCLI != "" {
+		t.Fatalf("got[2]=%+v want human-a coordinator", got[2])
+	}
+}
+
+func TestParseRoomMemberSpecsSupportsPerMemberAgentMode(t *testing.T) {
+	got, err := parseRoomMemberSpecs([]string{"cursor-a=reviewer@agent:auto"})
+	if err != nil {
+		t.Fatalf("parseRoomMemberSpecs: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("len(got)=%d want 1", len(got))
+	}
+	if got[0].Member.ActorID != "cursor-a" || got[0].Member.Role != "reviewer" || got[0].AgentCLI != "agent" || got[0].AgentMode != "auto" {
+		t.Fatalf("got[0]=%+v want cursor-a reviewer@agent:auto", got[0])
+	}
+}
+
+func TestRoomMembersFromSpecsStripsAgentMetadata(t *testing.T) {
+	specs, err := parseRoomMemberSpecs([]string{"gemini-a=reviewer@gemini"})
+	if err != nil {
+		t.Fatalf("parseRoomMemberSpecs: %v", err)
+	}
+	got := roomMembersFromSpecs(specs)
+	if len(got) != 1 {
+		t.Fatalf("len(got)=%d want 1", len(got))
+	}
+	if got[0].ActorID != "gemini-a" || got[0].Role != "reviewer" {
+		t.Fatalf("got[0]=%+v want room member without agent metadata", got[0])
+	}
+}
+
+func TestParseRoomMemberArgMap(t *testing.T) {
+	got, err := parseRoomMemberArgMap([]string{"cursor-a=--yolo", "cursor-a=--model=gpt-5", "gemini-a=--sandbox"})
+	if err != nil {
+		t.Fatalf("parseRoomMemberArgMap: %v", err)
+	}
+	if len(got["cursor-a"]) != 2 || got["cursor-a"][0] != "--yolo" || got["cursor-a"][1] != "--model=gpt-5" {
+		t.Fatalf("cursor-a args=%v want two ordered args", got["cursor-a"])
+	}
+	if len(got["gemini-a"]) != 1 || got["gemini-a"][0] != "--sandbox" {
+		t.Fatalf("gemini-a args=%v want one arg", got["gemini-a"])
+	}
+}
+
 func TestMergeRoomMembersUpdatesRole(t *testing.T) {
 	got := mergeRoomMembers(
 		parseMembersForTest("agent-a", "agent-b=member"),
@@ -1616,8 +1675,30 @@ func TestCollectRoomRelayTargetsByBackendRoutesZellijBySession(t *testing.T) {
 		t.Fatalf("skipped=%v want 2 entries", skipped)
 	}
 	targets := zellijTargets["fascinating-salamander"]
-	if len(targets) != 1 || targets[0] != zellijRelaySingletonTarget {
-		t.Fatalf("zellijTargets=%v want singleton route for fascinating-salamander", zellijTargets)
+	if len(targets) != 1 || targets[0] != "cursor-a" {
+		t.Fatalf("zellijTargets=%v want title route for fascinating-salamander", zellijTargets)
+	}
+}
+
+func TestCollectRoomRelayTargetsByBackendRoutesZellijByPaneID(t *testing.T) {
+	_, zellijTargets, failed, skipped := collectRoomRelayTargetsByBackend(agent.RoomSummary{
+		Members: []agent.RoomMember{
+			{ActorID: "human-a"},
+			{ActorID: "cursor-a", Backend: "zellij", Session: "sparkling-apricot", PaneID: "3"},
+		},
+	}, agent.BoardMessage{
+		Sender:    "human-a",
+		Recipient: "cursor-a",
+	})
+	if len(failed) != 0 {
+		t.Fatalf("failed=%v want none", failed)
+	}
+	if len(skipped) != 1 {
+		t.Fatalf("skipped=%v want 1 entry", skipped)
+	}
+	targets := zellijTargets["sparkling-apricot"]
+	if len(targets) != 1 || targets[0] != "zellij:sparkling-apricot:terminal_3" {
+		t.Fatalf("zellijTargets=%v want canonical pane target", zellijTargets)
 	}
 }
 
@@ -1872,6 +1953,53 @@ func TestRunRoomJoinPersistsTransportBinding(t *testing.T) {
 			found = true
 			if member["backend"] != "zellij" || member["session"] != "fascinating-salamander" {
 				t.Fatalf("cursor binding=%v want zellij/fascinating-salamander", member)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("cursor-a not found in members=%v", members)
+	}
+}
+
+func TestRunRoomJoinCurrentPersistsZellijPaneBinding(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("TMUX", "")
+	t.Setenv("TMUX_PANE", "")
+	t.Setenv("ZELLIJ", "1")
+	t.Setenv("ZELLIJ_SESSION_NAME", "sparkling-apricot")
+	t.Setenv("ZELLIJ_PANE_ID", "7")
+	t.Setenv("AGENTCTL_ZELLIJ_PARTICIPANT", "cursor-a")
+	ctx := context.Background()
+	workspace := t.TempDir()
+
+	cmd, _ := newRoomTestCommand(ctx)
+	if err := runRoomCreate(cmd, workspace, "alpha", "Alpha", "", []string{"human-a=coordinator"}); err != nil {
+		t.Fatalf("runRoomCreate: %v", err)
+	}
+
+	cmd, out := newRoomTestCommand(ctx)
+	if err := runRoomJoin(cmd, workspace, "alpha", "", "reviewer", "", "", "", false, true, true); err != nil {
+		t.Fatalf("runRoomJoin: %v", err)
+	}
+	data := decodeRoomEnvelope(t, out)
+	roomRaw, ok := data["room"].(map[string]any)
+	if !ok {
+		t.Fatalf("room type=%T", data["room"])
+	}
+	members, ok := roomRaw["members"].([]any)
+	if !ok {
+		t.Fatalf("members=%T", roomRaw["members"])
+	}
+	found := false
+	for _, raw := range members {
+		member, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		if member["actor_id"] == "cursor-a" {
+			found = true
+			if member["backend"] != "zellij" || member["session"] != "sparkling-apricot" || member["pane_id"] != "7" {
+				t.Fatalf("cursor binding=%v want zellij/sparkling-apricot/7", member)
 			}
 		}
 	}

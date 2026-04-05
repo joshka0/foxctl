@@ -1,20 +1,38 @@
 package cmd
 
 import (
+	"errors"
 	"fmt"
 	"os"
+	"os/exec"
+	"regexp"
 	"strings"
 
 	"github.com/jkatigb/agentctl/internal/contextplane"
 	"github.com/jkatigb/agentctl/internal/protocol"
 	"github.com/jkatigb/agentctl/internal/tmuxbridge"
+	"github.com/jkatigb/agentctl/internal/zellijbridge"
 	"github.com/spf13/cobra"
 )
 
+var muxLabelSanitizer = regexp.MustCompile(`[^a-z0-9._-]+`)
+
+type muxCreateError struct {
+	code protocol.ErrorCode
+	msg  string
+	hint string
+	data map[string]any
+}
+
+func (e *muxCreateError) Error() string {
+	return e.msg
+}
+
 func newTmuxCommand() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "tmux",
-		Short: "Inspect terminal panes for live multi-agent collaboration",
+		Use:     "mux",
+		Aliases: []string{"tmux"},
+		Short:   "Inspect and message terminal panes for live multi-agent collaboration",
 	}
 	cmd.AddCommand(
 		newTmuxListCommand(),
@@ -37,7 +55,7 @@ func newTmuxListCommand() *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "list",
-		Short: "List tmux panes or agent-owned zellij panes",
+		Short: "List mux panes or agent-owned zellij panes",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			switch strings.TrimSpace(backend) {
 			case "", "tmux":
@@ -45,7 +63,7 @@ func newTmuxListCommand() *cobra.Command {
 				panes, err := client.List(cmd.Context())
 				if err != nil {
 					return protocol.WriteError(cmd.OutOrStdout(), "agentctl.tmux.list", protocol.ErrorCodeERuntime, err.Error(), map[string]any{
-						"hint": "Run `agentctl tmux doctor` to inspect connectivity, or set TMUX_BRIDGE_SOCKET if the tmux env is stale.",
+						"hint": "Run `agentctl mux doctor` to inspect connectivity, or set TMUX_BRIDGE_SOCKET if the tmux env is stale.",
 					}, protocol.WithSource("cli"))
 				}
 				return protocol.WriteOK(cmd.OutOrStdout(), "agentctl.tmux.list", map[string]any{
@@ -104,7 +122,7 @@ func newTmuxReadCommand() *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "read <target>",
-		Short: "Capture the last N lines from a tmux pane",
+		Short: "Capture the last N lines from a mux pane",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			client := tmuxbridge.New()
@@ -127,7 +145,7 @@ func newTmuxReadCommand() *cobra.Command {
 func newTmuxDoctorCommand() *cobra.Command {
 	return &cobra.Command{
 		Use:   "doctor",
-		Short: "Diagnose tmux connectivity for agentctl and tmux-bridge",
+		Short: "Diagnose mux connectivity for agentctl and tmux-bridge",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			client := tmuxbridge.New()
 			report, err := client.Doctor(cmd.Context())
@@ -145,6 +163,7 @@ func newTmuxDoctorCommand() *cobra.Command {
 
 func newTmuxCreateCommand() *cobra.Command {
 	var (
+		backend           string
 		session           string
 		panes             int
 		paneCommand       string
@@ -164,7 +183,7 @@ func newTmuxCreateCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "create",
 		Aliases: []string{"prepare"},
-		Short:   "Create or extend a tmux collaboration session and label its panes",
+		Short:   "Create or extend a collaboration session and label its panes",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if panes <= 0 {
 				return protocol.WriteError(cmd.OutOrStdout(), "agentctl.tmux.create", protocol.ErrorCodeEARG, "panes must be positive", map[string]any{
@@ -176,9 +195,34 @@ func newTmuxCreateCommand() *cobra.Command {
 					cwd = wd
 				}
 			}
+			resolvedBackend := resolveMuxCreateBackend(strings.TrimSpace(backend))
+			if resolvedBackend == "" {
+				return protocol.WriteError(cmd.OutOrStdout(), "agentctl.tmux.create", protocol.ErrorCodeEARG, fmt.Sprintf("unsupported backend %q", backend), map[string]any{
+					"hint": "Use --backend auto, tmux, or zellij.",
+				}, protocol.WithSource("cli"))
+			}
+			resolvedSession := resolveMuxCreateSession(cmd, resolvedBackend, strings.TrimSpace(session))
+			if resolvedBackend == "zellij" {
+				result, err := runMuxCreateZellij(cmd, resolvedSession, panes, paneCommand, agent, agentMode, agentArgs, agentSessionID, cwd, labelPrefix, parentParticipant, parentAgentID, roomID, roomAccess, attach)
+				if err != nil {
+					var createErr *muxCreateError
+					if errors.As(err, &createErr) {
+						return protocol.WriteError(cmd.OutOrStdout(), "agentctl.tmux.create", createErr.code, createErr.msg, mergeHintData(createErr.hint, createErr.data), protocol.WithSource("cli"))
+					}
+					return protocol.WriteError(cmd.OutOrStdout(), "agentctl.tmux.create", protocol.ErrorCodeERuntime, err.Error(), map[string]any{
+						"hint": "Ensure zellij is installed, the target session exists, and the current user can run zellij actions against it.",
+					}, protocol.WithSource("cli"))
+				}
+				return protocol.WriteOK(cmd.OutOrStdout(), "agentctl.tmux.create", map[string]any{
+					"result": result,
+					"hints": map[string]any{
+						"attach": result["attach_command"],
+					},
+				}, protocol.WithSource("cli"))
+			}
 			client := tmuxbridge.New()
 			result, err := client.PrepareSession(cmd.Context(), tmuxbridge.PrepareOptions{
-				Session:           session,
+				Session:           resolvedSession,
 				Panes:             panes,
 				PaneCommand:       paneCommand,
 				Agent:             agent,
@@ -200,7 +244,7 @@ func newTmuxCreateCommand() *cobra.Command {
 			if attach {
 				if err := client.AttachOrSwitch(cmd.Context(), result.Session); err != nil {
 					return protocol.WriteError(cmd.OutOrStdout(), "agentctl.tmux.create", protocol.ErrorCodeERuntime, err.Error(), map[string]any{
-						"hint":   "Prepare succeeded, but the attach/switch step failed. Try the returned attach command manually.",
+					"hint":   "Prepare succeeded, but the attach/switch step failed. Try the returned attach command manually.",
 						"result": result,
 					}, protocol.WithSource("cli"))
 				}
@@ -212,14 +256,15 @@ func newTmuxCreateCommand() *cobra.Command {
 				"result": result,
 				"hints": map[string]any{
 					"attach":       result.AttachCommand,
-					"read_example": "agentctl tmux read " + tmuxbridgeLabelExample(result.Panes) + " --lines 80",
-					"send_example": "agentctl tmux send " + targetExample + " \"review this pane\" --sender " + senderExample,
+					"read_example": "agentctl mux read " + tmuxbridgeLabelExample(result.Panes) + " --lines 80",
+					"send_example": "agentctl mux send " + targetExample + " \"review this pane\" --sender " + senderExample,
 				},
 			}, protocol.WithSource("cli"))
 		},
 	}
 
-	cmd.Flags().StringVar(&session, "session", "agentctl-collab", "tmux session name")
+	cmd.Flags().StringVar(&backend, "backend", "auto", "Terminal backend to prepare (auto|tmux|zellij)")
+	cmd.Flags().StringVar(&session, "session", "", "Mux session name (defaults to current zellij session when inside zellij, otherwise agentctl-collab)")
 	cmd.Flags().IntVar(&panes, "panes", 3, "Number of panes to prepare")
 	cmd.Flags().StringVar(&paneCommand, "pane-command", "", "Command to launch in each pane (default: current shell)")
 	cmd.Flags().StringVar(&agent, "agent", "", "Agent CLI to launch in each pane (for example: claude, codex, gemini, agent, droid)")
@@ -236,19 +281,232 @@ func newTmuxCreateCommand() *cobra.Command {
 	return cmd
 }
 
+func resolveMuxCreateBackend(raw string) string {
+	switch strings.TrimSpace(raw) {
+	case "", "auto":
+		if strings.TrimSpace(os.Getenv("ZELLIJ_SESSION_NAME")) != "" {
+			return "zellij"
+		}
+		return "tmux"
+	case "tmux", "zellij":
+		return strings.TrimSpace(raw)
+	default:
+		return ""
+	}
+}
+
+func resolveMuxCreateSession(cmd *cobra.Command, backend, raw string) string {
+	value := strings.TrimSpace(raw)
+	if value != "" {
+		return value
+	}
+	if backend == "zellij" {
+		if current := strings.TrimSpace(os.Getenv("ZELLIJ_SESSION_NAME")); current != "" {
+			return current
+		}
+	}
+	return "agentctl-collab"
+}
+
+func runMuxCreateZellij(cmd *cobra.Command, session string, panes int, paneCommand, agent, agentMode string, agentArgs []string, agentSessionID, cwd, labelPrefix, parentParticipant, parentAgentID, roomID, roomAccess string, attach bool) (map[string]any, error) {
+	if strings.TrimSpace(session) == "" {
+		return nil, &muxCreateError{
+			code: protocol.ErrorCodeEARG,
+			msg:  "zellij session is required",
+			hint: "Pass --session or run inside zellij so ZELLIJ_SESSION_NAME can be detected.",
+		}
+	}
+	command, err := resolveMuxCreateCommand(strings.TrimSpace(paneCommand), strings.TrimSpace(agent), strings.TrimSpace(agentMode), append([]string(nil), agentArgs...), strings.TrimSpace(agentSessionID))
+	if err != nil {
+		return nil, &muxCreateError{
+			code: protocol.ErrorCodeEARG,
+			msg:  err.Error(),
+			hint: "Use --pane-command directly, or pass --agent with optional repeated --agent-arg values.",
+		}
+	}
+	prefix := strings.TrimSpace(labelPrefix)
+	if prefix == "" {
+		prefix = deriveMuxCreateLabelPrefix(strings.TrimSpace(agent))
+	}
+	client := zellijbridge.New()
+	created := make([]map[string]any, 0, panes)
+	for i := 0; i < panes; i++ {
+		name := zellijPaneNameForIndex(prefix, i)
+		result, createErr := client.CreatePane(cmd.Context(), zellijbridge.CreatePaneOptions{
+			Session:           session,
+			CWD:               cwd,
+			Name:              name,
+			Command:           command,
+			ParticipantID:     name,
+			ParentParticipant: parentParticipant,
+			ParentAgentID:     parentAgentID,
+			RoomID:            roomID,
+			RoomAccess:        roomAccess,
+		})
+		if createErr != nil {
+			return nil, &muxCreateError{
+				code: protocol.ErrorCodeERuntime,
+				msg:  createErr.Error(),
+				hint: "Ensure zellij is installed, the target session exists, and the current user can run zellij actions against it.",
+			}
+		}
+		created = append(created, map[string]any{
+			"backend":        "zellij",
+			"session":        result.Session,
+			"pane_name":      result.PaneName,
+			"participant_id": result.ParticipantID,
+		})
+	}
+	attachCommand := "zellij attach " + shellQuoteZshSafe(session)
+	if attach && strings.TrimSpace(os.Getenv("ZELLIJ_SESSION_NAME")) == "" {
+		attachCmd := exec.CommandContext(cmd.Context(), "zellij", "attach", session)
+		attachCmd.Stdin = os.Stdin
+		attachCmd.Stdout = os.Stdout
+		attachCmd.Stderr = os.Stdout
+		if err := attachCmd.Run(); err != nil {
+			return nil, &muxCreateError{
+				code: protocol.ErrorCodeERuntime,
+				msg:  err.Error(),
+				hint: "Pane creation succeeded, but attaching to the zellij session failed. Try the returned attach command manually.",
+				data: map[string]any{
+					"result": map[string]any{
+						"session":        session,
+						"panes":          created,
+						"attach_command": attachCommand,
+					},
+				},
+			}
+		}
+	}
+	return map[string]any{
+		"backend":        "zellij",
+		"session":        session,
+		"created":        true,
+		"panes_requested": panes,
+		"pane_command":   command,
+		"agent":          agent,
+		"agent_mode":     agentMode,
+		"agent_args":     append([]string(nil), agentArgs...),
+		"agent_session_id": agentSessionID,
+		"cwd":            cwd,
+		"label_prefix":   prefix,
+		"parent_participant": parentParticipant,
+		"parent_agent_id": parentAgentID,
+		"room_id":        roomID,
+		"room_access":    roomAccess,
+		"attach_command": attachCommand,
+		"panes":          created,
+	}, nil
+}
+
+func resolveMuxCreateCommand(paneCommand, agent, agentMode string, agentArgs []string, agentSessionID string) (string, error) {
+	if paneCommand != "" {
+		return paneCommand, nil
+	}
+	if agent == "" {
+		shell := strings.TrimSpace(os.Getenv("SHELL"))
+		if shell == "" {
+			shell = "zsh"
+		}
+		return shell, nil
+	}
+	args := make([]string, 0, 8)
+	args = append(args, agent)
+	if strings.TrimSpace(agentSessionID) != "" {
+		switch strings.TrimSpace(agent) {
+		case "codex":
+			args = append(args, "resume", agentSessionID)
+		case "claude":
+			args = append(args, "--resume", agentSessionID)
+		default:
+			return "", fmt.Errorf("--agent-session-id is currently supported only for codex and claude")
+		}
+	}
+	switch strings.TrimSpace(agentMode) {
+	case "", "interactive":
+	case "auto":
+		switch strings.TrimSpace(agent) {
+		case "codex":
+			args = append(args, "--full-auto")
+		case "claude":
+			args = append(args, "--dangerously-skip-permissions")
+		case "gemini", "agent":
+			args = append(args, "--yolo")
+		default:
+			return "", fmt.Errorf("auto mode is unsupported for agent %q", agent)
+		}
+	default:
+		return "", fmt.Errorf("unsupported mode %q", agentMode)
+	}
+	args = append(args, agentArgs...)
+	return joinShellCommand(args), nil
+}
+
+func deriveMuxCreateLabelPrefix(agent string) string {
+	base := strings.ToLower(strings.TrimSpace(agent))
+	if base == "" {
+		return "agent"
+	}
+	base = muxLabelSanitizer.ReplaceAllString(base, "-")
+	base = strings.Trim(base, "-")
+	if base == "" {
+		return "agent"
+	}
+	return base
+}
+
+func zellijPaneNameForIndex(prefix string, idx int) string {
+	if idx < 26 {
+		return fmt.Sprintf("%s-%c", prefix, rune('a'+idx))
+	}
+	return fmt.Sprintf("%s-%d", prefix, idx+1)
+}
+
+func joinShellCommand(parts []string) string {
+	quoted := make([]string, 0, len(parts))
+	for _, part := range parts {
+		quoted = append(quoted, shellQuoteZshSafe(part))
+	}
+	return strings.Join(quoted, " ")
+}
+
+func shellQuoteZshSafe(value string) string {
+	if value == "" {
+		return "''"
+	}
+	if !strings.ContainsAny(value, " \t\n'\"\\$`()[]{}*?!&;|<>") {
+		return value
+	}
+	return "'" + strings.ReplaceAll(value, "'", `'"'"'`) + "'"
+}
+
+func mergeHintData(hint string, data map[string]any) map[string]any {
+	if strings.TrimSpace(hint) == "" && len(data) == 0 {
+		return nil
+	}
+	out := make(map[string]any, len(data)+1)
+	for k, v := range data {
+		out[k] = v
+	}
+	if strings.TrimSpace(hint) != "" {
+		out["hint"] = hint
+	}
+	return out
+}
+
 func newTmuxSendCommand() *cobra.Command {
 	var sender string
 
 	cmd := &cobra.Command{
 		Use:   "send <target> <text>",
-		Short: "Send a structured bridge message into a tmux pane",
+		Short: "Send a structured bridge message into a mux pane",
 		Args:  cobra.MinimumNArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			client := tmuxbridge.New()
 			result, err := client.Send(cmd.Context(), sender, args[0], strings.Join(args[1:], " "))
 			if err != nil {
 				return protocol.WriteError(cmd.OutOrStdout(), "agentctl.tmux.send", protocol.ErrorCodeERuntime, err.Error(), map[string]any{
-					"hint": "Use a pane id like %3 or a pane label like agent-b. When invoking outside tmux, pass --sender <pane-label> so replies can route back to your pane.",
+					"hint": "Use a pane id like %3 or a pane label like agent-b. When invoking outside the active mux, pass --sender <pane-label> so replies can route back to your pane.",
 				}, protocol.WithSource("cli"))
 			}
 			return protocol.WriteOK(cmd.OutOrStdout(), "agentctl.tmux.send", map[string]any{
@@ -272,14 +530,14 @@ func newTmuxSendParentCommand() *cobra.Command {
 			parent, err := resolveParentParticipantID()
 			if err != nil {
 				return protocol.WriteError(cmd.OutOrStdout(), "agentctl.tmux.send-parent", protocol.ErrorCodeEARG, "AGENTCTL_PARENT_PARTICIPANT_ID is not set", map[string]any{
-					"hint": "Launch the pane with --parent-participant or pass the parent explicitly with agentctl tmux send --sender ... <target>.",
+					"hint": "Launch the pane with --parent-participant or pass the parent explicitly with agentctl mux send --sender ... <target>.",
 				}, protocol.WithSource("cli"))
 			}
 			client := tmuxbridge.New()
 			result, err := client.Send(cmd.Context(), sender, parent, strings.Join(args, " "))
 			if err != nil {
 				return protocol.WriteError(cmd.OutOrStdout(), "agentctl.tmux.send-parent", protocol.ErrorCodeERuntime, err.Error(), map[string]any{
-					"hint":   "Ensure the current pane is inside tmux and the parent participant pane label is reachable.",
+					"hint":   "Ensure the current pane is inside the active mux and the parent participant pane label is reachable.",
 					"parent": parent,
 				}, protocol.WithSource("cli"))
 			}
@@ -339,7 +597,7 @@ func newTmuxObserveCommand() *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "observe <target>",
-		Short: "Promote the latest tmux-bridge message in a pane into an ACA observation",
+		Short: "Promote the latest mux bridge message in a pane into an ACA observation",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			client := tmuxbridge.New()
