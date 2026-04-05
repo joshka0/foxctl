@@ -125,7 +125,7 @@ func TestRoomCommandFlow_CreateJoinSendShow(t *testing.T) {
 	}
 
 	cmd, out = newRoomTestCommand(ctx)
-	if err := runRoomJoin(cmd, workspace, "alpha", "agent-b", "reviewer", true, false); err != nil {
+	if err := runRoomJoin(cmd, workspace, "alpha", "agent-b", "reviewer", "", "", "", false, true, false); err != nil {
 		t.Fatalf("runRoomJoin: %v", err)
 	}
 
@@ -148,8 +148,25 @@ func TestRoomCommandFlow_CreateJoinSendShow(t *testing.T) {
 		t.Fatalf("room id=%v want alpha", roomRaw["id"])
 	}
 	members, ok := roomRaw["members"].([]any)
-	if !ok || len(members) != 2 {
-		t.Fatalf("members=%T/%v want 2 entries", roomRaw["members"], roomRaw["members"])
+	if !ok || len(members) < 2 {
+		t.Fatalf("members=%T/%v want at least 2 entries", roomRaw["members"], roomRaw["members"])
+	}
+	foundLead := false
+	foundReviewer := false
+	for _, raw := range members {
+		member, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		if member["actor_id"] == "agent-a" && member["role"] == "lead" {
+			foundLead = true
+		}
+		if member["actor_id"] == "agent-b" && member["role"] == "reviewer" {
+			foundReviewer = true
+		}
+	}
+	if !foundLead || !foundReviewer {
+		t.Fatalf("members=%v want agent-a lead and agent-b reviewer", members)
 	}
 	messages, ok := data["messages"].([]any)
 	if !ok || len(messages) != 1 {
@@ -722,7 +739,7 @@ func TestBuildRoomStatusEntriesCollapsesHistoricalBacklogByChain(t *testing.T) {
 	entries := buildRoomStatusEntries("gemini-a", []agent.BoardMessage{
 		{
 			ID:               "m1",
-			Sender:           "actor:system:room:alpha",
+			Sender:           "human-a",
 			Recipient:        "gemini-a",
 			RelatedMessageID: "orig-1",
 			Subject:          "old reminder",
@@ -734,7 +751,7 @@ func TestBuildRoomStatusEntriesCollapsesHistoricalBacklogByChain(t *testing.T) {
 		},
 		{
 			ID:               "m2",
-			Sender:           "actor:system:room:alpha",
+			Sender:           "human-a",
 			Recipient:        "gemini-a",
 			RelatedMessageID: "orig-1",
 			Subject:          "new reminder",
@@ -746,7 +763,7 @@ func TestBuildRoomStatusEntriesCollapsesHistoricalBacklogByChain(t *testing.T) {
 		},
 		{
 			ID:               "m3",
-			Sender:           "actor:system:room:alpha",
+			Sender:           "human-a",
 			Recipient:        "gemini-a",
 			RelatedMessageID: "orig-2",
 			Subject:          "other reminder",
@@ -756,14 +773,11 @@ func TestBuildRoomStatusEntriesCollapsesHistoricalBacklogByChain(t *testing.T) {
 			Status:           agent.BoardMessageStatusUnread,
 		},
 	})
-	if len(entries) != 2 {
-		t.Fatalf("len(entries)=%d want 2", len(entries))
+	if len(entries) != 1 {
+		t.Fatalf("len(entries)=%d want 1", len(entries))
 	}
 	if entries[0].ID != "m2" {
 		t.Fatalf("entries[0].ID=%q want m2", entries[0].ID)
-	}
-	if entries[1].ID != "m3" {
-		t.Fatalf("entries[1].ID=%q want m3", entries[1].ID)
 	}
 }
 
@@ -1295,6 +1309,26 @@ func TestDetectRoomPulseMessagesSkipsSatisfiedReplyExpected(t *testing.T) {
 	}
 }
 
+func TestDetectRoomPulseMessagesSkipsReadReplyExpected(t *testing.T) {
+	now := time.Date(2026, 4, 4, 19, 0, 0, 0, time.UTC)
+	pulses := detectRoomPulseMessages("alpha", []agent.BoardMessage{
+		{
+			ID:            "msg-1",
+			WorkspaceID:   "/repo",
+			Stream:        "room:alpha",
+			Sender:        "human-a",
+			Recipient:     "gemini-a",
+			ReplyExpected: true,
+			Status:        agent.BoardMessageStatusRead,
+			Subject:       "Please respond",
+			CreatedAt:     now.Add(-3 * time.Minute),
+		},
+	}, now, roomPulseConfig{ReplyStaleAfter: 2 * time.Minute}, map[string]time.Time{})
+	if len(pulses) != 0 {
+		t.Fatalf("len(pulses)=%d want 0", len(pulses))
+	}
+}
+
 func TestDetectRoomPulseMessagesKeepsOnlyLatestOutstandingPerRecipient(t *testing.T) {
 	now := time.Date(2026, 4, 4, 19, 0, 0, 0, time.UTC)
 	pulses := detectRoomPulseMessages("alpha", []agent.BoardMessage{
@@ -1324,6 +1358,56 @@ func TestDetectRoomPulseMessagesKeepsOnlyLatestOutstandingPerRecipient(t *testin
 	}
 	if pulses[0].Key != "msg-2" {
 		t.Fatalf("key=%q want msg-2", pulses[0].Key)
+	}
+}
+
+func TestBuildRoomStatusEntriesSkipsSystemReminderMessages(t *testing.T) {
+	entries := buildRoomStatusEntries("human-a", []agent.BoardMessage{
+		{
+			ID:        "sys-1",
+			Stream:    "room:alpha",
+			Sender:    "actor:system:room:alpha",
+			Recipient: "human-a",
+			Subject:   "Coordinator pulse",
+			Body:      "keep the room on track",
+			Status:    agent.BoardMessageStatusUnread,
+			CreatedAt: time.Date(2026, 4, 4, 19, 0, 0, 0, time.UTC),
+		},
+		{
+			ID:        "msg-1",
+			Stream:    "room:alpha",
+			Sender:    "cursor-a",
+			Recipient: "human-a",
+			Subject:   "Re: smoke",
+			Body:      "yes",
+			Status:    agent.BoardMessageStatusUnread,
+			ReplyExpected: true,
+			CreatedAt: time.Date(2026, 4, 4, 19, 1, 0, 0, time.UTC),
+		},
+	})
+	if len(entries) != 1 {
+		t.Fatalf("len(entries)=%d want 1", len(entries))
+	}
+	if entries[0].ID != "msg-1" {
+		t.Fatalf("entry id=%q want msg-1", entries[0].ID)
+	}
+}
+
+func TestBuildRoomStatusEntriesSkipsNonActionableDirectInfo(t *testing.T) {
+	entries := buildRoomStatusEntries("cursor-a", []agent.BoardMessage{
+		{
+			ID:        "m1",
+			Stream:    "room:alpha",
+			Sender:    "human-a",
+			Recipient: "cursor-a",
+			Subject:   "Smoke",
+			Body:      "plain direct info",
+			Status:    agent.BoardMessageStatusUnread,
+			CreatedAt: time.Date(2026, 4, 4, 19, 0, 0, 0, time.UTC),
+		},
+	})
+	if len(entries) != 0 {
+		t.Fatalf("len(entries)=%d want 0", len(entries))
 	}
 }
 
@@ -1447,6 +1531,32 @@ func TestCollectRoomRelayTargetsDirectRecipient(t *testing.T) {
 	}
 	if len(skipped) != 2 {
 		t.Fatalf("skipped=%v want 2 entries", skipped)
+	}
+}
+
+func TestCollectRoomRelayTargetsByBackendRoutesZellijBySession(t *testing.T) {
+	tmuxTargets, zellijTargets, failed, skipped := collectRoomRelayTargetsByBackend(agent.RoomSummary{
+		Members: []agent.RoomMember{
+			{ActorID: "human-a"},
+			{ActorID: "cursor-a", Backend: "zellij", Session: "fascinating-salamander"},
+			{ActorID: "claude-a"},
+		},
+	}, agent.BoardMessage{
+		Sender:    "human-a",
+		Recipient: "cursor-a",
+	})
+	if len(tmuxTargets) != 0 {
+		t.Fatalf("tmuxTargets=%v want none", tmuxTargets)
+	}
+	if len(failed) != 0 {
+		t.Fatalf("failed=%v want none", failed)
+	}
+	if len(skipped) != 2 {
+		t.Fatalf("skipped=%v want 2 entries", skipped)
+	}
+	targets := zellijTargets["fascinating-salamander"]
+	if len(targets) != 1 || targets[0] != zellijRelaySingletonTarget {
+		t.Fatalf("zellijTargets=%v want singleton route for fascinating-salamander", zellijTargets)
 	}
 }
 
@@ -1635,7 +1745,7 @@ func TestRunRoomJoinCurrentDerivesCanonicalTmuxParticipant(t *testing.T) {
 	}
 
 	cmd, out := newRoomTestCommand(ctx)
-	if err := runRoomJoin(cmd, workspace, "alpha", "", "worker", true, true); err != nil {
+	if err := runRoomJoin(cmd, workspace, "alpha", "", "worker", "", "", "", false, true, true); err != nil {
 		t.Fatalf("runRoomJoin: %v", err)
 	}
 	data := decodeRoomEnvelope(t, out)
@@ -1665,6 +1775,47 @@ func TestSameRoomParticipantRecognizesCanonicalIDs(t *testing.T) {
 	}
 	if sameRoomParticipant("codex-a", "tmux:collab:%1") {
 		t.Fatal("sameRoomParticipant true, want false for unrelated ids")
+	}
+}
+
+func TestRunRoomJoinPersistsTransportBinding(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	ctx := context.Background()
+	workspace := t.TempDir()
+
+	cmd, _ := newRoomTestCommand(ctx)
+	if err := runRoomCreate(cmd, workspace, "alpha", "Alpha", "", []string{"human-a=coordinator"}); err != nil {
+		t.Fatalf("runRoomCreate: %v", err)
+	}
+
+	cmd, out := newRoomTestCommand(ctx)
+	if err := runRoomJoin(cmd, workspace, "alpha", "cursor-a", "reviewer", "zellij", "fascinating-salamander", "", false, true, false); err != nil {
+		t.Fatalf("runRoomJoin: %v", err)
+	}
+	data := decodeRoomEnvelope(t, out)
+	roomRaw, ok := data["room"].(map[string]any)
+	if !ok {
+		t.Fatalf("room type=%T", data["room"])
+	}
+	members, ok := roomRaw["members"].([]any)
+	if !ok {
+		t.Fatalf("members=%T", roomRaw["members"])
+	}
+	found := false
+	for _, raw := range members {
+		member, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		if member["actor_id"] == "cursor-a" {
+			found = true
+			if member["backend"] != "zellij" || member["session"] != "fascinating-salamander" {
+				t.Fatalf("cursor binding=%v want zellij/fascinating-salamander", member)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("cursor-a not found in members=%v", members)
 	}
 }
 

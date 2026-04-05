@@ -44,6 +44,10 @@ type RoomResponse struct {
 type RoomMemberResponse struct {
 	ActorID  string `json:"actor_id"`
 	Role     string `json:"role,omitempty"`
+	Backend  string `json:"backend,omitempty"`
+	Session  string `json:"session,omitempty"`
+	PaneID   string `json:"pane_id,omitempty"`
+	Unbound  bool   `json:"unbound,omitempty"`
 	JoinedAt string `json:"joined_at,omitempty"`
 }
 
@@ -67,6 +71,10 @@ type RoomPatchRequest struct {
 type RoomMemberRequest struct {
 	ActorID string `json:"actor_id"`
 	Role    string `json:"role,omitempty"`
+	Backend string `json:"backend,omitempty"`
+	Session string `json:"session,omitempty"`
+	PaneID  string `json:"pane_id,omitempty"`
+	Unbound bool   `json:"unbound,omitempty"`
 }
 
 // RoomMessageSendRequest sends one message into a room-scoped stream.
@@ -1269,6 +1277,10 @@ func convertRoomMembers(members []agent.RoomMember) []RoomMemberResponse {
 		resp := RoomMemberResponse{
 			ActorID: member.ActorID,
 			Role:    member.Role,
+			Backend: member.Backend,
+			Session: member.Session,
+			PaneID:  member.PaneID,
+			Unbound: member.Unbound,
 		}
 		if !member.JoinedAt.IsZero() {
 			resp.JoinedAt = member.JoinedAt.Format(time.RFC3339)
@@ -1288,6 +1300,10 @@ func toRoomMembers(members []RoomMemberRequest) []agent.RoomMember {
 		out = append(out, agent.RoomMember{
 			ActorID: actorID,
 			Role:    strings.TrimSpace(member.Role),
+			Backend: strings.ToLower(strings.TrimSpace(member.Backend)),
+			Session: strings.TrimSpace(member.Session),
+			PaneID:  strings.TrimSpace(member.PaneID),
+			Unbound: member.Unbound,
 		})
 	}
 	return out

@@ -158,6 +158,10 @@ type RoomSummary struct {
 type RoomMember struct {
 	ActorID  string    `json:"actor_id"`
 	Role     string    `json:"role,omitempty"`
+	Backend  string    `json:"backend,omitempty"`
+	Session  string    `json:"session,omitempty"`
+	PaneID   string    `json:"pane_id,omitempty"`
+	Unbound  bool      `json:"unbound,omitempty"`
 	JoinedAt time.Time `json:"joined_at"`
 }
 

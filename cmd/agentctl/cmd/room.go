@@ -270,6 +270,10 @@ func newRoomJoinCommand() *cobra.Command {
 	var (
 		workspace string
 		role      string
+		backend   string
+		session   string
+		paneID    string
+		unbound   bool
 		create    bool
 		current   bool
 	)
@@ -282,11 +286,15 @@ func newRoomJoinCommand() *cobra.Command {
 			if len(args) > 1 {
 				actorID = args[1]
 			}
-			return runRoomJoin(cmd, workspace, args[0], actorID, role, create, current)
+			return runRoomJoin(cmd, workspace, args[0], actorID, role, backend, session, paneID, unbound, create, current)
 		},
 	}
 	cmd.Flags().StringVar(&workspace, "workspace", ".", "Workspace root override")
 	cmd.Flags().StringVar(&role, "role", "", "Optional member role")
+	cmd.Flags().StringVar(&backend, "backend", "", "Optional transport backend binding (tmux|zellij)")
+	cmd.Flags().StringVar(&session, "session", "", "Optional transport session binding")
+	cmd.Flags().StringVar(&paneID, "pane-id", "", "Optional transport pane binding")
+	cmd.Flags().BoolVar(&unbound, "unbound", false, "Mark the member transport as unbound/misaligned")
 	cmd.Flags().BoolVar(&create, "create", true, "Create the room if it does not exist")
 	cmd.Flags().BoolVar(&current, "current", false, "Join the current tmux/zellij participant when actor-id is omitted")
 	return cmd
@@ -354,7 +362,7 @@ func newRoomRelayCommand() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&workspace, "workspace", ".", "Workspace root override")
-	cmd.Flags().StringVar(&backend, "backend", "tmux", "Terminal backend (tmux|zellij)")
+	cmd.Flags().StringVar(&backend, "backend", "auto", "Terminal backend (auto|tmux|zellij)")
 	cmd.Flags().StringVar(&session, "session", "", "Zellij session name (defaults to ZELLIJ_SESSION_NAME when inside zellij)")
 	cmd.Flags().StringVar(&plugin, "plugin-path", "", "Path to the zellij room relay plugin wasm")
 	cmd.Flags().DurationVar(&poll, "poll", 2*time.Second, "Polling interval")
@@ -410,6 +418,7 @@ func ensureRoomCoordinator(existing []agent.RoomMember, actorID string) []agent.
 	out := make([]agent.RoomMember, len(existing))
 	copy(out, existing)
 	for i := range out {
+		out[i] = normalizeRoomMember(out[i])
 		if strings.TrimSpace(out[i].ActorID) != actorID {
 			continue
 		}
@@ -418,7 +427,7 @@ func ensureRoomCoordinator(existing []agent.RoomMember, actorID string) []agent.
 		}
 		return out
 	}
-	return append(out, agent.RoomMember{ActorID: actorID, Role: "coordinator"})
+	return append(out, normalizeRoomMember(agent.RoomMember{ActorID: actorID, Role: "coordinator"}))
 }
 
 func runRoomList(cmd *cobra.Command, workspace, actorID string, limit int) error {
@@ -918,20 +927,42 @@ func runRoomCoordinatorSet(cmd *cobra.Command, workspace, roomID, actorID, targe
 	}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
 }
 
-func runRoomJoin(cmd *cobra.Command, workspace, roomID, actorID, role string, create, current bool) error {
+func runRoomJoin(cmd *cobra.Command, workspace, roomID, actorID, role, backend, session, paneID string, unbound, create, current bool) error {
 	absWorkspace, err := resolveRoomWorkspace(workspace)
 	if err != nil {
 		return err
 	}
-	if current || strings.TrimSpace(actorID) == "" {
+	member := agent.RoomMember{
+		ActorID: strings.TrimSpace(actorID),
+		Role:    strings.TrimSpace(role),
+	}
+	if current || member.ActorID == "" {
 		identity, resolveErr := resolveRoomSender(cmd.Context(), actorID)
 		if resolveErr != nil {
 			return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.join", protocol.ErrorCodeEARG, resolveErr.Error(), map[string]any{
 				"hint": "Pass an explicit actor id, or run inside tmux/zellij with --current so agentctl can derive the participant id.",
 			}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
 		}
-		actorID = identity.Sender
+		if member.ActorID == "" {
+			member.ActorID = identity.Sender
+		}
+		if current {
+			member.Backend = identity.Backend
+			member.Session = identity.Session
+			member.PaneID = identity.PaneID
+		}
 	}
+	if value := strings.TrimSpace(backend); value != "" {
+		member.Backend = strings.ToLower(value)
+	}
+	if value := strings.TrimSpace(session); value != "" {
+		member.Session = value
+	}
+	if value := strings.TrimSpace(paneID); value != "" {
+		member.PaneID = value
+	}
+	member.Unbound = unbound
+	member = normalizeRoomMember(member)
 	store, err := openRoomBoardStore(cmd.Context())
 	if err != nil {
 		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.join", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
@@ -954,7 +985,6 @@ func runRoomJoin(cmd *cobra.Command, workspace, roomID, actorID, role string, cr
 			"hint": "Create the room first or use --create.",
 		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
 	}
-	member := agent.RoomMember{ActorID: strings.TrimSpace(actorID), Role: strings.TrimSpace(role)}
 	updatedMembers := mergeRoomMembers(summary.Members, member)
 	if _, err := store.ReplaceRoomMembers(cmd.Context(), absWorkspace, roomID, updatedMembers); err != nil {
 		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.join", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
@@ -1196,7 +1226,7 @@ func parseRoomMembers(values []string) ([]agent.RoomMember, error) {
 		if member.ActorID == "" {
 			return nil, fmt.Errorf("member actor id is required")
 		}
-		out = append(out, member)
+		out = append(out, normalizeRoomMember(member))
 	}
 	return out, nil
 }
@@ -1205,8 +1235,7 @@ func mergeRoomMembers(existing []agent.RoomMember, additions ...agent.RoomMember
 	out := make([]agent.RoomMember, 0, len(existing)+len(additions))
 	index := make(map[string]int, len(existing)+len(additions))
 	for _, member := range existing {
-		member.ActorID = strings.TrimSpace(member.ActorID)
-		member.Role = strings.TrimSpace(member.Role)
+		member = normalizeRoomMember(member)
 		if member.ActorID == "" {
 			continue
 		}
@@ -1214,8 +1243,7 @@ func mergeRoomMembers(existing []agent.RoomMember, additions ...agent.RoomMember
 		out = append(out, member)
 	}
 	for _, member := range additions {
-		member.ActorID = strings.TrimSpace(member.ActorID)
-		member.Role = strings.TrimSpace(member.Role)
+		member = normalizeRoomMember(member)
 		if member.ActorID == "" {
 			continue
 		}
@@ -1223,12 +1251,31 @@ func mergeRoomMembers(existing []agent.RoomMember, additions ...agent.RoomMember
 			if member.Role != "" {
 				out[pos].Role = member.Role
 			}
+			if member.Backend != "" {
+				out[pos].Backend = member.Backend
+			}
+			if member.Session != "" {
+				out[pos].Session = member.Session
+			}
+			if member.PaneID != "" {
+				out[pos].PaneID = member.PaneID
+			}
+			out[pos].Unbound = member.Unbound
 			continue
 		}
 		index[member.ActorID] = len(out)
 		out = append(out, member)
 	}
 	return out
+}
+
+func normalizeRoomMember(member agent.RoomMember) agent.RoomMember {
+	member.ActorID = strings.TrimSpace(member.ActorID)
+	member.Role = strings.TrimSpace(member.Role)
+	member.Backend = strings.ToLower(strings.TrimSpace(member.Backend))
+	member.Session = strings.TrimSpace(member.Session)
+	member.PaneID = strings.TrimSpace(member.PaneID)
+	return member
 }
 
 func removeRoomMember(existing []agent.RoomMember, actorID string) []agent.RoomMember {
@@ -1453,6 +1500,8 @@ type roomRelayOptions struct {
 
 func relayRoomMessage(ctx context.Context, client *tmuxbridge.Client, room agent.RoomSummary, msg agent.BoardMessage, relay roomRelayOptions) roomRelayResult {
 	switch strings.TrimSpace(strings.ToLower(relay.Backend)) {
+	case "auto", "mixed":
+		return relayRoomMessageAuto(ctx, client, room, msg, relay)
 	case "", "tmux":
 		return relayRoomMessageTmux(ctx, client, room, msg)
 	case "zellij":
@@ -1463,6 +1512,38 @@ func relayRoomMessage(ctx context.Context, client *tmuxbridge.Client, room agent
 			Error:   fmt.Sprintf("unsupported relay backend %q", relay.Backend),
 		}
 	}
+}
+
+func relayRoomMessageAuto(ctx context.Context, client *tmuxbridge.Client, room agent.RoomSummary, msg agent.BoardMessage, relay roomRelayOptions) roomRelayResult {
+	result := roomRelayResult{Backend: "auto"}
+	tmuxTargets, zellijTargets, failed, skipped := collectRoomRelayTargetsByBackend(room, msg)
+	result.SkippedMembers = append(result.SkippedMembers, skipped...)
+	if len(failed) > 0 {
+		result.FailedMembers = append(result.FailedMembers, failed...)
+		result.FailedCount += len(failed)
+	}
+	for _, target := range tmuxTargets {
+		_, err := client.DeliverText(ctx, target, formatRoomRelayContent(room, msg))
+		if err != nil {
+			result.FailedCount++
+			result.FailedMembers = append(result.FailedMembers, target)
+			continue
+		}
+		result.DeliveredCount++
+		result.DeliveredTo = append(result.DeliveredTo, target)
+	}
+	for session, targets := range zellijTargets {
+		zellijResult := relayRoomMessageZellijTargets(ctx, room, msg, session, targets, relay)
+		result.DeliveredCount += zellijResult.DeliveredCount
+		result.FailedCount += zellijResult.FailedCount
+		result.DeliveredTo = append(result.DeliveredTo, zellijResult.DeliveredTo...)
+		result.FailedMembers = append(result.FailedMembers, zellijResult.FailedMembers...)
+		result.SkippedMembers = append(result.SkippedMembers, zellijResult.SkippedMembers...)
+		if result.Error == "" && zellijResult.Error != "" {
+			result.Error = zellijResult.Error
+		}
+	}
+	return result
 }
 
 func relayRoomMessageTmux(ctx context.Context, client *tmuxbridge.Client, room agent.RoomSummary, msg agent.BoardMessage) roomRelayResult {
@@ -1540,7 +1621,7 @@ func roomInboxEntryForActor(actorID string, msg agent.BoardMessage, includeBroad
 	if !isDirect && !isBroadcast {
 		return roomInboxEntry{}, false
 	}
-	if msg.Status == agent.BoardMessageStatusAcked {
+	if msg.Status == agent.BoardMessageStatusAcked || msg.Status == agent.BoardMessageStatusRead {
 		return roomInboxEntry{}, false
 	}
 	if msg.ReplyExpected && !messageStillAwaitsReply(msg, latestBySender) {
@@ -1970,6 +2051,12 @@ func buildRoomStatusEntries(actorID string, messages []agent.BoardMessage) []roo
 	}
 	latestByChain := make(map[string]roomInboxEntry, len(entries))
 	for _, entry := range entries {
+		if strings.HasPrefix(strings.TrimSpace(entry.Sender), "actor:system:room:") {
+			continue
+		}
+		if len(entry.Flags) == 0 {
+			continue
+		}
 		key := roomMessageChainKey(entry.Message)
 		if key == "" {
 			key = entry.ID
@@ -2110,6 +2197,64 @@ func collectRoomRelayTargets(room agent.RoomSummary, msg agent.BoardMessage) ([]
 		targets = append(targets, target)
 	}
 	return targets, skipped
+}
+
+func collectRoomRelayTargetsByBackend(room agent.RoomSummary, msg agent.BoardMessage) ([]string, map[string][]string, []string, []string) {
+	tmuxTargets := make([]string, 0, len(room.Members))
+	zellijTargets := make(map[string][]string)
+	failed := make([]string, 0, len(room.Members))
+	skipped := make([]string, 0, len(room.Members))
+	recipient := normalizeRoomRecipient(msg.Recipient)
+	for _, member := range room.Members {
+		member = normalizeRoomMember(member)
+		target := member.ActorID
+		if target == "" {
+			continue
+		}
+		if sameRoomParticipant(target, strings.TrimSpace(msg.Sender)) {
+			skipped = append(skipped, target)
+			continue
+		}
+		if recipient != agent.BroadcastRecipient && !sameRoomParticipant(target, recipient) {
+			skipped = append(skipped, target)
+			continue
+		}
+		if roomMemberRelayBackend(member) != "zellij" {
+			tmuxTargets = append(tmuxTargets, target)
+			continue
+		}
+		session, zellijTarget, ok := resolveRoomMemberZellijTarget(member)
+		if !ok {
+			failed = append(failed, target)
+			continue
+		}
+		zellijTargets[session] = append(zellijTargets[session], zellijTarget)
+	}
+	return tmuxTargets, zellijTargets, failed, skipped
+}
+
+func roomMemberRelayBackend(member agent.RoomMember) string {
+	if member.Backend != "" {
+		return member.Backend
+	}
+	if strings.HasPrefix(member.ActorID, "zellij:") {
+		return "zellij"
+	}
+	return "tmux"
+}
+
+func resolveRoomMemberZellijTarget(member agent.RoomMember) (string, string, bool) {
+	if session, paneID, ok := parseZellijParticipantID(member.ActorID); ok {
+		return session, formatZellijParticipantID(session, paneID), true
+	}
+	session := strings.TrimSpace(member.Session)
+	if session == "" || member.Unbound {
+		return "", "", false
+	}
+	if paneID := normalizeZellijPaneID(member.PaneID); paneID != "" {
+		return session, formatZellijParticipantID(session, paneID), true
+	}
+	return session, zellijRelaySingletonTarget, true
 }
 
 func normalizeRoomRecipient(recipient string) string {

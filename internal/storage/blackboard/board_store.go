@@ -243,6 +243,9 @@ func (s *boardSQLStore) ReplaceRoomMembers(ctx context.Context, workspaceID, roo
 	for _, member := range members {
 		member.ActorID = strings.TrimSpace(member.ActorID)
 		member.Role = strings.TrimSpace(member.Role)
+		member.Backend = strings.ToLower(strings.TrimSpace(member.Backend))
+		member.Session = strings.TrimSpace(member.Session)
+		member.PaneID = strings.TrimSpace(member.PaneID)
 		if member.ActorID == "" {
 			continue
 		}
@@ -255,9 +258,9 @@ func (s *boardSQLStore) ReplaceRoomMembers(ctx context.Context, workspaceID, roo
 		}
 		if err := retryBoardBusy(ctx, func() error {
 			_, execErr := tx.ExecContext(ctx, `
-			INSERT INTO room_members (workspace_id, room_id, actor_id, role, joined_at)
-			VALUES (?, ?, ?, ?, ?)`,
-				workspaceID, roomID, member.ActorID, member.Role, member.JoinedAt.Unix(),
+			INSERT INTO room_members (workspace_id, room_id, actor_id, role, backend, session, pane_id, unbound, joined_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+				workspaceID, roomID, member.ActorID, member.Role, member.Backend, member.Session, member.PaneID, boardBoolToInt(member.Unbound), member.JoinedAt.Unix(),
 			)
 			return execErr
 		}); err != nil {
@@ -757,6 +760,10 @@ CREATE TABLE IF NOT EXISTS room_members (
 	room_id      TEXT NOT NULL,
 	actor_id     TEXT NOT NULL,
 	role         TEXT NOT NULL DEFAULT '',
+	backend      TEXT NOT NULL DEFAULT '',
+	session      TEXT NOT NULL DEFAULT '',
+	pane_id      TEXT NOT NULL DEFAULT '',
+	unbound      INTEGER NOT NULL DEFAULT 0,
 	joined_at    INTEGER NOT NULL,
 	PRIMARY KEY (workspace_id, room_id, actor_id)
 );
@@ -787,6 +794,10 @@ CREATE INDEX IF NOT EXISTS idx_res_expires ON file_reservations(expires_at);
 		`ALTER TABLE room_metadata ADD COLUMN dispatch_agent_ids TEXT NOT NULL DEFAULT '[]'`,
 		`ALTER TABLE board_messages ADD COLUMN reply_expected INTEGER NOT NULL DEFAULT 0`,
 		`ALTER TABLE board_messages ADD COLUMN related_message_id TEXT`,
+		`ALTER TABLE room_members ADD COLUMN backend TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE room_members ADD COLUMN session TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE room_members ADD COLUMN pane_id TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE room_members ADD COLUMN unbound INTEGER NOT NULL DEFAULT 0`,
 	} {
 		if err := retryBoardBusy(ctx, func() error {
 			_, err := db.ExecContext(ctx, stmt)
@@ -1214,7 +1225,7 @@ func (s *boardSQLStore) getRoomMetadataByStream(ctx context.Context, workspaceID
 
 func (s *boardSQLStore) listRoomMembers(ctx context.Context, workspaceID, roomID string) ([]agent.RoomMember, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT actor_id, role, joined_at
+		SELECT actor_id, role, backend, session, pane_id, unbound, joined_at
 		FROM room_members
 		WHERE workspace_id = ? AND room_id = ?
 		ORDER BY joined_at ASC, actor_id ASC`, workspaceID, roomID)
@@ -1227,18 +1238,30 @@ func (s *boardSQLStore) listRoomMembers(ctx context.Context, workspaceID, roomID
 
 	var members []agent.RoomMember
 	for rows.Next() {
-		var actorID, role string
+		var actorID, role, backend, session, paneID string
+		var unbound int
 		var joinedAt int64
-		if err := rows.Scan(&actorID, &role, &joinedAt); err != nil {
+		if err := rows.Scan(&actorID, &role, &backend, &session, &paneID, &unbound, &joinedAt); err != nil {
 			return nil, fmt.Errorf("board: scan room member: %w", err)
 		}
 		members = append(members, agent.RoomMember{
 			ActorID:  actorID,
 			Role:     role,
+			Backend:  backend,
+			Session:  session,
+			PaneID:   paneID,
+			Unbound:  unbound != 0,
 			JoinedAt: time.Unix(joinedAt, 0).UTC(),
 		})
 	}
 	return members, nil
+}
+
+func boardBoolToInt(v bool) int {
+	if v {
+		return 1
+	}
+	return 0
 }
 
 func scanRoomMetadataRow(scanner interface{ Scan(dest ...any) error }) (roomMetadataRow, error) {

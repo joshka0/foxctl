@@ -190,6 +190,9 @@ fn deliver_to_panes(pane_manifest: &PaneManifest, request: RelayRequest) -> Rela
 }
 
 fn find_terminal_pane_by_title(pane_manifest: &PaneManifest, title: &str) -> Option<PaneId> {
+    if title.trim() == "__singleton__" {
+        return find_single_terminal_pane(pane_manifest);
+    }
     for panes in pane_manifest.panes.values() {
         for pane in panes {
             if pane.is_plugin {
@@ -204,6 +207,22 @@ fn find_terminal_pane_by_title(pane_manifest: &PaneManifest, title: &str) -> Opt
         }
     }
     None
+}
+
+fn find_single_terminal_pane(pane_manifest: &PaneManifest) -> Option<PaneId> {
+    let mut terminal_id: Option<u32> = None;
+    for panes in pane_manifest.panes.values() {
+        for pane in panes {
+            if pane.is_plugin {
+                continue;
+            }
+            if terminal_id.is_some() {
+                return None;
+            }
+            terminal_id = Some(pane.id);
+        }
+    }
+    terminal_id.map(PaneId::Terminal)
 }
 
 fn target_key(target: &str) -> String {

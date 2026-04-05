@@ -414,7 +414,7 @@ func TestBoardStore_RoomMetadataAndMembers(t *testing.T) {
 	}
 
 	replaced, err := store.ReplaceRoomMembers(ctx, "ws1", "alpha", []agent.RoomMember{
-		{ActorID: "actor:agent:three", Role: "owner"},
+		{ActorID: "actor:agent:three", Role: "owner", Backend: "zellij", Session: "fascinating-salamander"},
 	})
 	if err != nil {
 		t.Fatalf("ReplaceRoomMembers: %v", err)
@@ -429,6 +429,9 @@ func TestBoardStore_RoomMetadataAndMembers(t *testing.T) {
 	}
 	if len(updated.Members) != 1 || updated.Members[0].ActorID != "actor:agent:three" {
 		t.Fatalf("updated members=%+v want actor:agent:three", updated.Members)
+	}
+	if updated.Members[0].Backend != "zellij" || updated.Members[0].Session != "fascinating-salamander" {
+		t.Fatalf("updated member binding=%+v want zellij/fascinating-salamander", updated.Members[0])
 	}
 	if len(updated.Participants) != 1 || updated.Participants[0] != "actor:agent:three" {
 		t.Fatalf("updated participants=%+v want actor:agent:three", updated.Participants)

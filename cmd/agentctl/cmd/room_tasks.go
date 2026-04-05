@@ -331,7 +331,7 @@ func newRoomLoopCommand() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&workspace, "workspace", ".", "Workspace root override")
-	cmd.Flags().StringVar(&backend, "backend", "tmux", "Terminal backend (tmux|zellij)")
+	cmd.Flags().StringVar(&backend, "backend", "auto", "Terminal backend (auto|tmux|zellij)")
 	cmd.Flags().StringVar(&session, "session", "", "Zellij session name (defaults to ZELLIJ_SESSION_NAME when inside zellij)")
 	cmd.Flags().StringVar(&plugin, "plugin-path", "", "Path to the zellij room relay plugin wasm")
 	cmd.Flags().DurationVar(&poll, "poll", 2*time.Second, "Room message polling interval")
@@ -1274,7 +1274,7 @@ func detectRoomPulseMessages(roomID string, messages []agent.BoardMessage, now t
 		if !msg.AckRequired && !msg.ReplyExpected {
 			continue
 		}
-		if msg.AckRequired && msg.Status == agent.BoardMessageStatusAcked {
+		if msg.Status == agent.BoardMessageStatusAcked || msg.Status == agent.BoardMessageStatusRead {
 			continue
 		}
 		if msg.ReplyExpected && !messageStillAwaitsReply(msg, latestBySender) {

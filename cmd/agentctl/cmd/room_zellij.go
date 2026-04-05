@@ -18,6 +18,7 @@ const (
 	zellijRelayPipePrefix       = "agentctl-room-relay"
 	zellijRelayArtifactName     = "zellij_room_relay.wasm"
 	zellijRelayRelativeManifest = "plugins/zellij-room-relay/Cargo.toml"
+	zellijRelaySingletonTarget  = "__singleton__"
 )
 
 type zellijRelayRequest struct {
@@ -40,6 +41,17 @@ func relayRoomMessageZellij(ctx context.Context, room agent.RoomSummary, msg age
 		result.FailedCount = len(targets)
 		result.FailedMembers = append(result.FailedMembers, targets...)
 		return result
+	}
+	return relayRoomMessageZellijTargets(ctx, room, msg, session, targets, relay)
+}
+
+func relayRoomMessageZellijTargets(ctx context.Context, room agent.RoomSummary, msg agent.BoardMessage, session string, targets []string, relay roomRelayOptions) roomRelayResult {
+	result := roomRelayResult{Backend: "zellij"}
+	if len(targets) == 0 {
+		return result
+	}
+	if onlySingletonRelayTarget(targets) {
+		return relayRoomMessageZellijSingleton(ctx, room, msg, session)
 	}
 	pluginPath, err := ensureZellijRelayPlugin(ctx, relay.ZellijPluginPath)
 	if err != nil {
@@ -98,6 +110,50 @@ func relayRoomMessageZellij(ctx context.Context, room agent.RoomSummary, msg age
 		result.Backend = "zellij"
 	}
 	return result
+}
+
+func relayRoomMessageZellijSingleton(ctx context.Context, room agent.RoomSummary, msg agent.BoardMessage, session string) roomRelayResult {
+	result := roomRelayResult{Backend: "zellij"}
+	content := formatRoomRelayContent(room, msg)
+	writeChars := exec.CommandContext(ctx, "zellij", "--session", session, "action", "write-chars", content)
+	var stderr bytes.Buffer
+	writeChars.Stderr = &stderr
+	if err := writeChars.Run(); err != nil {
+		result.Error = strings.TrimSpace(stderr.String())
+		if result.Error == "" {
+			result.Error = err.Error()
+		}
+		result.FailedCount = 1
+		result.FailedMembers = append(result.FailedMembers, zellijRelaySingletonTarget)
+		return result
+	}
+	submit := exec.CommandContext(ctx, "zellij", "--session", session, "action", "write", "13")
+	stderr.Reset()
+	submit.Stderr = &stderr
+	if err := submit.Run(); err != nil {
+		result.Error = strings.TrimSpace(stderr.String())
+		if result.Error == "" {
+			result.Error = err.Error()
+		}
+		result.FailedCount = 1
+		result.FailedMembers = append(result.FailedMembers, zellijRelaySingletonTarget)
+		return result
+	}
+	result.DeliveredCount = 1
+	result.DeliveredTo = append(result.DeliveredTo, zellijRelaySingletonTarget)
+	return result
+}
+
+func onlySingletonRelayTarget(targets []string) bool {
+	if len(targets) == 0 {
+		return false
+	}
+	for _, target := range targets {
+		if strings.TrimSpace(target) != zellijRelaySingletonTarget {
+			return false
+		}
+	}
+	return true
 }
 
 func resolveZellijSession(explicit string) (string, error) {
