@@ -22,6 +22,8 @@ var defaultPrompts = map[string]string{
 	"overseer":              "You are an oversight agent. Coordinate tasks, delegate work, and request human decisions when needed.",
 }
 
+const structuredShellPolicy = "STRUCTURED SHELL POLICY:\n- Prefer the `shell` tool for supported read-only repo inspection commands such as `find`, `rg`, `grep`, `sed -n`, `git status --short`, `git diff --stat`, and `git log --stat`.\n- Prefer raw/native tools for already-compact or exact-value commands such as `git diff --name-only`, `wc`, plain `head`/`tail`, or exact-value queries.\n- If `shell` reports unsupported, `keep_raw`, or `raw_unavailable`, fall back immediately to the raw/native tool.\n- Before editing, reread the target with `fs_read_file`, `context_grep`, or another raw file/context tool."
+
 // DefaultPrompt returns the standard prompt for a role, if available.
 func DefaultPrompt(role string) (string, bool) {
 	normalized := strings.TrimSpace(strings.ToLower(role))
@@ -29,5 +31,30 @@ func DefaultPrompt(role string) (string, bool) {
 		return "", false
 	}
 	prompt, ok := defaultPrompts[normalized]
-	return prompt, ok
+	if !ok {
+		return "", false
+	}
+	return AppendStructuredShellGuidance(normalized, prompt), true
+}
+
+// AppendStructuredShellGuidance appends shared shell-tool policy for roles that support it.
+func AppendStructuredShellGuidance(role string, prompt string) string {
+	guidance, ok := structuredShellGuidance(role)
+	if !ok {
+		return prompt
+	}
+	prompt = strings.TrimSpace(prompt)
+	if prompt == "" || strings.Contains(prompt, guidance) {
+		return prompt
+	}
+	return prompt + "\n\n" + guidance
+}
+
+func structuredShellGuidance(role string) (string, bool) {
+	switch strings.TrimSpace(strings.ToLower(role)) {
+	case "coder", "reviewer", "fixer", "verifier", "researcher", "subcall_worker", "overseer":
+		return structuredShellPolicy, true
+	default:
+		return "", false
+	}
 }

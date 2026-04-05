@@ -102,8 +102,11 @@ func TestBuildTaskPromptPrefersTargetProfileVariant(t *testing.T) {
 		LLMProvider: "lmstudio",
 		LLMModel:    "liquid/lfm2.5-1.2b",
 	})
-	if prompt != "local runtime prompt" {
-		t.Fatalf("prompt=%q want local runtime prompt", prompt)
+	if !strings.Contains(prompt, "local runtime prompt") {
+		t.Fatalf("prompt=%q missing local runtime prompt", prompt)
+	}
+	if !strings.Contains(prompt, "STRUCTURED SHELL POLICY:") {
+		t.Fatalf("prompt=%q missing shell guidance", prompt)
 	}
 }
 
@@ -170,11 +173,39 @@ func TestBuildTaskPromptVariantAppendsTaskContext(t *testing.T) {
 	if !strings.Contains(prompt, "local runtime prompt") {
 		t.Fatalf("prompt=%q missing variant prompt", prompt)
 	}
+	if !strings.Contains(prompt, "STRUCTURED SHELL POLICY:") {
+		t.Fatalf("prompt=%q missing shell guidance", prompt)
+	}
 	if !strings.Contains(prompt, "Assigned task: task-123") {
 		t.Fatalf("prompt=%q missing task context", prompt)
 	}
 	if !strings.Contains(prompt, "Epic: epic-9") {
 		t.Fatalf("prompt=%q missing epic context", prompt)
+	}
+}
+
+func TestBuildTaskPromptGenericAppendsStructuredShellGuidance(t *testing.T) {
+	rt := NewRuntime(Config{})
+	prompt := rt.buildTaskPrompt(context.Background(), types.AgentConfig{
+		Role:        types.RoleReviewer,
+		WorkspaceID: "ws-test",
+	})
+	if !strings.Contains(prompt, "Please analyze the workspace and complete your assigned work.") {
+		t.Fatalf("prompt=%q missing generic body", prompt)
+	}
+	if !strings.Contains(prompt, "STRUCTURED SHELL POLICY:") {
+		t.Fatalf("prompt=%q missing shell guidance", prompt)
+	}
+}
+
+func TestBuildTaskPromptGenericOmitsStructuredShellGuidanceForPlanner(t *testing.T) {
+	rt := NewRuntime(Config{})
+	prompt := rt.buildTaskPrompt(context.Background(), types.AgentConfig{
+		Role:        types.RolePlanner,
+		WorkspaceID: "ws-test",
+	})
+	if strings.Contains(prompt, "STRUCTURED SHELL POLICY:") {
+		t.Fatalf("planner prompt should not include shell guidance: %q", prompt)
 	}
 }
 

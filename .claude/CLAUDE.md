@@ -170,6 +170,34 @@ agentctl memory search "auth"
 agentctl ci status --pr 123
 ```
 
+## Structured Shell For Retrieval
+
+For command-shaped, read-only repo inspection, prefer `agentctl shell` before reconstructing the same request with multiple raw tools. This is the compact structured shell path, not an arbitrary shell executor.
+
+Use `agentctl shell` first for supported noisy inspection commands such as:
+- `find`
+- `rg`, `grep`
+- `sed -n 'A,Bp' file`
+- `git status --short`
+- `git diff --stat`
+- `git log --stat -N`
+
+Prefer raw/native tools instead when the command is already compact or exact-value oriented, for example:
+- `git diff --name-only`
+- `wc`
+- plain `head` / `tail`
+- exact-value queries such as `kubectl get -o jsonpath`
+
+If `agentctl shell` reports unsupported, `keep_raw`, or `raw_unavailable`, fall back immediately to the raw/native command. Before editing, reread the target with a raw file/context tool such as `fs_read_file` or `context_grep`.
+
+Examples:
+```bash
+agentctl shell --command "rg -n 'spawn' internal/agent | head -n 10"
+agentctl shell --command "sed -n '1,120p' cmd/agentctl/cmd/agent.go"
+agentctl shell --command "git status --short"
+agentctl shell --measure --command "git log --stat -5"
+```
+
 Many convenience commands wrap skills internally. **Prefer convenience commands** for interactive use; **prefer skill invocation** for scripting.
 
 ---

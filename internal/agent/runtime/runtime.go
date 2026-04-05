@@ -21,6 +21,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/agent/optimization"
 	"github.com/oklog/ulid/v2"
 
+	agentprompts "github.com/jkatigb/agentctl/internal/agent/prompts"
 	"github.com/jkatigb/agentctl/internal/agent/toolnames"
 	"github.com/jkatigb/agentctl/internal/agent/types"
 	"github.com/jkatigb/agentctl/internal/agentprompt"
@@ -3927,30 +3928,26 @@ func (r *Runtime) buildTaskPrompt(ctx context.Context, cfg types.AgentConfig) st
 		return prompt
 	}
 
+	var prompt string
 	if r != nil && r.config.PromptVariantStore != nil && strings.TrimSpace(cfg.WorkspaceID) != "" && strings.TrimSpace(string(cfg.Role)) != "" {
 		provider, model := r.resolveEffectiveLLMTarget(cfg)
 		cfg.LLMProvider = provider
 		cfg.LLMModel = model
 		targetProfile := optimization.DerivePromptTargetProfile("", provider, model)
 		if variant, err := r.config.PromptVariantStore.ResolveLatestCompatible(ctx, strings.TrimSpace(cfg.WorkspaceID), strings.TrimSpace(string(cfg.Role)), targetProfile); err == nil && strings.TrimSpace(variant.Prompt) != "" {
-			return appendTaskPromptContext(strings.TrimSpace(variant.Prompt), cfg)
+			prompt = strings.TrimSpace(variant.Prompt)
 		}
 	}
 
-	// Otherwise, build a generic task prompt
-	prompt := fmt.Sprintf("You are a %s agent working in workspace %s.\n\n",
-		cfg.Role, cfg.WorkspaceID)
-
-	if cfg.TaskID != "" {
-		prompt += fmt.Sprintf("You are working on task: %s\n\n", cfg.TaskID)
+	if strings.TrimSpace(prompt) == "" {
+		// Otherwise, build a generic task prompt
+		prompt = fmt.Sprintf("You are a %s agent working in workspace %s.\n\n",
+			cfg.Role, cfg.WorkspaceID)
+		prompt += "Please analyze the workspace and complete your assigned work."
 	}
 
-	if cfg.EpicID != "" {
-		prompt += fmt.Sprintf("This is part of epic: %s\n\n", cfg.EpicID)
-	}
-
-	prompt += "Please analyze the workspace and complete your assigned work."
-
+	prompt = appendTaskPromptContext(prompt, cfg)
+	prompt = agentprompts.AppendStructuredShellGuidance(string(cfg.Role), prompt)
 	return prompt
 }
 
