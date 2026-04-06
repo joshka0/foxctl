@@ -141,16 +141,19 @@ func openContext(ctx context.Context, minimumBudget time.Duration) (context.Cont
 	if ctx == nil {
 		return context.WithTimeout(context.Background(), minimumBudget)
 	}
-	if err := ctx.Err(); err != nil {
-		return ctx, func() {}
-	}
 	if minimumBudget <= 0 {
 		return ctx, func() {}
 	}
-	if deadline, ok := ctx.Deadline(); ok && time.Until(deadline) < minimumBudget {
-		return context.WithTimeout(context.WithoutCancel(ctx), minimumBudget)
+	if deadline, ok := ctx.Deadline(); ok {
+		if err := ctx.Err(); err != nil || time.Until(deadline) < minimumBudget {
+			return context.WithTimeout(context.WithoutCancel(ctx), minimumBudget)
+		}
+		return ctx, func() {}
 	}
-	return ctx, func() {}
+	if err := ctx.Err(); err != nil {
+		return ctx, func() {}
+	}
+	return context.WithTimeout(context.WithoutCancel(ctx), minimumBudget)
 }
 
 // Close closes the underlying database.
