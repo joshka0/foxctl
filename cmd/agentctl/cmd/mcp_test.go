@@ -675,16 +675,50 @@ func TestSkillGroupsIncludeOptimizedRetrieval(t *testing.T) {
 	expected := map[string]bool{
 		"code/semantic_search": true,
 		"code/smart_search":    true,
+		"code/symbols":         true,
 		"code/snippet_extract": true,
 		"code/context_grep":    true,
 		"code/dag_grep":        true,
 		"codemap/get":          true,
+		"code/refactor_scout":  true,
 	}
 	for _, skill := range skills {
 		delete(expected, skill)
 	}
 	if len(expected) > 0 {
 		t.Fatalf("optimized-retrieval missing skills: %v", expected)
+	}
+}
+
+func TestSkillGroupsIncludeFocusedProfiles(t *testing.T) {
+	cases := map[string][]string{
+		"mobile":  {"mobile/android", "mobile/ios"},
+		"godot":   {"build/godot", "editor/godot"},
+		"api":     {"http/openapi"},
+		"context": {"session/recall", "session/timeline", "session/query", "session/summarize"},
+	}
+	for group, expectedSkills := range cases {
+		skills, ok := skillGroups[group]
+		if !ok {
+			t.Fatalf("%s group missing", group)
+		}
+		got := make(map[string]bool, len(skills))
+		for _, skill := range skills {
+			got[skill] = true
+		}
+		for _, want := range expectedSkills {
+			if !got[want] {
+				t.Fatalf("%s missing %s", group, want)
+			}
+		}
+	}
+}
+
+func TestSkillGroupsIncludeCommandBackedProfiles(t *testing.T) {
+	for _, group := range []string{"room", "mux", "collab"} {
+		if _, ok := skillGroups[group]; !ok {
+			t.Fatalf("%s group missing", group)
+		}
 	}
 }
 
@@ -696,5 +730,16 @@ func TestMCPServeHasOptimizedRetrievalFlag(t *testing.T) {
 	}
 	if flag.DefValue != "false" {
 		t.Fatalf("optimized-retrieval default=%q want false", flag.DefValue)
+	}
+}
+
+func TestMCPServeHasGroupOnlyFlag(t *testing.T) {
+	cmd := newMCPServeCommand()
+	flag := cmd.Flags().Lookup("group-only")
+	if flag == nil {
+		t.Fatal("group-only flag missing")
+	}
+	if flag.DefValue != "false" {
+		t.Fatalf("group-only default=%q want false", flag.DefValue)
 	}
 }
