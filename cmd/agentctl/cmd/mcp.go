@@ -1559,7 +1559,7 @@ func registerRoomTools(s *server.MCPServer) {
 func registerMuxTools(s *server.MCPServer) {
 	s.AddTool(
 		mcp.NewTool("mux",
-			mcp.WithDescription("Command-backed tmux/zellij collaboration tool. Actions: list, read, send, send_parent, observe, doctor, create."),
+			mcp.WithDescription("Command-backed tmux/zellij collaboration tool. Actions: list, read, send, submit, send_parent, observe, doctor, create."),
 			mcp.WithString("action", mcp.Required(), mcp.Description("Mux action to run")),
 			mcp.WithString("backend", mcp.Description("Mux backend (tmux|zellij|auto)")),
 			mcp.WithString("session", mcp.Description("Mux session override")),
@@ -3982,6 +3982,14 @@ func handleMuxTool(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolR
 		}
 		argv = append(argv, "send", target, text)
 		argv = appendStringFlagArgs(argv, "--sender", getStringArg(args, "sender", ""))
+	case "submit":
+		argv = append(argv, "submit")
+		target := getStringArg(args, "target", "")
+		if target != "" {
+			argv = append(argv, target)
+		}
+		argv = appendStringFlagArgs(argv, "--backend", getStringArg(args, "backend", ""))
+		argv = appendStringFlagArgs(argv, "--session", getStringArg(args, "session", ""))
 	case "send_parent":
 		text := getStringArg(args, "text", "")
 		if text == "" {

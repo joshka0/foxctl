@@ -191,6 +191,14 @@ type SendResult struct {
 	BridgeMessage  BridgeMessage `json:"bridge_message"`
 }
 
+// SubmitResult describes an Escape+Enter submit action for a target pane.
+type SubmitResult struct {
+	Target         string `json:"target"`
+	ResolvedTarget string `json:"resolved_target"`
+	Pane           Pane   `json:"pane"`
+	Mode           string `json:"mode"`
+}
+
 // DeliverResult describes one plain-text delivery into a pane.
 type DeliverResult struct {
 	Target         string `json:"target"`
@@ -468,6 +476,30 @@ func (c *Client) Send(ctx context.Context, sender string, target string, text st
 			ReplyTo: from,
 			Content: content,
 		},
+	}, nil
+}
+
+// Submit injects an Escape+Enter sequence into the target pane.
+func (c *Client) Submit(ctx context.Context, target string) (SubmitResult, error) {
+	resolvedTarget, err := c.ResolveTarget(ctx, target)
+	if err != nil {
+		return SubmitResult{}, err
+	}
+	targetPane, err := c.describePane(ctx, resolvedTarget)
+	if err != nil {
+		return SubmitResult{}, err
+	}
+	if _, err := c.runTmux(ctx, "send-keys", "-t", resolvedTarget, "Escape"); err != nil {
+		return SubmitResult{}, err
+	}
+	if _, err := c.runTmux(ctx, "send-keys", "-t", resolvedTarget, "Enter"); err != nil {
+		return SubmitResult{}, err
+	}
+	return SubmitResult{
+		Target:         target,
+		ResolvedTarget: resolvedTarget,
+		Pane:           targetPane,
+		Mode:           "escape_enter",
 	}, nil
 }
 

@@ -666,6 +666,32 @@ func TestSendRequiresSenderOutsideTmux(t *testing.T) {
 	}
 }
 
+func TestSubmitUsesEscapeThenEnter(t *testing.T) {
+	client := NewWithRunner(fakeRunner{
+		responses: map[string]fakeResponse{
+			"tmux list-panes -a -F " + labelFormat:     {stdout: "%2" + fieldSep + "agent-b\n"},
+			"tmux list-sessions":                       {stdout: "ok\n"},
+			"tmux display-message -t %2 -p #{pane_id}": {stdout: "%2\n"},
+			"tmux display-message -t %2 -p " + listFormat: {
+				stdout: "%2" + fieldSep + "agentctl-collab" + fieldSep + "0" + fieldSep + "1" + fieldSep + "zsh" + fieldSep + "222" + fieldSep + "80" + fieldSep + "24" + fieldSep + "agent-b" + fieldSep + "/repo" + fieldSep + "zsh" + fieldSep + "0\n",
+			},
+			"tmux send-keys -t %2 Escape": {},
+			"tmux send-keys -t %2 Enter":  {},
+		},
+	}, map[string]string{})
+
+	got, err := client.Submit(context.Background(), "agent-b")
+	if err != nil {
+		t.Fatalf("Submit() error = %v", err)
+	}
+	if got.ResolvedTarget != "%2" {
+		t.Fatalf("ResolvedTarget = %q, want %q", got.ResolvedTarget, "%2")
+	}
+	if got.Mode != "escape_enter" {
+		t.Fatalf("Mode = %q, want escape_enter", got.Mode)
+	}
+}
+
 func TestDeliverTextUsesPrintfForShellPane(t *testing.T) {
 	prev := writePaneTTY
 	writePaneTTY = func(path, content string) error {
@@ -785,9 +811,9 @@ func TestDeliverTextInterruptingGeminiPaneUsesEscapeBeforeAndAfterPayload(t *tes
 			"tmux display-message -t %31 -p " + listFormat: {
 				stdout: "%31" + fieldSep + "collab" + fieldSep + "0" + fieldSep + "2" + fieldSep + "main" + fieldSep + "333" + fieldSep + "80" + fieldSep + "24" + fieldSep + "gemini-a" + fieldSep + "/repo" + fieldSep + "node" + fieldSep + "0\n",
 			},
-			"tmux send-keys -t %31 Escape":                              {},
+			"tmux send-keys -t %31 Escape":                             {},
 			"tmux send-keys -t %31 -l -- [room alpha] interrupt smoke": {},
-			"tmux send-keys -t %31 Enter":                               {},
+			"tmux send-keys -t %31 Enter":                              {},
 		},
 	}, map[string]string{})
 

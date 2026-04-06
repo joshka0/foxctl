@@ -38,6 +38,7 @@ func newTmuxCommand() *cobra.Command {
 		newTmuxListCommand(),
 		newTmuxReadCommand(),
 		newTmuxSendCommand(),
+		newTmuxSubmitCommand(),
 		newTmuxSendParentCommand(),
 		newTmuxObserveCommand(),
 		newTmuxDoctorCommand(),
@@ -244,7 +245,7 @@ func newTmuxCreateCommand() *cobra.Command {
 			if attach {
 				if err := client.AttachOrSwitch(cmd.Context(), result.Session); err != nil {
 					return protocol.WriteError(cmd.OutOrStdout(), "agentctl.tmux.create", protocol.ErrorCodeERuntime, err.Error(), map[string]any{
-					"hint":   "Prepare succeeded, but the attach/switch step failed. Try the returned attach command manually.",
+						"hint":   "Prepare succeeded, but the attach/switch step failed. Try the returned attach command manually.",
 						"result": result,
 					}, protocol.WithSource("cli"))
 				}
@@ -379,23 +380,23 @@ func runMuxCreateZellij(cmd *cobra.Command, session string, panes int, paneComma
 		}
 	}
 	return map[string]any{
-		"backend":        "zellij",
-		"session":        session,
-		"created":        true,
-		"panes_requested": panes,
-		"pane_command":   command,
-		"agent":          agent,
-		"agent_mode":     agentMode,
-		"agent_args":     append([]string(nil), agentArgs...),
-		"agent_session_id": agentSessionID,
-		"cwd":            cwd,
-		"label_prefix":   prefix,
+		"backend":            "zellij",
+		"session":            session,
+		"created":            true,
+		"panes_requested":    panes,
+		"pane_command":       command,
+		"agent":              agent,
+		"agent_mode":         agentMode,
+		"agent_args":         append([]string(nil), agentArgs...),
+		"agent_session_id":   agentSessionID,
+		"cwd":                cwd,
+		"label_prefix":       prefix,
 		"parent_participant": parentParticipant,
-		"parent_agent_id": parentAgentID,
-		"room_id":        roomID,
-		"room_access":    roomAccess,
-		"attach_command": attachCommand,
-		"panes":          created,
+		"parent_agent_id":    parentAgentID,
+		"room_id":            roomID,
+		"room_access":        roomAccess,
+		"attach_command":     attachCommand,
+		"panes":              created,
 	}, nil
 }
 
@@ -516,6 +517,73 @@ func newTmuxSendCommand() *cobra.Command {
 	}
 
 	cmd.Flags().StringVar(&sender, "sender", "", "Sender pane label or pane id when invoking outside tmux or overriding the current pane")
+	return cmd
+}
+
+func newTmuxSubmitCommand() *cobra.Command {
+	var (
+		backend string
+		session string
+	)
+
+	cmd := &cobra.Command{
+		Use:   "submit [target]",
+		Short: "Submit the current mux draft with Escape then Enter",
+		Args:  cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			resolvedBackend := resolveMuxCreateBackend(strings.TrimSpace(backend))
+			if resolvedBackend == "" {
+				return protocol.WriteError(cmd.OutOrStdout(), "agentctl.tmux.submit", protocol.ErrorCodeEARG, fmt.Sprintf("unsupported backend %q", backend), map[string]any{
+					"hint": "Use --backend auto, tmux, or zellij.",
+				}, protocol.WithSource("cli"))
+			}
+			switch resolvedBackend {
+			case "tmux":
+				if len(args) == 0 || strings.TrimSpace(args[0]) == "" {
+					return protocol.WriteError(cmd.OutOrStdout(), "agentctl.tmux.submit", protocol.ErrorCodeEARG, "target is required for tmux submit", map[string]any{
+						"hint": "Pass a pane id like %3 or a pane label like agent-b.",
+					}, protocol.WithSource("cli"))
+				}
+				client := tmuxbridge.New()
+				result, err := client.Submit(cmd.Context(), args[0])
+				if err != nil {
+					return protocol.WriteError(cmd.OutOrStdout(), "agentctl.tmux.submit", protocol.ErrorCodeERuntime, err.Error(), map[string]any{
+						"hint": "Use a pane id like %3 or a pane label set with tmux-bridge name <target> <label>.",
+					}, protocol.WithSource("cli"))
+				}
+				return protocol.WriteOK(cmd.OutOrStdout(), "agentctl.tmux.submit", map[string]any{
+					"backend": "tmux",
+					"result":  result,
+				}, protocol.WithSource("cli"))
+			case "zellij":
+				resolvedSession := strings.TrimSpace(session)
+				if resolvedSession == "" {
+					resolvedSession = strings.TrimSpace(os.Getenv("ZELLIJ_SESSION_NAME"))
+				}
+				if resolvedSession == "" {
+					return protocol.WriteError(cmd.OutOrStdout(), "agentctl.tmux.submit", protocol.ErrorCodeEARG, "session is required for zellij submit", map[string]any{
+						"hint": "Pass --session or run inside the target zellij session.",
+					}, protocol.WithSource("cli"))
+				}
+				client := zellijbridge.New()
+				result, err := client.Submit(cmd.Context(), resolvedSession)
+				if err != nil {
+					return protocol.WriteError(cmd.OutOrStdout(), "agentctl.tmux.submit", protocol.ErrorCodeERuntime, err.Error(), map[string]any{
+						"hint": "Zellij submit acts on the focused pane in the named session and requires an attached client.",
+					}, protocol.WithSource("cli"))
+				}
+				return protocol.WriteOK(cmd.OutOrStdout(), "agentctl.tmux.submit", map[string]any{
+					"backend": "zellij",
+					"result":  result,
+				}, protocol.WithSource("cli"))
+			default:
+				return protocol.WriteError(cmd.OutOrStdout(), "agentctl.tmux.submit", protocol.ErrorCodeEARG, fmt.Sprintf("unsupported backend %q", resolvedBackend), nil, protocol.WithSource("cli"))
+			}
+		},
+	}
+
+	cmd.Flags().StringVar(&backend, "backend", "auto", "Mux backend to submit against (auto|tmux|zellij)")
+	cmd.Flags().StringVar(&session, "session", "", "Zellij session name when --backend zellij (defaults to ZELLIJ_SESSION_NAME)")
 	return cmd
 }
 

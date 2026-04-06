@@ -46,6 +46,12 @@ type CreatePaneResult struct {
 	ParticipantID string `json:"participant_id"`
 }
 
+// SubmitResult describes an Escape+Enter submit action for the focused pane in a session.
+type SubmitResult struct {
+	Session string `json:"session"`
+	Mode    string `json:"mode"`
+}
+
 // Client exposes minimal zellij pane creation for agent tenancy.
 type Client struct {
 	runner Runner
@@ -102,6 +108,27 @@ func (c *Client) CreatePane(ctx context.Context, opts CreatePaneOptions) (Create
 		PaneName:      name,
 		ParticipantID: participantID,
 	}, nil
+}
+
+// Submit injects an Escape+Enter sequence into the currently focused pane for a session.
+func (c *Client) Submit(ctx context.Context, session string) (SubmitResult, error) {
+	session = strings.TrimSpace(session)
+	if session == "" {
+		return SubmitResult{}, fmt.Errorf("session is required")
+	}
+	if _, stderr, err := c.runner.Run(ctx, "zellij", "--session", session, "action", "write", "27"); err != nil {
+		if strings.TrimSpace(stderr) == "" {
+			return SubmitResult{}, err
+		}
+		return SubmitResult{}, fmt.Errorf("zellij submit escape: %s", strings.TrimSpace(stderr))
+	}
+	if _, stderr, err := c.runner.Run(ctx, "zellij", "--session", session, "action", "write", "13"); err != nil {
+		if strings.TrimSpace(stderr) == "" {
+			return SubmitResult{}, err
+		}
+		return SubmitResult{}, fmt.Errorf("zellij submit enter: %s", strings.TrimSpace(stderr))
+	}
+	return SubmitResult{Session: session, Mode: "escape_enter"}, nil
 }
 
 func (c *Client) ensureSession(ctx context.Context, session string) error {

@@ -130,3 +130,28 @@ func TestCreatePaneSurfacesRunnerError(t *testing.T) {
 		t.Fatalf("CreatePane() error = %v, want permission denied", err)
 	}
 }
+
+func TestSubmitUsesEscapeThenEnter(t *testing.T) {
+	runner := &fakeRunner{}
+	client := NewWithRunner(runner)
+
+	got, err := client.Submit(context.Background(), "collab")
+	if err != nil {
+		t.Fatalf("Submit() error = %v", err)
+	}
+	if got.Session != "collab" {
+		t.Fatalf("Session = %q, want collab", got.Session)
+	}
+	if got.Mode != "escape_enter" {
+		t.Fatalf("Mode = %q, want escape_enter", got.Mode)
+	}
+	if len(runner.calls) != 2 {
+		t.Fatalf("calls=%v want 2 invocations", runner.calls)
+	}
+	if runner.calls[0] != "zellij --session collab action write 27" {
+		t.Fatalf("first call=%q want escape write", runner.calls[0])
+	}
+	if runner.calls[1] != "zellij --session collab action write 13" {
+		t.Fatalf("second call=%q want enter write", runner.calls[1])
+	}
+}
