@@ -736,7 +736,7 @@ func TestSkillGroupsIncludeOptimizedRetrieval(t *testing.T) {
 
 func TestSkillGroupsIncludeFocusedProfiles(t *testing.T) {
 	cases := map[string][]string{
-		"mobile":  {"mobile/android", "mobile/ios"},
+		"mobile":  {"mobile/android", "mobile/ios", "mobile/expo"},
 		"godot":   {"build/godot", "editor/godot"},
 		"api":     {"http/openapi"},
 		"context": {"session/recall", "session/timeline", "session/query", "session/summarize"},
@@ -755,6 +755,14 @@ func TestSkillGroupsIncludeFocusedProfiles(t *testing.T) {
 				t.Fatalf("%s missing %s", group, want)
 			}
 		}
+	}
+}
+
+func TestRegisterFocusedGroupToolsAddsMobileExpo(t *testing.T) {
+	srv := server.NewMCPServer("agentctl", "test")
+	registerFocusedGroupTools(srv, []string{"mobile"})
+	if _, ok := srv.ListTools()["mobile_expo"]; !ok {
+		t.Fatal("mobile_expo tool missing")
 	}
 }
 

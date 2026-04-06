@@ -61,6 +61,22 @@ type UnifiedDevice struct {
 	Model    string `json:"model,omitempty"`
 }
 
+func simctlTarget(device string) string {
+	if strings.TrimSpace(device) != "" {
+		return strings.TrimSpace(device)
+	}
+	return "booted"
+}
+
+func iosOpRequiresIDB(op string) bool {
+	switch op {
+	case "device_info", "tap", "swipe", "type_text", "ui_tree", "logs":
+		return true
+	default:
+		return false
+	}
+}
+
 func main() {
 	skillmain.Main(command, run)
 }
@@ -79,20 +95,21 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 		in.Platform = "auto"
 	}
 	// Check tool availability
-	hasIDB := checkTool("idb")
+	hasIDB := mobileutil.HasRunnableIDB(ctx)
+	hasSimctl := checkTool("xcrun")
 	hasADB := checkTool("adb")
 
-	if !hasIDB && !hasADB {
+	if !hasIDB && !hasSimctl && !hasADB {
 		return skillerr.Runtime(
-			"neither idb nor adb found",
-			skillerr.WithHint("Install idb (brew install idb-companion) or adb (Android SDK)."),
+			"none of idb, xcrun, or adb found",
+			skillerr.WithHint("Install Xcode command line tools for simctl, optionally idb-companion, or adb (Android SDK)."),
 		)
 	}
 
 	// Handle auto mode for list_devices
 	if in.Platform == "auto" {
 		if op == "list_devices" {
-			return listAllDevices(ctx, rc, hasIDB, hasADB)
+			return listAllDevices(ctx, rc, hasIDB, hasSimctl, hasADB)
 		}
 		return skillerr.Arg(
 			fmt.Sprintf("platform is required for %s operation", op),
@@ -101,8 +118,11 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	}
 
 	// Validate platform availability
-	if in.Platform == "ios" && !hasIDB {
-		return skillerr.Runtime("idb not found", skillerr.WithHint("Install with: brew install idb-companion."))
+	if in.Platform == "ios" && !hasIDB && !hasSimctl {
+		return skillerr.Runtime("neither idb nor xcrun found", skillerr.WithHint("Install Xcode command line tools and optionally idb-companion."))
+	}
+	if in.Platform == "ios" && iosOpRequiresIDB(op) && !hasIDB {
+		return skillerr.Runtime("idb not found", skillerr.WithHint("Install with: brew install idb-companion. This iOS operation still requires idb."))
 	}
 	if in.Platform == "android" && !hasADB {
 		return skillerr.Runtime("adb not found", skillerr.WithHint("Install Android SDK or brew install android-platform-tools."))
@@ -129,11 +149,11 @@ func checkTool(name string) bool {
 }
 
 // listAllDevices lists devices from both iOS and Android.
-func listAllDevices(ctx context.Context, rc *skillmain.RunContext, hasIDB, hasADB bool) error {
+func listAllDevices(ctx context.Context, rc *skillmain.RunContext, hasIDB, hasSimctl, hasADB bool) error {
 	var allDevices []UnifiedDevice
 
 	// Get iOS simulators
-	if hasIDB {
+	if hasIDB || hasSimctl {
 		iosDevices, err := listIOSDevices(ctx)
 		if err == nil {
 			allDevices = append(allDevices, iosDevices...)
@@ -170,13 +190,17 @@ func listAllDevices(ctx context.Context, rc *skillmain.RunContext, hasIDB, hasAD
 }
 
 func listIOSDevices(ctx context.Context) ([]UnifiedDevice, error) {
-	idbDevices, err := mobileutil.ListIDBDevices(ctx)
+	var rawDevices []mobileutil.IDBDevice
+	rawDevices, err := mobileutil.ListSimctlDevices(ctx)
 	if err != nil {
-		return nil, err
+		rawDevices, err = mobileutil.ListIDBDevices(ctx)
+		if err != nil {
+			return nil, err
+		}
 	}
 
-	devices := make([]UnifiedDevice, 0, len(idbDevices))
-	for _, dev := range idbDevices {
+	devices := make([]UnifiedDevice, 0, len(rawDevices))
+	for _, dev := range rawDevices {
 		if dev.TargetType != "simulator" {
 			continue
 		}
@@ -316,13 +340,23 @@ func iosInstall(ctx context.Context, rc *skillmain.RunContext, udid, app string)
 	if app == "" {
 		return fmt.Errorf("app path is required")
 	}
-	result := mobileutil.RunIDB(ctx, udid, "install", app)
+	backend := "simctl"
+	result := mobileutil.RunSimctl(ctx, "install", simctlTarget(udid), app)
 	if result.Err != nil {
-		return fmt.Errorf("idb install: %w", result.Err)
+		simctlErr := result.Err
+		if !mobileutil.HasRunnableIDB(ctx) {
+			return fmt.Errorf("ios install failed (simctl: %w)", simctlErr)
+		}
+		backend = "idb"
+		result = mobileutil.RunIDB(ctx, udid, "install", app)
+		if result.Err != nil {
+			return fmt.Errorf("ios install failed (simctl: %w, idb: %v)", simctlErr, result.Err)
+		}
 	}
 	return emit(rc, map[string]any{
 		"operation": "install",
 		"platform":  "ios",
+		"backend":   backend,
 		"app":       app,
 		"success":   true,
 	})
@@ -332,13 +366,23 @@ func iosLaunch(ctx context.Context, rc *skillmain.RunContext, udid, bundleID str
 	if bundleID == "" {
 		return fmt.Errorf("bundle ID is required")
 	}
-	result := mobileutil.RunIDB(ctx, udid, "launch", bundleID)
+	backend := "simctl"
+	result := mobileutil.RunSimctl(ctx, "launch", simctlTarget(udid), bundleID)
 	if result.Err != nil {
-		return fmt.Errorf("idb launch: %w", result.Err)
+		simctlErr := result.Err
+		if !mobileutil.HasRunnableIDB(ctx) {
+			return fmt.Errorf("ios launch failed (simctl: %w)", simctlErr)
+		}
+		backend = "idb"
+		result = mobileutil.RunIDB(ctx, udid, "launch", bundleID)
+		if result.Err != nil {
+			return fmt.Errorf("ios launch failed (simctl: %w, idb: %v)", simctlErr, result.Err)
+		}
 	}
 	return emit(rc, map[string]any{
 		"operation": "launch",
 		"platform":  "ios",
+		"backend":   backend,
 		"app":       bundleID,
 		"success":   true,
 	})
@@ -348,13 +392,23 @@ func iosTerminate(ctx context.Context, rc *skillmain.RunContext, udid, bundleID 
 	if bundleID == "" {
 		return fmt.Errorf("bundle ID is required")
 	}
-	result := mobileutil.RunIDB(ctx, udid, "terminate", bundleID)
+	backend := "simctl"
+	result := mobileutil.RunSimctl(ctx, "terminate", simctlTarget(udid), bundleID)
 	if result.Err != nil {
-		return fmt.Errorf("idb terminate: %w", result.Err)
+		simctlErr := result.Err
+		if !mobileutil.HasRunnableIDB(ctx) {
+			return fmt.Errorf("ios terminate failed (simctl: %w)", simctlErr)
+		}
+		backend = "idb"
+		result = mobileutil.RunIDB(ctx, udid, "terminate", bundleID)
+		if result.Err != nil {
+			return fmt.Errorf("ios terminate failed (simctl: %w, idb: %v)", simctlErr, result.Err)
+		}
 	}
 	return emit(rc, map[string]any{
 		"operation": "terminate",
 		"platform":  "ios",
+		"backend":   backend,
 		"app":       bundleID,
 		"success":   true,
 	})
@@ -364,9 +418,18 @@ func iosScreenshot(ctx context.Context, rc *skillmain.RunContext, udid, outputPa
 	if outputPath == "" {
 		outputPath = fmt.Sprintf("/tmp/ios_screenshot_%d.png", time.Now().UnixNano())
 	}
-	result := mobileutil.RunIDB(ctx, udid, "screenshot", outputPath)
+	backend := "simctl"
+	result := mobileutil.RunSimctl(ctx, "io", simctlTarget(udid), "screenshot", outputPath)
 	if result.Err != nil {
-		return fmt.Errorf("idb screenshot: %w", result.Err)
+		simctlErr := result.Err
+		if !mobileutil.HasRunnableIDB(ctx) {
+			return fmt.Errorf("ios screenshot failed (simctl: %w)", simctlErr)
+		}
+		backend = "idb"
+		result = mobileutil.RunIDB(ctx, udid, "screenshot", outputPath)
+		if result.Err != nil {
+			return fmt.Errorf("ios screenshot failed (simctl: %w, idb: %v)", simctlErr, result.Err)
+		}
 	}
 	data, err := os.ReadFile(outputPath)
 	if err != nil {
@@ -379,6 +442,7 @@ func iosScreenshot(ctx context.Context, rc *skillmain.RunContext, udid, outputPa
 	return emit(rc, map[string]any{
 		"operation":  "screenshot",
 		"platform":   "ios",
+		"backend":    backend,
 		"screenshot": artifact.Digest,
 		"path":       outputPath,
 		"success":    true,
@@ -491,13 +555,23 @@ func iosOpenURL(ctx context.Context, rc *skillmain.RunContext, udid, url string)
 	if url == "" {
 		return fmt.Errorf("url is required")
 	}
-	result := mobileutil.RunIDB(ctx, udid, "open", url)
+	backend := "simctl"
+	result := mobileutil.RunSimctl(ctx, "openurl", simctlTarget(udid), url)
 	if result.Err != nil {
-		return fmt.Errorf("idb open: %w", result.Err)
+		simctlErr := result.Err
+		if !mobileutil.HasRunnableIDB(ctx) {
+			return fmt.Errorf("ios open_url failed (simctl: %w)", simctlErr)
+		}
+		backend = "idb"
+		result = mobileutil.RunIDB(ctx, udid, "open", url)
+		if result.Err != nil {
+			return fmt.Errorf("ios open_url failed (simctl: %w, idb: %v)", simctlErr, result.Err)
+		}
 	}
 	return emit(rc, map[string]any{
 		"operation": "open_url",
 		"platform":  "ios",
+		"backend":   backend,
 		"url":       url,
 		"success":   true,
 	})

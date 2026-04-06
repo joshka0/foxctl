@@ -85,6 +85,7 @@ var skillGroups = map[string][]string{
 	"mobile": {
 		"mobile/android",
 		"mobile/ios",
+		"mobile/expo",
 	},
 	// godot: Godot editor/build automation.
 	"godot": {
@@ -338,7 +339,7 @@ Available skill groups:
   all         - All installed agentctl skills as first-class MCP tools
   code-intel  - Code analysis: semantic_search, smart_search, symbols, snippet_extract, context_grep, codemap_get, codemap_generate
   optimized-retrieval - Only the compact retrieval tools optimized for agent use
-  mobile      - mobile/android, mobile/ios
+  mobile      - mobile/android, mobile/ios, mobile/expo
   godot       - build/godot, editor/godot
   api         - http/openapi
   refactor    - refactor_scout, refactor_advisor, symbols, snippet tools
@@ -1447,6 +1448,28 @@ func registerFocusedGroupTools(s *server.MCPServer, groups []string) {
 	if groupSet["collab"] || groupSet["mux"] {
 		registerMuxTools(s)
 	}
+	if groupSet["mobile"] {
+		registerMobileTools(s)
+	}
+}
+
+func registerMobileTools(s *server.MCPServer) {
+	s.AddTool(
+		mcp.NewTool("mobile_expo",
+			mcp.WithDescription("Expo/React Native mobile debugging and dev-menu surface for iOS and Android simulators/devices."),
+			mcp.WithString("operation", mcp.Required(), mcp.Description("Operation to perform: debug_status, debug_snapshot, shake, reload, deep_link, dev_menu, toggle_inspector, toggle_performance, toggle_remote_debug, build, update, build_status, logs")),
+			mcp.WithString("device_id", mcp.Description("Device ID (UDID for iOS, serial for Android). Auto-detects if omitted.")),
+			mcp.WithString("platform", mcp.Description("Target platform. ios, android, or auto.")),
+			mcp.WithString("url", mcp.Description("Deep link URL for deep_link operation")),
+			mcp.WithString("build_platform", mcp.Description("Platform for EAS build: ios, android, or all")),
+			mcp.WithString("profile", mcp.Description("EAS build profile: development, preview, or production")),
+			mcp.WithString("channel", mcp.Description("Update channel for EAS update")),
+			mcp.WithString("message", mcp.Description("Update message for EAS update")),
+			mcp.WithString("filter", mcp.Description("Filter pattern for logs operation")),
+			mcp.WithNumber("count", mcp.Description("Number of log lines to retrieve")),
+		),
+		handleMobileExpo,
+	)
 }
 
 func registerRoomTools(s *server.MCPServer) {
@@ -2454,6 +2477,9 @@ func registerSkillGroups(ctx context.Context, s *server.MCPServer, groups []stri
 func registerSkillAsTool(s *server.MCPServer, manifest skill.Manifest, artifactPath string) {
 	// Convert skill name to MCP tool name: code/semantic_search -> code_semantic_search
 	toolName := strings.ReplaceAll(manifest.Metadata.Name, "/", "_")
+	if _, exists := s.ListTools()[toolName]; exists {
+		return
+	}
 
 	// Build MCP tool options from manifest
 	toolOpts := []mcp.ToolOption{
@@ -3640,6 +3666,26 @@ func handleStructuredShell(ctx context.Context, req mcp.CallToolRequest) (*mcp.C
 	return runEnvelopeCommand(ctx, "structured_shell", func(cmd *cobra.Command) error {
 		return runShellCommand(cmd, workspace, command, measureRaw, tokenModel, argv)
 	})
+}
+
+func handleMobileExpo(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	args := getArgs(req)
+	operation := getStringArg(args, "operation", "")
+	if operation == "" {
+		return mcp.NewToolResultError("operation is required"), nil
+	}
+	input := map[string]any{
+		"operation": operation,
+	}
+	for _, key := range []string{"device_id", "platform", "url", "build_platform", "profile", "channel", "message", "filter"} {
+		if value := getStringArg(args, key, ""); value != "" {
+			input[key] = value
+		}
+	}
+	if value := getIntArg(args, "count", 0); value > 0 {
+		input["count"] = value
+	}
+	return runSkillAsMCP(ctx, "mobile/expo", input)
 }
 
 func handleRoomTool(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {

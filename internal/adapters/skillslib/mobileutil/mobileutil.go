@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"regexp"
+	"sort"
 	"strings"
+	"time"
 
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/executil"
 )
@@ -32,7 +34,23 @@ func RunADB(ctx context.Context, serial string, args ...string) executil.CmdResu
 
 // RunIDB executes idb with the optional device UDID.
 func RunIDB(ctx context.Context, udid string, args ...string) executil.CmdResult {
-	return executil.Run(ctx, "", "idb", IDBArgs(udid, args...)...)
+	path, err := executil.ResolveRunnableTool(ctx, "idb", "--help")
+	if err != nil {
+		return executil.CmdResult{ExitCode: -1, Err: err}
+	}
+	return executil.Run(ctx, "", path, IDBArgs(udid, args...)...)
+}
+
+// RunSimctl executes xcrun simctl with the provided arguments.
+func RunSimctl(ctx context.Context, args ...string) executil.CmdResult {
+	return executil.Run(ctx, "", "xcrun", append([]string{"simctl"}, args...)...)
+}
+
+// HasRunnableIDB returns true if idb resolves in PATH and can be launched.
+func HasRunnableIDB(ctx context.Context) bool {
+	probeCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	return executil.HasRunnableTool(probeCtx, "idb", "--help")
 }
 
 // ADBDevice represents an Android device from adb devices -l.
@@ -154,6 +172,74 @@ func ListIDBDevices(ctx context.Context) ([]IDBDevice, error) {
 		return nil, result.Err
 	}
 	return ParseIDBDevices(result.Stdout), nil
+}
+
+type simctlList struct {
+	Devices map[string][]simctlDevice `json:"devices"`
+}
+
+type simctlDevice struct {
+	UDID              string `json:"udid"`
+	Name              string `json:"name"`
+	State             string `json:"state"`
+	IsAvailable       bool   `json:"isAvailable"`
+	AvailabilityError string `json:"availabilityError"`
+}
+
+// ParseSimctlDevices parses `xcrun simctl list devices --json` output into a normalized device list.
+func ParseSimctlDevices(output []byte) []IDBDevice {
+	var payload simctlList
+	if err := json.Unmarshal(output, &payload); err != nil {
+		return nil
+	}
+
+	devices := make([]IDBDevice, 0)
+	for runtime, runtimeDevices := range payload.Devices {
+		for _, dev := range runtimeDevices {
+			if !dev.IsAvailable && strings.TrimSpace(dev.AvailabilityError) != "" {
+				continue
+			}
+			devices = append(devices, IDBDevice{
+				UDID:       dev.UDID,
+				Name:       dev.Name,
+				State:      strings.ToLower(strings.TrimSpace(dev.State)),
+				TargetType: "simulator",
+				OSVersion:  formatSimctlRuntime(runtime),
+			})
+		}
+	}
+
+	sort.Slice(devices, func(i, j int) bool {
+		if devices[i].State != devices[j].State {
+			return devices[i].State < devices[j].State
+		}
+		if devices[i].OSVersion != devices[j].OSVersion {
+			return devices[i].OSVersion < devices[j].OSVersion
+		}
+		return devices[i].Name < devices[j].Name
+	})
+	return devices
+}
+
+// ListSimctlDevices lists available iOS simulators via simctl.
+func ListSimctlDevices(ctx context.Context) ([]IDBDevice, error) {
+	result := RunSimctl(ctx, "list", "devices", "available", "--json")
+	if result.Err != nil {
+		return nil, result.Err
+	}
+	return ParseSimctlDevices(result.Stdout), nil
+}
+
+func formatSimctlRuntime(runtime string) string {
+	runtime = strings.TrimPrefix(runtime, "com.apple.CoreSimulator.SimRuntime.")
+	if !strings.HasPrefix(runtime, "iOS-") && !strings.HasPrefix(runtime, "tvOS-") && !strings.HasPrefix(runtime, "watchOS-") && !strings.HasPrefix(runtime, "visionOS-") {
+		return runtime
+	}
+	parts := strings.Split(runtime, "-")
+	if len(parts) < 2 {
+		return runtime
+	}
+	return parts[0] + " " + strings.Join(parts[1:], ".")
 }
 
 var (
