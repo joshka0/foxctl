@@ -144,13 +144,8 @@ func TestChildSpawner_SpawnChild_EmitsRecentLogsInRawState(t *testing.T) {
 		t.Fatalf("SpawnChild() error = %v", err)
 	}
 
-	record := waitForWorkerStatus(t, state, "subprocess:agent:logs-1", coreworker.StatusCompleted)
-	var raw map[string]any
-	if err := json.Unmarshal(record.RawState, &raw); err != nil {
-		t.Fatalf("decode raw_state: %v raw=%s", err, string(record.RawState))
-	}
-	agentctlState, _ := raw["agentctl"].(map[string]any)
-	recentLogs, _ := agentctlState["recent_logs"].([]any)
+	_ = waitForWorkerStatus(t, state, "subprocess:agent:logs-1", coreworker.StatusCompleted)
+	recentLogs := waitForRecentLogs(t, state, "subprocess:agent:logs-1", 2)
 	if len(recentLogs) < 2 {
 		t.Fatalf("recent_logs=%v want at least 2 entries", recentLogs)
 	}
@@ -415,4 +410,28 @@ func waitForWorkerStatus(t *testing.T, state *runtimeworkers.StateComponent, wor
 	}
 	t.Fatalf("worker %q did not reach status %q", workerID, want)
 	return coreworker.Record{}
+}
+
+func waitForRecentLogs(t *testing.T, state *runtimeworkers.StateComponent, workerID string, minCount int) []any {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		snapshot := state.Snapshot()
+		record, ok := snapshot.Workers[workerID]
+		if !ok || record.Status != coreworker.StatusCompleted {
+			time.Sleep(20 * time.Millisecond)
+			continue
+		}
+		var raw map[string]any
+		if err := json.Unmarshal(record.RawState, &raw); err == nil {
+			agentctlState, _ := raw["agentctl"].(map[string]any)
+			recentLogs, _ := agentctlState["recent_logs"].([]any)
+			if len(recentLogs) >= minCount {
+				return recentLogs
+			}
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatalf("worker %q did not accumulate %d recent log entries", workerID, minCount)
+	return nil
 }

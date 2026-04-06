@@ -16,6 +16,20 @@ func TestNewTmuxCommandHasSendParentSubcommand(t *testing.T) {
 	}
 }
 
+func TestNewTmuxCommandHasRemindSubcommand(t *testing.T) {
+	cmd := newTmuxCommand()
+	found := false
+	for _, sub := range cmd.Commands() {
+		if sub.Name() == "remind" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatal("expected tmux remind subcommand")
+	}
+}
+
 func TestResolveParentParticipantIDRequiresEnv(t *testing.T) {
 	t.Setenv("AGENTCTL_PARENT_PARTICIPANT_ID", "")
 	if _, err := resolveParentParticipantID(); err == nil {
@@ -68,5 +82,26 @@ func TestResolveMuxCreateCommandAutoModeMappings(t *testing.T) {
 func TestDeriveMuxCreateLabelPrefixSanitizesAgentName(t *testing.T) {
 	if got := deriveMuxCreateLabelPrefix("Cursor Agent"); got != "cursor-agent" {
 		t.Fatalf("deriveMuxCreateLabelPrefix() = %q, want cursor-agent", got)
+	}
+}
+
+func TestResolveMuxRemindArgsUsesEnvRoomID(t *testing.T) {
+	t.Setenv("AGENTCTL_ROOM_ID", "room-alpha")
+	roomID, body, err := resolveMuxRemindArgs([]string{"check in"})
+	if err != nil {
+		t.Fatalf("resolveMuxRemindArgs() error = %v", err)
+	}
+	if roomID != "room-alpha" {
+		t.Fatalf("resolveMuxRemindArgs() roomID = %q, want room-alpha", roomID)
+	}
+	if body != "check in" {
+		t.Fatalf("resolveMuxRemindArgs() body = %q, want %q", body, "check in")
+	}
+}
+
+func TestResolveMuxRemindArgsRequiresRoomIDOutsideRoomBoundPane(t *testing.T) {
+	t.Setenv("AGENTCTL_ROOM_ID", "")
+	if _, _, err := resolveMuxRemindArgs([]string{"check in"}); err == nil {
+		t.Fatal("expected error when room id is missing outside room-bound pane")
 	}
 }

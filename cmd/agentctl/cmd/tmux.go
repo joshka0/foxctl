@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/jkatigb/agentctl/internal/contextplane"
 	"github.com/jkatigb/agentctl/internal/protocol"
@@ -38,6 +39,7 @@ func newTmuxCommand() *cobra.Command {
 		newTmuxListCommand(),
 		newTmuxReadCommand(),
 		newTmuxSendCommand(),
+		newTmuxRemindCommand(),
 		newTmuxSubmitCommand(),
 		newTmuxSendParentCommand(),
 		newTmuxObserveCommand(),
@@ -45,6 +47,83 @@ func newTmuxCommand() *cobra.Command {
 		newTmuxCreateCommand(),
 	)
 	return cmd
+}
+
+func newTmuxRemindCommand() *cobra.Command {
+	var (
+		workspace     string
+		sender        string
+		recipient     string
+		subject       string
+		every         time.Duration
+		maxIterations int
+		replyExpected bool
+		ackRequired   bool
+		interrupt     bool
+	)
+
+	cmd := &cobra.Command{
+		Use:   "remind [room-id] <text>",
+		Short: "Create a durable room reminder for the current mux participant",
+		Args:  cobra.RangeArgs(1, 2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			roomID, body, err := resolveMuxRemindArgs(args)
+			if err != nil {
+				return protocol.WriteError(cmd.OutOrStdout(), "agentctl.tmux.remind", protocol.ErrorCodeEARG, err.Error(), map[string]any{
+					"hint": "Pass agentctl mux remind <room-id> \"...\", or run inside a room-bound pane so AGENTCTL_ROOM_ID is available.",
+				}, protocol.WithSource("cli"))
+			}
+			resolvedRecipient := strings.TrimSpace(recipient)
+			if resolvedRecipient == "" {
+				identity, err := resolveRoomSender(cmd.Context(), sender)
+				if err != nil {
+					return protocol.WriteError(cmd.OutOrStdout(), "agentctl.tmux.remind", protocol.ErrorCodeEARG, err.Error(), map[string]any{
+						"hint": "Pass --recipient explicitly or run inside a labeled tmux/zellij pane so agentctl can derive the current participant id.",
+					}, protocol.WithSource("cli"))
+				}
+				resolvedRecipient = identity.Sender
+			}
+			return runRoomRemindAdd(cmd, workspace, sender, roomID, resolvedRecipient, subject, body, every, maxIterations, ackRequired, replyExpected, interrupt)
+		},
+	}
+
+	cmd.Flags().StringVar(&workspace, "workspace", ".", "Workspace root override")
+	cmd.Flags().StringVar(&sender, "sender", "", "Sender actor or participant id (defaults to current tmux/zellij pane)")
+	cmd.Flags().StringVar(&recipient, "recipient", "", "Reminder recipient (defaults to current tmux/zellij pane)")
+	cmd.Flags().StringVar(&subject, "subject", "", "Optional root message subject")
+	cmd.Flags().DurationVar(&every, "every", 15*time.Minute, "Reminder interval")
+	cmd.Flags().IntVar(&maxIterations, "max-iterations", 3, "Maximum reminder follow-ups after the initial request")
+	cmd.Flags().BoolVar(&replyExpected, "reply-expected", true, "Require a reply to stop reminders")
+	cmd.Flags().BoolVar(&ackRequired, "ack-required", false, "Require an ack to stop reminders")
+	cmd.Flags().BoolVar(&interrupt, "interrupt", false, "Interrupt the target pane for reminder follow-ups")
+	return cmd
+}
+
+func resolveMuxRemindArgs(args []string) (string, string, error) {
+	switch len(args) {
+	case 1:
+		roomID := strings.TrimSpace(os.Getenv("AGENTCTL_ROOM_ID"))
+		if roomID == "" {
+			return "", "", fmt.Errorf("room id is required outside a room-bound pane")
+		}
+		body := strings.TrimSpace(args[0])
+		if body == "" {
+			return "", "", fmt.Errorf("reminder text is required")
+		}
+		return roomID, body, nil
+	case 2:
+		roomID := strings.TrimSpace(args[0])
+		body := strings.TrimSpace(args[1])
+		if roomID == "" {
+			return "", "", fmt.Errorf("room id is required")
+		}
+		if body == "" {
+			return "", "", fmt.Errorf("reminder text is required")
+		}
+		return roomID, body, nil
+	default:
+		return "", "", fmt.Errorf("expected [room-id] <text>")
+	}
 }
 
 func newTmuxListCommand() *cobra.Command {
