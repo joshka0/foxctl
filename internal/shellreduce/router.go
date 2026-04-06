@@ -475,21 +475,12 @@ func parseSliceSegment(tokens []string) (mode string, count int, lineStart int, 
 }
 
 func parseLineCountSegment(tokens []string) (int, bool) {
-	if len(tokens) == 1 {
+	switch len(tokens) {
+	case 1:
 		return 10, true
-	}
-	for i := 1; i < len(tokens); i++ {
-		token := tokens[i]
+	case 2:
+		token := tokens[1]
 		switch {
-		case token == "-n":
-			if i+1 >= len(tokens) {
-				return 0, false
-			}
-			n, err := strconv.Atoi(tokens[i+1])
-			if err != nil || n <= 0 {
-				return 0, false
-			}
-			return n, true
 		case strings.HasPrefix(token, "-n="):
 			n, err := strconv.Atoi(strings.TrimPrefix(token, "-n="))
 			if err != nil || n <= 0 {
@@ -502,13 +493,21 @@ func parseLineCountSegment(tokens []string) (int, bool) {
 				return 0, false
 			}
 			return n, true
-		case strings.HasPrefix(token, "-"):
-			return 0, false
 		default:
 			return 0, false
 		}
+	case 3:
+		if tokens[1] != "-n" {
+			return 0, false
+		}
+		n, err := strconv.Atoi(tokens[2])
+		if err != nil || n <= 0 {
+			return 0, false
+		}
+		return n, true
+	default:
+		return 0, false
 	}
-	return 10, true
 }
 
 func splitControlSegments(argv []string) [][]string {

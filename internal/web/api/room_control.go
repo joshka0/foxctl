@@ -588,7 +588,8 @@ func handleRoomMessageAction(w http.ResponseWriter, r *http.Request, cfg config.
 		status = agent.BoardMessageStatusAcked
 	case "resolve":
 		mode := strings.TrimSpace(strings.ToLower(req.Mode))
-		if mode == "" || mode == "acked" || mode == "ack" {
+		switch mode {
+		case "", "acked", "ack":
 			expanded, expandErr := apiExpandRoomResolveMessageIDs(r.Context(), store, req.WorkspaceID, roomID, messageIDs)
 			if expandErr != nil {
 				httpError(w, http.StatusInternalServerError, "failed to resolve reminder chain")
@@ -597,7 +598,7 @@ func handleRoomMessageAction(w http.ResponseWriter, r *http.Request, cfg config.
 			messageIDs = expanded
 			updated, err = store.AckMessages(r.Context(), req.WorkspaceID, req.ActorID, messageIDs)
 			status = agent.BoardMessageStatusAcked
-		} else if mode == "read" {
+		case "read":
 			expanded, expandErr := apiExpandRoomResolveMessageIDs(r.Context(), store, req.WorkspaceID, roomID, messageIDs)
 			if expandErr != nil {
 				httpError(w, http.StatusInternalServerError, "failed to resolve reminder chain")
@@ -606,7 +607,7 @@ func handleRoomMessageAction(w http.ResponseWriter, r *http.Request, cfg config.
 			messageIDs = expanded
 			updated, err = store.MarkRead(r.Context(), req.WorkspaceID, req.ActorID, messageIDs)
 			status = agent.BoardMessageStatusRead
-		} else {
+		default:
 			httpError(w, http.StatusBadRequest, "mode must be acked or read")
 			return
 		}
@@ -685,13 +686,14 @@ func handleRoomMessagesResolveBulk(w http.ResponseWriter, r *http.Request, cfg c
 		updated int
 		status  agent.BoardMessageStatus
 	)
-	if mode == "" || mode == "acked" || mode == "ack" {
+	switch mode {
+	case "", "acked", "ack":
 		updated, err = store.AckMessages(r.Context(), req.WorkspaceID, req.ActorID, ids)
 		status = agent.BoardMessageStatusAcked
-	} else if mode == "read" {
+	case "read":
 		updated, err = store.MarkRead(r.Context(), req.WorkspaceID, req.ActorID, ids)
 		status = agent.BoardMessageStatusRead
-	} else {
+	default:
 		httpError(w, http.StatusBadRequest, "mode must be acked or read")
 		return
 	}

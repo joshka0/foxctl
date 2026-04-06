@@ -182,7 +182,7 @@ func TestEvaluateParserOnlyWhenSchemaMismatches(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer closeDB()
+	defer func() { _ = closeDB() }()
 	if _, err := db.ExecContext(ctx, `UPDATE index_meta SET value = ? WHERE key = 'schema_version'`, fmt.Sprintf("%d", repoindex.SchemaVersion()-1)); err != nil {
 		t.Fatal(err)
 	}

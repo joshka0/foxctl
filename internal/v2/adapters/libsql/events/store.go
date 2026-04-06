@@ -309,7 +309,7 @@ func stringFromAnyMap(m map[string]any, key string) string {
 	if m == nil {
 		return ""
 	}
-	value, _ := m[key]
+	value := m[key]
 	switch typed := value.(type) {
 	case string:
 		return typed

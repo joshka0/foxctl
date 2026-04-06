@@ -193,22 +193,22 @@ func TestRoomCommandFlow_CreateJoinSendShow(t *testing.T) {
 	ctx := context.Background()
 	workspace := t.TempDir()
 
-	cmd, out := newRoomTestCommand(ctx)
+	cmd, _ := newRoomTestCommand(ctx)
 	if err := runRoomCreate(cmd, workspace, "alpha", "Alpha", "coordination room", []string{"agent-a=lead"}); err != nil {
 		t.Fatalf("runRoomCreate: %v", err)
 	}
 
-	cmd, out = newRoomTestCommand(ctx)
+	cmd, _ = newRoomTestCommand(ctx)
 	if err := runRoomJoin(cmd, workspace, "alpha", "agent-b", "reviewer", "", "", "", false, true, false); err != nil {
 		t.Fatalf("runRoomJoin: %v", err)
 	}
 
-	cmd, out = newRoomTestCommand(ctx)
+	cmd, _ = newRoomTestCommand(ctx)
 	if err := runRoomSend(cmd, workspace, "alpha", "agent-a", "", "", "hello room", "info", "", 0, false, false, false, true); err != nil {
 		t.Fatalf("runRoomSend: %v", err)
 	}
 
-	cmd, out = newRoomTestCommand(ctx)
+	cmd, out := newRoomTestCommand(ctx)
 	if err := runRoomShow(cmd, workspace, "alpha", "", 20); err != nil {
 		t.Fatalf("runRoomShow: %v", err)
 	}
@@ -298,7 +298,7 @@ func TestRoomTaskFlow_AddListComplete(t *testing.T) {
 		t.Fatalf("tasks=%T/%v want 1 entry", data["tasks"], data["tasks"])
 	}
 
-	cmd, out = newRoomTestCommand(ctx)
+	cmd, _ = newRoomTestCommand(ctx)
 	if err := runRoomTaskClaim(cmd, workspace, "alpha", "agent-b", taskID); err != nil {
 		t.Fatalf("runRoomTaskClaim: %v", err)
 	}
@@ -559,6 +559,16 @@ func TestRunRoomTaskAssignPersistsAssignmentAndNotifiesRecipient(t *testing.T) {
 			continue
 		}
 		if msg["recipient"] == "gemini-a" && msg["task_id"] == taskID {
+			body, _ := msg["body"].(string)
+			if !strings.Contains(body, "agentctl-room-operator") {
+				t.Fatalf("direct assignment body missing skill hint: %q", body)
+			}
+			if !strings.Contains(body, "agentctl room send alpha --to human-a") {
+				t.Fatalf("direct assignment body missing direct reply command: %q", body)
+			}
+			if !strings.Contains(body, "agentctl room task complete alpha --id "+taskID) {
+				t.Fatalf("direct assignment body missing completion command: %q", body)
+			}
 			foundDirect = true
 			break
 		}
@@ -1526,7 +1536,7 @@ func TestRunRoomRedgreenInitHideAndShow(t *testing.T) {
 		t.Fatalf("state=%v want red-a/green-a", stateRaw)
 	}
 
-	cmd, out = newRoomTestCommand(ctx)
+	cmd, _ = newRoomTestCommand(ctx)
 	if err := runRoomRedgreenHide(cmd, workspace, "red-a", "alpha", "pkg/hidden_test.go"); err != nil {
 		t.Fatalf("runRoomRedgreenHide: %v", err)
 	}
@@ -1636,7 +1646,7 @@ func TestRunRoomInterviewFlow(t *testing.T) {
 		t.Fatalf("answer recipient=%v want human-a", got)
 	}
 
-	cmd, out = newRoomTestCommand(ctx)
+	cmd, _ = newRoomTestCommand(ctx)
 	if err := runRoomInterviewVerify(cmd, workspace, "human-a", "alpha", answerID, "accept", "Yes, that matches the intended semantics."); err != nil {
 		t.Fatalf("runRoomInterviewVerify: %v", err)
 	}

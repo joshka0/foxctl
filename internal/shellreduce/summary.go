@@ -434,9 +434,7 @@ func summarizeGitDiffNames(data map[string]any) string {
 		return ""
 	}
 	lines := make([]string, 0, minInt(len(files), 20)+1)
-	for _, file := range files[:minInt(len(files), 20)] {
-		lines = append(lines, file)
-	}
+	lines = append(lines, files[:minInt(len(files), 20)]...)
 	if len(files) > 20 {
 		lines = append(lines, "...")
 	}

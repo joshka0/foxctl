@@ -1662,9 +1662,7 @@ func pythonModuleID(filePath string) string {
 		return pythonPkgPrefix + "root"
 	}
 	withoutExt := strings.TrimSuffix(trimmed, filepath.Ext(trimmed))
-	if strings.HasSuffix(withoutExt, "/__init__") {
-		withoutExt = strings.TrimSuffix(withoutExt, "/__init__")
-	}
+	withoutExt = strings.TrimSuffix(withoutExt, "/__init__")
 	if withoutExt == "" || withoutExt == "." {
 		return pythonPkgPrefix + "root"
 	}
@@ -1677,9 +1675,7 @@ func rustModuleID(filePath string) string {
 		return rustPkgPrefix + "root"
 	}
 	withoutExt := strings.TrimSuffix(trimmed, filepath.Ext(trimmed))
-	if strings.HasSuffix(withoutExt, "/mod") {
-		withoutExt = strings.TrimSuffix(withoutExt, "/mod")
-	}
+	withoutExt = strings.TrimSuffix(withoutExt, "/mod")
 	if withoutExt == "" || withoutExt == "." {
 		return rustPkgPrefix + "root"
 	}

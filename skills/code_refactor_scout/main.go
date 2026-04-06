@@ -386,29 +386,6 @@ func buildScoutStatusScope(workspace, searchPath string, info fs.FileInfo, scope
 	}
 }
 
-func discoverLanguages(dir string, includeTests bool) ([]string, error) {
-	info, err := os.Stat(dir)
-	if err != nil {
-		return nil, skillerr.WrapIO("discover languages", err)
-	}
-	resolved, err := refscope.ResolveResolvedPath(dir, dir, info, "auto", includeTests)
-	if err != nil {
-		if resolveErr, ok := err.(*refscope.ResolveError); ok {
-			if strings.Contains(resolveErr.Message, "multiple languages detected") {
-				parts := strings.Split(resolveErr.Message, ": ")
-				if len(parts) == 2 {
-					return strings.Split(parts[1], ", "), nil
-				}
-			}
-			if strings.Contains(resolveErr.Message, "no supported source files found") {
-				return nil, nil
-			}
-		}
-		return nil, skillerr.WrapIO("discover languages", err)
-	}
-	return resolved.Detected, nil
-}
-
 func analyzeDirectory(ctx context.Context, dir string, in input, state *scoutState) error {
 	return filepath.WalkDir(dir, func(path string, d fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
@@ -3640,10 +3617,9 @@ func summarizeNoiseIndicators(items []finding) []scoutNoiseIndicator {
 
 func buildEntrypointLane(items []finding, limit int) []scoutLaneItem {
 	type group struct {
-		rep     finding
-		count   int
-		rules   map[string]struct{}
-		summary string
+		rep   finding
+		count int
+		rules map[string]struct{}
 	}
 	index := make(map[string]*group)
 	for _, item := range items {
@@ -5002,176 +4978,6 @@ func detectGoBoolReturnWrapper(stmts []ast.Stmt) *semanticSimplificationCandidat
 	}
 }
 
-func singleBlockBooleanReturnValue(block *ast.BlockStmt) (bool, bool) {
-	if block == nil || len(block.List) != 1 {
-		return false, false
-	}
-	return booleanReturnValue(block.List[0])
-}
-
-func booleanReturnValue(stmt ast.Stmt) (bool, bool) {
-	ret, ok := stmt.(*ast.ReturnStmt)
-	if !ok || len(ret.Results) != 1 {
-		return false, false
-	}
-	return boolLiteralValue(ret.Results[0])
-}
-
-func simplifyGoBoolExpr(expr ast.Expr) (ast.Expr, []string, bool) {
-	expr = unwrapParenExpr(expr)
-	switch node := expr.(type) {
-	case *ast.ParenExpr:
-		return simplifyGoBoolExpr(node.X)
-	case *ast.UnaryExpr:
-		if node.Op != token.NOT {
-			return expr, nil, false
-		}
-		inner, patterns, changed := simplifyGoBoolExpr(node.X)
-		inner = unwrapParenExpr(inner)
-		if nested, ok := inner.(*ast.UnaryExpr); ok && nested.Op == token.NOT {
-			return unwrapParenExpr(nested.X), appendUniquePatternStrings(patterns, "double_negation"), true
-		}
-		if changed {
-			return &ast.UnaryExpr{Op: token.NOT, X: wrapNegationOperand(inner)}, patterns, true
-		}
-		return expr, nil, false
-	case *ast.BinaryExpr:
-		left, leftPatterns, leftChanged := simplifyGoBoolExpr(node.X)
-		if !leftChanged {
-			left = node.X
-		}
-		right, rightPatterns, rightChanged := simplifyGoBoolExpr(node.Y)
-		if !rightChanged {
-			right = node.Y
-		}
-		patterns := appendUniquePatternStrings(nil, leftPatterns...)
-		patterns = appendUniquePatternStrings(patterns, rightPatterns...)
-		switch node.Op {
-		case token.EQL, token.NEQ:
-			if lit, ok := boolLiteralValue(right); ok {
-				return simplifyBooleanLiteralComparison(left, node.Op, lit, patterns)
-			}
-			if lit, ok := boolLiteralValue(left); ok {
-				return simplifyBooleanLiteralComparison(right, node.Op, lit, patterns)
-			}
-		case token.LAND:
-			if lit, ok := boolLiteralValue(left); ok {
-				if lit {
-					return unwrapParenExpr(right), appendUniquePatternStrings(patterns, "left_true_and"), true
-				}
-				return ast.NewIdent("false"), appendUniquePatternStrings(patterns, "left_false_and"), true
-			}
-			if lit, ok := boolLiteralValue(right); ok && lit {
-				return unwrapParenExpr(left), appendUniquePatternStrings(patterns, "right_true_and"), true
-			}
-		case token.LOR:
-			if lit, ok := boolLiteralValue(left); ok {
-				if lit {
-					return ast.NewIdent("true"), appendUniquePatternStrings(patterns, "left_true_or"), true
-				}
-				return unwrapParenExpr(right), appendUniquePatternStrings(patterns, "left_false_or"), true
-			}
-			if lit, ok := boolLiteralValue(right); ok && !lit {
-				return unwrapParenExpr(left), appendUniquePatternStrings(patterns, "right_false_or"), true
-			}
-		}
-		if leftChanged || rightChanged {
-			return &ast.BinaryExpr{X: left, Op: node.Op, Y: right}, patterns, true
-		}
-	}
-	return expr, nil, false
-}
-
-func simplifyBooleanLiteralComparison(expr ast.Expr, op token.Token, lit bool, patterns []string) (ast.Expr, []string, bool) {
-	switch op {
-	case token.EQL:
-		if lit {
-			return unwrapParenExpr(expr), appendUniquePatternStrings(patterns, "boolean_literal_comparison"), true
-		}
-		return negateGoExpr(expr), appendUniquePatternStrings(patterns, "boolean_literal_comparison"), true
-	case token.NEQ:
-		if lit {
-			return negateGoExpr(expr), appendUniquePatternStrings(patterns, "boolean_literal_comparison"), true
-		}
-		return unwrapParenExpr(expr), appendUniquePatternStrings(patterns, "boolean_literal_comparison"), true
-	default:
-		return expr, patterns, false
-	}
-}
-
-func negateGoExpr(expr ast.Expr) ast.Expr {
-	expr = unwrapParenExpr(expr)
-	switch node := expr.(type) {
-	case *ast.UnaryExpr:
-		if node.Op == token.NOT {
-			return unwrapParenExpr(node.X)
-		}
-	case *ast.BinaryExpr:
-		if inverse, ok := inverseComparisonToken(node.Op); ok {
-			return &ast.BinaryExpr{X: node.X, Op: inverse, Y: node.Y}
-		}
-	}
-	return &ast.UnaryExpr{Op: token.NOT, X: wrapNegationOperand(expr)}
-}
-
-func inverseComparisonToken(op token.Token) (token.Token, bool) {
-	switch op {
-	case token.EQL:
-		return token.NEQ, true
-	case token.NEQ:
-		return token.EQL, true
-	case token.GTR:
-		return token.LEQ, true
-	case token.GEQ:
-		return token.LSS, true
-	case token.LSS:
-		return token.GEQ, true
-	case token.LEQ:
-		return token.GTR, true
-	default:
-		return token.ILLEGAL, false
-	}
-}
-
-func wrapNegationOperand(expr ast.Expr) ast.Expr {
-	expr = unwrapParenExpr(expr)
-	switch expr.(type) {
-	case *ast.BinaryExpr:
-		return &ast.ParenExpr{X: expr}
-	default:
-		return expr
-	}
-}
-
-func unwrapParenExpr(expr ast.Expr) ast.Expr {
-	for {
-		paren, ok := expr.(*ast.ParenExpr)
-		if !ok {
-			return expr
-		}
-		expr = paren.X
-	}
-}
-
-func boolLiteralValue(expr ast.Expr) (bool, bool) {
-	ident, ok := unwrapParenExpr(expr).(*ast.Ident)
-	if !ok {
-		return false, false
-	}
-	switch ident.Name {
-	case "true":
-		return true, true
-	case "false":
-		return false, true
-	default:
-		return false, false
-	}
-}
-
-func renderGoExpr(expr ast.Expr) string {
-	return renderGoNode(expr)
-}
-
 func renderGoStmtList(stmts []ast.Stmt) string {
 	if len(stmts) == 0 {
 		return ""
@@ -5192,24 +4998,6 @@ func renderGoNode(node any) string {
 		return ""
 	}
 	return strings.Join(strings.Fields(buf.String()), " ")
-}
-
-func goSourceTokenCount(value string) int {
-	replacer := strings.NewReplacer(
-		"(", " ",
-		")", " ",
-		"{", " ",
-		"}", " ",
-		",", " ",
-		";", " ",
-		"!", " ! ",
-		"&", " & ",
-		"|", " | ",
-		"=", " = ",
-		"<", " < ",
-		">", " > ",
-	)
-	return len(strings.Fields(replacer.Replace(value)))
 }
 
 func appendUniquePatternStrings(base []string, values ...string) []string {

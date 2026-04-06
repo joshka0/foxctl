@@ -590,14 +590,14 @@ func (c *Client) PrepareSession(ctx context.Context, opts PrepareOptions) (Prepa
 		return PrepareResult{}, err
 	}
 
-	panes, err := c.ensureSessionPaneCount(ctx, socket, plan)
+	_, err = c.ensureSessionPaneCount(ctx, socket, plan)
 	if err != nil {
 		return PrepareResult{}, err
 	}
 	if _, err := c.runTmuxWithSocket(ctx, socket, "select-layout", "-t", plan.session, "tiled"); err != nil {
 		return PrepareResult{}, err
 	}
-	panes, err = c.listPanesForSession(ctx, socket, plan.session)
+	panes, err := c.listPanesForSession(ctx, socket, plan.session)
 	if err != nil {
 		return PrepareResult{}, err
 	}

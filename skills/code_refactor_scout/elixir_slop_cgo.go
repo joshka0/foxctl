@@ -787,9 +787,7 @@ func elixirNamedChildren(node *sitter.Node) []sitter.Node {
 		return nil
 	}
 	out := make([]sitter.Node, 0, len(children))
-	for _, child := range children {
-		out = append(out, child)
-	}
+	out = append(out, children...)
 	return out
 }
 

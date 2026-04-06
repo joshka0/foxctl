@@ -4805,18 +4805,6 @@ func roomMessageHasInterviewPendingWork(msg agent.BoardMessage) bool {
 	}
 }
 
-func roomMessageIsInterviewKind(kind agent.BoardMessageKind) bool {
-	switch kind {
-	case agent.BoardMessageKindInterviewSession,
-		agent.BoardMessageKindInterviewQuestion,
-		agent.BoardMessageKindInterviewAnswer,
-		agent.BoardMessageKindInterviewVerify:
-		return true
-	default:
-		return false
-	}
-}
-
 func sortedRoomStatusFilters(filters map[string]struct{}) []string {
 	out := make([]string, 0, len(filters))
 	for key := range filters {

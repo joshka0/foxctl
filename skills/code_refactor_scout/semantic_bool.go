@@ -246,11 +246,6 @@ func semanticSourceTokenCount(value string) int {
 	return len(strings.Fields(replacer.Replace(value)))
 }
 
-func lowerGoSemanticBoolExpr(expr ast.Expr) *semanticBoolExpr {
-	lowered, _, _ := lowerGoSemanticBoolExprDetailed(expr)
-	return lowered
-}
-
 func lowerGoSemanticBoolExprDetailed(expr ast.Expr) (*semanticBoolExpr, []string, bool) {
 	expr = goUnwrapParenExpr(expr)
 	switch node := expr.(type) {
@@ -401,12 +396,12 @@ func goExprPure(expr ast.Expr) bool {
 	case *ast.CompositeLit:
 		for _, elt := range node.Elts {
 			switch e := elt.(type) {
-			case ast.Expr:
-				if !goExprPure(e) {
-					return false
-				}
 			case *ast.KeyValueExpr:
 				if !goExprPure(e.Key) || !goExprPure(e.Value) {
+					return false
+				}
+			case ast.Expr:
+				if !goExprPure(e) {
 					return false
 				}
 			default:

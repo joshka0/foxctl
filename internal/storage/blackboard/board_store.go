@@ -1307,34 +1307,6 @@ func (s *boardSQLStore) listDerivedRoomStreams(ctx context.Context, workspaceID 
 	return streams, nil
 }
 
-func (s *boardSQLStore) listRoomMetadata(ctx context.Context, workspaceID string, archivedOnly bool) ([]roomMetadataRow, error) {
-	archiveFilter := "archived_at = ''"
-	if archivedOnly {
-		archiveFilter = "archived_at != ''"
-	}
-	rows, err := s.db.QueryContext(ctx, `
-		SELECT workspace_id, room_id, stream, title, description, dispatch_policy, dispatch_agent_ids, created_at, updated_at, archived_at
-		FROM room_metadata
-		WHERE workspace_id = ? AND `+archiveFilter+`
-		ORDER BY updated_at DESC, room_id ASC`, workspaceID)
-	if err != nil {
-		return nil, fmt.Errorf("board: list room metadata: %w", err)
-	}
-	defer func() {
-		errs.Ignore(rows.Close(), "close room metadata rows")
-	}()
-
-	var metas []roomMetadataRow
-	for rows.Next() {
-		meta, err := scanRoomMetadataRow(rows)
-		if err != nil {
-			return nil, err
-		}
-		metas = append(metas, meta)
-	}
-	return metas, nil
-}
-
 func (s *boardSQLStore) listAllRoomMetadata(ctx context.Context, workspaceID string) ([]roomMetadataRow, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT workspace_id, room_id, stream, title, description, dispatch_policy, dispatch_agent_ids, created_at, updated_at, archived_at

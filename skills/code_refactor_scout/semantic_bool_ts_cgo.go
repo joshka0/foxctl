@@ -179,11 +179,6 @@ func tsSingleReturnedBooleanExpr(root *sitter.Node, content []byte) (*semanticBo
 	return lowered, original, patterns, changed
 }
 
-func lowerTypeScriptSemanticBoolExpr(node *sitter.Node, content []byte) *semanticBoolExpr {
-	expr, _, _ := lowerTypeScriptSemanticBoolExprDetailed(node, content)
-	return expr
-}
-
 func lowerTypeScriptSemanticBoolExprDetailed(node *sitter.Node, content []byte) (*semanticBoolExpr, []string, bool) {
 	node = tsUnwrapParens(node)
 	if node == nil {

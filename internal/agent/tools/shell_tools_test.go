@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -30,7 +31,7 @@ func TestShellTool_UnsupportedCommand(t *testing.T) {
 }
 
 func TestShellTool_CatGoMod(t *testing.T) {
-	repoRoot := findRepoRoot(t)
+	repoRoot := makeShellToolWorkspace(t)
 	cfg := Config{
 		WorkspaceRoot: repoRoot,
 	}
@@ -61,7 +62,7 @@ func TestShellTool_CatGoMod(t *testing.T) {
 }
 
 func TestShellTool_CatGoModWithMeasure(t *testing.T) {
-	repoRoot := findRepoRoot(t)
+	repoRoot := makeShellToolWorkspace(t)
 	cfg := Config{
 		WorkspaceRoot: repoRoot,
 	}
@@ -93,7 +94,7 @@ func TestShellTool_CatGoModWithMeasure(t *testing.T) {
 }
 
 func TestRegistryToolExecutor_Shell(t *testing.T) {
-	repoRoot := findRepoRoot(t)
+	repoRoot := makeShellToolWorkspace(t)
 	registry, err := NewRegistry(Config{WorkspaceRoot: repoRoot}, nil)
 	if err != nil {
 		t.Fatalf("NewRegistry: %v", err)
@@ -114,6 +115,33 @@ func TestRegistryToolExecutor_Shell(t *testing.T) {
 	if !strings.Contains(got, `module github.com/jkatigb/agentctl`) {
 		t.Fatalf("expected go.mod preview, got %s", got)
 	}
+}
+
+func makeShellToolWorkspace(t *testing.T) string {
+	t.Helper()
+
+	sourceRoot := findRepoRoot(t)
+	workspaceRoot := t.TempDir()
+	if err := os.WriteFile(filepath.Join(workspaceRoot, "go.mod"), []byte("module github.com/jkatigb/agentctl\n\ngo 1.25.0\n"), 0o644); err != nil {
+		t.Fatalf("write go.mod: %v", err)
+	}
+	skillDir := filepath.Join(workspaceRoot, "skills", "fs_read")
+	if err := os.MkdirAll(skillDir, 0o755); err != nil {
+		t.Fatalf("mkdir skill dir: %v", err)
+	}
+	manifest, err := os.ReadFile(filepath.Join(sourceRoot, "skills", "fs_read", "skill.yaml"))
+	if err != nil {
+		t.Fatalf("read skill manifest: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(skillDir, "skill.yaml"), manifest, 0o644); err != nil {
+		t.Fatalf("write skill manifest: %v", err)
+	}
+	build := exec.Command("go", "build", "-o", filepath.Join(skillDir, "fs_read"), "./skills/fs_read")
+	build.Dir = sourceRoot
+	if out, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("build fs_read artifact: %v\n%s", err, out)
+	}
+	return workspaceRoot
 }
 
 func findRepoRoot(t *testing.T) string {

@@ -644,7 +644,7 @@ func runRoomTaskAssign(cmd *cobra.Command, workspace, roomID, sender, taskID, re
 		ReplyExpected: true,
 		Interrupt:     true,
 		Subject:       subject,
-		Body:          strings.Join(bodyLines, "\n"),
+		Body:          appendRoomTaskOperatorTip(strings.Join(bodyLines, "\n"), strings.TrimSpace(roomID), task.ID, identity.Sender),
 	}
 	if err := boardStore.SendMessage(cmd.Context(), direct); err != nil {
 		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.task.assign", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
@@ -1318,33 +1318,24 @@ func syncRoomLoopState(ctx context.Context, store *coordination.Store, workspace
 		}
 		return roomPulseConfigFromStore(persisted), nil
 	}
-	changed := false
 	if strings.TrimSpace(loop.ManagedBy) != roomLoopManagedBy {
 		loop.ManagedBy = roomLoopManagedBy
-		changed = true
 	}
 	if loop.MinPulseFloor <= 0 {
 		loop.MinPulseFloor = roomLoopMinimumPulseFloor
-		changed = true
 	}
 	if loop.InterruptAttemptLimit <= 0 {
 		loop.InterruptAttemptLimit = roomPulseInterruptLimit
-		changed = true
 	}
 	if loop.ReminderBackoffCap <= 0 {
 		loop.ReminderBackoffCap = roomPulseBackoffCap
-		changed = true
 	}
 	loop.LastTickAt = &tickAt
-	changed = true
-	if changed {
-		persisted, err := store.UpsertRoomLoop(ctx, *loop)
-		if err != nil {
-			return roomPulseConfig{}, err
-		}
-		return roomPulseConfigFromStore(persisted), nil
+	persisted, err := store.UpsertRoomLoop(ctx, *loop)
+	if err != nil {
+		return roomPulseConfig{}, err
 	}
-	return roomPulseConfigFromStore(*loop), nil
+	return roomPulseConfigFromStore(persisted), nil
 }
 
 func refreshRoomLoopPolicy(ctx context.Context, store *coordination.Store, workspaceID, roomID string, current roomPulseConfig, tickAt time.Time) (roomPulseConfig, bool, error) {
@@ -2034,7 +2025,7 @@ func sendRoomTaskCoordinatorMessages(ctx context.Context, workspace, roomID stri
 		ReplyExpected: true,
 		Interrupt:     true,
 		Subject:       subject,
-		Body:          body,
+		Body:          appendRoomTaskOperatorTip(body, roomID, task.ID, sender),
 	}
 	return boardStore.SendMessage(ctx, direct)
 }
@@ -2088,6 +2079,20 @@ func formatRoomTaskTransitionMessage(action string, task taskstore.Task) (string
 		lines = append(lines, "Notes: "+task.Notes)
 	}
 	return subject, strings.Join(lines, "\n")
+}
+
+func appendRoomTaskOperatorTip(body, roomID, taskID, sender string) string {
+	lines := []string{strings.TrimSpace(body)}
+	tip := []string{
+		"Quick tip:",
+		"- Read the `agentctl-room-operator` skill if you need the room protocol.",
+		fmt.Sprintf("- Claim with: agentctl room task claim %s --id %s", roomID, taskID),
+		fmt.Sprintf("- Reply durably to the coordinator with: agentctl room send %s --to %s \"status update\"", roomID, sender),
+		fmt.Sprintf("- Send room-wide updates with: agentctl room send %s \"team update\"", roomID),
+		fmt.Sprintf("- Complete with: agentctl room task complete %s --id %s --notes \"what changed\"", roomID, taskID),
+	}
+	lines = append(lines, "", strings.Join(tip, "\n"))
+	return strings.Join(lines, "\n")
 }
 
 func roomTaskStatusSubject(task taskstore.Task, previousStatus string) string {

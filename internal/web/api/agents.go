@@ -751,10 +751,6 @@ func handleAgentDaemonSessionsWithRoute(w http.ResponseWriter, r *http.Request, 
 	})
 }
 
-func handleAgentDaemonKill(w http.ResponseWriter, r *http.Request, cfg config.Config, log zerolog.Logger, agentID string) {
-	handleAgentDaemonKillWithRuntime(w, r, cfg, log, agentID, nil)
-}
-
 func handleAgentDaemonKillWithRuntime(w http.ResponseWriter, r *http.Request, cfg config.Config, log zerolog.Logger, agentID string, runtimeHost OrchestrationRuntimeHost) {
 	handleAgentDaemonKillWithRoute(w, r, cfg, log, agentID, runtimeHost)
 }
