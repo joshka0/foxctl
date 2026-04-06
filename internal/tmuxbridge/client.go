@@ -16,12 +16,13 @@ import (
 )
 
 const (
-	defaultSocketSentinel = "__default__"
-	defaultSessionName    = "agentctl-collab"
-	defaultLabelPrefix    = "agent"
-	fieldSep              = "\x1f"
-	listFormat            = "#{pane_id}" + fieldSep + "#{session_name}" + fieldSep + "#{window_index}" + fieldSep + "#{pane_index}" + fieldSep + "#{window_name}" + fieldSep + "#{pane_pid}" + fieldSep + "#{pane_width}" + fieldSep + "#{pane_height}" + fieldSep + "#{@name}" + fieldSep + "#{pane_current_path}" + fieldSep + "#{pane_current_command}" + fieldSep + "#{pane_active}"
-	labelFormat           = "#{pane_id}" + fieldSep + "#{@name}"
+	defaultSocketSentinel         = "__default__"
+	defaultSessionName            = "agentctl-collab"
+	defaultLabelPrefix            = "agent"
+	muxCreateRoomOnboardingHeader = "Started via agentctl mux create."
+	fieldSep                      = "\x1f"
+	listFormat                    = "#{pane_id}" + fieldSep + "#{session_name}" + fieldSep + "#{window_index}" + fieldSep + "#{pane_index}" + fieldSep + "#{window_name}" + fieldSep + "#{pane_pid}" + fieldSep + "#{pane_width}" + fieldSep + "#{pane_height}" + fieldSep + "#{@name}" + fieldSep + "#{pane_current_path}" + fieldSep + "#{pane_current_command}" + fieldSep + "#{pane_active}"
+	labelFormat                   = "#{pane_id}" + fieldSep + "#{@name}"
 )
 
 var (
@@ -612,6 +613,9 @@ func (c *Client) PrepareSession(ctx context.Context, opts PrepareOptions) (Prepa
 			return PrepareResult{}, err
 		}
 	}
+	if err := c.injectRoomAgentOnboarding(ctx, socket, panes, plan); err != nil {
+		return PrepareResult{}, err
+	}
 
 	return PrepareResult{
 		Session:           plan.session,
@@ -833,6 +837,10 @@ func (c *Client) deliverPayload(ctx context.Context, resolvedTarget string, pane
 		}
 	}
 	payload, mode := relayPayloadForPane(pane, content)
+	return c.deliverPreparedPayload(ctx, resolvedTarget, pane, payload, mode, interrupt)
+}
+
+func (c *Client) deliverPreparedPayload(ctx context.Context, resolvedTarget string, pane Pane, payload, mode string, interrupt bool) (string, string, error) {
 	if interrupt {
 		if _, err := c.runTmux(ctx, "send-keys", "-t", resolvedTarget, "Escape"); err != nil {
 			return "", "", err
@@ -850,6 +858,67 @@ func (c *Client) deliverPayload(ctx context.Context, resolvedTarget string, pane
 		return "", "", err
 	}
 	return payload, mode, nil
+}
+
+func (c *Client) deliverPreparedPayloadWithSocket(ctx context.Context, socket, resolvedTarget string, pane Pane, payload, mode string, interrupt bool) (string, string, error) {
+	if interrupt {
+		if _, err := c.runTmuxWithSocket(ctx, socket, "send-keys", "-t", resolvedTarget, "Escape"); err != nil {
+			return "", "", err
+		}
+	}
+	if _, err := c.runTmuxWithSocket(ctx, socket, "send-keys", "-t", resolvedTarget, "-l", "--", payload); err != nil {
+		return "", "", err
+	}
+	if relayNeedsEscape(pane) {
+		if _, err := c.runTmuxWithSocket(ctx, socket, "send-keys", "-t", resolvedTarget, "Escape"); err != nil {
+			return "", "", err
+		}
+	}
+	if _, err := c.runTmuxWithSocket(ctx, socket, "send-keys", "-t", resolvedTarget, "Enter"); err != nil {
+		return "", "", err
+	}
+	return payload, mode, nil
+}
+
+func (c *Client) injectRoomAgentOnboarding(ctx context.Context, socket string, panes []Pane, plan preparePlan) error {
+	if strings.TrimSpace(plan.agent) == "" || strings.TrimSpace(plan.roomID) == "" || strings.TrimSpace(plan.roomAccess) != "direct" {
+		return nil
+	}
+	for _, pane := range panes {
+		participantID := strings.TrimSpace(pane.Label)
+		if participantID == "" {
+			participantID = formatTmuxParticipantID(plan.session, pane.ID)
+		}
+		payload := buildMuxCreateRoomOnboarding(plan.roomID, participantID)
+		if strings.TrimSpace(payload) == "" {
+			continue
+		}
+		if _, _, err := c.deliverPreparedPayloadWithSocket(ctx, socket, pane.ID, pane, payload, "raw", false); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func buildMuxCreateRoomOnboarding(roomID, participantID string) string {
+	roomID = strings.TrimSpace(roomID)
+	participantID = strings.TrimSpace(participantID)
+	if roomID == "" {
+		return ""
+	}
+	if participantID == "" {
+		participantID = "<you>"
+	}
+	return fmt.Sprintf(
+		"%s Read skills agentctl-tmux and agentctl-room. Room %s. Participant %s. Start with: agentctl room status %s ; agentctl room inbox %s --actor %s ; agentctl room task list %s. Use agentctl mux submit if text is left drafted.",
+		muxCreateRoomOnboardingHeader,
+		roomID,
+		participantID,
+		roomID,
+		roomID,
+		participantID,
+		roomID,
+	)
 }
 
 func relayPayloadForPane(pane Pane, content string) (string, string) {

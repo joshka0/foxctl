@@ -91,6 +91,11 @@ MCP exposure:
 - actions: `start`, `ask`, `answer`, `verify`, `next`, `show`
 - prefer `room_interview.next` or `room status --only interview` when you need the next actionable clarification item rather than raw transcript history
 
+Startup injection:
+
+- when a tmux pane is created with `agentctl mux create --agent ... --room-id <room-id>` and direct room access, agentctl injects a lightweight startup prompt into that pane
+- the prompt tells the agent to read `agentctl-tmux` and `agentctl-room`, then start with `room status`, `room inbox`, and `room task list` for the attached room
+
 ## Default room workflow
 
 Use this sequence unless the room already has a more specific protocol:

@@ -148,6 +148,8 @@ Use `agentctl mux submit` when the text is already sitting in an agent composer 
 - tmux: targeted `Escape` then `Enter`
 - zellij: `Escape` then `Enter` on the focused pane in the named session
 
+When `agentctl mux create` launches a tmux agent pane with direct room access, agentctl also injects a lightweight startup note into that pane telling the agent to read `agentctl-tmux` and `agentctl-room`, along with the initial `room status` / `room inbox` / `room task list` commands for the attached room.
+
 Common agent launches include `--agent codex`, `--agent claude`, `--agent gemini`, `--agent agent` for Cursor CLI, and `--agent droid` for Factory Droid.
 
 Useful hierarchy flags on `mux create`:

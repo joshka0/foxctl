@@ -314,6 +314,7 @@ func TestPrepareSessionInjectsDirectRoomEnvForTopLevelPanes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("buildAgentPaneCommand() error = %v", err)
 	}
+	onboarding := buildMuxCreateRoomOnboarding("room-alpha", "codex-a")
 	runner := &sequenceRunner{
 		steps: []sequenceStep{
 			{key: "tmux new-session -d -s room-smoke " + cmd, stderr: "duplicate session", err: fmt.Errorf("exit status 1")},
@@ -323,6 +324,8 @@ func TestPrepareSessionInjectsDirectRoomEnvForTopLevelPanes(t *testing.T) {
 			{key: "tmux set-option -p -t %41 @name codex-a"},
 			{key: "tmux respawn-pane -k -t %41 env AGENTCTL_PARTICIPANT_ID=codex-a AGENTCTL_MUX_BACKEND=tmux AGENTCTL_MUX_SESSION=room-smoke AGENTCTL_MUX_PANE_ID=%41 AGENTCTL_ROOM_ID=room-alpha " + cmd},
 			{key: "tmux list-panes -t room-smoke -F " + listFormat, stdout: "%41" + fieldSep + "room-smoke" + fieldSep + "0" + fieldSep + "0" + fieldSep + "main" + fieldSep + "111" + fieldSep + "80" + fieldSep + "24" + fieldSep + "codex-a" + fieldSep + "/repo" + fieldSep + "node" + fieldSep + "1\n"},
+			{key: "tmux send-keys -t %41 -l -- " + onboarding},
+			{key: "tmux send-keys -t %41 Enter"},
 		},
 	}
 	client := NewWithRunner(runner, map[string]string{})
