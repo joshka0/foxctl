@@ -1641,6 +1641,112 @@ func TestRunRoomInterviewVerifyRequiresVerifier(t *testing.T) {
 	}
 }
 
+func TestRunRoomInterviewNext(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	ctx := context.Background()
+	workspace := t.TempDir()
+
+	cmd, _ := newRoomTestCommand(ctx)
+	if err := runRoomCreate(cmd, workspace, "alpha", "Alpha", "", []string{"human-a=coordinator", "gemini-a=reviewer", "cursor-a=reviewer"}); err != nil {
+		t.Fatalf("runRoomCreate: %v", err)
+	}
+
+	cmd, out := newRoomTestCommand(ctx)
+	if err := runRoomInterviewStart(cmd, workspace, "human-a", "alpha", "spec-meaning", "", "", "human-a", "gemini-a", "cursor-a", "human-a", nil); err != nil {
+		t.Fatalf("runRoomInterviewStart: %v", err)
+	}
+	data := decodeRoomEnvelope(t, out)
+	sessionID := data["session_id"].(string)
+
+	cmd, _ = newRoomTestCommand(ctx)
+	if err := runRoomInterviewAsk(cmd, workspace, "gemini-a", "alpha", sessionID, "", "What should we do?"); err != nil {
+		t.Fatalf("runRoomInterviewAsk: %v", err)
+	}
+
+	cmd, out = newRoomTestCommand(ctx)
+	if err := runRoomInterviewNext(cmd, workspace, "alpha", "cursor-a", 50); err != nil {
+		t.Fatalf("runRoomInterviewNext cursor-a: %v", err)
+	}
+	data = decodeRoomEnvelope(t, out)
+	if pending, ok := data["pending"].(bool); !ok || !pending {
+		t.Fatalf("pending=%v want true", data["pending"])
+	}
+	item := data["item"].(map[string]any)
+	if item["type"] != "answer_question" {
+		t.Fatalf("type=%v want answer_question", item["type"])
+	}
+
+	questionID := item["message"].(map[string]any)["id"].(string)
+	cmd, _ = newRoomTestCommand(ctx)
+	if err := runRoomInterviewAnswer(cmd, workspace, "cursor-a", "alpha", questionID, "Here is the answer."); err != nil {
+		t.Fatalf("runRoomInterviewAnswer: %v", err)
+	}
+
+	cmd, out = newRoomTestCommand(ctx)
+	if err := runRoomInterviewNext(cmd, workspace, "alpha", "human-a", 50); err != nil {
+		t.Fatalf("runRoomInterviewNext human-a: %v", err)
+	}
+	data = decodeRoomEnvelope(t, out)
+	item = data["item"].(map[string]any)
+	if item["type"] != "verify_answer" {
+		t.Fatalf("type=%v want verify_answer", item["type"])
+	}
+}
+
+func TestRunRoomStatusIncludesInterviewLane(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	ctx := context.Background()
+	workspace := t.TempDir()
+
+	cmd, _ := newRoomTestCommand(ctx)
+	if err := runRoomCreate(cmd, workspace, "alpha", "Alpha", "", []string{"human-a=coordinator", "gemini-a=reviewer", "cursor-a=reviewer"}); err != nil {
+		t.Fatalf("runRoomCreate: %v", err)
+	}
+
+	cmd, out := newRoomTestCommand(ctx)
+	if err := runRoomInterviewStart(cmd, workspace, "human-a", "alpha", "spec-meaning", "", "", "human-a", "gemini-a", "cursor-a", "human-a", nil); err != nil {
+		t.Fatalf("runRoomInterviewStart: %v", err)
+	}
+	data := decodeRoomEnvelope(t, out)
+	sessionID := data["session_id"].(string)
+
+	cmd, _ = newRoomTestCommand(ctx)
+	if err := runRoomInterviewAsk(cmd, workspace, "gemini-a", "alpha", sessionID, "", "What should we do?"); err != nil {
+		t.Fatalf("runRoomInterviewAsk: %v", err)
+	}
+
+	cmd, out = newRoomTestCommand(ctx)
+	if err := runRoomStatus(cmd, workspace, "alpha", 50, 5*time.Minute, []string{"interview"}, false); err != nil {
+		t.Fatalf("runRoomStatus interview: %v", err)
+	}
+	data = decodeRoomEnvelope(t, out)
+	action := data["action_required"].(map[string]any)
+	if got := action["participants_with_pending"]; got != float64(1) {
+		t.Fatalf("participants_with_pending=%v want 1", got)
+	}
+	if got := action["pending_replies"]; got != float64(1) {
+		t.Fatalf("pending_replies=%v want 1", got)
+	}
+	top := action["top_entries"].([]any)
+	if len(top) == 0 {
+		t.Fatalf("top_entries empty")
+	}
+	if got := top[0].(map[string]any)["subject"]; got != "Interview Question: What should we do?" {
+		t.Fatalf("subject=%v want interview question", got)
+	}
+	flags := top[0].(map[string]any)["flags"].([]any)
+	foundInterview := false
+	for _, raw := range flags {
+		if raw == "INTERVIEW" {
+			foundInterview = true
+			break
+		}
+	}
+	if !foundInterview {
+		t.Fatalf("flags=%v want INTERVIEW", flags)
+	}
+}
+
 func TestRunRoomSendResolvesCoordinatorAlias(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	ctx := context.Background()

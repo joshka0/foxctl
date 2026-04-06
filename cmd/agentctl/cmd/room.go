@@ -633,6 +633,7 @@ func newRoomInterviewCommand() *cobra.Command {
 		newRoomInterviewAskCommand(),
 		newRoomInterviewAnswerCommand(),
 		newRoomInterviewVerifyCommand(),
+		newRoomInterviewNextCommand(),
 		newRoomInterviewShowCommand(),
 	)
 	return cmd
@@ -723,6 +724,26 @@ func newRoomInterviewVerifyCommand() *cobra.Command {
 	}
 	cmd.Flags().StringVar(&workspace, "workspace", ".", "Workspace root override")
 	cmd.Flags().StringVar(&sender, "sender", "", "Verifier actor or participant id (defaults to current tmux/zellij pane)")
+	return cmd
+}
+
+func newRoomInterviewNextCommand() *cobra.Command {
+	var (
+		workspace string
+		actorID   string
+		limit     int
+	)
+	cmd := &cobra.Command{
+		Use:   "next <room-id>",
+		Short: "Show the next pending interview item for one participant",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runRoomInterviewNext(cmd, workspace, args[0], actorID, limit)
+		},
+	}
+	cmd.Flags().StringVar(&workspace, "workspace", ".", "Workspace root override")
+	cmd.Flags().StringVar(&actorID, "actor", "", "Actor or participant id (defaults to current tmux/zellij pane)")
+	cmd.Flags().IntVar(&limit, "limit", 200, "Maximum room messages to inspect")
 	return cmd
 }
 
@@ -2036,6 +2057,38 @@ func runRoomInterviewShow(cmd *cobra.Command, workspace, roomID, sessionID strin
 	}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
 }
 
+func runRoomInterviewNext(cmd *cobra.Command, workspace, roomID, actorID string, limit int) error {
+	absWorkspace, identity, store, roomID, summary, err := prepareRoomInterviewCommand(cmd, workspace, actorID, roomID)
+	if err != nil {
+		return err
+	}
+	defer store.Close()
+	_, messages, err := loadRoomState(cmd.Context(), store, absWorkspace, roomID, identity.Sender, limit)
+	if err != nil {
+		code := protocol.ErrorCodeERuntime
+		if errors.Is(err, blackboard.ErrRoomNotFound) {
+			code = protocol.ErrorCodeENotFound
+		}
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.interview.next", code, err.Error(), map[string]any{
+			"hint": "Create the room first or check the room id.",
+		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	next, ok := findNextRoomInterviewItem(identity.Sender, summary, messages)
+	if !ok {
+		return protocol.WriteOK(cmd.OutOrStdout(), "agentctl.room.interview.next", map[string]any{
+			"room":     summary,
+			"actor_id": identity.Sender,
+			"pending":  false,
+		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	return protocol.WriteOK(cmd.OutOrStdout(), "agentctl.room.interview.next", map[string]any{
+		"room":     summary,
+		"actor_id": identity.Sender,
+		"pending":  true,
+		"item":     next,
+	}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+}
+
 func prepareRoomInterviewCommand(cmd *cobra.Command, workspace, sender, roomID string) (string, roomIdentity, blackboard.BoardStore, string, agent.RoomSummary, error) {
 	absWorkspace, err := resolveRoomWorkspace(workspace)
 	if err != nil {
@@ -2314,6 +2367,67 @@ func buildRoomInterviewSessions(messages []agent.BoardMessage) []map[string]any 
 		})
 	}
 	return out
+}
+
+func findNextRoomInterviewItem(actorID string, room agent.RoomSummary, messages []agent.BoardMessage) (map[string]any, bool) {
+	sessions := buildRoomInterviewSessions(messages)
+	for _, session := range sessions {
+		meta, _ := session["meta"].(roomInterviewSessionMeta)
+		entries, _ := session["entries"].([]agent.BoardMessage)
+		questionIndex := make(map[string]agent.BoardMessage)
+		answerIndex := make(map[string]agent.BoardMessage)
+		verifyIndex := make(map[string]agent.BoardMessage)
+		for _, entry := range entries {
+			switch entry.Kind {
+			case agent.BoardMessageKindInterviewQuestion:
+				questionIndex[entry.ID] = entry
+			case agent.BoardMessageKindInterviewAnswer:
+				answerIndex[entry.ID] = entry
+			case agent.BoardMessageKindInterviewVerify:
+				verifyIndex[entry.RelatedMessageID] = entry
+			}
+		}
+		for _, entry := range entries {
+			switch entry.Kind {
+			case agent.BoardMessageKindInterviewQuestion:
+				if sameRoomParticipant(entry.Recipient, actorID) {
+					if answer := findRoomInterviewAnswerForQuestion(entry.ID, answerIndex); answer.ID == "" {
+						return map[string]any{
+							"type":       "answer_question",
+							"session_id": session["id"],
+							"topic":      session["topic"],
+							"message":    entry,
+							"session":    meta,
+						}, true
+					}
+				}
+			case agent.BoardMessageKindInterviewAnswer:
+				if sameRoomParticipant(meta.Verifier, actorID) || (meta.Verifier == "" && roomMemberHasRole(room.Members, actorID, "coordinator")) {
+					if verifyIndex[entry.ID].ID == "" {
+						question := questionIndex[strings.TrimSpace(entry.RelatedMessageID)]
+						return map[string]any{
+							"type":       "verify_answer",
+							"session_id": session["id"],
+							"topic":      session["topic"],
+							"message":    entry,
+							"question":   question,
+							"session":    meta,
+						}, true
+					}
+				}
+			}
+		}
+	}
+	return nil, false
+}
+
+func findRoomInterviewAnswerForQuestion(questionID string, answers map[string]agent.BoardMessage) agent.BoardMessage {
+	for _, answer := range answers {
+		if strings.TrimSpace(answer.RelatedMessageID) == strings.TrimSpace(questionID) {
+			return answer
+		}
+	}
+	return agent.BoardMessage{}
 }
 
 func runRoomCoordinatorSet(cmd *cobra.Command, workspace, roomID, actorID, targetID string) error {
@@ -4006,19 +4120,26 @@ func roomInboxEntryForActor(actorID string, msg agent.BoardMessage, includeBroad
 		return roomInboxEntry{}, false
 	}
 
-	flags := make([]string, 0, 2)
+	interviewPending := roomMessageHasInterviewPendingWork(msg)
+	flags := make([]string, 0, 3)
 	if msg.AckRequired && msg.Status != agent.BoardMessageStatusAcked {
 		flags = append(flags, "ACK-REQUIRED")
 	}
 	if msg.ReplyExpected && msg.Status != agent.BoardMessageStatusAcked {
 		flags = append(flags, "REPLY-EXPECTED")
 	}
+	if interviewPending {
+		flags = append(flags, "INTERVIEW")
+	}
 	category := "direct"
-	if msg.AckRequired && msg.Status != agent.BoardMessageStatusAcked {
+	switch {
+	case interviewPending:
+		category = "interview"
+	case msg.AckRequired && msg.Status != agent.BoardMessageStatusAcked:
 		category = "ack-required"
-	} else if msg.ReplyExpected && msg.Status != agent.BoardMessageStatusAcked {
+	case msg.ReplyExpected && msg.Status != agent.BoardMessageStatusAcked:
 		category = "reply-expected"
-	} else if isBroadcast {
+	case isBroadcast:
 		category = "broadcast"
 	}
 	if isBroadcast && !includeBroadcasts && category == "broadcast" {
@@ -4070,7 +4191,7 @@ func messageStillAwaitsReply(msg agent.BoardMessage, latestBySender map[string]t
 
 func normalizeRoomInboxFilter(filter string) string {
 	switch strings.TrimSpace(strings.ToLower(filter)) {
-	case "ack-required", "reply-expected", "direct", "broadcast":
+	case "ack-required", "reply-expected", "direct", "broadcast", "interview":
 		return strings.TrimSpace(strings.ToLower(filter))
 	default:
 		return "all"
@@ -4204,12 +4325,12 @@ func buildRoomStatusBacklog(room agent.RoomSummary, messages []agent.BoardMessag
 func buildRoomStatusActionRequired(room agent.RoomSummary, messages []agent.BoardMessage, tasks []taskstore.Task, backlog roomStatusBacklog, taskPulse roomTaskPulseSummary, filters map[string]struct{}, staleAfter time.Duration, now time.Time, verbose bool) roomStatusActionRequired {
 	summary := roomStatusActionRequired{
 		Filter:                  sortedRoomStatusFilters(filters),
-		ParticipantsWithPending: roomStatusFilteredCount(filters, "ack", "reply", backlog.ParticipantsWithPending),
-		PendingAcks:             roomStatusFilteredCount(filters, "ack", "", backlog.PendingAcks),
-		PendingReplies:          roomStatusFilteredCount(filters, "reply", "", backlog.PendingReplies),
-		AssignedUnclaimed:       roomStatusFilteredCount(filters, "assigned", "", taskPulse.AssignedUnclaimed),
-		BlockedTasks:            roomStatusFilteredCount(filters, "blocked", "", taskPulse.Blocked),
-		StaleTasks:              roomStatusFilteredCount(filters, "stale", "", taskPulse.Stale),
+		ParticipantsWithPending: roomStatusFilteredCount(filters, "ack", "reply", "interview", backlog.ParticipantsWithPending),
+		PendingAcks:             roomStatusFilteredCount(filters, "ack", "", "", backlog.PendingAcks),
+		PendingReplies:          roomStatusFilteredCount(filters, "reply", "interview", "", backlog.PendingReplies),
+		AssignedUnclaimed:       roomStatusFilteredCount(filters, "assigned", "", "", taskPulse.AssignedUnclaimed),
+		BlockedTasks:            roomStatusFilteredCount(filters, "blocked", "", "", taskPulse.Blocked),
+		StaleTasks:              roomStatusFilteredCount(filters, "stale", "", "", taskPulse.Stale),
 		TopEntries:              filterRoomStatusEntries(backlog.LatestByParticipant, filters),
 		TopTasks:                buildRoomStatusTaskEntries(tasks, filters, now, staleAfter),
 	}
@@ -4355,6 +4476,10 @@ func roomStatusEntryMatchesFilters(entry roomStatusEntry, filters map[string]str
 			if _, ok := filters["reply"]; ok {
 				return true
 			}
+		case "INTERVIEW":
+			if _, ok := filters["interview"]; ok {
+				return true
+			}
 		}
 	}
 	return false
@@ -4362,12 +4487,13 @@ func roomStatusEntryMatchesFilters(entry roomStatusEntry, filters map[string]str
 
 func normalizeRoomStatusFilters(values []string) (map[string]struct{}, error) {
 	allowed := map[string]struct{}{
-		"all":      {},
-		"ack":      {},
-		"reply":    {},
-		"assigned": {},
-		"blocked":  {},
-		"stale":    {},
+		"all":       {},
+		"ack":       {},
+		"reply":     {},
+		"interview": {},
+		"assigned":  {},
+		"blocked":   {},
+		"stale":     {},
 	}
 	filters := make(map[string]struct{})
 	for _, raw := range values {
@@ -4391,6 +4517,30 @@ func normalizeRoomStatusFilters(values []string) (map[string]struct{}, error) {
 	return filters, nil
 }
 
+func roomMessageHasInterviewPendingWork(msg agent.BoardMessage) bool {
+	switch msg.Kind {
+	case agent.BoardMessageKindInterviewQuestion,
+		agent.BoardMessageKindInterviewAnswer:
+		return true
+	case agent.BoardMessageKindInterviewVerify:
+		return msg.ReplyExpected && msg.Status != agent.BoardMessageStatusAcked
+	default:
+		return false
+	}
+}
+
+func roomMessageIsInterviewKind(kind agent.BoardMessageKind) bool {
+	switch kind {
+	case agent.BoardMessageKindInterviewSession,
+		agent.BoardMessageKindInterviewQuestion,
+		agent.BoardMessageKindInterviewAnswer,
+		agent.BoardMessageKindInterviewVerify:
+		return true
+	default:
+		return false
+	}
+}
+
 func sortedRoomStatusFilters(filters map[string]struct{}) []string {
 	out := make([]string, 0, len(filters))
 	for key := range filters {
@@ -4405,7 +4555,7 @@ func roomStatusIncludesAll(filters map[string]struct{}) bool {
 	return ok
 }
 
-func roomStatusFilteredCount(filters map[string]struct{}, primary string, secondary string, value int) int {
+func roomStatusFilteredCount(filters map[string]struct{}, primary string, secondary string, tertiary string, value int) int {
 	if roomStatusIncludesAll(filters) {
 		return value
 	}
@@ -4416,6 +4566,11 @@ func roomStatusFilteredCount(filters map[string]struct{}, primary string, second
 	}
 	if secondary != "" {
 		if _, ok := filters[secondary]; ok {
+			return value
+		}
+	}
+	if tertiary != "" {
+		if _, ok := filters[tertiary]; ok {
 			return value
 		}
 	}
@@ -4524,6 +4679,18 @@ func expandRoomResolveMessageIDs(ctx context.Context, store blackboard.BoardStor
 }
 
 func roomMessageChainKey(msg agent.BoardMessage) string {
+	switch msg.Kind {
+	case agent.BoardMessageKindInterviewQuestion:
+		return strings.TrimSpace(msg.ID)
+	case agent.BoardMessageKindInterviewAnswer:
+		if strings.TrimSpace(msg.RelatedMessageID) != "" {
+			return strings.TrimSpace(msg.RelatedMessageID)
+		}
+	case agent.BoardMessageKindInterviewVerify:
+		if strings.TrimSpace(msg.RelatedMessageID) != "" {
+			return strings.TrimSpace(msg.RelatedMessageID)
+		}
+	}
 	if strings.TrimSpace(msg.RelatedMessageID) != "" {
 		return strings.TrimSpace(msg.RelatedMessageID)
 	}
