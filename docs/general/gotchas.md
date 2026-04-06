@@ -232,6 +232,41 @@ agentctl run session/summarize --input '{"session_id": "..."}'
 
 ---
 
+## Rooms & Relay
+
+### Room Messages Stored but Not Visible in a tmux Pane
+
+**Problem:** A room message is durably written, but one participant pane does not
+show it even though other panes in the same room do.
+
+**Cause:** There are two common failure modes:
+
+1. The live `room loop` is running in the wrong workspace, so it is polling a
+   different `board.db` than the room you are inspecting.
+2. The room member's `actor_id` does not match the actual tmux pane label, so
+   relay matching succeeds logically but delivery targets the wrong tmux pane
+   unless `pane_id` is used authoritatively.
+
+**Solution:** Check all three layers before assuming fanout is broken:
+
+```bash
+# 1. Verify the live loop points at the intended workspace + room
+ps -Ao pid=,command= | rg 'agentctl room loop'
+lsof -a -p <loop-pid> -d cwd
+
+# 2. Verify the room membership records include pane_id for tmux members
+agentctl room show <room-id> --workspace /path/to/workspace
+
+# 3. Read the pane directly to distinguish relay failure from display/composer state
+agentctl mux read <pane-id> --lines 120
+```
+
+For tmux-backed room relay, treat `pane_id` as the delivery target when it is
+present. `actor_id` is for room semantics and matching; `pane_id` is for the
+actual write target.
+
+---
+
 ## Security
 
 ### TOCTOU File Reading
