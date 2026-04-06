@@ -762,8 +762,8 @@ func TestDeliverTextUsesRawAndEnterForNodeAgentPane(t *testing.T) {
 			"tmux display-message -t %31 -p " + listFormat: {
 				stdout: "%31" + fieldSep + "collab" + fieldSep + "0" + fieldSep + "2" + fieldSep + "main" + fieldSep + "333" + fieldSep + "80" + fieldSep + "24" + fieldSep + "gemini-a" + fieldSep + "/repo" + fieldSep + "node" + fieldSep + "0\n",
 			},
-			"tmux send-keys -t %31 Escape":                          {},
 			"tmux send-keys -t %31 -l -- [room alpha] hello gemini": {},
+			"tmux send-keys -t %31 Escape":                          {},
 			"tmux send-keys -t %31 Enter":                           {},
 		},
 	}, map[string]string{})
@@ -774,6 +774,29 @@ func TestDeliverTextUsesRawAndEnterForNodeAgentPane(t *testing.T) {
 	}
 	if got.Mode != "raw" {
 		t.Fatalf("DeliverText() mode = %q, want raw", got.Mode)
+	}
+}
+
+func TestDeliverTextInterruptingGeminiPaneUsesEscapeBeforeAndAfterPayload(t *testing.T) {
+	client := NewWithRunner(fakeRunner{
+		responses: map[string]fakeResponse{
+			"tmux list-sessions":                        {stdout: "ok\n"},
+			"tmux display-message -t %31 -p #{pane_id}": {stdout: "%31\n"},
+			"tmux display-message -t %31 -p " + listFormat: {
+				stdout: "%31" + fieldSep + "collab" + fieldSep + "0" + fieldSep + "2" + fieldSep + "main" + fieldSep + "333" + fieldSep + "80" + fieldSep + "24" + fieldSep + "gemini-a" + fieldSep + "/repo" + fieldSep + "node" + fieldSep + "0\n",
+			},
+			"tmux send-keys -t %31 Escape":                              {},
+			"tmux send-keys -t %31 -l -- [room alpha] interrupt smoke": {},
+			"tmux send-keys -t %31 Enter":                               {},
+		},
+	}, map[string]string{})
+
+	got, err := client.DeliverTextWithOptions(context.Background(), "%31", "[room alpha] interrupt smoke", DeliverOptions{Interrupt: true})
+	if err != nil {
+		t.Fatalf("DeliverTextWithOptions() error = %v", err)
+	}
+	if got.Mode != "raw" {
+		t.Fatalf("DeliverTextWithOptions() mode = %q, want raw", got.Mode)
 	}
 }
 

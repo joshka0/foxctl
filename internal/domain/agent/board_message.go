@@ -27,6 +27,18 @@ const (
 	BoardMessageKindLeadChange BoardMessageKind = "lead_change"
 	// BoardMessageKindCoordinatorPulse represents a coordinator-facing system pulse.
 	BoardMessageKindCoordinatorPulse BoardMessageKind = "coordinator_pulse"
+	// BoardMessageKindPlanSession represents the root of a room planning session.
+	BoardMessageKindPlanSession BoardMessageKind = "plan_session"
+	// BoardMessageKindPlanProposal represents a proposed plan slice within a planning session.
+	BoardMessageKindPlanProposal BoardMessageKind = "plan_proposal"
+	// BoardMessageKindPlanQuestion represents an explicit open question in a planning session.
+	BoardMessageKindPlanQuestion BoardMessageKind = "plan_question"
+	// BoardMessageKindPlanDecision represents an accepted/superseded planning decision.
+	BoardMessageKindPlanDecision BoardMessageKind = "plan_decision"
+	// BoardMessageKindPlanReview represents a review/approval/block note for a planning session.
+	BoardMessageKindPlanReview BoardMessageKind = "plan_review"
+	// BoardMessageKindPlanClose represents the durable closure of a planning session.
+	BoardMessageKindPlanClose BoardMessageKind = "plan_close"
 )
 
 // BoardMessageStatus defines the read/ack status of a message.

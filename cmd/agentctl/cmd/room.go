@@ -42,6 +42,7 @@ func newRoomCommand() *cobra.Command {
 		newRoomAckCommand(),
 		newRoomResolveCommand(),
 		newRoomClearCommand(),
+		newRoomPlanCommand(),
 		newRoomJoinCommand(),
 		newRoomLeaveCommand(),
 		newRoomTaskCommand(),
@@ -319,6 +320,171 @@ func newRoomClearCommand() *cobra.Command {
 	cmd.Flags().StringVar(&actorID, "actor", "", "Coordinator actor or participant id (defaults to current tmux/zellij pane)")
 	cmd.Flags().StringVar(&mode, "mode", "read", "Clear mode (acked|read)")
 	cmd.Flags().StringVar(&preset, "preset", "coordinator-pulses", "Cleanup preset (coordinator-pulses|system-reminders)")
+	return cmd
+}
+
+func newRoomPlanCommand() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "plan",
+		Short: "Run a durable planning protocol inside a room",
+	}
+	cmd.AddCommand(
+		newRoomPlanStartCommand(),
+		newRoomPlanProposeCommand(),
+		newRoomPlanAskCommand(),
+		newRoomPlanDecideCommand(),
+		newRoomPlanReviewCommand(),
+		newRoomPlanCloseCommand(),
+		newRoomPlanShowCommand(),
+	)
+	return cmd
+}
+
+func newRoomPlanStartCommand() *cobra.Command {
+	var (
+		workspace   string
+		sender      string
+		goal        string
+		artifact    string
+		scope       []string
+		constraints []string
+	)
+	cmd := &cobra.Command{
+		Use:   "start <room-id> <topic>",
+		Short: "Start a durable planning session in a room",
+		Args:  cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runRoomPlanStart(cmd, workspace, sender, args[0], args[1], goal, artifact, scope, constraints)
+		},
+	}
+	cmd.Flags().StringVar(&workspace, "workspace", ".", "Workspace root override")
+	cmd.Flags().StringVar(&sender, "sender", "", "Sender actor or participant id (defaults to current tmux/zellij pane)")
+	cmd.Flags().StringVar(&goal, "goal", "", "Planning goal or desired outcome")
+	cmd.Flags().StringVar(&artifact, "artifact", "", "Target plan artifact path, doc path, or external reference")
+	cmd.Flags().StringSliceVar(&scope, "scope", nil, "Scope item (repeatable)")
+	cmd.Flags().StringSliceVar(&constraints, "constraint", nil, "Constraint or guardrail (repeatable)")
+	return cmd
+}
+
+func newRoomPlanProposeCommand() *cobra.Command {
+	var (
+		workspace string
+		sender    string
+	)
+	cmd := &cobra.Command{
+		Use:   "propose <room-id> <session-id> <title> <body>",
+		Short: "Submit a plan proposal within a planning session",
+		Args:  cobra.MinimumNArgs(4),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runRoomPlanEntry(cmd, workspace, args[0], sender, args[1], agent.BoardMessageKindPlanProposal, "Proposal: "+strings.TrimSpace(args[2]), strings.Join(args[3:], " "), false)
+		},
+	}
+	cmd.Flags().StringVar(&workspace, "workspace", ".", "Workspace root override")
+	cmd.Flags().StringVar(&sender, "sender", "", "Sender actor or participant id (defaults to current tmux/zellij pane)")
+	return cmd
+}
+
+func newRoomPlanAskCommand() *cobra.Command {
+	var (
+		workspace string
+		sender    string
+	)
+	cmd := &cobra.Command{
+		Use:   "ask <room-id> <session-id> <question>",
+		Short: "Record an explicit planning question",
+		Args:  cobra.MinimumNArgs(3),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			question := strings.Join(args[2:], " ")
+			return runRoomPlanEntry(cmd, workspace, args[0], sender, args[1], agent.BoardMessageKindPlanQuestion, "Question: "+deriveRoomSubject(question), question, false)
+		},
+	}
+	cmd.Flags().StringVar(&workspace, "workspace", ".", "Workspace root override")
+	cmd.Flags().StringVar(&sender, "sender", "", "Sender actor or participant id (defaults to current tmux/zellij pane)")
+	return cmd
+}
+
+func newRoomPlanDecideCommand() *cobra.Command {
+	var (
+		workspace string
+		sender    string
+	)
+	cmd := &cobra.Command{
+		Use:   "decide <room-id> <session-id> <decision>",
+		Short: "Record a coordinator decision for a planning session",
+		Args:  cobra.MinimumNArgs(3),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			decision := strings.Join(args[2:], " ")
+			return runRoomPlanEntry(cmd, workspace, args[0], sender, args[1], agent.BoardMessageKindPlanDecision, "Decision: "+deriveRoomSubject(decision), decision, true)
+		},
+	}
+	cmd.Flags().StringVar(&workspace, "workspace", ".", "Workspace root override")
+	cmd.Flags().StringVar(&sender, "sender", "", "Coordinator actor or participant id (defaults to current tmux/zellij pane)")
+	return cmd
+}
+
+func newRoomPlanReviewCommand() *cobra.Command {
+	var (
+		workspace string
+		sender    string
+	)
+	cmd := &cobra.Command{
+		Use:   "review <room-id> <session-id> <approve|block> <notes>",
+		Short: "Record a review or approval note for a planning session",
+		Args:  cobra.MinimumNArgs(4),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			verdict := strings.TrimSpace(strings.ToLower(args[2]))
+			if verdict != "approve" && verdict != "block" {
+				return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.plan.review", protocol.ErrorCodeEARG, fmt.Sprintf("unsupported review verdict %q", args[2]), map[string]any{
+					"hint": "Use approve or block.",
+				})
+			}
+			notes := strings.Join(args[3:], " ")
+			return runRoomPlanEntry(cmd, workspace, args[0], sender, args[1], agent.BoardMessageKindPlanReview, "Review: "+verdict, notes, false)
+		},
+	}
+	cmd.Flags().StringVar(&workspace, "workspace", ".", "Workspace root override")
+	cmd.Flags().StringVar(&sender, "sender", "", "Sender actor or participant id (defaults to current tmux/zellij pane)")
+	return cmd
+}
+
+func newRoomPlanCloseCommand() *cobra.Command {
+	var (
+		workspace string
+		sender    string
+	)
+	cmd := &cobra.Command{
+		Use:   "close <room-id> <session-id> <summary>",
+		Short: "Close a planning session with a final durable summary",
+		Args:  cobra.MinimumNArgs(3),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			summary := strings.Join(args[2:], " ")
+			return runRoomPlanEntry(cmd, workspace, args[0], sender, args[1], agent.BoardMessageKindPlanClose, "Planning session closed", summary, true)
+		},
+	}
+	cmd.Flags().StringVar(&workspace, "workspace", ".", "Workspace root override")
+	cmd.Flags().StringVar(&sender, "sender", "", "Coordinator actor or participant id (defaults to current tmux/zellij pane)")
+	return cmd
+}
+
+func newRoomPlanShowCommand() *cobra.Command {
+	var (
+		workspace string
+		limit     int
+	)
+	cmd := &cobra.Command{
+		Use:   "show <room-id> [session-id]",
+		Short: "Show planning sessions or one planning session thread",
+		Args:  cobra.RangeArgs(1, 2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			sessionID := ""
+			if len(args) > 1 {
+				sessionID = args[1]
+			}
+			return runRoomPlanShow(cmd, workspace, args[0], sessionID, limit)
+		},
+	}
+	cmd.Flags().StringVar(&workspace, "workspace", ".", "Workspace root override")
+	cmd.Flags().IntVar(&limit, "limit", 200, "Maximum room messages to inspect")
 	return cmd
 }
 
@@ -1046,6 +1212,291 @@ func runRoomClear(cmd *cobra.Command, workspace, roomID, actorID, mode, preset s
 		"resolved_status":   resolvedStatus,
 		"resolver_identity": identity,
 	}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+}
+
+func runRoomPlanStart(cmd *cobra.Command, workspace, sender, roomID, topic, goal, artifact string, scope, constraints []string) error {
+	absWorkspace, identity, store, roomID, summary, err := prepareRoomPlanCommand(cmd, workspace, sender, roomID)
+	if err != nil {
+		return err
+	}
+	defer store.Close()
+
+	topic = strings.TrimSpace(topic)
+	if topic == "" {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.plan.start", protocol.ErrorCodeEARG, "topic is required", map[string]any{
+			"hint": "Pass a concise planning topic such as `phase-3-ui-polish` or `api-rate-limit-refactor`.",
+		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+
+	body := buildRoomPlanSessionBody(topic, goal, artifact, scope, constraints)
+	msg := &agent.BoardMessage{
+		WorkspaceID: absWorkspace,
+		Stream:      agent.RoomStreamName(roomID),
+		Sender:      identity.Sender,
+		Recipient:   agent.BroadcastRecipient,
+		Kind:        agent.BoardMessageKindPlanSession,
+		Priority:    agent.DefaultPriority,
+		Subject:     "Plan Session: " + topic,
+		Body:        body,
+	}
+	if err := store.SendMessage(cmd.Context(), msg); err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.plan.start", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+
+	return protocol.WriteOK(cmd.OutOrStdout(), "agentctl.room.plan.start", map[string]any{
+		"room_id":         roomID,
+		"session_id":      msg.ID,
+		"topic":           topic,
+		"message":         msg,
+		"sender_identity": identity,
+		"room":            summary,
+	}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+}
+
+func runRoomPlanEntry(cmd *cobra.Command, workspace, roomID, sender, sessionID string, kind agent.BoardMessageKind, subject, body string, requireCoordinator bool) error {
+	absWorkspace, identity, store, roomID, summary, err := prepareRoomPlanCommand(cmd, workspace, sender, roomID)
+	if err != nil {
+		return err
+	}
+	defer store.Close()
+
+	if requireCoordinator && !roomMemberHasRole(summary.Members, identity.Sender, "coordinator") {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.plan", protocol.ErrorCodeEARG, "room plan phase changes require coordinator role", map[string]any{
+			"hint": "Run the command as the room coordinator, or join the room with role=coordinator first.",
+		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+
+	sessionMsg, err := loadRoomPlanSession(cmd.Context(), store, absWorkspace, roomID, sessionID)
+	if err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.plan", protocol.ErrorCodeENotFound, err.Error(), map[string]any{
+			"hint": "Start a session with `agentctl room plan start` and reuse its session_id.",
+		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+
+	msg := &agent.BoardMessage{
+		WorkspaceID:      absWorkspace,
+		RelatedMessageID: sessionMsg.ID,
+		Stream:           agent.RoomStreamName(roomID),
+		Sender:           identity.Sender,
+		Recipient:        agent.BroadcastRecipient,
+		Kind:             kind,
+		Priority:         agent.DefaultPriority,
+		Subject:          strings.TrimSpace(subject),
+		Body:             strings.TrimSpace(body),
+	}
+	if msg.Subject == "" {
+		msg.Subject = deriveRoomSubject(msg.Body)
+	}
+	if msg.Body == "" {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.plan", protocol.ErrorCodeEARG, "body is required", map[string]any{
+			"hint": "Include the actual proposal, question, decision, review note, or closure summary.",
+		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	if err := store.SendMessage(cmd.Context(), msg); err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.plan", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+
+	return protocol.WriteOK(cmd.OutOrStdout(), "agentctl.room.plan", map[string]any{
+		"room_id":         roomID,
+		"session_id":      sessionMsg.ID,
+		"message":         msg,
+		"sender_identity": identity,
+	}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+}
+
+func runRoomPlanShow(cmd *cobra.Command, workspace, roomID, sessionID string, limit int) error {
+	absWorkspace, err := resolveRoomWorkspace(workspace)
+	if err != nil {
+		return err
+	}
+	store, err := openRoomBoardStore(cmd.Context())
+	if err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.plan.show", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	defer store.Close()
+
+	summary, messages, err := loadRoomState(cmd.Context(), store, absWorkspace, roomID, "", limit)
+	if err != nil {
+		code := protocol.ErrorCodeERuntime
+		if errors.Is(err, blackboard.ErrRoomNotFound) {
+			code = protocol.ErrorCodeENotFound
+		}
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.plan.show", code, err.Error(), map[string]any{
+			"hint": "Create the room first or check the room id.",
+		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+
+	sessions := buildRoomPlanSessions(messages)
+	if strings.TrimSpace(sessionID) == "" {
+		return protocol.WriteOK(cmd.OutOrStdout(), "agentctl.room.plan.show", map[string]any{
+			"room":     summary,
+			"count":    len(sessions),
+			"sessions": sessions,
+		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+
+	for _, session := range sessions {
+		if session["id"] == strings.TrimSpace(sessionID) {
+			return protocol.WriteOK(cmd.OutOrStdout(), "agentctl.room.plan.show", map[string]any{
+				"room":    summary,
+				"session": session,
+			}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+		}
+	}
+
+	return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.plan.show", protocol.ErrorCodeENotFound, fmt.Sprintf("planning session %q not found", sessionID), map[string]any{
+		"hint": "Run `agentctl room plan show <room-id>` to list available planning sessions.",
+	}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+}
+
+func prepareRoomPlanCommand(cmd *cobra.Command, workspace, sender, roomID string) (string, roomIdentity, blackboard.BoardStore, string, agent.RoomSummary, error) {
+	absWorkspace, err := resolveRoomWorkspace(workspace)
+	if err != nil {
+		return "", roomIdentity{}, nil, "", agent.RoomSummary{}, err
+	}
+	identity, err := resolveRoomSender(cmd.Context(), sender)
+	if err != nil {
+		return "", roomIdentity{}, nil, "", agent.RoomSummary{}, protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.plan", protocol.ErrorCodeEARG, err.Error(), map[string]any{
+			"hint": "Pass --sender when outside tmux/zellij, or run inside a prepared pane so agentctl can derive the participant id.",
+		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	store, err := openRoomBoardStore(cmd.Context())
+	if err != nil {
+		return "", roomIdentity{}, nil, "", agent.RoomSummary{}, protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.plan", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	roomID = strings.TrimSpace(roomID)
+	summary, err := store.GetRoom(cmd.Context(), absWorkspace, roomID, identity.Sender)
+	if err != nil {
+		code := protocol.ErrorCodeERuntime
+		if errors.Is(err, blackboard.ErrRoomNotFound) {
+			code = protocol.ErrorCodeENotFound
+		}
+		store.Close()
+		return "", roomIdentity{}, nil, "", agent.RoomSummary{}, protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.plan", code, err.Error(), map[string]any{
+			"hint": "Create the room first or check the room id.",
+		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	return absWorkspace, identity, store, roomID, summary, nil
+}
+
+func loadRoomPlanSession(ctx context.Context, store blackboard.BoardStore, workspaceID, roomID, sessionID string) (agent.BoardMessage, error) {
+	messages, err := store.ListRoomMessages(ctx, workspaceID, roomID, roomTaskScanLimit)
+	if err != nil {
+		return agent.BoardMessage{}, err
+	}
+	sessionID = strings.TrimSpace(sessionID)
+	for _, msg := range messages {
+		if msg.ID == sessionID && msg.Kind == agent.BoardMessageKindPlanSession {
+			return msg, nil
+		}
+	}
+	return agent.BoardMessage{}, fmt.Errorf("planning session %q not found", sessionID)
+}
+
+func buildRoomPlanSessionBody(topic, goal, artifact string, scope, constraints []string) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "Topic: %s\n", strings.TrimSpace(topic))
+	if strings.TrimSpace(goal) != "" {
+		fmt.Fprintf(&b, "Goal: %s\n", strings.TrimSpace(goal))
+	}
+	if strings.TrimSpace(artifact) != "" {
+		fmt.Fprintf(&b, "Artifact: %s\n", strings.TrimSpace(artifact))
+	}
+	if len(scope) > 0 {
+		b.WriteString("Scope:\n")
+		for _, item := range scope {
+			item = strings.TrimSpace(item)
+			if item == "" {
+				continue
+			}
+			fmt.Fprintf(&b, "- %s\n", item)
+		}
+	}
+	if len(constraints) > 0 {
+		b.WriteString("Constraints:\n")
+		for _, item := range constraints {
+			item = strings.TrimSpace(item)
+			if item == "" {
+				continue
+			}
+			fmt.Fprintf(&b, "- %s\n", item)
+		}
+	}
+	b.WriteString("Protocol:\n- submit proposals\n- record open questions\n- coordinator records decisions\n- reviewers approve or block\n- close with a final summary\n")
+	return strings.TrimSpace(b.String())
+}
+
+func buildRoomPlanSessions(messages []agent.BoardMessage) []map[string]any {
+	type sessionState struct {
+		Root      agent.BoardMessage
+		Entries   []agent.BoardMessage
+		Decisions int
+		Questions int
+		Proposals int
+		Reviews   int
+		Status    string
+	}
+	sessions := make(map[string]*sessionState)
+	for _, msg := range messages {
+		if msg.Kind == agent.BoardMessageKindPlanSession {
+			sessions[msg.ID] = &sessionState{Root: msg, Status: "drafting"}
+		}
+	}
+	for _, msg := range messages {
+		related := strings.TrimSpace(msg.RelatedMessageID)
+		if related == "" {
+			continue
+		}
+		session := sessions[related]
+		if session == nil {
+			continue
+		}
+		session.Entries = append(session.Entries, msg)
+		switch msg.Kind {
+		case agent.BoardMessageKindPlanProposal:
+			session.Proposals++
+		case agent.BoardMessageKindPlanQuestion:
+			session.Questions++
+		case agent.BoardMessageKindPlanDecision:
+			session.Decisions++
+		case agent.BoardMessageKindPlanReview:
+			session.Reviews++
+			subject := strings.ToLower(strings.TrimSpace(msg.Subject))
+			if strings.Contains(subject, "block") {
+				session.Status = "blocked"
+			} else if session.Status != "blocked" {
+				session.Status = "in_review"
+			}
+		case agent.BoardMessageKindPlanClose:
+			session.Status = "closed"
+		}
+	}
+
+	ordered := make([]*sessionState, 0, len(sessions))
+	for _, session := range sessions {
+		ordered = append(ordered, session)
+	}
+	sort.Slice(ordered, func(i, j int) bool {
+		return ordered[i].Root.CreatedAt.After(ordered[j].Root.CreatedAt)
+	})
+
+	out := make([]map[string]any, 0, len(ordered))
+	for _, session := range ordered {
+		out = append(out, map[string]any{
+			"id":          session.Root.ID,
+			"topic":       strings.TrimPrefix(strings.TrimSpace(session.Root.Subject), "Plan Session: "),
+			"status":      session.Status,
+			"root":        session.Root,
+			"entries":     session.Entries,
+			"proposals":   session.Proposals,
+			"questions":   session.Questions,
+			"decisions":   session.Decisions,
+			"reviews":     session.Reviews,
+			"closed":      session.Status == "closed",
+			"entry_count": len(session.Entries),
+		})
+	}
+	return out
 }
 
 func runRoomCoordinatorSet(cmd *cobra.Command, workspace, roomID, actorID, targetID string) error {

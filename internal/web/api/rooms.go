@@ -83,6 +83,7 @@ type RoomMessageSendRequest struct {
 	WorkspaceID      string         `json:"workspace_id"`
 	Sender           string         `json:"sender"`
 	Recipient        string         `json:"recipient,omitempty"`
+	RelatedMessageID string         `json:"related_message_id,omitempty"`
 	Subject          string         `json:"subject,omitempty"`
 	Body             string         `json:"body"`
 	Kind             string         `json:"kind,omitempty"`
@@ -744,6 +745,7 @@ func handleRoomMessagesPost(w http.ResponseWriter, r *http.Request, cfg config.C
 	req.WorkspaceID = strings.TrimSpace(req.WorkspaceID)
 	req.Sender = strings.TrimSpace(req.Sender)
 	req.Recipient = strings.TrimSpace(req.Recipient)
+	req.RelatedMessageID = strings.TrimSpace(req.RelatedMessageID)
 	req.Subject = strings.TrimSpace(req.Subject)
 	req.Body = strings.TrimSpace(req.Body)
 	req.TaskID = strings.TrimSpace(req.TaskID)
@@ -802,21 +804,22 @@ func handleRoomMessagesPost(w http.ResponseWriter, r *http.Request, cfg config.C
 	}
 
 	msg := &agent.BoardMessage{
-		ID:            uuid.New().String(),
-		WorkspaceID:   req.WorkspaceID,
-		TaskID:        req.TaskID,
-		Stream:        agent.RoomStreamName(roomID),
-		Sender:        req.Sender,
-		Recipient:     req.Recipient,
-		Subject:       req.Subject,
-		Body:          req.Body,
-		Kind:          kind,
-		Priority:      priority,
-		Status:        agent.BoardMessageStatusUnread,
-		AckRequired:   req.AckRequired,
-		ReplyExpected: req.ReplyExpected,
-		Interrupt:     req.Interrupt,
-		CreatedAt:     time.Now(),
+		ID:               uuid.New().String(),
+		WorkspaceID:      req.WorkspaceID,
+		TaskID:           req.TaskID,
+		RelatedMessageID: req.RelatedMessageID,
+		Stream:           agent.RoomStreamName(roomID),
+		Sender:           req.Sender,
+		Recipient:        req.Recipient,
+		Subject:          req.Subject,
+		Body:             req.Body,
+		Kind:             kind,
+		Priority:         priority,
+		Status:           agent.BoardMessageStatusUnread,
+		AckRequired:      req.AckRequired,
+		ReplyExpected:    req.ReplyExpected,
+		Interrupt:        req.Interrupt,
+		CreatedAt:        time.Now(),
 	}
 	if err := store.SendMessage(r.Context(), msg); err != nil {
 		log.Error().Err(err).Str("room_id", roomID).Msg("failed to send room message")
@@ -1389,10 +1392,13 @@ func normalizeBoardMessageKind(raw string) (agent.BoardMessageKind, error) {
 	case agent.BoardMessageKindInstruction, agent.BoardMessageKindInfo,
 		agent.BoardMessageKindAlert, agent.BoardMessageKindReviewRequest,
 		agent.BoardMessageKindTaskUpdate, agent.BoardMessageKindLeadChange,
-		agent.BoardMessageKindCoordinatorPulse:
+		agent.BoardMessageKindCoordinatorPulse,
+		agent.BoardMessageKindPlanSession, agent.BoardMessageKindPlanProposal,
+		agent.BoardMessageKindPlanQuestion, agent.BoardMessageKindPlanDecision,
+		agent.BoardMessageKindPlanReview, agent.BoardMessageKindPlanClose:
 		return kind, nil
 	default:
-		return "", errors.New("invalid kind: must be one of instruction, info, alert, review_request, task_update, lead_change, coordinator_pulse")
+		return "", errors.New("invalid kind: must be one of instruction, info, alert, review_request, task_update, lead_change, coordinator_pulse, plan_session, plan_proposal, plan_question, plan_decision, plan_review, plan_close")
 	}
 }
 

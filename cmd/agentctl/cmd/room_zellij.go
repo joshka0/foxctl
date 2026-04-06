@@ -164,6 +164,13 @@ func hasPendingZellijRelayPermissionPrompt(ctx context.Context, session string) 
 func relayRoomMessageZellijSingleton(ctx context.Context, room agent.RoomSummary, msg agent.BoardMessage, session string) roomRelayResult {
 	result := roomRelayResult{Backend: "zellij"}
 	content := formatRoomRelayContent(room, msg)
+	requiresEscapeSubmit := false
+	for _, member := range room.Members {
+		if sameRoomParticipant(member.ActorID, msg.Recipient) && strings.HasPrefix(strings.ToLower(strings.TrimSpace(member.ActorID)), "gemini") {
+			requiresEscapeSubmit = true
+			break
+		}
+	}
 	if msg.Interrupt {
 		interrupt := exec.CommandContext(ctx, "zellij", "--session", session, "action", "write", "27")
 		var interruptErr bytes.Buffer
@@ -189,6 +196,20 @@ func relayRoomMessageZellijSingleton(ctx context.Context, room agent.RoomSummary
 		result.FailedCount = 1
 		result.FailedMembers = append(result.FailedMembers, zellijRelaySingletonTarget)
 		return result
+	}
+	if requiresEscapeSubmit {
+		submitMode := exec.CommandContext(ctx, "zellij", "--session", session, "action", "write", "27")
+		stderr.Reset()
+		submitMode.Stderr = &stderr
+		if err := submitMode.Run(); err != nil {
+			result.Error = strings.TrimSpace(stderr.String())
+			if result.Error == "" {
+				result.Error = err.Error()
+			}
+			result.FailedCount = 1
+			result.FailedMembers = append(result.FailedMembers, zellijRelaySingletonTarget)
+			return result
+		}
 	}
 	submit := exec.CommandContext(ctx, "zellij", "--session", session, "action", "write", "13")
 	stderr.Reset()

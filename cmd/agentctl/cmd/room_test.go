@@ -1343,6 +1343,75 @@ func TestRunRoomClearSystemReminders(t *testing.T) {
 	}
 }
 
+func TestRunRoomPlanStartAndShow(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	ctx := context.Background()
+	workspace := t.TempDir()
+
+	cmd, _ := newRoomTestCommand(ctx)
+	if err := runRoomCreate(cmd, workspace, "alpha", "Alpha", "", []string{"human-a=coordinator", "gemini-a=reviewer"}); err != nil {
+		t.Fatalf("runRoomCreate: %v", err)
+	}
+
+	cmd, out := newRoomTestCommand(ctx)
+	if err := runRoomPlanStart(cmd, workspace, "human-a", "alpha", "phase-3", "Ship the next UI slice", "docs/plans/phase-3.md", []string{"gui-agent", "rooms"}, []string{"keep API stable"}); err != nil {
+		t.Fatalf("runRoomPlanStart: %v", err)
+	}
+	data := decodeRoomEnvelope(t, out)
+	sessionID := data["session_id"].(string)
+	if sessionID == "" {
+		t.Fatalf("session_id empty")
+	}
+
+	cmd, _ = newRoomTestCommand(ctx)
+	if err := runRoomPlanEntry(cmd, workspace, "alpha", "gemini-a", sessionID, agent.BoardMessageKindPlanProposal, "Proposal: split UI and API", "Start with the planning tab and a typed message protocol.", false); err != nil {
+		t.Fatalf("runRoomPlanEntry proposal: %v", err)
+	}
+
+	cmd, out = newRoomTestCommand(ctx)
+	if err := runRoomPlanShow(cmd, workspace, "alpha", sessionID, 50); err != nil {
+		t.Fatalf("runRoomPlanShow: %v", err)
+	}
+	data = decodeRoomEnvelope(t, out)
+	session := data["session"].(map[string]any)
+	if got := session["id"]; got != sessionID {
+		t.Fatalf("session.id=%v want %s", got, sessionID)
+	}
+	if got := session["proposals"]; got != float64(1) {
+		t.Fatalf("session.proposals=%v want 1", got)
+	}
+}
+
+func TestRunRoomPlanDecideRequiresCoordinator(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	ctx := context.Background()
+	workspace := t.TempDir()
+
+	cmd, _ := newRoomTestCommand(ctx)
+	if err := runRoomCreate(cmd, workspace, "alpha", "Alpha", "", []string{"human-a=coordinator", "gemini-a=reviewer"}); err != nil {
+		t.Fatalf("runRoomCreate: %v", err)
+	}
+
+	cmd, out := newRoomTestCommand(ctx)
+	if err := runRoomPlanStart(cmd, workspace, "human-a", "alpha", "phase-3", "", "", nil, nil); err != nil {
+		t.Fatalf("runRoomPlanStart: %v", err)
+	}
+	data := decodeRoomEnvelope(t, out)
+	sessionID := data["session_id"].(string)
+
+	cmd, out = newRoomTestCommand(ctx)
+	err := runRoomPlanEntry(cmd, workspace, "alpha", "gemini-a", sessionID, agent.BoardMessageKindPlanDecision, "Decision: do it", "Coordinator decision", true)
+	if err != nil {
+		t.Fatalf("runRoomPlanEntry decision returned error: %v", err)
+	}
+	if !strings.Contains(out.String(), `"status":"error"`) {
+		t.Fatalf("expected error envelope, got %s", out.String())
+	}
+	if !strings.Contains(out.String(), "room plan phase changes require coordinator role") {
+		t.Fatalf("expected coordinator plan error, got %s", out.String())
+	}
+}
+
 func TestRunRoomSendResolvesCoordinatorAlias(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	ctx := context.Background()

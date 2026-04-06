@@ -35,6 +35,7 @@ import { ReplyComposer } from './ReplyComposer'
 import { LoopPolicyEditor } from './LoopPolicyEditor'
 import { AdminRoomComposer } from './AdminRoomComposer'
 import { RoomChatView } from './RoomChatView'
+import { RoomPlanningView } from './RoomPlanningView'
 import { Hash, MessageSquare, ShieldAlert, Zap, X, RefreshCw, CheckCircle2, UserCircle, Users, Bell, Trash2 } from 'lucide-react'
 import type { MailboxMessage, RoomMessageEvent } from '@/api/types'
 
@@ -74,7 +75,7 @@ export function RoomControlCenter({ roomId }: { roomId: string }) {
   } = useRoomControlStore()
 
   const [timelineFilter, setTimelineFilter] = useState<'all' | 'messages' | 'reclaims' | 'handoffs' | 'reminders' | 'reassignments'>('all')
-  const [surfaceMode, setSurfaceMode] = useState<'ops' | 'chat'>('ops')
+  const [surfaceMode, setSurfaceMode] = useState<'ops' | 'chat' | 'planning'>('ops')
   const [isParticipantsOpen, setIsParticipantsOpen] = useState(false)
   const [isLoopEditorOpen, setIsLoopEditorOpen] = useState(false)
   const [replyTarget, setReplyTarget] = useState<MailboxMessage | null>(null)
@@ -412,6 +413,14 @@ export function RoomControlCenter({ roomId }: { roomId: string }) {
               >
                 Chat
               </Button>
+              <Button
+                variant={surfaceMode === 'planning' ? 'secondary' : 'ghost'}
+                size="xs"
+                className="h-6 px-2 text-[9px] font-black uppercase tracking-tight"
+                onClick={() => setSurfaceMode('planning')}
+              >
+                Planning
+              </Button>
             </div>
           </div>
         </header>
@@ -524,6 +533,8 @@ export function RoomControlCenter({ roomId }: { roomId: string }) {
                 participants={status.participants}
                 events={recentRoomEvents}
               />
+            ) : surfaceMode === 'planning' ? (
+              <RoomPlanningView messages={messages?.messages ?? []} currentActorID={currentActorID} />
             ) : (
               <>
             {/* 3. Task Board */}

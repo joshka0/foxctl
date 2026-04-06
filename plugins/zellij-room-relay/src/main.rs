@@ -172,6 +172,9 @@ fn deliver_to_panes(pane_manifest: &PaneManifest, request: RelayRequest) -> Rela
                     write_chars_to_pane_id("\u{1b}", pane_id);
                 }
                 write_chars_to_pane_id(&request.content, pane_id);
+                if pane_requires_escape_submit(&target) {
+                    write_chars_to_pane_id("\u{1b}", pane_id);
+                }
                 write_chars_to_pane_id("\n", pane_id);
                 response.delivered_count += 1;
                 response.delivered_to.push(target);
@@ -191,6 +194,10 @@ fn deliver_to_panes(pane_manifest: &PaneManifest, request: RelayRequest) -> Rela
     }
 
     response
+}
+
+fn pane_requires_escape_submit(title: &str) -> bool {
+    title.trim().to_lowercase().starts_with("gemini")
 }
 
 fn find_terminal_pane_by_title(pane_manifest: &PaneManifest, title: &str) -> Option<PaneId> {

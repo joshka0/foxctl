@@ -801,13 +801,18 @@ func (c *Client) deliverPayload(ctx context.Context, resolvedTarget string, pane
 		}
 	}
 	payload, mode := relayPayloadForPane(pane, content)
-	if interrupt || relayNeedsEscape(pane) {
+	if interrupt {
 		if _, err := c.runTmux(ctx, "send-keys", "-t", resolvedTarget, "Escape"); err != nil {
 			return "", "", err
 		}
 	}
 	if _, err := c.runTmux(ctx, "send-keys", "-t", resolvedTarget, "-l", "--", payload); err != nil {
 		return "", "", err
+	}
+	if relayNeedsEscape(pane) {
+		if _, err := c.runTmux(ctx, "send-keys", "-t", resolvedTarget, "Escape"); err != nil {
+			return "", "", err
+		}
 	}
 	if _, err := c.runTmux(ctx, "send-keys", "-t", resolvedTarget, "Enter"); err != nil {
 		return "", "", err
