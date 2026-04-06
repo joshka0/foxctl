@@ -26,6 +26,7 @@ type MailboxMessageResponse struct {
 	Status        string `json:"status"`
 	AckRequired   bool   `json:"ack_required,omitempty"`
 	ReplyExpected bool   `json:"reply_expected,omitempty"`
+	Interrupt     bool   `json:"interrupt,omitempty"`
 	CreatedAt     string `json:"created_at"`
 	TaskID        string `json:"task_id,omitempty"`
 	Stream        string `json:"stream,omitempty"`
@@ -174,6 +175,7 @@ func convertBoardMessages(msgs []agent.BoardMessage) []MailboxMessageResponse {
 			Status:        string(m.Status),
 			AckRequired:   m.AckRequired,
 			ReplyExpected: m.ReplyExpected,
+			Interrupt:     m.Interrupt,
 			CreatedAt:     m.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
 			TaskID:        m.TaskID,
 			Stream:        m.Stream,
@@ -241,10 +243,11 @@ func handleMailboxSend(w http.ResponseWriter, r *http.Request, cfg config.Config
 		// Validate enum value
 		switch kind {
 		case agent.BoardMessageKindInstruction, agent.BoardMessageKindInfo,
-			agent.BoardMessageKindAlert, agent.BoardMessageKindReviewRequest:
+			agent.BoardMessageKindAlert, agent.BoardMessageKindReviewRequest,
+			agent.BoardMessageKindCoordinatorPulse:
 			// valid
 		default:
-			httpError(w, http.StatusBadRequest, "invalid kind: must be one of instruction, info, alert, review_request")
+			httpError(w, http.StatusBadRequest, "invalid kind: must be one of instruction, info, alert, review_request, coordinator_pulse")
 			return
 		}
 	}

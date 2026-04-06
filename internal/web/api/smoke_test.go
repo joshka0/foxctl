@@ -92,6 +92,20 @@ func TestRoomsHandlers_Smoke(t *testing.T) {
 	if got := strings.TrimSpace(message["body"].(string)); got != "smoke room message" {
 		t.Fatalf("room message body=%q want smoke room message", got)
 	}
+
+	deleteReq := httptest.NewRequest(http.MethodDelete, "/api/rooms/smoke-room?workspace_id="+roomSmokeWorkspacePath, nil)
+	deleteRR := httptest.NewRecorder()
+	detailHandler.ServeHTTP(deleteRR, deleteReq)
+	if deleteRR.Code != http.StatusOK {
+		t.Fatalf("delete room status=%d body=%s", deleteRR.Code, deleteRR.Body.String())
+	}
+
+	verifyReq := httptest.NewRequest(http.MethodGet, "/api/rooms/smoke-room?workspace_id="+roomSmokeWorkspacePath, nil)
+	verifyRR := httptest.NewRecorder()
+	detailHandler.ServeHTTP(verifyRR, verifyReq)
+	if verifyRR.Code != http.StatusNotFound {
+		t.Fatalf("verify deleted room status=%d want %d body=%s", verifyRR.Code, http.StatusNotFound, verifyRR.Body.String())
+	}
 }
 
 func TestOrchestrationBoardHandlers_Smoke(t *testing.T) {

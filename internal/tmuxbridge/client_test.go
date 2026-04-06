@@ -754,6 +754,51 @@ func TestDeliverTextUsesRawForAgentPane(t *testing.T) {
 	}
 }
 
+func TestDeliverTextUsesRawAndEnterForNodeAgentPane(t *testing.T) {
+	client := NewWithRunner(fakeRunner{
+		responses: map[string]fakeResponse{
+			"tmux list-sessions":                        {stdout: "ok\n"},
+			"tmux display-message -t %31 -p #{pane_id}": {stdout: "%31\n"},
+			"tmux display-message -t %31 -p " + listFormat: {
+				stdout: "%31" + fieldSep + "collab" + fieldSep + "0" + fieldSep + "2" + fieldSep + "main" + fieldSep + "333" + fieldSep + "80" + fieldSep + "24" + fieldSep + "gemini-a" + fieldSep + "/repo" + fieldSep + "node" + fieldSep + "0\n",
+			},
+			"tmux send-keys -t %31 Escape":                          {},
+			"tmux send-keys -t %31 -l -- [room alpha] hello gemini": {},
+			"tmux send-keys -t %31 Enter":                           {},
+		},
+	}, map[string]string{})
+
+	got, err := client.DeliverText(context.Background(), "%31", "[room alpha] hello gemini")
+	if err != nil {
+		t.Fatalf("DeliverText() error = %v", err)
+	}
+	if got.Mode != "raw" {
+		t.Fatalf("DeliverText() mode = %q, want raw", got.Mode)
+	}
+}
+
+func TestDeliverTextUsesRawWithoutEscapeForNonGeminiAgentPane(t *testing.T) {
+	client := NewWithRunner(fakeRunner{
+		responses: map[string]fakeResponse{
+			"tmux list-sessions":                       {stdout: "ok\n"},
+			"tmux display-message -t %2 -p #{pane_id}": {stdout: "%2\n"},
+			"tmux display-message -t %2 -p " + listFormat: {
+				stdout: "%2" + fieldSep + "collab" + fieldSep + "0" + fieldSep + "1" + fieldSep + "main" + fieldSep + "222" + fieldSep + "80" + fieldSep + "24" + fieldSep + "codex-b" + fieldSep + "/repo" + fieldSep + "codex" + fieldSep + "0\n",
+			},
+			"tmux send-keys -t %2 -l -- [room alpha] relay smoke": {},
+			"tmux send-keys -t %2 Enter":                          {},
+		},
+	}, map[string]string{})
+
+	got, err := client.DeliverText(context.Background(), "%2", "[room alpha] relay smoke")
+	if err != nil {
+		t.Fatalf("DeliverText() error = %v", err)
+	}
+	if got.Mode != "raw" {
+		t.Fatalf("DeliverText() mode = %q, want raw", got.Mode)
+	}
+}
+
 func TestCurrentParticipantIDPrefersLabel(t *testing.T) {
 	client := NewWithRunner(fakeRunner{
 		responses: map[string]fakeResponse{

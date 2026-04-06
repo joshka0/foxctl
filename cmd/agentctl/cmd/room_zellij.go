@@ -22,10 +22,11 @@ const (
 )
 
 type zellijRelayRequest struct {
-	RoomID  string   `json:"room_id"`
-	Sender  string   `json:"sender"`
-	Content string   `json:"content"`
-	Targets []string `json:"targets"`
+	RoomID    string   `json:"room_id"`
+	Sender    string   `json:"sender"`
+	Content   string   `json:"content"`
+	Interrupt bool     `json:"interrupt,omitempty"`
+	Targets   []string `json:"targets"`
 }
 
 func relayRoomMessageZellij(ctx context.Context, room agent.RoomSummary, msg agent.BoardMessage, relay roomRelayOptions) roomRelayResult {
@@ -69,10 +70,11 @@ func relayRoomMessageZellijTargets(ctx context.Context, room agent.RoomSummary, 
 	}
 
 	payload, err := json.Marshal(zellijRelayRequest{
-		RoomID:  room.ID,
-		Sender:  strings.TrimSpace(msg.Sender),
-		Content: formatRoomRelayContent(room, msg),
-		Targets: targets,
+		RoomID:    room.ID,
+		Sender:    strings.TrimSpace(msg.Sender),
+		Content:   formatRoomRelayContent(room, msg),
+		Interrupt: msg.Interrupt,
+		Targets:   targets,
 	})
 	if err != nil {
 		result.Error = fmt.Sprintf("marshal zellij relay payload: %v", err)
@@ -162,6 +164,20 @@ func hasPendingZellijRelayPermissionPrompt(ctx context.Context, session string) 
 func relayRoomMessageZellijSingleton(ctx context.Context, room agent.RoomSummary, msg agent.BoardMessage, session string) roomRelayResult {
 	result := roomRelayResult{Backend: "zellij"}
 	content := formatRoomRelayContent(room, msg)
+	if msg.Interrupt {
+		interrupt := exec.CommandContext(ctx, "zellij", "--session", session, "action", "write", "27")
+		var interruptErr bytes.Buffer
+		interrupt.Stderr = &interruptErr
+		if err := interrupt.Run(); err != nil {
+			result.Error = strings.TrimSpace(interruptErr.String())
+			if result.Error == "" {
+				result.Error = err.Error()
+			}
+			result.FailedCount = 1
+			result.FailedMembers = append(result.FailedMembers, zellijRelaySingletonTarget)
+			return result
+		}
+	}
 	writeChars := exec.CommandContext(ctx, "zellij", "--session", session, "action", "write-chars", content)
 	var stderr bytes.Buffer
 	writeChars.Stderr = &stderr

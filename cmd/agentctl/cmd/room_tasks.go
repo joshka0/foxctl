@@ -23,6 +23,8 @@ const (
 	roomTaskScanLimit         = 1000
 	roomLoopManagedBy         = "agentctl.room.loop"
 	roomLoopMinimumPulseFloor = 24 * time.Hour
+	roomPulseInterruptLimit   = 2
+	roomPulseBackoffCap       = 8
 )
 
 func newRoomTaskCommand() *cobra.Command {
@@ -329,12 +331,15 @@ func newRoomLoopCommand() *cobra.Command {
 				ZellijSession:    session,
 				ZellijPluginPath: plugin,
 			}, poll, taskPoll, history, roomPulseConfig{
-				Enabled:                 pulse > 0,
-				Interval:                pulse,
-				ReplyStaleAfter:         replyStale,
-				TaskStaleAfter:          taskHeartbeatStale,
-				MinPulseFloor:           roomLoopMinimumPulseFloor,
-				CoordinatorPulseEnabled: true,
+				Enabled:                      pulse > 0,
+				Interval:                     pulse,
+				ReplyStaleAfter:              replyStale,
+				TaskStaleAfter:               taskHeartbeatStale,
+				MinPulseFloor:                roomLoopMinimumPulseFloor,
+				InterruptAttemptLimit:        roomPulseInterruptLimit,
+				ReminderBackoffCap:           roomPulseBackoffCap,
+				CoordinatorPulseEnabled:      true,
+				CoordinatorEscalationEnabled: true,
 			})
 		},
 	}
@@ -637,6 +642,7 @@ func runRoomTaskAssign(cmd *cobra.Command, workspace, roomID, sender, taskID, re
 		Priority:      agent.DefaultPriority,
 		AckRequired:   true,
 		ReplyExpected: true,
+		Interrupt:     true,
 		Subject:       subject,
 		Body:          strings.Join(bodyLines, "\n"),
 	}
@@ -940,12 +946,15 @@ func runRoomTaskTransition(cmd *cobra.Command, workspace, roomID, sender, taskID
 }
 
 type roomPulseConfig struct {
-	Enabled                 bool
-	Interval                time.Duration
-	ReplyStaleAfter         time.Duration
-	TaskStaleAfter          time.Duration
-	MinPulseFloor           time.Duration
-	CoordinatorPulseEnabled bool
+	Enabled                      bool
+	Interval                     time.Duration
+	ReplyStaleAfter              time.Duration
+	TaskStaleAfter               time.Duration
+	MinPulseFloor                time.Duration
+	InterruptAttemptLimit        int
+	ReminderBackoffCap           int
+	CoordinatorPulseEnabled      bool
+	CoordinatorEscalationEnabled bool
 }
 
 func runRoomLoop(cmd *cobra.Command, workspace, roomID string, relay roomRelayOptions, poll, taskPoll time.Duration, history int, pulse roomPulseConfig) error {
@@ -1032,8 +1041,8 @@ func runRoomLoop(cmd *cobra.Command, workspace, roomID string, relay roomRelayOp
 		pulseTicker = time.NewTicker(pulse.Interval)
 		defer pulseTicker.Stop()
 	}
-	remindedMessages := map[string]time.Time{}
-	remindedTasks := map[string]time.Time{}
+	remindedMessages := map[string]roomPulseState{}
+	remindedTasks := map[string]roomPulseState{}
 	remindedCoordinators := map[string]time.Time{}
 
 	for {
@@ -1139,12 +1148,14 @@ func runRoomLoop(cmd *cobra.Command, workspace, roomID string, relay roomRelayOp
 			if err != nil {
 				return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.loop", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
 			}
+			cleanupRoomReplyPulseState(current, time.Now().UTC(), pulse, remindedMessages)
+			cleanupRoomTaskPulseState(roomTasks, time.Now().UTC(), pulse, remindedTasks)
 			for _, pulseMsg := range detectRoomPulseMessages(roomID, current, time.Now().UTC(), pulse, remindedMessages) {
 				msg := pulseMsg.Message
 				if err := boardStore.SendMessage(cmd.Context(), &msg); err != nil {
 					return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.loop", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
 				}
-				remindedMessages[pulseMsg.Key] = msg.CreatedAt
+				markRoomPulseState(remindedMessages, pulseMsg.Key, msg.CreatedAt, false)
 				seenMessages[msg.ID] = struct{}{}
 				seq++
 				result := relayRoomMessage(cmd.Context(), client, summary, msg, relay)
@@ -1162,7 +1173,7 @@ func runRoomLoop(cmd *cobra.Command, workspace, roomID string, relay roomRelayOp
 				if err := boardStore.SendMessage(cmd.Context(), &msg); err != nil {
 					return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.loop", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
 				}
-				remindedTasks[pulseMsg.Key] = msg.CreatedAt
+				markRoomPulseState(remindedTasks, pulseMsg.Key, msg.CreatedAt, false)
 				seenMessages[msg.ID] = struct{}{}
 				seq++
 				result := relayRoomMessage(cmd.Context(), client, summary, msg, relay)
@@ -1173,6 +1184,42 @@ func runRoomLoop(cmd *cobra.Command, workspace, roomID string, relay roomRelayOp
 					"relay":   result,
 				}, absWorkspace)); err != nil {
 					return fmt.Errorf("write room loop task pulse envelope: %w", err)
+				}
+			}
+			for _, pulseMsg := range detectRoomPulseEscalationMessages(summary, current, time.Now().UTC(), pulse, remindedMessages) {
+				msg := pulseMsg.Message
+				if err := boardStore.SendMessage(cmd.Context(), &msg); err != nil {
+					return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.loop", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+				}
+				markRoomPulseState(remindedMessages, pulseMsg.Key, msg.CreatedAt, true)
+				seenMessages[msg.ID] = struct{}{}
+				seq++
+				result := relayRoomMessage(cmd.Context(), client, summary, msg, relay)
+				if err := writer.Write(roomProgressEnvelope("agentctl.room.loop", seq, false, map[string]any{
+					"event":   "room_pulse_escalation",
+					"room_id": roomID,
+					"message": msg,
+					"relay":   result,
+				}, absWorkspace)); err != nil {
+					return fmt.Errorf("write room loop pulse escalation envelope: %w", err)
+				}
+			}
+			for _, pulseMsg := range detectRoomTaskEscalationMessages(summary, roomTasks, time.Now().UTC(), pulse, remindedTasks) {
+				msg := pulseMsg.Message
+				if err := boardStore.SendMessage(cmd.Context(), &msg); err != nil {
+					return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.loop", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+				}
+				markRoomPulseState(remindedTasks, pulseMsg.Key, msg.CreatedAt, true)
+				seenMessages[msg.ID] = struct{}{}
+				seq++
+				result := relayRoomMessage(cmd.Context(), client, summary, msg, relay)
+				if err := writer.Write(roomProgressEnvelope("agentctl.room.loop", seq, false, map[string]any{
+					"event":   "task_pulse_escalation",
+					"room_id": roomID,
+					"message": msg,
+					"relay":   result,
+				}, absWorkspace)); err != nil {
+					return fmt.Errorf("write room loop task escalation envelope: %w", err)
 				}
 			}
 			for _, pulseMsg := range detectRoomCoordinatorPulseMessages(summary, current, roomTasks, time.Now().UTC(), pulse, remindedCoordinators) {
@@ -1208,19 +1255,28 @@ func defaultRoomLoopPolicy(workspaceID, roomID string, pulse roomPulseConfig) co
 	if pulse.MinPulseFloor <= 0 {
 		pulse.MinPulseFloor = roomLoopMinimumPulseFloor
 	}
+	if pulse.InterruptAttemptLimit <= 0 {
+		pulse.InterruptAttemptLimit = roomPulseInterruptLimit
+	}
+	if pulse.ReminderBackoffCap <= 0 {
+		pulse.ReminderBackoffCap = roomPulseBackoffCap
+	}
 	if pulse.Interval <= 0 {
 		pulse.Enabled = false
 	}
 	return coordination.RoomLoop{
-		WorkspaceID:             strings.TrimSpace(workspaceID),
-		RoomID:                  strings.TrimSpace(roomID),
-		Enabled:                 pulse.Enabled,
-		ManagedBy:               roomLoopManagedBy,
-		PulseInterval:           pulse.Interval,
-		ReplyStaleAfter:         pulse.ReplyStaleAfter,
-		TaskStaleAfter:          pulse.TaskStaleAfter,
-		MinPulseFloor:           pulse.MinPulseFloor,
-		CoordinatorPulseEnabled: pulse.CoordinatorPulseEnabled,
+		WorkspaceID:                  strings.TrimSpace(workspaceID),
+		RoomID:                       strings.TrimSpace(roomID),
+		Enabled:                      pulse.Enabled,
+		ManagedBy:                    roomLoopManagedBy,
+		PulseInterval:                pulse.Interval,
+		ReplyStaleAfter:              pulse.ReplyStaleAfter,
+		TaskStaleAfter:               pulse.TaskStaleAfter,
+		MinPulseFloor:                pulse.MinPulseFloor,
+		InterruptAttemptLimit:        pulse.InterruptAttemptLimit,
+		ReminderBackoffCap:           pulse.ReminderBackoffCap,
+		CoordinatorPulseEnabled:      pulse.CoordinatorPulseEnabled,
+		CoordinatorEscalationEnabled: pulse.CoordinatorEscalationEnabled,
 	}
 }
 
@@ -1245,6 +1301,14 @@ func syncRoomLoopState(ctx context.Context, store *coordination.Store, workspace
 	}
 	if loop.MinPulseFloor <= 0 {
 		loop.MinPulseFloor = roomLoopMinimumPulseFloor
+		changed = true
+	}
+	if loop.InterruptAttemptLimit <= 0 {
+		loop.InterruptAttemptLimit = roomPulseInterruptLimit
+		changed = true
+	}
+	if loop.ReminderBackoffCap <= 0 {
+		loop.ReminderBackoffCap = roomPulseBackoffCap
 		changed = true
 	}
 	loop.LastTickAt = &tickAt
@@ -1273,17 +1337,23 @@ func sameRoomPulseConfig(a, b roomPulseConfig) bool {
 		a.ReplyStaleAfter == b.ReplyStaleAfter &&
 		a.TaskStaleAfter == b.TaskStaleAfter &&
 		a.MinPulseFloor == b.MinPulseFloor &&
-		a.CoordinatorPulseEnabled == b.CoordinatorPulseEnabled
+		a.InterruptAttemptLimit == b.InterruptAttemptLimit &&
+		a.ReminderBackoffCap == b.ReminderBackoffCap &&
+		a.CoordinatorPulseEnabled == b.CoordinatorPulseEnabled &&
+		a.CoordinatorEscalationEnabled == b.CoordinatorEscalationEnabled
 }
 
 func roomPulseConfigFromStore(loop coordination.RoomLoop) roomPulseConfig {
 	return roomPulseConfig{
-		Enabled:                 loop.Enabled,
-		Interval:                loop.PulseInterval,
-		ReplyStaleAfter:         loop.ReplyStaleAfter,
-		TaskStaleAfter:          loop.TaskStaleAfter,
-		MinPulseFloor:           loop.MinPulseFloor,
-		CoordinatorPulseEnabled: loop.CoordinatorPulseEnabled,
+		Enabled:                      loop.Enabled,
+		Interval:                     loop.PulseInterval,
+		ReplyStaleAfter:              loop.ReplyStaleAfter,
+		TaskStaleAfter:               loop.TaskStaleAfter,
+		MinPulseFloor:                loop.MinPulseFloor,
+		InterruptAttemptLimit:        loop.InterruptAttemptLimit,
+		ReminderBackoffCap:           loop.ReminderBackoffCap,
+		CoordinatorPulseEnabled:      loop.CoordinatorPulseEnabled,
+		CoordinatorEscalationEnabled: loop.CoordinatorEscalationEnabled,
 	}
 }
 
@@ -1313,6 +1383,105 @@ type roomTaskTransition struct {
 type roomPulseMessage struct {
 	Key     string
 	Message agent.BoardMessage
+}
+
+type roomPulseState struct {
+	LastSentAt time.Time
+	Count      int
+	Escalated  bool
+}
+
+func markRoomPulseState(states map[string]roomPulseState, key string, sentAt time.Time, escalated bool) {
+	state := states[key]
+	state.LastSentAt = sentAt
+	state.Count++
+	if escalated {
+		state.Escalated = true
+	}
+	states[key] = state
+}
+
+func roomPulseReminderInterval(base time.Duration, capMultiplier int, state roomPulseState) time.Duration {
+	if base <= 0 {
+		return 0
+	}
+	multiplier := 1
+	if state.Count > 0 {
+		multiplier = 1 << min(state.Count-1, 3)
+	}
+	if capMultiplier <= 0 {
+		capMultiplier = roomPulseBackoffCap
+	}
+	if multiplier > capMultiplier {
+		multiplier = capMultiplier
+	}
+	return time.Duration(multiplier) * base
+}
+
+func roomPulseReady(now time.Time, base time.Duration, capMultiplier int, state roomPulseState) bool {
+	if state.LastSentAt.IsZero() {
+		return true
+	}
+	return now.Sub(state.LastSentAt) >= roomPulseReminderInterval(base, capMultiplier, state)
+}
+
+func cleanupRoomReplyPulseState(messages []agent.BoardMessage, now time.Time, cfg roomPulseConfig, states map[string]roomPulseState) {
+	latestBySender := latestRoomSenderActivity(messages)
+	active := make(map[string]struct{})
+	for _, msg := range messages {
+		recipient := normalizeRoomRecipient(msg.Recipient)
+		if recipient == agent.BroadcastRecipient || recipient == "" {
+			continue
+		}
+		if strings.HasPrefix(strings.TrimSpace(msg.Sender), roomLoopSender(strings.TrimPrefix(msg.Stream, agent.RoomStreamPrefix))) {
+			continue
+		}
+		if !msg.AckRequired && !msg.ReplyExpected {
+			continue
+		}
+		if msg.Status == agent.BoardMessageStatusAcked || msg.Status == agent.BoardMessageStatusRead {
+			continue
+		}
+		if msg.ReplyExpected && !messageStillAwaitsReply(msg, latestBySender) {
+			continue
+		}
+		if now.Sub(msg.CreatedAt) < cfg.ReplyStaleAfter {
+			continue
+		}
+		active[msg.ID] = struct{}{}
+	}
+	for key := range states {
+		if _, ok := active[key]; !ok {
+			delete(states, key)
+		}
+	}
+}
+
+func cleanupRoomTaskPulseState(tasks []taskstore.Task, now time.Time, cfg roomPulseConfig, states map[string]roomPulseState) {
+	active := make(map[string]struct{})
+	for _, task := range tasks {
+		if task.OwnerActorID == "" {
+			continue
+		}
+		if task.Status != taskstore.StatusInProgress && task.Status != taskstore.StatusBlocked {
+			continue
+		}
+		reference := task.CreatedAt
+		if task.HeartbeatAt != nil {
+			reference = *task.HeartbeatAt
+		} else if task.ClaimedAt != nil {
+			reference = *task.ClaimedAt
+		}
+		if now.Sub(reference) < cfg.TaskStaleAfter {
+			continue
+		}
+		active[task.ID] = struct{}{}
+	}
+	for key := range states {
+		if _, ok := active[key]; !ok {
+			delete(states, key)
+		}
+	}
 }
 
 func openRoomTaskStore(ctx context.Context) (taskstore.Store, error) {
@@ -1410,7 +1579,7 @@ func detectRoomTaskTransitions(ctx context.Context, store taskstore.Store, state
 	return out, nil
 }
 
-func detectRoomPulseMessages(roomID string, messages []agent.BoardMessage, now time.Time, cfg roomPulseConfig, reminded map[string]time.Time) []roomPulseMessage {
+func detectRoomPulseMessages(roomID string, messages []agent.BoardMessage, now time.Time, cfg roomPulseConfig, reminded map[string]roomPulseState) []roomPulseMessage {
 	if !roomPulseEnabled(cfg) || cfg.ReplyStaleAfter <= 0 {
 		return nil
 	}
@@ -1440,7 +1609,15 @@ func detectRoomPulseMessages(roomID string, messages []agent.BoardMessage, now t
 		if now.Sub(msg.CreatedAt) < cfg.ReplyStaleAfter {
 			continue
 		}
-		if last, ok := reminded[msg.ID]; ok && now.Sub(last) < reminderFloor {
+		state := reminded[msg.ID]
+		limit := cfg.InterruptAttemptLimit
+		if limit <= 0 {
+			limit = roomPulseInterruptLimit
+		}
+		if state.Count >= limit {
+			continue
+		}
+		if !roomPulseReady(now, reminderFloor, cfg.ReminderBackoffCap, state) {
 			continue
 		}
 		if existing, ok := latestOutstanding[recipient]; ok && !msg.CreatedAt.After(existing.CreatedAt) {
@@ -1467,6 +1644,7 @@ func detectRoomPulseMessages(roomID string, messages []agent.BoardMessage, now t
 				Recipient:        recipient,
 				Kind:             agent.BoardMessageKindAlert,
 				Priority:         2,
+				Interrupt:        true,
 				Subject:          subject,
 				Body:             body,
 				CreatedAt:        now,
@@ -1476,7 +1654,43 @@ func detectRoomPulseMessages(roomID string, messages []agent.BoardMessage, now t
 	return out
 }
 
-func detectRoomTaskPulseMessages(workspace, roomID string, tasks []taskstore.Task, now time.Time, cfg roomPulseConfig, reminded map[string]time.Time) []roomPulseMessage {
+func detectRoomPulseEscalationMessages(room agent.RoomSummary, messages []agent.BoardMessage, now time.Time, cfg roomPulseConfig, reminded map[string]roomPulseState) []roomPulseMessage {
+	if !cfg.CoordinatorEscalationEnabled {
+		return nil
+	}
+	coordinator := roomCoordinatorActorID(room.Members)
+	if coordinator == "" {
+		return nil
+	}
+	limit := cfg.InterruptAttemptLimit
+	if limit <= 0 {
+		limit = roomPulseInterruptLimit
+	}
+	latestBySender := latestRoomSenderActivity(messages)
+	out := make([]roomPulseMessage, 0)
+	for _, msg := range messages {
+		state, ok := reminded[msg.ID]
+		if !ok || state.Count < limit || state.Escalated {
+			continue
+		}
+		recipient := normalizeRoomRecipient(msg.Recipient)
+		if recipient == agent.BroadcastRecipient || recipient == "" {
+			continue
+		}
+		if msg.Status == agent.BoardMessageStatusAcked || msg.Status == agent.BoardMessageStatusRead {
+			continue
+		}
+		if msg.ReplyExpected && !messageStillAwaitsReply(msg, latestBySender) {
+			continue
+		}
+		subject := fmt.Sprintf("Escalation: repeated unanswered request for %s", recipient)
+		body := fmt.Sprintf("Message %s to %s has already triggered %d interrupting reminders with no acknowledgement or reply. Consider updating loop policy, resolving the request, or reclaiming the work.\nOriginal sender: %s\nOriginal subject: %s", msg.ID, recipient, state.Count, strings.TrimSpace(msg.Sender), strings.TrimSpace(msg.Subject))
+		out = append(out, roomPulseMessage{Key: msg.ID, Message: agent.BoardMessage{WorkspaceID: room.WorkspaceID, TaskID: msg.TaskID, RelatedMessageID: roomMessageChainKey(msg), Stream: room.Stream, Sender: roomLoopSender(room.ID), Recipient: coordinator, Kind: agent.BoardMessageKindAlert, Priority: 1, Interrupt: true, Subject: subject, Body: body, CreatedAt: now}})
+	}
+	return out
+}
+
+func detectRoomTaskPulseMessages(workspace, roomID string, tasks []taskstore.Task, now time.Time, cfg roomPulseConfig, reminded map[string]roomPulseState) []roomPulseMessage {
 	if !roomPulseEnabled(cfg) || cfg.TaskStaleAfter <= 0 {
 		return nil
 	}
@@ -1501,7 +1715,15 @@ func detectRoomTaskPulseMessages(workspace, roomID string, tasks []taskstore.Tas
 		if now.Sub(reference) < cfg.TaskStaleAfter {
 			continue
 		}
-		if last, ok := reminded[task.ID]; ok && now.Sub(last) < reminderFloor {
+		state := reminded[task.ID]
+		limit := cfg.InterruptAttemptLimit
+		if limit <= 0 {
+			limit = roomPulseInterruptLimit
+		}
+		if state.Count >= limit {
+			continue
+		}
+		if !roomPulseReady(now, reminderFloor, cfg.ReminderBackoffCap, state) {
 			continue
 		}
 		subject := fmt.Sprintf("Reminder: task awaiting update: %s", task.Title)
@@ -1519,11 +1741,52 @@ func detectRoomTaskPulseMessages(workspace, roomID string, tasks []taskstore.Tas
 				Recipient:   task.OwnerActorID,
 				Kind:        agent.BoardMessageKindAlert,
 				Priority:    2,
+				Interrupt:   true,
 				Subject:     subject,
 				Body:        body,
 				CreatedAt:   now,
 			},
 		})
+	}
+	return out
+}
+
+func detectRoomTaskEscalationMessages(room agent.RoomSummary, tasks []taskstore.Task, now time.Time, cfg roomPulseConfig, reminded map[string]roomPulseState) []roomPulseMessage {
+	if !cfg.CoordinatorEscalationEnabled {
+		return nil
+	}
+	coordinator := roomCoordinatorActorID(room.Members)
+	if coordinator == "" {
+		return nil
+	}
+	limit := cfg.InterruptAttemptLimit
+	if limit <= 0 {
+		limit = roomPulseInterruptLimit
+	}
+	out := make([]roomPulseMessage, 0)
+	for _, task := range tasks {
+		state, ok := reminded[task.ID]
+		if !ok || state.Count < limit || state.Escalated {
+			continue
+		}
+		if task.OwnerActorID == "" {
+			continue
+		}
+		if task.Status != taskstore.StatusInProgress && task.Status != taskstore.StatusBlocked {
+			continue
+		}
+		reference := task.CreatedAt
+		if task.HeartbeatAt != nil {
+			reference = *task.HeartbeatAt
+		} else if task.ClaimedAt != nil {
+			reference = *task.ClaimedAt
+		}
+		if now.Sub(reference) < cfg.TaskStaleAfter {
+			continue
+		}
+		subject := fmt.Sprintf("Escalation: task may be stuck: %s", task.Title)
+		body := fmt.Sprintf("Task %s owned by %s has already triggered %d interrupting reminders with no heartbeat change. Consider touching the task, updating loop policy, reclaiming, blocking, or reassigning it.", task.ID, task.OwnerActorID, state.Count)
+		out = append(out, roomPulseMessage{Key: task.ID, Message: agent.BoardMessage{WorkspaceID: room.WorkspaceID, TaskID: task.ID, Stream: room.Stream, Sender: roomLoopSender(room.ID), Recipient: coordinator, Kind: agent.BoardMessageKindAlert, Priority: 1, Interrupt: true, Subject: subject, Body: body, CreatedAt: now}})
 	}
 	return out
 }
@@ -1564,8 +1827,9 @@ func detectRoomCoordinatorPulseMessages(room agent.RoomSummary, messages []agent
 			Stream:      room.Stream,
 			Sender:      roomLoopSender(room.ID),
 			Recipient:   coordinator,
-			Kind:        agent.BoardMessageKindAlert,
+			Kind:        agent.BoardMessageKindCoordinatorPulse,
 			Priority:    2,
+			Interrupt:   true,
 			Subject:     subject,
 			Body:        body,
 			CreatedAt:   now,
@@ -1651,6 +1915,7 @@ func sendRoomTaskCoordinatorMessages(ctx context.Context, workspace, roomID stri
 		Priority:      agent.DefaultPriority,
 		AckRequired:   true,
 		ReplyExpected: true,
+		Interrupt:     true,
 		Subject:       subject,
 		Body:          body,
 	}

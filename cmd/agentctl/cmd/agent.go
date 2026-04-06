@@ -573,6 +573,13 @@ func runAgentSpawnWithRoute(cmd *cobra.Command) error {
 			}
 		}
 	}
+	if strings.TrimSpace(spawnRoomID) != "" {
+		prompt = prompts.ComposeRoomAwarePrompt(prompt, prompts.RoomOnboardingOptions{
+			RoomID:      strings.TrimSpace(spawnRoomID),
+			WorkspaceID: currentSpawnWorkspaceID(),
+			Role:        strings.TrimSpace(spawnRole),
+		})
+	}
 
 	// Parse skills allow list (used in daemon and legacy spawn paths).
 	var skillsAllow []string

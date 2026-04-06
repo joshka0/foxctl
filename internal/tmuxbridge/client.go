@@ -200,6 +200,10 @@ type DeliverResult struct {
 	Payload        string `json:"payload"`
 }
 
+type DeliverOptions struct {
+	Interrupt bool `json:"interrupt,omitempty"`
+}
+
 // Client exposes read-only access to a reachable tmux server.
 type Client struct {
 	runner Runner
@@ -470,6 +474,10 @@ func (c *Client) Send(ctx context.Context, sender string, target string, text st
 // DeliverText injects plain text into a target pane. Shell-like panes receive a
 // shell-safe printf payload; non-shell panes receive the raw text.
 func (c *Client) DeliverText(ctx context.Context, target string, text string) (DeliverResult, error) {
+	return c.DeliverTextWithOptions(ctx, target, text, DeliverOptions{})
+}
+
+func (c *Client) DeliverTextWithOptions(ctx context.Context, target string, text string, opts DeliverOptions) (DeliverResult, error) {
 	content := strings.TrimSpace(text)
 	if content == "" {
 		return DeliverResult{}, fmt.Errorf("message text is required")
@@ -482,7 +490,7 @@ func (c *Client) DeliverText(ctx context.Context, target string, text string) (D
 	if err != nil {
 		return DeliverResult{}, err
 	}
-	payload, mode, err := c.deliverPayload(ctx, resolvedTarget, targetPane, content)
+	payload, mode, err := c.deliverPayload(ctx, resolvedTarget, targetPane, content, opts.Interrupt)
 	if err != nil {
 		return DeliverResult{}, err
 	}
@@ -784,7 +792,7 @@ func formatTmuxParticipantID(session, paneID string) string {
 	return "tmux:" + strings.TrimSpace(session) + ":" + strings.TrimSpace(paneID)
 }
 
-func (c *Client) deliverPayload(ctx context.Context, resolvedTarget string, pane Pane, content string) (string, string, error) {
+func (c *Client) deliverPayload(ctx context.Context, resolvedTarget string, pane Pane, content string, interrupt bool) (string, string, error) {
 	if isShellCommand(pane.CurrentCommand) {
 		if tty, err := c.paneTTY(ctx, resolvedTarget); err == nil && strings.TrimSpace(tty) != "" {
 			if err := writePaneTTY(tty, formatTTYRelayWrite(content)); err == nil {
@@ -793,7 +801,7 @@ func (c *Client) deliverPayload(ctx context.Context, resolvedTarget string, pane
 		}
 	}
 	payload, mode := relayPayloadForPane(pane, content)
-	if relayNeedsEscape(pane) {
+	if interrupt || relayNeedsEscape(pane) {
 		if _, err := c.runTmux(ctx, "send-keys", "-t", resolvedTarget, "Escape"); err != nil {
 			return "", "", err
 		}

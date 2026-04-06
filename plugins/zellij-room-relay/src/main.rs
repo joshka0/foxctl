@@ -22,6 +22,7 @@ struct RelayRequest {
     room_id: String,
     sender: String,
     content: String,
+    interrupt: bool,
     targets: Vec<String>,
 }
 
@@ -167,6 +168,9 @@ fn deliver_to_panes(pane_manifest: &PaneManifest, request: RelayRequest) -> Rela
         }
         match find_terminal_pane_by_title(pane_manifest, &target) {
             Some(pane_id) => {
+                if request.interrupt {
+                    write_chars_to_pane_id("\u{1b}", pane_id);
+                }
                 write_chars_to_pane_id(&request.content, pane_id);
                 write_chars_to_pane_id("\n", pane_id);
                 response.delivered_count += 1;

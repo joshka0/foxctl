@@ -26,17 +26,20 @@ type Lease struct {
 
 // RoomLoop stores persisted runtime/policy state for one room loop.
 type RoomLoop struct {
-	WorkspaceID              string
-	RoomID                   string
-	Enabled                  bool
-	ManagedBy                string
-	LastTickAt               *time.Time
-	PulseInterval            time.Duration
-	ReplyStaleAfter          time.Duration
-	TaskStaleAfter           time.Duration
-	MinPulseFloor            time.Duration
-	CoordinatorPulseEnabled  bool
-	UpdatedAt                time.Time
+	WorkspaceID                  string
+	RoomID                       string
+	Enabled                      bool
+	ManagedBy                    string
+	LastTickAt                   *time.Time
+	PulseInterval                time.Duration
+	ReplyStaleAfter              time.Duration
+	TaskStaleAfter               time.Duration
+	MinPulseFloor                time.Duration
+	InterruptAttemptLimit        int
+	ReminderBackoffCap           int
+	CoordinatorPulseEnabled      bool
+	CoordinatorEscalationEnabled bool
+	UpdatedAt                    time.Time
 }
 
 // Open opens the coordination store rooted at storageRoot/coordination.db.
@@ -91,7 +94,10 @@ CREATE TABLE IF NOT EXISTS room_loops (
 	reply_stale_after_ms        INTEGER NOT NULL,
 	task_stale_after_ms         INTEGER NOT NULL,
 	min_pulse_floor_ms          INTEGER NOT NULL,
+	interrupt_attempt_limit     INTEGER NOT NULL DEFAULT 2,
+	reminder_backoff_cap        INTEGER NOT NULL DEFAULT 8,
 	coordinator_pulse_enabled   INTEGER NOT NULL DEFAULT 1,
+	coordinator_escalation_enabled INTEGER NOT NULL DEFAULT 1,
 	updated_at_ms               INTEGER NOT NULL,
 	created_at_ms               INTEGER NOT NULL,
 	PRIMARY KEY (workspace_id, room_id)
@@ -99,6 +105,18 @@ CREATE TABLE IF NOT EXISTS room_loops (
 `
 	if _, err := db.ExecContext(ctx, ddl); err != nil {
 		return fmt.Errorf("coordination: migrate: %w", err)
+	}
+	for _, stmt := range []string{
+		`ALTER TABLE room_loops ADD COLUMN interrupt_attempt_limit INTEGER NOT NULL DEFAULT 2`,
+		`ALTER TABLE room_loops ADD COLUMN reminder_backoff_cap INTEGER NOT NULL DEFAULT 8`,
+		`ALTER TABLE room_loops ADD COLUMN coordinator_escalation_enabled INTEGER NOT NULL DEFAULT 1`,
+	} {
+		if _, err := db.ExecContext(ctx, stmt); err != nil {
+			errMsg := strings.ToLower(strings.TrimSpace(err.Error()))
+			if !strings.Contains(errMsg, "duplicate column") && !strings.Contains(errMsg, "already exists") {
+				return fmt.Errorf("coordination: migrate room loop columns: %w", err)
+			}
+		}
 	}
 	return nil
 }
@@ -122,7 +140,8 @@ func (s *Store) GetRoomLoop(ctx context.Context, workspaceID, roomID string) (*R
 	err := s.db.QueryRowContext(ctx, `
 		SELECT workspace_id, room_id, enabled, managed_by, last_tick_at_ms,
 		       pulse_interval_ms, reply_stale_after_ms, task_stale_after_ms,
-		       min_pulse_floor_ms, coordinator_pulse_enabled, updated_at_ms
+		       min_pulse_floor_ms, interrupt_attempt_limit, reminder_backoff_cap,
+		       coordinator_pulse_enabled, coordinator_escalation_enabled, updated_at_ms
 		FROM room_loops
 		WHERE workspace_id = $1 AND room_id = $2
 	`, workspaceID, roomID).Scan(
@@ -135,7 +154,10 @@ func (s *Store) GetRoomLoop(ctx context.Context, workspaceID, roomID string) (*R
 		(*durationMillis)(&loop.ReplyStaleAfter),
 		(*durationMillis)(&loop.TaskStaleAfter),
 		(*durationMillis)(&loop.MinPulseFloor),
+		&loop.InterruptAttemptLimit,
+		&loop.ReminderBackoffCap,
 		(*intBool)(&loop.CoordinatorPulseEnabled),
+		(*intBool)(&loop.CoordinatorEscalationEnabled),
 		&updatedMS,
 	)
 	if err != nil {
@@ -174,9 +196,10 @@ func (s *Store) UpsertRoomLoop(ctx context.Context, loop RoomLoop) (RoomLoop, er
 		INSERT INTO room_loops (
 			workspace_id, room_id, enabled, managed_by, last_tick_at_ms,
 			pulse_interval_ms, reply_stale_after_ms, task_stale_after_ms,
-			min_pulse_floor_ms, coordinator_pulse_enabled, updated_at_ms, created_at_ms
+			min_pulse_floor_ms, interrupt_attempt_limit, reminder_backoff_cap,
+			coordinator_pulse_enabled, coordinator_escalation_enabled, updated_at_ms, created_at_ms
 		)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
 		ON CONFLICT(workspace_id, room_id) DO UPDATE SET
 			enabled = excluded.enabled,
 			managed_by = excluded.managed_by,
@@ -185,7 +208,10 @@ func (s *Store) UpsertRoomLoop(ctx context.Context, loop RoomLoop) (RoomLoop, er
 			reply_stale_after_ms = excluded.reply_stale_after_ms,
 			task_stale_after_ms = excluded.task_stale_after_ms,
 			min_pulse_floor_ms = excluded.min_pulse_floor_ms,
+			interrupt_attempt_limit = excluded.interrupt_attempt_limit,
+			reminder_backoff_cap = excluded.reminder_backoff_cap,
 			coordinator_pulse_enabled = excluded.coordinator_pulse_enabled,
+			coordinator_escalation_enabled = excluded.coordinator_escalation_enabled,
 			updated_at_ms = excluded.updated_at_ms
 	`,
 		loop.WorkspaceID,
@@ -197,7 +223,10 @@ func (s *Store) UpsertRoomLoop(ctx context.Context, loop RoomLoop) (RoomLoop, er
 		loop.ReplyStaleAfter.Milliseconds(),
 		loop.TaskStaleAfter.Milliseconds(),
 		loop.MinPulseFloor.Milliseconds(),
+		loop.InterruptAttemptLimit,
+		loop.ReminderBackoffCap,
 		boolToIntCoord(loop.CoordinatorPulseEnabled),
+		boolToIntCoord(loop.CoordinatorEscalationEnabled),
 		now.UnixMilli(),
 		now.UnixMilli(),
 	)
