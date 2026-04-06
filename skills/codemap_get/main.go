@@ -22,6 +22,7 @@ const command = "codemap/get"
 const (
 	DefaultMaxTraceContent = 500
 	DefaultTimeout         = 5 * time.Second
+	DefaultPreviewTraces   = 5
 )
 
 // Input is the expected JSON input for codemap/get operations.
@@ -29,13 +30,18 @@ type Input struct {
 	ID              string `json:"id" validate:"required"`
 	IncludeTraces   *bool  `json:"include_traces,omitempty"`
 	MaxTraceContent int    `json:"max_trace_content,omitempty"`
+	InlineMode      string `json:"inline_mode,omitempty"`
 }
 
 // Output contains the retrieved codemap data and metadata.
 type Output struct {
-	Codemap *CodemapData `json:"codemap,omitempty"`
-	Found   bool         `json:"found"`
-	Stats   Stats        `json:"stats"`
+	Codemap         *CodemapData `json:"codemap,omitempty"`
+	Found           bool         `json:"found"`
+	InlineMode      string       `json:"inline_mode,omitempty"`
+	TracesTotal     int          `json:"traces_total,omitempty"`
+	TracesTruncated bool         `json:"traces_truncated,omitempty"`
+	Artifact        string       `json:"artifact,omitempty"`
+	Stats           Stats        `json:"stats"`
 }
 
 // CodemapData represents the codemap structure for API output.
@@ -83,12 +89,36 @@ type StoredTrace struct {
 	EndLine     int    `json:"end_line"`
 }
 
+type InlineMode string
+
+const (
+	InlineModeAuto         InlineMode = "auto"
+	InlineModeFull         InlineMode = "full"
+	InlineModePreview      InlineMode = "preview"
+	InlineModeArtifactOnly InlineMode = "artifact_only"
+)
+
 // main is the skill entry point for codemap/get.
 func main() {
 	skillmain.Main(command, skillmain.Chain(run,
 		skillmain.WithTimeout[Input](DefaultTimeout),
 		skillmain.WithRecover[Input](),
 	))
+}
+
+func parseInlineMode(value string) (InlineMode, error) {
+	switch InlineMode(strings.ToLower(strings.TrimSpace(value))) {
+	case "", InlineModeAuto:
+		return InlineModeAuto, nil
+	case InlineModeFull:
+		return InlineModeFull, nil
+	case InlineModePreview:
+		return InlineModePreview, nil
+	case InlineModeArtifactOnly:
+		return InlineModeArtifactOnly, nil
+	default:
+		return InlineModeAuto, skillerr.Arg("inline_mode must be one of: auto, full, preview, artifact_only")
+	}
 }
 
 // run retrieves a codemap by ID with configurable trace inclusion and content limits.
@@ -109,6 +139,10 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	if in.IncludeTraces == nil {
 		defaultTrue := true
 		in.IncludeTraces = &defaultTrue
+	}
+	inlineMode, err := parseInlineMode(in.InlineMode)
+	if err != nil {
+		return err
 	}
 
 	start := time.Now()
@@ -154,6 +188,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 
 	if foundEntry == nil {
 		out.Stats.LatencyMS = int(time.Since(start).Milliseconds())
+		out.InlineMode = string(InlineModeFull)
 		return skillout.Emit(rc, command, out)
 	}
 
@@ -232,9 +267,10 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	if out.Codemap.Traces == nil {
 		out.Codemap.Traces = []Trace{}
 	}
+	out.TracesTotal = len(out.Codemap.Traces)
 
 	out.Stats.LatencyMS = int(time.Since(start).Milliseconds())
-	return skillout.Emit(rc, command, out)
+	return emitCodemapOutput(ctx, rc, inlineMode, out)
 }
 
 // extractWindsurfFiles extracts unique file paths from Windsurf codemap locations.
@@ -261,4 +297,74 @@ func extractWindsurfFiles(ws *codemap.WindsurfCodemap) []string {
 	}
 	sort.Strings(paths)
 	return paths
+}
+
+func shouldPreviewCodemapOutput(rc *skillmain.RunContext, out *Output) bool {
+	if out == nil || out.Codemap == nil {
+		return false
+	}
+	if len(out.Codemap.Traces) > DefaultPreviewTraces {
+		return true
+	}
+	payload, err := json.Marshal(out)
+	if err != nil {
+		return false
+	}
+	return rc != nil && rc.ShouldTruncate(len(payload))
+}
+
+func buildCodemapPreview(out *Output) *Output {
+	preview := *out
+	if out.Codemap == nil {
+		preview.InlineMode = string(InlineModePreview)
+		return &preview
+	}
+	cm := *out.Codemap
+	if len(cm.Traces) > DefaultPreviewTraces {
+		cm.Traces = append([]Trace(nil), cm.Traces[:DefaultPreviewTraces]...)
+		preview.TracesTruncated = true
+	}
+	preview.Codemap = &cm
+	preview.InlineMode = string(InlineModePreview)
+	return &preview
+}
+
+func emitCodemapOutput(ctx context.Context, rc *skillmain.RunContext, mode InlineMode, out *Output) error {
+	if out == nil {
+		return skillout.Emit(rc, command, map[string]any{})
+	}
+	switch mode {
+	case InlineModeFull:
+		out.InlineMode = string(InlineModeFull)
+		return skillout.Emit(rc, command, out)
+	case InlineModePreview, InlineModeArtifactOnly:
+		artifact, err := skillmain.PersistJSON(ctx, rc, out, command)
+		if err != nil {
+			return skillerr.WrapIO("persist codemap output", err)
+		}
+		if mode == InlineModeArtifactOnly {
+			return skillout.Emit(rc, command, &Output{
+				Found:       out.Found,
+				InlineMode:  string(InlineModeArtifactOnly),
+				TracesTotal: out.TracesTotal,
+				Artifact:    artifact.Digest,
+				Stats:       out.Stats,
+			})
+		}
+		preview := buildCodemapPreview(out)
+		preview.Artifact = artifact.Digest
+		return skillout.Emit(rc, command, preview)
+	default:
+		if !shouldPreviewCodemapOutput(rc, out) {
+			out.InlineMode = string(InlineModeFull)
+			return skillout.Emit(rc, command, out)
+		}
+		artifact, err := skillmain.PersistJSON(ctx, rc, out, command)
+		if err != nil {
+			return skillerr.WrapIO("persist codemap output", err)
+		}
+		preview := buildCodemapPreview(out)
+		preview.Artifact = artifact.Digest
+		return skillout.Emit(rc, command, preview)
+	}
 }

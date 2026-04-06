@@ -78,6 +78,10 @@ func (r *Registry) registerContextGrepTool() error {
 					Type:        "string",
 					Description: "Expansion target: function, block, or class",
 				},
+				"inline_mode": {
+					Type:        "string",
+					Description: "How much block content to inline: auto, full, preview, or artifact_only",
+				},
 				"max_blocks": {
 					Type:        "integer",
 					Description: "Maximum number of code blocks to return",

@@ -88,3 +88,57 @@ func TestRunValidationGuards(t *testing.T) {
 		t.Fatalf("unexpected input defaults: %+v", in)
 	}
 }
+
+func TestParseInlineMode(t *testing.T) {
+	tests := []struct {
+		in      string
+		want    InlineMode
+		wantErr bool
+	}{
+		{"", InlineModeAuto, false},
+		{"auto", InlineModeAuto, false},
+		{"full", InlineModeFull, false},
+		{"preview", InlineModePreview, false},
+		{"artifact_only", InlineModeArtifactOnly, false},
+		{"bad", InlineModeAuto, true},
+	}
+
+	for _, tt := range tests {
+		got, err := parseInlineMode(tt.in)
+		if tt.wantErr {
+			if err == nil {
+				t.Fatalf("expected error for %q", tt.in)
+			}
+			continue
+		}
+		if err != nil {
+			t.Fatalf("parseInlineMode(%q): %v", tt.in, err)
+		}
+		if got != tt.want {
+			t.Fatalf("parseInlineMode(%q)=%q want %q", tt.in, got, tt.want)
+		}
+	}
+}
+
+func TestApplySnippetInlineModePreview(t *testing.T) {
+	previews := make([]codecontext.SnippetPreview, 0, 20)
+	for i := 0; i < 20; i++ {
+		previews = append(previews, codecontext.SnippetPreview{File: "a.go", Preview: "x"})
+	}
+	data := map[string]any{
+		"snippets_inline": previews,
+		"artifact":        "sha256:abc",
+		"truncated":       false,
+	}
+	applySnippetInlineMode(data, InlineModeAuto)
+	got, _ := data["snippets_inline"].([]codecontext.SnippetPreview)
+	if mode, _ := data["inline_mode"].(string); mode != string(InlineModePreview) {
+		t.Fatalf("inline_mode=%q want preview", mode)
+	}
+	if len(got) != defaultPreviewSnippets {
+		t.Fatalf("snippets_inline=%d want %d", len(got), defaultPreviewSnippets)
+	}
+	if truncated, _ := data["truncated"].(bool); !truncated {
+		t.Fatal("expected truncated preview")
+	}
+}

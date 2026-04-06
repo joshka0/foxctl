@@ -348,3 +348,57 @@ func TestCodemapGet_DefaultsApplied(t *testing.T) {
 	assert.Equal(t, DefaultMaxTraceContent, in.MaxTraceContent)
 	assert.True(t, *in.IncludeTraces)
 }
+
+func TestParseInlineMode(t *testing.T) {
+	tests := []struct {
+		in      string
+		want    InlineMode
+		wantErr bool
+	}{
+		{"", InlineModeAuto, false},
+		{"auto", InlineModeAuto, false},
+		{"full", InlineModeFull, false},
+		{"preview", InlineModePreview, false},
+		{"artifact_only", InlineModeArtifactOnly, false},
+		{"bad", InlineModeAuto, true},
+	}
+
+	for _, tt := range tests {
+		got, err := parseInlineMode(tt.in)
+		if tt.wantErr {
+			if err == nil {
+				t.Fatalf("expected error for %q", tt.in)
+			}
+			continue
+		}
+		if err != nil {
+			t.Fatalf("parseInlineMode(%q): %v", tt.in, err)
+		}
+		if got != tt.want {
+			t.Fatalf("parseInlineMode(%q)=%q want %q", tt.in, got, tt.want)
+		}
+	}
+}
+
+func TestBuildCodemapPreviewTruncatesTraces(t *testing.T) {
+	out := &Output{
+		Found: true,
+		Codemap: &CodemapData{
+			ID: "codemap://x",
+			Traces: []Trace{
+				{Name: "1"}, {Name: "2"}, {Name: "3"}, {Name: "4"}, {Name: "5"}, {Name: "6"},
+			},
+		},
+		TracesTotal: 6,
+	}
+	preview := buildCodemapPreview(out)
+	if preview.InlineMode != string(InlineModePreview) {
+		t.Fatalf("inline_mode=%q want preview", preview.InlineMode)
+	}
+	if len(preview.Codemap.Traces) != DefaultPreviewTraces {
+		t.Fatalf("traces=%d want %d", len(preview.Codemap.Traces), DefaultPreviewTraces)
+	}
+	if !preview.TracesTruncated {
+		t.Fatal("expected trace truncation")
+	}
+}

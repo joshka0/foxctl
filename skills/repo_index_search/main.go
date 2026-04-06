@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -17,10 +18,36 @@ import (
 const Command = "repo/index_search"
 
 type Input struct {
-	Query     string `json:"query"`
-	Workspace string `json:"workspace,omitempty"`
-	Limit     int    `json:"limit,omitempty"`
+	Query      string `json:"query"`
+	Workspace  string `json:"workspace,omitempty"`
+	Limit      int    `json:"limit,omitempty"`
+	InlineMode string `json:"inline_mode,omitempty"`
 }
+
+type Output struct {
+	Count        int                `json:"count"`
+	Results      []repoindex.Node   `json:"results"`
+	Anchors      []repoquery.Anchor `json:"anchors,omitempty"`
+	Workspace    string             `json:"workspace,omitempty"`
+	InlineMode   string             `json:"inline_mode,omitempty"`
+	ResultsTotal int                `json:"results_total,omitempty"`
+	AnchorsTotal int                `json:"anchors_total,omitempty"`
+	Truncated    bool               `json:"truncated,omitempty"`
+	Artifact     string             `json:"artifact,omitempty"`
+}
+
+type InlineMode string
+
+const (
+	InlineModeAuto         InlineMode = "auto"
+	InlineModeFull         InlineMode = "full"
+	InlineModePreview      InlineMode = "preview"
+	InlineModeArtifactOnly InlineMode = "artifact_only"
+	defaultPreviewResults             = 20
+	defaultPreviewAnchors             = 12
+	previewDocLimit                   = 240
+	previewSummaryLimit               = 180
+)
 
 func main() {
 	skillmain.Main(Command, run)
@@ -53,11 +80,11 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 		return skillerr.WrapIO("repo index search", err)
 	}
 
-	return skillout.Emit(rc, Command, map[string]any{
-		"count":     len(result.Nodes),
-		"results":   result.Nodes,
-		"anchors":   result.Anchors,
-		"workspace": workspaceRoot,
+	return emitSearchOutput(ctx, rc, in, Output{
+		Count:     len(result.Nodes),
+		Results:   result.Nodes,
+		Anchors:   result.Anchors,
+		Workspace: workspaceRoot,
 	})
 }
 
@@ -73,4 +100,127 @@ func resolveWorkspace(base, override string) (string, error) {
 		workspace = filepath.Join(base, workspace)
 	}
 	return filepath.Abs(workspace)
+}
+
+func parseInlineMode(value string) (InlineMode, error) {
+	switch InlineMode(strings.ToLower(strings.TrimSpace(value))) {
+	case "", InlineModeAuto:
+		return InlineModeAuto, nil
+	case InlineModeFull:
+		return InlineModeFull, nil
+	case InlineModePreview:
+		return InlineModePreview, nil
+	case InlineModeArtifactOnly:
+		return InlineModeArtifactOnly, nil
+	default:
+		return InlineModeAuto, skillerr.Arg("inline_mode must be one of: auto, full, preview, artifact_only")
+	}
+}
+
+func compactSearchNode(node repoindex.Node) repoindex.Node {
+	if node.Doc != "" {
+		node.Doc = truncateText(node.Doc, previewDocLimit)
+	}
+	if node.Summary != "" {
+		node.Summary = truncateText(node.Summary, previewSummaryLimit)
+	}
+	node.Meta = nil
+	return node
+}
+
+func compactAnchor(anchor repoquery.Anchor) repoquery.Anchor {
+	if anchor.Summary != "" {
+		anchor.Summary = truncateText(anchor.Summary, previewSummaryLimit)
+	}
+	return anchor
+}
+
+func truncateText(value string, limit int) string {
+	value = strings.TrimSpace(value)
+	if limit <= 0 || len(value) <= limit {
+		return value
+	}
+	return strings.TrimSpace(value[:limit]) + "..."
+}
+
+func estimateSearchOutputSize(out Output) int {
+	payload, err := json.Marshal(out)
+	if err != nil {
+		return 0
+	}
+	return len(payload)
+}
+
+func trimSearchOutput(out Output) Output {
+	preview := out
+	if len(preview.Results) > defaultPreviewResults {
+		preview.Results = append([]repoindex.Node(nil), preview.Results[:defaultPreviewResults]...)
+	}
+	for i := range preview.Results {
+		preview.Results[i] = compactSearchNode(preview.Results[i])
+	}
+	if len(preview.Anchors) > defaultPreviewAnchors {
+		preview.Anchors = append([]repoquery.Anchor(nil), preview.Anchors[:defaultPreviewAnchors]...)
+	}
+	for i := range preview.Anchors {
+		preview.Anchors[i] = compactAnchor(preview.Anchors[i])
+	}
+	preview.InlineMode = string(InlineModePreview)
+	preview.ResultsTotal = out.Count
+	preview.AnchorsTotal = len(out.Anchors)
+	preview.Truncated = len(preview.Results) < out.Count || len(preview.Anchors) < len(out.Anchors)
+	return preview
+}
+
+func shouldPreviewSearchOutput(rc *skillmain.RunContext, out Output) bool {
+	if len(out.Results) > defaultPreviewResults || len(out.Anchors) > defaultPreviewAnchors {
+		return true
+	}
+	return rc != nil && rc.ShouldTruncate(estimateSearchOutputSize(out))
+}
+
+func emitSearchOutput(ctx context.Context, rc *skillmain.RunContext, in Input, out Output) error {
+	mode, err := parseInlineMode(in.InlineMode)
+	if err != nil {
+		return err
+	}
+	out.ResultsTotal = out.Count
+	out.AnchorsTotal = len(out.Anchors)
+
+	switch mode {
+	case InlineModeFull:
+		out.InlineMode = string(InlineModeFull)
+		return skillout.Emit(rc, Command, out)
+	case InlineModePreview, InlineModeArtifactOnly:
+		artifact, err := skillmain.PersistJSON(ctx, rc, out, Command)
+		if err != nil {
+			return skillerr.WrapIO("persist output", err)
+		}
+		if mode == InlineModeArtifactOnly {
+			return skillout.Emit(rc, Command, Output{
+				Count:        out.Count,
+				Workspace:    out.Workspace,
+				InlineMode:   string(InlineModeArtifactOnly),
+				ResultsTotal: out.ResultsTotal,
+				AnchorsTotal: out.AnchorsTotal,
+				Truncated:    true,
+				Artifact:     artifact.Digest,
+			})
+		}
+		preview := trimSearchOutput(out)
+		preview.Artifact = artifact.Digest
+		return skillout.Emit(rc, Command, preview)
+	default:
+		if !shouldPreviewSearchOutput(rc, out) {
+			out.InlineMode = string(InlineModeFull)
+			return skillout.Emit(rc, Command, out)
+		}
+		artifact, err := skillmain.PersistJSON(ctx, rc, out, Command)
+		if err != nil {
+			return skillerr.WrapIO("persist output", err)
+		}
+		preview := trimSearchOutput(out)
+		preview.Artifact = artifact.Digest
+		return skillout.Emit(rc, Command, preview)
+	}
 }

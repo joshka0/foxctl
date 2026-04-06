@@ -200,3 +200,61 @@ func TestSummary_JSONMarshal(t *testing.T) {
 		t.Errorf("snippets_emitted mismatch")
 	}
 }
+
+func TestParseInlineMode(t *testing.T) {
+	tests := []struct {
+		in      string
+		want    InlineMode
+		wantErr bool
+	}{
+		{"", InlineModeAuto, false},
+		{"auto", InlineModeAuto, false},
+		{"full", InlineModeFull, false},
+		{"preview", InlineModePreview, false},
+		{"artifact_only", InlineModeArtifactOnly, false},
+		{"bad", InlineModeAuto, true},
+	}
+
+	for _, tt := range tests {
+		got, err := parseInlineMode(tt.in)
+		if tt.wantErr {
+			if err == nil {
+				t.Fatalf("expected error for %q", tt.in)
+			}
+			continue
+		}
+		if err != nil {
+			t.Fatalf("parseInlineMode(%q): %v", tt.in, err)
+		}
+		if got != tt.want {
+			t.Fatalf("parseInlineMode(%q)=%q want %q", tt.in, got, tt.want)
+		}
+	}
+}
+
+func TestApplySmartSearchInlineModePreview(t *testing.T) {
+	snippets := make([]json.RawMessage, 0, 20)
+	for i := 0; i < 20; i++ {
+		snippets = append(snippets, json.RawMessage(`{"file":"a.go","preview":"x"}`))
+	}
+	out := Output{
+		Candidates:      make([]CandidateOutput, 20),
+		CandidatesTotal: 20,
+		SnippetsInline:  snippets,
+		SnippetsTotal:   20,
+		Artifact:        "sha256:abc",
+	}
+	got := applySmartSearchInlineMode(out, InlineModeAuto)
+	if got.InlineMode != string(InlineModePreview) {
+		t.Fatalf("inline_mode=%q want preview", got.InlineMode)
+	}
+	if len(got.Candidates) != defaultPreviewCandidates {
+		t.Fatalf("candidates=%d want %d", len(got.Candidates), defaultPreviewCandidates)
+	}
+	if len(got.SnippetsInline) != defaultPreviewSnippets {
+		t.Fatalf("snippets_inline=%d want %d", len(got.SnippetsInline), defaultPreviewSnippets)
+	}
+	if !got.Truncated {
+		t.Fatal("expected truncated preview")
+	}
+}

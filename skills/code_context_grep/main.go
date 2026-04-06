@@ -36,6 +36,15 @@ const (
 	ModeLine    Mode = "line"    // Line range expansion
 )
 
+type InlineMode string
+
+const (
+	InlineModeAuto         InlineMode = "auto"
+	InlineModeFull         InlineMode = "full"
+	InlineModePreview      InlineMode = "preview"
+	InlineModeArtifactOnly InlineMode = "artifact_only"
+)
+
 const maxASTGrepLineBytes = 4 * 1024 * 1024
 
 // input defines the skill input parameters for code context search with multiple modes and comprehensive options.
@@ -46,6 +55,7 @@ type input struct {
 	MaxBlockLines    int    `json:"max_block_lines"`
 	MaxBlocksPerFile int    `json:"max_blocks_per_file"`
 	MaxBytesPerFile  int    `json:"max_bytes_per_file"`
+	InlineMode       string `json:"inline_mode,omitempty"`
 
 	// Mode selection (auto-detected if not specified)
 	Mode Mode `json:"mode,omitempty"`
@@ -218,6 +228,23 @@ func parsePatternMode(value string) (string, bool, error) {
 	default:
 		return "regex", false, skillerr.Arg("pattern_mode must be one of: regex, literal",
 			skillerr.WithHint("Set pattern_mode to literal to treat the pattern as a literal string."),
+		)
+	}
+}
+
+func parseInlineMode(value string) (InlineMode, error) {
+	switch InlineMode(strings.ToLower(strings.TrimSpace(value))) {
+	case "", InlineModeAuto:
+		return InlineModeAuto, nil
+	case InlineModeFull:
+		return InlineModeFull, nil
+	case InlineModePreview:
+		return InlineModePreview, nil
+	case InlineModeArtifactOnly:
+		return InlineModeArtifactOnly, nil
+	default:
+		return InlineModeAuto, skillerr.Arg("inline_mode must be one of: auto, full, preview, artifact_only",
+			skillerr.WithHint("Use inline_mode:\"preview\" to force compact inline blocks, or artifact_only to rely on the CAS artifact."),
 		)
 	}
 }
@@ -532,11 +559,14 @@ func mergeOverlappingBlocks(blocks []Block, lines []string) []Block {
 func emitEmptyResult(rc *skillmain.RunContext, in input, mode Mode) error {
 	data := map[string]any{
 		"mode":                string(mode),
+		"inline_mode":         string(InlineModeFull),
 		"pattern":             in.Pattern,
 		"pattern_mode":        in.PatternMode,
 		"ast_pattern":         in.ASTPattern,
 		"match_count":         0,
 		"block_count":         0,
+		"blocks_shown":        0,
+		"blocks_truncated":    false,
 		"files_touched":       0,
 		"preview":             []BlockPreview{},
 		"blocks":              []Block{},
@@ -549,6 +579,54 @@ func emitEmptyResult(rc *skillmain.RunContext, in input, mode Mode) error {
 		"include_definitions": in.IncludeDefinitions,
 	}
 	return skillout.Emit(rc, "code/context_grep", data)
+}
+
+func estimateJSONSize(v any) int {
+	payload, err := json.Marshal(v)
+	if err != nil {
+		return 0
+	}
+	return len(payload)
+}
+
+func ensureBlocksArtifact(ctx context.Context, rc *skillmain.RunContext, blocks []Block, artifact *skillmain.Artifact) (*skillmain.Artifact, error) {
+	if artifact != nil || rc == nil || rc.CASStore == nil || len(blocks) == 0 {
+		return artifact, nil
+	}
+	if !rc.ShouldTruncate(estimateJSONSize(blocks)) {
+		return artifact, nil
+	}
+	persisted, err := skillmain.PersistJSON(ctx, rc, blocks, "code_context_grep_blocks")
+	if err != nil {
+		return artifact, skillerr.WrapRuntime("persist context_grep blocks to CAS", err)
+	}
+	return &persisted, nil
+}
+
+func resolveInlineSelection(requested string, totalBlocks, previewBlocks int, hasArtifact, fullTooLarge bool) (InlineMode, bool, bool, error) {
+	inlineMode, err := parseInlineMode(requested)
+	if err != nil {
+		return InlineModeAuto, false, false, err
+	}
+
+	switch inlineMode {
+	case InlineModeFull:
+		return InlineModeFull, false, false, nil
+	case InlineModePreview:
+		return InlineModePreview, true, previewBlocks < totalBlocks, nil
+	case InlineModeArtifactOnly:
+		return InlineModeArtifactOnly, false, totalBlocks > 0, nil
+	case InlineModeAuto:
+		if hasArtifact && previewBlocks > 0 && previewBlocks < totalBlocks {
+			return InlineModePreview, true, true, nil
+		}
+		if hasArtifact && fullTooLarge && previewBlocks == 0 && totalBlocks > 0 {
+			return InlineModeArtifactOnly, false, true, nil
+		}
+		return InlineModeFull, false, false, nil
+	default:
+		return InlineModeAuto, false, false, nil
+	}
 }
 
 func finalizeMergedBlock(block Block, lines []string) Block {
@@ -883,8 +961,23 @@ func emitResult(ctx context.Context, rc *skillmain.RunContext, in input, blocks 
 	if err != nil {
 		return err
 	}
+	artifact, err := ensureBlocksArtifact(ctx, rc, blocks, previewResult.Artifact)
+	if err != nil {
+		return err
+	}
+	fullTooLarge := rc != nil && rc.ShouldTruncate(estimateJSONSize(blocks))
+	resolvedInlineMode, usePreviewBlocks, blocksTruncated, err := resolveInlineSelection(in.InlineMode, len(blocks), len(previewResult.Preview), artifact != nil, fullTooLarge)
+	if err != nil {
+		return err
+	}
+	inlineBlocks := blocks
+	if usePreviewBlocks {
+		inlineBlocks = previewResult.Preview
+	}
+	if resolvedInlineMode == InlineModeArtifactOnly {
+		inlineBlocks = []Block{}
+	}
 	preview := codeblocks.PrepareBlockPreview(previewResult.Preview)
-	artifact := previewResult.Artifact
 	renderedContext := renderContextMarkdown(previewResult.Preview)
 
 	// Calculate totals
@@ -898,14 +991,17 @@ func emitResult(ctx context.Context, rc *skillmain.RunContext, in input, blocks 
 
 	data := map[string]any{
 		"mode":                string(mode),
+		"inline_mode":         string(resolvedInlineMode),
 		"pattern":             in.Pattern,
 		"pattern_mode":        in.PatternMode,
 		"ast_pattern":         in.ASTPattern,
 		"match_count":         totalMatches,
 		"block_count":         len(blocks),
+		"blocks_shown":        len(inlineBlocks),
+		"blocks_truncated":    blocksTruncated,
 		"files_touched":       len(fileHits),
 		"preview":             preview,
-		"blocks":              blocks,
+		"blocks":              inlineBlocks,
 		"rendered_context":    renderedContext,
 		"render_format":       "markdown",
 		"top_files":           skillout.SummarizeTopFiles(fileHits, 5),

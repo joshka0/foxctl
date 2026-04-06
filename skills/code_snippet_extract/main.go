@@ -56,9 +56,20 @@ type Input struct {
 	WorkspaceID string                  `json:"workspace_id"`
 	Question    string                  `json:"question"`
 	Query       string                  `json:"query"`
+	InlineMode  string                  `json:"inline_mode,omitempty"`
 	Candidates  []codecontext.Candidate `json:"candidates"`
 	Limits      Limits                  `json:"limits,omitempty"`
 }
+
+type InlineMode string
+
+const (
+	InlineModeAuto         InlineMode = "auto"
+	InlineModeFull         InlineMode = "full"
+	InlineModePreview      InlineMode = "preview"
+	InlineModeArtifactOnly InlineMode = "artifact_only"
+	defaultPreviewSnippets            = 12
+)
 
 type SessionContext struct {
 	SessionID string   `json:"session_id"`
@@ -113,6 +124,10 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	}
 
 	start := time.Now()
+	inlineMode, err := parseInlineMode(in.InlineMode)
+	if err != nil {
+		return err
+	}
 
 	limits := applyDefaultLimits(in.Limits)
 
@@ -143,13 +158,21 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 		return skillerr.WrapRuntime("prepare codecontext output", err)
 	}
 
+	inlinePreviews := output.SnippetsInline
+	if artifactPayload != nil && len(inlinePreviews) == 0 && len(evidence.Snippets) > 0 {
+		inlinePreviews = codecontext.MakePreviews(evidence.Snippets, 512)
+	}
+
 	data := map[string]any{
 		"summary": map[string]int{
 			"files_considered": evidence.Stats.FilesProcessed + evidence.Stats.FilesSkipped,
 			"files_relevant":   evidence.Stats.FilesProcessed,
 			"snippets_emitted": len(evidence.Snippets),
 		},
-		"snippets_inline": output.SnippetsInline,
+		"snippets_inline": inlinePreviews,
+		"snippets_total":  len(evidence.Snippets),
+		"inline_mode":     string(inlineMode),
+		"truncated":       output.Truncated || artifactPayload != nil,
 	}
 	if len(output.Hints) > 0 {
 		data["hints"] = output.Hints
@@ -169,6 +192,8 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 		}
 		skillout.AddArtifact(data, &artifact)
 	}
+
+	applySnippetInlineMode(data, inlineMode)
 
 	hasArtifact := data["artifact"] != nil
 	durationMS := time.Since(start).Milliseconds()
@@ -197,6 +222,51 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	_ = observability.WriteSweGrepEvent(ctx, ev)
 
 	return skillout.Emit(rc, Command, data)
+}
+
+func parseInlineMode(value string) (InlineMode, error) {
+	switch InlineMode(strings.ToLower(strings.TrimSpace(value))) {
+	case "", InlineModeAuto:
+		return InlineModeAuto, nil
+	case InlineModeFull:
+		return InlineModeFull, nil
+	case InlineModePreview:
+		return InlineModePreview, nil
+	case InlineModeArtifactOnly:
+		return InlineModeArtifactOnly, nil
+	default:
+		return InlineModeAuto, skillerr.Validationf("invalid inline_mode: %s (valid: auto, full, preview, artifact_only)", strings.TrimSpace(value))
+	}
+}
+
+func applySnippetInlineMode(data map[string]any, requested InlineMode) {
+	raw, _ := data["snippets_inline"].([]codecontext.SnippetPreview)
+	hasArtifact := data["artifact"] != nil
+	resolved := requested
+	if resolved == InlineModeAuto {
+		if hasArtifact || len(raw) > defaultPreviewSnippets {
+			resolved = InlineModePreview
+		} else {
+			resolved = InlineModeFull
+		}
+	}
+	if resolved == InlineModeArtifactOnly && !hasArtifact {
+		resolved = InlineModePreview
+	}
+	data["inline_mode"] = string(resolved)
+
+	switch resolved {
+	case InlineModeFull:
+		return
+	case InlineModePreview:
+		if len(raw) > defaultPreviewSnippets {
+			data["snippets_inline"] = append([]codecontext.SnippetPreview(nil), raw[:defaultPreviewSnippets]...)
+			data["truncated"] = true
+		}
+	case InlineModeArtifactOnly:
+		data["snippets_inline"] = []codecontext.SnippetPreview{}
+		data["truncated"] = true
+	}
 }
 
 func fatalErrorForEvidence(evidence *codecontext.Evidence) *skillerr.Error {

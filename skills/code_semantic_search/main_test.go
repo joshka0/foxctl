@@ -8,10 +8,152 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
 	"github.com/jkatigb/agentctl/internal/contextplane"
 	"github.com/jkatigb/agentctl/internal/platform/config"
+	"github.com/jkatigb/agentctl/internal/retrieval"
 	"github.com/jkatigb/agentctl/internal/storage/memory"
 )
+
+func TestParseInlineMode(t *testing.T) {
+	tests := []struct {
+		input   string
+		want    InlineMode
+		wantErr bool
+	}{
+		{input: "", want: InlineModeAuto},
+		{input: "auto", want: InlineModeAuto},
+		{input: "full", want: InlineModeFull},
+		{input: "preview", want: InlineModePreview},
+		{input: "artifact_only", want: InlineModeArtifactOnly},
+		{input: "nope", wantErr: true},
+	}
+
+	for _, tt := range tests {
+		got, err := parseInlineMode(tt.input)
+		if tt.wantErr {
+			if err == nil {
+				t.Fatalf("expected error for %q", tt.input)
+			}
+			continue
+		}
+		if err != nil {
+			t.Fatalf("parseInlineMode(%q): %v", tt.input, err)
+		}
+		if got != tt.want {
+			t.Fatalf("parseInlineMode(%q)=%q want %q", tt.input, got, tt.want)
+		}
+	}
+}
+
+func TestShouldPreviewSemanticOutput(t *testing.T) {
+	rc := &skillmain.RunContext{InlineKB: 64, MaxPreview: 5}
+	out := &Output{
+		Query: "test",
+		Results: []Result{
+			{Name: "a"}, {Name: "b"}, {Name: "c"}, {Name: "d"}, {Name: "e"}, {Name: "f"},
+		},
+	}
+	if !shouldPreviewSemanticOutput(rc, out) {
+		t.Fatal("expected preview when results exceed MaxPreview")
+	}
+}
+
+func TestBuildSemanticSearchPreview_TruncatesNestedPayloads(t *testing.T) {
+	out := &Output{
+		Query: "test",
+		Results: []Result{
+			{Name: "r1", Timeline: &SessionTimeline{SessionID: "s1"}},
+			{Name: "r2", Timeline: &SessionTimeline{SessionID: "s2"}},
+			{Name: "r3", Timeline: &SessionTimeline{SessionID: "s3"}},
+		},
+		CandidateBundles: []CandidateBundle{
+			{Key: "a"}, {Key: "b"}, {Key: "c"}, {Key: "d"}, {Key: "e"}, {Key: "f"}, {Key: "g"},
+		},
+		ContextHints: []ContextHint{
+			{Type: "a"}, {Type: "b"}, {Type: "c"}, {Type: "d"},
+		},
+		Timelines: []SessionTimeline{
+			{
+				SessionID: "s1",
+				ChunkSummaries: []TimelineChunk{
+					{Summary: "1"}, {Summary: "2"}, {Summary: "3"}, {Summary: "4"},
+				},
+				Learnings: []TimelineLearning{
+					{Summary: "a"}, {Summary: "b"}, {Summary: "c"}, {Summary: "d"},
+				},
+				Rollup: &TimelineRollup{
+					SummaryLines: []string{"1", "2", "3", "4", "5", "6"},
+					Tools:        []string{"a", "b", "c", "d", "e", "f"},
+				},
+			},
+			{SessionID: "s2"},
+			{SessionID: "s3"},
+		},
+		TreeText: strings.Repeat("x", DefaultPreviewTreeTextRunes+100),
+		Tree: &retrieval.TreeOutput{
+			Stats: retrieval.TreeStats{TotalFiles: 10, TotalDirectories: 5},
+		},
+	}
+
+	preview := buildSemanticSearchPreview(out, InlineModePreview, 2)
+	if preview.InlineMode != string(InlineModePreview) {
+		t.Fatalf("inline_mode=%q want preview", preview.InlineMode)
+	}
+	if len(preview.Results) != 2 {
+		t.Fatalf("results=%d want 2", len(preview.Results))
+	}
+	if preview.Results[0].Timeline != nil {
+		t.Fatal("expected inline result timelines to be cleared in preview")
+	}
+	if len(preview.CandidateBundles) != DefaultPreviewCandidateBundles {
+		t.Fatalf("candidate_bundles=%d want %d", len(preview.CandidateBundles), DefaultPreviewCandidateBundles)
+	}
+	if len(preview.ContextHints) != DefaultPreviewContextHints {
+		t.Fatalf("context_hints=%d want %d", len(preview.ContextHints), DefaultPreviewContextHints)
+	}
+	if len(preview.Timelines) != DefaultPreviewTimelines {
+		t.Fatalf("timelines=%d want %d", len(preview.Timelines), DefaultPreviewTimelines)
+	}
+	if len(preview.Timelines[0].ChunkSummaries) != DefaultPreviewTimelineChunks {
+		t.Fatalf("chunk_summaries=%d want %d", len(preview.Timelines[0].ChunkSummaries), DefaultPreviewTimelineChunks)
+	}
+	if len(preview.Timelines[0].Learnings) != DefaultPreviewTimelineLearns {
+		t.Fatalf("learnings=%d want %d", len(preview.Timelines[0].Learnings), DefaultPreviewTimelineLearns)
+	}
+	if preview.Tree != nil {
+		t.Fatal("expected tree object omitted in preview mode")
+	}
+	if !preview.TreeTextTruncated {
+		t.Fatal("expected tree text truncation marker")
+	}
+	if preview.ResultsTotal != 3 || preview.CandidateBundlesTotal != 7 || preview.ContextHintsTotal != 4 || preview.TimelinesTotal != 3 {
+		t.Fatalf("unexpected totals: %+v", preview)
+	}
+}
+
+func TestBuildSemanticSearchPreview_ArtifactOnlyClearsInlinePayload(t *testing.T) {
+	out := &Output{
+		Query:            "test",
+		Results:          []Result{{Name: "r1"}},
+		CandidateBundles: []CandidateBundle{{Key: "a"}},
+		ContextHints:     []ContextHint{{Type: "hint"}},
+		Timelines:        []SessionTimeline{{SessionID: "s1"}},
+		TreeText:         "tree",
+		Tree:             &retrieval.TreeOutput{},
+	}
+
+	preview := buildSemanticSearchPreview(out, InlineModeArtifactOnly, 5)
+	if len(preview.Results) != 0 || len(preview.CandidateBundles) != 0 || len(preview.ContextHints) != 0 || len(preview.Timelines) != 0 {
+		t.Fatalf("expected inline payload cleared: %+v", preview)
+	}
+	if preview.Tree != nil {
+		t.Fatal("expected tree omitted")
+	}
+	if preview.TreeText != "" || !preview.TreeTextTruncated {
+		t.Fatalf("unexpected tree text state: %q truncated=%v", preview.TreeText, preview.TreeTextTruncated)
+	}
+}
 
 func TestDimensionValidation(t *testing.T) {
 	// Test cases for dimension validation logic

@@ -416,6 +416,22 @@ agentctl mcp stop
 The MCP server exposes all available skills as MCP tools via SSE transport,
 allowing any MCP-compatible client to discover and invoke them.
 
+For agent use, prefer the narrow optimized retrieval surface instead of the full MCP facade:
+
+```bash
+# Start only the compact retrieval tools we optimized for agents
+agentctl mcp serve --optimized-retrieval
+```
+
+That profile exposes:
+- `structured_shell`
+- `repo_index_search`
+- `repo_index_expand`
+- `repo_index_dag_grep`
+- optimized retrieval skills such as `code/semantic_search`, `code/smart_search`, `code/snippet_extract`, `code/context_grep`, `code/dag_grep`, and `codemap/get`
+
+Use this when you want agent-friendly retrieval without overloading the tool surface with unrelated browser, web, or project-management tools.
+
 ---
 
 ## GUI & TUI

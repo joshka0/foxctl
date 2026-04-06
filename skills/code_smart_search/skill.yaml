@@ -2,7 +2,7 @@ apiVersion: agentctl/v1
 kind: Skill
 metadata:
   name: code/smart_search
-  version: 0.2.0
+  version: 0.3.0
   description: "Smart code search: auto-generates candidates from indexes and extracts relevant snippets"
   tags: ["code", "search", "snippets", "retrieval", "smart", "auto"]
 distribution:
@@ -37,6 +37,12 @@ signature:
       required: false
       default: auto
       description: "Repo-index contribution mode: auto (default, search-first with DAG fallback on zero hits), search (precise structural), dag (broader graph exploration), or off"
+    - name: inline_mode
+      type: string
+      required: false
+      default: auto
+      enum: ["auto", "full", "preview", "artifact_only"]
+      description: "How much candidate/snippet detail to inline; auto prefers preview when artifacts are present or result sets are larger"
     - name: limits
       type: object
       required: false
@@ -58,9 +64,21 @@ signature:
     - name: candidates
       type: array
       description: "Generated candidates with path, symbol_id, score, source"
+    - name: candidates_total
+      type: integer
+      description: "Total candidates before inline preview truncation"
     - name: snippets_inline
       type: array
       description: "Inline snippet previews"
+    - name: snippets_total
+      type: integer
+      description: "Total snippets before inline preview truncation"
+    - name: inline_mode
+      type: string
+      description: "Resolved inline mode used for the response"
+    - name: truncated
+      type: boolean
+      description: "Whether inline candidates or snippets were preview-truncated"
     - name: artifact
       type: string
       description: "CAS digest of full snippets when output exceeds inline threshold"

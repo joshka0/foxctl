@@ -3,7 +3,7 @@ kind: Skill
 metadata:
   name: code/semantic_search
   description: Unified semantic search across code, session, memory, and ACA context with BM25/vector fallback
-  version: 0.2.0
+  version: 0.3.0
   author: agentctl
   tags: [search, semantic, embedding, symbols, sessions, memories, codemaps]
 distribution:
@@ -87,6 +87,12 @@ signature:
       required: false
       default: json
       description: Output format - "json" (default) or "tree" (displays file paths as directory tree)
+    - name: inline_mode
+      type: string
+      required: false
+      default: auto
+      enum: ["auto", "full", "preview", "artifact_only"]
+      description: How much result detail to inline; auto prefers preview + artifact for larger outputs
     - name: repo_index_mode
       type: string
       required: false
@@ -113,21 +119,42 @@ signature:
     - name: results
       type: array
       description: Ranked search results from all sources
+    - name: results_total
+      type: integer
+      description: Total ranked results before inline preview truncation
     - name: candidate_bundles
       type: array
       description: Grouped candidate bundles for downstream narrowing (machine-usable wide-stage handoff)
+    - name: candidate_bundles_total
+      type: integer
+      description: Total candidate bundles before inline preview truncation
     - name: context_hints
       type: array
       description: Context hints from related sessions
+    - name: context_hints_total
+      type: integer
+      description: Total context hints before inline preview truncation
     - name: stats
       type: object
       description: Search statistics (counts, latencies, missing sources)
+    - name: inline_mode
+      type: string
+      description: Resolved inline mode used for the response
     - name: tree_text
       type: string
       description: ASCII tree visualization of related files (present when format=tree)
+    - name: tree_text_truncated
+      type: boolean
+      description: Whether the inline tree text was truncated in preview mode
     - name: timelines
       type: array
       description: Timeline data for matched sessions (present when timeline=true)
+    - name: timelines_total
+      type: integer
+      description: Total timelines before inline preview truncation
+    - name: artifact
+      type: string
+      description: CAS artifact digest for the full untruncated output when previewed inline
   help:
     short: "Search code, sessions, and memories with semantic understanding"
     long: |

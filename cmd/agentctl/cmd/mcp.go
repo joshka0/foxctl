@@ -69,6 +69,16 @@ var skillGroups = map[string][]string{
 		"code/dag_grep",
 		"codemap/get",
 	},
+	// optimized-retrieval: Only the compact retrieval tools we optimized for agent use.
+	// Keep repo_index_* and structured_shell in curated MCP registration to avoid name conflicts.
+	"optimized-retrieval": {
+		"code/semantic_search",
+		"code/smart_search",
+		"code/snippet_extract",
+		"code/context_grep",
+		"code/dag_grep",
+		"codemap/get",
+	},
 	// code-write: Code modification tools
 	"code-write": {
 		"fs/apply_edit",
@@ -265,11 +275,12 @@ const (
 
 func newMCPServeCommand() *cobra.Command {
 	var (
-		configFile   string
-		httpAddr     string
-		enableSkills bool
-		daemonMode   bool
-		skillGroupsF []string
+		configFile         string
+		httpAddr           string
+		enableSkills       bool
+		daemonMode         bool
+		skillGroupsF       []string
+		optimizedRetrieval bool
 	)
 
 	cmd := &cobra.Command{
@@ -286,6 +297,7 @@ Use --groups to expose specific skill groups as first-class MCP tools.
 Available skill groups:
   all         - All installed agentctl skills as first-class MCP tools
   code-intel  - Code analysis: semantic_search, smart_search, symbols, snippet_extract, context_grep, codemap_get, codemap_generate
+  optimized-retrieval - Only the compact retrieval tools optimized for agent use
   code-write  - Code modification: smart_write
   project     - Project management: todo/manage, memory/query, session/recall
   agentctl-ci - CI/CD integration: checks, prcomments
@@ -311,7 +323,10 @@ Example usage in Claude's mcp.json (stdio):
 Example usage with HTTP/SSE daemon (foreground):
   agentctl mcp serve --http :8091 --groups code-intel,project
 
-Example usage with daemon mode (background):
+  # Start a narrow retrieval-focused MCP bridge
+  agentctl mcp serve --optimized-retrieval
+
+  Example usage with daemon mode (background):
   # Start daemon in background
   agentctl mcp serve --daemon --groups code-intel,project,agentctl-ci
 
@@ -330,23 +345,36 @@ Example usage with daemon mode (background):
     }
   }`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			if !optimizedRetrieval {
+				for _, group := range skillGroupsF {
+					if strings.EqualFold(strings.TrimSpace(group), "optimized-retrieval") {
+						optimizedRetrieval = true
+						break
+					}
+				}
+			}
+			if optimizedRetrieval && len(skillGroupsF) == 0 {
+				skillGroupsF = []string{"optimized-retrieval"}
+			}
 			// Daemon mode implies HTTP mode with default port
 			if daemonMode {
 				if httpAddr == "" {
 					httpAddr = defaultDaemonPort
 				}
 				return runDaemonMode(cmd.Context(), mcpServerOptions{
-					configFile:   configFile,
-					httpAddr:     httpAddr,
-					enableSkills: enableSkills,
-					groups:       skillGroupsF,
+					configFile:         configFile,
+					httpAddr:           httpAddr,
+					enableSkills:       enableSkills,
+					groups:             skillGroupsF,
+					optimizedRetrieval: optimizedRetrieval,
 				})
 			}
 			return runMCPServer(cmd.Context(), mcpServerOptions{
-				configFile:   configFile,
-				httpAddr:     httpAddr,
-				enableSkills: enableSkills,
-				groups:       skillGroupsF,
+				configFile:         configFile,
+				httpAddr:           httpAddr,
+				enableSkills:       enableSkills,
+				groups:             skillGroupsF,
+				optimizedRetrieval: optimizedRetrieval,
 			})
 		},
 	}
@@ -356,6 +384,7 @@ Example usage with daemon mode (background):
 	cmd.Flags().BoolVar(&enableSkills, "skills", false, "Expose all agentctl skills via agentctl_run/agentctl_skills tools")
 	cmd.Flags().BoolVar(&daemonMode, "daemon", false, "Run as background daemon (implies --http :8091)")
 	cmd.Flags().StringSliceVar(&skillGroupsF, "groups", nil, "Skill groups to expose as first-class tools (code-intel,code-write,project,agentctl-ci)")
+	cmd.Flags().BoolVar(&optimizedRetrieval, "optimized-retrieval", false, "Expose only the optimized retrieval MCP surface: structured_shell, repo index retrieval, and the optimized-retrieval skill group")
 	return cmd
 }
 
@@ -386,6 +415,9 @@ func runDaemonMode(ctx context.Context, opts mcpServerOptions) error {
 	args := []string{"mcp", "serve", "--http", opts.httpAddr}
 	if opts.enableSkills {
 		args = append(args, "--skills")
+	}
+	if opts.optimizedRetrieval {
+		args = append(args, "--optimized-retrieval")
 	}
 	if opts.configFile != "" {
 		args = append(args, "--config", opts.configFile)
@@ -580,10 +612,11 @@ func newMCPStatusCommand() *cobra.Command {
 
 // mcpServerOptions holds configuration for the MCP server.
 type mcpServerOptions struct {
-	configFile   string
-	httpAddr     string
-	enableSkills bool
-	groups       []string
+	configFile         string
+	httpAddr           string
+	enableSkills       bool
+	groups             []string
+	optimizedRetrieval bool
 }
 
 func runMCPServer(ctx context.Context, opts mcpServerOptions) error {
@@ -609,8 +642,12 @@ func runMCPServer(ctx context.Context, opts mcpServerOptions) error {
 		server.WithToolCapabilities(true),
 	)
 
-	// Register curated tools with simplified schemas (external MCP proxies + html)
-	registerTools(s)
+	// Register curated tools with simplified schemas.
+	if opts.optimizedRetrieval {
+		registerOptimizedRetrievalTools(s)
+	} else {
+		registerTools(s)
+	}
 
 	// Register skill groups as first-class MCP tools
 	if len(opts.groups) > 0 {
@@ -1234,6 +1271,67 @@ func registerTools(s *server.MCPServer) {
 	)
 }
 
+func registerOptimizedRetrievalTools(s *server.MCPServer) {
+	s.AddTool(
+		mcp.NewTool("structured_shell",
+			mcp.WithDescription("Structured shell router for supported read-only repo inspection commands. This is not an arbitrary shell executor."),
+			mcp.WithString("command", mcp.Description("Shell command string to route, for example `git log --stat -5` or `rg -n 'spawn' internal/agent | head -n 10`")),
+			mcp.WithArray("argv", mcp.Description("Optional argv form instead of command string"), mcp.WithStringItems()),
+			mcp.WithString("workspace", mcp.Description("Workspace root (default: .)")),
+			mcp.WithBoolean("measure_raw", mcp.Description("Measure raw output bytes and token estimates against the reduced summary")),
+			mcp.WithString("token_model", mcp.Description("Tokenizer model or encoding for measurement (default: cl100k_base)")),
+		),
+		handleStructuredShell,
+	)
+
+	s.AddTool(
+		mcp.NewTool("repo_index_search",
+			mcp.WithDescription("Search the repo index with compact preview-first output."),
+			mcp.WithString("workspace", mcp.Description("Workspace root (default: .)")),
+			mcp.WithString("query", mcp.Required(), mcp.Description("FTS query string")),
+			mcp.WithNumber("limit", mcp.Description("Maximum results (default: 20)")),
+			mcp.WithString("inline_mode", mcp.Description("Inline mode: auto, full, preview, or artifact_only")),
+		),
+		handleRepoIndexSearch,
+	)
+
+	s.AddTool(
+		mcp.NewTool("repo_index_expand",
+			mcp.WithDescription("Expand the repo index graph from seed nodes with compact preview-first output."),
+			mcp.WithString("workspace", mcp.Description("Workspace root (default: .)")),
+			mcp.WithArray("seed", mcp.Required(), mcp.Description("Seed node IDs (repeatable)"), mcp.WithStringItems()),
+			mcp.WithArray("edge", mcp.Description("Edge types to traverse (repeatable)"), mcp.WithStringItems()),
+			mcp.WithNumber("depth", mcp.Description("Traversal depth (default: 1)")),
+			mcp.WithNumber("budget", mcp.Description("Max nodes to return (default: 50)")),
+			mcp.WithNumber("per_node", mcp.Description("Max edges per node per hop (default: 50)")),
+			mcp.WithString("direction", mcp.Description("Traversal direction: out or in (default: out)")),
+			mcp.WithString("inline_mode", mcp.Description("Inline mode: auto, full, preview, or artifact_only")),
+		),
+		handleRepoIndexExpand,
+	)
+
+	s.AddTool(
+		mcp.NewTool("repo_index_dag_grep",
+			mcp.WithDescription("Search and expand the repo index into a compact explanation subgraph with preview-first output."),
+			mcp.WithString("query", mcp.Required(), mcp.Description("Search query")),
+			mcp.WithString("workspace", mcp.Description("Workspace root (default: .)")),
+			mcp.WithString("mode", mcp.Description("Search mode: fts, semantic, or hybrid")),
+			mcp.WithNumber("k", mcp.Description("Number of seed nodes (default: 10)")),
+			mcp.WithArray("node_kinds", mcp.Description("Node kinds to include"), mcp.WithStringItems()),
+			mcp.WithArray("edge_sets", mcp.Description("Edge sets to include"), mcp.WithStringItems()),
+			mcp.WithArray("edge_types", mcp.Description("Explicit edge types to traverse"), mcp.WithStringItems()),
+			mcp.WithString("direction", mcp.Description("Traversal direction: out or in")),
+			mcp.WithNumber("depth", mcp.Description("Traversal depth")),
+			mcp.WithNumber("budget", mcp.Description("Max nodes to return")),
+			mcp.WithNumber("per_node_cap", mcp.Description("Max edges per node")),
+			mcp.WithBoolean("include_anchors", mcp.Description("Include file/package anchors")),
+			mcp.WithString("render", mcp.Description("Optional render format: tree or mermaid")),
+			mcp.WithString("inline_mode", mcp.Description("Inline mode: auto, full, preview, or artifact_only")),
+		),
+		handleRepoIndexDAGGrep,
+	)
+}
+
 // Tool handlers
 
 // getArgs safely extracts arguments from the request as a map.
@@ -1304,6 +1402,10 @@ func getStringSliceArg(args map[string]any, key string) []string {
 }
 
 func runRepoIndexCommand(ctx context.Context, run func(cmd *cobra.Command) error) (*mcp.CallToolResult, error) {
+	return runEnvelopeCommand(ctx, "repo_index", run)
+}
+
+func runEnvelopeCommand(ctx context.Context, toolLabel string, run func(cmd *cobra.Command) error) (*mcp.CallToolResult, error) {
 	var out bytes.Buffer
 	var errBuf bytes.Buffer
 	cmd := &cobra.Command{}
@@ -1329,21 +1431,21 @@ func runRepoIndexCommand(ctx context.Context, run func(cmd *cobra.Command) error
 	}
 
 	if err := json.Unmarshal([]byte(raw), &envelope); err != nil {
-		return truncateSkillOutput(ctx, raw, "repo_index")
+		return truncateSkillOutput(ctx, raw, toolLabel)
 	}
 	if envelope.Status == "error" {
 		if envelope.Error.Message != "" {
 			return mcp.NewToolResultError(envelope.Error.Message), nil
 		}
-		return mcp.NewToolResultError("repo index command failed"), nil
+		return mcp.NewToolResultError(toolLabel + " command failed"), nil
 	}
 
 	result, err := json.MarshalIndent(envelope.Data, "", "  ")
 	if err != nil {
-		return truncateSkillOutput(ctx, raw, "repo_index")
+		return truncateSkillOutput(ctx, raw, toolLabel)
 	}
 
-	return truncateSkillOutput(ctx, string(result), "repo_index")
+	return truncateSkillOutput(ctx, string(result), toolLabel)
 }
 
 func handleWebSearch(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -2247,6 +2349,63 @@ func handleAgentctlRun(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallT
 	return truncateSkillOutput(ctx, string(result), skillName)
 }
 
+func runSkillAsMCP(ctx context.Context, skillName string, input map[string]any) (*mcp.CallToolResult, error) {
+	if strings.TrimSpace(skillName) == "" {
+		return mcp.NewToolResultError("skill name is required"), nil
+	}
+	if input == nil {
+		input = make(map[string]any)
+	}
+
+	cfg, err := loadConfig(ctx)
+	if err != nil {
+		return mcp.NewToolResultError("load config: " + err.Error()), nil
+	}
+
+	handle, err := findSkill(cfg, skillName)
+	if err != nil {
+		return mcp.NewToolResultError("skill not found: " + skillName + " - " + err.Error()), nil
+	}
+
+	inputBytes, err := json.Marshal(input)
+	if err != nil {
+		return mcp.NewToolResultError("marshal input: " + err.Error()), nil
+	}
+
+	runCtx := resolveWorkspaceContext(ctx, "")
+	stdout, stderr, err := executeSkill(runCtx, handle.Manifest, handle.ArtifactPath, inputBytes)
+	if err != nil {
+		errMsg := err.Error()
+		if len(stderr) > 0 {
+			errMsg += "\nstderr: " + string(stderr)
+		}
+		return mcp.NewToolResultError("execute skill: " + errMsg), nil
+	}
+
+	var envelope struct {
+		Status  string         `json:"status"`
+		Command string         `json:"command"`
+		Data    map[string]any `json:"data"`
+		Error   struct {
+			Code    string `json:"code"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+
+	if err := json.Unmarshal(stdout, &envelope); err != nil {
+		return truncateSkillOutput(ctx, string(stdout), skillName)
+	}
+	if envelope.Status == "error" {
+		return mcp.NewToolResultError(envelope.Error.Message), nil
+	}
+
+	result, err := json.MarshalIndent(envelope.Data, "", "  ")
+	if err != nil {
+		return truncateSkillOutput(ctx, string(stdout), skillName)
+	}
+	return truncateSkillOutput(ctx, string(result), skillName)
+}
+
 func handleAgentctlSkills(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	args := getArgs(req)
 	filter, _ := args["filter"].(string)
@@ -3111,9 +3270,15 @@ func handleRepoIndexSearch(ctx context.Context, req mcp.CallToolRequest) (*mcp.C
 		return mcp.NewToolResultError("query is required"), nil
 	}
 	limit := getIntArg(args, "limit", 20)
-	return runRepoIndexCommand(ctx, func(cmd *cobra.Command) error {
-		return runIndexRepoSearch(cmd, workspace, query, limit)
-	})
+	input := map[string]any{
+		"workspace": workspace,
+		"query":     query,
+		"limit":     limit,
+	}
+	if inlineMode := getStringArg(args, "inline_mode", ""); inlineMode != "" {
+		input["inline_mode"] = inlineMode
+	}
+	return runSkillAsMCP(ctx, "repo/index_search", input)
 }
 
 func handleRepoIndexExpand(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -3128,9 +3293,68 @@ func handleRepoIndexExpand(ctx context.Context, req mcp.CallToolRequest) (*mcp.C
 	budget := getIntArg(args, "budget", 50)
 	perNodeCap := getIntArg(args, "per_node", 50)
 	direction := getStringArg(args, "direction", "out")
+	input := map[string]any{
+		"workspace":    workspace,
+		"seeds":        seeds,
+		"edge_types":   edgeTypes,
+		"depth":        depth,
+		"budget":       budget,
+		"per_node_cap": perNodeCap,
+		"direction":    direction,
+	}
+	if inlineMode := getStringArg(args, "inline_mode", ""); inlineMode != "" {
+		input["inline_mode"] = inlineMode
+	}
+	return runSkillAsMCP(ctx, "repo/index_expand", input)
+}
 
-	return runRepoIndexCommand(ctx, func(cmd *cobra.Command) error {
-		return runIndexRepoExpand(cmd, workspace, seeds, edgeTypes, depth, budget, perNodeCap, direction)
+func handleRepoIndexDAGGrep(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	args := getArgs(req)
+	query := getStringArg(args, "query", "")
+	if query == "" {
+		return mcp.NewToolResultError("query is required"), nil
+	}
+	input := map[string]any{
+		"query":     query,
+		"workspace": getStringArg(args, "workspace", "."),
+	}
+	for _, key := range []string{"mode", "direction", "render", "inline_mode"} {
+		if value := getStringArg(args, key, ""); value != "" {
+			input[key] = value
+		}
+	}
+	for _, key := range []string{"k", "depth", "budget", "per_node_cap"} {
+		if value := getIntArg(args, key, 0); value > 0 {
+			input[key] = value
+		}
+	}
+	if values := getStringSliceArg(args, "node_kinds"); len(values) > 0 {
+		input["node_kinds"] = values
+	}
+	if values := getStringSliceArg(args, "edge_sets"); len(values) > 0 {
+		input["edge_sets"] = values
+	}
+	if values := getStringSliceArg(args, "edge_types"); len(values) > 0 {
+		input["edge_types"] = values
+	}
+	if includeAnchors, ok := args["include_anchors"].(bool); ok {
+		input["include_anchors"] = includeAnchors
+	}
+	return runSkillAsMCP(ctx, "code/dag_grep", input)
+}
+
+func handleStructuredShell(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	args := getArgs(req)
+	command := getStringArg(args, "command", "")
+	argv := getStringSliceArg(args, "argv")
+	if command == "" && len(argv) == 0 {
+		return mcp.NewToolResultError("command or argv is required"), nil
+	}
+	workspace := getStringArg(args, "workspace", ".")
+	measureRaw := getBoolArg(args, "measure_raw", false)
+	tokenModel := getStringArg(args, "token_model", "cl100k_base")
+	return runEnvelopeCommand(ctx, "structured_shell", func(cmd *cobra.Command) error {
+		return runShellCommand(cmd, workspace, command, measureRaw, tokenModel, argv)
 	})
 }
 

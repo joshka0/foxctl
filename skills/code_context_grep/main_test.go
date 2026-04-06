@@ -153,6 +153,123 @@ func TestParsePatternMode(t *testing.T) {
 	}
 }
 
+func TestParseInlineMode(t *testing.T) {
+	tests := []struct {
+		input   string
+		want    InlineMode
+		wantErr bool
+	}{
+		{input: "", want: InlineModeAuto},
+		{input: "auto", want: InlineModeAuto},
+		{input: "full", want: InlineModeFull},
+		{input: "preview", want: InlineModePreview},
+		{input: "artifact_only", want: InlineModeArtifactOnly},
+		{input: "nope", want: InlineModeAuto, wantErr: true},
+	}
+
+	for _, tt := range tests {
+		got, err := parseInlineMode(tt.input)
+		if tt.wantErr {
+			assert.Error(t, err)
+			continue
+		}
+		assert.NoError(t, err)
+		assert.Equal(t, tt.want, got)
+	}
+}
+
+func TestResolveInlineSelection(t *testing.T) {
+	tests := []struct {
+		name          string
+		requested     string
+		totalBlocks   int
+		previewBlocks int
+		hasArtifact   bool
+		fullTooLarge  bool
+		wantMode      InlineMode
+		wantPreview   bool
+		wantTruncated bool
+		wantErr       bool
+	}{
+		{
+			name:          "auto falls back to full when everything fits",
+			requested:     "",
+			totalBlocks:   3,
+			previewBlocks: 3,
+			hasArtifact:   false,
+			fullTooLarge:  false,
+			wantMode:      InlineModeFull,
+		},
+		{
+			name:          "auto prefers preview when artifact exists and preview is smaller",
+			requested:     "",
+			totalBlocks:   10,
+			previewBlocks: 5,
+			hasArtifact:   true,
+			fullTooLarge:  true,
+			wantMode:      InlineModePreview,
+			wantPreview:   true,
+			wantTruncated: true,
+		},
+		{
+			name:          "explicit preview uses preview blocks",
+			requested:     "preview",
+			totalBlocks:   8,
+			previewBlocks: 5,
+			hasArtifact:   true,
+			fullTooLarge:  false,
+			wantMode:      InlineModePreview,
+			wantPreview:   true,
+			wantTruncated: true,
+		},
+		{
+			name:          "explicit artifact only omits inline blocks",
+			requested:     "artifact_only",
+			totalBlocks:   8,
+			previewBlocks: 5,
+			hasArtifact:   true,
+			fullTooLarge:  true,
+			wantMode:      InlineModeArtifactOnly,
+			wantPreview:   false,
+			wantTruncated: true,
+		},
+		{
+			name:          "auto artifact only when only artifact can represent result",
+			requested:     "",
+			totalBlocks:   3,
+			previewBlocks: 0,
+			hasArtifact:   true,
+			fullTooLarge:  true,
+			wantMode:      InlineModeArtifactOnly,
+			wantPreview:   false,
+			wantTruncated: true,
+		},
+		{
+			name:          "invalid requested mode errors",
+			requested:     "bad",
+			totalBlocks:   1,
+			previewBlocks: 1,
+			hasArtifact:   false,
+			fullTooLarge:  false,
+			wantErr:       true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotMode, gotPreview, gotTruncated, err := resolveInlineSelection(tt.requested, tt.totalBlocks, tt.previewBlocks, tt.hasArtifact, tt.fullTooLarge)
+			if tt.wantErr {
+				assert.Error(t, err)
+				return
+			}
+			assert.NoError(t, err)
+			assert.Equal(t, tt.wantMode, gotMode)
+			assert.Equal(t, tt.wantPreview, gotPreview)
+			assert.Equal(t, tt.wantTruncated, gotTruncated)
+		})
+	}
+}
+
 func TestParseASTGrepOutput_Empty(t *testing.T) {
 	matches, err := parseASTGrepOutput([]byte{}, "/workspace", 100)
 	assert.NoError(t, err)

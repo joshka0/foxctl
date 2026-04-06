@@ -666,3 +666,35 @@ func firstTextContent(result *mcp.CallToolResult) string {
 	}
 	return ""
 }
+
+func TestSkillGroupsIncludeOptimizedRetrieval(t *testing.T) {
+	skills, ok := skillGroups["optimized-retrieval"]
+	if !ok {
+		t.Fatal("optimized-retrieval group missing")
+	}
+	expected := map[string]bool{
+		"code/semantic_search": true,
+		"code/smart_search":    true,
+		"code/snippet_extract": true,
+		"code/context_grep":    true,
+		"code/dag_grep":        true,
+		"codemap/get":          true,
+	}
+	for _, skill := range skills {
+		delete(expected, skill)
+	}
+	if len(expected) > 0 {
+		t.Fatalf("optimized-retrieval missing skills: %v", expected)
+	}
+}
+
+func TestMCPServeHasOptimizedRetrievalFlag(t *testing.T) {
+	cmd := newMCPServeCommand()
+	flag := cmd.Flags().Lookup("optimized-retrieval")
+	if flag == nil {
+		t.Fatal("optimized-retrieval flag missing")
+	}
+	if flag.DefValue != "false" {
+		t.Fatalf("optimized-retrieval default=%q want false", flag.DefValue)
+	}
+}
