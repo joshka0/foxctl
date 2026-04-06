@@ -4,7 +4,11 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -1412,6 +1416,123 @@ func TestRunRoomPlanDecideRequiresCoordinator(t *testing.T) {
 	}
 }
 
+func TestSyncRoomRedgreenWorktreePreservesHiddenPaths(t *testing.T) {
+	src := t.TempDir()
+	dst := t.TempDir()
+
+	mustWriteRoomTestFile(t, filepath.Join(src, "pkg", "impl.go"), "package pkg\nconst Value = 2\n")
+	mustWriteRoomTestFile(t, filepath.Join(src, "README.md"), "updated\n")
+	mustWriteRoomTestFile(t, filepath.Join(dst, "pkg", "impl.go"), "package pkg\nconst Value = 1\n")
+	mustWriteRoomTestFile(t, filepath.Join(dst, "pkg", "hidden_test.go"), "package pkg\nfunc TestHidden(t *testing.T) {}\n")
+	mustWriteRoomTestFile(t, filepath.Join(dst, "stale.txt"), "remove me\n")
+
+	if err := syncRoomRedgreenWorktree(src, dst, []string{"pkg/hidden_test.go"}); err != nil {
+		t.Fatalf("syncRoomRedgreenWorktree: %v", err)
+	}
+
+	impl := mustReadRoomTestFile(t, filepath.Join(dst, "pkg", "impl.go"))
+	if !strings.Contains(impl, "Value = 2") {
+		t.Fatalf("impl=%q want synced green implementation", impl)
+	}
+	hidden := mustReadRoomTestFile(t, filepath.Join(dst, "pkg", "hidden_test.go"))
+	if !strings.Contains(hidden, "TestHidden") {
+		t.Fatalf("hidden=%q want preserved hidden test", hidden)
+	}
+	if _, err := os.Stat(filepath.Join(dst, "stale.txt")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("stale.txt err=%v want not exist", err)
+	}
+}
+
+func TestRunRoomRedgreenInitHideAndShow(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	ctx := context.Background()
+	workspace := t.TempDir()
+	initRoomGitRepo(t, workspace)
+
+	cmd, out := newRoomTestCommand(ctx)
+	if err := runRoomRedgreenInit(cmd, workspace, "alpha", "retry-loop", "", "", "red-a", "green-a", "human-a", filepath.Join(t.TempDir(), "pair"), "HEAD", "go test ./..."); err != nil {
+		t.Fatalf("runRoomRedgreenInit: %v", err)
+	}
+	data := decodeRoomEnvelope(t, out)
+	stateRaw, ok := data["state"].(map[string]any)
+	if !ok {
+		t.Fatalf("state payload type=%T", data["state"])
+	}
+	if stateRaw["red_actor"] != "red-a" || stateRaw["green_actor"] != "green-a" {
+		t.Fatalf("state=%v want red-a/green-a", stateRaw)
+	}
+
+	cmd, out = newRoomTestCommand(ctx)
+	if err := runRoomRedgreenHide(cmd, workspace, "red-a", "alpha", "pkg/hidden_test.go"); err != nil {
+		t.Fatalf("runRoomRedgreenHide: %v", err)
+	}
+
+	cmd, out = newRoomTestCommand(ctx)
+	if err := runRoomRedgreenShow(cmd, workspace, "green-a", "alpha"); err != nil {
+		t.Fatalf("runRoomRedgreenShow green: %v", err)
+	}
+	showGreen := decodeRoomEnvelope(t, out)
+	if showGreen["red_worktree"] != "[redacted]" {
+		t.Fatalf("green red_worktree=%v want [redacted]", showGreen["red_worktree"])
+	}
+	if showGreen["hidden_paths"] != "[redacted]" {
+		t.Fatalf("green hidden_paths=%v want [redacted]", showGreen["hidden_paths"])
+	}
+
+	cmd, out = newRoomTestCommand(ctx)
+	if err := runRoomRedgreenShow(cmd, workspace, "human-a", "alpha"); err != nil {
+		t.Fatalf("runRoomRedgreenShow coordinator: %v", err)
+	}
+	showCoord := decodeRoomEnvelope(t, out)
+	if showCoord["red_worktree"] == "[redacted]" {
+		t.Fatalf("coordinator red_worktree unexpectedly redacted: %v", showCoord["red_worktree"])
+	}
+	hiddenPaths, ok := showCoord["hidden_paths"].([]any)
+	if !ok || len(hiddenPaths) != 1 || hiddenPaths[0] != "pkg/hidden_test.go" {
+		t.Fatalf("hidden_paths=%T/%v want pkg/hidden_test.go", showCoord["hidden_paths"], showCoord["hidden_paths"])
+	}
+}
+
+func TestRunRoomCreatePatternRedgreen(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	ctx := context.Background()
+	workspace := t.TempDir()
+	initRoomGitRepo(t, workspace)
+
+	cmd, out := newRoomTestCommand(ctx)
+	err := runRoomCreateWithProvision(cmd, workspace, "alpha", "", "", nil, roomCreateProvisionOptions{
+		Pattern:          "redgreen",
+		PatternSlug:      "alpha-rg",
+		RedActor:         "red-a",
+		GreenActor:       "green-a",
+		CoordinatorActor: "human-a",
+		WorktreeRoot:     filepath.Join(t.TempDir(), "pair"),
+		BaseRef:          "HEAD",
+		CheckCommand:     "go test ./...",
+	})
+	if err != nil {
+		t.Fatalf("runRoomCreateWithProvision redgreen: %v", err)
+	}
+	data := decodeRoomEnvelope(t, out)
+	roomRaw, ok := data["room"].(map[string]any)
+	if !ok {
+		t.Fatalf("room payload type=%T", data["room"])
+	}
+	if roomRaw["id"] != "alpha" {
+		t.Fatalf("room id=%v want alpha", roomRaw["id"])
+	}
+	stateRaw, ok := data["state"].(map[string]any)
+	if !ok {
+		t.Fatalf("state payload type=%T", data["state"])
+	}
+	if stateRaw["slug"] != "alpha-rg" {
+		t.Fatalf("slug=%v want alpha-rg", stateRaw["slug"])
+	}
+	if stateRaw["red_actor"] != "red-a" || stateRaw["green_actor"] != "green-a" || stateRaw["coordinator"] != "human-a" {
+		t.Fatalf("state=%v want red/green/coordinator roles", stateRaw)
+	}
+}
+
 func TestRunRoomSendResolvesCoordinatorAlias(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	ctx := context.Background()
@@ -2528,4 +2649,43 @@ func roomListFormat() string {
 		"#{pane_current_path}" + roomFieldSep() +
 		"#{pane_current_command}" + roomFieldSep() +
 		"#{pane_active}"
+}
+
+func mustWriteRoomTestFile(t *testing.T, path, contents string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("mkdir %s: %v", path, err)
+	}
+	if err := os.WriteFile(path, []byte(contents), 0o644); err != nil {
+		t.Fatalf("write %s: %v", path, err)
+	}
+}
+
+func mustReadRoomTestFile(t *testing.T, path string) string {
+	t.Helper()
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	return string(raw)
+}
+
+func initRoomGitRepo(t *testing.T, dir string) {
+	t.Helper()
+	runRoomGit(t, dir, "init")
+	runRoomGit(t, dir, "config", "user.email", "room-tests@example.com")
+	runRoomGit(t, dir, "config", "user.name", "Room Tests")
+	mustWriteRoomTestFile(t, filepath.Join(dir, "pkg", "impl.go"), "package pkg\nconst Value = 1\n")
+	runRoomGit(t, dir, "add", ".")
+	runRoomGit(t, dir, "commit", "-m", "initial")
+}
+
+func runRoomGit(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, string(output))
+	}
 }

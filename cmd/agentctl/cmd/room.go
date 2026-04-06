@@ -2,8 +2,10 @@ package cmd
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -34,6 +36,7 @@ func newRoomCommand() *cobra.Command {
 	cmd.AddCommand(
 		newRoomCreateCommand(),
 		newRoomCoordinatorCommand(),
+		newRoomRedgreenCommand(),
 		newRoomListCommand(),
 		newRoomShowCommand(),
 		newRoomStatusCommand(),
@@ -52,6 +55,11 @@ func newRoomCommand() *cobra.Command {
 	)
 	return cmd
 }
+
+const (
+	roomRedgreenMetadataDir       = ".agentctl/room-redgreen"
+	roomRedgreenDefaultCheckShell = "go test ./..."
+)
 
 func newRoomCoordinatorCommand() *cobra.Command {
 	cmd := &cobra.Command{
@@ -82,21 +90,131 @@ func newRoomCoordinatorSetCommand() *cobra.Command {
 	return cmd
 }
 
+func newRoomRedgreenCommand() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "redgreen",
+		Short: "Run brokered red/green test-driving sessions inside a room",
+	}
+	cmd.AddCommand(
+		newRoomRedgreenInitCommand(),
+		newRoomRedgreenHideCommand(),
+		newRoomRedgreenShowCommand(),
+		newRoomRedgreenCheckCommand(),
+	)
+	return cmd
+}
+
+func newRoomRedgreenInitCommand() *cobra.Command {
+	var (
+		workspace    string
+		title        string
+		description  string
+		redActor     string
+		greenActor   string
+		coordinator  string
+		worktreeRoot string
+		baseRef      string
+		checkCommand string
+	)
+	cmd := &cobra.Command{
+		Use:   "init <room-id> <slug>",
+		Short: "Create a brokered red/green room with paired worktrees",
+		Args:  cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runRoomRedgreenInit(cmd, workspace, args[0], args[1], title, description, redActor, greenActor, coordinator, worktreeRoot, baseRef, checkCommand)
+		},
+	}
+	cmd.Flags().StringVar(&workspace, "workspace", ".", "Workspace root override")
+	cmd.Flags().StringVar(&title, "title", "", "Room title override")
+	cmd.Flags().StringVar(&description, "description", "", "Room description override")
+	cmd.Flags().StringVar(&redActor, "red", "red-a", "Actor id for the hidden-test author")
+	cmd.Flags().StringVar(&greenActor, "green", "green-a", "Actor id for the implementation author")
+	cmd.Flags().StringVar(&coordinator, "coordinator", "", "Coordinator actor id (defaults to current pane identity or human-a)")
+	cmd.Flags().StringVar(&worktreeRoot, "worktree-root", filepath.Join(os.TempDir(), "agentctl-redgreen"), "Parent directory for paired worktrees")
+	cmd.Flags().StringVar(&baseRef, "base-ref", "HEAD", "Git ref to branch the paired worktrees from")
+	cmd.Flags().StringVar(&checkCommand, "check-command", roomRedgreenDefaultCheckShell, "Shell command used for brokered hidden-suite checks")
+	return cmd
+}
+
+func newRoomRedgreenHideCommand() *cobra.Command {
+	var (
+		workspace string
+		sender    string
+	)
+	cmd := &cobra.Command{
+		Use:   "hide <room-id> <path>",
+		Short: "Register a hidden test path that must stay private to the red worktree",
+		Args:  cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runRoomRedgreenHide(cmd, workspace, sender, args[0], args[1])
+		},
+	}
+	cmd.Flags().StringVar(&workspace, "workspace", ".", "Workspace root override")
+	cmd.Flags().StringVar(&sender, "sender", "", "Sender actor or participant id (defaults to current tmux/zellij pane)")
+	return cmd
+}
+
+func newRoomRedgreenShowCommand() *cobra.Command {
+	var (
+		workspace string
+		sender    string
+	)
+	cmd := &cobra.Command{
+		Use:   "show <room-id>",
+		Short: "Show brokered red/green room metadata",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runRoomRedgreenShow(cmd, workspace, sender, args[0])
+		},
+	}
+	cmd.Flags().StringVar(&workspace, "workspace", ".", "Workspace root override")
+	cmd.Flags().StringVar(&sender, "sender", "", "Viewer actor or participant id (defaults to current tmux/zellij pane)")
+	return cmd
+}
+
+func newRoomRedgreenCheckCommand() *cobra.Command {
+	var (
+		workspace    string
+		sender       string
+		checkCommand string
+	)
+	cmd := &cobra.Command{
+		Use:   "check <room-id>",
+		Short: "Run the hidden suite against the green worktree without exposing the tests",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runRoomRedgreenCheck(cmd, workspace, sender, args[0], checkCommand)
+		},
+	}
+	cmd.Flags().StringVar(&workspace, "workspace", ".", "Workspace root override")
+	cmd.Flags().StringVar(&sender, "sender", "", "Requester actor or participant id (defaults to current tmux/zellij pane)")
+	cmd.Flags().StringVar(&checkCommand, "check-command", "", "Override the stored hidden-suite check shell command for this run")
+	return cmd
+}
+
 func newRoomCreateCommand() *cobra.Command {
 	var (
-		workspace   string
-		title       string
-		description string
-		members     []string
-		provision   bool
-		muxBackend  string
-		muxSession  string
-		paneCommand string
-		agentCLI    string
-		agentMode   string
-		agentArgs   []string
-		memberArgs  []string
-		attach      bool
+		workspace    string
+		title        string
+		description  string
+		members      []string
+		provision    bool
+		muxBackend   string
+		muxSession   string
+		paneCommand  string
+		agentCLI     string
+		agentMode    string
+		agentArgs    []string
+		memberArgs   []string
+		attach       bool
+		pattern      string
+		slug         string
+		redActor     string
+		greenActor   string
+		coordinator  string
+		worktreeRoot string
+		baseRef      string
+		checkCommand string
 	)
 	cmd := &cobra.Command{
 		Use:   "create <room-id>",
@@ -104,15 +222,23 @@ func newRoomCreateCommand() *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runRoomCreateWithProvision(cmd, workspace, args[0], title, description, members, roomCreateProvisionOptions{
-				Enabled:     provision,
-				MuxBackend:  muxBackend,
-				MuxSession:  muxSession,
-				PaneCommand: paneCommand,
-				AgentCLI:    agentCLI,
-				AgentMode:   agentMode,
-				AgentArgs:   append([]string(nil), agentArgs...),
-				MemberArgs:  append([]string(nil), memberArgs...),
-				Attach:      attach,
+				Enabled:          provision,
+				MuxBackend:       muxBackend,
+				MuxSession:       muxSession,
+				PaneCommand:      paneCommand,
+				AgentCLI:         agentCLI,
+				AgentMode:        agentMode,
+				AgentArgs:        append([]string(nil), agentArgs...),
+				MemberArgs:       append([]string(nil), memberArgs...),
+				Attach:           attach,
+				Pattern:          pattern,
+				PatternSlug:      slug,
+				RedActor:         redActor,
+				GreenActor:       greenActor,
+				CoordinatorActor: coordinator,
+				WorktreeRoot:     worktreeRoot,
+				BaseRef:          baseRef,
+				CheckCommand:     checkCommand,
 			})
 		},
 	}
@@ -129,6 +255,14 @@ func newRoomCreateCommand() *cobra.Command {
 	cmd.Flags().StringArrayVar(&agentArgs, "agent-arg", nil, "Provisioned agent CLI argument (repeatable, preserves order)")
 	cmd.Flags().StringArrayVar(&memberArgs, "member-arg", nil, "Per-member provisioned CLI arg in actor=arg form (repeatable, supports multiple args per actor)")
 	cmd.Flags().BoolVar(&attach, "attach", false, "Attach or switch to the provisioned mux session after setup")
+	cmd.Flags().StringVar(&pattern, "pattern", "", "Optional room bootstrap pattern (currently: redgreen)")
+	cmd.Flags().StringVar(&slug, "slug", "", "Pattern slug override (defaults to room id when --pattern redgreen)")
+	cmd.Flags().StringVar(&redActor, "red", "red-a", "Red actor id when --pattern redgreen")
+	cmd.Flags().StringVar(&greenActor, "green", "green-a", "Green actor id when --pattern redgreen")
+	cmd.Flags().StringVar(&coordinator, "coordinator", "", "Coordinator actor id when --pattern redgreen")
+	cmd.Flags().StringVar(&worktreeRoot, "worktree-root", filepath.Join(os.TempDir(), "agentctl-redgreen"), "Parent directory for paired worktrees when --pattern redgreen")
+	cmd.Flags().StringVar(&baseRef, "base-ref", "HEAD", "Git ref to branch paired worktrees from when --pattern redgreen")
+	cmd.Flags().StringVar(&checkCommand, "check-command", roomRedgreenDefaultCheckShell, "Brokered hidden-suite command when --pattern redgreen")
 	return cmd
 }
 
@@ -593,15 +727,23 @@ func newRoomRelayCommand() *cobra.Command {
 }
 
 type roomCreateProvisionOptions struct {
-	Enabled     bool
-	MuxBackend  string
-	MuxSession  string
-	PaneCommand string
-	AgentCLI    string
-	AgentMode   string
-	AgentArgs   []string
-	MemberArgs  []string
-	Attach      bool
+	Enabled          bool
+	MuxBackend       string
+	MuxSession       string
+	PaneCommand      string
+	AgentCLI         string
+	AgentMode        string
+	AgentArgs        []string
+	MemberArgs       []string
+	Attach           bool
+	Pattern          string
+	PatternSlug      string
+	RedActor         string
+	GreenActor       string
+	CoordinatorActor string
+	WorktreeRoot     string
+	BaseRef          string
+	CheckCommand     string
 }
 
 type roomProvisionMemberSpec struct {
@@ -615,6 +757,37 @@ func runRoomCreate(cmd *cobra.Command, workspace, roomID, title, description str
 }
 
 func runRoomCreateWithProvision(cmd *cobra.Command, workspace, roomID, title, description string, rawMembers []string, provision roomCreateProvisionOptions) error {
+	switch strings.TrimSpace(strings.ToLower(provision.Pattern)) {
+	case "":
+	case "redgreen":
+		slug := strings.TrimSpace(provision.PatternSlug)
+		if slug == "" {
+			slug = roomID
+		}
+		return runRoomRedgreenInit(
+			cmd,
+			workspace,
+			roomID,
+			slug,
+			title,
+			description,
+			provision.RedActor,
+			provision.GreenActor,
+			provision.CoordinatorActor,
+			provision.WorktreeRoot,
+			provision.BaseRef,
+			provision.CheckCommand,
+		)
+	default:
+		absWorkspace, err := resolveRoomWorkspace(workspace)
+		if err != nil {
+			return err
+		}
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.create", protocol.ErrorCodeEARG, fmt.Sprintf("unsupported room pattern %q", provision.Pattern), map[string]any{
+			"hint": "Use --pattern redgreen or omit --pattern.",
+		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+
 	absWorkspace, err := resolveRoomWorkspace(workspace)
 	if err != nil {
 		return err
@@ -2313,6 +2486,635 @@ func roomMessageMatchesSystemReminder(msg agent.BoardMessage, roomID string) boo
 		return false
 	}
 	return strings.HasPrefix(subject, "Reminder:")
+}
+
+type roomRedgreenState struct {
+	Version       int        `json:"version"`
+	RoomID        string     `json:"room_id"`
+	Workspace     string     `json:"workspace"`
+	Slug          string     `json:"slug"`
+	RedActor      string     `json:"red_actor"`
+	GreenActor    string     `json:"green_actor"`
+	Coordinator   string     `json:"coordinator"`
+	RedWorktree   string     `json:"red_worktree"`
+	GreenWorktree string     `json:"green_worktree"`
+	BaseRef       string     `json:"base_ref"`
+	CheckCommand  string     `json:"check_command"`
+	HiddenPaths   []string   `json:"hidden_paths,omitempty"`
+	ChecksRun     int        `json:"checks_run"`
+	LastStatus    string     `json:"last_status,omitempty"`
+	LastExitCode  int        `json:"last_exit_code,omitempty"`
+	LastCheckedAt *time.Time `json:"last_checked_at,omitempty"`
+	CreatedAt     time.Time  `json:"created_at"`
+	UpdatedAt     time.Time  `json:"updated_at"`
+}
+
+type roomRedgreenCheckResult struct {
+	Passed    bool      `json:"passed"`
+	ExitCode  int       `json:"exit_code"`
+	Command   string    `json:"command"`
+	Output    string    `json:"output"`
+	CheckedAt time.Time `json:"checked_at"`
+	MessageID string    `json:"message_id,omitempty"`
+	Recipient string    `json:"recipient"`
+	Sender    string    `json:"sender"`
+}
+
+func runRoomRedgreenInit(cmd *cobra.Command, workspace, roomID, slug, title, description, redActor, greenActor, coordinator, worktreeRoot, baseRef, checkCommand string) error {
+	absWorkspace, err := resolveRoomWorkspace(workspace)
+	if err != nil {
+		return err
+	}
+	redActor = strings.TrimSpace(redActor)
+	greenActor = strings.TrimSpace(greenActor)
+	if redActor == "" || greenActor == "" {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.redgreen.init", protocol.ErrorCodeEARG, "both --red and --green actor ids are required", map[string]any{
+			"hint": "Use distinct actor ids such as red-a and green-a.",
+		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	if sameRoomParticipant(redActor, greenActor) {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.redgreen.init", protocol.ErrorCodeEARG, "red and green actors must be distinct", map[string]any{
+			"hint": "Use different actor ids for the hidden-test author and implementation worker.",
+		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	if strings.TrimSpace(coordinator) == "" {
+		if identity, err := resolveRoomSender(cmd.Context(), ""); err == nil && strings.TrimSpace(identity.Sender) != "" {
+			coordinator = identity.Sender
+		} else {
+			coordinator = "human-a"
+		}
+	}
+	store, err := openRoomBoardStore(cmd.Context())
+	if err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.redgreen.init", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	defer store.Close()
+
+	slug = sanitizeRoomRedgreenSlug(slug)
+	if slug == "" {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.redgreen.init", protocol.ErrorCodeEARG, "slug must contain at least one alphanumeric character", map[string]any{
+			"hint": "Use a short identifier such as retry-logic or parser-phase-1.",
+		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	members := mergeRoomMembers(nil,
+		agent.RoomMember{ActorID: coordinator, Role: "coordinator"},
+		agent.RoomMember{ActorID: redActor, Role: "reviewer"},
+		agent.RoomMember{ActorID: greenActor, Role: "reviewer"},
+	)
+	if strings.TrimSpace(title) == "" {
+		title = "Red/Green: " + slug
+	}
+	if strings.TrimSpace(description) == "" {
+		description = "Brokered red/green room with hidden tests in a private worktree"
+	}
+	room, err := store.UpsertRoom(cmd.Context(), agent.Room{
+		ID:          strings.TrimSpace(roomID),
+		WorkspaceID: absWorkspace,
+		Title:       strings.TrimSpace(title),
+		Description: strings.TrimSpace(description),
+		Members:     members,
+	})
+	if err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.redgreen.init", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+
+	worktreeRoot = strings.TrimSpace(worktreeRoot)
+	if worktreeRoot == "" {
+		worktreeRoot = filepath.Join(os.TempDir(), "agentctl-redgreen")
+	}
+	if err := os.MkdirAll(worktreeRoot, 0o755); err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.redgreen.init", protocol.ErrorCodeERuntime, fmt.Sprintf("mkdir worktree root: %v", err), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	stamp := time.Now().UTC().Format("20060102-150405")
+	redWorktree := filepath.Join(worktreeRoot, fmt.Sprintf("%s-red-%s", slug, stamp))
+	greenWorktree := filepath.Join(worktreeRoot, fmt.Sprintf("%s-green-%s", slug, stamp))
+	redBranch := fmt.Sprintf("redgreen-%s-red-%s", slug, stamp)
+	greenBranch := fmt.Sprintf("redgreen-%s-green-%s", slug, stamp)
+	if err := createRoomRedgreenWorktree(cmd.Context(), absWorkspace, redWorktree, redBranch, baseRef); err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.redgreen.init", protocol.ErrorCodeERuntime, err.Error(), map[string]any{
+			"hint": "Ensure the workspace is a git repository and the target worktree path does not already exist.",
+		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	if err := createRoomRedgreenWorktree(cmd.Context(), absWorkspace, greenWorktree, greenBranch, baseRef); err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.redgreen.init", protocol.ErrorCodeERuntime, err.Error(), map[string]any{
+			"hint":       "The red worktree was created successfully; remove it manually if you want to retry with a clean slate.",
+			"red_path":   redWorktree,
+			"red_branch": redBranch,
+		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+
+	now := time.Now().UTC()
+	state := roomRedgreenState{
+		Version:       1,
+		RoomID:        room.ID,
+		Workspace:     absWorkspace,
+		Slug:          slug,
+		RedActor:      redActor,
+		GreenActor:    greenActor,
+		Coordinator:   coordinator,
+		RedWorktree:   redWorktree,
+		GreenWorktree: greenWorktree,
+		BaseRef:       strings.TrimSpace(baseRef),
+		CheckCommand:  firstNonEmpty(strings.TrimSpace(checkCommand), roomRedgreenDefaultCheckShell),
+		CreatedAt:     now,
+		UpdatedAt:     now,
+	}
+	if err := saveRoomRedgreenState(absWorkspace, state); err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.redgreen.init", protocol.ErrorCodeERuntime, err.Error(), map[string]any{
+			"hint": "The room and worktrees were created, but agentctl could not persist red/green metadata under .agentctl/room-redgreen.",
+		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+
+	systemSender := fmt.Sprintf("actor:system:room:%s", room.ID)
+	initMessages := []*agent.BoardMessage{
+		{
+			WorkspaceID: absWorkspace,
+			Stream:      agent.RoomStreamName(room.ID),
+			Sender:      systemSender,
+			Recipient:   agent.BroadcastRecipient,
+			Kind:        agent.BoardMessageKindInfo,
+			Priority:    agent.DefaultPriority,
+			Subject:     "Red/Green protocol active",
+			Body:        fmt.Sprintf("Brokered red/green mode is active for %s.\n\nRoles:\n- red: %s (private hidden tests)\n- green: %s (implementation only)\n- coordinator: %s\n\nGreen must request checks with `agentctl room redgreen check %s --workspace %s` instead of reading hidden tests directly.", slug, redActor, greenActor, coordinator, room.ID, absWorkspace),
+		},
+		{
+			WorkspaceID: absWorkspace,
+			Stream:      agent.RoomStreamName(room.ID),
+			Sender:      systemSender,
+			Recipient:   redActor,
+			Kind:        agent.BoardMessageKindInstruction,
+			Priority:    agent.DefaultPriority,
+			Subject:     "Red ownership: hidden tests",
+			Body:        fmt.Sprintf("Your private red worktree is:\n%s\n\nWrite hidden tests there and register any hidden files or directories with:\nagentctl room redgreen hide %s <relative-path> --workspace %s --sender %s\n\nDo not reveal hidden test contents in the room. Only share failure summaries.", redWorktree, room.ID, absWorkspace, redActor),
+		},
+		{
+			WorkspaceID: absWorkspace,
+			Stream:      agent.RoomStreamName(room.ID),
+			Sender:      systemSender,
+			Recipient:   greenActor,
+			Kind:        agent.BoardMessageKindInstruction,
+			Priority:    agent.DefaultPriority,
+			Subject:     "Green ownership: implementation only",
+			Body:        fmt.Sprintf("Your green worktree is:\n%s\n\nImplement there without reading hidden tests. Ask the broker to run the hidden suite with:\nagentctl room redgreen check %s --workspace %s --sender %s\n\nOnly the summarized result will be posted back into the room.", greenWorktree, room.ID, absWorkspace, greenActor),
+		},
+	}
+	for _, msg := range initMessages {
+		if err := store.SendMessage(cmd.Context(), msg); err != nil {
+			return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.redgreen.init", protocol.ErrorCodeERuntime, err.Error(), map[string]any{
+				"hint": "The room and worktrees are ready, but agentctl failed while posting the initial protocol messages.",
+			}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+		}
+	}
+
+	return protocol.WriteOK(cmd.OutOrStdout(), "agentctl.room.redgreen.init", map[string]any{
+		"room":  room,
+		"state": state,
+	}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+}
+
+func runRoomRedgreenHide(cmd *cobra.Command, workspace, sender, roomID, hiddenPath string) error {
+	absWorkspace, err := resolveRoomWorkspace(workspace)
+	if err != nil {
+		return err
+	}
+	state, err := loadRoomRedgreenState(absWorkspace, roomID)
+	if err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.redgreen.hide", protocol.ErrorCodeENotFound, err.Error(), map[string]any{
+			"hint": "Initialize brokered red/green mode first with `agentctl room redgreen init`.",
+		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	identity, err := resolveRoomSender(cmd.Context(), sender)
+	if err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.redgreen.hide", protocol.ErrorCodeEARG, err.Error(), map[string]any{
+			"hint": "Pass --sender when outside tmux/zellij, or run inside the red pane so agentctl can derive the participant id.",
+		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	if !sameRoomParticipant(identity.Sender, state.RedActor) && !sameRoomParticipant(identity.Sender, state.Coordinator) {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.redgreen.hide", protocol.ErrorCodeEARG, "only the red actor or coordinator can register hidden paths", nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	relPath, err := resolveRoomRedgreenRelativePath(state.RedWorktree, hiddenPath)
+	if err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.redgreen.hide", protocol.ErrorCodeEARG, err.Error(), map[string]any{
+			"hint": "Use a path inside the red worktree, relative or absolute.",
+		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	state.HiddenPaths = appendUniqueRoomPaths(state.HiddenPaths, relPath)
+	state.UpdatedAt = time.Now().UTC()
+	if err := saveRoomRedgreenState(absWorkspace, state); err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.redgreen.hide", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	return protocol.WriteOK(cmd.OutOrStdout(), "agentctl.room.redgreen.hide", map[string]any{
+		"room_id":      state.RoomID,
+		"hidden_paths": state.HiddenPaths,
+		"registered":   relPath,
+	}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+}
+
+func runRoomRedgreenShow(cmd *cobra.Command, workspace, sender, roomID string) error {
+	absWorkspace, err := resolveRoomWorkspace(workspace)
+	if err != nil {
+		return err
+	}
+	state, err := loadRoomRedgreenState(absWorkspace, roomID)
+	if err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.redgreen.show", protocol.ErrorCodeENotFound, err.Error(), map[string]any{
+			"hint": "Initialize brokered red/green mode first with `agentctl room redgreen init`.",
+		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	viewer := strings.TrimSpace(sender)
+	if viewer == "" {
+		if identity, err := resolveRoomSender(cmd.Context(), ""); err == nil {
+			viewer = identity.Sender
+		}
+	}
+	data := map[string]any{
+		"version":         state.Version,
+		"room_id":         state.RoomID,
+		"workspace":       state.Workspace,
+		"slug":            state.Slug,
+		"red_actor":       state.RedActor,
+		"green_actor":     state.GreenActor,
+		"coordinator":     state.Coordinator,
+		"green_worktree":  state.GreenWorktree,
+		"base_ref":        state.BaseRef,
+		"check_command":   state.CheckCommand,
+		"checks_run":      state.ChecksRun,
+		"last_status":     state.LastStatus,
+		"last_exit_code":  state.LastExitCode,
+		"last_checked_at": state.LastCheckedAt,
+		"created_at":      state.CreatedAt,
+		"updated_at":      state.UpdatedAt,
+	}
+	if sameRoomParticipant(viewer, state.RedActor) || sameRoomParticipant(viewer, state.Coordinator) {
+		data["red_worktree"] = state.RedWorktree
+		data["hidden_paths"] = append([]string(nil), state.HiddenPaths...)
+	} else {
+		data["red_worktree"] = "[redacted]"
+		data["hidden_paths"] = "[redacted]"
+	}
+	return protocol.WriteOK(cmd.OutOrStdout(), "agentctl.room.redgreen.show", data, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+}
+
+func runRoomRedgreenCheck(cmd *cobra.Command, workspace, sender, roomID, overrideCommand string) error {
+	absWorkspace, err := resolveRoomWorkspace(workspace)
+	if err != nil {
+		return err
+	}
+	state, err := loadRoomRedgreenState(absWorkspace, roomID)
+	if err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.redgreen.check", protocol.ErrorCodeENotFound, err.Error(), map[string]any{
+			"hint": "Initialize brokered red/green mode first with `agentctl room redgreen init`.",
+		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	identity, err := resolveRoomSender(cmd.Context(), sender)
+	if err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.redgreen.check", protocol.ErrorCodeEARG, err.Error(), map[string]any{
+			"hint": "Pass --sender when outside tmux/zellij, or run inside the green pane so agentctl can derive the participant id.",
+		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	if !sameRoomParticipant(identity.Sender, state.GreenActor) && !sameRoomParticipant(identity.Sender, state.Coordinator) {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.redgreen.check", protocol.ErrorCodeEARG, "only the green actor or coordinator can run brokered checks", nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	if err := syncRoomRedgreenWorktree(state.GreenWorktree, state.RedWorktree, state.HiddenPaths); err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.redgreen.check", protocol.ErrorCodeERuntime, err.Error(), map[string]any{
+			"hint": "Ensure both paired worktrees exist and the hidden paths were registered correctly.",
+		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	checkShell := firstNonEmpty(strings.TrimSpace(overrideCommand), strings.TrimSpace(state.CheckCommand), roomRedgreenDefaultCheckShell)
+	result, err := executeRoomRedgreenCheck(cmd.Context(), state.RedWorktree, checkShell)
+	if err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.redgreen.check", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	state.ChecksRun++
+	state.LastStatus = "failing"
+	if result.Passed {
+		state.LastStatus = "passing"
+	}
+	state.LastExitCode = result.ExitCode
+	state.LastCheckedAt = &result.CheckedAt
+	state.UpdatedAt = result.CheckedAt
+	if err := saveRoomRedgreenState(absWorkspace, state); err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.redgreen.check", protocol.ErrorCodeERuntime, err.Error(), map[string]any{
+			"hint": "The brokered check finished, but agentctl failed while updating the local red/green metadata.",
+		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+
+	store, err := openRoomBoardStore(cmd.Context())
+	if err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.redgreen.check", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	defer store.Close()
+	systemSender := fmt.Sprintf("actor:system:room:%s", state.RoomID)
+	subject := "Red/Green check failed"
+	kind := agent.BoardMessageKindAlert
+	if result.Passed {
+		subject = "Red/Green check passed"
+		kind = agent.BoardMessageKindInfo
+	}
+	body := buildRoomRedgreenCheckBody(state, result)
+	msg := &agent.BoardMessage{
+		WorkspaceID:   absWorkspace,
+		Stream:        agent.RoomStreamName(state.RoomID),
+		Sender:        systemSender,
+		Recipient:     state.GreenActor,
+		Kind:          kind,
+		Priority:      agent.DefaultPriority,
+		Subject:       subject,
+		Body:          body,
+		ReplyExpected: !result.Passed,
+	}
+	if err := store.SendMessage(cmd.Context(), msg); err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.redgreen.check", protocol.ErrorCodeERuntime, err.Error(), map[string]any{
+			"hint": "The hidden-suite run completed, but agentctl failed while posting the durable result back into the room.",
+		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	result.MessageID = msg.ID
+	result.Recipient = state.GreenActor
+	result.Sender = systemSender
+	return protocol.WriteOK(cmd.OutOrStdout(), "agentctl.room.redgreen.check", map[string]any{
+		"room_id": state.RoomID,
+		"result":  result,
+	}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+}
+
+func roomRedgreenStatePath(workspace, roomID string) string {
+	return filepath.Join(workspace, roomRedgreenMetadataDir, strings.TrimSpace(roomID)+".json")
+}
+
+func loadRoomRedgreenState(workspace, roomID string) (roomRedgreenState, error) {
+	path := roomRedgreenStatePath(workspace, roomID)
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return roomRedgreenState{}, fmt.Errorf("red/green state for room %q not found", roomID)
+		}
+		return roomRedgreenState{}, err
+	}
+	var state roomRedgreenState
+	if err := json.Unmarshal(raw, &state); err != nil {
+		return roomRedgreenState{}, err
+	}
+	return state, nil
+}
+
+func saveRoomRedgreenState(workspace string, state roomRedgreenState) error {
+	path := roomRedgreenStatePath(workspace, state.RoomID)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	raw, err := json.MarshalIndent(state, "", "  ")
+	if err != nil {
+		return err
+	}
+	raw = append(raw, '\n')
+	return os.WriteFile(path, raw, 0o644)
+}
+
+func sanitizeRoomRedgreenSlug(input string) string {
+	input = strings.ToLower(strings.TrimSpace(input))
+	var b strings.Builder
+	lastDash := false
+	for _, r := range input {
+		switch {
+		case r >= 'a' && r <= 'z':
+			b.WriteRune(r)
+			lastDash = false
+		case r >= '0' && r <= '9':
+			b.WriteRune(r)
+			lastDash = false
+		default:
+			if !lastDash && b.Len() > 0 {
+				b.WriteByte('-')
+				lastDash = true
+			}
+		}
+	}
+	return strings.Trim(b.String(), "-")
+}
+
+func createRoomRedgreenWorktree(ctx context.Context, repoPath, targetPath, branch, baseRef string) error {
+	if strings.TrimSpace(targetPath) == "" {
+		return fmt.Errorf("worktree path is required")
+	}
+	if _, err := os.Stat(targetPath); err == nil {
+		return fmt.Errorf("worktree path %q already exists", targetPath)
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(targetPath), 0o755); err != nil {
+		return err
+	}
+	args := []string{"-C", repoPath, "worktree", "add"}
+	if strings.TrimSpace(branch) != "" {
+		args = append(args, "-b", strings.TrimSpace(branch))
+	}
+	args = append(args, targetPath)
+	if strings.TrimSpace(baseRef) != "" {
+		args = append(args, strings.TrimSpace(baseRef))
+	}
+	out, err := exec.CommandContext(ctx, "git", args...).CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("git worktree add failed: %s", strings.TrimSpace(string(out)))
+	}
+	return nil
+}
+
+func resolveRoomRedgreenRelativePath(root, candidate string) (string, error) {
+	candidate = strings.TrimSpace(candidate)
+	if candidate == "" {
+		return "", fmt.Errorf("hidden path is required")
+	}
+	var rel string
+	if filepath.IsAbs(candidate) {
+		var err error
+		rel, err = filepath.Rel(root, candidate)
+		if err != nil {
+			return "", err
+		}
+	} else {
+		rel = candidate
+	}
+	rel = filepath.Clean(rel)
+	if rel == "." || rel == "" {
+		return "", fmt.Errorf("hidden path must not be the worktree root")
+	}
+	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return "", fmt.Errorf("hidden path must stay inside the red worktree")
+	}
+	return filepath.ToSlash(rel), nil
+}
+
+func appendUniqueRoomPaths(existing []string, value string) []string {
+	for _, item := range existing {
+		if strings.EqualFold(strings.TrimSpace(item), strings.TrimSpace(value)) {
+			return existing
+		}
+	}
+	out := append(append([]string(nil), existing...), value)
+	sort.Strings(out)
+	return out
+}
+
+func syncRoomRedgreenWorktree(srcRoot, dstRoot string, hiddenPaths []string) error {
+	hidden := make(map[string]struct{}, len(hiddenPaths))
+	for _, path := range hiddenPaths {
+		path = filepath.ToSlash(strings.TrimSpace(path))
+		if path != "" {
+			hidden[path] = struct{}{}
+		}
+	}
+	present := make(map[string]struct{})
+	if err := filepath.Walk(srcRoot, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(srcRoot, path)
+		if err != nil {
+			return err
+		}
+		if rel == "." {
+			return nil
+		}
+		rel = filepath.ToSlash(rel)
+		if roomRedgreenPathIsHidden(rel, hidden) {
+			if info.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		present[rel] = struct{}{}
+		target := filepath.Join(dstRoot, filepath.FromSlash(rel))
+		if info.IsDir() {
+			return os.MkdirAll(target, info.Mode().Perm())
+		}
+		return copyRoomRedgreenFile(path, target, info.Mode())
+	}); err != nil {
+		return err
+	}
+	toRemove := make([]string, 0)
+	if err := filepath.Walk(dstRoot, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(dstRoot, path)
+		if err != nil {
+			return err
+		}
+		if rel == "." {
+			return nil
+		}
+		rel = filepath.ToSlash(rel)
+		if roomRedgreenPathIsHidden(rel, hidden) {
+			if info.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if _, ok := present[rel]; ok {
+			return nil
+		}
+		toRemove = append(toRemove, path)
+		return nil
+	}); err != nil {
+		return err
+	}
+	sort.Slice(toRemove, func(i, j int) bool { return len(toRemove[i]) > len(toRemove[j]) })
+	for _, path := range toRemove {
+		if err := os.RemoveAll(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+	}
+	return nil
+}
+
+func roomRedgreenPathIsHidden(rel string, hidden map[string]struct{}) bool {
+	rel = filepath.ToSlash(strings.TrimSpace(rel))
+	if rel == ".git" || strings.HasPrefix(rel, ".git/") {
+		return true
+	}
+	for hiddenPath := range hidden {
+		if rel == hiddenPath || strings.HasPrefix(rel, hiddenPath+"/") {
+			return true
+		}
+	}
+	return false
+}
+
+func copyRoomRedgreenFile(src, dst string, mode os.FileMode) error {
+	if mode&os.ModeSymlink != 0 {
+		target, err := os.Readlink(src)
+		if err != nil {
+			return err
+		}
+		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+			return err
+		}
+		_ = os.Remove(dst)
+		return os.Symlink(target, dst)
+	}
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		return err
+	}
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+	out, err := os.Create(dst)
+	if err != nil {
+		return err
+	}
+	if _, err := io.Copy(out, in); err != nil {
+		out.Close()
+		return err
+	}
+	if err := out.Close(); err != nil {
+		return err
+	}
+	return os.Chmod(dst, mode.Perm())
+}
+
+func executeRoomRedgreenCheck(ctx context.Context, cwd, shellCommand string) (roomRedgreenCheckResult, error) {
+	checkedAt := time.Now().UTC()
+	cmd := exec.CommandContext(ctx, "/bin/zsh", "-lc", shellCommand)
+	cmd.Dir = cwd
+	output, err := cmd.CombinedOutput()
+	result := roomRedgreenCheckResult{
+		Passed:    err == nil,
+		ExitCode:  0,
+		Command:   shellCommand,
+		Output:    trimRoomRedgreenOutput(string(output)),
+		CheckedAt: checkedAt,
+	}
+	if err == nil {
+		return result, nil
+	}
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) {
+		result.ExitCode = exitErr.ExitCode()
+		return result, nil
+	}
+	return roomRedgreenCheckResult{}, err
+}
+
+func trimRoomRedgreenOutput(output string) string {
+	output = strings.TrimSpace(output)
+	if output == "" {
+		return "No stdout/stderr output."
+	}
+	const maxLen = 2400
+	if len(output) <= maxLen {
+		return output
+	}
+	return output[len(output)-maxLen:]
+}
+
+func buildRoomRedgreenCheckBody(state roomRedgreenState, result roomRedgreenCheckResult) string {
+	status := "failed"
+	if result.Passed {
+		status = "passed"
+	}
+	return fmt.Sprintf("Brokered hidden-suite check %s for %s.\n\ncommand: %s\nchecks_run: %d\nexit_code: %d\nchecked_at: %s\n\noutput:\n%s", status, state.Slug, result.Command, state.ChecksRun, result.ExitCode, result.CheckedAt.Format(time.RFC3339), result.Output)
 }
 
 func normalizeRoomResolveFilters(values []string) (map[string]struct{}, error) {
