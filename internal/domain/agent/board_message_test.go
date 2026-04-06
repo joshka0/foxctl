@@ -24,6 +24,10 @@ func TestBoardMessageKind_Constants(t *testing.T) {
 		{BoardMessageKindPlanDecision, "plan_decision"},
 		{BoardMessageKindPlanReview, "plan_review"},
 		{BoardMessageKindPlanClose, "plan_close"},
+		{BoardMessageKindInterviewSession, "interview_session"},
+		{BoardMessageKindInterviewQuestion, "interview_question"},
+		{BoardMessageKindInterviewAnswer, "interview_answer"},
+		{BoardMessageKindInterviewVerify, "interview_verify"},
 	}
 
 	for _, tt := range tests {

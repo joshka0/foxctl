@@ -46,6 +46,7 @@ func newRoomCommand() *cobra.Command {
 		newRoomResolveCommand(),
 		newRoomClearCommand(),
 		newRoomPlanCommand(),
+		newRoomInterviewCommand(),
 		newRoomJoinCommand(),
 		newRoomLeaveCommand(),
 		newRoomTaskCommand(),
@@ -615,6 +616,131 @@ func newRoomPlanShowCommand() *cobra.Command {
 				sessionID = args[1]
 			}
 			return runRoomPlanShow(cmd, workspace, args[0], sessionID, limit)
+		},
+	}
+	cmd.Flags().StringVar(&workspace, "workspace", ".", "Workspace root override")
+	cmd.Flags().IntVar(&limit, "limit", 200, "Maximum room messages to inspect")
+	return cmd
+}
+
+func newRoomInterviewCommand() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "interview",
+		Short: "Run a durable round-robin interview protocol inside a room",
+	}
+	cmd.AddCommand(
+		newRoomInterviewStartCommand(),
+		newRoomInterviewAskCommand(),
+		newRoomInterviewAnswerCommand(),
+		newRoomInterviewVerifyCommand(),
+		newRoomInterviewShowCommand(),
+	)
+	return cmd
+}
+
+func newRoomInterviewStartCommand() *cobra.Command {
+	var (
+		workspace   string
+		sender      string
+		spec        string
+		specRef     string
+		submitter   string
+		questioner  string
+		respondent  string
+		verifier    string
+		constraints []string
+	)
+	cmd := &cobra.Command{
+		Use:   "start <room-id> <topic>",
+		Short: "Start a durable interview session for clarifying a spec or plan",
+		Args:  cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runRoomInterviewStart(cmd, workspace, sender, args[0], args[1], spec, specRef, submitter, questioner, respondent, verifier, constraints)
+		},
+	}
+	cmd.Flags().StringVar(&workspace, "workspace", ".", "Workspace root override")
+	cmd.Flags().StringVar(&sender, "sender", "", "Sender actor or participant id (defaults to current tmux/zellij pane)")
+	cmd.Flags().StringVar(&spec, "spec", "", "Inline spec or request summary")
+	cmd.Flags().StringVar(&specRef, "spec-ref", "", "Doc path, plan id, or message id that anchors the interview")
+	cmd.Flags().StringVar(&submitter, "submitter", "", "Actor who submitted the plan or spec")
+	cmd.Flags().StringVar(&questioner, "questioner", "", "Actor responsible for drafting interview questions")
+	cmd.Flags().StringVar(&respondent, "respondent", "", "Actor expected to answer the questions")
+	cmd.Flags().StringVar(&verifier, "verifier", "", "Actor who decides whether answers match the original intent (defaults to submitter)")
+	cmd.Flags().StringSliceVar(&constraints, "constraint", nil, "Constraint or guardrail (repeatable)")
+	return cmd
+}
+
+func newRoomInterviewAskCommand() *cobra.Command {
+	var (
+		workspace string
+		sender    string
+		to        string
+	)
+	cmd := &cobra.Command{
+		Use:   "ask <room-id> <session-id> <question>",
+		Short: "Record a directed interview question for another participant",
+		Args:  cobra.MinimumNArgs(3),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runRoomInterviewAsk(cmd, workspace, sender, args[0], args[1], to, strings.Join(args[2:], " "))
+		},
+	}
+	cmd.Flags().StringVar(&workspace, "workspace", ".", "Workspace root override")
+	cmd.Flags().StringVar(&sender, "sender", "", "Questioner actor or participant id (defaults to current tmux/zellij pane)")
+	cmd.Flags().StringVar(&to, "to", "", "Respondent actor id (defaults to the session respondent)")
+	return cmd
+}
+
+func newRoomInterviewAnswerCommand() *cobra.Command {
+	var (
+		workspace string
+		sender    string
+	)
+	cmd := &cobra.Command{
+		Use:   "answer <room-id> <question-id> <answer>",
+		Short: "Answer a previously recorded interview question",
+		Args:  cobra.MinimumNArgs(3),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runRoomInterviewAnswer(cmd, workspace, sender, args[0], args[1], strings.Join(args[2:], " "))
+		},
+	}
+	cmd.Flags().StringVar(&workspace, "workspace", ".", "Workspace root override")
+	cmd.Flags().StringVar(&sender, "sender", "", "Respondent actor or participant id (defaults to current tmux/zellij pane)")
+	return cmd
+}
+
+func newRoomInterviewVerifyCommand() *cobra.Command {
+	var (
+		workspace string
+		sender    string
+	)
+	cmd := &cobra.Command{
+		Use:   "verify <room-id> <answer-id> <accept|clarify|reject> <notes>",
+		Short: "Record whether an interview answer matches the intended meaning",
+		Args:  cobra.MinimumNArgs(4),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runRoomInterviewVerify(cmd, workspace, sender, args[0], args[1], args[2], strings.Join(args[3:], " "))
+		},
+	}
+	cmd.Flags().StringVar(&workspace, "workspace", ".", "Workspace root override")
+	cmd.Flags().StringVar(&sender, "sender", "", "Verifier actor or participant id (defaults to current tmux/zellij pane)")
+	return cmd
+}
+
+func newRoomInterviewShowCommand() *cobra.Command {
+	var (
+		workspace string
+		limit     int
+	)
+	cmd := &cobra.Command{
+		Use:   "show <room-id> [session-id]",
+		Short: "Show interview sessions or one interview thread",
+		Args:  cobra.RangeArgs(1, 2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			sessionID := ""
+			if len(args) > 1 {
+				sessionID = args[1]
+			}
+			return runRoomInterviewShow(cmd, workspace, args[0], sessionID, limit)
 		},
 	}
 	cmd.Flags().StringVar(&workspace, "workspace", ".", "Workspace root override")
@@ -1666,6 +1792,524 @@ func buildRoomPlanSessions(messages []agent.BoardMessage) []map[string]any {
 			"decisions":   session.Decisions,
 			"reviews":     session.Reviews,
 			"closed":      session.Status == "closed",
+			"entry_count": len(session.Entries),
+		})
+	}
+	return out
+}
+
+type roomInterviewSessionMeta struct {
+	Topic       string
+	Spec        string
+	SpecRef     string
+	Submitter   string
+	Questioner  string
+	Respondent  string
+	Verifier    string
+	Constraints []string
+}
+
+func runRoomInterviewStart(cmd *cobra.Command, workspace, sender, roomID, topic, spec, specRef, submitter, questioner, respondent, verifier string, constraints []string) error {
+	absWorkspace, identity, store, roomID, summary, err := prepareRoomInterviewCommand(cmd, workspace, sender, roomID)
+	if err != nil {
+		return err
+	}
+	defer store.Close()
+
+	topic = strings.TrimSpace(topic)
+	if topic == "" {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.interview.start", protocol.ErrorCodeEARG, "topic is required", map[string]any{
+			"hint": "Pass a concise topic such as `phase-4-api-contract` or `retry-loop-meaning-check`.",
+		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	submitter = firstNonEmpty(strings.TrimSpace(submitter), identity.Sender)
+	verifier = firstNonEmpty(strings.TrimSpace(verifier), submitter)
+	body := buildRoomInterviewSessionBody(topic, spec, specRef, submitter, questioner, respondent, verifier, constraints)
+	msg := &agent.BoardMessage{
+		WorkspaceID: absWorkspace,
+		Stream:      agent.RoomStreamName(roomID),
+		Sender:      identity.Sender,
+		Recipient:   agent.BroadcastRecipient,
+		Kind:        agent.BoardMessageKindInterviewSession,
+		Priority:    agent.DefaultPriority,
+		Subject:     "Interview Session: " + topic,
+		Body:        body,
+	}
+	if err := store.SendMessage(cmd.Context(), msg); err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.interview.start", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	return protocol.WriteOK(cmd.OutOrStdout(), "agentctl.room.interview.start", map[string]any{
+		"room_id":         roomID,
+		"session_id":      msg.ID,
+		"topic":           topic,
+		"message":         msg,
+		"sender_identity": identity,
+		"room":            summary,
+	}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+}
+
+func runRoomInterviewAsk(cmd *cobra.Command, workspace, sender, roomID, sessionID, recipient, question string) error {
+	absWorkspace, identity, store, roomID, _, err := prepareRoomInterviewCommand(cmd, workspace, sender, roomID)
+	if err != nil {
+		return err
+	}
+	defer store.Close()
+	sessionMsg, meta, err := loadRoomInterviewSession(cmd.Context(), store, absWorkspace, roomID, sessionID)
+	if err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.interview.ask", protocol.ErrorCodeENotFound, err.Error(), map[string]any{
+			"hint": "Start a session with `agentctl room interview start` and reuse its session_id.",
+		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	recipient = firstNonEmpty(strings.TrimSpace(recipient), strings.TrimSpace(meta.Respondent))
+	if recipient == "" {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.interview.ask", protocol.ErrorCodeEARG, "recipient is required", map[string]any{
+			"hint": "Set --to or define a respondent when starting the interview session.",
+		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	question = strings.TrimSpace(question)
+	if question == "" {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.interview.ask", protocol.ErrorCodeEARG, "question is required", nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	msg := &agent.BoardMessage{
+		WorkspaceID:      absWorkspace,
+		RelatedMessageID: sessionMsg.ID,
+		Stream:           agent.RoomStreamName(roomID),
+		Sender:           identity.Sender,
+		Recipient:        recipient,
+		Kind:             agent.BoardMessageKindInterviewQuestion,
+		Priority:         agent.DefaultPriority,
+		ReplyExpected:    true,
+		Subject:          "Interview Question: " + deriveRoomSubject(question),
+		Body:             question,
+	}
+	if err := store.SendMessage(cmd.Context(), msg); err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.interview.ask", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	return protocol.WriteOK(cmd.OutOrStdout(), "agentctl.room.interview.ask", map[string]any{
+		"room_id":    roomID,
+		"session_id": sessionMsg.ID,
+		"message":    msg,
+		"session":    meta,
+	}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+}
+
+func runRoomInterviewAnswer(cmd *cobra.Command, workspace, sender, roomID, questionID, answer string) error {
+	absWorkspace, identity, store, roomID, summary, err := prepareRoomInterviewCommand(cmd, workspace, sender, roomID)
+	if err != nil {
+		return err
+	}
+	defer store.Close()
+	questionMsg, sessionMsg, meta, err := loadRoomInterviewQuestion(cmd.Context(), store, absWorkspace, roomID, questionID)
+	if err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.interview.answer", protocol.ErrorCodeENotFound, err.Error(), map[string]any{
+			"hint": "Use a question id returned by `agentctl room interview ask` or listed in `agentctl room interview show`.",
+		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	if questionMsg.Recipient != "" && questionMsg.Recipient != agent.BroadcastRecipient && !sameRoomParticipant(questionMsg.Recipient, identity.Sender) && !roomMemberHasRole(summary.Members, identity.Sender, "coordinator") {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.interview.answer", protocol.ErrorCodeEARG, "only the intended respondent or coordinator can answer this interview question", nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	answer = strings.TrimSpace(answer)
+	if answer == "" {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.interview.answer", protocol.ErrorCodeEARG, "answer is required", nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	recipient := firstNonEmpty(strings.TrimSpace(meta.Verifier), strings.TrimSpace(meta.Submitter), strings.TrimSpace(questionMsg.Sender))
+	msg := &agent.BoardMessage{
+		WorkspaceID:      absWorkspace,
+		RelatedMessageID: questionMsg.ID,
+		Stream:           agent.RoomStreamName(roomID),
+		Sender:           identity.Sender,
+		Recipient:        recipient,
+		Kind:             agent.BoardMessageKindInterviewAnswer,
+		Priority:         agent.DefaultPriority,
+		ReplyExpected:    true,
+		Subject:          "Interview Answer: " + deriveRoomSubject(answer),
+		Body:             answer,
+	}
+	if err := store.SendMessage(cmd.Context(), msg); err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.interview.answer", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	return protocol.WriteOK(cmd.OutOrStdout(), "agentctl.room.interview.answer", map[string]any{
+		"room_id":     roomID,
+		"session_id":  sessionMsg.ID,
+		"question_id": questionMsg.ID,
+		"message":     msg,
+		"session":     meta,
+	}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+}
+
+func runRoomInterviewVerify(cmd *cobra.Command, workspace, sender, roomID, answerID, verdict, notes string) error {
+	absWorkspace, identity, store, roomID, summary, err := prepareRoomInterviewCommand(cmd, workspace, sender, roomID)
+	if err != nil {
+		return err
+	}
+	defer store.Close()
+	answerMsg, questionMsg, sessionMsg, meta, err := loadRoomInterviewAnswer(cmd.Context(), store, absWorkspace, roomID, answerID)
+	if err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.interview.verify", protocol.ErrorCodeENotFound, err.Error(), map[string]any{
+			"hint": "Use an answer id returned by `agentctl room interview answer` or listed in `agentctl room interview show`.",
+		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	if !sameRoomParticipant(identity.Sender, meta.Verifier) && !roomMemberHasRole(summary.Members, identity.Sender, "coordinator") {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.interview.verify", protocol.ErrorCodeEARG, "only the verifier or coordinator can record an interview verdict", map[string]any{
+			"hint": "Set --verifier when starting the session, or run the command as the room coordinator.",
+		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	verdict = strings.TrimSpace(strings.ToLower(verdict))
+	switch verdict {
+	case "accept", "clarify", "reject":
+	default:
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.interview.verify", protocol.ErrorCodeEARG, fmt.Sprintf("unsupported interview verdict %q", verdict), map[string]any{
+			"hint": "Use accept, clarify, or reject.",
+		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	notes = strings.TrimSpace(notes)
+	if notes == "" {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.interview.verify", protocol.ErrorCodeEARG, "notes are required", map[string]any{
+			"hint": "Capture why the answer matched, needed clarification, or diverged from intent.",
+		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	msg := &agent.BoardMessage{
+		WorkspaceID:      absWorkspace,
+		RelatedMessageID: answerMsg.ID,
+		Stream:           agent.RoomStreamName(roomID),
+		Sender:           identity.Sender,
+		Recipient:        answerMsg.Sender,
+		Kind:             agent.BoardMessageKindInterviewVerify,
+		Priority:         agent.DefaultPriority,
+		Subject:          "Interview Verdict: " + verdict,
+		Body:             notes,
+	}
+	if verdict != "accept" {
+		msg.ReplyExpected = true
+	}
+	if err := store.SendMessage(cmd.Context(), msg); err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.interview.verify", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	return protocol.WriteOK(cmd.OutOrStdout(), "agentctl.room.interview.verify", map[string]any{
+		"room_id":     roomID,
+		"session_id":  sessionMsg.ID,
+		"question_id": questionMsg.ID,
+		"answer_id":   answerMsg.ID,
+		"message":     msg,
+		"session":     meta,
+	}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+}
+
+func runRoomInterviewShow(cmd *cobra.Command, workspace, roomID, sessionID string, limit int) error {
+	absWorkspace, err := resolveRoomWorkspace(workspace)
+	if err != nil {
+		return err
+	}
+	store, err := openRoomBoardStore(cmd.Context())
+	if err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.interview.show", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	defer store.Close()
+	summary, messages, err := loadRoomState(cmd.Context(), store, absWorkspace, roomID, "", limit)
+	if err != nil {
+		code := protocol.ErrorCodeERuntime
+		if errors.Is(err, blackboard.ErrRoomNotFound) {
+			code = protocol.ErrorCodeENotFound
+		}
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.interview.show", code, err.Error(), map[string]any{
+			"hint": "Create the room first or check the room id.",
+		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	sessions := buildRoomInterviewSessions(messages)
+	if strings.TrimSpace(sessionID) == "" {
+		return protocol.WriteOK(cmd.OutOrStdout(), "agentctl.room.interview.show", map[string]any{
+			"room":     summary,
+			"count":    len(sessions),
+			"sessions": sessions,
+		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	for _, session := range sessions {
+		if session["id"] == strings.TrimSpace(sessionID) {
+			return protocol.WriteOK(cmd.OutOrStdout(), "agentctl.room.interview.show", map[string]any{
+				"room":    summary,
+				"session": session,
+			}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+		}
+	}
+	return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.interview.show", protocol.ErrorCodeENotFound, fmt.Sprintf("interview session %q not found", sessionID), map[string]any{
+		"hint": "Run `agentctl room interview show <room-id>` to list available interview sessions.",
+	}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+}
+
+func prepareRoomInterviewCommand(cmd *cobra.Command, workspace, sender, roomID string) (string, roomIdentity, blackboard.BoardStore, string, agent.RoomSummary, error) {
+	absWorkspace, err := resolveRoomWorkspace(workspace)
+	if err != nil {
+		return "", roomIdentity{}, nil, "", agent.RoomSummary{}, err
+	}
+	identity, err := resolveRoomSender(cmd.Context(), sender)
+	if err != nil {
+		return "", roomIdentity{}, nil, "", agent.RoomSummary{}, protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.interview", protocol.ErrorCodeEARG, err.Error(), map[string]any{
+			"hint": "Pass --sender when outside tmux/zellij, or run inside a prepared pane so agentctl can derive the participant id.",
+		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	store, err := openRoomBoardStore(cmd.Context())
+	if err != nil {
+		return "", roomIdentity{}, nil, "", agent.RoomSummary{}, protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.interview", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	roomID = strings.TrimSpace(roomID)
+	summary, err := store.GetRoom(cmd.Context(), absWorkspace, roomID, identity.Sender)
+	if err != nil {
+		code := protocol.ErrorCodeERuntime
+		if errors.Is(err, blackboard.ErrRoomNotFound) {
+			code = protocol.ErrorCodeENotFound
+		}
+		store.Close()
+		return "", roomIdentity{}, nil, "", agent.RoomSummary{}, protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.interview", code, err.Error(), map[string]any{
+			"hint": "Create the room first or check the room id.",
+		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	return absWorkspace, identity, store, roomID, summary, nil
+}
+
+func loadRoomInterviewSession(ctx context.Context, store blackboard.BoardStore, workspaceID, roomID, sessionID string) (agent.BoardMessage, roomInterviewSessionMeta, error) {
+	messages, err := store.ListRoomMessages(ctx, workspaceID, roomID, roomTaskScanLimit)
+	if err != nil {
+		return agent.BoardMessage{}, roomInterviewSessionMeta{}, err
+	}
+	sessionID = strings.TrimSpace(sessionID)
+	for _, msg := range messages {
+		if msg.ID == sessionID && msg.Kind == agent.BoardMessageKindInterviewSession {
+			return msg, parseRoomInterviewSessionBody(msg.Body), nil
+		}
+	}
+	return agent.BoardMessage{}, roomInterviewSessionMeta{}, fmt.Errorf("interview session %q not found", sessionID)
+}
+
+func loadRoomInterviewQuestion(ctx context.Context, store blackboard.BoardStore, workspaceID, roomID, questionID string) (agent.BoardMessage, agent.BoardMessage, roomInterviewSessionMeta, error) {
+	messages, err := store.ListRoomMessages(ctx, workspaceID, roomID, roomTaskScanLimit)
+	if err != nil {
+		return agent.BoardMessage{}, agent.BoardMessage{}, roomInterviewSessionMeta{}, err
+	}
+	questionID = strings.TrimSpace(questionID)
+	var question agent.BoardMessage
+	for _, msg := range messages {
+		if msg.ID == questionID && msg.Kind == agent.BoardMessageKindInterviewQuestion {
+			question = msg
+			break
+		}
+	}
+	if question.ID == "" {
+		return agent.BoardMessage{}, agent.BoardMessage{}, roomInterviewSessionMeta{}, fmt.Errorf("interview question %q not found", questionID)
+	}
+	sessionID := strings.TrimSpace(question.RelatedMessageID)
+	session, meta, err := loadRoomInterviewSession(ctx, store, workspaceID, roomID, sessionID)
+	if err != nil {
+		return agent.BoardMessage{}, agent.BoardMessage{}, roomInterviewSessionMeta{}, err
+	}
+	return question, session, meta, nil
+}
+
+func loadRoomInterviewAnswer(ctx context.Context, store blackboard.BoardStore, workspaceID, roomID, answerID string) (agent.BoardMessage, agent.BoardMessage, agent.BoardMessage, roomInterviewSessionMeta, error) {
+	messages, err := store.ListRoomMessages(ctx, workspaceID, roomID, roomTaskScanLimit)
+	if err != nil {
+		return agent.BoardMessage{}, agent.BoardMessage{}, agent.BoardMessage{}, roomInterviewSessionMeta{}, err
+	}
+	answerID = strings.TrimSpace(answerID)
+	var answer agent.BoardMessage
+	for _, msg := range messages {
+		if msg.ID == answerID && msg.Kind == agent.BoardMessageKindInterviewAnswer {
+			answer = msg
+			break
+		}
+	}
+	if answer.ID == "" {
+		return agent.BoardMessage{}, agent.BoardMessage{}, agent.BoardMessage{}, roomInterviewSessionMeta{}, fmt.Errorf("interview answer %q not found", answerID)
+	}
+	question, session, meta, err := loadRoomInterviewQuestion(ctx, store, workspaceID, roomID, answer.RelatedMessageID)
+	if err != nil {
+		return agent.BoardMessage{}, agent.BoardMessage{}, agent.BoardMessage{}, roomInterviewSessionMeta{}, err
+	}
+	return answer, question, session, meta, nil
+}
+
+func buildRoomInterviewSessionBody(topic, spec, specRef, submitter, questioner, respondent, verifier string, constraints []string) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "Topic: %s\n", strings.TrimSpace(topic))
+	if strings.TrimSpace(spec) != "" {
+		fmt.Fprintf(&b, "Spec: %s\n", strings.TrimSpace(spec))
+	}
+	if strings.TrimSpace(specRef) != "" {
+		fmt.Fprintf(&b, "SpecRef: %s\n", strings.TrimSpace(specRef))
+	}
+	if strings.TrimSpace(submitter) != "" {
+		fmt.Fprintf(&b, "Submitter: %s\n", strings.TrimSpace(submitter))
+	}
+	if strings.TrimSpace(questioner) != "" {
+		fmt.Fprintf(&b, "Questioner: %s\n", strings.TrimSpace(questioner))
+	}
+	if strings.TrimSpace(respondent) != "" {
+		fmt.Fprintf(&b, "Respondent: %s\n", strings.TrimSpace(respondent))
+	}
+	if strings.TrimSpace(verifier) != "" {
+		fmt.Fprintf(&b, "Verifier: %s\n", strings.TrimSpace(verifier))
+	}
+	if len(constraints) > 0 {
+		b.WriteString("Constraints:\n")
+		for _, item := range constraints {
+			item = strings.TrimSpace(item)
+			if item == "" {
+				continue
+			}
+			fmt.Fprintf(&b, "- %s\n", item)
+		}
+	}
+	b.WriteString("Protocol:\n- questioner writes directed questions\n- respondent answers one question at a time\n- verifier records accept/clarify/reject\n")
+	return strings.TrimSpace(b.String())
+}
+
+func parseRoomInterviewSessionBody(body string) roomInterviewSessionMeta {
+	meta := roomInterviewSessionMeta{}
+	lines := strings.Split(body, "\n")
+	inConstraints := false
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			continue
+		}
+		if strings.HasPrefix(trimmed, "Protocol:") {
+			break
+		}
+		if trimmed == "Constraints:" {
+			inConstraints = true
+			continue
+		}
+		if inConstraints {
+			if strings.HasPrefix(trimmed, "- ") {
+				meta.Constraints = append(meta.Constraints, strings.TrimSpace(strings.TrimPrefix(trimmed, "- ")))
+			}
+			continue
+		}
+		key, value, ok := strings.Cut(trimmed, ":")
+		if !ok {
+			continue
+		}
+		value = strings.TrimSpace(value)
+		switch strings.TrimSpace(key) {
+		case "Topic":
+			meta.Topic = value
+		case "Spec":
+			meta.Spec = value
+		case "SpecRef":
+			meta.SpecRef = value
+		case "Submitter":
+			meta.Submitter = value
+		case "Questioner":
+			meta.Questioner = value
+		case "Respondent":
+			meta.Respondent = value
+		case "Verifier":
+			meta.Verifier = value
+		}
+	}
+	return meta
+}
+
+func buildRoomInterviewSessions(messages []agent.BoardMessage) []map[string]any {
+	type sessionState struct {
+		Root      agent.BoardMessage
+		Meta      roomInterviewSessionMeta
+		Entries   []agent.BoardMessage
+		Questions int
+		Answers   int
+		Verified  int
+		Status    string
+	}
+	sessions := make(map[string]*sessionState)
+	for _, msg := range messages {
+		if msg.Kind == agent.BoardMessageKindInterviewSession {
+			sessions[msg.ID] = &sessionState{
+				Root:   msg,
+				Meta:   parseRoomInterviewSessionBody(msg.Body),
+				Status: "questioning",
+			}
+		}
+	}
+	questionToSession := make(map[string]string)
+	answerToSession := make(map[string]string)
+	answerByQuestion := make(map[string]agent.BoardMessage)
+	for _, msg := range messages {
+		if msg.Kind == agent.BoardMessageKindInterviewQuestion {
+			if sessionID := strings.TrimSpace(msg.RelatedMessageID); sessionID != "" {
+				questionToSession[msg.ID] = sessionID
+			}
+		}
+	}
+	for _, msg := range messages {
+		if msg.Kind == agent.BoardMessageKindInterviewAnswer {
+			answerByQuestion[strings.TrimSpace(msg.RelatedMessageID)] = msg
+			if sessionID := questionToSession[strings.TrimSpace(msg.RelatedMessageID)]; sessionID != "" {
+				answerToSession[msg.ID] = sessionID
+			}
+		}
+	}
+	for _, msg := range messages {
+		related := strings.TrimSpace(msg.RelatedMessageID)
+		if related == "" {
+			continue
+		}
+		switch msg.Kind {
+		case agent.BoardMessageKindInterviewQuestion:
+			session := sessions[related]
+			if session == nil {
+				continue
+			}
+			session.Entries = append(session.Entries, msg)
+			session.Questions++
+			if _, ok := answerByQuestion[msg.ID]; !ok {
+				session.Status = "awaiting_answer"
+			}
+		case agent.BoardMessageKindInterviewAnswer:
+			session := sessions[answerToSession[msg.ID]]
+			if session == nil {
+				continue
+			}
+			session.Entries = append(session.Entries, msg)
+			session.Answers++
+			if session.Status == "questioning" || session.Status == "awaiting_answer" {
+				session.Status = "awaiting_verification"
+			}
+		case agent.BoardMessageKindInterviewVerify:
+			session := sessions[answerToSession[related]]
+			if session == nil {
+				continue
+			}
+			session.Entries = append(session.Entries, msg)
+			session.Verified++
+			subject := strings.ToLower(strings.TrimSpace(msg.Subject))
+			switch {
+			case strings.Contains(subject, "accept"):
+				session.Status = "verified"
+			case strings.Contains(subject, "reject"):
+				session.Status = "rejected"
+			default:
+				session.Status = "needs_clarification"
+			}
+		}
+	}
+	ordered := make([]*sessionState, 0, len(sessions))
+	for _, session := range sessions {
+		ordered = append(ordered, session)
+	}
+	sort.Slice(ordered, func(i, j int) bool {
+		return ordered[i].Root.CreatedAt.After(ordered[j].Root.CreatedAt)
+	})
+	out := make([]map[string]any, 0, len(ordered))
+	for _, session := range ordered {
+		out = append(out, map[string]any{
+			"id":          session.Root.ID,
+			"topic":       firstNonEmpty(session.Meta.Topic, strings.TrimPrefix(strings.TrimSpace(session.Root.Subject), "Interview Session: ")),
+			"status":      session.Status,
+			"root":        session.Root,
+			"meta":        session.Meta,
+			"entries":     session.Entries,
+			"questions":   session.Questions,
+			"answers":     session.Answers,
+			"verified":    session.Verified,
 			"entry_count": len(session.Entries),
 		})
 	}

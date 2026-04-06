@@ -1395,10 +1395,12 @@ func normalizeBoardMessageKind(raw string) (agent.BoardMessageKind, error) {
 		agent.BoardMessageKindCoordinatorPulse,
 		agent.BoardMessageKindPlanSession, agent.BoardMessageKindPlanProposal,
 		agent.BoardMessageKindPlanQuestion, agent.BoardMessageKindPlanDecision,
-		agent.BoardMessageKindPlanReview, agent.BoardMessageKindPlanClose:
+		agent.BoardMessageKindPlanReview, agent.BoardMessageKindPlanClose,
+		agent.BoardMessageKindInterviewSession, agent.BoardMessageKindInterviewQuestion,
+		agent.BoardMessageKindInterviewAnswer, agent.BoardMessageKindInterviewVerify:
 		return kind, nil
 	default:
-		return "", errors.New("invalid kind: must be one of instruction, info, alert, review_request, task_update, lead_change, coordinator_pulse, plan_session, plan_proposal, plan_question, plan_decision, plan_review, plan_close")
+		return "", errors.New("invalid kind: must be one of instruction, info, alert, review_request, task_update, lead_change, coordinator_pulse, plan_session, plan_proposal, plan_question, plan_decision, plan_review, plan_close, interview_session, interview_question, interview_answer, interview_verify")
 	}
 }
 

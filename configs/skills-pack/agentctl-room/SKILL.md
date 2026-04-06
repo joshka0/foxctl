@@ -30,6 +30,7 @@ description: "Durable multi-agent room coordination with shared chat, direct req
 - `room coordinator set` transfers coordinator ownership to another room participant.
 - `room send --to @coordinator` resolves to the current coordinator without hard-coding an actor id.
 - `room relay` mirrors room messages into terminal panes.
+- `mux submit` is the convenience submit gesture when a live pane already has drafted text waiting in its composer.
 - `room task` links shared tasks to the room.
 - `room loop` runs the central coordination loop:
   - relay new messages
@@ -67,6 +68,12 @@ Role expectations:
   - claims assigned work explicitly
   - keeps task heartbeat current
   - escalates blockers through the room instead of assuming others noticed
+
+Live-pane convenience:
+
+- if a room relay or direct live nudge leaves text sitting in an agent composer, use `agentctl mux submit ...` instead of retyping or sending ad hoc key presses
+- tmux supports targeted submit by pane label or pane id
+- zellij submit currently applies to the focused pane in the named session
 
 ## Default room workflow
 

@@ -17,6 +17,7 @@ Use this skill when multiple AI agents are open in tmux or zellij and need to:
 
 - the live mux pane layer can be `tmux` or `zellij`
 - `agentctl mux` is the backend-neutral create/read/send surface
+- `agentctl mux submit` is the backend-neutral "submit current draft" surface
 - `agentctl room` is the durable shared room surface
 - `room relay` and `room loop` fan room events back into terminal panes
 - `tmux-bridge` is an optional low-level helper
@@ -61,6 +62,13 @@ Send a message natively:
 
 ```bash
 agentctl mux send agent-b "Review internal/actor/supervisor.go for mailbox ack risks."
+```
+
+Submit a drafted message in the target mux surface:
+
+```bash
+agentctl mux submit agent-b
+agentctl mux submit --backend zellij --session alpha-room
 ```
 
 For autonomous panes, prefer `--mode auto`:
@@ -128,11 +136,17 @@ agentctl mux create --session agentctl-collab --panes 3 --pane-command codex
 agentctl mux list
 agentctl mux read <target> --lines 50
 agentctl mux send <target> "review this pane" [--sender <pane-label>]
+agentctl mux submit [<target>] [--backend tmux|zellij] [--session <session-name>]
 agentctl mux observe <target> --lines 80
 agentctl mux doctor
 ```
 
 Use `agentctl mux ...` when you want machine-friendly envelopes, pane metadata, and a native send path that does not depend on repo-local scripts. `agentctl tmux ...` remains as a compatibility alias.
+
+Use `agentctl mux submit` when the text is already sitting in an agent composer and you only need the standard submit gesture:
+
+- tmux: targeted `Escape` then `Enter`
+- zellij: `Escape` then `Enter` on the focused pane in the named session
 
 Common agent launches include `--agent codex`, `--agent claude`, `--agent gemini`, `--agent agent` for Cursor CLI, and `--agent droid` for Factory Droid.
 

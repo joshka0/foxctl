@@ -1533,6 +1533,114 @@ func TestRunRoomCreatePatternRedgreen(t *testing.T) {
 	}
 }
 
+func TestRunRoomInterviewFlow(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	ctx := context.Background()
+	workspace := t.TempDir()
+
+	cmd, _ := newRoomTestCommand(ctx)
+	if err := runRoomCreate(cmd, workspace, "alpha", "Alpha", "", []string{"human-a=coordinator", "gemini-a=reviewer", "cursor-a=reviewer"}); err != nil {
+		t.Fatalf("runRoomCreate: %v", err)
+	}
+
+	cmd, out := newRoomTestCommand(ctx)
+	if err := runRoomInterviewStart(cmd, workspace, "human-a", "alpha", "spec-meaning", "Need to clarify the retry semantics", "docs/spec/retry.md", "human-a", "gemini-a", "cursor-a", "human-a", []string{"keep API stable"}); err != nil {
+		t.Fatalf("runRoomInterviewStart: %v", err)
+	}
+	data := decodeRoomEnvelope(t, out)
+	sessionID := data["session_id"].(string)
+
+	cmd, out = newRoomTestCommand(ctx)
+	if err := runRoomInterviewAsk(cmd, workspace, "gemini-a", "alpha", sessionID, "", "Should the retry ladder stop on 429 or continue after backoff?"); err != nil {
+		t.Fatalf("runRoomInterviewAsk: %v", err)
+	}
+	data = decodeRoomEnvelope(t, out)
+	questionMsg := data["message"].(map[string]any)
+	questionID := questionMsg["id"].(string)
+	if got := questionMsg["recipient"]; got != "cursor-a" {
+		t.Fatalf("recipient=%v want cursor-a", got)
+	}
+
+	cmd, out = newRoomTestCommand(ctx)
+	if err := runRoomInterviewAnswer(cmd, workspace, "cursor-a", "alpha", questionID, "Stop on 429 after recording the backoff reason."); err != nil {
+		t.Fatalf("runRoomInterviewAnswer: %v", err)
+	}
+	data = decodeRoomEnvelope(t, out)
+	answerMsg := data["message"].(map[string]any)
+	answerID := answerMsg["id"].(string)
+	if got := answerMsg["recipient"]; got != "human-a" {
+		t.Fatalf("answer recipient=%v want human-a", got)
+	}
+
+	cmd, out = newRoomTestCommand(ctx)
+	if err := runRoomInterviewVerify(cmd, workspace, "human-a", "alpha", answerID, "accept", "Yes, that matches the intended semantics."); err != nil {
+		t.Fatalf("runRoomInterviewVerify: %v", err)
+	}
+
+	cmd, out = newRoomTestCommand(ctx)
+	if err := runRoomInterviewShow(cmd, workspace, "alpha", sessionID, 50); err != nil {
+		t.Fatalf("runRoomInterviewShow: %v", err)
+	}
+	data = decodeRoomEnvelope(t, out)
+	session := data["session"].(map[string]any)
+	if got := session["status"]; got != "verified" {
+		t.Fatalf("status=%v want verified", got)
+	}
+	if got := session["questions"]; got != float64(1) {
+		t.Fatalf("questions=%v want 1", got)
+	}
+	if got := session["answers"]; got != float64(1) {
+		t.Fatalf("answers=%v want 1", got)
+	}
+	if got := session["verified"]; got != float64(1) {
+		t.Fatalf("verified=%v want 1", got)
+	}
+}
+
+func TestRunRoomInterviewVerifyRequiresVerifier(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	ctx := context.Background()
+	workspace := t.TempDir()
+
+	cmd, _ := newRoomTestCommand(ctx)
+	if err := runRoomCreate(cmd, workspace, "alpha", "Alpha", "", []string{"human-a=coordinator", "gemini-a=reviewer", "cursor-a=reviewer", "claude-a=reviewer"}); err != nil {
+		t.Fatalf("runRoomCreate: %v", err)
+	}
+
+	cmd, out := newRoomTestCommand(ctx)
+	if err := runRoomInterviewStart(cmd, workspace, "human-a", "alpha", "spec-meaning", "", "", "human-a", "gemini-a", "cursor-a", "human-a", nil); err != nil {
+		t.Fatalf("runRoomInterviewStart: %v", err)
+	}
+	data := decodeRoomEnvelope(t, out)
+	sessionID := data["session_id"].(string)
+
+	cmd, out = newRoomTestCommand(ctx)
+	if err := runRoomInterviewAsk(cmd, workspace, "gemini-a", "alpha", sessionID, "", "What should we do?"); err != nil {
+		t.Fatalf("runRoomInterviewAsk: %v", err)
+	}
+	data = decodeRoomEnvelope(t, out)
+	questionID := data["message"].(map[string]any)["id"].(string)
+
+	cmd, out = newRoomTestCommand(ctx)
+	if err := runRoomInterviewAnswer(cmd, workspace, "cursor-a", "alpha", questionID, "Here is the answer."); err != nil {
+		t.Fatalf("runRoomInterviewAnswer: %v", err)
+	}
+	data = decodeRoomEnvelope(t, out)
+	answerID := data["message"].(map[string]any)["id"].(string)
+
+	cmd, out = newRoomTestCommand(ctx)
+	err := runRoomInterviewVerify(cmd, workspace, "claude-a", "alpha", answerID, "accept", "Looks right.")
+	if err != nil {
+		t.Fatalf("runRoomInterviewVerify returned error: %v", err)
+	}
+	if !strings.Contains(out.String(), `"status":"error"`) {
+		t.Fatalf("expected error envelope, got %s", out.String())
+	}
+	if !strings.Contains(out.String(), "only the verifier or coordinator can record an interview verdict") {
+		t.Fatalf("expected verifier error, got %s", out.String())
+	}
+}
+
 func TestRunRoomSendResolvesCoordinatorAlias(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	ctx := context.Background()

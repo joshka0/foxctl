@@ -250,10 +250,12 @@ func handleMailboxSend(w http.ResponseWriter, r *http.Request, cfg config.Config
 			agent.BoardMessageKindCoordinatorPulse,
 			agent.BoardMessageKindPlanSession, agent.BoardMessageKindPlanProposal,
 			agent.BoardMessageKindPlanQuestion, agent.BoardMessageKindPlanDecision,
-			agent.BoardMessageKindPlanReview, agent.BoardMessageKindPlanClose:
+			agent.BoardMessageKindPlanReview, agent.BoardMessageKindPlanClose,
+			agent.BoardMessageKindInterviewSession, agent.BoardMessageKindInterviewQuestion,
+			agent.BoardMessageKindInterviewAnswer, agent.BoardMessageKindInterviewVerify:
 			// valid
 		default:
-			httpError(w, http.StatusBadRequest, "invalid kind: must be one of instruction, info, alert, review_request, coordinator_pulse, plan_session, plan_proposal, plan_question, plan_decision, plan_review, plan_close")
+			httpError(w, http.StatusBadRequest, "invalid kind: must be one of instruction, info, alert, review_request, coordinator_pulse, plan_session, plan_proposal, plan_question, plan_decision, plan_review, plan_close, interview_session, interview_question, interview_answer, interview_verify")
 			return
 		}
 	}

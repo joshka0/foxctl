@@ -39,6 +39,14 @@ const (
 	BoardMessageKindPlanReview BoardMessageKind = "plan_review"
 	// BoardMessageKindPlanClose represents the durable closure of a planning session.
 	BoardMessageKindPlanClose BoardMessageKind = "plan_close"
+	// BoardMessageKindInterviewSession represents the root of a round-robin interview session.
+	BoardMessageKindInterviewSession BoardMessageKind = "interview_session"
+	// BoardMessageKindInterviewQuestion represents a question posed within an interview session.
+	BoardMessageKindInterviewQuestion BoardMessageKind = "interview_question"
+	// BoardMessageKindInterviewAnswer represents an answer to a session question.
+	BoardMessageKindInterviewAnswer BoardMessageKind = "interview_answer"
+	// BoardMessageKindInterviewVerify represents a verifier verdict on an interview answer.
+	BoardMessageKindInterviewVerify BoardMessageKind = "interview_verify"
 )
 
 // BoardMessageStatus defines the read/ack status of a message.
