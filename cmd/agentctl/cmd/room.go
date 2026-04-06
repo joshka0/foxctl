@@ -4386,7 +4386,7 @@ func buildRoomInboxEntries(actorID string, messages []agent.BoardMessage, filter
 	return entries
 }
 
-func roomInboxEntryForActor(actorID string, msg agent.BoardMessage, includeBroadcasts bool, latestBySender map[string]time.Time) (roomInboxEntry, bool) {
+func roomInboxEntryForActor(actorID string, msg agent.BoardMessage, includeBroadcasts bool, latestBySender map[string]roomSenderActivity) (roomInboxEntry, bool) {
 	recipient := normalizeRoomRecipient(msg.Recipient)
 	isDirect := sameRoomParticipant(recipient, actorID)
 	isBroadcast := recipient == agent.BroadcastRecipient
@@ -4440,21 +4440,30 @@ func roomInboxEntryForActor(actorID string, msg agent.BoardMessage, includeBroad
 	}, true
 }
 
-func latestRoomSenderActivity(messages []agent.BoardMessage) map[string]time.Time {
-	latest := make(map[string]time.Time, len(messages))
+type roomSenderActivity struct {
+	CreatedAt time.Time
+	MessageID string
+}
+
+func latestRoomSenderActivity(messages []agent.BoardMessage) map[string]roomSenderActivity {
+	latest := make(map[string]roomSenderActivity, len(messages))
 	for _, msg := range messages {
 		sender := strings.TrimSpace(msg.Sender)
 		if sender == "" {
 			continue
 		}
-		if ts, ok := latest[sender]; !ok || msg.CreatedAt.After(ts) {
-			latest[sender] = msg.CreatedAt
+		current, ok := latest[sender]
+		if !ok || msg.CreatedAt.After(current.CreatedAt) || (msg.CreatedAt.Equal(current.CreatedAt) && strings.TrimSpace(msg.ID) > current.MessageID) {
+			latest[sender] = roomSenderActivity{
+				CreatedAt: msg.CreatedAt,
+				MessageID: strings.TrimSpace(msg.ID),
+			}
 		}
 	}
 	return latest
 }
 
-func messageStillAwaitsReply(msg agent.BoardMessage, latestBySender map[string]time.Time) bool {
+func messageStillAwaitsReply(msg agent.BoardMessage, latestBySender map[string]roomSenderActivity) bool {
 	if !msg.ReplyExpected {
 		return false
 	}
@@ -4466,9 +4475,15 @@ func messageStillAwaitsReply(msg agent.BoardMessage, latestBySender map[string]t
 	if !ok {
 		return true
 	}
-	// A reply only counts when the recipient speaks after the request.
-	// Self-addressed messages should not satisfy themselves at the same timestamp.
-	return !latestReply.After(msg.CreatedAt)
+	// A reply counts when the recipient speaks later, or when a different
+	// message from that recipient lands at the same timestamp.
+	if latestReply.CreatedAt.After(msg.CreatedAt) {
+		return false
+	}
+	if latestReply.CreatedAt.Equal(msg.CreatedAt) && latestReply.MessageID != strings.TrimSpace(msg.ID) {
+		return false
+	}
+	return true
 }
 
 func normalizeRoomInboxFilter(filter string) string {
@@ -4517,10 +4532,10 @@ func buildRoomStatusParticipants(room agent.RoomSummary, messages []agent.BoardM
 			Role:    roomMemberRole(room.Members, actorID),
 			Status:  "idle",
 		}
-		if ts, ok := latestBySender[actorID]; ok {
-			tsCopy := ts
+		if activity, ok := latestBySender[actorID]; ok {
+			tsCopy := activity.CreatedAt
 			p.LastActiveAt = &tsCopy
-			if staleAfter > 0 && now.Sub(ts) > staleAfter {
+			if staleAfter > 0 && now.Sub(activity.CreatedAt) > staleAfter {
 				p.Status = "stale"
 			} else {
 				p.Status = "active"

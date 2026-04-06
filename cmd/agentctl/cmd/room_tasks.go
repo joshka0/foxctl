@@ -1471,7 +1471,7 @@ func processRoomReminderTick(ctx context.Context, coordStore *coordination.Store
 	return out, nil
 }
 
-func roomReminderSatisfied(rootMessageID string, messages []agent.BoardMessage, latestBySender map[string]time.Time) bool {
+func roomReminderSatisfied(rootMessageID string, messages []agent.BoardMessage, latestBySender map[string]roomSenderActivity) bool {
 	rootMessageID = strings.TrimSpace(rootMessageID)
 	if rootMessageID == "" {
 		return true
