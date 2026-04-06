@@ -146,11 +146,11 @@ func TestChildSpawner_SpawnChild_EmitsRecentLogsInRawState(t *testing.T) {
 		t.Fatalf("SpawnChild() error = %v", err)
 	}
 
-	_ = waitForWorkerStatus(t, state, "subprocess:agent:logs-1", coreworker.StatusCompleted)
 	recentLogs := waitForRecentLogs(t, state, "subprocess:agent:logs-1", 1)
 	if !recentLogsContainAnyText(recentLogs, "hello-stdout", "hello-stderr") {
 		t.Fatalf("recent_logs=%v want at least one expected log entry", recentLogs)
 	}
+	_ = waitForWorkerStatus(t, state, "subprocess:agent:logs-1", coreworker.StatusCompleted)
 
 	cancel()
 	if err := <-done; err != nil {
@@ -414,30 +414,6 @@ func waitForWorkerStatus(t *testing.T, state *runtimeworkers.StateComponent, wor
 	return coreworker.Record{}
 }
 
-func waitForRecentLogTexts(t *testing.T, state *runtimeworkers.StateComponent, workerID string, wantTexts ...string) []any {
-	t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
-		snapshot := state.Snapshot()
-		record, ok := snapshot.Workers[workerID]
-		if !ok || record.Status != coreworker.StatusCompleted {
-			time.Sleep(20 * time.Millisecond)
-			continue
-		}
-		var raw map[string]any
-		if err := json.Unmarshal(record.RawState, &raw); err == nil {
-			agentctlState, _ := raw["agentctl"].(map[string]any)
-			recentLogs, _ := agentctlState["recent_logs"].([]any)
-			if recentLogsContainTexts(recentLogs, wantTexts...) {
-				return recentLogs
-			}
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
-	t.Fatalf("worker %q did not accumulate recent log texts %v", workerID, wantTexts)
-	return nil
-}
-
 func waitForRecentLogs(t *testing.T, state *runtimeworkers.StateComponent, workerID string, minCount int) []any {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
@@ -458,28 +434,6 @@ func waitForRecentLogs(t *testing.T, state *runtimeworkers.StateComponent, worke
 	}
 	t.Fatalf("worker %q did not accumulate %d recent log entries", workerID, minCount)
 	return nil
-}
-
-func recentLogsContainTexts(recentLogs []any, wantTexts ...string) bool {
-	if len(wantTexts) == 0 {
-		return true
-	}
-	seen := make(map[string]bool, len(wantTexts))
-	for _, entry := range recentLogs {
-		record, _ := entry.(map[string]any)
-		text := strings.TrimSpace(fmt.Sprint(record["text"]))
-		for _, want := range wantTexts {
-			if text == want {
-				seen[want] = true
-			}
-		}
-	}
-	for _, want := range wantTexts {
-		if !seen[want] {
-			return false
-		}
-	}
-	return true
 }
 
 func recentLogsContainAnyText(recentLogs []any, wantTexts ...string) bool {
