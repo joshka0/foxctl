@@ -4991,18 +4991,20 @@ func collectRoomRelayTargets(room agent.RoomSummary, msg agent.BoardMessage) ([]
 	skipped := make([]string, 0, len(room.Members))
 	recipient := normalizeRoomRecipient(msg.Recipient)
 	for _, member := range room.Members {
-		target := strings.TrimSpace(member.ActorID)
-		if target == "" {
+		member = normalizeRoomMember(member)
+		actorID := strings.TrimSpace(member.ActorID)
+		if actorID == "" {
 			continue
 		}
-		if sameRoomParticipant(target, strings.TrimSpace(msg.Sender)) {
-			skipped = append(skipped, target)
+		if sameRoomParticipant(actorID, strings.TrimSpace(msg.Sender)) {
+			skipped = append(skipped, actorID)
 			continue
 		}
-		if recipient != agent.BroadcastRecipient && !sameRoomParticipant(target, recipient) {
-			skipped = append(skipped, target)
+		if recipient != agent.BroadcastRecipient && !sameRoomParticipant(actorID, recipient) {
+			skipped = append(skipped, actorID)
 			continue
 		}
+		target := roomMemberTmuxTarget(member)
 		targets = append(targets, target)
 	}
 	return targets, skipped
@@ -5029,7 +5031,7 @@ func collectRoomRelayTargetsByBackend(room agent.RoomSummary, msg agent.BoardMes
 			continue
 		}
 		if roomMemberRelayBackend(member) != "zellij" {
-			tmuxTargets = append(tmuxTargets, target)
+			tmuxTargets = append(tmuxTargets, roomMemberTmuxTarget(member))
 			continue
 		}
 		session, zellijTarget, ok := resolveRoomMemberZellijTarget(member)
@@ -5067,6 +5069,14 @@ func resolveRoomMemberZellijTarget(member agent.RoomMember) (string, string, boo
 		return session, actorID, true
 	}
 	return "", "", false
+}
+
+func roomMemberTmuxTarget(member agent.RoomMember) string {
+	member = normalizeRoomMember(member)
+	if paneID := strings.TrimSpace(member.PaneID); paneID != "" {
+		return paneID
+	}
+	return strings.TrimSpace(member.ActorID)
 }
 
 func normalizeRoomRecipient(recipient string) string {

@@ -2466,6 +2466,80 @@ func TestDetectRoomTaskPulseMessagesSkipsRecentlyTouchedTask(t *testing.T) {
 	}
 }
 
+func TestDetectRoomTaskFollowupMessagesEmitsTipForClaimedTask(t *testing.T) {
+	now := time.Date(2026, 4, 4, 19, 0, 0, 0, time.UTC)
+	claimedAt := now.Add(-10 * time.Minute)
+	room := agent.RoomSummary{
+		ID:          "alpha",
+		WorkspaceID: "/repo",
+		Stream:      agent.RoomStreamName("alpha"),
+		Members: []agent.RoomMember{
+			{ActorID: "human-a", Role: "coordinator"},
+			{ActorID: "claude-a", Role: "reviewer"},
+		},
+	}
+	pulses := detectRoomTaskFollowupMessages(room, []taskstore.Task{
+		{
+			ID:           "task-1",
+			Title:        "Review retry path",
+			Status:       taskstore.StatusInProgress,
+			OwnerActorID: "claude-a",
+			ClaimedAt:    &claimedAt,
+		},
+	}, now, roomPulseConfig{
+		Interval:       5 * time.Minute,
+		TaskStaleAfter: 30 * time.Minute,
+	}, map[string]time.Time{})
+	if len(pulses) != 1 {
+		t.Fatalf("len(pulses)=%d want 1", len(pulses))
+	}
+	msg := pulses[0].Message
+	if msg.Recipient != "claude-a" {
+		t.Fatalf("recipient=%q want claude-a", msg.Recipient)
+	}
+	if msg.Interrupt {
+		t.Fatalf("interrupt=%v want false", msg.Interrupt)
+	}
+	if msg.Kind != agent.BoardMessageKindInfo {
+		t.Fatalf("kind=%q want %q", msg.Kind, agent.BoardMessageKindInfo)
+	}
+	if !strings.Contains(msg.Body, "Quick tip:") {
+		t.Fatalf("body missing quick tip: %s", msg.Body)
+	}
+	if !strings.Contains(msg.Body, "agentctl room task complete alpha --id task-1") {
+		t.Fatalf("body missing completion tip: %s", msg.Body)
+	}
+}
+
+func TestDetectRoomTaskFollowupMessagesSkipsFreshlyClaimedTask(t *testing.T) {
+	now := time.Date(2026, 4, 4, 19, 0, 0, 0, time.UTC)
+	claimedAt := now.Add(-2 * time.Minute)
+	room := agent.RoomSummary{
+		ID:          "alpha",
+		WorkspaceID: "/repo",
+		Stream:      agent.RoomStreamName("alpha"),
+		Members: []agent.RoomMember{
+			{ActorID: "human-a", Role: "coordinator"},
+			{ActorID: "claude-a", Role: "reviewer"},
+		},
+	}
+	pulses := detectRoomTaskFollowupMessages(room, []taskstore.Task{
+		{
+			ID:           "task-1",
+			Title:        "Review retry path",
+			Status:       taskstore.StatusInProgress,
+			OwnerActorID: "claude-a",
+			ClaimedAt:    &claimedAt,
+		},
+	}, now, roomPulseConfig{
+		Interval:       5 * time.Minute,
+		TaskStaleAfter: 30 * time.Minute,
+	}, map[string]time.Time{})
+	if len(pulses) != 0 {
+		t.Fatalf("len(pulses)=%d want 0", len(pulses))
+	}
+}
+
 func TestDetectRoomTaskEscalationMessagesAfterInterruptBudget(t *testing.T) {
 	now := time.Date(2026, 4, 5, 12, 0, 0, 0, time.UTC)
 	room := agent.RoomSummary{
@@ -2582,6 +2656,25 @@ func TestCollectRoomRelayTargetsDirectRecipient(t *testing.T) {
 	}
 }
 
+func TestCollectRoomRelayTargetsDirectRecipientUsesTmuxPaneID(t *testing.T) {
+	targets, skipped := collectRoomRelayTargets(agent.RoomSummary{
+		Members: []agent.RoomMember{
+			{ActorID: "human-a", Backend: "tmux", PaneID: "%3"},
+			{ActorID: "cursor-review", Backend: "tmux", PaneID: "%11"},
+			{ActorID: "gemini-a", Backend: "tmux", PaneID: "%10"},
+		},
+	}, agent.BoardMessage{
+		Sender:    "human-a",
+		Recipient: "cursor-review",
+	})
+	if len(targets) != 1 || targets[0] != "%11" {
+		t.Fatalf("targets=%v want [%%11]", targets)
+	}
+	if len(skipped) != 2 {
+		t.Fatalf("skipped=%v want 2 entries", skipped)
+	}
+}
+
 func TestCollectRoomRelayTargetsByBackendRoutesZellijBySession(t *testing.T) {
 	tmuxTargets, zellijTargets, failed, skipped := collectRoomRelayTargetsByBackend(agent.RoomSummary{
 		Members: []agent.RoomMember{
@@ -2605,6 +2698,31 @@ func TestCollectRoomRelayTargetsByBackendRoutesZellijBySession(t *testing.T) {
 	targets := zellijTargets["fascinating-salamander"]
 	if len(targets) != 1 || targets[0] != "cursor-a" {
 		t.Fatalf("zellijTargets=%v want title route for fascinating-salamander", zellijTargets)
+	}
+}
+
+func TestCollectRoomRelayTargetsByBackendRoutesTmuxByPaneID(t *testing.T) {
+	tmuxTargets, zellijTargets, failed, skipped := collectRoomRelayTargetsByBackend(agent.RoomSummary{
+		Members: []agent.RoomMember{
+			{ActorID: "codex-backend", Backend: "tmux", PaneID: "%3"},
+			{ActorID: "cursor-review", Backend: "tmux", PaneID: "%11"},
+			{ActorID: "block-gemini-a", Backend: "tmux", PaneID: "%10"},
+		},
+	}, agent.BoardMessage{
+		Sender:    "codex-backend",
+		Recipient: "cursor-review",
+	})
+	if len(tmuxTargets) != 1 || tmuxTargets[0] != "%11" {
+		t.Fatalf("tmuxTargets=%v want [%%11]", tmuxTargets)
+	}
+	if len(zellijTargets) != 0 {
+		t.Fatalf("zellijTargets=%v want none", zellijTargets)
+	}
+	if len(failed) != 0 {
+		t.Fatalf("failed=%v want none", failed)
+	}
+	if len(skipped) != 2 {
+		t.Fatalf("skipped=%v want 2 entries", skipped)
 	}
 }
 

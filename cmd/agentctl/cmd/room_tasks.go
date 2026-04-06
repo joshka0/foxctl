@@ -1043,6 +1043,7 @@ func runRoomLoop(cmd *cobra.Command, workspace, roomID string, relay roomRelayOp
 	}
 	remindedMessages := map[string]roomPulseState{}
 	remindedTasks := map[string]roomPulseState{}
+	remindedTaskFollowups := map[string]time.Time{}
 	remindedCoordinators := map[string]time.Time{}
 
 	for {
@@ -1174,6 +1175,7 @@ func runRoomLoop(cmd *cobra.Command, workspace, roomID string, relay roomRelayOp
 			}
 			cleanupRoomReplyPulseState(current, time.Now().UTC(), pulse, remindedMessages)
 			cleanupRoomTaskPulseState(roomTasks, time.Now().UTC(), pulse, remindedTasks)
+			cleanupRoomTaskFollowupState(roomTasks, remindedTaskFollowups)
 			for _, pulseMsg := range detectRoomPulseMessages(roomID, current, time.Now().UTC(), pulse, remindedMessages) {
 				msg := pulseMsg.Message
 				if err := boardStore.SendMessage(cmd.Context(), &msg); err != nil {
@@ -1190,6 +1192,24 @@ func runRoomLoop(cmd *cobra.Command, workspace, roomID string, relay roomRelayOp
 					"relay":   result,
 				}, absWorkspace)); err != nil {
 					return fmt.Errorf("write room loop pulse envelope: %w", err)
+				}
+			}
+			for _, pulseMsg := range detectRoomTaskFollowupMessages(summary, roomTasks, time.Now().UTC(), pulse, remindedTaskFollowups) {
+				msg := pulseMsg.Message
+				if err := boardStore.SendMessage(cmd.Context(), &msg); err != nil {
+					return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.loop", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+				}
+				remindedTaskFollowups[pulseMsg.Key] = msg.CreatedAt
+				seenMessages[msg.ID] = struct{}{}
+				seq++
+				result := relayRoomMessage(cmd.Context(), client, summary, msg, relay)
+				if err := writer.Write(roomProgressEnvelope("agentctl.room.loop", seq, false, map[string]any{
+					"event":   "task_followup",
+					"room_id": roomID,
+					"message": msg,
+					"relay":   result,
+				}, absWorkspace)); err != nil {
+					return fmt.Errorf("write room loop task follow-up envelope: %w", err)
 				}
 			}
 			for _, pulseMsg := range detectRoomTaskPulseMessages(absWorkspace, roomID, roomTasks, time.Now().UTC(), pulse, remindedTasks) {
@@ -1592,6 +1612,24 @@ func cleanupRoomTaskPulseState(tasks []taskstore.Task, now time.Time, cfg roomPu
 	}
 }
 
+func cleanupRoomTaskFollowupState(tasks []taskstore.Task, states map[string]time.Time) {
+	active := make(map[string]struct{})
+	for _, task := range tasks {
+		if task.OwnerActorID == "" {
+			continue
+		}
+		if task.Status != taskstore.StatusInProgress && task.Status != taskstore.StatusBlocked {
+			continue
+		}
+		active[task.ID] = struct{}{}
+	}
+	for key := range states {
+		if _, ok := active[key]; !ok {
+			delete(states, key)
+		}
+	}
+}
+
 func openRoomTaskStore(ctx context.Context) (taskstore.Store, error) {
 	cfg, err := loadConfig(ctx)
 	if err != nil {
@@ -1852,6 +1890,65 @@ func detectRoomTaskPulseMessages(workspace, roomID string, tasks []taskstore.Tas
 				Interrupt:   true,
 				Subject:     subject,
 				Body:        body,
+				CreatedAt:   now,
+			},
+		})
+	}
+	return out
+}
+
+func detectRoomTaskFollowupMessages(room agent.RoomSummary, tasks []taskstore.Task, now time.Time, cfg roomPulseConfig, reminded map[string]time.Time) []roomPulseMessage {
+	if !roomPulseEnabled(cfg) || cfg.Interval <= 0 {
+		return nil
+	}
+	coordinator := roomCoordinatorActorID(room.Members)
+	if coordinator == "" {
+		coordinator = "@coordinator"
+	}
+	out := make([]roomPulseMessage, 0)
+	for _, task := range tasks {
+		if task.OwnerActorID == "" {
+			continue
+		}
+		if task.Status != taskstore.StatusInProgress && task.Status != taskstore.StatusBlocked {
+			continue
+		}
+		reference := task.CreatedAt
+		if task.HeartbeatAt != nil {
+			reference = *task.HeartbeatAt
+		} else if task.ClaimedAt != nil {
+			reference = *task.ClaimedAt
+		}
+		if now.Sub(reference) < cfg.Interval {
+			continue
+		}
+		if last, ok := reminded[task.ID]; ok && now.Sub(last) < cfg.Interval {
+			continue
+		}
+		if cfg.TaskStaleAfter > 0 && now.Sub(reference) >= cfg.TaskStaleAfter {
+			continue
+		}
+		subject := fmt.Sprintf("Task check-in: %s", task.Title)
+		bodyLines := []string{
+			fmt.Sprintf("Task %s is still %s.", task.ID, task.Status),
+			fmt.Sprintf("Owner: %s", task.OwnerActorID),
+			"Please post a durable status update or complete the task if the work is done.",
+		}
+		if strings.TrimSpace(task.BlockedReason) != "" {
+			bodyLines = append(bodyLines, "Blocked reason: "+strings.TrimSpace(task.BlockedReason))
+		}
+		out = append(out, roomPulseMessage{
+			Key: task.ID,
+			Message: agent.BoardMessage{
+				WorkspaceID: room.WorkspaceID,
+				TaskID:      task.ID,
+				Stream:      room.Stream,
+				Sender:      roomLoopSender(room.ID),
+				Recipient:   task.OwnerActorID,
+				Kind:        agent.BoardMessageKindInfo,
+				Priority:    agent.DefaultPriority,
+				Subject:     subject,
+				Body:        appendRoomTaskOperatorTip(strings.Join(bodyLines, "\n"), room.ID, task.ID, coordinator),
 				CreatedAt:   now,
 			},
 		})
