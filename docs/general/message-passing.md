@@ -384,6 +384,6 @@ SELECT to_ns, visible_at, attempt FROM mailbox ORDER BY visible_at ASC LIMIT 20;
 
 ## See Also
 
-- [Events System](../observability/events.md) - Event bus for system-wide notifications
+- [Events System](./events.md) - Event bus for system-wide notifications
 - [Actors](https://github.com/jkatigb/agentctl/tree/main/internal/actor) - Actor implementation
 - [Mailbox Storage](https://github.com/jkatigb/agentctl/tree/main/internal/storage/mailbox) - Persistence layer

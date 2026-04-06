@@ -71,7 +71,7 @@ Current PostgreSQL-oriented deployment overlays use:
 - `AGENTCTL_CAS_S3_FORCE_PATH_STYLE`
 - `AGENTCTL_CAS_S3_DISABLE_SSL`
 
-Legacy base manifests may still show older env keys (`AGENTCTL_CAS_BACKEND`, `AGENTCTL_CAS_BUCKET`); these are documented as historical drift in `docs/kubernetes.md`.
+Legacy base manifests may still show older env keys (`AGENTCTL_CAS_BACKEND`, `AGENTCTL_CAS_BUCKET`); these are documented as historical drift in `docs/guides/kubernetes.md`.
 
 ## Teams conversation references
 
@@ -88,4 +88,4 @@ Teams adapter webhooks can persist conversation references outside the store-dri
 ## Cross-reference
 
 - Kubernetes runtime summary for DSN/env wiring: `docs/architecture/kubernetes-runtime.md`
-- Historical implementation plan: `docs/plans/k8s-sql-storage.md`
+- Historical implementation plan: `docs/archive/impl_plan/k8s-sql-storage.md`

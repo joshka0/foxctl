@@ -142,4 +142,4 @@ engines behind the boundary.
 
 - Current web/API map: `docs/general/api-server.md`
 - Current runtime map: `docs/general/runtime-orchestration.md`
-- Historical plan: `docs/plans/chat-platform-adapter.md`
+- Historical plan: `docs/archive/impl_plan/chat-platform-adapter.md`

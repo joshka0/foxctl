@@ -27,7 +27,7 @@ contributors
 | [docs/architecture/](docs/architecture/)           | Current architecture overviews (runtime + storage + adapters) |
 | [docs/general/gotchas.md](docs/general/gotchas.md) | Common pitfalls                                  |
 | [docs/codemaps/](docs/codemaps/)                   | Generated codemap artifacts and notes            |
-| [docs/kubernetes.md](docs/kubernetes.md)           | Kubernetes deployment guide                      |
+| [docs/guides/kubernetes.md](docs/guides/kubernetes.md) | Kubernetes deployment guide                      |
 | [deploy/kubernetes/](deploy/kubernetes/)           | Kubernetes manifests and overlays                |
 | [docs/spec/agent_hierarchy.md](docs/spec/agent_hierarchy.md) | Subagent hierarchy and spawn protocol   |
 | [docs/spec/overseer_profile.md](docs/spec/overseer_profile.md) | Overseer coordination profile |
@@ -37,8 +37,8 @@ contributors
 | [docs/architecture/postgres-storage.md](docs/architecture/postgres-storage.md) | PostgreSQL + CAS storage architecture |
 | [docs/architecture/context-architecture.md](docs/architecture/context-architecture.md) | ACA dual-plane context + Obsidian knowledge layer |
 | [docs/architecture/simulator-agents.md](docs/architecture/simulator-agents.md) | Simulator agent pattern for app/API integrations |
-| [docs/plans/chat-platform-adapter.md](docs/plans/chat-platform-adapter.md) | Implementation plan + historical notes |
-| [docs/plans/k8s-sql-storage.md](docs/plans/k8s-sql-storage.md) | Historical implementation plan (now partially complete) |
+| [docs/archive/impl_plan/chat-platform-adapter.md](docs/archive/impl_plan/chat-platform-adapter.md) | Implementation plan + historical notes |
+| [docs/archive/impl_plan/k8s-sql-storage.md](docs/archive/impl_plan/k8s-sql-storage.md) | Historical implementation plan (now partially complete) |
 
 ---
 
@@ -740,7 +740,7 @@ I/O: JSON envelopes (version: 1)
 | Storage      | [docs/general/storage.md](docs/general/storage.md)           |
 | Gotchas      | [docs/general/gotchas.md](docs/general/gotchas.md)           |
 | Multi-Agent  | [docs/spec/v1/agent_profile_v1.md](docs/spec/v1/agent_profile_v1.md) |
-| Deployment   | [docs/kubernetes.md](docs/kubernetes.md)                    |
+| Deployment   | [docs/guides/kubernetes.md](docs/guides/kubernetes.md)                    |
 | Deployment Manifests | [deploy/kubernetes/](deploy/kubernetes/)              |
 | Chat Adapter | [docs/architecture/chat-platform-adapter.md](docs/architecture/chat-platform-adapter.md) |
 | Postgres     | [docs/architecture/postgres-storage.md](docs/architecture/postgres-storage.md) |

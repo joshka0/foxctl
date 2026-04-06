@@ -503,7 +503,7 @@ Always use `make build-cgo` which includes `-tags=libsqlite3`.
 | [docs/README.md](docs/README.md) | Canonical documentation map |
 | [.claude/CLAUDE.md](.claude/CLAUDE.md) | Claude Code integration reference |
 | [docs/spec/](docs/spec/) | Technical specifications |
-| [docs/observability/](docs/observability/) | Wide events documentation |
+| [docs/general/events.md](docs/general/events.md) | Observability event stream documentation |
 
 ---
 

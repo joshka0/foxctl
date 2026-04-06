@@ -124,4 +124,4 @@ Legacy keys still seen in base artifacts:
   - [docs/architecture/chat-platform-adapter.md](chat-platform-adapter.md)
   - [docs/architecture/postgres-storage.md](postgres-storage.md)
 - Historical plans:
-  - [docs/plans/k8s-sql-storage.md](../plans/k8s-sql-storage.md)
+  - [docs/archive/impl_plan/k8s-sql-storage.md](../archive/impl_plan/k8s-sql-storage.md)

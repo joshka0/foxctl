@@ -34,6 +34,6 @@ Machine-friendly reference for proactive context injection and wide-event tracin
 
 ## Related Docs
 
-- `docs/observability/README.md`
+- `docs/general/events.md`
 - `docs/general/hooks.md`
 - `docs/general/runtime-orchestration.md`

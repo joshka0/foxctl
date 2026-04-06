@@ -831,7 +831,7 @@ See [GitHub Issues](https://github.com/jkatigb/agentctl/issues) for current know
 ## Additional Resources
 
 - **[Core Profile v1](./spec/v1/core_profile_v1.md)** — Complete specification
-- **[docs/roadmap.md](./roadmap.md)** — Roadmap pointer (current + historical)
+- **[docs/archive/roadmap.md](./archive/roadmap.md)** — Roadmap pointer (current + historical)
 - **[CONTRIBUTING.md](../CONTRIBUTING.md)** — Development guide
 - **[SECURITY.md](SECURITY.md)** — Security policy
 
