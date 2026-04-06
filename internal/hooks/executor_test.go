@@ -149,12 +149,24 @@ func (m *MockBoardStore) ReplaceRoomMembers(ctx context.Context, workspaceID, ro
 	return members, nil
 }
 
-func (m *MockBoardStore) ListRooms(ctx context.Context, workspaceID, actorID string, limit int) ([]agent.RoomSummary, error) {
+func (m *MockBoardStore) ListRooms(ctx context.Context, workspaceID, actorID string, limit int, archivedOnly bool) ([]agent.RoomSummary, error) {
 	return nil, nil
 }
 
 func (m *MockBoardStore) GetRoom(ctx context.Context, workspaceID, roomID, actorID string) (agent.RoomSummary, error) {
 	return agent.RoomSummary{}, nil
+}
+
+func (m *MockBoardStore) ArchiveRoom(ctx context.Context, workspaceID, roomID string) error {
+	return nil
+}
+
+func (m *MockBoardStore) RestoreRoom(ctx context.Context, workspaceID, roomID string) error {
+	return nil
+}
+
+func (m *MockBoardStore) DeleteRoom(ctx context.Context, workspaceID, roomID string) error {
+	return nil
 }
 
 func (m *MockBoardStore) ListRoomMessages(ctx context.Context, workspaceID, roomID string, limit int) ([]agent.BoardMessage, error) {

@@ -112,6 +112,146 @@ func TestStore_ApplyAndBoard(t *testing.T) {
 	}
 }
 
+func TestStore_DeleteCards_RemovesProjectionAndAppliedEvents(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	db, closeFn, err := dbutil.OpenSQLiteDBShared(ctx, filepath.Join(t.TempDir(), "orchestration_delete.db"), nil)
+	if err != nil {
+		t.Fatalf("open sqlite db: %v", err)
+	}
+	t.Cleanup(func() { _ = closeFn() })
+	if err := MigrateSchema(ctx, db); err != nil {
+		t.Fatalf("migrate schema: %v", err)
+	}
+
+	store := NewStore(db, StoreOptions{})
+	store.SetNowForTest(func() time.Time { return time.Date(2026, time.April, 6, 13, 0, 0, 0, time.UTC) })
+
+	apply := func(eventID, issueID string) {
+		t.Helper()
+		if err := store.Apply(ctx, coreevents.Event{
+			ID:            eventID,
+			StreamID:      "run-" + issueID,
+			StreamType:    coreevents.StreamTypeRun,
+			StreamVersion: 1,
+			EventType:     coreevents.EventRunStarted,
+			OccurredAt:    time.Date(2026, time.April, 6, 13, 0, 1, 0, time.UTC),
+			Command:       "orchestration/dispatch-issue",
+			RequestID:     "req-" + issueID,
+			Payload: coreevents.MustMarshalPayload(map[string]any{
+				"workspace_id": "ws-delete",
+				"issue_id":     issueID,
+				"title":        issueID,
+				"state":        "Released",
+				"eligibility":  "eligible",
+			}),
+		}); err != nil {
+			t.Fatalf("apply %s: %v", issueID, err)
+		}
+	}
+
+	apply("evt-del-1", "issue-delete-1")
+	apply("evt-del-2", "issue-delete-2")
+
+	deleted, err := store.DeleteCards(ctx, "ws-delete", []string{"issue-delete-1", "issue-delete-2"}, []string{"evt-del-1", "evt-del-2"})
+	if err != nil {
+		t.Fatalf("DeleteCards() error = %v", err)
+	}
+	if deleted != 2 {
+		t.Fatalf("deleted=%d want 2", deleted)
+	}
+
+	board, err := store.Board(ctx, coreorchestration.BoardRequest{WorkspaceID: "ws-delete", Limit: 10})
+	if err != nil {
+		t.Fatalf("Board() error = %v", err)
+	}
+	total := 0
+	for _, count := range board.Counts {
+		total += count
+	}
+	if total != 0 {
+		t.Fatalf("board count=%d want 0", total)
+	}
+}
+
+func TestStore_ArchiveAndRestoreCards(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	db, closeFn, err := dbutil.OpenSQLiteDBShared(ctx, filepath.Join(t.TempDir(), "orchestration_archive.db"), nil)
+	if err != nil {
+		t.Fatalf("open sqlite db: %v", err)
+	}
+	t.Cleanup(func() { _ = closeFn() })
+	if err := MigrateSchema(ctx, db); err != nil {
+		t.Fatalf("migrate schema: %v", err)
+	}
+
+	store := NewStore(db, StoreOptions{})
+	store.SetNowForTest(func() time.Time { return time.Date(2026, time.April, 6, 14, 0, 0, 0, time.UTC) })
+
+	if err := store.Apply(ctx, coreevents.Event{
+		ID:            "evt-arch-1",
+		StreamID:      "run-arch-1",
+		StreamType:    coreevents.StreamTypeRun,
+		StreamVersion: 1,
+		EventType:     coreevents.EventRunStarted,
+		OccurredAt:    time.Date(2026, time.April, 6, 14, 0, 1, 0, time.UTC),
+		Command:       "orchestration/dispatch-issue",
+		RequestID:     "req-arch-1",
+		Payload: coreevents.MustMarshalPayload(map[string]any{
+			"workspace_id": "ws-archive",
+			"issue_id":     "issue-archive-1",
+			"title":        "Archive me",
+			"state":        "Released",
+			"eligibility":  "eligible",
+		}),
+	}); err != nil {
+		t.Fatalf("Apply() error = %v", err)
+	}
+
+	updated, err := store.ArchiveCards(ctx, "ws-archive", []string{"issue-archive-1"})
+	if err != nil {
+		t.Fatalf("ArchiveCards() error = %v", err)
+	}
+	if updated != 1 {
+		t.Fatalf("updated=%d want 1", updated)
+	}
+
+	activeBoard, err := store.Board(ctx, coreorchestration.BoardRequest{WorkspaceID: "ws-archive", Limit: 10})
+	if err != nil {
+		t.Fatalf("Board(active) error = %v", err)
+	}
+	activeTotal := 0
+	for _, count := range activeBoard.Counts {
+		activeTotal += count
+	}
+	if activeTotal != 0 {
+		t.Fatalf("active board count=%d want 0", activeTotal)
+	}
+
+	archivedBoard, err := store.Board(ctx, coreorchestration.BoardRequest{WorkspaceID: "ws-archive", Limit: 10, ArchivedOnly: true})
+	if err != nil {
+		t.Fatalf("Board(archived) error = %v", err)
+	}
+	archivedTotal := 0
+	for _, count := range archivedBoard.Counts {
+		archivedTotal += count
+	}
+	if archivedTotal != 1 {
+		t.Fatalf("archived board count=%d want 1", archivedTotal)
+	}
+
+	updated, err = store.RestoreCards(ctx, "ws-archive", []string{"issue-archive-1"})
+	if err != nil {
+		t.Fatalf("RestoreCards() error = %v", err)
+	}
+	if updated != 1 {
+		t.Fatalf("restored=%d want 1", updated)
+	}
+}
+
 func TestMigrateSchema_AddsAgentIDColumnToLegacyCards(t *testing.T) {
 	t.Parallel()
 

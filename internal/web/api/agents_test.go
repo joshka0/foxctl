@@ -15,6 +15,7 @@ import (
 
 	agentdomain "github.com/jkatigb/agentctl/internal/domain/agent"
 	"github.com/jkatigb/agentctl/internal/storage/agents"
+	"github.com/jkatigb/agentctl/internal/storage/blackboard"
 	v2jido "github.com/jkatigb/agentctl/internal/v2/adapters/jido"
 )
 
@@ -157,6 +158,72 @@ func TestAgentRuntimeGetHandler_ReturnsRuntimeTree(t *testing.T) {
 	grandchild, _ := grandchildren[0].(map[string]any)
 	if strings.TrimSpace(fmt.Sprint(grandchild["agent_id"])) != "agent-grandchild-1" {
 		t.Fatalf("grandchild.agent_id=%v want agent-grandchild-1", grandchild["agent_id"])
+	}
+}
+
+func TestResolveAgentSpawnPrompt_UsesRoomRoleDefaultAndOnboarding(t *testing.T) {
+	got := resolveAgentSpawnPrompt(AgentSpawnRequest{
+		Role:        "assistant",
+		RoomID:      "triad-123",
+		RoomRole:    "frontend-eng",
+		WorkspaceID: "ws1",
+	}, "ws1")
+	for _, want := range []string{
+		"You are a frontend engineering agent.",
+		"ROOM ONBOARDING:",
+		"`agentctl-room-operator` and `agentctl-room`",
+		"`agentctl room status triad-123`",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("prompt missing %q\n%s", want, got)
+		}
+	}
+}
+
+func TestAttachSpawnedAgentToRoom_SendsOnboardingMessage(t *testing.T) {
+	cfg := orchestrationTestConfig(t.TempDir())
+	ctx := context.Background()
+	if err := attachSpawnedAgentToRoom(ctx, cfg, "ws1", "alpha", "agent-1", "frontend-eng", "frontend-eng"); err != nil {
+		t.Fatalf("attachSpawnedAgentToRoom: %v", err)
+	}
+
+	store, err := blackboard.OpenBoardStore(ctx, cfg.Storage.Root)
+	if err != nil {
+		t.Fatalf("open board store: %v", err)
+	}
+	defer func() { _ = store.Close() }()
+
+	room, err := store.GetRoom(ctx, "ws1", "alpha", "")
+	if err != nil {
+		t.Fatalf("get room: %v", err)
+	}
+	foundMember := false
+	for _, member := range room.Members {
+		if member.ActorID == "agent-1" && member.Role == "frontend-eng" {
+			foundMember = true
+			break
+		}
+	}
+	if !foundMember {
+		t.Fatalf("expected agent-1 frontend-eng member, got %+v", room.Members)
+	}
+
+	messages, err := store.ListRoomMessages(ctx, "ws1", "alpha", 10)
+	if err != nil {
+		t.Fatalf("list room messages: %v", err)
+	}
+	if len(messages) != 1 {
+		t.Fatalf("messages=%d want 1", len(messages))
+	}
+	msg := messages[0]
+	if got, want := msg.Recipient, "agent-1"; got != want {
+		t.Fatalf("recipient=%q want %q", got, want)
+	}
+	if got, want := msg.Subject, "Room onboarding: frontend-eng"; got != want {
+		t.Fatalf("subject=%q want %q", got, want)
+	}
+	if !strings.Contains(msg.Body, "ROOM ONBOARDING:") {
+		t.Fatalf("body missing onboarding block\n%s", msg.Body)
 	}
 }
 

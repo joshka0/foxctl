@@ -403,6 +403,7 @@ func (s *Server) Handler() http.Handler {
 
 	// --- SSE Events ---
 	apiMux.HandleFunc("/api/events", sse.Handler(s.sseHub))
+	apiMux.HandleFunc("/api/logs/cleanup", api.LogCleanupHandler(s.cfg, s.log))
 
 	// --- OAuth AuthBroker Callback ---
 	apiMux.HandleFunc("/api/oauth/callback", api.OAuthCallbackHandler(s.cfg, s.log))
@@ -514,6 +515,9 @@ func (s *Server) Handler() http.Handler {
 	apiMux.HandleFunc("/api/orchestration/board-card-runtime-get", api.OrchestrationBoardCardRuntimeGetHandler(s.cfg, s.log))
 	apiMux.HandleFunc("/api/orchestration/refresh", api.OrchestrationRefreshHandler(s.cfg, s.log))
 	apiMux.HandleFunc("/api/orchestration/seed-cards", api.OrchestrationSeedCardsHandler(s.cfg, s.log))
+	apiMux.HandleFunc("/api/orchestration/cleanup-cards", api.OrchestrationCleanupCardsHandler(s.cfg, s.log))
+	apiMux.HandleFunc("/api/orchestration/archive-cards", api.OrchestrationArchiveCardsHandler(s.cfg, s.log))
+	apiMux.HandleFunc("/api/orchestration/restore-cards", api.OrchestrationRestoreCardsHandler(s.cfg, s.log))
 
 	// --- Companion (RLM Mobile Backend) ---
 	// Shared Locker ensures per-conversation mutual exclusion across all

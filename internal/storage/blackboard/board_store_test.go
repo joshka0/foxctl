@@ -312,7 +312,7 @@ func TestBoardStore_ListRoomsAndRoomMessages(t *testing.T) {
 		}
 	}
 
-	rooms, err := store.ListRooms(ctx, "ws1", "actor:agent:viewer", 10)
+	rooms, err := store.ListRooms(ctx, "ws1", "actor:agent:viewer", 10, false)
 	if err != nil {
 		t.Fatalf("ListRooms: %v", err)
 	}
@@ -358,6 +358,119 @@ func TestBoardStore_ListRoomsAndRoomMessages(t *testing.T) {
 	}
 	if roomMessages[0].Subject != "alpha-1" || roomMessages[1].Subject != "alpha-2" {
 		t.Fatalf("room messages not chronological: %+v", []string{roomMessages[0].Subject, roomMessages[1].Subject})
+	}
+}
+
+func TestBoardStore_DeleteRoomRemovesMetadataMembersAndMessages(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+
+	store, err := OpenBoardStore(ctx, dir)
+	if err != nil {
+		t.Fatalf("OpenBoardStore: %v", err)
+	}
+	defer store.Close()
+
+	if _, err := store.UpsertRoom(ctx, agent.Room{
+		ID:          "cleanup-room",
+		WorkspaceID: "ws1",
+		Title:       "Cleanup Room",
+		Members: []agent.RoomMember{
+			{ActorID: "actor:agent:alpha", Role: "researcher"},
+		},
+	}); err != nil {
+		t.Fatalf("UpsertRoom: %v", err)
+	}
+
+	msg := &agent.BoardMessage{
+		WorkspaceID: "ws1",
+		Stream:      agent.RoomStreamName("cleanup-room"),
+		Sender:      "human:gui",
+		Recipient:   agent.BroadcastRecipient,
+		Kind:        agent.BoardMessageKindInfo,
+		Priority:    agent.DefaultPriority,
+		Status:      agent.BoardMessageStatusUnread,
+		Subject:     "Cleanup",
+		Body:        "remove this room",
+	}
+	if err := store.SendMessage(ctx, msg); err != nil {
+		t.Fatalf("SendMessage: %v", err)
+	}
+
+	if err := store.DeleteRoom(ctx, "ws1", "cleanup-room"); err != nil {
+		t.Fatalf("DeleteRoom: %v", err)
+	}
+
+	if _, err := store.GetRoom(ctx, "ws1", "cleanup-room", ""); !errors.Is(err, ErrRoomNotFound) {
+		t.Fatalf("GetRoom after delete err=%v want ErrRoomNotFound", err)
+	}
+
+	messages, err := store.ListRoomMessages(ctx, "ws1", "cleanup-room", 10)
+	if !errors.Is(err, ErrRoomNotFound) {
+		t.Fatalf("ListRoomMessages after delete err=%v want ErrRoomNotFound", err)
+	}
+	if len(messages) != 0 {
+		t.Fatalf("messages slice after delete=%d want 0", len(messages))
+	}
+}
+
+func TestBoardStore_ArchiveAndRestoreRoom(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+
+	store, err := OpenBoardStore(ctx, dir)
+	if err != nil {
+		t.Fatalf("OpenBoardStore: %v", err)
+	}
+	defer store.Close()
+
+	if _, err := store.UpsertRoom(ctx, agent.Room{
+		ID:          "archive-room",
+		WorkspaceID: "ws1",
+		Title:       "Archive Room",
+	}); err != nil {
+		t.Fatalf("UpsertRoom: %v", err)
+	}
+	if err := store.SendMessage(ctx, &agent.BoardMessage{
+		WorkspaceID: "ws1",
+		Stream:      agent.RoomStreamName("archive-room"),
+		Sender:      "actor:agent:a",
+		Recipient:   agent.BroadcastRecipient,
+		Subject:     "persisted timeline",
+		Body:        "keep this after archive",
+	}); err != nil {
+		t.Fatalf("SendMessage: %v", err)
+	}
+
+	if err := store.ArchiveRoom(ctx, "ws1", "archive-room"); err != nil {
+		t.Fatalf("ArchiveRoom: %v", err)
+	}
+
+	activeRooms, err := store.ListRooms(ctx, "ws1", "", 10, false)
+	if err != nil {
+		t.Fatalf("ListRooms(active): %v", err)
+	}
+	if len(activeRooms) != 0 {
+		t.Fatalf("active rooms=%d want 0", len(activeRooms))
+	}
+
+	archivedRooms, err := store.ListRooms(ctx, "ws1", "", 10, true)
+	if err != nil {
+		t.Fatalf("ListRooms(archived): %v", err)
+	}
+	if len(archivedRooms) != 1 || archivedRooms[0].ArchivedAt == nil {
+		t.Fatalf("archived rooms=%+v want one archived room", archivedRooms)
+	}
+
+	if err := store.RestoreRoom(ctx, "ws1", "archive-room"); err != nil {
+		t.Fatalf("RestoreRoom: %v", err)
+	}
+	restoredRooms, err := store.ListRooms(ctx, "ws1", "", 10, false)
+	if err != nil {
+		t.Fatalf("ListRooms(restored): %v", err)
+	}
+	if len(restoredRooms) != 1 || restoredRooms[0].ArchivedAt != nil {
+		t.Fatalf("restored rooms=%+v want one active room", restoredRooms)
 	}
 }
 

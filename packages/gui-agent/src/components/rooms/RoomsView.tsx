@@ -6,10 +6,10 @@ import { Card } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Tooltip, HelpTooltip } from '@/components/ui/tooltip'
-import { listRooms, listWorkspaces } from '@/api/client'
+import { archiveRoom, listRooms, listWorkspaces, restoreRoom } from '@/api/client'
 import { useViewStore } from '@/stores/viewStore'
 import { cn, formatRelativeTime } from '@/lib/utils'
-import { Hash, RefreshCw } from 'lucide-react'
+import { ArchiveRestore, Hash, RefreshCw } from 'lucide-react'
 import type { Room, RoomMessageEvent } from '@/api/types'
 import { RoomControlCenter } from './RoomControlCenter'
 
@@ -17,6 +17,8 @@ export function RoomsView() {
   const queryClient = useQueryClient()
   const { selectedRoomID, selectedRoomWorkspaceID, setSelectedRoom } = useViewStore()
   const [pendingRoomID, setPendingRoomID] = useState('')
+  const [showArchived, setShowArchived] = useState(false)
+  const [bulkArchiveLoading, setBulkArchiveLoading] = useState(false)
   const eventSourceRef = useRef<EventSource | null>(null)
 
   const workspacesQuery = useQuery({
@@ -38,9 +40,9 @@ export function RoomsView() {
   }, [selectedRoomWorkspaceID, workspaceOptions])
 
   const roomsQuery = useQuery({
-    queryKey: ['rooms', workspaceID],
+    queryKey: ['rooms', workspaceID, showArchived],
     enabled: workspaceID.trim().length > 0,
-    queryFn: () => listRooms({ workspace_id: workspaceID.trim(), limit: 100 }),
+    queryFn: () => listRooms({ workspace_id: workspaceID.trim(), limit: 100, archived_only: showArchived }),
   })
 
   const rooms = roomsQuery.data?.rooms ?? []
@@ -92,6 +94,42 @@ export function RoomsView() {
 
   const roomDisplayName = (room: Room) => room.title || room.id
 
+  const handleArchiveActionForVisibleRooms = async () => {
+    if (rooms.length === 0 || workspaceID.trim().length === 0) return
+    if (
+      !window.confirm(
+        `${showArchived ? 'Restore' : 'Archive'} ${rooms.length} visible room${rooms.length === 1 ? '' : 's'} in workspace "${workspaceLabel(workspaceID)}"?`,
+      )
+    ) {
+      return
+    }
+
+    setBulkArchiveLoading(true)
+    try {
+      const results = await Promise.allSettled(
+        rooms.map((room) =>
+          showArchived
+            ? restoreRoom(room.id, { workspace_id: workspaceID.trim() })
+            : archiveRoom(room.id, { workspace_id: workspaceID.trim() }),
+        ),
+      )
+      const failures = results.filter(
+        (result): result is PromiseRejectedResult => result.status === 'rejected',
+      )
+      await queryClient.invalidateQueries({ queryKey: ['rooms', workspaceID.trim()] })
+      if (selectedRoomID && rooms.some((room) => room.id === selectedRoomID)) {
+        setSelectedRoom(null, workspaceID.trim())
+      }
+      if (failures.length > 0) {
+        alert(
+          `${showArchived ? 'Restored' : 'Archived'} ${rooms.length - failures.length} room${rooms.length - failures.length === 1 ? '' : 's'}, ${failures.length} failed.`,
+        )
+      }
+    } finally {
+      setBulkArchiveLoading(false)
+    }
+  }
+
   return (
     <div className="flex h-full min-h-0 bg-background">
       <div className="w-[320px] min-w-[280px] border-r border-border bg-muted/10 flex flex-col">
@@ -115,6 +153,16 @@ export function RoomsView() {
                 disabled={roomsQuery.isFetching || workspaceID.trim().length === 0}
               >
                 <RefreshCw className={cn('h-4 w-4', roomsQuery.isFetching && 'animate-spin')} />
+              </Button>
+            </Tooltip>
+            <Tooltip content={showArchived ? 'Return archived rooms to the active list.' : 'Move visible rooms out of the active list without deleting their history.'}>
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => void handleArchiveActionForVisibleRooms()}
+                disabled={bulkArchiveLoading || rooms.length === 0 || workspaceID.trim().length === 0}
+              >
+                <ArchiveRestore className={cn('h-4 w-4', bulkArchiveLoading && 'animate-pulse')} />
               </Button>
             </Tooltip>
           </div>
@@ -175,6 +223,29 @@ export function RoomsView() {
               </Tooltip>
             </div>
           </div>
+          {rooms.length > 0 && (
+            <div className="flex items-center justify-between text-[11px] text-muted-foreground">
+              <span>{rooms.length} {showArchived ? 'archived' : 'visible'}</span>
+              <Button
+                variant={showArchived ? 'secondary' : 'outline'}
+                size="sm"
+                className="h-7 text-[11px]"
+                onClick={() => setShowArchived((value) => !value)}
+              >
+                {showArchived ? 'Show Active' : 'Show Archived'}
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-7 text-[11px]"
+                onClick={() => void handleArchiveActionForVisibleRooms()}
+                disabled={bulkArchiveLoading}
+              >
+                <ArchiveRestore className="h-3.5 w-3.5" />
+                {showArchived ? 'Recover Visible Rooms' : 'Archive Visible Rooms'}
+              </Button>
+            </div>
+          )}
         </div>
 
         <ScrollArea className="flex-1">
@@ -203,7 +274,11 @@ export function RoomsView() {
                       <Hash className="h-4 w-4 text-muted-foreground" />
                       <span className="truncate text-sm font-medium text-foreground">{roomDisplayName(room)}</span>
                     </div>
-                    {room.unread_count > 0 && (
+                    {room.archived_at ? (
+                      <Badge variant="secondary" className="h-4 px-1.5 min-w-[1rem] text-[10px]">
+                        archived
+                      </Badge>
+                    ) : room.unread_count > 0 && (
                       <Badge variant="default" className="h-4 px-1.5 min-w-[1rem] text-[10px]">
                         {room.unread_count}
                       </Badge>

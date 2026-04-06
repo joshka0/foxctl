@@ -13,6 +13,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/domain/agent"
 	errs "github.com/jkatigb/agentctl/internal/platform/errors"
 	"github.com/jkatigb/agentctl/internal/storage/dbutil"
+	"github.com/jkatigb/agentctl/internal/storage/sqlutil"
 	"github.com/oklog/ulid/v2"
 )
 
@@ -26,8 +27,11 @@ type BoardStore interface {
 	UpsertRoom(ctx context.Context, room agent.Room) (agent.Room, error)
 	EnsureRoom(ctx context.Context, workspaceID, roomID, title string) (agent.Room, error)
 	ReplaceRoomMembers(ctx context.Context, workspaceID, roomID string, members []agent.RoomMember) ([]agent.RoomMember, error)
-	ListRooms(ctx context.Context, workspaceID, actorID string, limit int) ([]agent.RoomSummary, error)
+	ListRooms(ctx context.Context, workspaceID, actorID string, limit int, archivedOnly bool) ([]agent.RoomSummary, error)
 	GetRoom(ctx context.Context, workspaceID, roomID, actorID string) (agent.RoomSummary, error)
+	ArchiveRoom(ctx context.Context, workspaceID, roomID string) error
+	RestoreRoom(ctx context.Context, workspaceID, roomID string) error
+	DeleteRoom(ctx context.Context, workspaceID, roomID string) error
 	ListRoomMessages(ctx context.Context, workspaceID, roomID string, limit int) ([]agent.BoardMessage, error)
 	// MarkSurfaced marks messages as surfaced (shown in context, but not explicitly read).
 	MarkSurfaced(ctx context.Context, workspaceID, actorID string, messageIDs []string) (int, error)
@@ -95,10 +99,10 @@ func (s *boardSQLStore) SendMessage(ctx context.Context, msg *agent.BoardMessage
 	err := retryBoardBusy(ctx, func() error {
 		_, execErr := s.db.ExecContext(ctx, `
 		INSERT INTO board_messages 
-		(id, workspace_id, task_id, related_message_id, stream, sender, recipient, kind, priority, ack_required, reply_expected, status, subject, body, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		(id, workspace_id, task_id, related_message_id, stream, sender, recipient, kind, priority, ack_required, reply_expected, interrupt, status, subject, body, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			msg.ID, msg.WorkspaceID, msg.TaskID, msg.RelatedMessageID, msg.Stream, msg.Sender, msg.Recipient,
-			msg.Kind, msg.Priority, msg.AckRequired, msg.ReplyExpected, msg.Status, msg.Subject, msg.Body,
+			msg.Kind, msg.Priority, msg.AckRequired, msg.ReplyExpected, msg.Interrupt, msg.Status, msg.Subject, msg.Body,
 			msg.CreatedAt.Unix())
 		return execErr
 	})
@@ -285,6 +289,106 @@ func (s *boardSQLStore) ReplaceRoomMembers(ctx context.Context, workspaceID, roo
 	return out, nil
 }
 
+func (s *boardSQLStore) DeleteRoom(ctx context.Context, workspaceID, roomID string) error {
+	workspaceID = strings.TrimSpace(workspaceID)
+	roomID = strings.TrimSpace(roomID)
+	if workspaceID == "" {
+		return fmt.Errorf("board: delete room: workspace_id is required")
+	}
+	if roomID == "" {
+		return fmt.Errorf("board: delete room: room id is required")
+	}
+
+	var tx *sql.Tx
+	err := retryBoardBusy(ctx, func() error {
+		var beginErr error
+		tx, beginErr = s.db.BeginTx(ctx, nil)
+		return beginErr
+	})
+	if err != nil {
+		return fmt.Errorf("board: delete room begin tx: %w", err)
+	}
+	defer func() {
+		errs.Ignore(tx.Rollback(), "rollback delete room")
+	}()
+
+	res, err := tx.ExecContext(ctx, `DELETE FROM room_metadata WHERE workspace_id = ? AND room_id = ?`, workspaceID, roomID)
+	if err != nil {
+		return fmt.Errorf("board: delete room metadata: %w", err)
+	}
+	rows, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("board: delete room metadata rows affected: %w", err)
+	}
+	if rows == 0 {
+		return ErrRoomNotFound
+	}
+
+	if _, err := tx.ExecContext(ctx, `DELETE FROM room_members WHERE workspace_id = ? AND room_id = ?`, workspaceID, roomID); err != nil {
+		return fmt.Errorf("board: delete room members: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM board_messages WHERE workspace_id = ? AND stream = ?`, workspaceID, agent.RoomStreamName(roomID)); err != nil {
+		return fmt.Errorf("board: delete room messages: %w", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("board: delete room commit: %w", err)
+	}
+	return nil
+}
+
+func (s *boardSQLStore) ArchiveRoom(ctx context.Context, workspaceID, roomID string) error {
+	workspaceID = strings.TrimSpace(workspaceID)
+	roomID = strings.TrimSpace(roomID)
+	if workspaceID == "" {
+		return fmt.Errorf("board: archive room: workspace_id is required")
+	}
+	if roomID == "" {
+		return fmt.Errorf("board: archive room: room id is required")
+	}
+	res, err := s.db.ExecContext(ctx, `
+		UPDATE room_metadata SET archived_at = ?
+		WHERE workspace_id = ? AND room_id = ? AND archived_at = ''`,
+		sqlutil.FormatTimestamp(time.Now().UTC()), workspaceID, roomID)
+	if err != nil {
+		return fmt.Errorf("board: archive room: %w", err)
+	}
+	rows, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("board: archive room rows affected: %w", err)
+	}
+	if rows == 0 {
+		return ErrRoomNotFound
+	}
+	return nil
+}
+
+func (s *boardSQLStore) RestoreRoom(ctx context.Context, workspaceID, roomID string) error {
+	workspaceID = strings.TrimSpace(workspaceID)
+	roomID = strings.TrimSpace(roomID)
+	if workspaceID == "" {
+		return fmt.Errorf("board: restore room: workspace_id is required")
+	}
+	if roomID == "" {
+		return fmt.Errorf("board: restore room: room id is required")
+	}
+	res, err := s.db.ExecContext(ctx, `
+		UPDATE room_metadata SET archived_at = ''
+		WHERE workspace_id = ? AND room_id = ? AND archived_at != ''`,
+		workspaceID, roomID)
+	if err != nil {
+		return fmt.Errorf("board: restore room: %w", err)
+	}
+	rows, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("board: restore room rows affected: %w", err)
+	}
+	if rows == 0 {
+		return ErrRoomNotFound
+	}
+	return nil
+}
+
 // Inbox retrieves messages for an actor based on filter criteria.
 func (s *boardSQLStore) Inbox(ctx context.Context, filter agent.InboxFilter) ([]agent.BoardMessage, error) {
 	limit := filter.Limit
@@ -294,7 +398,7 @@ func (s *boardSQLStore) Inbox(ctx context.Context, filter agent.InboxFilter) ([]
 
 	// Build query with optional filters
 	query := `
-		SELECT id, workspace_id, task_id, related_message_id, stream, sender, recipient, kind, priority, ack_required, reply_expected, status, subject, body, created_at
+		SELECT id, workspace_id, task_id, related_message_id, stream, sender, recipient, kind, priority, ack_required, reply_expected, interrupt, status, subject, body, created_at
 		FROM board_messages
 		WHERE workspace_id = ?`
 	args := []any{filter.WorkspaceID}
@@ -347,18 +451,27 @@ func (s *boardSQLStore) Inbox(ctx context.Context, filter agent.InboxFilter) ([]
 	return messages, nil
 }
 
-func (s *boardSQLStore) ListRooms(ctx context.Context, workspaceID, actorID string, limit int) ([]agent.RoomSummary, error) {
+func (s *boardSQLStore) ListRooms(ctx context.Context, workspaceID, actorID string, limit int, archivedOnly bool) ([]agent.RoomSummary, error) {
 	if limit <= 0 {
 		limit = 50
 	}
 
-	metas, err := s.listRoomMetadata(ctx, workspaceID)
+	allMetas, err := s.listAllRoomMetadata(ctx, workspaceID)
 	if err != nil {
 		return nil, err
 	}
 	streams, err := s.listDerivedRoomStreams(ctx, workspaceID)
 	if err != nil {
 		return nil, err
+	}
+
+	metaByStream := make(map[string]roomMetadataRow, len(allMetas))
+	metas := make([]roomMetadataRow, 0, len(allMetas))
+	for _, meta := range allMetas {
+		metaByStream[meta.Stream] = meta
+		if roomMetadataMatchesArchiveFilter(meta, archivedOnly) {
+			metas = append(metas, meta)
+		}
 	}
 
 	seen := make(map[string]struct{}, len(metas)+len(streams))
@@ -373,6 +486,9 @@ func (s *boardSQLStore) ListRooms(ctx context.Context, workspaceID, actorID stri
 	}
 	for _, stream := range streams {
 		if _, ok := seen[stream]; ok {
+			continue
+		}
+		if _, ok := metaByStream[stream]; ok {
 			continue
 		}
 		summary, err := s.roomSummary(ctx, workspaceID, stream, actorID)
@@ -413,7 +529,7 @@ func (s *boardSQLStore) ListRoomMessages(ctx context.Context, workspaceID, roomI
 	stream := agent.RoomStreamName(roomID)
 
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, workspace_id, task_id, related_message_id, stream, sender, recipient, kind, priority, ack_required, reply_expected, status, subject, body, created_at
+		SELECT id, workspace_id, task_id, related_message_id, stream, sender, recipient, kind, priority, ack_required, reply_expected, interrupt, status, subject, body, created_at
 		FROM board_messages
 		WHERE workspace_id = ? AND stream = ?
 		ORDER BY created_at DESC, id DESC
@@ -731,6 +847,7 @@ CREATE TABLE IF NOT EXISTS board_messages (
 	priority     INTEGER NOT NULL DEFAULT 3,
 	ack_required INTEGER NOT NULL DEFAULT 0,
 	reply_expected INTEGER NOT NULL DEFAULT 0,
+	interrupt    INTEGER NOT NULL DEFAULT 0,
 	status       TEXT NOT NULL DEFAULT 'unread',
 	subject      TEXT NOT NULL,
 	body         TEXT NOT NULL,
@@ -750,6 +867,7 @@ CREATE TABLE IF NOT EXISTS room_metadata (
 	dispatch_agent_ids TEXT NOT NULL DEFAULT '[]',
 	created_at   INTEGER NOT NULL,
 	updated_at   INTEGER NOT NULL,
+	archived_at  TEXT NOT NULL DEFAULT '',
 	PRIMARY KEY (workspace_id, room_id)
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_room_metadata_workspace_stream ON room_metadata(workspace_id, stream);
@@ -792,8 +910,10 @@ CREATE INDEX IF NOT EXISTS idx_res_expires ON file_reservations(expires_at);
 	for _, stmt := range []string{
 		`ALTER TABLE room_metadata ADD COLUMN dispatch_policy TEXT NOT NULL DEFAULT 'all_subtree'`,
 		`ALTER TABLE room_metadata ADD COLUMN dispatch_agent_ids TEXT NOT NULL DEFAULT '[]'`,
+		`ALTER TABLE room_metadata ADD COLUMN archived_at TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE board_messages ADD COLUMN reply_expected INTEGER NOT NULL DEFAULT 0`,
 		`ALTER TABLE board_messages ADD COLUMN related_message_id TEXT`,
+		`ALTER TABLE board_messages ADD COLUMN interrupt INTEGER NOT NULL DEFAULT 0`,
 		`ALTER TABLE room_members ADD COLUMN backend TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE room_members ADD COLUMN session TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE room_members ADD COLUMN pane_id TEXT NOT NULL DEFAULT ''`,
@@ -827,15 +947,17 @@ func scanBoardMessage(rows *sql.Rows) (agent.BoardMessage, error) {
 	var createdAt int64
 	var ackRequired int
 	var replyExpected int
+	var interrupt int
 	var relatedMessageID sql.NullString
 	if err := rows.Scan(&msg.ID, &msg.WorkspaceID, &msg.TaskID, &relatedMessageID, &msg.Stream, &msg.Sender, &msg.Recipient,
-		&msg.Kind, &msg.Priority, &ackRequired, &replyExpected, &msg.Status, &msg.Subject, &msg.Body, &createdAt); err != nil {
+		&msg.Kind, &msg.Priority, &ackRequired, &replyExpected, &interrupt, &msg.Status, &msg.Subject, &msg.Body, &createdAt); err != nil {
 		return agent.BoardMessage{}, fmt.Errorf("board: scan message: %w", err)
 	}
 	msg.RelatedMessageID = strings.TrimSpace(relatedMessageID.String)
 	msg.CreatedAt = time.Unix(createdAt, 0).UTC()
 	msg.AckRequired = ackRequired != 0
 	msg.ReplyExpected = replyExpected != 0
+	msg.Interrupt = interrupt != 0
 	return msg, nil
 }
 
@@ -866,6 +988,7 @@ type roomMetadataRow struct {
 	DispatchAgentIDs []string
 	CreatedAt        time.Time
 	UpdatedAt        time.Time
+	ArchivedAt       *time.Time
 }
 
 func normalizeRoomDispatchPolicy(policy string) string {
@@ -1039,12 +1162,13 @@ func (s *boardSQLStore) roomSummary(ctx context.Context, workspaceID, stream, ac
 		Participants:     participants,
 		TaskIDs:          taskIDs,
 		Members:          members,
+		ArchivedAt:       meta.ArchivedAt,
 	}, nil
 }
 
 func (s *boardSQLStore) lastRoomMessage(ctx context.Context, workspaceID, stream string) (agent.BoardMessage, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, workspace_id, task_id, related_message_id, stream, sender, recipient, kind, priority, ack_required, reply_expected, status, subject, body, created_at
+		SELECT id, workspace_id, task_id, related_message_id, stream, sender, recipient, kind, priority, ack_required, reply_expected, interrupt, status, subject, body, created_at
 		FROM board_messages
 		WHERE workspace_id = ? AND stream = ?
 		ORDER BY created_at DESC, id DESC
@@ -1183,11 +1307,15 @@ func (s *boardSQLStore) listDerivedRoomStreams(ctx context.Context, workspaceID 
 	return streams, nil
 }
 
-func (s *boardSQLStore) listRoomMetadata(ctx context.Context, workspaceID string) ([]roomMetadataRow, error) {
+func (s *boardSQLStore) listRoomMetadata(ctx context.Context, workspaceID string, archivedOnly bool) ([]roomMetadataRow, error) {
+	archiveFilter := "archived_at = ''"
+	if archivedOnly {
+		archiveFilter = "archived_at != ''"
+	}
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT workspace_id, room_id, stream, title, description, dispatch_policy, dispatch_agent_ids, created_at, updated_at
+		SELECT workspace_id, room_id, stream, title, description, dispatch_policy, dispatch_agent_ids, created_at, updated_at, archived_at
 		FROM room_metadata
-		WHERE workspace_id = ?
+		WHERE workspace_id = ? AND `+archiveFilter+`
 		ORDER BY updated_at DESC, room_id ASC`, workspaceID)
 	if err != nil {
 		return nil, fmt.Errorf("board: list room metadata: %w", err)
@@ -1207,9 +1335,33 @@ func (s *boardSQLStore) listRoomMetadata(ctx context.Context, workspaceID string
 	return metas, nil
 }
 
+func (s *boardSQLStore) listAllRoomMetadata(ctx context.Context, workspaceID string) ([]roomMetadataRow, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT workspace_id, room_id, stream, title, description, dispatch_policy, dispatch_agent_ids, created_at, updated_at, archived_at
+		FROM room_metadata
+		WHERE workspace_id = ?
+		ORDER BY updated_at DESC, room_id ASC`, workspaceID)
+	if err != nil {
+		return nil, fmt.Errorf("board: list all room metadata: %w", err)
+	}
+	defer func() {
+		errs.Ignore(rows.Close(), "close all room metadata rows")
+	}()
+
+	var metas []roomMetadataRow
+	for rows.Next() {
+		meta, err := scanRoomMetadataRow(rows)
+		if err != nil {
+			return nil, err
+		}
+		metas = append(metas, meta)
+	}
+	return metas, nil
+}
+
 func (s *boardSQLStore) getRoomMetadata(ctx context.Context, workspaceID, roomID string) (roomMetadataRow, error) {
 	row := s.db.QueryRowContext(ctx, `
-		SELECT workspace_id, room_id, stream, title, description, dispatch_policy, dispatch_agent_ids, created_at, updated_at
+		SELECT workspace_id, room_id, stream, title, description, dispatch_policy, dispatch_agent_ids, created_at, updated_at, archived_at
 		FROM room_metadata
 		WHERE workspace_id = ? AND room_id = ?`, workspaceID, roomID)
 	return scanRoomMetadataRow(row)
@@ -1217,10 +1369,18 @@ func (s *boardSQLStore) getRoomMetadata(ctx context.Context, workspaceID, roomID
 
 func (s *boardSQLStore) getRoomMetadataByStream(ctx context.Context, workspaceID, stream string) (roomMetadataRow, error) {
 	row := s.db.QueryRowContext(ctx, `
-		SELECT workspace_id, room_id, stream, title, description, dispatch_policy, dispatch_agent_ids, created_at, updated_at
+		SELECT workspace_id, room_id, stream, title, description, dispatch_policy, dispatch_agent_ids, created_at, updated_at, archived_at
 		FROM room_metadata
 		WHERE workspace_id = ? AND stream = ?`, workspaceID, stream)
 	return scanRoomMetadataRow(row)
+}
+
+func roomMetadataMatchesArchiveFilter(meta roomMetadataRow, archivedOnly bool) bool {
+	isArchived := meta.ArchivedAt != nil && !meta.ArchivedAt.IsZero()
+	if archivedOnly {
+		return isArchived
+	}
+	return !isArchived
 }
 
 func (s *boardSQLStore) listRoomMembers(ctx context.Context, workspaceID, roomID string) ([]agent.RoomMember, error) {
@@ -1268,7 +1428,8 @@ func scanRoomMetadataRow(scanner interface{ Scan(dest ...any) error }) (roomMeta
 	var meta roomMetadataRow
 	var createdAt, updatedAt int64
 	var dispatchAgentIDsJSON string
-	if err := scanner.Scan(&meta.WorkspaceID, &meta.RoomID, &meta.Stream, &meta.Title, &meta.Description, &meta.DispatchPolicy, &dispatchAgentIDsJSON, &createdAt, &updatedAt); err != nil {
+	var archivedAt string
+	if err := scanner.Scan(&meta.WorkspaceID, &meta.RoomID, &meta.Stream, &meta.Title, &meta.Description, &meta.DispatchPolicy, &dispatchAgentIDsJSON, &createdAt, &updatedAt, &archivedAt); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return roomMetadataRow{}, ErrRoomNotFound
 		}
@@ -1283,6 +1444,11 @@ func scanRoomMetadataRow(scanner interface{ Scan(dest ...any) error }) (roomMeta
 	meta.DispatchAgentIDs = normalizeRoomDispatchAgentIDs(meta.DispatchAgentIDs)
 	meta.CreatedAt = time.Unix(createdAt, 0).UTC()
 	meta.UpdatedAt = time.Unix(updatedAt, 0).UTC()
+	if strings.TrimSpace(archivedAt) != "" {
+		if parsed, err := sqlutil.ScanTimestamp(archivedAt); err == nil {
+			meta.ArchivedAt = &parsed
+		}
+	}
 	return meta, nil
 }
 
@@ -1298,6 +1464,7 @@ func roomMetadataToRoom(meta roomMetadataRow, members []agent.RoomMember) agent.
 		CreatedAt:        meta.CreatedAt,
 		UpdatedAt:        meta.UpdatedAt,
 		Members:          members,
+		ArchivedAt:       meta.ArchivedAt,
 	}
 }
 

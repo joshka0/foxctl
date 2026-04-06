@@ -13,7 +13,7 @@ import { useEventProjectionStore } from '@/stores/eventProjectionStore'
 import { useViewStore } from '@/stores/viewStore'
 import { EventTraceDrawer } from '@/components/v2/EventTraceDrawer'
 import { RefDrilldownPanel } from '@/components/v2/RefDrilldownPanel'
-import { getLogs } from '@/api/client'
+import { cleanupLogs, getLogs } from '@/api/client'
 import type { ActivityEvent } from '@/api/types'
 import {
   RefreshCw,
@@ -189,6 +189,7 @@ export function LogsViewer() {
   const [searchInput, setSearchInput] = useState('')
   const [showFilterPanel, setShowFilterPanel] = useState(false)
   const [loading, setLoading] = useState(false)
+  const [cleanupLoading, setCleanupLoading] = useState(false)
   const [selectedTraceID, setSelectedTraceID] = useState<string | null>(null)
   const [selectedLog, setSelectedLog] = useState<LogEntry | null>(null)
 
@@ -369,6 +370,10 @@ export function LogsViewer() {
     if (!errorsOnly) return logsAfterPrimaryFilters
     return logsAfterPrimaryFilters.filter((log) => log.status === 'error')
   }, [logsAfterPrimaryFilters, errorsOnly])
+  const visibleErrorCount = useMemo(
+    () => filteredLogs.filter((log) => log.status === 'error').length,
+    [filteredLogs],
+  )
 
   const summarySourceLogs = useMemo(
     () =>
@@ -456,6 +461,67 @@ export function LogsViewer() {
     [openLogFocus, selectLog, setActiveView],
   )
 
+  const handleCleanupErrors = useCallback(async () => {
+    if (visibleErrorCount === 0) return
+
+    const scopeBits: string[] = []
+    if (focus?.traceIDs.length) {
+      scopeBits.push(`${focus.traceIDs.length} focused trace${focus.traceIDs.length === 1 ? '' : 's'}`)
+    }
+    if (focus?.sessionID) {
+      scopeBits.push(`session ${focus.sessionID.slice(0, 8)}`)
+    }
+    if (componentFilter) {
+      scopeBits.push(`component ${componentFilter}`)
+    }
+    if (workspaceFilter) {
+      scopeBits.push(`workspace ${getWorkspaceDisplayName(workspaceFilter)}`)
+    }
+    if (searchQuery) {
+      scopeBits.push(`query "${searchQuery}"`)
+    }
+
+    const scopeLine =
+      scopeBits.length > 0
+        ? `\n\nScope: ${scopeBits.join(' · ')}`
+        : '\n\nScope: all persisted error events currently visible in the Events view.'
+
+    if (
+      !window.confirm(
+        `Delete persisted error events from activity history? This removes matching records from observability storage and does not prevent future errors from appearing.${scopeLine}`,
+      )
+    ) {
+      return
+    }
+
+    setCleanupLoading(true)
+    try {
+      const result = await cleanupLogs({
+        component: componentFilter || undefined,
+        workspace: workspaceFilter || undefined,
+        errors_only: true,
+        text_query: searchQuery || undefined,
+        session_id: focus?.sessionID || undefined,
+        trace_ids: focus?.traceIDs?.length ? focus.traceIDs : undefined,
+      })
+      clearEvents()
+      await fetchLogs()
+      alert(`Deleted ${result.deleted} persisted error event${result.deleted === 1 ? '' : 's'}.`)
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Failed to clean up persisted error events')
+    } finally {
+      setCleanupLoading(false)
+    }
+  }, [
+    clearEvents,
+    componentFilter,
+    fetchLogs,
+    focus,
+    searchQuery,
+    visibleErrorCount,
+    workspaceFilter,
+  ])
+
   return (
     <div className="flex flex-col h-full">
       {/* Header */}
@@ -498,7 +564,19 @@ export function LogsViewer() {
               onClick={clearEvents}
               className="h-8 text-xs"
             >
-              Clear
+              Clear local
+            </Button>
+            <Button
+              variant="destructive"
+              size="sm"
+              onClick={handleCleanupErrors}
+              disabled={cleanupLoading || visibleErrorCount === 0}
+              className="h-8 text-xs"
+            >
+              {cleanupLoading ? (
+                <Loader2 className="h-3 w-3 animate-spin" />
+              ) : null}
+              Delete errors
             </Button>
           </div>
         </div>

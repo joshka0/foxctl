@@ -25,6 +25,8 @@ const (
 	BoardMessageKindTaskUpdate BoardMessageKind = "task_update"
 	// BoardMessageKindLeadChange represents a durable coordinator handoff event.
 	BoardMessageKindLeadChange BoardMessageKind = "lead_change"
+	// BoardMessageKindCoordinatorPulse represents a coordinator-facing system pulse.
+	BoardMessageKindCoordinatorPulse BoardMessageKind = "coordinator_pulse"
 )
 
 // BoardMessageStatus defines the read/ack status of a message.
@@ -56,6 +58,7 @@ type BoardMessage struct {
 	Priority         int                `json:"priority"` // 1 (highest) .. 5 (lowest)
 	AckRequired      bool               `json:"ack_required"`
 	ReplyExpected    bool               `json:"reply_expected,omitempty"`
+	Interrupt        bool               `json:"interrupt,omitempty"`
 	Status           BoardMessageStatus `json:"status"`
 	Subject          string             `json:"subject"`
 	Body             string             `json:"body"`
@@ -152,6 +155,7 @@ type RoomSummary struct {
 	Participants     []string     `json:"participants,omitempty"`
 	TaskIDs          []string     `json:"task_ids,omitempty"`
 	Members          []RoomMember `json:"members,omitempty"`
+	ArchivedAt       *time.Time   `json:"archived_at,omitempty"`
 }
 
 // RoomMember is an explicit membership record for one room.
@@ -177,6 +181,7 @@ type Room struct {
 	CreatedAt        time.Time    `json:"created_at"`
 	UpdatedAt        time.Time    `json:"updated_at"`
 	Members          []RoomMember `json:"members,omitempty"`
+	ArchivedAt       *time.Time   `json:"archived_at,omitempty"`
 }
 
 // RoomStreamName builds the canonical board stream for a room id.

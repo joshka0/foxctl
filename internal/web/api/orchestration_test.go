@@ -817,6 +817,170 @@ func TestOrchestrationSeedCardsHandler_CreatesProjectedCards(t *testing.T) {
 	}
 }
 
+func TestOrchestrationCleanupCardsHandler_RemovesCardsAndReplayHistory(t *testing.T) {
+	t.Setenv("AGENTCTL_DB_DRIVER", "")
+	t.Setenv("AGENTCTL_V2_EVENTS_DB_DRIVER", "")
+
+	cfg := orchestrationTestConfig(t.TempDir())
+	seedHandler := OrchestrationSeedCardsHandler(cfg, zerolog.Nop())
+	cleanupHandler := OrchestrationCleanupCardsHandler(cfg, zerolog.Nop())
+	boardHandler := OrchestrationBoardGetHandler(cfg, zerolog.Nop())
+	refreshHandler := OrchestrationRefreshHandler(cfg, zerolog.Nop())
+
+	seedReq := httptest.NewRequest(http.MethodPost, "/api/orchestration/seed-cards", bytes.NewBufferString(`{
+		"request_id":"req-cleanup-seed-001",
+		"workspace_id":"ws-1",
+		"cards":[
+			{"issue_id":"cleanup-1","issue_identifier":"CLEAN-1","title":"Cleanup one"},
+			{"issue_id":"cleanup-2","issue_identifier":"CLEAN-2","title":"Cleanup two"}
+		]
+	}`))
+	seedRR := httptest.NewRecorder()
+	seedHandler.ServeHTTP(seedRR, seedReq)
+	if seedRR.Code != http.StatusOK {
+		t.Fatalf("seed status=%d body=%s", seedRR.Code, seedRR.Body.String())
+	}
+
+	cleanupReq := httptest.NewRequest(http.MethodPost, "/api/orchestration/cleanup-cards", bytes.NewBufferString(`{
+		"request_id":"req-cleanup-001",
+		"workspace_id":"ws-1",
+		"issue_ids":["cleanup-1","cleanup-2"]
+	}`))
+	cleanupRR := httptest.NewRecorder()
+	cleanupHandler.ServeHTTP(cleanupRR, cleanupReq)
+	if cleanupRR.Code != http.StatusOK {
+		t.Fatalf("cleanup status=%d body=%s", cleanupRR.Code, cleanupRR.Body.String())
+	}
+	cleanupBody := decodeResponseBody(t, cleanupRR)
+	cleanupData, _ := cleanupBody["data"].(map[string]any)
+	if got := int(cleanupData["deleted_cards"].(float64)); got != 2 {
+		t.Fatalf("deleted_cards=%d want 2", got)
+	}
+
+	boardReq := httptest.NewRequest(http.MethodGet, "/api/orchestration/board-get?workspace_id=ws-1&limit=10", nil)
+	boardRR := httptest.NewRecorder()
+	boardHandler.ServeHTTP(boardRR, boardReq)
+	if boardRR.Code != http.StatusOK {
+		t.Fatalf("board after cleanup status=%d body=%s", boardRR.Code, boardRR.Body.String())
+	}
+	if got := boardCardCountFromEnvelope(decodeResponseBody(t, boardRR)); got != 0 {
+		t.Fatalf("expected 0 cards after cleanup, got %d", got)
+	}
+
+	refreshReq := httptest.NewRequest(http.MethodPost, "/api/orchestration/refresh", bytes.NewBufferString(`{
+		"request_id":"req-cleanup-refresh-001",
+		"workspace_id":"ws-1"
+	}`))
+	refreshRR := httptest.NewRecorder()
+	refreshHandler.ServeHTTP(refreshRR, refreshReq)
+	if refreshRR.Code != http.StatusOK {
+		t.Fatalf("refresh status=%d body=%s", refreshRR.Code, refreshRR.Body.String())
+	}
+
+	boardReplayReq := httptest.NewRequest(http.MethodGet, "/api/orchestration/board-get?workspace_id=ws-1&limit=10", nil)
+	boardReplayRR := httptest.NewRecorder()
+	boardHandler.ServeHTTP(boardReplayRR, boardReplayReq)
+	if boardReplayRR.Code != http.StatusOK {
+		t.Fatalf("board after refresh status=%d body=%s", boardReplayRR.Code, boardReplayRR.Body.String())
+	}
+	if got := boardCardCountFromEnvelope(decodeResponseBody(t, boardReplayRR)); got != 0 {
+		t.Fatalf("expected 0 cards after refresh replay, got %d", got)
+	}
+}
+
+func TestOrchestrationArchiveCardsHandler_ArchivesAndRestoresCards(t *testing.T) {
+	t.Setenv("AGENTCTL_DB_DRIVER", "")
+	t.Setenv("AGENTCTL_V2_EVENTS_DB_DRIVER", "")
+
+	cfg := orchestrationTestConfig(t.TempDir())
+	seedHandler := OrchestrationSeedCardsHandler(cfg, zerolog.Nop())
+	archiveHandler := OrchestrationArchiveCardsHandler(cfg, zerolog.Nop())
+	restoreHandler := OrchestrationRestoreCardsHandler(cfg, zerolog.Nop())
+	boardHandler := OrchestrationBoardGetHandler(cfg, zerolog.Nop())
+	cardHandler := OrchestrationBoardCardGetHandler(cfg, zerolog.Nop())
+
+	seedReq := httptest.NewRequest(http.MethodPost, "/api/orchestration/seed-cards", bytes.NewBufferString(`{
+		"request_id":"req-archive-seed-001",
+		"workspace_id":"ws-1",
+		"cards":[{"issue_id":"archive-1","issue_identifier":"ARCH-1","title":"Archive me"}]
+	}`))
+	seedRR := httptest.NewRecorder()
+	seedHandler.ServeHTTP(seedRR, seedReq)
+	if seedRR.Code != http.StatusOK {
+		t.Fatalf("seed status=%d body=%s", seedRR.Code, seedRR.Body.String())
+	}
+
+	archiveReq := httptest.NewRequest(http.MethodPost, "/api/orchestration/archive-cards", bytes.NewBufferString(`{
+		"request_id":"req-archive-001",
+		"workspace_id":"ws-1",
+		"issue_ids":["archive-1"]
+	}`))
+	archiveRR := httptest.NewRecorder()
+	archiveHandler.ServeHTTP(archiveRR, archiveReq)
+	if archiveRR.Code != http.StatusOK {
+		t.Fatalf("archive status=%d body=%s", archiveRR.Code, archiveRR.Body.String())
+	}
+	archiveBody := decodeResponseBody(t, archiveRR)
+	archiveData, _ := archiveBody["data"].(map[string]any)
+	if got := int(archiveData["updated"].(float64)); got != 1 {
+		t.Fatalf("updated=%d want 1", got)
+	}
+
+	activeBoardReq := httptest.NewRequest(http.MethodGet, "/api/orchestration/board-get?workspace_id=ws-1&limit=10", nil)
+	activeBoardRR := httptest.NewRecorder()
+	boardHandler.ServeHTTP(activeBoardRR, activeBoardReq)
+	if activeBoardRR.Code != http.StatusOK {
+		t.Fatalf("active board status=%d body=%s", activeBoardRR.Code, activeBoardRR.Body.String())
+	}
+	if got := boardCardCountFromEnvelope(decodeResponseBody(t, activeBoardRR)); got != 0 {
+		t.Fatalf("active board count=%d want 0", got)
+	}
+
+	archivedBoardReq := httptest.NewRequest(http.MethodGet, "/api/orchestration/board-get?workspace_id=ws-1&limit=10&archived_only=true", nil)
+	archivedBoardRR := httptest.NewRecorder()
+	boardHandler.ServeHTTP(archivedBoardRR, archivedBoardReq)
+	if archivedBoardRR.Code != http.StatusOK {
+		t.Fatalf("archived board status=%d body=%s", archivedBoardRR.Code, archivedBoardRR.Body.String())
+	}
+	if got := boardCardCountFromEnvelope(decodeResponseBody(t, archivedBoardRR)); got != 1 {
+		t.Fatalf("archived board count=%d want 1", got)
+	}
+
+	cardReq := httptest.NewRequest(http.MethodGet, "/api/orchestration/board-card-get?workspace_id=ws-1&issue_id=archive-1", nil)
+	cardRR := httptest.NewRecorder()
+	cardHandler.ServeHTTP(cardRR, cardReq)
+	if cardRR.Code != http.StatusOK {
+		t.Fatalf("card status=%d body=%s", cardRR.Code, cardRR.Body.String())
+	}
+	cardBody := decodeResponseBody(t, cardRR)
+	cardData, _ := cardBody["data"].(map[string]any)
+	cardWrap, _ := cardData["card"].(map[string]any)
+	if got := strings.TrimSpace(fmt.Sprint(cardWrap["archived_at"])); got == "" {
+		t.Fatal("archived_at should be populated on archived card detail")
+	}
+
+	restoreReq := httptest.NewRequest(http.MethodPost, "/api/orchestration/restore-cards", bytes.NewBufferString(`{
+		"request_id":"req-restore-001",
+		"workspace_id":"ws-1",
+		"issue_ids":["archive-1"]
+	}`))
+	restoreRR := httptest.NewRecorder()
+	restoreHandler.ServeHTTP(restoreRR, restoreReq)
+	if restoreRR.Code != http.StatusOK {
+		t.Fatalf("restore status=%d body=%s", restoreRR.Code, restoreRR.Body.String())
+	}
+
+	activeAfterRestoreReq := httptest.NewRequest(http.MethodGet, "/api/orchestration/board-get?workspace_id=ws-1&limit=10", nil)
+	activeAfterRestoreRR := httptest.NewRecorder()
+	boardHandler.ServeHTTP(activeAfterRestoreRR, activeAfterRestoreReq)
+	if activeAfterRestoreRR.Code != http.StatusOK {
+		t.Fatalf("active after restore status=%d body=%s", activeAfterRestoreRR.Code, activeAfterRestoreRR.Body.String())
+	}
+	if got := boardCardCountFromEnvelope(decodeResponseBody(t, activeAfterRestoreRR)); got != 1 {
+		t.Fatalf("active board count after restore=%d want 1", got)
+	}
+}
+
 func TestOrchestrationBoardGetHandler_ArtifactizesLargePayload(t *testing.T) {
 	t.Setenv("AGENTCTL_DB_DRIVER", "")
 	t.Setenv("AGENTCTL_V2_EVENTS_DB_DRIVER", "")

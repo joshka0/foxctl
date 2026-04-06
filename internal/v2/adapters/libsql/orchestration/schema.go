@@ -37,7 +37,8 @@ func MigrateSchema(ctx context.Context, db *sql.DB) error {
 			last_request_id TEXT,
 			last_event_id TEXT NOT NULL,
 			last_stream_version INTEGER NOT NULL,
-			updated_at TEXT NOT NULL
+			updated_at TEXT NOT NULL,
+			archived_at TEXT NOT NULL DEFAULT ''
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_v2_orchestration_cards_workspace ON v2_orchestration_cards(workspace_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_v2_orchestration_cards_lane ON v2_orchestration_cards(lane)`,
@@ -61,6 +62,7 @@ func MigrateSchema(ctx context.Context, db *sql.DB) error {
 	}
 	for _, stmt := range []string{
 		`ALTER TABLE v2_orchestration_cards ADD COLUMN agent_id TEXT`,
+		`ALTER TABLE v2_orchestration_cards ADD COLUMN archived_at TEXT NOT NULL DEFAULT ''`,
 	} {
 		if _, err := db.ExecContext(ctx, stmt); err != nil && !isDuplicateColumnError(err) {
 			return fmt.Errorf("v2 orchestration migrate: %w", err)

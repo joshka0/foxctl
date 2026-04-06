@@ -130,3 +130,67 @@ func TestReplay_Failure_RetriedAsInternalRetryable(t *testing.T) {
 		t.Fatal("v2error.retryable=false want true")
 	}
 }
+
+func TestDeleteOrchestrationIssueHistory_RemovesMatchingWorkspaceIssues(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	db, closeFn, err := dbutil.OpenSQLiteDBShared(ctx, filepath.Join(t.TempDir(), "events_cleanup.db"), nil)
+	if err != nil {
+		t.Fatalf("open sqlite db: %v", err)
+	}
+	t.Cleanup(func() { _ = closeFn() })
+	if err := MigrateSchema(ctx, db); err != nil {
+		t.Fatalf("migrate schema: %v", err)
+	}
+
+	store := NewStore(db, db.Close)
+	now := time.Date(2026, time.April, 6, 12, 0, 0, 0, time.UTC)
+	store.now = func() time.Time { return now }
+
+	appendEvent := func(id, issueID, workspaceID, command string) {
+		t.Helper()
+		if err := store.Append(ctx, v2events.Event{
+			ID:            id,
+			StreamID:      "run:" + issueID,
+			StreamType:    v2events.StreamTypeRun,
+			StreamVersion: 1,
+			Sequence:      1,
+			EventType:     v2events.EventRunStarted,
+			OccurredAt:    now,
+			Command:       command,
+			Payload: v2events.MustMarshalPayload(map[string]any{
+				"issue_id":     issueID,
+				"workspace_id": workspaceID,
+			}),
+		}); err != nil {
+			t.Fatalf("append event %s: %v", id, err)
+		}
+	}
+
+	appendEvent("evt-clean-1", "issue-clean-1", "ws-1", "orchestration/dispatch-issue")
+	appendEvent("evt-clean-2", "issue-clean-2", "ws-1", "orchestration/card-action")
+	appendEvent("evt-keep-1", "issue-keep-1", "ws-2", "orchestration/dispatch-issue")
+
+	deleted, eventIDs, err := store.DeleteOrchestrationIssueHistory(ctx, "ws-1", []string{"issue-clean-1", "issue-clean-2"})
+	if err != nil {
+		t.Fatalf("DeleteOrchestrationIssueHistory() error = %v", err)
+	}
+	if deleted != 2 {
+		t.Fatalf("deleted=%d want 2", deleted)
+	}
+	if len(eventIDs) != 2 {
+		t.Fatalf("len(eventIDs)=%d want 2", len(eventIDs))
+	}
+
+	remaining, err := store.ListStream(ctx, v2events.StreamFilter{
+		StreamID:   "run:issue-keep-1",
+		StreamType: v2events.StreamTypeRun,
+	})
+	if err != nil {
+		t.Fatalf("ListStream(keep) error = %v", err)
+	}
+	if len(remaining) != 1 {
+		t.Fatalf("remaining keep events=%d want 1", len(remaining))
+	}
+}

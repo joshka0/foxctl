@@ -189,6 +189,11 @@ func (s *Store) Board(ctx context.Context, req coreorchestration.BoardRequest) (
 		where = append(where, "workspace_id = ?")
 		args = append(args, ws)
 	}
+	if req.ArchivedOnly {
+		where = append(where, "archived_at != ''")
+	} else {
+		where = append(where, "archived_at = ''")
+	}
 	if lane := strings.TrimSpace(string(req.Lane)); lane != "" {
 		where = append(where, "lane = ?")
 		args = append(args, lane)
@@ -204,7 +209,7 @@ func (s *Store) Board(ctx context.Context, req coreorchestration.BoardRequest) (
 			COALESCE(tracker_state, ''), COALESCE(policy_status, ''), COALESCE(last_outcome, ''),
 			COALESCE(eligibility, ''), COALESCE(denial_reason, ''), COALESCE(suggestion, ''),
 			COALESCE(run_id, ''), COALESCE(agent_id, ''), COALESCE(actor_id, ''), COALESCE(attempt, 0),
-			COALESCE(retry_due_at, ''), COALESCE(last_event_type, ''), COALESCE(last_event_at, '')
+			COALESCE(retry_due_at, ''), COALESCE(last_event_type, ''), COALESCE(last_event_at, ''), COALESCE(archived_at, '')
 		FROM v2_orchestration_cards
 		WHERE %s
 		ORDER BY issue_id ASC
@@ -239,7 +244,7 @@ func (s *Store) Board(ctx context.Context, req coreorchestration.BoardRequest) (
 		cards = cards[:limit]
 	}
 
-	counts, err := s.loadCounts(ctx, strings.TrimSpace(req.WorkspaceID))
+	counts, err := s.loadCounts(ctx, strings.TrimSpace(req.WorkspaceID), req.ArchivedOnly)
 	if err != nil {
 		return coreorchestration.BoardResponse{}, err
 	}
@@ -270,6 +275,141 @@ func (s *Store) Board(ctx context.Context, req coreorchestration.BoardRequest) (
 	}, nil
 }
 
+// DeleteCards removes projected orchestration cards for the provided issue ids
+// in a workspace. When issueIDs is empty, all cards in the workspace are
+// removed. If appliedEventIDs are provided, corresponding replay guards are
+// removed as well so the cleanup fully clears projection state.
+func (s *Store) DeleteCards(ctx context.Context, workspaceID string, issueIDs []string, appliedEventIDs []string) (deleted int, err error) {
+	if s == nil || s.db == nil {
+		return 0, fmt.Errorf("v2 orchestration delete cards: nil store")
+	}
+	workspaceID = strings.TrimSpace(workspaceID)
+	if workspaceID == "" {
+		return 0, fmt.Errorf("v2 orchestration delete cards: workspace_id is required")
+	}
+
+	issueSet := make(map[string]struct{}, len(issueIDs))
+	for _, issueID := range issueIDs {
+		if trimmed := strings.TrimSpace(issueID); trimmed != "" {
+			issueSet[trimmed] = struct{}{}
+		}
+	}
+
+	returnedDeleted := 0
+	err = sqlutil.WithTransaction(ctx, s.db, func(tx *sql.Tx) error {
+		var (
+			res     sql.Result
+			execErr error
+		)
+		if len(issueSet) == 0 {
+			res, execErr = tx.ExecContext(ctx, `DELETE FROM v2_orchestration_cards WHERE workspace_id = $1`, workspaceID)
+		} else {
+			for issueID := range issueSet {
+				result, deleteErr := tx.ExecContext(ctx, `DELETE FROM v2_orchestration_cards WHERE workspace_id = $1 AND issue_id = $2`, workspaceID, issueID)
+				if deleteErr != nil {
+					return fmt.Errorf("delete orchestration card %s: %w", issueID, deleteErr)
+				}
+				rows, rowsErr := result.RowsAffected()
+				if rowsErr == nil {
+					returnedDeleted += int(rows)
+				}
+			}
+		}
+		if execErr != nil {
+			return fmt.Errorf("delete orchestration cards: %w", execErr)
+		}
+		if res != nil {
+			rows, rowsErr := res.RowsAffected()
+			if rowsErr == nil {
+				returnedDeleted = int(rows)
+			}
+		}
+		for _, eventID := range appliedEventIDs {
+			eventID = strings.TrimSpace(eventID)
+			if eventID == "" {
+				continue
+			}
+			if _, deleteErr := tx.ExecContext(ctx, `DELETE FROM v2_orchestration_applied_events WHERE event_id = $1`, eventID); deleteErr != nil {
+				return fmt.Errorf("delete applied orchestration event %s: %w", eventID, deleteErr)
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return 0, err
+	}
+	return returnedDeleted, nil
+}
+
+func (s *Store) ArchiveCards(ctx context.Context, workspaceID string, issueIDs []string) (int, error) {
+	if s == nil || s.db == nil {
+		return 0, fmt.Errorf("v2 orchestration archive cards: nil store")
+	}
+	workspaceID = strings.TrimSpace(workspaceID)
+	if workspaceID == "" {
+		return 0, fmt.Errorf("v2 orchestration archive cards: workspace_id is required")
+	}
+	now := sqlutil.FormatTimestamp(s.now().UTC())
+	return updateArchivedCards(ctx, s.db, workspaceID, issueIDs, now, "archive")
+}
+
+func (s *Store) RestoreCards(ctx context.Context, workspaceID string, issueIDs []string) (int, error) {
+	if s == nil || s.db == nil {
+		return 0, fmt.Errorf("v2 orchestration restore cards: nil store")
+	}
+	workspaceID = strings.TrimSpace(workspaceID)
+	if workspaceID == "" {
+		return 0, fmt.Errorf("v2 orchestration restore cards: workspace_id is required")
+	}
+	return updateArchivedCards(ctx, s.db, workspaceID, issueIDs, "", "restore")
+}
+
+func updateArchivedCards(ctx context.Context, db *sql.DB, workspaceID string, issueIDs []string, archivedAt, verb string) (int, error) {
+	issueSet := make(map[string]struct{}, len(issueIDs))
+	for _, issueID := range issueIDs {
+		if trimmed := strings.TrimSpace(issueID); trimmed != "" {
+			issueSet[trimmed] = struct{}{}
+		}
+	}
+	updated := 0
+	err := sqlutil.WithTransaction(ctx, db, func(tx *sql.Tx) error {
+		if len(issueSet) == 0 {
+			query := `UPDATE v2_orchestration_cards SET archived_at = $1 WHERE workspace_id = $2`
+			if archivedAt == "" {
+				query += ` AND archived_at != ''`
+			} else {
+				query += ` AND archived_at = ''`
+			}
+			res, err := tx.ExecContext(ctx, query, archivedAt, workspaceID)
+			if err != nil {
+				return fmt.Errorf("%s orchestration cards: %w", verb, err)
+			}
+			rows, _ := res.RowsAffected()
+			updated = int(rows)
+			return nil
+		}
+		for issueID := range issueSet {
+			query := `UPDATE v2_orchestration_cards SET archived_at = $1 WHERE workspace_id = $2 AND issue_id = $3`
+			if archivedAt == "" {
+				query += ` AND archived_at != ''`
+			} else {
+				query += ` AND archived_at = ''`
+			}
+			res, err := tx.ExecContext(ctx, query, archivedAt, workspaceID, issueID)
+			if err != nil {
+				return fmt.Errorf("%s orchestration card %s: %w", verb, issueID, err)
+			}
+			rows, _ := res.RowsAffected()
+			updated += int(rows)
+		}
+		return nil
+	})
+	if err != nil {
+		return 0, err
+	}
+	return updated, nil
+}
+
 // Card returns one projected card by issue id.
 func (s *Store) Card(ctx context.Context, req coreorchestration.CardRequest) (coreorchestration.CardResponse, error) {
 	if s == nil || s.db == nil {
@@ -287,7 +427,7 @@ func (s *Store) Card(ctx context.Context, req coreorchestration.CardRequest) (co
 			COALESCE(tracker_state, ''), COALESCE(policy_status, ''), COALESCE(last_outcome, ''),
 			COALESCE(eligibility, ''), COALESCE(denial_reason, ''), COALESCE(suggestion, ''),
 			COALESCE(run_id, ''), COALESCE(agent_id, ''), COALESCE(actor_id, ''), COALESCE(attempt, 0),
-			COALESCE(retry_due_at, ''), COALESCE(last_event_type, ''), COALESCE(last_event_at, '')
+			COALESCE(retry_due_at, ''), COALESCE(last_event_type, ''), COALESCE(last_event_at, ''), COALESCE(archived_at, '')
 		FROM v2_orchestration_cards
 		WHERE issue_id = ?
 	`
@@ -310,7 +450,7 @@ func (s *Store) Card(ctx context.Context, req coreorchestration.CardRequest) (co
 	return coreorchestration.CardResponse{Card: card}, nil
 }
 
-func (s *Store) loadCounts(ctx context.Context, workspaceID string) (map[coreorchestration.Lane]int, error) {
+func (s *Store) loadCounts(ctx context.Context, workspaceID string, archivedOnly bool) (map[coreorchestration.Lane]int, error) {
 	counts := coreorchestration.EnsureLaneCounts(nil)
 
 	where := "1=1"
@@ -318,6 +458,11 @@ func (s *Store) loadCounts(ctx context.Context, workspaceID string) (map[coreorc
 	if workspaceID != "" {
 		where = "workspace_id = ?"
 		args = append(args, workspaceID)
+	}
+	if archivedOnly {
+		where += " AND archived_at != ''"
+	} else {
+		where += " AND archived_at = ''"
 	}
 	query := fmt.Sprintf(`
 		SELECT COALESCE(lane, ''), COUNT(*)
@@ -432,6 +577,7 @@ func scanCardFrom(scanner cardScanner) (coreorchestration.Card, error) {
 		lane        string
 		retryDueAt  string
 		lastEventAt string
+		archivedAt  string
 	)
 	err := scanner.Scan(
 		&card.WorkspaceID,
@@ -453,6 +599,7 @@ func scanCardFrom(scanner cardScanner) (coreorchestration.Card, error) {
 		&retryDueAt,
 		&card.LastEvent,
 		&lastEventAt,
+		&archivedAt,
 	)
 	if err != nil {
 		return coreorchestration.Card{}, err
@@ -472,6 +619,13 @@ func scanCardFrom(scanner cardScanner) (coreorchestration.Card, error) {
 			return coreorchestration.Card{}, fmt.Errorf("parse orchestration last_event_at: %w", err)
 		}
 		card.LastEventAt = &parsed
+	}
+	if strings.TrimSpace(archivedAt) != "" {
+		parsed, err := sqlutil.ScanTimestamp(archivedAt)
+		if err != nil {
+			return coreorchestration.Card{}, fmt.Errorf("parse orchestration archived_at: %w", err)
+		}
+		card.ArchivedAt = &parsed
 	}
 	return card, nil
 }

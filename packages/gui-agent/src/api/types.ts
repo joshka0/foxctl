@@ -185,6 +185,7 @@ export interface MailboxMessage {
   status: string;
   ack_required?: boolean;
   reply_expected?: boolean;
+  interrupt?: boolean;
   related_message_id?: string;
   created_at: string;
   task_id?: string;
@@ -215,6 +216,7 @@ export interface Room {
   participants?: string[];
   task_ids?: string[];
   members?: RoomMember[];
+  archived_at?: string;
 }
 
 export interface RoomMember {
@@ -316,7 +318,10 @@ export interface RoomLoop {
   reply_stale_after: string;
   task_stale_after: string;
   min_pulse_floor: string;
+  interrupt_attempt_limit: number;
+  reminder_backoff_cap: number;
   coordinator_pulse_enabled: boolean;
+  coordinator_escalation_enabled: boolean;
 }
 
 // Blackboard types
@@ -387,6 +392,7 @@ export interface OrchestrationCard {
   retry_due_at?: string;
   last_event_type?: string;
   last_event_at?: string;
+  archived_at?: string;
 }
 
 export type OrchestrationCardAction = "retry-now" | "release" | "mark-done";

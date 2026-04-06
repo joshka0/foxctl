@@ -39,6 +39,7 @@ type RoomResponse struct {
 	Participants     []string             `json:"participants,omitempty"`
 	TaskIDs          []string             `json:"task_ids,omitempty"`
 	Members          []RoomMemberResponse `json:"members,omitempty"`
+	ArchivedAt       string               `json:"archived_at,omitempty"`
 }
 
 type RoomMemberResponse struct {
@@ -88,6 +89,7 @@ type RoomMessageSendRequest struct {
 	Priority         int            `json:"priority,omitempty"`
 	AckRequired      bool           `json:"ack_required,omitempty"`
 	ReplyExpected    bool           `json:"reply_expected,omitempty"`
+	Interrupt        bool           `json:"interrupt,omitempty"`
 	TaskID           string         `json:"task_id,omitempty"`
 	DispatchAgents   bool           `json:"dispatch_agents,omitempty"`
 	DispatchAgentIDs []string       `json:"dispatch_agent_ids,omitempty"`
@@ -217,7 +219,8 @@ func RoomsListHandler(cfg config.Config, log zerolog.Logger) http.HandlerFunc {
 		}
 		defer store.Close()
 
-		rooms, err := store.ListRooms(r.Context(), workspaceID, actorID, limit)
+		archivedOnly := parseBool(r.URL.Query().Get("archived_only"))
+		rooms, err := store.ListRooms(r.Context(), workspaceID, actorID, limit, archivedOnly)
 		if err != nil {
 			log.Error().Err(err).Msg("failed to list rooms")
 			httpError(w, http.StatusInternalServerError, "failed to list rooms")
@@ -517,6 +520,24 @@ func RoomDetailHandler(cfg config.Config, log zerolog.Logger, events roomEventPu
 			return
 		}
 
+		if len(parts) >= 2 && parts[1] == "archive" {
+			if r.Method != http.MethodPost {
+				httpError(w, http.StatusMethodNotAllowed, "method not allowed")
+				return
+			}
+			handleRoomArchive(w, r, cfg, log, roomID)
+			return
+		}
+
+		if len(parts) >= 2 && parts[1] == "restore" {
+			if r.Method != http.MethodPost {
+				httpError(w, http.StatusMethodNotAllowed, "method not allowed")
+				return
+			}
+			handleRoomRestore(w, r, cfg, log, roomID)
+			return
+		}
+
 		if len(parts) >= 2 && parts[1] == "members" {
 			switch r.Method {
 			case http.MethodGet:
@@ -534,6 +555,8 @@ func RoomDetailHandler(cfg config.Config, log zerolog.Logger, events roomEventPu
 			handleRoomGet(w, r, cfg, log, roomID)
 		case http.MethodPatch:
 			handleRoomPatch(w, r, cfg, log, roomID)
+		case http.MethodDelete:
+			handleRoomDelete(w, r, cfg, log, roomID)
 		default:
 			httpError(w, http.StatusMethodNotAllowed, "method not allowed")
 		}
@@ -572,6 +595,96 @@ func handleRoomGet(w http.ResponseWriter, r *http.Request, cfg config.Config, lo
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"room": convertRoomSummary(room),
+	})
+}
+
+func handleRoomDelete(w http.ResponseWriter, r *http.Request, cfg config.Config, log zerolog.Logger, roomID string) {
+	workspaceID := roomWorkspaceID(r)
+	if workspaceID == "" {
+		httpError(w, http.StatusBadRequest, "workspace_id required")
+		return
+	}
+
+	store, err := blackboard.OpenBoardStore(r.Context(), cfg.Storage.Root)
+	if err != nil {
+		log.Error().Err(err).Msg("failed to open board store")
+		httpError(w, http.StatusInternalServerError, "failed to open board store")
+		return
+	}
+	defer store.Close()
+
+	if err := store.DeleteRoom(r.Context(), workspaceID, roomID); err != nil {
+		if errors.Is(err, blackboard.ErrRoomNotFound) {
+			httpError(w, http.StatusNotFound, "room not found")
+			return
+		}
+		log.Error().Err(err).Str("room_id", roomID).Msg("failed to delete room")
+		httpError(w, http.StatusInternalServerError, "failed to delete room")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"status":       "deleted",
+		"room_id":      roomID,
+		"workspace_id": workspaceID,
+	})
+}
+
+func handleRoomArchive(w http.ResponseWriter, r *http.Request, cfg config.Config, log zerolog.Logger, roomID string) {
+	workspaceID := roomWorkspaceID(r)
+	if workspaceID == "" {
+		httpError(w, http.StatusBadRequest, "workspace_id required")
+		return
+	}
+	store, err := blackboard.OpenBoardStore(r.Context(), cfg.Storage.Root)
+	if err != nil {
+		log.Error().Err(err).Msg("failed to open board store")
+		httpError(w, http.StatusInternalServerError, "failed to open board store")
+		return
+	}
+	defer store.Close()
+	if err := store.ArchiveRoom(r.Context(), workspaceID, roomID); err != nil {
+		if errors.Is(err, blackboard.ErrRoomNotFound) {
+			httpError(w, http.StatusNotFound, "room not found")
+			return
+		}
+		log.Error().Err(err).Str("room_id", roomID).Msg("failed to archive room")
+		httpError(w, http.StatusInternalServerError, "failed to archive room")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"status":       "archived",
+		"room_id":      roomID,
+		"workspace_id": workspaceID,
+	})
+}
+
+func handleRoomRestore(w http.ResponseWriter, r *http.Request, cfg config.Config, log zerolog.Logger, roomID string) {
+	workspaceID := roomWorkspaceID(r)
+	if workspaceID == "" {
+		httpError(w, http.StatusBadRequest, "workspace_id required")
+		return
+	}
+	store, err := blackboard.OpenBoardStore(r.Context(), cfg.Storage.Root)
+	if err != nil {
+		log.Error().Err(err).Msg("failed to open board store")
+		httpError(w, http.StatusInternalServerError, "failed to open board store")
+		return
+	}
+	defer store.Close()
+	if err := store.RestoreRoom(r.Context(), workspaceID, roomID); err != nil {
+		if errors.Is(err, blackboard.ErrRoomNotFound) {
+			httpError(w, http.StatusNotFound, "room not found")
+			return
+		}
+		log.Error().Err(err).Str("room_id", roomID).Msg("failed to restore room")
+		httpError(w, http.StatusInternalServerError, "failed to restore room")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"status":       "restored",
+		"room_id":      roomID,
+		"workspace_id": workspaceID,
 	})
 }
 
@@ -675,6 +788,10 @@ func handleRoomMessagesPost(w http.ResponseWriter, r *http.Request, cfg config.C
 		httpError(w, http.StatusBadRequest, "reply_expected requires a direct recipient")
 		return
 	}
+	if req.Interrupt && req.Recipient == agent.BroadcastRecipient {
+		httpError(w, http.StatusBadRequest, "interrupt requires a direct recipient")
+		return
+	}
 	if req.Subject == "" {
 		req.Subject = agent.RoomStreamName(roomID)
 	}
@@ -698,6 +815,7 @@ func handleRoomMessagesPost(w http.ResponseWriter, r *http.Request, cfg config.C
 		Status:        agent.BoardMessageStatusUnread,
 		AckRequired:   req.AckRequired,
 		ReplyExpected: req.ReplyExpected,
+		Interrupt:     req.Interrupt,
 		CreatedAt:     time.Now(),
 	}
 	if err := store.SendMessage(r.Context(), msg); err != nil {
@@ -1256,6 +1374,9 @@ func convertRoomSummary(room agent.RoomSummary) RoomResponse {
 	if !room.LatestMessageAt.IsZero() {
 		resp.LatestMessageAt = room.LatestMessageAt.Format(time.RFC3339)
 	}
+	if room.ArchivedAt != nil && !room.ArchivedAt.IsZero() {
+		resp.ArchivedAt = room.ArchivedAt.Format(time.RFC3339)
+	}
 	return resp
 }
 
@@ -1267,10 +1388,11 @@ func normalizeBoardMessageKind(raw string) (agent.BoardMessageKind, error) {
 	switch kind {
 	case agent.BoardMessageKindInstruction, agent.BoardMessageKindInfo,
 		agent.BoardMessageKindAlert, agent.BoardMessageKindReviewRequest,
-		agent.BoardMessageKindTaskUpdate, agent.BoardMessageKindLeadChange:
+		agent.BoardMessageKindTaskUpdate, agent.BoardMessageKindLeadChange,
+		agent.BoardMessageKindCoordinatorPulse:
 		return kind, nil
 	default:
-		return "", errors.New("invalid kind: must be one of instruction, info, alert, review_request, task_update, lead_change")
+		return "", errors.New("invalid kind: must be one of instruction, info, alert, review_request, task_update, lead_change, coordinator_pulse")
 	}
 }
 

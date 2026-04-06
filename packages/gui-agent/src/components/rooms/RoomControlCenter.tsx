@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -19,7 +19,8 @@ import {
   touchRoomTask,
   completeRoomTask,
   sendRoomMessage,
-  unblockRoomTask
+  unblockRoomTask,
+  archiveRoom,
 } from '@/api/client'
 import { useRoomControlStore } from '@/stores/roomControlStore'
 import { useAuthSession } from '@/hooks/useAuthSession'
@@ -32,14 +33,27 @@ import { TimelineEvent } from './TimelineEvent'
 import { ParticipantList } from './ParticipantList'
 import { ReplyComposer } from './ReplyComposer'
 import { LoopPolicyEditor } from './LoopPolicyEditor'
-import { Hash, MessageSquare, ShieldAlert, Zap, X, RefreshCw, CheckCircle2, UserCircle, Users, Bell } from 'lucide-react'
-import type { MailboxMessage } from '@/api/types'
+import { AdminRoomComposer } from './AdminRoomComposer'
+import { RoomChatView } from './RoomChatView'
+import { Hash, MessageSquare, ShieldAlert, Zap, X, RefreshCw, CheckCircle2, UserCircle, Users, Bell, Trash2 } from 'lucide-react'
+import type { MailboxMessage, RoomMessageEvent } from '@/api/types'
+
+interface AdminDispatchSummary {
+  id: string
+  recipient: string
+  kind: string
+  ack_required: boolean
+  reply_expected: boolean
+  interrupt: boolean
+  dispatched?: number
+  skipped?: number
+}
 
 export function RoomControlCenter({ roomId }: { roomId: string }) {
   const queryClient = useQueryClient()
   const authSession = useAuthSession()
   const currentActorID = authSession.data?.user.id || 'unknown'
-  const { selectedRoomWorkspaceID } = useViewStore()
+  const { selectedRoomWorkspaceID, setSelectedRoom } = useViewStore()
   const workspaceId = selectedRoomWorkspaceID || '.'
 
   const { 
@@ -60,9 +74,14 @@ export function RoomControlCenter({ roomId }: { roomId: string }) {
   } = useRoomControlStore()
 
   const [timelineFilter, setTimelineFilter] = useState<'all' | 'messages' | 'reclaims' | 'handoffs' | 'reminders' | 'reassignments'>('all')
+  const [surfaceMode, setSurfaceMode] = useState<'ops' | 'chat'>('ops')
   const [isParticipantsOpen, setIsParticipantsOpen] = useState(false)
   const [isLoopEditorOpen, setIsLoopEditorOpen] = useState(false)
   const [replyTarget, setReplyTarget] = useState<MailboxMessage | null>(null)
+  const [recentRoomEvents, setRecentRoomEvents] = useState<RoomMessageEvent[]>([])
+  const [adminDispatchSummary, setAdminDispatchSummary] = useState<AdminDispatchSummary | null>(null)
+  const eventSourceRef = useRef<EventSource | null>(null)
+  const isLocalDevSuperuser = currentActorID === 'dev-local-user' || currentActorID === 'local-dev-user'
 
   // Queries
   const { data: status } = useQuery({
@@ -90,8 +109,7 @@ export function RoomControlCenter({ roomId }: { roomId: string }) {
 
   const { data: messages } = useQuery({
     queryKey: ['room', roomId, 'messages'],
-    queryFn: () => listRoomMessages(roomId, { workspace_id: workspaceId, limit: 50 }),
-    enabled: isTimelineOpen,
+    queryFn: () => listRoomMessages(roomId, { workspace_id: workspaceId, limit: 200 }),
   })
 
   const { data: loop } = useQuery({
@@ -165,8 +183,92 @@ export function RoomControlCenter({ roomId }: { roomId: string }) {
     }),
   })
 
+  const adminSendMutation = useMutation({
+    mutationFn: (params: { recipient?: string; subject?: string; body: string; kind: string; ack_required: boolean; reply_expected: boolean; interrupt: boolean }) =>
+      sendRoomMessage(roomId, {
+        workspace_id: workspaceId,
+        sender: currentActorID,
+        recipient: params.recipient,
+        subject: params.subject,
+        body: params.body,
+        kind: params.kind,
+        ack_required: params.ack_required,
+        reply_expected: params.reply_expected,
+        interrupt: params.interrupt,
+      }),
+    onSuccess: (result, variables) => {
+      setAdminDispatchSummary({
+        id: result.id,
+        recipient: variables.recipient || '*',
+        kind: variables.kind,
+        ack_required: variables.ack_required,
+        reply_expected: variables.reply_expected,
+        interrupt: variables.interrupt,
+        dispatched: result.dispatched,
+        skipped: result.skipped,
+      })
+      setTimelineFilter('all')
+      setTimelineOpen(true)
+      queryClient.invalidateQueries({ queryKey: ['room', roomId] })
+    },
+  })
+
+  const archiveRoomMutation = useMutation({
+    mutationFn: () => archiveRoom(roomId, { workspace_id: workspaceId }),
+    onSuccess: async () => {
+      setSelectedRoom(null, workspaceId)
+      await queryClient.invalidateQueries({ queryKey: ['rooms'] })
+      await queryClient.invalidateQueries({ queryKey: ['room', roomId] })
+    },
+  })
+
   const isCoordinator = status?.coordinator_actor_id === currentActorID
-  const userRole = status?.participants.find(p => p.actor_id === currentActorID)?.role || 'member'
+  const canAdminRoom = isCoordinator || isLocalDevSuperuser
+  const userRole = isLocalDevSuperuser
+    ? 'admin'
+    : status?.participants.find(p => p.actor_id === currentActorID)?.role || 'member'
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+
+    const eventSource = new EventSource('/api/events')
+    eventSourceRef.current = eventSource
+    eventSource.onmessage = (rawEvent) => {
+      let parsed: { type?: string; data?: unknown } | null = null
+      try {
+        parsed = JSON.parse(rawEvent.data) as { type?: string; data?: unknown }
+      } catch {
+        return
+      }
+      if (parsed?.type !== 'room.message' || !parsed.data || typeof parsed.data !== 'object') return
+      const event = parsed.data as RoomMessageEvent
+      if (event.workspace_id !== workspaceId || event.room_id !== roomId) return
+      setRecentRoomEvents((prev) => {
+        const duplicate = prev.find(
+          (candidate) =>
+            candidate.message_id === event.message_id &&
+            candidate.phase === event.phase &&
+            candidate.agent_id === event.agent_id &&
+            candidate.error === event.error,
+        )
+        if (duplicate) return prev
+        const next = [...prev, event]
+        if (next.length > 200) {
+          return next.slice(next.length - 200)
+        }
+        return next
+      })
+      void queryClient.invalidateQueries({ queryKey: ['room', roomId] })
+      void queryClient.invalidateQueries({ queryKey: ['rooms', workspaceId] })
+    }
+
+    return () => {
+      eventSource.close()
+      if (eventSourceRef.current === eventSource) {
+        eventSourceRef.current = null
+      }
+    }
+  }, [queryClient, roomId, workspaceId])
 
   if (!status) return <div className="p-8 text-center text-muted-foreground animate-pulse text-sm font-mono tracking-tighter">LOADING ROOM_CONTROL_PLANE...</div>
 
@@ -222,9 +324,9 @@ export function RoomControlCenter({ roomId }: { roomId: string }) {
                       loop.enabled 
                         ? "bg-green-500/10 text-green-600 border-green-500/20" 
                         : "bg-muted text-muted-foreground border-muted",
-                      isCoordinator && "cursor-pointer hover:opacity-80"
+                      canAdminRoom && "cursor-pointer hover:opacity-80"
                     )}
-                    onClick={() => isCoordinator && setIsLoopEditorOpen(true)}
+                    onClick={() => canAdminRoom && setIsLoopEditorOpen(true)}
                   >
                     <Zap className={cn("w-2 h-2", loop.enabled ? "fill-current" : "opacity-50")} /> 
                     LOOP: {loop.enabled ? loop.pulse_interval : 'OFF'}
@@ -234,10 +336,10 @@ export function RoomControlCenter({ roomId }: { roomId: string }) {
                   <p>Managed by: <span className="font-bold">{loop.managed_by || 'none'}</span></p>
                   {loop.enabled && <p>Last tick: <span className="font-mono">{loop.last_tick_at ? new Date(loop.last_tick_at).toLocaleTimeString() : 'never'}</span></p>}
                   <p>Stale thresholds: task={loop.task_stale_after}, reply={loop.reply_stale_after}</p>
-                  {isCoordinator && <p className="text-[9px] text-primary/70 italic pt-1 font-bold">Click to edit loop policy</p>}
+                  {canAdminRoom && <p className="text-[9px] text-primary/70 italic pt-1 font-bold">Click to edit loop policy</p>}
                 </TooltipContent>
               </Tooltip>
-            ) : isCoordinator && (
+            ) : canAdminRoom && (
               <Button 
                 variant="ghost" 
                 size="xs" 
@@ -254,15 +356,32 @@ export function RoomControlCenter({ roomId }: { roomId: string }) {
               <span className="opacity-70">Coordinator:</span>
               <span className={cn(
                 "font-bold px-1.5 py-0.5 rounded flex items-center gap-1 border",
-                isCoordinator ? "bg-primary text-primary-foreground border-primary" : "bg-muted text-foreground border-border"
+                canAdminRoom ? "bg-primary text-primary-foreground border-primary" : "bg-muted text-foreground border-border"
               )}>
-                {isCoordinator ? <ShieldAlert className="w-2.5 h-2.5" /> : <UserCircle className="w-2.5 h-2.5 opacity-50" />}
-                {status.coordinator_actor_id || 'none'}
+                {canAdminRoom ? <ShieldAlert className="w-2.5 h-2.5" /> : <UserCircle className="w-2.5 h-2.5 opacity-50" />}
+                {isLocalDevSuperuser ? 'dev-admin' : (status.coordinator_actor_id || 'none')}
               </span>
             </div>
-            {isCoordinator && (
+            {canAdminRoom && (
               <Button variant="outline" size="xs" className="font-black border-primary/20 hover:bg-primary/5 uppercase tracking-tighter" onClick={() => openTransferLead()}>
                 Transfer Lead
+              </Button>
+            )}
+            {canAdminRoom && (
+              <Button
+                variant="outline"
+                size="xs"
+                className="font-black border-red-500/20 text-red-600 hover:bg-red-500/5 uppercase tracking-tighter"
+                disabled={archiveRoomMutation.isPending}
+                onClick={() => {
+                  if (!window.confirm(`Archive room "${status.room.title || roomId}"? This hides it from the active room list without deleting its timeline.`)) {
+                    return
+                  }
+                  archiveRoomMutation.mutate()
+                }}
+              >
+                <Trash2 className="w-3.5 h-3.5 mr-1.5" />
+                Archive Room
               </Button>
             )}
             <Button variant="outline" size="xs" className="font-bold" onClick={() => setIsParticipantsOpen(!isParticipantsOpen)}>
@@ -276,8 +395,60 @@ export function RoomControlCenter({ roomId }: { roomId: string }) {
             >
               {isTimelineOpen ? 'Close Timeline' : 'Timeline'}
             </Button>
+            <div className="ml-2 flex items-center rounded-md border border-border bg-background p-0.5">
+              <Button
+                variant={surfaceMode === 'ops' ? 'secondary' : 'ghost'}
+                size="xs"
+                className="h-6 px-2 text-[9px] font-black uppercase tracking-tight"
+                onClick={() => setSurfaceMode('ops')}
+              >
+                Ops
+              </Button>
+              <Button
+                variant={surfaceMode === 'chat' ? 'secondary' : 'ghost'}
+                size="xs"
+                className="h-6 px-2 text-[9px] font-black uppercase tracking-tight"
+                onClick={() => setSurfaceMode('chat')}
+              >
+                Chat
+              </Button>
+            </div>
           </div>
         </header>
+
+        {canAdminRoom && (
+          <>
+            <AdminRoomComposer
+              sender={currentActorID}
+              participants={status.participants}
+              onSend={(params) => adminSendMutation.mutate(params)}
+              disabled={adminSendMutation.isPending}
+            />
+            {adminDispatchSummary && (
+              <div className="border-b bg-emerald-500/5 px-4 py-2 text-[11px] text-emerald-800">
+                <div className="flex flex-wrap items-center gap-2">
+                  <Badge variant="outline" className="h-4 px-1.5 text-[9px] font-mono border-emerald-500/30 text-emerald-700">
+                    stored
+                  </Badge>
+                  <span className="font-semibold">
+                    {adminDispatchSummary.recipient === '*' ? 'Broadcast stored in room' : `Direct message stored for ${adminDispatchSummary.recipient}`}
+                  </span>
+                  <span className="text-emerald-700/80">
+                    kind={adminDispatchSummary.kind}
+                  </span>
+                  {adminDispatchSummary.ack_required && <span className="text-amber-700">awaiting ack</span>}
+                  {adminDispatchSummary.reply_expected && <span className="text-purple-700">awaiting reply</span>}
+                  {adminDispatchSummary.interrupt && <span className="text-red-700">interrupt on relay</span>}
+                  {typeof adminDispatchSummary.dispatched === 'number' && (
+                    <span className="text-muted-foreground">
+                      agent dispatch: {adminDispatchSummary.dispatched} sent{typeof adminDispatchSummary.skipped === 'number' ? `, ${adminDispatchSummary.skipped} skipped` : ''}
+                    </span>
+                  )}
+                </div>
+              </div>
+            )}
+          </>
+        )}
 
         {/* 2. Action Ribbon */}
         <div className="flex items-center gap-2 px-4 py-2 border-b bg-muted/10 shrink-0 overflow-x-auto no-scrollbar">
@@ -344,8 +515,17 @@ export function RoomControlCenter({ roomId }: { roomId: string }) {
             </aside>
           )}
 
-          {/* Main Content: Task Board & Inbox */}
+          {/* Main Content */}
           <div className="flex-1 flex flex-col min-w-0">
+            {surfaceMode === 'chat' ? (
+              <RoomChatView
+                messages={messages?.messages ?? []}
+                currentActorID={currentActorID}
+                participants={status.participants}
+                events={recentRoomEvents}
+              />
+            ) : (
+              <>
             {/* 3. Task Board */}
             <div className="flex-1 min-h-0 flex flex-col border-b">
               <div className="px-4 py-1.5 bg-muted/5 border-b flex items-center justify-between">
@@ -375,7 +555,7 @@ export function RoomControlCenter({ roomId }: { roomId: string }) {
                       task={task} 
                       onClaim={() => claimMutation.mutate(task.id)}
                       onReassign={() => openReassignTask(task)}
-                      isCoordinator={isCoordinator}
+                      isCoordinator={canAdminRoom}
                     />
                   ))}
                 </TaskColumn>
@@ -389,7 +569,7 @@ export function RoomControlCenter({ roomId }: { roomId: string }) {
                       onComplete={() => openConfirm("Complete Task", `Mark "${task.title}" as done?`, () => completeMutation.mutate(task.id))}
                       onReclaim={() => openReclaimTask(task)}
                       onReassign={() => openReassignTask(task)}
-                      isCoordinator={isCoordinator}
+                      isCoordinator={canAdminRoom}
                     />
                   ))}
                 </TaskColumn>
@@ -402,7 +582,7 @@ export function RoomControlCenter({ roomId }: { roomId: string }) {
                       onAbandon={() => openAbandonTask(task)}
                       onReclaim={() => openReclaimTask(task)}
                       onReassign={() => openReassignTask(task)}
-                      isCoordinator={isCoordinator}
+                      isCoordinator={canAdminRoom}
                     />
                   ))}
                 </TaskColumn>
@@ -411,7 +591,7 @@ export function RoomControlCenter({ roomId }: { roomId: string }) {
                     <TaskCard 
                       key={task.id} 
                       task={task} 
-                      isCoordinator={isCoordinator}
+                      isCoordinator={canAdminRoom}
                       onReclaim={() => openReclaimTask(task)}
                       onReassign={() => openReassignTask(task)}
                     />
@@ -433,7 +613,7 @@ export function RoomControlCenter({ roomId }: { roomId: string }) {
                   <InboxFilterButton active={inboxFilters.only === 'ack'} label="Ack" onClick={() => setInboxFilters({ only: 'ack' })} />
                   <InboxFilterButton active={inboxFilters.only === 'reply'} label="Reply" onClick={() => setInboxFilters({ only: 'reply' })} />
                   <InboxFilterButton active={inboxFilters.only === 'alerts'} label="Alerts" onClick={() => setInboxFilters({ only: 'alerts' })} />
-                  {isCoordinator && (
+                  {canAdminRoom && (
                     <div className="ml-4 pl-4 border-l border-muted flex items-center gap-1.5">
                       <span className="text-[9px] font-black text-muted-foreground uppercase mr-1">Bulk Resolve:</span>
                       <BulkActionButton label="INFO" onClick={() => openConfirm("Bulk Resolve: INFO", "Resolve all informational broadcasts?", () => bulkResolveMutation.mutate('info'))} />
@@ -461,7 +641,7 @@ export function RoomControlCenter({ roomId }: { roomId: string }) {
                       onResolve={() => openConfirm("Resolve Message", "Clear this message from the actionable inbox?", () => resolveMutation.mutate(msg.id))}
                       onReply={() => setReplyTarget(msg)}
                       onNudge={() => nudgeMutation.mutate(msg.sender)}
-                      isCoordinator={isCoordinator}
+                      isCoordinator={canAdminRoom}
                     />
                   ))}
                   {(!filteredInboxEntries || filteredInboxEntries.length === 0) && (
@@ -473,10 +653,12 @@ export function RoomControlCenter({ roomId }: { roomId: string }) {
                 </div>
               </ScrollArea>
             </div>
+              </>
+            )}
           </div>
 
           {/* 5. Timeline Drawer (Right) */}
-          {isTimelineOpen && (
+          {isTimelineOpen && surfaceMode === 'ops' && (
             <aside className="w-80 border-l bg-muted/5 flex flex-col shrink-0 absolute right-0 top-0 bottom-0 z-10 shadow-xl lg:relative lg:shadow-none animate-in slide-in-from-right duration-200">
               <div className="px-4 py-2 bg-muted/10 border-b flex items-center justify-between shrink-0">
                 <h2 className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">Timeline</h2>

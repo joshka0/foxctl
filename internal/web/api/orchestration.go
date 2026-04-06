@@ -41,6 +41,9 @@ const (
 	commandOrchestrationBoardCardRuntimeGet = "orchestration/board-card-runtime-get"
 	commandOrchestrationRefresh             = "orchestration/refresh"
 	commandOrchestrationSeedCards           = "orchestration/seed-cards"
+	commandOrchestrationCleanupCards        = "orchestration/cleanup-cards"
+	commandOrchestrationArchiveCards        = "orchestration/archive-cards"
+	commandOrchestrationRestoreCards        = "orchestration/restore-cards"
 	opWebOrchestrationDispatchIssue         = "web.orchestration.dispatch_issue"
 	opWebOrchestrationCardAction            = "web.orchestration.card_action"
 	opWebOrchestrationBoardGet              = "web.orchestration.board_get"
@@ -48,6 +51,9 @@ const (
 	opWebOrchestrationBoardCardRuntimeGet   = "web.orchestration.board_card_runtime_get"
 	opWebOrchestrationRefresh               = "web.orchestration.refresh"
 	opWebOrchestrationSeedCards             = "web.orchestration.seed_cards"
+	opWebOrchestrationCleanupCards          = "web.orchestration.cleanup_cards"
+	opWebOrchestrationArchiveCards          = "web.orchestration.archive_cards"
+	opWebOrchestrationRestoreCards          = "web.orchestration.restore_cards"
 
 	orchestrationLargePayloadThreshold = 64 * 1024
 	refreshQueueCoalesceWindow         = 5 * time.Second
@@ -114,6 +120,32 @@ type orchestrationCardActionResponse struct {
 	Timestamp  time.Time              `json:"ts"`
 }
 
+type orchestrationCleanupCardsRequest struct {
+	RequestID   string   `json:"request_id"`
+	WorkspaceID string   `json:"workspace_id,omitempty"`
+	IssueIDs    []string `json:"issue_ids,omitempty"`
+}
+
+type orchestrationCleanupCardsResponse struct {
+	RequestID     string    `json:"request_id"`
+	DeletedCards  int       `json:"deleted_cards"`
+	DeletedEvents int       `json:"deleted_events"`
+	Timestamp     time.Time `json:"ts"`
+}
+
+type orchestrationArchiveCardsRequest struct {
+	RequestID   string   `json:"request_id"`
+	WorkspaceID string   `json:"workspace_id,omitempty"`
+	IssueIDs    []string `json:"issue_ids,omitempty"`
+}
+
+type orchestrationArchiveCardsResponse struct {
+	RequestID string    `json:"request_id"`
+	Updated   int       `json:"updated"`
+	Action    string    `json:"action"`
+	Timestamp time.Time `json:"ts"`
+}
+
 type orchestrationRuntimeTreeData struct {
 	Enabled bool                          `json:"enabled"`
 	AgentID string                        `json:"agent_id,omitempty"`
@@ -176,11 +208,12 @@ func OrchestrationBoardGetHandler(cfg config.Config, log zerolog.Logger) http.Ha
 			EnrichFromContext(r.Context())
 
 		resp, err := svc.Board(r.Context(), coreorchestration.BoardRequest{
-			RequestID:   requestID,
-			WorkspaceID: workspaceID,
-			Limit:       limit,
-			Cursor:      strings.TrimSpace(r.URL.Query().Get("cursor")),
-			Lane:        coreorchestration.Lane(laneFilter),
+			RequestID:    requestID,
+			WorkspaceID:  workspaceID,
+			Limit:        limit,
+			Cursor:       strings.TrimSpace(r.URL.Query().Get("cursor")),
+			Lane:         coreorchestration.Lane(laneFilter),
+			ArchivedOnly: parseBool(r.URL.Query().Get("archived_only")),
 		})
 		if err != nil {
 			observability.Emit(r.Context(), event.Error(err, time.Since(started)))
@@ -553,6 +586,138 @@ func OrchestrationSeedCardsHandler(cfg config.Config, log zerolog.Logger) http.H
 			WithData("skipped", resp.Skipped)
 		observability.Emit(r.Context(), event.Success(time.Since(started)))
 		writeCommandOK(w, http.StatusOK, commandOrchestrationSeedCards, resp)
+	}
+}
+
+// OrchestrationCleanupCardsHandler handles POST /api/orchestration/cleanup-cards.
+func OrchestrationCleanupCardsHandler(cfg config.Config, log zerolog.Logger) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			writeCommandError(w, http.StatusMethodNotAllowed, commandOrchestrationCleanupCards, "EARG", "method not allowed", map[string]any{
+				"hint": httpErrorHint(http.StatusMethodNotAllowed),
+			})
+			return
+		}
+
+		started := time.Now()
+		var req orchestrationCleanupCardsRequest
+		if err := readJSON(w, r, &req); err != nil {
+			evt := observability.NewEvent(opWebOrchestrationCleanupCards).
+				WithComponent(observability.ComponentWeb).
+				WithCommand(commandOrchestrationCleanupCards).
+				EnrichFromContext(r.Context())
+			observability.Emit(r.Context(), evt.Error(err, time.Since(started)))
+			writeCommandError(w, http.StatusBadRequest, commandOrchestrationCleanupCards, "EARG", "invalid json", map[string]any{
+				"hint": httpErrorHint(http.StatusBadRequest),
+			})
+			return
+		}
+
+		req.RequestID = strings.TrimSpace(req.RequestID)
+		req.WorkspaceID = strings.TrimSpace(req.WorkspaceID)
+		if req.RequestID == "" {
+			writeCommandError(w, http.StatusBadRequest, commandOrchestrationCleanupCards, "EARG", "request_id is required", map[string]any{
+				"field": "request_id",
+				"hint":  httpErrorHint(http.StatusBadRequest),
+			})
+			return
+		}
+		if req.WorkspaceID == "" {
+			writeCommandError(w, http.StatusBadRequest, commandOrchestrationCleanupCards, "EARG", "workspace_id is required", map[string]any{
+				"field": "workspace_id",
+				"hint":  httpErrorHint(http.StatusBadRequest),
+			})
+			return
+		}
+
+		event := observability.NewEvent(opWebOrchestrationCleanupCards).
+			WithComponent(observability.ComponentWeb).
+			WithCommand(commandOrchestrationCleanupCards).
+			WithWorkspace(req.WorkspaceID).
+			WithData("request_id", req.RequestID).
+			WithData("issue_count", len(req.IssueIDs)).
+			EnrichFromContext(r.Context())
+
+		resp, err := cleanupOrchestrationCards(r.Context(), cfg, log, req)
+		if err != nil {
+			observability.Emit(r.Context(), event.Error(err, time.Since(started)))
+			writeCommandError(w, http.StatusInternalServerError, commandOrchestrationCleanupCards, "ERUNTIME", "failed to clean up cards", map[string]any{
+				"hint": httpErrorHint(http.StatusInternalServerError),
+			})
+			return
+		}
+
+		event.WithData("deleted_cards", resp.DeletedCards).
+			WithData("deleted_events", resp.DeletedEvents)
+		observability.Emit(r.Context(), event.Success(time.Since(started)))
+		writeCommandOK(w, http.StatusOK, commandOrchestrationCleanupCards, resp)
+	}
+}
+
+func OrchestrationArchiveCardsHandler(cfg config.Config, log zerolog.Logger) http.HandlerFunc {
+	return orchestrationArchiveToggleHandler(cfg, log, true)
+}
+
+func OrchestrationRestoreCardsHandler(cfg config.Config, log zerolog.Logger) http.HandlerFunc {
+	return orchestrationArchiveToggleHandler(cfg, log, false)
+}
+
+func orchestrationArchiveToggleHandler(cfg config.Config, log zerolog.Logger, archive bool) http.HandlerFunc {
+	command := commandOrchestrationArchiveCards
+	op := opWebOrchestrationArchiveCards
+	action := "archived"
+	if !archive {
+		command = commandOrchestrationRestoreCards
+		op = opWebOrchestrationRestoreCards
+		action = "restored"
+	}
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			writeCommandError(w, http.StatusMethodNotAllowed, command, "EARG", "method not allowed", map[string]any{
+				"hint": httpErrorHint(http.StatusMethodNotAllowed),
+			})
+			return
+		}
+		started := time.Now()
+		var req orchestrationArchiveCardsRequest
+		if err := readJSON(w, r, &req); err != nil {
+			evt := observability.NewEvent(op).
+				WithComponent(observability.ComponentWeb).
+				WithCommand(command).
+				EnrichFromContext(r.Context())
+			observability.Emit(r.Context(), evt.Error(err, time.Since(started)))
+			writeCommandError(w, http.StatusBadRequest, command, "EARG", "invalid json", map[string]any{
+				"hint": httpErrorHint(http.StatusBadRequest),
+			})
+			return
+		}
+		req.RequestID = strings.TrimSpace(req.RequestID)
+		req.WorkspaceID = strings.TrimSpace(req.WorkspaceID)
+		if req.RequestID == "" || req.WorkspaceID == "" {
+			writeCommandError(w, http.StatusBadRequest, command, "EARG", "request_id and workspace_id are required", map[string]any{
+				"hint": httpErrorHint(http.StatusBadRequest),
+			})
+			return
+		}
+		event := observability.NewEvent(op).
+			WithComponent(observability.ComponentWeb).
+			WithCommand(command).
+			WithWorkspace(req.WorkspaceID).
+			WithData("request_id", req.RequestID).
+			WithData("issue_count", len(req.IssueIDs)).
+			EnrichFromContext(r.Context())
+		resp, err := archiveOrRestoreOrchestrationCards(r.Context(), cfg, log, req, archive)
+		if err != nil {
+			observability.Emit(r.Context(), event.Error(err, time.Since(started)))
+			writeCommandError(w, http.StatusInternalServerError, command, "ERUNTIME", "failed to update archive state", map[string]any{
+				"hint": httpErrorHint(http.StatusInternalServerError),
+			})
+			return
+		}
+		event.WithData("updated", resp.Updated).
+			WithData("action", action)
+		observability.Emit(r.Context(), event.Success(time.Since(started)))
+		writeCommandOK(w, http.StatusOK, command, resp)
 	}
 }
 
@@ -1031,6 +1196,88 @@ func seedOrchestrationProjectionCards(
 		Created:   created,
 		Skipped:   skipped,
 		Timestamp: now,
+	}, nil
+}
+
+func cleanupOrchestrationCards(
+	ctx context.Context,
+	cfg config.Config,
+	log zerolog.Logger,
+	req orchestrationCleanupCardsRequest,
+) (orchestrationCleanupCardsResponse, error) {
+	eventStore, err := openOrchestrationEventStore(ctx, cfg)
+	if err != nil {
+		return orchestrationCleanupCardsResponse{}, fmt.Errorf("open event store for cleanup: %w", err)
+	}
+	defer func() {
+		if closeErr := eventStore.Close(); closeErr != nil {
+			log.Warn().Err(closeErr).Msg("failed to close event store during card cleanup")
+		}
+	}()
+
+	orchestrationStore, closeFn, err := openOrchestrationStore(ctx, cfg)
+	if err != nil {
+		return orchestrationCleanupCardsResponse{}, fmt.Errorf("open orchestration store for cleanup: %w", err)
+	}
+	defer func() {
+		if closeErr := closeFn(); closeErr != nil {
+			log.Warn().Err(closeErr).Msg("failed to close orchestration store during card cleanup")
+		}
+	}()
+
+	deletedEvents, eventIDs, err := eventStore.DeleteOrchestrationIssueHistory(ctx, req.WorkspaceID, req.IssueIDs)
+	if err != nil {
+		return orchestrationCleanupCardsResponse{}, fmt.Errorf("delete orchestration event history: %w", err)
+	}
+	deletedCards, err := orchestrationStore.DeleteCards(ctx, req.WorkspaceID, req.IssueIDs, eventIDs)
+	if err != nil {
+		return orchestrationCleanupCardsResponse{}, fmt.Errorf("delete orchestration cards: %w", err)
+	}
+
+	return orchestrationCleanupCardsResponse{
+		RequestID:     req.RequestID,
+		DeletedCards:  deletedCards,
+		DeletedEvents: deletedEvents,
+		Timestamp:     time.Now().UTC(),
+	}, nil
+}
+
+func archiveOrRestoreOrchestrationCards(
+	ctx context.Context,
+	cfg config.Config,
+	log zerolog.Logger,
+	req orchestrationArchiveCardsRequest,
+	archive bool,
+) (orchestrationArchiveCardsResponse, error) {
+	orchestrationStore, closeFn, err := openOrchestrationStore(ctx, cfg)
+	if err != nil {
+		return orchestrationArchiveCardsResponse{}, fmt.Errorf("open orchestration store for archive toggle: %w", err)
+	}
+	defer func() {
+		if closeErr := closeFn(); closeErr != nil {
+			log.Warn().Err(closeErr).Msg("failed to close orchestration store during archive toggle")
+		}
+	}()
+
+	var updated int
+	if archive {
+		updated, err = orchestrationStore.ArchiveCards(ctx, req.WorkspaceID, req.IssueIDs)
+	} else {
+		updated, err = orchestrationStore.RestoreCards(ctx, req.WorkspaceID, req.IssueIDs)
+	}
+	if err != nil {
+		return orchestrationArchiveCardsResponse{}, err
+	}
+
+	action := "restored"
+	if archive {
+		action = "archived"
+	}
+	return orchestrationArchiveCardsResponse{
+		RequestID: req.RequestID,
+		Updated:   updated,
+		Action:    action,
+		Timestamp: time.Now().UTC(),
 	}, nil
 }
 

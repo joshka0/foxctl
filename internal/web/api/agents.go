@@ -18,6 +18,7 @@ import (
 	"github.com/oklog/ulid/v2"
 	"github.com/rs/zerolog"
 
+	agentprompts "github.com/jkatigb/agentctl/internal/agent/prompts"
 	"github.com/jkatigb/agentctl/internal/companion"
 	"github.com/jkatigb/agentctl/internal/contextplane/taskhistory"
 	"github.com/jkatigb/agentctl/internal/daemon"
@@ -883,10 +884,6 @@ func handleAgentSpawnWithRoute(w http.ResponseWriter, r *http.Request, cfg confi
 		httpError(w, http.StatusBadRequest, "role is required")
 		return
 	}
-	if req.Prompt == "" {
-		httpError(w, http.StatusBadRequest, "prompt is required")
-		return
-	}
 
 	workspaceRoot := strings.TrimSpace(req.WorkspaceRoot)
 	if workspaceRoot != "" {
@@ -936,6 +933,12 @@ func handleAgentSpawnWithRoute(w http.ResponseWriter, r *http.Request, cfg confi
 		namespace = workspace.Normalize(namespace)
 	}
 
+	resolvedPrompt := resolveAgentSpawnPrompt(req, namespace)
+	if resolvedPrompt == "" {
+		httpError(w, http.StatusBadRequest, "prompt is required")
+		return
+	}
+
 	// Generate name if not provided
 	name := req.Name
 	if name == "" {
@@ -983,7 +986,7 @@ func handleAgentSpawnWithRoute(w http.ResponseWriter, r *http.Request, cfg confi
 		Name:            name,
 		Slug:            req.Slug,
 		Role:            req.Role,
-		Prompt:          req.Prompt,
+		Prompt:          resolvedPrompt,
 		SkillsAllow:     req.SkillsAllow,
 		Policy:          agenttypes.Policy{},
 		ShareBB:         "scoped",
@@ -1031,7 +1034,7 @@ func handleAgentSpawnWithRoute(w http.ResponseWriter, r *http.Request, cfg confi
 			}
 			return workspaceRoot
 		}(),
-		Prompt:           req.Prompt,
+		Prompt:           resolvedPrompt,
 		SkillsAllow:      req.SkillsAllow,
 		MemoryScope:      string(normalizeSpawnMemoryScope(req)),
 		MemoryRetention:  string(normalizeSpawnMemoryRetention(req)),
@@ -1067,7 +1070,7 @@ func handleAgentSpawnWithRoute(w http.ResponseWriter, r *http.Request, cfg confi
 	}
 
 	if roomID := strings.TrimSpace(req.RoomID); roomID != "" {
-		if err := attachSpawnedAgentToRoom(r.Context(), cfg, namespace, roomID, agentID, chooseNonEmpty(strings.TrimSpace(req.RoomRole), strings.TrimSpace(req.Role))); err != nil {
+		if err := attachSpawnedAgentToRoom(r.Context(), cfg, namespace, roomID, agentID, strings.TrimSpace(req.Role), strings.TrimSpace(req.RoomRole)); err != nil {
 			log.Warn().Err(err).Str("agent_id", agentID).Str("room_id", roomID).Msg("failed to attach spawned agent to room")
 		}
 	}
@@ -1167,7 +1170,28 @@ func isSQLiteBusyError(err error) bool {
 	return strings.Contains(msg, "database is locked") || strings.Contains(msg, "sqlite_busy")
 }
 
-func attachSpawnedAgentToRoom(ctx context.Context, cfg config.Config, workspaceID, roomID, agentID, roomRole string) error {
+func resolveAgentSpawnPrompt(req AgentSpawnRequest, workspaceID string) string {
+	roleForPrompt := chooseNonEmpty(strings.TrimSpace(req.RoomRole), strings.TrimSpace(req.Role))
+	prompt := strings.TrimSpace(req.Prompt)
+	if prompt == "" {
+		if defaultPrompt, ok := agentprompts.DefaultPrompt(roleForPrompt); ok {
+			prompt = defaultPrompt
+		}
+	}
+	if prompt == "" && !strings.EqualFold(roleForPrompt, strings.TrimSpace(req.Role)) {
+		if defaultPrompt, ok := agentprompts.DefaultPrompt(strings.TrimSpace(req.Role)); ok {
+			prompt = defaultPrompt
+		}
+	}
+	return agentprompts.ComposeRoomAwarePrompt(prompt, agentprompts.RoomOnboardingOptions{
+		RoomID:      strings.TrimSpace(req.RoomID),
+		WorkspaceID: strings.TrimSpace(workspaceID),
+		Role:        strings.TrimSpace(req.Role),
+		RoomRole:    strings.TrimSpace(req.RoomRole),
+	})
+}
+
+func attachSpawnedAgentToRoom(ctx context.Context, cfg config.Config, workspaceID, roomID, agentID, role, roomRole string) error {
 	store, err := blackboard.OpenBoardStore(ctx, cfg.Storage.Root)
 	if err != nil {
 		return fmt.Errorf("open board store: %w", err)
@@ -1200,12 +1224,35 @@ func attachSpawnedAgentToRoom(ctx context.Context, cfg config.Config, workspaceI
 	if _, ok := seen[agentID]; !ok {
 		nextMembers = append(nextMembers, agenttypes.RoomMember{
 			ActorID: agentID,
-			Role:    strings.TrimSpace(roomRole),
+			Role:    chooseNonEmpty(strings.TrimSpace(roomRole), strings.TrimSpace(role)),
 		})
 	}
 
 	if _, err := store.ReplaceRoomMembers(ctx, workspaceID, roomID, nextMembers); err != nil {
 		return fmt.Errorf("replace room members: %w", err)
+	}
+	subject, body := agentprompts.RoomOnboardingMessage(agentprompts.RoomOnboardingOptions{
+		RoomID:      roomID,
+		WorkspaceID: workspaceID,
+		Role:        role,
+		RoomRole:    roomRole,
+	})
+	if strings.TrimSpace(body) != "" {
+		msg := &agenttypes.BoardMessage{
+			WorkspaceID: workspaceID,
+			Stream:      agenttypes.RoomStreamName(roomID),
+			Sender:      "actor:system:room:" + roomID,
+			Recipient:   agentID,
+			Subject:     subject,
+			Body:        body,
+			Kind:        "info",
+			Priority:    agenttypes.DefaultPriority,
+			Status:      agenttypes.BoardMessageStatusUnread,
+			CreatedAt:   time.Now().UTC(),
+		}
+		if err := store.SendMessage(ctx, msg); err != nil {
+			return fmt.Errorf("send onboarding message: %w", err)
+		}
 	}
 	return nil
 }

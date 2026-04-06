@@ -207,6 +207,94 @@ func TestRoomDetailHandler_GetAndPostMessages(t *testing.T) {
 	}
 }
 
+func TestRoomDetailHandler_ArchiveAndRestore(t *testing.T) {
+	cfg := orchestrationTestConfig(t.TempDir())
+	listHandler := RoomsListHandler(cfg, zerolog.Nop())
+	detailHandler := RoomDetailHandler(cfg, zerolog.Nop(), nil)
+
+	createReq := httptest.NewRequest(http.MethodPost, "/api/rooms", strings.NewReader(`{
+		"workspace_id":"ws1",
+		"id":"archive-room",
+		"title":"Archive Room"
+	}`))
+	createRR := httptest.NewRecorder()
+	listHandler.ServeHTTP(createRR, createReq)
+	if createRR.Code != http.StatusCreated {
+		t.Fatalf("create status=%d body=%s", createRR.Code, createRR.Body.String())
+	}
+
+	postReq := httptest.NewRequest(http.MethodPost, "/api/rooms/archive-room/messages", strings.NewReader(`{
+		"workspace_id":"ws1",
+		"sender":"actor:agent:a",
+		"body":"preserve timeline"
+	}`))
+	postRR := httptest.NewRecorder()
+	detailHandler.ServeHTTP(postRR, postReq)
+	if postRR.Code != http.StatusCreated {
+		t.Fatalf("post status=%d body=%s", postRR.Code, postRR.Body.String())
+	}
+
+	archiveReq := httptest.NewRequest(http.MethodPost, "/api/rooms/archive-room/archive?workspace_id=ws1", nil)
+	archiveRR := httptest.NewRecorder()
+	detailHandler.ServeHTTP(archiveRR, archiveReq)
+	if archiveRR.Code != http.StatusOK {
+		t.Fatalf("archive status=%d body=%s", archiveRR.Code, archiveRR.Body.String())
+	}
+
+	activeListReq := httptest.NewRequest(http.MethodGet, "/api/rooms?workspace_id=ws1", nil)
+	activeListRR := httptest.NewRecorder()
+	listHandler.ServeHTTP(activeListRR, activeListReq)
+	if activeListRR.Code != http.StatusOK {
+		t.Fatalf("active list status=%d body=%s", activeListRR.Code, activeListRR.Body.String())
+	}
+	activeListBody := decodeResponseBody(t, activeListRR)
+	if got := int(activeListBody["count"].(float64)); got != 0 {
+		t.Fatalf("active count=%d want 0", got)
+	}
+
+	archivedListReq := httptest.NewRequest(http.MethodGet, "/api/rooms?workspace_id=ws1&archived_only=true", nil)
+	archivedListRR := httptest.NewRecorder()
+	listHandler.ServeHTTP(archivedListRR, archivedListReq)
+	if archivedListRR.Code != http.StatusOK {
+		t.Fatalf("archived list status=%d body=%s", archivedListRR.Code, archivedListRR.Body.String())
+	}
+	archivedListBody := decodeResponseBody(t, archivedListRR)
+	if got := int(archivedListBody["count"].(float64)); got != 1 {
+		t.Fatalf("archived count=%d want 1", got)
+	}
+	archivedRooms, _ := archivedListBody["rooms"].([]any)
+	firstArchived, _ := archivedRooms[0].(map[string]any)
+	if got := strings.TrimSpace(fmt.Sprint(firstArchived["id"])); got != "archive-room" {
+		t.Fatalf("archived room id=%q want archive-room", got)
+	}
+	if got := strings.TrimSpace(fmt.Sprint(firstArchived["archived_at"])); got == "" {
+		t.Fatal("archived_at should be populated for archived room")
+	}
+
+	restoreReq := httptest.NewRequest(http.MethodPost, "/api/rooms/archive-room/restore?workspace_id=ws1", nil)
+	restoreRR := httptest.NewRecorder()
+	detailHandler.ServeHTTP(restoreRR, restoreReq)
+	if restoreRR.Code != http.StatusOK {
+		t.Fatalf("restore status=%d body=%s", restoreRR.Code, restoreRR.Body.String())
+	}
+
+	activeAfterRestoreReq := httptest.NewRequest(http.MethodGet, "/api/rooms?workspace_id=ws1", nil)
+	activeAfterRestoreRR := httptest.NewRecorder()
+	listHandler.ServeHTTP(activeAfterRestoreRR, activeAfterRestoreReq)
+	if activeAfterRestoreRR.Code != http.StatusOK {
+		t.Fatalf("active after restore status=%d body=%s", activeAfterRestoreRR.Code, activeAfterRestoreRR.Body.String())
+	}
+	activeAfterRestoreBody := decodeResponseBody(t, activeAfterRestoreRR)
+	if got := int(activeAfterRestoreBody["count"].(float64)); got != 1 {
+		t.Fatalf("active count after restore=%d want 1", got)
+	}
+	activeRooms, _ := activeAfterRestoreBody["rooms"].([]any)
+	firstActive, _ := activeRooms[0].(map[string]any)
+	if raw, ok := firstActive["archived_at"]; ok && raw != nil && strings.TrimSpace(fmt.Sprint(raw)) != "" {
+		t.Fatalf("archived_at after restore=%q want empty/omitted", strings.TrimSpace(fmt.Sprint(raw)))
+	}
+}
+
 func TestRoomDetailHandler_PostMessageRejectsBroadcastReplyExpected(t *testing.T) {
 	cfg := orchestrationTestConfig(t.TempDir())
 	h := RoomDetailHandler(cfg, zerolog.Nop(), nil)
@@ -832,6 +920,38 @@ func TestRoomDetailHandler_PatchLoopRequiresCoordinator(t *testing.T) {
 	rr := httptest.NewRecorder()
 	roomHandler.ServeHTTP(rr, req)
 	if rr.Code != http.StatusForbidden {
+		t.Fatalf("status=%d body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestRoomDetailHandler_PatchLoopAllowsLocalDevSuperuser(t *testing.T) {
+	cfg := orchestrationTestConfig(t.TempDir())
+	listHandler := RoomsListHandler(cfg, zerolog.Nop())
+	roomHandler := RoomDetailHandler(cfg, zerolog.Nop(), nil)
+
+	createReq := httptest.NewRequest(http.MethodPost, "/api/rooms", strings.NewReader(`{
+		"workspace_id":"ws1",
+		"id":"alpha",
+		"title":"Alpha",
+		"members":[
+			{"actor_id":"human-a","role":"coordinator"},
+			{"actor_id":"gemini-a","role":"reviewer"}
+		]
+	}`))
+	createRR := httptest.NewRecorder()
+	listHandler.ServeHTTP(createRR, createReq)
+	if createRR.Code != http.StatusCreated {
+		t.Fatalf("create status=%d body=%s", createRR.Code, createRR.Body.String())
+	}
+
+	req := httptest.NewRequest(http.MethodPatch, "/api/rooms/alpha/loop", strings.NewReader(`{
+		"workspace_id":"ws1",
+		"actor_id":"dev-local-user",
+		"pulse_interval":"15m"
+	}`))
+	rr := httptest.NewRecorder()
+	roomHandler.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
 		t.Fatalf("status=%d body=%s", rr.Code, rr.Body.String())
 	}
 }
