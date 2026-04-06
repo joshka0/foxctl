@@ -2566,41 +2566,7 @@ func makeSkillHandler(manifest skill.Manifest, artifactPath string) func(ctx con
 
 		// Execute the skill
 		stdout, stderr, err := executeSkill(runCtx, manifest, artifactPath, inputBytes)
-		if err != nil {
-			errMsg := err.Error()
-			if len(stderr) > 0 {
-				errMsg += "\nstderr: " + string(stderr)
-			}
-			return mcp.NewToolResultError("execute skill: " + errMsg), nil
-		}
-
-		// Parse the envelope response
-		var envelope struct {
-			Status  string         `json:"status"`
-			Command string         `json:"command"`
-			Data    map[string]any `json:"data"`
-			Error   struct {
-				Code    string `json:"code"`
-				Message string `json:"message"`
-			} `json:"error"`
-		}
-
-		if err := json.Unmarshal(stdout, &envelope); err != nil {
-			// Return raw output if not a valid envelope
-			return truncateSkillOutput(ctx, string(stdout), manifest.Metadata.Name)
-		}
-
-		if envelope.Status == "error" {
-			return mcp.NewToolResultError(envelope.Error.Message), nil
-		}
-
-		// Format the data as readable output
-		result, err := json.MarshalIndent(envelope.Data, "", "  ")
-		if err != nil {
-			return truncateSkillOutput(ctx, string(stdout), manifest.Metadata.Name)
-		}
-
-		return truncateSkillOutput(ctx, string(result), manifest.Metadata.Name)
+		return renderSkillExecutionResult(ctx, manifest.Metadata.Name, stdout, stderr, err)
 	}
 }
 
@@ -2642,42 +2608,7 @@ func handleAgentctlRun(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallT
 
 	// Execute the skill
 	stdout, stderr, err := executeSkill(runCtx, handle.Manifest, handle.ArtifactPath, inputBytes)
-	if err != nil {
-		errMsg := err.Error()
-		if len(stderr) > 0 {
-			errMsg += "\nstderr: " + string(stderr)
-		}
-		return mcp.NewToolResultError("execute skill: " + errMsg), nil
-	}
-
-	// Parse the envelope response
-	var envelope struct {
-		Status  string         `json:"status"`
-		Command string         `json:"command"`
-		Data    map[string]any `json:"data"`
-		Meta    map[string]any `json:"meta"`
-		Error   struct {
-			Code    string `json:"code"`
-			Message string `json:"message"`
-		} `json:"error"`
-	}
-
-	if err := json.Unmarshal(stdout, &envelope); err != nil {
-		// Return raw output if not a valid envelope
-		return truncateSkillOutput(ctx, string(stdout), skillName)
-	}
-
-	if envelope.Status == "error" {
-		return mcp.NewToolResultError(envelope.Error.Message), nil
-	}
-
-	// Format the data as readable output
-	result, err := json.MarshalIndent(envelope.Data, "", "  ")
-	if err != nil {
-		return truncateSkillOutput(ctx, string(stdout), skillName)
-	}
-
-	return truncateSkillOutput(ctx, string(result), skillName)
+	return renderSkillExecutionResult(ctx, skillName, stdout, stderr, err)
 }
 
 func runSkillAsMCP(ctx context.Context, skillName string, input map[string]any) (*mcp.CallToolResult, error) {
@@ -2705,36 +2636,58 @@ func runSkillAsMCP(ctx context.Context, skillName string, input map[string]any) 
 
 	runCtx := resolveWorkspaceContext(ctx, "")
 	stdout, stderr, err := executeSkill(runCtx, handle.Manifest, handle.ArtifactPath, inputBytes)
-	if err != nil {
-		errMsg := err.Error()
+	return renderSkillExecutionResult(ctx, skillName, stdout, stderr, err)
+}
+
+type skillExecutionEnvelope struct {
+	Status  string         `json:"status"`
+	Command string         `json:"command"`
+	Data    map[string]any `json:"data"`
+	Error   struct {
+		Code    string `json:"code"`
+		Message string `json:"message"`
+	} `json:"error"`
+}
+
+func renderSkillExecutionResult(ctx context.Context, skillName string, stdout, stderr []byte, execErr error) (*mcp.CallToolResult, error) {
+	if envelope, ok := decodeSkillExecutionEnvelope(stdout); ok {
+		if envelope.Status == "error" {
+			msg := strings.TrimSpace(envelope.Error.Message)
+			if msg == "" {
+				msg = skillName + " failed"
+			}
+			return mcp.NewToolResultError(msg), nil
+		}
+		result, err := json.MarshalIndent(envelope.Data, "", "  ")
+		if err != nil {
+			return truncateSkillOutput(ctx, strings.TrimSpace(string(stdout)), skillName)
+		}
+		return truncateSkillOutput(ctx, string(result), skillName)
+	}
+
+	if execErr != nil {
+		errMsg := execErr.Error()
 		if len(stderr) > 0 {
 			errMsg += "\nstderr: " + string(stderr)
 		}
 		return mcp.NewToolResultError("execute skill: " + errMsg), nil
 	}
 
-	var envelope struct {
-		Status  string         `json:"status"`
-		Command string         `json:"command"`
-		Data    map[string]any `json:"data"`
-		Error   struct {
-			Code    string `json:"code"`
-			Message string `json:"message"`
-		} `json:"error"`
-	}
+	return truncateSkillOutput(ctx, strings.TrimSpace(string(stdout)), skillName)
+}
 
+func decodeSkillExecutionEnvelope(stdout []byte) (skillExecutionEnvelope, bool) {
+	var envelope skillExecutionEnvelope
+	if len(bytes.TrimSpace(stdout)) == 0 {
+		return envelope, false
+	}
 	if err := json.Unmarshal(stdout, &envelope); err != nil {
-		return truncateSkillOutput(ctx, string(stdout), skillName)
+		return envelope, false
 	}
-	if envelope.Status == "error" {
-		return mcp.NewToolResultError(envelope.Error.Message), nil
+	if strings.TrimSpace(envelope.Status) == "" {
+		return envelope, false
 	}
-
-	result, err := json.MarshalIndent(envelope.Data, "", "  ")
-	if err != nil {
-		return truncateSkillOutput(ctx, string(stdout), skillName)
-	}
-	return truncateSkillOutput(ctx, string(result), skillName)
+	return envelope, true
 }
 
 func handleAgentctlSkills(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -4195,41 +4148,7 @@ func callLocalSkill(ctx context.Context, skillName string, input map[string]any)
 
 	// Execute the skill
 	stdout, stderr, err := executeSkill(runCtx, handle.Manifest, handle.ArtifactPath, inputBytes)
-	if err != nil {
-		errMsg := err.Error()
-		if len(stderr) > 0 {
-			errMsg += "\nstderr: " + string(stderr)
-		}
-		return mcp.NewToolResultError("execute skill: " + errMsg), nil
-	}
-
-	// Parse the envelope response
-	var envelope struct {
-		Status  string         `json:"status"`
-		Command string         `json:"command"`
-		Data    map[string]any `json:"data"`
-		Error   struct {
-			Code    string `json:"code"`
-			Message string `json:"message"`
-		} `json:"error"`
-	}
-
-	if err := json.Unmarshal(stdout, &envelope); err != nil {
-		// Return raw output if not a valid envelope
-		return mcp.NewToolResultText(string(stdout)), nil
-	}
-
-	if envelope.Status == "error" {
-		return mcp.NewToolResultError(envelope.Error.Message), nil
-	}
-
-	// Format the data as readable output
-	result, err := json.MarshalIndent(envelope.Data, "", "  ")
-	if err != nil {
-		return mcp.NewToolResultText(string(stdout)), nil
-	}
-
-	return mcp.NewToolResultText(string(result)), nil
+	return renderSkillExecutionResult(ctx, skillName, stdout, stderr, err)
 }
 
 // Backend communication
