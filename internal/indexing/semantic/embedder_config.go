@@ -6,6 +6,30 @@ import (
 	"github.com/jkatigb/agentctl/internal/platform/config"
 )
 
+// DetectProviderForConfig resolves the effective embedding provider for a repo/workspace config.
+// Priority: explicit provider > model family > base URL/API key shape > env-backed fallback.
+// This keeps provider selection repo-scoped, while still allowing env-only setups when no
+// embedding config is present.
+func DetectProviderForConfig(cfg config.Config, voyageKey, geminiKey string) string {
+	provider := normalizeEmbeddingProviderName(cfg.Embedding.Provider)
+	if provider != "" {
+		return provider
+	}
+	if inferred := providerFromModel(ResolveModelForScope(ScopeDefault, cfg)); inferred != "" {
+		return inferred
+	}
+	if strings.TrimSpace(cfg.Embedding.BaseURL) != "" || strings.TrimSpace(cfg.Embedding.APIKey) != "" {
+		return "openai_compat"
+	}
+	if strings.TrimSpace(voyageKey) != "" {
+		return "voyage"
+	}
+	if strings.TrimSpace(geminiKey) != "" {
+		return "gemini"
+	}
+	return ""
+}
+
 // ResolveModelForScope returns the configured model for a scope.
 // Priority: per-scope override > global model > scope recommendation.
 func ResolveModelForScope(scope EmbeddingScope, cfg config.Config) string {
@@ -63,6 +87,9 @@ func applyProviderPreference(model string, cfg config.Config, opts []EmbedderOpt
 	}
 	if provider == "" && strings.TrimSpace(cfg.Embedding.BaseURL) != "" {
 		provider = "openai_compat"
+	}
+	if provider != "" {
+		opts = append(opts, WithProvider(provider))
 	}
 	switch provider {
 	case "gemini":

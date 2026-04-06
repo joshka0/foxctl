@@ -62,3 +62,301 @@
 - 2026-03-11 [gotcha]: Need to handle both file path and function signature detection for code_ref
 - 2026-03-11 [time]: Multiple plan grading iterations (B → A → A+) required refinement
 - 2026-03-11 [time]: Subagent exploration needed to gather comprehensive context for M3/M4
+- 2026-04-04 [gotcha]: The 'dream' skill doesn't exist in the system
+- 2026-04-04 [gotcha]: MEMORY.md content is 36 days old and approaching the 200-line limit
+- 2026-04-04 [gotcha]: Memory content is inlined instead of split into separate files with frontmatter as required
+- 2026-04-04 [gotcha]: The 'dream' skill doesn't exist in the system
+- 2026-04-04 [gotcha]: MEMORY.md content is 36 days old and approaching the 200-line limit
+- 2026-04-04 [gotcha]: Memory content is inlined instead of split into separate files with frontmatter as required
+- 2026-04-04 [gotcha]: The 'dream' skill doesn't exist in the system
+- 2026-04-04 [gotcha]: MEMORY.md content is 36 days old and approaching the 200-line limit
+- 2026-04-04 [gotcha]: Memory content is inlined instead of split into separate files with frontmatter as required
+- 2026-04-04 [gotcha]: The 'dream' skill doesn't exist in the system
+- 2026-04-04 [gotcha]: MEMORY.md content is 36 days old and approaching the 200-line limit
+- 2026-04-04 [gotcha]: Memory content is inlined instead of split into separate files with frontmatter as required
+- 2026-04-04 [gotcha]: The 'dream' skill doesn't exist in the system
+- 2026-04-04 [gotcha]: MEMORY.md content is 36 days old and approaching the 200-line limit
+- 2026-04-04 [gotcha]: Memory content is inlined instead of split into separate files with frontmatter as required
+- 2026-04-04 [gotcha]: The 'dream' skill doesn't exist in the system
+- 2026-04-04 [gotcha]: MEMORY.md content is 36 days old and approaching the 200-line limit
+- 2026-04-04 [gotcha]: Memory content is inlined instead of split into separate files with frontmatter as required
+- 2026-04-04 [gotcha]: The 'dream' skill doesn't exist in the system
+- 2026-04-04 [gotcha]: MEMORY.md content is 36 days old and approaching the 200-line limit
+- 2026-04-04 [gotcha]: Memory content is inlined instead of split into separate files with frontmatter as required
+- 2026-04-04 [gotcha]: The 'dream' skill doesn't exist in the system
+- 2026-04-04 [gotcha]: MEMORY.md content is 36 days old and approaching the 200-line limit
+- 2026-04-04 [gotcha]: Memory content is inlined instead of split into separate files with frontmatter as required
+- 2026-04-04 [gotcha]: The 'dream' skill doesn't exist in the system
+- 2026-04-04 [gotcha]: MEMORY.md content is 36 days old and approaching the 200-line limit
+- 2026-04-04 [gotcha]: Memory content is inlined instead of split into separate files with frontmatter as required
+- 2026-04-04 [gotcha]: The 'dream' skill doesn't exist in the system
+- 2026-04-04 [gotcha]: MEMORY.md content is 36 days old and approaching the 200-line limit
+- 2026-04-04 [gotcha]: Memory content is inlined instead of split into separate files with frontmatter as required
+- 2026-04-04 [gotcha]: The 'dream' skill doesn't exist in the system
+- 2026-04-04 [gotcha]: MEMORY.md content is 36 days old and approaching the 200-line limit
+- 2026-04-04 [gotcha]: Memory content is inlined instead of split into separate files with frontmatter as required
+- 2026-04-04 [gotcha]: The 'dream' skill doesn't exist in the system
+- 2026-04-04 [gotcha]: MEMORY.md content is 36 days old and approaching the 200-line limit
+- 2026-04-04 [gotcha]: Memory content is inlined instead of split into separate files with frontmatter as required
+- 2026-04-04 [gotcha]: The 'dream' skill doesn't exist in the system
+- 2026-04-04 [gotcha]: MEMORY.md content is 36 days old and approaching the 200-line limit
+- 2026-04-04 [gotcha]: Memory content is inlined instead of split into separate files with frontmatter as required
+- 2026-04-04 [gotcha]: The 'dream' skill doesn't exist in the system
+- 2026-04-04 [gotcha]: MEMORY.md content is 36 days old and approaching the 200-line limit
+- 2026-04-04 [gotcha]: Memory content is inlined instead of split into separate files with frontmatter as required
+- 2026-04-04 [gotcha]: The 'dream' skill doesn't exist in the system
+- 2026-04-04 [gotcha]: MEMORY.md content is 36 days old and approaching the 200-line limit
+- 2026-04-04 [gotcha]: Memory content is inlined instead of split into separate files with frontmatter as required
+- 2026-04-04 [gotcha]: The 'dream' skill doesn't exist in the system
+- 2026-04-04 [gotcha]: MEMORY.md content is 36 days old and approaching the 200-line limit
+- 2026-04-04 [gotcha]: Memory content is inlined instead of split into separate files with frontmatter as required
+- 2026-04-04 [gotcha]: The 'dream' skill doesn't exist in the system
+- 2026-04-04 [gotcha]: MEMORY.md content is 36 days old and approaching the 200-line limit
+- 2026-04-04 [gotcha]: Memory content is inlined instead of split into separate files with frontmatter as required
+- 2026-04-04 [gotcha]: The 'dream' skill doesn't exist in the system
+- 2026-04-04 [gotcha]: MEMORY.md content is 36 days old and approaching the 200-line limit
+- 2026-04-04 [gotcha]: Memory content is inlined instead of split into separate files with frontmatter as required
+- 2026-04-04 [gotcha]: The 'dream' skill doesn't exist in the system
+- 2026-04-04 [gotcha]: MEMORY.md content is 36 days old and approaching the 200-line limit
+- 2026-04-04 [gotcha]: Memory content is inlined instead of split into separate files with frontmatter as required
+- 2026-04-04 [gotcha]: The 'dream' skill doesn't exist in the system
+- 2026-04-04 [gotcha]: MEMORY.md content is 36 days old and approaching the 200-line limit
+- 2026-04-04 [gotcha]: Memory content is inlined instead of split into separate files with frontmatter as required
+- 2026-04-04 [gotcha]: The 'dream' skill doesn't exist in the system
+- 2026-04-04 [gotcha]: MEMORY.md content is 36 days old and approaching the 200-line limit
+- 2026-04-04 [gotcha]: Memory content is inlined instead of split into separate files with frontmatter as required
+- 2026-04-04 [gotcha]: The 'dream' skill doesn't exist in the system
+- 2026-04-04 [gotcha]: MEMORY.md content is 36 days old and approaching the 200-line limit
+- 2026-04-04 [gotcha]: Memory content is inlined instead of split into separate files with frontmatter as required
+- 2026-04-04 [gotcha]: The 'dream' skill doesn't exist in the system
+- 2026-04-04 [gotcha]: MEMORY.md content is 36 days old and approaching the 200-line limit
+- 2026-04-04 [gotcha]: Memory content is inlined instead of split into separate files with frontmatter as required
+- 2026-04-04 [gotcha]: The 'dream' skill doesn't exist in the system
+- 2026-04-04 [gotcha]: MEMORY.md content is 36 days old and approaching the 200-line limit
+- 2026-04-04 [gotcha]: Memory content is inlined instead of split into separate files with frontmatter as required
+- 2026-04-04 [gotcha]: The 'dream' skill doesn't exist in the system
+- 2026-04-04 [gotcha]: MEMORY.md content is 36 days old and approaching the 200-line limit
+- 2026-04-04 [gotcha]: Memory content is inlined instead of split into separate files with frontmatter as required
+- 2026-04-04 [gotcha]: The 'dream' skill doesn't exist in the system
+- 2026-04-04 [gotcha]: MEMORY.md content is 36 days old and approaching the 200-line limit
+- 2026-04-04 [gotcha]: Memory content is inlined instead of split into separate files with frontmatter as required
+- 2026-04-04 [gotcha]: The 'dream' skill doesn't exist in the system
+- 2026-04-04 [gotcha]: MEMORY.md content is 36 days old and approaching the 200-line limit
+- 2026-04-04 [gotcha]: Memory content is inlined instead of split into separate files with frontmatter as required
+- 2026-04-04 [gotcha]: The 'dream' skill doesn't exist in the system
+- 2026-04-04 [gotcha]: MEMORY.md content is 36 days old and approaching the 200-line limit
+- 2026-04-04 [gotcha]: Memory content is inlined instead of split into separate files with frontmatter as required
+- 2026-04-04 [gotcha]: The 'dream' skill doesn't exist in the system
+- 2026-04-04 [gotcha]: MEMORY.md content is 36 days old and approaching the 200-line limit
+- 2026-04-04 [gotcha]: Memory content is inlined instead of split into separate files with frontmatter as required
+- 2026-04-04 [gotcha]: Claude's initial replies were only going to local pane output, not appearing in the room log
+- 2026-04-04 [gotcha]: Solution: Directly call `agentctl room send` with explicit sender flag instead of relying on automatic hooks
+- 2026-04-04 [time]: Claude initially needed multiple bash attempts to discover the correct `agentctl room send` command usage
+- 2026-04-04 [gotcha]: Initial replies only appeared locally in pane, not in room log - fixed by using proper room send command
+- 2026-04-04 [gotcha]: Need to explicitly use room commands rather than relying on implicit integration
+- 2026-04-04 [gotcha]: Initial replies only appeared locally in pane, not in room log - fixed by using proper room send command
+- 2026-04-04 [gotcha]: Need to explicitly use room commands rather than relying on implicit integration
+- 2026-04-04 [gotcha]: Initial replies only appeared locally in pane, not in room log - fixed by using proper room send command
+- 2026-04-04 [gotcha]: Need to explicitly use room commands rather than relying on implicit integration
+- 2026-04-04 [gotcha]: Initial replies only appeared locally in pane, not in room log - fixed by using proper room send command
+- 2026-04-04 [gotcha]: Need to explicitly use room commands rather than relying on implicit integration
+- 2026-04-04 [gotcha]: Initial replies only appeared locally in pane, not in room log - fixed by using proper room send command
+- 2026-04-04 [gotcha]: Need to explicitly use room commands rather than relying on implicit integration
+- 2026-04-04 [gotcha]: Initial replies only appeared locally in pane, not in room log - fixed by using proper room send command
+- 2026-04-04 [gotcha]: Need to explicitly use room commands rather than relying on implicit integration
+- 2026-04-04 [gotcha]: Initial replies only appeared locally in pane, not in room log - fixed by using proper room send command
+- 2026-04-04 [gotcha]: Need to explicitly use room commands rather than relying on implicit integration
+- 2026-04-04 [gotcha]: Initial replies only appeared locally in pane, not in room log - fixed by using proper room send command
+- 2026-04-04 [gotcha]: Need to explicitly use room commands rather than relying on implicit integration
+- 2026-04-04 [gotcha]: Initial replies only appeared locally in pane, not in room log - fixed by using proper room send command
+- 2026-04-04 [gotcha]: Need to explicitly use room commands rather than relying on implicit integration
+- 2026-04-04 [gotcha]: Initial replies only appeared locally in pane, not in room log - fixed by using proper room send command
+- 2026-04-04 [gotcha]: Need to explicitly use room commands rather than relying on implicit integration
+- 2026-04-04 [gotcha]: Initial replies only appeared locally in pane, not in room log - fixed by using proper room send command
+- 2026-04-04 [gotcha]: Need to explicitly use room commands rather than relying on implicit integration
+- 2026-04-04 [gotcha]: Initial replies only appeared locally in pane, not in room log - fixed by using proper room send command
+- 2026-04-04 [gotcha]: Need to explicitly use room commands rather than relying on implicit integration
+- 2026-04-05 [gotcha]: Initial replies only appeared locally in pane, not in room log - fixed by using proper room send command
+- 2026-04-05 [gotcha]: Need to explicitly use room commands rather than relying on implicit integration
+- 2026-04-05 [gotcha]: Initial replies only appeared locally in pane, not in room log - fixed by using proper room send command
+- 2026-04-05 [gotcha]: Need to explicitly use room commands rather than relying on implicit integration
+- 2026-04-05 [gotcha]: Initial replies only appeared locally in pane, not in room log - fixed by using proper room send command
+- 2026-04-05 [gotcha]: Need to explicitly use room commands rather than relying on implicit integration
+- 2026-04-05 [gotcha]: Initial replies only appeared locally in pane, not in room log - fixed by using proper room send command
+- 2026-04-05 [gotcha]: Need to explicitly use room commands rather than relying on implicit integration
+- 2026-04-05 [gotcha]: Initial replies only appeared locally in pane, not in room log - fixed by using proper room send command
+- 2026-04-05 [gotcha]: Need to explicitly use room commands rather than relying on implicit integration
+- 2026-04-05 [gotcha]: Initial replies only appeared locally in pane, not in room log - fixed by using proper room send command
+- 2026-04-05 [gotcha]: Need to explicitly use room commands rather than relying on implicit integration
+- 2026-04-05 [gotcha]: Initial replies only appeared locally in pane, not in room log - fixed by using proper room send command
+- 2026-04-05 [gotcha]: Need to explicitly use room commands rather than relying on implicit integration
+- 2026-04-05 [gotcha]: Initial replies only appeared locally in pane, not in room log - fixed by using proper room send command
+- 2026-04-05 [gotcha]: Need to explicitly use room commands rather than relying on implicit integration
+- 2026-04-05 [gotcha]: Initial replies only appeared locally in pane, not in room log - fixed by using proper room send command
+- 2026-04-05 [gotcha]: Need to explicitly use room commands rather than relying on implicit integration
+- 2026-04-05 [gotcha]: Initial replies only appeared locally in pane, not in room log - fixed by using proper room send command
+- 2026-04-05 [gotcha]: Need to explicitly use room commands rather than relying on implicit integration
+- 2026-04-05 [gotcha]: Initial replies only appeared locally in pane, not in room log - fixed by using proper room send command
+- 2026-04-05 [gotcha]: Need to explicitly use room commands rather than relying on implicit integration
+- 2026-04-05 [gotcha]: Initial replies only appeared locally in pane, not in room log - fixed by using proper room send command
+- 2026-04-05 [gotcha]: Need to explicitly use room commands rather than relying on implicit integration
+- 2026-04-05 [gotcha]: Initial replies only appeared locally in pane, not in room log - fixed by using proper room send command
+- 2026-04-05 [gotcha]: Need to explicitly use room commands rather than relying on implicit integration
+- 2026-04-05 [gotcha]: Initial replies only appeared locally in pane, not in room log - fixed by using proper room send command
+- 2026-04-05 [gotcha]: Need to explicitly use room commands rather than relying on implicit integration
+- 2026-04-05 [gotcha]: Initial replies only appeared locally in pane, not in room log - fixed by using proper room send command
+- 2026-04-05 [gotcha]: Need to explicitly use room commands rather than relying on implicit integration
+- 2026-04-05 [gotcha]: Initial replies only appeared locally in pane, not in room log - fixed by using proper room send command
+- 2026-04-05 [gotcha]: Need to explicitly use room commands rather than relying on implicit integration
+- 2026-04-05 [gotcha]: Initial replies only appeared locally in pane, not in room log - fixed by using proper room send command
+- 2026-04-05 [gotcha]: Need to explicitly use room commands rather than relying on implicit integration
+- 2026-04-05 [gotcha]: Initial replies only appeared locally in pane, not in room log - fixed by using proper room send command
+- 2026-04-05 [gotcha]: Need to explicitly use room commands rather than relying on implicit integration
+- 2026-04-05 [gotcha]: Initial replies only appeared locally in pane, not in room log - fixed by using proper room send command
+- 2026-04-05 [gotcha]: Need to explicitly use room commands rather than relying on implicit integration
+- 2026-04-05 [gotcha]: Initial replies only appeared locally in pane, not in room log - fixed by using proper room send command
+- 2026-04-05 [gotcha]: Need to explicitly use room commands rather than relying on implicit integration
+- 2026-04-05 [gotcha]: Initial replies only appeared locally in pane, not in room log - fixed by using proper room send command
+- 2026-04-05 [gotcha]: Need to explicitly use room commands rather than relying on implicit integration
+- 2026-04-05 [gotcha]: Initial replies only appeared locally in pane, not in room log - fixed by using proper room send command
+- 2026-04-05 [gotcha]: Need to explicitly use room commands rather than relying on implicit integration
+- 2026-04-05 [gotcha]: Initial replies only appeared locally in pane, not in room log - fixed by using proper room send command
+- 2026-04-05 [gotcha]: Need to explicitly use room commands rather than relying on implicit integration
+- 2026-04-05 [gotcha]: Initial replies only appeared locally in pane, not in room log - fixed by using proper room send command
+- 2026-04-05 [gotcha]: Need to explicitly use room commands rather than relying on implicit integration
+- 2026-04-05 [gotcha]: Initial replies only appeared locally in pane, not in room log - fixed by using proper room send command
+- 2026-04-05 [gotcha]: Need to explicitly use room commands rather than relying on implicit integration
+- 2026-04-05 [gotcha]: Initial replies only appeared locally in pane, not in room log - fixed by using proper room send command
+- 2026-04-05 [gotcha]: Need to explicitly use room commands rather than relying on implicit integration
+- 2026-04-05 [gotcha]: Initial replies only appeared locally in pane, not in room log - fixed by using proper room send command
+- 2026-04-05 [gotcha]: Need to explicitly use room commands rather than relying on implicit integration
+- 2026-04-05 [gotcha]: Initial replies only appeared locally in pane, not in room log - fixed by using proper room send command
+- 2026-04-05 [gotcha]: Need to explicitly use room commands rather than relying on implicit integration
+- 2026-04-05 [gotcha]: Initial replies only appeared locally in pane, not in room log - fixed by using proper room send command
+- 2026-04-05 [gotcha]: Need to explicitly use room commands rather than relying on implicit integration
+- 2026-04-05 [gotcha]: Initial replies only appeared locally in pane, not in room log - fixed by using proper room send command
+- 2026-04-05 [gotcha]: Need to explicitly use room commands rather than relying on implicit integration
+- 2026-04-05 [gotcha]: Initial replies only appeared locally in pane, not in room log - fixed by using proper room send command
+- 2026-04-05 [gotcha]: Need to explicitly use room commands rather than relying on implicit integration
+- 2026-04-05 [gotcha]: Initial replies only appeared locally in pane, not in room log - fixed by using proper room send command
+- 2026-04-05 [gotcha]: Need to explicitly use room commands rather than relying on implicit integration
+- 2026-04-05 [gotcha]: Initial replies only appeared locally in pane, not in room log - fixed by using proper room send command
+- 2026-04-05 [gotcha]: Need to explicitly use room commands rather than relying on implicit integration
+- 2026-04-05 [gotcha]: Initial replies only appeared locally in pane, not in room log - fixed by using proper room send command
+- 2026-04-05 [gotcha]: Need to explicitly use room commands rather than relying on implicit integration
+- 2026-04-05 [gotcha]: Initial replies only appeared locally in pane, not in room log - fixed by using proper room send command
+- 2026-04-05 [gotcha]: Need to explicitly use room commands rather than relying on implicit integration
+- 2026-04-05 [gotcha]: Initial replies only appeared locally in pane, not in room log - fixed by using proper room send command
+- 2026-04-05 [gotcha]: Need to explicitly use room commands rather than relying on implicit integration
+- 2026-04-05 [gotcha]: Initial replies only appeared locally in pane, not in room log - fixed by using proper room send command
+- 2026-04-05 [gotcha]: Need to explicitly use room commands rather than relying on implicit integration
+- 2026-04-05 [gotcha]: Initial replies only appeared locally in pane, not in room log - fixed by using proper room send command
+- 2026-04-05 [gotcha]: Need to explicitly use room commands rather than relying on implicit integration
+- 2026-04-05 [gotcha]: Initial replies only appeared locally in pane, not in room log - fixed by using proper room send command
+- 2026-04-05 [gotcha]: Need to explicitly use room commands rather than relying on implicit integration
+- 2026-04-05 [gotcha]: Initial replies only appeared locally in pane, not in room log - fixed by using proper room send command
+- 2026-04-05 [gotcha]: Need to explicitly use room commands rather than relying on implicit integration
+- 2026-04-05 [gotcha]: Initial replies only appeared locally in pane, not in room log - fixed by using proper room send command
+- 2026-04-05 [gotcha]: Need to explicitly use room commands rather than relying on implicit integration
+- 2026-04-05 [gotcha]: Initial replies only appeared locally in pane, not in room log - fixed by using proper room send command
+- 2026-04-05 [gotcha]: Need to explicitly use room commands rather than relying on implicit integration
+- 2026-04-05 [gotcha]: Initial replies only appeared locally in pane, not in room log - fixed by using proper room send command
+- 2026-04-05 [gotcha]: Need to explicitly use room commands rather than relying on implicit integration
+- 2026-04-05 [gotcha]: Initial replies only appeared locally in pane, not in room log - fixed by using proper room send command
+- 2026-04-05 [gotcha]: Need to explicitly use room commands rather than relying on implicit integration
+- 2026-04-05 [gotcha]: Initial replies only appeared locally in pane, not in room log - fixed by using proper room send command
+- 2026-04-05 [gotcha]: Need to explicitly use room commands rather than relying on implicit integration
+- 2026-04-05 [gotcha]: Initial replies only appeared locally in pane, not in room log - fixed by using proper room send command
+- 2026-04-05 [gotcha]: Need to explicitly use room commands rather than relying on implicit integration
+- 2026-04-05 [gotcha]: Initial replies only appeared locally in pane, not in room log - fixed by using proper room send command
+- 2026-04-05 [gotcha]: Need to explicitly use room commands rather than relying on implicit integration
+- 2026-04-05 [gotcha]: Initial replies only appeared locally in pane, not in room log - fixed by using proper room send command
+- 2026-04-05 [gotcha]: Need to explicitly use room commands rather than relying on implicit integration
+- 2026-04-05 [gotcha]: Initial replies only appeared locally in pane, not in room log - fixed by using proper room send command
+- 2026-04-05 [gotcha]: Need to explicitly use room commands rather than relying on implicit integration
+- 2026-04-05 [gotcha]: Initial replies only appeared locally in pane, not in room log - fixed by using proper room send command
+- 2026-04-05 [gotcha]: Need to explicitly use room commands rather than relying on implicit integration
+- 2026-04-05 [gotcha]: Initial replies only appeared locally in pane, not in room log - fixed by using proper room send command
+- 2026-04-05 [gotcha]: Need to explicitly use room commands rather than relying on implicit integration
+- 2026-04-05 [gotcha]: Initial replies only appeared locally in pane, not in room log - fixed by using proper room send command
+- 2026-04-05 [gotcha]: Need to explicitly use room commands rather than relying on implicit integration
+- 2026-04-05 [gotcha]: Initial replies only appeared locally in pane, not in room log - fixed by using proper room send command
+- 2026-04-05 [gotcha]: Need to explicitly use room commands rather than relying on implicit integration
+- 2026-04-05 [gotcha]: Initial replies only appeared locally in pane, not in room log - fixed by using proper room send command
+- 2026-04-05 [gotcha]: Need to explicitly use room commands rather than relying on implicit integration
+- 2026-04-05 [gotcha]: Initial replies only appeared locally in pane, not in room log - fixed by using proper room send command
+- 2026-04-05 [gotcha]: Need to explicitly use room commands rather than relying on implicit integration
+- 2026-04-05 [gotcha]: Initial replies only appeared locally in pane, not in room log - fixed by using proper room send command
+- 2026-04-05 [gotcha]: Need to explicitly use room commands rather than relying on implicit integration
+- 2026-04-05 [gotcha]: Initial replies only appeared locally in pane, not in room log - fixed by using proper room send command
+- 2026-04-05 [gotcha]: Need to explicitly use room commands rather than relying on implicit integration
+- 2026-04-05 [gotcha]: Initial replies only appeared locally in pane, not in room log - fixed by using proper room send command
+- 2026-04-05 [gotcha]: Need to explicitly use room commands rather than relying on implicit integration
+- 2026-04-05 [gotcha]: Initial replies only appeared locally in pane, not in room log - fixed by using proper room send command
+- 2026-04-05 [gotcha]: Need to explicitly use room commands rather than relying on implicit integration
+- 2026-04-05 [gotcha]: Initial replies only appeared locally in pane, not in room log - fixed by using proper room send command
+- 2026-04-05 [gotcha]: Need to explicitly use room commands rather than relying on implicit integration
+- 2026-04-05 [gotcha]: Initial replies only appeared locally in pane, not in room log - fixed by using proper room send command
+- 2026-04-05 [gotcha]: Need to explicitly use room commands rather than relying on implicit integration
+- 2026-04-05 [gotcha]: Initial replies only appeared locally in pane, not in room log - fixed by using proper room send command
+- 2026-04-05 [gotcha]: Need to explicitly use room commands rather than relying on implicit integration
+- 2026-04-05 [gotcha]: Initial replies only appeared locally in pane, not in room log - fixed by using proper room send command
+- 2026-04-05 [gotcha]: Need to explicitly use room commands rather than relying on implicit integration
+- 2026-04-05 [gotcha]: Initial replies only appeared locally in pane, not in room log - fixed by using proper room send command
+- 2026-04-05 [gotcha]: Need to explicitly use room commands rather than relying on implicit integration
+- 2026-04-05 [gotcha]: Initial replies only appeared locally in pane, not in room log - fixed by using proper room send command
+- 2026-04-05 [gotcha]: Need to explicitly use room commands rather than relying on implicit integration
+- 2026-04-05 [gotcha]: Initial replies only appeared locally in pane, not in room log - fixed by using proper room send command
+- 2026-04-05 [gotcha]: Need to explicitly use room commands rather than relying on implicit integration
+- 2026-04-05 [gotcha]: Initial replies only appeared locally in pane, not in room log - fixed by using proper room send command
+- 2026-04-05 [gotcha]: Need to explicitly use room commands rather than relying on implicit integration
+- 2026-04-05 [gotcha]: Initial replies only appeared locally in pane, not in room log - fixed by using proper room send command
+- 2026-04-05 [gotcha]: Need to explicitly use room commands rather than relying on implicit integration
+- 2026-04-05 [gotcha]: Initial replies only appeared locally in pane, not in room log - fixed by using proper room send command
+- 2026-04-05 [gotcha]: Need to explicitly use room commands rather than relying on implicit integration
+- 2026-04-05 [gotcha]: Initial replies only appeared locally in pane, not in room log - fixed by using proper room send command
+- 2026-04-05 [gotcha]: Need to explicitly use room commands rather than relying on implicit integration
+- 2026-04-05 [gotcha]: Initial replies only appeared locally in pane, not in room log - fixed by using proper room send command
+- 2026-04-05 [gotcha]: Need to explicitly use room commands rather than relying on implicit integration
+- 2026-04-05 [gotcha]: Initial replies only appeared locally in pane, not in room log - fixed by using proper room send command
+- 2026-04-05 [gotcha]: Need to explicitly use room commands rather than relying on implicit integration
+- 2026-04-05 [gotcha]: Initial replies only appeared locally in pane, not in room log - fixed by using proper room send command
+- 2026-04-05 [gotcha]: Need to explicitly use room commands rather than relying on implicit integration
+- 2026-04-05 [gotcha]: Initial replies only appeared locally in pane, not in room log - fixed by using proper room send command
+- 2026-04-05 [gotcha]: Need to explicitly use room commands rather than relying on implicit integration
+- 2026-04-05 [gotcha]: Initial replies only appeared locally in pane, not in room log - fixed by using proper room send command
+- 2026-04-05 [gotcha]: Need to explicitly use room commands rather than relying on implicit integration
+- 2026-04-05 [gotcha]: Initial replies only appeared locally in pane, not in room log - fixed by using proper room send command
+- 2026-04-05 [gotcha]: Need to explicitly use room commands rather than relying on implicit integration
+- 2026-04-05 [gotcha]: Initial replies only appeared locally in pane, not in room log - fixed by using proper room send command
+- 2026-04-05 [gotcha]: Need to explicitly use room commands rather than relying on implicit integration
+- 2026-04-05 [gotcha]: Initial replies only appeared locally in pane, not in room log - fixed by using proper room send command
+- 2026-04-05 [gotcha]: Need to explicitly use room commands rather than relying on implicit integration
+- 2026-04-05 [gotcha]: Initial replies only appeared locally in pane, not in room log - fixed by using proper room send command
+- 2026-04-05 [gotcha]: Need to explicitly use room commands rather than relying on implicit integration
+- 2026-04-05 [gotcha]: Initial replies only appeared locally in pane, not in room log - fixed by using proper room send command
+- 2026-04-05 [gotcha]: Need to explicitly use room commands rather than relying on implicit integration
+- 2026-04-05 [gotcha]: Initial replies only appeared locally in pane, not in room log - fixed by using proper room send command
+- 2026-04-05 [gotcha]: Need to explicitly use room commands rather than relying on implicit integration
+- 2026-04-05 [gotcha]: Initial replies only appeared locally in pane, not in room log - fixed by using proper room send command
+- 2026-04-05 [gotcha]: Need to explicitly use room commands rather than relying on implicit integration
+- 2026-04-05 [gotcha]: Initial replies only appeared locally in pane, not in room log - fixed by using proper room send command
+- 2026-04-05 [gotcha]: Need to explicitly use room commands rather than relying on implicit integration
+- 2026-04-05 [gotcha]: Initial replies only appeared locally in pane, not in room log - fixed by using proper room send command
+- 2026-04-05 [gotcha]: Need to explicitly use room commands rather than relying on implicit integration
+- 2026-04-05 [gotcha]: Initial replies only appeared locally in pane, not in room log - fixed by using proper room send command
+- 2026-04-05 [gotcha]: Need to explicitly use room commands rather than relying on implicit integration
+- 2026-04-06 [gotcha]: Initial replies only appeared locally in pane, not in room log - fixed by using proper room send command
+- 2026-04-06 [gotcha]: Need to explicitly use room commands rather than relying on implicit integration
+- 2026-04-06 [gotcha]: Initial replies only appeared locally in pane, not in room log - fixed by using proper room send command
+- 2026-04-06 [gotcha]: Need to explicitly use room commands rather than relying on implicit integration
+- 2026-04-06 [gotcha]: Initial replies only appeared locally in pane, not in room log - fixed by using proper room send command
+- 2026-04-06 [gotcha]: Need to explicitly use room commands rather than relying on implicit integration
+- 2026-04-06 [gotcha]: Initial replies only appeared locally in pane, not in room log - fixed by using proper room send command
+- 2026-04-06 [gotcha]: Need to explicitly use room commands rather than relying on implicit integration
+- 2026-04-06 [gotcha]: Initial replies only appeared locally in pane, not in room log - fixed by using proper room send command
+- 2026-04-06 [gotcha]: Need to explicitly use room commands rather than relying on implicit integration
+- 2026-04-06 [gotcha]: Initial replies only appeared locally in pane, not in room log - fixed by using proper room send command
+- 2026-04-06 [gotcha]: Need to explicitly use room commands rather than relying on implicit integration
+- 2026-04-06 [gotcha]: Initial replies only appeared locally in pane, not in room log - fixed by using proper room send command
+- 2026-04-06 [gotcha]: Need to explicitly use room commands rather than relying on implicit integration

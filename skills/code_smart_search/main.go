@@ -230,16 +230,20 @@ func applySmartSearchInlineMode(out Output, requested InlineMode) Output {
 
 func searchCode(ctx context.Context, rc *skillmain.RunContext, in Input) ([]CandidateOutput, []codecontext.Candidate, map[string]int, error) {
 	var embedder semantic.EmbeddingProvider
+	voyageKey := os.Getenv("VOYAGE_API_KEY")
+	geminiKey := os.Getenv("GEMINI_API_KEY")
 	for _, src := range in.Sources {
 		if src == "semantic" {
-			provider, err := semantic.NewProviderForScope(
-				semantic.ScopeSymbols,
-				rc.Config,
-				semantic.WithVoyageKey(os.Getenv("VOYAGE_API_KEY")),
-				semantic.WithGeminiKey(os.Getenv("GEMINI_API_KEY")),
-			)
-			if err == nil {
-				embedder = provider
+			if semantic.DetectProviderForConfig(rc.Config, voyageKey, geminiKey) != "" {
+				provider, err := semantic.NewProviderForScope(
+					semantic.ScopeSymbols,
+					rc.Config,
+					semantic.WithVoyageKey(voyageKey),
+					semantic.WithGeminiKey(geminiKey),
+				)
+				if err == nil {
+					embedder = provider
+				}
 			}
 			break
 		}

@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -30,6 +29,7 @@ import (
 	coreevents "github.com/jkatigb/agentctl/internal/v2/core/events"
 	coreorchestration "github.com/jkatigb/agentctl/internal/v2/core/orchestration"
 	corespawn "github.com/jkatigb/agentctl/internal/v2/core/spawn"
+	coreworker "github.com/jkatigb/agentctl/internal/v2/core/worker"
 	v2services "github.com/jkatigb/agentctl/internal/v2/services"
 )
 
@@ -172,7 +172,7 @@ type orchestrationBoardCardRuntimeData struct {
 
 // OrchestrationBoardGetHandler handles GET /api/orchestration/board-get.
 func OrchestrationBoardGetHandler(cfg config.Config, log zerolog.Logger) http.HandlerFunc {
-	svc := newOrchestrationCommandService(cfg, log)
+	svc := newOrchestrationCommandService(cfg, log, nil)
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			writeCommandError(w, http.StatusMethodNotAllowed, commandOrchestrationBoardGet, "EARG", "method not allowed", map[string]any{
@@ -246,7 +246,7 @@ func OrchestrationBoardGetHandler(cfg config.Config, log zerolog.Logger) http.Ha
 
 // OrchestrationBoardCardGetHandler handles GET /api/orchestration/board-card-get.
 func OrchestrationBoardCardGetHandler(cfg config.Config, log zerolog.Logger) http.HandlerFunc {
-	svc := newOrchestrationCommandService(cfg, log)
+	svc := newOrchestrationCommandService(cfg, log, nil)
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			writeCommandError(w, http.StatusMethodNotAllowed, commandOrchestrationBoardCardGet, "EARG", "method not allowed", map[string]any{
@@ -304,7 +304,7 @@ func OrchestrationBoardCardGetHandler(cfg config.Config, log zerolog.Logger) htt
 
 // OrchestrationBoardCardRuntimeGetHandler handles GET /api/orchestration/board-card-runtime-get.
 func OrchestrationBoardCardRuntimeGetHandler(cfg config.Config, log zerolog.Logger) http.HandlerFunc {
-	svc := newOrchestrationCommandService(cfg, log)
+	svc := newOrchestrationCommandService(cfg, log, nil)
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			writeCommandError(w, http.StatusMethodNotAllowed, commandOrchestrationBoardCardRuntimeGet, "EARG", "method not allowed", map[string]any{
@@ -371,7 +371,11 @@ func OrchestrationBoardCardRuntimeGetHandler(cfg config.Config, log zerolog.Logg
 
 // OrchestrationDispatchIssueHandler handles POST /api/orchestration/dispatch-issue.
 func OrchestrationDispatchIssueHandler(cfg config.Config, log zerolog.Logger) http.HandlerFunc {
-	svc := newOrchestrationCommandService(cfg, log)
+	return OrchestrationDispatchIssueHandlerWithRuntime(cfg, log, nil)
+}
+
+func OrchestrationDispatchIssueHandlerWithRuntime(cfg config.Config, log zerolog.Logger, runtimeHost OrchestrationRuntimeHost) http.HandlerFunc {
+	svc := newOrchestrationCommandService(cfg, log, runtimeHost)
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			writeCommandError(w, http.StatusMethodNotAllowed, commandOrchestrationDispatchIssue, "EARG", "method not allowed", map[string]any{
@@ -481,7 +485,11 @@ func OrchestrationCardActionHandler(cfg config.Config, log zerolog.Logger) http.
 
 // OrchestrationRefreshHandler handles POST /api/orchestration/refresh.
 func OrchestrationRefreshHandler(cfg config.Config, log zerolog.Logger) http.HandlerFunc {
-	svc := newOrchestrationCommandService(cfg, log)
+	return OrchestrationRefreshHandlerWithRuntime(cfg, log, nil)
+}
+
+func OrchestrationRefreshHandlerWithRuntime(cfg config.Config, log zerolog.Logger, runtimeHost OrchestrationRuntimeHost) http.HandlerFunc {
+	svc := newOrchestrationCommandService(cfg, log, runtimeHost)
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			writeCommandError(w, http.StatusMethodNotAllowed, commandOrchestrationRefresh, "EARG", "method not allowed", map[string]any{
@@ -853,13 +861,16 @@ func (q *inMemoryRefreshQueue) Enqueue(ctx context.Context, workspaceID, request
 	return true, false, nil
 }
 
-func newOrchestrationCommandService(cfg config.Config, log zerolog.Logger) *v2services.OrchestrationService {
+func newOrchestrationCommandService(cfg config.Config, log zerolog.Logger, runtimeHost OrchestrationRuntimeHost) *v2services.OrchestrationService {
 	reader := orchestrationProjectionReader{cfg: cfg, log: log}
-	dispatchSpawner := newOrchestrationDispatchSpawner(cfg, log)
+	dispatchSpawner := newOrchestrationDispatchSpawner(cfg, log, runtimeHost)
 	return v2services.NewOrchestrationService(v2services.OrchestrationDependencies{
 		Spawn:  dispatchSpawner,
 		Reader: reader,
 		RefreshQueue: newInMemoryRefreshQueue(refreshQueueCoalesceWindow, func(ctx context.Context, workspaceID, requestID string) error {
+			if runtimeHost != nil {
+				return runtimeHost.Refresh(ctx, workspaceID, requestID)
+			}
 			return runOrchestrationRefresh(ctx, cfg, log, workspaceID, requestID)
 		}),
 		Now: func() time.Time {
@@ -870,15 +881,19 @@ func newOrchestrationCommandService(cfg config.Config, log zerolog.Logger) *v2se
 }
 
 type orchestrationRuntimeSpawner struct {
-	cfg config.Config
-	log zerolog.Logger
+	cfg         config.Config
+	log         zerolog.Logger
+	runtimeHost OrchestrationRuntimeHost
 }
 
-func newOrchestrationDispatchSpawner(cfg config.Config, log zerolog.Logger) v2services.OrchestrationSpawner {
-	return orchestrationRuntimeSpawner{cfg: cfg, log: log}
+func newOrchestrationDispatchSpawner(cfg config.Config, log zerolog.Logger, runtimeHost OrchestrationRuntimeHost) v2services.OrchestrationSpawner {
+	return orchestrationRuntimeSpawner{cfg: cfg, log: log, runtimeHost: runtimeHost}
 }
 
 func (s orchestrationRuntimeSpawner) Spawn(ctx context.Context, req corespawn.Request) (corespawn.Response, error) {
+	if s.runtimeHost != nil {
+		return s.runtimeHost.Spawn(ctx, req)
+	}
 	req.ParentAgentID = chooseNonEmpty(strings.TrimSpace(req.ParentAgentID), resolveOrchestrationDispatchParentAgentID())
 	if strings.TrimSpace(req.ParentAgentID) == "" {
 		return corespawn.Response{}, &v2errors.V2Error{
@@ -1503,6 +1518,37 @@ func loadOrchestrationCardRuntime(ctx context.Context, cfg config.Config, log ze
 		return runtime
 	}
 
+	if strings.EqualFold(ResolveOrchestrationRuntimeBackend(), orchestrationRuntimeBackendGoruntimeAPI) {
+		reader, closeFn, available, err := loadOptionalRuntimeStateReader(ctx, cfg)
+		if err != nil {
+			runtime.Error = err.Error()
+			return runtime
+		}
+		if !available {
+			return runtime
+		}
+		defer func() {
+			if closeFn != nil {
+				_ = closeFn()
+			}
+		}()
+
+		record, err := reader.Worker(ctx, coreworker.LookupRequest{AgentID: runtime.AgentID})
+		if err != nil {
+			runtime.Error = err.Error()
+			return runtime
+		}
+		runtime.Status = string(record.Status)
+		runtime.State = decodeRuntimeWorkerState(ctx, cfg, log, runtime.AgentID, record.RawState, "failed to decode orchestration runtime state; returning raw payload")
+		children, err := reader.Children(ctx, coreworker.ChildrenRequest{ParentAgentID: runtime.AgentID})
+		if err != nil {
+			runtime.Error = chooseNonEmpty(runtime.Error, err.Error())
+			return runtime
+		}
+		runtime.Children = workerChildRefs(children)
+		return runtime
+	}
+
 	client, available, err := loadOptionalJidoClient()
 	if err != nil {
 		runtime.Error = err.Error()
@@ -1553,7 +1599,7 @@ func loadOrchestrationCardRuntimeTree(ctx context.Context, cfg config.Config, lo
 		return runtime
 	}
 
-	client, available, err := loadOptionalJidoClient()
+	reader, closeFn, available, err := loadOptionalRuntimeStateReader(ctx, cfg)
 	if err != nil {
 		runtime.Error = err.Error()
 		return runtime
@@ -1561,9 +1607,14 @@ func loadOrchestrationCardRuntimeTree(ctx context.Context, cfg config.Config, lo
 	if !available {
 		return runtime
 	}
+	defer func() {
+		if closeFn != nil {
+			_ = closeFn()
+		}
+	}()
 
 	visited := map[string]struct{}{}
-	root := loadOrchestrationRuntimeTreeNode(ctx, cfg, log, client, v2jido.ChildRef{
+	root := loadOrchestrationRuntimeTreeNode(ctx, cfg, log, reader, coreworker.Record{
 		Tag:      runtime.AgentID,
 		AgentID:  runtime.AgentID,
 		Metadata: map[string]any{"workspace_id": card.WorkspaceID, "issue_id": card.IssueID},
@@ -1579,17 +1630,17 @@ func loadOrchestrationRuntimeTreeNode(
 	ctx context.Context,
 	cfg config.Config,
 	log zerolog.Logger,
-	client v2jido.Client,
-	ref v2jido.ChildRef,
+	reader coreworker.StateReader,
+	seed coreworker.Record,
 	depth int,
 	visited map[string]struct{},
 ) *orchestrationRuntimeTreeNode {
-	agentID := strings.TrimSpace(ref.AgentID)
+	agentID := strings.TrimSpace(seed.AgentID)
 	node := &orchestrationRuntimeTreeNode{
-		Tag:      strings.TrimSpace(ref.Tag),
+		Tag:      strings.TrimSpace(seed.Tag),
 		AgentID:  agentID,
-		PID:      strings.TrimSpace(ref.PID),
-		Metadata: ref.Metadata,
+		PID:      strings.TrimSpace(seed.PID),
+		Metadata: seed.Metadata,
 	}
 	if agentID == "" {
 		node.Error = "runtime node has no agent_id"
@@ -1602,53 +1653,29 @@ func loadOrchestrationRuntimeTreeNode(
 	visited[agentID] = struct{}{}
 	defer delete(visited, agentID)
 
-	stateResp, err := client.State(ctx, v2jido.StateRequest{AgentID: agentID})
+	record, err := reader.Worker(ctx, coreworker.LookupRequest{AgentID: agentID})
 	if err != nil {
 		node.Error = err.Error()
 		return node
 	}
-	node.Status = strings.TrimSpace(stateResp.Status)
-	if len(stateResp.State) > 0 && string(stateResp.State) != "null" {
-		var state any
-		if err := json.Unmarshal(stateResp.State, &state); err != nil {
-			node.State = string(stateResp.State)
-			log.Debug().Err(err).Str("agent_id", agentID).Msg("failed to decode orchestration runtime node state; returning raw payload")
-		} else {
-			if stateMap, ok := state.(map[string]any); ok {
-				state = taskhistory.RefreshJidoRuntimeState(ctx, cfg.Storage.Root, cfg.Paths.CAS, stateMap)
-			}
-			node.State = state
-		}
-	}
+	node.Tag = chooseNonEmpty(strings.TrimSpace(record.Tag), node.Tag)
+	node.PID = chooseNonEmpty(strings.TrimSpace(record.PID), node.PID)
+	node.Metadata = mergeRuntimeMetadata(node.Metadata, record.Metadata)
+	node.Status = string(record.Status)
+	node.State = decodeRuntimeWorkerState(ctx, cfg, log, agentID, record.RawState, "failed to decode orchestration runtime node state; returning raw payload")
 	if depth <= 0 {
 		return node
 	}
 
-	childrenResp, err := client.GetChildren(ctx, v2jido.GetChildrenRequest{AgentID: agentID})
+	children, err := reader.Children(ctx, coreworker.ChildrenRequest{ParentAgentID: agentID})
 	if err != nil {
 		node.Error = chooseNonEmpty(node.Error, err.Error())
 		return node
 	}
-	for _, child := range sortedChildRefs(childrenResp.Children) {
-		node.Children = append(node.Children, loadOrchestrationRuntimeTreeNode(ctx, cfg, log, client, child, depth-1, visited))
+	for _, child := range children {
+		node.Children = append(node.Children, loadOrchestrationRuntimeTreeNode(ctx, cfg, log, reader, child, depth-1, visited))
 	}
 	return node
-}
-
-func sortedChildRefs(children map[string]v2jido.ChildRef) []v2jido.ChildRef {
-	if len(children) == 0 {
-		return nil
-	}
-	keys := make([]string, 0, len(children))
-	for key := range children {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-	out := make([]v2jido.ChildRef, 0, len(keys))
-	for _, key := range keys {
-		out = append(out, children[key])
-	}
-	return out
 }
 
 func resolveOrchestrationDispatchParentAgentID() string {

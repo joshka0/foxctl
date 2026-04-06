@@ -1121,23 +1121,7 @@ type scopedEmbeddings struct {
 }
 
 func detectEmbeddingProviderName(cfg config.Config, voyageKey, geminiKey string) string {
-	provider := strings.ToLower(strings.TrimSpace(cfg.Embedding.Provider))
-	switch provider {
-	case "openai_compat", "openai-compatible", "lmstudio":
-		return "openai_compat"
-	case "voyage", "gemini":
-		return provider
-	}
-	if strings.TrimSpace(cfg.Embedding.BaseURL) != "" {
-		return "openai_compat"
-	}
-	if voyageKey != "" {
-		return "voyage"
-	}
-	if geminiKey != "" {
-		return "gemini"
-	}
-	return ""
+	return semantic.DetectProviderForConfig(cfg, voyageKey, geminiKey)
 }
 
 func noEmbeddingHint(cfg config.Config) string {

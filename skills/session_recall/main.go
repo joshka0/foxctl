@@ -348,7 +348,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	// Check for embedding API key - prefer Voyage, fall back to Gemini, then FTS
 	voyageKey := os.Getenv("VOYAGE_API_KEY")
 	geminiKey := os.Getenv("GEMINI_API_KEY")
-	useFTSFallback := voyageKey == "" && geminiKey == ""
+	useFTSFallback := semantic.DetectProviderForConfig(rc.Config, voyageKey, geminiKey) == ""
 
 	// Generate embedding for the query - prefer Voyage, fall back to Gemini, then FTS
 	var queryEmbedding []float32
@@ -377,7 +377,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 
 	if in.ChunkGranularity {
 		if useFTSFallback {
-			return skillerr.Arg("chunk_granularity requires embeddings (set VOYAGE_API_KEY or GEMINI_API_KEY)")
+			return skillerr.Arg("chunk_granularity requires embeddings (configure a repo embedding provider or set VOYAGE_API_KEY / GEMINI_API_KEY)")
 		}
 
 		chunkResults, err := sessionStore.SearchChunks(ctx, queryEmbedding, in.Limit*3)

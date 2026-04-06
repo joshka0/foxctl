@@ -24,8 +24,11 @@ import (
 	"github.com/jkatigb/agentctl/internal/platform/config"
 	"github.com/jkatigb/agentctl/internal/storage/dbdriver"
 	v2jido "github.com/jkatigb/agentctl/internal/v2/adapters/jido"
+	libsqlworkers "github.com/jkatigb/agentctl/internal/v2/adapters/libsql/workers"
 	coreevents "github.com/jkatigb/agentctl/internal/v2/core/events"
 	coreorchestration "github.com/jkatigb/agentctl/internal/v2/core/orchestration"
+	corespawn "github.com/jkatigb/agentctl/internal/v2/core/spawn"
+	coreworker "github.com/jkatigb/agentctl/internal/v2/core/worker"
 )
 
 func TestOrchestrationBoardGetHandler_ReturnsEnvelope(t *testing.T) {
@@ -347,6 +350,192 @@ func TestOrchestrationBoardCardRuntimeGetHandler_ReturnsRuntimeTree(t *testing.T
 	grandchild, _ := grandchildren[0].(map[string]any)
 	if strings.TrimSpace(fmt.Sprint(grandchild["agent_id"])) != "agent:grandchild-tree-1" {
 		t.Fatalf("grandchild.agent_id=%v want agent:grandchild-tree-1", grandchild["agent_id"])
+	}
+}
+
+func TestOrchestrationBoardCardGetHandler_ReturnsGoRuntimeSummary(t *testing.T) {
+	t.Setenv("AGENTCTL_DB_DRIVER", "")
+	t.Setenv("AGENTCTL_V2_EVENTS_DB_DRIVER", "")
+	t.Setenv(EnvOrchestrationRuntimeBackend, orchestrationRuntimeBackendGoruntimeAPI)
+
+	cfg := orchestrationTestConfig(t.TempDir())
+	ctx := context.Background()
+	store, closeFn, err := openOrchestrationStore(ctx, cfg)
+	if err != nil {
+		t.Fatalf("open orchestration store: %v", err)
+	}
+	defer func() {
+		if closeErr := closeFn(); closeErr != nil {
+			t.Fatalf("close orchestration store: %v", closeErr)
+		}
+	}()
+
+	if err := store.Apply(ctx, coreevents.Event{
+		ID:            "evt-runtime-go-001",
+		StreamID:      "run-runtime-go-001",
+		StreamType:    coreevents.StreamTypeRun,
+		StreamVersion: 1,
+		EventType:     coreevents.EventRunStarted,
+		OccurredAt:    time.Date(2026, time.April, 6, 12, 0, 0, 0, time.UTC),
+		Command:       commandOrchestrationDispatchIssue,
+		RequestID:     "req-runtime-go-001",
+		Payload: coreevents.MustMarshalPayload(map[string]any{
+			"workspace_id":     "ws-1",
+			"issue_id":         "issue-runtime-go-001",
+			"issue_identifier": "ABC-RUNTIME-GO-1",
+			"title":            "Inspect go runtime",
+			"state":            "Running",
+			"eligibility":      "eligible",
+			"agent_id":         "agent:worker-runtime-go-1",
+		}),
+	}); err != nil {
+		t.Fatalf("apply runtime card event: %v", err)
+	}
+
+	workerStore, closeWorkers, err := libsqlworkers.Open(ctx, cfg.Storage.Root)
+	if err != nil {
+		t.Fatalf("open worker store: %v", err)
+	}
+	defer func() { _ = closeWorkers() }()
+	if err := workerStore.Upsert(ctx, coreworker.Record{
+		WorkerID:      "subprocess:agent:worker-runtime-go-1",
+		BackendKind:   coreworker.BackendSubprocess,
+		AgentID:       "agent:worker-runtime-go-1",
+		ParentAgentID: "agent:dispatch-root",
+		RunID:         "run-runtime-go-001",
+		Status:        coreworker.StatusRunning,
+		RawState:      json.RawMessage(`{"agentctl":{"status":"running","agent":"agent:worker-runtime-go-1"}}`),
+	}); err != nil {
+		t.Fatalf("upsert root worker: %v", err)
+	}
+	if err := workerStore.Upsert(ctx, coreworker.Record{
+		WorkerID:       "subprocess:agent:child-runtime-go-1",
+		BackendKind:    coreworker.BackendSubprocess,
+		AgentID:        "agent:child-runtime-go-1",
+		ParentAgentID:  "agent:worker-runtime-go-1",
+		ParentWorkerID: "subprocess:agent:worker-runtime-go-1",
+		RunID:          "run-runtime-go-001",
+		Status:         coreworker.StatusRunning,
+		Metadata:       map[string]any{"issue_id": "issue-runtime-go-001", "workspace_id": "ws-1"},
+	}); err != nil {
+		t.Fatalf("upsert child worker: %v", err)
+	}
+
+	h := OrchestrationBoardCardGetHandler(cfg, zerolog.Nop())
+	req := httptest.NewRequest(http.MethodGet, "/api/orchestration/board-card-get?workspace_id=ws-1&issue_id=issue-runtime-go-001&include_runtime=true", nil)
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	body := decodeResponseBody(t, rr)
+	data, _ := body["data"].(map[string]any)
+	runtimeWrap, _ := data["runtime"].(map[string]any)
+	if strings.TrimSpace(fmt.Sprint(runtimeWrap["agent_id"])) != "agent:worker-runtime-go-1" {
+		t.Fatalf("runtime.agent_id=%v want agent:worker-runtime-go-1", runtimeWrap["agent_id"])
+	}
+	if strings.TrimSpace(fmt.Sprint(runtimeWrap["status"])) != "running" {
+		t.Fatalf("runtime.status=%v want running", runtimeWrap["status"])
+	}
+	children, _ := runtimeWrap["children"].(map[string]any)
+	if _, ok := children["agent:child-runtime-go-1"]; !ok {
+		t.Fatalf("runtime children missing child entry: %+v", children)
+	}
+}
+
+func TestOrchestrationBoardCardRuntimeGetHandler_ReturnsGoRuntimeTree(t *testing.T) {
+	t.Setenv("AGENTCTL_DB_DRIVER", "")
+	t.Setenv("AGENTCTL_V2_EVENTS_DB_DRIVER", "")
+	t.Setenv(EnvOrchestrationRuntimeBackend, orchestrationRuntimeBackendGoruntimeAPI)
+
+	cfg := orchestrationTestConfig(t.TempDir())
+	ctx := context.Background()
+	store, closeFn, err := openOrchestrationStore(ctx, cfg)
+	if err != nil {
+		t.Fatalf("open orchestration store: %v", err)
+	}
+	defer func() {
+		if closeErr := closeFn(); closeErr != nil {
+			t.Fatalf("close orchestration store: %v", closeErr)
+		}
+	}()
+
+	if err := store.Apply(ctx, coreevents.Event{
+		ID:            "evt-runtime-go-tree-001",
+		StreamID:      "run-runtime-go-tree-001",
+		StreamType:    coreevents.StreamTypeRun,
+		StreamVersion: 1,
+		EventType:     coreevents.EventRunStarted,
+		OccurredAt:    time.Date(2026, time.April, 6, 12, 5, 0, 0, time.UTC),
+		Command:       commandOrchestrationDispatchIssue,
+		RequestID:     "req-runtime-go-tree-001",
+		Payload: coreevents.MustMarshalPayload(map[string]any{
+			"workspace_id":     "ws-1",
+			"issue_id":         "issue-runtime-go-tree-001",
+			"issue_identifier": "ABC-RUNTIME-GO-TREE-1",
+			"title":            "Inspect go runtime tree",
+			"state":            "Running",
+			"eligibility":      "eligible",
+			"agent_id":         "agent:worker-runtime-go-tree-1",
+		}),
+	}); err != nil {
+		t.Fatalf("apply runtime card event: %v", err)
+	}
+
+	workerStore, closeWorkers, err := libsqlworkers.Open(ctx, cfg.Storage.Root)
+	if err != nil {
+		t.Fatalf("open worker store: %v", err)
+	}
+	defer func() { _ = closeWorkers() }()
+	if err := workerStore.Upsert(ctx, coreworker.Record{
+		WorkerID:    "subprocess:agent:worker-runtime-go-tree-1",
+		BackendKind: coreworker.BackendSubprocess,
+		AgentID:     "agent:worker-runtime-go-tree-1",
+		RunID:       "run-runtime-go-tree-001",
+		Status:      coreworker.StatusRunning,
+		RawState:    json.RawMessage(`{"agentctl":{"status":"running","agent":"agent:worker-runtime-go-tree-1"}}`),
+	}); err != nil {
+		t.Fatalf("upsert root worker: %v", err)
+	}
+	if err := workerStore.Upsert(ctx, coreworker.Record{
+		WorkerID:       "subprocess:agent:child-runtime-go-tree-1",
+		BackendKind:    coreworker.BackendSubprocess,
+		AgentID:        "agent:child-runtime-go-tree-1",
+		ParentAgentID:  "agent:worker-runtime-go-tree-1",
+		ParentWorkerID: "subprocess:agent:worker-runtime-go-tree-1",
+		RunID:          "run-runtime-go-tree-001",
+		Status:         coreworker.StatusCompleted,
+		RawState:       json.RawMessage(`{"agentctl":{"status":"completed","agent":"agent:child-runtime-go-tree-1"}}`),
+	}); err != nil {
+		t.Fatalf("upsert child worker: %v", err)
+	}
+
+	h := OrchestrationBoardCardRuntimeGetHandler(cfg, zerolog.Nop())
+	req := httptest.NewRequest(http.MethodGet, "/api/orchestration/board-card-runtime-get?workspace_id=ws-1&issue_id=issue-runtime-go-tree-001&depth=2", nil)
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	body := decodeResponseBody(t, rr)
+	data, _ := body["data"].(map[string]any)
+	runtimeWrap, _ := data["runtime"].(map[string]any)
+	root, _ := runtimeWrap["root"].(map[string]any)
+	if strings.TrimSpace(fmt.Sprint(root["agent_id"])) != "agent:worker-runtime-go-tree-1" {
+		t.Fatalf("root.agent_id=%v want agent:worker-runtime-go-tree-1", root["agent_id"])
+	}
+	children, _ := root["children"].([]any)
+	if len(children) != 1 {
+		t.Fatalf("root children=%d want 1", len(children))
+	}
+	child, _ := children[0].(map[string]any)
+	if strings.TrimSpace(fmt.Sprint(child["agent_id"])) != "agent:child-runtime-go-tree-1" {
+		t.Fatalf("child.agent_id=%v want agent:child-runtime-go-tree-1", child["agent_id"])
+	}
+	if strings.TrimSpace(fmt.Sprint(child["status"])) != "completed" {
+		t.Fatalf("child.status=%v want completed", child["status"])
 	}
 }
 
@@ -751,6 +940,73 @@ func TestOrchestrationRefreshHandler_EmitsSSEOrchestrationMetadata(t *testing.T)
 	}
 	if _, ok := activity.Data["queued"]; !ok {
 		t.Fatalf("queued missing from activity data: %+v", activity.Data)
+	}
+}
+
+func TestOrchestrationDispatchIssueHandlerWithRuntime_UsesInjectedHost(t *testing.T) {
+	cfg := orchestrationTestConfig(t.TempDir())
+	host := &fakeOrchestrationRuntimeHost{
+		spawnResp: corespawn.Response{
+			RunID:     "run-host-1",
+			AgentID:   "agent:host-1",
+			ActorID:   "actor:host-1",
+			RequestID: "req-host-1",
+			Status:    "spawned",
+			CreatedAt: time.Date(2026, time.April, 6, 22, 0, 0, 0, time.UTC),
+		},
+	}
+	h := OrchestrationDispatchIssueHandlerWithRuntime(cfg, zerolog.Nop(), host)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/orchestration/dispatch-issue", bytes.NewBufferString(`{
+		"request_id":"req-host-1",
+		"workspace_id":"ws-1",
+		"issue_id":"issue-host-1",
+		"issue_identifier":"ABC-HOST-1",
+		"title":"Dispatch via injected host",
+		"parent_agent_id":"agent:parent-host"
+	}`))
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	if host.spawnCalls != 1 {
+		t.Fatalf("spawn_calls=%d want 1", host.spawnCalls)
+	}
+	if host.lastSpawnReq.ParentAgentID != "agent:parent-host" {
+		t.Fatalf("parent_agent_id=%q want agent:parent-host", host.lastSpawnReq.ParentAgentID)
+	}
+	body := decodeResponseBody(t, rr)
+	data, _ := body["data"].(map[string]any)
+	if strings.TrimSpace(fmt.Sprint(data["run_id"])) != "run-host-1" {
+		t.Fatalf("run_id=%v want run-host-1", data["run_id"])
+	}
+	if strings.TrimSpace(fmt.Sprint(data["agent_id"])) != "agent:host-1" {
+		t.Fatalf("agent_id=%v want agent:host-1", data["agent_id"])
+	}
+}
+
+func TestOrchestrationRefreshHandlerWithRuntime_UsesInjectedHost(t *testing.T) {
+	cfg := orchestrationTestConfig(t.TempDir())
+	host := &fakeOrchestrationRuntimeHost{}
+	h := OrchestrationRefreshHandlerWithRuntime(cfg, zerolog.Nop(), host)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/orchestration/refresh", bytes.NewBufferString(`{"request_id":"req-refresh-host-1","workspace_id":"ws-1"}`))
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	if host.refreshCalls != 1 {
+		t.Fatalf("refresh_calls=%d want 1", host.refreshCalls)
+	}
+	if host.lastRefreshWorkspaceID != "ws-1" {
+		t.Fatalf("workspace_id=%q want ws-1", host.lastRefreshWorkspaceID)
+	}
+	if host.lastRefreshRequestID != "req-refresh-host-1" {
+		t.Fatalf("request_id=%q want req-refresh-host-1", host.lastRefreshRequestID)
 	}
 }
 
@@ -1648,4 +1904,48 @@ func (c *captureSSEPublisher) Publish(eventType string, data any) {
 		eventType: eventType,
 		data:      data,
 	})
+}
+
+type fakeOrchestrationRuntimeHost struct {
+	spawnResp              corespawn.Response
+	spawnErr               error
+	refreshErr             error
+	signalResp             coreworker.SignalResponse
+	signalErr              error
+	spawnCalls             int
+	refreshCalls           int
+	signalCalls            int
+	lastSpawnReq           corespawn.Request
+	lastRefreshWorkspaceID string
+	lastRefreshRequestID   string
+	lastSignalReq          coreworker.SignalRequest
+}
+
+func (f *fakeOrchestrationRuntimeHost) Run(context.Context) error { return nil }
+
+func (f *fakeOrchestrationRuntimeHost) Close() error { return nil }
+
+func (f *fakeOrchestrationRuntimeHost) Spawn(_ context.Context, req corespawn.Request) (corespawn.Response, error) {
+	f.spawnCalls++
+	f.lastSpawnReq = req
+	if f.spawnErr != nil {
+		return corespawn.Response{}, f.spawnErr
+	}
+	return f.spawnResp, nil
+}
+
+func (f *fakeOrchestrationRuntimeHost) Refresh(_ context.Context, workspaceID, requestID string) error {
+	f.refreshCalls++
+	f.lastRefreshWorkspaceID = workspaceID
+	f.lastRefreshRequestID = requestID
+	return f.refreshErr
+}
+
+func (f *fakeOrchestrationRuntimeHost) Signal(_ context.Context, req coreworker.SignalRequest) (coreworker.SignalResponse, error) {
+	f.signalCalls++
+	f.lastSignalReq = req
+	if f.signalErr != nil {
+		return coreworker.SignalResponse{}, f.signalErr
+	}
+	return f.signalResp, nil
 }

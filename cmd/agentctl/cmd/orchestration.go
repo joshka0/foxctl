@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"sort"
 	"strings"
 	"time"
@@ -392,6 +393,13 @@ func runOrchestrationDispatchIssueCLI(
 	cfg config.Config,
 	req coreorchestration.DispatchRequest,
 ) (coreorchestration.DispatchResponse, error) {
+	if strings.EqualFold(strings.TrimSpace(os.Getenv("AGENTCTL_V2_ORCHESTRATION_RUNTIME_BACKEND")), "goruntime") {
+		return coreorchestration.DispatchResponse{}, &v2errors.V2Error{
+			Kind:    v2errors.ErrDependency,
+			Message: "goruntime orchestration dispatch requires a persistent host (use overseer or web server), not the one-shot CLI command",
+			Fatal:   true,
+		}
+	}
 	req.RequestID = chooseNonEmptyCLI(strings.TrimSpace(req.RequestID), newOrchestrationCLIRequestID("orch-dispatch", req.IssueID))
 	req.WorkspaceID = strings.TrimSpace(req.WorkspaceID)
 	req.IssueID = strings.TrimSpace(req.IssueID)

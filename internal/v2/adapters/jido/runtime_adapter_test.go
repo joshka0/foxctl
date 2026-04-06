@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/jkatigb/agentctl/internal/v2/core/ask"
+	coreworker "github.com/jkatigb/agentctl/internal/v2/core/worker"
 )
 
 func TestRuntimeAdapter_SendMapsAskToSignal(t *testing.T) {
@@ -254,6 +255,118 @@ func TestRuntimeAdapter_ConfigValidation(t *testing.T) {
 	_, err := NewRuntimeAdapter(RuntimeAdapterConfig{})
 	if err == nil {
 		t.Fatal("expected missing client error")
+	}
+}
+
+func TestRuntimeAdapter_WorkerMapsJidoStateToWorkerRecord(t *testing.T) {
+	t.Parallel()
+
+	client := &fakeClient{
+		stateResp: StateResponse{
+			Status: "running",
+			State: json.RawMessage(`{
+				"agentctl": {
+					"status": "completed",
+					"run_id": "run-123",
+					"session_id": "sess-123",
+					"workspace_id": "ws-123",
+					"role": "reviewer",
+					"parent_agent_id": "agent:parent",
+					"stop_reason": "done",
+					"pid": "4321",
+					"metadata": {"lane":"review"}
+				}
+			}`),
+		},
+	}
+	adapter, err := NewRuntimeAdapter(RuntimeAdapterConfig{Client: client})
+	if err != nil {
+		t.Fatalf("NewRuntimeAdapter() error = %v", err)
+	}
+
+	record, err := adapter.Worker(context.Background(), coreworker.LookupRequest{AgentID: "agent:child"})
+	if err != nil {
+		t.Fatalf("Worker() error = %v", err)
+	}
+	if client.stateReq.AgentID != "agent:child" {
+		t.Fatalf("state request agent_id=%q want agent:child", client.stateReq.AgentID)
+	}
+	if record.WorkerID != "jido:agent:child" {
+		t.Fatalf("worker_id=%q want jido:agent:child", record.WorkerID)
+	}
+	if record.Status != coreworker.StatusCompleted {
+		t.Fatalf("status=%q want %q", record.Status, coreworker.StatusCompleted)
+	}
+	if record.RunID != "run-123" {
+		t.Fatalf("run_id=%q want run-123", record.RunID)
+	}
+	if record.ParentAgentID != "agent:parent" {
+		t.Fatalf("parent_agent_id=%q want agent:parent", record.ParentAgentID)
+	}
+	if record.PID != "4321" {
+		t.Fatalf("pid=%q want 4321", record.PID)
+	}
+	if got := record.Metadata["lane"]; got != "review" {
+		t.Fatalf("metadata.lane=%v want review", got)
+	}
+}
+
+func TestRuntimeAdapter_ChildrenMapsChildRefsToWorkerRecords(t *testing.T) {
+	t.Parallel()
+
+	client := &fakeClient{
+		getChildrenResp: GetChildrenResponse{
+			AgentID: "agent:parent",
+			Children: map[string]ChildRef{
+				"b": {
+					Tag:     "child-b",
+					AgentID: "agent:b",
+					PID:     "222",
+					Metadata: map[string]any{
+						"run_id":       "run-b",
+						"workspace_id": "ws-b",
+						"profile":      "worker",
+					},
+				},
+				"a": {
+					Tag:     "child-a",
+					AgentID: "agent:a",
+					PID:     "111",
+					Metadata: map[string]any{
+						"run_id":       "run-a",
+						"workspace_id": "ws-a",
+						"role":         "reviewer",
+					},
+				},
+			},
+		},
+	}
+	adapter, err := NewRuntimeAdapter(RuntimeAdapterConfig{Client: client})
+	if err != nil {
+		t.Fatalf("NewRuntimeAdapter() error = %v", err)
+	}
+
+	records, err := adapter.Children(context.Background(), coreworker.ChildrenRequest{ParentAgentID: "agent:parent"})
+	if err != nil {
+		t.Fatalf("Children() error = %v", err)
+	}
+	if client.getChildrenReq.AgentID != "agent:parent" {
+		t.Fatalf("children request agent_id=%q want agent:parent", client.getChildrenReq.AgentID)
+	}
+	if len(records) != 2 {
+		t.Fatalf("records len=%d want 2", len(records))
+	}
+	if records[0].AgentID != "agent:a" || records[1].AgentID != "agent:b" {
+		t.Fatalf("record order=%q,%q want agent:a,agent:b", records[0].AgentID, records[1].AgentID)
+	}
+	if records[0].ParentAgentID != "agent:parent" {
+		t.Fatalf("parent_agent_id=%q want agent:parent", records[0].ParentAgentID)
+	}
+	if records[1].Role != "worker" {
+		t.Fatalf("role=%q want worker", records[1].Role)
+	}
+	if records[0].Status != coreworker.StatusUnknown {
+		t.Fatalf("status=%q want %q", records[0].Status, coreworker.StatusUnknown)
 	}
 }
 

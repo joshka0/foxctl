@@ -391,8 +391,12 @@ func createEmbeddingProvider(cfg config.Config) (semantic.EmbeddingProvider, str
 	voyageKey := os.Getenv("VOYAGE_API_KEY")
 	geminiKey := os.Getenv("GEMINI_API_KEY")
 
-	if voyageKey == "" && geminiKey == "" {
-		return nil, "no embedding API key set (VOYAGE_API_KEY or GEMINI_API_KEY); session context disabled (BM25-only)"
+	switch semantic.DetectProviderForConfig(cfg, voyageKey, geminiKey) {
+	case "":
+		return nil, "no embedding provider configured; session context disabled"
+	case "openai_compat":
+		// Local/OpenAI-compatible providers are configured via embedding.provider/base_url/model
+		// and do not require VOYAGE_API_KEY or GEMINI_API_KEY.
 	}
 
 	provider, err := semantic.NewProviderForScope(

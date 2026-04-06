@@ -3,6 +3,7 @@ package web
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -37,6 +38,7 @@ type Server struct {
 	chatAdapter  chatadapter.ChatAdapter
 	turnLock     companion.Locker
 	convRefStore convref.Store
+	orchRuntime  api.OrchestrationRuntimeHost
 }
 
 // NewServer creates and returns a configured Server for the web layer.
@@ -76,6 +78,12 @@ func NewServer(ctx context.Context, opts Options, cfg config.Config, log zerolog
 		consoleHub: consoleHub,
 		turnLock:   buildCompanionLocker(ctx, cfg),
 	}
+
+	orchRuntime, err := api.NewOrchestrationRuntimeHost(ctx, cfg, log)
+	if err != nil {
+		return nil, fmt.Errorf("configure orchestration runtime host: %w", err)
+	}
+	s.orchRuntime = orchRuntime
 
 	// Start chat adapter if configured
 	switch opts.ChatAdapter {
@@ -224,7 +232,19 @@ func createConsoleRunnerFactory(cfg config.Config) consolews.RunnerFactory {
 
 // Run starts the SSE hub event loop. Call in a goroutine.
 func (s *Server) Run(ctx context.Context) {
+	if s.orchRuntime != nil {
+		go func() {
+			if err := s.orchRuntime.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
+				s.log.Error().Err(err).Msg("orchestration runtime host failed")
+			}
+		}()
+	}
 	s.sseHub.Run(ctx)
+	if s.orchRuntime != nil {
+		if err := s.orchRuntime.Close(); err != nil {
+			s.log.Warn().Err(err).Msg("failed to close orchestration runtime host")
+		}
+	}
 }
 
 // SSEHub returns the SSE hub for publishing events.
@@ -460,7 +480,7 @@ func (s *Server) Handler() http.Handler {
 
 	// --- Agents (Phase 11) ---
 	apiMux.HandleFunc("/api/agents", api.AgentsListHandler(s.cfg, s.log))
-	apiMux.HandleFunc("/api/agents/", api.AgentDetailHandler(s.cfg, s.log, s.sseHub))
+	apiMux.HandleFunc("/api/agents/", api.AgentDetailHandlerWithRuntime(s.cfg, s.log, s.sseHub, s.orchRuntime))
 
 	// --- Stats & Insights (Phase 11) ---
 	apiMux.HandleFunc("/api/stats", api.StatsHandler(s.cfg, s.log))
@@ -508,12 +528,12 @@ func (s *Server) Handler() http.Handler {
 	apiMux.HandleFunc("/api/codemaps/", api.CodemapDetailHandler(s.cfg, s.log))
 
 	// --- Orchestration (Wave 7 / PR-46) ---
-	apiMux.HandleFunc("/api/orchestration/dispatch-issue", api.OrchestrationDispatchIssueHandler(s.cfg, s.log))
+	apiMux.HandleFunc("/api/orchestration/dispatch-issue", api.OrchestrationDispatchIssueHandlerWithRuntime(s.cfg, s.log, s.orchRuntime))
 	apiMux.HandleFunc("/api/orchestration/card-action", api.OrchestrationCardActionHandler(s.cfg, s.log))
 	apiMux.HandleFunc("/api/orchestration/board-get", api.OrchestrationBoardGetHandler(s.cfg, s.log))
 	apiMux.HandleFunc("/api/orchestration/board-card-get", api.OrchestrationBoardCardGetHandler(s.cfg, s.log))
 	apiMux.HandleFunc("/api/orchestration/board-card-runtime-get", api.OrchestrationBoardCardRuntimeGetHandler(s.cfg, s.log))
-	apiMux.HandleFunc("/api/orchestration/refresh", api.OrchestrationRefreshHandler(s.cfg, s.log))
+	apiMux.HandleFunc("/api/orchestration/refresh", api.OrchestrationRefreshHandlerWithRuntime(s.cfg, s.log, s.orchRuntime))
 	apiMux.HandleFunc("/api/orchestration/seed-cards", api.OrchestrationSeedCardsHandler(s.cfg, s.log))
 	apiMux.HandleFunc("/api/orchestration/cleanup-cards", api.OrchestrationCleanupCardsHandler(s.cfg, s.log))
 	apiMux.HandleFunc("/api/orchestration/archive-cards", api.OrchestrationArchiveCardsHandler(s.cfg, s.log))

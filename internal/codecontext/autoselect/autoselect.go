@@ -60,23 +60,21 @@ func Select(ctx context.Context, cfg sysconfig.Config, opts Options) (*Result, e
 		return nil, fmt.Errorf("max files must be > 0")
 	}
 
-	memStore, err := memory.OpenWithConfig(ctx, cfg)
-	if err != nil {
-		return nil, fmt.Errorf("open memory store: %w", err)
-	}
-	defer memStore.Close()
-
 	indexStore, cleanup, err := searchindex.OpenEphemeral(ctx, cfg.Storage.Root)
 	if err != nil {
 		return nil, fmt.Errorf("open ephemeral search index: %w", err)
 	}
 	defer func() { _ = cleanup() }()
 
-	if _, err := searchindex.BuildCodeDocuments(ctx, memoryListByTypeSource{store: memStore}, indexStore, workspaceID, searchindex.BuildCodeOptions{
-		Limit:         opts.MaxFiles * 10,
-		EmbedProvider: opts.EmbedProvider,
-	}); err != nil {
-		return nil, fmt.Errorf("build code search documents: %w", err)
+	memStore, err := memory.OpenWithConfig(ctx, cfg)
+	if err == nil {
+		defer memStore.Close()
+		if _, err := searchindex.BuildCodeDocuments(ctx, memoryListByTypeSource{store: memStore}, indexStore, workspaceID, searchindex.BuildCodeOptions{
+			Limit:         opts.MaxFiles * 10,
+			EmbedProvider: opts.EmbedProvider,
+		}); err != nil {
+			return nil, fmt.Errorf("build code search documents: %w", err)
+		}
 	}
 
 	engine := retrievalv2.NewEngine(indexStore, opts.EmbedProvider)

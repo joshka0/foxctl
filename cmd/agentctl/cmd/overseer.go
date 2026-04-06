@@ -30,7 +30,7 @@ var overseerRunCmd = &cobra.Command{
 			})
 		}
 
-		component, cleanup, err := newOverseerJidoOrchestrationComponent(ctx, cfg)
+		component, cleanup, err := newOverseerOrchestrationComponent(ctx, cfg)
 		if err != nil {
 			return err
 		}
