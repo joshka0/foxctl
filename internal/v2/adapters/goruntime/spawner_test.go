@@ -3,7 +3,9 @@ package goruntime
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -145,9 +147,9 @@ func TestChildSpawner_SpawnChild_EmitsRecentLogsInRawState(t *testing.T) {
 	}
 
 	_ = waitForWorkerStatus(t, state, "subprocess:agent:logs-1", coreworker.StatusCompleted)
-	recentLogs := waitForRecentLogs(t, state, "subprocess:agent:logs-1", 2)
-	if len(recentLogs) < 2 {
-		t.Fatalf("recent_logs=%v want at least 2 entries", recentLogs)
+	recentLogs := waitForRecentLogTexts(t, state, "subprocess:agent:logs-1", "hello-stdout", "hello-stderr")
+	if len(recentLogs) == 0 {
+		t.Fatalf("recent_logs=%v want expected log entries", recentLogs)
 	}
 
 	cancel()
@@ -412,9 +414,9 @@ func waitForWorkerStatus(t *testing.T, state *runtimeworkers.StateComponent, wor
 	return coreworker.Record{}
 }
 
-func waitForRecentLogs(t *testing.T, state *runtimeworkers.StateComponent, workerID string, minCount int) []any {
+func waitForRecentLogTexts(t *testing.T, state *runtimeworkers.StateComponent, workerID string, wantTexts ...string) []any {
 	t.Helper()
-	deadline := time.Now().Add(2 * time.Second)
+	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
 		snapshot := state.Snapshot()
 		record, ok := snapshot.Workers[workerID]
@@ -426,12 +428,34 @@ func waitForRecentLogs(t *testing.T, state *runtimeworkers.StateComponent, worke
 		if err := json.Unmarshal(record.RawState, &raw); err == nil {
 			agentctlState, _ := raw["agentctl"].(map[string]any)
 			recentLogs, _ := agentctlState["recent_logs"].([]any)
-			if len(recentLogs) >= minCount {
+			if recentLogsContainTexts(recentLogs, wantTexts...) {
 				return recentLogs
 			}
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-	t.Fatalf("worker %q did not accumulate %d recent log entries", workerID, minCount)
+	t.Fatalf("worker %q did not accumulate recent log texts %v", workerID, wantTexts)
 	return nil
+}
+
+func recentLogsContainTexts(recentLogs []any, wantTexts ...string) bool {
+	if len(wantTexts) == 0 {
+		return true
+	}
+	seen := make(map[string]bool, len(wantTexts))
+	for _, entry := range recentLogs {
+		record, _ := entry.(map[string]any)
+		text := strings.TrimSpace(fmt.Sprint(record["text"]))
+		for _, want := range wantTexts {
+			if text == want {
+				seen[want] = true
+			}
+		}
+	}
+	for _, want := range wantTexts {
+		if !seen[want] {
+			return false
+		}
+	}
+	return true
 }

@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -445,7 +446,7 @@ func TestAgentRuntimeLogsStreamHandler_StreamsGoRuntimeLogUpdates(t *testing.T) 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	req := httptest.NewRequest(http.MethodGet, "/api/agents/agent-go-stream-logs-1/runtime/logs/stream?poll_ms=25", nil).WithContext(ctx)
-	rr := httptest.NewRecorder()
+	rr := newStreamingResponseRecorder()
 	done := make(chan struct{})
 	go func() {
 		AgentDetailHandler(cfg, zerolog.Nop(), nil).ServeHTTP(rr, req)
@@ -466,11 +467,11 @@ func TestAgentRuntimeLogsStreamHandler_StreamsGoRuntimeLogUpdates(t *testing.T) 
 		t.Fatalf("upsert worker update: %v", err)
 	}
 
-	time.Sleep(120 * time.Millisecond)
+	waitForBodyContains(t, rr, "second line", 2*time.Second)
 	cancel()
 	<-done
 
-	body := rr.Body.String()
+	body := rr.BodyString()
 	if !strings.Contains(body, "event: connected") {
 		t.Fatalf("expected connected event, body=%s", body)
 	}
@@ -480,6 +481,57 @@ func TestAgentRuntimeLogsStreamHandler_StreamsGoRuntimeLogUpdates(t *testing.T) 
 	if !strings.Contains(body, "first line") || !strings.Contains(body, "second line") {
 		t.Fatalf("expected streamed log lines, body=%s", body)
 	}
+}
+
+func waitForBodyContains(t *testing.T, rr *streamingResponseRecorder, needle string, timeout time.Duration) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		body := rr.BodyString()
+		if strings.Contains(body, needle) {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatalf("response body did not contain %q within %s; body=%s", needle, timeout, rr.BodyString())
+}
+
+type streamingResponseRecorder struct {
+	mu     sync.Mutex
+	header http.Header
+	body   bytes.Buffer
+	status int
+}
+
+func newStreamingResponseRecorder() *streamingResponseRecorder {
+	return &streamingResponseRecorder{
+		header: make(http.Header),
+		status: http.StatusOK,
+	}
+}
+
+func (r *streamingResponseRecorder) Header() http.Header {
+	return r.header
+}
+
+func (r *streamingResponseRecorder) Write(p []byte) (int, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.body.Write(p)
+}
+
+func (r *streamingResponseRecorder) WriteHeader(statusCode int) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.status = statusCode
+}
+
+func (r *streamingResponseRecorder) Flush() {}
+
+func (r *streamingResponseRecorder) BodyString() string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.body.String()
 }
 
 func TestResolveAgentSpawnPrompt_UsesRoomRoleDefaultAndOnboarding(t *testing.T) {
