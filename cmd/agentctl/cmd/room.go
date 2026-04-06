@@ -1254,7 +1254,11 @@ func runRoomStatus(cmd *cobra.Command, workspace, roomID string, limit int, stal
 	}
 	now := time.Now().UTC()
 	taskPulse := buildRoomTaskPulseSummary(tasks, now, staleAfter)
-	backlog := buildRoomStatusBacklog(summary, messages)
+	reminderRoots, err := loadRoomReminderRoots(cmd.Context(), absWorkspace, roomID, true)
+	if err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.status", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	backlog := buildRoomStatusBacklog(summary, messages, reminderRoots)
 	filters, err := normalizeRoomStatusFilters(only)
 	if err != nil {
 		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.status", protocol.ErrorCodeEARG, err.Error(), map[string]any{
@@ -1263,10 +1267,10 @@ func runRoomStatus(cmd *cobra.Command, workspace, roomID string, limit int, stal
 	}
 	return protocol.WriteOK(cmd.OutOrStdout(), "agentctl.room.status", map[string]any{
 		"room":            summary,
-		"participants":    buildRoomStatusParticipants(summary, messages, tasks, staleAfter),
+		"participants":    buildRoomStatusParticipants(summary, messages, tasks, staleAfter, reminderRoots),
 		"task_pulse":      taskPulse,
 		"backlog":         backlog,
-		"action_required": buildRoomStatusActionRequired(summary, messages, tasks, backlog, taskPulse, filters, staleAfter, now, verbose),
+		"action_required": buildRoomStatusActionRequired(summary, messages, tasks, backlog, taskPulse, filters, staleAfter, now, verbose, reminderRoots),
 	}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
 }
 
@@ -3448,7 +3452,7 @@ func resolveRoomMessageIDsForResolve(ctx context.Context, store blackboard.Board
 			if strings.HasPrefix(strings.TrimSpace(participant), "actor:system:room:") {
 				continue
 			}
-			for _, entry := range buildRoomStatusEntries(participant, messages) {
+			for _, entry := range buildRoomStatusEntries(participant, messages, nil) {
 				if roomResolveEntryMatches(entry, filters) {
 					trimmedIDs = append(trimmedIDs, entry.ID)
 				}
@@ -4462,7 +4466,9 @@ func messageStillAwaitsReply(msg agent.BoardMessage, latestBySender map[string]t
 	if !ok {
 		return true
 	}
-	return latestReply.Before(msg.CreatedAt)
+	// A reply only counts when the recipient speaks after the request.
+	// Self-addressed messages should not satisfy themselves at the same timestamp.
+	return !latestReply.After(msg.CreatedAt)
 }
 
 func normalizeRoomInboxFilter(filter string) string {
@@ -4490,7 +4496,7 @@ func summarizeRoomPreview(body string) string {
 	return body[:140] + "..."
 }
 
-func buildRoomStatusParticipants(room agent.RoomSummary, messages []agent.BoardMessage, tasks []taskstore.Task, staleAfter time.Duration) []roomStatusParticipant {
+func buildRoomStatusParticipants(room agent.RoomSummary, messages []agent.BoardMessage, tasks []taskstore.Task, staleAfter time.Duration, reminderRoots map[string]struct{}) []roomStatusParticipant {
 	latestBySender := latestRoomSenderActivity(messages)
 	participantSet := map[string]struct{}{}
 	for _, member := range room.Members {
@@ -4528,7 +4534,7 @@ func buildRoomStatusParticipants(room agent.RoomSummary, messages []agent.BoardM
 				p.OwnedTaskCount++
 			}
 		}
-		entries := buildRoomStatusEntries(actorID, messages)
+		entries := buildRoomStatusEntries(actorID, messages, reminderRoots)
 		p.ActionableInboxCount = len(entries)
 		if len(entries) > 0 {
 			entry := entries[0]
@@ -4566,13 +4572,13 @@ func buildRoomTaskPulseSummary(tasks []taskstore.Task, now time.Time, staleAfter
 	return pulse
 }
 
-func buildRoomStatusBacklog(room agent.RoomSummary, messages []agent.BoardMessage) roomStatusBacklog {
+func buildRoomStatusBacklog(room agent.RoomSummary, messages []agent.BoardMessage, reminderRoots map[string]struct{}) roomStatusBacklog {
 	backlog := roomStatusBacklog{}
 	for _, participant := range room.Participants {
 		if strings.HasPrefix(strings.TrimSpace(participant), "actor:system:room:") {
 			continue
 		}
-		entries := buildRoomStatusEntries(participant, messages)
+		entries := buildRoomStatusEntries(participant, messages, reminderRoots)
 		if len(entries) == 0 {
 			continue
 		}
@@ -4598,7 +4604,7 @@ func buildRoomStatusBacklog(room agent.RoomSummary, messages []agent.BoardMessag
 	return backlog
 }
 
-func buildRoomStatusActionRequired(room agent.RoomSummary, messages []agent.BoardMessage, tasks []taskstore.Task, backlog roomStatusBacklog, taskPulse roomTaskPulseSummary, filters map[string]struct{}, staleAfter time.Duration, now time.Time, verbose bool) roomStatusActionRequired {
+func buildRoomStatusActionRequired(room agent.RoomSummary, messages []agent.BoardMessage, tasks []taskstore.Task, backlog roomStatusBacklog, taskPulse roomTaskPulseSummary, filters map[string]struct{}, staleAfter time.Duration, now time.Time, verbose bool, reminderRoots map[string]struct{}) roomStatusActionRequired {
 	summary := roomStatusActionRequired{
 		Filter:                  sortedRoomStatusFilters(filters),
 		ParticipantsWithPending: roomStatusFilteredCount(filters, "ack", "reply", "interview", backlog.ParticipantsWithPending),
@@ -4613,17 +4619,17 @@ func buildRoomStatusActionRequired(room agent.RoomSummary, messages []agent.Boar
 	if !verbose {
 		return summary
 	}
-	summary.VerboseTopEntries = filterRoomStatusVerboseEntries(buildRoomStatusVerboseEntries(room, messages), filters)
+	summary.VerboseTopEntries = filterRoomStatusVerboseEntries(buildRoomStatusVerboseEntries(room, messages, reminderRoots), filters)
 	return summary
 }
 
-func buildRoomStatusVerboseEntries(room agent.RoomSummary, messages []agent.BoardMessage) []roomInboxEntry {
+func buildRoomStatusVerboseEntries(room agent.RoomSummary, messages []agent.BoardMessage, reminderRoots map[string]struct{}) []roomInboxEntry {
 	out := make([]roomInboxEntry, 0, len(room.Participants))
 	for _, participant := range room.Participants {
 		if strings.HasPrefix(strings.TrimSpace(participant), "actor:system:room:") {
 			continue
 		}
-		entries := buildRoomStatusEntries(participant, messages)
+		entries := buildRoomStatusEntries(participant, messages, reminderRoots)
 		if len(entries) == 0 {
 			continue
 		}
@@ -4841,7 +4847,7 @@ func roomStatusFilteredCount(filters map[string]struct{}, primary string, second
 	return 0
 }
 
-func buildRoomStatusEntries(actorID string, messages []agent.BoardMessage) []roomInboxEntry {
+func buildRoomStatusEntries(actorID string, messages []agent.BoardMessage, reminderRoots map[string]struct{}) []roomInboxEntry {
 	entries := buildRoomInboxEntries(actorID, messages, "all", false)
 	if len(entries) == 0 {
 		return nil
@@ -4857,6 +4863,9 @@ func buildRoomStatusEntries(actorID string, messages []agent.BoardMessage) []roo
 		key := roomMessageChainKey(entry.Message)
 		if key == "" {
 			key = entry.ID
+		}
+		if _, suppressed := reminderRoots[key]; suppressed {
+			continue
 		}
 		current, ok := latestByChain[key]
 		if !ok || roomStatusEntryMoreRecent(entry, current) {
@@ -4876,6 +4885,35 @@ func buildRoomStatusEntries(actorID string, messages []agent.BoardMessage) []roo
 		}
 		return out[i].ID < out[j].ID
 	})
+	return out
+}
+
+func loadRoomReminderRoots(ctx context.Context, workspaceID, roomID string, includeInactive bool) (map[string]struct{}, error) {
+	cfg, err := loadConfig(ctx)
+	if err != nil {
+		return nil, err
+	}
+	coordStore, err := coordination.Open(ctx, cfg.Storage.Root)
+	if err != nil {
+		return nil, err
+	}
+	defer coordStore.Close()
+	reminders, err := coordStore.ListRoomReminders(ctx, workspaceID, strings.TrimSpace(roomID), includeInactive)
+	if err != nil {
+		return nil, err
+	}
+	return roomReminderRootSet(reminders), nil
+}
+
+func roomReminderRootSet(reminders []coordination.RoomReminder) map[string]struct{} {
+	out := make(map[string]struct{}, len(reminders))
+	for _, reminder := range reminders {
+		id := strings.TrimSpace(reminder.RootMessageID)
+		if id == "" {
+			continue
+		}
+		out[id] = struct{}{}
+	}
 	return out
 }
 

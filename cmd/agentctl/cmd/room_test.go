@@ -856,7 +856,7 @@ func TestBuildRoomStatusEntriesCollapsesHistoricalBacklogByChain(t *testing.T) {
 			Priority:         2,
 			Status:           agent.BoardMessageStatusUnread,
 		},
-	})
+	}, nil)
 	if len(entries) != 1 {
 		t.Fatalf("len(entries)=%d want 1", len(entries))
 	}
@@ -1904,7 +1904,7 @@ func TestDetectRoomCoordinatorPulseMessagesEmitsReminder(t *testing.T) {
 		Interval:                30 * time.Second,
 		TaskStaleAfter:          5 * time.Minute,
 		CoordinatorPulseEnabled: true,
-	}, map[string]time.Time{})
+	}, map[string]time.Time{}, nil)
 	if len(pulses) != 1 {
 		t.Fatalf("len(pulses)=%d want 1", len(pulses))
 	}
@@ -2011,7 +2011,7 @@ func TestDetectRoomPulseMessagesEmitsReminderForStaleReplyExpected(t *testing.T)
 			Subject:       "Please respond",
 			CreatedAt:     now.Add(-3 * time.Minute),
 		},
-	}, now, roomPulseConfig{ReplyStaleAfter: 2 * time.Minute}, map[string]roomPulseState{})
+	}, now, roomPulseConfig{ReplyStaleAfter: 2 * time.Minute}, map[string]roomPulseState{}, nil)
 	if len(pulses) != 1 {
 		t.Fatalf("len(pulses)=%d want 1", len(pulses))
 	}
@@ -2048,9 +2048,31 @@ func TestDetectRoomPulseMessagesSkipsSatisfiedReplyExpected(t *testing.T) {
 			Body:        "I replied",
 			CreatedAt:   now.Add(-2 * time.Minute),
 		},
-	}, now, roomPulseConfig{ReplyStaleAfter: 2 * time.Minute}, map[string]roomPulseState{})
+	}, now, roomPulseConfig{ReplyStaleAfter: 2 * time.Minute}, map[string]roomPulseState{}, nil)
 	if len(pulses) != 0 {
 		t.Fatalf("len(pulses)=%d want 0", len(pulses))
+	}
+}
+
+func TestDetectRoomPulseMessagesSelfDirectedReplyExpectedStillAwaitsFollowUp(t *testing.T) {
+	now := time.Date(2026, 4, 4, 19, 0, 0, 0, time.UTC)
+	pulses := detectRoomPulseMessages("alpha", []agent.BoardMessage{
+		{
+			ID:            "msg-1",
+			WorkspaceID:   "/repo",
+			Stream:        "room:alpha",
+			Sender:        "gemini-a",
+			Recipient:     "gemini-a",
+			ReplyExpected: true,
+			Subject:       "Check in",
+			CreatedAt:     now.Add(-3 * time.Minute),
+		},
+	}, now, roomPulseConfig{ReplyStaleAfter: 2 * time.Minute}, map[string]roomPulseState{}, nil)
+	if len(pulses) != 1 {
+		t.Fatalf("len(pulses)=%d want 1", len(pulses))
+	}
+	if pulses[0].Message.Recipient != "gemini-a" {
+		t.Fatalf("recipient=%q want gemini-a", pulses[0].Message.Recipient)
 	}
 }
 
@@ -2068,7 +2090,7 @@ func TestDetectRoomPulseMessagesSkipsReadReplyExpected(t *testing.T) {
 			Subject:       "Please respond",
 			CreatedAt:     now.Add(-3 * time.Minute),
 		},
-	}, now, roomPulseConfig{ReplyStaleAfter: 2 * time.Minute}, map[string]roomPulseState{})
+	}, now, roomPulseConfig{ReplyStaleAfter: 2 * time.Minute}, map[string]roomPulseState{}, nil)
 	if len(pulses) != 0 {
 		t.Fatalf("len(pulses)=%d want 0", len(pulses))
 	}
@@ -2093,7 +2115,7 @@ func TestDetectRoomPulseMessagesHonorsMinimumPulseFloor(t *testing.T) {
 		MinPulseFloor:   24 * time.Hour,
 	}, map[string]roomPulseState{
 		"msg-1": {LastSentAt: now.Add(-3 * time.Hour), Count: 1},
-	})
+	}, nil)
 	if len(pulses) != 0 {
 		t.Fatalf("len(pulses)=%d want 0", len(pulses))
 	}
@@ -2129,7 +2151,7 @@ func TestDetectRoomCoordinatorPulseMessagesHonorsCoordinatorToggle(t *testing.T)
 		TaskStaleAfter:          5 * time.Minute,
 		MinPulseFloor:           24 * time.Hour,
 		CoordinatorPulseEnabled: false,
-	}, map[string]time.Time{})
+	}, map[string]time.Time{}, nil)
 	if len(pulses) != 0 {
 		t.Fatalf("len(pulses)=%d want 0", len(pulses))
 	}
@@ -2165,7 +2187,7 @@ func TestDetectRoomCoordinatorPulseMessagesInterruptsCoordinator(t *testing.T) {
 		Interval:                30 * time.Minute,
 		TaskStaleAfter:          5 * time.Minute,
 		CoordinatorPulseEnabled: true,
-	}, map[string]time.Time{})
+	}, map[string]time.Time{}, nil)
 	if len(pulses) != 1 {
 		t.Fatalf("len(pulses)=%d want 1", len(pulses))
 	}
@@ -2226,7 +2248,7 @@ func TestDetectRoomPulseMessagesKeepsOnlyLatestOutstandingPerRecipient(t *testin
 			Subject:       "Latest request",
 			CreatedAt:     now.Add(-3 * time.Minute),
 		},
-	}, now, roomPulseConfig{ReplyStaleAfter: 2 * time.Minute}, map[string]roomPulseState{})
+	}, now, roomPulseConfig{ReplyStaleAfter: 2 * time.Minute}, map[string]roomPulseState{}, nil)
 	if len(pulses) != 1 {
 		t.Fatalf("len(pulses)=%d want 1", len(pulses))
 	}
@@ -2253,7 +2275,7 @@ func TestDetectRoomPulseMessagesUsesExponentialBackoff(t *testing.T) {
 		MinPulseFloor:   2 * time.Hour,
 	}, map[string]roomPulseState{
 		"msg-1": {LastSentAt: now.Add(-3 * time.Hour), Count: 2},
-	})
+	}, nil)
 	if len(pulses) != 0 {
 		t.Fatalf("len(pulses)=%d want 0", len(pulses))
 	}
@@ -2286,7 +2308,7 @@ func TestDetectRoomPulseEscalationMessagesAfterInterruptBudget(t *testing.T) {
 		CoordinatorEscalationEnabled: true,
 	}, map[string]roomPulseState{
 		"msg-1": {LastSentAt: now.Add(-10 * time.Hour), Count: roomPulseInterruptLimit},
-	})
+	}, nil)
 	if len(pulses) != 1 {
 		t.Fatalf("len(pulses)=%d want 1", len(pulses))
 	}
@@ -2371,6 +2393,72 @@ func TestProcessRoomReminderTickEmitsScheduledFollowUp(t *testing.T) {
 	}
 }
 
+func TestProcessRoomReminderTickKeepsSelfDirectedReminderActiveUntilLaterReply(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	ctx := context.Background()
+	storageRoot := filepath.Join(t.TempDir(), "storage")
+	store, err := coordination.Open(ctx, storageRoot)
+	if err != nil {
+		t.Fatalf("coordination.Open: %v", err)
+	}
+	defer store.Close()
+
+	now := time.Now().UTC()
+	lastSent := now.Add(-20 * time.Minute)
+	if _, err := store.UpsertRoomReminder(ctx, coordination.RoomReminder{
+		ID:            "msg-self",
+		WorkspaceID:   "/repo",
+		RoomID:        "alpha",
+		RootMessageID: "msg-self",
+		Sender:        "gemini-a",
+		Recipient:     "gemini-a",
+		Subject:       "Check in",
+		Body:          "Check in and report status",
+		ReplyExpected: true,
+		Interval:      15 * time.Minute,
+		MaxIterations: 3,
+		Active:        true,
+		LastSentAt:    &lastSent,
+	}); err != nil {
+		t.Fatalf("UpsertRoomReminder: %v", err)
+	}
+
+	room := agent.RoomSummary{
+		ID:          "alpha",
+		WorkspaceID: "/repo",
+		Stream:      agent.RoomStreamName("alpha"),
+	}
+	messages := []agent.BoardMessage{{
+		ID:            "msg-self",
+		WorkspaceID:   "/repo",
+		Stream:        agent.RoomStreamName("alpha"),
+		Sender:        "gemini-a",
+		Recipient:     "gemini-a",
+		Kind:          agent.BoardMessageKindInstruction,
+		Priority:      agent.DefaultPriority,
+		ReplyExpected: true,
+		Status:        agent.BoardMessageStatusUnread,
+		Subject:       "Check in",
+		Body:          "Check in and report status",
+		CreatedAt:     now.Add(-30 * time.Minute),
+	}}
+
+	out, err := processRoomReminderTick(ctx, store, room, messages, now)
+	if err != nil {
+		t.Fatalf("processRoomReminderTick: %v", err)
+	}
+	if len(out) != 1 {
+		t.Fatalf("len(out)=%d want 1", len(out))
+	}
+	updated, err := store.GetRoomReminder(ctx, "/repo", "msg-self")
+	if err != nil {
+		t.Fatalf("GetRoomReminder: %v", err)
+	}
+	if updated == nil || !updated.Active || updated.SentCount != 1 {
+		t.Fatalf("updated=%+v want active reminder with sent_count=1", updated)
+	}
+}
+
 func TestBuildRoomStatusEntriesSkipsSystemReminderMessages(t *testing.T) {
 	entries := buildRoomStatusEntries("human-a", []agent.BoardMessage{
 		{
@@ -2394,7 +2482,7 @@ func TestBuildRoomStatusEntriesSkipsSystemReminderMessages(t *testing.T) {
 			ReplyExpected: true,
 			CreatedAt:     time.Date(2026, 4, 4, 19, 1, 0, 0, time.UTC),
 		},
-	})
+	}, nil)
 	if len(entries) != 1 {
 		t.Fatalf("len(entries)=%d want 1", len(entries))
 	}
@@ -2415,7 +2503,7 @@ func TestBuildRoomStatusEntriesSkipsNonActionableDirectInfo(t *testing.T) {
 			Status:    agent.BoardMessageStatusUnread,
 			CreatedAt: time.Date(2026, 4, 4, 19, 0, 0, 0, time.UTC),
 		},
-	})
+	}, nil)
 	if len(entries) != 0 {
 		t.Fatalf("len(entries)=%d want 0", len(entries))
 	}
