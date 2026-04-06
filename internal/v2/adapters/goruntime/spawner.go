@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -163,8 +164,10 @@ func (s *ChildSpawner) SpawnChild(ctx context.Context, req spawn.Request) (spawn
 		},
 	}
 	globalProcessRegistry.register(entry)
-	go s.streamLogs(req, workerID, "stdout", stdoutPipe)
-	go s.streamLogs(req, workerID, "stderr", stderrPipe)
+	var logWG sync.WaitGroup
+	logWG.Add(2)
+	go s.streamLogs(req, workerID, "stdout", stdoutPipe, &logWG)
+	go s.streamLogs(req, workerID, "stderr", stderrPipe, &logWG)
 
 	if err := s.publish(ctx, coreworker.LifecycleEvent{
 		EventKind:     coreworker.EventWorkerSpawned,
@@ -209,7 +212,7 @@ func (s *ChildSpawner) SpawnChild(ctx context.Context, req spawn.Request) (spawn
 		return spawn.Response{}, err
 	}
 
-	go s.waitAndPublish(req, workerID, cmd, entry)
+	go s.waitAndPublish(req, workerID, cmd, entry, &logWG)
 
 	return spawn.Response{
 		RunID:     strings.TrimSpace(req.RunID),
@@ -222,9 +225,12 @@ func (s *ChildSpawner) SpawnChild(ctx context.Context, req spawn.Request) (spawn
 	}, nil
 }
 
-func (s *ChildSpawner) waitAndPublish(req spawn.Request, workerID string, cmd *exec.Cmd, entry *processEntry) {
+func (s *ChildSpawner) waitAndPublish(req spawn.Request, workerID string, cmd *exec.Cmd, entry *processEntry, logWG *sync.WaitGroup) {
 	defer globalProcessRegistry.unregister(workerID, strings.TrimSpace(req.AgentID))
 	err := cmd.Wait()
+	if logWG != nil {
+		logWG.Wait()
+	}
 	now := s.now().UTC()
 	if err == nil {
 		cancelled, signalName, reason := false, "", ""
@@ -310,7 +316,10 @@ func (s *ChildSpawner) publish(ctx context.Context, evt coreworker.LifecycleEven
 	return s.publisher.Publish(ctx, evt)
 }
 
-func (s *ChildSpawner) streamLogs(req spawn.Request, workerID, stream string, reader io.ReadCloser) {
+func (s *ChildSpawner) streamLogs(req spawn.Request, workerID, stream string, reader io.ReadCloser, wg *sync.WaitGroup) {
+	if wg != nil {
+		defer wg.Done()
+	}
 	defer func() { _ = reader.Close() }()
 	scanner := bufio.NewScanner(reader)
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
