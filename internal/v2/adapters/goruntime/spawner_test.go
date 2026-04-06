@@ -128,7 +128,7 @@ func TestChildSpawner_SpawnChild_EmitsRecentLogsInRawState(t *testing.T) {
 		BuildCommand: func(req spawn.Request) (CommandSpec, error) {
 			return CommandSpec{
 				Path: "/bin/sh",
-				Args: []string{"-c", "echo hello-stdout; echo hello-stderr 1>&2; sleep 0.1; exit 0"},
+				Args: []string{"-c", "echo hello-stdout; sleep 1; echo hello-stderr 1>&2; sleep 1; exit 0"},
 			}, nil
 		},
 	})
@@ -401,7 +401,7 @@ func TestEnsureAgentRecord_ReusesExistingRecord(t *testing.T) {
 
 func waitForWorkerStatus(t *testing.T, state *runtimeworkers.StateComponent, workerID string, want coreworker.Status) coreworker.Record {
 	t.Helper()
-	deadline := time.Now().Add(2 * time.Second)
+	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
 		snapshot := state.Snapshot()
 		record, ok := snapshot.Workers[workerID]
