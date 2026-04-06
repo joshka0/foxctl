@@ -10,8 +10,10 @@ import (
 	"github.com/jkatigb/agentctl/internal/zellijbridge"
 )
 
-var newTmuxClient = func() *tmuxbridge.Client { return tmuxbridge.New() }
-var newZellijClient = func() *zellijbridge.Client { return zellijbridge.New() }
+var (
+	newTmuxClient   = func() *tmuxbridge.Client { return tmuxbridge.New() }
+	newZellijClient = func() *zellijbridge.Client { return zellijbridge.New() }
+)
 
 // CreateWatchPane allocates a terminal pane for a spawned agent watch stream and
 // returns the normalized terminal binding plus backend-specific metadata.

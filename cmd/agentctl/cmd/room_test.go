@@ -16,6 +16,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/domain/agent"
 	"github.com/jkatigb/agentctl/internal/domain/envelope"
 	ws "github.com/jkatigb/agentctl/internal/platform/workspace"
+	"github.com/jkatigb/agentctl/internal/storage/coordination"
 	taskstore "github.com/jkatigb/agentctl/internal/storage/tasks"
 	"github.com/jkatigb/agentctl/internal/tmuxbridge"
 	"github.com/spf13/cobra"
@@ -169,6 +170,15 @@ func TestRunRoomCreateDerivesCurrentParticipantAsCoordinator(t *testing.T) {
 			continue
 		}
 		if member["actor_id"] == "human-a" && member["role"] == "coordinator" {
+			if member["backend"] != "tmux" {
+				t.Fatalf("backend=%v want tmux", member["backend"])
+			}
+			if member["session"] != "14" {
+				t.Fatalf("session=%v want 14", member["session"])
+			}
+			if member["pane_id"] != "%18" {
+				t.Fatalf("pane_id=%v want %%18", member["pane_id"])
+			}
 			foundCoordinator = true
 			break
 		}
@@ -1347,6 +1357,60 @@ func TestRunRoomClearSystemReminders(t *testing.T) {
 	}
 }
 
+func TestRunRoomRemindLifecycle(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	ctx := context.Background()
+	workspace := t.TempDir()
+
+	cmd, _ := newRoomTestCommand(ctx)
+	if err := runRoomCreate(cmd, workspace, "alpha", "Alpha", "", []string{"human-a=coordinator", "gemini-a=reviewer"}); err != nil {
+		t.Fatalf("runRoomCreate: %v", err)
+	}
+
+	cmd, out := newRoomTestCommand(ctx)
+	if err := runRoomRemindAdd(cmd, workspace, "human-a", "alpha", "gemini-a", "", "Check MR !26 and report status", 15*time.Minute, 3, false, true, true); err != nil {
+		t.Fatalf("runRoomRemindAdd: %v", err)
+	}
+	data := decodeRoomEnvelope(t, out)
+	reminder := data["reminder"].(map[string]any)
+	reminderID := reminder["id"].(string)
+	if reminder["reply_expected"] != true {
+		t.Fatalf("reply_expected=%v want true", reminder["reply_expected"])
+	}
+
+	cmd, out = newRoomTestCommand(ctx)
+	if err := runRoomRemindList(cmd, workspace, "alpha", false); err != nil {
+		t.Fatalf("runRoomRemindList: %v", err)
+	}
+	data = decodeRoomEnvelope(t, out)
+	if got := data["count"]; got != float64(1) {
+		t.Fatalf("count=%v want 1", got)
+	}
+
+	cmd, out = newRoomTestCommand(ctx)
+	if err := runRoomRemindCancel(cmd, workspace, "human-a", "alpha", reminderID); err != nil {
+		t.Fatalf("runRoomRemindCancel: %v", err)
+	}
+	data = decodeRoomEnvelope(t, out)
+	cancelled := data["reminder"].(map[string]any)
+	if cancelled["active"] != false {
+		t.Fatalf("active=%v want false", cancelled["active"])
+	}
+
+	cmd, out = newRoomTestCommand(ctx)
+	if err := runRoomRemindList(cmd, workspace, "alpha", true); err != nil {
+		t.Fatalf("runRoomRemindList all: %v", err)
+	}
+	data = decodeRoomEnvelope(t, out)
+	reminders := data["reminders"].([]any)
+	if len(reminders) != 1 {
+		t.Fatalf("len(reminders)=%d want 1", len(reminders))
+	}
+	if reminders[0].(map[string]any)["active"] != false {
+		t.Fatalf("listed active=%v want false", reminders[0].(map[string]any)["active"])
+	}
+}
+
 func TestRunRoomPlanStartAndShow(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	ctx := context.Background()
@@ -2221,6 +2285,79 @@ func TestDetectRoomPulseEscalationMessagesAfterInterruptBudget(t *testing.T) {
 	}
 	if !pulses[0].Message.Interrupt {
 		t.Fatalf("interrupt=%v want true", pulses[0].Message.Interrupt)
+	}
+}
+
+func TestProcessRoomReminderTickEmitsScheduledFollowUp(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	ctx := context.Background()
+	storageRoot := filepath.Join(t.TempDir(), "storage")
+	store, err := coordination.Open(ctx, storageRoot)
+	if err != nil {
+		t.Fatalf("coordination.Open: %v", err)
+	}
+	defer store.Close()
+
+	now := time.Now().UTC()
+	lastSent := now.Add(-20 * time.Minute)
+	if _, err := store.UpsertRoomReminder(ctx, coordination.RoomReminder{
+		ID:            "msg-1",
+		WorkspaceID:   "/repo",
+		RoomID:        "alpha",
+		RootMessageID: "msg-1",
+		Sender:        "human-a",
+		Recipient:     "gemini-a",
+		Subject:       "Check MR !26",
+		Body:          "Check MR !26 and report status",
+		ReplyExpected: true,
+		Interrupt:     true,
+		Interval:      15 * time.Minute,
+		MaxIterations: 3,
+		Active:        true,
+		LastSentAt:    &lastSent,
+	}); err != nil {
+		t.Fatalf("UpsertRoomReminder: %v", err)
+	}
+
+	room := agent.RoomSummary{
+		ID:          "alpha",
+		WorkspaceID: "/repo",
+		Stream:      agent.RoomStreamName("alpha"),
+	}
+	messages := []agent.BoardMessage{{
+		ID:            "msg-1",
+		WorkspaceID:   "/repo",
+		Stream:        agent.RoomStreamName("alpha"),
+		Sender:        "human-a",
+		Recipient:     "gemini-a",
+		Kind:          agent.BoardMessageKindInstruction,
+		Priority:      agent.DefaultPriority,
+		ReplyExpected: true,
+		Status:        agent.BoardMessageStatusUnread,
+		Subject:       "Check MR !26",
+		Body:          "Check MR !26 and report status",
+		CreatedAt:     now.Add(-30 * time.Minute),
+	}}
+
+	out, err := processRoomReminderTick(ctx, store, room, messages, now)
+	if err != nil {
+		t.Fatalf("processRoomReminderTick: %v", err)
+	}
+	if len(out) != 1 {
+		t.Fatalf("len(out)=%d want 1", len(out))
+	}
+	if out[0].Recipient != "gemini-a" {
+		t.Fatalf("recipient=%q want gemini-a", out[0].Recipient)
+	}
+	if out[0].Interrupt != true {
+		t.Fatalf("interrupt=%v want true", out[0].Interrupt)
+	}
+	updated, err := store.GetRoomReminder(ctx, "/repo", "msg-1")
+	if err != nil {
+		t.Fatalf("GetRoomReminder: %v", err)
+	}
+	if updated == nil || updated.SentCount != 1 {
+		t.Fatalf("sent_count=%v want 1", updated)
 	}
 }
 

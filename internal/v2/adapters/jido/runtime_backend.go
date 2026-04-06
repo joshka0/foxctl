@@ -10,8 +10,10 @@ import (
 	coreworker "github.com/jkatigb/agentctl/internal/v2/core/worker"
 )
 
-var _ coreworker.Spawner = (*ChildSpawner)(nil)
-var _ coreworker.StateReader = (*RuntimeAdapter)(nil)
+var (
+	_ coreworker.Spawner     = (*ChildSpawner)(nil)
+	_ coreworker.StateReader = (*RuntimeAdapter)(nil)
+)
 
 // Worker reads one Jido-backed worker snapshot as a runtime-neutral worker record.
 func (a *RuntimeAdapter) Worker(ctx context.Context, req coreworker.LookupRequest) (coreworker.Record, error) {

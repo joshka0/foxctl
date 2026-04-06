@@ -1139,6 +1139,30 @@ func runRoomLoop(cmd *cobra.Command, workspace, roomID string, relay roomRelayOp
 				pulse = updatedPulse
 				pulseTicker = resetRoomPulseTicker(pulseTicker, pulse)
 			}
+			summary, current, err := loadRoomState(cmd.Context(), boardStore, absWorkspace, roomID, "", roomTaskScanLimit)
+			if err != nil {
+				return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.loop", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+			}
+			reminderMessages, err := processRoomReminderTick(cmd.Context(), coordStore, summary, current, time.Now().UTC())
+			if err != nil {
+				return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.loop", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+			}
+			for _, msg := range reminderMessages {
+				if err := boardStore.SendMessage(cmd.Context(), &msg); err != nil {
+					return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.loop", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+				}
+				seenMessages[msg.ID] = struct{}{}
+				seq++
+				result := relayRoomMessage(cmd.Context(), client, summary, msg, relay)
+				if err := writer.Write(roomProgressEnvelope("agentctl.room.loop", seq, false, map[string]any{
+					"event":   "room_reminder",
+					"room_id": roomID,
+					"message": msg,
+					"relay":   result,
+				}, absWorkspace)); err != nil {
+					return fmt.Errorf("write room loop reminder envelope: %w", err)
+				}
+			}
 		case <-roomPulseChan(pulseTicker):
 			summary, current, err := loadRoomState(cmd.Context(), boardStore, absWorkspace, roomID, "", roomTaskScanLimit)
 			if err != nil {
@@ -1389,6 +1413,99 @@ type roomPulseState struct {
 	LastSentAt time.Time
 	Count      int
 	Escalated  bool
+}
+
+func processRoomReminderTick(ctx context.Context, coordStore *coordination.Store, room agent.RoomSummary, messages []agent.BoardMessage, now time.Time) ([]agent.BoardMessage, error) {
+	if coordStore == nil {
+		return nil, nil
+	}
+	reminders, err := coordStore.ListRoomReminders(ctx, room.WorkspaceID, room.ID, false)
+	if err != nil {
+		return nil, err
+	}
+	if len(reminders) == 0 {
+		return nil, nil
+	}
+	latestBySender := latestRoomSenderActivity(messages)
+	out := make([]agent.BoardMessage, 0, len(reminders))
+	for _, reminder := range reminders {
+		if !reminder.Active {
+			continue
+		}
+		if roomReminderSatisfied(reminder.RootMessageID, messages, latestBySender) || reminder.SentCount >= reminder.MaxIterations {
+			reminder.Active = false
+			if _, err := coordStore.UpsertRoomReminder(ctx, reminder); err != nil {
+				return nil, err
+			}
+			continue
+		}
+		if reminder.LastSentAt != nil && !reminder.LastSentAt.IsZero() && now.Sub(*reminder.LastSentAt) < reminder.Interval {
+			continue
+		}
+		out = append(out, buildRoomReminderMessage(room, reminder, now))
+		reminder.SentCount++
+		sentAt := now
+		reminder.LastSentAt = &sentAt
+		if reminder.SentCount >= reminder.MaxIterations {
+			reminder.Active = false
+		}
+		if _, err := coordStore.UpsertRoomReminder(ctx, reminder); err != nil {
+			return nil, err
+		}
+	}
+	return out, nil
+}
+
+func roomReminderSatisfied(rootMessageID string, messages []agent.BoardMessage, latestBySender map[string]time.Time) bool {
+	rootMessageID = strings.TrimSpace(rootMessageID)
+	if rootMessageID == "" {
+		return true
+	}
+	var root *agent.BoardMessage
+	for i := range messages {
+		if strings.TrimSpace(messages[i].ID) == rootMessageID {
+			root = &messages[i]
+			break
+		}
+	}
+	if root == nil {
+		return true
+	}
+	chainKey := rootMessageID
+	for _, msg := range messages {
+		if roomMessageChainKey(msg) != chainKey && strings.TrimSpace(msg.ID) != chainKey {
+			continue
+		}
+		if msg.Status == agent.BoardMessageStatusAcked || msg.Status == agent.BoardMessageStatusRead {
+			return true
+		}
+	}
+	if root.ReplyExpected && !messageStillAwaitsReply(*root, latestBySender) {
+		return true
+	}
+	return false
+}
+
+func buildRoomReminderMessage(room agent.RoomSummary, reminder coordination.RoomReminder, now time.Time) agent.BoardMessage {
+	subject := fmt.Sprintf("Reminder (%d/%d): %s", reminder.SentCount+1, reminder.MaxIterations, strings.TrimSpace(reminder.Subject))
+	body := fmt.Sprintf("Scheduled follow-up for message %s.\nOriginal sender: %s\nOriginal request: %s", strings.TrimSpace(reminder.RootMessageID), strings.TrimSpace(reminder.Sender), strings.TrimSpace(reminder.Subject))
+	if strings.TrimSpace(reminder.Body) != "" && strings.TrimSpace(reminder.Body) != strings.TrimSpace(reminder.Subject) {
+		body += "\nOriginal body: " + strings.TrimSpace(reminder.Body)
+	}
+	body += fmt.Sprintf("\nReminder iteration: %d of %d", reminder.SentCount+1, reminder.MaxIterations)
+	return agent.BoardMessage{
+		WorkspaceID:      room.WorkspaceID,
+		RelatedMessageID: strings.TrimSpace(reminder.RootMessageID),
+		Stream:           room.Stream,
+		Sender:           roomLoopSender(room.ID),
+		Recipient:        strings.TrimSpace(reminder.Recipient),
+		Kind:             agent.BoardMessageKindAlert,
+		Priority:         2,
+		Interrupt:        reminder.Interrupt,
+		Subject:          subject,
+		Body:             body,
+		CreatedAt:        now,
+	}
 }
 
 func markRoomPulseState(states map[string]roomPulseState, key string, sentAt time.Time, escalated bool) {

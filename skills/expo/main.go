@@ -337,8 +337,8 @@ func debugStatus(ctx context.Context, rc *skillmain.RunContext, platform, device
 		"log_sources":         logSources,
 		"metro_running_guess": anyRecentLogSource(logSources, time.Now().UTC(), 15*time.Minute),
 		"recommended_debugger": map[string]any{
-			"name":     "React Native DevTools",
-			"engine":   "Hermes",
+			"name":      "React Native DevTools",
+			"engine":    "Hermes",
 			"open_hint": "For Expo apps, press 'j' in the terminal where Expo was started.",
 		},
 		"agentctl_paths": map[string]any{

@@ -32,6 +32,7 @@ description: "Durable multi-agent room coordination with shared chat, direct req
 - `room relay` mirrors room messages into terminal panes.
 - `mux submit` is the convenience submit gesture when a live pane already has drafted text waiting in its composer.
 - `room interview` runs a durable round-robin clarification loop inside the room.
+- `room remind` schedules bounded durable follow-ups for direct requests.
 - `room task` links shared tasks to the room.
 - `room loop` runs the central coordination loop:
   - relay new messages
@@ -90,6 +91,9 @@ MCP exposure:
 - the MCP facade exposes this as `room_interview`
 - actions: `start`, `ask`, `answer`, `verify`, `next`, `show`
 - prefer `room_interview.next` or `room status --only interview` when you need the next actionable clarification item rather than raw transcript history
+- the MCP facade also exposes `room_remind`
+- actions: `add`, `list`, `cancel`
+- use it for scheduled check-ins like “check MR !26 in 15 minutes and reply with status”
 
 Startup injection:
 
@@ -134,6 +138,18 @@ agentctl room interview answer <room-id> <question-id> "Answer text" --sender <r
 agentctl room interview next <room-id> --actor <verifier>
 agentctl room interview verify <room-id> <answer-id> accept "Matches the intended meaning" --sender <verifier>
 agentctl room status <room-id> --only interview
+```
+
+For bounded scheduled follow-ups, use:
+
+```bash
+agentctl room remind add <room-id> <participant> "Check MR !26 and report status" \
+  --every 15m \
+  --max-iterations 3 \
+  --reply-expected
+
+agentctl room remind list <room-id>
+agentctl room remind cancel <room-id> <reminder-id>
 ```
 
 ## Task note format

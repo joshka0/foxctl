@@ -17,6 +17,7 @@ This skill is about **room operating protocol**, not room creation.
 - you are acting as coordinator or reviewer in a live room
 - you need to know whether to `send`, `ack`, `resolve`, `claim`, `touch`, `block`, or `complete`
 - you need to answer or verify a room interview question
+- you need to manage a bounded scheduled follow-up for a participant
 
 ## Core rules
 
@@ -121,6 +122,19 @@ Use:
 ```bash
 agentctl room send <room-id> "Need coordinator input on <issue>" --to @coordinator --reply-expected
 ```
+
+### I need a durable scheduled follow-up
+
+Use:
+
+```bash
+agentctl room remind add <room-id> <participant> "Check MR !26 and report status" \
+  --every 15m \
+  --max-iterations 3 \
+  --reply-expected
+```
+
+This writes the original direct request now, then lets the room loop send bounded reminder follow-ups until the recipient replies or the retry budget is exhausted.
 
 ### I am the interview respondent
 

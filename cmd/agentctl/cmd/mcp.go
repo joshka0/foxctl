@@ -1572,6 +1572,28 @@ func registerRoomTools(s *server.MCPServer) {
 	)
 
 	s.AddTool(
+		mcp.NewTool("room_remind",
+			mcp.WithDescription("Command-backed durable room follow-up scheduler. Actions: add, list, cancel."),
+			mcp.WithString("action", mcp.Required(), mcp.Description("Reminder action to run")),
+			mcp.WithString("workspace", mcp.Description("Workspace root override (default: .)")),
+			mcp.WithString("room_id", mcp.Description("Room id")),
+			mcp.WithString("sender", mcp.Description("Sender actor or participant id override")),
+			mcp.WithString("actor", mcp.Description("Coordinator actor id for cancel")),
+			mcp.WithString("recipient", mcp.Description("Direct reminder recipient")),
+			mcp.WithString("subject", mcp.Description("Optional root message subject")),
+			mcp.WithString("text", mcp.Description("Reminder request text")),
+			mcp.WithString("every", mcp.Description("Reminder interval duration")),
+			mcp.WithNumber("max_iterations", mcp.Description("Maximum reminder follow-ups after the initial request")),
+			mcp.WithBoolean("ack_required", mcp.Description("Require ack to stop reminders")),
+			mcp.WithBoolean("reply_expected", mcp.Description("Require reply to stop reminders")),
+			mcp.WithBoolean("interrupt", mcp.Description("Interrupt the target pane for reminder follow-ups")),
+			mcp.WithString("reminder_id", mcp.Description("Reminder id for cancel")),
+			mcp.WithBoolean("all", mcp.Description("Include inactive reminders when listing")),
+		),
+		handleRoomRemindTool,
+	)
+
+	s.AddTool(
 		mcp.NewTool("agent_room",
 			mcp.WithDescription("Command-backed agent control-room tool. Actions: info, policy."),
 			mcp.WithString("action", mcp.Required(), mcp.Description("Agent room action to run")),
@@ -4034,6 +4056,54 @@ func handleRoomInterviewTool(ctx context.Context, req mcp.CallToolRequest) (*mcp
 		return mcp.NewToolResultError("unsupported room_interview action: " + action), nil
 	}
 	return runCLICommandAsMCP(ctx, "room_interview", newRoomCommand, argv)
+}
+
+func handleRoomRemindTool(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	args := getArgs(req)
+	action := getStringArg(args, "action", "")
+	roomID := getStringArg(args, "room_id", "")
+	if roomID == "" {
+		return mcp.NewToolResultError("room_id is required"), nil
+	}
+	workspace := getStringArg(args, "workspace", "")
+	argv := []string{"remind", action, roomID}
+	switch action {
+	case "add":
+		recipient := getStringArg(args, "recipient", "")
+		text := getStringArg(args, "text", "")
+		if recipient == "" || text == "" {
+			return mcp.NewToolResultError("recipient and text are required for room_remind add"), nil
+		}
+		argv = append(argv, recipient, text)
+		argv = appendStringFlagArgs(argv, "--workspace", workspace)
+		argv = appendStringFlagArgs(argv, "--sender", getStringArg(args, "sender", ""))
+		argv = appendStringFlagArgs(argv, "--subject", getStringArg(args, "subject", ""))
+		argv = appendDurationFlagArgs(argv, "--every", getStringArg(args, "every", ""))
+		argv = appendIntFlagArgs(argv, "--max-iterations", getIntArg(args, "max_iterations", 0))
+		argv = appendBoolFlagArgs(argv, "--ack-required", getBoolArg(args, "ack_required", false))
+		if _, ok := args["reply_expected"]; ok {
+			if getBoolArg(args, "reply_expected", false) {
+				argv = append(argv, "--reply-expected")
+			} else {
+				argv = append(argv, "--reply-expected=false")
+			}
+		}
+		argv = appendBoolFlagArgs(argv, "--interrupt", getBoolArg(args, "interrupt", false))
+	case "list":
+		argv = appendStringFlagArgs(argv, "--workspace", workspace)
+		argv = appendBoolFlagArgs(argv, "--all", getBoolArg(args, "all", false))
+	case "cancel":
+		reminderID := getStringArg(args, "reminder_id", "")
+		if reminderID == "" {
+			return mcp.NewToolResultError("reminder_id is required for room_remind cancel"), nil
+		}
+		argv = append(argv, reminderID)
+		argv = appendStringFlagArgs(argv, "--workspace", workspace)
+		argv = appendStringFlagArgs(argv, "--actor", getStringArg(args, "actor", ""))
+	default:
+		return mcp.NewToolResultError("unsupported room_remind action: " + action), nil
+	}
+	return runCLICommandAsMCP(ctx, "room_remind", newRoomCommand, argv)
 }
 
 func handleAgentRoomTool(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {

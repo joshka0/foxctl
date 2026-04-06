@@ -21,9 +21,11 @@ const (
 	defaultOrchestrationEventIDPref = "evt"
 )
 
-type EventAppender = v2jido.EventAppender
-type ProjectionApplier = v2jido.ProjectionApplier
-type OrchestrationCardReader = v2jido.OrchestrationCardReader
+type (
+	EventAppender           = v2jido.EventAppender
+	ProjectionApplier       = v2jido.ProjectionApplier
+	OrchestrationCardReader = v2jido.OrchestrationCardReader
+)
 
 // OrchestrationReconciler converts subprocess spawn and worker outcomes into canonical orchestration events.
 type OrchestrationReconciler struct {

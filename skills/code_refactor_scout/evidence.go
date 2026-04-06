@@ -18,8 +18,10 @@ import (
 	"github.com/jkatigb/agentctl/internal/repoquery"
 )
 
-const maxEvidenceHotspots = 5
-const maxIndexedHotspotEvidence = 20
+const (
+	maxEvidenceHotspots       = 5
+	maxIndexedHotspotEvidence = 20
+)
 
 type scoutEvidenceResult struct {
 	SnapshotID       string

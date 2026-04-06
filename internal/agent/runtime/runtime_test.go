@@ -271,8 +271,11 @@ func TestSpawnPersistsResolvedPromptVariant(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Get() error = %v", err)
 	}
-	if stored.Prompt != "resolved runtime prompt" {
-		t.Fatalf("stored.Prompt=%q want resolved runtime prompt", stored.Prompt)
+	if !strings.HasPrefix(stored.Prompt, "resolved runtime prompt") {
+		t.Fatalf("stored.Prompt=%q want prefix resolved runtime prompt", stored.Prompt)
+	}
+	if !strings.Contains(stored.Prompt, "STRUCTURED SHELL POLICY:") {
+		t.Fatalf("stored.Prompt=%q missing shell guidance", stored.Prompt)
 	}
 	if stored.PromptHash == "" {
 		t.Fatal("stored.PromptHash is empty")

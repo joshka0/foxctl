@@ -17,8 +17,6 @@ import (
 )
 
 func TestLogCleanupHandlerDeletesMatchingEntries(t *testing.T) {
-	t.Parallel()
-
 	obsDir := t.TempDir()
 	t.Setenv("AGENTCTL_OBS_DIR", obsDir)
 	writeWideEventsFileForAPITest(t, obsDir, []observability.WideEvent{

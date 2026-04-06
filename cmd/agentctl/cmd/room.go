@@ -18,6 +18,7 @@ import (
 	ws "github.com/jkatigb/agentctl/internal/platform/workspace"
 	"github.com/jkatigb/agentctl/internal/protocol"
 	"github.com/jkatigb/agentctl/internal/storage/blackboard"
+	"github.com/jkatigb/agentctl/internal/storage/coordination"
 	taskstore "github.com/jkatigb/agentctl/internal/storage/tasks"
 	"github.com/jkatigb/agentctl/internal/tmuxbridge"
 	"github.com/jkatigb/agentctl/internal/zellijbridge"
@@ -47,6 +48,7 @@ func newRoomCommand() *cobra.Command {
 		newRoomClearCommand(),
 		newRoomPlanCommand(),
 		newRoomInterviewCommand(),
+		newRoomRemindCommand(),
 		newRoomJoinCommand(),
 		newRoomLeaveCommand(),
 		newRoomTaskCommand(),
@@ -54,6 +56,85 @@ func newRoomCommand() *cobra.Command {
 		newRoomRelayCommand(),
 		newRoomLoopCommand(),
 	)
+	return cmd
+}
+
+func newRoomRemindCommand() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "remind",
+		Short: "Manage durable scheduled room follow-ups",
+	}
+	cmd.AddCommand(
+		newRoomRemindAddCommand(),
+		newRoomRemindListCommand(),
+		newRoomRemindCancelCommand(),
+	)
+	return cmd
+}
+
+func newRoomRemindAddCommand() *cobra.Command {
+	var (
+		workspace     string
+		sender        string
+		subject       string
+		every         time.Duration
+		maxIterations int
+		replyExpected bool
+		ackRequired   bool
+		interrupt     bool
+	)
+	cmd := &cobra.Command{
+		Use:   "add <room-id> <recipient> <text>",
+		Short: "Create a durable scheduled follow-up for one participant",
+		Args:  cobra.ExactArgs(3),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runRoomRemindAdd(cmd, workspace, sender, args[0], args[1], subject, args[2], every, maxIterations, ackRequired, replyExpected, interrupt)
+		},
+	}
+	cmd.Flags().StringVar(&workspace, "workspace", ".", "Workspace root override")
+	cmd.Flags().StringVar(&sender, "sender", "", "Sender actor or participant id (defaults to current tmux/zellij pane)")
+	cmd.Flags().StringVar(&subject, "subject", "", "Optional root message subject")
+	cmd.Flags().DurationVar(&every, "every", 15*time.Minute, "Reminder interval")
+	cmd.Flags().IntVar(&maxIterations, "max-iterations", 3, "Maximum reminder follow-ups after the initial request")
+	cmd.Flags().BoolVar(&replyExpected, "reply-expected", true, "Require a reply to stop reminders")
+	cmd.Flags().BoolVar(&ackRequired, "ack-required", false, "Require an ack to stop reminders")
+	cmd.Flags().BoolVar(&interrupt, "interrupt", false, "Interrupt the target pane for reminder follow-ups")
+	return cmd
+}
+
+func newRoomRemindListCommand() *cobra.Command {
+	var (
+		workspace       string
+		includeInactive bool
+	)
+	cmd := &cobra.Command{
+		Use:   "list <room-id>",
+		Short: "List durable scheduled room follow-ups",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runRoomRemindList(cmd, workspace, args[0], includeInactive)
+		},
+	}
+	cmd.Flags().StringVar(&workspace, "workspace", ".", "Workspace root override")
+	cmd.Flags().BoolVar(&includeInactive, "all", false, "Include completed and cancelled reminders")
+	return cmd
+}
+
+func newRoomRemindCancelCommand() *cobra.Command {
+	var (
+		workspace string
+		actorID   string
+	)
+	cmd := &cobra.Command{
+		Use:   "cancel <room-id> <reminder-id>",
+		Short: "Cancel one durable room follow-up",
+		Args:  cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runRoomRemindCancel(cmd, workspace, actorID, args[0], args[1])
+		},
+	}
+	cmd.Flags().StringVar(&workspace, "workspace", ".", "Workspace root override")
+	cmd.Flags().StringVar(&actorID, "actor", "", "Coordinator actor or participant id (defaults to current tmux/zellij pane)")
 	return cmd
 }
 
@@ -955,7 +1036,13 @@ func runRoomCreateWithProvision(cmd *cobra.Command, workspace, roomID, title, de
 	}
 	members := roomMembersFromSpecs(memberSpecs)
 	if identity, err := resolveRoomSender(cmd.Context(), ""); err == nil {
-		members = ensureRoomCoordinator(members, identity.Sender)
+		members = ensureRoomCoordinatorMember(members, agent.RoomMember{
+			ActorID: identity.Sender,
+			Role:    "coordinator",
+			Backend: identity.Backend,
+			Session: identity.Session,
+			PaneID:  identity.PaneID,
+		})
 	}
 	memberSpecs = mergeProvisionSpecsWithMembers(memberSpecs, members)
 
@@ -994,23 +1081,36 @@ func runRoomCreateWithProvision(cmd *cobra.Command, workspace, roomID, title, de
 }
 
 func ensureRoomCoordinator(existing []agent.RoomMember, actorID string) []agent.RoomMember {
-	actorID = strings.TrimSpace(actorID)
-	if actorID == "" {
+	return ensureRoomCoordinatorMember(existing, agent.RoomMember{ActorID: actorID, Role: "coordinator"})
+}
+
+func ensureRoomCoordinatorMember(existing []agent.RoomMember, member agent.RoomMember) []agent.RoomMember {
+	member = normalizeRoomMember(member)
+	if strings.TrimSpace(member.ActorID) == "" {
 		return existing
 	}
 	out := make([]agent.RoomMember, len(existing))
 	copy(out, existing)
 	for i := range out {
 		out[i] = normalizeRoomMember(out[i])
-		if strings.TrimSpace(out[i].ActorID) != actorID {
+		if strings.TrimSpace(out[i].ActorID) != member.ActorID {
 			continue
 		}
 		if strings.TrimSpace(out[i].Role) == "" {
 			out[i].Role = "coordinator"
 		}
+		if out[i].Backend == "" {
+			out[i].Backend = member.Backend
+		}
+		if out[i].Session == "" {
+			out[i].Session = member.Session
+		}
+		if out[i].PaneID == "" {
+			out[i].PaneID = member.PaneID
+		}
 		return out
 	}
-	return append(out, normalizeRoomMember(agent.RoomMember{ActorID: actorID, Role: "coordinator"}))
+	return append(out, member)
 }
 
 func runRoomList(cmd *cobra.Command, workspace, actorID string, limit int) error {
@@ -1311,6 +1411,182 @@ func runRoomSend(cmd *cobra.Command, workspace, roomID, sender, recipient, subje
 		"message_id":      msg.ID,
 		"message":         msg,
 		"sender_identity": identity,
+	}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+}
+
+func runRoomRemindAdd(cmd *cobra.Command, workspace, sender, roomID, recipient, subject, body string, every time.Duration, maxIterations int, ackRequired, replyExpected, interrupt bool) error {
+	absWorkspace, err := resolveRoomWorkspace(workspace)
+	if err != nil {
+		return err
+	}
+	if !ackRequired && !replyExpected {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.remind.add", protocol.ErrorCodeEARG, "room remind requires --ack-required or --reply-expected", map[string]any{
+			"hint": "Use --reply-expected for check-ins that need a response, or --ack-required for simple confirmation reminders.",
+		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	if every <= 0 {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.remind.add", protocol.ErrorCodeEARG, "every must be positive", nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	if maxIterations <= 0 {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.remind.add", protocol.ErrorCodeEARG, "max-iterations must be positive", nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	identity, err := resolveRoomSender(cmd.Context(), sender)
+	if err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.remind.add", protocol.ErrorCodeEARG, err.Error(), map[string]any{
+			"hint": "Pass --sender when outside tmux/zellij, or run inside a prepared pane so agentctl can derive the participant id.",
+		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	boardStore, err := openRoomBoardStore(cmd.Context())
+	if err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.remind.add", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	defer boardStore.Close()
+	recipient, err = resolveRoomRecipient(cmd.Context(), boardStore, absWorkspace, roomID, recipient)
+	if err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.remind.add", protocol.ErrorCodeEARG, err.Error(), map[string]any{
+			"hint": "Use a direct room participant id or @coordinator. Broadcast reminders are not supported.",
+		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	if recipient == agent.BroadcastRecipient {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.remind.add", protocol.ErrorCodeEARG, "room remind requires a direct recipient", nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	if strings.TrimSpace(subject) == "" {
+		subject = deriveRoomSubject(body)
+	}
+	root := &agent.BoardMessage{
+		WorkspaceID:   absWorkspace,
+		Stream:        agent.RoomStreamName(strings.TrimSpace(roomID)),
+		Sender:        identity.Sender,
+		Recipient:     recipient,
+		Kind:          agent.BoardMessageKindInstruction,
+		Priority:      agent.DefaultPriority,
+		AckRequired:   ackRequired,
+		ReplyExpected: replyExpected,
+		Interrupt:     interrupt,
+		Subject:       subject,
+		Body:          strings.TrimSpace(body),
+	}
+	if err := boardStore.SendMessage(cmd.Context(), root); err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.remind.add", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	cfg, err := loadConfig(cmd.Context())
+	if err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.remind.add", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	coordStore, err := coordination.Open(cmd.Context(), cfg.Storage.Root)
+	if err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.remind.add", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	defer coordStore.Close()
+	reminder, err := coordStore.UpsertRoomReminder(cmd.Context(), coordination.RoomReminder{
+		ID:            root.ID,
+		WorkspaceID:   absWorkspace,
+		RoomID:        strings.TrimSpace(roomID),
+		RootMessageID: root.ID,
+		Sender:        identity.Sender,
+		Recipient:     recipient,
+		Subject:       subject,
+		Body:          strings.TrimSpace(body),
+		AckRequired:   ackRequired,
+		ReplyExpected: replyExpected,
+		Interrupt:     interrupt,
+		Interval:      every,
+		MaxIterations: maxIterations,
+		LastSentAt:    &root.CreatedAt,
+		Active:        true,
+	})
+	if err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.remind.add", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	return protocol.WriteOK(cmd.OutOrStdout(), "agentctl.room.remind.add", map[string]any{
+		"room_id":   roomID,
+		"message":   root,
+		"reminder":  reminder,
+		"actor_id":  identity.Sender,
+		"recipient": recipient,
+	}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+}
+
+func runRoomRemindList(cmd *cobra.Command, workspace, roomID string, includeInactive bool) error {
+	absWorkspace, err := resolveRoomWorkspace(workspace)
+	if err != nil {
+		return err
+	}
+	cfg, err := loadConfig(cmd.Context())
+	if err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.remind.list", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	coordStore, err := coordination.Open(cmd.Context(), cfg.Storage.Root)
+	if err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.remind.list", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	defer coordStore.Close()
+	reminders, err := coordStore.ListRoomReminders(cmd.Context(), absWorkspace, strings.TrimSpace(roomID), includeInactive)
+	if err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.remind.list", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	return protocol.WriteOK(cmd.OutOrStdout(), "agentctl.room.remind.list", map[string]any{
+		"room_id":   roomID,
+		"count":     len(reminders),
+		"reminders": reminders,
+	}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+}
+
+func runRoomRemindCancel(cmd *cobra.Command, workspace, actorID, roomID, reminderID string) error {
+	absWorkspace, err := resolveRoomWorkspace(workspace)
+	if err != nil {
+		return err
+	}
+	identity, err := resolveRoomSender(cmd.Context(), actorID)
+	if err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.remind.cancel", protocol.ErrorCodeEARG, err.Error(), map[string]any{
+			"hint": "Pass --actor when outside tmux/zellij, or run inside a prepared pane so agentctl can derive the participant id.",
+		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	boardStore, err := openRoomBoardStore(cmd.Context())
+	if err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.remind.cancel", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	defer boardStore.Close()
+	summary, _, err := loadRoomState(cmd.Context(), boardStore, absWorkspace, roomID, identity.Sender, 1)
+	if err != nil {
+		code := protocol.ErrorCodeERuntime
+		if errors.Is(err, blackboard.ErrRoomNotFound) {
+			code = protocol.ErrorCodeENotFound
+		}
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.remind.cancel", code, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	if !roomMemberHasRole(summary.Members, identity.Sender, "coordinator") {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.remind.cancel", protocol.ErrorCodeEARG, "room remind cancel requires coordinator role", map[string]any{
+			"hint": "Run the command as the room coordinator or transfer coordinator ownership first.",
+		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	cfg, err := loadConfig(cmd.Context())
+	if err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.remind.cancel", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	coordStore, err := coordination.Open(cmd.Context(), cfg.Storage.Root)
+	if err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.remind.cancel", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	defer coordStore.Close()
+	reminder, err := coordStore.GetRoomReminder(cmd.Context(), absWorkspace, reminderID)
+	if err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.remind.cancel", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	if reminder == nil || strings.TrimSpace(reminder.RoomID) != strings.TrimSpace(roomID) {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.remind.cancel", protocol.ErrorCodeENotFound, fmt.Sprintf("reminder %q not found", reminderID), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	reminder.Active = false
+	updated, err := coordStore.UpsertRoomReminder(cmd.Context(), *reminder)
+	if err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.remind.cancel", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	return protocol.WriteOK(cmd.OutOrStdout(), "agentctl.room.remind.cancel", map[string]any{
+		"room_id":   roomID,
+		"actor_id":  identity.Sender,
+		"reminder":  updated,
+		"cancelled": true,
 	}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
 }
 

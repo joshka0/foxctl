@@ -47,7 +47,7 @@ func TestApplyConfidenceScoresDifferentiatesDeadCodeRules(t *testing.T) {
 			RuleID:     "unreachable_private_symbol",
 			Confidence: "high",
 			Evidence: map[string]any{
-				"incoming_ref_count":    0,
+				"incoming_ref_count":     0,
 				"external_non_test_refs": 0,
 			},
 		},
@@ -55,7 +55,7 @@ func TestApplyConfidenceScoresDifferentiatesDeadCodeRules(t *testing.T) {
 			RuleID:     "stale_export_candidate",
 			Confidence: "medium",
 			Evidence: map[string]any{
-				"incoming_ref_count":    0,
+				"incoming_ref_count":     0,
 				"external_non_test_refs": 0,
 			},
 		},

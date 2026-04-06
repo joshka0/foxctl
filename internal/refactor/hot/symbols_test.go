@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	refsnapshot "github.com/jkatigb/agentctl/internal/refactor/snapshot"
 	refscope "github.com/jkatigb/agentctl/internal/refactor/scope"
+	refsnapshot "github.com/jkatigb/agentctl/internal/refactor/snapshot"
 	refstatus "github.com/jkatigb/agentctl/internal/refactor/status"
 )
 
