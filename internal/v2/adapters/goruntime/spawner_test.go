@@ -147,9 +147,9 @@ func TestChildSpawner_SpawnChild_EmitsRecentLogsInRawState(t *testing.T) {
 	}
 
 	_ = waitForWorkerStatus(t, state, "subprocess:agent:logs-1", coreworker.StatusCompleted)
-	recentLogs := waitForRecentLogTexts(t, state, "subprocess:agent:logs-1", "hello-stdout", "hello-stderr")
-	if len(recentLogs) == 0 {
-		t.Fatalf("recent_logs=%v want expected log entries", recentLogs)
+	recentLogs := waitForRecentLogs(t, state, "subprocess:agent:logs-1", 1)
+	if !recentLogsContainAnyText(recentLogs, "hello-stdout", "hello-stderr") {
+		t.Fatalf("recent_logs=%v want at least one expected log entry", recentLogs)
 	}
 
 	cancel()
@@ -438,6 +438,28 @@ func waitForRecentLogTexts(t *testing.T, state *runtimeworkers.StateComponent, w
 	return nil
 }
 
+func waitForRecentLogs(t *testing.T, state *runtimeworkers.StateComponent, workerID string, minCount int) []any {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		snapshot := state.Snapshot()
+		record, ok := snapshot.Workers[workerID]
+		if ok && len(record.RawState) > 0 {
+			var raw map[string]any
+			if err := json.Unmarshal(record.RawState, &raw); err == nil {
+				agentctlState, _ := raw["agentctl"].(map[string]any)
+				recentLogs, _ := agentctlState["recent_logs"].([]any)
+				if len(recentLogs) >= minCount {
+					return recentLogs
+				}
+			}
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatalf("worker %q did not accumulate %d recent log entries", workerID, minCount)
+	return nil
+}
+
 func recentLogsContainTexts(recentLogs []any, wantTexts ...string) bool {
 	if len(wantTexts) == 0 {
 		return true
@@ -458,4 +480,17 @@ func recentLogsContainTexts(recentLogs []any, wantTexts ...string) bool {
 		}
 	}
 	return true
+}
+
+func recentLogsContainAnyText(recentLogs []any, wantTexts ...string) bool {
+	for _, entry := range recentLogs {
+		record, _ := entry.(map[string]any)
+		text := strings.TrimSpace(fmt.Sprint(record["text"]))
+		for _, want := range wantTexts {
+			if text == want {
+				return true
+			}
+		}
+	}
+	return false
 }
