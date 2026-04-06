@@ -31,6 +31,7 @@ description: "Durable multi-agent room coordination with shared chat, direct req
 - `room send --to @coordinator` resolves to the current coordinator without hard-coding an actor id.
 - `room relay` mirrors room messages into terminal panes.
 - `mux submit` is the convenience submit gesture when a live pane already has drafted text waiting in its composer.
+- `room interview` runs a durable round-robin clarification loop inside the room.
 - `room task` links shared tasks to the room.
 - `room loop` runs the central coordination loop:
   - relay new messages
@@ -75,6 +76,21 @@ Live-pane convenience:
 - tmux supports targeted submit by pane label or pane id
 - zellij submit currently applies to the focused pane in the named session
 
+Interview protocol:
+
+- use `agentctl room interview start` when a spec or plan needs meaning checks before implementation
+- use `agentctl room interview ask` for one directed question at a time
+- use `agentctl room interview answer` only from the intended respondent or coordinator
+- use `agentctl room interview verify` from the verifier or coordinator to record `accept`, `clarify`, or `reject`
+- use `agentctl room interview next --actor <you>` to fetch the next concrete interview obligation instead of rereading the whole room
+- use `agentctl room status --only interview` when the coordinator wants just the unresolved interview lane
+
+MCP exposure:
+
+- the MCP facade exposes this as `room_interview`
+- actions: `start`, `ask`, `answer`, `verify`, `next`, `show`
+- prefer `room_interview.next` or `room status --only interview` when you need the next actionable clarification item rather than raw transcript history
+
 ## Default room workflow
 
 Use this sequence unless the room already has a more specific protocol:
@@ -95,6 +111,24 @@ agentctl room send <room-id> "Need coordinator input on <issue>" --to @coordinat
 
 # 5. close with durable notes
 agentctl room task complete <room-id> --id <task-id> --notes "..."
+```
+
+When the room is in a meaning-check or spec-clarification phase, use this interview loop instead:
+
+```bash
+agentctl room interview start <room-id> <topic> \
+  --spec "<summary>" \
+  --submitter <submitter> \
+  --questioner <questioner> \
+  --respondent <respondent> \
+  --verifier <verifier>
+
+agentctl room interview ask <room-id> <session-id> "Question text" --sender <questioner>
+agentctl room interview next <room-id> --actor <respondent>
+agentctl room interview answer <room-id> <question-id> "Answer text" --sender <respondent>
+agentctl room interview next <room-id> --actor <verifier>
+agentctl room interview verify <room-id> <answer-id> accept "Matches the intended meaning" --sender <verifier>
+agentctl room status <room-id> --only interview
 ```
 
 ## Task note format

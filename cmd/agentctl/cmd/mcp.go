@@ -1543,6 +1543,35 @@ func registerRoomTools(s *server.MCPServer) {
 	)
 
 	s.AddTool(
+		mcp.NewTool("room_interview",
+			mcp.WithDescription("Command-backed durable room interview protocol. Actions: start, ask, answer, verify, next, show."),
+			mcp.WithString("action", mcp.Required(), mcp.Description("Interview action to run")),
+			mcp.WithString("workspace", mcp.Description("Workspace root override (default: .)")),
+			mcp.WithString("room_id", mcp.Description("Room id")),
+			mcp.WithString("sender", mcp.Description("Sender actor or participant id override")),
+			mcp.WithString("topic", mcp.Description("Interview topic for start")),
+			mcp.WithString("session_id", mcp.Description("Interview session id")),
+			mcp.WithString("question_id", mcp.Description("Interview question id")),
+			mcp.WithString("answer_id", mcp.Description("Interview answer id")),
+			mcp.WithString("spec", mcp.Description("Inline spec or request summary for start")),
+			mcp.WithString("spec_ref", mcp.Description("Doc path, plan id, or message id that anchors the interview")),
+			mcp.WithString("submitter", mcp.Description("Actor who submitted the plan or spec")),
+			mcp.WithString("questioner", mcp.Description("Actor responsible for drafting interview questions")),
+			mcp.WithString("respondent", mcp.Description("Actor expected to answer the questions")),
+			mcp.WithString("verifier", mcp.Description("Actor who decides whether answers match the original intent")),
+			mcp.WithArray("constraint", mcp.Description("Constraint or guardrail (repeatable)"), mcp.WithStringItems()),
+			mcp.WithString("to", mcp.Description("Respondent actor id override for ask")),
+			mcp.WithString("question", mcp.Description("Interview question text")),
+			mcp.WithString("answer", mcp.Description("Interview answer text")),
+			mcp.WithString("verdict", mcp.Description("Interview verdict: accept, clarify, or reject")),
+			mcp.WithString("notes", mcp.Description("Verifier notes")),
+			mcp.WithString("actor", mcp.Description("Actor id for interview next")),
+			mcp.WithNumber("limit", mcp.Description("Maximum room messages to inspect for next/show")),
+		),
+		handleRoomInterviewTool,
+	)
+
+	s.AddTool(
 		mcp.NewTool("agent_room",
 			mcp.WithDescription("Command-backed agent control-room tool. Actions: info, policy."),
 			mcp.WithString("action", mcp.Required(), mcp.Description("Agent room action to run")),
@@ -3934,6 +3963,77 @@ func handleRoomTaskTool(ctx context.Context, req mcp.CallToolRequest) (*mcp.Call
 		return mcp.NewToolResultError("unsupported room_task action: " + action), nil
 	}
 	return runCLICommandAsMCP(ctx, "room_task", newRoomCommand, argv)
+}
+
+func handleRoomInterviewTool(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	args := getArgs(req)
+	action := getStringArg(args, "action", "")
+	workspace := getStringArg(args, "workspace", "")
+	roomID := getStringArg(args, "room_id", "")
+	if roomID == "" {
+		return mcp.NewToolResultError("room_id is required"), nil
+	}
+	argv := []string{"interview", action, roomID}
+	switch action {
+	case "start":
+		topic := getStringArg(args, "topic", "")
+		if topic == "" {
+			return mcp.NewToolResultError("topic is required for room_interview start"), nil
+		}
+		argv = append(argv, topic)
+		argv = appendStringFlagArgs(argv, "--workspace", workspace)
+		argv = appendStringFlagArgs(argv, "--sender", getStringArg(args, "sender", ""))
+		argv = appendStringFlagArgs(argv, "--spec", getStringArg(args, "spec", ""))
+		argv = appendStringFlagArgs(argv, "--spec-ref", getStringArg(args, "spec_ref", ""))
+		argv = appendStringFlagArgs(argv, "--submitter", getStringArg(args, "submitter", ""))
+		argv = appendStringFlagArgs(argv, "--questioner", getStringArg(args, "questioner", ""))
+		argv = appendStringFlagArgs(argv, "--respondent", getStringArg(args, "respondent", ""))
+		argv = appendStringFlagArgs(argv, "--verifier", getStringArg(args, "verifier", ""))
+		argv = appendStringSliceFlagArgs(argv, "--constraint", getStringSliceArg(args, "constraint"))
+	case "ask":
+		sessionID := getStringArg(args, "session_id", "")
+		question := getStringArg(args, "question", "")
+		if sessionID == "" || question == "" {
+			return mcp.NewToolResultError("session_id and question are required for room_interview ask"), nil
+		}
+		argv = append(argv, sessionID, question)
+		argv = appendStringFlagArgs(argv, "--workspace", workspace)
+		argv = appendStringFlagArgs(argv, "--sender", getStringArg(args, "sender", ""))
+		argv = appendStringFlagArgs(argv, "--to", getStringArg(args, "to", ""))
+	case "answer":
+		questionID := getStringArg(args, "question_id", "")
+		answer := getStringArg(args, "answer", "")
+		if questionID == "" || answer == "" {
+			return mcp.NewToolResultError("question_id and answer are required for room_interview answer"), nil
+		}
+		argv = append(argv, questionID, answer)
+		argv = appendStringFlagArgs(argv, "--workspace", workspace)
+		argv = appendStringFlagArgs(argv, "--sender", getStringArg(args, "sender", ""))
+	case "verify":
+		answerID := getStringArg(args, "answer_id", "")
+		verdict := getStringArg(args, "verdict", "")
+		notes := getStringArg(args, "notes", "")
+		if answerID == "" || verdict == "" || notes == "" {
+			return mcp.NewToolResultError("answer_id, verdict, and notes are required for room_interview verify"), nil
+		}
+		argv = append(argv, answerID, verdict, notes)
+		argv = appendStringFlagArgs(argv, "--workspace", workspace)
+		argv = appendStringFlagArgs(argv, "--sender", getStringArg(args, "sender", ""))
+	case "next":
+		argv = appendStringFlagArgs(argv, "--workspace", workspace)
+		argv = appendStringFlagArgs(argv, "--actor", getStringArg(args, "actor", ""))
+		argv = appendIntFlagArgs(argv, "--limit", getIntArg(args, "limit", 0))
+	case "show":
+		if sessionID := getStringArg(args, "session_id", ""); sessionID != "" {
+			argv = append(argv, sessionID)
+		}
+		argv = appendStringFlagArgs(argv, "--workspace", workspace)
+		argv = appendStringFlagArgs(argv, "--sender", getStringArg(args, "sender", ""))
+		argv = appendIntFlagArgs(argv, "--limit", getIntArg(args, "limit", 0))
+	default:
+		return mcp.NewToolResultError("unsupported room_interview action: " + action), nil
+	}
+	return runCLICommandAsMCP(ctx, "room_interview", newRoomCommand, argv)
 }
 
 func handleAgentRoomTool(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {

@@ -16,6 +16,7 @@ This skill is about **room operating protocol**, not room creation.
 - you need to reply to a direct room request
 - you are acting as coordinator or reviewer in a live room
 - you need to know whether to `send`, `ack`, `resolve`, `claim`, `touch`, `block`, or `complete`
+- you need to answer or verify a room interview question
 
 ## Core rules
 
@@ -28,6 +29,7 @@ This skill is about **room operating protocol**, not room creation.
 - When done, `room task complete --notes ...` so the outcome is durable.
 - Use `room send --to @coordinator` for escalation or routing decisions.
 - Do not work a task that another participant already owns unless the coordinator reassigns or reclaims it.
+- If the room is using the interview protocol, use `room interview next --actor <you>` before browsing the full transcript.
 
 ## Room entry flow
 
@@ -37,6 +39,7 @@ Run this first:
 agentctl room status <room-id>
 agentctl room inbox <room-id> --actor <you>
 agentctl room task list <room-id>
+agentctl room interview next <room-id> --actor <you>
 ```
 
 If you are in an existing `zellij` pane and the environment is missing
@@ -58,6 +61,7 @@ Practical rule:
 Then decide:
 
 - direct ask waiting on you: answer or acknowledge it first
+- interview item waiting on you: answer or verify it first
 - assigned task waiting on you: claim it
 - no direct ask, no assigned task: ask the coordinator or pick unclaimed work only if the room policy allows it
 
@@ -117,6 +121,30 @@ Use:
 ```bash
 agentctl room send <room-id> "Need coordinator input on <issue>" --to @coordinator --reply-expected
 ```
+
+### I am the interview respondent
+
+Use:
+
+```bash
+agentctl room interview next <room-id> --actor <you>
+agentctl room interview answer <room-id> <question-id> "<answer>"
+```
+
+Do not answer by free-form room chat if the room is already using a durable interview session.
+
+### I am the interview verifier
+
+Use:
+
+```bash
+agentctl room interview next <room-id> --actor <you>
+agentctl room interview verify <room-id> <answer-id> accept "<why it matches>"
+agentctl room interview verify <room-id> <answer-id> clarify "<what is still ambiguous>"
+agentctl room interview verify <room-id> <answer-id> reject "<why it diverged>"
+```
+
+The verifier is usually the original submitter or the coordinator.
 
 ### I am the coordinator
 
