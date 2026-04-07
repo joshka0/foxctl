@@ -4229,6 +4229,7 @@ func handleRoomAgileTool(ctx context.Context, req mcp.CallToolRequest) (*mcp.Cal
 		argv = appendStringSliceFlagArgs(argv, "--validator", getStringSliceArg(args, "validator"))
 		argv = appendStringSliceFlagArgs(argv, "--required-lane", getStringSliceArg(args, "required_lane"))
 		argv = appendStringSliceFlagArgs(argv, "--optional-lane", getStringSliceArg(args, "optional_lane"))
+		argv = appendBoolFlagArgs(argv, "--enforce-exit-policy", getBoolArg(args, "enforce_exit_policy", false))
 		argv = appendStringSliceFlagArgs(argv, "--exit", getStringSliceArg(args, "exit"))
 		argv = appendStringFlagArgs(argv, "--proposal", proposalID)
 	case "milestone_contract":
@@ -4246,6 +4247,7 @@ func handleRoomAgileTool(ctx context.Context, req mcp.CallToolRequest) (*mcp.Cal
 		argv = appendStringSliceFlagArgs(argv, "--validator", getStringSliceArg(args, "validator"))
 		argv = appendStringSliceFlagArgs(argv, "--required-lane", getStringSliceArg(args, "required_lane"))
 		argv = appendStringSliceFlagArgs(argv, "--optional-lane", getStringSliceArg(args, "optional_lane"))
+		argv = appendBoolFlagArgs(argv, "--enforce-exit-policy", getBoolArg(args, "enforce_exit_policy", false))
 		argv = appendStringSliceFlagArgs(argv, "--exit", getStringSliceArg(args, "exit"))
 	case "milestone_criteria":
 		milestoneID := getStringArg(args, "milestone_id", "")

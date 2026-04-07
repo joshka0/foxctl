@@ -174,6 +174,12 @@ Milestone evidence policy is guidance-only in v1:
 - `epic next` and `epic health` now align on the same derived milestone exit-policy helper
 - milestone review writes are not auto-rejected on policy gaps in this slice
 
+If a room wants strict pass-review discipline, milestone contract can opt into enforcement:
+
+- `--enforce-exit-policy`
+- when enabled, `milestone review ... pass ...` is rejected unless the milestone exit policy is `ready_for_review` or `ready_to_exit`
+- `block` verdicts remain allowed
+
 Then add explicit acceptance criteria:
 
 ```bash

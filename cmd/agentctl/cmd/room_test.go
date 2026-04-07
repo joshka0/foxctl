@@ -2341,14 +2341,14 @@ func TestRunRoomMilestoneContractStartAndUpdate(t *testing.T) {
 	}
 
 	cmd, out = newRoomTestCommand(ctx)
-	if err := runRoomMilestoneStartWithPolicy(cmd, workspace, "human-a", "alpha", epicID, "Foundation", "Ship the first contract slice", "Make milestone intent explicit.", "human-a", []string{"contracts", "work-pack sync"}, []string{"send-confirm gap", "send-confirm gap"}, []string{"GUI changes"}, []string{"epic finalized"}, []string{"audit", "review", "review"}, []string{"integration", "review", "review"}, []string{"integration", "user_test"}, []string{"contract visible", "contract visible"}, ""); err != nil {
+	if err := runRoomMilestoneStartWithPolicy(cmd, workspace, "human-a", "alpha", epicID, "Foundation", "Ship the first contract slice", "Make milestone intent explicit.", "human-a", []string{"contracts", "work-pack sync"}, []string{"send-confirm gap", "send-confirm gap"}, []string{"GUI changes"}, []string{"epic finalized"}, []string{"audit", "review", "review"}, []string{"integration", "review", "review"}, []string{"integration", "user_test"}, false, []string{"contract visible", "contract visible"}, ""); err != nil {
 		t.Fatalf("runRoomMilestoneStart: %v", err)
 	}
 	data := decodeRoomEnvelope(t, out)
 	milestoneID := data["milestone_id"].(string)
 
 	cmd, out = newRoomTestCommand(ctx)
-	if err := runRoomMilestoneContractWithPolicy(cmd, workspace, "human-a", "alpha", milestoneID, "Updated objective.", []string{"multi-epic rooms"}, []string{"transport rewrite"}, []string{"send confirm"}, []string{"test", "review"}, []string{"test"}, []string{"manual_check", "review"}, []string{"summary written"}); err != nil {
+	if err := runRoomMilestoneContractWithPolicy(cmd, workspace, "human-a", "alpha", milestoneID, "Updated objective.", []string{"multi-epic rooms"}, []string{"transport rewrite"}, []string{"send confirm"}, []string{"test", "review"}, []string{"test"}, []string{"manual_check", "review"}, false, []string{"summary written"}); err != nil {
 		t.Fatalf("runRoomMilestoneContract: %v", err)
 	}
 
@@ -3184,7 +3184,7 @@ func TestRunRoomMilestoneEvidencePolicyGuidesHealthAndNext(t *testing.T) {
 	epicID, milestoneID, storyID := setupRoomAgileWorkpackFixture(t, ctx, workspace)
 
 	cmd, _ := newRoomTestCommand(ctx)
-	if err := runRoomMilestoneContractWithPolicy(cmd, workspace, "human-a", "alpha", milestoneID, "Foundation objective.", nil, nil, nil, []string{"review"}, []string{"integration"}, []string{"user_test"}, []string{"story validated"}); err != nil {
+	if err := runRoomMilestoneContractWithPolicy(cmd, workspace, "human-a", "alpha", milestoneID, "Foundation objective.", nil, nil, nil, []string{"review"}, []string{"integration"}, []string{"user_test"}, false, []string{"story validated"}); err != nil {
 		t.Fatalf("runRoomMilestoneContractWithPolicy: %v", err)
 	}
 
@@ -3261,7 +3261,7 @@ func TestRunRoomMilestoneExitPolicyStates(t *testing.T) {
 		epicID, milestoneID, storyID := setupRoomAgileWorkpackFixture(t, ctx, workspace)
 
 		cmd, _ := newRoomTestCommand(ctx)
-		if err := runRoomMilestoneContractWithPolicy(cmd, workspace, "human-a", "alpha", milestoneID, "Foundation objective.", nil, nil, nil, []string{"review"}, []string{"review"}, nil, []string{"story validated"}); err != nil {
+		if err := runRoomMilestoneContractWithPolicy(cmd, workspace, "human-a", "alpha", milestoneID, "Foundation objective.", nil, nil, nil, []string{"review"}, []string{"review"}, nil, false, []string{"story validated"}); err != nil {
 			t.Fatalf("runRoomMilestoneContractWithPolicy: %v", err)
 		}
 		cmd, _ = newRoomTestCommand(ctx)
@@ -3330,7 +3330,7 @@ func TestRunRoomMilestoneExitPolicyStates(t *testing.T) {
 		epicID, milestoneID, storyID := setupRoomAgileWorkpackFixture(t, ctx, workspace)
 
 		cmd, _ := newRoomTestCommand(ctx)
-		if err := runRoomMilestoneContractWithPolicy(cmd, workspace, "human-a", "alpha", milestoneID, "Foundation objective.", nil, nil, nil, []string{"review"}, []string{"review"}, nil, []string{"story validated"}); err != nil {
+		if err := runRoomMilestoneContractWithPolicy(cmd, workspace, "human-a", "alpha", milestoneID, "Foundation objective.", nil, nil, nil, []string{"review"}, []string{"review"}, nil, false, []string{"story validated"}); err != nil {
 			t.Fatalf("runRoomMilestoneContractWithPolicy: %v", err)
 		}
 		cmd, _ = newRoomTestCommand(ctx)
@@ -3362,6 +3362,129 @@ func TestRunRoomMilestoneExitPolicyStates(t *testing.T) {
 		}
 		if !roomIssueTypesContain(health["issues"].([]any), "milestone_failed_validation") {
 			t.Fatalf("issues=%v want milestone_failed_validation", health["issues"])
+		}
+	})
+}
+
+func TestRunRoomMilestoneExitEnforcement(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	ctx := context.Background()
+
+	t.Run("enforcement off allows pass", func(t *testing.T) {
+		workspace := t.TempDir()
+		_, milestoneID, _ := setupRoomAgileWorkpackFixture(t, ctx, workspace)
+
+		cmd, out := newRoomTestCommand(ctx)
+		if err := runRoomMilestoneReview(cmd, workspace, "human-a", "alpha", milestoneID, "pass", "Looks good."); err != nil {
+			t.Fatalf("runRoomMilestoneReview: %v", err)
+		}
+		if got := decodeRoomEnvelope(t, out)["message"].(map[string]any)["subject"]; got != "Milestone Review: pass" {
+			t.Fatalf("subject=%v want pass review", got)
+		}
+	})
+
+	t.Run("enforcement on rejects not_ready", func(t *testing.T) {
+		workspace := t.TempDir()
+		_, milestoneID, _ := setupRoomAgileWorkpackFixture(t, ctx, workspace)
+
+		cmd, _ := newRoomTestCommand(ctx)
+		if err := runRoomMilestoneContractWithPolicy(cmd, workspace, "human-a", "alpha", milestoneID, "", nil, nil, nil, nil, nil, nil, true, nil); err != nil {
+			t.Fatalf("runRoomMilestoneContractWithPolicy: %v", err)
+		}
+
+		cmd, out := newRoomTestCommand(ctx)
+		if err := runRoomMilestoneReview(cmd, workspace, "human-a", "alpha", milestoneID, "pass", "Looks good."); err != nil {
+			t.Fatalf("runRoomMilestoneReview: %v", err)
+		}
+		var env envelope.Envelope
+		if err := json.Unmarshal(out.Bytes(), &env); err != nil {
+			t.Fatalf("decode envelope: %v\n%s", err, out.String())
+		}
+		if env.Status != envelope.StatusError {
+			t.Fatalf("status=%q want error payload=%s", env.Status, out.String())
+		}
+		payload := env.Data.(map[string]any)
+		if got := payload["exit_policy_status"]; got != "not_ready" {
+			t.Fatalf("exit_policy_status=%v want not_ready", got)
+		}
+		reasons := payload["exit_policy_reasons"].([]any)
+		found := false
+		for _, reason := range reasons {
+			if reason == "accepted_stories_uncovered" {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("exit_policy_reasons=%v want accepted_stories_uncovered", reasons)
+		}
+	})
+
+	t.Run("enforcement on allows ready_for_review", func(t *testing.T) {
+		workspace := t.TempDir()
+		_, milestoneID, storyID := setupRoomAgileWorkpackFixture(t, ctx, workspace)
+
+		cmd, _ := newRoomTestCommand(ctx)
+		if err := runRoomMilestoneContractWithPolicy(cmd, workspace, "human-a", "alpha", milestoneID, "", nil, nil, nil, nil, nil, nil, true, nil); err != nil {
+			t.Fatalf("runRoomMilestoneContractWithPolicy: %v", err)
+		}
+		cmd, _ = newRoomTestCommand(ctx)
+		if err := runRoomMilestoneCriteria(cmd, workspace, "human-a", "alpha", milestoneID, "Accepted stories are validated"); err != nil {
+			t.Fatalf("runRoomMilestoneCriteria: %v", err)
+		}
+		cmd, _ = newRoomTestCommand(ctx)
+		if err := runRoomStoryValidate(cmd, workspace, "human-a", "alpha", storyID, "review", "pass", "Validated.", "docs/reviews/pass.md", "", "", "", nil); err != nil {
+			t.Fatalf("runRoomStoryValidate: %v", err)
+		}
+
+		cmd, out := newRoomTestCommand(ctx)
+		if err := runRoomMilestoneReview(cmd, workspace, "human-a", "alpha", milestoneID, "pass", "Looks good."); err != nil {
+			t.Fatalf("runRoomMilestoneReview: %v", err)
+		}
+		var env envelope.Envelope
+		if err := json.Unmarshal(out.Bytes(), &env); err != nil {
+			t.Fatalf("decode envelope: %v\n%s", err, out.String())
+		}
+		if env.Status != envelope.StatusOK {
+			t.Fatalf("status=%q want ok payload=%s", env.Status, out.String())
+		}
+	})
+
+	t.Run("enforcement on rejects ready_for_summary", func(t *testing.T) {
+		workspace := t.TempDir()
+		_, milestoneID, storyID := setupRoomAgileWorkpackFixture(t, ctx, workspace)
+
+		cmd, _ := newRoomTestCommand(ctx)
+		if err := runRoomMilestoneContractWithPolicy(cmd, workspace, "human-a", "alpha", milestoneID, "", nil, nil, nil, nil, nil, nil, true, nil); err != nil {
+			t.Fatalf("runRoomMilestoneContractWithPolicy: %v", err)
+		}
+		cmd, _ = newRoomTestCommand(ctx)
+		if err := runRoomMilestoneCriteria(cmd, workspace, "human-a", "alpha", milestoneID, "Accepted stories are validated"); err != nil {
+			t.Fatalf("runRoomMilestoneCriteria: %v", err)
+		}
+		cmd, _ = newRoomTestCommand(ctx)
+		if err := runRoomStoryValidate(cmd, workspace, "human-a", "alpha", storyID, "review", "pass", "Validated.", "docs/reviews/pass.md", "", "", "", nil); err != nil {
+			t.Fatalf("runRoomStoryValidate: %v", err)
+		}
+		cmd, _ = newRoomTestCommand(ctx)
+		if err := runRoomMilestoneReview(cmd, workspace, "human-a", "alpha", milestoneID, "pass", "Looks good."); err != nil {
+			t.Fatalf("runRoomMilestoneReview initial: %v", err)
+		}
+
+		cmd, out := newRoomTestCommand(ctx)
+		if err := runRoomMilestoneReview(cmd, workspace, "human-a", "alpha", milestoneID, "pass", "Second pass should fail."); err != nil {
+			t.Fatalf("runRoomMilestoneReview second: %v", err)
+		}
+		var env envelope.Envelope
+		if err := json.Unmarshal(out.Bytes(), &env); err != nil {
+			t.Fatalf("decode envelope: %v\n%s", err, out.String())
+		}
+		if env.Status != envelope.StatusError {
+			t.Fatalf("status=%q want error payload=%s", env.Status, out.String())
+		}
+		payload := env.Data.(map[string]any)
+		if got := payload["exit_policy_status"]; got != "ready_for_summary" {
+			t.Fatalf("exit_policy_status=%v want ready_for_summary", got)
 		}
 	})
 }
