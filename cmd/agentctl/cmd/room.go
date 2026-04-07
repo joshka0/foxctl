@@ -46,6 +46,11 @@ func newRoomCommand() *cobra.Command {
 		newRoomAckCommand(),
 		newRoomResolveCommand(),
 		newRoomClearCommand(),
+		newRoomEpicCommand(),
+		newRoomMilestoneCommand(),
+		newRoomStoryCommand(),
+		newRoomLogCommand(),
+		newRoomWorkpackCommand(),
 		newRoomPlanCommand(),
 		newRoomInterviewCommand(),
 		newRoomRemindCommand(),
@@ -82,13 +87,14 @@ func newRoomRemindAddCommand() *cobra.Command {
 		replyExpected bool
 		ackRequired   bool
 		interrupt     bool
+		allowPassive  bool
 	)
 	cmd := &cobra.Command{
 		Use:   "add <room-id> <recipient> <text>",
 		Short: "Create a durable scheduled follow-up for one participant",
 		Args:  cobra.ExactArgs(3),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runRoomRemindAdd(cmd, workspace, sender, args[0], args[1], subject, args[2], every, maxIterations, ackRequired, replyExpected, interrupt)
+			return runRoomRemindAdd(cmd, workspace, sender, args[0], args[1], subject, args[2], every, maxIterations, ackRequired, replyExpected, interrupt, allowPassive)
 		},
 	}
 	cmd.Flags().StringVar(&workspace, "workspace", ".", "Workspace root override")
@@ -99,6 +105,7 @@ func newRoomRemindAddCommand() *cobra.Command {
 	cmd.Flags().BoolVar(&replyExpected, "reply-expected", true, "Require a reply to stop reminders")
 	cmd.Flags().BoolVar(&ackRequired, "ack-required", false, "Require an ack to stop reminders")
 	cmd.Flags().BoolVar(&interrupt, "interrupt", false, "Interrupt the target pane for reminder follow-ups")
+	cmd.Flags().BoolVar(&allowPassive, "allow-passive", false, "Allow scheduling reminders even when the room loop is not currently active")
 	return cmd
 }
 
@@ -445,6 +452,7 @@ func newRoomSendCommand() *cobra.Command {
 		sender        string
 		recipient     string
 		subject       string
+		hint          string
 		kind          string
 		taskID        string
 		priority      int
@@ -458,13 +466,14 @@ func newRoomSendCommand() *cobra.Command {
 		Short: "Append a durable message to a room timeline",
 		Args:  cobra.MinimumNArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runRoomSend(cmd, workspace, args[0], sender, recipient, subject, strings.Join(args[1:], " "), kind, taskID, priority, ackRequired, replyExpected, interrupt, autoCreate)
+			return runRoomSendWithHint(cmd, workspace, args[0], sender, recipient, subject, hint, strings.Join(args[1:], " "), kind, taskID, priority, ackRequired, replyExpected, interrupt, autoCreate)
 		},
 	}
 	cmd.Flags().StringVar(&workspace, "workspace", ".", "Workspace root override")
 	cmd.Flags().StringVar(&sender, "sender", "", "Sender actor or participant id (defaults to current tmux/zellij pane)")
 	cmd.Flags().StringVar(&recipient, "to", "", "Target room participant id (defaults to broadcast)")
 	cmd.Flags().StringVar(&subject, "subject", "", "Optional subject line")
+	cmd.Flags().StringVar(&hint, "hint", "", "Optional explicit hint for how the recipient should respond")
 	cmd.Flags().StringVar(&kind, "kind", string(agent.BoardMessageKindInfo), "Message kind (info|instruction|alert|review_request)")
 	cmd.Flags().StringVar(&taskID, "task-id", "", "Optional task id")
 	cmd.Flags().IntVar(&priority, "priority", agent.DefaultPriority, "Priority from 1 (highest) to 5 (lowest)")
@@ -536,6 +545,536 @@ func newRoomClearCommand() *cobra.Command {
 	cmd.Flags().StringVar(&actorID, "actor", "", "Coordinator actor or participant id (defaults to current tmux/zellij pane)")
 	cmd.Flags().StringVar(&mode, "mode", "read", "Clear mode (acked|read)")
 	cmd.Flags().StringVar(&preset, "preset", "coordinator-pulses", "Cleanup preset (coordinator-pulses|system-reminders)")
+	return cmd
+}
+
+func newRoomEpicCommand() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "epic",
+		Short: "Manage long-running agile epics inside a room",
+	}
+	cmd.AddCommand(
+		newRoomEpicStartCommand(),
+		newRoomEpicAskCommand(),
+		newRoomEpicAnswerCommand(),
+		newRoomEpicFinalizeCommand(),
+		newRoomEpicShapeCommand(),
+		newRoomEpicShowCommand(),
+		newRoomEpicResumeCommand(),
+		newRoomEpicNextCommand(),
+	)
+	return cmd
+}
+
+func newRoomEpicStartCommand() *cobra.Command {
+	var (
+		workspace string
+		sender    string
+		goal      string
+		owner     string
+		outcome   string
+		horizon   string
+		scope     []string
+		success   []string
+	)
+	cmd := &cobra.Command{
+		Use:   "start <room-id> <title>",
+		Short: "Start a durable epic in a room",
+		Args:  cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runRoomEpicStart(cmd, workspace, sender, args[0], args[1], goal, owner, outcome, horizon, scope, success)
+		},
+	}
+	cmd.Flags().StringVar(&workspace, "workspace", ".", "Workspace root override")
+	cmd.Flags().StringVar(&sender, "sender", "", "Coordinator actor or participant id (defaults to current tmux/zellij pane)")
+	cmd.Flags().StringVar(&goal, "goal", "", "Epic goal or desired outcome")
+	cmd.Flags().StringVar(&owner, "owner", "", "Epic owner actor id")
+	cmd.Flags().StringVar(&outcome, "outcome", "", "Expected business or delivery outcome")
+	cmd.Flags().StringVar(&horizon, "horizon", "", "Delivery horizon or target window")
+	cmd.Flags().StringSliceVar(&scope, "scope", nil, "Scope item (repeatable)")
+	cmd.Flags().StringSliceVar(&success, "success", nil, "Success signal or success measure (repeatable)")
+	return cmd
+}
+
+func newRoomEpicShowCommand() *cobra.Command {
+	var (
+		workspace string
+		limit     int
+	)
+	cmd := &cobra.Command{
+		Use:   "show <room-id> [epic-id]",
+		Short: "Show epics or one epic hierarchy for a room",
+		Args:  cobra.RangeArgs(1, 2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			epicID := ""
+			if len(args) > 1 {
+				epicID = args[1]
+			}
+			return runRoomEpicShow(cmd, workspace, args[0], epicID, limit)
+		},
+	}
+	cmd.Flags().StringVar(&workspace, "workspace", ".", "Workspace root override")
+	cmd.Flags().IntVar(&limit, "limit", 250, "Maximum room messages to inspect")
+	return cmd
+}
+
+func newRoomEpicResumeCommand() *cobra.Command {
+	var workspace string
+	cmd := &cobra.Command{
+		Use:   "resume <room-id> <epic-id>",
+		Short: "Return a resumable operational summary for one epic",
+		Args:  cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runRoomEpicResume(cmd, workspace, args[0], args[1])
+		},
+	}
+	cmd.Flags().StringVar(&workspace, "workspace", ".", "Workspace root override")
+	return cmd
+}
+
+func newRoomEpicNextCommand() *cobra.Command {
+	var (
+		workspace string
+		actorID   string
+	)
+	cmd := &cobra.Command{
+		Use:   "next <room-id> <epic-id>",
+		Short: "Return the next concrete actions for one epic",
+		Args:  cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runRoomEpicNext(cmd, workspace, args[0], args[1], actorID)
+		},
+	}
+	cmd.Flags().StringVar(&workspace, "workspace", ".", "Workspace root override")
+	cmd.Flags().StringVar(&actorID, "actor", "", "Actor id for actor-specific next actions (defaults to coordinator lane)")
+	return cmd
+}
+
+func newRoomEpicAskCommand() *cobra.Command {
+	var (
+		workspace string
+		sender    string
+		to        string
+		kind      string
+	)
+	cmd := &cobra.Command{
+		Use:   "ask <room-id> <epic-id> <question>",
+		Short: "Ask one durable intake question for an epic",
+		Args:  cobra.MinimumNArgs(3),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runRoomEpicAsk(cmd, workspace, sender, args[0], args[1], to, kind, strings.Join(args[2:], " "))
+		},
+	}
+	cmd.Flags().StringVar(&workspace, "workspace", ".", "Workspace root override")
+	cmd.Flags().StringVar(&sender, "sender", "", "Coordinator or PM actor id (defaults to current tmux/zellij pane)")
+	cmd.Flags().StringVar(&to, "to", "", "Directed respondent actor id")
+	cmd.Flags().StringVar(&kind, "kind", "product", "Epic intake question kind (product|technical|constraint|success)")
+	return cmd
+}
+
+func newRoomEpicAnswerCommand() *cobra.Command {
+	var (
+		workspace string
+		sender    string
+	)
+	cmd := &cobra.Command{
+		Use:   "answer <room-id> <question-id> <answer>",
+		Short: "Answer one epic intake question",
+		Args:  cobra.MinimumNArgs(3),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runRoomEpicAnswer(cmd, workspace, sender, args[0], args[1], strings.Join(args[2:], " "))
+		},
+	}
+	cmd.Flags().StringVar(&workspace, "workspace", ".", "Workspace root override")
+	cmd.Flags().StringVar(&sender, "sender", "", "Respondent actor id (defaults to current tmux/zellij pane)")
+	return cmd
+}
+
+func newRoomEpicFinalizeCommand() *cobra.Command {
+	var (
+		workspace string
+		sender    string
+	)
+	cmd := &cobra.Command{
+		Use:   "finalize <room-id> <epic-id> <summary>",
+		Short: "Finalize an epic after intake and milestone-shaping discussion",
+		Args:  cobra.MinimumNArgs(3),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runRoomEpicFinalize(cmd, workspace, sender, args[0], args[1], strings.Join(args[2:], " "))
+		},
+	}
+	cmd.Flags().StringVar(&workspace, "workspace", ".", "Workspace root override")
+	cmd.Flags().StringVar(&sender, "sender", "", "Coordinator actor id (defaults to current tmux/zellij pane)")
+	return cmd
+}
+
+func newRoomEpicShapeCommand() *cobra.Command {
+	var (
+		workspace string
+		sender    string
+		count     int
+	)
+	cmd := &cobra.Command{
+		Use:   "shape <room-id> <epic-id>",
+		Short: "Derive milestone proposals from a finalized epic brief",
+		Args:  cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runRoomEpicShape(cmd, workspace, sender, args[0], args[1], count)
+		},
+	}
+	cmd.Flags().StringVar(&workspace, "workspace", ".", "Workspace root override")
+	cmd.Flags().StringVar(&sender, "sender", "", "Coordinator actor id (defaults to current tmux/zellij pane)")
+	cmd.Flags().IntVar(&count, "count", 3, "Maximum milestone proposals to derive")
+	return cmd
+}
+
+func newRoomMilestoneCommand() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "milestone",
+		Short: "Manage agile milestones inside a room epic",
+	}
+	cmd.AddCommand(
+		newRoomMilestoneStartCommand(),
+		newRoomMilestoneCriteriaCommand(),
+		newRoomMilestoneReviewCommand(),
+		newRoomMilestoneSummaryCommand(),
+		newRoomMilestoneShowCommand(),
+	)
+	return cmd
+}
+
+func newRoomMilestoneStartCommand() *cobra.Command {
+	var (
+		workspace string
+		sender    string
+		goal      string
+		owner     string
+		scope     []string
+		proposal  string
+	)
+	cmd := &cobra.Command{
+		Use:   "start <room-id> <epic-id> [title]",
+		Short: "Start a milestone under an epic",
+		Args:  cobra.RangeArgs(2, 3),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			title := ""
+			if len(args) > 2 {
+				title = args[2]
+			}
+			return runRoomMilestoneStart(cmd, workspace, sender, args[0], args[1], title, goal, owner, scope, proposal)
+		},
+	}
+	cmd.Flags().StringVar(&workspace, "workspace", ".", "Workspace root override")
+	cmd.Flags().StringVar(&sender, "sender", "", "Coordinator actor or participant id (defaults to current tmux/zellij pane)")
+	cmd.Flags().StringVar(&goal, "goal", "", "Milestone goal")
+	cmd.Flags().StringVar(&owner, "owner", "", "Milestone owner actor id")
+	cmd.Flags().StringSliceVar(&scope, "scope", nil, "Scope item (repeatable)")
+	cmd.Flags().StringVar(&proposal, "proposal", "", "Milestone proposal id to promote into a real milestone")
+	return cmd
+}
+
+func newRoomMilestoneCriteriaCommand() *cobra.Command {
+	var (
+		workspace string
+		sender    string
+	)
+	cmd := &cobra.Command{
+		Use:   "criteria <room-id> <milestone-id> <criterion>",
+		Short: "Add one acceptance criterion to a milestone",
+		Args:  cobra.MinimumNArgs(3),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runRoomMilestoneCriteria(cmd, workspace, sender, args[0], args[1], strings.Join(args[2:], " "))
+		},
+	}
+	cmd.Flags().StringVar(&workspace, "workspace", ".", "Workspace root override")
+	cmd.Flags().StringVar(&sender, "sender", "", "Coordinator actor or participant id (defaults to current tmux/zellij pane)")
+	return cmd
+}
+
+func newRoomMilestoneReviewCommand() *cobra.Command {
+	var (
+		workspace string
+		sender    string
+	)
+	cmd := &cobra.Command{
+		Use:   "review <room-id> <milestone-id> <pass|block> <notes>",
+		Short: "Record a milestone review verdict",
+		Args:  cobra.MinimumNArgs(4),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runRoomMilestoneReview(cmd, workspace, sender, args[0], args[1], args[2], strings.Join(args[3:], " "))
+		},
+	}
+	cmd.Flags().StringVar(&workspace, "workspace", ".", "Workspace root override")
+	cmd.Flags().StringVar(&sender, "sender", "", "Coordinator actor or participant id (defaults to current tmux/zellij pane)")
+	return cmd
+}
+
+func newRoomMilestoneSummaryCommand() *cobra.Command {
+	var (
+		workspace string
+		sender    string
+	)
+	cmd := &cobra.Command{
+		Use:   "summary <room-id> <milestone-id> <notes>",
+		Short: "Record a milestone review synthesis summary",
+		Args:  cobra.MinimumNArgs(3),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runRoomMilestoneSummary(cmd, workspace, sender, args[0], args[1], strings.Join(args[2:], " "))
+		},
+	}
+	cmd.Flags().StringVar(&workspace, "workspace", ".", "Workspace root override")
+	cmd.Flags().StringVar(&sender, "sender", "", "Coordinator actor or participant id (defaults to current tmux/zellij pane)")
+	return cmd
+}
+
+func newRoomMilestoneShowCommand() *cobra.Command {
+	var (
+		workspace string
+		limit     int
+	)
+	cmd := &cobra.Command{
+		Use:   "show <room-id> [milestone-id]",
+		Short: "Show milestones or one milestone hierarchy for a room",
+		Args:  cobra.RangeArgs(1, 2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			milestoneID := ""
+			if len(args) > 1 {
+				milestoneID = args[1]
+			}
+			return runRoomMilestoneShow(cmd, workspace, args[0], milestoneID, limit)
+		},
+	}
+	cmd.Flags().StringVar(&workspace, "workspace", ".", "Workspace root override")
+	cmd.Flags().IntVar(&limit, "limit", 250, "Maximum room messages to inspect")
+	return cmd
+}
+
+func newRoomStoryCommand() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "story",
+		Short: "Manage agile stories under room milestones",
+	}
+	cmd.AddCommand(
+		newRoomStoryProposeCommand(),
+		newRoomStoryAcceptCommand(),
+		newRoomStoryAddCommand(),
+		newRoomStoryValidateCommand(),
+		newRoomStoryShowCommand(),
+	)
+	return cmd
+}
+
+func newRoomStoryProposeCommand() *cobra.Command {
+	var (
+		workspace string
+		sender    string
+		owner     string
+		rationale string
+	)
+	cmd := &cobra.Command{
+		Use:   "propose <room-id> <milestone-id> <title> <body>",
+		Short: "Propose a story under a milestone before accepting it",
+		Args:  cobra.MinimumNArgs(4),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runRoomStoryPropose(cmd, workspace, sender, args[0], args[1], args[2], strings.Join(args[3:], " "), owner, rationale)
+		},
+	}
+	cmd.Flags().StringVar(&workspace, "workspace", ".", "Workspace root override")
+	cmd.Flags().StringVar(&sender, "sender", "", "Sender actor or participant id (defaults to current tmux/zellij pane)")
+	cmd.Flags().StringVar(&owner, "owner", "", "Proposed story owner actor id")
+	cmd.Flags().StringVar(&rationale, "rationale", "", "Why this proposed story belongs in the milestone")
+	return cmd
+}
+
+func newRoomStoryAcceptCommand() *cobra.Command {
+	var (
+		workspace string
+		sender    string
+		owner     string
+	)
+	cmd := &cobra.Command{
+		Use:   "accept <room-id> <milestone-id> <proposal-id>",
+		Short: "Accept a proposed story into a real story record",
+		Args:  cobra.ExactArgs(3),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runRoomStoryAccept(cmd, workspace, sender, args[0], args[1], args[2], owner)
+		},
+	}
+	cmd.Flags().StringVar(&workspace, "workspace", ".", "Workspace root override")
+	cmd.Flags().StringVar(&sender, "sender", "", "Coordinator actor or participant id (defaults to current tmux/zellij pane)")
+	cmd.Flags().StringVar(&owner, "owner", "", "Story owner override")
+	return cmd
+}
+
+func newRoomStoryAddCommand() *cobra.Command {
+	var (
+		workspace string
+		sender    string
+		owner     string
+	)
+	cmd := &cobra.Command{
+		Use:   "add <room-id> <milestone-id> <title> <body>",
+		Short: "Add a story under a milestone",
+		Args:  cobra.MinimumNArgs(4),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runRoomStoryAdd(cmd, workspace, sender, args[0], args[1], args[2], strings.Join(args[3:], " "), owner)
+		},
+	}
+	cmd.Flags().StringVar(&workspace, "workspace", ".", "Workspace root override")
+	cmd.Flags().StringVar(&sender, "sender", "", "Sender actor or participant id (defaults to current tmux/zellij pane)")
+	cmd.Flags().StringVar(&owner, "owner", "", "Story owner actor id")
+	return cmd
+}
+
+func newRoomStoryShowCommand() *cobra.Command {
+	var (
+		workspace string
+		limit     int
+	)
+	cmd := &cobra.Command{
+		Use:   "show <room-id> [story-id]",
+		Short: "Show stories or one story record for a room",
+		Args:  cobra.RangeArgs(1, 2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			storyID := ""
+			if len(args) > 1 {
+				storyID = args[1]
+			}
+			return runRoomStoryShow(cmd, workspace, args[0], storyID, limit)
+		},
+	}
+	cmd.Flags().StringVar(&workspace, "workspace", ".", "Workspace root override")
+	cmd.Flags().IntVar(&limit, "limit", 250, "Maximum room messages to inspect")
+	return cmd
+}
+
+func newRoomStoryValidateCommand() *cobra.Command {
+	var (
+		workspace      string
+		sender         string
+		artifactPath   string
+		artifactDigest string
+		command        string
+		notes          string
+		relatedStoryID []string
+	)
+	cmd := &cobra.Command{
+		Use:   "validate <room-id> <story-id> <validator-type> <pass|fail|blocked|waived> <summary>",
+		Short: "Attach story-owned validation evidence",
+		Args:  cobra.MinimumNArgs(5),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runRoomStoryValidate(cmd, workspace, sender, args[0], args[1], args[2], args[3], strings.Join(args[4:], " "), artifactPath, artifactDigest, command, notes, relatedStoryID)
+		},
+	}
+	cmd.Flags().StringVar(&workspace, "workspace", ".", "Workspace root override")
+	cmd.Flags().StringVar(&sender, "sender", "", "Sender actor or participant id (defaults to current tmux/zellij pane)")
+	cmd.Flags().StringVar(&artifactPath, "artifact-path", "", "Optional markdown or artifact path")
+	cmd.Flags().StringVar(&artifactDigest, "artifact-digest", "", "Optional CAS digest for the validation artifact")
+	cmd.Flags().StringVar(&command, "command", "", "Optional command or check that produced this validation")
+	cmd.Flags().StringVar(&notes, "notes", "", "Optional validation notes")
+	cmd.Flags().StringSliceVar(&relatedStoryID, "related-story", nil, "Related story ids for cross-story validation")
+	return cmd
+}
+
+func newRoomLogCommand() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "log",
+		Short: "Manage the durable delivery log for a room epic",
+	}
+	cmd.AddCommand(
+		newRoomLogAppendCommand(),
+		newRoomLogShowCommand(),
+	)
+	return cmd
+}
+
+func newRoomWorkpackCommand() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "workpack",
+		Short: "Show or refresh agile epic work-pack mirrors",
+	}
+	cmd.AddCommand(
+		newRoomWorkpackShowCommand(),
+		newRoomWorkpackSyncCommand(),
+	)
+	return cmd
+}
+
+func newRoomWorkpackShowCommand() *cobra.Command {
+	var workspace string
+	cmd := &cobra.Command{
+		Use:   "show <room-id> <epic-id>",
+		Short: "Show the derived work-pack paths for one epic",
+		Args:  cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runRoomWorkpackShow(cmd, workspace, args[0], args[1])
+		},
+	}
+	cmd.Flags().StringVar(&workspace, "workspace", ".", "Workspace root override")
+	return cmd
+}
+
+func newRoomWorkpackSyncCommand() *cobra.Command {
+	var (
+		workspace string
+		sender    string
+	)
+	cmd := &cobra.Command{
+		Use:   "sync <room-id> <epic-id>",
+		Short: "Force a refresh of the derived work-pack mirror for one epic",
+		Args:  cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runRoomWorkpackSync(cmd, workspace, sender, args[0], args[1])
+		},
+	}
+	cmd.Flags().StringVar(&workspace, "workspace", ".", "Workspace root override")
+	cmd.Flags().StringVar(&sender, "sender", "", "Sender actor or participant id (defaults to current tmux/zellij pane)")
+	return cmd
+}
+
+func newRoomLogAppendCommand() *cobra.Command {
+	var (
+		workspace string
+		sender    string
+		completed []string
+		inFlight  []string
+		blockers  []string
+		nextFocus []string
+		notes     string
+	)
+	cmd := &cobra.Command{
+		Use:   "append <room-id> <epic-id> <label>",
+		Short: "Append one durable delivery-log entry to an epic",
+		Args:  cobra.ExactArgs(3),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runRoomLogAppend(cmd, workspace, sender, args[0], args[1], args[2], completed, inFlight, blockers, nextFocus, notes)
+		},
+	}
+	cmd.Flags().StringVar(&workspace, "workspace", ".", "Workspace root override")
+	cmd.Flags().StringVar(&sender, "sender", "", "Coordinator actor or participant id (defaults to current tmux/zellij pane)")
+	cmd.Flags().StringSliceVar(&completed, "completed", nil, "Completed item (repeatable)")
+	cmd.Flags().StringSliceVar(&inFlight, "in-flight", nil, "In-flight item (repeatable)")
+	cmd.Flags().StringSliceVar(&blockers, "blocker", nil, "Blocker item (repeatable)")
+	cmd.Flags().StringSliceVar(&nextFocus, "next", nil, "Next-focus item (repeatable)")
+	cmd.Flags().StringVar(&notes, "notes", "", "Freeform notes for the delivery-log entry")
+	return cmd
+}
+
+func newRoomLogShowCommand() *cobra.Command {
+	var (
+		workspace string
+		limit     int
+	)
+	cmd := &cobra.Command{
+		Use:   "show <room-id> <epic-id>",
+		Short: "Show delivery-log entries for one epic",
+		Args:  cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runRoomLogShow(cmd, workspace, args[0], args[1], limit)
+		},
+	}
+	cmd.Flags().StringVar(&workspace, "workspace", ".", "Workspace root override")
+	cmd.Flags().IntVar(&limit, "limit", 250, "Maximum room messages to inspect")
 	return cmd
 }
 
@@ -1342,10 +1881,15 @@ func runRoomInbox(cmd *cobra.Command, workspace, roomID, actorID string, limit i
 }
 
 func runRoomSend(cmd *cobra.Command, workspace, roomID, sender, recipient, subject, body, kind, taskID string, priority int, ackRequired, replyExpected, interrupt, autoCreate bool) error {
+	return runRoomSendWithHint(cmd, workspace, roomID, sender, recipient, subject, "", body, kind, taskID, priority, ackRequired, replyExpected, interrupt, autoCreate)
+}
+
+func runRoomSendWithHint(cmd *cobra.Command, workspace, roomID, sender, recipient, subject, hint, body, kind, taskID string, priority int, ackRequired, replyExpected, interrupt, autoCreate bool) error {
 	absWorkspace, err := resolveRoomWorkspace(workspace)
 	if err != nil {
 		return err
 	}
+	senderProvided := strings.TrimSpace(sender) != ""
 	identity, err := resolveRoomSender(cmd.Context(), sender)
 	if err != nil {
 		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.send", protocol.ErrorCodeEARG, err.Error(), map[string]any{
@@ -1366,6 +1910,10 @@ func runRoomSend(cmd *cobra.Command, workspace, roomID, sender, recipient, subje
 			}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
 		}
 	}
+	summary, err := store.GetRoom(cmd.Context(), absWorkspace, roomID, "")
+	if err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.send", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
 	recipient, err = resolveRoomRecipient(cmd.Context(), store, absWorkspace, roomID, recipient)
 	if err != nil {
 		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.send", protocol.ErrorCodeEARG, err.Error(), map[string]any{
@@ -1382,9 +1930,15 @@ func runRoomSend(cmd *cobra.Command, workspace, roomID, sender, recipient, subje
 			"hint": "Pass --to <participant-id> when you need to interrupt a specific pane before sending the message.",
 		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
 	}
+	if recipient != agent.BroadcastRecipient && !roomHasParticipant(summary, recipient) {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.send", protocol.ErrorCodeEARG, fmt.Sprintf("recipient %q is not a participant in room %q", recipient, roomID), map[string]any{
+			"hint": "Add the participant to the room first with `agentctl room join`, or send a broadcast without --to.",
+		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
 	if strings.TrimSpace(subject) == "" {
 		subject = deriveRoomSubject(body)
 	}
+	body = annotateRoomSendBody(roomID, identity.Sender, recipient, body, hint, ackRequired, replyExpected)
 
 	msg := &agent.BoardMessage{
 		WorkspaceID:   absWorkspace,
@@ -1409,16 +1963,58 @@ func runRoomSend(cmd *cobra.Command, workspace, roomID, sender, recipient, subje
 	if err := store.SendMessage(cmd.Context(), msg); err != nil {
 		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.send", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
 	}
+	warnings := make([]string, 0, 1)
+	if !senderProvided {
+		warnings = append(warnings, fmt.Sprintf("sender was inferred as %s from the current execution context", identity.Sender))
+	}
 	return protocol.WriteOK(cmd.OutOrStdout(), "agentctl.room.send", map[string]any{
 		"room_id":         roomID,
 		"stream":          msg.Stream,
 		"message_id":      msg.ID,
 		"message":         msg,
 		"sender_identity": identity,
+		"warnings":        warnings,
 	}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
 }
 
-func runRoomRemindAdd(cmd *cobra.Command, workspace, sender, roomID, recipient, subject, body string, every time.Duration, maxIterations int, ackRequired, replyExpected, interrupt bool) error {
+func annotateRoomSendBody(roomID, sender, recipient, body, hint string, ackRequired, replyExpected bool) string {
+	body = strings.TrimSpace(body)
+	sender = strings.TrimSpace(sender)
+	if sender == "" {
+		sender = "unknown"
+	}
+	recipient = normalizeRoomRecipient(recipient)
+	if recipient == "" {
+		recipient = agent.BroadcastRecipient
+	}
+
+	lines := []string{
+		"",
+		"--",
+		"Room send metadata:",
+		fmt.Sprintf("Sent by: %s", sender),
+	}
+	if recipient == agent.BroadcastRecipient {
+		lines = append(lines, "Audience: room")
+	} else {
+		lines = append(lines, fmt.Sprintf("Direct recipient: %s", recipient))
+	}
+	lines = append(lines,
+		fmt.Sprintf("Response requested: %t", replyExpected),
+		fmt.Sprintf("Acknowledgment requested: %t", ackRequired),
+	)
+	if replyExpected && recipient != agent.BroadcastRecipient {
+		lines = append(lines, fmt.Sprintf("Reply with: agentctl room send %s --to %s \"<response>\"", roomID, sender))
+	}
+	if trimmedHint := strings.TrimSpace(hint); trimmedHint != "" {
+		lines = append(lines, "Response hint: "+trimmedHint)
+	}
+	return body + "\n" + strings.Join(lines, "\n")
+}
+
+const roomLoopHeartbeatGrace = 15 * time.Second
+
+func runRoomRemindAdd(cmd *cobra.Command, workspace, sender, roomID, recipient, subject, body string, every time.Duration, maxIterations int, ackRequired, replyExpected, interrupt, allowPassive bool) error {
 	absWorkspace, err := resolveRoomWorkspace(workspace)
 	if err != nil {
 		return err
@@ -1482,6 +2078,13 @@ func runRoomRemindAdd(cmd *cobra.Command, workspace, sender, roomID, recipient, 
 		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.remind.add", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
 	}
 	defer coordStore.Close()
+	if !allowPassive {
+		if err := requireActiveRoomLoop(cmd.Context(), coordStore, absWorkspace, strings.TrimSpace(roomID), time.Now().UTC()); err != nil {
+			return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.remind.add", protocol.ErrorCodeERuntime, err.Error(), map[string]any{
+				"hint": fmt.Sprintf("Start the room loop first with `agentctl room loop %s --workspace %s ...`, or pass --allow-passive if you intentionally want a stored reminder without an active loop.", strings.TrimSpace(roomID), absWorkspace),
+			}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+		}
+	}
 	reminder, err := coordStore.UpsertRoomReminder(cmd.Context(), coordination.RoomReminder{
 		ID:            root.ID,
 		WorkspaceID:   absWorkspace,
@@ -1509,6 +2112,23 @@ func runRoomRemindAdd(cmd *cobra.Command, workspace, sender, roomID, recipient, 
 		"actor_id":  identity.Sender,
 		"recipient": recipient,
 	}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+}
+
+func requireActiveRoomLoop(ctx context.Context, coordStore *coordination.Store, workspaceID, roomID string, now time.Time) error {
+	loop, err := coordStore.GetRoomLoop(ctx, workspaceID, roomID)
+	if err != nil {
+		return err
+	}
+	if loop == nil || !loop.Enabled {
+		return fmt.Errorf("room loop is not active for %q", roomID)
+	}
+	if loop.LastTickAt == nil || loop.LastTickAt.IsZero() {
+		return fmt.Errorf("room loop for %q has no recorded heartbeat", roomID)
+	}
+	if now.Sub(loop.LastTickAt.UTC()) > roomLoopHeartbeatGrace {
+		return fmt.Errorf("room loop heartbeat for %q is stale (last tick %s)", roomID, loop.LastTickAt.UTC().Format(time.RFC3339))
+	}
+	return nil
 }
 
 func runRoomRemindList(cmd *cobra.Command, workspace, roomID string, includeInactive bool) error {
@@ -1812,6 +2432,3286 @@ func runRoomClear(cmd *cobra.Command, workspace, roomID, actorID, mode, preset s
 		"resolved_status":   resolvedStatus,
 		"resolver_identity": identity,
 	}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+}
+
+type roomEpicMeta struct {
+	Goal    string   `json:"goal"`
+	Owner   string   `json:"owner"`
+	Outcome string   `json:"outcome"`
+	Horizon string   `json:"horizon"`
+	Scope   []string `json:"scope"`
+	Success []string `json:"success"`
+}
+
+type roomEpicQuestionMeta struct {
+	Kind     string `json:"kind"`
+	Question string `json:"question"`
+}
+
+type roomMilestoneMeta struct {
+	EpicID string   `json:"epic_id"`
+	Goal   string   `json:"goal"`
+	Owner  string   `json:"owner"`
+	Scope  []string `json:"scope"`
+}
+
+type roomStoryMeta struct {
+	Owner       string `json:"owner"`
+	Description string `json:"description"`
+}
+
+type roomStoryValidationMeta struct {
+	EpicID          string   `json:"epic_id"`
+	MilestoneID     string   `json:"milestone_id"`
+	StoryID         string   `json:"story_id"`
+	ValidatorType   string   `json:"validator_type"`
+	Status          string   `json:"status"`
+	Summary         string   `json:"summary"`
+	Command         string   `json:"command"`
+	ArtifactPath    string   `json:"artifact_path"`
+	ArtifactDigest  string   `json:"artifact_digest"`
+	Notes           string   `json:"notes"`
+	WaiverReason    string   `json:"waiver_reason"`
+	RelatedStoryIDs []string `json:"related_story_ids"`
+}
+
+type roomStoryProposalMeta struct {
+	MilestoneID string `json:"milestone_id"`
+	Owner       string `json:"owner"`
+	Description string `json:"description"`
+	Rationale   string `json:"rationale"`
+}
+
+type roomDeliveryLogMeta struct {
+	Label     string   `json:"label"`
+	Completed []string `json:"completed"`
+	InFlight  []string `json:"in_flight"`
+	Blockers  []string `json:"blockers"`
+	NextFocus []string `json:"next_focus"`
+	Notes     string   `json:"notes"`
+}
+
+type roomMilestoneProposalMeta struct {
+	EpicID    string   `json:"epic_id"`
+	Goal      string   `json:"goal"`
+	Scope     []string `json:"scope"`
+	Rationale string   `json:"rationale"`
+}
+
+func runRoomEpicStart(cmd *cobra.Command, workspace, sender, roomID, title, goal, owner, outcome, horizon string, scope, success []string) error {
+	absWorkspace, identity, store, roomID, summary, err := prepareRoomAgileCommand(cmd, "agentctl.room.epic", workspace, sender, roomID)
+	if err != nil {
+		return err
+	}
+	defer store.Close()
+	if !roomMemberHasRole(summary.Members, identity.Sender, "coordinator") {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.epic.start", protocol.ErrorCodeEARG, "agile scope changes require coordinator role", map[string]any{
+			"hint": "Run the command as the room coordinator, or join the room with role=coordinator first.",
+		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+
+	title = strings.TrimSpace(title)
+	if title == "" {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.epic.start", protocol.ErrorCodeEARG, "title is required", map[string]any{
+			"hint": "Pass a concise epic title such as `room-agile-protocol` or `delivery-ledger-hardening`.",
+		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+
+	msg := &agent.BoardMessage{
+		WorkspaceID: absWorkspace,
+		Stream:      agent.RoomStreamName(roomID),
+		Sender:      identity.Sender,
+		Recipient:   agent.BroadcastRecipient,
+		Kind:        agent.BoardMessageKindEpic,
+		Priority:    agent.DefaultPriority,
+		Subject:     "Epic: " + title,
+		Body:        buildRoomEpicBody(title, goal, owner, outcome, horizon, scope, success),
+	}
+	if err := store.SendMessage(cmd.Context(), msg); err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.epic.start", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	if err := syncRoomAgileWorkpack(cmd.Context(), store, absWorkspace, roomID, msg.ID); err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.epic.start", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+
+	return protocol.WriteOK(cmd.OutOrStdout(), "agentctl.room.epic.start", map[string]any{
+		"room_id":         roomID,
+		"epic_id":         msg.ID,
+		"message":         msg,
+		"sender_identity": identity,
+		"room":            summary,
+	}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+}
+
+func runRoomEpicAsk(cmd *cobra.Command, workspace, sender, roomID, epicID, recipient, questionKind, question string) error {
+	absWorkspace, identity, store, roomID, summary, err := prepareRoomAgileCommand(cmd, "agentctl.room.epic", workspace, sender, roomID)
+	if err != nil {
+		return err
+	}
+	defer store.Close()
+	if !roomMemberHasRole(summary.Members, identity.Sender, "coordinator") {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.epic.ask", protocol.ErrorCodeEARG, "epic intake questions require coordinator role", map[string]any{
+			"hint": "Run the command as the room coordinator, or join the room with role=coordinator first.",
+		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+
+	epicMsg, epicMeta, err := loadRoomEpic(cmd.Context(), store, absWorkspace, roomID, epicID)
+	if err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.epic.ask", protocol.ErrorCodeENotFound, err.Error(), map[string]any{
+			"hint": "Create an epic first with `agentctl room epic start` and reuse its epic_id.",
+		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	if epicIsFinalized(cmd.Context(), store, absWorkspace, roomID, epicMsg.ID) {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.epic.ask", protocol.ErrorCodeEARG, "epic intake is already finalized", map[string]any{
+			"hint": "Start a new epic or continue milestone work instead of reopening finalized intake via epic ask.",
+		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	recipient = firstNonEmpty(strings.TrimSpace(recipient), strings.TrimSpace(epicMeta.Owner))
+	if recipient == "" {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.epic.ask", protocol.ErrorCodeEARG, "recipient is required", map[string]any{
+			"hint": "Set --to or start the epic with --owner so intake questions have a default respondent.",
+		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	question = strings.TrimSpace(question)
+	if question == "" {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.epic.ask", protocol.ErrorCodeEARG, "question is required", nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	questionKind, err = normalizeRoomEpicQuestionKind(questionKind)
+	if err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.epic.ask", protocol.ErrorCodeEARG, err.Error(), map[string]any{
+			"hint": "Use one of: product, technical, constraint, success.",
+		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+
+	msg := &agent.BoardMessage{
+		WorkspaceID:      absWorkspace,
+		RelatedMessageID: epicMsg.ID,
+		Stream:           agent.RoomStreamName(roomID),
+		Sender:           identity.Sender,
+		Recipient:        recipient,
+		Kind:             agent.BoardMessageKindEpicQuestion,
+		Priority:         agent.DefaultPriority,
+		ReplyExpected:    true,
+		Subject:          "Epic Question (" + questionKind + "): " + deriveRoomSubject(question),
+		Body:             buildRoomEpicQuestionBody(questionKind, question),
+	}
+	if err := store.SendMessage(cmd.Context(), msg); err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.epic.ask", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	return protocol.WriteOK(cmd.OutOrStdout(), "agentctl.room.epic.ask", map[string]any{
+		"room_id": roomID,
+		"epic_id": epicMsg.ID,
+		"message": msg,
+	}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+}
+
+func runRoomEpicAnswer(cmd *cobra.Command, workspace, sender, roomID, questionID, answer string) error {
+	absWorkspace, identity, store, roomID, summary, err := prepareRoomAgileCommand(cmd, "agentctl.room.epic", workspace, sender, roomID)
+	if err != nil {
+		return err
+	}
+	defer store.Close()
+
+	questionMsg, epicMsg, _, err := loadRoomEpicQuestion(cmd.Context(), store, absWorkspace, roomID, questionID)
+	if err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.epic.answer", protocol.ErrorCodeENotFound, err.Error(), map[string]any{
+			"hint": "Use a question id returned by `agentctl room epic ask` or listed in `agentctl room epic show`.",
+		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	if questionMsg.Recipient != "" && questionMsg.Recipient != agent.BroadcastRecipient && !sameRoomParticipant(questionMsg.Recipient, identity.Sender) && !roomMemberHasRole(summary.Members, identity.Sender, "coordinator") {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.epic.answer", protocol.ErrorCodeEARG, "only the intended respondent or coordinator can answer this epic question", nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	answer = strings.TrimSpace(answer)
+	if answer == "" {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.epic.answer", protocol.ErrorCodeEARG, "answer is required", nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+
+	msg := &agent.BoardMessage{
+		WorkspaceID:      absWorkspace,
+		RelatedMessageID: questionMsg.ID,
+		Stream:           agent.RoomStreamName(roomID),
+		Sender:           identity.Sender,
+		Recipient:        epicMsg.Sender,
+		Kind:             agent.BoardMessageKindEpicAnswer,
+		Priority:         agent.DefaultPriority,
+		Subject:          "Epic Answer: " + deriveRoomSubject(answer),
+		Body:             answer,
+	}
+	if err := store.SendMessage(cmd.Context(), msg); err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.epic.answer", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	return protocol.WriteOK(cmd.OutOrStdout(), "agentctl.room.epic.answer", map[string]any{
+		"room_id":     roomID,
+		"epic_id":     epicMsg.ID,
+		"question_id": questionMsg.ID,
+		"message":     msg,
+	}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+}
+
+func runRoomEpicFinalize(cmd *cobra.Command, workspace, sender, roomID, epicID, summaryText string) error {
+	absWorkspace, identity, store, roomID, summary, err := prepareRoomAgileCommand(cmd, "agentctl.room.epic", workspace, sender, roomID)
+	if err != nil {
+		return err
+	}
+	defer store.Close()
+	if !roomMemberHasRole(summary.Members, identity.Sender, "coordinator") {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.epic.finalize", protocol.ErrorCodeEARG, "epic finalization requires coordinator role", map[string]any{
+			"hint": "Run the command as the room coordinator, or join the room with role=coordinator first.",
+		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+
+	epicMsg, _, err := loadRoomEpic(cmd.Context(), store, absWorkspace, roomID, epicID)
+	if err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.epic.finalize", protocol.ErrorCodeENotFound, err.Error(), map[string]any{
+			"hint": "Create an epic first with `agentctl room epic start` and reuse its epic_id.",
+		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	if epicIsFinalized(cmd.Context(), store, absWorkspace, roomID, epicMsg.ID) {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.epic.finalize", protocol.ErrorCodeEARG, "epic is already finalized", nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	if openQuestions, err := countOpenEpicQuestions(cmd.Context(), store, absWorkspace, roomID, epicMsg.ID); err == nil && openQuestions > 0 {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.epic.finalize", protocol.ErrorCodeEARG, "cannot finalize epic while intake questions remain open", map[string]any{
+			"open_questions": openQuestions,
+			"hint":           "Answer or resolve the remaining epic intake questions before finalizing the epic.",
+		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	} else if err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.epic.finalize", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+
+	summaryText = strings.TrimSpace(summaryText)
+	if summaryText == "" {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.epic.finalize", protocol.ErrorCodeEARG, "summary is required", map[string]any{
+			"hint": "Capture the clarified epic brief and major delivery shape before opening milestones.",
+		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+
+	msg := &agent.BoardMessage{
+		WorkspaceID:      absWorkspace,
+		RelatedMessageID: epicMsg.ID,
+		Stream:           agent.RoomStreamName(roomID),
+		Sender:           identity.Sender,
+		Recipient:        agent.BroadcastRecipient,
+		Kind:             agent.BoardMessageKindEpicFinalize,
+		Priority:         agent.DefaultPriority,
+		Subject:          "Epic Finalized: " + strings.TrimPrefix(strings.TrimSpace(epicMsg.Subject), "Epic: "),
+		Body:             summaryText,
+	}
+	if err := store.SendMessage(cmd.Context(), msg); err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.epic.finalize", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	if err := syncRoomAgileWorkpack(cmd.Context(), store, absWorkspace, roomID, epicMsg.ID); err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.epic.finalize", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	return protocol.WriteOK(cmd.OutOrStdout(), "agentctl.room.epic.finalize", map[string]any{
+		"room_id": roomID,
+		"epic_id": epicMsg.ID,
+		"message": msg,
+	}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+}
+
+func runRoomEpicShape(cmd *cobra.Command, workspace, sender, roomID, epicID string, count int) error {
+	absWorkspace, identity, store, roomID, summary, err := prepareRoomAgileCommand(cmd, "agentctl.room.epic", workspace, sender, roomID)
+	if err != nil {
+		return err
+	}
+	defer store.Close()
+	if !roomMemberHasRole(summary.Members, identity.Sender, "coordinator") {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.epic.shape", protocol.ErrorCodeEARG, "epic shaping requires coordinator role", map[string]any{
+			"hint": "Run the command as the room coordinator, or join the room with role=coordinator first.",
+		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+
+	epicMsg, epicMeta, err := loadRoomEpic(cmd.Context(), store, absWorkspace, roomID, epicID)
+	if err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.epic.shape", protocol.ErrorCodeENotFound, err.Error(), map[string]any{
+			"hint": "Create an epic first with `agentctl room epic start` and reuse its epic_id.",
+		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	if !epicIsFinalized(cmd.Context(), store, absWorkspace, roomID, epicMsg.ID) {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.epic.shape", protocol.ErrorCodeEARG, "epic shaping requires a finalized epic", map[string]any{
+			"hint": "Run the intake loop and `agentctl room epic finalize` before shaping milestones.",
+		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	if count <= 0 {
+		count = 3
+	}
+
+	messages, err := store.ListRoomMessages(cmd.Context(), absWorkspace, roomID, roomTaskScanLimit)
+	if err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.epic.shape", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	brief, qa := deriveRoomEpicShapingInputs(messages, epicMsg.ID)
+	proposals := deriveRoomMilestoneProposals(epicMsg, epicMeta, brief, qa, count)
+	if len(proposals) == 0 {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.epic.shape", protocol.ErrorCodeEARG, "could not derive milestone proposals from epic data", map[string]any{
+			"hint": "Add epic scope or success signals before shaping milestones.",
+		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+
+	written := make([]*agent.BoardMessage, 0, len(proposals))
+	for _, proposal := range proposals {
+		msg := &agent.BoardMessage{
+			WorkspaceID:      absWorkspace,
+			RelatedMessageID: epicMsg.ID,
+			Stream:           agent.RoomStreamName(roomID),
+			Sender:           identity.Sender,
+			Recipient:        agent.BroadcastRecipient,
+			Kind:             agent.BoardMessageKindMilestoneProposal,
+			Priority:         agent.DefaultPriority,
+			Subject:          "Milestone Proposal: " + proposal.Title,
+			Body:             buildRoomMilestoneProposalBody(epicMsg.ID, proposal.Goal, proposal.Scope, proposal.Rationale),
+		}
+		if err := store.SendMessage(cmd.Context(), msg); err != nil {
+			return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.epic.shape", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+		}
+		written = append(written, msg)
+	}
+
+	return protocol.WriteOK(cmd.OutOrStdout(), "agentctl.room.epic.shape", map[string]any{
+		"room_id":   roomID,
+		"epic_id":   epicMsg.ID,
+		"count":     len(written),
+		"proposals": written,
+	}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+}
+
+func runRoomEpicShow(cmd *cobra.Command, workspace, roomID, epicID string, limit int) error {
+	absWorkspace, err := resolveRoomWorkspace(workspace)
+	if err != nil {
+		return err
+	}
+	store, err := openRoomBoardStore(cmd.Context())
+	if err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.epic.show", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	defer store.Close()
+
+	summary, messages, err := loadRoomState(cmd.Context(), store, absWorkspace, roomID, "", limit)
+	if err != nil {
+		code := protocol.ErrorCodeERuntime
+		if errors.Is(err, blackboard.ErrRoomNotFound) {
+			code = protocol.ErrorCodeENotFound
+		}
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.epic.show", code, err.Error(), map[string]any{
+			"hint": "Create the room first or check the room id.",
+		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+
+	epics := buildRoomEpicViews(messages)
+	if strings.TrimSpace(epicID) == "" {
+		return protocol.WriteOK(cmd.OutOrStdout(), "agentctl.room.epic.show", map[string]any{
+			"room":  summary,
+			"count": len(epics),
+			"epics": epics,
+		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	for _, epic := range epics {
+		if epic["id"] == strings.TrimSpace(epicID) {
+			return protocol.WriteOK(cmd.OutOrStdout(), "agentctl.room.epic.show", map[string]any{
+				"room": summary,
+				"epic": epic,
+			}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+		}
+	}
+	return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.epic.show", protocol.ErrorCodeENotFound, fmt.Sprintf("epic %q not found", epicID), map[string]any{
+		"hint": "Run `agentctl room epic show <room-id>` to list available epics.",
+	}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+}
+
+func runRoomEpicResume(cmd *cobra.Command, workspace, roomID, epicID string) error {
+	absWorkspace, err := resolveRoomWorkspace(workspace)
+	if err != nil {
+		return err
+	}
+	store, err := openRoomBoardStore(cmd.Context())
+	if err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.epic.resume", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	defer store.Close()
+
+	summary, messages, err := loadRoomState(cmd.Context(), store, absWorkspace, roomID, "", roomTaskScanLimit)
+	if err != nil {
+		code := protocol.ErrorCodeERuntime
+		if errors.Is(err, blackboard.ErrRoomNotFound) {
+			code = protocol.ErrorCodeENotFound
+		}
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.epic.resume", code, err.Error(), map[string]any{
+			"hint": "Create the room first or check the room id.",
+		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+
+	epic := roomEpicViewByID(buildRoomEpicViews(messages), epicID)
+	if epic == nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.epic.resume", protocol.ErrorCodeENotFound, fmt.Sprintf("epic %q not found", epicID), map[string]any{
+			"hint": "Run `agentctl room epic show <room-id>` to list available epics.",
+		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+
+	resume := buildRoomEpicContinuity(summary, messages, epic)
+	return protocol.WriteOK(cmd.OutOrStdout(), "agentctl.room.epic.resume", map[string]any{
+		"room":   summary,
+		"epic":   epic,
+		"resume": resume,
+	}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+}
+
+func runRoomEpicNext(cmd *cobra.Command, workspace, roomID, epicID, actorID string) error {
+	absWorkspace, err := resolveRoomWorkspace(workspace)
+	if err != nil {
+		return err
+	}
+	store, err := openRoomBoardStore(cmd.Context())
+	if err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.epic.next", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	defer store.Close()
+
+	summary, messages, err := loadRoomState(cmd.Context(), store, absWorkspace, roomID, "", roomTaskScanLimit)
+	if err != nil {
+		code := protocol.ErrorCodeERuntime
+		if errors.Is(err, blackboard.ErrRoomNotFound) {
+			code = protocol.ErrorCodeENotFound
+		}
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.epic.next", code, err.Error(), map[string]any{
+			"hint": "Create the room first or check the room id.",
+		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+
+	epic := roomEpicViewByID(buildRoomEpicViews(messages), epicID)
+	if epic == nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.epic.next", protocol.ErrorCodeENotFound, fmt.Sprintf("epic %q not found", epicID), map[string]any{
+			"hint": "Run `agentctl room epic show <room-id>` to list available epics.",
+		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+
+	resume := buildRoomEpicContinuity(summary, messages, epic)
+	laneActor := strings.TrimSpace(actorID)
+	lane := "coordinator"
+	if laneActor == "" {
+		laneActor = roomCoordinatorActorID(summary.Members)
+		if laneActor == "" {
+			laneActor = "coordinator"
+		}
+	} else {
+		lane = laneActor
+	}
+	items, reason := buildRoomEpicNextItems(summary, messages, epic, resume, laneActor)
+	return protocol.WriteOK(cmd.OutOrStdout(), "agentctl.room.epic.next", map[string]any{
+		"room":    summary,
+		"epic_id": epicID,
+		"actor":   laneActor,
+		"lane":    lane,
+		"items":   items,
+		"reason":  reason,
+	}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+}
+
+func runRoomMilestoneStart(cmd *cobra.Command, workspace, sender, roomID, epicID, title, goal, owner string, scope []string, proposalID string) error {
+	absWorkspace, identity, store, roomID, summary, err := prepareRoomAgileCommand(cmd, "agentctl.room.milestone", workspace, sender, roomID)
+	if err != nil {
+		return err
+	}
+	defer store.Close()
+	if !roomMemberHasRole(summary.Members, identity.Sender, "coordinator") {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.milestone.start", protocol.ErrorCodeEARG, "agile scope changes require coordinator role", map[string]any{
+			"hint": "Run the command as the room coordinator, or join the room with role=coordinator first.",
+		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+
+	epicMsg, epicMeta, err := loadRoomEpic(cmd.Context(), store, absWorkspace, roomID, epicID)
+	if err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.milestone.start", protocol.ErrorCodeENotFound, err.Error(), map[string]any{
+			"hint": "Create an epic first with `agentctl room epic start` and reuse its epic_id.",
+		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	if !epicIsFinalized(cmd.Context(), store, absWorkspace, roomID, epicMsg.ID) {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.milestone.start", protocol.ErrorCodeEARG, "milestones require a finalized epic", map[string]any{
+			"hint": "Use `agentctl room epic ask`, `agentctl room epic answer`, and `agentctl room epic finalize` before opening milestones.",
+		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	proposalID = strings.TrimSpace(proposalID)
+	if proposalID != "" {
+		proposalMsg, proposalMeta, err := loadRoomMilestoneProposal(cmd.Context(), store, absWorkspace, roomID, proposalID)
+		if err != nil {
+			return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.milestone.start", protocol.ErrorCodeENotFound, err.Error(), map[string]any{
+				"hint": "Use a proposal id returned by `agentctl room epic shape` or visible in `agentctl room epic show`.",
+			}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+		}
+		if strings.TrimSpace(proposalMeta.EpicID) != epicMsg.ID {
+			return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.milestone.start", protocol.ErrorCodeEARG, "proposal does not belong to this epic", nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+		}
+		title = firstNonEmpty(strings.TrimSpace(title), strings.TrimPrefix(strings.TrimSpace(proposalMsg.Subject), "Milestone Proposal: "))
+		goal = firstNonEmpty(strings.TrimSpace(goal), strings.TrimSpace(proposalMeta.Goal))
+		owner = firstNonEmpty(strings.TrimSpace(owner), strings.TrimSpace(epicMeta.Owner))
+		if len(scope) == 0 {
+			scope = append([]string(nil), proposalMeta.Scope...)
+		}
+	}
+	title = strings.TrimSpace(title)
+	if title == "" {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.milestone.start", protocol.ErrorCodeEARG, "title is required", map[string]any{
+			"hint": "Pass a milestone title directly, or use --proposal <proposal-id> to promote a shaped milestone proposal.",
+		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+
+	msg := &agent.BoardMessage{
+		WorkspaceID:      absWorkspace,
+		RelatedMessageID: epicMsg.ID,
+		Stream:           agent.RoomStreamName(roomID),
+		Sender:           identity.Sender,
+		Recipient:        agent.BroadcastRecipient,
+		Kind:             agent.BoardMessageKindMilestone,
+		Priority:         agent.DefaultPriority,
+		Subject:          "Milestone: " + title,
+		Body:             buildRoomMilestoneBody(epicMsg.ID, title, goal, owner, scope),
+	}
+	if err := store.SendMessage(cmd.Context(), msg); err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.milestone.start", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	if err := syncRoomAgileWorkpack(cmd.Context(), store, absWorkspace, roomID, epicMsg.ID); err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.milestone.start", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	return protocol.WriteOK(cmd.OutOrStdout(), "agentctl.room.milestone.start", map[string]any{
+		"room_id":         roomID,
+		"epic_id":         epicMsg.ID,
+		"milestone_id":    msg.ID,
+		"message":         msg,
+		"sender_identity": identity,
+		"room":            summary,
+	}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+}
+
+func runRoomMilestoneCriteria(cmd *cobra.Command, workspace, sender, roomID, milestoneID, criterion string) error {
+	absWorkspace, identity, store, roomID, summary, err := prepareRoomAgileCommand(cmd, "agentctl.room.milestone", workspace, sender, roomID)
+	if err != nil {
+		return err
+	}
+	defer store.Close()
+	if !roomMemberHasRole(summary.Members, identity.Sender, "coordinator") {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.milestone.criteria", protocol.ErrorCodeEARG, "agile scope changes require coordinator role", map[string]any{
+			"hint": "Run the command as the room coordinator, or join the room with role=coordinator first.",
+		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+
+	milestoneMsg, err := loadRoomAgileRoot(cmd.Context(), store, absWorkspace, roomID, milestoneID, agent.BoardMessageKindMilestone)
+	if err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.milestone.criteria", protocol.ErrorCodeENotFound, err.Error(), map[string]any{
+			"hint": "Start a milestone first with `agentctl room milestone start` and reuse its milestone_id.",
+		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	criterion = strings.TrimSpace(criterion)
+	if criterion == "" {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.milestone.criteria", protocol.ErrorCodeEARG, "criterion is required", nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+
+	msg := &agent.BoardMessage{
+		WorkspaceID:      absWorkspace,
+		RelatedMessageID: milestoneMsg.ID,
+		Stream:           agent.RoomStreamName(roomID),
+		Sender:           identity.Sender,
+		Recipient:        agent.BroadcastRecipient,
+		Kind:             agent.BoardMessageKindAcceptanceCriteria,
+		Priority:         agent.DefaultPriority,
+		Subject:          "Acceptance Criteria: " + deriveRoomSubject(criterion),
+		Body:             criterion,
+	}
+	if err := store.SendMessage(cmd.Context(), msg); err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.milestone.criteria", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	if milestoneMeta := parseRoomMilestoneBody(milestoneMsg.Body); strings.TrimSpace(milestoneMeta.EpicID) != "" {
+		if err := syncRoomAgileWorkpack(cmd.Context(), store, absWorkspace, roomID, milestoneMeta.EpicID); err != nil {
+			return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.milestone.criteria", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+		}
+	}
+	return protocol.WriteOK(cmd.OutOrStdout(), "agentctl.room.milestone.criteria", map[string]any{
+		"room_id":      roomID,
+		"milestone_id": milestoneMsg.ID,
+		"message":      msg,
+	}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+}
+
+func runRoomMilestoneReview(cmd *cobra.Command, workspace, sender, roomID, milestoneID, verdict, notes string) error {
+	absWorkspace, identity, store, roomID, summary, err := prepareRoomAgileCommand(cmd, "agentctl.room.milestone", workspace, sender, roomID)
+	if err != nil {
+		return err
+	}
+	defer store.Close()
+	if !roomMemberHasRole(summary.Members, identity.Sender, "coordinator") {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.milestone.review", protocol.ErrorCodeEARG, "agile scope changes require coordinator role", map[string]any{
+			"hint": "Run the command as the room coordinator, or join the room with role=coordinator first.",
+		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+
+	milestoneMsg, err := loadRoomAgileRoot(cmd.Context(), store, absWorkspace, roomID, milestoneID, agent.BoardMessageKindMilestone)
+	if err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.milestone.review", protocol.ErrorCodeENotFound, err.Error(), map[string]any{
+			"hint": "Use a milestone id returned by `agentctl room milestone start` or listed in `agentctl room milestone show`.",
+		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	verdict = strings.TrimSpace(strings.ToLower(verdict))
+	switch verdict {
+	case "pass", "block":
+	default:
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.milestone.review", protocol.ErrorCodeEARG, fmt.Sprintf("unsupported milestone verdict %q", verdict), map[string]any{
+			"hint": "Use pass or block.",
+		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	notes = strings.TrimSpace(notes)
+	if notes == "" {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.milestone.review", protocol.ErrorCodeEARG, "notes are required", nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+
+	msg := &agent.BoardMessage{
+		WorkspaceID:      absWorkspace,
+		RelatedMessageID: milestoneMsg.ID,
+		Stream:           agent.RoomStreamName(roomID),
+		Sender:           identity.Sender,
+		Recipient:        agent.BroadcastRecipient,
+		Kind:             agent.BoardMessageKindMilestoneReview,
+		Priority:         agent.DefaultPriority,
+		Subject:          "Milestone Review: " + verdict,
+		Body:             notes,
+	}
+	if err := store.SendMessage(cmd.Context(), msg); err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.milestone.review", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	if milestoneMeta := parseRoomMilestoneBody(milestoneMsg.Body); strings.TrimSpace(milestoneMeta.EpicID) != "" {
+		if err := syncRoomAgileWorkpack(cmd.Context(), store, absWorkspace, roomID, milestoneMeta.EpicID); err != nil {
+			return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.milestone.review", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+		}
+	}
+	return protocol.WriteOK(cmd.OutOrStdout(), "agentctl.room.milestone.review", map[string]any{
+		"room_id":      roomID,
+		"milestone_id": milestoneMsg.ID,
+		"message":      msg,
+	}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+}
+
+func runRoomMilestoneSummary(cmd *cobra.Command, workspace, sender, roomID, milestoneID, notes string) error {
+	absWorkspace, identity, store, roomID, summary, err := prepareRoomAgileCommand(cmd, "agentctl.room.milestone", workspace, sender, roomID)
+	if err != nil {
+		return err
+	}
+	defer store.Close()
+	if !roomMemberHasRole(summary.Members, identity.Sender, "coordinator") {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.milestone.summary", protocol.ErrorCodeEARG, "agile scope changes require coordinator role", map[string]any{
+			"hint": "Run the command as the room coordinator, or join the room with role=coordinator first.",
+		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+
+	milestoneMsg, err := loadRoomAgileRoot(cmd.Context(), store, absWorkspace, roomID, milestoneID, agent.BoardMessageKindMilestone)
+	if err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.milestone.summary", protocol.ErrorCodeENotFound, err.Error(), map[string]any{
+			"hint": "Use a milestone id returned by `agentctl room milestone start` or listed in `agentctl room milestone show`.",
+		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	notes = strings.TrimSpace(notes)
+	if notes == "" {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.milestone.summary", protocol.ErrorCodeEARG, "notes are required", nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+
+	msg := &agent.BoardMessage{
+		WorkspaceID:      absWorkspace,
+		RelatedMessageID: milestoneMsg.ID,
+		Stream:           agent.RoomStreamName(roomID),
+		Sender:           identity.Sender,
+		Recipient:        agent.BroadcastRecipient,
+		Kind:             agent.BoardMessageKindMilestoneSummary,
+		Priority:         agent.DefaultPriority,
+		Subject:          "Milestone Summary: " + strings.TrimPrefix(strings.TrimSpace(milestoneMsg.Subject), "Milestone: "),
+		Body:             notes,
+	}
+	if err := store.SendMessage(cmd.Context(), msg); err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.milestone.summary", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	if milestoneMeta := parseRoomMilestoneBody(milestoneMsg.Body); strings.TrimSpace(milestoneMeta.EpicID) != "" {
+		if err := syncRoomAgileWorkpack(cmd.Context(), store, absWorkspace, roomID, milestoneMeta.EpicID); err != nil {
+			return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.milestone.summary", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+		}
+	}
+	return protocol.WriteOK(cmd.OutOrStdout(), "agentctl.room.milestone.summary", map[string]any{
+		"room_id":      roomID,
+		"milestone_id": milestoneMsg.ID,
+		"message":      msg,
+	}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+}
+
+func runRoomMilestoneShow(cmd *cobra.Command, workspace, roomID, milestoneID string, limit int) error {
+	absWorkspace, err := resolveRoomWorkspace(workspace)
+	if err != nil {
+		return err
+	}
+	store, err := openRoomBoardStore(cmd.Context())
+	if err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.milestone.show", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	defer store.Close()
+
+	summary, messages, err := loadRoomState(cmd.Context(), store, absWorkspace, roomID, "", limit)
+	if err != nil {
+		code := protocol.ErrorCodeERuntime
+		if errors.Is(err, blackboard.ErrRoomNotFound) {
+			code = protocol.ErrorCodeENotFound
+		}
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.milestone.show", code, err.Error(), map[string]any{
+			"hint": "Create the room first or check the room id.",
+		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+
+	milestones := buildRoomMilestoneViews(messages)
+	if strings.TrimSpace(milestoneID) == "" {
+		return protocol.WriteOK(cmd.OutOrStdout(), "agentctl.room.milestone.show", map[string]any{
+			"room":       summary,
+			"count":      len(milestones),
+			"milestones": milestones,
+		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	for _, milestone := range milestones {
+		if milestone["id"] == strings.TrimSpace(milestoneID) {
+			return protocol.WriteOK(cmd.OutOrStdout(), "agentctl.room.milestone.show", map[string]any{
+				"room":      summary,
+				"milestone": milestone,
+			}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+		}
+	}
+	return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.milestone.show", protocol.ErrorCodeENotFound, fmt.Sprintf("milestone %q not found", milestoneID), map[string]any{
+		"hint": "Run `agentctl room milestone show <room-id>` to list available milestones.",
+	}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+}
+
+func runRoomStoryAdd(cmd *cobra.Command, workspace, sender, roomID, milestoneID, title, body, owner string) error {
+	absWorkspace, identity, store, roomID, _, err := prepareRoomAgileCommand(cmd, "agentctl.room.story", workspace, sender, roomID)
+	if err != nil {
+		return err
+	}
+	defer store.Close()
+
+	milestoneMsg, err := loadRoomAgileRoot(cmd.Context(), store, absWorkspace, roomID, milestoneID, agent.BoardMessageKindMilestone)
+	if err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.story.add", protocol.ErrorCodeENotFound, err.Error(), map[string]any{
+			"hint": "Create a milestone first with `agentctl room milestone start` and reuse its milestone_id.",
+		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	title = strings.TrimSpace(title)
+	body = strings.TrimSpace(body)
+	if title == "" || body == "" {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.story.add", protocol.ErrorCodeEARG, "title and body are required", nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	msg := &agent.BoardMessage{
+		WorkspaceID:      absWorkspace,
+		RelatedMessageID: milestoneMsg.ID,
+		Stream:           agent.RoomStreamName(roomID),
+		Sender:           identity.Sender,
+		Recipient:        agent.BroadcastRecipient,
+		Kind:             agent.BoardMessageKindStory,
+		Priority:         agent.DefaultPriority,
+		Subject:          "Story: " + title,
+		Body:             buildRoomStoryBody(owner, body),
+	}
+	if err := store.SendMessage(cmd.Context(), msg); err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.story.add", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	if milestoneMeta := parseRoomMilestoneBody(milestoneMsg.Body); strings.TrimSpace(milestoneMeta.EpicID) != "" {
+		if err := syncRoomAgileWorkpack(cmd.Context(), store, absWorkspace, roomID, milestoneMeta.EpicID); err != nil {
+			return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.story.add", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+		}
+	}
+	return protocol.WriteOK(cmd.OutOrStdout(), "agentctl.room.story.add", map[string]any{
+		"room_id":      roomID,
+		"milestone_id": milestoneMsg.ID,
+		"story_id":     msg.ID,
+		"message":      msg,
+	}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+}
+
+func runRoomStoryPropose(cmd *cobra.Command, workspace, sender, roomID, milestoneID, title, body, owner, rationale string) error {
+	absWorkspace, identity, store, roomID, _, err := prepareRoomAgileCommand(cmd, "agentctl.room.story", workspace, sender, roomID)
+	if err != nil {
+		return err
+	}
+	defer store.Close()
+
+	milestoneMsg, err := loadRoomAgileRoot(cmd.Context(), store, absWorkspace, roomID, milestoneID, agent.BoardMessageKindMilestone)
+	if err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.story.propose", protocol.ErrorCodeENotFound, err.Error(), map[string]any{
+			"hint": "Create a milestone first with `agentctl room milestone start` and reuse its milestone_id.",
+		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	title = strings.TrimSpace(title)
+	body = strings.TrimSpace(body)
+	if title == "" || body == "" {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.story.propose", protocol.ErrorCodeEARG, "title and body are required", nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	msg := &agent.BoardMessage{
+		WorkspaceID:      absWorkspace,
+		RelatedMessageID: milestoneMsg.ID,
+		Stream:           agent.RoomStreamName(roomID),
+		Sender:           identity.Sender,
+		Recipient:        agent.BroadcastRecipient,
+		Kind:             agent.BoardMessageKindStoryProposal,
+		Priority:         agent.DefaultPriority,
+		Subject:          "Story Proposal: " + title,
+		Body:             buildRoomStoryProposalBody(milestoneMsg.ID, owner, body, rationale),
+	}
+	if err := store.SendMessage(cmd.Context(), msg); err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.story.propose", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	return protocol.WriteOK(cmd.OutOrStdout(), "agentctl.room.story.propose", map[string]any{
+		"room_id":      roomID,
+		"milestone_id": milestoneMsg.ID,
+		"proposal_id":  msg.ID,
+		"message":      msg,
+	}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+}
+
+func runRoomStoryAccept(cmd *cobra.Command, workspace, sender, roomID, milestoneID, proposalID, owner string) error {
+	absWorkspace, identity, store, roomID, summary, err := prepareRoomAgileCommand(cmd, "agentctl.room.story", workspace, sender, roomID)
+	if err != nil {
+		return err
+	}
+	defer store.Close()
+	if !roomMemberHasRole(summary.Members, identity.Sender, "coordinator") {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.story.accept", protocol.ErrorCodeEARG, "agile scope changes require coordinator role", map[string]any{
+			"hint": "Run the command as the room coordinator, or join the room with role=coordinator first.",
+		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+
+	milestoneMsg, err := loadRoomAgileRoot(cmd.Context(), store, absWorkspace, roomID, milestoneID, agent.BoardMessageKindMilestone)
+	if err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.story.accept", protocol.ErrorCodeENotFound, err.Error(), map[string]any{
+			"hint": "Create a milestone first with `agentctl room milestone start` and reuse its milestone_id.",
+		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	proposalMsg, proposalMeta, err := loadRoomStoryProposal(cmd.Context(), store, absWorkspace, roomID, proposalID)
+	if err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.story.accept", protocol.ErrorCodeENotFound, err.Error(), map[string]any{
+			"hint": "Use a proposal id returned by `agentctl room story propose` or listed in `agentctl room story show`.",
+		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	if strings.TrimSpace(proposalMeta.MilestoneID) != milestoneMsg.ID {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.story.accept", protocol.ErrorCodeEARG, "story proposal does not belong to this milestone", nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	return runRoomStoryAdd(cmd, workspace, identity.Sender, roomID, milestoneID, strings.TrimPrefix(strings.TrimSpace(proposalMsg.Subject), "Story Proposal: "), proposalMeta.Description, firstNonEmpty(strings.TrimSpace(owner), strings.TrimSpace(proposalMeta.Owner)))
+}
+
+func runRoomStoryValidate(cmd *cobra.Command, workspace, sender, roomID, storyID, validatorType, status, summaryText, artifactPath, artifactDigest, commandText, notes string, relatedStoryIDs []string) error {
+	absWorkspace, identity, store, roomID, _, err := prepareRoomAgileCommand(cmd, "agentctl.room.story", workspace, sender, roomID)
+	if err != nil {
+		return err
+	}
+	defer store.Close()
+
+	storyMsg, err := loadRoomAgileRoot(cmd.Context(), store, absWorkspace, roomID, storyID, agent.BoardMessageKindStory)
+	if err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.story.validate", protocol.ErrorCodeENotFound, err.Error(), map[string]any{
+			"hint": "Add or accept the story first with `agentctl room story add` or `agentctl room story accept`.",
+		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	milestoneMsg, err := loadRoomAgileRoot(cmd.Context(), store, absWorkspace, roomID, storyMsg.RelatedMessageID, agent.BoardMessageKindMilestone)
+	if err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.story.validate", protocol.ErrorCodeENotFound, err.Error(), map[string]any{
+			"hint": "The story must belong to a valid milestone before validation can be recorded.",
+		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	milestoneMeta := parseRoomMilestoneBody(milestoneMsg.Body)
+	storyMeta := parseRoomStoryBody(storyMsg.Body)
+	validatorType, err = normalizeRoomStoryValidatorType(validatorType)
+	if err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.story.validate", protocol.ErrorCodeEARG, err.Error(), map[string]any{
+			"hint": "Use one of: review, test, integration, user_test, manual_check, audit.",
+		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	status, err = normalizeRoomStoryValidationStatus(status)
+	if err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.story.validate", protocol.ErrorCodeEARG, err.Error(), map[string]any{
+			"hint": "Use one of: pass, fail, blocked, waived.",
+		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	summaryText = strings.TrimSpace(summaryText)
+	if summaryText == "" {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.story.validate", protocol.ErrorCodeEARG, "summary is required", nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	artifactPath = strings.TrimSpace(artifactPath)
+	artifactDigest = strings.TrimSpace(artifactDigest)
+	commandText = strings.TrimSpace(commandText)
+	notes = strings.TrimSpace(notes)
+	if artifactDigest != "" && artifactPath == "" {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.story.validate", protocol.ErrorCodeEARG, "artifact-digest requires artifact-path", map[string]any{
+			"hint": "Pass --artifact-path alongside --artifact-digest so the validation record can point to the concrete artifact source.",
+		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	if status == "waived" {
+		if !roomMemberHasRoleFromRoomState(cmd.Context(), store, absWorkspace, roomID, identity.Sender, "coordinator") {
+			if !sameRoomParticipant(firstNonEmpty(strings.TrimSpace(storyMeta.Owner), identity.Sender), identity.Sender) || strings.TrimSpace(storyMeta.Owner) == "" {
+				return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.story.validate", protocol.ErrorCodeEARG, "waived validations require the story owner or coordinator", map[string]any{
+					"hint": "Use the story owner account or the room coordinator when recording a waiver.",
+				}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+			}
+		}
+		if notes == "" {
+			return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.story.validate", protocol.ErrorCodeEARG, "waived validations require waiver notes", map[string]any{
+				"hint": "Pass --notes with the explicit waiver reason when status is waived.",
+			}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+		}
+	}
+	normalizedRelatedStoryIDs, err := validateRoomRelatedStoryIDs(cmd.Context(), store, absWorkspace, roomID, milestoneMeta.EpicID, milestoneMsg.ID, storyMsg.ID, relatedStoryIDs)
+	if err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.story.validate", protocol.ErrorCodeEARG, err.Error(), map[string]any{
+			"hint": "Related story ids must resolve to stories in the same milestone and epic.",
+		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+
+	msg := &agent.BoardMessage{
+		WorkspaceID:      absWorkspace,
+		RelatedMessageID: storyMsg.ID,
+		Stream:           agent.RoomStreamName(roomID),
+		Sender:           identity.Sender,
+		Recipient:        agent.BroadcastRecipient,
+		Kind:             agent.BoardMessageKindStoryValidation,
+		Priority:         agent.DefaultPriority,
+		Subject:          fmt.Sprintf("Story Validation (%s/%s): %s", validatorType, status, strings.TrimPrefix(strings.TrimSpace(storyMsg.Subject), "Story: ")),
+		Body:             buildRoomStoryValidationBody(milestoneMeta.EpicID, milestoneMsg.ID, storyMsg.ID, validatorType, status, summaryText, artifactPath, artifactDigest, commandText, notes, normalizedRelatedStoryIDs),
+	}
+	if err := store.SendMessage(cmd.Context(), msg); err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.story.validate", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	if strings.TrimSpace(milestoneMeta.EpicID) != "" {
+		if err := syncRoomAgileWorkpack(cmd.Context(), store, absWorkspace, roomID, milestoneMeta.EpicID); err != nil {
+			return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.story.validate", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+		}
+	}
+	return protocol.WriteOK(cmd.OutOrStdout(), "agentctl.room.story.validate", map[string]any{
+		"room_id":       roomID,
+		"epic_id":       milestoneMeta.EpicID,
+		"milestone_id":  milestoneMsg.ID,
+		"story_id":      storyMsg.ID,
+		"validation_id": msg.ID,
+		"message":       msg,
+	}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+}
+
+func runRoomStoryShow(cmd *cobra.Command, workspace, roomID, storyID string, limit int) error {
+	absWorkspace, err := resolveRoomWorkspace(workspace)
+	if err != nil {
+		return err
+	}
+	store, err := openRoomBoardStore(cmd.Context())
+	if err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.story.show", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	defer store.Close()
+
+	summary, messages, err := loadRoomState(cmd.Context(), store, absWorkspace, roomID, "", limit)
+	if err != nil {
+		code := protocol.ErrorCodeERuntime
+		if errors.Is(err, blackboard.ErrRoomNotFound) {
+			code = protocol.ErrorCodeENotFound
+		}
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.story.show", code, err.Error(), map[string]any{
+			"hint": "Create the room first or check the room id.",
+		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+
+	stories := buildRoomStoryViews(messages)
+	if strings.TrimSpace(storyID) == "" {
+		return protocol.WriteOK(cmd.OutOrStdout(), "agentctl.room.story.show", map[string]any{
+			"room":    summary,
+			"count":   len(stories),
+			"stories": stories,
+		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	for _, story := range stories {
+		if story["id"] == strings.TrimSpace(storyID) {
+			return protocol.WriteOK(cmd.OutOrStdout(), "agentctl.room.story.show", map[string]any{
+				"room":  summary,
+				"story": story,
+			}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+		}
+	}
+	return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.story.show", protocol.ErrorCodeENotFound, fmt.Sprintf("story %q not found", storyID), map[string]any{
+		"hint": "Run `agentctl room story show <room-id>` to list available stories.",
+	}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+}
+
+func runRoomLogAppend(cmd *cobra.Command, workspace, sender, roomID, epicID, label string, completed, inFlight, blockers, nextFocus []string, notes string) error {
+	absWorkspace, identity, store, roomID, summary, err := prepareRoomAgileCommand(cmd, "agentctl.room.log", workspace, sender, roomID)
+	if err != nil {
+		return err
+	}
+	defer store.Close()
+	if !roomMemberHasRole(summary.Members, identity.Sender, "coordinator") {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.log.append", protocol.ErrorCodeEARG, "agile scope changes require coordinator role", map[string]any{
+			"hint": "Run the command as the room coordinator, or join the room with role=coordinator first.",
+		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+
+	epicMsg, err := loadRoomAgileRoot(cmd.Context(), store, absWorkspace, roomID, epicID, agent.BoardMessageKindEpic)
+	if err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.log.append", protocol.ErrorCodeENotFound, err.Error(), map[string]any{
+			"hint": "Create an epic first with `agentctl room epic start` and reuse its epic_id.",
+		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	label = strings.TrimSpace(label)
+	if label == "" {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.log.append", protocol.ErrorCodeEARG, "label is required", nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	msg := &agent.BoardMessage{
+		WorkspaceID:      absWorkspace,
+		RelatedMessageID: epicMsg.ID,
+		Stream:           agent.RoomStreamName(roomID),
+		Sender:           identity.Sender,
+		Recipient:        agent.BroadcastRecipient,
+		Kind:             agent.BoardMessageKindDeliveryLog,
+		Priority:         agent.DefaultPriority,
+		Subject:          "Delivery Log: " + label,
+		Body:             buildRoomDeliveryLogBody(label, completed, inFlight, blockers, nextFocus, notes),
+	}
+	if err := store.SendMessage(cmd.Context(), msg); err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.log.append", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	if err := syncRoomAgileWorkpack(cmd.Context(), store, absWorkspace, roomID, epicMsg.ID); err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.log.append", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	return protocol.WriteOK(cmd.OutOrStdout(), "agentctl.room.log.append", map[string]any{
+		"room_id": roomID,
+		"epic_id": epicMsg.ID,
+		"log_id":  msg.ID,
+		"message": msg,
+	}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+}
+
+func runRoomLogShow(cmd *cobra.Command, workspace, roomID, epicID string, limit int) error {
+	absWorkspace, err := resolveRoomWorkspace(workspace)
+	if err != nil {
+		return err
+	}
+	store, err := openRoomBoardStore(cmd.Context())
+	if err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.log.show", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	defer store.Close()
+
+	summary, messages, err := loadRoomState(cmd.Context(), store, absWorkspace, roomID, "", limit)
+	if err != nil {
+		code := protocol.ErrorCodeERuntime
+		if errors.Is(err, blackboard.ErrRoomNotFound) {
+			code = protocol.ErrorCodeENotFound
+		}
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.log.show", code, err.Error(), map[string]any{
+			"hint": "Create the room first or check the room id.",
+		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+
+	logs := buildRoomDeliveryLogViews(messages)
+	filtered := make([]map[string]any, 0, len(logs))
+	for _, entry := range logs {
+		if entry["epic_id"] == strings.TrimSpace(epicID) {
+			filtered = append(filtered, entry)
+		}
+	}
+	if len(filtered) == 0 {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.log.show", protocol.ErrorCodeENotFound, fmt.Sprintf("delivery log for epic %q not found", epicID), map[string]any{
+			"hint": "Append a log entry with `agentctl room log append` after creating the epic.",
+		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	return protocol.WriteOK(cmd.OutOrStdout(), "agentctl.room.log.show", map[string]any{
+		"room":    summary,
+		"epic_id": strings.TrimSpace(epicID),
+		"count":   len(filtered),
+		"entries": filtered,
+	}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+}
+
+func runRoomWorkpackShow(cmd *cobra.Command, workspace, roomID, epicID string) error {
+	absWorkspace, err := resolveRoomWorkspace(workspace)
+	if err != nil {
+		return err
+	}
+	store, err := openRoomBoardStore(cmd.Context())
+	if err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.workpack.show", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	defer store.Close()
+
+	summary, messages, err := loadRoomState(cmd.Context(), store, absWorkspace, roomID, "", roomTaskScanLimit)
+	if err != nil {
+		code := protocol.ErrorCodeERuntime
+		if errors.Is(err, blackboard.ErrRoomNotFound) {
+			code = protocol.ErrorCodeENotFound
+		}
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.workpack.show", code, err.Error(), map[string]any{
+			"hint": "Create the room first or check the room id.",
+		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+
+	for _, epic := range buildRoomEpicViews(messages) {
+		if id, _ := epic["id"].(string); id == strings.TrimSpace(epicID) {
+			return protocol.WriteOK(cmd.OutOrStdout(), "agentctl.room.workpack.show", map[string]any{
+				"room":      summary,
+				"epic_id":   epicID,
+				"workpack":  buildRoomAgileWorkpackInfo(epic),
+				"epic":      epic,
+				"workspace": absWorkspace,
+			}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+		}
+	}
+	return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.workpack.show", protocol.ErrorCodeENotFound, fmt.Sprintf("epic %q not found", epicID), map[string]any{
+		"hint": "Run `agentctl room epic show <room-id>` to list available epics.",
+	}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+}
+
+func runRoomWorkpackSync(cmd *cobra.Command, workspace, sender, roomID, epicID string) error {
+	absWorkspace, identity, store, roomID, _, err := prepareRoomAgileCommand(cmd, "agentctl.room.workpack", workspace, sender, roomID)
+	if err != nil {
+		return err
+	}
+	defer store.Close()
+
+	epicMsg, err := loadRoomAgileRoot(cmd.Context(), store, absWorkspace, roomID, epicID, agent.BoardMessageKindEpic)
+	if err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.workpack.sync", protocol.ErrorCodeENotFound, err.Error(), map[string]any{
+			"hint": "Create the epic first with `agentctl room epic start` and reuse its epic_id.",
+		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	if err := syncRoomAgileWorkpack(cmd.Context(), store, absWorkspace, roomID, epicMsg.ID); err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.workpack.sync", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+
+	messages, err := store.ListRoomMessages(cmd.Context(), absWorkspace, roomID, roomTaskScanLimit)
+	if err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.workpack.sync", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	for _, epic := range buildRoomEpicViews(messages) {
+		if id, _ := epic["id"].(string); id == epicMsg.ID {
+			return protocol.WriteOK(cmd.OutOrStdout(), "agentctl.room.workpack.sync", map[string]any{
+				"room_id":   roomID,
+				"epic_id":   epicMsg.ID,
+				"actor":     identity.Sender,
+				"workpack":  buildRoomAgileWorkpackInfo(epic),
+				"workspace": absWorkspace,
+			}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+		}
+	}
+	return protocol.WriteOK(cmd.OutOrStdout(), "agentctl.room.workpack.sync", map[string]any{
+		"room_id":   roomID,
+		"epic_id":   epicMsg.ID,
+		"actor":     identity.Sender,
+		"workpack":  map[string]any{"root": roomAgileWorkpackRootPath(epicMsg.ID)},
+		"workspace": absWorkspace,
+	}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+}
+
+func prepareRoomAgileCommand(cmd *cobra.Command, commandName, workspace, sender, roomID string) (string, roomIdentity, blackboard.BoardStore, string, agent.RoomSummary, error) {
+	absWorkspace, err := resolveRoomWorkspace(workspace)
+	if err != nil {
+		return "", roomIdentity{}, nil, "", agent.RoomSummary{}, err
+	}
+	identity, err := resolveRoomSender(cmd.Context(), sender)
+	if err != nil {
+		return "", roomIdentity{}, nil, "", agent.RoomSummary{}, protocol.WriteError(cmd.OutOrStdout(), commandName, protocol.ErrorCodeEARG, err.Error(), map[string]any{
+			"hint": "Pass --sender when outside tmux/zellij, or run inside a prepared pane so agentctl can derive the participant id.",
+		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	store, err := openRoomBoardStore(cmd.Context())
+	if err != nil {
+		return "", roomIdentity{}, nil, "", agent.RoomSummary{}, protocol.WriteError(cmd.OutOrStdout(), commandName, protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	roomID = strings.TrimSpace(roomID)
+	summary, err := store.GetRoom(cmd.Context(), absWorkspace, roomID, identity.Sender)
+	if err != nil {
+		code := protocol.ErrorCodeERuntime
+		if errors.Is(err, blackboard.ErrRoomNotFound) {
+			code = protocol.ErrorCodeENotFound
+		}
+		store.Close()
+		return "", roomIdentity{}, nil, "", agent.RoomSummary{}, protocol.WriteError(cmd.OutOrStdout(), commandName, code, err.Error(), map[string]any{
+			"hint": "Create the room first or check the room id.",
+		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	return absWorkspace, identity, store, roomID, summary, nil
+}
+
+func loadRoomAgileRoot(ctx context.Context, store blackboard.BoardStore, workspaceID, roomID, rootID string, kind agent.BoardMessageKind) (agent.BoardMessage, error) {
+	messages, err := store.ListRoomMessages(ctx, workspaceID, roomID, roomTaskScanLimit)
+	if err != nil {
+		return agent.BoardMessage{}, err
+	}
+	rootID = strings.TrimSpace(rootID)
+	for _, msg := range messages {
+		if msg.ID == rootID && msg.Kind == kind {
+			return msg, nil
+		}
+	}
+	return agent.BoardMessage{}, fmt.Errorf("%s %q not found", strings.ReplaceAll(string(kind), "_", " "), rootID)
+}
+
+func loadRoomEpic(ctx context.Context, store blackboard.BoardStore, workspaceID, roomID, epicID string) (agent.BoardMessage, roomEpicMeta, error) {
+	msg, err := loadRoomAgileRoot(ctx, store, workspaceID, roomID, epicID, agent.BoardMessageKindEpic)
+	if err != nil {
+		return agent.BoardMessage{}, roomEpicMeta{}, err
+	}
+	return msg, parseRoomEpicBody(msg.Body), nil
+}
+
+func loadRoomEpicQuestion(ctx context.Context, store blackboard.BoardStore, workspaceID, roomID, questionID string) (agent.BoardMessage, agent.BoardMessage, roomEpicMeta, error) {
+	messages, err := store.ListRoomMessages(ctx, workspaceID, roomID, roomTaskScanLimit)
+	if err != nil {
+		return agent.BoardMessage{}, agent.BoardMessage{}, roomEpicMeta{}, err
+	}
+	questionID = strings.TrimSpace(questionID)
+	for _, msg := range messages {
+		if msg.ID == questionID && msg.Kind == agent.BoardMessageKindEpicQuestion {
+			epicMsg, meta, err := loadRoomEpic(ctx, store, workspaceID, roomID, msg.RelatedMessageID)
+			if err != nil {
+				return agent.BoardMessage{}, agent.BoardMessage{}, roomEpicMeta{}, err
+			}
+			return msg, epicMsg, meta, nil
+		}
+	}
+	return agent.BoardMessage{}, agent.BoardMessage{}, roomEpicMeta{}, fmt.Errorf("epic question %q not found", questionID)
+}
+
+func loadRoomMilestoneProposal(ctx context.Context, store blackboard.BoardStore, workspaceID, roomID, proposalID string) (agent.BoardMessage, roomMilestoneProposalMeta, error) {
+	msg, err := loadRoomAgileRoot(ctx, store, workspaceID, roomID, proposalID, agent.BoardMessageKindMilestoneProposal)
+	if err != nil {
+		return agent.BoardMessage{}, roomMilestoneProposalMeta{}, err
+	}
+	return msg, parseRoomMilestoneProposalBody(msg.Body), nil
+}
+
+func loadRoomStoryProposal(ctx context.Context, store blackboard.BoardStore, workspaceID, roomID, proposalID string) (agent.BoardMessage, roomStoryProposalMeta, error) {
+	msg, err := loadRoomAgileRoot(ctx, store, workspaceID, roomID, proposalID, agent.BoardMessageKindStoryProposal)
+	if err != nil {
+		return agent.BoardMessage{}, roomStoryProposalMeta{}, err
+	}
+	return msg, parseRoomStoryProposalBody(msg.Body), nil
+}
+
+func roomMemberHasRoleFromRoomState(ctx context.Context, store blackboard.BoardStore, workspaceID, roomID, actorID, role string) bool {
+	summary, _, err := loadRoomState(ctx, store, workspaceID, roomID, "", roomTaskScanLimit)
+	if err != nil {
+		return false
+	}
+	return roomMemberHasRole(summary.Members, actorID, role)
+}
+
+func validateRoomRelatedStoryIDs(ctx context.Context, store blackboard.BoardStore, workspaceID, roomID, epicID, milestoneID, storyID string, relatedStoryIDs []string) ([]string, error) {
+	if len(relatedStoryIDs) == 0 {
+		return nil, nil
+	}
+	seen := make(map[string]struct{}, len(relatedStoryIDs))
+	out := make([]string, 0, len(relatedStoryIDs))
+	for _, candidate := range relatedStoryIDs {
+		candidate = strings.TrimSpace(candidate)
+		if candidate == "" || candidate == strings.TrimSpace(storyID) {
+			continue
+		}
+		if _, ok := seen[candidate]; ok {
+			continue
+		}
+		seen[candidate] = struct{}{}
+		relatedStory, err := loadRoomAgileRoot(ctx, store, workspaceID, roomID, candidate, agent.BoardMessageKindStory)
+		if err != nil {
+			return nil, fmt.Errorf("related story %q not found", candidate)
+		}
+		if strings.TrimSpace(relatedStory.RelatedMessageID) != strings.TrimSpace(milestoneID) {
+			return nil, fmt.Errorf("related story %q is not in milestone %q", candidate, milestoneID)
+		}
+		relatedMilestone, err := loadRoomAgileRoot(ctx, store, workspaceID, roomID, relatedStory.RelatedMessageID, agent.BoardMessageKindMilestone)
+		if err != nil {
+			return nil, fmt.Errorf("related story %q milestone not found", candidate)
+		}
+		relatedMeta := parseRoomMilestoneBody(relatedMilestone.Body)
+		if strings.TrimSpace(relatedMeta.EpicID) != strings.TrimSpace(epicID) {
+			return nil, fmt.Errorf("related story %q is not in epic %q", candidate, epicID)
+		}
+		out = append(out, candidate)
+	}
+	sort.Strings(out)
+	return out, nil
+}
+
+func epicIsFinalized(ctx context.Context, store blackboard.BoardStore, workspaceID, roomID, epicID string) bool {
+	messages, err := store.ListRoomMessages(ctx, workspaceID, roomID, roomTaskScanLimit)
+	if err != nil {
+		return false
+	}
+	for _, msg := range messages {
+		if msg.Kind == agent.BoardMessageKindEpicFinalize && strings.TrimSpace(msg.RelatedMessageID) == strings.TrimSpace(epicID) {
+			return true
+		}
+	}
+	return false
+}
+
+func countOpenEpicQuestions(ctx context.Context, store blackboard.BoardStore, workspaceID, roomID, epicID string) (int, error) {
+	messages, err := store.ListRoomMessages(ctx, workspaceID, roomID, roomTaskScanLimit)
+	if err != nil {
+		return 0, err
+	}
+	answersByQuestion := make(map[string]struct{})
+	for _, msg := range messages {
+		if msg.Kind == agent.BoardMessageKindEpicAnswer {
+			answersByQuestion[strings.TrimSpace(msg.RelatedMessageID)] = struct{}{}
+		}
+	}
+	open := 0
+	for _, msg := range messages {
+		if msg.Kind == agent.BoardMessageKindEpicQuestion && strings.TrimSpace(msg.RelatedMessageID) == strings.TrimSpace(epicID) {
+			if _, ok := answersByQuestion[msg.ID]; !ok {
+				open++
+			}
+		}
+	}
+	return open, nil
+}
+
+func buildRoomEpicBody(title, goal, owner, outcome, horizon string, scope, success []string) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "Title: %s\n", strings.TrimSpace(title))
+	if strings.TrimSpace(goal) != "" {
+		fmt.Fprintf(&b, "Goal: %s\n", strings.TrimSpace(goal))
+	}
+	if strings.TrimSpace(owner) != "" {
+		fmt.Fprintf(&b, "Owner: %s\n", strings.TrimSpace(owner))
+	}
+	if strings.TrimSpace(outcome) != "" {
+		fmt.Fprintf(&b, "Outcome: %s\n", strings.TrimSpace(outcome))
+	}
+	if strings.TrimSpace(horizon) != "" {
+		fmt.Fprintf(&b, "Horizon: %s\n", strings.TrimSpace(horizon))
+	}
+	appendRoomSection(&b, "Scope", scope)
+	appendRoomSection(&b, "Success", success)
+	b.WriteString("Protocol:\n- define milestones\n- add stories under milestones\n- review milestones against acceptance criteria\n- append delivery log entries as work progresses\n")
+	return strings.TrimSpace(b.String())
+}
+
+func parseRoomEpicBody(body string) roomEpicMeta {
+	meta := roomEpicMeta{}
+	lines := strings.Split(body, "\n")
+	section := ""
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			continue
+		}
+		if strings.HasPrefix(trimmed, "Protocol:") {
+			break
+		}
+		switch trimmed {
+		case "Scope:":
+			section = "scope"
+			continue
+		case "Success:":
+			section = "success"
+			continue
+		}
+		if section != "" && strings.HasPrefix(trimmed, "- ") {
+			value := strings.TrimSpace(strings.TrimPrefix(trimmed, "- "))
+			if value == "" {
+				continue
+			}
+			switch section {
+			case "scope":
+				meta.Scope = append(meta.Scope, value)
+			case "success":
+				meta.Success = append(meta.Success, value)
+			}
+			continue
+		}
+		section = ""
+		key, value, ok := strings.Cut(trimmed, ":")
+		if !ok {
+			continue
+		}
+		value = strings.TrimSpace(value)
+		switch strings.TrimSpace(key) {
+		case "Goal":
+			meta.Goal = value
+		case "Owner":
+			meta.Owner = value
+		case "Outcome":
+			meta.Outcome = value
+		case "Horizon":
+			meta.Horizon = value
+		}
+	}
+	return meta
+}
+
+func normalizeRoomEpicQuestionKind(raw string) (string, error) {
+	kind := strings.TrimSpace(strings.ToLower(raw))
+	if kind == "" {
+		kind = "product"
+	}
+	switch kind {
+	case "product", "technical", "constraint", "success":
+		return kind, nil
+	default:
+		return "", fmt.Errorf("unsupported epic question kind %q", raw)
+	}
+}
+
+func buildRoomEpicQuestionBody(kind, question string) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "Kind: %s\n", strings.TrimSpace(kind))
+	fmt.Fprintf(&b, "Question: %s\n", strings.TrimSpace(question))
+	return strings.TrimSpace(b.String())
+}
+
+func parseRoomEpicQuestionBody(body string) roomEpicQuestionMeta {
+	meta := roomEpicQuestionMeta{}
+	lines := strings.Split(body, "\n")
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			continue
+		}
+		key, value, ok := strings.Cut(trimmed, ":")
+		if !ok {
+			continue
+		}
+		value = strings.TrimSpace(value)
+		switch strings.TrimSpace(key) {
+		case "Kind":
+			meta.Kind = value
+		case "Question":
+			meta.Question = value
+		}
+	}
+	return meta
+}
+
+func buildRoomMilestoneBody(epicID, title, goal, owner string, scope []string) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "EpicID: %s\n", strings.TrimSpace(epicID))
+	fmt.Fprintf(&b, "Title: %s\n", strings.TrimSpace(title))
+	if strings.TrimSpace(goal) != "" {
+		fmt.Fprintf(&b, "Goal: %s\n", strings.TrimSpace(goal))
+	}
+	if strings.TrimSpace(owner) != "" {
+		fmt.Fprintf(&b, "Owner: %s\n", strings.TrimSpace(owner))
+	}
+	appendRoomSection(&b, "Scope", scope)
+	b.WriteString("Protocol:\n- add acceptance criteria\n- attach stories under the milestone\n- record pass/block review at the milestone boundary\n")
+	return strings.TrimSpace(b.String())
+}
+
+func parseRoomMilestoneBody(body string) roomMilestoneMeta {
+	meta := roomMilestoneMeta{}
+	lines := strings.Split(body, "\n")
+	inScope := false
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			continue
+		}
+		if strings.HasPrefix(trimmed, "Protocol:") {
+			break
+		}
+		if trimmed == "Scope:" {
+			inScope = true
+			continue
+		}
+		if inScope && strings.HasPrefix(trimmed, "- ") {
+			meta.Scope = append(meta.Scope, strings.TrimSpace(strings.TrimPrefix(trimmed, "- ")))
+			continue
+		}
+		inScope = false
+		key, value, ok := strings.Cut(trimmed, ":")
+		if !ok {
+			continue
+		}
+		value = strings.TrimSpace(value)
+		switch strings.TrimSpace(key) {
+		case "EpicID":
+			meta.EpicID = value
+		case "Goal":
+			meta.Goal = value
+		case "Owner":
+			meta.Owner = value
+		}
+	}
+	return meta
+}
+
+func buildRoomMilestoneProposalBody(epicID, goal string, scope []string, rationale string) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "EpicID: %s\n", strings.TrimSpace(epicID))
+	if strings.TrimSpace(goal) != "" {
+		fmt.Fprintf(&b, "Goal: %s\n", strings.TrimSpace(goal))
+	}
+	appendRoomSection(&b, "Scope", scope)
+	if strings.TrimSpace(rationale) != "" {
+		fmt.Fprintf(&b, "Rationale: %s\n", strings.TrimSpace(rationale))
+	}
+	return strings.TrimSpace(b.String())
+}
+
+func parseRoomMilestoneProposalBody(body string) roomMilestoneProposalMeta {
+	meta := roomMilestoneProposalMeta{}
+	lines := strings.Split(body, "\n")
+	inScope := false
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			continue
+		}
+		if trimmed == "Scope:" {
+			inScope = true
+			continue
+		}
+		if inScope && strings.HasPrefix(trimmed, "- ") {
+			meta.Scope = append(meta.Scope, strings.TrimSpace(strings.TrimPrefix(trimmed, "- ")))
+			continue
+		}
+		inScope = false
+		key, value, ok := strings.Cut(trimmed, ":")
+		if !ok {
+			continue
+		}
+		value = strings.TrimSpace(value)
+		switch strings.TrimSpace(key) {
+		case "EpicID":
+			meta.EpicID = value
+		case "Goal":
+			meta.Goal = value
+		case "Rationale":
+			meta.Rationale = value
+		}
+	}
+	return meta
+}
+
+func buildRoomStoryBody(owner, description string) string {
+	var b strings.Builder
+	if strings.TrimSpace(owner) != "" {
+		fmt.Fprintf(&b, "Owner: %s\n", strings.TrimSpace(owner))
+	}
+	fmt.Fprintf(&b, "Description: %s\n", strings.TrimSpace(description))
+	return strings.TrimSpace(b.String())
+}
+
+func parseRoomStoryBody(body string) roomStoryMeta {
+	meta := roomStoryMeta{}
+	lines := strings.Split(body, "\n")
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			continue
+		}
+		key, value, ok := strings.Cut(trimmed, ":")
+		if !ok {
+			continue
+		}
+		value = strings.TrimSpace(value)
+		switch strings.TrimSpace(key) {
+		case "Owner":
+			meta.Owner = value
+		case "Description":
+			meta.Description = value
+		}
+	}
+	return meta
+}
+
+func normalizeRoomStoryValidatorType(raw string) (string, error) {
+	kind := strings.TrimSpace(strings.ToLower(raw))
+	switch kind {
+	case "review", "test", "integration", "user_test", "manual_check", "audit":
+		return kind, nil
+	default:
+		return "", fmt.Errorf("unsupported story validator type %q", raw)
+	}
+}
+
+func normalizeRoomStoryValidationStatus(raw string) (string, error) {
+	status := strings.TrimSpace(strings.ToLower(raw))
+	switch status {
+	case "pass", "fail", "blocked", "waived":
+		return status, nil
+	default:
+		return "", fmt.Errorf("unsupported story validation status %q", raw)
+	}
+}
+
+func buildRoomStoryValidationBody(epicID, milestoneID, storyID, validatorType, status, summaryText, artifactPath, artifactDigest, commandText, notes string, relatedStoryIDs []string) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "EpicID: %s\n", strings.TrimSpace(epicID))
+	fmt.Fprintf(&b, "MilestoneID: %s\n", strings.TrimSpace(milestoneID))
+	fmt.Fprintf(&b, "StoryID: %s\n", strings.TrimSpace(storyID))
+	fmt.Fprintf(&b, "ValidatorType: %s\n", strings.TrimSpace(validatorType))
+	fmt.Fprintf(&b, "Status: %s\n", strings.TrimSpace(status))
+	fmt.Fprintf(&b, "Summary: %s\n", strings.TrimSpace(summaryText))
+	if strings.TrimSpace(commandText) != "" {
+		fmt.Fprintf(&b, "Command: %s\n", strings.TrimSpace(commandText))
+	}
+	if strings.TrimSpace(artifactPath) != "" {
+		fmt.Fprintf(&b, "ArtifactPath: %s\n", strings.TrimSpace(artifactPath))
+	}
+	if strings.TrimSpace(artifactDigest) != "" {
+		fmt.Fprintf(&b, "ArtifactDigest: %s\n", strings.TrimSpace(artifactDigest))
+	}
+	appendRoomSection(&b, "RelatedStoryIDs", relatedStoryIDs)
+	if strings.TrimSpace(status) == "waived" && strings.TrimSpace(notes) != "" {
+		fmt.Fprintf(&b, "WaiverReason: %s\n", strings.TrimSpace(notes))
+	}
+	if strings.TrimSpace(notes) != "" {
+		fmt.Fprintf(&b, "Notes: %s\n", strings.TrimSpace(notes))
+	}
+	return strings.TrimSpace(b.String())
+}
+
+func parseRoomStoryValidationBody(body string) roomStoryValidationMeta {
+	meta := roomStoryValidationMeta{}
+	lines := strings.Split(body, "\n")
+	section := ""
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			continue
+		}
+		if trimmed == "RelatedStoryIDs:" {
+			section = "related"
+			continue
+		}
+		if section == "related" && strings.HasPrefix(trimmed, "- ") {
+			meta.RelatedStoryIDs = append(meta.RelatedStoryIDs, strings.TrimSpace(strings.TrimPrefix(trimmed, "- ")))
+			continue
+		}
+		section = ""
+		key, value, ok := strings.Cut(trimmed, ":")
+		if !ok {
+			continue
+		}
+		value = strings.TrimSpace(value)
+		switch strings.TrimSpace(key) {
+		case "EpicID":
+			meta.EpicID = value
+		case "MilestoneID":
+			meta.MilestoneID = value
+		case "StoryID":
+			meta.StoryID = value
+		case "ValidatorType":
+			meta.ValidatorType = value
+		case "Status":
+			meta.Status = value
+		case "Summary":
+			meta.Summary = value
+		case "Command":
+			meta.Command = value
+		case "ArtifactPath":
+			meta.ArtifactPath = value
+		case "ArtifactDigest":
+			meta.ArtifactDigest = value
+		case "WaiverReason":
+			meta.WaiverReason = value
+		case "Notes":
+			meta.Notes = value
+		}
+	}
+	return meta
+}
+
+func buildRoomStoryProposalBody(milestoneID, owner, description, rationale string) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "MilestoneID: %s\n", strings.TrimSpace(milestoneID))
+	if strings.TrimSpace(owner) != "" {
+		fmt.Fprintf(&b, "Owner: %s\n", strings.TrimSpace(owner))
+	}
+	fmt.Fprintf(&b, "Description: %s\n", strings.TrimSpace(description))
+	if strings.TrimSpace(rationale) != "" {
+		fmt.Fprintf(&b, "Rationale: %s\n", strings.TrimSpace(rationale))
+	}
+	return strings.TrimSpace(b.String())
+}
+
+func parseRoomStoryProposalBody(body string) roomStoryProposalMeta {
+	meta := roomStoryProposalMeta{}
+	lines := strings.Split(body, "\n")
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			continue
+		}
+		key, value, ok := strings.Cut(trimmed, ":")
+		if !ok {
+			continue
+		}
+		value = strings.TrimSpace(value)
+		switch strings.TrimSpace(key) {
+		case "MilestoneID":
+			meta.MilestoneID = value
+		case "Owner":
+			meta.Owner = value
+		case "Description":
+			meta.Description = value
+		case "Rationale":
+			meta.Rationale = value
+		}
+	}
+	return meta
+}
+
+func buildRoomDeliveryLogBody(label string, completed, inFlight, blockers, nextFocus []string, notes string) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "Label: %s\n", strings.TrimSpace(label))
+	appendRoomSection(&b, "Completed", completed)
+	appendRoomSection(&b, "InFlight", inFlight)
+	appendRoomSection(&b, "Blockers", blockers)
+	appendRoomSection(&b, "NextFocus", nextFocus)
+	if strings.TrimSpace(notes) != "" {
+		fmt.Fprintf(&b, "Notes: %s\n", strings.TrimSpace(notes))
+	}
+	return strings.TrimSpace(b.String())
+}
+
+func parseRoomDeliveryLogBody(body string) roomDeliveryLogMeta {
+	meta := roomDeliveryLogMeta{}
+	lines := strings.Split(body, "\n")
+	section := ""
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			continue
+		}
+		switch trimmed {
+		case "Completed:":
+			section = "completed"
+			continue
+		case "InFlight:":
+			section = "inflight"
+			continue
+		case "Blockers:":
+			section = "blockers"
+			continue
+		case "NextFocus:":
+			section = "next"
+			continue
+		}
+		if section != "" && strings.HasPrefix(trimmed, "- ") {
+			value := strings.TrimSpace(strings.TrimPrefix(trimmed, "- "))
+			switch section {
+			case "completed":
+				meta.Completed = append(meta.Completed, value)
+			case "inflight":
+				meta.InFlight = append(meta.InFlight, value)
+			case "blockers":
+				meta.Blockers = append(meta.Blockers, value)
+			case "next":
+				meta.NextFocus = append(meta.NextFocus, value)
+			}
+			continue
+		}
+		section = ""
+		key, value, ok := strings.Cut(trimmed, ":")
+		if !ok {
+			continue
+		}
+		value = strings.TrimSpace(value)
+		switch strings.TrimSpace(key) {
+		case "Label":
+			meta.Label = value
+		case "Notes":
+			meta.Notes = value
+		}
+	}
+	return meta
+}
+
+func appendRoomSection(b *strings.Builder, label string, items []string) {
+	clean := make([]string, 0, len(items))
+	for _, item := range items {
+		item = strings.TrimSpace(item)
+		if item != "" {
+			clean = append(clean, item)
+		}
+	}
+	if len(clean) == 0 {
+		return
+	}
+	fmt.Fprintf(b, "%s:\n", label)
+	for _, item := range clean {
+		fmt.Fprintf(b, "- %s\n", item)
+	}
+}
+
+type roomEpicShapingQA struct {
+	Kind     string
+	Question string
+	Answer   string
+}
+
+type roomMilestoneProposal struct {
+	Title     string
+	Goal      string
+	Scope     []string
+	Rationale string
+}
+
+func deriveRoomEpicShapingInputs(messages []agent.BoardMessage, epicID string) (string, []roomEpicShapingQA) {
+	brief := ""
+	answersByQuestion := make(map[string]agent.BoardMessage)
+	for _, msg := range messages {
+		if msg.Kind == agent.BoardMessageKindEpicFinalize && strings.TrimSpace(msg.RelatedMessageID) == strings.TrimSpace(epicID) {
+			brief = strings.TrimSpace(msg.Body)
+		}
+		if msg.Kind == agent.BoardMessageKindEpicAnswer {
+			answersByQuestion[strings.TrimSpace(msg.RelatedMessageID)] = msg
+		}
+	}
+	qa := make([]roomEpicShapingQA, 0)
+	for _, msg := range messages {
+		if msg.Kind != agent.BoardMessageKindEpicQuestion || strings.TrimSpace(msg.RelatedMessageID) != strings.TrimSpace(epicID) {
+			continue
+		}
+		qMeta := parseRoomEpicQuestionBody(msg.Body)
+		qaItem := roomEpicShapingQA{
+			Kind:     firstNonEmpty(qMeta.Kind, "product"),
+			Question: firstNonEmpty(qMeta.Question, strings.TrimSpace(msg.Body)),
+		}
+		if answer, ok := answersByQuestion[msg.ID]; ok {
+			qaItem.Answer = strings.TrimSpace(answer.Body)
+		}
+		qa = append(qa, qaItem)
+	}
+	return brief, qa
+}
+
+func deriveRoomMilestoneProposals(epicMsg agent.BoardMessage, epicMeta roomEpicMeta, brief string, qa []roomEpicShapingQA, count int) []roomMilestoneProposal {
+	scope := cleanRoomItems(epicMeta.Scope)
+	success := cleanRoomItems(epicMeta.Success)
+	if len(scope) == 0 && len(success) == 0 {
+		return nil
+	}
+	if count < 1 {
+		count = 1
+	}
+
+	proposals := make([]roomMilestoneProposal, 0, count)
+	scopeChunks := chunkRoomItems(scope, 2)
+	scopeProposalCap := count
+	if len(success) > 0 && count > 1 {
+		scopeProposalCap = count - 1
+	}
+	for i, chunk := range scopeChunks {
+		if len(proposals) >= scopeProposalCap {
+			break
+		}
+		title := fmt.Sprintf("Milestone %d", i+1)
+		goal := "Advance the next scoped tranche of the epic."
+		if i == 0 {
+			goal = firstNonEmpty(epicMeta.Goal, "Turn the clarified epic brief into the first executable tranche.")
+		}
+		rationale := firstNonEmpty(strings.TrimSpace(brief), "Derived from the clarified epic brief.")
+		if i < len(qa) && strings.TrimSpace(qa[i].Answer) != "" {
+			rationale = qa[i].Answer
+		}
+		proposals = append(proposals, roomMilestoneProposal{
+			Title:     title,
+			Goal:      goal,
+			Scope:     chunk,
+			Rationale: rationale,
+		})
+	}
+	if len(success) > 0 && len(proposals) < count {
+		rationale := "Derived from the explicit success signals attached to the epic."
+		for _, item := range qa {
+			if item.Kind == "success" && strings.TrimSpace(item.Answer) != "" {
+				rationale = item.Answer
+				break
+			}
+		}
+		proposals = append(proposals, roomMilestoneProposal{
+			Title:     "Verification and adoption",
+			Goal:      "Prove the epic meets its acceptance bar and is ready for broad use.",
+			Scope:     success,
+			Rationale: rationale,
+		})
+	}
+	return proposals
+}
+
+func cleanRoomItems(items []string) []string {
+	out := make([]string, 0, len(items))
+	for _, item := range items {
+		item = strings.TrimSpace(item)
+		if item != "" {
+			out = append(out, item)
+		}
+	}
+	return out
+}
+
+func chunkRoomItems(items []string, size int) [][]string {
+	if size <= 0 {
+		size = len(items)
+	}
+	out := make([][]string, 0)
+	for i := 0; i < len(items); i += size {
+		end := i + size
+		if end > len(items) {
+			end = len(items)
+		}
+		out = append(out, append([]string(nil), items[i:end]...))
+	}
+	return out
+}
+
+func buildRoomEpicViews(messages []agent.BoardMessage) []map[string]any {
+	questionsByEpic := make(map[string][]agent.BoardMessage)
+	answersByQuestion := make(map[string]agent.BoardMessage)
+	finalizeByEpic := make(map[string]agent.BoardMessage)
+	proposalsByEpic := make(map[string][]map[string]any)
+	for _, msg := range messages {
+		switch msg.Kind {
+		case agent.BoardMessageKindEpicQuestion:
+			questionsByEpic[strings.TrimSpace(msg.RelatedMessageID)] = append(questionsByEpic[strings.TrimSpace(msg.RelatedMessageID)], msg)
+		case agent.BoardMessageKindEpicAnswer:
+			answersByQuestion[strings.TrimSpace(msg.RelatedMessageID)] = msg
+		case agent.BoardMessageKindEpicFinalize:
+			finalizeByEpic[strings.TrimSpace(msg.RelatedMessageID)] = msg
+		case agent.BoardMessageKindMilestoneProposal:
+			proposalsByEpic[strings.TrimSpace(msg.RelatedMessageID)] = append(proposalsByEpic[strings.TrimSpace(msg.RelatedMessageID)], map[string]any{
+				"id":    msg.ID,
+				"title": strings.TrimPrefix(strings.TrimSpace(msg.Subject), "Milestone Proposal: "),
+				"root":  msg,
+				"meta":  parseRoomMilestoneProposalBody(msg.Body),
+			})
+		}
+	}
+	milestonesByEpic := make(map[string][]map[string]any)
+	for _, milestone := range buildRoomMilestoneViews(messages) {
+		epicID, _ := milestone["epic_id"].(string)
+		milestonesByEpic[epicID] = append(milestonesByEpic[epicID], milestone)
+	}
+	logsByEpic := make(map[string][]map[string]any)
+	for _, entry := range buildRoomDeliveryLogViews(messages) {
+		epicID, _ := entry["epic_id"].(string)
+		logsByEpic[epicID] = append(logsByEpic[epicID], entry)
+	}
+	out := make([]map[string]any, 0)
+	for _, msg := range messages {
+		if msg.Kind != agent.BoardMessageKindEpic {
+			continue
+		}
+		meta := parseRoomEpicBody(msg.Body)
+		questions := questionsByEpic[msg.ID]
+		answers := make([]agent.BoardMessage, 0, len(questions))
+		questionKinds := make(map[string]int)
+		openQuestions := 0
+		for _, question := range questions {
+			qMeta := parseRoomEpicQuestionBody(question.Body)
+			kind := firstNonEmpty(qMeta.Kind, "product")
+			questionKinds[kind]++
+			if answer, ok := answersByQuestion[question.ID]; ok {
+				answers = append(answers, answer)
+			} else {
+				openQuestions++
+			}
+		}
+		status := "discovery"
+		if finalizeByEpic[msg.ID].ID != "" {
+			status = "finalized"
+		} else if len(questions) > 0 && openQuestions == 0 {
+			status = "ready_to_finalize"
+		} else if len(questions) > 0 {
+			status = "intake_in_progress"
+		}
+		milestones := milestonesByEpic[msg.ID]
+		logs := logsByEpic[msg.ID]
+		storyCount := 0
+		for _, milestone := range milestones {
+			if count, ok := milestone["story_count"].(int); ok {
+				storyCount += count
+			}
+		}
+		out = append(out, map[string]any{
+			"id":              msg.ID,
+			"title":           strings.TrimPrefix(strings.TrimSpace(msg.Subject), "Epic: "),
+			"status":          status,
+			"workpack_root":   roomAgileWorkpackRootPath(msg.ID),
+			"root":            msg,
+			"meta":            meta,
+			"questions":       questions,
+			"question_kinds":  questionKinds,
+			"question_count":  len(questions),
+			"answers":         answers,
+			"answer_count":    len(answers),
+			"open_questions":  openQuestions,
+			"finalized":       finalizeByEpic[msg.ID].ID != "",
+			"final_brief":     finalizeByEpic[msg.ID],
+			"proposals":       proposalsByEpic[msg.ID],
+			"proposal_count":  len(proposalsByEpic[msg.ID]),
+			"milestones":      milestones,
+			"milestone_count": len(milestones),
+			"story_count":     storyCount,
+			"logs":            logs,
+			"log_count":       len(logs),
+		})
+	}
+	sort.Slice(out, func(i, j int) bool {
+		left := out[i]["root"].(agent.BoardMessage)
+		right := out[j]["root"].(agent.BoardMessage)
+		return left.CreatedAt.After(right.CreatedAt)
+	})
+	return out
+}
+
+func roomEpicViewByID(epics []map[string]any, epicID string) map[string]any {
+	epicID = strings.TrimSpace(epicID)
+	for _, epic := range epics {
+		if stringField(epic, "id") == epicID {
+			return epic
+		}
+	}
+	return nil
+}
+
+func buildRoomEpicContinuity(room agent.RoomSummary, messages []agent.BoardMessage, epic map[string]any) map[string]any {
+	milestones := mapSlice(epic["milestones"])
+	currentMilestone := findCurrentRoomMilestone(milestones)
+	missingValidation := buildRoomStoriesMissingValidation(currentMilestone)
+	latestLog := roomEpicLatestLog(epic)
+	openInterviewItems := buildRoomOpenInterviewItems(messages)
+	phase := deriveRoomEpicPhase(epic, currentMilestone, missingValidation, openInterviewItems)
+	summary := summarizeRoomEpicContinuity(epic, currentMilestone, missingValidation, latestLog, openInterviewItems, phase)
+
+	out := map[string]any{
+		"epic_id":                    stringField(epic, "id"),
+		"title":                      stringField(epic, "title"),
+		"status":                     stringField(epic, "status"),
+		"phase":                      phase,
+		"finalized":                  boolField(epic, "finalized"),
+		"current_milestone_id":       stringField(currentMilestone, "id"),
+		"current_milestone_title":    stringField(currentMilestone, "title"),
+		"milestone_count":            intField(epic, "milestone_count"),
+		"story_count":                intField(epic, "story_count"),
+		"accepted_story_count":       sumRoomIntField(milestones, "accepted_story_count"),
+		"validated_story_count":      sumRoomIntField(milestones, "validated_story_count"),
+		"blocked_story_count":        sumRoomIntField(milestones, "blocked_story_count"),
+		"open_intake_questions":      intField(epic, "open_questions"),
+		"open_interview_items":       len(openInterviewItems),
+		"stories_missing_validation": missingValidation,
+		"latest_log_label":           stringField(latestLog, "label"),
+		"latest_log_notes":           stringField(anyMap(latestLog["meta"]), "notes"),
+		"workpack_root":              stringField(epic, "workpack_root"),
+		"summary":                    summary,
+	}
+	if currentMilestone != nil {
+		out["current_milestone"] = currentMilestone
+	}
+	if latestLog != nil {
+		out["latest_log"] = latestLog
+	}
+	if len(openInterviewItems) > 0 {
+		out["interview_items"] = openInterviewItems
+	}
+	return out
+}
+
+func sumRoomIntField(items []map[string]any, key string) int {
+	total := 0
+	for _, item := range items {
+		total += intField(item, key)
+	}
+	return total
+}
+
+func findCurrentRoomMilestone(milestones []map[string]any) map[string]any {
+	if len(milestones) == 0 {
+		return nil
+	}
+	candidates := append([]map[string]any(nil), milestones...)
+	sort.Slice(candidates, func(i, j int) bool {
+		left := mapField(candidates[i], "root")
+		right := mapField(candidates[j], "root")
+		leftAt := time.Time{}
+		rightAt := time.Time{}
+		if left != nil {
+			leftAt = parseRFC3339Time(stringField(left, "created_at"))
+		}
+		if right != nil {
+			rightAt = parseRFC3339Time(stringField(right, "created_at"))
+		}
+		if leftAt.Equal(rightAt) {
+			return stringField(candidates[i], "id") < stringField(candidates[j], "id")
+		}
+		return leftAt.After(rightAt)
+	})
+	for _, milestone := range candidates {
+		if stringField(milestone, "status") != "passed" {
+			return milestone
+		}
+	}
+	return candidates[0]
+}
+
+func buildRoomStoriesMissingValidation(currentMilestone map[string]any) []map[string]any {
+	if currentMilestone == nil {
+		return nil
+	}
+	stories := mapSlice(currentMilestone["stories"])
+	missing := make([]map[string]any, 0)
+	for _, story := range stories {
+		if stringField(story, "status") != "accepted" {
+			continue
+		}
+		if boolField(story, "covered") {
+			continue
+		}
+		missing = append(missing, map[string]any{
+			"id":             stringField(story, "id"),
+			"title":          stringField(story, "title"),
+			"owner":          stringField(anyMap(story["meta"]), "owner"),
+			"milestone_id":   stringField(story, "milestone_id"),
+			"workpack_dir":   stringField(story, "workpack_dir"),
+			"validation_dir": stringField(story, "validation_dir"),
+		})
+	}
+	sort.Slice(missing, func(i, j int) bool {
+		return stringField(missing[i], "id") < stringField(missing[j], "id")
+	})
+	return missing
+}
+
+func roomEpicLatestLog(epic map[string]any) map[string]any {
+	logs := mapSlice(epic["logs"])
+	if len(logs) == 0 {
+		return nil
+	}
+	return logs[0]
+}
+
+func buildRoomOpenInterviewItems(messages []agent.BoardMessage) []map[string]any {
+	sessions := buildRoomInterviewSessions(messages)
+	items := make([]map[string]any, 0)
+	for _, session := range sessions {
+		status := stringField(session, "status")
+		if status == "verified" || status == "rejected" {
+			continue
+		}
+		items = append(items, map[string]any{
+			"id":     stringField(session, "id"),
+			"topic":  stringField(session, "topic"),
+			"status": status,
+		})
+	}
+	sort.Slice(items, func(i, j int) bool {
+		return stringField(items[i], "id") < stringField(items[j], "id")
+	})
+	return items
+}
+
+func deriveRoomEpicPhase(epic, currentMilestone map[string]any, missingValidation []map[string]any, openInterviewItems []map[string]any) string {
+	if !boolField(epic, "finalized") {
+		return "discovery"
+	}
+	if currentMilestone == nil {
+		if intField(epic, "milestone_count") > 0 {
+			return "completed"
+		}
+		return "shaping"
+	}
+	if stringField(currentMilestone, "status") == "blocked" || intField(currentMilestone, "blocked_story_count") > 0 {
+		return "blocked"
+	}
+	if roomMilestoneNeedsReview(currentMilestone) || roomMilestoneNeedsSummary(currentMilestone) {
+		return "review"
+	}
+	if stringField(currentMilestone, "status") == "passed" && intField(epic, "milestone_count") > 0 && len(missingValidation) == 0 && len(openInterviewItems) == 0 {
+		return "completed"
+	}
+	return "execution"
+}
+
+func roomMilestoneNeedsReview(milestone map[string]any) bool {
+	if milestone == nil {
+		return false
+	}
+	accepted := intField(milestone, "accepted_story_count")
+	validated := intField(milestone, "validated_story_count")
+	if accepted == 0 || validated < accepted {
+		return false
+	}
+	return intField(milestone, "review_count") == 0
+}
+
+func roomMilestoneNeedsSummary(milestone map[string]any) bool {
+	if milestone == nil {
+		return false
+	}
+	return intField(milestone, "review_count") > 0 && intField(milestone, "summary_count") == 0
+}
+
+func summarizeRoomEpicContinuity(epic, currentMilestone map[string]any, missingValidation []map[string]any, latestLog map[string]any, openInterviewItems []map[string]any, phase string) string {
+	parts := []string{
+		fmt.Sprintf("Epic is in %s.", phase),
+	}
+	if currentMilestone != nil {
+		parts = append(parts, fmt.Sprintf("Current milestone is %q.", stringField(currentMilestone, "title")))
+	}
+	if count := len(missingValidation); count > 0 {
+		parts = append(parts, fmt.Sprintf("%d accepted stor%s still need validation.", count, pluralSuffix(count, "y", "ies")))
+	}
+	if openQuestions := intField(epic, "open_questions"); openQuestions > 0 {
+		parts = append(parts, fmt.Sprintf("%d intake question%s remain open.", openQuestions, pluralS(openQuestions)))
+	}
+	if count := len(openInterviewItems); count > 0 {
+		parts = append(parts, fmt.Sprintf("%d interview item%s remain unresolved.", count, pluralS(count)))
+	}
+	if latestLog != nil {
+		label := stringField(latestLog, "label")
+		nextFocus := stringSliceField(anyMap(latestLog["meta"]), "next_focus")
+		switch {
+		case label != "" && len(nextFocus) > 0:
+			parts = append(parts, fmt.Sprintf("Latest log is %q and next focus is %q.", label, nextFocus[0]))
+		case label != "":
+			parts = append(parts, fmt.Sprintf("Latest log is %q.", label))
+		}
+	}
+	return strings.Join(parts, " ")
+}
+
+func pluralS(count int) string {
+	if count == 1 {
+		return ""
+	}
+	return "s"
+}
+
+func pluralSuffix(count int, singular, plural string) string {
+	if count == 1 {
+		return singular
+	}
+	return plural
+}
+
+func parseRFC3339Time(raw string) time.Time {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return time.Time{}
+	}
+	parsed, err := time.Parse(time.RFC3339Nano, raw)
+	if err == nil {
+		return parsed
+	}
+	parsed, _ = time.Parse(time.RFC3339, raw)
+	return parsed
+}
+
+func buildRoomEpicNextItems(room agent.RoomSummary, messages []agent.BoardMessage, epic, resume map[string]any, actorID string) ([]map[string]any, string) {
+	items := make([]map[string]any, 0)
+	epicID := stringField(epic, "id")
+	roomID := room.ID
+	actorID = strings.TrimSpace(actorID)
+	if actorID == "" {
+		actorID = roomCoordinatorActorID(room.Members)
+	}
+	if stringField(resume, "phase") == "completed" {
+		return items, "no open work"
+	}
+
+	answerByQuestion := make(map[string]agent.BoardMessage)
+	for _, msg := range messages {
+		if msg.Kind == agent.BoardMessageKindEpicAnswer {
+			answerByQuestion[strings.TrimSpace(msg.RelatedMessageID)] = msg
+		}
+	}
+	for _, question := range boardMessageSliceValue(epic["questions"]) {
+		questionID := strings.TrimSpace(question.ID)
+		if questionID == "" || answerByQuestion[questionID].ID != "" {
+			continue
+		}
+		qMeta := parseRoomEpicQuestionBody(question.Body)
+		recipient := normalizeRoomRecipient(question.Recipient)
+		if recipient != actorID && actorID != roomCoordinatorActorID(room.Members) {
+			continue
+		}
+		items = append(items, map[string]any{
+			"type":         "answer_intake_question",
+			"priority":     1,
+			"target_id":    questionID,
+			"title":        firstNonEmpty(qMeta.Question, strings.TrimSpace(question.Subject)),
+			"reason":       "Epic intake is still open and this question does not have an answer yet.",
+			"command_hint": fmt.Sprintf(`agentctl room epic answer %s %s "<answer>"`, roomID, questionID),
+		})
+	}
+
+	if boolField(epic, "finalized") == false && intField(epic, "open_questions") == 0 {
+		items = append(items, map[string]any{
+			"type":         "finalize_epic",
+			"priority":     1,
+			"target_id":    epicID,
+			"title":        "Finalize epic brief",
+			"reason":       "Epic intake is answered and ready to finalize.",
+			"command_hint": fmt.Sprintf(`agentctl room epic finalize %s %s "<summary>"`, roomID, epicID),
+		})
+	}
+
+	currentMilestone := mapField(resume, "current_milestone")
+	if currentMilestone == nil {
+		if boolField(epic, "finalized") {
+			proposals := mapSlice(epic["proposals"])
+			if len(proposals) > 0 {
+				for _, proposal := range proposals {
+					items = append(items, map[string]any{
+						"type":         "start_milestone_from_proposal",
+						"priority":     2,
+						"target_id":    stringField(proposal, "id"),
+						"title":        firstNonEmpty(stringField(proposal, "title"), "Start milestone from proposal"),
+						"reason":       "Epic is finalized and has a pending milestone proposal.",
+						"command_hint": fmt.Sprintf(`agentctl room milestone start %s %s --proposal %s`, roomID, epicID, stringField(proposal, "id")),
+					})
+				}
+			} else {
+				items = append(items, map[string]any{
+					"type":         "shape_milestones",
+					"priority":     2,
+					"target_id":    epicID,
+					"title":        "Shape milestone proposals",
+					"reason":       "Epic is finalized but does not yet have milestone proposals.",
+					"command_hint": fmt.Sprintf(`agentctl room epic shape %s %s`, roomID, epicID),
+				})
+			}
+		}
+	} else {
+		milestoneID := stringField(currentMilestone, "id")
+		if intField(currentMilestone, "criteria_count") == 0 {
+			items = append(items, map[string]any{
+				"type":         "add_milestone_criteria",
+				"priority":     3,
+				"target_id":    milestoneID,
+				"title":        "Add milestone acceptance criteria",
+				"reason":       "Current milestone has no acceptance criteria yet.",
+				"command_hint": fmt.Sprintf(`agentctl room milestone criteria %s %s "<criterion>"`, roomID, milestoneID),
+			})
+		}
+
+		for _, story := range mapSlice(currentMilestone["stories"]) {
+			if stringField(story, "status") != "accepted" || boolField(story, "covered") {
+				continue
+			}
+			owner := stringField(anyMap(story["meta"]), "owner")
+			if actorID != roomCoordinatorActorID(room.Members) && owner != "" && !sameRoomParticipant(owner, actorID) {
+				continue
+			}
+			items = append(items, map[string]any{
+				"type":         "validate_story",
+				"priority":     3,
+				"target_id":    stringField(story, "id"),
+				"title":        firstNonEmpty(stringField(story, "title"), "Validate story"),
+				"reason":       "Accepted story still lacks validation coverage.",
+				"command_hint": fmt.Sprintf(`agentctl room story validate %s %s review pass "<summary>"`, roomID, stringField(story, "id")),
+			})
+		}
+
+		if stringField(currentMilestone, "status") == "blocked" || intField(currentMilestone, "blocked_story_count") > 0 {
+			items = append(items, map[string]any{
+				"type":         "follow_up_blocker",
+				"priority":     2,
+				"target_id":    milestoneID,
+				"title":        firstNonEmpty(stringField(currentMilestone, "title"), "Follow up blocker"),
+				"reason":       "Current milestone is blocked and needs explicit coordinator follow-up.",
+				"command_hint": fmt.Sprintf(`agentctl room milestone show %s %s`, roomID, milestoneID),
+			})
+		}
+
+		if roomMilestoneNeedsReview(currentMilestone) {
+			items = append(items, map[string]any{
+				"type":         "review_milestone",
+				"priority":     4,
+				"target_id":    milestoneID,
+				"title":        "Review milestone",
+				"reason":       "Accepted stories are covered and the milestone is ready for review.",
+				"command_hint": fmt.Sprintf(`agentctl room milestone review %s %s pass "<notes>"`, roomID, milestoneID),
+			})
+		}
+		if roomMilestoneNeedsSummary(currentMilestone) {
+			items = append(items, map[string]any{
+				"type":         "summarize_milestone",
+				"priority":     5,
+				"target_id":    milestoneID,
+				"title":        "Summarize milestone",
+				"reason":       "Current milestone has a review verdict but no summary yet.",
+				"command_hint": fmt.Sprintf(`agentctl room milestone summary %s %s "<notes>"`, roomID, milestoneID),
+			})
+		}
+	}
+
+	if next, ok := findNextRoomInterviewItem(actorID, room, messages); ok {
+		targetID := ""
+		if msg := mapField(next, "message"); msg != nil {
+			targetID = stringField(msg, "id")
+		}
+		items = append(items, map[string]any{
+			"type":         "resolve_interview",
+			"priority":     2,
+			"target_id":    targetID,
+			"title":        firstNonEmpty(stringField(next, "topic"), "Resolve interview item"),
+			"reason":       "There is an unresolved interview item for this actor.",
+			"command_hint": fmt.Sprintf(`agentctl room interview next %s --actor %s`, roomID, actorID),
+		})
+	}
+
+	if roomEpicLatestLog(epic) == nil && intField(epic, "story_count") > 0 {
+		items = append(items, map[string]any{
+			"type":         "append_delivery_log",
+			"priority":     6,
+			"target_id":    epicID,
+			"title":        "Append delivery log",
+			"reason":       "Epic has active scope but no delivery log entry yet.",
+			"command_hint": fmt.Sprintf(`agentctl room log append %s %s "<label>"`, roomID, epicID),
+		})
+	}
+
+	sort.Slice(items, func(i, j int) bool {
+		leftPriority := intField(items[i], "priority")
+		rightPriority := intField(items[j], "priority")
+		if leftPriority != rightPriority {
+			return leftPriority < rightPriority
+		}
+		leftType := stringField(items[i], "type")
+		rightType := stringField(items[j], "type")
+		if leftType != rightType {
+			return leftType < rightType
+		}
+		return stringField(items[i], "target_id") < stringField(items[j], "target_id")
+	})
+	if len(items) == 0 {
+		return items, "no open work"
+	}
+	return items, "open epic work remains"
+}
+
+func buildRoomMilestoneViews(messages []agent.BoardMessage) []map[string]any {
+	storiesByMilestone := make(map[string][]map[string]any)
+	for _, story := range buildRoomStoryViews(messages) {
+		milestoneID, _ := story["milestone_id"].(string)
+		storiesByMilestone[milestoneID] = append(storiesByMilestone[milestoneID], story)
+	}
+	criteriaByMilestone := make(map[string][]agent.BoardMessage)
+	reviewsByMilestone := make(map[string][]agent.BoardMessage)
+	summariesByMilestone := make(map[string][]agent.BoardMessage)
+	for _, msg := range messages {
+		related := strings.TrimSpace(msg.RelatedMessageID)
+		if related == "" {
+			continue
+		}
+		switch msg.Kind {
+		case agent.BoardMessageKindAcceptanceCriteria:
+			criteriaByMilestone[related] = append(criteriaByMilestone[related], msg)
+		case agent.BoardMessageKindMilestoneReview:
+			reviewsByMilestone[related] = append(reviewsByMilestone[related], msg)
+		case agent.BoardMessageKindMilestoneSummary:
+			summariesByMilestone[related] = append(summariesByMilestone[related], msg)
+		}
+	}
+	out := make([]map[string]any, 0)
+	for _, msg := range messages {
+		if msg.Kind != agent.BoardMessageKindMilestone {
+			continue
+		}
+		meta := parseRoomMilestoneBody(msg.Body)
+		reviews := reviewsByMilestone[msg.ID]
+		status := "active"
+		if len(reviews) > 0 {
+			latest := reviews[len(reviews)-1]
+			switch {
+			case strings.Contains(strings.ToLower(strings.TrimSpace(latest.Subject)), "block"):
+				status = "blocked"
+			case strings.Contains(strings.ToLower(strings.TrimSpace(latest.Subject)), "pass"):
+				status = "passed"
+			}
+		}
+		stories := storiesByMilestone[msg.ID]
+		acceptedStories := 0
+		validatedStories := 0
+		passedStories := 0
+		failedStories := 0
+		blockedStories := 0
+		waivedStories := 0
+		blockingValidationIDs := make([]string, 0)
+		for _, story := range stories {
+			if storyStatus, _ := story["status"].(string); storyStatus != "accepted" {
+				continue
+			}
+			acceptedStories++
+			if covered, _ := story["covered"].(bool); covered {
+				validatedStories++
+			}
+			latestStatus, _ := story["latest_validation_status"].(string)
+			switch latestStatus {
+			case "pass":
+				passedStories++
+			case "fail":
+				failedStories++
+			case "blocked":
+				blockedStories++
+			case "waived":
+				waivedStories++
+			}
+			if latestStatus == "fail" || latestStatus == "blocked" {
+				if id, ok := story["latest_validation_id"].(string); ok && id != "" {
+					blockingValidationIDs = append(blockingValidationIDs, id)
+				}
+			}
+		}
+		sort.Strings(blockingValidationIDs)
+		out = append(out, map[string]any{
+			"id":                      msg.ID,
+			"epic_id":                 meta.EpicID,
+			"title":                   strings.TrimPrefix(strings.TrimSpace(msg.Subject), "Milestone: "),
+			"status":                  status,
+			"workpack_dir":            roomAgileMilestoneWorkpackDir(meta.EpicID, msg.ID),
+			"root":                    msg,
+			"meta":                    meta,
+			"criteria":                criteriaByMilestone[msg.ID],
+			"criteria_count":          len(criteriaByMilestone[msg.ID]),
+			"reviews":                 reviews,
+			"review_count":            len(reviews),
+			"summaries":               summariesByMilestone[msg.ID],
+			"summary_count":           len(summariesByMilestone[msg.ID]),
+			"stories":                 stories,
+			"story_count":             len(stories),
+			"accepted_story_count":    acceptedStories,
+			"validated_story_count":   validatedStories,
+			"passed_story_count":      passedStories,
+			"failed_story_count":      failedStories,
+			"blocked_story_count":     blockedStories,
+			"waived_story_count":      waivedStories,
+			"blocking_validation_ids": blockingValidationIDs,
+			"coverage": map[string]any{
+				"validated": validatedStories,
+				"accepted":  acceptedStories,
+			},
+		})
+	}
+	sort.Slice(out, func(i, j int) bool {
+		left := out[i]["root"].(agent.BoardMessage)
+		right := out[j]["root"].(agent.BoardMessage)
+		return left.CreatedAt.After(right.CreatedAt)
+	})
+	return out
+}
+
+func buildRoomStoryViews(messages []agent.BoardMessage) []map[string]any {
+	milestoneEpicByID := make(map[string]string)
+	for _, msg := range messages {
+		if msg.Kind != agent.BoardMessageKindMilestone {
+			continue
+		}
+		meta := parseRoomMilestoneBody(msg.Body)
+		milestoneEpicByID[msg.ID] = strings.TrimSpace(meta.EpicID)
+	}
+	validationsByStory := make(map[string][]map[string]any)
+	for _, msg := range messages {
+		if msg.Kind != agent.BoardMessageKindStoryValidation {
+			continue
+		}
+		meta := parseRoomStoryValidationBody(msg.Body)
+		validationsByStory[strings.TrimSpace(msg.RelatedMessageID)] = append(validationsByStory[strings.TrimSpace(msg.RelatedMessageID)], map[string]any{
+			"id":            msg.ID,
+			"validation_id": msg.ID,
+			"root":          msg,
+			"meta":          meta,
+			"status":        meta.Status,
+			"created_at":    msg.CreatedAt.Format(time.RFC3339),
+			"created_by":    strings.TrimSpace(msg.Sender),
+		})
+	}
+	out := make([]map[string]any, 0)
+	for _, msg := range messages {
+		if msg.Kind != agent.BoardMessageKindStory && msg.Kind != agent.BoardMessageKindStoryProposal {
+			continue
+		}
+		if msg.Kind == agent.BoardMessageKindStoryProposal {
+			meta := parseRoomStoryProposalBody(msg.Body)
+			out = append(out, map[string]any{
+				"id":           msg.ID,
+				"milestone_id": strings.TrimSpace(msg.RelatedMessageID),
+				"title":        strings.TrimPrefix(strings.TrimSpace(msg.Subject), "Story Proposal: "),
+				"status":       "proposed",
+				"root":         msg,
+				"meta":         meta,
+			})
+			continue
+		}
+		meta := parseRoomStoryBody(msg.Body)
+		milestoneID := strings.TrimSpace(msg.RelatedMessageID)
+		epicID := milestoneEpicByID[milestoneID]
+		validations := validationsByStory[msg.ID]
+		summary := summarizeRoomStoryValidations(validations)
+		out = append(out, map[string]any{
+			"id":                       msg.ID,
+			"milestone_id":             milestoneID,
+			"title":                    strings.TrimPrefix(strings.TrimSpace(msg.Subject), "Story: "),
+			"status":                   "accepted",
+			"epic_id":                  epicID,
+			"workpack_dir":             roomAgileStoryWorkpackDir(epicID, milestoneID, msg.ID),
+			"validation_dir":           roomAgileStoryValidationDir(epicID, milestoneID, msg.ID),
+			"artifacts_dir":            roomAgileStoryArtifactsDir(epicID, milestoneID, msg.ID),
+			"root":                     msg,
+			"meta":                     meta,
+			"validations":              validations,
+			"validation_count":         len(validations),
+			"latest_validation_status": summary.LatestStatus,
+			"latest_validation_id":     summary.LatestID,
+			"effective_validations":    summary.EffectiveValidations,
+			"covered":                  summary.Covered,
+			"has_failures":             summary.HasFailures,
+			"has_blockers":             summary.HasBlockers,
+			"waived":                   summary.WaivedOnly,
+		})
+	}
+	sort.Slice(out, func(i, j int) bool {
+		left := out[i]["root"].(agent.BoardMessage)
+		right := out[j]["root"].(agent.BoardMessage)
+		return left.CreatedAt.After(right.CreatedAt)
+	})
+	return out
+}
+
+type roomStoryValidationSummary struct {
+	LatestStatus         string
+	LatestID             string
+	EffectiveValidations []map[string]any
+	Covered              bool
+	HasFailures          bool
+	HasBlockers          bool
+	WaivedOnly           bool
+}
+
+func summarizeRoomStoryValidations(validations []map[string]any) roomStoryValidationSummary {
+	summary := roomStoryValidationSummary{
+		EffectiveValidations: make([]map[string]any, 0),
+	}
+	if len(validations) == 0 {
+		return summary
+	}
+	sort.Slice(validations, func(i, j int) bool {
+		left := validations[i]["root"].(agent.BoardMessage)
+		right := validations[j]["root"].(agent.BoardMessage)
+		if left.CreatedAt.Equal(right.CreatedAt) {
+			return stringField(validations[i], "id") < stringField(validations[j], "id")
+		}
+		return left.CreatedAt.Before(right.CreatedAt)
+	})
+	lastIndexByType := make(map[string]int)
+	for idx, validation := range validations {
+		meta := anyMap(validation["meta"])
+		validatorType := stringField(meta, "validator_type")
+		if validatorType == "" {
+			validatorType = "unknown"
+		}
+		lastIndexByType[validatorType] = idx
+	}
+	latestByType := make(map[string]map[string]any)
+	for idx, validation := range validations {
+		meta := anyMap(validation["meta"])
+		validatorType := stringField(meta, "validator_type")
+		if validatorType == "" {
+			validatorType = "unknown"
+		}
+		validation["superseded"] = lastIndexByType[validatorType] != idx
+		latestByType[validatorType] = validation
+		last := validation
+		summary.LatestStatus, _ = last["status"].(string)
+		summary.LatestID, _ = last["id"].(string)
+	}
+	keys := make([]string, 0, len(latestByType))
+	for key := range latestByType {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	hasPass := false
+	hasWaived := false
+	for _, key := range keys {
+		validation := latestByType[key]
+		summary.EffectiveValidations = append(summary.EffectiveValidations, validation)
+		status, _ := validation["status"].(string)
+		switch status {
+		case "blocked":
+			summary.HasBlockers = true
+		case "fail":
+			summary.HasFailures = true
+		case "pass":
+			hasPass = true
+		case "waived":
+			hasWaived = true
+		}
+	}
+	summary.Covered = hasPass || hasWaived
+	summary.WaivedOnly = !hasPass && !summary.HasFailures && !summary.HasBlockers && hasWaived
+	if summary.HasBlockers {
+		summary.LatestStatus = "blocked"
+	} else if summary.HasFailures {
+		summary.LatestStatus = "fail"
+	} else if hasPass {
+		summary.LatestStatus = "pass"
+	} else if hasWaived {
+		summary.LatestStatus = "waived"
+	}
+	return summary
+}
+
+func buildRoomDeliveryLogViews(messages []agent.BoardMessage) []map[string]any {
+	out := make([]map[string]any, 0)
+	for _, msg := range messages {
+		if msg.Kind != agent.BoardMessageKindDeliveryLog {
+			continue
+		}
+		meta := parseRoomDeliveryLogBody(msg.Body)
+		out = append(out, map[string]any{
+			"id":      msg.ID,
+			"epic_id": strings.TrimSpace(msg.RelatedMessageID),
+			"label":   firstNonEmpty(meta.Label, strings.TrimPrefix(strings.TrimSpace(msg.Subject), "Delivery Log: ")),
+			"root":    msg,
+			"meta":    meta,
+		})
+	}
+	sort.Slice(out, func(i, j int) bool {
+		left := out[i]["root"].(agent.BoardMessage)
+		right := out[j]["root"].(agent.BoardMessage)
+		return left.CreatedAt.After(right.CreatedAt)
+	})
+	return out
+}
+
+const roomAgileWorkpackRootDir = ".agentctl/epics"
+
+func roomAgileWorkpackRootPath(epicID string) string {
+	epicID = strings.TrimSpace(epicID)
+	if epicID == "" {
+		return ""
+	}
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(homeDir, roomAgileWorkpackRootDir, epicID)
+}
+
+func roomAgileMilestoneWorkpackDir(epicID, milestoneID string) string {
+	root := roomAgileWorkpackRootPath(epicID)
+	milestoneID = strings.TrimSpace(milestoneID)
+	if root == "" || milestoneID == "" {
+		return ""
+	}
+	return filepath.Join(root, "milestones", milestoneID)
+}
+
+func roomAgileStoryWorkpackDir(epicID, milestoneID, storyID string) string {
+	milestoneDir := roomAgileMilestoneWorkpackDir(epicID, milestoneID)
+	storyID = strings.TrimSpace(storyID)
+	if milestoneDir == "" || storyID == "" {
+		return ""
+	}
+	return filepath.Join(milestoneDir, "stories", storyID)
+}
+
+func roomAgileStoryValidationDir(epicID, milestoneID, storyID string) string {
+	storyDir := roomAgileStoryWorkpackDir(epicID, milestoneID, storyID)
+	if storyDir == "" {
+		return ""
+	}
+	return filepath.Join(storyDir, "validation")
+}
+
+func roomAgileStoryArtifactsDir(epicID, milestoneID, storyID string) string {
+	storyDir := roomAgileStoryWorkpackDir(epicID, milestoneID, storyID)
+	if storyDir == "" {
+		return ""
+	}
+	return filepath.Join(storyDir, "artifacts")
+}
+
+func buildRoomAgileWorkpackInfo(epic map[string]any) map[string]any {
+	epicID := stringField(epic, "id")
+	root := roomAgileWorkpackRootPath(epicID)
+	info := map[string]any{
+		"root":                  root,
+		"epic_markdown":         filepath.Join(root, "epic.md"),
+		"meta_json":             filepath.Join(root, "meta.json"),
+		"delivery_log_markdown": filepath.Join(root, "delivery-log.md"),
+	}
+	milestones := make([]map[string]any, 0)
+	for _, milestone := range mapSlice(epic["milestones"]) {
+		milestoneID := stringField(milestone, "id")
+		milestoneDir := roomAgileMilestoneWorkpackDir(epicID, milestoneID)
+		milestoneInfo := map[string]any{
+			"id":                 milestoneID,
+			"title":              stringField(milestone, "title"),
+			"dir":                milestoneDir,
+			"milestone_markdown": filepath.Join(milestoneDir, "milestone.md"),
+			"meta_json":          filepath.Join(milestoneDir, "meta.json"),
+			"criteria_markdown":  filepath.Join(milestoneDir, "criteria.md"),
+			"summary_markdown":   filepath.Join(milestoneDir, "summary.md"),
+		}
+		stories := make([]map[string]any, 0)
+		for _, story := range mapSlice(milestone["stories"]) {
+			if status := stringField(story, "status"); status != "accepted" {
+				continue
+			}
+			storyID := stringField(story, "id")
+			storyDir := roomAgileStoryWorkpackDir(epicID, milestoneID, storyID)
+			stories = append(stories, map[string]any{
+				"id":             storyID,
+				"title":          stringField(story, "title"),
+				"dir":            storyDir,
+				"story_markdown": filepath.Join(storyDir, "story.md"),
+				"meta_json":      filepath.Join(storyDir, "meta.json"),
+				"validation_dir": roomAgileStoryValidationDir(epicID, milestoneID, storyID),
+				"artifacts_dir":  roomAgileStoryArtifactsDir(epicID, milestoneID, storyID),
+			})
+		}
+		milestoneInfo["stories"] = stories
+		milestones = append(milestones, milestoneInfo)
+	}
+	info["milestones"] = milestones
+	return info
+}
+
+func syncRoomAgileWorkpack(ctx context.Context, store blackboard.BoardStore, workspaceID, roomID, epicID string) error {
+	messages, err := store.ListRoomMessages(ctx, workspaceID, roomID, roomTaskScanLimit)
+	if err != nil {
+		return err
+	}
+	var epic map[string]any
+	for _, candidate := range buildRoomEpicViews(messages) {
+		if id, _ := candidate["id"].(string); id == strings.TrimSpace(epicID) {
+			epic = candidate
+			break
+		}
+	}
+	if epic == nil {
+		return fmt.Errorf("epic %q not found for work-pack sync", epicID)
+	}
+	epicDir := roomAgileWorkpackRootPath(epicID)
+	if epicDir == "" {
+		return fmt.Errorf("resolve user home for work-pack sync")
+	}
+	if err := os.MkdirAll(filepath.Join(epicDir, "milestones"), 0o755); err != nil {
+		return fmt.Errorf("create epic work-pack directory: %w", err)
+	}
+	if err := writeRoomAgileFile(filepath.Join(epicDir, "epic.md"), renderRoomEpicMarkdown(epic)); err != nil {
+		return err
+	}
+	if err := writeRoomAgileJSON(filepath.Join(epicDir, "meta.json"), map[string]any{
+		"schema_version": 1,
+		"generated_at":   time.Now().UTC().Format(time.RFC3339),
+		"epic":           epic,
+	}); err != nil {
+		return err
+	}
+	if err := writeRoomAgileFile(filepath.Join(epicDir, "delivery-log.md"), renderRoomDeliveryLogMarkdown(epic)); err != nil {
+		return err
+	}
+	for _, milestone := range mapSlice(epic["milestones"]) {
+		if err := syncRoomAgileMilestoneWorkpack(epicDir, milestone); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func syncRoomAgileMilestoneWorkpack(epicDir string, milestone map[string]any) error {
+	milestoneID := stringField(milestone, "id")
+	if milestoneID == "" {
+		return nil
+	}
+	milestoneDir := filepath.Join(epicDir, "milestones", milestoneID)
+	if err := os.MkdirAll(filepath.Join(milestoneDir, "stories"), 0o755); err != nil {
+		return fmt.Errorf("create milestone work-pack directory: %w", err)
+	}
+	if err := writeRoomAgileFile(filepath.Join(milestoneDir, "milestone.md"), renderRoomMilestoneMarkdown(milestone)); err != nil {
+		return err
+	}
+	if err := writeRoomAgileJSON(filepath.Join(milestoneDir, "meta.json"), map[string]any{
+		"schema_version": 1,
+		"generated_at":   time.Now().UTC().Format(time.RFC3339),
+		"milestone":      milestone,
+	}); err != nil {
+		return err
+	}
+	if err := writeRoomAgileFile(filepath.Join(milestoneDir, "criteria.md"), renderRoomMilestoneCriteriaMarkdown(milestone)); err != nil {
+		return err
+	}
+	if err := writeRoomAgileFile(filepath.Join(milestoneDir, "summary.md"), renderRoomMilestoneSummaryMarkdown(milestone)); err != nil {
+		return err
+	}
+	for _, story := range mapSlice(milestone["stories"]) {
+		if err := syncRoomAgileStoryWorkpack(milestoneDir, story); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func syncRoomAgileStoryWorkpack(milestoneDir string, story map[string]any) error {
+	storyID := stringField(story, "id")
+	if storyID == "" {
+		return nil
+	}
+	storyDir := filepath.Join(milestoneDir, "stories", storyID)
+	validationDir := filepath.Join(storyDir, "validation")
+	artifactsDir := filepath.Join(storyDir, "artifacts")
+	if err := os.MkdirAll(validationDir, 0o755); err != nil {
+		return fmt.Errorf("create story validation directory: %w", err)
+	}
+	if err := os.MkdirAll(artifactsDir, 0o755); err != nil {
+		return fmt.Errorf("create story artifacts directory: %w", err)
+	}
+	if err := writeRoomAgileFile(filepath.Join(storyDir, "story.md"), renderRoomStoryMarkdown(story)); err != nil {
+		return err
+	}
+	if err := writeRoomAgileJSON(filepath.Join(storyDir, "meta.json"), map[string]any{
+		"schema_version": 1,
+		"generated_at":   time.Now().UTC().Format(time.RFC3339),
+		"story":          story,
+	}); err != nil {
+		return err
+	}
+	for _, validation := range mapSlice(story["validations"]) {
+		validationID := stringField(validation, "id")
+		if validationID == "" {
+			continue
+		}
+		if err := writeRoomAgileFile(filepath.Join(validationDir, validationID+".md"), renderRoomStoryValidationMarkdown(validation)); err != nil {
+			return err
+		}
+		if err := writeRoomAgileJSON(filepath.Join(validationDir, validationID+".json"), map[string]any{
+			"schema_version": 1,
+			"generated_at":   time.Now().UTC().Format(time.RFC3339),
+			"validation":     validation,
+		}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func writeRoomAgileFile(path, content string) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return fmt.Errorf("create work-pack parent directory: %w", err)
+	}
+	if err := os.WriteFile(path, []byte(strings.TrimSpace(content)+"\n"), 0o644); err != nil {
+		return fmt.Errorf("write work-pack file %s: %w", path, err)
+	}
+	return nil
+}
+
+func writeRoomAgileJSON(path string, payload any) error {
+	data, err := json.MarshalIndent(payload, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshal work-pack json %s: %w", path, err)
+	}
+	return writeRoomAgileFile(path, string(data))
+}
+
+func renderRoomEpicMarkdown(epic map[string]any) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "# Epic %s\n\n", stringField(epic, "title"))
+	fmt.Fprintf(&b, "- ID: `%s`\n", stringField(epic, "id"))
+	fmt.Fprintf(&b, "- Status: `%s`\n", stringField(epic, "status"))
+	fmt.Fprintf(&b, "- Milestones: `%d`\n", intField(epic, "milestone_count"))
+	fmt.Fprintf(&b, "- Stories: `%d`\n", intField(epic, "story_count"))
+	if meta := anyMap(epic["meta"]); meta != nil {
+		if goal := stringField(meta, "goal"); goal != "" {
+			fmt.Fprintf(&b, "- Goal: %s\n", goal)
+		}
+		if owner := stringField(meta, "owner"); owner != "" {
+			fmt.Fprintf(&b, "- Owner: %s\n", owner)
+		}
+	}
+	if finalBrief := anyMap(epic["final_brief"]); finalBrief != nil {
+		if body := stringField(finalBrief, "body"); body != "" {
+			fmt.Fprintf(&b, "\n## Final Brief\n\n%s\n", body)
+		}
+	}
+	if milestones := mapSlice(epic["milestones"]); len(milestones) > 0 {
+		fmt.Fprintf(&b, "\n## Milestones\n")
+		for _, milestone := range milestones {
+			fmt.Fprintf(&b, "- `%s` %s\n", stringField(milestone, "id"), stringField(milestone, "title"))
+		}
+	}
+	return b.String()
+}
+
+func renderRoomDeliveryLogMarkdown(epic map[string]any) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "# Delivery Log\n\n")
+	for _, entry := range mapSlice(epic["logs"]) {
+		fmt.Fprintf(&b, "## %s\n\n", stringField(entry, "label"))
+		if meta := anyMap(entry["meta"]); meta != nil {
+			appendMarkdownList(&b, "Completed", stringSliceField(meta, "completed"))
+			appendMarkdownList(&b, "In Flight", stringSliceField(meta, "in_flight"))
+			appendMarkdownList(&b, "Blockers", stringSliceField(meta, "blockers"))
+			appendMarkdownList(&b, "Next", stringSliceField(meta, "next_focus"))
+			if notes := stringField(meta, "notes"); notes != "" {
+				fmt.Fprintf(&b, "Notes: %s\n\n", notes)
+			}
+		}
+	}
+	return b.String()
+}
+
+func renderRoomMilestoneMarkdown(milestone map[string]any) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "# Milestone %s\n\n", stringField(milestone, "title"))
+	fmt.Fprintf(&b, "- ID: `%s`\n", stringField(milestone, "id"))
+	fmt.Fprintf(&b, "- Epic ID: `%s`\n", stringField(milestone, "epic_id"))
+	fmt.Fprintf(&b, "- Status: `%s`\n", stringField(milestone, "status"))
+	fmt.Fprintf(&b, "- Stories: `%d`\n", intField(milestone, "story_count"))
+	fmt.Fprintf(&b, "- Validated stories: `%d`\n", intField(milestone, "validated_story_count"))
+	if meta := anyMap(milestone["meta"]); meta != nil {
+		if goal := stringField(meta, "goal"); goal != "" {
+			fmt.Fprintf(&b, "- Goal: %s\n", goal)
+		}
+		if owner := stringField(meta, "owner"); owner != "" {
+			fmt.Fprintf(&b, "- Owner: %s\n", owner)
+		}
+		appendMarkdownList(&b, "Scope", stringSliceField(meta, "scope"))
+	}
+	return b.String()
+}
+
+func renderRoomMilestoneCriteriaMarkdown(milestone map[string]any) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "# Criteria\n\n")
+	for _, criterion := range mapSlice(milestone["criteria"]) {
+		root := mapField(criterion, "root")
+		if root == nil {
+			root = criterion
+		}
+		if body := stringField(root, "body"); body != "" {
+			fmt.Fprintf(&b, "- %s\n", body)
+		}
+	}
+	return b.String()
+}
+
+func renderRoomMilestoneSummaryMarkdown(milestone map[string]any) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "# Milestone Summary\n\n")
+	fmt.Fprintf(&b, "- Story count: `%d`\n", intField(milestone, "story_count"))
+	fmt.Fprintf(&b, "- Validated story count: `%d`\n", intField(milestone, "validated_story_count"))
+	fmt.Fprintf(&b, "- Passed story count: `%d`\n", intField(milestone, "passed_story_count"))
+	fmt.Fprintf(&b, "- Failed story count: `%d`\n", intField(milestone, "failed_story_count"))
+	fmt.Fprintf(&b, "- Blocked story count: `%d`\n", intField(milestone, "blocked_story_count"))
+	fmt.Fprintf(&b, "- Waived story count: `%d`\n", intField(milestone, "waived_story_count"))
+	if ids := stringSliceValue(milestone["blocking_validation_ids"]); len(ids) > 0 {
+		appendMarkdownList(&b, "Blocking validation ids", ids)
+	}
+	for _, summary := range mapSlice(milestone["summaries"]) {
+		root := mapField(summary, "root")
+		if root == nil {
+			root = summary
+		}
+		if body := stringField(root, "body"); body != "" {
+			fmt.Fprintf(&b, "\n## Summary Note\n\n%s\n", body)
+		}
+	}
+	return b.String()
+}
+
+func renderRoomStoryMarkdown(story map[string]any) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "# Story %s\n\n", stringField(story, "title"))
+	fmt.Fprintf(&b, "- ID: `%s`\n", stringField(story, "id"))
+	fmt.Fprintf(&b, "- Milestone ID: `%s`\n", stringField(story, "milestone_id"))
+	fmt.Fprintf(&b, "- Validation count: `%d`\n", intField(story, "validation_count"))
+	if latest := stringField(story, "latest_validation_status"); latest != "" {
+		fmt.Fprintf(&b, "- Latest validation status: `%s`\n", latest)
+	}
+	if meta := anyMap(story["meta"]); meta != nil {
+		if owner := stringField(meta, "owner"); owner != "" {
+			fmt.Fprintf(&b, "- Owner: %s\n", owner)
+		}
+		if desc := stringField(meta, "description"); desc != "" {
+			fmt.Fprintf(&b, "\n## Description\n\n%s\n", desc)
+		}
+	}
+	return b.String()
+}
+
+func renderRoomStoryValidationMarkdown(validation map[string]any) string {
+	var b strings.Builder
+	meta := anyMap(validation["meta"])
+	fmt.Fprintf(&b, "# Story Validation %s\n\n", stringField(validation, "id"))
+	if root := mapField(validation, "root"); root != nil {
+		if createdAt := stringField(root, "created_at"); createdAt != "" {
+			fmt.Fprintf(&b, "- Created at: `%s`\n", createdAt)
+		}
+		if sender := stringField(root, "sender"); sender != "" {
+			fmt.Fprintf(&b, "- Created by: `%s`\n", sender)
+		}
+	}
+	fmt.Fprintf(&b, "- Validator type: `%s`\n", stringField(meta, "validator_type"))
+	fmt.Fprintf(&b, "- Status: `%s`\n", stringField(meta, "status"))
+	if summary := stringField(meta, "summary"); summary != "" {
+		fmt.Fprintf(&b, "- Summary: %s\n", summary)
+	}
+	if commandText := stringField(meta, "command"); commandText != "" {
+		fmt.Fprintf(&b, "- Command: `%s`\n", commandText)
+	}
+	if artifactPath := stringField(meta, "artifact_path"); artifactPath != "" {
+		fmt.Fprintf(&b, "- Artifact path: `%s`\n", artifactPath)
+	}
+	if digest := stringField(meta, "artifact_digest"); digest != "" {
+		fmt.Fprintf(&b, "- Artifact digest: `%s`\n", digest)
+	}
+	appendMarkdownList(&b, "Related story ids", stringSliceField(meta, "related_story_ids"))
+	if waiverReason := stringField(meta, "waiver_reason"); waiverReason != "" {
+		fmt.Fprintf(&b, "\n## Waiver Reason\n\n%s\n", waiverReason)
+	}
+	if notes := stringField(meta, "notes"); notes != "" {
+		fmt.Fprintf(&b, "\n## Notes\n\n%s\n", notes)
+	}
+	return b.String()
+}
+
+func appendMarkdownList(b *strings.Builder, heading string, items []string) {
+	if len(items) == 0 {
+		return
+	}
+	fmt.Fprintf(b, "\n## %s\n", heading)
+	for _, item := range items {
+		item = strings.TrimSpace(item)
+		if item == "" {
+			continue
+		}
+		fmt.Fprintf(b, "- %s\n", item)
+	}
+}
+
+func mapSlice(value any) []map[string]any {
+	if maps, ok := value.([]map[string]any); ok {
+		return maps
+	}
+	raw, ok := value.([]any)
+	if !ok {
+		var decoded []map[string]any
+		data, err := json.Marshal(value)
+		if err != nil {
+			return nil
+		}
+		if err := json.Unmarshal(data, &decoded); err != nil {
+			return nil
+		}
+		return decoded
+	}
+	out := make([]map[string]any, 0, len(raw))
+	for _, item := range raw {
+		if m, ok := item.(map[string]any); ok {
+			out = append(out, m)
+		}
+	}
+	return out
+}
+
+func mapField(value any, key string) map[string]any {
+	m := anyMap(value)
+	if m == nil {
+		return nil
+	}
+	child, ok := m[key].(map[string]any)
+	if !ok {
+		child = anyMap(m[key])
+	}
+	if child == nil {
+		return nil
+	}
+	return child
+}
+
+func stringField(value any, key string) string {
+	m := anyMap(value)
+	if m == nil {
+		return ""
+	}
+	s, _ := m[key].(string)
+	return s
+}
+
+func intField(value any, key string) int {
+	m := anyMap(value)
+	if m == nil {
+		return 0
+	}
+	switch v := m[key].(type) {
+	case int:
+		return v
+	case float64:
+		return int(v)
+	default:
+		return 0
+	}
+}
+
+func boolField(value any, key string) bool {
+	m := anyMap(value)
+	if m == nil {
+		return false
+	}
+	switch v := m[key].(type) {
+	case bool:
+		return v
+	default:
+		return false
+	}
+}
+
+func stringSliceField(value any, key string) []string {
+	m := anyMap(value)
+	if m == nil {
+		return nil
+	}
+	return stringSliceValue(m[key])
+}
+
+func stringSliceValue(value any) []string {
+	switch v := value.(type) {
+	case []string:
+		return append([]string(nil), v...)
+	case []any:
+		out := make([]string, 0, len(v))
+		for _, item := range v {
+			if s, ok := item.(string); ok && strings.TrimSpace(s) != "" {
+				out = append(out, s)
+			}
+		}
+		return out
+	default:
+		var decoded []string
+		data, err := json.Marshal(value)
+		if err != nil {
+			return nil
+		}
+		if err := json.Unmarshal(data, &decoded); err != nil {
+			return nil
+		}
+		return decoded
+	}
+}
+
+func anyMap(value any) map[string]any {
+	if value == nil {
+		return nil
+	}
+	if m, ok := value.(map[string]any); ok {
+		return m
+	}
+	data, err := json.Marshal(value)
+	if err != nil {
+		return nil
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return nil
+	}
+	return decoded
 }
 
 func runRoomPlanStart(cmd *cobra.Command, workspace, sender, roomID, topic, goal, artifact string, scope, constraints []string) error {
@@ -3955,6 +7855,34 @@ func createRoomRedgreenWorktree(ctx context.Context, repoPath, targetPath, branc
 		return fmt.Errorf("git worktree add failed: %s", strings.TrimSpace(string(out)))
 	}
 	return nil
+}
+
+func boardMessageSliceValue(value any) []agent.BoardMessage {
+	switch v := value.(type) {
+	case []agent.BoardMessage:
+		return append([]agent.BoardMessage(nil), v...)
+	case []any:
+		out := make([]agent.BoardMessage, 0, len(v))
+		for _, item := range v {
+			switch msg := item.(type) {
+			case agent.BoardMessage:
+				out = append(out, msg)
+			case map[string]any:
+				var decoded agent.BoardMessage
+				data, err := json.Marshal(msg)
+				if err != nil {
+					continue
+				}
+				if err := json.Unmarshal(data, &decoded); err != nil {
+					continue
+				}
+				out = append(out, decoded)
+			}
+		}
+		return out
+	default:
+		return nil
+	}
 }
 
 func resolveRoomRedgreenRelativePath(root, candidate string) (string, error) {

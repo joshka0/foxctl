@@ -32,6 +32,9 @@ description: "Durable multi-agent room coordination with shared chat, direct req
 - `room relay` mirrors room messages into terminal panes.
 - `mux submit` is the convenience submit gesture when a live pane already has drafted text waiting in its composer.
 - `room interview` runs a durable round-robin clarification loop inside the room.
+- `room epic`, `room milestone`, `room story`, and `room log` give the room an agile-shaped long-running delivery structure.
+- `room epic resume` and `room epic next` give that agile layer a resumable continuity surface.
+- when that agile layer is the main workflow, explicitly use `agentctl-room-agile` instead of relying on this broader room skill alone.
 - `room remind` schedules bounded durable follow-ups for direct requests.
 - `room task` links shared tasks to the room.
 - `room loop` runs the central coordination loop:
@@ -94,6 +97,10 @@ MCP exposure:
 - the MCP facade also exposes `room_remind`
 - actions: `add`, `list`, `cancel`
 - use it for scheduled check-ins like “check MR !26 in 15 minutes and reply with status”
+- the MCP facade also exposes `room_agile`
+- actions: `epic_start`, `epic_ask`, `epic_answer`, `epic_finalize`, `epic_shape`, `epic_show`, `milestone_start`, `milestone_criteria`, `milestone_review`, `milestone_show`, `story_add`, `story_show`, `log_append`, `log_show`
+- actions: `epic_start`, `epic_ask`, `epic_answer`, `epic_finalize`, `epic_shape`, `epic_show`, `epic_resume`, `epic_next`, `milestone_start`, `milestone_criteria`, `milestone_review`, `milestone_show`, `story_add`, `story_show`, `log_append`, `log_show`
+- use it when the room needs a durable epic/milestone/story structure instead of only free-form chat and tasks
 
 Startup injection:
 
@@ -139,6 +146,45 @@ agentctl room interview next <room-id> --actor <verifier>
 agentctl room interview verify <room-id> <answer-id> accept "Matches the intended meaning" --sender <verifier>
 agentctl room status <room-id> --only interview
 ```
+
+When the room is running a longer agile tranche, use this structure:
+
+```bash
+agentctl room epic start <room-id> "Delivery ledger and agile room model" \
+  --goal "Give the room a durable epic/milestone/story hierarchy" \
+  --owner human-a \
+  --scope room \
+  --scope gui-agent
+
+agentctl room epic ask <room-id> <epic-id> "What must be true before milestones can open?" --kind success --to human-a
+agentctl room epic ask <room-id> <epic-id> "What constraints must the first tranche respect?" --kind constraint --to human-a
+agentctl room epic answer <room-id> <question-id> "The epic needs a clarified brief and no open intake questions." --sender human-a
+agentctl room epic finalize <room-id> <epic-id> "Clarified brief: ship the room agile layer first, then surface it in the GUI."
+agentctl room epic shape <room-id> <epic-id>
+
+agentctl room epic show <room-id> <epic-id>
+agentctl room milestone start <room-id> <epic-id> --proposal <proposal-id>
+
+agentctl room milestone criteria <room-id> <milestone-id> "Epic and milestone hierarchy is visible via show commands"
+agentctl room story add <room-id> <milestone-id> "Implement CLI flow" "Add epic, milestone, story, and log commands." --owner gemini-a
+agentctl room milestone review <room-id> <milestone-id> pass "Foundation slice met the milestone criteria"
+agentctl room log append <room-id> <epic-id> "Foundation landed" \
+  --completed "CLI hierarchy shipped" \
+  --in-flight "GUI surfacing" \
+  --next "Wire status and planning views"
+```
+
+Agile room model:
+
+- `epic` is the long-running objective for the room
+- `epic` starts in discovery, not execution
+- use typed epic intake questions: `product`, `technical`, `constraint`, `success`
+- use `epic ask` / `epic answer` / `epic finalize` to clarify the brief before opening milestones
+- use `epic shape` after finalization to write durable milestone proposals back into the room
+- `milestone` is the current bounded tranche under that epic
+- `story` is a concrete work item under a milestone
+- `acceptance criteria` are attached to the milestone, not buried in chat
+- `delivery log` is the durable session-to-session progress journal
 
 For bounded scheduled follow-ups, use:
 
@@ -327,6 +373,7 @@ agentctl room send review "Please check the 401 fallback branch."
 ## Related
 
 - `configs/skills-pack/agentctl-room-operator/SKILL.md`
+- `configs/skills-pack/agentctl-room-agile/SKILL.md`
 - `configs/skills-pack/agentctl-orchestrate/SKILL.md`
 - `configs/skills-pack/agentctl-tmux/SKILL.md`
 - `docs/general/tmux-collaboration.md`
