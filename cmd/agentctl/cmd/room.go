@@ -785,20 +785,20 @@ func newRoomMilestoneCommand() *cobra.Command {
 
 func newRoomMilestoneStartCommand() *cobra.Command {
 	var (
-		workspace  string
-		sender     string
-		goal       string
-		objective  string
-		owner      string
-		scope      []string
-		risks      []string
-		excludes   []string
-		deps       []string
-		validators []string
+		workspace     string
+		sender        string
+		goal          string
+		objective     string
+		owner         string
+		scope         []string
+		risks         []string
+		excludes      []string
+		deps          []string
+		validators    []string
 		requiredLanes []string
 		optionalLanes []string
-		exits      []string
-		proposal   string
+		exits         []string
+		proposal      string
 	)
 	cmd := &cobra.Command{
 		Use:   "start <room-id> <epic-id> [title]",
@@ -831,16 +831,16 @@ func newRoomMilestoneStartCommand() *cobra.Command {
 
 func newRoomMilestoneContractCommand() *cobra.Command {
 	var (
-		workspace  string
-		sender     string
-		objective  string
-		risks      []string
-		excludes   []string
-		deps       []string
-		validators []string
+		workspace     string
+		sender        string
+		objective     string
+		risks         []string
+		excludes      []string
+		deps          []string
+		validators    []string
 		requiredLanes []string
 		optionalLanes []string
-		exits      []string
+		exits         []string
 	)
 	cmd := &cobra.Command{
 		Use:   "contract <room-id> <milestone-id>",
@@ -2013,7 +2013,7 @@ func runRoomStatus(cmd *cobra.Command, workspace, roomID string, limit int, stal
 		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.status", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
 	}
 	defer taskStore.Close()
-	tasks, err := listRoomTasks(cmd.Context(), taskStore, ws.CanonicalID(absWorkspace), messages, "")
+	tasks, err := listRoomTasks(cmd.Context(), taskStore, ws.CanonicalID(absWorkspace), messages, "", false)
 	if err != nil {
 		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.status", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
 	}
@@ -2712,18 +2712,18 @@ type roomEpicQuestionMeta struct {
 }
 
 type roomMilestoneMeta struct {
-	EpicID             string   `json:"epic_id"`
-	Goal               string   `json:"goal"`
-	Objective          string   `json:"objective"`
-	Owner              string   `json:"owner"`
-	Scope              []string `json:"scope"`
-	Risks              []string `json:"risks"`
-	Exclusions         []string `json:"exclusions"`
-	Dependencies       []string `json:"dependencies"`
-	ValidatorsExpected []string `json:"validators_expected"`
+	EpicID                string   `json:"epic_id"`
+	Goal                  string   `json:"goal"`
+	Objective             string   `json:"objective"`
+	Owner                 string   `json:"owner"`
+	Scope                 []string `json:"scope"`
+	Risks                 []string `json:"risks"`
+	Exclusions            []string `json:"exclusions"`
+	Dependencies          []string `json:"dependencies"`
+	ValidatorsExpected    []string `json:"validators_expected"`
 	RequiredEvidenceLanes []string `json:"required_evidence_lanes"`
 	OptionalEvidenceLanes []string `json:"optional_evidence_lanes"`
-	ExitCriteria       []string `json:"exit_criteria"`
+	ExitCriteria          []string `json:"exit_criteria"`
 }
 
 type roomMilestoneSummaryMeta struct {
@@ -3299,18 +3299,18 @@ func runRoomMilestoneStartWithPolicy(cmd *cobra.Command, workspace, sender, room
 		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
 	}
 	meta, err := normalizeRoomMilestoneContract(roomMilestoneMeta{
-		EpicID:             epicMsg.ID,
-		Goal:               goal,
-		Objective:          objective,
-		Owner:              firstNonEmpty(strings.TrimSpace(owner), strings.TrimSpace(epicMeta.Owner)),
-		Scope:              scope,
-		Risks:              risks,
-		Exclusions:         exclusions,
-		Dependencies:       dependencies,
-		ValidatorsExpected: validatorsExpected,
+		EpicID:                epicMsg.ID,
+		Goal:                  goal,
+		Objective:             objective,
+		Owner:                 firstNonEmpty(strings.TrimSpace(owner), strings.TrimSpace(epicMeta.Owner)),
+		Scope:                 scope,
+		Risks:                 risks,
+		Exclusions:            exclusions,
+		Dependencies:          dependencies,
+		ValidatorsExpected:    validatorsExpected,
 		RequiredEvidenceLanes: requiredEvidenceLanes,
 		OptionalEvidenceLanes: optionalEvidenceLanes,
-		ExitCriteria:       exitCriteria,
+		ExitCriteria:          exitCriteria,
 	})
 	if err != nil {
 		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.milestone.start", protocol.ErrorCodeEARG, err.Error(), map[string]any{
@@ -3368,14 +3368,14 @@ func runRoomMilestoneContractWithPolicy(cmd *cobra.Command, workspace, sender, r
 		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
 	}
 	patch, err := normalizeRoomMilestoneContract(roomMilestoneMeta{
-		Objective:          objective,
-		Risks:              risks,
-		Exclusions:         exclusions,
-		Dependencies:       dependencies,
-		ValidatorsExpected: validatorsExpected,
+		Objective:             objective,
+		Risks:                 risks,
+		Exclusions:            exclusions,
+		Dependencies:          dependencies,
+		ValidatorsExpected:    validatorsExpected,
 		RequiredEvidenceLanes: requiredEvidenceLanes,
 		OptionalEvidenceLanes: optionalEvidenceLanes,
-		ExitCriteria:       exitCriteria,
+		ExitCriteria:          exitCriteria,
 	})
 	if err != nil {
 		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.milestone.contract", protocol.ErrorCodeEARG, err.Error(), map[string]any{
@@ -7221,65 +7221,65 @@ func buildRoomMilestoneViews(messages []agent.BoardMessage) []map[string]any {
 			append(collectRoomMapIDs(summaryViews), collectRoomMapIDs(stories)...)...,
 		))
 		out = append(out, map[string]any{
-			"id":                        msg.ID,
-			"epic_id":                   meta.EpicID,
-			"title":                     strings.TrimPrefix(strings.TrimSpace(msg.Subject), "Milestone: "),
-			"status":                    status,
-			"source_kind":               "milestone",
-			"source_id":                 msg.ID,
-			"workpack_dir":              roomAgileMilestoneWorkpackDir(meta.EpicID, msg.ID),
-			"milestone_markdown":        roomAgileMilestoneMarkdownPath(meta.EpicID, msg.ID),
-			"meta_json_path":            roomAgileMilestoneMetaJSONPath(meta.EpicID, msg.ID),
-			"criteria_markdown":         roomAgileMilestoneCriteriaMarkdownPath(meta.EpicID, msg.ID),
-			"summary_markdown":          roomAgileMilestoneSummaryMarkdownPath(meta.EpicID, msg.ID),
-			"root":                      msg,
-			"meta":                      meta,
-			"contract":                  meta,
-			"contract_update_count":     len(contractsByMilestone[msg.ID]),
-			"criteria":                  criteriaByMilestone[msg.ID],
-			"criteria_count":            len(criteriaByMilestone[msg.ID]),
-			"reviews":                   reviews,
-			"review_count":              len(reviews),
-			"summaries":                 summaryViews,
-			"summary_count":             len(summaryViews),
-			"latest_summary":            latestSummary,
-			"summary_meta":              latestSummaryMeta,
-			"stories":                   stories,
-			"story_count":               len(stories),
-			"accepted_story_count":      acceptedStories,
-			"validated_story_count":     validatedStories,
-			"in_progress_story_count":   inProgressStories,
-			"in_review_story_count":     inReviewStories,
-			"done_story_count":          doneStories,
-			"deferred_story_count":      deferredStories,
-			"passed_story_count":        passedStories,
-			"failed_story_count":        failedStories,
-			"blocked_story_count":       blockedStories,
-			"waived_story_count":        waivedStories,
-			"risk_count":                len(meta.Risks),
-			"dependency_count":          len(meta.Dependencies),
-			"validator_count":           len(meta.ValidatorsExpected),
+			"id":                           msg.ID,
+			"epic_id":                      meta.EpicID,
+			"title":                        strings.TrimPrefix(strings.TrimSpace(msg.Subject), "Milestone: "),
+			"status":                       status,
+			"source_kind":                  "milestone",
+			"source_id":                    msg.ID,
+			"workpack_dir":                 roomAgileMilestoneWorkpackDir(meta.EpicID, msg.ID),
+			"milestone_markdown":           roomAgileMilestoneMarkdownPath(meta.EpicID, msg.ID),
+			"meta_json_path":               roomAgileMilestoneMetaJSONPath(meta.EpicID, msg.ID),
+			"criteria_markdown":            roomAgileMilestoneCriteriaMarkdownPath(meta.EpicID, msg.ID),
+			"summary_markdown":             roomAgileMilestoneSummaryMarkdownPath(meta.EpicID, msg.ID),
+			"root":                         msg,
+			"meta":                         meta,
+			"contract":                     meta,
+			"contract_update_count":        len(contractsByMilestone[msg.ID]),
+			"criteria":                     criteriaByMilestone[msg.ID],
+			"criteria_count":               len(criteriaByMilestone[msg.ID]),
+			"reviews":                      reviews,
+			"review_count":                 len(reviews),
+			"summaries":                    summaryViews,
+			"summary_count":                len(summaryViews),
+			"latest_summary":               latestSummary,
+			"summary_meta":                 latestSummaryMeta,
+			"stories":                      stories,
+			"story_count":                  len(stories),
+			"accepted_story_count":         acceptedStories,
+			"validated_story_count":        validatedStories,
+			"in_progress_story_count":      inProgressStories,
+			"in_review_story_count":        inReviewStories,
+			"done_story_count":             doneStories,
+			"deferred_story_count":         deferredStories,
+			"passed_story_count":           passedStories,
+			"failed_story_count":           failedStories,
+			"blocked_story_count":          blockedStories,
+			"waived_story_count":           waivedStories,
+			"risk_count":                   len(meta.Risks),
+			"dependency_count":             len(meta.Dependencies),
+			"validator_count":              len(meta.ValidatorsExpected),
 			"required_evidence_lane_count": len(meta.RequiredEvidenceLanes),
 			"optional_evidence_lane_count": len(meta.OptionalEvidenceLanes),
-			"exit_criteria_count":       len(meta.ExitCriteria),
-			"passed_criteria_count":     len(latestSummaryMeta.PassedCriteria),
-			"failed_criteria_count":     len(latestSummaryMeta.FailedCriteria),
-			"waived_validation_count":   len(latestSummaryMeta.WaivedValidationIDs),
-			"blocking_validation_count": len(latestSummaryMeta.BlockingValidationIDs),
-			"decision_count":            len(latestSummaryMeta.NotableDecisions),
-			"finding_count":             len(latestSummaryMeta.SystemicFindings),
-			"recommended_next_count":    len(latestSummaryMeta.RecommendedNext),
-			"guidance_update_count":     len(latestSummaryMeta.GuidanceUpdates),
-			"blocking_validation_ids":   blockingValidationIDs,
-			"lane_counts":               laneCounts,
-			"lane_coverage":             laneCoverage,
-			"lane_blockers":             laneBlockers,
-			"lane_waivers":              laneWaivers,
-			"required_evidence_lanes":   meta.RequiredEvidenceLanes,
-			"optional_evidence_lanes":   meta.OptionalEvidenceLanes,
-			"required_lane_status":      requiredLaneStatus,
-			"required_lane_covered":     requiredLaneCovered,
-			"required_lane_missing":     requiredLaneMissing,
+			"exit_criteria_count":          len(meta.ExitCriteria),
+			"passed_criteria_count":        len(latestSummaryMeta.PassedCriteria),
+			"failed_criteria_count":        len(latestSummaryMeta.FailedCriteria),
+			"waived_validation_count":      len(latestSummaryMeta.WaivedValidationIDs),
+			"blocking_validation_count":    len(latestSummaryMeta.BlockingValidationIDs),
+			"decision_count":               len(latestSummaryMeta.NotableDecisions),
+			"finding_count":                len(latestSummaryMeta.SystemicFindings),
+			"recommended_next_count":       len(latestSummaryMeta.RecommendedNext),
+			"guidance_update_count":        len(latestSummaryMeta.GuidanceUpdates),
+			"blocking_validation_ids":      blockingValidationIDs,
+			"lane_counts":                  laneCounts,
+			"lane_coverage":                laneCoverage,
+			"lane_blockers":                laneBlockers,
+			"lane_waivers":                 laneWaivers,
+			"required_evidence_lanes":      meta.RequiredEvidenceLanes,
+			"optional_evidence_lanes":      meta.OptionalEvidenceLanes,
+			"required_lane_status":         requiredLaneStatus,
+			"required_lane_covered":        requiredLaneCovered,
+			"required_lane_missing":        requiredLaneMissing,
 			"coverage": map[string]any{
 				"validated": validatedStories,
 				"accepted":  acceptedStories,
@@ -8136,12 +8136,16 @@ func renderRoomEpicMarkdown(epic map[string]any) string {
 		if body := stringField(finalBrief, "body"); body != "" {
 			fmt.Fprintf(&b, "\n## Final Brief\n\n%s\n", body)
 		}
+	} else {
+		appendMarkdownEmptyState(&b, "Final Brief", "No finalized brief recorded yet.")
 	}
 	if milestones := mapSlice(epic["milestones"]); len(milestones) > 0 {
 		fmt.Fprintf(&b, "\n## Milestones\n")
 		for _, milestone := range milestones {
 			fmt.Fprintf(&b, "- `%s` %s\n", stringField(milestone, "id"), stringField(milestone, "title"))
 		}
+	} else {
+		appendMarkdownEmptyState(&b, "Milestones", "No milestones shaped yet.")
 	}
 	return b.String()
 }
@@ -8149,7 +8153,14 @@ func renderRoomEpicMarkdown(epic map[string]any) string {
 func renderRoomDeliveryLogMarkdown(epic map[string]any) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "# Delivery Log\n\n")
-	for _, entry := range mapSlice(epic["logs"]) {
+	logs := mapSlice(epic["logs"])
+	if len(logs) == 0 {
+		fmt.Fprintf(&b, "Delivery log entries are listed newest first.\n")
+		appendMarkdownEmptyState(&b, "Entries", "No delivery log entries recorded yet.")
+		return b.String()
+	}
+	fmt.Fprintf(&b, "Delivery log entries are listed newest first.\n")
+	for _, entry := range logs {
 		fmt.Fprintf(&b, "## %s\n\n", stringField(entry, "label"))
 		if meta := anyMap(entry["meta"]); meta != nil {
 			appendMarkdownList(&b, "Completed", stringSliceField(meta, "completed"))
@@ -8233,7 +8244,12 @@ func renderRoomMilestoneMarkdown(milestone map[string]any) string {
 func renderRoomMilestoneCriteriaMarkdown(milestone map[string]any) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "# Criteria\n\n")
-	for _, criterion := range mapSlice(milestone["criteria"]) {
+	criteria := mapSlice(milestone["criteria"])
+	if len(criteria) == 0 {
+		appendMarkdownEmptyState(&b, "Acceptance Criteria", "No acceptance criteria recorded yet.")
+		return b.String()
+	}
+	for _, criterion := range criteria {
 		root := mapField(criterion, "root")
 		if root == nil {
 			root = criterion
@@ -8273,6 +8289,8 @@ func renderRoomMilestoneSummaryMarkdown(milestone map[string]any) string {
 		appendMarkdownList(&b, "Guidance Updates", stringSliceField(summaryMeta, "guidance_updates"))
 	} else if ids := stringSliceValue(milestone["blocking_validation_ids"]); len(ids) > 0 {
 		appendMarkdownList(&b, "Blocking validation ids", ids)
+	} else {
+		appendMarkdownEmptyState(&b, "Summary", "No milestone summary recorded yet.")
 	}
 	if laneCounts := anyMap(milestone["lane_counts"]); len(laneCounts) > 0 {
 		fmt.Fprintf(&b, "\n## Evidence Lanes\n")
@@ -8292,6 +8310,8 @@ func renderRoomMilestoneSummaryMarkdown(milestone map[string]any) string {
 			}
 			fmt.Fprintln(&b, line)
 		}
+	} else {
+		appendMarkdownEmptyState(&b, "Evidence Lanes", "No evidence lanes recorded yet.")
 	}
 	return b.String()
 }
@@ -8321,6 +8341,8 @@ func renderRoomStoryMarkdown(story map[string]any) string {
 		}
 		if desc := stringField(meta, "description"); desc != "" {
 			fmt.Fprintf(&b, "\n## Description\n\n%s\n", desc)
+		} else {
+			appendMarkdownEmptyState(&b, "Description", "No story description recorded yet.")
 		}
 	}
 	if history := mapSlice(story["state_history"]); len(history) > 0 {
@@ -8335,6 +8357,8 @@ func renderRoomStoryMarkdown(story map[string]any) string {
 				fmt.Fprintf(&b, "- `%s`\n", state)
 			}
 		}
+	} else {
+		appendMarkdownEmptyState(&b, "State History", "No story state transitions recorded yet.")
 	}
 	if lanes := mapField(story, "evidence_lanes"); len(lanes) > 0 {
 		fmt.Fprintf(&b, "\n## Evidence Lanes\n")
@@ -8357,6 +8381,25 @@ func renderRoomStoryMarkdown(story map[string]any) string {
 			}
 			fmt.Fprintln(&b, line)
 		}
+	} else {
+		appendMarkdownEmptyState(&b, "Evidence Lanes", "No evidence lanes recorded yet.")
+	}
+	if validations := mapSlice(story["validations"]); len(validations) > 0 {
+		fmt.Fprintf(&b, "\n## Validation History\n")
+		for i := len(validations) - 1; i >= 0; i-- {
+			validation := validations[i]
+			meta := anyMap(validation["meta"])
+			line := fmt.Sprintf("- `%s`: `%s`", stringField(meta, "validator_type"), stringField(meta, "status"))
+			if summary := stringField(meta, "summary"); summary != "" {
+				line += fmt.Sprintf(" — %s", summary)
+			}
+			if id := stringField(validation, "id"); id != "" {
+				line += fmt.Sprintf(" (`%s`)", id)
+			}
+			fmt.Fprintln(&b, line)
+		}
+	} else {
+		appendMarkdownEmptyState(&b, "Validation History", "No validation entries recorded yet.")
 	}
 	return b.String()
 }
@@ -8393,6 +8436,8 @@ func renderRoomStoryValidationMarkdown(validation map[string]any) string {
 	}
 	if notes := stringField(meta, "notes"); notes != "" {
 		fmt.Fprintf(&b, "\n## Notes\n\n%s\n", notes)
+	} else {
+		appendMarkdownEmptyState(&b, "Notes", "No additional notes recorded.")
 	}
 	return b.String()
 }
@@ -8409,6 +8454,15 @@ func appendMarkdownList(b *strings.Builder, heading string, items []string) {
 		}
 		fmt.Fprintf(b, "- %s\n", item)
 	}
+}
+
+func appendMarkdownEmptyState(b *strings.Builder, heading, text string) {
+	heading = strings.TrimSpace(heading)
+	text = strings.TrimSpace(text)
+	if heading == "" || text == "" {
+		return
+	}
+	fmt.Fprintf(b, "\n## %s\n\n%s\n", heading, text)
 }
 
 func mapSlice(value any) []map[string]any {

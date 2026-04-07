@@ -298,7 +298,7 @@ func TestRoomTaskFlow_AddListComplete(t *testing.T) {
 	}
 
 	cmd, out = newRoomTestCommand(ctx)
-	if err := runRoomTaskList(cmd, workspace, "alpha", ""); err != nil {
+	if err := runRoomTaskList(cmd, workspace, "alpha", "", false); err != nil {
 		t.Fatalf("runRoomTaskList: %v", err)
 	}
 	data = decodeRoomEnvelope(t, out)
@@ -327,6 +327,36 @@ func TestRoomTaskFlow_AddListComplete(t *testing.T) {
 	}
 	if status != "completed" {
 		t.Fatalf("status=%v want completed", status)
+	}
+
+	cmd, out = newRoomTestCommand(ctx)
+	if err := runRoomTaskList(cmd, workspace, "alpha", "", false); err != nil {
+		t.Fatalf("runRoomTaskList after complete: %v", err)
+	}
+	data = decodeRoomEnvelope(t, out)
+	tasksRaw, ok = data["tasks"].([]any)
+	if !ok || len(tasksRaw) != 0 {
+		t.Fatalf("tasks after complete (default)=%T/%v want 0 entries", data["tasks"], data["tasks"])
+	}
+
+	cmd, out = newRoomTestCommand(ctx)
+	if err := runRoomTaskList(cmd, workspace, "alpha", "", true); err != nil {
+		t.Fatalf("runRoomTaskList include completed: %v", err)
+	}
+	data = decodeRoomEnvelope(t, out)
+	tasksRaw, ok = data["tasks"].([]any)
+	if !ok || len(tasksRaw) != 1 {
+		t.Fatalf("tasks with includeCompleted=%T/%v want 1 entry", data["tasks"], data["tasks"])
+	}
+
+	cmd, out = newRoomTestCommand(ctx)
+	if err := runRoomTaskList(cmd, workspace, "alpha", "completed", false); err != nil {
+		t.Fatalf("runRoomTaskList status=completed: %v", err)
+	}
+	data = decodeRoomEnvelope(t, out)
+	tasksRaw, ok = data["tasks"].([]any)
+	if !ok || len(tasksRaw) != 1 {
+		t.Fatalf("tasks with status=completed filter=%T/%v want 1 entry", data["tasks"], data["tasks"])
 	}
 
 	cmd, out = newRoomTestCommand(ctx)
@@ -2993,6 +3023,67 @@ func TestRunRoomWorkpackShowAndSync(t *testing.T) {
 	workpack = data["workpack"].(map[string]any)
 	if got := workpack["root"]; got != root {
 		t.Fatalf("sync root=%v want %s", got, root)
+	}
+}
+
+func TestRenderRoomWorkpackTemplatesEmptyStates(t *testing.T) {
+	delivery := renderRoomDeliveryLogMarkdown(map[string]any{})
+	for _, want := range []string{"# Delivery Log", "Delivery log entries are listed newest first.", "## Entries", "No delivery log entries recorded yet."} {
+		if !strings.Contains(delivery, want) {
+			t.Fatalf("delivery markdown missing %q:\n%s", want, delivery)
+		}
+	}
+
+	criteria := renderRoomMilestoneCriteriaMarkdown(map[string]any{})
+	for _, want := range []string{"# Criteria", "## Acceptance Criteria", "No acceptance criteria recorded yet."} {
+		if !strings.Contains(criteria, want) {
+			t.Fatalf("criteria markdown missing %q:\n%s", want, criteria)
+		}
+	}
+
+	summary := renderRoomMilestoneSummaryMarkdown(map[string]any{})
+	for _, want := range []string{"# Milestone Summary", "## Summary", "No milestone summary recorded yet.", "## Evidence Lanes", "No evidence lanes recorded yet."} {
+		if !strings.Contains(summary, want) {
+			t.Fatalf("summary markdown missing %q:\n%s", want, summary)
+		}
+	}
+
+	story := renderRoomStoryMarkdown(map[string]any{
+		"title": "Template Story",
+		"id":    "story-1",
+		"meta":  map[string]any{},
+	})
+	for _, want := range []string{"# Story Template Story", "## Description", "No story description recorded yet.", "## State History", "No story state transitions recorded yet.", "## Evidence Lanes", "No evidence lanes recorded yet.", "## Validation History", "No validation entries recorded yet."} {
+		if !strings.Contains(story, want) {
+			t.Fatalf("story markdown missing %q:\n%s", want, story)
+		}
+	}
+
+	validation := renderRoomStoryValidationMarkdown(map[string]any{
+		"id":   "val-1",
+		"meta": map[string]any{"validator_type": "review", "status": "pass"},
+	})
+	for _, want := range []string{"# Story Validation val-1", "## Notes", "No additional notes recorded."} {
+		if !strings.Contains(validation, want) {
+			t.Fatalf("validation markdown missing %q:\n%s", want, validation)
+		}
+	}
+}
+
+func TestRenderRoomStoryMarkdownValidationHistoryNewestFirst(t *testing.T) {
+	story := renderRoomStoryMarkdown(map[string]any{
+		"title": "Template Story",
+		"id":    "story-1",
+		"meta":  map[string]any{"description": "Story desc"},
+		"validations": []map[string]any{
+			{"id": "val-1", "meta": map[string]any{"validator_type": "review", "status": "fail", "summary": "Older"}},
+			{"id": "val-2", "meta": map[string]any{"validator_type": "integration", "status": "pass", "summary": "Newer"}},
+		},
+	})
+	first := strings.Index(story, "val-2")
+	second := strings.Index(story, "val-1")
+	if first == -1 || second == -1 || first > second {
+		t.Fatalf("validation history order wrong:\n%s", story)
 	}
 }
 
