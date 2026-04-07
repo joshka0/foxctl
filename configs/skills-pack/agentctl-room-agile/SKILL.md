@@ -168,8 +168,10 @@ Behavior:
 Milestone evidence policy is guidance-only in v1:
 
 - `milestone show` exposes `required_lane_status`, `required_lane_missing`, and `required_lane_covered`
+- `milestone show` also exposes `exit_policy.status`, `exit_policy.reasons`, and `exit_policy.checks`
 - `epic next` may emit `cover_required_lane`
 - `epic health` may warn with `milestone_missing_required_lane`
+- `epic next` and `epic health` now align on the same derived milestone exit-policy helper
 - milestone review writes are not auto-rejected on policy gaps in this slice
 
 Then add explicit acceptance criteria:

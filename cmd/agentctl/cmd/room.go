@@ -403,6 +403,7 @@ func newRoomStatusCommand() *cobra.Command {
 		limit      int
 		staleAfter time.Duration
 		only       []string
+		taskFilter string
 		verbose    bool
 	)
 	cmd := &cobra.Command{
@@ -410,13 +411,14 @@ func newRoomStatusCommand() *cobra.Command {
 		Short: "Show a coordinator-facing room summary",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runRoomStatus(cmd, workspace, args[0], limit, staleAfter, only, verbose)
+			return runRoomStatus(cmd, workspace, args[0], limit, staleAfter, only, taskFilter, verbose)
 		},
 	}
 	cmd.Flags().StringVar(&workspace, "workspace", ".", "Workspace root override")
 	cmd.Flags().IntVar(&limit, "limit", 200, "Maximum room messages to inspect for status derivation")
 	cmd.Flags().DurationVar(&staleAfter, "stale-after", 5*time.Minute, "Participant idle threshold")
 	cmd.Flags().StringSliceVar(&only, "only", nil, "Filter coordinator action summary (ack,reply,assigned,blocked,stale,all)")
+	cmd.Flags().StringVar(&taskFilter, "filter", "open", "Tasks to include in status payload: open (excludes completed and canceled), all, or completed")
 	cmd.Flags().BoolVar(&verbose, "verbose", false, "Include verbose actionable entry detail for debugging")
 	return cmd
 }
@@ -1990,7 +1992,7 @@ type roomStatusTask struct {
 	Signals         []string   `json:"signals,omitempty"`
 }
 
-func runRoomStatus(cmd *cobra.Command, workspace, roomID string, limit int, staleAfter time.Duration, only []string, verbose bool) error {
+func runRoomStatus(cmd *cobra.Command, workspace, roomID string, limit int, staleAfter time.Duration, only []string, taskFilter string, verbose bool) error {
 	absWorkspace, err := resolveRoomWorkspace(workspace)
 	if err != nil {
 		return err
@@ -2013,7 +2015,13 @@ func runRoomStatus(cmd *cobra.Command, workspace, roomID string, limit int, stal
 		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.status", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
 	}
 	defer taskStore.Close()
-	tasks, err := listRoomTasks(cmd.Context(), taskStore, ws.CanonicalID(absWorkspace), messages, "", false)
+	statusEff, omitComp, omitCan, err := parseRoomTaskListSelection("", taskFilter)
+	if err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.status", protocol.ErrorCodeEARG, err.Error(), map[string]any{
+			"hint": "Use --filter open (default), all, or completed.",
+		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	tasks, err := listRoomTasks(cmd.Context(), taskStore, ws.CanonicalID(absWorkspace), messages, statusEff, omitComp, omitCan)
 	if err != nil {
 		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.status", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
 	}
@@ -6340,7 +6348,8 @@ func deriveRoomEpicPhase(epic, currentMilestone map[string]any, missingValidatio
 		}
 		return "shaping"
 	}
-	if stringField(currentMilestone, "status") == "blocked" || intField(currentMilestone, "blocked_story_count") > 0 {
+	exitPolicy := roomMilestoneExitPolicy(currentMilestone)
+	if stringField(exitPolicy, "status") == "blocked" {
 		return "blocked"
 	}
 	if roomMilestoneNeedsReview(currentMilestone) || roomMilestoneNeedsSummary(currentMilestone) {
@@ -6353,22 +6362,11 @@ func deriveRoomEpicPhase(epic, currentMilestone map[string]any, missingValidatio
 }
 
 func roomMilestoneNeedsReview(milestone map[string]any) bool {
-	if milestone == nil {
-		return false
-	}
-	accepted := intField(milestone, "accepted_story_count")
-	validated := intField(milestone, "validated_story_count")
-	if accepted == 0 || validated < accepted {
-		return false
-	}
-	return intField(milestone, "review_count") == 0
+	return stringField(roomMilestoneExitPolicy(milestone), "status") == "ready_for_review"
 }
 
 func roomMilestoneNeedsSummary(milestone map[string]any) bool {
-	if milestone == nil {
-		return false
-	}
-	return intField(milestone, "review_count") > 0 && intField(milestone, "summary_count") == 0
+	return stringField(roomMilestoneExitPolicy(milestone), "status") == "ready_for_summary"
 }
 
 func summarizeRoomEpicContinuity(epic, currentMilestone map[string]any, missingValidation []map[string]any, latestLog map[string]any, openInterviewItems []map[string]any, phase string) string {
@@ -6503,23 +6501,25 @@ func buildRoomEpicHealthIssues(room agent.RoomSummary, messages []agent.BoardMes
 	for _, milestone := range milestones {
 		milestoneID := stringField(milestone, "id")
 		milestoneTitle := firstNonEmpty(stringField(milestone, "title"), milestoneID)
+		exitPolicy := anyMap(milestone["exit_policy"])
+		exitReasons := stringSliceField(exitPolicy, "reasons")
 		if roomMilestoneMissingContract(milestone) {
 			issues = append(issues, roomEpicHealthIssue("milestone_missing_contract", "warn", milestoneID, milestoneTitle, "Milestone is missing an explicit contract (objective, validators, or exit criteria).", fmt.Sprintf(`agentctl room milestone contract %s %s --objective "<objective>" --validator review --exit "<exit>"`, roomID, milestoneID)))
 		}
 		if intField(milestone, "criteria_count") == 0 {
 			issues = append(issues, roomEpicHealthIssue("milestone_missing_criteria", "warn", milestoneID, milestoneTitle, "Milestone has no acceptance criteria yet.", fmt.Sprintf(`agentctl room milestone criteria %s %s "<criterion>"`, roomID, milestoneID)))
 		}
-		if roomMilestoneNeedsReview(milestone) {
+		if stringField(exitPolicy, "status") == "ready_for_review" {
 			issues = append(issues, roomEpicHealthIssue("milestone_needs_review", "warn", milestoneID, milestoneTitle, "Accepted stories are covered and the milestone is ready for review.", fmt.Sprintf(`agentctl room milestone review %s %s pass "<notes>"`, roomID, milestoneID)))
 		}
-		if roomMilestoneNeedsSummary(milestone) {
+		if stringField(exitPolicy, "status") == "ready_for_summary" {
 			issues = append(issues, roomEpicHealthIssue("milestone_needs_summary", "info", milestoneID, milestoneTitle, "Milestone has a review verdict but no summary yet.", fmt.Sprintf(`agentctl room milestone summary %s %s --summary "<summary>"`, roomID, milestoneID)))
 		}
 		if roomMilestoneSummaryIsStale(milestone) {
 			issues = append(issues, roomEpicHealthIssue("stale_summary", "warn", milestoneID, milestoneTitle, "Milestone summary is older than the latest material change in this milestone.", fmt.Sprintf(`agentctl room milestone summary %s %s --summary "<summary>"`, roomID, milestoneID)))
 		}
-		requiredLaneStatus, _, requiredLaneMissing := roomMilestoneRequiredLaneStatus(milestone)
-		if requiredLaneStatus == "missing" {
+		if stringSliceContains(exitReasons, "missing_required_lane") {
+			_, _, requiredLaneMissing := roomMilestoneRequiredLaneStatus(milestone)
 			for _, lane := range requiredLaneMissing {
 				storyHint := roomMilestoneFirstAcceptedStoryMissingLane(milestone, lane, actorID, coordinator)
 				issues = append(issues, roomEpicHealthIssue(
@@ -6532,8 +6532,11 @@ func buildRoomEpicHealthIssues(room agent.RoomSummary, messages []agent.BoardMes
 				))
 			}
 		}
+		if stringSliceContains(exitReasons, "has_failed_validation") {
+			issues = append(issues, roomEpicHealthIssue("milestone_failed_validation", "block", milestoneID, milestoneTitle, "Milestone has a failing validation and is not ready to exit.", fmt.Sprintf(`agentctl room milestone show %s %s`, roomID, milestoneID)))
+		}
 		for _, story := range mapSlice(milestone["stories"]) {
-			if stringField(story, "status") == "accepted" && !boolField(story, "covered") {
+			if stringField(story, "status") == "accepted" && !boolField(story, "covered") && stringSliceContains(exitReasons, "accepted_stories_uncovered") {
 				issues = append(issues, roomEpicHealthIssue("story_missing_validation", "warn", stringField(story, "id"), firstNonEmpty(stringField(story, "title"), "Validate story"), "Accepted story still lacks validation coverage.", fmt.Sprintf(`agentctl room story validate %s %s review pass "<summary>"`, roomID, stringField(story, "id"))))
 			}
 			if stringField(story, "state") == "blocked" || stringField(story, "latest_validation_status") == "blocked" {
@@ -6675,6 +6678,65 @@ func roomMilestoneMissingContract(milestone map[string]any) bool {
 		intField(milestone, "required_evidence_lane_count") == 0 &&
 		intField(milestone, "optional_evidence_lane_count") == 0 &&
 		intField(milestone, "exit_criteria_count") == 0
+}
+
+func roomMilestoneExitPolicy(milestone map[string]any) map[string]any {
+	if milestone == nil {
+		return map[string]any{
+			"status":  "not_ready",
+			"reasons": []string{"milestone_missing"},
+			"checks":  map[string]any{},
+		}
+	}
+	requiredLaneStatus, _, _ := roomMilestoneRequiredLaneStatus(milestone)
+	acceptedStories := intField(milestone, "accepted_story_count")
+	validatedStories := intField(milestone, "validated_story_count")
+	checks := map[string]any{
+		"accepted_stories_covered": acceptedStories > 0 && validatedStories >= acceptedStories,
+		"required_lanes_satisfied": requiredLaneStatus != "missing",
+		"has_blocking_story":       intField(milestone, "blocked_story_count") > 0,
+		"has_failed_validation":    intField(milestone, "failed_story_count") > 0,
+		"has_review":               intField(milestone, "review_count") > 0,
+		"has_summary":              intField(milestone, "summary_count") > 0,
+	}
+	reasons := make([]string, 0, 4)
+	if boolField(checks, "has_blocking_story") {
+		reasons = append(reasons, "has_blocking_story")
+	}
+	if boolField(checks, "has_failed_validation") {
+		reasons = append(reasons, "has_failed_validation")
+	}
+	if !boolField(checks, "accepted_stories_covered") {
+		reasons = append(reasons, "accepted_stories_uncovered")
+	}
+	if !boolField(checks, "required_lanes_satisfied") {
+		reasons = append(reasons, "missing_required_lane")
+	}
+	if !boolField(checks, "has_review") {
+		reasons = append(reasons, "missing_review")
+	}
+	if !boolField(checks, "has_summary") {
+		reasons = append(reasons, "missing_summary")
+	}
+	status := "not_ready"
+	switch {
+	case boolField(checks, "has_blocking_story") || boolField(checks, "has_failed_validation"):
+		status = "blocked"
+	case !boolField(checks, "accepted_stories_covered") || !boolField(checks, "required_lanes_satisfied"):
+		status = "not_ready"
+	case !boolField(checks, "has_review"):
+		status = "ready_for_review"
+	case !boolField(checks, "has_summary"):
+		status = "ready_for_summary"
+	default:
+		status = "ready_to_exit"
+	}
+	sort.Strings(reasons)
+	return map[string]any{
+		"status":  status,
+		"reasons": reasons,
+		"checks":  checks,
+	}
 }
 
 func roomMilestoneRequiredLaneStatus(milestone map[string]any) (string, []string, []string) {
@@ -6913,6 +6975,8 @@ func buildRoomEpicNextItems(room agent.RoomSummary, messages []agent.BoardMessag
 	} else {
 		milestoneID := stringField(currentMilestone, "id")
 		policyCoveredStoryIDs := make(map[string]struct{})
+		exitPolicy := anyMap(currentMilestone["exit_policy"])
+		exitReasons := stringSliceField(exitPolicy, "reasons")
 		if intField(currentMilestone, "criteria_count") == 0 {
 			items = append(items, map[string]any{
 				"type":         "add_milestone_criteria",
@@ -6923,9 +6987,9 @@ func buildRoomEpicNextItems(room agent.RoomSummary, messages []agent.BoardMessag
 				"command_hint": fmt.Sprintf(`agentctl room milestone criteria %s %s "<criterion>"`, roomID, milestoneID),
 			})
 		}
-		requiredLaneStatus, _, requiredLaneMissing := roomMilestoneRequiredLaneStatus(currentMilestone)
-		if requiredLaneStatus == "missing" {
+		if stringSliceContains(exitReasons, "missing_required_lane") {
 			coordinator := roomCoordinatorActorID(room.Members)
+			_, _, requiredLaneMissing := roomMilestoneRequiredLaneStatus(currentMilestone)
 			for _, lane := range requiredLaneMissing {
 				storyHint := roomMilestoneFirstAcceptedStoryMissingLane(currentMilestone, lane, actorID, coordinator)
 				targetID := milestoneID
@@ -6950,7 +7014,7 @@ func buildRoomEpicNextItems(room agent.RoomSummary, messages []agent.BoardMessag
 		}
 
 		for _, story := range mapSlice(currentMilestone["stories"]) {
-			if stringField(story, "status") != "accepted" || boolField(story, "covered") {
+			if stringField(story, "status") != "accepted" || boolField(story, "covered") || !stringSliceContains(exitReasons, "accepted_stories_uncovered") {
 				continue
 			}
 			if _, ok := policyCoveredStoryIDs[stringField(story, "id")]; ok {
@@ -6970,7 +7034,7 @@ func buildRoomEpicNextItems(room agent.RoomSummary, messages []agent.BoardMessag
 			})
 		}
 
-		if stringField(currentMilestone, "status") == "blocked" || intField(currentMilestone, "blocked_story_count") > 0 {
+		if stringField(exitPolicy, "status") == "blocked" {
 			items = append(items, map[string]any{
 				"type":         "follow_up_blocker",
 				"priority":     2,
@@ -6981,7 +7045,7 @@ func buildRoomEpicNextItems(room agent.RoomSummary, messages []agent.BoardMessag
 			})
 		}
 
-		if roomMilestoneNeedsReview(currentMilestone) {
+		if stringField(exitPolicy, "status") == "ready_for_review" {
 			items = append(items, map[string]any{
 				"type":         "review_milestone",
 				"priority":     4,
@@ -6991,7 +7055,7 @@ func buildRoomEpicNextItems(room agent.RoomSummary, messages []agent.BoardMessag
 				"command_hint": fmt.Sprintf(`agentctl room milestone review %s %s pass "<notes>"`, roomID, milestoneID),
 			})
 		}
-		if roomMilestoneNeedsSummary(currentMilestone) {
+		if stringField(exitPolicy, "status") == "ready_for_summary" {
 			items = append(items, map[string]any{
 				"type":         "summarize_milestone",
 				"priority":     5,
@@ -7220,7 +7284,7 @@ func buildRoomMilestoneViews(messages []agent.BoardMessage) []map[string]any {
 			),
 			append(collectRoomMapIDs(summaryViews), collectRoomMapIDs(stories)...)...,
 		))
-		out = append(out, map[string]any{
+		milestoneView := map[string]any{
 			"id":                           msg.ID,
 			"epic_id":                      meta.EpicID,
 			"title":                        strings.TrimPrefix(strings.TrimSpace(msg.Subject), "Milestone: "),
@@ -7285,7 +7349,9 @@ func buildRoomMilestoneViews(messages []agent.BoardMessage) []map[string]any {
 				"accepted":  acceptedStories,
 			},
 			"room_message_ids": milestoneMessageIDs,
-		})
+		}
+		milestoneView["exit_policy"] = roomMilestoneExitPolicy(milestoneView)
+		out = append(out, milestoneView)
 	}
 	sort.Slice(out, func(i, j int) bool {
 		left := out[i]["root"].(agent.BoardMessage)
@@ -8580,6 +8646,19 @@ func stringSliceValue(value any) []string {
 		}
 		return decoded
 	}
+}
+
+func stringSliceContains(values []string, want string) bool {
+	want = strings.TrimSpace(want)
+	if want == "" {
+		return false
+	}
+	for _, value := range values {
+		if strings.TrimSpace(value) == want {
+			return true
+		}
+	}
+	return false
 }
 
 func anyMap(value any) map[string]any {

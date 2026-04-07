@@ -298,7 +298,7 @@ func TestRoomTaskFlow_AddListComplete(t *testing.T) {
 	}
 
 	cmd, out = newRoomTestCommand(ctx)
-	if err := runRoomTaskList(cmd, workspace, "alpha", "", false); err != nil {
+	if err := runRoomTaskList(cmd, workspace, "alpha", "", true, true); err != nil {
 		t.Fatalf("runRoomTaskList: %v", err)
 	}
 	data = decodeRoomEnvelope(t, out)
@@ -330,7 +330,7 @@ func TestRoomTaskFlow_AddListComplete(t *testing.T) {
 	}
 
 	cmd, out = newRoomTestCommand(ctx)
-	if err := runRoomTaskList(cmd, workspace, "alpha", "", false); err != nil {
+	if err := runRoomTaskList(cmd, workspace, "alpha", "", true, true); err != nil {
 		t.Fatalf("runRoomTaskList after complete: %v", err)
 	}
 	data = decodeRoomEnvelope(t, out)
@@ -340,7 +340,7 @@ func TestRoomTaskFlow_AddListComplete(t *testing.T) {
 	}
 
 	cmd, out = newRoomTestCommand(ctx)
-	if err := runRoomTaskList(cmd, workspace, "alpha", "", true); err != nil {
+	if err := runRoomTaskList(cmd, workspace, "alpha", "", false, false); err != nil {
 		t.Fatalf("runRoomTaskList include completed: %v", err)
 	}
 	data = decodeRoomEnvelope(t, out)
@@ -350,7 +350,7 @@ func TestRoomTaskFlow_AddListComplete(t *testing.T) {
 	}
 
 	cmd, out = newRoomTestCommand(ctx)
-	if err := runRoomTaskList(cmd, workspace, "alpha", "completed", false); err != nil {
+	if err := runRoomTaskList(cmd, workspace, "alpha", "completed", false, false); err != nil {
 		t.Fatalf("runRoomTaskList status=completed: %v", err)
 	}
 	data = decodeRoomEnvelope(t, out)
@@ -861,7 +861,7 @@ func TestRunRoomStatusIncludesPulseAndBacklog(t *testing.T) {
 	}
 
 	cmd, out = newRoomTestCommand(ctx)
-	if err := runRoomStatus(cmd, workspace, "alpha", 50, 5*time.Minute, nil, false); err != nil {
+	if err := runRoomStatus(cmd, workspace, "alpha", 50, 5*time.Minute, nil, "open", false); err != nil {
 		t.Fatalf("runRoomStatus: %v", err)
 	}
 	data = decodeRoomEnvelope(t, out)
@@ -928,6 +928,95 @@ func TestRunRoomStatusIncludesPulseAndBacklog(t *testing.T) {
 	}
 	if _, ok := topEntry["message"]; ok {
 		t.Fatalf("top_entry unexpectedly contains full message payload: %v", topEntry)
+	}
+}
+
+func TestRunRoomStatusFilterOpenOmitsCompletedFromTaskPulse(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	ctx := context.Background()
+	workspace := t.TempDir()
+
+	cmd, _ := newRoomTestCommand(ctx)
+	if err := runRoomCreate(cmd, workspace, "alpha", "Alpha", "", []string{"human-a=coordinator", "gemini-a=reviewer"}); err != nil {
+		t.Fatalf("runRoomCreate: %v", err)
+	}
+	cmd, out := newRoomTestCommand(ctx)
+	if err := runRoomTaskAdd(cmd, workspace, "alpha", "human-a", "Done task", "body", "", "", nil, true); err != nil {
+		t.Fatalf("runRoomTaskAdd: %v", err)
+	}
+	data := decodeRoomEnvelope(t, out)
+	taskRaw := data["task"].(map[string]any)
+	taskID, _ := taskRaw["id"].(string)
+	if taskID == "" {
+		taskID, _ = taskRaw["ID"].(string)
+	}
+	cmd, _ = newRoomTestCommand(ctx)
+	if err := runRoomTaskAssign(cmd, workspace, "alpha", "human-a", taskID, "gemini-a", "go"); err != nil {
+		t.Fatalf("runRoomTaskAssign: %v", err)
+	}
+	cmd, _ = newRoomTestCommand(ctx)
+	if err := runRoomTaskClaim(cmd, workspace, "alpha", "gemini-a", taskID); err != nil {
+		t.Fatalf("runRoomTaskClaim: %v", err)
+	}
+	cmd, _ = newRoomTestCommand(ctx)
+	if err := runRoomTaskComplete(cmd, workspace, "alpha", "gemini-a", taskID, "done", ""); err != nil {
+		t.Fatalf("runRoomTaskComplete: %v", err)
+	}
+
+	cmd, out = newRoomTestCommand(ctx)
+	if err := runRoomStatus(cmd, workspace, "alpha", 50, 5*time.Minute, nil, "open", false); err != nil {
+		t.Fatalf("runRoomStatus open: %v", err)
+	}
+	data = decodeRoomEnvelope(t, out)
+	pulse := data["task_pulse"].(map[string]any)
+	if got := pulse["completed"]; got != float64(0) {
+		t.Fatalf("task_pulse.completed (filter open)=%v want 0", got)
+	}
+
+	cmd, out = newRoomTestCommand(ctx)
+	if err := runRoomStatus(cmd, workspace, "alpha", 50, 5*time.Minute, nil, "all", false); err != nil {
+		t.Fatalf("runRoomStatus all: %v", err)
+	}
+	data = decodeRoomEnvelope(t, out)
+	pulse = data["task_pulse"].(map[string]any)
+	if got := pulse["completed"]; got != float64(1) {
+		t.Fatalf("task_pulse.completed (filter all)=%v want 1", got)
+	}
+}
+
+func TestParseRoomTaskListSelection(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		status, filter string
+		wantStatus     string
+		wantOmitC      bool
+		wantOmitCan    bool
+		wantErr        bool
+	}{
+		{"", "open", "", true, true, false},
+		{"", "active", "", true, true, false},
+		{"", "all", "", false, false, false},
+		{"", "completed", taskstore.StatusCompleted, false, false, false},
+		{"pending", "open", "pending", false, false, false},
+		{"pending", "completed", "", false, false, true},
+		{"completed", "completed", taskstore.StatusCompleted, false, false, false},
+		{"bogus", "all", "bogus", false, false, false},
+		{"", "weird", "", false, false, true},
+	}
+	for _, tc := range cases {
+		st, oc, ocan, err := parseRoomTaskListSelection(tc.status, tc.filter)
+		if tc.wantErr {
+			if err == nil {
+				t.Fatalf("status=%q filter=%q want error", tc.status, tc.filter)
+			}
+			continue
+		}
+		if err != nil {
+			t.Fatalf("status=%q filter=%q err=%v", tc.status, tc.filter, err)
+		}
+		if st != tc.wantStatus || oc != tc.wantOmitC || ocan != tc.wantOmitCan {
+			t.Fatalf("status=%q filter=%q got (%q,%v,%v) want (%q,%v,%v)", tc.status, tc.filter, st, oc, ocan, tc.wantStatus, tc.wantOmitC, tc.wantOmitCan)
+		}
 	}
 }
 
@@ -1020,7 +1109,7 @@ func TestRunRoomStatusVerboseIncludesVerboseTopEntries(t *testing.T) {
 	}
 
 	cmd, out := newRoomTestCommand(ctx)
-	if err := runRoomStatus(cmd, workspace, "alpha", 50, 5*time.Minute, nil, true); err != nil {
+	if err := runRoomStatus(cmd, workspace, "alpha", 50, 5*time.Minute, nil, "open", true); err != nil {
 		t.Fatalf("runRoomStatus verbose: %v", err)
 	}
 	data := decodeRoomEnvelope(t, out)
@@ -1081,7 +1170,7 @@ func TestRunRoomStatusOnlyFiltersActionRequired(t *testing.T) {
 	}
 
 	cmd, out = newRoomTestCommand(ctx)
-	if err := runRoomStatus(cmd, workspace, "alpha", 50, 5*time.Minute, []string{"blocked"}, false); err != nil {
+	if err := runRoomStatus(cmd, workspace, "alpha", 50, 5*time.Minute, []string{"blocked"}, "open", false); err != nil {
 		t.Fatalf("runRoomStatus blocked: %v", err)
 	}
 	data = decodeRoomEnvelope(t, out)
@@ -1180,7 +1269,7 @@ func TestRunRoomResolveMarksMessageResolved(t *testing.T) {
 	}
 
 	cmd, out = newRoomTestCommand(ctx)
-	if err := runRoomStatus(cmd, workspace, "alpha", 20, 5*time.Minute, nil, false); err != nil {
+	if err := runRoomStatus(cmd, workspace, "alpha", 20, 5*time.Minute, nil, "open", false); err != nil {
 		t.Fatalf("runRoomStatus: %v", err)
 	}
 	data = decodeRoomEnvelope(t, out)
@@ -1245,7 +1334,7 @@ func TestRunRoomResolveMarksRelatedReminderChainResolved(t *testing.T) {
 	}
 
 	cmd, out = newRoomTestCommand(ctx)
-	if err := runRoomStatus(cmd, workspace, "alpha", 50, 5*time.Minute, nil, false); err != nil {
+	if err := runRoomStatus(cmd, workspace, "alpha", 50, 5*time.Minute, nil, "open", false); err != nil {
 		t.Fatalf("runRoomStatus: %v", err)
 	}
 	data = decodeRoomEnvelope(t, out)
@@ -3163,6 +3252,120 @@ func TestRunRoomMilestoneEvidencePolicyGuidesHealthAndNext(t *testing.T) {
 	}
 }
 
+func TestRunRoomMilestoneExitPolicyStates(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	ctx := context.Background()
+
+	t.Run("status ladder", func(t *testing.T) {
+		workspace := t.TempDir()
+		epicID, milestoneID, storyID := setupRoomAgileWorkpackFixture(t, ctx, workspace)
+
+		cmd, _ := newRoomTestCommand(ctx)
+		if err := runRoomMilestoneContractWithPolicy(cmd, workspace, "human-a", "alpha", milestoneID, "Foundation objective.", nil, nil, nil, []string{"review"}, []string{"review"}, nil, []string{"story validated"}); err != nil {
+			t.Fatalf("runRoomMilestoneContractWithPolicy: %v", err)
+		}
+		cmd, _ = newRoomTestCommand(ctx)
+		if err := runRoomMilestoneCriteria(cmd, workspace, "human-a", "alpha", milestoneID, "Accepted stories are validated"); err != nil {
+			t.Fatalf("runRoomMilestoneCriteria: %v", err)
+		}
+
+		assertExitPolicy := func(want string, reasons ...string) {
+			t.Helper()
+			cmd, out := newRoomTestCommand(ctx)
+			if err := runRoomMilestoneShow(cmd, workspace, "alpha", milestoneID, 100); err != nil {
+				t.Fatalf("runRoomMilestoneShow: %v", err)
+			}
+			milestone := decodeRoomEnvelope(t, out)["milestone"].(map[string]any)
+			exitPolicy := milestone["exit_policy"].(map[string]any)
+			if got := exitPolicy["status"]; got != want {
+				t.Fatalf("exit_policy.status=%v want %s", got, want)
+			}
+			gotReasons := exitPolicy["reasons"].([]any)
+			for _, reason := range reasons {
+				found := false
+				for _, got := range gotReasons {
+					if got == reason {
+						found = true
+						break
+					}
+				}
+				if !found {
+					t.Fatalf("exit_policy.reasons=%v want %s", gotReasons, reason)
+				}
+			}
+		}
+
+		assertExitPolicy("not_ready", "accepted_stories_uncovered")
+
+		cmd, _ = newRoomTestCommand(ctx)
+		if err := runRoomStoryValidate(cmd, workspace, "human-a", "alpha", storyID, "review", "pass", "Validated.", "docs/reviews/pass.md", "", "", "", nil); err != nil {
+			t.Fatalf("runRoomStoryValidate pass: %v", err)
+		}
+		assertExitPolicy("ready_for_review", "missing_review")
+
+		cmd, _ = newRoomTestCommand(ctx)
+		if err := runRoomMilestoneReview(cmd, workspace, "human-a", "alpha", milestoneID, "pass", "Looks good."); err != nil {
+			t.Fatalf("runRoomMilestoneReview: %v", err)
+		}
+		assertExitPolicy("ready_for_summary", "missing_summary")
+
+		cmd, _ = newRoomTestCommand(ctx)
+		if err := runRoomMilestoneSummary(cmd, workspace, "human-a", "alpha", milestoneID, "Summary.", "", nil, nil, nil, nil, nil, nil, nil, nil); err != nil {
+			t.Fatalf("runRoomMilestoneSummary: %v", err)
+		}
+		assertExitPolicy("ready_to_exit")
+
+		cmd, out := newRoomTestCommand(ctx)
+		if err := runRoomEpicHealth(cmd, workspace, "alpha", epicID, "", 100); err != nil {
+			t.Fatalf("runRoomEpicHealth: %v", err)
+		}
+		health := decodeRoomEnvelope(t, out)["health"].(map[string]any)
+		if got := health["health"]; got != "closing" {
+			t.Fatalf("health=%v want closing", got)
+		}
+	})
+
+	t.Run("failed validation blocks", func(t *testing.T) {
+		workspace := t.TempDir()
+		epicID, milestoneID, storyID := setupRoomAgileWorkpackFixture(t, ctx, workspace)
+
+		cmd, _ := newRoomTestCommand(ctx)
+		if err := runRoomMilestoneContractWithPolicy(cmd, workspace, "human-a", "alpha", milestoneID, "Foundation objective.", nil, nil, nil, []string{"review"}, []string{"review"}, nil, []string{"story validated"}); err != nil {
+			t.Fatalf("runRoomMilestoneContractWithPolicy: %v", err)
+		}
+		cmd, _ = newRoomTestCommand(ctx)
+		if err := runRoomMilestoneCriteria(cmd, workspace, "human-a", "alpha", milestoneID, "Accepted stories are validated"); err != nil {
+			t.Fatalf("runRoomMilestoneCriteria: %v", err)
+		}
+		cmd, _ = newRoomTestCommand(ctx)
+		if err := runRoomStoryValidate(cmd, workspace, "human-a", "alpha", storyID, "review", "fail", "Validation failed.", "docs/reviews/fail.md", "", "", "", nil); err != nil {
+			t.Fatalf("runRoomStoryValidate fail: %v", err)
+		}
+
+		cmd, out := newRoomTestCommand(ctx)
+		if err := runRoomMilestoneShow(cmd, workspace, "alpha", milestoneID, 100); err != nil {
+			t.Fatalf("runRoomMilestoneShow: %v", err)
+		}
+		milestone := decodeRoomEnvelope(t, out)["milestone"].(map[string]any)
+		exitPolicy := milestone["exit_policy"].(map[string]any)
+		if got := exitPolicy["status"]; got != "blocked" {
+			t.Fatalf("exit_policy.status=%v want blocked", got)
+		}
+
+		cmd, out = newRoomTestCommand(ctx)
+		if err := runRoomEpicHealth(cmd, workspace, "alpha", epicID, "", 100); err != nil {
+			t.Fatalf("runRoomEpicHealth: %v", err)
+		}
+		health := decodeRoomEnvelope(t, out)["health"].(map[string]any)
+		if got := health["health"]; got != "blocked" {
+			t.Fatalf("health=%v want blocked", got)
+		}
+		if !roomIssueTypesContain(health["issues"].([]any), "milestone_failed_validation") {
+			t.Fatalf("issues=%v want milestone_failed_validation", health["issues"])
+		}
+	})
+}
+
 func TestRunRoomEpicResumeAndNextDiscovery(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	ctx := context.Background()
@@ -4268,7 +4471,7 @@ func TestRunRoomStatusIncludesInterviewLane(t *testing.T) {
 	}
 
 	cmd, out = newRoomTestCommand(ctx)
-	if err := runRoomStatus(cmd, workspace, "alpha", 50, 5*time.Minute, []string{"interview"}, false); err != nil {
+	if err := runRoomStatus(cmd, workspace, "alpha", 50, 5*time.Minute, []string{"interview"}, "open", false); err != nil {
 		t.Fatalf("runRoomStatus interview: %v", err)
 	}
 	data = decodeRoomEnvelope(t, out)
