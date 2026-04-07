@@ -51,6 +51,7 @@ This skill adds the explicit agile layer:
 - `log append` is the cross-session delivery journal for the epic
 - `story validate` attaches proof at the story level
 - `~/.agentctl/epics/<epic-id>/...` is the rich markdown/artifact mirror; room state stays canonical
+- `room aca promote` projects high-signal completed agile artifacts into ACA draft notes for later semantic retrieval
 
 ## Operating sequence
 
@@ -219,6 +220,24 @@ agentctl room milestone summary <room-id> <milestone-id> \
   --guidance "Use milestone summary for synthesis, not proof"
 ```
 
+### 9. Promote durable work into ACA drafts when the signal is worth keeping
+
+Use ACA promotion for completed/high-signal artifacts, not routine chat churn:
+
+```bash
+agentctl room aca promote epic <room-id> <epic-id>
+agentctl room aca promote milestone <room-id> <milestone-id>
+agentctl room aca promote retro <room-id> <guidance-update-id>
+agentctl room aca promote validation <room-id> <validation-id>
+```
+
+Rules:
+
+- the room/work-pack remain canonical
+- ACA promotion is review-first and draft-only in v1
+- routine green validations should usually stay out of ACA
+- failed, blocked, and waived validations are the safest first promotion targets
+
 `milestone review` is the verdict.
 
 `milestone summary` is the durable synthesis.
@@ -230,7 +249,7 @@ Rules:
 - `blocking_validation_ids` and `waived_validation_ids` must reference existing story validations in the same milestone
 - summary should summarize or reference proof, not paste large validation bodies or artifacts
 
-### 9. Attach validation to accepted stories
+### 10. Attach validation to accepted stories
 
 Use story-level validation as the primary proof unit:
 
@@ -250,7 +269,7 @@ Rules:
 - `waived` requires explicit waiver notes and owner/coordinator authority
 - related stories must resolve inside the same milestone for the current slice
 
-### 10. Capture retro guidance separately from milestone synthesis
+### 11. Capture retro guidance separately from milestone synthesis
 
 Use retro guidance for what should change next time, not for restating milestone proof:
 

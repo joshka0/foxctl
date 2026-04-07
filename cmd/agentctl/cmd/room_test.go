@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jkatigb/agentctl/internal/contextplane"
 	"github.com/jkatigb/agentctl/internal/domain/agent"
 	"github.com/jkatigb/agentctl/internal/domain/envelope"
 	ws "github.com/jkatigb/agentctl/internal/platform/workspace"
@@ -2527,6 +2528,120 @@ func TestRunRoomRetroAddRejectsUnknownKind(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "unsupported retro kind") {
 		t.Fatalf("expected retro kind error, got %s", out.String())
+	}
+}
+
+func TestRunRoomACAPromoteEpicDraftsProposalAndIsIdempotent(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	ctx := context.Background()
+	workspace := t.TempDir()
+
+	epicID, milestoneID, _ := setupRoomAgileWorkpackFixture(t, ctx, workspace)
+
+	cmd, _ := newRoomTestCommand(ctx)
+	if err := runRoomRetroAdd(cmd, workspace, "human-a", "alpha", epicID, milestoneID, "quality", "Capture durable epic memory.", "Makes retrieval stronger later.", "Promote completed agile artifacts into ACA drafts.", []string{"aca", "room-agile"}, []string{"Implement room aca promote"}); err != nil {
+		t.Fatalf("runRoomRetroAdd: %v", err)
+	}
+
+	cmd, out := newRoomTestCommand(ctx)
+	if err := runRoomACAPromote(cmd, workspace, "alpha", "epic", epicID); err != nil {
+		t.Fatalf("runRoomACAPromote epic: %v", err)
+	}
+	data := decodeRoomEnvelope(t, out)
+	if got := data["promotion_state"]; got != "created" {
+		t.Fatalf("promotion_state=%v want created", got)
+	}
+	draftPath, _ := data["draft_path"].(string)
+	if strings.TrimSpace(draftPath) == "" {
+		t.Fatal("expected draft_path")
+	}
+	proposal, ok := data["proposal"].(map[string]any)
+	if !ok {
+		t.Fatalf("proposal type=%T", data["proposal"])
+	}
+	if got := proposal["kind"]; got != "room_agile_draft" {
+		t.Fatalf("proposal.kind=%v want room_agile_draft", got)
+	}
+
+	acaStore := contextplane.NewWorkspaceStore(workspace)
+	layout, err := acaStore.EnsureLayout()
+	if err != nil {
+		t.Fatalf("EnsureLayout: %v", err)
+	}
+	draftBody := mustReadRoomTestFile(t, filepath.Join(layout.TemplatesDir, filepath.FromSlash(draftPath)))
+	for _, want := range []string{"note_type: room_epic", "room_id: alpha", "[[room-milestones/", "Capture durable epic memory."} {
+		if !strings.Contains(draftBody, want) {
+			t.Fatalf("epic ACA draft missing %q:\n%s", want, draftBody)
+		}
+	}
+
+	cmd, out = newRoomTestCommand(ctx)
+	if err := runRoomACAPromote(cmd, workspace, "alpha", "epic", epicID); err != nil {
+		t.Fatalf("runRoomACAPromote epic second: %v", err)
+	}
+	data = decodeRoomEnvelope(t, out)
+	if got := data["promotion_state"]; got != "already_current" {
+		t.Fatalf("promotion_state second=%v want already_current", got)
+	}
+}
+
+func TestRunRoomACAPromoteValidationRequiresHighSignal(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	ctx := context.Background()
+	workspace := t.TempDir()
+
+	epicID, _, storyID := setupRoomAgileWorkpackFixture(t, ctx, workspace)
+
+	cmd, out := newRoomTestCommand(ctx)
+	if err := runRoomStoryValidate(cmd, workspace, "human-a", "alpha", storyID, "review", "pass", "Routine green validation.", "docs/reviews/pass.md", "", "", "", nil); err != nil {
+		t.Fatalf("runRoomStoryValidate pass: %v", err)
+	}
+	passValidationID := decodeRoomEnvelope(t, out)["validation_id"].(string)
+
+	cmd, out = newRoomTestCommand(ctx)
+	if err := runRoomACAPromote(cmd, workspace, "alpha", "validation", passValidationID); err != nil {
+		t.Fatalf("runRoomACAPromote routine validation returned error: %v", err)
+	}
+	if !strings.Contains(out.String(), `"status":"error"`) {
+		t.Fatalf("expected error envelope, got %s", out.String())
+	}
+	if !strings.Contains(out.String(), "not high-signal enough") {
+		t.Fatalf("expected high-signal rejection, got %s", out.String())
+	}
+
+	cmd, out = newRoomTestCommand(ctx)
+	if err := runRoomStoryValidate(cmd, workspace, "human-a", "alpha", storyID, "review", "blocked", "Validation blocked on cross-story decision.", "docs/reviews/blocked.md", "", "", "Need the other story clarified.", nil); err != nil {
+		t.Fatalf("runRoomStoryValidate blocked: %v", err)
+	}
+	blockedValidationID := decodeRoomEnvelope(t, out)["validation_id"].(string)
+
+	cmd, out = newRoomTestCommand(ctx)
+	if err := runRoomACAPromote(cmd, workspace, "alpha", "validation", blockedValidationID); err != nil {
+		t.Fatalf("runRoomACAPromote blocked validation: %v", err)
+	}
+	data := decodeRoomEnvelope(t, out)
+	if got := data["promotion_state"]; got != "created" {
+		t.Fatalf("promotion_state=%v want created", got)
+	}
+	if got := data["epic_id"]; got != epicID {
+		t.Fatalf("epic_id=%v want %s", got, epicID)
+	}
+	draftPath, _ := data["draft_path"].(string)
+	if strings.TrimSpace(draftPath) == "" {
+		t.Fatal("expected blocked validation draft_path")
+	}
+
+	acaStore := contextplane.NewWorkspaceStore(workspace)
+	layout, err := acaStore.EnsureLayout()
+	if err != nil {
+		t.Fatalf("EnsureLayout: %v", err)
+	}
+	draftBody := mustReadRoomTestFile(t, filepath.Join(layout.TemplatesDir, filepath.FromSlash(draftPath)))
+	for _, want := range []string{"note_type: room_validation", "validation_id: " + blockedValidationID, "status: blocked", "[[room-milestones/"} {
+		if !strings.Contains(draftBody, want) {
+			t.Fatalf("validation ACA draft missing %q:\n%s", want, draftBody)
+		}
 	}
 }
 

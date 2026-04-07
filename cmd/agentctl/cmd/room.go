@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jkatigb/agentctl/internal/contextplane"
 	"github.com/jkatigb/agentctl/internal/domain/agent"
 	"github.com/jkatigb/agentctl/internal/domain/envelope"
 	ws "github.com/jkatigb/agentctl/internal/platform/workspace"
@@ -51,6 +52,7 @@ func newRoomCommand() *cobra.Command {
 		newRoomStoryCommand(),
 		newRoomLogCommand(),
 		newRoomRetroCommand(),
+		newRoomACACommand(),
 		newRoomWorkpackCommand(),
 		newRoomPlanCommand(),
 		newRoomInterviewCommand(),
@@ -1176,6 +1178,31 @@ func newRoomRetroShowCommand() *cobra.Command {
 	cmd.Flags().StringVar(&workspace, "workspace", ".", "Workspace root override")
 	cmd.Flags().StringVar(&milestoneID, "milestone", "", "Optional milestone id filter")
 	cmd.Flags().IntVar(&limit, "limit", 250, "Maximum room messages to inspect")
+	return cmd
+}
+
+func newRoomACACommand() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "aca",
+		Short: "Promote high-signal agile room artifacts into ACA drafts",
+	}
+	cmd.AddCommand(
+		newRoomACAPromoteCommand(),
+	)
+	return cmd
+}
+
+func newRoomACAPromoteCommand() *cobra.Command {
+	var workspace string
+	cmd := &cobra.Command{
+		Use:   "promote <epic|milestone|retro|validation> <room-id> <source-id>",
+		Short: "Draft one ACA proposal note from a room-agile artifact",
+		Args:  cobra.ExactArgs(3),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runRoomACAPromote(cmd, workspace, args[1], args[0], args[2])
+		},
+	}
+	cmd.Flags().StringVar(&workspace, "workspace", ".", "Workspace root override")
 	return cmd
 }
 
@@ -4208,6 +4235,477 @@ func runRoomRetroShow(cmd *cobra.Command, workspace, roomID, epicID, milestoneID
 		"updates":      filtered,
 		"groups":       groups,
 	}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+}
+
+type roomACAPromotionPrepared struct {
+	EpicID     string
+	TargetKind string
+	TargetID   string
+	Source     map[string]any
+	Input      contextplane.MarkdownProposalInput
+}
+
+func runRoomACAPromote(cmd *cobra.Command, workspace, roomID, targetKind, sourceID string) error {
+	absWorkspace, err := resolveRoomWorkspace(workspace)
+	if err != nil {
+		return err
+	}
+	store, err := openRoomBoardStore(cmd.Context())
+	if err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.aca.promote", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	defer store.Close()
+
+	summary, messages, err := loadRoomState(cmd.Context(), store, absWorkspace, roomID, "", roomTaskScanLimit)
+	if err != nil {
+		code := protocol.ErrorCodeERuntime
+		if errors.Is(err, blackboard.ErrRoomNotFound) {
+			code = protocol.ErrorCodeENotFound
+		}
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.aca.promote", code, err.Error(), map[string]any{
+			"hint": "Create the room first or check the room id.",
+		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+
+	prepared, err := buildRoomACAPromotionInput(absWorkspace, roomID, summary, messages, targetKind, sourceID)
+	if err != nil {
+		code := protocol.ErrorCodeEARG
+		if errors.Is(err, os.ErrNotExist) {
+			code = protocol.ErrorCodeENotFound
+		}
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.aca.promote", code, err.Error(), map[string]any{
+			"hint": "Use one of: epic, milestone, retro, validation and an id visible in the matching `agentctl room ... show` command.",
+		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	if prepared.EpicID != "" {
+		if err := syncRoomAgileWorkpack(cmd.Context(), store, absWorkspace, roomID, prepared.EpicID); err != nil {
+			return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.aca.promote", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+		}
+	}
+
+	acaStore := contextplane.NewWorkspaceStore(absWorkspace)
+	result, err := acaStore.DraftMarkdownProposal(cmd.Context(), prepared.Input)
+	if err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.aca.promote", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	return protocol.WriteOK(cmd.OutOrStdout(), "agentctl.room.aca.promote", map[string]any{
+		"room":            summary,
+		"target_kind":     prepared.TargetKind,
+		"target_id":       prepared.TargetID,
+		"epic_id":         prepared.EpicID,
+		"source":          prepared.Source,
+		"draft_path":      result.DraftPath,
+		"promotion_state": result.PromotionState,
+		"proposal":        result.Proposal,
+	}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+}
+
+func buildRoomACAPromotionInput(absWorkspace, roomID string, room agent.RoomSummary, messages []agent.BoardMessage, targetKind, sourceID string) (roomACAPromotionPrepared, error) {
+	targetKind = strings.TrimSpace(strings.ToLower(targetKind))
+	sourceID = strings.TrimSpace(sourceID)
+	if sourceID == "" {
+		return roomACAPromotionPrepared{}, fmt.Errorf("source id is required")
+	}
+	project := filepath.Base(absWorkspace)
+	epics := buildRoomEpicViews(messages)
+	switch targetKind {
+	case "epic":
+		epic := roomEpicViewByID(epics, sourceID)
+		if epic == nil {
+			return roomACAPromotionPrepared{}, fmt.Errorf("epic %q not found: %w", sourceID, os.ErrNotExist)
+		}
+		return roomACAPromoteEpic(absWorkspace, roomID, room, messages, project, epic), nil
+	case "milestone":
+		milestone := roomMilestoneViewByID(buildRoomMilestoneViews(messages), sourceID)
+		if milestone == nil {
+			return roomACAPromotionPrepared{}, fmt.Errorf("milestone %q not found: %w", sourceID, os.ErrNotExist)
+		}
+		epic := roomEpicViewByID(epics, stringField(milestone, "epic_id"))
+		return roomACAPromoteMilestone(absWorkspace, roomID, project, epic, milestone), nil
+	case "retro":
+		update := roomGuidanceUpdateViewByID(buildRoomGuidanceUpdateViews(messages), sourceID)
+		if update == nil {
+			return roomACAPromotionPrepared{}, fmt.Errorf("guidance update %q not found: %w", sourceID, os.ErrNotExist)
+		}
+		epic := roomEpicViewByID(epics, stringField(update, "epic_id"))
+		return roomACAPromoteRetro(absWorkspace, roomID, project, epic, update), nil
+	case "validation":
+		stories := buildRoomStoryViews(messages)
+		story, validation := roomStoryValidationViewByID(stories, sourceID)
+		if validation == nil {
+			return roomACAPromotionPrepared{}, fmt.Errorf("validation %q not found: %w", sourceID, os.ErrNotExist)
+		}
+		status := stringField(anyMap(validation["meta"]), "status")
+		if status != "fail" && status != "blocked" && status != "waived" {
+			return roomACAPromotionPrepared{}, fmt.Errorf("validation %q is not high-signal enough for ACA promotion yet; promote fail, blocked, or waived validations in the first slice", sourceID)
+		}
+		milestone := roomMilestoneViewByID(buildRoomMilestoneViews(messages), stringField(story, "milestone_id"))
+		epic := roomEpicViewByID(epics, stringField(story, "epic_id"))
+		return roomACAPromoteValidation(absWorkspace, roomID, project, epic, milestone, story, validation), nil
+	default:
+		return roomACAPromotionPrepared{}, fmt.Errorf("unsupported room aca promotion kind %q", targetKind)
+	}
+}
+
+func roomACAPromoteEpic(absWorkspace, roomID string, room agent.RoomSummary, messages []agent.BoardMessage, project string, epic map[string]any) roomACAPromotionPrepared {
+	epicID := stringField(epic, "id")
+	meta := anyMap(epic["meta"])
+	finalBrief := anyMap(epic["final_brief"])
+	resume := buildRoomEpicContinuity(room, messages, epic)
+	title := firstNonEmpty(stringField(epic, "title"), epicID)
+	summaryText := firstNonEmpty(stringField(resume, "summary"), stringField(finalBrief, "body"), stringField(meta, "goal"), title)
+	workpackRoot := stringField(epic, "workpack_root")
+	workpackPath := filepath.Join(workpackRoot, "epic.md")
+	roomMessageIDs := []string{epicID}
+	if finalID := stringField(finalBrief, "id"); finalID != "" {
+		roomMessageIDs = append(roomMessageIDs, finalID)
+	}
+	if latestLog := roomEpicLatestLog(epic); latestLog != nil {
+		if id := stringField(latestLog, "id"); id != "" {
+			roomMessageIDs = append(roomMessageIDs, id)
+		}
+	}
+	relatedLinks := make([]string, 0, len(mapSlice(epic["milestones"])))
+	for _, milestone := range mapSlice(epic["milestones"]) {
+		milestoneID := stringField(milestone, "id")
+		if milestoneID == "" {
+			continue
+		}
+		relatedLinks = append(relatedLinks, fmt.Sprintf("Milestone: [[room-milestones/%s]]", milestoneID))
+	}
+	body := renderRoomACAPromotionMarkdown(
+		title,
+		renderRoomEpicMarkdown(epic)+"\n"+renderRoomDeliveryLogMarkdown(epic)+"\n"+renderRoomRetroMarkdown(epic),
+		[]string{
+			fmt.Sprintf("- Room: `%s`", roomID),
+			fmt.Sprintf("- Epic ID: `%s`", epicID),
+			fmt.Sprintf("- Work-pack: `%s`", workpackPath),
+		},
+		relatedLinks,
+	)
+	frontmatter := roomACAFrontmatter(absWorkspace, project, "room_epic", roomID, epicID, "", "", "", "", roomMessageIDs, workpackRoot, workpackPath, stringField(epic, "status"), []string{"room/agile", "epic"})
+	return roomACAPromotionPrepared{
+		EpicID:     epicID,
+		TargetKind: "epic",
+		TargetID:   epicID,
+		Source:     epic,
+		Input: contextplane.MarkdownProposalInput{
+			NoteType:       "room_epic",
+			Project:        project,
+			Folder:         filepath.ToSlash(filepath.Join("room-agile", roomACASlug(project, "workspace"), "room_epic")),
+			SourceKind:     "epic",
+			SourceID:       epicID,
+			Title:          title,
+			Summary:        fmt.Sprintf("Review ACA epic draft for %s. %s", title, summaryText),
+			Body:           body,
+			Frontmatter:    frontmatter,
+			DedupeKey:      fmt.Sprintf("room_agile_draft|room_epic|%s", epicID),
+			Kind:           "room_agile_draft",
+			Classification: "room_epic",
+			ReviewAction:   "review_room_agile_draft",
+			SourceRefs:     uniqueStrings([]string{"room:" + roomID, "epic:" + epicID, "workpack:" + workpackPath}),
+			ProposedChange: map[string]any{
+				"room_id":          roomID,
+				"epic_id":          epicID,
+				"room_message_ids": roomMessageIDs,
+				"workpack_root":    workpackRoot,
+				"workpack_path":    workpackPath,
+			},
+		},
+	}
+}
+
+func roomACAPromoteMilestone(absWorkspace, roomID, project string, epic, milestone map[string]any) roomACAPromotionPrepared {
+	milestoneID := stringField(milestone, "id")
+	epicID := stringField(milestone, "epic_id")
+	title := firstNonEmpty(stringField(milestone, "title"), milestoneID)
+	workpackDir := stringField(milestone, "workpack_dir")
+	workpackPath := filepath.Join(workpackDir, "milestone.md")
+	summaryMeta := anyMap(milestone["summary_meta"])
+	roomMessageIDs := []string{milestoneID}
+	if latestSummary := mapField(milestone, "latest_summary"); latestSummary != nil {
+		if id := stringField(latestSummary, "id"); id != "" {
+			roomMessageIDs = append(roomMessageIDs, id)
+		}
+	}
+	if reviews := boardMessageSliceValue(milestone["reviews"]); len(reviews) > 0 {
+		roomMessageIDs = append(roomMessageIDs, reviews[len(reviews)-1].ID)
+	}
+	body := renderRoomACAPromotionMarkdown(
+		title,
+		renderRoomMilestoneMarkdown(milestone)+"\n"+renderRoomMilestoneSummaryMarkdown(milestone),
+		[]string{
+			fmt.Sprintf("- Room: `%s`", roomID),
+			fmt.Sprintf("- Epic ID: `%s`", epicID),
+			fmt.Sprintf("- Milestone ID: `%s`", milestoneID),
+			fmt.Sprintf("- Work-pack: `%s`", workpackPath),
+		},
+		roomACARelatedLinks("room_milestone", epicID, milestoneID, ""),
+	)
+	frontmatter := roomACAFrontmatter(absWorkspace, project, "room_milestone", roomID, epicID, milestoneID, "", "", "", roomMessageIDs, roomAgileWorkpackRootPath(epicID), workpackPath, stringField(milestone, "status"), []string{"room/agile", "milestone"})
+	return roomACAPromotionPrepared{
+		EpicID:     epicID,
+		TargetKind: "milestone",
+		TargetID:   milestoneID,
+		Source:     milestone,
+		Input: contextplane.MarkdownProposalInput{
+			NoteType:       "room_milestone",
+			Project:        project,
+			Folder:         filepath.ToSlash(filepath.Join("room-agile", roomACASlug(project, "workspace"), "room_milestone")),
+			SourceKind:     "milestone",
+			SourceID:       milestoneID,
+			Title:          title,
+			Summary:        fmt.Sprintf("Review ACA milestone draft for %s. %s", title, firstNonEmpty(stringField(summaryMeta, "summary"), stringField(anyMap(milestone["meta"]), "objective"), title)),
+			Body:           body,
+			Frontmatter:    frontmatter,
+			DedupeKey:      fmt.Sprintf("room_agile_draft|room_milestone|%s", milestoneID),
+			Kind:           "room_agile_draft",
+			Classification: "room_milestone",
+			ReviewAction:   "review_room_agile_draft",
+			SourceRefs:     uniqueStrings([]string{"room:" + roomID, "epic:" + epicID, "milestone:" + milestoneID, "workpack:" + workpackPath}),
+			ProposedChange: map[string]any{
+				"room_id":          roomID,
+				"epic_id":          epicID,
+				"milestone_id":     milestoneID,
+				"room_message_ids": roomMessageIDs,
+				"workpack_root":    roomAgileWorkpackRootPath(epicID),
+				"workpack_path":    workpackPath,
+			},
+		},
+	}
+}
+
+func roomACAPromoteRetro(absWorkspace, roomID, project string, epic, update map[string]any) roomACAPromotionPrepared {
+	updateID := stringField(update, "id")
+	epicID := stringField(update, "epic_id")
+	meta := anyMap(update["meta"])
+	title := firstNonEmpty(stringField(update, "summary"), updateID)
+	workpackRoot := roomAgileWorkpackRootPath(epicID)
+	workpackPath := filepath.Join(workpackRoot, "retro.md")
+	roomMessageIDs := []string{updateID}
+	body := renderRoomACAPromotionMarkdown(
+		title,
+		renderRoomRetroMarkdown(map[string]any{"guidance_updates": []map[string]any{update}}),
+		[]string{
+			fmt.Sprintf("- Room: `%s`", roomID),
+			fmt.Sprintf("- Epic ID: `%s`", epicID),
+			fmt.Sprintf("- Guidance update ID: `%s`", updateID),
+			fmt.Sprintf("- Work-pack: `%s`", workpackPath),
+		},
+		roomACARelatedLinks("room_retro", epicID, stringField(meta, "milestone_id"), ""),
+	)
+	frontmatter := roomACAFrontmatter(absWorkspace, project, "room_retro", roomID, epicID, stringField(meta, "milestone_id"), "", "", updateID, roomMessageIDs, workpackRoot, workpackPath, "completed", []string{"room/agile", "retro", stringField(meta, "kind")})
+	return roomACAPromotionPrepared{
+		EpicID:     epicID,
+		TargetKind: "retro",
+		TargetID:   updateID,
+		Source:     update,
+		Input: contextplane.MarkdownProposalInput{
+			NoteType:       "room_retro",
+			Project:        project,
+			Folder:         filepath.ToSlash(filepath.Join("room-agile", roomACASlug(project, "workspace"), "room_retro")),
+			SourceKind:     "guidance_update",
+			SourceID:       updateID,
+			Title:          title,
+			Summary:        fmt.Sprintf("Review ACA retro draft for %s. %s", title, firstNonEmpty(stringField(meta, "impact"), title)),
+			Body:           body,
+			Frontmatter:    frontmatter,
+			DedupeKey:      fmt.Sprintf("room_agile_draft|room_retro|%s", updateID),
+			Kind:           "room_agile_draft",
+			Classification: "room_retro",
+			ReviewAction:   "review_room_agile_draft",
+			SourceRefs:     uniqueStrings([]string{"room:" + roomID, "epic:" + epicID, "guidance_update:" + updateID, "workpack:" + workpackPath}),
+			ProposedChange: map[string]any{
+				"room_id":            roomID,
+				"epic_id":            epicID,
+				"milestone_id":       stringField(meta, "milestone_id"),
+				"guidance_update_id": updateID,
+				"room_message_ids":   roomMessageIDs,
+				"workpack_root":      workpackRoot,
+				"workpack_path":      workpackPath,
+			},
+		},
+	}
+}
+
+func roomACAPromoteValidation(absWorkspace, roomID, project string, epic, milestone, story, validation map[string]any) roomACAPromotionPrepared {
+	validationID := stringField(validation, "id")
+	epicID := stringField(story, "epic_id")
+	milestoneID := stringField(story, "milestone_id")
+	storyID := stringField(story, "id")
+	meta := anyMap(validation["meta"])
+	title := firstNonEmpty(stringField(story, "title"), storyID)
+	workpackDir := stringField(story, "validation_dir")
+	workpackPath := filepath.Join(workpackDir, validationID+".md")
+	roomMessageIDs := []string{validationID}
+	body := renderRoomACAPromotionMarkdown(
+		fmt.Sprintf("%s validation", title),
+		renderRoomStoryValidationMarkdown(validation),
+		[]string{
+			fmt.Sprintf("- Room: `%s`", roomID),
+			fmt.Sprintf("- Epic ID: `%s`", epicID),
+			fmt.Sprintf("- Milestone ID: `%s`", milestoneID),
+			fmt.Sprintf("- Story ID: `%s`", storyID),
+			fmt.Sprintf("- Validation ID: `%s`", validationID),
+			fmt.Sprintf("- Work-pack: `%s`", workpackPath),
+		},
+		roomACARelatedLinks("room_validation", epicID, milestoneID, storyID),
+	)
+	frontmatter := roomACAFrontmatter(absWorkspace, project, "room_validation", roomID, epicID, milestoneID, storyID, validationID, "", roomMessageIDs, roomAgileWorkpackRootPath(epicID), workpackPath, stringField(meta, "status"), []string{"room/agile", "validation", stringField(meta, "status")})
+	return roomACAPromotionPrepared{
+		EpicID:     epicID,
+		TargetKind: "validation",
+		TargetID:   validationID,
+		Source:     validation,
+		Input: contextplane.MarkdownProposalInput{
+			NoteType:       "room_validation",
+			Project:        project,
+			Folder:         filepath.ToSlash(filepath.Join("room-agile", roomACASlug(project, "workspace"), "room_validation")),
+			SourceKind:     "story_validation",
+			SourceID:       validationID,
+			Title:          fmt.Sprintf("%s validation", title),
+			Summary:        fmt.Sprintf("Review ACA validation draft for story %s after a %s validation outcome.", title, stringField(meta, "status")),
+			Body:           body,
+			Frontmatter:    frontmatter,
+			DedupeKey:      fmt.Sprintf("room_agile_draft|room_validation|%s", validationID),
+			Kind:           "room_agile_draft",
+			Classification: "room_validation",
+			ReviewAction:   "review_room_agile_draft",
+			SourceRefs:     uniqueStrings([]string{"room:" + roomID, "epic:" + epicID, "milestone:" + milestoneID, "story:" + storyID, "validation:" + validationID, "workpack:" + workpackPath}),
+			ProposedChange: map[string]any{
+				"room_id":          roomID,
+				"epic_id":          epicID,
+				"milestone_id":     milestoneID,
+				"story_id":         storyID,
+				"validation_id":    validationID,
+				"room_message_ids": roomMessageIDs,
+				"workpack_root":    roomAgileWorkpackRootPath(epicID),
+				"workpack_path":    workpackPath,
+			},
+		},
+	}
+}
+
+func roomACAFrontmatter(absWorkspace, project, noteType, roomID, epicID, milestoneID, storyID, validationID, guidanceUpdateID string, roomMessageIDs []string, workpackRoot, workpackPath, status string, tags []string) map[string]any {
+	return map[string]any{
+		"note_type":              noteType,
+		"schema_version":         1,
+		"generated_at":           time.Now().UTC().Format(time.RFC3339),
+		"workspace":              absWorkspace,
+		"workspace_id":           absWorkspace,
+		"project":                project,
+		"room_id":                roomID,
+		"epic_id":                strings.TrimSpace(epicID),
+		"milestone_id":           strings.TrimSpace(milestoneID),
+		"story_id":               strings.TrimSpace(storyID),
+		"validation_id":          strings.TrimSpace(validationID),
+		"guidance_update_id":     strings.TrimSpace(guidanceUpdateID),
+		"room_message_ids":       uniqueStrings(roomMessageIDs),
+		"workpack_root":          strings.TrimSpace(workpackRoot),
+		"workpack_path":          strings.TrimSpace(workpackPath),
+		"status":                 firstNonEmpty(strings.TrimSpace(status), "drafted"),
+		"promotion_source":       "room_agile",
+		"promotion_review_state": "drafted",
+		"tags":                   uniqueStrings(tags),
+	}
+}
+
+func renderRoomACAPromotionMarkdown(title, core string, provenance, links []string) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "# %s\n\n", strings.TrimSpace(title))
+	if strings.TrimSpace(core) != "" {
+		b.WriteString(strings.TrimSpace(core))
+		b.WriteString("\n")
+	}
+	if len(provenance) > 0 {
+		b.WriteString("\n## Provenance\n")
+		for _, item := range provenance {
+			item = strings.TrimSpace(item)
+			if item == "" {
+				continue
+			}
+			if strings.HasPrefix(item, "- ") {
+				b.WriteString(item)
+			} else {
+				b.WriteString("- " + item)
+			}
+			b.WriteString("\n")
+		}
+	}
+	if len(links) > 0 {
+		b.WriteString("\n## Related\n")
+		for _, item := range links {
+			item = strings.TrimSpace(item)
+			if item == "" {
+				continue
+			}
+			b.WriteString("- " + item + "\n")
+		}
+	}
+	return strings.TrimSpace(b.String()) + "\n"
+}
+
+func roomACARelatedLinks(noteType, epicID, milestoneID, storyID string) []string {
+	out := make([]string, 0, 4)
+	if epicID != "" && noteType != "room_epic" {
+		out = append(out, fmt.Sprintf("Epic: [[room-epics/%s]]", epicID))
+	}
+	if milestoneID != "" && noteType != "room_milestone" {
+		out = append(out, fmt.Sprintf("Milestone: [[room-milestones/%s]]", milestoneID))
+	}
+	if storyID != "" && noteType != "room_story" {
+		out = append(out, fmt.Sprintf("Story: [[room-stories/%s]]", storyID))
+	}
+	return out
+}
+
+func roomACASlug(value, fallback string) string {
+	value = strings.TrimSpace(strings.ToLower(value))
+	if value == "" {
+		return fallback
+	}
+	var b strings.Builder
+	lastDash := false
+	for _, r := range value {
+		switch {
+		case r >= 'a' && r <= 'z', r >= '0' && r <= '9':
+			b.WriteRune(r)
+			lastDash = false
+		default:
+			if lastDash || b.Len() == 0 {
+				continue
+			}
+			b.WriteByte('-')
+			lastDash = true
+		}
+	}
+	slug := strings.Trim(b.String(), "-")
+	if slug == "" {
+		return fallback
+	}
+	return slug
+}
+
+func roomGuidanceUpdateViewByID(updates []map[string]any, updateID string) map[string]any {
+	updateID = strings.TrimSpace(updateID)
+	for _, update := range updates {
+		if stringField(update, "id") == updateID {
+			return update
+		}
+	}
+	return nil
+}
+
+func roomStoryValidationViewByID(stories []map[string]any, validationID string) (map[string]any, map[string]any) {
+	validationID = strings.TrimSpace(validationID)
+	for _, story := range stories {
+		for _, validation := range mapSlice(story["validations"]) {
+			if stringField(validation, "id") == validationID {
+				return story, validation
+			}
+		}
+	}
+	return nil, nil
 }
 
 func runRoomWorkpackShow(cmd *cobra.Command, workspace, roomID, epicID string) error {
