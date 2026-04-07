@@ -250,7 +250,40 @@ Rules:
 - `waived` requires explicit waiver notes and owner/coordinator authority
 - related stories must resolve inside the same milestone for the current slice
 
-### 10. Let the work-pack mirror stay in sync
+### 10. Capture retro guidance separately from milestone synthesis
+
+Use retro guidance for what should change next time, not for restating milestone proof:
+
+```bash
+agentctl room retro add <room-id> <epic-id> \
+  --milestone <milestone-id> \
+  --kind coordination \
+  --summary "Ack no-blocker follow-ups." \
+  --impact "Prevents stale reply-expected inbox items." \
+  --change "Ack no-blocker follow-ups instead of waiting for another reply." \
+  --scope room \
+  --scope review-loop \
+  --follow-up "Document this in the room-agile skill"
+
+agentctl room retro show <room-id> <epic-id>
+```
+
+Rules:
+
+- retro guidance is append-only
+- the coordinator owns retro writes in this slice
+- `kind` must be one of:
+  - `process`
+  - `tooling`
+  - `coordination`
+  - `quality`
+  - `delivery`
+- `summary`, `impact`, and `--change` are required
+- if `--milestone` is set, it must belong to the same epic
+- use `milestone summary` for what happened
+- use `retro add` for what should change next time
+
+### 11. Let the work-pack mirror stay in sync
 
 After epic, milestone, story, review, summary, and validation writes, agentctl materializes:
 
@@ -270,7 +303,7 @@ agentctl room workpack show <room-id> <epic-id>
 agentctl room workpack sync <room-id> <epic-id> --sender human-a
 ```
 
-### 11. Keep the epic delivery log current
+### 12. Keep the epic delivery log current
 
 ```bash
 agentctl room log append <room-id> <epic-id> "Foundation landed" \

@@ -1406,10 +1406,10 @@ func normalizeBoardMessageKind(raw string) (agent.BoardMessageKind, error) {
 		agent.BoardMessageKindStory, agent.BoardMessageKindStoryProposal, agent.BoardMessageKindStoryState, agent.BoardMessageKindStoryValidation,
 		agent.BoardMessageKindAcceptanceCriteria,
 		agent.BoardMessageKindMilestoneReview, agent.BoardMessageKindMilestoneSummary,
-		agent.BoardMessageKindDeliveryLog:
+		agent.BoardMessageKindDeliveryLog, agent.BoardMessageKindGuidanceUpdate:
 		return kind, nil
 	default:
-		return "", errors.New("invalid kind: must be one of instruction, info, alert, review_request, task_update, lead_change, coordinator_pulse, plan_session, plan_proposal, plan_question, plan_decision, plan_review, plan_close, interview_session, interview_question, interview_answer, interview_verify, epic, epic_question, epic_answer, epic_finalize, milestone_proposal, milestone, story, story_proposal, story_validation, acceptance_criteria, milestone_review, milestone_summary, delivery_log")
+		return "", errors.New("invalid kind: must be one of instruction, info, alert, review_request, task_update, lead_change, coordinator_pulse, plan_session, plan_proposal, plan_question, plan_decision, plan_review, plan_close, interview_session, interview_question, interview_answer, interview_verify, epic, epic_question, epic_answer, epic_finalize, milestone_proposal, milestone, story, story_proposal, story_validation, acceptance_criteria, milestone_review, milestone_summary, delivery_log, guidance_update")
 	}
 }
 

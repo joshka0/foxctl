@@ -1574,7 +1574,7 @@ func registerRoomTools(s *server.MCPServer) {
 
 	s.AddTool(
 		mcp.NewTool("room_agile",
-			mcp.WithDescription("Command-backed agile room protocol. Actions: epic_start, epic_ask, epic_answer, epic_finalize, epic_shape, epic_show, epic_resume, epic_next, milestone_start, milestone_contract, milestone_criteria, milestone_review, milestone_summary, milestone_show, story_propose, story_accept, story_add, story_state, story_validate, story_show, log_append, log_show, workpack_show, workpack_sync."),
+			mcp.WithDescription("Command-backed agile room protocol. Actions: epic_start, epic_ask, epic_answer, epic_finalize, epic_shape, epic_show, epic_resume, epic_next, milestone_start, milestone_contract, milestone_criteria, milestone_review, milestone_summary, milestone_show, story_propose, story_accept, story_add, story_state, story_validate, story_show, log_append, log_show, retro_add, retro_show, workpack_show, workpack_sync."),
 			mcp.WithString("action", mcp.Required(), mcp.Description("Agile room action to run")),
 			mcp.WithString("workspace", mcp.Description("Workspace root override (default: .)")),
 			mcp.WithString("room_id", mcp.Description("Room id")),
@@ -1591,6 +1591,10 @@ func registerRoomTools(s *server.MCPServer) {
 			mcp.WithString("artifact_digest", mcp.Description("Optional CAS digest for the validation artifact")),
 			mcp.WithString("command", mcp.Description("Optional command or check run for story validation")),
 			mcp.WithString("validation_notes", mcp.Description("Optional extra notes for story validation")),
+			mcp.WithString("kind", mcp.Description("Retro kind: process, tooling, coordination, quality, delivery")),
+			mcp.WithString("summary", mcp.Description("Structured summary or retro summary text")),
+			mcp.WithString("impact", mcp.Description("Retro impact statement")),
+			mcp.WithString("change", mcp.Description("Retro recommended change")),
 			mcp.WithArray("related_story_ids", mcp.Description("Related story ids for cross-story validation"), mcp.WithStringItems()),
 			mcp.WithString("question_id", mcp.Description("Epic intake question id")),
 			mcp.WithString("title", mcp.Description("Epic, milestone, or story title")),
@@ -1612,6 +1616,7 @@ func registerRoomTools(s *server.MCPServer) {
 			mcp.WithArray("in_flight", mcp.Description("Delivery log in-flight items"), mcp.WithStringItems()),
 			mcp.WithArray("blocker", mcp.Description("Delivery log blocker items"), mcp.WithStringItems()),
 			mcp.WithArray("next", mcp.Description("Delivery log next-focus items"), mcp.WithStringItems()),
+			mcp.WithArray("follow_up", mcp.Description("Retro follow-up items"), mcp.WithStringItems()),
 			mcp.WithNumber("limit", mcp.Description("Maximum room messages to inspect for show actions")),
 			mcp.WithNumber("count", mcp.Description("Maximum proposal count for epic shaping")),
 		),
@@ -4364,6 +4369,34 @@ func handleRoomAgileTool(ctx context.Context, req mcp.CallToolRequest) (*mcp.Cal
 		}
 		argv = []string{"log", "show", roomID, epicID}
 		argv = appendStringFlagArgs(argv, "--workspace", workspace)
+		argv = appendIntFlagArgs(argv, "--limit", getIntArg(args, "limit", 0))
+	case "retro_add":
+		epicID := getStringArg(args, "epic_id", "")
+		kind := getStringArg(args, "kind", "")
+		summaryText := getStringArg(args, "summary", "")
+		impact := getStringArg(args, "impact", "")
+		change := getStringArg(args, "change", "")
+		if epicID == "" || kind == "" || summaryText == "" || impact == "" || change == "" {
+			return mcp.NewToolResultError("epic_id, kind, summary, impact, and change are required for room_agile retro_add"), nil
+		}
+		argv = []string{"retro", "add", roomID, epicID}
+		argv = appendStringFlagArgs(argv, "--workspace", workspace)
+		argv = appendStringFlagArgs(argv, "--sender", getStringArg(args, "sender", ""))
+		argv = appendStringFlagArgs(argv, "--milestone", getStringArg(args, "milestone_id", ""))
+		argv = appendStringFlagArgs(argv, "--kind", kind)
+		argv = appendStringFlagArgs(argv, "--summary", summaryText)
+		argv = appendStringFlagArgs(argv, "--impact", impact)
+		argv = appendStringFlagArgs(argv, "--change", change)
+		argv = appendStringSliceFlagArgs(argv, "--scope", getStringSliceArg(args, "scope"))
+		argv = appendStringSliceFlagArgs(argv, "--follow-up", getStringSliceArg(args, "follow_up"))
+	case "retro_show":
+		epicID := getStringArg(args, "epic_id", "")
+		if epicID == "" {
+			return mcp.NewToolResultError("epic_id is required for room_agile retro_show"), nil
+		}
+		argv = []string{"retro", "show", roomID, epicID}
+		argv = appendStringFlagArgs(argv, "--workspace", workspace)
+		argv = appendStringFlagArgs(argv, "--milestone", getStringArg(args, "milestone_id", ""))
 		argv = appendIntFlagArgs(argv, "--limit", getIntArg(args, "limit", 0))
 	case "workpack_show":
 		epicID := getStringArg(args, "epic_id", "")

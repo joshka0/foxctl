@@ -77,6 +77,8 @@ const (
 	BoardMessageKindStoryValidation BoardMessageKind = "story_validation"
 	// BoardMessageKindDeliveryLog represents a durable delivery-log entry for an epic.
 	BoardMessageKindDeliveryLog BoardMessageKind = "delivery_log"
+	// BoardMessageKindGuidanceUpdate represents a durable retro/guidance artifact for an epic.
+	BoardMessageKindGuidanceUpdate BoardMessageKind = "guidance_update"
 )
 
 // BoardMessageStatus defines the read/ack status of a message.

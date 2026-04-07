@@ -50,6 +50,7 @@ func newRoomCommand() *cobra.Command {
 		newRoomMilestoneCommand(),
 		newRoomStoryCommand(),
 		newRoomLogCommand(),
+		newRoomRetroCommand(),
 		newRoomWorkpackCommand(),
 		newRoomPlanCommand(),
 		newRoomInterviewCommand(),
@@ -1090,6 +1091,70 @@ func newRoomLogCommand() *cobra.Command {
 		newRoomLogAppendCommand(),
 		newRoomLogShowCommand(),
 	)
+	return cmd
+}
+
+func newRoomRetroCommand() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "retro",
+		Short: "Record and inspect durable agile guidance updates",
+	}
+	cmd.AddCommand(
+		newRoomRetroAddCommand(),
+		newRoomRetroShowCommand(),
+	)
+	return cmd
+}
+
+func newRoomRetroAddCommand() *cobra.Command {
+	var (
+		workspace   string
+		sender      string
+		milestoneID string
+		kind        string
+		summaryText string
+		impact      string
+		change      string
+		scope       []string
+		followUp    []string
+	)
+	cmd := &cobra.Command{
+		Use:   "add <room-id> <epic-id>",
+		Short: "Add one durable retro/guidance update for an epic",
+		Args:  cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runRoomRetroAdd(cmd, workspace, sender, args[0], args[1], milestoneID, kind, summaryText, impact, change, scope, followUp)
+		},
+	}
+	cmd.Flags().StringVar(&workspace, "workspace", ".", "Workspace root override")
+	cmd.Flags().StringVar(&sender, "sender", "", "Coordinator actor or participant id (defaults to current tmux/zellij pane)")
+	cmd.Flags().StringVar(&milestoneID, "milestone", "", "Optional milestone id linked to this retro update")
+	cmd.Flags().StringVar(&kind, "kind", "", "Guidance kind: process, tooling, coordination, quality, delivery")
+	cmd.Flags().StringVar(&summaryText, "summary", "", "Guidance summary")
+	cmd.Flags().StringVar(&impact, "impact", "", "Why the guidance matters")
+	cmd.Flags().StringVar(&change, "change", "", "Recommended change to carry forward")
+	cmd.Flags().StringSliceVar(&scope, "scope", nil, "Scope item (repeatable)")
+	cmd.Flags().StringSliceVar(&followUp, "follow-up", nil, "Suggested follow-up action (repeatable)")
+	return cmd
+}
+
+func newRoomRetroShowCommand() *cobra.Command {
+	var (
+		workspace   string
+		milestoneID string
+		limit       int
+	)
+	cmd := &cobra.Command{
+		Use:   "show <room-id> <epic-id>",
+		Short: "Show retro/guidance updates for an epic",
+		Args:  cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runRoomRetroShow(cmd, workspace, args[0], args[1], milestoneID, limit)
+		},
+	}
+	cmd.Flags().StringVar(&workspace, "workspace", ".", "Workspace root override")
+	cmd.Flags().StringVar(&milestoneID, "milestone", "", "Optional milestone id filter")
+	cmd.Flags().IntVar(&limit, "limit", 250, "Maximum room messages to inspect")
 	return cmd
 }
 
@@ -2658,6 +2723,17 @@ type roomDeliveryLogMeta struct {
 	Notes     string   `json:"notes"`
 }
 
+type roomGuidanceUpdateMeta struct {
+	EpicID            string   `json:"epic_id"`
+	MilestoneID       string   `json:"milestone_id"`
+	Kind              string   `json:"kind"`
+	Summary           string   `json:"summary"`
+	Impact            string   `json:"impact"`
+	RecommendedChange string   `json:"recommended_change"`
+	Scope             []string `json:"scope"`
+	FollowUp          []string `json:"follow_up"`
+}
+
 type roomMilestoneProposalMeta struct {
 	EpicID    string   `json:"epic_id"`
 	Goal      string   `json:"goal"`
@@ -3928,6 +4004,151 @@ func runRoomLogShow(cmd *cobra.Command, workspace, roomID, epicID string, limit 
 	}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
 }
 
+func runRoomRetroAdd(cmd *cobra.Command, workspace, sender, roomID, epicID, milestoneID, kind, summaryText, impact, recommendedChange string, scope, followUp []string) error {
+	absWorkspace, identity, store, roomID, summary, err := prepareRoomAgileCommand(cmd, "agentctl.room.retro", workspace, sender, roomID)
+	if err != nil {
+		return err
+	}
+	defer store.Close()
+	if !roomMemberHasRole(summary.Members, identity.Sender, "coordinator") {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.retro.add", protocol.ErrorCodeEARG, "agile scope changes require coordinator role", map[string]any{
+			"hint": "Run the command as the room coordinator, or join the room with role=coordinator first.",
+		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+
+	epicMsg, err := loadRoomAgileRoot(cmd.Context(), store, absWorkspace, roomID, epicID, agent.BoardMessageKindEpic)
+	if err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.retro.add", protocol.ErrorCodeENotFound, err.Error(), map[string]any{
+			"hint": "Create an epic first with `agentctl room epic start` and reuse its epic_id.",
+		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+
+	kind, err = normalizeRoomGuidanceKind(kind)
+	if err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.retro.add", protocol.ErrorCodeEARG, err.Error(), map[string]any{
+			"hint": "Use one of: process, tooling, coordination, quality, delivery.",
+		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	meta := normalizeRoomGuidanceUpdateMeta(roomGuidanceUpdateMeta{
+		EpicID:            epicMsg.ID,
+		MilestoneID:       strings.TrimSpace(milestoneID),
+		Kind:              kind,
+		Summary:           summaryText,
+		Impact:            impact,
+		RecommendedChange: recommendedChange,
+		Scope:             scope,
+		FollowUp:          followUp,
+	})
+	if meta.Summary == "" || meta.Impact == "" || meta.RecommendedChange == "" {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.retro.add", protocol.ErrorCodeEARG, "summary, impact, and change are required", map[string]any{
+			"hint": "Pass --summary, --impact, and --change to capture a usable retro update.",
+		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	if meta.MilestoneID != "" {
+		milestoneMsg, err := loadRoomAgileRoot(cmd.Context(), store, absWorkspace, roomID, meta.MilestoneID, agent.BoardMessageKindMilestone)
+		if err != nil {
+			return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.retro.add", protocol.ErrorCodeENotFound, err.Error(), map[string]any{
+				"hint": "Use a milestone id returned by `agentctl room milestone start` or listed in `agentctl room milestone show`.",
+			}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+		}
+		milestoneMeta := parseRoomMilestoneBody(milestoneMsg.Body)
+		if strings.TrimSpace(milestoneMeta.EpicID) != epicMsg.ID {
+			return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.retro.add", protocol.ErrorCodeEARG, "milestone does not belong to this epic", map[string]any{
+				"hint": "Use a milestone id from the same epic, or omit --milestone for epic-wide guidance.",
+			}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+		}
+	}
+
+	msg := &agent.BoardMessage{
+		WorkspaceID:      absWorkspace,
+		RelatedMessageID: epicMsg.ID,
+		Stream:           agent.RoomStreamName(roomID),
+		Sender:           identity.Sender,
+		Recipient:        agent.BroadcastRecipient,
+		Kind:             agent.BoardMessageKindGuidanceUpdate,
+		Priority:         agent.DefaultPriority,
+		Subject:          fmt.Sprintf("Retro (%s): %s", meta.Kind, meta.Summary),
+		Body:             buildRoomGuidanceUpdateBody(meta),
+	}
+	if err := store.SendMessage(cmd.Context(), msg); err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.retro.add", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	if err := syncRoomAgileWorkpack(cmd.Context(), store, absWorkspace, roomID, epicMsg.ID); err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.retro.add", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	return protocol.WriteOK(cmd.OutOrStdout(), "agentctl.room.retro.add", map[string]any{
+		"room_id":      roomID,
+		"epic_id":      epicMsg.ID,
+		"milestone_id": meta.MilestoneID,
+		"update_id":    msg.ID,
+		"message":      msg,
+	}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+}
+
+func runRoomRetroShow(cmd *cobra.Command, workspace, roomID, epicID, milestoneID string, limit int) error {
+	absWorkspace, err := resolveRoomWorkspace(workspace)
+	if err != nil {
+		return err
+	}
+	store, err := openRoomBoardStore(cmd.Context())
+	if err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.retro.show", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	defer store.Close()
+
+	summary, messages, err := loadRoomState(cmd.Context(), store, absWorkspace, roomID, "", limit)
+	if err != nil {
+		code := protocol.ErrorCodeERuntime
+		if errors.Is(err, blackboard.ErrRoomNotFound) {
+			code = protocol.ErrorCodeENotFound
+		}
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.retro.show", code, err.Error(), map[string]any{
+			"hint": "Create the room first or check the room id.",
+		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+
+	epic := roomEpicViewByID(buildRoomEpicViews(messages), epicID)
+	if epic == nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.retro.show", protocol.ErrorCodeENotFound, fmt.Sprintf("epic %q not found", epicID), map[string]any{
+			"hint": "Run `agentctl room epic show <room-id>` to list available epics.",
+		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	updates := mapSlice(epic["guidance_updates"])
+	filtered := make([]map[string]any, 0, len(updates))
+	for _, update := range updates {
+		if milestoneID != "" && stringField(anyMap(update["meta"]), "milestone_id") != strings.TrimSpace(milestoneID) {
+			continue
+		}
+		filtered = append(filtered, update)
+	}
+	groups := make([]map[string]any, 0)
+	for _, kind := range []string{"coordination", "delivery", "process", "quality", "tooling"} {
+		groupUpdates := make([]map[string]any, 0)
+		for _, update := range filtered {
+			if stringField(anyMap(update["meta"]), "kind") == kind {
+				groupUpdates = append(groupUpdates, update)
+			}
+		}
+		if len(groupUpdates) == 0 {
+			continue
+		}
+		groups = append(groups, map[string]any{
+			"kind":    kind,
+			"count":   len(groupUpdates),
+			"updates": groupUpdates,
+		})
+	}
+	return protocol.WriteOK(cmd.OutOrStdout(), "agentctl.room.retro.show", map[string]any{
+		"room":         summary,
+		"epic":         epic,
+		"epic_id":      strings.TrimSpace(epicID),
+		"milestone_id": strings.TrimSpace(milestoneID),
+		"count":        len(filtered),
+		"updates":      filtered,
+		"groups":       groups,
+	}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+}
+
 func runRoomWorkpackShow(cmd *cobra.Command, workspace, roomID, epicID string) error {
 	absWorkspace, err := resolveRoomWorkspace(workspace)
 	if err != nil {
@@ -4929,6 +5150,94 @@ func parseRoomDeliveryLogBody(body string) roomDeliveryLogMeta {
 	return meta
 }
 
+func normalizeRoomGuidanceKind(raw string) (string, error) {
+	kind := strings.TrimSpace(strings.ToLower(raw))
+	switch kind {
+	case "process", "tooling", "coordination", "quality", "delivery":
+		return kind, nil
+	default:
+		return "", fmt.Errorf("unsupported retro kind %q", raw)
+	}
+}
+
+func normalizeRoomGuidanceUpdateMeta(meta roomGuidanceUpdateMeta) roomGuidanceUpdateMeta {
+	meta.EpicID = strings.TrimSpace(meta.EpicID)
+	meta.MilestoneID = strings.TrimSpace(meta.MilestoneID)
+	meta.Kind = strings.TrimSpace(strings.ToLower(meta.Kind))
+	meta.Summary = strings.TrimSpace(meta.Summary)
+	meta.Impact = strings.TrimSpace(meta.Impact)
+	meta.RecommendedChange = strings.TrimSpace(meta.RecommendedChange)
+	meta.Scope = normalizeRoomList(meta.Scope, false)
+	meta.FollowUp = normalizeRoomList(meta.FollowUp, false)
+	return meta
+}
+
+func buildRoomGuidanceUpdateBody(meta roomGuidanceUpdateMeta) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "EpicID: %s\n", strings.TrimSpace(meta.EpicID))
+	if strings.TrimSpace(meta.MilestoneID) != "" {
+		fmt.Fprintf(&b, "MilestoneID: %s\n", strings.TrimSpace(meta.MilestoneID))
+	}
+	fmt.Fprintf(&b, "Kind: %s\n", strings.TrimSpace(meta.Kind))
+	fmt.Fprintf(&b, "Summary: %s\n", strings.TrimSpace(meta.Summary))
+	fmt.Fprintf(&b, "Impact: %s\n", strings.TrimSpace(meta.Impact))
+	fmt.Fprintf(&b, "RecommendedChange: %s\n", strings.TrimSpace(meta.RecommendedChange))
+	appendRoomSection(&b, "Scope", meta.Scope)
+	appendRoomSection(&b, "FollowUp", meta.FollowUp)
+	return strings.TrimSpace(b.String())
+}
+
+func parseRoomGuidanceUpdateBody(body string) roomGuidanceUpdateMeta {
+	meta := roomGuidanceUpdateMeta{}
+	lines := strings.Split(body, "\n")
+	section := ""
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			continue
+		}
+		switch trimmed {
+		case "Scope:":
+			section = "scope"
+			continue
+		case "FollowUp:":
+			section = "follow_up"
+			continue
+		}
+		if section != "" && strings.HasPrefix(trimmed, "- ") {
+			value := strings.TrimSpace(strings.TrimPrefix(trimmed, "- "))
+			switch section {
+			case "scope":
+				meta.Scope = append(meta.Scope, value)
+			case "follow_up":
+				meta.FollowUp = append(meta.FollowUp, value)
+			}
+			continue
+		}
+		section = ""
+		key, value, ok := strings.Cut(trimmed, ":")
+		if !ok {
+			continue
+		}
+		value = strings.TrimSpace(value)
+		switch strings.TrimSpace(key) {
+		case "EpicID":
+			meta.EpicID = value
+		case "MilestoneID":
+			meta.MilestoneID = value
+		case "Kind":
+			meta.Kind = value
+		case "Summary":
+			meta.Summary = value
+		case "Impact":
+			meta.Impact = value
+		case "RecommendedChange":
+			meta.RecommendedChange = value
+		}
+	}
+	return normalizeRoomGuidanceUpdateMeta(meta)
+}
+
 func appendRoomSection(b *strings.Builder, label string, items []string) {
 	clean := make([]string, 0, len(items))
 	for _, item := range items {
@@ -5100,6 +5409,11 @@ func buildRoomEpicViews(messages []agent.BoardMessage) []map[string]any {
 		epicID, _ := entry["epic_id"].(string)
 		logsByEpic[epicID] = append(logsByEpic[epicID], entry)
 	}
+	guidanceByEpic := make(map[string][]map[string]any)
+	for _, update := range buildRoomGuidanceUpdateViews(messages) {
+		epicID, _ := update["epic_id"].(string)
+		guidanceByEpic[epicID] = append(guidanceByEpic[epicID], update)
+	}
 	out := make([]map[string]any, 0)
 	for _, msg := range messages {
 		if msg.Kind != agent.BoardMessageKindEpic {
@@ -5130,6 +5444,17 @@ func buildRoomEpicViews(messages []agent.BoardMessage) []map[string]any {
 		}
 		milestones := milestonesByEpic[msg.ID]
 		logs := logsByEpic[msg.ID]
+		guidanceUpdates := append([]map[string]any(nil), guidanceByEpic[msg.ID]...)
+		sort.Slice(guidanceUpdates, func(i, j int) bool {
+			left := anyMap(guidanceUpdates[i]["root"])
+			right := anyMap(guidanceUpdates[j]["root"])
+			leftAt := parseRFC3339Time(stringField(left, "created_at"))
+			rightAt := parseRFC3339Time(stringField(right, "created_at"))
+			if leftAt.Equal(rightAt) {
+				return stringField(guidanceUpdates[i], "id") > stringField(guidanceUpdates[j], "id")
+			}
+			return leftAt.After(rightAt)
+		})
 		storyCount := 0
 		for _, milestone := range milestones {
 			if count, ok := milestone["story_count"].(int); ok {
@@ -5137,27 +5462,30 @@ func buildRoomEpicViews(messages []agent.BoardMessage) []map[string]any {
 			}
 		}
 		out = append(out, map[string]any{
-			"id":              msg.ID,
-			"title":           strings.TrimPrefix(strings.TrimSpace(msg.Subject), "Epic: "),
-			"status":          status,
-			"workpack_root":   roomAgileWorkpackRootPath(msg.ID),
-			"root":            msg,
-			"meta":            meta,
-			"questions":       questions,
-			"question_kinds":  questionKinds,
-			"question_count":  len(questions),
-			"answers":         answers,
-			"answer_count":    len(answers),
-			"open_questions":  openQuestions,
-			"finalized":       finalizeByEpic[msg.ID].ID != "",
-			"final_brief":     finalizeByEpic[msg.ID],
-			"proposals":       proposalsByEpic[msg.ID],
-			"proposal_count":  len(proposalsByEpic[msg.ID]),
-			"milestones":      milestones,
-			"milestone_count": len(milestones),
-			"story_count":     storyCount,
-			"logs":            logs,
-			"log_count":       len(logs),
+			"id":                      msg.ID,
+			"title":                   strings.TrimPrefix(strings.TrimSpace(msg.Subject), "Epic: "),
+			"status":                  status,
+			"workpack_root":           roomAgileWorkpackRootPath(msg.ID),
+			"root":                    msg,
+			"meta":                    meta,
+			"questions":               questions,
+			"question_kinds":          questionKinds,
+			"question_count":          len(questions),
+			"answers":                 answers,
+			"answer_count":            len(answers),
+			"open_questions":          openQuestions,
+			"finalized":               finalizeByEpic[msg.ID].ID != "",
+			"final_brief":             finalizeByEpic[msg.ID],
+			"proposals":               proposalsByEpic[msg.ID],
+			"proposal_count":          len(proposalsByEpic[msg.ID]),
+			"milestones":              milestones,
+			"milestone_count":         len(milestones),
+			"story_count":             storyCount,
+			"logs":                    logs,
+			"log_count":               len(logs),
+			"guidance_updates":        guidanceUpdates,
+			"guidance_update_count":   len(guidanceUpdates),
+			"latest_guidance_updates": truncateRoomMapSlice(guidanceUpdates, 3),
 		})
 	}
 	sort.Slice(out, func(i, j int) bool {
@@ -5225,6 +5553,7 @@ func buildRoomEpicContinuity(room agent.RoomSummary, messages []agent.BoardMessa
 		"stories_missing_validation": missingValidation,
 		"latest_log_label":           stringField(latestLog, "label"),
 		"latest_log_notes":           stringField(anyMap(latestLog["meta"]), "notes"),
+		"guidance_update_count":      intField(epic, "guidance_update_count"),
 		"workpack_root":              stringField(epic, "workpack_root"),
 		"summary":                    summary,
 	}
@@ -5236,6 +5565,9 @@ func buildRoomEpicContinuity(room agent.RoomSummary, messages []agent.BoardMessa
 	}
 	if len(openInterviewItems) > 0 {
 		out["interview_items"] = openInterviewItems
+	}
+	if guidance := mapSlice(epic["latest_guidance_updates"]); len(guidance) > 0 {
+		out["recent_guidance_updates"] = guidance
 	}
 	return out
 }
@@ -5399,6 +5731,9 @@ func summarizeRoomEpicContinuity(epic, currentMilestone map[string]any, missingV
 		case label != "":
 			parts = append(parts, fmt.Sprintf("Latest log is %q.", label))
 		}
+	}
+	if guidanceCount := intField(epic, "guidance_update_count"); guidanceCount > 0 {
+		parts = append(parts, fmt.Sprintf("%d guidance update%s captured.", guidanceCount, pluralS(guidanceCount)))
 	}
 	return strings.Join(parts, " ")
 }
@@ -6028,6 +6363,36 @@ func summarizeRoomStoryStates(states []map[string]any) roomStoryStateSummary {
 	return summary
 }
 
+func buildRoomGuidanceUpdateViews(messages []agent.BoardMessage) []map[string]any {
+	out := make([]map[string]any, 0)
+	for _, msg := range messages {
+		if msg.Kind != agent.BoardMessageKindGuidanceUpdate {
+			continue
+		}
+		meta := parseRoomGuidanceUpdateBody(msg.Body)
+		out = append(out, map[string]any{
+			"id":           msg.ID,
+			"epic_id":      meta.EpicID,
+			"milestone_id": meta.MilestoneID,
+			"kind":         meta.Kind,
+			"summary":      meta.Summary,
+			"root":         msg,
+			"meta":         meta,
+			"created_at":   msg.CreatedAt.Format(time.RFC3339),
+			"created_by":   strings.TrimSpace(msg.Sender),
+		})
+	}
+	sort.Slice(out, func(i, j int) bool {
+		left := out[i]["root"].(agent.BoardMessage)
+		right := out[j]["root"].(agent.BoardMessage)
+		if left.CreatedAt.Equal(right.CreatedAt) {
+			return left.ID > right.ID
+		}
+		return left.CreatedAt.After(right.CreatedAt)
+	})
+	return out
+}
+
 func buildRoomDeliveryLogViews(messages []agent.BoardMessage) []map[string]any {
 	out := make([]map[string]any, 0)
 	for _, msg := range messages {
@@ -6107,6 +6472,7 @@ func buildRoomAgileWorkpackInfo(epic map[string]any) map[string]any {
 		"epic_markdown":         filepath.Join(root, "epic.md"),
 		"meta_json":             filepath.Join(root, "meta.json"),
 		"delivery_log_markdown": filepath.Join(root, "delivery-log.md"),
+		"retro_markdown":        filepath.Join(root, "retro.md"),
 	}
 	milestones := make([]map[string]any, 0)
 	for _, milestone := range mapSlice(epic["milestones"]) {
@@ -6178,6 +6544,9 @@ func syncRoomAgileWorkpack(ctx context.Context, store blackboard.BoardStore, wor
 		return err
 	}
 	if err := writeRoomAgileFile(filepath.Join(epicDir, "delivery-log.md"), renderRoomDeliveryLogMarkdown(epic)); err != nil {
+		return err
+	}
+	if err := writeRoomAgileFile(filepath.Join(epicDir, "retro.md"), renderRoomRetroMarkdown(epic)); err != nil {
 		return err
 	}
 	for _, milestone := range mapSlice(epic["milestones"]) {
@@ -6289,6 +6658,7 @@ func renderRoomEpicMarkdown(epic map[string]any) string {
 	fmt.Fprintf(&b, "- Status: `%s`\n", stringField(epic, "status"))
 	fmt.Fprintf(&b, "- Milestones: `%d`\n", intField(epic, "milestone_count"))
 	fmt.Fprintf(&b, "- Stories: `%d`\n", intField(epic, "story_count"))
+	fmt.Fprintf(&b, "- Guidance updates: `%d`\n", intField(epic, "guidance_update_count"))
 	if meta := anyMap(epic["meta"]); meta != nil {
 		if goal := stringField(meta, "goal"); goal != "" {
 			fmt.Fprintf(&b, "- Goal: %s\n", goal)
@@ -6325,6 +6695,36 @@ func renderRoomDeliveryLogMarkdown(epic map[string]any) string {
 				fmt.Fprintf(&b, "Notes: %s\n\n", notes)
 			}
 		}
+	}
+	return b.String()
+}
+
+func renderRoomRetroMarkdown(epic map[string]any) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "# Retro Guidance\n\n")
+	updates := mapSlice(epic["guidance_updates"])
+	if len(updates) == 0 {
+		fmt.Fprintf(&b, "No retro guidance updates recorded yet.\n")
+		return b.String()
+	}
+	for _, update := range updates {
+		meta := anyMap(update["meta"])
+		title := firstNonEmpty(stringField(update, "summary"), stringField(update, "id"))
+		fmt.Fprintf(&b, "## %s\n\n", title)
+		fmt.Fprintf(&b, "- ID: `%s`\n", stringField(update, "id"))
+		fmt.Fprintf(&b, "- Kind: `%s`\n", stringField(meta, "kind"))
+		if milestoneID := stringField(meta, "milestone_id"); milestoneID != "" {
+			fmt.Fprintf(&b, "- Milestone ID: `%s`\n", milestoneID)
+		}
+		if impact := stringField(meta, "impact"); impact != "" {
+			fmt.Fprintf(&b, "\n### Impact\n\n%s\n", impact)
+		}
+		if change := stringField(meta, "recommended_change"); change != "" {
+			fmt.Fprintf(&b, "\n### Recommended Change\n\n%s\n", change)
+		}
+		appendMarkdownList(&b, "Scope", stringSliceField(meta, "scope"))
+		appendMarkdownList(&b, "Follow-up", stringSliceField(meta, "follow_up"))
+		fmt.Fprintf(&b, "\n")
 	}
 	return b.String()
 }
@@ -6515,6 +6915,13 @@ func mapSlice(value any) []map[string]any {
 		}
 	}
 	return out
+}
+
+func truncateRoomMapSlice(items []map[string]any, limit int) []map[string]any {
+	if limit <= 0 || len(items) <= limit {
+		return append([]map[string]any(nil), items...)
+	}
+	return append([]map[string]any(nil), items[:limit]...)
 }
 
 func mapField(value any, key string) map[string]any {
@@ -9085,14 +9492,20 @@ func normalizeRoomPoll(value time.Duration) time.Duration {
 	return value
 }
 
+type roomRelayDeliveryFailure struct {
+	Target string `json:"target"`
+	Reason string `json:"reason"`
+}
+
 type roomRelayResult struct {
-	Backend        string   `json:"backend"`
-	DeliveredCount int      `json:"delivered_count"`
-	FailedCount    int      `json:"failed_count"`
-	DeliveredTo    []string `json:"delivered_to,omitempty"`
-	FailedMembers  []string `json:"failed_members,omitempty"`
-	SkippedMembers []string `json:"skipped_members,omitempty"`
-	Error          string   `json:"error,omitempty"`
+	Backend          string                     `json:"backend"`
+	DeliveredCount   int                        `json:"delivered_count"`
+	FailedCount      int                        `json:"failed_count"`
+	DeliveredTo      []string                   `json:"delivered_to,omitempty"`
+	FailedMembers    []string                   `json:"failed_members,omitempty"`
+	DeliveryFailures []roomRelayDeliveryFailure `json:"delivery_failures,omitempty"`
+	SkippedMembers   []string                   `json:"skipped_members,omitempty"`
+	Error            string                     `json:"error,omitempty"`
 }
 
 func defaultRoomRelayOptions() roomRelayOptions {
@@ -9165,11 +9578,21 @@ func relayRoomMessageAuto(ctx context.Context, client *tmuxbridge.Client, room a
 		result.FailedMembers = append(result.FailedMembers, failed...)
 		result.FailedCount += len(failed)
 	}
+	seenTmux := make(map[string]struct{}, len(tmuxTargets))
 	for _, target := range tmuxTargets {
+		target = strings.TrimSpace(target)
+		if target == "" {
+			continue
+		}
+		if _, dup := seenTmux[target]; dup {
+			continue
+		}
+		seenTmux[target] = struct{}{}
 		_, err := client.DeliverTextWithOptions(ctx, target, formatRoomRelayContent(room, msg), tmuxbridge.DeliverOptions{Interrupt: msg.Interrupt})
 		if err != nil {
 			result.FailedCount++
 			result.FailedMembers = append(result.FailedMembers, target)
+			result.DeliveryFailures = append(result.DeliveryFailures, roomRelayDeliveryFailure{Target: target, Reason: err.Error()})
 			continue
 		}
 		result.DeliveredCount++
@@ -9201,13 +9624,16 @@ func relayRoomMessageTmux(ctx context.Context, client *tmuxbridge.Client, room a
 		target := roomMemberTmuxTarget(member)
 		if strings.TrimSpace(target) == "" {
 			result.FailedCount++
-			result.FailedMembers = append(result.FailedMembers, strings.TrimSpace(member.ActorID))
+			aid := strings.TrimSpace(member.ActorID)
+			result.FailedMembers = append(result.FailedMembers, aid)
+			result.DeliveryFailures = append(result.DeliveryFailures, roomRelayDeliveryFailure{Target: aid, Reason: "no tmux pane target (empty PaneID and actor id)"})
 			continue
 		}
 		_, err := client.DeliverTextWithOptions(ctx, target, content, tmuxbridge.DeliverOptions{Interrupt: msg.Interrupt})
 		if err != nil {
 			result.FailedCount++
 			result.FailedMembers = append(result.FailedMembers, target)
+			result.DeliveryFailures = append(result.DeliveryFailures, roomRelayDeliveryFailure{Target: target, Reason: err.Error()})
 			continue
 		}
 		result.DeliveredCount++
@@ -9991,6 +10417,12 @@ func relayRecipientMatchesMember(room agent.RoomSummary, member agent.RoomMember
 	if actorID == "" {
 		return false
 	}
+	// When both a legacy ActorID "human-a" row and a coordinator row with a real pane exist, only
+	// relay to the coordinator pane — otherwise we fan out twice and the label target often fails
+	// (failed_count 1) while the timeline still shows status ok.
+	if recipient == "human-a" && roomPreferCoordinatorRelayForHumanA(room) {
+		return strings.EqualFold(strings.TrimSpace(member.Role), "coordinator") && strings.TrimSpace(member.PaneID) != ""
+	}
 	if sameRoomParticipant(actorID, recipient) {
 		return true
 	}
@@ -10002,9 +10434,40 @@ func relayRecipientMatchesMember(room agent.RoomSummary, member agent.RoomMember
 	}
 	// Common handoff: direct sends use "human-a" while the coordinator row stores tmux:session:pane.
 	if recipient == "human-a" && strings.EqualFold(strings.TrimSpace(member.Role), "coordinator") {
+		if roomHasMemberWithExactActorID(room, "human-a") {
+			return false
+		}
 		return true
 	}
 	return false
+}
+
+func roomHasMemberWithExactActorID(room agent.RoomSummary, actorID string) bool {
+	actorID = strings.TrimSpace(actorID)
+	if actorID == "" {
+		return false
+	}
+	for _, m := range room.Members {
+		if strings.TrimSpace(m.ActorID) == actorID {
+			return true
+		}
+	}
+	return false
+}
+
+func roomPreferCoordinatorRelayForHumanA(room agent.RoomSummary) bool {
+	var hasHumanA bool
+	var coordHasPane bool
+	for _, m := range room.Members {
+		m = normalizeRoomMember(m)
+		if strings.TrimSpace(m.ActorID) == "human-a" {
+			hasHumanA = true
+		}
+		if strings.EqualFold(strings.TrimSpace(m.Role), "coordinator") && strings.TrimSpace(m.PaneID) != "" {
+			coordHasPane = true
+		}
+	}
+	return hasHumanA && coordHasPane
 }
 
 // collectRoomRelayMembers returns room members that should receive this relay (same routing as targets).

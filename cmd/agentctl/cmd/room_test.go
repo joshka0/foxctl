@@ -2256,6 +2256,206 @@ func TestRunRoomMilestoneContractRequiresCoordinator(t *testing.T) {
 	}
 }
 
+func TestRunRoomRetroAddAndShow(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	ctx := context.Background()
+	workspace := t.TempDir()
+
+	cmd, _ := newRoomTestCommand(ctx)
+	if err := runRoomCreate(cmd, workspace, "alpha", "Alpha", "", []string{"human-a=coordinator", "gemini-a=reviewer"}); err != nil {
+		t.Fatalf("runRoomCreate: %v", err)
+	}
+
+	cmd, out := newRoomTestCommand(ctx)
+	if err := runRoomEpicStart(cmd, workspace, "human-a", "alpha", "Room agile protocol", "Ship retro guidance", "human-a", "", "", []string{"room"}, []string{"operators can carry lessons forward"}); err != nil {
+		t.Fatalf("runRoomEpicStart: %v", err)
+	}
+	epicID := decodeRoomEnvelope(t, out)["epic_id"].(string)
+
+	cmd, _ = newRoomTestCommand(ctx)
+	if err := runRoomEpicFinalize(cmd, workspace, "human-a", "alpha", epicID, "Clarified brief."); err != nil {
+		t.Fatalf("runRoomEpicFinalize: %v", err)
+	}
+
+	cmd, out = newRoomTestCommand(ctx)
+	if err := runRoomMilestoneStart(cmd, workspace, "human-a", "alpha", epicID, "Foundation", "Ship retro guidance", "", "human-a", []string{"retro"}, nil, nil, nil, nil, nil, ""); err != nil {
+		t.Fatalf("runRoomMilestoneStart: %v", err)
+	}
+	milestoneID := decodeRoomEnvelope(t, out)["milestone_id"].(string)
+
+	cmd, out = newRoomTestCommand(ctx)
+	if err := runRoomRetroAdd(cmd, workspace, "human-a", "alpha", epicID, milestoneID, "coordination", "Ack no-blocker follow-ups.", "Prevents stale reply-expected inbox items.", "Ack no-blocker follow-ups instead of waiting for a reply.", []string{"room", "review-loop"}, []string{"Document this in the room-agile skill"}); err != nil {
+		t.Fatalf("runRoomRetroAdd: %v", err)
+	}
+	updateID := decodeRoomEnvelope(t, out)["update_id"].(string)
+
+	cmd, out = newRoomTestCommand(ctx)
+	if err := runRoomRetroShow(cmd, workspace, "alpha", epicID, milestoneID, 100); err != nil {
+		t.Fatalf("runRoomRetroShow: %v", err)
+	}
+	data := decodeRoomEnvelope(t, out)
+	if got := data["count"]; got != float64(1) {
+		t.Fatalf("count=%v want 1", got)
+	}
+	updates := data["updates"].([]any)
+	if len(updates) != 1 {
+		t.Fatalf("len(updates)=%d want 1", len(updates))
+	}
+	update := updates[0].(map[string]any)
+	if got := update["id"]; got != updateID {
+		t.Fatalf("update.id=%v want %s", got, updateID)
+	}
+	if got := update["kind"]; got != "coordination" {
+		t.Fatalf("kind=%v want coordination", got)
+	}
+	groups := data["groups"].([]any)
+	if len(groups) != 1 {
+		t.Fatalf("len(groups)=%d want 1", len(groups))
+	}
+	group := groups[0].(map[string]any)
+	if got := group["kind"]; got != "coordination" {
+		t.Fatalf("group.kind=%v want coordination", got)
+	}
+
+	cmd, out = newRoomTestCommand(ctx)
+	if err := runRoomEpicShow(cmd, workspace, "alpha", epicID, 100); err != nil {
+		t.Fatalf("runRoomEpicShow: %v", err)
+	}
+	epic := decodeRoomEnvelope(t, out)["epic"].(map[string]any)
+	if got := epic["guidance_update_count"]; got != float64(1) {
+		t.Fatalf("guidance_update_count=%v want 1", got)
+	}
+	recent := epic["latest_guidance_updates"].([]any)
+	if len(recent) != 1 {
+		t.Fatalf("len(latest_guidance_updates)=%d want 1", len(recent))
+	}
+
+	retroMarkdownPath := filepath.Join(home, ".agentctl", "epics", epicID, "retro.md")
+	retroMarkdown, err := os.ReadFile(retroMarkdownPath)
+	if err != nil {
+		t.Fatalf("ReadFile retro markdown: %v", err)
+	}
+	for _, want := range []string{"# Retro Guidance", "Ack no-blocker follow-ups.", "## Scope", "review-loop", "## Follow-up"} {
+		if !strings.Contains(string(retroMarkdown), want) {
+			t.Fatalf("retro markdown missing %q:\n%s", want, string(retroMarkdown))
+		}
+	}
+}
+
+func TestRunRoomRetroAddRequiresCoordinator(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	ctx := context.Background()
+	workspace := t.TempDir()
+
+	cmd, _ := newRoomTestCommand(ctx)
+	if err := runRoomCreate(cmd, workspace, "alpha", "Alpha", "", []string{"human-a=coordinator", "gemini-a=reviewer"}); err != nil {
+		t.Fatalf("runRoomCreate: %v", err)
+	}
+
+	cmd, out := newRoomTestCommand(ctx)
+	if err := runRoomEpicStart(cmd, workspace, "human-a", "alpha", "Room agile protocol", "", "human-a", "", "", nil, nil); err != nil {
+		t.Fatalf("runRoomEpicStart: %v", err)
+	}
+	epicID := decodeRoomEnvelope(t, out)["epic_id"].(string)
+
+	cmd, _ = newRoomTestCommand(ctx)
+	if err := runRoomEpicFinalize(cmd, workspace, "human-a", "alpha", epicID, "Clarified brief."); err != nil {
+		t.Fatalf("runRoomEpicFinalize: %v", err)
+	}
+
+	cmd, out = newRoomTestCommand(ctx)
+	if err := runRoomRetroAdd(cmd, workspace, "gemini-a", "alpha", epicID, "", "process", "Use the room loop.", "Prevents passive reminders from silently stalling.", "Fail reminder add when no loop is running.", nil, nil); err != nil {
+		t.Fatalf("runRoomRetroAdd returned error: %v", err)
+	}
+	if !strings.Contains(out.String(), `"status":"error"`) {
+		t.Fatalf("expected error envelope, got %s", out.String())
+	}
+	if !strings.Contains(out.String(), "agile scope changes require coordinator role") {
+		t.Fatalf("expected coordinator agile error, got %s", out.String())
+	}
+}
+
+func TestRunRoomRetroAddRejectsMilestoneOutsideEpic(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	ctx := context.Background()
+	workspace := t.TempDir()
+
+	cmd, _ := newRoomTestCommand(ctx)
+	if err := runRoomCreate(cmd, workspace, "alpha", "Alpha", "", []string{"human-a=coordinator", "gemini-a=reviewer"}); err != nil {
+		t.Fatalf("runRoomCreate: %v", err)
+	}
+
+	cmd, out := newRoomTestCommand(ctx)
+	if err := runRoomEpicStart(cmd, workspace, "human-a", "alpha", "Epic A", "", "human-a", "", "", nil, nil); err != nil {
+		t.Fatalf("runRoomEpicStart A: %v", err)
+	}
+	epicA := decodeRoomEnvelope(t, out)["epic_id"].(string)
+	cmd, _ = newRoomTestCommand(ctx)
+	if err := runRoomEpicFinalize(cmd, workspace, "human-a", "alpha", epicA, "Clarified brief A."); err != nil {
+		t.Fatalf("runRoomEpicFinalize A: %v", err)
+	}
+
+	cmd, out = newRoomTestCommand(ctx)
+	if err := runRoomEpicStart(cmd, workspace, "human-a", "alpha", "Epic B", "", "human-a", "", "", nil, nil); err != nil {
+		t.Fatalf("runRoomEpicStart B: %v", err)
+	}
+	epicB := decodeRoomEnvelope(t, out)["epic_id"].(string)
+	cmd, _ = newRoomTestCommand(ctx)
+	if err := runRoomEpicFinalize(cmd, workspace, "human-a", "alpha", epicB, "Clarified brief B."); err != nil {
+		t.Fatalf("runRoomEpicFinalize B: %v", err)
+	}
+
+	cmd, out = newRoomTestCommand(ctx)
+	if err := runRoomMilestoneStart(cmd, workspace, "human-a", "alpha", epicB, "Foundation", "", "", "human-a", nil, nil, nil, nil, nil, nil, ""); err != nil {
+		t.Fatalf("runRoomMilestoneStart: %v", err)
+	}
+	milestoneID := decodeRoomEnvelope(t, out)["milestone_id"].(string)
+
+	cmd, out = newRoomTestCommand(ctx)
+	if err := runRoomRetroAdd(cmd, workspace, "human-a", "alpha", epicA, milestoneID, "tooling", "Wrong milestone.", "Should reject cross-epic milestone reference.", "Use a milestone from the same epic.", nil, nil); err != nil {
+		t.Fatalf("runRoomRetroAdd returned error: %v", err)
+	}
+	if !strings.Contains(out.String(), `"status":"error"`) {
+		t.Fatalf("expected error envelope, got %s", out.String())
+	}
+	if !strings.Contains(out.String(), "milestone does not belong to this epic") {
+		t.Fatalf("expected milestone/epic mismatch error, got %s", out.String())
+	}
+}
+
+func TestRunRoomRetroAddRejectsUnknownKind(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	ctx := context.Background()
+	workspace := t.TempDir()
+
+	cmd, _ := newRoomTestCommand(ctx)
+	if err := runRoomCreate(cmd, workspace, "alpha", "Alpha", "", []string{"human-a=coordinator"}); err != nil {
+		t.Fatalf("runRoomCreate: %v", err)
+	}
+
+	cmd, out := newRoomTestCommand(ctx)
+	if err := runRoomEpicStart(cmd, workspace, "human-a", "alpha", "Epic A", "", "human-a", "", "", nil, nil); err != nil {
+		t.Fatalf("runRoomEpicStart: %v", err)
+	}
+	epicID := decodeRoomEnvelope(t, out)["epic_id"].(string)
+	cmd, _ = newRoomTestCommand(ctx)
+	if err := runRoomEpicFinalize(cmd, workspace, "human-a", "alpha", epicID, "Clarified brief."); err != nil {
+		t.Fatalf("runRoomEpicFinalize: %v", err)
+	}
+
+	cmd, out = newRoomTestCommand(ctx)
+	if err := runRoomRetroAdd(cmd, workspace, "human-a", "alpha", epicID, "", "unknown", "Bad kind.", "Should reject invalid kind.", "Use a fixed enum.", nil, nil); err != nil {
+		t.Fatalf("runRoomRetroAdd returned error: %v", err)
+	}
+	if !strings.Contains(out.String(), `"status":"error"`) {
+		t.Fatalf("expected error envelope, got %s", out.String())
+	}
+	if !strings.Contains(out.String(), "unsupported retro kind") {
+		t.Fatalf("expected retro kind error, got %s", out.String())
+	}
+}
+
 func TestRunRoomStoryValidateAndWorkpackSync(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
