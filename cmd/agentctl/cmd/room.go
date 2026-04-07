@@ -6961,6 +6961,10 @@ func buildRoomMilestoneViews(messages []agent.BoardMessage) []map[string]any {
 		blockedStories := 0
 		waivedStories := 0
 		blockingValidationIDs := make([]string, 0)
+		laneCounts := make(map[string]int)
+		laneCoverage := make(map[string]int)
+		laneWaivers := make(map[string]int)
+		laneBlockers := make(map[string][]string)
 		for _, story := range stories {
 			if storyStatus, _ := story["status"].(string); storyStatus != "accepted" {
 				continue
@@ -6999,8 +7003,34 @@ func buildRoomMilestoneViews(messages []agent.BoardMessage) []map[string]any {
 					blockingValidationIDs = append(blockingValidationIDs, id)
 				}
 			}
+			for laneName, laneRaw := range mapField(story, "evidence_lanes") {
+				lane := anyMap(laneRaw)
+				laneCounts[laneName]++
+				if _, ok := laneCoverage[laneName]; !ok {
+					laneCoverage[laneName] = 0
+				}
+				if _, ok := laneWaivers[laneName]; !ok {
+					laneWaivers[laneName] = 0
+				}
+				if _, ok := laneBlockers[laneName]; !ok {
+					laneBlockers[laneName] = []string{}
+				}
+				if boolField(lane, "covered") {
+					laneCoverage[laneName]++
+				}
+				if boolField(lane, "waived") {
+					laneWaivers[laneName]++
+				}
+				if boolField(lane, "blocking") {
+					laneBlockers[laneName] = append(laneBlockers[laneName], stringField(lane, "latest_validation_id"))
+				}
+			}
 		}
 		sort.Strings(blockingValidationIDs)
+		for key, ids := range laneBlockers {
+			sort.Strings(ids)
+			laneBlockers[key] = ids
+		}
 		milestoneMessageIDs := uniqueStrings(append(
 			append(
 				append([]string{msg.ID}, collectRoomBoardIDs(criteriaByMilestone[msg.ID])...),
@@ -7057,6 +7087,10 @@ func buildRoomMilestoneViews(messages []agent.BoardMessage) []map[string]any {
 			"recommended_next_count":    len(latestSummaryMeta.RecommendedNext),
 			"guidance_update_count":     len(latestSummaryMeta.GuidanceUpdates),
 			"blocking_validation_ids":   blockingValidationIDs,
+			"lane_counts":               laneCounts,
+			"lane_coverage":             laneCoverage,
+			"lane_blockers":             laneBlockers,
+			"lane_waivers":              laneWaivers,
 			"coverage": map[string]any{
 				"validated": validatedStories,
 				"accepted":  acceptedStories,
@@ -7181,6 +7215,10 @@ func buildRoomStoryViews(messages []agent.BoardMessage) []map[string]any {
 			"latest_validation_markdown": roomAgileValidationMarkdownPath(epicID, milestoneID, msg.ID, validationSummary.LatestID),
 			"latest_validation_json":     roomAgileValidationJSONPath(epicID, milestoneID, msg.ID, validationSummary.LatestID),
 			"effective_validations":      validationSummary.EffectiveValidations,
+			"evidence_lanes":             validationSummary.EvidenceLanes,
+			"covered_lanes":              validationSummary.CoveredLanes,
+			"blocking_lanes":             validationSummary.BlockingLanes,
+			"waived_lanes":               validationSummary.WaivedLanes,
 			"covered":                    validationSummary.Covered,
 			"has_failures":               validationSummary.HasFailures,
 			"has_blockers":               validationSummary.HasBlockers,
@@ -7204,6 +7242,10 @@ type roomStoryValidationSummary struct {
 	HasFailures          bool
 	HasBlockers          bool
 	WaivedOnly           bool
+	EvidenceLanes        map[string]map[string]any
+	CoveredLanes         []string
+	BlockingLanes        []string
+	WaivedLanes          []string
 }
 
 type roomStoryStateSummary struct {
@@ -7218,6 +7260,7 @@ type roomStoryStateSummary struct {
 func summarizeRoomStoryValidations(validations []map[string]any) roomStoryValidationSummary {
 	summary := roomStoryValidationSummary{
 		EffectiveValidations: make([]map[string]any, 0),
+		EvidenceLanes:        make(map[string]map[string]any),
 	}
 	if len(validations) == 0 {
 		return summary
@@ -7240,6 +7283,7 @@ func summarizeRoomStoryValidations(validations []map[string]any) roomStoryValida
 		lastIndexByType[validatorType] = idx
 	}
 	latestByType := make(map[string]map[string]any)
+	countByType := make(map[string]int)
 	for idx, validation := range validations {
 		meta := anyMap(validation["meta"])
 		validatorType := stringField(meta, "validator_type")
@@ -7248,6 +7292,7 @@ func summarizeRoomStoryValidations(validations []map[string]any) roomStoryValida
 		}
 		validation["superseded"] = lastIndexByType[validatorType] != idx
 		latestByType[validatorType] = validation
+		countByType[validatorType]++
 		last := validation
 		summary.LatestStatus, _ = last["status"].(string)
 		summary.LatestID, _ = last["id"].(string)
@@ -7263,17 +7308,35 @@ func summarizeRoomStoryValidations(validations []map[string]any) roomStoryValida
 		validation := latestByType[key]
 		summary.EffectiveValidations = append(summary.EffectiveValidations, validation)
 		status, _ := validation["status"].(string)
+		lane := map[string]any{
+			"lane":                 key,
+			"count":                countByType[key],
+			"latest_status":        status,
+			"latest_validation_id": stringField(validation, "id"),
+			"covered":              status == "pass" || status == "waived",
+			"waived":               status == "waived",
+			"blocking":             status == "fail" || status == "blocked",
+		}
+		summary.EvidenceLanes[key] = lane
 		switch status {
 		case "blocked":
 			summary.HasBlockers = true
+			summary.BlockingLanes = append(summary.BlockingLanes, key)
 		case "fail":
 			summary.HasFailures = true
+			summary.BlockingLanes = append(summary.BlockingLanes, key)
 		case "pass":
 			hasPass = true
+			summary.CoveredLanes = append(summary.CoveredLanes, key)
 		case "waived":
 			hasWaived = true
+			summary.CoveredLanes = append(summary.CoveredLanes, key)
+			summary.WaivedLanes = append(summary.WaivedLanes, key)
 		}
 	}
+	sort.Strings(summary.CoveredLanes)
+	sort.Strings(summary.BlockingLanes)
+	sort.Strings(summary.WaivedLanes)
 	summary.Covered = hasPass || hasWaived
 	summary.WaivedOnly = !hasPass && !summary.HasFailures && !summary.HasBlockers && hasWaived
 	if summary.HasBlockers {
@@ -8009,6 +8072,25 @@ func renderRoomMilestoneSummaryMarkdown(milestone map[string]any) string {
 	} else if ids := stringSliceValue(milestone["blocking_validation_ids"]); len(ids) > 0 {
 		appendMarkdownList(&b, "Blocking validation ids", ids)
 	}
+	if laneCounts := anyMap(milestone["lane_counts"]); len(laneCounts) > 0 {
+		fmt.Fprintf(&b, "\n## Evidence Lanes\n")
+		keys := make([]string, 0, len(laneCounts))
+		for key := range laneCounts {
+			keys = append(keys, key)
+		}
+		sort.Strings(keys)
+		coverage := anyMap(milestone["lane_coverage"])
+		waivers := anyMap(milestone["lane_waivers"])
+		blockers := anyMap(milestone["lane_blockers"])
+		for _, key := range keys {
+			line := fmt.Sprintf("- `%s`: seen `%d`, covered `%d`, waived `%d`", key, intField(laneCounts, key), intField(coverage, key), intField(waivers, key))
+			blockingIDs := stringSliceValue(blockers[key])
+			if len(blockingIDs) > 0 {
+				line += fmt.Sprintf(", blocking `%s`", strings.Join(blockingIDs, "`, `"))
+			}
+			fmt.Fprintln(&b, line)
+		}
+	}
 	return b.String()
 }
 
@@ -8050,6 +8132,28 @@ func renderRoomStoryMarkdown(story map[string]any) string {
 			} else {
 				fmt.Fprintf(&b, "- `%s`\n", state)
 			}
+		}
+	}
+	if lanes := mapField(story, "evidence_lanes"); len(lanes) > 0 {
+		fmt.Fprintf(&b, "\n## Evidence Lanes\n")
+		keys := make([]string, 0, len(lanes))
+		for key := range lanes {
+			keys = append(keys, key)
+		}
+		sort.Strings(keys)
+		for _, key := range keys {
+			lane := anyMap(lanes[key])
+			line := fmt.Sprintf("- `%s`: %s", key, stringField(lane, "latest_status"))
+			if id := stringField(lane, "latest_validation_id"); id != "" {
+				line += fmt.Sprintf(" (`%s`)", id)
+			}
+			if boolField(lane, "waived") {
+				line += " [waived]"
+			}
+			if boolField(lane, "blocking") {
+				line += " [blocking]"
+			}
+			fmt.Fprintln(&b, line)
 		}
 	}
 	return b.String()

@@ -2846,6 +2846,93 @@ func TestRunRoomStoryValidateAndWorkpackSync(t *testing.T) {
 	}
 }
 
+func TestRunRoomEvidenceLanesRollup(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	ctx := context.Background()
+	workspace := t.TempDir()
+
+	_, milestoneID, storyID := setupRoomAgileWorkpackFixture(t, ctx, workspace)
+
+	cmd, out := newRoomTestCommand(ctx)
+	if err := runRoomStoryValidate(cmd, workspace, "human-a", "alpha", storyID, "review", "pass", "Review passed.", "docs/reviews/review.md", "", "", "", nil); err != nil {
+		t.Fatalf("runRoomStoryValidate review: %v", err)
+	}
+	reviewValidationID := decodeRoomEnvelope(t, out)["validation_id"].(string)
+
+	cmd, out = newRoomTestCommand(ctx)
+	if err := runRoomStoryValidate(cmd, workspace, "human-a", "alpha", storyID, "integration", "blocked", "Integration blocked.", "docs/reviews/integration.md", "", "", "Waiting on integration environment.", nil); err != nil {
+		t.Fatalf("runRoomStoryValidate integration: %v", err)
+	}
+	integrationValidationID := decodeRoomEnvelope(t, out)["validation_id"].(string)
+
+	cmd, out = newRoomTestCommand(ctx)
+	if err := runRoomStoryShow(cmd, workspace, "alpha", storyID, 100); err != nil {
+		t.Fatalf("runRoomStoryShow: %v", err)
+	}
+	story := decodeRoomEnvelope(t, out)["story"].(map[string]any)
+	evidenceLanes := story["evidence_lanes"].(map[string]any)
+	reviewLane := evidenceLanes["review"].(map[string]any)
+	if got := reviewLane["latest_status"]; got != "pass" {
+		t.Fatalf("review latest_status=%v want pass", got)
+	}
+	if got := reviewLane["latest_validation_id"]; got != reviewValidationID {
+		t.Fatalf("review latest_validation_id=%v want %s", got, reviewValidationID)
+	}
+	integrationLane := evidenceLanes["integration"].(map[string]any)
+	if got := integrationLane["latest_status"]; got != "blocked" {
+		t.Fatalf("integration latest_status=%v want blocked", got)
+	}
+	if got := integrationLane["latest_validation_id"]; got != integrationValidationID {
+		t.Fatalf("integration latest_validation_id=%v want %s", got, integrationValidationID)
+	}
+	if lanes, ok := story["blocking_lanes"].([]any); !ok || len(lanes) != 1 || lanes[0] != "integration" {
+		t.Fatalf("blocking_lanes=%v want [integration]", story["blocking_lanes"])
+	}
+	if lanes, ok := story["covered_lanes"].([]any); !ok || len(lanes) != 1 || lanes[0] != "review" {
+		t.Fatalf("covered_lanes=%v want [review]", story["covered_lanes"])
+	}
+
+	cmd, out = newRoomTestCommand(ctx)
+	if err := runRoomMilestoneShow(cmd, workspace, "alpha", milestoneID, 100); err != nil {
+		t.Fatalf("runRoomMilestoneShow: %v", err)
+	}
+	milestone := decodeRoomEnvelope(t, out)["milestone"].(map[string]any)
+	laneCounts := milestone["lane_counts"].(map[string]any)
+	if got := laneCounts["review"]; got != float64(1) {
+		t.Fatalf("lane_counts.review=%v want 1", got)
+	}
+	if got := laneCounts["integration"]; got != float64(1) {
+		t.Fatalf("lane_counts.integration=%v want 1", got)
+	}
+	laneCoverage := milestone["lane_coverage"].(map[string]any)
+	if got := laneCoverage["review"]; got != float64(1) {
+		t.Fatalf("lane_coverage.review=%v want 1", got)
+	}
+	if got := laneCoverage["integration"]; got != float64(0) {
+		t.Fatalf("lane_coverage.integration=%v want 0", got)
+	}
+	laneBlockers := milestone["lane_blockers"].(map[string]any)
+	blockers := laneBlockers["integration"].([]any)
+	if len(blockers) != 1 || blockers[0] != integrationValidationID {
+		t.Fatalf("lane_blockers.integration=%v want [%s]", blockers, integrationValidationID)
+	}
+
+	workpackRoot := filepath.Join(home, ".agentctl", "epics", story["epic_id"].(string))
+	storyMarkdown := mustReadRoomTestFile(t, filepath.Join(workpackRoot, "milestones", milestoneID, "stories", storyID, "story.md"))
+	for _, want := range []string{"## Evidence Lanes", "`review`: pass", "`integration`: blocked"} {
+		if !strings.Contains(storyMarkdown, want) {
+			t.Fatalf("story markdown missing %q:\n%s", want, storyMarkdown)
+		}
+	}
+	summaryMarkdown := mustReadRoomTestFile(t, filepath.Join(workpackRoot, "milestones", milestoneID, "summary.md"))
+	for _, want := range []string{"## Evidence Lanes", "`review`: seen `1`, covered `1`", "`integration`: seen `1`, covered `0`, waived `0`, blocking"} {
+		if !strings.Contains(summaryMarkdown, want) {
+			t.Fatalf("summary markdown missing %q:\n%s", want, summaryMarkdown)
+		}
+	}
+}
+
 func TestRunRoomWorkpackShowAndSync(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
