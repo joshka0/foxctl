@@ -577,6 +577,7 @@ func newRoomEpicCommand() *cobra.Command {
 		newRoomEpicShapeCommand(),
 		newRoomEpicShowCommand(),
 		newRoomEpicResumeCommand(),
+		newRoomEpicHealthCommand(),
 		newRoomEpicNextCommand(),
 	)
 	return cmd
@@ -645,6 +646,26 @@ func newRoomEpicResumeCommand() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&workspace, "workspace", ".", "Workspace root override")
+	return cmd
+}
+
+func newRoomEpicHealthCommand() *cobra.Command {
+	var (
+		workspace string
+		actorID   string
+		limit     int
+	)
+	cmd := &cobra.Command{
+		Use:   "health <room-id> <epic-id>",
+		Short: "Return a coordinator-facing health pulse for one epic",
+		Args:  cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runRoomEpicHealth(cmd, workspace, args[0], args[1], actorID, limit)
+		},
+	}
+	cmd.Flags().StringVar(&workspace, "workspace", ".", "Workspace root override")
+	cmd.Flags().StringVar(&actorID, "actor", "", "Optional actor id to tailor actor-specific context")
+	cmd.Flags().IntVar(&limit, "limit", roomTaskScanLimit, "Maximum room messages to inspect")
 	return cmd
 }
 
@@ -3095,6 +3116,46 @@ func runRoomEpicResume(cmd *cobra.Command, workspace, roomID, epicID string) err
 		"room":   summary,
 		"epic":   epic,
 		"resume": resume,
+	}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+}
+
+func runRoomEpicHealth(cmd *cobra.Command, workspace, roomID, epicID, actorID string, limit int) error {
+	absWorkspace, err := resolveRoomWorkspace(workspace)
+	if err != nil {
+		return err
+	}
+	if limit <= 0 {
+		limit = roomTaskScanLimit
+	}
+	store, err := openRoomBoardStore(cmd.Context())
+	if err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.epic.health", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	defer store.Close()
+
+	summary, messages, err := loadRoomState(cmd.Context(), store, absWorkspace, roomID, "", limit)
+	if err != nil {
+		code := protocol.ErrorCodeERuntime
+		if errors.Is(err, blackboard.ErrRoomNotFound) {
+			code = protocol.ErrorCodeENotFound
+		}
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.epic.health", code, err.Error(), map[string]any{
+			"hint": "Create the room first or check the room id.",
+		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+
+	epic := roomEpicViewByID(buildRoomEpicViews(messages), epicID)
+	if epic == nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.epic.health", protocol.ErrorCodeENotFound, fmt.Sprintf("epic %q not found", epicID), map[string]any{
+			"hint": "Run `agentctl room epic show <room-id>` to list available epics.",
+		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+
+	health := buildRoomEpicHealth(summary, messages, epic, actorID)
+	return protocol.WriteOK(cmd.OutOrStdout(), "agentctl.room.epic.health", map[string]any{
+		"room":   summary,
+		"epic":   epic,
+		"health": health,
 	}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
 }
 
@@ -5736,6 +5797,340 @@ func summarizeRoomEpicContinuity(epic, currentMilestone map[string]any, missingV
 		parts = append(parts, fmt.Sprintf("%d guidance update%s captured.", guidanceCount, pluralS(guidanceCount)))
 	}
 	return strings.Join(parts, " ")
+}
+
+func buildRoomEpicHealth(room agent.RoomSummary, messages []agent.BoardMessage, epic map[string]any, actorID string) map[string]any {
+	resume := buildRoomEpicContinuity(room, messages, epic)
+	milestones := mapSlice(epic["milestones"])
+	currentMilestone := mapField(resume, "current_milestone")
+	missingValidation := buildRoomEpicStoriesMissingValidation(milestones)
+	issues := buildRoomEpicHealthIssues(room, messages, epic, milestones, currentMilestone, missingValidation, actorID)
+	healthStatus := deriveRoomEpicHealthStatus(epic, milestones, issues)
+	recentLogs := truncateRoomMapSlice(mapSlice(epic["logs"]), 3)
+	recentGuidance := truncateRoomMapSlice(mapSlice(epic["guidance_updates"]), 3)
+
+	out := map[string]any{
+		"epic_id":                           stringField(epic, "id"),
+		"title":                             stringField(epic, "title"),
+		"health":                            healthStatus,
+		"phase":                             stringField(resume, "phase"),
+		"current_milestone_id":              stringField(resume, "current_milestone_id"),
+		"current_milestone_title":           stringField(resume, "current_milestone_title"),
+		"summary":                           summarizeRoomEpicHealth(healthStatus, issues, epic, currentMilestone, missingValidation),
+		"open_intake_questions":             intField(epic, "open_questions"),
+		"open_interview_items":              len(mapSlice(resume["interview_items"])),
+		"milestone_count":                   intField(epic, "milestone_count"),
+		"active_milestone_count":            countRoomActiveMilestones(milestones),
+		"stories_missing_validation_count":  len(missingValidation),
+		"stories_missing_validation":        missingValidation,
+		"blocked_story_count":               sumRoomIntField(milestones, "blocked_story_count"),
+		"stale_milestone_summary_count":     countRoomStaleMilestoneSummaries(milestones),
+		"milestones_missing_contract_count": countRoomMilestonesMissingContract(milestones),
+		"guidance_update_count":             intField(epic, "guidance_update_count"),
+		"issues":                            issues,
+		"issue_count":                       len(issues),
+		"recent_guidance_updates":           recentGuidance,
+		"recent_delivery_logs":              recentLogs,
+	}
+	if actor := strings.TrimSpace(actorID); actor != "" {
+		out["actor"] = actor
+	}
+	if currentMilestone != nil {
+		out["current_milestone"] = currentMilestone
+	}
+	return out
+}
+
+func buildRoomEpicStoriesMissingValidation(milestones []map[string]any) []map[string]any {
+	missing := make([]map[string]any, 0)
+	for _, milestone := range milestones {
+		for _, story := range mapSlice(milestone["stories"]) {
+			if stringField(story, "status") != "accepted" || boolField(story, "covered") {
+				continue
+			}
+			missing = append(missing, map[string]any{
+				"id":              stringField(story, "id"),
+				"title":           stringField(story, "title"),
+				"owner":           stringField(anyMap(story["meta"]), "owner"),
+				"milestone_id":    stringField(story, "milestone_id"),
+				"milestone_title": stringField(milestone, "title"),
+				"workpack_dir":    stringField(story, "workpack_dir"),
+				"validation_dir":  stringField(story, "validation_dir"),
+			})
+		}
+	}
+	sort.Slice(missing, func(i, j int) bool {
+		leftMilestone := stringField(missing[i], "milestone_id")
+		rightMilestone := stringField(missing[j], "milestone_id")
+		if leftMilestone != rightMilestone {
+			return leftMilestone < rightMilestone
+		}
+		return stringField(missing[i], "id") < stringField(missing[j], "id")
+	})
+	return missing
+}
+
+func buildRoomEpicHealthIssues(room agent.RoomSummary, messages []agent.BoardMessage, epic map[string]any, milestones []map[string]any, currentMilestone map[string]any, missingValidation []map[string]any, actorID string) []map[string]any {
+	issues := make([]map[string]any, 0)
+	roomID := room.ID
+	epicID := stringField(epic, "id")
+	coordinator := roomCoordinatorActorID(room.Members)
+	if coordinator == "" {
+		coordinator = strings.TrimSpace(actorID)
+	}
+
+	if open := intField(epic, "open_questions"); open > 0 {
+		issues = append(issues, roomEpicHealthIssue("intake_open", "warn", epicID, "Epic intake remains open", fmt.Sprintf("%d intake question%s still need answers or finalization.", open, pluralS(open)), fmt.Sprintf(`agentctl room epic show %s %s`, roomID, epicID)))
+	}
+
+	for _, interview := range buildRoomOpenInterviewItems(messages) {
+		targetID := stringField(interview, "id")
+		commandHint := fmt.Sprintf(`agentctl room status %s --only interview`, roomID)
+		if coordinator != "" {
+			commandHint = fmt.Sprintf(`agentctl room interview next %s --actor %s`, roomID, coordinator)
+		}
+		issues = append(issues, roomEpicHealthIssue("interview_unresolved", "warn", targetID, firstNonEmpty(stringField(interview, "topic"), "Resolve interview item"), "There is at least one unresolved interview thread in the room.", commandHint))
+	}
+
+	if intField(epic, "story_count") > 0 && roomEpicLatestLog(epic) == nil {
+		issues = append(issues, roomEpicHealthIssue("epic_has_no_log", "info", epicID, "Epic has no delivery log entries", "The epic has active scope but no delivery log checkpoint yet.", fmt.Sprintf(`agentctl room log append %s %s "<label>"`, roomID, epicID)))
+	}
+
+	for _, milestone := range milestones {
+		milestoneID := stringField(milestone, "id")
+		milestoneTitle := firstNonEmpty(stringField(milestone, "title"), milestoneID)
+		if roomMilestoneMissingContract(milestone) {
+			issues = append(issues, roomEpicHealthIssue("milestone_missing_contract", "warn", milestoneID, milestoneTitle, "Milestone is missing an explicit contract (objective, validators, or exit criteria).", fmt.Sprintf(`agentctl room milestone contract %s %s --objective "<objective>" --validator review --exit "<exit>"`, roomID, milestoneID)))
+		}
+		if intField(milestone, "criteria_count") == 0 {
+			issues = append(issues, roomEpicHealthIssue("milestone_missing_criteria", "warn", milestoneID, milestoneTitle, "Milestone has no acceptance criteria yet.", fmt.Sprintf(`agentctl room milestone criteria %s %s "<criterion>"`, roomID, milestoneID)))
+		}
+		if roomMilestoneNeedsReview(milestone) {
+			issues = append(issues, roomEpicHealthIssue("milestone_needs_review", "warn", milestoneID, milestoneTitle, "Accepted stories are covered and the milestone is ready for review.", fmt.Sprintf(`agentctl room milestone review %s %s pass "<notes>"`, roomID, milestoneID)))
+		}
+		if roomMilestoneNeedsSummary(milestone) {
+			issues = append(issues, roomEpicHealthIssue("milestone_needs_summary", "info", milestoneID, milestoneTitle, "Milestone has a review verdict but no summary yet.", fmt.Sprintf(`agentctl room milestone summary %s %s --summary "<summary>"`, roomID, milestoneID)))
+		}
+		if roomMilestoneSummaryIsStale(milestone) {
+			issues = append(issues, roomEpicHealthIssue("stale_summary", "warn", milestoneID, milestoneTitle, "Milestone summary is older than the latest material change in this milestone.", fmt.Sprintf(`agentctl room milestone summary %s %s --summary "<summary>"`, roomID, milestoneID)))
+		}
+		for _, story := range mapSlice(milestone["stories"]) {
+			if stringField(story, "status") == "accepted" && !boolField(story, "covered") {
+				issues = append(issues, roomEpicHealthIssue("story_missing_validation", "warn", stringField(story, "id"), firstNonEmpty(stringField(story, "title"), "Validate story"), "Accepted story still lacks validation coverage.", fmt.Sprintf(`agentctl room story validate %s %s review pass "<summary>"`, roomID, stringField(story, "id"))))
+			}
+			if stringField(story, "state") == "blocked" || stringField(story, "latest_validation_status") == "blocked" {
+				issues = append(issues, roomEpicHealthIssue("story_blocked", "block", stringField(story, "id"), firstNonEmpty(stringField(story, "title"), "Story blocked"), "Story is blocked and needs coordinator follow-up.", fmt.Sprintf(`agentctl room story show %s %s`, roomID, stringField(story, "id"))))
+			}
+		}
+	}
+
+	sort.Slice(issues, func(i, j int) bool {
+		leftSeverity := roomEpicHealthSeverityRank(stringField(issues[i], "severity"))
+		rightSeverity := roomEpicHealthSeverityRank(stringField(issues[j], "severity"))
+		if leftSeverity != rightSeverity {
+			return leftSeverity < rightSeverity
+		}
+		leftType := stringField(issues[i], "type")
+		rightType := stringField(issues[j], "type")
+		if leftType != rightType {
+			return leftType < rightType
+		}
+		return stringField(issues[i], "target_id") < stringField(issues[j], "target_id")
+	})
+	return issues
+}
+
+func roomEpicHealthIssue(issueType, severity, targetID, title, reason, commandHint string) map[string]any {
+	return map[string]any{
+		"type":         issueType,
+		"severity":     severity,
+		"target_id":    strings.TrimSpace(targetID),
+		"title":        strings.TrimSpace(title),
+		"reason":       strings.TrimSpace(reason),
+		"command_hint": strings.TrimSpace(commandHint),
+	}
+}
+
+func roomEpicHealthSeverityRank(severity string) int {
+	switch strings.TrimSpace(strings.ToLower(severity)) {
+	case "block":
+		return 0
+	case "warn":
+		return 1
+	case "info":
+		return 2
+	default:
+		return 3
+	}
+}
+
+func deriveRoomEpicHealthStatus(epic map[string]any, milestones, issues []map[string]any) string {
+	hasBlock := false
+	hasWarn := false
+	infoOnly := len(issues) > 0
+	closingOnly := true
+	currentMilestone := findCurrentRoomMilestone(milestones)
+	for _, issue := range issues {
+		switch stringField(issue, "severity") {
+		case "block":
+			hasBlock = true
+		case "warn":
+			hasWarn = true
+		}
+		switch stringField(issue, "type") {
+		case "milestone_needs_summary", "epic_has_no_log":
+		default:
+			closingOnly = false
+		}
+	}
+	if hasBlock {
+		return "blocked"
+	}
+	if hasWarn {
+		return "needs_attention"
+	}
+	if roomEpicIsComplete(epic, milestones, issues) {
+		return "complete"
+	}
+	if infoOnly && closingOnly && currentMilestone != nil && stringField(currentMilestone, "status") == "passed" {
+		return "closing"
+	}
+	return "healthy"
+}
+
+func roomEpicIsComplete(epic map[string]any, milestones, issues []map[string]any) bool {
+	if !boolField(epic, "finalized") || intField(epic, "milestone_count") == 0 || len(issues) > 0 {
+		return false
+	}
+	for _, milestone := range milestones {
+		if stringField(milestone, "status") != "passed" {
+			return false
+		}
+	}
+	return roomEpicLatestLog(epic) != nil
+}
+
+func summarizeRoomEpicHealth(health string, issues []map[string]any, epic, currentMilestone map[string]any, missingValidation []map[string]any) string {
+	parts := []string{fmt.Sprintf("Epic health is %s.", health)}
+	if currentMilestone != nil {
+		parts = append(parts, fmt.Sprintf("Current milestone is %q.", stringField(currentMilestone, "title")))
+	}
+	if len(missingValidation) > 0 {
+		parts = append(parts, fmt.Sprintf("%d stor%s still need validation.", len(missingValidation), pluralSuffix(len(missingValidation), "y", "ies")))
+	}
+	if len(issues) > 0 {
+		first := issues[0]
+		parts = append(parts, fmt.Sprintf("Top issue: %s.", strings.TrimSpace(stringField(first, "reason"))))
+	} else if roomEpicLatestLog(epic) != nil {
+		parts = append(parts, fmt.Sprintf("Latest delivery log is %q.", stringField(roomEpicLatestLog(epic), "label")))
+	}
+	return strings.Join(parts, " ")
+}
+
+func countRoomActiveMilestones(milestones []map[string]any) int {
+	total := 0
+	for _, milestone := range milestones {
+		if stringField(milestone, "status") != "passed" {
+			total++
+		}
+	}
+	return total
+}
+
+func countRoomMilestonesMissingContract(milestones []map[string]any) int {
+	total := 0
+	for _, milestone := range milestones {
+		if roomMilestoneMissingContract(milestone) {
+			total++
+		}
+	}
+	return total
+}
+
+func roomMilestoneMissingContract(milestone map[string]any) bool {
+	if milestone == nil {
+		return false
+	}
+	meta := anyMap(milestone["meta"])
+	return stringField(meta, "objective") == "" && intField(milestone, "validator_count") == 0 && intField(milestone, "exit_criteria_count") == 0
+}
+
+func countRoomStaleMilestoneSummaries(milestones []map[string]any) int {
+	total := 0
+	for _, milestone := range milestones {
+		if roomMilestoneSummaryIsStale(milestone) {
+			total++
+		}
+	}
+	return total
+}
+
+func roomMilestoneSummaryIsStale(milestone map[string]any) bool {
+	if milestone == nil || intField(milestone, "accepted_story_count") == 0 || stringField(milestone, "status") == "blocked" || intField(milestone, "summary_count") == 0 {
+		return false
+	}
+	summaryMarker := roomMilestoneLatestSummaryMarker(milestone)
+	if summaryMarker.At.IsZero() {
+		return false
+	}
+	return roomTimelineMarkerAfter(roomMilestoneLatestMaterialChangeMarker(milestone), summaryMarker)
+}
+
+type roomTimelineMarker struct {
+	At time.Time
+	ID string
+}
+
+func roomMilestoneLatestSummaryMarker(milestone map[string]any) roomTimelineMarker {
+	latestSummary := mapField(milestone, "latest_summary")
+	if latestSummary == nil {
+		return roomTimelineMarker{}
+	}
+	root := mapField(latestSummary, "root")
+	return roomTimelineMarker{
+		At: parseRFC3339Time(stringField(root, "created_at")),
+		ID: stringField(root, "id"),
+	}
+}
+
+func roomMilestoneLatestMaterialChangeMarker(milestone map[string]any) roomTimelineMarker {
+	latest := roomTimelineMarker{}
+	for _, story := range mapSlice(milestone["stories"]) {
+		if stringField(story, "status") != "accepted" {
+			continue
+		}
+		root := mapField(story, "root")
+		latest = roomLaterTimelineMarker(latest, roomTimelineMarker{At: parseRFC3339Time(stringField(root, "created_at")), ID: stringField(root, "id")})
+		for _, state := range mapSlice(story["state_history"]) {
+			root := mapField(state, "root")
+			latest = roomLaterTimelineMarker(latest, roomTimelineMarker{At: parseRFC3339Time(stringField(root, "created_at")), ID: stringField(root, "id")})
+		}
+		for _, validation := range mapSlice(story["validations"]) {
+			root := mapField(validation, "root")
+			latest = roomLaterTimelineMarker(latest, roomTimelineMarker{At: parseRFC3339Time(stringField(root, "created_at")), ID: stringField(root, "id")})
+		}
+	}
+	for _, review := range boardMessageSliceValue(milestone["reviews"]) {
+		latest = roomLaterTimelineMarker(latest, roomTimelineMarker{At: review.CreatedAt, ID: review.ID})
+	}
+	return latest
+}
+
+func roomLaterTimelineMarker(left, right roomTimelineMarker) roomTimelineMarker {
+	if roomTimelineMarkerAfter(right, left) {
+		return right
+	}
+	return left
+}
+
+func roomTimelineMarkerAfter(left, right roomTimelineMarker) bool {
+	if left.At.After(right.At) {
+		return true
+	}
+	if left.At.Equal(right.At) && strings.TrimSpace(left.ID) != "" && strings.TrimSpace(left.ID) > strings.TrimSpace(right.ID) {
+		return true
+	}
+	return false
 }
 
 func pluralS(count int) string {
@@ -8594,6 +8989,21 @@ func roomMemberHasRole(members []agent.RoomMember, actorID, role string) bool {
 		}
 	}
 	return false
+}
+
+// roomMemberCanManageRoomTasks reports whether the sender may assign/reassign/reclaim room tasks.
+// Eligible: room members with role coordinator or admin; system admin / overseer senders bypass
+// room role checks. Other participants (including reviewers and unprivileged agents) cannot assign
+// work to others — use a coordinator/admin pane or grant role=admin to a parent agent that should delegate.
+func roomMemberCanManageRoomTasks(members []agent.RoomMember, sender string) bool {
+	sender = strings.TrimSpace(sender)
+	if sender == "" {
+		return false
+	}
+	if agent.IsAdminSender(sender) || agent.IsOverseerSender(sender) {
+		return true
+	}
+	return roomMemberHasRole(members, sender, "coordinator") || roomMemberHasRole(members, sender, "admin")
 }
 
 func roomHasParticipant(room agent.RoomSummary, actorID string) bool {
