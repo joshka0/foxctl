@@ -800,6 +800,7 @@ func newRoomMilestoneStartCommand() *cobra.Command {
 		requiredLanes []string
 		optionalLanes []string
 		enforceExit   bool
+		disableExit   bool
 		exits         []string
 		proposal      string
 	)
@@ -812,7 +813,13 @@ func newRoomMilestoneStartCommand() *cobra.Command {
 			if len(args) > 2 {
 				title = args[2]
 			}
-			return runRoomMilestoneStartWithPolicy(cmd, workspace, sender, args[0], args[1], title, goal, objective, owner, scope, risks, excludes, deps, validators, requiredLanes, optionalLanes, enforceExit, exits, proposal)
+			if enforceExit && disableExit {
+				return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.milestone.start", protocol.ErrorCodeEARG, "enforcement flags conflict", map[string]any{
+					"hint": "Use either --enforce-exit-policy or --no-enforce-exit-policy, not both.",
+				})
+			}
+			enforceValue := enforceExit
+			return runRoomMilestoneStartWithPolicy(cmd, workspace, sender, args[0], args[1], title, goal, objective, owner, scope, risks, excludes, deps, validators, requiredLanes, optionalLanes, &enforceValue, exits, proposal)
 		},
 	}
 	cmd.Flags().StringVar(&workspace, "workspace", ".", "Workspace root override")
@@ -828,6 +835,7 @@ func newRoomMilestoneStartCommand() *cobra.Command {
 	cmd.Flags().StringSliceVar(&requiredLanes, "required-lane", nil, "Required evidence lane for milestone exit (repeatable)")
 	cmd.Flags().StringSliceVar(&optionalLanes, "optional-lane", nil, "Optional evidence lane worth tracking but not required for exit (repeatable)")
 	cmd.Flags().BoolVar(&enforceExit, "enforce-exit-policy", false, "Require milestone pass review to satisfy the derived exit policy")
+	cmd.Flags().BoolVar(&disableExit, "no-enforce-exit-policy", false, "Explicitly disable milestone exit-policy enforcement")
 	cmd.Flags().StringSliceVar(&exits, "exit", nil, "Milestone exit criterion (repeatable)")
 	cmd.Flags().StringVar(&proposal, "proposal", "", "Milestone proposal id to promote into a real milestone")
 	return cmd
@@ -845,6 +853,7 @@ func newRoomMilestoneContractCommand() *cobra.Command {
 		requiredLanes []string
 		optionalLanes []string
 		enforceExit   bool
+		disableExit   bool
 		exits         []string
 	)
 	cmd := &cobra.Command{
@@ -852,7 +861,21 @@ func newRoomMilestoneContractCommand() *cobra.Command {
 		Short: "Update the explicit milestone contract",
 		Args:  cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runRoomMilestoneContractWithPolicy(cmd, workspace, sender, args[0], args[1], objective, risks, excludes, deps, validators, requiredLanes, optionalLanes, enforceExit, exits)
+			if enforceExit && disableExit {
+				return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.milestone.contract", protocol.ErrorCodeEARG, "enforcement flags conflict", map[string]any{
+					"hint": "Use either --enforce-exit-policy or --no-enforce-exit-policy, not both.",
+				})
+			}
+			var enforceValue *bool
+			if enforceExit {
+				val := true
+				enforceValue = &val
+			}
+			if disableExit {
+				val := false
+				enforceValue = &val
+			}
+			return runRoomMilestoneContractWithPolicy(cmd, workspace, sender, args[0], args[1], objective, risks, excludes, deps, validators, requiredLanes, optionalLanes, enforceValue, exits)
 		},
 	}
 	cmd.Flags().StringVar(&workspace, "workspace", ".", "Workspace root override")
@@ -865,6 +888,7 @@ func newRoomMilestoneContractCommand() *cobra.Command {
 	cmd.Flags().StringSliceVar(&requiredLanes, "required-lane", nil, "Required evidence lane for milestone exit (repeatable)")
 	cmd.Flags().StringSliceVar(&optionalLanes, "optional-lane", nil, "Optional evidence lane worth tracking but not required for exit (repeatable)")
 	cmd.Flags().BoolVar(&enforceExit, "enforce-exit-policy", false, "Require milestone pass review to satisfy the derived exit policy")
+	cmd.Flags().BoolVar(&disableExit, "no-enforce-exit-policy", false, "Explicitly disable milestone exit-policy enforcement")
 	cmd.Flags().StringSliceVar(&exits, "exit", nil, "Milestone exit criterion (repeatable)")
 	return cmd
 }
@@ -2736,6 +2760,7 @@ type roomMilestoneMeta struct {
 	RequiredEvidenceLanes []string `json:"required_evidence_lanes"`
 	OptionalEvidenceLanes []string `json:"optional_evidence_lanes"`
 	EnforceExitPolicy     bool     `json:"enforce_exit_policy"`
+	EnforceExitPolicySet  bool     `json:"-"`
 	ExitCriteria          []string `json:"exit_criteria"`
 }
 
@@ -3261,10 +3286,11 @@ func runRoomEpicNext(cmd *cobra.Command, workspace, roomID, epicID, actorID stri
 }
 
 func runRoomMilestoneStart(cmd *cobra.Command, workspace, sender, roomID, epicID, title, goal, objective, owner string, scope, risks, exclusions, dependencies, validatorsExpected, exitCriteria []string, proposalID string) error {
-	return runRoomMilestoneStartWithPolicy(cmd, workspace, sender, roomID, epicID, title, goal, objective, owner, scope, risks, exclusions, dependencies, validatorsExpected, nil, nil, false, exitCriteria, proposalID)
+	defaultEnforce := false
+	return runRoomMilestoneStartWithPolicy(cmd, workspace, sender, roomID, epicID, title, goal, objective, owner, scope, risks, exclusions, dependencies, validatorsExpected, nil, nil, &defaultEnforce, exitCriteria, proposalID)
 }
 
-func runRoomMilestoneStartWithPolicy(cmd *cobra.Command, workspace, sender, roomID, epicID, title, goal, objective, owner string, scope, risks, exclusions, dependencies, validatorsExpected, requiredEvidenceLanes, optionalEvidenceLanes []string, enforceExitPolicy bool, exitCriteria []string, proposalID string) error {
+func runRoomMilestoneStartWithPolicy(cmd *cobra.Command, workspace, sender, roomID, epicID, title, goal, objective, owner string, scope, risks, exclusions, dependencies, validatorsExpected, requiredEvidenceLanes, optionalEvidenceLanes []string, enforceExitPolicy *bool, exitCriteria []string, proposalID string) error {
 	absWorkspace, identity, store, roomID, summary, err := prepareRoomAgileCommand(cmd, "agentctl.room.milestone", workspace, sender, roomID)
 	if err != nil {
 		return err
@@ -3323,7 +3349,8 @@ func runRoomMilestoneStartWithPolicy(cmd *cobra.Command, workspace, sender, room
 		ValidatorsExpected:    validatorsExpected,
 		RequiredEvidenceLanes: requiredEvidenceLanes,
 		OptionalEvidenceLanes: optionalEvidenceLanes,
-		EnforceExitPolicy:     enforceExitPolicy,
+		EnforceExitPolicy:     enforceExitPolicy != nil && *enforceExitPolicy,
+		EnforceExitPolicySet:  enforceExitPolicy != nil,
 		ExitCriteria:          exitCriteria,
 	})
 	if err != nil {
@@ -3341,7 +3368,7 @@ func runRoomMilestoneStartWithPolicy(cmd *cobra.Command, workspace, sender, room
 		Kind:             agent.BoardMessageKindMilestone,
 		Priority:         agent.DefaultPriority,
 		Subject:          "Milestone: " + title,
-		Body:             buildRoomMilestoneBody(epicMsg.ID, title, meta.Goal, meta.Objective, meta.Owner, meta.Scope, meta.Risks, meta.Exclusions, meta.Dependencies, meta.ValidatorsExpected, meta.RequiredEvidenceLanes, meta.OptionalEvidenceLanes, meta.EnforceExitPolicy, meta.ExitCriteria),
+		Body:             buildRoomMilestoneBody(epicMsg.ID, title, meta.Goal, meta.Objective, meta.Owner, meta.Scope, meta.Risks, meta.Exclusions, meta.Dependencies, meta.ValidatorsExpected, meta.RequiredEvidenceLanes, meta.OptionalEvidenceLanes, &meta.EnforceExitPolicy, meta.ExitCriteria),
 	}
 	if err := store.SendMessage(cmd.Context(), msg); err != nil {
 		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.milestone.start", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
@@ -3360,10 +3387,10 @@ func runRoomMilestoneStartWithPolicy(cmd *cobra.Command, workspace, sender, room
 }
 
 func runRoomMilestoneContract(cmd *cobra.Command, workspace, sender, roomID, milestoneID, objective string, risks, exclusions, dependencies, validatorsExpected, exitCriteria []string) error {
-	return runRoomMilestoneContractWithPolicy(cmd, workspace, sender, roomID, milestoneID, objective, risks, exclusions, dependencies, validatorsExpected, nil, nil, false, exitCriteria)
+	return runRoomMilestoneContractWithPolicy(cmd, workspace, sender, roomID, milestoneID, objective, risks, exclusions, dependencies, validatorsExpected, nil, nil, nil, exitCriteria)
 }
 
-func runRoomMilestoneContractWithPolicy(cmd *cobra.Command, workspace, sender, roomID, milestoneID, objective string, risks, exclusions, dependencies, validatorsExpected, requiredEvidenceLanes, optionalEvidenceLanes []string, enforceExitPolicy bool, exitCriteria []string) error {
+func runRoomMilestoneContractWithPolicy(cmd *cobra.Command, workspace, sender, roomID, milestoneID, objective string, risks, exclusions, dependencies, validatorsExpected, requiredEvidenceLanes, optionalEvidenceLanes []string, enforceExitPolicy *bool, exitCriteria []string) error {
 	absWorkspace, identity, store, roomID, summary, err := prepareRoomAgileCommand(cmd, "agentctl.room.milestone", workspace, sender, roomID)
 	if err != nil {
 		return err
@@ -3389,7 +3416,8 @@ func runRoomMilestoneContractWithPolicy(cmd *cobra.Command, workspace, sender, r
 		ValidatorsExpected:    validatorsExpected,
 		RequiredEvidenceLanes: requiredEvidenceLanes,
 		OptionalEvidenceLanes: optionalEvidenceLanes,
-		EnforceExitPolicy:     enforceExitPolicy,
+		EnforceExitPolicy:     enforceExitPolicy != nil && *enforceExitPolicy,
+		EnforceExitPolicySet:  enforceExitPolicy != nil,
 		ExitCriteria:          exitCriteria,
 	})
 	if err != nil {
@@ -3397,7 +3425,7 @@ func runRoomMilestoneContractWithPolicy(cmd *cobra.Command, workspace, sender, r
 			"hint": "Use supported validator values: review, test, integration, user_test, manual_check, audit.",
 		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
 	}
-	if patch.Objective == "" && len(patch.Risks) == 0 && len(patch.Exclusions) == 0 && len(patch.Dependencies) == 0 && len(patch.ValidatorsExpected) == 0 && len(patch.RequiredEvidenceLanes) == 0 && len(patch.OptionalEvidenceLanes) == 0 && !patch.EnforceExitPolicy && len(patch.ExitCriteria) == 0 {
+	if patch.Objective == "" && len(patch.Risks) == 0 && len(patch.Exclusions) == 0 && len(patch.Dependencies) == 0 && len(patch.ValidatorsExpected) == 0 && len(patch.RequiredEvidenceLanes) == 0 && len(patch.OptionalEvidenceLanes) == 0 && !patch.EnforceExitPolicySet && len(patch.ExitCriteria) == 0 {
 		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.milestone.contract", protocol.ErrorCodeEARG, "at least one contract field is required", map[string]any{
 			"hint": "Pass --objective, --risk, --exclude, --dependency, --validator, --required-lane, --optional-lane, or --exit.",
 		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
@@ -3412,7 +3440,7 @@ func runRoomMilestoneContractWithPolicy(cmd *cobra.Command, workspace, sender, r
 		Kind:             agent.BoardMessageKindMilestoneContract,
 		Priority:         agent.DefaultPriority,
 		Subject:          "Milestone Contract: " + strings.TrimPrefix(strings.TrimSpace(milestoneMsg.Subject), "Milestone: "),
-		Body:             buildRoomMilestoneBody("", "", "", patch.Objective, "", nil, patch.Risks, patch.Exclusions, patch.Dependencies, patch.ValidatorsExpected, patch.RequiredEvidenceLanes, patch.OptionalEvidenceLanes, patch.EnforceExitPolicy, patch.ExitCriteria),
+		Body:             buildRoomMilestoneBody("", "", "", patch.Objective, "", nil, patch.Risks, patch.Exclusions, patch.Dependencies, patch.ValidatorsExpected, patch.RequiredEvidenceLanes, patch.OptionalEvidenceLanes, roomMilestoneEnforcePolicyPtr(patch), patch.ExitCriteria),
 	}
 	if err := store.SendMessage(cmd.Context(), msg); err != nil {
 		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.milestone.contract", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
@@ -5136,7 +5164,7 @@ func parseRoomEpicQuestionBody(body string) roomEpicQuestionMeta {
 	return meta
 }
 
-func buildRoomMilestoneBody(epicID, title, goal, objective, owner string, scope, risks, exclusions, dependencies, validatorsExpected, requiredEvidenceLanes, optionalEvidenceLanes []string, enforceExitPolicy bool, exitCriteria []string) string {
+func buildRoomMilestoneBody(epicID, title, goal, objective, owner string, scope, risks, exclusions, dependencies, validatorsExpected, requiredEvidenceLanes, optionalEvidenceLanes []string, enforceExitPolicy *bool, exitCriteria []string) string {
 	var b strings.Builder
 	if strings.TrimSpace(epicID) != "" {
 		fmt.Fprintf(&b, "EpicID: %s\n", strings.TrimSpace(epicID))
@@ -5160,8 +5188,8 @@ func buildRoomMilestoneBody(epicID, title, goal, objective, owner string, scope,
 	appendRoomSection(&b, "ValidatorsExpected", validatorsExpected)
 	appendRoomSection(&b, "RequiredEvidenceLanes", requiredEvidenceLanes)
 	appendRoomSection(&b, "OptionalEvidenceLanes", optionalEvidenceLanes)
-	if enforceExitPolicy {
-		fmt.Fprintf(&b, "EnforceExitPolicy: true\n")
+	if enforceExitPolicy != nil {
+		fmt.Fprintf(&b, "EnforceExitPolicy: %t\n", *enforceExitPolicy)
 	}
 	appendRoomSection(&b, "ExitCriteria", exitCriteria)
 	if strings.TrimSpace(epicID) != "" || strings.TrimSpace(title) != "" {
@@ -5247,6 +5275,7 @@ func parseRoomMilestoneBody(body string) roomMilestoneMeta {
 			meta.Owner = value
 		case "EnforceExitPolicy":
 			meta.EnforceExitPolicy = strings.EqualFold(value, "true")
+			meta.EnforceExitPolicySet = true
 		}
 	}
 	return meta
@@ -5633,8 +5662,9 @@ func mergeRoomMilestoneMeta(base roomMilestoneMeta, patch roomMilestoneMeta) roo
 	if len(patch.OptionalEvidenceLanes) > 0 {
 		base.OptionalEvidenceLanes = mergeRoomList(base.OptionalEvidenceLanes, patch.OptionalEvidenceLanes, true)
 	}
-	if patch.EnforceExitPolicy {
-		base.EnforceExitPolicy = true
+	if patch.EnforceExitPolicySet {
+		base.EnforceExitPolicy = patch.EnforceExitPolicy
+		base.EnforceExitPolicySet = true
 	}
 	if len(base.OptionalEvidenceLanes) > 0 && len(base.RequiredEvidenceLanes) > 0 {
 		requiredSet := make(map[string]struct{}, len(base.RequiredEvidenceLanes))
@@ -5654,6 +5684,14 @@ func mergeRoomMilestoneMeta(base roomMilestoneMeta, patch roomMilestoneMeta) roo
 		base.ExitCriteria = mergeRoomList(base.ExitCriteria, patch.ExitCriteria, true)
 	}
 	return base
+}
+
+func roomMilestoneEnforcePolicyPtr(meta roomMilestoneMeta) *bool {
+	if !meta.EnforceExitPolicySet {
+		return nil
+	}
+	value := meta.EnforceExitPolicy
+	return &value
 }
 
 func buildRoomStoryValidationBody(epicID, milestoneID, storyID, validatorType, status, summaryText, artifactPath, artifactDigest, commandText, notes string, relatedStoryIDs []string) string {

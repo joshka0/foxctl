@@ -4213,6 +4213,9 @@ func handleRoomAgileTool(ctx context.Context, req mcp.CallToolRequest) (*mcp.Cal
 		if epicID == "" || (title == "" && proposalID == "") {
 			return mcp.NewToolResultError("epic_id and either title or proposal_id are required for room_agile milestone_start"), nil
 		}
+		if getBoolArg(args, "enforce_exit_policy", false) && getBoolArg(args, "no_enforce_exit_policy", false) {
+			return mcp.NewToolResultError("enforce_exit_policy and no_enforce_exit_policy cannot both be true for room_agile milestone_start"), nil
+		}
 		argv = []string{"milestone", "start", roomID, epicID}
 		if title != "" {
 			argv = append(argv, title)
@@ -4230,12 +4233,16 @@ func handleRoomAgileTool(ctx context.Context, req mcp.CallToolRequest) (*mcp.Cal
 		argv = appendStringSliceFlagArgs(argv, "--required-lane", getStringSliceArg(args, "required_lane"))
 		argv = appendStringSliceFlagArgs(argv, "--optional-lane", getStringSliceArg(args, "optional_lane"))
 		argv = appendBoolFlagArgs(argv, "--enforce-exit-policy", getBoolArg(args, "enforce_exit_policy", false))
+		argv = appendBoolFlagArgs(argv, "--no-enforce-exit-policy", getBoolArg(args, "no_enforce_exit_policy", false))
 		argv = appendStringSliceFlagArgs(argv, "--exit", getStringSliceArg(args, "exit"))
 		argv = appendStringFlagArgs(argv, "--proposal", proposalID)
 	case "milestone_contract":
 		milestoneID := getStringArg(args, "milestone_id", "")
 		if milestoneID == "" {
 			return mcp.NewToolResultError("milestone_id is required for room_agile milestone_contract"), nil
+		}
+		if getBoolArg(args, "enforce_exit_policy", false) && getBoolArg(args, "no_enforce_exit_policy", false) {
+			return mcp.NewToolResultError("enforce_exit_policy and no_enforce_exit_policy cannot both be true for room_agile milestone_contract"), nil
 		}
 		argv = []string{"milestone", "contract", roomID, milestoneID}
 		argv = appendStringFlagArgs(argv, "--workspace", workspace)
@@ -4248,6 +4255,7 @@ func handleRoomAgileTool(ctx context.Context, req mcp.CallToolRequest) (*mcp.Cal
 		argv = appendStringSliceFlagArgs(argv, "--required-lane", getStringSliceArg(args, "required_lane"))
 		argv = appendStringSliceFlagArgs(argv, "--optional-lane", getStringSliceArg(args, "optional_lane"))
 		argv = appendBoolFlagArgs(argv, "--enforce-exit-policy", getBoolArg(args, "enforce_exit_policy", false))
+		argv = appendBoolFlagArgs(argv, "--no-enforce-exit-policy", getBoolArg(args, "no_enforce_exit_policy", false))
 		argv = appendStringSliceFlagArgs(argv, "--exit", getStringSliceArg(args, "exit"))
 	case "milestone_criteria":
 		milestoneID := getStringArg(args, "milestone_id", "")

@@ -2341,14 +2341,15 @@ func TestRunRoomMilestoneContractStartAndUpdate(t *testing.T) {
 	}
 
 	cmd, out = newRoomTestCommand(ctx)
-	if err := runRoomMilestoneStartWithPolicy(cmd, workspace, "human-a", "alpha", epicID, "Foundation", "Ship the first contract slice", "Make milestone intent explicit.", "human-a", []string{"contracts", "work-pack sync"}, []string{"send-confirm gap", "send-confirm gap"}, []string{"GUI changes"}, []string{"epic finalized"}, []string{"audit", "review", "review"}, []string{"integration", "review", "review"}, []string{"integration", "user_test"}, false, []string{"contract visible", "contract visible"}, ""); err != nil {
+	enforceFalse := false
+	if err := runRoomMilestoneStartWithPolicy(cmd, workspace, "human-a", "alpha", epicID, "Foundation", "Ship the first contract slice", "Make milestone intent explicit.", "human-a", []string{"contracts", "work-pack sync"}, []string{"send-confirm gap", "send-confirm gap"}, []string{"GUI changes"}, []string{"epic finalized"}, []string{"audit", "review", "review"}, []string{"integration", "review", "review"}, []string{"integration", "user_test"}, &enforceFalse, []string{"contract visible", "contract visible"}, ""); err != nil {
 		t.Fatalf("runRoomMilestoneStart: %v", err)
 	}
 	data := decodeRoomEnvelope(t, out)
 	milestoneID := data["milestone_id"].(string)
 
 	cmd, out = newRoomTestCommand(ctx)
-	if err := runRoomMilestoneContractWithPolicy(cmd, workspace, "human-a", "alpha", milestoneID, "Updated objective.", []string{"multi-epic rooms"}, []string{"transport rewrite"}, []string{"send confirm"}, []string{"test", "review"}, []string{"test"}, []string{"manual_check", "review"}, false, []string{"summary written"}); err != nil {
+	if err := runRoomMilestoneContractWithPolicy(cmd, workspace, "human-a", "alpha", milestoneID, "Updated objective.", []string{"multi-epic rooms"}, []string{"transport rewrite"}, []string{"send confirm"}, []string{"test", "review"}, []string{"test"}, []string{"manual_check", "review"}, &enforceFalse, []string{"summary written"}); err != nil {
 		t.Fatalf("runRoomMilestoneContract: %v", err)
 	}
 
@@ -3184,7 +3185,8 @@ func TestRunRoomMilestoneEvidencePolicyGuidesHealthAndNext(t *testing.T) {
 	epicID, milestoneID, storyID := setupRoomAgileWorkpackFixture(t, ctx, workspace)
 
 	cmd, _ := newRoomTestCommand(ctx)
-	if err := runRoomMilestoneContractWithPolicy(cmd, workspace, "human-a", "alpha", milestoneID, "Foundation objective.", nil, nil, nil, []string{"review"}, []string{"integration"}, []string{"user_test"}, false, []string{"story validated"}); err != nil {
+	enforceFalse := false
+	if err := runRoomMilestoneContractWithPolicy(cmd, workspace, "human-a", "alpha", milestoneID, "Foundation objective.", nil, nil, nil, []string{"review"}, []string{"integration"}, []string{"user_test"}, &enforceFalse, []string{"story validated"}); err != nil {
 		t.Fatalf("runRoomMilestoneContractWithPolicy: %v", err)
 	}
 
@@ -3261,7 +3263,8 @@ func TestRunRoomMilestoneExitPolicyStates(t *testing.T) {
 		epicID, milestoneID, storyID := setupRoomAgileWorkpackFixture(t, ctx, workspace)
 
 		cmd, _ := newRoomTestCommand(ctx)
-		if err := runRoomMilestoneContractWithPolicy(cmd, workspace, "human-a", "alpha", milestoneID, "Foundation objective.", nil, nil, nil, []string{"review"}, []string{"review"}, nil, false, []string{"story validated"}); err != nil {
+		enforceFalse := false
+		if err := runRoomMilestoneContractWithPolicy(cmd, workspace, "human-a", "alpha", milestoneID, "Foundation objective.", nil, nil, nil, []string{"review"}, []string{"review"}, nil, &enforceFalse, []string{"story validated"}); err != nil {
 			t.Fatalf("runRoomMilestoneContractWithPolicy: %v", err)
 		}
 		cmd, _ = newRoomTestCommand(ctx)
@@ -3330,7 +3333,8 @@ func TestRunRoomMilestoneExitPolicyStates(t *testing.T) {
 		epicID, milestoneID, storyID := setupRoomAgileWorkpackFixture(t, ctx, workspace)
 
 		cmd, _ := newRoomTestCommand(ctx)
-		if err := runRoomMilestoneContractWithPolicy(cmd, workspace, "human-a", "alpha", milestoneID, "Foundation objective.", nil, nil, nil, []string{"review"}, []string{"review"}, nil, false, []string{"story validated"}); err != nil {
+		enforceFalse := false
+		if err := runRoomMilestoneContractWithPolicy(cmd, workspace, "human-a", "alpha", milestoneID, "Foundation objective.", nil, nil, nil, []string{"review"}, []string{"review"}, nil, &enforceFalse, []string{"story validated"}); err != nil {
 			t.Fatalf("runRoomMilestoneContractWithPolicy: %v", err)
 		}
 		cmd, _ = newRoomTestCommand(ctx)
@@ -3388,7 +3392,8 @@ func TestRunRoomMilestoneExitEnforcement(t *testing.T) {
 		_, milestoneID, _ := setupRoomAgileWorkpackFixture(t, ctx, workspace)
 
 		cmd, _ := newRoomTestCommand(ctx)
-		if err := runRoomMilestoneContractWithPolicy(cmd, workspace, "human-a", "alpha", milestoneID, "", nil, nil, nil, nil, nil, nil, true, nil); err != nil {
+		enforceTrue := true
+		if err := runRoomMilestoneContractWithPolicy(cmd, workspace, "human-a", "alpha", milestoneID, "", nil, nil, nil, nil, nil, nil, &enforceTrue, nil); err != nil {
 			t.Fatalf("runRoomMilestoneContractWithPolicy: %v", err)
 		}
 
@@ -3425,7 +3430,8 @@ func TestRunRoomMilestoneExitEnforcement(t *testing.T) {
 		_, milestoneID, storyID := setupRoomAgileWorkpackFixture(t, ctx, workspace)
 
 		cmd, _ := newRoomTestCommand(ctx)
-		if err := runRoomMilestoneContractWithPolicy(cmd, workspace, "human-a", "alpha", milestoneID, "", nil, nil, nil, nil, nil, nil, true, nil); err != nil {
+		enforceTrue := true
+		if err := runRoomMilestoneContractWithPolicy(cmd, workspace, "human-a", "alpha", milestoneID, "", nil, nil, nil, nil, nil, nil, &enforceTrue, nil); err != nil {
 			t.Fatalf("runRoomMilestoneContractWithPolicy: %v", err)
 		}
 		cmd, _ = newRoomTestCommand(ctx)
@@ -3455,7 +3461,8 @@ func TestRunRoomMilestoneExitEnforcement(t *testing.T) {
 		_, milestoneID, storyID := setupRoomAgileWorkpackFixture(t, ctx, workspace)
 
 		cmd, _ := newRoomTestCommand(ctx)
-		if err := runRoomMilestoneContractWithPolicy(cmd, workspace, "human-a", "alpha", milestoneID, "", nil, nil, nil, nil, nil, nil, true, nil); err != nil {
+		enforceTrue := true
+		if err := runRoomMilestoneContractWithPolicy(cmd, workspace, "human-a", "alpha", milestoneID, "", nil, nil, nil, nil, nil, nil, &enforceTrue, nil); err != nil {
 			t.Fatalf("runRoomMilestoneContractWithPolicy: %v", err)
 		}
 		cmd, _ = newRoomTestCommand(ctx)
@@ -3487,6 +3494,105 @@ func TestRunRoomMilestoneExitEnforcement(t *testing.T) {
 			t.Fatalf("exit_policy_status=%v want ready_for_summary", got)
 		}
 	})
+}
+
+func TestRunRoomMilestoneExitEnforcementToggle(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	ctx := context.Background()
+	workspace := t.TempDir()
+
+	_, milestoneID, _ := setupRoomAgileWorkpackFixture(t, ctx, workspace)
+
+	enforceTrue := true
+	cmd, _ := newRoomTestCommand(ctx)
+	if err := runRoomMilestoneContractWithPolicy(cmd, workspace, "human-a", "alpha", milestoneID, "", nil, nil, nil, nil, nil, nil, &enforceTrue, nil); err != nil {
+		t.Fatalf("enable enforcement: %v", err)
+	}
+
+	cmd, out := newRoomTestCommand(ctx)
+	if err := runRoomMilestoneShow(cmd, workspace, "alpha", milestoneID, 100); err != nil {
+		t.Fatalf("runRoomMilestoneShow enabled: %v", err)
+	}
+	milestone := decodeRoomEnvelope(t, out)["milestone"].(map[string]any)
+	if got := milestone["enforce_exit_policy"]; got != true {
+		t.Fatalf("enforce_exit_policy=%v want true", got)
+	}
+
+	cmd, _ = newRoomTestCommand(ctx)
+	if err := runRoomMilestoneContractWithPolicy(cmd, workspace, "human-a", "alpha", milestoneID, "Updated objective.", nil, nil, nil, nil, nil, nil, nil, nil); err != nil {
+		t.Fatalf("omit enforcement update: %v", err)
+	}
+
+	cmd, out = newRoomTestCommand(ctx)
+	if err := runRoomMilestoneShow(cmd, workspace, "alpha", milestoneID, 100); err != nil {
+		t.Fatalf("runRoomMilestoneShow unchanged: %v", err)
+	}
+	milestone = decodeRoomEnvelope(t, out)["milestone"].(map[string]any)
+	if got := milestone["enforce_exit_policy"]; got != true {
+		t.Fatalf("enforce_exit_policy after omit=%v want true", got)
+	}
+
+	enforceFalse := false
+	cmd, _ = newRoomTestCommand(ctx)
+	if err := runRoomMilestoneContractWithPolicy(cmd, workspace, "human-a", "alpha", milestoneID, "", nil, nil, nil, nil, nil, nil, &enforceFalse, nil); err != nil {
+		t.Fatalf("disable enforcement: %v", err)
+	}
+
+	cmd, out = newRoomTestCommand(ctx)
+	if err := runRoomMilestoneShow(cmd, workspace, "alpha", milestoneID, 100); err != nil {
+		t.Fatalf("runRoomMilestoneShow disabled: %v", err)
+	}
+	milestone = decodeRoomEnvelope(t, out)["milestone"].(map[string]any)
+	if got := milestone["enforce_exit_policy"]; got != false {
+		t.Fatalf("enforce_exit_policy=%v want false", got)
+	}
+}
+
+// Regression: Cobra milestone start must default exit enforcement off when neither
+// --enforce-exit-policy nor --no-enforce-exit-policy is passed (see room milestone toggle spec).
+func TestRoomMilestoneStartCLI_DefaultEnforceExitPolicyFalse(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	ctx := context.Background()
+	workspace := t.TempDir()
+
+	cmd, _ := newRoomTestCommand(ctx)
+	if err := runRoomCreate(cmd, workspace, "alpha", "Alpha", "", []string{"human-a=coordinator"}); err != nil {
+		t.Fatalf("runRoomCreate: %v", err)
+	}
+	cmd, out := newRoomTestCommand(ctx)
+	if err := runRoomEpicStart(cmd, workspace, "human-a", "alpha", "Agile", "Goal", "human-a", "", "", []string{"scope"}, []string{"ok"}); err != nil {
+		t.Fatalf("runRoomEpicStart: %v", err)
+	}
+	epicID := decodeRoomEnvelope(t, out)["epic_id"].(string)
+	cmd, _ = newRoomTestCommand(ctx)
+	if err := runRoomEpicFinalize(cmd, workspace, "human-a", "alpha", epicID, "Brief ready."); err != nil {
+		t.Fatalf("runRoomEpicFinalize: %v", err)
+	}
+
+	root := newRoomCommand()
+	buf := &bytes.Buffer{}
+	root.SetContext(ctx)
+	root.SetOut(buf)
+	root.SetErr(buf)
+	root.SetArgs([]string{
+		"milestone", "start", "alpha", epicID, "M1",
+		"--workspace", workspace,
+		"--sender", "human-a",
+		"--goal", "g",
+	})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("milestone start (cobra): %v", err)
+	}
+	milestoneID := decodeRoomEnvelope(t, buf)["milestone_id"].(string)
+
+	cmd, out = newRoomTestCommand(ctx)
+	if err := runRoomMilestoneShow(cmd, workspace, "alpha", milestoneID, 100); err != nil {
+		t.Fatalf("runRoomMilestoneShow: %v", err)
+	}
+	milestone := decodeRoomEnvelope(t, out)["milestone"].(map[string]any)
+	if got := milestone["enforce_exit_policy"]; got != false {
+		t.Fatalf("enforce_exit_policy=%v want false (CLI default)", got)
+	}
 }
 
 func TestRunRoomEpicResumeAndNextDiscovery(t *testing.T) {

@@ -177,8 +177,10 @@ Milestone evidence policy is guidance-only in v1:
 If a room wants strict pass-review discipline, milestone contract can opt into enforcement:
 
 - `--enforce-exit-policy`
+- `--no-enforce-exit-policy`
 - when enabled, `milestone review ... pass ...` is rejected unless the milestone exit policy is `ready_for_review` or `ready_to_exit`
 - `block` verdicts remain allowed
+- milestone contract updates can explicitly turn enforcement back off again with `--no-enforce-exit-policy`
 
 Then add explicit acceptance criteria:
 
