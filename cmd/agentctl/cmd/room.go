@@ -42,6 +42,7 @@ func newRoomCommand() *cobra.Command {
 		newRoomListCommand(),
 		newRoomShowCommand(),
 		newRoomStatusCommand(),
+		newRoomPulseCommand(),
 		newRoomInboxCommand(),
 		newRoomSendCommand(),
 		newRoomAckCommand(),
@@ -423,6 +424,28 @@ func newRoomStatusCommand() *cobra.Command {
 	return cmd
 }
 
+func newRoomPulseCommand() *cobra.Command {
+	var (
+		workspace string
+		actorID   string
+		limit     int
+		only      []string
+	)
+	cmd := &cobra.Command{
+		Use:   "pulse <room-id>",
+		Short: "Show a room-wide epic coordinator pulse",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runRoomPulse(cmd, workspace, args[0], actorID, limit, only)
+		},
+	}
+	cmd.Flags().StringVar(&workspace, "workspace", ".", "Workspace root override")
+	cmd.Flags().StringVar(&actorID, "actor", "", "Actor id used for actor-specific next-action derivation")
+	cmd.Flags().IntVar(&limit, "limit", 20, "Maximum room-wide top items to return")
+	cmd.Flags().StringSliceVar(&only, "only", nil, "Filter epic pulse lanes (all, blocked, intake, review, stale, ready)")
+	return cmd
+}
+
 func newRoomInboxCommand() *cobra.Command {
 	var (
 		workspace         string
@@ -432,13 +455,14 @@ func newRoomInboxCommand() *cobra.Command {
 		grouped           bool
 		idsOnly           bool
 		includeBroadcasts bool
+		compact           bool
 	)
 	cmd := &cobra.Command{
 		Use:   "inbox <room-id>",
 		Short: "Show actionable room messages for one participant",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runRoomInbox(cmd, workspace, args[0], actorID, limit, filter, grouped, idsOnly, includeBroadcasts)
+			return runRoomInbox(cmd, workspace, args[0], actorID, limit, filter, grouped, idsOnly, includeBroadcasts, compact)
 		},
 	}
 	cmd.Flags().StringVar(&workspace, "workspace", ".", "Workspace root override")
@@ -448,6 +472,7 @@ func newRoomInboxCommand() *cobra.Command {
 	cmd.Flags().BoolVar(&grouped, "grouped", false, "Group entries by category")
 	cmd.Flags().BoolVar(&idsOnly, "ids-only", false, "Return only matching message ids")
 	cmd.Flags().BoolVar(&includeBroadcasts, "include-broadcasts", false, "Include plain broadcast messages in the default all filter")
+	cmd.Flags().BoolVar(&compact, "compact", true, "Omit bulky room fields (task_ids, members, participants) from the response; use --compact=false for the full room summary")
 	return cmd
 }
 
@@ -579,6 +604,7 @@ func newRoomEpicCommand() *cobra.Command {
 		newRoomEpicAnswerCommand(),
 		newRoomEpicFinalizeCommand(),
 		newRoomEpicShapeCommand(),
+		newRoomEpicCheckpointCommand(),
 		newRoomEpicShowCommand(),
 		newRoomEpicResumeCommand(),
 		newRoomEpicHealthCommand(),
@@ -636,6 +662,32 @@ func newRoomEpicShowCommand() *cobra.Command {
 	}
 	cmd.Flags().StringVar(&workspace, "workspace", ".", "Workspace root override")
 	cmd.Flags().IntVar(&limit, "limit", 250, "Maximum room messages to inspect")
+	return cmd
+}
+
+func newRoomEpicCheckpointCommand() *cobra.Command {
+	var (
+		workspace string
+		sender    string
+		actorID   string
+		label     string
+		note      string
+		limit     int
+	)
+	cmd := &cobra.Command{
+		Use:   "checkpoint <room-id> <epic-id>",
+		Short: "Persist a resumable checkpoint snapshot for one epic",
+		Args:  cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runRoomEpicCheckpoint(cmd, workspace, sender, args[0], args[1], actorID, label, note, limit)
+		},
+	}
+	cmd.Flags().StringVar(&workspace, "workspace", ".", "Workspace root override")
+	cmd.Flags().StringVar(&sender, "sender", "", "Coordinator actor or participant id (defaults to current tmux/zellij pane)")
+	cmd.Flags().StringVar(&actorID, "actor", "", "Actor id for deriving next actions (defaults to coordinator lane)")
+	cmd.Flags().StringVar(&label, "label", "", "Optional checkpoint label")
+	cmd.Flags().StringVar(&note, "note", "", "Optional coordinator note")
+	cmd.Flags().IntVar(&limit, "limit", 5, "Maximum next-action items to embed in the checkpoint")
 	return cmd
 }
 
@@ -2075,6 +2127,42 @@ func runRoomStatus(cmd *cobra.Command, workspace, roomID string, limit int, stal
 	}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
 }
 
+func runRoomPulse(cmd *cobra.Command, workspace, roomID, actorID string, limit int, only []string) error {
+	absWorkspace, err := resolveRoomWorkspace(workspace)
+	if err != nil {
+		return err
+	}
+	if limit <= 0 {
+		limit = 20
+	}
+	store, err := openRoomBoardStore(cmd.Context())
+	if err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.pulse", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	defer store.Close()
+
+	summary, messages, err := loadRoomState(cmd.Context(), store, absWorkspace, roomID, "", roomTaskScanLimit)
+	if err != nil {
+		code := protocol.ErrorCodeERuntime
+		if errors.Is(err, blackboard.ErrRoomNotFound) {
+			code = protocol.ErrorCodeENotFound
+		}
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.pulse", code, err.Error(), map[string]any{
+			"hint": "Create the room first or check the room id.",
+		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+
+	filters, err := normalizeRoomPulseFilters(only)
+	if err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.pulse", protocol.ErrorCodeEARG, err.Error(), map[string]any{
+			"hint": "Use comma-separated or repeated --only values from: all, blocked, intake, review, stale, ready.",
+		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+
+	pulse := buildRoomCoordinatorPulse(summary, messages, actorID, limit, filters)
+	return protocol.WriteOK(cmd.OutOrStdout(), "agentctl.room.pulse", pulse, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+}
+
 type roomInboxEntry struct {
 	ID        string                   `json:"id"`
 	Sender    string                   `json:"sender"`
@@ -2089,7 +2177,7 @@ type roomInboxEntry struct {
 	Message   agent.BoardMessage       `json:"message"`
 }
 
-func runRoomInbox(cmd *cobra.Command, workspace, roomID, actorID string, limit int, filter string, grouped, idsOnly, includeBroadcasts bool) error {
+func runRoomInbox(cmd *cobra.Command, workspace, roomID, actorID string, limit int, filter string, grouped, idsOnly, includeBroadcasts, compact bool) error {
 	absWorkspace, err := resolveRoomWorkspace(workspace)
 	if err != nil {
 		return err
@@ -2116,13 +2204,17 @@ func runRoomInbox(cmd *cobra.Command, workspace, roomID, actorID string, limit i
 	}
 
 	entries := buildRoomInboxEntries(identity.Sender, messages, strings.TrimSpace(filter), includeBroadcasts)
+	roomPayload := any(summary)
+	if compact {
+		roomPayload = agent.CompactRoomSummaryForInbox(summary)
+	}
 	if idsOnly {
 		ids := make([]string, 0, len(entries))
 		for _, entry := range entries {
 			ids = append(ids, entry.ID)
 		}
 		return protocol.WriteOK(cmd.OutOrStdout(), "agentctl.room.inbox", map[string]any{
-			"room":   summary,
+			"room":   roomPayload,
 			"actor":  identity.Sender,
 			"filter": normalizeRoomInboxFilter(filter),
 			"ids":    ids,
@@ -2130,7 +2222,7 @@ func runRoomInbox(cmd *cobra.Command, workspace, roomID, actorID string, limit i
 		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
 	}
 	data := map[string]any{
-		"room":    summary,
+		"room":    roomPayload,
 		"actor":   identity.Sender,
 		"filter":  normalizeRoomInboxFilter(filter),
 		"count":   len(entries),
@@ -2747,6 +2839,18 @@ type roomEpicQuestionMeta struct {
 	Question string `json:"question"`
 }
 
+type roomEpicCheckpointMeta struct {
+	Actor                 string           `json:"actor"`
+	Label                 string           `json:"label"`
+	Phase                 string           `json:"phase"`
+	Summary               string           `json:"summary"`
+	CurrentMilestoneID    string           `json:"current_milestone_id"`
+	CurrentMilestoneTitle string           `json:"current_milestone_title"`
+	Reason                string           `json:"reason"`
+	Note                  string           `json:"note"`
+	NextItems             []map[string]any `json:"next_items"`
+}
+
 type roomMilestoneMeta struct {
 	EpicID                string   `json:"epic_id"`
 	Goal                  string   `json:"goal"`
@@ -3154,6 +3258,91 @@ func runRoomEpicShow(cmd *cobra.Command, workspace, roomID, epicID string, limit
 	}
 	return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.epic.show", protocol.ErrorCodeENotFound, fmt.Sprintf("epic %q not found", epicID), map[string]any{
 		"hint": "Run `agentctl room epic show <room-id>` to list available epics.",
+	}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+}
+
+func runRoomEpicCheckpoint(cmd *cobra.Command, workspace, sender, roomID, epicID, actorID, label, note string, limit int) error {
+	absWorkspace, identity, store, roomID, summary, err := prepareRoomAgileCommand(cmd, "agentctl.room.epic.checkpoint", workspace, sender, roomID)
+	if err != nil {
+		return err
+	}
+	defer store.Close()
+	if !roomMemberHasRole(summary.Members, identity.Sender, "coordinator") {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.epic.checkpoint", protocol.ErrorCodeEARG, "epic checkpoints require coordinator role", map[string]any{
+			"hint": "Run the command as the room coordinator, or join the room with role=coordinator first.",
+		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	if limit <= 0 {
+		limit = 5
+	}
+
+	_, messages, err := loadRoomState(cmd.Context(), store, absWorkspace, roomID, "", roomTaskScanLimit)
+	if err != nil {
+		code := protocol.ErrorCodeERuntime
+		if errors.Is(err, blackboard.ErrRoomNotFound) {
+			code = protocol.ErrorCodeENotFound
+		}
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.epic.checkpoint", code, err.Error(), map[string]any{
+			"hint": "Create the room first or check the room id.",
+		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+
+	epic := roomEpicViewByID(buildRoomEpicViews(messages), epicID)
+	if epic == nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.epic.checkpoint", protocol.ErrorCodeENotFound, fmt.Sprintf("epic %q not found", epicID), map[string]any{
+			"hint": "Run `agentctl room epic show <room-id>` to list available epics.",
+		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+
+	resume := buildRoomEpicContinuity(summary, messages, epic)
+	laneActor := strings.TrimSpace(actorID)
+	if laneActor == "" {
+		laneActor = roomCoordinatorActorID(summary.Members)
+		if laneActor == "" {
+			laneActor = "coordinator"
+		}
+	}
+	nextItems, reason := buildRoomEpicNextItems(summary, messages, epic, resume, laneActor)
+	if limit < len(nextItems) {
+		nextItems = append([]map[string]any(nil), nextItems[:limit]...)
+	}
+	now := time.Now().UTC()
+	meta := roomEpicCheckpointMeta{
+		Actor:                 laneActor,
+		Label:                 firstNonEmpty(strings.TrimSpace(label), roomEpicCheckpointLabel(firstNonEmpty(stringField(resume, "phase"), stringField(epic, "status")), stringField(resume, "current_milestone_title"), now)),
+		Phase:                 firstNonEmpty(stringField(resume, "phase"), stringField(epic, "status")),
+		Summary:               stringField(resume, "summary"),
+		CurrentMilestoneID:    stringField(resume, "current_milestone_id"),
+		CurrentMilestoneTitle: stringField(resume, "current_milestone_title"),
+		Reason:                reason,
+		Note:                  strings.TrimSpace(note),
+		NextItems:             cloneRoomMapSlice(nextItems),
+	}
+
+	msg := &agent.BoardMessage{
+		WorkspaceID:      absWorkspace,
+		Stream:           agent.RoomStreamName(roomID),
+		Sender:           identity.Sender,
+		Recipient:        agent.BroadcastRecipient,
+		Kind:             agent.BoardMessageKindEpicCheckpoint,
+		Priority:         agent.DefaultPriority,
+		Subject:          "Epic Checkpoint: " + meta.Label,
+		Body:             buildRoomEpicCheckpointBody(meta),
+		RelatedMessageID: epicID,
+	}
+	if err := store.SendMessage(cmd.Context(), msg); err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.epic.checkpoint", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	if err := syncRoomAgileWorkpack(cmd.Context(), store, absWorkspace, roomID, epicID); err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.epic.checkpoint", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+
+	epic = roomEpicViewByID(buildRoomEpicViews(append(messages, *msg)), epicID)
+	return protocol.WriteOK(cmd.OutOrStdout(), "agentctl.room.epic.checkpoint", map[string]any{
+		"room":       summary,
+		"epic":       epic,
+		"resume":     resume,
+		"checkpoint": mapField(epic, "latest_checkpoint"),
 	}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
 }
 
@@ -5164,6 +5353,98 @@ func parseRoomEpicQuestionBody(body string) roomEpicQuestionMeta {
 	return meta
 }
 
+func buildRoomEpicCheckpointBody(meta roomEpicCheckpointMeta) string {
+	var b strings.Builder
+	if meta.Actor != "" {
+		fmt.Fprintf(&b, "Actor: %s\n", strings.TrimSpace(meta.Actor))
+	}
+	if meta.Label != "" {
+		fmt.Fprintf(&b, "Label: %s\n", strings.TrimSpace(meta.Label))
+	}
+	if meta.Phase != "" {
+		fmt.Fprintf(&b, "Phase: %s\n", strings.TrimSpace(meta.Phase))
+	}
+	if meta.CurrentMilestoneID != "" {
+		fmt.Fprintf(&b, "CurrentMilestoneID: %s\n", strings.TrimSpace(meta.CurrentMilestoneID))
+	}
+	if meta.CurrentMilestoneTitle != "" {
+		fmt.Fprintf(&b, "CurrentMilestoneTitle: %s\n", strings.TrimSpace(meta.CurrentMilestoneTitle))
+	}
+	if meta.Summary != "" {
+		fmt.Fprintf(&b, "Summary: %s\n", strings.TrimSpace(meta.Summary))
+	}
+	if meta.Reason != "" {
+		fmt.Fprintf(&b, "Reason: %s\n", strings.TrimSpace(meta.Reason))
+	}
+	if meta.Note != "" {
+		fmt.Fprintf(&b, "Note: %s\n", strings.TrimSpace(meta.Note))
+	}
+	if len(meta.NextItems) > 0 {
+		b.WriteString("NextItems:\n")
+		for _, item := range meta.NextItems {
+			encoded, err := json.Marshal(item)
+			if err != nil {
+				continue
+			}
+			fmt.Fprintf(&b, "- %s\n", string(encoded))
+		}
+	}
+	return strings.TrimSpace(b.String())
+}
+
+func parseRoomEpicCheckpointBody(body string) roomEpicCheckpointMeta {
+	meta := roomEpicCheckpointMeta{NextItems: make([]map[string]any, 0)}
+	lines := strings.Split(body, "\n")
+	section := ""
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			continue
+		}
+		switch trimmed {
+		case "NextItems:":
+			section = "next_items"
+			continue
+		}
+		if section == "next_items" && strings.HasPrefix(trimmed, "- ") {
+			payload := strings.TrimSpace(strings.TrimPrefix(trimmed, "- "))
+			if payload == "" {
+				continue
+			}
+			var item map[string]any
+			if err := json.Unmarshal([]byte(payload), &item); err == nil {
+				meta.NextItems = append(meta.NextItems, item)
+			}
+			continue
+		}
+		section = ""
+		key, value, ok := strings.Cut(trimmed, ":")
+		if !ok {
+			continue
+		}
+		value = strings.TrimSpace(value)
+		switch strings.TrimSpace(key) {
+		case "Actor":
+			meta.Actor = value
+		case "Label":
+			meta.Label = value
+		case "Phase":
+			meta.Phase = value
+		case "CurrentMilestoneID":
+			meta.CurrentMilestoneID = value
+		case "CurrentMilestoneTitle":
+			meta.CurrentMilestoneTitle = value
+		case "Summary":
+			meta.Summary = value
+		case "Reason":
+			meta.Reason = value
+		case "Note":
+			meta.Note = value
+		}
+	}
+	return meta
+}
+
 func buildRoomMilestoneBody(epicID, title, goal, objective, owner string, scope, risks, exclusions, dependencies, validatorsExpected, requiredEvidenceLanes, optionalEvidenceLanes []string, enforceExitPolicy *bool, exitCriteria []string) string {
 	var b strings.Builder
 	if strings.TrimSpace(epicID) != "" {
@@ -6142,6 +6423,11 @@ func buildRoomEpicViews(messages []agent.BoardMessage) []map[string]any {
 		epicID, _ := update["epic_id"].(string)
 		guidanceByEpic[epicID] = append(guidanceByEpic[epicID], update)
 	}
+	checkpointsByEpic := make(map[string][]map[string]any)
+	for _, checkpoint := range buildRoomEpicCheckpointViews(messages) {
+		epicID, _ := checkpoint["epic_id"].(string)
+		checkpointsByEpic[epicID] = append(checkpointsByEpic[epicID], checkpoint)
+	}
 	out := make([]map[string]any, 0)
 	for _, msg := range messages {
 		if msg.Kind != agent.BoardMessageKindEpic {
@@ -6173,6 +6459,7 @@ func buildRoomEpicViews(messages []agent.BoardMessage) []map[string]any {
 		milestones := milestonesByEpic[msg.ID]
 		logs := logsByEpic[msg.ID]
 		guidanceUpdates := append([]map[string]any(nil), guidanceByEpic[msg.ID]...)
+		checkpoints := append([]map[string]any(nil), checkpointsByEpic[msg.ID]...)
 		sort.Slice(guidanceUpdates, func(i, j int) bool {
 			left := anyMap(guidanceUpdates[i]["root"])
 			right := anyMap(guidanceUpdates[j]["root"])
@@ -6194,7 +6481,7 @@ func buildRoomEpicViews(messages []agent.BoardMessage) []map[string]any {
 				append([]string{msg.ID}, collectRoomMapIDs(milestones)...),
 				collectRoomMapIDs(logs)...,
 			),
-			collectRoomMapIDs(guidanceUpdates)...,
+			append(collectRoomMapIDs(guidanceUpdates), collectRoomMapIDs(checkpoints)...)...,
 		))
 		if finalizeMsg := finalizeByEpic[msg.ID]; strings.TrimSpace(finalizeMsg.ID) != "" {
 			epicMessageIDs = uniqueStrings(append(epicMessageIDs, finalizeMsg.ID))
@@ -6211,6 +6498,7 @@ func buildRoomEpicViews(messages []agent.BoardMessage) []map[string]any {
 			"meta_json_path":          roomAgileEpicMetaJSONPath(msg.ID),
 			"delivery_log_markdown":   roomAgileDeliveryLogMarkdownPath(msg.ID),
 			"retro_markdown":          roomAgileRetroMarkdownPath(msg.ID),
+			"checkpoint_dir":          roomAgileEpicCheckpointDir(msg.ID),
 			"root":                    msg,
 			"meta":                    meta,
 			"questions":               questions,
@@ -6231,6 +6519,9 @@ func buildRoomEpicViews(messages []agent.BoardMessage) []map[string]any {
 			"guidance_updates":        guidanceUpdates,
 			"guidance_update_count":   len(guidanceUpdates),
 			"latest_guidance_updates": truncateRoomMapSlice(guidanceUpdates, 3),
+			"checkpoints":             checkpoints,
+			"checkpoint_count":        len(checkpoints),
+			"latest_checkpoint":       firstRoomMap(checkpoints),
 		})
 	}
 	sort.Slice(out, func(i, j int) bool {
@@ -6276,6 +6567,7 @@ func buildRoomEpicContinuity(room agent.RoomSummary, messages []agent.BoardMessa
 	currentMilestone := findCurrentRoomMilestone(milestones)
 	missingValidation := buildRoomStoriesMissingValidation(currentMilestone)
 	latestLog := roomEpicLatestLog(epic)
+	latestCheckpoint := mapField(epic, "latest_checkpoint")
 	openInterviewItems := buildRoomOpenInterviewItems(messages)
 	phase := deriveRoomEpicPhase(epic, currentMilestone, missingValidation, openInterviewItems)
 	summary := summarizeRoomEpicContinuity(epic, currentMilestone, missingValidation, latestLog, openInterviewItems, phase)
@@ -6298,6 +6590,9 @@ func buildRoomEpicContinuity(room agent.RoomSummary, messages []agent.BoardMessa
 		"stories_missing_validation": missingValidation,
 		"latest_log_label":           stringField(latestLog, "label"),
 		"latest_log_notes":           stringField(anyMap(latestLog["meta"]), "notes"),
+		"latest_checkpoint_id":       stringField(latestCheckpoint, "id"),
+		"latest_checkpoint_label":    stringField(latestCheckpoint, "label"),
+		"latest_checkpoint_at":       stringField(latestCheckpoint, "created_at"),
 		"guidance_update_count":      intField(epic, "guidance_update_count"),
 		"workpack_root":              stringField(epic, "workpack_root"),
 		"summary":                    summary,
@@ -6307,6 +6602,9 @@ func buildRoomEpicContinuity(room agent.RoomSummary, messages []agent.BoardMessa
 	}
 	if latestLog != nil {
 		out["latest_log"] = latestLog
+	}
+	if latestCheckpoint != nil {
+		out["latest_checkpoint"] = latestCheckpoint
 	}
 	if len(openInterviewItems) > 0 {
 		out["interview_items"] = openInterviewItems
@@ -6471,6 +6769,29 @@ func summarizeRoomEpicContinuity(epic, currentMilestone map[string]any, missingV
 		parts = append(parts, fmt.Sprintf("%d guidance update%s captured.", guidanceCount, pluralS(guidanceCount)))
 	}
 	return strings.Join(parts, " ")
+}
+
+func roomEpicCheckpointLabel(phase, currentMilestoneTitle string, when time.Time) string {
+	phase = strings.TrimSpace(phase)
+	if phase == "" {
+		phase = "execution"
+	}
+	datePart := when.UTC().Format("2006-01-02")
+	phaseParts := strings.Fields(strings.ReplaceAll(strings.ReplaceAll(phase, "_", " "), "-", " "))
+	for i, part := range phaseParts {
+		if part == "" {
+			continue
+		}
+		phaseParts[i] = strings.ToUpper(part[:1]) + strings.ToLower(part[1:])
+	}
+	phaseLabel := strings.Join(phaseParts, " ")
+	if phaseLabel == "" {
+		phaseLabel = "Execution"
+	}
+	if title := strings.TrimSpace(currentMilestoneTitle); title != "" {
+		return fmt.Sprintf("%s checkpoint - %s - %s", phaseLabel, title, datePart)
+	}
+	return fmt.Sprintf("%s checkpoint - %s", phaseLabel, datePart)
 }
 
 func buildRoomEpicHealth(room agent.RoomSummary, messages []agent.BoardMessage, epic map[string]any, actorID string) map[string]any {
@@ -6718,6 +7039,406 @@ func summarizeRoomEpicHealth(health string, issues []map[string]any, epic, curre
 		parts = append(parts, fmt.Sprintf("Latest delivery log is %q.", stringField(roomEpicLatestLog(epic), "label")))
 	}
 	return strings.Join(parts, " ")
+}
+
+func buildRoomCoordinatorPulse(room agent.RoomSummary, messages []agent.BoardMessage, actorID string, limit int, filters map[string]struct{}) map[string]any {
+	epics := buildRoomEpicViews(messages)
+	laneActor := strings.TrimSpace(actorID)
+	if laneActor == "" {
+		laneActor = roomCoordinatorActorID(room.Members)
+		if laneActor == "" {
+			laneActor = "coordinator"
+		}
+	}
+
+	rows := make([]map[string]any, 0, len(epics))
+	topItems := make([]map[string]any, 0)
+	for _, epic := range epics {
+		row := buildRoomCoordinatorPulseEpicRow(room, messages, epic, laneActor)
+		rows = append(rows, row)
+		if !roomPulseEpicMatchesFilters(row, filters) {
+			continue
+		}
+		for _, item := range mapSlice(row["items"]) {
+			enriched := anyMap(item)
+			enriched["epic_id"] = stringField(row, "epic_id")
+			enriched["epic_title"] = stringField(row, "title")
+			enriched["epic_priority"] = intField(row, "priority")
+			topItems = append(topItems, enriched)
+		}
+	}
+
+	sort.Slice(rows, func(i, j int) bool {
+		leftPriority := intField(rows[i], "priority")
+		rightPriority := intField(rows[j], "priority")
+		if leftPriority != rightPriority {
+			return leftPriority < rightPriority
+		}
+		leftHealth := roomCoordinatorPulseHealthRank(stringField(rows[i], "health_status"))
+		rightHealth := roomCoordinatorPulseHealthRank(stringField(rows[j], "health_status"))
+		if leftHealth != rightHealth {
+			return leftHealth < rightHealth
+		}
+		return stringField(rows[i], "epic_id") < stringField(rows[j], "epic_id")
+	})
+
+	sort.Slice(topItems, func(i, j int) bool {
+		leftEpicPriority := intField(topItems[i], "epic_priority")
+		rightEpicPriority := intField(topItems[j], "epic_priority")
+		if leftEpicPriority != rightEpicPriority {
+			return leftEpicPriority < rightEpicPriority
+		}
+		leftPriority := intField(topItems[i], "priority")
+		rightPriority := intField(topItems[j], "priority")
+		if leftPriority != rightPriority {
+			return leftPriority < rightPriority
+		}
+		leftType := stringField(topItems[i], "type")
+		rightType := stringField(topItems[j], "type")
+		if leftType != rightType {
+			return leftType < rightType
+		}
+		leftEpicID := stringField(topItems[i], "epic_id")
+		rightEpicID := stringField(topItems[j], "epic_id")
+		if leftEpicID != rightEpicID {
+			return leftEpicID < rightEpicID
+		}
+		return stringField(topItems[i], "target_id") < stringField(topItems[j], "target_id")
+	})
+	if limit > 0 && len(topItems) > limit {
+		topItems = topItems[:limit]
+	}
+
+	filteredRows := make([]map[string]any, 0, len(rows))
+	for _, row := range rows {
+		if roomPulseEpicMatchesFilters(row, filters) {
+			filteredRows = append(filteredRows, row)
+		}
+	}
+
+	return map[string]any{
+		"room":       room,
+		"filters":    sortedRoomPulseFilters(filters),
+		"summary":    buildRoomCoordinatorPulseSummary(rows),
+		"epic_count": len(filteredRows),
+		"epics":      filteredRows,
+		"top_items":  topItems,
+	}
+}
+
+func buildRoomCoordinatorPulseEpicRow(room agent.RoomSummary, messages []agent.BoardMessage, epic map[string]any, actorID string) map[string]any {
+	resume := buildRoomEpicContinuity(room, messages, epic)
+	health := buildRoomEpicHealth(room, messages, epic, actorID)
+	currentMilestone := mapField(resume, "current_milestone")
+	exitPolicy := roomMilestoneExitPolicy(currentMilestone)
+	items, _ := buildRoomEpicNextItems(room, messages, epic, resume, actorID)
+	checkpointStatus := roomEpicCoordinatorCheckpointStatus(epic)
+
+	issueTypes := stringSliceValue(nil)
+	for _, issue := range mapSlice(health["issues"]) {
+		issueTypes = append(issueTypes, stringField(issue, "type"))
+	}
+	if checkpointStatus == "missing" {
+		issueTypes = append(issueTypes, "epic_checkpoint_missing")
+	}
+	if checkpointStatus == "stale" {
+		issueTypes = append(issueTypes, "epic_checkpoint_stale")
+	}
+	issueTypes = uniqueStrings(issueTypes)
+
+	syntheticItems := buildRoomCoordinatorPulseSyntheticItems(room.ID, epic, resume, checkpointStatus, actorID)
+	allItems := append(cloneRoomMapSlice(syntheticItems), cloneRoomMapSlice(items)...)
+	sort.Slice(allItems, func(i, j int) bool {
+		leftPriority := intField(allItems[i], "priority")
+		rightPriority := intField(allItems[j], "priority")
+		if leftPriority != rightPriority {
+			return leftPriority < rightPriority
+		}
+		leftType := stringField(allItems[i], "type")
+		rightType := stringField(allItems[j], "type")
+		if leftType != rightType {
+			return leftType < rightType
+		}
+		return stringField(allItems[i], "target_id") < stringField(allItems[j], "target_id")
+	})
+
+	latestLog := mapField(resume, "latest_log")
+	latestCheckpoint := mapField(resume, "latest_checkpoint")
+	row := map[string]any{
+		"epic_id":                 stringField(epic, "id"),
+		"title":                   stringField(epic, "title"),
+		"phase":                   stringField(resume, "phase"),
+		"finalized":               boolField(epic, "finalized"),
+		"health_status":           stringField(health, "status"),
+		"priority":                roomCoordinatorPulsePriority(epic, resume, health, checkpointStatus, issueTypes),
+		"current_milestone_id":    stringField(resume, "current_milestone_id"),
+		"current_milestone_title": stringField(resume, "current_milestone_title"),
+		"exit_policy_status":      stringField(exitPolicy, "status"),
+		"checkpoint_status":       checkpointStatus,
+		"latest_checkpoint_at":    stringField(latestCheckpoint, "created_at"),
+		"latest_log_label":        stringField(latestLog, "label"),
+		"latest_log_at":           stringField(mapField(latestLog, "root"), "created_at"),
+		"top_issue_types":         truncateRoomStringSlice(issueTypes, 3),
+		"items":                   allItems,
+	}
+	if len(allItems) > 0 {
+		row["top_next_action"] = allItems[0]
+	}
+	return row
+}
+
+func buildRoomCoordinatorPulseSyntheticItems(roomID string, epic, resume map[string]any, checkpointStatus, actorID string) []map[string]any {
+	items := make([]map[string]any, 0, 1)
+	epicID := stringField(epic, "id")
+	if checkpointStatus == "missing" || checkpointStatus == "stale" {
+		items = append(items, map[string]any{
+			"type":         "checkpoint_epic",
+			"priority":     4,
+			"target_id":    epicID,
+			"title":        firstNonEmpty(stringField(epic, "title"), "Record epic checkpoint"),
+			"reason":       fmt.Sprintf("Epic checkpoint status is %s and the coordinator should refresh the resumability snapshot.", checkpointStatus),
+			"command_hint": fmt.Sprintf(`agentctl room epic checkpoint %s %s --actor %s --note "<handoff note>"`, roomID, epicID, firstNonEmpty(actorID, "coordinator")),
+		})
+	}
+	return items
+}
+
+func roomCoordinatorPulsePriority(epic, resume, health map[string]any, checkpointStatus string, issueTypes []string) int {
+	phase := stringField(resume, "phase")
+	exitPolicyStatus := stringField(mapField(mapField(resume, "current_milestone"), "exit_policy"), "status")
+	switch {
+	case stringField(health, "status") == "blocked" || phase == "blocked":
+		return 1
+	case !boolField(epic, "finalized") || phase == "discovery":
+		return 2
+	case exitPolicyStatus == "ready_for_review" || exitPolicyStatus == "ready_for_summary":
+		return 3
+	case checkpointStatus == "missing" || checkpointStatus == "stale" || stringSliceContains(issueTypes, "epic_has_no_log"):
+		return 4
+	case phase == "completed":
+		return 6
+	default:
+		return 5
+	}
+}
+
+func buildRoomCoordinatorPulseSummary(rows []map[string]any) map[string]any {
+	summary := map[string]any{
+		"blocked_epic_count":       0,
+		"intake_epic_count":        0,
+		"review_epic_count":        0,
+		"execution_epic_count":     0,
+		"shaping_epic_count":       0,
+		"completed_epic_count":     0,
+		"missing_checkpoint_count": 0,
+		"stale_checkpoint_count":   0,
+		"stale_summary_count":      0,
+		"missing_log_count":        0,
+	}
+	for _, row := range rows {
+		switch stringField(row, "phase") {
+		case "blocked":
+			summary["blocked_epic_count"] = intField(summary, "blocked_epic_count") + 1
+		case "discovery":
+			summary["intake_epic_count"] = intField(summary, "intake_epic_count") + 1
+		case "review":
+			summary["review_epic_count"] = intField(summary, "review_epic_count") + 1
+		case "shaping":
+			summary["shaping_epic_count"] = intField(summary, "shaping_epic_count") + 1
+		case "completed":
+			summary["completed_epic_count"] = intField(summary, "completed_epic_count") + 1
+		default:
+			summary["execution_epic_count"] = intField(summary, "execution_epic_count") + 1
+		}
+		switch stringField(row, "checkpoint_status") {
+		case "missing":
+			summary["missing_checkpoint_count"] = intField(summary, "missing_checkpoint_count") + 1
+		case "stale":
+			summary["stale_checkpoint_count"] = intField(summary, "stale_checkpoint_count") + 1
+		}
+		for _, issueType := range stringSliceField(row, "top_issue_types") {
+			switch issueType {
+			case "stale_summary":
+				summary["stale_summary_count"] = intField(summary, "stale_summary_count") + 1
+			case "epic_has_no_log":
+				summary["missing_log_count"] = intField(summary, "missing_log_count") + 1
+			}
+		}
+	}
+	return summary
+}
+
+func roomCoordinatorPulseHealthRank(status string) int {
+	switch strings.TrimSpace(strings.ToLower(status)) {
+	case "blocked":
+		return 0
+	case "needs_attention":
+		return 1
+	case "closing":
+		return 2
+	case "healthy":
+		return 3
+	case "complete":
+		return 4
+	default:
+		return 5
+	}
+}
+
+func roomEpicCoordinatorCheckpointStatus(epic map[string]any) string {
+	latestCheckpoint := mapField(epic, "latest_checkpoint")
+	if latestCheckpoint == nil {
+		if roomEpicCheckpointActivityThreshold(epic) {
+			return "missing"
+		}
+		return "not_needed"
+	}
+	checkpointMarker := roomEpicLatestCheckpointMarker(epic)
+	if checkpointMarker.At.IsZero() {
+		return "fresh"
+	}
+	if roomTimelineMarkerAfter(roomEpicLatestMaterialChangeMarker(epic), checkpointMarker) {
+		return "stale"
+	}
+	return "fresh"
+}
+
+func roomEpicCheckpointActivityThreshold(epic map[string]any) bool {
+	return boolField(epic, "finalized") ||
+		intField(epic, "milestone_count") > 0 ||
+		intField(epic, "story_count") > 0 ||
+		intField(epic, "log_count") > 0 ||
+		intField(epic, "guidance_update_count") > 0
+}
+
+func roomEpicLatestCheckpointMarker(epic map[string]any) roomTimelineMarker {
+	latest := mapField(epic, "latest_checkpoint")
+	if latest == nil {
+		return roomTimelineMarker{}
+	}
+	root := mapField(latest, "root")
+	return roomTimelineMarker{
+		At: parseRFC3339Time(stringField(root, "created_at")),
+		ID: stringField(root, "id"),
+	}
+}
+
+func roomEpicLatestMaterialChangeMarker(epic map[string]any) roomTimelineMarker {
+	latest := roomTimelineMarker{}
+	root := mapField(epic, "root")
+	latest = roomLaterTimelineMarker(latest, roomTimelineMarker{At: parseRFC3339Time(stringField(root, "created_at")), ID: stringField(root, "id")})
+	if finalBrief := mapField(epic, "final_brief"); finalBrief != nil {
+		latest = roomLaterTimelineMarker(latest, roomTimelineMarker{At: parseRFC3339Time(stringField(finalBrief, "created_at")), ID: stringField(finalBrief, "id")})
+	}
+	for _, milestone := range mapSlice(epic["milestones"]) {
+		milestoneRoot := mapField(milestone, "root")
+		latest = roomLaterTimelineMarker(latest, roomTimelineMarker{At: parseRFC3339Time(stringField(milestoneRoot, "created_at")), ID: stringField(milestoneRoot, "id")})
+		latest = roomLaterTimelineMarker(latest, roomMilestoneLatestMaterialChangeMarker(milestone))
+		latest = roomLaterTimelineMarker(latest, roomMilestoneLatestSummaryMarker(milestone))
+		for _, criterion := range boardMessageSliceValue(milestone["criteria"]) {
+			latest = roomLaterTimelineMarker(latest, roomTimelineMarker{At: criterion.CreatedAt, ID: criterion.ID})
+		}
+		for _, contract := range mapSlice(milestone["contracts"]) {
+			contractRoot := mapField(contract, "root")
+			latest = roomLaterTimelineMarker(latest, roomTimelineMarker{At: parseRFC3339Time(stringField(contractRoot, "created_at")), ID: stringField(contractRoot, "id")})
+		}
+	}
+	for _, log := range mapSlice(epic["logs"]) {
+		logRoot := mapField(log, "root")
+		latest = roomLaterTimelineMarker(latest, roomTimelineMarker{At: parseRFC3339Time(stringField(logRoot, "created_at")), ID: stringField(logRoot, "id")})
+	}
+	for _, update := range mapSlice(epic["guidance_updates"]) {
+		updateRoot := mapField(update, "root")
+		latest = roomLaterTimelineMarker(latest, roomTimelineMarker{At: parseRFC3339Time(stringField(updateRoot, "created_at")), ID: stringField(updateRoot, "id")})
+	}
+	return latest
+}
+
+func normalizeRoomPulseFilters(values []string) (map[string]struct{}, error) {
+	allowed := map[string]struct{}{
+		"all":     {},
+		"blocked": {},
+		"intake":  {},
+		"review":  {},
+		"stale":   {},
+		"ready":   {},
+	}
+	filters := make(map[string]struct{})
+	for _, raw := range values {
+		for _, part := range strings.Split(raw, ",") {
+			value := strings.TrimSpace(strings.ToLower(part))
+			if value == "" {
+				continue
+			}
+			if _, ok := allowed[value]; !ok {
+				return nil, fmt.Errorf("unsupported room pulse filter %q", value)
+			}
+			if value == "all" {
+				return map[string]struct{}{"all": {}}, nil
+			}
+			filters[value] = struct{}{}
+		}
+	}
+	if len(filters) == 0 {
+		return map[string]struct{}{"all": {}}, nil
+	}
+	return filters, nil
+}
+
+func sortedRoomPulseFilters(filters map[string]struct{}) []string {
+	out := make([]string, 0, len(filters))
+	for key := range filters {
+		out = append(out, key)
+	}
+	sort.Strings(out)
+	return out
+}
+
+func roomPulseIncludesAll(filters map[string]struct{}) bool {
+	_, ok := filters["all"]
+	return ok || len(filters) == 0
+}
+
+func roomPulseEpicMatchesFilters(row map[string]any, filters map[string]struct{}) bool {
+	if roomPulseIncludesAll(filters) {
+		return true
+	}
+	phase := stringField(row, "phase")
+	exitPolicyStatus := stringField(row, "exit_policy_status")
+	checkpointStatus := stringField(row, "checkpoint_status")
+	issueTypes := stringSliceField(row, "top_issue_types")
+	for filter := range filters {
+		switch filter {
+		case "blocked":
+			if stringField(row, "health_status") == "blocked" || phase == "blocked" {
+				return true
+			}
+		case "intake":
+			if !boolField(row, "finalized") || phase == "discovery" {
+				return true
+			}
+		case "review":
+			if phase == "review" || exitPolicyStatus == "ready_for_review" || exitPolicyStatus == "ready_for_summary" {
+				return true
+			}
+		case "stale":
+			if checkpointStatus == "missing" || checkpointStatus == "stale" || stringSliceContains(issueTypes, "stale_summary") || stringSliceContains(issueTypes, "epic_has_no_log") {
+				return true
+			}
+		case "ready":
+			if exitPolicyStatus == "ready_for_review" || exitPolicyStatus == "ready_for_summary" || exitPolicyStatus == "ready_to_exit" || phase == "shaping" {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func truncateRoomStringSlice(items []string, limit int) []string {
+	if limit <= 0 || len(items) <= limit {
+		return append([]string(nil), items...)
+	}
+	return append([]string(nil), items[:limit]...)
 }
 
 func countRoomActiveMilestones(milestones []map[string]any) int {
@@ -7704,6 +8425,52 @@ func summarizeRoomStoryStates(states []map[string]any) roomStoryStateSummary {
 	return summary
 }
 
+func buildRoomEpicCheckpointViews(messages []agent.BoardMessage) []map[string]any {
+	out := make([]map[string]any, 0)
+	for _, msg := range messages {
+		if msg.Kind != agent.BoardMessageKindEpicCheckpoint {
+			continue
+		}
+		meta := parseRoomEpicCheckpointBody(msg.Body)
+		epicID := strings.TrimSpace(msg.RelatedMessageID)
+		out = append(out, map[string]any{
+			"id":                      msg.ID,
+			"epic_id":                 epicID,
+			"source_kind":             "epic_checkpoint",
+			"source_id":               msg.ID,
+			"actor":                   meta.Actor,
+			"label":                   firstNonEmpty(meta.Label, strings.TrimPrefix(strings.TrimSpace(msg.Subject), "Epic Checkpoint: ")),
+			"phase":                   meta.Phase,
+			"summary":                 meta.Summary,
+			"current_milestone_id":    meta.CurrentMilestoneID,
+			"current_milestone_title": meta.CurrentMilestoneTitle,
+			"reason":                  meta.Reason,
+			"note":                    meta.Note,
+			"next_items":              meta.NextItems,
+			"next_item_count":         len(meta.NextItems),
+			"workpack_root":           roomAgileWorkpackRootPath(epicID),
+			"checkpoint_dir":          roomAgileEpicCheckpointDir(epicID),
+			"checkpoint_markdown":     roomAgileCheckpointMarkdownPath(epicID, msg.ID),
+			"checkpoint_json":         roomAgileCheckpointJSONPath(epicID, msg.ID),
+			"meta_json_path":          roomAgileCheckpointJSONPath(epicID, msg.ID),
+			"root":                    msg,
+			"meta":                    meta,
+			"created_at":              msg.CreatedAt.Format(time.RFC3339),
+			"created_by":              strings.TrimSpace(msg.Sender),
+			"room_message_ids":        []string{msg.ID},
+		})
+	}
+	sort.Slice(out, func(i, j int) bool {
+		left := out[i]["root"].(agent.BoardMessage)
+		right := out[j]["root"].(agent.BoardMessage)
+		if left.CreatedAt.Equal(right.CreatedAt) {
+			return left.ID > right.ID
+		}
+		return left.CreatedAt.After(right.CreatedAt)
+	})
+	return out
+}
+
 func buildRoomGuidanceUpdateViews(messages []agent.BoardMessage) []map[string]any {
 	out := make([]map[string]any, 0)
 	for _, msg := range messages {
@@ -7827,6 +8594,30 @@ func roomAgileEpicMetaJSONPath(epicID string) string {
 	return filepath.Join(root, "meta.json")
 }
 
+func roomAgileEpicCheckpointDir(epicID string) string {
+	root := roomAgileWorkpackRootPath(epicID)
+	if root == "" {
+		return ""
+	}
+	return filepath.Join(root, "checkpoints")
+}
+
+func roomAgileCheckpointMarkdownPath(epicID, checkpointID string) string {
+	dir := roomAgileEpicCheckpointDir(epicID)
+	if dir == "" || strings.TrimSpace(checkpointID) == "" {
+		return ""
+	}
+	return filepath.Join(dir, strings.TrimSpace(checkpointID)+".md")
+}
+
+func roomAgileCheckpointJSONPath(epicID, checkpointID string) string {
+	dir := roomAgileEpicCheckpointDir(epicID)
+	if dir == "" || strings.TrimSpace(checkpointID) == "" {
+		return ""
+	}
+	return filepath.Join(dir, strings.TrimSpace(checkpointID)+".json")
+}
+
 func roomAgileDeliveryLogMarkdownPath(epicID string) string {
 	root := roomAgileWorkpackRootPath(epicID)
 	if root == "" {
@@ -7914,9 +8705,24 @@ func buildRoomAgileWorkpackInfo(epic map[string]any) map[string]any {
 		"root":                  root,
 		"epic_markdown":         roomAgileEpicMarkdownPath(epicID),
 		"meta_json":             roomAgileEpicMetaJSONPath(epicID),
+		"checkpoint_dir":        roomAgileEpicCheckpointDir(epicID),
 		"delivery_log_markdown": roomAgileDeliveryLogMarkdownPath(epicID),
 		"retro_markdown":        roomAgileRetroMarkdownPath(epicID),
 	}
+	checkpoints := make([]map[string]any, 0)
+	for _, checkpoint := range mapSlice(epic["checkpoints"]) {
+		checkpointID := stringField(checkpoint, "id")
+		if checkpointID == "" {
+			continue
+		}
+		checkpoints = append(checkpoints, map[string]any{
+			"id":                  checkpointID,
+			"label":               stringField(checkpoint, "label"),
+			"checkpoint_markdown": roomAgileCheckpointMarkdownPath(epicID, checkpointID),
+			"checkpoint_json":     roomAgileCheckpointJSONPath(epicID, checkpointID),
+		})
+	}
+	info["checkpoints"] = checkpoints
 	milestones := make([]map[string]any, 0)
 	for _, milestone := range mapSlice(epic["milestones"]) {
 		milestoneID := stringField(milestone, "id")
@@ -8046,6 +8852,9 @@ func roomEpicSyncMessageIDs(epic map[string]any) []string {
 	for _, update := range mapSlice(epic["guidance_updates"]) {
 		ids = append(ids, stringField(update, "id"))
 	}
+	for _, checkpoint := range mapSlice(epic["checkpoints"]) {
+		ids = append(ids, stringField(checkpoint, "id"))
+	}
 	return uniqueStrings(ids)
 }
 
@@ -8123,6 +8932,9 @@ func syncRoomAgileWorkpack(ctx context.Context, store blackboard.BoardStore, wor
 	if err := os.MkdirAll(filepath.Join(epicDir, "milestones"), 0o755); err != nil {
 		return fmt.Errorf("create epic work-pack directory: %w", err)
 	}
+	if err := os.MkdirAll(roomAgileEpicCheckpointDir(epicID), 0o755); err != nil {
+		return fmt.Errorf("create checkpoint work-pack directory: %w", err)
+	}
 	if err := writeRoomAgileFile(roomAgileEpicMarkdownPath(epicID), prependRoomWorkpackProvenance(renderRoomEpicMarkdown(epic), epicProvenance)); err != nil {
 		return err
 	}
@@ -8141,6 +8953,25 @@ func syncRoomAgileWorkpack(ctx context.Context, store blackboard.BoardStore, wor
 	retroProvenance := buildRoomWorkpackProvenance(workspaceID, roomID, "epic", epicID, epicID, "", "", "", "", epicDir, roomAgileRetroMarkdownPath(epicID), epicMetaJSON, uniqueStrings(append([]string{epicID}, collectRoomMapIDs(mapSlice(epic["guidance_updates"]))...)))
 	if err := writeRoomAgileFile(roomAgileRetroMarkdownPath(epicID), prependRoomWorkpackProvenance(renderRoomRetroMarkdown(epic), retroProvenance)); err != nil {
 		return err
+	}
+	for _, checkpoint := range mapSlice(epic["checkpoints"]) {
+		checkpointID := stringField(checkpoint, "id")
+		if checkpointID == "" {
+			continue
+		}
+		checkpointJSON := roomAgileCheckpointJSONPath(epicID, checkpointID)
+		checkpointProvenance := buildRoomWorkpackProvenance(workspaceID, roomID, "epic_checkpoint", checkpointID, epicID, "", "", "", "", roomAgileWorkpackRootPath(epicID), roomAgileCheckpointMarkdownPath(epicID, checkpointID), checkpointJSON, []string{checkpointID})
+		if err := writeRoomAgileFile(roomAgileCheckpointMarkdownPath(epicID, checkpointID), prependRoomWorkpackProvenance(renderRoomEpicCheckpointMarkdown(checkpoint), checkpointProvenance)); err != nil {
+			return err
+		}
+		if err := writeRoomAgileJSON(checkpointJSON, map[string]any{
+			"schema_version": 1,
+			"generated_at":   time.Now().UTC().Format(time.RFC3339),
+			"provenance":     checkpointProvenance,
+			"checkpoint":     checkpoint,
+		}); err != nil {
+			return err
+		}
 	}
 	for _, milestone := range mapSlice(epic["milestones"]) {
 		if err := syncRoomAgileMilestoneWorkpack(workspaceID, roomID, epicID, milestone); err != nil {
@@ -8263,6 +9094,7 @@ func renderRoomEpicMarkdown(epic map[string]any) string {
 	fmt.Fprintf(&b, "- Milestones: `%d`\n", intField(epic, "milestone_count"))
 	fmt.Fprintf(&b, "- Stories: `%d`\n", intField(epic, "story_count"))
 	fmt.Fprintf(&b, "- Guidance updates: `%d`\n", intField(epic, "guidance_update_count"))
+	fmt.Fprintf(&b, "- Checkpoints: `%d`\n", intField(epic, "checkpoint_count"))
 	if meta := anyMap(epic["meta"]); meta != nil {
 		if goal := stringField(meta, "goal"); goal != "" {
 			fmt.Fprintf(&b, "- Goal: %s\n", goal)
@@ -8341,6 +9173,51 @@ func renderRoomRetroMarkdown(epic map[string]any) string {
 		appendMarkdownList(&b, "Follow-up", stringSliceField(meta, "follow_up"))
 		fmt.Fprintf(&b, "\n")
 	}
+	return b.String()
+}
+
+func renderRoomEpicCheckpointMarkdown(checkpoint map[string]any) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "# Epic Checkpoint %s\n\n", firstNonEmpty(stringField(checkpoint, "label"), stringField(checkpoint, "id")))
+	fmt.Fprintf(&b, "- ID: `%s`\n", stringField(checkpoint, "id"))
+	fmt.Fprintf(&b, "- Phase: `%s`\n", firstNonEmpty(stringField(checkpoint, "phase"), "unknown"))
+	if actor := stringField(checkpoint, "actor"); actor != "" {
+		fmt.Fprintf(&b, "- Actor: `%s`\n", actor)
+	}
+	if createdAt := stringField(checkpoint, "created_at"); createdAt != "" {
+		fmt.Fprintf(&b, "- Created at: `%s`\n", createdAt)
+	}
+	if createdBy := stringField(checkpoint, "created_by"); createdBy != "" {
+		fmt.Fprintf(&b, "- Created by: `%s`\n", createdBy)
+	}
+	if milestoneTitle := stringField(checkpoint, "current_milestone_title"); milestoneTitle != "" {
+		fmt.Fprintf(&b, "- Current milestone: `%s`\n", milestoneTitle)
+	}
+	b.WriteString("\n## Summary\n\n")
+	b.WriteString(markdownOrFallback(stringField(checkpoint, "summary"), "No checkpoint summary recorded yet."))
+	b.WriteString("\n")
+	nextItems := mapSlice(checkpoint["next_items"])
+	if len(nextItems) == 0 {
+		appendMarkdownEmptyState(&b, "Next Actions", "No open next actions.")
+	} else {
+		b.WriteString("\n## Next Actions\n")
+		for _, item := range nextItems {
+			title := firstNonEmpty(stringField(item, "title"), stringField(item, "type"))
+			fmt.Fprintf(&b, "- `%s`", title)
+			if command := stringField(item, "command_hint"); command != "" {
+				fmt.Fprintf(&b, " - `%s`", command)
+			}
+			if reason := stringField(item, "reason"); reason != "" {
+				fmt.Fprintf(&b, " - %s", reason)
+			}
+			b.WriteString("\n")
+		}
+	}
+	b.WriteString("\n## Reason\n\n")
+	b.WriteString(markdownOrFallback(stringField(checkpoint, "reason"), "No checkpoint reason recorded yet."))
+	b.WriteString("\n\n## Note\n\n")
+	b.WriteString(markdownOrFallback(stringField(checkpoint, "note"), "No coordinator note recorded."))
+	b.WriteString("\n")
 	return b.String()
 }
 
@@ -8607,6 +9484,13 @@ func appendMarkdownEmptyState(b *strings.Builder, heading, text string) {
 	fmt.Fprintf(b, "\n## %s\n\n%s\n", heading, text)
 }
 
+func markdownOrFallback(text, fallback string) string {
+	if strings.TrimSpace(text) == "" {
+		return strings.TrimSpace(fallback)
+	}
+	return strings.TrimSpace(text)
+}
+
 func mapSlice(value any) []map[string]any {
 	if maps, ok := value.([]map[string]any); ok {
 		return maps
@@ -8637,6 +9521,28 @@ func truncateRoomMapSlice(items []map[string]any, limit int) []map[string]any {
 		return append([]map[string]any(nil), items...)
 	}
 	return append([]map[string]any(nil), items[:limit]...)
+}
+
+func firstRoomMap(items []map[string]any) map[string]any {
+	if len(items) == 0 {
+		return nil
+	}
+	return items[0]
+}
+
+func cloneRoomMapSlice(items []map[string]any) []map[string]any {
+	if len(items) == 0 {
+		return nil
+	}
+	data, err := json.Marshal(items)
+	if err != nil {
+		return append([]map[string]any(nil), items...)
+	}
+	var decoded []map[string]any
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return append([]map[string]any(nil), items...)
+	}
+	return decoded
 }
 
 func mapField(value any, key string) map[string]any {

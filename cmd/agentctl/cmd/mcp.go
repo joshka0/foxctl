@@ -1521,6 +1521,18 @@ func registerRoomTools(s *server.MCPServer) {
 	)
 
 	s.AddTool(
+		mcp.NewTool("room_pulse",
+			mcp.WithDescription("Read-only room-wide epic coordinator pulse. Summarizes all epics in one room using existing epic resume/health/next/checkpoint helpers."),
+			mcp.WithString("workspace", mcp.Description("Workspace root override (default: .)")),
+			mcp.WithString("room_id", mcp.Required(), mcp.Description("Room id")),
+			mcp.WithString("actor", mcp.Description("Actor id used for actor-specific next-action derivation")),
+			mcp.WithNumber("limit", mcp.Description("Maximum room-wide top items to return")),
+			mcp.WithArray("only", mcp.Description("Filter epic pulse lanes (all, blocked, intake, review, stale, ready)"), mcp.WithStringItems()),
+		),
+		handleRoomPulseTool,
+	)
+
+	s.AddTool(
 		mcp.NewTool("room_task",
 			mcp.WithDescription("Command-backed room task management. Actions: add, list, assign, reassign, claim, touch, block, reclaim, unblock, abandon, complete."),
 			mcp.WithString("action", mcp.Required(), mcp.Description("Room task action to run")),
@@ -1574,7 +1586,7 @@ func registerRoomTools(s *server.MCPServer) {
 
 	s.AddTool(
 		mcp.NewTool("room_agile",
-			mcp.WithDescription("Command-backed agile room protocol. Actions: epic_start, epic_ask, epic_answer, epic_finalize, epic_shape, epic_show, epic_resume, epic_health, epic_next, milestone_start, milestone_contract, milestone_criteria, milestone_review, milestone_summary, milestone_show, story_propose, story_accept, story_add, story_state, story_validate, story_show, log_append, log_show, retro_add, retro_show, aca_promote, workpack_show, workpack_sync."),
+			mcp.WithDescription("Command-backed agile room protocol. Actions: epic_start, epic_ask, epic_answer, epic_finalize, epic_shape, epic_checkpoint, epic_show, epic_resume, epic_health, epic_next, milestone_start, milestone_contract, milestone_criteria, milestone_review, milestone_summary, milestone_show, story_propose, story_accept, story_add, story_state, story_validate, story_show, log_append, log_show, retro_add, retro_show, aca_promote, workpack_show, workpack_sync."),
 			mcp.WithString("action", mcp.Required(), mcp.Description("Agile room action to run")),
 			mcp.WithString("workspace", mcp.Description("Workspace root override (default: .)")),
 			mcp.WithString("room_id", mcp.Description("Room id")),
@@ -1610,6 +1622,8 @@ func registerRoomTools(s *server.MCPServer) {
 			mcp.WithString("question_kind", mcp.Description("Epic intake question kind: product, technical, constraint, success")),
 			mcp.WithString("question", mcp.Description("Epic intake question text")),
 			mcp.WithString("answer", mcp.Description("Epic intake answer text")),
+			mcp.WithString("label", mcp.Description("Checkpoint label")),
+			mcp.WithString("note", mcp.Description("Checkpoint coordinator note")),
 			mcp.WithString("criterion", mcp.Description("Acceptance criterion text")),
 			mcp.WithString("verdict", mcp.Description("Milestone review verdict: pass or block")),
 			mcp.WithString("notes", mcp.Description("Notes or description body")),
@@ -3961,6 +3975,21 @@ func handleRoomTool(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallTool
 	return runCLICommandAsMCP(ctx, "room", newRoomCommand, argv)
 }
 
+func handleRoomPulseTool(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	args := getArgs(req)
+	roomID := getStringArg(args, "room_id", "")
+	if roomID == "" {
+		return mcp.NewToolResultError("room_id is required"), nil
+	}
+	workspace := getStringArg(args, "workspace", "")
+	argv := []string{"pulse", roomID}
+	argv = appendStringFlagArgs(argv, "--workspace", workspace)
+	argv = appendStringFlagArgs(argv, "--actor", getStringArg(args, "actor", ""))
+	argv = appendIntFlagArgs(argv, "--limit", getIntArg(args, "limit", 0))
+	argv = appendStringSliceFlagArgs(argv, "--only", getStringSliceArg(args, "only"))
+	return runCLICommandAsMCP(ctx, "room_pulse", newRoomCommand, argv)
+}
+
 func handleRoomTaskTool(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	args := getArgs(req)
 	action := getStringArg(args, "action", "")
@@ -4181,6 +4210,18 @@ func handleRoomAgileTool(ctx context.Context, req mcp.CallToolRequest) (*mcp.Cal
 			argv = append(argv, epicID)
 		}
 		argv = appendStringFlagArgs(argv, "--workspace", workspace)
+		argv = appendIntFlagArgs(argv, "--limit", getIntArg(args, "limit", 0))
+	case "epic_checkpoint":
+		epicID := getStringArg(args, "epic_id", "")
+		if epicID == "" {
+			return mcp.NewToolResultError("epic_id is required for room_agile epic_checkpoint"), nil
+		}
+		argv = []string{"epic", "checkpoint", roomID, epicID}
+		argv = appendStringFlagArgs(argv, "--workspace", workspace)
+		argv = appendStringFlagArgs(argv, "--sender", getStringArg(args, "sender", ""))
+		argv = appendStringFlagArgs(argv, "--actor", getStringArg(args, "actor", ""))
+		argv = appendStringFlagArgs(argv, "--label", getStringArg(args, "label", ""))
+		argv = appendStringFlagArgs(argv, "--note", getStringArg(args, "note", ""))
 		argv = appendIntFlagArgs(argv, "--limit", getIntArg(args, "limit", 0))
 	case "epic_resume":
 		epicID := getStringArg(args, "epic_id", "")

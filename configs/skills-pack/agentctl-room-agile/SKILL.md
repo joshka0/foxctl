@@ -44,6 +44,8 @@ This skill adds the explicit agile layer:
 - `epic shape` turns the finalized brief into durable milestone proposals
 - `epic resume` reconstructs the current operational state after a gap
 - `epic next` extracts the next concrete actions without rereading the whole room
+- `epic checkpoint` captures a durable resumability snapshot from the current `resume` and `next` state
+- `room pulse` is the room-wide mission-control surface across multiple epics
 - `milestone start --proposal` promotes one proposal into a real milestone
 - `story propose` / `story accept` do the same one level down
 - `milestone review` records the pass/block verdict
@@ -110,6 +112,8 @@ agentctl room epic shape <room-id> <epic-id>
 agentctl room epic show <room-id> <epic-id>
 agentctl room epic resume <room-id> <epic-id>
 agentctl room epic next <room-id> <epic-id>
+agentctl room epic checkpoint <room-id> <epic-id> --note "Coordinator handoff note"
+agentctl room pulse <room-id>
 ```
 
 This writes `milestone proposal` messages into the room. Review them before execution starts.
@@ -119,6 +123,7 @@ When resuming after a pause, prefer:
 ```bash
 agentctl room epic resume <room-id> <epic-id>
 agentctl room epic next <room-id> <epic-id> --actor <you>
+agentctl room epic checkpoint <room-id> <epic-id> --actor <you> --note "Where to resume from next"
 ```
 
 ### 5. Promote one milestone proposal into a real milestone
@@ -172,6 +177,7 @@ Milestone evidence policy is guidance-only in v1:
 - `epic next` may emit `cover_required_lane`
 - `epic health` may warn with `milestone_missing_required_lane`
 - `epic next` and `epic health` now align on the same derived milestone exit-policy helper
+- `room pulse` aggregates those epic-level signals across the whole room for the coordinator
 - milestone review writes are not auto-rejected on policy gaps in this slice
 
 If a room wants strict pass-review discipline, milestone contract can opt into enforcement:
