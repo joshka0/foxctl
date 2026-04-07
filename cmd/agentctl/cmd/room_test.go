@@ -2570,7 +2570,7 @@ func TestRunRoomACAPromoteEpicDraftsProposalAndIsIdempotent(t *testing.T) {
 		t.Fatalf("EnsureLayout: %v", err)
 	}
 	draftBody := mustReadRoomTestFile(t, filepath.Join(layout.TemplatesDir, filepath.FromSlash(draftPath)))
-	for _, want := range []string{"note_type: room_epic", "room_id: alpha", "[[room-milestones/", "Capture durable epic memory."} {
+	for _, want := range []string{"note_type: room_epic", "room_id: alpha", "meta_json_path:", "[[room-milestones/", "Capture durable epic memory."} {
 		if !strings.Contains(draftBody, want) {
 			t.Fatalf("epic ACA draft missing %q:\n%s", want, draftBody)
 		}
@@ -2638,7 +2638,7 @@ func TestRunRoomACAPromoteValidationRequiresHighSignal(t *testing.T) {
 		t.Fatalf("EnsureLayout: %v", err)
 	}
 	draftBody := mustReadRoomTestFile(t, filepath.Join(layout.TemplatesDir, filepath.FromSlash(draftPath)))
-	for _, want := range []string{"note_type: room_validation", "validation_id: " + blockedValidationID, "status: blocked", "[[room-milestones/"} {
+	for _, want := range []string{"note_type: room_validation", "validation_id: " + blockedValidationID, "meta_json_path:", "status: blocked", "[[room-milestones/"} {
 		if !strings.Contains(draftBody, want) {
 			t.Fatalf("validation ACA draft missing %q:\n%s", want, draftBody)
 		}
@@ -2711,11 +2711,26 @@ func TestRunRoomStoryValidateAndWorkpackSync(t *testing.T) {
 	if got := story["workpack_dir"]; got == "" {
 		t.Fatalf("workpack_dir=%v want non-empty", got)
 	}
+	if got := story["story_markdown"]; got == "" {
+		t.Fatalf("story_markdown=%v want non-empty", got)
+	}
+	if got := story["meta_json_path"]; got == "" {
+		t.Fatalf("meta_json_path=%v want non-empty", got)
+	}
 	if got := story["validation_dir"]; got == "" {
 		t.Fatalf("validation_dir=%v want non-empty", got)
 	}
+	if got := story["latest_validation_markdown"]; got == "" {
+		t.Fatalf("latest_validation_markdown=%v want non-empty", got)
+	}
+	if got := story["latest_validation_json"]; got == "" {
+		t.Fatalf("latest_validation_json=%v want non-empty", got)
+	}
 	if got := story["artifacts_dir"]; got == "" {
 		t.Fatalf("artifacts_dir=%v want non-empty", got)
+	}
+	if ids, ok := story["room_message_ids"].([]any); !ok || len(ids) < 2 {
+		t.Fatalf("story.room_message_ids=%T/%v want at least 2 ids", story["room_message_ids"], story["room_message_ids"])
 	}
 
 	cmd, out = newRoomTestCommand(ctx)
@@ -2732,6 +2747,18 @@ func TestRunRoomStoryValidateAndWorkpackSync(t *testing.T) {
 	}
 	if got := milestone["workpack_dir"]; got == "" {
 		t.Fatalf("workpack_dir=%v want non-empty", got)
+	}
+	if got := milestone["milestone_markdown"]; got == "" {
+		t.Fatalf("milestone_markdown=%v want non-empty", got)
+	}
+	if got := milestone["meta_json_path"]; got == "" {
+		t.Fatalf("milestone meta_json_path=%v want non-empty", got)
+	}
+	if got := milestone["summary_markdown"]; got == "" {
+		t.Fatalf("summary_markdown=%v want non-empty", got)
+	}
+	if ids, ok := milestone["room_message_ids"].([]any); !ok || len(ids) < 2 {
+		t.Fatalf("milestone.room_message_ids=%T/%v want at least 2 ids", milestone["room_message_ids"], milestone["room_message_ids"])
 	}
 
 	workpackRoot := filepath.Join(home, ".agentctl", "epics", epicID)
@@ -2761,6 +2788,11 @@ func TestRunRoomStoryValidateAndWorkpackSync(t *testing.T) {
 	if !strings.Contains(string(validationMarkdown), "Artifact path: `docs/reviews/story.md`") {
 		t.Fatalf("validation markdown missing artifact path: %s", string(validationMarkdown))
 	}
+	for _, want := range []string{"## Provenance", "Source kind: `story_validation`", "Room ID: `alpha`", "Meta JSON:"} {
+		if !strings.Contains(string(validationMarkdown), want) {
+			t.Fatalf("validation markdown missing provenance %q:\n%s", want, string(validationMarkdown))
+		}
+	}
 
 	validationJSON, err := os.ReadFile(filepath.Join(workpackRoot, "milestones", milestoneID, "stories", storyID, "validation", validationID+".json"))
 	if err != nil {
@@ -2773,12 +2805,44 @@ func TestRunRoomStoryValidateAndWorkpackSync(t *testing.T) {
 	if got := validationPayload["schema_version"]; got != float64(1) {
 		t.Fatalf("schema_version=%v want 1", got)
 	}
+	provenance := validationPayload["provenance"].(map[string]any)
+	if got := provenance["source_kind"]; got != "story_validation" {
+		t.Fatalf("validation provenance.source_kind=%v want story_validation", got)
+	}
+	if got := provenance["source_id"]; got != validationID {
+		t.Fatalf("validation provenance.source_id=%v want %s", got, validationID)
+	}
+	if got := provenance["room_id"]; got != "alpha" {
+		t.Fatalf("validation provenance.room_id=%v want alpha", got)
+	}
+	if got := provenance["meta_json_path"]; got == "" {
+		t.Fatalf("validation provenance.meta_json_path empty")
+	}
 	validationView := validationPayload["validation"].(map[string]any)
 	if got := validationView["created_by"]; got != "human-a" {
 		t.Fatalf("created_by=%v want human-a", got)
 	}
 	if got := validationView["superseded"]; got != false {
 		t.Fatalf("superseded=%v want false", got)
+	}
+
+	epicMarkdown := mustReadRoomTestFile(t, filepath.Join(workpackRoot, "epic.md"))
+	for _, want := range []string{"## Provenance", "Source kind: `epic`", "Room ID: `alpha`", "Meta JSON:"} {
+		if !strings.Contains(epicMarkdown, want) {
+			t.Fatalf("epic markdown missing provenance %q:\n%s", want, epicMarkdown)
+		}
+	}
+	epicMetaRaw := mustReadRoomTestFile(t, filepath.Join(workpackRoot, "meta.json"))
+	var epicPayload map[string]any
+	if err := json.Unmarshal([]byte(epicMetaRaw), &epicPayload); err != nil {
+		t.Fatalf("Unmarshal epic meta json: %v", err)
+	}
+	epicProvenance := epicPayload["provenance"].(map[string]any)
+	if got := epicProvenance["source_kind"]; got != "epic" {
+		t.Fatalf("epic provenance.source_kind=%v want epic", got)
+	}
+	if got := epicProvenance["source_id"]; got != epicID {
+		t.Fatalf("epic provenance.source_id=%v want %s", got, epicID)
 	}
 }
 

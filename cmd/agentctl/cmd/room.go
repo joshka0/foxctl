@@ -4380,10 +4380,11 @@ func roomACAPromoteEpic(absWorkspace, roomID string, room agent.RoomSummary, mes
 			fmt.Sprintf("- Room: `%s`", roomID),
 			fmt.Sprintf("- Epic ID: `%s`", epicID),
 			fmt.Sprintf("- Work-pack: `%s`", workpackPath),
+			fmt.Sprintf("- Meta JSON: `%s`", roomAgileEpicMetaJSONPath(epicID)),
 		},
 		relatedLinks,
 	)
-	frontmatter := roomACAFrontmatter(absWorkspace, project, "room_epic", roomID, epicID, "", "", "", "", roomMessageIDs, workpackRoot, workpackPath, stringField(epic, "status"), []string{"room/agile", "epic"})
+	frontmatter := roomACAFrontmatter(absWorkspace, project, "room_epic", "epic", epicID, roomID, epicID, "", "", "", "", roomMessageIDs, workpackRoot, workpackPath, roomAgileEpicMetaJSONPath(epicID), stringField(epic, "status"), []string{"room/agile", "epic"})
 	return roomACAPromotionPrepared{
 		EpicID:     epicID,
 		TargetKind: "epic",
@@ -4410,6 +4411,7 @@ func roomACAPromoteEpic(absWorkspace, roomID string, room agent.RoomSummary, mes
 				"room_message_ids": roomMessageIDs,
 				"workpack_root":    workpackRoot,
 				"workpack_path":    workpackPath,
+				"meta_json_path":   roomAgileEpicMetaJSONPath(epicID),
 			},
 		},
 	}
@@ -4439,10 +4441,11 @@ func roomACAPromoteMilestone(absWorkspace, roomID, project string, epic, milesto
 			fmt.Sprintf("- Epic ID: `%s`", epicID),
 			fmt.Sprintf("- Milestone ID: `%s`", milestoneID),
 			fmt.Sprintf("- Work-pack: `%s`", workpackPath),
+			fmt.Sprintf("- Meta JSON: `%s`", roomAgileMilestoneMetaJSONPath(epicID, milestoneID)),
 		},
 		roomACARelatedLinks("room_milestone", epicID, milestoneID, ""),
 	)
-	frontmatter := roomACAFrontmatter(absWorkspace, project, "room_milestone", roomID, epicID, milestoneID, "", "", "", roomMessageIDs, roomAgileWorkpackRootPath(epicID), workpackPath, stringField(milestone, "status"), []string{"room/agile", "milestone"})
+	frontmatter := roomACAFrontmatter(absWorkspace, project, "room_milestone", "milestone", milestoneID, roomID, epicID, milestoneID, "", "", "", roomMessageIDs, roomAgileWorkpackRootPath(epicID), workpackPath, roomAgileMilestoneMetaJSONPath(epicID, milestoneID), stringField(milestone, "status"), []string{"room/agile", "milestone"})
 	return roomACAPromotionPrepared{
 		EpicID:     epicID,
 		TargetKind: "milestone",
@@ -4470,6 +4473,7 @@ func roomACAPromoteMilestone(absWorkspace, roomID, project string, epic, milesto
 				"room_message_ids": roomMessageIDs,
 				"workpack_root":    roomAgileWorkpackRootPath(epicID),
 				"workpack_path":    workpackPath,
+				"meta_json_path":   roomAgileMilestoneMetaJSONPath(epicID, milestoneID),
 			},
 		},
 	}
@@ -4491,10 +4495,11 @@ func roomACAPromoteRetro(absWorkspace, roomID, project string, epic, update map[
 			fmt.Sprintf("- Epic ID: `%s`", epicID),
 			fmt.Sprintf("- Guidance update ID: `%s`", updateID),
 			fmt.Sprintf("- Work-pack: `%s`", workpackPath),
+			fmt.Sprintf("- Meta JSON: `%s`", roomAgileEpicMetaJSONPath(epicID)),
 		},
 		roomACARelatedLinks("room_retro", epicID, stringField(meta, "milestone_id"), ""),
 	)
-	frontmatter := roomACAFrontmatter(absWorkspace, project, "room_retro", roomID, epicID, stringField(meta, "milestone_id"), "", "", updateID, roomMessageIDs, workpackRoot, workpackPath, "completed", []string{"room/agile", "retro", stringField(meta, "kind")})
+	frontmatter := roomACAFrontmatter(absWorkspace, project, "room_retro", "guidance_update", updateID, roomID, epicID, stringField(meta, "milestone_id"), "", "", updateID, roomMessageIDs, workpackRoot, workpackPath, roomAgileEpicMetaJSONPath(epicID), "completed", []string{"room/agile", "retro", stringField(meta, "kind")})
 	return roomACAPromotionPrepared{
 		EpicID:     epicID,
 		TargetKind: "retro",
@@ -4523,6 +4528,7 @@ func roomACAPromoteRetro(absWorkspace, roomID, project string, epic, update map[
 				"room_message_ids":   roomMessageIDs,
 				"workpack_root":      workpackRoot,
 				"workpack_path":      workpackPath,
+				"meta_json_path":     roomAgileEpicMetaJSONPath(epicID),
 			},
 		},
 	}
@@ -4548,10 +4554,11 @@ func roomACAPromoteValidation(absWorkspace, roomID, project string, epic, milest
 			fmt.Sprintf("- Story ID: `%s`", storyID),
 			fmt.Sprintf("- Validation ID: `%s`", validationID),
 			fmt.Sprintf("- Work-pack: `%s`", workpackPath),
+			fmt.Sprintf("- Meta JSON: `%s`", roomAgileValidationJSONPath(epicID, milestoneID, storyID, validationID)),
 		},
 		roomACARelatedLinks("room_validation", epicID, milestoneID, storyID),
 	)
-	frontmatter := roomACAFrontmatter(absWorkspace, project, "room_validation", roomID, epicID, milestoneID, storyID, validationID, "", roomMessageIDs, roomAgileWorkpackRootPath(epicID), workpackPath, stringField(meta, "status"), []string{"room/agile", "validation", stringField(meta, "status")})
+	frontmatter := roomACAFrontmatter(absWorkspace, project, "room_validation", "story_validation", validationID, roomID, epicID, milestoneID, storyID, validationID, "", roomMessageIDs, roomAgileWorkpackRootPath(epicID), workpackPath, roomAgileValidationJSONPath(epicID, milestoneID, storyID, validationID), stringField(meta, "status"), []string{"room/agile", "validation", stringField(meta, "status")})
 	return roomACAPromotionPrepared{
 		EpicID:     epicID,
 		TargetKind: "validation",
@@ -4581,12 +4588,13 @@ func roomACAPromoteValidation(absWorkspace, roomID, project string, epic, milest
 				"room_message_ids": roomMessageIDs,
 				"workpack_root":    roomAgileWorkpackRootPath(epicID),
 				"workpack_path":    workpackPath,
+				"meta_json_path":   roomAgileValidationJSONPath(epicID, milestoneID, storyID, validationID),
 			},
 		},
 	}
 }
 
-func roomACAFrontmatter(absWorkspace, project, noteType, roomID, epicID, milestoneID, storyID, validationID, guidanceUpdateID string, roomMessageIDs []string, workpackRoot, workpackPath, status string, tags []string) map[string]any {
+func roomACAFrontmatter(absWorkspace, project, noteType, sourceKind, sourceID, roomID, epicID, milestoneID, storyID, validationID, guidanceUpdateID string, roomMessageIDs []string, workpackRoot, workpackPath, metaJSONPath, status string, tags []string) map[string]any {
 	return map[string]any{
 		"note_type":              noteType,
 		"schema_version":         1,
@@ -4595,6 +4603,8 @@ func roomACAFrontmatter(absWorkspace, project, noteType, roomID, epicID, milesto
 		"workspace_id":           absWorkspace,
 		"project":                project,
 		"room_id":                roomID,
+		"source_kind":            strings.TrimSpace(sourceKind),
+		"source_id":              strings.TrimSpace(sourceID),
 		"epic_id":                strings.TrimSpace(epicID),
 		"milestone_id":           strings.TrimSpace(milestoneID),
 		"story_id":               strings.TrimSpace(storyID),
@@ -4603,6 +4613,7 @@ func roomACAFrontmatter(absWorkspace, project, noteType, roomID, epicID, milesto
 		"room_message_ids":       uniqueStrings(roomMessageIDs),
 		"workpack_root":          strings.TrimSpace(workpackRoot),
 		"workpack_path":          strings.TrimSpace(workpackPath),
+		"meta_json_path":         strings.TrimSpace(metaJSONPath),
 		"status":                 firstNonEmpty(strings.TrimSpace(status), "drafted"),
 		"promotion_source":       "room_agile",
 		"promotion_review_state": "drafted",
@@ -6020,11 +6031,28 @@ func buildRoomEpicViews(messages []agent.BoardMessage) []map[string]any {
 				storyCount += count
 			}
 		}
+		epicMessageIDs := uniqueStrings(append(
+			append(
+				append([]string{msg.ID}, collectRoomMapIDs(milestones)...),
+				collectRoomMapIDs(logs)...,
+			),
+			collectRoomMapIDs(guidanceUpdates)...,
+		))
+		if finalizeMsg := finalizeByEpic[msg.ID]; strings.TrimSpace(finalizeMsg.ID) != "" {
+			epicMessageIDs = uniqueStrings(append(epicMessageIDs, finalizeMsg.ID))
+		}
 		out = append(out, map[string]any{
 			"id":                      msg.ID,
 			"title":                   strings.TrimPrefix(strings.TrimSpace(msg.Subject), "Epic: "),
 			"status":                  status,
+			"source_kind":             "epic",
+			"source_id":               msg.ID,
+			"room_message_ids":        epicMessageIDs,
 			"workpack_root":           roomAgileWorkpackRootPath(msg.ID),
+			"epic_markdown":           roomAgileEpicMarkdownPath(msg.ID),
+			"meta_json_path":          roomAgileEpicMetaJSONPath(msg.ID),
+			"delivery_log_markdown":   roomAgileDeliveryLogMarkdownPath(msg.ID),
+			"retro_markdown":          roomAgileRetroMarkdownPath(msg.ID),
 			"root":                    msg,
 			"meta":                    meta,
 			"questions":               questions,
@@ -6973,12 +7001,25 @@ func buildRoomMilestoneViews(messages []agent.BoardMessage) []map[string]any {
 			}
 		}
 		sort.Strings(blockingValidationIDs)
+		milestoneMessageIDs := uniqueStrings(append(
+			append(
+				append([]string{msg.ID}, collectRoomBoardIDs(criteriaByMilestone[msg.ID])...),
+				collectRoomBoardIDs(reviews)...,
+			),
+			append(collectRoomMapIDs(summaryViews), collectRoomMapIDs(stories)...)...,
+		))
 		out = append(out, map[string]any{
 			"id":                        msg.ID,
 			"epic_id":                   meta.EpicID,
 			"title":                     strings.TrimPrefix(strings.TrimSpace(msg.Subject), "Milestone: "),
 			"status":                    status,
+			"source_kind":               "milestone",
+			"source_id":                 msg.ID,
 			"workpack_dir":              roomAgileMilestoneWorkpackDir(meta.EpicID, msg.ID),
+			"milestone_markdown":        roomAgileMilestoneMarkdownPath(meta.EpicID, msg.ID),
+			"meta_json_path":            roomAgileMilestoneMetaJSONPath(meta.EpicID, msg.ID),
+			"criteria_markdown":         roomAgileMilestoneCriteriaMarkdownPath(meta.EpicID, msg.ID),
+			"summary_markdown":          roomAgileMilestoneSummaryMarkdownPath(meta.EpicID, msg.ID),
 			"root":                      msg,
 			"meta":                      meta,
 			"contract":                  meta,
@@ -7020,6 +7061,7 @@ func buildRoomMilestoneViews(messages []agent.BoardMessage) []map[string]any {
 				"validated": validatedStories,
 				"accepted":  acceptedStories,
 			},
+			"room_message_ids": milestoneMessageIDs,
 		})
 	}
 	sort.Slice(out, func(i, j int) bool {
@@ -7058,13 +7100,16 @@ func buildRoomStoryViews(messages []agent.BoardMessage) []map[string]any {
 		}
 		meta := parseRoomStoryValidationBody(msg.Body)
 		validationsByStory[strings.TrimSpace(msg.RelatedMessageID)] = append(validationsByStory[strings.TrimSpace(msg.RelatedMessageID)], map[string]any{
-			"id":            msg.ID,
-			"validation_id": msg.ID,
-			"root":          msg,
-			"meta":          meta,
-			"status":        meta.Status,
-			"created_at":    msg.CreatedAt.Format(time.RFC3339),
-			"created_by":    strings.TrimSpace(msg.Sender),
+			"id":               msg.ID,
+			"validation_id":    msg.ID,
+			"source_kind":      "story_validation",
+			"source_id":        msg.ID,
+			"root":             msg,
+			"meta":             meta,
+			"status":           meta.Status,
+			"created_at":       msg.CreatedAt.Format(time.RFC3339),
+			"created_by":       strings.TrimSpace(msg.Sender),
+			"room_message_ids": []string{msg.ID},
 		})
 	}
 	out := make([]map[string]any, 0)
@@ -7089,6 +7134,11 @@ func buildRoomStoryViews(messages []agent.BoardMessage) []map[string]any {
 		milestoneID := strings.TrimSpace(msg.RelatedMessageID)
 		epicID := milestoneEpicByID[milestoneID]
 		validations := validationsByStory[msg.ID]
+		for i := range validations {
+			validationID := stringField(validations[i], "id")
+			validations[i]["validation_markdown"] = roomAgileValidationMarkdownPath(epicID, milestoneID, msg.ID, validationID)
+			validations[i]["validation_json"] = roomAgileValidationJSONPath(epicID, milestoneID, msg.ID, validationID)
+		}
 		validationSummary := summarizeRoomStoryValidations(validations)
 		stateSummary := summarizeRoomStoryStates(statesByStory[msg.ID])
 		state := "accepted"
@@ -7103,32 +7153,39 @@ func buildRoomStoryViews(messages []agent.BoardMessage) []map[string]any {
 			}
 		}
 		out = append(out, map[string]any{
-			"id":                       msg.ID,
-			"milestone_id":             milestoneID,
-			"title":                    strings.TrimPrefix(strings.TrimSpace(msg.Subject), "Story: "),
-			"status":                   "accepted",
-			"state":                    state,
-			"state_reason":             stateSummary.Reason,
-			"blocked_by":               stateSummary.BlockedBy,
-			"reviewer":                 stateSummary.Reviewer,
-			"state_update_count":       len(stateSummary.StateHistory),
-			"state_history":            stateSummary.StateHistory,
-			"latest_state_id":          stateSummary.LatestID,
-			"epic_id":                  epicID,
-			"workpack_dir":             roomAgileStoryWorkpackDir(epicID, milestoneID, msg.ID),
-			"validation_dir":           roomAgileStoryValidationDir(epicID, milestoneID, msg.ID),
-			"artifacts_dir":            roomAgileStoryArtifactsDir(epicID, milestoneID, msg.ID),
-			"root":                     msg,
-			"meta":                     meta,
-			"validations":              validations,
-			"validation_count":         len(validations),
-			"latest_validation_status": validationSummary.LatestStatus,
-			"latest_validation_id":     validationSummary.LatestID,
-			"effective_validations":    validationSummary.EffectiveValidations,
-			"covered":                  validationSummary.Covered,
-			"has_failures":             validationSummary.HasFailures,
-			"has_blockers":             validationSummary.HasBlockers,
-			"waived":                   validationSummary.WaivedOnly,
+			"id":                         msg.ID,
+			"milestone_id":               milestoneID,
+			"title":                      strings.TrimPrefix(strings.TrimSpace(msg.Subject), "Story: "),
+			"status":                     "accepted",
+			"source_kind":                "story",
+			"source_id":                  msg.ID,
+			"state":                      state,
+			"state_reason":               stateSummary.Reason,
+			"blocked_by":                 stateSummary.BlockedBy,
+			"reviewer":                   stateSummary.Reviewer,
+			"state_update_count":         len(stateSummary.StateHistory),
+			"state_history":              stateSummary.StateHistory,
+			"latest_state_id":            stateSummary.LatestID,
+			"epic_id":                    epicID,
+			"workpack_dir":               roomAgileStoryWorkpackDir(epicID, milestoneID, msg.ID),
+			"story_markdown":             roomAgileStoryMarkdownPath(epicID, milestoneID, msg.ID),
+			"meta_json_path":             roomAgileStoryMetaJSONPath(epicID, milestoneID, msg.ID),
+			"validation_dir":             roomAgileStoryValidationDir(epicID, milestoneID, msg.ID),
+			"artifacts_dir":              roomAgileStoryArtifactsDir(epicID, milestoneID, msg.ID),
+			"root":                       msg,
+			"meta":                       meta,
+			"validations":                validations,
+			"validation_count":           len(validations),
+			"latest_validation_status":   validationSummary.LatestStatus,
+			"latest_validation_id":       validationSummary.LatestID,
+			"latest_validation_markdown": roomAgileValidationMarkdownPath(epicID, milestoneID, msg.ID, validationSummary.LatestID),
+			"latest_validation_json":     roomAgileValidationJSONPath(epicID, milestoneID, msg.ID, validationSummary.LatestID),
+			"effective_validations":      validationSummary.EffectiveValidations,
+			"covered":                    validationSummary.Covered,
+			"has_failures":               validationSummary.HasFailures,
+			"has_blockers":               validationSummary.HasBlockers,
+			"waived":                     validationSummary.WaivedOnly,
+			"room_message_ids":           roomStorySyncMessageIDs(map[string]any{"id": msg.ID, "state_history": stateSummary.StateHistory, "validations": validations}),
 		})
 	}
 	sort.Slice(out, func(i, j int) bool {
@@ -7264,15 +7321,21 @@ func buildRoomGuidanceUpdateViews(messages []agent.BoardMessage) []map[string]an
 		}
 		meta := parseRoomGuidanceUpdateBody(msg.Body)
 		out = append(out, map[string]any{
-			"id":           msg.ID,
-			"epic_id":      meta.EpicID,
-			"milestone_id": meta.MilestoneID,
-			"kind":         meta.Kind,
-			"summary":      meta.Summary,
-			"root":         msg,
-			"meta":         meta,
-			"created_at":   msg.CreatedAt.Format(time.RFC3339),
-			"created_by":   strings.TrimSpace(msg.Sender),
+			"id":               msg.ID,
+			"epic_id":          meta.EpicID,
+			"milestone_id":     meta.MilestoneID,
+			"source_kind":      "guidance_update",
+			"source_id":        msg.ID,
+			"kind":             meta.Kind,
+			"summary":          meta.Summary,
+			"workpack_root":    roomAgileWorkpackRootPath(meta.EpicID),
+			"workpack_path":    roomAgileRetroMarkdownPath(meta.EpicID),
+			"meta_json_path":   roomAgileEpicMetaJSONPath(meta.EpicID),
+			"root":             msg,
+			"meta":             meta,
+			"created_at":       msg.CreatedAt.Format(time.RFC3339),
+			"created_by":       strings.TrimSpace(msg.Sender),
+			"room_message_ids": []string{msg.ID},
 		})
 	}
 	sort.Slice(out, func(i, j int) bool {
@@ -7357,15 +7420,111 @@ func roomAgileStoryArtifactsDir(epicID, milestoneID, storyID string) string {
 	return filepath.Join(storyDir, "artifacts")
 }
 
+func roomAgileEpicMarkdownPath(epicID string) string {
+	root := roomAgileWorkpackRootPath(epicID)
+	if root == "" {
+		return ""
+	}
+	return filepath.Join(root, "epic.md")
+}
+
+func roomAgileEpicMetaJSONPath(epicID string) string {
+	root := roomAgileWorkpackRootPath(epicID)
+	if root == "" {
+		return ""
+	}
+	return filepath.Join(root, "meta.json")
+}
+
+func roomAgileDeliveryLogMarkdownPath(epicID string) string {
+	root := roomAgileWorkpackRootPath(epicID)
+	if root == "" {
+		return ""
+	}
+	return filepath.Join(root, "delivery-log.md")
+}
+
+func roomAgileRetroMarkdownPath(epicID string) string {
+	root := roomAgileWorkpackRootPath(epicID)
+	if root == "" {
+		return ""
+	}
+	return filepath.Join(root, "retro.md")
+}
+
+func roomAgileMilestoneMarkdownPath(epicID, milestoneID string) string {
+	dir := roomAgileMilestoneWorkpackDir(epicID, milestoneID)
+	if dir == "" {
+		return ""
+	}
+	return filepath.Join(dir, "milestone.md")
+}
+
+func roomAgileMilestoneMetaJSONPath(epicID, milestoneID string) string {
+	dir := roomAgileMilestoneWorkpackDir(epicID, milestoneID)
+	if dir == "" {
+		return ""
+	}
+	return filepath.Join(dir, "meta.json")
+}
+
+func roomAgileMilestoneCriteriaMarkdownPath(epicID, milestoneID string) string {
+	dir := roomAgileMilestoneWorkpackDir(epicID, milestoneID)
+	if dir == "" {
+		return ""
+	}
+	return filepath.Join(dir, "criteria.md")
+}
+
+func roomAgileMilestoneSummaryMarkdownPath(epicID, milestoneID string) string {
+	dir := roomAgileMilestoneWorkpackDir(epicID, milestoneID)
+	if dir == "" {
+		return ""
+	}
+	return filepath.Join(dir, "summary.md")
+}
+
+func roomAgileStoryMarkdownPath(epicID, milestoneID, storyID string) string {
+	dir := roomAgileStoryWorkpackDir(epicID, milestoneID, storyID)
+	if dir == "" {
+		return ""
+	}
+	return filepath.Join(dir, "story.md")
+}
+
+func roomAgileStoryMetaJSONPath(epicID, milestoneID, storyID string) string {
+	dir := roomAgileStoryWorkpackDir(epicID, milestoneID, storyID)
+	if dir == "" {
+		return ""
+	}
+	return filepath.Join(dir, "meta.json")
+}
+
+func roomAgileValidationMarkdownPath(epicID, milestoneID, storyID, validationID string) string {
+	dir := roomAgileStoryValidationDir(epicID, milestoneID, storyID)
+	if dir == "" || strings.TrimSpace(validationID) == "" {
+		return ""
+	}
+	return filepath.Join(dir, strings.TrimSpace(validationID)+".md")
+}
+
+func roomAgileValidationJSONPath(epicID, milestoneID, storyID, validationID string) string {
+	dir := roomAgileStoryValidationDir(epicID, milestoneID, storyID)
+	if dir == "" || strings.TrimSpace(validationID) == "" {
+		return ""
+	}
+	return filepath.Join(dir, strings.TrimSpace(validationID)+".json")
+}
+
 func buildRoomAgileWorkpackInfo(epic map[string]any) map[string]any {
 	epicID := stringField(epic, "id")
 	root := roomAgileWorkpackRootPath(epicID)
 	info := map[string]any{
 		"root":                  root,
-		"epic_markdown":         filepath.Join(root, "epic.md"),
-		"meta_json":             filepath.Join(root, "meta.json"),
-		"delivery_log_markdown": filepath.Join(root, "delivery-log.md"),
-		"retro_markdown":        filepath.Join(root, "retro.md"),
+		"epic_markdown":         roomAgileEpicMarkdownPath(epicID),
+		"meta_json":             roomAgileEpicMetaJSONPath(epicID),
+		"delivery_log_markdown": roomAgileDeliveryLogMarkdownPath(epicID),
+		"retro_markdown":        roomAgileRetroMarkdownPath(epicID),
 	}
 	milestones := make([]map[string]any, 0)
 	for _, milestone := range mapSlice(epic["milestones"]) {
@@ -7375,10 +7534,10 @@ func buildRoomAgileWorkpackInfo(epic map[string]any) map[string]any {
 			"id":                 milestoneID,
 			"title":              stringField(milestone, "title"),
 			"dir":                milestoneDir,
-			"milestone_markdown": filepath.Join(milestoneDir, "milestone.md"),
-			"meta_json":          filepath.Join(milestoneDir, "meta.json"),
-			"criteria_markdown":  filepath.Join(milestoneDir, "criteria.md"),
-			"summary_markdown":   filepath.Join(milestoneDir, "summary.md"),
+			"milestone_markdown": roomAgileMilestoneMarkdownPath(epicID, milestoneID),
+			"meta_json":          roomAgileMilestoneMetaJSONPath(epicID, milestoneID),
+			"criteria_markdown":  roomAgileMilestoneCriteriaMarkdownPath(epicID, milestoneID),
+			"summary_markdown":   roomAgileMilestoneSummaryMarkdownPath(epicID, milestoneID),
 		}
 		stories := make([]map[string]any, 0)
 		for _, story := range mapSlice(milestone["stories"]) {
@@ -7387,14 +7546,27 @@ func buildRoomAgileWorkpackInfo(epic map[string]any) map[string]any {
 			}
 			storyID := stringField(story, "id")
 			storyDir := roomAgileStoryWorkpackDir(epicID, milestoneID, storyID)
+			validations := make([]map[string]any, 0)
+			for _, validation := range mapSlice(story["validations"]) {
+				validationID := stringField(validation, "id")
+				if validationID == "" {
+					continue
+				}
+				validations = append(validations, map[string]any{
+					"id":                  validationID,
+					"validation_markdown": roomAgileValidationMarkdownPath(epicID, milestoneID, storyID, validationID),
+					"validation_json":     roomAgileValidationJSONPath(epicID, milestoneID, storyID, validationID),
+				})
+			}
 			stories = append(stories, map[string]any{
 				"id":             storyID,
 				"title":          stringField(story, "title"),
 				"dir":            storyDir,
-				"story_markdown": filepath.Join(storyDir, "story.md"),
-				"meta_json":      filepath.Join(storyDir, "meta.json"),
+				"story_markdown": roomAgileStoryMarkdownPath(epicID, milestoneID, storyID),
+				"meta_json":      roomAgileStoryMetaJSONPath(epicID, milestoneID, storyID),
 				"validation_dir": roomAgileStoryValidationDir(epicID, milestoneID, storyID),
 				"artifacts_dir":  roomAgileStoryArtifactsDir(epicID, milestoneID, storyID),
+				"validations":    validations,
 			})
 		}
 		milestoneInfo["stories"] = stories
@@ -7402,6 +7574,138 @@ func buildRoomAgileWorkpackInfo(epic map[string]any) map[string]any {
 	}
 	info["milestones"] = milestones
 	return info
+}
+
+func buildRoomWorkpackProvenance(workspaceID, roomID, sourceKind, sourceID, epicID, milestoneID, storyID, validationID, guidanceUpdateID, workpackRoot, workpackPath, metaJSONPath string, roomMessageIDs []string) map[string]any {
+	return map[string]any{
+		"workspace":          strings.TrimSpace(workspaceID),
+		"workspace_id":       strings.TrimSpace(workspaceID),
+		"room_id":            strings.TrimSpace(roomID),
+		"source_kind":        strings.TrimSpace(sourceKind),
+		"source_id":          strings.TrimSpace(sourceID),
+		"epic_id":            strings.TrimSpace(epicID),
+		"milestone_id":       strings.TrimSpace(milestoneID),
+		"story_id":           strings.TrimSpace(storyID),
+		"validation_id":      strings.TrimSpace(validationID),
+		"guidance_update_id": strings.TrimSpace(guidanceUpdateID),
+		"room_message_ids":   uniqueStrings(roomMessageIDs),
+		"workpack_root":      strings.TrimSpace(workpackRoot),
+		"workpack_path":      strings.TrimSpace(workpackPath),
+		"meta_json_path":     strings.TrimSpace(metaJSONPath),
+	}
+}
+
+func prependRoomWorkpackProvenance(content string, provenance map[string]any) string {
+	var b strings.Builder
+	content = strings.TrimSpace(content)
+	if content != "" {
+		b.WriteString(content)
+		b.WriteString("\n")
+	}
+	lines := make([]string, 0, 10)
+	for _, item := range []struct {
+		label string
+		value string
+	}{
+		{"Workspace", stringField(provenance, "workspace")},
+		{"Room ID", stringField(provenance, "room_id")},
+		{"Source kind", stringField(provenance, "source_kind")},
+		{"Source ID", stringField(provenance, "source_id")},
+		{"Epic ID", stringField(provenance, "epic_id")},
+		{"Milestone ID", stringField(provenance, "milestone_id")},
+		{"Story ID", stringField(provenance, "story_id")},
+		{"Validation ID", stringField(provenance, "validation_id")},
+		{"Guidance update ID", stringField(provenance, "guidance_update_id")},
+		{"Meta JSON", stringField(provenance, "meta_json_path")},
+	} {
+		if strings.TrimSpace(item.value) == "" {
+			continue
+		}
+		lines = append(lines, fmt.Sprintf("- %s: `%s`", item.label, item.value))
+	}
+	if ids := stringSliceField(provenance, "room_message_ids"); len(ids) > 0 {
+		lines = append(lines, fmt.Sprintf("- Room message IDs: `%s`", strings.Join(ids, "`, `")))
+	}
+	if len(lines) > 0 {
+		b.WriteString("\n## Provenance\n")
+		for _, line := range lines {
+			b.WriteString(line)
+			b.WriteString("\n")
+		}
+	}
+	return strings.TrimSpace(b.String()) + "\n"
+}
+
+func roomEpicSyncMessageIDs(epic map[string]any) []string {
+	ids := []string{stringField(epic, "id")}
+	switch finalBrief := epic["final_brief"].(type) {
+	case map[string]any:
+		ids = append(ids, stringField(finalBrief, "id"))
+	case agent.BoardMessage:
+		if strings.TrimSpace(finalBrief.ID) != "" {
+			ids = append(ids, finalBrief.ID)
+		}
+	}
+	for _, milestone := range mapSlice(epic["milestones"]) {
+		ids = append(ids, stringField(milestone, "id"))
+	}
+	for _, log := range mapSlice(epic["logs"]) {
+		ids = append(ids, stringField(log, "id"))
+	}
+	for _, update := range mapSlice(epic["guidance_updates"]) {
+		ids = append(ids, stringField(update, "id"))
+	}
+	return uniqueStrings(ids)
+}
+
+func roomMilestoneSyncMessageIDs(milestone map[string]any) []string {
+	ids := []string{stringField(milestone, "id")}
+	ids = append(ids, collectRoomBoardIDs(boardMessageSliceValue(milestone["criteria"]))...)
+	for _, review := range boardMessageSliceValue(milestone["reviews"]) {
+		ids = append(ids, review.ID)
+	}
+	for _, summary := range mapSlice(milestone["summaries"]) {
+		ids = append(ids, stringField(summary, "id"))
+	}
+	for _, story := range mapSlice(milestone["stories"]) {
+		ids = append(ids, stringField(story, "id"))
+	}
+	return uniqueStrings(ids)
+}
+
+func roomStorySyncMessageIDs(story map[string]any) []string {
+	ids := []string{stringField(story, "id")}
+	for _, state := range mapSlice(story["state_history"]) {
+		ids = append(ids, stringField(state, "id"))
+	}
+	for _, validation := range mapSlice(story["validations"]) {
+		ids = append(ids, stringField(validation, "id"))
+	}
+	return uniqueStrings(ids)
+}
+
+func collectRoomMapIDs(items []map[string]any) []string {
+	out := make([]string, 0, len(items))
+	for _, item := range items {
+		if id := stringField(item, "id"); id != "" {
+			out = append(out, id)
+			continue
+		}
+		if id := stringField(mapField(item, "root"), "id"); id != "" {
+			out = append(out, id)
+		}
+	}
+	return uniqueStrings(out)
+}
+
+func collectRoomBoardIDs(items []agent.BoardMessage) []string {
+	out := make([]string, 0, len(items))
+	for _, item := range items {
+		if strings.TrimSpace(item.ID) != "" {
+			out = append(out, item.ID)
+		}
+	}
+	return uniqueStrings(out)
 }
 
 func syncRoomAgileWorkpack(ctx context.Context, store blackboard.BoardStore, workspaceID, roomID, epicID string) error {
@@ -7423,86 +7727,99 @@ func syncRoomAgileWorkpack(ctx context.Context, store blackboard.BoardStore, wor
 	if epicDir == "" {
 		return fmt.Errorf("resolve user home for work-pack sync")
 	}
+	epicMetaJSON := roomAgileEpicMetaJSONPath(epicID)
+	epicProvenance := buildRoomWorkpackProvenance(workspaceID, roomID, "epic", epicID, epicID, "", "", "", "", epicDir, roomAgileEpicMarkdownPath(epicID), epicMetaJSON, roomEpicSyncMessageIDs(epic))
 	if err := os.MkdirAll(filepath.Join(epicDir, "milestones"), 0o755); err != nil {
 		return fmt.Errorf("create epic work-pack directory: %w", err)
 	}
-	if err := writeRoomAgileFile(filepath.Join(epicDir, "epic.md"), renderRoomEpicMarkdown(epic)); err != nil {
+	if err := writeRoomAgileFile(roomAgileEpicMarkdownPath(epicID), prependRoomWorkpackProvenance(renderRoomEpicMarkdown(epic), epicProvenance)); err != nil {
 		return err
 	}
-	if err := writeRoomAgileJSON(filepath.Join(epicDir, "meta.json"), map[string]any{
+	if err := writeRoomAgileJSON(epicMetaJSON, map[string]any{
 		"schema_version": 1,
 		"generated_at":   time.Now().UTC().Format(time.RFC3339),
+		"provenance":     epicProvenance,
 		"epic":           epic,
 	}); err != nil {
 		return err
 	}
-	if err := writeRoomAgileFile(filepath.Join(epicDir, "delivery-log.md"), renderRoomDeliveryLogMarkdown(epic)); err != nil {
+	deliveryLogProvenance := buildRoomWorkpackProvenance(workspaceID, roomID, "delivery_log", epicID, epicID, "", "", "", "", epicDir, roomAgileDeliveryLogMarkdownPath(epicID), epicMetaJSON, uniqueStrings(append([]string{epicID}, collectRoomMapIDs(mapSlice(epic["logs"]))...)))
+	if err := writeRoomAgileFile(roomAgileDeliveryLogMarkdownPath(epicID), prependRoomWorkpackProvenance(renderRoomDeliveryLogMarkdown(epic), deliveryLogProvenance)); err != nil {
 		return err
 	}
-	if err := writeRoomAgileFile(filepath.Join(epicDir, "retro.md"), renderRoomRetroMarkdown(epic)); err != nil {
+	retroProvenance := buildRoomWorkpackProvenance(workspaceID, roomID, "epic", epicID, epicID, "", "", "", "", epicDir, roomAgileRetroMarkdownPath(epicID), epicMetaJSON, uniqueStrings(append([]string{epicID}, collectRoomMapIDs(mapSlice(epic["guidance_updates"]))...)))
+	if err := writeRoomAgileFile(roomAgileRetroMarkdownPath(epicID), prependRoomWorkpackProvenance(renderRoomRetroMarkdown(epic), retroProvenance)); err != nil {
 		return err
 	}
 	for _, milestone := range mapSlice(epic["milestones"]) {
-		if err := syncRoomAgileMilestoneWorkpack(epicDir, milestone); err != nil {
+		if err := syncRoomAgileMilestoneWorkpack(workspaceID, roomID, epicID, milestone); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func syncRoomAgileMilestoneWorkpack(epicDir string, milestone map[string]any) error {
+func syncRoomAgileMilestoneWorkpack(workspaceID, roomID, epicID string, milestone map[string]any) error {
 	milestoneID := stringField(milestone, "id")
 	if milestoneID == "" {
 		return nil
 	}
-	milestoneDir := filepath.Join(epicDir, "milestones", milestoneID)
+	milestoneDir := roomAgileMilestoneWorkpackDir(epicID, milestoneID)
+	milestoneMetaJSON := roomAgileMilestoneMetaJSONPath(epicID, milestoneID)
+	milestoneProvenance := buildRoomWorkpackProvenance(workspaceID, roomID, "milestone", milestoneID, epicID, milestoneID, "", "", "", roomAgileWorkpackRootPath(epicID), roomAgileMilestoneMarkdownPath(epicID, milestoneID), milestoneMetaJSON, roomMilestoneSyncMessageIDs(milestone))
 	if err := os.MkdirAll(filepath.Join(milestoneDir, "stories"), 0o755); err != nil {
 		return fmt.Errorf("create milestone work-pack directory: %w", err)
 	}
-	if err := writeRoomAgileFile(filepath.Join(milestoneDir, "milestone.md"), renderRoomMilestoneMarkdown(milestone)); err != nil {
+	if err := writeRoomAgileFile(roomAgileMilestoneMarkdownPath(epicID, milestoneID), prependRoomWorkpackProvenance(renderRoomMilestoneMarkdown(milestone), milestoneProvenance)); err != nil {
 		return err
 	}
-	if err := writeRoomAgileJSON(filepath.Join(milestoneDir, "meta.json"), map[string]any{
+	if err := writeRoomAgileJSON(milestoneMetaJSON, map[string]any{
 		"schema_version": 1,
 		"generated_at":   time.Now().UTC().Format(time.RFC3339),
+		"provenance":     milestoneProvenance,
 		"milestone":      milestone,
 	}); err != nil {
 		return err
 	}
-	if err := writeRoomAgileFile(filepath.Join(milestoneDir, "criteria.md"), renderRoomMilestoneCriteriaMarkdown(milestone)); err != nil {
+	criteriaProvenance := buildRoomWorkpackProvenance(workspaceID, roomID, "milestone", milestoneID, epicID, milestoneID, "", "", "", roomAgileWorkpackRootPath(epicID), roomAgileMilestoneCriteriaMarkdownPath(epicID, milestoneID), milestoneMetaJSON, uniqueStrings(append([]string{milestoneID}, collectRoomBoardIDs(boardMessageSliceValue(milestone["criteria"]))...)))
+	if err := writeRoomAgileFile(roomAgileMilestoneCriteriaMarkdownPath(epicID, milestoneID), prependRoomWorkpackProvenance(renderRoomMilestoneCriteriaMarkdown(milestone), criteriaProvenance)); err != nil {
 		return err
 	}
-	if err := writeRoomAgileFile(filepath.Join(milestoneDir, "summary.md"), renderRoomMilestoneSummaryMarkdown(milestone)); err != nil {
+	summarySourceID := firstNonEmpty(stringField(mapField(milestone, "latest_summary"), "id"), milestoneID)
+	summaryProvenance := buildRoomWorkpackProvenance(workspaceID, roomID, "milestone_summary", summarySourceID, epicID, milestoneID, "", "", "", roomAgileWorkpackRootPath(epicID), roomAgileMilestoneSummaryMarkdownPath(epicID, milestoneID), milestoneMetaJSON, uniqueStrings(append([]string{milestoneID}, collectRoomMapIDs(mapSlice(milestone["summaries"]))...)))
+	if err := writeRoomAgileFile(roomAgileMilestoneSummaryMarkdownPath(epicID, milestoneID), prependRoomWorkpackProvenance(renderRoomMilestoneSummaryMarkdown(milestone), summaryProvenance)); err != nil {
 		return err
 	}
 	for _, story := range mapSlice(milestone["stories"]) {
-		if err := syncRoomAgileStoryWorkpack(milestoneDir, story); err != nil {
+		if err := syncRoomAgileStoryWorkpack(workspaceID, roomID, epicID, milestoneID, story); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func syncRoomAgileStoryWorkpack(milestoneDir string, story map[string]any) error {
+func syncRoomAgileStoryWorkpack(workspaceID, roomID, epicID, milestoneID string, story map[string]any) error {
 	storyID := stringField(story, "id")
 	if storyID == "" {
 		return nil
 	}
-	storyDir := filepath.Join(milestoneDir, "stories", storyID)
-	validationDir := filepath.Join(storyDir, "validation")
-	artifactsDir := filepath.Join(storyDir, "artifacts")
+	validationDir := roomAgileStoryValidationDir(epicID, milestoneID, storyID)
+	artifactsDir := roomAgileStoryArtifactsDir(epicID, milestoneID, storyID)
+	storyMetaJSON := roomAgileStoryMetaJSONPath(epicID, milestoneID, storyID)
+	storyProvenance := buildRoomWorkpackProvenance(workspaceID, roomID, "story", storyID, epicID, milestoneID, storyID, "", "", roomAgileWorkpackRootPath(epicID), roomAgileStoryMarkdownPath(epicID, milestoneID, storyID), storyMetaJSON, roomStorySyncMessageIDs(story))
 	if err := os.MkdirAll(validationDir, 0o755); err != nil {
 		return fmt.Errorf("create story validation directory: %w", err)
 	}
 	if err := os.MkdirAll(artifactsDir, 0o755); err != nil {
 		return fmt.Errorf("create story artifacts directory: %w", err)
 	}
-	if err := writeRoomAgileFile(filepath.Join(storyDir, "story.md"), renderRoomStoryMarkdown(story)); err != nil {
+	if err := writeRoomAgileFile(roomAgileStoryMarkdownPath(epicID, milestoneID, storyID), prependRoomWorkpackProvenance(renderRoomStoryMarkdown(story), storyProvenance)); err != nil {
 		return err
 	}
-	if err := writeRoomAgileJSON(filepath.Join(storyDir, "meta.json"), map[string]any{
+	if err := writeRoomAgileJSON(storyMetaJSON, map[string]any{
 		"schema_version": 1,
 		"generated_at":   time.Now().UTC().Format(time.RFC3339),
+		"provenance":     storyProvenance,
 		"story":          story,
 	}); err != nil {
 		return err
@@ -7512,12 +7829,15 @@ func syncRoomAgileStoryWorkpack(milestoneDir string, story map[string]any) error
 		if validationID == "" {
 			continue
 		}
-		if err := writeRoomAgileFile(filepath.Join(validationDir, validationID+".md"), renderRoomStoryValidationMarkdown(validation)); err != nil {
+		validationMetaJSON := roomAgileValidationJSONPath(epicID, milestoneID, storyID, validationID)
+		validationProvenance := buildRoomWorkpackProvenance(workspaceID, roomID, "story_validation", validationID, epicID, milestoneID, storyID, validationID, "", roomAgileWorkpackRootPath(epicID), roomAgileValidationMarkdownPath(epicID, milestoneID, storyID, validationID), validationMetaJSON, []string{validationID})
+		if err := writeRoomAgileFile(roomAgileValidationMarkdownPath(epicID, milestoneID, storyID, validationID), prependRoomWorkpackProvenance(renderRoomStoryValidationMarkdown(validation), validationProvenance)); err != nil {
 			return err
 		}
-		if err := writeRoomAgileJSON(filepath.Join(validationDir, validationID+".json"), map[string]any{
+		if err := writeRoomAgileJSON(validationMetaJSON, map[string]any{
 			"schema_version": 1,
 			"generated_at":   time.Now().UTC().Format(time.RFC3339),
+			"provenance":     validationProvenance,
 			"validation":     validation,
 		}); err != nil {
 			return err
