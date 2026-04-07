@@ -17,7 +17,7 @@ shapes** always live in the linked specs.
 Related specs:
 
 - `../review_gate.md`
-- `../semantic_file_index.md`
+- `../../archive/specs/semantic_file_index.md`
 - `../code_symbol_index_and_swe_grep.md`
 - `../archive/specs/dspy_go_agents.md` (legacy runtime reference)
 - `../archive/specs/dspy_trajectory_capture.md` (legacy trajectory format)

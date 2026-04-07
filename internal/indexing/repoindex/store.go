@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
@@ -20,6 +21,11 @@ const (
 	schemaVersion            = 3
 	openContextMinimumBudget = 10 * time.Second
 )
+
+// SchemaVersion returns the current repoindex schema version.
+func SchemaVersion() int {
+	return schemaVersion
+}
 
 // ErrNotFound indicates the requested node or edge was not found.
 var ErrNotFound = errors.New("not found")
@@ -51,19 +57,10 @@ func Open(ctx context.Context, storageRoot, repoRoot string) (*Store, error) {
 	if repoRoot == "" {
 		return nil, fmt.Errorf("repoindex: repo root is required")
 	}
-	absoluteRoot, err := filepath.Abs(repoRoot)
+	absoluteRoot, dbPath, legacyPath, key, err := resolveStorePaths(storageRoot, repoRoot)
 	if err != nil {
-		return nil, fmt.Errorf("repoindex: resolve repo root: %w", err)
+		return nil, err
 	}
-	absoluteRoot = filepath.Clean(absoluteRoot)
-
-	key := repoKey(absoluteRoot)
-	dir := strings.TrimSpace(os.Getenv("AGENTCTL_REPOINDEX_DB_DIR"))
-	if dir == "" {
-		dir = filepath.Join(storageRoot, "repoindex")
-	}
-	dbPath := filepath.Join(dir, key+".db")
-	legacyPath := filepath.Join(dir, legacyRepoKey(absoluteRoot)+".db")
 	if dbPath != legacyPath {
 		if _, err := os.Stat(dbPath); err != nil {
 			if os.IsNotExist(err) {
@@ -97,20 +94,66 @@ func Open(ctx context.Context, storageRoot, repoRoot string) (*Store, error) {
 	return &Store{db: db, path: dbPath, repoRoot: absoluteRoot, repoKey: key, close: closeFn}, nil
 }
 
+// StoreExists reports whether a repoindex store already exists for repoRoot.
+// It checks both the current deterministic path and the legacy path without
+// creating a new database.
+func StoreExists(storageRoot, repoRoot string) (bool, error) {
+	_, dbPath, legacyPath, _, err := resolveStorePaths(storageRoot, repoRoot)
+	if err != nil {
+		return false, err
+	}
+	if _, err := os.Stat(dbPath); err == nil {
+		return true, nil
+	} else if !os.IsNotExist(err) {
+		return false, err
+	}
+	if legacyPath != dbPath {
+		if _, err := os.Stat(legacyPath); err == nil {
+			return true, nil
+		} else if !os.IsNotExist(err) {
+			return false, err
+		}
+	}
+	return false, nil
+}
+
+func resolveStorePaths(storageRoot, repoRoot string) (absoluteRoot, dbPath, legacyPath, key string, err error) {
+	if repoRoot == "" {
+		return "", "", "", "", fmt.Errorf("repoindex: repo root is required")
+	}
+	absoluteRoot, err = filepath.Abs(repoRoot)
+	if err != nil {
+		return "", "", "", "", fmt.Errorf("repoindex: resolve repo root: %w", err)
+	}
+	absoluteRoot = filepath.Clean(absoluteRoot)
+
+	key = repoKey(absoluteRoot)
+	dir := strings.TrimSpace(os.Getenv("AGENTCTL_REPOINDEX_DB_DIR"))
+	if dir == "" {
+		dir = filepath.Join(storageRoot, "repoindex")
+	}
+	dbPath = filepath.Join(dir, key+".db")
+	legacyPath = filepath.Join(dir, legacyRepoKey(absoluteRoot)+".db")
+	return absoluteRoot, dbPath, legacyPath, key, nil
+}
+
 func openContext(ctx context.Context, minimumBudget time.Duration) (context.Context, context.CancelFunc) {
 	if ctx == nil {
 		return context.WithTimeout(context.Background(), minimumBudget)
 	}
-	if err := ctx.Err(); err != nil {
-		return ctx, func() {}
-	}
 	if minimumBudget <= 0 {
 		return ctx, func() {}
 	}
-	if deadline, ok := ctx.Deadline(); ok && time.Until(deadline) < minimumBudget {
-		return context.WithTimeout(context.WithoutCancel(ctx), minimumBudget)
+	if deadline, ok := ctx.Deadline(); ok {
+		if err := ctx.Err(); err != nil || time.Until(deadline) < minimumBudget {
+			return context.WithTimeout(context.WithoutCancel(ctx), minimumBudget)
+		}
+		return ctx, func() {}
 	}
-	return ctx, func() {}
+	if err := ctx.Err(); err != nil {
+		return ctx, func() {}
+	}
+	return context.WithTimeout(context.WithoutCancel(ctx), minimumBudget)
 }
 
 // Close closes the underlying database.
@@ -163,6 +206,15 @@ func (s *Store) SetMeta(ctx context.Context, meta IndexMeta) error {
 	if err := setMetaValue(ctx, tx, "indexed_at_unix", fmt.Sprintf("%d", meta.IndexedAt.Unix())); err != nil {
 		return err
 	}
+	if meta.Languages != nil {
+		data, err := json.Marshal(meta.Languages)
+		if err != nil {
+			return err
+		}
+		if err := setMetaValue(ctx, tx, "languages_json", string(data)); err != nil {
+			return err
+		}
+	}
 
 	return tx.Commit()
 }
@@ -193,6 +245,13 @@ func (s *Store) GetMeta(ctx context.Context) (IndexMeta, error) {
 		case "indexed_at_unix":
 			if parsed, err := parseInt64(value); err == nil {
 				meta.IndexedAt = time.Unix(parsed, 0).UTC()
+			}
+		case "languages_json":
+			if strings.TrimSpace(value) != "" {
+				var languages []string
+				if err := json.Unmarshal([]byte(value), &languages); err == nil {
+					meta.Languages = languages
+				}
 			}
 		}
 	}
@@ -510,6 +569,48 @@ func (s *Store) Stats(ctx context.Context) (Stats, error) {
 	}
 
 	return stats, nil
+}
+
+// ListFilesInScope returns indexed file node paths within the requested relative scope path.
+func (s *Store) ListFilesInScope(ctx context.Context, scopePath string, isDir bool) ([]string, error) {
+	scopePath = filepath.ToSlash(strings.TrimSpace(scopePath))
+	var (
+		query string
+		args  []any
+		rows  *sql.Rows
+		err   error
+	)
+	switch {
+	case scopePath == "" || scopePath == ".":
+		query = `SELECT file FROM nodes WHERE repo_key = ? AND kind = ? AND file IS NOT NULL ORDER BY file ASC`
+		args = []any{s.repoKey, string(NodeFile)}
+	case isDir:
+		query = `SELECT file FROM nodes WHERE repo_key = ? AND kind = ? AND (file = ? OR file LIKE ?) ORDER BY file ASC`
+		args = []any{s.repoKey, string(NodeFile), scopePath, scopePath + "/%"}
+	default:
+		query = `SELECT file FROM nodes WHERE repo_key = ? AND kind = ? AND file = ? ORDER BY file ASC`
+		args = []any{s.repoKey, string(NodeFile), scopePath}
+	}
+	rows, err = s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	files := make([]string, 0)
+	for rows.Next() {
+		var file string
+		if err := rows.Scan(&file); err != nil {
+			return nil, err
+		}
+		file = filepath.ToSlash(strings.TrimSpace(file))
+		if file != "" {
+			files = append(files, file)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return files, nil
 }
 
 func migrate(ctx context.Context, db *sql.DB) error {

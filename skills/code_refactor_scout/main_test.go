@@ -5,6 +5,7 @@ import (
 	"go/parser"
 	"go/token"
 	"os"
+	"path/filepath"
 	"testing"
 
 	symindex "github.com/jkatigb/agentctl/internal/indexing/symbol"
@@ -96,6 +97,171 @@ func DoThing(a int, b int, c int, d bool, e string, f string) (int, string, erro
 	}
 }
 
+func TestAnalyzeGoFuncDeclFindsDuplicateRecoveryBlock(t *testing.T) {
+	src := `package sample
+
+func recoverThing(a, b bool) error {
+	if a {
+		logFailure()
+		return errRetry
+	}
+	if b {
+		logFailure()
+		return errRetry
+	}
+	return nil
+}
+`
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, "sample.go", src, parser.ParseComments)
+	if err != nil {
+		t.Fatalf("parse go file: %v", err)
+	}
+
+	state := &scoutState{
+		Thresholds: thresholdsFor("default"),
+	}
+
+	var got []finding
+	for _, decl := range file.Decls {
+		fn, ok := decl.(*ast.FuncDecl)
+		if !ok {
+			continue
+		}
+		got = append(got, analyzeGoFuncDecl(fn, fset, "sample.go", state)...)
+	}
+
+	for _, item := range got {
+		if item.RuleID != "duplicate_recovery_block" {
+			continue
+		}
+		if item.Symbol != "recoverThing" {
+			t.Fatalf("symbol=%q want recoverThing", item.Symbol)
+		}
+		if gotLines, ok := item.Evidence["duplicate_span_lines"].([]int); !ok || len(gotLines) != 2 || gotLines[0] != 4 || gotLines[1] != 8 {
+			t.Fatalf("duplicate_span_lines=%#v", item.Evidence["duplicate_span_lines"])
+		}
+		return
+	}
+
+	t.Fatalf("expected duplicate_recovery_block finding, got %#v", got)
+}
+
+func TestAnalyzeGoFuncDeclFindsSemanticSimplificationForBoolWrapper(t *testing.T) {
+	src := `package sample
+
+func isPresent(value *Item) bool {
+	if value == nil {
+		return false
+	}
+	return true
+}
+`
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, "sample.go", src, parser.ParseComments)
+	if err != nil {
+		t.Fatalf("parse go file: %v", err)
+	}
+
+	state := &scoutState{Thresholds: thresholdsFor("default")}
+	var got []finding
+	for _, decl := range file.Decls {
+		fn, ok := decl.(*ast.FuncDecl)
+		if !ok {
+			continue
+		}
+		got = append(got, analyzeGoFuncDecl(fn, fset, "sample.go", state)...)
+	}
+
+	for _, item := range got {
+		if item.RuleID != "semantic_simplification_candidate" {
+			continue
+		}
+		if item.Symbol != "isPresent" {
+			t.Fatalf("symbol=%q want isPresent", item.Symbol)
+		}
+		if item.Evidence["simplified_form"] != "return value != nil" {
+			t.Fatalf("simplified_form=%#v", item.Evidence["simplified_form"])
+		}
+		patterns, ok := item.Evidence["pattern_ids"].([]string)
+		if !ok || len(patterns) == 0 {
+			t.Fatalf("pattern_ids=%#v", item.Evidence["pattern_ids"])
+		}
+		if patterns[0] != "inverted_boolean_return_wrapper" {
+			t.Fatalf("pattern_ids=%#v want inverted wrapper first", patterns)
+		}
+		return
+	}
+
+	t.Fatalf("expected semantic_simplification_candidate, got %#v", got)
+}
+
+func TestAnalyzeGoFuncDeclFindsSemanticSimplificationForBooleanLiteralComparison(t *testing.T) {
+	src := `package sample
+
+func shouldRun(flag bool) bool {
+	return flag == true
+}
+`
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, "sample.go", src, parser.ParseComments)
+	if err != nil {
+		t.Fatalf("parse go file: %v", err)
+	}
+
+	state := &scoutState{Thresholds: thresholdsFor("default")}
+	var got []finding
+	for _, decl := range file.Decls {
+		fn, ok := decl.(*ast.FuncDecl)
+		if !ok {
+			continue
+		}
+		got = append(got, analyzeGoFuncDecl(fn, fset, "sample.go", state)...)
+	}
+
+	for _, item := range got {
+		if item.RuleID != "semantic_simplification_candidate" {
+			continue
+		}
+		if item.Evidence["simplified_form"] != "return flag" {
+			t.Fatalf("simplified_form=%#v", item.Evidence["simplified_form"])
+		}
+		return
+	}
+
+	t.Fatalf("expected semantic_simplification_candidate, got %#v", got)
+}
+
+func TestAnalyzeGoFuncDeclSkipsUnsafeSemanticSimplification(t *testing.T) {
+	src := `package sample
+
+func keepCall() bool {
+	return expensive() || true
+}
+`
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, "sample.go", src, parser.ParseComments)
+	if err != nil {
+		t.Fatalf("parse go file: %v", err)
+	}
+
+	state := &scoutState{Thresholds: thresholdsFor("default")}
+	var got []finding
+	for _, decl := range file.Decls {
+		fn, ok := decl.(*ast.FuncDecl)
+		if !ok {
+			continue
+		}
+		got = append(got, analyzeGoFuncDecl(fn, fset, "sample.go", state)...)
+	}
+
+	for _, item := range got {
+		if item.RuleID == "semantic_simplification_candidate" {
+			t.Fatalf("unexpected semantic simplification finding: %#v", item)
+		}
+	}
+}
+
 func TestFinalizeReceiverHotspots(t *testing.T) {
 	state := &scoutState{
 		Thresholds: thresholdsFor("default"),
@@ -125,7 +291,7 @@ func TestResolveLanguageScopeRejectsMixedDirectoryAuto(t *testing.T) {
 		t.Fatalf("stat dir: %v", err)
 	}
 
-	_, err = resolveLanguageScope(dir, info, input{Language: "auto"})
+	_, err = resolveLanguageScope(dir, dir, info, input{Language: "auto"})
 	if err == nil {
 		t.Fatal("expected mixed-language auto scope to fail")
 	}
@@ -141,12 +307,43 @@ func TestResolveLanguageScopeInfersSingleDirectoryLanguage(t *testing.T) {
 		t.Fatalf("stat dir: %v", err)
 	}
 
-	scope, err := resolveLanguageScope(dir, info, input{Language: "auto"})
+	scope, err := resolveLanguageScope(dir, dir, info, input{Language: "auto"})
 	if err != nil {
 		t.Fatalf("resolve scope: %v", err)
 	}
 	if scope.Language != "go" {
 		t.Fatalf("expected go, got %s", scope.Language)
+	}
+}
+
+func TestBuildScoutStatusScopeUsesWorkspaceRelativePath(t *testing.T) {
+	workspace := t.TempDir()
+	searchPath := filepath.Join(workspace, "internal", "actor")
+	if err := os.MkdirAll(searchPath, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	info, err := os.Stat(searchPath)
+	if err != nil {
+		t.Fatalf("stat dir: %v", err)
+	}
+
+	scope := buildScoutStatusScope(workspace, searchPath, info, languageScope{
+		Mode:     "explicit",
+		Language: "go",
+		Detected: []string{"go"},
+	}, false)
+
+	if scope.Path != "internal/actor" {
+		t.Fatalf("scope path=%q want internal/actor", scope.Path)
+	}
+	if scope.Absolute != searchPath {
+		t.Fatalf("scope absolute=%q want %q", scope.Absolute, searchPath)
+	}
+	if !scope.IsDir {
+		t.Fatal("expected scope IsDir=true")
+	}
+	if scope.IncludeTests {
+		t.Fatal("expected include_tests=false")
 	}
 }
 
@@ -216,6 +413,42 @@ func TestSynthesizeCompositeFindingsAddsFunctionHotspot(t *testing.T) {
 	}
 	if !found {
 		t.Fatal("expected function_hotspot finding")
+	}
+}
+
+func TestApplyFocusSlopFiltersToSlopFindings(t *testing.T) {
+	items := []finding{
+		{RuleID: "duplicate_recovery_block", Symbol: "Recover", Score: 84},
+		{RuleID: "duplicated_error_remap", Symbol: "Recover", Score: 83},
+		{RuleID: "repeated_guard_ladder", Symbol: "Recover", Score: 82},
+		{RuleID: "semantic_simplification_candidate", Symbol: "Recover", Score: 81},
+		{RuleID: "high_cyclomatic_complexity", Symbol: "Complex", Score: 88},
+		{
+			RuleID: "function_hotspot",
+			Symbol: "Recover",
+			Evidence: map[string]any{
+				"rules": []string{"semantic_simplification_candidate", "high_cyclomatic_complexity"},
+			},
+		},
+	}
+
+	got := applyFocus(items, "slop")
+	if len(got) != 5 {
+		t.Fatalf("len(got)=%d want 5 (%#v)", len(got), got)
+	}
+	for _, item := range got {
+		if item.RuleID == "high_cyclomatic_complexity" {
+			t.Fatalf("non-slop finding survived focus filter: %#v", item)
+		}
+	}
+}
+
+func TestShouldSuppressConstituentFindings(t *testing.T) {
+	if shouldSuppressConstituentFindings("slop") {
+		t.Fatal("slop focus should keep constituent findings visible")
+	}
+	if !shouldSuppressConstituentFindings("all") {
+		t.Fatal("all focus should suppress constituent findings behind hotspots")
 	}
 }
 
@@ -418,6 +651,155 @@ func TestSortFindingsPrefersModuleClusterOverFileClusterAtEqualScore(t *testing.
 	sortFindings(items)
 	if items[0].RuleID != "structural_similarity_module_cluster" {
 		t.Fatalf("expected module cluster first, got %#v", items)
+	}
+}
+
+func TestBuildScoutPresentationAggregatesRepeatedPatternFamilies(t *testing.T) {
+	items := []finding{
+		{
+			RuleID:   "repeated_guard_ladder",
+			Category: "function",
+			File:     "reader/index.ts",
+			Line:     10,
+			Symbol:   "readerApi",
+			Score:    84,
+			Detail:   "readerApi repeats the same guard predicate 4 times.",
+			Evidence: map[string]any{"guard_preview": "value !== null"},
+		},
+		{
+			RuleID:   "repeated_guard_ladder",
+			Category: "function",
+			File:     "reader/index.ts",
+			Line:     10,
+			Symbol:   "readerApi",
+			Score:    84,
+			Detail:   "readerApi repeats the same guard predicate 4 times.",
+			Evidence: map[string]any{"guard_preview": "value !== undefined"},
+		},
+		{
+			RuleID:   "function_hotspot",
+			Category: "function",
+			File:     "reader/index.ts",
+			Line:     10,
+			Symbol:   "readerApi",
+			Score:    94,
+			Detail:   "readerApi triggers multiple refactoring signals.",
+			Evidence: map[string]any{"rules": []string{"repeated_guard_ladder", "fan_out_dependency_spread"}},
+		},
+	}
+
+	presentation := buildScoutPresentation(items, "grouped")
+	if presentation.ActiveLane != "best_entrypoints" {
+		t.Fatalf("active lane=%q want best_entrypoints", presentation.ActiveLane)
+	}
+	if len(presentation.Lanes.BestEntrypoints) != 1 {
+		t.Fatalf("entrypoints=%#v want 1", presentation.Lanes.BestEntrypoints)
+	}
+	if presentation.Lanes.BestEntrypoints[0].RepresentativeRule != "function_hotspot" {
+		t.Fatalf("representative rule=%q want function_hotspot", presentation.Lanes.BestEntrypoints[0].RepresentativeRule)
+	}
+	if len(presentation.Lanes.RepeatedPatternFamily) != 1 {
+		t.Fatalf("pattern families=%#v want 1", presentation.Lanes.RepeatedPatternFamily)
+	}
+	if presentation.Lanes.RepeatedPatternFamily[0].FindingCount != 2 {
+		t.Fatalf("pattern family count=%d want 2", presentation.Lanes.RepeatedPatternFamily[0].FindingCount)
+	}
+	if len(presentation.Lanes.RepeatedPatternFamily[0].Samples) != 2 {
+		t.Fatalf("pattern family samples=%#v want 2", presentation.Lanes.RepeatedPatternFamily[0].Samples)
+	}
+}
+
+func TestBuildScoutPresentationSummaryViewUsesOverviewLane(t *testing.T) {
+	items := []finding{{RuleID: "god_file", Category: "file", File: "a.go", Score: 81, Detail: "large file"}}
+	presentation := buildScoutPresentation(items, "summary")
+	if presentation.ActiveLane != "overview" {
+		t.Fatalf("active lane=%q want overview", presentation.ActiveLane)
+	}
+	if len(presentation.Overview.TopRuleFamilies) != 1 {
+		t.Fatalf("top rule families=%#v want 1", presentation.Overview.TopRuleFamilies)
+	}
+}
+
+func TestBuildScoutPresentationIncludesDBAccessLane(t *testing.T) {
+	items := []finding{
+		{
+			RuleID:   "preload_after_get_chain",
+			Category: "function",
+			File:     "praze/moderation/content_report_triage.ex",
+			Line:     104,
+			Symbol:   "resolve_source",
+			Score:    74,
+			Detail:   "resolve_source uses Repo.get/get_by and then immediately pipes into Repo.preload.",
+			Evidence: map[string]any{
+				"chain_samples": []string{"Repo.get(Offering, target_id) |> Repo.preload(:media_assets)"},
+			},
+		},
+		{
+			RuleID:   "transaction_script_hotspot",
+			Category: "function",
+			File:     "praze/bible.ex",
+			Line:     238,
+			Symbol:   "stream_version_verses",
+			Score:    82,
+			Detail:   "stream_version_verses runs a multi-step anonymous transaction body.",
+			Evidence: map[string]any{
+				"repo_calls":     []string{"Repo.stream", "Repo.rollback"},
+				"script_preview": "Repo.transaction(fn -> ... end)",
+			},
+		},
+	}
+
+	presentation := buildScoutPresentation(items, "grouped")
+	if len(presentation.Lanes.DBAccessPatterns) != 2 {
+		t.Fatalf("db access lane=%#v want 2 items", presentation.Lanes.DBAccessPatterns)
+	}
+	if presentation.Lanes.DBAccessPatterns[0].RepresentativeRule != "transaction_script_hotspot" {
+		t.Fatalf("top db lane rule=%q want transaction_script_hotspot", presentation.Lanes.DBAccessPatterns[0].RepresentativeRule)
+	}
+	if len(presentation.Lanes.DBAccessPatterns[0].Samples) == 0 {
+		t.Fatalf("expected db lane samples, got %#v", presentation.Lanes.DBAccessPatterns[0])
+	}
+}
+
+func TestBuildDBAccessLaneCollapsesTransactionVariantsPerFunction(t *testing.T) {
+	items := []finding{
+		{
+			RuleID:   "transaction_script_hotspot",
+			Category: "function",
+			File:     "praze/trust.ex",
+			Line:     140,
+			Symbol:   "request_export",
+			Score:    90,
+			Detail:   "request_export runs a multi-step anonymous transaction body.",
+			Evidence: map[string]any{
+				"script_preview": "Multi.new() |> Multi.insert(...) |> Repo.transaction()",
+				"repo_calls":     []string{"Repo.transaction"},
+			},
+		},
+		{
+			RuleID:   "transaction_script_hotspot",
+			Category: "function",
+			File:     "praze/trust.ex",
+			Line:     198,
+			Symbol:   "request_export",
+			Score:    88,
+			Detail:   "request_export runs a second transaction-like pipeline.",
+			Evidence: map[string]any{
+				"script_preview": "Multi.new() |> Multi.update(...) |> Repo.transaction()",
+				"repo_calls":     []string{"Repo.transaction"},
+			},
+		},
+	}
+
+	lane := buildDBAccessLane(items, 10)
+	if len(lane) != 1 {
+		t.Fatalf("lane=%#v want 1 item", lane)
+	}
+	if lane[0].FindingCount != 1 {
+		t.Fatalf("finding_count=%d want 1 representative candidate", lane[0].FindingCount)
+	}
+	if len(lane[0].Samples) < 2 {
+		t.Fatalf("samples=%#v want both transaction previews retained", lane[0].Samples)
 	}
 }
 

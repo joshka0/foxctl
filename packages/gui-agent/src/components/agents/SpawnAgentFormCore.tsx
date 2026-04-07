@@ -24,6 +24,7 @@ import {
   PROVIDERS,
   getRoleById,
   getProviderById,
+  ROOM_ROLE_PRESETS,
 } from "./spawnFormConstants";
 import { humanReadableWorkspacePath } from "@/lib/room-utils";
 import { useViewStore } from "@/stores/viewStore";
@@ -121,6 +122,13 @@ export function SpawnAgentFormCore({
   });
 
   const skills = useMemo(() => skillsData?.skills ?? [], [skillsData?.skills]);
+  const selectedRoomRolePreset = useMemo(
+    () =>
+      ROOM_ROLE_PRESETS.find(
+        (preset) => preset.id === (formData.room_role || spawnRoomRole || ""),
+      ),
+    [formData.room_role, spawnRoomRole],
+  );
   // Group skills by toolkit (first tag) for easier selection
   const skillsByToolkit = useMemo(() => {
     const toolkits: Record<string, (typeof skills)[number][]> = {};
@@ -142,10 +150,12 @@ export function SpawnAgentFormCore({
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!formData.prompt.trim()) return;
+    const roleDefaultPrompt = getRoleById(formData.role)?.defaultPrompt || "";
+    const finalPrompt = formData.prompt.trim() || roleDefaultPrompt;
+    if (!finalPrompt.trim()) return;
     const params: SpawnAgentParams = {
       role: formData.role,
-      prompt: formData.prompt,
+      prompt: finalPrompt,
     };
     if (formData.workspace_id?.trim())
       params.workspace_id = formData.workspace_id.trim();
@@ -211,6 +221,30 @@ export function SpawnAgentFormCore({
       memory_retention: nextRetention,
       memory_scope: recommendedMemoryScopeForRetention(nextRetention),
       prompt: shouldAutoFill && role ? role.defaultPrompt : formData.prompt,
+    });
+  };
+
+  const handleRoomRoleChange = (roomRoleId: string) => {
+    const preset = ROOM_ROLE_PRESETS.find((entry) => entry.id === roomRoleId);
+    if (!preset) {
+      setFormData({ ...formData, room_role: roomRoleId });
+      return;
+    }
+    const nextRole = preset.recommendedAgentRole;
+    const nextRoleConfig = getRoleById(nextRole);
+    const currentRoleConfig = getRoleById(formData.role);
+    const shouldAutoFill =
+      !formData.prompt.trim() ||
+      (currentRoleConfig &&
+        formData.prompt.trim() === currentRoleConfig.defaultPrompt);
+    setFormData({
+      ...formData,
+      room_role: roomRoleId,
+      role: nextRole,
+      prompt:
+        shouldAutoFill && nextRoleConfig
+          ? nextRoleConfig.defaultPrompt
+          : formData.prompt,
     });
   };
 
@@ -474,14 +508,23 @@ export function SpawnAgentFormCore({
               <label className="text-xs font-medium text-muted-foreground">
                 Room Role
               </label>
-              <Input
+              <select
                 value={formData.room_role || ""}
-                onChange={(e) =>
-                  setFormData({ ...formData, room_role: e.target.value })
-                }
-                placeholder="researcher, coder, reviewer..."
-                className="h-9 text-sm mt-1"
-              />
+                onChange={(e) => handleRoomRoleChange(e.target.value)}
+                className="w-full mt-1 h-9 rounded-md border border-input bg-background px-3 text-sm"
+              >
+                <option value="">Select room role</option>
+                {ROOM_ROLE_PRESETS.map((preset) => (
+                  <option key={preset.id} value={preset.id}>
+                    {preset.name}
+                  </option>
+                ))}
+              </select>
+              <p className="text-[11px] text-muted-foreground mt-1">
+                {selectedRoomRolePreset
+                  ? `${selectedRoomRolePreset.description} Recommended agent role: ${selectedRoomRolePreset.recommendedAgentRole}.`
+                  : "Room role presets inject room-specific onboarding and operator guidance automatically."}
+              </p>
             </div>
           </div>
         </div>

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -103,6 +104,35 @@ func RequireAny(names []string, installHint string) (string, error) {
 func HasTool(name string) bool {
 	_, err := exec.LookPath(name)
 	return err == nil
+}
+
+// HasRunnableTool returns true if the tool resolves in PATH and can be executed.
+// A non-zero exit code still counts as runnable; launch failures (for example stale shebang targets) do not.
+func HasRunnableTool(ctx context.Context, name string, probeArgs ...string) bool {
+	_, err := ResolveRunnableTool(ctx, name, probeArgs...)
+	return err == nil
+}
+
+// ResolveRunnableTool resolves a tool in PATH and verifies it can be launched.
+func ResolveRunnableTool(ctx context.Context, name string, probeArgs ...string) (string, error) {
+	path, err := exec.LookPath(name)
+	if err != nil {
+		return "", err
+	}
+	probeCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(probeCtx, path, probeArgs...)
+	cmd.Stdout = io.Discard
+	cmd.Stderr = io.Discard
+	err = cmd.Run()
+	if err == nil {
+		return path, nil
+	}
+	if _, ok := err.(*exec.ExitError); ok {
+		return path, nil
+	}
+	return "", err
 }
 
 // AgentctlBin returns the path to the agentctl binary for subprocess calls.

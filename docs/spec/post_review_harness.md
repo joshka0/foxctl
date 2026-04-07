@@ -12,7 +12,7 @@
 **Related specs:**
 
 - `docs/spec/review_gate.md`
-- `docs/spec/semantic_file_index.md`
+- `docs/archive/specs/semantic_file_index.md`
 - `docs/spec/code_symbol_index_and_swe_grep.md`
 - `docs/archive/specs/dspy_go_agents.md` (legacy)
 - `docs/archive/specs/dspy_trajectory_capture.md` (legacy)

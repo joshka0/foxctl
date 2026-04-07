@@ -15,10 +15,20 @@ type AgentRole string
 const (
 	// RoleCoder is the default role for coding agents that read/write files.
 	RoleCoder AgentRole = "coder"
+	// RoleFrontendEng is a UI-focused engineering role.
+	RoleFrontendEng AgentRole = "frontend-eng"
+	// RoleBackendEng is a service/API-focused engineering role.
+	RoleBackendEng AgentRole = "backend-eng"
+	// RoleCollaborator is a room-oriented implementation role.
+	RoleCollaborator AgentRole = "collaborator"
+	// RoleCoordinator is a room coordination role.
+	RoleCoordinator AgentRole = "coordinator"
 	// RolePlanner is a planning agent that creates and manages task graphs.
 	RolePlanner AgentRole = "planner"
 	// RoleReviewer is a review agent that validates code changes.
 	RoleReviewer AgentRole = "reviewer"
+	// RoleSecurityReview is a security-focused review role.
+	RoleSecurityReview AgentRole = "security-review"
 	// RoleFixer is a fixing agent that addresses review feedback.
 	RoleFixer AgentRole = "fixer"
 	// RoleVerifier is a verification agent for CoVe (Chain of Verification) claims.
@@ -204,6 +214,9 @@ type AgentConfig struct {
 
 	// TeamID is the optional team this agent belongs to.
 	TeamID string `json:"team_id,omitempty"`
+
+	// TerminalBinding captures optional mux/room identity for pane-backed agents.
+	TerminalBinding agent.TerminalBinding `json:"terminal_binding,omitempty"`
 
 	// --- Hierarchy fields (see agent_hierarchy.md) ---
 

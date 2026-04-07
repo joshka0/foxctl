@@ -25,6 +25,7 @@ const Command = "code/dag_grep"
 type Input struct {
 	Query          string   `json:"query"`
 	Workspace      string   `json:"workspace,omitempty"`
+	InlineMode     string   `json:"inline_mode,omitempty"`
 	Mode           string   `json:"mode,omitempty"`
 	K              int      `json:"k,omitempty"`
 	NodeKinds      []string `json:"node_kinds,omitempty"`
@@ -40,15 +41,30 @@ type Input struct {
 
 // Output is the response for code/dag_grep.
 type Output struct {
-	Result   repoindex.DAGGrepResult `json:"result"`
-	Rendered string                  `json:"rendered,omitempty"`
+	Result         repoindex.DAGGrepResult `json:"result"`
+	Rendered       string                  `json:"rendered,omitempty"`
+	InlineMode     string                  `json:"inline_mode,omitempty"`
+	NodeCountTotal int                     `json:"node_count_total,omitempty"`
+	EdgeCountTotal int                     `json:"edge_count_total,omitempty"`
+	Truncated      bool                    `json:"truncated,omitempty"`
+	Artifact       string                  `json:"artifact,omitempty"`
 }
 
 const (
 	defaultPreviewNodes = 40
 	defaultPreviewEdges = 80
+	defaultPreviewSeeds = 10
 	previewDocLimit     = 240
 	previewSummaryLimit = 180
+)
+
+type InlineMode string
+
+const (
+	InlineModeAuto         InlineMode = "auto"
+	InlineModeFull         InlineMode = "full"
+	InlineModePreview      InlineMode = "preview"
+	InlineModeArtifactOnly InlineMode = "artifact_only"
 )
 
 func main() {
@@ -111,42 +127,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	if rendered := renderDAG(result, in.Render); rendered != "" {
 		output.Rendered = rendered
 	}
-
-	payload, err := json.Marshal(output)
-	if err != nil {
-		return skillerr.WrapIO("marshal output", err)
-	}
-
-	inlineLimit := rc.InlineLimit()
-	if inlineLimit <= 0 || inlineLimit > 64*1024 {
-		inlineLimit = 64 * 1024
-	}
-	if len(payload) <= inlineLimit {
-		return skillout.Emit(rc, Command, output)
-	}
-
-	artifact, err := skillmain.PersistJSON(ctx, rc, output, Command)
-	if err != nil {
-		return skillerr.WrapIO("persist output", err)
-	}
-	casResult := skillout.BuildCASResult(artifact, rc.ExposePolicy())
-
-	preview := trimDAGResult(result, defaultPreviewNodes, defaultPreviewEdges)
-	previewOutput := Output{Result: preview}
-	if rendered := renderDAG(preview, in.Render); rendered != "" {
-		previewOutput.Rendered = rendered
-	}
-
-	envelope := map[string]any{
-		"result":    previewOutput.Result,
-		"rendered":  previewOutput.Rendered,
-		"truncated": true,
-	}
-	for key, value := range casResult {
-		envelope[key] = value
-	}
-
-	return skillout.Emit(rc, Command, envelope)
+	return emitDAGOutput(ctx, rc, in, output)
 }
 
 func resolveWorkspace(base, override string) (string, error) {
@@ -412,4 +393,96 @@ func truncateText(value string, limit int) string {
 		return value
 	}
 	return strings.TrimSpace(value[:limit]) + "..."
+}
+
+func parseInlineMode(value string) (InlineMode, error) {
+	switch InlineMode(strings.ToLower(strings.TrimSpace(value))) {
+	case "", InlineModeAuto:
+		return InlineModeAuto, nil
+	case InlineModeFull:
+		return InlineModeFull, nil
+	case InlineModePreview:
+		return InlineModePreview, nil
+	case InlineModeArtifactOnly:
+		return InlineModeArtifactOnly, nil
+	default:
+		return InlineModeAuto, skillerr.Arg("inline_mode must be one of: auto, full, preview, artifact_only")
+	}
+}
+
+func estimateDAGOutputSize(out Output) int {
+	payload, err := json.Marshal(out)
+	if err != nil {
+		return 0
+	}
+	return len(payload)
+}
+
+func shouldPreviewDAGOutput(rc *skillmain.RunContext, out Output) bool {
+	if len(out.Result.Graph.Nodes) > defaultPreviewNodes || len(out.Result.Graph.Edges) > defaultPreviewEdges || len(out.Result.Seeds) > defaultPreviewSeeds {
+		return true
+	}
+	return rc != nil && rc.ShouldTruncate(estimateDAGOutputSize(out))
+}
+
+func buildDAGPreview(result repoindex.DAGGrepResult, render string) Output {
+	preview := trimDAGResult(result, defaultPreviewNodes, defaultPreviewEdges)
+	if len(preview.Seeds) > defaultPreviewSeeds {
+		preview.Seeds = append([]repoindex.ScoredNode(nil), preview.Seeds[:defaultPreviewSeeds]...)
+	}
+	out := Output{
+		Result:         preview,
+		InlineMode:     string(InlineModePreview),
+		NodeCountTotal: result.Stats.NodeCount,
+		EdgeCountTotal: result.Stats.EdgeCount,
+		Truncated:      true,
+	}
+	if rendered := renderDAG(preview, render); rendered != "" {
+		out.Rendered = rendered
+	}
+	return out
+}
+
+func emitDAGOutput(ctx context.Context, rc *skillmain.RunContext, in Input, out Output) error {
+	mode, err := parseInlineMode(in.InlineMode)
+	if err != nil {
+		return err
+	}
+	out.NodeCountTotal = out.Result.Stats.NodeCount
+	out.EdgeCountTotal = out.Result.Stats.EdgeCount
+
+	switch mode {
+	case InlineModeFull:
+		out.InlineMode = string(InlineModeFull)
+		return skillout.Emit(rc, Command, out)
+	case InlineModePreview, InlineModeArtifactOnly:
+		artifact, err := skillmain.PersistJSON(ctx, rc, out, Command)
+		if err != nil {
+			return skillerr.WrapIO("persist output", err)
+		}
+		if mode == InlineModeArtifactOnly {
+			return skillout.Emit(rc, Command, Output{
+				InlineMode:     string(InlineModeArtifactOnly),
+				NodeCountTotal: out.Result.Stats.NodeCount,
+				EdgeCountTotal: out.Result.Stats.EdgeCount,
+				Truncated:      true,
+				Artifact:       artifact.Digest,
+			})
+		}
+		preview := buildDAGPreview(out.Result, in.Render)
+		preview.Artifact = artifact.Digest
+		return skillout.Emit(rc, Command, preview)
+	default:
+		if !shouldPreviewDAGOutput(rc, out) {
+			out.InlineMode = string(InlineModeFull)
+			return skillout.Emit(rc, Command, out)
+		}
+		artifact, err := skillmain.PersistJSON(ctx, rc, out, Command)
+		if err != nil {
+			return skillerr.WrapIO("persist output", err)
+		}
+		preview := buildDAGPreview(out.Result, in.Render)
+		preview.Artifact = artifact.Digest
+		return skillout.Emit(rc, Command, preview)
+	}
 }

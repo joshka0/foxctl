@@ -430,7 +430,7 @@ If you're an AI coding assistant, read [AGENTS.md](AGENTS.md) for specific guide
 ### Getting Help
 
 - Read the [Core Profile v1 spec](docs/spec/core_profile_v1.md)
-- Check [docs/roadmap.md](docs/roadmap.md) for project status
+- Check [docs/plans/README.md](docs/plans/README.md) for project status
 - Review [AGENTS.md](AGENTS.md) for detailed conventions
 - Ask questions in GitHub Discussions
 

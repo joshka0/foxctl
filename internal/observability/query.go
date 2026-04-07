@@ -25,6 +25,9 @@ type EventQueryOptions struct {
 	WorkspaceID     string
 	WorkspaceIDs    []string
 	ErrorsOnly      bool
+	TextQuery       string
+	SessionID       string
+	TraceIDs        []string
 }
 
 // EventRecord is the JSON-friendly shape used by the GUI and CLI error/log views.
@@ -93,10 +96,10 @@ func QueryEventRecords(ctx context.Context, opts EventQueryOptions) ([]EventReco
 		workspaceFilters = []string{strings.TrimSpace(opts.WorkspaceID)}
 	}
 
-	return readEventRecords(ctx, filepath.Join(obsDir, "events"), limit, opts.Since, opts.Component, opts.OperationPrefix, workspaceFilters, opts.ErrorsOnly)
+	return readEventRecords(ctx, filepath.Join(obsDir, "events"), limit, opts.Since, opts.Component, opts.OperationPrefix, workspaceFilters, opts.ErrorsOnly, opts.TextQuery, opts.SessionID, opts.TraceIDs)
 }
 
-func readEventRecords(ctx context.Context, eventsDir string, limit int, sinceTime time.Time, componentFilter, operationFilter string, workspaceFilters []string, errorsOnly bool) ([]EventRecord, error) {
+func readEventRecords(ctx context.Context, eventsDir string, limit int, sinceTime time.Time, componentFilter, operationFilter string, workspaceFilters []string, errorsOnly bool, textQuery, sessionID string, traceIDs []string) ([]EventRecord, error) {
 	files, err := filepath.Glob(filepath.Join(eventsDir, "*.ndjson*"))
 	if err != nil {
 		return nil, err
@@ -149,14 +152,14 @@ func readEventRecords(ctx context.Context, eventsDir string, limit int, sinceTim
 		}
 
 		if !strings.HasSuffix(file, ".gz") {
-			fileEntries, partial, err := readEventFileTail(ctx, file, internalLimit-len(entries), sinceTime, componentFilter, operationFilter, workspaceFilters, errorsOnly)
+			fileEntries, partial, err := readEventFileTail(ctx, file, internalLimit-len(entries), sinceTime, componentFilter, operationFilter, workspaceFilters, errorsOnly, textQuery, sessionID, traceIDs)
 			if err == nil && !partial {
 				entries = append(entries, fileEntries...)
 				continue
 			}
 		}
 
-		fileEntries, err := readEventFile(ctx, file, internalLimit-len(entries), sinceTime, componentFilter, operationFilter, workspaceFilters, errorsOnly)
+		fileEntries, err := readEventFile(ctx, file, internalLimit-len(entries), sinceTime, componentFilter, operationFilter, workspaceFilters, errorsOnly, textQuery, sessionID, traceIDs)
 		if err != nil {
 			if errors.Is(err, context.Canceled) {
 				return nil, err
@@ -188,7 +191,7 @@ func readEventRecords(ctx context.Context, eventsDir string, limit int, sinceTim
 	return out, nil
 }
 
-func readEventFileTail(ctx context.Context, path string, limit int, sinceTime time.Time, componentFilter, operationFilter string, workspaceFilters []string, errorsOnly bool) ([]timedEventRecord, bool, error) {
+func readEventFileTail(ctx context.Context, path string, limit int, sinceTime time.Time, componentFilter, operationFilter string, workspaceFilters []string, errorsOnly bool, textQuery, sessionID string, traceIDs []string) ([]timedEventRecord, bool, error) {
 	file, err := os.Open(path)
 	if err != nil {
 		return nil, false, err
@@ -240,7 +243,7 @@ func readEventFileTail(ctx context.Context, path string, limit int, sinceTime ti
 		if err := json.Unmarshal([]byte(line), &event); err != nil {
 			continue
 		}
-		if !matchesEventFilters(event, sinceTime, componentFilter, operationFilter, workspaceFilters, errorsOnly) {
+		if !matchesEventFilters(event, sinceTime, componentFilter, operationFilter, workspaceFilters, errorsOnly, textQuery, sessionID, traceIDs) {
 			continue
 		}
 		entries = append(entries, eventToRecord(event))
@@ -248,7 +251,7 @@ func readEventFileTail(ctx context.Context, path string, limit int, sinceTime ti
 	return entries, start > 0 && len(entries) < limit, nil
 }
 
-func readEventFile(ctx context.Context, path string, limit int, sinceTime time.Time, componentFilter, operationFilter string, workspaceFilters []string, errorsOnly bool) ([]timedEventRecord, error) {
+func readEventFile(ctx context.Context, path string, limit int, sinceTime time.Time, componentFilter, operationFilter string, workspaceFilters []string, errorsOnly bool, textQuery, sessionID string, traceIDs []string) ([]timedEventRecord, error) {
 	file, err := os.Open(path)
 	if err != nil {
 		return nil, err
@@ -285,7 +288,7 @@ func readEventFile(ctx context.Context, path string, limit int, sinceTime time.T
 		if err := json.Unmarshal(line, &event); err != nil {
 			continue
 		}
-		if !matchesEventFilters(event, sinceTime, componentFilter, operationFilter, workspaceFilters, errorsOnly) {
+		if !matchesEventFilters(event, sinceTime, componentFilter, operationFilter, workspaceFilters, errorsOnly, textQuery, sessionID, traceIDs) {
 			continue
 		}
 		entries = append(entries, eventToRecord(event))
@@ -296,7 +299,7 @@ func readEventFile(ctx context.Context, path string, limit int, sinceTime time.T
 	return entries, reader.Err()
 }
 
-func matchesEventFilters(event WideEvent, sinceTime time.Time, componentFilter, operationFilter string, workspaceFilters []string, errorsOnly bool) bool {
+func matchesEventFilters(event WideEvent, sinceTime time.Time, componentFilter, operationFilter string, workspaceFilters []string, errorsOnly bool, textQuery, sessionID string, traceIDs []string) bool {
 	if !sinceTime.IsZero() && event.Ts.Before(sinceTime) {
 		return false
 	}
@@ -312,6 +315,15 @@ func matchesEventFilters(event WideEvent, sinceTime time.Time, componentFilter, 
 	if errorsOnly && event.Status != StatusError {
 		return false
 	}
+	if trimmedSessionID := strings.TrimSpace(sessionID); trimmedSessionID != "" && strings.TrimSpace(event.SessionID) != trimmedSessionID {
+		return false
+	}
+	if len(traceIDs) > 0 && !matchesTraceFilter(event.TraceID, traceIDs) {
+		return false
+	}
+	if trimmedQuery := strings.TrimSpace(textQuery); trimmedQuery != "" && !matchesTextQuery(event, trimmedQuery) {
+		return false
+	}
 	return true
 }
 
@@ -323,6 +335,40 @@ func matchesWorkspaceFilter(value string, filters []string) bool {
 		}
 	}
 	return false
+}
+
+func matchesTraceFilter(value string, filters []string) bool {
+	value = strings.TrimSpace(value)
+	for _, filter := range filters {
+		if value == strings.TrimSpace(filter) {
+			return true
+		}
+	}
+	return false
+}
+
+func matchesTextQuery(event WideEvent, query string) bool {
+	query = strings.ToLower(strings.TrimSpace(query))
+	if query == "" {
+		return true
+	}
+	if strings.Contains(strings.ToLower(event.Operation), query) {
+		return true
+	}
+	if strings.Contains(strings.ToLower(event.Command), query) {
+		return true
+	}
+	if strings.Contains(strings.ToLower(event.ErrorMessage), query) {
+		return true
+	}
+	if len(event.Data) == 0 {
+		return false
+	}
+	raw, err := json.Marshal(event.Data)
+	if err != nil {
+		return false
+	}
+	return strings.Contains(strings.ToLower(string(raw)), query)
 }
 
 func eventToRecord(event WideEvent) timedEventRecord {

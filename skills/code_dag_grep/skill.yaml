@@ -2,7 +2,7 @@ apiVersion: agentctl/v1
 kind: Skill
 metadata:
   name: code/dag_grep
-  version: 0.1.0
+  version: 0.2.0
   description: "Search repo index and return a compact explanation DAG"
   tags: ["code", "repoindex", "graph", "search"]
 distribution:
@@ -23,6 +23,12 @@ signature:
       type: string
       required: false
       description: "Workspace root (default: current workspace)"
+    - name: inline_mode
+      type: string
+      required: false
+      default: auto
+      enum: ["auto", "full", "preview", "artifact_only"]
+      description: "How much graph detail to inline; auto prefers preview + artifact for larger outputs"
     - name: mode
       type: string
       required: false
@@ -85,6 +91,21 @@ signature:
     - name: rendered
       type: string
       description: "Optional rendered view (tree or mermaid)"
+    - name: inline_mode
+      type: string
+      description: "Resolved inline mode used for the response"
+    - name: node_count_total
+      type: integer
+      description: "Total graph node count before preview truncation"
+    - name: edge_count_total
+      type: integer
+      description: "Total graph edge count before preview truncation"
+    - name: truncated
+      type: boolean
+      description: "Whether the inline graph result is a preview of a larger artifact-backed result"
+    - name: artifact
+      type: string
+      description: "CAS artifact digest for the full untruncated output when previewed inline"
   help:
     short: "Repo index DAG grep"
     long: |

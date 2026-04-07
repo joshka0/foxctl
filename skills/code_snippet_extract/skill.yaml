@@ -2,7 +2,7 @@ apiVersion: agentctl/v1
 kind: Skill
 metadata:
   name: code/snippet_extract
-  version: 0.2.0
+  version: 0.3.0
   description: "Extract code snippets from candidate files (requires candidates - use code/smart_search if you don't have them)"
   tags: ["code", "extract", "snippets", "retrieval"]
 distribution:
@@ -27,6 +27,12 @@ signature:
       type: string
       required: false
       description: "Alias for 'question' (for convenience)"
+    - name: inline_mode
+      type: string
+      required: false
+      default: auto
+      enum: ["auto", "full", "preview", "artifact_only"]
+      description: "How much snippet detail to inline; auto prefers preview when artifacts are present or result sets are larger"
     - name: candidates
       type: array
       required: true
@@ -64,6 +70,15 @@ signature:
     - name: snippets_inline
       type: array
       description: "Inline snippet previews when total output is small"
+    - name: snippets_total
+      type: integer
+      description: "Total snippets before inline preview truncation"
+    - name: inline_mode
+      type: string
+      description: "Resolved inline mode used for the response"
+    - name: truncated
+      type: boolean
+      description: "Whether inline snippets were preview-truncated or moved behind an artifact"
     - name: artifact
       type: string
       description: "CAS digest of full NDJSON snippets when output is large"

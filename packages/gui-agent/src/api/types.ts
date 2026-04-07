@@ -184,6 +184,9 @@ export interface MailboxMessage {
   priority: number;
   status: string;
   ack_required?: boolean;
+  reply_expected?: boolean;
+  interrupt?: boolean;
+  related_message_id?: string;
   created_at: string;
   task_id?: string;
   stream?: string;
@@ -213,12 +216,112 @@ export interface Room {
   participants?: string[];
   task_ids?: string[];
   members?: RoomMember[];
+  archived_at?: string;
 }
 
 export interface RoomMember {
   actor_id: string;
   role?: string;
   joined_at?: string;
+  last_active_at?: string;
+  status?: "online" | "idle" | "stale" | string;
+  transport?: "tmux" | "zellij" | "unknown" | string;
+  session_id?: string;
+  pane_id?: string;
+  unbound?: boolean;
+}
+
+export interface RoomStatus {
+  room: Room;
+  coordinator_actor_id?: string;
+  participants: RoomMember[];
+  task_pulse: {
+    pending: number;
+    in_progress: number;
+    blocked: number;
+    stale: number;
+    completed: number;
+  };
+  actionable_backlog: {
+    pending_acks: number;
+    pending_replies: number;
+    stale_tasks: number;
+    blocked_tasks: number;
+  };
+}
+
+export interface LeadChangeEvent {
+  room_id: string;
+  previous_lead: string;
+  new_lead: string;
+  note?: string;
+  changed_at: string;
+  changed_by: string;
+}
+
+export interface BulkResolveRequest {
+  workspace_id: string;
+  actor?: string;
+  filter?: {
+    kind?: string;
+    sender?: string;
+    subject_contains?: string;
+  };
+}
+
+export interface RoomInbox {
+  room_id: string;
+  entries: MailboxMessage[];
+  count: number;
+}
+
+export interface RoomTask {
+  id: string;
+  workspace_id: string;
+  room_id: string;
+  title: string;
+  description?: string;
+  status: "pending" | "in_progress" | "blocked" | "completed" | "abandoned";
+  priority: number;
+  owner_actor_id?: string;
+  assigned_actor_id?: string;
+  claimed_at?: string;
+  heartbeat_at?: string;
+  blocked_at?: string;
+  blocked_reason?: string;
+  created_at: string;
+  completed_at?: string;
+  nudge_count: number;
+  last_nudged_at?: string;
+  stale?: boolean;
+  stale_duration_ms?: number;
+  reclaim_audit?: {
+    previous_owner: string;
+    reclaimed_by: string;
+    reclaimed_at: string;
+    reclaim_reason: string;
+    stale_duration_ms: number;
+  };
+  reassign_audit?: {
+    previous_assignee: string;
+    reassigned_by: string;
+    reassigned_at: string;
+    reassign_reason: string;
+  };
+}
+
+export interface RoomLoop {
+  enabled: boolean;
+  managed_by: string;
+  last_tick_at?: string;
+  pulse_interval: string;
+  reply_stale_after: string;
+  task_stale_after: string;
+  min_pulse_floor: string;
+  interrupt_attempt_limit: number;
+  reminder_backoff_cap: number;
+  coordinator_pulse_enabled: boolean;
+  coordinator_escalation_enabled: boolean;
 }
 
 // Blackboard types
@@ -289,6 +392,7 @@ export interface OrchestrationCard {
   retry_due_at?: string;
   last_event_type?: string;
   last_event_at?: string;
+  archived_at?: string;
 }
 
 export type OrchestrationCardAction = "retry-now" | "release" | "mark-done";

@@ -52,6 +52,15 @@ func TestAgentStore(t *testing.T) {
 			SandboxID:       "sbx-123",
 			RepoURL:         "https://github.com/example/repo.git",
 			RepoRef:         "main",
+			TerminalBinding: agent.TerminalBinding{
+				Backend:             "tmux",
+				Session:             "collab",
+				PaneID:              "%7",
+				ParticipantID:       "agent-a",
+				ParentParticipantID: "parent-a",
+				ParentAgentID:       "agent:parent-1",
+				RoomAccess:          "none",
+			},
 		}
 
 		if err := store.Create(ctx, a); err != nil {
@@ -110,6 +119,12 @@ func TestAgentStore(t *testing.T) {
 		}
 		if a.RepoRef != "main" {
 			t.Errorf("expected repo_ref round-trip, got %q", a.RepoRef)
+		}
+		if a.TerminalBinding.ParticipantID != "agent-a" {
+			t.Errorf("expected terminal binding participant round-trip, got %q", a.TerminalBinding.ParticipantID)
+		}
+		if a.TerminalBinding.RoomAccess != "none" {
+			t.Errorf("expected terminal binding room access round-trip, got %q", a.TerminalBinding.RoomAccess)
 		}
 	})
 
@@ -185,6 +200,30 @@ func TestAgentStore(t *testing.T) {
 
 		if a.MemoryRetention != agent.MemoryRetentionEphemeral {
 			t.Errorf("expected memory retention ephemeral, got %q", a.MemoryRetention)
+		}
+	})
+
+	// Test UpdateTerminalBinding
+	t.Run("UpdateTerminalBinding", func(t *testing.T) {
+		binding := agent.TerminalBinding{
+			Backend:       "zellij",
+			Session:       "alpha",
+			PaneID:        "researcher-a1b2",
+			ParticipantID: "researcher-a1b2",
+			RoomAccess:    "none",
+		}
+		if err := store.UpdateTerminalBinding(ctx, "test-agent-001", binding); err != nil {
+			t.Fatalf("failed to update terminal binding: %v", err)
+		}
+		a, err := store.Get(ctx, "test-agent-001")
+		if err != nil {
+			t.Fatalf("failed to get agent: %v", err)
+		}
+		if a.TerminalBinding.Backend != "zellij" {
+			t.Fatalf("expected updated terminal binding backend, got %q", a.TerminalBinding.Backend)
+		}
+		if a.TerminalBinding.PaneID != "researcher-a1b2" {
+			t.Fatalf("expected updated terminal binding pane id, got %q", a.TerminalBinding.PaneID)
 		}
 	})
 

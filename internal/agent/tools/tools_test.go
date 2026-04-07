@@ -39,6 +39,7 @@ func TestNewRegistry_RegistersAllTools(t *testing.T) {
 		// FS tools
 		"fs.read_file",
 		"fs.list_dir",
+		"shell",
 		// Test tools
 		"tests.run",
 	}

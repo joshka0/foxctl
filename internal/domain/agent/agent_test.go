@@ -199,6 +199,14 @@ func TestAgent_JSONSerialization(t *testing.T) {
 		State:       StateRunning,
 		LLMProvider: "openai",
 		LLMModel:    "gpt-4",
+		TerminalBinding: TerminalBinding{
+			Backend:             "tmux",
+			Session:             "collab",
+			ParticipantID:       "agent-a",
+			ParentParticipantID: "parent-a",
+			ParentAgentID:       "agent:parent-1",
+			RoomAccess:          "none",
+		},
 	}
 
 	// Marshal
@@ -226,6 +234,49 @@ func TestAgent_JSONSerialization(t *testing.T) {
 	if got.LLMProvider != agent.LLMProvider {
 		t.Errorf("LLMProvider = %q, want %q", got.LLMProvider, agent.LLMProvider)
 	}
+	if got.TerminalBinding.ParticipantID != agent.TerminalBinding.ParticipantID {
+		t.Errorf("TerminalBinding.ParticipantID = %q, want %q", got.TerminalBinding.ParticipantID, agent.TerminalBinding.ParticipantID)
+	}
+}
+
+func TestNormalizeTerminalBinding(t *testing.T) {
+	t.Run("child defaults to room access none", func(t *testing.T) {
+		got := NormalizeTerminalBinding(TerminalBinding{
+			Backend:             "TMUX",
+			Session:             " collab ",
+			ParticipantID:       " child-a ",
+			ParentParticipantID: " parent-a ",
+			RoomID:              "room-alpha",
+			RoomAccess:          "default",
+		})
+		if got.Backend != "tmux" {
+			t.Fatalf("Backend = %q, want tmux", got.Backend)
+		}
+		if got.RoomAccess != "none" {
+			t.Fatalf("RoomAccess = %q, want none", got.RoomAccess)
+		}
+		if got.RoomID != "" {
+			t.Fatalf("RoomID = %q, want empty when room access is none", got.RoomID)
+		}
+		if got.ParentParticipantID != "parent-a" {
+			t.Fatalf("ParentParticipantID = %q, want parent-a", got.ParentParticipantID)
+		}
+	})
+
+	t.Run("top level defaults to direct", func(t *testing.T) {
+		got := NormalizeTerminalBinding(TerminalBinding{
+			Backend:       "zellij",
+			Session:       "alpha",
+			ParticipantID: "lead-a",
+			RoomID:        "room-alpha",
+		})
+		if got.RoomAccess != "direct" {
+			t.Fatalf("RoomAccess = %q, want direct", got.RoomAccess)
+		}
+		if got.RoomID != "room-alpha" {
+			t.Fatalf("RoomID = %q, want room-alpha", got.RoomID)
+		}
+	})
 }
 
 func TestQuotas_JSONSerialization(t *testing.T) {

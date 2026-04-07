@@ -26,6 +26,7 @@ LOCAL_BIN="${HOME}/.local/bin"
 AGENTCTL_HOME="${AGENTCTL_HOME:-$HOME/.agentctl}"
 CLAUDE_DIR="$HOME/.claude"
 CODEX_DIR="$HOME/.codex"
+GEMINI_DIR="$HOME/.gemini"
 
 echo -e "${BLUE}=== agentctl System Initialization ===${NC}"
 echo ""
@@ -618,6 +619,67 @@ if [[ -f "$CODEX_AGENTS_SOURCE" ]]; then
     fi
 else
     warn "Codex AGENTS.md source not found (skipping): $CODEX_AGENTS_SOURCE"
+fi
+
+echo ""
+
+echo -e "${BLUE}5d. Setting up Gemini skills...${NC}"
+
+GEMINI_SKILLS_DIR="$(provider_cfg gemini target_dir "$GEMINI_DIR/antigravity/skills")"
+GEMINI_SKILLS_LEGACY="$(provider_cfg gemini legacy_dir "$GEMINI_DIR/antigravity/skills-legacy")"
+mkdir -p "$GEMINI_SKILLS_DIR" "$GEMINI_SKILLS_LEGACY"
+
+while IFS= read -r prune_root; do
+    prune_root="$(resolve_repo_path "$prune_root")"
+    [[ -d "$prune_root" ]] || continue
+
+    for skill_dir in "$prune_root"/*; do
+        [[ -d "$skill_dir" ]] || continue
+
+        skill_name="$(basename "$skill_dir")"
+        target="$GEMINI_SKILLS_DIR/$skill_name"
+
+        if [[ -L "$target" ]]; then
+            legacy="$GEMINI_SKILLS_LEGACY/$skill_name"
+            if [[ ! -e "$legacy" ]]; then
+                mv "$target" "$legacy"
+            else
+                rm "$target"
+            fi
+        fi
+    done
+done < <(provider_cfg_list gemini prune_sources "$REPO_ROOT/configs/skills-condensed")
+
+gemini_installed_any=0
+while IFS= read -r source_root; do
+    source_root="$(resolve_repo_path "$source_root")"
+    [[ -d "$source_root" ]] || continue
+    gemini_installed_any=1
+
+    info "Linking Gemini skills from $source_root"
+
+    for skill_dir in "$source_root"/*; do
+        [[ -d "$skill_dir" ]] || continue
+
+        skill_name="$(basename "$skill_dir")"
+        target="$GEMINI_SKILLS_DIR/$skill_name"
+
+        if [[ -L "$target" ]]; then
+            rm "$target"
+        elif [[ -e "$target" ]]; then
+            warn "Gemini skill already exists (skipping): $target"
+            continue
+        fi
+
+        skill_dir_abs="$(cd "$skill_dir" && pwd)"
+        ln -s "$skill_dir_abs" "$target"
+    done
+done < <(provider_cfg_list gemini sources "$REPO_ROOT/configs/skills-pack")
+
+if [[ "$gemini_installed_any" == "1" ]]; then
+    success "Installed agentctl Gemini skills (restart Gemini to load)"
+else
+    warn "No Gemini skills to install (sources not found)"
 fi
 
 echo ""

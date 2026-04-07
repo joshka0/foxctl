@@ -7,7 +7,12 @@ import type {
   AgentSpawnResponse,
   CoChangeHit,
   MailboxListResponse,
+  BulkResolveRequest,
   Room,
+  RoomStatus,
+  RoomInbox,
+  RoomTask,
+  RoomLoop,
   BlackboardListResponse,
   LogsListResponse,
   AgentSession,
@@ -183,21 +188,10 @@ function isLocalDevAuthFallbackEligible(): boolean {
   return host === "localhost" || host === "127.0.0.1" || host === "0.0.0.0";
 }
 
-function localDevAuthSession(): AuthSessionResponse {
-  return {
-    session: {
-      id: "local-dev-session",
-    },
-    user: {
-      id: "local-dev-user",
-      email: "local@agentctl.dev",
-      name: "Local Dev",
-      emailVerified: true,
-    },
-  };
-}
-
 export async function getAuthSession(): Promise<AuthSessionResponse | null> {
+  if (IS_DEV && isLocalDevAuthFallbackEligible()) {
+    return DEV_AUTH_SESSION;
+  }
   try {
     return await request<AuthSessionResponse>("/auth/session");
   } catch (error) {
@@ -245,6 +239,7 @@ export interface OrchestrationBoardGetParams {
   limit?: number;
   cursor?: string;
   lane?: OrchestrationLaneID;
+  archived_only?: boolean;
 }
 
 function normalizeBoardPayload(data: unknown): OrchestrationBoardResult {
@@ -275,6 +270,7 @@ export async function getOrchestrationBoard(
   }
   if (params.cursor) query.set("cursor", params.cursor);
   if (params.lane) query.set("lane", params.lane);
+  if (params.archived_only) query.set("archived_only", "true");
 
   const suffix = query.size > 0 ? `?${query.toString()}` : "";
   const env = await request<ApiEnvelope<unknown>>(
@@ -373,6 +369,78 @@ export async function seedOrchestrationCards(params: {
       body: JSON.stringify(params),
     },
   );
+  return unwrapEnvelope(env);
+}
+
+export async function cleanupOrchestrationCards(params: {
+  request_id: string;
+  workspace_id: string;
+  issue_ids?: string[];
+}): Promise<{
+  request_id: string;
+  deleted_cards: number;
+  deleted_events: number;
+  ts: string;
+}> {
+  const env = await request<
+    ApiEnvelope<{
+      request_id: string;
+      deleted_cards: number;
+      deleted_events: number;
+      ts: string;
+    }>
+  >("/orchestration/cleanup-cards", {
+    method: "POST",
+    body: JSON.stringify(params),
+  });
+  return unwrapEnvelope(env);
+}
+
+export async function archiveOrchestrationCards(params: {
+  request_id: string;
+  workspace_id: string;
+  issue_ids?: string[];
+}): Promise<{
+  request_id: string;
+  updated: number;
+  action: string;
+  ts: string;
+}> {
+  const env = await request<
+    ApiEnvelope<{
+      request_id: string;
+      updated: number;
+      action: string;
+      ts: string;
+    }>
+  >("/orchestration/archive-cards", {
+    method: "POST",
+    body: JSON.stringify(params),
+  });
+  return unwrapEnvelope(env);
+}
+
+export async function restoreOrchestrationCards(params: {
+  request_id: string;
+  workspace_id: string;
+  issue_ids?: string[];
+}): Promise<{
+  request_id: string;
+  updated: number;
+  action: string;
+  ts: string;
+}> {
+  const env = await request<
+    ApiEnvelope<{
+      request_id: string;
+      updated: number;
+      action: string;
+      ts: string;
+    }>
+  >("/orchestration/restore-cards", {
+    method: "POST",
+    body: JSON.stringify(params),
+  });
   return unwrapEnvelope(env);
 }
 
@@ -766,11 +834,13 @@ export async function listRooms(params: {
   workspace_id: string;
   actor_id?: string;
   limit?: number;
+  archived_only?: boolean;
 }): Promise<{ rooms: Room[]; count: number }> {
   const query = new URLSearchParams();
   query.set("workspace_id", params.workspace_id);
   if (params.actor_id) query.set("actor_id", params.actor_id);
   if (params.limit) query.set("limit", String(params.limit));
+  if (params.archived_only) query.set("archived_only", "true");
 
   return request<{ rooms: Room[]; count: number }>(`/rooms?${query}`);
 }
@@ -834,6 +904,43 @@ export async function patchRoom(
   );
 }
 
+export async function deleteRoom(
+  roomId: string,
+  params: { workspace_id: string },
+): Promise<{ status: string; room_id: string; workspace_id: string }> {
+  const query = new URLSearchParams();
+  query.set("workspace_id", params.workspace_id);
+
+  return request<{ status: string; room_id: string; workspace_id: string }>(
+    `/rooms/${encodeURIComponent(roomId)}?${query}`,
+    {
+      method: "DELETE",
+    },
+  );
+}
+
+export async function archiveRoom(
+  roomId: string,
+  params: { workspace_id: string },
+): Promise<{ status: string; room_id: string; workspace_id: string }> {
+  const query = new URLSearchParams();
+  query.set("workspace_id", params.workspace_id);
+  return request(`/rooms/${encodeURIComponent(roomId)}/archive?${query}`, {
+    method: "POST",
+  });
+}
+
+export async function restoreRoom(
+  roomId: string,
+  params: { workspace_id: string },
+): Promise<{ status: string; room_id: string; workspace_id: string }> {
+  const query = new URLSearchParams();
+  query.set("workspace_id", params.workspace_id);
+  return request(`/rooms/${encodeURIComponent(roomId)}/restore?${query}`, {
+    method: "POST",
+  });
+}
+
 export async function patchRoomMembers(
   roomId: string,
   params: {
@@ -885,6 +992,9 @@ export async function sendRoomMessage(
     kind?: string;
     priority?: number;
     ack_required?: boolean;
+    reply_expected?: boolean;
+    interrupt?: boolean;
+    related_message_id?: string;
     task_id?: string;
     dispatch_agents?: boolean;
     dispatch_agent_ids?: string[];
@@ -902,6 +1012,274 @@ export async function sendRoomMessage(
     method: "POST",
     body: JSON.stringify(params),
   });
+}
+
+export async function getRoomStatus(
+  roomId: string,
+  params: {
+    workspace_id: string;
+    actor_id?: string;
+    only?: string;
+    verbose?: boolean;
+    limit?: number;
+  },
+): Promise<RoomStatus> {
+  const query = new URLSearchParams();
+  query.set("workspace_id", params.workspace_id);
+  if (params.actor_id) query.set("actor_id", params.actor_id);
+  if (params.only) query.set("only", params.only);
+  if (params.verbose) query.set("verbose", String(params.verbose));
+  if (params.limit) query.set("limit", String(params.limit));
+
+  const response = await request<{
+    room: RoomStatus["room"];
+    coordinator_actor_id?: string;
+    participants: RoomStatus["participants"];
+    task_pulse: RoomStatus["task_pulse"];
+    actionable_backlog?: RoomStatus["actionable_backlog"];
+    action_required?: {
+      pending_acks?: number;
+      pending_replies?: number;
+      stale_tasks?: number;
+      blocked_tasks?: number;
+    };
+  }>(
+    `/rooms/${encodeURIComponent(roomId)}/status?${query}`,
+  );
+  return {
+    room: response.room,
+    coordinator_actor_id: response.coordinator_actor_id,
+    participants: response.participants,
+    task_pulse: response.task_pulse,
+    actionable_backlog: response.actionable_backlog ?? {
+      pending_acks: response.action_required?.pending_acks ?? 0,
+      pending_replies: response.action_required?.pending_replies ?? 0,
+      stale_tasks: response.action_required?.stale_tasks ?? 0,
+      blocked_tasks: response.action_required?.blocked_tasks ?? 0,
+    },
+  };
+}
+
+export async function getRoomInbox(
+  roomId: string,
+  params: {
+    workspace_id: string;
+    actor_id: string;
+    only?: string;
+    limit?: number;
+  },
+): Promise<RoomInbox> {
+  const query = new URLSearchParams();
+  query.set("workspace_id", params.workspace_id);
+  query.set("actor_id", params.actor_id);
+  if (params.only) query.set("only", params.only);
+  if (params.limit) query.set("limit", String(params.limit));
+
+  return request<RoomInbox>(
+    `/rooms/${encodeURIComponent(roomId)}/inbox?${query}`,
+  );
+}
+
+export async function getRoomTasks(
+  roomId: string,
+  params: {
+    workspace_id: string;
+    stale_after?: string;
+    include_completed?: boolean;
+  },
+): Promise<RoomTask[]> {
+  const query = new URLSearchParams();
+  query.set("workspace_id", params.workspace_id);
+  if (params.stale_after) query.set("stale_after", params.stale_after);
+  if (params.include_completed)
+    query.set("include_completed", String(params.include_completed));
+
+  const response = await request<{ tasks?: RoomTask[] }>(
+    `/rooms/${encodeURIComponent(roomId)}/tasks?${query}`,
+  );
+  return response.tasks ?? [];
+}
+
+export async function getRoomLoop(
+  roomId: string,
+  workspaceId: string,
+  actorId: string,
+): Promise<RoomLoop> {
+  const query = new URLSearchParams();
+  query.set("workspace_id", workspaceId);
+  query.set("actor_id", actorId);
+  const response = await request<{ loop?: RoomLoop }>(
+    `/rooms/${encodeURIComponent(roomId)}/loop?${query}`,
+  );
+  if (!response.loop) {
+    throw new Error("Room loop payload missing");
+  }
+  return response.loop;
+}
+
+export async function ackRoomMessage(
+  roomId: string,
+  messageId: string,
+  params: { workspace_id: string; actor?: string },
+): Promise<void> {
+  await request(
+    `/rooms/${encodeURIComponent(roomId)}/messages/${messageId}/ack`,
+    {
+      method: "POST",
+      body: JSON.stringify(params),
+    },
+  );
+}
+
+export async function resolveRoomMessage(
+  roomId: string,
+  messageId: string,
+  params: { workspace_id: string; actor?: string },
+): Promise<void> {
+  await request(
+    `/rooms/${encodeURIComponent(roomId)}/messages/${messageId}/resolve`,
+    {
+      method: "POST",
+      body: JSON.stringify(params),
+    },
+  );
+}
+
+export async function bulkResolveRoomMessages(
+  roomId: string,
+  params: BulkResolveRequest,
+): Promise<{ count: number }> {
+  return request<{ count: number }>(
+    `/rooms/${encodeURIComponent(roomId)}/messages/resolve`,
+    {
+      method: "POST",
+      body: JSON.stringify(params),
+    },
+  );
+}
+
+export async function transferRoomCoordinator(
+  roomId: string,
+  params: { workspace_id: string; to: string; note?: string },
+): Promise<void> {
+  await request(`/rooms/${encodeURIComponent(roomId)}/coordinator`, {
+    method: "POST",
+    body: JSON.stringify(params),
+  });
+}
+
+export async function claimRoomTask(
+  roomId: string,
+  taskId: string,
+  params: { workspace_id: string; actor?: string },
+): Promise<void> {
+  await request(`/rooms/${encodeURIComponent(roomId)}/tasks/${taskId}/claim`, {
+    method: "POST",
+    body: JSON.stringify(params),
+  });
+}
+
+export async function touchRoomTask(
+  roomId: string,
+  taskId: string,
+  params: { workspace_id: string; actor?: string },
+): Promise<void> {
+  await request(`/rooms/${encodeURIComponent(roomId)}/tasks/${taskId}/touch`, {
+    method: "POST",
+    body: JSON.stringify(params),
+  });
+}
+
+export async function blockRoomTask(
+  roomId: string,
+  taskId: string,
+  params: { workspace_id: string; reason: string; actor?: string },
+): Promise<void> {
+  await request(`/rooms/${encodeURIComponent(roomId)}/tasks/${taskId}/block`, {
+    method: "POST",
+    body: JSON.stringify(params),
+  });
+}
+
+export async function unblockRoomTask(
+  roomId: string,
+  taskId: string,
+  params: { workspace_id: string; actor?: string },
+): Promise<void> {
+  await request(`/rooms/${encodeURIComponent(roomId)}/tasks/${taskId}/unblock`, {
+    method: "POST",
+    body: JSON.stringify(params),
+  });
+}
+
+export async function completeRoomTask(
+  roomId: string,
+  taskId: string,
+  params: { workspace_id: string; notes?: string; actor?: string },
+): Promise<void> {
+  await request(
+    `/rooms/${encodeURIComponent(roomId)}/tasks/${taskId}/complete`,
+    {
+      method: "POST",
+      body: JSON.stringify(params),
+    },
+  );
+}
+
+export async function abandonRoomTask(
+  roomId: string,
+  taskId: string,
+  params: { workspace_id: string; actor?: string },
+): Promise<void> {
+  await request(
+    `/rooms/${encodeURIComponent(roomId)}/tasks/${taskId}/abandon`,
+    {
+      method: "POST",
+      body: JSON.stringify(params),
+    },
+  );
+}
+
+export async function reassignRoomTask(
+  roomId: string,
+  taskId: string,
+  params: { workspace_id: string; to: string; reason?: string; actor?: string },
+): Promise<void> {
+  await request(
+    `/rooms/${encodeURIComponent(roomId)}/tasks/${taskId}/reassign`,
+    {
+      method: "POST",
+      body: JSON.stringify(params),
+    },
+  );
+}
+
+export async function reclaimRoomTask(
+  roomId: string,
+  taskId: string,
+  params: { workspace_id: string; reason: string; actor?: string },
+): Promise<void> {
+  await request(
+    `/rooms/${encodeURIComponent(roomId)}/tasks/${taskId}/reclaim`,
+    {
+      method: "POST",
+      body: JSON.stringify(params),
+    },
+  );
+}
+
+export async function patchRoomLoop(
+  roomId: string,
+  params: { workspace_id: string; actor_id: string } & Partial<RoomLoop>,
+): Promise<RoomLoop> {
+  const response = await request<{ loop?: RoomLoop }>(`/rooms/${encodeURIComponent(roomId)}/loop`, {
+    method: "PATCH",
+    body: JSON.stringify(params),
+  });
+  if (!response.loop) {
+    throw new Error("Room loop payload missing");
+  }
+  return response.loop;
 }
 
 /**
@@ -984,6 +1362,28 @@ export async function getLogs(params: {
   if (params.errors_only) query.set("errors_only", "true");
 
   return request<LogsListResponse>(`/logs?${query}`);
+}
+
+export async function cleanupLogs(params: {
+  component?: string;
+  operation?: string;
+  workspace?: string;
+  errors_only?: boolean;
+  text_query?: string;
+  session_id?: string;
+  trace_ids?: string[];
+  dry_run?: boolean;
+}): Promise<{
+  status: string;
+  deleted: number;
+  kept: number;
+  files: number;
+  errors?: string[];
+}> {
+  return request(`/logs/cleanup`, {
+    method: "POST",
+    body: JSON.stringify(params),
+  });
 }
 
 // Skills

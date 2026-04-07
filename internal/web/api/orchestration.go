@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -30,6 +29,7 @@ import (
 	coreevents "github.com/jkatigb/agentctl/internal/v2/core/events"
 	coreorchestration "github.com/jkatigb/agentctl/internal/v2/core/orchestration"
 	corespawn "github.com/jkatigb/agentctl/internal/v2/core/spawn"
+	coreworker "github.com/jkatigb/agentctl/internal/v2/core/worker"
 	v2services "github.com/jkatigb/agentctl/internal/v2/services"
 )
 
@@ -41,6 +41,9 @@ const (
 	commandOrchestrationBoardCardRuntimeGet = "orchestration/board-card-runtime-get"
 	commandOrchestrationRefresh             = "orchestration/refresh"
 	commandOrchestrationSeedCards           = "orchestration/seed-cards"
+	commandOrchestrationCleanupCards        = "orchestration/cleanup-cards"
+	commandOrchestrationArchiveCards        = "orchestration/archive-cards"
+	commandOrchestrationRestoreCards        = "orchestration/restore-cards"
 	opWebOrchestrationDispatchIssue         = "web.orchestration.dispatch_issue"
 	opWebOrchestrationCardAction            = "web.orchestration.card_action"
 	opWebOrchestrationBoardGet              = "web.orchestration.board_get"
@@ -48,6 +51,9 @@ const (
 	opWebOrchestrationBoardCardRuntimeGet   = "web.orchestration.board_card_runtime_get"
 	opWebOrchestrationRefresh               = "web.orchestration.refresh"
 	opWebOrchestrationSeedCards             = "web.orchestration.seed_cards"
+	opWebOrchestrationCleanupCards          = "web.orchestration.cleanup_cards"
+	opWebOrchestrationArchiveCards          = "web.orchestration.archive_cards"
+	opWebOrchestrationRestoreCards          = "web.orchestration.restore_cards"
 
 	orchestrationLargePayloadThreshold = 64 * 1024
 	refreshQueueCoalesceWindow         = 5 * time.Second
@@ -114,6 +120,32 @@ type orchestrationCardActionResponse struct {
 	Timestamp  time.Time              `json:"ts"`
 }
 
+type orchestrationCleanupCardsRequest struct {
+	RequestID   string   `json:"request_id"`
+	WorkspaceID string   `json:"workspace_id,omitempty"`
+	IssueIDs    []string `json:"issue_ids,omitempty"`
+}
+
+type orchestrationCleanupCardsResponse struct {
+	RequestID     string    `json:"request_id"`
+	DeletedCards  int       `json:"deleted_cards"`
+	DeletedEvents int       `json:"deleted_events"`
+	Timestamp     time.Time `json:"ts"`
+}
+
+type orchestrationArchiveCardsRequest struct {
+	RequestID   string   `json:"request_id"`
+	WorkspaceID string   `json:"workspace_id,omitempty"`
+	IssueIDs    []string `json:"issue_ids,omitempty"`
+}
+
+type orchestrationArchiveCardsResponse struct {
+	RequestID string    `json:"request_id"`
+	Updated   int       `json:"updated"`
+	Action    string    `json:"action"`
+	Timestamp time.Time `json:"ts"`
+}
+
 type orchestrationRuntimeTreeData struct {
 	Enabled bool                          `json:"enabled"`
 	AgentID string                        `json:"agent_id,omitempty"`
@@ -140,7 +172,7 @@ type orchestrationBoardCardRuntimeData struct {
 
 // OrchestrationBoardGetHandler handles GET /api/orchestration/board-get.
 func OrchestrationBoardGetHandler(cfg config.Config, log zerolog.Logger) http.HandlerFunc {
-	svc := newOrchestrationCommandService(cfg, log)
+	svc := newOrchestrationCommandService(cfg, log, nil)
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			writeCommandError(w, http.StatusMethodNotAllowed, commandOrchestrationBoardGet, "EARG", "method not allowed", map[string]any{
@@ -176,11 +208,12 @@ func OrchestrationBoardGetHandler(cfg config.Config, log zerolog.Logger) http.Ha
 			EnrichFromContext(r.Context())
 
 		resp, err := svc.Board(r.Context(), coreorchestration.BoardRequest{
-			RequestID:   requestID,
-			WorkspaceID: workspaceID,
-			Limit:       limit,
-			Cursor:      strings.TrimSpace(r.URL.Query().Get("cursor")),
-			Lane:        coreorchestration.Lane(laneFilter),
+			RequestID:    requestID,
+			WorkspaceID:  workspaceID,
+			Limit:        limit,
+			Cursor:       strings.TrimSpace(r.URL.Query().Get("cursor")),
+			Lane:         coreorchestration.Lane(laneFilter),
+			ArchivedOnly: parseBool(r.URL.Query().Get("archived_only")),
 		})
 		if err != nil {
 			observability.Emit(r.Context(), event.Error(err, time.Since(started)))
@@ -213,7 +246,7 @@ func OrchestrationBoardGetHandler(cfg config.Config, log zerolog.Logger) http.Ha
 
 // OrchestrationBoardCardGetHandler handles GET /api/orchestration/board-card-get.
 func OrchestrationBoardCardGetHandler(cfg config.Config, log zerolog.Logger) http.HandlerFunc {
-	svc := newOrchestrationCommandService(cfg, log)
+	svc := newOrchestrationCommandService(cfg, log, nil)
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			writeCommandError(w, http.StatusMethodNotAllowed, commandOrchestrationBoardCardGet, "EARG", "method not allowed", map[string]any{
@@ -271,7 +304,7 @@ func OrchestrationBoardCardGetHandler(cfg config.Config, log zerolog.Logger) htt
 
 // OrchestrationBoardCardRuntimeGetHandler handles GET /api/orchestration/board-card-runtime-get.
 func OrchestrationBoardCardRuntimeGetHandler(cfg config.Config, log zerolog.Logger) http.HandlerFunc {
-	svc := newOrchestrationCommandService(cfg, log)
+	svc := newOrchestrationCommandService(cfg, log, nil)
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			writeCommandError(w, http.StatusMethodNotAllowed, commandOrchestrationBoardCardRuntimeGet, "EARG", "method not allowed", map[string]any{
@@ -338,7 +371,11 @@ func OrchestrationBoardCardRuntimeGetHandler(cfg config.Config, log zerolog.Logg
 
 // OrchestrationDispatchIssueHandler handles POST /api/orchestration/dispatch-issue.
 func OrchestrationDispatchIssueHandler(cfg config.Config, log zerolog.Logger) http.HandlerFunc {
-	svc := newOrchestrationCommandService(cfg, log)
+	return OrchestrationDispatchIssueHandlerWithRuntime(cfg, log, nil)
+}
+
+func OrchestrationDispatchIssueHandlerWithRuntime(cfg config.Config, log zerolog.Logger, runtimeHost OrchestrationRuntimeHost) http.HandlerFunc {
+	svc := newOrchestrationCommandService(cfg, log, runtimeHost)
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			writeCommandError(w, http.StatusMethodNotAllowed, commandOrchestrationDispatchIssue, "EARG", "method not allowed", map[string]any{
@@ -448,7 +485,11 @@ func OrchestrationCardActionHandler(cfg config.Config, log zerolog.Logger) http.
 
 // OrchestrationRefreshHandler handles POST /api/orchestration/refresh.
 func OrchestrationRefreshHandler(cfg config.Config, log zerolog.Logger) http.HandlerFunc {
-	svc := newOrchestrationCommandService(cfg, log)
+	return OrchestrationRefreshHandlerWithRuntime(cfg, log, nil)
+}
+
+func OrchestrationRefreshHandlerWithRuntime(cfg config.Config, log zerolog.Logger, runtimeHost OrchestrationRuntimeHost) http.HandlerFunc {
+	svc := newOrchestrationCommandService(cfg, log, runtimeHost)
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			writeCommandError(w, http.StatusMethodNotAllowed, commandOrchestrationRefresh, "EARG", "method not allowed", map[string]any{
@@ -553,6 +594,138 @@ func OrchestrationSeedCardsHandler(cfg config.Config, log zerolog.Logger) http.H
 			WithData("skipped", resp.Skipped)
 		observability.Emit(r.Context(), event.Success(time.Since(started)))
 		writeCommandOK(w, http.StatusOK, commandOrchestrationSeedCards, resp)
+	}
+}
+
+// OrchestrationCleanupCardsHandler handles POST /api/orchestration/cleanup-cards.
+func OrchestrationCleanupCardsHandler(cfg config.Config, log zerolog.Logger) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			writeCommandError(w, http.StatusMethodNotAllowed, commandOrchestrationCleanupCards, "EARG", "method not allowed", map[string]any{
+				"hint": httpErrorHint(http.StatusMethodNotAllowed),
+			})
+			return
+		}
+
+		started := time.Now()
+		var req orchestrationCleanupCardsRequest
+		if err := readJSON(w, r, &req); err != nil {
+			evt := observability.NewEvent(opWebOrchestrationCleanupCards).
+				WithComponent(observability.ComponentWeb).
+				WithCommand(commandOrchestrationCleanupCards).
+				EnrichFromContext(r.Context())
+			observability.Emit(r.Context(), evt.Error(err, time.Since(started)))
+			writeCommandError(w, http.StatusBadRequest, commandOrchestrationCleanupCards, "EARG", "invalid json", map[string]any{
+				"hint": httpErrorHint(http.StatusBadRequest),
+			})
+			return
+		}
+
+		req.RequestID = strings.TrimSpace(req.RequestID)
+		req.WorkspaceID = strings.TrimSpace(req.WorkspaceID)
+		if req.RequestID == "" {
+			writeCommandError(w, http.StatusBadRequest, commandOrchestrationCleanupCards, "EARG", "request_id is required", map[string]any{
+				"field": "request_id",
+				"hint":  httpErrorHint(http.StatusBadRequest),
+			})
+			return
+		}
+		if req.WorkspaceID == "" {
+			writeCommandError(w, http.StatusBadRequest, commandOrchestrationCleanupCards, "EARG", "workspace_id is required", map[string]any{
+				"field": "workspace_id",
+				"hint":  httpErrorHint(http.StatusBadRequest),
+			})
+			return
+		}
+
+		event := observability.NewEvent(opWebOrchestrationCleanupCards).
+			WithComponent(observability.ComponentWeb).
+			WithCommand(commandOrchestrationCleanupCards).
+			WithWorkspace(req.WorkspaceID).
+			WithData("request_id", req.RequestID).
+			WithData("issue_count", len(req.IssueIDs)).
+			EnrichFromContext(r.Context())
+
+		resp, err := cleanupOrchestrationCards(r.Context(), cfg, log, req)
+		if err != nil {
+			observability.Emit(r.Context(), event.Error(err, time.Since(started)))
+			writeCommandError(w, http.StatusInternalServerError, commandOrchestrationCleanupCards, "ERUNTIME", "failed to clean up cards", map[string]any{
+				"hint": httpErrorHint(http.StatusInternalServerError),
+			})
+			return
+		}
+
+		event.WithData("deleted_cards", resp.DeletedCards).
+			WithData("deleted_events", resp.DeletedEvents)
+		observability.Emit(r.Context(), event.Success(time.Since(started)))
+		writeCommandOK(w, http.StatusOK, commandOrchestrationCleanupCards, resp)
+	}
+}
+
+func OrchestrationArchiveCardsHandler(cfg config.Config, log zerolog.Logger) http.HandlerFunc {
+	return orchestrationArchiveToggleHandler(cfg, log, true)
+}
+
+func OrchestrationRestoreCardsHandler(cfg config.Config, log zerolog.Logger) http.HandlerFunc {
+	return orchestrationArchiveToggleHandler(cfg, log, false)
+}
+
+func orchestrationArchiveToggleHandler(cfg config.Config, log zerolog.Logger, archive bool) http.HandlerFunc {
+	command := commandOrchestrationArchiveCards
+	op := opWebOrchestrationArchiveCards
+	action := "archived"
+	if !archive {
+		command = commandOrchestrationRestoreCards
+		op = opWebOrchestrationRestoreCards
+		action = "restored"
+	}
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			writeCommandError(w, http.StatusMethodNotAllowed, command, "EARG", "method not allowed", map[string]any{
+				"hint": httpErrorHint(http.StatusMethodNotAllowed),
+			})
+			return
+		}
+		started := time.Now()
+		var req orchestrationArchiveCardsRequest
+		if err := readJSON(w, r, &req); err != nil {
+			evt := observability.NewEvent(op).
+				WithComponent(observability.ComponentWeb).
+				WithCommand(command).
+				EnrichFromContext(r.Context())
+			observability.Emit(r.Context(), evt.Error(err, time.Since(started)))
+			writeCommandError(w, http.StatusBadRequest, command, "EARG", "invalid json", map[string]any{
+				"hint": httpErrorHint(http.StatusBadRequest),
+			})
+			return
+		}
+		req.RequestID = strings.TrimSpace(req.RequestID)
+		req.WorkspaceID = strings.TrimSpace(req.WorkspaceID)
+		if req.RequestID == "" || req.WorkspaceID == "" {
+			writeCommandError(w, http.StatusBadRequest, command, "EARG", "request_id and workspace_id are required", map[string]any{
+				"hint": httpErrorHint(http.StatusBadRequest),
+			})
+			return
+		}
+		event := observability.NewEvent(op).
+			WithComponent(observability.ComponentWeb).
+			WithCommand(command).
+			WithWorkspace(req.WorkspaceID).
+			WithData("request_id", req.RequestID).
+			WithData("issue_count", len(req.IssueIDs)).
+			EnrichFromContext(r.Context())
+		resp, err := archiveOrRestoreOrchestrationCards(r.Context(), cfg, log, req, archive)
+		if err != nil {
+			observability.Emit(r.Context(), event.Error(err, time.Since(started)))
+			writeCommandError(w, http.StatusInternalServerError, command, "ERUNTIME", "failed to update archive state", map[string]any{
+				"hint": httpErrorHint(http.StatusInternalServerError),
+			})
+			return
+		}
+		event.WithData("updated", resp.Updated).
+			WithData("action", action)
+		observability.Emit(r.Context(), event.Success(time.Since(started)))
+		writeCommandOK(w, http.StatusOK, command, resp)
 	}
 }
 
@@ -688,13 +861,16 @@ func (q *inMemoryRefreshQueue) Enqueue(ctx context.Context, workspaceID, request
 	return true, false, nil
 }
 
-func newOrchestrationCommandService(cfg config.Config, log zerolog.Logger) *v2services.OrchestrationService {
+func newOrchestrationCommandService(cfg config.Config, log zerolog.Logger, runtimeHost OrchestrationRuntimeHost) *v2services.OrchestrationService {
 	reader := orchestrationProjectionReader{cfg: cfg, log: log}
-	dispatchSpawner := newOrchestrationDispatchSpawner(cfg, log)
+	dispatchSpawner := newOrchestrationDispatchSpawner(cfg, log, runtimeHost)
 	return v2services.NewOrchestrationService(v2services.OrchestrationDependencies{
 		Spawn:  dispatchSpawner,
 		Reader: reader,
 		RefreshQueue: newInMemoryRefreshQueue(refreshQueueCoalesceWindow, func(ctx context.Context, workspaceID, requestID string) error {
+			if runtimeHost != nil {
+				return runtimeHost.Refresh(ctx, workspaceID, requestID)
+			}
 			return runOrchestrationRefresh(ctx, cfg, log, workspaceID, requestID)
 		}),
 		Now: func() time.Time {
@@ -705,15 +881,19 @@ func newOrchestrationCommandService(cfg config.Config, log zerolog.Logger) *v2se
 }
 
 type orchestrationRuntimeSpawner struct {
-	cfg config.Config
-	log zerolog.Logger
+	cfg         config.Config
+	log         zerolog.Logger
+	runtimeHost OrchestrationRuntimeHost
 }
 
-func newOrchestrationDispatchSpawner(cfg config.Config, log zerolog.Logger) v2services.OrchestrationSpawner {
-	return orchestrationRuntimeSpawner{cfg: cfg, log: log}
+func newOrchestrationDispatchSpawner(cfg config.Config, log zerolog.Logger, runtimeHost OrchestrationRuntimeHost) v2services.OrchestrationSpawner {
+	return orchestrationRuntimeSpawner{cfg: cfg, log: log, runtimeHost: runtimeHost}
 }
 
 func (s orchestrationRuntimeSpawner) Spawn(ctx context.Context, req corespawn.Request) (corespawn.Response, error) {
+	if s.runtimeHost != nil {
+		return s.runtimeHost.Spawn(ctx, req)
+	}
 	req.ParentAgentID = chooseNonEmpty(strings.TrimSpace(req.ParentAgentID), resolveOrchestrationDispatchParentAgentID())
 	if strings.TrimSpace(req.ParentAgentID) == "" {
 		return corespawn.Response{}, &v2errors.V2Error{
@@ -1034,6 +1214,88 @@ func seedOrchestrationProjectionCards(
 	}, nil
 }
 
+func cleanupOrchestrationCards(
+	ctx context.Context,
+	cfg config.Config,
+	log zerolog.Logger,
+	req orchestrationCleanupCardsRequest,
+) (orchestrationCleanupCardsResponse, error) {
+	eventStore, err := openOrchestrationEventStore(ctx, cfg)
+	if err != nil {
+		return orchestrationCleanupCardsResponse{}, fmt.Errorf("open event store for cleanup: %w", err)
+	}
+	defer func() {
+		if closeErr := eventStore.Close(); closeErr != nil {
+			log.Warn().Err(closeErr).Msg("failed to close event store during card cleanup")
+		}
+	}()
+
+	orchestrationStore, closeFn, err := openOrchestrationStore(ctx, cfg)
+	if err != nil {
+		return orchestrationCleanupCardsResponse{}, fmt.Errorf("open orchestration store for cleanup: %w", err)
+	}
+	defer func() {
+		if closeErr := closeFn(); closeErr != nil {
+			log.Warn().Err(closeErr).Msg("failed to close orchestration store during card cleanup")
+		}
+	}()
+
+	deletedEvents, eventIDs, err := eventStore.DeleteOrchestrationIssueHistory(ctx, req.WorkspaceID, req.IssueIDs)
+	if err != nil {
+		return orchestrationCleanupCardsResponse{}, fmt.Errorf("delete orchestration event history: %w", err)
+	}
+	deletedCards, err := orchestrationStore.DeleteCards(ctx, req.WorkspaceID, req.IssueIDs, eventIDs)
+	if err != nil {
+		return orchestrationCleanupCardsResponse{}, fmt.Errorf("delete orchestration cards: %w", err)
+	}
+
+	return orchestrationCleanupCardsResponse{
+		RequestID:     req.RequestID,
+		DeletedCards:  deletedCards,
+		DeletedEvents: deletedEvents,
+		Timestamp:     time.Now().UTC(),
+	}, nil
+}
+
+func archiveOrRestoreOrchestrationCards(
+	ctx context.Context,
+	cfg config.Config,
+	log zerolog.Logger,
+	req orchestrationArchiveCardsRequest,
+	archive bool,
+) (orchestrationArchiveCardsResponse, error) {
+	orchestrationStore, closeFn, err := openOrchestrationStore(ctx, cfg)
+	if err != nil {
+		return orchestrationArchiveCardsResponse{}, fmt.Errorf("open orchestration store for archive toggle: %w", err)
+	}
+	defer func() {
+		if closeErr := closeFn(); closeErr != nil {
+			log.Warn().Err(closeErr).Msg("failed to close orchestration store during archive toggle")
+		}
+	}()
+
+	var updated int
+	if archive {
+		updated, err = orchestrationStore.ArchiveCards(ctx, req.WorkspaceID, req.IssueIDs)
+	} else {
+		updated, err = orchestrationStore.RestoreCards(ctx, req.WorkspaceID, req.IssueIDs)
+	}
+	if err != nil {
+		return orchestrationArchiveCardsResponse{}, err
+	}
+
+	action := "restored"
+	if archive {
+		action = "archived"
+	}
+	return orchestrationArchiveCardsResponse{
+		RequestID: req.RequestID,
+		Updated:   updated,
+		Action:    action,
+		Timestamp: time.Now().UTC(),
+	}, nil
+}
+
 func applyOrchestrationCardAction(
 	ctx context.Context,
 	cfg config.Config,
@@ -1256,6 +1518,37 @@ func loadOrchestrationCardRuntime(ctx context.Context, cfg config.Config, log ze
 		return runtime
 	}
 
+	if strings.EqualFold(ResolveOrchestrationRuntimeBackend(), orchestrationRuntimeBackendGoruntimeAPI) {
+		reader, closeFn, available, err := loadOptionalRuntimeStateReader(ctx, cfg)
+		if err != nil {
+			runtime.Error = err.Error()
+			return runtime
+		}
+		if !available {
+			return runtime
+		}
+		defer func() {
+			if closeFn != nil {
+				_ = closeFn()
+			}
+		}()
+
+		record, err := reader.Worker(ctx, coreworker.LookupRequest{AgentID: runtime.AgentID})
+		if err != nil {
+			runtime.Error = err.Error()
+			return runtime
+		}
+		runtime.Status = string(record.Status)
+		runtime.State = decodeRuntimeWorkerState(ctx, cfg, log, runtime.AgentID, record.RawState, "failed to decode orchestration runtime state; returning raw payload")
+		children, err := reader.Children(ctx, coreworker.ChildrenRequest{ParentAgentID: runtime.AgentID})
+		if err != nil {
+			runtime.Error = chooseNonEmpty(runtime.Error, err.Error())
+			return runtime
+		}
+		runtime.Children = workerChildRefs(children)
+		return runtime
+	}
+
 	client, available, err := loadOptionalJidoClient()
 	if err != nil {
 		runtime.Error = err.Error()
@@ -1306,7 +1599,7 @@ func loadOrchestrationCardRuntimeTree(ctx context.Context, cfg config.Config, lo
 		return runtime
 	}
 
-	client, available, err := loadOptionalJidoClient()
+	reader, closeFn, available, err := loadOptionalRuntimeStateReader(ctx, cfg)
 	if err != nil {
 		runtime.Error = err.Error()
 		return runtime
@@ -1314,9 +1607,14 @@ func loadOrchestrationCardRuntimeTree(ctx context.Context, cfg config.Config, lo
 	if !available {
 		return runtime
 	}
+	defer func() {
+		if closeFn != nil {
+			_ = closeFn()
+		}
+	}()
 
 	visited := map[string]struct{}{}
-	root := loadOrchestrationRuntimeTreeNode(ctx, cfg, log, client, v2jido.ChildRef{
+	root := loadOrchestrationRuntimeTreeNode(ctx, cfg, log, reader, coreworker.Record{
 		Tag:      runtime.AgentID,
 		AgentID:  runtime.AgentID,
 		Metadata: map[string]any{"workspace_id": card.WorkspaceID, "issue_id": card.IssueID},
@@ -1332,17 +1630,17 @@ func loadOrchestrationRuntimeTreeNode(
 	ctx context.Context,
 	cfg config.Config,
 	log zerolog.Logger,
-	client v2jido.Client,
-	ref v2jido.ChildRef,
+	reader coreworker.StateReader,
+	seed coreworker.Record,
 	depth int,
 	visited map[string]struct{},
 ) *orchestrationRuntimeTreeNode {
-	agentID := strings.TrimSpace(ref.AgentID)
+	agentID := strings.TrimSpace(seed.AgentID)
 	node := &orchestrationRuntimeTreeNode{
-		Tag:      strings.TrimSpace(ref.Tag),
+		Tag:      strings.TrimSpace(seed.Tag),
 		AgentID:  agentID,
-		PID:      strings.TrimSpace(ref.PID),
-		Metadata: ref.Metadata,
+		PID:      strings.TrimSpace(seed.PID),
+		Metadata: seed.Metadata,
 	}
 	if agentID == "" {
 		node.Error = "runtime node has no agent_id"
@@ -1355,53 +1653,29 @@ func loadOrchestrationRuntimeTreeNode(
 	visited[agentID] = struct{}{}
 	defer delete(visited, agentID)
 
-	stateResp, err := client.State(ctx, v2jido.StateRequest{AgentID: agentID})
+	record, err := reader.Worker(ctx, coreworker.LookupRequest{AgentID: agentID})
 	if err != nil {
 		node.Error = err.Error()
 		return node
 	}
-	node.Status = strings.TrimSpace(stateResp.Status)
-	if len(stateResp.State) > 0 && string(stateResp.State) != "null" {
-		var state any
-		if err := json.Unmarshal(stateResp.State, &state); err != nil {
-			node.State = string(stateResp.State)
-			log.Debug().Err(err).Str("agent_id", agentID).Msg("failed to decode orchestration runtime node state; returning raw payload")
-		} else {
-			if stateMap, ok := state.(map[string]any); ok {
-				state = taskhistory.RefreshJidoRuntimeState(ctx, cfg.Storage.Root, cfg.Paths.CAS, stateMap)
-			}
-			node.State = state
-		}
-	}
+	node.Tag = chooseNonEmpty(strings.TrimSpace(record.Tag), node.Tag)
+	node.PID = chooseNonEmpty(strings.TrimSpace(record.PID), node.PID)
+	node.Metadata = mergeRuntimeMetadata(node.Metadata, record.Metadata)
+	node.Status = string(record.Status)
+	node.State = decodeRuntimeWorkerState(ctx, cfg, log, agentID, record.RawState, "failed to decode orchestration runtime node state; returning raw payload")
 	if depth <= 0 {
 		return node
 	}
 
-	childrenResp, err := client.GetChildren(ctx, v2jido.GetChildrenRequest{AgentID: agentID})
+	children, err := reader.Children(ctx, coreworker.ChildrenRequest{ParentAgentID: agentID})
 	if err != nil {
 		node.Error = chooseNonEmpty(node.Error, err.Error())
 		return node
 	}
-	for _, child := range sortedChildRefs(childrenResp.Children) {
-		node.Children = append(node.Children, loadOrchestrationRuntimeTreeNode(ctx, cfg, log, client, child, depth-1, visited))
+	for _, child := range children {
+		node.Children = append(node.Children, loadOrchestrationRuntimeTreeNode(ctx, cfg, log, reader, child, depth-1, visited))
 	}
 	return node
-}
-
-func sortedChildRefs(children map[string]v2jido.ChildRef) []v2jido.ChildRef {
-	if len(children) == 0 {
-		return nil
-	}
-	keys := make([]string, 0, len(children))
-	for key := range children {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-	out := make([]v2jido.ChildRef, 0, len(keys))
-	for _, key := range keys {
-		out = append(out, children[key])
-	}
-	return out
 }
 
 func resolveOrchestrationDispatchParentAgentID() string {

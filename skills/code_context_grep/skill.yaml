@@ -2,7 +2,7 @@ apiVersion: agentctl/v1
 kind: Skill
 metadata:
   name: code/context_grep
-  version: 0.2.0
+  version: 0.3.0
   description: "Search for patterns and return surrounding code blocks with multi-mode support (ripgrep, ast-grep, line expansion)"
   tags: ["code", "search", "context", "ast", "function", "grep"]
 distribution:
@@ -35,6 +35,12 @@ signature:
       required: false
       default: 400
       description: "Maximum lines per code block"
+    - name: inline_mode
+      type: string
+      required: false
+      default: auto
+      enum: ["auto", "full", "preview", "artifact_only"]
+      description: "How much block content to inline: auto prefers preview + artifact for larger result sets"
 
     # Ripgrep mode options
     - name: pattern
@@ -123,6 +129,15 @@ signature:
     - name: block_count
       type: integer
       description: "Number of code blocks returned"
+    - name: blocks_shown
+      type: integer
+      description: "Number of blocks included inline in the response"
+    - name: blocks_truncated
+      type: boolean
+      description: "Whether some full blocks were omitted from inline output"
+    - name: inline_mode
+      type: string
+      description: "Resolved inline mode used for blocks: full, preview, or artifact_only"
     - name: files_touched
       type: integer
     - name: preview
@@ -130,7 +145,7 @@ signature:
       description: "Preview of matched blocks with file, start/end lines, symbol info"
     - name: blocks
       type: array
-      description: "Full code blocks with source"
+      description: "Inline code blocks with source; may be preview-only when inline_mode is preview or artifact_only"
     - name: artifact
       type: string
       description: "CAS digest of full block data (NDJSON)"

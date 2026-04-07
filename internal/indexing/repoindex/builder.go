@@ -25,6 +25,8 @@ import (
 
 const (
 	goPkgPrefix         = "go:"
+	pythonPkgPrefix     = "py:"
+	rustPkgPrefix       = "rs:"
 	tsLocalPrefix       = "ts:local:"
 	tsNpmPrefix         = "ts:npm:"
 	elixirPkgPrefix     = "ex:"
@@ -73,7 +75,7 @@ func (b *Builder) Build(ctx context.Context, opts BuildOptions) (BuildResult, er
 	if len(opts.Patterns) == 0 {
 		opts.Patterns = []string{"./..."}
 	}
-	if !opts.IncludeGo && !opts.IncludeTypescript && !opts.IncludeElixir && !opts.IncludeTerraform && !opts.IncludeKubernetes && !opts.IncludeShell {
+	if !opts.IncludeGo && !opts.IncludePython && !opts.IncludeRust && !opts.IncludeTypescript && !opts.IncludeElixir && !opts.IncludeTerraform && !opts.IncludeKubernetes && !opts.IncludeShell {
 		return result, fmt.Errorf("repoindex: at least one language or config family must be enabled")
 	}
 
@@ -85,6 +87,16 @@ func (b *Builder) Build(ctx context.Context, opts BuildOptions) (BuildResult, er
 
 	if opts.IncludeGo {
 		if err := b.buildGo(ctx, opts, nodes, edges, &result, &locators); err != nil {
+			return result, err
+		}
+	}
+	if opts.IncludePython {
+		if err := b.buildPython(ctx, opts, nodes, edges, &result, &pending, &locators); err != nil {
+			return result, err
+		}
+	}
+	if opts.IncludeRust {
+		if err := b.buildRust(ctx, opts, nodes, edges, &result, &pending, &locators); err != nil {
 			return result, err
 		}
 	}
@@ -152,6 +164,7 @@ func (b *Builder) Build(ctx context.Context, opts BuildOptions) (BuildResult, er
 		HeadSHA:       resolveGitHead(ctx, opts.RepoRoot),
 		SchemaVersion: schemaVersion,
 		IndexedAt:     time.Now().UTC(),
+		Languages:     buildLanguages(opts),
 	}
 	if err := b.store.SetMeta(ctx, meta); err != nil {
 		return result, err
@@ -385,6 +398,25 @@ func (b *Builder) buildTS(ctx context.Context, opts BuildOptions, nodes map[stri
 					})
 				}
 			}
+
+			refNames, err := symbol.ExtractTypeScriptReferences(ctx, sym, content)
+			if err == nil && len(refNames) > 0 && pending != nil {
+				refNames = capList(refNames, 100)
+				for _, refName := range refNames {
+					refName = strings.TrimSpace(refName)
+					if refName == "" {
+						continue
+					}
+					*pending = append(*pending, pendingNameEdge{
+						SrcID:      srcID,
+						SrcPkg:     pkgID,
+						SrcFile:    fileRelPath,
+						TargetName: refName,
+						Type:       EdgeRefersTo,
+						Weight:     0.8,
+					})
+				}
+			}
 		}
 
 		imports := extractTSImports(fileRelPath, content)
@@ -451,6 +483,216 @@ func (b *Builder) buildTS(ctx context.Context, opts BuildOptions, nodes map[stri
 					Type:       EdgeUsesSymbol,
 					Weight:     0.95,
 				})
+			}
+		}
+	}
+
+	return nil
+}
+
+func (b *Builder) buildPython(ctx context.Context, opts BuildOptions, nodes map[string]Node, edges map[string]Edge, result *BuildResult, pending *[]pendingNameEdge, locators *[]LocatorEntry) error {
+	extractor := b.registry.Get("python")
+	if extractor == nil {
+		return fmt.Errorf("repoindex: no python extractor registered")
+	}
+
+	exclude := []string{
+		"__pycache__/**",
+		".pytest_cache/**",
+		".venv/**",
+		"venv/**",
+		"node_modules/**",
+		"vendor/**",
+		"dist/**",
+		"build/**",
+		".git/**",
+	}
+
+	files, err := fsutil.FindFilesRespectingGitignore(opts.RepoRoot, "**/*.py", exclude)
+	if err != nil {
+		return fmt.Errorf("repoindex: find python files: %w", err)
+	}
+	sort.Strings(files)
+
+	seenPackages := make(map[string]bool)
+	for _, fileRelPath := range files {
+		if !opts.IncludeTests && fsutil.IsTestFile(fileRelPath) {
+			continue
+		}
+		absPath := filepath.Join(opts.RepoRoot, fileRelPath)
+		content, err := os.ReadFile(absPath)
+		if err != nil {
+			return fmt.Errorf("repoindex: read python file %s: %w", fileRelPath, err)
+		}
+
+		pkgID := pythonModuleID(fileRelPath)
+		pkgNodeID := PackageID(opts.RepoKey, pkgID)
+		addNode(nodes, Node{
+			ID:        pkgNodeID,
+			Kind:      NodePackage,
+			Pkg:       pkgID,
+			Name:      strings.TrimPrefix(pkgID, pythonPkgPrefix),
+			UpdatedAt: time.Now().UTC(),
+		})
+		if !seenPackages[pkgID] {
+			result.Packages++
+			seenPackages[pkgID] = true
+		}
+
+		lineCount := countLines(content)
+		fileNodeID := FileID(opts.RepoKey, pkgID, fileRelPath)
+		fileNode := Node{
+			ID:        fileNodeID,
+			Kind:      NodeFile,
+			Pkg:       pkgID,
+			File:      fileRelPath,
+			Name:      filepath.Base(fileRelPath),
+			SpanStart: 1,
+			SpanEnd:   lineCount,
+			Hash:      symbol.ComputeDigest(content),
+			UpdatedAt: time.Now().UTC(),
+		}
+		applyFileSummary(ctx, opts, &fileNode, fileRelPath)
+		addNode(nodes, fileNode)
+		addEdge(edges, Edge{
+			Src:    pkgNodeID,
+			Dst:    fileNode.ID,
+			Type:   EdgeContains,
+			Weight: 1.0,
+		})
+		result.Files++
+
+		syms, err := extractor.Extract(ctx, fileRelPath, content)
+		if err != nil {
+			return fmt.Errorf("repoindex: extract python symbols %s: %w", fileRelPath, err)
+		}
+		for _, sym := range syms {
+			sym.Key = symbol.PythonSymbolKey(sym.Name)
+			srcID := SymbolID(opts.RepoKey, pkgID, sym.EffectiveID())
+			addSymbol(ctx, opts, nodes, edges, pkgID, fileNode.ID, sym, locators)
+			result.Symbols++
+
+			callNames, err := extractor.ExtractCalls(ctx, sym, content)
+			if err == nil && len(callNames) > 0 && pending != nil {
+				callNames = capList(callNames, 50)
+				for _, callName := range callNames {
+					callName = strings.TrimSpace(callName)
+					if callName == "" {
+						continue
+					}
+					*pending = append(*pending, pendingNameEdge{
+						SrcID:      srcID,
+						SrcPkg:     pkgID,
+						SrcFile:    fileRelPath,
+						TargetName: callName,
+						Type:       EdgeCalls,
+						Weight:     0.9,
+					})
+				}
+			}
+		}
+	}
+
+	return nil
+}
+
+func (b *Builder) buildRust(ctx context.Context, opts BuildOptions, nodes map[string]Node, edges map[string]Edge, result *BuildResult, pending *[]pendingNameEdge, locators *[]LocatorEntry) error {
+	extractor := b.registry.Get("rust")
+	if extractor == nil {
+		return fmt.Errorf("repoindex: no rust extractor registered")
+	}
+
+	exclude := []string{
+		"target/**",
+		".cargo/**",
+		"node_modules/**",
+		"vendor/**",
+		"dist/**",
+		"build/**",
+		".git/**",
+	}
+
+	files, err := fsutil.FindFilesRespectingGitignore(opts.RepoRoot, "**/*.rs", exclude)
+	if err != nil {
+		return fmt.Errorf("repoindex: find rust files: %w", err)
+	}
+	sort.Strings(files)
+
+	seenPackages := make(map[string]bool)
+	for _, fileRelPath := range files {
+		if !opts.IncludeTests && fsutil.IsTestFile(fileRelPath) {
+			continue
+		}
+		absPath := filepath.Join(opts.RepoRoot, fileRelPath)
+		content, err := os.ReadFile(absPath)
+		if err != nil {
+			return fmt.Errorf("repoindex: read rust file %s: %w", fileRelPath, err)
+		}
+
+		pkgID := rustModuleID(fileRelPath)
+		pkgNodeID := PackageID(opts.RepoKey, pkgID)
+		addNode(nodes, Node{
+			ID:        pkgNodeID,
+			Kind:      NodePackage,
+			Pkg:       pkgID,
+			Name:      strings.TrimPrefix(pkgID, rustPkgPrefix),
+			UpdatedAt: time.Now().UTC(),
+		})
+		if !seenPackages[pkgID] {
+			result.Packages++
+			seenPackages[pkgID] = true
+		}
+
+		lineCount := countLines(content)
+		fileNodeID := FileID(opts.RepoKey, pkgID, fileRelPath)
+		fileNode := Node{
+			ID:        fileNodeID,
+			Kind:      NodeFile,
+			Pkg:       pkgID,
+			File:      fileRelPath,
+			Name:      filepath.Base(fileRelPath),
+			SpanStart: 1,
+			SpanEnd:   lineCount,
+			Hash:      symbol.ComputeDigest(content),
+			UpdatedAt: time.Now().UTC(),
+		}
+		applyFileSummary(ctx, opts, &fileNode, fileRelPath)
+		addNode(nodes, fileNode)
+		addEdge(edges, Edge{
+			Src:    pkgNodeID,
+			Dst:    fileNode.ID,
+			Type:   EdgeContains,
+			Weight: 1.0,
+		})
+		result.Files++
+
+		syms, err := extractor.Extract(ctx, fileRelPath, content)
+		if err != nil {
+			return fmt.Errorf("repoindex: extract rust symbols %s: %w", fileRelPath, err)
+		}
+		for _, sym := range syms {
+			sym.Key = symbol.RustSymbolKey(sym.Name, isExportedSymbol(sym), filepath.Base(fileRelPath))
+			srcID := SymbolID(opts.RepoKey, pkgID, sym.EffectiveID())
+			addSymbol(ctx, opts, nodes, edges, pkgID, fileNode.ID, sym, locators)
+			result.Symbols++
+
+			callNames, err := extractor.ExtractCalls(ctx, sym, content)
+			if err == nil && len(callNames) > 0 && pending != nil {
+				callNames = capList(callNames, 50)
+				for _, callName := range callNames {
+					callName = strings.TrimSpace(callName)
+					if callName == "" {
+						continue
+					}
+					*pending = append(*pending, pendingNameEdge{
+						SrcID:      srcID,
+						SrcPkg:     pkgID,
+						SrcFile:    fileRelPath,
+						TargetName: callName,
+						Type:       EdgeCalls,
+						Weight:     0.9,
+					})
+				}
 			}
 		}
 	}
@@ -622,6 +864,10 @@ func (b *Builder) addGoReferenceEdges(opts BuildOptions, pkgs []*packages.Packag
 			if !ok {
 				continue
 			}
+			fileNodeID := FileID(opts.RepoKey, pkgID, fileRelPath)
+			if _, ok := nodes[fileNodeID]; !ok {
+				continue
+			}
 			for _, decl := range file.Decls {
 				fn, ok := decl.(*ast.FuncDecl)
 				if !ok || fn.Body == nil {
@@ -671,9 +917,58 @@ func (b *Builder) addGoReferenceEdges(opts BuildOptions, pkgs []*packages.Packag
 					return true
 				})
 			}
+			addGoFileRootReferenceEdges(opts, pkg, file, fileNodeID, nodes, edges)
 		}
 	}
 	return nil
+}
+
+func addGoFileRootReferenceEdges(opts BuildOptions, pkg *packages.Package, file *ast.File, fileNodeID string, nodes map[string]Node, edges map[string]Edge) {
+	if pkg == nil || pkg.TypesInfo == nil || file == nil || fileNodeID == "" {
+		return
+	}
+	for _, decl := range file.Decls {
+		gen, ok := decl.(*ast.GenDecl)
+		if !ok {
+			continue
+		}
+		for _, spec := range gen.Specs {
+			valueSpec, ok := spec.(*ast.ValueSpec)
+			if !ok {
+				continue
+			}
+			for _, value := range valueSpec.Values {
+				if value == nil {
+					continue
+				}
+				ast.Inspect(value, func(n ast.Node) bool {
+					switch expr := n.(type) {
+					case *ast.Ident:
+						dstID := goObjectNodeID(opts, pkg, pkg.TypesInfo.Uses[expr], nodes)
+						if dstID != "" {
+							addEdge(edges, Edge{
+								Src:    fileNodeID,
+								Dst:    dstID,
+								Type:   EdgeRefersTo,
+								Weight: 1.0,
+							})
+						}
+					case *ast.SelectorExpr:
+						dstID := goObjectNodeID(opts, pkg, goSelectorObject(pkg.TypesInfo, expr), nodes)
+						if dstID != "" {
+							addEdge(edges, Edge{
+								Src:    fileNodeID,
+								Dst:    dstID,
+								Type:   EdgeRefersTo,
+								Weight: 1.0,
+							})
+						}
+					}
+					return true
+				})
+			}
+		}
+	}
 }
 
 func goFuncDeclSymbolName(fn *ast.FuncDecl) string {
@@ -1258,7 +1553,24 @@ func isExportedSymbol(sym symbol.Symbol) bool {
 		// Private: defp, defmacrop, @typep
 		return false
 	}
-	return isExportedName(sym.Name)
+	if sym.Language == "python" {
+		name := strings.TrimSpace(sym.Name)
+		if name == "" {
+			return false
+		}
+		return !strings.HasPrefix(name, "_")
+	}
+	if sym.Language == "rust" {
+		signature := strings.TrimSpace(sym.Signature)
+		return strings.HasPrefix(signature, "pub ") || strings.HasPrefix(signature, "pub(")
+	}
+	name := strings.TrimSpace(sym.Name)
+	if sym.Language == "go" && sym.Kind == symbol.KindMethod {
+		if idx := strings.LastIndex(name, "."); idx >= 0 && idx+1 < len(name) {
+			name = name[idx+1:]
+		}
+	}
+	return isExportedName(name)
 }
 
 func relPath(root, path string) (string, bool) {
@@ -1284,6 +1596,10 @@ func languageFromPackageID(pkgID string) string {
 		return "typescript"
 	case strings.HasPrefix(pkgID, tsNpmPrefix):
 		return "typescript"
+	case strings.HasPrefix(pkgID, pythonPkgPrefix):
+		return "python"
+	case strings.HasPrefix(pkgID, rustPkgPrefix):
+		return "rust"
 	case strings.HasPrefix(pkgID, elixirPkgPrefix):
 		return "elixir"
 	default:
@@ -1309,4 +1625,59 @@ func resolveGitHead(ctx context.Context, repoRoot string) string {
 		return ""
 	}
 	return strings.TrimSpace(string(output))
+}
+
+func buildLanguages(opts BuildOptions) []string {
+	languages := make([]string, 0, 7)
+	if opts.IncludeGo {
+		languages = append(languages, "go")
+	}
+	if opts.IncludePython {
+		languages = append(languages, "python")
+	}
+	if opts.IncludeRust {
+		languages = append(languages, "rust")
+	}
+	if opts.IncludeTypescript {
+		languages = append(languages, "typescript")
+	}
+	if opts.IncludeElixir {
+		languages = append(languages, "elixir")
+	}
+	if opts.IncludeTerraform {
+		languages = append(languages, "terraform")
+	}
+	if opts.IncludeKubernetes {
+		languages = append(languages, "kubernetes")
+	}
+	if opts.IncludeShell {
+		languages = append(languages, "shell")
+	}
+	return languages
+}
+
+func pythonModuleID(filePath string) string {
+	trimmed := strings.TrimSpace(filepath.ToSlash(filePath))
+	if trimmed == "" {
+		return pythonPkgPrefix + "root"
+	}
+	withoutExt := strings.TrimSuffix(trimmed, filepath.Ext(trimmed))
+	withoutExt = strings.TrimSuffix(withoutExt, "/__init__")
+	if withoutExt == "" || withoutExt == "." {
+		return pythonPkgPrefix + "root"
+	}
+	return pythonPkgPrefix + withoutExt
+}
+
+func rustModuleID(filePath string) string {
+	trimmed := strings.TrimSpace(filepath.ToSlash(filePath))
+	if trimmed == "" {
+		return rustPkgPrefix + "root"
+	}
+	withoutExt := strings.TrimSuffix(trimmed, filepath.Ext(trimmed))
+	withoutExt = strings.TrimSuffix(withoutExt, "/mod")
+	if withoutExt == "" || withoutExt == "." {
+		return rustPkgPrefix + "root"
+	}
+	return rustPkgPrefix + withoutExt
 }

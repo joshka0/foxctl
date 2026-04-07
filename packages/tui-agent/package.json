@@ -1,0 +1,20 @@
+{
+  "name": "@agentctl/tui-agent",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts",
+  "scripts": {
+    "dev": "cross-env AGENTCTL_API_URL=http://localhost:8090 bun run src/index.ts",
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@mariozechner/pi-tui": "^0.64.0"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.2.0",
+    "cross-env": "^7.0.3",
+    "typescript": "^5.9.3"
+  }
+}

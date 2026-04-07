@@ -2,7 +2,7 @@
   "files": [],
   "references": [
     { "path": "./packages/data" },
-    { "path": "./packages/tui" },
+    { "path": "./packages/tui-agent" },
     { "path": "./packages/gui-agent" },
     { "path": "./packages/gui-auth-gateway" }
   ]

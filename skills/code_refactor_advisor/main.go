@@ -24,7 +24,8 @@ const command = "code/refactor_advisor"
 
 type input struct {
 	Path          string  `json:"path"`
-	Language      string  `json:"language" validate:"required,oneof=go python javascript typescript elixir"`
+	Language      string  `json:"language" validate:"required,oneof=go python javascript typescript elixir rust"`
+	Focus         string  `json:"focus" validate:"omitempty,oneof=all slop"`
 	RuleSet       string  `json:"rule_set" validate:"omitempty,oneof=conservative default aggressive"`
 	MinScore      int     `json:"min_score" validate:"gte=0,lte=100"`
 	MaxFindings   int     `json:"max_findings" validate:"gte=1,lte=20"`
@@ -95,6 +96,9 @@ func main() {
 }
 
 func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
+	if in.Focus == "" {
+		in.Focus = "all"
+	}
 	if in.RuleSet == "" {
 		in.RuleSet = "default"
 	}
@@ -134,6 +138,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	scoutIn := map[string]any{
 		"path":        normalizedScoutPath(in.Path),
 		"language":    in.Language,
+		"focus":       in.Focus,
 		"rule_set":    in.RuleSet,
 		"min_score":   in.MinScore,
 		"max_results": in.MaxFindings,
@@ -156,6 +161,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 			"prioritized":     []advisorItem{},
 			"provider":        in.Provider,
 			"model":           in.Model,
+			"focus":           in.Focus,
 		})
 	}
 
@@ -189,6 +195,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 			"scout_summary":  scoutRes.Summary,
 			"provider":       provider,
 			"model":          model,
+			"focus":          in.Focus,
 			"raw_response":   raw,
 		}
 		return skillout.Emit(rc, command, data)
@@ -210,6 +217,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 		"scout_summary":  scoutRes.Summary,
 		"provider":       provider,
 		"model":          model,
+		"focus":          in.Focus,
 		"raw_response":   raw,
 	}
 	return skillout.Emit(rc, command, data)
@@ -322,6 +330,7 @@ func buildAdvisorUserPrompt(in input, candidates []candidateBrief) string {
 	payload := map[string]any{
 		"path":           normalizedScoutPath(in.Path),
 		"language":       in.Language,
+		"focus":          in.Focus,
 		"rule_set":       in.RuleSet,
 		"shortlist_size": in.ShortlistSize,
 		"candidates":     candidates,

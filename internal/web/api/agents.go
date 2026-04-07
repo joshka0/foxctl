@@ -9,7 +9,6 @@ import (
 	"math/rand"
 	"net/http"
 	"path/filepath"
-	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -18,8 +17,8 @@ import (
 	"github.com/oklog/ulid/v2"
 	"github.com/rs/zerolog"
 
+	agentprompts "github.com/jkatigb/agentctl/internal/agent/prompts"
 	"github.com/jkatigb/agentctl/internal/companion"
-	"github.com/jkatigb/agentctl/internal/contextplane/taskhistory"
 	"github.com/jkatigb/agentctl/internal/daemon"
 	agenttypes "github.com/jkatigb/agentctl/internal/domain/agent"
 	"github.com/jkatigb/agentctl/internal/indexing/semantic"
@@ -34,7 +33,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/storage/dbutil"
 	memorystore "github.com/jkatigb/agentctl/internal/storage/memory"
 	"github.com/jkatigb/agentctl/internal/storage/sessions"
-	v2jido "github.com/jkatigb/agentctl/internal/v2/adapters/jido"
+	coreworker "github.com/jkatigb/agentctl/internal/v2/core/worker"
 )
 
 // AgentResponse represents an agent in API responses.
@@ -426,6 +425,10 @@ func AgentsListHandler(cfg config.Config, log zerolog.Logger) http.HandlerFunc {
 // Returns standard HTTP errors for unknown daemon actions, missing agent IDs,
 // unsupported methods, and internal failures.
 func AgentDetailHandler(cfg config.Config, log zerolog.Logger, events agentEventPublisher) http.HandlerFunc {
+	return AgentDetailHandlerWithRuntime(cfg, log, events, nil)
+}
+
+func AgentDetailHandlerWithRuntime(cfg config.Config, log zerolog.Logger, events agentEventPublisher, runtimeHost OrchestrationRuntimeHost) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// Extract agent ID and action from path: /api/agents/{id}[/daemon/action]
 		path := r.URL.Path
@@ -443,7 +446,7 @@ func AgentDetailHandler(cfg config.Config, log zerolog.Logger, events agentEvent
 		}
 
 		remaining := strings.TrimPrefix(path, prefix)
-		parts := strings.SplitN(remaining, "/", 3)
+		parts := strings.SplitN(remaining, "/", 4)
 		agentID := parts[0]
 
 		if agentID == "" {
@@ -460,7 +463,7 @@ func AgentDetailHandler(cfg config.Config, log zerolog.Logger, events agentEvent
 			case "sessions":
 				handleAgentDaemonSessions(w, r, log, agentID)
 			case "kill":
-				handleAgentDaemonKill(w, r, cfg, log, agentID)
+				handleAgentDaemonKillWithRuntime(w, r, cfg, log, agentID, runtimeHost)
 			default:
 				httpError(w, http.StatusNotFound, "unknown daemon action")
 			}
@@ -484,6 +487,14 @@ func AgentDetailHandler(cfg config.Config, log zerolog.Logger, events agentEvent
 		}
 
 		if len(parts) >= 2 && parts[1] == "runtime" {
+			if len(parts) >= 4 && parts[2] == "logs" && parts[3] == "stream" {
+				handleAgentRuntimeLogsStream(w, r, cfg, log, agentID)
+				return
+			}
+			if len(parts) >= 3 && parts[2] == "logs" {
+				handleAgentRuntimeLogsGet(w, r, cfg, log, agentID)
+				return
+			}
 			handleAgentRuntimeGet(w, r, cfg, log, agentID)
 			return
 		}
@@ -740,8 +751,8 @@ func handleAgentDaemonSessionsWithRoute(w http.ResponseWriter, r *http.Request, 
 	})
 }
 
-func handleAgentDaemonKill(w http.ResponseWriter, r *http.Request, cfg config.Config, log zerolog.Logger, agentID string) {
-	handleAgentDaemonKillWithRoute(w, r, cfg, log, agentID)
+func handleAgentDaemonKillWithRuntime(w http.ResponseWriter, r *http.Request, cfg config.Config, log zerolog.Logger, agentID string, runtimeHost OrchestrationRuntimeHost) {
+	handleAgentDaemonKillWithRoute(w, r, cfg, log, agentID, runtimeHost)
 }
 
 // handleAgentDaemonKillLegacy terminates a running daemon session for the given agent and ensures the agent's stored state is set to stopped.
@@ -749,23 +760,53 @@ func handleAgentDaemonKill(w http.ResponseWriter, r *http.Request, cfg config.Co
 // It handles POST requests and writes JSON HTTP responses describing the outcome. If the daemon is not running or no matching session is found,
 // the handler updates the agent state to "stopped" and returns an OK payload indicating no active session; on successful termination it returns
 // the killed session ID and status. Errors are reported via appropriate HTTP error responses.
-func handleAgentDaemonKillWithRoute(w http.ResponseWriter, r *http.Request, cfg config.Config, log zerolog.Logger, agentID string) {
+func handleAgentDaemonKillWithRoute(w http.ResponseWriter, r *http.Request, cfg config.Config, log zerolog.Logger, agentID string, runtimeHost OrchestrationRuntimeHost) {
 	if r.Method != http.MethodPost {
 		httpError(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
+	}
+
+	store, err := agents.Open(r.Context(), cfg.Storage.Root)
+	if err != nil {
+		log.Error().Err(err).Msg("failed to open agents store")
+		httpError(w, http.StatusInternalServerError, "failed to open agents store")
+		return
+	}
+	defer store.Close()
+
+	if _, err := store.Get(r.Context(), agentID); err != nil {
+		log.Error().Err(err).Str("agent_id", agentID).Msg("agent not found")
+		httpError(w, http.StatusNotFound, "agent not found")
+		return
+	}
+
+	if runtimeHost != nil && strings.EqualFold(ResolveOrchestrationRuntimeBackend(), orchestrationRuntimeBackendGoruntimeAPI) {
+		signalResp, signalErr := runtimeHost.Signal(r.Context(), coreworker.SignalRequest{
+			AgentID:   agentID,
+			RequestID: "kill:" + agentID,
+			Signal:    "terminate",
+			Reason:    "agentctl web kill",
+		})
+		if signalErr == nil {
+			if err := store.UpdateState(r.Context(), agentID, agenttypes.StateStopped); err != nil {
+				log.Error().Err(err).Str("agent_id", agentID).Msg("failed to update agent state after runtime signal")
+				httpError(w, http.StatusInternalServerError, "agent signaled but failed to update state")
+				return
+			}
+			writeJSON(w, http.StatusOK, map[string]any{
+				"ok":         true,
+				"session_id": "",
+				"status":     string(signalResp.Status),
+				"message":    "agent runtime signaled",
+			})
+			return
+		}
 	}
 
 	// Connect to daemon
 	client := daemon.NewClient()
 	if !client.IsRunning() {
 		// Daemon not running - just update agent state to stopped
-		store, err := agents.Open(r.Context(), cfg.Storage.Root)
-		if err != nil {
-			log.Error().Err(err).Msg("failed to open agents store")
-			httpError(w, http.StatusInternalServerError, "failed to open agents store")
-			return
-		}
-		defer store.Close()
 		if err := store.UpdateState(r.Context(), agentID, agenttypes.StateStopped); err != nil {
 			log.Error().Err(err).Str("agent_id", agentID).Msg("failed to update agent state")
 			httpError(w, http.StatusInternalServerError, "failed to update agent state")
@@ -832,13 +873,6 @@ func handleAgentDaemonKillWithRoute(w http.ResponseWriter, r *http.Request, cfg 
 	}
 
 	// Update agent state to stopped in store
-	store, err := agents.Open(r.Context(), cfg.Storage.Root)
-	if err != nil {
-		log.Error().Err(err).Msg("failed to open agents store after kill")
-		httpError(w, http.StatusInternalServerError, "agent killed but failed to open store for state update")
-		return
-	}
-	defer store.Close()
 	if err := store.UpdateState(r.Context(), agentID, agenttypes.StateStopped); err != nil {
 		log.Error().Err(err).Str("agent_id", agentID).Msg("failed to update agent state after kill")
 		httpError(w, http.StatusInternalServerError, "agent killed but failed to update state")
@@ -881,10 +915,6 @@ func handleAgentSpawnWithRoute(w http.ResponseWriter, r *http.Request, cfg confi
 
 	if req.Role == "" {
 		httpError(w, http.StatusBadRequest, "role is required")
-		return
-	}
-	if req.Prompt == "" {
-		httpError(w, http.StatusBadRequest, "prompt is required")
 		return
 	}
 
@@ -936,6 +966,12 @@ func handleAgentSpawnWithRoute(w http.ResponseWriter, r *http.Request, cfg confi
 		namespace = workspace.Normalize(namespace)
 	}
 
+	resolvedPrompt := resolveAgentSpawnPrompt(req, namespace)
+	if resolvedPrompt == "" {
+		httpError(w, http.StatusBadRequest, "prompt is required")
+		return
+	}
+
 	// Generate name if not provided
 	name := req.Name
 	if name == "" {
@@ -983,7 +1019,7 @@ func handleAgentSpawnWithRoute(w http.ResponseWriter, r *http.Request, cfg confi
 		Name:            name,
 		Slug:            req.Slug,
 		Role:            req.Role,
-		Prompt:          req.Prompt,
+		Prompt:          resolvedPrompt,
 		SkillsAllow:     req.SkillsAllow,
 		Policy:          agenttypes.Policy{},
 		ShareBB:         "scoped",
@@ -1031,7 +1067,7 @@ func handleAgentSpawnWithRoute(w http.ResponseWriter, r *http.Request, cfg confi
 			}
 			return workspaceRoot
 		}(),
-		Prompt:           req.Prompt,
+		Prompt:           resolvedPrompt,
 		SkillsAllow:      req.SkillsAllow,
 		MemoryScope:      string(normalizeSpawnMemoryScope(req)),
 		MemoryRetention:  string(normalizeSpawnMemoryRetention(req)),
@@ -1067,7 +1103,7 @@ func handleAgentSpawnWithRoute(w http.ResponseWriter, r *http.Request, cfg confi
 	}
 
 	if roomID := strings.TrimSpace(req.RoomID); roomID != "" {
-		if err := attachSpawnedAgentToRoom(r.Context(), cfg, namespace, roomID, agentID, chooseNonEmpty(strings.TrimSpace(req.RoomRole), strings.TrimSpace(req.Role))); err != nil {
+		if err := attachSpawnedAgentToRoom(r.Context(), cfg, namespace, roomID, agentID, strings.TrimSpace(req.Role), strings.TrimSpace(req.RoomRole)); err != nil {
 			log.Warn().Err(err).Str("agent_id", agentID).Str("room_id", roomID).Msg("failed to attach spawned agent to room")
 		}
 	}
@@ -1167,7 +1203,28 @@ func isSQLiteBusyError(err error) bool {
 	return strings.Contains(msg, "database is locked") || strings.Contains(msg, "sqlite_busy")
 }
 
-func attachSpawnedAgentToRoom(ctx context.Context, cfg config.Config, workspaceID, roomID, agentID, roomRole string) error {
+func resolveAgentSpawnPrompt(req AgentSpawnRequest, workspaceID string) string {
+	roleForPrompt := chooseNonEmpty(strings.TrimSpace(req.RoomRole), strings.TrimSpace(req.Role))
+	prompt := strings.TrimSpace(req.Prompt)
+	if prompt == "" {
+		if defaultPrompt, ok := agentprompts.DefaultPrompt(roleForPrompt); ok {
+			prompt = defaultPrompt
+		}
+	}
+	if prompt == "" && !strings.EqualFold(roleForPrompt, strings.TrimSpace(req.Role)) {
+		if defaultPrompt, ok := agentprompts.DefaultPrompt(strings.TrimSpace(req.Role)); ok {
+			prompt = defaultPrompt
+		}
+	}
+	return agentprompts.ComposeRoomAwarePrompt(prompt, agentprompts.RoomOnboardingOptions{
+		RoomID:      strings.TrimSpace(req.RoomID),
+		WorkspaceID: strings.TrimSpace(workspaceID),
+		Role:        strings.TrimSpace(req.Role),
+		RoomRole:    strings.TrimSpace(req.RoomRole),
+	})
+}
+
+func attachSpawnedAgentToRoom(ctx context.Context, cfg config.Config, workspaceID, roomID, agentID, role, roomRole string) error {
 	store, err := blackboard.OpenBoardStore(ctx, cfg.Storage.Root)
 	if err != nil {
 		return fmt.Errorf("open board store: %w", err)
@@ -1200,12 +1257,35 @@ func attachSpawnedAgentToRoom(ctx context.Context, cfg config.Config, workspaceI
 	if _, ok := seen[agentID]; !ok {
 		nextMembers = append(nextMembers, agenttypes.RoomMember{
 			ActorID: agentID,
-			Role:    strings.TrimSpace(roomRole),
+			Role:    chooseNonEmpty(strings.TrimSpace(roomRole), strings.TrimSpace(role)),
 		})
 	}
 
 	if _, err := store.ReplaceRoomMembers(ctx, workspaceID, roomID, nextMembers); err != nil {
 		return fmt.Errorf("replace room members: %w", err)
+	}
+	subject, body := agentprompts.RoomOnboardingMessage(agentprompts.RoomOnboardingOptions{
+		RoomID:      roomID,
+		WorkspaceID: workspaceID,
+		Role:        role,
+		RoomRole:    roomRole,
+	})
+	if strings.TrimSpace(body) != "" {
+		msg := &agenttypes.BoardMessage{
+			WorkspaceID: workspaceID,
+			Stream:      agenttypes.RoomStreamName(roomID),
+			Sender:      "actor:system:room:" + roomID,
+			Recipient:   agentID,
+			Subject:     subject,
+			Body:        body,
+			Kind:        "info",
+			Priority:    agenttypes.DefaultPriority,
+			Status:      agenttypes.BoardMessageStatusUnread,
+			CreatedAt:   time.Now().UTC(),
+		}
+		if err := store.SendMessage(ctx, msg); err != nil {
+			return fmt.Errorf("send onboarding message: %w", err)
+		}
 	}
 	return nil
 }
@@ -1594,6 +1674,164 @@ func handleAgentRuntimeGet(w http.ResponseWriter, r *http.Request, cfg config.Co
 	writeJSON(w, http.StatusOK, map[string]any{
 		"runtime": loadAgentRuntimeTree(r.Context(), cfg, log, agent, depth),
 	})
+}
+
+func handleAgentRuntimeLogsGet(w http.ResponseWriter, r *http.Request, cfg config.Config, log zerolog.Logger, agentID string) {
+	if r.Method != http.MethodGet {
+		httpError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+
+	store, err := agents.Open(r.Context(), cfg.Storage.Root)
+	if err != nil {
+		log.Error().Err(err).Msg("failed to open agents store")
+		httpError(w, http.StatusInternalServerError, "failed to open agents store")
+		return
+	}
+	defer store.Close()
+
+	if _, err := store.Get(r.Context(), agentID); err != nil {
+		log.Error().Err(err).Str("agent_id", agentID).Msg("agent not found")
+		httpError(w, http.StatusNotFound, "agent not found")
+		return
+	}
+
+	entries, found, err := loadAgentRuntimeLogEntries(r.Context(), cfg, agentID)
+	if err != nil {
+		httpError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if !found {
+		httpError(w, http.StatusNotFound, "runtime worker not found")
+		return
+	}
+	limit := len(entries)
+	if rawLimit := strings.TrimSpace(r.URL.Query().Get("limit")); rawLimit != "" {
+		parsed, parseErr := strconv.Atoi(rawLimit)
+		if parseErr != nil || parsed < 0 {
+			httpError(w, http.StatusBadRequest, "limit must be a non-negative integer")
+			return
+		}
+		if parsed > 0 && parsed < limit {
+			entries = entries[len(entries)-parsed:]
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"agent_id": agentID,
+		"entries":  entries,
+		"count":    len(entries),
+	})
+}
+
+func handleAgentRuntimeLogsStream(w http.ResponseWriter, r *http.Request, cfg config.Config, log zerolog.Logger, agentID string) {
+	if r.Method != http.MethodGet {
+		httpError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		httpError(w, http.StatusInternalServerError, "streaming unsupported")
+		return
+	}
+
+	store, err := agents.Open(r.Context(), cfg.Storage.Root)
+	if err != nil {
+		log.Error().Err(err).Msg("failed to open agents store")
+		httpError(w, http.StatusInternalServerError, "failed to open agents store")
+		return
+	}
+	defer store.Close()
+
+	if _, err := store.Get(r.Context(), agentID); err != nil {
+		log.Error().Err(err).Str("agent_id", agentID).Msg("agent not found")
+		httpError(w, http.StatusNotFound, "agent not found")
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+
+	format := strings.TrimSpace(r.URL.Query().Get("format"))
+	poll := 250 * time.Millisecond
+	if rawPoll := strings.TrimSpace(r.URL.Query().Get("poll_ms")); rawPoll != "" {
+		if parsed, err := strconv.Atoi(rawPoll); err == nil && parsed >= 25 && parsed <= 5000 {
+			poll = time.Duration(parsed) * time.Millisecond
+		}
+	}
+
+	writeSSEEvent(w, "connected", map[string]any{
+		"agent_id":  agentID,
+		"timestamp": time.Now().UnixMilli(),
+	}, format)
+	flusher.Flush()
+
+	lastSent := 0
+	sendEntries := func(entries []map[string]any) {
+		if len(entries) == 0 {
+			return
+		}
+		writeSSEEvent(w, "runtime.logs", map[string]any{
+			"agent_id": agentID,
+			"entries":  entries,
+			"count":    len(entries),
+		}, format)
+		flusher.Flush()
+	}
+
+	if entries, found, err := loadAgentRuntimeLogEntries(r.Context(), cfg, agentID); err == nil && found {
+		sendEntries(entries)
+		lastSent = len(entries)
+	}
+
+	ticker := time.NewTicker(poll)
+	defer ticker.Stop()
+	heartbeat := time.NewTicker(30 * time.Second)
+	defer heartbeat.Stop()
+
+	for {
+		select {
+		case <-r.Context().Done():
+			return
+		case <-heartbeat.C:
+			writeSSEEvent(w, "heartbeat", map[string]any{
+				"timestamp": time.Now().UnixMilli(),
+			}, format)
+			flusher.Flush()
+		case <-ticker.C:
+			entries, found, err := loadAgentRuntimeLogEntries(r.Context(), cfg, agentID)
+			if err != nil || !found {
+				continue
+			}
+			switch {
+			case len(entries) > lastSent:
+				sendEntries(entries[lastSent:])
+			case len(entries) < lastSent:
+				sendEntries(entries)
+			default:
+				continue
+			}
+			lastSent = len(entries)
+		}
+	}
+}
+
+func loadAgentRuntimeLogEntries(ctx context.Context, cfg config.Config, agentID string) ([]map[string]any, bool, error) {
+	reader, closeFn, available, err := loadOptionalRuntimeStateReader(ctx, cfg)
+	if err != nil {
+		return nil, false, err
+	}
+	if closeFn != nil {
+		defer func() { _ = closeFn() }()
+	}
+	if !available {
+		return nil, true, nil
+	}
+	record, err := reader.Worker(ctx, coreworker.LookupRequest{AgentID: agentID})
+	if err != nil {
+		return nil, false, nil
+	}
+	return runtimeRecentLogs(record.RawState), true, nil
 }
 
 func buildAgentCompanionService(ctx context.Context, cfg config.Config, log zerolog.Logger, agent agenttypes.Agent) (*companion.Service, func(), error) {
@@ -2424,7 +2662,7 @@ func loadAgentRuntimeTree(ctx context.Context, cfg config.Config, log zerolog.Lo
 		return runtime
 	}
 
-	client, available, err := loadOptionalJidoClient()
+	reader, closeFn, available, err := loadOptionalRuntimeStateReader(ctx, cfg)
 	if err != nil {
 		runtime.Error = err.Error()
 		return runtime
@@ -2432,9 +2670,14 @@ func loadAgentRuntimeTree(ctx context.Context, cfg config.Config, log zerolog.Lo
 	if !available {
 		return runtime
 	}
+	defer func() {
+		if closeFn != nil {
+			_ = closeFn()
+		}
+	}()
 
 	visited := map[string]struct{}{}
-	root := loadAgentRuntimeTreeNode(ctx, cfg, log, client, v2jido.ChildRef{
+	root := loadAgentRuntimeTreeNode(ctx, cfg, log, reader, coreworker.Record{
 		Tag:     runtime.AgentID,
 		AgentID: runtime.AgentID,
 		Metadata: map[string]any{
@@ -2489,17 +2732,17 @@ func loadAgentRuntimeTreeNode(
 	ctx context.Context,
 	cfg config.Config,
 	log zerolog.Logger,
-	client v2jido.Client,
-	ref v2jido.ChildRef,
+	reader coreworker.StateReader,
+	seed coreworker.Record,
 	depth int,
 	visited map[string]struct{},
 ) *agentRuntimeTreeNode {
-	agentID := strings.TrimSpace(ref.AgentID)
+	agentID := strings.TrimSpace(seed.AgentID)
 	node := &agentRuntimeTreeNode{
-		Tag:      strings.TrimSpace(ref.Tag),
+		Tag:      strings.TrimSpace(seed.Tag),
 		AgentID:  agentID,
-		PID:      strings.TrimSpace(ref.PID),
-		Metadata: ref.Metadata,
+		PID:      strings.TrimSpace(seed.PID),
+		Metadata: seed.Metadata,
 	}
 	if agentID == "" {
 		node.Error = "runtime node has no agent_id"
@@ -2512,51 +2755,27 @@ func loadAgentRuntimeTreeNode(
 	visited[agentID] = struct{}{}
 	defer delete(visited, agentID)
 
-	stateResp, err := client.State(ctx, v2jido.StateRequest{AgentID: agentID})
+	record, err := reader.Worker(ctx, coreworker.LookupRequest{AgentID: agentID})
 	if err != nil {
 		node.Error = err.Error()
 		return node
 	}
-	node.Status = strings.TrimSpace(stateResp.Status)
-	if len(stateResp.State) > 0 && string(stateResp.State) != "null" {
-		var state any
-		if err := json.Unmarshal(stateResp.State, &state); err != nil {
-			node.State = string(stateResp.State)
-			log.Debug().Err(err).Str("agent_id", agentID).Msg("failed to decode agent runtime state; returning raw payload")
-		} else {
-			if stateMap, ok := state.(map[string]any); ok {
-				state = taskhistory.RefreshJidoRuntimeState(ctx, cfg.Storage.Root, cfg.Paths.CAS, stateMap)
-			}
-			node.State = state
-		}
-	}
+	node.Tag = chooseNonEmpty(strings.TrimSpace(record.Tag), node.Tag)
+	node.PID = chooseNonEmpty(strings.TrimSpace(record.PID), node.PID)
+	node.Metadata = mergeRuntimeMetadata(node.Metadata, record.Metadata)
+	node.Status = string(record.Status)
+	node.State = decodeRuntimeWorkerState(ctx, cfg, log, agentID, record.RawState, "failed to decode agent runtime state; returning raw payload")
 	if depth <= 0 {
 		return node
 	}
 
-	childrenResp, err := client.GetChildren(ctx, v2jido.GetChildrenRequest{AgentID: agentID})
+	children, err := reader.Children(ctx, coreworker.ChildrenRequest{ParentAgentID: agentID})
 	if err != nil {
 		node.Error = chooseNonEmpty(node.Error, err.Error())
 		return node
 	}
-	for _, child := range sortedAgentChildRefs(childrenResp.Children) {
-		node.Children = append(node.Children, loadAgentRuntimeTreeNode(ctx, cfg, log, client, child, depth-1, visited))
+	for _, child := range children {
+		node.Children = append(node.Children, loadAgentRuntimeTreeNode(ctx, cfg, log, reader, child, depth-1, visited))
 	}
 	return node
-}
-
-func sortedAgentChildRefs(children map[string]v2jido.ChildRef) []v2jido.ChildRef {
-	if len(children) == 0 {
-		return nil
-	}
-	keys := make([]string, 0, len(children))
-	for key := range children {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-	out := make([]v2jido.ChildRef, 0, len(keys))
-	for _, key := range keys {
-		out = append(out, children[key])
-	}
-	return out
 }

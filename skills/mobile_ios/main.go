@@ -54,6 +54,24 @@ var allowedOps = []string{
 	"expo_reload",
 }
 
+func simctlTarget(udid string) string {
+	if strings.TrimSpace(udid) != "" {
+		return strings.TrimSpace(udid)
+	}
+	return "booted"
+}
+
+func opRequiresIDB(op string) bool {
+	switch op {
+	case "device_info", "tap", "swipe", "type_text", "button", "ui_tree", "describe_point",
+		"logs", "set_location", "approve_permissions", "record_start", "record_stop",
+		"crash_logs", "clear_keychain", "focus", "expo_reload":
+		return true
+	default:
+		return false
+	}
+}
+
 // input defines the skill input parameters for iOS simulator operations with comprehensive device control.
 type input struct {
 	Operation   string   `json:"operation"`
@@ -102,12 +120,18 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	if err := oputil.Validate(op, allowedOps...); err != nil {
 		return skillerr.Arg(err.Error(), skillerr.WithHint(opHint))
 	}
-	// Check IDB availability
-	if _, err := executil.RequireTool("idb", "install idb-companion"); err != nil {
+	hasIDB := mobileutil.HasRunnableIDB(ctx)
+	hasSimctl := executil.HasTool("xcrun")
+	if !hasIDB && !hasSimctl {
+		return skillerr.Runtime(
+			"neither idb nor xcrun found",
+			skillerr.WithHint("Install Xcode command line tools for simctl and optionally idb-companion for richer iOS automation."),
+		)
+	}
+	if opRequiresIDB(op) && !hasIDB {
 		return skillerr.Runtime(
 			"idb not found",
-			skillerr.WithCause(err),
-			skillerr.WithHint("Install idb-companion (brew install idb-companion)."),
+			skillerr.WithHint("Install idb-companion (brew install idb-companion). Core simulator lifecycle actions use simctl, but this operation still requires idb."),
 		)
 	}
 
@@ -171,23 +195,25 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 
 // listDevices lists all available iOS simulators with filtering for simulators only and device enumeration.
 func listDevices(ctx context.Context, rc *skillmain.RunContext) error {
-	devices, err := mobileutil.ListIDBDevices(ctx)
+	backend := "simctl"
+	devices, err := mobileutil.ListSimctlDevices(ctx)
 	if err != nil {
-		return skillerr.WrapRuntime("idb list-targets", err)
-	}
-
-	simulators := make([]mobileutil.IDBDevice, 0, len(devices))
-	for _, dev := range devices {
-		// Only include simulators (not real devices)
-		if dev.TargetType == "simulator" {
-			simulators = append(simulators, dev)
+		simctlErr := err
+		if !mobileutil.HasRunnableIDB(ctx) {
+			return skillerr.Runtimef("list devices failed (simctl: %v)", simctlErr)
+		}
+		backend = "idb"
+		devices, err = mobileutil.ListIDBDevices(ctx)
+		if err != nil {
+			return skillerr.Runtimef("list devices failed (simctl: %v, idb: %v)", simctlErr, err)
 		}
 	}
 
 	return emit(rc, map[string]any{
 		"operation": "list_devices",
-		"devices":   simulators,
-		"count":     len(simulators),
+		"backend":   backend,
+		"devices":   devices,
+		"count":     len(devices),
 	})
 }
 
@@ -214,14 +240,23 @@ func boot(ctx context.Context, rc *skillmain.RunContext, udid string) error {
 	if udid == "" {
 		return skillerr.Arg("udid is required for boot operation")
 	}
-
-	result := mobileutil.RunIDB(ctx, "", "boot", udid)
+	backend := "simctl"
+	result := mobileutil.RunSimctl(ctx, "boot", udid)
 	if result.Err != nil {
-		return skillerr.WrapRuntime("idb boot", result.Err)
+		simctlErr := result.Err
+		if !mobileutil.HasRunnableIDB(ctx) {
+			return skillerr.Runtimef("boot failed (simctl: %v)", simctlErr)
+		}
+		backend = "idb"
+		result = mobileutil.RunIDB(ctx, "", "boot", udid)
+		if result.Err != nil {
+			return skillerr.Runtimef("boot failed (simctl: %v, idb: %v)", simctlErr, result.Err)
+		}
 	}
 
 	return emit(rc, map[string]any{
 		"operation": "boot",
+		"backend":   backend,
 		"udid":      udid,
 		"success":   true,
 		"message":   "Simulator booted successfully",
@@ -261,13 +296,23 @@ func install(ctx context.Context, rc *skillmain.RunContext, udid, app string) er
 		return skillerr.Validation(fmt.Sprintf("app path %s: expected .ipa file but got directory", resolvedPath))
 	}
 
-	result := mobileutil.RunIDB(ctx, udid, "install", resolvedPath)
+	backend := "simctl"
+	result := mobileutil.RunSimctl(ctx, "install", simctlTarget(udid), resolvedPath)
 	if result.Err != nil {
-		return skillerr.WrapRuntime("idb install", result.Err)
+		simctlErr := result.Err
+		if !mobileutil.HasRunnableIDB(ctx) {
+			return skillerr.Runtimef("install failed (simctl: %v)", simctlErr)
+		}
+		backend = "idb"
+		result = mobileutil.RunIDB(ctx, udid, "install", resolvedPath)
+		if result.Err != nil {
+			return skillerr.Runtimef("install failed (simctl: %v, idb: %v)", simctlErr, result.Err)
+		}
 	}
 
 	return emit(rc, map[string]any{
 		"operation": "install",
+		"backend":   backend,
 		"app":       resolvedPath,
 		"success":   true,
 		"message":   "App installed successfully",
@@ -283,13 +328,23 @@ func launch(ctx context.Context, rc *skillmain.RunContext, udid, bundleID string
 		)
 	}
 
-	result := mobileutil.RunIDB(ctx, udid, "launch", bundleID)
+	backend := "simctl"
+	result := mobileutil.RunSimctl(ctx, "launch", simctlTarget(udid), bundleID)
 	if result.Err != nil {
-		return skillerr.WrapRuntime("idb launch", result.Err)
+		simctlErr := result.Err
+		if !mobileutil.HasRunnableIDB(ctx) {
+			return skillerr.Runtimef("launch failed (simctl: %v)", simctlErr)
+		}
+		backend = "idb"
+		result = mobileutil.RunIDB(ctx, udid, "launch", bundleID)
+		if result.Err != nil {
+			return skillerr.Runtimef("launch failed (simctl: %v, idb: %v)", simctlErr, result.Err)
+		}
 	}
 
 	return emit(rc, map[string]any{
 		"operation": "launch",
+		"backend":   backend,
 		"app":       bundleID,
 		"success":   true,
 		"message":   "App launched successfully",
@@ -305,13 +360,23 @@ func terminate(ctx context.Context, rc *skillmain.RunContext, udid, bundleID str
 		)
 	}
 
-	result := mobileutil.RunIDB(ctx, udid, "terminate", bundleID)
+	backend := "simctl"
+	result := mobileutil.RunSimctl(ctx, "terminate", simctlTarget(udid), bundleID)
 	if result.Err != nil {
-		return skillerr.WrapRuntime("idb terminate", result.Err)
+		simctlErr := result.Err
+		if !mobileutil.HasRunnableIDB(ctx) {
+			return skillerr.Runtimef("terminate failed (simctl: %v)", simctlErr)
+		}
+		backend = "idb"
+		result = mobileutil.RunIDB(ctx, udid, "terminate", bundleID)
+		if result.Err != nil {
+			return skillerr.Runtimef("terminate failed (simctl: %v, idb: %v)", simctlErr, result.Err)
+		}
 	}
 
 	return emit(rc, map[string]any{
 		"operation": "terminate",
+		"backend":   backend,
 		"app":       bundleID,
 		"success":   true,
 		"message":   "App terminated successfully",
@@ -334,9 +399,18 @@ func screenshot(ctx context.Context, rc *skillmain.RunContext, udid, outputPath 
 		}()
 	}
 
-	result := mobileutil.RunIDB(ctx, udid, "screenshot", outputPath)
+	backend := "simctl"
+	result := mobileutil.RunSimctl(ctx, "io", simctlTarget(udid), "screenshot", outputPath)
 	if result.Err != nil {
-		return skillerr.WrapRuntime("idb screenshot", result.Err)
+		simctlErr := result.Err
+		if !mobileutil.HasRunnableIDB(ctx) {
+			return skillerr.Runtimef("screenshot failed (simctl: %v)", simctlErr)
+		}
+		backend = "idb"
+		result = mobileutil.RunIDB(ctx, udid, "screenshot", outputPath)
+		if result.Err != nil {
+			return skillerr.Runtimef("screenshot failed (simctl: %v, idb: %v)", simctlErr, result.Err)
+		}
 	}
 
 	// Read screenshot and store in CAS
@@ -352,6 +426,7 @@ func screenshot(ctx context.Context, rc *skillmain.RunContext, udid, outputPath 
 
 	return emit(rc, map[string]any{
 		"operation":  "screenshot",
+		"backend":    backend,
 		"screenshot": artifact.Digest,
 		"path":       outputPath,
 		"size_bytes": len(data),
@@ -547,13 +622,23 @@ func openURL(ctx context.Context, rc *skillmain.RunContext, udid, url string) er
 		return skillerr.Arg("url is required for open_url operation", skillerr.WithHint("Provide a URL to open."))
 	}
 
-	result := mobileutil.RunIDB(ctx, udid, "open", url)
+	backend := "simctl"
+	result := mobileutil.RunSimctl(ctx, "openurl", simctlTarget(udid), url)
 	if result.Err != nil {
-		return skillerr.WrapRuntime("idb open", result.Err)
+		simctlErr := result.Err
+		if !mobileutil.HasRunnableIDB(ctx) {
+			return skillerr.Runtimef("open url failed (simctl: %v)", simctlErr)
+		}
+		backend = "idb"
+		result = mobileutil.RunIDB(ctx, udid, "open", url)
+		if result.Err != nil {
+			return skillerr.Runtimef("open url failed (simctl: %v, idb: %v)", simctlErr, result.Err)
+		}
 	}
 
 	return emit(rc, map[string]any{
 		"operation": "open_url",
+		"backend":   backend,
 		"url":       url,
 		"success":   true,
 	})
@@ -742,13 +827,23 @@ func addMedia(ctx context.Context, rc *skillmain.RunContext, udid, mediaPath str
 		return skillerr.Validation(fmt.Sprintf("media_path %s: not a regular file", resolvedPath))
 	}
 
-	result := mobileutil.RunIDB(ctx, udid, "add-media", resolvedPath)
+	backend := "simctl"
+	result := mobileutil.RunSimctl(ctx, "addmedia", simctlTarget(udid), resolvedPath)
 	if result.Err != nil {
-		return skillerr.WrapRuntime("idb add-media", result.Err)
+		simctlErr := result.Err
+		if !mobileutil.HasRunnableIDB(ctx) {
+			return skillerr.Runtimef("add media failed (simctl: %v)", simctlErr)
+		}
+		backend = "idb"
+		result = mobileutil.RunIDB(ctx, udid, "add-media", resolvedPath)
+		if result.Err != nil {
+			return skillerr.Runtimef("add media failed (simctl: %v, idb: %v)", simctlErr, result.Err)
+		}
 	}
 
 	return emit(rc, map[string]any{
 		"operation":  "add_media",
+		"backend":    backend,
 		"media_path": resolvedPath,
 		"success":    true,
 	})
@@ -829,13 +924,23 @@ func expoDeepLink(ctx context.Context, rc *skillmain.RunContext, udid, expoURL s
 		expoURL = "exp://" + expoURL
 	}
 
-	result := mobileutil.RunIDB(ctx, udid, "open", expoURL)
+	backend := "simctl"
+	result := mobileutil.RunSimctl(ctx, "openurl", simctlTarget(udid), expoURL)
 	if result.Err != nil {
-		return skillerr.WrapRuntime("idb open expo URL", result.Err)
+		simctlErr := result.Err
+		if !mobileutil.HasRunnableIDB(ctx) {
+			return skillerr.Runtimef("open expo URL failed (simctl: %v)", simctlErr)
+		}
+		backend = "idb"
+		result = mobileutil.RunIDB(ctx, udid, "open", expoURL)
+		if result.Err != nil {
+			return skillerr.Runtimef("open expo URL failed (simctl: %v, idb: %v)", simctlErr, result.Err)
+		}
 	}
 
 	return emit(rc, map[string]any{
 		"operation": "expo_deep_link",
+		"backend":   backend,
 		"expo_url":  expoURL,
 		"success":   true,
 		"message":   "Expo deep link opened",

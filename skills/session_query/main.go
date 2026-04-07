@@ -228,8 +228,8 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	case in.ErrorChains:
 		voyageKey := os.Getenv("VOYAGE_API_KEY")
 		geminiKey := os.Getenv("GEMINI_API_KEY")
-		if voyageKey == "" && geminiKey == "" {
-			return skillerr.Arg("error_chains requires embeddings (set VOYAGE_API_KEY or GEMINI_API_KEY)")
+		if semantic.DetectProviderForConfig(rc.Config, voyageKey, geminiKey) == "" {
+			return skillerr.Arg("error_chains requires embeddings (configure a repo embedding provider or set VOYAGE_API_KEY / GEMINI_API_KEY)")
 		}
 
 		provider, err := semantic.NewProviderForScope(

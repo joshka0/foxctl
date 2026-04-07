@@ -27,7 +27,7 @@ contributors
 | [docs/architecture/](docs/architecture/)           | Current architecture overviews (runtime + storage + adapters) |
 | [docs/general/gotchas.md](docs/general/gotchas.md) | Common pitfalls                                  |
 | [docs/codemaps/](docs/codemaps/)                   | Generated codemap artifacts and notes            |
-| [docs/kubernetes.md](docs/kubernetes.md)           | Kubernetes deployment guide                      |
+| [docs/guides/kubernetes.md](docs/guides/kubernetes.md) | Kubernetes deployment guide                      |
 | [deploy/kubernetes/](deploy/kubernetes/)           | Kubernetes manifests and overlays                |
 | [docs/spec/agent_hierarchy.md](docs/spec/agent_hierarchy.md) | Subagent hierarchy and spawn protocol   |
 | [docs/spec/overseer_profile.md](docs/spec/overseer_profile.md) | Overseer coordination profile |
@@ -37,8 +37,8 @@ contributors
 | [docs/architecture/postgres-storage.md](docs/architecture/postgres-storage.md) | PostgreSQL + CAS storage architecture |
 | [docs/architecture/context-architecture.md](docs/architecture/context-architecture.md) | ACA dual-plane context + Obsidian knowledge layer |
 | [docs/architecture/simulator-agents.md](docs/architecture/simulator-agents.md) | Simulator agent pattern for app/API integrations |
-| [docs/plans/chat-platform-adapter.md](docs/plans/chat-platform-adapter.md) | Implementation plan + historical notes |
-| [docs/plans/k8s-sql-storage.md](docs/plans/k8s-sql-storage.md) | Historical implementation plan (now partially complete) |
+| [docs/archive/impl_plan/chat-platform-adapter.md](docs/archive/impl_plan/chat-platform-adapter.md) | Implementation plan + historical notes |
+| [docs/archive/impl_plan/k8s-sql-storage.md](docs/archive/impl_plan/k8s-sql-storage.md) | Historical implementation plan (now partially complete) |
 
 ---
 
@@ -70,13 +70,14 @@ contributors
    [docs/general/gotchas.md](docs/general/gotchas.md)
 7. **Task titles** — generate based on current work; do not require user-provided titles
 8. **Native tools** — prefer agentctl skills, but if a skill is unavailable or makes completion harder, fall back to native tools
-9. **Subagent-aware planning** — before requesting agent splits, verify current spawning rules in [docs/spec/agent_hierarchy.md](docs/spec/agent_hierarchy.md) (depth constraints, actor roles, rejection paths).
-10. **Terminology coaching** — when the user asks something technical but uses imprecise language, provide the correct terminology in parentheses as a mini-lesson (e.g., "Fixed. Added scrolling *(in CSS terms: `overflow-y: auto` to handle content overflow)*")
-11. **Docs link hygiene** — run `make check-doc-links` for markdown/doc updates; CI enforces this via `.github/workflows/docs.yml`
-12. **Go-native runtime rules (v2)** — prefer `Run(ctx)` components, bounded channels, single-writer state ownership, and immutable snapshots for high-read paths
-13. **ACA vault refresh** — after repo docs, repo graph, or bridge metadata changes, rebuild the Obsidian layer with `agentctl obsidian graph build`, `graph promote`, `bridge reconcile`, and `index build`
-14. **Task continuity split** — use `agentctl context task-history-summary` for Codex/agents/scripts *(structured summary + artifact pointer)* and `configs/hooks/task-continuity-summary.sh` for hook injection *(prompt-ready wrapper output)*
-15. **Never use keyword heuristics** — do not route, classify, promote, or suppress behavior using ad hoc substring/keyword matching; these heuristics are brittle. Prefer explicit schemas, typed signals, scored features, tests, or learned policies.
+9. **Structured shell first for command-shaped retrieval** — for supported read-only repo inspection commands *(for example: `find`, `rg`, `grep`, `sed -n`, `git status --short`, `git diff --stat`, `git log --stat`)*, prefer `agentctl shell` because it returns compact structured output; fall back to raw/native tools for already-compact or exact-value commands *(for example: `git diff --name-only`, `wc`, plain `head`/`tail`)*
+10. **Subagent-aware planning** — before requesting agent splits, verify current spawning rules in [docs/spec/agent_hierarchy.md](docs/spec/agent_hierarchy.md) (depth constraints, actor roles, rejection paths).
+11. **Terminology coaching** — when the user asks something technical but uses imprecise language, provide the correct terminology in parentheses as a mini-lesson (e.g., "Fixed. Added scrolling *(in CSS terms: `overflow-y: auto` to handle content overflow)*")
+12. **Docs link hygiene** — run `make check-doc-links` for markdown/doc updates; CI enforces this via `.github/workflows/docs.yml`
+13. **Go-native runtime rules (v2)** — prefer `Run(ctx)` components, bounded channels, single-writer state ownership, and immutable snapshots for high-read paths
+14. **ACA vault refresh** — after repo docs, repo graph, or bridge metadata changes, rebuild the Obsidian layer with `agentctl obsidian graph build`, `graph promote`, `bridge reconcile`, and `index build`
+15. **Task continuity split** — use `agentctl context task-history-summary` for Codex/agents/scripts *(structured summary + artifact pointer)* and `configs/hooks/task-continuity-summary.sh` for hook injection *(prompt-ready wrapper output)*
+16. **Never use keyword heuristics** — do not route, classify, promote, or suppress behavior using ad hoc substring/keyword matching; these heuristics are brittle. Prefer explicit schemas, typed signals, scored features, tests, or learned policies.
 
 ## ACA / Obsidian Refresh
 
@@ -103,6 +104,7 @@ Use this table as the deterministic execution contract.
 | Routing, classification, or memory-promotion logic | Do **not** use keyword heuristics *(ad hoc substring matching)* for behavior decisions; use explicit fields, typed signals, scoring, or learned policies instead | Behavior is driven by structured inputs/tests rather than string-trigger lists |
 | WASI skill manifest or runtime change | Keep `capabilities.network: "none"` | Manifest validation (`ValidateWASIPolicy`) continues to pass |
 | Large output result (>64KB or blob-like) | Persist to CAS and return `data.summary` + `data.artifact` pointer | Output envelope contains artifact digest instead of large inline payload |
+| Read-only repo inspection via shell-shaped commands | Prefer `agentctl shell` for supported retrieval commands; fall back to raw/native when the command is already compact, exact-value oriented, unsupported, or the reducer reports `keep_raw`/`raw_unavailable` | Agent uses structured shell for noisy command-shaped retrieval and reopens raw file/context before editing |
 | Documentation changed (`*.md`) | Run doc link checker | `make check-doc-links` passes |
 | User asks for terminology clarification | Include corrected term in parentheses with the fix | Response includes concise term mapping |
 | Skill unavailable or unsuitable | Fall back to native tools and continue | Completion does not block on missing skill |
@@ -738,7 +740,7 @@ I/O: JSON envelopes (version: 1)
 | Storage      | [docs/general/storage.md](docs/general/storage.md)           |
 | Gotchas      | [docs/general/gotchas.md](docs/general/gotchas.md)           |
 | Multi-Agent  | [docs/spec/v1/agent_profile_v1.md](docs/spec/v1/agent_profile_v1.md) |
-| Deployment   | [docs/kubernetes.md](docs/kubernetes.md)                    |
+| Deployment   | [docs/guides/kubernetes.md](docs/guides/kubernetes.md)                    |
 | Deployment Manifests | [deploy/kubernetes/](deploy/kubernetes/)              |
 | Chat Adapter | [docs/architecture/chat-platform-adapter.md](docs/architecture/chat-platform-adapter.md) |
 | Postgres     | [docs/architecture/postgres-storage.md](docs/architecture/postgres-storage.md) |

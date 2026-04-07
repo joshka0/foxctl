@@ -257,14 +257,14 @@ ts-install:
 	@command -v bun >/dev/null 2>&1 || { echo "bun not installed. See: https://bun.sh"; exit 1; }
 	@bun install
 
-# Build the standalone TUI binary
+# Build the standalone TUI agent binary
 ts-build-tui: ts-install
 	@mkdir -p bin
-	@bun build --compile --minify packages/tui/src/index.tsx --outfile bin/agentctl-tui
+	@bun build --compile --minify packages/tui-agent/src/index.ts --outfile bin/agentctl-tui
 	@echo "Built bin/agentctl-tui"
 
 ts-dev-tui: ts-install
-	@cd packages/tui && bun run dev
+	@cd packages/tui-agent && bun run dev
 
 # Starts API server + gui-agent (Vite) development workflow
 ts-dev-gui: gui-agent
@@ -420,6 +420,16 @@ skills-build-cgo:
 		mkdir -p dist/skills; \
 		for dir in $(SKILL_DIRS); do \
 			name=$$(basename "$$dir"); \
+			needs_cgo=0; \
+			if echo " $(CGO_SKILLS) " | grep -q " $$name "; then \
+				needs_cgo=1; \
+			elif ls "$$dir"/*.go >/dev/null 2>&1 && grep -qE '^//go:build cgo|^// +build cgo' "$$dir"/*.go; then \
+				needs_cgo=1; \
+			fi; \
+			if [ "$$needs_cgo" -ne 1 ]; then \
+				echo " - $$name (skipped, no CGO variant needed)"; \
+				continue; \
+			fi; \
 			outdir="dist/skills/$$name"; \
 			mkdir -p "$$outdir"; \
 			if ls "$$dir"/*.go >/dev/null 2>&1; then \

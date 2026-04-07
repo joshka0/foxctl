@@ -2,10 +2,12 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"go/ast"
 	"go/parser"
+	"go/printer"
 	"go/token"
 	"io/fs"
 	"os"
@@ -14,12 +16,15 @@ import (
 	"strings"
 
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/fsutil"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/hashutil"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/langutil"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/pathutil"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillerr"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
 	symindex "github.com/jkatigb/agentctl/internal/indexing/symbol"
+	refscope "github.com/jkatigb/agentctl/internal/refactor/scope"
+	refstatus "github.com/jkatigb/agentctl/internal/refactor/status"
 )
 
 const command = "code/refactor_scout"
@@ -33,7 +38,9 @@ const (
 
 type input struct {
 	Path         string `json:"path"`
-	Language     string `json:"language" validate:"omitempty,oneof=auto go python javascript typescript elixir"`
+	Language     string `json:"language" validate:"omitempty,oneof=auto go python javascript typescript elixir rust"`
+	Focus        string `json:"focus" validate:"omitempty,oneof=all slop dead"`
+	View         string `json:"view" validate:"omitempty,oneof=raw grouped entrypoints summary"`
 	IncludeTests bool   `json:"include_tests"`
 	MaxResults   int    `json:"max_results" validate:"gte=0"`
 	MinScore     int    `json:"min_score" validate:"gte=0,lte=100"`
@@ -130,6 +137,74 @@ type languageScope struct {
 	Detected []string `json:"detected,omitempty"`
 }
 
+type scoutPresentation struct {
+	View       string                 `json:"view"`
+	ActiveLane string                 `json:"active_lane,omitempty"`
+	Overview   scoutPresentationMeta  `json:"overview"`
+	Lanes      scoutPresentationLanes `json:"lanes"`
+}
+
+type scoutPresentationMeta struct {
+	TopRuleFamilies []scoutRuleFamilySummary `json:"top_rule_families,omitempty"`
+	TopFiles        []scoutFileSummary       `json:"top_files,omitempty"`
+	TopSymbols      []scoutSymbolSummary     `json:"top_symbols,omitempty"`
+	NoiseIndicators []scoutNoiseIndicator    `json:"noise_indicators,omitempty"`
+}
+
+type scoutRuleFamilySummary struct {
+	RuleID   string  `json:"rule_id"`
+	Count    int     `json:"count"`
+	MaxScore int     `json:"max_score"`
+	Share    float64 `json:"share"`
+}
+
+type scoutFileSummary struct {
+	File          string   `json:"file"`
+	Count         int      `json:"count"`
+	MaxScore      int      `json:"max_score"`
+	TopSymbol     string   `json:"top_symbol,omitempty"`
+	DominantRules []string `json:"dominant_rules,omitempty"`
+}
+
+type scoutSymbolSummary struct {
+	File     string   `json:"file"`
+	Symbol   string   `json:"symbol"`
+	Line     int      `json:"line,omitempty"`
+	Count    int      `json:"count"`
+	MaxScore int      `json:"max_score"`
+	RuleIDs  []string `json:"rule_ids,omitempty"`
+}
+
+type scoutNoiseIndicator struct {
+	Kind   string  `json:"kind"`
+	Detail string  `json:"detail"`
+	Count  int     `json:"count,omitempty"`
+	Share  float64 `json:"share,omitempty"`
+}
+
+type scoutPresentationLanes struct {
+	BestEntrypoints       []scoutLaneItem `json:"best_entrypoints,omitempty"`
+	DBAccessPatterns      []scoutLaneItem `json:"db_access_patterns,omitempty"`
+	RepeatedPatternFamily []scoutLaneItem `json:"repeated_pattern_families,omitempty"`
+	ModuleSeams           []scoutLaneItem `json:"module_seams,omitempty"`
+	Backlog               []scoutLaneItem `json:"backlog,omitempty"`
+}
+
+type scoutLaneItem struct {
+	File               string   `json:"file,omitempty"`
+	Symbol             string   `json:"symbol,omitempty"`
+	Line               int      `json:"line,omitempty"`
+	MaxScore           int      `json:"max_score"`
+	FindingCount       int      `json:"finding_count"`
+	RepresentativeRule string   `json:"representative_rule"`
+	RuleIDs            []string `json:"rule_ids,omitempty"`
+	Summary            string   `json:"summary"`
+	Category           string   `json:"category,omitempty"`
+	SeamKind           string   `json:"seam_kind,omitempty"`
+	ScopePath          string   `json:"scope_path,omitempty"`
+	Samples            []string `json:"samples,omitempty"`
+}
+
 func main() {
 	skillmain.Main(command, run)
 }
@@ -137,6 +212,12 @@ func main() {
 func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	if in.Language == "" {
 		in.Language = "auto"
+	}
+	if in.Focus == "" {
+		in.Focus = "all"
+	}
+	if in.View == "" {
+		in.View = "grouped"
 	}
 	if in.MaxResults <= 0 {
 		in.MaxResults = 100
@@ -158,7 +239,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 		return skillerr.WrapIO("stat path", err)
 	}
 
-	scope, err := resolveLanguageScope(searchPath, info, in)
+	scope, err := resolveLanguageScope(workspace, searchPath, info, in)
 	if err != nil {
 		return err
 	}
@@ -188,10 +269,23 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	finalizeObservationFindings(state)
 	finalizeReceiverHotspots(state)
 	hotspotSymbols := synthesizeCompositeFindings(state)
-	suppressConstituentFindings(state, hotspotSymbols)
+	if shouldSuppressConstituentFindings(in.Focus) {
+		suppressConstituentFindings(state, hotspotSymbols)
+	}
 
-	filtered := make([]finding, 0, len(state.Findings))
-	for _, item := range state.Findings {
+	statusScope := buildScoutStatusScope(workspace, searchPath, info, scope, in.IncludeTests)
+	indexStatus := refstatus.Evaluate(ctx, rc.Config.Storage.Root, statusScope)
+	effectiveScope := indexStatus.Scope
+
+	allFindings := append([]finding(nil), state.Findings...)
+	deadCodeFindings, deadCodeErr := buildDeadCodeFindings(ctx, rc.Config.Storage.Root, effectiveScope, indexStatus, in.Focus)
+	if deadCodeErr == nil {
+		allFindings = append(allFindings, deadCodeFindings...)
+	}
+	allFindings = applyFocus(allFindings, in.Focus)
+
+	filtered := make([]finding, 0, len(allFindings))
+	for _, item := range allFindings {
 		if item.Score >= in.MinScore {
 			filtered = append(filtered, item)
 		}
@@ -199,14 +293,21 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	sortFindings(filtered)
 	filtered = diversifyFindings(filtered, maxInt(headDiversifyMinItems, in.MaxResults*3), headMaxPerRule, headMaxPerFile, headMaxPerSymbol)
 
+	evidence, evidenceErr := buildScoutEvidence(ctx, rc, in, effectiveScope, indexStatus, filtered)
+	if evidenceErr == nil {
+		filtered = evidence.Findings
+	}
+	filtered = applyConfidenceScores(filtered, indexStatus.Mode)
+	sortFindings(filtered)
+
 	totalFindings := len(filtered)
 	summary := buildSummary(filtered)
+	presentation := buildScoutPresentation(filtered, in.View)
 	limitedByMaxResults := false
 	if len(filtered) > in.MaxResults {
 		filtered = filtered[:in.MaxResults]
 		limitedByMaxResults = true
 	}
-
 	previewResult, err := skillout.PreviewAndPersistNDJSON(ctx, rc, filtered, rc.MaxPreview, "code_refactor_scout", true)
 	if err != nil {
 		return err
@@ -215,6 +316,9 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	data := map[string]any{
 		"findings":       previewResult.Preview,
 		"language_scope": scope,
+		"index_mode":     string(indexStatus.Mode),
+		"view":           in.View,
+		"presentation":   presentation,
 		"summary": map[string]any{
 			"scanned_files":      state.ScannedFiles,
 			"scanned_symbols":    state.ScannedSymbols,
@@ -225,97 +329,61 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 			"limited_by_results": limitedByMaxResults,
 		},
 		"rule_set": in.RuleSet,
+		"focus":    in.Focus,
 		"signals": map[string]any{
 			"symbol_signatures": true,
 			"go_ast":            true,
 			"call_extraction":   true,
-			"repo_graph":        false,
+			"slop_focus":        in.Focus == "slop",
+			"dead_focus":        in.Focus == "dead",
+			"repo_graph":        indexStatus.Mode == refstatus.ModeIndexBacked,
+			"evidence_backed":   evidenceErr == nil,
 		},
+	}
+	if deadCodeErr != nil {
+		data["dead_code_error"] = deadCodeErr.Error()
+	}
+	if evidenceErr == nil {
+		data["snapshot_id"] = evidence.SnapshotID
+		data["snapshot_artifact"] = evidence.SnapshotArtifact
+		if strings.TrimSpace(evidence.EvidenceArtifact) != "" {
+			data["evidence_artifact"] = evidence.EvidenceArtifact
+		}
+	} else {
+		data["evidence_error"] = evidenceErr.Error()
 	}
 	skillout.AddArtifact(data, previewResult.Artifact)
 
 	return skillout.Emit(rc, command, data)
 }
 
-func resolveLanguageScope(searchPath string, info fs.FileInfo, in input) (languageScope, error) {
-	if strings.TrimSpace(in.Language) != "" && in.Language != "auto" {
-		return languageScope{
-			Mode:     "explicit",
-			Language: in.Language,
-			Detected: []string{in.Language},
-		}, nil
-	}
-
-	if !info.IsDir() {
-		lang := langutil.DetectAllowed(searchPath, langutil.CommonCodeLanguages)
-		if lang == "" {
-			return languageScope{}, skillerr.Validation("unsupported file type",
-				skillerr.WithHint("Pass a supported source file or specify --language for a supported code family."),
-			)
-		}
-		return languageScope{
-			Mode:     "auto_file",
-			Language: lang,
-			Detected: []string{lang},
-		}, nil
-	}
-
-	detected, err := discoverLanguages(searchPath, in.IncludeTests)
+func resolveLanguageScope(workspace, searchPath string, info fs.FileInfo, in input) (languageScope, error) {
+	resolved, err := refscope.ResolveResolvedPath(workspace, searchPath, info, in.Language, in.IncludeTests)
 	if err != nil {
-		return languageScope{}, err
+		if resolveErr, ok := err.(*refscope.ResolveError); ok {
+			return languageScope{}, skillerr.Validation(resolveErr.Message, skillerr.WithHint(resolveErr.Hint))
+		}
+		return languageScope{}, skillerr.WrapIO("resolve language scope", err)
 	}
-	switch len(detected) {
-	case 0:
-		return languageScope{}, skillerr.Validation("no supported source files found",
-			skillerr.WithHint("Point the scout at a source directory or set --language to the language you want to refactor."),
-		)
-	case 1:
-		return languageScope{
-			Mode:     "auto_directory_single_language",
-			Language: detected[0],
-			Detected: detected,
-		}, nil
-	default:
-		return languageScope{}, skillerr.Validation(
-			fmt.Sprintf("multiple languages detected in %s: %s", searchPath, strings.Join(detected, ", ")),
-			skillerr.WithHint("Refactor scouting is intentionally single-language per run. Re-run with --language set to one language."),
-		)
-	}
+	return languageScope{
+		Mode:     resolved.Mode,
+		Language: resolved.Language,
+		Detected: resolved.Detected,
+	}, nil
 }
 
-func discoverLanguages(dir string, includeTests bool) ([]string, error) {
-	found := make(map[string]struct{})
-	err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, walkErr error) error {
-		if walkErr != nil {
-			return nil
-		}
-		if fsutil.ShouldSkipHiddenOrCommon(d.Name()) {
-			if d.IsDir() {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		if d.IsDir() {
-			return nil
-		}
-		if !includeTests && fsutil.IsTestFile(d.Name()) {
-			return nil
-		}
-		lang := langutil.DetectAllowed(path, langutil.CommonCodeLanguages)
-		if lang != "" {
-			found[lang] = struct{}{}
-		}
-		return nil
-	})
-	if err != nil {
-		return nil, skillerr.WrapIO("discover languages", err)
+func buildScoutStatusScope(workspace, searchPath string, info fs.FileInfo, scope languageScope, includeTests bool) refscope.Scope {
+	return refscope.Scope{
+		Workspace:    workspace,
+		RepoRoot:     workspace,
+		Path:         pathutil.RelativePath(searchPath, workspace),
+		Absolute:     searchPath,
+		Mode:         scope.Mode,
+		Language:     scope.Language,
+		Detected:     append([]string(nil), scope.Detected...),
+		IsDir:        info != nil && info.IsDir(),
+		IncludeTests: includeTests,
 	}
-	out := make([]string, 0, len(found))
-	for lang := range found {
-		out = append(out, lang)
-	}
-	sort.Strings(out)
-	return out, nil
 }
 
 func analyzeDirectory(ctx context.Context, dir string, in input, state *scoutState) error {
@@ -376,6 +444,24 @@ func analyzeFile(ctx context.Context, path, workspace string, in input, state *s
 	switch lang {
 	case "go":
 		return analyzeGoFile(path, relPath, content, state)
+	case "typescript", "javascript":
+		applySignatureFindings(relPath, lang, symbols, state)
+		state.Findings = append(state.Findings, analyzeTypeScriptSemanticSimplifications(path, relPath, lang, content, symbols)...)
+		state.Findings = append(state.Findings, analyzeTypeScriptDuplicateRecoveryBlocks(path, relPath, lang, content, symbols)...)
+		state.Findings = append(state.Findings, analyzeTypeScriptDuplicatedErrorRemaps(path, relPath, lang, content, symbols)...)
+		state.Findings = append(state.Findings, analyzeTypeScriptRepeatedGuardLadders(path, relPath, lang, content, symbols)...)
+	case "python":
+		applySignatureFindings(relPath, lang, symbols, state)
+		state.Findings = append(state.Findings, analyzePythonSemanticSimplifications(path, relPath, lang, content, symbols)...)
+	case "elixir":
+		applySignatureFindings(relPath, lang, symbols, state)
+		state.Findings = append(state.Findings, analyzeElixirSemanticSimplifications(path, relPath, lang, content, symbols)...)
+		state.Findings = append(state.Findings, analyzeElixirPreloadAfterGetChains(path, relPath, lang, content, symbols)...)
+		state.Findings = append(state.Findings, analyzeElixirPostTransactionPreloads(path, relPath, lang, content, symbols)...)
+		state.Findings = append(state.Findings, analyzeElixirTransactionScriptHotspots(path, relPath, lang, content, symbols)...)
+		state.Findings = append(state.Findings, analyzeElixirDuplicateRecoveryBlocks(path, relPath, lang, content, symbols)...)
+		state.Findings = append(state.Findings, analyzeElixirDuplicatedErrorRemaps(path, relPath, lang, content, symbols)...)
+		state.Findings = append(state.Findings, analyzeElixirRepeatedGuardLadders(path, relPath, lang, content, symbols)...)
 	default:
 		applySignatureFindings(relPath, lang, symbols, state)
 	}
@@ -781,6 +867,9 @@ func analyzeGoFuncDecl(fn *ast.FuncDecl, fset *token.FileSet, relPath string, st
 			},
 		})
 	}
+
+	findings = append(findings, analyzeGoSemanticSimplification(fn, fset, relPath, name)...)
+	findings = append(findings, analyzeDuplicateRecoveryBlocks(fn, fset, relPath, name)...)
 
 	return findings
 }
@@ -2916,7 +3005,7 @@ func isFunctionConstituent(item finding) bool {
 	switch item.RuleID {
 	case "long_parameter_list", "boolean_parameter", "wide_return_tuple",
 		"oversized_function", "high_cyclomatic_complexity", "deep_nesting", "oversized_symbol",
-		"fan_out_dependency_spread", "duplicate_orchestration_fingerprint", "same_file_extraction_candidate":
+		"fan_out_dependency_spread", "preload_after_get_chain", "post_transaction_preload", "transaction_script_hotspot", "duplicate_orchestration_fingerprint", "duplicate_recovery_block", "duplicated_error_remap", "repeated_guard_ladder", "semantic_simplification_candidate", "same_file_extraction_candidate":
 		return strings.TrimSpace(item.Symbol) != ""
 	default:
 		return false
@@ -2939,11 +3028,15 @@ func suppressConstituentFindings(state *scoutState, hotspotSymbols map[string]st
 	state.Findings = filtered
 }
 
+func shouldSuppressConstituentFindings(focus string) bool {
+	return strings.TrimSpace(focus) != "slop"
+}
+
 func hotspotRuleMix(rules map[string]finding) (structural, signature, supportive int) {
 	for ruleID := range rules {
 		switch ruleID {
 		case "high_cyclomatic_complexity", "oversized_function", "deep_nesting",
-			"fan_out_dependency_spread", "duplicate_orchestration_fingerprint":
+			"fan_out_dependency_spread", "preload_after_get_chain", "post_transaction_preload", "transaction_script_hotspot", "duplicate_orchestration_fingerprint", "duplicate_recovery_block", "duplicated_error_remap", "repeated_guard_ladder", "semantic_simplification_candidate":
 			structural++
 		case "long_parameter_list", "boolean_parameter", "wide_return_tuple":
 			signature++
@@ -3054,6 +3147,8 @@ func parseSignatureMetrics(signature, lang string) signatureMetrics {
 		metrics.ReturnCount = parseTSReturnCount(rest)
 	case "python":
 		metrics.ReturnCount = parsePythonReturnCount(rest)
+	case "rust":
+		metrics.ReturnCount = parseRustReturnCount(rest)
 	}
 
 	return metrics
@@ -3117,6 +3212,30 @@ func parsePythonReturnCount(rest string) int {
 	return 1
 }
 
+func parseRustReturnCount(rest string) int {
+	idx := strings.LastIndex(rest, "->")
+	if idx < 0 {
+		return 0
+	}
+	ret := strings.TrimSpace(rest[idx+2:])
+	if ret == "" {
+		return 0
+	}
+	if idx := strings.Index(ret, "{"); idx >= 0 {
+		ret = strings.TrimSpace(ret[:idx])
+	}
+	if ret == "" || ret == "!" {
+		return 0
+	}
+	if strings.HasPrefix(ret, "(") {
+		end := findMatching(ret, 0, '(', ')')
+		if end >= 0 {
+			return countNonEmpty(splitTopLevel(ret[1:end]))
+		}
+	}
+	return 1
+}
+
 func isTypedBooleanParam(lang, param string) bool {
 	value := strings.ToLower(strings.TrimSpace(param))
 	if value == "" {
@@ -3128,6 +3247,8 @@ func isTypedBooleanParam(lang, param string) bool {
 	case "typescript", "javascript":
 		return strings.Contains(value, ": boolean") || strings.HasSuffix(value, ":bool")
 	case "python":
+		return strings.Contains(value, ": bool")
+	case "rust":
 		return strings.Contains(value, ": bool")
 	default:
 		return false
@@ -3240,6 +3361,612 @@ func buildSummary(items []finding) map[string]int {
 	}
 	for _, item := range items {
 		out[item.Severity]++
+	}
+	return out
+}
+
+func buildScoutPresentation(items []finding, view string) scoutPresentation {
+	presentation := scoutPresentation{
+		View: view,
+		Overview: scoutPresentationMeta{
+			TopRuleFamilies: summarizeRuleFamilies(items, 5),
+			TopFiles:        summarizeFiles(items, 5),
+			TopSymbols:      summarizeSymbols(items, 5),
+			NoiseIndicators: summarizeNoiseIndicators(items),
+		},
+		Lanes: scoutPresentationLanes{
+			BestEntrypoints:       buildEntrypointLane(items, 8),
+			DBAccessPatterns:      buildDBAccessLane(items, 8),
+			RepeatedPatternFamily: buildRepeatedPatternLane(items, 8),
+			ModuleSeams:           buildModuleSeamLane(items, 8),
+			Backlog:               buildBacklogLane(items, 8),
+		},
+	}
+	switch view {
+	case "entrypoints":
+		presentation.ActiveLane = "best_entrypoints"
+	case "summary":
+		presentation.ActiveLane = "overview"
+	case "raw":
+		presentation.ActiveLane = ""
+	default:
+		presentation.ActiveLane = "best_entrypoints"
+	}
+	return presentation
+}
+
+func summarizeRuleFamilies(items []finding, limit int) []scoutRuleFamilySummary {
+	if len(items) == 0 {
+		return nil
+	}
+	type acc struct {
+		count    int
+		maxScore int
+	}
+	index := make(map[string]acc)
+	for _, item := range items {
+		a := index[item.RuleID]
+		a.count++
+		if item.Score > a.maxScore {
+			a.maxScore = item.Score
+		}
+		index[item.RuleID] = a
+	}
+	out := make([]scoutRuleFamilySummary, 0, len(index))
+	total := len(items)
+	for ruleID, a := range index {
+		share := 0.0
+		if total > 0 {
+			share = float64(a.count) / float64(total)
+		}
+		out = append(out, scoutRuleFamilySummary{
+			RuleID:   ruleID,
+			Count:    a.count,
+			MaxScore: a.maxScore,
+			Share:    share,
+		})
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Count != out[j].Count {
+			return out[i].Count > out[j].Count
+		}
+		if out[i].MaxScore != out[j].MaxScore {
+			return out[i].MaxScore > out[j].MaxScore
+		}
+		return out[i].RuleID < out[j].RuleID
+	})
+	if limit > 0 && len(out) > limit {
+		out = out[:limit]
+	}
+	return out
+}
+
+func summarizeFiles(items []finding, limit int) []scoutFileSummary {
+	if len(items) == 0 {
+		return nil
+	}
+	type acc struct {
+		count     int
+		maxScore  int
+		topSymbol string
+		rules     map[string]int
+	}
+	index := make(map[string]*acc)
+	for _, item := range items {
+		if strings.TrimSpace(item.File) == "" {
+			continue
+		}
+		a := index[item.File]
+		if a == nil {
+			a = &acc{rules: make(map[string]int)}
+			index[item.File] = a
+		}
+		a.count++
+		a.rules[item.RuleID]++
+		if item.Score > a.maxScore || (item.Score == a.maxScore && strings.TrimSpace(item.Symbol) != "" && a.topSymbol == "") {
+			a.maxScore = item.Score
+			a.topSymbol = item.Symbol
+		}
+	}
+	out := make([]scoutFileSummary, 0, len(index))
+	for file, a := range index {
+		out = append(out, scoutFileSummary{
+			File:          file,
+			Count:         a.count,
+			MaxScore:      a.maxScore,
+			TopSymbol:     strings.TrimSpace(a.topSymbol),
+			DominantRules: topCountKeys(a.rules, 3),
+		})
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].MaxScore != out[j].MaxScore {
+			return out[i].MaxScore > out[j].MaxScore
+		}
+		if out[i].Count != out[j].Count {
+			return out[i].Count > out[j].Count
+		}
+		return out[i].File < out[j].File
+	})
+	if limit > 0 && len(out) > limit {
+		out = out[:limit]
+	}
+	return out
+}
+
+func summarizeSymbols(items []finding, limit int) []scoutSymbolSummary {
+	type acc struct {
+		file     string
+		symbol   string
+		line     int
+		count    int
+		maxScore int
+		rules    map[string]struct{}
+	}
+	index := make(map[string]*acc)
+	for _, item := range items {
+		if strings.TrimSpace(item.Symbol) == "" {
+			continue
+		}
+		key := findingSymbolKey(item)
+		a := index[key]
+		if a == nil {
+			a = &acc{
+				file:   item.File,
+				symbol: item.Symbol,
+				line:   item.Line,
+				rules:  make(map[string]struct{}),
+			}
+			index[key] = a
+		}
+		a.count++
+		if item.Score > a.maxScore {
+			a.maxScore = item.Score
+		}
+		if a.line == 0 && item.Line > 0 {
+			a.line = item.Line
+		}
+		a.rules[item.RuleID] = struct{}{}
+	}
+	out := make([]scoutSymbolSummary, 0, len(index))
+	for _, a := range index {
+		out = append(out, scoutSymbolSummary{
+			File:     a.file,
+			Symbol:   a.symbol,
+			Line:     a.line,
+			Count:    a.count,
+			MaxScore: a.maxScore,
+			RuleIDs:  sortedKeys(a.rules),
+		})
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].MaxScore != out[j].MaxScore {
+			return out[i].MaxScore > out[j].MaxScore
+		}
+		if out[i].Count != out[j].Count {
+			return out[i].Count > out[j].Count
+		}
+		if out[i].File != out[j].File {
+			return out[i].File < out[j].File
+		}
+		return out[i].Symbol < out[j].Symbol
+	})
+	if limit > 0 && len(out) > limit {
+		out = out[:limit]
+	}
+	return out
+}
+
+func summarizeNoiseIndicators(items []finding) []scoutNoiseIndicator {
+	if len(items) == 0 {
+		return nil
+	}
+	ruleCounts := make(map[string]int)
+	symbolRuleCounts := make(map[string]int)
+	for _, item := range items {
+		ruleCounts[item.RuleID]++
+		if strings.TrimSpace(item.Symbol) != "" {
+			symbolRuleCounts[findingSymbolKey(item)+"::"+item.RuleID]++
+		}
+	}
+	out := make([]scoutNoiseIndicator, 0, 3)
+	var dominantRule string
+	dominantCount := 0
+	for ruleID, count := range ruleCounts {
+		if count > dominantCount || (count == dominantCount && ruleID < dominantRule) {
+			dominantRule = ruleID
+			dominantCount = count
+		}
+	}
+	if dominantRule != "" {
+		out = append(out, scoutNoiseIndicator{
+			Kind:   "dominant_rule_share",
+			Detail: dominantRule,
+			Count:  dominantCount,
+			Share:  float64(dominantCount) / float64(len(items)),
+		})
+	}
+	duplicatedGroups := 0
+	for _, count := range symbolRuleCounts {
+		if count > 1 {
+			duplicatedGroups++
+		}
+	}
+	if duplicatedGroups > 0 {
+		out = append(out, scoutNoiseIndicator{
+			Kind:   "duplicate_symbol_rule_groups",
+			Detail: "same symbol and rule emitted more than once",
+			Count:  duplicatedGroups,
+		})
+	}
+	clusterCount := 0
+	for _, item := range items {
+		if item.Category == "cluster" {
+			clusterCount++
+		}
+	}
+	if clusterCount > 0 {
+		out = append(out, scoutNoiseIndicator{
+			Kind:   "cluster_share",
+			Detail: "cluster findings among returned results",
+			Count:  clusterCount,
+			Share:  float64(clusterCount) / float64(len(items)),
+		})
+	}
+	return out
+}
+
+func buildEntrypointLane(items []finding, limit int) []scoutLaneItem {
+	type group struct {
+		rep   finding
+		count int
+		rules map[string]struct{}
+	}
+	index := make(map[string]*group)
+	for _, item := range items {
+		if strings.TrimSpace(item.Symbol) == "" {
+			continue
+		}
+		if item.Category != "function" && item.RuleID != "function_hotspot" {
+			continue
+		}
+		key := findingSymbolKey(item)
+		g := index[key]
+		if g == nil {
+			g = &group{rep: item, rules: make(map[string]struct{})}
+			index[key] = g
+		}
+		g.count++
+		g.rules[item.RuleID] = struct{}{}
+		if shouldReplaceRepresentative(g.rep, item) {
+			g.rep = item
+		}
+	}
+	out := make([]scoutLaneItem, 0, len(index))
+	for _, g := range index {
+		out = append(out, scoutLaneItem{
+			File:               g.rep.File,
+			Symbol:             g.rep.Symbol,
+			Line:               g.rep.Line,
+			MaxScore:           g.rep.Score,
+			FindingCount:       g.count,
+			RepresentativeRule: g.rep.RuleID,
+			RuleIDs:            sortedKeys(g.rules),
+			Summary:            scoutLaneSummary(g.rep),
+			Category:           g.rep.Category,
+			SeamKind:           evidenceString(g.rep.Evidence["seam_kind"]),
+		})
+	}
+	sortLaneItems(out)
+	if limit > 0 && len(out) > limit {
+		out = out[:limit]
+	}
+	return out
+}
+
+func buildRepeatedPatternLane(items []finding, limit int) []scoutLaneItem {
+	type group struct {
+		rep     finding
+		count   int
+		samples []string
+	}
+	index := make(map[string]*group)
+	for _, item := range items {
+		if !isPatternFamilyRule(item.RuleID) || strings.TrimSpace(item.Symbol) == "" {
+			continue
+		}
+		key := findingSymbolKey(item) + "::" + item.RuleID
+		g := index[key]
+		if g == nil {
+			g = &group{rep: item}
+			index[key] = g
+		}
+		g.count++
+		if shouldReplaceRepresentative(g.rep, item) {
+			g.rep = item
+		}
+		g.samples = appendUniquePatternStrings(g.samples, patternEvidenceSamples(item)...)
+	}
+	out := make([]scoutLaneItem, 0, len(index))
+	for _, g := range index {
+		if g.count <= 1 && g.rep.RuleID != "semantic_simplification_candidate" {
+			continue
+		}
+		summary := scoutLaneSummary(g.rep)
+		if g.count > 1 {
+			summary = fmt.Sprintf("%s emitted %d %s finding(s). %s", g.rep.Symbol, g.count, g.rep.RuleID, scoutLaneSummary(g.rep))
+		}
+		out = append(out, scoutLaneItem{
+			File:               g.rep.File,
+			Symbol:             g.rep.Symbol,
+			Line:               g.rep.Line,
+			MaxScore:           g.rep.Score,
+			FindingCount:       g.count,
+			RepresentativeRule: g.rep.RuleID,
+			RuleIDs:            []string{g.rep.RuleID},
+			Summary:            summary,
+			Category:           g.rep.Category,
+			Samples:            sampleStrings(g.samples, 4),
+		})
+	}
+	sortLaneItems(out)
+	if limit > 0 && len(out) > limit {
+		out = out[:limit]
+	}
+	return out
+}
+
+func buildDBAccessLane(items []finding, limit int) []scoutLaneItem {
+	type group struct {
+		rep        finding
+		count      int
+		rules      map[string]struct{}
+		seenShapes map[string]struct{}
+		samples    []string
+	}
+	index := make(map[string]*group)
+	for _, item := range items {
+		if !isDBAccessRule(item.RuleID) || strings.TrimSpace(item.Symbol) == "" {
+			continue
+		}
+		key := findingSymbolKey(item)
+		g := index[key]
+		if g == nil {
+			g = &group{rep: item, rules: make(map[string]struct{}), seenShapes: make(map[string]struct{})}
+			index[key] = g
+		}
+		shapeKey := item.RuleID + "::" + fmt.Sprintf("%d", item.Line) + "::" + dbAccessShapeKey(item)
+		if item.RuleID == "transaction_script_hotspot" {
+			shapeKey = item.RuleID
+		}
+		if _, ok := g.seenShapes[shapeKey]; !ok {
+			g.seenShapes[shapeKey] = struct{}{}
+			g.count++
+		}
+		g.rules[item.RuleID] = struct{}{}
+		g.samples = appendUniquePatternStrings(g.samples, patternEvidenceSamples(item)...)
+		if shouldReplaceRepresentative(g.rep, item) {
+			g.rep = item
+		}
+	}
+	out := make([]scoutLaneItem, 0, len(index))
+	for _, g := range index {
+		displayCount := g.count
+		if len(g.rules) == 1 {
+			if _, ok := g.rules["transaction_script_hotspot"]; ok {
+				displayCount = 1
+			}
+		}
+		summary := scoutLaneSummary(g.rep)
+		if displayCount > 1 {
+			summary = fmt.Sprintf("%s carries %d DB access pattern finding(s). %s", g.rep.Symbol, displayCount, scoutLaneSummary(g.rep))
+		}
+		out = append(out, scoutLaneItem{
+			File:               g.rep.File,
+			Symbol:             g.rep.Symbol,
+			Line:               g.rep.Line,
+			MaxScore:           g.rep.Score,
+			FindingCount:       displayCount,
+			RepresentativeRule: g.rep.RuleID,
+			RuleIDs:            sortedKeys(g.rules),
+			Summary:            summary,
+			Category:           g.rep.Category,
+			SeamKind:           evidenceString(g.rep.Evidence["suggested_boundary_kind"]),
+			Samples:            sampleStrings(g.samples, 4),
+		})
+	}
+	sortLaneItems(out)
+	if limit > 0 && len(out) > limit {
+		out = out[:limit]
+	}
+	return out
+}
+
+func dbAccessShapeKey(item finding) string {
+	if item.Evidence == nil {
+		return truncateForEvidence(item.Detail, 120)
+	}
+	if preview := evidenceString(item.Evidence["script_preview"]); preview != "" {
+		return preview
+	}
+	if values := evidenceStrings(item.Evidence["chain_samples"]); len(values) > 0 {
+		return strings.Join(values, "|")
+	}
+	return truncateForEvidence(item.Detail, 120)
+}
+
+func buildModuleSeamLane(items []finding, limit int) []scoutLaneItem {
+	out := make([]scoutLaneItem, 0, len(items))
+	seen := make(map[string]struct{})
+	for _, item := range items {
+		if item.Category != "cluster" && item.Category != "file" {
+			continue
+		}
+		scopePath := evidenceString(item.Evidence["scope_path"])
+		key := item.RuleID + "::" + item.File + "::" + scopePath + "::" + evidenceString(item.Evidence["seam_kind"])
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, scoutLaneItem{
+			File:               item.File,
+			Line:               item.Line,
+			MaxScore:           item.Score,
+			FindingCount:       1,
+			RepresentativeRule: item.RuleID,
+			RuleIDs:            []string{item.RuleID},
+			Summary:            scoutLaneSummary(item),
+			Category:           item.Category,
+			SeamKind:           evidenceString(item.Evidence["seam_kind"]),
+			ScopePath:          scopePath,
+		})
+	}
+	sortLaneItems(out)
+	if limit > 0 && len(out) > limit {
+		out = out[:limit]
+	}
+	return out
+}
+
+func buildBacklogLane(items []finding, limit int) []scoutLaneItem {
+	coveredSymbols := make(map[string]struct{})
+	for _, item := range buildEntrypointLane(items, 1000) {
+		if strings.TrimSpace(item.Symbol) != "" {
+			coveredSymbols[item.File+"\x00"+item.Symbol] = struct{}{}
+		}
+	}
+	out := make([]scoutLaneItem, 0, len(items))
+	seen := make(map[string]struct{})
+	for _, item := range items {
+		key := item.File + "::" + item.Symbol + "::" + item.RuleID + "::" + item.Category
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		if strings.TrimSpace(item.Symbol) != "" {
+			if _, ok := coveredSymbols[item.File+"\x00"+item.Symbol]; ok {
+				continue
+			}
+		}
+		seen[key] = struct{}{}
+		out = append(out, scoutLaneItem{
+			File:               item.File,
+			Symbol:             item.Symbol,
+			Line:               item.Line,
+			MaxScore:           item.Score,
+			FindingCount:       1,
+			RepresentativeRule: item.RuleID,
+			RuleIDs:            []string{item.RuleID},
+			Summary:            scoutLaneSummary(item),
+			Category:           item.Category,
+			SeamKind:           evidenceString(item.Evidence["seam_kind"]),
+			ScopePath:          evidenceString(item.Evidence["scope_path"]),
+		})
+	}
+	sortLaneItems(out)
+	if limit > 0 && len(out) > limit {
+		out = out[:limit]
+	}
+	return out
+}
+
+func shouldReplaceRepresentative(current, candidate finding) bool {
+	if candidate.RuleID == "function_hotspot" && current.RuleID != "function_hotspot" {
+		return true
+	}
+	if candidate.Score != current.Score {
+		return candidate.Score > current.Score
+	}
+	return rulePriority(candidate.RuleID) < rulePriority(current.RuleID)
+}
+
+func isPatternFamilyRule(ruleID string) bool {
+	switch ruleID {
+	case "duplicate_recovery_block", "duplicated_error_remap", "repeated_guard_ladder", "semantic_simplification_candidate":
+		return true
+	default:
+		return false
+	}
+}
+
+func isDBAccessRule(ruleID string) bool {
+	switch ruleID {
+	case "preload_after_get_chain", "post_transaction_preload", "transaction_script_hotspot":
+		return true
+	default:
+		return false
+	}
+}
+
+func patternEvidenceSamples(item finding) []string {
+	if item.Evidence == nil {
+		return nil
+	}
+	var samples []string
+	for _, key := range []string{"guard_preview", "simplified_form", "why_similar"} {
+		if value := evidenceString(item.Evidence[key]); value != "" {
+			samples = append(samples, truncateForEvidence(value, 120))
+		}
+	}
+	for _, key := range []string{"script_preview"} {
+		if value := evidenceString(item.Evidence[key]); value != "" {
+			samples = append(samples, truncateForEvidence(value, 120))
+		}
+	}
+	if values := evidenceStrings(item.Evidence["chain_samples"]); len(values) > 0 {
+		samples = append(samples, sampleStrings(values, 2)...)
+	}
+	if values := evidenceStrings(item.Evidence["repo_calls"]); len(values) > 0 {
+		samples = append(samples, sampleStrings(values, 3)...)
+	}
+	return samples
+}
+
+func scoutLaneSummary(item finding) string {
+	detail := strings.TrimSpace(item.Detail)
+	if detail == "" {
+		detail = strings.TrimSpace(item.Title)
+	}
+	return truncateForEvidence(detail, 220)
+}
+
+func sortLaneItems(items []scoutLaneItem) {
+	sort.Slice(items, func(i, j int) bool {
+		if items[i].MaxScore != items[j].MaxScore {
+			return items[i].MaxScore > items[j].MaxScore
+		}
+		if items[i].FindingCount != items[j].FindingCount {
+			return items[i].FindingCount > items[j].FindingCount
+		}
+		if items[i].File != items[j].File {
+			return items[i].File < items[j].File
+		}
+		return items[i].Symbol < items[j].Symbol
+	})
+}
+
+func topCountKeys(values map[string]int, limit int) []string {
+	if len(values) == 0 {
+		return nil
+	}
+	type pair struct {
+		key   string
+		count int
+	}
+	pairs := make([]pair, 0, len(values))
+	for key, count := range values {
+		pairs = append(pairs, pair{key: key, count: count})
+	}
+	sort.Slice(pairs, func(i, j int) bool {
+		if pairs[i].count != pairs[j].count {
+			return pairs[i].count > pairs[j].count
+		}
+		return pairs[i].key < pairs[j].key
+	})
+	if limit > 0 && len(pairs) > limit {
+		pairs = pairs[:limit]
+	}
+	out := make([]string, 0, len(pairs))
+	for _, pair := range pairs {
+		out = append(out, pair.key)
 	}
 	return out
 }
@@ -3374,6 +4101,34 @@ func scoreFanOutDependencySpread(fanOut int, th thresholds) int {
 	return clampScore(67 + minInt(18, extra*3))
 }
 
+func scorePreloadAfterGetChain(chainCount int) int {
+	score := 74 + minInt(10, maxInt(0, chainCount-1)*5)
+	return clampScore(score)
+}
+
+func scorePostTransactionPreload(matchCount int) int {
+	score := 73 + minInt(10, maxInt(0, matchCount-1)*5)
+	return clampScore(score)
+}
+
+func scoreTransactionScriptHotspot(stmtCount, repoCalls, branchCount int) int {
+	score := 76 +
+		minInt(8, maxInt(0, stmtCount-3)*2) +
+		minInt(8, maxInt(0, repoCalls-2)*3) +
+		minInt(6, branchCount*3)
+	return clampScore(score)
+}
+
+func scoreSemanticSimplification(patternCount, simplificationGain int, fullWrapper bool) int {
+	score := 72 +
+		minInt(10, maxInt(0, patternCount-1)*4) +
+		minInt(12, maxInt(0, simplificationGain)*3)
+	if fullWrapper {
+		score += 6
+	}
+	return clampScore(score)
+}
+
 func scoreDuplicateOrchestration(clusterSize, branchCount, callSites, similarity int) int {
 	return clampScore(70 + minInt(8, (clusterSize-2)*4) + minInt(8, maxInt(0, branchCount-1)*2) + minInt(6, maxInt(0, callSites-4)) + minInt(10, maxInt(0, similarity-70)/2))
 }
@@ -3464,26 +4219,54 @@ func rulePriority(ruleID string) int {
 	switch ruleID {
 	case "function_hotspot":
 		return 0
-	case "duplicate_orchestration_fingerprint":
+	case "unreachable_private_symbol":
 		return 1
-	case "structural_similarity_module_cluster":
+	case "test_only_helper":
 		return 2
-	case "structural_similarity_cluster":
+	case "stale_export_candidate":
 		return 3
-	case "call_family_module_cluster":
+	case "orphan_file":
 		return 4
-	case "call_family_cluster":
+	case "test_only_file":
 		return 5
-	case "same_file_extraction_candidate":
+	case "stale_package_candidate":
 		return 6
-	case "fan_out_dependency_spread":
+	case "test_only_package":
 		return 7
-	case "complexity_cluster":
+	case "duplicated_error_remap":
 		return 8
-	case "receiver_hotspot":
+	case "preload_after_get_chain":
 		return 9
-	case "god_file":
+	case "post_transaction_preload":
 		return 10
+	case "duplicate_recovery_block":
+		return 11
+	case "repeated_guard_ladder":
+		return 12
+	case "transaction_script_hotspot":
+		return 13
+	case "semantic_simplification_candidate":
+		return 14
+	case "duplicate_orchestration_fingerprint":
+		return 15
+	case "structural_similarity_module_cluster":
+		return 8
+	case "structural_similarity_cluster":
+		return 9
+	case "call_family_module_cluster":
+		return 10
+	case "call_family_cluster":
+		return 11
+	case "same_file_extraction_candidate":
+		return 16
+	case "fan_out_dependency_spread":
+		return 17
+	case "complexity_cluster":
+		return 18
+	case "receiver_hotspot":
+		return 19
+	case "god_file":
+		return 20
 	default:
 		return 10
 	}
@@ -3878,7 +4661,9 @@ func goStmtFingerprint(stmt ast.Stmt, metrics *goOrchestrationMetrics) string {
 		}
 		return "return(" + strings.Join(parts, ",") + ")"
 	case *ast.IfStmt:
-		metrics.BranchCount++
+		if metrics != nil {
+			metrics.BranchCount++
+		}
 		body := goBlockFingerprint(node.Body, metrics)
 		elseShape := ""
 		if node.Else != nil {
@@ -3886,19 +4671,29 @@ func goStmtFingerprint(stmt ast.Stmt, metrics *goOrchestrationMetrics) string {
 		}
 		return "if(" + goExprFingerprint(node.Cond, metrics) + "){" + body + "}" + elseShape
 	case *ast.ForStmt:
-		metrics.BranchCount++
+		if metrics != nil {
+			metrics.BranchCount++
+		}
 		return "for{" + goBlockFingerprint(node.Body, metrics) + "}"
 	case *ast.RangeStmt:
-		metrics.BranchCount++
+		if metrics != nil {
+			metrics.BranchCount++
+		}
 		return "range(" + goExprFingerprint(node.X, metrics) + "){" + goBlockFingerprint(node.Body, metrics) + "}"
 	case *ast.SwitchStmt:
-		metrics.BranchCount++
+		if metrics != nil {
+			metrics.BranchCount++
+		}
 		return "switch{" + goCaseBlockFingerprint(node.Body, metrics) + "}"
 	case *ast.TypeSwitchStmt:
-		metrics.BranchCount++
+		if metrics != nil {
+			metrics.BranchCount++
+		}
 		return "typeswitch{" + goCaseBlockFingerprint(node.Body, metrics) + "}"
 	case *ast.SelectStmt:
-		metrics.BranchCount++
+		if metrics != nil {
+			metrics.BranchCount++
+		}
 		return "select{" + goCaseBlockFingerprint(node.Body, metrics) + "}"
 	case *ast.DeferStmt:
 		return "defer(" + goExprFingerprint(node.Call, metrics) + ")"
@@ -3973,7 +4768,9 @@ func goCaseBlockFingerprint(block *ast.BlockStmt, metrics *goOrchestrationMetric
 func goExprFingerprint(expr ast.Expr, metrics *goOrchestrationMetrics) string {
 	switch node := expr.(type) {
 	case *ast.CallExpr:
-		metrics.CallSiteCount++
+		if metrics != nil {
+			metrics.CallSiteCount++
+		}
 		return goCallFingerprint(node)
 	case *ast.BinaryExpr:
 		return "bin(" + strings.ToLower(node.Op.String()) + "," + goExprFingerprint(node.X, metrics) + "," + goExprFingerprint(node.Y, metrics) + ")"
@@ -4004,6 +4801,437 @@ func goExprFingerprint(expr ast.Expr, metrics *goOrchestrationMetrics) string {
 	default:
 		return fmt.Sprintf("%T", expr)
 	}
+}
+
+type semanticSimplificationCandidate struct {
+	Kind               string
+	PatternIDs         []string
+	OriginalForm       string
+	SimplifiedForm     string
+	OriginalTokenCount int
+	SimplifiedTokens   int
+}
+
+func analyzeGoSemanticSimplification(fn *ast.FuncDecl, fset *token.FileSet, relPath, name string) []finding {
+	candidate := detectGoSemanticSimplification(fn)
+	if candidate == nil {
+		return nil
+	}
+	line := 0
+	if fset != nil && fn != nil {
+		line = fset.Position(fn.Pos()).Line
+	}
+	return []finding{emitSemanticSimplificationFinding(candidate, relPath, name, line, "go")}
+}
+
+func emitSemanticSimplificationFinding(candidate *semanticSimplificationCandidate, relPath, name string, line int, language string) finding {
+	simplificationGain := maxInt(1, candidate.OriginalTokenCount-candidate.SimplifiedTokens)
+	score := scoreSemanticSimplification(len(candidate.PatternIDs), simplificationGain, candidate.Kind == "boolean_return_wrapper")
+	signals := []string{"semantic_simplification"}
+	switch language {
+	case "go":
+		signals = append([]string{"go_ast"}, signals...)
+	case "typescript", "javascript", "python", "elixir":
+		signals = append([]string{"tree_sitter"}, signals...)
+	}
+	return finding{
+		RuleID:            "semantic_simplification_candidate",
+		Category:          "function",
+		Severity:          severityFor(score),
+		Score:             score,
+		Title:             "Function reduces to a much simpler boolean predicate",
+		Detail:            fmt.Sprintf("%s has a deterministic boolean simplification path. The current body collapses to `%s`, which means the extra wrapper logic is carrying noise more than behavior.", name, candidate.SimplifiedForm),
+		SuggestedRefactor: "Collapse the boolean wrapper or redundant predicate logic into the simpler boolean form, then keep any remaining guard logic only when it adds real behavior.",
+		File:              relPath,
+		Line:              line,
+		Symbol:            name,
+		Language:          language,
+		Confidence:        "high",
+		Signals:           signals,
+		Evidence: map[string]any{
+			"simplification_kind":  candidate.Kind,
+			"pattern_ids":          candidate.PatternIDs,
+			"original_form":        skillout.TruncateSingleLine(candidate.OriginalForm, 220),
+			"simplified_form":      candidate.SimplifiedForm,
+			"original_token_count": candidate.OriginalTokenCount,
+			"simplified_tokens":    candidate.SimplifiedTokens,
+			"simplification_gain":  simplificationGain,
+		},
+	}
+}
+
+func detectGoSemanticSimplification(fn *ast.FuncDecl) *semanticSimplificationCandidate {
+	if fn == nil || fn.Body == nil || len(fn.Body.List) == 0 {
+		return nil
+	}
+	if wrapper := detectGoBoolReturnWrapper(fn.Body.List); wrapper != nil {
+		return wrapper
+	}
+	if len(fn.Body.List) != 1 {
+		return nil
+	}
+	ret, ok := fn.Body.List[0].(*ast.ReturnStmt)
+	if !ok || len(ret.Results) != 1 {
+		return nil
+	}
+	expr, lowerPatterns, lowerChanged := lowerGoSemanticBoolExprDetailed(ret.Results[0])
+	if expr == nil {
+		return nil
+	}
+	simplified, patterns, changed := simplifySemanticBoolExpr(expr)
+	patterns = appendUniquePatternStrings(lowerPatterns, patterns...)
+	if !changed && !lowerChanged {
+		return nil
+	}
+	original := "return " + renderGoNode(ret.Results[0])
+	simplifiedText := "return " + renderSemanticBoolExpr(simplified, goSemanticBoolSyntax)
+	if original == simplifiedText {
+		return nil
+	}
+	return &semanticSimplificationCandidate{
+		Kind:               "boolean_expr_identity",
+		PatternIDs:         appendUniquePatternStrings(nil, patterns...),
+		OriginalForm:       original,
+		SimplifiedForm:     simplifiedText,
+		OriginalTokenCount: semanticSourceTokenCount(original),
+		SimplifiedTokens:   semanticSourceTokenCount(simplifiedText),
+	}
+}
+
+func detectGoBoolReturnWrapper(stmts []ast.Stmt) *semanticSimplificationCandidate {
+	if len(stmts) == 0 {
+		return nil
+	}
+	var (
+		cond      ast.Expr
+		invert    bool
+		patternID string
+	)
+	switch len(stmts) {
+	case 1:
+		ifStmt, ok := stmts[0].(*ast.IfStmt)
+		if !ok || ifStmt.Else == nil {
+			return nil
+		}
+		bodyValue, bodyOK := goSingleBlockBooleanReturnValue(ifStmt.Body)
+		elseBlock, elseOK := ifStmt.Else.(*ast.BlockStmt)
+		elseValue, elseReturnOK := goSingleBlockBooleanReturnValue(elseBlock)
+		if !bodyOK || !elseOK || !elseReturnOK || bodyValue == elseValue {
+			return nil
+		}
+		cond = ifStmt.Cond
+		invert = !bodyValue && elseValue
+		if invert {
+			patternID = "inverted_boolean_return_wrapper"
+		} else {
+			patternID = "boolean_return_wrapper"
+		}
+	case 2:
+		ifStmt, ok := stmts[0].(*ast.IfStmt)
+		if !ok || ifStmt.Else != nil {
+			return nil
+		}
+		bodyValue, bodyOK := goSingleBlockBooleanReturnValue(ifStmt.Body)
+		tailValue, tailOK := goBooleanReturnValue(stmts[1])
+		if !bodyOK || !tailOK || bodyValue == tailValue {
+			return nil
+		}
+		cond = ifStmt.Cond
+		invert = !bodyValue && tailValue
+		if invert {
+			patternID = "inverted_boolean_return_wrapper"
+		} else {
+			patternID = "boolean_return_wrapper"
+		}
+	default:
+		return nil
+	}
+	if cond == nil {
+		return nil
+	}
+	simplifiedExpr, lowerPatterns, lowerChanged := lowerGoSemanticBoolExprDetailed(cond)
+	if simplifiedExpr == nil {
+		return nil
+	}
+	patterns := appendUniquePatternStrings([]string{patternID}, lowerPatterns...)
+	if invert {
+		simplifiedExpr = semanticBoolNot(simplifiedExpr)
+	}
+	if expr, exprPatterns, changed := simplifySemanticBoolExpr(simplifiedExpr); changed {
+		simplifiedExpr = expr
+		patterns = append(patterns, exprPatterns...)
+	} else if !lowerChanged && !invert {
+		return nil
+	}
+	original := renderGoStmtList(stmts)
+	simplifiedText := "return " + renderSemanticBoolExpr(simplifiedExpr, goSemanticBoolSyntax)
+	if original == simplifiedText {
+		return nil
+	}
+	return &semanticSimplificationCandidate{
+		Kind:               "boolean_return_wrapper",
+		PatternIDs:         appendUniquePatternStrings(nil, patterns...),
+		OriginalForm:       original,
+		SimplifiedForm:     simplifiedText,
+		OriginalTokenCount: semanticSourceTokenCount(original),
+		SimplifiedTokens:   semanticSourceTokenCount(simplifiedText),
+	}
+}
+
+func renderGoStmtList(stmts []ast.Stmt) string {
+	if len(stmts) == 0 {
+		return ""
+	}
+	parts := make([]string, 0, len(stmts))
+	for _, stmt := range stmts {
+		parts = append(parts, renderGoNode(stmt))
+	}
+	return strings.Join(parts, " ")
+}
+
+func renderGoNode(node any) string {
+	if node == nil {
+		return ""
+	}
+	var buf bytes.Buffer
+	if err := printer.Fprint(&buf, token.NewFileSet(), node); err != nil {
+		return ""
+	}
+	return strings.Join(strings.Fields(buf.String()), " ")
+}
+
+func appendUniquePatternStrings(base []string, values ...string) []string {
+	seen := make(map[string]struct{}, len(base)+len(values))
+	out := make([]string, 0, len(base)+len(values))
+	for _, item := range base {
+		item = strings.TrimSpace(item)
+		if item == "" {
+			continue
+		}
+		if _, ok := seen[item]; ok {
+			continue
+		}
+		seen[item] = struct{}{}
+		out = append(out, item)
+	}
+	for _, item := range values {
+		item = strings.TrimSpace(item)
+		if item == "" {
+			continue
+		}
+		if _, ok := seen[item]; ok {
+			continue
+		}
+		seen[item] = struct{}{}
+		out = append(out, item)
+	}
+	return out
+}
+
+type duplicateRecoveryCandidate struct {
+	Fingerprint      string
+	StartLine        int
+	Lines            []int
+	StatementCount   int
+	ControlTransfers int
+}
+
+func analyzeDuplicateRecoveryBlocks(fn *ast.FuncDecl, fset *token.FileSet, relPath, name string) []finding {
+	groups := findDuplicateRecoveryBlocks(fn, fset)
+	if len(groups) == 0 {
+		return nil
+	}
+	findings := make([]finding, 0, len(groups))
+	for _, group := range groups {
+		score := scoreDuplicateRecoveryBlock(len(group.Lines), group.StatementCount)
+		findings = append(findings, finding{
+			RuleID:            "duplicate_recovery_block",
+			Category:          "function",
+			Severity:          severityFor(score),
+			Score:             score,
+			Title:             "Function repeats the same guarded recovery block",
+			Detail:            fmt.Sprintf("%s repeats a normalized guarded block %d times, which is a strong signal that the recovery or fallback path wants one helper instead of copy-pasted branches.", name, len(group.Lines)),
+			SuggestedRefactor: "Extract the repeated guarded recovery/remap path into a local helper or small policy function, then keep each branch focused on the condition that differs.",
+			File:              relPath,
+			Line:              group.Lines[0],
+			Symbol:            name,
+			Language:          "go",
+			Confidence:        "high",
+			Signals:           []string{"go_ast", "normalized_recovery_block"},
+			Evidence: map[string]any{
+				"normalized_block_hash": hashutil.ShortHash(group.Fingerprint),
+				"duplicate_count":       len(group.Lines),
+				"duplicate_span_lines":  group.Lines,
+				"statement_count":       group.StatementCount,
+				"control_transfers":     group.ControlTransfers,
+			},
+		})
+	}
+	return findings
+}
+
+func findDuplicateRecoveryBlocks(fn *ast.FuncDecl, fset *token.FileSet) []duplicateRecoveryCandidate {
+	if fn == nil || fn.Body == nil || fset == nil {
+		return nil
+	}
+	groups := make(map[string]*duplicateRecoveryCandidate)
+	linesByFingerprint := make(map[string][]int)
+	ast.Inspect(fn.Body, func(n ast.Node) bool {
+		switch node := n.(type) {
+		case *ast.IfStmt:
+			recordDuplicateRecoveryCandidate(groups, linesByFingerprint, blockRecoveryCandidate(node.Body, fset))
+			if block, ok := node.Else.(*ast.BlockStmt); ok {
+				recordDuplicateRecoveryCandidate(groups, linesByFingerprint, blockRecoveryCandidate(block, fset))
+			}
+		}
+		return true
+	})
+	out := make([]duplicateRecoveryCandidate, 0, len(groups))
+	for _, candidate := range groups {
+		if candidate == nil || len(candidate.Fingerprint) == 0 {
+			continue
+		}
+		if candidate.ControlTransfers <= 0 || candidate.StatementCount < 2 {
+			continue
+		}
+		if lines, ok := linesByFingerprint[candidate.Fingerprint]; ok && len(lines) >= 2 {
+			item := *candidate
+			item.Lines = append([]int(nil), lines...)
+			item.StartLine = item.Lines[0]
+			out = append(out, item)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].StartLine != out[j].StartLine {
+			return out[i].StartLine < out[j].StartLine
+		}
+		return out[i].Fingerprint < out[j].Fingerprint
+	})
+	return out
+}
+
+func recordDuplicateRecoveryCandidate(groups map[string]*duplicateRecoveryCandidate, linesByFingerprint map[string][]int, candidate *duplicateRecoveryCandidate) {
+	if groups == nil || candidate == nil || strings.TrimSpace(candidate.Fingerprint) == "" {
+		return
+	}
+	lines := append(linesByFingerprint[candidate.Fingerprint], candidate.StartLine)
+	sort.Ints(lines)
+	linesByFingerprint[candidate.Fingerprint] = lines
+	if existing, ok := groups[candidate.Fingerprint]; ok {
+		existing.ControlTransfers = maxInt(existing.ControlTransfers, candidate.ControlTransfers)
+		existing.StatementCount = maxInt(existing.StatementCount, candidate.StatementCount)
+		return
+	}
+	copyCandidate := *candidate
+	groups[candidate.Fingerprint] = &copyCandidate
+}
+
+func blockRecoveryCandidate(block *ast.BlockStmt, fset *token.FileSet) *duplicateRecoveryCandidate {
+	if block == nil || len(block.List) < 2 {
+		return nil
+	}
+	fingerprint := goBlockFingerprint(block, nil)
+	if strings.TrimSpace(fingerprint) == "" {
+		return nil
+	}
+	if len(tokenizeStructuralFingerprint(fingerprint)) < 3 {
+		return nil
+	}
+	controlTransfers := blockControlTransfers(block)
+	if controlTransfers == 0 {
+		return nil
+	}
+	return &duplicateRecoveryCandidate{
+		Fingerprint:      fingerprint,
+		StartLine:        fset.Position(block.Pos()).Line,
+		StatementCount:   len(block.List),
+		ControlTransfers: controlTransfers,
+	}
+}
+
+func blockControlTransfers(block *ast.BlockStmt) int {
+	if block == nil {
+		return 0
+	}
+	count := 0
+	ast.Inspect(block, func(n ast.Node) bool {
+		switch n.(type) {
+		case *ast.ReturnStmt, *ast.BranchStmt:
+			count++
+		}
+		return true
+	})
+	return count
+}
+
+func scoreDuplicateRecoveryBlock(duplicateCount, stmtCount int) int {
+	score := 74 + minInt(12, maxInt(0, duplicateCount-2)*6) + minInt(8, maxInt(0, stmtCount-2)*2)
+	return clampScore(score)
+}
+
+func applyFocus(items []finding, focus string) []finding {
+	if focus == "" || focus == "all" || len(items) == 0 {
+		return items
+	}
+	filtered := make([]finding, 0, len(items))
+	for _, item := range items {
+		if focusAllowsFinding(item, focus) {
+			filtered = append(filtered, item)
+		}
+	}
+	return filtered
+}
+
+func focusAllowsFinding(item finding, focus string) bool {
+	switch focus {
+	case "slop":
+		return isSlopFinding(item)
+	case "dead":
+		return isDeadFinding(item)
+	default:
+		return true
+	}
+}
+
+func isSlopFinding(item finding) bool {
+	switch item.RuleID {
+	case "duplicate_recovery_block", "duplicated_error_remap", "repeated_guard_ladder", "semantic_simplification_candidate", "preload_after_get_chain", "post_transaction_preload", "transaction_script_hotspot", "duplicate_orchestration_fingerprint", "same_file_extraction_candidate":
+		return true
+	case "function_hotspot":
+		return compositeIncludesSlopRule(item)
+	default:
+		return false
+	}
+}
+
+func isDeadFinding(item finding) bool {
+	switch item.RuleID {
+	case "unreachable_private_symbol", "test_only_helper", "stale_export_candidate", "orphan_file", "test_only_file", "stale_package_candidate", "test_only_package":
+		return true
+	default:
+		return false
+	}
+}
+
+func compositeIncludesSlopRule(item finding) bool {
+	if item.Evidence == nil {
+		return false
+	}
+	switch rules := item.Evidence["rules"].(type) {
+	case []string:
+		for _, ruleID := range rules {
+			if isSlopFinding(finding{RuleID: ruleID}) {
+				return true
+			}
+		}
+	case []any:
+		for _, value := range rules {
+			if ruleID, ok := value.(string); ok && isSlopFinding(finding{RuleID: ruleID}) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func goCallFingerprint(call *ast.CallExpr) string {

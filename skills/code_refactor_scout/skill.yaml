@@ -3,8 +3,8 @@ kind: Skill
 metadata:
   name: code/refactor_scout
   version: 0.1.0
-  description: "Structural refactoring scout using signatures, call extraction, and Go AST metrics"
-  tags: ["code", "refactor", "quality", "structure", "treesitter"]
+  description: "Deterministic refactor scout with index-aware evidence, slop focus, and dead-code candidates"
+  tags: ["code", "refactor", "quality", "structure", "treesitter", "repoindex", "dead-code", "evidence"]
 distribution:
   type: exec
   exec:
@@ -22,9 +22,21 @@ signature:
     - name: language
       type: string
       required: false
-      enum: ["auto", "go", "python", "javascript", "typescript", "elixir"]
+      enum: ["auto", "go", "python", "javascript", "typescript", "elixir", "rust"]
       default: "auto"
       description: "Restrict analysis to one language or auto-detect by extension"
+    - name: focus
+      type: string
+      required: false
+      enum: ["all", "slop", "dead"]
+      default: "all"
+      description: "Optional focus filter for one finding family"
+    - name: view
+      type: string
+      required: false
+      enum: ["raw", "grouped", "entrypoints", "summary"]
+      default: "grouped"
+      description: "Optional presentation view for grouped output lanes; raw findings are still included"
     - name: include_tests
       type: boolean
       required: false
@@ -53,55 +65,168 @@ signature:
     - name: summary
       type: object
       description: "Scan counters and severity totals"
+    - name: presentation
+      type: object
+      description: "Grouped overview and lane summaries for broader scopes"
+    - name: index_mode
+      type: string
+      description: "Whether the run was parser_only or index_backed for the requested scope"
+    - name: snapshot_id
+      type: string
+      description: "Stored snapshot identifier for the analyzed scope when snapshot capture succeeds"
+    - name: snapshot_artifact
+      type: string
+      description: "CAS digest for the stored scope snapshot when available"
+    - name: evidence_artifact
+      type: string
+      description: "CAS digest for persisted hotspot evidence when available"
     - name: signals
       type: object
       description: "Signal families used during the scan"
   help:
-    short: "Surface structural refactoring hotspots from signatures and AST signals."
+    short: "Surface deterministic refactor hotspots, slop patterns, and dead-code candidates."
     long: |
       code/refactor_scout is a read-only analysis skill that ranks likely
-      refactoring hotspots.
+      refactoring hotspots from local structure plus scoped repo-index evidence
+      when the requested path is fresh enough to run index-backed.
+
+      It is the primary deterministic retrieval lane inside the broader
+      refactor workflow:
+      - refactor status decides parser_only vs index_backed mode
+      - refactor snapshot freezes a deterministic scope artifact
+      - refactor deps, changes, and hot add graph/churn context
+      - refactor evidence reads stored scout and snapshot artifacts
+      - refactor advisor runs this scout first, then asks an LLM to rank the
+        returned findings
 
       Current signal sources:
       - Symbol signatures and spans from the existing symbol extractors
-      - Per-symbol call extraction across Go, TypeScript, Python, and Elixir
-      - Tree-sitter-backed extraction for TypeScript, Python, and Elixir when available
+      - Per-symbol call extraction across Go, TypeScript, Python, Elixir, and Rust
+      - Tree-sitter-backed extraction for TypeScript, Python, Elixir, and Rust when available
       - Go AST metrics for stronger function and interface findings
+      - Repoindex-backed reachability, reverse deps, forward deps, and suggested
+        reads when the scope is index_backed
+
+      Current output contract:
+      - data.index_mode reports parser_only or index_backed
+      - data.view reports the requested presentation mode
+      - data.presentation adds grouped overview lanes while preserving the raw
+        data.findings list for compatibility
+      - data.snapshot_id and data.snapshot_artifact identify the captured scope
+      - data.evidence_artifact points at persisted hotspot evidence when emitted
+      - data.signals.evidence_backed tells downstream tooling whether the
+        snapshot/evidence layer completed
+      - function_hotspot evidence now includes opportunity_score,
+        opportunity_bonus, and opportunity_factors for deterministic ranking
+      - when recent diff ranges overlap the hotspot symbol body, the evidence
+        can also include symbol_hot_score, symbol_recent_change_count, and
+        symbol_changed_line_count
+      - hotspot evidence can also include cochange_paths, cochange_count, and
+        cochange_strength when nearby files repeatedly move with the hotspot
+      - hotspot evidence can also include suggested_boundary_kind when the
+        hotspot's rule mix is strong enough to name a likely extraction seam
+      - all findings now also include confidence_score and confidence_factors in
+        evidence so trust can be filtered deterministically without relying on
+        the coarse high|medium|low label alone
+      - parser_only runs still attach snapshot and churn evidence; index_backed
+        runs additionally attach repo-graph evidence and rerank function_hotspot
+        findings with dependency and hot-score factors
 
       Language scope is intentionally strict:
       - File targets may use language=auto
       - Directory targets must resolve to exactly one language in auto mode
       - Mixed-language directories require an explicit --language selection
 
-      Current rule families:
-      - long_parameter_list
-      - boolean_parameter
-      - wide_return_tuple
-      - oversized_function
-      - high_cyclomatic_complexity
-      - deep_nesting
-      - fan_out_dependency_spread
-      - duplicate_orchestration_fingerprint
-      - structural_similarity_cluster
-      - structural_similarity_module_cluster
-      - call_family_cluster
-      - call_family_module_cluster
-      - same_file_extraction_candidate
-      - wide_interface
-      - receiver_hotspot
-      - god_file
+      Focus modes:
+      - all: return the full hotspot surface
+      - slop: emphasize duplicated recovery, repeated guards, duplicate
+        orchestration, and closely related extraction seams
+      - dead: return conservative dead-code candidates. Treat this as advisory
+        and trust it only when the scope is fully index_backed. The dead-code
+        lane now follows private method chains and suppresses method candidates
+        when repoindex marks the containing file as an interface/embedding root.
+        Broad `all` runs now suppress child dead-code rows when a file or
+        package-level dead family already summarizes the same seam; `focus=dead`
+        keeps the full detail. For Elixir, dead-code reachability now follows
+        local `defp` helper chains, treats framework callbacks from known
+        behaviours and `use` targets *(Application, GenServer, Supervisor, Plug,
+        Phoenix LiveView/Channel, Ecto types)* as structural roots, and avoids
+        misclassifying same-name type/function pairs like `@type config` versus
+        `defp config`. Python dead-code analysis is now also available on fully
+        `index_backed` scopes after building repoindex with `--python`; the
+        first version relies on module/file reachability plus same-file call
+        edges from extracted Python calls, so framework-specific roots may
+        still lag Go. Rust dead-code analysis is now also available on fully
+        `index_backed` scopes after building repoindex with `--rust`; the
+        first version uses tree-sitter-backed Rust symbols when available plus
+        same-file call edges, so crate-wide module/use reachability still lags
+        Go.
 
-      The scout is still local and deterministic. It uses extractor-level call
-      relationships rather than repoindex fan-in/fan-out, so current dependency
-      spread signals are strongest in Go and best-effort in TypeScript, Python,
-      and Elixir. Go duplicate-orchestration findings now use deterministic
-      structural similarity rather than exact fingerprint equality, and cluster
-      findings are classified into seam types such as workflow abstractions and
-      thin wrapper API layers from structural metrics.
+      Current rule families:
+      - dead-code candidates:
+        unreachable_private_symbol, test_only_helper, stale_export_candidate,
+        orphan_file, test_only_file, stale_package_candidate,
+        test_only_package
+      - slop and hotspot signals:
+        duplicate_recovery_block, duplicated_error_remap, repeated_guard_ladder,
+        semantic_simplification_candidate,
+        preload_after_get_chain, post_transaction_preload, transaction_script_hotspot,
+        duplicate_orchestration_fingerprint, same_file_extraction_candidate,
+        fan_out_dependency_spread, function_hotspot
+      - signature and size signals:
+        long_parameter_list, boolean_parameter, wide_return_tuple,
+        oversized_function, high_cyclomatic_complexity, deep_nesting
+      - file/module seams:
+        structural_similarity_cluster, structural_similarity_module_cluster,
+        call_family_cluster, call_family_module_cluster, wide_interface,
+        receiver_hotspot, god_file
+
+      The scout remains deterministic and local-first. Go currently has the
+      strongest AST support. TypeScript and Elixir now have parser-backed slop
+      rules for repeated guarded recovery and error-remap patterns. Python and
+      Rust now also support repoindex-backed refactor status and dead-code
+      analysis on indexed scopes. Dead-code findings require repoindex coverage and use
+      conservative reachability
+      rather than keyword heuristics. Go dead-code analysis now includes
+      private methods and structural roots from `IMPLEMENTS` / `EMBEDS`
+      file edges to reduce false positives around interface-backed dispatch.
+      Go repoindex also records file-level reference edges from package-scope
+      initializers, which keeps Cobra-style `RunE: runFoo` and similar
+      registration tables from being treated as dead. Elixir call extraction now
+      includes local helper calls as well as module references, which materially
+      improves dead-code reachability for `defp` helper chains in fully indexed
+      scopes. Elixir dead-code analysis now also keeps common framework callback
+      implementations live and disambiguates same-name non-function symbols from
+      real functions before emitting candidates. TypeScript repoindex now also
+      emits same-file symbol `REFERS_TO` edges for bare identifier usage inside
+      symbol bodies, which keeps reducer-style and callback-style helper chains
+      from being misclassified as dead just because they were passed by
+      reference instead of called directly.
+
+      Monorepo indexing guidance:
+      - prefer indexing the smallest workspace root that contains the app or
+        package you want to refactor
+      - for Python package trees, build repoindex with `--python` on the
+        package root or scripts root you actually want to analyze instead of
+        indexing unrelated monorepo siblings
+      - for Rust crates, build repoindex with `--rust` on the crate root you
+        actually want to analyze instead of indexing unrelated monorepo siblings
+      - for TypeScript and Elixir monorepos, that usually means indexing the
+        app root *(for example `praze/`, `apps/praze-api/`, or
+        `apps/praze-presence/`)* rather than the repo root
+      - nested workspace indexing now falls back to workspace-local file
+        discovery when a parent repo's gitignore would otherwise hide real app
+        source files
+      - rerun `refactor status` after indexing; `focus=dead` should be trusted
+        only when the target scope is fully `index_backed`
 
       Example commands:
         agentctl run code/refactor_scout --input '{"path":"./internal","rule_set":"default"}'
         agentctl run code/refactor_scout --input '{"path":"./internal/indexing","language":"go","min_score":60}'
+        agentctl run code/refactor_scout --input '{"path":"./crates/my-crate/src","language":"rust","focus":"dead"}'
+        agentctl run code/refactor_scout --input '{"path":"./internal","language":"go","focus":"slop"}'
+        agentctl run code/refactor_scout --input '{"path":"./internal/actor","language":"go","focus":"dead"}'
+        agentctl run code/refactor_scout --input '{"path":"./internal/actor","language":"go","focus":"slop","min_score":80,"max_results":8}'
         agentctl skills run code/refactor_scout --path ./internal --rule_set aggressive
     workflows:
       - id: go-hotspots
@@ -110,6 +235,26 @@ signature:
           path: "./internal"
           language: "go"
           rule_set: "default"
+      - id: slop-scan
+        description: "Narrow the scout output toward duplicated recovery and orchestration cleanup"
+        example_input:
+          path: "./internal/actor"
+          language: "go"
+          focus: "slop"
+          min_score: 75
+      - id: dead-code-candidates
+        description: "Find conservative dead-code candidates on a fully index-backed scope"
+        example_input:
+          path: "./internal/actor"
+          language: "go"
+          focus: "dead"
+      - id: rust-dead-code-candidates
+        description: "Find conservative Rust dead-code candidates on a fully index-backed crate scope"
+        example_input:
+          path: "./crates/my-crate/src"
+          language: "rust"
+          focus: "dead"
+          min_score: 0
       - id: mixed-signature-scan
         description: "Run a signature-first scan across supported languages"
         example_input:

@@ -22,7 +22,7 @@ Current implementation-reference docs to prefer:
 - [docs/architecture/context-architecture.md](./context-architecture.md)
 - [docs/architecture/jido-hybrid-runtime.md](./jido-hybrid-runtime.md)
 - [docs/architecture/auth-identity.md](./auth-identity.md)
-- [docs/kubernetes.md](../kubernetes.md)
+- [docs/guides/kubernetes.md](../guides/kubernetes.md)
 - [docs/architecture/chat-platform-adapter.md](./chat-platform-adapter.md)
 - [docs/architecture/kubernetes-runtime.md](./kubernetes-runtime.md)
 - [docs/architecture/postgres-storage.md](./postgres-storage.md)

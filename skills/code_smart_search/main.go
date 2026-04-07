@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillerr"
@@ -34,6 +35,7 @@ type Input struct {
 	Question      string   `json:"question"`
 	Sources       []string `json:"sources"`
 	RepoIndexMode string   `json:"repo_index_mode,omitempty"` // off, search, dag
+	InlineMode    string   `json:"inline_mode,omitempty"`
 	Limits        struct {
 		MaxCandidates   int `json:"max_candidates"`
 		MaxSnippets     int `json:"max_snippets"`
@@ -42,10 +44,14 @@ type Input struct {
 }
 
 type Output struct {
-	Summary        Summary           `json:"summary"`
-	Candidates     []CandidateOutput `json:"candidates"`
-	SnippetsInline []json.RawMessage `json:"snippets_inline"`
-	Artifact       string            `json:"artifact,omitempty"`
+	Summary         Summary           `json:"summary"`
+	InlineMode      string            `json:"inline_mode,omitempty"`
+	Candidates      []CandidateOutput `json:"candidates"`
+	CandidatesTotal int               `json:"candidates_total,omitempty"`
+	SnippetsInline  []json.RawMessage `json:"snippets_inline"`
+	SnippetsTotal   int               `json:"snippets_total,omitempty"`
+	Truncated       bool              `json:"truncated,omitempty"`
+	Artifact        string            `json:"artifact,omitempty"`
 }
 
 type Summary struct {
@@ -70,7 +76,19 @@ type ExtractResult struct {
 	SnippetsEmitted int
 	SnippetsInline  []json.RawMessage
 	Artifact        string
+	Truncated       bool
 }
+
+type InlineMode string
+
+const (
+	InlineModeAuto           InlineMode = "auto"
+	InlineModeFull           InlineMode = "full"
+	InlineModePreview        InlineMode = "preview"
+	InlineModeArtifactOnly   InlineMode = "artifact_only"
+	defaultPreviewCandidates            = 12
+	defaultPreviewSnippets              = 12
+)
 
 func main() {
 	skillmain.Main(Command, run)
@@ -115,8 +133,11 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 				DurationMS:            time.Since(start).Milliseconds(),
 				CandidateGenerationMS: candidateDuration.Milliseconds(),
 			},
-			Candidates:     []CandidateOutput{},
-			SnippetsInline: []json.RawMessage{},
+			InlineMode:      string(InlineModeFull),
+			Candidates:      []CandidateOutput{},
+			CandidatesTotal: 0,
+			SnippetsInline:  []json.RawMessage{},
+			SnippetsTotal:   0,
 		})
 	}
 
@@ -126,6 +147,11 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 		return skillerr.WrapRuntime("collect evidence", err)
 	}
 	snippetDuration := time.Since(snippetStart)
+
+	inlineMode, err := parseInlineMode(in.InlineMode)
+	if err != nil {
+		return err
+	}
 
 	output := Output{
 		Summary: Summary{
@@ -137,26 +163,87 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 			CandidateGenerationMS: candidateDuration.Milliseconds(),
 			SnippetExtractionMS:   snippetDuration.Milliseconds(),
 		},
-		Candidates:     candidates,
-		SnippetsInline: extractResult.SnippetsInline,
-		Artifact:       extractResult.Artifact,
+		Candidates:      candidates,
+		CandidatesTotal: len(candidates),
+		SnippetsInline:  extractResult.SnippetsInline,
+		SnippetsTotal:   extractResult.SnippetsEmitted,
+		Artifact:        extractResult.Artifact,
+		Truncated:       extractResult.Truncated,
 	}
+	output = applySmartSearchInlineMode(output, inlineMode)
 
 	return skillout.Emit(rc, Command, output)
 }
 
+func parseInlineMode(value string) (InlineMode, error) {
+	switch InlineMode(strings.ToLower(strings.TrimSpace(value))) {
+	case "", InlineModeAuto:
+		return InlineModeAuto, nil
+	case InlineModeFull:
+		return InlineModeFull, nil
+	case InlineModePreview:
+		return InlineModePreview, nil
+	case InlineModeArtifactOnly:
+		return InlineModeArtifactOnly, nil
+	default:
+		return InlineModeAuto, skillerr.Validationf("invalid inline_mode: %s (valid: auto, full, preview, artifact_only)", strings.TrimSpace(value))
+	}
+}
+
+func applySmartSearchInlineMode(out Output, requested InlineMode) Output {
+	hasArtifact := strings.TrimSpace(out.Artifact) != ""
+	resolved := requested
+	if resolved == InlineModeAuto {
+		if hasArtifact || len(out.Candidates) > defaultPreviewCandidates || len(out.SnippetsInline) > defaultPreviewSnippets {
+			resolved = InlineModePreview
+		} else {
+			resolved = InlineModeFull
+		}
+	}
+	if resolved == InlineModeArtifactOnly && !hasArtifact {
+		resolved = InlineModePreview
+	}
+	out.InlineMode = string(resolved)
+
+	switch resolved {
+	case InlineModeFull:
+		return out
+	case InlineModePreview:
+		if len(out.Candidates) > defaultPreviewCandidates {
+			out.Candidates = append([]CandidateOutput(nil), out.Candidates[:defaultPreviewCandidates]...)
+			out.Truncated = true
+		}
+		if len(out.SnippetsInline) > defaultPreviewSnippets {
+			out.SnippetsInline = append([]json.RawMessage(nil), out.SnippetsInline[:defaultPreviewSnippets]...)
+			out.Truncated = true
+		}
+		return out
+	case InlineModeArtifactOnly:
+		out.Candidates = nil
+		out.SnippetsInline = nil
+		out.Truncated = true
+		return out
+	default:
+		return out
+	}
+}
+
 func searchCode(ctx context.Context, rc *skillmain.RunContext, in Input) ([]CandidateOutput, []codecontext.Candidate, map[string]int, error) {
 	var embedder semantic.EmbeddingProvider
+	voyageKey := os.Getenv("VOYAGE_API_KEY")
+	geminiKey := os.Getenv("GEMINI_API_KEY")
 	for _, src := range in.Sources {
 		if src == "semantic" {
-			provider, err := semantic.NewProviderForScope(
-				semantic.ScopeSymbols,
-				rc.Config,
-				semantic.WithVoyageKey(os.Getenv("VOYAGE_API_KEY")),
-				semantic.WithGeminiKey(os.Getenv("GEMINI_API_KEY")),
-			)
-			if err == nil {
-				embedder = provider
+			if semantic.DetectProviderForConfig(rc.Config, voyageKey, geminiKey) != "" {
+				provider, err := semantic.NewProviderForScope(
+					semantic.ScopeSymbols,
+					rc.Config,
+					semantic.WithVoyageKey(voyageKey),
+					semantic.WithGeminiKey(geminiKey),
+				)
+				if err == nil {
+					embedder = provider
+				}
 			}
 			break
 		}
@@ -216,8 +303,12 @@ func collectEvidence(ctx context.Context, rc *skillmain.RunContext, in Input, cc
 		return nil, err
 	}
 
-	previews := make([]json.RawMessage, 0, len(output.SnippetsInline))
-	for _, preview := range output.SnippetsInline {
+	inlinePreviews := output.SnippetsInline
+	if artifactPayload != nil && len(inlinePreviews) == 0 && len(evidence.Snippets) > 0 {
+		inlinePreviews = codecontext.MakePreviews(evidence.Snippets, 512)
+	}
+	previews := make([]json.RawMessage, 0, len(inlinePreviews))
+	for _, preview := range inlinePreviews {
 		b, err := json.Marshal(preview)
 		if err != nil {
 			return nil, skillerr.WrapRuntime("marshal snippet preview", err)
@@ -239,5 +330,6 @@ func collectEvidence(ctx context.Context, rc *skillmain.RunContext, in Input, cc
 		SnippetsEmitted: len(evidence.Snippets),
 		SnippetsInline:  previews,
 		Artifact:        artifactDigest,
+		Truncated:       output.Truncated || artifactPayload != nil,
 	}, nil
 }

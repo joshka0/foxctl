@@ -44,7 +44,7 @@ func TestClampAdvisorOutputFiltersUnknownCandidates(t *testing.T) {
 }
 
 func TestBuildAdvisorUserPrompt(t *testing.T) {
-	prompt := buildAdvisorUserPrompt(input{Path: "./internal", Language: "go", RuleSet: "default", ShortlistSize: 3}, []candidateBrief{
+	prompt := buildAdvisorUserPrompt(input{Path: "./internal", Language: "go", Focus: "slop", RuleSet: "default", ShortlistSize: 3}, []candidateBrief{
 		{File: "internal/foo.go", Symbol: "Foo", Score: 90, RuleID: "function_hotspot"},
 	})
 	if prompt == "" {
@@ -55,6 +55,9 @@ func TestBuildAdvisorUserPrompt(t *testing.T) {
 	}
 	if !strings.Contains(prompt, "internal/foo.go") {
 		t.Fatalf("prompt missing candidate file: %q", prompt)
+	}
+	if !strings.Contains(prompt, "\"focus\": \"slop\"") {
+		t.Fatalf("prompt missing focus: %q", prompt)
 	}
 }
 

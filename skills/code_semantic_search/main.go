@@ -80,6 +80,26 @@ const (
 	RRFConstant            = 60 // Standard RRF constant
 )
 
+type InlineMode string
+
+const (
+	InlineModeAuto         InlineMode = "auto"
+	InlineModeFull         InlineMode = "full"
+	InlineModePreview      InlineMode = "preview"
+	InlineModeArtifactOnly InlineMode = "artifact_only"
+)
+
+const (
+	DefaultPreviewResults          = 8
+	DefaultPreviewCandidateBundles = 6
+	DefaultPreviewContextHints     = 3
+	DefaultPreviewTimelines        = 2
+	DefaultPreviewTimelineChunks   = 3
+	DefaultPreviewTimelineLearns   = 3
+	DefaultPreviewRollupItems      = 5
+	DefaultPreviewTreeTextRunes    = 4000
+)
+
 // PageRank scoring weights (from plan: 0.50*Similarity + 0.30*PageRank + 0.20*Connection).
 const (
 	WeightSimilarity = 0.50
@@ -123,6 +143,7 @@ type Input struct {
 	Summarize      bool     `json:"summarize,omitempty"`       // Send results to LLM for synthesis
 	SummarizeModel string   `json:"summarize_model,omitempty"` // Override default LLM model
 	Format         string   `json:"format,omitempty"`          // Output format: "json" (default), "tree"
+	InlineMode     string   `json:"inline_mode,omitempty"`     // auto, full, preview, artifact_only
 
 	// Remote/cross-workspace options (requires Turso)
 	Remote     bool     `json:"remote,omitempty"`     // Use remote Turso database
@@ -153,15 +174,22 @@ type semanticSearchPolicy struct {
 
 // Output is the JSON output structure for code/semantic_search results.
 type Output struct {
-	Query            string                `json:"query"`
-	Results          []Result              `json:"results"`
-	CandidateBundles []CandidateBundle     `json:"candidate_bundles,omitempty"`
-	ContextHints     []ContextHint         `json:"context_hints,omitempty"`
-	Timelines        []SessionTimeline     `json:"timelines,omitempty"` // Present when timeline=true
-	Stats            SearchStats           `json:"stats"`
-	Summary          *SynthesisSummary     `json:"summary,omitempty"`   // Present when summarize=true
-	TreeText         string                `json:"tree_text,omitempty"` // Present when format=tree
-	Tree             *retrieval.TreeOutput `json:"tree,omitempty"`      // Structured tree output when format=tree
+	Query                 string                `json:"query"`
+	InlineMode            string                `json:"inline_mode,omitempty"`
+	Results               []Result              `json:"results"`
+	ResultsTotal          int                   `json:"results_total,omitempty"`
+	CandidateBundles      []CandidateBundle     `json:"candidate_bundles,omitempty"`
+	CandidateBundlesTotal int                   `json:"candidate_bundles_total,omitempty"`
+	ContextHints          []ContextHint         `json:"context_hints,omitempty"`
+	ContextHintsTotal     int                   `json:"context_hints_total,omitempty"`
+	Timelines             []SessionTimeline     `json:"timelines,omitempty"` // Present when timeline=true
+	TimelinesTotal        int                   `json:"timelines_total,omitempty"`
+	Stats                 SearchStats           `json:"stats"`
+	Summary               *SynthesisSummary     `json:"summary,omitempty"`             // Present when summarize=true
+	TreeText              string                `json:"tree_text,omitempty"`           // Present when format=tree
+	TreeTextTruncated     bool                  `json:"tree_text_truncated,omitempty"` // Present when preview truncates tree text
+	Tree                  *retrieval.TreeOutput `json:"tree,omitempty"`                // Structured tree output when format=tree
+	Artifact              string                `json:"artifact,omitempty"`            // CAS artifact for full output when inline result is previewed
 }
 
 // SynthesisSummary contains the LLM-generated synthesis of search results.
@@ -280,6 +308,28 @@ func main() {
 	))
 }
 
+func parseInlineMode(value string) (InlineMode, error) {
+	switch InlineMode(strings.ToLower(strings.TrimSpace(value))) {
+	case "", InlineModeAuto:
+		return InlineModeAuto, nil
+	case InlineModeFull:
+		return InlineModeFull, nil
+	case InlineModePreview:
+		return InlineModePreview, nil
+	case InlineModeArtifactOnly:
+		return InlineModeArtifactOnly, nil
+	default:
+		return InlineModeAuto, skillerr.Validationf("invalid inline_mode: %s (valid: auto, full, preview, artifact_only)", strings.TrimSpace(value))
+	}
+}
+
+func semanticPreviewResultsLimit(rc *skillmain.RunContext) int {
+	if rc != nil && rc.MaxPreview > 0 {
+		return rc.MaxPreview
+	}
+	return DefaultPreviewResults
+}
+
 // run orchestrates unified semantic search across multiple data sources.
 //
 // Index:
@@ -330,7 +380,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 		if err != nil {
 			return err
 		}
-		return skillout.Emit(rc, Command, out)
+		return emitSemanticSearchOutput(ctx, rc, &in, out)
 	}
 
 	// Validate scope values
@@ -359,7 +409,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 		return err
 	}
 
-	return skillout.Emit(rc, Command, out)
+	return emitSemanticSearchOutput(ctx, rc, &in, out)
 }
 
 // search performs the core search logic with parallel source queries and result fusion.
@@ -859,6 +909,199 @@ func search(ctx context.Context, rc *skillmain.RunContext, in *Input, voyageKey,
 	return out, nil
 }
 
+func estimateSemanticOutputSize(out *Output) int {
+	payload, err := json.Marshal(out)
+	if err != nil {
+		return 0
+	}
+	return len(payload)
+}
+
+func shouldPreviewSemanticOutput(rc *skillmain.RunContext, out *Output) bool {
+	if out == nil {
+		return false
+	}
+	resultsLimit := semanticPreviewResultsLimit(rc)
+	if len(out.Results) > resultsLimit {
+		return true
+	}
+	if len(out.CandidateBundles) > DefaultPreviewCandidateBundles {
+		return true
+	}
+	if len(out.ContextHints) > DefaultPreviewContextHints {
+		return true
+	}
+	if len(out.Timelines) > DefaultPreviewTimelines {
+		return true
+	}
+	if len([]rune(out.TreeText)) > DefaultPreviewTreeTextRunes {
+		return true
+	}
+	if out.Tree != nil && (out.Tree.Stats.TotalFiles > resultsLimit || out.Tree.Stats.TotalDirectories > DefaultPreviewCandidateBundles) {
+		return true
+	}
+	return rc != nil && rc.ShouldTruncate(estimateSemanticOutputSize(out))
+}
+
+func ensureSemanticSearchArtifact(ctx context.Context, rc *skillmain.RunContext, out *Output) (*skillmain.Artifact, error) {
+	if rc == nil || rc.CASStore == nil || out == nil {
+		return nil, nil
+	}
+	artifact, err := skillmain.PersistJSON(ctx, rc, out, "code_semantic_search")
+	if err != nil {
+		return nil, skillerr.WrapRuntime("persist semantic_search output to CAS", err)
+	}
+	return &artifact, nil
+}
+
+func truncateTimelineRollup(rollup *TimelineRollup) *TimelineRollup {
+	if rollup == nil {
+		return nil
+	}
+	out := *rollup
+	if len(out.SummaryLines) > DefaultPreviewRollupItems {
+		out.SummaryLines = append([]string(nil), out.SummaryLines[:DefaultPreviewRollupItems]...)
+	}
+	if len(out.Tools) > DefaultPreviewRollupItems {
+		out.Tools = append([]string(nil), out.Tools[:DefaultPreviewRollupItems]...)
+	}
+	if len(out.Files) > DefaultPreviewRollupItems {
+		out.Files = append([]string(nil), out.Files[:DefaultPreviewRollupItems]...)
+	}
+	if len(out.Errors) > DefaultPreviewRollupItems {
+		out.Errors = append([]string(nil), out.Errors[:DefaultPreviewRollupItems]...)
+	}
+	if len(out.Decisions) > DefaultPreviewRollupItems {
+		out.Decisions = append([]string(nil), out.Decisions[:DefaultPreviewRollupItems]...)
+	}
+	if len(out.Gotchas) > DefaultPreviewRollupItems {
+		out.Gotchas = append([]string(nil), out.Gotchas[:DefaultPreviewRollupItems]...)
+	}
+	return &out
+}
+
+func previewSemanticTimelines(timelines []SessionTimeline) []SessionTimeline {
+	if len(timelines) == 0 {
+		return nil
+	}
+	limit := DefaultPreviewTimelines
+	if len(timelines) < limit {
+		limit = len(timelines)
+	}
+	out := make([]SessionTimeline, 0, limit)
+	for _, timeline := range timelines[:limit] {
+		copyTimeline := timeline
+		if len(copyTimeline.ChunkSummaries) > DefaultPreviewTimelineChunks {
+			copyTimeline.ChunkSummaries = append([]TimelineChunk(nil), copyTimeline.ChunkSummaries[:DefaultPreviewTimelineChunks]...)
+		}
+		if len(copyTimeline.Learnings) > DefaultPreviewTimelineLearns {
+			copyTimeline.Learnings = append([]TimelineLearning(nil), copyTimeline.Learnings[:DefaultPreviewTimelineLearns]...)
+		}
+		copyTimeline.Rollup = truncateTimelineRollup(copyTimeline.Rollup)
+		out = append(out, copyTimeline)
+	}
+	return out
+}
+
+func buildSemanticSearchPreview(out *Output, mode InlineMode, resultsLimit int) *Output {
+	if out == nil {
+		return nil
+	}
+	preview := *out
+	preview.InlineMode = string(mode)
+	preview.ResultsTotal = len(out.Results)
+	preview.CandidateBundlesTotal = len(out.CandidateBundles)
+	preview.ContextHintsTotal = len(out.ContextHints)
+	preview.TimelinesTotal = len(out.Timelines)
+
+	switch mode {
+	case InlineModeArtifactOnly:
+		preview.Results = nil
+		preview.CandidateBundles = nil
+		preview.ContextHints = nil
+		preview.Timelines = nil
+		preview.Tree = nil
+		preview.TreeTextTruncated = out.TreeText != ""
+		preview.TreeText = ""
+		return &preview
+	case InlineModePreview:
+		if len(preview.Results) > resultsLimit {
+			preview.Results = append([]Result(nil), preview.Results[:resultsLimit]...)
+		} else {
+			preview.Results = append([]Result(nil), preview.Results...)
+		}
+		for i := range preview.Results {
+			preview.Results[i].Timeline = nil
+		}
+		if len(preview.CandidateBundles) > DefaultPreviewCandidateBundles {
+			preview.CandidateBundles = append([]CandidateBundle(nil), preview.CandidateBundles[:DefaultPreviewCandidateBundles]...)
+		} else {
+			preview.CandidateBundles = append([]CandidateBundle(nil), preview.CandidateBundles...)
+		}
+		if len(preview.ContextHints) > DefaultPreviewContextHints {
+			preview.ContextHints = append([]ContextHint(nil), preview.ContextHints[:DefaultPreviewContextHints]...)
+		} else {
+			preview.ContextHints = append([]ContextHint(nil), preview.ContextHints...)
+		}
+		preview.Timelines = previewSemanticTimelines(preview.Timelines)
+		preview.Tree = nil
+		if len([]rune(preview.TreeText)) > DefaultPreviewTreeTextRunes {
+			preview.TreeText = skillout.TruncateRunes(preview.TreeText, DefaultPreviewTreeTextRunes)
+			preview.TreeTextTruncated = true
+		}
+		return &preview
+	default:
+		preview.InlineMode = string(InlineModeFull)
+		preview.TreeTextTruncated = false
+		return &preview
+	}
+}
+
+func emitSemanticSearchOutput(ctx context.Context, rc *skillmain.RunContext, in *Input, out *Output) error {
+	if out == nil {
+		return skillout.Emit(rc, Command, map[string]any{})
+	}
+
+	requestedMode, err := parseInlineMode(in.InlineMode)
+	if err != nil {
+		return err
+	}
+
+	resolvedMode := requestedMode
+	switch requestedMode {
+	case InlineModeArtifactOnly:
+		if rc == nil || rc.CASStore == nil {
+			resolvedMode = InlineModePreview
+		}
+	case InlineModeAuto:
+		if shouldPreviewSemanticOutput(rc, out) {
+			resolvedMode = InlineModePreview
+		} else {
+			resolvedMode = InlineModeFull
+		}
+	}
+
+	if resolvedMode == InlineModeFull {
+		out.InlineMode = string(InlineModeFull)
+		out.TreeTextTruncated = false
+		return skillout.Emit(rc, Command, out)
+	}
+
+	artifact, err := ensureSemanticSearchArtifact(ctx, rc, out)
+	if err != nil {
+		return err
+	}
+	if resolvedMode == InlineModeArtifactOnly && artifact == nil {
+		resolvedMode = InlineModePreview
+	}
+
+	preview := buildSemanticSearchPreview(out, resolvedMode, semanticPreviewResultsLimit(rc))
+	if artifact != nil {
+		preview.Artifact = artifact.Digest
+	}
+	return skillout.Emit(rc, Command, preview)
+}
+
 // sourceResults holds results from a single search source with timing and error information.
 type sourceResults struct {
 	source  string
@@ -878,23 +1121,7 @@ type scopedEmbeddings struct {
 }
 
 func detectEmbeddingProviderName(cfg config.Config, voyageKey, geminiKey string) string {
-	provider := strings.ToLower(strings.TrimSpace(cfg.Embedding.Provider))
-	switch provider {
-	case "openai_compat", "openai-compatible", "lmstudio":
-		return "openai_compat"
-	case "voyage", "gemini":
-		return provider
-	}
-	if strings.TrimSpace(cfg.Embedding.BaseURL) != "" {
-		return "openai_compat"
-	}
-	if voyageKey != "" {
-		return "voyage"
-	}
-	if geminiKey != "" {
-		return "gemini"
-	}
-	return ""
+	return semantic.DetectProviderForConfig(cfg, voyageKey, geminiKey)
 }
 
 func noEmbeddingHint(cfg config.Config) string {

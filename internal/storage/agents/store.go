@@ -35,6 +35,7 @@ type Store interface {
 	UpdateConversationID(ctx context.Context, id, conversationID string) error // Link agent to conversation
 	UpdateMemoryScope(ctx context.Context, id string, scope agent.MemoryScope) error
 	UpdateMemoryRetention(ctx context.Context, id string, retention agent.MemoryRetention) error
+	UpdateTerminalBinding(ctx context.Context, id string, binding agent.TerminalBinding) error
 }
 
 type sqlStore struct {
@@ -49,7 +50,7 @@ type rowScanner interface {
 const agentSelectColumns = `
 		id, parent_id, ns, workspace_root, workspace_source, name, slug, role, prompt, skills_allow, policy, share_bb, state, created_at, heartbeat_at,
 		llm_provider, llm_model, llm_api_key, llm_base_url, llm_auth_mode, llm_auth_header, llm_auth_prefix, exec_mode, execution_layer,
-		max_iterations, max_auto_turns, think_interval, conversation_id, memory_scope, memory_retention, sandbox_provider, sandbox_id, repo_url, repo_ref`
+		max_iterations, max_auto_turns, think_interval, conversation_id, memory_scope, memory_retention, sandbox_provider, sandbox_id, repo_url, repo_ref, terminal_binding`
 
 // Open opens the agents store rooted at the given storage root directory.
 // The database driver is selected via the dbdriver env var conventions (e.g., AGENTCTL_AGENTS_DB_DRIVER).
@@ -99,18 +100,18 @@ func (s *sqlStore) Create(ctx context.Context, a agent.Agent) error {
 		INSERT INTO agents (
 			id, parent_id, ns, workspace_root, workspace_source, name, slug, role, prompt, skills_allow, policy, share_bb, state, created_at, heartbeat_at,
 			llm_provider, llm_model, llm_api_key, llm_base_url, llm_auth_mode, llm_auth_header, llm_auth_prefix, exec_mode, execution_layer,
-			max_iterations, max_auto_turns, think_interval, memory_scope, memory_retention, sandbox_provider, sandbox_id, repo_url, repo_ref
+			max_iterations, max_auto_turns, think_interval, memory_scope, memory_retention, sandbox_provider, sandbox_id, repo_url, repo_ref, terminal_binding
 		)
 		VALUES (
 			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
 			$16, $17, $18, $19, $20, $21, $22, $23, $24,
-			$25, $26, $27, $28, $29, $30, $31, $32, $33
+			$25, $26, $27, $28, $29, $30, $31, $32, $33, $34
 		)`,
 		a.ID, a.ParentID, a.Namespace, a.WorkspaceRoot, a.WorkspaceSource, a.Name, slugVal, a.Role, a.Prompt, string(skillsJSON), string(policyJSON), a.ShareBB, a.State,
 		sqlutil.FormatTimestamp(a.CreatedAt), sqlutil.FormatTimestamp(a.HeartbeatAt),
 		a.LLMProvider, a.LLMModel, a.LLMAPIKey, a.LLMBaseURL, a.LLMAuthMode, a.LLMAuthHeader, a.LLMAuthPrefix,
 		string(a.ExecMode), string(agent.NormalizeExecutionLayer(a.ExecutionLayer)), a.MaxIterations, a.MaxAutoTurns, a.ThinkInterval, string(memoryScope), string(memoryRetention),
-		a.SandboxProvider, a.SandboxID, a.RepoURL, a.RepoRef)
+		a.SandboxProvider, a.SandboxID, a.RepoURL, a.RepoRef, marshalTerminalBinding(a.TerminalBinding))
 	if err != nil {
 		return fmt.Errorf("agents: create: %w", err)
 	}
@@ -364,6 +365,22 @@ func (s *sqlStore) UpdateMemoryRetention(ctx context.Context, id string, retenti
 	return nil
 }
 
+func (s *sqlStore) UpdateTerminalBinding(ctx context.Context, id string, binding agent.TerminalBinding) error {
+	res, err := s.db.ExecContext(ctx, `
+		UPDATE agents SET terminal_binding = $1 WHERE id = $2 AND deleted_at IS NULL`, marshalTerminalBinding(binding), id)
+	if err != nil {
+		return fmt.Errorf("agents: update terminal binding: %w", err)
+	}
+	rows, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("agents: update terminal binding rows affected: %w", err)
+	}
+	if rows == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 func (s *sqlStore) Delete(ctx context.Context, id string) error {
 	res, err := s.db.ExecContext(ctx, `DELETE FROM agents WHERE id = $1`, id)
 	if err != nil {
@@ -453,7 +470,8 @@ CREATE TABLE IF NOT EXISTS agents (
 	sandbox_provider TEXT,
 	sandbox_id TEXT,
 	repo_url TEXT,
-	repo_ref TEXT
+	repo_ref TEXT,
+	terminal_binding TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_agents_ns ON agents(ns);
 CREATE INDEX IF NOT EXISTS idx_agents_parent ON agents(parent_id);
@@ -491,6 +509,7 @@ CREATE INDEX IF NOT EXISTS idx_agents_state ON agents(state);
 		"ALTER TABLE agents ADD COLUMN sandbox_id TEXT",
 		"ALTER TABLE agents ADD COLUMN repo_url TEXT",
 		"ALTER TABLE agents ADD COLUMN repo_ref TEXT",
+		"ALTER TABLE agents ADD COLUMN terminal_binding TEXT",
 	}
 	for _, stmt := range alterStmts {
 		// SQLite will error if column already exists, which is fine
@@ -581,15 +600,16 @@ CREATE TABLE agents_new (
 	sandbox_provider TEXT,
 	sandbox_id      TEXT,
 	repo_url        TEXT,
-	repo_ref        TEXT
+	repo_ref        TEXT,
+	terminal_binding TEXT
 );
 		INSERT INTO agents_new (
 	id, parent_id, ns, workspace_root, workspace_source, name, slug, role, prompt, skills_allow, policy, share_bb, state, created_at, heartbeat_at,
-	llm_provider, llm_model, llm_api_key, llm_base_url, llm_auth_mode, llm_auth_header, llm_auth_prefix, exec_mode, execution_layer, max_iterations, max_auto_turns, think_interval, deleted_at, conversation_id, memory_scope, memory_retention, sandbox_provider, sandbox_id, repo_url, repo_ref
+	llm_provider, llm_model, llm_api_key, llm_base_url, llm_auth_mode, llm_auth_header, llm_auth_prefix, exec_mode, execution_layer, max_iterations, max_auto_turns, think_interval, deleted_at, conversation_id, memory_scope, memory_retention, sandbox_provider, sandbox_id, repo_url, repo_ref, terminal_binding
 )
 SELECT
 	id, parent_id, ns, workspace_root, workspace_source, name, slug, role, prompt, skills_allow, policy, share_bb, state, created_at, heartbeat_at,
-	llm_provider, llm_model, llm_api_key, llm_base_url, llm_auth_mode, llm_auth_header, llm_auth_prefix, exec_mode, execution_layer, max_iterations, max_auto_turns, think_interval, deleted_at, conversation_id, memory_scope, memory_retention, sandbox_provider, sandbox_id, repo_url, repo_ref
+	llm_provider, llm_model, llm_api_key, llm_base_url, llm_auth_mode, llm_auth_header, llm_auth_prefix, exec_mode, execution_layer, max_iterations, max_auto_turns, think_interval, deleted_at, conversation_id, memory_scope, memory_retention, sandbox_provider, sandbox_id, repo_url, repo_ref, terminal_binding
 FROM agents;
 DROP TABLE agents;
 ALTER TABLE agents_new RENAME TO agents;
@@ -617,8 +637,8 @@ func scanAgent(scanner rowScanner) (agent.Agent, error) {
 	var llmBaseURL, llmAuthMode, llmAuthHeader, llmAuthPrefix sql.NullString
 	var execMode, executionLayer sql.NullString
 	var maxIterations, maxAutoTurns, thinkInterval sql.NullInt64
-	var conversationID, memoryScope, memoryRetention, sandboxProvider, sandboxID, repoURL, repoRef sql.NullString
-	if err := scanner.Scan(&a.ID, &parentID, &a.Namespace, &workspaceRoot, &workspaceSource, &name, &slug, &role, &prompt, &skillsJSON, &policyJSON, &a.ShareBB, &a.State, &created, &heartbeat, &llmProvider, &llmModel, &llmAPIKey, &llmBaseURL, &llmAuthMode, &llmAuthHeader, &llmAuthPrefix, &execMode, &executionLayer, &maxIterations, &maxAutoTurns, &thinkInterval, &conversationID, &memoryScope, &memoryRetention, &sandboxProvider, &sandboxID, &repoURL, &repoRef); err != nil {
+	var conversationID, memoryScope, memoryRetention, sandboxProvider, sandboxID, repoURL, repoRef, terminalBinding sql.NullString
+	if err := scanner.Scan(&a.ID, &parentID, &a.Namespace, &workspaceRoot, &workspaceSource, &name, &slug, &role, &prompt, &skillsJSON, &policyJSON, &a.ShareBB, &a.State, &created, &heartbeat, &llmProvider, &llmModel, &llmAPIKey, &llmBaseURL, &llmAuthMode, &llmAuthHeader, &llmAuthPrefix, &execMode, &executionLayer, &maxIterations, &maxAutoTurns, &thinkInterval, &conversationID, &memoryScope, &memoryRetention, &sandboxProvider, &sandboxID, &repoURL, &repoRef, &terminalBinding); err != nil {
 		return agent.Agent{}, fmt.Errorf("agents: scan: %w", err)
 	}
 
@@ -681,8 +701,32 @@ func scanAgent(scanner rowScanner) (agent.Agent, error) {
 	a.SandboxID = sandboxID.String
 	a.RepoURL = repoURL.String
 	a.RepoRef = repoRef.String
+	a.TerminalBinding = unmarshalTerminalBinding(terminalBinding)
 
 	return a, nil
+}
+
+func marshalTerminalBinding(binding agent.TerminalBinding) string {
+	binding = agent.NormalizeTerminalBinding(binding)
+	if binding == (agent.TerminalBinding{}) {
+		return ""
+	}
+	data, err := json.Marshal(binding)
+	if err != nil {
+		return ""
+	}
+	return string(data)
+}
+
+func unmarshalTerminalBinding(raw sql.NullString) agent.TerminalBinding {
+	if !raw.Valid || strings.TrimSpace(raw.String) == "" {
+		return agent.TerminalBinding{}
+	}
+	var binding agent.TerminalBinding
+	if err := json.Unmarshal([]byte(raw.String), &binding); err != nil {
+		return agent.TerminalBinding{}
+	}
+	return agent.NormalizeTerminalBinding(binding)
 }
 
 // ErrNotFound indicates the agent was not found.

@@ -11,11 +11,18 @@ This directory contains active planning documents and implementation roadmaps.
 
 ## High-Signal Entrypoints
 
+- `features/eino-go-native-runtime-plan.md` — Eino `AgentEngine` integration + Go-native `RuntimeSpawner`/reconciler; Jido optional path.
+- `tui-agent-control-plane.md`
 - `v2-implementation-todo.md`
 - `v2-greenfield-bootstrap.md`
 - `v2-symphony-kanban-implementation.md`
 - `gui-agent-improvement-roadmap.md`
+- `gui-agent-room-control-center.md`
 - `features/slop-function-detection.md`
+- `features/refactor-intelligence-substrate.md`
+- `features/refactor-phase1-status-and-snapshot.md`
+- `features/refactor-deterministic-detection-backlog.md`
+- `features/agent-mux-room-hierarchy.md`
 - `features/opensandbox-sandbox-workspace-integration.md`
 - `features/aca-self-evolving-memory-layer.md`
 - `jidoctl-v2-hybrid-interface.md`

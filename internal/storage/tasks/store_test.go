@@ -79,6 +79,69 @@ func TestStore_Update(t *testing.T) {
 	}
 }
 
+func TestStore_PersistsClaimAndBlockMetadata(t *testing.T) {
+	ctx := context.Background()
+	store := setupTestStore(t)
+
+	task, err := store.Add(ctx, Task{
+		WorkspaceID: "ws-1",
+		Title:       "Claimed task",
+	})
+	if err != nil {
+		t.Fatalf("Add failed: %v", err)
+	}
+
+	now := time.Now().UTC()
+	task.Status = StatusBlocked
+	task.OwnerActorID = "agent-a"
+	task.ClaimedAt = &now
+	task.HeartbeatAt = &now
+	task.BlockedReason = "waiting on review"
+	task.BlockedAt = &now
+
+	updated, err := store.Update(ctx, task)
+	if err != nil {
+		t.Fatalf("Update failed: %v", err)
+	}
+	if updated.OwnerActorID != "agent-a" {
+		t.Fatalf("owner=%q want agent-a", updated.OwnerActorID)
+	}
+	if updated.BlockedReason != "waiting on review" {
+		t.Fatalf("blocked_reason=%q want waiting on review", updated.BlockedReason)
+	}
+	if updated.ClaimedAt == nil || updated.BlockedAt == nil || updated.HeartbeatAt == nil {
+		t.Fatal("expected claim/block timestamps to be persisted")
+	}
+}
+
+func TestStore_PersistsAssignmentMetadata(t *testing.T) {
+	ctx := context.Background()
+	store := setupTestStore(t)
+
+	task, err := store.Add(ctx, Task{
+		WorkspaceID: "ws-1",
+		Title:       "Assigned task",
+	})
+	if err != nil {
+		t.Fatalf("Add failed: %v", err)
+	}
+
+	now := time.Now().UTC()
+	task.AssignedActorID = "gemini-a"
+	task.AssignedAt = &now
+
+	updated, err := store.Update(ctx, task)
+	if err != nil {
+		t.Fatalf("Update failed: %v", err)
+	}
+	if updated.AssignedActorID != "gemini-a" {
+		t.Fatalf("assigned=%q want gemini-a", updated.AssignedActorID)
+	}
+	if updated.AssignedAt == nil {
+		t.Fatal("expected assigned_at to be persisted")
+	}
+}
+
 func TestStore_ListByWorkspace(t *testing.T) {
 	ctx := context.Background()
 	store := setupTestStore(t)

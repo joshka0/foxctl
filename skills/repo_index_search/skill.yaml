@@ -2,7 +2,7 @@ apiVersion: agentctl/v1
 kind: Skill
 metadata:
   name: repo/index_search
-  version: 0.1.0
+  version: 0.2.0
   description: "Search the repo index and return matching nodes with projected anchors"
   tags: ["repoindex", "graph", "search"]
 distribution:
@@ -27,6 +27,12 @@ signature:
       type: integer
       required: false
       description: "Maximum results (default 20)"
+    - name: inline_mode
+      type: string
+      required: false
+      default: auto
+      enum: ["auto", "full", "preview", "artifact_only"]
+      description: "How much search detail to inline; auto prefers preview + artifact for larger outputs"
   returns:
     - name: count
       type: integer
@@ -34,9 +40,24 @@ signature:
     - name: results
       type: array
       description: "Matching repo-index nodes"
+    - name: results_total
+      type: integer
+      description: "Total matching nodes before preview truncation"
     - name: anchors
       type: array
       description: "Projected code anchors for matching nodes"
+    - name: anchors_total
+      type: integer
+      description: "Total anchors before preview truncation"
+    - name: inline_mode
+      type: string
+      description: "Resolved inline mode used for the response"
+    - name: truncated
+      type: boolean
+      description: "Whether the inline result is a preview of a larger artifact-backed result"
+    - name: artifact
+      type: string
+      description: "CAS artifact digest for the full untruncated output when previewed inline"
 capabilities:
   network: "none"
   filesystem:

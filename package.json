@@ -3,7 +3,8 @@
   "private": true,
   "workspaces": ["packages/*"],
   "scripts": {
-    "dev:tui": "bun run --cwd packages/tui dev",
+    "factory:model:add": "bun scripts/factory-model-add.ts",
+    "dev:tui": "bun run --cwd packages/tui-agent dev",
     "dev:gui": "bun run --cwd packages/gui-agent dev",
     "dev:gui-auth-gateway": "bun run --cwd packages/gui-auth-gateway dev",
     "dev:server": "go run ./cmd/agentctl web serve --dev-cors",

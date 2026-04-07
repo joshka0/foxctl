@@ -129,3 +129,48 @@ embedding:
 		t.Fatalf("expected VoyageProvider, got %T", provider)
 	}
 }
+
+func TestNewProviderForModel_GemmaModelOverridesVoyageProvider(t *testing.T) {
+	cfg := config.Config{}
+	cfg.Embedding.Provider = "voyage"
+	cfg.Embedding.Model = "text-embedding-embeddinggemma-300m-qat"
+	cfg.Embedding.BaseURL = "http://127.0.0.1:1234/v1"
+
+	provider, err := NewProviderForModel(
+		"text-embedding-embeddinggemma-300m-qat",
+		cfg,
+		WithProvider(cfg.Embedding.Provider),
+		WithBaseURL(cfg.Embedding.BaseURL),
+		WithVoyageKey("test-voyage-key"),
+	)
+	if err != nil {
+		t.Fatalf("NewProviderForModel: %v", err)
+	}
+	if _, ok := provider.(*OpenAICompatProvider); !ok {
+		t.Fatalf("expected OpenAICompatProvider, got %T", provider)
+	}
+	if provider.Model() != "text-embedding-embeddinggemma-300m-qat" {
+		t.Fatalf("model=%q", provider.Model())
+	}
+}
+
+func TestDetectProviderForConfig_PrefersRepoConfiguredProvider(t *testing.T) {
+	cfg := config.Config{}
+	cfg.Embedding.Provider = "lmstudio"
+	cfg.Embedding.Model = "text-embedding-embeddinggemma-300m-qat"
+	cfg.Embedding.BaseURL = "http://127.0.0.1:1234/v1"
+
+	got := DetectProviderForConfig(cfg, "voyage-key-present", "")
+	if got != "openai_compat" {
+		t.Fatalf("DetectProviderForConfig()=%q want openai_compat", got)
+	}
+}
+
+func TestDetectProviderForConfig_FallsBackToEnvWhenRepoUnset(t *testing.T) {
+	cfg := config.Config{}
+
+	got := DetectProviderForConfig(cfg, "voyage-key-present", "")
+	if got != "voyage" {
+		t.Fatalf("DetectProviderForConfig()=%q want voyage", got)
+	}
+}

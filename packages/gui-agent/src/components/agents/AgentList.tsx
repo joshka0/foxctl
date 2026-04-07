@@ -95,6 +95,7 @@ export function AgentList() {
   const [startLoadingAgentId, setStartLoadingAgentId] = useState<string | null>(
     null,
   );
+  const [bulkTrashLoading, setBulkTrashLoading] = useState(false);
   const queryClient = useQueryClient();
   const activityEvents = useActivityStore((s) => s.events);
   const setActivityFocus = useActivityFocusStore((s) => s.setFocus);
@@ -163,6 +164,10 @@ export function AgentList() {
     (a) => a.state === "stopped",
   ).length;
   const hideStoppedByDefault = normalizedQuery.length === 0 && !showStopped;
+  const trashableStoppedAgents = useMemo(
+    () => sortedMatchedAgents.filter((agent) => agent.state === "stopped"),
+    [sortedMatchedAgents],
+  );
   const visibleAgents = hideStoppedByDefault
     ? sortedMatchedAgents.filter((a) => a.state !== "stopped")
     : sortedMatchedAgents;
@@ -384,6 +389,37 @@ export function AgentList() {
       alert(err instanceof Error ? err.message : "Failed to start agent");
     } finally {
       setStartLoadingAgentId(null);
+    }
+  };
+
+  const handleBulkTrashStopped = async () => {
+    if (trashableStoppedAgents.length === 0) return;
+    if (
+      !window.confirm(
+        `Trash ${trashableStoppedAgents.length} stopped agent${trashableStoppedAgents.length === 1 ? "" : "s"} currently in view? This removes their runtime records and cannot be undone.`,
+      )
+    ) {
+      return;
+    }
+
+    setBulkTrashLoading(true);
+    try {
+      const results = await Promise.allSettled(
+        trashableStoppedAgents.map((agent) => trashAgent(agent.id)),
+      );
+      const failures = results.filter(
+        (result): result is PromiseRejectedResult => result.status === "rejected",
+      );
+      await queryClient.invalidateQueries({ queryKey: ["agents"] });
+      if (failures.length > 0) {
+        alert(
+          `Trashed ${trashableStoppedAgents.length - failures.length} agent${trashableStoppedAgents.length - failures.length === 1 ? "" : "s"}, ${failures.length} failed.`,
+        );
+      }
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Failed to trash stopped agents");
+    } finally {
+      setBulkTrashLoading(false);
     }
   };
   const handleOpenLatestErrorTrace = (event: ActivityEvent | undefined) => {
@@ -617,6 +653,18 @@ export function AgentList() {
               <span className="text-xs text-muted-foreground">
                 Runtime defaults to active/error agents to reduce noise.
               </span>
+            )}
+            {!hideStoppedByDefault && trashableStoppedAgents.length > 0 && (
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-7 text-xs border-red-500/30 text-red-600 hover:bg-red-500/5"
+                onClick={handleBulkTrashStopped}
+                disabled={bulkTrashLoading}
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+                Trash Visible Stopped ({trashableStoppedAgents.length})
+              </Button>
             )}
           </div>
         )}

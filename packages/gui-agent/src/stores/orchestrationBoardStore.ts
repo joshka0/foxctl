@@ -48,7 +48,7 @@ interface OrchestrationBoardState {
   actingOnCard: boolean
   error: string | null
   loadBoard: (params?: Omit<OrchestrationBoardGetParams, 'request_id'>) => Promise<void>
-  refreshBoard: (workspaceID?: string) => Promise<void>
+  refreshBoard: (params?: { workspaceID?: string; archivedOnly?: boolean }) => Promise<void>
   loadCard: (issueID: string, workspaceID?: string) => Promise<void>
   applyCardAction: (issueID: string, action: OrchestrationCardAction, workspaceID?: string) => Promise<void>
   clearSelectedCard: () => void
@@ -97,18 +97,19 @@ export const useOrchestrationBoardStore = create<OrchestrationBoardState>((set) 
       }
     }
   },
-  refreshBoard: async (workspaceID) => {
+  refreshBoard: async (params) => {
     const refreshSeq = ++boardRefreshSeq
     const dataSeq = ++boardDataSeq
     set({ refreshing: true, error: null })
     try {
       await refreshOrchestration({
         request_id: requestID('refresh'),
-        workspace_id: workspaceID,
+        workspace_id: params?.workspaceID,
       })
       const result = await getOrchestrationBoard({
         request_id: requestID('board'),
-        workspace_id: workspaceID,
+        workspace_id: params?.workspaceID,
+        archived_only: params?.archivedOnly,
       })
       if (dataSeq !== boardDataSeq) return
       set({

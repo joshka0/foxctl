@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 
 	models "github.com/XiaoConstantine/mcp-go/pkg/model"
@@ -12,6 +13,23 @@ import (
 	"github.com/jkatigb/agentctl/internal/indexing/repoindex"
 	"github.com/jkatigb/agentctl/internal/platform/errors"
 	"github.com/jkatigb/agentctl/internal/repoquery"
+)
+
+type repoInlineMode string
+
+const (
+	repoInlineAuto          repoInlineMode = "auto"
+	repoInlineFull          repoInlineMode = "full"
+	repoInlinePreview       repoInlineMode = "preview"
+	repoInlineArtifactOnly  repoInlineMode = "artifact_only"
+	repoPreviewResults                     = 20
+	repoPreviewAnchors                     = 12
+	repoPreviewNodes                       = 40
+	repoPreviewEdges                       = 80
+	repoPreviewSeeds                       = 10
+	repoPreviewDocLimit                    = 240
+	repoPreviewSummaryLimit                = 180
+	repoPreviewTrailLimit                  = 20
 )
 
 // registerRepoIndexTools registers repo index tools for agents.
@@ -34,6 +52,10 @@ func (r *Registry) registerRepoIndexTools() error {
 				"limit": {
 					Type:        "integer",
 					Description: "Maximum results (default 20)",
+				},
+				"inline_mode": {
+					Type:        "string",
+					Description: "How much search detail to inline: auto, full, preview, or artifact_only",
 				},
 			},
 		},
@@ -73,6 +95,10 @@ func (r *Registry) registerRepoIndexTools() error {
 				"per_node_cap": {
 					Type:        "integer",
 					Description: "Max edges per node per hop (default 50)",
+				},
+				"inline_mode": {
+					Type:        "string",
+					Description: "How much graph detail to inline: auto, full, preview, or artifact_only",
 				},
 			},
 		},
@@ -156,6 +182,10 @@ func (r *Registry) registerRepoIndexTools() error {
 					Type:        "string",
 					Description: "Optional render format: tree or mermaid",
 				},
+				"inline_mode": {
+					Type:        "string",
+					Description: "How much graph detail to inline: auto, full, preview, or artifact_only",
+				},
 			},
 		},
 		r.wrapWithTelemetry(repoindex.ToolDAGGrep, r.repoIndexDagGrep),
@@ -186,11 +216,7 @@ func (r *Registry) repoIndexSearch(ctx context.Context, args map[string]any) (*m
 	if err != nil {
 		return errorResult(fmt.Sprintf("repo index search error: %v", err)), nil
 	}
-	return successResult(map[string]any{
-		"count":   len(result.Nodes),
-		"results": result.Nodes,
-		"anchors": result.Anchors,
-	}), nil
+	return successResult(previewRepoIndexSearchOutput(result, repoInlineModeFromArgs(args))), nil
 }
 
 func (r *Registry) repoIndexExpand(ctx context.Context, args map[string]any) (*models.CallToolResult, error) {
@@ -229,11 +255,7 @@ func (r *Registry) repoIndexExpand(ctx context.Context, args map[string]any) (*m
 	if err != nil {
 		return errorResult(fmt.Sprintf("repo index expand error: %v", err)), nil
 	}
-
-	return successResult(map[string]any{
-		"result":  result.Result,
-		"anchors": result.Anchors,
-	}), nil
+	return successResult(previewRepoIndexExpandOutput(result, repoInlineModeFromArgs(args))), nil
 }
 
 func (r *Registry) repoIndexOpen(ctx context.Context, args map[string]any) (*models.CallToolResult, error) {
@@ -299,7 +321,284 @@ func (r *Registry) repoIndexDagGrep(ctx context.Context, args map[string]any) (*
 	if rendered := repoquery.RenderDAG(result.Result, input.Render); rendered != "" && len(result.Rendered) == 0 {
 		output["rendered"] = rendered
 	}
-	return successResult(output), nil
+	return successResult(previewRepoIndexDAGOutput(output, repoInlineModeFromArgs(args))), nil
+}
+
+func repoInlineModeFromArgs(args map[string]any) repoInlineMode {
+	if value, ok := args["inline_mode"].(string); ok {
+		switch repoInlineMode(strings.ToLower(strings.TrimSpace(value))) {
+		case repoInlineFull, repoInlinePreview, repoInlineArtifactOnly:
+			return repoInlineMode(strings.ToLower(strings.TrimSpace(value)))
+		}
+	}
+	return repoInlineAuto
+}
+
+func compactRepoNode(node repoindex.Node) repoindex.Node {
+	if node.Doc != "" {
+		node.Doc = truncateRepoText(node.Doc, repoPreviewDocLimit)
+	}
+	if node.Summary != "" {
+		node.Summary = truncateRepoText(node.Summary, repoPreviewSummaryLimit)
+	}
+	node.Meta = nil
+	return node
+}
+
+func compactRepoAnchor(anchor repoquery.Anchor) repoquery.Anchor {
+	if anchor.Summary != "" {
+		anchor.Summary = truncateRepoText(anchor.Summary, repoPreviewSummaryLimit)
+	}
+	return anchor
+}
+
+func truncateRepoText(value string, limit int) string {
+	value = strings.TrimSpace(value)
+	if limit <= 0 || len(value) <= limit {
+		return value
+	}
+	return strings.TrimSpace(value[:limit]) + "..."
+}
+
+func previewRepoIndexSearchOutput(result repoquery.SearchOutput, mode repoInlineMode) map[string]any {
+	preview := mode == repoInlinePreview || mode == repoInlineArtifactOnly
+	if mode == repoInlineAuto && (len(result.Nodes) > repoPreviewResults || len(result.Anchors) > repoPreviewAnchors) {
+		preview = true
+	}
+	if mode == repoInlineArtifactOnly {
+		return map[string]any{
+			"count":         len(result.Nodes),
+			"results_total": len(result.Nodes),
+			"anchors_total": len(result.Anchors),
+			"inline_mode":   string(repoInlineArtifactOnly),
+			"truncated":     true,
+		}
+	}
+	nodes := result.Nodes
+	anchors := result.Anchors
+	if preview {
+		if len(nodes) > repoPreviewResults {
+			nodes = append([]repoindex.Node(nil), nodes[:repoPreviewResults]...)
+		} else {
+			nodes = append([]repoindex.Node(nil), nodes...)
+		}
+		for i := range nodes {
+			nodes[i] = compactRepoNode(nodes[i])
+		}
+		if len(anchors) > repoPreviewAnchors {
+			anchors = append([]repoquery.Anchor(nil), anchors[:repoPreviewAnchors]...)
+		} else {
+			anchors = append([]repoquery.Anchor(nil), anchors...)
+		}
+		for i := range anchors {
+			anchors[i] = compactRepoAnchor(anchors[i])
+		}
+	}
+	out := map[string]any{
+		"count":         len(result.Nodes),
+		"results":       nodes,
+		"anchors":       anchors,
+		"results_total": len(result.Nodes),
+		"anchors_total": len(result.Anchors),
+		"inline_mode":   map[bool]string{true: string(repoInlinePreview), false: string(repoInlineFull)}[preview],
+	}
+	if preview {
+		out["truncated"] = len(nodes) < len(result.Nodes) || len(anchors) < len(result.Anchors)
+	}
+	return out
+}
+
+func previewRepoIndexExpandOutput(result repoquery.ExpandOutput, mode repoInlineMode) map[string]any {
+	preview := mode == repoInlinePreview || mode == repoInlineArtifactOnly
+	if mode == repoInlineAuto && (len(result.Result.Nodes) > repoPreviewNodes || len(result.Result.Edges) > repoPreviewEdges || len(result.Anchors) > repoPreviewAnchors) {
+		preview = true
+	}
+	if mode == repoInlineArtifactOnly {
+		return map[string]any{
+			"result":           map[string]any{},
+			"anchors_total":    len(result.Anchors),
+			"node_count_total": len(result.Result.Nodes),
+			"edge_count_total": len(result.Result.Edges),
+			"inline_mode":      string(repoInlineArtifactOnly),
+			"truncated":        true,
+		}
+	}
+	nodes := result.Result.Nodes
+	edges := result.Result.Edges
+	trail := result.Result.Trail
+	anchors := result.Anchors
+	if preview {
+		keep := map[string]struct{}{}
+		if len(nodes) > repoPreviewNodes {
+			nodes = append([]repoindex.Node(nil), nodes[:repoPreviewNodes]...)
+		} else {
+			nodes = append([]repoindex.Node(nil), nodes...)
+		}
+		for i := range nodes {
+			nodes[i] = compactRepoNode(nodes[i])
+			keep[nodes[i].ID] = struct{}{}
+		}
+		filteredEdges := make([]repoindex.Edge, 0, minInt(repoPreviewEdges, len(edges)))
+		for _, edge := range edges {
+			if _, ok := keep[edge.Src]; !ok {
+				continue
+			}
+			if _, ok := keep[edge.Dst]; !ok {
+				continue
+			}
+			filteredEdges = append(filteredEdges, edge)
+			if len(filteredEdges) >= repoPreviewEdges {
+				break
+			}
+		}
+		edges = filteredEdges
+		if len(trail) > repoPreviewTrailLimit {
+			trail = append([]string(nil), trail[:repoPreviewTrailLimit]...)
+		}
+		if len(anchors) > repoPreviewAnchors {
+			anchors = append([]repoquery.Anchor(nil), anchors[:repoPreviewAnchors]...)
+		} else {
+			anchors = append([]repoquery.Anchor(nil), anchors...)
+		}
+		for i := range anchors {
+			anchors[i] = compactRepoAnchor(anchors[i])
+		}
+	}
+	out := map[string]any{
+		"result": map[string]any{
+			"nodes": nodes,
+			"edges": edges,
+			"trail": trail,
+		},
+		"anchors":          anchors,
+		"node_count_total": len(result.Result.Nodes),
+		"edge_count_total": len(result.Result.Edges),
+		"anchors_total":    len(result.Anchors),
+		"inline_mode":      map[bool]string{true: string(repoInlinePreview), false: string(repoInlineFull)}[preview],
+	}
+	if preview {
+		out["truncated"] = len(nodes) < len(result.Result.Nodes) || len(edges) < len(result.Result.Edges) || len(anchors) < len(result.Anchors)
+	}
+	return out
+}
+
+func previewRepoIndexDAGOutput(output map[string]any, mode repoInlineMode) map[string]any {
+	result, _ := output["result"].(repoindex.DAGGrepResult)
+	rendered, _ := output["rendered"].(string)
+	preview := mode == repoInlinePreview || mode == repoInlineArtifactOnly
+	if mode == repoInlineAuto && (len(result.Graph.Nodes) > repoPreviewNodes || len(result.Graph.Edges) > repoPreviewEdges || len(result.Seeds) > repoPreviewSeeds) {
+		preview = true
+	}
+	if mode == repoInlineArtifactOnly {
+		return map[string]any{
+			"inline_mode":      string(repoInlineArtifactOnly),
+			"node_count_total": result.Stats.NodeCount,
+			"edge_count_total": result.Stats.EdgeCount,
+			"anchors_total":    len(outputAnchors(output)),
+			"truncated":        true,
+		}
+	}
+	if preview {
+		trimmed := result
+		if len(trimmed.Seeds) > repoPreviewSeeds {
+			trimmed.Seeds = append([]repoindex.ScoredNode(nil), trimmed.Seeds[:repoPreviewSeeds]...)
+		}
+		nodeByID := make(map[string]repoindex.Node, len(trimmed.Graph.Nodes))
+		for _, node := range trimmed.Graph.Nodes {
+			nodeByID[node.ID] = compactRepoNode(node)
+		}
+		type layerItem struct {
+			id    string
+			layer int
+		}
+		items := make([]layerItem, 0, len(trimmed.DAG.Layers))
+		for id, layer := range trimmed.DAG.Layers {
+			items = append(items, layerItem{id: id, layer: layer})
+		}
+		sort.Slice(items, func(i, j int) bool {
+			if items[i].layer == items[j].layer {
+				return items[i].id < items[j].id
+			}
+			return items[i].layer < items[j].layer
+		})
+		keep := make(map[string]struct{}, repoPreviewNodes)
+		nodes := make([]repoindex.Node, 0, repoPreviewNodes)
+		layers := make(map[string]int, repoPreviewNodes)
+		for _, item := range items {
+			if len(nodes) >= repoPreviewNodes {
+				break
+			}
+			if node, ok := nodeByID[item.id]; ok {
+				nodes = append(nodes, node)
+				keep[item.id] = struct{}{}
+				layers[item.id] = item.layer
+			}
+		}
+		filterEdges := func(src []repoindex.Edge, limit int) []repoindex.Edge {
+			outEdges := make([]repoindex.Edge, 0, minInt(limit, len(src)))
+			for _, edge := range src {
+				if _, ok := keep[edge.Src]; !ok {
+					continue
+				}
+				if _, ok := keep[edge.Dst]; !ok {
+					continue
+				}
+				outEdges = append(outEdges, edge)
+				if len(outEdges) >= limit {
+					break
+				}
+			}
+			return outEdges
+		}
+		trimmed.Graph.Nodes = nodes
+		trimmed.Graph.Edges = filterEdges(trimmed.Graph.Edges, repoPreviewEdges)
+		trimmed.DAG.Layers = layers
+		trimmed.DAG.Edges = filterEdges(trimmed.DAG.Edges, repoPreviewEdges)
+		trimmed.DAG.BackEdges = filterEdges(trimmed.DAG.BackEdges, repoPreviewEdges)
+		trimmed.Stats.NodeCount = len(nodes)
+		trimmed.Stats.EdgeCount = len(trimmed.Graph.Edges)
+		out := map[string]any{
+			"result":           result,
+			"rendered":         rendered,
+			"node_count_total": result.Stats.NodeCount,
+			"edge_count_total": result.Stats.EdgeCount,
+			"anchors_total":    len(outputAnchors(output)),
+			"inline_mode":      string(repoInlinePreview),
+			"truncated":        true,
+		}
+		out["result"] = trimmed
+		if anchors := outputAnchors(output); len(anchors) > 0 {
+			if len(anchors) > repoPreviewAnchors {
+				anchors = append([]repoquery.Anchor(nil), anchors[:repoPreviewAnchors]...)
+			} else {
+				anchors = append([]repoquery.Anchor(nil), anchors...)
+			}
+			for i := range anchors {
+				anchors[i] = compactRepoAnchor(anchors[i])
+			}
+			out["anchors"] = anchors
+		}
+		return out
+	}
+	output["inline_mode"] = string(repoInlineFull)
+	output["node_count_total"] = result.Stats.NodeCount
+	output["edge_count_total"] = result.Stats.EdgeCount
+	output["anchors_total"] = len(outputAnchors(output))
+	return output
+}
+
+func outputAnchors(output map[string]any) []repoquery.Anchor {
+	if anchors, ok := output["anchors"].([]repoquery.Anchor); ok {
+		return anchors
+	}
+	return nil
+}
+
+func minInt(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }
 
 func (r *Registry) openRepoQueryService(ctx context.Context) (*repoindex.Store, *repoquery.QueryService, error) {

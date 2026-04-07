@@ -21,6 +21,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/agent/optimization"
 	"github.com/oklog/ulid/v2"
 
+	agentprompts "github.com/jkatigb/agentctl/internal/agent/prompts"
 	"github.com/jkatigb/agentctl/internal/agent/toolnames"
 	"github.com/jkatigb/agentctl/internal/agent/types"
 	"github.com/jkatigb/agentctl/internal/agentprompt"
@@ -29,7 +30,9 @@ import (
 	"github.com/jkatigb/agentctl/internal/engine"
 	"github.com/jkatigb/agentctl/internal/hooks"
 	"github.com/jkatigb/agentctl/internal/observability"
+	"github.com/jkatigb/agentctl/internal/protocol"
 	llmproviders "github.com/jkatigb/agentctl/internal/providers/llm"
+	"github.com/jkatigb/agentctl/internal/shellreduce"
 	"github.com/jkatigb/agentctl/internal/storage"
 )
 
@@ -584,6 +587,8 @@ func (e *agentToolExecutor) Execute(ctx context.Context, name string, args json.
 		out, err = e.executeWriteFile(ctx, argsMap)
 	case "code_search":
 		out, err = e.executeCodeSearch(ctx, argsMap)
+	case "shell":
+		out, err = e.executeShell(ctx, argsMap)
 	case "think":
 		out, err = e.executeThink(ctx, argsMap)
 	case "end_tick":
@@ -782,6 +787,57 @@ func (e *agentToolExecutor) executeCodeSearch(ctx context.Context, args map[stri
 	}
 
 	return results, nil
+}
+
+func (e *agentToolExecutor) executeShell(ctx context.Context, args map[string]any) (string, error) {
+	var argv []string
+	command := stringArg(args, "", "command")
+	if strings.TrimSpace(command) == "" {
+		argv = stringSliceArg(args, "argv")
+		if len(argv) == 0 {
+			return "", fmt.Errorf("command is required")
+		}
+	} else {
+		var err error
+		argv, err = shellreduce.SplitCommand(command)
+		if err != nil {
+			return "", fmt.Errorf("parse command: %w", err)
+		}
+	}
+	if _, err := shellreduce.RouteArgv(argv); err != nil {
+		return "", err
+	}
+	command = shellreduce.JoinCommand(argv)
+
+	cmdArgs := []string{"shell", "--command", command}
+	if boolArg(args, "measure_raw") {
+		cmdArgs = append(cmdArgs, "--measure")
+		if tokenModel := stringArg(args, "", "token_model"); strings.TrimSpace(tokenModel) != "" {
+			cmdArgs = append(cmdArgs, "--token-model", tokenModel)
+		}
+	}
+	cmd := e.newAgentctlCommand(ctx, cmdArgs...)
+	output, err := commandOutput(cmd, "shell")
+	if err != nil {
+		return "", err
+	}
+
+	env, err := protocol.DecodeEnvelope([]byte(output))
+	if err != nil {
+		return output, nil
+	}
+	if env.Status == envelope.StatusError {
+		return "", protocol.EnvelopeStatusErrorFromEnvelope(env)
+	}
+
+	if summary := summarizeToolData("shell", env.Data); summary != "" {
+		return summary, nil
+	}
+	body, err := json.MarshalIndent(env.Data, "", "  ")
+	if err != nil {
+		return output, nil
+	}
+	return string(body), nil
 }
 
 func (e *agentToolExecutor) executeThink(ctx context.Context, args map[string]any) (string, error) {
@@ -1397,6 +1453,9 @@ func (e *agentToolExecutor) executeSemanticSearchScoped(ctx context.Context, lab
 		"query": query,
 		"limit": limit,
 	}
+	if inlineMode, ok := args["inline_mode"].(string); ok && strings.TrimSpace(inlineMode) != "" {
+		inputMap["inline_mode"] = strings.TrimSpace(inlineMode)
+	}
 	if strings.TrimSpace(opts.Profile) != "" {
 		inputMap["profile"] = strings.TrimSpace(opts.Profile)
 	}
@@ -1433,6 +1492,9 @@ func (e *agentToolExecutor) executeSmartSearch(ctx context.Context, args map[str
 
 	inputMap := map[string]any{
 		"question": query,
+	}
+	if inlineMode, ok := args["inline_mode"].(string); ok && strings.TrimSpace(inlineMode) != "" {
+		inputMap["inline_mode"] = strings.TrimSpace(inlineMode)
 	}
 	maxSnippets := intArg(args, 0, "max_snippets", "limit")
 	if maxSnippets > 0 {
@@ -1673,9 +1735,19 @@ func (e *agentToolExecutor) executeRepoIndexSearch(ctx context.Context, args map
 	if workspace == "" {
 		workspace = "."
 	}
-
-	cmd := e.newAgentctlCommand(ctx, "index", "repo", "search", "--workspace", workspace, "--query", query, "--limit", strconv.Itoa(limit))
-
+	input := map[string]any{
+		"query":     query,
+		"workspace": workspace,
+		"limit":     limit,
+	}
+	if inlineMode := stringArg(args, "inline_mode", ""); strings.TrimSpace(inlineMode) != "" {
+		input["inline_mode"] = strings.TrimSpace(inlineMode)
+	}
+	inputBytes, err := json.Marshal(input)
+	if err != nil {
+		return "", fmt.Errorf("marshal repo_index_search input: %w", err)
+	}
+	cmd := e.newAgentctlCommand(ctx, "run", "repo/index_search", "--input", string(inputBytes))
 	return commandOutput(cmd, "repo_index_search")
 }
 
@@ -1685,30 +1757,27 @@ func (e *agentToolExecutor) executeRepoIndexExpand(ctx context.Context, args map
 		return "", fmt.Errorf("seeds are required")
 	}
 
-	edgeTypes := stringSliceArg(args, "edge_types", "edges", "edge")
-	direction, _ := args["direction"].(string)
-	if strings.TrimSpace(direction) == "" {
-		direction = "out"
-	}
-
-	depth := intArg(args, 1, "depth")
-	budget := intArg(args, 50, "budget")
-	perNodeCap := intArg(args, 50, "per_node_cap", "per_node")
 	workspace := strings.TrimSpace(e.workspaceRoot)
 	if workspace == "" {
 		workspace = "."
 	}
-
-	argsList := []string{"index", "repo", "expand", "--workspace", workspace, "--direction", direction, "--depth", strconv.Itoa(depth), "--budget", strconv.Itoa(budget), "--per-node", strconv.Itoa(perNodeCap)}
-	for _, seed := range seeds {
-		argsList = append(argsList, "--seed", seed)
+	input := map[string]any{
+		"seeds":        seeds,
+		"workspace":    workspace,
+		"edge_types":   stringSliceArg(args, "edge_types", "edges", "edge"),
+		"direction":    firstNonEmptyString(stringArg(args, "direction", ""), "out"),
+		"depth":        intArg(args, 1, "depth"),
+		"budget":       intArg(args, 50, "budget"),
+		"per_node_cap": intArg(args, 50, "per_node_cap", "per_node"),
 	}
-	for _, edgeType := range edgeTypes {
-		argsList = append(argsList, "--edge", edgeType)
+	if inlineMode := stringArg(args, "inline_mode", ""); strings.TrimSpace(inlineMode) != "" {
+		input["inline_mode"] = strings.TrimSpace(inlineMode)
 	}
-
-	cmd := e.newAgentctlCommand(ctx, argsList...)
-
+	inputBytes, err := json.Marshal(input)
+	if err != nil {
+		return "", fmt.Errorf("marshal repo_index_expand input: %w", err)
+	}
+	cmd := e.newAgentctlCommand(ctx, "run", "repo/index_expand", "--input", string(inputBytes))
 	return commandOutput(cmd, "repo_index_expand")
 }
 
@@ -2309,6 +2378,23 @@ func summarizeToolData(label string, data any) string {
 		return ""
 	}
 	switch label {
+	case "shell":
+		route, _ := m["route"].(map[string]any)
+		summary := stringFromMap(m, "summary")
+		if summary == "" {
+			return ""
+		}
+		var b strings.Builder
+		b.WriteString("Structured shell\n")
+		writeKeyValueLine(&b, "Backend", firstNonEmptyString(stringFromMap(route, "skill"), stringFromMap(route, "native")))
+		writeKeyValueLine(&b, "Intent", stringFromMap(route, "intent"))
+		writeListLine(&b, "Notes", stringSliceFromMap(route, "notes"), 4)
+		b.WriteString(strings.TrimSpace(summary))
+		if measure := shellreduce.MeasureSummaryLine(asStringMap(m["measure"])); measure != "" {
+			b.WriteString("\n")
+			b.WriteString(measure)
+		}
+		return strings.TrimSpace(b.String())
 	case "context_show":
 		top, ok := m["top_of_mind"].(map[string]any)
 		if !ok {
@@ -2463,6 +2549,13 @@ func stringFromMap(m map[string]any, key string) string {
 	return ""
 }
 
+func asStringMap(value any) map[string]any {
+	if m, ok := value.(map[string]any); ok {
+		return m
+	}
+	return nil
+}
+
 func stringSliceFromMap(m map[string]any, key string) []string {
 	raw, ok := m[key].([]any)
 	if !ok {
@@ -2491,6 +2584,15 @@ func minInt(a, b int) int {
 		return a
 	}
 	return b
+}
+
+func roleSupportsStructuredShell(role types.AgentRole) bool {
+	switch role {
+	case types.RoleCoder, types.RoleFrontendEng, types.RoleBackendEng, types.RoleCollaborator, types.RoleCoordinator, types.RoleReviewer, types.RoleSecurityReview, types.RoleFixer, types.RoleVerifier, types.RoleResearcher, types.RoleSubcallWorker, types.RoleOverseer:
+		return true
+	default:
+		return false
+	}
 }
 
 // buildToolDefsForRole returns tool definitions appropriate for the agent role.
@@ -2539,6 +2641,14 @@ func buildToolDefsForRole(role types.AgentRole, hasMailbox, hasBoard bool, allow
 			Name:        "fs_list_dir",
 			Description: "List files and directories in a directory",
 			Parameters:  json.RawMessage(`{"type":"object","properties":{"path":{"type":"string","description":"Directory path to list"}}}`),
+		})
+	}
+
+	if roleSupportsStructuredShell(role) {
+		tools = append(tools, engine.ToolDef{
+			Name:        "shell",
+			Description: "Route supported shell-style commands through structured reducers. Supported families: ls, tree, find, cat/read, grep/rg, git status/diff/log, go/cargo test, pytest, npm/pnpm/yarn test, ruff check, and docker ps. Returns compact summaries instead of raw shell output. This is not an arbitrary shell executor.",
+			Parameters:  json.RawMessage(`{"type":"object","properties":{"command":{"type":"string","description":"Supported shell-style command string, e.g. 'git log --stat -5', 'cargo test parser', 'pytest -k unit tests/', 'npm test --prefix packages/gui-agent', or 'docker ps'"},"measure_raw":{"type":"boolean","description":"Measure raw command output bytes and token estimates against the reduced summary"},"token_model":{"type":"string","description":"Tokenizer model or encoding for measurement (default cl100k_base)"}},"required":["command"]}`),
 		})
 	}
 
@@ -2591,7 +2701,8 @@ func buildToolDefsForRole(role types.AgentRole, hasMailbox, hasBoard bool, allow
 				Description: "Search codebase for relevant files and symbols. Returns a tree view of matches with file paths and sizes.",
 				Parameters: json.RawMessage(`{"type":"object","properties":{
 					"query":{"type":"string","description":"Natural language query describing what to find (e.g., 'hook dispatcher implementation')"},
-					"limit":{"type":"integer","description":"Maximum results to return (default 20)"}
+					"limit":{"type":"integer","description":"Maximum results to return (default 20)"},
+					"inline_mode":{"type":"string","enum":["auto","full","preview","artifact_only"],"description":"How much semantic search detail to inline (default auto)"}
 					},"required":["query"]}`),
 			},
 			engine.ToolDef{
@@ -2599,7 +2710,8 @@ func buildToolDefsForRole(role types.AgentRole, hasMailbox, hasBoard bool, allow
 				Description: "Code-only semantic search over symbols and codemaps. Use this when you need file discovery without session, memory, or ACA noise.",
 				Parameters: json.RawMessage(`{"type":"object","properties":{
 						"query":{"type":"string","description":"Natural language query describing what code to find"},
-						"limit":{"type":"integer","description":"Maximum results to return (default 20)"}
+						"limit":{"type":"integer","description":"Maximum results to return (default 20)"},
+						"inline_mode":{"type":"string","enum":["auto","full","preview","artifact_only"],"description":"How much semantic search detail to inline (default auto)"}
 					},"required":["query"]}`),
 			},
 			engine.ToolDef{
@@ -2607,7 +2719,8 @@ func buildToolDefsForRole(role types.AgentRole, hasMailbox, hasBoard bool, allow
 				Description: "Session-only semantic search over prior session summaries and related session context.",
 				Parameters: json.RawMessage(`{"type":"object","properties":{
 						"query":{"type":"string","description":"Natural language query describing what session history to find"},
-						"limit":{"type":"integer","description":"Maximum results to return (default 20)"}
+						"limit":{"type":"integer","description":"Maximum results to return (default 20)"},
+						"inline_mode":{"type":"string","enum":["auto","full","preview","artifact_only"],"description":"How much semantic search detail to inline (default auto)"}
 					},"required":["query"]}`),
 			},
 			engine.ToolDef{
@@ -2615,7 +2728,8 @@ func buildToolDefsForRole(role types.AgentRole, hasMailbox, hasBoard bool, allow
 				Description: "Memory-only semantic search over named memories and durable memory entries.",
 				Parameters: json.RawMessage(`{"type":"object","properties":{
 						"query":{"type":"string","description":"Natural language query describing what memory facts to find"},
-						"limit":{"type":"integer","description":"Maximum results to return (default 20)"}
+						"limit":{"type":"integer","description":"Maximum results to return (default 20)"},
+						"inline_mode":{"type":"string","enum":["auto","full","preview","artifact_only"],"description":"How much semantic search detail to inline (default auto)"}
 					},"required":["query"]}`),
 			},
 			engine.ToolDef{
@@ -2623,7 +2737,8 @@ func buildToolDefsForRole(role types.AgentRole, hasMailbox, hasBoard bool, allow
 				Description: "ACA/context-only semantic retrieval over top-of-mind, handoffs, and configured vault context.",
 				Parameters: json.RawMessage(`{"type":"object","properties":{
 						"query":{"type":"string","description":"Natural language query describing what context to retrieve"},
-						"limit":{"type":"integer","description":"Maximum results to return (default 20)"}
+						"limit":{"type":"integer","description":"Maximum results to return (default 20)"},
+						"inline_mode":{"type":"string","enum":["auto","full","preview","artifact_only"],"description":"How much semantic search detail to inline (default auto)"}
 					},"required":["query"]}`),
 			},
 			engine.ToolDef{
@@ -2631,7 +2746,8 @@ func buildToolDefsForRole(role types.AgentRole, hasMailbox, hasBoard bool, allow
 				Description: "All-in-one search: finds candidate files AND extracts relevant code snippets. Best for getting actual code context quickly.",
 				Parameters: json.RawMessage(`{"type":"object","properties":{
 					"question":{"type":"string","description":"Natural language query describing what code to find"},
-					"max_snippets":{"type":"integer","description":"Maximum snippets to return (default 20)"}
+					"max_snippets":{"type":"integer","description":"Maximum snippets to return (default 20)"},
+					"inline_mode":{"type":"string","enum":["auto","full","preview","artifact_only"],"description":"How much candidate/snippet detail to inline (default auto)"}
 				},"required":["question"]}`),
 			},
 			engine.ToolDef{
@@ -2660,10 +2776,11 @@ func buildToolDefsForRole(role types.AgentRole, hasMailbox, hasBoard bool, allow
 			},
 			engine.ToolDef{
 				Name:        "context_grep",
-				Description: "Search with simple single-line regex or literal-like patterns and return full function/block bodies. Do not use multiline regex such as \\n or [\\s\\S].",
+				Description: "Search with simple single-line regex or literal-like patterns and return function/block bodies. Large results may inline a preview and attach a CAS artifact. Do not use multiline regex such as \\n or [\\s\\S].",
 				Parameters: json.RawMessage(`{"type":"object","properties":{
 					"pattern":{"type":"string","description":"Regex pattern to search for"},
-					"path":{"type":"string","description":"Path to search in (default: workspace root)"}
+					"path":{"type":"string","description":"Path to search in (default: workspace root)"},
+					"inline_mode":{"type":"string","enum":["auto","full","preview","artifact_only"],"description":"How much block content to inline (default auto)"}
 				},"required":["pattern"]}`),
 			},
 			engine.ToolDef{
@@ -2677,12 +2794,12 @@ func buildToolDefsForRole(role types.AgentRole, hasMailbox, hasBoard bool, allow
 			engine.ToolDef{
 				Name:        "repo_index_search",
 				Description: "Search the repo index for nodes that match a short natural-language or symbol-name query. Avoid slash-heavy path strings.",
-				Parameters:  json.RawMessage(`{"type":"object","properties":{"query":{"type":"string","description":"FTS query string"},"limit":{"type":"integer","description":"Maximum results","default":20}},"required":["query"]}`),
+				Parameters:  json.RawMessage(`{"type":"object","properties":{"query":{"type":"string","description":"FTS query string"},"limit":{"type":"integer","description":"Maximum results","default":20},"inline_mode":{"type":"string","enum":["auto","full","preview","artifact_only"],"description":"How much search detail to inline (default auto)"}},"required":["query"]}`),
 			},
 			engine.ToolDef{
 				Name:        "repo_index_expand",
 				Description: "Expand the repo index graph from seed node IDs.",
-				Parameters:  json.RawMessage(`{"type":"object","properties":{"seeds":{"type":"array","items":{"type":"string"},"description":"Seed node IDs"},"edge_types":{"type":"array","items":{"type":"string"},"description":"Edge types to traverse"},"direction":{"type":"string","enum":["out","in"],"description":"Traversal direction"},"depth":{"type":"integer","description":"Traversal depth","default":1},"budget":{"type":"integer","description":"Max nodes to return","default":50},"per_node_cap":{"type":"integer","description":"Max edges per node per hop","default":50}},"required":["seeds"]}`),
+				Parameters:  json.RawMessage(`{"type":"object","properties":{"seeds":{"type":"array","items":{"type":"string"},"description":"Seed node IDs"},"edge_types":{"type":"array","items":{"type":"string"},"description":"Edge types to traverse"},"direction":{"type":"string","enum":["out","in"],"description":"Traversal direction"},"depth":{"type":"integer","description":"Traversal depth","default":1},"budget":{"type":"integer","description":"Max nodes to return","default":50},"per_node_cap":{"type":"integer","description":"Max edges per node per hop","default":50},"inline_mode":{"type":"string","enum":["auto","full","preview","artifact_only"],"description":"How much graph detail to inline (default auto)"}},"required":["seeds"]}`),
 			},
 			engine.ToolDef{
 				Name:        "repo_index_open",
@@ -2704,7 +2821,8 @@ func buildToolDefsForRole(role types.AgentRole, hasMailbox, hasBoard bool, allow
 					"budget":{"type":"integer","description":"Max nodes to return"},
 					"per_node_cap":{"type":"integer","description":"Max edges per node"},
 					"include_anchors":{"type":"boolean","description":"Include file/package anchors"},
-					"render":{"type":"string","enum":["none","tree","mermaid"]}
+					"render":{"type":"string","enum":["none","tree","mermaid"]},
+					"inline_mode":{"type":"string","enum":["auto","full","preview","artifact_only"],"description":"How much graph detail to inline (default auto)"}
 				},"required":["query"]}`),
 			},
 			engine.ToolDef{
@@ -2801,7 +2919,8 @@ func buildToolDefsForRole(role types.AgentRole, hasMailbox, hasBoard bool, allow
 				Description: "Search codebase for relevant files and symbols. Returns a tree view of matches with file paths and sizes.",
 				Parameters: json.RawMessage(`{"type":"object","properties":{
 					"query":{"type":"string","description":"Natural language query describing what to find (e.g., 'hook dispatcher implementation')"},
-					"limit":{"type":"integer","description":"Maximum results to return (default 20)"}
+					"limit":{"type":"integer","description":"Maximum results to return (default 20)"},
+					"inline_mode":{"type":"string","enum":["auto","full","preview","artifact_only"],"description":"How much semantic search detail to inline (default auto)"}
 					},"required":["query"]}`),
 			},
 			engine.ToolDef{
@@ -2809,7 +2928,8 @@ func buildToolDefsForRole(role types.AgentRole, hasMailbox, hasBoard bool, allow
 				Description: "Code-only semantic search over symbols and codemaps. Prefer this for scout discovery.",
 				Parameters: json.RawMessage(`{"type":"object","properties":{
 						"query":{"type":"string","description":"Natural language query describing what code to find"},
-						"limit":{"type":"integer","description":"Maximum results to return (default 20)"}
+						"limit":{"type":"integer","description":"Maximum results to return (default 20)"},
+						"inline_mode":{"type":"string","enum":["auto","full","preview","artifact_only"],"description":"How much semantic search detail to inline (default auto)"}
 					},"required":["query"]}`),
 			},
 			engine.ToolDef{
@@ -2817,7 +2937,8 @@ func buildToolDefsForRole(role types.AgentRole, hasMailbox, hasBoard bool, allow
 				Description: "All-in-one search: finds candidate files AND extracts relevant code snippets. Best for getting actual code context quickly.",
 				Parameters: json.RawMessage(`{"type":"object","properties":{
 					"question":{"type":"string","description":"Natural language query describing what code to find"},
-					"max_snippets":{"type":"integer","description":"Maximum snippets to return (default 20)"}
+					"max_snippets":{"type":"integer","description":"Maximum snippets to return (default 20)"},
+					"inline_mode":{"type":"string","enum":["auto","full","preview","artifact_only"],"description":"How much candidate/snippet detail to inline (default auto)"}
 				},"required":["question"]}`),
 			},
 			engine.ToolDef{
@@ -2835,12 +2956,12 @@ func buildToolDefsForRole(role types.AgentRole, hasMailbox, hasBoard bool, allow
 			engine.ToolDef{
 				Name:        "repo_index_search",
 				Description: "Search the repo index for nodes that match a short natural-language or symbol-name query. Avoid slash-heavy path strings.",
-				Parameters:  json.RawMessage(`{"type":"object","properties":{"query":{"type":"string","description":"FTS query string"},"limit":{"type":"integer","description":"Maximum results","default":20}},"required":["query"]}`),
+				Parameters:  json.RawMessage(`{"type":"object","properties":{"query":{"type":"string","description":"FTS query string"},"limit":{"type":"integer","description":"Maximum results","default":20},"inline_mode":{"type":"string","enum":["auto","full","preview","artifact_only"],"description":"How much search detail to inline (default auto)"}},"required":["query"]}`),
 			},
 			engine.ToolDef{
 				Name:        "repo_index_expand",
 				Description: "Expand the repo index graph from seed node IDs.",
-				Parameters:  json.RawMessage(`{"type":"object","properties":{"seeds":{"type":"array","items":{"type":"string"},"description":"Seed node IDs"},"edge_types":{"type":"array","items":{"type":"string"},"description":"Edge types to traverse"},"direction":{"type":"string","enum":["out","in"],"description":"Traversal direction"},"depth":{"type":"integer","description":"Traversal depth","default":1},"budget":{"type":"integer","description":"Max nodes to return","default":50},"per_node_cap":{"type":"integer","description":"Max edges per node per hop","default":50}},"required":["seeds"]}`),
+				Parameters:  json.RawMessage(`{"type":"object","properties":{"seeds":{"type":"array","items":{"type":"string"},"description":"Seed node IDs"},"edge_types":{"type":"array","items":{"type":"string"},"description":"Edge types to traverse"},"direction":{"type":"string","enum":["out","in"],"description":"Traversal direction"},"depth":{"type":"integer","description":"Traversal depth","default":1},"budget":{"type":"integer","description":"Max nodes to return","default":50},"per_node_cap":{"type":"integer","description":"Max edges per node per hop","default":50},"inline_mode":{"type":"string","enum":["auto","full","preview","artifact_only"],"description":"How much graph detail to inline (default auto)"}},"required":["seeds"]}`),
 			},
 			engine.ToolDef{
 				Name:        "repo_index_open",
@@ -2862,7 +2983,8 @@ func buildToolDefsForRole(role types.AgentRole, hasMailbox, hasBoard bool, allow
 					"budget":{"type":"integer","description":"Max nodes to return"},
 					"per_node_cap":{"type":"integer","description":"Max edges per node"},
 					"include_anchors":{"type":"boolean","description":"Include file/package anchors"},
-					"render":{"type":"string","enum":["none","tree","mermaid"]}
+					"render":{"type":"string","enum":["none","tree","mermaid"]},
+					"inline_mode":{"type":"string","enum":["auto","full","preview","artifact_only"],"description":"How much graph detail to inline (default auto)"}
 				},"required":["query"]}`),
 			},
 		)
@@ -2889,10 +3011,11 @@ func buildToolDefsForRole(role types.AgentRole, hasMailbox, hasBoard bool, allow
 			},
 			engine.ToolDef{
 				Name:        "context_grep",
-				Description: "Search with simple single-line regex or literal-like patterns and return full function/block bodies. Do not use multiline regex such as \\n or [\\s\\S].",
+				Description: "Search with simple single-line regex or literal-like patterns and return function/block bodies. Large results may inline a preview and attach a CAS artifact. Do not use multiline regex such as \\n or [\\s\\S].",
 				Parameters: json.RawMessage(`{"type":"object","properties":{
 					"pattern":{"type":"string","description":"Regex pattern to search for"},
-					"path":{"type":"string","description":"Path to search in (default: workspace root)"}
+					"path":{"type":"string","description":"Path to search in (default: workspace root)"},
+					"inline_mode":{"type":"string","enum":["auto","full","preview","artifact_only"],"description":"How much block content to inline (default auto)"}
 				},"required":["pattern"]}`),
 			},
 			engine.ToolDef{
@@ -2943,7 +3066,8 @@ func buildToolDefsForRole(role types.AgentRole, hasMailbox, hasBoard bool, allow
 				Description: "Memory-only semantic search over named memories and durable memory entries.",
 				Parameters: json.RawMessage(`{"type":"object","properties":{
 						"query":{"type":"string","description":"Natural language query describing what memory facts to find"},
-						"limit":{"type":"integer","description":"Maximum results to return (default 20)"}
+						"limit":{"type":"integer","description":"Maximum results to return (default 20)"},
+						"inline_mode":{"type":"string","enum":["auto","full","preview","artifact_only"],"description":"How much semantic search detail to inline (default auto)"}
 					},"required":["query"]}`),
 			},
 			engine.ToolDef{
@@ -3009,7 +3133,8 @@ func buildToolDefsForRole(role types.AgentRole, hasMailbox, hasBoard bool, allow
 				Description: "Session-only semantic search over prior session summaries and related session context.",
 				Parameters: json.RawMessage(`{"type":"object","properties":{
 						"query":{"type":"string","description":"Natural language query describing what session history to find"},
-						"limit":{"type":"integer","description":"Maximum results to return (default 20)"}
+						"limit":{"type":"integer","description":"Maximum results to return (default 20)"},
+						"inline_mode":{"type":"string","enum":["auto","full","preview","artifact_only"],"description":"How much semantic search detail to inline (default auto)"}
 					},"required":["query"]}`),
 			},
 			engine.ToolDef{
@@ -3063,7 +3188,8 @@ func buildToolDefsForRole(role types.AgentRole, hasMailbox, hasBoard bool, allow
 				Description: "ACA/context-only semantic retrieval over top-of-mind, handoffs, and configured vault context.",
 				Parameters: json.RawMessage(`{"type":"object","properties":{
 						"query":{"type":"string","description":"Natural language query describing what context to retrieve"},
-						"limit":{"type":"integer","description":"Maximum results to return (default 20)"}
+						"limit":{"type":"integer","description":"Maximum results to return (default 20)"},
+						"inline_mode":{"type":"string","enum":["auto","full","preview","artifact_only"],"description":"How much semantic search detail to inline (default auto)"}
 					},"required":["query"]}`),
 			},
 			engine.ToolDef{
@@ -3133,7 +3259,8 @@ func buildToolDefsForRole(role types.AgentRole, hasMailbox, hasBoard bool, allow
 				Description: "All-in-one search: finds candidate files AND extracts relevant code snippets. Best for getting actual code context quickly.",
 				Parameters: json.RawMessage(`{"type":"object","properties":{
 					"question":{"type":"string","description":"Natural language query describing what code to find"},
-					"max_snippets":{"type":"integer","description":"Maximum snippets to return (default 20)"}
+					"max_snippets":{"type":"integer","description":"Maximum snippets to return (default 20)"},
+					"inline_mode":{"type":"string","enum":["auto","full","preview","artifact_only"],"description":"How much candidate/snippet detail to inline (default auto)"}
 				},"required":["question"]}`),
 			},
 			engine.ToolDef{
@@ -3151,10 +3278,11 @@ func buildToolDefsForRole(role types.AgentRole, hasMailbox, hasBoard bool, allow
 			},
 			engine.ToolDef{
 				Name:        "context_grep",
-				Description: "Search with regex pattern, returns full function/block bodies (not just matching lines). Good for finding specific patterns with surrounding context.",
+				Description: "Search with regex pattern and return function/block bodies with surrounding context. Large results may inline a preview and attach a CAS artifact.",
 				Parameters: json.RawMessage(`{"type":"object","properties":{
 					"pattern":{"type":"string","description":"Regex pattern to search for"},
-					"path":{"type":"string","description":"Path to search in (default: workspace root)"}
+					"path":{"type":"string","description":"Path to search in (default: workspace root)"},
+					"inline_mode":{"type":"string","enum":["auto","full","preview","artifact_only"],"description":"How much block content to inline (default auto)"}
 				},"required":["pattern"]}`),
 			},
 			engine.ToolDef{
@@ -3168,12 +3296,12 @@ func buildToolDefsForRole(role types.AgentRole, hasMailbox, hasBoard bool, allow
 			engine.ToolDef{
 				Name:        "repo_index_search",
 				Description: "Search the repo index for nodes that match a text query. USE THIS for precise structural discovery before spawning DAG-focused subagents.",
-				Parameters:  json.RawMessage(`{"type":"object","properties":{"query":{"type":"string","description":"FTS query string"},"limit":{"type":"integer","description":"Maximum results","default":20}},"required":["query"]}`),
+				Parameters:  json.RawMessage(`{"type":"object","properties":{"query":{"type":"string","description":"FTS query string"},"limit":{"type":"integer","description":"Maximum results","default":20},"inline_mode":{"type":"string","enum":["auto","full","preview","artifact_only"],"description":"How much search detail to inline (default auto)"}},"required":["query"]}`),
 			},
 			engine.ToolDef{
 				Name:        "repo_index_expand",
 				Description: "Expand the repo index graph from seed node IDs.",
-				Parameters:  json.RawMessage(`{"type":"object","properties":{"seeds":{"type":"array","items":{"type":"string"},"description":"Seed node IDs"},"edge_types":{"type":"array","items":{"type":"string"},"description":"Edge types to traverse"},"direction":{"type":"string","enum":["out","in"],"description":"Traversal direction"},"depth":{"type":"integer","description":"Traversal depth","default":1},"budget":{"type":"integer","description":"Max nodes to return","default":50},"per_node_cap":{"type":"integer","description":"Max edges per node per hop","default":50}},"required":["seeds"]}`),
+				Parameters:  json.RawMessage(`{"type":"object","properties":{"seeds":{"type":"array","items":{"type":"string"},"description":"Seed node IDs"},"edge_types":{"type":"array","items":{"type":"string"},"description":"Edge types to traverse"},"direction":{"type":"string","enum":["out","in"],"description":"Traversal direction"},"depth":{"type":"integer","description":"Traversal depth","default":1},"budget":{"type":"integer","description":"Max nodes to return","default":50},"per_node_cap":{"type":"integer","description":"Max edges per node per hop","default":50},"inline_mode":{"type":"string","enum":["auto","full","preview","artifact_only"],"description":"How much graph detail to inline (default auto)"}},"required":["seeds"]}`),
 			},
 			engine.ToolDef{
 				Name:        "repo_index_open",
@@ -3195,7 +3323,8 @@ func buildToolDefsForRole(role types.AgentRole, hasMailbox, hasBoard bool, allow
 					"budget":{"type":"integer","description":"Max nodes to return"},
 					"per_node_cap":{"type":"integer","description":"Max edges per node"},
 					"include_anchors":{"type":"boolean","description":"Include file/package anchors"},
-					"render":{"type":"string","enum":["none","tree","mermaid"]}
+					"render":{"type":"string","enum":["none","tree","mermaid"]},
+					"inline_mode":{"type":"string","enum":["auto","full","preview","artifact_only"],"description":"How much graph detail to inline (default auto)"}
 				},"required":["query"]}`),
 			},
 		)
@@ -3831,30 +3960,26 @@ func (r *Runtime) buildTaskPrompt(ctx context.Context, cfg types.AgentConfig) st
 		return prompt
 	}
 
+	var prompt string
 	if r != nil && r.config.PromptVariantStore != nil && strings.TrimSpace(cfg.WorkspaceID) != "" && strings.TrimSpace(string(cfg.Role)) != "" {
 		provider, model := r.resolveEffectiveLLMTarget(cfg)
 		cfg.LLMProvider = provider
 		cfg.LLMModel = model
 		targetProfile := optimization.DerivePromptTargetProfile("", provider, model)
 		if variant, err := r.config.PromptVariantStore.ResolveLatestCompatible(ctx, strings.TrimSpace(cfg.WorkspaceID), strings.TrimSpace(string(cfg.Role)), targetProfile); err == nil && strings.TrimSpace(variant.Prompt) != "" {
-			return appendTaskPromptContext(strings.TrimSpace(variant.Prompt), cfg)
+			prompt = strings.TrimSpace(variant.Prompt)
 		}
 	}
 
-	// Otherwise, build a generic task prompt
-	prompt := fmt.Sprintf("You are a %s agent working in workspace %s.\n\n",
-		cfg.Role, cfg.WorkspaceID)
-
-	if cfg.TaskID != "" {
-		prompt += fmt.Sprintf("You are working on task: %s\n\n", cfg.TaskID)
+	if strings.TrimSpace(prompt) == "" {
+		// Otherwise, build a generic task prompt
+		prompt = fmt.Sprintf("You are a %s agent working in workspace %s.\n\n",
+			cfg.Role, cfg.WorkspaceID)
+		prompt += "Please analyze the workspace and complete your assigned work."
 	}
 
-	if cfg.EpicID != "" {
-		prompt += fmt.Sprintf("This is part of epic: %s\n\n", cfg.EpicID)
-	}
-
-	prompt += "Please analyze the workspace and complete your assigned work."
-
+	prompt = appendTaskPromptContext(prompt, cfg)
+	prompt = agentprompts.AppendStructuredShellGuidance(string(cfg.Role), prompt)
 	return prompt
 }
 

@@ -2,7 +2,7 @@ apiVersion: agentctl/v1
 kind: Skill
 metadata:
   name: repo/index_expand
-  version: 0.1.0
+  version: 0.2.0
   description: "Expand the repo index graph from seed node IDs"
   tags: ["repoindex", "graph", "expand"]
 distribution:
@@ -25,6 +25,12 @@ signature:
       type: string
       required: false
       description: "Workspace root (default: current workspace)"
+    - name: inline_mode
+      type: string
+      required: false
+      default: auto
+      enum: ["auto", "full", "preview", "artifact_only"]
+      description: "How much graph detail to inline; auto prefers preview + artifact for larger outputs"
     - name: edge_types
       type: array
       required: false
@@ -54,6 +60,24 @@ signature:
     - name: anchors
       type: array
       description: "Projected anchors for expanded nodes"
+    - name: inline_mode
+      type: string
+      description: "Resolved inline mode used for the response"
+    - name: node_count_total
+      type: integer
+      description: "Total node count before preview truncation"
+    - name: edge_count_total
+      type: integer
+      description: "Total edge count before preview truncation"
+    - name: anchor_count_total
+      type: integer
+      description: "Total anchor count before preview truncation"
+    - name: truncated
+      type: boolean
+      description: "Whether the inline result is a preview of a larger artifact-backed result"
+    - name: artifact
+      type: string
+      description: "CAS artifact digest for the full untruncated output when previewed inline"
 capabilities:
   network: "none"
   filesystem:

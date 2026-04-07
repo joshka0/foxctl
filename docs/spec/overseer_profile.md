@@ -7,7 +7,7 @@
 [mailbox_blackboard.md](./mailbox_blackboard.md),
 [../archive/specs/task_graph_insights.md](../archive/specs/task_graph_insights.md),
 [../archive/specs/unified_agents.md](../archive/specs/unified_agents.md),
-[semantic_file_index.md](./semantic_file_index.md)
+[semantic_file_index.md](../archive/specs/semantic_file_index.md)
 
 ---
 
@@ -133,7 +133,7 @@ behavior contract.
 
 - **Post-review indexing**
   - Overseer SHOULD coordinate post-review indexers such as the semantic file
-    index; see `semantic_file_index.md` §8 for details.
+    index; see `../archive/specs/semantic_file_index.md` §8 for details.
 
 - **Factory / Claude**
   - Overseer profile SHOULD be reflected in Factory / Claude agent

@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -15,7 +16,10 @@ import (
 
 	agentdomain "github.com/jkatigb/agentctl/internal/domain/agent"
 	"github.com/jkatigb/agentctl/internal/storage/agents"
+	"github.com/jkatigb/agentctl/internal/storage/blackboard"
 	v2jido "github.com/jkatigb/agentctl/internal/v2/adapters/jido"
+	libsqlworkers "github.com/jkatigb/agentctl/internal/v2/adapters/libsql/workers"
+	coreworker "github.com/jkatigb/agentctl/internal/v2/core/worker"
 )
 
 type testAgentEventPublisher struct {
@@ -157,6 +161,442 @@ func TestAgentRuntimeGetHandler_ReturnsRuntimeTree(t *testing.T) {
 	grandchild, _ := grandchildren[0].(map[string]any)
 	if strings.TrimSpace(fmt.Sprint(grandchild["agent_id"])) != "agent-grandchild-1" {
 		t.Fatalf("grandchild.agent_id=%v want agent-grandchild-1", grandchild["agent_id"])
+	}
+}
+
+func TestAgentRuntimeGetHandler_ReturnsGoRuntimeTree(t *testing.T) {
+	t.Setenv("AGENTCTL_DB_DRIVER", "")
+	t.Setenv(EnvOrchestrationRuntimeBackend, orchestrationRuntimeBackendGoruntimeAPI)
+
+	cfg := orchestrationTestConfig(t.TempDir())
+	store, err := agents.Open(context.Background(), cfg.Storage.Root)
+	if err != nil {
+		t.Fatalf("open agents store: %v", err)
+	}
+	defer func() {
+		if closeErr := store.Close(); closeErr != nil {
+			t.Fatalf("close agents store: %v", closeErr)
+		}
+	}()
+
+	err = store.Create(context.Background(), agentdomain.Agent{
+		ID:          "agent-go-root",
+		Namespace:   "ws-1",
+		Name:        "Go Runtime Root",
+		Role:        "overseer",
+		SkillsAllow: []string{},
+		Policy:      agentdomain.Policy{},
+		ShareBB:     "scoped",
+		State:       agentdomain.StateRunning,
+		CreatedAt:   time.Date(2026, time.April, 6, 12, 0, 0, 0, time.UTC),
+		ExecMode:    agentdomain.ModeReactive,
+	})
+	if err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+
+	workerStore, closeWorkers, err := libsqlworkers.Open(context.Background(), cfg.Storage.Root)
+	if err != nil {
+		t.Fatalf("open worker store: %v", err)
+	}
+	defer func() { _ = closeWorkers() }()
+	if err := workerStore.Upsert(context.Background(), coreworker.Record{
+		WorkerID:    "subprocess:agent-go-root",
+		BackendKind: coreworker.BackendSubprocess,
+		AgentID:     "agent-go-root",
+		Status:      coreworker.StatusRunning,
+		RawState:    json.RawMessage(`{"agentctl":{"status":"running","agent":"agent-go-root"}}`),
+	}); err != nil {
+		t.Fatalf("upsert root worker: %v", err)
+	}
+	if err := workerStore.Upsert(context.Background(), coreworker.Record{
+		WorkerID:       "subprocess:agent-go-child-1",
+		BackendKind:    coreworker.BackendSubprocess,
+		AgentID:        "agent-go-child-1",
+		ParentAgentID:  "agent-go-root",
+		ParentWorkerID: "subprocess:agent-go-root",
+		Status:         coreworker.StatusRunning,
+		RawState:       json.RawMessage(`{"agentctl":{"status":"running","agent":"agent-go-child-1"}}`),
+	}); err != nil {
+		t.Fatalf("upsert child worker: %v", err)
+	}
+
+	h := AgentDetailHandler(cfg, zerolog.Nop(), nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/agents/agent-go-root/runtime?depth=2", nil)
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rr.Code, rr.Body.String())
+	}
+
+	body := decodeResponseBody(t, rr)
+	runtimeWrap, _ := body["runtime"].(map[string]any)
+	root, _ := runtimeWrap["root"].(map[string]any)
+	if strings.TrimSpace(fmt.Sprint(root["agent_id"])) != "agent-go-root" {
+		t.Fatalf("root.agent_id=%v want agent-go-root", root["agent_id"])
+	}
+	children, _ := root["children"].([]any)
+	if len(children) != 1 {
+		t.Fatalf("root children=%d want 1", len(children))
+	}
+	child, _ := children[0].(map[string]any)
+	if strings.TrimSpace(fmt.Sprint(child["agent_id"])) != "agent-go-child-1" {
+		t.Fatalf("child.agent_id=%v want agent-go-child-1", child["agent_id"])
+	}
+	if strings.TrimSpace(fmt.Sprint(child["status"])) != "running" {
+		t.Fatalf("child.status=%v want running", child["status"])
+	}
+}
+
+func TestAgentDaemonKillWithRuntime_UsesInjectedHostForGoRuntime(t *testing.T) {
+	t.Setenv("AGENTCTL_DB_DRIVER", "")
+	t.Setenv(EnvOrchestrationRuntimeBackend, orchestrationRuntimeBackendGoruntimeAPI)
+
+	cfg := orchestrationTestConfig(t.TempDir())
+	store, err := agents.Open(context.Background(), cfg.Storage.Root)
+	if err != nil {
+		t.Fatalf("open agents store: %v", err)
+	}
+	defer func() {
+		if closeErr := store.Close(); closeErr != nil {
+			t.Fatalf("close agents store: %v", closeErr)
+		}
+	}()
+
+	err = store.Create(context.Background(), agentdomain.Agent{
+		ID:          "agent-go-kill-1",
+		Namespace:   "ws-1",
+		Name:        "Go Runtime Kill",
+		Role:        "coder",
+		SkillsAllow: []string{},
+		Policy:      agentdomain.Policy{},
+		ShareBB:     "scoped",
+		State:       agentdomain.StateRunning,
+		CreatedAt:   time.Date(2026, time.April, 6, 12, 30, 0, 0, time.UTC),
+		ExecMode:    agentdomain.ModeReactive,
+	})
+	if err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+
+	host := &fakeOrchestrationRuntimeHost{
+		signalResp: coreworker.SignalResponse{
+			WorkerID: "subprocess:agent-go-kill-1",
+			AgentID:  "agent-go-kill-1",
+			Status:   coreworker.StatusStopping,
+		},
+	}
+	h := AgentDetailHandlerWithRuntime(cfg, zerolog.Nop(), nil, host)
+	req := httptest.NewRequest(http.MethodPost, "/api/agents/agent-go-kill-1/daemon/kill", nil)
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	if host.signalCalls != 1 {
+		t.Fatalf("signal_calls=%d want 1", host.signalCalls)
+	}
+	if host.lastSignalReq.AgentID != "agent-go-kill-1" {
+		t.Fatalf("signal agent_id=%q want agent-go-kill-1", host.lastSignalReq.AgentID)
+	}
+	body := decodeResponseBody(t, rr)
+	if ok := body["ok"]; ok != true {
+		t.Fatalf("ok=%v want true", ok)
+	}
+	if status := strings.TrimSpace(fmt.Sprint(body["status"])); status != "stopping" {
+		t.Fatalf("status=%q want stopping", status)
+	}
+
+	updated, err := store.Get(context.Background(), "agent-go-kill-1")
+	if err != nil {
+		t.Fatalf("reload agent: %v", err)
+	}
+	if updated.State != agentdomain.StateStopped {
+		t.Fatalf("agent state=%q want %q", updated.State, agentdomain.StateStopped)
+	}
+}
+
+func TestAgentRuntimeLogsGetHandler_ReturnsGoRuntimeRecentLogs(t *testing.T) {
+	t.Setenv("AGENTCTL_DB_DRIVER", "")
+	t.Setenv(EnvOrchestrationRuntimeBackend, orchestrationRuntimeBackendGoruntimeAPI)
+
+	cfg := orchestrationTestConfig(t.TempDir())
+	store, err := agents.Open(context.Background(), cfg.Storage.Root)
+	if err != nil {
+		t.Fatalf("open agents store: %v", err)
+	}
+	defer func() {
+		if closeErr := store.Close(); closeErr != nil {
+			t.Fatalf("close agents store: %v", closeErr)
+		}
+	}()
+
+	err = store.Create(context.Background(), agentdomain.Agent{
+		ID:          "agent-go-logs-1",
+		Namespace:   "ws-1",
+		Name:        "Go Runtime Logs",
+		Role:        "coder",
+		SkillsAllow: []string{},
+		Policy:      agentdomain.Policy{},
+		ShareBB:     "scoped",
+		State:       agentdomain.StateRunning,
+		CreatedAt:   time.Date(2026, time.April, 6, 12, 40, 0, 0, time.UTC),
+		ExecMode:    agentdomain.ModeReactive,
+	})
+	if err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+
+	workerStore, closeWorkers, err := libsqlworkers.Open(context.Background(), cfg.Storage.Root)
+	if err != nil {
+		t.Fatalf("open worker store: %v", err)
+	}
+	defer func() { _ = closeWorkers() }()
+	if err := workerStore.Upsert(context.Background(), coreworker.Record{
+		WorkerID:    "subprocess:agent-go-logs-1",
+		BackendKind: coreworker.BackendSubprocess,
+		AgentID:     "agent-go-logs-1",
+		Status:      coreworker.StatusRunning,
+		RawState: json.RawMessage(`{"agentctl":{"status":"running","recent_logs":[
+			{"stream":"stdout","text":"first line","ts":"2026-04-06T12:40:01Z"},
+			{"stream":"stderr","text":"second line","ts":"2026-04-06T12:40:02Z"}
+		]}}`),
+	}); err != nil {
+		t.Fatalf("upsert worker: %v", err)
+	}
+
+	h := AgentDetailHandler(cfg, zerolog.Nop(), nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/agents/agent-go-logs-1/runtime/logs?limit=1", nil)
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	body := decodeResponseBody(t, rr)
+	if strings.TrimSpace(fmt.Sprint(body["agent_id"])) != "agent-go-logs-1" {
+		t.Fatalf("agent_id=%v want agent-go-logs-1", body["agent_id"])
+	}
+	if strings.TrimSpace(fmt.Sprint(body["count"])) != "1" {
+		t.Fatalf("count=%v want 1", body["count"])
+	}
+	entries, _ := body["entries"].([]any)
+	if len(entries) != 1 {
+		t.Fatalf("entries len=%d want 1", len(entries))
+	}
+	entry, _ := entries[0].(map[string]any)
+	if strings.TrimSpace(fmt.Sprint(entry["stream"])) != "stderr" {
+		t.Fatalf("stream=%v want stderr", entry["stream"])
+	}
+	if strings.TrimSpace(fmt.Sprint(entry["text"])) != "second line" {
+		t.Fatalf("text=%v want second line", entry["text"])
+	}
+}
+
+func TestAgentRuntimeLogsStreamHandler_StreamsGoRuntimeLogUpdates(t *testing.T) {
+	t.Setenv("AGENTCTL_DB_DRIVER", "")
+	t.Setenv(EnvOrchestrationRuntimeBackend, orchestrationRuntimeBackendGoruntimeAPI)
+
+	cfg := orchestrationTestConfig(t.TempDir())
+	store, err := agents.Open(context.Background(), cfg.Storage.Root)
+	if err != nil {
+		t.Fatalf("open agents store: %v", err)
+	}
+	defer func() {
+		if closeErr := store.Close(); closeErr != nil {
+			t.Fatalf("close agents store: %v", closeErr)
+		}
+	}()
+
+	err = store.Create(context.Background(), agentdomain.Agent{
+		ID:          "agent-go-stream-logs-1",
+		Namespace:   "ws-1",
+		Name:        "Go Runtime Log Stream",
+		Role:        "coder",
+		SkillsAllow: []string{},
+		Policy:      agentdomain.Policy{},
+		ShareBB:     "scoped",
+		State:       agentdomain.StateRunning,
+		CreatedAt:   time.Date(2026, time.April, 6, 12, 50, 0, 0, time.UTC),
+		ExecMode:    agentdomain.ModeReactive,
+	})
+	if err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+
+	workerStore, closeWorkers, err := libsqlworkers.Open(context.Background(), cfg.Storage.Root)
+	if err != nil {
+		t.Fatalf("open worker store: %v", err)
+	}
+	defer func() { _ = closeWorkers() }()
+	if err := workerStore.Upsert(context.Background(), coreworker.Record{
+		WorkerID:    "subprocess:agent-go-stream-logs-1",
+		BackendKind: coreworker.BackendSubprocess,
+		AgentID:     "agent-go-stream-logs-1",
+		Status:      coreworker.StatusRunning,
+		RawState: json.RawMessage(`{"agentctl":{"status":"running","recent_logs":[
+			{"stream":"stdout","text":"first line","ts":"2026-04-06T12:50:01Z"}
+		]}}`),
+	}); err != nil {
+		t.Fatalf("upsert worker: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	req := httptest.NewRequest(http.MethodGet, "/api/agents/agent-go-stream-logs-1/runtime/logs/stream?poll_ms=25", nil).WithContext(ctx)
+	rr := newStreamingResponseRecorder()
+	done := make(chan struct{})
+	go func() {
+		AgentDetailHandler(cfg, zerolog.Nop(), nil).ServeHTTP(rr, req)
+		close(done)
+	}()
+
+	time.Sleep(80 * time.Millisecond)
+	if err := workerStore.Upsert(context.Background(), coreworker.Record{
+		WorkerID:    "subprocess:agent-go-stream-logs-1",
+		BackendKind: coreworker.BackendSubprocess,
+		AgentID:     "agent-go-stream-logs-1",
+		Status:      coreworker.StatusRunning,
+		RawState: json.RawMessage(`{"agentctl":{"status":"running","recent_logs":[
+			{"stream":"stdout","text":"first line","ts":"2026-04-06T12:50:01Z"},
+			{"stream":"stderr","text":"second line","ts":"2026-04-06T12:50:02Z"}
+		]}}`),
+	}); err != nil {
+		t.Fatalf("upsert worker update: %v", err)
+	}
+
+	waitForBodyContains(t, rr, "second line", 2*time.Second)
+	cancel()
+	<-done
+
+	body := rr.BodyString()
+	if !strings.Contains(body, "event: connected") {
+		t.Fatalf("expected connected event, body=%s", body)
+	}
+	if !strings.Contains(body, "event: runtime.logs") {
+		t.Fatalf("expected runtime.logs event, body=%s", body)
+	}
+	if !strings.Contains(body, "first line") || !strings.Contains(body, "second line") {
+		t.Fatalf("expected streamed log lines, body=%s", body)
+	}
+}
+
+func waitForBodyContains(t *testing.T, rr *streamingResponseRecorder, needle string, timeout time.Duration) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		body := rr.BodyString()
+		if strings.Contains(body, needle) {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatalf("response body did not contain %q within %s; body=%s", needle, timeout, rr.BodyString())
+}
+
+type streamingResponseRecorder struct {
+	mu     sync.Mutex
+	header http.Header
+	body   bytes.Buffer
+	status int
+}
+
+func newStreamingResponseRecorder() *streamingResponseRecorder {
+	return &streamingResponseRecorder{
+		header: make(http.Header),
+		status: http.StatusOK,
+	}
+}
+
+func (r *streamingResponseRecorder) Header() http.Header {
+	return r.header
+}
+
+func (r *streamingResponseRecorder) Write(p []byte) (int, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.body.Write(p)
+}
+
+func (r *streamingResponseRecorder) WriteHeader(statusCode int) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.status = statusCode
+}
+
+func (r *streamingResponseRecorder) Flush() {}
+
+func (r *streamingResponseRecorder) BodyString() string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.body.String()
+}
+
+func TestResolveAgentSpawnPrompt_UsesRoomRoleDefaultAndOnboarding(t *testing.T) {
+	got := resolveAgentSpawnPrompt(AgentSpawnRequest{
+		Role:        "assistant",
+		RoomID:      "triad-123",
+		RoomRole:    "frontend-eng",
+		WorkspaceID: "ws1",
+	}, "ws1")
+	for _, want := range []string{
+		"You are a frontend engineering agent.",
+		"ROOM ONBOARDING:",
+		"`agentctl-room-operator` and `agentctl-room`",
+		"`agentctl room status triad-123`",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("prompt missing %q\n%s", want, got)
+		}
+	}
+}
+
+func TestAttachSpawnedAgentToRoom_SendsOnboardingMessage(t *testing.T) {
+	cfg := orchestrationTestConfig(t.TempDir())
+	ctx := context.Background()
+	if err := attachSpawnedAgentToRoom(ctx, cfg, "ws1", "alpha", "agent-1", "frontend-eng", "frontend-eng"); err != nil {
+		t.Fatalf("attachSpawnedAgentToRoom: %v", err)
+	}
+
+	store, err := blackboard.OpenBoardStore(ctx, cfg.Storage.Root)
+	if err != nil {
+		t.Fatalf("open board store: %v", err)
+	}
+	defer func() { _ = store.Close() }()
+
+	room, err := store.GetRoom(ctx, "ws1", "alpha", "")
+	if err != nil {
+		t.Fatalf("get room: %v", err)
+	}
+	foundMember := false
+	for _, member := range room.Members {
+		if member.ActorID == "agent-1" && member.Role == "frontend-eng" {
+			foundMember = true
+			break
+		}
+	}
+	if !foundMember {
+		t.Fatalf("expected agent-1 frontend-eng member, got %+v", room.Members)
+	}
+
+	messages, err := store.ListRoomMessages(ctx, "ws1", "alpha", 10)
+	if err != nil {
+		t.Fatalf("list room messages: %v", err)
+	}
+	if len(messages) != 1 {
+		t.Fatalf("messages=%d want 1", len(messages))
+	}
+	msg := messages[0]
+	if got, want := msg.Recipient, "agent-1"; got != want {
+		t.Fatalf("recipient=%q want %q", got, want)
+	}
+	if got, want := msg.Subject, "Room onboarding: frontend-eng"; got != want {
+		t.Fatalf("subject=%q want %q", got, want)
+	}
+	if !strings.Contains(msg.Body, "ROOM ONBOARDING:") {
+		t.Fatalf("body missing onboarding block\n%s", msg.Body)
 	}
 }
 

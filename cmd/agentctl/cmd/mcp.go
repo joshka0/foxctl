@@ -69,6 +69,55 @@ var skillGroups = map[string][]string{
 		"code/dag_grep",
 		"codemap/get",
 	},
+	// optimized-retrieval: Only the compact retrieval tools we optimized for agent use.
+	// Keep repo_index_* and structured_shell in curated MCP registration to avoid name conflicts.
+	"optimized-retrieval": {
+		"code/semantic_search",
+		"code/smart_search",
+		"code/symbols",
+		"code/snippet_extract",
+		"code/context_grep",
+		"code/dag_grep",
+		"codemap/get",
+		"code/refactor_scout",
+	},
+	// mobile: simulator/device automation surfaces.
+	"mobile": {
+		"mobile/android",
+		"mobile/ios",
+		"mobile/expo",
+	},
+	// godot: Godot editor/build automation.
+	"godot": {
+		"build/godot",
+		"editor/godot",
+	},
+	// api: narrow HTTP/OpenAPI planning surface.
+	"api": {
+		"http/openapi",
+	},
+	// refactor: refactor discovery/planning without the broader retrieval set.
+	"refactor": {
+		"code/refactor_scout",
+		"code/refactor_advisor",
+		"code/symbols",
+		"code/context_grep",
+		"code/snippet_extract",
+		"code/semantic_search",
+	},
+	// context: session/context continuity tools.
+	"context": {
+		"session/recall",
+		"session/timeline",
+		"session/query",
+		"session/summarize",
+	},
+	// room: command-backed durable room coordination surface.
+	"room": {},
+	// mux: command-backed terminal collaboration surface.
+	"mux": {},
+	// collab: combined room + mux collaboration surface.
+	"collab": {},
 	// code-write: Code modification tools
 	"code-write": {
 		"fs/apply_edit",
@@ -265,11 +314,13 @@ const (
 
 func newMCPServeCommand() *cobra.Command {
 	var (
-		configFile   string
-		httpAddr     string
-		enableSkills bool
-		daemonMode   bool
-		skillGroupsF []string
+		configFile         string
+		httpAddr           string
+		enableSkills       bool
+		daemonMode         bool
+		skillGroupsF       []string
+		optimizedRetrieval bool
+		groupOnly          bool
 	)
 
 	cmd := &cobra.Command{
@@ -282,10 +333,20 @@ Use --http to run as an HTTP daemon with SSE transport (foreground).
 Use --daemon to run as an HTTP daemon in background mode.
 Use --skills to expose all agentctl skills via generic agentctl_run/agentctl_skills tools.
 Use --groups to expose specific skill groups as first-class MCP tools.
+Use --group-only to expose only the specified groups (no default curated MCP tools).
 
 Available skill groups:
   all         - All installed agentctl skills as first-class MCP tools
   code-intel  - Code analysis: semantic_search, smart_search, symbols, snippet_extract, context_grep, codemap_get, codemap_generate
+  optimized-retrieval - Only the compact retrieval tools optimized for agent use
+  mobile      - mobile/android, mobile/ios, mobile/expo
+  godot       - build/godot, editor/godot
+  api         - http/openapi
+  refactor    - refactor_scout, refactor_advisor, symbols, snippet tools
+  context     - session recall/timeline/query/summarize
+  room        - command-backed room coordination tools
+  mux         - command-backed terminal collaboration tools
+  collab      - room + mux collaboration tools
   code-write  - Code modification: smart_write
   project     - Project management: todo/manage, memory/query, session/recall
   agentctl-ci - CI/CD integration: checks, prcomments
@@ -311,7 +372,22 @@ Example usage in Claude's mcp.json (stdio):
 Example usage with HTTP/SSE daemon (foreground):
   agentctl mcp serve --http :8091 --groups code-intel,project
 
-Example usage with daemon mode (background):
+  # Start a narrow retrieval-focused MCP bridge
+  agentctl mcp serve --optimized-retrieval
+
+  # Start a mobile-only MCP bridge
+  agentctl mcp serve --groups mobile --group-only
+
+  # Start a Godot-only MCP bridge
+  agentctl mcp serve --groups godot --group-only
+
+  # Start a room-only MCP bridge
+  agentctl mcp serve --groups room --group-only
+
+  # Start a mux-only MCP bridge
+  agentctl mcp serve --groups mux --group-only
+
+  Example usage with daemon mode (background):
   # Start daemon in background
   agentctl mcp serve --daemon --groups code-intel,project,agentctl-ci
 
@@ -330,23 +406,38 @@ Example usage with daemon mode (background):
     }
   }`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			if !optimizedRetrieval {
+				for _, group := range skillGroupsF {
+					if strings.EqualFold(strings.TrimSpace(group), "optimized-retrieval") {
+						optimizedRetrieval = true
+						break
+					}
+				}
+			}
+			if optimizedRetrieval && len(skillGroupsF) == 0 {
+				skillGroupsF = []string{"optimized-retrieval"}
+			}
 			// Daemon mode implies HTTP mode with default port
 			if daemonMode {
 				if httpAddr == "" {
 					httpAddr = defaultDaemonPort
 				}
 				return runDaemonMode(cmd.Context(), mcpServerOptions{
-					configFile:   configFile,
-					httpAddr:     httpAddr,
-					enableSkills: enableSkills,
-					groups:       skillGroupsF,
+					configFile:         configFile,
+					httpAddr:           httpAddr,
+					enableSkills:       enableSkills,
+					groups:             skillGroupsF,
+					optimizedRetrieval: optimizedRetrieval,
+					groupOnly:          groupOnly,
 				})
 			}
 			return runMCPServer(cmd.Context(), mcpServerOptions{
-				configFile:   configFile,
-				httpAddr:     httpAddr,
-				enableSkills: enableSkills,
-				groups:       skillGroupsF,
+				configFile:         configFile,
+				httpAddr:           httpAddr,
+				enableSkills:       enableSkills,
+				groups:             skillGroupsF,
+				optimizedRetrieval: optimizedRetrieval,
+				groupOnly:          groupOnly,
 			})
 		},
 	}
@@ -355,7 +446,9 @@ Example usage with daemon mode (background):
 	cmd.Flags().StringVar(&httpAddr, "http", "", "HTTP address for SSE daemon mode (e.g., :8091)")
 	cmd.Flags().BoolVar(&enableSkills, "skills", false, "Expose all agentctl skills via agentctl_run/agentctl_skills tools")
 	cmd.Flags().BoolVar(&daemonMode, "daemon", false, "Run as background daemon (implies --http :8091)")
-	cmd.Flags().StringSliceVar(&skillGroupsF, "groups", nil, "Skill groups to expose as first-class tools (code-intel,code-write,project,agentctl-ci)")
+	cmd.Flags().StringSliceVar(&skillGroupsF, "groups", nil, "Skill groups to expose as first-class tools (code-intel,optimized-retrieval,mobile,godot,api,refactor,context,room,mux,collab,code-write,project,agentctl-ci)")
+	cmd.Flags().BoolVar(&groupOnly, "group-only", false, "Expose only the specified skill groups (skip the default curated MCP tools)")
+	cmd.Flags().BoolVar(&optimizedRetrieval, "optimized-retrieval", false, "Expose only the optimized retrieval MCP surface: structured_shell, repo index retrieval, and the optimized-retrieval skill group")
 	return cmd
 }
 
@@ -386,6 +479,9 @@ func runDaemonMode(ctx context.Context, opts mcpServerOptions) error {
 	args := []string{"mcp", "serve", "--http", opts.httpAddr}
 	if opts.enableSkills {
 		args = append(args, "--skills")
+	}
+	if opts.optimizedRetrieval {
+		args = append(args, "--optimized-retrieval")
 	}
 	if opts.configFile != "" {
 		args = append(args, "--config", opts.configFile)
@@ -580,10 +676,12 @@ func newMCPStatusCommand() *cobra.Command {
 
 // mcpServerOptions holds configuration for the MCP server.
 type mcpServerOptions struct {
-	configFile   string
-	httpAddr     string
-	enableSkills bool
-	groups       []string
+	configFile         string
+	httpAddr           string
+	enableSkills       bool
+	groups             []string
+	optimizedRetrieval bool
+	groupOnly          bool
 }
 
 func runMCPServer(ctx context.Context, opts mcpServerOptions) error {
@@ -609,8 +707,17 @@ func runMCPServer(ctx context.Context, opts mcpServerOptions) error {
 		server.WithToolCapabilities(true),
 	)
 
-	// Register curated tools with simplified schemas (external MCP proxies + html)
-	registerTools(s)
+	// Register curated tools with simplified schemas unless this is a groups-only surface.
+	if opts.groupOnly {
+		// Intentionally skip default curated tool registration.
+	} else if opts.optimizedRetrieval {
+		registerOptimizedRetrievalTools(s)
+	} else {
+		registerTools(s)
+	}
+
+	// Register focused command-backed group tools regardless of skill-group mode.
+	registerFocusedGroupTools(s, opts.groups)
 
 	// Register skill groups as first-class MCP tools
 	if len(opts.groups) > 0 {
@@ -1234,6 +1341,309 @@ func registerTools(s *server.MCPServer) {
 	)
 }
 
+func registerOptimizedRetrievalTools(s *server.MCPServer) {
+	s.AddTool(
+		mcp.NewTool("repo_index_build",
+			mcp.WithDescription("Build or refresh the repo graph index."),
+			mcp.WithString("workspace", mcp.Description("Workspace root (default: .)")),
+			mcp.WithBoolean("include_go", mcp.Description("Include Go sources (default: true)")),
+			mcp.WithBoolean("include_typescript", mcp.Description("Include TypeScript sources (default: true)")),
+			mcp.WithBoolean("include_elixir", mcp.Description("Include Elixir sources (default: false)")),
+			mcp.WithBoolean("include_terraform", mcp.Description("Include Terraform sources (default: false)")),
+			mcp.WithBoolean("include_kubernetes", mcp.Description("Include Kubernetes/Helm manifests (default: false)")),
+			mcp.WithBoolean("include_shell", mcp.Description("Include shell scripts (default: false)")),
+			mcp.WithBoolean("include_tests", mcp.Description("Include test files (default: false)")),
+			mcp.WithBoolean("dry_run", mcp.Description("Build without writing to the index (default: false)")),
+		),
+		handleRepoIndexBuild,
+	)
+
+	s.AddTool(
+		mcp.NewTool("repo_index_status",
+			mcp.WithDescription("Show repo graph index status."),
+			mcp.WithString("workspace", mcp.Description("Workspace root (default: .)")),
+		),
+		handleRepoIndexStatus,
+	)
+
+	s.AddTool(
+		mcp.NewTool("structured_shell",
+			mcp.WithDescription("Structured shell router for supported read-only repo inspection commands. This is not an arbitrary shell executor."),
+			mcp.WithString("command", mcp.Description("Shell command string to route, for example `git log --stat -5` or `rg -n 'spawn' internal/agent | head -n 10`")),
+			mcp.WithArray("argv", mcp.Description("Optional argv form instead of command string"), mcp.WithStringItems()),
+			mcp.WithString("workspace", mcp.Description("Workspace root (default: .)")),
+			mcp.WithBoolean("measure_raw", mcp.Description("Measure raw output bytes and token estimates against the reduced summary")),
+			mcp.WithString("token_model", mcp.Description("Tokenizer model or encoding for measurement (default: cl100k_base)")),
+		),
+		handleStructuredShell,
+	)
+
+	s.AddTool(
+		mcp.NewTool("context_show",
+			mcp.WithDescription("Show current context-plane workspace state."),
+			mcp.WithString("workspace", mcp.Description("Workspace path (optional; defaults to current workspace context)")),
+		),
+		handleContextShow,
+	)
+
+	s.AddTool(
+		mcp.NewTool("repo_index_search",
+			mcp.WithDescription("Search the repo index with compact preview-first output."),
+			mcp.WithString("workspace", mcp.Description("Workspace root (default: .)")),
+			mcp.WithString("query", mcp.Required(), mcp.Description("FTS query string")),
+			mcp.WithNumber("limit", mcp.Description("Maximum results (default: 20)")),
+			mcp.WithString("inline_mode", mcp.Description("Inline mode: auto, full, preview, or artifact_only")),
+		),
+		handleRepoIndexSearch,
+	)
+
+	s.AddTool(
+		mcp.NewTool("repo_index_expand",
+			mcp.WithDescription("Expand the repo index graph from seed nodes with compact preview-first output."),
+			mcp.WithString("workspace", mcp.Description("Workspace root (default: .)")),
+			mcp.WithArray("seed", mcp.Required(), mcp.Description("Seed node IDs (repeatable)"), mcp.WithStringItems()),
+			mcp.WithArray("edge", mcp.Description("Edge types to traverse (repeatable)"), mcp.WithStringItems()),
+			mcp.WithNumber("depth", mcp.Description("Traversal depth (default: 1)")),
+			mcp.WithNumber("budget", mcp.Description("Max nodes to return (default: 50)")),
+			mcp.WithNumber("per_node", mcp.Description("Max edges per node per hop (default: 50)")),
+			mcp.WithString("direction", mcp.Description("Traversal direction: out or in (default: out)")),
+			mcp.WithString("inline_mode", mcp.Description("Inline mode: auto, full, preview, or artifact_only")),
+		),
+		handleRepoIndexExpand,
+	)
+
+	s.AddTool(
+		mcp.NewTool("repo_index_dag_grep",
+			mcp.WithDescription("Search and expand the repo index into a compact explanation subgraph with preview-first output."),
+			mcp.WithString("query", mcp.Required(), mcp.Description("Search query")),
+			mcp.WithString("workspace", mcp.Description("Workspace root (default: .)")),
+			mcp.WithString("mode", mcp.Description("Search mode: fts, semantic, or hybrid")),
+			mcp.WithNumber("k", mcp.Description("Number of seed nodes (default: 10)")),
+			mcp.WithArray("node_kinds", mcp.Description("Node kinds to include"), mcp.WithStringItems()),
+			mcp.WithArray("edge_sets", mcp.Description("Edge sets to include"), mcp.WithStringItems()),
+			mcp.WithArray("edge_types", mcp.Description("Explicit edge types to traverse"), mcp.WithStringItems()),
+			mcp.WithString("direction", mcp.Description("Traversal direction: out or in")),
+			mcp.WithNumber("depth", mcp.Description("Traversal depth")),
+			mcp.WithNumber("budget", mcp.Description("Max nodes to return")),
+			mcp.WithNumber("per_node_cap", mcp.Description("Max edges per node")),
+			mcp.WithBoolean("include_anchors", mcp.Description("Include file/package anchors")),
+			mcp.WithString("render", mcp.Description("Optional render format: tree or mermaid")),
+			mcp.WithString("inline_mode", mcp.Description("Inline mode: auto, full, preview, or artifact_only")),
+		),
+		handleRepoIndexDAGGrep,
+	)
+}
+
+func registerFocusedGroupTools(s *server.MCPServer, groups []string) {
+	groupSet := make(map[string]bool, len(groups))
+	for _, group := range groups {
+		group = strings.ToLower(strings.TrimSpace(group))
+		if group != "" {
+			groupSet[group] = true
+		}
+	}
+	if groupSet["collab"] || groupSet["room"] {
+		registerRoomTools(s)
+	}
+	if groupSet["collab"] || groupSet["mux"] {
+		registerMuxTools(s)
+	}
+	if groupSet["mobile"] {
+		registerMobileTools(s)
+	}
+}
+
+func registerMobileTools(s *server.MCPServer) {
+	s.AddTool(
+		mcp.NewTool("mobile_expo",
+			mcp.WithDescription("Expo/React Native mobile debugging and dev-menu surface for iOS and Android simulators/devices."),
+			mcp.WithString("operation", mcp.Required(), mcp.Description("Operation to perform: debug_status, debug_snapshot, shake, reload, deep_link, dev_menu, toggle_inspector, toggle_performance, toggle_remote_debug, build, update, build_status, logs")),
+			mcp.WithString("device_id", mcp.Description("Device ID (UDID for iOS, serial for Android). Auto-detects if omitted.")),
+			mcp.WithString("platform", mcp.Description("Target platform. ios, android, or auto.")),
+			mcp.WithString("url", mcp.Description("Deep link URL for deep_link operation")),
+			mcp.WithString("build_platform", mcp.Description("Platform for EAS build: ios, android, or all")),
+			mcp.WithString("profile", mcp.Description("EAS build profile: development, preview, or production")),
+			mcp.WithString("channel", mcp.Description("Update channel for EAS update")),
+			mcp.WithString("message", mcp.Description("Update message for EAS update")),
+			mcp.WithString("filter", mcp.Description("Filter pattern for logs operation")),
+			mcp.WithNumber("count", mcp.Description("Number of log lines to retrieve")),
+		),
+		handleMobileExpo,
+	)
+}
+
+func registerRoomTools(s *server.MCPServer) {
+	s.AddTool(
+		mcp.NewTool("room",
+			mcp.WithDescription("Command-backed durable room coordination tool. Actions: create, list, show, status, inbox, send, ack, resolve, clear, join, leave, subscribe, relay, coordinator_set."),
+			mcp.WithString("action", mcp.Required(), mcp.Description("Room action to run")),
+			mcp.WithString("workspace", mcp.Description("Workspace root override (default: .)")),
+			mcp.WithString("room_id", mcp.Description("Room id for actions that target a room")),
+			mcp.WithString("title", mcp.Description("Room title for create")),
+			mcp.WithString("description", mcp.Description("Room description for create")),
+			mcp.WithArray("members", mcp.Description("Room members for create"), mcp.WithStringItems()),
+			mcp.WithString("actor", mcp.Description("Actor or participant id override")),
+			mcp.WithString("role", mcp.Description("Room member role for join")),
+			mcp.WithString("backend", mcp.Description("Backend override for join or relay (tmux|zellij|auto)")),
+			mcp.WithString("session", mcp.Description("Mux/Zellij session override")),
+			mcp.WithString("pane_id", mcp.Description("Pane id for join")),
+			mcp.WithBoolean("unbound", mcp.Description("Mark room member transport unbound")),
+			mcp.WithBoolean("create", mcp.Description("Create the room if missing for join")),
+			mcp.WithBoolean("current", mcp.Description("Join current tmux/zellij participant when actor is omitted")),
+			mcp.WithNumber("limit", mcp.Description("Limit for list/show/status/inbox/subscribe")),
+			mcp.WithString("recipient", mcp.Description("Recipient actor/participant id for send")),
+			mcp.WithString("subject", mcp.Description("Optional room message subject")),
+			mcp.WithString("text", mcp.Description("Message body for send")),
+			mcp.WithString("kind", mcp.Description("Message kind for send")),
+			mcp.WithString("task_id", mcp.Description("Optional task id for send")),
+			mcp.WithNumber("priority", mcp.Description("Priority from 1 to 5 for send")),
+			mcp.WithBoolean("ack_required", mcp.Description("Require explicit ack for send")),
+			mcp.WithBoolean("reply_expected", mcp.Description("Mark send as expecting a reply")),
+			mcp.WithBoolean("interrupt", mcp.Description("Interrupt target pane for direct send")),
+			mcp.WithBoolean("auto_create", mcp.Description("Create room if missing for send")),
+			mcp.WithArray("message_ids", mcp.Description("Message ids for ack/resolve"), mcp.WithStringItems()),
+			mcp.WithString("mode", mcp.Description("Mode for resolve or clear")),
+			mcp.WithBoolean("all", mcp.Description("Resolve all current entries matching filters")),
+			mcp.WithArray("only", mcp.Description("Filter list for status/resolve"), mcp.WithStringItems()),
+			mcp.WithString("filter", mcp.Description("Inbox filter")),
+			mcp.WithBoolean("grouped", mcp.Description("Group inbox entries")),
+			mcp.WithBoolean("ids_only", mcp.Description("Return only matching inbox ids")),
+			mcp.WithBoolean("include_broadcasts", mcp.Description("Include broadcasts in inbox all-filter")),
+			mcp.WithNumber("history", mcp.Description("History count for subscribe/relay")),
+			mcp.WithBoolean("follow", mcp.Description("Follow room subscribe stream")),
+			mcp.WithString("poll", mcp.Description("Poll duration string, e.g. 2s")),
+			mcp.WithString("plugin_path", mcp.Description("Zellij plugin path for relay")),
+			mcp.WithString("participant_id", mcp.Description("Participant id for leave or coordinator_set")),
+			mcp.WithString("preset", mcp.Description("Clear preset")),
+		),
+		handleRoomTool,
+	)
+
+	s.AddTool(
+		mcp.NewTool("room_task",
+			mcp.WithDescription("Command-backed room task management. Actions: add, list, assign, reassign, claim, touch, block, reclaim, unblock, abandon, complete."),
+			mcp.WithString("action", mcp.Required(), mcp.Description("Room task action to run")),
+			mcp.WithString("workspace", mcp.Description("Workspace root override (default: .)")),
+			mcp.WithString("room_id", mcp.Description("Room id")),
+			mcp.WithString("sender", mcp.Description("Sender actor or participant id override")),
+			mcp.WithString("task_id", mcp.Description("Task id")),
+			mcp.WithString("title", mcp.Description("Task title for add")),
+			mcp.WithString("description", mcp.Description("Task description for add")),
+			mcp.WithString("scope", mcp.Description("Task scope path for add")),
+			mcp.WithString("parent", mcp.Description("Parent task id for add")),
+			mcp.WithArray("depends_on", mcp.Description("Dependency task ids"), mcp.WithStringItems()),
+			mcp.WithBoolean("create_room", mcp.Description("Create room if missing for add")),
+			mcp.WithString("status", mcp.Description("Status filter for list")),
+			mcp.WithString("recipient", mcp.Description("Assignee participant id")),
+			mcp.WithString("notes", mcp.Description("Assignment or completion notes")),
+			mcp.WithString("reason", mcp.Description("Block/reassign/reclaim/abandon reason")),
+			mcp.WithString("gotchas", mcp.Description("Completion gotchas")),
+		),
+		handleRoomTaskTool,
+	)
+
+	s.AddTool(
+		mcp.NewTool("room_interview",
+			mcp.WithDescription("Command-backed durable room interview protocol. Actions: start, ask, answer, verify, next, show."),
+			mcp.WithString("action", mcp.Required(), mcp.Description("Interview action to run")),
+			mcp.WithString("workspace", mcp.Description("Workspace root override (default: .)")),
+			mcp.WithString("room_id", mcp.Description("Room id")),
+			mcp.WithString("sender", mcp.Description("Sender actor or participant id override")),
+			mcp.WithString("topic", mcp.Description("Interview topic for start")),
+			mcp.WithString("session_id", mcp.Description("Interview session id")),
+			mcp.WithString("question_id", mcp.Description("Interview question id")),
+			mcp.WithString("answer_id", mcp.Description("Interview answer id")),
+			mcp.WithString("spec", mcp.Description("Inline spec or request summary for start")),
+			mcp.WithString("spec_ref", mcp.Description("Doc path, plan id, or message id that anchors the interview")),
+			mcp.WithString("submitter", mcp.Description("Actor who submitted the plan or spec")),
+			mcp.WithString("questioner", mcp.Description("Actor responsible for drafting interview questions")),
+			mcp.WithString("respondent", mcp.Description("Actor expected to answer the questions")),
+			mcp.WithString("verifier", mcp.Description("Actor who decides whether answers match the original intent")),
+			mcp.WithArray("constraint", mcp.Description("Constraint or guardrail (repeatable)"), mcp.WithStringItems()),
+			mcp.WithString("to", mcp.Description("Respondent actor id override for ask")),
+			mcp.WithString("question", mcp.Description("Interview question text")),
+			mcp.WithString("answer", mcp.Description("Interview answer text")),
+			mcp.WithString("verdict", mcp.Description("Interview verdict: accept, clarify, or reject")),
+			mcp.WithString("notes", mcp.Description("Verifier notes")),
+			mcp.WithString("actor", mcp.Description("Actor id for interview next")),
+			mcp.WithNumber("limit", mcp.Description("Maximum room messages to inspect for next/show")),
+		),
+		handleRoomInterviewTool,
+	)
+
+	s.AddTool(
+		mcp.NewTool("room_remind",
+			mcp.WithDescription("Command-backed durable room follow-up scheduler. Actions: add, list, cancel."),
+			mcp.WithString("action", mcp.Required(), mcp.Description("Reminder action to run")),
+			mcp.WithString("workspace", mcp.Description("Workspace root override (default: .)")),
+			mcp.WithString("room_id", mcp.Description("Room id")),
+			mcp.WithString("sender", mcp.Description("Sender actor or participant id override")),
+			mcp.WithString("actor", mcp.Description("Coordinator actor id for cancel")),
+			mcp.WithString("recipient", mcp.Description("Direct reminder recipient")),
+			mcp.WithString("subject", mcp.Description("Optional root message subject")),
+			mcp.WithString("text", mcp.Description("Reminder request text")),
+			mcp.WithString("every", mcp.Description("Reminder interval duration")),
+			mcp.WithNumber("max_iterations", mcp.Description("Maximum reminder follow-ups after the initial request")),
+			mcp.WithBoolean("ack_required", mcp.Description("Require ack to stop reminders")),
+			mcp.WithBoolean("reply_expected", mcp.Description("Require reply to stop reminders")),
+			mcp.WithBoolean("interrupt", mcp.Description("Interrupt the target pane for reminder follow-ups")),
+			mcp.WithString("reminder_id", mcp.Description("Reminder id for cancel")),
+			mcp.WithBoolean("all", mcp.Description("Include inactive reminders when listing")),
+		),
+		handleRoomRemindTool,
+	)
+
+	s.AddTool(
+		mcp.NewTool("agent_room",
+			mcp.WithDescription("Command-backed agent control-room tool. Actions: info, policy."),
+			mcp.WithString("action", mcp.Required(), mcp.Description("Agent room action to run")),
+			mcp.WithString("agent_ref", mcp.Description("Agent reference for info/policy")),
+			mcp.WithString("workspace", mcp.Description("Workspace path override")),
+			mcp.WithString("room_id", mcp.Description("Override control room id")),
+			mcp.WithString("dispatch_policy", mcp.Description("Dispatch policy for policy action")),
+			mcp.WithArray("dispatch_agents", mcp.Description("Dispatch agent ids for policy action"), mcp.WithStringItems()),
+		),
+		handleAgentRoomTool,
+	)
+}
+
+func registerMuxTools(s *server.MCPServer) {
+	s.AddTool(
+		mcp.NewTool("mux",
+			mcp.WithDescription("Command-backed tmux/zellij collaboration tool. Actions: list, read, send, submit, send_parent, observe, doctor, create."),
+			mcp.WithString("action", mcp.Required(), mcp.Description("Mux action to run")),
+			mcp.WithString("backend", mcp.Description("Mux backend (tmux|zellij|auto)")),
+			mcp.WithString("session", mcp.Description("Mux session override")),
+			mcp.WithNumber("limit", mcp.Description("Limit when listing zellij-bound panes")),
+			mcp.WithString("target", mcp.Description("Pane target for read/send/observe")),
+			mcp.WithNumber("lines", mcp.Description("Scrollback lines to read/observe")),
+			mcp.WithString("sender", mcp.Description("Sender pane label or pane id override")),
+			mcp.WithString("text", mcp.Description("Message text for send/send_parent")),
+			mcp.WithString("statement", mcp.Description("Observation statement override")),
+			mcp.WithString("workspace", mcp.Description("Workspace path for observe")),
+			mcp.WithNumber("confidence", mcp.Description("Observation confidence")),
+			mcp.WithNumber("count", mcp.Description("Observation count")),
+			mcp.WithString("project", mcp.Description("Observation project")),
+			mcp.WithString("area", mcp.Description("Observation area")),
+			mcp.WithBoolean("dry_run", mcp.Description("Preview observe without persisting")),
+			mcp.WithNumber("panes", mcp.Description("Number of panes for create")),
+			mcp.WithString("pane_command", mcp.Description("Command to launch in each pane")),
+			mcp.WithString("agent", mcp.Description("Agent CLI to launch in each pane")),
+			mcp.WithString("mode", mcp.Description("Agent launch mode for create")),
+			mcp.WithArray("agent_args", mcp.Description("Agent CLI arguments"), mcp.WithStringItems()),
+			mcp.WithString("agent_session_id", mcp.Description("Resume agent session id for create")),
+			mcp.WithString("cwd", mcp.Description("Working directory for create")),
+			mcp.WithString("label_prefix", mcp.Description("Label prefix for create")),
+			mcp.WithString("parent_participant", mcp.Description("Parent participant id for child panes")),
+			mcp.WithString("parent_agent_id", mcp.Description("Parent agent id for child panes")),
+			mcp.WithString("room_id", mcp.Description("Room id exported into created panes")),
+			mcp.WithString("room_access", mcp.Description("Room access policy for created panes")),
+			mcp.WithBoolean("attach", mcp.Description("Attach or switch after create")),
+		),
+		handleMuxTool,
+	)
+}
+
 // Tool handlers
 
 // getArgs safely extracts arguments from the request as a map.
@@ -1303,13 +1713,110 @@ func getStringSliceArg(args map[string]any, key string) []string {
 	return nil
 }
 
+func getFloatArg(args map[string]any, key string, fallback float64) float64 {
+	switch value := args[key].(type) {
+	case float64:
+		return value
+	case int:
+		return float64(value)
+	}
+	return fallback
+}
+
+func appendStringFlagArgs(argv []string, flagName, value string) []string {
+	if strings.TrimSpace(value) == "" {
+		return argv
+	}
+	return append(argv, flagName, strings.TrimSpace(value))
+}
+
+func appendStringSliceFlagArgs(argv []string, flagName string, values []string) []string {
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		argv = append(argv, flagName, value)
+	}
+	return argv
+}
+
+func appendBoolFlagArgs(argv []string, flagName string, enabled bool) []string {
+	if enabled {
+		return append(argv, flagName)
+	}
+	return argv
+}
+
+func appendIntFlagArgs(argv []string, flagName string, value int) []string {
+	if value > 0 {
+		return append(argv, flagName, strconv.Itoa(value))
+	}
+	return argv
+}
+
+func appendFloatFlagArgs(argv []string, flagName string, value float64) []string {
+	if value > 0 {
+		return append(argv, flagName, strconv.FormatFloat(value, 'f', -1, 64))
+	}
+	return argv
+}
+
+func appendDurationFlagArgs(argv []string, flagName string, value string) []string {
+	if strings.TrimSpace(value) == "" {
+		return argv
+	}
+	if _, err := time.ParseDuration(strings.TrimSpace(value)); err != nil {
+		return argv
+	}
+	return append(argv, flagName, strings.TrimSpace(value))
+}
+
+func runCLICommandAsMCP(ctx context.Context, toolLabel string, newCmd func() *cobra.Command, argv []string) (*mcp.CallToolResult, error) {
+	return runEnvelopeCommand(ctx, toolLabel, func(cmd *cobra.Command) error {
+		root := newCmd()
+		var out bytes.Buffer
+		var errBuf bytes.Buffer
+		root.SetOut(&out)
+		root.SetErr(&errBuf)
+		runCtx := ctx
+		if _, ok := config.FromContext(runCtx); !ok {
+			if cfg, err := loadConfig(ctx); err == nil {
+				runCtx = config.WithContext(runCtx, cfg)
+			}
+		}
+		root.SetContext(runCtx)
+		root.SetArgs(argv)
+		if err := root.Execute(); err != nil {
+			return err
+		}
+		if out.Len() > 0 {
+			_, _ = cmd.OutOrStdout().Write(out.Bytes())
+		}
+		if errBuf.Len() > 0 {
+			_, _ = cmd.ErrOrStderr().Write(errBuf.Bytes())
+		}
+		return nil
+	})
+}
+
 func runRepoIndexCommand(ctx context.Context, run func(cmd *cobra.Command) error) (*mcp.CallToolResult, error) {
+	return runEnvelopeCommand(ctx, "repo_index", run)
+}
+
+func runEnvelopeCommand(ctx context.Context, toolLabel string, run func(cmd *cobra.Command) error) (*mcp.CallToolResult, error) {
 	var out bytes.Buffer
 	var errBuf bytes.Buffer
 	cmd := &cobra.Command{}
 	cmd.SetOut(&out)
 	cmd.SetErr(&errBuf)
-	cmd.SetContext(ctx)
+	runCtx := ctx
+	if _, ok := config.FromContext(runCtx); !ok {
+		if cfg, err := loadConfig(ctx); err == nil {
+			runCtx = config.WithContext(runCtx, cfg)
+		}
+	}
+	cmd.SetContext(runCtx)
 
 	if err := run(cmd); err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
@@ -1329,21 +1836,21 @@ func runRepoIndexCommand(ctx context.Context, run func(cmd *cobra.Command) error
 	}
 
 	if err := json.Unmarshal([]byte(raw), &envelope); err != nil {
-		return truncateSkillOutput(ctx, raw, "repo_index")
+		return truncateSkillOutput(ctx, raw, toolLabel)
 	}
 	if envelope.Status == "error" {
 		if envelope.Error.Message != "" {
 			return mcp.NewToolResultError(envelope.Error.Message), nil
 		}
-		return mcp.NewToolResultError("repo index command failed"), nil
+		return mcp.NewToolResultError(toolLabel + " command failed"), nil
 	}
 
 	result, err := json.MarshalIndent(envelope.Data, "", "  ")
 	if err != nil {
-		return truncateSkillOutput(ctx, raw, "repo_index")
+		return truncateSkillOutput(ctx, raw, toolLabel)
 	}
 
-	return truncateSkillOutput(ctx, string(result), "repo_index")
+	return truncateSkillOutput(ctx, string(result), toolLabel)
 }
 
 func handleWebSearch(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -2021,6 +2528,9 @@ func registerSkillGroups(ctx context.Context, s *server.MCPServer, groups []stri
 func registerSkillAsTool(s *server.MCPServer, manifest skill.Manifest, artifactPath string) {
 	// Convert skill name to MCP tool name: code/semantic_search -> code_semantic_search
 	toolName := strings.ReplaceAll(manifest.Metadata.Name, "/", "_")
+	if _, exists := s.ListTools()[toolName]; exists {
+		return
+	}
 
 	// Build MCP tool options from manifest
 	toolOpts := []mcp.ToolOption{
@@ -2133,41 +2643,7 @@ func makeSkillHandler(manifest skill.Manifest, artifactPath string) func(ctx con
 
 		// Execute the skill
 		stdout, stderr, err := executeSkill(runCtx, manifest, artifactPath, inputBytes)
-		if err != nil {
-			errMsg := err.Error()
-			if len(stderr) > 0 {
-				errMsg += "\nstderr: " + string(stderr)
-			}
-			return mcp.NewToolResultError("execute skill: " + errMsg), nil
-		}
-
-		// Parse the envelope response
-		var envelope struct {
-			Status  string         `json:"status"`
-			Command string         `json:"command"`
-			Data    map[string]any `json:"data"`
-			Error   struct {
-				Code    string `json:"code"`
-				Message string `json:"message"`
-			} `json:"error"`
-		}
-
-		if err := json.Unmarshal(stdout, &envelope); err != nil {
-			// Return raw output if not a valid envelope
-			return truncateSkillOutput(ctx, string(stdout), manifest.Metadata.Name)
-		}
-
-		if envelope.Status == "error" {
-			return mcp.NewToolResultError(envelope.Error.Message), nil
-		}
-
-		// Format the data as readable output
-		result, err := json.MarshalIndent(envelope.Data, "", "  ")
-		if err != nil {
-			return truncateSkillOutput(ctx, string(stdout), manifest.Metadata.Name)
-		}
-
-		return truncateSkillOutput(ctx, string(result), manifest.Metadata.Name)
+		return renderSkillExecutionResult(ctx, manifest.Metadata.Name, stdout, stderr, err)
 	}
 }
 
@@ -2209,42 +2685,86 @@ func handleAgentctlRun(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallT
 
 	// Execute the skill
 	stdout, stderr, err := executeSkill(runCtx, handle.Manifest, handle.ArtifactPath, inputBytes)
+	return renderSkillExecutionResult(ctx, skillName, stdout, stderr, err)
+}
+
+func runSkillAsMCP(ctx context.Context, skillName string, input map[string]any) (*mcp.CallToolResult, error) {
+	if strings.TrimSpace(skillName) == "" {
+		return mcp.NewToolResultError("skill name is required"), nil
+	}
+	if input == nil {
+		input = make(map[string]any)
+	}
+
+	cfg, err := loadConfig(ctx)
 	if err != nil {
-		errMsg := err.Error()
+		return mcp.NewToolResultError("load config: " + err.Error()), nil
+	}
+
+	handle, err := findSkill(cfg, skillName)
+	if err != nil {
+		return mcp.NewToolResultError("skill not found: " + skillName + " - " + err.Error()), nil
+	}
+
+	inputBytes, err := json.Marshal(input)
+	if err != nil {
+		return mcp.NewToolResultError("marshal input: " + err.Error()), nil
+	}
+
+	runCtx := resolveWorkspaceContext(ctx, "")
+	stdout, stderr, err := executeSkill(runCtx, handle.Manifest, handle.ArtifactPath, inputBytes)
+	return renderSkillExecutionResult(ctx, skillName, stdout, stderr, err)
+}
+
+type skillExecutionEnvelope struct {
+	Status  string         `json:"status"`
+	Command string         `json:"command"`
+	Data    map[string]any `json:"data"`
+	Error   struct {
+		Code    string `json:"code"`
+		Message string `json:"message"`
+	} `json:"error"`
+}
+
+func renderSkillExecutionResult(ctx context.Context, skillName string, stdout, stderr []byte, execErr error) (*mcp.CallToolResult, error) {
+	if envelope, ok := decodeSkillExecutionEnvelope(stdout); ok {
+		if envelope.Status == "error" {
+			msg := strings.TrimSpace(envelope.Error.Message)
+			if msg == "" {
+				msg = skillName + " failed"
+			}
+			return mcp.NewToolResultError(msg), nil
+		}
+		result, err := json.MarshalIndent(envelope.Data, "", "  ")
+		if err != nil {
+			return truncateSkillOutput(ctx, strings.TrimSpace(string(stdout)), skillName)
+		}
+		return truncateSkillOutput(ctx, string(result), skillName)
+	}
+
+	if execErr != nil {
+		errMsg := execErr.Error()
 		if len(stderr) > 0 {
 			errMsg += "\nstderr: " + string(stderr)
 		}
 		return mcp.NewToolResultError("execute skill: " + errMsg), nil
 	}
 
-	// Parse the envelope response
-	var envelope struct {
-		Status  string         `json:"status"`
-		Command string         `json:"command"`
-		Data    map[string]any `json:"data"`
-		Meta    map[string]any `json:"meta"`
-		Error   struct {
-			Code    string `json:"code"`
-			Message string `json:"message"`
-		} `json:"error"`
-	}
+	return truncateSkillOutput(ctx, strings.TrimSpace(string(stdout)), skillName)
+}
 
+func decodeSkillExecutionEnvelope(stdout []byte) (skillExecutionEnvelope, bool) {
+	var envelope skillExecutionEnvelope
+	if len(bytes.TrimSpace(stdout)) == 0 {
+		return envelope, false
+	}
 	if err := json.Unmarshal(stdout, &envelope); err != nil {
-		// Return raw output if not a valid envelope
-		return truncateSkillOutput(ctx, string(stdout), skillName)
+		return envelope, false
 	}
-
-	if envelope.Status == "error" {
-		return mcp.NewToolResultError(envelope.Error.Message), nil
+	if strings.TrimSpace(envelope.Status) == "" {
+		return envelope, false
 	}
-
-	// Format the data as readable output
-	result, err := json.MarshalIndent(envelope.Data, "", "  ")
-	if err != nil {
-		return truncateSkillOutput(ctx, string(stdout), skillName)
-	}
-
-	return truncateSkillOutput(ctx, string(result), skillName)
+	return envelope, true
 }
 
 func handleAgentctlSkills(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -3080,6 +3600,8 @@ func handleRepoIndexBuild(ctx context.Context, req mcp.CallToolRequest) (*mcp.Ca
 		patterns = []string{"./..."}
 	}
 	includeGo := getBoolArg(args, "include_go", true)
+	includePython := getBoolArg(args, "include_python", false)
+	includeRust := getBoolArg(args, "include_rust", false)
 	includeTS := getBoolArg(args, "include_typescript", true)
 	includeElixir := getBoolArg(args, "include_elixir", false)
 	includeTerraform := getBoolArg(args, "include_terraform", false)
@@ -3089,7 +3611,7 @@ func handleRepoIndexBuild(ctx context.Context, req mcp.CallToolRequest) (*mcp.Ca
 	dryRun := getBoolArg(args, "dry_run", false)
 
 	return runRepoIndexCommand(ctx, func(cmd *cobra.Command) error {
-		return runIndexRepoBuild(cmd, workspace, patterns, includeGo, includeTS, includeElixir, includeTerraform, includeKubernetes, includeShell, includeTests, dryRun)
+		return runIndexRepoBuild(cmd, workspace, patterns, includeGo, includePython, includeRust, includeTS, includeElixir, includeTerraform, includeKubernetes, includeShell, includeTests, dryRun)
 	})
 }
 
@@ -3109,9 +3631,15 @@ func handleRepoIndexSearch(ctx context.Context, req mcp.CallToolRequest) (*mcp.C
 		return mcp.NewToolResultError("query is required"), nil
 	}
 	limit := getIntArg(args, "limit", 20)
-	return runRepoIndexCommand(ctx, func(cmd *cobra.Command) error {
-		return runIndexRepoSearch(cmd, workspace, query, limit)
-	})
+	input := map[string]any{
+		"workspace": workspace,
+		"query":     query,
+		"limit":     limit,
+	}
+	if inlineMode := getStringArg(args, "inline_mode", ""); inlineMode != "" {
+		input["inline_mode"] = inlineMode
+	}
+	return runSkillAsMCP(ctx, "repo/index_search", input)
 }
 
 func handleRepoIndexExpand(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -3126,10 +3654,556 @@ func handleRepoIndexExpand(ctx context.Context, req mcp.CallToolRequest) (*mcp.C
 	budget := getIntArg(args, "budget", 50)
 	perNodeCap := getIntArg(args, "per_node", 50)
 	direction := getStringArg(args, "direction", "out")
+	input := map[string]any{
+		"workspace":    workspace,
+		"seeds":        seeds,
+		"edge_types":   edgeTypes,
+		"depth":        depth,
+		"budget":       budget,
+		"per_node_cap": perNodeCap,
+		"direction":    direction,
+	}
+	if inlineMode := getStringArg(args, "inline_mode", ""); inlineMode != "" {
+		input["inline_mode"] = inlineMode
+	}
+	return runSkillAsMCP(ctx, "repo/index_expand", input)
+}
 
-	return runRepoIndexCommand(ctx, func(cmd *cobra.Command) error {
-		return runIndexRepoExpand(cmd, workspace, seeds, edgeTypes, depth, budget, perNodeCap, direction)
+func handleRepoIndexDAGGrep(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	args := getArgs(req)
+	query := getStringArg(args, "query", "")
+	if query == "" {
+		return mcp.NewToolResultError("query is required"), nil
+	}
+	input := map[string]any{
+		"query":     query,
+		"workspace": getStringArg(args, "workspace", "."),
+	}
+	for _, key := range []string{"mode", "direction", "render", "inline_mode"} {
+		if value := getStringArg(args, key, ""); value != "" {
+			input[key] = value
+		}
+	}
+	for _, key := range []string{"k", "depth", "budget", "per_node_cap"} {
+		if value := getIntArg(args, key, 0); value > 0 {
+			input[key] = value
+		}
+	}
+	if values := getStringSliceArg(args, "node_kinds"); len(values) > 0 {
+		input["node_kinds"] = values
+	}
+	if values := getStringSliceArg(args, "edge_sets"); len(values) > 0 {
+		input["edge_sets"] = values
+	}
+	if values := getStringSliceArg(args, "edge_types"); len(values) > 0 {
+		input["edge_types"] = values
+	}
+	if includeAnchors, ok := args["include_anchors"].(bool); ok {
+		input["include_anchors"] = includeAnchors
+	}
+	return runSkillAsMCP(ctx, "code/dag_grep", input)
+}
+
+func handleStructuredShell(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	args := getArgs(req)
+	command := getStringArg(args, "command", "")
+	argv := getStringSliceArg(args, "argv")
+	if command == "" && len(argv) == 0 {
+		return mcp.NewToolResultError("command or argv is required"), nil
+	}
+	workspace := getStringArg(args, "workspace", ".")
+	measureRaw := getBoolArg(args, "measure_raw", false)
+	tokenModel := getStringArg(args, "token_model", "cl100k_base")
+	return runEnvelopeCommand(ctx, "structured_shell", func(cmd *cobra.Command) error {
+		return runShellCommand(cmd, workspace, command, measureRaw, tokenModel, argv)
 	})
+}
+
+func handleMobileExpo(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	args := getArgs(req)
+	operation := getStringArg(args, "operation", "")
+	if operation == "" {
+		return mcp.NewToolResultError("operation is required"), nil
+	}
+	input := map[string]any{
+		"operation": operation,
+	}
+	for _, key := range []string{"device_id", "platform", "url", "build_platform", "profile", "channel", "message", "filter"} {
+		if value := getStringArg(args, key, ""); value != "" {
+			input[key] = value
+		}
+	}
+	if value := getIntArg(args, "count", 0); value > 0 {
+		input["count"] = value
+	}
+	return runSkillAsMCP(ctx, "mobile/expo", input)
+}
+
+func handleRoomTool(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	args := getArgs(req)
+	action := getStringArg(args, "action", "")
+	workspace := getStringArg(args, "workspace", "")
+	roomID := getStringArg(args, "room_id", "")
+	argv := make([]string, 0, 32)
+
+	switch action {
+	case "create":
+		if roomID == "" {
+			return mcp.NewToolResultError("room_id is required for create"), nil
+		}
+		argv = append(argv, "create", roomID)
+		argv = appendStringFlagArgs(argv, "--workspace", workspace)
+		argv = appendStringFlagArgs(argv, "--title", getStringArg(args, "title", ""))
+		argv = appendStringFlagArgs(argv, "--description", getStringArg(args, "description", ""))
+		argv = appendStringSliceFlagArgs(argv, "--member", getStringSliceArg(args, "members"))
+	case "list":
+		argv = append(argv, "list")
+		argv = appendStringFlagArgs(argv, "--workspace", workspace)
+		argv = appendStringFlagArgs(argv, "--actor", getStringArg(args, "actor", ""))
+		argv = appendIntFlagArgs(argv, "--limit", getIntArg(args, "limit", 0))
+	case "show":
+		if roomID == "" {
+			return mcp.NewToolResultError("room_id is required for show"), nil
+		}
+		argv = append(argv, "show", roomID)
+		argv = appendStringFlagArgs(argv, "--workspace", workspace)
+		argv = appendStringFlagArgs(argv, "--actor", getStringArg(args, "actor", ""))
+		argv = appendIntFlagArgs(argv, "--limit", getIntArg(args, "limit", 0))
+	case "status":
+		if roomID == "" {
+			return mcp.NewToolResultError("room_id is required for status"), nil
+		}
+		argv = append(argv, "status", roomID)
+		argv = appendStringFlagArgs(argv, "--workspace", workspace)
+		argv = appendIntFlagArgs(argv, "--limit", getIntArg(args, "limit", 0))
+		argv = appendStringSliceFlagArgs(argv, "--only", getStringSliceArg(args, "only"))
+	case "inbox":
+		if roomID == "" {
+			return mcp.NewToolResultError("room_id is required for inbox"), nil
+		}
+		argv = append(argv, "inbox", roomID)
+		argv = appendStringFlagArgs(argv, "--workspace", workspace)
+		argv = appendStringFlagArgs(argv, "--actor", getStringArg(args, "actor", ""))
+		argv = appendIntFlagArgs(argv, "--limit", getIntArg(args, "limit", 0))
+		argv = appendStringFlagArgs(argv, "--filter", getStringArg(args, "filter", ""))
+		argv = appendBoolFlagArgs(argv, "--grouped", getBoolArg(args, "grouped", false))
+		argv = appendBoolFlagArgs(argv, "--ids-only", getBoolArg(args, "ids_only", false))
+		argv = appendBoolFlagArgs(argv, "--include-broadcasts", getBoolArg(args, "include_broadcasts", false))
+	case "send":
+		text := getStringArg(args, "text", "")
+		if roomID == "" || text == "" {
+			return mcp.NewToolResultError("room_id and text are required for send"), nil
+		}
+		argv = append(argv, "send", roomID, text)
+		argv = appendStringFlagArgs(argv, "--workspace", workspace)
+		argv = appendStringFlagArgs(argv, "--sender", getStringArg(args, "actor", ""))
+		argv = appendStringFlagArgs(argv, "--to", getStringArg(args, "recipient", ""))
+		argv = appendStringFlagArgs(argv, "--subject", getStringArg(args, "subject", ""))
+		argv = appendStringFlagArgs(argv, "--kind", getStringArg(args, "kind", ""))
+		argv = appendStringFlagArgs(argv, "--task-id", getStringArg(args, "task_id", ""))
+		argv = appendIntFlagArgs(argv, "--priority", getIntArg(args, "priority", 0))
+		argv = appendBoolFlagArgs(argv, "--ack-required", getBoolArg(args, "ack_required", false))
+		argv = appendBoolFlagArgs(argv, "--reply-expected", getBoolArg(args, "reply_expected", false))
+		argv = appendBoolFlagArgs(argv, "--interrupt", getBoolArg(args, "interrupt", false))
+		if _, ok := args["auto_create"]; ok {
+			if getBoolArg(args, "auto_create", false) {
+				argv = append(argv, "--auto-create")
+			} else {
+				argv = append(argv, "--auto-create=false")
+			}
+		}
+	case "ack":
+		messageIDs := getStringSliceArg(args, "message_ids")
+		if roomID == "" || len(messageIDs) == 0 {
+			return mcp.NewToolResultError("room_id and message_ids are required for ack"), nil
+		}
+		argv = append(argv, "ack", roomID)
+		argv = append(argv, messageIDs...)
+		argv = appendStringFlagArgs(argv, "--workspace", workspace)
+		argv = appendStringFlagArgs(argv, "--actor", getStringArg(args, "actor", ""))
+	case "resolve":
+		if roomID == "" {
+			return mcp.NewToolResultError("room_id is required for resolve"), nil
+		}
+		argv = append(argv, "resolve", roomID)
+		argv = append(argv, getStringSliceArg(args, "message_ids")...)
+		argv = appendStringFlagArgs(argv, "--workspace", workspace)
+		argv = appendStringFlagArgs(argv, "--actor", getStringArg(args, "actor", ""))
+		argv = appendStringFlagArgs(argv, "--mode", getStringArg(args, "mode", ""))
+		argv = appendBoolFlagArgs(argv, "--all", getBoolArg(args, "all", false))
+		argv = appendStringSliceFlagArgs(argv, "--only", getStringSliceArg(args, "only"))
+	case "clear":
+		if roomID == "" {
+			return mcp.NewToolResultError("room_id is required for clear"), nil
+		}
+		argv = append(argv, "clear", roomID)
+		argv = appendStringFlagArgs(argv, "--workspace", workspace)
+		argv = appendStringFlagArgs(argv, "--actor", getStringArg(args, "actor", ""))
+		argv = appendStringFlagArgs(argv, "--mode", getStringArg(args, "mode", ""))
+		argv = appendStringFlagArgs(argv, "--preset", getStringArg(args, "preset", ""))
+	case "join":
+		if roomID == "" {
+			return mcp.NewToolResultError("room_id is required for join"), nil
+		}
+		argv = append(argv, "join", roomID)
+		if actor := getStringArg(args, "actor", ""); actor != "" {
+			argv = append(argv, actor)
+		}
+		argv = appendStringFlagArgs(argv, "--workspace", workspace)
+		argv = appendStringFlagArgs(argv, "--role", getStringArg(args, "role", ""))
+		argv = appendStringFlagArgs(argv, "--backend", getStringArg(args, "backend", ""))
+		argv = appendStringFlagArgs(argv, "--session", getStringArg(args, "session", ""))
+		argv = appendStringFlagArgs(argv, "--pane-id", getStringArg(args, "pane_id", ""))
+		argv = appendBoolFlagArgs(argv, "--unbound", getBoolArg(args, "unbound", false))
+		if _, ok := args["create"]; ok {
+			if getBoolArg(args, "create", false) {
+				argv = append(argv, "--create")
+			} else {
+				argv = append(argv, "--create=false")
+			}
+		}
+		argv = appendBoolFlagArgs(argv, "--current", getBoolArg(args, "current", false))
+	case "leave":
+		participantID := getStringArg(args, "participant_id", "")
+		if roomID == "" || participantID == "" {
+			return mcp.NewToolResultError("room_id and participant_id are required for leave"), nil
+		}
+		argv = append(argv, "leave", roomID, participantID)
+		argv = appendStringFlagArgs(argv, "--workspace", workspace)
+	case "subscribe":
+		if roomID == "" {
+			return mcp.NewToolResultError("room_id is required for subscribe"), nil
+		}
+		argv = append(argv, "subscribe", roomID)
+		argv = appendStringFlagArgs(argv, "--workspace", workspace)
+		argv = appendStringFlagArgs(argv, "--actor", getStringArg(args, "actor", ""))
+		argv = appendIntFlagArgs(argv, "--limit", getIntArg(args, "limit", 0))
+		argv = appendBoolFlagArgs(argv, "--follow", getBoolArg(args, "follow", false))
+		argv = appendDurationFlagArgs(argv, "--poll", getStringArg(args, "poll", ""))
+		argv = appendIntFlagArgs(argv, "--history", getIntArg(args, "history", 0))
+	case "relay":
+		if roomID == "" {
+			return mcp.NewToolResultError("room_id is required for relay"), nil
+		}
+		argv = append(argv, "relay", roomID)
+		argv = appendStringFlagArgs(argv, "--workspace", workspace)
+		argv = appendStringFlagArgs(argv, "--backend", getStringArg(args, "backend", ""))
+		argv = appendStringFlagArgs(argv, "--session", getStringArg(args, "session", ""))
+		argv = appendStringFlagArgs(argv, "--plugin-path", getStringArg(args, "plugin_path", ""))
+		argv = appendDurationFlagArgs(argv, "--poll", getStringArg(args, "poll", ""))
+		argv = appendIntFlagArgs(argv, "--history", getIntArg(args, "history", 0))
+	case "coordinator_set":
+		participantID := getStringArg(args, "participant_id", "")
+		if roomID == "" || participantID == "" {
+			return mcp.NewToolResultError("room_id and participant_id are required for coordinator_set"), nil
+		}
+		argv = append(argv, "coordinator", "set", roomID, participantID)
+		argv = appendStringFlagArgs(argv, "--workspace", workspace)
+		argv = appendStringFlagArgs(argv, "--actor", getStringArg(args, "actor", ""))
+	default:
+		return mcp.NewToolResultError("unsupported room action: " + action), nil
+	}
+	return runCLICommandAsMCP(ctx, "room", newRoomCommand, argv)
+}
+
+func handleRoomTaskTool(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	args := getArgs(req)
+	action := getStringArg(args, "action", "")
+	workspace := getStringArg(args, "workspace", "")
+	roomID := getStringArg(args, "room_id", "")
+	if roomID == "" {
+		return mcp.NewToolResultError("room_id is required"), nil
+	}
+	argv := []string{"task", action, roomID}
+	switch action {
+	case "add":
+		title := getStringArg(args, "title", "")
+		if title == "" {
+			return mcp.NewToolResultError("title is required for room_task add"), nil
+		}
+		argv = appendStringFlagArgs(argv, "--workspace", workspace)
+		argv = appendStringFlagArgs(argv, "--sender", getStringArg(args, "sender", ""))
+		argv = appendStringFlagArgs(argv, "--title", title)
+		argv = appendStringFlagArgs(argv, "--description", getStringArg(args, "description", ""))
+		argv = appendStringFlagArgs(argv, "--scope", getStringArg(args, "scope", ""))
+		argv = appendStringFlagArgs(argv, "--parent", getStringArg(args, "parent", ""))
+		argv = appendStringSliceFlagArgs(argv, "--depends-on", getStringSliceArg(args, "depends_on"))
+		if _, ok := args["create_room"]; ok {
+			if getBoolArg(args, "create_room", false) {
+				argv = append(argv, "--create-room")
+			} else {
+				argv = append(argv, "--create-room=false")
+			}
+		}
+	case "list":
+		argv = appendStringFlagArgs(argv, "--workspace", workspace)
+		argv = appendStringFlagArgs(argv, "--status", getStringArg(args, "status", ""))
+	case "assign", "reassign":
+		taskID := getStringArg(args, "task_id", "")
+		recipient := getStringArg(args, "recipient", "")
+		if taskID == "" || recipient == "" {
+			return mcp.NewToolResultError("task_id and recipient are required"), nil
+		}
+		argv = appendStringFlagArgs(argv, "--workspace", workspace)
+		argv = appendStringFlagArgs(argv, "--sender", getStringArg(args, "sender", ""))
+		argv = appendStringFlagArgs(argv, "--id", taskID)
+		argv = appendStringFlagArgs(argv, "--to", recipient)
+		if action == "assign" {
+			argv = appendStringFlagArgs(argv, "--notes", getStringArg(args, "notes", ""))
+		} else {
+			argv = appendStringFlagArgs(argv, "--reason", getStringArg(args, "reason", ""))
+		}
+	case "claim", "touch", "unblock":
+		taskID := getStringArg(args, "task_id", "")
+		if taskID == "" {
+			return mcp.NewToolResultError("task_id is required"), nil
+		}
+		argv = appendStringFlagArgs(argv, "--workspace", workspace)
+		argv = appendStringFlagArgs(argv, "--sender", getStringArg(args, "sender", ""))
+		argv = appendStringFlagArgs(argv, "--id", taskID)
+	case "block", "reclaim", "abandon":
+		taskID := getStringArg(args, "task_id", "")
+		reason := getStringArg(args, "reason", "")
+		if taskID == "" {
+			return mcp.NewToolResultError("task_id is required"), nil
+		}
+		argv = appendStringFlagArgs(argv, "--workspace", workspace)
+		argv = appendStringFlagArgs(argv, "--sender", getStringArg(args, "sender", ""))
+		argv = appendStringFlagArgs(argv, "--id", taskID)
+		argv = appendStringFlagArgs(argv, "--reason", reason)
+	case "complete":
+		taskID := getStringArg(args, "task_id", "")
+		if taskID == "" {
+			return mcp.NewToolResultError("task_id is required"), nil
+		}
+		argv = appendStringFlagArgs(argv, "--workspace", workspace)
+		argv = appendStringFlagArgs(argv, "--sender", getStringArg(args, "sender", ""))
+		argv = appendStringFlagArgs(argv, "--id", taskID)
+		argv = appendStringFlagArgs(argv, "--notes", getStringArg(args, "notes", ""))
+		argv = appendStringFlagArgs(argv, "--gotchas", getStringArg(args, "gotchas", ""))
+	default:
+		return mcp.NewToolResultError("unsupported room_task action: " + action), nil
+	}
+	return runCLICommandAsMCP(ctx, "room_task", newRoomCommand, argv)
+}
+
+func handleRoomInterviewTool(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	args := getArgs(req)
+	action := getStringArg(args, "action", "")
+	workspace := getStringArg(args, "workspace", "")
+	roomID := getStringArg(args, "room_id", "")
+	if roomID == "" {
+		return mcp.NewToolResultError("room_id is required"), nil
+	}
+	argv := []string{"interview", action, roomID}
+	switch action {
+	case "start":
+		topic := getStringArg(args, "topic", "")
+		if topic == "" {
+			return mcp.NewToolResultError("topic is required for room_interview start"), nil
+		}
+		argv = append(argv, topic)
+		argv = appendStringFlagArgs(argv, "--workspace", workspace)
+		argv = appendStringFlagArgs(argv, "--sender", getStringArg(args, "sender", ""))
+		argv = appendStringFlagArgs(argv, "--spec", getStringArg(args, "spec", ""))
+		argv = appendStringFlagArgs(argv, "--spec-ref", getStringArg(args, "spec_ref", ""))
+		argv = appendStringFlagArgs(argv, "--submitter", getStringArg(args, "submitter", ""))
+		argv = appendStringFlagArgs(argv, "--questioner", getStringArg(args, "questioner", ""))
+		argv = appendStringFlagArgs(argv, "--respondent", getStringArg(args, "respondent", ""))
+		argv = appendStringFlagArgs(argv, "--verifier", getStringArg(args, "verifier", ""))
+		argv = appendStringSliceFlagArgs(argv, "--constraint", getStringSliceArg(args, "constraint"))
+	case "ask":
+		sessionID := getStringArg(args, "session_id", "")
+		question := getStringArg(args, "question", "")
+		if sessionID == "" || question == "" {
+			return mcp.NewToolResultError("session_id and question are required for room_interview ask"), nil
+		}
+		argv = append(argv, sessionID, question)
+		argv = appendStringFlagArgs(argv, "--workspace", workspace)
+		argv = appendStringFlagArgs(argv, "--sender", getStringArg(args, "sender", ""))
+		argv = appendStringFlagArgs(argv, "--to", getStringArg(args, "to", ""))
+	case "answer":
+		questionID := getStringArg(args, "question_id", "")
+		answer := getStringArg(args, "answer", "")
+		if questionID == "" || answer == "" {
+			return mcp.NewToolResultError("question_id and answer are required for room_interview answer"), nil
+		}
+		argv = append(argv, questionID, answer)
+		argv = appendStringFlagArgs(argv, "--workspace", workspace)
+		argv = appendStringFlagArgs(argv, "--sender", getStringArg(args, "sender", ""))
+	case "verify":
+		answerID := getStringArg(args, "answer_id", "")
+		verdict := getStringArg(args, "verdict", "")
+		notes := getStringArg(args, "notes", "")
+		if answerID == "" || verdict == "" || notes == "" {
+			return mcp.NewToolResultError("answer_id, verdict, and notes are required for room_interview verify"), nil
+		}
+		argv = append(argv, answerID, verdict, notes)
+		argv = appendStringFlagArgs(argv, "--workspace", workspace)
+		argv = appendStringFlagArgs(argv, "--sender", getStringArg(args, "sender", ""))
+	case "next":
+		argv = appendStringFlagArgs(argv, "--workspace", workspace)
+		argv = appendStringFlagArgs(argv, "--actor", getStringArg(args, "actor", ""))
+		argv = appendIntFlagArgs(argv, "--limit", getIntArg(args, "limit", 0))
+	case "show":
+		if sessionID := getStringArg(args, "session_id", ""); sessionID != "" {
+			argv = append(argv, sessionID)
+		}
+		argv = appendStringFlagArgs(argv, "--workspace", workspace)
+		argv = appendStringFlagArgs(argv, "--sender", getStringArg(args, "sender", ""))
+		argv = appendIntFlagArgs(argv, "--limit", getIntArg(args, "limit", 0))
+	default:
+		return mcp.NewToolResultError("unsupported room_interview action: " + action), nil
+	}
+	return runCLICommandAsMCP(ctx, "room_interview", newRoomCommand, argv)
+}
+
+func handleRoomRemindTool(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	args := getArgs(req)
+	action := getStringArg(args, "action", "")
+	roomID := getStringArg(args, "room_id", "")
+	if roomID == "" {
+		return mcp.NewToolResultError("room_id is required"), nil
+	}
+	workspace := getStringArg(args, "workspace", "")
+	argv := []string{"remind", action, roomID}
+	switch action {
+	case "add":
+		recipient := getStringArg(args, "recipient", "")
+		text := getStringArg(args, "text", "")
+		if recipient == "" || text == "" {
+			return mcp.NewToolResultError("recipient and text are required for room_remind add"), nil
+		}
+		argv = append(argv, recipient, text)
+		argv = appendStringFlagArgs(argv, "--workspace", workspace)
+		argv = appendStringFlagArgs(argv, "--sender", getStringArg(args, "sender", ""))
+		argv = appendStringFlagArgs(argv, "--subject", getStringArg(args, "subject", ""))
+		argv = appendDurationFlagArgs(argv, "--every", getStringArg(args, "every", ""))
+		argv = appendIntFlagArgs(argv, "--max-iterations", getIntArg(args, "max_iterations", 0))
+		argv = appendBoolFlagArgs(argv, "--ack-required", getBoolArg(args, "ack_required", false))
+		if _, ok := args["reply_expected"]; ok {
+			if getBoolArg(args, "reply_expected", false) {
+				argv = append(argv, "--reply-expected")
+			} else {
+				argv = append(argv, "--reply-expected=false")
+			}
+		}
+		argv = appendBoolFlagArgs(argv, "--interrupt", getBoolArg(args, "interrupt", false))
+	case "list":
+		argv = appendStringFlagArgs(argv, "--workspace", workspace)
+		argv = appendBoolFlagArgs(argv, "--all", getBoolArg(args, "all", false))
+	case "cancel":
+		reminderID := getStringArg(args, "reminder_id", "")
+		if reminderID == "" {
+			return mcp.NewToolResultError("reminder_id is required for room_remind cancel"), nil
+		}
+		argv = append(argv, reminderID)
+		argv = appendStringFlagArgs(argv, "--workspace", workspace)
+		argv = appendStringFlagArgs(argv, "--actor", getStringArg(args, "actor", ""))
+	default:
+		return mcp.NewToolResultError("unsupported room_remind action: " + action), nil
+	}
+	return runCLICommandAsMCP(ctx, "room_remind", newRoomCommand, argv)
+}
+
+func handleAgentRoomTool(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	args := getArgs(req)
+	action := getStringArg(args, "action", "")
+	agentRef := getStringArg(args, "agent_ref", "")
+	if agentRef == "" {
+		return mcp.NewToolResultError("agent_ref is required"), nil
+	}
+	argv := []string{action, agentRef}
+	argv = appendStringFlagArgs(argv, "--workspace", getStringArg(args, "workspace", ""))
+	argv = appendStringFlagArgs(argv, "--room-id", getStringArg(args, "room_id", ""))
+	switch action {
+	case "info":
+	case "policy":
+		argv = appendStringFlagArgs(argv, "--dispatch-policy", getStringArg(args, "dispatch_policy", ""))
+		argv = appendStringSliceFlagArgs(argv, "--dispatch-agent", getStringSliceArg(args, "dispatch_agents"))
+	default:
+		return mcp.NewToolResultError("unsupported agent_room action: " + action), nil
+	}
+	return runCLICommandAsMCP(ctx, "agent_room", newAgentRoomCommand, argv)
+}
+
+func handleMuxTool(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	args := getArgs(req)
+	action := getStringArg(args, "action", "")
+	argv := make([]string, 0, 32)
+	switch action {
+	case "list":
+		argv = append(argv, "list")
+		argv = appendStringFlagArgs(argv, "--backend", getStringArg(args, "backend", ""))
+		argv = appendStringFlagArgs(argv, "--session", getStringArg(args, "session", ""))
+		argv = appendIntFlagArgs(argv, "--limit", getIntArg(args, "limit", 0))
+	case "read":
+		target := getStringArg(args, "target", "")
+		if target == "" {
+			return mcp.NewToolResultError("target is required for mux read"), nil
+		}
+		argv = append(argv, "read", target)
+		argv = appendIntFlagArgs(argv, "--lines", getIntArg(args, "lines", 0))
+	case "send":
+		target := getStringArg(args, "target", "")
+		text := getStringArg(args, "text", "")
+		if target == "" || text == "" {
+			return mcp.NewToolResultError("target and text are required for mux send"), nil
+		}
+		argv = append(argv, "send", target, text)
+		argv = appendStringFlagArgs(argv, "--sender", getStringArg(args, "sender", ""))
+	case "submit":
+		argv = append(argv, "submit")
+		target := getStringArg(args, "target", "")
+		if target != "" {
+			argv = append(argv, target)
+		}
+		argv = appendStringFlagArgs(argv, "--backend", getStringArg(args, "backend", ""))
+		argv = appendStringFlagArgs(argv, "--session", getStringArg(args, "session", ""))
+	case "send_parent":
+		text := getStringArg(args, "text", "")
+		if text == "" {
+			return mcp.NewToolResultError("text is required for mux send_parent"), nil
+		}
+		argv = append(argv, "send-parent", text)
+		argv = appendStringFlagArgs(argv, "--sender", getStringArg(args, "sender", ""))
+	case "observe":
+		target := getStringArg(args, "target", "")
+		if target == "" {
+			return mcp.NewToolResultError("target is required for mux observe"), nil
+		}
+		argv = append(argv, "observe", target)
+		argv = appendIntFlagArgs(argv, "--lines", getIntArg(args, "lines", 0))
+		argv = appendStringFlagArgs(argv, "--statement", getStringArg(args, "statement", ""))
+		argv = appendStringFlagArgs(argv, "--workspace", getStringArg(args, "workspace", ""))
+		argv = appendFloatFlagArgs(argv, "--confidence", getFloatArg(args, "confidence", 0))
+		argv = appendIntFlagArgs(argv, "--count", getIntArg(args, "count", 0))
+		argv = appendStringFlagArgs(argv, "--project", getStringArg(args, "project", ""))
+		argv = appendStringFlagArgs(argv, "--area", getStringArg(args, "area", ""))
+		argv = appendBoolFlagArgs(argv, "--dry-run", getBoolArg(args, "dry_run", false))
+	case "doctor":
+		argv = append(argv, "doctor")
+	case "create":
+		argv = append(argv, "create")
+		argv = appendStringFlagArgs(argv, "--backend", getStringArg(args, "backend", ""))
+		argv = appendStringFlagArgs(argv, "--session", getStringArg(args, "session", ""))
+		argv = appendIntFlagArgs(argv, "--panes", getIntArg(args, "panes", 0))
+		argv = appendStringFlagArgs(argv, "--pane-command", getStringArg(args, "pane_command", ""))
+		argv = appendStringFlagArgs(argv, "--agent", getStringArg(args, "agent", ""))
+		argv = appendStringFlagArgs(argv, "--mode", getStringArg(args, "mode", ""))
+		argv = appendStringSliceFlagArgs(argv, "--agent-arg", getStringSliceArg(args, "agent_args"))
+		argv = appendStringFlagArgs(argv, "--agent-session-id", getStringArg(args, "agent_session_id", ""))
+		argv = appendStringFlagArgs(argv, "--cwd", getStringArg(args, "cwd", ""))
+		argv = appendStringFlagArgs(argv, "--label-prefix", getStringArg(args, "label_prefix", ""))
+		argv = appendStringFlagArgs(argv, "--parent-participant", getStringArg(args, "parent_participant", ""))
+		argv = appendStringFlagArgs(argv, "--parent-agent-id", getStringArg(args, "parent_agent_id", ""))
+		argv = appendStringFlagArgs(argv, "--room-id", getStringArg(args, "room_id", ""))
+		argv = appendStringFlagArgs(argv, "--room-access", getStringArg(args, "room_access", ""))
+		argv = appendBoolFlagArgs(argv, "--attach", getBoolArg(args, "attach", false))
+	default:
+		return mcp.NewToolResultError("unsupported mux action: " + action), nil
+	}
+	return runCLICommandAsMCP(ctx, "mux", newTmuxCommand, argv)
 }
 
 func handleRepoIndexOpen(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -3298,41 +4372,7 @@ func callLocalSkill(ctx context.Context, skillName string, input map[string]any)
 
 	// Execute the skill
 	stdout, stderr, err := executeSkill(runCtx, handle.Manifest, handle.ArtifactPath, inputBytes)
-	if err != nil {
-		errMsg := err.Error()
-		if len(stderr) > 0 {
-			errMsg += "\nstderr: " + string(stderr)
-		}
-		return mcp.NewToolResultError("execute skill: " + errMsg), nil
-	}
-
-	// Parse the envelope response
-	var envelope struct {
-		Status  string         `json:"status"`
-		Command string         `json:"command"`
-		Data    map[string]any `json:"data"`
-		Error   struct {
-			Code    string `json:"code"`
-			Message string `json:"message"`
-		} `json:"error"`
-	}
-
-	if err := json.Unmarshal(stdout, &envelope); err != nil {
-		// Return raw output if not a valid envelope
-		return mcp.NewToolResultText(string(stdout)), nil
-	}
-
-	if envelope.Status == "error" {
-		return mcp.NewToolResultError(envelope.Error.Message), nil
-	}
-
-	// Format the data as readable output
-	result, err := json.MarshalIndent(envelope.Data, "", "  ")
-	if err != nil {
-		return mcp.NewToolResultText(string(stdout)), nil
-	}
-
-	return mcp.NewToolResultText(string(result)), nil
+	return renderSkillExecutionResult(ctx, skillName, stdout, stderr, err)
 }
 
 // Backend communication

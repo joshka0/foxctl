@@ -116,6 +116,25 @@ func (e *TypeScriptExtractor) ExtractCalls(ctx context.Context, symbol Symbol, c
 	return calls, nil
 }
 
+// ExtractTypeScriptReferences returns best-effort identifier references from a
+// TypeScript/JavaScript symbol body. It is intentionally broader than
+// ExtractCalls and is meant for repo-graph reference edges rather than call-only
+// scoring.
+func ExtractTypeScriptReferences(ctx context.Context, symbol Symbol, content []byte) ([]string, error) {
+	if refs, ok, err := extractTypeScriptRefsWithTreeSitter(ctx, symbol, content); ok || err != nil {
+		return refs, err
+	}
+	if symbol.StartByte < 0 || symbol.EndByte > len(content) || symbol.StartByte >= symbol.EndByte {
+		return nil, nil
+	}
+	body := string(content[symbol.StartByte:symbol.EndByte])
+	refs := extractTSReferenceNames(body)
+	if len(refs) > 100 {
+		refs = refs[:100]
+	}
+	return refs, nil
+}
+
 var identPattern = regexp.MustCompile(`^[A-Za-z_$][A-Za-z0-9_$]*`)
 
 func parseTSDeclaration(line string) (string, Kind, string, bool, bool) {
@@ -287,6 +306,19 @@ var tsCallKeywords = map[string]struct{}{
 	"in": {}, "of": {},
 }
 
+var tsReferenceKeywords = map[string]struct{}{
+	"as": {}, "async": {}, "await": {}, "break": {}, "case": {}, "catch": {},
+	"class": {}, "const": {}, "continue": {}, "debugger": {}, "default": {},
+	"delete": {}, "do": {}, "else": {}, "enum": {}, "export": {}, "extends": {},
+	"false": {}, "finally": {}, "for": {}, "from": {}, "function": {}, "if": {},
+	"implements": {}, "import": {}, "in": {}, "instanceof": {}, "interface": {},
+	"let": {}, "new": {}, "null": {}, "of": {}, "package": {}, "private": {},
+	"protected": {}, "public": {}, "readonly": {}, "return": {}, "satisfies": {},
+	"static": {}, "super": {}, "switch": {}, "this": {}, "throw": {}, "true": {},
+	"try": {}, "type": {}, "typeof": {}, "undefined": {}, "var": {}, "void": {},
+	"while": {}, "with": {}, "yield": {},
+}
+
 func findTSBraceLine(lines []string, declIdx int) int {
 	if declIdx < 0 || declIdx >= len(lines) {
 		return -1
@@ -413,6 +445,105 @@ func extractTSCallNames(body string) []string {
 					out = append(out, ident)
 				}
 			}
+		}
+
+		prevIdentLower = identLower
+	}
+
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+func extractTSReferenceNames(body string) []string {
+	if strings.TrimSpace(body) == "" {
+		return nil
+	}
+
+	seen := make(map[string]struct{})
+	out := make([]string, 0, 32)
+
+	prevIdentLower := ""
+	for i := 0; i < len(body); {
+		c := body[i]
+
+		// Comments
+		if c == '/' && i+1 < len(body) && body[i+1] == '/' {
+			i += 2
+			for i < len(body) && body[i] != '\n' {
+				i++
+			}
+			prevIdentLower = ""
+			continue
+		}
+		if c == '/' && i+1 < len(body) && body[i+1] == '*' {
+			i += 2
+			for i+1 < len(body) {
+				if body[i] == '*' && body[i+1] == '/' {
+					i += 2
+					break
+				}
+				i++
+			}
+			prevIdentLower = ""
+			continue
+		}
+
+		// Strings
+		if c == '\'' || c == '"' || c == '`' {
+			quote := c
+			i++
+			for i < len(body) {
+				if body[i] == '\\' {
+					i += 2
+					continue
+				}
+				if body[i] == quote {
+					i++
+					break
+				}
+				i++
+			}
+			prevIdentLower = ""
+			continue
+		}
+
+		if !isTSIdentStart(rune(c)) {
+			i++
+			continue
+		}
+
+		start := i
+		i++
+		for i < len(body) && isTSIdentPart(rune(body[i])) {
+			i++
+		}
+		ident := body[start:i]
+		identLower := strings.ToLower(ident)
+
+		if _, ok := tsReferenceKeywords[identLower]; ok || prevIdentLower == "function" {
+			prevIdentLower = identLower
+			continue
+		}
+
+		j := i
+		for j < len(body) && isTSWhitespace(body[j]) {
+			j++
+		}
+		declContext := prevIdentLower == "const" || prevIdentLower == "let" || prevIdentLower == "var" || prevIdentLower == "type" || prevIdentLower == "interface" || prevIdentLower == "class"
+		if declContext && j < len(body) && (body[j] == ':' || body[j] == '=') {
+			prevIdentLower = identLower
+			continue
+		}
+		if j < len(body) && body[j] == ':' && prevIdentLower == "" {
+			prevIdentLower = identLower
+			continue
+		}
+
+		if _, ok := seen[ident]; !ok {
+			seen[ident] = struct{}{}
+			out = append(out, ident)
 		}
 
 		prevIdentLower = identLower

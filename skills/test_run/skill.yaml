@@ -3,8 +3,8 @@ kind: Skill
 metadata:
   name: test/run
   version: 0.1.0
-  description: "Run tests with coverage, benchmarks, and race detection"
-  tags: ["test", "go", "coverage", "benchmark"]
+  description: "Run tests with Go, pytest, or npm test entrypoints"
+  tags: ["test", "go", "python", "npm", "coverage", "benchmark"]
 distribution:
   type: exec
   exec:
@@ -22,8 +22,8 @@ signature:
     - name: mode
       type: string
       required: false
-      description: "Test mode: test, race, bench, coverage"
-      enum: ["test", "race", "bench", "coverage"]
+      description: "Test mode: test, race, bench, coverage, cargo, pytest, npm, pnpm, yarn"
+      enum: ["test", "race", "bench", "coverage", "cargo", "pytest", "npm", "pnpm", "yarn"]
       default: "test"
     - name: short
       type: boolean
@@ -47,12 +47,14 @@ signature:
   help:
     short: "Run tests, benchmarks, or coverage."
     long: |
-      Use test/run to execute Go tests with optional coverage or race mode.
+      Use test/run to execute Go tests, Cargo tests, pytest suites, or JS test scripts via npm/pnpm/yarn.
       Example commands:
         agentctl run test/run --input '{"path":"./...","mode":"test"}'
         agentctl skills run test/run --path ./... --mode test
         agentctl run test/run --input '{"path":"./...","mode":"race","timeout":"20m"}'
         agentctl skills run test/run --path ./... --mode race --timeout 20m
+        agentctl run test/run --input '{"path":".","mode":"pytest","pattern":"unit"}'
+        agentctl run test/run --input '{"path":".","mode":"npm"}'
     workflows:
       - id: run-tests
         description: "Run tests."

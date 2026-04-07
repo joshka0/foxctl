@@ -8,6 +8,8 @@ import (
 
 	agenttools "github.com/jkatigb/agentctl/internal/agent/tools"
 	"github.com/jkatigb/agentctl/internal/agent/types"
+	"github.com/jkatigb/agentctl/internal/agentpane"
+	domainagent "github.com/jkatigb/agentctl/internal/domain/agent"
 )
 
 // OverseerActorID is the canonical actor ID for the overseer.
@@ -165,6 +167,11 @@ func (o *Overseer) HandleSpawnRequest(ctx context.Context, req types.SpawnReques
 			LLMAuthHeader: sub.LLMAuthHeader,
 			LLMAuthPrefix: sub.LLMAuthPrefix,
 		}
+		if parentSessionID := o.runtime.FindSessionByActorID(req.CallerActorID); parentSessionID != "" {
+			if parentSession, ok := o.runtime.Get(parentSessionID); ok {
+				childCfg.TerminalBinding = inheritChildTerminalBinding(parentSession.Config.TerminalBinding, req.CallerActorID)
+			}
+		}
 
 		// Spawn the child session
 		session, err := o.runtime.Spawn(ctx, childCfg)
@@ -205,6 +212,10 @@ func (o *Overseer) HandleSpawnRequest(ctx context.Context, req types.SpawnReques
 	}
 
 	return resp, nil
+}
+
+func inheritChildTerminalBinding(parent domainagent.TerminalBinding, parentActorID string) domainagent.TerminalBinding {
+	return agentpane.InheritChildBinding(parent, "", parentActorID)
 }
 
 // SpawnOverseerAgent spawns the root overseer agent session.

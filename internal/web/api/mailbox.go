@@ -16,32 +16,36 @@ import (
 
 // MailboxMessageResponse represents a mailbox message in API responses.
 type MailboxMessageResponse struct {
-	ID          string `json:"id"`
-	Sender      string `json:"sender"`
-	Recipient   string `json:"recipient"`
-	Subject     string `json:"subject"`
-	Body        string `json:"body"`
-	Kind        string `json:"kind"`
-	Priority    int    `json:"priority"`
-	Status      string `json:"status"`
-	AckRequired bool   `json:"ack_required,omitempty"`
-	CreatedAt   string `json:"created_at"`
-	TaskID      string `json:"task_id,omitempty"`
-	Stream      string `json:"stream,omitempty"`
+	ID               string `json:"id"`
+	RelatedMessageID string `json:"related_message_id,omitempty"`
+	Sender           string `json:"sender"`
+	Recipient        string `json:"recipient"`
+	Subject          string `json:"subject"`
+	Body             string `json:"body"`
+	Kind             string `json:"kind"`
+	Priority         int    `json:"priority"`
+	Status           string `json:"status"`
+	AckRequired      bool   `json:"ack_required,omitempty"`
+	ReplyExpected    bool   `json:"reply_expected,omitempty"`
+	Interrupt        bool   `json:"interrupt,omitempty"`
+	CreatedAt        string `json:"created_at"`
+	TaskID           string `json:"task_id,omitempty"`
+	Stream           string `json:"stream,omitempty"`
 }
 
 // MailboxSendRequest is the request body for sending a mailbox message.
 type MailboxSendRequest struct {
-	WorkspaceID string `json:"workspace_id"`
-	Sender      string `json:"sender"`
-	Recipient   string `json:"recipient"`
-	Subject     string `json:"subject"`
-	Body        string `json:"body"`
-	Kind        string `json:"kind,omitempty"`
-	Priority    int    `json:"priority,omitempty"`
-	AckRequired bool   `json:"ack_required,omitempty"`
-	TaskID      string `json:"task_id,omitempty"`
-	Stream      string `json:"stream,omitempty"`
+	WorkspaceID      string `json:"workspace_id"`
+	RelatedMessageID string `json:"related_message_id,omitempty"`
+	Sender           string `json:"sender"`
+	Recipient        string `json:"recipient"`
+	Subject          string `json:"subject"`
+	Body             string `json:"body"`
+	Kind             string `json:"kind,omitempty"`
+	Priority         int    `json:"priority,omitempty"`
+	AckRequired      bool   `json:"ack_required,omitempty"`
+	TaskID           string `json:"task_id,omitempty"`
+	Stream           string `json:"stream,omitempty"`
 }
 
 // MailboxSendResponse is the response for sending a mailbox message.
@@ -163,18 +167,21 @@ func convertBoardMessages(msgs []agent.BoardMessage) []MailboxMessageResponse {
 	resp := make([]MailboxMessageResponse, 0, len(msgs))
 	for _, m := range msgs {
 		resp = append(resp, MailboxMessageResponse{
-			ID:          m.ID,
-			Sender:      m.Sender,
-			Recipient:   m.Recipient,
-			Subject:     m.Subject,
-			Body:        m.Body,
-			Kind:        string(m.Kind),
-			Priority:    m.Priority,
-			Status:      string(m.Status),
-			AckRequired: m.AckRequired,
-			CreatedAt:   m.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
-			TaskID:      m.TaskID,
-			Stream:      m.Stream,
+			ID:               m.ID,
+			RelatedMessageID: m.RelatedMessageID,
+			Sender:           m.Sender,
+			Recipient:        m.Recipient,
+			Subject:          m.Subject,
+			Body:             m.Body,
+			Kind:             string(m.Kind),
+			Priority:         m.Priority,
+			Status:           string(m.Status),
+			AckRequired:      m.AckRequired,
+			ReplyExpected:    m.ReplyExpected,
+			Interrupt:        m.Interrupt,
+			CreatedAt:        m.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
+			TaskID:           m.TaskID,
+			Stream:           m.Stream,
 		})
 	}
 	return resp
@@ -239,10 +246,16 @@ func handleMailboxSend(w http.ResponseWriter, r *http.Request, cfg config.Config
 		// Validate enum value
 		switch kind {
 		case agent.BoardMessageKindInstruction, agent.BoardMessageKindInfo,
-			agent.BoardMessageKindAlert, agent.BoardMessageKindReviewRequest:
+			agent.BoardMessageKindAlert, agent.BoardMessageKindReviewRequest,
+			agent.BoardMessageKindCoordinatorPulse,
+			agent.BoardMessageKindPlanSession, agent.BoardMessageKindPlanProposal,
+			agent.BoardMessageKindPlanQuestion, agent.BoardMessageKindPlanDecision,
+			agent.BoardMessageKindPlanReview, agent.BoardMessageKindPlanClose,
+			agent.BoardMessageKindInterviewSession, agent.BoardMessageKindInterviewQuestion,
+			agent.BoardMessageKindInterviewAnswer, agent.BoardMessageKindInterviewVerify:
 			// valid
 		default:
-			httpError(w, http.StatusBadRequest, "invalid kind: must be one of instruction, info, alert, review_request")
+			httpError(w, http.StatusBadRequest, "invalid kind: must be one of instruction, info, alert, review_request, coordinator_pulse, plan_session, plan_proposal, plan_question, plan_decision, plan_review, plan_close, interview_session, interview_question, interview_answer, interview_verify")
 			return
 		}
 	}
@@ -258,19 +271,20 @@ func handleMailboxSend(w http.ResponseWriter, r *http.Request, cfg config.Config
 
 	// Create the message
 	msg := &agent.BoardMessage{
-		ID:          uuid.New().String(),
-		WorkspaceID: req.WorkspaceID,
-		Sender:      req.Sender,
-		Recipient:   req.Recipient,
-		Subject:     req.Subject,
-		Body:        req.Body,
-		Kind:        kind,
-		Priority:    priority,
-		Status:      agent.BoardMessageStatusUnread,
-		AckRequired: req.AckRequired,
-		CreatedAt:   time.Now(),
-		TaskID:      req.TaskID,
-		Stream:      req.Stream,
+		ID:               uuid.New().String(),
+		WorkspaceID:      req.WorkspaceID,
+		RelatedMessageID: strings.TrimSpace(req.RelatedMessageID),
+		Sender:           req.Sender,
+		Recipient:        req.Recipient,
+		Subject:          req.Subject,
+		Body:             req.Body,
+		Kind:             kind,
+		Priority:         priority,
+		Status:           agent.BoardMessageStatusUnread,
+		AckRequired:      req.AckRequired,
+		CreatedAt:        time.Now(),
+		TaskID:           req.TaskID,
+		Stream:           req.Stream,
 	}
 
 	// Send the message

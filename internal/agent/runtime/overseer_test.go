@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/jkatigb/agentctl/internal/agent/types"
+	domainagent "github.com/jkatigb/agentctl/internal/domain/agent"
 )
 
 func TestValidateSpawnDepth(t *testing.T) {
@@ -248,5 +249,39 @@ func TestHierarchyNode(t *testing.T) {
 	}
 	if node.Children[0].Depth != 1 {
 		t.Errorf("child depth = %d, want 1", node.Children[0].Depth)
+	}
+}
+
+func TestInheritChildTerminalBinding(t *testing.T) {
+	parent := domainagent.TerminalBinding{
+		Backend:       "tmux",
+		Session:       "collab",
+		PaneID:        "%7",
+		ParticipantID: "lead-a",
+		RoomID:        "room-alpha",
+		RoomAccess:    "direct",
+	}
+
+	got := inheritChildTerminalBinding(parent, "agent:parent-1")
+	if got.Backend != "tmux" {
+		t.Fatalf("Backend = %q, want tmux", got.Backend)
+	}
+	if got.Session != "collab" {
+		t.Fatalf("Session = %q, want collab", got.Session)
+	}
+	if got.ParentParticipantID != "lead-a" {
+		t.Fatalf("ParentParticipantID = %q, want lead-a", got.ParentParticipantID)
+	}
+	if got.ParentAgentID != "agent:parent-1" {
+		t.Fatalf("ParentAgentID = %q, want agent:parent-1", got.ParentAgentID)
+	}
+	if got.RoomAccess != "none" {
+		t.Fatalf("RoomAccess = %q, want none", got.RoomAccess)
+	}
+	if got.RoomID != "" {
+		t.Fatalf("RoomID = %q, want empty", got.RoomID)
+	}
+	if got.PaneID != "" {
+		t.Fatalf("PaneID = %q, want empty", got.PaneID)
 	}
 }

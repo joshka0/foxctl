@@ -23,7 +23,7 @@ signature:
     - name: operation
       type: string
       required: true
-      enum: [shake, reload, deep_link, dev_menu, toggle_inspector,
+      enum: [debug_status, debug_snapshot, shake, reload, deep_link, dev_menu, toggle_inspector,
              toggle_performance, toggle_remote_debug,
              build, update, build_status, logs]
       description: Operation to perform
@@ -71,6 +71,8 @@ signature:
     long: |
       Use mobile/expo for Expo dev menu actions and EAS build/update flows.
       Example commands:
+        agentctl run mobile/expo --input '{"operation":"debug_status","platform":"ios"}'
+        agentctl run mobile/expo --input '{"operation":"debug_snapshot","platform":"ios","count":50}'
         agentctl run mobile/expo --input '{"operation":"reload","platform":"ios"}'
         agentctl skills run mobile/expo --operation reload --platform ios
         agentctl run mobile/expo --input '{"operation":"build","build_platform":"android","profile":"preview"}'
@@ -91,6 +93,15 @@ signature:
     - name: operation
       type: string
       description: The operation that was performed
+    - name: project
+      type: object
+      description: Workspace-level Expo/React Native project detection information
+    - name: tooling
+      type: object
+      description: Available local debugging toolchain components
+    - name: ios
+      type: object
+      description: Optional iOS-specific snapshot data such as screenshot and UI tree preview
     - name: success
       type: boolean
       description: Whether the operation succeeded

@@ -24,11 +24,6 @@ type SpawnDependencies struct {
 	NewID          func() string
 }
 
-// RuntimeSpawner performs parent-aware child spawn against an external runtime.
-type RuntimeSpawner interface {
-	SpawnChild(ctx context.Context, req spawn.Request) (spawn.Response, error)
-}
-
 // SpawnService orchestrates spawn operations through the shared run service.
 type SpawnService struct {
 	deps SpawnDependencies

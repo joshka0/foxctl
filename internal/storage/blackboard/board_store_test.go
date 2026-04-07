@@ -2,12 +2,15 @@ package blackboard
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/jkatigb/agentctl/internal/domain/agent"
+	"github.com/jkatigb/agentctl/internal/storage/sqliteutil"
 )
 
 func TestBoardStore_SendAndInbox(t *testing.T) {
@@ -28,12 +31,13 @@ func TestBoardStore_SendAndInbox(t *testing.T) {
 
 	// Send a message
 	msg := agent.BoardMessage{
-		WorkspaceID: "ws1",
-		Sender:      "admin",
-		Recipient:   "actor:agent:coder",
-		Subject:     "Test message",
-		Body:        "This is a test",
-		Priority:    1,
+		WorkspaceID:   "ws1",
+		Sender:        "admin",
+		Recipient:     "actor:agent:coder",
+		Subject:       "Test message",
+		Body:          "This is a test",
+		Priority:      1,
+		ReplyExpected: true,
 	}
 	if err := store.SendMessage(ctx, &msg); err != nil {
 		t.Fatalf("SendMessage: %v", err)
@@ -57,6 +61,9 @@ func TestBoardStore_SendAndInbox(t *testing.T) {
 	}
 	if messages[0].Sender != "admin" {
 		t.Errorf("expected sender 'admin', got %q", messages[0].Sender)
+	}
+	if !messages[0].ReplyExpected {
+		t.Errorf("expected reply_expected=true, got false")
 	}
 }
 
@@ -135,6 +142,58 @@ func TestBoardStore_AckMessages(t *testing.T) {
 	}
 	if count != 1 {
 		t.Errorf("expected 1 acked, got %d", count)
+	}
+}
+
+func TestOpenBoardStore_MigratesLegacyBoardMessagesRelatedMessageID(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	path := filepath.Join(root, "board.db")
+	db, err := sqliteutil.OpenDB(ctx, path, nil)
+	if err != nil {
+		t.Fatalf("sqliteutil.OpenDB legacy schema: %v", err)
+	}
+	defer db.Close()
+	if _, err := db.ExecContext(ctx, `
+CREATE TABLE IF NOT EXISTS board_messages (
+	id           TEXT PRIMARY KEY,
+	workspace_id TEXT NOT NULL,
+	task_id      TEXT,
+	stream       TEXT NOT NULL DEFAULT 'coordination',
+	sender       TEXT NOT NULL,
+	recipient    TEXT NOT NULL,
+	kind         TEXT NOT NULL DEFAULT 'info',
+	priority     INTEGER NOT NULL DEFAULT 3,
+	ack_required INTEGER NOT NULL DEFAULT 0,
+	reply_expected INTEGER NOT NULL DEFAULT 0,
+	status       TEXT NOT NULL DEFAULT 'unread',
+	subject      TEXT NOT NULL,
+	body         TEXT NOT NULL,
+	created_at   INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_board_msg_workspace_recipient ON board_messages(workspace_id, recipient);
+CREATE INDEX IF NOT EXISTS idx_board_msg_workspace_task ON board_messages(workspace_id, task_id);
+CREATE INDEX IF NOT EXISTS idx_board_msg_priority_created ON board_messages(priority, created_at);
+`); err != nil {
+		t.Fatalf("legacy schema exec: %v", err)
+	}
+
+	store, err := OpenBoardStore(ctx, root)
+	if err != nil {
+		t.Fatalf("OpenBoardStore migrated legacy schema: %v", err)
+	}
+	defer store.Close()
+
+	msg := agent.BoardMessage{
+		WorkspaceID:      "ws1",
+		RelatedMessageID: "orig-1",
+		Sender:           "admin",
+		Recipient:        "actor:agent:coder",
+		Subject:          "legacy migrated",
+		Body:             "legacy migrated body",
+	}
+	if err := store.SendMessage(ctx, &msg); err != nil {
+		t.Fatalf("SendMessage after migration: %v", err)
 	}
 }
 
@@ -253,7 +312,7 @@ func TestBoardStore_ListRoomsAndRoomMessages(t *testing.T) {
 		}
 	}
 
-	rooms, err := store.ListRooms(ctx, "ws1", "actor:agent:viewer", 10)
+	rooms, err := store.ListRooms(ctx, "ws1", "actor:agent:viewer", 10, false)
 	if err != nil {
 		t.Fatalf("ListRooms: %v", err)
 	}
@@ -299,6 +358,119 @@ func TestBoardStore_ListRoomsAndRoomMessages(t *testing.T) {
 	}
 	if roomMessages[0].Subject != "alpha-1" || roomMessages[1].Subject != "alpha-2" {
 		t.Fatalf("room messages not chronological: %+v", []string{roomMessages[0].Subject, roomMessages[1].Subject})
+	}
+}
+
+func TestBoardStore_DeleteRoomRemovesMetadataMembersAndMessages(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+
+	store, err := OpenBoardStore(ctx, dir)
+	if err != nil {
+		t.Fatalf("OpenBoardStore: %v", err)
+	}
+	defer store.Close()
+
+	if _, err := store.UpsertRoom(ctx, agent.Room{
+		ID:          "cleanup-room",
+		WorkspaceID: "ws1",
+		Title:       "Cleanup Room",
+		Members: []agent.RoomMember{
+			{ActorID: "actor:agent:alpha", Role: "researcher"},
+		},
+	}); err != nil {
+		t.Fatalf("UpsertRoom: %v", err)
+	}
+
+	msg := &agent.BoardMessage{
+		WorkspaceID: "ws1",
+		Stream:      agent.RoomStreamName("cleanup-room"),
+		Sender:      "human:gui",
+		Recipient:   agent.BroadcastRecipient,
+		Kind:        agent.BoardMessageKindInfo,
+		Priority:    agent.DefaultPriority,
+		Status:      agent.BoardMessageStatusUnread,
+		Subject:     "Cleanup",
+		Body:        "remove this room",
+	}
+	if err := store.SendMessage(ctx, msg); err != nil {
+		t.Fatalf("SendMessage: %v", err)
+	}
+
+	if err := store.DeleteRoom(ctx, "ws1", "cleanup-room"); err != nil {
+		t.Fatalf("DeleteRoom: %v", err)
+	}
+
+	if _, err := store.GetRoom(ctx, "ws1", "cleanup-room", ""); !errors.Is(err, ErrRoomNotFound) {
+		t.Fatalf("GetRoom after delete err=%v want ErrRoomNotFound", err)
+	}
+
+	messages, err := store.ListRoomMessages(ctx, "ws1", "cleanup-room", 10)
+	if !errors.Is(err, ErrRoomNotFound) {
+		t.Fatalf("ListRoomMessages after delete err=%v want ErrRoomNotFound", err)
+	}
+	if len(messages) != 0 {
+		t.Fatalf("messages slice after delete=%d want 0", len(messages))
+	}
+}
+
+func TestBoardStore_ArchiveAndRestoreRoom(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+
+	store, err := OpenBoardStore(ctx, dir)
+	if err != nil {
+		t.Fatalf("OpenBoardStore: %v", err)
+	}
+	defer store.Close()
+
+	if _, err := store.UpsertRoom(ctx, agent.Room{
+		ID:          "archive-room",
+		WorkspaceID: "ws1",
+		Title:       "Archive Room",
+	}); err != nil {
+		t.Fatalf("UpsertRoom: %v", err)
+	}
+	if err := store.SendMessage(ctx, &agent.BoardMessage{
+		WorkspaceID: "ws1",
+		Stream:      agent.RoomStreamName("archive-room"),
+		Sender:      "actor:agent:a",
+		Recipient:   agent.BroadcastRecipient,
+		Subject:     "persisted timeline",
+		Body:        "keep this after archive",
+	}); err != nil {
+		t.Fatalf("SendMessage: %v", err)
+	}
+
+	if err := store.ArchiveRoom(ctx, "ws1", "archive-room"); err != nil {
+		t.Fatalf("ArchiveRoom: %v", err)
+	}
+
+	activeRooms, err := store.ListRooms(ctx, "ws1", "", 10, false)
+	if err != nil {
+		t.Fatalf("ListRooms(active): %v", err)
+	}
+	if len(activeRooms) != 0 {
+		t.Fatalf("active rooms=%d want 0", len(activeRooms))
+	}
+
+	archivedRooms, err := store.ListRooms(ctx, "ws1", "", 10, true)
+	if err != nil {
+		t.Fatalf("ListRooms(archived): %v", err)
+	}
+	if len(archivedRooms) != 1 || archivedRooms[0].ArchivedAt == nil {
+		t.Fatalf("archived rooms=%+v want one archived room", archivedRooms)
+	}
+
+	if err := store.RestoreRoom(ctx, "ws1", "archive-room"); err != nil {
+		t.Fatalf("RestoreRoom: %v", err)
+	}
+	restoredRooms, err := store.ListRooms(ctx, "ws1", "", 10, false)
+	if err != nil {
+		t.Fatalf("ListRooms(restored): %v", err)
+	}
+	if len(restoredRooms) != 1 || restoredRooms[0].ArchivedAt != nil {
+		t.Fatalf("restored rooms=%+v want one active room", restoredRooms)
 	}
 }
 
@@ -355,7 +527,7 @@ func TestBoardStore_RoomMetadataAndMembers(t *testing.T) {
 	}
 
 	replaced, err := store.ReplaceRoomMembers(ctx, "ws1", "alpha", []agent.RoomMember{
-		{ActorID: "actor:agent:three", Role: "owner"},
+		{ActorID: "actor:agent:three", Role: "owner", Backend: "zellij", Session: "fascinating-salamander"},
 	})
 	if err != nil {
 		t.Fatalf("ReplaceRoomMembers: %v", err)
@@ -370,6 +542,9 @@ func TestBoardStore_RoomMetadataAndMembers(t *testing.T) {
 	}
 	if len(updated.Members) != 1 || updated.Members[0].ActorID != "actor:agent:three" {
 		t.Fatalf("updated members=%+v want actor:agent:three", updated.Members)
+	}
+	if updated.Members[0].Backend != "zellij" || updated.Members[0].Session != "fascinating-salamander" {
+		t.Fatalf("updated member binding=%+v want zellij/fascinating-salamander", updated.Members[0])
 	}
 	if len(updated.Participants) != 1 || updated.Participants[0] != "actor:agent:three" {
 		t.Fatalf("updated participants=%+v want actor:agent:three", updated.Participants)
@@ -712,6 +887,37 @@ func TestCountMessagesByTaskCountsSurfaced(t *testing.T) {
 	}
 	if total != 2 {
 		t.Fatalf("expected total=2 (unread+surfaced), got %d (admin=%d overseer=%d)", total, admin, overseer)
+	}
+}
+
+func TestRetryBoardBusyRetriesBusyErrors(t *testing.T) {
+	var calls int32
+	err := retryBoardBusy(context.Background(), func() error {
+		if atomic.AddInt32(&calls, 1) < 3 {
+			return errors.New("database is locked")
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("retryBoardBusy: %v", err)
+	}
+	if got := atomic.LoadInt32(&calls); got != 3 {
+		t.Fatalf("calls=%d want 3", got)
+	}
+}
+
+func TestRetryBoardBusyDoesNotRetryNonBusyErrors(t *testing.T) {
+	var calls int32
+	want := errors.New("boom")
+	err := retryBoardBusy(context.Background(), func() error {
+		atomic.AddInt32(&calls, 1)
+		return want
+	})
+	if !errors.Is(err, want) {
+		t.Fatalf("err=%v want %v", err, want)
+	}
+	if got := atomic.LoadInt32(&calls); got != 1 {
+		t.Fatalf("calls=%d want 1", got)
 	}
 }
 

@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -97,6 +98,49 @@ func TestExtractLibraryID(t *testing.T) {
 				t.Errorf("extractLibraryID() = %q, want %q", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestDecodeSkillExecutionEnvelope(t *testing.T) {
+	env, ok := decodeSkillExecutionEnvelope([]byte(`{"status":"error","command":"mobile/android","data":{},"error":{"message":"adb not found"}}`))
+	if !ok {
+		t.Fatal("expected envelope to decode")
+	}
+	if env.Status != "error" {
+		t.Fatalf("status=%q want error", env.Status)
+	}
+	if env.Error.Message != "adb not found" {
+		t.Fatalf("message=%q want adb not found", env.Error.Message)
+	}
+}
+
+func TestRenderSkillExecutionResult_UsesEnvelopeOnExecError(t *testing.T) {
+	result, err := renderSkillExecutionResult(context.Background(), "mobile/android",
+		[]byte(`{"status":"error","command":"mobile/android","data":{},"error":{"message":"adb not found"}}`),
+		[]byte("warning"),
+		errors.New("exit status 1"),
+	)
+	if err != nil {
+		t.Fatalf("renderSkillExecutionResult: %v", err)
+	}
+	if !result.IsError {
+		t.Fatal("expected MCP error result")
+	}
+	if text := firstTextContent(result); !strings.Contains(text, "adb not found") {
+		t.Fatalf("unexpected text: %q", text)
+	}
+}
+
+func TestRenderSkillExecutionResult_PassesThroughRawOutput(t *testing.T) {
+	result, err := renderSkillExecutionResult(context.Background(), "raw/test", []byte("not json"), nil, nil)
+	if err != nil {
+		t.Fatalf("renderSkillExecutionResult: %v", err)
+	}
+	if result.IsError {
+		t.Fatal("expected non-error result")
+	}
+	if text := strings.TrimSpace(firstTextContent(result)); text != "not json" {
+		t.Fatalf("unexpected text: %q", text)
 	}
 }
 
@@ -665,4 +709,89 @@ func firstTextContent(result *mcp.CallToolResult) string {
 		}
 	}
 	return ""
+}
+
+func TestSkillGroupsIncludeOptimizedRetrieval(t *testing.T) {
+	skills, ok := skillGroups["optimized-retrieval"]
+	if !ok {
+		t.Fatal("optimized-retrieval group missing")
+	}
+	expected := map[string]bool{
+		"code/semantic_search": true,
+		"code/smart_search":    true,
+		"code/symbols":         true,
+		"code/snippet_extract": true,
+		"code/context_grep":    true,
+		"code/dag_grep":        true,
+		"codemap/get":          true,
+		"code/refactor_scout":  true,
+	}
+	for _, skill := range skills {
+		delete(expected, skill)
+	}
+	if len(expected) > 0 {
+		t.Fatalf("optimized-retrieval missing skills: %v", expected)
+	}
+}
+
+func TestSkillGroupsIncludeFocusedProfiles(t *testing.T) {
+	cases := map[string][]string{
+		"mobile":  {"mobile/android", "mobile/ios", "mobile/expo"},
+		"godot":   {"build/godot", "editor/godot"},
+		"api":     {"http/openapi"},
+		"context": {"session/recall", "session/timeline", "session/query", "session/summarize"},
+	}
+	for group, expectedSkills := range cases {
+		skills, ok := skillGroups[group]
+		if !ok {
+			t.Fatalf("%s group missing", group)
+		}
+		got := make(map[string]bool, len(skills))
+		for _, skill := range skills {
+			got[skill] = true
+		}
+		for _, want := range expectedSkills {
+			if !got[want] {
+				t.Fatalf("%s missing %s", group, want)
+			}
+		}
+	}
+}
+
+func TestRegisterFocusedGroupToolsAddsMobileExpo(t *testing.T) {
+	srv := server.NewMCPServer("agentctl", "test")
+	registerFocusedGroupTools(srv, []string{"mobile"})
+	if _, ok := srv.ListTools()["mobile_expo"]; !ok {
+		t.Fatal("mobile_expo tool missing")
+	}
+}
+
+func TestSkillGroupsIncludeCommandBackedProfiles(t *testing.T) {
+	for _, group := range []string{"room", "mux", "collab"} {
+		if _, ok := skillGroups[group]; !ok {
+			t.Fatalf("%s group missing", group)
+		}
+	}
+}
+
+func TestMCPServeHasOptimizedRetrievalFlag(t *testing.T) {
+	cmd := newMCPServeCommand()
+	flag := cmd.Flags().Lookup("optimized-retrieval")
+	if flag == nil {
+		t.Fatal("optimized-retrieval flag missing")
+	}
+	if flag.DefValue != "false" {
+		t.Fatalf("optimized-retrieval default=%q want false", flag.DefValue)
+	}
+}
+
+func TestMCPServeHasGroupOnlyFlag(t *testing.T) {
+	cmd := newMCPServeCommand()
+	flag := cmd.Flags().Lookup("group-only")
+	if flag == nil {
+		t.Fatal("group-only flag missing")
+	}
+	if flag.DefValue != "false" {
+		t.Fatalf("group-only default=%q want false", flag.DefValue)
+	}
 }

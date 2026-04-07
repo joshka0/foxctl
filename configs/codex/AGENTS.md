@@ -122,6 +122,8 @@ For common workflows, use skill packs instead of individual skills:
 | `$agentctl-code` | Code analysis + semantic search |
 | `$agentctl-dev` | Tests + CI + verification |
 | `$agentctl-orchestrate` | Tasks + sessions + inbox |
+| `$agentctl-room` | Durable room chat, room loop, room tasks |
+| `$agentctl-room-operator` | How to behave inside an active room as participant, reviewer, or coordinator |
 
 ---
 

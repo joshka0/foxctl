@@ -648,7 +648,7 @@ func persistSessionLearnings(ctx context.Context, rc *skillmain.RunContext, sess
 	var embedProvider semantic.EmbeddingProvider
 	voyageKey := os.Getenv("VOYAGE_API_KEY")
 	geminiKey := os.Getenv("GEMINI_API_KEY")
-	if voyageKey != "" || geminiKey != "" {
+	if semantic.DetectProviderForConfig(rc.Config, voyageKey, geminiKey) != "" {
 		waitOnLimit := true
 		embedProvider, _ = semantic.NewProviderForScope(
 			semantic.ScopeMemory,

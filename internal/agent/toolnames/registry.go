@@ -20,6 +20,7 @@ var (
 
 var runtimeToolNames = []string{
 	"fs_read_file", "fs_list_dir", "fs_write_file", "code_search", "think",
+	"shell",
 	"context_search", "semantic_search_code", "semantic_search_sessions", "semantic_search_memories", "semantic_search_context",
 	"smart_search", "code_search_ensemble", "context_grep", "code_symbols", "refactor_scout", "context_filter", "session_timeline",
 	"memory_query", "session_recall", "annotation_recall", "annotation_list_sessions", "annotation_category_stats",

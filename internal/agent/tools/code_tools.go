@@ -118,6 +118,10 @@ func (r *Registry) registerCodeTools() error {
 					Description: "Array of candidate files with optional symbol_id and priority",
 					Required:    true,
 				},
+				"inline_mode": {
+					Type:        "string",
+					Description: "How much snippet detail to inline: auto, full, preview, or artifact_only",
+				},
 			},
 		},
 		r.wrapWithTelemetry("code.snippet_extract", r.codeSnippetExtract),
@@ -713,6 +717,7 @@ type SweGrepSnippet struct {
 type SweGrepInput struct {
 	WorkspaceID string             `json:"workspace_id"`
 	Question    string             `json:"question"`
+	InlineMode  string             `json:"inline_mode,omitempty"`
 	Candidates  []SweGrepCandidate `json:"candidates"`
 	Limits      *SweGrepLimits     `json:"limits,omitempty"`
 }
@@ -774,6 +779,9 @@ func (r *Registry) codeSnippetExtract(ctx context.Context, args map[string]any) 
 		Question:    question,
 		Candidates:  candidates,
 	}
+	if inlineMode, ok := args["inline_mode"].(string); ok && strings.TrimSpace(inlineMode) != "" {
+		input.InlineMode = strings.TrimSpace(inlineMode)
+	}
 
 	inputBytes, err := json.Marshal(input)
 	if err != nil {
@@ -801,7 +809,10 @@ func (r *Registry) codeSnippetExtract(ctx context.Context, args map[string]any) 
 			EndLine   int    `json:"end_line"`
 			Preview   string `json:"preview"`
 		} `json:"snippets_inline"`
-		Artifact string `json:"artifact"`
+		SnippetsTotal int    `json:"snippets_total"`
+		InlineMode    string `json:"inline_mode"`
+		Truncated     bool   `json:"truncated"`
+		Artifact      string `json:"artifact"`
 	}
 
 	_, err = skillrun.RunAndDecodeInto(ctx, resolver, "code/snippet_extract", inputBytes, skillrun.Options{
@@ -832,6 +843,15 @@ func (r *Registry) codeSnippetExtract(ctx context.Context, args map[string]any) 
 	toolResult["files_considered"] = payload.Summary.FilesConsidered
 	toolResult["files_relevant"] = payload.Summary.FilesRelevant
 	toolResult["snippets_emitted"] = payload.Summary.SnippetsEmitted
+	if payload.SnippetsTotal > 0 {
+		toolResult["snippets_total"] = payload.SnippetsTotal
+	}
+	if payload.InlineMode != "" {
+		toolResult["inline_mode"] = payload.InlineMode
+	}
+	if payload.Truncated {
+		toolResult["truncated"] = true
+	}
 
 	// Extract inline snippets
 	if len(payload.SnippetsInline) > 0 {

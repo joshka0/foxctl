@@ -55,32 +55,30 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 		return err
 	}
 
-	// Check if go is available
-	if _, err := executil.RequireTool("go", "install Go from https://go.dev/doc/install"); err != nil {
-		return fmt.Errorf("go command not found: %w", err)
-	}
-
 	// Build command based on mode
-	args, env, err := buildTestArgs(in.Mode, testPath, in)
+	runner, args, env, runDir, err := buildTestCommand(in.Mode, testPath, in)
 	if err != nil {
 		return err
 	}
 
 	// Execute tests
-	result := executil.RunWithEnv(ctx, "", "go", env, args...)
+	result := executil.RunWithEnv(ctx, runDir, runner, env, args...)
 
 	// Parse output
-	results := parseTestOutput(string(result.Stdout), in.Mode)
+	results := parseGoTestOutput(string(result.Stdout), in.Mode)
 
 	// Prepare response data
 	data := map[string]any{
-		"mode":    in.Mode,
-		"path":    testPath,
-		"results": results,
+		"mode":   in.Mode,
+		"runner": runner,
+		"path":   testPath,
+	}
+	if len(results) > 0 {
+		data["results"] = results
 	}
 
 	// Add summary
-	summary := summarizeResults(results)
+	summary := summarizeResults(in.Mode, string(result.Stdout), string(result.Stderr), result.ExitCode, results)
 	for k, v := range summary {
 		data[k] = v
 	}
@@ -118,15 +116,32 @@ func resolveTestPath(rc *skillmain.RunContext, path string) (string, error) {
 	return valid, nil
 }
 
-func buildTestArgs(mode, path string, in input) ([]string, []string, error) {
-	var args []string
+func buildTestCommand(mode, path string, in input) (string, []string, []string, string, error) {
+	var (
+		args   []string
+		env    []string
+		runner string
+		runDir string
+	)
 
 	switch mode {
 	case "test":
+		if _, err := executil.RequireTool("go", "install Go from https://go.dev/doc/install"); err != nil {
+			return "", nil, nil, "", fmt.Errorf("go command not found: %w", err)
+		}
+		runner = "go"
 		args = []string{"test"}
 	case "race":
+		if _, err := executil.RequireTool("go", "install Go from https://go.dev/doc/install"); err != nil {
+			return "", nil, nil, "", fmt.Errorf("go command not found: %w", err)
+		}
+		runner = "go"
 		args = []string{"test", "-race"}
 	case "bench":
+		if _, err := executil.RequireTool("go", "install Go from https://go.dev/doc/install"); err != nil {
+			return "", nil, nil, "", fmt.Errorf("go command not found: %w", err)
+		}
+		runner = "go"
 		args = []string{"test"}
 		if in.Pattern != "" {
 			args = append(args, "-bench="+in.Pattern)
@@ -135,42 +150,101 @@ func buildTestArgs(mode, path string, in input) ([]string, []string, error) {
 			args = append(args, "-bench=.")
 		}
 	case "coverage":
+		if _, err := executil.RequireTool("go", "install Go from https://go.dev/doc/install"); err != nil {
+			return "", nil, nil, "", fmt.Errorf("go command not found: %w", err)
+		}
+		runner = "go"
 		args = []string{"test", "-cover", "-covermode=atomic"}
+	case "cargo":
+		if _, err := executil.RequireTool("cargo", "install Rust/Cargo"); err != nil {
+			return "", nil, nil, "", fmt.Errorf("cargo command not found: %w", err)
+		}
+		runner = "cargo"
+		runDir = testCommandDir(path)
+		args = []string{"test"}
+		if in.Pattern != "" {
+			args = append(args, in.Pattern)
+		}
+	case "pytest":
+		if _, err := executil.RequireTool("pytest", "install pytest in the active environment"); err != nil {
+			return "", nil, nil, "", fmt.Errorf("pytest command not found: %w", err)
+		}
+		runner = "pytest"
+		runDir = testCommandDir(path)
+		if in.Verbose {
+			args = append(args, "-v")
+		}
+		if in.Pattern != "" {
+			args = append(args, "-k", in.Pattern)
+		}
+		if path != "" && path != "." {
+			args = append(args, path)
+		}
+	case "npm":
+		if _, err := executil.RequireTool("npm", "install npm or Node.js"); err != nil {
+			return "", nil, nil, "", fmt.Errorf("npm command not found: %w", err)
+		}
+		runner = "npm"
+		runDir = testCommandDir(path)
+		args = []string{"test"}
+	case "pnpm":
+		if _, err := executil.RequireTool("pnpm", "install pnpm"); err != nil {
+			return "", nil, nil, "", fmt.Errorf("pnpm command not found: %w", err)
+		}
+		runner = "pnpm"
+		runDir = testCommandDir(path)
+		args = []string{"test"}
+	case "yarn":
+		if _, err := executil.RequireTool("yarn", "install yarn"); err != nil {
+			return "", nil, nil, "", fmt.Errorf("yarn command not found: %w", err)
+		}
+		runner = "yarn"
+		runDir = testCommandDir(path)
+		args = []string{"test"}
 	default:
-		return nil, nil, fmt.Errorf("invalid mode: %s", mode)
+		return "", nil, nil, "", fmt.Errorf("invalid mode: %s", mode)
 	}
 
-	// Add common flags
-	if in.Short {
-		args = append(args, "-short")
-	}
-	if in.Verbose {
-		args = append(args, "-v")
-	}
-	if in.Pattern != "" && mode != "bench" {
-		// For bench mode, pattern is already handled above with -bench flag
-		args = append(args, "-run="+in.Pattern)
-	}
-	if in.Timeout != "" {
-		args = append(args, "-timeout="+in.Timeout)
+	if runner == "go" {
+		// Add common flags
+		if in.Short {
+			args = append(args, "-short")
+		}
+		if in.Verbose {
+			args = append(args, "-v")
+		}
+		if in.Pattern != "" && mode != "bench" {
+			// For bench mode, pattern is already handled above with -bench flag
+			args = append(args, "-run="+in.Pattern)
+		}
+		if in.Timeout != "" {
+			args = append(args, "-timeout="+in.Timeout)
+		}
+
+		// Add JSON output for parsing
+		args = append(args, "-json")
+
+		// Add path
+		args = append(args, path)
+
+		// For race mode, we need CGO_ENABLED=1.
+		env = []string{"CGO_ENABLED=0"}
+		if mode == "race" {
+			env = []string{"CGO_ENABLED=1"}
+		}
 	}
 
-	// Add JSON output for parsing
-	args = append(args, "-json")
-
-	// Add path
-	args = append(args, path)
-
-	// For race mode, we need CGO_ENABLED=1.
-	env := []string{"CGO_ENABLED=0"}
-	if mode == "race" {
-		env = []string{"CGO_ENABLED=1"}
-	}
-
-	return args, env, nil
+	return runner, args, env, runDir, nil
 }
 
-func parseTestOutput(output, mode string) []testResult {
+func testCommandDir(path string) string {
+	if path == "" || path == "." || path == "./..." {
+		return ""
+	}
+	return path
+}
+
+func parseGoTestOutput(output, mode string) []testResult {
 	var results []testResult
 	packageMap := make(map[string]*testResult)
 
@@ -228,7 +302,16 @@ func extractCoverage(output string) float64 {
 	return 0
 }
 
-func summarizeResults(results []testResult) map[string]any {
+func summarizeResults(mode, stdout, stderr string, exitCode int, results []testResult) map[string]any {
+	if mode == "pytest" {
+		return summarizePytest(stdout, stderr, exitCode)
+	}
+	if mode == "npm" || mode == "pnpm" || mode == "yarn" {
+		return summarizeNPM(stdout, stderr, exitCode)
+	}
+	if mode == "cargo" {
+		return summarizeCargo(stdout, stderr, exitCode)
+	}
 	summary := map[string]any{
 		"total_packages": len(results),
 		"passed":         0,
@@ -264,4 +347,111 @@ func summarizeResults(results []testResult) map[string]any {
 	summary["success"] = summary["failed"].(int) == 0
 
 	return summary
+}
+
+func summarizePytest(stdout, stderr string, exitCode int) map[string]any {
+	summary := map[string]any{
+		"passed":        0,
+		"failed":        0,
+		"skipped":       0,
+		"runner_status": "unknown",
+	}
+	text := strings.TrimSpace(stdout + "\n" + stderr)
+	for _, line := range strings.Split(text, "\n") {
+		line = strings.TrimSpace(line)
+		if !strings.Contains(line, " in ") {
+			continue
+		}
+		if strings.Contains(line, " passed") || strings.Contains(line, " failed") || strings.Contains(line, " skipped") {
+			counts := parseNamedCounts(line, []string{"passed", "failed", "skipped", "xfailed", "xpassed", "error", "errors"})
+			summary["passed"] = counts["passed"]
+			summary["failed"] = counts["failed"] + counts["error"] + counts["errors"]
+			summary["skipped"] = counts["skipped"] + counts["xfailed"] + counts["xpassed"]
+			break
+		}
+	}
+	if exitCode == 0 {
+		summary["runner_status"] = "pass"
+	} else {
+		summary["runner_status"] = "fail"
+	}
+	return summary
+}
+
+func summarizeNPM(stdout, stderr string, exitCode int) map[string]any {
+	summary := map[string]any{
+		"passed":        0,
+		"failed":        0,
+		"skipped":       0,
+		"total_suites":  0,
+		"passed_suites": 0,
+		"failed_suites": 0,
+		"runner_status": "unknown",
+	}
+	text := strings.TrimSpace(stdout + "\n" + stderr)
+	for _, line := range strings.Split(text, "\n") {
+		line = strings.TrimSpace(line)
+		switch {
+		case strings.HasPrefix(line, "Tests:"):
+			counts := parseNamedCounts(line, []string{"passed", "failed", "skipped", "todo", "total"})
+			summary["passed"] = counts["passed"]
+			summary["failed"] = counts["failed"]
+			summary["skipped"] = counts["skipped"] + counts["todo"]
+		case strings.HasPrefix(line, "Test Suites:"):
+			counts := parseNamedCounts(line, []string{"passed", "failed", "total"})
+			summary["passed_suites"] = counts["passed"]
+			summary["failed_suites"] = counts["failed"]
+			summary["total_suites"] = counts["total"]
+		}
+	}
+	if exitCode == 0 {
+		summary["runner_status"] = "pass"
+	} else {
+		summary["runner_status"] = "fail"
+	}
+	return summary
+}
+
+func summarizeCargo(stdout, stderr string, exitCode int) map[string]any {
+	summary := map[string]any{
+		"passed":        0,
+		"failed":        0,
+		"skipped":       0,
+		"runner_status": "unknown",
+	}
+	text := strings.TrimSpace(stdout + "\n" + stderr)
+	for _, line := range strings.Split(text, "\n") {
+		line = strings.TrimSpace(line)
+		if !strings.Contains(line, "test result:") {
+			continue
+		}
+		counts := parseNamedCounts(line, []string{"passed", "failed", "ignored"})
+		summary["passed"] = counts["passed"]
+		summary["failed"] = counts["failed"]
+		summary["skipped"] = counts["ignored"]
+		break
+	}
+	if exitCode == 0 {
+		summary["runner_status"] = "pass"
+	} else {
+		summary["runner_status"] = "fail"
+	}
+	return summary
+}
+
+func parseNamedCounts(line string, names []string) map[string]int {
+	counts := make(map[string]int, len(names))
+	for _, name := range names {
+		re := regexp.MustCompile(`(\d+)\s+` + regexp.QuoteMeta(name) + `\b`)
+		matches := re.FindStringSubmatch(strings.ToLower(line))
+		if len(matches) != 2 {
+			continue
+		}
+		value, err := strconv.Atoi(matches[1])
+		if err != nil {
+			continue
+		}
+		counts[name] = value
+	}
+	return counts
 }

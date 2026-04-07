@@ -18,14 +18,15 @@ This is the canonical map for docs in this repository.
 - [docs/general/refactor-scout.md](general/refactor-scout.md) - Local refactor scout/advisor workflow, seam vocabulary, language coverage, and ACA fit.
 - [docs/general/code-search-evals.md](general/code-search-evals.md) - Stable code-search eval suites, checked-in policies, and wrapper commands.
 - [docs/general/retrieval-evals.md](general/retrieval-evals.md) - Stable ACA retrieval eval suites, wrapper commands, and current expected bands.
-- [docs/general/retrieval-stack-snapshot.md](general/retrieval-stack-snapshot.md) - Compact current benchmark snapshot across code-search and ACA retrieval.
 - [docs/general/tmux-collaboration.md](general/tmux-collaboration.md) - tmux-based live collaboration setup, structured pane inspection, and ACA promotion flow.
+- [configs/skills-pack/agentctl-room/SKILL.md](../configs/skills-pack/agentctl-room/SKILL.md) - Durable shared room coordination skill for room chat, relay, loop, and room tasks.
 - [docs/architecture/](architecture/) - Current runtime architecture docs.
 - [docs/architecture/context-architecture.md](architecture/context-architecture.md) - Workspace-local ACA control plane and top-of-mind slice.
 - [docs/architecture/jido-hybrid-runtime.md](architecture/jido-hybrid-runtime.md) - Canonical hybrid-runtime split for Jido orchestration + `agentctl` semantics.
+- [docs/architecture/go-native-runtime-and-optional-jido.md](architecture/go-native-runtime-and-optional-jido.md) - Go-native replacements for Jido dependencies, optional frameworks, and where Eino fits (Jido optional for Elixir/BEAM users).
 - [docs/architecture/auth-identity.md](architecture/auth-identity.md) - Auth, identity, and verification architecture map.
-- [docs/kubernetes.md](kubernetes.md) - Kubernetes deployment guide tied to current overlays.
-- [docs/observability/README.md](observability/README.md) - Event schema and persistence docs.
+- [docs/guides/kubernetes.md](guides/kubernetes.md) - Kubernetes deployment guide tied to current overlays.
+- [docs/general/events.md](general/events.md) - Event schema and persistence docs.
 
 ## Specifications
 
@@ -43,6 +44,7 @@ This is the canonical map for docs in this repository.
 1. [docs/architecture/system-architecture.md](architecture/system-architecture.md)
 2. [docs/architecture/context-architecture.md](architecture/context-architecture.md)
 3. [docs/architecture/jido-hybrid-runtime.md](architecture/jido-hybrid-runtime.md)
+3b. [docs/architecture/go-native-runtime-and-optional-jido.md](architecture/go-native-runtime-and-optional-jido.md) (target / migration alignment)
 4. [docs/general/runtime-orchestration.md](general/runtime-orchestration.md)
 5. [docs/general/agent-daemon.md](general/agent-daemon.md)
 6. [docs/spec/agent_hierarchy.md](spec/agent_hierarchy.md)
@@ -51,11 +53,16 @@ This is the canonical map for docs in this repository.
 ## Planning Docs
 
 - [docs/plans/README.md](plans/README.md) - Active and current planning docs.
+- [docs/plans/features/eino-go-native-runtime-plan.md](plans/features/eino-go-native-runtime-plan.md) - Eino `AgentEngine` integration + Go-native orchestration runtime; Jido optional.
 - [docs/plans/gui-agent-improvement-roadmap.md](plans/gui-agent-improvement-roadmap.md) - Converged roadmap for turning `gui-agent` into a coherent operator control plane.
 - [docs/plans/features/v2-skills-parity-plan.md](plans/features/v2-skills-parity-plan.md) - Bring v2 profiles/tooling up to parity with ACA, Obsidian, and newer retrieval surfaces.
 - [docs/plans/features/agentctl-rlm-integration-outline.md](plans/features/agentctl-rlm-integration-outline.md) - Concrete outline for adding an RLM query-time runtime over ACA, companion memory, and repo/vault state.
 - [docs/plans/features/agentctl-rlm-next-steps.md](plans/features/agentctl-rlm-next-steps.md) - Routed and staged next-step plan for turning the experimental RLM runtime into a practical retrieval/controller layer.
 - [docs/plans/features/slop-function-detection.md](plans/features/slop-function-detection.md) - Plan for treating "slop" as deterministic structural findings on top of refactor scout, with optional advisor reranking.
+- [docs/plans/features/refactor-intelligence-substrate.md](plans/features/refactor-intelligence-substrate.md) - Plan for making refactor scout index-aware through status, snapshots, dependency queries, change cursors, and evidence packs.
+- [docs/plans/features/refactor-phase1-status-and-snapshot.md](plans/features/refactor-phase1-status-and-snapshot.md) - Concrete Phase 1 spec for `agentctl refactor status` and `agentctl refactor snapshot`, including CLI contract, envelopes, and snapshot persistence.
+- [docs/plans/features/refactor-deterministic-detection-backlog.md](plans/features/refactor-deterministic-detection-backlog.md) - Prioritized backlog for improving refactor scout through symbol hotness, opportunity scoring, co-change signals, stronger dead-code roots, and other deterministic detection upgrades.
+- [docs/plans/features/agent-mux-room-hierarchy.md](plans/features/agent-mux-room-hierarchy.md) - Proposed policy for mux-backed agent panes, parent-private subagents, and room membership boundaries.
 - [docs/plans/features/rlm-retrieval-findings.md](plans/features/rlm-retrieval-findings.md) - Current benchmark snapshot comparing ACA, direct repoindex lanes, and RLM retrieval modes.
 - [docs/plans/features/aca-retrieval-hypotheses.md](plans/features/aca-retrieval-hypotheses.md) - Deterministic ACA retrieval hypotheses and eval modes for testing control-plane, vault, trust, and repo-hint improvements.
 - [docs/plans/features/aca-self-corrective-loop.md](plans/features/aca-self-corrective-loop.md) - First slice for observing ACA retrieval misses, classifying them, and proposing deterministic corrections.
@@ -63,7 +70,6 @@ This is the canonical map for docs in this repository.
 - [docs/plans/features/generic-agent-experiment-loop.md](plans/features/generic-agent-experiment-loop.md) - Design for turning long-running agents into hypothesis-driven, evaluator-bounded experiment loops.
 - [docs/plans/features/workspace-embedding-overrides-research.md](plans/features/workspace-embedding-overrides-research.md) - Checklist for enabling workspace-local embedding overrides safely without dimension drift.
 - [docs/plans/features/opensandbox-sandbox-workspace-integration.md](plans/features/opensandbox-sandbox-workspace-integration.md) - Plan for running public-GUI agents in isolated OpenSandbox workspaces with shallow clones and controlled retrieval access.
-- [docs/impl_plan/README.md](impl_plan/README.md) - Legacy phased plan stream kept for history.
 
 ## Historical and Generated Material
 
@@ -79,7 +85,7 @@ This is the canonical map for docs in this repository.
 - [docs/ci/README.md](ci/README.md) - CI-specific docs.
 - [docs/guides/README.md](guides/README.md) - How-to guides.
 - [docs/research/README.md](research/README.md) - Exploratory research notes.
-- [docs/workflows/README.md](workflows/README.md) - Workflow-specific docs.
+- [docs/general/runtime-orchestration.md](general/runtime-orchestration.md) - Workflow-specific docs.
 - [docs/godot/README.md](godot/README.md) - Godot integration docs.
 - [docs/notes/README.md](notes/README.md) - Working notes (non-canonical).
 

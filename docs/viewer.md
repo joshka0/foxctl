@@ -6,7 +6,7 @@ mailbox/blackboard state, and companion conversations.
 ## Current Packages
 
 - `packages/gui-agent` — Web GUI (React + Vite, port `5174` in dev)
-- `packages/tui` — Terminal UI (OpenTUI)
+- `packages/tui-agent` — Terminal-first operator control plane (`pi-tui`)
 - `packages/data` — Shared TypeScript data/client types
 
 ## Runtime Topology
@@ -39,8 +39,8 @@ bun run dev:gui
 # API only
 bun run dev:server
 
-# TUI (requires API server)
-AGENTCTL_API_URL=http://localhost:8090 bun run dev:tui
+# TUI agent shell (requires API server)
+bun run dev:tui
 ```
 
 ## Make Targets
@@ -48,7 +48,7 @@ AGENTCTL_API_URL=http://localhost:8090 bun run dev:tui
 - `gui-agent` — build Go backend, start API server, start Vite GUI
 - `gui-agent-vite` — GUI only (Vite dev server)
 - `gui-agent-build` — frontend build only
-- `ts-dev-tui` — TUI dev mode
+- `ts-dev-tui` — TUI agent dev mode
 
 ## Troubleshooting
 

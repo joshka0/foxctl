@@ -15,6 +15,19 @@ func TestBoardMessageKind_Constants(t *testing.T) {
 		{BoardMessageKindInfo, "info"},
 		{BoardMessageKindAlert, "alert"},
 		{BoardMessageKindReviewRequest, "review_request"},
+		{BoardMessageKindTaskUpdate, "task_update"},
+		{BoardMessageKindLeadChange, "lead_change"},
+		{BoardMessageKindCoordinatorPulse, "coordinator_pulse"},
+		{BoardMessageKindPlanSession, "plan_session"},
+		{BoardMessageKindPlanProposal, "plan_proposal"},
+		{BoardMessageKindPlanQuestion, "plan_question"},
+		{BoardMessageKindPlanDecision, "plan_decision"},
+		{BoardMessageKindPlanReview, "plan_review"},
+		{BoardMessageKindPlanClose, "plan_close"},
+		{BoardMessageKindInterviewSession, "interview_session"},
+		{BoardMessageKindInterviewQuestion, "interview_question"},
+		{BoardMessageKindInterviewAnswer, "interview_answer"},
+		{BoardMessageKindInterviewVerify, "interview_verify"},
 	}
 
 	for _, tt := range tests {
@@ -166,19 +179,20 @@ func TestRoomStreamHelpers(t *testing.T) {
 func TestBoardMessage_JSONSerialization(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Second)
 	msg := BoardMessage{
-		ID:          "msg-123",
-		WorkspaceID: "ws-456",
-		TaskID:      "task-789",
-		Stream:      "coordination",
-		Sender:      "actor:system:overseer",
-		Recipient:   "*",
-		Kind:        BoardMessageKindInstruction,
-		Priority:    1,
-		AckRequired: true,
-		Status:      BoardMessageStatusUnread,
-		Subject:     "Task Assignment",
-		Body:        "Please review PR #42",
-		CreatedAt:   now,
+		ID:            "msg-123",
+		WorkspaceID:   "ws-456",
+		TaskID:        "task-789",
+		Stream:        "coordination",
+		Sender:        "actor:system:overseer",
+		Recipient:     "*",
+		Kind:          BoardMessageKindInstruction,
+		Priority:      1,
+		AckRequired:   true,
+		ReplyExpected: true,
+		Status:        BoardMessageStatusUnread,
+		Subject:       "Task Assignment",
+		Body:          "Please review PR #42",
+		CreatedAt:     now,
 	}
 
 	data, err := json.Marshal(msg)
@@ -202,6 +216,9 @@ func TestBoardMessage_JSONSerialization(t *testing.T) {
 	}
 	if got.AckRequired != msg.AckRequired {
 		t.Errorf("AckRequired = %v, want %v", got.AckRequired, msg.AckRequired)
+	}
+	if got.ReplyExpected != msg.ReplyExpected {
+		t.Errorf("ReplyExpected = %v, want %v", got.ReplyExpected, msg.ReplyExpected)
 	}
 }
 

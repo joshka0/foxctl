@@ -2,6 +2,7 @@
 /bin/
 /dist/
 /coverage/
+/plugins/zellij-room-relay/target/
 
 # Node/Bun
 node_modules/

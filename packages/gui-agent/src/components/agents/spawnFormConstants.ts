@@ -19,6 +19,13 @@ export interface RoleConfig {
   defaultPrompt: string
 }
 
+export interface RoomRolePreset {
+  id: string
+  name: string
+  description: string
+  recommendedAgentRole: string
+}
+
 export const ROLES: RoleConfig[] = [
   {
     id: 'assistant',
@@ -37,12 +44,52 @@ export const ROLES: RoleConfig[] = [
       'You are a coding agent. Make small, correct changes, explain briefly, and prefer tests. Ask when requirements are unclear.',
   },
   {
+    id: 'frontend-eng',
+    name: 'Frontend Eng',
+    icon: Code,
+    description: 'Implement UI and interaction work',
+    defaultPrompt:
+      'You are a frontend engineering agent. Build polished, intentional UI, preserve product intent, keep behavior accessible and testable, and prefer small correct changes over speculative rewrites.',
+  },
+  {
+    id: 'backend-eng',
+    name: 'Backend Eng',
+    icon: Code,
+    description: 'Implement APIs and server behavior',
+    defaultPrompt:
+      'You are a backend engineering agent. Protect contracts, data integrity, safety checks, and operability. Prefer explicit schemas, deterministic behavior, and focused verification.',
+  },
+  {
+    id: 'collaborator',
+    name: 'Collaborator',
+    icon: Users,
+    description: 'Room-oriented implementation partner',
+    defaultPrompt:
+      'You are a collaborative implementation agent. Pick up assigned work cleanly, keep status durable, escalate blockers early, and optimize for handoff clarity instead of solo heroics.',
+  },
+  {
+    id: 'coordinator',
+    name: 'Coordinator',
+    icon: Users,
+    description: 'Drive assignments and close loops',
+    defaultPrompt:
+      'You are a coordination agent. Keep work routed, assignments explicit, blockers visible, and review closure unambiguous. Prefer durable task and room actions over ad hoc chat.',
+  },
+  {
     id: 'reviewer',
     name: 'Reviewer',
     icon: Eye,
     description: 'Review code changes',
     defaultPrompt:
       'You are a code reviewer. Focus on bugs, risks, regressions, and missing tests. Prioritize issues by severity.',
+  },
+  {
+    id: 'security-review',
+    name: 'Security Review',
+    icon: Eye,
+    description: 'Review auth, safety, and exposure',
+    defaultPrompt:
+      'You are a security review agent. Focus on authz/authn boundaries, secret handling, injection risk, unsafe defaults, privilege escalation, audit gaps, and rollout safety. Findings first.',
   },
   {
     id: 'planner',
@@ -131,6 +178,45 @@ export const EXEC_MODES: ExecModeConfig[] = [
     name: 'Story',
     description: 'Narrative flow',
     details: 'Agent runs a gather-then-dialogue loop. Best for research and exploration.',
+  },
+]
+
+export const ROOM_ROLE_PRESETS: RoomRolePreset[] = [
+  {
+    id: 'collaborator',
+    name: 'Collaborator',
+    description: 'General room participant who claims, updates, and completes assigned work.',
+    recommendedAgentRole: 'collaborator',
+  },
+  {
+    id: 'frontend-eng',
+    name: 'Frontend Eng',
+    description: 'UI-focused implementer for gui-agent and browser-facing room work.',
+    recommendedAgentRole: 'frontend-eng',
+  },
+  {
+    id: 'backend-eng',
+    name: 'Backend Eng',
+    description: 'API/runtime implementer for backend, data model, and room control behavior.',
+    recommendedAgentRole: 'backend-eng',
+  },
+  {
+    id: 'reviewer',
+    name: 'Reviewer',
+    description: 'Findings-first acceptance reviewer for correctness and regressions.',
+    recommendedAgentRole: 'reviewer',
+  },
+  {
+    id: 'security-review',
+    name: 'Security Review',
+    description: 'Focused reviewer for auth, secrets, privilege, and unsafe defaults.',
+    recommendedAgentRole: 'security-review',
+  },
+  {
+    id: 'coordinator',
+    name: 'Coordinator',
+    description: 'Owns routing, stale work, and final room decisions.',
+    recommendedAgentRole: 'coordinator',
   },
 ]
 

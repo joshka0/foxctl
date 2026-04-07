@@ -2,7 +2,7 @@ apiVersion: agentctl/v1
 kind: Skill
 metadata:
   name: codemap/get
-  version: 0.1.0
+  version: 0.2.0
   description: "Retrieve a single codemap by ID with full content (traces, files, description)"
   tags: ["codemap", "get", "memory"]
 distribution:
@@ -33,6 +33,12 @@ signature:
       required: false
       default: 500
       description: "Maximum characters per trace content (truncate longer)"
+    - name: inline_mode
+      type: string
+      required: false
+      default: auto
+      enum: ["auto", "full", "preview", "artifact_only"]
+      description: "How much trace detail to inline; auto prefers preview + artifact for larger codemaps"
   help:
     short: "Retrieve a codemap by ID."
     long: |
@@ -59,6 +65,18 @@ returns:
   - name: found
     type: boolean
     description: "Whether the codemap was found"
+  - name: inline_mode
+    type: string
+    description: "Resolved inline mode used for the response"
+  - name: traces_total
+    type: integer
+    description: "Total traces before preview truncation"
+  - name: traces_truncated
+    type: boolean
+    description: "Whether inline traces were preview-truncated"
+  - name: artifact
+    type: string
+    description: "CAS artifact digest for the full untruncated codemap when previewed inline"
   - name: stats
     type: object
     description: "Query statistics"

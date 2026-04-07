@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -22,6 +23,8 @@ import (
 const skillName = "mobile/expo"
 
 var allowedOps = []string{
+	"debug_status",
+	"debug_snapshot",
 	"shake",
 	"reload",
 	"deep_link",
@@ -79,6 +82,10 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	platform := detectPlatform(in.DeviceID, in.Platform)
 
 	switch op {
+	case "debug_status":
+		return debugStatus(ctx, rc, platform, in.DeviceID)
+	case "debug_snapshot":
+		return debugSnapshot(ctx, rc, platform, in.DeviceID, in.Filter, in.Count)
 	// Device operations
 	case "shake":
 		return shake(ctx, rc, platform, in.DeviceID)
@@ -107,6 +114,344 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	default:
 		return skillerr.Arg(fmt.Sprintf("unknown operation: %s", in.Operation), skillerr.WithHint(opHint))
 	}
+}
+
+type expoPackageJSON struct {
+	Name            string            `json:"name"`
+	Dependencies    map[string]string `json:"dependencies"`
+	DevDependencies map[string]string `json:"devDependencies"`
+}
+
+func metroProcessMatches(lines []string) []map[string]any {
+	matches := make([]map[string]any, 0)
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		lower := strings.ToLower(line)
+		if !(strings.Contains(lower, "expo start") ||
+			strings.Contains(lower, "@expo/cli") ||
+			strings.Contains(lower, "react-native start") ||
+			strings.Contains(lower, "metro")) {
+			continue
+		}
+		fields := strings.Fields(line)
+		if len(fields) == 0 {
+			continue
+		}
+		pid := fields[0]
+		command := strings.TrimSpace(strings.TrimPrefix(line, pid))
+		matches = append(matches, map[string]any{
+			"pid":     pid,
+			"command": command,
+		})
+	}
+	return matches
+}
+
+func detectMetroProcesses(ctx context.Context) []map[string]any {
+	result := executil.Run(ctx, "", "ps", "-axo", "pid=,command=")
+	if result.Err != nil {
+		return nil
+	}
+	return metroProcessMatches(strings.Split(string(result.Stdout), "\n"))
+}
+
+func detectExpoProjectInfo(workspace string) map[string]any {
+	info := map[string]any{
+		"workspace": workspace,
+		"type":      "unknown",
+	}
+	pkgPath := filepath.Join(workspace, "package.json")
+	data, err := os.ReadFile(pkgPath)
+	if err != nil {
+		return info
+	}
+
+	var pkg expoPackageJSON
+	if err := json.Unmarshal(data, &pkg); err != nil {
+		info["package_json"] = pkgPath
+		info["package_json_parse_error"] = err.Error()
+		return info
+	}
+
+	info["package_json"] = pkgPath
+	if pkg.Name != "" {
+		info["name"] = pkg.Name
+	}
+
+	hasExpo := pkg.Dependencies["expo"] != "" || pkg.DevDependencies["expo"] != ""
+	hasRN := pkg.Dependencies["react-native"] != "" || pkg.DevDependencies["react-native"] != ""
+	hasHermes := pkg.Dependencies["hermes-engine"] != "" || pkg.DevDependencies["hermes-engine"] != ""
+
+	info["has_expo_dependency"] = hasExpo
+	info["has_react_native_dependency"] = hasRN
+	info["has_hermes_dependency"] = hasHermes
+
+	switch {
+	case hasExpo:
+		info["type"] = "expo"
+	case hasRN:
+		info["type"] = "react-native"
+	}
+
+	return info
+}
+
+func expoLogPaths(workspace string) []string {
+	homeDir, _ := os.UserHomeDir()
+	paths := []string{}
+	if homeDir != "" {
+		paths = append(paths, filepath.Join(homeDir, ".expo", "debug.log"))
+	}
+	if workspace != "" {
+		paths = append(paths, filepath.Join(workspace, ".expo", "debug.log"))
+	}
+	return paths
+}
+
+func inspectExpoLogSources(paths []string) []map[string]any {
+	sources := make([]map[string]any, 0, len(paths))
+	for _, path := range paths {
+		src := map[string]any{"path": path, "exists": false}
+		if path == "" {
+			sources = append(sources, src)
+			continue
+		}
+		info, err := os.Stat(path)
+		if err == nil {
+			src["exists"] = true
+			src["size_bytes"] = info.Size()
+			src["modified_at"] = info.ModTime().UTC().Format(time.RFC3339)
+		}
+		sources = append(sources, src)
+	}
+	return sources
+}
+
+func anyRecentLogSource(sources []map[string]any, now time.Time, window time.Duration) bool {
+	for _, src := range sources {
+		exists, _ := src["exists"].(bool)
+		if !exists {
+			continue
+		}
+		modifiedAt, _ := src["modified_at"].(string)
+		if modifiedAt == "" {
+			continue
+		}
+		ts, err := time.Parse(time.RFC3339, modifiedAt)
+		if err != nil {
+			continue
+		}
+		if now.Sub(ts) <= window {
+			return true
+		}
+	}
+	return false
+}
+
+func collectExpoLogs(workspace, filter string, count int) map[string]any {
+	if count <= 0 {
+		count = 100
+	}
+	paths := expoLogPaths(workspace)
+
+	var logContent []byte
+	var logPath string
+	for _, p := range paths {
+		if content, err := os.ReadFile(p); err == nil {
+			logContent = content
+			logPath = p
+			break
+		}
+	}
+
+	if logContent == nil {
+		return map[string]any{
+			"success": false,
+			"message": "No Expo logs found. Start Metro with: npx expo start --clear",
+			"hint":    "Logs are available at: ~/.expo/debug.log or .expo/debug.log",
+			"sources": inspectExpoLogSources(paths),
+		}
+	}
+
+	lines := strings.Split(string(logContent), "\n")
+	if len(lines) > count {
+		lines = lines[len(lines)-count:]
+	}
+
+	if filter != "" {
+		var filtered []string
+		filterLower := strings.ToLower(filter)
+		for _, line := range lines {
+			if strings.Contains(strings.ToLower(line), filterLower) {
+				filtered = append(filtered, line)
+			}
+		}
+		lines = filtered
+	}
+
+	return map[string]any{
+		"success":     true,
+		"logs":        strings.Join(lines, "\n"),
+		"total_lines": len(lines),
+		"source":      logPath,
+		"sources":     inspectExpoLogSources(paths),
+	}
+}
+
+func metroStatus(ctx context.Context, workspace string) map[string]any {
+	processes := detectMetroProcesses(ctx)
+	logSources := inspectExpoLogSources(expoLogPaths(workspace))
+	return map[string]any{
+		"running_guess": anyRecentLogSource(logSources, time.Now().UTC(), 15*time.Minute) || len(processes) > 0,
+		"processes":     processes,
+		"log_sources":   logSources,
+	}
+}
+
+// debugStatus reports whether the current workspace and machine are ready for modern Expo/React Native debugging.
+func debugStatus(ctx context.Context, rc *skillmain.RunContext, platform, deviceID string) error {
+	workspace, _ := os.Getwd()
+	logSources := inspectExpoLogSources(expoLogPaths(workspace))
+	project := detectExpoProjectInfo(workspace)
+	metro := metroStatus(ctx, workspace)
+
+	tooling := map[string]any{
+		"npx":    executil.HasTool("npx"),
+		"expo":   executil.HasTool("expo"),
+		"idb":    mobileutil.HasRunnableIDB(ctx),
+		"simctl": executil.HasTool("xcrun"),
+		"adb":    executil.HasTool("adb"),
+	}
+
+	return emit(rc, map[string]any{
+		"operation":           "debug_status",
+		"platform":            platform,
+		"device_id":           deviceID,
+		"workspace":           workspace,
+		"project":             project,
+		"tooling":             tooling,
+		"metro":               metro,
+		"log_sources":         logSources,
+		"metro_running_guess": anyRecentLogSource(logSources, time.Now().UTC(), 15*time.Minute),
+		"recommended_debugger": map[string]any{
+			"name":      "React Native DevTools",
+			"engine":    "Hermes",
+			"open_hint": "For Expo apps, press 'j' in the terminal where Expo was started.",
+		},
+		"agentctl_paths": map[string]any{
+			"expo_actions": []string{
+				"debug_status",
+				"logs",
+				"deep_link",
+				"dev_menu",
+				"shake",
+				"reload",
+				"toggle_inspector",
+				"toggle_performance",
+				"toggle_remote_debug",
+			},
+			"ios_actions": []string{
+				"list_devices",
+				"launch",
+				"terminate",
+				"open_url",
+				"screenshot",
+				"ui_tree",
+				"logs",
+				"shake",
+				"expo_deep_link",
+				"expo_reload",
+			},
+		},
+		"notes": []string{
+			"Use React Native DevTools as the primary JS debugger path for Hermes-based apps.",
+			"Use mobile/ios for simulator state, screenshots, UI tree inspection, and app lifecycle control.",
+			"Use mobile/expo for Expo dev menu actions, reloads, and Metro-style log inspection.",
+		},
+	})
+}
+
+func debugSnapshot(ctx context.Context, rc *skillmain.RunContext, platform, deviceID, filter string, count int) error {
+	workspace, _ := os.Getwd()
+	logsData := collectExpoLogs(workspace, filter, count)
+	project := detectExpoProjectInfo(workspace)
+	metro := metroStatus(ctx, workspace)
+	tooling := map[string]any{
+		"npx":    executil.HasTool("npx"),
+		"expo":   executil.HasTool("expo"),
+		"idb":    mobileutil.HasRunnableIDB(ctx),
+		"simctl": executil.HasTool("xcrun"),
+		"adb":    executil.HasTool("adb"),
+	}
+
+	snapshot := map[string]any{
+		"operation": "debug_snapshot",
+		"platform":  platform,
+		"device_id": deviceID,
+		"workspace": workspace,
+		"project":   project,
+		"tooling":   tooling,
+		"metro":     metro,
+		"logs":      logsData,
+		"recommended_debugger": map[string]any{
+			"name":      "React Native DevTools",
+			"engine":    "Hermes",
+			"open_hint": "For Expo apps, press 'j' in the terminal where Expo was started.",
+		},
+	}
+
+	if platform == "ios" {
+		iosData := map[string]any{}
+		if devices, err := mobileutil.ListSimctlDevices(ctx); err == nil {
+			iosData["devices_count"] = len(devices)
+		}
+		if executil.HasTool("xcrun") {
+			outputPath := fmt.Sprintf("/tmp/expo_debug_snapshot_%d.png", time.Now().UnixNano())
+			defer func() { _ = os.Remove(outputPath) }()
+			target := "booted"
+			if strings.TrimSpace(deviceID) != "" {
+				target = strings.TrimSpace(deviceID)
+			}
+			result := mobileutil.RunSimctl(ctx, "io", target, "screenshot", outputPath)
+			if result.Err == nil {
+				if data, err := os.ReadFile(outputPath); err == nil {
+					if artifact, err := skillout.PersistBuffer(ctx, rc, bytes.NewBuffer(data), "image/png", "expo_debug_snapshot"); err == nil {
+						iosData["screenshot"] = artifact.Digest
+						iosData["screenshot_backend"] = "simctl"
+					}
+				}
+			} else {
+				iosData["screenshot_error"] = result.Err.Error()
+			}
+		}
+		if mobileutil.HasRunnableIDB(ctx) {
+			cmdResult := mobileutil.RunIDB(ctx, deviceID, "ui", "describe-all", "--json")
+			if cmdResult.Err == nil {
+				var elements []any
+				if err := json.Unmarshal(cmdResult.Stdout, &elements); err == nil {
+					preview := elements
+					truncated := false
+					if len(preview) > 20 {
+						preview = preview[:20]
+						truncated = true
+					}
+					iosData["ui_tree_preview"] = preview
+					iosData["ui_tree_count"] = len(elements)
+					iosData["ui_tree_truncated"] = truncated
+				}
+			} else {
+				iosData["ui_tree_error"] = cmdResult.Err.Error()
+			}
+		} else {
+			iosData["ui_tree_unavailable"] = "idb unavailable"
+		}
+		snapshot["ios"] = iosData
+	}
+
+	return emit(rc, snapshot)
 }
 
 // emit outputs skill results with consistent formatting.
@@ -168,13 +513,30 @@ func shake(ctx context.Context, rc *skillmain.RunContext, platform, deviceID str
 func iosShake(ctx context.Context, udid string) error {
 	// Method 1: Try sending keyboard shortcut via IDB (Cmd+D opens React Native dev menu)
 	// First, focus the simulator
-	_ = mobileutil.RunIDB(ctx, udid, "focus").Err // Ignore errors, just best effort
+	if mobileutil.HasRunnableIDB(ctx) {
+		_ = mobileutil.RunIDB(ctx, udid, "focus").Err // Ignore errors, just best effort
+	}
 
 	// Method 2: Use IDB to send key sequence that opens dev menu
 	// Sending 'd' key typically opens dev menu in Expo apps
-	keyResult := mobileutil.RunIDB(ctx, udid, "ui", "text", "d")
+	keyResult := executil.CmdResult{}
+	if mobileutil.HasRunnableIDB(ctx) {
+		keyResult = mobileutil.RunIDB(ctx, udid, "ui", "text", "d")
+	} else {
+		keyResult.Err = errors.New("idb unavailable")
+	}
 	if keyResult.Err != nil {
-		// Method 3: Try AppleScript to trigger shake via menu (requires accessibility)
+		// Method 3: Fall back to native simulator shake support on current runtimes.
+		simctlTarget := "booted"
+		if strings.TrimSpace(udid) != "" {
+			simctlTarget = strings.TrimSpace(udid)
+		}
+		simResult := mobileutil.RunSimctl(ctx, "io", simctlTarget, "shake")
+		if simResult.Err == nil {
+			return nil
+		}
+
+		// Method 4: Try AppleScript to trigger shake via menu (requires accessibility)
 		script := `tell application "Simulator" to activate
 	delay 0.3
 	tell application "System Events"
@@ -184,7 +546,7 @@ func iosShake(ctx context.Context, udid string) error {
 	end tell`
 		appleResult := executil.Run(ctx, "", "osascript", "-e", script)
 		if appleResult.Err != nil {
-			return skillerr.Runtime("shake failed", skillerr.WithCause(errors.Join(keyResult.Err, appleResult.Err)))
+			return skillerr.Runtime("shake failed", skillerr.WithCause(errors.Join(keyResult.Err, simResult.Err, appleResult.Err)))
 		}
 	}
 	return nil
@@ -278,10 +640,25 @@ func deepLink(ctx context.Context, rc *skillmain.RunContext, platform, deviceID,
 	})
 }
 
-// iosDeepLink opens deep link on iOS simulator using IDB.
+// iosDeepLink opens deep link on iOS simulator using simctl first with IDB fallback.
 func iosDeepLink(ctx context.Context, udid, url string) error {
-	result := mobileutil.RunIDB(ctx, udid, "open", url)
-	return result.Err
+	simctlTarget := "booted"
+	if strings.TrimSpace(udid) != "" {
+		simctlTarget = strings.TrimSpace(udid)
+	}
+	result := mobileutil.RunSimctl(ctx, "openurl", simctlTarget, url)
+	if result.Err == nil {
+		return nil
+	}
+	simctlErr := result.Err
+	if !mobileutil.HasRunnableIDB(ctx) {
+		return skillerr.Runtime("open deep link failed", skillerr.WithCause(simctlErr))
+	}
+	result = mobileutil.RunIDB(ctx, udid, "open", url)
+	if result.Err != nil {
+		return skillerr.Runtime("open deep link failed", skillerr.WithCause(errors.Join(simctlErr, result.Err)))
+	}
+	return nil
 }
 
 // androidDeepLink opens deep link on Android device/emulator using ADB.

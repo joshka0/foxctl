@@ -416,6 +416,22 @@ agentctl mcp stop
 The MCP server exposes all available skills as MCP tools via SSE transport,
 allowing any MCP-compatible client to discover and invoke them.
 
+For agent use, prefer the narrow optimized retrieval surface instead of the full MCP facade:
+
+```bash
+# Start only the compact retrieval tools we optimized for agents
+agentctl mcp serve --optimized-retrieval
+```
+
+That profile exposes:
+- `structured_shell`
+- `repo_index_search`
+- `repo_index_expand`
+- `repo_index_dag_grep`
+- optimized retrieval skills such as `code/semantic_search`, `code/smart_search`, `code/snippet_extract`, `code/context_grep`, `code/dag_grep`, and `codemap/get`
+
+Use this when you want agent-friendly retrieval without overloading the tool surface with unrelated browser, web, or project-management tools.
+
 ---
 
 ## GUI & TUI
@@ -434,17 +450,11 @@ bun run dev:gui
 ### Terminal UI
 
 ```bash
-# Start TUI (requires API server)
-AGENTCTL_API_URL=http://localhost:8090 bun run --cwd packages/tui dev
+# Start the new TUI control-plane shell (requires API server)
+bun run dev:tui
 ```
 
-| Key | View | Description |
-|-----|------|-------------|
-| 1 | Jobs | Job queue with status |
-| 2 | Tasks | Task list with dependencies |
-| 3 | Insights | PageRank, critical path |
-| 4 | Mailbox | Actor messages |
-| 5 | Search | Full-text search |
+The legacy diagnostics-first TUI has been archived. Active terminal work now targets `packages/tui-agent`, which is being rebuilt as an operator control plane alongside `gui-agent`.
 
 ---
 
@@ -493,7 +503,7 @@ Always use `make build-cgo` which includes `-tags=libsqlite3`.
 | [docs/README.md](docs/README.md) | Canonical documentation map |
 | [.claude/CLAUDE.md](.claude/CLAUDE.md) | Claude Code integration reference |
 | [docs/spec/](docs/spec/) | Technical specifications |
-| [docs/observability/](docs/observability/) | Wide events documentation |
+| [docs/general/events.md](docs/general/events.md) | Observability event stream documentation |
 
 ---
 

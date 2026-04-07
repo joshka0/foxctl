@@ -21,6 +21,32 @@ const (
 	BoardMessageKindAlert BoardMessageKind = "alert"
 	// BoardMessageKindReviewRequest represents a code or work review request.
 	BoardMessageKindReviewRequest BoardMessageKind = "review_request"
+	// BoardMessageKindTaskUpdate represents a task lifecycle update shared through a room.
+	BoardMessageKindTaskUpdate BoardMessageKind = "task_update"
+	// BoardMessageKindLeadChange represents a durable coordinator handoff event.
+	BoardMessageKindLeadChange BoardMessageKind = "lead_change"
+	// BoardMessageKindCoordinatorPulse represents a coordinator-facing system pulse.
+	BoardMessageKindCoordinatorPulse BoardMessageKind = "coordinator_pulse"
+	// BoardMessageKindPlanSession represents the root of a room planning session.
+	BoardMessageKindPlanSession BoardMessageKind = "plan_session"
+	// BoardMessageKindPlanProposal represents a proposed plan slice within a planning session.
+	BoardMessageKindPlanProposal BoardMessageKind = "plan_proposal"
+	// BoardMessageKindPlanQuestion represents an explicit open question in a planning session.
+	BoardMessageKindPlanQuestion BoardMessageKind = "plan_question"
+	// BoardMessageKindPlanDecision represents an accepted/superseded planning decision.
+	BoardMessageKindPlanDecision BoardMessageKind = "plan_decision"
+	// BoardMessageKindPlanReview represents a review/approval/block note for a planning session.
+	BoardMessageKindPlanReview BoardMessageKind = "plan_review"
+	// BoardMessageKindPlanClose represents the durable closure of a planning session.
+	BoardMessageKindPlanClose BoardMessageKind = "plan_close"
+	// BoardMessageKindInterviewSession represents the root of a round-robin interview session.
+	BoardMessageKindInterviewSession BoardMessageKind = "interview_session"
+	// BoardMessageKindInterviewQuestion represents a question posed within an interview session.
+	BoardMessageKindInterviewQuestion BoardMessageKind = "interview_question"
+	// BoardMessageKindInterviewAnswer represents an answer to a session question.
+	BoardMessageKindInterviewAnswer BoardMessageKind = "interview_answer"
+	// BoardMessageKindInterviewVerify represents a verifier verdict on an interview answer.
+	BoardMessageKindInterviewVerify BoardMessageKind = "interview_verify"
 )
 
 // BoardMessageStatus defines the read/ack status of a message.
@@ -41,19 +67,22 @@ const (
 // BoardMessage represents a workspace-scoped message for coordination.
 // This is the richer message type per mailbox_blackboard.md spec.
 type BoardMessage struct {
-	ID          string             `json:"id"`
-	WorkspaceID string             `json:"workspace_id"`
-	TaskID      string             `json:"task_id,omitempty"`
-	Stream      string             `json:"stream"`
-	Sender      string             `json:"sender"`
-	Recipient   string             `json:"recipient"` // Actor ID or "*" for broadcast
-	Kind        BoardMessageKind   `json:"kind"`
-	Priority    int                `json:"priority"` // 1 (highest) .. 5 (lowest)
-	AckRequired bool               `json:"ack_required"`
-	Status      BoardMessageStatus `json:"status"`
-	Subject     string             `json:"subject"`
-	Body        string             `json:"body"`
-	CreatedAt   time.Time          `json:"created_at"`
+	ID               string             `json:"id"`
+	WorkspaceID      string             `json:"workspace_id"`
+	TaskID           string             `json:"task_id,omitempty"`
+	RelatedMessageID string             `json:"related_message_id,omitempty"`
+	Stream           string             `json:"stream"`
+	Sender           string             `json:"sender"`
+	Recipient        string             `json:"recipient"` // Actor ID or "*" for broadcast
+	Kind             BoardMessageKind   `json:"kind"`
+	Priority         int                `json:"priority"` // 1 (highest) .. 5 (lowest)
+	AckRequired      bool               `json:"ack_required"`
+	ReplyExpected    bool               `json:"reply_expected,omitempty"`
+	Interrupt        bool               `json:"interrupt,omitempty"`
+	Status           BoardMessageStatus `json:"status"`
+	Subject          string             `json:"subject"`
+	Body             string             `json:"body"`
+	CreatedAt        time.Time          `json:"created_at"`
 }
 
 // ReservationMode defines the locking mode for file reservations.
@@ -146,12 +175,17 @@ type RoomSummary struct {
 	Participants     []string     `json:"participants,omitempty"`
 	TaskIDs          []string     `json:"task_ids,omitempty"`
 	Members          []RoomMember `json:"members,omitempty"`
+	ArchivedAt       *time.Time   `json:"archived_at,omitempty"`
 }
 
 // RoomMember is an explicit membership record for one room.
 type RoomMember struct {
 	ActorID  string    `json:"actor_id"`
 	Role     string    `json:"role,omitempty"`
+	Backend  string    `json:"backend,omitempty"`
+	Session  string    `json:"session,omitempty"`
+	PaneID   string    `json:"pane_id,omitempty"`
+	Unbound  bool      `json:"unbound,omitempty"`
 	JoinedAt time.Time `json:"joined_at"`
 }
 
@@ -167,6 +201,7 @@ type Room struct {
 	CreatedAt        time.Time    `json:"created_at"`
 	UpdatedAt        time.Time    `json:"updated_at"`
 	Members          []RoomMember `json:"members,omitempty"`
+	ArchivedAt       *time.Time   `json:"archived_at,omitempty"`
 }
 
 // RoomStreamName builds the canonical board stream for a room id.

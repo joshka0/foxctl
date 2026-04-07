@@ -10,7 +10,7 @@ import { indexRoomsByActor, isPathWorkspace, roomDisplayName } from '@/lib/room-
 import { useActivityFocusStore } from '@/stores/activityFocusStore'
 import { useOrchestrationBoardStore, ORCHESTRATION_LANE_ORDER } from '@/stores/orchestrationBoardStore'
 import { useViewStore } from '@/stores/viewStore'
-import { companionChat, listRooms, seedOrchestrationCards } from '@/api/client'
+import { archiveOrchestrationCards, companionChat, listRooms, restoreOrchestrationCards, seedOrchestrationCards } from '@/api/client'
 import type {
   OrchestrationCard,
   OrchestrationCardAction,
@@ -29,6 +29,7 @@ import {
   LayoutGrid,
   RefreshCw,
   RotateCcw,
+  ArchiveRestore,
   TriangleAlert,
   Undo2,
 } from 'lucide-react'
@@ -281,7 +282,8 @@ export function RuntimeSummaryPanel({
   const setActivityFocus = useActivityFocusStore((s) => s.setFocus)
   const setActiveView = useViewStore((s) => s.setActiveView)
   const setSelectedRoom = useViewStore((s) => s.setSelectedRoom)
-  const workspaceKey = workspaceID?.trim() || '_workspace'
+  const [showArchived, setShowArchived] = useState(false)
+  const workspaceKey = `${workspaceID?.trim() || '_workspace'}:${showArchived ? 'archived' : 'active'}`
   const workspaceLabel = workspaceBadgeLabel(workspaceID ?? '')
   const workspaceTitle = workspaceID?.trim() || 'unscoped (all workspaces)'
   const [showGenerator, setShowGenerator] = useState(false)
@@ -291,13 +293,14 @@ export function RuntimeSummaryPanel({
   const [aiCount, setAICount] = useState(5)
   const [generatorBusy, setGeneratorBusy] = useState(false)
   const [generatorError, setGeneratorError] = useState<string | null>(null)
+  const [cleanupBusy, setCleanupBusy] = useState(false)
 
   useEffect(() => {
     if (loadedWorkspaceKeyRef.current === workspaceKey) return
     loadedWorkspaceKeyRef.current = workspaceKey
     clearSelectedCard()
-    void loadBoard({ workspace_id: workspaceID })
-  }, [clearSelectedCard, loadBoard, workspaceID, workspaceKey])
+    void loadBoard({ workspace_id: workspaceID, archived_only: showArchived })
+  }, [clearSelectedCard, loadBoard, showArchived, workspaceID, workspaceKey])
 
   const lanes = useMemo(() => sortLanes(board?.lanes ?? []), [board?.lanes])
   const generatedAt = board?.generated_at || artifact?.generated_at
@@ -384,7 +387,7 @@ export function RuntimeSummaryPanel({
         workspace_id: workspaceID,
         cards,
       })
-      await refreshBoard(workspaceID)
+      await refreshBoard({ workspaceID, archivedOnly: showArchived })
       setSeedText('')
       setAIGoal('')
       setShowGenerator(false)
@@ -397,6 +400,42 @@ export function RuntimeSummaryPanel({
 
   const handleCardAction = async (card: OrchestrationCard, action: OrchestrationCardAction) => {
     await applyCardAction(card.issue_id, action, workspaceID)
+  }
+
+  const visibleIssueIDs = useMemo(
+    () => lanes.flatMap((lane) => lane.cards.map((card) => card.issue_id)).filter(Boolean),
+    [lanes],
+  )
+
+  const handleArchiveActionForVisibleCards = async () => {
+    if (!workspaceID?.trim() || visibleIssueIDs.length === 0) return
+    if (
+      !window.confirm(
+        `${showArchived ? 'Restore' : 'Archive'} ${visibleIssueIDs.length} visible orchestration card${visibleIssueIDs.length === 1 ? '' : 's'} for workspace "${workspaceLabel}"?`,
+      )
+    ) {
+      return
+    }
+    setCleanupBusy(true)
+    setGeneratorError(null)
+    try {
+      const request = {
+        request_id: localRequestID(showArchived ? 'restore-cards' : 'archive-cards'),
+        workspace_id: workspaceID,
+        issue_ids: visibleIssueIDs,
+      }
+      if (showArchived) {
+        await restoreOrchestrationCards(request)
+      } else {
+        await archiveOrchestrationCards(request)
+      }
+      clearSelectedCard()
+      await loadBoard({ workspace_id: workspaceID, archived_only: showArchived })
+    } catch (err) {
+      setGeneratorError(err instanceof Error ? err.message : 'Failed to update visible cards')
+    } finally {
+      setCleanupBusy(false)
+    }
   }
 
   return (
@@ -418,6 +457,27 @@ export function RuntimeSummaryPanel({
             </p>
           </div>
           <div className="flex items-center gap-2">
+            {workspaceID?.trim() && visibleIssueIDs.length > 0 && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-8"
+                onClick={() => void handleArchiveActionForVisibleCards()}
+                disabled={cleanupBusy || refreshing || loadingBoard}
+              >
+                <ArchiveRestore className={cn('h-3.5 w-3.5 mr-1', cleanupBusy && 'animate-pulse')} />
+                {showArchived ? 'Recover Visible Cards' : 'Archive Visible Cards'}
+              </Button>
+            )}
+            <Button
+              variant={showArchived ? 'secondary' : 'outline'}
+              size="sm"
+              className="h-8"
+              onClick={() => setShowArchived((value) => !value)}
+              disabled={cleanupBusy || refreshing || loadingBoard}
+            >
+              {showArchived ? 'Show Active' : 'Show Archived'}
+            </Button>
             <Button
               variant={showGenerator ? 'secondary' : 'outline'}
               size="sm"
@@ -435,7 +495,7 @@ export function RuntimeSummaryPanel({
               variant="outline"
               size="sm"
               className="h-8"
-              onClick={() => void refreshBoard(workspaceID)}
+              onClick={() => void refreshBoard({ workspaceID, archivedOnly: showArchived })}
               disabled={refreshing || loadingBoard}
             >
               <RefreshCw className={cn('h-3.5 w-3.5 mr-1', (refreshing || loadingBoard) && 'animate-spin')} />

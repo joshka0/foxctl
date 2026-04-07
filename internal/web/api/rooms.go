@@ -39,11 +39,16 @@ type RoomResponse struct {
 	Participants     []string             `json:"participants,omitempty"`
 	TaskIDs          []string             `json:"task_ids,omitempty"`
 	Members          []RoomMemberResponse `json:"members,omitempty"`
+	ArchivedAt       string               `json:"archived_at,omitempty"`
 }
 
 type RoomMemberResponse struct {
 	ActorID  string `json:"actor_id"`
 	Role     string `json:"role,omitempty"`
+	Backend  string `json:"backend,omitempty"`
+	Session  string `json:"session,omitempty"`
+	PaneID   string `json:"pane_id,omitempty"`
+	Unbound  bool   `json:"unbound,omitempty"`
 	JoinedAt string `json:"joined_at,omitempty"`
 }
 
@@ -67,6 +72,10 @@ type RoomPatchRequest struct {
 type RoomMemberRequest struct {
 	ActorID string `json:"actor_id"`
 	Role    string `json:"role,omitempty"`
+	Backend string `json:"backend,omitempty"`
+	Session string `json:"session,omitempty"`
+	PaneID  string `json:"pane_id,omitempty"`
+	Unbound bool   `json:"unbound,omitempty"`
 }
 
 // RoomMessageSendRequest sends one message into a room-scoped stream.
@@ -74,11 +83,14 @@ type RoomMessageSendRequest struct {
 	WorkspaceID      string         `json:"workspace_id"`
 	Sender           string         `json:"sender"`
 	Recipient        string         `json:"recipient,omitempty"`
+	RelatedMessageID string         `json:"related_message_id,omitempty"`
 	Subject          string         `json:"subject,omitempty"`
 	Body             string         `json:"body"`
 	Kind             string         `json:"kind,omitempty"`
 	Priority         int            `json:"priority,omitempty"`
 	AckRequired      bool           `json:"ack_required,omitempty"`
+	ReplyExpected    bool           `json:"reply_expected,omitempty"`
+	Interrupt        bool           `json:"interrupt,omitempty"`
 	TaskID           string         `json:"task_id,omitempty"`
 	DispatchAgents   bool           `json:"dispatch_agents,omitempty"`
 	DispatchAgentIDs []string       `json:"dispatch_agent_ids,omitempty"`
@@ -208,7 +220,8 @@ func RoomsListHandler(cfg config.Config, log zerolog.Logger) http.HandlerFunc {
 		}
 		defer store.Close()
 
-		rooms, err := store.ListRooms(r.Context(), workspaceID, actorID, limit)
+		archivedOnly := parseBool(r.URL.Query().Get("archived_only"))
+		rooms, err := store.ListRooms(r.Context(), workspaceID, actorID, limit, archivedOnly)
 		if err != nil {
 			log.Error().Err(err).Msg("failed to list rooms")
 			httpError(w, http.StatusInternalServerError, "failed to list rooms")
@@ -411,7 +424,7 @@ func handleRoomMembersPatch(w http.ResponseWriter, r *http.Request, cfg config.C
 	})
 }
 
-// RoomDetailHandler serves /api/rooms/{id} and /api/rooms/{id}/messages.
+// RoomDetailHandler serves /api/rooms/{id} and room control subroutes.
 func RoomDetailHandler(cfg config.Config, log zerolog.Logger, events roomEventPublisher) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		path := strings.TrimPrefix(r.URL.Path, "/api/rooms/")
@@ -422,7 +435,81 @@ func RoomDetailHandler(cfg config.Config, log zerolog.Logger, events roomEventPu
 		}
 		roomID := strings.TrimSpace(parts[0])
 
+		if len(parts) >= 2 && parts[1] == "status" {
+			if r.Method != http.MethodGet {
+				httpError(w, http.StatusMethodNotAllowed, "method not allowed")
+				return
+			}
+			handleRoomStatusGet(w, r, cfg, log, roomID)
+			return
+		}
+
+		if len(parts) >= 2 && parts[1] == "inbox" {
+			if r.Method != http.MethodGet {
+				httpError(w, http.StatusMethodNotAllowed, "method not allowed")
+				return
+			}
+			handleRoomInboxGet(w, r, cfg, log, roomID)
+			return
+		}
+
+		if len(parts) >= 2 && parts[1] == "tasks" {
+			if len(parts) >= 4 {
+				switch r.Method {
+				case http.MethodPost:
+					handleRoomTaskAction(w, r, cfg, log, roomID, strings.TrimSpace(parts[2]), strings.TrimSpace(parts[3]))
+				default:
+					httpError(w, http.StatusMethodNotAllowed, "method not allowed")
+				}
+				return
+			}
+			if r.Method != http.MethodGet {
+				httpError(w, http.StatusMethodNotAllowed, "method not allowed")
+				return
+			}
+			handleRoomTasksGet(w, r, cfg, log, roomID)
+			return
+		}
+
+		if len(parts) >= 2 && parts[1] == "loop" {
+			switch r.Method {
+			case http.MethodGet:
+				handleRoomLoopGet(w, r, cfg, log, roomID)
+			case http.MethodPatch:
+				handleRoomLoopPatch(w, r, cfg, log, roomID)
+			default:
+				httpError(w, http.StatusMethodNotAllowed, "method not allowed")
+			}
+			return
+		}
+
+		if len(parts) >= 2 && parts[1] == "coordinator" {
+			if r.Method != http.MethodPost {
+				httpError(w, http.StatusMethodNotAllowed, "method not allowed")
+				return
+			}
+			handleRoomCoordinatorSet(w, r, cfg, log, roomID)
+			return
+		}
+
 		if len(parts) >= 2 && parts[1] == "messages" {
+			if len(parts) >= 3 && parts[2] == "resolve" {
+				if r.Method != http.MethodPost {
+					httpError(w, http.StatusMethodNotAllowed, "method not allowed")
+					return
+				}
+				handleRoomMessagesResolveBulk(w, r, cfg, log, roomID)
+				return
+			}
+			if len(parts) >= 4 {
+				switch r.Method {
+				case http.MethodPost:
+					handleRoomMessageAction(w, r, cfg, log, roomID, strings.TrimSpace(parts[2]), strings.TrimSpace(parts[3]))
+				default:
+					httpError(w, http.StatusMethodNotAllowed, "method not allowed")
+				}
+				return
+			}
 			switch r.Method {
 			case http.MethodGet:
 				handleRoomMessagesGet(w, r, cfg, log, roomID)
@@ -431,6 +518,24 @@ func RoomDetailHandler(cfg config.Config, log zerolog.Logger, events roomEventPu
 			default:
 				httpError(w, http.StatusMethodNotAllowed, "method not allowed")
 			}
+			return
+		}
+
+		if len(parts) >= 2 && parts[1] == "archive" {
+			if r.Method != http.MethodPost {
+				httpError(w, http.StatusMethodNotAllowed, "method not allowed")
+				return
+			}
+			handleRoomArchive(w, r, cfg, log, roomID)
+			return
+		}
+
+		if len(parts) >= 2 && parts[1] == "restore" {
+			if r.Method != http.MethodPost {
+				httpError(w, http.StatusMethodNotAllowed, "method not allowed")
+				return
+			}
+			handleRoomRestore(w, r, cfg, log, roomID)
 			return
 		}
 
@@ -451,6 +556,8 @@ func RoomDetailHandler(cfg config.Config, log zerolog.Logger, events roomEventPu
 			handleRoomGet(w, r, cfg, log, roomID)
 		case http.MethodPatch:
 			handleRoomPatch(w, r, cfg, log, roomID)
+		case http.MethodDelete:
+			handleRoomDelete(w, r, cfg, log, roomID)
 		default:
 			httpError(w, http.StatusMethodNotAllowed, "method not allowed")
 		}
@@ -489,6 +596,96 @@ func handleRoomGet(w http.ResponseWriter, r *http.Request, cfg config.Config, lo
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"room": convertRoomSummary(room),
+	})
+}
+
+func handleRoomDelete(w http.ResponseWriter, r *http.Request, cfg config.Config, log zerolog.Logger, roomID string) {
+	workspaceID := roomWorkspaceID(r)
+	if workspaceID == "" {
+		httpError(w, http.StatusBadRequest, "workspace_id required")
+		return
+	}
+
+	store, err := blackboard.OpenBoardStore(r.Context(), cfg.Storage.Root)
+	if err != nil {
+		log.Error().Err(err).Msg("failed to open board store")
+		httpError(w, http.StatusInternalServerError, "failed to open board store")
+		return
+	}
+	defer store.Close()
+
+	if err := store.DeleteRoom(r.Context(), workspaceID, roomID); err != nil {
+		if errors.Is(err, blackboard.ErrRoomNotFound) {
+			httpError(w, http.StatusNotFound, "room not found")
+			return
+		}
+		log.Error().Err(err).Str("room_id", roomID).Msg("failed to delete room")
+		httpError(w, http.StatusInternalServerError, "failed to delete room")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"status":       "deleted",
+		"room_id":      roomID,
+		"workspace_id": workspaceID,
+	})
+}
+
+func handleRoomArchive(w http.ResponseWriter, r *http.Request, cfg config.Config, log zerolog.Logger, roomID string) {
+	workspaceID := roomWorkspaceID(r)
+	if workspaceID == "" {
+		httpError(w, http.StatusBadRequest, "workspace_id required")
+		return
+	}
+	store, err := blackboard.OpenBoardStore(r.Context(), cfg.Storage.Root)
+	if err != nil {
+		log.Error().Err(err).Msg("failed to open board store")
+		httpError(w, http.StatusInternalServerError, "failed to open board store")
+		return
+	}
+	defer store.Close()
+	if err := store.ArchiveRoom(r.Context(), workspaceID, roomID); err != nil {
+		if errors.Is(err, blackboard.ErrRoomNotFound) {
+			httpError(w, http.StatusNotFound, "room not found")
+			return
+		}
+		log.Error().Err(err).Str("room_id", roomID).Msg("failed to archive room")
+		httpError(w, http.StatusInternalServerError, "failed to archive room")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"status":       "archived",
+		"room_id":      roomID,
+		"workspace_id": workspaceID,
+	})
+}
+
+func handleRoomRestore(w http.ResponseWriter, r *http.Request, cfg config.Config, log zerolog.Logger, roomID string) {
+	workspaceID := roomWorkspaceID(r)
+	if workspaceID == "" {
+		httpError(w, http.StatusBadRequest, "workspace_id required")
+		return
+	}
+	store, err := blackboard.OpenBoardStore(r.Context(), cfg.Storage.Root)
+	if err != nil {
+		log.Error().Err(err).Msg("failed to open board store")
+		httpError(w, http.StatusInternalServerError, "failed to open board store")
+		return
+	}
+	defer store.Close()
+	if err := store.RestoreRoom(r.Context(), workspaceID, roomID); err != nil {
+		if errors.Is(err, blackboard.ErrRoomNotFound) {
+			httpError(w, http.StatusNotFound, "room not found")
+			return
+		}
+		log.Error().Err(err).Str("room_id", roomID).Msg("failed to restore room")
+		httpError(w, http.StatusInternalServerError, "failed to restore room")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"status":       "restored",
+		"room_id":      roomID,
+		"workspace_id": workspaceID,
 	})
 }
 
@@ -548,6 +745,7 @@ func handleRoomMessagesPost(w http.ResponseWriter, r *http.Request, cfg config.C
 	req.WorkspaceID = strings.TrimSpace(req.WorkspaceID)
 	req.Sender = strings.TrimSpace(req.Sender)
 	req.Recipient = strings.TrimSpace(req.Recipient)
+	req.RelatedMessageID = strings.TrimSpace(req.RelatedMessageID)
 	req.Subject = strings.TrimSpace(req.Subject)
 	req.Body = strings.TrimSpace(req.Body)
 	req.TaskID = strings.TrimSpace(req.TaskID)
@@ -588,6 +786,14 @@ func handleRoomMessagesPost(w http.ResponseWriter, r *http.Request, cfg config.C
 	if req.Recipient == "" {
 		req.Recipient = agent.BroadcastRecipient
 	}
+	if req.ReplyExpected && req.Recipient == agent.BroadcastRecipient {
+		httpError(w, http.StatusBadRequest, "reply_expected requires a direct recipient")
+		return
+	}
+	if req.Interrupt && req.Recipient == agent.BroadcastRecipient {
+		httpError(w, http.StatusBadRequest, "interrupt requires a direct recipient")
+		return
+	}
 	if req.Subject == "" {
 		req.Subject = agent.RoomStreamName(roomID)
 	}
@@ -598,19 +804,22 @@ func handleRoomMessagesPost(w http.ResponseWriter, r *http.Request, cfg config.C
 	}
 
 	msg := &agent.BoardMessage{
-		ID:          uuid.New().String(),
-		WorkspaceID: req.WorkspaceID,
-		TaskID:      req.TaskID,
-		Stream:      agent.RoomStreamName(roomID),
-		Sender:      req.Sender,
-		Recipient:   req.Recipient,
-		Subject:     req.Subject,
-		Body:        req.Body,
-		Kind:        kind,
-		Priority:    priority,
-		Status:      agent.BoardMessageStatusUnread,
-		AckRequired: req.AckRequired,
-		CreatedAt:   time.Now(),
+		ID:               uuid.New().String(),
+		WorkspaceID:      req.WorkspaceID,
+		TaskID:           req.TaskID,
+		RelatedMessageID: req.RelatedMessageID,
+		Stream:           agent.RoomStreamName(roomID),
+		Sender:           req.Sender,
+		Recipient:        req.Recipient,
+		Subject:          req.Subject,
+		Body:             req.Body,
+		Kind:             kind,
+		Priority:         priority,
+		Status:           agent.BoardMessageStatusUnread,
+		AckRequired:      req.AckRequired,
+		ReplyExpected:    req.ReplyExpected,
+		Interrupt:        req.Interrupt,
+		CreatedAt:        time.Now(),
 	}
 	if err := store.SendMessage(r.Context(), msg); err != nil {
 		log.Error().Err(err).Str("room_id", roomID).Msg("failed to send room message")
@@ -1168,6 +1377,9 @@ func convertRoomSummary(room agent.RoomSummary) RoomResponse {
 	if !room.LatestMessageAt.IsZero() {
 		resp.LatestMessageAt = room.LatestMessageAt.Format(time.RFC3339)
 	}
+	if room.ArchivedAt != nil && !room.ArchivedAt.IsZero() {
+		resp.ArchivedAt = room.ArchivedAt.Format(time.RFC3339)
+	}
 	return resp
 }
 
@@ -1178,10 +1390,17 @@ func normalizeBoardMessageKind(raw string) (agent.BoardMessageKind, error) {
 	}
 	switch kind {
 	case agent.BoardMessageKindInstruction, agent.BoardMessageKindInfo,
-		agent.BoardMessageKindAlert, agent.BoardMessageKindReviewRequest:
+		agent.BoardMessageKindAlert, agent.BoardMessageKindReviewRequest,
+		agent.BoardMessageKindTaskUpdate, agent.BoardMessageKindLeadChange,
+		agent.BoardMessageKindCoordinatorPulse,
+		agent.BoardMessageKindPlanSession, agent.BoardMessageKindPlanProposal,
+		agent.BoardMessageKindPlanQuestion, agent.BoardMessageKindPlanDecision,
+		agent.BoardMessageKindPlanReview, agent.BoardMessageKindPlanClose,
+		agent.BoardMessageKindInterviewSession, agent.BoardMessageKindInterviewQuestion,
+		agent.BoardMessageKindInterviewAnswer, agent.BoardMessageKindInterviewVerify:
 		return kind, nil
 	default:
-		return "", errors.New("invalid kind: must be one of instruction, info, alert, review_request")
+		return "", errors.New("invalid kind: must be one of instruction, info, alert, review_request, task_update, lead_change, coordinator_pulse, plan_session, plan_proposal, plan_question, plan_decision, plan_review, plan_close, interview_session, interview_question, interview_answer, interview_verify")
 	}
 }
 
@@ -1191,6 +1410,10 @@ func convertRoomMembers(members []agent.RoomMember) []RoomMemberResponse {
 		resp := RoomMemberResponse{
 			ActorID: member.ActorID,
 			Role:    member.Role,
+			Backend: member.Backend,
+			Session: member.Session,
+			PaneID:  member.PaneID,
+			Unbound: member.Unbound,
 		}
 		if !member.JoinedAt.IsZero() {
 			resp.JoinedAt = member.JoinedAt.Format(time.RFC3339)
@@ -1210,6 +1433,10 @@ func toRoomMembers(members []RoomMemberRequest) []agent.RoomMember {
 		out = append(out, agent.RoomMember{
 			ActorID: actorID,
 			Role:    strings.TrimSpace(member.Role),
+			Backend: strings.ToLower(strings.TrimSpace(member.Backend)),
+			Session: strings.TrimSpace(member.Session),
+			PaneID:  strings.TrimSpace(member.PaneID),
+			Unbound: member.Unbound,
 		})
 	}
 	return out

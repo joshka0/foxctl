@@ -89,6 +89,7 @@ type Card struct {
 	RetryDueAt  *time.Time `json:"retry_due_at,omitempty"`
 	LastEvent   string     `json:"last_event_type,omitempty"`
 	LastEventAt *time.Time `json:"last_event_at,omitempty"`
+	ArchivedAt  *time.Time `json:"archived_at,omitempty"`
 }
 
 // LaneColumn groups cards for one lane in board responses.
@@ -100,11 +101,12 @@ type LaneColumn struct {
 
 // BoardRequest is the canonical board query request.
 type BoardRequest struct {
-	RequestID   string `json:"request_id,omitempty"`
-	WorkspaceID string `json:"workspace_id,omitempty"`
-	Limit       int    `json:"limit,omitempty"`
-	Cursor      string `json:"cursor,omitempty"`
-	Lane        Lane   `json:"lane,omitempty"`
+	RequestID    string `json:"request_id,omitempty"`
+	WorkspaceID  string `json:"workspace_id,omitempty"`
+	Limit        int    `json:"limit,omitempty"`
+	Cursor       string `json:"cursor,omitempty"`
+	Lane         Lane   `json:"lane,omitempty"`
+	ArchivedOnly bool   `json:"archived_only,omitempty"`
 }
 
 // BoardResponse is the canonical board query response model.

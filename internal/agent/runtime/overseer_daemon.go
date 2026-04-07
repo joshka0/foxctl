@@ -10,6 +10,7 @@ import (
 	"github.com/rs/zerolog/log"
 
 	"github.com/jkatigb/agentctl/internal/agent/types"
+	"github.com/jkatigb/agentctl/internal/agentpane"
 	"github.com/jkatigb/agentctl/internal/domain/agent"
 	"github.com/jkatigb/agentctl/internal/domain/envelope"
 	"github.com/jkatigb/agentctl/internal/execution/agentmanager"
@@ -135,20 +136,24 @@ func handleOverseerCmd(ctx context.Context, msg agent.Message, mgr *agentmanager
 			continue
 		}
 		prompt := buildSpawnPrompt(req, sub)
+		childBinding := agentpane.InheritChildBinding(parentAgent.TerminalBinding, parentAgent.TerminalBinding.ParticipantID, parentAgent.ID)
 		spawnResp, err := mgr.Spawn(ctx, agentmanager.SpawnRequest{
-			ParentNS:      msg.FromNS,
-			Role:          string(sub.Role),
-			Prompt:        prompt,
-			SkillsAllow:   parentAgent.SkillsAllow,
-			Policy:        parentAgent.Policy,
-			ShareBB:       "scoped",
-			LLMProvider:   parentAgent.LLMProvider,
-			LLMModel:      parentAgent.LLMModel,
-			LLMAPIKey:     parentAgent.LLMAPIKey,
-			LLMBaseURL:    parentAgent.LLMBaseURL,
-			LLMAuthMode:   parentAgent.LLMAuthMode,
-			LLMAuthHeader: parentAgent.LLMAuthHeader,
-			LLMAuthPrefix: parentAgent.LLMAuthPrefix,
+			ParentNS:        msg.FromNS,
+			WorkspaceRoot:   parentAgent.WorkspaceRoot,
+			WorkspaceSource: parentAgent.WorkspaceSource,
+			Role:            string(sub.Role),
+			Prompt:          prompt,
+			SkillsAllow:     parentAgent.SkillsAllow,
+			Policy:          parentAgent.Policy,
+			ShareBB:         "scoped",
+			LLMProvider:     parentAgent.LLMProvider,
+			LLMModel:        parentAgent.LLMModel,
+			LLMAPIKey:       parentAgent.LLMAPIKey,
+			LLMBaseURL:      parentAgent.LLMBaseURL,
+			LLMAuthMode:     parentAgent.LLMAuthMode,
+			LLMAuthHeader:   parentAgent.LLMAuthHeader,
+			LLMAuthPrefix:   parentAgent.LLMAuthPrefix,
+			TerminalBinding: childBinding,
 		})
 		if err != nil {
 			resp.DeniedAgents = append(resp.DeniedAgents, types.DeniedAgent{
@@ -157,6 +162,15 @@ func handleOverseerCmd(ctx context.Context, msg agent.Message, mgr *agentmanager
 				Reason: err.Error(),
 			})
 			continue
+		}
+		if updatedBinding, paneMeta, paneErr := maybeAttachSpawnedChildPane(ctx, agentStore, spawnResp.AgentID, parentAgent, childBinding, sub); paneErr != nil {
+			log.Warn().Err(paneErr).Str("agent_id", spawnResp.AgentID).Msg("failed to attach spawned child pane")
+		} else if paneMeta != nil {
+			log.Info().
+				Str("agent_id", spawnResp.AgentID).
+				Interface("terminal_binding", updatedBinding).
+				Interface("pane", paneMeta).
+				Msg("attached spawned child pane")
 		}
 
 		resp.SpawnedAgents = append(resp.SpawnedAgents, types.SpawnedAgent{
@@ -174,6 +188,26 @@ func handleOverseerCmd(ctx context.Context, msg agent.Message, mgr *agentmanager
 	}
 
 	sendSpawnResponse(ctx, store, msg, resp)
+}
+
+func maybeAttachSpawnedChildPane(ctx context.Context, agentStore agents.Store, agentID string, parentAgent agent.Agent, binding agent.TerminalBinding, sub types.SubagentRequest) (agent.TerminalBinding, map[string]any, error) {
+	binding = agent.NormalizeTerminalBinding(binding)
+	if binding == (agent.TerminalBinding{}) {
+		return binding, nil, nil
+	}
+	label := strings.TrimSpace(string(sub.Role))
+	if label == "" {
+		label = "child"
+	}
+	label = label + "-" + strings.ToLower(strings.TrimSpace(agentID[:6]))
+	updated, paneMeta, err := agentpane.CreateWatchPane(ctx, binding, parentAgent.WorkspaceRoot, label, "agentctl agent watch "+strings.TrimSpace(agentID))
+	if err != nil {
+		return binding, nil, err
+	}
+	if err := agentStore.UpdateTerminalBinding(ctx, agentID, updated); err != nil {
+		return updated, paneMeta, err
+	}
+	return updated, paneMeta, nil
 }
 
 func buildSpawnPrompt(req types.SpawnRequest, sub types.SubagentRequest) string {
