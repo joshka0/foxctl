@@ -2222,14 +2222,14 @@ func TestRunRoomMilestoneContractStartAndUpdate(t *testing.T) {
 	}
 
 	cmd, out = newRoomTestCommand(ctx)
-	if err := runRoomMilestoneStart(cmd, workspace, "human-a", "alpha", epicID, "Foundation", "Ship the first contract slice", "Make milestone intent explicit.", "human-a", []string{"contracts", "work-pack sync"}, []string{"send-confirm gap", "send-confirm gap"}, []string{"GUI changes"}, []string{"epic finalized"}, []string{"audit", "review", "review"}, []string{"contract visible", "contract visible"}, ""); err != nil {
+	if err := runRoomMilestoneStartWithPolicy(cmd, workspace, "human-a", "alpha", epicID, "Foundation", "Ship the first contract slice", "Make milestone intent explicit.", "human-a", []string{"contracts", "work-pack sync"}, []string{"send-confirm gap", "send-confirm gap"}, []string{"GUI changes"}, []string{"epic finalized"}, []string{"audit", "review", "review"}, []string{"integration", "review", "review"}, []string{"integration", "user_test"}, []string{"contract visible", "contract visible"}, ""); err != nil {
 		t.Fatalf("runRoomMilestoneStart: %v", err)
 	}
 	data := decodeRoomEnvelope(t, out)
 	milestoneID := data["milestone_id"].(string)
 
 	cmd, out = newRoomTestCommand(ctx)
-	if err := runRoomMilestoneContract(cmd, workspace, "human-a", "alpha", milestoneID, "Updated objective.", []string{"multi-epic rooms"}, []string{"transport rewrite"}, []string{"send confirm"}, []string{"test", "review"}, []string{"summary written"}); err != nil {
+	if err := runRoomMilestoneContractWithPolicy(cmd, workspace, "human-a", "alpha", milestoneID, "Updated objective.", []string{"multi-epic rooms"}, []string{"transport rewrite"}, []string{"send confirm"}, []string{"test", "review"}, []string{"test"}, []string{"manual_check", "review"}, []string{"summary written"}); err != nil {
 		t.Fatalf("runRoomMilestoneContract: %v", err)
 	}
 
@@ -2251,6 +2251,12 @@ func TestRunRoomMilestoneContractStartAndUpdate(t *testing.T) {
 	if got := milestone["validator_count"]; got != float64(3) {
 		t.Fatalf("validator_count=%v want 3", got)
 	}
+	if got := milestone["required_evidence_lane_count"]; got != float64(3) {
+		t.Fatalf("required_evidence_lane_count=%v want 3", got)
+	}
+	if got := milestone["optional_evidence_lane_count"]; got != float64(2) {
+		t.Fatalf("optional_evidence_lane_count=%v want 2", got)
+	}
 	if got := milestone["exit_criteria_count"]; got != float64(2) {
 		t.Fatalf("exit_criteria_count=%v want 2", got)
 	}
@@ -2262,6 +2268,14 @@ func TestRunRoomMilestoneContractStartAndUpdate(t *testing.T) {
 	if len(validators) != 3 || validators[0] != "audit" || validators[1] != "review" || validators[2] != "test" {
 		t.Fatalf("validators=%v want [audit review test]", validators)
 	}
+	requiredLanes := contract["required_evidence_lanes"].([]any)
+	if len(requiredLanes) != 3 || requiredLanes[0] != "integration" || requiredLanes[1] != "review" || requiredLanes[2] != "test" {
+		t.Fatalf("required_evidence_lanes=%v want [integration review test]", requiredLanes)
+	}
+	optionalLanes := contract["optional_evidence_lanes"].([]any)
+	if len(optionalLanes) != 2 || optionalLanes[0] != "manual_check" || optionalLanes[1] != "user_test" {
+		t.Fatalf("optional_evidence_lanes=%v want [manual_check user_test]", optionalLanes)
+	}
 	if got := milestone["contract_update_count"]; got != float64(1) {
 		t.Fatalf("contract_update_count=%v want 1", got)
 	}
@@ -2272,7 +2286,7 @@ func TestRunRoomMilestoneContractStartAndUpdate(t *testing.T) {
 		t.Fatalf("ReadFile milestone markdown: %v", err)
 	}
 	markdown := string(milestoneMarkdown)
-	for _, want := range []string{"Objective: Updated objective.", "## Risks", "send-confirm gap", "multi-epic rooms", "## Validators Expected", "audit", "review", "test", "## Exit Criteria"} {
+	for _, want := range []string{"Objective: Updated objective.", "## Risks", "send-confirm gap", "multi-epic rooms", "## Validators Expected", "audit", "review", "test", "## Required Evidence Lanes", "integration", "## Optional Evidence Lanes", "manual_check", "user_test", "## Exit Criteria"} {
 		if !strings.Contains(markdown, want) {
 			t.Fatalf("milestone markdown missing %q:\n%s", want, markdown)
 		}
@@ -2289,6 +2303,9 @@ func TestRunRoomMilestoneContractStartAndUpdate(t *testing.T) {
 	meta := milestoneView["meta"].(map[string]any)
 	if got := meta["objective"]; got != "Updated objective." {
 		t.Fatalf("meta.objective=%v want Updated objective.", got)
+	}
+	if got := milestoneView["required_lane_status"]; got != "missing" {
+		t.Fatalf("required_lane_status=%v want missing", got)
 	}
 }
 
@@ -2976,6 +2993,82 @@ func TestRunRoomWorkpackShowAndSync(t *testing.T) {
 	workpack = data["workpack"].(map[string]any)
 	if got := workpack["root"]; got != root {
 		t.Fatalf("sync root=%v want %s", got, root)
+	}
+}
+
+func TestRunRoomMilestoneEvidencePolicyGuidesHealthAndNext(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	ctx := context.Background()
+	workspace := t.TempDir()
+
+	epicID, milestoneID, storyID := setupRoomAgileWorkpackFixture(t, ctx, workspace)
+
+	cmd, _ := newRoomTestCommand(ctx)
+	if err := runRoomMilestoneContractWithPolicy(cmd, workspace, "human-a", "alpha", milestoneID, "Foundation objective.", nil, nil, nil, []string{"review"}, []string{"integration"}, []string{"user_test"}, []string{"story validated"}); err != nil {
+		t.Fatalf("runRoomMilestoneContractWithPolicy: %v", err)
+	}
+
+	cmd, out := newRoomTestCommand(ctx)
+	if err := runRoomMilestoneShow(cmd, workspace, "alpha", milestoneID, 100); err != nil {
+		t.Fatalf("runRoomMilestoneShow: %v", err)
+	}
+	milestone := decodeRoomEnvelope(t, out)["milestone"].(map[string]any)
+	if got := milestone["required_lane_status"]; got != "missing" {
+		t.Fatalf("required_lane_status=%v want missing", got)
+	}
+	if got := milestone["required_lane_missing"].([]any); len(got) != 1 || got[0] != "integration" {
+		t.Fatalf("required_lane_missing=%v want [integration]", got)
+	}
+
+	cmd, out = newRoomTestCommand(ctx)
+	if err := runRoomEpicNext(cmd, workspace, "alpha", epicID, "human-a"); err != nil {
+		t.Fatalf("runRoomEpicNext: %v", err)
+	}
+	items := decodeRoomEnvelope(t, out)["items"].([]any)
+	foundPolicy := false
+	for _, raw := range items {
+		item := raw.(map[string]any)
+		if item["type"] == "cover_required_lane" && item["target_id"] == storyID {
+			foundPolicy = strings.Contains(item["command_hint"].(string), " integration pass ")
+		}
+	}
+	if !foundPolicy {
+		t.Fatalf("items=%v want cover_required_lane for %s", items, storyID)
+	}
+
+	cmd, out = newRoomTestCommand(ctx)
+	if err := runRoomEpicHealth(cmd, workspace, "alpha", epicID, "human-a", 100); err != nil {
+		t.Fatalf("runRoomEpicHealth: %v", err)
+	}
+	health := decodeRoomEnvelope(t, out)["health"].(map[string]any)
+	if !roomIssueTypesContain(health["issues"].([]any), "milestone_missing_required_lane") {
+		t.Fatalf("issues=%v want milestone_missing_required_lane", health["issues"])
+	}
+
+	cmd, _ = newRoomTestCommand(ctx)
+	if err := runRoomStoryValidate(cmd, workspace, "human-a", "alpha", storyID, "integration", "pass", "Integrated.", "docs/reviews/integration.md", "", "", "", nil); err != nil {
+		t.Fatalf("runRoomStoryValidate integration: %v", err)
+	}
+
+	cmd, out = newRoomTestCommand(ctx)
+	if err := runRoomMilestoneShow(cmd, workspace, "alpha", milestoneID, 100); err != nil {
+		t.Fatalf("runRoomMilestoneShow after validate: %v", err)
+	}
+	milestone = decodeRoomEnvelope(t, out)["milestone"].(map[string]any)
+	if got := milestone["required_lane_status"]; got != "satisfied" {
+		t.Fatalf("required_lane_status=%v want satisfied", got)
+	}
+	if got := milestone["required_lane_covered"].([]any); len(got) != 1 || got[0] != "integration" {
+		t.Fatalf("required_lane_covered=%v want [integration]", got)
+	}
+
+	cmd, out = newRoomTestCommand(ctx)
+	if err := runRoomEpicHealth(cmd, workspace, "alpha", epicID, "human-a", 100); err != nil {
+		t.Fatalf("runRoomEpicHealth after validate: %v", err)
+	}
+	health = decodeRoomEnvelope(t, out)["health"].(map[string]any)
+	if roomIssueTypesContain(health["issues"].([]any), "milestone_missing_required_lane") {
+		t.Fatalf("issues=%v want milestone_missing_required_lane cleared", health["issues"])
 	}
 }
 

@@ -795,6 +795,8 @@ func newRoomMilestoneStartCommand() *cobra.Command {
 		excludes   []string
 		deps       []string
 		validators []string
+		requiredLanes []string
+		optionalLanes []string
 		exits      []string
 		proposal   string
 	)
@@ -807,7 +809,7 @@ func newRoomMilestoneStartCommand() *cobra.Command {
 			if len(args) > 2 {
 				title = args[2]
 			}
-			return runRoomMilestoneStart(cmd, workspace, sender, args[0], args[1], title, goal, objective, owner, scope, risks, excludes, deps, validators, exits, proposal)
+			return runRoomMilestoneStartWithPolicy(cmd, workspace, sender, args[0], args[1], title, goal, objective, owner, scope, risks, excludes, deps, validators, requiredLanes, optionalLanes, exits, proposal)
 		},
 	}
 	cmd.Flags().StringVar(&workspace, "workspace", ".", "Workspace root override")
@@ -820,6 +822,8 @@ func newRoomMilestoneStartCommand() *cobra.Command {
 	cmd.Flags().StringSliceVar(&excludes, "exclude", nil, "Milestone exclusion (repeatable)")
 	cmd.Flags().StringSliceVar(&deps, "dependency", nil, "Milestone dependency (repeatable)")
 	cmd.Flags().StringSliceVar(&validators, "validator", nil, "Expected validator lane (repeatable)")
+	cmd.Flags().StringSliceVar(&requiredLanes, "required-lane", nil, "Required evidence lane for milestone exit (repeatable)")
+	cmd.Flags().StringSliceVar(&optionalLanes, "optional-lane", nil, "Optional evidence lane worth tracking but not required for exit (repeatable)")
 	cmd.Flags().StringSliceVar(&exits, "exit", nil, "Milestone exit criterion (repeatable)")
 	cmd.Flags().StringVar(&proposal, "proposal", "", "Milestone proposal id to promote into a real milestone")
 	return cmd
@@ -834,6 +838,8 @@ func newRoomMilestoneContractCommand() *cobra.Command {
 		excludes   []string
 		deps       []string
 		validators []string
+		requiredLanes []string
+		optionalLanes []string
 		exits      []string
 	)
 	cmd := &cobra.Command{
@@ -841,7 +847,7 @@ func newRoomMilestoneContractCommand() *cobra.Command {
 		Short: "Update the explicit milestone contract",
 		Args:  cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runRoomMilestoneContract(cmd, workspace, sender, args[0], args[1], objective, risks, excludes, deps, validators, exits)
+			return runRoomMilestoneContractWithPolicy(cmd, workspace, sender, args[0], args[1], objective, risks, excludes, deps, validators, requiredLanes, optionalLanes, exits)
 		},
 	}
 	cmd.Flags().StringVar(&workspace, "workspace", ".", "Workspace root override")
@@ -851,6 +857,8 @@ func newRoomMilestoneContractCommand() *cobra.Command {
 	cmd.Flags().StringSliceVar(&excludes, "exclude", nil, "Milestone exclusion (repeatable)")
 	cmd.Flags().StringSliceVar(&deps, "dependency", nil, "Milestone dependency (repeatable)")
 	cmd.Flags().StringSliceVar(&validators, "validator", nil, "Expected validator lane (repeatable)")
+	cmd.Flags().StringSliceVar(&requiredLanes, "required-lane", nil, "Required evidence lane for milestone exit (repeatable)")
+	cmd.Flags().StringSliceVar(&optionalLanes, "optional-lane", nil, "Optional evidence lane worth tracking but not required for exit (repeatable)")
 	cmd.Flags().StringSliceVar(&exits, "exit", nil, "Milestone exit criterion (repeatable)")
 	return cmd
 }
@@ -2713,6 +2721,8 @@ type roomMilestoneMeta struct {
 	Exclusions         []string `json:"exclusions"`
 	Dependencies       []string `json:"dependencies"`
 	ValidatorsExpected []string `json:"validators_expected"`
+	RequiredEvidenceLanes []string `json:"required_evidence_lanes"`
+	OptionalEvidenceLanes []string `json:"optional_evidence_lanes"`
 	ExitCriteria       []string `json:"exit_criteria"`
 }
 
@@ -3238,6 +3248,10 @@ func runRoomEpicNext(cmd *cobra.Command, workspace, roomID, epicID, actorID stri
 }
 
 func runRoomMilestoneStart(cmd *cobra.Command, workspace, sender, roomID, epicID, title, goal, objective, owner string, scope, risks, exclusions, dependencies, validatorsExpected, exitCriteria []string, proposalID string) error {
+	return runRoomMilestoneStartWithPolicy(cmd, workspace, sender, roomID, epicID, title, goal, objective, owner, scope, risks, exclusions, dependencies, validatorsExpected, nil, nil, exitCriteria, proposalID)
+}
+
+func runRoomMilestoneStartWithPolicy(cmd *cobra.Command, workspace, sender, roomID, epicID, title, goal, objective, owner string, scope, risks, exclusions, dependencies, validatorsExpected, requiredEvidenceLanes, optionalEvidenceLanes, exitCriteria []string, proposalID string) error {
 	absWorkspace, identity, store, roomID, summary, err := prepareRoomAgileCommand(cmd, "agentctl.room.milestone", workspace, sender, roomID)
 	if err != nil {
 		return err
@@ -3294,6 +3308,8 @@ func runRoomMilestoneStart(cmd *cobra.Command, workspace, sender, roomID, epicID
 		Exclusions:         exclusions,
 		Dependencies:       dependencies,
 		ValidatorsExpected: validatorsExpected,
+		RequiredEvidenceLanes: requiredEvidenceLanes,
+		OptionalEvidenceLanes: optionalEvidenceLanes,
 		ExitCriteria:       exitCriteria,
 	})
 	if err != nil {
@@ -3311,7 +3327,7 @@ func runRoomMilestoneStart(cmd *cobra.Command, workspace, sender, roomID, epicID
 		Kind:             agent.BoardMessageKindMilestone,
 		Priority:         agent.DefaultPriority,
 		Subject:          "Milestone: " + title,
-		Body:             buildRoomMilestoneBody(epicMsg.ID, title, meta.Goal, meta.Objective, meta.Owner, meta.Scope, meta.Risks, meta.Exclusions, meta.Dependencies, meta.ValidatorsExpected, meta.ExitCriteria),
+		Body:             buildRoomMilestoneBody(epicMsg.ID, title, meta.Goal, meta.Objective, meta.Owner, meta.Scope, meta.Risks, meta.Exclusions, meta.Dependencies, meta.ValidatorsExpected, meta.RequiredEvidenceLanes, meta.OptionalEvidenceLanes, meta.ExitCriteria),
 	}
 	if err := store.SendMessage(cmd.Context(), msg); err != nil {
 		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.milestone.start", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
@@ -3330,6 +3346,10 @@ func runRoomMilestoneStart(cmd *cobra.Command, workspace, sender, roomID, epicID
 }
 
 func runRoomMilestoneContract(cmd *cobra.Command, workspace, sender, roomID, milestoneID, objective string, risks, exclusions, dependencies, validatorsExpected, exitCriteria []string) error {
+	return runRoomMilestoneContractWithPolicy(cmd, workspace, sender, roomID, milestoneID, objective, risks, exclusions, dependencies, validatorsExpected, nil, nil, exitCriteria)
+}
+
+func runRoomMilestoneContractWithPolicy(cmd *cobra.Command, workspace, sender, roomID, milestoneID, objective string, risks, exclusions, dependencies, validatorsExpected, requiredEvidenceLanes, optionalEvidenceLanes, exitCriteria []string) error {
 	absWorkspace, identity, store, roomID, summary, err := prepareRoomAgileCommand(cmd, "agentctl.room.milestone", workspace, sender, roomID)
 	if err != nil {
 		return err
@@ -3353,6 +3373,8 @@ func runRoomMilestoneContract(cmd *cobra.Command, workspace, sender, roomID, mil
 		Exclusions:         exclusions,
 		Dependencies:       dependencies,
 		ValidatorsExpected: validatorsExpected,
+		RequiredEvidenceLanes: requiredEvidenceLanes,
+		OptionalEvidenceLanes: optionalEvidenceLanes,
 		ExitCriteria:       exitCriteria,
 	})
 	if err != nil {
@@ -3360,9 +3382,9 @@ func runRoomMilestoneContract(cmd *cobra.Command, workspace, sender, roomID, mil
 			"hint": "Use supported validator values: review, test, integration, user_test, manual_check, audit.",
 		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
 	}
-	if patch.Objective == "" && len(patch.Risks) == 0 && len(patch.Exclusions) == 0 && len(patch.Dependencies) == 0 && len(patch.ValidatorsExpected) == 0 && len(patch.ExitCriteria) == 0 {
+	if patch.Objective == "" && len(patch.Risks) == 0 && len(patch.Exclusions) == 0 && len(patch.Dependencies) == 0 && len(patch.ValidatorsExpected) == 0 && len(patch.RequiredEvidenceLanes) == 0 && len(patch.OptionalEvidenceLanes) == 0 && len(patch.ExitCriteria) == 0 {
 		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.milestone.contract", protocol.ErrorCodeEARG, "at least one contract field is required", map[string]any{
-			"hint": "Pass --objective, --risk, --exclude, --dependency, --validator, or --exit.",
+			"hint": "Pass --objective, --risk, --exclude, --dependency, --validator, --required-lane, --optional-lane, or --exit.",
 		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
 	}
 
@@ -3375,7 +3397,7 @@ func runRoomMilestoneContract(cmd *cobra.Command, workspace, sender, roomID, mil
 		Kind:             agent.BoardMessageKindMilestoneContract,
 		Priority:         agent.DefaultPriority,
 		Subject:          "Milestone Contract: " + strings.TrimPrefix(strings.TrimSpace(milestoneMsg.Subject), "Milestone: "),
-		Body:             buildRoomMilestoneBody("", "", "", patch.Objective, "", nil, patch.Risks, patch.Exclusions, patch.Dependencies, patch.ValidatorsExpected, patch.ExitCriteria),
+		Body:             buildRoomMilestoneBody("", "", "", patch.Objective, "", nil, patch.Risks, patch.Exclusions, patch.Dependencies, patch.ValidatorsExpected, patch.RequiredEvidenceLanes, patch.OptionalEvidenceLanes, patch.ExitCriteria),
 	}
 	if err := store.SendMessage(cmd.Context(), msg); err != nil {
 		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.milestone.contract", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
@@ -5080,7 +5102,7 @@ func parseRoomEpicQuestionBody(body string) roomEpicQuestionMeta {
 	return meta
 }
 
-func buildRoomMilestoneBody(epicID, title, goal, objective, owner string, scope, risks, exclusions, dependencies, validatorsExpected, exitCriteria []string) string {
+func buildRoomMilestoneBody(epicID, title, goal, objective, owner string, scope, risks, exclusions, dependencies, validatorsExpected, requiredEvidenceLanes, optionalEvidenceLanes, exitCriteria []string) string {
 	var b strings.Builder
 	if strings.TrimSpace(epicID) != "" {
 		fmt.Fprintf(&b, "EpicID: %s\n", strings.TrimSpace(epicID))
@@ -5102,6 +5124,8 @@ func buildRoomMilestoneBody(epicID, title, goal, objective, owner string, scope,
 	appendRoomSection(&b, "Exclusions", exclusions)
 	appendRoomSection(&b, "Dependencies", dependencies)
 	appendRoomSection(&b, "ValidatorsExpected", validatorsExpected)
+	appendRoomSection(&b, "RequiredEvidenceLanes", requiredEvidenceLanes)
+	appendRoomSection(&b, "OptionalEvidenceLanes", optionalEvidenceLanes)
 	appendRoomSection(&b, "ExitCriteria", exitCriteria)
 	if strings.TrimSpace(epicID) != "" || strings.TrimSpace(title) != "" {
 		b.WriteString("Protocol:\n- add acceptance criteria\n- attach stories under the milestone\n- record pass/block review at the milestone boundary\n")
@@ -5137,6 +5161,12 @@ func parseRoomMilestoneBody(body string) roomMilestoneMeta {
 		case "ValidatorsExpected:":
 			section = "validators"
 			continue
+		case "RequiredEvidenceLanes:":
+			section = "required_lanes"
+			continue
+		case "OptionalEvidenceLanes:":
+			section = "optional_lanes"
+			continue
 		case "ExitCriteria:":
 			section = "exit"
 			continue
@@ -5154,6 +5184,10 @@ func parseRoomMilestoneBody(body string) roomMilestoneMeta {
 				meta.Dependencies = append(meta.Dependencies, value)
 			case "validators":
 				meta.ValidatorsExpected = append(meta.ValidatorsExpected, value)
+			case "required_lanes":
+				meta.RequiredEvidenceLanes = append(meta.RequiredEvidenceLanes, value)
+			case "optional_lanes":
+				meta.OptionalEvidenceLanes = append(meta.OptionalEvidenceLanes, value)
 			case "exit":
 				meta.ExitCriteria = append(meta.ExitCriteria, value)
 			}
@@ -5478,6 +5512,30 @@ func normalizeRoomMilestoneContract(meta roomMilestoneMeta) (roomMilestoneMeta, 
 		return roomMilestoneMeta{}, err
 	}
 	meta.ValidatorsExpected = validators
+	required, err := normalizeRoomMilestoneValidatorTypes(meta.RequiredEvidenceLanes)
+	if err != nil {
+		return roomMilestoneMeta{}, err
+	}
+	meta.RequiredEvidenceLanes = required
+	optional, err := normalizeRoomMilestoneValidatorTypes(meta.OptionalEvidenceLanes)
+	if err != nil {
+		return roomMilestoneMeta{}, err
+	}
+	if len(optional) > 0 && len(required) > 0 {
+		filtered := make([]string, 0, len(optional))
+		requiredSet := make(map[string]struct{}, len(required))
+		for _, lane := range required {
+			requiredSet[lane] = struct{}{}
+		}
+		for _, lane := range optional {
+			if _, ok := requiredSet[lane]; ok {
+				continue
+			}
+			filtered = append(filtered, lane)
+		}
+		optional = filtered
+	}
+	meta.OptionalEvidenceLanes = optional
 	meta.ExitCriteria = normalizeRoomList(meta.ExitCriteria, true)
 	return meta, nil
 }
@@ -5529,6 +5587,26 @@ func mergeRoomMilestoneMeta(base roomMilestoneMeta, patch roomMilestoneMeta) roo
 	}
 	if len(patch.ValidatorsExpected) > 0 {
 		base.ValidatorsExpected = mergeRoomList(base.ValidatorsExpected, patch.ValidatorsExpected, true)
+	}
+	if len(patch.RequiredEvidenceLanes) > 0 {
+		base.RequiredEvidenceLanes = mergeRoomList(base.RequiredEvidenceLanes, patch.RequiredEvidenceLanes, true)
+	}
+	if len(patch.OptionalEvidenceLanes) > 0 {
+		base.OptionalEvidenceLanes = mergeRoomList(base.OptionalEvidenceLanes, patch.OptionalEvidenceLanes, true)
+	}
+	if len(base.OptionalEvidenceLanes) > 0 && len(base.RequiredEvidenceLanes) > 0 {
+		requiredSet := make(map[string]struct{}, len(base.RequiredEvidenceLanes))
+		for _, lane := range base.RequiredEvidenceLanes {
+			requiredSet[lane] = struct{}{}
+		}
+		filtered := make([]string, 0, len(base.OptionalEvidenceLanes))
+		for _, lane := range base.OptionalEvidenceLanes {
+			if _, ok := requiredSet[lane]; ok {
+				continue
+			}
+			filtered = append(filtered, lane)
+		}
+		base.OptionalEvidenceLanes = filtered
 	}
 	if len(patch.ExitCriteria) > 0 {
 		base.ExitCriteria = mergeRoomList(base.ExitCriteria, patch.ExitCriteria, true)
@@ -6440,6 +6518,20 @@ func buildRoomEpicHealthIssues(room agent.RoomSummary, messages []agent.BoardMes
 		if roomMilestoneSummaryIsStale(milestone) {
 			issues = append(issues, roomEpicHealthIssue("stale_summary", "warn", milestoneID, milestoneTitle, "Milestone summary is older than the latest material change in this milestone.", fmt.Sprintf(`agentctl room milestone summary %s %s --summary "<summary>"`, roomID, milestoneID)))
 		}
+		requiredLaneStatus, _, requiredLaneMissing := roomMilestoneRequiredLaneStatus(milestone)
+		if requiredLaneStatus == "missing" {
+			for _, lane := range requiredLaneMissing {
+				storyHint := roomMilestoneFirstAcceptedStoryMissingLane(milestone, lane, actorID, coordinator)
+				issues = append(issues, roomEpicHealthIssue(
+					"milestone_missing_required_lane",
+					"warn",
+					fmt.Sprintf("%s:%s", milestoneID, lane),
+					milestoneTitle,
+					fmt.Sprintf("Milestone requires evidence lane %q, but no accepted story covers it yet.", lane),
+					roomMilestoneRequiredLaneIssueHint(roomID, milestone, storyHint, lane),
+				))
+			}
+		}
 		for _, story := range mapSlice(milestone["stories"]) {
 			if stringField(story, "status") == "accepted" && !boolField(story, "covered") {
 				issues = append(issues, roomEpicHealthIssue("story_missing_validation", "warn", stringField(story, "id"), firstNonEmpty(stringField(story, "title"), "Validate story"), "Accepted story still lacks validation coverage.", fmt.Sprintf(`agentctl room story validate %s %s review pass "<summary>"`, roomID, stringField(story, "id"))))
@@ -6578,7 +6670,64 @@ func roomMilestoneMissingContract(milestone map[string]any) bool {
 		return false
 	}
 	meta := anyMap(milestone["meta"])
-	return stringField(meta, "objective") == "" && intField(milestone, "validator_count") == 0 && intField(milestone, "exit_criteria_count") == 0
+	return stringField(meta, "objective") == "" &&
+		intField(milestone, "validator_count") == 0 &&
+		intField(milestone, "required_evidence_lane_count") == 0 &&
+		intField(milestone, "optional_evidence_lane_count") == 0 &&
+		intField(milestone, "exit_criteria_count") == 0
+}
+
+func roomMilestoneRequiredLaneStatus(milestone map[string]any) (string, []string, []string) {
+	required := stringSliceField(anyMap(milestone["meta"]), "required_evidence_lanes")
+	if len(required) == 0 {
+		return "not_configured", nil, nil
+	}
+	coverage := anyMap(milestone["lane_coverage"])
+	covered := make([]string, 0, len(required))
+	missing := make([]string, 0, len(required))
+	for _, lane := range required {
+		if intField(coverage, lane) > 0 {
+			covered = append(covered, lane)
+			continue
+		}
+		missing = append(missing, lane)
+	}
+	if len(missing) == 0 {
+		return "satisfied", covered, nil
+	}
+	return "missing", covered, missing
+}
+
+func roomMilestoneFirstAcceptedStoryMissingLane(milestone map[string]any, lane, actorID, coordinatorID string) map[string]any {
+	lane = strings.TrimSpace(lane)
+	if lane == "" {
+		return nil
+	}
+	actorID = strings.TrimSpace(actorID)
+	coordinatorID = strings.TrimSpace(coordinatorID)
+	for _, story := range mapSlice(milestone["stories"]) {
+		if stringField(story, "status") != "accepted" {
+			continue
+		}
+		if boolField(anyMap(mapField(story, "evidence_lanes")[lane]), "covered") {
+			continue
+		}
+		if actorID != "" && actorID != coordinatorID {
+			owner := stringField(anyMap(story["meta"]), "owner")
+			if owner != "" && !sameRoomParticipant(owner, actorID) {
+				continue
+			}
+		}
+		return story
+	}
+	return nil
+}
+
+func roomMilestoneRequiredLaneIssueHint(roomID string, milestone, story map[string]any, lane string) string {
+	if story != nil {
+		return fmt.Sprintf(`agentctl room story validate %s %s %s pass "<summary>"`, roomID, stringField(story, "id"), lane)
+	}
+	return fmt.Sprintf(`agentctl room milestone show %s %s`, roomID, stringField(milestone, "id"))
 }
 
 func countRoomStaleMilestoneSummaries(milestones []map[string]any) int {
@@ -6763,6 +6912,7 @@ func buildRoomEpicNextItems(room agent.RoomSummary, messages []agent.BoardMessag
 		}
 	} else {
 		milestoneID := stringField(currentMilestone, "id")
+		policyCoveredStoryIDs := make(map[string]struct{})
 		if intField(currentMilestone, "criteria_count") == 0 {
 			items = append(items, map[string]any{
 				"type":         "add_milestone_criteria",
@@ -6773,9 +6923,37 @@ func buildRoomEpicNextItems(room agent.RoomSummary, messages []agent.BoardMessag
 				"command_hint": fmt.Sprintf(`agentctl room milestone criteria %s %s "<criterion>"`, roomID, milestoneID),
 			})
 		}
+		requiredLaneStatus, _, requiredLaneMissing := roomMilestoneRequiredLaneStatus(currentMilestone)
+		if requiredLaneStatus == "missing" {
+			coordinator := roomCoordinatorActorID(room.Members)
+			for _, lane := range requiredLaneMissing {
+				storyHint := roomMilestoneFirstAcceptedStoryMissingLane(currentMilestone, lane, actorID, coordinator)
+				targetID := milestoneID
+				title := fmt.Sprintf("Cover required evidence lane %s", lane)
+				reason := fmt.Sprintf("Current milestone requires lane %q, but no accepted story covers it yet.", lane)
+				commandHint := roomMilestoneRequiredLaneIssueHint(roomID, currentMilestone, storyHint, lane)
+				if storyHint != nil {
+					targetID = stringField(storyHint, "id")
+					policyCoveredStoryIDs[targetID] = struct{}{}
+					title = firstNonEmpty(stringField(storyHint, "title"), title)
+					reason = fmt.Sprintf("Story needs evidence in required lane %q for the current milestone.", lane)
+				}
+				items = append(items, map[string]any{
+					"type":         "cover_required_lane",
+					"priority":     3,
+					"target_id":    targetID,
+					"title":        title,
+					"reason":       reason,
+					"command_hint": commandHint,
+				})
+			}
+		}
 
 		for _, story := range mapSlice(currentMilestone["stories"]) {
 			if stringField(story, "status") != "accepted" || boolField(story, "covered") {
+				continue
+			}
+			if _, ok := policyCoveredStoryIDs[stringField(story, "id")]; ok {
 				continue
 			}
 			owner := stringField(anyMap(story["meta"]), "owner")
@@ -7031,6 +7209,10 @@ func buildRoomMilestoneViews(messages []agent.BoardMessage) []map[string]any {
 			sort.Strings(ids)
 			laneBlockers[key] = ids
 		}
+		requiredLaneStatus, requiredLaneCovered, requiredLaneMissing := roomMilestoneRequiredLaneStatus(map[string]any{
+			"meta":          meta,
+			"lane_coverage": laneCoverage,
+		})
 		milestoneMessageIDs := uniqueStrings(append(
 			append(
 				append([]string{msg.ID}, collectRoomBoardIDs(criteriaByMilestone[msg.ID])...),
@@ -7077,6 +7259,8 @@ func buildRoomMilestoneViews(messages []agent.BoardMessage) []map[string]any {
 			"risk_count":                len(meta.Risks),
 			"dependency_count":          len(meta.Dependencies),
 			"validator_count":           len(meta.ValidatorsExpected),
+			"required_evidence_lane_count": len(meta.RequiredEvidenceLanes),
+			"optional_evidence_lane_count": len(meta.OptionalEvidenceLanes),
 			"exit_criteria_count":       len(meta.ExitCriteria),
 			"passed_criteria_count":     len(latestSummaryMeta.PassedCriteria),
 			"failed_criteria_count":     len(latestSummaryMeta.FailedCriteria),
@@ -7091,6 +7275,11 @@ func buildRoomMilestoneViews(messages []agent.BoardMessage) []map[string]any {
 			"lane_coverage":             laneCoverage,
 			"lane_blockers":             laneBlockers,
 			"lane_waivers":              laneWaivers,
+			"required_evidence_lanes":   meta.RequiredEvidenceLanes,
+			"optional_evidence_lanes":   meta.OptionalEvidenceLanes,
+			"required_lane_status":      requiredLaneStatus,
+			"required_lane_covered":     requiredLaneCovered,
+			"required_lane_missing":     requiredLaneMissing,
 			"coverage": map[string]any{
 				"validated": validatedStories,
 				"accepted":  acceptedStories,
@@ -8028,7 +8217,15 @@ func renderRoomMilestoneMarkdown(milestone map[string]any) string {
 		appendMarkdownList(&b, "Exclusions", stringSliceField(meta, "exclusions"))
 		appendMarkdownList(&b, "Dependencies", stringSliceField(meta, "dependencies"))
 		appendMarkdownList(&b, "Validators Expected", stringSliceField(meta, "validators_expected"))
+		appendMarkdownList(&b, "Required Evidence Lanes", stringSliceField(meta, "required_evidence_lanes"))
+		appendMarkdownList(&b, "Optional Evidence Lanes", stringSliceField(meta, "optional_evidence_lanes"))
 		appendMarkdownList(&b, "Exit Criteria", stringSliceField(meta, "exit_criteria"))
+	}
+	if status := stringField(milestone, "required_lane_status"); status != "" && status != "not_configured" {
+		fmt.Fprintf(&b, "\n## Required Lane Status\n")
+		fmt.Fprintf(&b, "- Status: `%s`\n", status)
+		appendMarkdownList(&b, "Covered Required Lanes", stringSliceValue(milestone["required_lane_covered"]))
+		appendMarkdownList(&b, "Missing Required Lanes", stringSliceValue(milestone["required_lane_missing"]))
 	}
 	return b.String()
 }
@@ -8057,6 +8254,11 @@ func renderRoomMilestoneSummaryMarkdown(milestone map[string]any) string {
 	fmt.Fprintf(&b, "- Failed story count: `%d`\n", intField(milestone, "failed_story_count"))
 	fmt.Fprintf(&b, "- Blocked story count: `%d`\n", intField(milestone, "blocked_story_count"))
 	fmt.Fprintf(&b, "- Waived story count: `%d`\n", intField(milestone, "waived_story_count"))
+	if status := stringField(milestone, "required_lane_status"); status != "" && status != "not_configured" {
+		fmt.Fprintf(&b, "- Required lane status: `%s`\n", status)
+		appendMarkdownList(&b, "Covered Required Lanes", stringSliceValue(milestone["required_lane_covered"]))
+		appendMarkdownList(&b, "Missing Required Lanes", stringSliceValue(milestone["required_lane_missing"]))
+	}
 	if summaryMeta := anyMap(milestone["summary_meta"]); summaryMeta != nil {
 		if summary := stringField(summaryMeta, "summary"); summary != "" {
 			fmt.Fprintf(&b, "\n## Summary\n\n%s\n", summary)

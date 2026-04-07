@@ -137,6 +137,9 @@ agentctl room milestone start <room-id> <epic-id> --proposal <proposal-id> \
   --dependency "epic finalized" \
   --validator review \
   --validator test \
+  --required-lane review \
+  --required-lane integration \
+  --optional-lane user_test \
   --exit "accepted stories are validated"
 ```
 
@@ -148,6 +151,8 @@ agentctl room milestone contract <room-id> <milestone-id> \
   --risk "..." \
   --dependency "..." \
   --validator review \
+  --required-lane integration \
+  --optional-lane user_test \
   --exit "..."
 ```
 
@@ -156,7 +161,16 @@ Behavior:
 - `--objective` replaces the objective narrative when provided
 - repeated list flags on `milestone contract` are cumulative for the fields you pass
 - cumulative list fields are unioned, deduped, and stable-sorted
+- `required-lane` and `optional-lane` use the same lane keys as evidence lanes (`review`, `test`, `integration`, `user_test`, `manual_check`, `audit`)
+- optional lanes stay disjoint from required lanes after merge
 - omitted fields remain unchanged
+
+Milestone evidence policy is guidance-only in v1:
+
+- `milestone show` exposes `required_lane_status`, `required_lane_missing`, and `required_lane_covered`
+- `epic next` may emit `cover_required_lane`
+- `epic health` may warn with `milestone_missing_required_lane`
+- milestone review writes are not auto-rejected on policy gaps in this slice
 
 Then add explicit acceptance criteria:
 
