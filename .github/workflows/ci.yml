@@ -99,6 +99,12 @@ jobs:
           GOTOOLCHAIN: go1.25.0
         run: make lint
 
+      - name: Check large files
+        run: make check-large-files
+
+      - name: Check tech debt (TODO/FIXME count)
+        run: make check-tech-debt
+
   unit-tests:
     runs-on: arc-runner-agentctl
     container:
@@ -118,7 +124,14 @@ jobs:
           restore-keys: go-${{ runner.os }}-go1.25-
 
       - name: Unit tests
-        run: CGO_ENABLED=0 go test -short ./...
+        run: |
+          echo "::group::Unit test results"
+          CGO_ENABLED=0 go test -short -v -count=1 ./... 2>&1 | tee /tmp/test-output.txt
+          echo "::endgroup::"
+          echo "## Test timing summary" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          grep -E '(^--- |ok\s+|FAIL\s+|panic)' /tmp/test-output.txt | head -100 >> $GITHUB_STEP_SUMMARY || true
+          echo '```' >> $GITHUB_STEP_SUMMARY
 
   race-tests:
     runs-on: arc-runner-agentctl

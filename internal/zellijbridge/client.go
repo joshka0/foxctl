@@ -46,10 +46,28 @@ type CreatePaneResult struct {
 	ParticipantID string `json:"participant_id"`
 }
 
-// SubmitResult describes an Escape+Enter submit action for the focused pane in a session.
+// Submit modes for mux submit (see [Client.Submit]).
+const (
+	SubmitModeEscapeEnter = "escape_enter"
+	SubmitModeEnterOnly   = "enter_only"
+)
+
+// SubmitOptions configures [Client.Submit].
+type SubmitOptions struct {
+	// Mode defaults to [SubmitModeEscapeEnter]. Use [SubmitModeEnterOnly] when only
+	// Enter should be sent to the terminal (Escape can clear TUIs).
+	Mode string
+	// PaneID optionally targets a pane (e.g. terminal_2 or 2). Requires a zellij
+	// build where `zellij action write` accepts --pane-id; when empty, writes go
+	// to the focused pane for the session.
+	PaneID string
+}
+
+// SubmitResult describes a submit action for a zellij session/pane.
 type SubmitResult struct {
 	Session string `json:"session"`
 	Mode    string `json:"mode"`
+	PaneID  string `json:"pane_id,omitempty"`
 }
 
 // Client exposes minimal zellij pane creation for agent tenancy.
@@ -110,25 +128,52 @@ func (c *Client) CreatePane(ctx context.Context, opts CreatePaneOptions) (Create
 	}, nil
 }
 
-// Submit injects an Escape+Enter sequence into the currently focused pane for a session.
-func (c *Client) Submit(ctx context.Context, session string) (SubmitResult, error) {
+// Submit injects a submit sequence for a session. By default it sends Escape (27)
+// then Enter (13); use [SubmitOptions] with [SubmitModeEnterOnly] for Enter-only.
+func (c *Client) Submit(ctx context.Context, session string, opts SubmitOptions) (SubmitResult, error) {
 	session = strings.TrimSpace(session)
 	if session == "" {
 		return SubmitResult{}, fmt.Errorf("session is required")
 	}
-	if _, stderr, err := c.runner.Run(ctx, "zellij", "--session", session, "action", "write", "27"); err != nil {
-		if strings.TrimSpace(stderr) == "" {
+	mode := strings.TrimSpace(opts.Mode)
+	if mode == "" {
+		mode = SubmitModeEscapeEnter
+	}
+	switch mode {
+	case SubmitModeEscapeEnter, SubmitModeEnterOnly:
+	default:
+		return SubmitResult{}, fmt.Errorf("unsupported submit mode %q", mode)
+	}
+	paneID := strings.TrimSpace(opts.PaneID)
+	if mode != SubmitModeEnterOnly {
+		if err := c.sessionWriteByte(ctx, session, paneID, "27"); err != nil {
 			return SubmitResult{}, err
 		}
-		return SubmitResult{}, fmt.Errorf("zellij submit escape: %s", strings.TrimSpace(stderr))
 	}
-	if _, stderr, err := c.runner.Run(ctx, "zellij", "--session", session, "action", "write", "13"); err != nil {
-		if strings.TrimSpace(stderr) == "" {
-			return SubmitResult{}, err
+	if err := c.sessionWriteByte(ctx, session, paneID, "13"); err != nil {
+		return SubmitResult{}, err
+	}
+	return SubmitResult{Session: session, Mode: mode, PaneID: paneID}, nil
+}
+
+func (c *Client) sessionWriteByte(ctx context.Context, session, paneID, byteToken string) error {
+	args := []string{"--session", session, "action", "write"}
+	if pid := strings.TrimSpace(paneID); pid != "" {
+		args = append(args, "--pane-id", pid)
+	}
+	args = append(args, byteToken)
+	_, stderr, err := c.runner.Run(ctx, "zellij", args...)
+	if err != nil {
+		msg := strings.TrimSpace(stderr)
+		if msg == "" {
+			return err
 		}
-		return SubmitResult{}, fmt.Errorf("zellij submit enter: %s", strings.TrimSpace(stderr))
+		if strings.Contains(msg, "pane-id") && strings.Contains(msg, "wasn't expected") {
+			return fmt.Errorf("%s (this zellij build may not support --pane-id on action write; upgrade zellij or omit --pane-id)", msg)
+		}
+		return fmt.Errorf("zellij action write: %s", msg)
 	}
-	return SubmitResult{Session: session, Mode: "escape_enter"}, nil
+	return nil
 }
 
 func (c *Client) ensureSession(ctx context.Context, session string) error {

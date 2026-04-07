@@ -16,6 +16,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/storage/coordination"
 	taskstore "github.com/jkatigb/agentctl/internal/storage/tasks"
 	"github.com/jkatigb/agentctl/internal/tmuxbridge"
+	"github.com/jkatigb/agentctl/internal/zellijbridge"
 	"github.com/spf13/cobra"
 )
 
@@ -32,6 +33,8 @@ func newRoomTaskCommand() *cobra.Command {
 		Use:   "task",
 		Short: "Manage room-scoped tasks backed by the task store",
 	}
+	cmd.PersistentFlags().Bool("no-live-relay", false,
+		"Skip fan-out to tmux/zellij panes after persisting messages (use when room loop or room relay already delivers)")
 	cmd.AddCommand(
 		newRoomTaskAddCommand(),
 		newRoomTaskListCommand(),
@@ -50,18 +53,25 @@ func newRoomTaskCommand() *cobra.Command {
 
 func newRoomTaskAssignCommand() *cobra.Command {
 	var (
-		workspace string
-		sender    string
-		taskID    string
-		recipient string
-		notes     string
+		workspace      string
+		sender         string
+		taskID         string
+		recipient      string
+		notes          string
+		provisionPane  bool
+		paneAgent      string
+		paneAgentMode  string
 	)
 	cmd := &cobra.Command{
 		Use:   "assign <room-id>",
-		Short: "Assign a room task to a participant without claiming it on their behalf",
+		Short: "Assign a room task to a participant (coordinator, room admin, or system admin only)",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runRoomTaskAssign(cmd, workspace, args[0], sender, taskID, recipient, notes)
+			return runRoomTaskAssign(cmd, workspace, args[0], sender, taskID, recipient, notes, roomTaskAssignOptions{
+				ProvisionPane: provisionPane,
+				PaneAgent:     paneAgent,
+				PaneAgentMode: paneAgentMode,
+			})
 		},
 	}
 	cmd.Flags().StringVar(&workspace, "workspace", ".", "Workspace root override")
@@ -69,6 +79,9 @@ func newRoomTaskAssignCommand() *cobra.Command {
 	cmd.Flags().StringVar(&taskID, "id", "", "Task id to assign")
 	cmd.Flags().StringVar(&recipient, "to", "", "Assigned participant id")
 	cmd.Flags().StringVar(&notes, "notes", "", "Optional assignment note")
+	cmd.Flags().BoolVar(&provisionPane, "provision-pane", false, "Auto-create a mux pane for the assignee when they lack pane bindings")
+	cmd.Flags().StringVar(&paneAgent, "pane-agent", "", "Agent CLI to launch in the provisioned pane (e.g. codex, claude)")
+	cmd.Flags().StringVar(&paneAgentMode, "pane-agent-mode", "auto", "Agent launch mode for the provisioned pane (interactive|auto)")
 	_ = cmd.MarkFlagRequired("id")
 	_ = cmd.MarkFlagRequired("to")
 	return cmd
@@ -84,7 +97,7 @@ func newRoomTaskReassignCommand() *cobra.Command {
 	)
 	cmd := &cobra.Command{
 		Use:   "reassign <room-id>",
-		Short: "Coordinator-only reassignment that moves a task back to pending for a new assignee",
+		Short: "Reassign a task to a new participant (coordinator, room admin, or system admin only)",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runRoomTaskReassign(cmd, workspace, args[0], sender, taskID, recipient, reason)
@@ -133,19 +146,39 @@ func newRoomTaskAddCommand() *cobra.Command {
 
 func newRoomTaskListCommand() *cobra.Command {
 	var (
-		workspace string
-		status    string
+		workspace     string
+		status        string
+		taskFilter    string
+		showCompleted bool
+		includeAll    bool
 	)
 	cmd := &cobra.Command{
 		Use:   "list <room-id>",
 		Short: "List tasks associated with a room",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runRoomTaskList(cmd, workspace, args[0], status)
+			effFilter := strings.ToLower(strings.TrimSpace(taskFilter))
+			if showCompleted || includeAll {
+				effFilter = "all"
+			}
+			statusEff, omitComp, omitCan, err := parseRoomTaskListSelection(status, effFilter)
+			if err != nil {
+				absWs, wsErr := resolveRoomWorkspace(workspace)
+				if wsErr != nil {
+					return wsErr
+				}
+				return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.task.list", protocol.ErrorCodeEARG, err.Error(), map[string]any{
+					"hint": "Use --filter open (default, excludes completed and canceled when not using --status), all, or completed; --show-completed and --all are aliases for --filter all.",
+				}, protocol.WithSource("cli"), protocol.WithWorkspace(absWs))
+			}
+			return runRoomTaskList(cmd, workspace, args[0], statusEff, omitComp, omitCan)
 		},
 	}
 	cmd.Flags().StringVar(&workspace, "workspace", ".", "Workspace root override")
 	cmd.Flags().StringVar(&status, "status", "", "Filter by task status")
+	cmd.Flags().StringVar(&taskFilter, "filter", "open", "Task set when not using --status: open (excludes completed and canceled), all, or completed")
+	cmd.Flags().BoolVar(&showCompleted, "show-completed", false, "Include completed tasks when not using --status (same as --filter all)")
+	cmd.Flags().BoolVar(&includeAll, "all", false, "Include completed tasks when not using --status (same as --filter all)")
 	return cmd
 }
 
@@ -270,7 +303,7 @@ func newRoomTaskReclaimCommand() *cobra.Command {
 	)
 	cmd := &cobra.Command{
 		Use:   "reclaim <room-id>",
-		Short: "Coordinator-only force reclaim that returns a task to pending",
+		Short: "Force-reclaim a task to pending (coordinator, room admin, or system admin only)",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runRoomTaskReclaim(cmd, workspace, args[0], sender, taskID, reason)
@@ -418,7 +451,7 @@ func runRoomTaskAdd(cmd *cobra.Command, workspace, roomID, sender, title, desc, 
 	}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
 }
 
-func runRoomTaskList(cmd *cobra.Command, workspace, roomID, status string) error {
+func runRoomTaskList(cmd *cobra.Command, workspace, roomID, status string, omitCompleted, omitCanceled bool) error {
 	absWorkspace, err := resolveRoomWorkspace(workspace)
 	if err != nil {
 		return err
@@ -445,7 +478,7 @@ func runRoomTaskList(cmd *cobra.Command, workspace, roomID, status string) error
 	}
 	defer taskStore.Close()
 
-	roomTasks, err := listRoomTasks(cmd.Context(), taskStore, taskWorkspaceID, messages, strings.TrimSpace(status))
+	roomTasks, err := listRoomTasks(cmd.Context(), taskStore, taskWorkspaceID, messages, strings.TrimSpace(status), omitCompleted, omitCanceled)
 	if err != nil {
 		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.task.list", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
 	}
@@ -517,12 +550,24 @@ func runRoomTaskComplete(cmd *cobra.Command, workspace, roomID, sender, taskID, 
 	}
 	defer boardStore.Close()
 
+	roomID = strings.TrimSpace(roomID)
+	summary, err := boardStore.GetRoom(cmd.Context(), absWorkspace, roomID, "")
+	if err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.task.complete", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	completeRecipient, rerr := roomTaskEventRecipient(summary.Members)
+	if rerr != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.task.complete", protocol.ErrorCodeEARG, rerr.Error(), map[string]any{
+			"hint": "Task completion notifications are sent only to the coordinator (or lead); configure the room membership first.",
+		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+
 	msg := &agent.BoardMessage{
 		WorkspaceID: absWorkspace,
 		TaskID:      task.ID,
-		Stream:      agent.RoomStreamName(strings.TrimSpace(roomID)),
+		Stream:      agent.RoomStreamName(roomID),
 		Sender:      identity.Sender,
-		Recipient:   agent.BroadcastRecipient,
+		Recipient:   completeRecipient,
 		Kind:        agent.BoardMessageKindTaskUpdate,
 		Priority:    agent.DefaultPriority,
 		Subject:     fmt.Sprintf("Task completed: %s", task.Title),
@@ -531,15 +576,21 @@ func runRoomTaskComplete(cmd *cobra.Command, workspace, roomID, sender, taskID, 
 	if err := boardStore.SendMessage(cmd.Context(), msg); err != nil {
 		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.task.complete", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
 	}
-	return protocol.WriteOK(cmd.OutOrStdout(), "agentctl.room.task.complete", map[string]any{
+	data := map[string]any{
 		"room_id":         strings.TrimSpace(roomID),
 		"task":            task,
 		"message_id":      msg.ID,
 		"sender_identity": identity,
-	}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	if roomTaskNoLiveRelay(cmd) {
+		data["live_relay_skipped"] = true
+	} else {
+		data["live_relay"] = relayPersistedRoomMessages(cmd.Context(), boardStore, absWorkspace, roomID, []*agent.BoardMessage{msg})
+	}
+	return protocol.WriteOK(cmd.OutOrStdout(), "agentctl.room.task.complete", data, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
 }
 
-func runRoomTaskAssign(cmd *cobra.Command, workspace, roomID, sender, taskID, recipient, notes string) error {
+func runRoomTaskAssign(cmd *cobra.Command, workspace, roomID, sender, taskID, recipient, notes string, opts roomTaskAssignOptions) error {
 	absWorkspace, err := resolveRoomWorkspace(workspace)
 	if err != nil {
 		return err
@@ -568,9 +619,10 @@ func runRoomTaskAssign(cmd *cobra.Command, workspace, roomID, sender, taskID, re
 		}
 		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.task.assign", code, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
 	}
-	if !roomMemberHasRole(summary.Members, identity.Sender, "coordinator") {
-		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.task.assign", protocol.ErrorCodeEARG, "only room coordinators can assign tasks", map[string]any{
+	if !roomMemberCanManageRoomTasks(summary.Members, identity.Sender) {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.task.assign", protocol.ErrorCodeEARG, "only room coordinators, room admins, or system admins may assign tasks to other participants", map[string]any{
 			"sender": identity.Sender,
+			"hint":   "Grant role=admin on room join for parent agents that should delegate assignments without being the coordinator.",
 		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
 	}
 	if !roomHasParticipant(summary, recipient) {
@@ -649,13 +701,27 @@ func runRoomTaskAssign(cmd *cobra.Command, workspace, roomID, sender, taskID, re
 	if err := boardStore.SendMessage(cmd.Context(), direct); err != nil {
 		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.task.assign", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
 	}
-	return protocol.WriteOK(cmd.OutOrStdout(), "agentctl.room.task.assign", map[string]any{
+	out := map[string]any{
 		"room_id":         strings.TrimSpace(roomID),
 		"task":            task,
 		"assignee":        recipient,
 		"message_id":      direct.ID,
 		"sender_identity": identity,
-	}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	if roomTaskNoLiveRelay(cmd) {
+		out["live_relay_skipped"] = true
+	} else {
+		out["live_relay"] = relayPersistedRoomMessages(cmd.Context(), boardStore, absWorkspace, roomID, []*agent.BoardMessage{broadcast, direct})
+	}
+	if opts.ProvisionPane {
+		provisioned, provisionErr := provisionAssigneePane(cmd.Context(), absWorkspace, strings.TrimSpace(roomID), summary, recipient, opts)
+		if provisionErr != nil {
+			out["provision_error"] = provisionErr.Error()
+		} else if provisioned != nil {
+			out["provisioned_pane"] = provisioned
+		}
+	}
+	return protocol.WriteOK(cmd.OutOrStdout(), "agentctl.room.task.assign", out, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
 }
 
 func runRoomTaskReassign(cmd *cobra.Command, workspace, roomID, sender, taskID, recipient, reason string) error {
@@ -922,13 +988,29 @@ func runRoomTaskTransition(cmd *cobra.Command, workspace, roomID, sender, taskID
 	}
 	defer boardStore.Close()
 
+	roomID = strings.TrimSpace(roomID)
+	summary, err := boardStore.GetRoom(cmd.Context(), absWorkspace, roomID, "")
+	if err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.task."+action, protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+
 	subject, body := formatRoomTaskTransitionMessage(action, task)
+	recipient := agent.BroadcastRecipient
+	if action == "claim" {
+		coordOrLead, rerr := roomTaskEventRecipient(summary.Members)
+		if rerr != nil {
+			return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.task.claim", protocol.ErrorCodeEARG, rerr.Error(), map[string]any{
+				"hint": "Task claim notifications are sent only to the coordinator (or lead); configure the room membership first.",
+			}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+		}
+		recipient = coordOrLead
+	}
 	msg := &agent.BoardMessage{
 		WorkspaceID: absWorkspace,
 		TaskID:      task.ID,
-		Stream:      agent.RoomStreamName(strings.TrimSpace(roomID)),
+		Stream:      agent.RoomStreamName(roomID),
 		Sender:      identity.Sender,
-		Recipient:   agent.BroadcastRecipient,
+		Recipient:   recipient,
 		Kind:        agent.BoardMessageKindTaskUpdate,
 		Priority:    agent.DefaultPriority,
 		Subject:     subject,
@@ -937,12 +1019,18 @@ func runRoomTaskTransition(cmd *cobra.Command, workspace, roomID, sender, taskID
 	if err := boardStore.SendMessage(cmd.Context(), msg); err != nil {
 		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.task."+action, protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
 	}
-	return protocol.WriteOK(cmd.OutOrStdout(), "agentctl.room.task."+action, map[string]any{
+	out := map[string]any{
 		"room_id":         strings.TrimSpace(roomID),
 		"task":            task,
 		"message_id":      msg.ID,
 		"sender_identity": identity,
-	}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	if roomTaskNoLiveRelay(cmd) {
+		out["live_relay_skipped"] = true
+	} else {
+		out["live_relay"] = relayPersistedRoomMessages(cmd.Context(), boardStore, absWorkspace, roomID, []*agent.BoardMessage{msg})
+	}
+	return protocol.WriteOK(cmd.OutOrStdout(), "agentctl.room.task."+action, out, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
 }
 
 type roomPulseConfig struct {
@@ -1121,12 +1209,20 @@ func runRoomLoop(cmd *cobra.Command, workspace, roomID string, relay roomRelayOp
 					return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.loop", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
 				}
 				announcedStates[update.Task.ID] = update.Task.Status
+				seenMessages[msg.ID] = struct{}{}
+				summary, _, err := loadRoomState(cmd.Context(), boardStore, absWorkspace, roomID, "", roomTaskScanLimit)
+				if err != nil {
+					return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.loop", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+				}
+				relayResult := relayRoomMessage(cmd.Context(), client, summary, *msg, relay)
 				seq++
 				if err := writer.Write(roomProgressEnvelope("agentctl.room.loop", seq, false, map[string]any{
 					"event":   "task_broadcast",
 					"room_id": roomID,
 					"task":    update.Task,
 					"subject": update.Subject,
+					"message": msg,
+					"relay":   relayResult,
 				}, absWorkspace)); err != nil {
 					return fmt.Errorf("write room loop task envelope: %w", err)
 				}
@@ -1173,7 +1269,7 @@ func runRoomLoop(cmd *cobra.Command, workspace, roomID string, relay roomRelayOp
 			if err != nil {
 				return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.loop", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
 			}
-			roomTasks, err := listRoomTasks(cmd.Context(), taskStore, ws.CanonicalID(absWorkspace), current, "")
+			roomTasks, err := listRoomTasks(cmd.Context(), taskStore, ws.CanonicalID(absWorkspace), current, "", false, false)
 			if err != nil {
 				return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.loop", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
 			}
@@ -1642,7 +1738,38 @@ func openRoomTaskStore(ctx context.Context) (taskstore.Store, error) {
 	return taskstore.Open(ctx, cfg.Storage.Root)
 }
 
-func listRoomTasks(ctx context.Context, store taskstore.Store, workspaceID string, messages []agent.BoardMessage, status string) ([]taskstore.Task, error) {
+// parseRoomTaskListSelection maps CLI --filter/--status into listRoomTasks arguments.
+// When status is non-empty, omission flags are always false (status drives inclusion).
+func parseRoomTaskListSelection(status, filter string) (statusOut string, omitCompleted, omitCanceled bool, err error) {
+	statusOut = strings.TrimSpace(status)
+	filter = strings.ToLower(strings.TrimSpace(filter))
+	if filter == "" {
+		filter = "open"
+	}
+	switch filter {
+	case "open", "active":
+	case "all":
+	case "completed":
+	default:
+		return "", false, false, fmt.Errorf("unknown --filter %q, want open, all, or completed", filter)
+	}
+	if filter == "completed" {
+		if statusOut != "" && statusOut != taskstore.StatusCompleted {
+			return "", false, false, fmt.Errorf("--filter completed cannot be combined with --status %q", statusOut)
+		}
+		statusOut = taskstore.StatusCompleted
+	}
+	if statusOut != "" {
+		return statusOut, false, false, nil
+	}
+	if filter == "open" || filter == "active" {
+		return "", true, true, nil
+	}
+	// filter == "all"
+	return "", false, false, nil
+}
+
+func listRoomTasks(ctx context.Context, store taskstore.Store, workspaceID string, messages []agent.BoardMessage, status string, omitCompleted, omitCanceled bool) ([]taskstore.Task, error) {
 	taskIDs := collectRoomTaskIDs(messages)
 	if len(taskIDs) == 0 {
 		return []taskstore.Task{}, nil
@@ -1661,6 +1788,12 @@ func listRoomTasks(ctx context.Context, store taskstore.Store, workspaceID strin
 			continue
 		}
 		if status != "" && task.Status != status {
+			continue
+		}
+		if omitCompleted && status == "" && task.Status == taskstore.StatusCompleted {
+			continue
+		}
+		if omitCanceled && status == "" && task.Status == taskstore.StatusCanceled {
 			continue
 		}
 		filtered = append(filtered, task)
@@ -2082,9 +2215,10 @@ func loadCoordinatorTaskContext(cmd *cobra.Command, workspace, roomID, sender, t
 		writeErr := protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.task", code, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
 		return "", roomIdentity{}, agent.RoomSummary{}, taskstore.Task{}, boardStore, nil, writeErr
 	}
-	if !roomMemberHasRole(summary.Members, identity.Sender, "coordinator") {
-		writeErr := protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.task", protocol.ErrorCodeEARG, "only room coordinators can perform this action", map[string]any{
+	if !roomMemberCanManageRoomTasks(summary.Members, identity.Sender) {
+		writeErr := protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.task", protocol.ErrorCodeEARG, "only room coordinators, room admins, or system admins may perform this action", map[string]any{
 			"sender": identity.Sender,
+			"hint":   "Reassign/reclaim require the same privilege as assign (coordinator, room admin, or system admin).",
 		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
 		return "", roomIdentity{}, agent.RoomSummary{}, taskstore.Task{}, boardStore, nil, writeErr
 	}
@@ -2103,6 +2237,42 @@ func loadCoordinatorTaskContext(cmd *cobra.Command, workspace, roomID, sender, t
 		return "", roomIdentity{}, agent.RoomSummary{}, taskstore.Task{}, boardStore, taskStore, writeErr
 	}
 	return absWorkspace, identity, summary, task, boardStore, taskStore, nil
+}
+
+// sendRoomCoordinatorInfoNote delivers a short direct info message to the room coordinator when the
+// sender is not the coordinator. It returns (nil, nil) when there is nothing to send.
+func sendRoomCoordinatorInfoNote(ctx context.Context, cmd *cobra.Command, boardStore blackboard.BoardStore, workspace, roomID, sender, taskID, subject, body string) (*agent.BoardMessage, error) {
+	roomID = strings.TrimSpace(roomID)
+	sender = strings.TrimSpace(sender)
+	if roomID == "" || sender == "" {
+		return nil, nil
+	}
+	summary, err := boardStore.GetRoom(ctx, workspace, roomID, "")
+	if err != nil {
+		return nil, err
+	}
+	coord := strings.TrimSpace(roomCoordinatorActorID(summary.Members))
+	if coord == "" || sameRoomParticipant(coord, sender) {
+		return nil, nil
+	}
+	note := &agent.BoardMessage{
+		WorkspaceID: workspace,
+		TaskID:      strings.TrimSpace(taskID),
+		Stream:      agent.RoomStreamName(roomID),
+		Sender:      sender,
+		Recipient:   coord,
+		Kind:        agent.BoardMessageKindInfo,
+		Priority:    agent.DefaultPriority,
+		Subject:     strings.TrimSpace(subject),
+		Body:        strings.TrimSpace(body),
+	}
+	if err := boardStore.SendMessage(ctx, note); err != nil {
+		return nil, err
+	}
+	if cmd != nil && !roomTaskNoLiveRelay(cmd) {
+		_ = relayPersistedRoomMessages(ctx, boardStore, workspace, roomID, []*agent.BoardMessage{note})
+	}
+	return note, nil
 }
 
 func sendRoomTaskCoordinatorMessages(ctx context.Context, workspace, roomID string, boardStore blackboard.BoardStore, sender, recipient string, task taskstore.Task, subject, body string) error {
@@ -2225,4 +2395,81 @@ func roomTaskStatusBody(task taskstore.Task, previousStatus string) string {
 		lines = append(lines, "Notes: "+task.Notes)
 	}
 	return strings.Join(lines, "\n")
+}
+
+// roomTaskAssignOptions carries optional pane provisioning parameters for task assign.
+type roomTaskAssignOptions struct {
+	ProvisionPane bool
+	PaneAgent     string
+	PaneAgentMode string
+}
+
+// provisionAssigneePane checks whether the assignee already has mux pane bindings
+// in the room membership and, if not, creates a source pane for them in the room session.
+func provisionAssigneePane(ctx context.Context, absWorkspace, roomID string, summary agent.RoomSummary, recipient string, opts roomTaskAssignOptions) (map[string]any, error) {
+	for _, member := range summary.Members {
+		if !sameRoomParticipant(member.ActorID, recipient) {
+			continue
+		}
+		if strings.TrimSpace(member.PaneID) != "" || strings.TrimSpace(member.Session) != "" {
+			return nil, nil
+		}
+	}
+	backend := resolveMuxCreateBackend("")
+	if backend == "" {
+		backend = "tmux"
+	}
+	session := roomSourceSessionName(roomID, backend)
+	agentCLI := strings.TrimSpace(opts.PaneAgent)
+	agentMode := strings.TrimSpace(opts.PaneAgentMode)
+	command, err := resolveMuxCreateCommand("", agentCLI, agentMode, nil, "")
+	if err != nil {
+		return nil, fmt.Errorf("resolve pane command for assignee %s: %w", recipient, err)
+	}
+	switch backend {
+	case "tmux":
+		client := tmuxbridge.New()
+		result, createErr := client.CreatePane(ctx, tmuxbridge.CreatePaneOptions{
+			Session:       session,
+			CWD:           absWorkspace,
+			Label:         recipient,
+			Command:       command,
+			ParticipantID: recipient,
+			RoomID:        roomID,
+			RoomAccess:    "direct",
+		})
+		if createErr != nil {
+			return nil, createErr
+		}
+		return map[string]any{
+			"backend":        "tmux",
+			"session":        result.Session,
+			"pane_id":        result.Pane.ID,
+			"agent":          agentCLI,
+			"attach_command": result.AttachCommand,
+		}, nil
+	case "zellij":
+		client := zellijbridge.New()
+		result, createErr := client.CreatePane(ctx, zellijbridge.CreatePaneOptions{
+			Session:       session,
+			CWD:           absWorkspace,
+			Name:          recipient,
+			Command:       command,
+			ParticipantID: recipient,
+			RoomID:        roomID,
+			RoomAccess:    "direct",
+		})
+		if createErr != nil {
+			return nil, createErr
+		}
+		return map[string]any{
+			"backend":        "zellij",
+			"session":        result.Session,
+			"pane_id":        result.PaneName,
+			"agent":          agentCLI,
+			"attach_command": "zellij attach " + shellQuoteZshSafe(result.Session),
+		}, nil
+	default:
+		return nil, fmt.Errorf("unsupported mux backend %q for pane provisioning", backend)
+	}
 }

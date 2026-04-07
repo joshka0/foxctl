@@ -135,15 +135,15 @@ func TestSubmitUsesEscapeThenEnter(t *testing.T) {
 	runner := &fakeRunner{}
 	client := NewWithRunner(runner)
 
-	got, err := client.Submit(context.Background(), "collab")
+	got, err := client.Submit(context.Background(), "collab", SubmitOptions{})
 	if err != nil {
 		t.Fatalf("Submit() error = %v", err)
 	}
 	if got.Session != "collab" {
 		t.Fatalf("Session = %q, want collab", got.Session)
 	}
-	if got.Mode != "escape_enter" {
-		t.Fatalf("Mode = %q, want escape_enter", got.Mode)
+	if got.Mode != SubmitModeEscapeEnter {
+		t.Fatalf("Mode = %q, want %s", got.Mode, SubmitModeEscapeEnter)
 	}
 	if len(runner.calls) != 2 {
 		t.Fatalf("calls=%v want 2 invocations", runner.calls)
@@ -153,5 +153,48 @@ func TestSubmitUsesEscapeThenEnter(t *testing.T) {
 	}
 	if runner.calls[1] != "zellij --session collab action write 13" {
 		t.Fatalf("second call=%q want enter write", runner.calls[1])
+	}
+}
+
+func TestSubmitEnterOnly(t *testing.T) {
+	runner := &fakeRunner{}
+	client := NewWithRunner(runner)
+
+	got, err := client.Submit(context.Background(), "collab", SubmitOptions{Mode: SubmitModeEnterOnly})
+	if err != nil {
+		t.Fatalf("Submit() error = %v", err)
+	}
+	if got.Mode != SubmitModeEnterOnly {
+		t.Fatalf("Mode = %q, want %s", got.Mode, SubmitModeEnterOnly)
+	}
+	if len(runner.calls) != 1 {
+		t.Fatalf("calls=%v want 1 invocation", runner.calls)
+	}
+	if runner.calls[0] != "zellij --session collab action write 13" {
+		t.Fatalf("call=%q want enter write only", runner.calls[0])
+	}
+}
+
+func TestSubmitWithPaneID(t *testing.T) {
+	runner := &fakeRunner{}
+	client := NewWithRunner(runner)
+
+	got, err := client.Submit(context.Background(), "collab", SubmitOptions{PaneID: "terminal_2"})
+	if err != nil {
+		t.Fatalf("Submit() error = %v", err)
+	}
+	if got.PaneID != "terminal_2" {
+		t.Fatalf("PaneID = %q, want terminal_2", got.PaneID)
+	}
+	if len(runner.calls) != 2 {
+		t.Fatalf("calls=%v want 2 invocations", runner.calls)
+	}
+	want0 := "zellij --session collab action write --pane-id terminal_2 27"
+	want1 := "zellij --session collab action write --pane-id terminal_2 13"
+	if runner.calls[0] != want0 {
+		t.Fatalf("first call=%q want %q", runner.calls[0], want0)
+	}
+	if runner.calls[1] != want1 {
+		t.Fatalf("second call=%q want %q", runner.calls[1], want1)
 	}
 }

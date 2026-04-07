@@ -150,6 +150,19 @@ impl State {
     }
 }
 
+/// When true, send a leading Escape before paste for `interrupt` deliveries (tmux parity).
+/// Skip for Droid/Codex/Cursor titles — Escape often clears the composer there.
+fn interrupt_escape_before_paste(target: &str) -> bool {
+    let t = target.trim().to_lowercase();
+    if t.starts_with("gemini") {
+        return true;
+    }
+    if t.starts_with("droid") || t.starts_with("codex") || t.starts_with("cursor") {
+        return false;
+    }
+    true
+}
+
 fn deliver_to_panes(pane_manifest: &PaneManifest, request: RelayRequest) -> RelayResponse {
     let mut response = RelayResponse {
         backend: "zellij",
@@ -168,14 +181,22 @@ fn deliver_to_panes(pane_manifest: &PaneManifest, request: RelayRequest) -> Rela
         }
         match find_terminal_pane_by_title(pane_manifest, &target) {
             Some(pane_id) => {
-                if request.interrupt {
+                if request.interrupt && interrupt_escape_before_paste(&target) {
                     write_chars_to_pane_id("\u{1b}", pane_id);
                 }
                 write_chars_to_pane_id(&request.content, pane_id);
-                if pane_requires_escape_submit(&target) {
+                // Match tmuxbridge relay: Gemini uses Escape+newline; composer TUIs (Droid/Codex/Cursor)
+                // need Ctrl+Enter. Kitty keyboard CSI works when the outer terminal/session supports it
+                // (Zellij enables this by default for capable terminals).
+                let t = target.trim().to_lowercase();
+                if t.starts_with("gemini") {
                     write_chars_to_pane_id("\u{1b}", pane_id);
+                    write_chars_to_pane_id("\n", pane_id);
+                } else if t.starts_with("droid") || t.starts_with("codex") || t.starts_with("cursor") {
+                    write_chars_to_pane_id("\x1b[13;5u", pane_id);
+                } else {
+                    write_chars_to_pane_id("\n", pane_id);
                 }
-                write_chars_to_pane_id("\n", pane_id);
                 response.delivered_count += 1;
                 response.delivered_to.push(target);
             }
@@ -194,10 +215,6 @@ fn deliver_to_panes(pane_manifest: &PaneManifest, request: RelayRequest) -> Rela
     }
 
     response
-}
-
-fn pane_requires_escape_submit(title: &str) -> bool {
-    title.trim().to_lowercase().starts_with("gemini")
 }
 
 fn find_terminal_pane_by_title(pane_manifest: &PaneManifest, title: &str) -> Option<PaneId> {

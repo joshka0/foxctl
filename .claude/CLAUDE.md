@@ -374,6 +374,33 @@ make env-watch-stop  # Stop the watcher
 
 ---
 
+## Local CI (agent-ci)
+
+Run GitHub Actions CI locally against your working tree — no commit or push needed.
+
+```bash
+# Run the CI workflow locally
+npx agent-ci run --quiet --workflow .github/workflows/ci.yml
+
+# If a step fails, fix it then retry just the failed step
+npx agent-ci retry --name <runner-name>
+
+# Abort a paused runner
+npx agent-ci abort --name <runner-name>
+```
+
+**Rules:**
+- Use `npx agent-ci run --quiet --workflow .github/workflows/ci.yml` to run CI locally before pushing
+- Do NOT push to trigger remote CI when agent-ci can run it locally — it's instant and free
+- CI was green before you started. Any failure is caused by your changes — do not assume pre-existing failures
+- When a step fails, the run pauses. Fix the issue and `npx agent-ci retry --name <runner>` to retry just that step
+- The `label-ai` and `release` jobs will fail locally (require GitHub API) — that's expected and non-blocking
+- `secrets.*` are not available locally. The LLM planner test already has a skip guard for missing `OPENROUTER_API_KEY`
+
+**Note:** The repo uses both GitHub Actions (`.github/workflows/ci.yml`) and GitLab CI (`.gitlab-ci.yml`). They should have parity. If you add a check to one, add it to the other.
+
+---
+
 ## Critical Gotchas
 
 ### CGO Build

@@ -192,7 +192,20 @@ type SendResult struct {
 	BridgeMessage  BridgeMessage `json:"bridge_message"`
 }
 
-// SubmitResult describes an Escape+Enter submit action for a target pane.
+// Submit modes for mux submit (see [Client.Submit]).
+const (
+	SubmitModeEscapeEnter = "escape_enter"
+	SubmitModeEnterOnly   = "enter_only"
+)
+
+// SubmitOptions configures [Client.Submit].
+type SubmitOptions struct {
+	// Mode defaults to [SubmitModeEscapeEnter]. Use [SubmitModeEnterOnly] when the
+	// draft is complete and only Enter should be sent (Escape can clear TUIs).
+	Mode string
+}
+
+// SubmitResult describes a submit action for a target pane.
 type SubmitResult struct {
 	Target         string `json:"target"`
 	ResolvedTarget string `json:"resolved_target"`
@@ -461,8 +474,10 @@ func (c *Client) Send(ctx context.Context, sender string, target string, text st
 	if _, err := c.runTmux(ctx, "send-keys", "-t", resolvedTarget, "-l", "--", raw); err != nil {
 		return SendResult{}, err
 	}
-	if _, err := c.runTmux(ctx, "send-keys", "-t", resolvedTarget, "Enter"); err != nil {
-		return SendResult{}, err
+	for _, key := range relayPostPasteKeys(targetPane) {
+		if _, err := c.runTmux(ctx, "send-keys", "-t", resolvedTarget, key); err != nil {
+			return SendResult{}, err
+		}
 	}
 
 	return SendResult{
@@ -480,8 +495,19 @@ func (c *Client) Send(ctx context.Context, sender string, target string, text st
 	}, nil
 }
 
-// Submit injects an Escape+Enter sequence into the target pane.
-func (c *Client) Submit(ctx context.Context, target string) (SubmitResult, error) {
+// Submit injects a submit sequence into the target pane. By default it sends
+// Escape then Enter for typical shells; Composer-style agent TUIs (tmux current_command node or codex)
+// use Ctrl+Enter. Use [SubmitOptions] with [SubmitModeEnterOnly] for Enter-only.
+func (c *Client) Submit(ctx context.Context, target string, opts SubmitOptions) (SubmitResult, error) {
+	mode := strings.TrimSpace(opts.Mode)
+	if mode == "" {
+		mode = SubmitModeEscapeEnter
+	}
+	switch mode {
+	case SubmitModeEscapeEnter, SubmitModeEnterOnly:
+	default:
+		return SubmitResult{}, fmt.Errorf("unsupported submit mode %q", mode)
+	}
 	resolvedTarget, err := c.ResolveTarget(ctx, target)
 	if err != nil {
 		return SubmitResult{}, err
@@ -490,17 +516,22 @@ func (c *Client) Submit(ctx context.Context, target string) (SubmitResult, error
 	if err != nil {
 		return SubmitResult{}, err
 	}
-	if _, err := c.runTmux(ctx, "send-keys", "-t", resolvedTarget, "Escape"); err != nil {
-		return SubmitResult{}, err
+	var keys []string
+	if mode == SubmitModeEnterOnly {
+		keys = []string{"Enter"}
+	} else {
+		keys = submitKeysForPane(targetPane)
 	}
-	if _, err := c.runTmux(ctx, "send-keys", "-t", resolvedTarget, "Enter"); err != nil {
-		return SubmitResult{}, err
+	for _, key := range keys {
+		if _, err := c.runTmux(ctx, "send-keys", "-t", resolvedTarget, key); err != nil {
+			return SubmitResult{}, err
+		}
 	}
 	return SubmitResult{
 		Target:         target,
 		ResolvedTarget: resolvedTarget,
 		Pane:           targetPane,
-		Mode:           "escape_enter",
+		Mode:           mode,
 	}, nil
 }
 
@@ -829,7 +860,9 @@ func formatTmuxParticipantID(session, paneID string) string {
 }
 
 func (c *Client) deliverPayload(ctx context.Context, resolvedTarget string, pane Pane, content string, interrupt bool) (string, string, error) {
-	if isShellCommand(pane.CurrentCommand) {
+	// Agent TUIs often still show pane_current_command as zsh/bash; TTY writes and shell printf go to the
+	// shell layer, not the composer. When the pane label marks a composer-style agent, force send-keys.
+	if isShellCommand(pane.CurrentCommand) && !paneUsesComposerStyleSubmit(pane) {
 		if tty, err := c.paneTTY(ctx, resolvedTarget); err == nil && strings.TrimSpace(tty) != "" {
 			if err := writePaneTTY(tty, formatTTYRelayWrite(content)); err == nil {
 				return content, "tty_write", nil
@@ -841,7 +874,7 @@ func (c *Client) deliverPayload(ctx context.Context, resolvedTarget string, pane
 }
 
 func (c *Client) deliverPreparedPayload(ctx context.Context, resolvedTarget string, pane Pane, payload, mode string, interrupt bool) (string, string, error) {
-	if interrupt {
+	if interrupt && !relaySkipsLeadingInterruptEscape(pane) {
 		if _, err := c.runTmux(ctx, "send-keys", "-t", resolvedTarget, "Escape"); err != nil {
 			return "", "", err
 		}
@@ -849,19 +882,16 @@ func (c *Client) deliverPreparedPayload(ctx context.Context, resolvedTarget stri
 	if _, err := c.runTmux(ctx, "send-keys", "-t", resolvedTarget, "-l", "--", payload); err != nil {
 		return "", "", err
 	}
-	if relayNeedsEscape(pane) {
-		if _, err := c.runTmux(ctx, "send-keys", "-t", resolvedTarget, "Escape"); err != nil {
+	for _, key := range relayPostPasteKeys(pane) {
+		if _, err := c.runTmux(ctx, "send-keys", "-t", resolvedTarget, key); err != nil {
 			return "", "", err
 		}
-	}
-	if _, err := c.runTmux(ctx, "send-keys", "-t", resolvedTarget, "Enter"); err != nil {
-		return "", "", err
 	}
 	return payload, mode, nil
 }
 
 func (c *Client) deliverPreparedPayloadWithSocket(ctx context.Context, socket, resolvedTarget string, pane Pane, payload, mode string, interrupt bool) (string, string, error) {
-	if interrupt {
+	if interrupt && !relaySkipsLeadingInterruptEscape(pane) {
 		if _, err := c.runTmuxWithSocket(ctx, socket, "send-keys", "-t", resolvedTarget, "Escape"); err != nil {
 			return "", "", err
 		}
@@ -869,13 +899,10 @@ func (c *Client) deliverPreparedPayloadWithSocket(ctx context.Context, socket, r
 	if _, err := c.runTmuxWithSocket(ctx, socket, "send-keys", "-t", resolvedTarget, "-l", "--", payload); err != nil {
 		return "", "", err
 	}
-	if relayNeedsEscape(pane) {
-		if _, err := c.runTmuxWithSocket(ctx, socket, "send-keys", "-t", resolvedTarget, "Escape"); err != nil {
+	for _, key := range relayPostPasteKeys(pane) {
+		if _, err := c.runTmuxWithSocket(ctx, socket, "send-keys", "-t", resolvedTarget, key); err != nil {
 			return "", "", err
 		}
-	}
-	if _, err := c.runTmuxWithSocket(ctx, socket, "send-keys", "-t", resolvedTarget, "Enter"); err != nil {
-		return "", "", err
 	}
 	return payload, mode, nil
 }
@@ -910,7 +937,7 @@ func buildMuxCreateRoomOnboarding(roomID, participantID string) string {
 		participantID = "<you>"
 	}
 	return fmt.Sprintf(
-		"%s Read skills agentctl-tmux and agentctl-room. Room %s. Participant %s. Start with: agentctl room status %s ; agentctl room inbox %s --actor %s ; agentctl room task list %s. Use agentctl mux submit if text is left drafted.",
+		"%s Read skills agentctl-tmux and agentctl-room. Room %s. Participant %s. Start with: agentctl room status %s ; agentctl room inbox %s --actor %s ; agentctl room task list %s. Room relay and room task commands deliver to panes with an implicit submit; after `room send`, the CLI also submits the current pane unless you pass --no-mux-submit.",
 		muxCreateRoomOnboardingHeader,
 		roomID,
 		participantID,
@@ -922,15 +949,73 @@ func buildMuxCreateRoomOnboarding(roomID, participantID string) string {
 }
 
 func relayPayloadForPane(pane Pane, content string) (string, string) {
-	if isShellCommand(pane.CurrentCommand) {
+	if isShellCommand(pane.CurrentCommand) && !paneUsesComposerStyleSubmit(pane) {
 		return shellPrintfCommand(content), "shell_printf"
 	}
 	return content, "raw"
 }
 
-func relayNeedsEscape(pane Pane) bool {
+// relayPostPasteKeys are tmux send-keys tokens sent after `send-keys -l -- <payload>` so the target
+// actually accepts the message. VS Code / Cursor Composer (tmux often reports current_command "node")
+// uses Enter for newlines in multi-line input; submission is Ctrl+Enter (C-Enter). Codex CLI often
+// shows as current_command "codex" or "node"; Factory Droid is usually "droid". All need C-Enter for
+// the same composer-style submit. Gemini CLIs use Escape then Enter.
+func relayPostPasteKeys(pane Pane) []string {
 	label := strings.ToLower(strings.TrimSpace(pane.Label))
-	return strings.HasPrefix(label, "gemini")
+	if strings.HasPrefix(label, "gemini") {
+		return []string{"Escape", "Enter"}
+	}
+	if paneUsesComposerStyleSubmit(pane) {
+		return []string{"C-Enter"}
+	}
+	return []string{"Enter"}
+}
+
+// submitKeysForPane is the default mux submit sequence (no pasted payload) for Escape+Enter mode.
+func submitKeysForPane(pane Pane) []string {
+	label := strings.ToLower(strings.TrimSpace(pane.Label))
+	if strings.HasPrefix(label, "gemini") {
+		return []string{"Escape", "Enter"}
+	}
+	if paneUsesComposerStyleSubmit(pane) {
+		return []string{"C-Enter"}
+	}
+	return []string{"Escape", "Enter"}
+}
+
+// paneUsesComposerStyleSubmit is true when the pane should get Ctrl+Enter after paste (composer-style TUIs).
+func paneUsesComposerStyleSubmit(pane Pane) bool {
+	if relayUsesComposerStyleSubmit(pane.CurrentCommand) {
+		return true
+	}
+	label := strings.ToLower(strings.TrimSpace(pane.Label))
+	// Pane labels from mux create use agent basename (droid-1, codex-a, …); current_command can stay zsh/bash
+	// while the Ink/node composer owns the TTY — avoid shell TTY/printf paths for those panes.
+	return strings.HasPrefix(label, "droid") ||
+		strings.HasPrefix(label, "codex") ||
+		strings.HasPrefix(label, "cursor")
+}
+
+// relaySkipsLeadingInterruptEscape is true when a leading Escape should not be sent before paste for
+// Interrupt deliveries. Composer TUIs (Droid/Codex/Cursor) often treat Escape as leaving or clearing
+// the input; Gemini and shells still use the Escape poke to exit nested modes.
+func relaySkipsLeadingInterruptEscape(pane Pane) bool {
+	label := strings.ToLower(strings.TrimSpace(pane.Label))
+	if strings.HasPrefix(label, "gemini") {
+		return false
+	}
+	return paneUsesComposerStyleSubmit(pane)
+}
+
+// relayUsesComposerStyleSubmit is true when tmux reports a TUI that treats Enter as newline and
+// expects Ctrl+Enter to send (Cursor/Composer, Codex, Droid, and other node-backed agent CLIs).
+func relayUsesComposerStyleSubmit(currentCommand string) bool {
+	switch strings.ToLower(strings.TrimSpace(currentCommand)) {
+	case "node", "codex", "droid":
+		return true
+	default:
+		return false
+	}
 }
 
 func isShellCommand(command string) bool {

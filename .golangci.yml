@@ -12,6 +12,7 @@ linters:
     - errcheck
     - depguard
     - forbidigo
+    - gocyclo
   settings:
     forbidigo:
       forbid:
@@ -61,6 +62,10 @@ linters:
           disabled: true
         - name: unhandled-error
           disabled: true
+
+    gocyclo:
+      # Current max in codebase is 24 (PruneBySize). Threshold set to catch new regressions.
+      min-complexity: 25
 
     # Enforce layered architecture - prevent layer violations
     depguard:

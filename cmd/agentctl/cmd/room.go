@@ -11272,6 +11272,22 @@ func roomCoordinatorActorID(members []agent.RoomMember) string {
 	return ""
 }
 
+// roomTaskEventRecipient is the direct recipient for durable task claim/complete board updates
+// (never broadcast): coordinator if set, otherwise the first room lead.
+func roomTaskEventRecipient(members []agent.RoomMember) (string, error) {
+	if id := strings.TrimSpace(roomCoordinatorActorID(members)); id != "" {
+		return id, nil
+	}
+	for _, member := range members {
+		if strings.EqualFold(strings.TrimSpace(member.Role), "lead") {
+			if id := strings.TrimSpace(member.ActorID); id != "" {
+				return id, nil
+			}
+		}
+	}
+	return "", fmt.Errorf("room has no coordinator or lead; set a coordinator with `agentctl room coordinator set` or add a lead member")
+}
+
 func resolveRoomRecipient(ctx context.Context, store blackboard.BoardStore, workspaceID, roomID, recipient string) (string, error) {
 	normalized := normalizeRoomRecipient(recipient)
 	switch normalized {

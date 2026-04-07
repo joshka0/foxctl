@@ -22,7 +22,7 @@ SKILL_DIRS := $(shell find skills -mindepth 1 -maxdepth 1 -type d)
 # Skills requiring CGO (excluded from non-CGO builds)
 CGO_SKILLS := libsql_migrate
 
-.PHONY: fmt lint typecheck lsp-check vet test test-cgo test-cgo-short test-race test-integration test-integration-cmd cover check-coverage check-doc-links build build-cgo build-all viewer snapshot tidy check skill skills-build skills-build-cgo skills-build-all skills-install skills-install-cgo skills-install-all skills-test completions init ts-install ts-dev-tui ts-dev-gui ts-build-tui ts-tui ts-build ts-typecheck env-sync env-watch env-watch-stop db-backup db-backup-list db-backup-clean gepa-prompt gepa-cycle gepa-dataset-export gepa-dataset-export-ranked gepa-claude-export gepa-claude-rewrite gepa-leaderboard gepa-compare-batch gepa-judge-baseline eval-code-search-agentctl-package eval-code-search-praze-infra eval-code-search-agentctl-repo-grounded eval-code-search-agentctl-change-impact eval-code-search-agentctl-trace-symbol eval-code-search-agentctl-bridge-esoteric eval-retrieval-agentctl eval-retrieval-agentctl-mixed eval-retrieval-agentctl-cochange eval-retrieval-jido eval-retrieval-praze eval-retrieval-praze-mixed eval-retrieval-praze-k8s
+.PHONY: fmt lint typecheck lsp-check vet test test-cgo test-cgo-short test-race test-integration test-integration-cmd cover check-coverage check-doc-links check-large-files check-tech-debt check-duplication test-timing build build-cgo build-all viewer snapshot tidy check skill skills-build skills-build-cgo skills-build-all skills-install skills-install-cgo skills-install-all skills-test completions init ts-install ts-dev-tui ts-dev-gui ts-build-tui ts-tui ts-build ts-typecheck env-sync env-watch env-watch-stop db-backup db-backup-list db-backup-clean gepa-prompt gepa-cycle gepa-dataset-export gepa-dataset-export-ranked gepa-claude-export gepa-claude-rewrite gepa-leaderboard gepa-compare-batch gepa-judge-baseline eval-code-search-agentctl-package eval-code-search-praze-infra eval-code-search-agentctl-repo-grounded eval-code-search-agentctl-change-impact eval-code-search-agentctl-trace-symbol eval-code-search-agentctl-bridge-esoteric eval-retrieval-agentctl eval-retrieval-agentctl-mixed eval-retrieval-agentctl-cochange eval-retrieval-jido eval-retrieval-praze eval-retrieval-praze-mixed eval-retrieval-praze-k8s
 
 fmt:
 	@echo "Running gofumpt"
@@ -507,7 +507,20 @@ tidy:
 check-doc-links:
 	@bash scripts/check_doc_links.sh
 
-check: fmt lint vet test check-coverage check-doc-links build
+check-large-files:
+	@bash scripts/check_large_files.sh
+
+check-tech-debt:
+	@bash scripts/check_tech_debt.sh
+
+check-duplication:
+	@command -v jscpd >/dev/null 2>&1 || { echo "jscpd not installed. Run: npm i -g jscpd"; exit 1; }
+	@jscpd --config .jscpd.json .
+
+test-timing:
+	@$(GO_CMD) test ./... -v -count=1 2>&1 | grep -E '(^--- |PASS|FAIL|panic)' | awk '{print $$0}'
+
+check: fmt lint vet test check-coverage check-doc-links check-large-files check-tech-debt build
 
 completions: build
 	@mkdir -p dist

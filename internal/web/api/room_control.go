@@ -232,6 +232,13 @@ func handleRoomInboxGet(w http.ResponseWriter, r *http.Request, cfg config.Confi
 		filter = strings.TrimSpace(r.URL.Query().Get("filter"))
 	}
 	includeBroadcasts := parseBool(r.URL.Query().Get("include_broadcasts"))
+	compact := true
+	q := r.URL.Query()
+	if parseBool(q.Get("full_room")) {
+		compact = false
+	} else if raw := strings.TrimSpace(q.Get("compact")); raw != "" {
+		compact = parseBool(raw)
+	}
 	limit := apiRoomDefaultLimit
 	if raw := strings.TrimSpace(r.URL.Query().Get("limit")); raw != "" {
 		n, err := strconv.Atoi(raw)
@@ -259,8 +266,12 @@ func handleRoomInboxGet(w http.ResponseWriter, r *http.Request, cfg config.Confi
 		return
 	}
 	entries := apiBuildRoomInboxEntries(actorID, messages, filter, includeBroadcasts)
+	roomPayload := any(convertRoomSummary(summary))
+	if compact {
+		roomPayload = agent.CompactRoomSummaryForInbox(summary)
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"room":    convertRoomSummary(summary),
+		"room":    roomPayload,
 		"actor":   actorID,
 		"filter":  apiNormalizeRoomInboxFilter(filter),
 		"count":   len(entries),

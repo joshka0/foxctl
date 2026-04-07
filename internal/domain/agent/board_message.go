@@ -55,6 +55,8 @@ const (
 	BoardMessageKindEpicAnswer BoardMessageKind = "epic_answer"
 	// BoardMessageKindEpicFinalize represents the clarified epic brief after intake is complete.
 	BoardMessageKindEpicFinalize BoardMessageKind = "epic_finalize"
+	// BoardMessageKindEpicCheckpoint represents a durable resumability snapshot for an epic.
+	BoardMessageKindEpicCheckpoint BoardMessageKind = "epic_checkpoint"
 	// BoardMessageKindMilestoneProposal represents a proposed milestone shape derived from an epic.
 	BoardMessageKindMilestoneProposal BoardMessageKind = "milestone_proposal"
 	// BoardMessageKindMilestone represents a milestone nested under an epic.
@@ -208,6 +210,45 @@ type RoomSummary struct {
 	TaskIDs          []string     `json:"task_ids,omitempty"`
 	Members          []RoomMember `json:"members,omitempty"`
 	ArchivedAt       *time.Time   `json:"archived_at,omitempty"`
+}
+
+// CompactRoomSummaryForInbox returns a small JSON-friendly map for inbox-style responses.
+// It omits bulky fields (task_ids, participants, members, description, dispatch_agent_ids)
+// to keep agent-facing payloads small.
+func CompactRoomSummaryForInbox(s RoomSummary) map[string]any {
+	out := map[string]any{
+		"id":            s.ID,
+		"workspace_id":  s.WorkspaceID,
+		"stream":        s.Stream,
+		"title":         s.Title,
+		"message_count": s.MessageCount,
+		"unread_count":  s.UnreadCount,
+	}
+	if s.DispatchPolicy != "" {
+		out["dispatch_policy"] = s.DispatchPolicy
+	}
+	if s.LatestSubject != "" {
+		out["latest_subject"] = s.LatestSubject
+	}
+	if s.LatestPreview != "" {
+		out["latest_preview"] = s.LatestPreview
+	}
+	if s.LatestSender != "" {
+		out["latest_sender"] = s.LatestSender
+	}
+	if !s.LatestMessageAt.IsZero() {
+		out["latest_message_at"] = s.LatestMessageAt.Format(time.RFC3339)
+	}
+	if !s.CreatedAt.IsZero() {
+		out["created_at"] = s.CreatedAt.Format(time.RFC3339)
+	}
+	if !s.UpdatedAt.IsZero() {
+		out["updated_at"] = s.UpdatedAt.Format(time.RFC3339)
+	}
+	if s.ArchivedAt != nil && !s.ArchivedAt.IsZero() {
+		out["archived_at"] = s.ArchivedAt.Format(time.RFC3339)
+	}
+	return out
 }
 
 // RoomMember is an explicit membership record for one room.

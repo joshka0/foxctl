@@ -1,0 +1,24 @@
+{
+  "threshold": 5,
+  "reporters": ["console", "consoleFull"],
+  "ignore": [
+    "**/node_modules/**",
+    "**/.git/**",
+    "**/dist/**",
+    "**/build/**",
+    "**/vendor/**",
+    "**/*.min.js",
+    "**/*.min.css",
+    "**/bun.lock",
+    "**/go.sum",
+    "**/coverage/**",
+    "**/testdata/**",
+    "**/*.golden",
+    "**/*.json",
+    "**/*.ndjson"
+  ],
+  "format": ["go", "typescript", "javascript"],
+  "minLines": 8,
+  "minTokens": 100,
+  "absolute": false
+}

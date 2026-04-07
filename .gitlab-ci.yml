@@ -80,13 +80,16 @@ static-analysis:
     - make fmt
     - git diff --exit-code || (echo 'Formatting changed files. Run make fmt locally.' && exit 1)
     - make lint
+    - make check-large-files
+    - make check-tech-debt
 
 unit-tests:
   stage: check
   variables:
     CGO_ENABLED: "0"
   script:
-    - go test -short ./...
+    - go test -short -v -count=1 ./... 2>&1 | tee test-output.txt
+    - grep -E '(^--- |ok\s+|FAIL\s+|panic)' test-output.txt | head -100 || true
 
 race-tests:
   stage: check
@@ -98,6 +101,7 @@ cgo-build-and-tests:
   script:
     - make build-cgo
     - make test-cgo-short
+    - CGO_ENABLED=1 AGENTCTL_V2_REQUIRE_NATIVE_VECTOR_SQL=1 go test -tags=libsqlite3 ./internal/v2/adapters/libsql/turns -run TestTurnStore_SearchArtifactsByEmbedding_VectorPathLibSQL -count=1 -v
 
 integration-tests:
   stage: check
@@ -130,3 +134,15 @@ build:
     paths:
       - bin/agentctl
     expire_in: 7 days
+
+all-checks:
+  stage: build
+  needs:
+    - job: static-analysis
+    - job: unit-tests
+    - job: race-tests
+    - job: cgo-build-and-tests
+    - job: integration-tests
+    - job: llm-planner-integration
+  script:
+    - echo "All checks passed"
