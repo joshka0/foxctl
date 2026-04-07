@@ -16,11 +16,19 @@ import (
 	"github.com/jkatigb/agentctl/internal/domain/agent"
 	"github.com/jkatigb/agentctl/internal/domain/envelope"
 	ws "github.com/jkatigb/agentctl/internal/platform/workspace"
+	"github.com/jkatigb/agentctl/internal/storage/blackboard"
 	"github.com/jkatigb/agentctl/internal/storage/coordination"
 	taskstore "github.com/jkatigb/agentctl/internal/storage/tasks"
 	"github.com/jkatigb/agentctl/internal/tmuxbridge"
 	"github.com/spf13/cobra"
 )
+
+func init() {
+	// Unit tests use an isolated HOME without a live tmux server; skip mux fan-out by default.
+	roomSendRelayHook = func(ctx context.Context, boardStore blackboard.BoardStore, absWorkspace, roomID string, msgs []*agent.BoardMessage) []roomRelayResult {
+		return nil
+	}
+}
 
 func TestParseRoomMembers(t *testing.T) {
 	got, err := parseRoomMembers([]string{"agent-a=lead", "agent-b"})
@@ -1628,7 +1636,7 @@ func TestRunRoomEpicMilestoneStoryAndLogFlow(t *testing.T) {
 	}
 
 	cmd, out = newRoomTestCommand(ctx)
-	if err := runRoomMilestoneStart(cmd, workspace, "human-a", "alpha", epicID, "Foundation", "Ship core CLI nouns", "human-a", []string{"commands", "derived show"}, ""); err != nil {
+	if err := runRoomMilestoneStart(cmd, workspace, "human-a", "alpha", epicID, "Foundation", "Ship core CLI nouns", "", "human-a", []string{"commands", "derived show"}, nil, nil, nil, nil, nil, ""); err != nil {
 		t.Fatalf("runRoomMilestoneStart: %v", err)
 	}
 	data = decodeRoomEnvelope(t, out)
@@ -1724,7 +1732,7 @@ func TestRunRoomMilestoneReviewRequiresCoordinator(t *testing.T) {
 	}
 
 	cmd, out = newRoomTestCommand(ctx)
-	if err := runRoomMilestoneStart(cmd, workspace, "human-a", "alpha", epicID, "Foundation", "", "", nil, ""); err != nil {
+	if err := runRoomMilestoneStart(cmd, workspace, "human-a", "alpha", epicID, "Foundation", "", "", "", nil, nil, nil, nil, nil, nil, ""); err != nil {
 		t.Fatalf("runRoomMilestoneStart: %v", err)
 	}
 	data = decodeRoomEnvelope(t, out)
@@ -1761,7 +1769,7 @@ func TestRunRoomMilestoneStartRequiresFinalizedEpic(t *testing.T) {
 	epicID := data["epic_id"].(string)
 
 	cmd, out = newRoomTestCommand(ctx)
-	err := runRoomMilestoneStart(cmd, workspace, "human-a", "alpha", epicID, "Foundation", "", "", nil, "")
+	err := runRoomMilestoneStart(cmd, workspace, "human-a", "alpha", epicID, "Foundation", "", "", "", nil, nil, nil, nil, nil, nil, "")
 	if err != nil {
 		t.Fatalf("runRoomMilestoneStart returned error: %v", err)
 	}
@@ -1850,7 +1858,7 @@ func TestRunRoomMilestoneStartFromProposal(t *testing.T) {
 	proposalID := proposal["id"].(string)
 
 	cmd, out = newRoomTestCommand(ctx)
-	if err := runRoomMilestoneStart(cmd, workspace, "human-a", "alpha", epicID, "", "", "", nil, proposalID); err != nil {
+	if err := runRoomMilestoneStart(cmd, workspace, "human-a", "alpha", epicID, "", "", "", "", nil, nil, nil, nil, nil, nil, proposalID); err != nil {
 		t.Fatalf("runRoomMilestoneStart from proposal: %v", err)
 	}
 	data = decodeRoomEnvelope(t, out)
@@ -1902,7 +1910,7 @@ func TestRunRoomStoryProposalAcceptAndMilestoneSummary(t *testing.T) {
 	}
 
 	cmd, out = newRoomTestCommand(ctx)
-	if err := runRoomMilestoneStart(cmd, workspace, "human-a", "alpha", epicID, "Foundation", "Ship the first CLI slice", "human-a", []string{"commands"}, ""); err != nil {
+	if err := runRoomMilestoneStart(cmd, workspace, "human-a", "alpha", epicID, "Foundation", "Ship the first CLI slice", "", "human-a", []string{"commands"}, nil, nil, nil, nil, nil, ""); err != nil {
 		t.Fatalf("runRoomMilestoneStart: %v", err)
 	}
 	data = decodeRoomEnvelope(t, out)
@@ -1925,7 +1933,7 @@ func TestRunRoomStoryProposalAcceptAndMilestoneSummary(t *testing.T) {
 	}
 
 	cmd, _ = newRoomTestCommand(ctx)
-	if err := runRoomMilestoneSummary(cmd, workspace, "human-a", "alpha", milestoneID, "Review synthesis: the foundation milestone now has accepted story structure."); err != nil {
+	if err := runRoomMilestoneSummary(cmd, workspace, "human-a", "alpha", milestoneID, "Review synthesis: the foundation milestone now has accepted story structure.", "", nil, nil, nil, nil, nil, nil, nil, nil); err != nil {
 		t.Fatalf("runRoomMilestoneSummary: %v", err)
 	}
 
@@ -1938,6 +1946,10 @@ func TestRunRoomStoryProposalAcceptAndMilestoneSummary(t *testing.T) {
 	if got := milestone["summary_count"]; got != float64(1) {
 		t.Fatalf("summary_count=%v want 1", got)
 	}
+	latestSummary := milestone["latest_summary"].(map[string]any)
+	if got := latestSummary["summary"]; got != "Review synthesis: the foundation milestone now has accepted story structure." {
+		t.Fatalf("latest_summary.summary=%v want shorthand summary body", got)
+	}
 	if got := milestone["story_count"]; got != float64(2) {
 		t.Fatalf("story_count=%v want 2 (proposal + accepted story)", got)
 	}
@@ -1949,6 +1961,298 @@ func TestRunRoomStoryProposalAcceptAndMilestoneSummary(t *testing.T) {
 	}
 	if !statuses["proposed"] || !statuses["accepted"] {
 		t.Fatalf("statuses=%v want proposed and accepted", statuses)
+	}
+}
+
+func TestRunRoomMilestoneSummaryStructuredSynthesis(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	ctx := context.Background()
+	workspace := t.TempDir()
+
+	cmd, _ := newRoomTestCommand(ctx)
+	if err := runRoomCreate(cmd, workspace, "alpha", "Alpha", "", []string{"human-a=coordinator", "gemini-a=reviewer"}); err != nil {
+		t.Fatalf("runRoomCreate: %v", err)
+	}
+
+	cmd, out := newRoomTestCommand(ctx)
+	if err := runRoomEpicStart(cmd, workspace, "human-a", "alpha", "Room agile protocol", "", "human-a", "", "", []string{"room"}, []string{"operators can orient from room state"}); err != nil {
+		t.Fatalf("runRoomEpicStart: %v", err)
+	}
+	epicID := decodeRoomEnvelope(t, out)["epic_id"].(string)
+
+	cmd, _ = newRoomTestCommand(ctx)
+	if err := runRoomEpicFinalize(cmd, workspace, "human-a", "alpha", epicID, "Clarified brief."); err != nil {
+		t.Fatalf("runRoomEpicFinalize: %v", err)
+	}
+
+	cmd, out = newRoomTestCommand(ctx)
+	if err := runRoomMilestoneStart(cmd, workspace, "human-a", "alpha", epicID, "Foundation", "Ship the first validation slice", "", "human-a", []string{"story validation", "work-pack sync"}, nil, nil, nil, nil, nil, ""); err != nil {
+		t.Fatalf("runRoomMilestoneStart: %v", err)
+	}
+	milestoneID := decodeRoomEnvelope(t, out)["milestone_id"].(string)
+
+	cmd, out = newRoomTestCommand(ctx)
+	if err := runRoomStoryAdd(cmd, workspace, "human-a", "alpha", milestoneID, "Implement story validate", "Add a story-level validation record.", "gemini-a"); err != nil {
+		t.Fatalf("runRoomStoryAdd: %v", err)
+	}
+	storyID := decodeRoomEnvelope(t, out)["story_id"].(string)
+
+	cmd, out = newRoomTestCommand(ctx)
+	if err := runRoomStoryValidate(cmd, workspace, "human-a", "alpha", storyID, "review", "blocked", "Code review still has one blocking issue.", "docs/reviews/story.md", "", "", "", nil); err != nil {
+		t.Fatalf("runRoomStoryValidate: %v", err)
+	}
+	validationID := decodeRoomEnvelope(t, out)["validation_id"].(string)
+
+	cmd, _ = newRoomTestCommand(ctx)
+	if err := runRoomMilestoneSummary(cmd, workspace, "human-a", "alpha", milestoneID, "", "Foundation passed with one clean review.", []string{"Accepted stories are validated"}, nil, nil, []string{validationID}, []string{"Keep summary separate from proof"}, []string{"Follow-up threads should be acked when no reply is needed"}, []string{"Start story lifecycle"}, []string{"Use milestone summary for synthesis, not proof"}); err != nil {
+		t.Fatalf("runRoomMilestoneSummary structured: %v", err)
+	}
+
+	cmd, out = newRoomTestCommand(ctx)
+	if err := runRoomMilestoneShow(cmd, workspace, "alpha", milestoneID, 100); err != nil {
+		t.Fatalf("runRoomMilestoneShow: %v", err)
+	}
+	milestone := decodeRoomEnvelope(t, out)["milestone"].(map[string]any)
+	if got := milestone["summary_count"]; got != float64(1) {
+		t.Fatalf("summary_count=%v want 1", got)
+	}
+	if got := milestone["blocking_validation_count"]; got != float64(1) {
+		t.Fatalf("blocking_validation_count=%v want 1", got)
+	}
+	if got := milestone["decision_count"]; got != float64(1) {
+		t.Fatalf("decision_count=%v want 1", got)
+	}
+	if got := milestone["recommended_next_count"]; got != float64(1) {
+		t.Fatalf("recommended_next_count=%v want 1", got)
+	}
+	summaryMeta := milestone["summary_meta"].(map[string]any)
+	if got := summaryMeta["summary"]; got != "Foundation passed with one clean review." {
+		t.Fatalf("summary_meta.summary=%v", got)
+	}
+	blocking := summaryMeta["blocking_validation_ids"].([]any)
+	if len(blocking) != 1 || blocking[0] != validationID {
+		t.Fatalf("blocking_validation_ids=%v want [%s]", blocking, validationID)
+	}
+
+	summaryMarkdown, err := os.ReadFile(filepath.Join(home, ".agentctl", "epics", epicID, "milestones", milestoneID, "summary.md"))
+	if err != nil {
+		t.Fatalf("ReadFile summary markdown: %v", err)
+	}
+	for _, want := range []string{"## Summary", "Foundation passed with one clean review.", "## Blocking Validations", validationID, "## Guidance Updates"} {
+		if !strings.Contains(string(summaryMarkdown), want) {
+			t.Fatalf("summary markdown missing %q:\n%s", want, string(summaryMarkdown))
+		}
+	}
+}
+
+func TestRunRoomMilestoneSummaryRejectsUnknownValidationIDs(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	ctx := context.Background()
+	workspace := t.TempDir()
+
+	cmd, _ := newRoomTestCommand(ctx)
+	if err := runRoomCreate(cmd, workspace, "alpha", "Alpha", "", []string{"human-a=coordinator", "gemini-a=reviewer"}); err != nil {
+		t.Fatalf("runRoomCreate: %v", err)
+	}
+
+	cmd, out := newRoomTestCommand(ctx)
+	if err := runRoomEpicStart(cmd, workspace, "human-a", "alpha", "Room agile protocol", "", "human-a", "", "", []string{"room"}, []string{"operators can orient from room state"}); err != nil {
+		t.Fatalf("runRoomEpicStart: %v", err)
+	}
+	epicID := decodeRoomEnvelope(t, out)["epic_id"].(string)
+
+	cmd, _ = newRoomTestCommand(ctx)
+	if err := runRoomEpicFinalize(cmd, workspace, "human-a", "alpha", epicID, "Clarified brief."); err != nil {
+		t.Fatalf("runRoomEpicFinalize: %v", err)
+	}
+
+	cmd, out = newRoomTestCommand(ctx)
+	if err := runRoomMilestoneStart(cmd, workspace, "human-a", "alpha", epicID, "Foundation", "Ship the first validation slice", "", "human-a", []string{"story validation"}, nil, nil, nil, nil, nil, ""); err != nil {
+		t.Fatalf("runRoomMilestoneStart: %v", err)
+	}
+	milestoneID := decodeRoomEnvelope(t, out)["milestone_id"].(string)
+
+	cmd, out = newRoomTestCommand(ctx)
+	if err := runRoomMilestoneSummary(cmd, workspace, "human-a", "alpha", milestoneID, "", "Summary.", nil, nil, nil, []string{"01BADVALIDATION"}, nil, nil, nil, nil); err != nil {
+		t.Fatalf("runRoomMilestoneSummary returned error: %v", err)
+	}
+	if !strings.Contains(out.String(), `"status":"error"`) {
+		t.Fatalf("expected error envelope, got %s", out.String())
+	}
+	if !strings.Contains(out.String(), "is not a current blocking validation for this milestone") {
+		t.Fatalf("expected validation reference error, got %s", out.String())
+	}
+}
+
+func TestRunRoomMilestoneSummaryRejectsUnknownWaivedValidationIDs(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	ctx := context.Background()
+	workspace := t.TempDir()
+
+	cmd, _ := newRoomTestCommand(ctx)
+	if err := runRoomCreate(cmd, workspace, "alpha", "Alpha", "", []string{"human-a=coordinator", "gemini-a=reviewer"}); err != nil {
+		t.Fatalf("runRoomCreate: %v", err)
+	}
+
+	cmd, out := newRoomTestCommand(ctx)
+	if err := runRoomEpicStart(cmd, workspace, "human-a", "alpha", "Room agile protocol", "", "human-a", "", "", []string{"room"}, []string{"operators can orient from room state"}); err != nil {
+		t.Fatalf("runRoomEpicStart: %v", err)
+	}
+	epicID := decodeRoomEnvelope(t, out)["epic_id"].(string)
+
+	cmd, _ = newRoomTestCommand(ctx)
+	if err := runRoomEpicFinalize(cmd, workspace, "human-a", "alpha", epicID, "Clarified brief."); err != nil {
+		t.Fatalf("runRoomEpicFinalize: %v", err)
+	}
+
+	cmd, out = newRoomTestCommand(ctx)
+	if err := runRoomMilestoneStart(cmd, workspace, "human-a", "alpha", epicID, "Foundation", "Ship the first validation slice", "", "human-a", []string{"story validation"}, nil, nil, nil, nil, nil, ""); err != nil {
+		t.Fatalf("runRoomMilestoneStart: %v", err)
+	}
+	milestoneID := decodeRoomEnvelope(t, out)["milestone_id"].(string)
+
+	cmd, out = newRoomTestCommand(ctx)
+	if err := runRoomMilestoneSummary(cmd, workspace, "human-a", "alpha", milestoneID, "", "Summary.", nil, nil, []string{"01BADWAIVED"}, nil, nil, nil, nil, nil); err != nil {
+		t.Fatalf("runRoomMilestoneSummary returned error: %v", err)
+	}
+	if !strings.Contains(out.String(), `"status":"error"`) {
+		t.Fatalf("expected error envelope, got %s", out.String())
+	}
+	if !strings.Contains(out.String(), "is not attached to this milestone") {
+		t.Fatalf("expected waived validation reference error, got %s", out.String())
+	}
+}
+
+func TestRunRoomMilestoneContractStartAndUpdate(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	ctx := context.Background()
+	workspace := t.TempDir()
+
+	cmd, _ := newRoomTestCommand(ctx)
+	if err := runRoomCreate(cmd, workspace, "alpha", "Alpha", "", []string{"human-a=coordinator", "gemini-a=reviewer"}); err != nil {
+		t.Fatalf("runRoomCreate: %v", err)
+	}
+
+	cmd, out := newRoomTestCommand(ctx)
+	if err := runRoomEpicStart(cmd, workspace, "human-a", "alpha", "Room agile protocol", "Ship milestone contracts", "human-a", "", "", []string{"room", "filesystem mirror"}, []string{"milestone contracts are visible"}); err != nil {
+		t.Fatalf("runRoomEpicStart: %v", err)
+	}
+	epicID := decodeRoomEnvelope(t, out)["epic_id"].(string)
+
+	cmd, _ = newRoomTestCommand(ctx)
+	if err := runRoomEpicFinalize(cmd, workspace, "human-a", "alpha", epicID, "Clarified brief."); err != nil {
+		t.Fatalf("runRoomEpicFinalize: %v", err)
+	}
+
+	cmd, out = newRoomTestCommand(ctx)
+	if err := runRoomMilestoneStart(cmd, workspace, "human-a", "alpha", epicID, "Foundation", "Ship the first contract slice", "Make milestone intent explicit.", "human-a", []string{"contracts", "work-pack sync"}, []string{"send-confirm gap", "send-confirm gap"}, []string{"GUI changes"}, []string{"epic finalized"}, []string{"audit", "review", "review"}, []string{"contract visible", "contract visible"}, ""); err != nil {
+		t.Fatalf("runRoomMilestoneStart: %v", err)
+	}
+	data := decodeRoomEnvelope(t, out)
+	milestoneID := data["milestone_id"].(string)
+
+	cmd, out = newRoomTestCommand(ctx)
+	if err := runRoomMilestoneContract(cmd, workspace, "human-a", "alpha", milestoneID, "Updated objective.", []string{"multi-epic rooms"}, []string{"transport rewrite"}, []string{"send confirm"}, []string{"test", "review"}, []string{"summary written"}); err != nil {
+		t.Fatalf("runRoomMilestoneContract: %v", err)
+	}
+
+	cmd, out = newRoomTestCommand(ctx)
+	if err := runRoomMilestoneShow(cmd, workspace, "alpha", milestoneID, 100); err != nil {
+		t.Fatalf("runRoomMilestoneShow: %v", err)
+	}
+	milestone := decodeRoomEnvelope(t, out)["milestone"].(map[string]any)
+	contract := milestone["contract"].(map[string]any)
+	if got := contract["objective"]; got != "Updated objective." {
+		t.Fatalf("contract.objective=%v want Updated objective.", got)
+	}
+	if got := milestone["risk_count"]; got != float64(2) {
+		t.Fatalf("risk_count=%v want 2", got)
+	}
+	if got := milestone["dependency_count"]; got != float64(2) {
+		t.Fatalf("dependency_count=%v want 2", got)
+	}
+	if got := milestone["validator_count"]; got != float64(3) {
+		t.Fatalf("validator_count=%v want 3", got)
+	}
+	if got := milestone["exit_criteria_count"]; got != float64(2) {
+		t.Fatalf("exit_criteria_count=%v want 2", got)
+	}
+	risks := contract["risks"].([]any)
+	if len(risks) != 2 || risks[0] != "multi-epic rooms" || risks[1] != "send-confirm gap" {
+		t.Fatalf("risks=%v want [multi-epic rooms send-confirm gap]", risks)
+	}
+	validators := contract["validators_expected"].([]any)
+	if len(validators) != 3 || validators[0] != "audit" || validators[1] != "review" || validators[2] != "test" {
+		t.Fatalf("validators=%v want [audit review test]", validators)
+	}
+	if got := milestone["contract_update_count"]; got != float64(1) {
+		t.Fatalf("contract_update_count=%v want 1", got)
+	}
+
+	workpackRoot := filepath.Join(home, ".agentctl", "epics", epicID)
+	milestoneMarkdown, err := os.ReadFile(filepath.Join(workpackRoot, "milestones", milestoneID, "milestone.md"))
+	if err != nil {
+		t.Fatalf("ReadFile milestone markdown: %v", err)
+	}
+	markdown := string(milestoneMarkdown)
+	for _, want := range []string{"Objective: Updated objective.", "## Risks", "send-confirm gap", "multi-epic rooms", "## Validators Expected", "audit", "review", "test", "## Exit Criteria"} {
+		if !strings.Contains(markdown, want) {
+			t.Fatalf("milestone markdown missing %q:\n%s", want, markdown)
+		}
+	}
+	milestoneJSON, err := os.ReadFile(filepath.Join(workpackRoot, "milestones", milestoneID, "meta.json"))
+	if err != nil {
+		t.Fatalf("ReadFile milestone meta json: %v", err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(milestoneJSON, &payload); err != nil {
+		t.Fatalf("Unmarshal milestone meta json: %v", err)
+	}
+	milestoneView := payload["milestone"].(map[string]any)
+	meta := milestoneView["meta"].(map[string]any)
+	if got := meta["objective"]; got != "Updated objective." {
+		t.Fatalf("meta.objective=%v want Updated objective.", got)
+	}
+}
+
+func TestRunRoomMilestoneContractRequiresCoordinator(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	ctx := context.Background()
+	workspace := t.TempDir()
+
+	cmd, _ := newRoomTestCommand(ctx)
+	if err := runRoomCreate(cmd, workspace, "alpha", "Alpha", "", []string{"human-a=coordinator", "gemini-a=reviewer"}); err != nil {
+		t.Fatalf("runRoomCreate: %v", err)
+	}
+
+	cmd, out := newRoomTestCommand(ctx)
+	if err := runRoomEpicStart(cmd, workspace, "human-a", "alpha", "Room agile protocol", "", "", "", "", nil, nil); err != nil {
+		t.Fatalf("runRoomEpicStart: %v", err)
+	}
+	epicID := decodeRoomEnvelope(t, out)["epic_id"].(string)
+
+	cmd, _ = newRoomTestCommand(ctx)
+	if err := runRoomEpicFinalize(cmd, workspace, "human-a", "alpha", epicID, "Clarified brief."); err != nil {
+		t.Fatalf("runRoomEpicFinalize: %v", err)
+	}
+
+	cmd, out = newRoomTestCommand(ctx)
+	if err := runRoomMilestoneStart(cmd, workspace, "human-a", "alpha", epicID, "Foundation", "", "", "", nil, nil, nil, nil, nil, nil, ""); err != nil {
+		t.Fatalf("runRoomMilestoneStart: %v", err)
+	}
+	milestoneID := decodeRoomEnvelope(t, out)["milestone_id"].(string)
+
+	cmd, out = newRoomTestCommand(ctx)
+	if err := runRoomMilestoneContract(cmd, workspace, "gemini-a", "alpha", milestoneID, "Nope.", nil, nil, nil, nil, nil); err != nil {
+		t.Fatalf("runRoomMilestoneContract returned error: %v", err)
+	}
+	if !strings.Contains(out.String(), `"status":"error"`) {
+		t.Fatalf("expected error envelope, got %s", out.String())
+	}
+	if !strings.Contains(out.String(), "agile scope changes require coordinator role") {
+		t.Fatalf("expected coordinator agile error, got %s", out.String())
 	}
 }
 
@@ -1976,7 +2280,7 @@ func TestRunRoomStoryValidateAndWorkpackSync(t *testing.T) {
 	}
 
 	cmd, out = newRoomTestCommand(ctx)
-	if err := runRoomMilestoneStart(cmd, workspace, "human-a", "alpha", epicID, "Foundation", "Ship the first validation slice", "human-a", []string{"story validation", "work-pack sync"}, ""); err != nil {
+	if err := runRoomMilestoneStart(cmd, workspace, "human-a", "alpha", epicID, "Foundation", "Ship the first validation slice", "", "human-a", []string{"story validation", "work-pack sync"}, nil, nil, nil, nil, nil, ""); err != nil {
 		t.Fatalf("runRoomMilestoneStart: %v", err)
 	}
 	data = decodeRoomEnvelope(t, out)
@@ -2371,7 +2675,7 @@ func TestRunRoomEpicNextReturnsDeterministicEmptyShape(t *testing.T) {
 		t.Fatalf("runRoomMilestoneReview: %v", err)
 	}
 	cmd, _ = newRoomTestCommand(ctx)
-	if err := runRoomMilestoneSummary(cmd, workspace, "human-a", "alpha", milestoneID, "Summary."); err != nil {
+	if err := runRoomMilestoneSummary(cmd, workspace, "human-a", "alpha", milestoneID, "Summary.", "", nil, nil, nil, nil, nil, nil, nil, nil); err != nil {
 		t.Fatalf("runRoomMilestoneSummary: %v", err)
 	}
 	cmd, _ = newRoomTestCommand(ctx)
@@ -2532,7 +2836,7 @@ func setupRoomStoryValidationFixture(t *testing.T, ctx context.Context, workspac
 	}
 
 	cmd, out = newRoomTestCommand(ctx)
-	if err := runRoomMilestoneStart(cmd, workspace, "human-a", "alpha", epicID, "Foundation", "Ship the first validation slice", "human-a", []string{"story validation", "work-pack sync"}, ""); err != nil {
+	if err := runRoomMilestoneStart(cmd, workspace, "human-a", "alpha", epicID, "Foundation", "Ship the first validation slice", "", "human-a", []string{"story validation", "work-pack sync"}, nil, nil, nil, nil, nil, ""); err != nil {
 		t.Fatalf("runRoomMilestoneStart: %v", err)
 	}
 	milestoneID := decodeRoomEnvelope(t, out)["milestone_id"].(string)
@@ -2564,7 +2868,7 @@ func setupRoomAgileWorkpackFixture(t *testing.T, ctx context.Context, workspace 
 	}
 
 	cmd, out = newRoomTestCommand(ctx)
-	if err := runRoomMilestoneStart(cmd, workspace, "human-a", "alpha", epicID, "Foundation", "Ship the first validation slice", "human-a", []string{"story validation", "work-pack sync"}, ""); err != nil {
+	if err := runRoomMilestoneStart(cmd, workspace, "human-a", "alpha", epicID, "Foundation", "Ship the first validation slice", "", "human-a", []string{"story validation", "work-pack sync"}, nil, nil, nil, nil, nil, ""); err != nil {
 		t.Fatalf("runRoomMilestoneStart: %v", err)
 	}
 	milestoneID := decodeRoomEnvelope(t, out)["milestone_id"].(string)
@@ -2575,6 +2879,165 @@ func setupRoomAgileWorkpackFixture(t *testing.T, ctx context.Context, workspace 
 	}
 	storyID := decodeRoomEnvelope(t, out)["story_id"].(string)
 	return epicID, milestoneID, storyID
+}
+
+func setupRoomStoryLifecycleFixture(t *testing.T, ctx context.Context, workspace string) (string, string, string) {
+	t.Helper()
+	return setupRoomAgileWorkpackFixture(t, ctx, workspace)
+}
+
+func TestRunRoomStoryStateProgression(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	ctx := context.Background()
+	workspace := t.TempDir()
+
+	_, milestoneID, storyID := setupRoomStoryLifecycleFixture(t, ctx, workspace)
+
+	cmd, _ := newRoomTestCommand(ctx)
+	if err := runRoomStoryState(cmd, workspace, "human-a", "alpha", storyID, "in_progress", "Started implementation.", "", ""); err != nil {
+		t.Fatalf("runRoomStoryState in_progress: %v", err)
+	}
+	cmd, _ = newRoomTestCommand(ctx)
+	if err := runRoomStoryState(cmd, workspace, "human-a", "alpha", storyID, "in_review", "Ready for review.", "", "human-a"); err != nil {
+		t.Fatalf("runRoomStoryState in_review: %v", err)
+	}
+
+	cmd, out := newRoomTestCommand(ctx)
+	if err := runRoomStoryShow(cmd, workspace, "alpha", storyID, 100); err != nil {
+		t.Fatalf("runRoomStoryShow: %v", err)
+	}
+	story := decodeRoomEnvelope(t, out)["story"].(map[string]any)
+	if got := story["state"]; got != "in_review" {
+		t.Fatalf("state=%v want in_review", got)
+	}
+	if got := story["reviewer"]; got != "human-a" {
+		t.Fatalf("reviewer=%v want human-a", got)
+	}
+	if got := story["state_update_count"]; got != float64(2) {
+		t.Fatalf("state_update_count=%v want 2", got)
+	}
+	history := story["state_history"].([]any)
+	if len(history) != 2 {
+		t.Fatalf("len(state_history)=%d want 2", len(history))
+	}
+
+	cmd, out = newRoomTestCommand(ctx)
+	if err := runRoomMilestoneShow(cmd, workspace, "alpha", milestoneID, 100); err != nil {
+		t.Fatalf("runRoomMilestoneShow: %v", err)
+	}
+	milestone := decodeRoomEnvelope(t, out)["milestone"].(map[string]any)
+	if got := milestone["in_review_story_count"]; got != float64(1) {
+		t.Fatalf("in_review_story_count=%v want 1", got)
+	}
+}
+
+func TestRunRoomStoryStateBlockedRequiresReason(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	ctx := context.Background()
+	workspace := t.TempDir()
+
+	_, _, storyID := setupRoomStoryLifecycleFixture(t, ctx, workspace)
+
+	cmd, out := newRoomTestCommand(ctx)
+	if err := runRoomStoryState(cmd, workspace, "human-a", "alpha", storyID, "blocked", "", "", ""); err != nil {
+		t.Fatalf("runRoomStoryState returned error: %v", err)
+	}
+	if !strings.Contains(out.String(), `"status":"error"`) {
+		t.Fatalf("expected error envelope, got %s", out.String())
+	}
+	if !strings.Contains(out.String(), "blocked stories require a reason") {
+		t.Fatalf("expected blocked reason error, got %s", out.String())
+	}
+}
+
+func TestRunRoomStoryStateDoneRequiresValidationOrWaiver(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	ctx := context.Background()
+	workspace := t.TempDir()
+
+	_, _, storyID := setupRoomStoryLifecycleFixture(t, ctx, workspace)
+
+	cmd, out := newRoomTestCommand(ctx)
+	if err := runRoomStoryState(cmd, workspace, "human-a", "alpha", storyID, "done", "Finished.", "", ""); err != nil {
+		t.Fatalf("runRoomStoryState returned error: %v", err)
+	}
+	if !strings.Contains(out.String(), `"status":"error"`) {
+		t.Fatalf("expected error envelope, got %s", out.String())
+	}
+	if !strings.Contains(out.String(), "done stories require the latest validation status to be pass or waived") {
+		t.Fatalf("expected done gating error, got %s", out.String())
+	}
+
+	cmd, _ = newRoomTestCommand(ctx)
+	if err := runRoomStoryValidate(cmd, workspace, "human-a", "alpha", storyID, "review", "pass", "Validated.", "docs/reviews/pass.md", "", "", "", nil); err != nil {
+		t.Fatalf("runRoomStoryValidate pass: %v", err)
+	}
+	cmd, _ = newRoomTestCommand(ctx)
+	if err := runRoomStoryState(cmd, workspace, "human-a", "alpha", storyID, "done", "Finished.", "", ""); err != nil {
+		t.Fatalf("runRoomStoryState done: %v", err)
+	}
+
+	cmd, out = newRoomTestCommand(ctx)
+	if err := runRoomStoryShow(cmd, workspace, "alpha", storyID, 100); err != nil {
+		t.Fatalf("runRoomStoryShow: %v", err)
+	}
+	story := decodeRoomEnvelope(t, out)["story"].(map[string]any)
+	if got := story["state"]; got != "done" {
+		t.Fatalf("state=%v want done", got)
+	}
+}
+
+func TestRunRoomStoryStateValidatedRequiresPassingValidation(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	ctx := context.Background()
+	workspace := t.TempDir()
+
+	_, _, storyID := setupRoomStoryLifecycleFixture(t, ctx, workspace)
+
+	cmd, out := newRoomTestCommand(ctx)
+	if err := runRoomStoryState(cmd, workspace, "human-a", "alpha", storyID, "validated", "Looks validated.", "", ""); err != nil {
+		t.Fatalf("runRoomStoryState returned error: %v", err)
+	}
+	if !strings.Contains(out.String(), `"status":"error"`) {
+		t.Fatalf("expected error envelope, got %s", out.String())
+	}
+	if !strings.Contains(out.String(), "validated story state requires the latest story validation status to be pass") {
+		t.Fatalf("expected validated contradiction error, got %s", out.String())
+	}
+}
+
+func TestRunRoomStoryStateDeferredPersists(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	ctx := context.Background()
+	workspace := t.TempDir()
+
+	_, milestoneID, storyID := setupRoomStoryLifecycleFixture(t, ctx, workspace)
+
+	cmd, _ := newRoomTestCommand(ctx)
+	if err := runRoomStoryState(cmd, workspace, "human-a", "alpha", storyID, "deferred", "Move to the next tranche.", "", ""); err != nil {
+		t.Fatalf("runRoomStoryState deferred: %v", err)
+	}
+
+	cmd, out := newRoomTestCommand(ctx)
+	if err := runRoomStoryShow(cmd, workspace, "alpha", storyID, 100); err != nil {
+		t.Fatalf("runRoomStoryShow: %v", err)
+	}
+	story := decodeRoomEnvelope(t, out)["story"].(map[string]any)
+	if got := story["state"]; got != "deferred" {
+		t.Fatalf("state=%v want deferred", got)
+	}
+	if got := story["state_reason"]; got != "Move to the next tranche." {
+		t.Fatalf("state_reason=%v want deferred reason", got)
+	}
+
+	cmd, out = newRoomTestCommand(ctx)
+	if err := runRoomMilestoneShow(cmd, workspace, "alpha", milestoneID, 100); err != nil {
+		t.Fatalf("runRoomMilestoneShow: %v", err)
+	}
+	milestone := decodeRoomEnvelope(t, out)["milestone"].(map[string]any)
+	if got := milestone["deferred_story_count"]; got != float64(1) {
+		t.Fatalf("deferred_story_count=%v want 1", got)
+	}
 }
 
 func TestSyncRoomRedgreenWorktreePreservesHiddenPaths(t *testing.T) {
@@ -3794,6 +4257,30 @@ func TestFormatRoomRelayContentFallsBackToUnknownSender(t *testing.T) {
 	}
 }
 
+func TestFindRoomMemberForMuxSubmit(t *testing.T) {
+	summary := agent.RoomSummary{
+		ID: "triad",
+		Members: []agent.RoomMember{
+			{ActorID: "cursor-c-a", Backend: "tmux", PaneID: "%15"},
+			{ActorID: "zellij:spark:terminal_2", Backend: "zellij", Session: "spark", PaneID: "2"},
+		},
+	}
+	if _, ok := findRoomMemberForMuxSubmit(summary, "missing"); ok {
+		t.Fatal("expected no match")
+	}
+	m, ok := findRoomMemberForMuxSubmit(summary, "cursor-c-a")
+	if !ok || strings.TrimSpace(m.ActorID) != "cursor-c-a" {
+		t.Fatalf("got %+v ok=%v", m, ok)
+	}
+	m, ok = findRoomMemberForMuxSubmit(summary, "zellij:spark:terminal_2")
+	if !ok {
+		t.Fatal("expected match by canonical actor id")
+	}
+	if strings.TrimSpace(m.Session) != "spark" {
+		t.Fatalf("session=%q", m.Session)
+	}
+}
+
 func TestFormatRoomRelayContentIncludesRecipientAndFlags(t *testing.T) {
 	room := agent.RoomSummary{ID: "alpha"}
 	msg := agent.BoardMessage{
@@ -3806,7 +4293,8 @@ func TestFormatRoomRelayContentIncludesRecipientAndFlags(t *testing.T) {
 		Interrupt:     true,
 	}
 	got := formatRoomRelayContent(room, msg)
-	want := "[room alpha from=human-a to=claude-a ack reply interrupt] Review needed\nPlease review the spawn flow."
+	want := "[room alpha from=human-a to=claude-a ack reply interrupt] Review needed\nPlease review the spawn flow.\n" +
+		"Action: open your inbox (`agentctl room inbox <room> --actor <you>`), acknowledge if required, then reply or complete the requested follow-up."
 	if got != want {
 		t.Fatalf("formatRoomRelayContent() = %q, want %q", got, want)
 	}
@@ -3945,6 +4433,10 @@ func TestRunRoomSendDerivesSenderFromCurrentTmuxPane(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv("TMUX", "/tmp/tmux.sock,1,0")
 	t.Setenv("TMUX_PANE", "%7")
+	restoreSubmit := swapRoomSendMuxSubmitHook(func(context.Context, string) (map[string]any, string) {
+		return nil, ""
+	})
+	defer restoreSubmit()
 	restore := swapRoomTmuxClientForTest(func() *tmuxbridge.Client {
 		return tmuxbridge.NewWithRunner(roomFakeRunner{responses: map[string]roomFakeResponse{
 			"tmux list-sessions": {stdout: "ok\n"},
@@ -3994,7 +4486,7 @@ func TestRunRoomSendAnnotatesBodyWithSenderAndHint(t *testing.T) {
 	}
 
 	cmd, out := newRoomTestCommand(ctx)
-	if err := runRoomSendWithHint(cmd, workspace, "alpha", "human-a", "gemini-a", "Need review", "Reply with a short recommendation and blocker list.", "Please review the work-pack draft.", "info", "", 0, false, true, false, true); err != nil {
+	if err := runRoomSendWithHint(cmd, workspace, "alpha", "human-a", "gemini-a", "Need review", "Reply with a short recommendation and blocker list.", "Please review the work-pack draft.", "info", "", 0, false, true, false, true, roomSendMuxOpts{}); err != nil {
 		t.Fatalf("runRoomSendWithHint: %v", err)
 	}
 	data := decodeRoomEnvelope(t, out)
@@ -4101,6 +4593,10 @@ func TestRunRoomAckDerivesActorFromCurrentTmuxPane(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv("TMUX", "/tmp/tmux.sock,1,0")
 	t.Setenv("TMUX_PANE", "%7")
+	restoreSubmit := swapRoomSendMuxSubmitHook(func(context.Context, string) (map[string]any, string) {
+		return nil, ""
+	})
+	defer restoreSubmit()
 	restore := swapRoomTmuxClientForTest(func() *tmuxbridge.Client {
 		return tmuxbridge.NewWithRunner(roomFakeRunner{responses: map[string]roomFakeResponse{
 			"tmux list-sessions": {stdout: "ok\n"},
@@ -4332,6 +4828,12 @@ func swapRoomTmuxClientForTest(fn func() *tmuxbridge.Client) func() {
 	prev := newRoomTmuxClient
 	newRoomTmuxClient = fn
 	return func() { newRoomTmuxClient = prev }
+}
+
+func swapRoomSendMuxSubmitHook(fn func(context.Context, string) (map[string]any, string)) func() {
+	prev := roomSendMuxSubmitHook
+	roomSendMuxSubmitHook = fn
+	return func() { roomSendMuxSubmitHook = prev }
 }
 
 type roomFakeRunner struct {

@@ -460,18 +460,30 @@ func newRoomSendCommand() *cobra.Command {
 		replyExpected bool
 		interrupt     bool
 		autoCreate    bool
+		noMuxSubmit   bool
+		muxSubmitMode string
+		noLiveRelay   bool
 	)
 	cmd := &cobra.Command{
 		Use:   "send <room-id> <text>",
-		Short: "Append a durable message to a room timeline",
-		Args:  cobra.MinimumNArgs(2),
+		Short: "Append a durable message and fan out to mux panes (live relay on by default)",
+		Long: "Stores the message in the room timeline, then delivers it to other participants' tmux/zellij panes " +
+			"(same path as room relay / room loop) so targets see the line and an implicit submit. " +
+			"When this command runs inside tmux or zellij, agentctl also mux-submits the current pane by default " +
+			"(Enter-only) so your local shell/agent composer finishes. Use --no-live-relay if room loop already relays; " +
+			"use --no-mux-submit to skip the local pane submit.",
+		Args: cobra.MinimumNArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runRoomSendWithHint(cmd, workspace, args[0], sender, recipient, subject, hint, strings.Join(args[1:], " "), kind, taskID, priority, ackRequired, replyExpected, interrupt, autoCreate)
+			return runRoomSendWithHint(cmd, workspace, args[0], sender, recipient, subject, hint, strings.Join(args[1:], " "), kind, taskID, priority, ackRequired, replyExpected, interrupt, autoCreate, roomSendMuxOpts{
+				NoMuxSubmit:   noMuxSubmit,
+				MuxSubmitMode: muxSubmitMode,
+				NoLiveRelay:   noLiveRelay,
+			})
 		},
 	}
 	cmd.Flags().StringVar(&workspace, "workspace", ".", "Workspace root override")
 	cmd.Flags().StringVar(&sender, "sender", "", "Sender actor or participant id (defaults to current tmux/zellij pane)")
-	cmd.Flags().StringVar(&recipient, "to", "", "Target room participant id (defaults to broadcast)")
+	cmd.Flags().StringVar(&recipient, "to", "", "Direct recipient participant id (omit for broadcast). Use --to so live relay targets exactly that pane; broadcast delivers to all other members")
 	cmd.Flags().StringVar(&subject, "subject", "", "Optional subject line")
 	cmd.Flags().StringVar(&hint, "hint", "", "Optional explicit hint for how the recipient should respond")
 	cmd.Flags().StringVar(&kind, "kind", string(agent.BoardMessageKindInfo), "Message kind (info|instruction|alert|review_request)")
@@ -481,6 +493,9 @@ func newRoomSendCommand() *cobra.Command {
 	cmd.Flags().BoolVar(&replyExpected, "reply-expected", false, "Mark the message as expecting a response (direct messages only)")
 	cmd.Flags().BoolVar(&interrupt, "interrupt", false, "Interrupt the target pane before delivering the message (direct messages only)")
 	cmd.Flags().BoolVar(&autoCreate, "auto-create", true, "Create the room if it does not exist")
+	cmd.Flags().BoolVar(&noMuxSubmit, "no-mux-submit", false, "Do not send mux submit keys to the current pane after a successful send")
+	cmd.Flags().StringVar(&muxSubmitMode, "mux-submit-mode", "enter-only", "Submit mode after send when inside tmux/zellij (escape-enter|enter-only)")
+	cmd.Flags().BoolVar(&noLiveRelay, "no-live-relay", false, "Do not fan out this message to other participants' mux panes (use when room relay or room loop already delivers)")
 	return cmd
 }
 
@@ -735,6 +750,7 @@ func newRoomMilestoneCommand() *cobra.Command {
 	}
 	cmd.AddCommand(
 		newRoomMilestoneStartCommand(),
+		newRoomMilestoneContractCommand(),
 		newRoomMilestoneCriteriaCommand(),
 		newRoomMilestoneReviewCommand(),
 		newRoomMilestoneSummaryCommand(),
@@ -745,12 +761,18 @@ func newRoomMilestoneCommand() *cobra.Command {
 
 func newRoomMilestoneStartCommand() *cobra.Command {
 	var (
-		workspace string
-		sender    string
-		goal      string
-		owner     string
-		scope     []string
-		proposal  string
+		workspace  string
+		sender     string
+		goal       string
+		objective  string
+		owner      string
+		scope      []string
+		risks      []string
+		excludes   []string
+		deps       []string
+		validators []string
+		exits      []string
+		proposal   string
 	)
 	cmd := &cobra.Command{
 		Use:   "start <room-id> <epic-id> [title]",
@@ -761,15 +783,51 @@ func newRoomMilestoneStartCommand() *cobra.Command {
 			if len(args) > 2 {
 				title = args[2]
 			}
-			return runRoomMilestoneStart(cmd, workspace, sender, args[0], args[1], title, goal, owner, scope, proposal)
+			return runRoomMilestoneStart(cmd, workspace, sender, args[0], args[1], title, goal, objective, owner, scope, risks, excludes, deps, validators, exits, proposal)
 		},
 	}
 	cmd.Flags().StringVar(&workspace, "workspace", ".", "Workspace root override")
 	cmd.Flags().StringVar(&sender, "sender", "", "Coordinator actor or participant id (defaults to current tmux/zellij pane)")
 	cmd.Flags().StringVar(&goal, "goal", "", "Milestone goal")
+	cmd.Flags().StringVar(&objective, "objective", "", "Milestone objective narrative")
 	cmd.Flags().StringVar(&owner, "owner", "", "Milestone owner actor id")
 	cmd.Flags().StringSliceVar(&scope, "scope", nil, "Scope item (repeatable)")
+	cmd.Flags().StringSliceVar(&risks, "risk", nil, "Milestone risk (repeatable)")
+	cmd.Flags().StringSliceVar(&excludes, "exclude", nil, "Milestone exclusion (repeatable)")
+	cmd.Flags().StringSliceVar(&deps, "dependency", nil, "Milestone dependency (repeatable)")
+	cmd.Flags().StringSliceVar(&validators, "validator", nil, "Expected validator lane (repeatable)")
+	cmd.Flags().StringSliceVar(&exits, "exit", nil, "Milestone exit criterion (repeatable)")
 	cmd.Flags().StringVar(&proposal, "proposal", "", "Milestone proposal id to promote into a real milestone")
+	return cmd
+}
+
+func newRoomMilestoneContractCommand() *cobra.Command {
+	var (
+		workspace  string
+		sender     string
+		objective  string
+		risks      []string
+		excludes   []string
+		deps       []string
+		validators []string
+		exits      []string
+	)
+	cmd := &cobra.Command{
+		Use:   "contract <room-id> <milestone-id>",
+		Short: "Update the explicit milestone contract",
+		Args:  cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runRoomMilestoneContract(cmd, workspace, sender, args[0], args[1], objective, risks, excludes, deps, validators, exits)
+		},
+	}
+	cmd.Flags().StringVar(&workspace, "workspace", ".", "Workspace root override")
+	cmd.Flags().StringVar(&sender, "sender", "", "Coordinator actor or participant id (defaults to current tmux/zellij pane)")
+	cmd.Flags().StringVar(&objective, "objective", "", "Milestone objective narrative")
+	cmd.Flags().StringSliceVar(&risks, "risk", nil, "Milestone risk (repeatable)")
+	cmd.Flags().StringSliceVar(&excludes, "exclude", nil, "Milestone exclusion (repeatable)")
+	cmd.Flags().StringSliceVar(&deps, "dependency", nil, "Milestone dependency (repeatable)")
+	cmd.Flags().StringSliceVar(&validators, "validator", nil, "Expected validator lane (repeatable)")
+	cmd.Flags().StringSliceVar(&exits, "exit", nil, "Milestone exit criterion (repeatable)")
 	return cmd
 }
 
@@ -811,19 +869,41 @@ func newRoomMilestoneReviewCommand() *cobra.Command {
 
 func newRoomMilestoneSummaryCommand() *cobra.Command {
 	var (
-		workspace string
-		sender    string
+		workspace           string
+		sender              string
+		summaryText         string
+		passedCriteria      []string
+		failedCriteria      []string
+		waivedValidations   []string
+		blockingValidations []string
+		decisions           []string
+		findings            []string
+		nextItems           []string
+		guidanceUpdates     []string
 	)
 	cmd := &cobra.Command{
-		Use:   "summary <room-id> <milestone-id> <notes>",
+		Use:   "summary <room-id> <milestone-id> [notes]",
 		Short: "Record a milestone review synthesis summary",
-		Args:  cobra.MinimumNArgs(3),
+		Args:  cobra.RangeArgs(2, 3),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runRoomMilestoneSummary(cmd, workspace, sender, args[0], args[1], strings.Join(args[2:], " "))
+			notes := ""
+			if len(args) > 2 {
+				notes = strings.Join(args[2:], " ")
+			}
+			return runRoomMilestoneSummary(cmd, workspace, sender, args[0], args[1], notes, summaryText, passedCriteria, failedCriteria, waivedValidations, blockingValidations, decisions, findings, nextItems, guidanceUpdates)
 		},
 	}
 	cmd.Flags().StringVar(&workspace, "workspace", ".", "Workspace root override")
 	cmd.Flags().StringVar(&sender, "sender", "", "Coordinator actor or participant id (defaults to current tmux/zellij pane)")
+	cmd.Flags().StringVar(&summaryText, "summary", "", "Structured synthesis summary (overrides positional notes when provided)")
+	cmd.Flags().StringSliceVar(&passedCriteria, "passed-criterion", nil, "Passed synthesis criterion (repeatable)")
+	cmd.Flags().StringSliceVar(&failedCriteria, "failed-criterion", nil, "Failed synthesis criterion (repeatable)")
+	cmd.Flags().StringSliceVar(&waivedValidations, "waived-validation", nil, "Waived validation id referenced by the synthesis (repeatable)")
+	cmd.Flags().StringSliceVar(&blockingValidations, "blocking-validation", nil, "Blocking validation id referenced by the synthesis (repeatable)")
+	cmd.Flags().StringSliceVar(&decisions, "decision", nil, "Notable milestone decision (repeatable)")
+	cmd.Flags().StringSliceVar(&findings, "finding", nil, "Systemic milestone finding (repeatable)")
+	cmd.Flags().StringSliceVar(&nextItems, "next", nil, "Recommended next milestone follow-up (repeatable)")
+	cmd.Flags().StringSliceVar(&guidanceUpdates, "guidance", nil, "Guidance update captured from the synthesis (repeatable)")
 	return cmd
 }
 
@@ -858,6 +938,7 @@ func newRoomStoryCommand() *cobra.Command {
 		newRoomStoryProposeCommand(),
 		newRoomStoryAcceptCommand(),
 		newRoomStoryAddCommand(),
+		newRoomStoryStateCommand(),
 		newRoomStoryValidateCommand(),
 		newRoomStoryShowCommand(),
 	)
@@ -945,6 +1026,30 @@ func newRoomStoryShowCommand() *cobra.Command {
 	}
 	cmd.Flags().StringVar(&workspace, "workspace", ".", "Workspace root override")
 	cmd.Flags().IntVar(&limit, "limit", 250, "Maximum room messages to inspect")
+	return cmd
+}
+
+func newRoomStoryStateCommand() *cobra.Command {
+	var (
+		workspace string
+		sender    string
+		reason    string
+		blockedBy string
+		reviewer  string
+	)
+	cmd := &cobra.Command{
+		Use:   "state <room-id> <story-id> <state>",
+		Short: "Record an append-only lifecycle state update for an accepted story",
+		Args:  cobra.ExactArgs(3),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runRoomStoryState(cmd, workspace, sender, args[0], args[1], args[2], reason, blockedBy, reviewer)
+		},
+	}
+	cmd.Flags().StringVar(&workspace, "workspace", ".", "Workspace root override")
+	cmd.Flags().StringVar(&sender, "sender", "", "Sender actor or participant id (defaults to current tmux/zellij pane)")
+	cmd.Flags().StringVar(&reason, "reason", "", "Lifecycle state reason")
+	cmd.Flags().StringVar(&blockedBy, "blocked-by", "", "Optional blocker reference when state=blocked")
+	cmd.Flags().StringVar(&reviewer, "reviewer", "", "Optional reviewer when state=in_review")
 	return cmd
 }
 
@@ -1880,11 +1985,15 @@ func runRoomInbox(cmd *cobra.Command, workspace, roomID, actorID string, limit i
 	return protocol.WriteOK(cmd.OutOrStdout(), "agentctl.room.inbox", data, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
 }
 
-func runRoomSend(cmd *cobra.Command, workspace, roomID, sender, recipient, subject, body, kind, taskID string, priority int, ackRequired, replyExpected, interrupt, autoCreate bool) error {
-	return runRoomSendWithHint(cmd, workspace, roomID, sender, recipient, subject, "", body, kind, taskID, priority, ackRequired, replyExpected, interrupt, autoCreate)
+func runRoomSend(cmd *cobra.Command, workspace, roomID, sender, recipient, subject, body, kind, taskID string, priority int, ackRequired, replyExpected, interrupt, autoCreate bool, muxOpts ...roomSendMuxOpts) error {
+	var mux roomSendMuxOpts
+	if len(muxOpts) > 0 {
+		mux = muxOpts[0]
+	}
+	return runRoomSendWithHint(cmd, workspace, roomID, sender, recipient, subject, "", body, kind, taskID, priority, ackRequired, replyExpected, interrupt, autoCreate, mux)
 }
 
-func runRoomSendWithHint(cmd *cobra.Command, workspace, roomID, sender, recipient, subject, hint, body, kind, taskID string, priority int, ackRequired, replyExpected, interrupt, autoCreate bool) error {
+func runRoomSendWithHint(cmd *cobra.Command, workspace, roomID, sender, recipient, subject, hint, body, kind, taskID string, priority int, ackRequired, replyExpected, interrupt, autoCreate bool, mux roomSendMuxOpts) error {
 	absWorkspace, err := resolveRoomWorkspace(workspace)
 	if err != nil {
 		return err
@@ -1963,18 +2072,51 @@ func runRoomSendWithHint(cmd *cobra.Command, workspace, roomID, sender, recipien
 	if err := store.SendMessage(cmd.Context(), msg); err != nil {
 		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.send", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
 	}
-	warnings := make([]string, 0, 1)
+	warnings := make([]string, 0, 4)
 	if !senderProvided {
 		warnings = append(warnings, fmt.Sprintf("sender was inferred as %s from the current execution context", identity.Sender))
 	}
-	return protocol.WriteOK(cmd.OutOrStdout(), "agentctl.room.send", map[string]any{
+	if msg.Recipient == agent.BroadcastRecipient {
+		warnings = append(warnings, "broadcast: live relay (unless --no-live-relay) notifies every other participant; pass --to <participant-id> to deliver only to that target")
+	}
+	var muxSubmit map[string]any
+	if !mux.NoMuxSubmit {
+		mode := strings.TrimSpace(mux.MuxSubmitMode)
+		if mode == "" {
+			mode = "enter-only"
+		}
+		bridgeMode, err := parseMuxSubmitModeString(mode)
+		if err != nil {
+			warnings = append(warnings, fmt.Sprintf("mux submit skipped: %v", err))
+		} else if detail, warn := roomSendMuxSubmitHook(cmd.Context(), bridgeMode); detail != nil {
+			muxSubmit = detail
+		} else if warn != "" {
+			warnings = append(warnings, warn)
+		}
+	}
+	data := map[string]any{
 		"room_id":         roomID,
 		"stream":          msg.Stream,
 		"message_id":      msg.ID,
 		"message":         msg,
 		"sender_identity": identity,
 		"warnings":        warnings,
-	}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	if msg.Recipient != agent.BroadcastRecipient {
+		data["delivery"] = "direct"
+		data["recipient"] = msg.Recipient
+	} else {
+		data["delivery"] = "broadcast"
+	}
+	if !mux.NoLiveRelay {
+		data["live_relay"] = roomSendRelayHook(cmd.Context(), store, absWorkspace, roomID, []*agent.BoardMessage{msg})
+	} else {
+		data["live_relay_skipped"] = true
+	}
+	if muxSubmit != nil {
+		data["mux_submit"] = muxSubmit
+	}
+	return protocol.WriteOK(cmd.OutOrStdout(), "agentctl.room.send", data, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
 }
 
 func annotateRoomSendBody(roomID, sender, recipient, body, hint string, ackRequired, replyExpected bool) string {
@@ -2449,15 +2591,40 @@ type roomEpicQuestionMeta struct {
 }
 
 type roomMilestoneMeta struct {
-	EpicID string   `json:"epic_id"`
-	Goal   string   `json:"goal"`
-	Owner  string   `json:"owner"`
-	Scope  []string `json:"scope"`
+	EpicID             string   `json:"epic_id"`
+	Goal               string   `json:"goal"`
+	Objective          string   `json:"objective"`
+	Owner              string   `json:"owner"`
+	Scope              []string `json:"scope"`
+	Risks              []string `json:"risks"`
+	Exclusions         []string `json:"exclusions"`
+	Dependencies       []string `json:"dependencies"`
+	ValidatorsExpected []string `json:"validators_expected"`
+	ExitCriteria       []string `json:"exit_criteria"`
+}
+
+type roomMilestoneSummaryMeta struct {
+	Summary               string   `json:"summary"`
+	PassedCriteria        []string `json:"passed_criteria"`
+	FailedCriteria        []string `json:"failed_criteria"`
+	WaivedValidationIDs   []string `json:"waived_validation_ids"`
+	BlockingValidationIDs []string `json:"blocking_validation_ids"`
+	NotableDecisions      []string `json:"notable_decisions"`
+	SystemicFindings      []string `json:"systemic_findings"`
+	RecommendedNext       []string `json:"recommended_next"`
+	GuidanceUpdates       []string `json:"guidance_updates"`
 }
 
 type roomStoryMeta struct {
 	Owner       string `json:"owner"`
 	Description string `json:"description"`
+}
+
+type roomStoryStateMeta struct {
+	State     string `json:"state"`
+	Reason    string `json:"reason"`
+	BlockedBy string `json:"blocked_by"`
+	Reviewer  string `json:"reviewer"`
 }
 
 type roomStoryValidationMeta struct {
@@ -2906,7 +3073,7 @@ func runRoomEpicNext(cmd *cobra.Command, workspace, roomID, epicID, actorID stri
 	}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
 }
 
-func runRoomMilestoneStart(cmd *cobra.Command, workspace, sender, roomID, epicID, title, goal, owner string, scope []string, proposalID string) error {
+func runRoomMilestoneStart(cmd *cobra.Command, workspace, sender, roomID, epicID, title, goal, objective, owner string, scope, risks, exclusions, dependencies, validatorsExpected, exitCriteria []string, proposalID string) error {
 	absWorkspace, identity, store, roomID, summary, err := prepareRoomAgileCommand(cmd, "agentctl.room.milestone", workspace, sender, roomID)
 	if err != nil {
 		return err
@@ -2953,6 +3120,23 @@ func runRoomMilestoneStart(cmd *cobra.Command, workspace, sender, roomID, epicID
 			"hint": "Pass a milestone title directly, or use --proposal <proposal-id> to promote a shaped milestone proposal.",
 		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
 	}
+	meta, err := normalizeRoomMilestoneContract(roomMilestoneMeta{
+		EpicID:             epicMsg.ID,
+		Goal:               goal,
+		Objective:          objective,
+		Owner:              firstNonEmpty(strings.TrimSpace(owner), strings.TrimSpace(epicMeta.Owner)),
+		Scope:              scope,
+		Risks:              risks,
+		Exclusions:         exclusions,
+		Dependencies:       dependencies,
+		ValidatorsExpected: validatorsExpected,
+		ExitCriteria:       exitCriteria,
+	})
+	if err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.milestone.start", protocol.ErrorCodeEARG, err.Error(), map[string]any{
+			"hint": "Use supported validator values: review, test, integration, user_test, manual_check, audit.",
+		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
 
 	msg := &agent.BoardMessage{
 		WorkspaceID:      absWorkspace,
@@ -2963,7 +3147,7 @@ func runRoomMilestoneStart(cmd *cobra.Command, workspace, sender, roomID, epicID
 		Kind:             agent.BoardMessageKindMilestone,
 		Priority:         agent.DefaultPriority,
 		Subject:          "Milestone: " + title,
-		Body:             buildRoomMilestoneBody(epicMsg.ID, title, goal, owner, scope),
+		Body:             buildRoomMilestoneBody(epicMsg.ID, title, meta.Goal, meta.Objective, meta.Owner, meta.Scope, meta.Risks, meta.Exclusions, meta.Dependencies, meta.ValidatorsExpected, meta.ExitCriteria),
 	}
 	if err := store.SendMessage(cmd.Context(), msg); err != nil {
 		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.milestone.start", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
@@ -2978,6 +3162,69 @@ func runRoomMilestoneStart(cmd *cobra.Command, workspace, sender, roomID, epicID
 		"message":         msg,
 		"sender_identity": identity,
 		"room":            summary,
+	}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+}
+
+func runRoomMilestoneContract(cmd *cobra.Command, workspace, sender, roomID, milestoneID, objective string, risks, exclusions, dependencies, validatorsExpected, exitCriteria []string) error {
+	absWorkspace, identity, store, roomID, summary, err := prepareRoomAgileCommand(cmd, "agentctl.room.milestone", workspace, sender, roomID)
+	if err != nil {
+		return err
+	}
+	defer store.Close()
+	if !roomMemberHasRole(summary.Members, identity.Sender, "coordinator") {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.milestone.contract", protocol.ErrorCodeEARG, "agile scope changes require coordinator role", map[string]any{
+			"hint": "Run the command as the room coordinator, or join the room with role=coordinator first.",
+		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+
+	milestoneMsg, err := loadRoomAgileRoot(cmd.Context(), store, absWorkspace, roomID, milestoneID, agent.BoardMessageKindMilestone)
+	if err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.milestone.contract", protocol.ErrorCodeENotFound, err.Error(), map[string]any{
+			"hint": "Use a milestone id returned by `agentctl room milestone start` or listed in `agentctl room milestone show`.",
+		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	patch, err := normalizeRoomMilestoneContract(roomMilestoneMeta{
+		Objective:          objective,
+		Risks:              risks,
+		Exclusions:         exclusions,
+		Dependencies:       dependencies,
+		ValidatorsExpected: validatorsExpected,
+		ExitCriteria:       exitCriteria,
+	})
+	if err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.milestone.contract", protocol.ErrorCodeEARG, err.Error(), map[string]any{
+			"hint": "Use supported validator values: review, test, integration, user_test, manual_check, audit.",
+		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	if patch.Objective == "" && len(patch.Risks) == 0 && len(patch.Exclusions) == 0 && len(patch.Dependencies) == 0 && len(patch.ValidatorsExpected) == 0 && len(patch.ExitCriteria) == 0 {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.milestone.contract", protocol.ErrorCodeEARG, "at least one contract field is required", map[string]any{
+			"hint": "Pass --objective, --risk, --exclude, --dependency, --validator, or --exit.",
+		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+
+	msg := &agent.BoardMessage{
+		WorkspaceID:      absWorkspace,
+		RelatedMessageID: milestoneMsg.ID,
+		Stream:           agent.RoomStreamName(roomID),
+		Sender:           identity.Sender,
+		Recipient:        agent.BroadcastRecipient,
+		Kind:             agent.BoardMessageKindMilestoneContract,
+		Priority:         agent.DefaultPriority,
+		Subject:          "Milestone Contract: " + strings.TrimPrefix(strings.TrimSpace(milestoneMsg.Subject), "Milestone: "),
+		Body:             buildRoomMilestoneBody("", "", "", patch.Objective, "", nil, patch.Risks, patch.Exclusions, patch.Dependencies, patch.ValidatorsExpected, patch.ExitCriteria),
+	}
+	if err := store.SendMessage(cmd.Context(), msg); err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.milestone.contract", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	if milestoneMeta := parseRoomMilestoneBody(milestoneMsg.Body); strings.TrimSpace(milestoneMeta.EpicID) != "" {
+		if err := syncRoomAgileWorkpack(cmd.Context(), store, absWorkspace, roomID, milestoneMeta.EpicID); err != nil {
+			return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.milestone.contract", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+		}
+	}
+	return protocol.WriteOK(cmd.OutOrStdout(), "agentctl.room.milestone.contract", map[string]any{
+		"room_id":      roomID,
+		"milestone_id": milestoneMsg.ID,
+		"message":      msg,
 	}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
 }
 
@@ -3087,7 +3334,7 @@ func runRoomMilestoneReview(cmd *cobra.Command, workspace, sender, roomID, miles
 	}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
 }
 
-func runRoomMilestoneSummary(cmd *cobra.Command, workspace, sender, roomID, milestoneID, notes string) error {
+func runRoomMilestoneSummary(cmd *cobra.Command, workspace, sender, roomID, milestoneID, notes, summaryText string, passedCriteria, failedCriteria, waivedValidationIDs, blockingValidationIDs, notableDecisions, systemicFindings, recommendedNext, guidanceUpdates []string) error {
 	absWorkspace, identity, store, roomID, summary, err := prepareRoomAgileCommand(cmd, "agentctl.room.milestone", workspace, sender, roomID)
 	if err != nil {
 		return err
@@ -3105,9 +3352,69 @@ func runRoomMilestoneSummary(cmd *cobra.Command, workspace, sender, roomID, mile
 			"hint": "Use a milestone id returned by `agentctl room milestone start` or listed in `agentctl room milestone show`.",
 		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
 	}
-	notes = strings.TrimSpace(notes)
-	if notes == "" {
-		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.milestone.summary", protocol.ErrorCodeEARG, "notes are required", nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	effectiveSummary := strings.TrimSpace(summaryText)
+	if effectiveSummary == "" {
+		effectiveSummary = strings.TrimSpace(notes)
+	}
+	meta := normalizeRoomMilestoneSummaryMeta(roomMilestoneSummaryMeta{
+		Summary:               effectiveSummary,
+		PassedCriteria:        passedCriteria,
+		FailedCriteria:        failedCriteria,
+		WaivedValidationIDs:   waivedValidationIDs,
+		BlockingValidationIDs: blockingValidationIDs,
+		NotableDecisions:      notableDecisions,
+		SystemicFindings:      systemicFindings,
+		RecommendedNext:       recommendedNext,
+		GuidanceUpdates:       guidanceUpdates,
+	})
+	if meta.Summary == "" && len(meta.PassedCriteria) == 0 && len(meta.FailedCriteria) == 0 && len(meta.WaivedValidationIDs) == 0 && len(meta.BlockingValidationIDs) == 0 && len(meta.NotableDecisions) == 0 && len(meta.SystemicFindings) == 0 && len(meta.RecommendedNext) == 0 && len(meta.GuidanceUpdates) == 0 {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.milestone.summary", protocol.ErrorCodeEARG, "summary details are required", map[string]any{
+			"hint": "Pass positional notes or --summary, and optionally add structured synthesis flags like --passed-criterion or --decision.",
+		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+
+	messages, err := store.ListRoomMessages(cmd.Context(), absWorkspace, roomID, roomTaskScanLimit)
+	if err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.milestone.summary", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	milestone := roomMilestoneViewByID(buildRoomMilestoneViews(messages), milestoneMsg.ID)
+	if milestone == nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.milestone.summary", protocol.ErrorCodeENotFound, fmt.Sprintf("milestone %q not found in room view", milestoneMsg.ID), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	allowedWaivedValidationIDs := make(map[string]struct{})
+	allowedBlockingValidationIDs := make(map[string]struct{})
+	for _, story := range mapSlice(milestone["stories"]) {
+		for _, validation := range mapSlice(story["validations"]) {
+			id := stringField(validation, "id")
+			if id == "" {
+				continue
+			}
+			switch stringField(validation, "status") {
+			case "waived":
+				allowedWaivedValidationIDs[id] = struct{}{}
+			}
+		}
+	}
+	for _, id := range stringSliceValue(milestone["blocking_validation_ids"]) {
+		if id != "" {
+			allowedBlockingValidationIDs[id] = struct{}{}
+		}
+	}
+	for _, id := range meta.WaivedValidationIDs {
+		if _, ok := allowedWaivedValidationIDs[id]; !ok {
+			return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.milestone.summary", protocol.ErrorCodeEARG, fmt.Sprintf("validation id %q is not attached to this milestone", id), map[string]any{
+				"hint": "Reference only waived story validation ids currently attached to accepted stories in this milestone.",
+				"id":   id,
+			}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+		}
+	}
+	for _, id := range meta.BlockingValidationIDs {
+		if _, ok := allowedBlockingValidationIDs[id]; !ok {
+			return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.milestone.summary", protocol.ErrorCodeEARG, fmt.Sprintf("validation id %q is not a current blocking validation for this milestone", id), map[string]any{
+				"hint": "Reference only current blocking validation ids surfaced by the milestone rollup.",
+				"id":   id,
+			}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+		}
 	}
 
 	msg := &agent.BoardMessage{
@@ -3119,7 +3426,7 @@ func runRoomMilestoneSummary(cmd *cobra.Command, workspace, sender, roomID, mile
 		Kind:             agent.BoardMessageKindMilestoneSummary,
 		Priority:         agent.DefaultPriority,
 		Subject:          "Milestone Summary: " + strings.TrimPrefix(strings.TrimSpace(milestoneMsg.Subject), "Milestone: "),
-		Body:             notes,
+		Body:             buildRoomMilestoneSummaryBody(meta),
 	}
 	if err := store.SendMessage(cmd.Context(), msg); err != nil {
 		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.milestone.summary", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
@@ -3292,6 +3599,105 @@ func runRoomStoryAccept(cmd *cobra.Command, workspace, sender, roomID, milestone
 		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.story.accept", protocol.ErrorCodeEARG, "story proposal does not belong to this milestone", nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
 	}
 	return runRoomStoryAdd(cmd, workspace, identity.Sender, roomID, milestoneID, strings.TrimPrefix(strings.TrimSpace(proposalMsg.Subject), "Story Proposal: "), proposalMeta.Description, firstNonEmpty(strings.TrimSpace(owner), strings.TrimSpace(proposalMeta.Owner)))
+}
+
+func runRoomStoryState(cmd *cobra.Command, workspace, sender, roomID, storyID, state, reason, blockedBy, reviewer string) error {
+	absWorkspace, identity, store, roomID, summary, err := prepareRoomAgileCommand(cmd, "agentctl.room.story", workspace, sender, roomID)
+	if err != nil {
+		return err
+	}
+	defer store.Close()
+
+	storyMsg, err := loadRoomAgileRoot(cmd.Context(), store, absWorkspace, roomID, storyID, agent.BoardMessageKindStory)
+	if err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.story.state", protocol.ErrorCodeENotFound, err.Error(), map[string]any{
+			"hint": "Accept or add the story first with `agentctl room story accept` or `agentctl room story add`.",
+		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	storyMeta := parseRoomStoryBody(storyMsg.Body)
+	if !roomMemberHasRole(summary.Members, identity.Sender, "coordinator") {
+		if owner := strings.TrimSpace(storyMeta.Owner); owner == "" || !sameRoomParticipant(owner, identity.Sender) {
+			return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.story.state", protocol.ErrorCodeEARG, "story lifecycle changes require the story owner or coordinator", map[string]any{
+				"hint": "Use the story owner account, or run the command as the room coordinator.",
+			}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+		}
+	}
+	state, err = normalizeRoomStoryState(state)
+	if err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.story.state", protocol.ErrorCodeEARG, err.Error(), map[string]any{
+			"hint": "Use one of: proposed, accepted, in_progress, in_review, validated, blocked, waived, done, deferred.",
+		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	reason = strings.TrimSpace(reason)
+	blockedBy = strings.TrimSpace(blockedBy)
+	reviewer = strings.TrimSpace(reviewer)
+	switch state {
+	case "blocked", "deferred":
+		if reason == "" {
+			return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.story.state", protocol.ErrorCodeEARG, fmt.Sprintf("%s stories require a reason", state), map[string]any{
+				"hint": "Pass --reason to explain why the story is blocked or deferred.",
+			}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+		}
+	}
+
+	messages, err := store.ListRoomMessages(cmd.Context(), absWorkspace, roomID, roomTaskScanLimit)
+	if err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.story.state", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	story := roomStoryViewByID(buildRoomStoryViews(messages), storyMsg.ID)
+	if story == nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.story.state", protocol.ErrorCodeENotFound, fmt.Sprintf("story %q not found in room view", storyMsg.ID), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	latestValidationStatus := stringField(story, "latest_validation_status")
+	switch state {
+	case "validated":
+		if latestValidationStatus != "pass" {
+			return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.story.state", protocol.ErrorCodeEARG, "validated story state requires the latest story validation status to be pass", map[string]any{
+				"hint": "Record a passing story validation first, or leave the story in a non-terminal execution state.",
+			}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+		}
+	case "waived":
+		if latestValidationStatus != "waived" {
+			return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.story.state", protocol.ErrorCodeEARG, "waived story state requires the latest story validation status to be waived", map[string]any{
+				"hint": "Record a waived story validation first so the lifecycle state and validation ledger do not contradict each other.",
+			}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+		}
+	case "done":
+		if latestValidationStatus != "pass" && latestValidationStatus != "waived" {
+			return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.story.state", protocol.ErrorCodeEARG, "done stories require the latest validation status to be pass or waived", map[string]any{
+				"hint": "Validate or explicitly waive the story before marking it done.",
+			}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+		}
+	}
+
+	msg := &agent.BoardMessage{
+		WorkspaceID:      absWorkspace,
+		RelatedMessageID: storyMsg.ID,
+		Stream:           agent.RoomStreamName(roomID),
+		Sender:           identity.Sender,
+		Recipient:        agent.BroadcastRecipient,
+		Kind:             agent.BoardMessageKindStoryState,
+		Priority:         agent.DefaultPriority,
+		Subject:          fmt.Sprintf("Story State (%s): %s", state, strings.TrimPrefix(strings.TrimSpace(storyMsg.Subject), "Story: ")),
+		Body:             buildRoomStoryStateBody(state, reason, blockedBy, reviewer),
+	}
+	if err := store.SendMessage(cmd.Context(), msg); err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.story.state", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	if milestoneID := strings.TrimSpace(storyMsg.RelatedMessageID); milestoneID != "" {
+		if milestoneMsg, err := loadRoomAgileRoot(cmd.Context(), store, absWorkspace, roomID, milestoneID, agent.BoardMessageKindMilestone); err == nil {
+			if milestoneMeta := parseRoomMilestoneBody(milestoneMsg.Body); strings.TrimSpace(milestoneMeta.EpicID) != "" {
+				if err := syncRoomAgileWorkpack(cmd.Context(), store, absWorkspace, roomID, milestoneMeta.EpicID); err != nil {
+					return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.story.state", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+				}
+			}
+		}
+	}
+	return protocol.WriteOK(cmd.OutOrStdout(), "agentctl.room.story.state", map[string]any{
+		"room_id":  roomID,
+		"story_id": storyMsg.ID,
+		"message":  msg,
+	}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
 }
 
 func runRoomStoryValidate(cmd *cobra.Command, workspace, sender, roomID, storyID, validatorType, status, summaryText, artifactPath, artifactDigest, commandText, notes string, relatedStoryIDs []string) error {
@@ -3883,25 +4289,39 @@ func parseRoomEpicQuestionBody(body string) roomEpicQuestionMeta {
 	return meta
 }
 
-func buildRoomMilestoneBody(epicID, title, goal, owner string, scope []string) string {
+func buildRoomMilestoneBody(epicID, title, goal, objective, owner string, scope, risks, exclusions, dependencies, validatorsExpected, exitCriteria []string) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "EpicID: %s\n", strings.TrimSpace(epicID))
-	fmt.Fprintf(&b, "Title: %s\n", strings.TrimSpace(title))
+	if strings.TrimSpace(epicID) != "" {
+		fmt.Fprintf(&b, "EpicID: %s\n", strings.TrimSpace(epicID))
+	}
+	if strings.TrimSpace(title) != "" {
+		fmt.Fprintf(&b, "Title: %s\n", strings.TrimSpace(title))
+	}
 	if strings.TrimSpace(goal) != "" {
 		fmt.Fprintf(&b, "Goal: %s\n", strings.TrimSpace(goal))
+	}
+	if strings.TrimSpace(objective) != "" {
+		fmt.Fprintf(&b, "Objective: %s\n", strings.TrimSpace(objective))
 	}
 	if strings.TrimSpace(owner) != "" {
 		fmt.Fprintf(&b, "Owner: %s\n", strings.TrimSpace(owner))
 	}
 	appendRoomSection(&b, "Scope", scope)
-	b.WriteString("Protocol:\n- add acceptance criteria\n- attach stories under the milestone\n- record pass/block review at the milestone boundary\n")
+	appendRoomSection(&b, "Risks", risks)
+	appendRoomSection(&b, "Exclusions", exclusions)
+	appendRoomSection(&b, "Dependencies", dependencies)
+	appendRoomSection(&b, "ValidatorsExpected", validatorsExpected)
+	appendRoomSection(&b, "ExitCriteria", exitCriteria)
+	if strings.TrimSpace(epicID) != "" || strings.TrimSpace(title) != "" {
+		b.WriteString("Protocol:\n- add acceptance criteria\n- attach stories under the milestone\n- record pass/block review at the milestone boundary\n")
+	}
 	return strings.TrimSpace(b.String())
 }
 
 func parseRoomMilestoneBody(body string) roomMilestoneMeta {
 	meta := roomMilestoneMeta{}
 	lines := strings.Split(body, "\n")
-	inScope := false
+	section := ""
 	for _, line := range lines {
 		trimmed := strings.TrimSpace(line)
 		if trimmed == "" {
@@ -3910,15 +4330,45 @@ func parseRoomMilestoneBody(body string) roomMilestoneMeta {
 		if strings.HasPrefix(trimmed, "Protocol:") {
 			break
 		}
-		if trimmed == "Scope:" {
-			inScope = true
+		switch trimmed {
+		case "Scope:":
+			section = "scope"
+			continue
+		case "Risks:":
+			section = "risks"
+			continue
+		case "Exclusions:":
+			section = "exclusions"
+			continue
+		case "Dependencies:":
+			section = "dependencies"
+			continue
+		case "ValidatorsExpected:":
+			section = "validators"
+			continue
+		case "ExitCriteria:":
+			section = "exit"
 			continue
 		}
-		if inScope && strings.HasPrefix(trimmed, "- ") {
-			meta.Scope = append(meta.Scope, strings.TrimSpace(strings.TrimPrefix(trimmed, "- ")))
+		if section != "" && strings.HasPrefix(trimmed, "- ") {
+			value := strings.TrimSpace(strings.TrimPrefix(trimmed, "- "))
+			switch section {
+			case "scope":
+				meta.Scope = append(meta.Scope, value)
+			case "risks":
+				meta.Risks = append(meta.Risks, value)
+			case "exclusions":
+				meta.Exclusions = append(meta.Exclusions, value)
+			case "dependencies":
+				meta.Dependencies = append(meta.Dependencies, value)
+			case "validators":
+				meta.ValidatorsExpected = append(meta.ValidatorsExpected, value)
+			case "exit":
+				meta.ExitCriteria = append(meta.ExitCriteria, value)
+			}
 			continue
 		}
-		inScope = false
+		section = ""
 		key, value, ok := strings.Cut(trimmed, ":")
 		if !ok {
 			continue
@@ -3929,9 +4379,103 @@ func parseRoomMilestoneBody(body string) roomMilestoneMeta {
 			meta.EpicID = value
 		case "Goal":
 			meta.Goal = value
+		case "Objective":
+			meta.Objective = value
 		case "Owner":
 			meta.Owner = value
 		}
+	}
+	return meta
+}
+
+func buildRoomMilestoneSummaryBody(meta roomMilestoneSummaryMeta) string {
+	var b strings.Builder
+	if strings.TrimSpace(meta.Summary) != "" {
+		fmt.Fprintf(&b, "Summary: %s\n", strings.TrimSpace(meta.Summary))
+	}
+	appendRoomSection(&b, "PassedCriteria", meta.PassedCriteria)
+	appendRoomSection(&b, "FailedCriteria", meta.FailedCriteria)
+	appendRoomSection(&b, "WaivedValidationIDs", meta.WaivedValidationIDs)
+	appendRoomSection(&b, "BlockingValidationIDs", meta.BlockingValidationIDs)
+	appendRoomSection(&b, "NotableDecisions", meta.NotableDecisions)
+	appendRoomSection(&b, "SystemicFindings", meta.SystemicFindings)
+	appendRoomSection(&b, "RecommendedNext", meta.RecommendedNext)
+	appendRoomSection(&b, "GuidanceUpdates", meta.GuidanceUpdates)
+	return strings.TrimSpace(b.String())
+}
+
+func parseRoomMilestoneSummaryBody(body string) roomMilestoneSummaryMeta {
+	meta := roomMilestoneSummaryMeta{}
+	legacyLines := make([]string, 0)
+	lines := strings.Split(body, "\n")
+	section := ""
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			continue
+		}
+		switch trimmed {
+		case "PassedCriteria:":
+			section = "passed"
+			continue
+		case "FailedCriteria:":
+			section = "failed"
+			continue
+		case "WaivedValidationIDs:":
+			section = "waived"
+			continue
+		case "BlockingValidationIDs:":
+			section = "blocking"
+			continue
+		case "NotableDecisions:":
+			section = "decisions"
+			continue
+		case "SystemicFindings:":
+			section = "findings"
+			continue
+		case "RecommendedNext:":
+			section = "next"
+			continue
+		case "GuidanceUpdates:":
+			section = "guidance"
+			continue
+		}
+		if section != "" && strings.HasPrefix(trimmed, "- ") {
+			value := strings.TrimSpace(strings.TrimPrefix(trimmed, "- "))
+			switch section {
+			case "passed":
+				meta.PassedCriteria = append(meta.PassedCriteria, value)
+			case "failed":
+				meta.FailedCriteria = append(meta.FailedCriteria, value)
+			case "waived":
+				meta.WaivedValidationIDs = append(meta.WaivedValidationIDs, value)
+			case "blocking":
+				meta.BlockingValidationIDs = append(meta.BlockingValidationIDs, value)
+			case "decisions":
+				meta.NotableDecisions = append(meta.NotableDecisions, value)
+			case "findings":
+				meta.SystemicFindings = append(meta.SystemicFindings, value)
+			case "next":
+				meta.RecommendedNext = append(meta.RecommendedNext, value)
+			case "guidance":
+				meta.GuidanceUpdates = append(meta.GuidanceUpdates, value)
+			}
+			continue
+		}
+		section = ""
+		key, value, ok := strings.Cut(trimmed, ":")
+		if !ok {
+			legacyLines = append(legacyLines, trimmed)
+			continue
+		}
+		if strings.TrimSpace(key) == "Summary" {
+			meta.Summary = strings.TrimSpace(value)
+			continue
+		}
+		legacyLines = append(legacyLines, trimmed)
+	}
+	if meta.Summary == "" && len(legacyLines) > 0 {
+		meta.Summary = strings.Join(legacyLines, "\n")
 	}
 	return meta
 }
@@ -4016,6 +4560,58 @@ func parseRoomStoryBody(body string) roomStoryMeta {
 	return meta
 }
 
+func normalizeRoomStoryState(raw string) (string, error) {
+	state := strings.TrimSpace(strings.ToLower(raw))
+	switch state {
+	case "proposed", "accepted", "in_progress", "in_review", "validated", "blocked", "waived", "done", "deferred":
+		return state, nil
+	default:
+		return "", fmt.Errorf("unsupported story state %q", raw)
+	}
+}
+
+func buildRoomStoryStateBody(state, reason, blockedBy, reviewer string) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "State: %s\n", strings.TrimSpace(state))
+	if strings.TrimSpace(reason) != "" {
+		fmt.Fprintf(&b, "Reason: %s\n", strings.TrimSpace(reason))
+	}
+	if strings.TrimSpace(blockedBy) != "" {
+		fmt.Fprintf(&b, "BlockedBy: %s\n", strings.TrimSpace(blockedBy))
+	}
+	if strings.TrimSpace(reviewer) != "" {
+		fmt.Fprintf(&b, "Reviewer: %s\n", strings.TrimSpace(reviewer))
+	}
+	return strings.TrimSpace(b.String())
+}
+
+func parseRoomStoryStateBody(body string) roomStoryStateMeta {
+	meta := roomStoryStateMeta{}
+	lines := strings.Split(body, "\n")
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			continue
+		}
+		key, value, ok := strings.Cut(trimmed, ":")
+		if !ok {
+			continue
+		}
+		value = strings.TrimSpace(value)
+		switch strings.TrimSpace(key) {
+		case "State":
+			meta.State = value
+		case "Reason":
+			meta.Reason = value
+		case "BlockedBy":
+			meta.BlockedBy = value
+		case "Reviewer":
+			meta.Reviewer = value
+		}
+	}
+	return meta
+}
+
 func normalizeRoomStoryValidatorType(raw string) (string, error) {
 	kind := strings.TrimSpace(strings.ToLower(raw))
 	switch kind {
@@ -4034,6 +4630,119 @@ func normalizeRoomStoryValidationStatus(raw string) (string, error) {
 	default:
 		return "", fmt.Errorf("unsupported story validation status %q", raw)
 	}
+}
+
+func normalizeRoomMilestoneValidatorTypes(values []string) ([]string, error) {
+	out := make([]string, 0, len(values))
+	seen := make(map[string]struct{})
+	for _, raw := range values {
+		if strings.TrimSpace(raw) == "" {
+			continue
+		}
+		kind, err := normalizeRoomStoryValidatorType(raw)
+		if err != nil {
+			return nil, err
+		}
+		if _, ok := seen[kind]; ok {
+			continue
+		}
+		seen[kind] = struct{}{}
+		out = append(out, kind)
+	}
+	sort.Strings(out)
+	return out, nil
+}
+
+func normalizeRoomList(items []string, sortItems bool) []string {
+	clean := cleanRoomItems(items)
+	if len(clean) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(clean))
+	seen := make(map[string]struct{}, len(clean))
+	for _, item := range clean {
+		if _, ok := seen[item]; ok {
+			continue
+		}
+		seen[item] = struct{}{}
+		out = append(out, item)
+	}
+	if sortItems {
+		sort.Strings(out)
+	}
+	return out
+}
+
+func normalizeRoomMilestoneContract(meta roomMilestoneMeta) (roomMilestoneMeta, error) {
+	meta.EpicID = strings.TrimSpace(meta.EpicID)
+	meta.Goal = strings.TrimSpace(meta.Goal)
+	meta.Objective = strings.TrimSpace(meta.Objective)
+	meta.Owner = strings.TrimSpace(meta.Owner)
+	meta.Scope = normalizeRoomList(meta.Scope, false)
+	meta.Risks = normalizeRoomList(meta.Risks, true)
+	meta.Exclusions = normalizeRoomList(meta.Exclusions, true)
+	meta.Dependencies = normalizeRoomList(meta.Dependencies, true)
+	validators, err := normalizeRoomMilestoneValidatorTypes(meta.ValidatorsExpected)
+	if err != nil {
+		return roomMilestoneMeta{}, err
+	}
+	meta.ValidatorsExpected = validators
+	meta.ExitCriteria = normalizeRoomList(meta.ExitCriteria, true)
+	return meta, nil
+}
+
+func mergeRoomList(base, patch []string, sortItems bool) []string {
+	if len(base) == 0 && len(patch) == 0 {
+		return nil
+	}
+	return normalizeRoomList(append(append([]string(nil), base...), patch...), sortItems)
+}
+
+func normalizeRoomMilestoneSummaryMeta(meta roomMilestoneSummaryMeta) roomMilestoneSummaryMeta {
+	meta.Summary = strings.TrimSpace(meta.Summary)
+	meta.PassedCriteria = normalizeRoomList(meta.PassedCriteria, false)
+	meta.FailedCriteria = normalizeRoomList(meta.FailedCriteria, false)
+	meta.WaivedValidationIDs = normalizeRoomList(meta.WaivedValidationIDs, true)
+	meta.BlockingValidationIDs = normalizeRoomList(meta.BlockingValidationIDs, true)
+	meta.NotableDecisions = normalizeRoomList(meta.NotableDecisions, false)
+	meta.SystemicFindings = normalizeRoomList(meta.SystemicFindings, false)
+	meta.RecommendedNext = normalizeRoomList(meta.RecommendedNext, false)
+	meta.GuidanceUpdates = normalizeRoomList(meta.GuidanceUpdates, false)
+	return meta
+}
+
+func mergeRoomMilestoneMeta(base roomMilestoneMeta, patch roomMilestoneMeta) roomMilestoneMeta {
+	if patch.EpicID != "" {
+		base.EpicID = patch.EpicID
+	}
+	if patch.Goal != "" {
+		base.Goal = patch.Goal
+	}
+	if patch.Objective != "" {
+		base.Objective = patch.Objective
+	}
+	if patch.Owner != "" {
+		base.Owner = patch.Owner
+	}
+	if len(patch.Scope) > 0 {
+		base.Scope = append([]string(nil), patch.Scope...)
+	}
+	if len(patch.Risks) > 0 {
+		base.Risks = mergeRoomList(base.Risks, patch.Risks, true)
+	}
+	if len(patch.Exclusions) > 0 {
+		base.Exclusions = mergeRoomList(base.Exclusions, patch.Exclusions, true)
+	}
+	if len(patch.Dependencies) > 0 {
+		base.Dependencies = mergeRoomList(base.Dependencies, patch.Dependencies, true)
+	}
+	if len(patch.ValidatorsExpected) > 0 {
+		base.ValidatorsExpected = mergeRoomList(base.ValidatorsExpected, patch.ValidatorsExpected, true)
+	}
+	if len(patch.ExitCriteria) > 0 {
+		base.ExitCriteria = mergeRoomList(base.ExitCriteria, patch.ExitCriteria, true)
+	}
+	return base
 }
 
 func buildRoomStoryValidationBody(epicID, milestoneID, storyID, validatorType, status, summaryText, artifactPath, artifactDigest, commandText, notes string, relatedStoryIDs []string) string {
@@ -4469,6 +5178,26 @@ func roomEpicViewByID(epics []map[string]any, epicID string) map[string]any {
 	return nil
 }
 
+func roomMilestoneViewByID(milestones []map[string]any, milestoneID string) map[string]any {
+	milestoneID = strings.TrimSpace(milestoneID)
+	for _, milestone := range milestones {
+		if stringField(milestone, "id") == milestoneID {
+			return milestone
+		}
+	}
+	return nil
+}
+
+func roomStoryViewByID(stories []map[string]any, storyID string) map[string]any {
+	storyID = strings.TrimSpace(storyID)
+	for _, story := range stories {
+		if stringField(story, "id") == storyID {
+			return story
+		}
+	}
+	return nil
+}
+
 func buildRoomEpicContinuity(room agent.RoomSummary, messages []agent.BoardMessage, epic map[string]any) map[string]any {
 	milestones := mapSlice(epic["milestones"])
 	currentMilestone := findCurrentRoomMilestone(milestones)
@@ -4892,6 +5621,7 @@ func buildRoomMilestoneViews(messages []agent.BoardMessage) []map[string]any {
 		storiesByMilestone[milestoneID] = append(storiesByMilestone[milestoneID], story)
 	}
 	criteriaByMilestone := make(map[string][]agent.BoardMessage)
+	contractsByMilestone := make(map[string][]agent.BoardMessage)
 	reviewsByMilestone := make(map[string][]agent.BoardMessage)
 	summariesByMilestone := make(map[string][]agent.BoardMessage)
 	for _, msg := range messages {
@@ -4902,6 +5632,8 @@ func buildRoomMilestoneViews(messages []agent.BoardMessage) []map[string]any {
 		switch msg.Kind {
 		case agent.BoardMessageKindAcceptanceCriteria:
 			criteriaByMilestone[related] = append(criteriaByMilestone[related], msg)
+		case agent.BoardMessageKindMilestoneContract:
+			contractsByMilestone[related] = append(contractsByMilestone[related], msg)
 		case agent.BoardMessageKindMilestoneReview:
 			reviewsByMilestone[related] = append(reviewsByMilestone[related], msg)
 		case agent.BoardMessageKindMilestoneSummary:
@@ -4914,7 +5646,43 @@ func buildRoomMilestoneViews(messages []agent.BoardMessage) []map[string]any {
 			continue
 		}
 		meta := parseRoomMilestoneBody(msg.Body)
+		for _, update := range contractsByMilestone[msg.ID] {
+			meta = mergeRoomMilestoneMeta(meta, parseRoomMilestoneBody(update.Body))
+		}
 		reviews := reviewsByMilestone[msg.ID]
+		summaryMessages := summariesByMilestone[msg.ID]
+		summaryViews := make([]map[string]any, 0, len(summaryMessages))
+		var latestSummaryMeta roomMilestoneSummaryMeta
+		for _, summaryMsg := range summaryMessages {
+			summaryMeta := normalizeRoomMilestoneSummaryMeta(parseRoomMilestoneSummaryBody(summaryMsg.Body))
+			summaryViews = append(summaryViews, map[string]any{
+				"id":         summaryMsg.ID,
+				"root":       summaryMsg,
+				"meta":       summaryMeta,
+				"summary":    summaryMeta.Summary,
+				"created_at": summaryMsg.CreatedAt.Format(time.RFC3339),
+				"created_by": strings.TrimSpace(summaryMsg.Sender),
+			})
+			latestSummaryMeta = summaryMeta
+		}
+		sort.Slice(summaryViews, func(i, j int) bool {
+			leftMsg, ok1 := summaryViews[i]["root"].(agent.BoardMessage)
+			rightMsg, ok2 := summaryViews[j]["root"].(agent.BoardMessage)
+			if !ok1 || !ok2 {
+				return stringField(summaryViews[i], "id") < stringField(summaryViews[j], "id")
+			}
+			if leftMsg.CreatedAt.Equal(rightMsg.CreatedAt) {
+				return leftMsg.ID < rightMsg.ID
+			}
+			return leftMsg.CreatedAt.Before(rightMsg.CreatedAt)
+		})
+		var latestSummary map[string]any
+		if len(summaryViews) > 0 {
+			latestSummary = summaryViews[len(summaryViews)-1]
+			if root := mapField(latestSummary, "root"); root != nil {
+				latestSummaryMeta = normalizeRoomMilestoneSummaryMeta(parseRoomMilestoneSummaryBody(stringField(root, "body")))
+			}
+		}
 		status := "active"
 		if len(reviews) > 0 {
 			latest := reviews[len(reviews)-1]
@@ -4928,6 +5696,10 @@ func buildRoomMilestoneViews(messages []agent.BoardMessage) []map[string]any {
 		stories := storiesByMilestone[msg.ID]
 		acceptedStories := 0
 		validatedStories := 0
+		inProgressStories := 0
+		inReviewStories := 0
+		doneStories := 0
+		deferredStories := 0
 		passedStories := 0
 		failedStories := 0
 		blockedStories := 0
@@ -4941,6 +5713,18 @@ func buildRoomMilestoneViews(messages []agent.BoardMessage) []map[string]any {
 			if covered, _ := story["covered"].(bool); covered {
 				validatedStories++
 			}
+			switch stringField(story, "state") {
+			case "in_progress":
+				inProgressStories++
+			case "in_review":
+				inReviewStories++
+			case "blocked":
+				blockedStories++
+			case "done":
+				doneStories++
+			case "deferred":
+				deferredStories++
+			}
 			latestStatus, _ := story["latest_validation_status"].(string)
 			switch latestStatus {
 			case "pass":
@@ -4948,7 +5732,9 @@ func buildRoomMilestoneViews(messages []agent.BoardMessage) []map[string]any {
 			case "fail":
 				failedStories++
 			case "blocked":
-				blockedStories++
+				if stringField(story, "state") != "blocked" {
+					blockedStories++
+				}
 			case "waived":
 				waivedStories++
 			}
@@ -4960,28 +5746,48 @@ func buildRoomMilestoneViews(messages []agent.BoardMessage) []map[string]any {
 		}
 		sort.Strings(blockingValidationIDs)
 		out = append(out, map[string]any{
-			"id":                      msg.ID,
-			"epic_id":                 meta.EpicID,
-			"title":                   strings.TrimPrefix(strings.TrimSpace(msg.Subject), "Milestone: "),
-			"status":                  status,
-			"workpack_dir":            roomAgileMilestoneWorkpackDir(meta.EpicID, msg.ID),
-			"root":                    msg,
-			"meta":                    meta,
-			"criteria":                criteriaByMilestone[msg.ID],
-			"criteria_count":          len(criteriaByMilestone[msg.ID]),
-			"reviews":                 reviews,
-			"review_count":            len(reviews),
-			"summaries":               summariesByMilestone[msg.ID],
-			"summary_count":           len(summariesByMilestone[msg.ID]),
-			"stories":                 stories,
-			"story_count":             len(stories),
-			"accepted_story_count":    acceptedStories,
-			"validated_story_count":   validatedStories,
-			"passed_story_count":      passedStories,
-			"failed_story_count":      failedStories,
-			"blocked_story_count":     blockedStories,
-			"waived_story_count":      waivedStories,
-			"blocking_validation_ids": blockingValidationIDs,
+			"id":                        msg.ID,
+			"epic_id":                   meta.EpicID,
+			"title":                     strings.TrimPrefix(strings.TrimSpace(msg.Subject), "Milestone: "),
+			"status":                    status,
+			"workpack_dir":              roomAgileMilestoneWorkpackDir(meta.EpicID, msg.ID),
+			"root":                      msg,
+			"meta":                      meta,
+			"contract":                  meta,
+			"contract_update_count":     len(contractsByMilestone[msg.ID]),
+			"criteria":                  criteriaByMilestone[msg.ID],
+			"criteria_count":            len(criteriaByMilestone[msg.ID]),
+			"reviews":                   reviews,
+			"review_count":              len(reviews),
+			"summaries":                 summaryViews,
+			"summary_count":             len(summaryViews),
+			"latest_summary":            latestSummary,
+			"summary_meta":              latestSummaryMeta,
+			"stories":                   stories,
+			"story_count":               len(stories),
+			"accepted_story_count":      acceptedStories,
+			"validated_story_count":     validatedStories,
+			"in_progress_story_count":   inProgressStories,
+			"in_review_story_count":     inReviewStories,
+			"done_story_count":          doneStories,
+			"deferred_story_count":      deferredStories,
+			"passed_story_count":        passedStories,
+			"failed_story_count":        failedStories,
+			"blocked_story_count":       blockedStories,
+			"waived_story_count":        waivedStories,
+			"risk_count":                len(meta.Risks),
+			"dependency_count":          len(meta.Dependencies),
+			"validator_count":           len(meta.ValidatorsExpected),
+			"exit_criteria_count":       len(meta.ExitCriteria),
+			"passed_criteria_count":     len(latestSummaryMeta.PassedCriteria),
+			"failed_criteria_count":     len(latestSummaryMeta.FailedCriteria),
+			"waived_validation_count":   len(latestSummaryMeta.WaivedValidationIDs),
+			"blocking_validation_count": len(latestSummaryMeta.BlockingValidationIDs),
+			"decision_count":            len(latestSummaryMeta.NotableDecisions),
+			"finding_count":             len(latestSummaryMeta.SystemicFindings),
+			"recommended_next_count":    len(latestSummaryMeta.RecommendedNext),
+			"guidance_update_count":     len(latestSummaryMeta.GuidanceUpdates),
+			"blocking_validation_ids":   blockingValidationIDs,
 			"coverage": map[string]any{
 				"validated": validatedStories,
 				"accepted":  acceptedStories,
@@ -5006,8 +5812,20 @@ func buildRoomStoryViews(messages []agent.BoardMessage) []map[string]any {
 		milestoneEpicByID[msg.ID] = strings.TrimSpace(meta.EpicID)
 	}
 	validationsByStory := make(map[string][]map[string]any)
+	statesByStory := make(map[string][]map[string]any)
 	for _, msg := range messages {
 		if msg.Kind != agent.BoardMessageKindStoryValidation {
+			if msg.Kind == agent.BoardMessageKindStoryState {
+				meta := parseRoomStoryStateBody(msg.Body)
+				statesByStory[strings.TrimSpace(msg.RelatedMessageID)] = append(statesByStory[strings.TrimSpace(msg.RelatedMessageID)], map[string]any{
+					"id":         msg.ID,
+					"root":       msg,
+					"meta":       meta,
+					"state":      meta.State,
+					"created_at": msg.CreatedAt.Format(time.RFC3339),
+					"created_by": strings.TrimSpace(msg.Sender),
+				})
+			}
 			continue
 		}
 		meta := parseRoomStoryValidationBody(msg.Body)
@@ -5033,6 +5851,7 @@ func buildRoomStoryViews(messages []agent.BoardMessage) []map[string]any {
 				"milestone_id": strings.TrimSpace(msg.RelatedMessageID),
 				"title":        strings.TrimPrefix(strings.TrimSpace(msg.Subject), "Story Proposal: "),
 				"status":       "proposed",
+				"state":        "proposed",
 				"root":         msg,
 				"meta":         meta,
 			})
@@ -5042,12 +5861,31 @@ func buildRoomStoryViews(messages []agent.BoardMessage) []map[string]any {
 		milestoneID := strings.TrimSpace(msg.RelatedMessageID)
 		epicID := milestoneEpicByID[milestoneID]
 		validations := validationsByStory[msg.ID]
-		summary := summarizeRoomStoryValidations(validations)
+		validationSummary := summarizeRoomStoryValidations(validations)
+		stateSummary := summarizeRoomStoryStates(statesByStory[msg.ID])
+		state := "accepted"
+		if stateSummary.State != "" {
+			state = stateSummary.State
+		} else {
+			switch validationSummary.LatestStatus {
+			case "pass":
+				state = "validated"
+			case "waived":
+				state = "waived"
+			}
+		}
 		out = append(out, map[string]any{
 			"id":                       msg.ID,
 			"milestone_id":             milestoneID,
 			"title":                    strings.TrimPrefix(strings.TrimSpace(msg.Subject), "Story: "),
 			"status":                   "accepted",
+			"state":                    state,
+			"state_reason":             stateSummary.Reason,
+			"blocked_by":               stateSummary.BlockedBy,
+			"reviewer":                 stateSummary.Reviewer,
+			"state_update_count":       len(stateSummary.StateHistory),
+			"state_history":            stateSummary.StateHistory,
+			"latest_state_id":          stateSummary.LatestID,
 			"epic_id":                  epicID,
 			"workpack_dir":             roomAgileStoryWorkpackDir(epicID, milestoneID, msg.ID),
 			"validation_dir":           roomAgileStoryValidationDir(epicID, milestoneID, msg.ID),
@@ -5056,13 +5894,13 @@ func buildRoomStoryViews(messages []agent.BoardMessage) []map[string]any {
 			"meta":                     meta,
 			"validations":              validations,
 			"validation_count":         len(validations),
-			"latest_validation_status": summary.LatestStatus,
-			"latest_validation_id":     summary.LatestID,
-			"effective_validations":    summary.EffectiveValidations,
-			"covered":                  summary.Covered,
-			"has_failures":             summary.HasFailures,
-			"has_blockers":             summary.HasBlockers,
-			"waived":                   summary.WaivedOnly,
+			"latest_validation_status": validationSummary.LatestStatus,
+			"latest_validation_id":     validationSummary.LatestID,
+			"effective_validations":    validationSummary.EffectiveValidations,
+			"covered":                  validationSummary.Covered,
+			"has_failures":             validationSummary.HasFailures,
+			"has_blockers":             validationSummary.HasBlockers,
+			"waived":                   validationSummary.WaivedOnly,
 		})
 	}
 	sort.Slice(out, func(i, j int) bool {
@@ -5081,6 +5919,15 @@ type roomStoryValidationSummary struct {
 	HasFailures          bool
 	HasBlockers          bool
 	WaivedOnly           bool
+}
+
+type roomStoryStateSummary struct {
+	State        string
+	Reason       string
+	BlockedBy    string
+	Reviewer     string
+	LatestID     string
+	StateHistory []map[string]any
 }
 
 func summarizeRoomStoryValidations(validations []map[string]any) roomStoryValidationSummary {
@@ -5152,6 +5999,31 @@ func summarizeRoomStoryValidations(validations []map[string]any) roomStoryValida
 		summary.LatestStatus = "pass"
 	} else if hasWaived {
 		summary.LatestStatus = "waived"
+	}
+	return summary
+}
+
+func summarizeRoomStoryStates(states []map[string]any) roomStoryStateSummary {
+	summary := roomStoryStateSummary{StateHistory: make([]map[string]any, 0, len(states))}
+	if len(states) == 0 {
+		return summary
+	}
+	sort.Slice(states, func(i, j int) bool {
+		left := states[i]["root"].(agent.BoardMessage)
+		right := states[j]["root"].(agent.BoardMessage)
+		if left.CreatedAt.Equal(right.CreatedAt) {
+			return stringField(states[i], "id") < stringField(states[j], "id")
+		}
+		return left.CreatedAt.Before(right.CreatedAt)
+	})
+	for _, state := range states {
+		summary.StateHistory = append(summary.StateHistory, state)
+		last := anyMap(state["meta"])
+		summary.State = stringField(last, "state")
+		summary.Reason = stringField(last, "reason")
+		summary.BlockedBy = stringField(last, "blocked_by")
+		summary.Reviewer = stringField(last, "reviewer")
+		summary.LatestID = stringField(state, "id")
 	}
 	return summary
 }
@@ -5469,10 +6341,18 @@ func renderRoomMilestoneMarkdown(milestone map[string]any) string {
 		if goal := stringField(meta, "goal"); goal != "" {
 			fmt.Fprintf(&b, "- Goal: %s\n", goal)
 		}
+		if objective := stringField(meta, "objective"); objective != "" {
+			fmt.Fprintf(&b, "- Objective: %s\n", objective)
+		}
 		if owner := stringField(meta, "owner"); owner != "" {
 			fmt.Fprintf(&b, "- Owner: %s\n", owner)
 		}
 		appendMarkdownList(&b, "Scope", stringSliceField(meta, "scope"))
+		appendMarkdownList(&b, "Risks", stringSliceField(meta, "risks"))
+		appendMarkdownList(&b, "Exclusions", stringSliceField(meta, "exclusions"))
+		appendMarkdownList(&b, "Dependencies", stringSliceField(meta, "dependencies"))
+		appendMarkdownList(&b, "Validators Expected", stringSliceField(meta, "validators_expected"))
+		appendMarkdownList(&b, "Exit Criteria", stringSliceField(meta, "exit_criteria"))
 	}
 	return b.String()
 }
@@ -5501,17 +6381,20 @@ func renderRoomMilestoneSummaryMarkdown(milestone map[string]any) string {
 	fmt.Fprintf(&b, "- Failed story count: `%d`\n", intField(milestone, "failed_story_count"))
 	fmt.Fprintf(&b, "- Blocked story count: `%d`\n", intField(milestone, "blocked_story_count"))
 	fmt.Fprintf(&b, "- Waived story count: `%d`\n", intField(milestone, "waived_story_count"))
-	if ids := stringSliceValue(milestone["blocking_validation_ids"]); len(ids) > 0 {
+	if summaryMeta := anyMap(milestone["summary_meta"]); summaryMeta != nil {
+		if summary := stringField(summaryMeta, "summary"); summary != "" {
+			fmt.Fprintf(&b, "\n## Summary\n\n%s\n", summary)
+		}
+		appendMarkdownList(&b, "Passed Criteria", stringSliceField(summaryMeta, "passed_criteria"))
+		appendMarkdownList(&b, "Failed Criteria", stringSliceField(summaryMeta, "failed_criteria"))
+		appendMarkdownList(&b, "Waived Validations", stringSliceField(summaryMeta, "waived_validation_ids"))
+		appendMarkdownList(&b, "Blocking Validations", stringSliceField(summaryMeta, "blocking_validation_ids"))
+		appendMarkdownList(&b, "Notable Decisions", stringSliceField(summaryMeta, "notable_decisions"))
+		appendMarkdownList(&b, "Systemic Findings", stringSliceField(summaryMeta, "systemic_findings"))
+		appendMarkdownList(&b, "Recommended Next", stringSliceField(summaryMeta, "recommended_next"))
+		appendMarkdownList(&b, "Guidance Updates", stringSliceField(summaryMeta, "guidance_updates"))
+	} else if ids := stringSliceValue(milestone["blocking_validation_ids"]); len(ids) > 0 {
 		appendMarkdownList(&b, "Blocking validation ids", ids)
-	}
-	for _, summary := range mapSlice(milestone["summaries"]) {
-		root := mapField(summary, "root")
-		if root == nil {
-			root = summary
-		}
-		if body := stringField(root, "body"); body != "" {
-			fmt.Fprintf(&b, "\n## Summary Note\n\n%s\n", body)
-		}
 	}
 	return b.String()
 }
@@ -5521,9 +6404,19 @@ func renderRoomStoryMarkdown(story map[string]any) string {
 	fmt.Fprintf(&b, "# Story %s\n\n", stringField(story, "title"))
 	fmt.Fprintf(&b, "- ID: `%s`\n", stringField(story, "id"))
 	fmt.Fprintf(&b, "- Milestone ID: `%s`\n", stringField(story, "milestone_id"))
+	fmt.Fprintf(&b, "- State: `%s`\n", stringField(story, "state"))
 	fmt.Fprintf(&b, "- Validation count: `%d`\n", intField(story, "validation_count"))
 	if latest := stringField(story, "latest_validation_status"); latest != "" {
 		fmt.Fprintf(&b, "- Latest validation status: `%s`\n", latest)
+	}
+	if reason := stringField(story, "state_reason"); reason != "" {
+		fmt.Fprintf(&b, "- State reason: %s\n", reason)
+	}
+	if blockedBy := stringField(story, "blocked_by"); blockedBy != "" {
+		fmt.Fprintf(&b, "- Blocked by: `%s`\n", blockedBy)
+	}
+	if reviewer := stringField(story, "reviewer"); reviewer != "" {
+		fmt.Fprintf(&b, "- Reviewer: `%s`\n", reviewer)
 	}
 	if meta := anyMap(story["meta"]); meta != nil {
 		if owner := stringField(meta, "owner"); owner != "" {
@@ -5531,6 +6424,19 @@ func renderRoomStoryMarkdown(story map[string]any) string {
 		}
 		if desc := stringField(meta, "description"); desc != "" {
 			fmt.Fprintf(&b, "\n## Description\n\n%s\n", desc)
+		}
+	}
+	if history := mapSlice(story["state_history"]); len(history) > 0 {
+		fmt.Fprintf(&b, "\n## State History\n")
+		for _, item := range history {
+			meta := anyMap(item["meta"])
+			state := stringField(meta, "state")
+			reason := stringField(meta, "reason")
+			if reason != "" {
+				fmt.Fprintf(&b, "- `%s`: %s\n", state, reason)
+			} else {
+				fmt.Fprintf(&b, "- `%s`\n", state)
+			}
 		}
 	}
 	return b.String()
@@ -8189,6 +9095,46 @@ type roomRelayResult struct {
 	Error          string   `json:"error,omitempty"`
 }
 
+func defaultRoomRelayOptions() roomRelayOptions {
+	return roomRelayOptions{Backend: "auto"}
+}
+
+// relayPersistedRoomMessages fans out already-stored messages to mux panes (tmux/zellij auto),
+// using the same path as room loop / room relay. Delivery injects a trailing newline/Enter so the
+// agent surface accepts the relayed text without a separate submit step.
+func relayPersistedRoomMessages(ctx context.Context, boardStore blackboard.BoardStore, absWorkspace, roomID string, msgs []*agent.BoardMessage) []roomRelayResult {
+	summary, err := boardStore.GetRoom(ctx, absWorkspace, strings.TrimSpace(roomID), "")
+	if err != nil {
+		return []roomRelayResult{{Backend: "auto", Error: err.Error()}}
+	}
+	client := tmuxbridge.New()
+	relay := defaultRoomRelayOptions()
+	out := make([]roomRelayResult, 0, len(msgs))
+	for _, m := range msgs {
+		if m == nil {
+			continue
+		}
+		out = append(out, relayRoomMessage(ctx, client, summary, *m, relay))
+	}
+	return out
+}
+
+// roomSendRelayHook runs after a successful room send to fan out to participant mux panes. Tests may replace it.
+var roomSendRelayHook = relayPersistedRoomMessages
+
+// roomTaskNoLiveRelay is true when `room task --no-live-relay` was set (skip mux fan-out because
+// a long-running room loop/relay already delivers new messages).
+func roomTaskNoLiveRelay(cmd *cobra.Command) bool {
+	if cmd == nil {
+		return false
+	}
+	v, err := cmd.Flags().GetBool("no-live-relay")
+	if err != nil {
+		return false
+	}
+	return v
+}
+
 type roomRelayOptions struct {
 	Backend          string
 	ZellijSession    string
@@ -8245,10 +9191,20 @@ func relayRoomMessageAuto(ctx context.Context, client *tmuxbridge.Client, room a
 
 func relayRoomMessageTmux(ctx context.Context, client *tmuxbridge.Client, room agent.RoomSummary, msg agent.BoardMessage) roomRelayResult {
 	result := roomRelayResult{Backend: "tmux"}
-	targets, skipped := collectRoomRelayTargets(room, msg)
+	members, skipped := collectRoomRelayMembers(room, msg)
 	result.SkippedMembers = append(result.SkippedMembers, skipped...)
-	for _, target := range targets {
-		_, err := client.DeliverTextWithOptions(ctx, target, formatRoomRelayContent(room, msg), tmuxbridge.DeliverOptions{Interrupt: msg.Interrupt})
+	content := formatRoomRelayContent(room, msg)
+	for _, member := range members {
+		if roomMemberRelayBackend(member) != "tmux" {
+			continue
+		}
+		target := roomMemberTmuxTarget(member)
+		if strings.TrimSpace(target) == "" {
+			result.FailedCount++
+			result.FailedMembers = append(result.FailedMembers, strings.TrimSpace(member.ActorID))
+			continue
+		}
+		_, err := client.DeliverTextWithOptions(ctx, target, content, tmuxbridge.DeliverOptions{Interrupt: msg.Interrupt})
 		if err != nil {
 			result.FailedCount++
 			result.FailedMembers = append(result.FailedMembers, target)
@@ -8282,10 +9238,16 @@ func formatRoomRelayContent(room agent.RoomSummary, msg agent.BoardMessage) stri
 		prefix += " interrupt"
 	}
 	prefix += "]"
+	var main string
 	if subject != "" && body != subject {
-		return fmt.Sprintf("%s %s\n%s", prefix, subject, body)
+		main = fmt.Sprintf("%s %s\n%s", prefix, subject, body)
+	} else {
+		main = fmt.Sprintf("%s %s", prefix, body)
 	}
-	return fmt.Sprintf("%s %s", prefix, body)
+	if msg.AckRequired || msg.ReplyExpected {
+		main += "\nAction: open your inbox (`agentctl room inbox <room> --actor <you>`), acknowledge if required, then reply or complete the requested follow-up."
+	}
+	return main
 }
 
 func buildRoomInboxEntries(actorID string, messages []agent.BoardMessage, filter string, includeBroadcasts bool) []roomInboxEntry {
@@ -8967,8 +9929,87 @@ func taskIsStale(task taskstore.Task, now time.Time, staleAfter time.Duration) b
 	return now.Sub(reference) > staleAfter
 }
 
-func collectRoomRelayTargets(room agent.RoomSummary, msg agent.BoardMessage) ([]string, []string) {
-	targets := make([]string, 0, len(room.Members))
+func findRoomMemberForMuxSubmit(summary agent.RoomSummary, target string) (agent.RoomMember, bool) {
+	target = strings.TrimSpace(target)
+	if target == "" {
+		return agent.RoomMember{}, false
+	}
+	for _, m := range summary.Members {
+		m = normalizeRoomMember(m)
+		if sameRoomParticipant(m.ActorID, target) {
+			return m, true
+		}
+	}
+	return agent.RoomMember{}, false
+}
+
+// muxSubmitForRoomMember runs mux submit against the pane binding stored on a room member.
+func muxSubmitForRoomMember(ctx context.Context, member agent.RoomMember, submitMode string) (any, string, error) {
+	member = normalizeRoomMember(member)
+	switch roomMemberRelayBackend(member) {
+	case "zellij":
+		session, _, ok := resolveRoomMemberZellijTarget(member)
+		if !ok || strings.TrimSpace(session) == "" {
+			return nil, "", fmt.Errorf("member %q has no resolvable zellij session", member.ActorID)
+		}
+		pane := strings.TrimSpace(member.PaneID)
+		if pane == "" {
+			if _, p, ok := parseZellijParticipantID(member.ActorID); ok {
+				pane = p
+			}
+		}
+		pane = normalizeZellijPaneID(pane)
+		res, err := zellijbridge.New().Submit(ctx, session, zellijbridge.SubmitOptions{Mode: submitMode, PaneID: pane})
+		if err != nil {
+			return nil, "", err
+		}
+		return res, "zellij", nil
+	default:
+		target := roomMemberTmuxTarget(member)
+		if strings.TrimSpace(target) == "" {
+			return nil, "", fmt.Errorf("member %q has no tmux pane target", member.ActorID)
+		}
+		res, err := tmuxbridge.New().Submit(ctx, target, tmuxbridge.SubmitOptions{Mode: submitMode})
+		if err != nil {
+			return nil, "", err
+		}
+		return res, "tmux", nil
+	}
+}
+
+// relayRecipientMatchesMember reports whether a direct message's recipient should be relayed to this
+// member's mux pane. It must stay consistent with send-time validation (roomHasParticipant): timeline
+// traffic may use stable labels (e.g. human-a) while membership rows store tmux participant ids for
+// the same pane, so sameRoomParticipant(actor_id, recipient) alone is not enough.
+func relayRecipientMatchesMember(room agent.RoomSummary, member agent.RoomMember, recipient string) bool {
+	recipient = strings.TrimSpace(recipient)
+	if recipient == "" || recipient == agent.BroadcastRecipient {
+		return true
+	}
+	member = normalizeRoomMember(member)
+	actorID := strings.TrimSpace(member.ActorID)
+	if actorID == "" {
+		return false
+	}
+	if sameRoomParticipant(actorID, recipient) {
+		return true
+	}
+	if pane := strings.TrimSpace(member.PaneID); pane != "" && recipient == pane {
+		return true
+	}
+	if ref, ok := tmuxbridge.ParseParticipantID(actorID); ok && recipient == ref.Target {
+		return true
+	}
+	// Common handoff: direct sends use "human-a" while the coordinator row stores tmux:session:pane.
+	if recipient == "human-a" && strings.EqualFold(strings.TrimSpace(member.Role), "coordinator") {
+		return true
+	}
+	return false
+}
+
+// collectRoomRelayMembers returns room members that should receive this relay (same routing as targets).
+func collectRoomRelayMembers(room agent.RoomSummary, msg agent.BoardMessage) ([]agent.RoomMember, []string) {
+	members := make([]agent.RoomMember, 0, len(room.Members))
 	skipped := make([]string, 0, len(room.Members))
 	recipient := normalizeRoomRecipient(msg.Recipient)
 	for _, member := range room.Members {
@@ -8981,12 +10022,20 @@ func collectRoomRelayTargets(room agent.RoomSummary, msg agent.BoardMessage) ([]
 			skipped = append(skipped, actorID)
 			continue
 		}
-		if recipient != agent.BroadcastRecipient && !sameRoomParticipant(actorID, recipient) {
+		if recipient != agent.BroadcastRecipient && !relayRecipientMatchesMember(room, member, recipient) {
 			skipped = append(skipped, actorID)
 			continue
 		}
-		target := roomMemberTmuxTarget(member)
-		targets = append(targets, target)
+		members = append(members, member)
+	}
+	return members, skipped
+}
+
+func collectRoomRelayTargets(room agent.RoomSummary, msg agent.BoardMessage) ([]string, []string) {
+	members, skipped := collectRoomRelayMembers(room, msg)
+	targets := make([]string, 0, len(members))
+	for _, member := range members {
+		targets = append(targets, roomMemberTmuxTarget(member))
 	}
 	return targets, skipped
 }
@@ -9007,7 +10056,7 @@ func collectRoomRelayTargetsByBackend(room agent.RoomSummary, msg agent.BoardMes
 			skipped = append(skipped, target)
 			continue
 		}
-		if recipient != agent.BroadcastRecipient && !sameRoomParticipant(target, recipient) {
+		if recipient != agent.BroadcastRecipient && !relayRecipientMatchesMember(room, member, recipient) {
 			skipped = append(skipped, target)
 			continue
 		}

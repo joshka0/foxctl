@@ -126,6 +126,37 @@ agentctl room epic next <room-id> <epic-id> --actor <you>
 agentctl room milestone start <room-id> <epic-id> --proposal <proposal-id>
 ```
 
+Prefer attaching the milestone contract at creation time for non-trivial work:
+
+```bash
+agentctl room milestone start <room-id> <epic-id> --proposal <proposal-id> \
+  --objective "Make story validation and work-pack sync operational." \
+  --risk "Multi-epic rooms may overcount unrelated interview sessions." \
+  --exclude "GUI changes" \
+  --dependency "epic finalized" \
+  --validator review \
+  --validator test \
+  --exit "accepted stories are validated"
+```
+
+If the contract changes later, update it explicitly instead of smuggling those changes into summary text:
+
+```bash
+agentctl room milestone contract <room-id> <milestone-id> \
+  --objective "..." \
+  --risk "..." \
+  --dependency "..." \
+  --validator review \
+  --exit "..."
+```
+
+Behavior:
+
+- `--objective` replaces the objective narrative when provided
+- repeated list flags on `milestone contract` are cumulative for the fields you pass
+- cumulative list fields are unioned, deduped, and stable-sorted
+- omitted fields remain unchanged
+
 Then add explicit acceptance criteria:
 
 ```bash
@@ -148,21 +179,58 @@ agentctl room story accept <room-id> <milestone-id> <story-proposal-id>
 
 Use `story add` only when a proposal step would add no value.
 
-### 7. Review and synthesize the milestone
+### 7. Track execution state explicitly
+
+Use `story state` for execution lifecycle, not proof:
+
+```bash
+agentctl room story state <room-id> <story-id> in_progress \
+  --reason "Started implementation"
+
+agentctl room story state <room-id> <story-id> in_review \
+  --reason "Ready for review" \
+  --reviewer human-a
+
+agentctl room story state <room-id> <story-id> blocked \
+  --reason "Waiting on cross-story decision" \
+  --blocked-by milestone-summary
+```
+
+Rules:
+
+- `story state` is append-only
+- use it for execution state, not proof
+- `blocked` and `deferred` require `--reason`
+- `done` requires the latest story validation status to be `pass` or `waived`
+- `validated` and `waived` story states must not contradict the latest story validation
+- milestone `validated_story_count` remains proof/coverage-based, not strictly `state == validated`
+### 8. Review and synthesize the milestone
 
 ```bash
 agentctl room milestone review <room-id> <milestone-id> pass \
   "Foundation slice met the milestone criteria"
 
 agentctl room milestone summary <room-id> <milestone-id> \
-  "Review synthesis: the milestone passed, accepted stories are clear, and the next tranche can start."
+  --summary "Review synthesis: the milestone passed, accepted stories are clear, and the next tranche can start." \
+  --passed-criterion "Accepted stories are validated" \
+  --decision "Keep summary separate from proof" \
+  --finding "Room follow-ups should be acked when no reply is needed" \
+  --next "Start the story lifecycle slice" \
+  --guidance "Use milestone summary for synthesis, not proof"
 ```
 
 `milestone review` is the verdict.
 
 `milestone summary` is the durable synthesis.
 
-### 8. Attach validation to accepted stories
+Rules:
+
+- positional `milestone summary <room> <milestone> "<notes>"` still works as shorthand
+- if both positional notes and `--summary` are provided, `--summary` wins
+- `blocking_validation_ids` and `waived_validation_ids` must reference existing story validations in the same milestone
+- summary should summarize or reference proof, not paste large validation bodies or artifacts
+
+### 9. Attach validation to accepted stories
 
 Use story-level validation as the primary proof unit:
 
@@ -182,7 +250,7 @@ Rules:
 - `waived` requires explicit waiver notes and owner/coordinator authority
 - related stories must resolve inside the same milestone for the current slice
 
-### 9. Let the work-pack mirror stay in sync
+### 10. Let the work-pack mirror stay in sync
 
 After epic, milestone, story, review, summary, and validation writes, agentctl materializes:
 
@@ -202,7 +270,7 @@ agentctl room workpack show <room-id> <epic-id>
 agentctl room workpack sync <room-id> <epic-id> --sender human-a
 ```
 
-### 10. Keep the epic delivery log current
+### 11. Keep the epic delivery log current
 
 ```bash
 agentctl room log append <room-id> <epic-id> "Foundation landed" \
@@ -217,6 +285,7 @@ agentctl room log append <room-id> <epic-id> "Foundation landed" \
 - use `epic shape` before improvising milestones
 - prefer `milestone start --proposal`
 - prefer `story propose` then `story accept` for non-trivial work
+- use `story state` to make in-progress, review, blocked, and deferred work durable
 - treat `story validate` as required closure evidence, not an optional afterthought
 - write `milestone summary` after reviews so the next session does not need to reconstruct conclusions
 - keep `log append` current at tranche boundaries
@@ -227,6 +296,7 @@ agentctl room log append <room-id> <epic-id> "Foundation landed" \
 - after a long gap, read `epic resume` and `epic next` before reconstructing state manually
 - if intake is still open, answer epic questions instead of starting implementation
 - if a story is only proposed, wait for acceptance before treating it as committed execution scope
+- when work starts or stalls, update `story state` instead of relying on chat context alone
 - once a story is implemented, attach validation before calling it done
 - keep detailed work notes in room tasks; keep scope/acceptance decisions in the agile layer
 

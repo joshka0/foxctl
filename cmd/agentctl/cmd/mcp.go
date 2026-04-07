@@ -1574,7 +1574,7 @@ func registerRoomTools(s *server.MCPServer) {
 
 	s.AddTool(
 		mcp.NewTool("room_agile",
-			mcp.WithDescription("Command-backed agile room protocol. Actions: epic_start, epic_ask, epic_answer, epic_finalize, epic_shape, epic_show, epic_resume, epic_next, milestone_start, milestone_criteria, milestone_review, milestone_summary, milestone_show, story_propose, story_accept, story_add, story_validate, story_show, log_append, log_show, workpack_show, workpack_sync."),
+			mcp.WithDescription("Command-backed agile room protocol. Actions: epic_start, epic_ask, epic_answer, epic_finalize, epic_shape, epic_show, epic_resume, epic_next, milestone_start, milestone_contract, milestone_criteria, milestone_review, milestone_summary, milestone_show, story_propose, story_accept, story_add, story_state, story_validate, story_show, log_append, log_show, workpack_show, workpack_sync."),
 			mcp.WithString("action", mcp.Required(), mcp.Description("Agile room action to run")),
 			mcp.WithString("workspace", mcp.Description("Workspace root override (default: .)")),
 			mcp.WithString("room_id", mcp.Description("Room id")),
@@ -4204,9 +4204,29 @@ func handleRoomAgileTool(ctx context.Context, req mcp.CallToolRequest) (*mcp.Cal
 		argv = appendStringFlagArgs(argv, "--workspace", workspace)
 		argv = appendStringFlagArgs(argv, "--sender", getStringArg(args, "sender", ""))
 		argv = appendStringFlagArgs(argv, "--goal", getStringArg(args, "goal", ""))
+		argv = appendStringFlagArgs(argv, "--objective", getStringArg(args, "objective", ""))
 		argv = appendStringFlagArgs(argv, "--owner", getStringArg(args, "owner", ""))
 		argv = appendStringSliceFlagArgs(argv, "--scope", getStringSliceArg(args, "scope"))
+		argv = appendStringSliceFlagArgs(argv, "--risk", getStringSliceArg(args, "risk"))
+		argv = appendStringSliceFlagArgs(argv, "--exclude", getStringSliceArg(args, "exclude"))
+		argv = appendStringSliceFlagArgs(argv, "--dependency", getStringSliceArg(args, "dependency"))
+		argv = appendStringSliceFlagArgs(argv, "--validator", getStringSliceArg(args, "validator"))
+		argv = appendStringSliceFlagArgs(argv, "--exit", getStringSliceArg(args, "exit"))
 		argv = appendStringFlagArgs(argv, "--proposal", proposalID)
+	case "milestone_contract":
+		milestoneID := getStringArg(args, "milestone_id", "")
+		if milestoneID == "" {
+			return mcp.NewToolResultError("milestone_id is required for room_agile milestone_contract"), nil
+		}
+		argv = []string{"milestone", "contract", roomID, milestoneID}
+		argv = appendStringFlagArgs(argv, "--workspace", workspace)
+		argv = appendStringFlagArgs(argv, "--sender", getStringArg(args, "sender", ""))
+		argv = appendStringFlagArgs(argv, "--objective", getStringArg(args, "objective", ""))
+		argv = appendStringSliceFlagArgs(argv, "--risk", getStringSliceArg(args, "risk"))
+		argv = appendStringSliceFlagArgs(argv, "--exclude", getStringSliceArg(args, "exclude"))
+		argv = appendStringSliceFlagArgs(argv, "--dependency", getStringSliceArg(args, "dependency"))
+		argv = appendStringSliceFlagArgs(argv, "--validator", getStringSliceArg(args, "validator"))
+		argv = appendStringSliceFlagArgs(argv, "--exit", getStringSliceArg(args, "exit"))
 	case "milestone_criteria":
 		milestoneID := getStringArg(args, "milestone_id", "")
 		criterion := getStringArg(args, "criterion", "")
@@ -4229,12 +4249,25 @@ func handleRoomAgileTool(ctx context.Context, req mcp.CallToolRequest) (*mcp.Cal
 	case "milestone_summary":
 		milestoneID := getStringArg(args, "milestone_id", "")
 		notes := getStringArg(args, "notes", "")
-		if milestoneID == "" || notes == "" {
-			return mcp.NewToolResultError("milestone_id and notes are required for room_agile milestone_summary"), nil
+		summaryText := getStringArg(args, "summary", "")
+		if milestoneID == "" || (notes == "" && summaryText == "" && len(getStringSliceArg(args, "passed_criterion")) == 0 && len(getStringSliceArg(args, "failed_criterion")) == 0 && len(getStringSliceArg(args, "waived_validation")) == 0 && len(getStringSliceArg(args, "blocking_validation")) == 0 && len(getStringSliceArg(args, "decision")) == 0 && len(getStringSliceArg(args, "finding")) == 0 && len(getStringSliceArg(args, "next")) == 0 && len(getStringSliceArg(args, "guidance")) == 0) {
+			return mcp.NewToolResultError("milestone_id and either notes, summary, or structured synthesis fields are required for room_agile milestone_summary"), nil
 		}
-		argv = []string{"milestone", "summary", roomID, milestoneID, notes}
+		argv = []string{"milestone", "summary", roomID, milestoneID}
+		if notes != "" {
+			argv = append(argv, notes)
+		}
 		argv = appendStringFlagArgs(argv, "--workspace", workspace)
 		argv = appendStringFlagArgs(argv, "--sender", getStringArg(args, "sender", ""))
+		argv = appendStringFlagArgs(argv, "--summary", summaryText)
+		argv = appendStringSliceFlagArgs(argv, "--passed-criterion", getStringSliceArg(args, "passed_criterion"))
+		argv = appendStringSliceFlagArgs(argv, "--failed-criterion", getStringSliceArg(args, "failed_criterion"))
+		argv = appendStringSliceFlagArgs(argv, "--waived-validation", getStringSliceArg(args, "waived_validation"))
+		argv = appendStringSliceFlagArgs(argv, "--blocking-validation", getStringSliceArg(args, "blocking_validation"))
+		argv = appendStringSliceFlagArgs(argv, "--decision", getStringSliceArg(args, "decision"))
+		argv = appendStringSliceFlagArgs(argv, "--finding", getStringSliceArg(args, "finding"))
+		argv = appendStringSliceFlagArgs(argv, "--next", getStringSliceArg(args, "next"))
+		argv = appendStringSliceFlagArgs(argv, "--guidance", getStringSliceArg(args, "guidance"))
 	case "milestone_show":
 		argv = []string{"milestone", "show", roomID}
 		if milestoneID := getStringArg(args, "milestone_id", ""); milestoneID != "" {
@@ -4275,6 +4308,18 @@ func handleRoomAgileTool(ctx context.Context, req mcp.CallToolRequest) (*mcp.Cal
 		argv = appendStringFlagArgs(argv, "--workspace", workspace)
 		argv = appendStringFlagArgs(argv, "--sender", getStringArg(args, "sender", ""))
 		argv = appendStringFlagArgs(argv, "--owner", getStringArg(args, "owner", ""))
+	case "story_state":
+		storyID := getStringArg(args, "story_id", "")
+		state := getStringArg(args, "state", "")
+		if storyID == "" || state == "" {
+			return mcp.NewToolResultError("story_id and state are required for room_agile story_state"), nil
+		}
+		argv = []string{"story", "state", roomID, storyID, state}
+		argv = appendStringFlagArgs(argv, "--workspace", workspace)
+		argv = appendStringFlagArgs(argv, "--sender", getStringArg(args, "sender", ""))
+		argv = appendStringFlagArgs(argv, "--reason", getStringArg(args, "reason", ""))
+		argv = appendStringFlagArgs(argv, "--blocked-by", getStringArg(args, "blocked_by", ""))
+		argv = appendStringFlagArgs(argv, "--reviewer", getStringArg(args, "reviewer", ""))
 	case "story_validate":
 		storyID := getStringArg(args, "story_id", "")
 		validatorType := getStringArg(args, "validator_type", "")
