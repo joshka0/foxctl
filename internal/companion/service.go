@@ -20,6 +20,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/platform/config"
 	"github.com/jkatigb/agentctl/internal/storage"
 	"github.com/jkatigb/agentctl/internal/storage/contextvar"
+	einoadapter "github.com/jkatigb/agentctl/internal/v2/adapters/eino"
 	"github.com/jkatigb/agentctl/internal/v2/runtime/contextbuilder"
 )
 
@@ -29,6 +30,9 @@ type EngineType string
 const (
 	// EngineTypeLLMChat uses LLMChatEngine for OpenAI-compatible execution.
 	EngineTypeLLMChat EngineType = "llmchat"
+
+	// EngineTypeEino uses EinoEngineAdapter for graph-based tool execution.
+	EngineTypeEino EngineType = "eino"
 )
 
 const (
@@ -644,8 +648,8 @@ func (s *Service) Chat(ctx context.Context, req ChatRequest) (*ChatResponse, err
 	if engineType == "" {
 		engineType = EngineTypeLLMChat
 	}
-	if engineType != EngineTypeLLMChat {
-		return nil, fmt.Errorf("unsupported engine_type %q (only %q is supported)", engineType, EngineTypeLLMChat)
+	if engineType != EngineTypeLLMChat && engineType != EngineTypeEino {
+		return nil, fmt.Errorf("unsupported engine_type %q (only %q and %q are supported)", engineType, EngineTypeLLMChat, EngineTypeEino)
 	}
 
 	s.logger.Debug().
@@ -745,8 +749,8 @@ func (s *Service) ChatStreaming(ctx context.Context, req ChatRequest, callbacks 
 	if engineType == "" {
 		engineType = EngineTypeLLMChat
 	}
-	if engineType != EngineTypeLLMChat {
-		return nil, fmt.Errorf("unsupported engine_type %q (only %q is supported)", engineType, EngineTypeLLMChat)
+	if engineType != EngineTypeLLMChat && engineType != EngineTypeEino {
+		return nil, fmt.Errorf("unsupported engine_type %q (only %q and %q are supported)", engineType, EngineTypeLLMChat, EngineTypeEino)
 	}
 	if execMode == agent.ModeStory {
 		return s.Chat(ctx, req)
@@ -898,47 +902,70 @@ func (s *Service) chatWithLLMChat(ctx context.Context, req ChatRequest, frame co
 		llmEngine.SetRLMExecutor(rlmExecutor)
 	}
 
+	var eng engine.AgentEngine = llmEngine
+
+	// Config gate: opt in to the tool-capable Eino engine path via AGENTCTL_ENGINE_BACKEND=eino.
+	// When the gate is on, we provision a real Eino engine that bridges the companion's
+	// toolset into the Eino substrate.
+	if einoadapter.IsEinoEnabled() {
+		einoEngine, err := einoadapter.ProvisionFromLLMConfig(llmEngine.Config(), toolExecutor, toolDefs)
+		if err != nil {
+			return nil, fmt.Errorf("eino companion provisioning failed: %w", err)
+		}
+		// Replace the base engine with the Eino-backed engine adapter.
+		// Note: EinoEngineAdapter already handles tool execution internally via its own loop.
+		eng = einoEngine
+	}
+
 	input := engine.EngineInput{
 		SystemPrompt: systemPrompt,
 		Messages:     frame.Messages,
 		Tools:        toolDefs,
 	}
 
-	// Execute
+	// Execute. Streaming is only available on the classic LLMChatEngine path; when
+	// the Eino gate is on, eng is an EinoEngineAdapter that satisfies AgentEngine.Run
+	// but not RunStreaming, so we fall through to the non-streaming path.
 	var output engine.EngineOutput
 	if stream != nil {
-		output, err = llmEngine.RunStreaming(ctx, input, engine.StreamConfig{
-			Stream: true,
-			OnDelta: func(delta engine.StreamDelta) {
-				if stream.OnDelta != nil {
-					stream.OnDelta(ChatStreamDelta{
-						ContentDelta: delta.ContentDelta,
-						FinishReason: delta.FinishReason,
-					})
-				}
-			},
-			OnToolCall: func(call engine.ToolCall) {
-				if stream.OnToolCall != nil {
-					stream.OnToolCall(ChatToolCallEvent{
-						ID:        call.ID,
-						Name:      call.Name,
-						Arguments: call.Arguments,
-					})
-				}
-			},
-			OnToolResult: func(call engine.ToolCall, result engine.ToolResult) {
-				if stream.OnToolResult != nil {
-					stream.OnToolResult(ChatToolResultEvent{
-						ToolCallID: result.ToolCallID,
-						Name:       call.Name,
-						Content:    result.Content,
-						IsError:    result.IsError,
-					})
-				}
-			},
-		})
+		if se, ok := eng.(interface {
+			RunStreaming(ctx context.Context, input engine.EngineInput, streamCfg engine.StreamConfig) (engine.EngineOutput, error)
+		}); ok {
+			output, err = se.RunStreaming(ctx, input, engine.StreamConfig{
+				Stream: true,
+				OnDelta: func(delta engine.StreamDelta) {
+					if stream.OnDelta != nil {
+						stream.OnDelta(ChatStreamDelta{
+							ContentDelta: delta.ContentDelta,
+							FinishReason: delta.FinishReason,
+						})
+					}
+				},
+				OnToolCall: func(call engine.ToolCall) {
+					if stream.OnToolCall != nil {
+						stream.OnToolCall(ChatToolCallEvent{
+							ID:        call.ID,
+							Name:      call.Name,
+							Arguments: call.Arguments,
+						})
+					}
+				},
+				OnToolResult: func(call engine.ToolCall, result engine.ToolResult) {
+					if stream.OnToolResult != nil {
+						stream.OnToolResult(ChatToolResultEvent{
+							ToolCallID: result.ToolCallID,
+							Name:       call.Name,
+							Content:    result.Content,
+							IsError:    result.IsError,
+						})
+					}
+				},
+			})
+		} else {
+			output, err = eng.Run(ctx, input)
+		}
 	} else {
-		output, err = llmEngine.Run(ctx, input)
+		output, err = eng.Run(ctx, input)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("engine run: %w", err)

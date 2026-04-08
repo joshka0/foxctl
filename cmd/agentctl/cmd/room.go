@@ -617,21 +617,27 @@ func newRoomEpicCommand() *cobra.Command {
 
 func newRoomEpicStartCommand() *cobra.Command {
 	var (
-		workspace string
-		sender    string
-		goal      string
-		owner     string
-		outcome   string
-		horizon   string
-		scope     []string
-		success   []string
+		workspace        string
+		sender           string
+		goal             string
+		owner            string
+		outcome          string
+		horizon          string
+		scope            []string
+		success          []string
+		maintenance      bool
+		defaultSmallWork bool
 	)
 	cmd := &cobra.Command{
-		Use:   "start <room-id> <title>",
+		Use:   "start <room-id> [title]",
 		Short: "Start a durable epic in a room",
-		Args:  cobra.ExactArgs(2),
+		Args:  cobra.RangeArgs(1, 2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runRoomEpicStart(cmd, workspace, sender, args[0], args[1], goal, owner, outcome, horizon, scope, success)
+			title := ""
+			if len(args) > 1 {
+				title = args[1]
+			}
+			return runRoomEpicStart(cmd, workspace, sender, args[0], title, goal, owner, outcome, horizon, scope, success, maintenance, defaultSmallWork)
 		},
 	}
 	cmd.Flags().StringVar(&workspace, "workspace", ".", "Workspace root override")
@@ -642,6 +648,8 @@ func newRoomEpicStartCommand() *cobra.Command {
 	cmd.Flags().StringVar(&horizon, "horizon", "", "Delivery horizon or target window")
 	cmd.Flags().StringSliceVar(&scope, "scope", nil, "Scope item (repeatable)")
 	cmd.Flags().StringSliceVar(&success, "success", nil, "Success signal or success measure (repeatable)")
+	cmd.Flags().BoolVar(&maintenance, "maintenance", false, "Use the built-in catch-all maintenance/small-stories epic template")
+	cmd.Flags().BoolVar(&defaultSmallWork, "default-small-work", false, "Mark this maintenance epic as the room's default catch-all for small work")
 	return cmd
 }
 
@@ -2874,12 +2882,14 @@ func runRoomClear(cmd *cobra.Command, workspace, roomID, actorID, mode, preset s
 }
 
 type roomEpicMeta struct {
-	Goal    string   `json:"goal"`
-	Owner   string   `json:"owner"`
-	Outcome string   `json:"outcome"`
-	Horizon string   `json:"horizon"`
-	Scope   []string `json:"scope"`
-	Success []string `json:"success"`
+	Goal             string   `json:"goal"`
+	Owner            string   `json:"owner"`
+	Outcome          string   `json:"outcome"`
+	Horizon          string   `json:"horizon"`
+	Scope            []string `json:"scope"`
+	Success          []string `json:"success"`
+	Template         string   `json:"template"`
+	DefaultSmallWork bool     `json:"default_small_work"`
 }
 
 type roomEpicQuestionMeta struct {
@@ -2994,7 +3004,15 @@ type roomMilestoneProposalMeta struct {
 	Rationale string   `json:"rationale"`
 }
 
-func runRoomEpicStart(cmd *cobra.Command, workspace, sender, roomID, title, goal, owner, outcome, horizon string, scope, success []string) error {
+func runRoomEpicStart(cmd *cobra.Command, workspace, sender, roomID, title, goal, owner, outcome, horizon string, scope, success []string, extraFlags ...bool) error {
+	maintenanceTemplate := false
+	defaultSmallWork := false
+	if len(extraFlags) > 0 {
+		maintenanceTemplate = extraFlags[0]
+	}
+	if len(extraFlags) > 1 {
+		defaultSmallWork = extraFlags[1]
+	}
 	absWorkspace, identity, store, roomID, summary, err := prepareRoomAgileCommand(cmd, "agentctl.room.epic", workspace, sender, roomID)
 	if err != nil {
 		return err
@@ -3006,10 +3024,23 @@ func runRoomEpicStart(cmd *cobra.Command, workspace, sender, roomID, title, goal
 		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
 	}
 
-	title = strings.TrimSpace(title)
+	title, goal, outcome, horizon, scope, success, template := applyRoomEpicStartTemplate(
+		strings.TrimSpace(title),
+		strings.TrimSpace(goal),
+		strings.TrimSpace(outcome),
+		strings.TrimSpace(horizon),
+		scope,
+		success,
+		maintenanceTemplate,
+	)
+	if defaultSmallWork && template != "maintenance" {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.epic.start", protocol.ErrorCodeEARG, "--default-small-work requires --maintenance", map[string]any{
+			"hint": "Use `agentctl room epic start <room-id> --maintenance --default-small-work` to create the standard catch-all maintenance epic.",
+		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
 	if title == "" {
 		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.epic.start", protocol.ErrorCodeEARG, "title is required", map[string]any{
-			"hint": "Pass a concise epic title such as `room-agile-protocol` or `delivery-ledger-hardening`.",
+			"hint": "Pass a concise epic title such as `room-agile-protocol` or use `--maintenance` for the built-in catch-all small-work epic.",
 		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
 	}
 
@@ -3021,7 +3052,7 @@ func runRoomEpicStart(cmd *cobra.Command, workspace, sender, roomID, title, goal
 		Kind:        agent.BoardMessageKindEpic,
 		Priority:    agent.DefaultPriority,
 		Subject:     "Epic: " + title,
-		Body:        buildRoomEpicBody(title, goal, owner, outcome, horizon, scope, success),
+		Body:        buildRoomEpicBody(title, goal, owner, outcome, horizon, scope, success, template, defaultSmallWork),
 	}
 	if err := store.SendMessage(cmd.Context(), msg); err != nil {
 		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.epic.start", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
@@ -5385,7 +5416,40 @@ func countOpenEpicQuestions(ctx context.Context, store blackboard.BoardStore, wo
 	return open, nil
 }
 
-func buildRoomEpicBody(title, goal, owner, outcome, horizon string, scope, success []string) string {
+func applyRoomEpicStartTemplate(title, goal, outcome, horizon string, scope, success []string, maintenance bool) (string, string, string, string, []string, []string, string) {
+	if !maintenance {
+		return title, goal, outcome, horizon, scope, success, ""
+	}
+	if title == "" {
+		title = "Maintenance / Small Stories"
+	}
+	if goal == "" {
+		goal = "Provide a durable catch-all epic for single tasks, small stories, workflow cleanup, and incidental follow-up work that should not expand the primary mission epic."
+	}
+	if outcome == "" {
+		outcome = "Small follow-up work has a canonical epic home and the main mission epic stays focused on its bounded milestones."
+	}
+	if horizon == "" {
+		horizon = "rolling"
+	}
+	if len(scope) == 0 {
+		scope = []string{
+			"single tasks",
+			"small stories",
+			"workflow cleanup",
+			"maintenance follow-ups",
+		}
+	}
+	if len(success) == 0 {
+		success = []string{
+			"small work can be routed here without opening a new mission epic",
+			"the main multi-milestone epic stays focused on its primary delivery scope",
+		}
+	}
+	return title, goal, outcome, horizon, scope, success, "maintenance"
+}
+
+func buildRoomEpicBody(title, goal, owner, outcome, horizon string, scope, success []string, template string, defaultSmallWork bool) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "Title: %s\n", strings.TrimSpace(title))
 	if strings.TrimSpace(goal) != "" {
@@ -5399,6 +5463,12 @@ func buildRoomEpicBody(title, goal, owner, outcome, horizon string, scope, succe
 	}
 	if strings.TrimSpace(horizon) != "" {
 		fmt.Fprintf(&b, "Horizon: %s\n", strings.TrimSpace(horizon))
+	}
+	if strings.TrimSpace(template) != "" {
+		fmt.Fprintf(&b, "Template: %s\n", strings.TrimSpace(template))
+	}
+	if defaultSmallWork {
+		fmt.Fprintf(&b, "DefaultSmallWork: true\n")
 	}
 	appendRoomSection(&b, "Scope", scope)
 	appendRoomSection(&b, "Success", success)
@@ -5461,6 +5531,10 @@ func parseRoomEpicBody(body string) roomEpicMeta {
 			meta.Outcome = value
 		case "Horizon":
 			meta.Horizon = value
+		case "Template":
+			meta.Template = value
+		case "DefaultSmallWork":
+			meta.DefaultSmallWork = strings.EqualFold(value, "true")
 		}
 	}
 	return meta
@@ -6695,6 +6769,8 @@ func buildRoomEpicViews(messages []agent.BoardMessage) []map[string]any {
 			"closed":                  closeMsg.ID != "",
 			"close_reason":            closeMeta.Reason,
 			"close_summary":           closeMeta.Summary,
+			"template":                meta.Template,
+			"default_small_work":      meta.DefaultSmallWork,
 			"source_kind":             "epic",
 			"source_id":               msg.ID,
 			"room_message_ids":        epicMessageIDs,

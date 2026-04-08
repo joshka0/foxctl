@@ -346,6 +346,49 @@ func TestCreateEngine_EinoGateProvisionsRealAdapter(t *testing.T) {
 	}
 }
 
+func TestCreateEngine_EinoGatePassesTools(t *testing.T) {
+	t.Setenv(einoadapter.EnvEngineBackend, "eino")
+
+	rt := NewRuntime(Config{
+		DefaultMaxIterations: 1,
+		DefaultTimeout:       5 * time.Second,
+		LLMProvider:          "openai",
+		LLMModel:             "test-model",
+		LLMAPIKey:            "test-key",
+		LLMBaseURL:           "http://example.invalid",
+	})
+
+	_, tools, err := rt.createEngine(types.AgentConfig{
+		Role:          types.RoleCoder,
+		ActorID:       "actor:test:coder",
+		WorkspaceID:   "ws-test",
+		MaxIterations: 1,
+		Timeout:       5 * time.Second,
+	}, "session-test")
+	if err != nil {
+		t.Fatalf("createEngine() error = %v", err)
+	}
+
+	// Verify that tools are returned even when Eino is enabled.
+	// In Milestone 1 spike, tools might have been empty or ignored.
+	// In Milestone 2, they must be passed through and returned.
+	if len(tools) == 0 {
+		t.Error("createEngine() returned no tool definitions when Eino is enabled")
+	}
+
+	// Check for a known coder tool
+	found := false
+	for _, tool := range tools {
+		if tool.Name == "fs_read_file" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("createEngine() tools missing 'fs_read_file'; got %v", tools)
+	}
+}
+
 func TestAgentInstruction_PlannerRole(t *testing.T) {
 	cfg := types.AgentConfig{
 		Role:        types.RolePlanner,

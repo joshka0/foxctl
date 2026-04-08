@@ -1,0 +1,532 @@
+package gateway
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/rs/zerolog"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+)
+
+// testLogger creates a logger that discards output for tests that don't need
+// to inspect logs.
+func testLogger() zerolog.Logger {
+	return zerolog.New(io.Discard).With().Timestamp().Logger()
+}
+
+// findFreePort finds an available TCP port on localhost for testing.
+func findFreePort(t *testing.T) int {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	port := ln.Addr().(*net.TCPAddr).Port
+	ln.Close()
+	return port
+}
+
+func TestDefaultOptions(t *testing.T) {
+	opts := DefaultOptions()
+	assert.Equal(t, DefaultPort, opts.Port)
+	assert.Equal(t, DefaultStateDir, opts.StateDir)
+	assert.Equal(t, HostnamePrefix, opts.Hostname)
+	assert.False(t, opts.Dev)
+}
+
+func TestResolveStateDir(t *testing.T) {
+	tests := []struct {
+		name    string
+		input   string
+		wantErr bool
+		check   func(t *testing.T, result string)
+	}{
+		{
+			name:  "expands tilde",
+			input: "~/test-gateway",
+			check: func(t *testing.T, result string) {
+				home, _ := os.UserHomeDir()
+				assert.Equal(t, filepath.Join(home, "test-gateway"), result)
+			},
+		},
+		{
+			name:  "absolute path unchanged",
+			input: "/var/lib/gateway",
+			check: func(t *testing.T, result string) {
+				assert.Equal(t, "/var/lib/gateway", result)
+			},
+		},
+		{
+			name:  "relative path resolved to absolute",
+			input: "relative/path",
+			check: func(t *testing.T, result string) {
+				assert.True(t, filepath.IsAbs(result))
+				assert.True(t, strings.HasSuffix(result, "relative/path"))
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := ResolveStateDir(tt.input)
+			if tt.wantErr {
+				require.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			if tt.check != nil {
+				tt.check(t, result)
+			}
+		})
+	}
+}
+
+func TestResolveAuthKey(t *testing.T) {
+	tests := []struct {
+		name   string
+		optKey string
+		envKey string
+		want   string
+		envSet bool
+	}{
+		{
+			name:   "option key takes priority",
+			optKey: "opt-key-123",
+			envKey: "env-key-456",
+			want:   "opt-key-123",
+			envSet: true,
+		},
+		{
+			name:   "env key used when no option key",
+			optKey: "",
+			envKey: "env-key-456",
+			want:   "env-key-456",
+			envSet: true,
+		},
+		{
+			name:   "empty when no key available",
+			optKey: "",
+			envKey: "",
+			want:   "",
+			envSet: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.envSet {
+				t.Setenv("TS_AUTHKEY", tt.envKey)
+			} else {
+				t.Setenv("TS_AUTHKEY", "")
+			}
+			got := ResolveAuthKey(tt.optKey)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestNewServer(t *testing.T) {
+	opts := Options{
+		Dev:      true,
+		Port:     9999,
+		Hostname: "test-gateway",
+	}
+	srv := NewServer(opts, testLogger())
+
+	assert.Equal(t, 9999, srv.opts.Port)
+	assert.Equal(t, "test-gateway", srv.opts.Hostname)
+	assert.True(t, srv.opts.Dev)
+	assert.Equal(t, "starting", srv.health.Tsnet)
+	assert.Equal(t, "starting", srv.health.Store)
+}
+
+func TestNewServer_DefaultPort(t *testing.T) {
+	opts := Options{Port: 0}
+	srv := NewServer(opts, testLogger())
+	assert.Equal(t, DefaultPort, srv.opts.Port)
+}
+
+func TestHealth(t *testing.T) {
+	srv := NewServer(DefaultOptions(), testLogger())
+
+	// Initial health
+	h := srv.Health()
+	assert.Equal(t, "starting", h.Tsnet)
+
+	// Set health
+	srv.setHealth(HealthStatus{
+		Tsnet: "ok",
+		Store: "ok",
+		Tmux:  "ok",
+	})
+	h = srv.Health()
+	assert.Equal(t, "ok", h.Tsnet)
+	assert.Equal(t, "ok", h.Store)
+	assert.Equal(t, "ok", h.Tmux)
+}
+
+func TestHandleHealthz_OK(t *testing.T) {
+	srv := NewServer(DefaultOptions(), testLogger())
+	srv.setHealth(HealthStatus{
+		Tsnet: "ok",
+		Store: "ok",
+		Tmux:  "ok",
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
+	w := httptest.NewRecorder()
+
+	srv.Handler().ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	var health HealthStatus
+	err := json.NewDecoder(w.Body).Decode(&health)
+	require.NoError(t, err)
+	assert.Equal(t, "ok", health.Tsnet)
+	assert.Equal(t, "ok", health.Store)
+	assert.Equal(t, "ok", health.Tmux)
+
+	// Verify content type
+	assert.Equal(t, "application/json; charset=utf-8", w.Header().Get("Content-Type"))
+}
+
+func TestHandleHealthz_Starting(t *testing.T) {
+	srv := NewServer(DefaultOptions(), testLogger())
+	srv.setHealth(HealthStatus{
+		Tsnet: "starting",
+		Store: "ok",
+		Tmux:  "ok",
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
+	w := httptest.NewRecorder()
+
+	srv.Handler().ServeHTTP(w, req)
+
+	// "starting" is not degraded, should return 200
+	assert.Equal(t, http.StatusOK, w.Code)
+}
+
+func TestHandleHealthz_Degraded(t *testing.T) {
+	srv := NewServer(DefaultOptions(), testLogger())
+	srv.setHealth(HealthStatus{
+		Tsnet: "error",
+		Store: "ok",
+		Tmux:  "ok",
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
+	w := httptest.NewRecorder()
+
+	srv.Handler().ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusServiceUnavailable, w.Code)
+
+	var health HealthStatus
+	err := json.NewDecoder(w.Body).Decode(&health)
+	require.NoError(t, err)
+	assert.Equal(t, "error", health.Tsnet)
+}
+
+func TestHandleHealthz_Disabled(t *testing.T) {
+	srv := NewServer(DefaultOptions(), testLogger())
+	srv.setHealth(HealthStatus{
+		Tsnet: "disabled",
+		Store: "ok",
+		Tmux:  "ok",
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
+	w := httptest.NewRecorder()
+
+	srv.Handler().ServeHTTP(w, req)
+
+	// "disabled" is not degraded (it's expected in dev mode)
+	assert.Equal(t, http.StatusOK, w.Code)
+}
+
+func TestHandleHealthz_MethodNotAllowed(t *testing.T) {
+	srv := NewServer(DefaultOptions(), testLogger())
+
+	req := httptest.NewRequest(http.MethodPost, "/healthz", nil)
+	w := httptest.NewRecorder()
+
+	srv.Handler().ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusMethodNotAllowed, w.Code)
+}
+
+func TestStartDevMode(t *testing.T) {
+	port := findFreePort(t)
+
+	opts := Options{
+		Dev:  true,
+		Port: port,
+	}
+	srv := NewServer(opts, testLogger())
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- srv.Start(ctx)
+	}()
+
+	// Wait for server to start
+	time.Sleep(200 * time.Millisecond)
+
+	// Verify healthz works
+	url := fmt.Sprintf("http://127.0.0.1:%d/healthz", port)
+	resp, err := http.Get(url)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+
+	var health HealthStatus
+	err = json.NewDecoder(resp.Body).Decode(&health)
+	require.NoError(t, err)
+	assert.Equal(t, "disabled", health.Tsnet)
+	assert.Equal(t, "ok", health.Store)
+	assert.Equal(t, "ok", health.Tmux)
+
+	// Shutdown
+	cancel()
+	err = <-errCh
+	assert.NoError(t, err)
+}
+
+func TestStartDevMode_GracefulShutdown(t *testing.T) {
+	port := findFreePort(t)
+
+	opts := Options{
+		Dev:  true,
+		Port: port,
+	}
+	srv := NewServer(opts, testLogger())
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- srv.Start(ctx)
+	}()
+
+	// Wait for server to start
+	time.Sleep(200 * time.Millisecond)
+
+	// Verify it's running
+	url := fmt.Sprintf("http://127.0.0.1:%d/healthz", port)
+	resp, err := http.Get(url)
+	require.NoError(t, err)
+	resp.Body.Close()
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+
+	// Trigger shutdown
+	cancel()
+
+	// Wait for shutdown to complete
+	select {
+	case err := <-errCh:
+		assert.NoError(t, err)
+	case <-time.After(20 * time.Second):
+		t.Fatal("shutdown timed out")
+	}
+
+	// Verify server is stopped
+	_, err = http.Get(url)
+	assert.Error(t, err, "server should be stopped after shutdown")
+}
+
+func TestStartTwiceReturnsError(t *testing.T) {
+	port := findFreePort(t)
+
+	opts := Options{
+		Dev:  true,
+		Port: port,
+	}
+	srv := NewServer(opts, testLogger())
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- srv.Start(ctx)
+	}()
+
+	// Wait for first start
+	time.Sleep(200 * time.Millisecond)
+
+	// Second start should fail
+	err := srv.Start(ctx)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "already started")
+
+	// Cleanup
+	cancel()
+	<-errCh
+}
+
+func TestAuthKeyError(t *testing.T) {
+	err := &AuthKeyError{StateDir: "/tmp/gateway"}
+
+	assert.Equal(t, "no Tailscale auth key provided and no existing state", err.Error())
+
+	env := err.Envelope()
+	assert.NotNil(t, env)
+
+	data, ok := env["data"].(map[string]string)
+	require.True(t, ok)
+	assert.Contains(t, data["hint"], "TS_AUTHKEY")
+	assert.Contains(t, data["hint"], "--ts-authkey")
+	assert.Equal(t, "/tmp/gateway", data["state"])
+}
+
+func TestAuthKeyError_NoStateNoKey(t *testing.T) {
+	// Create temp dir for state (empty, no identity)
+	tmpDir := t.TempDir()
+
+	// No auth key, no existing state
+	opts := Options{
+		StateDir: tmpDir,
+	}
+	srv := NewServer(opts, testLogger())
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	err := srv.Start(ctx)
+	require.Error(t, err)
+
+	var authErr *AuthKeyError
+	assert.ErrorAs(t, err, &authErr)
+}
+
+func TestStateDirResolution(t *testing.T) {
+	port := findFreePort(t)
+	tmpDir := filepath.Join(t.TempDir(), "gateway-state")
+
+	opts := Options{
+		Dev:      true,
+		Port:     port,
+		StateDir: tmpDir,
+	}
+	srv := NewServer(opts, testLogger())
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- srv.Start(ctx)
+	}()
+
+	time.Sleep(200 * time.Millisecond)
+
+	// Verify the state dir option was stored correctly
+	assert.Equal(t, tmpDir, srv.opts.StateDir)
+
+	cancel()
+	<-errCh
+}
+
+func TestRun_DevMode(t *testing.T) {
+	port := findFreePort(t)
+
+	opts := Options{
+		Dev:  true,
+		Port: port,
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- Run(ctx, opts, testLogger())
+	}()
+
+	// Wait for server to start
+	time.Sleep(200 * time.Millisecond)
+
+	// Verify it's running
+	url := fmt.Sprintf("http://127.0.0.1:%d/healthz", port)
+	resp, err := http.Get(url)
+	require.NoError(t, err)
+	resp.Body.Close()
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+
+	// Cancel context to trigger shutdown
+	cancel()
+
+	select {
+	case err := <-errCh:
+		assert.NoError(t, err)
+	case <-time.After(20 * time.Second):
+		t.Fatal("Run did not complete within timeout")
+	}
+}
+
+func TestRun_AuthKeyError(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("TS_AUTHKEY", "")
+
+	opts := Options{
+		StateDir: tmpDir,
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	err := Run(ctx, opts, testLogger())
+	require.Error(t, err)
+
+	var authErr *AuthKeyError
+	assert.ErrorAs(t, err, &authErr)
+}
+
+func TestShutdown_SetsStoppedHealth(t *testing.T) {
+	port := findFreePort(t)
+
+	opts := Options{
+		Dev:  true,
+		Port: port,
+	}
+	srv := NewServer(opts, testLogger())
+
+	ctx, cancel := context.WithCancel(context.Background())
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- srv.Start(ctx)
+	}()
+
+	time.Sleep(200 * time.Millisecond)
+
+	// Verify running
+	h := srv.Health()
+	assert.Equal(t, "ok", h.Store)
+
+	// Shutdown
+	cancel()
+	<-errCh
+
+	// After shutdown, health should be "stopped"
+	h = srv.Health()
+	assert.Equal(t, "stopped", h.Tsnet)
+	assert.Equal(t, "stopped", h.Store)
+	assert.Equal(t, "stopped", h.Tmux)
+}

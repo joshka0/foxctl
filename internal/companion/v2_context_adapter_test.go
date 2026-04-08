@@ -313,3 +313,229 @@ func TestService_GetLayeredMemoryContext_TenTurnFactSequencePrefersCanonicalHard
 		}
 	}
 }
+
+// --- M3 companion parity tests ---
+//
+// These tests verify that ToolCallDetail JSON written from engine.ToolCall
+// (as the Eino gate-on path produces via service.go) round-trips correctly
+// through parseCompanionToolCalls and produces parity ToolCallRecord entries
+// matching what the classic LLMChatEngine path would produce.
+
+// TestParseCompanionToolCalls_EinoPathFormat verifies that ToolCallDetail JSON
+// written in the canonical engine.ToolCall format is parsed correctly. This is
+// the core parity assertion: if the Eino path writes {id, name, arguments, output}
+// the companion context adapter must produce the same ToolCallRecord as the
+// classic path.
+func TestParseCompanionToolCalls_EinoPathFormat(t *testing.T) {
+	t.Parallel()
+
+	details := []ToolCallDetail{
+		{
+			ID:        "call-eino-1",
+			Name:      "fs.read_file",
+			Arguments: json.RawMessage(`{"path":"/tmp/test.txt"}`),
+			Output:    "file contents here",
+		},
+	}
+	raw, err := json.Marshal(details)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+
+	records := parseCompanionToolCalls(raw, "turn-eino-1")
+	if len(records) != 1 {
+		t.Fatalf("records count=%d want 1", len(records))
+	}
+	r := records[0]
+	if r.CallID != "call-eino-1" {
+		t.Errorf("CallID=%q want %q", r.CallID, "call-eino-1")
+	}
+	if r.Name != "fs.read_file" {
+		t.Errorf("Name=%q want %q", r.Name, "fs.read_file")
+	}
+	if string(r.ArgsJSON) != `{"path":"/tmp/test.txt"}` {
+		t.Errorf("ArgsJSON=%q want JSON args", r.ArgsJSON)
+	}
+	if r.ResultRef.Text != "file contents here" {
+		t.Errorf("ResultRef.Text=%q want output text", r.ResultRef.Text)
+	}
+	if r.ResultRef.Kind != "inline" {
+		t.Errorf("ResultRef.Kind=%q want %q", r.ResultRef.Kind, "inline")
+	}
+}
+
+// TestParseCompanionToolCalls_EmptyOutput verifies parity when ToolResults is
+// absent (e.g. Eino path before write-through is fully wired): the call record
+// is still populated with name/id/args; ResultRef.Text is empty rather than
+// causing a parse failure.
+func TestParseCompanionToolCalls_EmptyOutput(t *testing.T) {
+	t.Parallel()
+
+	details := []ToolCallDetail{
+		{
+			ID:        "call-eino-2",
+			Name:      "think",
+			Arguments: json.RawMessage(`{"thought":"checking plan"}`),
+			Output:    "", // no ToolResult populated yet
+		},
+	}
+	raw, err := json.Marshal(details)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+
+	records := parseCompanionToolCalls(raw, "turn-eino-2")
+	if len(records) != 1 {
+		t.Fatalf("records count=%d want 1", len(records))
+	}
+	if records[0].Name != "think" {
+		t.Errorf("Name=%q want %q", records[0].Name, "think")
+	}
+	if records[0].ResultRef.Text != "" {
+		t.Errorf("ResultRef.Text=%q want empty", records[0].ResultRef.Text)
+	}
+}
+
+// TestParseCompanionToolCalls_NilArguments verifies that a tool call with no
+// arguments (nil json.RawMessage) does not cause a panic or parse error.
+func TestParseCompanionToolCalls_NilArguments(t *testing.T) {
+	t.Parallel()
+
+	details := []ToolCallDetail{
+		{
+			ID:        "call-eino-3",
+			Name:      "end_tick",
+			Arguments: nil,
+			Output:    "ok",
+		},
+	}
+	raw, err := json.Marshal(details)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+
+	records := parseCompanionToolCalls(raw, "turn-eino-3")
+	if len(records) != 1 {
+		t.Fatalf("records count=%d want 1", len(records))
+	}
+	if records[0].Name != "end_tick" {
+		t.Errorf("Name=%q want %q", records[0].Name, "end_tick")
+	}
+}
+
+// TestParseCompanionToolCalls_IDFallback verifies that when the call ID is
+// empty (absent from the engine output), a stable fallback ID is generated
+// using the turn ID and index rather than an empty string.
+func TestParseCompanionToolCalls_IDFallback(t *testing.T) {
+	t.Parallel()
+
+	details := []ToolCallDetail{
+		{
+			ID:        "", // no ID from engine
+			Name:      "list_dir",
+			Arguments: json.RawMessage(`{"path":"."}`),
+			Output:    "file1.go\nfile2.go",
+		},
+	}
+	raw, err := json.Marshal(details)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+
+	records := parseCompanionToolCalls(raw, "turn-eino-4")
+	if len(records) != 1 {
+		t.Fatalf("records count=%d want 1", len(records))
+	}
+	if records[0].CallID == "" {
+		t.Error("CallID should not be empty when ID field is missing")
+	}
+	if !strings.Contains(records[0].CallID, "turn-eino-4") {
+		t.Errorf("CallID=%q should contain turn ID for stable fallback", records[0].CallID)
+	}
+}
+
+// TestCompanionTurnReader_EinoPathToolCallsProduceIterationRecord verifies
+// the full read path: a turn persisted with Eino-format ToolCallDetail JSON
+// produces an IterationRecord with the correct ToolCallRecord entries when
+// read back through companionTurnReader.ListTurns.
+func TestCompanionTurnReader_EinoPathToolCallsProduceIterationRecord(t *testing.T) {
+	ctx := context.Background()
+	db, err := sql.Open("sqlite", ":memory:")
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+
+	mem, err := NewConversationMemory(db)
+	if err != nil {
+		t.Fatalf("new conversation memory: %v", err)
+	}
+
+	convID := "conv-eino-parity"
+	if err := mem.AppendTurn(ctx, ConversationTurn{
+		ID:             "turn-user-eino",
+		ConversationID: convID,
+		Role:           "user",
+		Content:        "read the config file",
+		CreatedAt:      time.Date(2026, 4, 8, 10, 0, 0, 0, time.UTC),
+	}); err != nil {
+		t.Fatalf("append user turn: %v", err)
+	}
+
+	// Simulate what service.go writes from EngineOutput.ToolCalls + ToolResults
+	// on the Eino gate-on path.
+	einoToolCalls, err := json.Marshal([]ToolCallDetail{
+		{
+			ID:        "call-eino-cfg",
+			Name:      "fs.read_file",
+			Arguments: json.RawMessage(`{"path":"config.yaml"}`),
+			Output:    "key: value",
+		},
+	})
+	if err != nil {
+		t.Fatalf("marshal eino tool calls: %v", err)
+	}
+	if err := mem.AppendTurn(ctx, ConversationTurn{
+		ID:             "turn-asst-eino",
+		ConversationID: convID,
+		Role:           "assistant",
+		Content:        "The config contains key: value.",
+		ToolCalls:      einoToolCalls,
+		CreatedAt:      time.Date(2026, 4, 8, 10, 0, 1, 0, time.UTC),
+	}); err != nil {
+		t.Fatalf("append assistant turn: %v", err)
+	}
+
+	reader := companionTurnReader{memory: mem}
+	turns, err := reader.ListTurns(ctx, convID, run.TurnListOptions{Asc: true})
+	if err != nil {
+		t.Fatalf("list turns: %v", err)
+	}
+	if len(turns) != 2 {
+		t.Fatalf("turn count=%d want 2", len(turns))
+	}
+
+	asst := turns[1]
+	if asst.FinalOutput.Text != "The config contains key: value." {
+		t.Errorf("FinalOutput.Text=%q", asst.FinalOutput.Text)
+	}
+	if len(asst.Iterations) != 1 {
+		t.Fatalf("Iterations count=%d want 1", len(asst.Iterations))
+	}
+	if len(asst.Iterations[0].ToolCalls) != 1 {
+		t.Fatalf("ToolCalls count=%d want 1", len(asst.Iterations[0].ToolCalls))
+	}
+	tc := asst.Iterations[0].ToolCalls[0]
+	if tc.CallID != "call-eino-cfg" {
+		t.Errorf("CallID=%q want %q", tc.CallID, "call-eino-cfg")
+	}
+	if tc.Name != "fs.read_file" {
+		t.Errorf("Name=%q want %q", tc.Name, "fs.read_file")
+	}
+	if string(tc.ArgsJSON) != `{"path":"config.yaml"}` {
+		t.Errorf("ArgsJSON=%q want json", tc.ArgsJSON)
+	}
+	if tc.ResultRef.Text != "key: value" {
+		t.Errorf("ResultRef.Text=%q want %q", tc.ResultRef.Text, "key: value")
+	}
+}

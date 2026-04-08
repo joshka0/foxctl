@@ -499,10 +499,10 @@ func (r *Runtime) createEngine(cfg types.AgentConfig, sessionID string) (engine.
 	// Milestone 1 mailbox-owned default path.
 	//
 	// When the gate is on, we provision a real adk.ChatModelAgent using the provider-resolved
-	// connection parameters from llmEngine.Config(). Tool-call bridging is out of scope for
-	// this spike; only the plain chat completion path is wired.
+	// connection parameters from llmEngine.Config() and bridge the real agentctl ToolExecutor
+	// and ToolDefs into the Eino substrate.
 	if einoadapter.IsEinoEnabled() {
-		einoAdapter, err := einoadapter.ProvisionFromLLMConfig(llmEngine.Config())
+		einoAdapter, err := einoadapter.ProvisionFromLLMConfig(llmEngine.Config(), executor, toolDefs)
 		if err != nil {
 			return nil, nil, fmt.Errorf("eino gate-on provisioning failed: %w", err)
 		}

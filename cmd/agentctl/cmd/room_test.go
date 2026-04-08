@@ -3607,6 +3607,122 @@ func TestRoomMilestoneStartCLI_DefaultEnforceExitPolicyFalse(t *testing.T) {
 	}
 }
 
+func TestRunRoomEpicStartMaintenanceDefaults(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	ctx := context.Background()
+	workspace := t.TempDir()
+
+	cmd, _ := newRoomTestCommand(ctx)
+	if err := runRoomCreate(cmd, workspace, "alpha", "Alpha", "", []string{"human-a=coordinator"}); err != nil {
+		t.Fatalf("runRoomCreate: %v", err)
+	}
+
+	cmd, out := newRoomTestCommand(ctx)
+	if err := runRoomEpicStart(cmd, workspace, "human-a", "alpha", "", "", "human-a", "", "", nil, nil, true, true); err != nil {
+		t.Fatalf("runRoomEpicStart maintenance: %v", err)
+	}
+	epicID := decodeRoomEnvelope(t, out)["epic_id"].(string)
+
+	cmd, out = newRoomTestCommand(ctx)
+	if err := runRoomEpicShow(cmd, workspace, "alpha", epicID, 100); err != nil {
+		t.Fatalf("runRoomEpicShow: %v", err)
+	}
+	epic := decodeRoomEnvelope(t, out)["epic"].(map[string]any)
+	if got := epic["title"]; got != "Maintenance / Small Stories" {
+		t.Fatalf("title=%v want Maintenance / Small Stories", got)
+	}
+	if got := epic["template"]; got != "maintenance" {
+		t.Fatalf("template=%v want maintenance", got)
+	}
+	if got := epic["default_small_work"]; got != true {
+		t.Fatalf("default_small_work=%v want true", got)
+	}
+	meta := epic["meta"].(map[string]any)
+	if got := meta["goal"]; got == "" {
+		t.Fatalf("goal=%v want non-empty maintenance default", got)
+	}
+	if got := meta["horizon"]; got != "rolling" {
+		t.Fatalf("horizon=%v want rolling", got)
+	}
+	scope := meta["scope"].([]any)
+	if len(scope) == 0 {
+		t.Fatal("scope should contain default maintenance entries")
+	}
+}
+
+func TestRunRoomEpicStartDefaultSmallWorkRequiresMaintenance(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	ctx := context.Background()
+	workspace := t.TempDir()
+
+	cmd, _ := newRoomTestCommand(ctx)
+	if err := runRoomCreate(cmd, workspace, "alpha", "Alpha", "", []string{"human-a=coordinator"}); err != nil {
+		t.Fatalf("runRoomCreate: %v", err)
+	}
+
+	cmd, out := newRoomTestCommand(ctx)
+	err := runRoomEpicStart(cmd, workspace, "human-a", "alpha", "General Epic", "", "human-a", "", "", nil, nil, false, true)
+	if err == nil {
+		t.Fatal("runRoomEpicStart error = nil want written error envelope")
+	}
+	var env envelope.Envelope
+	if err := json.Unmarshal(out.Bytes(), &env); err != nil {
+		t.Fatalf("decode envelope: %v\n%s", err, out.String())
+	}
+	if env.Status != envelope.StatusError {
+		t.Fatalf("status=%q want error payload=%s", env.Status, out.String())
+	}
+	if env.Error.Code != string(protocol.ErrorCodeEARG) {
+		t.Fatalf("error.code=%q want %q", env.Error.Code, protocol.ErrorCodeEARG)
+	}
+	if !strings.Contains(out.String(), "--maintenance") {
+		t.Fatalf("body=%s want --maintenance hint", out.String())
+	}
+}
+
+func TestRoomEpicStartCLI_MaintenanceAllowsOmittedTitle(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	ctx := context.Background()
+	workspace := t.TempDir()
+
+	cmd, _ := newRoomTestCommand(ctx)
+	if err := runRoomCreate(cmd, workspace, "alpha", "Alpha", "", []string{"human-a=coordinator"}); err != nil {
+		t.Fatalf("runRoomCreate: %v", err)
+	}
+
+	root := newRoomCommand()
+	buf := &bytes.Buffer{}
+	root.SetContext(ctx)
+	root.SetOut(buf)
+	root.SetErr(buf)
+	root.SilenceUsage = true
+	root.SilenceErrors = true
+	root.SetArgs([]string{
+		"epic", "start", "alpha",
+		"--workspace", workspace,
+		"--sender", "human-a",
+		"--owner", "human-a",
+		"--maintenance",
+		"--default-small-work",
+	})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("epic start (cobra maintenance): %v", err)
+	}
+	epicID := decodeRoomEnvelope(t, buf)["epic_id"].(string)
+
+	cmd, out := newRoomTestCommand(ctx)
+	if err := runRoomEpicShow(cmd, workspace, "alpha", epicID, 100); err != nil {
+		t.Fatalf("runRoomEpicShow: %v", err)
+	}
+	epic := decodeRoomEnvelope(t, out)["epic"].(map[string]any)
+	if got := epic["title"]; got != "Maintenance / Small Stories" {
+		t.Fatalf("title=%v want Maintenance / Small Stories", got)
+	}
+	if got := epic["default_small_work"]; got != true {
+		t.Fatalf("default_small_work=%v want true", got)
+	}
+}
+
 func TestRoomMilestoneReviewCLI_ErrorEnvelopeReturnsError(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	ctx := context.Background()

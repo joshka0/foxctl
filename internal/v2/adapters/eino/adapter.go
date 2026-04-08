@@ -2,6 +2,7 @@ package eino
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -13,12 +14,12 @@ import (
 
 // EinoEngineAdapter bridges Eino's adk.Agent to agentctl's engine.AgentEngine.
 //
-// This is a spike adapter — it is only instantiated when AGENTCTL_ENGINE_BACKEND=eino
+// This is an integration adapter — it is instantiated when AGENTCTL_ENGINE_BACKEND=eino
 // is set. The default LLMChatEngine path is unaffected when the gate is off.
 //
 // Scope: the adapter converts engine.EngineInput messages to adk.AgentInput,
 // drains the AsyncIterator of AgentEvents, and collects the final assistant text
-// into engine.EngineOutput. Tool-call bridging is out of scope for the spike.
+// into engine.EngineOutput. Tool-call bridging is supported by the adk.Agent.
 type EinoEngineAdapter struct {
 	agent adk.Agent
 }
@@ -86,14 +87,16 @@ func toEinoRole(r string) (schema.RoleType, error) {
 }
 
 // drainIterator consumes all AgentEvents from the iterator and assembles
-// the final EngineOutput. Tool-call bridging is not implemented in the spike;
-// only the final assistant text is collected.
+// the final EngineOutput, including tool calls and results for parity with
+// the classic engine path.
 func drainIterator(iter *adk.AsyncIterator[*adk.AgentEvent]) (engine.EngineOutput, error) {
 	if iter == nil {
 		return engine.EngineOutput{}, fmt.Errorf("eino adapter: nil event iterator")
 	}
 
 	var assistantParts []string
+	var toolCalls []engine.ToolCall
+	var toolResults []engine.ToolResult
 	var firstErr error
 
 	for {
@@ -117,8 +120,26 @@ func drainIterator(iter *adk.AsyncIterator[*adk.AgentEvent]) (engine.EngineOutpu
 		if err != nil || msg == nil {
 			continue
 		}
-		if msg.Role == schema.Assistant && strings.TrimSpace(msg.Content) != "" {
-			assistantParts = append(assistantParts, msg.Content)
+
+		switch msg.Role {
+		case schema.Assistant:
+			if strings.TrimSpace(msg.Content) != "" {
+				assistantParts = append(assistantParts, msg.Content)
+			}
+			if len(msg.ToolCalls) > 0 {
+				for _, tc := range msg.ToolCalls {
+					toolCalls = append(toolCalls, engine.ToolCall{
+						ID:        tc.ID,
+						Name:      tc.Function.Name,
+						Arguments: json.RawMessage(tc.Function.Arguments),
+					})
+				}
+			}
+		case schema.Tool:
+			toolResults = append(toolResults, engine.ToolResult{
+				ToolCallID: msg.ToolCallID,
+				Content:    msg.Content,
+			})
 		}
 	}
 
@@ -128,6 +149,8 @@ func drainIterator(iter *adk.AsyncIterator[*adk.AgentEvent]) (engine.EngineOutpu
 
 	return engine.EngineOutput{
 		AssistantText: strings.Join(assistantParts, ""),
+		ToolCalls:     toolCalls,
+		ToolResults:   toolResults,
 		StopReason:    engine.StopReasonEndTurn,
 	}, nil
 }
