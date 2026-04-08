@@ -31,6 +31,8 @@ Environment variables, external dependencies, and setup notes.
 - **Linux:** Gateway SSH server may need permissions for port 22 on Tailscale IP
 - **tsnet:** Userspace networking only (no TUN device). Performance adequate for terminal use (~1-2ms latency overhead)
 - **Binary size:** tsnet adds ~15-20 MB to binary (gVisor netstack + WireGuard)
+- **Go version:** tailscale.com v1.96.5 requires Go 1.26+. The golangci-lint binary must be built with Go 1.26+ to lint packages that import tailscale. Install via: `GOBIN=/tmp/gobin go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest`
+- **genproto conflict:** `google.golang.org/genproto` (flat module v0.0.0-20231106174013) must be kept in go.mod as a direct indirect dependency to resolve ambiguity with `google.golang.org/genproto/googleapis/rpc` (apache/arrow transitive dep). Do NOT let `go mod tidy` remove it.
 
 ## Git Subprocess Patterns
 
