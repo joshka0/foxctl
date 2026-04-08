@@ -73,6 +73,13 @@ current pane explicitly before assuming relay or coordinator messages will land:
 agentctl room join <room-id> --current --role <room-role>
 ```
 
+If the participant already exists in the room but moved to a different
+`tmux`/`zellij` pane, update the transport binding instead of re-joining:
+
+```bash
+agentctl room rebind <room-id> <actor-id> --backend tmux --session <session> --pane-id <pane>
+```
+
 Practical rule:
 
 - `tmux` or `zellij` session membership is not the same thing as room membership

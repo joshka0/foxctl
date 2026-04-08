@@ -1710,11 +1710,6 @@ func runAgentAskWithRoute(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return writeErrorEnvelope(cmd, "agent/ask", string(protocol.ErrorCodeENotFound), fmt.Sprintf("agent not found: %v", err))
 	}
-	if !cmd.Flags().Changed("dispatcher") &&
-		strings.TrimSpace(os.Getenv(envAskDispatcherMode)) == "" &&
-		agent.NormalizeExecutionLayer(agentRecord.ExecutionLayer) == agent.ExecutionLayerJido {
-		dispatcherMode = askDispatchModeJido
-	}
 	var mailboxStore mailbox.Store
 	if dispatcherMode == askDispatchModeMailbox {
 		mailboxStore, err = mailbox.Open(ctx, cfg.Storage.Root)

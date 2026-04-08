@@ -1586,7 +1586,7 @@ func registerRoomTools(s *server.MCPServer) {
 
 	s.AddTool(
 		mcp.NewTool("room_agile",
-			mcp.WithDescription("Command-backed agile room protocol. Actions: epic_start, epic_ask, epic_answer, epic_finalize, epic_shape, epic_checkpoint, epic_show, epic_resume, epic_health, epic_next, milestone_start, milestone_contract, milestone_criteria, milestone_review, milestone_summary, milestone_show, story_propose, story_accept, story_add, story_state, story_validate, story_show, log_append, log_show, retro_add, retro_show, aca_promote, workpack_show, workpack_sync."),
+			mcp.WithDescription("Command-backed agile room protocol. Actions: epic_start, epic_ask, epic_answer, epic_finalize, epic_close, epic_shape, epic_checkpoint, epic_show, epic_resume, epic_health, epic_next, milestone_start, milestone_contract, milestone_criteria, milestone_review, milestone_summary, milestone_show, story_propose, story_accept, story_add, story_state, story_validate, story_show, log_append, log_show, retro_add, retro_show, aca_promote, workpack_show, workpack_sync."),
 			mcp.WithString("action", mcp.Required(), mcp.Description("Agile room action to run")),
 			mcp.WithString("workspace", mcp.Description("Workspace root override (default: .)")),
 			mcp.WithString("room_id", mcp.Description("Room id")),
@@ -1622,6 +1622,7 @@ func registerRoomTools(s *server.MCPServer) {
 			mcp.WithString("question_kind", mcp.Description("Epic intake question kind: product, technical, constraint, success")),
 			mcp.WithString("question", mcp.Description("Epic intake question text")),
 			mcp.WithString("answer", mcp.Description("Epic intake answer text")),
+			mcp.WithString("close_reason", mcp.Description("Epic close reason: completed, wont_do, superseded, cancelled")),
 			mcp.WithString("label", mcp.Description("Checkpoint label")),
 			mcp.WithString("note", mcp.Description("Checkpoint coordinator note")),
 			mcp.WithString("criterion", mcp.Description("Acceptance criterion text")),
@@ -4193,6 +4194,16 @@ func handleRoomAgileTool(ctx context.Context, req mcp.CallToolRequest) (*mcp.Cal
 			return mcp.NewToolResultError("epic_id and notes are required for room_agile epic_finalize"), nil
 		}
 		argv = []string{"epic", "finalize", roomID, epicID, notes}
+		argv = appendStringFlagArgs(argv, "--workspace", workspace)
+		argv = appendStringFlagArgs(argv, "--sender", getStringArg(args, "sender", ""))
+	case "epic_close":
+		epicID := getStringArg(args, "epic_id", "")
+		reason := getStringArg(args, "close_reason", "")
+		notes := getStringArg(args, "notes", "")
+		if epicID == "" || reason == "" || notes == "" {
+			return mcp.NewToolResultError("epic_id, close_reason, and notes are required for room_agile epic_close"), nil
+		}
+		argv = []string{"epic", "close", roomID, epicID, reason, notes}
 		argv = appendStringFlagArgs(argv, "--workspace", workspace)
 		argv = appendStringFlagArgs(argv, "--sender", getStringArg(args, "sender", ""))
 	case "epic_shape":

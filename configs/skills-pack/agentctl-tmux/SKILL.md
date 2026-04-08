@@ -249,6 +249,13 @@ agentctl room join <room-id> --current --role <room-role>
 Use that in each zellij pane that should receive room traffic. For zellij,
 room membership is pane-bound, not merely session-bound.
 
+If an existing participant moves to a different pane, repair the stored mux
+binding instead of pretending it is a new member:
+
+```bash
+agentctl room rebind <room-id> <actor-id> --backend <tmux|zellij> --session <session> --pane-id <pane>
+```
+
 The intended room policy is:
 
 - top-level panes may join rooms directly

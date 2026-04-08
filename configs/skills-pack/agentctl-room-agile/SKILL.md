@@ -39,6 +39,9 @@ This skill adds the explicit agile layer:
 ## Mental model
 
 - `epic` is the long-running objective
+- one mission should normally stay one `epic` across many milestones
+- do not start a second `epic` just because the next tranche or milestone begins
+- start a new `epic` only when the mission/outcome is materially different, not when the same mission continues
 - `epic` starts in discovery, not execution
 - `epic ask` / `epic answer` / `epic finalize` make the intake interview durable
 - `epic shape` turns the finalized brief into durable milestone proposals
@@ -58,6 +61,8 @@ This skill adds the explicit agile layer:
 ## Operating sequence
 
 ### 1. Start the epic
+
+Use `epic start` once per mission. After that, keep extending the same mission with more milestone proposals and milestone starts instead of opening a sibling epic for the next tranche.
 
 ```bash
 agentctl room epic start <room-id> "Room agile protocol" \

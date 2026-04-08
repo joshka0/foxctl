@@ -17,6 +17,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/domain/agent"
 	"github.com/jkatigb/agentctl/internal/domain/envelope"
 	ws "github.com/jkatigb/agentctl/internal/platform/workspace"
+	"github.com/jkatigb/agentctl/internal/protocol"
 	"github.com/jkatigb/agentctl/internal/storage/blackboard"
 	"github.com/jkatigb/agentctl/internal/storage/coordination"
 	taskstore "github.com/jkatigb/agentctl/internal/storage/tasks"
@@ -499,7 +500,10 @@ func TestRunRoomTaskCompleteRequiresClaim(t *testing.T) {
 
 	cmd, out = newRoomTestCommand(ctx)
 	if err := runRoomTaskComplete(cmd, workspace, "alpha", "agent-a", taskID, "should fail", ""); err != nil {
-		t.Fatalf("runRoomTaskComplete returned error instead of envelope: %v", err)
+		var we *protocol.WrittenEnvelopeError
+		if !errors.As(err, &we) {
+			t.Fatalf("runRoomTaskComplete: %v", err)
+		}
 	}
 	var env envelope.Envelope
 	if err := json.Unmarshal(out.Bytes(), &env); err != nil {
@@ -535,7 +539,10 @@ func TestRunRoomTaskAssignRequiresCoordinator(t *testing.T) {
 
 	cmd, out = newRoomTestCommand(ctx)
 	if err := runRoomTaskAssign(cmd, workspace, "alpha", "gemini-a", taskID, "gemini-a", "take this", roomTaskAssignOptions{}); err != nil {
-		t.Fatalf("runRoomTaskAssign returned error instead of envelope: %v", err)
+		var we *protocol.WrittenEnvelopeError
+		if !errors.As(err, &we) {
+			t.Fatalf("runRoomTaskAssign: %v", err)
+		}
 	}
 	var env envelope.Envelope
 	if err := json.Unmarshal(out.Bytes(), &env); err != nil {
@@ -662,8 +669,8 @@ func TestRunRoomTaskAssignPersistsAssignmentAndNotifiesRecipient(t *testing.T) {
 	}
 	data = decodeRoomEnvelope(t, out)
 	messages, ok := data["messages"].([]any)
-	if !ok || len(messages) < 3 {
-		t.Fatalf("messages=%T/%v want at least 3 entries", data["messages"], data["messages"])
+	if !ok || len(messages) < 2 {
+		t.Fatalf("messages=%T/%v want at least 2 entries (task add + assignment instruction)", data["messages"], data["messages"])
 	}
 	foundDirect := false
 	for _, raw := range messages {
@@ -822,7 +829,10 @@ func TestRunRoomTaskClaimRejectsDifferentAssignee(t *testing.T) {
 
 	cmd, out = newRoomTestCommand(ctx)
 	if err := runRoomTaskClaim(cmd, workspace, "alpha", "claude-a", taskID); err != nil {
-		t.Fatalf("runRoomTaskClaim returned error instead of envelope: %v", err)
+		var we *protocol.WrittenEnvelopeError
+		if !errors.As(err, &we) {
+			t.Fatalf("runRoomTaskClaim: %v", err)
+		}
 	}
 	var env envelope.Envelope
 	if err := json.Unmarshal(out.Bytes(), &env); err != nil {
@@ -3574,6 +3584,8 @@ func TestRoomMilestoneStartCLI_DefaultEnforceExitPolicyFalse(t *testing.T) {
 	root.SetContext(ctx)
 	root.SetOut(buf)
 	root.SetErr(buf)
+	root.SilenceUsage = true
+	root.SilenceErrors = true
 	root.SetArgs([]string{
 		"milestone", "start", "alpha", epicID, "M1",
 		"--workspace", workspace,
@@ -3592,6 +3604,88 @@ func TestRoomMilestoneStartCLI_DefaultEnforceExitPolicyFalse(t *testing.T) {
 	milestone := decodeRoomEnvelope(t, out)["milestone"].(map[string]any)
 	if got := milestone["enforce_exit_policy"]; got != false {
 		t.Fatalf("enforce_exit_policy=%v want false (CLI default)", got)
+	}
+}
+
+func TestRoomMilestoneReviewCLI_ErrorEnvelopeReturnsError(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	ctx := context.Background()
+	workspace := t.TempDir()
+
+	cmd, _ := newRoomTestCommand(ctx)
+	if err := runRoomCreate(cmd, workspace, "alpha", "Alpha", "", []string{"human-a=coordinator"}); err != nil {
+		t.Fatalf("runRoomCreate: %v", err)
+	}
+	cmd, out := newRoomTestCommand(ctx)
+	if err := runRoomEpicStart(cmd, workspace, "human-a", "alpha", "Agile", "Goal", "human-a", "", "", []string{"scope"}, []string{"ok"}); err != nil {
+		t.Fatalf("runRoomEpicStart: %v", err)
+	}
+	epicID := decodeRoomEnvelope(t, out)["epic_id"].(string)
+	cmd, _ = newRoomTestCommand(ctx)
+	if err := runRoomEpicFinalize(cmd, workspace, "human-a", "alpha", epicID, "Brief ready."); err != nil {
+		t.Fatalf("runRoomEpicFinalize: %v", err)
+	}
+
+	root := newRoomCommand()
+	buf := &bytes.Buffer{}
+	root.SetContext(ctx)
+	root.SetOut(buf)
+	root.SetErr(buf)
+	root.SetArgs([]string{
+		"milestone", "start", "alpha", epicID, "M1",
+		"--workspace", workspace,
+		"--sender", "human-a",
+		"--goal", "g",
+	})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("milestone start (cobra): %v", err)
+	}
+	milestoneID := decodeRoomEnvelope(t, buf)["milestone_id"].(string)
+
+	root = newRoomCommand()
+	buf = &bytes.Buffer{}
+	root.SetContext(ctx)
+	root.SetOut(buf)
+	root.SetErr(buf)
+	root.SilenceUsage = true
+	root.SilenceErrors = true
+	root.SetArgs([]string{
+		"milestone", "contract", "alpha", milestoneID,
+		"--required-lane", "test",
+		"--validator", "test",
+		"--enforce-exit-policy",
+		"--workspace", workspace,
+		"--sender", "human-a",
+	})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("milestone contract (cobra): %v", err)
+	}
+
+	root = newRoomCommand()
+	buf = &bytes.Buffer{}
+	errBuf := &bytes.Buffer{}
+	root.SetContext(ctx)
+	root.SetOut(buf)
+	root.SetErr(errBuf)
+	root.SilenceUsage = true
+	root.SilenceErrors = true
+	root.SetArgs([]string{
+		"milestone", "review", "alpha", milestoneID, "pass", "too early",
+		"--workspace", workspace,
+		"--sender", "human-a",
+	})
+	if err := root.Execute(); err == nil {
+		t.Fatal("milestone review expected error when exit policy blocks pass")
+	}
+	var env envelope.Envelope
+	if err := json.Unmarshal(buf.Bytes(), &env); err != nil {
+		t.Fatalf("Unmarshal envelope error = %v", err)
+	}
+	if env.Status != envelope.StatusError {
+		t.Fatalf("env.Status=%q want %q", env.Status, envelope.StatusError)
+	}
+	if env.Command != "agentctl.room.milestone.review" {
+		t.Fatalf("env.Command=%q want agentctl.room.milestone.review", env.Command)
 	}
 }
 
@@ -3850,6 +3944,79 @@ func TestRunRoomEpicNextReturnsDeterministicEmptyShape(t *testing.T) {
 	items := data["items"].([]any)
 	if len(items) != 0 {
 		t.Fatalf("len(items)=%d want 0", len(items))
+	}
+}
+
+func TestRunRoomEpicCloseCompletedOverridesPhaseAndHealth(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	ctx := context.Background()
+	workspace := t.TempDir()
+
+	epicID, _, _ := setupRoomAgileWorkpackFixture(t, ctx, workspace)
+
+	cmd, _ := newRoomTestCommand(ctx)
+	if err := runRoomEpicClose(cmd, workspace, "human-a", "alpha", epicID, "implemented", "Bounded scope is implemented and the mission is complete."); err != nil {
+		t.Fatalf("runRoomEpicClose: %v", err)
+	}
+
+	cmd, out := newRoomTestCommand(ctx)
+	if err := runRoomEpicResume(cmd, workspace, "alpha", epicID); err != nil {
+		t.Fatalf("runRoomEpicResume: %v", err)
+	}
+	resume := decodeRoomEnvelope(t, out)["resume"].(map[string]any)
+	if got := resume["phase"]; got != "completed" {
+		t.Fatalf("phase=%v want completed", got)
+	}
+	if got := resume["close_reason"]; got != "completed" {
+		t.Fatalf("close_reason=%v want completed", got)
+	}
+
+	cmd, out = newRoomTestCommand(ctx)
+	if err := runRoomEpicHealth(cmd, workspace, "alpha", epicID, "", 200); err != nil {
+		t.Fatalf("runRoomEpicHealth: %v", err)
+	}
+	health := decodeRoomEnvelope(t, out)["health"].(map[string]any)
+	if got := health["health"]; got != "complete" {
+		t.Fatalf("health=%v want complete", got)
+	}
+}
+
+func TestRunRoomEpicCloseSupersededClearsNextAndPulse(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	ctx := context.Background()
+	workspace := t.TempDir()
+
+	epicID, _, _ := setupRoomAgileWorkpackFixture(t, ctx, workspace)
+
+	cmd, _ := newRoomTestCommand(ctx)
+	if err := runRoomEpicClose(cmd, workspace, "human-a", "alpha", epicID, "superseded", "This split was mistaken; continue the same mission under the original epic as another milestone."); err != nil {
+		t.Fatalf("runRoomEpicClose superseded: %v", err)
+	}
+
+	cmd, out := newRoomTestCommand(ctx)
+	if err := runRoomEpicNext(cmd, workspace, "alpha", epicID, "human-a"); err != nil {
+		t.Fatalf("runRoomEpicNext: %v", err)
+	}
+	next := decodeRoomEnvelope(t, out)
+	if got := next["reason"]; got != "epic closed" {
+		t.Fatalf("reason=%v want epic closed", got)
+	}
+	if items := next["items"].([]any); len(items) != 0 {
+		t.Fatalf("len(items)=%d want 0", len(items))
+	}
+
+	cmd, out = newRoomTestCommand(ctx)
+	if err := runRoomPulse(cmd, workspace, "alpha", "", 20, []string{"all"}); err != nil {
+		t.Fatalf("runRoomPulse: %v", err)
+	}
+	pulse := decodeRoomEnvelope(t, out)
+	summary := pulse["summary"].(map[string]any)
+	if got := summary["closed_epic_count"]; got != float64(1) {
+		t.Fatalf("closed_epic_count=%v want 1", got)
+	}
+	topItems := pulse["top_items"].([]any)
+	if len(topItems) != 0 {
+		t.Fatalf("len(top_items)=%d want 0", len(topItems))
 	}
 }
 
@@ -6492,6 +6659,83 @@ func TestRunRoomJoinPersistsTransportBinding(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("cursor-a not found in members=%v", members)
+	}
+}
+
+func TestRunRoomRebindUpdatesTransportBindingWithoutChangingRole(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	ctx := context.Background()
+	workspace := t.TempDir()
+
+	cmd, _ := newRoomTestCommand(ctx)
+	if err := runRoomCreate(cmd, workspace, "alpha", "Alpha", "", []string{"human-a=coordinator"}); err != nil {
+		t.Fatalf("runRoomCreate: %v", err)
+	}
+
+	cmd, _ = newRoomTestCommand(ctx)
+	if err := runRoomJoin(cmd, workspace, "alpha", "claude-a", "reviewer", "tmux", "13", "%25", false, true, false); err != nil {
+		t.Fatalf("runRoomJoin: %v", err)
+	}
+
+	cmd, out := newRoomTestCommand(ctx)
+	if err := runRoomRebind(cmd, workspace, "alpha", "claude-a", "", "tmux", "13", "%27", false, false); err != nil {
+		t.Fatalf("runRoomRebind: %v", err)
+	}
+
+	data := decodeRoomEnvelope(t, out)
+	roomRaw, ok := data["room"].(map[string]any)
+	if !ok {
+		t.Fatalf("room type=%T", data["room"])
+	}
+	members, ok := roomRaw["members"].([]any)
+	if !ok {
+		t.Fatalf("members=%T", roomRaw["members"])
+	}
+	found := false
+	for _, raw := range members {
+		member, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		if member["actor_id"] == "claude-a" {
+			found = true
+			if member["backend"] != "tmux" || member["session"] != "13" || member["pane_id"] != "%27" {
+				t.Fatalf("claude binding=%v want tmux/13/%%27", member)
+			}
+			if member["role"] != "reviewer" {
+				t.Fatalf("claude role=%v want reviewer", member["role"])
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("claude-a not found in members=%v", members)
+	}
+}
+
+func TestRunRoomRebindRequiresExistingMember(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	ctx := context.Background()
+	workspace := t.TempDir()
+
+	cmd, _ := newRoomTestCommand(ctx)
+	if err := runRoomCreate(cmd, workspace, "alpha", "Alpha", "", []string{"human-a=coordinator"}); err != nil {
+		t.Fatalf("runRoomCreate: %v", err)
+	}
+
+	cmd, out := newRoomTestCommand(ctx)
+	err := runRoomRebind(cmd, workspace, "alpha", "missing-a", "", "tmux", "13", "%27", false, false)
+	if err == nil {
+		t.Fatal("runRoomRebind error = nil want written error envelope")
+	}
+	var env envelope.Envelope
+	if err := json.Unmarshal(out.Bytes(), &env); err != nil {
+		t.Fatalf("decode envelope: %v\n%s", err, out.String())
+	}
+	if env.Status != envelope.StatusError {
+		t.Fatalf("status=%q want error payload=%s", env.Status, out.String())
+	}
+	if env.Error.Code != string(protocol.ErrorCodeENotFound) {
+		t.Fatalf("error.code=%q want %q", env.Error.Code, protocol.ErrorCodeENotFound)
 	}
 }
 

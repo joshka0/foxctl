@@ -55,6 +55,8 @@ const (
 	BoardMessageKindEpicAnswer BoardMessageKind = "epic_answer"
 	// BoardMessageKindEpicFinalize represents the clarified epic brief after intake is complete.
 	BoardMessageKindEpicFinalize BoardMessageKind = "epic_finalize"
+	// BoardMessageKindEpicClose represents an explicit closure decision for an epic.
+	BoardMessageKindEpicClose BoardMessageKind = "epic_close"
 	// BoardMessageKindEpicCheckpoint represents a durable resumability snapshot for an epic.
 	BoardMessageKindEpicCheckpoint BoardMessageKind = "epic_checkpoint"
 	// BoardMessageKindMilestoneProposal represents a proposed milestone shape derived from an epic.

@@ -1,0 +1,61 @@
+name: Local CI
+
+on:
+  workflow_dispatch:
+
+env:
+  GOFLAGS: "-buildvcs=false"
+
+jobs:
+  static-analysis:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Format (gofumpt)
+        run: |
+          make fmt
+          git diff --exit-code || (echo 'Formatting changed files. Run make fmt locally.' && exit 1)
+
+      - name: Lint (golangci-lint)
+        run: make lint
+
+      - name: Check large files
+        run: make check-large-files
+
+      - name: Check tech debt (TODO/FIXME count)
+        run: make check-tech-debt
+
+  unit-tests:
+    runs-on: ubuntu-latest
+    env:
+      CGO_ENABLED: "0"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Unit tests
+        run: go test -short -v -count=1 ./...
+
+  race-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Race tests
+        run: make test-race
+
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build CLI
+        run: make build
+
+      - name: Build skills pack
+        run: make skills-build
+
+      - name: Check skill manifests (policy)
+        run: go run ./scripts/checkmanifests

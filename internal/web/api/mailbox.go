@@ -254,7 +254,7 @@ func handleMailboxSend(w http.ResponseWriter, r *http.Request, cfg config.Config
 			agent.BoardMessageKindInterviewSession, agent.BoardMessageKindInterviewQuestion,
 			agent.BoardMessageKindInterviewAnswer, agent.BoardMessageKindInterviewVerify,
 			agent.BoardMessageKindEpic, agent.BoardMessageKindEpicQuestion,
-			agent.BoardMessageKindEpicAnswer, agent.BoardMessageKindEpicFinalize, agent.BoardMessageKindEpicCheckpoint,
+			agent.BoardMessageKindEpicAnswer, agent.BoardMessageKindEpicFinalize, agent.BoardMessageKindEpicClose, agent.BoardMessageKindEpicCheckpoint,
 			agent.BoardMessageKindMilestoneProposal,
 			agent.BoardMessageKindMilestone,
 			agent.BoardMessageKindMilestoneContract,

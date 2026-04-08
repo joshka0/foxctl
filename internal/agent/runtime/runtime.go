@@ -28,6 +28,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/domain/agent"
 	"github.com/jkatigb/agentctl/internal/domain/envelope"
 	"github.com/jkatigb/agentctl/internal/engine"
+	einoadapter "github.com/jkatigb/agentctl/internal/v2/adapters/eino"
 	"github.com/jkatigb/agentctl/internal/hooks"
 	"github.com/jkatigb/agentctl/internal/observability"
 	"github.com/jkatigb/agentctl/internal/protocol"
@@ -208,7 +209,7 @@ type Session struct {
 	ID              string
 	Config          types.AgentConfig
 	Status          types.AgentStatus
-	Engine          *engine.LLMChatEngine
+	Engine          engine.AgentEngine
 	Tools           []engine.ToolDef
 	StartedAt       time.Time
 	EndedAt         *time.Time
@@ -436,7 +437,7 @@ func (r *Runtime) Spawn(ctx context.Context, cfg types.AgentConfig) (*Session, e
 }
 
 // createEngine creates an LLMChatEngine with tools for the given agent configuration.
-func (r *Runtime) createEngine(cfg types.AgentConfig, sessionID string) (*engine.LLMChatEngine, []engine.ToolDef, error) {
+func (r *Runtime) createEngine(cfg types.AgentConfig, sessionID string) (engine.AgentEngine, []engine.ToolDef, error) {
 	workspaceRoot := r.workspaceRootForConfig(cfg)
 	provider, model := r.resolveEffectiveLLMTarget(cfg)
 
@@ -492,6 +493,21 @@ func (r *Runtime) createEngine(cfg types.AgentConfig, sessionID string) (*engine
 	}
 	toolRunner := engine.NewToolRunner(executor, r.config.HookDispatcher, runnerCfg)
 	llmEngine.SetToolRunner(toolRunner)
+
+	// Config gate: opt in to the Eino-backed engine path via AGENTCTL_ENGINE_BACKEND=eino.
+	// When the gate is off (the default), llmEngine is returned unchanged, preserving the
+	// Milestone 1 mailbox-owned default path.
+	//
+	// When the gate is on, we provision a real adk.ChatModelAgent using the provider-resolved
+	// connection parameters from llmEngine.Config(). Tool-call bridging is out of scope for
+	// this spike; only the plain chat completion path is wired.
+	if einoadapter.IsEinoEnabled() {
+		einoAdapter, err := einoadapter.ProvisionFromLLMConfig(llmEngine.Config())
+		if err != nil {
+			return nil, nil, fmt.Errorf("eino gate-on provisioning failed: %w", err)
+		}
+		return einoAdapter, toolDefs, nil
+	}
 
 	return llmEngine, toolDefs, nil
 }

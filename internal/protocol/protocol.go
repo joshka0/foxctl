@@ -443,7 +443,14 @@ func WriteOK(w io.Writer, cmd string, data any, opts ...Option) error {
 // WriteError builds, validates, and writes an error envelope.
 func WriteError(w io.Writer, cmd string, code ErrorCode, msg string, data any, opts ...Option) error {
 	env := Error(cmd, code, msg, data, opts...)
-	return Write(w, env)
+	if err := Write(w, env); err != nil {
+		return err
+	}
+	return &WrittenEnvelopeError{
+		Command: cmd,
+		Code:    code,
+		Message: msg,
+	}
 }
 
 // AnnotateRun annotates an envelope with run metadata.

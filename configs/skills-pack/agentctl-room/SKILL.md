@@ -355,6 +355,8 @@ agentctl room join alpha --current --role <room-role>
   launched with room metadata and must be joined explicitly
 - session-only assumptions are unsafe for multi-pane zellij rooms; pane binding
   is the correct unit of room membership
+- if an existing participant moves to a new pane, prefer `agentctl room rebind`
+  to update the stored transport binding without pretending it is a new member
 
 ## Conventions
 
@@ -365,6 +367,8 @@ agentctl room join alpha --current --role <room-role>
 - Use `--to <participant>` plus `--ack-required` when you only need confirmation.
 - Use `room inbox` as the actionable queue for each participant; it is not a full archive.
 - `room join <room-id> --current` registers the current pane without hand-writing the id.
+- `room rebind <room-id> <actor-id> --backend <tmux|zellij> --session <session> --pane-id <pane>`
+  repairs a moved pane binding for an existing participant.
 - In `tmux`, room member ids can be pane labels or canonical ids like `tmux:<session>:%7`.
 - In `zellij`, room member ids can be pane titles or canonical ids like `zellij:<session>:terminal_3`.
 - The sender should also be a room member if you want them excluded from fanout.

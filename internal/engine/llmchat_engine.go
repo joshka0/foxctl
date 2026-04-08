@@ -237,6 +237,13 @@ func (e *LLMChatEngine) SetHookContext(ctx HookContext) {
 	e.hookContext = ctx
 }
 
+// Config returns the resolved LLMChatConfig for this engine.
+// Useful for callers that need the provider-resolved APIKey, BaseURL, and Model
+// after auto-detection has run.
+func (e *LLMChatEngine) Config() LLMChatConfig {
+	return e.config
+}
+
 // IsStatelessMode returns true if the engine is in RLM stateless mode.
 func (e *LLMChatEngine) IsStatelessMode() bool {
 	return e.config.StatelessMode
