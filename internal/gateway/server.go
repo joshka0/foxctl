@@ -21,6 +21,8 @@ import (
 
 	"github.com/rs/zerolog"
 	"tailscale.com/tsnet"
+
+	"github.com/jkatigb/agentctl/internal/gateway/webterm"
 )
 
 const (
@@ -105,6 +107,7 @@ type Server struct {
 	mu      sync.RWMutex
 	health  HealthStatus
 	started bool
+	termHub *webterm.Hub
 }
 
 // NewServer creates a new gateway server.
@@ -123,6 +126,7 @@ func NewServer(opts Options, log zerolog.Logger) *Server {
 			Store: "starting",
 			Tmux:  "ok",
 		},
+		termHub: webterm.NewHub(webterm.HubConfig{}, log),
 	}
 }
 
@@ -144,7 +148,39 @@ func (s *Server) setHealth(h HealthStatus) {
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", s.handleHealthz)
+
+	// Web terminal routes
+	termHandler := webterm.NewHandler(s.termHub, s.log)
+	termHandler.RegisterRoutes(mux)
+
 	return mux
+}
+
+// RegisterTerminalRoom registers a room for terminal access.
+// The room will be accessible at /terminal/{roomID} and /ws/terminal/{roomID}.
+func (s *Server) RegisterTerminalRoom(roomID, tmuxSession string, maxConnections int) {
+	config := webterm.RoomConfig{
+		TmuxSession:    tmuxSession,
+		MaxConnections: maxConnections,
+	}
+	s.termHub.RegisterRoom(roomID, config)
+	s.log.Info().
+		Str("room", roomID).
+		Str("tmux_session", tmuxSession).
+		Msg("Terminal room registered")
+}
+
+// UnregisterTerminalRoom removes a room's terminal access.
+func (s *Server) UnregisterTerminalRoom(roomID string) {
+	s.termHub.UnregisterRoom(roomID)
+	s.log.Info().
+		Str("room", roomID).
+		Msg("Terminal room unregistered")
+}
+
+// TerminalHub returns the web terminal hub for direct access.
+func (s *Server) TerminalHub() *webterm.Hub {
+	return s.termHub
 }
 
 // handleHealthz returns the subsystem health status as JSON.
@@ -366,6 +402,11 @@ func (s *Server) shutdown() error {
 		if err := s.tsnet.Close(); err != nil {
 			errs = append(errs, fmt.Errorf("tsnet close: %w", err))
 		}
+	}
+
+	// Close terminal hub (disconnects all web terminal clients)
+	if s.termHub != nil {
+		s.termHub.Close()
 	}
 
 	s.setHealth(HealthStatus{

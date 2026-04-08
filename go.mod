@@ -1,6 +1,6 @@
 module github.com/jkatigb/agentctl
 
-go 1.25.0
+go 1.26.1
 
 require (
 	github.com/BurntSushi/toml v1.5.0
@@ -63,6 +63,7 @@ require (
 	github.com/akutz/memconn v0.1.0 // indirect
 	github.com/alexbrainman/sspi v0.0.0-20231016080023-1a75b4708caa // indirect
 	github.com/creachadair/msync v0.7.1 // indirect
+	github.com/creack/pty v1.1.24 // indirect
 	github.com/dblohm7/wingoes v0.0.0-20240119213807-a09d6be7affa // indirect
 	github.com/fxamacker/cbor/v2 v2.9.0 // indirect
 	github.com/gaissmai/bart v0.26.1 // indirect

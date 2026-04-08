@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>agentctl terminal</title>
+  <style>
+    html, body { margin: 0; padding: 0; height: 100%; background: #1e1e2e; }
+    #terminal { width: 100%; height: 100%; }
+    #status {
+      position: fixed; bottom: 0; right: 0; padding: 4px 10px;
+      background: rgba(0,0,0,0.6); color: #ccc; font: 12px monospace;
+      display: none; z-index: 10;
+    }
+    #reconnect-bar {
+      position: fixed; top: 0; left: 0; right: 0;
+      background: #f59e0b; color: #000; text-align: center;
+      padding: 8px; font: bold 14px monospace; display: none; z-index: 20;
+    }
+  </style>
+</head>
+<body>
+  <div id="terminal"></div>
+  <div id="status"></div>
+  <div id="reconnect-bar">Reconnecting...</div>
+
+  <link rel="stylesheet" href="/static/xterm.css">
+  <link rel="stylesheet" href="/static/xterm-addon-fit.css">
+  <script src="/static/xterm.js"></script>
+  <script src="/static/xterm-addon-fit.js"></script>
+  <script>
+    (function () {
+      // Extract room ID from path: /terminal/{room-id}
+      var pathParts = window.location.pathname.split('/');
+      var roomId = pathParts[pathParts.length - 1] || pathParts[pathParts.length - 2];
+
+      // Build WebSocket URL
+      var wsProto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+      var wsUrl = wsProto + '//' + location.host + '/ws/terminal/' + encodeURIComponent(roomId);
+
+      var term = new Terminal({
+        theme: {
+          background: '#1e1e2e',
+          foreground: '#cdd6f4',
+          cursor: '#f5e0dc',
+          selectionBackground: '#585b70',
+        },
+        fontFamily: 'Menlo, Monaco, "Courier New", monospace',
+        fontSize: 14,
+        cursorBlink: true,
+        scrollback: 10000,
+      });
+
+      var fitAddon = new FitAddon.FitAddon();
+      term.loadAddon(fitAddon);
+      term.open(document.getElementById('terminal'));
+      fitAddon.fit();
+
+      var statusEl = document.getElementById('status');
+      var reconnectBar = document.getElementById('reconnect-bar');
+
+      function showStatus(msg) {
+        statusEl.textContent = msg;
+        statusEl.style.display = msg ? 'block' : 'none';
+      }
+
+      var ws = null;
+      var reconnectDelay = 500;
+      var maxReconnectDelay = 10000;
+      var intentionalClose = false;
+
+      function connect() {
+        ws = new WebSocket(wsUrl);
+        ws.binaryType = 'arraybuffer';
+
+        ws.onopen = function () {
+          showStatus('connected');
+          reconnectBar.style.display = 'none';
+          reconnectDelay = 500;
+          // Send initial size
+          sendResize();
+        };
+
+        ws.onmessage = function (event) {
+          if (typeof event.data === 'string') {
+            // JSON control message
+            try {
+              var msg = JSON.parse(event.data);
+              if (msg.type === 'resize') {
+                // Server acknowledged resize
+                return;
+              }
+            } catch (e) { /* not JSON, write as text */ }
+            term.write(event.data);
+          } else {
+            // Binary (ArrayBuffer) — raw terminal output
+            var bytes = new Uint8Array(event.data);
+            term.write(bytes);
+          }
+        };
+
+        ws.onclose = function () {
+          showStatus('disconnected');
+          if (!intentionalClose) {
+            reconnectBar.style.display = 'block';
+            setTimeout(function () {
+              reconnectDelay = Math.min(reconnectDelay * 2, maxReconnectDelay);
+              connect();
+            }, reconnectDelay);
+          }
+        };
+
+        ws.onerror = function () {
+          // onclose will fire after this
+        };
+      }
+
+      function sendResize() {
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({
+            type: 'resize',
+            cols: term.cols,
+            rows: term.rows,
+          }));
+        }
+      }
+
+      // Send keyboard input to the WebSocket
+      term.onData(function (data) {
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          ws.send(data);
+        }
+      });
+
+      // Send resize events
+      term.onResize(function () {
+        sendResize();
+      });
+
+      // Handle window resize
+      window.addEventListener('resize', function () {
+        fitAddon.fit();
+      });
+
+      // Start connection
+      connect();
+
+      // Cleanup on unload
+      window.addEventListener('beforeunload', function () {
+        intentionalClose = true;
+        if (ws) ws.close();
+      });
+    })();
+  </script>
+</body>
+</html>

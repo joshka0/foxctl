@@ -1,0 +1,9 @@
+/* xterm.js v5.x placeholder — in production, replace with actual xterm.js CSS */
+/**
+ * This is a minimal placeholder for xterm.js CSS.
+ * For the full xterm.js experience, replace this file with the actual
+ * xterm.css from https://cdn.jsdelivr.net/npm/xterm@5/dist/xterm.css
+ */
+.xterm { position: relative; user-select: none; }
+.xterm-viewport { overflow-y: auto; }
+.xterm-screen { position: relative; }
