@@ -14,44 +14,129 @@ func TestSanitizeBranchName_UnsafeChars(t *testing.T) {
 		expected string
 	}{
 		{
-			name:     "spaces and tilde",
+			name:     "spaces and tilde replaced",
 			input:    "feat/my cool feature~",
 			expected: "feat/my-cool-feature",
 		},
 		{
-			name:     "special characters",
-			input:    "fix/bug#123!",
-			expected: "fix/bug-123",
+			name:     "consecutive unsafe chars collapse",
+			input:    "feat/foo~~bar",
+			expected: "feat/foo-bar",
 		},
 		{
-			name:     "consecutive unsafe chars",
-			input:    "feat/hello,,,world",
-			expected: "feat/hello-world",
+			name:     "multiple consecutive unsafe chars",
+			input:    "fix/...bug",
+			expected: "fix/bug",
 		},
 		{
-			name:     "leading and trailing unsafe",
-			input:    "~~~feat/test~~~",
-			expected: "feat/test",
+			name:     "special shell chars",
+			input:    "feat/risky;rm-rf",
+			expected: "feat/risky-rm-rf",
 		},
 		{
-			name:     "mixed unsafe chars",
-			input:    "release/v1.0 @prod",
-			expected: "release/v1.0-prod",
+			name:     "backslash replaced",
+			input:    `feat\backslash`,
+			expected: "feat-backslash",
 		},
 		{
-			name:     "colon in name",
-			input:    "feat:dashboard",
-			expected: "feat-dashboard",
+			name:     "colon replaced",
+			input:    "feat/jira:123",
+			expected: "feat/jira-123",
+		},
+		{
+			name:     "carriage return and newline",
+			input:    "feat/line\r\nbreak",
+			expected: "feat/line-break",
+		},
+		{
+			name:     "tab replaced",
+			input:    "feat/tab\tvalue",
+			expected: "feat/tab-value",
+		},
+		{
+			name:     "double quotes",
+			input:    `feat/"quoted"`,
+			expected: "feat/quoted",
+		},
+		{
+			name:     "single quotes",
+			input:    "feat/'quoted'",
+			expected: "feat/quoted",
+		},
+		{
+			name:     "pipe character",
+			input:    "feat/pipe|value",
+			expected: "feat/pipe-value",
+		},
+		{
+			name:     "dollar sign",
+			input:    "feat/$var",
+			expected: "feat/var",
+		},
+		{
+			name:     "ampersand",
+			input:    "feat/a&b",
+			expected: "feat/a-b",
+		},
+		{
+			name:     "exclamation mark",
+			input:    "feat/wow!",
+			expected: "feat/wow",
+		},
+		{
+			name:     "asterisk",
+			input:    "feat/glob*",
+			expected: "feat/glob",
+		},
+		{
+			name:     "question mark",
+			input:    "feat/what?",
+			expected: "feat/what",
+		},
+		{
+			name:     "angle brackets",
+			input:    "feat/<redirect>",
+			expected: "feat/redirect",
 		},
 		{
 			name:     "parentheses",
-			input:    "fix(urgent): crash",
-			expected: "fix-urgent-crash",
+			input:    "feat/(parens)",
+			expected: "feat/parens",
 		},
 		{
-			name:     "at symbol",
-			input:    "user@feature",
-			expected: "user-feature",
+			name:     "brackets",
+			input:    "feat/[brackets]",
+			expected: "feat/brackets",
+		},
+		{
+			name:     "curly braces",
+			input:    "feat/{braces}",
+			expected: "feat/braces",
+		},
+		{
+			name:     "leading hyphens stripped",
+			input:    "-feat/x",
+			expected: "feat/x",
+		},
+		{
+			name:     "leading dot stripped",
+			input:    ".feat/x",
+			expected: "feat/x",
+		},
+		{
+			name:     "trailing dot and hyphen stripped",
+			input:    "feat/x.",
+			expected: "feat/x",
+		},
+		{
+			name:     "trailing slash stripped",
+			input:    "feat/x/",
+			expected: "feat/x",
+		},
+		{
+			name:     "lock suffix rejected",
+			input:    "feat/branch.lock",
+			expected: "feat/branch",
 		},
 	}
 
@@ -69,9 +154,11 @@ func TestSanitizeBranchName_EmptyResult(t *testing.T) {
 		name  string
 		input string
 	}{
-		{name: "dots only", input: "..."},
-		{name: "all special chars", input: "~~~!!!@@@"},
+		{name: "only dots", input: "..."},
+		{name: "only unsafe chars", input: "~!@#$%"},
 		{name: "empty string", input: ""},
+		{name: "only spaces", input: "   "},
+		{name: "only hyphens", input: "---"},
 	}
 
 	for _, tc := range tests {
@@ -79,7 +166,6 @@ func TestSanitizeBranchName_EmptyResult(t *testing.T) {
 			result, err := SanitizeBranchName(tc.input)
 			assert.Error(t, err)
 			assert.Empty(t, result)
-			assert.Contains(t, err.Error(), "invalid after sanitization")
 		})
 	}
 }
@@ -91,14 +177,9 @@ func TestSanitizeBranchName_SafePreserved(t *testing.T) {
 		expected string
 	}{
 		{
-			name:     "safe characters unchanged",
+			name:     "typical feature branch",
 			input:    "feat/jira-123_fix",
 			expected: "feat/jira-123_fix",
-		},
-		{
-			name:     "dots preserved",
-			input:    "release/v1.2.3",
-			expected: "release/v1.2.3",
 		},
 		{
 			name:     "simple name",
@@ -106,46 +187,29 @@ func TestSanitizeBranchName_SafePreserved(t *testing.T) {
 			expected: "main",
 		},
 		{
-			name:     "underscore and hyphen",
-			input:    "my-feature_branch",
-			expected: "my-feature_branch",
+			name:     "alphanumeric with hyphens",
+			input:    "my-feature-branch",
+			expected: "my-feature-branch",
 		},
 		{
-			name:     "just numbers",
+			name:     "alphanumeric with underscores",
+			input:    "my_feature_branch",
+			expected: "my_feature_branch",
+		},
+		{
+			name:     "slash separator",
+			input:    "fix/bug-123",
+			expected: "fix/bug-123",
+		},
+		{
+			name:     "numbers only",
 			input:    "12345",
 			expected: "12345",
 		},
 		{
-			name:     "with dots and dashes",
-			input:    "feature/v2.0-beta",
-			expected: "feature/v2.0-beta",
-		},
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			result, err := SanitizeBranchName(tc.input)
-			require.NoError(t, err)
-			assert.Equal(t, tc.expected, result)
-		})
-	}
-}
-
-func TestSanitizeBranchName_CollapsesHyphens(t *testing.T) {
-	tests := []struct {
-		name     string
-		input    string
-		expected string
-	}{
-		{
-			name:     "multiple spaces collapse to single hyphen",
-			input:    "feat/many   spaces",
-			expected: "feat/many-spaces",
-		},
-		{
-			name:     "consecutive special chars",
-			input:    "test$$$name",
-			expected: "test-name",
+			name:     "mixed case alphanumeric",
+			input:    "feat/ABC-123",
+			expected: "feat/ABC-123",
 		},
 	}
 

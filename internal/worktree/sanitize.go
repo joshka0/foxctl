@@ -6,49 +6,70 @@ import (
 	"strings"
 )
 
-// sanitizeReplacer matches any character that is not a letter, digit,
-// hyphen, underscore, dot, or forward slash (the characters allowed in
-// git branch names by convention).
-var sanitizeReplacer = regexp.MustCompile(`[^a-zA-Z0-9._\-/]+`)
+// unsafePattern matches characters that are not allowed in git branch names.
+// Safe characters: alphanumeric, hyphen, underscore, dot, forward slash.
+var unsafePattern = regexp.MustCompile(`[^a-zA-Z0-9._/\-]`)
 
-// SanitizeBranchName replaces unsafe characters with hyphens and validates
-// the result. Consecutive unsafe chars collapse to a single hyphen.
+// collapseHyphens matches consecutive hyphens.
+var collapseHyphens = regexp.MustCompile(`-{2,}`)
+
+// collapseSlashes matches consecutive forward slashes.
+var collapseSlashes = regexp.MustCompile(`/{2,}`)
+
+// SanitizeBranchName cleans a proposed branch name by replacing unsafe characters
+// with hyphens and collapsing consecutive unsafe characters. Returns an error if
+// the result would be empty or invalid.
 //
-// Returns an error if the result is empty after sanitization.
-// Safe characters (letters, digits, hyphen, underscore, dot, slash) are
-// preserved unchanged.
+// This is a pure function — no IO, no side effects.
 func SanitizeBranchName(name string) (string, error) {
-	sanitized := sanitizeReplacer.ReplaceAllString(name, "-")
-
-	// Collapse consecutive hyphens (from multiple unsafe chars in a row)
-	// but only those that weren't part of the original input.
-	// Simple approach: collapse all runs of multiple hyphens.
-	sanitized = collapseHyphens(sanitized)
-
-	// Trim leading/trailing hyphens
-	sanitized = strings.Trim(sanitized, "-")
-
-	if sanitized == "" {
-		return "", fmt.Errorf("branch name is invalid after sanitization: empty result")
+	if name == "" {
+		return "", fmt.Errorf("branch name is empty")
 	}
 
-	return sanitized, nil
-}
+	// Replace unsafe characters with hyphens
+	result := unsafePattern.ReplaceAllString(name, "-")
 
-// collapseHyphens collapses runs of 2+ consecutive hyphens into a single hyphen.
-func collapseHyphens(s string) string {
-	var b strings.Builder
-	prevHyphen := false
-	for _, r := range s {
-		if r == '-' {
-			if prevHyphen {
-				continue
-			}
-			prevHyphen = true
-		} else {
-			prevHyphen = false
+	// Collapse consecutive hyphens into a single hyphen
+	result = collapseHyphens.ReplaceAllString(result, "-")
+
+	// Collapse consecutive slashes
+	result = collapseSlashes.ReplaceAllString(result, "/")
+
+	// Strip leading/trailing hyphens, dots, and slashes from the whole name
+	result = strings.Trim(result, "-./ ")
+
+	// Handle component-level cleanup: split by "/", clean each part, rejoin
+	parts := strings.Split(result, "/")
+	cleaned := make([]string, 0, len(parts))
+	for _, part := range parts {
+		// Strip leading/trailing dots and hyphens from each component
+		part = strings.Trim(part, "-. ")
+		if part == "" {
+			continue
 		}
-		b.WriteRune(r)
+		cleaned = append(cleaned, part)
 	}
-	return b.String()
+	result = strings.Join(cleaned, "/")
+
+	if result == "" {
+		return "", fmt.Errorf("branch name is invalid after sanitization")
+	}
+
+	// Reject names ending with .lock
+	if strings.HasSuffix(result, ".lock") {
+		result = strings.TrimSuffix(result, ".lock")
+		result = strings.TrimRight(result, "-. ")
+	}
+
+	// Reject names with @{ (reflog notation)
+	if strings.Contains(result, "@{") {
+		result = strings.ReplaceAll(result, "@{", "-")
+		result = strings.ReplaceAll(result, "}", "")
+	}
+
+	if result == "" {
+		return "", fmt.Errorf("branch name is invalid after sanitization")
+	}
+
+	return result, nil
 }
