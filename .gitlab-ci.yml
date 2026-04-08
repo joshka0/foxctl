@@ -78,7 +78,7 @@ static-analysis:
   stage: check
   script:
     - make fmt
-    - git diff --exit-code || (echo 'Formatting changed files. Run make fmt locally.' && exit 1)
+    - git -c core.filemode=false diff --exit-code || (echo 'Formatting changed files. Run make fmt locally.' && exit 1)
     - make lint
     - make check-large-files
     - make check-tech-debt

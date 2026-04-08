@@ -38,17 +38,17 @@ type CommandBuilder func(req spawn.Request) (CommandSpec, error)
 
 // ChildSpawnerConfig configures the Go-native subprocess spawner.
 type ChildSpawnerConfig struct {
-	Publisher    EventPublisher
-	BuildCommand CommandBuilder
-	Now          func() time.Time
+	Publisher         EventPublisher
+	BuildCommand      CommandBuilder
+	Now               func() time.Time
 	HeartbeatInterval time.Duration
 }
 
 // ChildSpawner launches one subprocess worker and reports its lifecycle.
 type ChildSpawner struct {
-	publisher    EventPublisher
-	buildCommand CommandBuilder
-	now          func() time.Time
+	publisher         EventPublisher
+	buildCommand      CommandBuilder
+	now               func() time.Time
 	heartbeatInterval time.Duration
 }
 
@@ -67,9 +67,9 @@ func NewChildSpawner(cfg ChildSpawnerConfig) (*ChildSpawner, error) {
 		cfg.HeartbeatInterval = 30 * time.Second
 	}
 	return &ChildSpawner{
-		publisher:    cfg.Publisher,
-		buildCommand: cfg.BuildCommand,
-		now:          cfg.Now,
+		publisher:         cfg.Publisher,
+		buildCommand:      cfg.BuildCommand,
+		now:               cfg.Now,
 		heartbeatInterval: cfg.HeartbeatInterval,
 	}, nil
 }
@@ -342,21 +342,21 @@ func (s *ChildSpawner) publishHeartbeats(req spawn.Request, entry *processEntry)
 			return
 		case <-ticker.C:
 			_ = s.publish(context.Background(), coreworker.LifecycleEvent{
-				EventKind:      coreworker.EventWorkerHeartbeat,
-				ObservedAt:     s.now().UTC(),
-				WorkerID:       entry.workerID,
-				BackendKind:    coreworker.BackendSubprocess,
-				AgentID:        strings.TrimSpace(req.AgentID),
-				RunID:          strings.TrimSpace(req.RunID),
-				ParentAgentID:  strings.TrimSpace(req.ParentAgentID),
-				WorkspaceID:    stringMeta(req.Metadata, "workspace_id"),
-				RequestID:      strings.TrimSpace(req.RequestID),
-				CorrelationID:  strings.TrimSpace(req.CorrelationID),
-				CausationID:    strings.TrimSpace(req.CausationID),
-				Status:         coreworker.StatusRunning,
-				Role:           strings.TrimSpace(req.Role),
-				PID:            entry.baseEvent.PID,
-				Metadata:       cloneMeta(req.Metadata),
+				EventKind:     coreworker.EventWorkerHeartbeat,
+				ObservedAt:    s.now().UTC(),
+				WorkerID:      entry.workerID,
+				BackendKind:   coreworker.BackendSubprocess,
+				AgentID:       strings.TrimSpace(req.AgentID),
+				RunID:         strings.TrimSpace(req.RunID),
+				ParentAgentID: strings.TrimSpace(req.ParentAgentID),
+				WorkspaceID:   stringMeta(req.Metadata, "workspace_id"),
+				RequestID:     strings.TrimSpace(req.RequestID),
+				CorrelationID: strings.TrimSpace(req.CorrelationID),
+				CausationID:   strings.TrimSpace(req.CausationID),
+				Status:        coreworker.StatusRunning,
+				Role:          strings.TrimSpace(req.Role),
+				PID:           entry.baseEvent.PID,
+				Metadata:      cloneMeta(req.Metadata),
 			})
 		}
 	}
@@ -504,12 +504,12 @@ type AgentCommandBuilder func(record agentdomain.Agent, req spawn.Request) (Comm
 
 // ManagedAgentSpawnerConfig configures a subprocess spawner that provisions a real agent record first.
 type ManagedAgentSpawnerConfig struct {
-	StorageRoot   string
-	WorkspaceRoot string
-	BinaryPath    string
-	Publisher     EventPublisher
-	BuildCommand  AgentCommandBuilder
-	Now           func() time.Time
+	StorageRoot       string
+	WorkspaceRoot     string
+	BinaryPath        string
+	Publisher         EventPublisher
+	BuildCommand      AgentCommandBuilder
+	Now               func() time.Time
 	HeartbeatInterval time.Duration
 }
 
@@ -552,8 +552,8 @@ func NewManagedAgentSpawner(cfg ManagedAgentSpawnerConfig) (*ManagedAgentSpawner
 	}
 
 	spawner, err := NewChildSpawner(ChildSpawnerConfig{
-		Publisher: cfg.Publisher,
-		Now:       cfg.Now,
+		Publisher:         cfg.Publisher,
+		Now:               cfg.Now,
 		HeartbeatInterval: cfg.HeartbeatInterval,
 		BuildCommand: func(req spawn.Request) (CommandSpec, error) {
 			record, err := ensureAgentRecord(context.Background(), cfg.StorageRoot, workspaceRoot, cfg.Now, req)

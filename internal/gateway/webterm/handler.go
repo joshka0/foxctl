@@ -109,10 +109,9 @@ func (h *Handler) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 
 	if err := client.Run(ctx, roomID, cols, rows); err != nil {
-		switch err.(type) {
+		switch limitErr := err.(type) {
 		case *ConnectionLimitError:
 			// Send 429-like message through WebSocket before closing
-			limitErr := err.(*ConnectionLimitError)
 			errMsg, _ := json.Marshal(map[string]any{
 				"type":    "error",
 				"code":    "429",

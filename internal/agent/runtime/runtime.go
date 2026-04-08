@@ -28,13 +28,13 @@ import (
 	"github.com/jkatigb/agentctl/internal/domain/agent"
 	"github.com/jkatigb/agentctl/internal/domain/envelope"
 	"github.com/jkatigb/agentctl/internal/engine"
-	einoadapter "github.com/jkatigb/agentctl/internal/v2/adapters/eino"
 	"github.com/jkatigb/agentctl/internal/hooks"
 	"github.com/jkatigb/agentctl/internal/observability"
 	"github.com/jkatigb/agentctl/internal/protocol"
 	llmproviders "github.com/jkatigb/agentctl/internal/providers/llm"
 	"github.com/jkatigb/agentctl/internal/shellreduce"
 	"github.com/jkatigb/agentctl/internal/storage"
+	einoadapter "github.com/jkatigb/agentctl/internal/v2/adapters/eino"
 )
 
 var traceIDContextKey = struct{ Name string }{Name: "agentctl.trace_id"}
@@ -901,10 +901,10 @@ func (e *agentToolExecutor) executeMailInbox(ctx context.Context, args map[strin
 
 	// Format messages for the agent
 	var result strings.Builder
-	result.WriteString(fmt.Sprintf("Found %d message(s):\n\n", len(messages)))
+	fmt.Fprintf(&result, "Found %d message(s):\n\n", len(messages))
 	for _, msg := range messages {
-		result.WriteString(fmt.Sprintf("ID: %s\nFrom: %s\nType: %s\n", msg.ID, msg.FromNS, msg.Type))
-		result.WriteString(fmt.Sprintf("Content: %s\n---\n", string(msg.Payload)))
+		fmt.Fprintf(&result, "ID: %s\nFrom: %s\nType: %s\n", msg.ID, msg.FromNS, msg.Type)
+		fmt.Fprintf(&result, "Content: %s\n---\n", string(msg.Payload))
 	}
 	return result.String(), nil
 }

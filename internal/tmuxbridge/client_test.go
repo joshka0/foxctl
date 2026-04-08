@@ -730,8 +730,8 @@ func TestSubmitUsesEscapeThenEnter(t *testing.T) {
 func TestSubmitUsesCtrlEnterForNodeNonGeminiPane(t *testing.T) {
 	client := NewWithRunner(fakeRunner{
 		responses: map[string]fakeResponse{
-			"tmux list-panes -a -F " + labelFormat:     {stdout: "%15" + fieldSep + "cursor-c-a\n"},
-			"tmux list-sessions":                       {stdout: "ok\n"},
+			"tmux list-panes -a -F " + labelFormat:      {stdout: "%15" + fieldSep + "cursor-c-a\n"},
+			"tmux list-sessions":                        {stdout: "ok\n"},
 			"tmux display-message -t %15 -p #{pane_id}": {stdout: "%15\n"},
 			"tmux display-message -t %15 -p " + listFormat: {
 				stdout: "%15" + fieldSep + "triad-cur0" + fieldSep + "0" + fieldSep + "0" + fieldSep + "main" + fieldSep + "222" + fieldSep + "80" + fieldSep + "24" + fieldSep + "cursor-c-a" + fieldSep + "/repo" + fieldSep + "node" + fieldSep + "1\n",
@@ -778,7 +778,7 @@ func TestSubmitUsesCtrlEnterForDroidCommandPane(t *testing.T) {
 	client := NewWithRunner(fakeRunner{
 		responses: map[string]fakeResponse{
 			"tmux list-panes -a -F " + labelFormat:      {stdout: "%21" + fieldSep + "droid-a\n"},
-			"tmux list-sessions":                         {stdout: "ok\n"},
+			"tmux list-sessions":                        {stdout: "ok\n"},
 			"tmux display-message -t %21 -p #{pane_id}": {stdout: "%21\n"},
 			"tmux display-message -t %21 -p " + listFormat: {
 				stdout: "%21" + fieldSep + "collab" + fieldSep + "0" + fieldSep + "0" + fieldSep + "main" + fieldSep + "222" + fieldSep + "80" + fieldSep + "24" + fieldSep + "droid-a" + fieldSep + "/repo" + fieldSep + "droid" + fieldSep + "1\n",
@@ -978,7 +978,7 @@ func TestDeliverTextUsesRawForAgentPane(t *testing.T) {
 				stdout: "%2" + fieldSep + "collab" + fieldSep + "0" + fieldSep + "1" + fieldSep + "main" + fieldSep + "222" + fieldSep + "80" + fieldSep + "24" + fieldSep + "codex-b" + fieldSep + "/repo" + fieldSep + "codex" + fieldSep + "0\n",
 			},
 			"tmux send-keys -t %2 -l -- [room alpha] relay smoke": {},
-			"tmux send-keys -t %2 C-Enter":                         {},
+			"tmux send-keys -t %2 C-Enter":                        {},
 		},
 	}, map[string]string{})
 
@@ -1023,7 +1023,7 @@ func TestDeliverTextUsesCtrlEnterForNodeNonGeminiPane(t *testing.T) {
 				stdout: "%15" + fieldSep + "collab" + fieldSep + "0" + fieldSep + "1" + fieldSep + "main" + fieldSep + "222" + fieldSep + "80" + fieldSep + "24" + fieldSep + "cursor-c-a" + fieldSep + "/repo" + fieldSep + "node" + fieldSep + "0\n",
 			},
 			"tmux send-keys -t %15 -l -- [room alpha] composer uses ctrl enter": {},
-			"tmux send-keys -t %15 C-Enter": {},
+			"tmux send-keys -t %15 C-Enter":                                     {},
 		},
 	}, map[string]string{})
 
@@ -1068,7 +1068,7 @@ func TestDeliverTextInterruptingComposerLabeledPaneSkipsLeadingEscape(t *testing
 				stdout: "%40" + fieldSep + "collab" + fieldSep + "0" + fieldSep + "3" + fieldSep + "main" + fieldSep + "444" + fieldSep + "80" + fieldSep + "24" + fieldSep + "droid-1" + fieldSep + "/repo" + fieldSep + "zsh" + fieldSep + "0\n",
 			},
 			"tmux send-keys -t %40 -l -- [room alpha] task assigned": {},
-			"tmux send-keys -t %40 C-Enter": {},
+			"tmux send-keys -t %40 C-Enter":                          {},
 		},
 	}, map[string]string{})
 
@@ -1090,7 +1090,7 @@ func TestDeliverTextUsesRawWithoutEscapeForNonGeminiAgentPane(t *testing.T) {
 				stdout: "%2" + fieldSep + "collab" + fieldSep + "0" + fieldSep + "1" + fieldSep + "main" + fieldSep + "222" + fieldSep + "80" + fieldSep + "24" + fieldSep + "codex-b" + fieldSep + "/repo" + fieldSep + "codex" + fieldSep + "0\n",
 			},
 			"tmux send-keys -t %2 -l -- [room alpha] relay smoke": {},
-			"tmux send-keys -t %2 C-Enter":                         {},
+			"tmux send-keys -t %2 C-Enter":                        {},
 		},
 	}, map[string]string{})
 

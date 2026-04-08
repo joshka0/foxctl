@@ -17,7 +17,7 @@ type processEntry struct {
 	agentID        string
 	process        *os.Process
 	processGroupID int
-	done          chan struct{}
+	done           chan struct{}
 
 	publisher EventPublisher
 	now       func() time.Time

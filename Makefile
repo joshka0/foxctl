@@ -30,7 +30,17 @@ fmt:
 
 lint:
 	@echo "Running golangci-lint"
-	@GOFLAGS=-buildvcs=false $(GOLANGCI) run --timeout $(GOLANGCI_TIMEOUT) ./...
+	@lint_scope=""; \
+	if git rev-parse --verify origin/main >/dev/null 2>&1; then \
+		head_ref="$$(git rev-parse HEAD 2>/dev/null || true)"; \
+		main_ref="$$(git rev-parse origin/main 2>/dev/null || true)"; \
+		if [ -n "$$head_ref" ] && [ -n "$$main_ref" ] && [ "$$head_ref" != "$$main_ref" ]; then \
+			merge_base="$$(git merge-base HEAD origin/main)"; \
+			lint_scope="--new-from-rev=$$merge_base"; \
+			echo "Using diff-aware lint from $$merge_base"; \
+		fi; \
+	fi; \
+	GOFLAGS=-buildvcs=false $(GOLANGCI) run --timeout $(GOLANGCI_TIMEOUT) $$lint_scope ./...
 
 # Type-check all packages (faster than gopls per-file, catches type errors)
 # This is essentially what the compiler does during build
@@ -508,7 +518,16 @@ check-doc-links:
 	@bash scripts/check_doc_links.sh
 
 check-large-files:
-	@bash scripts/check_large_files.sh
+	@large_file_base=""; \
+	if git rev-parse --verify origin/main >/dev/null 2>&1; then \
+		head_ref="$$(git rev-parse HEAD 2>/dev/null || true)"; \
+		main_ref="$$(git rev-parse origin/main 2>/dev/null || true)"; \
+		if [ -n "$$head_ref" ] && [ -n "$$main_ref" ] && [ "$$head_ref" != "$$main_ref" ]; then \
+			large_file_base="$$(git merge-base HEAD origin/main)"; \
+			echo "Checking newly added large files from $$large_file_base"; \
+		fi; \
+	fi; \
+	CHECK_LARGE_FILES_BASE_REF="$$large_file_base" bash scripts/check_large_files.sh
 
 check-tech-debt:
 	@bash scripts/check_tech_debt.sh

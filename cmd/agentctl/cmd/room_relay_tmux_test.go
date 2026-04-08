@@ -70,7 +70,7 @@ func TestRelayRoomMessageTmuxSendsPayloadThenEnter(t *testing.T) {
 			stderr string
 			err    error
 		}{
-			"tmux display-message -t %2 -p #{pane_id}": {stdout: "%2\n"},
+			"tmux display-message -t %2 -p #{pane_id}":                 {stdout: "%2\n"},
 			"tmux display-message -t %2 -p " + relayTestTmuxListFormat: {stdout: paneLine},
 			payloadKey: {},
 			enterKey:   {},
@@ -132,7 +132,7 @@ func TestRelayRoomMessageDirectToHumanADeliversToCoordinatorPane(t *testing.T) {
 			stderr string
 			err    error
 		}{
-			"tmux display-message -t %13 -p #{pane_id}": {stdout: "%13\n"},
+			"tmux display-message -t %13 -p #{pane_id}":                 {stdout: "%13\n"},
 			"tmux display-message -t %13 -p " + relayTestTmuxListFormat: {stdout: paneLine},
 			payloadKey: {},
 			submitKey:  {},
@@ -181,7 +181,7 @@ func TestRelayRoomMessageDirectToHumanAPrefersCoordinatorWhenLegacyHumanARowExis
 			stderr string
 			err    error
 		}{
-			"tmux display-message -t %13 -p #{pane_id}": {stdout: "%13\n"},
+			"tmux display-message -t %13 -p #{pane_id}":                 {stdout: "%13\n"},
 			"tmux display-message -t %13 -p " + relayTestTmuxListFormat: {stdout: paneLine},
 			payloadKey: {},
 			submitKey:  {},

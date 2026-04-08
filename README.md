@@ -13,7 +13,7 @@ vault_refs:
 
 [![Go Report Card](https://goreportcard.com/badge/github.com/jkatigb/agentctl)](https://goreportcard.com/report/github.com/jkatigb/agentctl)
 ![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)
-[![Go Version](https://img.shields.io/badge/go-1.25+-blue.svg)](https://golang.org/dl/)
+[![Go Version](https://img.shields.io/badge/go-1.26.1+-blue.svg)](https://golang.org/dl/)
 
 **agentctl** provides infrastructure for AI coding assistants: discoverable skills,
 persistent memory, hook-based context injection, semantic code search, and

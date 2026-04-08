@@ -16,6 +16,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/codecontext"
 	"github.com/jkatigb/agentctl/internal/codecontext/autoselect"
 	"github.com/jkatigb/agentctl/internal/indexing/semantic"
+	"github.com/jkatigb/agentctl/internal/platform/config"
 	ws "github.com/jkatigb/agentctl/internal/platform/workspace"
 )
 
@@ -279,6 +280,11 @@ func searchCode(ctx context.Context, rc *skillmain.RunContext, in Input) ([]Cand
 }
 
 func collectEvidence(ctx context.Context, rc *skillmain.RunContext, in Input, ccCandidates []codecontext.Candidate) (*ExtractResult, error) {
+	inlineKB := rc.InlineKB
+	if inlineKB <= 0 {
+		inlineKB = config.DefaultInlineOutputKB
+	}
+
 	evidence, err := codecontext.Collect(ctx, codecontext.CollectOpts{
 		Candidates:      ccCandidates,
 		Query:           in.Question,
@@ -295,7 +301,7 @@ func collectEvidence(ctx context.Context, rc *skillmain.RunContext, in Input, cc
 
 	output, artifactPayload, err := codecontext.PrepareOutputWithArtifact(
 		evidence,
-		32,
+		inlineKB,
 		512,
 		codecontext.RenderNDJSON,
 	)

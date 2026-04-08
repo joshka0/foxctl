@@ -122,7 +122,7 @@ func makeShellToolWorkspace(t *testing.T) string {
 
 	sourceRoot := findRepoRoot(t)
 	workspaceRoot := t.TempDir()
-	if err := os.WriteFile(filepath.Join(workspaceRoot, "go.mod"), []byte("module github.com/jkatigb/agentctl\n\ngo 1.25.0\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(workspaceRoot, "go.mod"), []byte("module github.com/jkatigb/agentctl\n\ngo 1.26.1\n"), 0o644); err != nil {
 		t.Fatalf("write go.mod: %v", err)
 	}
 	skillDir := filepath.Join(workspaceRoot, "skills", "fs_read")

@@ -1,13 +1,13 @@
 name: CI (local)
 
-# Local-only workflow for agent-ci. Uses the local agentctl-ci:go1.25 image
-# instead of ghcr.io/${{ github.repository_owner }}/agentctl-ci:go1.25.
+# Local-only workflow for agent-ci. Uses the local agentctl-ci:go1.26.1 image
+# instead of ghcr.io/${{ github.repository_owner }}/agentctl-ci:go1.26.1.
 #
 # Usage:
 #   npx agent-ci run --workflow .github/workflows/ci-local.yml
 #
 # Build the CI image first:
-#   docker build -t agentctl-ci:go1.25 -f Dockerfile.ci .
+#   docker build -t agentctl-ci:go1.26.1 -f Dockerfile.ci .
 
 on:
   pull_request:
@@ -39,7 +39,7 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
-          go-version: "1.25"
+          go-version: "1.26.1"
 
       - name: Install build tools
         run: |
@@ -53,7 +53,7 @@ jobs:
         run: |
           cd "$GITHUB_WORKSPACE"
           make fmt
-          git diff --exit-code || (echo 'Formatting changed files. Run make fmt locally.' && exit 1)
+          git -c core.filemode=false diff --exit-code || (echo 'Formatting changed files. Run make fmt locally.' && exit 1)
 
       - name: Lint (golangci-lint)
         run: make lint
@@ -74,7 +74,7 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
-          go-version: "1.25"
+          go-version: "1.26.1"
 
       - name: Unit tests
         run: |
@@ -92,7 +92,7 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
-          go-version: "1.25"
+          go-version: "1.26.1"
 
       - name: Install build tools
         run: |
@@ -113,7 +113,7 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
-          go-version: "1.25"
+          go-version: "1.26.1"
 
       - name: Install build tools
         run: |
@@ -140,7 +140,7 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
-          go-version: "1.25"
+          go-version: "1.26.1"
 
       - name: Install build tools
         run: |
@@ -164,7 +164,7 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
-          go-version: "1.25"
+          go-version: "1.26.1"
 
       - name: Install build tools
         run: |

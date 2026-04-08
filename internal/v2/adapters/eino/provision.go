@@ -13,11 +13,11 @@ import (
 
 // ProvisionFromLLMConfig constructs a real Eino-backed engine adapter from a
 // provider-resolved LLMChatConfig. It:
-//   1. Wraps the resolved connection parameters in an oaiModelBridge that implements
-//      model.BaseChatModel against the same OpenAI-compatible endpoint.
-//   2. Bridges the provided agentctl ToolDefs and ToolExecutor into Eino tools.
-//   3. Creates an adk.ChatModelAgent with that model and the bridged tools.
-//   4. Returns the EinoEngineAdapter that satisfies engine.AgentEngine.
+//  1. Wraps the resolved connection parameters in an oaiModelBridge that implements
+//     model.BaseChatModel against the same OpenAI-compatible endpoint.
+//  2. Bridges the provided agentctl ToolDefs and ToolExecutor into Eino tools.
+//  3. Creates an adk.ChatModelAgent with that model and the bridged tools.
+//  4. Returns the EinoEngineAdapter that satisfies engine.AgentEngine.
 //
 // The resolved config must have APIKey, BaseURL, and Model already filled in
 // (i.e. passed after engine.NewLLMChatEngine has run auto-detection).

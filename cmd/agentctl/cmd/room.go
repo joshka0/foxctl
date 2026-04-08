@@ -7843,7 +7843,7 @@ func roomMilestoneExitPolicy(milestone map[string]any) map[string]any {
 	if !boolField(checks, "has_summary") {
 		reasons = append(reasons, "missing_summary")
 	}
-	status := "not_ready"
+	var status string
 	switch {
 	case boolField(checks, "has_blocking_story") || boolField(checks, "has_failed_validation"):
 		status = "blocked"
@@ -8063,7 +8063,7 @@ func buildRoomEpicNextItems(room agent.RoomSummary, messages []agent.BoardMessag
 		})
 	}
 
-	if boolField(epic, "finalized") == false && intField(epic, "open_questions") == 0 {
+	if !boolField(epic, "finalized") && intField(epic, "open_questions") == 0 {
 		items = append(items, map[string]any{
 			"type":         "finalize_epic",
 			"priority":     1,
@@ -12630,6 +12630,7 @@ type roomRelayOptions struct {
 	Backend          string
 	ZellijSession    string
 	ZellijPluginPath string
+	TaskEventMode    string
 }
 
 func relayRoomMessage(ctx context.Context, client *tmuxbridge.Client, room agent.RoomSummary, msg agent.BoardMessage, relay roomRelayOptions) roomRelayResult {
@@ -13512,10 +13513,7 @@ func relayRecipientMatchesMember(room agent.RoomSummary, member agent.RoomMember
 	}
 	// Common handoff: direct sends use "human-a" while the coordinator row stores tmux:session:pane.
 	if recipient == "human-a" && strings.EqualFold(strings.TrimSpace(member.Role), "coordinator") {
-		if roomHasMemberWithExactActorID(room, "human-a") {
-			return false
-		}
-		return true
+		return !roomHasMemberWithExactActorID(room, "human-a")
 	}
 	return false
 }

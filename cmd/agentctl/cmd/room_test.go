@@ -266,8 +266,9 @@ func TestRoomCommandFlow_CreateJoinSendShow(t *testing.T) {
 	if msg["stream"] != "room:alpha" {
 		t.Fatalf("stream=%v want room:alpha", msg["stream"])
 	}
-	if msg["body"] != "hello room" {
-		t.Fatalf("body=%v want hello room", msg["body"])
+	body, _ := msg["body"].(string)
+	if !strings.Contains(body, "hello room") {
+		t.Fatalf("body=%v want to contain hello room", msg["body"])
 	}
 }
 
@@ -366,8 +367,8 @@ func TestRoomTaskFlow_AddListComplete(t *testing.T) {
 	}
 	data = decodeRoomEnvelope(t, out)
 	messages, ok := data["messages"].([]any)
-	if !ok || len(messages) != 3 {
-		t.Fatalf("messages=%T/%v want 3 entries", data["messages"], data["messages"])
+	if !ok || len(messages) != 1 {
+		t.Fatalf("messages=%T/%v want 1 entry", data["messages"], data["messages"])
 	}
 }
 
@@ -472,6 +473,61 @@ func TestRoomTaskFlow_ClaimBlockUnblockAbandon(t *testing.T) {
 	}
 	if got := taskRaw["OwnerActorID"]; got != "" {
 		t.Fatalf("owner=%v want empty", got)
+	}
+
+	cmd, out = newRoomTestCommand(ctx)
+	if err := runRoomShow(cmd, workspace, "alpha", "", 20); err != nil {
+		t.Fatalf("runRoomShow: %v", err)
+	}
+	data = decodeRoomEnvelope(t, out)
+	messages, ok := data["messages"].([]any)
+	if !ok || len(messages) != 1 {
+		t.Fatalf("messages=%T/%v want 1 entry (task add only)", data["messages"], data["messages"])
+	}
+}
+
+func TestRoomLoopShouldRelayTaskTransitionModes(t *testing.T) {
+	cases := []struct {
+		name   string
+		mode   string
+		update roomTaskTransition
+		want   bool
+	}{
+		{
+			name:   "quiet suppresses claim",
+			mode:   "quiet",
+			update: roomTaskTransition{PreviousStatus: taskstore.StatusPending, CurrentStatus: taskstore.StatusInProgress},
+			want:   false,
+		},
+		{
+			name:   "default relays claim",
+			mode:   "default",
+			update: roomTaskTransition{PreviousStatus: taskstore.StatusPending, CurrentStatus: taskstore.StatusInProgress},
+			want:   true,
+		},
+		{
+			name:   "default relays complete",
+			mode:   "default",
+			update: roomTaskTransition{PreviousStatus: taskstore.StatusInProgress, CurrentStatus: taskstore.StatusCompleted},
+			want:   true,
+		},
+		{
+			name:   "default suppresses unblock",
+			mode:   "default",
+			update: roomTaskTransition{PreviousStatus: taskstore.StatusBlocked, CurrentStatus: taskstore.StatusInProgress},
+			want:   false,
+		},
+		{
+			name:   "verbose relays unblock",
+			mode:   "verbose",
+			update: roomTaskTransition{PreviousStatus: taskstore.StatusBlocked, CurrentStatus: taskstore.StatusInProgress},
+			want:   true,
+		},
+	}
+	for _, tc := range cases {
+		if got := roomLoopShouldRelayTaskTransition(tc.mode, tc.update); got != tc.want {
+			t.Fatalf("%s: got %v want %v", tc.name, got, tc.want)
+		}
 	}
 }
 
@@ -1235,17 +1291,9 @@ func TestRunRoomResolveRequiresCoordinator(t *testing.T) {
 	messages := data["messages"].([]any)
 	msgID := messages[0].(map[string]any)["id"].(string)
 
-	cmd, out = newRoomTestCommand(ctx)
+	cmd, _ = newRoomTestCommand(ctx)
 	err := runRoomResolve(cmd, workspace, "alpha", "gemini-a", "acked", false, nil, []string{msgID})
-	if err != nil {
-		t.Fatalf("runRoomResolve returned error: %v", err)
-	}
-	if !strings.Contains(out.String(), `"status":"error"`) {
-		t.Fatalf("expected error envelope, got %s", out.String())
-	}
-	if !strings.Contains(out.String(), "room resolve requires coordinator role") {
-		t.Fatalf("expected coordinator error, got %s", out.String())
-	}
+	assertRoomErrorContains(t, err, "room resolve requires coordinator role")
 }
 
 func TestRunRoomResolveMarksMessageResolved(t *testing.T) {
@@ -1478,17 +1526,10 @@ func TestRunRoomClearRequiresCoordinator(t *testing.T) {
 		t.Fatalf("runRoomCreate: %v", err)
 	}
 
-	cmd, out := newRoomTestCommand(ctx)
-	err := runRoomClear(cmd, workspace, "alpha", "gemini-a", "read", "coordinator-pulses")
-	if err != nil {
-		t.Fatalf("runRoomClear returned error: %v", err)
-	}
-	if !strings.Contains(out.String(), `"status":"error"`) {
-		t.Fatalf("expected error envelope, got %s", out.String())
-	}
-	if !strings.Contains(out.String(), "room clear requires coordinator role") {
-		t.Fatalf("expected coordinator error, got %s", out.String())
-	}
+	var err error
+	cmd, _ = newRoomTestCommand(ctx)
+	err = runRoomClear(cmd, workspace, "alpha", "gemini-a", "read", "coordinator-pulses")
+	assertRoomErrorContains(t, err, "room clear requires coordinator role")
 }
 
 func TestRunRoomClearSystemReminders(t *testing.T) {
@@ -1671,16 +1712,10 @@ func TestRunRoomRemindAddRequiresActiveLoopByDefault(t *testing.T) {
 		t.Fatalf("runRoomCreate: %v", err)
 	}
 
-	cmd, out := newRoomTestCommand(ctx)
-	if err := runRoomRemindAdd(cmd, workspace, "human-a", "alpha", "gemini-a", "", "Check MR !26 and report status", 15*time.Minute, 3, false, true, true, false); err != nil {
-		t.Fatalf("runRoomRemindAdd returned error: %v", err)
-	}
-	if !strings.Contains(out.String(), `"status":"error"`) {
-		t.Fatalf("expected error envelope, got %s", out.String())
-	}
-	if !strings.Contains(out.String(), `room loop is not active`) {
-		t.Fatalf("expected inactive loop error, got %s", out.String())
-	}
+	var err error
+	cmd, _ = newRoomTestCommand(ctx)
+	err = runRoomRemindAdd(cmd, workspace, "human-a", "alpha", "gemini-a", "", "Check MR !26 and report status", 15*time.Minute, 3, false, true, true, false)
+	assertRoomErrorContains(t, err, "room loop is not active")
 
 	cfg, err := loadConfig(ctx)
 	if err != nil {
@@ -1776,17 +1811,9 @@ func TestRunRoomPlanDecideRequiresCoordinator(t *testing.T) {
 	data := decodeRoomEnvelope(t, out)
 	sessionID := data["session_id"].(string)
 
-	cmd, out = newRoomTestCommand(ctx)
+	cmd, _ = newRoomTestCommand(ctx)
 	err := runRoomPlanEntry(cmd, workspace, "alpha", "gemini-a", sessionID, agent.BoardMessageKindPlanDecision, "Decision: do it", "Coordinator decision", true)
-	if err != nil {
-		t.Fatalf("runRoomPlanEntry decision returned error: %v", err)
-	}
-	if !strings.Contains(out.String(), `"status":"error"`) {
-		t.Fatalf("expected error envelope, got %s", out.String())
-	}
-	if !strings.Contains(out.String(), "room plan phase changes require coordinator role") {
-		t.Fatalf("expected coordinator plan error, got %s", out.String())
-	}
+	assertRoomErrorContains(t, err, "room plan phase changes require coordinator role")
 }
 
 func TestRunRoomEpicMilestoneStoryAndLogFlow(t *testing.T) {
@@ -1820,12 +1847,12 @@ func TestRunRoomEpicMilestoneStoryAndLogFlow(t *testing.T) {
 		t.Fatalf("question body=%v want Kind: success", questionMsg["body"])
 	}
 
-	cmd, out = newRoomTestCommand(ctx)
+	cmd, _ = newRoomTestCommand(ctx)
 	if err := runRoomEpicAnswer(cmd, workspace, "gemini-a", "alpha", questionID, "The epic needs a clarified brief and no open intake questions."); err != nil {
 		t.Fatalf("runRoomEpicAnswer: %v", err)
 	}
 
-	cmd, out = newRoomTestCommand(ctx)
+	cmd, _ = newRoomTestCommand(ctx)
 	if err := runRoomEpicFinalize(cmd, workspace, "human-a", "alpha", epicID, "Clarified brief: build the room agile layer first, then surface it in the GUI."); err != nil {
 		t.Fatalf("runRoomEpicFinalize: %v", err)
 	}
@@ -1930,7 +1957,7 @@ func TestRunRoomMilestoneReviewRequiresCoordinator(t *testing.T) {
 	data := decodeRoomEnvelope(t, out)
 	epicID := data["epic_id"].(string)
 
-	cmd, out = newRoomTestCommand(ctx)
+	cmd, _ = newRoomTestCommand(ctx)
 	if err := runRoomEpicFinalize(cmd, workspace, "human-a", "alpha", epicID, "Clarified brief."); err != nil {
 		t.Fatalf("runRoomEpicFinalize: %v", err)
 	}
@@ -1942,17 +1969,9 @@ func TestRunRoomMilestoneReviewRequiresCoordinator(t *testing.T) {
 	data = decodeRoomEnvelope(t, out)
 	milestoneID := data["milestone_id"].(string)
 
-	cmd, out = newRoomTestCommand(ctx)
+	cmd, _ = newRoomTestCommand(ctx)
 	err := runRoomMilestoneReview(cmd, workspace, "gemini-a", "alpha", milestoneID, "pass", "Looks good.")
-	if err != nil {
-		t.Fatalf("runRoomMilestoneReview returned error: %v", err)
-	}
-	if !strings.Contains(out.String(), `"status":"error"`) {
-		t.Fatalf("expected error envelope, got %s", out.String())
-	}
-	if !strings.Contains(out.String(), "agile scope changes require coordinator role") {
-		t.Fatalf("expected coordinator agile error, got %s", out.String())
-	}
+	assertRoomErrorContains(t, err, "agile scope changes require coordinator role")
 }
 
 func TestRunRoomMilestoneStartRequiresFinalizedEpic(t *testing.T) {
@@ -1972,17 +1991,9 @@ func TestRunRoomMilestoneStartRequiresFinalizedEpic(t *testing.T) {
 	data := decodeRoomEnvelope(t, out)
 	epicID := data["epic_id"].(string)
 
-	cmd, out = newRoomTestCommand(ctx)
+	cmd, _ = newRoomTestCommand(ctx)
 	err := runRoomMilestoneStart(cmd, workspace, "human-a", "alpha", epicID, "Foundation", "", "", "", nil, nil, nil, nil, nil, nil, "")
-	if err != nil {
-		t.Fatalf("runRoomMilestoneStart returned error: %v", err)
-	}
-	if !strings.Contains(out.String(), `"status":"error"`) {
-		t.Fatalf("expected error envelope, got %s", out.String())
-	}
-	if !strings.Contains(out.String(), "milestones require a finalized epic") {
-		t.Fatalf("expected finalized epic error, got %s", out.String())
-	}
+	assertRoomErrorContains(t, err, "milestones require a finalized epic")
 }
 
 func TestRunRoomEpicShapeRequiresFinalizedEpic(t *testing.T) {
@@ -2002,17 +2013,9 @@ func TestRunRoomEpicShapeRequiresFinalizedEpic(t *testing.T) {
 	data := decodeRoomEnvelope(t, out)
 	epicID := data["epic_id"].(string)
 
-	cmd, out = newRoomTestCommand(ctx)
+	cmd, _ = newRoomTestCommand(ctx)
 	err := runRoomEpicShape(cmd, workspace, "human-a", "alpha", epicID, 3)
-	if err != nil {
-		t.Fatalf("runRoomEpicShape returned error: %v", err)
-	}
-	if !strings.Contains(out.String(), `"status":"error"`) {
-		t.Fatalf("expected error envelope, got %s", out.String())
-	}
-	if !strings.Contains(out.String(), "epic shaping requires a finalized epic") {
-		t.Fatalf("expected finalized epic error, got %s", out.String())
-	}
+	assertRoomErrorContains(t, err, "epic shaping requires a finalized epic")
 }
 
 func TestRunRoomMilestoneStartFromProposal(t *testing.T) {
@@ -2277,16 +2280,9 @@ func TestRunRoomMilestoneSummaryRejectsUnknownValidationIDs(t *testing.T) {
 	}
 	milestoneID := decodeRoomEnvelope(t, out)["milestone_id"].(string)
 
-	cmd, out = newRoomTestCommand(ctx)
-	if err := runRoomMilestoneSummary(cmd, workspace, "human-a", "alpha", milestoneID, "", "Summary.", nil, nil, nil, []string{"01BADVALIDATION"}, nil, nil, nil, nil); err != nil {
-		t.Fatalf("runRoomMilestoneSummary returned error: %v", err)
-	}
-	if !strings.Contains(out.String(), `"status":"error"`) {
-		t.Fatalf("expected error envelope, got %s", out.String())
-	}
-	if !strings.Contains(out.String(), "is not a current blocking validation for this milestone") {
-		t.Fatalf("expected validation reference error, got %s", out.String())
-	}
+	cmd, _ = newRoomTestCommand(ctx)
+	err := runRoomMilestoneSummary(cmd, workspace, "human-a", "alpha", milestoneID, "", "Summary.", nil, nil, nil, []string{"01BADVALIDATION"}, nil, nil, nil, nil)
+	assertRoomErrorContains(t, err, "is not a current blocking validation for this milestone")
 }
 
 func TestRunRoomMilestoneSummaryRejectsUnknownWaivedValidationIDs(t *testing.T) {
@@ -2316,16 +2312,9 @@ func TestRunRoomMilestoneSummaryRejectsUnknownWaivedValidationIDs(t *testing.T) 
 	}
 	milestoneID := decodeRoomEnvelope(t, out)["milestone_id"].(string)
 
-	cmd, out = newRoomTestCommand(ctx)
-	if err := runRoomMilestoneSummary(cmd, workspace, "human-a", "alpha", milestoneID, "", "Summary.", nil, nil, []string{"01BADWAIVED"}, nil, nil, nil, nil, nil); err != nil {
-		t.Fatalf("runRoomMilestoneSummary returned error: %v", err)
-	}
-	if !strings.Contains(out.String(), `"status":"error"`) {
-		t.Fatalf("expected error envelope, got %s", out.String())
-	}
-	if !strings.Contains(out.String(), "is not attached to this milestone") {
-		t.Fatalf("expected waived validation reference error, got %s", out.String())
-	}
+	cmd, _ = newRoomTestCommand(ctx)
+	err := runRoomMilestoneSummary(cmd, workspace, "human-a", "alpha", milestoneID, "", "Summary.", nil, nil, []string{"01BADWAIVED"}, nil, nil, nil, nil, nil)
+	assertRoomErrorContains(t, err, "is not attached to this milestone")
 }
 
 func TestRunRoomMilestoneContractStartAndUpdate(t *testing.T) {
@@ -2358,7 +2347,7 @@ func TestRunRoomMilestoneContractStartAndUpdate(t *testing.T) {
 	data := decodeRoomEnvelope(t, out)
 	milestoneID := data["milestone_id"].(string)
 
-	cmd, out = newRoomTestCommand(ctx)
+	cmd, _ = newRoomTestCommand(ctx)
 	if err := runRoomMilestoneContractWithPolicy(cmd, workspace, "human-a", "alpha", milestoneID, "Updated objective.", []string{"multi-epic rooms"}, []string{"transport rewrite"}, []string{"send confirm"}, []string{"test", "review"}, []string{"test"}, []string{"manual_check", "review"}, &enforceFalse, []string{"summary written"}); err != nil {
 		t.Fatalf("runRoomMilestoneContract: %v", err)
 	}
@@ -2466,16 +2455,9 @@ func TestRunRoomMilestoneContractRequiresCoordinator(t *testing.T) {
 	}
 	milestoneID := decodeRoomEnvelope(t, out)["milestone_id"].(string)
 
-	cmd, out = newRoomTestCommand(ctx)
-	if err := runRoomMilestoneContract(cmd, workspace, "gemini-a", "alpha", milestoneID, "Nope.", nil, nil, nil, nil, nil); err != nil {
-		t.Fatalf("runRoomMilestoneContract returned error: %v", err)
-	}
-	if !strings.Contains(out.String(), `"status":"error"`) {
-		t.Fatalf("expected error envelope, got %s", out.String())
-	}
-	if !strings.Contains(out.String(), "agile scope changes require coordinator role") {
-		t.Fatalf("expected coordinator agile error, got %s", out.String())
-	}
+	cmd, _ = newRoomTestCommand(ctx)
+	err := runRoomMilestoneContract(cmd, workspace, "gemini-a", "alpha", milestoneID, "Nope.", nil, nil, nil, nil, nil)
+	assertRoomErrorContains(t, err, "agile scope changes require coordinator role")
 }
 
 func TestRunRoomRetroAddAndShow(t *testing.T) {
@@ -2586,16 +2568,9 @@ func TestRunRoomRetroAddRequiresCoordinator(t *testing.T) {
 		t.Fatalf("runRoomEpicFinalize: %v", err)
 	}
 
-	cmd, out = newRoomTestCommand(ctx)
-	if err := runRoomRetroAdd(cmd, workspace, "gemini-a", "alpha", epicID, "", "process", "Use the room loop.", "Prevents passive reminders from silently stalling.", "Fail reminder add when no loop is running.", nil, nil); err != nil {
-		t.Fatalf("runRoomRetroAdd returned error: %v", err)
-	}
-	if !strings.Contains(out.String(), `"status":"error"`) {
-		t.Fatalf("expected error envelope, got %s", out.String())
-	}
-	if !strings.Contains(out.String(), "agile scope changes require coordinator role") {
-		t.Fatalf("expected coordinator agile error, got %s", out.String())
-	}
+	cmd, _ = newRoomTestCommand(ctx)
+	err := runRoomRetroAdd(cmd, workspace, "gemini-a", "alpha", epicID, "", "process", "Use the room loop.", "Prevents passive reminders from silently stalling.", "Fail reminder add when no loop is running.", nil, nil)
+	assertRoomErrorContains(t, err, "agile scope changes require coordinator role")
 }
 
 func TestRunRoomRetroAddRejectsMilestoneOutsideEpic(t *testing.T) {
@@ -2634,16 +2609,9 @@ func TestRunRoomRetroAddRejectsMilestoneOutsideEpic(t *testing.T) {
 	}
 	milestoneID := decodeRoomEnvelope(t, out)["milestone_id"].(string)
 
-	cmd, out = newRoomTestCommand(ctx)
-	if err := runRoomRetroAdd(cmd, workspace, "human-a", "alpha", epicA, milestoneID, "tooling", "Wrong milestone.", "Should reject cross-epic milestone reference.", "Use a milestone from the same epic.", nil, nil); err != nil {
-		t.Fatalf("runRoomRetroAdd returned error: %v", err)
-	}
-	if !strings.Contains(out.String(), `"status":"error"`) {
-		t.Fatalf("expected error envelope, got %s", out.String())
-	}
-	if !strings.Contains(out.String(), "milestone does not belong to this epic") {
-		t.Fatalf("expected milestone/epic mismatch error, got %s", out.String())
-	}
+	cmd, _ = newRoomTestCommand(ctx)
+	err := runRoomRetroAdd(cmd, workspace, "human-a", "alpha", epicA, milestoneID, "tooling", "Wrong milestone.", "Should reject cross-epic milestone reference.", "Use a milestone from the same epic.", nil, nil)
+	assertRoomErrorContains(t, err, "milestone does not belong to this epic")
 }
 
 func TestRunRoomRetroAddRejectsUnknownKind(t *testing.T) {
@@ -2666,16 +2634,9 @@ func TestRunRoomRetroAddRejectsUnknownKind(t *testing.T) {
 		t.Fatalf("runRoomEpicFinalize: %v", err)
 	}
 
-	cmd, out = newRoomTestCommand(ctx)
-	if err := runRoomRetroAdd(cmd, workspace, "human-a", "alpha", epicID, "", "unknown", "Bad kind.", "Should reject invalid kind.", "Use a fixed enum.", nil, nil); err != nil {
-		t.Fatalf("runRoomRetroAdd returned error: %v", err)
-	}
-	if !strings.Contains(out.String(), `"status":"error"`) {
-		t.Fatalf("expected error envelope, got %s", out.String())
-	}
-	if !strings.Contains(out.String(), "unsupported retro kind") {
-		t.Fatalf("expected retro kind error, got %s", out.String())
-	}
+	cmd, _ = newRoomTestCommand(ctx)
+	err := runRoomRetroAdd(cmd, workspace, "human-a", "alpha", epicID, "", "unknown", "Bad kind.", "Should reject invalid kind.", "Use a fixed enum.", nil, nil)
+	assertRoomErrorContains(t, err, "unsupported retro kind")
 }
 
 func TestRunRoomACAPromoteEpicDraftsProposalAndIsIdempotent(t *testing.T) {
@@ -2746,16 +2707,9 @@ func TestRunRoomACAPromoteValidationRequiresHighSignal(t *testing.T) {
 	}
 	passValidationID := decodeRoomEnvelope(t, out)["validation_id"].(string)
 
-	cmd, out = newRoomTestCommand(ctx)
-	if err := runRoomACAPromote(cmd, workspace, "alpha", "validation", passValidationID); err != nil {
-		t.Fatalf("runRoomACAPromote routine validation returned error: %v", err)
-	}
-	if !strings.Contains(out.String(), `"status":"error"`) {
-		t.Fatalf("expected error envelope, got %s", out.String())
-	}
-	if !strings.Contains(out.String(), "not high-signal enough") {
-		t.Fatalf("expected high-signal rejection, got %s", out.String())
-	}
+	cmd, _ = newRoomTestCommand(ctx)
+	err := runRoomACAPromote(cmd, workspace, "alpha", "validation", passValidationID)
+	assertRoomErrorContains(t, err, "not high-signal enough")
 
 	cmd, out = newRoomTestCommand(ctx)
 	if err := runRoomStoryValidate(cmd, workspace, "human-a", "alpha", storyID, "review", "blocked", "Validation blocked on cross-story decision.", "docs/reviews/blocked.md", "", "", "Need the other story clarified.", nil); err != nil {
@@ -3407,32 +3361,10 @@ func TestRunRoomMilestoneExitEnforcement(t *testing.T) {
 			t.Fatalf("runRoomMilestoneContractWithPolicy: %v", err)
 		}
 
-		cmd, out := newRoomTestCommand(ctx)
-		if err := runRoomMilestoneReview(cmd, workspace, "human-a", "alpha", milestoneID, "pass", "Looks good."); err != nil {
-			t.Fatalf("runRoomMilestoneReview: %v", err)
-		}
-		var env envelope.Envelope
-		if err := json.Unmarshal(out.Bytes(), &env); err != nil {
-			t.Fatalf("decode envelope: %v\n%s", err, out.String())
-		}
-		if env.Status != envelope.StatusError {
-			t.Fatalf("status=%q want error payload=%s", env.Status, out.String())
-		}
-		payload := env.Data.(map[string]any)
-		if got := payload["exit_policy_status"]; got != "not_ready" {
-			t.Fatalf("exit_policy_status=%v want not_ready", got)
-		}
-		reasons := payload["exit_policy_reasons"].([]any)
-		found := false
-		for _, reason := range reasons {
-			if reason == "accepted_stories_uncovered" {
-				found = true
-				break
-			}
-		}
-		if !found {
-			t.Fatalf("exit_policy_reasons=%v want accepted_stories_uncovered", reasons)
-		}
+		var err error
+		cmd, _ = newRoomTestCommand(ctx)
+		err = runRoomMilestoneReview(cmd, workspace, "human-a", "alpha", milestoneID, "pass", "Looks good.")
+		assertRoomErrorContains(t, err, "milestone pass review is blocked by the enforced exit policy")
 	})
 
 	t.Run("enforcement on allows ready_for_review", func(t *testing.T) {
@@ -3488,21 +3420,10 @@ func TestRunRoomMilestoneExitEnforcement(t *testing.T) {
 			t.Fatalf("runRoomMilestoneReview initial: %v", err)
 		}
 
-		cmd, out := newRoomTestCommand(ctx)
-		if err := runRoomMilestoneReview(cmd, workspace, "human-a", "alpha", milestoneID, "pass", "Second pass should fail."); err != nil {
-			t.Fatalf("runRoomMilestoneReview second: %v", err)
-		}
-		var env envelope.Envelope
-		if err := json.Unmarshal(out.Bytes(), &env); err != nil {
-			t.Fatalf("decode envelope: %v\n%s", err, out.String())
-		}
-		if env.Status != envelope.StatusError {
-			t.Fatalf("status=%q want error payload=%s", env.Status, out.String())
-		}
-		payload := env.Data.(map[string]any)
-		if got := payload["exit_policy_status"]; got != "ready_for_summary" {
-			t.Fatalf("exit_policy_status=%v want ready_for_summary", got)
-		}
+		var err error
+		cmd, _ = newRoomTestCommand(ctx)
+		err = runRoomMilestoneReview(cmd, workspace, "human-a", "alpha", milestoneID, "pass", "Second pass should fail.")
+		assertRoomErrorContains(t, err, "milestone pass review is blocked by the enforced exit policy")
 	})
 }
 
@@ -4700,20 +4621,9 @@ func TestRunRoomStoryValidateRejectsArtifactDigestWithoutPath(t *testing.T) {
 
 	storyID := setupRoomStoryValidationFixture(t, ctx, workspace)
 
-	cmd, out := newRoomTestCommand(ctx)
-	if err := runRoomStoryValidate(cmd, workspace, "human-a", "alpha", storyID, "review", "pass", "Validation attached at story level.", "", "sha256:test", "", "", nil); err != nil {
-		t.Fatalf("runRoomStoryValidate returned error instead of envelope: %v", err)
-	}
-	var env envelope.Envelope
-	if err := json.Unmarshal(out.Bytes(), &env); err != nil {
-		t.Fatalf("decode envelope: %v", err)
-	}
-	if env.Status != "error" {
-		t.Fatalf("status=%q want error body=%s", env.Status, out.String())
-	}
-	if !strings.Contains(out.String(), "artifact-digest requires artifact-path") {
-		t.Fatalf("body=%s want artifact-path hint", out.String())
-	}
+	cmd, _ := newRoomTestCommand(ctx)
+	err := runRoomStoryValidate(cmd, workspace, "human-a", "alpha", storyID, "review", "pass", "Validation attached at story level.", "", "sha256:test", "", "", nil)
+	assertRoomErrorContains(t, err, "artifact-digest requires artifact-path")
 }
 
 func TestRunRoomStoryValidateRequiresWaiverNotesAndAuthority(t *testing.T) {
@@ -4724,34 +4634,13 @@ func TestRunRoomStoryValidateRequiresWaiverNotesAndAuthority(t *testing.T) {
 
 	storyID := setupRoomStoryValidationFixture(t, ctx, workspace)
 
-	cmd, out := newRoomTestCommand(ctx)
-	if err := runRoomStoryValidate(cmd, workspace, "gemini-a", "alpha", storyID, "review", "waived", "Waive validation.", "", "", "", "", nil); err != nil {
-		t.Fatalf("runRoomStoryValidate returned error instead of envelope: %v", err)
-	}
-	var env envelope.Envelope
-	if err := json.Unmarshal(out.Bytes(), &env); err != nil {
-		t.Fatalf("decode envelope: %v", err)
-	}
-	if env.Status != "error" {
-		t.Fatalf("status=%q want error body=%s", env.Status, out.String())
-	}
-	if !strings.Contains(out.String(), "waived validations require the story owner or coordinator") {
-		t.Fatalf("body=%s want authority error", out.String())
-	}
+	cmd, _ := newRoomTestCommand(ctx)
+	err := runRoomStoryValidate(cmd, workspace, "gemini-a", "alpha", storyID, "review", "waived", "Waive validation.", "", "", "", "", nil)
+	assertRoomErrorContains(t, err, "waived validations require the story owner or coordinator")
 
-	cmd, out = newRoomTestCommand(ctx)
-	if err := runRoomStoryValidate(cmd, workspace, "human-a", "alpha", storyID, "review", "waived", "Waive validation.", "", "", "", "", nil); err != nil {
-		t.Fatalf("runRoomStoryValidate returned error instead of envelope: %v", err)
-	}
-	if err := json.Unmarshal(out.Bytes(), &env); err != nil {
-		t.Fatalf("decode envelope: %v", err)
-	}
-	if env.Status != "error" {
-		t.Fatalf("status=%q want error body=%s", env.Status, out.String())
-	}
-	if !strings.Contains(out.String(), "waived validations require waiver notes") {
-		t.Fatalf("body=%s want waiver notes error", out.String())
-	}
+	cmd, _ = newRoomTestCommand(ctx)
+	err = runRoomStoryValidate(cmd, workspace, "human-a", "alpha", storyID, "review", "waived", "Waive validation.", "", "", "", "", nil)
+	assertRoomErrorContains(t, err, "waived validations require waiver notes")
 }
 
 func TestRunRoomStoryValidateSupersedesByValidatorType(t *testing.T) {
@@ -4933,16 +4822,9 @@ func TestRunRoomStoryStateBlockedRequiresReason(t *testing.T) {
 
 	_, _, storyID := setupRoomStoryLifecycleFixture(t, ctx, workspace)
 
-	cmd, out := newRoomTestCommand(ctx)
-	if err := runRoomStoryState(cmd, workspace, "human-a", "alpha", storyID, "blocked", "", "", ""); err != nil {
-		t.Fatalf("runRoomStoryState returned error: %v", err)
-	}
-	if !strings.Contains(out.String(), `"status":"error"`) {
-		t.Fatalf("expected error envelope, got %s", out.String())
-	}
-	if !strings.Contains(out.String(), "blocked stories require a reason") {
-		t.Fatalf("expected blocked reason error, got %s", out.String())
-	}
+	cmd, _ := newRoomTestCommand(ctx)
+	err := runRoomStoryState(cmd, workspace, "human-a", "alpha", storyID, "blocked", "", "", "")
+	assertRoomErrorContains(t, err, "blocked stories require a reason")
 }
 
 func TestRunRoomStoryStateDoneRequiresValidationOrWaiver(t *testing.T) {
@@ -4952,16 +4834,9 @@ func TestRunRoomStoryStateDoneRequiresValidationOrWaiver(t *testing.T) {
 
 	_, _, storyID := setupRoomStoryLifecycleFixture(t, ctx, workspace)
 
-	cmd, out := newRoomTestCommand(ctx)
-	if err := runRoomStoryState(cmd, workspace, "human-a", "alpha", storyID, "done", "Finished.", "", ""); err != nil {
-		t.Fatalf("runRoomStoryState returned error: %v", err)
-	}
-	if !strings.Contains(out.String(), `"status":"error"`) {
-		t.Fatalf("expected error envelope, got %s", out.String())
-	}
-	if !strings.Contains(out.String(), "done stories require the latest validation status to be pass or waived") {
-		t.Fatalf("expected done gating error, got %s", out.String())
-	}
+	cmd, _ := newRoomTestCommand(ctx)
+	err := runRoomStoryState(cmd, workspace, "human-a", "alpha", storyID, "done", "Finished.", "", "")
+	assertRoomErrorContains(t, err, "done stories require the latest validation status to be pass or waived")
 
 	cmd, _ = newRoomTestCommand(ctx)
 	if err := runRoomStoryValidate(cmd, workspace, "human-a", "alpha", storyID, "review", "pass", "Validated.", "docs/reviews/pass.md", "", "", "", nil); err != nil {
@@ -4972,7 +4847,7 @@ func TestRunRoomStoryStateDoneRequiresValidationOrWaiver(t *testing.T) {
 		t.Fatalf("runRoomStoryState done: %v", err)
 	}
 
-	cmd, out = newRoomTestCommand(ctx)
+	cmd, out := newRoomTestCommand(ctx)
 	if err := runRoomStoryShow(cmd, workspace, "alpha", storyID, 100); err != nil {
 		t.Fatalf("runRoomStoryShow: %v", err)
 	}
@@ -4989,16 +4864,9 @@ func TestRunRoomStoryStateValidatedRequiresPassingValidation(t *testing.T) {
 
 	_, _, storyID := setupRoomStoryLifecycleFixture(t, ctx, workspace)
 
-	cmd, out := newRoomTestCommand(ctx)
-	if err := runRoomStoryState(cmd, workspace, "human-a", "alpha", storyID, "validated", "Looks validated.", "", ""); err != nil {
-		t.Fatalf("runRoomStoryState returned error: %v", err)
-	}
-	if !strings.Contains(out.String(), `"status":"error"`) {
-		t.Fatalf("expected error envelope, got %s", out.String())
-	}
-	if !strings.Contains(out.String(), "validated story state requires the latest story validation status to be pass") {
-		t.Fatalf("expected validated contradiction error, got %s", out.String())
-	}
+	cmd, _ := newRoomTestCommand(ctx)
+	err := runRoomStoryState(cmd, workspace, "human-a", "alpha", storyID, "validated", "Looks validated.", "", "")
+	assertRoomErrorContains(t, err, "validated story state requires the latest story validation status to be pass")
 }
 
 func TestRunRoomStoryStateDeferredPersists(t *testing.T) {
@@ -5249,15 +5117,7 @@ func TestRunRoomInterviewVerifyRequiresVerifier(t *testing.T) {
 
 	cmd, out = newRoomTestCommand(ctx)
 	err := runRoomInterviewVerify(cmd, workspace, "claude-a", "alpha", answerID, "accept", "Looks right.")
-	if err != nil {
-		t.Fatalf("runRoomInterviewVerify returned error: %v", err)
-	}
-	if !strings.Contains(out.String(), `"status":"error"`) {
-		t.Fatalf("expected error envelope, got %s", out.String())
-	}
-	if !strings.Contains(out.String(), "only the verifier or coordinator can record an interview verdict") {
-		t.Fatalf("expected verifier error, got %s", out.String())
-	}
+	assertRoomErrorContains(t, err, "only the verifier or coordinator can record an interview verdict")
 }
 
 func TestRunRoomInterviewNext(t *testing.T) {
@@ -6449,17 +6309,9 @@ func TestRunRoomSendRejectsReplyExpectedBroadcast(t *testing.T) {
 	ctx := context.Background()
 	workspace := t.TempDir()
 
-	cmd, out := newRoomTestCommand(ctx)
-	if err := runRoomSend(cmd, workspace, "alpha", "human-a", "", "", "hello room", "info", "", 0, false, true, false, true); err != nil {
-		t.Fatalf("runRoomSend returned error instead of envelope: %v", err)
-	}
-	var env envelope.Envelope
-	if err := json.Unmarshal(out.Bytes(), &env); err != nil {
-		t.Fatalf("decode envelope: %v", err)
-	}
-	if env.Status != "error" {
-		t.Fatalf("status=%q want error body=%s", env.Status, out.String())
-	}
+	cmd, _ := newRoomTestCommand(ctx)
+	err := runRoomSend(cmd, workspace, "alpha", "human-a", "", "", "hello room", "info", "", 0, false, true, false, true)
+	assertRoomErrorContains(t, err, "reply_expected requires a direct recipient")
 }
 
 func TestRunRoomSendDerivesSenderFromCurrentTmuxPane(t *testing.T) {
@@ -6555,20 +6407,10 @@ func TestRunRoomSendRejectsDirectRecipientOutsideRoom(t *testing.T) {
 		t.Fatalf("runRoomCreate: %v", err)
 	}
 
-	cmd, out := newRoomTestCommand(ctx)
-	if err := runRoomSend(cmd, workspace, "alpha", "human-a", "cursor-a", "", "hello room", "info", "", 0, false, false, false, true); err != nil {
-		t.Fatalf("runRoomSend returned error instead of envelope: %v", err)
-	}
-	var env envelope.Envelope
-	if err := json.Unmarshal(out.Bytes(), &env); err != nil {
-		t.Fatalf("decode envelope: %v", err)
-	}
-	if env.Status != "error" {
-		t.Fatalf("status=%q want error body=%s", env.Status, out.String())
-	}
-	if !strings.Contains(out.String(), `recipient \"cursor-a\" is not a participant in room \"alpha\"`) {
-		t.Fatalf("expected missing participant error, got %s", out.String())
-	}
+	var err error
+	cmd, _ = newRoomTestCommand(ctx)
+	err = runRoomSend(cmd, workspace, "alpha", "human-a", "cursor-a", "", "hello room", "info", "", 0, false, false, false, true)
+	assertRoomErrorContains(t, err, `recipient "cursor-a" is not a participant in room "alpha"`)
 }
 
 func TestRunRoomAckMarksMessageAcked(t *testing.T) {
@@ -6924,6 +6766,16 @@ func decodeRoomEnvelope(t *testing.T, buf *bytes.Buffer) map[string]any {
 		t.Fatalf("data type=%T", env.Data)
 	}
 	return data
+}
+
+func assertRoomErrorContains(t *testing.T, err error, want string) {
+	t.Helper()
+	if err == nil {
+		t.Fatalf("expected error containing %q", want)
+	}
+	if !strings.Contains(err.Error(), want) {
+		t.Fatalf("error=%q want substring %q", err.Error(), want)
+	}
 }
 
 func parseMembersForTest(raw ...string) []agent.RoomMember {

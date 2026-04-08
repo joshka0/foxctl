@@ -72,11 +72,11 @@ func TestRedactEvent_ErrorMessage(t *testing.T) {
 func TestRedactEvent_SensitiveDataKeys(t *testing.T) {
 	event := &WideEvent{
 		Data: map[string]any{
-			"token":       "secret-value",
-			"api_key":     "sk-12345",
-			"count":       42,
-			"safe_field":  "hello world",
-			"password":    "hunter2",
+			"token":      "secret-value",
+			"api_key":    "sk-12345",
+			"count":      42,
+			"safe_field": "hello world",
+			"password":   "hunter2",
 			"nested": map[string]any{
 				"credential": "nested-secret",
 				"name":       "preserved",

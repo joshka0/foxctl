@@ -63,7 +63,7 @@ jobs:
   static-analysis:
     runs-on: arc-runner-agentctl
     container:
-      image: ghcr.io/${{ github.repository_owner }}/agentctl-ci:go1.25
+      image: ghcr.io/${{ github.repository_owner }}/agentctl-ci:go1.26.1
     steps:
       - uses: actions/checkout@v4
         with:
@@ -76,12 +76,12 @@ jobs:
             ~/.cache/go-build
             ~/.cache/golangci-lint
             ~/go/pkg/mod
-          key: go-${{ runner.os }}-go1.25-${{ hashFiles('**/go.sum') }}
-          restore-keys: go-${{ runner.os }}-go1.25-
+          key: go-${{ runner.os }}-go1.26.1-${{ hashFiles('**/go.sum') }}
+          restore-keys: go-${{ runner.os }}-go1.26.1-
 
       - name: Install golangci-lint (pinned)
         env:
-          GOTOOLCHAIN: go1.25.0
+          GOTOOLCHAIN: go1.26.1
         run: go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.8.0
 
       - name: Format (gofumpt)
@@ -89,14 +89,14 @@ jobs:
           cd "$GITHUB_WORKSPACE"
           make fmt
           if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-            git diff --exit-code || (echo 'Formatting changed files. Run make fmt locally.' && exit 1)
+            git -c core.filemode=false diff --exit-code || (echo 'Formatting changed files. Run make fmt locally.' && exit 1)
           else
             echo 'No git repository metadata; skipping formatting diff check.'
           fi
 
       - name: Lint (golangci-lint)
         env:
-          GOTOOLCHAIN: go1.25.0
+          GOTOOLCHAIN: go1.26.1
         run: make lint
 
       - name: Check large files
@@ -108,7 +108,7 @@ jobs:
   unit-tests:
     runs-on: arc-runner-agentctl
     container:
-      image: ghcr.io/${{ github.repository_owner }}/agentctl-ci:go1.25
+      image: ghcr.io/${{ github.repository_owner }}/agentctl-ci:go1.26.1
     steps:
       - uses: actions/checkout@v4
         with:
@@ -120,8 +120,8 @@ jobs:
           path: |
             ~/.cache/go-build
             ~/go/pkg/mod
-          key: go-${{ runner.os }}-go1.25-${{ hashFiles('**/go.sum') }}
-          restore-keys: go-${{ runner.os }}-go1.25-
+          key: go-${{ runner.os }}-go1.26.1-${{ hashFiles('**/go.sum') }}
+          restore-keys: go-${{ runner.os }}-go1.26.1-
 
       - name: Unit tests
         run: |
@@ -136,7 +136,7 @@ jobs:
   race-tests:
     runs-on: arc-runner-agentctl
     container:
-      image: ghcr.io/${{ github.repository_owner }}/agentctl-ci:go1.25
+      image: ghcr.io/${{ github.repository_owner }}/agentctl-ci:go1.26.1
     steps:
       - uses: actions/checkout@v4
         with:
@@ -148,8 +148,8 @@ jobs:
           path: |
             ~/.cache/go-build
             ~/go/pkg/mod
-          key: go-${{ runner.os }}-go1.25-${{ hashFiles('**/go.sum') }}
-          restore-keys: go-${{ runner.os }}-go1.25-
+          key: go-${{ runner.os }}-go1.26.1-${{ hashFiles('**/go.sum') }}
+          restore-keys: go-${{ runner.os }}-go1.26.1-
 
       - name: Race tests
         run: make test-race
@@ -157,7 +157,7 @@ jobs:
   build:
     runs-on: arc-runner-agentctl
     container:
-      image: ghcr.io/${{ github.repository_owner }}/agentctl-ci:go1.25
+      image: ghcr.io/${{ github.repository_owner }}/agentctl-ci:go1.26.1
     steps:
       - uses: actions/checkout@v4
         with:
@@ -169,8 +169,8 @@ jobs:
           path: |
             ~/.cache/go-build
             ~/go/pkg/mod
-          key: go-${{ runner.os }}-go1.25-${{ hashFiles('**/go.sum') }}
-          restore-keys: go-${{ runner.os }}-go1.25-
+          key: go-${{ runner.os }}-go1.26.1-${{ hashFiles('**/go.sum') }}
+          restore-keys: go-${{ runner.os }}-go1.26.1-
 
       - name: Build CLI
         run: make build
@@ -185,7 +185,7 @@ jobs:
         uses: actions/upload-artifact@v4
         continue-on-error: true
         with:
-          name: agentctl-${{ runner.os }}-go1.25
+          name: agentctl-${{ runner.os }}-go1.26.1
           path: |
             bin/agentctl
             dist/skills/**
@@ -193,7 +193,7 @@ jobs:
   cgo-build-and-tests:
     runs-on: arc-runner-agentctl
     container:
-      image: ghcr.io/${{ github.repository_owner }}/agentctl-ci:go1.25
+      image: ghcr.io/${{ github.repository_owner }}/agentctl-ci:go1.26.1
     steps:
       - uses: actions/checkout@v4
         with:
@@ -211,8 +211,8 @@ jobs:
           path: |
             ~/.cache/go-build
             ~/go/pkg/mod
-          key: go-cgo-${{ runner.os }}-go1.25-${{ hashFiles('**/go.sum') }}
-          restore-keys: go-cgo-${{ runner.os }}-go1.25-
+          key: go-cgo-${{ runner.os }}-go1.26.1-${{ hashFiles('**/go.sum') }}
+          restore-keys: go-cgo-${{ runner.os }}-go1.26.1-
 
       - name: Build CLI (CGO + libsqlite3)
         run: make build-cgo
@@ -231,7 +231,7 @@ jobs:
   integration-tests:
     runs-on: arc-runner-agentctl
     container:
-      image: ghcr.io/${{ github.repository_owner }}/agentctl-ci:go1.25
+      image: ghcr.io/${{ github.repository_owner }}/agentctl-ci:go1.26.1
     steps:
       - uses: actions/checkout@v4
         with:
@@ -243,8 +243,8 @@ jobs:
           path: |
             ~/.cache/go-build
             ~/go/pkg/mod
-          key: go-${{ runner.os }}-go1.25-${{ hashFiles('**/go.sum') }}
-          restore-keys: go-${{ runner.os }}-go1.25-
+          key: go-${{ runner.os }}-go1.26.1-${{ hashFiles('**/go.sum') }}
+          restore-keys: go-${{ runner.os }}-go1.26.1-
 
       - name: Run integration tests
         run: make test-integration
@@ -252,7 +252,7 @@ jobs:
   llm-planner-integration:
     runs-on: arc-runner-agentctl
     container:
-      image: ghcr.io/${{ github.repository_owner }}/agentctl-ci:go1.25
+      image: ghcr.io/${{ github.repository_owner }}/agentctl-ci:go1.26.1
     env:
       AGENTCTL_ENABLE_LIVE_LLM_TESTS: "1"
       OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
@@ -275,8 +275,8 @@ jobs:
           path: |
             ~/.cache/go-build
             ~/go/pkg/mod
-          key: go-cgo-${{ runner.os }}-go1.25-${{ hashFiles('**/go.sum') }}
-          restore-keys: go-cgo-${{ runner.os }}-go1.25-
+          key: go-cgo-${{ runner.os }}-go1.26.1-${{ hashFiles('**/go.sum') }}
+          restore-keys: go-cgo-${{ runner.os }}-go1.26.1-
 
       - name: Skip if OpenRouter secret not set
         if: env.OPENROUTER_API_KEY == ''

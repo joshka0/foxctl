@@ -236,17 +236,25 @@ func Load() *Config {
 	})
 
 	t.Run("cas_artifact_present", func(t *testing.T) {
-		candidates := make([]map[string]any, 0, 12)
-		for i := 0; i < 6; i++ {
-			candidates = append(candidates,
-				map[string]any{"path": "auth/login.go"},
-				map[string]any{"path": "auth/logout.go"},
-			)
+		const largePath = "auth/login_large.go"
+		largeContent := `package auth
+
+// LoginLarge exercises the CAS artifact path by ensuring the extracted
+// snippet payload is materially larger than the inline threshold.
+func LoginLarge() string {
+	return "` + strings.Repeat("login artifact payload ", 128) + `"
+}
+`
+		fullPath := filepath.Join(workspaceDir, largePath)
+		if err := os.WriteFile(fullPath, []byte(largeContent), 0o644); err != nil {
+			t.Fatalf("write %s: %v", largePath, err)
 		}
 		input := map[string]any{
 			"workspace_id": "test-ws",
 			"question":     "login",
-			"candidates":   candidates,
+			"candidates": []map[string]any{
+				{"path": largePath},
+			},
 		}
 
 		envelope := runSWEGrep(t, binPath, runRoot, workspaceDir, input, "AGENTCTL_INLINE_OUTPUT_KB=1")

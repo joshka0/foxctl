@@ -11,14 +11,12 @@ import (
 	"syscall"
 
 	"github.com/creack/pty"
-	"github.com/rs/zerolog"
 )
 
 // PTYProcess manages a PTY connected to a tmux attach session.
 type PTYProcess struct {
 	cmd     *exec.Cmd
 	ptmx    *os.File
-	log     zerolog.Logger
 	running atomic.Bool
 
 	mu          sync.Mutex

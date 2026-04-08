@@ -341,9 +341,6 @@ func TestCreateEngine_EinoGateProvisionsRealAdapter(t *testing.T) {
 	if eng == nil {
 		t.Fatal("createEngine() engine = nil; expected a provisioned EinoEngineAdapter")
 	}
-	if _, ok := eng.(engine.AgentEngine); !ok {
-		t.Fatalf("createEngine() engine type = %T; want engine.AgentEngine", eng)
-	}
 }
 
 func TestCreateEngine_EinoGatePassesTools(t *testing.T) {
