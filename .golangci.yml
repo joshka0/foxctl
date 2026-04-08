@@ -107,6 +107,6 @@ linters:
       # TODO: Remove these exclusions as files are migrated
       - linters:
           - forbidigo
-        path: '(cmd/.*/main\.go|cmd/agentctl/cmd/.*|cmd/agentctl_viewer/.*|cmd/synctest/.*|internal/adapters/skillslib/.*|internal/actor/.*|internal/agent/.*|internal/analysis/.*|internal/codemap/.*|internal/companion/.*|internal/daemon/.*|internal/engine/.*|internal/indexing/.*|internal/lsp/.*|internal/platform/.*|internal/retrieval/.*|internal/storage/.*|internal/testwatch/.*|internal/web/.*|plugins/.*|scripts/.*|skills/.*|.*_test\.go)'
+        path: '(cmd/.*/main\.go|cmd/agentctl/cmd/.*|cmd/agentctl_viewer/.*|cmd/synctest/.*|internal/adapters/skillslib/.*|internal/actor/.*|internal/agent/.*|internal/analysis/.*|internal/codemap/.*|internal/companion/.*|internal/daemon/.*|internal/engine/.*|internal/gateway/.*|internal/indexing/.*|internal/lsp/.*|internal/platform/.*|internal/retrieval/.*|internal/storage/.*|internal/testwatch/.*|internal/web/.*|plugins/.*|scripts/.*|skills/.*|.*_test\.go)'
     # Exclude generated code
     generated: strict
