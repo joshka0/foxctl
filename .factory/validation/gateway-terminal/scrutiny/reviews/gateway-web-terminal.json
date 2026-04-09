@@ -1,0 +1,73 @@
+{
+  "featureId": "gateway-web-terminal",
+  "reviewedAt": "2026-04-09T19:30:00Z",
+  "commitId": "1cd9de1b",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "pass",
+  "codeReview": {
+    "summary": "The implementation is well-structured, follows project conventions, and thoroughly covers the feature requirements. The code uses proper concurrency patterns (mutex-protected shared state, channel-based fan-out for PTY output, closeOnce for idempotent cleanup), correct WebSocket lifecycle management, and appropriate error handling. 37 tests pass with race detection enabled. A few non-blocking observations noted below.",
+    "issues": [
+      {
+        "file": "internal/gateway/webterm/pty.go",
+        "line": 188,
+        "severity": "non_blocking",
+        "description": "PTY.Close() waits for cmd.Wait() OR p.done but doesn't guarantee both complete. If cmd.Wait() blocks (e.g., zombie process), the SIGTERM may not be sufficient. Consider adding a timeout to the wait, or sending SIGKILL after a grace period. This is a minor robustness concern since the PTY master close should cause the child to exit."
+      },
+      {
+        "file": "internal/gateway/webterm/client.go",
+        "line": 105,
+        "severity": "non_blocking",
+        "description": "readPump: When JSON unmarshal of ControlMessage succeeds but the type is not 'resize', the message falls through to pty.WriteInput(data) — which sends the raw JSON string as terminal input. This means any valid JSON text message that isn't a recognized control message gets written to the PTY as user input. For the current protocol (only 'resize' control messages exist), this is a reasonable fallback, but could be surprising if new control message types are added later without updating the switch statement."
+      },
+      {
+        "file": "internal/gateway/webterm/handler.go",
+        "line": 146,
+        "severity": "non_blocking",
+        "description": "ConnectionLimitError is checked AFTER the WebSocket has already been upgraded and accepted. The spec says '429 on excess' but the HTTP response is already upgraded at that point. The handler correctly sends a 429-like error message through the WebSocket before closing, which is the best possible approach given the ordering constraint. The room existence check happens before upgrade, but the connection limit check happens in client.Run() after upgrade. This is acceptable but worth noting: an alternative would be to check the limit before upgrade (using a Hub method like ClientCount), though that introduces a TOCTOU race."
+      },
+      {
+        "file": "internal/gateway/webterm/handler.go",
+        "line": 180,
+        "severity": "non_blocking",
+        "description": "getAllowedOrigins returns a hardcoded list of origin patterns including wildcard patterns like 'https://*.ts.net' and 'https://*.tail*'. The '*.tail*' pattern is unusually broad and may match unintended domains. This is minor since it's only for development/initial setup and should be configurable for production."
+      },
+      {
+        "file": "internal/gateway/webterm/hub.go",
+        "line": 236,
+        "severity": "non_blocking",
+        "description": "getOrCreatePTY is called while holding room.mu, which means the PTY creation (including spawning tmux) blocks all other room operations. For a room with many concurrent clients connecting simultaneously, this serializes PTY creation. In practice this is fine since PTY creation happens once per room, but the lock scope could be narrowed in the future."
+      },
+      {
+        "file": "internal/gateway/static/index.html",
+        "line": 1,
+        "severity": "non_blocking",
+        "description": "xterm.js and FitAddon are placeholder stubs. The handoff correctly notes this is intentional — the gateway-xterm-assets feature replaces them with real xterm.js v5.x. The stubs are sufficient for build/embed verification and handler tests."
+      }
+    ]
+  },
+  "sharedStateObservations": [
+    {
+      "area": "conventions",
+      "observation": "The error responses from the web terminal handler do NOT use the canonical JSON envelope format specified in AGENTS.md (version, status, command, data, meta, error). Instead, writeErrorJSON outputs a simpler structure: {\"error\": {\"code\": \"...\", \"message\": \"...\"}, \"data\": {\"hint\": \"...\"}}. This deviates from the project convention that 'All I/O uses canonical envelopes' and 'meta.ts MUST be present'. The mission AGENTS.md also states 'JSON envelopes: All CLI output uses canonical envelope format'. While the web terminal is a browser-facing HTTP handler (not CLI stdout), it would be more consistent to use the canonical envelope for error responses.",
+      "evidence": "internal/gateway/webterm/handler.go:195-211 — writeErrorJSON function omits version, status, command, and meta.ts fields from the response. Compare to AGENTS.md envelope spec: {\"version\": 1, \"status\": \"error\", \"command\": \"...\", \"data\": {}, \"meta\": {\"ts\": \"...\"}, \"error\": {\"code\": \"...\", \"message\": \"...\"}}."
+    },
+    {
+      "area": "knowledge",
+      "observation": "The coder/websocket library's Accept function does not reject non-WebSocket HTTP requests with a standard error code — it simply fails the upgrade. The handler_test.go TestHandler_WebSocket_RoomNotFound test uses http.Get (not a WebSocket client) and documents this behavior: it expects the room-not-found check to happen before the upgrade, returning a proper 404 JSON response. This is a useful pattern for others implementing WebSocket handlers in this project.",
+      "evidence": "internal/gateway/webterm/handler.go:121-142 — room existence is checked before websocket.Accept(). handler_test.go:TestHandler_WebSocket_RoomNotFound uses http.Get and asserts StatusNotFound."
+    },
+    {
+      "area": "conventions",
+      "observation": "The web terminal tests use real tmux sessions with time-based sleeps (500ms-1s) for synchronization rather than event-driven waits. This is documented as acceptable in the pty_test.go tests (which skip in CI). The pattern is: start tmux → sleep → assert. While this works, it makes the tests slower (~3.3s total) and potentially flaky under load. A more robust approach would poll for expected output with a timeout.",
+      "evidence": "internal/gateway/webterm/pty_test.go:35-37, 67-68, 109, 163-165 — time.Sleep calls for shell startup and command execution synchronization."
+    },
+    {
+      "area": "services",
+      "observation": "The web terminal handler uses tmux as a runtime dependency for PTY operations. The services.yaml does not list tmux as a service dependency for the gateway-dev service, but it IS documented in environment.md as an external dependency (tmux 3.6a). The PTY tests correctly skip when tmux is not available (tmuxAvailable helper). No gap here — just noting the dependency is properly documented.",
+      "evidence": "internal/gateway/webterm/pty_test.go:tmuxAvailable() checks for tmux on PATH. .factory/library/environment.md lists tmux 3.6a as an external dependency."
+    }
+  ],
+  "addressesFailureFrom": null,
+  "summary": "The gateway-web-terminal feature is well-implemented with solid test coverage (37 tests, all passing with -race). The WebSocket→PTY bridge architecture is clean: hub manages rooms, clients manage WebSocket lifecycle, and PTYProcess manages the tmux subprocess. Concurrency is handled correctly with mutex-protected maps, channel-based output fan-out, and idempotent close via sync.Once. The implementation covers all expected behaviors: embedded xterm.js frontend, room-based routing, PTY resize, connection limiting, ping/pong keepalive, and clean disconnect. Non-blocking issues noted: PTY close could use a SIGKILL fallback, error responses don't use canonical envelope format, and origin allowlist includes a broad wildcard. The placeholder xterm.js stubs are intentionally left for the gateway-xterm-assets feature."
+}
