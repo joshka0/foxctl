@@ -23,8 +23,9 @@ func helperInitGitRepo(t *testing.T) (string, func()) {
 
 	require.NoError(t, os.MkdirAll(repoPath, 0o755))
 
-	// git init
-	require.NoError(t, runGit(repoPath, "init"))
+	// git init with an explicit primary branch so tests don't depend on the
+	// runner's global init.defaultBranch setting.
+	require.NoError(t, runGit(repoPath, "init", "-b", "main"))
 	// configure user for commits
 	require.NoError(t, runGit(repoPath, "config", "user.email", "test@test.com"))
 	require.NoError(t, runGit(repoPath, "config", "user.name", "Test"))
