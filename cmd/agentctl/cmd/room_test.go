@@ -5115,7 +5115,7 @@ func TestRunRoomInterviewVerifyRequiresVerifier(t *testing.T) {
 	data = decodeRoomEnvelope(t, out)
 	answerID := data["message"].(map[string]any)["id"].(string)
 
-	cmd, out = newRoomTestCommand(ctx)
+	cmd, _ = newRoomTestCommand(ctx)
 	err := runRoomInterviewVerify(cmd, workspace, "claude-a", "alpha", answerID, "accept", "Looks right.")
 	assertRoomErrorContains(t, err, "only the verifier or coordinator can record an interview verdict")
 }
