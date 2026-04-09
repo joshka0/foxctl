@@ -732,18 +732,9 @@ func handleRoomTaskAction(w http.ResponseWriter, r *http.Request, cfg config.Con
 		httpError(w, http.StatusBadRequest, "invalid request body: "+err.Error())
 		return
 	}
-	req.WorkspaceID = strings.TrimSpace(req.WorkspaceID)
-	req.ActorID = strings.TrimSpace(req.ActorID)
-	req.Recipient = strings.TrimSpace(req.Recipient)
-	req.Reason = strings.TrimSpace(req.Reason)
-	req.Notes = strings.TrimSpace(req.Notes)
-	req.Gotchas = strings.TrimSpace(req.Gotchas)
-	if req.WorkspaceID == "" {
-		httpError(w, http.StatusBadRequest, "workspace_id is required")
-		return
-	}
-	if req.ActorID == "" {
-		httpError(w, http.StatusBadRequest, "actor_id is required")
+	req.normalize()
+	if err := req.validate(); err != nil {
+		httpError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
@@ -784,148 +775,16 @@ func handleRoomTaskAction(w http.ResponseWriter, r *http.Request, cfg config.Con
 	}
 
 	now := time.Now().UTC()
-	switch strings.ToLower(strings.TrimSpace(action)) {
-	case "claim":
-		if assigned := strings.TrimSpace(task.AssignedActorID); assigned != "" && !apiSameRoomParticipant(assigned, req.ActorID) {
-			httpError(w, http.StatusForbidden, "task is assigned to another participant")
-			return
+	action = strings.ToLower(strings.TrimSpace(action))
+	if err := applyRoomTaskAction(&task, summary, req, action, now); err != nil {
+		statusCode := http.StatusBadRequest
+		switch {
+		case errors.Is(err, errRoomTaskActionForbidden):
+			statusCode = http.StatusForbidden
+		case errors.Is(err, errRoomTaskActionUnsupported):
+			statusCode = http.StatusMethodNotAllowed
 		}
-		if strings.TrimSpace(task.OwnerActorID) != "" && !apiSameRoomParticipant(task.OwnerActorID, req.ActorID) && task.Status != taskstore.StatusPending && task.Status != taskstore.StatusCanceled {
-			httpError(w, http.StatusForbidden, "task is already claimed by another participant")
-			return
-		}
-		task.Status = taskstore.StatusInProgress
-		if strings.TrimSpace(task.AssignedActorID) == "" {
-			task.AssignedActorID = req.ActorID
-			task.AssignedAt = &now
-		}
-		task.OwnerActorID = req.ActorID
-		task.ClaimedAt = &now
-		task.HeartbeatAt = &now
-		task.BlockedReason = ""
-		task.BlockedAt = nil
-	case "touch":
-		if !apiSameRoomParticipant(task.OwnerActorID, req.ActorID) {
-			httpError(w, http.StatusForbidden, "only the current owner can refresh this task heartbeat")
-			return
-		}
-		if task.Status != taskstore.StatusInProgress && task.Status != taskstore.StatusBlocked {
-			httpError(w, http.StatusBadRequest, "only in-progress or blocked tasks can be refreshed")
-			return
-		}
-		task.HeartbeatAt = &now
-	case "block":
-		if req.Reason == "" {
-			httpError(w, http.StatusBadRequest, "reason is required")
-			return
-		}
-		if !apiSameRoomParticipant(task.OwnerActorID, req.ActorID) {
-			httpError(w, http.StatusForbidden, "only the current owner can block this task")
-			return
-		}
-		task.Status = taskstore.StatusBlocked
-		task.BlockedReason = req.Reason
-		task.BlockedAt = &now
-		task.HeartbeatAt = &now
-	case "unblock":
-		if !apiSameRoomParticipant(task.OwnerActorID, req.ActorID) {
-			httpError(w, http.StatusForbidden, "only the current owner can unblock this task")
-			return
-		}
-		task.Status = taskstore.StatusInProgress
-		task.BlockedReason = ""
-		task.BlockedAt = nil
-		task.HeartbeatAt = &now
-	case "complete":
-		if !apiSameRoomParticipant(task.OwnerActorID, req.ActorID) {
-			httpError(w, http.StatusForbidden, "only the current owner can complete this task")
-			return
-		}
-		if task.Status == taskstore.StatusBlocked {
-			httpError(w, http.StatusBadRequest, "blocked tasks must be unblocked before completion")
-			return
-		}
-		task.Status = taskstore.StatusCompleted
-		task.CompletedAt = &now
-		task.OwnerActorID = ""
-		task.HeartbeatAt = &now
-		task.BlockedReason = ""
-		task.BlockedAt = nil
-		task.Notes = req.Notes
-		task.Gotchas = req.Gotchas
-	case "abandon":
-		if strings.TrimSpace(task.OwnerActorID) != "" && !apiSameRoomParticipant(task.OwnerActorID, req.ActorID) {
-			httpError(w, http.StatusForbidden, "only the current owner can abandon this task")
-			return
-		}
-		task.Status = taskstore.StatusPending
-		task.AssignedActorID = ""
-		task.AssignedAt = nil
-		task.OwnerActorID = ""
-		task.ClaimedAt = nil
-		task.HeartbeatAt = nil
-		task.BlockedReason = ""
-		task.BlockedAt = nil
-		if req.Reason != "" {
-			task.Notes = req.Reason
-		}
-	case "assign", "reassign", "reclaim":
-		if !apiRoomActorHasCoordinatorAccess(summary.Members, req.ActorID) {
-			httpError(w, http.StatusForbidden, "only room coordinators can perform this action")
-			return
-		}
-		switch action {
-		case "assign":
-			if req.Recipient == "" {
-				httpError(w, http.StatusBadRequest, "recipient is required")
-				return
-			}
-			if !apiRoomHasParticipant(summary, req.Recipient) {
-				httpError(w, http.StatusBadRequest, "assignee is not a room participant")
-				return
-			}
-			task.AssignedActorID = req.Recipient
-			task.AssignedAt = &now
-			if req.Notes != "" {
-				task.Notes = req.Notes
-			}
-		case "reassign":
-			if req.Recipient == "" {
-				httpError(w, http.StatusBadRequest, "recipient is required")
-				return
-			}
-			if !apiRoomHasParticipant(summary, req.Recipient) {
-				httpError(w, http.StatusBadRequest, "assignee is not a room participant")
-				return
-			}
-			task.Status = taskstore.StatusPending
-			task.AssignedActorID = req.Recipient
-			task.AssignedAt = &now
-			task.OwnerActorID = ""
-			task.ClaimedAt = nil
-			task.HeartbeatAt = nil
-			task.BlockedReason = ""
-			task.BlockedAt = nil
-			if req.Reason != "" {
-				task.Notes = req.Reason
-			}
-		case "reclaim":
-			if req.Reason == "" {
-				httpError(w, http.StatusBadRequest, "reason is required")
-				return
-			}
-			task.Status = taskstore.StatusPending
-			task.AssignedActorID = ""
-			task.AssignedAt = nil
-			task.OwnerActorID = ""
-			task.ClaimedAt = nil
-			task.HeartbeatAt = nil
-			task.BlockedReason = ""
-			task.BlockedAt = nil
-			task.Notes = req.Reason
-		}
-	default:
-		httpError(w, http.StatusMethodNotAllowed, "unsupported room task action")
+		httpError(w, statusCode, err.Error())
 		return
 	}
 
@@ -960,6 +819,213 @@ func handleRoomTaskAction(w http.ResponseWriter, r *http.Request, cfg config.Con
 		"action":  strings.ToLower(strings.TrimSpace(action)),
 		"actor":   req.ActorID,
 	})
+}
+
+var (
+	errRoomTaskActionForbidden   = errors.New("room task action forbidden")
+	errRoomTaskActionUnsupported = errors.New("room task action unsupported")
+)
+
+func (req *roomTaskActionRequest) normalize() {
+	req.WorkspaceID = strings.TrimSpace(req.WorkspaceID)
+	req.ActorID = strings.TrimSpace(req.ActorID)
+	req.Recipient = strings.TrimSpace(req.Recipient)
+	req.Reason = strings.TrimSpace(req.Reason)
+	req.Notes = strings.TrimSpace(req.Notes)
+	req.Gotchas = strings.TrimSpace(req.Gotchas)
+}
+
+func (req roomTaskActionRequest) validate() error {
+	if req.WorkspaceID == "" {
+		return fmt.Errorf("workspace_id is required")
+	}
+	if req.ActorID == "" {
+		return fmt.Errorf("actor_id is required")
+	}
+	return nil
+}
+
+func applyRoomTaskAction(task *taskstore.Task, summary agent.RoomSummary, req roomTaskActionRequest, action string, now time.Time) error {
+	switch action {
+	case "claim":
+		return applyRoomTaskClaim(task, req, now)
+	case "touch":
+		return applyRoomTaskTouch(task, req, now)
+	case "block":
+		return applyRoomTaskBlock(task, req, now)
+	case "unblock":
+		return applyRoomTaskUnblock(task, req, now)
+	case "complete":
+		return applyRoomTaskComplete(task, req, now)
+	case "abandon":
+		return applyRoomTaskAbandon(task, req)
+	case "assign", "reassign", "reclaim":
+		return applyCoordinatorRoomTaskAction(task, summary, req, action, now)
+	default:
+		return fmt.Errorf("%w: unsupported room task action", errRoomTaskActionUnsupported)
+	}
+}
+
+func applyRoomTaskClaim(task *taskstore.Task, req roomTaskActionRequest, now time.Time) error {
+	if assigned := strings.TrimSpace(task.AssignedActorID); assigned != "" && !apiSameRoomParticipant(assigned, req.ActorID) {
+		return fmt.Errorf("%w: task is assigned to another participant", errRoomTaskActionForbidden)
+	}
+	if strings.TrimSpace(task.OwnerActorID) != "" && !apiSameRoomParticipant(task.OwnerActorID, req.ActorID) && task.Status != taskstore.StatusPending && task.Status != taskstore.StatusCanceled {
+		return fmt.Errorf("%w: task is already claimed by another participant", errRoomTaskActionForbidden)
+	}
+	task.Status = taskstore.StatusInProgress
+	if strings.TrimSpace(task.AssignedActorID) == "" {
+		task.AssignedActorID = req.ActorID
+		task.AssignedAt = &now
+	}
+	task.OwnerActorID = req.ActorID
+	task.ClaimedAt = &now
+	task.HeartbeatAt = &now
+	task.BlockedReason = ""
+	task.BlockedAt = nil
+	return nil
+}
+
+func applyRoomTaskTouch(task *taskstore.Task, req roomTaskActionRequest, now time.Time) error {
+	if !apiSameRoomParticipant(task.OwnerActorID, req.ActorID) {
+		return fmt.Errorf("%w: only the current owner can refresh this task heartbeat", errRoomTaskActionForbidden)
+	}
+	if task.Status != taskstore.StatusInProgress && task.Status != taskstore.StatusBlocked {
+		return fmt.Errorf("only in-progress or blocked tasks can be refreshed")
+	}
+	task.HeartbeatAt = &now
+	return nil
+}
+
+func applyRoomTaskBlock(task *taskstore.Task, req roomTaskActionRequest, now time.Time) error {
+	if req.Reason == "" {
+		return fmt.Errorf("reason is required")
+	}
+	if !apiSameRoomParticipant(task.OwnerActorID, req.ActorID) {
+		return fmt.Errorf("%w: only the current owner can block this task", errRoomTaskActionForbidden)
+	}
+	task.Status = taskstore.StatusBlocked
+	task.BlockedReason = req.Reason
+	task.BlockedAt = &now
+	task.HeartbeatAt = &now
+	return nil
+}
+
+func applyRoomTaskUnblock(task *taskstore.Task, req roomTaskActionRequest, now time.Time) error {
+	if !apiSameRoomParticipant(task.OwnerActorID, req.ActorID) {
+		return fmt.Errorf("%w: only the current owner can unblock this task", errRoomTaskActionForbidden)
+	}
+	task.Status = taskstore.StatusInProgress
+	task.BlockedReason = ""
+	task.BlockedAt = nil
+	task.HeartbeatAt = &now
+	return nil
+}
+
+func applyRoomTaskComplete(task *taskstore.Task, req roomTaskActionRequest, now time.Time) error {
+	if !apiSameRoomParticipant(task.OwnerActorID, req.ActorID) {
+		return fmt.Errorf("%w: only the current owner can complete this task", errRoomTaskActionForbidden)
+	}
+	if task.Status == taskstore.StatusBlocked {
+		return fmt.Errorf("blocked tasks must be unblocked before completion")
+	}
+	task.Status = taskstore.StatusCompleted
+	task.CompletedAt = &now
+	task.OwnerActorID = ""
+	task.HeartbeatAt = &now
+	task.BlockedReason = ""
+	task.BlockedAt = nil
+	task.Notes = req.Notes
+	task.Gotchas = req.Gotchas
+	return nil
+}
+
+func applyRoomTaskAbandon(task *taskstore.Task, req roomTaskActionRequest) error {
+	if strings.TrimSpace(task.OwnerActorID) != "" && !apiSameRoomParticipant(task.OwnerActorID, req.ActorID) {
+		return fmt.Errorf("%w: only the current owner can abandon this task", errRoomTaskActionForbidden)
+	}
+	resetRoomTaskOwnership(task)
+	task.Status = taskstore.StatusPending
+	if req.Reason != "" {
+		task.Notes = req.Reason
+	}
+	return nil
+}
+
+func applyCoordinatorRoomTaskAction(task *taskstore.Task, summary agent.RoomSummary, req roomTaskActionRequest, action string, now time.Time) error {
+	if !apiRoomActorHasCoordinatorAccess(summary.Members, req.ActorID) {
+		return fmt.Errorf("%w: only room coordinators can perform this action", errRoomTaskActionForbidden)
+	}
+	switch action {
+	case "assign":
+		return assignRoomTask(task, summary, req, now)
+	case "reassign":
+		return reassignRoomTask(task, summary, req, now)
+	case "reclaim":
+		return reclaimRoomTask(task, req)
+	default:
+		return fmt.Errorf("%w: unsupported room task action", errRoomTaskActionUnsupported)
+	}
+}
+
+func assignRoomTask(task *taskstore.Task, summary agent.RoomSummary, req roomTaskActionRequest, now time.Time) error {
+	if err := validateRoomTaskRecipient(summary, req.Recipient); err != nil {
+		return err
+	}
+	task.AssignedActorID = req.Recipient
+	task.AssignedAt = &now
+	if req.Notes != "" {
+		task.Notes = req.Notes
+	}
+	return nil
+}
+
+func reassignRoomTask(task *taskstore.Task, summary agent.RoomSummary, req roomTaskActionRequest, now time.Time) error {
+	if err := validateRoomTaskRecipient(summary, req.Recipient); err != nil {
+		return err
+	}
+	task.Status = taskstore.StatusPending
+	task.AssignedActorID = req.Recipient
+	task.AssignedAt = &now
+	task.OwnerActorID = ""
+	task.ClaimedAt = nil
+	task.HeartbeatAt = nil
+	task.BlockedReason = ""
+	task.BlockedAt = nil
+	if req.Reason != "" {
+		task.Notes = req.Reason
+	}
+	return nil
+}
+
+func reclaimRoomTask(task *taskstore.Task, req roomTaskActionRequest) error {
+	if req.Reason == "" {
+		return fmt.Errorf("reason is required")
+	}
+	task.Status = taskstore.StatusPending
+	resetRoomTaskOwnership(task)
+	task.Notes = req.Reason
+	return nil
+}
+
+func validateRoomTaskRecipient(summary agent.RoomSummary, recipient string) error {
+	if recipient == "" {
+		return fmt.Errorf("recipient is required")
+	}
+	if !apiRoomHasParticipant(summary, recipient) {
+		return fmt.Errorf("assignee is not a room participant")
+	}
+	return nil
+}
+
+func resetRoomTaskOwnership(task *taskstore.Task) {
+	task.AssignedActorID = ""
+	task.AssignedAt = nil
+	task.OwnerActorID = ""
+	task.ClaimedAt = nil
+	task.HeartbeatAt = nil
+	task.BlockedReason = ""
+	task.BlockedAt = nil
 }
 
 func parseRoomStatusParams(r *http.Request) (limit int, staleAfter time.Duration, verbose bool, filters map[string]struct{}, err error) {

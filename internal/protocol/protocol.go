@@ -224,81 +224,117 @@ func extractArtifactValue(data any) (string, bool, error) {
 		return "", false, nil
 	}
 
+	if artifact, handled, err := extractArtifactFromDirectTypes(data); handled {
+		return artifact, artifact != "", err
+	}
+	return extractArtifactFromReflection(data)
+}
+
+func extractArtifactFromDirectTypes(data any) (string, bool, error) {
 	if raw, ok := data.(json.RawMessage); ok {
-		if len(raw) == 0 {
-			return "", false, nil
-		}
-		var decoded map[string]any
-		if err := json.Unmarshal(raw, &decoded); err != nil {
-			return "", false, fmt.Errorf("decode artifact raw message: %w", err)
-		}
-		if artifact, ok := decoded["artifact"].(string); ok && artifact != "" {
-			return artifact, true, nil
-		}
-		return "", false, nil
+		return extractArtifactFromRawJSON(raw)
 	}
 	if m, ok := data.(map[string]string); ok {
-		if artifact := strings.TrimSpace(m["artifact"]); artifact != "" {
-			return artifact, true, nil
-		}
-		return "", false, nil
+		return strings.TrimSpace(m["artifact"]), true, nil
 	}
 	if m, ok := data.(map[string]json.RawMessage); ok {
 		if raw, ok := m["artifact"]; ok {
 			return extractArtifactValue(raw)
 		}
+		return "", true, nil
 	}
+	return "", false, nil
+}
 
+func extractArtifactFromRawJSON(raw json.RawMessage) (string, bool, error) {
+	if len(raw) == 0 {
+		return "", true, nil
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		return "", true, fmt.Errorf("decode artifact raw message: %w", err)
+	}
+	if artifact, ok := decoded["artifact"].(string); ok && artifact != "" {
+		return artifact, true, nil
+	}
+	return "", true, nil
+}
+
+func extractArtifactFromReflection(data any) (string, bool, error) {
+	rv, ok := unwrapArtifactValue(data)
+	if !ok {
+		return "", false, nil
+	}
+	switch rv.Kind() {
+	case reflect.Map:
+		return extractArtifactFromReflectedMap(rv)
+	case reflect.Struct:
+		return extractArtifactFromReflectedStruct(rv)
+	default:
+		return "", false, nil
+	}
+}
+
+func unwrapArtifactValue(data any) (reflect.Value, bool) {
 	rv := reflect.ValueOf(data)
-	for rv.Kind() == reflect.Interface {
+	for rv.IsValid() && rv.Kind() == reflect.Interface {
 		if rv.IsNil() {
-			return "", false, nil
+			return reflect.Value{}, false
 		}
 		rv = rv.Elem()
 	}
-
-	switch rv.Kind() {
-	case reflect.Pointer:
+	if rv.IsValid() && rv.Kind() == reflect.Pointer {
 		if rv.IsNil() {
+			return reflect.Value{}, false
+		}
+		return rv.Elem(), true
+	}
+	return rv, rv.IsValid()
+}
+
+func extractArtifactFromReflectedMap(rv reflect.Value) (string, bool, error) {
+	for _, key := range rv.MapKeys() {
+		if key.Kind() != reflect.String || key.String() != "artifact" {
+			continue
+		}
+		val := rv.MapIndex(key)
+		if !val.IsValid() {
 			return "", false, nil
 		}
-		return extractArtifactValue(rv.Elem().Interface())
-	case reflect.Map:
-		for _, key := range rv.MapKeys() {
-			if key.Kind() != reflect.String || key.String() != "artifact" {
-				continue
-			}
-			val := rv.MapIndex(key)
-			if !val.IsValid() {
-				return "", false, nil
-			}
-			if val.Kind() == reflect.Interface || val.Kind() == reflect.Pointer {
-				if val.IsNil() {
-					return "", false, nil
-				}
-				val = val.Elem()
-			}
-			if !val.CanInterface() {
-				continue
-			}
-			if artifact, ok := val.Interface().(string); ok && artifact != "" {
-				return artifact, true, nil
-			}
-			if raw, ok := val.Interface().(json.RawMessage); ok {
-				return extractArtifactValue(raw)
-			}
+		val, ok := unwrapReflectedArtifactValue(val)
+		if !ok || !val.CanInterface() {
+			return "", false, nil
 		}
-	case reflect.Struct:
-		field := rv.FieldByName("Artifact")
-		if field.IsValid() && field.Kind() == reflect.String {
-			artifact := field.String()
-			if artifact != "" {
-				return artifact, true, nil
-			}
+		if artifact, ok := val.Interface().(string); ok && artifact != "" {
+			return artifact, true, nil
+		}
+		if raw, ok := val.Interface().(json.RawMessage); ok {
+			return extractArtifactValue(raw)
 		}
 	}
-
 	return "", false, nil
+}
+
+func unwrapReflectedArtifactValue(val reflect.Value) (reflect.Value, bool) {
+	for val.IsValid() && (val.Kind() == reflect.Interface || val.Kind() == reflect.Pointer) {
+		if val.IsNil() {
+			return reflect.Value{}, false
+		}
+		val = val.Elem()
+	}
+	return val, val.IsValid()
+}
+
+func extractArtifactFromReflectedStruct(rv reflect.Value) (string, bool, error) {
+	field := rv.FieldByName("Artifact")
+	if !field.IsValid() || field.Kind() != reflect.String {
+		return "", false, nil
+	}
+	artifact := field.String()
+	if artifact == "" {
+		return "", false, nil
+	}
+	return artifact, true, nil
 }
 
 // validateErrorStatusCode checks if error envelopes have valid status codes

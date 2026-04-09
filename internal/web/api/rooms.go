@@ -427,141 +427,137 @@ func handleRoomMembersPatch(w http.ResponseWriter, r *http.Request, cfg config.C
 // RoomDetailHandler serves /api/rooms/{id} and room control subroutes.
 func RoomDetailHandler(cfg config.Config, log zerolog.Logger, events roomEventPublisher) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		path := strings.TrimPrefix(r.URL.Path, "/api/rooms/")
-		parts := strings.Split(path, "/")
-		if len(parts) == 0 || strings.TrimSpace(parts[0]) == "" {
+		roomID, parts, ok := roomRequestParts(r)
+		if !ok {
 			httpError(w, http.StatusBadRequest, "room id required")
 			return
 		}
-		roomID := strings.TrimSpace(parts[0])
-
-		if len(parts) >= 2 && parts[1] == "status" {
-			if r.Method != http.MethodGet {
-				httpError(w, http.StatusMethodNotAllowed, "method not allowed")
-				return
-			}
-			handleRoomStatusGet(w, r, cfg, log, roomID)
+		if len(parts) >= 2 && handleRoomSubresourceRoute(w, r, cfg, log, events, roomID, parts[1:]) {
 			return
 		}
-
-		if len(parts) >= 2 && parts[1] == "inbox" {
-			if r.Method != http.MethodGet {
-				httpError(w, http.StatusMethodNotAllowed, "method not allowed")
-				return
-			}
-			handleRoomInboxGet(w, r, cfg, log, roomID)
-			return
-		}
-
-		if len(parts) >= 2 && parts[1] == "tasks" {
-			if len(parts) >= 4 {
-				switch r.Method {
-				case http.MethodPost:
-					handleRoomTaskAction(w, r, cfg, log, roomID, strings.TrimSpace(parts[2]), strings.TrimSpace(parts[3]))
-				default:
-					httpError(w, http.StatusMethodNotAllowed, "method not allowed")
-				}
-				return
-			}
-			if r.Method != http.MethodGet {
-				httpError(w, http.StatusMethodNotAllowed, "method not allowed")
-				return
-			}
-			handleRoomTasksGet(w, r, cfg, log, roomID)
-			return
-		}
-
-		if len(parts) >= 2 && parts[1] == "loop" {
-			switch r.Method {
-			case http.MethodGet:
-				handleRoomLoopGet(w, r, cfg, log, roomID)
-			case http.MethodPatch:
-				handleRoomLoopPatch(w, r, cfg, log, roomID)
-			default:
-				httpError(w, http.StatusMethodNotAllowed, "method not allowed")
-			}
-			return
-		}
-
-		if len(parts) >= 2 && parts[1] == "coordinator" {
-			if r.Method != http.MethodPost {
-				httpError(w, http.StatusMethodNotAllowed, "method not allowed")
-				return
-			}
-			handleRoomCoordinatorSet(w, r, cfg, log, roomID)
-			return
-		}
-
-		if len(parts) >= 2 && parts[1] == "messages" {
-			if len(parts) >= 3 && parts[2] == "resolve" {
-				if r.Method != http.MethodPost {
-					httpError(w, http.StatusMethodNotAllowed, "method not allowed")
-					return
-				}
-				handleRoomMessagesResolveBulk(w, r, cfg, log, roomID)
-				return
-			}
-			if len(parts) >= 4 {
-				switch r.Method {
-				case http.MethodPost:
-					handleRoomMessageAction(w, r, cfg, log, roomID, strings.TrimSpace(parts[2]), strings.TrimSpace(parts[3]))
-				default:
-					httpError(w, http.StatusMethodNotAllowed, "method not allowed")
-				}
-				return
-			}
-			switch r.Method {
-			case http.MethodGet:
-				handleRoomMessagesGet(w, r, cfg, log, roomID)
-			case http.MethodPost:
-				handleRoomMessagesPost(w, r, cfg, log, events, roomID)
-			default:
-				httpError(w, http.StatusMethodNotAllowed, "method not allowed")
-			}
-			return
-		}
-
-		if len(parts) >= 2 && parts[1] == "archive" {
-			if r.Method != http.MethodPost {
-				httpError(w, http.StatusMethodNotAllowed, "method not allowed")
-				return
-			}
-			handleRoomArchive(w, r, cfg, log, roomID)
-			return
-		}
-
-		if len(parts) >= 2 && parts[1] == "restore" {
-			if r.Method != http.MethodPost {
-				httpError(w, http.StatusMethodNotAllowed, "method not allowed")
-				return
-			}
-			handleRoomRestore(w, r, cfg, log, roomID)
-			return
-		}
-
-		if len(parts) >= 2 && parts[1] == "members" {
-			switch r.Method {
-			case http.MethodGet:
-				handleRoomGet(w, r, cfg, log, roomID)
-			case http.MethodPatch:
-				handleRoomMembersPatch(w, r, cfg, log, roomID)
-			default:
-				httpError(w, http.StatusMethodNotAllowed, "method not allowed")
-			}
-			return
-		}
-
-		switch r.Method {
-		case http.MethodGet:
-			handleRoomGet(w, r, cfg, log, roomID)
-		case http.MethodPatch:
-			handleRoomPatch(w, r, cfg, log, roomID)
-		case http.MethodDelete:
-			handleRoomDelete(w, r, cfg, log, roomID)
-		default:
-			httpError(w, http.StatusMethodNotAllowed, "method not allowed")
-		}
+		handleRoomRootRoute(w, r, cfg, log, roomID)
 	}
+}
+
+func roomRequestParts(r *http.Request) (string, []string, bool) {
+	path := strings.TrimPrefix(r.URL.Path, "/api/rooms/")
+	parts := strings.Split(path, "/")
+	if len(parts) == 0 {
+		return "", nil, false
+	}
+	roomID := strings.TrimSpace(parts[0])
+	if roomID == "" {
+		return "", nil, false
+	}
+	return roomID, parts, true
+}
+
+func handleRoomSubresourceRoute(w http.ResponseWriter, r *http.Request, cfg config.Config, log zerolog.Logger, events roomEventPublisher, roomID string, parts []string) bool {
+	switch parts[0] {
+	case "status":
+		handleRoomGetOnly(w, r, func() { handleRoomStatusGet(w, r, cfg, log, roomID) })
+	case "inbox":
+		handleRoomGetOnly(w, r, func() { handleRoomInboxGet(w, r, cfg, log, roomID) })
+	case "tasks":
+		handleRoomTasksRoute(w, r, cfg, log, roomID, parts)
+	case "loop":
+		handleRoomLoopRoute(w, r, cfg, log, roomID)
+	case "coordinator":
+		handleRoomPostOnly(w, r, func() { handleRoomCoordinatorSet(w, r, cfg, log, roomID) })
+	case "messages":
+		handleRoomMessagesRoute(w, r, cfg, log, events, roomID, parts)
+	case "archive":
+		handleRoomPostOnly(w, r, func() { handleRoomArchive(w, r, cfg, log, roomID) })
+	case "restore":
+		handleRoomPostOnly(w, r, func() { handleRoomRestore(w, r, cfg, log, roomID) })
+	case "members":
+		handleRoomMembersRoute(w, r, cfg, log, roomID)
+	default:
+		return false
+	}
+	return true
+}
+
+func handleRoomTasksRoute(w http.ResponseWriter, r *http.Request, cfg config.Config, log zerolog.Logger, roomID string, parts []string) {
+	if len(parts) >= 3 {
+		handleRoomPostOnly(w, r, func() {
+			handleRoomTaskAction(w, r, cfg, log, roomID, strings.TrimSpace(parts[1]), strings.TrimSpace(parts[2]))
+		})
+		return
+	}
+	handleRoomGetOnly(w, r, func() { handleRoomTasksGet(w, r, cfg, log, roomID) })
+}
+
+func handleRoomLoopRoute(w http.ResponseWriter, r *http.Request, cfg config.Config, log zerolog.Logger, roomID string) {
+	switch r.Method {
+	case http.MethodGet:
+		handleRoomLoopGet(w, r, cfg, log, roomID)
+	case http.MethodPatch:
+		handleRoomLoopPatch(w, r, cfg, log, roomID)
+	default:
+		httpError(w, http.StatusMethodNotAllowed, "method not allowed")
+	}
+}
+
+func handleRoomMessagesRoute(w http.ResponseWriter, r *http.Request, cfg config.Config, log zerolog.Logger, events roomEventPublisher, roomID string, parts []string) {
+	if len(parts) >= 2 && parts[1] == "resolve" {
+		handleRoomPostOnly(w, r, func() { handleRoomMessagesResolveBulk(w, r, cfg, log, roomID) })
+		return
+	}
+	if len(parts) >= 3 {
+		handleRoomPostOnly(w, r, func() {
+			handleRoomMessageAction(w, r, cfg, log, roomID, strings.TrimSpace(parts[1]), strings.TrimSpace(parts[2]))
+		})
+		return
+	}
+	switch r.Method {
+	case http.MethodGet:
+		handleRoomMessagesGet(w, r, cfg, log, roomID)
+	case http.MethodPost:
+		handleRoomMessagesPost(w, r, cfg, log, events, roomID)
+	default:
+		httpError(w, http.StatusMethodNotAllowed, "method not allowed")
+	}
+}
+
+func handleRoomMembersRoute(w http.ResponseWriter, r *http.Request, cfg config.Config, log zerolog.Logger, roomID string) {
+	switch r.Method {
+	case http.MethodGet:
+		handleRoomGet(w, r, cfg, log, roomID)
+	case http.MethodPatch:
+		handleRoomMembersPatch(w, r, cfg, log, roomID)
+	default:
+		httpError(w, http.StatusMethodNotAllowed, "method not allowed")
+	}
+}
+
+func handleRoomRootRoute(w http.ResponseWriter, r *http.Request, cfg config.Config, log zerolog.Logger, roomID string) {
+	switch r.Method {
+	case http.MethodGet:
+		handleRoomGet(w, r, cfg, log, roomID)
+	case http.MethodPatch:
+		handleRoomPatch(w, r, cfg, log, roomID)
+	case http.MethodDelete:
+		handleRoomDelete(w, r, cfg, log, roomID)
+	default:
+		httpError(w, http.StatusMethodNotAllowed, "method not allowed")
+	}
+}
+
+func handleRoomGetOnly(w http.ResponseWriter, r *http.Request, next func()) {
+	if r.Method != http.MethodGet {
+		httpError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	next()
+}
+
+func handleRoomPostOnly(w http.ResponseWriter, r *http.Request, next func()) {
+	if r.Method != http.MethodPost {
+		httpError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	next()
 }
 
 func handleRoomGet(w http.ResponseWriter, r *http.Request, cfg config.Config, log zerolog.Logger, roomID string) {

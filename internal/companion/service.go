@@ -807,166 +807,12 @@ func (s *Service) ChatStreaming(ctx context.Context, req ChatRequest, callbacks 
 // - Related: engine.NewLLMChatEngine, engine.LLMChatEngine.Run, buildTooling
 // - Keywords: llmchat, provider, model, tool_calls, conversation_id, tools_used
 func (s *Service) chatWithLLMChat(ctx context.Context, req ChatRequest, frame conversationContextFrame, rlmExecutor *engine.RLMToolExecutor, systemPrompt string, promptMeta memoryPromptMetadata, start time.Time, stream *ChatStreamCallbacks) (*ChatResponse, error) {
-	if strings.TrimSpace(frame.HistoryRecap) != "" {
-		systemPrompt = systemPrompt + "\n\n# Conversation State (Machine Generated)\n" + buildStructuredConversationState(frame)
-	}
-	controllerPlan, controllerTokens := s.planConversationAnswerSource(ctx, req, frame)
-	if strings.TrimSpace(controllerPlan.VisibleSummary) != "" {
-		systemPrompt = systemPrompt + "\n\n# Continuity Controller\nsource: " + controllerPlan.Source + "\nvisible_summary: " + controllerPlan.VisibleSummary
-		if strings.TrimSpace(controllerPlan.MemoryQuery) != "" {
-			systemPrompt = systemPrompt + "\nmemory_query: " + controllerPlan.MemoryQuery
-		}
-		if strings.TrimSpace(controllerPlan.SubcallPrompt) != "" {
-			systemPrompt = systemPrompt + "\nsubcall_prompt: " + controllerPlan.SubcallPrompt
-		}
-	}
-	var subcallResult CompanionSubcallResult
-	var subcallErr error
-	if controllerPlan.Source == "subcall" && s.config.SubcallProvider != nil {
-		subcallResult, subcallErr = s.config.SubcallProvider(ctx, CompanionSubcallRequest{
-			ParentAgentID:  resolveCompanionParentAgentID(req),
-			Workspace:      resolveCompanionWorkspace(req, s.config.HookContext.WorkspaceRoot),
-			ConversationID: req.ConversationID,
-			Prompt:         chooseFirstNonEmpty(controllerPlan.SubcallPrompt, controllerPlan.MemoryQuery, req.Message),
-			HarnessState:   frame.WorkspaceState,
-			Role:           DefaultSubcallWorkerRole,
-			LLMProvider:    s.config.LLMProvider,
-			LLMModel:       s.config.LLMModel,
-			MaxDepth:       1,
-			MaxIterations:  4,
-			MaxSubcalls:    0,
-		})
-		if subcallErr != nil {
-			s.logger.Warn().
-				Err(subcallErr).
-				Str("conversation_id", req.ConversationID).
-				Msg("companion subcall failed")
-		}
-		if strings.TrimSpace(subcallResult.Summary) != "" {
-			systemPrompt = systemPrompt + "\n\n# Subcall Result\n" + strings.TrimSpace(subcallResult.Summary)
-		}
-		if strings.TrimSpace(subcallResult.ArtifactRef) != "" {
-			frame.ArtifactRefs = append(frame.ArtifactRefs, strings.TrimSpace(subcallResult.ArtifactRef))
-		}
-	}
-	// Create LLM engine in stateless mode
-	engineCfg := engine.LLMChatConfig{
-		Provider:              s.config.LLMProvider,
-		APIKey:                s.config.LLMAPIKey,
-		BaseURL:               s.config.LLMBaseURL,
-		AuthMode:              s.config.LLMAuthMode,
-		AuthHeader:            s.config.LLMAuthHeader,
-		AuthPrefix:            s.config.LLMAuthPrefix,
-		Model:                 s.config.LLMModel,
-		MaxIterations:         s.config.MaxIterations,
-		Timeout:               s.config.Timeout,
-		StatelessMode:         true,
-		RLMSystemPromptSuffix: RLMContextInstructions,
-		RequireContextQuery:   s.config.RequireContextQuery,
-		HookDispatcher:        s.config.HookDispatcher,
-		ActionExecutor:        s.config.ActionExecutor,
-	}
-
-	s.applyRetentionAwareContextPolicy(&engineCfg, req, frame.HasHistory, promptMeta, true)
-	toolExecutor, toolDefs, usesRLM := s.buildTooling(rlmExecutor)
-	if controllerPlan.Source == "visible_history" || controllerPlan.Source == "subcall" {
-		toolExecutor = nil
-		toolDefs = nil
-		usesRLM = false
-		engineCfg.RequireContextQuery = false
-		engineCfg.RLMSystemPromptSuffix = ""
-	}
-
-	llmEngine, err := engine.NewLLMChatEngine(engineCfg)
+	systemPrompt, controllerPlan, controllerTokens, subcallResult := s.prepareCompanionSystemPrompt(ctx, req, frame, systemPrompt)
+	eng, input, toolExecutor, toolDefs, usesRLM, engineCfg, err := s.buildCompanionExecutionEngine(ctx, req, frame, rlmExecutor, systemPrompt, promptMeta, controllerPlan)
 	if err != nil {
-		return nil, fmt.Errorf("create engine: %w", err)
+		return nil, err
 	}
-
-	// Set hook context for dispatch (uses conversation ID as session if not set)
-	hookCtx := engine.HookContext{
-		SessionID:     s.config.HookContext.SessionID,
-		ActorID:       s.config.HookContext.ActorID,
-		WorkspaceID:   s.config.HookContext.WorkspaceID,
-		WorkspaceRoot: s.config.HookContext.WorkspaceRoot,
-	}
-	if hookCtx.SessionID == "" {
-		hookCtx.SessionID = req.ConversationID
-	}
-	llmEngine.SetHookContext(hookCtx)
-
-	if toolExecutor != nil && len(toolDefs) > 0 {
-		toolRunner := engine.NewToolRunner(toolExecutor, nil, engine.DefaultToolRunnerConfig())
-		llmEngine.SetToolRunner(toolRunner)
-	}
-	if usesRLM {
-		llmEngine.SetRLMExecutor(rlmExecutor)
-	}
-
-	var eng engine.AgentEngine = llmEngine
-
-	// Config gate: opt in to the tool-capable Eino engine path via AGENTCTL_ENGINE_BACKEND=eino.
-	// When the gate is on, we provision a real Eino engine that bridges the companion's
-	// toolset into the Eino substrate.
-	if einoadapter.IsEinoEnabled() {
-		einoEngine, err := einoadapter.ProvisionFromLLMConfig(llmEngine.Config(), toolExecutor, toolDefs)
-		if err != nil {
-			return nil, fmt.Errorf("eino companion provisioning failed: %w", err)
-		}
-		// Replace the base engine with the Eino-backed engine adapter.
-		// Note: EinoEngineAdapter already handles tool execution internally via its own loop.
-		eng = einoEngine
-	}
-
-	input := engine.EngineInput{
-		SystemPrompt: systemPrompt,
-		Messages:     frame.Messages,
-		Tools:        toolDefs,
-	}
-
-	// Execute. Streaming is only available on the classic LLMChatEngine path; when
-	// the Eino gate is on, eng is an EinoEngineAdapter that satisfies AgentEngine.Run
-	// but not RunStreaming, so we fall through to the non-streaming path.
-	var output engine.EngineOutput
-	if stream != nil {
-		if se, ok := eng.(interface {
-			RunStreaming(ctx context.Context, input engine.EngineInput, streamCfg engine.StreamConfig) (engine.EngineOutput, error)
-		}); ok {
-			output, err = se.RunStreaming(ctx, input, engine.StreamConfig{
-				Stream: true,
-				OnDelta: func(delta engine.StreamDelta) {
-					if stream.OnDelta != nil {
-						stream.OnDelta(ChatStreamDelta{
-							ContentDelta: delta.ContentDelta,
-							FinishReason: delta.FinishReason,
-						})
-					}
-				},
-				OnToolCall: func(call engine.ToolCall) {
-					if stream.OnToolCall != nil {
-						stream.OnToolCall(ChatToolCallEvent{
-							ID:        call.ID,
-							Name:      call.Name,
-							Arguments: call.Arguments,
-						})
-					}
-				},
-				OnToolResult: func(call engine.ToolCall, result engine.ToolResult) {
-					if stream.OnToolResult != nil {
-						stream.OnToolResult(ChatToolResultEvent{
-							ToolCallID: result.ToolCallID,
-							Name:       call.Name,
-							Content:    result.Content,
-							IsError:    result.IsError,
-						})
-					}
-				},
-			})
-		} else {
-			output, err = eng.Run(ctx, input)
-		}
-	} else {
-		output, err = eng.Run(ctx, input)
-	}
+	output, err := s.runCompanionAgentEngine(ctx, eng, input, stream)
 	if err != nil {
 		return nil, fmt.Errorf("engine run: %w", err)
 	}
@@ -974,109 +820,8 @@ func (s *Service) chatWithLLMChat(ctx context.Context, req ChatRequest, frame co
 		output.Tokens.Add(controllerTokens.InputTokens, controllerTokens.OutputTokens)
 	}
 
-	enforceGrounded := req.RequireContextQuery != nil && *req.RequireContextQuery
-
-	// Strip <think>...</think> blocks from reasoning models (e.g., GLM, DeepSeek).
-	// Some local models may return only reasoning in <think> tags; if that happens,
-	// run a one-shot recovery prompt to force a visible plain-text answer.
-	rawAssistantText := output.AssistantText
-	responseText := strings.TrimSpace(stripThinkTags(rawAssistantText))
-	if shouldRetryGroundedTurn(enforceGrounded, output, responseText, rlmExecutor.QueryCount()) {
-		retryOutput, retryErr := s.retryGroundedTurn(
-			ctx, req, engineCfg, input, toolExecutor, toolDefs, rlmExecutor, usesRLM,
-		)
-		if retryErr != nil {
-			s.logger.Warn().
-				Err(retryErr).
-				Str("conversation_id", req.ConversationID).
-				Msg("grounded retry failed")
-		} else {
-			// Keep accounting from the original attempt and use retry output as canonical.
-			retryOutput.Tokens.Add(output.Tokens.InputTokens, output.Tokens.OutputTokens)
-			output = retryOutput
-			rawAssistantText = output.AssistantText
-			responseText = strings.TrimSpace(stripThinkTags(rawAssistantText))
-			s.logger.Debug().
-				Str("conversation_id", req.ConversationID).
-				Int("context_queries", rlmExecutor.QueryCount()).
-				Int("tool_calls", len(output.ToolCalls)).
-				Msg("grounded retry completed")
-		}
-	}
-
-	if responseText == "" {
-		if !enforceGrounded {
-			recoveredText, recoveredTokens := s.recoverEmptyAssistantText(ctx, systemPrompt, frame.Messages, rawAssistantText)
-			if recoveredText != "" {
-				responseText = recoveredText
-			}
-			if recoveredTokens.InputTokens > 0 || recoveredTokens.OutputTokens > 0 {
-				output.Tokens.Add(recoveredTokens.InputTokens, recoveredTokens.OutputTokens)
-			}
-		}
-	}
-	if shouldRecoverContextToolLeak(responseText, rawAssistantText, output.ToolCalls) {
-		recoveredText, recoveredTokens, recoverErr := s.synthesizeContextToolAnswer(
-			ctx, req, engineCfg, systemPrompt, frame.Messages, rawAssistantText, output.ToolCalls, output.ToolResults,
-		)
-		if recoverErr != nil {
-			s.logger.Warn().
-				Err(recoverErr).
-				Str("conversation_id", req.ConversationID).
-				Msg("context-tool synthesis recovery failed")
-		} else if strings.TrimSpace(recoveredText) != "" {
-			responseText = strings.TrimSpace(recoveredText)
-			output.Tokens.Add(recoveredTokens.InputTokens, recoveredTokens.OutputTokens)
-		}
-	}
-	if enforceGrounded && len(output.ToolCalls) == 0 {
-		forcedCalls, forcedResults, forcedEvidence := s.collectForcedResearchEvidence(ctx, toolExecutor, toolDefs, req.Message)
-		if len(forcedCalls) > 0 {
-			output.ToolCalls = append(output.ToolCalls, forcedCalls...)
-			output.ToolResults = append(output.ToolResults, forcedResults...)
-		}
-		if forcedEvidence != "" {
-			synthText, synthTokens, synthErr := s.synthesizeForcedResearchAnswer(ctx, req, engineCfg, systemPrompt, req.Message, forcedEvidence)
-			if synthErr != nil {
-				s.logger.Warn().
-					Err(synthErr).
-					Str("conversation_id", req.ConversationID).
-					Msg("forced grounded synthesis failed")
-			} else if strings.TrimSpace(synthText) != "" {
-				responseText = strings.TrimSpace(synthText)
-				output.Tokens.Add(synthTokens.InputTokens, synthTokens.OutputTokens)
-				s.logger.Debug().
-					Str("conversation_id", req.ConversationID).
-					Int("forced_tool_calls", len(forcedCalls)).
-					Msg("forced grounded synthesis completed")
-			}
-		}
-		if strings.TrimSpace(responseText) == "" && len(forcedCalls) > 0 {
-			responseText = buildForcedResearchFallbackReport(forcedCalls, forcedResults)
-		}
-	}
-	if enforceGrounded && len(output.ToolCalls) == 0 && strings.TrimSpace(responseText) == "" {
-		responseText = "I could not complete a tool-grounded research pass in this turn. Retry with a narrower target (path/function) or use a model with stronger tool-calling support."
-	}
-	diagnosticError := ""
-	if responseText == "" {
-		diagnosticError = explainInvisibleResponse(output, rawAssistantText, enforceGrounded)
-		responseText = "I couldn't generate a visible response. Please try again."
-	}
-
-	// Build response
-	resp := &ChatResponse{
-		ConversationID: req.ConversationID,
-		Response:       responseText,
-		ContextQueries: rlmExecutor.QueryCount(),
-		DurationMS:     time.Since(start).Milliseconds(),
-		TokenUsage: TokenUsage{
-			InputTokens:  output.Tokens.InputTokens,
-			OutputTokens: output.Tokens.OutputTokens,
-			TotalTokens:  output.Tokens.TotalTokens,
-		},
-		Error: diagnosticError,
-	}
+	responseText, diagnosticError, output := s.postProcessCompanionOutput(ctx, req, frame, rlmExecutor, systemPrompt, input, engineCfg, toolExecutor, toolDefs, usesRLM, output)
+	resp := s.buildCompanionChatResponse(req, rlmExecutor, start, responseText, diagnosticError, output)
 	if controllerPlan.Source != "" || controllerPlan.VisibleSummary != "" || controllerPlan.MemoryQuery != "" {
 		resp.Continuity = &ContinuityDetail{
 			Source:         controllerPlan.Source,
@@ -1142,6 +887,258 @@ func (s *Service) chatWithLLMChat(ctx context.Context, req ChatRequest, frame co
 	// to avoid duplicate entries.
 
 	return resp, nil
+}
+
+func (s *Service) prepareCompanionSystemPrompt(ctx context.Context, req ChatRequest, frame conversationContextFrame, systemPrompt string) (string, continuityControllerPlan, engine.TokenUsage, CompanionSubcallResult) {
+	if strings.TrimSpace(frame.HistoryRecap) != "" {
+		systemPrompt += "\n\n# Conversation State (Machine Generated)\n" + buildStructuredConversationState(frame)
+	}
+	controllerPlan, controllerTokens := s.planConversationAnswerSource(ctx, req, frame)
+	systemPrompt = appendContinuityControllerPrompt(systemPrompt, controllerPlan)
+	subcallResult := s.maybeRunCompanionSubcall(ctx, req, frame, controllerPlan, &systemPrompt)
+	return systemPrompt, controllerPlan, controllerTokens, subcallResult
+}
+
+func appendContinuityControllerPrompt(systemPrompt string, controllerPlan continuityControllerPlan) string {
+	if strings.TrimSpace(controllerPlan.VisibleSummary) == "" {
+		return systemPrompt
+	}
+	systemPrompt += "\n\n# Continuity Controller\nsource: " + controllerPlan.Source + "\nvisible_summary: " + controllerPlan.VisibleSummary
+	if strings.TrimSpace(controllerPlan.MemoryQuery) != "" {
+		systemPrompt += "\nmemory_query: " + controllerPlan.MemoryQuery
+	}
+	if strings.TrimSpace(controllerPlan.SubcallPrompt) != "" {
+		systemPrompt += "\nsubcall_prompt: " + controllerPlan.SubcallPrompt
+	}
+	return systemPrompt
+}
+
+func (s *Service) maybeRunCompanionSubcall(ctx context.Context, req ChatRequest, frame conversationContextFrame, controllerPlan continuityControllerPlan, systemPrompt *string) CompanionSubcallResult {
+	if controllerPlan.Source != "subcall" || s.config.SubcallProvider == nil {
+		return CompanionSubcallResult{}
+	}
+	subcallResult, subcallErr := s.config.SubcallProvider(ctx, CompanionSubcallRequest{
+		ParentAgentID:  resolveCompanionParentAgentID(req),
+		Workspace:      resolveCompanionWorkspace(req, s.config.HookContext.WorkspaceRoot),
+		ConversationID: req.ConversationID,
+		Prompt:         chooseFirstNonEmpty(controllerPlan.SubcallPrompt, controllerPlan.MemoryQuery, req.Message),
+		HarnessState:   frame.WorkspaceState,
+		Role:           DefaultSubcallWorkerRole,
+		LLMProvider:    s.config.LLMProvider,
+		LLMModel:       s.config.LLMModel,
+		MaxDepth:       1,
+		MaxIterations:  4,
+		MaxSubcalls:    0,
+	})
+	if subcallErr != nil {
+		s.logger.Warn().Err(subcallErr).Str("conversation_id", req.ConversationID).Msg("companion subcall failed")
+	}
+	if strings.TrimSpace(subcallResult.Summary) != "" {
+		*systemPrompt += "\n\n# Subcall Result\n" + strings.TrimSpace(subcallResult.Summary)
+	}
+	return subcallResult
+}
+
+func (s *Service) buildCompanionExecutionEngine(ctx context.Context, req ChatRequest, frame conversationContextFrame, rlmExecutor *engine.RLMToolExecutor, systemPrompt string, promptMeta memoryPromptMetadata, controllerPlan continuityControllerPlan) (engine.AgentEngine, engine.EngineInput, engine.ToolExecutor, []engine.ToolDef, bool, engine.LLMChatConfig, error) {
+	engineCfg := s.newCompanionLLMChatConfig(req, frame, promptMeta)
+	toolExecutor, toolDefs, usesRLM := s.buildTooling(rlmExecutor)
+	if controllerPlan.Source == "visible_history" || controllerPlan.Source == "subcall" {
+		toolExecutor = nil
+		toolDefs = nil
+		usesRLM = false
+		engineCfg.RequireContextQuery = false
+		engineCfg.RLMSystemPromptSuffix = ""
+	}
+
+	llmEngine, err := engine.NewLLMChatEngine(engineCfg)
+	if err != nil {
+		return nil, engine.EngineInput{}, nil, nil, false, engine.LLMChatConfig{}, fmt.Errorf("create engine: %w", err)
+	}
+	s.configureCompanionLLMEngine(llmEngine, req, toolExecutor, toolDefs, rlmExecutor, usesRLM)
+
+	eng := engine.AgentEngine(llmEngine)
+	if einoadapter.IsEinoEnabled() {
+		einoEngine, err := einoadapter.ProvisionFromLLMConfig(llmEngine.Config(), toolExecutor, toolDefs)
+		if err != nil {
+			return nil, engine.EngineInput{}, nil, nil, false, engine.LLMChatConfig{}, fmt.Errorf("eino companion provisioning failed: %w", err)
+		}
+		eng = einoEngine
+	}
+	return eng, engine.EngineInput{SystemPrompt: systemPrompt, Messages: frame.Messages, Tools: toolDefs}, toolExecutor, toolDefs, usesRLM, engineCfg, nil
+}
+
+func (s *Service) newCompanionLLMChatConfig(req ChatRequest, frame conversationContextFrame, promptMeta memoryPromptMetadata) engine.LLMChatConfig {
+	engineCfg := engine.LLMChatConfig{
+		Provider:              s.config.LLMProvider,
+		APIKey:                s.config.LLMAPIKey,
+		BaseURL:               s.config.LLMBaseURL,
+		AuthMode:              s.config.LLMAuthMode,
+		AuthHeader:            s.config.LLMAuthHeader,
+		AuthPrefix:            s.config.LLMAuthPrefix,
+		Model:                 s.config.LLMModel,
+		MaxIterations:         s.config.MaxIterations,
+		Timeout:               s.config.Timeout,
+		StatelessMode:         true,
+		RLMSystemPromptSuffix: RLMContextInstructions,
+		RequireContextQuery:   s.config.RequireContextQuery,
+		HookDispatcher:        s.config.HookDispatcher,
+		ActionExecutor:        s.config.ActionExecutor,
+	}
+	s.applyRetentionAwareContextPolicy(&engineCfg, req, frame.HasHistory, promptMeta, true)
+	return engineCfg
+}
+
+func (s *Service) configureCompanionLLMEngine(llmEngine *engine.LLMChatEngine, req ChatRequest, toolExecutor engine.ToolExecutor, toolDefs []engine.ToolDef, rlmExecutor *engine.RLMToolExecutor, usesRLM bool) {
+	hookCtx := engine.HookContext{
+		SessionID:     s.config.HookContext.SessionID,
+		ActorID:       s.config.HookContext.ActorID,
+		WorkspaceID:   s.config.HookContext.WorkspaceID,
+		WorkspaceRoot: s.config.HookContext.WorkspaceRoot,
+	}
+	if hookCtx.SessionID == "" {
+		hookCtx.SessionID = req.ConversationID
+	}
+	llmEngine.SetHookContext(hookCtx)
+	if toolExecutor != nil && len(toolDefs) > 0 {
+		llmEngine.SetToolRunner(engine.NewToolRunner(toolExecutor, nil, engine.DefaultToolRunnerConfig()))
+	}
+	if usesRLM {
+		llmEngine.SetRLMExecutor(rlmExecutor)
+	}
+}
+
+func (s *Service) runCompanionAgentEngine(ctx context.Context, eng engine.AgentEngine, input engine.EngineInput, stream *ChatStreamCallbacks) (engine.EngineOutput, error) {
+	if stream == nil {
+		return eng.Run(ctx, input)
+	}
+	if se, ok := eng.(interface {
+		RunStreaming(ctx context.Context, input engine.EngineInput, streamCfg engine.StreamConfig) (engine.EngineOutput, error)
+	}); ok {
+		return se.RunStreaming(ctx, input, engine.StreamConfig{
+			Stream: true,
+			OnDelta: func(delta engine.StreamDelta) {
+				if stream.OnDelta != nil {
+					stream.OnDelta(ChatStreamDelta{ContentDelta: delta.ContentDelta, FinishReason: delta.FinishReason})
+				}
+			},
+			OnToolCall: func(call engine.ToolCall) {
+				if stream.OnToolCall != nil {
+					stream.OnToolCall(ChatToolCallEvent{ID: call.ID, Name: call.Name, Arguments: call.Arguments})
+				}
+			},
+			OnToolResult: func(call engine.ToolCall, result engine.ToolResult) {
+				if stream.OnToolResult != nil {
+					stream.OnToolResult(ChatToolResultEvent{
+						ToolCallID: result.ToolCallID,
+						Name:       call.Name,
+						Content:    result.Content,
+						IsError:    result.IsError,
+					})
+				}
+			},
+		})
+	}
+	return eng.Run(ctx, input)
+}
+
+func (s *Service) postProcessCompanionOutput(ctx context.Context, req ChatRequest, frame conversationContextFrame, rlmExecutor *engine.RLMToolExecutor, systemPrompt string, input engine.EngineInput, engineCfg engine.LLMChatConfig, toolExecutor engine.ToolExecutor, toolDefs []engine.ToolDef, usesRLM bool, output engine.EngineOutput) (string, string, engine.EngineOutput) {
+	enforceGrounded := req.RequireContextQuery != nil && *req.RequireContextQuery
+	rawAssistantText := output.AssistantText
+	responseText := strings.TrimSpace(stripThinkTags(rawAssistantText))
+	output, rawAssistantText, responseText = s.maybeRetryGroundedCompanionTurn(ctx, req, rlmExecutor, input, engineCfg, toolExecutor, toolDefs, usesRLM, output, rawAssistantText, responseText, enforceGrounded)
+	output, responseText = s.maybeRecoverCompanionResponse(ctx, req, frame, systemPrompt, engineCfg, toolExecutor, toolDefs, output, rawAssistantText, responseText, enforceGrounded)
+	diagnosticError := ""
+	if responseText == "" {
+		diagnosticError = explainInvisibleResponse(output, rawAssistantText, enforceGrounded)
+		responseText = "I couldn't generate a visible response. Please try again."
+	}
+	return responseText, diagnosticError, output
+}
+
+func (s *Service) maybeRetryGroundedCompanionTurn(ctx context.Context, req ChatRequest, rlmExecutor *engine.RLMToolExecutor, input engine.EngineInput, engineCfg engine.LLMChatConfig, toolExecutor engine.ToolExecutor, toolDefs []engine.ToolDef, usesRLM bool, output engine.EngineOutput, rawAssistantText, responseText string, enforceGrounded bool) (engine.EngineOutput, string, string) {
+	if !shouldRetryGroundedTurn(enforceGrounded, output, responseText, rlmExecutor.QueryCount()) {
+		return output, rawAssistantText, responseText
+	}
+	retryOutput, retryErr := s.retryGroundedTurn(ctx, req, engineCfg, input, toolExecutor, toolDefs, rlmExecutor, usesRLM)
+	if retryErr != nil {
+		s.logger.Warn().Err(retryErr).Str("conversation_id", req.ConversationID).Msg("grounded retry failed")
+		return output, rawAssistantText, responseText
+	}
+	retryOutput.Tokens.Add(output.Tokens.InputTokens, output.Tokens.OutputTokens)
+	output = retryOutput
+	rawAssistantText = output.AssistantText
+	responseText = strings.TrimSpace(stripThinkTags(rawAssistantText))
+	s.logger.Debug().
+		Str("conversation_id", req.ConversationID).
+		Int("context_queries", rlmExecutor.QueryCount()).
+		Int("tool_calls", len(output.ToolCalls)).
+		Msg("grounded retry completed")
+	return output, rawAssistantText, responseText
+}
+
+func (s *Service) maybeRecoverCompanionResponse(ctx context.Context, req ChatRequest, frame conversationContextFrame, systemPrompt string, engineCfg engine.LLMChatConfig, toolExecutor engine.ToolExecutor, toolDefs []engine.ToolDef, output engine.EngineOutput, rawAssistantText, responseText string, enforceGrounded bool) (engine.EngineOutput, string) {
+	if responseText == "" && !enforceGrounded {
+		recoveredText, recoveredTokens := s.recoverEmptyAssistantText(ctx, systemPrompt, frame.Messages, rawAssistantText)
+		if recoveredText != "" {
+			responseText = recoveredText
+		}
+		if recoveredTokens.InputTokens > 0 || recoveredTokens.OutputTokens > 0 {
+			output.Tokens.Add(recoveredTokens.InputTokens, recoveredTokens.OutputTokens)
+		}
+	}
+	if shouldRecoverContextToolLeak(responseText, rawAssistantText, output.ToolCalls) {
+		recoveredText, recoveredTokens, recoverErr := s.synthesizeContextToolAnswer(ctx, req, engineCfg, systemPrompt, frame.Messages, rawAssistantText, output.ToolCalls, output.ToolResults)
+		if recoverErr != nil {
+			s.logger.Warn().Err(recoverErr).Str("conversation_id", req.ConversationID).Msg("context-tool synthesis recovery failed")
+		} else if strings.TrimSpace(recoveredText) != "" {
+			responseText = strings.TrimSpace(recoveredText)
+			output.Tokens.Add(recoveredTokens.InputTokens, recoveredTokens.OutputTokens)
+		}
+	}
+	if enforceGrounded && len(output.ToolCalls) == 0 {
+		output, responseText = s.applyForcedGroundingFallback(ctx, req, systemPrompt, engineCfg, toolExecutor, toolDefs, output, responseText)
+	}
+	if enforceGrounded && len(output.ToolCalls) == 0 && strings.TrimSpace(responseText) == "" {
+		responseText = "I could not complete a tool-grounded research pass in this turn. Retry with a narrower target (path/function) or use a model with stronger tool-calling support."
+	}
+	return output, responseText
+}
+
+func (s *Service) applyForcedGroundingFallback(ctx context.Context, req ChatRequest, systemPrompt string, engineCfg engine.LLMChatConfig, toolExecutor engine.ToolExecutor, toolDefs []engine.ToolDef, output engine.EngineOutput, responseText string) (engine.EngineOutput, string) {
+	forcedCalls, forcedResults, forcedEvidence := s.collectForcedResearchEvidence(ctx, toolExecutor, toolDefs, req.Message)
+	if len(forcedCalls) > 0 {
+		output.ToolCalls = append(output.ToolCalls, forcedCalls...)
+		output.ToolResults = append(output.ToolResults, forcedResults...)
+	}
+	if forcedEvidence != "" {
+		synthText, synthTokens, synthErr := s.synthesizeForcedResearchAnswer(ctx, req, engineCfg, systemPrompt, req.Message, forcedEvidence)
+		if synthErr != nil {
+			s.logger.Warn().Err(synthErr).Str("conversation_id", req.ConversationID).Msg("forced grounded synthesis failed")
+		} else if strings.TrimSpace(synthText) != "" {
+			responseText = strings.TrimSpace(synthText)
+			output.Tokens.Add(synthTokens.InputTokens, synthTokens.OutputTokens)
+			s.logger.Debug().Str("conversation_id", req.ConversationID).Int("forced_tool_calls", len(forcedCalls)).Msg("forced grounded synthesis completed")
+		}
+	}
+	if strings.TrimSpace(responseText) == "" && len(forcedCalls) > 0 {
+		responseText = buildForcedResearchFallbackReport(forcedCalls, forcedResults)
+	}
+	return output, responseText
+}
+
+func (s *Service) buildCompanionChatResponse(req ChatRequest, rlmExecutor *engine.RLMToolExecutor, start time.Time, responseText, diagnosticError string, output engine.EngineOutput) *ChatResponse {
+	return &ChatResponse{
+		ConversationID: req.ConversationID,
+		Response:       responseText,
+		ContextQueries: rlmExecutor.QueryCount(),
+		DurationMS:     time.Since(start).Milliseconds(),
+		TokenUsage: TokenUsage{
+			InputTokens:  output.Tokens.InputTokens,
+			OutputTokens: output.Tokens.OutputTokens,
+			TotalTokens:  output.Tokens.TotalTokens,
+		},
+		Error: diagnosticError,
+	}
 }
 
 func explainInvisibleResponse(output engine.EngineOutput, rawAssistantText string, enforceGrounded bool) string {
@@ -3853,9 +3850,60 @@ func (s *Service) generatePresence(ctx context.Context, req ChatRequest, resp *C
 		return
 	}
 
-	presenceCfg := s.config.PresenceConfig
+	orchOutput, ok := s.runPresenceOrchestrator(ctx, req, resp)
+	if !ok {
+		return
+	}
 
-	// Build orchestrate input
+	bundle := newPresenceBundle(orchOutput)
+	s.collectPresenceSubSkills(ctx, orchOutput, bundle, resp)
+	resp.Presence = bundle
+
+	if resp.Tone == nil && bundle.Emotion != "" {
+		resp.Tone = &ChatTone{
+			Emotion:   bundle.Emotion,
+			Intensity: bundle.Intensity,
+		}
+	}
+}
+
+type orchestratedPresenceOutput struct {
+	Emotion          string         `json:"emotion"`
+	Intensity        float64        `json:"intensity"`
+	DisplayText      string         `json:"display_text"`
+	Markers          []string       `json:"markers"`
+	DetectedEmoji    []string       `json:"detected_emoji"`
+	BackgroundParams map[string]any `json:"background_params"`
+	CharacterParams  map[string]any `json:"character_params"`
+	VoiceParams      map[string]any `json:"voice_params"`
+}
+
+type presenceSubSkillResult struct {
+	skill  string
+	output json.RawMessage
+	err    error
+}
+
+func (s *Service) runPresenceOrchestrator(ctx context.Context, req ChatRequest, resp *ChatResponse) (orchestratedPresenceOutput, bool) {
+	result, err := s.config.SkillRunner.Run(ctx, "presence/orchestrate", s.buildPresenceOrchestrateInput(req, resp))
+	if err != nil {
+		s.logger.Warn().Err(err).Msg("presence/orchestrate failed")
+		return orchestratedPresenceOutput{}, false
+	}
+	if !result.Success {
+		s.logger.Warn().Str("error", result.Error).Msg("presence/orchestrate returned error")
+		return orchestratedPresenceOutput{}, false
+	}
+	var orchOutput orchestratedPresenceOutput
+	if err := json.Unmarshal(result.Output, &orchOutput); err != nil {
+		s.logger.Warn().Err(err).Msg("failed to parse presence/orchestrate output")
+		return orchestratedPresenceOutput{}, false
+	}
+	return orchOutput, true
+}
+
+func (s *Service) buildPresenceOrchestrateInput(req ChatRequest, resp *ChatResponse) map[string]any {
+	presenceCfg := s.config.PresenceConfig
 	input := map[string]any{
 		"text":                resp.Response,
 		"conversation_id":     req.ConversationID,
@@ -3886,165 +3934,125 @@ func (s *Service) generatePresence(ctx context.Context, req ChatRequest, resp *C
 	if presenceCfg.RewriteMaxChars > 0 {
 		input["rewrite_max_chars"] = presenceCfg.RewriteMaxChars
 	}
-	// Add scene from ChatAction if present
 	if resp.Action != nil && resp.Action.Scene != "" {
 		input["scene"] = resp.Action.Scene
 	}
+	return input
+}
 
-	// Run presence/orchestrate to parse emotions and get sub-skill params
-	result, err := s.config.SkillRunner.Run(ctx, "presence/orchestrate", input)
-	if err != nil {
-		s.logger.Warn().Err(err).Msg("presence/orchestrate failed")
-		return
-	}
-	if !result.Success {
-		s.logger.Warn().Str("error", result.Error).Msg("presence/orchestrate returned error")
-		return
-	}
-
-	// Parse orchestrate output
-	var orchOutput struct {
-		Emotion          string         `json:"emotion"`
-		Intensity        float64        `json:"intensity"`
-		DisplayText      string         `json:"display_text"`
-		Markers          []string       `json:"markers"`
-		DetectedEmoji    []string       `json:"detected_emoji"`
-		BackgroundParams map[string]any `json:"background_params"`
-		CharacterParams  map[string]any `json:"character_params"`
-		VoiceParams      map[string]any `json:"voice_params"`
-	}
-	if err := json.Unmarshal(result.Output, &orchOutput); err != nil {
-		s.logger.Warn().Err(err).Msg("failed to parse presence/orchestrate output")
-		return
-	}
-
-	// Initialize presence bundle with parsed emotion data
-	bundle := &PresenceBundle{
+func newPresenceBundle(orchOutput orchestratedPresenceOutput) *PresenceBundle {
+	return &PresenceBundle{
 		Emotion:       orchOutput.Emotion,
 		Intensity:     orchOutput.Intensity,
 		DisplayText:   orchOutput.DisplayText,
 		Markers:       orchOutput.Markers,
 		DetectedEmoji: orchOutput.DetectedEmoji,
 	}
+}
 
-	// Run sub-skills in parallel using goroutines
-	type subSkillResult struct {
-		skill  string
-		output json.RawMessage
-		err    error
-	}
-	resultCh := make(chan subSkillResult, 3)
-	running := 0
-
-	// Background generation
-	if orchOutput.BackgroundParams != nil {
-		running++
-		go func() {
-			res, err := s.config.SkillRunner.Run(ctx, "presence/background", orchOutput.BackgroundParams)
-			if err != nil {
-				resultCh <- subSkillResult{skill: "background", err: err}
-				return
-			}
-			resultCh <- subSkillResult{skill: "background", output: res.Output}
-		}()
-	}
-
-	// Character overlay selection
-	if orchOutput.CharacterParams != nil {
-		running++
-		go func() {
-			res, err := s.config.SkillRunner.Run(ctx, "presence/character", orchOutput.CharacterParams)
-			if err != nil {
-				resultCh <- subSkillResult{skill: "character", err: err}
-				return
-			}
-			resultCh <- subSkillResult{skill: "character", output: res.Output}
-		}()
-	}
-
-	// Voice generation
-	if orchOutput.VoiceParams != nil {
-		running++
-		go func() {
-			res, err := s.config.SkillRunner.Run(ctx, "presence/voice", orchOutput.VoiceParams)
-			if err != nil {
-				resultCh <- subSkillResult{skill: "voice", err: err}
-				return
-			}
-			resultCh <- subSkillResult{skill: "voice", output: res.Output}
-		}()
-	}
-
-	// Collect results with context cancellation support
+func (s *Service) collectPresenceSubSkills(ctx context.Context, orchOutput orchestratedPresenceOutput, bundle *PresenceBundle, resp *ChatResponse) {
+	resultCh, running := s.startPresenceSubSkills(ctx, orchOutput)
 	for i := 0; i < running; i++ {
-		var res subSkillResult
-		select {
-		case res = <-resultCh:
-			// Got result, process below
-		case <-ctx.Done():
-			// Context cancelled, stop waiting for remaining results
-			s.logger.Warn().Err(ctx.Err()).Int("remaining", running-i).Msg("presence bundle collection cancelled")
-			bundle.Errors = append(bundle.Errors, fmt.Sprintf("cancelled: %v", ctx.Err()))
+		res, ok := s.awaitPresenceSubSkillResult(ctx, bundle, running-i, resultCh)
+		if !ok {
 			resp.Presence = bundle
 			return
 		}
-		if res.err != nil {
-			s.logger.Warn().Err(res.err).Str("skill", res.skill).Msg("presence sub-skill failed")
-			bundle.Errors = append(bundle.Errors, fmt.Sprintf("%s: %v", res.skill, res.err))
-			bundle.CacheMisses++
-			continue
+		s.applyPresenceSubSkillResult(bundle, res)
+	}
+}
+
+func (s *Service) startPresenceSubSkills(ctx context.Context, orchOutput orchestratedPresenceOutput) (<-chan presenceSubSkillResult, int) {
+	resultCh := make(chan presenceSubSkillResult, 3)
+	running := 0
+	running += s.startPresenceSubSkill(ctx, "background", orchOutput.BackgroundParams, resultCh)
+	running += s.startPresenceSubSkill(ctx, "character", orchOutput.CharacterParams, resultCh)
+	running += s.startPresenceSubSkill(ctx, "voice", orchOutput.VoiceParams, resultCh)
+	return resultCh, running
+}
+
+func (s *Service) startPresenceSubSkill(ctx context.Context, skill string, params map[string]any, resultCh chan<- presenceSubSkillResult) int {
+	if params == nil {
+		return 0
+	}
+	go func() {
+		res, err := s.config.SkillRunner.Run(ctx, "presence/"+skill, params)
+		if err != nil {
+			resultCh <- presenceSubSkillResult{skill: skill, err: err}
+			return
 		}
+		resultCh <- presenceSubSkillResult{skill: skill, output: res.Output}
+	}()
+	return 1
+}
 
-		switch res.skill {
-		case "background":
-			var bgOut struct {
-				ImageDigest string `json:"image_digest"`
-				Cached      bool   `json:"cached"`
-			}
-			if err := json.Unmarshal(res.output, &bgOut); err == nil {
-				bundle.BackgroundDigest = bgOut.ImageDigest
-				if bgOut.Cached {
-					bundle.CacheHits++
-				} else {
-					bundle.CacheMisses++
-				}
-			}
+func (s *Service) awaitPresenceSubSkillResult(ctx context.Context, bundle *PresenceBundle, remaining int, resultCh <-chan presenceSubSkillResult) (presenceSubSkillResult, bool) {
+	select {
+	case res := <-resultCh:
+		return res, true
+	case <-ctx.Done():
+		s.logger.Warn().Err(ctx.Err()).Int("remaining", remaining).Msg("presence bundle collection cancelled")
+		bundle.Errors = append(bundle.Errors, fmt.Sprintf("cancelled: %v", ctx.Err()))
+		return presenceSubSkillResult{}, false
+	}
+}
 
-		case "character":
-			var charOut struct {
-				Overlay *struct {
-					OverlayDigest string `json:"overlay_digest"`
-				} `json:"overlay"`
-			}
-			if err := json.Unmarshal(res.output, &charOut); err == nil && charOut.Overlay != nil {
-				bundle.OverlayDigest = charOut.Overlay.OverlayDigest
-			}
+func (s *Service) applyPresenceSubSkillResult(bundle *PresenceBundle, res presenceSubSkillResult) {
+	if res.err != nil {
+		s.logger.Warn().Err(res.err).Str("skill", res.skill).Msg("presence sub-skill failed")
+		bundle.Errors = append(bundle.Errors, fmt.Sprintf("%s: %v", res.skill, res.err))
+		bundle.CacheMisses++
+		return
+	}
+	switch res.skill {
+	case "background":
+		applyPresenceBackgroundResult(bundle, res.output)
+	case "character":
+		applyPresenceCharacterResult(bundle, res.output)
+	case "voice":
+		applyPresenceVoiceResult(bundle, res.output)
+	}
+}
 
-		case "voice":
-			var voiceOut struct {
-				AudioDigest string `json:"audio_digest"`
-				DurationMS  int    `json:"duration_ms"`
-				Cached      bool   `json:"cached"`
-			}
-			if err := json.Unmarshal(res.output, &voiceOut); err == nil {
-				bundle.AudioDigest = voiceOut.AudioDigest
-				bundle.AudioDurationMS = voiceOut.DurationMS
-				if voiceOut.Cached {
-					bundle.CacheHits++
-				} else {
-					bundle.CacheMisses++
-				}
-			}
+func applyPresenceBackgroundResult(bundle *PresenceBundle, output json.RawMessage) {
+	var bgOut struct {
+		ImageDigest string `json:"image_digest"`
+		Cached      bool   `json:"cached"`
+	}
+	if err := json.Unmarshal(output, &bgOut); err == nil {
+		bundle.BackgroundDigest = bgOut.ImageDigest
+		if bgOut.Cached {
+			bundle.CacheHits++
+		} else {
+			bundle.CacheMisses++
 		}
 	}
+}
 
-	resp.Presence = bundle
+func applyPresenceCharacterResult(bundle *PresenceBundle, output json.RawMessage) {
+	var charOut struct {
+		Overlay *struct {
+			OverlayDigest string `json:"overlay_digest"`
+		} `json:"overlay"`
+	}
+	if err := json.Unmarshal(output, &charOut); err == nil && charOut.Overlay != nil {
+		bundle.OverlayDigest = charOut.Overlay.OverlayDigest
+	}
+}
 
-	// Also update Tone from presence if not already set
-	if resp.Tone == nil && bundle.Emotion != "" {
-		resp.Tone = &ChatTone{
-			Emotion:   bundle.Emotion,
-			Intensity: bundle.Intensity,
+func applyPresenceVoiceResult(bundle *PresenceBundle, output json.RawMessage) {
+	var voiceOut struct {
+		AudioDigest string `json:"audio_digest"`
+		DurationMS  int    `json:"duration_ms"`
+		Cached      bool   `json:"cached"`
+	}
+	if err := json.Unmarshal(output, &voiceOut); err == nil {
+		bundle.AudioDigest = voiceOut.AudioDigest
+		bundle.AudioDurationMS = voiceOut.DurationMS
+		if voiceOut.Cached {
+			bundle.CacheHits++
+		} else {
+			bundle.CacheMisses++
 		}
 	}
 }

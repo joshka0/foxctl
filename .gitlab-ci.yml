@@ -77,9 +77,14 @@ build-ci-image:
 static-analysis:
   stage: check
   script:
+    - |
+      if [ -n "$CI_MERGE_REQUEST_TARGET_BRANCH_NAME" ]; then
+        git fetch --no-tags origin \
+          "+refs/heads/${CI_MERGE_REQUEST_TARGET_BRANCH_NAME}:refs/remotes/origin/${CI_MERGE_REQUEST_TARGET_BRANCH_NAME}"
+      fi
     - make fmt
     - git -c core.filemode=false diff --exit-code || (echo 'Formatting changed files. Run make fmt locally.' && exit 1)
-    - make lint
+    - make lint LINT_TARGETS='./cmd/... ./internal/... ./plugins/... ./scripts/... ./test/...'
     - make check-large-files
     - make check-tech-debt
 

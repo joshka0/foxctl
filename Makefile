@@ -17,6 +17,7 @@ BINARY ?= agentctl
 GOFUMPT ?= gofumpt
 GOLANGCI ?= golangci-lint
 GOLANGCI_TIMEOUT ?= 10m
+LINT_TARGETS ?= ./...
 GOFILES := $(shell find cmd internal skills -name '*.go')
 SKILL_DIRS := $(shell find skills -mindepth 1 -maxdepth 1 -type d)
 # Skills requiring CGO (excluded from non-CGO builds)
@@ -49,7 +50,7 @@ lint:
 		lint_scope="--new-from-rev=$$base_ref"; \
 		echo "Using diff-aware lint from $$base_ref"; \
 	fi; \
-	GOFLAGS=-buildvcs=false $(GOLANGCI) run --timeout $(GOLANGCI_TIMEOUT) $$lint_scope ./...
+	GOFLAGS=-buildvcs=false $(GOLANGCI) run --timeout $(GOLANGCI_TIMEOUT) $$lint_scope $(LINT_TARGETS)
 
 # Type-check all packages (faster than gopls per-file, catches type errors)
 # This is essentially what the compiler does during build
