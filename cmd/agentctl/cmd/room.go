@@ -18,6 +18,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/domain/envelope"
 	ws "github.com/jkatigb/agentctl/internal/platform/workspace"
 	"github.com/jkatigb/agentctl/internal/protocol"
+	"github.com/jkatigb/agentctl/internal/sandbox/opensandbox"
 	"github.com/jkatigb/agentctl/internal/storage/agents"
 	"github.com/jkatigb/agentctl/internal/storage/blackboard"
 	"github.com/jkatigb/agentctl/internal/storage/coordination"
@@ -315,6 +316,10 @@ func newRoomCreateCommand() *cobra.Command {
 		sandbox        bool
 		sandboxWTRoot  string
 		sandboxBaseRef string
+		sandboxRuntime string
+		sandboxTTL     time.Duration
+		sandboxCPU     string
+		sandboxMemory  string
 	)
 	cmd := &cobra.Command{
 		Use:   "create <room-id>",
@@ -342,6 +347,10 @@ func newRoomCreateCommand() *cobra.Command {
 				Sandbox:             sandbox,
 				SandboxWorktreeRoot: sandboxWTRoot,
 				SandboxBaseRef:      sandboxBaseRef,
+				SandboxRuntime:      sandboxRuntime,
+				SandboxTTL:          sandboxTTL,
+				SandboxCPU:          sandboxCPU,
+				SandboxMemory:       sandboxMemory,
 			})
 		},
 	}
@@ -369,6 +378,10 @@ func newRoomCreateCommand() *cobra.Command {
 	cmd.Flags().BoolVar(&sandbox, "sandbox", false, "Provision git worktree + tmux session + gateway terminal route for sandbox isolation")
 	cmd.Flags().StringVar(&sandboxWTRoot, "sandbox-worktree-root", "", "Parent directory for sandbox worktree (defaults to <repo>-worktrees sibling)")
 	cmd.Flags().StringVar(&sandboxBaseRef, "sandbox-base-ref", "HEAD", "Git ref to branch sandbox worktree from")
+	cmd.Flags().StringVar(&sandboxRuntime, "sandbox-runtime", "worktree", "Sandbox runtime type: worktree or opensandbox")
+	cmd.Flags().DurationVar(&sandboxTTL, "sandbox-ttl", 60*time.Minute, "Container TTL when using --sandbox-runtime opensandbox (default 60m)")
+	cmd.Flags().StringVar(&sandboxCPU, "sandbox-cpu", "", "CPU limit for container when using --sandbox-runtime opensandbox (e.g. 500m)")
+	cmd.Flags().StringVar(&sandboxMemory, "sandbox-memory", "", "Memory limit for container when using --sandbox-runtime opensandbox (e.g. 512Mi)")
 	return cmd
 }
 
@@ -1890,6 +1903,10 @@ type roomCreateProvisionOptions struct {
 	Sandbox             bool
 	SandboxWorktreeRoot string
 	SandboxBaseRef      string
+	SandboxRuntime      string
+	SandboxTTL          time.Duration
+	SandboxCPU          string
+	SandboxMemory       string
 }
 
 type roomProvisionMemberSpec struct {
@@ -2052,15 +2069,36 @@ func ensureRoomCoordinatorMember(existing []agent.RoomMember, member agent.RoomM
 
 // provisionSandbox provisions a sandbox environment for a room: creates a git
 // worktree, creates a tmux session, and sets the room's SandboxConfig.
+// When provision.SandboxRuntime is "opensandbox", it creates an OpenSandbox
+// container instead of (or in addition to) a worktree.
 // It is idempotent — if the room already has a valid sandbox config with an
 // existing worktree and tmux session, it returns the existing info.
 // On failure, it rolls back any partially-created resources.
 // The updated room (with SandboxConfig set) is returned via the pointer.
 func provisionSandbox(ctx context.Context, workspace string, room *agent.Room, provision roomCreateProvisionOptions) (map[string]any, error) {
-	// Idempotency: if room already has sandbox config with a valid worktree, return existing.
+	runtime := strings.TrimSpace(strings.ToLower(provision.SandboxRuntime))
+	if runtime == "" {
+		runtime = "worktree"
+	}
+
+	// Idempotency: if room already has sandbox config with a valid sandbox, return existing.
 	if room.SandboxConfig != nil && room.SandboxConfig.IsSandbox() {
+		existing := room.SandboxConfig.EffectiveRuntime()
+		// For opensandbox: check container ID still valid
+		if existing == "opensandbox" && room.SandboxConfig.ContainerID != "" {
+			return map[string]any{
+				"worktree_path":      room.SandboxConfig.WorktreePath,
+				"worktree_branch":    room.SandboxConfig.WorktreeBranch,
+				"tmux_session":       room.SandboxConfig.TmuxSession,
+				"terminal_url":       room.SandboxConfig.TerminalURL,
+				"runtime":            room.SandboxConfig.EffectiveRuntime(),
+				"container_id":       room.SandboxConfig.ContainerID,
+				"container_endpoint": room.SandboxConfig.ContainerEndpoint,
+				"status":             "existing",
+			}, nil
+		}
+		// For worktree: check worktree dir + tmux session still exist
 		if _, err := os.Stat(room.SandboxConfig.WorktreePath); err == nil {
-			// Worktree still exists; verify tmux session
 			if tmuxSessionExists(room.SandboxConfig.TmuxSession) {
 				return map[string]any{
 					"worktree_path":   room.SandboxConfig.WorktreePath,
@@ -2075,6 +2113,164 @@ func provisionSandbox(ctx context.Context, workspace string, room *agent.Room, p
 		// Existing sandbox is stale; fall through to re-provision
 	}
 
+	if runtime == "opensandbox" {
+		return provisionOpenSandbox(ctx, workspace, room, provision)
+	}
+	return provisionWorktreeSandbox(ctx, workspace, room, provision)
+}
+
+// provisionOpenSandbox provisions an OpenSandbox container for a room.
+// It first attempts to create the container via the OpenSandbox client.
+// If OpenSandbox is unavailable, it falls back to worktree mode with a warning.
+func provisionOpenSandbox(ctx context.Context, workspace string, room *agent.Room, provision roomCreateProvisionOptions) (map[string]any, error) {
+	cfg := opensandbox.ConfigFromEnv()
+	osClient := opensandbox.New(cfg)
+
+	// Determine workspace as the git repo root
+	repoPath := workspace
+	gitDir := filepath.Join(repoPath, ".git")
+	if info, err := os.Stat(gitDir); err != nil || (!info.IsDir() && info.Mode()&os.ModeSymlink == 0) {
+		return nil, fmt.Errorf("sandbox: workspace %q is not a git repository", repoPath)
+	}
+
+	// Build resource limits
+	resourceLimits := map[string]string{
+		"cpu":    "1000m",
+		"memory": "1Gi",
+	}
+	if provision.SandboxCPU != "" {
+		resourceLimits["cpu"] = provision.SandboxCPU
+	}
+	if provision.SandboxMemory != "" {
+		resourceLimits["memory"] = provision.SandboxMemory
+	}
+
+	// Build TTL
+	ttl := provision.SandboxTTL
+	if ttl <= 0 {
+		ttl = 60 * time.Minute
+	}
+	timeoutSeconds := int(ttl / time.Second)
+
+	// Create the container
+	req := opensandbox.CreateSandboxRequest{
+		Image: opensandbox.ImageSpec{
+			URI: opensandbox.DefaultSandboxImage,
+		},
+		ResourceLimits: resourceLimits,
+		Entrypoint:     []string{"/bin/sh", "-lc", "while true; do sleep 3600; done"},
+		TimeoutSeconds: &timeoutSeconds,
+		Metadata: map[string]string{
+			"name":    "agentctl-room-" + strings.TrimSpace(room.ID),
+			"room_id": strings.TrimSpace(room.ID),
+		},
+	}
+
+	sandbox, err := osClient.CreateSandbox(ctx, req)
+	if err != nil {
+		// OpenSandbox unavailable — fall back to worktree mode
+		fmt.Fprintf(os.Stderr, "warn: OpenSandbox unavailable, falling back to worktree: %v\n", err)
+		result, wtErr := provisionWorktreeSandbox(ctx, workspace, room, provision)
+		if wtErr != nil {
+			return nil, wtErr
+		}
+		// Mark as fallback in config
+		room.SandboxConfig.Fallback = true
+		room.SandboxConfig.Runtime = "worktree"
+		result["fallback"] = true
+		result["fallback_reason"] = err.Error()
+		result["runtime"] = "worktree"
+		return result, nil
+	}
+
+	// Get the execd endpoint for the container
+	endpoint, err := osClient.GetEndpoint(ctx, sandbox.ID, opensandbox.DefaultExecdPort)
+	if err != nil {
+		// Container created but endpoint not available yet — still record it
+		endpoint = &opensandbox.Endpoint{Endpoint: ""}
+	}
+
+	// Calculate expires-at timestamp
+	expiresAt := time.Now().UTC().Add(ttl).Format(time.RFC3339)
+
+	// Build terminal URL
+	terminalURL := "/terminal/" + strings.TrimSpace(room.ID)
+
+	// Also create a worktree for local git operations (optional, mirrors repo)
+	branchName := "sandbox/room-" + strings.TrimSpace(room.ID)
+	sanitized, sanitizeErr := worktree.SanitizeBranchName(branchName)
+	if sanitizeErr != nil {
+		sanitized = "sandbox/room-" + strings.TrimSpace(room.ID)
+	}
+
+	var wtPath string
+	mgr := worktree.NewManager()
+	var wtOpts []worktree.Option
+	wtOpts = append(wtOpts, worktree.WithNewBranch(true))
+	if provision.SandboxBaseRef != "" && provision.SandboxBaseRef != "HEAD" {
+		wtOpts = append(wtOpts, worktree.WithRef(provision.SandboxBaseRef))
+	}
+	if provision.SandboxWorktreeRoot != "" {
+		wtOpts = append(wtOpts, worktree.WithBaseDir(provision.SandboxWorktreeRoot))
+	}
+	wtResult, wtErr := mgr.Create(ctx, repoPath, sanitized, wtOpts...)
+	if wtErr == nil {
+		wtPath = wtResult.Path
+	}
+
+	// Create tmux session pointing at worktree (for gateway terminal routing)
+	tmuxSessionName := "agentctl-sandbox-" + strings.TrimSpace(room.ID)
+	if wtPath != "" {
+		tc := tmuxbridge.New()
+		if tmuxErr := createTmuxSessionForSandbox(ctx, tc, tmuxSessionName, wtPath); tmuxErr != nil {
+			// Clean up worktree if tmux fails
+			if wtPath != "" {
+				_ = mgr.Remove(ctx, repoPath, wtPath, worktree.WithForce(true), worktree.WithDeleteBranch(true))
+			}
+			// Non-fatal: container is up, but tmux isn't available
+			fmt.Fprintf(os.Stderr, "warn: tmux session creation failed: %v\n", tmuxErr)
+			tmuxSessionName = ""
+			wtPath = ""
+		}
+	}
+
+	// Update the room's SandboxConfig
+	room.SandboxConfig = &agent.SandboxConfig{
+		WorktreePath:       wtPath,
+		WorktreeBranch:     sanitized,
+		TmuxSession:        tmuxSessionName,
+		TerminalURL:        terminalURL,
+		Runtime:            "opensandbox",
+		BaseRef:            provision.SandboxBaseRef,
+		ContainerID:        sandbox.ID,
+		ContainerEndpoint:  endpoint.Endpoint,
+		ContainerExpiresAt: expiresAt,
+		ContainerCPU:       resourceLimits["cpu"],
+		ContainerMemory:    resourceLimits["memory"],
+	}
+
+	result := map[string]any{
+		"container_id":         sandbox.ID,
+		"container_endpoint":   endpoint.Endpoint,
+		"container_expires_at": expiresAt,
+		"container_cpu":        resourceLimits["cpu"],
+		"container_memory":     resourceLimits["memory"],
+		"terminal_url":         terminalURL,
+		"runtime":              "opensandbox",
+		"status":               "created",
+	}
+	if wtPath != "" {
+		result["worktree_path"] = wtPath
+		result["worktree_branch"] = sanitized
+	}
+	if tmuxSessionName != "" {
+		result["tmux_session"] = tmuxSessionName
+	}
+	return result, nil
+}
+
+// provisionWorktreeSandbox provisions a worktree-based sandbox for a room.
+func provisionWorktreeSandbox(ctx context.Context, workspace string, room *agent.Room, provision roomCreateProvisionOptions) (map[string]any, error) {
 	// Sanitize branch name for the room
 	branchName := "sandbox/room-" + strings.TrimSpace(room.ID)
 	sanitized, err := worktree.SanitizeBranchName(branchName)
@@ -2263,13 +2459,24 @@ func buildRoomSandboxInfo(room agent.RoomSummary) map[string]any {
 	if room.SandboxConfig == nil || !room.SandboxConfig.IsSandbox() {
 		return nil
 	}
-	return map[string]any{
+	info := map[string]any{
 		"worktree_path":   room.SandboxConfig.WorktreePath,
 		"worktree_branch": room.SandboxConfig.WorktreeBranch,
 		"tmux_session":    room.SandboxConfig.TmuxSession,
 		"terminal_url":    room.SandboxConfig.TerminalURL,
 		"runtime":         room.SandboxConfig.EffectiveRuntime(),
 	}
+	if room.SandboxConfig.ContainerID != "" {
+		info["container_id"] = room.SandboxConfig.ContainerID
+		info["container_endpoint"] = room.SandboxConfig.ContainerEndpoint
+		info["container_expires_at"] = room.SandboxConfig.ContainerExpiresAt
+		info["container_cpu"] = room.SandboxConfig.ContainerCPU
+		info["container_memory"] = room.SandboxConfig.ContainerMemory
+	}
+	if room.SandboxConfig.Fallback {
+		info["fallback"] = true
+	}
+	return info
 }
 
 // resolveRoomSandboxWorktree loads room metadata and returns the sandbox
@@ -2337,20 +2544,41 @@ func relayRoomMessageToSandbox(ctx context.Context, client *tmuxbridge.Client, r
 }
 
 // cleanupSandbox cleans up all sandbox resources associated with a room:
-// 1. Removes the git worktree
-// 2. Kills the tmux session
-// 3. Deregisters from gateway (future: HTTP call to gateway API)
+// 1. Deletes the OpenSandbox container (if runtime is opensandbox)
+// 2. Removes the git worktree
+// 3. Kills the tmux session
+// 4. Deregisters from gateway (future: HTTP call to gateway API)
 //
 // On error, partial cleanup results are still returned.
 func cleanupSandbox(ctx context.Context, workspace, roomID string, sc *agent.SandboxConfig) (map[string]any, error) {
 	result := map[string]any{
-		"worktree_removed": false,
-		"tmux_killed":      false,
-		"gateway_dereg":    false,
+		"worktree_removed":  false,
+		"tmux_killed":       false,
+		"gateway_dereg":     false,
+		"container_deleted": false,
 	}
 	var firstErr error
 
-	// Step 1: Kill tmux session
+	// Step 1: Delete OpenSandbox container (if applicable)
+	if sc.ContainerID != "" && sc.EffectiveRuntime() == "opensandbox" {
+		cfg := opensandbox.ConfigFromEnv()
+		osClient := opensandbox.New(cfg)
+		if err := osClient.DeleteSandbox(ctx, sc.ContainerID); err != nil {
+			// If the container was already deleted (404 or similar), treat as success
+			errMsg := err.Error()
+			if strings.Contains(errMsg, "404") || strings.Contains(errMsg, "not found") || strings.Contains(errMsg, "already") {
+				result["container_deleted"] = true
+			} else {
+				if firstErr == nil {
+					firstErr = fmt.Errorf("delete container %q: %w", sc.ContainerID, err)
+				}
+			}
+		} else {
+			result["container_deleted"] = true
+		}
+	}
+
+	// Step 2: Kill tmux session
 	if sc.TmuxSession != "" {
 		if tmuxSessionExists(sc.TmuxSession) {
 			cmd := exec.Command("tmux", "kill-session", "-t", sc.TmuxSession)
@@ -2367,7 +2595,7 @@ func cleanupSandbox(ctx context.Context, workspace, roomID string, sc *agent.San
 		}
 	}
 
-	// Step 2: Remove worktree
+	// Step 3: Remove worktree
 	if sc.WorktreePath != "" {
 		mgr := worktree.NewManager()
 		if _, err := os.Stat(sc.WorktreePath); err == nil {
@@ -2386,7 +2614,7 @@ func cleanupSandbox(ctx context.Context, workspace, roomID string, sc *agent.San
 		}
 	}
 
-	// Step 3: Deregister from gateway (best-effort — gateway may not be running)
+	// Step 4: Deregister from gateway (best-effort — gateway may not be running)
 	// Future: HTTP DELETE to gateway /api/rooms/{room-id}
 	result["gateway_dereg"] = true
 

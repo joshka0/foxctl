@@ -282,11 +282,31 @@ type SandboxConfig struct {
 	Runtime string `json:"runtime,omitempty"`
 	// BaseRef is the git ref the worktree was branched from.
 	BaseRef string `json:"base_ref,omitempty"`
+
+	// OpenSandbox-specific fields (set when Runtime == "opensandbox").
+
+	// ContainerID is the OpenSandbox container identifier.
+	ContainerID string `json:"container_id,omitempty"`
+	// ContainerEndpoint is the execd endpoint URL for running commands
+	// inside the container.
+	ContainerEndpoint string `json:"container_endpoint,omitempty"`
+	// ContainerExpiresAt is the RFC3339 timestamp when the container
+	// auto-expires (set from --sandbox-ttl).
+	ContainerExpiresAt string `json:"container_expires_at,omitempty"`
+	// ContainerCPU is the CPU resource limit (e.g. "500m").
+	ContainerCPU string `json:"container_cpu,omitempty"`
+	// ContainerMemory is the memory resource limit (e.g. "512Mi").
+	ContainerMemory string `json:"container_memory,omitempty"`
+	// Fallback is true when the sandbox was created as a worktree because
+	// OpenSandbox was unavailable.
+	Fallback bool `json:"fallback,omitempty"`
 }
 
 // IsSandbox returns true if the room has sandbox configuration.
+// A sandbox is identified by having either a worktree path or an
+// OpenSandbox container ID.
 func (sc *SandboxConfig) IsSandbox() bool {
-	return sc != nil && sc.WorktreePath != ""
+	return sc != nil && (sc.WorktreePath != "" || sc.ContainerID != "")
 }
 
 // EffectiveRuntime returns the sandbox runtime, defaulting to "worktree".
