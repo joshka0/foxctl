@@ -529,13 +529,21 @@ check-doc-links:
 
 check-large-files:
 	@large_file_base=""; \
-	if git rev-parse --verify origin/main >/dev/null 2>&1; then \
+	if [ -n "$$CI_MERGE_REQUEST_DIFF_BASE_SHA" ] && git cat-file -e "$$CI_MERGE_REQUEST_DIFF_BASE_SHA^{commit}" >/dev/null 2>&1; then \
+		large_file_base="$$CI_MERGE_REQUEST_DIFF_BASE_SHA"; \
+	elif [ -n "$$CI_MERGE_REQUEST_TARGET_BRANCH_NAME" ] && git rev-parse --verify "origin/$$CI_MERGE_REQUEST_TARGET_BRANCH_NAME" >/dev/null 2>&1; then \
+		large_file_base="$$(git merge-base HEAD "origin/$$CI_MERGE_REQUEST_TARGET_BRANCH_NAME")"; \
+	elif [ -n "$$CI_DEFAULT_BRANCH" ] && git rev-parse --verify "origin/$$CI_DEFAULT_BRANCH" >/dev/null 2>&1; then \
+		large_file_base="$$(git merge-base HEAD "origin/$$CI_DEFAULT_BRANCH")"; \
+	elif git rev-parse --verify origin/main >/dev/null 2>&1; then \
 		head_ref="$$(git rev-parse HEAD 2>/dev/null || true)"; \
 		main_ref="$$(git rev-parse origin/main 2>/dev/null || true)"; \
 		if [ -n "$$head_ref" ] && [ -n "$$main_ref" ] && [ "$$head_ref" != "$$main_ref" ]; then \
 			large_file_base="$$(git merge-base HEAD origin/main)"; \
-			echo "Checking newly added large files from $$large_file_base"; \
 		fi; \
+	fi; \
+	if [ -n "$$large_file_base" ]; then \
+		echo "Checking newly added large files from $$large_file_base"; \
 	fi; \
 	CHECK_LARGE_FILES_BASE_REF="$$large_file_base" bash scripts/check_large_files.sh
 
