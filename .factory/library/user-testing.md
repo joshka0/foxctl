@@ -51,6 +51,49 @@ Testing surface, required tools, and resource cost classification for validation
 - SSH validation in --dev mode: SSH server listens on localhost in dev mode
 - tmux must be available for all terminal tests; skip gracefully if missing
 
+## Flow Validator Guidance: go test (cmd/agentctl/cmd - room-sandbox)
+
+**Surface:** Go unit tests in `cmd/agentctl/cmd/` package for room sandbox features
+**Tool:** `env -u GOROOT -u GOBIN -u GOTOOLDIR CGO_ENABLED=0 go test ./cmd/agentctl/cmd/ -run "<pattern>" -v -count=1`
+**Isolation:** Each test function creates its own temp directory and git repo via `t.TempDir()`. No shared state between tests. Tests use mock/fake implementations for gateway and worktree where needed.
+**Concurrency:** Safe to run multiple test subsets concurrently — they operate on independent temp directories.
+**Assertions covered:** VAL-RS-001 through VAL-RS-021
+**Max concurrent validators:** 3 (each runs go test subset, ~50 MB per process)
+**Constraints:**
+- Do NOT modify any test files. Only run tests and report results.
+- Some tests require `tmux` — those tests skip gracefully if missing.
+- Must use CGO_ENABLED=0 to avoid SQLite symbol duplication.
+- Tests run in ~3 seconds total for the full suite.
+
+### Test-to-Assertion Mapping (room-sandbox)
+
+**Sandbox Provisioning (room-sandbox-create):**
+- VAL-RS-001 → TestProvisionSandbox_CreatesWorktreeAndTmuxSession
+- VAL-RS-002 → TestProvisionSandbox_CustomWorktreeRoot
+- VAL-RS-003 → TestProvisionSandbox_BaseRef
+- VAL-RS-004 → TestProvisionSandbox_RollbackOnTmuxFailure
+- VAL-RS-009 → TestProvisionSandbox_IdempotentOnExistingSandbox
+- VAL-RS-010 → TestProvisionSandbox_UpgradesNonSandboxRoom
+- VAL-RS-011 → TestBuildRoomSandboxInfo_SandboxRoom, TestRoomCreateWithSandboxFlag_Integration
+
+**Sandbox Lifecycle (room-sandbox-lifecycle):**
+- VAL-RS-005 → TestRoomListSandbox_IncludesSandboxStatus
+- VAL-RS-006 → TestRoomShowSandbox_IncludesSandboxMetadata
+- VAL-RS-007 → TestRoomDestroySandbox_CleansUpResources
+- VAL-RS-008 → TestRoomDestroySandbox_NonSandboxRoomIsNoop
+- VAL-RS-020 → TestRoomDestroySandbox_PartialCleanupOnMissingWorktree (active agent check)
+- VAL-RS-021 → TestRoomJoinSandbox_TerminalBinding, TestRoomLeaveSandbox_TerminalBinding
+
+**Sandbox Integration (room-sandbox-integration):**
+- VAL-RS-012 → TestRoomSandboxAgent_SpawnUsesWorktreeCWD
+- VAL-RS-013 → TestRoomSandboxTasks_ScopePathResolvedToWorktree, TestRoomSandboxTasks_TaskAddUsesSandboxScopePath
+- VAL-RS-014 → TestRoomSandboxRelay_DeliversToSandboxSession
+- VAL-RS-015 → TestRoomSandboxLoop_RelayIncludesSandboxDelivery
+- VAL-RS-016 → TestRoomSandboxStatus_IncludesSandboxInfo
+- VAL-RS-017 → TestRoomSandboxInbox_IncludesSandboxInfo
+- VAL-RS-018 → TestRoomSandboxRedgreen_InitOnSandboxRoom
+- VAL-RS-019 → TestRoomSandboxAgile_EpicStartOnSandboxRoom, TestRoomSandboxAgile_MilestoneStartOnSandboxRoom, TestRoomSandboxAgile_StoryAddOnSandboxRoom
+
 ## Flow Validator Guidance: go test (internal/worktree)
 
 **Surface:** Go unit tests in `internal/worktree/` package

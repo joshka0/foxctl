@@ -1,0 +1,44 @@
+{
+  "milestone": "room-sandbox",
+  "round": 1,
+  "status": "pass",
+  "assertionsSummary": {
+    "total": 21,
+    "passed": 21,
+    "failed": 0,
+    "blocked": 0
+  },
+  "passedAssertions": [
+    "VAL-RS-001",
+    "VAL-RS-002",
+    "VAL-RS-003",
+    "VAL-RS-004",
+    "VAL-RS-005",
+    "VAL-RS-006",
+    "VAL-RS-007",
+    "VAL-RS-008",
+    "VAL-RS-009",
+    "VAL-RS-010",
+    "VAL-RS-011",
+    "VAL-RS-012",
+    "VAL-RS-013",
+    "VAL-RS-014",
+    "VAL-RS-015",
+    "VAL-RS-016",
+    "VAL-RS-017",
+    "VAL-RS-018",
+    "VAL-RS-019",
+    "VAL-RS-020",
+    "VAL-RS-021"
+  ],
+  "failedAssertions": [],
+  "blockedAssertions": [],
+  "appliedUpdates": [
+    {
+      "target": "user-testing.md",
+      "description": "Added Flow Validator Guidance section for go test (cmd/agentctl/cmd - room-sandbox) with test-to-assertion mapping for all 21 VAL-RS assertions",
+      "source": "setup"
+    }
+  ],
+  "previousRound": null
+}

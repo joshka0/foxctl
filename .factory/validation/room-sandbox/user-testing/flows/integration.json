@@ -1,0 +1,168 @@
+{
+  "groupId": "integration",
+  "testedAt": "2026-04-10T00:15:00Z",
+  "isolation": {
+    "repoRoot": "/Users/joshka/repos/personal/agentctl",
+    "binary": "/Users/joshka/repos/personal/agentctl/bin/agentctl",
+    "testPackage": "./cmd/agentctl/cmd/",
+    "env": "CGO_ENABLED=0, GOROOT/GOBIN/GOTOOLDIR unset",
+    "isolationModel": "Each test creates its own temp directory and git repo via t.TempDir() — no shared state"
+  },
+  "toolsUsed": ["go test"],
+  "assertions": [
+    {
+      "id": "VAL-RS-012",
+      "title": "Agents spawned in sandbox room use worktree as CWD",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "Run TestRoomSandboxAgent_SpawnUsesWorktreeCWD",
+          "expected": "Test passes — agent working directory matches worktree path",
+          "observed": "PASS: TestRoomSandboxAgent_SpawnUsesWorktreeCWD (0.12s)"
+        }
+      ],
+      "evidence": {
+        "testOutput": "room-sandbox/integration/test-output.txt",
+        "consoleErrors": "none"
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-RS-013",
+      "title": "Tasks in sandbox rooms have worktree-relative scope paths",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "Run TestRoomSandboxTasks_ScopePathResolvedToWorktree",
+          "expected": "All subtests pass — scope paths resolved to worktree",
+          "observed": "PASS: TestRoomSandboxTasks_ScopePathResolvedToWorktree (0.01s) — 4/4 subtests passed (empty_scope_path_resolves_to_worktree, relative_path_resolves_under_worktree, absolute_path_under_worktree_stays_as-is, relative_nested_path_resolves_under_worktree)"
+        },
+        {
+          "action": "Run TestRoomSandboxTasks_TaskAddUsesSandboxScopePath",
+          "expected": "All subtests pass — task add uses sandbox scope path",
+          "observed": "PASS: TestRoomSandboxTasks_TaskAddUsesSandboxScopePath (0.01s) — 3/3 subtests passed (relative_path, empty_path, nested_path)"
+        }
+      ],
+      "evidence": {
+        "testOutput": "room-sandbox/integration/test-output.txt",
+        "consoleErrors": "none"
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-RS-014",
+      "title": "Room relay delivers messages to sandbox panes",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "Run TestRoomSandboxRelay_DeliversToSandboxSession",
+          "expected": "Test passes — pane output contains sent message",
+          "observed": "PASS: TestRoomSandboxRelay_DeliversToSandboxSession (0.32s)"
+        }
+      ],
+      "evidence": {
+        "testOutput": "room-sandbox/integration/test-output.txt",
+        "consoleErrors": "none"
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-RS-015",
+      "title": "Sandbox room works with room loop",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "Run TestRoomSandboxLoop_RelayIncludesSandboxDelivery",
+          "expected": "Test passes — loop relay includes sandbox delivery",
+          "observed": "PASS: TestRoomSandboxLoop_RelayIncludesSandboxDelivery (0.10s)"
+        }
+      ],
+      "evidence": {
+        "testOutput": "room-sandbox/integration/test-output.txt",
+        "consoleErrors": "none"
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-RS-016",
+      "title": "Sandbox room works with room status",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "Run TestRoomSandboxStatus_IncludesSandboxInfo",
+          "expected": "Test passes — status output includes sandbox fields",
+          "observed": "PASS: TestRoomSandboxStatus_IncludesSandboxInfo (0.07s)"
+        }
+      ],
+      "evidence": {
+        "testOutput": "room-sandbox/integration/test-output.txt",
+        "consoleErrors": "none"
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-RS-017",
+      "title": "Sandbox room works with room inbox",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "Run TestRoomSandboxInbox_IncludesSandboxInfo",
+          "expected": "Test passes — inbox output renders correctly",
+          "observed": "PASS: TestRoomSandboxInbox_IncludesSandboxInfo (0.03s)"
+        }
+      ],
+      "evidence": {
+        "testOutput": "room-sandbox/integration/test-output.txt",
+        "consoleErrors": "none"
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-RS-018",
+      "title": "Sandbox room works with red/green pattern",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "Run TestRoomSandboxRedgreen_InitOnSandboxRoom",
+          "expected": "Test passes — red/green worktrees created inside sandbox worktree",
+          "observed": "PASS: TestRoomSandboxRedgreen_InitOnSandboxRoom (0.41s)"
+        }
+      ],
+      "evidence": {
+        "testOutput": "room-sandbox/integration/test-output.txt",
+        "consoleErrors": "none"
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-RS-019",
+      "title": "Sandbox room supports agile workflow",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "Run TestRoomSandboxAgile_EpicStartOnSandboxRoom",
+          "expected": "Test passes — epic created on sandbox room",
+          "observed": "PASS: TestRoomSandboxAgile_EpicStartOnSandboxRoom (0.01s)"
+        },
+        {
+          "action": "Run TestRoomSandboxAgile_MilestoneStartOnSandboxRoom",
+          "expected": "Test passes — milestone started on sandbox room",
+          "observed": "PASS: TestRoomSandboxAgile_MilestoneStartOnSandboxRoom (0.02s)"
+        },
+        {
+          "action": "Run TestRoomSandboxAgile_StoryAddOnSandboxRoom",
+          "expected": "Test passes — story added on sandbox room",
+          "observed": "PASS: TestRoomSandboxAgile_StoryAddOnSandboxRoom (0.02s)"
+        }
+      ],
+      "evidence": {
+        "testOutput": "room-sandbox/integration/test-output.txt",
+        "consoleErrors": "none"
+      },
+      "issues": null
+    }
+  ],
+  "frictions": [],
+  "blockers": [],
+  "summary": "Tested 8 assertions (13 test functions, 7 subtests): all 8 passed. Total test execution time: 2.632s. No failures, no blocks, no frictions encountered."
+}
