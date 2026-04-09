@@ -31,7 +31,15 @@ while IFS= read -r -d '' file; do
 		found=$(echo "$matches" | wc -l | tr -d ' ')
 		count=$((count + found))
 	fi
-done < <(find . -type f \( -name '*.go' -o -name '*.ts' -o -name '*.tsx' -o -name '*.js' -o -name '*.jsx' -o -name '*.py' -o -name '*.md' \) -not -path "*/vendor/*" -not -path "*/node_modules/*" -not -path "*/.git/*" -not -path "*/dist/*" -print0 2>/dev/null)
+done < <(find . -type f \( -name '*.go' -o -name '*.ts' -o -name '*.tsx' -o -name '*.js' -o -name '*.jsx' -o -name '*.py' -o -name '*.md' \) \
+	-not -path "*/vendor/*" \
+	-not -path "*/node_modules/*" \
+	-not -path "*/.git/*" \
+	-not -path "*/dist/*" \
+	-not -path "*/.cache/*" \
+	-not -path "*/.gocache/*" \
+	-not -path "*/.gomodcache/*" \
+	-print0 2>/dev/null)
 
 echo "=============================="
 echo "Total TODO/FIXME/HACK markers: $count"
