@@ -33,6 +33,8 @@ Environment variables, external dependencies, and setup notes.
 - **Binary size:** tsnet adds ~15-20 MB to binary (gVisor netstack + WireGuard)
 - **Go version:** tailscale.com v1.96.5 requires Go 1.26+. The golangci-lint binary must be built with Go 1.26+ to lint packages that import tailscale. Install via: `GOBIN=/tmp/gobin go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest`
 - **genproto conflict:** `google.golang.org/genproto` (flat module v0.0.0-20231106174013) must be kept in go.mod as a direct indirect dependency to resolve ambiguity with `google.golang.org/genproto/googleapis/rpc` (apache/arrow transitive dep). Do NOT let `go mod tidy` remove it.
+- **tmux test dependency:** Several room-sandbox tests require tmux to be installed and available in PATH. Tests automatically skip with `t.Skip()` when tmux is unavailable. This applies to room destroy, room list, room show, and sandbox integration tests.
+- **Test HOME isolation:** Use `t.Setenv("HOME", t.TempDir())` before `config.Load()` to isolate test config/storage from the real home directory. This pattern is used extensively in room-sandbox tests.
 
 ## Git Subprocess Patterns
 

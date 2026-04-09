@@ -207,7 +207,7 @@ func (s *Server) handleConn(ctx context.Context, conn net.Conn) {
 	// Handle channels
 	for newChannel := range chans {
 		if newChannel.ChannelType() != "session" {
-			newChannel.Reject(ssh.UnknownChannelType, "unknown channel type")
+			_ = newChannel.Reject(ssh.UnknownChannelType, "unknown channel type")
 			continue
 		}
 
@@ -265,7 +265,7 @@ func (s *Server) handleSession(ctx context.Context, sess *SSHSession, channel ss
 		switch req.Type {
 		case "pty-req":
 			if ptyRequested {
-				req.Reply(false, nil)
+				_ = req.Reply(false, nil)
 				continue
 			}
 			ptyRequested = true
@@ -291,11 +291,11 @@ func (s *Server) handleSession(ctx context.Context, sess *SSHSession, channel ss
 				Str("session", sess.ID).
 				Msg("PTY requested")
 
-			req.Reply(true, nil)
+			_ = req.Reply(true, nil)
 
 		case "window-change":
 			if !ptyRequested {
-				req.Reply(false, nil)
+				_ = req.Reply(false, nil)
 				continue
 			}
 
@@ -313,26 +313,26 @@ func (s *Server) handleSession(ctx context.Context, sess *SSHSession, channel ss
 				}
 			}
 
-			req.Reply(true, nil)
+			_ = req.Reply(true, nil)
 
 		case "shell":
 			if shellStarted {
-				req.Reply(false, nil)
+				_ = req.Reply(false, nil)
 				continue
 			}
 			if !ptyRequested {
-				req.Reply(false, nil)
+				_ = req.Reply(false, nil)
 				continue
 			}
 
-			req.Reply(true, nil)
+			_ = req.Reply(true, nil)
 			shellStarted = true
 
 			// Get tmux session name
 			tmuxSession, err := s.rooms.TmuxSessionForRoom(ctx, sess.RoomID)
 			if err != nil {
 				s.log.Error().Err(err).Str("room", sess.RoomID).Msg("Failed to get tmux session")
-				channel.Write([]byte(fmt.Sprintf("Error: %s\r\n", err)))
+				_, _ = fmt.Fprintf(channel, "Error: %s\r\n", err)
 				return
 			}
 
@@ -358,7 +358,7 @@ func (s *Server) handleSession(ctx context.Context, sess *SSHSession, channel ss
 				s.log.Error().Err(err).
 					Str("session", tmuxSession).
 					Msg("Failed to start tmux in PTY")
-				channel.Write([]byte(fmt.Sprintf("Error starting terminal: %s\r\n", err)))
+				_, _ = fmt.Fprintf(channel, "Error starting terminal: %s\r\n", err)
 				return
 			}
 
@@ -405,7 +405,7 @@ func (s *Server) handleSession(ctx context.Context, sess *SSHSession, channel ss
 
 		case "exec":
 			// Handle exec requests — reply with failure for now
-			req.Reply(false, nil)
+			_ = req.Reply(false, nil)
 
 		case "signal":
 			// Forward signals to the PTY process
@@ -418,7 +418,7 @@ func (s *Server) handleSession(ctx context.Context, sess *SSHSession, channel ss
 		default:
 			// Reply to other requests as needed
 			if req.WantReply {
-				req.Reply(false, nil)
+				_ = req.Reply(false, nil)
 			}
 		}
 	}

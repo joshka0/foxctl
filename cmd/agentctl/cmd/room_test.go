@@ -7966,7 +7966,7 @@ func TestRoomListSandbox_IncludesSandboxStatus(t *testing.T) {
 			foundPlain = true
 			if _, hasSC := roomMap["sandbox_config"]; hasSC {
 				sc, _ := roomMap["sandbox_config"].(map[string]any)
-				if sc != nil && len(sc) > 0 {
+				if len(sc) > 0 {
 					t.Error("plain room should not have sandbox_config data")
 				}
 			}

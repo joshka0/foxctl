@@ -68,15 +68,6 @@ func setupSandboxTestRoom(t *testing.T, roomID, worktreePath string) (string, bl
 	return workspace, store
 }
 
-// newSandboxTestCmd creates a cobra command with context and output buffer.
-func newSandboxTestCmd(ctx context.Context) (*cobra.Command, *bytes.Buffer) {
-	buf := &bytes.Buffer{}
-	cmd := &cobra.Command{}
-	cmd.SetContext(ctx)
-	cmd.SetOut(buf)
-	return cmd, buf
-}
-
 // decodeSandboxEnvelope decodes a JSON envelope from buffer.
 func decodeSandboxEnvelope(t *testing.T, buf *bytes.Buffer) map[string]any {
 	t.Helper()
