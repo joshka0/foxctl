@@ -22,6 +22,7 @@ import (
 	"github.com/rs/zerolog"
 	"tailscale.com/tsnet"
 
+	"github.com/jkatigb/agentctl/internal/gateway/sshterm"
 	"github.com/jkatigb/agentctl/internal/gateway/webterm"
 )
 
@@ -100,14 +101,16 @@ func ResolveAuthKey(optKey string) string {
 
 // Server is the gateway server.
 type Server struct {
-	opts    Options
-	log     zerolog.Logger
-	tsnet   *tsnet.Server
-	http    *http.Server
-	mu      sync.RWMutex
-	health  HealthStatus
-	started bool
-	termHub *webterm.Hub
+	opts     Options
+	log      zerolog.Logger
+	tsnet    *tsnet.Server
+	http     *http.Server
+	mu       sync.RWMutex
+	health   HealthStatus
+	started  bool
+	termHub  *webterm.Hub
+	sshSrv   *sshterm.Server
+	sshRooms *sshterm.RoomManager
 }
 
 // NewServer creates a new gateway server.
@@ -118,6 +121,10 @@ func NewServer(opts Options, log zerolog.Logger) *Server {
 	if opts.Hostname == "" {
 		opts.Hostname = HostnamePrefix
 	}
+
+	sshConfig := sshterm.DefaultSSHServerConfig()
+	sshRooms := sshterm.NewRoomManager(sshConfig, log)
+
 	return &Server{
 		opts: opts,
 		log:  log.With().Str("component", "gateway").Logger(),
@@ -126,7 +133,8 @@ func NewServer(opts Options, log zerolog.Logger) *Server {
 			Store: "starting",
 			Tmux:  "ok",
 		},
-		termHub: webterm.NewHub(webterm.HubConfig{}, log),
+		termHub:  webterm.NewHub(webterm.HubConfig{}, log),
+		sshRooms: sshRooms,
 	}
 }
 
@@ -157,30 +165,67 @@ func (s *Server) Handler() http.Handler {
 }
 
 // RegisterTerminalRoom registers a room for terminal access.
-// The room will be accessible at /terminal/{roomID} and /ws/terminal/{roomID}.
+// The room will be accessible at /terminal/{roomID}, /ws/terminal/{roomID},
+// and via SSH at room-<roomID>@<hostname>.
 func (s *Server) RegisterTerminalRoom(roomID, tmuxSession string, maxConnections int) {
 	config := webterm.RoomConfig{
 		TmuxSession:    tmuxSession,
 		MaxConnections: maxConnections,
 	}
 	s.termHub.RegisterRoom(roomID, config)
+
+	// Also register for SSH access
+	sshConfig := sshterm.RoomConfig{
+		TmuxSession: tmuxSession,
+		MaxSessions: maxConnections,
+	}
+	s.sshRooms.RegisterRoom(roomID, sshConfig)
+
 	s.log.Info().
 		Str("room", roomID).
 		Str("tmux_session", tmuxSession).
-		Msg("Terminal room registered")
+		Msg("Terminal room registered (web + SSH)")
 }
 
-// UnregisterTerminalRoom removes a room's terminal access.
+// UnregisterTerminalRoom removes a room's terminal access (web + SSH).
 func (s *Server) UnregisterTerminalRoom(roomID string) {
 	s.termHub.UnregisterRoom(roomID)
+	s.sshRooms.UnregisterRoom(roomID)
 	s.log.Info().
 		Str("room", roomID).
-		Msg("Terminal room unregistered")
+		Msg("Terminal room unregistered (web + SSH)")
 }
 
 // TerminalHub returns the web terminal hub for direct access.
 func (s *Server) TerminalHub() *webterm.Hub {
 	return s.termHub
+}
+
+// SSHRooms returns the SSH room manager for direct access.
+func (s *Server) SSHRooms() *sshterm.RoomManager {
+	return s.sshRooms
+}
+
+// RegisterSSHRoom registers a room for SSH terminal access.
+// The room will be accessible via `ssh room-<roomID>@<hostname>`.
+func (s *Server) RegisterSSHRoom(roomID, tmuxSession string, maxSessions int) {
+	config := sshterm.RoomConfig{
+		TmuxSession: tmuxSession,
+		MaxSessions: maxSessions,
+	}
+	s.sshRooms.RegisterRoom(roomID, config)
+	s.log.Info().
+		Str("room", roomID).
+		Str("tmux_session", tmuxSession).
+		Msg("SSH room registered")
+}
+
+// UnregisterSSHRoom removes a room's SSH terminal access.
+func (s *Server) UnregisterSSHRoom(roomID string) {
+	s.sshRooms.UnregisterRoom(roomID)
+	s.log.Info().
+		Str("room", roomID).
+		Msg("SSH room unregistered")
 }
 
 // handleHealthz returns the subsystem health status as JSON.
@@ -252,14 +297,20 @@ func (s *Server) startDev(ctx context.Context) error {
 		Tmux:  "ok",
 	})
 
-	errCh := make(chan error, 1)
+	errCh := make(chan error, 2) // may get errors from HTTP and SSH
+
 	go func() {
 		s.log.Info().Str("addr", addr).Msg("Gateway HTTP server listening")
 		if err := s.http.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			errCh <- err
 		}
-		close(errCh)
 	}()
+
+	// Start SSH server in dev mode (on next port)
+	sshAddr := fmt.Sprintf("127.0.0.1:%d", s.opts.Port+1)
+	if err := s.startSSHDev(ctx, sshAddr); err != nil {
+		s.log.Warn().Err(err).Str("addr", sshAddr).Msg("SSH server failed to start in dev mode")
+	}
 
 	// Wait for context cancellation or server error
 	select {
@@ -365,14 +416,24 @@ func (s *Server) startTsnet(ctx context.Context) error {
 		BaseContext:       func(_ net.Listener) context.Context { return ctx },
 	}
 
-	errCh := make(chan error, 1)
+	errCh := make(chan error, 2) // may get errors from HTTPS and SSH
+
 	go func() {
 		s.log.Info().Msg("Gateway HTTPS server listening on tsnet")
 		if err := s.http.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			errCh <- err
 		}
-		close(errCh)
 	}()
+
+	// Start SSH server on tsnet
+	sshLn, err := ts.Listen("tcp", ":22")
+	if err != nil {
+		s.log.Warn().Err(err).Msg("Failed to get SSH listener from tsnet")
+	} else {
+		if err := s.startSSHTsnet(ctx, sshLn); err != nil {
+			s.log.Warn().Err(err).Msg("SSH server failed to start on tsnet")
+		}
+	}
 
 	// Wait for context cancellation or server error
 	select {
@@ -409,6 +470,14 @@ func (s *Server) shutdown() error {
 		s.termHub.Close()
 	}
 
+	// Close SSH server
+	if s.sshSrv != nil {
+		_ = s.sshSrv.Close()
+	}
+	if s.sshRooms != nil {
+		s.sshRooms.Close()
+	}
+
 	s.setHealth(HealthStatus{
 		Tsnet: "stopped",
 		Store: "stopped",
@@ -420,6 +489,80 @@ func (s *Server) shutdown() error {
 	}
 
 	s.log.Info().Msg("Gateway stopped")
+	return nil
+}
+
+// startSSHDev starts the SSH server in dev mode (localhost, no Tailscale).
+// Uses a permissive WhoIs that accepts all connections.
+func (s *Server) startSSHDev(ctx context.Context, addr string) error {
+	// In dev mode, accept all connections (no Tailscale verification)
+	devWhoIs := func(_ context.Context, _ string) (*sshterm.IdentityInfo, error) {
+		return &sshterm.IdentityInfo{
+			UserID:    "dev-user",
+			UserLogin: "dev@localhost",
+			UserName:  "Dev User",
+			NodeName:  "localhost",
+			NodeID:    "dev-node",
+		}, nil
+	}
+
+	sshConfig := sshterm.DefaultSSHServerConfig()
+	s.sshSrv = sshterm.NewServer(sshConfig, s.sshRooms, devWhoIs, s.log)
+
+	ln, err := net.Listen("tcp", addr)
+	if err != nil {
+		return fmt.Errorf("SSH listen on %s: %w", addr, err)
+	}
+
+	go func() {
+		if err := s.sshSrv.Serve(ctx, ln); err != nil && ctx.Err() == nil {
+			s.log.Error().Err(err).Msg("SSH server error")
+		}
+	}()
+
+	s.log.Info().Str("addr", addr).Msg("SSH server listening (dev mode)")
+	return nil
+}
+
+// startSSHTsnet starts the SSH server on a tsnet listener with WhoIs verification.
+func (s *Server) startSSHTsnet(ctx context.Context, ln net.Listener) error {
+	ts := s.tsnet
+
+	// WhoIs function that uses the tsnet local client for identity verification
+	tsnetWhoIs := func(whoCtx context.Context, addr string) (*sshterm.IdentityInfo, error) {
+		lc, lcErr := ts.LocalClient()
+		if lcErr != nil {
+			return nil, fmt.Errorf("get tsnet local client: %w", lcErr)
+		}
+
+		who, whoErr := lc.WhoIs(whoCtx, addr)
+		if whoErr != nil {
+			return nil, fmt.Errorf("tsnet WhoIs failed for %s: %w", addr, whoErr)
+		}
+
+		info := &sshterm.IdentityInfo{
+			NodeName: who.Node.Name,
+			NodeID:   string(who.Node.StableID),
+		}
+		if who.UserProfile != nil {
+			info.UserID = fmt.Sprintf("%d", int64(who.UserProfile.ID))
+			info.UserLogin = who.UserProfile.LoginName
+			info.UserName = who.UserProfile.DisplayName
+		}
+
+		return info, nil
+	}
+
+	sshConfig := sshterm.DefaultSSHServerConfig()
+	s.sshSrv = sshterm.NewServer(sshConfig, s.sshRooms, tsnetWhoIs, s.log)
+
+	go func() {
+		if err := s.sshSrv.Serve(ctx, ln); err != nil && ctx.Err() == nil {
+			s.log.Error().Err(err).Msg("SSH server error")
+		}
+	}()
+
+	s.log.Info().Msg("SSH server listening on tsnet (port 22)")
 	return nil
 }
 
