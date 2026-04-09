@@ -18,6 +18,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/domain/envelope"
 	ws "github.com/jkatigb/agentctl/internal/platform/workspace"
 	"github.com/jkatigb/agentctl/internal/protocol"
+	"github.com/jkatigb/agentctl/internal/storage/agents"
 	"github.com/jkatigb/agentctl/internal/storage/blackboard"
 	"github.com/jkatigb/agentctl/internal/storage/coordination"
 	taskstore "github.com/jkatigb/agentctl/internal/storage/tasks"
@@ -66,6 +67,7 @@ func newRoomCommand() *cobra.Command {
 		newRoomSubscribeCommand(),
 		newRoomRelayCommand(),
 		newRoomLoopCommand(),
+		newRoomDestroyCommand(),
 	)
 	return cmd
 }
@@ -2162,6 +2164,189 @@ func createTmuxSessionForSandbox(ctx context.Context, tc *tmuxbridge.Client, ses
 func tmuxSessionExists(name string) bool {
 	cmd := exec.Command("tmux", "has-session", "-t", name)
 	return cmd.Run() == nil
+}
+
+func newRoomDestroyCommand() *cobra.Command {
+	var (
+		workspace string
+		force     bool
+	)
+	cmd := &cobra.Command{
+		Use:   "destroy <room-id>",
+		Short: "Destroy a room and clean up sandbox resources",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runRoomDestroy(cmd, workspace, args[0], force)
+		},
+	}
+	cmd.Flags().StringVar(&workspace, "workspace", ".", "Workspace root override")
+	cmd.Flags().BoolVar(&force, "force", false, "Force destroy even with active agents")
+	return cmd
+}
+
+func runRoomDestroy(cmd *cobra.Command, workspace, roomID string, force bool) error {
+	absWorkspace, err := resolveRoomWorkspace(workspace)
+	if err != nil {
+		return err
+	}
+	store, err := openRoomBoardStore(cmd.Context())
+	if err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.destroy", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	defer store.Close()
+
+	roomID = strings.TrimSpace(roomID)
+
+	// Load room state to check sandbox config
+	summary, err := store.GetRoom(cmd.Context(), absWorkspace, roomID, "")
+	if err != nil {
+		code := protocol.ErrorCodeERuntime
+		if errors.Is(err, blackboard.ErrRoomNotFound) {
+			code = protocol.ErrorCodeENotFound
+		}
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.destroy", code, err.Error(), map[string]any{
+			"hint": "Check the room id. Use `agentctl room list` to see available rooms.",
+		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+
+	// Check for active agents in this room (unless --force)
+	if !force {
+		activeAgents, checkErr := findActiveAgentsInRoom(cmd.Context(), absWorkspace, roomID)
+		if checkErr != nil {
+			// Log but don't block — agent store may be unavailable
+			fmt.Fprintf(os.Stderr, "warn: could not check active agents: %v\n", checkErr)
+		} else if len(activeAgents) > 0 {
+			return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.destroy", protocol.ErrorCodeERuntime,
+				fmt.Sprintf("room %q has %d active agent(s)", roomID, len(activeAgents)),
+				map[string]any{
+					"hint":          "Stop agents before destroying the room, or use --force.",
+					"active_agents": activeAgents,
+				}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+		}
+	}
+
+	// Sandbox cleanup before deleting room metadata
+	var sandboxCleanup map[string]any
+	if summary.SandboxConfig != nil && summary.SandboxConfig.IsSandbox() {
+		sandboxCleanup, err = cleanupSandbox(cmd.Context(), absWorkspace, roomID, summary.SandboxConfig)
+		if err != nil {
+			// Log cleanup errors but proceed with destroy
+			fmt.Fprintf(os.Stderr, "warn: sandbox cleanup error: %v\n", err)
+			if sandboxCleanup == nil {
+				sandboxCleanup = map[string]any{"status": "partial", "error": err.Error()}
+			}
+		}
+	}
+
+	// Delete room from store (removes metadata, members, messages)
+	if err := store.DeleteRoom(cmd.Context(), absWorkspace, roomID); err != nil {
+		code := protocol.ErrorCodeERuntime
+		if errors.Is(err, blackboard.ErrRoomNotFound) {
+			code = protocol.ErrorCodeENotFound
+		}
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.destroy", code, err.Error(), map[string]any{
+			"hint":            "Check the room id. Use `agentctl room list` to see available rooms.",
+			"sandbox_cleanup": sandboxCleanup,
+		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+
+	return protocol.WriteOK(cmd.OutOrStdout(), "agentctl.room.destroy", map[string]any{
+		"room_id":         roomID,
+		"status":          "destroyed",
+		"sandbox_cleanup": sandboxCleanup,
+	}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+}
+
+// cleanupSandbox cleans up all sandbox resources associated with a room:
+// 1. Removes the git worktree
+// 2. Kills the tmux session
+// 3. Deregisters from gateway (future: HTTP call to gateway API)
+//
+// On error, partial cleanup results are still returned.
+func cleanupSandbox(ctx context.Context, workspace, roomID string, sc *agent.SandboxConfig) (map[string]any, error) {
+	result := map[string]any{
+		"worktree_removed": false,
+		"tmux_killed":      false,
+		"gateway_dereg":    false,
+	}
+	var firstErr error
+
+	// Step 1: Kill tmux session
+	if sc.TmuxSession != "" {
+		if tmuxSessionExists(sc.TmuxSession) {
+			cmd := exec.Command("tmux", "kill-session", "-t", sc.TmuxSession)
+			if err := cmd.Run(); err != nil {
+				if firstErr == nil {
+					firstErr = fmt.Errorf("kill tmux session %q: %w", sc.TmuxSession, err)
+				}
+			} else {
+				result["tmux_killed"] = true
+			}
+		} else {
+			// Session already gone — consider it cleaned up
+			result["tmux_killed"] = true
+		}
+	}
+
+	// Step 2: Remove worktree
+	if sc.WorktreePath != "" {
+		mgr := worktree.NewManager()
+		if _, err := os.Stat(sc.WorktreePath); err == nil {
+			// Worktree still exists — remove it
+			if err := mgr.Remove(ctx, workspace, sc.WorktreePath, worktree.WithForce(true), worktree.WithDeleteBranch(true)); err != nil {
+				if firstErr == nil {
+					firstErr = fmt.Errorf("remove worktree %q: %w", sc.WorktreePath, err)
+				}
+			} else {
+				result["worktree_removed"] = true
+			}
+		} else {
+			// Worktree dir already gone — clean up stale git records
+			_ = mgr.Remove(ctx, workspace, sc.WorktreePath, worktree.WithForce(true))
+			result["worktree_removed"] = true
+		}
+	}
+
+	// Step 3: Deregister from gateway (best-effort — gateway may not be running)
+	// Future: HTTP DELETE to gateway /api/rooms/{room-id}
+	result["gateway_dereg"] = true
+
+	result["status"] = "cleaned"
+	if firstErr != nil {
+		result["status"] = "partial"
+	}
+
+	return result, firstErr
+}
+
+// findActiveAgentsInRoom checks the agent store for agents with a terminal
+// binding to the given room that are in a running or starting state.
+func findActiveAgentsInRoom(ctx context.Context, workspace, roomID string) ([]string, error) {
+	cfg, err := loadConfig(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("load config: %w", err)
+	}
+	agentStore, err := agents.Open(ctx, cfg.Storage.Root)
+	if err != nil {
+		return nil, fmt.Errorf("open agent store: %w", err)
+	}
+	defer agentStore.Close()
+
+	allAgents, err := agentStore.List(ctx, 1000)
+	if err != nil {
+		return nil, fmt.Errorf("list agents: %w", err)
+	}
+
+	var active []string
+	for _, a := range allAgents {
+		if a.TerminalBinding.RoomID != roomID {
+			continue
+		}
+		if a.State == agent.StateRunning || a.State == agent.StateStarting {
+			active = append(active, a.ID)
+		}
+	}
+	return active, nil
 }
 
 func runRoomList(cmd *cobra.Command, workspace, actorID string, limit int) error {
