@@ -551,6 +551,163 @@ func TestBoardStore_RoomMetadataAndMembers(t *testing.T) {
 	}
 }
 
+func TestBoardStore_SandboxConfigPersistence(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+
+	store, err := OpenBoardStore(ctx, dir)
+	if err != nil {
+		t.Fatalf("OpenBoardStore: %v", err)
+	}
+	defer store.Close()
+
+	// Create a room with sandbox config
+	room, err := store.UpsertRoom(ctx, agent.Room{
+		ID:          "sandbox-room",
+		WorkspaceID: "ws1",
+		Title:       "Sandbox Room",
+		SandboxConfig: &agent.SandboxConfig{
+			WorktreePath:   "/tmp/worktrees/sandbox/room-sandbox-room",
+			WorktreeBranch: "sandbox/room-sandbox-room",
+			TmuxSession:    "agentctl-sandbox-sandbox-room",
+			TerminalURL:    "/terminal/sandbox-room",
+			Runtime:        "worktree",
+			BaseRef:        "main",
+		},
+	})
+	if err != nil {
+		t.Fatalf("UpsertRoom with sandbox: %v", err)
+	}
+
+	if room.SandboxConfig == nil {
+		t.Fatal("room.SandboxConfig is nil after upsert")
+	}
+	if room.SandboxConfig.WorktreePath != "/tmp/worktrees/sandbox/room-sandbox-room" {
+		t.Errorf("WorktreePath = %q, want %q", room.SandboxConfig.WorktreePath, "/tmp/worktrees/sandbox/room-sandbox-room")
+	}
+	if room.SandboxConfig.Runtime != "worktree" {
+		t.Errorf("Runtime = %q, want %q", room.SandboxConfig.Runtime, "worktree")
+	}
+
+	// Read it back via GetRoom
+	summary, err := store.GetRoom(ctx, "ws1", "sandbox-room", "")
+	if err != nil {
+		t.Fatalf("GetRoom: %v", err)
+	}
+	if summary.SandboxConfig == nil {
+		t.Fatal("summary.SandboxConfig is nil after GetRoom")
+	}
+	if summary.SandboxConfig.WorktreePath != "/tmp/worktrees/sandbox/room-sandbox-room" {
+		t.Errorf("WorktreePath = %q, want %q", summary.SandboxConfig.WorktreePath, "/tmp/worktrees/sandbox/room-sandbox-room")
+	}
+	if summary.SandboxConfig.TmuxSession != "agentctl-sandbox-sandbox-room" {
+		t.Errorf("TmuxSession = %q, want %q", summary.SandboxConfig.TmuxSession, "agentctl-sandbox-sandbox-room")
+	}
+	if summary.SandboxConfig.TerminalURL != "/terminal/sandbox-room" {
+		t.Errorf("TerminalURL = %q, want %q", summary.SandboxConfig.TerminalURL, "/terminal/sandbox-room")
+	}
+
+	// List rooms includes sandbox config
+	rooms, err := store.ListRooms(ctx, "ws1", "", 50, false)
+	if err != nil {
+		t.Fatalf("ListRooms: %v", err)
+	}
+	if len(rooms) != 1 {
+		t.Fatalf("rooms count = %d, want 1", len(rooms))
+	}
+	if rooms[0].SandboxConfig == nil {
+		t.Fatal("listed room SandboxConfig is nil")
+	}
+	if rooms[0].SandboxConfig.WorktreeBranch != "sandbox/room-sandbox-room" {
+		t.Errorf("WorktreeBranch = %q, want %q", rooms[0].SandboxConfig.WorktreeBranch, "sandbox/room-sandbox-room")
+	}
+}
+
+func TestBoardStore_SandboxConfig_Update(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+
+	store, err := OpenBoardStore(ctx, dir)
+	if err != nil {
+		t.Fatalf("OpenBoardStore: %v", err)
+	}
+	defer store.Close()
+
+	// Create room without sandbox config
+	room, err := store.UpsertRoom(ctx, agent.Room{
+		ID:          "upgrade-room",
+		WorkspaceID: "ws1",
+		Title:       "Upgrade Room",
+	})
+	if err != nil {
+		t.Fatalf("UpsertRoom: %v", err)
+	}
+	if room.SandboxConfig != nil {
+		t.Fatal("SandboxConfig should be nil for non-sandbox room")
+	}
+
+	// Update with sandbox config (simulates upgrade)
+	room.SandboxConfig = &agent.SandboxConfig{
+		WorktreePath:   "/tmp/worktrees/sandbox/room-upgrade-room",
+		WorktreeBranch: "sandbox/room-upgrade-room",
+		TmuxSession:    "agentctl-sandbox-upgrade-room",
+		TerminalURL:    "/terminal/upgrade-room",
+		Runtime:        "worktree",
+	}
+	room, err = store.UpsertRoom(ctx, room)
+	if err != nil {
+		t.Fatalf("UpsertRoom with sandbox upgrade: %v", err)
+	}
+	if room.SandboxConfig == nil {
+		t.Fatal("SandboxConfig should be non-nil after upgrade")
+	}
+
+	// Verify persistence
+	got, err := store.GetRoom(ctx, "ws1", "upgrade-room", "")
+	if err != nil {
+		t.Fatalf("GetRoom: %v", err)
+	}
+	if got.SandboxConfig == nil {
+		t.Fatal("SandboxConfig lost after round-trip")
+	}
+	if got.SandboxConfig.WorktreePath != "/tmp/worktrees/sandbox/room-upgrade-room" {
+		t.Errorf("WorktreePath = %q, want %q", got.SandboxConfig.WorktreePath, "/tmp/worktrees/sandbox/room-upgrade-room")
+	}
+}
+
+func TestBoardStore_SandboxConfig_NonSandboxRoom(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+
+	store, err := OpenBoardStore(ctx, dir)
+	if err != nil {
+		t.Fatalf("OpenBoardStore: %v", err)
+	}
+	defer store.Close()
+
+	// Create a plain room (no sandbox)
+	room, err := store.UpsertRoom(ctx, agent.Room{
+		ID:          "plain-room",
+		WorkspaceID: "ws1",
+		Title:       "Plain Room",
+	})
+	if err != nil {
+		t.Fatalf("UpsertRoom: %v", err)
+	}
+	if room.SandboxConfig != nil {
+		t.Fatal("plain room should have nil SandboxConfig")
+	}
+
+	// Verify GetRoom also returns nil
+	got, err := store.GetRoom(ctx, "ws1", "plain-room", "")
+	if err != nil {
+		t.Fatalf("GetRoom: %v", err)
+	}
+	if got.SandboxConfig != nil {
+		t.Fatal("plain room GetRoom should have nil SandboxConfig")
+	}
+}
+
 func TestBoardStore_ReserveAndRelease(t *testing.T) {
 	ctx := context.Background()
 	dir := t.TempDir()

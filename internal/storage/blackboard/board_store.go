@@ -135,6 +135,14 @@ func (s *boardSQLStore) UpsertRoom(ctx context.Context, room agent.Room) (agent.
 	if err != nil {
 		return agent.Room{}, fmt.Errorf("board: upsert room marshal dispatch ids: %w", err)
 	}
+	var sandboxConfigJSON string
+	if room.SandboxConfig != nil {
+		scJSON, err := json.Marshal(room.SandboxConfig)
+		if err != nil {
+			return agent.Room{}, fmt.Errorf("board: upsert room marshal sandbox config: %w", err)
+		}
+		sandboxConfigJSON = string(scJSON)
+	}
 	now := time.Now().UTC()
 	if room.CreatedAt.IsZero() {
 		room.CreatedAt = now
@@ -143,17 +151,18 @@ func (s *boardSQLStore) UpsertRoom(ctx context.Context, room agent.Room) (agent.
 
 	err = retryBoardBusy(ctx, func() error {
 		_, execErr := s.db.ExecContext(ctx, `
-		INSERT INTO room_metadata (workspace_id, room_id, stream, title, description, dispatch_policy, dispatch_agent_ids, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO room_metadata (workspace_id, room_id, stream, title, description, dispatch_policy, dispatch_agent_ids, sandbox_config, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(workspace_id, room_id) DO UPDATE SET
 			stream = excluded.stream,
 			title = excluded.title,
 			description = excluded.description,
 			dispatch_policy = excluded.dispatch_policy,
 			dispatch_agent_ids = excluded.dispatch_agent_ids,
+			sandbox_config = excluded.sandbox_config,
 			updated_at = excluded.updated_at`,
 			room.WorkspaceID, room.ID, room.Stream, room.Title, room.Description,
-			room.DispatchPolicy, string(dispatchAgentIDsJSON), room.CreatedAt.Unix(), room.UpdatedAt.Unix(),
+			room.DispatchPolicy, string(dispatchAgentIDsJSON), sandboxConfigJSON, room.CreatedAt.Unix(), room.UpdatedAt.Unix(),
 		)
 		return execErr
 	})
@@ -194,8 +203,8 @@ func (s *boardSQLStore) EnsureRoom(ctx context.Context, workspaceID, roomID, tit
 
 	err := retryBoardBusy(ctx, func() error {
 		_, execErr := s.db.ExecContext(ctx, `
-		INSERT INTO room_metadata (workspace_id, room_id, stream, title, description, dispatch_policy, dispatch_agent_ids, created_at, updated_at)
-		VALUES (?, ?, ?, ?, '', ?, '[]', ?, ?)
+		INSERT INTO room_metadata (workspace_id, room_id, stream, title, description, dispatch_policy, dispatch_agent_ids, sandbox_config, created_at, updated_at)
+		VALUES (?, ?, ?, ?, '', ?, '[]', '', ?, ?)
 		ON CONFLICT(workspace_id, room_id) DO UPDATE SET
 			updated_at = excluded.updated_at`,
 			workspaceID, roomID, stream, title, defaultRoomDispatchPolicy, now.Unix(), now.Unix(),
@@ -865,6 +874,7 @@ CREATE TABLE IF NOT EXISTS room_metadata (
 	description  TEXT NOT NULL DEFAULT '',
 	dispatch_policy TEXT NOT NULL DEFAULT 'all_subtree',
 	dispatch_agent_ids TEXT NOT NULL DEFAULT '[]',
+	sandbox_config TEXT NOT NULL DEFAULT '',
 	created_at   INTEGER NOT NULL,
 	updated_at   INTEGER NOT NULL,
 	archived_at  TEXT NOT NULL DEFAULT '',
@@ -986,6 +996,7 @@ type roomMetadataRow struct {
 	Description      string
 	DispatchPolicy   string
 	DispatchAgentIDs []string
+	SandboxConfig    *agent.SandboxConfig
 	CreatedAt        time.Time
 	UpdatedAt        time.Time
 	ArchivedAt       *time.Time
@@ -1163,6 +1174,7 @@ func (s *boardSQLStore) roomSummary(ctx context.Context, workspaceID, stream, ac
 		TaskIDs:          taskIDs,
 		Members:          members,
 		ArchivedAt:       meta.ArchivedAt,
+		SandboxConfig:    meta.SandboxConfig,
 	}, nil
 }
 
@@ -1309,7 +1321,7 @@ func (s *boardSQLStore) listDerivedRoomStreams(ctx context.Context, workspaceID 
 
 func (s *boardSQLStore) listAllRoomMetadata(ctx context.Context, workspaceID string) ([]roomMetadataRow, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT workspace_id, room_id, stream, title, description, dispatch_policy, dispatch_agent_ids, created_at, updated_at, archived_at
+		SELECT workspace_id, room_id, stream, title, description, dispatch_policy, dispatch_agent_ids, sandbox_config, created_at, updated_at, archived_at
 		FROM room_metadata
 		WHERE workspace_id = ?
 		ORDER BY updated_at DESC, room_id ASC`, workspaceID)
@@ -1333,7 +1345,7 @@ func (s *boardSQLStore) listAllRoomMetadata(ctx context.Context, workspaceID str
 
 func (s *boardSQLStore) getRoomMetadata(ctx context.Context, workspaceID, roomID string) (roomMetadataRow, error) {
 	row := s.db.QueryRowContext(ctx, `
-		SELECT workspace_id, room_id, stream, title, description, dispatch_policy, dispatch_agent_ids, created_at, updated_at, archived_at
+		SELECT workspace_id, room_id, stream, title, description, dispatch_policy, dispatch_agent_ids, sandbox_config, created_at, updated_at, archived_at
 		FROM room_metadata
 		WHERE workspace_id = ? AND room_id = ?`, workspaceID, roomID)
 	return scanRoomMetadataRow(row)
@@ -1341,7 +1353,7 @@ func (s *boardSQLStore) getRoomMetadata(ctx context.Context, workspaceID, roomID
 
 func (s *boardSQLStore) getRoomMetadataByStream(ctx context.Context, workspaceID, stream string) (roomMetadataRow, error) {
 	row := s.db.QueryRowContext(ctx, `
-		SELECT workspace_id, room_id, stream, title, description, dispatch_policy, dispatch_agent_ids, created_at, updated_at, archived_at
+		SELECT workspace_id, room_id, stream, title, description, dispatch_policy, dispatch_agent_ids, sandbox_config, created_at, updated_at, archived_at
 		FROM room_metadata
 		WHERE workspace_id = ? AND stream = ?`, workspaceID, stream)
 	return scanRoomMetadataRow(row)
@@ -1400,8 +1412,9 @@ func scanRoomMetadataRow(scanner interface{ Scan(dest ...any) error }) (roomMeta
 	var meta roomMetadataRow
 	var createdAt, updatedAt int64
 	var dispatchAgentIDsJSON string
+	var sandboxConfigJSON string
 	var archivedAt string
-	if err := scanner.Scan(&meta.WorkspaceID, &meta.RoomID, &meta.Stream, &meta.Title, &meta.Description, &meta.DispatchPolicy, &dispatchAgentIDsJSON, &createdAt, &updatedAt, &archivedAt); err != nil {
+	if err := scanner.Scan(&meta.WorkspaceID, &meta.RoomID, &meta.Stream, &meta.Title, &meta.Description, &meta.DispatchPolicy, &dispatchAgentIDsJSON, &sandboxConfigJSON, &createdAt, &updatedAt, &archivedAt); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return roomMetadataRow{}, ErrRoomNotFound
 		}
@@ -1414,6 +1427,13 @@ func scanRoomMetadataRow(scanner interface{ Scan(dest ...any) error }) (roomMeta
 		}
 	}
 	meta.DispatchAgentIDs = normalizeRoomDispatchAgentIDs(meta.DispatchAgentIDs)
+	if strings.TrimSpace(sandboxConfigJSON) != "" {
+		var sc agent.SandboxConfig
+		if err := json.Unmarshal([]byte(sandboxConfigJSON), &sc); err != nil {
+			return roomMetadataRow{}, fmt.Errorf("board: decode room sandbox config: %w", err)
+		}
+		meta.SandboxConfig = &sc
+	}
 	meta.CreatedAt = time.Unix(createdAt, 0).UTC()
 	meta.UpdatedAt = time.Unix(updatedAt, 0).UTC()
 	if strings.TrimSpace(archivedAt) != "" {
@@ -1437,6 +1457,7 @@ func roomMetadataToRoom(meta roomMetadataRow, members []agent.RoomMember) agent.
 		UpdatedAt:        meta.UpdatedAt,
 		Members:          members,
 		ArchivedAt:       meta.ArchivedAt,
+		SandboxConfig:    meta.SandboxConfig,
 	}
 }
 

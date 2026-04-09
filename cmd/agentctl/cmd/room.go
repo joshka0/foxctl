@@ -22,6 +22,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/storage/coordination"
 	taskstore "github.com/jkatigb/agentctl/internal/storage/tasks"
 	"github.com/jkatigb/agentctl/internal/tmuxbridge"
+	"github.com/jkatigb/agentctl/internal/worktree"
 	"github.com/jkatigb/agentctl/internal/zellijbridge"
 	"github.com/spf13/cobra"
 )
@@ -288,27 +289,30 @@ func newRoomRedgreenCheckCommand() *cobra.Command {
 
 func newRoomCreateCommand() *cobra.Command {
 	var (
-		workspace    string
-		title        string
-		description  string
-		members      []string
-		provision    bool
-		muxBackend   string
-		muxSession   string
-		paneCommand  string
-		agentCLI     string
-		agentMode    string
-		agentArgs    []string
-		memberArgs   []string
-		attach       bool
-		pattern      string
-		slug         string
-		redActor     string
-		greenActor   string
-		coordinator  string
-		worktreeRoot string
-		baseRef      string
-		checkCommand string
+		workspace      string
+		title          string
+		description    string
+		members        []string
+		provision      bool
+		muxBackend     string
+		muxSession     string
+		paneCommand    string
+		agentCLI       string
+		agentMode      string
+		agentArgs      []string
+		memberArgs     []string
+		attach         bool
+		pattern        string
+		slug           string
+		redActor       string
+		greenActor     string
+		coordinator    string
+		worktreeRoot   string
+		baseRef        string
+		checkCommand   string
+		sandbox        bool
+		sandboxWTRoot  string
+		sandboxBaseRef string
 	)
 	cmd := &cobra.Command{
 		Use:   "create <room-id>",
@@ -316,23 +320,26 @@ func newRoomCreateCommand() *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runRoomCreateWithProvision(cmd, workspace, args[0], title, description, members, roomCreateProvisionOptions{
-				Enabled:          provision,
-				MuxBackend:       muxBackend,
-				MuxSession:       muxSession,
-				PaneCommand:      paneCommand,
-				AgentCLI:         agentCLI,
-				AgentMode:        agentMode,
-				AgentArgs:        append([]string(nil), agentArgs...),
-				MemberArgs:       append([]string(nil), memberArgs...),
-				Attach:           attach,
-				Pattern:          pattern,
-				PatternSlug:      slug,
-				RedActor:         redActor,
-				GreenActor:       greenActor,
-				CoordinatorActor: coordinator,
-				WorktreeRoot:     worktreeRoot,
-				BaseRef:          baseRef,
-				CheckCommand:     checkCommand,
+				Enabled:             provision,
+				MuxBackend:          muxBackend,
+				MuxSession:          muxSession,
+				PaneCommand:         paneCommand,
+				AgentCLI:            agentCLI,
+				AgentMode:           agentMode,
+				AgentArgs:           append([]string(nil), agentArgs...),
+				MemberArgs:          append([]string(nil), memberArgs...),
+				Attach:              attach,
+				Pattern:             pattern,
+				PatternSlug:         slug,
+				RedActor:            redActor,
+				GreenActor:          greenActor,
+				CoordinatorActor:    coordinator,
+				WorktreeRoot:        worktreeRoot,
+				BaseRef:             baseRef,
+				CheckCommand:        checkCommand,
+				Sandbox:             sandbox,
+				SandboxWorktreeRoot: sandboxWTRoot,
+				SandboxBaseRef:      sandboxBaseRef,
 			})
 		},
 	}
@@ -357,6 +364,9 @@ func newRoomCreateCommand() *cobra.Command {
 	cmd.Flags().StringVar(&worktreeRoot, "worktree-root", filepath.Join(os.TempDir(), "agentctl-redgreen"), "Parent directory for paired worktrees when --pattern redgreen")
 	cmd.Flags().StringVar(&baseRef, "base-ref", "HEAD", "Git ref to branch paired worktrees from when --pattern redgreen")
 	cmd.Flags().StringVar(&checkCommand, "check-command", roomRedgreenDefaultCheckShell, "Brokered hidden-suite command when --pattern redgreen")
+	cmd.Flags().BoolVar(&sandbox, "sandbox", false, "Provision git worktree + tmux session + gateway terminal route for sandbox isolation")
+	cmd.Flags().StringVar(&sandboxWTRoot, "sandbox-worktree-root", "", "Parent directory for sandbox worktree (defaults to <repo>-worktrees sibling)")
+	cmd.Flags().StringVar(&sandboxBaseRef, "sandbox-base-ref", "HEAD", "Git ref to branch sandbox worktree from")
 	return cmd
 }
 
@@ -1858,23 +1868,26 @@ func newRoomRelayCommand() *cobra.Command {
 }
 
 type roomCreateProvisionOptions struct {
-	Enabled          bool
-	MuxBackend       string
-	MuxSession       string
-	PaneCommand      string
-	AgentCLI         string
-	AgentMode        string
-	AgentArgs        []string
-	MemberArgs       []string
-	Attach           bool
-	Pattern          string
-	PatternSlug      string
-	RedActor         string
-	GreenActor       string
-	CoordinatorActor string
-	WorktreeRoot     string
-	BaseRef          string
-	CheckCommand     string
+	Enabled             bool
+	MuxBackend          string
+	MuxSession          string
+	PaneCommand         string
+	AgentCLI            string
+	AgentMode           string
+	AgentArgs           []string
+	MemberArgs          []string
+	Attach              bool
+	Pattern             string
+	PatternSlug         string
+	RedActor            string
+	GreenActor          string
+	CoordinatorActor    string
+	WorktreeRoot        string
+	BaseRef             string
+	CheckCommand        string
+	Sandbox             bool
+	SandboxWorktreeRoot string
+	SandboxBaseRef      string
 }
 
 type roomProvisionMemberSpec struct {
@@ -1977,9 +1990,28 @@ func runRoomCreateWithProvision(cmd *cobra.Command, workspace, roomID, title, de
 			}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
 		}
 	}
+
+	var sandboxResult map[string]any
+	if provision.Sandbox {
+		sandboxResult, err = provisionSandbox(cmd.Context(), absWorkspace, &room, provision)
+		if err != nil {
+			return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.create", protocol.ErrorCodeERuntime, err.Error(), map[string]any{
+				"hint": "Sandbox provisioning failed. Ensure the workspace is a git repository and tmux is available.",
+			}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+		}
+		room, err = store.UpsertRoom(cmd.Context(), room)
+		if err != nil {
+			return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.create", protocol.ErrorCodeERuntime, err.Error(), map[string]any{
+				"hint":         "Sandbox was provisioned, but persisting sandbox config failed.",
+				"sandbox_info": sandboxResult,
+			}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+		}
+	}
+
 	return protocol.WriteOK(cmd.OutOrStdout(), "agentctl.room.create", map[string]any{
 		"room":        room,
 		"provisioned": provisioned,
+		"sandbox":     sandboxResult,
 	}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
 }
 
@@ -2014,6 +2046,122 @@ func ensureRoomCoordinatorMember(existing []agent.RoomMember, member agent.RoomM
 		return out
 	}
 	return append(out, member)
+}
+
+// provisionSandbox provisions a sandbox environment for a room: creates a git
+// worktree, creates a tmux session, and sets the room's SandboxConfig.
+// It is idempotent — if the room already has a valid sandbox config with an
+// existing worktree and tmux session, it returns the existing info.
+// On failure, it rolls back any partially-created resources.
+// The updated room (with SandboxConfig set) is returned via the pointer.
+func provisionSandbox(ctx context.Context, workspace string, room *agent.Room, provision roomCreateProvisionOptions) (map[string]any, error) {
+	// Idempotency: if room already has sandbox config with a valid worktree, return existing.
+	if room.SandboxConfig != nil && room.SandboxConfig.IsSandbox() {
+		if _, err := os.Stat(room.SandboxConfig.WorktreePath); err == nil {
+			// Worktree still exists; verify tmux session
+			if tmuxSessionExists(room.SandboxConfig.TmuxSession) {
+				return map[string]any{
+					"worktree_path":   room.SandboxConfig.WorktreePath,
+					"worktree_branch": room.SandboxConfig.WorktreeBranch,
+					"tmux_session":    room.SandboxConfig.TmuxSession,
+					"terminal_url":    room.SandboxConfig.TerminalURL,
+					"runtime":         room.SandboxConfig.EffectiveRuntime(),
+					"status":          "existing",
+				}, nil
+			}
+		}
+		// Existing sandbox is stale; fall through to re-provision
+	}
+
+	// Sanitize branch name for the room
+	branchName := "sandbox/room-" + strings.TrimSpace(room.ID)
+	sanitized, err := worktree.SanitizeBranchName(branchName)
+	if err != nil {
+		return nil, fmt.Errorf("sandbox: invalid branch name %q: %w", branchName, err)
+	}
+
+	// Determine workspace as the git repo root
+	repoPath := workspace
+	gitDir := filepath.Join(repoPath, ".git")
+	if info, err := os.Stat(gitDir); err != nil || (!info.IsDir() && info.Mode()&os.ModeSymlink == 0) {
+		return nil, fmt.Errorf("sandbox: workspace %q is not a git repository", repoPath)
+	}
+
+	// Step 1: Create worktree
+	var wtOpts []worktree.Option
+	wtOpts = append(wtOpts, worktree.WithNewBranch(true))
+	if provision.SandboxBaseRef != "" && provision.SandboxBaseRef != "HEAD" {
+		wtOpts = append(wtOpts, worktree.WithRef(provision.SandboxBaseRef))
+	}
+	if provision.SandboxWorktreeRoot != "" {
+		wtOpts = append(wtOpts, worktree.WithBaseDir(provision.SandboxWorktreeRoot))
+	}
+
+	mgr := worktree.NewManager()
+	wtResult, err := mgr.Create(ctx, repoPath, sanitized, wtOpts...)
+	if err != nil {
+		return nil, fmt.Errorf("sandbox: create worktree: %w", err)
+	}
+
+	// Step 2: Create tmux session
+	tmuxSessionName := "agentctl-sandbox-" + strings.TrimSpace(room.ID)
+	tc := tmuxbridge.New()
+	err = createTmuxSessionForSandbox(ctx, tc, tmuxSessionName, wtResult.Path)
+	if err != nil {
+		// Rollback: remove the worktree we just created
+		_ = mgr.Remove(ctx, repoPath, wtResult.Path, worktree.WithForce(true), worktree.WithDeleteBranch(true))
+		return nil, fmt.Errorf("sandbox: create tmux session: %w", err)
+	}
+
+	// Build terminal URL (placeholder — gateway URL construction depends on deployment)
+	terminalURL := "/terminal/" + strings.TrimSpace(room.ID)
+
+	// Update the room's SandboxConfig
+	room.SandboxConfig = &agent.SandboxConfig{
+		WorktreePath:   wtResult.Path,
+		WorktreeBranch: wtResult.Branch,
+		TmuxSession:    tmuxSessionName,
+		TerminalURL:    terminalURL,
+		Runtime:        "worktree",
+		BaseRef:        provision.SandboxBaseRef,
+	}
+
+	return map[string]any{
+		"worktree_path":   wtResult.Path,
+		"worktree_branch": wtResult.Branch,
+		"worktree_commit": wtResult.Commit,
+		"tmux_session":    tmuxSessionName,
+		"terminal_url":    terminalURL,
+		"runtime":         "worktree",
+		"status":          "created",
+	}, nil
+}
+
+// createTmuxSessionForSandbox creates a tmux session for a sandbox room.
+// The session is created detached with CWD set to the worktree path.
+func createTmuxSessionForSandbox(ctx context.Context, tc *tmuxbridge.Client, sessionName, cwd string) error {
+	// Check if tmux is available
+	if _, err := exec.LookPath("tmux"); err != nil {
+		return fmt.Errorf("tmux not found in PATH: %w", err)
+	}
+
+	// Try to create a new session. If it already exists, that's fine (idempotent).
+	opts := tmuxbridge.PrepareOptions{
+		Session: sessionName,
+		Panes:   1,
+		CWD:     cwd,
+	}
+	_, err := tc.PrepareSession(ctx, opts)
+	if err != nil {
+		return fmt.Errorf("prepare tmux session: %w", err)
+	}
+	return nil
+}
+
+// tmuxSessionExists checks whether a tmux session with the given name exists.
+func tmuxSessionExists(name string) bool {
+	cmd := exec.Command("tmux", "has-session", "-t", name)
+	return cmd.Run() == nil
 }
 
 func runRoomList(cmd *cobra.Command, workspace, actorID string, limit int) error {
