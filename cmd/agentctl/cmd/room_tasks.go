@@ -446,11 +446,18 @@ func runRoomTaskAdd(cmd *cobra.Command, workspace, roomID, sender, title, desc, 
 	}
 	defer taskStore.Close()
 
+	// Resolve scope path for sandbox rooms: if the room has a sandbox worktree,
+	// make the scope path relative to the worktree root.
+	effectiveScopePath := strings.TrimSpace(scopePath)
+	if resolved := resolveSandboxScopePath(cmd.Context(), boardStore, absWorkspace, roomID, effectiveScopePath); resolved != effectiveScopePath {
+		effectiveScopePath = resolved
+	}
+
 	task, err := taskStore.Add(cmd.Context(), taskstore.Task{
 		WorkspaceID: taskWorkspaceID,
 		Title:       strings.TrimSpace(title),
 		Description: strings.TrimSpace(desc),
-		ScopePath:   strings.TrimSpace(scopePath),
+		ScopePath:   effectiveScopePath,
 		ParentID:    strings.TrimSpace(parentID),
 		DependsOn:   append([]string(nil), dependsOn...),
 		Status:      taskstore.StatusPending,

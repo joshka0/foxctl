@@ -2257,6 +2257,85 @@ func runRoomDestroy(cmd *cobra.Command, workspace, roomID string, force bool) er
 	}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
 }
 
+// buildRoomSandboxInfo returns a sandbox info map for inclusion in room status
+// and inbox responses. Returns nil if the room is not a sandbox room.
+func buildRoomSandboxInfo(room agent.RoomSummary) map[string]any {
+	if room.SandboxConfig == nil || !room.SandboxConfig.IsSandbox() {
+		return nil
+	}
+	return map[string]any{
+		"worktree_path":   room.SandboxConfig.WorktreePath,
+		"worktree_branch": room.SandboxConfig.WorktreeBranch,
+		"tmux_session":    room.SandboxConfig.TmuxSession,
+		"terminal_url":    room.SandboxConfig.TerminalURL,
+		"runtime":         room.SandboxConfig.EffectiveRuntime(),
+	}
+}
+
+// resolveRoomSandboxWorktree loads room metadata and returns the sandbox
+// worktree path if the room has an active sandbox configuration. Returns an
+// empty string if the room is not a sandbox room or has no sandbox config.
+func resolveRoomSandboxWorktree(ctx context.Context, boardStore blackboard.BoardStore, absWorkspace, roomID string) string {
+	summary, err := boardStore.GetRoom(ctx, absWorkspace, roomID, "")
+	if err != nil {
+		return ""
+	}
+	if summary.SandboxConfig == nil || !summary.SandboxConfig.IsSandbox() {
+		return ""
+	}
+	return summary.SandboxConfig.WorktreePath
+}
+
+// resolveSandboxScopePath resolves a task scope path relative to the sandbox
+// worktree. If the room is a sandbox room and a scopePath is provided, the
+// path is made relative to the worktree root. If no scopePath is given, the
+// worktree root itself is used as the scope.
+func resolveSandboxScopePath(ctx context.Context, boardStore blackboard.BoardStore, absWorkspace, roomID, scopePath string) string {
+	wtPath := resolveRoomSandboxWorktree(ctx, boardStore, absWorkspace, roomID)
+	if wtPath == "" {
+		return scopePath
+	}
+	if strings.TrimSpace(scopePath) == "" {
+		return wtPath
+	}
+	// If scopePath is already absolute and under the worktree, return as-is.
+	if filepath.IsAbs(scopePath) && strings.HasPrefix(scopePath, wtPath) {
+		return scopePath
+	}
+	// Make the scope path relative to the worktree root.
+	return filepath.Join(wtPath, scopePath)
+}
+
+// relayRoomMessageToSandbox delivers a relay message to the sandbox tmux
+// session associated with a room. If the room has no sandbox config or the
+// tmux session does not exist, this is a no-op.
+func relayRoomMessageToSandbox(ctx context.Context, client *tmuxbridge.Client, room agent.RoomSummary, msg agent.BoardMessage) roomRelayResult {
+	result := roomRelayResult{Backend: "sandbox"}
+	if room.SandboxConfig == nil || !room.SandboxConfig.IsSandbox() {
+		return result
+	}
+	sessionName := strings.TrimSpace(room.SandboxConfig.TmuxSession)
+	if sessionName == "" {
+		return result
+	}
+	if !tmuxSessionExists(sessionName) {
+		result.Error = fmt.Sprintf("sandbox tmux session %q not found", sessionName)
+		return result
+	}
+	content := formatRoomRelayContent(room, msg)
+	// Deliver to the first pane of the sandbox session using session:0 format.
+	// tmux send-keys -t session:0 sends to pane 0 within the session.
+	target := sessionName + ":0"
+	_, err := client.DeliverTextWithOptions(ctx, target, content, tmuxbridge.DeliverOptions{Interrupt: msg.Interrupt})
+	if err != nil {
+		result.Error = err.Error()
+		return result
+	}
+	result.DeliveredCount = 1
+	result.DeliveredTo = []string{target}
+	return result
+}
+
 // cleanupSandbox cleans up all sandbox resources associated with a room:
 // 1. Removes the git worktree
 // 2. Kills the tmux session
@@ -2513,6 +2592,7 @@ func runRoomStatus(cmd *cobra.Command, workspace, roomID string, limit int, stal
 		"task_pulse":      taskPulse,
 		"backlog":         backlog,
 		"action_required": buildRoomStatusActionRequired(summary, messages, tasks, backlog, taskPulse, filters, staleAfter, now, verbose, reminderRoots),
+		"sandbox":         buildRoomSandboxInfo(summary),
 	}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
 }
 
@@ -2616,6 +2696,7 @@ func runRoomInbox(cmd *cobra.Command, workspace, roomID, actorID string, limit i
 		"filter":  normalizeRoomInboxFilter(filter),
 		"count":   len(entries),
 		"entries": entries,
+		"sandbox": buildRoomSandboxInfo(summary),
 	}
 	if grouped {
 		data["groups"] = groupRoomInboxEntries(entries)
@@ -12969,7 +13050,16 @@ type roomRelayOptions struct {
 func relayRoomMessage(ctx context.Context, client *tmuxbridge.Client, room agent.RoomSummary, msg agent.BoardMessage, relay roomRelayOptions) roomRelayResult {
 	switch strings.TrimSpace(strings.ToLower(relay.Backend)) {
 	case "auto", "mixed":
-		return relayRoomMessageAuto(ctx, client, room, msg, relay)
+		result := relayRoomMessageAuto(ctx, client, room, msg, relay)
+		// Also deliver to sandbox tmux session if present.
+		if room.SandboxConfig != nil && room.SandboxConfig.IsSandbox() {
+			sandboxResult := relayRoomMessageToSandbox(ctx, client, room, msg)
+			result.DeliveredCount += sandboxResult.DeliveredCount
+			result.DeliveredTo = append(result.DeliveredTo, sandboxResult.DeliveredTo...)
+			result.FailedCount += sandboxResult.FailedCount
+			result.FailedMembers = append(result.FailedMembers, sandboxResult.FailedMembers...)
+		}
+		return result
 	case "", "tmux":
 		return relayRoomMessageTmux(ctx, client, room, msg)
 	case "zellij":
