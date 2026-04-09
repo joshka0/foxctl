@@ -55,3 +55,27 @@ func TestResolvedSpawnExecutionLayer(t *testing.T) {
 		t.Fatalf("override layer=%q want %q", got, agent.ExecutionLayerClassic)
 	}
 }
+
+// TestResolvedAskDispatcherMode_IgnoresAgentExecutionLayer verifies that the
+// ask dispatcher always defaults to mailbox regardless of the stored execution
+// layer on the agent record. The Jido-specific auto-routing was removed from
+// the default ask path; callers must opt in via --dispatcher or env.
+func TestResolvedAskDispatcherMode_IgnoresAgentExecutionLayer(t *testing.T) {
+	t.Setenv(envAskDispatcherMode, "")
+	// Even with no flags and no env, the resolved mode must be mailbox.
+	// The old code would have overridden this to jido when the agent has
+	// ExecutionLayerJido; that override no longer exists.
+	got := resolvedAskDispatcherMode("")
+	if got != askDispatchModeMailbox {
+		t.Fatalf("dispatcher mode for jido-layer agent=%q want %q (mailbox must be default)", got, askDispatchModeMailbox)
+	}
+	// Explicit jido env still works for opt-in.
+	t.Setenv(envAskDispatcherMode, askDispatchModeJido)
+	if got := resolvedAskDispatcherMode(""); got != askDispatchModeJido {
+		t.Fatalf("env-forced mode=%q want %q", got, askDispatchModeJido)
+	}
+	// Explicit mailbox override always wins.
+	if got := resolvedAskDispatcherMode(askDispatchModeMailbox); got != askDispatchModeMailbox {
+		t.Fatalf("explicit mailbox mode=%q want %q", got, askDispatchModeMailbox)
+	}
+}

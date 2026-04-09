@@ -130,6 +130,10 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	}
 
 	limits := applyDefaultLimits(in.Limits)
+	inlineKB := rc.InlineKB
+	if inlineKB <= 0 {
+		inlineKB = config.DefaultInlineOutputKB
+	}
 
 	evidence, err := codecontext.Collect(ctx, codecontext.CollectOpts{
 		Candidates:      in.Candidates,
@@ -150,7 +154,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 
 	output, artifactPayload, err := codecontext.PrepareOutputWithArtifact(
 		evidence,
-		32,
+		inlineKB,
 		512,
 		codecontext.RenderNDJSON,
 	)

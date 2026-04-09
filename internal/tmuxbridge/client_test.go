@@ -325,7 +325,7 @@ func TestPrepareSessionInjectsDirectRoomEnvForTopLevelPanes(t *testing.T) {
 			{key: "tmux respawn-pane -k -t %41 env AGENTCTL_PARTICIPANT_ID=codex-a AGENTCTL_MUX_BACKEND=tmux AGENTCTL_MUX_SESSION=room-smoke AGENTCTL_MUX_PANE_ID=%41 AGENTCTL_ROOM_ID=room-alpha " + cmd},
 			{key: "tmux list-panes -t room-smoke -F " + listFormat, stdout: "%41" + fieldSep + "room-smoke" + fieldSep + "0" + fieldSep + "0" + fieldSep + "main" + fieldSep + "111" + fieldSep + "80" + fieldSep + "24" + fieldSep + "codex-a" + fieldSep + "/repo" + fieldSep + "node" + fieldSep + "1\n"},
 			{key: "tmux send-keys -t %41 -l -- " + onboarding},
-			{key: "tmux send-keys -t %41 Enter"},
+			{key: "tmux send-keys -t %41 C-Enter"},
 		},
 	}
 	client := NewWithRunner(runner, map[string]string{})
@@ -649,6 +649,38 @@ func TestSendWithExplicitSenderLabel(t *testing.T) {
 	}
 }
 
+func TestSendUsesCtrlEnterForNodeNonGeminiPane(t *testing.T) {
+	client := NewWithRunner(fakeRunner{
+		responses: map[string]fakeResponse{
+			"tmux list-sessions": {stdout: "ok\n"},
+			"tmux list-panes -a -F " + labelFormat: {
+				stdout: "%1" + fieldSep + "praze-a\n%2" + fieldSep + "cursor-b\n",
+			},
+			"tmux display-message -t %2 -p #{pane_id}": {stdout: "%2\n"},
+			"tmux display-message -t %2 -p " + listFormat: {
+				stdout: "%2" + fieldSep + "agentctl-collab" + fieldSep + "0" + fieldSep + "1" + fieldSep + "zsh" + fieldSep + "222" + fieldSep + "80" + fieldSep + "24" + fieldSep + "cursor-b" + fieldSep + "/repo" + fieldSep + "node" + fieldSep + "0\n",
+			},
+			"tmux display-message -t %1 -p #{pane_id}": {stdout: "%1\n"},
+			"tmux display-message -t %1 -p " + listFormat: {
+				stdout: "%1" + fieldSep + "agentctl-collab" + fieldSep + "0" + fieldSep + "0" + fieldSep + "zsh" + fieldSep + "111" + fieldSep + "80" + fieldSep + "24" + fieldSep + "praze-a" + fieldSep + "/repo" + fieldSep + "zsh" + fieldSep + "1\n",
+			},
+			"tmux send-keys -t %2 -l -- [tmux-bridge from=praze-a pane=%1 reply_to=praze-a] ping": {},
+			"tmux send-keys -t %2 C-Enter": {},
+		},
+	}, map[string]string{})
+
+	got, err := client.Send(context.Background(), "praze-a", "cursor-b", "ping")
+	if err != nil {
+		t.Fatalf("Send() error = %v", err)
+	}
+	if got.ResolvedTarget != "%2" {
+		t.Fatalf("ResolvedTarget = %q, want %q", got.ResolvedTarget, "%2")
+	}
+	if got.Pane.CurrentCommand != "node" {
+		t.Fatalf("CurrentCommand = %q, want node", got.Pane.CurrentCommand)
+	}
+}
+
 func TestSendRequiresSenderOutsideTmux(t *testing.T) {
 	client := NewWithRunner(fakeRunner{
 		responses: map[string]fakeResponse{
@@ -683,15 +715,158 @@ func TestSubmitUsesEscapeThenEnter(t *testing.T) {
 		},
 	}, map[string]string{})
 
-	got, err := client.Submit(context.Background(), "agent-b")
+	got, err := client.Submit(context.Background(), "agent-b", SubmitOptions{})
 	if err != nil {
 		t.Fatalf("Submit() error = %v", err)
 	}
 	if got.ResolvedTarget != "%2" {
 		t.Fatalf("ResolvedTarget = %q, want %q", got.ResolvedTarget, "%2")
 	}
-	if got.Mode != "escape_enter" {
-		t.Fatalf("Mode = %q, want escape_enter", got.Mode)
+	if got.Mode != SubmitModeEscapeEnter {
+		t.Fatalf("Mode = %q, want %s", got.Mode, SubmitModeEscapeEnter)
+	}
+}
+
+func TestSubmitUsesCtrlEnterForNodeNonGeminiPane(t *testing.T) {
+	client := NewWithRunner(fakeRunner{
+		responses: map[string]fakeResponse{
+			"tmux list-panes -a -F " + labelFormat:      {stdout: "%15" + fieldSep + "cursor-c-a\n"},
+			"tmux list-sessions":                        {stdout: "ok\n"},
+			"tmux display-message -t %15 -p #{pane_id}": {stdout: "%15\n"},
+			"tmux display-message -t %15 -p " + listFormat: {
+				stdout: "%15" + fieldSep + "triad-cur0" + fieldSep + "0" + fieldSep + "0" + fieldSep + "main" + fieldSep + "222" + fieldSep + "80" + fieldSep + "24" + fieldSep + "cursor-c-a" + fieldSep + "/repo" + fieldSep + "node" + fieldSep + "1\n",
+			},
+			"tmux send-keys -t %15 C-Enter": {},
+		},
+	}, map[string]string{})
+
+	got, err := client.Submit(context.Background(), "cursor-c-a", SubmitOptions{})
+	if err != nil {
+		t.Fatalf("Submit() error = %v", err)
+	}
+	if got.ResolvedTarget != "%15" {
+		t.Fatalf("ResolvedTarget = %q, want %%15", got.ResolvedTarget)
+	}
+	if got.Mode != SubmitModeEscapeEnter {
+		t.Fatalf("Mode = %q, want %s", got.Mode, SubmitModeEscapeEnter)
+	}
+}
+
+func TestSubmitUsesCtrlEnterForCodexCommandPane(t *testing.T) {
+	client := NewWithRunner(fakeRunner{
+		responses: map[string]fakeResponse{
+			"tmux list-panes -a -F " + labelFormat:      {stdout: "%20" + fieldSep + "codex-a\n"},
+			"tmux list-sessions":                        {stdout: "ok\n"},
+			"tmux display-message -t %20 -p #{pane_id}": {stdout: "%20\n"},
+			"tmux display-message -t %20 -p " + listFormat: {
+				stdout: "%20" + fieldSep + "collab" + fieldSep + "0" + fieldSep + "0" + fieldSep + "main" + fieldSep + "222" + fieldSep + "80" + fieldSep + "24" + fieldSep + "codex-a" + fieldSep + "/repo" + fieldSep + "codex" + fieldSep + "1\n",
+			},
+			"tmux send-keys -t %20 C-Enter": {},
+		},
+	}, map[string]string{})
+
+	got, err := client.Submit(context.Background(), "codex-a", SubmitOptions{})
+	if err != nil {
+		t.Fatalf("Submit() error = %v", err)
+	}
+	if got.ResolvedTarget != "%20" {
+		t.Fatalf("ResolvedTarget = %q, want %%20", got.ResolvedTarget)
+	}
+}
+
+func TestSubmitUsesCtrlEnterForDroidCommandPane(t *testing.T) {
+	client := NewWithRunner(fakeRunner{
+		responses: map[string]fakeResponse{
+			"tmux list-panes -a -F " + labelFormat:      {stdout: "%21" + fieldSep + "droid-a\n"},
+			"tmux list-sessions":                        {stdout: "ok\n"},
+			"tmux display-message -t %21 -p #{pane_id}": {stdout: "%21\n"},
+			"tmux display-message -t %21 -p " + listFormat: {
+				stdout: "%21" + fieldSep + "collab" + fieldSep + "0" + fieldSep + "0" + fieldSep + "main" + fieldSep + "222" + fieldSep + "80" + fieldSep + "24" + fieldSep + "droid-a" + fieldSep + "/repo" + fieldSep + "droid" + fieldSep + "1\n",
+			},
+			"tmux send-keys -t %21 C-Enter": {},
+		},
+	}, map[string]string{})
+
+	got, err := client.Submit(context.Background(), "droid-a", SubmitOptions{})
+	if err != nil {
+		t.Fatalf("Submit() error = %v", err)
+	}
+	if got.ResolvedTarget != "%21" {
+		t.Fatalf("ResolvedTarget = %q, want %%21", got.ResolvedTarget)
+	}
+}
+
+func TestSendUsesCtrlEnterForDroidPane(t *testing.T) {
+	client := NewWithRunner(fakeRunner{
+		responses: map[string]fakeResponse{
+			"tmux list-sessions": {stdout: "ok\n"},
+			"tmux list-panes -a -F " + labelFormat: {
+				stdout: "%1" + fieldSep + "human-a\n%2" + fieldSep + "droid-a\n",
+			},
+			"tmux display-message -t %2 -p #{pane_id}": {stdout: "%2\n"},
+			"tmux display-message -t %2 -p " + listFormat: {
+				stdout: "%2" + fieldSep + "collab" + fieldSep + "0" + fieldSep + "1" + fieldSep + "main" + fieldSep + "222" + fieldSep + "80" + fieldSep + "24" + fieldSep + "droid-a" + fieldSep + "/repo" + fieldSep + "droid" + fieldSep + "0\n",
+			},
+			"tmux display-message -t %1 -p #{pane_id}": {stdout: "%1\n"},
+			"tmux display-message -t %1 -p " + listFormat: {
+				stdout: "%1" + fieldSep + "collab" + fieldSep + "0" + fieldSep + "0" + fieldSep + "main" + fieldSep + "111" + fieldSep + "80" + fieldSep + "24" + fieldSep + "human-a" + fieldSep + "/repo" + fieldSep + "zsh" + fieldSep + "1\n",
+			},
+			"tmux send-keys -t %2 -l -- [tmux-bridge from=human-a pane=%1 reply_to=human-a] task note": {},
+			"tmux send-keys -t %2 C-Enter": {},
+		},
+	}, map[string]string{})
+
+	_, err := client.Send(context.Background(), "human-a", "droid-a", "task note")
+	if err != nil {
+		t.Fatalf("Send() error = %v", err)
+	}
+}
+
+func TestSendUsesCtrlEnterForDroidLabeledPaneWhenCommandStillZsh(t *testing.T) {
+	client := NewWithRunner(fakeRunner{
+		responses: map[string]fakeResponse{
+			"tmux list-sessions": {stdout: "ok\n"},
+			"tmux list-panes -a -F " + labelFormat: {
+				stdout: "%1" + fieldSep + "human-a\n%2" + fieldSep + "droid-a\n",
+			},
+			"tmux display-message -t %2 -p #{pane_id}": {stdout: "%2\n"},
+			"tmux display-message -t %2 -p " + listFormat: {
+				stdout: "%2" + fieldSep + "collab" + fieldSep + "0" + fieldSep + "1" + fieldSep + "main" + fieldSep + "222" + fieldSep + "80" + fieldSep + "24" + fieldSep + "droid-a" + fieldSep + "/repo" + fieldSep + "zsh" + fieldSep + "0\n",
+			},
+			"tmux display-message -t %1 -p #{pane_id}": {stdout: "%1\n"},
+			"tmux display-message -t %1 -p " + listFormat: {
+				stdout: "%1" + fieldSep + "collab" + fieldSep + "0" + fieldSep + "0" + fieldSep + "main" + fieldSep + "111" + fieldSep + "80" + fieldSep + "24" + fieldSep + "human-a" + fieldSep + "/repo" + fieldSep + "zsh" + fieldSep + "1\n",
+			},
+			"tmux send-keys -t %2 -l -- [tmux-bridge from=human-a pane=%1 reply_to=human-a] hi": {},
+			"tmux send-keys -t %2 C-Enter": {},
+		},
+	}, map[string]string{})
+
+	_, err := client.Send(context.Background(), "human-a", "droid-a", "hi")
+	if err != nil {
+		t.Fatalf("Send() error = %v", err)
+	}
+}
+
+func TestSubmitEnterOnlySendsEnterWithoutEscape(t *testing.T) {
+	client := NewWithRunner(fakeRunner{
+		responses: map[string]fakeResponse{
+			"tmux list-panes -a -F " + labelFormat:     {stdout: "%2" + fieldSep + "agent-b\n"},
+			"tmux list-sessions":                       {stdout: "ok\n"},
+			"tmux display-message -t %2 -p #{pane_id}": {stdout: "%2\n"},
+			"tmux display-message -t %2 -p " + listFormat: {
+				stdout: "%2" + fieldSep + "agentctl-collab" + fieldSep + "0" + fieldSep + "1" + fieldSep + "zsh" + fieldSep + "222" + fieldSep + "80" + fieldSep + "24" + fieldSep + "agent-b" + fieldSep + "/repo" + fieldSep + "zsh" + fieldSep + "0\n",
+			},
+			"tmux send-keys -t %2 Enter": {},
+		},
+	}, map[string]string{})
+
+	got, err := client.Submit(context.Background(), "agent-b", SubmitOptions{Mode: SubmitModeEnterOnly})
+	if err != nil {
+		t.Fatalf("Submit() error = %v", err)
+	}
+	if got.Mode != SubmitModeEnterOnly {
+		t.Fatalf("Mode = %q, want %s", got.Mode, SubmitModeEnterOnly)
 	}
 }
 
@@ -761,6 +936,39 @@ func TestDeliverTextUsesTTYForShellPaneWhenAvailable(t *testing.T) {
 	}
 }
 
+func TestDeliverTextComposerLabeledShellCommandSkipsTTYAndPrintf(t *testing.T) {
+	var ttyCalls int
+	prev := writePaneTTY
+	writePaneTTY = func(path, content string) error {
+		ttyCalls++
+		return nil
+	}
+	t.Cleanup(func() { writePaneTTY = prev })
+
+	client := NewWithRunner(fakeRunner{
+		responses: map[string]fakeResponse{
+			"tmux list-sessions":                       {stdout: "ok\n"},
+			"tmux display-message -t %2 -p #{pane_id}": {stdout: "%2\n"},
+			"tmux display-message -t %2 -p " + listFormat: {
+				stdout: "%2" + fieldSep + "collab" + fieldSep + "0" + fieldSep + "1" + fieldSep + "main" + fieldSep + "222" + fieldSep + "80" + fieldSep + "24" + fieldSep + "droid-1" + fieldSep + "/repo" + fieldSep + "zsh" + fieldSep + "0\n",
+			},
+			"tmux send-keys -t %2 -l -- [room x] ping": {},
+			"tmux send-keys -t %2 C-Enter":             {},
+		},
+	}, map[string]string{})
+
+	got, err := client.DeliverText(context.Background(), "%2", "[room x] ping")
+	if err != nil {
+		t.Fatalf("DeliverText() error = %v", err)
+	}
+	if ttyCalls != 0 {
+		t.Fatalf("expected no TTY write for droid-labeled pane, got %d calls", ttyCalls)
+	}
+	if got.Mode != "raw" {
+		t.Fatalf("DeliverText() mode = %q, want raw", got.Mode)
+	}
+}
+
 func TestDeliverTextUsesRawForAgentPane(t *testing.T) {
 	client := NewWithRunner(fakeRunner{
 		responses: map[string]fakeResponse{
@@ -770,7 +978,7 @@ func TestDeliverTextUsesRawForAgentPane(t *testing.T) {
 				stdout: "%2" + fieldSep + "collab" + fieldSep + "0" + fieldSep + "1" + fieldSep + "main" + fieldSep + "222" + fieldSep + "80" + fieldSep + "24" + fieldSep + "codex-b" + fieldSep + "/repo" + fieldSep + "codex" + fieldSep + "0\n",
 			},
 			"tmux send-keys -t %2 -l -- [room alpha] relay smoke": {},
-			"tmux send-keys -t %2 Enter":                          {},
+			"tmux send-keys -t %2 C-Enter":                        {},
 		},
 	}, map[string]string{})
 
@@ -806,6 +1014,28 @@ func TestDeliverTextUsesRawAndEnterForNodeAgentPane(t *testing.T) {
 	}
 }
 
+func TestDeliverTextUsesCtrlEnterForNodeNonGeminiPane(t *testing.T) {
+	client := NewWithRunner(fakeRunner{
+		responses: map[string]fakeResponse{
+			"tmux list-sessions":                        {stdout: "ok\n"},
+			"tmux display-message -t %15 -p #{pane_id}": {stdout: "%15\n"},
+			"tmux display-message -t %15 -p " + listFormat: {
+				stdout: "%15" + fieldSep + "collab" + fieldSep + "0" + fieldSep + "1" + fieldSep + "main" + fieldSep + "222" + fieldSep + "80" + fieldSep + "24" + fieldSep + "cursor-c-a" + fieldSep + "/repo" + fieldSep + "node" + fieldSep + "0\n",
+			},
+			"tmux send-keys -t %15 -l -- [room alpha] composer uses ctrl enter": {},
+			"tmux send-keys -t %15 C-Enter":                                     {},
+		},
+	}, map[string]string{})
+
+	got, err := client.DeliverText(context.Background(), "%15", "[room alpha] composer uses ctrl enter")
+	if err != nil {
+		t.Fatalf("DeliverText() error = %v", err)
+	}
+	if got.Mode != "raw" {
+		t.Fatalf("DeliverText() mode = %q, want raw", got.Mode)
+	}
+}
+
 func TestDeliverTextInterruptingGeminiPaneUsesEscapeBeforeAndAfterPayload(t *testing.T) {
 	client := NewWithRunner(fakeRunner{
 		responses: map[string]fakeResponse{
@@ -829,6 +1059,28 @@ func TestDeliverTextInterruptingGeminiPaneUsesEscapeBeforeAndAfterPayload(t *tes
 	}
 }
 
+func TestDeliverTextInterruptingComposerLabeledPaneSkipsLeadingEscape(t *testing.T) {
+	client := NewWithRunner(fakeRunner{
+		responses: map[string]fakeResponse{
+			"tmux list-sessions":                        {stdout: "ok\n"},
+			"tmux display-message -t %40 -p #{pane_id}": {stdout: "%40\n"},
+			"tmux display-message -t %40 -p " + listFormat: {
+				stdout: "%40" + fieldSep + "collab" + fieldSep + "0" + fieldSep + "3" + fieldSep + "main" + fieldSep + "444" + fieldSep + "80" + fieldSep + "24" + fieldSep + "droid-1" + fieldSep + "/repo" + fieldSep + "zsh" + fieldSep + "0\n",
+			},
+			"tmux send-keys -t %40 -l -- [room alpha] task assigned": {},
+			"tmux send-keys -t %40 C-Enter":                          {},
+		},
+	}, map[string]string{})
+
+	got, err := client.DeliverTextWithOptions(context.Background(), "%40", "[room alpha] task assigned", DeliverOptions{Interrupt: true})
+	if err != nil {
+		t.Fatalf("DeliverTextWithOptions() error = %v", err)
+	}
+	if got.Mode != "raw" {
+		t.Fatalf("DeliverTextWithOptions() mode = %q, want raw", got.Mode)
+	}
+}
+
 func TestDeliverTextUsesRawWithoutEscapeForNonGeminiAgentPane(t *testing.T) {
 	client := NewWithRunner(fakeRunner{
 		responses: map[string]fakeResponse{
@@ -838,7 +1090,7 @@ func TestDeliverTextUsesRawWithoutEscapeForNonGeminiAgentPane(t *testing.T) {
 				stdout: "%2" + fieldSep + "collab" + fieldSep + "0" + fieldSep + "1" + fieldSep + "main" + fieldSep + "222" + fieldSep + "80" + fieldSep + "24" + fieldSep + "codex-b" + fieldSep + "/repo" + fieldSep + "codex" + fieldSep + "0\n",
 			},
 			"tmux send-keys -t %2 -l -- [room alpha] relay smoke": {},
-			"tmux send-keys -t %2 Enter":                          {},
+			"tmux send-keys -t %2 C-Enter":                        {},
 		},
 	}, map[string]string{})
 

@@ -34,6 +34,7 @@ import (
 	llmproviders "github.com/jkatigb/agentctl/internal/providers/llm"
 	"github.com/jkatigb/agentctl/internal/shellreduce"
 	"github.com/jkatigb/agentctl/internal/storage"
+	einoadapter "github.com/jkatigb/agentctl/internal/v2/adapters/eino"
 )
 
 var traceIDContextKey = struct{ Name string }{Name: "agentctl.trace_id"}
@@ -71,6 +72,8 @@ func firstNonEmpty(values ...string) string {
 	}
 	return ""
 }
+
+type runtimeToolHandler func(context.Context, map[string]any) (string, error)
 
 func (r *Runtime) resolveEffectiveLLMTarget(cfg types.AgentConfig) (string, string) {
 	provider := strings.TrimSpace(cfg.LLMProvider)
@@ -208,7 +211,7 @@ type Session struct {
 	ID              string
 	Config          types.AgentConfig
 	Status          types.AgentStatus
-	Engine          *engine.LLMChatEngine
+	Engine          engine.AgentEngine
 	Tools           []engine.ToolDef
 	StartedAt       time.Time
 	EndedAt         *time.Time
@@ -436,7 +439,7 @@ func (r *Runtime) Spawn(ctx context.Context, cfg types.AgentConfig) (*Session, e
 }
 
 // createEngine creates an LLMChatEngine with tools for the given agent configuration.
-func (r *Runtime) createEngine(cfg types.AgentConfig, sessionID string) (*engine.LLMChatEngine, []engine.ToolDef, error) {
+func (r *Runtime) createEngine(cfg types.AgentConfig, sessionID string) (engine.AgentEngine, []engine.ToolDef, error) {
 	workspaceRoot := r.workspaceRootForConfig(cfg)
 	provider, model := r.resolveEffectiveLLMTarget(cfg)
 
@@ -492,6 +495,21 @@ func (r *Runtime) createEngine(cfg types.AgentConfig, sessionID string) (*engine
 	}
 	toolRunner := engine.NewToolRunner(executor, r.config.HookDispatcher, runnerCfg)
 	llmEngine.SetToolRunner(toolRunner)
+
+	// Config gate: opt in to the Eino-backed engine path via AGENTCTL_ENGINE_BACKEND=eino.
+	// When the gate is off (the default), llmEngine is returned unchanged, preserving the
+	// Milestone 1 mailbox-owned default path.
+	//
+	// When the gate is on, we provision a real adk.ChatModelAgent using the provider-resolved
+	// connection parameters from llmEngine.Config() and bridge the real agentctl ToolExecutor
+	// and ToolDefs into the Eino substrate.
+	if einoadapter.IsEinoEnabled() {
+		einoAdapter, err := einoadapter.ProvisionFromLLMConfig(llmEngine.Config(), executor, toolDefs)
+		if err != nil {
+			return nil, nil, fmt.Errorf("eino gate-on provisioning failed: %w", err)
+		}
+		return einoAdapter, toolDefs, nil
+	}
 
 	return llmEngine, toolDefs, nil
 }
@@ -557,12 +575,9 @@ type agentToolExecutor struct {
 // Execute runs a tool by name with the given arguments.
 func (e *agentToolExecutor) Execute(ctx context.Context, name string, args json.RawMessage) (string, error) {
 	fmt.Fprintf(os.Stderr, "[TOOLEXEC] raw_name=%s raw_args=%s\n", name, strings.TrimSpace(string(args)))
-	// Parse args into map
-	var argsMap map[string]any
-	if len(args) > 0 {
-		if err := json.Unmarshal(args, &argsMap); err != nil {
-			return "", fmt.Errorf("parse args: %w", err)
-		}
+	argsMap, err := parseRuntimeToolArgs(args)
+	if err != nil {
+		return "", fmt.Errorf("parse args: %w", err)
 	}
 
 	canonicalName, ok := toolnames.CanonicalizeToolName(toolnames.ToolModeRuntime, name)
@@ -573,123 +588,86 @@ func (e *agentToolExecutor) Execute(ctx context.Context, name string, args json.
 	name = canonicalName
 	fmt.Fprintf(os.Stderr, "[TOOLEXEC] canonical_name=%s\n", name)
 
-	// Execute based on tool name (using underscores for Anthropic API compatibility)
-	var (
-		out string
-		err error
-	)
-	switch name {
-	case "fs_read_file":
-		out, err = e.executeReadFile(ctx, argsMap)
-	case "fs_list_dir":
-		out, err = e.executeListDir(ctx, argsMap)
-	case "fs_write_file":
-		out, err = e.executeWriteFile(ctx, argsMap)
-	case "code_search":
-		out, err = e.executeCodeSearch(ctx, argsMap)
-	case "shell":
-		out, err = e.executeShell(ctx, argsMap)
-	case "think":
-		out, err = e.executeThink(ctx, argsMap)
-	case "end_tick":
-		out, err = e.executeEndTick(ctx, argsMap)
-	// Mailbox tools
-	case "mail_inbox":
-		out, err = e.executeMailInbox(ctx, argsMap)
-	case "mail_send":
-		out, err = e.executeMailSend(ctx, argsMap)
-	case "mail_ack":
-		out, err = e.executeMailAck(ctx, argsMap)
-	// Blackboard tools
-	case "bb_inbox":
-		out, err = e.executeBBInbox(ctx, argsMap)
-	case "bb_post":
-		out, err = e.executeBBPost(ctx, argsMap)
-	case "bb_mark_read":
-		out, err = e.executeBBMarkRead(ctx, argsMap)
-	// Overseer context gathering tools
-	case "context_search":
-		out, err = e.executeContextSearch(ctx, argsMap)
-	case "semantic_search_code":
-		out, err = e.executeSemanticSearchCode(ctx, argsMap)
-	case "semantic_search_sessions":
-		out, err = e.executeSemanticSearchSessions(ctx, argsMap)
-	case "semantic_search_memories":
-		out, err = e.executeSemanticSearchMemories(ctx, argsMap)
-	case "semantic_search_context":
-		out, err = e.executeSemanticSearchContext(ctx, argsMap)
-	case "session_timeline":
-		out, err = e.executeSessionTimeline(ctx, argsMap)
-	case "smart_search":
-		out, err = e.executeSmartSearch(ctx, argsMap)
-	case "code_search_ensemble":
-		out, err = e.executeCodeSearchEnsemble(ctx, argsMap)
-	case "context_grep":
-		out, err = e.executeContextGrep(ctx, argsMap)
-	case "code_symbols":
-		out, err = e.executeCodeSymbols(ctx, argsMap)
-	case "refactor_scout":
-		out, err = e.executeRefactorScout(ctx, argsMap)
-	case "memory_query":
-		out, err = e.executeMemoryQuery(ctx, argsMap)
-	case "agent_memory_context":
-		out, err = e.executeAgentMemoryContext(ctx, argsMap)
-	case "agent_memory_search":
-		out, err = e.executeAgentMemorySearch(ctx, argsMap)
-	case "session_recall":
-		out, err = e.executeSessionRecall(ctx, argsMap)
-	case "annotation_recall":
-		out, err = e.executeAnnotationRecall(ctx, argsMap)
-	case "annotation_list_sessions":
-		out, err = e.executeAnnotationListSessions(ctx)
-	case "annotation_category_stats":
-		out, err = e.executeAnnotationCategoryStats(ctx, argsMap)
-	case "repo_index_search":
-		out, err = e.executeRepoIndexSearch(ctx, argsMap)
-	case "repo_index_expand":
-		out, err = e.executeRepoIndexExpand(ctx, argsMap)
-	case "repo_index_open":
-		out, err = e.executeRepoIndexOpen(ctx, argsMap)
-	case "repo_index_dag_grep":
-		out, err = e.executeRepoIndexDagGrep(ctx, argsMap)
-	case "context_show":
-		out, err = e.executeContextShow(ctx, argsMap)
-	case "context_retrieve":
-		out, err = e.executeContextRetrieve(ctx, argsMap)
-	case "obsidian_index_search":
-		out, err = e.executeObsidianIndexSearch(ctx, argsMap)
-	case "obsidian_read":
-		out, err = e.executeObsidianRead(ctx, argsMap)
-	case "obsidian_related":
-		out, err = e.executeObsidianRelated(ctx, argsMap)
-	case "heartwood_state":
-		out, err = e.executeHeartwoodState(ctx, argsMap)
-	case "heartwood_action":
-		out, err = e.executeHeartwoodAction(ctx, argsMap)
-	case "context_filter":
-		out, err = e.executeContextFilter(ctx, argsMap)
-	// Overseer agent management tools
-	case "agent_spawn":
-		out, err = e.executeAgentSpawn(ctx, argsMap)
-	case "agent_list":
-		out, err = e.executeAgentList(ctx, argsMap)
-	case "agent_status":
-		out, err = e.executeAgentStatus(ctx, argsMap)
-	case "agent_kill":
-		out, err = e.executeAgentKill(ctx, argsMap)
-	case "agent_hierarchy":
-		out, err = e.executeAgentHierarchy(ctx, argsMap)
-	case "agent_wait":
-		out, err = e.executeAgentWait(ctx, argsMap)
-	default:
+	handler, ok := e.runtimeToolHandlers()[name]
+	if !ok {
 		err = fmt.Errorf("unknown tool: %s", name)
+		fmt.Fprintf(os.Stderr, "[TOOLEXEC] tool=%s err=%v\n", name, err)
+		return "", err
 	}
+	out, err := handler(ctx, argsMap)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "[TOOLEXEC] tool=%s err=%v\n", name, err)
 		return "", err
 	}
 	fmt.Fprintf(os.Stderr, "[TOOLEXEC] tool=%s ok output_len=%d\n", name, len(out))
 	return out, nil
+}
+
+func parseRuntimeToolArgs(args json.RawMessage) (map[string]any, error) {
+	if len(args) == 0 {
+		return nil, nil
+	}
+	var argsMap map[string]any
+	if err := json.Unmarshal(args, &argsMap); err != nil {
+		return nil, err
+	}
+	return argsMap, nil
+}
+
+func (e *agentToolExecutor) runtimeToolHandlers() map[string]runtimeToolHandler {
+	return map[string]runtimeToolHandler{
+		"fs_read_file":             e.executeReadFile,
+		"fs_list_dir":              e.executeListDir,
+		"fs_write_file":            e.executeWriteFile,
+		"code_search":              e.executeCodeSearch,
+		"shell":                    e.executeShell,
+		"think":                    e.executeThink,
+		"end_tick":                 e.executeEndTick,
+		"mail_inbox":               e.executeMailInbox,
+		"mail_send":                e.executeMailSend,
+		"mail_ack":                 e.executeMailAck,
+		"bb_inbox":                 e.executeBBInbox,
+		"bb_post":                  e.executeBBPost,
+		"bb_mark_read":             e.executeBBMarkRead,
+		"context_search":           e.executeContextSearch,
+		"semantic_search_code":     e.executeSemanticSearchCode,
+		"semantic_search_sessions": e.executeSemanticSearchSessions,
+		"semantic_search_memories": e.executeSemanticSearchMemories,
+		"semantic_search_context":  e.executeSemanticSearchContext,
+		"session_timeline":         e.executeSessionTimeline,
+		"smart_search":             e.executeSmartSearch,
+		"code_search_ensemble":     e.executeCodeSearchEnsemble,
+		"context_grep":             e.executeContextGrep,
+		"code_symbols":             e.executeCodeSymbols,
+		"refactor_scout":           e.executeRefactorScout,
+		"memory_query":             e.executeMemoryQuery,
+		"agent_memory_context":     e.executeAgentMemoryContext,
+		"agent_memory_search":      e.executeAgentMemorySearch,
+		"session_recall":           e.executeSessionRecall,
+		"annotation_recall":        e.executeAnnotationRecall,
+		"annotation_list_sessions": func(ctx context.Context, _ map[string]any) (string, error) {
+			return e.executeAnnotationListSessions(ctx)
+		},
+		"annotation_category_stats": e.executeAnnotationCategoryStats,
+		"repo_index_search":         e.executeRepoIndexSearch,
+		"repo_index_expand":         e.executeRepoIndexExpand,
+		"repo_index_open":           e.executeRepoIndexOpen,
+		"repo_index_dag_grep":       e.executeRepoIndexDagGrep,
+		"context_show":              e.executeContextShow,
+		"context_retrieve":          e.executeContextRetrieve,
+		"obsidian_index_search":     e.executeObsidianIndexSearch,
+		"obsidian_read":             e.executeObsidianRead,
+		"obsidian_related":          e.executeObsidianRelated,
+		"heartwood_state":           e.executeHeartwoodState,
+		"heartwood_action":          e.executeHeartwoodAction,
+		"context_filter":            e.executeContextFilter,
+		"agent_spawn":               e.executeAgentSpawn,
+		"agent_list":                e.executeAgentList,
+		"agent_status":              e.executeAgentStatus,
+		"agent_kill":                e.executeAgentKill,
+		"agent_hierarchy":           e.executeAgentHierarchy,
+		"agent_wait":                e.executeAgentWait,
+	}
 }
 
 // List returns all available tool definitions.
@@ -885,10 +863,10 @@ func (e *agentToolExecutor) executeMailInbox(ctx context.Context, args map[strin
 
 	// Format messages for the agent
 	var result strings.Builder
-	result.WriteString(fmt.Sprintf("Found %d message(s):\n\n", len(messages)))
+	fmt.Fprintf(&result, "Found %d message(s):\n\n", len(messages))
 	for _, msg := range messages {
-		result.WriteString(fmt.Sprintf("ID: %s\nFrom: %s\nType: %s\n", msg.ID, msg.FromNS, msg.Type))
-		result.WriteString(fmt.Sprintf("Content: %s\n---\n", string(msg.Payload)))
+		fmt.Fprintf(&result, "ID: %s\nFrom: %s\nType: %s\n", msg.ID, msg.FromNS, msg.Type)
+		fmt.Fprintf(&result, "Content: %s\n---\n", string(msg.Payload))
 	}
 	return result.String(), nil
 }
@@ -2377,152 +2355,182 @@ func summarizeToolData(label string, data any) string {
 	if !ok {
 		return ""
 	}
-	switch label {
-	case "shell":
-		route, _ := m["route"].(map[string]any)
-		summary := stringFromMap(m, "summary")
-		if summary == "" {
-			return ""
-		}
-		var b strings.Builder
-		b.WriteString("Structured shell\n")
-		writeKeyValueLine(&b, "Backend", firstNonEmptyString(stringFromMap(route, "skill"), stringFromMap(route, "native")))
-		writeKeyValueLine(&b, "Intent", stringFromMap(route, "intent"))
-		writeListLine(&b, "Notes", stringSliceFromMap(route, "notes"), 4)
-		b.WriteString(strings.TrimSpace(summary))
-		if measure := shellreduce.MeasureSummaryLine(asStringMap(m["measure"])); measure != "" {
-			b.WriteString("\n")
-			b.WriteString(measure)
-		}
-		return strings.TrimSpace(b.String())
-	case "context_show":
-		top, ok := m["top_of_mind"].(map[string]any)
-		if !ok {
-			return ""
-		}
-		var b strings.Builder
-		b.WriteString("Top of mind\n")
-		writeKeyValueLine(&b, "Workspace", stringFromMap(top, "workspace_id"))
-		writeKeyValueLine(&b, "Objective", stringFromMap(top, "objective"))
-		writeKeyValueLine(&b, "Phase", stringFromMap(top, "phase"))
-		writeListLine(&b, "Active tasks", stringSliceFromMap(top, "active_task_ids"), 5)
-		writeListLine(&b, "Next actions", stringSliceFromMap(top, "next_actions"), 5)
-		return strings.TrimSpace(b.String())
-	case "context_retrieve":
-		result, ok := m["result"].(map[string]any)
-		if !ok {
-			return ""
-		}
-		var b strings.Builder
-		b.WriteString("Retrieved context\n")
-		writeKeyValueLine(&b, "Query", stringFromMap(result, "query"))
-		if top, ok := result["top_of_mind"].(map[string]any); ok {
-			writeKeyValueLine(&b, "Objective", stringFromMap(top, "objective"))
-			writeKeyValueLine(&b, "Phase", stringFromMap(top, "phase"))
-		}
-		if hits, ok := result["vault_hits"].([]any); ok && len(hits) > 0 {
-			b.WriteString("Vault hits:\n")
-			for _, item := range hits[:minInt(len(hits), 5)] {
-				hit, ok := item.(map[string]any)
-				if !ok {
-					continue
-				}
-				title := stringFromMap(hit, "title")
-				path := stringFromMap(hit, "path")
-				snippet := stringFromMap(hit, "snippet")
-				b.WriteString("- " + firstNonEmptyString(title, path) + " [" + path + "]\n")
-				if snippet != "" {
-					b.WriteString("  " + snippet + "\n")
-				}
-			}
-		}
-		return strings.TrimSpace(b.String())
-	case "obsidian_index_search":
-		var b strings.Builder
-		b.WriteString("Vault index search\n")
-		if query := stringFromMap(m, "query"); query != "" {
-			writeKeyValueLine(&b, "Query", query)
-		}
-		if hits, ok := m["hits"].([]any); ok {
-			if len(hits) == 0 {
-				b.WriteString("No hits.\n")
-				return strings.TrimSpace(b.String())
-			}
-			b.WriteString("Hits:\n")
-			for _, item := range hits[:minInt(len(hits), 5)] {
-				hit, ok := item.(map[string]any)
-				if !ok {
-					continue
-				}
-				title := stringFromMap(hit, "title")
-				path := stringFromMap(hit, "path")
-				snippet := stringFromMap(hit, "snippet")
-				b.WriteString("- " + firstNonEmptyString(title, path) + " [" + path + "]\n")
-				if snippet != "" {
-					b.WriteString("  " + snippet + "\n")
-				}
-			}
-			return strings.TrimSpace(b.String())
-		}
-	case "obsidian_read":
-		if result, ok := m["result"].(map[string]any); ok {
-			content := stringFromMap(result, "content")
-			if content != "" {
-				return content
-			}
-		}
-	case "obsidian_related":
-		var b strings.Builder
-		b.WriteString("Related notes\n")
-		if items, ok := m["results"].([]any); ok {
-			if len(items) == 0 {
-				b.WriteString("No related notes.\n")
-				return strings.TrimSpace(b.String())
-			}
-			for _, item := range items[:minInt(len(items), 5)] {
-				if hit, ok := item.(map[string]any); ok {
-					title := stringFromMap(hit, "title")
-					path := stringFromMap(hit, "path")
-					b.WriteString("- " + firstNonEmptyString(title, path) + " [" + path + "]\n")
-				}
-			}
-			return strings.TrimSpace(b.String())
-		}
-	case "agent_memory_context":
-		if text := stringFromMap(m, "context"); text != "" {
-			return text
-		}
-	case "agent_memory_search":
-		results, ok := m["results"].([]any)
-		if !ok {
-			return ""
-		}
-		var b strings.Builder
-		b.WriteString("Memory search\n")
-		writeKeyValueLine(&b, "Query", stringFromMap(m, "query"))
-		for _, item := range results[:minInt(len(results), 5)] {
-			row, ok := item.(map[string]any)
-			if !ok {
-				continue
-			}
-			name := stringFromMap(row, "name")
-			typ := stringFromMap(row, "type")
-			summary := stringFromMap(row, "summary")
-			if name == "" && summary == "" {
-				continue
-			}
-			line := "- " + name
-			if typ != "" {
-				line += " [" + typ + "]"
-			}
-			if summary != "" {
-				line += ": " + summary
-			}
-			b.WriteString(line + "\n")
-		}
-		return strings.TrimSpace(b.String())
+	if summarizer, ok := runtimeToolDataSummarizers()[label]; ok {
+		return summarizer(m)
 	}
 	return ""
+}
+
+type runtimeToolDataSummarizer func(map[string]any) string
+
+func runtimeToolDataSummarizers() map[string]runtimeToolDataSummarizer {
+	return map[string]runtimeToolDataSummarizer{
+		"shell":                 summarizeShellToolData,
+		"context_show":          summarizeContextShowToolData,
+		"context_retrieve":      summarizeContextRetrieveToolData,
+		"obsidian_index_search": summarizeObsidianIndexSearchToolData,
+		"obsidian_read":         summarizeObsidianReadToolData,
+		"obsidian_related":      summarizeObsidianRelatedToolData,
+		"agent_memory_context":  summarizeAgentMemoryContextToolData,
+		"agent_memory_search":   summarizeAgentMemorySearchToolData,
+	}
+}
+
+func summarizeShellToolData(m map[string]any) string {
+	route, _ := m["route"].(map[string]any)
+	summary := stringFromMap(m, "summary")
+	if summary == "" {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("Structured shell\n")
+	writeKeyValueLine(&b, "Backend", firstNonEmptyString(stringFromMap(route, "skill"), stringFromMap(route, "native")))
+	writeKeyValueLine(&b, "Intent", stringFromMap(route, "intent"))
+	writeListLine(&b, "Notes", stringSliceFromMap(route, "notes"), 4)
+	b.WriteString(strings.TrimSpace(summary))
+	if measure := shellreduce.MeasureSummaryLine(asStringMap(m["measure"])); measure != "" {
+		b.WriteString("\n")
+		b.WriteString(measure)
+	}
+	return strings.TrimSpace(b.String())
+}
+
+func summarizeContextShowToolData(m map[string]any) string {
+	top, ok := m["top_of_mind"].(map[string]any)
+	if !ok {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("Top of mind\n")
+	writeKeyValueLine(&b, "Workspace", stringFromMap(top, "workspace_id"))
+	writeKeyValueLine(&b, "Objective", stringFromMap(top, "objective"))
+	writeKeyValueLine(&b, "Phase", stringFromMap(top, "phase"))
+	writeListLine(&b, "Active tasks", stringSliceFromMap(top, "active_task_ids"), 5)
+	writeListLine(&b, "Next actions", stringSliceFromMap(top, "next_actions"), 5)
+	return strings.TrimSpace(b.String())
+}
+
+func summarizeContextRetrieveToolData(m map[string]any) string {
+	result, ok := m["result"].(map[string]any)
+	if !ok {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("Retrieved context\n")
+	writeKeyValueLine(&b, "Query", stringFromMap(result, "query"))
+	if top, ok := result["top_of_mind"].(map[string]any); ok {
+		writeKeyValueLine(&b, "Objective", stringFromMap(top, "objective"))
+		writeKeyValueLine(&b, "Phase", stringFromMap(top, "phase"))
+	}
+	if hits, ok := result["vault_hits"].([]any); ok && len(hits) > 0 {
+		b.WriteString("Vault hits:\n")
+		writeVaultHitLines(&b, hits)
+	}
+	return strings.TrimSpace(b.String())
+}
+
+func summarizeObsidianIndexSearchToolData(m map[string]any) string {
+	var b strings.Builder
+	b.WriteString("Vault index search\n")
+	if query := stringFromMap(m, "query"); query != "" {
+		writeKeyValueLine(&b, "Query", query)
+	}
+	hits, ok := m["hits"].([]any)
+	if !ok {
+		return ""
+	}
+	if len(hits) == 0 {
+		b.WriteString("No hits.\n")
+		return strings.TrimSpace(b.String())
+	}
+	b.WriteString("Hits:\n")
+	writeVaultHitLines(&b, hits)
+	return strings.TrimSpace(b.String())
+}
+
+func summarizeObsidianReadToolData(m map[string]any) string {
+	if result, ok := m["result"].(map[string]any); ok {
+		return stringFromMap(result, "content")
+	}
+	return ""
+}
+
+func summarizeObsidianRelatedToolData(m map[string]any) string {
+	items, ok := m["results"].([]any)
+	if !ok {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("Related notes\n")
+	if len(items) == 0 {
+		b.WriteString("No related notes.\n")
+		return strings.TrimSpace(b.String())
+	}
+	for _, item := range items[:minInt(len(items), 5)] {
+		if hit, ok := item.(map[string]any); ok {
+			title := stringFromMap(hit, "title")
+			path := stringFromMap(hit, "path")
+			b.WriteString("- " + firstNonEmptyString(title, path) + " [" + path + "]\n")
+		}
+	}
+	return strings.TrimSpace(b.String())
+}
+
+func summarizeAgentMemoryContextToolData(m map[string]any) string {
+	return stringFromMap(m, "context")
+}
+
+func summarizeAgentMemorySearchToolData(m map[string]any) string {
+	results, ok := m["results"].([]any)
+	if !ok {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("Memory search\n")
+	writeKeyValueLine(&b, "Query", stringFromMap(m, "query"))
+	for _, item := range results[:minInt(len(results), 5)] {
+		row, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		if line := formatAgentMemorySearchLine(row); line != "" {
+			b.WriteString(line + "\n")
+		}
+	}
+	return strings.TrimSpace(b.String())
+}
+
+func writeVaultHitLines(b *strings.Builder, hits []any) {
+	for _, item := range hits[:minInt(len(hits), 5)] {
+		hit, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		title := stringFromMap(hit, "title")
+		path := stringFromMap(hit, "path")
+		snippet := stringFromMap(hit, "snippet")
+		b.WriteString("- " + firstNonEmptyString(title, path) + " [" + path + "]\n")
+		if snippet != "" {
+			b.WriteString("  " + snippet + "\n")
+		}
+	}
+}
+
+func formatAgentMemorySearchLine(row map[string]any) string {
+	name := stringFromMap(row, "name")
+	typ := stringFromMap(row, "type")
+	summary := stringFromMap(row, "summary")
+	if name == "" && summary == "" {
+		return ""
+	}
+	line := "- " + name
+	if typ != "" {
+		line += " [" + typ + "]"
+	}
+	if summary != "" {
+		line += ": " + summary
+	}
+	return line
 }
 
 func writeKeyValueLine(b *strings.Builder, label, value string) {
@@ -2613,13 +2621,7 @@ func buildToolDefsForRole(role types.AgentRole, hasMailbox, hasBoard bool, allow
 	}
 
 	// Scout roles only get their specialized tools — no base file tools
-	isScout := role == types.RoleSemanticScout ||
-		role == types.RoleDAGScout ||
-		role == types.RoleSymbolScout ||
-		role == types.RoleAnnotationScout ||
-		role == types.RoleMemoryFactScout ||
-		role == types.RoleMemoryTimelineScout ||
-		role == types.RoleACAContextScout
+	isScout := isRuntimeScoutRole(role)
 	if !isScout {
 		tools = append(tools,
 			engine.ToolDef{
@@ -3416,14 +3418,27 @@ func buildToolDefsForRole(role types.AgentRole, hasMailbox, hasBoard bool, allow
 		)
 	}
 
-	if len(allowlist) > 0 {
-		allowlist = toolnames.NormalizeAllowlist(toolnames.ToolModeRuntime, allowlist)
-	}
-	if len(allowlist) > 0 {
-		tools = filterToolDefs(tools, allowlist)
-	}
+	return applyRuntimeToolAllowlist(tools, allowlist)
+}
 
-	return tools
+func isRuntimeScoutRole(role types.AgentRole) bool {
+	switch role {
+	case types.RoleSemanticScout, types.RoleDAGScout, types.RoleSymbolScout, types.RoleAnnotationScout, types.RoleMemoryFactScout, types.RoleMemoryTimelineScout, types.RoleACAContextScout:
+		return true
+	default:
+		return false
+	}
+}
+
+func applyRuntimeToolAllowlist(toolDefs []engine.ToolDef, allowlist []string) []engine.ToolDef {
+	if len(allowlist) == 0 {
+		return toolDefs
+	}
+	normalized := toolnames.NormalizeAllowlist(toolnames.ToolModeRuntime, allowlist)
+	if len(normalized) == 0 {
+		return toolDefs
+	}
+	return filterToolDefs(toolDefs, normalized)
 }
 
 func filterToolDefs(toolDefs []engine.ToolDef, allowlist []string) []engine.ToolDef {
@@ -3488,44 +3503,14 @@ func (r *Runtime) runSession(ctx context.Context, session *Session) {
 		}
 	}()
 
-	// Apply session timeout when configured. A zero timeout means no outer session deadline.
-	var cancel context.CancelFunc
-	if session.Config.Timeout > 0 {
-		ctx, cancel = context.WithTimeout(ctx, session.Config.Timeout)
-	} else {
-		ctx, cancel = context.WithCancel(ctx)
-	}
+	ctx, cancel := r.withSessionTimeout(ctx, session)
 	defer cancel()
 
-	// Check if context is already canceled
-	if ctx.Err() != nil {
-		session.mu.Lock()
-		session.Status = types.StatusCanceled
-		session.Error = "context canceled before start"
-		now := time.Now()
-		session.EndedAt = &now
-		session.mu.Unlock()
-		r.persistSessionStatus(session)
+	if r.finishSessionBeforeStartIfCanceled(ctx, session) {
 		return
 	}
 
-	// Build the system prompt and task message
-	session.mu.Lock()
-	session.SystemPrompt = agentprompt.InstructionRuntime(session.Config.Role)
-	taskPrompt := strings.TrimSpace(session.Config.Prompt)
-	session.mu.Unlock()
-	if taskPrompt == "" {
-		resolvedPrompt := r.buildTaskPrompt(ctx, session.Config)
-		session.mu.Lock()
-		if strings.TrimSpace(session.Config.Prompt) == "" {
-			session.Config.Prompt = resolvedPrompt
-		}
-		taskPrompt = strings.TrimSpace(session.Config.Prompt)
-		session.mu.Unlock()
-	}
-	if preface, ok := r.buildRefactorScoutPreface(ctx, session, taskPrompt); ok {
-		taskPrompt = mergeRefactorScoutTaskPrompt(taskPrompt, preface)
-	}
+	taskPrompt := r.buildSessionTaskPrompt(ctx, session)
 	var result string
 	var bestResult string // Track most substantive response for summary
 	var engineRetries int
@@ -3695,78 +3680,93 @@ func (r *Runtime) runSession(ctx context.Context, session *Session) {
 		break
 	}
 
-	// Handle exec_mode after initial prompt execution
+	result = r.runSessionExecMode(ctx, session, result, &bestResult)
+	r.completeSessionRun(ctx, session, workspaceRoot, sessionStart, result, bestResult)
+}
+
+func (r *Runtime) withSessionTimeout(ctx context.Context, session *Session) (context.Context, context.CancelFunc) {
+	if session.Config.Timeout > 0 {
+		return context.WithTimeout(ctx, session.Config.Timeout)
+	}
+	return context.WithCancel(ctx)
+}
+
+func (r *Runtime) finishSessionBeforeStartIfCanceled(ctx context.Context, session *Session) bool {
+	if ctx.Err() == nil {
+		return false
+	}
+	session.mu.Lock()
+	session.Status = types.StatusCanceled
+	session.Error = "context canceled before start"
+	now := time.Now()
+	session.EndedAt = &now
+	session.mu.Unlock()
+	r.persistSessionStatus(session)
+	return true
+}
+
+func (r *Runtime) buildSessionTaskPrompt(ctx context.Context, session *Session) string {
+	session.mu.Lock()
+	session.SystemPrompt = agentprompt.InstructionRuntime(session.Config.Role)
+	taskPrompt := strings.TrimSpace(session.Config.Prompt)
+	session.mu.Unlock()
+	if taskPrompt == "" {
+		resolvedPrompt := r.buildTaskPrompt(ctx, session.Config)
+		session.mu.Lock()
+		if strings.TrimSpace(session.Config.Prompt) == "" {
+			session.Config.Prompt = resolvedPrompt
+		}
+		taskPrompt = strings.TrimSpace(session.Config.Prompt)
+		session.mu.Unlock()
+	}
+	if preface, ok := r.buildRefactorScoutPreface(ctx, session, taskPrompt); ok {
+		return mergeRefactorScoutTaskPrompt(taskPrompt, preface)
+	}
+	return taskPrompt
+}
+
+func (r *Runtime) runSessionExecMode(ctx context.Context, session *Session, result string, bestResult *string) string {
 	switch session.Config.ExecMode {
 	case agent.ModeAutonomous:
-		// Run autonomous continuation loop
-		result = r.runAutonomousContinuation(ctx, session, result, &bestResult)
-
+		return r.runAutonomousContinuation(ctx, session, result, bestResult)
 	case agent.ModeAutonomousReactive:
-		// Run autonomous continuation first, then stay alive in reactive mode.
-		result = r.runAutonomousContinuation(ctx, session, result, &bestResult)
-
-		session.mu.Lock()
-		session.Status = types.StatusRunning
-		session.mu.Unlock()
-		r.persistSessionStatus(session)
-
-		r.runMessageLoop(ctx, session, 0)
-
+		result = r.runAutonomousContinuation(ctx, session, result, bestResult)
+		r.runSessionMessageLoop(session, ctx, 0)
+		return result
 	case agent.ModeReactive:
-		// Reactive mode: stay alive polling for messages
-		// Update status to running while in message loop
-		session.mu.Lock()
-		session.Status = types.StatusRunning
-		session.mu.Unlock()
-		r.persistSessionStatus(session)
-
-		// Enter message loop (blocks until context canceled)
-		r.runMessageLoop(ctx, session, 0)
-
-	case agent.ModeProactive:
-		// Proactive mode: stay alive with think cycles + message polling
-		session.mu.Lock()
-		session.Status = types.StatusRunning
-		session.mu.Unlock()
-		r.persistSessionStatus(session)
-
-		thinkInterval := scheduledTickInterval(session.Config.ThinkInterval)
-
-		// Enter message loop with proactive think cycles (blocks until context canceled)
-		r.runMessageLoop(ctx, session, thinkInterval)
-
-	case agent.ModeTick:
-		// Tick mode: stay alive with interval-driven simulation/work cycles + message polling
-		session.mu.Lock()
-		session.Status = types.StatusRunning
-		session.mu.Unlock()
-		r.persistSessionStatus(session)
-
-		thinkInterval := scheduledTickInterval(session.Config.ThinkInterval)
-
-		r.runMessageLoop(ctx, session, thinkInterval)
-
-	default:
-		// Default (empty or unknown): complete immediately after initial response
+		r.runSessionMessageLoop(session, ctx, 0)
+	case agent.ModeProactive, agent.ModeTick:
+		r.runSessionMessageLoop(session, ctx, scheduledTickInterval(session.Config.ThinkInterval))
 	}
+	return result
+}
 
-	// Check if context was canceled before marking OK
+func (r *Runtime) runSessionMessageLoop(session *Session, ctx context.Context, thinkInterval time.Duration) {
+	session.mu.Lock()
+	session.Status = types.StatusRunning
+	session.mu.Unlock()
+	r.persistSessionStatus(session)
+	r.runMessageLoop(ctx, session, thinkInterval)
+}
+
+func (r *Runtime) completeSessionRun(ctx context.Context, session *Session, workspaceRoot string, sessionStart time.Time, result, bestResult string) {
 	session.mu.Lock()
 	now := time.Now()
 	session.EndedAt = &now
-	if session.endTickRequested {
+	switch {
+	case session.endTickRequested:
 		session.Status = types.StatusOK
 		session.Error = ""
 		if bestResult == "" {
 			bestResult = "tick ended"
 		}
-	} else if ctx.Err() == context.Canceled {
+	case ctx.Err() == context.Canceled:
 		session.Status = types.StatusCanceled
 		session.Error = "session canceled"
-	} else if ctx.Err() == context.DeadlineExceeded {
+	case ctx.Err() == context.DeadlineExceeded:
 		session.Status = types.StatusError
 		session.Error = "session timeout"
-	} else {
+	default:
 		session.Status = types.StatusOK
 	}
 	if bestResult != "" {
@@ -3780,8 +3780,6 @@ func (r *Runtime) runSession(ctx context.Context, session *Session) {
 	session.mu.Unlock()
 
 	r.persistSessionStatus(session)
-
-	// Emit completion event for real-time activity tracking
 	observability.Emit(ctx, observability.NewEvent(observability.OpAgentComplete).
 		WithComponent(observability.ComponentAgent).
 		WithSession(session.ID, session.Config.ActorID).

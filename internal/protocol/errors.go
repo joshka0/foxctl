@@ -1,5 +1,7 @@
 package protocol
 
+import "fmt"
+
 // ErrorCode represents a canonical error code from Core Profile v1.
 type ErrorCode string
 
@@ -47,6 +49,25 @@ const (
 // String returns the string representation of the error code.
 func (c ErrorCode) String() string {
 	return string(c)
+}
+
+// WrittenEnvelopeError indicates that a terminal error envelope was already
+// written to stdout. CLI entrypoints should exit non-zero without printing an
+// additional human-readable error line when this is returned.
+type WrittenEnvelopeError struct {
+	Command string
+	Code    ErrorCode
+	Message string
+}
+
+func (e *WrittenEnvelopeError) Error() string {
+	if e == nil {
+		return ""
+	}
+	if e.Command == "" {
+		return fmt.Sprintf("%s: %s", e.Code, e.Message)
+	}
+	return fmt.Sprintf("%s (%s): %s", e.Command, e.Code, e.Message)
 }
 
 // IsRetryable returns true if the error code indicates a transient failure

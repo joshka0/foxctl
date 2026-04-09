@@ -17,9 +17,9 @@ Use this skill when multiple AI agents are open in tmux or zellij and need to:
 
 - the live mux pane layer can be `tmux` or `zellij`
 - `agentctl mux` is the backend-neutral create/read/send surface
-- `agentctl mux submit` is the backend-neutral "submit current draft" surface
 - `agentctl room` is the durable shared room surface
-- `room relay` and `room loop` fan room events back into terminal panes
+- `room relay` and `room loop` fan room events back into terminal panes (delivery ends with a newline/submit so the agent UI accepts the text)
+- `room send`: prefer **`--to <participant>`** and **`--sender <you>`** when addressing or when identity is ambiguous; from inside tmux/zellij the sender often infers from the pane. After storing, agentctl live-relays to targets and mux-submits the **current** pane (`--no-mux-submit` / `--no-live-relay` to skip either)
 - `tmux-bridge` is an optional low-level helper
 - ACA and the vault keep only promoted observations, tensions, and handoffs
 
@@ -62,13 +62,6 @@ Send a message natively:
 
 ```bash
 agentctl mux send agent-b "Review internal/actor/supervisor.go for mailbox ack risks."
-```
-
-Submit a drafted message in the target mux surface:
-
-```bash
-agentctl mux submit agent-b
-agentctl mux submit --backend zellij --session alpha-room
 ```
 
 For autonomous panes, prefer `--mode auto`:
@@ -136,17 +129,13 @@ agentctl mux create --session agentctl-collab --panes 3 --pane-command codex
 agentctl mux list
 agentctl mux read <target> --lines 50
 agentctl mux send <target> "review this pane" [--sender <pane-label>]
-agentctl mux submit [<target>] [--backend tmux|zellij] [--session <session-name>]
 agentctl mux observe <target> --lines 80
 agentctl mux doctor
 ```
 
 Use `agentctl mux ...` when you want machine-friendly envelopes, pane metadata, and a native send path that does not depend on repo-local scripts. `agentctl tmux ...` remains as a compatibility alias.
 
-Use `agentctl mux submit` when the text is already sitting in an agent composer and you only need the standard submit gesture:
-
-- tmux: targeted `Escape` then `Enter`
-- zellij: `Escape` then `Enter` on the focused pane in the named session
+Do **not** document `mux submit` as a primary workflow: room relay/loop and `room send` already cover submit behavior for coordination.
 
 When `agentctl mux create` launches a tmux agent pane with direct room access, agentctl also injects a lightweight startup note into that pane telling the agent to read `agentctl-tmux` and `agentctl-room`, along with the initial `room status` / `room inbox` / `room task list` commands for the attached room.
 
@@ -259,6 +248,13 @@ agentctl room join <room-id> --current --role <room-role>
 
 Use that in each zellij pane that should receive room traffic. For zellij,
 room membership is pane-bound, not merely session-bound.
+
+If an existing participant moves to a different pane, repair the stored mux
+binding instead of pretending it is a new member:
+
+```bash
+agentctl room rebind <room-id> <actor-id> --backend <tmux|zellij> --session <session> --pane-id <pane>
+```
 
 The intended room policy is:
 

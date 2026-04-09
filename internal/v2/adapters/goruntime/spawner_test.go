@@ -214,6 +214,59 @@ func TestChildSpawner_SpawnChild_CanBeCancelledViaSignaler(t *testing.T) {
 	}
 }
 
+func TestChildSpawner_SpawnChild_EmitsHeartbeatWhileRunning(t *testing.T) {
+	t.Parallel()
+
+	state := runtimeworkers.NewStateComponent(runtimeworkers.Config{Buffer: 64})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { done <- state.Run(ctx) }()
+
+	spawner, err := NewChildSpawner(ChildSpawnerConfig{
+		Publisher:         state,
+		HeartbeatInterval: 10 * time.Millisecond,
+		BuildCommand: func(req spawn.Request) (CommandSpec, error) {
+			return CommandSpec{
+				Path: "/bin/sh",
+				Args: []string{"-c", "sleep 0.2"},
+			}, nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewChildSpawner() error = %v", err)
+	}
+
+	if _, err := spawner.SpawnChild(context.Background(), spawn.Request{
+		RequestID:     "req-heartbeat-1",
+		RunID:         "run-heartbeat-1",
+		AgentID:       "agent:heartbeat-1",
+		Role:          "worker",
+		ParentAgentID: "agent:parent",
+		Metadata:      map[string]any{"workspace_id": "ws-heartbeat"},
+	}); err != nil {
+		t.Fatalf("SpawnChild() error = %v", err)
+	}
+
+	record := waitForHeartbeat(t, state, "subprocess:agent:heartbeat-1")
+	if record.WorkspaceID != "ws-heartbeat" {
+		t.Fatalf("workspace_id=%q want ws-heartbeat", record.WorkspaceID)
+	}
+	if record.HeartbeatAt.IsZero() {
+		t.Fatal("expected heartbeat_at to be populated")
+	}
+	if record.UpdatedAt.Before(record.HeartbeatAt) {
+		// okay; UpdatedAt should track the latest event, including heartbeats.
+	} else if !record.UpdatedAt.Equal(record.HeartbeatAt) {
+		t.Fatalf("updated_at=%s want latest heartbeat timestamp %s", record.UpdatedAt, record.HeartbeatAt)
+	}
+
+	cancel()
+	if err := <-done; err != nil {
+		t.Fatalf("state.Run() error = %v", err)
+	}
+}
+
 func TestChildSpawner_SpawnChild_FailsWithoutParent(t *testing.T) {
 	t.Parallel()
 
@@ -434,6 +487,21 @@ func waitForRecentLogs(t *testing.T, state *runtimeworkers.StateComponent, worke
 	}
 	t.Fatalf("worker %q did not accumulate %d recent log entries", workerID, minCount)
 	return nil
+}
+
+func waitForHeartbeat(t *testing.T, state *runtimeworkers.StateComponent, workerID string) coreworker.Record {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		snapshot := state.Snapshot()
+		record, ok := snapshot.Workers[workerID]
+		if ok && !record.HeartbeatAt.IsZero() {
+			return record
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatalf("worker %q did not emit heartbeat", workerID)
+	return coreworker.Record{}
 }
 
 func recentLogsContainAnyText(recentLogs []any, wantTexts ...string) bool {

@@ -15,6 +15,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/agentprompt"
 	"github.com/jkatigb/agentctl/internal/engine"
 	"github.com/jkatigb/agentctl/internal/storage/sessions"
+	einoadapter "github.com/jkatigb/agentctl/internal/v2/adapters/eino"
 )
 
 func TestAgentInstruction_CoderRole(t *testing.T) {
@@ -279,6 +280,109 @@ func TestSpawnPersistsResolvedPromptVariant(t *testing.T) {
 	}
 	if stored.PromptHash == "" {
 		t.Fatal("stored.PromptHash is empty")
+	}
+}
+
+func TestCreateEngine_DefaultPathUnaffectedWhenEinoDisabled(t *testing.T) {
+	t.Setenv(einoadapter.EnvEngineBackend, "")
+
+	rt := NewRuntime(Config{
+		DefaultMaxIterations: 1,
+		DefaultTimeout:       5 * time.Second,
+		LLMProvider:          "openai",
+		LLMModel:             "test-model",
+		LLMAPIKey:            "test-key",
+		LLMBaseURL:           "http://example.invalid",
+	})
+
+	eng, tools, err := rt.createEngine(types.AgentConfig{
+		Role:          types.RoleCoder,
+		ActorID:       "actor:test:coder",
+		WorkspaceID:   "ws-test",
+		MaxIterations: 1,
+		Timeout:       5 * time.Second,
+	}, "session-test")
+	if err != nil {
+		t.Fatalf("createEngine() error = %v", err)
+	}
+	if eng == nil {
+		t.Fatal("createEngine() returned nil engine")
+	}
+	if _, ok := eng.(*engine.LLMChatEngine); !ok {
+		t.Fatalf("createEngine() engine type = %T want *engine.LLMChatEngine when Eino gate is disabled", eng)
+	}
+	if len(tools) == 0 {
+		t.Fatal("createEngine() returned no tool definitions for default path")
+	}
+}
+
+func TestCreateEngine_EinoGateProvisionsRealAdapter(t *testing.T) {
+	t.Setenv(einoadapter.EnvEngineBackend, "eino")
+
+	rt := NewRuntime(Config{
+		DefaultMaxIterations: 1,
+		DefaultTimeout:       5 * time.Second,
+		LLMProvider:          "openai",
+		LLMModel:             "test-model",
+		LLMAPIKey:            "test-key",
+		LLMBaseURL:           "http://example.invalid",
+	})
+
+	eng, _, err := rt.createEngine(types.AgentConfig{
+		Role:          types.RoleCoder,
+		ActorID:       "actor:test:coder",
+		WorkspaceID:   "ws-test",
+		MaxIterations: 1,
+		Timeout:       5 * time.Second,
+	}, "session-test")
+	if err != nil {
+		t.Fatalf("createEngine() error = %v; gate-on should succeed with valid config", err)
+	}
+	if eng == nil {
+		t.Fatal("createEngine() engine = nil; expected a provisioned EinoEngineAdapter")
+	}
+}
+
+func TestCreateEngine_EinoGatePassesTools(t *testing.T) {
+	t.Setenv(einoadapter.EnvEngineBackend, "eino")
+
+	rt := NewRuntime(Config{
+		DefaultMaxIterations: 1,
+		DefaultTimeout:       5 * time.Second,
+		LLMProvider:          "openai",
+		LLMModel:             "test-model",
+		LLMAPIKey:            "test-key",
+		LLMBaseURL:           "http://example.invalid",
+	})
+
+	_, tools, err := rt.createEngine(types.AgentConfig{
+		Role:          types.RoleCoder,
+		ActorID:       "actor:test:coder",
+		WorkspaceID:   "ws-test",
+		MaxIterations: 1,
+		Timeout:       5 * time.Second,
+	}, "session-test")
+	if err != nil {
+		t.Fatalf("createEngine() error = %v", err)
+	}
+
+	// Verify that tools are returned even when Eino is enabled.
+	// In Milestone 1 spike, tools might have been empty or ignored.
+	// In Milestone 2, they must be passed through and returned.
+	if len(tools) == 0 {
+		t.Error("createEngine() returned no tool definitions when Eino is enabled")
+	}
+
+	// Check for a known coder tool
+	found := false
+	for _, tool := range tools {
+		if tool.Name == "fs_read_file" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("createEngine() tools missing 'fs_read_file'; got %v", tools)
 	}
 }
 

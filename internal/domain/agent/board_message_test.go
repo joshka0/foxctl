@@ -331,3 +331,37 @@ func TestConstants(t *testing.T) {
 		t.Errorf("BroadcastRecipient = %q, want %q", BroadcastRecipient, "*")
 	}
 }
+
+func TestCompactRoomSummaryForInboxOmitsBulkLists(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, 4, 7, 12, 0, 0, 0, time.UTC)
+	s := RoomSummary{
+		ID:               "r1",
+		WorkspaceID:      "/ws",
+		Stream:           "room:r1",
+		Title:            "T",
+		DispatchPolicy:   "all_subtree",
+		CreatedAt:        now,
+		UpdatedAt:        now,
+		LatestSubject:    "subj",
+		LatestPreview:    "prev",
+		LatestSender:     "human-a",
+		LatestMessageAt:  now,
+		MessageCount:     9,
+		UnreadCount:      3,
+		Participants:     []string{"a", "b"},
+		TaskIDs:          []string{"t1", "t2"},
+		Members:          []RoomMember{{ActorID: "a", JoinedAt: now}},
+		Description:      "long description",
+		DispatchAgentIDs: []string{"x"},
+	}
+	got := CompactRoomSummaryForInbox(s)
+	for _, key := range []string{"task_ids", "participants", "members", "description", "dispatch_agent_ids"} {
+		if _, ok := got[key]; ok {
+			t.Fatalf("unexpected key %q in compact summary", key)
+		}
+	}
+	if got["id"] != "r1" || got["message_count"] != 9 {
+		t.Fatalf("got=%v", got)
+	}
+}

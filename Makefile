@@ -17,12 +17,13 @@ BINARY ?= agentctl
 GOFUMPT ?= gofumpt
 GOLANGCI ?= golangci-lint
 GOLANGCI_TIMEOUT ?= 10m
+LINT_TARGETS ?= ./...
 GOFILES := $(shell find cmd internal skills -name '*.go')
 SKILL_DIRS := $(shell find skills -mindepth 1 -maxdepth 1 -type d)
 # Skills requiring CGO (excluded from non-CGO builds)
 CGO_SKILLS := libsql_migrate
 
-.PHONY: fmt lint typecheck lsp-check vet test test-cgo test-cgo-short test-race test-integration test-integration-cmd cover check-coverage check-doc-links build build-cgo build-all viewer snapshot tidy check skill skills-build skills-build-cgo skills-build-all skills-install skills-install-cgo skills-install-all skills-test completions init ts-install ts-dev-tui ts-dev-gui ts-build-tui ts-tui ts-build ts-typecheck env-sync env-watch env-watch-stop db-backup db-backup-list db-backup-clean gepa-prompt gepa-cycle gepa-dataset-export gepa-dataset-export-ranked gepa-claude-export gepa-claude-rewrite gepa-leaderboard gepa-compare-batch gepa-judge-baseline eval-code-search-agentctl-package eval-code-search-praze-infra eval-code-search-agentctl-repo-grounded eval-code-search-agentctl-change-impact eval-code-search-agentctl-trace-symbol eval-code-search-agentctl-bridge-esoteric eval-retrieval-agentctl eval-retrieval-agentctl-mixed eval-retrieval-agentctl-cochange eval-retrieval-jido eval-retrieval-praze eval-retrieval-praze-mixed eval-retrieval-praze-k8s
+.PHONY: fmt lint typecheck lsp-check vet test test-cgo test-cgo-short test-race test-integration test-integration-cmd cover check-coverage check-doc-links check-large-files check-tech-debt check-duplication test-timing build build-cgo build-all viewer snapshot tidy check skill skills-build skills-build-cgo skills-build-all skills-install skills-install-cgo skills-install-all skills-test completions init ts-install ts-dev-tui ts-dev-gui ts-build-tui ts-tui ts-build ts-typecheck env-sync env-watch env-watch-stop db-backup db-backup-list db-backup-clean gepa-prompt gepa-cycle gepa-dataset-export gepa-dataset-export-ranked gepa-claude-export gepa-claude-rewrite gepa-leaderboard gepa-compare-batch gepa-judge-baseline eval-code-search-agentctl-package eval-code-search-praze-infra eval-code-search-agentctl-repo-grounded eval-code-search-agentctl-change-impact eval-code-search-agentctl-trace-symbol eval-code-search-agentctl-bridge-esoteric eval-retrieval-agentctl eval-retrieval-agentctl-mixed eval-retrieval-agentctl-cochange eval-retrieval-jido eval-retrieval-praze eval-retrieval-praze-mixed eval-retrieval-praze-k8s
 
 fmt:
 	@echo "Running gofumpt"
@@ -30,7 +31,26 @@ fmt:
 
 lint:
 	@echo "Running golangci-lint"
-	@GOFLAGS=-buildvcs=false $(GOLANGCI) run --timeout $(GOLANGCI_TIMEOUT) ./...
+	@lint_scope=""; \
+	base_ref=""; \
+	if [ -n "$$CI_MERGE_REQUEST_DIFF_BASE_SHA" ] && git cat-file -e "$$CI_MERGE_REQUEST_DIFF_BASE_SHA^{commit}" >/dev/null 2>&1; then \
+		base_ref="$$CI_MERGE_REQUEST_DIFF_BASE_SHA"; \
+	elif [ -n "$$CI_MERGE_REQUEST_TARGET_BRANCH_NAME" ] && git rev-parse --verify "origin/$$CI_MERGE_REQUEST_TARGET_BRANCH_NAME" >/dev/null 2>&1; then \
+		base_ref="$$(git merge-base HEAD "origin/$$CI_MERGE_REQUEST_TARGET_BRANCH_NAME")"; \
+	elif [ -n "$$CI_DEFAULT_BRANCH" ] && git rev-parse --verify "origin/$$CI_DEFAULT_BRANCH" >/dev/null 2>&1; then \
+		base_ref="$$(git merge-base HEAD "origin/$$CI_DEFAULT_BRANCH")"; \
+	elif git rev-parse --verify origin/main >/dev/null 2>&1; then \
+		head_ref="$$(git rev-parse HEAD 2>/dev/null || true)"; \
+		main_ref="$$(git rev-parse origin/main 2>/dev/null || true)"; \
+		if [ -n "$$head_ref" ] && [ -n "$$main_ref" ] && [ "$$head_ref" != "$$main_ref" ]; then \
+			base_ref="$$(git merge-base HEAD origin/main)"; \
+		fi; \
+	fi; \
+	if [ -n "$$base_ref" ]; then \
+		lint_scope="--new-from-rev=$$base_ref"; \
+		echo "Using diff-aware lint from $$base_ref"; \
+	fi; \
+	GOFLAGS=-buildvcs=false $(GOLANGCI) run --timeout $(GOLANGCI_TIMEOUT) $$lint_scope $(LINT_TARGETS)
 
 # Type-check all packages (faster than gopls per-file, catches type errors)
 # This is essentially what the compiler does during build
@@ -507,7 +527,37 @@ tidy:
 check-doc-links:
 	@bash scripts/check_doc_links.sh
 
-check: fmt lint vet test check-coverage check-doc-links build
+check-large-files:
+	@large_file_base=""; \
+	if [ -n "$$CI_MERGE_REQUEST_DIFF_BASE_SHA" ] && git cat-file -e "$$CI_MERGE_REQUEST_DIFF_BASE_SHA^{commit}" >/dev/null 2>&1; then \
+		large_file_base="$$CI_MERGE_REQUEST_DIFF_BASE_SHA"; \
+	elif [ -n "$$CI_MERGE_REQUEST_TARGET_BRANCH_NAME" ] && git rev-parse --verify "origin/$$CI_MERGE_REQUEST_TARGET_BRANCH_NAME" >/dev/null 2>&1; then \
+		large_file_base="$$(git merge-base HEAD "origin/$$CI_MERGE_REQUEST_TARGET_BRANCH_NAME")"; \
+	elif [ -n "$$CI_DEFAULT_BRANCH" ] && git rev-parse --verify "origin/$$CI_DEFAULT_BRANCH" >/dev/null 2>&1; then \
+		large_file_base="$$(git merge-base HEAD "origin/$$CI_DEFAULT_BRANCH")"; \
+	elif git rev-parse --verify origin/main >/dev/null 2>&1; then \
+		head_ref="$$(git rev-parse HEAD 2>/dev/null || true)"; \
+		main_ref="$$(git rev-parse origin/main 2>/dev/null || true)"; \
+		if [ -n "$$head_ref" ] && [ -n "$$main_ref" ] && [ "$$head_ref" != "$$main_ref" ]; then \
+			large_file_base="$$(git merge-base HEAD origin/main)"; \
+		fi; \
+	fi; \
+	if [ -n "$$large_file_base" ]; then \
+		echo "Checking newly added large files from $$large_file_base"; \
+	fi; \
+	CHECK_LARGE_FILES_BASE_REF="$$large_file_base" bash scripts/check_large_files.sh
+
+check-tech-debt:
+	@bash scripts/check_tech_debt.sh
+
+check-duplication:
+	@command -v jscpd >/dev/null 2>&1 || { echo "jscpd not installed. Run: npm i -g jscpd"; exit 1; }
+	@jscpd --config .jscpd.json .
+
+test-timing:
+	@$(GO_CMD) test ./... -v -count=1 2>&1 | grep -E '(^--- |PASS|FAIL|panic)' | awk '{print $$0}'
+
+check: fmt lint vet test check-coverage check-doc-links check-large-files check-tech-debt build
 
 completions: build
 	@mkdir -p dist

@@ -19,19 +19,26 @@ description: "Durable multi-agent room coordination with shared chat, direct req
 ## Mental model
 
 - `agentctl room` is the source of truth.
-- `room send` writes durable chat messages.
+- `room send` writes durable chat messages and (by default) live-relays to mux panes so targets see the line in their terminal.
+- **`room send` routing:** prefer **`--to <participant-id>`** for anything meant for **one** agent so relay and inbox routing stay unambiguous; omit `--to` only when you **intentionally** broadcast to everyone else in the room.
+- **`room send` identity:** prefer **`--sender <your-participant-id>`** whenever the shell is not clearly bound to a mux pane (running outside tmux/zellij, scripts, or MCP); when you are inside the correct pane, sender can be omitted because agentctl infers it.
 - `room send --to <participant>` writes a direct room request instead of a broadcast.
 - `room ack` marks a specific room message as acknowledged.
 - `room resolve` lets the coordinator clear stale room messages once they have been handled out-of-band, and it resolves reminder chains by the original request id.
 - `room inbox` shows actionable direct requests and pending ack/reply work for one participant.
 - `room status` shows the coordinator-facing room pulse: participants, task counts, stale work, and compact actionable backlog summaries.
+- `room status` is the coordinator-facing room/task pulse; `room pulse` is a separate room-wide epic mission-control surface.
 - `room status --only blocked,stale,reply` narrows the action summary to the coordinator lane you care about right now.
 - `room status --verbose` includes richer top-entry detail for debugging without making the default coordinator view noisy.
 - `room coordinator set` transfers coordinator ownership to another room participant.
 - `room send --to @coordinator` resolves to the current coordinator without hard-coding an actor id.
-- `room relay` mirrors room messages into terminal panes.
-- `mux submit` is the convenience submit gesture when a live pane already has drafted text waiting in its composer.
+- `room relay` mirrors room messages into terminal panes (delivery includes a trailing newline / submit so agents see the instruction without a separate key gesture).
+- `room task assign`, `room task claim`, `room task complete`, and other task transitions persist first, then **fan out to mux panes by default** (same relay path as `room loop`). Use `room task --no-live-relay ...` when a long-running `room loop` / `room relay` already delivers messages so you do not double-deliver.
+- `room send` runs inside tmux/zellij still runs a mux “submit” on the **sender’s** pane by default so the shell/agent composer finishes the line; use `--no-mux-submit` to skip that.
 - `room interview` runs a durable round-robin clarification loop inside the room.
+- `room epic`, `room milestone`, `room story`, and `room log` give the room an agile-shaped long-running delivery structure.
+- `room epic resume` and `room epic next` give that agile layer a resumable continuity surface.
+- when that agile layer is the main workflow, explicitly use `agentctl-room-agile` instead of relying on this broader room skill alone.
 - `room remind` schedules bounded durable follow-ups for direct requests.
 - `room task` links shared tasks to the room.
 - `room loop` runs the central coordination loop:
@@ -47,6 +54,7 @@ Do not rely on scrollback as canonical history. The room log is canonical.
 
 When you are working inside an active room, follow this behavior by default:
 
+- For **`room send`**, **default to explicit addressing**: pass **`--to <participant>`** for directed work (peer, coordinator, assignee) and **`--sender <you>`** when identity would otherwise be ambiguous. Only omit `--to` when a **room-wide** broadcast is what you intend (everyone else gets live relay + inbox visibility).
 - Read `room status` first to understand the current coordinator, pending work, and stale lanes.
 - Read `room inbox --actor <you>` before starting new work; direct requests and ack/reply obligations take priority over browsing the whole timeline.
 - If a task is assigned to you, `claim` it before starting real work.
@@ -71,11 +79,11 @@ Role expectations:
   - keeps task heartbeat current
   - escalates blockers through the room instead of assuming others noticed
 
-Live-pane convenience:
+Live-pane behavior:
 
-- if a room relay or direct live nudge leaves text sitting in an agent composer, use `agentctl mux submit ...` instead of retyping or sending ad hoc key presses
-- tmux supports targeted submit by pane label or pane id
-- zellij submit currently applies to the focused pane in the named session
+- Prefer **`room send`**, **`room task`**, and **`room relay` / `room loop`**: they inject text and an implicit submit (Enter/newline) appropriate for the target surface.
+- Do **not** treat a hidden `mux submit` command as part of the normal workflow; it exists only as a legacy escape hatch.
+- If you are not using room relay/loop, run `agentctl room relay <room>` or `agentctl room loop <room>` so participants get terminal delivery.
 
 Interview protocol:
 
@@ -94,11 +102,23 @@ MCP exposure:
 - the MCP facade also exposes `room_remind`
 - actions: `add`, `list`, `cancel`
 - use it for scheduled check-ins like “check MR !26 in 15 minutes and reply with status”
+- the MCP facade also exposes `room_agile`
+- actions: `epic_start`, `epic_ask`, `epic_answer`, `epic_finalize`, `epic_shape`, `epic_show`, `milestone_start`, `milestone_criteria`, `milestone_review`, `milestone_show`, `story_add`, `story_show`, `log_append`, `log_show`
+- actions: `epic_start`, `epic_ask`, `epic_answer`, `epic_finalize`, `epic_shape`, `epic_show`, `epic_resume`, `epic_next`, `milestone_start`, `milestone_criteria`, `milestone_review`, `milestone_show`, `story_add`, `story_show`, `log_append`, `log_show`
+- use it when the room needs a durable epic/milestone/story structure instead of only free-form chat and tasks
 
 Startup injection:
 
 - when a tmux pane is created with `agentctl mux create --agent ... --room-id <room-id>` and direct room access, agentctl injects a lightweight startup prompt into that pane
 - the prompt tells the agent to read `agentctl-tmux` and `agentctl-room`, then start with `room status`, `room inbox`, and `room task list` for the attached room
+
+Source-panel agent creation:
+
+- when an agent is spawned with `--room-id <room-id>` and `--spawn-in-pane`, agentctl creates a dedicated mux pane in a room-scoped session (e.g., `room-<room-id>` for tmux) and runs the agent live in that pane
+- the spawned agent is automatically joined as a room member with pane binding metadata so the room relay can route messages to it
+- agents in source panes run `agentctl agent run <agent-id>` instead of just `agentctl agent watch`, so users can watch agents work together in a shared tmux session
+- `room task assign --provision-pane` auto-creates a mux pane for the assignee when they don't already have one; use `--pane-agent codex` or `--pane-agent claude` to choose the agent CLI
+- the room loop and room relay deliver messages to source panes the same way as any room member with pane bindings
 
 ## Default room workflow
 
@@ -110,16 +130,16 @@ agentctl room status <room-id>
 agentctl room inbox <room-id> --actor <you>
 
 # 2. take work
-agentctl room task claim <room-id> --id <task-id>
+agentctl room task claim <room-id> --id <task-id> --sender <you>
 
 # 3. keep heartbeat current during longer work
-agentctl room task touch <room-id> --id <task-id>
+agentctl room task touch <room-id> --id <task-id> --sender <you>
 
-# 4. escalate or ask for a decision
-agentctl room send <room-id> "Need coordinator input on <issue>" --to @coordinator --reply-expected
+# 4. escalate or ask for a decision (directed: prefer --to and --sender)
+agentctl room send <room-id> --to @coordinator --sender <you> --reply-expected "Need coordinator input on <issue>"
 
 # 5. close with durable notes
-agentctl room task complete <room-id> --id <task-id> --notes "..."
+agentctl room task complete <room-id> --id <task-id> --notes "..." --sender <you>
 ```
 
 When the room is in a meaning-check or spec-clarification phase, use this interview loop instead:
@@ -139,6 +159,45 @@ agentctl room interview next <room-id> --actor <verifier>
 agentctl room interview verify <room-id> <answer-id> accept "Matches the intended meaning" --sender <verifier>
 agentctl room status <room-id> --only interview
 ```
+
+When the room is running a longer agile tranche, use this structure:
+
+```bash
+agentctl room epic start <room-id> "Delivery ledger and agile room model" \
+  --goal "Give the room a durable epic/milestone/story hierarchy" \
+  --owner human-a \
+  --scope room \
+  --scope gui-agent
+
+agentctl room epic ask <room-id> <epic-id> "What must be true before milestones can open?" --kind success --to human-a
+agentctl room epic ask <room-id> <epic-id> "What constraints must the first tranche respect?" --kind constraint --to human-a
+agentctl room epic answer <room-id> <question-id> "The epic needs a clarified brief and no open intake questions." --sender human-a
+agentctl room epic finalize <room-id> <epic-id> "Clarified brief: ship the room agile layer first, then surface it in the GUI."
+agentctl room epic shape <room-id> <epic-id>
+
+agentctl room epic show <room-id> <epic-id>
+agentctl room milestone start <room-id> <epic-id> --proposal <proposal-id>
+
+agentctl room milestone criteria <room-id> <milestone-id> "Epic and milestone hierarchy is visible via show commands"
+agentctl room story add <room-id> <milestone-id> "Implement CLI flow" "Add epic, milestone, story, and log commands." --owner gemini-a
+agentctl room milestone review <room-id> <milestone-id> pass "Foundation slice met the milestone criteria"
+agentctl room log append <room-id> <epic-id> "Foundation landed" \
+  --completed "CLI hierarchy shipped" \
+  --in-flight "GUI surfacing" \
+  --next "Wire status and planning views"
+```
+
+Agile room model:
+
+- `epic` is the long-running objective for the room
+- `epic` starts in discovery, not execution
+- use typed epic intake questions: `product`, `technical`, `constraint`, `success`
+- use `epic ask` / `epic answer` / `epic finalize` to clarify the brief before opening milestones
+- use `epic shape` after finalization to write durable milestone proposals back into the room
+- `milestone` is the current bounded tranche under that epic
+- `story` is a concrete work item under a milestone
+- `acceptance criteria` are attached to the milestone, not buried in chat
+- `delivery log` is the durable session-to-session progress journal
 
 For bounded scheduled follow-ups, use:
 
@@ -210,6 +269,24 @@ agentctl room status alpha
 agentctl room subscribe alpha --follow
 ```
 
+### Source-pane agent spawning
+
+Spawn agents directly into mux panes so they are visible alongside other room participants:
+
+```bash
+# Spawn an agent into a room-scoped tmux session pane
+agentctl agent spawn --role researcher \
+  --prompt "Review the retry path" \
+  --room-id alpha \
+  --spawn-in-pane \
+  --participant-id reviewer-a \
+  --exec-mode autonomous \
+  --max-auto-turns 3
+
+# Assign a task and auto-provision a pane for the assignee
+agentctl room task assign alpha --id <task-id> --to coder-a --provision-pane --pane-agent codex
+```
+
 ## Shared task flow
 
 ```bash
@@ -278,6 +355,8 @@ agentctl room join alpha --current --role <room-role>
   launched with room metadata and must be joined explicitly
 - session-only assumptions are unsafe for multi-pane zellij rooms; pane binding
   is the correct unit of room membership
+- if an existing participant moves to a new pane, prefer `agentctl room rebind`
+  to update the stored transport binding without pretending it is a new member
 
 ## Conventions
 
@@ -288,6 +367,8 @@ agentctl room join alpha --current --role <room-role>
 - Use `--to <participant>` plus `--ack-required` when you only need confirmation.
 - Use `room inbox` as the actionable queue for each participant; it is not a full archive.
 - `room join <room-id> --current` registers the current pane without hand-writing the id.
+- `room rebind <room-id> <actor-id> --backend <tmux|zellij> --session <session> --pane-id <pane>`
+  repairs a moved pane binding for an existing participant.
 - In `tmux`, room member ids can be pane labels or canonical ids like `tmux:<session>:%7`.
 - In `zellij`, room member ids can be pane titles or canonical ids like `zellij:<session>:terminal_3`.
 - The sender should also be a room member if you want them excluded from fanout.
@@ -327,6 +408,7 @@ agentctl room send review "Please check the 401 fallback branch."
 ## Related
 
 - `configs/skills-pack/agentctl-room-operator/SKILL.md`
+- `configs/skills-pack/agentctl-room-agile/SKILL.md`
 - `configs/skills-pack/agentctl-orchestrate/SKILL.md`
 - `configs/skills-pack/agentctl-tmux/SKILL.md`
 - `docs/general/tmux-collaboration.md`

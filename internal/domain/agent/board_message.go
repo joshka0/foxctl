@@ -47,6 +47,42 @@ const (
 	BoardMessageKindInterviewAnswer BoardMessageKind = "interview_answer"
 	// BoardMessageKindInterviewVerify represents a verifier verdict on an interview answer.
 	BoardMessageKindInterviewVerify BoardMessageKind = "interview_verify"
+	// BoardMessageKindEpic represents the root of a long-running agile epic within a room.
+	BoardMessageKindEpic BoardMessageKind = "epic"
+	// BoardMessageKindEpicQuestion represents a discovery/intake question for an epic.
+	BoardMessageKindEpicQuestion BoardMessageKind = "epic_question"
+	// BoardMessageKindEpicAnswer represents an answer to an epic intake question.
+	BoardMessageKindEpicAnswer BoardMessageKind = "epic_answer"
+	// BoardMessageKindEpicFinalize represents the clarified epic brief after intake is complete.
+	BoardMessageKindEpicFinalize BoardMessageKind = "epic_finalize"
+	// BoardMessageKindEpicClose represents an explicit closure decision for an epic.
+	BoardMessageKindEpicClose BoardMessageKind = "epic_close"
+	// BoardMessageKindEpicCheckpoint represents a durable resumability snapshot for an epic.
+	BoardMessageKindEpicCheckpoint BoardMessageKind = "epic_checkpoint"
+	// BoardMessageKindMilestoneProposal represents a proposed milestone shape derived from an epic.
+	BoardMessageKindMilestoneProposal BoardMessageKind = "milestone_proposal"
+	// BoardMessageKindMilestone represents a milestone nested under an epic.
+	BoardMessageKindMilestone BoardMessageKind = "milestone"
+	// BoardMessageKindMilestoneContract represents a coordinator-owned contract update for a milestone.
+	BoardMessageKindMilestoneContract BoardMessageKind = "milestone_contract"
+	// BoardMessageKindStory represents a concrete work story nested under a milestone.
+	BoardMessageKindStory BoardMessageKind = "story"
+	// BoardMessageKindAcceptanceCriteria represents one explicit milestone acceptance criterion.
+	BoardMessageKindAcceptanceCriteria BoardMessageKind = "acceptance_criteria"
+	// BoardMessageKindMilestoneReview represents a milestone review/pass-block verdict.
+	BoardMessageKindMilestoneReview BoardMessageKind = "milestone_review"
+	// BoardMessageKindMilestoneSummary represents a review synthesis/summary for a milestone.
+	BoardMessageKindMilestoneSummary BoardMessageKind = "milestone_summary"
+	// BoardMessageKindStoryProposal represents a proposed story under a milestone.
+	BoardMessageKindStoryProposal BoardMessageKind = "story_proposal"
+	// BoardMessageKindStoryState represents an append-only lifecycle update for an accepted story.
+	BoardMessageKindStoryState BoardMessageKind = "story_state"
+	// BoardMessageKindStoryValidation represents story-owned validation evidence.
+	BoardMessageKindStoryValidation BoardMessageKind = "story_validation"
+	// BoardMessageKindDeliveryLog represents a durable delivery-log entry for an epic.
+	BoardMessageKindDeliveryLog BoardMessageKind = "delivery_log"
+	// BoardMessageKindGuidanceUpdate represents a durable retro/guidance artifact for an epic.
+	BoardMessageKindGuidanceUpdate BoardMessageKind = "guidance_update"
 )
 
 // BoardMessageStatus defines the read/ack status of a message.
@@ -176,6 +212,45 @@ type RoomSummary struct {
 	TaskIDs          []string     `json:"task_ids,omitempty"`
 	Members          []RoomMember `json:"members,omitempty"`
 	ArchivedAt       *time.Time   `json:"archived_at,omitempty"`
+}
+
+// CompactRoomSummaryForInbox returns a small JSON-friendly map for inbox-style responses.
+// It omits bulky fields (task_ids, participants, members, description, dispatch_agent_ids)
+// to keep agent-facing payloads small.
+func CompactRoomSummaryForInbox(s RoomSummary) map[string]any {
+	out := map[string]any{
+		"id":            s.ID,
+		"workspace_id":  s.WorkspaceID,
+		"stream":        s.Stream,
+		"title":         s.Title,
+		"message_count": s.MessageCount,
+		"unread_count":  s.UnreadCount,
+	}
+	if s.DispatchPolicy != "" {
+		out["dispatch_policy"] = s.DispatchPolicy
+	}
+	if s.LatestSubject != "" {
+		out["latest_subject"] = s.LatestSubject
+	}
+	if s.LatestPreview != "" {
+		out["latest_preview"] = s.LatestPreview
+	}
+	if s.LatestSender != "" {
+		out["latest_sender"] = s.LatestSender
+	}
+	if !s.LatestMessageAt.IsZero() {
+		out["latest_message_at"] = s.LatestMessageAt.Format(time.RFC3339)
+	}
+	if !s.CreatedAt.IsZero() {
+		out["created_at"] = s.CreatedAt.Format(time.RFC3339)
+	}
+	if !s.UpdatedAt.IsZero() {
+		out["updated_at"] = s.UpdatedAt.Format(time.RFC3339)
+	}
+	if s.ArchivedAt != nil && !s.ArchivedAt.IsZero() {
+		out["archived_at"] = s.ArchivedAt.Format(time.RFC3339)
+	}
+	return out
 }
 
 // RoomMember is an explicit membership record for one room.

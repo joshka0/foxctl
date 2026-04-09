@@ -134,36 +134,59 @@ func DefaultLLMChatConfig() LLMChatConfig {
 // - Related: DefaultLLMChatConfig, apiKeyForProvider, detectProvider
 // - Keywords: llm_chat, provider, api_key, base_url, model
 func NewLLMChatEngine(cfg LLMChatConfig) (*LLMChatEngine, error) {
-	cfg.Provider = normalizeEngineProvider(cfg.Provider)
+	resolvedCfg, err := resolveLLMChatConfig(cfg)
+	if err != nil {
+		return nil, err
+	}
 
+	engine := &LLMChatEngine{
+		config: resolvedCfg,
+		client: &http.Client{Timeout: resolvedCfg.Timeout},
+	}
+
+	if err := engine.initBedrockClient(); err != nil {
+		return nil, err
+	}
+
+	return engine, nil
+}
+
+func resolveLLMChatConfig(cfg LLMChatConfig) (LLMChatConfig, error) {
+	cfg.Provider = normalizeEngineProvider(cfg.Provider)
 	if cfg.Provider == "" && strings.TrimSpace(cfg.BaseURL) != "" {
 		cfg.Provider = "openai_compat"
 	}
 
-	// Resolve API key: if provider is specified, get key for that provider
+	if err := resolveLLMChatCredentials(&cfg); err != nil {
+		return LLMChatConfig{}, err
+	}
+	applyLLMChatDefaults(&cfg)
+	if authRequiresCredential(cfg.AuthMode) && cfg.APIKey == "" {
+		return LLMChatConfig{}, fmt.Errorf("auth mode %q requires an API key", cfg.AuthMode)
+	}
+	return cfg, nil
+}
+
+func resolveLLMChatCredentials(cfg *LLMChatConfig) error {
 	if authRequiresCredential(cfg.AuthMode) && cfg.APIKey == "" && cfg.Provider != "" {
 		cfg.APIKey = apiKeyForProvider(cfg.Provider)
-		// Error if explicit provider but no key found - don't auto-detect
 		if cfg.APIKey == "" {
-			return nil, fmt.Errorf("no API key configured for provider %q (set the appropriate env var or use auth_mode=none)", cfg.Provider)
+			return fmt.Errorf("no API key configured for provider %q (set the appropriate env var or use auth_mode=none)", cfg.Provider)
 		}
 	}
-	// Resolve API key: if provider is specified, get key for that provider
-	// Fall back to auto-detect only if no provider specified
 	if cfg.APIKey == "" && cfg.Provider == "" {
 		cfg.APIKey, cfg.Provider = detectProvider()
 	}
+	return nil
+}
 
-	// Set base URL based on provider
+func applyLLMChatDefaults(cfg *LLMChatConfig) {
 	if cfg.BaseURL == "" {
 		cfg.BaseURL = baseURLForProvider(cfg.Provider)
 	}
-
-	// Set default model based on provider
 	if cfg.Model == "" {
 		cfg.Model = llmproviders.DefaultModelForProvider(cfg.Provider)
 	}
-
 	if cfg.AuthMode == "" {
 		cfg.AuthMode = defaultAuthModeForProvider(cfg.Provider, cfg.APIKey)
 	}
@@ -173,11 +196,6 @@ func NewLLMChatEngine(cfg LLMChatConfig) (*LLMChatEngine, error) {
 	if cfg.AuthPrefix == "" && cfg.AuthMode == "bearer" {
 		cfg.AuthPrefix = "Bearer "
 	}
-	if authRequiresCredential(cfg.AuthMode) && cfg.APIKey == "" {
-		return nil, fmt.Errorf("auth mode %q requires an API key", cfg.AuthMode)
-	}
-
-	// Apply defaults
 	if cfg.MaxIterations <= 0 {
 		cfg.MaxIterations = 50
 	}
@@ -190,35 +208,34 @@ func NewLLMChatEngine(cfg LLMChatConfig) (*LLMChatEngine, error) {
 	if cfg.SynthesisReserve <= 0 {
 		cfg.SynthesisReserve = 2
 	}
+}
 
-	engine := &LLMChatEngine{
-		config: cfg,
-		client: &http.Client{Timeout: cfg.Timeout},
+func (e *LLMChatEngine) initBedrockClient() error {
+	if e.config.Provider != "bedrock" {
+		return nil
 	}
-
-	// Initialize Bedrock client when using AWS Bedrock provider.
-	if cfg.Provider == "bedrock" {
-		region := cfg.BaseURL // BaseURL field reused for region override
-		if region == "" {
-			region = os.Getenv("BEDROCK_REGION")
-			if region == "" {
-				region = os.Getenv("AWS_DEFAULT_REGION")
-			}
-		}
-		if region == "" {
-			return nil, fmt.Errorf("bedrock provider requires BEDROCK_REGION or AWS_DEFAULT_REGION")
-		}
-		// Use a timeout context for initialization instead of Background
-		initCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-		bc, err := NewBedrockClient(initCtx, region)
-		if err != nil {
-			return nil, fmt.Errorf("bedrock client: %w", err)
-		}
-		engine.bedrockClient = bc
+	region := resolveBedrockRegion(e.config)
+	if region == "" {
+		return fmt.Errorf("bedrock provider requires BEDROCK_REGION or AWS_DEFAULT_REGION")
 	}
+	initCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	bc, err := NewBedrockClient(initCtx, region)
+	if err != nil {
+		return fmt.Errorf("bedrock client: %w", err)
+	}
+	e.bedrockClient = bc
+	return nil
+}
 
-	return engine, nil
+func resolveBedrockRegion(cfg LLMChatConfig) string {
+	if cfg.BaseURL != "" {
+		return cfg.BaseURL
+	}
+	if region := os.Getenv("BEDROCK_REGION"); region != "" {
+		return region
+	}
+	return os.Getenv("AWS_DEFAULT_REGION")
 }
 
 // SetToolRunner sets the tool runner for executing tools.
@@ -235,6 +252,13 @@ func (e *LLMChatEngine) SetRLMExecutor(executor *RLMToolExecutor) {
 // SetHookContext sets the hook context for dispatch.
 func (e *LLMChatEngine) SetHookContext(ctx HookContext) {
 	e.hookContext = ctx
+}
+
+// Config returns the resolved LLMChatConfig for this engine.
+// Useful for callers that need the provider-resolved APIKey, BaseURL, and Model
+// after auto-detection has run.
+func (e *LLMChatEngine) Config() LLMChatConfig {
+	return e.config
 }
 
 // IsStatelessMode returns true if the engine is in RLM stateless mode.
@@ -273,115 +297,26 @@ func (e *LLMChatEngine) Run(ctx context.Context, input EngineInput) (EngineOutpu
 	for {
 		iterStart := time.Now()
 
-		// Check iteration limit
 		iteration++
-		if iteration > e.config.MaxIterations {
-			// Finalize: if no text output yet, run one final text-only call (no tools)
-			// so the model can produce a summary, PLAN_COMPLETE, or final report.
-			if output.AssistantText == "" {
-				finalizeMessages := append(messages, oaiMessage{
-					Role:    "user",
-					Content: "Your tool budget is exhausted. Produce your complete text response NOW.\n\nResearch:\n" + buildResearchSummary(output.ToolCalls),
-				})
-				if finalResp, err := e.callLLM(ctx, finalizeMessages, nil); err == nil && len(finalResp.Choices) > 0 {
-					output.AssistantText = resolveAssistantContent(finalResp.Choices[0].Message)
-					output.Tokens.Add(finalResp.Usage.PromptTokens, finalResp.Usage.CompletionTokens)
-					fmt.Fprintf(os.Stderr, "[CONTEXT] finalize: prompt_tokens=%d completion_tokens=%d\n",
-						finalResp.Usage.PromptTokens, finalResp.Usage.CompletionTokens)
-				}
-			}
-			output.StopReason = StopReasonMaxIterations
+		if e.finishIfIterationExceeded(ctx, iteration, messages, &output) {
 			return output, nil
 		}
 
-		// Check context cancellation
-		if ctx.Err() != nil {
-			output.StopReason = StopReasonCancelled
-			output.Error = ctx.Err().Error()
+		if e.finishIfRunCanceled(ctx, &output) {
 			return output, nil
 		}
 
-		// Call LLM
 		resp, err := e.callLLM(ctx, messages, tools)
 		iterDuration := time.Since(iterStart)
-		if err != nil {
-			// Check if error is due to context cancellation
-			if ctx.Err() != nil {
-				output.StopReason = StopReasonCancelled
-				output.Error = ctx.Err().Error()
-				return output, nil
-			}
-			output.StopReason = StopReasonError
-			output.Error = err.Error()
+		if e.finishIfRunCallFailed(ctx, err, &output) {
 			return output, nil
 		}
 
-		// Log response details with context tracking
-		if len(resp.Choices) > 0 {
-			finishReason := resp.Choices[0].FinishReason
-			promptTokens := resp.Usage.PromptTokens
-			completionTokens := resp.Usage.CompletionTokens
-			totalTokens := promptTokens + completionTokens
-
-			// Per-iteration context tracking (stderr for visibility)
-			fmt.Fprintf(os.Stderr, "[CONTEXT] iter=%d msgs=%d prompt_tokens=%d completion_tokens=%d total=%d finish=%s tool_calls=%d\n",
-				iteration, len(messages), promptTokens, completionTokens, totalTokens, finishReason, len(resp.Choices[0].Message.ToolCalls))
-
-			// Emit structured wide event for observability
-			observability.Emit(ctx, observability.NewEvent(observability.OpAgentIteration).
-				WithComponent(observability.ComponentAgent).
-				WithSession(e.hookContext.SessionID, e.hookContext.ActorID).
-				WithWorkspace(e.hookContext.WorkspaceID).
-				WithData("iteration", iteration).
-				WithData("message_count", len(messages)).
-				WithData("prompt_tokens", promptTokens).
-				WithData("completion_tokens", completionTokens).
-				WithData("total_tokens", totalTokens).
-				WithData("finish_reason", finishReason).
-				WithData("tool_calls", len(resp.Choices[0].Message.ToolCalls)).
-				WithData("provider", e.config.Provider).
-				WithData("model", e.config.Model).
-				Success(iterDuration))
-		} else {
-			observability.Emit(ctx, observability.NewEvent("llm.no_choices").
-				WithComponent(observability.ComponentAgent).
-				WithData("message", "LLM returned no choices").
-				Error(nil, 0))
-		}
-
-		// Track tokens
-		output.Tokens.Add(resp.Usage.PromptTokens, resp.Usage.CompletionTokens)
-
-		// Check context budget (stop before next iteration if exceeded)
-		if e.config.MaxContextTokens > 0 && resp.Usage.PromptTokens > e.config.MaxContextTokens {
-			fmt.Fprintf(os.Stderr, "[CONTEXT] budget exceeded: %d > %d limit, stopping\n",
-				resp.Usage.PromptTokens, e.config.MaxContextTokens)
-
-			observability.Emit(ctx, observability.NewEvent(observability.OpAgentIteration).
-				WithComponent(observability.ComponentAgent).
-				WithSession(e.hookContext.SessionID, e.hookContext.ActorID).
-				WithData("iteration", iteration).
-				WithData("budget_exceeded", true).
-				WithData("prompt_tokens", resp.Usage.PromptTokens).
-				WithData("budget_limit", e.config.MaxContextTokens).
-				Canceled(iterDuration))
-
-			output.StopReason = StopReasonContextBudget
-			// Still capture any assistant text from this response
-			if len(resp.Choices) > 0 {
-				output.AssistantText = resolveAssistantContent(resp.Choices[0].Message)
-			}
+		if !e.recordLLMResponse(ctx, resp, messages, iteration, iterDuration, &output) {
 			return output, nil
 		}
-
-		// Check for tool calls
-		if len(resp.Choices) == 0 {
-			output.StopReason = StopReasonError
-			output.Error = "no response from LLM"
-			return output, nil
-		}
-
 		choice := resp.Choices[0]
+
 		output.Iterations = append(output.Iterations, IterationUsage{
 			Iteration:        iteration,
 			MessageCount:     len(messages),
@@ -393,187 +328,277 @@ func (e *LLMChatEngine) Run(ctx context.Context, input EngineInput) (EngineOutpu
 			ToolNames:        oaiToolCallNames(choice.Message.ToolCalls),
 		})
 
-		// If tool calls present, execute them
 		if len(choice.Message.ToolCalls) > 0 {
-			// Add assistant message with tool calls to history
-			messages = append(messages, choice.Message)
-
-			// Execute each tool call
-			totalToolResultChars := 0
-			for _, tc := range choice.Message.ToolCalls {
-				toolCall := ToolCall{
-					ID:        tc.ID,
-					Name:      tc.Function.Name,
-					Arguments: json.RawMessage(tc.Function.Arguments),
-				}
-				output.ToolCalls = append(output.ToolCalls, toolCall)
-
-				if result, finalText, handled := maybeHandleFinalAnswerJSONTool(toolCall); handled {
-					output.ToolResults = append(output.ToolResults, result)
-					output.AssistantText = finalText
-					output.StopReason = StopReasonEndTurn
-					return output, nil
-				}
-
-				var result ToolResult
-				start := time.Now()
-
-				// 1. Dispatch PreToolUse hook
-				preOutput, err := e.dispatchPreToolUse(ctx, toolCall)
-				if err != nil {
-					observability.Emit(ctx, observability.NewEvent("hook.pre_tool_use_error").
-						WithComponent(observability.ComponentAgent).
-						WithData("tool", toolCall.Name).
-						Error(err, 0))
-				}
-
-				// Check if blocked by hook
-				if preOutput.Decision.IsBlocking() {
-					result = ToolResult{
-						ToolCallID: tc.ID,
-						Content:    fmt.Sprintf("Blocked by hook: %s", preOutput.Reason),
-						IsError:    true,
-					}
-				} else {
-					// Use updated args if hook modified them
-					execArgs := toolCall.Arguments
-					if len(preOutput.UpdatedToolInput) > 0 {
-						execArgs = preOutput.UpdatedToolInput
-					}
-
-					// 2. Execute tool
-					if e.toolRunner != nil {
-						// Create a modified call with potentially updated args
-						execCall := ToolCall{
-							ID:        toolCall.ID,
-							Name:      toolCall.Name,
-							Arguments: execArgs,
-						}
-						result, _ = e.toolRunner.Execute(ctx, execCall)
-					} else {
-						result = ToolResult{
-							ToolCallID: tc.ID,
-							Content:    fmt.Sprintf("Tool %q not available", tc.Function.Name),
-							IsError:    true,
-						}
-					}
-				}
-
-				// 3. Dispatch PostToolUse hook
-				durationMS := time.Since(start).Milliseconds()
-				postOutput := e.dispatchPostToolUse(ctx, toolCall, result, durationMS)
-
-				// 4. Process hook actions
-				if e.config.ActionExecutor != nil && len(postOutput.Actions) > 0 {
-					hookInput := hooks.Input{
-						Event:         hooks.EventPostToolUse,
-						ToolName:      toolCall.Name,
-						SessionID:     e.hookContext.SessionID,
-						ActorID:       e.hookContext.ActorID,
-						WorkspaceID:   e.hookContext.WorkspaceID,
-						WorkspaceRoot: e.hookContext.WorkspaceRoot,
-					}
-
-					injectedCtx, _ := e.config.ActionExecutor.Execute(ctx, postOutput.Actions, hookInput)
-
-					// Append injected context to tool result if present
-					if injectedCtx != "" {
-						result.Content = result.Content + "\n\n---\n" + injectedCtx
-
-						// Track injected context for visibility
-						output.InjectedContexts = append(output.InjectedContexts, InjectedContext{
-							ToolCallID: toolCall.ID,
-							Source:     "PostToolUse:" + toolCall.Name,
-							Content:    injectedCtx,
-						})
-					}
-				}
-
-				output.ToolResults = append(output.ToolResults, result)
-				totalToolResultChars += len(result.Content)
-
-				// Add tool result to messages
-				messages = append(messages, oaiMessage{
-					Role:       "tool",
-					ToolCallID: tc.ID,
-					Content:    result.Content,
-				})
+			var stop bool
+			messages, tools, stop = e.handleToolCallIteration(ctx, choice.Message, choice.Message.ToolCalls, messages, tools, iteration, &output)
+			if stop {
+				return output, nil
 			}
-			if len(output.Iterations) > 0 {
-				idx := len(output.Iterations) - 1
-				output.Iterations[idx].ToolResultChars = totalToolResultChars
-				output.Iterations[idx].ToolResultTokenEstimate = estimateEngineTokens(totalToolResultChars)
-			}
-
-			// Synthesis transition: strip tools N iterations before exhaustion
-			// so the model MUST produce text instead of more tool calls.
-			if e.config.SynthesisReserve > 0 &&
-				e.config.MaxIterations > e.config.SynthesisReserve &&
-				iteration == e.config.MaxIterations-e.config.SynthesisReserve {
-				tools = nil
-				messages = append(messages, oaiMessage{
-					Role:    "user",
-					Content: "SYNTHESIS PHASE: Your tool budget is ending. Write your complete report NOW.\n\nResearch:\n" + buildResearchSummary(output.ToolCalls),
-				})
-			}
-
-			// Continue the loop
 			continue
 		}
 
-		// No tool calls - this is the final response
-		output.AssistantText = resolveAssistantContent(choice.Message)
-		output.StopReason = mapFinishReason(choice.FinishReason)
-
-		// If the model stopped without producing text, run one final text-only
-		// call to force a concrete answer.
-		if strings.TrimSpace(output.AssistantText) == "" {
-			finalPrompt := "You returned an empty response. Respond to the user's latest message now with plain text."
-			if len(output.ToolCalls) > 0 {
-				finalPrompt = "You stopped without producing a text response. Write your complete report NOW.\n\nResearch:\n" + buildResearchSummary(output.ToolCalls)
-			}
-			finalizeMessages := append(messages,
-				oaiMessage{Role: "assistant", Content: ""},
-				oaiMessage{Role: "user", Content: finalPrompt},
-			)
-			if finalResp, finalErr := e.callLLM(ctx, finalizeMessages, nil); finalErr == nil && len(finalResp.Choices) > 0 {
-				output.AssistantText = strings.TrimSpace(resolveAssistantContent(finalResp.Choices[0].Message))
-				output.Tokens.Add(finalResp.Usage.PromptTokens, finalResp.Usage.CompletionTokens)
-				fmt.Fprintf(os.Stderr, "[CONTEXT] finalize (early stop): prompt_tokens=%d completion_tokens=%d\n",
-					finalResp.Usage.PromptTokens, finalResp.Usage.CompletionTokens)
-			}
+		if e.enforceRequiredContextQuery(choice.Message, &messages, &output) {
+			continue
 		}
 
-		// In StatelessMode with RequireContextQuery, verify context was queried.
-		// If the model skipped tool calling, nudge it to query context first.
-		if os.Getenv("AGENTCTL_DEBUG_CONTEXT_QUERY") == "1" {
-			qc := -1
-			if e.rlmExecutor != nil {
-				qc = e.rlmExecutor.QueryCount()
-			}
-			fmt.Fprintf(os.Stderr, "[CTX-POLICY] pre-check stateless=%t require=%t query_count=%d\n",
-				e.config.StatelessMode, e.config.RequireContextQuery, qc)
-		}
-		if e.config.StatelessMode && e.config.RequireContextQuery {
-			if e.rlmExecutor == nil || e.rlmExecutor.QueryCount() == 0 {
-				if os.Getenv("AGENTCTL_DEBUG_CONTEXT_QUERY") == "1" {
-					fmt.Fprintf(os.Stderr, "[CTX-POLICY] unsatisfied context query: nudging model and continuing\n")
-				}
-				// Add the model's premature response as an assistant message, then
-				// inject a user nudge asking it to query context before responding.
-				assistantText := resolveAssistantContent(choice.Message)
-				messages = append(messages,
-					oaiMessage{Role: "assistant", Content: assistantText},
-					oaiMessage{Role: "user", Content: "You MUST use the rlm_context_query tool to retrieve conversation context BEFORE responding. Please query context first, then respond."},
-				)
-				continue
-			}
-			if os.Getenv("AGENTCTL_DEBUG_CONTEXT_QUERY") == "1" {
-				fmt.Fprintf(os.Stderr, "[CTX-POLICY] satisfied context query count=%d\n", e.rlmExecutor.QueryCount())
-			}
-		}
-
+		e.finalizeAssistantChoice(ctx, choice.Message, choice.FinishReason, messages, &output)
 		return output, nil
+	}
+}
+
+func (e *LLMChatEngine) finishIfIterationExceeded(ctx context.Context, iteration int, messages []oaiMessage, output *EngineOutput) bool {
+	if iteration <= e.config.MaxIterations {
+		return false
+	}
+	if output.AssistantText == "" {
+		finalizeMessages := append(messages, oaiMessage{
+			Role:    "user",
+			Content: "Your tool budget is exhausted. Produce your complete text response NOW.\n\nResearch:\n" + buildResearchSummary(output.ToolCalls),
+		})
+		if finalResp, err := e.callLLM(ctx, finalizeMessages, nil); err == nil && len(finalResp.Choices) > 0 {
+			output.AssistantText = resolveAssistantContent(finalResp.Choices[0].Message)
+			output.Tokens.Add(finalResp.Usage.PromptTokens, finalResp.Usage.CompletionTokens)
+			fmt.Fprintf(os.Stderr, "[CONTEXT] finalize: prompt_tokens=%d completion_tokens=%d\n", finalResp.Usage.PromptTokens, finalResp.Usage.CompletionTokens)
+		}
+	}
+	output.StopReason = StopReasonMaxIterations
+	return true
+}
+
+func (e *LLMChatEngine) finishIfRunCanceled(ctx context.Context, output *EngineOutput) bool {
+	if ctx.Err() == nil {
+		return false
+	}
+	output.StopReason = StopReasonCancelled
+	output.Error = ctx.Err().Error()
+	return true
+}
+
+func (e *LLMChatEngine) finishIfRunCallFailed(ctx context.Context, err error, output *EngineOutput) bool {
+	if err == nil {
+		return false
+	}
+	if ctx.Err() != nil {
+		output.StopReason = StopReasonCancelled
+		output.Error = ctx.Err().Error()
+		return true
+	}
+	output.StopReason = StopReasonError
+	output.Error = err.Error()
+	return true
+}
+
+func (e *LLMChatEngine) recordLLMResponse(ctx context.Context, resp *oaiResponse, messages []oaiMessage, iteration int, iterDuration time.Duration, output *EngineOutput) bool {
+	logLLMIteration(ctx, e, resp, messages, iteration, iterDuration)
+	output.Tokens.Add(resp.Usage.PromptTokens, resp.Usage.CompletionTokens)
+	if e.finishIfContextBudgetExceeded(ctx, resp, iterDuration, output) {
+		return false
+	}
+	if len(resp.Choices) == 0 {
+		output.StopReason = StopReasonError
+		output.Error = "no response from LLM"
+		return false
+	}
+	return true
+}
+
+func logLLMIteration(ctx context.Context, e *LLMChatEngine, resp *oaiResponse, messages []oaiMessage, iteration int, iterDuration time.Duration) {
+	if len(resp.Choices) == 0 {
+		observability.Emit(ctx, observability.NewEvent("llm.no_choices").
+			WithComponent(observability.ComponentAgent).
+			WithData("message", "LLM returned no choices").
+			Error(nil, 0))
+		return
+	}
+	finishReason := resp.Choices[0].FinishReason
+	promptTokens := resp.Usage.PromptTokens
+	completionTokens := resp.Usage.CompletionTokens
+	totalTokens := promptTokens + completionTokens
+	fmt.Fprintf(os.Stderr, "[CONTEXT] iter=%d msgs=%d prompt_tokens=%d completion_tokens=%d total=%d finish=%s tool_calls=%d\n",
+		iteration, len(messages), promptTokens, completionTokens, totalTokens, finishReason, len(resp.Choices[0].Message.ToolCalls))
+	observability.Emit(ctx, observability.NewEvent(observability.OpAgentIteration).
+		WithComponent(observability.ComponentAgent).
+		WithSession(e.hookContext.SessionID, e.hookContext.ActorID).
+		WithWorkspace(e.hookContext.WorkspaceID).
+		WithData("iteration", iteration).
+		WithData("message_count", len(messages)).
+		WithData("prompt_tokens", promptTokens).
+		WithData("completion_tokens", completionTokens).
+		WithData("total_tokens", totalTokens).
+		WithData("finish_reason", finishReason).
+		WithData("tool_calls", len(resp.Choices[0].Message.ToolCalls)).
+		WithData("provider", e.config.Provider).
+		WithData("model", e.config.Model).
+		Success(iterDuration))
+}
+
+func (e *LLMChatEngine) finishIfContextBudgetExceeded(ctx context.Context, resp *oaiResponse, iterDuration time.Duration, output *EngineOutput) bool {
+	if e.config.MaxContextTokens <= 0 || resp.Usage.PromptTokens <= e.config.MaxContextTokens {
+		return false
+	}
+	fmt.Fprintf(os.Stderr, "[CONTEXT] budget exceeded: %d > %d limit, stopping\n", resp.Usage.PromptTokens, e.config.MaxContextTokens)
+	observability.Emit(ctx, observability.NewEvent(observability.OpAgentIteration).
+		WithComponent(observability.ComponentAgent).
+		WithSession(e.hookContext.SessionID, e.hookContext.ActorID).
+		WithData("iteration", len(output.Iterations)+1).
+		WithData("budget_exceeded", true).
+		WithData("prompt_tokens", resp.Usage.PromptTokens).
+		WithData("budget_limit", e.config.MaxContextTokens).
+		Canceled(iterDuration))
+	output.StopReason = StopReasonContextBudget
+	if len(resp.Choices) > 0 {
+		output.AssistantText = resolveAssistantContent(resp.Choices[0].Message)
+	}
+	return true
+}
+
+func (e *LLMChatEngine) handleToolCallIteration(ctx context.Context, choiceMessage oaiMessage, toolCalls []oaiToolCall, messages []oaiMessage, tools []oaiTool, iteration int, output *EngineOutput) ([]oaiMessage, []oaiTool, bool) {
+	messages = append(messages, choiceMessage)
+	totalToolResultChars := 0
+	for _, tc := range toolCalls {
+		stop, resultChars := e.executeToolCallIteration(ctx, tc, &messages, output)
+		totalToolResultChars += resultChars
+		if stop {
+			return messages, tools, true
+		}
+	}
+	if len(output.Iterations) > 0 {
+		idx := len(output.Iterations) - 1
+		output.Iterations[idx].ToolResultChars = totalToolResultChars
+		output.Iterations[idx].ToolResultTokenEstimate = estimateEngineTokens(totalToolResultChars)
+	}
+	if e.shouldEnterSynthesisPhase(iteration) {
+		tools = nil
+		messages = append(messages, oaiMessage{
+			Role:    "user",
+			Content: "SYNTHESIS PHASE: Your tool budget is ending. Write your complete report NOW.\n\nResearch:\n" + buildResearchSummary(output.ToolCalls),
+		})
+	}
+	return messages, tools, false
+}
+
+func (e *LLMChatEngine) executeToolCallIteration(ctx context.Context, tc oaiToolCall, messages *[]oaiMessage, output *EngineOutput) (bool, int) {
+	toolCall := ToolCall{ID: tc.ID, Name: tc.Function.Name, Arguments: json.RawMessage(tc.Function.Arguments)}
+	output.ToolCalls = append(output.ToolCalls, toolCall)
+	if result, finalText, handled := maybeHandleFinalAnswerJSONTool(toolCall); handled {
+		output.ToolResults = append(output.ToolResults, result)
+		output.AssistantText = finalText
+		output.StopReason = StopReasonEndTurn
+		return true, 0
+	}
+	result := e.executeSingleToolCall(ctx, tc, toolCall, output)
+	output.ToolResults = append(output.ToolResults, result)
+	*messages = append(*messages, oaiMessage{Role: "tool", ToolCallID: tc.ID, Content: result.Content})
+	return false, len(result.Content)
+}
+
+func (e *LLMChatEngine) executeSingleToolCall(ctx context.Context, tc oaiToolCall, toolCall ToolCall, output *EngineOutput) ToolResult {
+	start := time.Now()
+	preOutput, err := e.dispatchPreToolUse(ctx, toolCall)
+	if err != nil {
+		observability.Emit(ctx, observability.NewEvent("hook.pre_tool_use_error").
+			WithComponent(observability.ComponentAgent).
+			WithData("tool", toolCall.Name).
+			Error(err, 0))
+	}
+	result := e.resolveToolCallResult(ctx, tc, toolCall, preOutput)
+	postOutput := e.dispatchPostToolUse(ctx, toolCall, result, time.Since(start).Milliseconds())
+	e.applyPostToolActions(ctx, toolCall, postOutput, &result, output)
+	return result
+}
+
+func (e *LLMChatEngine) resolveToolCallResult(ctx context.Context, tc oaiToolCall, toolCall ToolCall, preOutput hooks.Output) ToolResult {
+	if preOutput.Decision.IsBlocking() {
+		return ToolResult{ToolCallID: tc.ID, Content: fmt.Sprintf("Blocked by hook: %s", preOutput.Reason), IsError: true}
+	}
+	execArgs := toolCall.Arguments
+	if len(preOutput.UpdatedToolInput) > 0 {
+		execArgs = preOutput.UpdatedToolInput
+	}
+	if e.toolRunner != nil {
+		execCall := ToolCall{ID: toolCall.ID, Name: toolCall.Name, Arguments: execArgs}
+		result, _ := e.toolRunner.Execute(ctx, execCall)
+		return result
+	}
+	return ToolResult{ToolCallID: tc.ID, Content: fmt.Sprintf("Tool %q not available", tc.Function.Name), IsError: true}
+}
+
+func (e *LLMChatEngine) applyPostToolActions(ctx context.Context, toolCall ToolCall, postOutput hooks.Output, result *ToolResult, output *EngineOutput) {
+	if e.config.ActionExecutor == nil || len(postOutput.Actions) == 0 {
+		return
+	}
+	hookInput := hooks.Input{
+		Event:         hooks.EventPostToolUse,
+		ToolName:      toolCall.Name,
+		SessionID:     e.hookContext.SessionID,
+		ActorID:       e.hookContext.ActorID,
+		WorkspaceID:   e.hookContext.WorkspaceID,
+		WorkspaceRoot: e.hookContext.WorkspaceRoot,
+	}
+	injectedCtx, _ := e.config.ActionExecutor.Execute(ctx, postOutput.Actions, hookInput)
+	if injectedCtx == "" {
+		return
+	}
+	result.Content = result.Content + "\n\n---\n" + injectedCtx
+	output.InjectedContexts = append(output.InjectedContexts, InjectedContext{
+		ToolCallID: toolCall.ID,
+		Source:     "PostToolUse:" + toolCall.Name,
+		Content:    injectedCtx,
+	})
+}
+
+func (e *LLMChatEngine) shouldEnterSynthesisPhase(iteration int) bool {
+	return e.config.SynthesisReserve > 0 &&
+		e.config.MaxIterations > e.config.SynthesisReserve &&
+		iteration == e.config.MaxIterations-e.config.SynthesisReserve
+}
+
+func (e *LLMChatEngine) enforceRequiredContextQuery(choiceMessage oaiMessage, messages *[]oaiMessage, output *EngineOutput) bool {
+	if os.Getenv("AGENTCTL_DEBUG_CONTEXT_QUERY") == "1" {
+		qc := -1
+		if e.rlmExecutor != nil {
+			qc = e.rlmExecutor.QueryCount()
+		}
+		fmt.Fprintf(os.Stderr, "[CTX-POLICY] pre-check stateless=%t require=%t query_count=%d\n", e.config.StatelessMode, e.config.RequireContextQuery, qc)
+	}
+	if !(e.config.StatelessMode && e.config.RequireContextQuery) {
+		return false
+	}
+	if e.rlmExecutor != nil && e.rlmExecutor.QueryCount() > 0 {
+		if os.Getenv("AGENTCTL_DEBUG_CONTEXT_QUERY") == "1" {
+			fmt.Fprintf(os.Stderr, "[CTX-POLICY] satisfied context query count=%d\n", e.rlmExecutor.QueryCount())
+		}
+		return false
+	}
+	if os.Getenv("AGENTCTL_DEBUG_CONTEXT_QUERY") == "1" {
+		fmt.Fprintf(os.Stderr, "[CTX-POLICY] unsatisfied context query: nudging model and continuing\n")
+	}
+	assistantText := resolveAssistantContent(choiceMessage)
+	*messages = append(*messages,
+		oaiMessage{Role: "assistant", Content: assistantText},
+		oaiMessage{Role: "user", Content: "You MUST use the rlm_context_query tool to retrieve conversation context BEFORE responding. Please query context first, then respond."},
+	)
+	return true
+}
+
+func (e *LLMChatEngine) finalizeAssistantChoice(ctx context.Context, choiceMessage oaiMessage, finishReason string, messages []oaiMessage, output *EngineOutput) {
+	output.AssistantText = resolveAssistantContent(choiceMessage)
+	output.StopReason = mapFinishReason(finishReason)
+	if strings.TrimSpace(output.AssistantText) != "" {
+		return
+	}
+	finalPrompt := "You returned an empty response. Respond to the user's latest message now with plain text."
+	if len(output.ToolCalls) > 0 {
+		finalPrompt = "You stopped without producing a text response. Write your complete report NOW.\n\nResearch:\n" + buildResearchSummary(output.ToolCalls)
+	}
+	finalizeMessages := append(messages,
+		oaiMessage{Role: "assistant", Content: ""},
+		oaiMessage{Role: "user", Content: finalPrompt},
+	)
+	if finalResp, finalErr := e.callLLM(ctx, finalizeMessages, nil); finalErr == nil && len(finalResp.Choices) > 0 {
+		output.AssistantText = strings.TrimSpace(resolveAssistantContent(finalResp.Choices[0].Message))
+		output.Tokens.Add(finalResp.Usage.PromptTokens, finalResp.Usage.CompletionTokens)
+		fmt.Fprintf(os.Stderr, "[CONTEXT] finalize (early stop): prompt_tokens=%d completion_tokens=%d\n", finalResp.Usage.PromptTokens, finalResp.Usage.CompletionTokens)
 	}
 }
 

@@ -1,0 +1,113 @@
+{
+  "groupId": "copyfiles-hooks",
+  "testedAt": "2026-04-08T00:00:00Z",
+  "isolation": {
+    "workingDirectory": "/Users/joshka/repos/personal/agentctl",
+    "isolationMethod": "Each test creates its own temp git repo — no shared state"
+  },
+  "toolsUsed": ["go test"],
+  "assertions": {
+    "VAL-WT-025": {
+      "id": "VAL-WT-025",
+      "title": "Copy files with include patterns",
+      "status": "pass",
+      "testName": "TestCopyFiles_IncludePatterns",
+      "evidence": "go test ./internal/worktree/... -v -count=1 -run TestCopyFiles_IncludePatterns → PASS (0.01s). CopyFiles with WithInclude(\"*.go\", \"*.mod\") copies only matching files preserving directory structure.",
+      "steps": [
+        { "action": "Run go test -run TestCopyFiles_IncludePatterns", "expected": "Test passes", "observed": "PASS (0.01s)" }
+      ],
+      "issues": null
+    },
+    "VAL-WT-026": {
+      "id": "VAL-WT-026",
+      "title": "Copy files with exclude patterns",
+      "status": "pass",
+      "testName": "TestCopyFiles_ExcludePatterns",
+      "evidence": "go test ./internal/worktree/... -v -count=1 -run TestCopyFiles_ExcludePatterns → PASS (0.01s). CopyFiles with WithExclude(\"*.test.ts\", \"node_modules/**\") copies all except excluded.",
+      "steps": [
+        { "action": "Run go test -run TestCopyFiles_ExcludePatterns", "expected": "Test passes", "observed": "PASS (0.01s)" }
+      ],
+      "issues": null
+    },
+    "VAL-WT-027": {
+      "id": "VAL-WT-027",
+      "title": "Copy combines include and exclude",
+      "status": "pass",
+      "testName": "TestCopyFiles_CombinedIncludeExclude",
+      "evidence": "go test ./internal/worktree/... -v -count=1 -run TestCopyFiles_CombinedIncludeExclude → PASS (0.00s). WithInclude(\"*.go\") + WithExclude(\"*_test.go\") copies Go files but skips test files.",
+      "steps": [
+        { "action": "Run go test -run TestCopyFiles_CombinedIncludeExclude", "expected": "Test passes", "observed": "PASS (0.00s)" }
+      ],
+      "issues": null
+    },
+    "VAL-WT-028": {
+      "id": "VAL-WT-028",
+      "title": "Copy handles .env dotfiles correctly",
+      "status": "pass",
+      "testName": "TestCopyFiles_Dotfiles",
+      "evidence": "go test ./internal/worktree/... -v -count=1 -run TestCopyFiles_Dotfiles → PASS (0.01s). CopyFiles with .env* pattern copies .env, .env.local, .env.production.",
+      "steps": [
+        { "action": "Run go test -run TestCopyFiles_Dotfiles", "expected": "Test passes", "observed": "PASS (0.01s)" }
+      ],
+      "issues": null
+    },
+    "VAL-WT-029": {
+      "id": "VAL-WT-029",
+      "title": "Copy preserves nested directory structure",
+      "status": "pass",
+      "testName": "TestCopyFiles_PreservesNestedDirectoryStructure",
+      "evidence": "go test ./internal/worktree/... -v -count=1 -run TestCopyFiles_PreservesNestedDirectoryStructure → PASS (0.01s). File at src/a/b/c/file.txt appears at dst/a/b/c/file.txt.",
+      "steps": [
+        { "action": "Run go test -run TestCopyFiles_PreservesNestedDirectoryStructure", "expected": "Test passes", "observed": "PASS (0.01s)" }
+      ],
+      "issues": null
+    },
+    "VAL-WT-030": {
+      "id": "VAL-WT-030",
+      "title": "PostCreate hook executes with correct env vars",
+      "status": "pass",
+      "testName": "TestHooks_PostCreateEnvVars",
+      "evidence": "go test ./internal/worktree/... -v -count=1 -run TestHooks_PostCreateEnvVars → PASS (0.80s). Hook receives WORKTREE_PATH, WORKTREE_BRANCH, WORKTREE_REPO_PATH, WORKTREE_COMMIT env vars.",
+      "steps": [
+        { "action": "Run go test -run TestHooks_PostCreateEnvVars", "expected": "Test passes", "observed": "PASS (0.80s)" }
+      ],
+      "issues": null
+    },
+    "VAL-WT-031": {
+      "id": "VAL-WT-031",
+      "title": "PostCreate hook failure does not roll back worktree",
+      "status": "pass",
+      "testName": "TestHooks_PostCreateFailureDoesNotRollback",
+      "evidence": "go test ./internal/worktree/... -v -count=1 -run TestHooks_PostCreateFailureDoesNotRollback → PASS (0.52s). Hook exits non-zero: worktree still exists on disk, Create returns wrapped error.",
+      "steps": [
+        { "action": "Run go test -run TestHooks_PostCreateFailureDoesNotRollback", "expected": "Test passes", "observed": "PASS (0.52s)" }
+      ],
+      "issues": null
+    },
+    "VAL-WT-032": {
+      "id": "VAL-WT-032",
+      "title": "PostRemove hook executes after removal",
+      "status": "pass",
+      "testName": "TestHooks_PostRemoveExecutesAfterRemoval",
+      "evidence": "go test ./internal/worktree/... -v -count=1 -run TestHooks_PostRemoveExecutesAfterRemoval → PASS (0.60s). Hook runs after directory is gone, receives correct env vars.",
+      "steps": [
+        { "action": "Run go test -run TestHooks_PostRemoveExecutesAfterRemoval", "expected": "Test passes", "observed": "PASS (0.60s)" }
+      ],
+      "issues": null
+    },
+    "VAL-WT-033": {
+      "id": "VAL-WT-033",
+      "title": "Hook timeout enforcement",
+      "status": "pass",
+      "testName": "TestHooks_TimeoutEnforcement",
+      "evidence": "go test ./internal/worktree/... -v -count=1 -run TestHooks_TimeoutEnforcement → PASS (1.39s). Hook exceeding timeout is killed; timeout error returned; underlying operation already completed.",
+      "steps": [
+        { "action": "Run go test -run TestHooks_TimeoutEnforcement", "expected": "Test passes", "observed": "PASS (1.39s)" }
+      ],
+      "issues": null
+    }
+  },
+  "frictions": [],
+  "blockers": [],
+  "summary": "Tested 9 assertions: all 9 passed. CopyFiles batch (5 tests) completed in 0.223s. Hooks batch (4 tests) completed in 3.527s. No issues, frictions, or blockers encountered."
+}

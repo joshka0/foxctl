@@ -53,18 +53,18 @@ func PrepareOutputWithArtifact(
 		inlineLimit = 32 * 1024
 	}
 
-	if totalBytes <= inlineLimit {
-		output.SnippetsInline = MakePreviews(evidence.Snippets, previewBytes)
-		addOutputHints(output)
-		return output, nil, nil
-	}
-
 	if render == nil {
 		render = RenderNDJSON
 	}
 	artifactData, err := render(evidence)
 	if err != nil {
 		return nil, nil, fmt.Errorf("prepare artifact: %w", err)
+	}
+
+	if totalBytes <= inlineLimit && len(artifactData) <= inlineLimit {
+		output.SnippetsInline = MakePreviews(evidence.Snippets, previewBytes)
+		addOutputHints(output)
+		return output, nil, nil
 	}
 
 	addOutputHints(output)

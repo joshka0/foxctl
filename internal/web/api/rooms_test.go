@@ -754,10 +754,34 @@ func TestRoomDetailHandler_GetInboxReturnsActorScopedEntries(t *testing.T) {
 	if got := int(body["count"].(float64)); got != 1 {
 		t.Fatalf("count=%d want 1", got)
 	}
+	room, ok := body["room"].(map[string]any)
+	if !ok {
+		t.Fatalf("room type=%T", body["room"])
+	}
+	for _, key := range []string{"task_ids", "members", "participants"} {
+		if _, has := room[key]; has {
+			t.Fatalf("default inbox response should omit %q", key)
+		}
+	}
 	entries, _ := body["entries"].([]any)
 	entry := entries[0].(map[string]any)
 	if got := strings.TrimSpace(entry["recipient"].(string)); got != "gemini-a" {
 		t.Fatalf("recipient=%q want gemini-a", got)
+	}
+
+	inboxFullReq := httptest.NewRequest(http.MethodGet, "/api/rooms/alpha/inbox?workspace_id=ws1&actor_id=gemini-a&full_room=1", nil)
+	inboxFullRR := httptest.NewRecorder()
+	roomHandler.ServeHTTP(inboxFullRR, inboxFullReq)
+	if inboxFullRR.Code != http.StatusOK {
+		t.Fatalf("inbox full status=%d body=%s", inboxFullRR.Code, inboxFullRR.Body.String())
+	}
+	fullBody := decodeResponseBody(t, inboxFullRR)
+	fullRoom, ok := fullBody["room"].(map[string]any)
+	if !ok {
+		t.Fatalf("full room type=%T", fullBody["room"])
+	}
+	if _, has := fullRoom["members"]; !has {
+		t.Fatalf("full_room=1 should include members")
 	}
 }
 

@@ -59,6 +59,9 @@ func EmitWithConfig(ctx context.Context, event *WideEvent, config *persistConfig
 		return
 	}
 
+	// Scrub sensitive data before any downstream processing (SSE, persistence).
+	RedactEvent(event)
+
 	// Always try to publish to SSE (even if file persistence is disabled)
 	// This allows real-time activity streaming without requiring AGENTCTL_OBS_DIR
 	publishToSSE(event)
@@ -96,6 +99,8 @@ func EmitSync(ctx context.Context, event *WideEvent) error {
 	if event == nil {
 		return nil
 	}
+
+	RedactEvent(event)
 
 	// Always try to publish to SSE (even if file persistence is disabled)
 	publishToSSE(event)
@@ -180,6 +185,7 @@ func NewWideEventWriter(sampler Sampler) (*WideEventWriter, error) {
 }
 
 // Write writes an event if the sampler allows it.
+// Sensitive fields are redacted before encoding.
 func (w *WideEventWriter) Write(event *WideEvent) error {
 	if w == nil || event == nil {
 		return nil
@@ -191,6 +197,8 @@ func (w *WideEventWriter) Write(event *WideEvent) error {
 		}
 	}
 
+	RedactEvent(event)
+
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
@@ -198,10 +206,13 @@ func (w *WideEventWriter) Write(event *WideEvent) error {
 }
 
 // WriteAlways writes an event bypassing the sampler.
+// Sensitive fields are redacted before encoding.
 func (w *WideEventWriter) WriteAlways(event *WideEvent) error {
 	if w == nil || event == nil {
 		return nil
 	}
+
+	RedactEvent(event)
 
 	w.mu.Lock()
 	defer w.mu.Unlock()

@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -10,7 +11,9 @@ import (
 	"time"
 
 	"github.com/jkatigb/agentctl/internal/contextplane"
+	"github.com/jkatigb/agentctl/internal/domain/agent"
 	"github.com/jkatigb/agentctl/internal/protocol"
+	"github.com/jkatigb/agentctl/internal/storage/blackboard"
 	"github.com/jkatigb/agentctl/internal/tmuxbridge"
 	"github.com/jkatigb/agentctl/internal/zellijbridge"
 	"github.com/spf13/cobra"
@@ -83,7 +86,7 @@ func newTmuxRemindCommand() *cobra.Command {
 				}
 				resolvedRecipient = identity.Sender
 			}
-			return runRoomRemindAdd(cmd, workspace, sender, roomID, resolvedRecipient, subject, body, every, maxIterations, ackRequired, replyExpected, interrupt)
+			return runRoomRemindAdd(cmd, workspace, sender, roomID, resolvedRecipient, subject, body, every, maxIterations, ackRequired, replyExpected, interrupt, false)
 		},
 	}
 
@@ -575,18 +578,46 @@ func mergeHintData(hint string, data map[string]any) map[string]any {
 }
 
 func newTmuxSendCommand() *cobra.Command {
-	var sender string
+	var (
+		sender         string
+		workspace      string
+		confirmRoomID  string
+		confirmActor   string
+		confirmReplyTo string
+		confirmTimeout time.Duration
+	)
 
 	cmd := &cobra.Command{
 		Use:   "send <target> <text>",
 		Short: "Send a structured bridge message into a mux pane",
 		Args:  cobra.MinimumNArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			confirmSpec, err := resolveMuxSendConfirmation(cmd.Context(), workspace, confirmRoomID, confirmActor, confirmReplyTo, confirmTimeout)
+			if err != nil {
+				return protocol.WriteError(cmd.OutOrStdout(), "agentctl.tmux.send", protocol.ErrorCodeEARG, err.Error(), map[string]any{
+					"hint": "Provide --confirm-room-id, --confirm-actor, and --confirm-reply-to together when using send confirmation.",
+				}, protocol.WithSource("cli"))
+			}
+			sendStartedAt := time.Now().UTC()
 			client := tmuxbridge.New()
 			result, err := client.Send(cmd.Context(), sender, args[0], strings.Join(args[1:], " "))
 			if err != nil {
 				return protocol.WriteError(cmd.OutOrStdout(), "agentctl.tmux.send", protocol.ErrorCodeERuntime, err.Error(), map[string]any{
 					"hint": "Use a pane id like %3 or a pane label like agent-b. When invoking outside the active mux, pass --sender <pane-label> so replies can route back to your pane.",
+				}, protocol.WithSource("cli"))
+			}
+			if confirmSpec != nil {
+				confirmSpec.StartedAt = sendStartedAt
+				confirmation, err := waitForMuxRoomConfirmation(cmd.Context(), *confirmSpec)
+				if err != nil {
+					return protocol.WriteError(cmd.OutOrStdout(), "agentctl.tmux.send", protocol.ErrorCodeERuntime, err.Error(), map[string]any{
+						"result":       result,
+						"confirmation": confirmation,
+					}, protocol.WithSource("cli"))
+				}
+				return protocol.WriteOK(cmd.OutOrStdout(), "agentctl.tmux.send", map[string]any{
+					"result":       result,
+					"confirmation": confirmation,
 				}, protocol.WithSource("cli"))
 			}
 			return protocol.WriteOK(cmd.OutOrStdout(), "agentctl.tmux.send", map[string]any{
@@ -595,21 +626,270 @@ func newTmuxSendCommand() *cobra.Command {
 		},
 	}
 
+	cmd.Flags().StringVar(&workspace, "workspace", ".", "Workspace root override for room confirmation")
 	cmd.Flags().StringVar(&sender, "sender", "", "Sender pane label or pane id when invoking outside tmux or overriding the current pane")
+	cmd.Flags().StringVar(&confirmRoomID, "confirm-room-id", "", "Room id to poll for durable confirmation")
+	cmd.Flags().StringVar(&confirmActor, "confirm-actor", "", "Room actor expected to post the durable reply")
+	cmd.Flags().StringVar(&confirmReplyTo, "confirm-reply-to", "", "Original room message id expected to be answered")
+	cmd.Flags().DurationVar(&confirmTimeout, "confirm-timeout", 30*time.Second, "Maximum time to wait for durable room confirmation")
 	return cmd
+}
+
+type muxSendConfirmationSpec struct {
+	Workspace string
+	RoomID    string
+	ActorID   string
+	ReplyTo   string
+	Timeout   time.Duration
+	StartedAt time.Time
+}
+
+type muxSendConfirmationResult struct {
+	Mode              string    `json:"mode"`
+	RoomID            string    `json:"room_id"`
+	ActorID           string    `json:"actor_id"`
+	ReplyTo           string    `json:"reply_to"`
+	Status            string    `json:"status"`
+	Signal            string    `json:"signal,omitempty"`
+	ConfirmedAt       time.Time `json:"confirmed_at,omitempty"`
+	ReplyMessageID    string    `json:"reply_message_id,omitempty"`
+	ReplyInboxCleared bool      `json:"reply_inbox_cleared,omitempty"`
+}
+
+func resolveMuxSendConfirmation(ctx context.Context, workspace, roomID, actorID, replyTo string, timeout time.Duration) (*muxSendConfirmationSpec, error) {
+	roomID = strings.TrimSpace(roomID)
+	actorID = strings.TrimSpace(actorID)
+	replyTo = strings.TrimSpace(replyTo)
+	if roomID == "" && actorID == "" && replyTo == "" {
+		return nil, nil
+	}
+	if roomID == "" || actorID == "" || replyTo == "" {
+		return nil, fmt.Errorf("send confirmation requires room id, actor id, and reply-to message id")
+	}
+	absWorkspace, err := resolveRoomWorkspace(workspace)
+	if err != nil {
+		return nil, err
+	}
+	store, err := openRoomBoardStore(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer store.Close()
+	summary, messages, err := loadRoomState(ctx, store, absWorkspace, roomID, actorID, roomTaskScanLimit)
+	if err != nil {
+		return nil, err
+	}
+	if !roomSummaryHasParticipant(summary, actorID) {
+		return nil, fmt.Errorf("confirmation actor %q is not a participant in room %q", actorID, roomID)
+	}
+	if roomMessageByID(messages, replyTo) == nil {
+		return nil, fmt.Errorf("confirmation reply-to message %q was not found in room %q", replyTo, roomID)
+	}
+	if timeout <= 0 {
+		timeout = 30 * time.Second
+	}
+	return &muxSendConfirmationSpec{
+		Workspace: absWorkspace,
+		RoomID:    roomID,
+		ActorID:   actorID,
+		ReplyTo:   replyTo,
+		Timeout:   timeout,
+	}, nil
+}
+
+func waitForMuxRoomConfirmation(ctx context.Context, spec muxSendConfirmationSpec) (muxSendConfirmationResult, error) {
+	result := muxSendConfirmationResult{
+		Mode:    "room",
+		RoomID:  spec.RoomID,
+		ActorID: spec.ActorID,
+		ReplyTo: spec.ReplyTo,
+		Status:  "waiting",
+	}
+	deadline := time.Now().UTC().Add(spec.Timeout)
+	pollEvery := 500 * time.Millisecond
+	if spec.Timeout < pollEvery {
+		pollEvery = spec.Timeout
+	}
+	if pollEvery <= 0 {
+		pollEvery = 100 * time.Millisecond
+	}
+	store, err := openRoomBoardStore(ctx)
+	if err != nil {
+		return result, err
+	}
+	defer store.Close()
+	for {
+		summary, messages, err := loadRoomState(ctx, store, spec.Workspace, spec.RoomID, spec.ActorID, roomTaskScanLimit)
+		if err != nil {
+			return result, err
+		}
+		replyID, inboxCleared := detectMuxRoomReplyConfirmation(summary, messages, spec.ActorID, spec.ReplyTo)
+		if replyID != "" {
+			result.Status = "confirmed"
+			result.Signal = "room_reply"
+			result.ConfirmedAt = time.Now().UTC()
+			result.ReplyMessageID = replyID
+			result.ReplyInboxCleared = inboxCleared
+			return result, nil
+		}
+		if time.Now().UTC().After(deadline) {
+			result.Status = "timed_out_waiting_for_confirmation"
+			result.ReplyInboxCleared = inboxCleared
+			return result, fmt.Errorf("timed out waiting for durable room confirmation for actor %q in room %q", spec.ActorID, spec.RoomID)
+		}
+		select {
+		case <-ctx.Done():
+			return result, ctx.Err()
+		case <-time.After(pollEvery):
+		}
+	}
+}
+
+func detectMuxRoomReplyConfirmation(summary agent.RoomSummary, messages []agent.BoardMessage, actorID, replyTo string) (string, bool) {
+	root := roomMessageByID(messages, replyTo)
+	if root == nil {
+		return "", false
+	}
+	entries := buildRoomInboxEntries(actorID, messages, "all", false)
+	inboxCleared := true
+	for _, entry := range entries {
+		if strings.TrimSpace(entry.ID) == strings.TrimSpace(replyTo) {
+			inboxCleared = false
+			break
+		}
+	}
+	rootSender := strings.TrimSpace(root.Sender)
+	for _, msg := range messages {
+		if !sameRoomParticipant(msg.Sender, actorID) {
+			continue
+		}
+		if strings.TrimSpace(msg.ID) == strings.TrimSpace(replyTo) {
+			continue
+		}
+		if msg.CreatedAt.Before(root.CreatedAt) {
+			continue
+		}
+		if msg.CreatedAt.Equal(root.CreatedAt) && strings.TrimSpace(msg.ID) < strings.TrimSpace(replyTo) {
+			continue
+		}
+		if strings.TrimSpace(msg.RelatedMessageID) == strings.TrimSpace(replyTo) {
+			return msg.ID, true
+		}
+		recipient := normalizeRoomRecipient(msg.Recipient)
+		if rootSender != "" && (sameRoomParticipant(recipient, rootSender) || recipient == agent.BroadcastRecipient) {
+			return msg.ID, true
+		}
+	}
+	return "", inboxCleared
+}
+
+func roomMessageByID(messages []agent.BoardMessage, id string) *agent.BoardMessage {
+	id = strings.TrimSpace(id)
+	for i := range messages {
+		if strings.TrimSpace(messages[i].ID) == id {
+			return &messages[i]
+		}
+	}
+	return nil
+}
+
+func roomSummaryHasParticipant(summary agent.RoomSummary, actorID string) bool {
+	actorID = strings.TrimSpace(actorID)
+	if actorID == "" {
+		return false
+	}
+	for _, participant := range summary.Participants {
+		if sameRoomParticipant(participant, actorID) {
+			return true
+		}
+	}
+	for _, member := range summary.Members {
+		if sameRoomParticipant(member.ActorID, actorID) {
+			return true
+		}
+	}
+	return false
 }
 
 func newTmuxSubmitCommand() *cobra.Command {
 	var (
-		backend string
-		session string
+		backend   string
+		session   string
+		modeFlag  string
+		paneID    string
+		roomID    string
+		workspace string
 	)
 
 	cmd := &cobra.Command{
-		Use:   "submit [target]",
-		Short: "Submit the current mux draft with Escape then Enter",
-		Args:  cobra.MaximumNArgs(1),
+		Use:    "submit [target]",
+		Hidden: true,
+		Short:  "Submit the current mux draft (Escape+Enter by default, or Enter-only)",
+		Long: "Deprecated hidden command: relay and room send already deliver text with a trailing submit; " +
+			"room task assign/claim/complete fan out to panes by default. Sends keys to submit a drafted prompt in the target pane. " +
+			"Default is Escape then Enter for " +
+			"multi-line UIs; use --mode enter-only when the line is complete and only Enter should be sent.\n\n" +
+			"Use --room <room-id> with [target] as the room participant id to resolve tmux/zellij pane bindings " +
+			"from room storage (avoids mixing up agentctl room ids with zellij --session).\n\n" +
+			"Without --room: for tmux pass a pane label or id as [target]; for zellij use --session and optional " +
+			"--pane-id (keys go to the focused pane when pane id is omitted).",
+		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			submitMode, err := parseMuxSubmitModeString(modeFlag)
+			if err != nil {
+				return protocol.WriteError(cmd.OutOrStdout(), "agentctl.tmux.submit", protocol.ErrorCodeEARG, err.Error(), map[string]any{
+					"hint": "Use --mode escape-enter (default) or --mode enter-only.",
+				}, protocol.WithSource("cli"))
+			}
+			if rid := strings.TrimSpace(roomID); rid != "" {
+				if len(args) == 0 || strings.TrimSpace(args[0]) == "" {
+					return protocol.WriteError(cmd.OutOrStdout(), "agentctl.tmux.submit", protocol.ErrorCodeEARG, "participant target is required when using --room", map[string]any{
+						"hint": "Example: agentctl mux submit --room my-room cursor-c-a",
+					}, protocol.WithSource("cli"))
+				}
+				absWorkspace, err := resolveRoomWorkspace(workspace)
+				if err != nil {
+					return err
+				}
+				store, err := openRoomBoardStore(cmd.Context())
+				if err != nil {
+					return protocol.WriteError(cmd.OutOrStdout(), "agentctl.tmux.submit", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+				}
+				defer store.Close()
+				summary, err := store.GetRoom(cmd.Context(), absWorkspace, rid, "")
+				if err != nil {
+					code := protocol.ErrorCodeERuntime
+					if errors.Is(err, blackboard.ErrRoomNotFound) {
+						code = protocol.ErrorCodeENotFound
+					}
+					return protocol.WriteError(cmd.OutOrStdout(), "agentctl.tmux.submit", code, err.Error(), map[string]any{
+						"hint": "Create the room or pass the correct --workspace.",
+					}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+				}
+				member, ok := findRoomMemberForMuxSubmit(summary, args[0])
+				if !ok {
+					return protocol.WriteError(cmd.OutOrStdout(), "agentctl.tmux.submit", protocol.ErrorCodeENotFound, fmt.Sprintf("participant %q not found in room %q", strings.TrimSpace(args[0]), rid), map[string]any{
+						"hint": "Use `agentctl room status <room>` to list participant ids.",
+					}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+				}
+				result, resolvedBackend, err := muxSubmitForRoomMember(cmd.Context(), member, submitMode)
+				if err != nil {
+					return protocol.WriteError(cmd.OutOrStdout(), "agentctl.tmux.submit", protocol.ErrorCodeERuntime, err.Error(), map[string]any{
+						"hint": "Ensure the participant joined with mux bindings (tmux label or zellij session/pane).",
+					}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+				}
+				data := map[string]any{
+					"backend":       resolvedBackend,
+					"result":        result,
+					"room_id":       rid,
+					"participant":   strings.TrimSpace(args[0]),
+					"resolved_from": "room",
+				}
+				if strings.TrimSpace(session) != "" {
+					data["note"] = "--session was ignored; submit used pane bindings from --room"
+				}
+				return protocol.WriteOK(cmd.OutOrStdout(), "agentctl.tmux.submit", data, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+			}
 			resolvedBackend := resolveMuxCreateBackend(strings.TrimSpace(backend))
 			if resolvedBackend == "" {
 				return protocol.WriteError(cmd.OutOrStdout(), "agentctl.tmux.submit", protocol.ErrorCodeEARG, fmt.Sprintf("unsupported backend %q", backend), map[string]any{
@@ -624,7 +904,7 @@ func newTmuxSubmitCommand() *cobra.Command {
 					}, protocol.WithSource("cli"))
 				}
 				client := tmuxbridge.New()
-				result, err := client.Submit(cmd.Context(), args[0])
+				result, err := client.Submit(cmd.Context(), args[0], tmuxbridge.SubmitOptions{Mode: submitMode})
 				if err != nil {
 					return protocol.WriteError(cmd.OutOrStdout(), "agentctl.tmux.submit", protocol.ErrorCodeERuntime, err.Error(), map[string]any{
 						"hint": "Use a pane id like %3 or a pane label set with tmux-bridge name <target> <label>.",
@@ -644,11 +924,22 @@ func newTmuxSubmitCommand() *cobra.Command {
 						"hint": "Pass --session or run inside the target zellij session.",
 					}, protocol.WithSource("cli"))
 				}
+				resolvedPane := strings.TrimSpace(paneID)
+				if resolvedPane == "" {
+					resolvedPane = strings.TrimSpace(os.Getenv("ZELLIJ_PANE_ID"))
+				}
 				client := zellijbridge.New()
-				result, err := client.Submit(cmd.Context(), resolvedSession)
+				result, err := client.Submit(cmd.Context(), resolvedSession, zellijbridge.SubmitOptions{
+					Mode:   submitMode,
+					PaneID: resolvedPane,
+				})
 				if err != nil {
+					hint := "Zellij submit requires an attached client. Without --pane-id, keys go to the focused pane."
+					if strings.TrimSpace(resolvedPane) != "" {
+						hint = "Ensure --pane-id matches a terminal pane (e.g. terminal_2) and your zellij version supports action write --pane-id."
+					}
 					return protocol.WriteError(cmd.OutOrStdout(), "agentctl.tmux.submit", protocol.ErrorCodeERuntime, err.Error(), map[string]any{
-						"hint": "Zellij submit acts on the focused pane in the named session and requires an attached client.",
+						"hint": hint,
 					}, protocol.WithSource("cli"))
 				}
 				return protocol.WriteOK(cmd.OutOrStdout(), "agentctl.tmux.submit", map[string]any{
@@ -662,7 +953,11 @@ func newTmuxSubmitCommand() *cobra.Command {
 	}
 
 	cmd.Flags().StringVar(&backend, "backend", "auto", "Mux backend to submit against (auto|tmux|zellij)")
-	cmd.Flags().StringVar(&session, "session", "", "Zellij session name when --backend zellij (defaults to ZELLIJ_SESSION_NAME)")
+	cmd.Flags().StringVar(&session, "session", "", "Zellij session name when --backend zellij (defaults to ZELLIJ_SESSION_NAME); ignored for tmux")
+	cmd.Flags().StringVar(&modeFlag, "mode", "escape-enter", "Submit key sequence (escape-enter|enter-only)")
+	cmd.Flags().StringVar(&paneID, "pane-id", "", "Zellij terminal pane id (e.g. terminal_2 or 2); defaults to ZELLIJ_PANE_ID when set")
+	cmd.Flags().StringVar(&roomID, "room", "", "Agentctl room id: resolve session/pane from stored membership for participant [target]")
+	cmd.Flags().StringVar(&workspace, "workspace", ".", "Workspace root for --room lookup")
 	return cmd
 }
 

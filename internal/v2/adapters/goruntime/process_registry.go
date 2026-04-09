@@ -17,6 +17,7 @@ type processEntry struct {
 	agentID        string
 	process        *os.Process
 	processGroupID int
+	done           chan struct{}
 
 	publisher EventPublisher
 	now       func() time.Time
@@ -40,6 +41,18 @@ func (e *processEntry) cancelState() (bool, string, string) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	return e.cancelRequested, e.cancelSignal, e.cancelReason
+}
+
+func (e *processEntry) closeDone() {
+	if e == nil || e.done == nil {
+		return
+	}
+	select {
+	case <-e.done:
+		return
+	default:
+		close(e.done)
+	}
 }
 
 func (e *processEntry) emit(ctx context.Context, evt coreworker.LifecycleEvent) error {

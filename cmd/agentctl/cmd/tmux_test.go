@@ -1,6 +1,12 @@
 package cmd
 
-import "testing"
+import (
+	"context"
+	"testing"
+	"time"
+
+	"github.com/jkatigb/agentctl/internal/tmuxbridge"
+)
 
 func TestNewTmuxCommandHasSendParentSubcommand(t *testing.T) {
 	cmd := newTmuxCommand()
@@ -103,5 +109,123 @@ func TestResolveMuxRemindArgsRequiresRoomIDOutsideRoomBoundPane(t *testing.T) {
 	t.Setenv("AGENTCTL_ROOM_ID", "")
 	if _, _, err := resolveMuxRemindArgs([]string{"check in"}); err == nil {
 		t.Fatal("expected error when room id is missing outside room-bound pane")
+	}
+}
+
+func TestResolveMuxSendConfirmationRejectsNonMember(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	ctx := context.Background()
+	workspace := t.TempDir()
+
+	cmd, _ := newRoomTestCommand(ctx)
+	if err := runRoomCreate(cmd, workspace, "alpha", "Alpha", "", []string{"human-a=coordinator", "cursor-a=reviewer"}); err != nil {
+		t.Fatalf("runRoomCreate: %v", err)
+	}
+	cmd, out := newRoomTestCommand(ctx)
+	if err := runRoomSend(cmd, workspace, "alpha", "human-a", "cursor-a", "", "please reply", "info", "", 0, false, true, false, true); err != nil {
+		t.Fatalf("runRoomSend: %v", err)
+	}
+	data := decodeRoomEnvelope(t, out)
+	replyTo := data["message_id"].(string)
+
+	if _, err := resolveMuxSendConfirmation(ctx, workspace, "alpha", "ghost-a", replyTo, 5*time.Second); err == nil {
+		t.Fatal("expected error for non-member confirm actor")
+	}
+}
+
+func TestWaitForMuxRoomConfirmationDetectsRoomReply(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	ctx := context.Background()
+	workspace := t.TempDir()
+
+	cmd, _ := newRoomTestCommand(ctx)
+	if err := runRoomCreate(cmd, workspace, "alpha", "Alpha", "", []string{"human-a=coordinator", "cursor-a=reviewer"}); err != nil {
+		t.Fatalf("runRoomCreate: %v", err)
+	}
+	cmd, out := newRoomTestCommand(ctx)
+	if err := runRoomSend(cmd, workspace, "alpha", "human-a", "cursor-a", "", "please reply", "info", "", 0, false, true, false, true); err != nil {
+		t.Fatalf("runRoomSend: %v", err)
+	}
+	data := decodeRoomEnvelope(t, out)
+	replyTo := data["message_id"].(string)
+
+	cmd, _ = newRoomTestCommand(ctx)
+	if err := runRoomSend(cmd, workspace, "alpha", "cursor-a", "human-a", "", "replying now", "info", "", 0, false, false, false, true); err != nil {
+		t.Fatalf("runRoomSend reply: %v", err)
+	}
+
+	confirmation, err := waitForMuxRoomConfirmation(ctx, muxSendConfirmationSpec{
+		Workspace: workspace,
+		RoomID:    "alpha",
+		ActorID:   "cursor-a",
+		ReplyTo:   replyTo,
+		Timeout:   2 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("waitForMuxRoomConfirmation: %v", err)
+	}
+	if confirmation.Status != "confirmed" {
+		t.Fatalf("status=%q want confirmed", confirmation.Status)
+	}
+	if confirmation.Signal != "room_reply" {
+		t.Fatalf("signal=%q want room_reply", confirmation.Signal)
+	}
+	if !confirmation.ReplyInboxCleared {
+		t.Fatalf("ReplyInboxCleared=%v want true", confirmation.ReplyInboxCleared)
+	}
+	if confirmation.ReplyMessageID == "" {
+		t.Fatalf("ReplyMessageID empty")
+	}
+}
+
+func TestWaitForMuxRoomConfirmationTimesOutWithoutReply(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	ctx := context.Background()
+	workspace := t.TempDir()
+
+	cmd, _ := newRoomTestCommand(ctx)
+	if err := runRoomCreate(cmd, workspace, "alpha", "Alpha", "", []string{"human-a=coordinator", "cursor-a=reviewer"}); err != nil {
+		t.Fatalf("runRoomCreate: %v", err)
+	}
+	cmd, out := newRoomTestCommand(ctx)
+	if err := runRoomSend(cmd, workspace, "alpha", "human-a", "cursor-a", "", "please reply", "info", "", 0, false, true, false, true); err != nil {
+		t.Fatalf("runRoomSend: %v", err)
+	}
+	data := decodeRoomEnvelope(t, out)
+	replyTo := data["message_id"].(string)
+
+	confirmation, err := waitForMuxRoomConfirmation(ctx, muxSendConfirmationSpec{
+		Workspace: workspace,
+		RoomID:    "alpha",
+		ActorID:   "cursor-a",
+		ReplyTo:   replyTo,
+		Timeout:   10 * time.Millisecond,
+	})
+	if err == nil {
+		t.Fatal("expected timeout error")
+	}
+	if confirmation.Status != "timed_out_waiting_for_confirmation" {
+		t.Fatalf("status=%q want timed_out_waiting_for_confirmation", confirmation.Status)
+	}
+}
+
+func TestParseMuxSubmitMode(t *testing.T) {
+	got, err := parseMuxSubmitModeString("")
+	if err != nil {
+		t.Fatalf("parseMuxSubmitModeString(\"\") error = %v", err)
+	}
+	if got != tmuxbridge.SubmitModeEscapeEnter {
+		t.Fatalf("got %q, want %s", got, tmuxbridge.SubmitModeEscapeEnter)
+	}
+	got, err = parseMuxSubmitModeString("escape_enter")
+	if err != nil || got != tmuxbridge.SubmitModeEscapeEnter {
+		t.Fatalf("escape_enter: got %q err=%v", got, err)
+	}
+	got, err = parseMuxSubmitModeString("enter-only")
+	if err != nil || got != tmuxbridge.SubmitModeEnterOnly {
+		t.Fatalf("enter-only: got %q err=%v", got, err)
+	}
+	if _, err := parseMuxSubmitModeString("bogus"); err == nil {
+		t.Fatal("expected error for bogus mode")
 	}
 }

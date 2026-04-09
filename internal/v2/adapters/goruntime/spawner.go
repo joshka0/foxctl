@@ -38,16 +38,18 @@ type CommandBuilder func(req spawn.Request) (CommandSpec, error)
 
 // ChildSpawnerConfig configures the Go-native subprocess spawner.
 type ChildSpawnerConfig struct {
-	Publisher    EventPublisher
-	BuildCommand CommandBuilder
-	Now          func() time.Time
+	Publisher         EventPublisher
+	BuildCommand      CommandBuilder
+	Now               func() time.Time
+	HeartbeatInterval time.Duration
 }
 
 // ChildSpawner launches one subprocess worker and reports its lifecycle.
 type ChildSpawner struct {
-	publisher    EventPublisher
-	buildCommand CommandBuilder
-	now          func() time.Time
+	publisher         EventPublisher
+	buildCommand      CommandBuilder
+	now               func() time.Time
+	heartbeatInterval time.Duration
 }
 
 // NewChildSpawner builds a Go-native subprocess child spawner.
@@ -61,10 +63,14 @@ func NewChildSpawner(cfg ChildSpawnerConfig) (*ChildSpawner, error) {
 	if cfg.Now == nil {
 		cfg.Now = func() time.Time { return time.Now().UTC() }
 	}
+	if cfg.HeartbeatInterval <= 0 {
+		cfg.HeartbeatInterval = 30 * time.Second
+	}
 	return &ChildSpawner{
-		publisher:    cfg.Publisher,
-		buildCommand: cfg.BuildCommand,
-		now:          cfg.Now,
+		publisher:         cfg.Publisher,
+		buildCommand:      cfg.BuildCommand,
+		now:               cfg.Now,
+		heartbeatInterval: cfg.HeartbeatInterval,
 	}, nil
 }
 
@@ -144,6 +150,7 @@ func (s *ChildSpawner) SpawnChild(ctx context.Context, req spawn.Request) (spawn
 		agentID:        strings.TrimSpace(req.AgentID),
 		process:        cmd.Process,
 		processGroupID: processGroupID,
+		done:           make(chan struct{}),
 		publisher:      s.publisher,
 		now:            s.now,
 		baseEvent: coreworker.LifecycleEvent{
@@ -212,6 +219,10 @@ func (s *ChildSpawner) SpawnChild(ctx context.Context, req spawn.Request) (spawn
 		return spawn.Response{}, err
 	}
 
+	if s.heartbeatInterval > 0 {
+		go s.publishHeartbeats(req, entry)
+	}
+
 	go s.waitAndPublish(req, workerID, cmd, entry, &logWG)
 
 	return spawn.Response{
@@ -227,6 +238,9 @@ func (s *ChildSpawner) SpawnChild(ctx context.Context, req spawn.Request) (spawn
 
 func (s *ChildSpawner) waitAndPublish(req spawn.Request, workerID string, cmd *exec.Cmd, entry *processEntry, logWG *sync.WaitGroup) {
 	defer globalProcessRegistry.unregister(workerID, strings.TrimSpace(req.AgentID))
+	if entry != nil {
+		defer entry.closeDone()
+	}
 	err := cmd.Wait()
 	if logWG != nil {
 		logWG.Wait()
@@ -314,6 +328,38 @@ func (s *ChildSpawner) waitAndPublish(req spawn.Request, workerID string, cmd *e
 
 func (s *ChildSpawner) publish(ctx context.Context, evt coreworker.LifecycleEvent) error {
 	return s.publisher.Publish(ctx, evt)
+}
+
+func (s *ChildSpawner) publishHeartbeats(req spawn.Request, entry *processEntry) {
+	if s == nil || entry == nil || entry.done == nil || s.heartbeatInterval <= 0 {
+		return
+	}
+	ticker := time.NewTicker(s.heartbeatInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-entry.done:
+			return
+		case <-ticker.C:
+			_ = s.publish(context.Background(), coreworker.LifecycleEvent{
+				EventKind:     coreworker.EventWorkerHeartbeat,
+				ObservedAt:    s.now().UTC(),
+				WorkerID:      entry.workerID,
+				BackendKind:   coreworker.BackendSubprocess,
+				AgentID:       strings.TrimSpace(req.AgentID),
+				RunID:         strings.TrimSpace(req.RunID),
+				ParentAgentID: strings.TrimSpace(req.ParentAgentID),
+				WorkspaceID:   stringMeta(req.Metadata, "workspace_id"),
+				RequestID:     strings.TrimSpace(req.RequestID),
+				CorrelationID: strings.TrimSpace(req.CorrelationID),
+				CausationID:   strings.TrimSpace(req.CausationID),
+				Status:        coreworker.StatusRunning,
+				Role:          strings.TrimSpace(req.Role),
+				PID:           entry.baseEvent.PID,
+				Metadata:      cloneMeta(req.Metadata),
+			})
+		}
+	}
 }
 
 func (s *ChildSpawner) streamLogs(req spawn.Request, workerID, stream string, reader io.ReadCloser, wg *sync.WaitGroup) {
@@ -458,12 +504,13 @@ type AgentCommandBuilder func(record agentdomain.Agent, req spawn.Request) (Comm
 
 // ManagedAgentSpawnerConfig configures a subprocess spawner that provisions a real agent record first.
 type ManagedAgentSpawnerConfig struct {
-	StorageRoot   string
-	WorkspaceRoot string
-	BinaryPath    string
-	Publisher     EventPublisher
-	BuildCommand  AgentCommandBuilder
-	Now           func() time.Time
+	StorageRoot       string
+	WorkspaceRoot     string
+	BinaryPath        string
+	Publisher         EventPublisher
+	BuildCommand      AgentCommandBuilder
+	Now               func() time.Time
+	HeartbeatInterval time.Duration
 }
 
 // ManagedAgentSpawner provisions a classic agent record, then runs it in a subprocess.
@@ -505,8 +552,9 @@ func NewManagedAgentSpawner(cfg ManagedAgentSpawnerConfig) (*ManagedAgentSpawner
 	}
 
 	spawner, err := NewChildSpawner(ChildSpawnerConfig{
-		Publisher: cfg.Publisher,
-		Now:       cfg.Now,
+		Publisher:         cfg.Publisher,
+		Now:               cfg.Now,
+		HeartbeatInterval: cfg.HeartbeatInterval,
 		BuildCommand: func(req spawn.Request) (CommandSpec, error) {
 			record, err := ensureAgentRecord(context.Background(), cfg.StorageRoot, workspaceRoot, cfg.Now, req)
 			if err != nil {

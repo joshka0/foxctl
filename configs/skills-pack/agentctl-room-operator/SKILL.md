@@ -9,6 +9,8 @@ Use this skill when you are already working inside an existing `agentctl room` a
 
 This skill is about **room operating protocol**, not room creation.
 
+If the room is explicitly running the agile epic/milestone/story workflow, also use `agentctl-room-agile`.
+
 ## Use me when
 
 - a room already exists and you need to pick up or continue work
@@ -18,10 +20,12 @@ This skill is about **room operating protocol**, not room creation.
 - you need to know whether to `send`, `ack`, `resolve`, `claim`, `touch`, `block`, or `complete`
 - you need to answer or verify a room interview question
 - you need to manage a bounded scheduled follow-up for a participant
+- you need to work inside an epic/milestone/story structure instead of only tasks and chat
 
 ## Core rules
 
 - The room timeline is canonical. Pane scrollback is not.
+- When invoking **`room send`**, **prefer explicit `--to <participant>`** for anything meant for one person (so relay + inbox stay aligned), and **`--sender <you>`** whenever your pane context might not identify you (scripts, MCP, or outside tmux/zellij). Omit `--to` only for deliberate **broadcasts** to the rest of the room.
 - Start with `room status`, then `room inbox --actor <you>`.
 - Direct obligations beat casual browsing of the timeline.
 - If a task is assigned to you, `claim` it before doing real work.
@@ -31,6 +35,7 @@ This skill is about **room operating protocol**, not room creation.
 - Use `room send --to @coordinator` for escalation or routing decisions.
 - Do not work a task that another participant already owns unless the coordinator reassigns or reclaims it.
 - If the room is using the interview protocol, use `room interview next --actor <you>` before browsing the full transcript.
+- If the room is using the agile layer, orient from `room epic show`, `room milestone show`, or `room story show` instead of reconstructing the tranche from raw chat.
 
 ## Room entry flow
 
@@ -43,6 +48,22 @@ agentctl room task list <room-id>
 agentctl room interview next <room-id> --actor <you>
 ```
 
+If the room is using the agile layer, orient here too:
+
+```bash
+agentctl room epic show <room-id>
+agentctl room milestone show <room-id>
+agentctl room story show <room-id>
+```
+
+Practical rule:
+
+- if an epic is still in `discovery` or `intake_in_progress`, do not start milestone work yet
+- answer epic intake questions first
+- milestones open only after the coordinator finalizes the epic brief
+- after finalization, prefer `agentctl room epic shape <room-id> <epic-id>` so milestone proposals become durable room objects before execution starts
+- when the coordinator opens a milestone from one of those proposals, prefer `agentctl room milestone start <room-id> <epic-id> --proposal <proposal-id>` over retyping the proposal by hand
+
 If you are in an existing `zellij` pane and the environment is missing
 `AGENTCTL_ROOM_ID` / `AGENTCTL_PARTICIPANT`, you are not room-bound yet even if
 the pane lives in the same zellij session as other room participants. Bind the
@@ -52,12 +73,20 @@ current pane explicitly before assuming relay or coordinator messages will land:
 agentctl room join <room-id> --current --role <room-role>
 ```
 
+If the participant already exists in the room but moved to a different
+`tmux`/`zellij` pane, update the transport binding instead of re-joining:
+
+```bash
+agentctl room rebind <room-id> <actor-id> --backend tmux --session <session> --pane-id <pane>
+```
+
 Practical rule:
 
 - `tmux` or `zellij` session membership is not the same thing as room membership
 - each pane that should receive room traffic must be joined explicitly unless it
   was launched by `agentctl` with room metadata already exported
 - do not assume a session-wide broadcast will reach unmanaged zellij panes
+- task assign/claim/complete **live-relay** to mux panes by default (same delivery as `room relay`). If a long-running `room loop` or `room relay` is already running, pass `room task --no-live-relay ...` on those commands to avoid double delivery to panes.
 
 Then decide:
 
@@ -73,7 +102,7 @@ Then decide:
 Use:
 
 ```bash
-agentctl room send <room-id> "Your reply" --to <sender>
+agentctl room send <room-id> --to <sender> --sender <you> "Your reply"
 ```
 
 If the request only needs confirmation:
@@ -103,8 +132,8 @@ agentctl room task touch <room-id> --id <task-id>
 Use:
 
 ```bash
-agentctl room task block <room-id> --id <task-id> --reason "waiting on <specific thing>"
-agentctl room send <room-id> "Blocked on <specific thing>" --to @coordinator --reply-expected
+agentctl room task block <room-id> --id <task-id> --reason "waiting on <specific thing>" --sender <you>
+agentctl room send <room-id> --to @coordinator --sender <you> --reply-expected "Blocked on <specific thing>"
 ```
 
 ### I finished the task
@@ -135,6 +164,17 @@ agentctl room remind add <room-id> <participant> "Check MR !26 and report status
 ```
 
 This writes the original direct request now, then lets the room loop send bounded reminder follow-ups until the recipient replies or the retry budget is exhausted.
+
+### I need to understand the current milestone
+
+Use:
+
+```bash
+agentctl room milestone show <room-id>
+agentctl room story show <room-id>
+```
+
+Read the milestone acceptance criteria before starting a story. If the criteria are unclear, use the room interview or planning protocol instead of guessing.
 
 ### I am the interview respondent
 

@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"sort"
 	"strings"
 	"time"
 
@@ -19,9 +18,11 @@ import (
 	"github.com/jkatigb/agentctl/internal/platform/logging"
 	v2jido "github.com/jkatigb/agentctl/internal/v2/adapters/jido"
 	libsqlorchestration "github.com/jkatigb/agentctl/internal/v2/adapters/libsql/orchestration"
+	libsqlworkers "github.com/jkatigb/agentctl/internal/v2/adapters/libsql/workers"
 	v2errors "github.com/jkatigb/agentctl/internal/v2/core/errors"
 	coreevents "github.com/jkatigb/agentctl/internal/v2/core/events"
 	coreorchestration "github.com/jkatigb/agentctl/internal/v2/core/orchestration"
+	coreworker "github.com/jkatigb/agentctl/internal/v2/core/worker"
 	v2services "github.com/jkatigb/agentctl/internal/v2/services"
 )
 
@@ -36,6 +37,10 @@ const (
 
 	defaultRuntimeTreeDepthCLI = 2
 	maxRuntimeTreeDepthCLI     = 5
+
+	cliRuntimeBackendJido      = "jido"
+	cliRuntimeBackendGoruntime = "goruntime"
+	envCLIRuntimeBackend       = "AGENTCTL_V2_ORCHESTRATION_RUNTIME_BACKEND"
 )
 
 type orchestrationCardActionResponseCLI struct {
@@ -453,6 +458,45 @@ func runOrchestrationDispatchIssueCLI(
 	return dispatchService.DispatchIssue(ctx, req)
 }
 
+func resolveCLIRuntimeBackend() string {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv(envCLIRuntimeBackend))) {
+	case cliRuntimeBackendGoruntime:
+		return cliRuntimeBackendGoruntime
+	case cliRuntimeBackendJido:
+		return cliRuntimeBackendJido
+	default:
+		return cliRuntimeBackendJido
+	}
+}
+
+func loadOptionalRuntimeStateReaderCLI(ctx context.Context, cfg config.Config) (coreworker.StateReader, func() error, bool, error) {
+	if strings.EqualFold(resolveCLIRuntimeBackend(), cliRuntimeBackendGoruntime) {
+		store, closeFn, err := libsqlworkers.Open(ctx, cfg.Storage.Root)
+		if err != nil {
+			return nil, nil, false, err
+		}
+		return store, closeFn, true, nil
+	}
+
+	client, available, err := loadOptionalJidoClientCLI()
+	if err != nil || !available {
+		return nil, nil, available, err
+	}
+	reader, err := v2jido.NewRuntimeAdapter(v2jido.RuntimeAdapterConfig{Client: client})
+	if err != nil {
+		return nil, nil, false, err
+	}
+	return reader, func() error { return nil }, true, nil
+}
+
+func loadOptionalJidoClientCLI() (v2jido.Client, bool, error) {
+	client, err := v2jido.NewEnvJSONRPCClient()
+	if err != nil {
+		return nil, false, nil
+	}
+	return client, true, nil
+}
+
 func loadOrchestrationCardRuntimeTreeCLI(ctx context.Context, cfg config.Config, log zerolog.Logger, card coreorchestration.Card, depth int) *orchestrationRuntimeTreeDataCLI {
 	runtime := &orchestrationRuntimeTreeDataCLI{
 		Enabled: strings.TrimSpace(card.AgentID) != "",
@@ -464,14 +508,22 @@ func loadOrchestrationCardRuntimeTreeCLI(ctx context.Context, cfg config.Config,
 		return runtime
 	}
 
-	client, err := v2jido.NewEnvJSONRPCClient()
+	reader, closeFn, available, err := loadOptionalRuntimeStateReaderCLI(ctx, cfg)
 	if err != nil {
 		runtime.Error = err.Error()
 		return runtime
 	}
+	if !available {
+		return runtime
+	}
+	defer func() {
+		if closeFn != nil {
+			_ = closeFn()
+		}
+	}()
 
 	visited := map[string]struct{}{}
-	runtime.Root = loadOrchestrationRuntimeTreeNodeCLI(ctx, cfg, log, client, v2jido.ChildRef{
+	runtime.Root = loadOrchestrationRuntimeTreeNodeCLI(ctx, cfg, log, reader, coreworker.Record{
 		Tag:      runtime.AgentID,
 		AgentID:  runtime.AgentID,
 		Metadata: map[string]any{"workspace_id": card.WorkspaceID, "issue_id": card.IssueID},
@@ -486,17 +538,17 @@ func loadOrchestrationRuntimeTreeNodeCLI(
 	ctx context.Context,
 	cfg config.Config,
 	log zerolog.Logger,
-	client v2jido.Client,
-	ref v2jido.ChildRef,
+	reader coreworker.StateReader,
+	seed coreworker.Record,
 	depth int,
 	visited map[string]struct{},
 ) *orchestrationRuntimeTreeNodeCLI {
-	agentID := strings.TrimSpace(ref.AgentID)
+	agentID := strings.TrimSpace(seed.AgentID)
 	node := &orchestrationRuntimeTreeNodeCLI{
-		Tag:      strings.TrimSpace(ref.Tag),
+		Tag:      strings.TrimSpace(seed.Tag),
 		AgentID:  agentID,
-		PID:      strings.TrimSpace(ref.PID),
-		Metadata: ref.Metadata,
+		PID:      strings.TrimSpace(seed.PID),
+		Metadata: seed.Metadata,
 	}
 	if agentID == "" {
 		node.Error = "runtime node has no agent_id"
@@ -509,16 +561,30 @@ func loadOrchestrationRuntimeTreeNodeCLI(
 	visited[agentID] = struct{}{}
 	defer delete(visited, agentID)
 
-	stateResp, err := client.State(ctx, v2jido.StateRequest{AgentID: agentID})
+	record, err := reader.Worker(ctx, coreworker.LookupRequest{AgentID: agentID})
 	if err != nil {
 		node.Error = err.Error()
 		return node
 	}
-	node.Status = strings.TrimSpace(stateResp.Status)
-	if len(stateResp.State) > 0 && string(stateResp.State) != "null" {
+	node.Tag = chooseNonEmptyCLI(strings.TrimSpace(record.Tag), node.Tag)
+	node.PID = chooseNonEmptyCLI(strings.TrimSpace(record.PID), node.PID)
+	if len(record.Metadata) > 0 && node.Metadata == nil {
+		node.Metadata = record.Metadata
+	} else if len(record.Metadata) > 0 {
+		merged := make(map[string]any, len(node.Metadata)+len(record.Metadata))
+		for k, v := range node.Metadata {
+			merged[k] = v
+		}
+		for k, v := range record.Metadata {
+			merged[k] = v
+		}
+		node.Metadata = merged
+	}
+	node.Status = string(record.Status)
+	if len(record.RawState) > 0 && string(record.RawState) != "null" {
 		var state any
-		if err := json.Unmarshal(stateResp.State, &state); err != nil {
-			node.State = string(stateResp.State)
+		if err := json.Unmarshal(record.RawState, &state); err != nil {
+			node.State = string(record.RawState)
 			log.Debug().Err(err).Str("agent_id", agentID).Msg("failed to decode orchestration runtime node state; returning raw payload")
 		} else {
 			if stateMap, ok := state.(map[string]any); ok {
@@ -531,31 +597,15 @@ func loadOrchestrationRuntimeTreeNodeCLI(
 		return node
 	}
 
-	childrenResp, err := client.GetChildren(ctx, v2jido.GetChildrenRequest{AgentID: agentID})
+	children, err := reader.Children(ctx, coreworker.ChildrenRequest{ParentAgentID: agentID})
 	if err != nil {
 		node.Error = chooseNonEmptyCLI(node.Error, err.Error())
 		return node
 	}
-	for _, child := range sortedChildRefsCLI(childrenResp.Children) {
-		node.Children = append(node.Children, loadOrchestrationRuntimeTreeNodeCLI(ctx, cfg, log, client, child, depth-1, visited))
+	for _, child := range children {
+		node.Children = append(node.Children, loadOrchestrationRuntimeTreeNodeCLI(ctx, cfg, log, reader, child, depth-1, visited))
 	}
 	return node
-}
-
-func sortedChildRefsCLI(children map[string]v2jido.ChildRef) []v2jido.ChildRef {
-	if len(children) == 0 {
-		return nil
-	}
-	keys := make([]string, 0, len(children))
-	for key := range children {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-	out := make([]v2jido.ChildRef, 0, len(keys))
-	for _, key := range keys {
-		out = append(out, children[key])
-	}
-	return out
 }
 
 func orchestrationCardActionPayloadCLI(card coreorchestration.Card, action string, now time.Time) (map[string]any, error) {

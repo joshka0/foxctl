@@ -18,8 +18,10 @@ import (
 	"github.com/jkatigb/agentctl/internal/domain/envelope"
 	"github.com/jkatigb/agentctl/internal/platform/config"
 	v2jido "github.com/jkatigb/agentctl/internal/v2/adapters/jido"
+	libsqlworkers "github.com/jkatigb/agentctl/internal/v2/adapters/libsql/workers"
 	coreevents "github.com/jkatigb/agentctl/internal/v2/core/events"
 	coreorchestration "github.com/jkatigb/agentctl/internal/v2/core/orchestration"
+	coreworker "github.com/jkatigb/agentctl/internal/v2/core/worker"
 )
 
 func TestOrchestrationCardActionCommand_ReleaseMovesCardBackToTodo(t *testing.T) {
@@ -366,4 +368,100 @@ func startOrchestrationCLIJSONRPCServer(t *testing.T, handle jsonrpcCLITestHandl
 		_ = server.Serve(listener)
 	}()
 	return server, socketPath
+}
+
+func TestOrchestrationCardRuntimeCommand_ReturnsGoRuntimeTree(t *testing.T) {
+	t.Setenv("AGENTCTL_DB_DRIVER", "")
+	t.Setenv("AGENTCTL_V2_EVENTS_DB_DRIVER", "")
+	t.Setenv(envCLIRuntimeBackend, cliRuntimeBackendGoruntime)
+
+	cfg := setupOrchestrationTestEnv(t)
+	ctx := context.Background()
+	store, closeFn, err := openOverseerOrchestrationStore(ctx, cfg)
+	if err != nil {
+		t.Fatalf("open orchestration store: %v", err)
+	}
+	defer func() {
+		if closeErr := closeFn(); closeErr != nil {
+			t.Fatalf("close orchestration store: %v", closeErr)
+		}
+	}()
+
+	if err := store.Apply(ctx, coreevents.Event{
+		ID:            "evt-orch-cli-go-runtime-001",
+		StreamID:      "run-orch-cli-go-runtime-001",
+		StreamType:    coreevents.StreamTypeRun,
+		StreamVersion: 1,
+		EventType:     coreevents.EventRunStarted,
+		OccurredAt:    time.Date(2026, time.April, 7, 14, 15, 0, 0, time.UTC),
+		Command:       "orchestration/dispatch-issue",
+		RequestID:     "req-orch-cli-go-runtime-seed-001",
+		Payload: coreevents.MustMarshalPayload(map[string]any{
+			"workspace_id":     "ws-1",
+			"issue_id":         "issue-cli-go-runtime-001",
+			"issue_identifier": "ABC-CLI-GO-RUNTIME-1",
+			"title":            "Inspect go runtime tree via CLI",
+			"state":            "Running",
+			"eligibility":      "eligible",
+			"agent_id":         "agent:root-go-runtime",
+		}),
+	}); err != nil {
+		t.Fatalf("seed apply: %v", err)
+	}
+
+	workerStore, closeWorkers, err := libsqlworkers.Open(ctx, cfg.Storage.Root)
+	if err != nil {
+		t.Fatalf("open worker store: %v", err)
+	}
+	defer func() { _ = closeWorkers() }()
+
+	if err := workerStore.Upsert(ctx, coreworker.Record{
+		WorkerID:    "subprocess:agent:root-go-runtime",
+		BackendKind: coreworker.BackendSubprocess,
+		AgentID:     "agent:root-go-runtime",
+		RunID:       "run-orch-cli-go-runtime-001",
+		Status:      coreworker.StatusRunning,
+		RawState:    json.RawMessage(`{"agentctl":{"status":"running","agent":"agent:root-go-runtime"}}`),
+	}); err != nil {
+		t.Fatalf("upsert root worker: %v", err)
+	}
+	if err := workerStore.Upsert(ctx, coreworker.Record{
+		WorkerID:       "subprocess:agent:child-go-runtime",
+		BackendKind:    coreworker.BackendSubprocess,
+		AgentID:        "agent:child-go-runtime",
+		ParentAgentID:  "agent:root-go-runtime",
+		ParentWorkerID: "subprocess:agent:root-go-runtime",
+		RunID:          "run-orch-cli-go-runtime-001",
+		Status:         coreworker.StatusCompleted,
+		RawState:       json.RawMessage(`{"agentctl":{"status":"completed","agent":"agent:child-go-runtime"}}`),
+	}); err != nil {
+		t.Fatalf("upsert child worker: %v", err)
+	}
+
+	body := runOrchestrationCommand(t, cfg, newOrchestrationCardRuntimeCommand(),
+		"--workspace", "ws-1",
+		"--depth", "2",
+		"issue-cli-go-runtime-001",
+	)
+
+	data, _ := body["data"].(map[string]any)
+	runtimeWrap, _ := data["runtime"].(map[string]any)
+	root, _ := runtimeWrap["root"].(map[string]any)
+	if strings.TrimSpace(fmt.Sprint(root["agent_id"])) != "agent:root-go-runtime" {
+		t.Fatalf("root.agent_id=%v want agent:root-go-runtime", root["agent_id"])
+	}
+	if strings.TrimSpace(fmt.Sprint(root["status"])) != "running" {
+		t.Fatalf("root.status=%v want running", root["status"])
+	}
+	children, _ := root["children"].([]any)
+	if len(children) != 1 {
+		t.Fatalf("root children=%d want 1", len(children))
+	}
+	child, _ := children[0].(map[string]any)
+	if strings.TrimSpace(fmt.Sprint(child["agent_id"])) != "agent:child-go-runtime" {
+		t.Fatalf("child.agent_id=%v want agent:child-go-runtime", child["agent_id"])
+	}
+	if strings.TrimSpace(fmt.Sprint(child["status"])) != "completed" {
+		t.Fatalf("child.status=%v want completed", child["status"])
+	}
 }

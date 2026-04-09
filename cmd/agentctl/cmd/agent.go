@@ -400,7 +400,14 @@ func maybePrepareSpawnPane(ctx context.Context, binding agent.TerminalBinding) (
 	}
 	binding = agent.NormalizeTerminalBinding(binding)
 	if strings.TrimSpace(binding.Backend) == "" {
-		binding.Backend = "tmux"
+		if strings.TrimSpace(os.Getenv("ZELLIJ_SESSION_NAME")) != "" {
+			binding.Backend = "zellij"
+		} else {
+			binding.Backend = "tmux"
+		}
+	}
+	if strings.TrimSpace(binding.Session) == "" && strings.TrimSpace(binding.RoomID) != "" {
+		binding.Session = roomSourceSessionName(strings.TrimSpace(binding.RoomID), binding.Backend)
 	}
 	switch binding.Backend {
 	case "tmux":
@@ -425,11 +432,15 @@ func maybePrepareSpawnPane(ctx context.Context, binding agent.TerminalBinding) (
 		return binding, nil, fmt.Errorf("spawn-in-pane currently supports only tmux and zellij")
 	}
 	client := tmuxbridge.New()
-	result, err := client.CreatePane(ctx, tmuxbridge.CreatePaneOptions{
-		Session: strings.TrimSpace(binding.Session),
-		CWD:     currentSpawnWorkspaceRoot(),
-		Label:   deriveSpawnPaneLabel(),
-	})
+	opts := tmuxbridge.CreatePaneOptions{
+		Session:       strings.TrimSpace(binding.Session),
+		CWD:           currentSpawnWorkspaceRoot(),
+		Label:         deriveSpawnPaneLabel(),
+		ParticipantID: strings.TrimSpace(binding.ParticipantID),
+		RoomID:        strings.TrimSpace(binding.RoomID),
+		RoomAccess:    strings.TrimSpace(binding.RoomAccess),
+	}
+	result, err := client.CreatePane(ctx, opts)
 	if err != nil {
 		return binding, nil, err
 	}
@@ -447,6 +458,25 @@ func maybePrepareSpawnPane(ctx context.Context, binding agent.TerminalBinding) (
 	}, nil
 }
 
+// roomSourceSessionName derives a mux session name scoped to a room so agents
+// created for the same room land in the same session.
+func roomSourceSessionName(roomID, backend string) string {
+	slug := strings.TrimSpace(strings.ToLower(roomID))
+	slug = strings.ReplaceAll(slug, " ", "-")
+	slug = strings.ReplaceAll(slug, "/", "-")
+	slug = strings.ReplaceAll(slug, ":", "-")
+	slug = strings.Trim(slug, "-")
+	if slug == "" {
+		slug = "room"
+	}
+	switch strings.TrimSpace(backend) {
+	case "zellij":
+		return slug + "-room"
+	default:
+		return "room-" + slug
+	}
+}
+
 func maybeRespawnSpawnPane(ctx context.Context, binding agent.TerminalBinding, agentID string) (map[string]any, error) {
 	if !spawnInPane {
 		return nil, nil
@@ -455,13 +485,14 @@ func maybeRespawnSpawnPane(ctx context.Context, binding agent.TerminalBinding, a
 	if strings.TrimSpace(binding.PaneID) == "" {
 		return nil, nil
 	}
+	command := spawnPaneCommand(agentID, binding)
 	switch binding.Backend {
 	case "tmux":
 		client := tmuxbridge.New()
 		result, err := client.RespawnPane(ctx, tmuxbridge.RespawnPaneOptions{
 			Target:            binding.PaneID,
 			CWD:               currentSpawnWorkspaceRoot(),
-			Command:           "agentctl agent watch " + strings.TrimSpace(agentID),
+			Command:           command,
 			ParticipantID:     binding.ParticipantID,
 			ParentParticipant: binding.ParentParticipantID,
 			ParentAgentID:     binding.ParentAgentID,
@@ -472,7 +503,8 @@ func maybeRespawnSpawnPane(ctx context.Context, binding agent.TerminalBinding, a
 			return nil, err
 		}
 		return map[string]any{
-			"pane": result.Pane,
+			"pane":    result.Pane,
+			"command": command,
 		}, nil
 	case "zellij":
 		client := zellijbridge.New()
@@ -480,7 +512,7 @@ func maybeRespawnSpawnPane(ctx context.Context, binding agent.TerminalBinding, a
 			Session:           binding.Session,
 			CWD:               currentSpawnWorkspaceRoot(),
 			Name:              binding.PaneID,
-			Command:           "agentctl agent watch " + strings.TrimSpace(agentID),
+			Command:           command,
 			ParticipantID:     binding.ParticipantID,
 			ParentParticipant: binding.ParentParticipantID,
 			ParentAgentID:     binding.ParentAgentID,
@@ -494,10 +526,81 @@ func maybeRespawnSpawnPane(ctx context.Context, binding agent.TerminalBinding, a
 			"session":        result.Session,
 			"pane_name":      result.PaneName,
 			"participant_id": result.ParticipantID,
+			"command":        command,
 		}, nil
 	default:
 		return nil, nil
 	}
+}
+
+// spawnPaneCommand returns the command to run in the agent source pane.
+// When room context is available, the agent runs live in the pane so users
+// can watch it work. Otherwise, falls back to watch mode.
+func spawnPaneCommand(agentID string, binding agent.TerminalBinding) string {
+	agentID = strings.TrimSpace(agentID)
+	if agentID == "" {
+		return "agentctl agent watch"
+	}
+	if strings.TrimSpace(binding.RoomID) != "" {
+		return "agentctl agent run " + agentID
+	}
+	return "agentctl agent watch " + agentID
+}
+
+// maybeAutoJoinRoom registers the newly spawned agent as a room member with
+// pane binding metadata so the room relay can route messages to the source pane.
+// This is only called when --room-id and --spawn-in-pane are both set.
+func maybeAutoJoinRoom(ctx context.Context, binding agent.TerminalBinding) (map[string]any, error) {
+	if !spawnInPane {
+		return nil, nil
+	}
+	binding = agent.NormalizeTerminalBinding(binding)
+	roomID := strings.TrimSpace(binding.RoomID)
+	if roomID == "" {
+		return nil, nil
+	}
+	if strings.TrimSpace(binding.ParticipantID) == "" {
+		return nil, nil
+	}
+	absWorkspace, err := resolveRoomWorkspace(".")
+	if err != nil {
+		return nil, nil
+	}
+	store, err := openRoomBoardStore(ctx)
+	if err != nil {
+		return nil, nil
+	}
+	defer store.Close()
+
+	if _, err := store.EnsureRoom(ctx, absWorkspace, roomID, roomID); err != nil {
+		return nil, nil
+	}
+	member := agent.RoomMember{
+		ActorID: binding.ParticipantID,
+		Role:    strings.TrimSpace(spawnRole),
+		Backend: binding.Backend,
+		Session: binding.Session,
+		PaneID:  binding.PaneID,
+	}
+	if member.Role == "" {
+		member.Role = "worker"
+	}
+	summary, err := store.GetRoom(ctx, absWorkspace, roomID, "")
+	if err != nil {
+		return nil, nil
+	}
+	updatedMembers := mergeRoomMembers(summary.Members, member)
+	if _, err := store.ReplaceRoomMembers(ctx, absWorkspace, roomID, updatedMembers); err != nil {
+		return nil, nil
+	}
+	return map[string]any{
+		"room_id":        roomID,
+		"participant_id": binding.ParticipantID,
+		"role":           member.Role,
+		"backend":        binding.Backend,
+		"session":        binding.Session,
+		"pane_id":        binding.PaneID,
+	}, nil
 }
 
 func resolveSpawnPromptVariantTarget(cfg config.Config, executionLayer agent.ExecutionLayer) (string, string) {
@@ -691,6 +794,7 @@ func runAgentSpawnWithRoute(cmd *cobra.Command) error {
 		if err != nil {
 			return writeErrorEnvelope(cmd, "agent/spawn", string(protocol.ErrorCodeERuntime), fmt.Sprintf("failed to attach tmux pane watcher: %v", err))
 		}
+		roomJoin, _ := maybeAutoJoinRoom(ctx, terminalBinding)
 
 		data := map[string]any{
 			"agent_id":         resp.AgentID,
@@ -702,6 +806,7 @@ func runAgentSpawnWithRoute(cmd *cobra.Command) error {
 			"terminal_binding": terminalBinding,
 			"spawn_pane":       spawnPaneMetadata,
 			"watch_pane":       watchPane,
+			"room_join":        roomJoin,
 		}
 		return writeOK(cmd, "agent/spawn", data, "run", nil)
 	}
@@ -787,6 +892,7 @@ func runAgentSpawnWithRoute(cmd *cobra.Command) error {
 		if err != nil {
 			return writeErrorEnvelope(cmd, "agent/spawn", string(protocol.ErrorCodeERuntime), fmt.Sprintf("failed to attach tmux pane watcher: %v", err))
 		}
+		roomJoin, _ := maybeAutoJoinRoom(ctx, terminalBinding)
 
 		// Write success envelope
 		data := map[string]any{
@@ -803,6 +909,7 @@ func runAgentSpawnWithRoute(cmd *cobra.Command) error {
 			"terminal_binding": terminalBinding,
 			"spawn_pane":       spawnPaneMetadata,
 			"watch_pane":       watchPane,
+			"room_join":        roomJoin,
 		}
 		return writeOK(cmd, "agent/spawn", data, "run", nil)
 	}
@@ -889,6 +996,7 @@ func runAgentSpawnWithRoute(cmd *cobra.Command) error {
 	if err != nil {
 		return writeErrorEnvelope(cmd, "agent/spawn", string(protocol.ErrorCodeERuntime), fmt.Sprintf("failed to attach tmux pane watcher: %v", err))
 	}
+	roomJoin, _ := maybeAutoJoinRoom(ctx, terminalBinding)
 
 	// Write success envelope
 	data := map[string]any{
@@ -901,6 +1009,7 @@ func runAgentSpawnWithRoute(cmd *cobra.Command) error {
 		"terminal_binding": terminalBinding,
 		"spawn_pane":       spawnPaneMetadata,
 		"watch_pane":       watchPane,
+		"room_join":        roomJoin,
 	}
 
 	return writeOK(cmd, "agent/spawn", data, "run", nil)
@@ -1600,11 +1709,6 @@ func runAgentAskWithRoute(cmd *cobra.Command, args []string) error {
 	agentRecord, err := agentStore.Resolve(ctx, agentID)
 	if err != nil {
 		return writeErrorEnvelope(cmd, "agent/ask", string(protocol.ErrorCodeENotFound), fmt.Sprintf("agent not found: %v", err))
-	}
-	if !cmd.Flags().Changed("dispatcher") &&
-		strings.TrimSpace(os.Getenv(envAskDispatcherMode)) == "" &&
-		agent.NormalizeExecutionLayer(agentRecord.ExecutionLayer) == agent.ExecutionLayerJido {
-		dispatcherMode = askDispatchModeJido
 	}
 	var mailboxStore mailbox.Store
 	if dispatcherMode == askDispatchModeMailbox {

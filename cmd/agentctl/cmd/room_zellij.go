@@ -161,17 +161,43 @@ func hasPendingZellijRelayPermissionPrompt(ctx context.Context, session string) 
 	return strings.Contains(screen, "asks permission to:") && strings.Contains(screen, "Allow? (y/n)")
 }
 
+// zellijSingletonSubmitKind picks the trailing key sequence for relayRoomMessageZellijSingleton.
+// "gemini" = Escape + Enter; "composer" = Kitty Ctrl+Enter CSI (aligns with tmux C-Enter for Droid/Codex/Cursor);
+// "enter" = plain Enter (byte 13).
+func zellijSingletonSubmitKind(room agent.RoomSummary, recipient string) string {
+	recipient = normalizeRoomRecipient(recipient)
+	if recipient == agent.BroadcastRecipient {
+		return "enter"
+	}
+	id := strings.ToLower(strings.TrimSpace(recipient))
+	if strings.HasPrefix(id, "gemini") {
+		return "gemini"
+	}
+	if strings.HasPrefix(id, "droid") || strings.HasPrefix(id, "codex") || strings.HasPrefix(id, "cursor") {
+		return "composer"
+	}
+	for _, member := range room.Members {
+		if !sameRoomParticipant(member.ActorID, recipient) {
+			continue
+		}
+		mid := strings.ToLower(strings.TrimSpace(member.ActorID))
+		if strings.HasPrefix(mid, "gemini") {
+			return "gemini"
+		}
+		if strings.HasPrefix(mid, "droid") || strings.HasPrefix(mid, "codex") || strings.HasPrefix(mid, "cursor") {
+			return "composer"
+		}
+		return "enter"
+	}
+	return "enter"
+}
+
 func relayRoomMessageZellijSingleton(ctx context.Context, room agent.RoomSummary, msg agent.BoardMessage, session string) roomRelayResult {
 	result := roomRelayResult{Backend: "zellij"}
 	content := formatRoomRelayContent(room, msg)
-	requiresEscapeSubmit := false
-	for _, member := range room.Members {
-		if sameRoomParticipant(member.ActorID, msg.Recipient) && strings.HasPrefix(strings.ToLower(strings.TrimSpace(member.ActorID)), "gemini") {
-			requiresEscapeSubmit = true
-			break
-		}
-	}
-	if msg.Interrupt {
+	submitKind := zellijSingletonSubmitKind(room, msg.Recipient)
+	// Composer targets match tmuxbridge: leading Escape clears their input; skip for Interrupt on those.
+	if msg.Interrupt && submitKind != "composer" {
 		interrupt := exec.CommandContext(ctx, "zellij", "--session", session, "action", "write", "27")
 		var interruptErr bytes.Buffer
 		interrupt.Stderr = &interruptErr
@@ -197,7 +223,7 @@ func relayRoomMessageZellijSingleton(ctx context.Context, room agent.RoomSummary
 		result.FailedMembers = append(result.FailedMembers, zellijRelaySingletonTarget)
 		return result
 	}
-	if requiresEscapeSubmit {
+	if submitKind == "gemini" {
 		submitMode := exec.CommandContext(ctx, "zellij", "--session", session, "action", "write", "27")
 		stderr.Reset()
 		submitMode.Stderr = &stderr
@@ -211,7 +237,13 @@ func relayRoomMessageZellijSingleton(ctx context.Context, room agent.RoomSummary
 			return result
 		}
 	}
-	submit := exec.CommandContext(ctx, "zellij", "--session", session, "action", "write", "13")
+	var submit *exec.Cmd
+	if submitKind == "composer" {
+		// Kitty keyboard protocol: Ctrl+Enter (same intent as tmux C-Enter).
+		submit = exec.CommandContext(ctx, "zellij", "--session", session, "action", "write-chars", "\x1b[13;5u")
+	} else {
+		submit = exec.CommandContext(ctx, "zellij", "--session", session, "action", "write", "13")
+	}
 	stderr.Reset()
 	submit.Stderr = &stderr
 	if err := submit.Run(); err != nil {

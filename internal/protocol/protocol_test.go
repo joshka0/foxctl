@@ -3,6 +3,7 @@ package protocol
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -297,8 +298,13 @@ func TestAnnotateRunBytesPreservesEmptySlices(t *testing.T) {
 func TestWriteError(t *testing.T) {
 	buf := &bytes.Buffer{}
 
-	if err := WriteError(buf, "test.fail", ErrorCodeEAuth, "auth failed", nil, WithSource("run")); err != nil {
-		t.Fatalf("WriteError failed: %v", err)
+	err := WriteError(buf, "test.fail", ErrorCodeEAuth, "auth failed", nil, WithSource("run"))
+	var written *WrittenEnvelopeError
+	if !errors.As(err, &written) {
+		t.Fatalf("WriteError error = %T want *WrittenEnvelopeError", err)
+	}
+	if written.Code != ErrorCodeEAuth {
+		t.Fatalf("WrittenEnvelopeError.Code=%q want %q", written.Code, ErrorCodeEAuth)
 	}
 
 	var decoded envelope.Envelope

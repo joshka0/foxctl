@@ -90,3 +90,26 @@ func TestListZellijBoundPanesFiltersAndDedupesByLatestPane(t *testing.T) {
 		t.Fatalf("second pane = %+v, want newest overseer pane", panes[1])
 	}
 }
+
+func TestZellijSingletonSubmitKind(t *testing.T) {
+	t.Parallel()
+	room := domainagent.RoomSummary{
+		Members: []domainagent.RoomMember{
+			{ActorID: "droid-a"},
+			{ActorID: "gemini-a"},
+			{ActorID: "claude-a"},
+		},
+	}
+	if got := zellijSingletonSubmitKind(room, "droid-a"); got != "composer" {
+		t.Fatalf("droid-a: %q want composer", got)
+	}
+	if got := zellijSingletonSubmitKind(room, "gemini-a"); got != "gemini" {
+		t.Fatalf("gemini-a: %q want gemini", got)
+	}
+	if got := zellijSingletonSubmitKind(room, "claude-a"); got != "enter" {
+		t.Fatalf("claude-a: %q want enter", got)
+	}
+	if got := zellijSingletonSubmitKind(room, domainagent.BroadcastRecipient); got != "enter" {
+		t.Fatalf("broadcast: %q want enter", got)
+	}
+}
