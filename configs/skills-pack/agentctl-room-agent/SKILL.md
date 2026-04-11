@@ -20,6 +20,7 @@ This skill is the participant-side companion to:
 - `tmux`, `zellij`, GUI PTY previews, and xterm/webterm are presentation only.
 - Room context is not room membership. A startup note, env var, or pane label does not prove you are joined.
 - Pane health is not delivery health. Check `room status` before blaming the viewer layer.
+- A room can remain fully valid with no panes and no live participant runtime. In that state, the room is still usable for durable planning and task state, but you should not expect an agent runtime to consume direct work until transport/runtime is live again.
 
 ## Startup flow
 
@@ -36,6 +37,18 @@ Acceptance checks:
 - your participant id is visible in `room status`
 - transport is available if you are expected to receive live delivery
 - any direct asks in your inbox are handled before new exploratory work
+
+If you are not expected to execute right now, durable-room-only mode is valid:
+
+- the room still exists
+- task / epic / story state still exists
+- you do not need to rebuild a pane just to preserve room state
+
+If you are expected to execute right now, you need more than room membership:
+
+- membership visible in `room status`
+- live transport/runtime for delivery
+- pane/viewer only if humans need presentation or PTY inspection
 
 If the room does not show your participant, fix membership first:
 
@@ -74,6 +87,7 @@ agentctl room task claim <room-id> --id <task-id>
 - `room relay` is viewer fanout only.
 - `room loop` is required for reminder follow-ups, stale-reply nudges, and coordinator pulses.
 - If you receive or set reminders, confirm the room loop is running.
+- `room loop` is not the thing that makes the room exist; it is the thing that drives room automation.
 
 ## Escalation
 

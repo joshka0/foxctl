@@ -42,6 +42,14 @@ Use `room status` to understand health. Use `mux list/read` to understand viewer
 - `agentctl mux observe` when a live pane exchange should become durable ACA evidence
 - `agentctl mux send` for a manual terminal poke outside the normal room transport path
 
+Launch-mode rule:
+
+- `agentctl mux create --agent droid --mode auto` enables the Droid-specific startup profile used by the transport-first wrapper.
+- That profile waits for the Droid UI to reach its `Auto (Off)` state and then sends `Ctrl+L` three times to clear/advance the runtime into its intended high-autonomy startup path.
+- `--mode interactive` does **not** use that startup profile.
+- So if someone launches Droid with `--mode interactive`, they have explicitly bypassed the Droid auto-start behavior and may still see approval-gated runtime behavior.
+- Treat that as a launch/runtime choice, not a room-delivery failure.
+
 ## What mux is not for
 
 - canonical room history

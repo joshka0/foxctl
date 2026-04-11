@@ -27,6 +27,7 @@ If the room is explicitly running the agile epic/milestone/story workflow, also 
 - The room timeline is canonical. Pane scrollback is not.
 - Participant transport and mux presentation are different things. A pane label or mux session is not proof of live delivery.
 - Room context and room membership are different things. `AGENTCTL_ROOM_ID`, a tmux/zellij session name, or a startup prompt only mean the pane knows about the room. They do **not** prove the participant is joined and routable.
+- Room durability and live execution are different things. A room can continue to hold epic/task/history state even when there are no panes or live participant runtimes.
 - When invoking **`room send`**, **prefer explicit `--to <participant>`** for anything meant for one person (so relay + inbox stay aligned), and **`--sender <you>`** whenever your pane context might not identify you (scripts, MCP, or outside tmux/zellij). Omit `--to` only for deliberate **broadcasts** to the rest of the room.
 - Start with `room status`, then `room inbox --actor <you>`.
 - Direct obligations beat casual browsing of the timeline.
@@ -90,6 +91,7 @@ Practical rule:
 - each pane that should receive room traffic must either join explicitly or auto-register transport when launched by `agentctl`
 - do not assume a session-wide broadcast will reach unmanaged panes
 - task assign/claim/complete use the same transport-first relay path as `room relay`; pane delivery is a viewer effect, not the room’s source of truth
+- if no agents are meant to execute right now, it is valid to leave the room in durable-room-only mode and avoid rebuilding panes until they are actually needed
 
 Then decide:
 

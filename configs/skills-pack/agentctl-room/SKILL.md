@@ -65,6 +65,18 @@ Membership rule:
 - a pane is only a room participant if `room status` shows it
 - if a pane has room env vars or a startup note but is missing from `room status`, explicitly `room join` it or repair the binding with `room rebind`
 
+Execution-mode rule:
+
+- A room can exist with no panes and no live participant runtimes.
+- Epic, milestone, story, task, reminder, and timeline state remain durable even when no viewer is attached.
+- Bring up panes only when you want live terminal-backed runtimes or human PTY inspection.
+- Think in this order:
+  - room state
+  - participant membership
+  - participant transport/runtime
+  - viewer attachment
+- Do not collapse those layers into one idea like "the pane is the room."
+
 ## Operating contract
 
 When you are working inside an active room, follow this behavior by default:
@@ -101,6 +113,18 @@ Live-pane behavior:
 - wrapped panes export canonical participant identity into the child process, so provider replies should use the participant id (for example `codex-a`) instead of a raw mux pane id.
 - Do **not** treat a hidden `mux submit` command as part of the normal workflow; it exists only as a legacy escape hatch.
 - If you are using tmux/zellij only as a viewer, the room still works. Use `room relay` / `room loop` when you want live pane visibility layered on top of the durable room.
+
+Two valid operating modes:
+
+- `durable-room only`
+  - no live participant runtime required
+  - no pane required
+  - use when humans are coordinating, planning, or reassigning work and no agent needs to actively execute
+- `live-agent mode`
+  - live participant runtime required
+  - pane is optional presentation, but often the practical host for Claude/Codex/Droid terminals
+  - use when agents need to actively receive room messages and work tasks
+- `room loop` is not required just to preserve the room; it is required when you need reminders, stale-work nudges, coordinator pulses, or automatic rebroadcast behavior
 
 Interview protocol:
 

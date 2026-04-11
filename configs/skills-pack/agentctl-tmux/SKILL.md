@@ -16,6 +16,12 @@ agent behavior inside a room.
 Keep using the existing `agentctl mux ...` commands and bundled
 `./scripts/tmux-bridge` helper where needed. The change is conceptual: rooms are
 canonical, mux is presentation.
+
+Important runtime note:
+
+- for Droid, `agentctl mux create --agent droid --mode auto` is not equivalent to `--mode interactive`
+- `--mode auto` enables the Droid startup profile in the pane wrapper
+- `--mode interactive` bypasses that profile and can leave Droid in approval-gated behavior
 `zellij:<session>:terminal_3`. Use `--sender` only when overriding or when
 running outside a mux session.
 
