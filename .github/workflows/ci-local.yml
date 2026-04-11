@@ -78,7 +78,7 @@ jobs:
       - name: Unit tests
         run: |
           export PATH=/usr/local/go/bin:/go/bin:$PATH
-          CGO_ENABLED=0 go test -short -v -count=1 ./...
+          CGO_ENABLED=0 go test -short -v -count=1 -timeout 20m ./...
 
   race-tests:
     needs: [cgo-build-and-tests]

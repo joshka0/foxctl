@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -1444,6 +1445,9 @@ func relayRoomMessageViaCLI(ctx context.Context, workspaceID, roomID, messageID 
 	exePath, err := os.Executable()
 	if err != nil {
 		return nil, fmt.Errorf("resolve current executable: %w", err)
+	}
+	if strings.HasSuffix(filepath.Base(exePath), ".test") {
+		return nil, errors.New("room live relay unavailable from test binary; stub roomSendLiveRelayHook in tests")
 	}
 	cmd := exec.CommandContext(ctx, exePath, "room", "relay-once", roomID, messageID, "--workspace", workspaceID)
 	out, err := cmd.Output()

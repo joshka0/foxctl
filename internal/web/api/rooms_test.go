@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"sync"
 	"testing"
@@ -25,6 +26,13 @@ type testRoomEventPublisher struct {
 	mu     sync.Mutex
 	types  []string
 	events []roomMessageEvent
+}
+
+func TestMain(m *testing.M) {
+	SetRoomSendLiveRelayHookForTests(func(ctx context.Context, workspaceID, roomID, messageID string) ([]RoomLiveRelayResult, error) {
+		return nil, nil
+	})
+	os.Exit(m.Run())
 }
 
 func (p *testRoomEventPublisher) Publish(eventType string, data any) {
@@ -414,6 +422,13 @@ func TestRoomDetailHandler_ArchiveAndRestore(t *testing.T) {
 	cfg := orchestrationTestConfig(t.TempDir())
 	listHandler := RoomsListHandler(cfg, zerolog.Nop())
 	detailHandler := RoomDetailHandler(cfg, zerolog.Nop(), nil)
+	originalRelayHook := roomSendLiveRelayHook
+	roomSendLiveRelayHook = func(ctx context.Context, workspaceID, roomID, messageID string) ([]RoomLiveRelayResult, error) {
+		return nil, nil
+	}
+	t.Cleanup(func() {
+		roomSendLiveRelayHook = originalRelayHook
+	})
 
 	createReq := httptest.NewRequest(http.MethodPost, "/api/rooms", strings.NewReader(`{
 		"workspace_id":"ws1",
@@ -521,6 +536,13 @@ func TestRoomDetailHandler_PostMessageDispatchesAgentReplies(t *testing.T) {
 	listHandler := RoomsListHandler(cfg, zerolog.Nop())
 	pub := &testRoomEventPublisher{}
 	h := RoomDetailHandler(cfg, zerolog.Nop(), pub)
+	originalRelayHook := roomSendLiveRelayHook
+	roomSendLiveRelayHook = func(ctx context.Context, workspaceID, roomID, messageID string) ([]RoomLiveRelayResult, error) {
+		return nil, nil
+	}
+	t.Cleanup(func() {
+		roomSendLiveRelayHook = originalRelayHook
+	})
 
 	agentStore, err := agents.Open(context.Background(), cfg.Storage.Root)
 	if err != nil {
@@ -687,6 +709,13 @@ func TestRoomDetailHandler_PostMessageMarksLinkedBoardCardDone(t *testing.T) {
 	roomHandler := RoomDetailHandler(cfg, zerolog.Nop(), nil)
 	seedHandler := OrchestrationSeedCardsHandler(cfg, zerolog.Nop())
 	cardHandler := OrchestrationBoardCardGetHandler(cfg, zerolog.Nop())
+	originalRelayHook := roomSendLiveRelayHook
+	roomSendLiveRelayHook = func(ctx context.Context, workspaceID, roomID, messageID string) ([]RoomLiveRelayResult, error) {
+		return nil, nil
+	}
+	defer func() {
+		roomSendLiveRelayHook = originalRelayHook
+	}()
 
 	seedReq := httptest.NewRequest(http.MethodPost, "/api/orchestration/seed-cards", strings.NewReader(`{
 		"request_id":"req-room-board-seed-001",
