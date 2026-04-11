@@ -37,10 +37,12 @@ Use `room status` to understand health. Use `mux list/read` to understand viewer
 ## What mux is for
 
 - `agentctl mux create` for pane/session creation
+- `agentctl room restore` when the real goal is to revive an existing room participant in one step
 - `agentctl mux list` for viewer metadata
 - `agentctl mux read` for PTY inspection
 - `agentctl mux observe` when a live pane exchange should become durable ACA evidence
 - `agentctl mux send` for a manual terminal poke outside the normal room transport path
+- `agentctl room restore` should be preferred over manual `mux create` + `room rebind` when you are reviving an existing participant runtime
 
 Launch-mode rule:
 

@@ -7223,6 +7223,120 @@ func TestRunRoomRebindPersistsTransportEndpoint(t *testing.T) {
 	}
 }
 
+func TestRunRoomRestoreLaunchesAndRebindsMember(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	ctx := context.Background()
+	workspace := t.TempDir()
+
+	cmd, _ := newRoomTestCommand(ctx)
+	if err := runRoomCreate(cmd, workspace, "restore-room", "Restore Room", "", []string{"codex-a=coordinator"}); err != nil {
+		t.Fatalf("runRoomCreate: %v", err)
+	}
+
+	originalHook := roomRestoreLaunchHook
+	roomRestoreLaunchHook = func(_ context.Context, opts roomRestoreLaunchOptions) (roomRestoreLaunchResult, error) {
+		if opts.ActorID != "codex-a" {
+			t.Fatalf("opts.ActorID = %q", opts.ActorID)
+		}
+		if opts.Agent != "codex" {
+			t.Fatalf("opts.Agent = %q", opts.Agent)
+		}
+		if opts.AgentSessionID != "sess-123" {
+			t.Fatalf("opts.AgentSessionID = %q", opts.AgentSessionID)
+		}
+		return roomRestoreLaunchResult{
+			Backend:           "tmux",
+			Session:           "room-alpha-codex",
+			PaneID:            "%27",
+			ParticipantID:     "codex-a",
+			TransportEndpoint: "/tmp/agentctl-pane/room-alpha-codex/codex-a.sock",
+			TransportKind:     "pane_socket",
+			AttachCommand:     "tmux attach-session -t room-alpha-codex",
+			SocketMode:        "default",
+			Command:           "codex resume sess-123",
+		}, nil
+	}
+	defer func() { roomRestoreLaunchHook = originalHook }()
+
+	cmd, out := newRoomTestCommand(ctx)
+	if err := runRoomRestore(cmd, workspace, "restore-room", "codex-a", "tmux", "room-alpha-codex", "codex", "interactive", nil, "sess-123", "", "direct", false); err != nil {
+		t.Fatalf("runRoomRestore: %v", err)
+	}
+
+	data := decodeRoomEnvelope(t, out)
+	runtime, ok := data["runtime"].(map[string]any)
+	if !ok {
+		t.Fatalf("runtime type=%T", data["runtime"])
+	}
+	if runtime["backend"] != "tmux" || runtime["session"] != "room-alpha-codex" || runtime["pane_id"] != "%27" {
+		t.Fatalf("runtime=%v want tmux/room-alpha-codex/%%27", runtime)
+	}
+	roomRaw, ok := data["room"].(map[string]any)
+	if !ok {
+		t.Fatalf("room type=%T", data["room"])
+	}
+	members, ok := roomRaw["members"].([]any)
+	if !ok {
+		t.Fatalf("members=%T", roomRaw["members"])
+	}
+	found := false
+	for _, raw := range members {
+		member, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		if member["actor_id"] == "codex-a" {
+			found = true
+			if member["backend"] != "tmux" || member["session"] != "room-alpha-codex" || member["pane_id"] != "%27" {
+				t.Fatalf("codex-a binding=%v want tmux/room-alpha-codex/%%27", member)
+			}
+			if member["transport_endpoint"] != "/tmp/agentctl-pane/room-alpha-codex/codex-a.sock" {
+				t.Fatalf("transport_endpoint=%v", member["transport_endpoint"])
+			}
+			if member["transport_kind"] != "pane_socket" {
+				t.Fatalf("transport_kind=%v want pane_socket", member["transport_kind"])
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("codex-a not found in members=%v", members)
+	}
+}
+
+func TestRunRoomRestoreRequiresExistingMember(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	ctx := context.Background()
+	workspace := t.TempDir()
+
+	cmd, _ := newRoomTestCommand(ctx)
+	if err := runRoomCreate(cmd, workspace, "restore-room", "Restore Room", "", []string{"human-a=coordinator"}); err != nil {
+		t.Fatalf("runRoomCreate: %v", err)
+	}
+
+	originalHook := roomRestoreLaunchHook
+	roomRestoreLaunchHook = func(_ context.Context, _ roomRestoreLaunchOptions) (roomRestoreLaunchResult, error) {
+		t.Fatal("roomRestoreLaunchHook should not be called for missing member")
+		return roomRestoreLaunchResult{}, nil
+	}
+	defer func() { roomRestoreLaunchHook = originalHook }()
+
+	cmd, out := newRoomTestCommand(ctx)
+	err := runRoomRestore(cmd, workspace, "restore-room", "missing-a", "tmux", "", "claude", "interactive", nil, "", "", "direct", false)
+	if err == nil {
+		t.Fatal("runRoomRestore error = nil want written error envelope")
+	}
+	var env envelope.Envelope
+	if err := json.Unmarshal(out.Bytes(), &env); err != nil {
+		t.Fatalf("decode envelope: %v\n%s", err, out.String())
+	}
+	if env.Status != envelope.StatusError {
+		t.Fatalf("status=%q want error payload=%s", env.Status, out.String())
+	}
+	if env.Error.Code != string(protocol.ErrorCodeENotFound) {
+		t.Fatalf("error.code=%q want %q", env.Error.Code, protocol.ErrorCodeENotFound)
+	}
+}
+
 func newRoomTestCommand(ctx context.Context) (*cobra.Command, *bytes.Buffer) {
 	buf := &bytes.Buffer{}
 	cmd := &cobra.Command{}

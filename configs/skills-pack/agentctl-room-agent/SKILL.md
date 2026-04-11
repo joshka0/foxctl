@@ -49,6 +49,7 @@ If you are expected to execute right now, you need more than room membership:
 - membership visible in `room status`
 - live transport/runtime for delivery
 - pane/viewer only if humans need presentation or PTY inspection
+- if your runtime needs to be brought back after a restart, prefer `agentctl room restore <room-id> <actor-id> --agent <provider> [--agent-session-id <provider-session>]`
 
 If the room does not show your participant, fix membership first:
 
@@ -61,6 +62,8 @@ If you moved to a new pane/session and already exist as a member, repair the bin
 ```bash
 agentctl room rebind <room-id> <actor-id> --backend <tmux|zellij> --session <session> --pane-id <pane>
 ```
+
+Use `room rebind` only when the runtime is already alive and only the stored binding is wrong. Use `room restore` when the runtime itself needs to be launched or resumed.
 
 ## Default behavior
 

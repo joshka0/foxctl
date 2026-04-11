@@ -117,6 +117,33 @@ func TestResolveMuxCreateCommandAutoModeAllowsDroid(t *testing.T) {
 	}
 }
 
+func TestResolveMuxCreateCommandResumeMappings(t *testing.T) {
+	tests := []struct {
+		name    string
+		agent   string
+		mode    string
+		session string
+		want    string
+	}{
+		{name: "codex", agent: "codex", mode: "interactive", session: "session-1", want: "codex resume session-1"},
+		{name: "claude", agent: "claude", mode: "interactive", session: "session-2", want: "claude --resume session-2"},
+		{name: "gemini", agent: "gemini", mode: "interactive", session: "session-3", want: "gemini --resume session-3"},
+		{name: "droid", agent: "droid", mode: "interactive", session: "session-4", want: "droid --resume session-4"},
+		{name: "agent", agent: "agent", mode: "interactive", session: "session-5", want: "agent --resume session-5"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := resolveMuxCreateCommand("", tt.agent, tt.mode, nil, tt.session)
+			if err != nil {
+				t.Fatalf("resolveMuxCreateCommand() error = %v", err)
+			}
+			if got != tt.want {
+				t.Fatalf("resolveMuxCreateCommand() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestResolveMuxCreateCommandAutoModeUsesClaudeBypassPermissions(t *testing.T) {
 	got, err := resolveMuxCreateCommand("", "claude", "auto", nil, "")
 	if err != nil {

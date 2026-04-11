@@ -1413,7 +1413,7 @@ func (p preparePlan) hasInjectedEnv() bool {
 func paneCommandForPane(plan preparePlan, pane Pane) string {
 	command := plan.paneCommand
 	if plan.agent != "" {
-		command = wrapTmuxPaneCommand(
+		command = WrapTmuxPaneCommand(
 			plan.paneServeExecutable,
 			plan.session,
 			strings.TrimSpace(pane.Label),
@@ -1780,31 +1780,37 @@ func buildAgentPaneCommand(agent, mode string, args []string, sessionID string) 
 	if err != nil {
 		return "", err
 	}
-	switch label {
-	case "codex":
-		if sessionID != "" {
-			parts = append(parts, "resume")
+	if sessionID != "" {
+		resumeArgs, err := AgentResumeArgs(label, sessionID)
+		if err != nil {
+			return "", err
+		}
+		parts = append(parts, resumeArgs...)
+		if label == "codex" {
 			parts = append(parts, autoArgs...)
 			parts = append(parts, args...)
-			parts = append(parts, sessionID)
 			return shellQuoteArgs(parts), nil
-		}
-	case "claude":
-		if sessionID != "" {
-			parts = append(parts, "--resume", sessionID)
-		}
-	case "gemini":
-		if sessionID != "" {
-			return "", fmt.Errorf("agent_session_id is not supported for gemini; use its own resume selector flags instead")
-		}
-	default:
-		if sessionID != "" {
-			return "", fmt.Errorf("agent_session_id is only supported for codex and claude")
 		}
 	}
 	parts = append(parts, autoArgs...)
 	parts = append(parts, args...)
 	return shellQuoteArgs(parts), nil
+}
+
+// AgentResumeArgs returns the provider-specific CLI arguments for resuming a prior session.
+func AgentResumeArgs(label, sessionID string) ([]string, error) {
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return nil, nil
+	}
+	switch strings.TrimSpace(label) {
+	case "codex":
+		return []string{"resume", sessionID}, nil
+	case "claude", "gemini", "droid", "agent":
+		return []string{"--resume", sessionID}, nil
+	default:
+		return nil, fmt.Errorf("agent_session_id is not supported for %s", label)
+	}
 }
 
 func agentAutoModeArgs(label, mode string) ([]string, error) {
@@ -1833,7 +1839,8 @@ func agentAutoModeArgs(label, mode string) ([]string, error) {
 	}
 }
 
-func wrapTmuxPaneCommand(executable, session, participantID, roomID, cwd, childCommand, startupProfile string) string {
+// WrapTmuxPaneCommand wraps a child agent command with pane serve so the pane publishes a socket transport.
+func WrapTmuxPaneCommand(executable, session, participantID, roomID, cwd, childCommand, startupProfile string) string {
 	executable = strings.TrimSpace(executable)
 	if executable == "" {
 		executable = defaultPaneServeExecutable()
@@ -1859,6 +1866,10 @@ func wrapTmuxPaneCommand(executable, session, participantID, roomID, cwd, childC
 	}
 	args = append(args, "--", "sh", "-lc", childCommand)
 	return shellQuoteArgs(args)
+}
+
+func wrapTmuxPaneCommand(executable, session, participantID, roomID, cwd, childCommand, startupProfile string) string {
+	return WrapTmuxPaneCommand(executable, session, participantID, roomID, cwd, childCommand, startupProfile)
 }
 
 func tmuxPaneStartupProfile(agent, agentMode string) string {
