@@ -1,0 +1,65 @@
+{
+  "milestone": "cross-feature",
+  "round": 1,
+  "status": "pass",
+  "assertionsSummary": {
+    "total": 10,
+    "passed": 8,
+    "failed": 0,
+    "blocked": 0,
+    "deferred": 2
+  },
+  "passedAssertions": [
+    "VAL-CROSS-001",
+    "VAL-CROSS-002",
+    "VAL-CROSS-004",
+    "VAL-CROSS-005",
+    "VAL-CROSS-006",
+    "VAL-CROSS-007",
+    "VAL-CROSS-008",
+    "VAL-CROSS-009"
+  ],
+  "failedAssertions": [],
+  "blockedAssertions": [],
+  "deferredAssertions": [
+    "VAL-CROSS-003",
+    "VAL-CROSS-010"
+  ],
+  "deferralRationale": {
+    "VAL-CROSS-003": "Terminal URL construction depends on gateway daemon registration endpoint — not yet implemented. TODO(gateway-integration) markers added to both construction sites.",
+    "VAL-CROSS-010": "Gateway deregistration on destroy depends on gateway daemon HTTP API — not yet implemented. Placeholder with explicit future comment is in place."
+  },
+  "coverageMap": {
+    "room-sandbox × worktree-manager": ["VAL-CROSS-001", "VAL-CROSS-002"],
+    "room-sandbox × gateway-terminal": ["VAL-CROSS-003 (deferred)", "VAL-CROSS-010 (deferred)"],
+    "opensandbox-adapter × worktree-manager": ["VAL-CROSS-004"],
+    "room-sandbox × agent-spawn": ["VAL-CROSS-005"],
+    "room-sandbox × tasks": ["VAL-CROSS-006"],
+    "room-sandbox × room-relay": ["VAL-CROSS-007"],
+    "opensandbox-adapter × room-status": ["VAL-CROSS-008"],
+    "room-sandbox × boardstore-migration": ["VAL-CROSS-009"]
+  },
+  "appliedUpdates": [
+    {
+      "target": "internal/storage/blackboard/board_store.go",
+      "description": "Added ALTER TABLE room_metadata ADD COLUMN sandbox_config migration statement so existing databases gain the column on next open",
+      "sourceFeature": "VAL-CROSS-009"
+    },
+    {
+      "target": "internal/storage/blackboard/board_store_test.go",
+      "description": "Added TestOpenBoardStore_MigratesLegacyRoomMetadataSandboxConfig to prove legacy databases are migrated successfully",
+      "sourceFeature": "VAL-CROSS-009"
+    },
+    {
+      "target": "cmd/agentctl/cmd/room_sandbox_integration_test.go",
+      "description": "Added path traversal subtests to TestRoomSandboxTasks_ScopePathResolvedToWorktree (VAL-CROSS-006 guard)",
+      "sourceFeature": "VAL-CROSS-006"
+    },
+    {
+      "target": "cmd/agentctl/cmd/room.go",
+      "description": "Added path traversal guard to resolveSandboxScopePath; changed provisionSandbox and provisionWorktreeSandbox to use newRoomTmuxClient() factory; added TODO(gateway-integration) comments to terminal URL construction; added relay gap documentation comment to relayRoomMessage()",
+      "sourceFeature": "VAL-CROSS-006, VAL-CROSS-007, VAL-CROSS-003"
+    }
+  ],
+  "previousRound": null
+}

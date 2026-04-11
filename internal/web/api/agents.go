@@ -25,7 +25,6 @@ import (
 	"github.com/jkatigb/agentctl/internal/platform/config"
 	"github.com/jkatigb/agentctl/internal/platform/workspace"
 	llmproviders "github.com/jkatigb/agentctl/internal/providers/llm"
-	sandboxopensandbox "github.com/jkatigb/agentctl/internal/sandbox/opensandbox"
 	"github.com/jkatigb/agentctl/internal/storage"
 	"github.com/jkatigb/agentctl/internal/storage/agents"
 	"github.com/jkatigb/agentctl/internal/storage/blackboard"
@@ -1131,51 +1130,7 @@ func prepareSandboxBackedSpawn(ctx context.Context, req AgentSpawnRequest) (*pre
 	if provider == "" {
 		return nil, nil
 	}
-	if provider != "opensandbox" {
-		return nil, fmt.Errorf("unsupported sandbox_provider %q", provider)
-	}
-	repoURL := strings.TrimSpace(req.RepoURL)
-	if repoURL == "" {
-		return nil, fmt.Errorf("repo_url is required when sandbox_provider=opensandbox")
-	}
-	timeout := time.Hour
-	if req.SandboxTimeoutS > 0 {
-		timeout = time.Duration(req.SandboxTimeoutS) * time.Second
-	}
-	client := sandboxopensandbox.New(sandboxopensandbox.ConfigFromEnv())
-	result, err := client.ProvisionShallowCloneWorkspace(ctx, sandboxopensandbox.ProvisionWorkspaceRequest{
-		RepoURL:       repoURL,
-		RepoRef:       strings.TrimSpace(req.RepoRef),
-		Image:         strings.TrimSpace(req.SandboxImage),
-		Name:          strings.TrimSpace(req.Name),
-		WorkspaceRoot: strings.TrimSpace(req.WorkspaceRoot),
-		Timeout:       timeout,
-		AllowEgress:   req.AllowEgress,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("opensandbox provision failed: %w", err)
-	}
-	workspaceID := strings.TrimSpace(req.WorkspaceID)
-	if workspaceID == "" {
-		workspaceID = "sandbox-" + strings.TrimSpace(result.SandboxID)
-	}
-	keep := false
-	return &preparedSandboxSpawn{
-		workspaceID:     workspaceID,
-		workspaceRoot:   result.WorkspaceRoot,
-		workspaceSource: "sandbox",
-		sandboxProvider: "opensandbox",
-		sandboxID:       result.SandboxID,
-		repoURL:         result.RepoURL,
-		repoRef:         result.RepoRef,
-		cleanup: func(ctx context.Context) {
-			if keep {
-				return
-			}
-			_ = client.DeleteSandbox(ctx, result.SandboxID)
-		},
-		release: func() { keep = true },
-	}, nil
+	return nil, fmt.Errorf("sandbox_provider %q is temporarily disabled", provider)
 }
 
 func updateAgentStateAfterSpawn(ctx context.Context, store agents.Store, agentID string) error {
@@ -1351,16 +1306,7 @@ func handleAgentAsk(w http.ResponseWriter, r *http.Request, cfg config.Config, l
 	}
 
 	if isSandboxBackedAgent(agent) {
-		reply, err := runSandboxBackedAgentAsk(r.Context(), cfg, agent, req.Message)
-		if err != nil {
-			log.Error().Err(err).Str("agent_id", agentID).Msg("sandbox-backed ask failed")
-			httpError(w, http.StatusInternalServerError, "sandbox ask failed: "+err.Error())
-			return
-		}
-		writeJSON(w, http.StatusOK, AgentAskResponse{
-			Reply:          reply,
-			ConversationID: resolveAgentConversationID(agent, ""),
-		})
+		httpError(w, http.StatusServiceUnavailable, "sandbox-backed agent execution is temporarily disabled")
 		return
 	}
 
@@ -1435,61 +1381,7 @@ func handleAgentAskStream(w http.ResponseWriter, r *http.Request, cfg config.Con
 	timeout := agentAskStreamTimeout(agent)
 
 	if isSandboxBackedAgent(agent) {
-		ctx, cancel := context.WithTimeout(context.Background(), timeout)
-		activeAgentStreams.Put(agentID, correlationID, cancel)
-
-		writeJSON(w, http.StatusAccepted, AgentAskStreamResponse{
-			Accepted:       true,
-			AgentID:        agentID,
-			CorrelationID:  correlationID,
-			ConversationID: conversationID,
-		})
-		publishAgentChatEvent(events, agentChatEvent{
-			AgentID:        agentID,
-			ConversationID: conversationID,
-			CorrelationID:  correlationID,
-			Phase:          "started",
-			Metadata: map[string]any{
-				"memory_scope":     string(agenttypes.NormalizeMemoryScope(agent.MemoryScope)),
-				"memory_retention": string(agenttypes.NormalizeMemoryRetention(agent.MemoryRetention)),
-				"workspace_source": agent.WorkspaceSource,
-				"sandbox_provider": agent.SandboxProvider,
-				"sandbox_id":       agent.SandboxID,
-			},
-		})
-		go func() {
-			defer activeAgentStreams.Delete(agentID, correlationID)
-			defer cancel()
-
-			reply, err := runSandboxBackedAgentAsk(ctx, cfg, agent, req.Message)
-			if err != nil {
-				if errors.Is(err, context.Canceled) {
-					publishAgentChatEvent(events, agentChatEvent{
-						AgentID:        agentID,
-						ConversationID: conversationID,
-						CorrelationID:  correlationID,
-						Phase:          "cancelled",
-						Error:          "cancelled",
-					})
-					return
-				}
-				publishAgentChatEvent(events, agentChatEvent{
-					AgentID:        agentID,
-					ConversationID: conversationID,
-					CorrelationID:  correlationID,
-					Phase:          "error",
-					Error:          err.Error(),
-				})
-				return
-			}
-			publishAgentChatEvent(events, agentChatEvent{
-				AgentID:        agentID,
-				ConversationID: conversationID,
-				CorrelationID:  correlationID,
-				Phase:          "completed",
-				Content:        reply,
-			})
-		}()
+		httpError(w, http.StatusServiceUnavailable, "sandbox-backed agent execution is temporarily disabled")
 		return
 	}
 
@@ -2163,36 +2055,16 @@ func resolveSandboxAgentLLMConfig(cfg config.Config, agent agenttypes.Agent) (sa
 }
 
 func runSandboxBackedAgentAsk(ctx context.Context, cfg config.Config, agent agenttypes.Agent, message string) (string, error) {
+	if strings.TrimSpace(agent.SandboxProvider) != "" {
+		return "", fmt.Errorf("sandbox-backed agent execution is temporarily disabled")
+	}
 	llmCfg, err := resolveSandboxAgentLLMConfig(cfg, agent)
 	if err != nil {
 		return "", err
 	}
-	client := sandboxopensandbox.New(sandboxopensandbox.ConfigFromEnv())
-	command, envs := buildSandboxPromptCommand(agent, llmCfg, message)
-	result, err := client.RunSandboxCommand(ctx, sandboxopensandbox.RunSandboxCommandRequest{
-		SandboxID: agent.SandboxID,
-		Command:   command,
-		Cwd:       firstNonEmpty(agent.WorkspaceRoot, sandboxopensandbox.DefaultWorkspaceRoot),
-		Timeout:   5 * time.Minute,
-		Envs:      envs,
-	})
-	if err != nil {
-		return "", err
-	}
-	reply := strings.TrimSpace(result.Stdout)
-	if reply == "" {
-		reply = strings.TrimSpace(result.Result)
-	}
-	if reply == "" && strings.TrimSpace(result.Error) != "" {
-		return "", errors.New(strings.TrimSpace(result.Error))
-	}
-	if reply == "" && strings.TrimSpace(result.Stderr) != "" {
-		return "", errors.New(strings.TrimSpace(result.Stderr))
-	}
-	if reply == "" {
-		return "", fmt.Errorf("sandbox execution completed without visible output")
-	}
-	return reply, nil
+	_ = llmCfg
+	_ = message
+	return "", fmt.Errorf("sandbox-backed agent execution is temporarily disabled")
 }
 
 func buildSandboxPromptCommand(agent agenttypes.Agent, llmCfg sandboxAgentLLMConfig, message string) (string, map[string]string) {

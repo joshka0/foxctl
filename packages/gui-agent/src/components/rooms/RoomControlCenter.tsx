@@ -11,9 +11,11 @@ import {
   getRoomInbox, 
   getRoomTasks, 
   getRoomLoop,
+  listMuxPanes,
   listRoomMessages,
   ackRoomMessage,
   resolveRoomMessage,
+  updateRoomMemberBinding,
   bulkResolveRoomMessages,
   claimRoomTask,
   touchRoomTask,
@@ -31,12 +33,14 @@ import { InboxRow } from './InboxRow'
 import { RoomDialogs } from './RoomDialogs'
 import { TimelineEvent } from './TimelineEvent'
 import { ParticipantList } from './ParticipantList'
+import { ViewerPaneList } from './ViewerPaneList'
 import { ReplyComposer } from './ReplyComposer'
 import { LoopPolicyEditor } from './LoopPolicyEditor'
 import { AdminRoomComposer } from './AdminRoomComposer'
 import { RoomChatView } from './RoomChatView'
 import { RoomPlanningView } from './RoomPlanningView'
-import { Hash, MessageSquare, ShieldAlert, Zap, X, RefreshCw, CheckCircle2, UserCircle, Users, Bell, Trash2 } from 'lucide-react'
+import { RoomTerminalView } from './RoomTerminalView'
+import { Hash, MessageSquare, ShieldAlert, Zap, X, RefreshCw, CheckCircle2, UserCircle, Users, Bell, Trash2, TerminalSquare } from 'lucide-react'
 import type { MailboxMessage, RoomMessageEvent } from '@/api/types'
 
 interface AdminDispatchSummary {
@@ -75,7 +79,7 @@ export function RoomControlCenter({ roomId }: { roomId: string }) {
   } = useRoomControlStore()
 
   const [timelineFilter, setTimelineFilter] = useState<'all' | 'messages' | 'reclaims' | 'handoffs' | 'reminders' | 'reassignments'>('all')
-  const [surfaceMode, setSurfaceMode] = useState<'ops' | 'chat' | 'planning'>('ops')
+  const [surfaceMode, setSurfaceMode] = useState<'ops' | 'chat' | 'planning' | 'terminal'>('ops')
   const [isParticipantsOpen, setIsParticipantsOpen] = useState(false)
   const [isLoopEditorOpen, setIsLoopEditorOpen] = useState(false)
   const [replyTarget, setReplyTarget] = useState<MailboxMessage | null>(null)
@@ -116,6 +120,74 @@ export function RoomControlCenter({ roomId }: { roomId: string }) {
   const { data: loop } = useQuery({
     queryKey: ['room', roomId, 'loop'],
     queryFn: () => getRoomLoop(roomId, workspaceId, currentActorID),
+  })
+
+  const coordinatorMemberActorID =
+    status?.room?.members?.find((member) => member.role === 'coordinator')?.actor_id
+
+  const roomDispatchActorID =
+    status?.participants.some((participant) => participant.actor_id === currentActorID)
+      ? currentActorID
+      : (isLocalDevSuperuser && (status?.coordinator_actor_id || coordinatorMemberActorID)
+          ? (status?.coordinator_actor_id || coordinatorMemberActorID)!
+          : currentActorID)
+
+  const { data: viewerPanes = [], isFetching: viewerPanesLoading } = useQuery({
+    queryKey: ['room', roomId, 'viewer-panes', status?.room?.members],
+    enabled: (isParticipantsOpen || surfaceMode === 'terminal') && !!status,
+    queryFn: async () => {
+      const participantIDs = new Set((status?.participants ?? []).map((p) => p.actor_id))
+      const tmuxBindingBySessionPane = new Map<string, string>()
+      const roomTmuxSessions = new Set(
+        (status?.room?.members ?? [])
+          .filter((m) => m.backend === 'tmux' && m.session)
+          .map((m) => String(m.session))
+      )
+      const tmuxParticipantSessions = new Map<string, Set<string>>()
+      ;(status?.room?.members ?? []).forEach((m) => {
+        if (m.backend !== 'tmux' || !m.session || !m.actor_id) return
+        const key = String(m.actor_id)
+        const current = tmuxParticipantSessions.get(key) ?? new Set<string>()
+        current.add(String(m.session))
+        tmuxParticipantSessions.set(key, current)
+        if (m.pane_id) {
+          tmuxBindingBySessionPane.set(`${String(m.session)}:${String(m.pane_id)}`, key)
+        }
+      })
+      const zellijSessions = Array.from(new Set(
+        (status?.room?.members ?? [])
+          .filter((m) => m.backend === 'zellij' && m.session)
+          .map((m) => m.session as string)
+      ))
+
+      const panes = await Promise.all([
+        listMuxPanes('tmux'),
+        ...zellijSessions.map((session) => listMuxPanes('zellij', { session })),
+      ]).then((groups) =>
+        groups.flat().map((pane) => {
+          if (pane.backend !== 'tmux' || pane.participant_id || !pane.session || !pane.id) return pane
+          const boundActorID = tmuxBindingBySessionPane.get(`${String(pane.session)}:${String(pane.id)}`)
+          if (!boundActorID) return pane
+          return {
+            ...pane,
+            participant_id: boundActorID,
+          }
+        }),
+      )
+
+      return panes.filter((pane) => {
+        const participant = pane.participant_id || pane.label || pane.pane_name || ''
+        if (pane.room_id && pane.room_id === roomId) return true
+        if (!participant || !participantIDs.has(participant)) return false
+        if (pane.backend === 'tmux') {
+          const sessions = tmuxParticipantSessions.get(participant)
+          if (!!pane.session && !!sessions?.has(pane.session)) return true
+          if (!!pane.session && roomTmuxSessions.has(pane.session)) return true
+          return false
+        }
+        return true
+      })
+    },
   })
 
   // Mutations
@@ -161,7 +233,7 @@ export function RoomControlCenter({ roomId }: { roomId: string }) {
   const sendReplyMutation = useMutation({
     mutationFn: (params: { body: string, relatedId: string, recipient: string }) => sendRoomMessage(roomId, {
       workspace_id: workspaceId,
-      sender: currentActorID,
+      sender: roomDispatchActorID,
       body: params.body,
       recipient: params.recipient,
       related_message_id: params.relatedId,
@@ -176,7 +248,7 @@ export function RoomControlCenter({ roomId }: { roomId: string }) {
   const nudgeMutation = useMutation({
     mutationFn: (target: string) => sendRoomMessage(roomId, {
       workspace_id: workspaceId,
-      sender: currentActorID,
+      sender: roomDispatchActorID,
       body: `Reminder for @${target}: obligation pending.`,
       recipient: target,
       kind: 'alert',
@@ -188,7 +260,7 @@ export function RoomControlCenter({ roomId }: { roomId: string }) {
     mutationFn: (params: { recipient?: string; subject?: string; body: string; kind: string; ack_required: boolean; reply_expected: boolean; interrupt: boolean }) =>
       sendRoomMessage(roomId, {
         workspace_id: workspaceId,
-        sender: currentActorID,
+        sender: roomDispatchActorID,
         recipient: params.recipient,
         subject: params.subject,
         body: params.body,
@@ -210,6 +282,81 @@ export function RoomControlCenter({ roomId }: { roomId: string }) {
       })
       setTimelineFilter('all')
       setTimelineOpen(true)
+      queryClient.invalidateQueries({ queryKey: ['room', roomId] })
+    },
+  })
+
+  const terminalSendMutation = useMutation({
+    mutationFn: (params: {
+      recipients?: string[]
+      subject?: string
+      body: string
+      kind: string
+      ack_required: boolean
+      reply_expected: boolean
+      interrupt: boolean
+    }) => {
+      const recipients = params.recipients?.filter(Boolean) ?? []
+      if (recipients.length <= 1) {
+        return sendRoomMessage(roomId, {
+          workspace_id: workspaceId,
+          sender: roomDispatchActorID,
+          recipient: recipients[0],
+          subject: params.subject,
+          body: params.body,
+          kind: params.kind,
+          ack_required: params.ack_required,
+          reply_expected: params.reply_expected,
+          interrupt: params.interrupt,
+        })
+      }
+      return Promise.all(
+        recipients.map((recipient) =>
+          sendRoomMessage(roomId, {
+            workspace_id: workspaceId,
+            sender: roomDispatchActorID,
+            recipient,
+            subject: params.subject,
+            body: params.body,
+            kind: params.kind,
+            ack_required: false,
+            reply_expected: false,
+            interrupt: params.interrupt,
+          }),
+        ),
+      ).then((results) => ({
+        id: results.map((result) => result.id).join(','),
+        room_id: roomId,
+        stream: results[0]?.stream || '',
+        status: 'sent',
+        dispatched: results.reduce((sum, result) => sum + (result.dispatched ?? 0), 0),
+        skipped: results.reduce((sum, result) => sum + (result.skipped ?? 0), 0),
+        live_relay: results.flatMap((result) => result.live_relay ?? []),
+      }))
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['room', roomId] })
+    },
+  })
+
+  const terminalRebindMutation = useMutation({
+    mutationFn: (params: {
+      actorId: string
+      backend?: string
+      session?: string
+      pane_id?: string
+      transport_endpoint?: string
+      transport_kind?: string
+    }) =>
+      updateRoomMemberBinding(roomId, params.actorId, {
+        workspace_id: workspaceId,
+        backend: params.backend,
+        session: params.session,
+        pane_id: params.pane_id,
+        transport_endpoint: params.transport_endpoint,
+        transport_kind: params.transport_kind,
+      }),
+    onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['room', roomId] })
     },
   })
@@ -385,9 +532,26 @@ export function RoomControlCenter({ roomId }: { roomId: string }) {
                 Archive Room
               </Button>
             )}
-            <Button variant="outline" size="xs" className="font-bold" onClick={() => setIsParticipantsOpen(!isParticipantsOpen)}>
-              <Users className="w-3.5 h-3.5 mr-1.5" /> {status.participants.length}
-            </Button>
+            {(() => {
+              const readyCount = status.participants.filter(p => p.transport?.transport === 'available').length
+              const totalCount = status.participants.length
+              const hasUnavailable = status.participants.some(p => p.transport?.transport === 'unavailable')
+              
+              return (
+                <Button 
+                  variant="outline" 
+                  size="xs" 
+                  className={cn(
+                    "font-bold transition-colors",
+                    hasUnavailable ? "border-red-500/50 text-red-600 hover:bg-red-50" : "hover:bg-muted"
+                  )} 
+                  onClick={() => setIsParticipantsOpen(!isParticipantsOpen)}
+                >
+                  <Users className={cn("w-3.5 h-3.5 mr-1.5", hasUnavailable && "animate-pulse")} /> 
+                  {readyCount}/{totalCount}
+                </Button>
+              )
+            })()}
             <Button 
               variant={isTimelineOpen ? 'secondary' : 'outline'} 
               size="xs"
@@ -421,14 +585,23 @@ export function RoomControlCenter({ roomId }: { roomId: string }) {
               >
                 Planning
               </Button>
+              <Button
+                variant={surfaceMode === 'terminal' ? 'secondary' : 'ghost'}
+                size="xs"
+                className="h-6 px-2 text-[9px] font-black uppercase tracking-tight"
+                onClick={() => setSurfaceMode('terminal')}
+              >
+                <TerminalSquare className="w-3 h-3 mr-1" />
+                Term
+              </Button>
             </div>
           </div>
         </header>
 
-        {canAdminRoom && (
+        {canAdminRoom && surfaceMode !== 'terminal' && (
           <>
             <AdminRoomComposer
-              sender={currentActorID}
+              sender={roomDispatchActorID}
               participants={status.participants}
               onSend={(params) => adminSendMutation.mutate(params)}
               disabled={adminSendMutation.isPending}
@@ -521,6 +694,7 @@ export function RoomControlCenter({ roomId }: { roomId: string }) {
           {isParticipantsOpen && (
             <aside className="w-64 border-r bg-muted/5 flex flex-col shrink-0">
               <ParticipantList participants={status.participants} coordinatorId={status.coordinator_actor_id} />
+              <ViewerPaneList panes={viewerPanes} loading={viewerPanesLoading} />
             </aside>
           )}
 
@@ -535,6 +709,19 @@ export function RoomControlCenter({ roomId }: { roomId: string }) {
               />
             ) : surfaceMode === 'planning' ? (
               <RoomPlanningView messages={messages?.messages ?? []} currentActorID={currentActorID} />
+            ) : surfaceMode === 'terminal' ? (
+              <RoomTerminalView
+                roomId={roomId}
+                workspaceId={workspaceId}
+                panes={viewerPanes}
+                participants={status.participants}
+                sender={roomDispatchActorID}
+                onSend={(params) => terminalSendMutation.mutateAsync(params)}
+                onRebind={(params) => terminalRebindMutation.mutateAsync(params).then(() => undefined)}
+                sending={terminalSendMutation.isPending}
+                rebinding={terminalRebindMutation.isPending}
+                loading={viewerPanesLoading}
+              />
             ) : (
               <>
             {/* 3. Task Board */}

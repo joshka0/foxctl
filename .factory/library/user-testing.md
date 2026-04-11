@@ -51,6 +51,49 @@ Testing surface, required tools, and resource cost classification for validation
 - SSH validation in --dev mode: SSH server listens on localhost in dev mode
 - tmux must be available for all terminal tests; skip gracefully if missing
 
+## Flow Validator Guidance: go test (cmd/agentctl/cmd - room-sandbox)
+
+**Surface:** Go unit tests in `cmd/agentctl/cmd/` package for room sandbox features
+**Tool:** `env -u GOROOT -u GOBIN -u GOTOOLDIR CGO_ENABLED=0 go test ./cmd/agentctl/cmd/ -run "<pattern>" -v -count=1`
+**Isolation:** Each test function creates its own temp directory and git repo via `t.TempDir()`. No shared state between tests. Tests use mock/fake implementations for gateway and worktree where needed.
+**Concurrency:** Safe to run multiple test subsets concurrently — they operate on independent temp directories.
+**Assertions covered:** VAL-RS-001 through VAL-RS-021
+**Max concurrent validators:** 3 (each runs go test subset, ~50 MB per process)
+**Constraints:**
+- Do NOT modify any test files. Only run tests and report results.
+- Some tests require `tmux` — those tests skip gracefully if missing.
+- Must use CGO_ENABLED=0 to avoid SQLite symbol duplication.
+- Tests run in ~3 seconds total for the full suite.
+
+### Test-to-Assertion Mapping (room-sandbox)
+
+**Sandbox Provisioning (room-sandbox-create):**
+- VAL-RS-001 → TestProvisionSandbox_CreatesWorktreeAndTmuxSession
+- VAL-RS-002 → TestProvisionSandbox_CustomWorktreeRoot
+- VAL-RS-003 → TestProvisionSandbox_BaseRef
+- VAL-RS-004 → TestProvisionSandbox_RollbackOnTmuxFailure
+- VAL-RS-009 → TestProvisionSandbox_IdempotentOnExistingSandbox
+- VAL-RS-010 → TestProvisionSandbox_UpgradesNonSandboxRoom
+- VAL-RS-011 → TestBuildRoomSandboxInfo_SandboxRoom, TestRoomCreateWithSandboxFlag_Integration
+
+**Sandbox Lifecycle (room-sandbox-lifecycle):**
+- VAL-RS-005 → TestRoomListSandbox_IncludesSandboxStatus
+- VAL-RS-006 → TestRoomShowSandbox_IncludesSandboxMetadata
+- VAL-RS-007 → TestRoomDestroySandbox_CleansUpResources
+- VAL-RS-008 → TestRoomDestroySandbox_NonSandboxRoomIsNoop
+- VAL-RS-020 → TestRoomDestroySandbox_PartialCleanupOnMissingWorktree (active agent check)
+- VAL-RS-021 → TestRoomJoinSandbox_TerminalBinding, TestRoomLeaveSandbox_TerminalBinding
+
+**Sandbox Integration (room-sandbox-integration):**
+- VAL-RS-012 → TestRoomSandboxAgent_SpawnUsesWorktreeCWD
+- VAL-RS-013 → TestRoomSandboxTasks_ScopePathResolvedToWorktree, TestRoomSandboxTasks_TaskAddUsesSandboxScopePath
+- VAL-RS-014 → TestRoomSandboxRelay_DeliversToSandboxSession
+- VAL-RS-015 → TestRoomSandboxLoop_RelayIncludesSandboxDelivery
+- VAL-RS-016 → TestRoomSandboxStatus_IncludesSandboxInfo
+- VAL-RS-017 → TestRoomSandboxInbox_IncludesSandboxInfo
+- VAL-RS-018 → TestRoomSandboxRedgreen_InitOnSandboxRoom
+- VAL-RS-019 → TestRoomSandboxAgile_EpicStartOnSandboxRoom, TestRoomSandboxAgile_MilestoneStartOnSandboxRoom, TestRoomSandboxAgile_StoryAddOnSandboxRoom
+
 ## Flow Validator Guidance: go test (internal/worktree)
 
 **Surface:** Go unit tests in `internal/worktree/` package
@@ -101,3 +144,60 @@ Testing surface, required tools, and resource cost classification for validation
 - VAL-WT-040 → TestCreate_PathValidation
 **Max concurrent validators:** 3 (each runs go test subset, ~50 MB per process)
 **Constraints:** Do NOT modify any test files. Only run tests and report results.
+
+## Flow Validator Guidance: go test (internal/gateway)
+
+**Surface:** Go unit tests in `internal/gateway/` package and sub-packages
+**Tool:** `go test ./internal/gateway/... -v -count=1`
+**Isolation:** Each test function creates its own server instance on a random port via `findFreePort()`. No shared state between tests. tmux sessions are created with unique timestamps and cleaned up in deferred cleanup.
+**Concurrency:** Safe to run multiple test subsets concurrently — they operate on independent ports and tmux sessions.
+**Assertions covered:** VAL-GW-001 through VAL-GW-030
+**Max concurrent validators:** 3 (each runs go test subset, ~50 MB per process)
+**Constraints:**
+- Do NOT modify any test files. Only run tests and report results.
+- Some tests require `tmux` to be available — those tests skip gracefully if missing.
+- Tests with `os.Getenv("CI") != ""` skip in CI environments.
+- SSH tests start their own server instances on random ports — no port conflicts.
+- Tailscale-specific assertions (VAL-GW-022, VAL-GW-023, VAL-GW-024) require `TS_AUTHKEY` and actual tsnet connectivity — mark as **blocked** if not available.
+
+### Test-to-Assertion Mapping (gateway-terminal)
+
+**Gateway Core (server.go tests):**
+- VAL-GW-001 → TestStartDevMode (dev mode healthz returns 200)
+- VAL-GW-002 → TestStateDirResolution (state dir stored; AuthKeyError_NoStateNoKey for restarts)
+- VAL-GW-003 → TestStartDevMode_GracefulShutdown, TestShutdown_SetsStoppedHealth
+- VAL-GW-004 → TestAuthKeyError, TestRun_AuthKeyError, TestAuthKeyError_NoStateNoKey
+- VAL-GW-027 → TestStartDevMode (dev mode on localhost HTTP)
+- VAL-GW-028 → TestHandleHealthz_OK, TestHandleHealthz_Degraded, TestHandleHealthz_Starting, TestHandleHealthz_Disabled
+
+**Web Terminal - Handler/Routing (webterm/handler_test.go):**
+- VAL-GW-005 → TestHandler_TerminalPage_ContainsHTML (HTML with xterm.js, /ws/terminal/ URL)
+- VAL-GW-025 → TestHandler_TerminalPage_RoomNotFound, TestHandler_ErrorJSON (ENOTFOUND with hint)
+
+**Web Terminal - PTY/Hub (webterm/pty_test.go, hub_test.go):**
+- VAL-GW-006 → TestStartTmuxAttach_CreatesSession (session created, PTY running)
+- VAL-GW-007 → TestPTY_WriteInput (echo hello-webterm visible)
+- VAL-GW-008 → TestPTY_Resize (132 columns verified via tmux list-panes)
+- VAL-GW-009 → TestPTY_OutputBroadcast (reconnect behavior tested via subscriber model)
+- VAL-GW-014 → TestPTY_OutputBroadcast (two subscribers both receive output)
+- VAL-GW-017 → TestHub_RemoveClient, TestPTY_Close (one client removed, hub still works)
+- VAL-GW-018 → TestHub_RoomIDs (multiple rooms registered independently)
+- VAL-GW-019 → Tests use separate tmux sessions per room (inherent isolation)
+- VAL-GW-020 → TestStartTmuxAttach_AttachExisting (pre-created session visible)
+- VAL-GW-021 → TestStartTmuxAttach_CreatesSession (creates new if none exists)
+- VAL-GW-026 → TestPTY_Close (abrupt close, no panic, idempotent)
+- VAL-GW-029 → TestHub_AddClient_ConnectionLimit (max connections enforced)
+
+**SSH Terminal (sshterm/server_test.go):**
+- VAL-GW-010 → TestServer_ServeAndConnect, TestServer_WhoIsIdentityLogged (WhoIs verified)
+- VAL-GW-011 → TestServer_PTYSession (routes by room-<id> username)
+- VAL-GW-012 → TestServer_WindowResize (resize propagates), signal tests via parseSignal
+- VAL-GW-013 → TestServer_DetachOnDisconnect (session survives disconnect)
+- VAL-GW-015 → TestServer_MultipleSessions (3 concurrent SSH sessions)
+- VAL-GW-016 → Covered by TestServer_MultipleSessions (shared tmux session)
+- VAL-GW-030 → TestServer_WhoIsIdentityLogged (identity captured and verified)
+
+**Tailscale-only (requires tsnet):**
+- VAL-GW-022 → auto-TLS via ListenTLS — blocked without Tailscale
+- VAL-GW-023 → MagicDNS resolution — blocked without Tailscale
+- VAL-GW-024 → localhost access fails in tsnet mode — blocked without Tailscale

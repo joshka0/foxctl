@@ -63,7 +63,7 @@ export function SpawnAgentFormCore({
     name: "",
     workspace_id: spawnRoomWorkspaceID || "",
     workspace_source: "local",
-    sandbox_provider: "opensandbox",
+    sandbox_provider: "",
     repo_url: "",
     repo_ref: "main",
     sandbox_timeout_s: 3600,
@@ -393,17 +393,16 @@ export function SpawnAgentFormCore({
               onClick={() =>
                 setFormData((prev) => ({
                   ...prev,
-                  workspace_source: "sandbox",
-                  sandbox_provider: prev.sandbox_provider || "opensandbox",
+                  workspace_source: "local",
+                  sandbox_provider: "",
                 }))
               }
+              disabled
               className={`w-full rounded-md border px-3 py-2 text-sm text-left ${
-                formData.workspace_source === "sandbox"
-                  ? "border-primary bg-primary/10 text-foreground"
-                  : "border-border bg-background text-muted-foreground"
+                "border-border bg-background text-muted-foreground opacity-50 cursor-not-allowed"
               }`}
             >
-              Sandbox Clone
+              Sandbox Clone (Disabled)
             </button>
           </Tooltip>
         </div>

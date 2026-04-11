@@ -41,6 +41,12 @@ agentctl mux list
 
 That gives you the durable room state first, then the live pane state.
 
+Important:
+
+- `mux create --room-id ...` gives the pane room context, not a guarantee of room membership
+- always verify membership with `agentctl room status <room-id>`
+- if your participant is missing from `room status`, explicitly `room join` or `room rebind` before assuming room traffic will reach you
+
 ## Quick Start
 
 Label each pane once:
@@ -72,6 +78,14 @@ agentctl mux create --session claude-auto --panes 2 --agent claude --mode auto -
 agentctl mux create --session gemini-auto --panes 2 --agent gemini --mode auto --attach
 agentctl mux create --session cursor-auto --panes 2 --agent agent --mode auto --attach
 ```
+
+Default participant naming is scoped when possible:
+
+- room-bound panes default to `<room-id>-<agent>-<suffix>`
+- named non-default sessions default to `<session>-<agent>-<suffix>`
+- only plain ad hoc sessions fall back to generic labels like `claude-a`
+
+This keeps participant ids obviously tied to their feature or room so other agents do not accidentally target the wrong runtime.
 
 Current auto mappings:
 
@@ -138,6 +152,8 @@ Use `agentctl mux ...` when you want machine-friendly envelopes, pane metadata, 
 Do **not** document `mux submit` as a primary workflow: room relay/loop and `room send` already cover submit behavior for coordination.
 
 When `agentctl mux create` launches a tmux agent pane with direct room access, agentctl also injects a lightweight startup note into that pane telling the agent to read `agentctl-tmux` and `agentctl-room`, along with the initial `room status` / `room inbox` / `room task list` commands for the attached room.
+
+That startup note is only orientation. The acceptance check is still: does `room status` show your participant?
 
 Common agent launches include `--agent codex`, `--agent claude`, `--agent gemini`, `--agent agent` for Cursor CLI, and `--agent droid` for Factory Droid.
 
@@ -211,6 +227,7 @@ agentctl room task complete <room-id> --id <task-id>
 Use `room relay` for pure room-message fanout.
 Use `room loop` when you also want room-associated task status transitions to be
 broadcast back into the room and then relayed to participants.
+If the room is using reminders, coordinator stale detection, or task heartbeat nudges, prefer `room loop`; `room relay` by itself is not enough.
 
 Operational rule:
 

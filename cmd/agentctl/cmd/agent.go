@@ -342,7 +342,41 @@ func currentSpawnWorkspaceRoot() string {
 	if err != nil {
 		return target
 	}
+
+	// If --room-id is set, check if the room has a sandbox worktree and use it as CWD.
+	if strings.TrimSpace(spawnRoomID) != "" {
+		if sandboxCWD := resolveSpawnRoomSandboxCWD(abs); sandboxCWD != "" {
+			return sandboxCWD
+		}
+	}
+
 	return abs
+}
+
+// resolveSpawnRoomSandboxCWD checks if the room identified by spawnRoomID has
+// a sandbox config with a valid worktree, and returns the worktree path to use
+// as the agent's working directory. Returns empty string if no sandbox config
+// or the worktree doesn't exist.
+func resolveSpawnRoomSandboxCWD(workspaceRoot string) string {
+	ctx := context.Background()
+	boardStore, err := openRoomBoardStore(ctx)
+	if err != nil {
+		return ""
+	}
+	defer boardStore.Close()
+
+	summary, err := boardStore.GetRoom(ctx, workspaceRoot, strings.TrimSpace(spawnRoomID), "")
+	if err != nil {
+		return ""
+	}
+	if summary.SandboxConfig == nil || !summary.SandboxConfig.IsSandbox() {
+		return ""
+	}
+	wtPath := summary.SandboxConfig.WorktreePath
+	if _, err := os.Stat(wtPath); err != nil {
+		return ""
+	}
+	return wtPath
 }
 
 func currentSpawnWorkspaceID() string {

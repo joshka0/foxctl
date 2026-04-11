@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"sync"
 	"testing"
@@ -25,6 +26,13 @@ type testRoomEventPublisher struct {
 	mu     sync.Mutex
 	types  []string
 	events []roomMessageEvent
+}
+
+func TestMain(m *testing.M) {
+	SetRoomSendLiveRelayHookForTests(func(ctx context.Context, workspaceID, roomID, messageID string) ([]RoomLiveRelayResult, error) {
+		return nil, nil
+	})
+	os.Exit(m.Run())
 }
 
 func (p *testRoomEventPublisher) Publish(eventType string, data any) {
@@ -101,6 +109,13 @@ func TestRoomDetailHandler_GetAndPostMessages(t *testing.T) {
 	cfg := orchestrationTestConfig(t.TempDir())
 	listHandler := RoomsListHandler(cfg, zerolog.Nop())
 	h := RoomDetailHandler(cfg, zerolog.Nop(), nil)
+	originalRelayHook := roomSendLiveRelayHook
+	roomSendLiveRelayHook = func(ctx context.Context, workspaceID, roomID, messageID string) ([]RoomLiveRelayResult, error) {
+		return nil, nil
+	}
+	defer func() {
+		roomSendLiveRelayHook = originalRelayHook
+	}()
 
 	createReq := httptest.NewRequest(http.MethodPost, "/api/rooms", strings.NewReader(`{
 		"workspace_id":"ws1",
@@ -207,10 +222,213 @@ func TestRoomDetailHandler_GetAndPostMessages(t *testing.T) {
 	}
 }
 
+func TestRoomDetailHandler_PostMessageIncludesLiveRelay(t *testing.T) {
+	cfg := orchestrationTestConfig(t.TempDir())
+	listHandler := RoomsListHandler(cfg, zerolog.Nop())
+	h := RoomDetailHandler(cfg, zerolog.Nop(), nil)
+
+	originalRelayHook := roomSendLiveRelayHook
+	roomSendLiveRelayHook = func(ctx context.Context, workspaceID, roomID, messageID string) ([]RoomLiveRelayResult, error) {
+		return []RoomLiveRelayResult{{
+			Backend:        "participant_transport",
+			DeliveredCount: 1,
+			DeliveredTo:    []string{"claude-a"},
+		}}, nil
+	}
+	defer func() {
+		roomSendLiveRelayHook = originalRelayHook
+	}()
+
+	createReq := httptest.NewRequest(http.MethodPost, "/api/rooms", strings.NewReader(`{
+		"workspace_id":"ws1",
+		"id":"alpha",
+		"title":"Alpha Room",
+		"members":[
+			{"actor_id":"claude-a","role":"participant"}
+		]
+	}`))
+	createRR := httptest.NewRecorder()
+	listHandler.ServeHTTP(createRR, createReq)
+	if createRR.Code != http.StatusCreated {
+		t.Fatalf("create status=%d body=%s", createRR.Code, createRR.Body.String())
+	}
+
+	postReq := httptest.NewRequest(http.MethodPost, "/api/rooms/alpha/messages", strings.NewReader(`{
+		"workspace_id":"ws1",
+		"sender":"dev-local-user",
+		"recipient":"claude-a",
+		"body":"hello from gui",
+		"kind":"instruction",
+		"interrupt":true
+	}`))
+	postRR := httptest.NewRecorder()
+	h.ServeHTTP(postRR, postReq)
+
+	if postRR.Code != http.StatusCreated {
+		t.Fatalf("post status=%d body=%s", postRR.Code, postRR.Body.String())
+	}
+	postBody := decodeResponseBody(t, postRR)
+	rawRelay, ok := postBody["live_relay"].([]any)
+	if !ok || len(rawRelay) != 1 {
+		t.Fatalf("live_relay=%T %#v want one result", postBody["live_relay"], postBody["live_relay"])
+	}
+	first, _ := rawRelay[0].(map[string]any)
+	if got := strings.TrimSpace(fmt.Sprint(first["backend"])); got != "participant_transport" {
+		t.Fatalf("backend=%q want participant_transport", got)
+	}
+	if got := strings.TrimSpace(fmt.Sprint(first["delivered_count"])); got != "1" {
+		t.Fatalf("delivered_count=%q want 1", got)
+	}
+}
+
+func TestRoomDetailHandler_AddListAndCancelReminder(t *testing.T) {
+	cfg := orchestrationTestConfig(t.TempDir())
+	listHandler := RoomsListHandler(cfg, zerolog.Nop())
+	h := RoomDetailHandler(cfg, zerolog.Nop(), nil)
+
+	originalRelayHook := roomSendLiveRelayHook
+	roomSendLiveRelayHook = func(ctx context.Context, workspaceID, roomID, messageID string) ([]RoomLiveRelayResult, error) {
+		return []RoomLiveRelayResult{{
+			Backend:        "participant_transport",
+			DeliveredCount: 1,
+			DeliveredTo:    []string{"claude-a"},
+		}}, nil
+	}
+	defer func() {
+		roomSendLiveRelayHook = originalRelayHook
+	}()
+
+	createReq := httptest.NewRequest(http.MethodPost, "/api/rooms", strings.NewReader(`{
+		"workspace_id":"ws1",
+		"id":"alpha",
+		"title":"Alpha Room",
+		"members":[
+			{"actor_id":"claude-a","role":"participant"},
+			{"actor_id":"coordinator-a","role":"coordinator"}
+		]
+	}`))
+	createRR := httptest.NewRecorder()
+	listHandler.ServeHTTP(createRR, createReq)
+	if createRR.Code != http.StatusCreated {
+		t.Fatalf("create status=%d body=%s", createRR.Code, createRR.Body.String())
+	}
+
+	addReq := httptest.NewRequest(http.MethodPost, "/api/rooms/alpha/reminders", strings.NewReader(`{
+		"workspace_id":"ws1",
+		"sender":"dev-local-user",
+		"recipient":"claude-a",
+		"subject":"Status update requested",
+		"body":"Please reply with current status.",
+		"every":"15m",
+		"max_iterations":3,
+		"reply_expected":true,
+		"allow_passive":true
+	}`))
+	addRR := httptest.NewRecorder()
+	h.ServeHTTP(addRR, addReq)
+	if addRR.Code != http.StatusCreated {
+		t.Fatalf("add reminder status=%d body=%s", addRR.Code, addRR.Body.String())
+	}
+	addBody := decodeResponseBody(t, addRR)
+	reminder, ok := addBody["reminder"].(map[string]any)
+	if !ok {
+		t.Fatalf("reminder type=%T want map[string]any", addBody["reminder"])
+	}
+	reminderID := strings.TrimSpace(fmt.Sprint(reminder["id"]))
+	if reminderID == "" {
+		t.Fatal("reminder id should be set")
+	}
+	rawRelay, ok := addBody["live_relay"].([]any)
+	if !ok || len(rawRelay) != 1 {
+		t.Fatalf("live_relay=%T %#v want one result", addBody["live_relay"], addBody["live_relay"])
+	}
+
+	listReq := httptest.NewRequest(http.MethodGet, "/api/rooms/alpha/reminders?workspace_id=ws1", nil)
+	listRR := httptest.NewRecorder()
+	h.ServeHTTP(listRR, listReq)
+	if listRR.Code != http.StatusOK {
+		t.Fatalf("list reminders status=%d body=%s", listRR.Code, listRR.Body.String())
+	}
+	listBody := decodeResponseBody(t, listRR)
+	reminders, ok := listBody["reminders"].([]any)
+	if !ok || len(reminders) != 1 {
+		t.Fatalf("reminders=%T %#v want one reminder", listBody["reminders"], listBody["reminders"])
+	}
+
+	cancelReq := httptest.NewRequest(http.MethodPost, "/api/rooms/alpha/reminders/"+reminderID+"/cancel?workspace_id=ws1", strings.NewReader(`{
+		"actor":"dev-local-user"
+	}`))
+	cancelRR := httptest.NewRecorder()
+	h.ServeHTTP(cancelRR, cancelReq)
+	if cancelRR.Code != http.StatusOK {
+		t.Fatalf("cancel reminder status=%d body=%s", cancelRR.Code, cancelRR.Body.String())
+	}
+	cancelBody := decodeResponseBody(t, cancelRR)
+	cancelled, ok := cancelBody["reminder"].(map[string]any)
+	if !ok {
+		t.Fatalf("cancelled reminder type=%T want map[string]any", cancelBody["reminder"])
+	}
+	if active := cancelled["active"]; active != false {
+		t.Fatalf("cancelled active=%v want false", active)
+	}
+}
+
+func TestRoomDetailHandler_PutMemberBinding(t *testing.T) {
+	cfg := orchestrationTestConfig(t.TempDir())
+	listHandler := RoomsListHandler(cfg, zerolog.Nop())
+	h := RoomDetailHandler(cfg, zerolog.Nop(), nil)
+
+	createReq := httptest.NewRequest(http.MethodPost, "/api/rooms", strings.NewReader(`{
+		"workspace_id":"ws1",
+		"id":"alpha",
+		"title":"Alpha Room",
+		"members":[{"actor_id":"droid-a","role":"participant"}]
+	}`))
+	createRR := httptest.NewRecorder()
+	listHandler.ServeHTTP(createRR, createReq)
+	if createRR.Code != http.StatusCreated {
+		t.Fatalf("create status=%d body=%s", createRR.Code, createRR.Body.String())
+	}
+
+	putReq := httptest.NewRequest(http.MethodPut, "/api/rooms/alpha/members/droid-a/binding?workspace_id=ws1", strings.NewReader(`{
+		"backend":"tmux",
+		"session":"146",
+		"pane_id":"%159",
+		"transport_endpoint":"/tmp/droid-a.sock",
+		"transport_kind":"pane_socket"
+	}`))
+	putRR := httptest.NewRecorder()
+	h.ServeHTTP(putRR, putReq)
+	if putRR.Code != http.StatusOK {
+		t.Fatalf("put status=%d body=%s", putRR.Code, putRR.Body.String())
+	}
+	body := decodeResponseBody(t, putRR)
+	member, ok := body["member"].(map[string]any)
+	if !ok {
+		t.Fatalf("member type=%T want map[string]any", body["member"])
+	}
+	if got := strings.TrimSpace(fmt.Sprint(member["session"])); got != "146" {
+		t.Fatalf("session=%q want 146", got)
+	}
+	if got := strings.TrimSpace(fmt.Sprint(member["pane_id"])); got != "%159" {
+		t.Fatalf("pane_id=%q want %%159", got)
+	}
+	if got := strings.TrimSpace(fmt.Sprint(member["transport_endpoint"])); got != "/tmp/droid-a.sock" {
+		t.Fatalf("transport_endpoint=%q want /tmp/droid-a.sock", got)
+	}
+}
+
 func TestRoomDetailHandler_ArchiveAndRestore(t *testing.T) {
 	cfg := orchestrationTestConfig(t.TempDir())
 	listHandler := RoomsListHandler(cfg, zerolog.Nop())
 	detailHandler := RoomDetailHandler(cfg, zerolog.Nop(), nil)
+	originalRelayHook := roomSendLiveRelayHook
+	roomSendLiveRelayHook = func(ctx context.Context, workspaceID, roomID, messageID string) ([]RoomLiveRelayResult, error) {
+		return nil, nil
+	}
+	t.Cleanup(func() {
+		roomSendLiveRelayHook = originalRelayHook
+	})
 
 	createReq := httptest.NewRequest(http.MethodPost, "/api/rooms", strings.NewReader(`{
 		"workspace_id":"ws1",
@@ -318,6 +536,13 @@ func TestRoomDetailHandler_PostMessageDispatchesAgentReplies(t *testing.T) {
 	listHandler := RoomsListHandler(cfg, zerolog.Nop())
 	pub := &testRoomEventPublisher{}
 	h := RoomDetailHandler(cfg, zerolog.Nop(), pub)
+	originalRelayHook := roomSendLiveRelayHook
+	roomSendLiveRelayHook = func(ctx context.Context, workspaceID, roomID, messageID string) ([]RoomLiveRelayResult, error) {
+		return nil, nil
+	}
+	t.Cleanup(func() {
+		roomSendLiveRelayHook = originalRelayHook
+	})
 
 	agentStore, err := agents.Open(context.Background(), cfg.Storage.Root)
 	if err != nil {
@@ -484,6 +709,13 @@ func TestRoomDetailHandler_PostMessageMarksLinkedBoardCardDone(t *testing.T) {
 	roomHandler := RoomDetailHandler(cfg, zerolog.Nop(), nil)
 	seedHandler := OrchestrationSeedCardsHandler(cfg, zerolog.Nop())
 	cardHandler := OrchestrationBoardCardGetHandler(cfg, zerolog.Nop())
+	originalRelayHook := roomSendLiveRelayHook
+	roomSendLiveRelayHook = func(ctx context.Context, workspaceID, roomID, messageID string) ([]RoomLiveRelayResult, error) {
+		return nil, nil
+	}
+	defer func() {
+		roomSendLiveRelayHook = originalRelayHook
+	}()
 
 	seedReq := httptest.NewRequest(http.MethodPost, "/api/orchestration/seed-cards", strings.NewReader(`{
 		"request_id":"req-room-board-seed-001",

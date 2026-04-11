@@ -2,11 +2,13 @@ import { useEffect, useMemo, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
-import { SendHorizonal, ShieldAlert } from 'lucide-react'
+import { SendHorizonal, ShieldAlert, ZapOff } from 'lucide-react'
+import type { RoomStatusParticipant } from '@/api/types'
+import { cn } from '@/lib/utils'
 
 interface AdminRoomComposerProps {
   sender: string
-  participants: Array<{ actor_id: string }>
+  participants: RoomStatusParticipant[]
   onSend: (params: {
     recipient?: string
     subject?: string
@@ -34,6 +36,12 @@ export function AdminRoomComposer({ sender, participants, onSend, disabled }: Ad
   }, [participants])
 
   const isBroadcast = recipient === '*'
+  const selectedParticipant = useMemo(() => {
+    return participants.find(p => p.actor_id === recipient)
+  }, [participants, recipient])
+
+  const transportUnavailable = selectedParticipant?.transport?.transport === 'unavailable'
+  const transportReady = selectedParticipant?.transport?.transport === 'available'
 
   useEffect(() => {
     if (!isBroadcast) return
@@ -59,17 +67,25 @@ export function AdminRoomComposer({ sender, participants, onSend, disabled }: Ad
           placeholder="Optional subject"
           className="h-8 text-xs"
         />
-        <select
-          value={recipient}
-          onChange={(e) => setRecipient(e.target.value)}
-          className="h-8 rounded-md border border-input bg-background px-3 text-xs font-mono"
-        >
-          {recipientOptions.map((value) => (
-            <option key={value} value={value}>
-              {value === '*' ? 'broadcast (*)' : value}
-            </option>
-          ))}
-        </select>
+        <div className="relative group">
+          <select
+            value={recipient}
+            onChange={(e) => setRecipient(e.target.value)}
+            className={cn(
+              "w-full h-8 rounded-md border border-input bg-background px-3 text-xs font-mono transition-colors appearance-none pr-8",
+              transportUnavailable ? "border-red-500 text-red-600 focus:ring-red-500" : (transportReady ? "border-green-500/50" : "")
+            )}
+          >
+            {recipientOptions.map((value) => (
+              <option key={value} value={value}>
+                {value === '*' ? 'broadcast (*)' : value}
+              </option>
+            ))}
+          </select>
+          <div className="absolute right-2 top-1.5 pointer-events-none text-muted-foreground">
+            {transportUnavailable ? <ZapOff className="w-3.5 h-3.5 text-red-500" /> : (transportReady ? <div className="w-2 h-2 rounded-full bg-green-500 mt-1" /> : null)}
+          </div>
+        </div>
         <select
           value={kind}
           onChange={(e) => setKind(e.target.value)}
@@ -90,7 +106,7 @@ export function AdminRoomComposer({ sender, participants, onSend, disabled }: Ad
       />
 
       <div className="flex items-center justify-between gap-3">
-        <div className="flex items-center gap-4 text-[10px] text-muted-foreground">
+        <div className="flex items-center gap-4 text-[10px] text-muted-foreground font-mono">
           <label className="inline-flex items-center gap-1.5 cursor-pointer">
             <input
               type="checkbox"
@@ -98,7 +114,7 @@ export function AdminRoomComposer({ sender, participants, onSend, disabled }: Ad
               disabled={isBroadcast}
               onChange={(e) => setAckRequired(e.target.checked)}
             />
-            <span className={isBroadcast ? 'opacity-50' : ''}>ack required</span>
+            <span className={isBroadcast ? 'opacity-50' : ''}>ack</span>
           </label>
           <label className="inline-flex items-center gap-1.5 cursor-pointer">
             <input
@@ -107,7 +123,7 @@ export function AdminRoomComposer({ sender, participants, onSend, disabled }: Ad
               disabled={isBroadcast}
               onChange={(e) => setReplyExpected(e.target.checked)}
             />
-            <span className={isBroadcast ? 'opacity-50' : ''}>reply expected</span>
+            <span className={isBroadcast ? 'opacity-50' : ''}>reply</span>
           </label>
           <label className="inline-flex items-center gap-1.5 cursor-pointer">
             <input
@@ -116,16 +132,23 @@ export function AdminRoomComposer({ sender, participants, onSend, disabled }: Ad
               disabled={isBroadcast}
               onChange={(e) => setInterrupt(e.target.checked)}
             />
-            <span className={isBroadcast ? 'opacity-50' : ''}>interrupt first</span>
+            <span className={isBroadcast ? 'opacity-50' : ''}>interrupt</span>
           </label>
-          {isBroadcast ? (
-            <span className="text-amber-600">broadcasts are informational only</span>
+          
+          <div className="h-4 w-px bg-muted mx-1" />
+
+          {transportUnavailable ? (
+            <span className="text-red-600 font-bold uppercase tracking-tighter animate-pulse flex items-center gap-1">
+              <ZapOff className="w-3 h-3" /> Transport Unavailable
+            </span>
+          ) : isBroadcast ? (
+            <span className="text-amber-600/70 italic">informational only</span>
           ) : replyExpected ? (
-            <span className="text-amber-600">reply will create a direct obligation</span>
+            <span className="text-amber-600">reply obligation</span>
           ) : ackRequired ? (
-            <span className="text-amber-600">ack will create a direct obligation</span>
+            <span className="text-amber-600">ack obligation</span>
           ) : interrupt ? (
-            <span className="text-amber-600">relay sends Escape before the message</span>
+            <span className="text-amber-600">relay escape first</span>
           ) : null}
         </div>
         <Button

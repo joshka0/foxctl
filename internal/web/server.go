@@ -488,6 +488,8 @@ func (s *Server) Handler() http.Handler {
 
 	// --- Mailbox (Phase 11) ---
 	apiMux.HandleFunc("/api/mailbox", api.MailboxListHandler(s.cfg, s.log))
+	apiMux.HandleFunc("/api/mux/panes", api.MuxPanesHandler(s.cfg, s.log))
+	apiMux.HandleFunc("/api/mux/read", api.MuxReadHandler(s.cfg, s.log))
 	apiMux.HandleFunc("/api/rooms", api.RoomsListHandler(s.cfg, s.log))
 	apiMux.HandleFunc("/api/rooms/", api.RoomDetailHandler(s.cfg, s.log, s.sseHub))
 

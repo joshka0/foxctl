@@ -1,28 +1,33 @@
 ---
 name: agentctl-room
-description: "Durable multi-agent room coordination with shared chat, direct requests, actionable inboxes, plugin-backed zellij/tmux relay, room tasks, and a central room loop that broadcasts task transitions."
+description: "Durable multi-agent room coordination with transport-first participant delivery, explicit participant state, optional tmux/zellij viewers, room tasks, and a central room loop."
 ---
 
 ## What I do
 
 - Keep a shared room timeline durable in `agentctl`, not trapped in pane scrollback.
-- Relay room messages into `tmux` or `zellij` panes.
+- Deliver room messages through agentctl-owned participant transport first.
+- Treat `tmux` and `zellij` as optional viewers and manual consoles, not the canonical room transport.
 - Track room-scoped tasks and broadcast completion/status changes to participants.
 
 ## When to use me
 
 - More than two agents need the same shared conversation.
-- You want a central chat room with live terminal fanout.
+- You want a central chat room with durable delivery independent of whether a mux viewer is attached.
 - You want shared todos visible to everyone in the room.
 - You want task completion to be announced automatically.
 
 ## Mental model
 
 - `agentctl room` is the source of truth.
-- `room send` writes durable chat messages and (by default) live-relays to mux panes so targets see the line in their terminal.
+- `room send` writes durable chat messages and triggers participant transport first; mux viewer delivery is secondary.
 - **`room send` routing:** prefer **`--to <participant-id>`** for anything meant for **one** agent so relay and inbox routing stay unambiguous; omit `--to` only when you **intentionally** broadcast to everyone else in the room.
 - **`room send` identity:** prefer **`--sender <your-participant-id>`** whenever the shell is not clearly bound to a mux pane (running outside tmux/zellij, scripts, or MCP); when you are inside the correct pane, sender can be omitted because agentctl infers it.
 - `room send --to <participant>` writes a direct room request instead of a broadcast.
+- the `gui-agent` `Term` surface is a room control plane, not a browser transport:
+  - PTY preview is read-only presentation
+  - direct/broadcast sends still go through room transport
+  - reminder creation/cancel is a durable room action, not a browser timer
 - `room ack` marks a specific room message as acknowledged.
 - `room resolve` lets the coordinator clear stale room messages once they have been handled out-of-band, and it resolves reminder chains by the original request id.
 - `room inbox` shows actionable direct requests and pending ack/reply work for one participant.
@@ -32,23 +37,33 @@ description: "Durable multi-agent room coordination with shared chat, direct req
 - `room status --verbose` includes richer top-entry detail for debugging without making the default coordinator view noisy.
 - `room coordinator set` transfers coordinator ownership to another room participant.
 - `room send --to @coordinator` resolves to the current coordinator without hard-coding an actor id.
-- `room relay` mirrors room messages into terminal panes (delivery includes a trailing newline / submit so agents see the instruction without a separate key gesture).
-- `room task assign`, `room task claim`, `room task complete`, and other task transitions persist first, then **fan out to mux panes by default** (same relay path as `room loop`). Use `room task --no-live-relay ...` when a long-running `room loop` / `room relay` already delivers messages so you do not double-deliver.
-- `room send` runs inside tmux/zellij still runs a mux “submit” on the **sender’s** pane by default so the shell/agent composer finishes the line; use `--no-mux-submit` to skip that.
+- `room relay` mirrors room messages into terminal panes when you want a viewer layer, but room transport no longer depends on viewer attachment.
+- `room task assign`, `room task claim`, `room task complete`, and other task transitions persist first, then use the same transport-first relay path as `room loop`.
+- `room send` inside tmux/zellij may still use a sender-pane submit convenience when sender identity is inferred from the current pane; when you pass an explicit `--sender`, agentctl skips that local mux-submit hook by default.
 - `room interview` runs a durable round-robin clarification loop inside the room.
 - `room epic`, `room milestone`, `room story`, and `room log` give the room an agile-shaped long-running delivery structure.
 - `room epic resume` and `room epic next` give that agile layer a resumable continuity surface.
 - when that agile layer is the main workflow, explicitly use `agentctl-room-agile` instead of relying on this broader room skill alone.
 - `room remind` schedules bounded durable follow-ups for direct requests.
+- `room remind` is first-class in the API / GUI too:
+  - use the same request body as the original request being followed up on
+  - choose the reminder recipient explicitly
+  - treat the reminder as loop-owned follow-up, not a second ad hoc chat thread
 - `room task` links shared tasks to the room.
 - `room loop` runs the central coordination loop:
-  - relay new messages
+  - trigger participant delivery for new messages
   - watch room tasks
   - broadcast task status changes back into the room
   - nudge stale direct requests and stale claimed tasks with reminder pulses
   - nudge the coordinator when unresolved work still needs oversight
 
 Do not rely on scrollback as canonical history. The room log is canonical.
+
+Membership rule:
+
+- room-aware startup context is not enough by itself
+- a pane is only a room participant if `room status` shows it
+- if a pane has room env vars or a startup note but is missing from `room status`, explicitly `room join` it or repair the binding with `room rebind`
 
 ## Operating contract
 
@@ -64,6 +79,7 @@ When you are working inside an active room, follow this behavior by default:
 - Use `room send --to @coordinator` when you need escalation, reassignment, or a decision from the coordinator.
 - Do not duplicate work on a task that is already claimed unless the coordinator explicitly reassigns or reclaims it.
 - Treat the room timeline as the durable audit trail; use direct room messages for requests, not ad hoc pane-only chat.
+- Treat participant transport state as distinct from mux viewer state. A named pane or session does not prove a live participant runtime.
 
 Role expectations:
 
@@ -81,9 +97,10 @@ Role expectations:
 
 Live-pane behavior:
 
-- Prefer **`room send`**, **`room task`**, and **`room relay` / `room loop`**: they inject text and an implicit submit (Enter/newline) appropriate for the target surface.
+- Prefer **`room send`**, **`room task`**, and **`room relay` / `room loop`**: they deliver through participant transport first and choose the provider-appropriate submit behavior for the target.
+- wrapped panes export canonical participant identity into the child process, so provider replies should use the participant id (for example `codex-a`) instead of a raw mux pane id.
 - Do **not** treat a hidden `mux submit` command as part of the normal workflow; it exists only as a legacy escape hatch.
-- If you are not using room relay/loop, run `agentctl room relay <room>` or `agentctl room loop <room>` so participants get terminal delivery.
+- If you are using tmux/zellij only as a viewer, the room still works. Use `room relay` / `room loop` when you want live pane visibility layered on top of the durable room.
 
 Interview protocol:
 
@@ -110,15 +127,17 @@ MCP exposure:
 Startup injection:
 
 - when a tmux pane is created with `agentctl mux create --agent ... --room-id <room-id>` and direct room access, agentctl injects a lightweight startup prompt into that pane
+- those panes are wrapped by `agentctl pane serve`, auto-register participant transport, and expose viewer metadata separately from room membership
 - the prompt tells the agent to read `agentctl-tmux` and `agentctl-room`, then start with `room status`, `room inbox`, and `room task list` for the attached room
+- if that startup check still shows only the coordinator or omits the expected participant, stop and fix membership first with `room join` / `room rebind` before assuming relay will work
 
 Source-panel agent creation:
 
 - when an agent is spawned with `--room-id <room-id>` and `--spawn-in-pane`, agentctl creates a dedicated mux pane in a room-scoped session (e.g., `room-<room-id>` for tmux) and runs the agent live in that pane
-- the spawned agent is automatically joined as a room member with pane binding metadata so the room relay can route messages to it
+- the spawned agent is automatically joined as a room member and registers transport metadata so room delivery does not rely on that pane remaining attached
 - agents in source panes run `agentctl agent run <agent-id>` instead of just `agentctl agent watch`, so users can watch agents work together in a shared tmux session
 - `room task assign --provision-pane` auto-creates a mux pane for the assignee when they don't already have one; use `--pane-agent codex` or `--pane-agent claude` to choose the agent CLI
-- the room loop and room relay deliver messages to source panes the same way as any room member with pane bindings
+- the room loop and room relay deliver messages to source panes the same way as any other transport-registered room participant
 
 ## Default room workflow
 
@@ -210,6 +229,15 @@ agentctl room remind add <room-id> <participant> "Check MR !26 and report status
 agentctl room remind list <room-id>
 agentctl room remind cancel <room-id> <reminder-id>
 ```
+
+For room-wide manual submit / interrupt across room members, use:
+
+```bash
+agentctl mux submit-all --room <room-id> --workspace .
+agentctl mux interrupt-all --room <room-id> --workspace .
+```
+
+These are viewer/control conveniences layered on top of canonical room participants. They should target canonical room participants, not raw mux ids.
 
 ## Task note format
 
@@ -366,6 +394,9 @@ agentctl room join alpha --current --role <room-role>
 - Use `--to <participant>` plus `--reply-expected` for direct asks.
 - Use `--to <participant>` plus `--ack-required` when you only need confirmation.
 - Use `room inbox` as the actionable queue for each participant; it is not a full archive.
+- Use `room relay` when you only need room-message fanout into panes/viewers.
+- Use `room loop` when you need reminders, stale-reply nudges, coordinator pulses, or task-state broadcasts in addition to message fanout.
+- If a room is using `room remind` or coordinator stale detection, `room loop` must be running; `room relay` alone is not enough.
 - `room join <room-id> --current` registers the current pane without hand-writing the id.
 - `room rebind <room-id> <actor-id> --backend <tmux|zellij> --session <session> --pane-id <pane>`
   repairs a moved pane binding for an existing participant.

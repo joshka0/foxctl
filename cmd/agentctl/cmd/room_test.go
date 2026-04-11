@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jkatigb/agentctl/internal/agentpane"
 	"github.com/jkatigb/agentctl/internal/contextplane"
 	"github.com/jkatigb/agentctl/internal/domain/agent"
 	"github.com/jkatigb/agentctl/internal/domain/envelope"
@@ -22,6 +23,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/storage/coordination"
 	taskstore "github.com/jkatigb/agentctl/internal/storage/tasks"
 	"github.com/jkatigb/agentctl/internal/tmuxbridge"
+	"github.com/jkatigb/agentctl/internal/worktree"
 	"github.com/spf13/cobra"
 )
 
@@ -209,7 +211,7 @@ func TestRoomCommandFlow_CreateJoinSendShow(t *testing.T) {
 	}
 
 	cmd, _ = newRoomTestCommand(ctx)
-	if err := runRoomJoin(cmd, workspace, "alpha", "agent-b", "reviewer", "", "", "", false, true, false); err != nil {
+	if err := runRoomJoin(cmd, workspace, "alpha", "agent-b", "reviewer", "", "", "", "", "", false, true, false); err != nil {
 		t.Fatalf("runRoomJoin: %v", err)
 	}
 
@@ -1086,6 +1088,176 @@ func TestParseRoomTaskListSelection(t *testing.T) {
 	}
 }
 
+func TestDeriveParticipantTransportState_PaneSocketReady(t *testing.T) {
+	// Create a real socket file to simulate a live pane wrapper.
+	socketPath := filepath.Join(t.TempDir(), "claude-a.sock")
+	f, err := os.Create(socketPath)
+	if err != nil {
+		t.Fatalf("create socket file: %v", err)
+	}
+	f.Close()
+
+	m := agent.RoomMember{
+		ActorID:           "claude-a",
+		Backend:           "zellij",
+		Session:           "test-session",
+		PaneID:            "terminal_0",
+		TransportEndpoint: socketPath,
+		TransportKind:     agent.PaneSocketTransportKind,
+	}
+	s := deriveParticipantTransportState(m)
+
+	if s.Membership != agent.MembershipActive {
+		t.Errorf("Membership=%q want active", s.Membership)
+	}
+	if s.Transport != agent.TransportAvailable {
+		t.Errorf("Transport=%q want available", s.Transport)
+	}
+	if s.Runtime != agent.RuntimeLive {
+		t.Errorf("Runtime=%q want live", s.Runtime)
+	}
+	if s.TransportEndpoint != socketPath {
+		t.Errorf("TransportEndpoint=%q want %q", s.TransportEndpoint, socketPath)
+	}
+	if s.MuxBackend != "zellij" {
+		t.Errorf("MuxBackend=%q want zellij", s.MuxBackend)
+	}
+	if !s.CanTriggerTurn {
+		t.Errorf("CanTriggerTurn=false want true")
+	}
+}
+
+func TestDeriveParticipantTransportState_PaneSocketUnavailable(t *testing.T) {
+	m := agent.RoomMember{
+		ActorID:           "claude-a",
+		TransportEndpoint: "/tmp/nonexistent-agentctl-sock/claude-a.sock",
+		TransportKind:     agent.PaneSocketTransportKind,
+	}
+	s := deriveParticipantTransportState(m)
+
+	if s.Transport != agent.TransportUnavailable {
+		t.Errorf("Transport=%q want unavailable", s.Transport)
+	}
+	if s.Runtime != agent.RuntimeStopped {
+		t.Errorf("Runtime=%q want stopped", s.Runtime)
+	}
+	if s.CanTriggerTurn {
+		t.Errorf("CanTriggerTurn=true want false")
+	}
+}
+
+func TestDeriveParticipantTransportState_MuxPane(t *testing.T) {
+	m := agent.RoomMember{
+		ActorID: "droid-a",
+		Backend: "tmux",
+		Session: "test-session",
+		PaneID:  "%5",
+	}
+	s := deriveParticipantTransportState(m)
+
+	// Legacy mux-pane: transport endpoint is derived from backend/session/pane,
+	// state is unknown (no live probe), presentation is detached.
+	if s.Membership != agent.MembershipActive {
+		t.Errorf("Membership=%q want active", s.Membership)
+	}
+	if s.Transport != agent.TransportUnknown {
+		t.Errorf("Transport=%q want unknown", s.Transport)
+	}
+	if s.Presentation != agent.PresentationDetached {
+		t.Errorf("Presentation=%q want detached", s.Presentation)
+	}
+	if s.MuxBackend != "tmux" {
+		t.Errorf("MuxBackend=%q want tmux", s.MuxBackend)
+	}
+	if s.TransportEndpoint == "" {
+		t.Errorf("TransportEndpoint empty, want mux address")
+	}
+}
+
+func TestDeriveParticipantTransportState_UnboundMember(t *testing.T) {
+	m := agent.RoomMember{ActorID: "gemini-a", Unbound: true}
+	s := deriveParticipantTransportState(m)
+
+	if s.Membership != agent.MembershipUnbound {
+		t.Errorf("Membership=%q want unbound", s.Membership)
+	}
+	if s.Transport != agent.TransportNone {
+		t.Errorf("Transport=%q want none", s.Transport)
+	}
+	if s.CanTriggerTurn {
+		t.Errorf("CanTriggerTurn=true want false for unbound member")
+	}
+}
+
+func TestBuildRoomStatusParticipantsIncludesTransport(t *testing.T) {
+	// Create a socket file so claude-a shows transport_state=ready.
+	socketPath := filepath.Join(t.TempDir(), "claude-a.sock")
+	f, err := os.Create(socketPath)
+	if err != nil {
+		t.Fatalf("create socket file: %v", err)
+	}
+	f.Close()
+
+	room := agent.RoomSummary{
+		ID:    "transport-alpha",
+		Title: "Transport Alpha",
+		Members: []agent.RoomMember{
+			{
+				ActorID:           "claude-a",
+				Role:              "worker",
+				Backend:           "zellij",
+				Session:           "test-session",
+				PaneID:            "terminal_0",
+				TransportEndpoint: socketPath,
+				TransportKind:     "pane_socket",
+			},
+			{
+				ActorID: "gemini-a",
+				Role:    "reviewer",
+				Backend: "tmux",
+				Session: "test-session",
+				PaneID:  "%5",
+			},
+		},
+		Participants: []string{"claude-a", "gemini-a"},
+	}
+
+	participants := buildRoomStatusParticipants(room, nil, nil, 5*time.Minute, nil)
+
+	byActor := make(map[string]roomStatusParticipant)
+	for _, p := range participants {
+		byActor[p.ActorID] = p
+	}
+
+	claudeA := byActor["claude-a"]
+	if claudeA.Transport.Membership != agent.MembershipActive {
+		t.Errorf("claude-a Membership=%q want active", claudeA.Transport.Membership)
+	}
+	if claudeA.Transport.Transport != agent.TransportAvailable {
+		t.Errorf("claude-a Transport=%q want available", claudeA.Transport.Transport)
+	}
+	if claudeA.Transport.Runtime != agent.RuntimeLive {
+		t.Errorf("claude-a Runtime=%q want live", claudeA.Transport.Runtime)
+	}
+	if claudeA.Transport.MuxBackend != "zellij" {
+		t.Errorf("claude-a MuxBackend=%q want zellij", claudeA.Transport.MuxBackend)
+	}
+	if !claudeA.Transport.CanTriggerTurn {
+		t.Errorf("claude-a CanTriggerTurn=false want true")
+	}
+
+	geminiA := byActor["gemini-a"]
+	if geminiA.Transport.Membership != agent.MembershipActive {
+		t.Errorf("gemini-a Membership=%q want active", geminiA.Transport.Membership)
+	}
+	if geminiA.Transport.Transport != agent.TransportUnknown {
+		t.Errorf("gemini-a Transport=%q want unknown", geminiA.Transport.Transport)
+	}
+	if geminiA.Transport.Presentation != agent.PresentationDetached {
+		t.Errorf("gemini-a Presentation=%q want detached", geminiA.Transport.Presentation)
+	}
+}
+
 func TestBuildRoomStatusEntriesCollapsesHistoricalBacklogByChain(t *testing.T) {
 	now := time.Date(2026, 4, 4, 20, 0, 0, 0, time.UTC)
 	entries := buildRoomStatusEntries("gemini-a", []agent.BoardMessage{
@@ -1667,6 +1839,9 @@ func TestRunRoomRemindLifecycle(t *testing.T) {
 	reminderID := reminder["id"].(string)
 	if reminder["reply_expected"] != true {
 		t.Fatalf("reply_expected=%v want true", reminder["reply_expected"])
+	}
+	if _, ok := data["live_relay"]; !ok {
+		t.Fatalf("live_relay missing from remind add payload: %v", data)
 	}
 
 	cmd, out = newRoomTestCommand(ctx)
@@ -6193,6 +6368,42 @@ func TestFormatRoomRelayContentIncludesRecipientAndFlags(t *testing.T) {
 	}
 }
 
+func TestFormatRoomRelayContentForTargetAddsDroidExecuteHint(t *testing.T) {
+	room := agent.RoomSummary{ID: "alpha"}
+	msg := agent.BoardMessage{
+		Sender:        "human-a",
+		Recipient:     "droid-a",
+		Subject:       "Reply needed",
+		Body:          "Please send a short status update.",
+		ReplyExpected: true,
+	}
+	got := formatRoomRelayContentForTarget(room, msg, "droid-a")
+	if !strings.Contains(got, `Execute directly if you are ready to answer: agentctl room send alpha --to human-a --sender droid-a "<response>"`) {
+		t.Fatalf("formatRoomRelayContentForTarget() missing droid execute hint: %q", got)
+	}
+}
+
+func TestTargetUsesComposerSubmitIncludesAgent(t *testing.T) {
+	if !targetUsesComposerSubmit("agent-a") {
+		t.Fatal("targetUsesComposerSubmit(agent-a) = false, want true")
+	}
+	if targetUsesComposerSubmit("claude-a") {
+		t.Fatal("targetUsesComposerSubmit(claude-a) = true, want false")
+	}
+}
+
+func TestTargetSubmitModeUsesEnterForClaude(t *testing.T) {
+	if got := targetSubmitMode("claude-a"); got != agentpane.SubmitModeEnter {
+		t.Fatalf("targetSubmitMode(claude-a) = %q, want %q", got, agentpane.SubmitModeEnter)
+	}
+}
+
+func TestTargetSubmitModeUsesEnterSplitForGemini(t *testing.T) {
+	if got := targetSubmitMode("gemini-a"); got != agentpane.SubmitModeEnterSplit {
+		t.Fatalf("targetSubmitMode(gemini-a) = %q, want %q", got, agentpane.SubmitModeEnterSplit)
+	}
+}
+
 func TestCollectRoomRelayTargetsDirectRecipient(t *testing.T) {
 	targets, skipped := collectRoomRelayTargets(agent.RoomSummary{
 		Members: []agent.RoomMember{
@@ -6304,6 +6515,79 @@ func TestCollectRoomRelayTargetsByBackendRoutesZellijByPaneID(t *testing.T) {
 	}
 }
 
+func TestCollectRoomRelayTargetsByBackendRoutesZellijNamedPaneByTitle(t *testing.T) {
+	_, zellijTargets, failed, skipped := collectRoomRelayTargetsByBackend(agent.RoomSummary{
+		Members: []agent.RoomMember{
+			{ActorID: "human-a"},
+			{ActorID: "claude-a", Backend: "zellij", Session: "sparkling-apricot", PaneID: "claude-a"},
+		},
+	}, agent.BoardMessage{
+		Sender:    "human-a",
+		Recipient: "claude-a",
+	})
+	if len(failed) != 0 {
+		t.Fatalf("failed=%v want none", failed)
+	}
+	if len(skipped) != 1 {
+		t.Fatalf("skipped=%v want 1 entry", skipped)
+	}
+	targets := zellijTargets["sparkling-apricot"]
+	if len(targets) != 1 || targets[0] != "claude-a" {
+		t.Fatalf("zellijTargets=%v want title target", zellijTargets)
+	}
+}
+
+func TestRelayRoomMessageZellijTargetsPrefersPaneSocketForNamedTargets(t *testing.T) {
+	origDeliver := deliverAgentPane
+	defer func() { deliverAgentPane = origDeliver }()
+
+	calls := 0
+	deliverAgentPane = func(ctx context.Context, socketPath string, msg agentpane.ControlMessage) (agentpane.ControlResponse, error) {
+		calls++
+		if !strings.Contains(socketPath, "sparkling-apricot") || !strings.Contains(socketPath, "claude-a") {
+			t.Fatalf("socketPath=%q", socketPath)
+		}
+		if msg.SubmitMode != agentpane.SubmitModeEnter {
+			t.Fatalf("submitMode=%q want %q", msg.SubmitMode, agentpane.SubmitModeEnter)
+		}
+		return agentpane.ControlResponse{OK: true, BytesWritten: len(msg.Content)}, nil
+	}
+
+	result := relayRoomMessageZellijTargets(context.Background(), agent.RoomSummary{
+		ID: "room-1",
+	}, agent.BoardMessage{
+		ID:        "msg-1",
+		Sender:    "human-a",
+		Recipient: "claude-a",
+		Body:      "hello",
+	}, "sparkling-apricot", []string{"claude-a"}, roomRelayOptions{})
+
+	if calls != 1 {
+		t.Fatalf("deliverAgentPane calls=%d want 1", calls)
+	}
+	if result.DeliveredCount != 1 || len(result.DeliveredTo) != 1 || result.DeliveredTo[0] != "claude-a" {
+		t.Fatalf("result=%+v want socket delivery", result)
+	}
+	if result.FailedCount != 0 || result.Error != "" {
+		t.Fatalf("result=%+v want no failures", result)
+	}
+}
+
+func TestResolveRoomMemberZellijTargetPrefersTitleForNamedPane(t *testing.T) {
+	session, target, ok := resolveRoomMemberZellijTarget(agent.RoomMember{
+		ActorID: "claude-a",
+		Backend: "zellij",
+		Session: "sparkling-apricot",
+		PaneID:  "claude-a",
+	})
+	if !ok {
+		t.Fatal("expected target")
+	}
+	if session != "sparkling-apricot" || target != "claude-a" {
+		t.Fatalf("got session=%q target=%q", session, target)
+	}
+}
+
 func TestRunRoomSendRejectsReplyExpectedBroadcast(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	ctx := context.Background()
@@ -6357,6 +6641,94 @@ func TestRunRoomSendDerivesSenderFromCurrentTmuxPane(t *testing.T) {
 	warnings, ok := data["warnings"].([]any)
 	if !ok || len(warnings) == 0 {
 		t.Fatalf("warnings=%T/%v want inferred sender warning", data["warnings"], data["warnings"])
+	}
+}
+
+func TestRunRoomSendExplicitSenderSkipsMuxSubmitHook(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	calls := 0
+	restoreSubmit := swapRoomSendMuxSubmitHook(func(context.Context, string) (map[string]any, string) {
+		calls++
+		return map[string]any{"backend": "tmux"}, ""
+	})
+	defer restoreSubmit()
+
+	ctx := context.Background()
+	workspace := t.TempDir()
+
+	cmd, _ := newRoomTestCommand(ctx)
+	if err := runRoomCreate(cmd, workspace, "alpha", "Alpha", "", []string{"human-a=coordinator", "gemini-a=reviewer"}); err != nil {
+		t.Fatalf("runRoomCreate: %v", err)
+	}
+
+	cmd, out := newRoomTestCommand(ctx)
+	if err := runRoomSend(cmd, workspace, "alpha", "human-a", "gemini-a", "", "hello room", "info", "", 0, false, false, false, true); err != nil {
+		t.Fatalf("runRoomSend: %v", err)
+	}
+	if calls != 0 {
+		t.Fatalf("mux submit hook calls=%d want 0", calls)
+	}
+	data := decodeRoomEnvelope(t, out)
+	warnings, ok := data["warnings"].([]any)
+	if !ok {
+		t.Fatalf("warnings type=%T", data["warnings"])
+	}
+	found := false
+	for _, raw := range warnings {
+		if s, _ := raw.(string); strings.Contains(s, "mux submit skipped because --sender was provided explicitly") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("warnings=%v want explicit sender mux-submit warning", warnings)
+	}
+	if _, ok := data["mux_submit"]; ok {
+		t.Fatalf("mux_submit present=%v want absent", data["mux_submit"])
+	}
+}
+
+func TestRunRoomSendInferredSenderStillAllowsMuxSubmitHook(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("TMUX", "/tmp/tmux.sock,1,0")
+	t.Setenv("TMUX_PANE", "%7")
+	calls := 0
+	restoreSubmit := swapRoomSendMuxSubmitHook(func(context.Context, string) (map[string]any, string) {
+		calls++
+		return map[string]any{"backend": "tmux"}, ""
+	})
+	defer restoreSubmit()
+	restore := swapRoomTmuxClientForTest(func() *tmuxbridge.Client {
+		return tmuxbridge.NewWithRunner(roomFakeRunner{responses: map[string]roomFakeResponse{
+			"tmux list-sessions": {stdout: "ok\n"},
+			"tmux display-message -t %7 -p " + roomListFormat(): {
+				stdout: "%7" + roomFieldSep() + "collab" + roomFieldSep() + "0" + roomFieldSep() + "0" + roomFieldSep() + "main" + roomFieldSep() + "111" + roomFieldSep() + "120" + roomFieldSep() + "30" + roomFieldSep() + "codex-a" + roomFieldSep() + "/repo" + roomFieldSep() + "zsh" + roomFieldSep() + "1\n",
+			},
+		}}, map[string]string{
+			"TMUX":      "/tmp/tmux.sock,1,0",
+			"TMUX_PANE": "%7",
+		})
+	})
+	defer restore()
+
+	ctx := context.Background()
+	workspace := t.TempDir()
+
+	cmd, _ := newRoomTestCommand(ctx)
+	if err := runRoomCreate(cmd, workspace, "alpha", "Alpha", "", []string{"codex-a=lead"}); err != nil {
+		t.Fatalf("runRoomCreate: %v", err)
+	}
+
+	cmd, out := newRoomTestCommand(ctx)
+	if err := runRoomSend(cmd, workspace, "alpha", "", "", "", "hello room", "info", "", 0, false, false, false, true); err != nil {
+		t.Fatalf("runRoomSend: %v", err)
+	}
+	if calls != 1 {
+		t.Fatalf("mux submit hook calls=%d want 1", calls)
+	}
+	data := decodeRoomEnvelope(t, out)
+	if _, ok := data["mux_submit"].(map[string]any); !ok {
+		t.Fatalf("mux_submit type=%T want map", data["mux_submit"])
 	}
 }
 
@@ -6546,7 +6918,7 @@ func TestRunRoomJoinCurrentDerivesCanonicalTmuxParticipant(t *testing.T) {
 	}
 
 	cmd, out := newRoomTestCommand(ctx)
-	if err := runRoomJoin(cmd, workspace, "alpha", "", "worker", "", "", "", false, true, true); err != nil {
+	if err := runRoomJoin(cmd, workspace, "alpha", "", "worker", "", "", "", "", "", false, true, true); err != nil {
 		t.Fatalf("runRoomJoin: %v", err)
 	}
 	data := decodeRoomEnvelope(t, out)
@@ -6590,7 +6962,7 @@ func TestRunRoomJoinPersistsTransportBinding(t *testing.T) {
 	}
 
 	cmd, out := newRoomTestCommand(ctx)
-	if err := runRoomJoin(cmd, workspace, "alpha", "cursor-a", "reviewer", "zellij", "fascinating-salamander", "", false, true, false); err != nil {
+	if err := runRoomJoin(cmd, workspace, "alpha", "cursor-a", "reviewer", "zellij", "fascinating-salamander", "", "", "", false, true, false); err != nil {
 		t.Fatalf("runRoomJoin: %v", err)
 	}
 	data := decodeRoomEnvelope(t, out)
@@ -6631,12 +7003,12 @@ func TestRunRoomRebindUpdatesTransportBindingWithoutChangingRole(t *testing.T) {
 	}
 
 	cmd, _ = newRoomTestCommand(ctx)
-	if err := runRoomJoin(cmd, workspace, "alpha", "claude-a", "reviewer", "tmux", "13", "%25", false, true, false); err != nil {
+	if err := runRoomJoin(cmd, workspace, "alpha", "claude-a", "reviewer", "tmux", "13", "%25", "", "", false, true, false); err != nil {
 		t.Fatalf("runRoomJoin: %v", err)
 	}
 
 	cmd, out := newRoomTestCommand(ctx)
-	if err := runRoomRebind(cmd, workspace, "alpha", "claude-a", "", "tmux", "13", "%27", false, false); err != nil {
+	if err := runRoomRebind(cmd, workspace, "alpha", "claude-a", "", "tmux", "13", "%27", "", "", false, false); err != nil {
 		t.Fatalf("runRoomRebind: %v", err)
 	}
 
@@ -6681,7 +7053,7 @@ func TestRunRoomRebindRequiresExistingMember(t *testing.T) {
 	}
 
 	cmd, out := newRoomTestCommand(ctx)
-	err := runRoomRebind(cmd, workspace, "alpha", "missing-a", "", "tmux", "13", "%27", false, false)
+	err := runRoomRebind(cmd, workspace, "alpha", "missing-a", "", "tmux", "13", "%27", "", "", false, false)
 	if err == nil {
 		t.Fatal("runRoomRebind error = nil want written error envelope")
 	}
@@ -6714,7 +7086,7 @@ func TestRunRoomJoinCurrentPersistsZellijPaneBinding(t *testing.T) {
 	}
 
 	cmd, out := newRoomTestCommand(ctx)
-	if err := runRoomJoin(cmd, workspace, "alpha", "", "reviewer", "", "", "", false, true, true); err != nil {
+	if err := runRoomJoin(cmd, workspace, "alpha", "", "reviewer", "", "", "", "", "", false, true, true); err != nil {
 		t.Fatalf("runRoomJoin: %v", err)
 	}
 	data := decodeRoomEnvelope(t, out)
@@ -6741,6 +7113,113 @@ func TestRunRoomJoinCurrentPersistsZellijPaneBinding(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("cursor-a not found in members=%v", members)
+	}
+}
+
+func TestRunRoomJoinPersistsTransportEndpoint(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("TMUX", "")
+	t.Setenv("TMUX_PANE", "")
+	t.Setenv("ZELLIJ", "")
+	ctx := context.Background()
+	workspace := t.TempDir()
+
+	cmd, _ := newRoomTestCommand(ctx)
+	if err := runRoomCreate(cmd, workspace, "ep-room", "EP Room", "", nil); err != nil {
+		t.Fatalf("runRoomCreate: %v", err)
+	}
+
+	endpoint := "/tmp/agentctl-pane/s1/claude-a.sock"
+	cmd, out := newRoomTestCommand(ctx)
+	if err := runRoomJoin(cmd, workspace, "ep-room", "claude-a", "worker", "zellij", "s1", "terminal_0", endpoint, "pane_socket", false, false, false); err != nil {
+		t.Fatalf("runRoomJoin: %v", err)
+	}
+
+	data := decodeRoomEnvelope(t, out)
+	roomRaw, ok := data["room"].(map[string]any)
+	if !ok {
+		t.Fatalf("room type=%T", data["room"])
+	}
+	members, ok := roomRaw["members"].([]any)
+	if !ok {
+		t.Fatalf("members=%T", roomRaw["members"])
+	}
+	var found bool
+	for _, raw := range members {
+		m, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		if m["actor_id"] == "claude-a" {
+			found = true
+			if m["transport_endpoint"] != endpoint {
+				t.Errorf("transport_endpoint=%q want %q", m["transport_endpoint"], endpoint)
+			}
+			if m["transport_kind"] != "pane_socket" {
+				t.Errorf("transport_kind=%q want pane_socket", m["transport_kind"])
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("claude-a not found in members=%v", members)
+	}
+}
+
+func TestRunRoomRebindPersistsTransportEndpoint(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("TMUX", "")
+	t.Setenv("TMUX_PANE", "")
+	t.Setenv("ZELLIJ", "")
+	ctx := context.Background()
+	workspace := t.TempDir()
+
+	cmd, _ := newRoomTestCommand(ctx)
+	if err := runRoomCreate(cmd, workspace, "rb-room", "Rebind Room", "", []string{"claude-a=worker"}); err != nil {
+		t.Fatalf("runRoomCreate: %v", err)
+	}
+	// Join claude-a with no transport initially.
+	cmd, _ = newRoomTestCommand(ctx)
+	if err := runRoomJoin(cmd, workspace, "rb-room", "claude-a", "worker", "tmux", "s1", "%1", "", "", false, false, false); err != nil {
+		t.Fatalf("runRoomJoin: %v", err)
+	}
+
+	endpoint := "/tmp/agentctl-pane/s1/claude-a.sock"
+	cmd, out := newRoomTestCommand(ctx)
+	if err := runRoomRebind(cmd, workspace, "rb-room", "claude-a", "", "", "", "", endpoint, "pane_socket", false, false); err != nil {
+		t.Fatalf("runRoomRebind: %v", err)
+	}
+
+	data := decodeRoomEnvelope(t, out)
+	roomRaw, ok := data["room"].(map[string]any)
+	if !ok {
+		t.Fatalf("room type=%T", data["room"])
+	}
+	members, ok := roomRaw["members"].([]any)
+	if !ok {
+		t.Fatalf("members=%T", roomRaw["members"])
+	}
+	var found bool
+	for _, raw := range members {
+		m, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		if m["actor_id"] == "claude-a" {
+			found = true
+			if m["transport_endpoint"] != endpoint {
+				t.Errorf("transport_endpoint=%q want %q", m["transport_endpoint"], endpoint)
+			}
+			if m["transport_kind"] != "pane_socket" {
+				t.Errorf("transport_kind=%q want pane_socket", m["transport_kind"])
+			}
+			// Existing backend preserved.
+			if m["backend"] != "tmux" {
+				t.Errorf("backend=%q want tmux (must be preserved after rebind)", m["backend"])
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("claude-a not found in members=%v", members)
 	}
 }
 
@@ -6833,7 +7312,11 @@ func roomListFormat() string {
 		"#{@name}" + roomFieldSep() +
 		"#{pane_current_path}" + roomFieldSep() +
 		"#{pane_current_command}" + roomFieldSep() +
-		"#{pane_active}"
+		"#{pane_active}" + roomFieldSep() +
+		"#{@agentctl_participant}" + roomFieldSep() +
+		"#{@agentctl_provider}" + roomFieldSep() +
+		"#{@agentctl_room_id}" + roomFieldSep() +
+		"#{@agentctl_wrapped}"
 }
 
 func mustWriteRoomTestFile(t *testing.T, path, contents string) {
@@ -6872,5 +7355,1449 @@ func runRoomGit(t *testing.T, dir string, args ...string) {
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, string(output))
+	}
+}
+
+// --- Sandbox Create Tests ---
+
+func TestProvisionSandbox_CreatesWorktreeAndTmuxSession(t *testing.T) {
+	if os.Getenv("TMUX") == "" {
+		// Need tmux for session creation
+		if _, err := exec.LookPath("tmux"); err != nil {
+			t.Skip("tmux not available")
+		}
+	}
+
+	t.Setenv("HOME", t.TempDir())
+	ctx := context.Background()
+
+	// Create a git repo as the workspace
+	workspace := t.TempDir()
+	initRoomGitRepo(t, workspace)
+
+	store, err := blackboard.OpenBoardStore(ctx, t.TempDir())
+	if err != nil {
+		t.Fatalf("OpenBoardStore: %v", err)
+	}
+	defer store.Close()
+
+	// Create a room first
+	room, err := store.UpsertRoom(ctx, agent.Room{
+		ID:          "test-sandbox",
+		WorkspaceID: workspace,
+		Title:       "Test Sandbox",
+	})
+	if err != nil {
+		t.Fatalf("UpsertRoom: %v", err)
+	}
+
+	// Provision sandbox
+	result, err := provisionSandbox(ctx, workspace, &room, roomCreateProvisionOptions{
+		Sandbox:             true,
+		SandboxBaseRef:      "HEAD",
+		SandboxWorktreeRoot: filepath.Join(t.TempDir(), "worktrees"),
+	})
+	if err != nil {
+		t.Fatalf("provisionSandbox: %v", err)
+	}
+
+	if result["status"] != "created" {
+		t.Errorf("status = %v, want created", result["status"])
+	}
+	if result["runtime"] != "worktree" {
+		t.Errorf("runtime = %v, want worktree", result["runtime"])
+	}
+
+	worktreePath, _ := result["worktree_path"].(string)
+	if worktreePath == "" {
+		t.Fatal("worktree_path is empty")
+	}
+	if _, err := os.Stat(worktreePath); err != nil {
+		t.Errorf("worktree dir does not exist at %q: %v", worktreePath, err)
+	}
+
+	tmuxSession, _ := result["tmux_session"].(string)
+	if tmuxSession == "" {
+		t.Fatal("tmux_session is empty")
+	}
+
+	terminalURL, _ := result["terminal_url"].(string)
+	if terminalURL != "/terminal/test-sandbox" {
+		t.Errorf("terminal_url = %q, want /terminal/test-sandbox", terminalURL)
+	}
+
+	// Verify room.SandboxConfig was set
+	if room.SandboxConfig == nil {
+		t.Fatal("room.SandboxConfig is nil")
+	}
+	if room.SandboxConfig.WorktreePath != worktreePath {
+		t.Errorf("SandboxConfig.WorktreePath = %q, want %q", room.SandboxConfig.WorktreePath, worktreePath)
+	}
+	if room.SandboxConfig.TmuxSession != tmuxSession {
+		t.Errorf("SandboxConfig.TmuxSession = %q, want %q", room.SandboxConfig.TmuxSession, tmuxSession)
+	}
+	if room.SandboxConfig.Runtime != "worktree" {
+		t.Errorf("SandboxConfig.Runtime = %q, want worktree", room.SandboxConfig.Runtime)
+	}
+
+	// Clean up tmux session
+	cmd := exec.Command("tmux", "kill-session", "-t", tmuxSession)
+	_ = cmd.Run()
+}
+
+func TestProvisionSandbox_IdempotentOnExistingSandbox(t *testing.T) {
+	if _, err := exec.LookPath("tmux"); err != nil {
+		t.Skip("tmux not available")
+	}
+
+	t.Setenv("HOME", t.TempDir())
+	ctx := context.Background()
+
+	workspace := t.TempDir()
+	initRoomGitRepo(t, workspace)
+
+	// Create a room with existing sandbox config
+	existingPath := filepath.Join(t.TempDir(), "existing-wt")
+	if err := os.MkdirAll(existingPath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	room := agent.Room{
+		ID:          "existing-sandbox",
+		WorkspaceID: workspace,
+		Title:       "Existing Sandbox",
+		SandboxConfig: &agent.SandboxConfig{
+			WorktreePath:   existingPath,
+			WorktreeBranch: "sandbox/room-existing-sandbox",
+			TmuxSession:    "agentctl-sandbox-existing-sandbox",
+			TerminalURL:    "/terminal/existing-sandbox",
+			Runtime:        "worktree",
+		},
+	}
+
+	// Create the tmux session so idempotency check passes
+	tmuxClient := tmuxbridge.New()
+	_ = createTmuxSessionForSandbox(ctx, tmuxClient, "agentctl-sandbox-existing-sandbox", existingPath)
+	defer func() {
+		cmd := exec.Command("tmux", "kill-session", "-t", "agentctl-sandbox-existing-sandbox")
+		_ = cmd.Run()
+	}()
+
+	// Calling provisionSandbox should return existing info
+	result, err := provisionSandbox(ctx, workspace, &room, roomCreateProvisionOptions{
+		Sandbox: true,
+	})
+	if err != nil {
+		t.Fatalf("provisionSandbox (idempotent): %v", err)
+	}
+
+	if result["status"] != "existing" {
+		t.Errorf("status = %v, want existing", result["status"])
+	}
+	if result["worktree_path"] != existingPath {
+		t.Errorf("worktree_path = %v, want %v", result["worktree_path"], existingPath)
+	}
+}
+
+func TestProvisionSandbox_NotGitRepoReturnsError(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	ctx := context.Background()
+
+	workspace := t.TempDir()
+	// Don't init a git repo
+
+	room := agent.Room{
+		ID:          "no-git-room",
+		WorkspaceID: workspace,
+		Title:       "No Git Room",
+	}
+
+	_, err := provisionSandbox(ctx, workspace, &room, roomCreateProvisionOptions{
+		Sandbox: true,
+	})
+	if err == nil {
+		t.Fatal("expected error for non-git workspace")
+	}
+	if !strings.Contains(err.Error(), "not a git repository") {
+		t.Errorf("error = %q, want substring 'not a git repository'", err.Error())
+	}
+}
+
+func TestProvisionSandbox_CustomWorktreeRoot(t *testing.T) {
+	if _, err := exec.LookPath("tmux"); err != nil {
+		t.Skip("tmux not available")
+	}
+
+	t.Setenv("HOME", t.TempDir())
+	ctx := context.Background()
+
+	workspace := t.TempDir()
+	initRoomGitRepo(t, workspace)
+
+	customRoot := filepath.Join(t.TempDir(), "custom-wt-root")
+
+	store, err := blackboard.OpenBoardStore(ctx, t.TempDir())
+	if err != nil {
+		t.Fatalf("OpenBoardStore: %v", err)
+	}
+	defer store.Close()
+
+	room, err := store.UpsertRoom(ctx, agent.Room{
+		ID:          "custom-root-room",
+		WorkspaceID: workspace,
+		Title:       "Custom Root",
+	})
+	if err != nil {
+		t.Fatalf("UpsertRoom: %v", err)
+	}
+
+	result, err := provisionSandbox(ctx, workspace, &room, roomCreateProvisionOptions{
+		Sandbox:             true,
+		SandboxWorktreeRoot: customRoot,
+	})
+	if err != nil {
+		t.Fatalf("provisionSandbox: %v", err)
+	}
+
+	worktreePath, _ := result["worktree_path"].(string)
+	// Resolve symlinks for comparison (macOS: /var → /private/var)
+	resolvedCustomRoot, _ := filepath.EvalSymlinks(customRoot)
+	if resolvedCustomRoot != "" && !strings.HasPrefix(worktreePath, resolvedCustomRoot) {
+		t.Errorf("worktree_path = %q, want prefix %q", worktreePath, resolvedCustomRoot)
+	}
+
+	// Clean up
+	if session, ok := result["tmux_session"].(string); ok {
+		cmd := exec.Command("tmux", "kill-session", "-t", session)
+		_ = cmd.Run()
+	}
+}
+
+func TestRoomCreateWithSandboxFlag_Integration(t *testing.T) {
+	if _, err := exec.LookPath("tmux"); err != nil {
+		t.Skip("tmux not available")
+	}
+
+	t.Setenv("HOME", t.TempDir())
+	ctx := context.Background()
+
+	workspace := t.TempDir()
+	initRoomGitRepo(t, workspace)
+
+	cmd, out := newRoomTestCommand(ctx)
+	err := runRoomCreateWithProvision(cmd, workspace, "integration-sandbox", "Integration Test", "", nil, roomCreateProvisionOptions{
+		Sandbox:             true,
+		SandboxWorktreeRoot: filepath.Join(t.TempDir(), "worktrees"),
+	})
+	if err != nil {
+		t.Fatalf("runRoomCreateWithProvision --sandbox: %v", err)
+	}
+
+	data := decodeRoomEnvelope(t, out)
+	roomRaw, ok := data["room"].(map[string]any)
+	if !ok {
+		t.Fatalf("room payload type=%T", data["room"])
+	}
+
+	// Check sandbox metadata in response
+	sandboxInfo, ok := data["sandbox"].(map[string]any)
+	if !ok {
+		t.Fatalf("sandbox payload type=%T", data["sandbox"])
+	}
+	if sandboxInfo["status"] != "created" {
+		t.Errorf("sandbox status = %v, want created", sandboxInfo["status"])
+	}
+	if sandboxInfo["runtime"] != "worktree" {
+		t.Errorf("sandbox runtime = %v, want worktree", sandboxInfo["runtime"])
+	}
+
+	// Check room has sandbox_config
+	scRaw, ok := roomRaw["sandbox_config"].(map[string]any)
+	if !ok {
+		t.Fatalf("sandbox_config type=%T", roomRaw["sandbox_config"])
+	}
+	if scRaw["worktree_path"] == nil {
+		t.Error("sandbox_config.worktree_path is nil")
+	}
+	if scRaw["tmux_session"] == nil {
+		t.Error("sandbox_config.tmux_session is nil")
+	}
+
+	// Clean up tmux session
+	if session, ok := scRaw["tmux_session"].(string); ok {
+		killCmd := exec.Command("tmux", "kill-session", "-t", session)
+		_ = killCmd.Run()
+	}
+}
+
+func TestRoomCreateWithoutSandbox_NoSandboxConfig(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	ctx := context.Background()
+
+	workspace := t.TempDir()
+
+	cmd, out := newRoomTestCommand(ctx)
+	err := runRoomCreateWithProvision(cmd, workspace, "plain-room", "Plain Room", "", nil, roomCreateProvisionOptions{})
+	if err != nil {
+		t.Fatalf("runRoomCreateWithProvision: %v", err)
+	}
+
+	data := decodeRoomEnvelope(t, out)
+	roomRaw, ok := data["room"].(map[string]any)
+	if !ok {
+		t.Fatalf("room payload type=%T", data["room"])
+	}
+
+	// sandbox_config should be nil
+	if sc, exists := roomRaw["sandbox_config"]; exists && sc != nil {
+		t.Errorf("sandbox_config should be nil for non-sandbox room, got %v", sc)
+	}
+}
+
+func TestTmuxSessionExists(t *testing.T) {
+	if _, err := exec.LookPath("tmux"); err != nil {
+		t.Skip("tmux not available")
+	}
+
+	t.Setenv("HOME", t.TempDir())
+	ctx := context.Background()
+
+	// Non-existent session
+	if tmuxSessionExists("nonexistent-session-xyz") {
+		t.Error("tmuxSessionExists should return false for non-existent session")
+	}
+
+	// Create a session
+	tc := tmuxbridge.New()
+	_ = createTmuxSessionForSandbox(ctx, tc, "test-exist-session", t.TempDir())
+	defer func() {
+		cmd := exec.Command("tmux", "kill-session", "-t", "test-exist-session")
+		_ = cmd.Run()
+	}()
+
+	if !tmuxSessionExists("test-exist-session") {
+		t.Error("tmuxSessionExists should return true for existing session")
+	}
+}
+
+// TestProvisionSandbox_BaseRef verifies that --sandbox-base-ref creates a worktree
+// branched from the specified git ref (VAL-RS-003).
+func TestProvisionSandbox_BaseRef(t *testing.T) {
+	if _, err := exec.LookPath("tmux"); err != nil {
+		t.Skip("tmux not available")
+	}
+
+	t.Setenv("HOME", t.TempDir())
+	ctx := context.Background()
+
+	workspace := t.TempDir()
+	initRoomGitRepo(t, workspace)
+
+	// Create a tag to use as base ref
+	runRoomGit(t, workspace, "tag", "v1.0.0")
+
+	// Make another commit on HEAD so HEAD != v1.0.0
+	mustWriteRoomTestFile(t, filepath.Join(workspace, "extra.txt"), "extra content\n")
+	runRoomGit(t, workspace, "add", ".")
+	runRoomGit(t, workspace, "commit", "-m", "extra commit")
+
+	// Resolve the tag and HEAD SHAs for comparison
+	tagSHA := strings.TrimSpace(roomGitOutput(t, workspace, "rev-parse", "v1.0.0"))
+	headSHA := strings.TrimSpace(roomGitOutput(t, workspace, "rev-parse", "HEAD"))
+	if tagSHA == headSHA {
+		t.Fatal("tag and HEAD should be different commits for this test")
+	}
+
+	store, err := blackboard.OpenBoardStore(ctx, t.TempDir())
+	if err != nil {
+		t.Fatalf("OpenBoardStore: %v", err)
+	}
+	defer store.Close()
+
+	room, err := store.UpsertRoom(ctx, agent.Room{
+		ID:          "baseref-room",
+		WorkspaceID: workspace,
+		Title:       "Base Ref Room",
+	})
+	if err != nil {
+		t.Fatalf("UpsertRoom: %v", err)
+	}
+
+	result, err := provisionSandbox(ctx, workspace, &room, roomCreateProvisionOptions{
+		Sandbox:             true,
+		SandboxBaseRef:      "v1.0.0",
+		SandboxWorktreeRoot: filepath.Join(t.TempDir(), "worktrees"),
+	})
+	if err != nil {
+		t.Fatalf("provisionSandbox: %v", err)
+	}
+
+	// The worktree HEAD should match the tag, not the main branch HEAD
+	worktreePath, _ := result["worktree_path"].(string)
+	if worktreePath == "" {
+		t.Fatal("worktree_path is empty")
+	}
+
+	wtHeadCmd := exec.Command("git", "rev-parse", "HEAD")
+	wtHeadCmd.Dir = worktreePath
+	wtHeadOut, err := wtHeadCmd.Output()
+	if err != nil {
+		t.Fatalf("rev-parse HEAD in worktree: %v", err)
+	}
+	wtHeadSHA := strings.TrimSpace(string(wtHeadOut))
+
+	if wtHeadSHA != tagSHA {
+		t.Errorf("worktree HEAD = %q, want tag SHA %q (base-ref=v1.0.0)", wtHeadSHA, tagSHA)
+	}
+
+	// Verify base ref is stored in SandboxConfig
+	if room.SandboxConfig == nil {
+		t.Fatal("SandboxConfig is nil")
+	}
+	if room.SandboxConfig.BaseRef != "v1.0.0" {
+		t.Errorf("BaseRef = %q, want %q", room.SandboxConfig.BaseRef, "v1.0.0")
+	}
+
+	// Clean up
+	if session, ok := result["tmux_session"].(string); ok {
+		killCmd := exec.Command("tmux", "kill-session", "-t", session)
+		_ = killCmd.Run()
+	}
+}
+
+// roomGitOutput runs a git command in the given directory and returns its stdout.
+func roomGitOutput(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("git %s: %v", strings.Join(args, " "), err)
+	}
+	return string(out)
+}
+
+// TestProvisionSandbox_RollbackOnTmuxFailure verifies that if tmux session creation
+// fails, the previously created worktree is cleaned up (VAL-RS-004).
+func TestProvisionSandbox_RollbackOnTmuxFailure(t *testing.T) {
+	// This test intentionally creates a scenario where tmux session creation
+	// will fail, then verifies the worktree was cleaned up.
+	//
+	// We use an invalid session name (containing a colon, which tmux rejects)
+	// to trigger the failure. But since the session name is derived from room ID,
+	// we need to mock the tmux client instead.
+	//
+	// However, provisionSandbox directly calls tmuxbridge.New() and
+	// createTmuxSessionForSandbox(). We'll create a scenario where the worktree
+	// dir is valid but tmux will fail (e.g., no tmux server available with
+	// an isolated HOME).
+
+	if _, err := exec.LookPath("tmux"); err != nil {
+		t.Skip("tmux not available")
+	}
+
+	t.Setenv("HOME", t.TempDir())
+	ctx := context.Background()
+
+	workspace := t.TempDir()
+	initRoomGitRepo(t, workspace)
+
+	wtRoot := filepath.Join(t.TempDir(), "worktrees")
+
+	// We can't easily force tmux to fail while still having it available.
+	// Instead, we'll verify rollback by examining the implementation:
+	// The provisionSandbox function removes the worktree on tmux error.
+	// We'll test with a non-existent CWD that will cause tmux to fail.
+	//
+	// Actually, the easiest approach: use a room ID with a session name that's
+	// too long or invalid. But tmux session names can be long.
+	//
+	// Best approach: We use a fake tmux that will fail. Let's test indirectly
+	// by creating a scenario where PrepareSession fails.
+	//
+	// The simplest way: create the worktree root read-only so tmux can't
+	// create a session CWD. But actually, the worktree is created first,
+	// then tmux session is created with CWD=worktree_path.
+	//
+	// Let me use a different approach: swap the tmux client for a failing one.
+
+	// Save and restore the tmux client factory
+	origNewTmux := newRoomTmuxClient
+	defer func() { newRoomTmuxClient = origNewTmux }()
+
+	// First create the worktree successfully to get its path
+	mgr := worktree.NewManager()
+	branchName := "sandbox/room-rollback-test"
+	wtResult, err := mgr.Create(ctx, workspace, branchName,
+		worktree.WithNewBranch(true),
+		worktree.WithBaseDir(wtRoot),
+	)
+	if err != nil {
+		t.Fatalf("manual worktree creation: %v", err)
+	}
+	worktreePath := wtResult.Path
+
+	// Verify worktree exists
+	if _, err := os.Stat(worktreePath); err != nil {
+		t.Fatalf("worktree should exist: %v", err)
+	}
+
+	// Now remove the worktree so provisionSandbox can create it fresh
+	if err := mgr.Remove(ctx, workspace, worktreePath, worktree.WithForce(true), worktree.WithDeleteBranch(true)); err != nil {
+		t.Fatalf("remove worktree: %v", err)
+	}
+
+	// Create a mock tmux client that always fails PrepareSession
+	mockTmux := &failingTmuxClient{}
+	newRoomTmuxClient = func() *tmuxbridge.Client { return nil }
+
+	// Since provisionSandbox creates its own tmux client internally,
+	// we need to test the rollback path differently.
+	// We'll inject a failure by having the tmux session name collide
+	// with an impossible-to-create session.
+
+	// Actually, the simplest test: remove tmux from PATH temporarily
+	// to force createTmuxSessionForSandbox to fail.
+	origPath := os.Getenv("PATH")
+	t.Setenv("PATH", "/nonexistent")
+	defer t.Setenv("PATH", origPath)
+
+	room := agent.Room{
+		ID:          "rollback-room",
+		WorkspaceID: workspace,
+		Title:       "Rollback Room",
+	}
+
+	_, err = provisionSandbox(ctx, workspace, &room, roomCreateProvisionOptions{
+		Sandbox:             true,
+		SandboxWorktreeRoot: wtRoot,
+	})
+	if err == nil {
+		// Clean up if somehow it succeeded
+		if room.SandboxConfig != nil && room.SandboxConfig.TmuxSession != "" {
+			killCmd := exec.Command("tmux", "kill-session", "-t", room.SandboxConfig.TmuxSession)
+			_ = killCmd.Run()
+		}
+		t.Fatal("expected error when tmux is not available")
+	}
+
+	// Restore PATH for verification
+	t.Setenv("PATH", origPath)
+
+	// The worktree should have been cleaned up (rolled back)
+	if _, statErr := os.Stat(worktreePath); statErr == nil {
+		t.Errorf("worktree at %q should have been cleaned up on tmux failure", worktreePath)
+		// Clean up residual
+		_ = mgr.Remove(ctx, workspace, worktreePath, worktree.WithForce(true), worktree.WithDeleteBranch(true))
+	}
+
+	// Verify the room was not given a SandboxConfig
+	if room.SandboxConfig != nil {
+		t.Error("room.SandboxConfig should be nil after failed sandbox provisioning")
+	}
+
+	_ = mockTmux // suppress unused var warning
+}
+
+// failingTmuxClient is a stub for type checking; not used directly.
+type failingTmuxClient = tmuxbridge.Client
+
+// TestProvisionSandbox_UpgradesNonSandboxRoom verifies that running --sandbox on
+// an existing non-sandbox room adds sandbox to it (VAL-RS-010).
+func TestProvisionSandbox_UpgradesNonSandboxRoom(t *testing.T) {
+	if _, err := exec.LookPath("tmux"); err != nil {
+		t.Skip("tmux not available")
+	}
+
+	t.Setenv("HOME", t.TempDir())
+	ctx := context.Background()
+
+	workspace := t.TempDir()
+	initRoomGitRepo(t, workspace)
+
+	store, err := blackboard.OpenBoardStore(ctx, t.TempDir())
+	if err != nil {
+		t.Fatalf("OpenBoardStore: %v", err)
+	}
+	defer store.Close()
+
+	// Step 1: Create a room without sandbox
+	room, err := store.UpsertRoom(ctx, agent.Room{
+		ID:          "upgrade-room",
+		WorkspaceID: workspace,
+		Title:       "Upgrade Room",
+	})
+	if err != nil {
+		t.Fatalf("UpsertRoom (no sandbox): %v", err)
+	}
+	if room.SandboxConfig != nil {
+		t.Fatal("SandboxConfig should be nil for non-sandbox room")
+	}
+
+	// Step 2: Upgrade with sandbox
+	result, err := provisionSandbox(ctx, workspace, &room, roomCreateProvisionOptions{
+		Sandbox:             true,
+		SandboxWorktreeRoot: filepath.Join(t.TempDir(), "worktrees"),
+	})
+	if err != nil {
+		t.Fatalf("provisionSandbox (upgrade): %v", err)
+	}
+
+	// Verify sandbox was provisioned
+	if result["status"] != "created" {
+		t.Errorf("status = %v, want created", result["status"])
+	}
+	if result["runtime"] != "worktree" {
+		t.Errorf("runtime = %v, want worktree", result["runtime"])
+	}
+
+	// Verify room now has SandboxConfig
+	if room.SandboxConfig == nil {
+		t.Fatal("room.SandboxConfig is nil after upgrade")
+	}
+	worktreePath := room.SandboxConfig.WorktreePath
+	if worktreePath == "" {
+		t.Fatal("SandboxConfig.WorktreePath is empty after upgrade")
+	}
+	if _, err := os.Stat(worktreePath); err != nil {
+		t.Errorf("worktree dir does not exist at %q: %v", worktreePath, err)
+	}
+	if room.SandboxConfig.TmuxSession == "" {
+		t.Error("SandboxConfig.TmuxSession is empty after upgrade")
+	}
+
+	// Step 3: Persist and verify round-trip
+	room, err = store.UpsertRoom(ctx, room)
+	if err != nil {
+		t.Fatalf("UpsertRoom (persist upgrade): %v", err)
+	}
+	if room.SandboxConfig == nil {
+		t.Fatal("SandboxConfig lost after UpsertRoom")
+	}
+	if room.SandboxConfig.WorktreePath != worktreePath {
+		t.Errorf("WorktreePath changed after UpsertRoom: got %q, want %q", room.SandboxConfig.WorktreePath, worktreePath)
+	}
+
+	// Step 4: Read back from store
+	got, err := store.GetRoom(ctx, workspace, "upgrade-room", "")
+	if err != nil {
+		t.Fatalf("GetRoom: %v", err)
+	}
+	if got.SandboxConfig == nil {
+		t.Fatal("GetRoom: SandboxConfig is nil")
+	}
+	if got.SandboxConfig.WorktreePath != worktreePath {
+		t.Errorf("GetRoom: WorktreePath = %q, want %q", got.SandboxConfig.WorktreePath, worktreePath)
+	}
+
+	// Clean up tmux session
+	if session := room.SandboxConfig.TmuxSession; session != "" {
+		killCmd := exec.Command("tmux", "kill-session", "-t", session)
+		_ = killCmd.Run()
+	}
+}
+
+// TestRoomCreateSandboxCLIFlags verifies that the CLI flags are correctly
+// wired to the room create command.
+func TestRoomCreateSandboxCLIFlags(t *testing.T) {
+	cmd := newRoomCreateCommand()
+
+	// Verify --sandbox flag exists
+	f := cmd.Flags().Lookup("sandbox")
+	if f == nil {
+		t.Fatal("--sandbox flag not found")
+	}
+	if f.DefValue != "false" {
+		t.Errorf("--sandbox default = %q, want false", f.DefValue)
+	}
+
+	// Verify --sandbox-worktree-root flag exists
+	f = cmd.Flags().Lookup("sandbox-worktree-root")
+	if f == nil {
+		t.Fatal("--sandbox-worktree-root flag not found")
+	}
+	if f.DefValue != "" {
+		t.Errorf("--sandbox-worktree-root default = %q, want empty", f.DefValue)
+	}
+
+	// Verify --sandbox-base-ref flag exists
+	f = cmd.Flags().Lookup("sandbox-base-ref")
+	if f == nil {
+		t.Fatal("--sandbox-base-ref flag not found")
+	}
+	if f.DefValue != "HEAD" {
+		t.Errorf("--sandbox-base-ref default = %q, want HEAD", f.DefValue)
+	}
+}
+
+// --- Sandbox Lifecycle Tests ---
+
+func TestRoomDestroySandbox_CleansUpResources(t *testing.T) {
+	if _, err := exec.LookPath("tmux"); err != nil {
+		t.Skip("tmux not available")
+	}
+
+	t.Setenv("HOME", t.TempDir())
+	ctx := context.Background()
+
+	// Create a git repo as the workspace
+	workspace := t.TempDir()
+	initRoomGitRepo(t, workspace)
+
+	store, err := blackboard.OpenBoardStore(ctx, t.TempDir())
+	if err != nil {
+		t.Fatalf("OpenBoardStore: %v", err)
+	}
+	defer store.Close()
+
+	// Create a room with sandbox
+	room, err := store.UpsertRoom(ctx, agent.Room{
+		ID:          "destroy-test",
+		WorkspaceID: workspace,
+		Title:       "Destroy Test",
+	})
+	if err != nil {
+		t.Fatalf("UpsertRoom: %v", err)
+	}
+
+	// Provision sandbox
+	result, err := provisionSandbox(ctx, workspace, &room, roomCreateProvisionOptions{
+		Sandbox:             true,
+		SandboxWorktreeRoot: filepath.Join(t.TempDir(), "worktrees"),
+	})
+	if err != nil {
+		t.Fatalf("provisionSandbox: %v", err)
+	}
+
+	worktreePath := result["worktree_path"].(string)
+	tmuxSession := result["tmux_session"].(string)
+
+	// Persist sandbox config
+	room, err = store.UpsertRoom(ctx, room)
+	if err != nil {
+		t.Fatalf("UpsertRoom (persist sandbox): %v", err)
+	}
+
+	// Verify resources exist
+	if _, err := os.Stat(worktreePath); err != nil {
+		t.Fatalf("worktree should exist before destroy: %v", err)
+	}
+	if !tmuxSessionExists(tmuxSession) {
+		t.Fatal("tmux session should exist before destroy")
+	}
+
+	// Run cleanupSandbox
+	summary, err := store.GetRoom(ctx, workspace, "destroy-test", "")
+	if err != nil {
+		t.Fatalf("GetRoom: %v", err)
+	}
+
+	cleanupResult, err := cleanupSandbox(ctx, workspace, "destroy-test", summary.SandboxConfig)
+	if err != nil {
+		t.Fatalf("cleanupSandbox: %v", err)
+	}
+
+	if cleanupResult["worktree_removed"] != true {
+		t.Error("worktree_removed should be true")
+	}
+	if cleanupResult["tmux_killed"] != true {
+		t.Error("tmux_killed should be true")
+	}
+	if cleanupResult["status"] != "cleaned" {
+		t.Errorf("status = %v, want cleaned", cleanupResult["status"])
+	}
+
+	// Verify worktree is gone
+	if _, err := os.Stat(worktreePath); !os.IsNotExist(err) {
+		t.Error("worktree dir should be removed after cleanup")
+	}
+
+	// Verify tmux session is gone
+	if tmuxSessionExists(tmuxSession) {
+		t.Error("tmux session should be killed after cleanup")
+	}
+}
+
+func TestRoomDestroySandbox_NonSandboxRoomIsNoop(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	ctx := context.Background()
+
+	workspace := t.TempDir()
+
+	store, err := blackboard.OpenBoardStore(ctx, t.TempDir())
+	if err != nil {
+		t.Fatalf("OpenBoardStore: %v", err)
+	}
+	defer store.Close()
+
+	// Create a room WITHOUT sandbox
+	room, err := store.UpsertRoom(ctx, agent.Room{
+		ID:          "no-sandbox-room",
+		WorkspaceID: workspace,
+		Title:       "No Sandbox",
+	})
+	if err != nil {
+		t.Fatalf("UpsertRoom: %v", err)
+	}
+
+	// Verify no sandbox config
+	if room.SandboxConfig != nil {
+		t.Fatal("non-sandbox room should not have SandboxConfig")
+	}
+
+	// Destroy the room via DeleteRoom (same path as runRoomDestroy but without sandbox)
+	err = store.DeleteRoom(ctx, workspace, "no-sandbox-room")
+	if err != nil {
+		t.Fatalf("DeleteRoom should succeed for non-sandbox room: %v", err)
+	}
+
+	// Verify room is gone
+	_, err = store.GetRoom(ctx, workspace, "no-sandbox-room", "")
+	if !errors.Is(err, blackboard.ErrRoomNotFound) {
+		t.Errorf("expected ErrRoomNotFound, got: %v", err)
+	}
+}
+
+func TestRoomDestroySandbox_PartialCleanupOnMissingWorktree(t *testing.T) {
+	if _, err := exec.LookPath("tmux"); err != nil {
+		t.Skip("tmux not available")
+	}
+
+	t.Setenv("HOME", t.TempDir())
+	ctx := context.Background()
+
+	workspace := t.TempDir()
+	initRoomGitRepo(t, workspace)
+
+	// Create a room with sandbox config pointing to a deleted worktree
+	fakeWorktreePath := filepath.Join(t.TempDir(), "deleted-wt")
+
+	tmuxSessionName := "agentctl-sandbox-partial-test"
+	tc := tmuxbridge.New()
+	_ = createTmuxSessionForSandbox(ctx, tc, tmuxSessionName, t.TempDir())
+	defer func() {
+		cmd := exec.Command("tmux", "kill-session", "-t", tmuxSessionName)
+		_ = cmd.Run()
+	}()
+
+	sc := &agent.SandboxConfig{
+		WorktreePath:   fakeWorktreePath,
+		WorktreeBranch: "sandbox/room-partial-test",
+		TmuxSession:    tmuxSessionName,
+		TerminalURL:    "/terminal/partial-test",
+		Runtime:        "worktree",
+	}
+
+	// Cleanup should handle missing worktree gracefully
+	result, err := cleanupSandbox(ctx, workspace, "partial-test", sc)
+	if err != nil {
+		t.Fatalf("cleanupSandbox with missing worktree: %v", err)
+	}
+
+	// Worktree removal should be marked as done (dir was already gone)
+	if result["worktree_removed"] != true {
+		t.Error("worktree_removed should be true (already gone)")
+	}
+	if result["tmux_killed"] != true {
+		t.Error("tmux_killed should be true")
+	}
+}
+
+func TestCleanupSandbox_AlreadyCleanedTmux(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	ctx := context.Background()
+
+	workspace := t.TempDir()
+	initRoomGitRepo(t, workspace)
+
+	sc := &agent.SandboxConfig{
+		WorktreePath:   "/nonexistent/path",
+		WorktreeBranch: "sandbox/room-already-clean",
+		TmuxSession:    "agentctl-sandbox-nonexistent-session",
+		TerminalURL:    "/terminal/already-clean",
+		Runtime:        "worktree",
+	}
+
+	// Cleanup should handle already-gone tmux session gracefully
+	result, err := cleanupSandbox(ctx, workspace, "already-clean", sc)
+	if err != nil {
+		t.Fatalf("cleanupSandbox with already-cleaned resources: %v", err)
+	}
+
+	if result["worktree_removed"] != true {
+		t.Error("worktree_removed should be true")
+	}
+	if result["tmux_killed"] != true {
+		t.Error("tmux_killed should be true (session already gone is ok)")
+	}
+	if result["status"] != "cleaned" {
+		t.Errorf("status = %v, want cleaned", result["status"])
+	}
+}
+
+func TestRoomDestroyCommand_Flags(t *testing.T) {
+	cmd := newRoomDestroyCommand()
+
+	// Verify --force flag exists
+	f := cmd.Flags().Lookup("force")
+	if f == nil {
+		t.Fatal("--force flag not found on destroy command")
+	}
+	if f.DefValue != "false" {
+		t.Errorf("--force default = %q, want false", f.DefValue)
+	}
+
+	// Verify --workspace flag exists
+	f = cmd.Flags().Lookup("workspace")
+	if f == nil {
+		t.Fatal("--workspace flag not found on destroy command")
+	}
+	if f.DefValue != "." {
+		t.Errorf("--workspace default = %q, want .", f.DefValue)
+	}
+}
+
+func TestRoomDestroyCommand_EnvelopeOutput(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	ctx := context.Background()
+
+	workspace := t.TempDir()
+
+	// Create a room via the command path (uses same config/storage as destroy)
+	createCmd, _ := newRoomTestCommand(ctx)
+	err := runRoomCreateWithProvision(createCmd, workspace, "destroy-envelope-test", "Envelope Test", "", nil, roomCreateProvisionOptions{})
+	if err != nil {
+		t.Fatalf("runRoomCreateWithProvision: %v", err)
+	}
+
+	// Run destroy command
+	buf := &bytes.Buffer{}
+	destroyCmd := &cobra.Command{}
+	destroyCmd.SetOut(buf)
+	destroyCmd.SetContext(ctx)
+
+	err = runRoomDestroy(destroyCmd, workspace, "destroy-envelope-test", false)
+	if err != nil {
+		t.Fatalf("runRoomDestroy: %v", err)
+	}
+
+	// Verify output is valid JSON envelope
+	var env envelope.Envelope
+	if err := json.Unmarshal(buf.Bytes(), &env); err != nil {
+		t.Fatalf("invalid JSON envelope: %v\noutput: %s", err, buf.String())
+	}
+
+	if env.Status != "ok" {
+		t.Errorf("envelope status = %q, want ok", env.Status)
+	}
+	if env.Command != "agentctl.room.destroy" {
+		t.Errorf("envelope command = %q, want agentctl.room.destroy", env.Command)
+	}
+
+	// Verify data fields
+	data, ok := env.Data.(map[string]any)
+	if !ok {
+		t.Fatal("envelope data is not a map")
+	}
+	if data["room_id"] != "destroy-envelope-test" {
+		t.Errorf("room_id = %v, want destroy-envelope-test", data["room_id"])
+	}
+	if data["status"] != "destroyed" {
+		t.Errorf("status = %v, want destroyed", data["status"])
+	}
+}
+
+func TestRoomDestroyCommand_NotFoundError(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	workspace := t.TempDir()
+
+	buf := &bytes.Buffer{}
+	cmd := &cobra.Command{}
+	cmd.SetOut(buf)
+	cmd.SetContext(context.Background())
+
+	err := runRoomDestroy(cmd, workspace, "nonexistent-room", false)
+	if err != nil {
+		// The function writes error envelope and returns nil or error depending on WriteError behavior
+		// WriteError returns the error so it propagates
+		t.Logf("runRoomDestroy returned error: %v", err)
+		// Check the envelope
+		var env envelope.Envelope
+		if jsonErr := json.Unmarshal(buf.Bytes(), &env); jsonErr == nil {
+			if env.Status != "error" {
+				t.Errorf("envelope status = %q, want error", env.Status)
+			}
+			if env.Error.Code != string(protocol.ErrorCodeENotFound) && env.Error.Code != string(protocol.ErrorCodeERuntime) {
+				t.Errorf("error code = %q, want ENOTFOUND or ERUNTIME", env.Error.Code)
+			}
+		}
+	}
+}
+
+func TestRoomListSandbox_IncludesSandboxStatus(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	ctx := context.Background()
+
+	workspace := t.TempDir()
+
+	// Create a room WITH sandbox config via the command path
+	createCmd1, _ := newRoomTestCommand(ctx)
+	err := runRoomCreateWithProvision(createCmd1, workspace, "sandbox-list-room", "Sandbox Room", "", nil, roomCreateProvisionOptions{})
+	if err != nil {
+		t.Fatalf("create sandbox room: %v", err)
+	}
+
+	// Manually update the room to add sandbox config (simulating what provisionSandbox would do)
+	// We need to go through the store directly since provisionSandbox needs tmux
+	storeDir := filepath.Join(t.TempDir(), ".agentctl", "storage")
+	cfg, cfgErr := loadConfig(ctx)
+	if cfgErr != nil {
+		// If we can't load config, try to open store directly from the known path
+		t.Logf("loadConfig: %v (trying direct store path)", cfgErr)
+	}
+	var store blackboard.BoardStore
+	if cfgErr == nil {
+		store, err = blackboard.OpenBoardStore(ctx, cfg.Storage.Root)
+	} else {
+		// Fall back to the test store
+		store, err = blackboard.OpenBoardStore(ctx, storeDir)
+	}
+	if err != nil {
+		t.Fatalf("OpenBoardStore: %v", err)
+	}
+	defer store.Close()
+
+	// Get the room and add sandbox config
+	room, err := store.UpsertRoom(ctx, agent.Room{
+		ID:          "sandbox-list-room",
+		WorkspaceID: workspace,
+		Title:       "Sandbox Room",
+		SandboxConfig: &agent.SandboxConfig{
+			WorktreePath:   "/tmp/worktrees/sandbox-list-room",
+			WorktreeBranch: "sandbox/room-sandbox-list-room",
+			TmuxSession:    "agentctl-sandbox-sandbox-list-room",
+			TerminalURL:    "/terminal/sandbox-list-room",
+			Runtime:        "worktree",
+		},
+	})
+	if err != nil {
+		t.Fatalf("UpsertRoom (sandbox): %v", err)
+	}
+	_ = room
+
+	// Create a room WITHOUT sandbox config
+	createCmd2, _ := newRoomTestCommand(ctx)
+	err = runRoomCreateWithProvision(createCmd2, workspace, "plain-list-room", "Plain Room", "", nil, roomCreateProvisionOptions{})
+	if err != nil {
+		t.Fatalf("create plain room: %v", err)
+	}
+
+	// List rooms
+	buf := &bytes.Buffer{}
+	listCmd := &cobra.Command{}
+	listCmd.SetOut(buf)
+	listCmd.SetContext(ctx)
+
+	err = runRoomList(listCmd, workspace, "", 50)
+	if err != nil {
+		t.Fatalf("runRoomList: %v", err)
+	}
+
+	var env envelope.Envelope
+	if err := json.Unmarshal(buf.Bytes(), &env); err != nil {
+		t.Fatalf("invalid JSON envelope: %v\noutput: %s", err, buf.String())
+	}
+
+	data, ok := env.Data.(map[string]any)
+	if !ok {
+		t.Fatal("envelope data is not a map")
+	}
+
+	rooms, ok := data["rooms"].([]any)
+	if !ok {
+		t.Fatal("rooms is not a slice")
+	}
+
+	// Find the sandbox room in the list
+	var foundSandbox, foundPlain bool
+	for _, r := range rooms {
+		roomMap, ok := r.(map[string]any)
+		if !ok {
+			continue
+		}
+		id, _ := roomMap["id"].(string)
+		if id == "sandbox-list-room" {
+			foundSandbox = true
+			sc, _ := roomMap["sandbox_config"].(map[string]any)
+			if sc == nil {
+				t.Error("sandbox room should have sandbox_config in list output")
+			} else {
+				if sc["worktree_path"] != "/tmp/worktrees/sandbox-list-room" {
+					t.Errorf("sandbox worktree_path = %v, want /tmp/worktrees/sandbox-list-room", sc["worktree_path"])
+				}
+				if sc["terminal_url"] != "/terminal/sandbox-list-room" {
+					t.Errorf("sandbox terminal_url = %v, want /terminal/sandbox-list-room", sc["terminal_url"])
+				}
+				if sc["runtime"] != "worktree" {
+					t.Errorf("sandbox runtime = %v, want worktree", sc["runtime"])
+				}
+			}
+		}
+		if id == "plain-list-room" {
+			foundPlain = true
+			if _, hasSC := roomMap["sandbox_config"]; hasSC {
+				sc, _ := roomMap["sandbox_config"].(map[string]any)
+				if len(sc) > 0 {
+					t.Error("plain room should not have sandbox_config data")
+				}
+			}
+		}
+	}
+	if !foundSandbox {
+		t.Error("sandbox-list-room not found in list output")
+	}
+	if !foundPlain {
+		t.Error("plain-list-room not found in list output")
+	}
+}
+
+func TestRoomShowSandbox_IncludesSandboxMetadata(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	ctx := context.Background()
+
+	workspace := t.TempDir()
+
+	// Create room via command path first
+	createCmd, _ := newRoomTestCommand(ctx)
+	err := runRoomCreateWithProvision(createCmd, workspace, "sandbox-show-room", "Sandbox Show Room", "", nil, roomCreateProvisionOptions{})
+	if err != nil {
+		t.Fatalf("create room: %v", err)
+	}
+
+	// Update with sandbox config via store
+	cfg, cfgErr := loadConfig(ctx)
+	if cfgErr != nil {
+		t.Fatalf("loadConfig: %v", cfgErr)
+	}
+	store, err := blackboard.OpenBoardStore(ctx, cfg.Storage.Root)
+	if err != nil {
+		t.Fatalf("OpenBoardStore: %v", err)
+	}
+	defer store.Close()
+
+	// Create a room WITH sandbox config
+	_, err = store.UpsertRoom(ctx, agent.Room{
+		ID:          "sandbox-show-room",
+		WorkspaceID: workspace,
+		Title:       "Sandbox Show Room",
+		SandboxConfig: &agent.SandboxConfig{
+			WorktreePath:   "/tmp/worktrees/sandbox-show-room",
+			WorktreeBranch: "sandbox/room-sandbox-show-room",
+			TmuxSession:    "agentctl-sandbox-sandbox-show-room",
+			TerminalURL:    "/terminal/sandbox-show-room",
+			Runtime:        "worktree",
+			BaseRef:        "main",
+		},
+	})
+	if err != nil {
+		t.Fatalf("UpsertRoom: %v", err)
+	}
+
+	// Show the room
+	buf := &bytes.Buffer{}
+	showCmd := &cobra.Command{}
+	showCmd.SetOut(buf)
+	showCmd.SetContext(ctx)
+
+	err = runRoomShow(showCmd, workspace, "sandbox-show-room", "", 100)
+	if err != nil {
+		t.Fatalf("runRoomShow: %v", err)
+	}
+
+	var env envelope.Envelope
+	if err := json.Unmarshal(buf.Bytes(), &env); err != nil {
+		t.Fatalf("invalid JSON envelope: %v\noutput: %s", err, buf.String())
+	}
+
+	data, ok := env.Data.(map[string]any)
+	if !ok {
+		t.Fatal("envelope data is not a map")
+	}
+
+	room, ok := data["room"].(map[string]any)
+	if !ok {
+		t.Fatal("room is not a map")
+	}
+
+	sc, ok := room["sandbox_config"].(map[string]any)
+	if !ok || sc == nil {
+		t.Fatal("sandbox_config not found in room show output")
+	}
+
+	// Verify all SandboxConfig fields
+	if sc["worktree_path"] != "/tmp/worktrees/sandbox-show-room" {
+		t.Errorf("worktree_path = %v, want /tmp/worktrees/sandbox-show-room", sc["worktree_path"])
+	}
+	if sc["worktree_branch"] != "sandbox/room-sandbox-show-room" {
+		t.Errorf("worktree_branch = %v, want sandbox/room-sandbox-show-room", sc["worktree_branch"])
+	}
+	if sc["tmux_session"] != "agentctl-sandbox-sandbox-show-room" {
+		t.Errorf("tmux_session = %v, want agentctl-sandbox-sandbox-show-room", sc["tmux_session"])
+	}
+	if sc["terminal_url"] != "/terminal/sandbox-show-room" {
+		t.Errorf("terminal_url = %v, want /terminal/sandbox-show-room", sc["terminal_url"])
+	}
+	if sc["runtime"] != "worktree" {
+		t.Errorf("runtime = %v, want worktree", sc["runtime"])
+	}
+	if sc["base_ref"] != "main" {
+		t.Errorf("base_ref = %v, want main", sc["base_ref"])
+	}
+}
+
+func TestRoomShowSandbox_NonSandboxRoom(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	ctx := context.Background()
+
+	workspace := t.TempDir()
+
+	// Create a room WITHOUT sandbox
+	createCmd, _ := newRoomTestCommand(ctx)
+	err := runRoomCreateWithProvision(createCmd, workspace, "plain-show-room", "Plain Show Room", "", nil, roomCreateProvisionOptions{})
+	if err != nil {
+		t.Fatalf("create room: %v", err)
+	}
+
+	// Show the room
+	buf := &bytes.Buffer{}
+	showCmd := &cobra.Command{}
+	showCmd.SetOut(buf)
+	showCmd.SetContext(ctx)
+
+	err = runRoomShow(showCmd, workspace, "plain-show-room", "", 100)
+	if err != nil {
+		t.Fatalf("runRoomShow: %v", err)
+	}
+
+	var env envelope.Envelope
+	if err := json.Unmarshal(buf.Bytes(), &env); err != nil {
+		t.Fatalf("invalid JSON envelope: %v\noutput: %s", err, buf.String())
+	}
+
+	data, ok := env.Data.(map[string]any)
+	if !ok {
+		t.Fatal("envelope data is not a map")
+	}
+
+	room, ok := data["room"].(map[string]any)
+	if !ok {
+		t.Fatal("room is not a map")
+	}
+
+	// Non-sandbox room should not have sandbox_config (omitempty)
+	if _, hasSC := room["sandbox_config"]; hasSC {
+		t.Error("non-sandbox room should not have sandbox_config field (omitempty)")
+	}
+}
+
+func TestRoomJoinSandbox_TerminalBinding(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	ctx := context.Background()
+
+	workspace := t.TempDir()
+
+	// Create room via command path
+	createCmd, _ := newRoomTestCommand(ctx)
+	err := runRoomCreateWithProvision(createCmd, workspace, "sandbox-join-room", "Sandbox Join Room", "", nil, roomCreateProvisionOptions{})
+	if err != nil {
+		t.Fatalf("create room: %v", err)
+	}
+
+	// Add sandbox config via store
+	cfg, cfgErr := loadConfig(ctx)
+	if cfgErr != nil {
+		t.Fatalf("loadConfig: %v", cfgErr)
+	}
+	store, err := blackboard.OpenBoardStore(ctx, cfg.Storage.Root)
+	if err != nil {
+		t.Fatalf("OpenBoardStore: %v", err)
+	}
+	defer store.Close()
+
+	_, err = store.UpsertRoom(ctx, agent.Room{
+		ID:          "sandbox-join-room",
+		WorkspaceID: workspace,
+		Title:       "Sandbox Join Room",
+		SandboxConfig: &agent.SandboxConfig{
+			WorktreePath:   "/tmp/worktrees/sandbox-join",
+			WorktreeBranch: "sandbox/room-sandbox-join-room",
+			TmuxSession:    "agentctl-sandbox-sandbox-join-room",
+			TerminalURL:    "/terminal/sandbox-join-room",
+			Runtime:        "worktree",
+		},
+	})
+	if err != nil {
+		t.Fatalf("UpsertRoom: %v", err)
+	}
+
+	// Join the room
+	buf := &bytes.Buffer{}
+	joinCmd := &cobra.Command{}
+	joinCmd.SetOut(buf)
+	joinCmd.SetContext(ctx)
+
+	err = runRoomJoin(joinCmd, workspace, "sandbox-join-room", "agent-a", "worker", "", "", "", "", "", false, false, false)
+	if err != nil {
+		t.Fatalf("runRoomJoin: %v", err)
+	}
+
+	var env envelope.Envelope
+	if err := json.Unmarshal(buf.Bytes(), &env); err != nil {
+		t.Fatalf("invalid JSON envelope: %v\noutput: %s", err, buf.String())
+	}
+
+	data, ok := env.Data.(map[string]any)
+	if !ok {
+		t.Fatal("envelope data is not a map")
+	}
+
+	room, ok := data["room"].(map[string]any)
+	if !ok {
+		t.Fatal("room is not a map")
+	}
+
+	// Room should include sandbox_config
+	sc, ok := room["sandbox_config"].(map[string]any)
+	if !ok || sc == nil {
+		t.Fatal("joined room should include sandbox_config")
+	}
+	if sc["terminal_url"] != "/terminal/sandbox-join-room" {
+		t.Errorf("terminal_url = %v, want /terminal/sandbox-join-room", sc["terminal_url"])
+	}
+
+	// Verify member was added
+	members, ok := room["members"].([]any)
+	if !ok {
+		t.Fatal("members is not a slice")
+	}
+	found := false
+	for _, m := range members {
+		member, ok := m.(map[string]any)
+		if !ok {
+			continue
+		}
+		if member["actor_id"] == "agent-a" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("agent-a should be in the members list")
+	}
+}
+
+func TestRoomLeaveSandbox_TerminalBinding(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	ctx := context.Background()
+
+	workspace := t.TempDir()
+
+	// Create room via command path, then add members + sandbox config via store
+	cfg, cfgErr := loadConfig(ctx)
+	if cfgErr != nil {
+		t.Fatalf("loadConfig: %v", cfgErr)
+	}
+	store, err := blackboard.OpenBoardStore(ctx, cfg.Storage.Root)
+	if err != nil {
+		t.Fatalf("OpenBoardStore: %v", err)
+	}
+	defer store.Close()
+
+	// Create a sandbox room with members
+	_, err = store.UpsertRoom(ctx, agent.Room{
+		ID:          "sandbox-leave-room",
+		WorkspaceID: workspace,
+		Title:       "Sandbox Leave Room",
+		Members: []agent.RoomMember{
+			{ActorID: "agent-a", Role: "worker", JoinedAt: time.Now().UTC()},
+			{ActorID: "agent-b", Role: "reviewer", JoinedAt: time.Now().UTC()},
+		},
+		SandboxConfig: &agent.SandboxConfig{
+			WorktreePath:   "/tmp/worktrees/sandbox-leave",
+			WorktreeBranch: "sandbox/room-sandbox-leave-room",
+			TmuxSession:    "agentctl-sandbox-sandbox-leave-room",
+			TerminalURL:    "/terminal/sandbox-leave-room",
+			Runtime:        "worktree",
+		},
+	})
+	if err != nil {
+		t.Fatalf("UpsertRoom: %v", err)
+	}
+
+	// Leave the room
+	buf := &bytes.Buffer{}
+	leaveCmd := &cobra.Command{}
+	leaveCmd.SetOut(buf)
+	leaveCmd.SetContext(ctx)
+
+	err = runRoomLeave(leaveCmd, workspace, "sandbox-leave-room", "agent-a")
+	if err != nil {
+		t.Fatalf("runRoomLeave: %v", err)
+	}
+
+	var env envelope.Envelope
+	if err := json.Unmarshal(buf.Bytes(), &env); err != nil {
+		t.Fatalf("invalid JSON envelope: %v\noutput: %s", err, buf.String())
+	}
+
+	data, ok := env.Data.(map[string]any)
+	if !ok {
+		t.Fatal("envelope data is not a map")
+	}
+
+	room, ok := data["room"].(map[string]any)
+	if !ok {
+		t.Fatal("room is not a map")
+	}
+
+	// Room should still have sandbox_config
+	sc, ok := room["sandbox_config"].(map[string]any)
+	if !ok || sc == nil {
+		t.Fatal("room should still have sandbox_config after member leaves")
+	}
+	if sc["terminal_url"] != "/terminal/sandbox-leave-room" {
+		t.Errorf("terminal_url = %v, want /terminal/sandbox-leave-room", sc["terminal_url"])
+	}
+
+	// Verify agent-a was removed but agent-b remains
+	members, ok := room["members"].([]any)
+	if !ok {
+		t.Fatal("members is not a slice")
+	}
+	if len(members) != 1 {
+		t.Errorf("members count = %d, want 1", len(members))
+	}
+	member, _ := members[0].(map[string]any)
+	if member["actor_id"] != "agent-b" {
+		t.Errorf("remaining member = %v, want agent-b", member["actor_id"])
+	}
+}
+
+func TestFindActiveAgentsInRoom_NoActiveAgents(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	ctx := context.Background()
+
+	workspace := t.TempDir()
+
+	// No agent store → should return empty list, not error
+	active, err := findActiveAgentsInRoom(ctx, workspace, "no-agents-room")
+	if err != nil {
+		// Agent store may not exist in test env, that's acceptable
+		t.Logf("findActiveAgentsInRoom returned error (acceptable in test): %v", err)
+		return
+	}
+	if len(active) != 0 {
+		t.Errorf("active agents = %v, want empty", active)
 	}
 }

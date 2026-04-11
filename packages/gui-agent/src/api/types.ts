@@ -119,6 +119,47 @@ export interface RoomMessageEvent {
   error?: string;
 }
 
+export interface RoomLiveRelayResult {
+  backend: string;
+  delivered_count?: number;
+  failed_count?: number;
+  delivered_to?: string[];
+  failed_members?: string[];
+  skipped_members?: string[];
+  error?: string;
+}
+
+export interface RoomSendMessageResult {
+  id: string;
+  room_id: string;
+  stream: string;
+  status: string;
+  dispatched?: number;
+  skipped?: number;
+  live_relay?: RoomLiveRelayResult[];
+}
+
+export interface RoomReminder {
+  id: string;
+  workspace_id: string;
+  room_id: string;
+  root_message_id: string;
+  sender: string;
+  recipient: string;
+  subject: string;
+  body: string;
+  ack_required: boolean;
+  reply_expected: boolean;
+  interrupt: boolean;
+  interval: string;
+  max_iterations: number;
+  sent_count: number;
+  active: boolean;
+  last_sent_at?: string;
+  created_at?: string;
+  updated_at?: string;
+}
+
 export interface ActivityEventData extends Record<string, unknown> {
   refs?: string[];
   turn_refs?: string[];
@@ -219,22 +260,66 @@ export interface Room {
   archived_at?: string;
 }
 
+// ParticipantState mirrors the backend agent.ParticipantState type.
+// It captures four independent dimensions of a room participant's state.
+export interface ParticipantState {
+  actor_id: string;
+  /** "active" | "unbound" | "none" */
+  membership: "active" | "unbound" | "none";
+  /** Unix socket path (pane_socket) or mux address "tmux:session:%pane" / "zellij:session:pane" */
+  transport_endpoint?: string;
+  /** "available" | "unknown" | "unavailable" | "none" */
+  transport: "available" | "unknown" | "unavailable" | "none";
+  /** "live" | "unknown" | "stopped" | "none" */
+  runtime: "live" | "unknown" | "stopped" | "none";
+  /** "attached" | "detached" | "none" */
+  presentation: "attached" | "detached" | "none";
+  /** "tmux" | "zellij" | "" */
+  mux_backend?: string;
+  reason?: string;
+  can_trigger_turn: boolean;
+}
+
+/** Derives the transport kind from the endpoint string. */
+export function participantTransportKind(state?: ParticipantState): "pane_socket" | "mux_pane" | "none" {
+  const ep = state?.transport_endpoint;
+  if (!ep) return "none";
+  if (ep.startsWith("/")) return "pane_socket";
+  return "mux_pane";
+}
+
 export interface RoomMember {
   actor_id: string;
   role?: string;
+  backend?: string;
+  session?: string;
+  pane_id?: string;
   joined_at?: string;
   last_active_at?: string;
   status?: "online" | "idle" | "stale" | string;
-  transport?: "tmux" | "zellij" | "unknown" | string;
   session_id?: string;
-  pane_id?: string;
   unbound?: boolean;
+  transport_endpoint?: string;
+  transport_kind?: string;
+}
+
+// RoomStatusParticipant is what room status returns — it extends basic membership
+// info with explicit transport state from the backend.
+export interface RoomStatusParticipant {
+  actor_id: string;
+  role?: string;
+  last_active_at?: string;
+  status: "active" | "idle" | "stale" | string;
+  assigned_task_count: number;
+  owned_task_count: number;
+  actionable_inbox_count: number;
+  transport: ParticipantState;
 }
 
 export interface RoomStatus {
   room: Room;
   coordinator_actor_id?: string;
-  participants: RoomMember[];
+  participants: RoomStatusParticipant[];
   task_pulse: {
     pending: number;
     in_progress: number;
@@ -322,6 +407,33 @@ export interface RoomLoop {
   reminder_backoff_cap: number;
   coordinator_pulse_enabled: boolean;
   coordinator_escalation_enabled: boolean;
+}
+
+export interface MuxPane {
+  backend: "tmux" | "zellij" | string;
+  id?: string;
+  session: string;
+  session_pane?: string;
+  pane_name?: string;
+  label?: string;
+  participant_id?: string;
+  provider?: string;
+  room_id?: string;
+  current_command?: string;
+  display_command?: string;
+  wrapped?: boolean;
+  socket_path?: string;
+  ready_path?: string;
+  state?: string;
+  active?: boolean;
+}
+
+export interface MuxPaneCapture {
+  target: string;
+  resolved_target: string;
+  lines_requested: number;
+  content: string;
+  lines?: string[];
 }
 
 // Blackboard types

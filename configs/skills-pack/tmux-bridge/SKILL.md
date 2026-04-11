@@ -1,6 +1,6 @@
 ---
 name: tmux-bridge
-description: Cross-pane communication for Codex, Claude, and other terminal agents. Use `agentctl mux create/read/send/observe` for backend-neutral mux operations, `agentctl room` for durable room chat, and the plugin-backed zellij room relay for session-aware fanout.
+description: Cross-pane communication and viewer management for Codex, Claude, and other terminal agents. Use `agentctl mux create/read/send/observe` for backend-neutral mux operations, but prefer `agentctl room` for durable transport-first coordination.
 metadata:
   openclaw:
     emoji: "🌉"
@@ -25,6 +25,12 @@ Use this skill when multiple terminal agents are running in tmux and need to:
 
 If a room exists, prefer the room for durable state and use the bridge only for live terminal delivery.
 
+Transport-first rule:
+
+- `agentctl room` is the canonical coordination and delivery plane
+- `tmux` / `zellij` are viewer surfaces and optional live consoles
+- use `mux` commands when you explicitly need pane inspection, viewer setup, or a manual poke
+
 ## Default Flow
 
 Prepare a neutral multi-agent session:
@@ -34,8 +40,11 @@ agentctl mux create --session agentctl-collab --panes 3 --attach
 ```
 
 If you do not pass `--agent`, this creates panes labeled `agent-a`, `agent-b`, `agent-c`.
-If you pass `--agent claude`, `--agent codex`, `--agent gemini`, `--agent agent`, or `--agent droid`, the default labels become `claude-a`, `codex-a`, `gemini-a`, `agent-a`, or `droid-a`.
-Use `--label-prefix` only when you want to override that default.
+If you pass `--agent`, the default label prefix is scoped when possible:
+- room-bound panes default to `<room-id>-<agent>` (for example `transport-first-claude-a`)
+- otherwise, named non-default sessions default to `<session>-<agent>` (for example `feature-auth-codex-a`)
+- only plain ad hoc sessions fall back to generic labels like `claude-a`
+Use `--label-prefix` only when you intentionally want to override that scoped default.
 
 Launch a specific agent CLI in every pane:
 
@@ -195,8 +204,9 @@ Default behavior for agents in a room-backed tmux session:
 
 - read the room first: `room status`, then `room inbox --actor <you>`
 - claim and complete shared work through `room task ...`
-- use `mux send` only when the target needs a live terminal poke
+- use `mux send` only when the target needs a live terminal poke outside the normal room transport path
 - do not close a review gate or task only in tmux chat; write the result back into the room timeline
+- if a pane looks healthy but room delivery is failing, inspect room participant transport state before assuming a tmux/zellij problem
 
 ## Direct Messaging
 
@@ -217,6 +227,12 @@ The bundled script is optional for lower-level pane control:
 `agentctl room ...` now follows the same identity rule: derive the current pane
 participant first, then fall back to canonical ids like `tmux:<session>:%7` or
 `zellij:<session>:terminal_3` when no human-friendly pane name is present.
+
+Viewer metadata:
+
+- wrapped panes expose participant/provider/room metadata in `mux list`
+- treat that metadata as operator-facing only; it does not replace room membership or participant transport state
+- when a room exists, prefer `room status` for health and `mux list` for viewer placement
 
 For spawned zellij panes, prefer `agentctl mux list --backend zellij --session <session-name>`.
 That view is driven by persisted `terminal_binding` metadata and is more

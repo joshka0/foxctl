@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 
@@ -94,7 +95,7 @@ func runGateway(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		// Check if it's an auth key error for structured envelope output
 		var authErr *gateway.AuthKeyError
-		if asErr(err, &authErr) {
+		if errors.As(err, &authErr) {
 			env := envelope.Error(
 				"gateway",
 				string(protocol.ErrorCodeEARG),
@@ -106,15 +107,6 @@ func runGateway(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("gateway: %w", err)
 	}
 	return nil
-}
-
-// asErr is a helper that works like errors.As for typed error checking.
-func asErr(err error, target **gateway.AuthKeyError) bool {
-	if e, ok := err.(*gateway.AuthKeyError); ok {
-		*target = e
-		return true
-	}
-	return false
 }
 
 // writeEnvelope writes a JSON envelope to stdout and returns a

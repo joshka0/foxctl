@@ -1,0 +1,69 @@
+{
+  "milestone": "gateway-terminal",
+  "round": 1,
+  "status": "fail",
+  "assertionsSummary": {
+    "total": 30,
+    "passed": 27,
+    "failed": 0,
+    "blocked": 3
+  },
+  "passedAssertions": [
+    "VAL-GW-001",
+    "VAL-GW-002",
+    "VAL-GW-003",
+    "VAL-GW-004",
+    "VAL-GW-005",
+    "VAL-GW-006",
+    "VAL-GW-007",
+    "VAL-GW-008",
+    "VAL-GW-009",
+    "VAL-GW-010",
+    "VAL-GW-011",
+    "VAL-GW-012",
+    "VAL-GW-013",
+    "VAL-GW-014",
+    "VAL-GW-015",
+    "VAL-GW-016",
+    "VAL-GW-017",
+    "VAL-GW-018",
+    "VAL-GW-019",
+    "VAL-GW-020",
+    "VAL-GW-021",
+    "VAL-GW-025",
+    "VAL-GW-026",
+    "VAL-GW-027",
+    "VAL-GW-028",
+    "VAL-GW-029",
+    "VAL-GW-030"
+  ],
+  "failedAssertions": [],
+  "blockedAssertions": [
+    {
+      "id": "VAL-GW-022",
+      "blockedBy": "Requires Tailscale tsnet with TS_AUTHKEY for auto-TLS via ListenTLS. Cannot test HTTPS with auto-TLS without a real Tailscale tailnet connection."
+    },
+    {
+      "id": "VAL-GW-023",
+      "blockedBy": "Requires Tailscale tsnet with TS_AUTHKEY for MagicDNS hostname resolution. Cannot test MagicDNS without a real Tailscale tailnet connection."
+    },
+    {
+      "id": "VAL-GW-024",
+      "blockedBy": "Requires Tailscale tsnet to verify that localhost access is rejected in production mode. Dev mode intentionally allows localhost; production tsnet mode binds only to tailnet."
+    }
+  ],
+  "appliedUpdates": [
+    {
+      "target": "user-testing.md",
+      "description": "Added Flow Validator Guidance section for gateway-terminal go test surface with test-to-assertion mapping for all 30 VAL-GW-* assertions",
+      "source": "setup"
+    }
+  ],
+  "previousRound": null,
+  "flowReports": [
+    "flows/gateway-core.json",
+    "flows/webterm-handler.json",
+    "flows/webterm-pty.json",
+    "flows/ssh-terminal.json"
+  ]
+}

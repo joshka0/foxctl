@@ -365,3 +365,185 @@ func TestCompactRoomSummaryForInboxOmitsBulkLists(t *testing.T) {
 		t.Fatalf("got=%v", got)
 	}
 }
+
+func TestSandboxConfig_IsSandbox(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		sc   *SandboxConfig
+		want bool
+	}{
+		{"nil", nil, false},
+		{"empty", &SandboxConfig{}, false},
+		{"with worktree path", &SandboxConfig{WorktreePath: "/tmp/worktree"}, true},
+		{"no worktree path", &SandboxConfig{TmuxSession: "s1"}, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.sc.IsSandbox(); got != tt.want {
+				t.Errorf("IsSandbox() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestSandboxConfig_EffectiveRuntime(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		sc   *SandboxConfig
+		want string
+	}{
+		{"nil defaults to worktree", nil, "worktree"},
+		{"empty defaults to worktree", &SandboxConfig{}, "worktree"},
+		{"explicit worktree", &SandboxConfig{Runtime: "worktree"}, "worktree"},
+		{"opensandbox", &SandboxConfig{Runtime: "opensandbox"}, "opensandbox"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.sc.EffectiveRuntime(); got != tt.want {
+				t.Errorf("EffectiveRuntime() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestSandboxConfig_JSONRoundTrip(t *testing.T) {
+	t.Parallel()
+	sc := &SandboxConfig{
+		WorktreePath:   "/tmp/worktrees/sandbox/room-test-room",
+		WorktreeBranch: "sandbox/room-test-room",
+		TmuxSession:    "agentctl-sandbox-test-room",
+		TerminalURL:    "/terminal/test-room",
+		Runtime:        "worktree",
+		BaseRef:        "HEAD",
+	}
+
+	data, err := json.Marshal(sc)
+	if err != nil {
+		t.Fatalf("json.Marshal() error = %v", err)
+	}
+
+	var got SandboxConfig
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+
+	if got.WorktreePath != sc.WorktreePath {
+		t.Errorf("WorktreePath = %q, want %q", got.WorktreePath, sc.WorktreePath)
+	}
+	if got.WorktreeBranch != sc.WorktreeBranch {
+		t.Errorf("WorktreeBranch = %q, want %q", got.WorktreeBranch, sc.WorktreeBranch)
+	}
+	if got.TmuxSession != sc.TmuxSession {
+		t.Errorf("TmuxSession = %q, want %q", got.TmuxSession, sc.TmuxSession)
+	}
+	if got.TerminalURL != sc.TerminalURL {
+		t.Errorf("TerminalURL = %q, want %q", got.TerminalURL, sc.TerminalURL)
+	}
+	if got.Runtime != sc.Runtime {
+		t.Errorf("Runtime = %q, want %q", got.Runtime, sc.Runtime)
+	}
+	if got.BaseRef != sc.BaseRef {
+		t.Errorf("BaseRef = %q, want %q", got.BaseRef, sc.BaseRef)
+	}
+}
+
+func TestRoom_JSONRoundTrip_WithSandbox(t *testing.T) {
+	t.Parallel()
+	now := time.Now().UTC().Truncate(time.Second)
+	room := Room{
+		ID:          "test-room",
+		WorkspaceID: "/workspace",
+		Stream:      "room:test-room",
+		Title:       "Test Room",
+		CreatedAt:   now,
+		UpdatedAt:   now,
+		SandboxConfig: &SandboxConfig{
+			WorktreePath:   "/tmp/worktrees/sandbox/room-test-room",
+			WorktreeBranch: "sandbox/room-test-room",
+			TmuxSession:    "agentctl-sandbox-test-room",
+			TerminalURL:    "/terminal/test-room",
+			Runtime:        "worktree",
+			BaseRef:        "HEAD",
+		},
+	}
+
+	data, err := json.Marshal(room)
+	if err != nil {
+		t.Fatalf("json.Marshal() error = %v", err)
+	}
+
+	var got Room
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+
+	if got.SandboxConfig == nil {
+		t.Fatal("SandboxConfig is nil after round-trip")
+	}
+	if got.SandboxConfig.WorktreePath != room.SandboxConfig.WorktreePath {
+		t.Errorf("WorktreePath = %q, want %q", got.SandboxConfig.WorktreePath, room.SandboxConfig.WorktreePath)
+	}
+}
+
+func TestRoom_JSONRoundTrip_WithoutSandbox(t *testing.T) {
+	t.Parallel()
+	room := Room{
+		ID:          "plain-room",
+		WorkspaceID: "/workspace",
+		Stream:      "room:plain-room",
+		Title:       "Plain Room",
+	}
+
+	data, err := json.Marshal(room)
+	if err != nil {
+		t.Fatalf("json.Marshal() error = %v", err)
+	}
+
+	var got Room
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+
+	if got.SandboxConfig != nil {
+		t.Errorf("SandboxConfig should be nil for non-sandbox room, got %+v", got.SandboxConfig)
+	}
+}
+
+func TestRoomSummary_WithSandboxConfig(t *testing.T) {
+	t.Parallel()
+	now := time.Now().UTC().Truncate(time.Second)
+	summary := RoomSummary{
+		ID:              "test-room",
+		WorkspaceID:     "/workspace",
+		Stream:          "room:test-room",
+		Title:           "Test Room",
+		CreatedAt:       now,
+		UpdatedAt:       now,
+		LatestMessageAt: now,
+		SandboxConfig: &SandboxConfig{
+			WorktreePath: "/tmp/wt",
+			Runtime:      "worktree",
+		},
+	}
+
+	data, err := json.Marshal(summary)
+	if err != nil {
+		t.Fatalf("json.Marshal() error = %v", err)
+	}
+
+	var got RoomSummary
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+
+	if got.SandboxConfig == nil {
+		t.Fatal("SandboxConfig is nil after round-trip")
+	}
+	if got.SandboxConfig.WorktreePath != "/tmp/wt" {
+		t.Errorf("WorktreePath = %q, want %q", got.SandboxConfig.WorktreePath, "/tmp/wt")
+	}
+}

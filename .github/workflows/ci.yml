@@ -126,7 +126,7 @@ jobs:
       - name: Unit tests
         run: |
           echo "::group::Unit test results"
-          CGO_ENABLED=0 go test -short -v -count=1 ./... 2>&1 | tee /tmp/test-output.txt
+          CGO_ENABLED=0 go test -short -v -count=1 -timeout 20m ./... 2>&1 | tee /tmp/test-output.txt
           echo "::endgroup::"
           echo "## Test timing summary" >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY

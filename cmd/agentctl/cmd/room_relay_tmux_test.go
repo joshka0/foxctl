@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/jkatigb/agentctl/internal/agentpane"
 	"github.com/jkatigb/agentctl/internal/domain/agent"
 	"github.com/jkatigb/agentctl/internal/tmuxbridge"
 )
@@ -13,7 +14,7 @@ import (
 const relayTestFieldSep = "\x1f"
 
 // relayTestTmuxListFormat matches internal/tmuxbridge listFormat (describePane metadata line).
-var relayTestTmuxListFormat = "#{pane_id}" + relayTestFieldSep + "#{session_name}" + relayTestFieldSep + "#{window_index}" + relayTestFieldSep + "#{pane_index}" + relayTestFieldSep + "#{window_name}" + relayTestFieldSep + "#{pane_pid}" + relayTestFieldSep + "#{pane_width}" + relayTestFieldSep + "#{pane_height}" + relayTestFieldSep + "#{@name}" + relayTestFieldSep + "#{pane_current_path}" + relayTestFieldSep + "#{pane_current_command}" + relayTestFieldSep + "#{pane_active}"
+var relayTestTmuxListFormat = "#{pane_id}" + relayTestFieldSep + "#{session_name}" + relayTestFieldSep + "#{window_index}" + relayTestFieldSep + "#{pane_index}" + relayTestFieldSep + "#{window_name}" + relayTestFieldSep + "#{pane_pid}" + relayTestFieldSep + "#{pane_width}" + relayTestFieldSep + "#{pane_height}" + relayTestFieldSep + "#{@name}" + relayTestFieldSep + "#{pane_current_path}" + relayTestFieldSep + "#{pane_current_command}" + relayTestFieldSep + "#{pane_active}" + relayTestFieldSep + "#{@agentctl_participant}" + relayTestFieldSep + "#{@agentctl_provider}" + relayTestFieldSep + "#{@agentctl_room_id}" + relayTestFieldSep + "#{@agentctl_wrapped}"
 
 // relayTmuxRecordingRunner implements tmuxbridge.Runner for tests: repeats list-sessions for
 // detectSocket, exact matches for pane probes and send-keys (asserting text + Enter delivery).
@@ -196,5 +197,290 @@ func TestRelayRoomMessageDirectToHumanAPrefersCoordinatorWhenLegacyHumanARowExis
 	}
 	if len(got.DeliveredTo) != 1 || got.DeliveredTo[0] != "%13" {
 		t.Fatalf("DeliveredTo=%v want [%%13]", got.DeliveredTo)
+	}
+}
+
+func TestCollectRelayParticipantsSkipsSender(t *testing.T) {
+	participants, skipped := collectRelayParticipants(agent.RoomSummary{
+		Members: []agent.RoomMember{
+			{ActorID: "agent-a", Backend: "tmux", Session: "s", PaneID: "%1"},
+			{ActorID: "agent-b", Backend: "tmux", Session: "s", PaneID: "%2"},
+			{ActorID: "agent-c", Backend: "tmux", Session: "s", PaneID: "%3"},
+		},
+	}, agent.BoardMessage{Sender: "agent-b"})
+	if len(participants) != 2 {
+		t.Fatalf("participants=%d want 2", len(participants))
+	}
+	if len(skipped) != 1 || skipped[0] != "agent-b" {
+		t.Fatalf("skipped=%v want [agent-b]", skipped)
+	}
+	for _, p := range participants {
+		if p.ActorID == "agent-b" {
+			t.Fatal("sender should not be in participants")
+		}
+	}
+}
+
+func TestCollectRelayParticipantsSkipsUnbound(t *testing.T) {
+	participants, _ := collectRelayParticipants(agent.RoomSummary{
+		Members: []agent.RoomMember{
+			{ActorID: "bound-a", Backend: "tmux", Session: "s", PaneID: "%1"},
+			{ActorID: "unbound-a", Unbound: true},
+		},
+	}, agent.BoardMessage{Sender: "sender"})
+	if len(participants) != 1 {
+		t.Fatalf("participants=%d want 1 (unbound skipped)", len(participants))
+	}
+	if participants[0].ActorID != "bound-a" {
+		t.Fatalf("participants[0].ActorID=%q want bound-a", participants[0].ActorID)
+	}
+}
+
+func TestCollectRelayParticipantsDirectRecipient(t *testing.T) {
+	participants, skipped := collectRelayParticipants(agent.RoomSummary{
+		Members: []agent.RoomMember{
+			{ActorID: "agent-a", Backend: "tmux", Session: "s", PaneID: "%1"},
+			{ActorID: "agent-b", Backend: "tmux", Session: "s", PaneID: "%2"},
+		},
+	}, agent.BoardMessage{Sender: "sender", Recipient: "agent-a"})
+	if len(participants) != 1 || participants[0].ActorID != "agent-a" {
+		t.Fatalf("participants=%v want only agent-a", participants)
+	}
+	if len(skipped) != 1 || skipped[0] != "agent-b" {
+		t.Fatalf("skipped=%v want [agent-b]", skipped)
+	}
+}
+
+func TestCollectRelayParticipantsAllowsDirectSelfRecipient(t *testing.T) {
+	participants, skipped := collectRelayParticipants(agent.RoomSummary{
+		Members: []agent.RoomMember{
+			{ActorID: "codex-a", Backend: "tmux", Session: "s", PaneID: "%1"},
+			{ActorID: "agent-b", Backend: "tmux", Session: "s", PaneID: "%2"},
+		},
+	}, agent.BoardMessage{Sender: "codex-a", Recipient: "codex-a"})
+	if len(participants) != 1 || participants[0].ActorID != "codex-a" {
+		t.Fatalf("participants=%v want only codex-a", participants)
+	}
+	if len(skipped) != 1 || skipped[0] != "agent-b" {
+		t.Fatalf("skipped=%v want [agent-b]", skipped)
+	}
+}
+
+func TestMergeRelayResultsDeduplicates(t *testing.T) {
+	primary := roomRelayResult{
+		Backend:        "participant_transport",
+		DeliveredCount: 1,
+		DeliveredTo:    []string{"agent-a"},
+	}
+	legacy := roomRelayResult{
+		Backend:        "auto",
+		DeliveredCount: 2,
+		DeliveredTo:    []string{"agent-a", "agent-b"},
+		FailedMembers:  []string{"agent-c"},
+	}
+	members := []agent.RoomMember{
+		{ActorID: "agent-a", Backend: "tmux", PaneID: "%1"},
+		{ActorID: "agent-b", Backend: "tmux", PaneID: "%2"},
+		{ActorID: "agent-c", Backend: "tmux", PaneID: "%3"},
+	}
+	merged := mergeRelayResults(primary, legacy, members)
+	if merged.DeliveredCount != 2 {
+		t.Fatalf("DeliveredCount=%d want 2 (agent-a deduped)", merged.DeliveredCount)
+	}
+	if merged.FailedCount != 1 {
+		t.Fatalf("FailedCount=%d want 1", merged.FailedCount)
+	}
+}
+
+func TestMergeRelayResultsDedupesPaneTargetToActorID(t *testing.T) {
+	// Key test: participant path records "claude-a", legacy records "%42" (same participant).
+	// mergeRelayResults must dedupe them using the member list.
+	primary := roomRelayResult{
+		Backend:        "participant_transport",
+		DeliveredCount: 1,
+		DeliveredTo:    []string{"claude-a"},
+	}
+	legacy := roomRelayResult{
+		Backend:        "auto",
+		DeliveredCount: 1,
+		DeliveredTo:    []string{"%42"},
+	}
+	members := []agent.RoomMember{
+		{ActorID: "claude-a", Backend: "tmux", Session: "collab", PaneID: "%42"},
+	}
+	merged := mergeRelayResults(primary, legacy, members)
+	// Primary had 1, legacy added 0 (deduped via pane→actor mapping).
+	// merged.DeliveredCount = primary's 1 + 0 from legacy = 1.
+	if merged.DeliveredCount != 1 {
+		t.Fatalf("DeliveredCount=%d want 1 (legacy %%42 deduped against claude-a, no additions)", merged.DeliveredCount)
+	}
+	// DeliveredTo should have exactly 1 entry: claude-a.
+	if len(merged.DeliveredTo) != 1 || merged.DeliveredTo[0] != "claude-a" {
+		t.Fatalf("DeliveredTo=%v want only [claude-a]", merged.DeliveredTo)
+	}
+}
+
+func TestCollectRelayParticipantsUsesParticipantStateNotPresentation(t *testing.T) {
+	// Key test: a member with Backend/Session/PaneID (presentation=detached)
+	// should still be included because CanTriggerTurn=true via transport endpoint.
+	participants, _ := collectRelayParticipants(agent.RoomSummary{
+		Members: []agent.RoomMember{
+			{ActorID: "claude-a", Backend: "tmux", Session: "collab", PaneID: "%42"},
+		},
+	}, agent.BoardMessage{Sender: "sender"})
+	if len(participants) != 1 {
+		t.Fatalf("participants=%d want 1", len(participants))
+	}
+	if !participants[0].State.CanTriggerTurn {
+		t.Error("CanTriggerTurn=false, want true (transport-first, presentation-independent)")
+	}
+	if participants[0].State.Presentation != agent.PresentationDetached {
+		t.Errorf("Presentation=%q want detached", participants[0].State.Presentation)
+	}
+}
+
+func TestRelayViaParticipantsUsesPaneSocket(t *testing.T) {
+	// When a participant has TransportKind=pane_socket, relayViaParticipants
+	// should use deliverAgentPane, not tmux DeliverTextWithOptions.
+	origDeliver := deliverAgentPane
+	defer func() { deliverAgentPane = origDeliver }()
+
+	socketPath := "/tmp/test-agentctl-socket"
+	calls := 0
+	deliverAgentPane = func(ctx context.Context, socket string, msg agentpane.ControlMessage) (agentpane.ControlResponse, error) {
+		calls++
+		if socket != socketPath {
+			t.Fatalf("socket=%q want %q", socket, socketPath)
+		}
+		if msg.Kind != "room_message" {
+			t.Fatalf("kind=%q want room_message", msg.Kind)
+		}
+		if msg.Recipient != "droid-a" {
+			t.Fatalf("recipient=%q want droid-a", msg.Recipient)
+		}
+		if msg.SubmitMode != agentpane.SubmitModeComposerCtrlEnter {
+			t.Fatalf("submit mode=%q want %q", msg.SubmitMode, agentpane.SubmitModeComposerCtrlEnter)
+		}
+		return agentpane.ControlResponse{OK: true, BytesWritten: len(msg.Content)}, nil
+	}
+
+	room := agent.RoomSummary{
+		ID: "test-room",
+		Members: []agent.RoomMember{
+			{
+				ActorID:           "droid-a",
+				Backend:           "tmux",
+				Session:           "collab",
+				PaneID:            "%42",
+				TransportEndpoint: socketPath,
+				TransportKind:     agent.PaneSocketTransportKind,
+			},
+		},
+	}
+	// Pane socket delivery doesn't use tmux client, but we still need a valid one.
+	client := tmuxbridge.NewWithRunner(&relayTmuxRecordingRunner{
+		responses: map[string]struct {
+			stdout string
+			stderr string
+			err    error
+		}{},
+	}, map[string]string{})
+	result := relayViaParticipants(context.Background(), client, room, agent.BoardMessage{
+		Sender: "sender", Body: "hello", Subject: "test",
+	})
+	if calls != 1 {
+		t.Fatalf("deliverAgentPane calls=%d want 1", calls)
+	}
+	if result.DeliveredCount != 1 {
+		t.Fatalf("DeliveredCount=%d want 1", result.DeliveredCount)
+	}
+	if len(result.DeliveredTo) != 1 || result.DeliveredTo[0] != "droid-a" {
+		t.Fatalf("DeliveredTo=%v want [droid-a]", result.DeliveredTo)
+	}
+}
+
+func TestParticipantTransportTargetUsesSocketEndpointWithoutBackend(t *testing.T) {
+	target, ok := participantTransportTarget(agent.ParticipantState{
+		ActorID:           "codex-a",
+		CanTriggerTurn:    true,
+		TransportEndpoint: "/tmp/agentctl-pane/room/codex-a.sock",
+	})
+	if !ok {
+		t.Fatal("participantTransportTarget() ok=false, want true")
+	}
+	if target != "/tmp/agentctl-pane/room/codex-a.sock" {
+		t.Fatalf("participantTransportTarget() = %q, want socket endpoint", target)
+	}
+}
+
+func TestRelayViaParticipantsUsesPaneSocketWithoutBackend(t *testing.T) {
+	origDeliver := deliverAgentPane
+	defer func() { deliverAgentPane = origDeliver }()
+
+	socketPath := "/tmp/test-agentctl-socket-no-backend"
+	calls := 0
+	deliverAgentPane = func(ctx context.Context, socket string, msg agentpane.ControlMessage) (agentpane.ControlResponse, error) {
+		calls++
+		if socket != socketPath {
+			t.Fatalf("socket=%q want %q", socket, socketPath)
+		}
+		if msg.Recipient != "codex-a" {
+			t.Fatalf("recipient=%q want codex-a", msg.Recipient)
+		}
+		if msg.SubmitMode != agentpane.SubmitModeComposerCtrlEnter {
+			t.Fatalf("submit mode=%q want %q", msg.SubmitMode, agentpane.SubmitModeComposerCtrlEnter)
+		}
+		return agentpane.ControlResponse{OK: true, BytesWritten: len(msg.Content)}, nil
+	}
+
+	room := agent.RoomSummary{
+		ID: "test-room",
+		Members: []agent.RoomMember{
+			{
+				ActorID:           "codex-a",
+				TransportEndpoint: socketPath,
+				TransportKind:     agent.PaneSocketTransportKind,
+			},
+		},
+	}
+	client := tmuxbridge.NewWithRunner(&relayTmuxRecordingRunner{
+		responses: map[string]struct {
+			stdout string
+			stderr string
+			err    error
+		}{},
+	}, map[string]string{})
+	result := relayViaParticipants(context.Background(), client, room, agent.BoardMessage{
+		Sender: "sender", Body: "hello", Subject: "test",
+	})
+	if calls != 1 {
+		t.Fatalf("deliverAgentPane calls=%d want 1", calls)
+	}
+	if result.DeliveredCount != 1 {
+		t.Fatalf("DeliveredCount=%d want 1", result.DeliveredCount)
+	}
+	if len(result.DeliveredTo) != 1 || result.DeliveredTo[0] != "codex-a" {
+		t.Fatalf("DeliveredTo=%v want [codex-a]", result.DeliveredTo)
+	}
+}
+
+func TestCollectRelayParticipantsIncludesTransportKind(t *testing.T) {
+	participants, _ := collectRelayParticipants(agent.RoomSummary{
+		Members: []agent.RoomMember{
+			{
+				ActorID:           "claude-a",
+				Backend:           "zellij",
+				Session:           "dev",
+				PaneID:            "terminal_0",
+				TransportEndpoint: "/tmp/test.sock",
+				TransportKind:     agent.PaneSocketTransportKind,
+			},
+		},
+	}, agent.BoardMessage{Sender: "sender"})
+	if len(participants) != 1 {
+		t.Fatalf("participants=%d want 1", len(participants))
+	}
+	if !participants[0].isPaneSocketDelivery() {
+		t.Error("isPaneSocketDelivery=false, want true for pane_socket transport")
 	}
 }

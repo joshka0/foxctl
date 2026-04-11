@@ -193,25 +193,26 @@ func IsOverseerSender(sender string) bool {
 
 // RoomSummary is a derived read model over room-scoped board messages.
 type RoomSummary struct {
-	ID               string       `json:"id"`
-	WorkspaceID      string       `json:"workspace_id"`
-	Stream           string       `json:"stream"`
-	Title            string       `json:"title"`
-	Description      string       `json:"description,omitempty"`
-	DispatchPolicy   string       `json:"dispatch_policy,omitempty"`
-	DispatchAgentIDs []string     `json:"dispatch_agent_ids,omitempty"`
-	CreatedAt        time.Time    `json:"created_at,omitempty"`
-	UpdatedAt        time.Time    `json:"updated_at,omitempty"`
-	LatestSubject    string       `json:"latest_subject,omitempty"`
-	LatestPreview    string       `json:"latest_preview,omitempty"`
-	LatestSender     string       `json:"latest_sender,omitempty"`
-	LatestMessageAt  time.Time    `json:"latest_message_at"`
-	MessageCount     int          `json:"message_count"`
-	UnreadCount      int          `json:"unread_count"`
-	Participants     []string     `json:"participants,omitempty"`
-	TaskIDs          []string     `json:"task_ids,omitempty"`
-	Members          []RoomMember `json:"members,omitempty"`
-	ArchivedAt       *time.Time   `json:"archived_at,omitempty"`
+	ID               string         `json:"id"`
+	WorkspaceID      string         `json:"workspace_id"`
+	Stream           string         `json:"stream"`
+	Title            string         `json:"title"`
+	Description      string         `json:"description,omitempty"`
+	DispatchPolicy   string         `json:"dispatch_policy,omitempty"`
+	DispatchAgentIDs []string       `json:"dispatch_agent_ids,omitempty"`
+	CreatedAt        time.Time      `json:"created_at,omitempty"`
+	UpdatedAt        time.Time      `json:"updated_at,omitempty"`
+	LatestSubject    string         `json:"latest_subject,omitempty"`
+	LatestPreview    string         `json:"latest_preview,omitempty"`
+	LatestSender     string         `json:"latest_sender,omitempty"`
+	LatestMessageAt  time.Time      `json:"latest_message_at"`
+	MessageCount     int            `json:"message_count"`
+	UnreadCount      int            `json:"unread_count"`
+	Participants     []string       `json:"participants,omitempty"`
+	TaskIDs          []string       `json:"task_ids,omitempty"`
+	Members          []RoomMember   `json:"members,omitempty"`
+	ArchivedAt       *time.Time     `json:"archived_at,omitempty"`
+	SandboxConfig    *SandboxConfig `json:"sandbox_config,omitempty"`
 }
 
 // CompactRoomSummaryForInbox returns a small JSON-friendly map for inbox-style responses.
@@ -262,21 +263,82 @@ type RoomMember struct {
 	PaneID   string    `json:"pane_id,omitempty"`
 	Unbound  bool      `json:"unbound,omitempty"`
 	JoinedAt time.Time `json:"joined_at"`
+	// TransportEndpoint is the unix socket path of an agentctl pane serve
+	// wrapper that owns this participant's child PTY. Empty means no pane
+	// wrapper is registered; use the legacy mux-pane path instead.
+	TransportEndpoint string `json:"transport_endpoint,omitempty"`
+	// TransportKind identifies the registered transport type:
+	// "pane_socket" when a pane wrapper is registered,
+	// "mux_pane" for legacy direct mux injection, or "" (unknown/none).
+	TransportKind string `json:"transport_kind,omitempty"`
+}
+
+// SandboxConfig holds sandbox-related metadata for a room that was created
+// with the --sandbox flag. When non-nil, the room has an associated git
+// worktree, tmux session, and gateway terminal route.
+type SandboxConfig struct {
+	// WorktreePath is the absolute path to the git worktree directory.
+	WorktreePath string `json:"worktree_path,omitempty"`
+	// WorktreeBranch is the branch name checked out in the worktree.
+	WorktreeBranch string `json:"worktree_branch,omitempty"`
+	// TmuxSession is the tmux session name for this sandbox room.
+	TmuxSession string `json:"tmux_session,omitempty"`
+	// TerminalURL is the gateway URL for web terminal access.
+	TerminalURL string `json:"terminal_url,omitempty"`
+	// Runtime is the sandbox runtime type ("worktree" or "opensandbox").
+	// Defaults to "worktree" when empty.
+	Runtime string `json:"runtime,omitempty"`
+	// BaseRef is the git ref the worktree was branched from.
+	BaseRef string `json:"base_ref,omitempty"`
+
+	// OpenSandbox-specific fields (set when Runtime == "opensandbox").
+
+	// ContainerID is the OpenSandbox container identifier.
+	ContainerID string `json:"container_id,omitempty"`
+	// ContainerEndpoint is the execd endpoint URL for running commands
+	// inside the container.
+	ContainerEndpoint string `json:"container_endpoint,omitempty"`
+	// ContainerExpiresAt is the RFC3339 timestamp when the container
+	// auto-expires (set from --sandbox-ttl).
+	ContainerExpiresAt string `json:"container_expires_at,omitempty"`
+	// ContainerCPU is the CPU resource limit (e.g. "500m").
+	ContainerCPU string `json:"container_cpu,omitempty"`
+	// ContainerMemory is the memory resource limit (e.g. "512Mi").
+	ContainerMemory string `json:"container_memory,omitempty"`
+	// Fallback is true when the sandbox was created as a worktree because
+	// OpenSandbox was unavailable.
+	Fallback bool `json:"fallback,omitempty"`
+}
+
+// IsSandbox returns true if the room has sandbox configuration.
+// A sandbox is identified by having either a worktree path or an
+// OpenSandbox container ID.
+func (sc *SandboxConfig) IsSandbox() bool {
+	return sc != nil && (sc.WorktreePath != "" || sc.ContainerID != "")
+}
+
+// EffectiveRuntime returns the sandbox runtime, defaulting to "worktree".
+func (sc *SandboxConfig) EffectiveRuntime() string {
+	if sc == nil || sc.Runtime == "" {
+		return "worktree"
+	}
+	return sc.Runtime
 }
 
 // Room is the first-class metadata record for a room.
 type Room struct {
-	ID               string       `json:"id"`
-	WorkspaceID      string       `json:"workspace_id"`
-	Stream           string       `json:"stream"`
-	Title            string       `json:"title"`
-	Description      string       `json:"description,omitempty"`
-	DispatchPolicy   string       `json:"dispatch_policy,omitempty"`
-	DispatchAgentIDs []string     `json:"dispatch_agent_ids,omitempty"`
-	CreatedAt        time.Time    `json:"created_at"`
-	UpdatedAt        time.Time    `json:"updated_at"`
-	Members          []RoomMember `json:"members,omitempty"`
-	ArchivedAt       *time.Time   `json:"archived_at,omitempty"`
+	ID               string         `json:"id"`
+	WorkspaceID      string         `json:"workspace_id"`
+	Stream           string         `json:"stream"`
+	Title            string         `json:"title"`
+	Description      string         `json:"description,omitempty"`
+	DispatchPolicy   string         `json:"dispatch_policy,omitempty"`
+	DispatchAgentIDs []string       `json:"dispatch_agent_ids,omitempty"`
+	CreatedAt        time.Time      `json:"created_at"`
+	UpdatedAt        time.Time      `json:"updated_at"`
+	Members          []RoomMember   `json:"members,omitempty"`
+	ArchivedAt       *time.Time     `json:"archived_at,omitempty"`
+	SandboxConfig    *SandboxConfig `json:"sandbox_config,omitempty"`
 }
 
 // RoomStreamName builds the canonical board stream for a room id.

@@ -7,12 +7,18 @@ import type {
   AgentSpawnResponse,
   CoChangeHit,
   MailboxListResponse,
+  MailboxMessage,
   BulkResolveRequest,
   Room,
+  RoomMember,
   RoomStatus,
   RoomInbox,
   RoomTask,
   RoomLoop,
+  MuxPane,
+  MuxPaneCapture,
+  RoomSendMessageResult,
+  RoomReminder,
   BlackboardListResponse,
   LogsListResponse,
   AgentSession,
@@ -981,6 +987,32 @@ export async function listRoomMessages(
   }>(`/rooms/${encodeURIComponent(roomId)}/messages?${query}`);
 }
 
+export async function updateRoomMemberBinding(
+  roomId: string,
+  actorId: string,
+  params: {
+    workspace_id: string;
+    backend?: string;
+    session?: string;
+    pane_id?: string;
+    unbound?: boolean;
+    transport_endpoint?: string;
+    transport_kind?: string;
+  },
+): Promise<{ member?: RoomMember }> {
+  return request(`/rooms/${encodeURIComponent(roomId)}/members/${encodeURIComponent(actorId)}/binding?workspace_id=${encodeURIComponent(params.workspace_id)}`, {
+    method: "PUT",
+    body: JSON.stringify({
+      backend: params.backend,
+      session: params.session,
+      pane_id: params.pane_id,
+      unbound: params.unbound,
+      transport_endpoint: params.transport_endpoint,
+      transport_kind: params.transport_kind,
+    }),
+  });
+}
+
 export async function sendRoomMessage(
   roomId: string,
   params: {
@@ -1000,18 +1032,54 @@ export async function sendRoomMessage(
     dispatch_agent_ids?: string[];
     context?: Record<string, unknown>;
   },
-): Promise<{
-  id: string;
-  room_id: string;
-  stream: string;
-  status: string;
-  dispatched?: number;
-  skipped?: number;
-}> {
+): Promise<RoomSendMessageResult> {
   return request(`/rooms/${encodeURIComponent(roomId)}/messages`, {
     method: "POST",
     body: JSON.stringify(params),
   });
+}
+
+export async function listRoomReminders(
+  roomId: string,
+  params: { workspace_id: string; all?: boolean },
+): Promise<{ room_id: string; count: number; reminders: RoomReminder[] }> {
+  const query = new URLSearchParams()
+  query.set("workspace_id", params.workspace_id)
+  if (params.all) query.set("all", String(params.all))
+  return request(`/rooms/${encodeURIComponent(roomId)}/reminders?${query}`)
+}
+
+export async function addRoomReminder(
+  roomId: string,
+  params: {
+    workspace_id: string
+    sender: string
+    recipient: string
+    subject?: string
+    body: string
+    every: string
+    max_iterations?: number
+    ack_required?: boolean
+    reply_expected?: boolean
+    interrupt?: boolean
+    allow_passive?: boolean
+  },
+): Promise<{ room_id: string; message: MailboxMessage; reminder: RoomReminder; live_relay?: RoomSendMessageResult["live_relay"] }> {
+  return request(`/rooms/${encodeURIComponent(roomId)}/reminders`, {
+    method: "POST",
+    body: JSON.stringify(params),
+  })
+}
+
+export async function cancelRoomReminder(
+  roomId: string,
+  reminderId: string,
+  params: { workspace_id: string; actor?: string },
+): Promise<{ room_id: string; cancelled: boolean; reminder: RoomReminder }> {
+  return request(`/rooms/${encodeURIComponent(roomId)}/reminders/${encodeURIComponent(reminderId)}/cancel?workspace_id=${encodeURIComponent(params.workspace_id)}`, {
+    method: "POST",
+    body: JSON.stringify({ actor: params.actor }),
+  })
 }
 
 export async function getRoomStatus(
@@ -1115,6 +1183,34 @@ export async function getRoomLoop(
     throw new Error("Room loop payload missing");
   }
   return response.loop;
+}
+
+export async function listMuxPanes(
+  backend: "tmux" | "zellij",
+  params?: { session?: string },
+): Promise<MuxPane[]> {
+  const query = new URLSearchParams();
+  query.set("backend", backend);
+  if (params?.session) query.set("session", params.session);
+  const response = await request<{ panes?: MuxPane[] }>(`/mux/panes?${query}`);
+  return response.panes ?? [];
+}
+
+export async function readMuxPane(
+  target: string,
+  params?: { backend?: "tmux" | "zellij"; lines?: number },
+): Promise<MuxPaneCapture> {
+  const query = new URLSearchParams()
+  query.set("target", target)
+  query.set("backend", params?.backend || "tmux")
+  if (typeof params?.lines === "number" && params.lines > 0) {
+    query.set("lines", String(params.lines))
+  }
+  const response = await request<{ capture?: MuxPaneCapture }>(`/mux/read?${query}`)
+  if (!response.capture) {
+    throw new Error("Mux pane capture missing")
+  }
+  return response.capture
 }
 
 export async function ackRoomMessage(

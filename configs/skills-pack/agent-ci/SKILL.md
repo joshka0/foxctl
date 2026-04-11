@@ -27,9 +27,17 @@ docker pull ghcr.io/actions/actions-runner:latest
 ```bash
 # Run the local CI workflow
 npx agent-ci run --quiet --workflow .github/workflows/ci-local.yml
+
+# Optional: collapse matrix jobs during debugging
+npx agent-ci run --quiet --workflow .github/workflows/ci-local.yml --no-matrix
+
+# Upstream-supported, but broader: run all relevant workflows for the branch
+npx agent-ci run --quiet --all
 ```
 
-This runs all jobs in parallel: static-analysis, unit-tests, race-tests, build, cgo-build-and-tests, integration-tests.
+For this repo, prefer the explicit local workflow over `--all`. It is the narrower and safer default, and it carries repo-local container limits for OrbStack/Docker.
+
+`--all` is valid upstream, but use it only as a final confirmation pass when you specifically want every relevant workflow selection rule to apply.
 
 ## If a step fails
 
@@ -49,7 +57,9 @@ npx agent-ci abort --name <runner-name>
 - agent-ci emulates the GitHub Actions API locally using the real `actions-runner` binary.
 - Your working tree is synced into the container — uncommitted changes are included.
 - `actions/checkout`, `actions/setup-go`, and `actions/cache` work natively.
-- The `ci-local.yml` workflow uses `runs-on: ubuntu-latest` with inline apt-get for build deps.
+- The `ci-local.yml` workflow in this repo uses the local `agentctl-ci:go1.26.1` container image.
+- Local CI container resource caps belong in the workflow `container.options`, not in ad hoc shell wrappers.
+- On macOS, OrbStack is the preferred Docker provider, but broad CI should still be treated as host-load-sensitive.
 
 ## Files
 
@@ -67,7 +77,9 @@ container/image handling (it uses `runs-on` instead of `container:` for local co
 
 ## Operating rules
 - Always run `npx agent-ci run --quiet --workflow .github/workflows/ci-local.yml` before opening an MR.
+- Prefer `--no-matrix` during failure triage unless full matrix coverage is the thing you are validating.
 - If CI fails, fix the issue locally and retry before pushing.
 - CI was green before you started. Any failure is from your changes — do not assume pre-existing failures.
 - The `label-ai` and `release` jobs from `ci.yml` are intentionally omitted from `ci-local.yml` (they need GitHub API).
 - Do NOT push to trigger remote CI when agent-ci can run it locally — it's instant and free.
+- On a busy host, do not treat `agent-ci` as the first hammer. Start with the narrow failing lane, then use agent-ci as the final workflow-shaped confirmation.

@@ -4,14 +4,17 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/rs/zerolog"
 
 	"github.com/jkatigb/agentctl/internal/platform/config"
+	"github.com/jkatigb/agentctl/internal/web/api"
 )
 
 const (
@@ -190,6 +193,14 @@ func TestServerHandler_RoomBoardWorkflowSmoke(t *testing.T) {
 func newSmokeTestServer(t *testing.T) *httptest.Server {
 	t.Helper()
 
+	originalRelayHook := api.RoomSendLiveRelayHookForTests()
+	api.SetRoomSendLiveRelayHookForTests(func(ctx context.Context, workspaceID, roomID, messageID string) ([]api.RoomLiveRelayResult, error) {
+		return nil, nil
+	})
+	t.Cleanup(func() {
+		api.SetRoomSendLiveRelayHookForTests(originalRelayHook)
+	})
+
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 
@@ -209,26 +220,41 @@ func newSmokeTestServer(t *testing.T) *httptest.Server {
 func mustJSONRequest(t *testing.T, server *httptest.Server, method, path, body string) *http.Response {
 	t.Helper()
 
-	var reqBody *bytes.Reader
-	if body != "" {
-		reqBody = bytes.NewReader([]byte(body))
-	} else {
-		reqBody = bytes.NewReader(nil)
-	}
-	req, err := http.NewRequest(method, server.URL+path, reqBody)
-	if err != nil {
-		t.Fatalf("new request %s %s: %v", method, path, err)
-	}
-	if body != "" {
-		req.Header.Set("Content-Type", "application/json")
-	}
+	client := server.Client()
+	deadline := time.Now().Add(5 * time.Second)
+	var lastErr error
+	for time.Now().Before(deadline) {
+		var reqBody *bytes.Reader
+		if body != "" {
+			reqBody = bytes.NewReader([]byte(body))
+		} else {
+			reqBody = bytes.NewReader(nil)
+		}
+		req, err := http.NewRequest(method, server.URL+path, reqBody)
+		if err != nil {
+			t.Fatalf("new request %s %s: %v", method, path, err)
+		}
+		if body != "" {
+			req.Header.Set("Content-Type", "application/json")
+		}
 
-	resp, err := server.Client().Do(req)
-	if err != nil {
-		t.Fatalf("do request %s %s: %v", method, path, err)
+		resp, err := client.Do(req)
+		if err == nil {
+			payload, readErr := io.ReadAll(resp.Body)
+			_ = resp.Body.Close()
+			if readErr != nil {
+				lastErr = readErr
+				time.Sleep(25 * time.Millisecond)
+				continue
+			}
+			resp.Body = io.NopCloser(bytes.NewReader(payload))
+			return resp
+		}
+		lastErr = err
+		time.Sleep(25 * time.Millisecond)
 	}
-	t.Cleanup(func() { _ = resp.Body.Close() })
-	return resp
+	t.Fatalf("do request %s %s: %v", method, path, lastErr)
+	return nil
 }
 
 func decodeJSONMap(t *testing.T, resp *http.Response) map[string]any {

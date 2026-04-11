@@ -118,7 +118,7 @@ func buildSampleFile(t *testing.T, path string) {
 		if _, err := builder.WriteString("needle line "); err != nil {
 			t.Fatalf("build sample prefix: %v", err)
 		}
-		if _, err := builder.WriteString(fmt.Sprint(i)); err != nil {
+		if _, err := fmt.Fprint(&builder, i); err != nil {
 			t.Fatalf("build sample idx: %v", err)
 		}
 		if _, err := builder.WriteString("\n"); err != nil {

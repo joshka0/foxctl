@@ -1,13 +1,15 @@
 name: CI (local)
 
-# Local-only workflow for agent-ci. Uses the local agentctl-ci:go1.26.1 image
-# instead of ghcr.io/${{ github.repository_owner }}/agentctl-ci:go1.26.1.
+# Local-only workflow for agent-ci. Uses the local registry mirror
+# localhost:5000/agentctl-ci:go1.26.1 instead of ghcr.io/${{ github.repository_owner }}/agentctl-ci:go1.26.1.
 #
 # Usage:
 #   npx agent-ci run --workflow .github/workflows/ci-local.yml
 #
 # Build the CI image first:
 #   docker build -t agentctl-ci:go1.26.1 -f Dockerfile.ci .
+#   docker tag agentctl-ci:go1.26.1 localhost:5000/agentctl-ci:go1.26.1
+#   docker push localhost:5000/agentctl-ci:go1.26.1
 
 on:
   pull_request:
@@ -31,32 +33,30 @@ env:
 jobs:
   static-analysis:
     runs-on: ubuntu-latest
+    container:
+      image: localhost:5000/agentctl-ci:go1.26.1
+      options: --memory=6g --memory-swap=6g --cpus=4
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Setup Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: "1.26.1"
-
-      - name: Install build tools
-        run: |
-          sudo apt-get update && sudo apt-get install -y --no-install-recommends make gcc libc6-dev
-          sudo mkdir -p /home/runner/.cache/go-build /home/runner/go/pkg/mod
-          sudo chown -R runner:runner /home/runner/.cache /home/runner/go
-          go install mvdan.cc/gofumpt@v0.7.0
-          go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.8.0
-
       - name: Format (gofumpt)
         run: |
+          export PATH=/usr/local/go/bin:/go/bin:$PATH
           cd "$GITHUB_WORKSPACE"
+          before_diff="$(mktemp)"
+          after_diff="$(mktemp)"
+          git -c core.filemode=false diff --binary >"$before_diff" || true
           make fmt
-          git -c core.filemode=false diff --exit-code || (echo 'Formatting changed files. Run make fmt locally.' && exit 1)
+          git -c core.filemode=false diff --binary >"$after_diff" || true
+          if ! cmp -s "$before_diff" "$after_diff"; then
+            echo 'Formatting changed files. Run make fmt locally.'
+            exit 1
+          fi
 
       - name: Lint (golangci-lint)
-        run: make lint
+        run: export PATH=/usr/local/go/bin:/go/bin:$PATH && make lint
 
       - name: Check large files
         run: make check-large-files
@@ -65,112 +65,82 @@ jobs:
         run: make check-tech-debt
 
   unit-tests:
+    needs: [static-analysis]
     runs-on: ubuntu-latest
+    container:
+      image: localhost:5000/agentctl-ci:go1.26.1
+      options: --memory=6g --memory-swap=6g --cpus=4
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 1
-
-      - name: Setup Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: "1.26.1"
 
       - name: Unit tests
         run: |
-          sudo mkdir -p /home/runner/.cache/go-build
-          sudo chown -R runner:runner /home/runner/.cache
-          CGO_ENABLED=0 go test -short -v -count=1 ./...
+          export PATH=/usr/local/go/bin:/go/bin:$PATH
+          CGO_ENABLED=0 go test -short -v -count=1 -timeout 20m ./...
 
   race-tests:
+    needs: [cgo-build-and-tests]
     runs-on: ubuntu-latest
+    container:
+      image: localhost:5000/agentctl-ci:go1.26.1
+      options: --memory=6g --memory-swap=6g --cpus=4
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 1
-
-      - name: Setup Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: "1.26.1"
-
-      - name: Install build tools
-        run: |
-          sudo apt-get update && sudo apt-get install -y --no-install-recommends make gcc libc6-dev
-          sudo mkdir -p /home/runner/.cache/go-build /home/runner/go/pkg/mod
-          sudo chown -R runner:runner /home/runner/.cache /home/runner/go
 
       - name: Race tests
-        run: make test-race
+        run: export PATH=/usr/local/go/bin:/go/bin:$PATH && make test-race
 
   build:
+    needs: [unit-tests]
     runs-on: ubuntu-latest
+    container:
+      image: localhost:5000/agentctl-ci:go1.26.1
+      options: --memory=6g --memory-swap=6g --cpus=4
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 1
-
-      - name: Setup Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: "1.26.1"
-
-      - name: Install build tools
-        run: |
-          sudo apt-get update && sudo apt-get install -y --no-install-recommends make gcc libc6-dev
-          sudo mkdir -p /home/runner/.cache/go-build /home/runner/go/pkg/mod
-          sudo chown -R runner:runner /home/runner/.cache /home/runner/go
 
       - name: Build CLI
-        run: make build
+        run: export PATH=/usr/local/go/bin:/go/bin:$PATH && make build
 
       - name: Build skills pack
-        run: make skills-build
+        run: export PATH=/usr/local/go/bin:/go/bin:$PATH && make skills-build
 
       - name: Check skill manifests (policy)
-        run: go run ./scripts/checkmanifests
+        run: export PATH=/usr/local/go/bin:/go/bin:$PATH && go run ./scripts/checkmanifests
 
   cgo-build-and-tests:
+    needs: [build]
     runs-on: ubuntu-latest
+    container:
+      image: localhost:5000/agentctl-ci:go1.26.1
+      options: --memory=6g --memory-swap=6g --cpus=4
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 1
-
-      - name: Setup Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: "1.26.1"
-
-      - name: Install build tools
-        run: |
-          sudo apt-get update && sudo apt-get install -y --no-install-recommends make gcc libc6-dev libsqlite3-dev
-          sudo mkdir -p /home/runner/.cache/go-build /home/runner/go/pkg/mod
-          sudo chown -R runner:runner /home/runner/.cache /home/runner/go
 
       - name: Build CLI (CGO + libsqlite3)
-        run: make build-cgo
+        run: export PATH=/usr/local/go/bin:/go/bin:$PATH && make build-cgo
 
       - name: Unit tests (CGO + libsqlite3)
-        run: make test-cgo-short
+        run: export PATH=/usr/local/go/bin:/go/bin:$PATH && make test-cgo-short
 
   integration-tests:
+    needs: [race-tests]
     runs-on: ubuntu-latest
+    container:
+      image: localhost:5000/agentctl-ci:go1.26.1
+      options: --memory=6g --memory-swap=6g --cpus=4
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 1
 
-      - name: Setup Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: "1.26.1"
-
-      - name: Install build tools
-        run: |
-          sudo apt-get update && sudo apt-get install -y --no-install-recommends make gcc libc6-dev
-          sudo mkdir -p /home/runner/.cache/go-build /home/runner/go/pkg/mod
-          sudo chown -R runner:runner /home/runner/.cache /home/runner/go
-
       - name: Run integration tests
-        run: make test-integration
+        run: export PATH=/usr/local/go/bin:/go/bin:$PATH && make test-integration

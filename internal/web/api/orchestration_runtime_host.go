@@ -32,6 +32,10 @@ const (
 	EnvOrchestrationRuntimeBackend          = "AGENTCTL_V2_ORCHESTRATION_RUNTIME_BACKEND"
 	orchestrationRuntimeBackendJidoAPI      = "jido"
 	orchestrationRuntimeBackendGoruntimeAPI = "goruntime"
+
+	EnvOrchestrationDispatchParentAgentID = "AGENTCTL_ORCHESTRATION_DISPATCH_PARENT_AGENT_ID"
+	EnvOrchestrationParentAgentIDs        = "AGENTCTL_ORCHESTRATION_PARENT_AGENT_IDS"
+	EnvOrchestrationSuccessTrackerState   = "AGENTCTL_ORCHESTRATION_SUCCESS_TRACKER_STATE"
 )
 
 // OrchestrationRuntimeHost is the long-lived runtime host used by web dispatch/refresh flows.
@@ -204,7 +208,7 @@ func (h *persistentOrchestrationRuntimeHost) Refresh(ctx context.Context, worksp
 		Reader:              h.orchestrationStore,
 		Workers:             h.workerStore,
 		ParentAgentIDs:      parentIDs,
-		SuccessTrackerState: strings.TrimSpace(os.Getenv(v2jido.EnvJidoOrchestrationSuccessTrackerState)),
+		SuccessTrackerState: resolveOrchestrationSuccessTrackerState(),
 	})
 	if err != nil {
 		return fmt.Errorf("configure go orchestration reconcile: %w", err)
@@ -364,6 +368,13 @@ func runtimeProcessAlive(pid int) bool {
 	}
 	err := syscall.Kill(pid, 0)
 	return err == nil || err == syscall.EPERM
+}
+
+func resolveOrchestrationSuccessTrackerState() string {
+	if value := strings.TrimSpace(os.Getenv(EnvOrchestrationSuccessTrackerState)); value != "" {
+		return value
+	}
+	return strings.TrimSpace(os.Getenv(v2jido.EnvJidoOrchestrationSuccessTrackerState))
 }
 
 func cloneMap(in map[string]any) map[string]any {

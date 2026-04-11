@@ -22,7 +22,7 @@ func (f *fakeRunner) Run(_ context.Context, name string, args ...string) (string
 	return "", f.stderr, f.err
 }
 
-func TestCreatePaneBuildsNamedZellijRunCommand(t *testing.T) {
+func TestCreatePaneBuildsNamedZellijNewPaneCommand(t *testing.T) {
 	runner := &fakeRunner{}
 	client := NewWithRunner(runner)
 
@@ -47,7 +47,7 @@ func TestCreatePaneBuildsNamedZellijRunCommand(t *testing.T) {
 	}
 	cmd := strings.Join(runner.lastArgs, " ")
 	for _, want := range []string{
-		"--session collab run",
+		"--session collab action new-pane",
 		"--cwd /repo",
 		"--name researcher-a1b2",
 		"AGENTCTL_PARTICIPANT_ID=researcher-a1b2",
@@ -55,7 +55,8 @@ func TestCreatePaneBuildsNamedZellijRunCommand(t *testing.T) {
 		"AGENTCTL_MUX_BACKEND=zellij",
 		"AGENTCTL_PARENT_PARTICIPANT_ID=lead-a",
 		"AGENTCTL_PARENT_AGENT_ID=agent:parent-1",
-		"sh -lc agentctl agent watch agent-123",
+		"sh -lc if [ -n",
+		"exec agentctl agent watch agent-123",
 	} {
 		if !strings.Contains(cmd, want) {
 			t.Fatalf("command %q missing %q", cmd, want)
@@ -84,8 +85,32 @@ func TestCreatePaneEnsuresSessionBeforeRun(t *testing.T) {
 	if !strings.Contains(runner.calls[0], "zellij attach --create-background collab") {
 		t.Fatalf("first call=%q want attach --create-background", runner.calls[0])
 	}
-	if !strings.Contains(runner.calls[1], "zellij --session collab run") {
-		t.Fatalf("second call=%q want session run", runner.calls[1])
+	if !strings.Contains(runner.calls[1], "zellij --session collab action new-pane") {
+		t.Fatalf("second call=%q want session action new-pane", runner.calls[1])
+	}
+}
+
+func TestCreatePaneSkipsEnsureForCurrentSession(t *testing.T) {
+	t.Setenv("ZELLIJ_SESSION_NAME", "awesome-orange")
+	runner := &fakeRunner{}
+	client := NewWithRunner(runner)
+
+	_, err := client.CreatePane(context.Background(), CreatePaneOptions{
+		Session: "awesome-orange",
+		Name:    "pane-a",
+		Command: "echo ok",
+	})
+	if err != nil {
+		t.Fatalf("CreatePane() error = %v", err)
+	}
+	if len(runner.calls) != 1 {
+		t.Fatalf("calls=%v want 1 invocation", runner.calls)
+	}
+	if strings.Contains(runner.calls[0], "attach --create-background") {
+		t.Fatalf("call=%q unexpectedly ensured current session", runner.calls[0])
+	}
+	if !strings.Contains(runner.calls[0], "zellij --session awesome-orange action new-pane") {
+		t.Fatalf("call=%q want session action new-pane", runner.calls[0])
 	}
 }
 
@@ -196,5 +221,25 @@ func TestSubmitWithPaneID(t *testing.T) {
 	}
 	if runner.calls[1] != want1 {
 		t.Fatalf("second call=%q want %q", runner.calls[1], want1)
+	}
+}
+
+func TestInterruptWritesEscape(t *testing.T) {
+	runner := &fakeRunner{}
+	client := NewWithRunner(runner)
+
+	got, err := client.Interrupt(context.Background(), "collab", "terminal_2")
+	if err != nil {
+		t.Fatalf("Interrupt() error = %v", err)
+	}
+	if got.PaneID != "terminal_2" {
+		t.Fatalf("PaneID = %q, want terminal_2", got.PaneID)
+	}
+	if len(runner.calls) != 1 {
+		t.Fatalf("calls=%v want 1 invocation", runner.calls)
+	}
+	want := "zellij --session collab action write --pane-id terminal_2 27"
+	if runner.calls[0] != want {
+		t.Fatalf("call=%q want %q", runner.calls[0], want)
 	}
 }

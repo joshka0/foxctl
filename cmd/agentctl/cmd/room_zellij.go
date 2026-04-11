@@ -5,13 +5,16 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
 
+	"github.com/jkatigb/agentctl/internal/agentpane"
 	"github.com/jkatigb/agentctl/internal/domain/agent"
+	"github.com/jkatigb/agentctl/internal/zellijbridge"
 )
 
 const (
@@ -29,18 +32,25 @@ type zellijRelayRequest struct {
 	Targets   []string `json:"targets"`
 }
 
+var deliverAgentPane = agentpane.Deliver
+
 func relayRoomMessageZellij(ctx context.Context, room agent.RoomSummary, msg agent.BoardMessage, relay roomRelayOptions) roomRelayResult {
 	result := roomRelayResult{Backend: "zellij"}
-	targets, skipped := collectRoomRelayTargets(room, msg)
-	result.SkippedMembers = append(result.SkippedMembers, skipped...)
-	if len(targets) == 0 {
-		return result
-	}
 	session, err := resolveZellijSession(relay.ZellijSession)
 	if err != nil {
 		result.Error = err.Error()
-		result.FailedCount = len(targets)
-		result.FailedMembers = append(result.FailedMembers, targets...)
+		return result
+	}
+	// Use zellij-native targets (zellij:<session>:terminal_<id>), not tmux pane ids — the room-relay
+	// plugin matches pane_target_matches / titles using those forms.
+	_, zellijBySession, failed, skipped := collectRoomRelayTargetsByBackend(room, msg)
+	result.SkippedMembers = append(result.SkippedMembers, skipped...)
+	if len(failed) > 0 {
+		result.FailedMembers = append(result.FailedMembers, failed...)
+		result.FailedCount += len(failed)
+	}
+	targets := zellijBySession[session]
+	if len(targets) == 0 {
 		return result
 	}
 	return relayRoomMessageZellijTargets(ctx, room, msg, session, targets, relay)
@@ -54,32 +64,49 @@ func relayRoomMessageZellijTargets(ctx context.Context, room agent.RoomSummary, 
 	if onlySingletonRelayTarget(targets) {
 		return relayRoomMessageZellijSingleton(ctx, room, msg, session)
 	}
+	remaining := make([]string, 0, len(targets))
+	for _, target := range targets {
+		if deliverErr := relayRoomMessageZellijPaneSocket(ctx, room, msg, session, target); deliverErr == nil {
+			result.DeliveredCount++
+			result.DeliveredTo = append(result.DeliveredTo, target)
+			continue
+		}
+		if deliverErr := relayRoomMessageZellijTTY(session, target, formatRoomRelayContentForTarget(room, msg, target), msg.Interrupt); deliverErr == nil {
+			result.DeliveredCount++
+			result.DeliveredTo = append(result.DeliveredTo, target)
+			continue
+		}
+		remaining = append(remaining, target)
+	}
+	if len(remaining) == 0 {
+		return result
+	}
 	pluginPath, err := ensureZellijRelayPlugin(ctx, relay.ZellijPluginPath)
 	if err != nil {
 		result.Error = err.Error()
-		result.FailedCount = len(targets)
-		result.FailedMembers = append(result.FailedMembers, targets...)
+		result.FailedCount = len(remaining)
+		result.FailedMembers = append(result.FailedMembers, remaining...)
 		return result
 	}
 
 	if err := ensureZellijRelaySessionReady(ctx, session, pluginPath); err != nil {
 		result.Error = err.Error()
-		result.FailedCount = len(targets)
-		result.FailedMembers = append(result.FailedMembers, targets...)
+		result.FailedCount = len(remaining)
+		result.FailedMembers = append(result.FailedMembers, remaining...)
 		return result
 	}
 
 	payload, err := json.Marshal(zellijRelayRequest{
 		RoomID:    room.ID,
 		Sender:    strings.TrimSpace(msg.Sender),
-		Content:   formatRoomRelayContent(room, msg),
+		Content:   formatRoomRelayContentForTarget(room, msg, zellijRelaySingletonTarget),
 		Interrupt: msg.Interrupt,
-		Targets:   targets,
+		Targets:   remaining,
 	})
 	if err != nil {
 		result.Error = fmt.Sprintf("marshal zellij relay payload: %v", err)
-		result.FailedCount = len(targets)
-		result.FailedMembers = append(result.FailedMembers, targets...)
+		result.FailedCount = len(remaining)
+		result.FailedMembers = append(result.FailedMembers, remaining...)
 		return result
 	}
 	pipeName := fmt.Sprintf("%s-%d", zellijRelayPipePrefix, time.Now().UnixNano())
@@ -101,13 +128,142 @@ func relayRoomMessageZellijTargets(ctx context.Context, room agent.RoomSummary, 
 		if hasPendingZellijRelayPermissionPrompt(ctx, session) {
 			result.Error = "zellij relay plugin is waiting for permission approval in the attached zellij session; approve the prompt once and retry"
 		}
-		result.FailedCount = len(targets)
-		result.FailedMembers = append(result.FailedMembers, targets...)
+		result.FailedCount = len(remaining)
+		result.FailedMembers = append(result.FailedMembers, remaining...)
 		return result
 	}
-	result.DeliveredCount = len(targets)
-	result.DeliveredTo = append(result.DeliveredTo, targets...)
+	result.DeliveredCount += len(remaining)
+	result.DeliveredTo = append(result.DeliveredTo, remaining...)
 	return result
+}
+
+func relayRoomMessageZellijPaneSocket(ctx context.Context, room agent.RoomSummary, msg agent.BoardMessage, session, target string) error {
+	target = strings.TrimSpace(target)
+	if strings.TrimSpace(session) == "" || target == "" || target == zellijRelaySingletonTarget {
+		return fmt.Errorf("no pane socket route")
+	}
+	if strings.HasPrefix(target, "zellij:") || isResolvableZellijPaneID(target) {
+		return fmt.Errorf("pane socket route requires named participant target")
+	}
+	submitMode := targetSubmitMode(target)
+	candidates := []string{agentpane.DefaultSocketPath(session, target)}
+	if roomID := strings.TrimSpace(room.ID); roomID != "" {
+		candidates = append(candidates, agentpane.DefaultSocketPath(roomID, target))
+	}
+	var lastErr error
+	for _, socketPath := range candidates {
+		_, err := deliverAgentPane(ctx, socketPath, agentpane.ControlMessage{
+			Kind:       "room_message",
+			RoomID:     room.ID,
+			MessageID:  strings.TrimSpace(msg.ID),
+			Sender:     strings.TrimSpace(msg.Sender),
+			Recipient:  target,
+			Interrupt:  msg.Interrupt,
+			Content:    formatRoomRelayContentForTarget(room, msg, target),
+			SubmitMode: submitMode,
+		})
+		if err == nil {
+			return nil
+		}
+		lastErr = err
+	}
+	return fmt.Errorf("deliver pane socket for %s in %s: %w", target, session, lastErr)
+}
+
+func relayRoomMessageZellijTTY(session, target, content string, interrupt bool) error {
+	ttyPath, ok := zellijTTYPath(session, target)
+	if !ok {
+		return fmt.Errorf("no tty registry for %s", target)
+	}
+	payload := zellijTTYRelayPayload(target, content, interrupt)
+	f, err := os.OpenFile(ttyPath, os.O_WRONLY, 0)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = f.Close() }()
+	_, err = io.WriteString(f, payload)
+	return err
+}
+
+func zellijTTYPath(session, target string) (string, bool) {
+	target = strings.TrimSpace(target)
+	if target == "" {
+		return "", false
+	}
+	// Named participants/panes created by agentctl register a tty file under this path.
+	if !strings.HasPrefix(target, "zellij:") && !isResolvableZellijPaneID(target) {
+		path := zellijbridge.TTYRegistryFile(session, target)
+		if _, err := os.Stat(path); err == nil {
+			data, readErr := os.ReadFile(path)
+			if readErr == nil {
+				if tty := strings.TrimSpace(string(data)); tty != "" {
+					return tty, true
+				}
+			}
+		}
+	}
+	return "", false
+}
+
+func zellijTTYRelayPayload(target, content string, interrupt bool) string {
+	var b strings.Builder
+	if interrupt && !targetUsesComposerSubmit(target) {
+		b.WriteByte(0x1b)
+	}
+	b.WriteString(content)
+	switch targetSubmitMode(target) {
+	case agentpane.SubmitModeComposerCtrlEnter:
+		b.WriteString("\x1b[13;5u")
+	case agentpane.SubmitModeEnterSplit:
+		b.WriteByte('\r')
+	case agentpane.SubmitModeEnter:
+		b.WriteByte('\r')
+	default:
+		b.WriteByte('\n')
+	}
+	return b.String()
+}
+
+func targetSubmitMode(target string) string {
+	t := strings.ToLower(strings.TrimSpace(target))
+	switch {
+	case strings.HasPrefix(t, "droid"),
+		strings.HasPrefix(t, "codex"),
+		strings.HasPrefix(t, "cursor"),
+		strings.HasPrefix(t, "agent"):
+		return agentpane.SubmitModeComposerCtrlEnter
+	case strings.HasPrefix(t, "gemini"):
+		return agentpane.SubmitModeEnterSplit
+	case strings.HasPrefix(t, "claude"):
+		return agentpane.SubmitModeEnter
+	default:
+		return agentpane.SubmitModeNewline
+	}
+}
+
+func targetUsesComposerSubmit(target string) bool {
+	return targetSubmitMode(target) == agentpane.SubmitModeComposerCtrlEnter
+}
+
+func formatRoomRelayContentForTarget(room agent.RoomSummary, msg agent.BoardMessage, target string) string {
+	content := formatRoomRelayContent(room, msg)
+	target = strings.ToLower(strings.TrimSpace(target))
+	if !strings.HasPrefix(target, "droid") || !msg.ReplyExpected {
+		return content
+	}
+	sender := strings.TrimSpace(msg.Sender)
+	if sender == "" || sender == "unknown" {
+		return content
+	}
+	participantID := strings.TrimSpace(msg.Recipient)
+	if participantID == "" || participantID == agent.BroadcastRecipient || participantID == zellijRelaySingletonTarget {
+		participantID = strings.TrimSpace(target)
+	}
+	if participantID == "" {
+		return content
+	}
+	return content + "\nExecute directly if you are ready to answer: " +
+		fmt.Sprintf("agentctl room send %s --to %s --sender %s \"<response>\"", room.ID, sender, participantID)
 }
 
 func ensureZellijRelaySessionReady(ctx context.Context, session, pluginPath string) error {
@@ -162,17 +318,14 @@ func hasPendingZellijRelayPermissionPrompt(ctx context.Context, session string) 
 }
 
 // zellijSingletonSubmitKind picks the trailing key sequence for relayRoomMessageZellijSingleton.
-// "gemini" = Escape + Enter; "composer" = Kitty Ctrl+Enter CSI (aligns with tmux C-Enter for Droid/Codex/Cursor);
-// "enter" = plain Enter (byte 13).
+// "composer" = Kitty Ctrl+Enter CSI (aligns with tmux C-Enter for Droid/Codex/Cursor);
+// "enter" = plain Enter (byte 13), which Gemini and Claude expect on the zellij path.
 func zellijSingletonSubmitKind(room agent.RoomSummary, recipient string) string {
 	recipient = normalizeRoomRecipient(recipient)
 	if recipient == agent.BroadcastRecipient {
 		return "enter"
 	}
 	id := strings.ToLower(strings.TrimSpace(recipient))
-	if strings.HasPrefix(id, "gemini") {
-		return "gemini"
-	}
 	if strings.HasPrefix(id, "droid") || strings.HasPrefix(id, "codex") || strings.HasPrefix(id, "cursor") {
 		return "composer"
 	}
@@ -181,9 +334,6 @@ func zellijSingletonSubmitKind(room agent.RoomSummary, recipient string) string 
 			continue
 		}
 		mid := strings.ToLower(strings.TrimSpace(member.ActorID))
-		if strings.HasPrefix(mid, "gemini") {
-			return "gemini"
-		}
 		if strings.HasPrefix(mid, "droid") || strings.HasPrefix(mid, "codex") || strings.HasPrefix(mid, "cursor") {
 			return "composer"
 		}
@@ -194,7 +344,7 @@ func zellijSingletonSubmitKind(room agent.RoomSummary, recipient string) string 
 
 func relayRoomMessageZellijSingleton(ctx context.Context, room agent.RoomSummary, msg agent.BoardMessage, session string) roomRelayResult {
 	result := roomRelayResult{Backend: "zellij"}
-	content := formatRoomRelayContent(room, msg)
+	content := formatRoomRelayContentForTarget(room, msg, normalizeRoomRecipient(msg.Recipient))
 	submitKind := zellijSingletonSubmitKind(room, msg.Recipient)
 	// Composer targets match tmuxbridge: leading Escape clears their input; skip for Interrupt on those.
 	if msg.Interrupt && submitKind != "composer" {
@@ -222,20 +372,6 @@ func relayRoomMessageZellijSingleton(ctx context.Context, room agent.RoomSummary
 		result.FailedCount = 1
 		result.FailedMembers = append(result.FailedMembers, zellijRelaySingletonTarget)
 		return result
-	}
-	if submitKind == "gemini" {
-		submitMode := exec.CommandContext(ctx, "zellij", "--session", session, "action", "write", "27")
-		stderr.Reset()
-		submitMode.Stderr = &stderr
-		if err := submitMode.Run(); err != nil {
-			result.Error = strings.TrimSpace(stderr.String())
-			if result.Error == "" {
-				result.Error = err.Error()
-			}
-			result.FailedCount = 1
-			result.FailedMembers = append(result.FailedMembers, zellijRelaySingletonTarget)
-			return result
-		}
 	}
 	var submit *exec.Cmd
 	if submitKind == "composer" {

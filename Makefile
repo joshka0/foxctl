@@ -162,8 +162,10 @@ eval-retrieval-praze-mixed:
 eval-retrieval-praze-k8s:
 	@bash ./scripts/eval_retrieval_praze_k8s.sh $(ARGS)
 
+RACE_P ?= 1
+
 test-race:
-	@$(GO_CMD_CGO) test -race -short $(RACE_PKGS)
+	@$(GO_CMD_CGO) test -race -short -p $(RACE_P) $(RACE_PKGS)
 
 test-integration:
 	@$(GO_CMD) test -tags=integration ./test/integration/... -timeout 15m -v

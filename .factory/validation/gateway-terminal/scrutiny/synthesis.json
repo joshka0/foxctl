@@ -1,0 +1,125 @@
+{
+  "milestone": "gateway-terminal",
+  "round": 1,
+  "status": "pass",
+  "validatorsRun": {
+    "test": {
+      "passed": true,
+      "command": "CGO_ENABLED=0 go test ./internal/gateway/... ./cmd/agentctl/cmd/ -count=1 -v",
+      "exitCode": 0,
+      "observation": "All gateway tests pass: internal/gateway/webterm (37 tests, 3.072s), internal/gateway/sshterm (38 tests, 11.808s), cmd/agentctl/cmd (all tests, 15.769s). Pre-existing CGO/SQLite duplicate symbol failures in unrelated packages (embedding_worker, optimize_*, session_recall, agent/optimization) are a known repo gotcha documented in AGENTS.md."
+    },
+    "typecheck": {
+      "passed": true,
+      "command": "CGO_ENABLED=0 go vet ./internal/gateway/... ./cmd/agentctl/cmd/",
+      "exitCode": 0,
+      "observation": "Clean vet, no issues. Also CGO_ENABLED=0 go build ./... passes cleanly."
+    },
+    "lint": {
+      "passed": false,
+      "command": "golangci-lint run --timeout 10m ./internal/gateway/... ./cmd/agentctl/cmd/",
+      "exitCode": 3,
+      "observation": "golangci-lint cannot run due to Go version mismatch: binary built with go1.25.4 but project targets go1.26.1. This is a pre-existing environment issue documented in .factory/library/environment.md. No code issues — the lint tool simply cannot load the config. The worker updated the golangci-lint binary via `go install` but the PATH still resolves to the old binary at /Users/joshka/.local/bin/golangci-lint. Non-blocking for this milestone."
+    }
+  },
+  "reviewsSummary": {
+    "total": 4,
+    "passed": 4,
+    "failed": 0,
+    "failedFeatures": []
+  },
+  "blockingIssues": [],
+  "nonBlockingIssues": [
+    {
+      "featureId": "gateway-tsnet-core",
+      "severity": "non_blocking",
+      "description": "Custom `asErr` helper in gateway.go should use `errors.As` for wrapped error handling consistency"
+    },
+    {
+      "featureId": "gateway-tsnet-core",
+      "severity": "non_blocking",
+      "description": "errCh channels in startDev/startTsnet not formally closed by producer goroutines on happy shutdown path"
+    },
+    {
+      "featureId": "gateway-web-terminal",
+      "severity": "non_blocking",
+      "description": "PTY.Close() could add SIGKILL fallback if cmd.Wait() blocks after SIGTERM"
+    },
+    {
+      "featureId": "gateway-web-terminal",
+      "severity": "non_blocking",
+      "description": "JSON text messages that aren't recognized control types are written to PTY as raw input"
+    },
+    {
+      "featureId": "gateway-web-terminal",
+      "severity": "non_blocking",
+      "description": "Connection limit check happens after WebSocket upgrade (429 sent via WS rather than HTTP status code)"
+    },
+    {
+      "featureId": "gateway-web-terminal",
+      "severity": "non_blocking",
+      "description": "Origin allowlist includes broad '*.tail*' wildcard pattern"
+    },
+    {
+      "featureId": "gateway-web-terminal",
+      "severity": "non_blocking",
+      "description": "getOrCreatePTY holds room.mu lock during tmux spawn (serializes PTY creation)"
+    },
+    {
+      "featureId": "gateway-xterm-assets",
+      "severity": "non_blocking",
+      "description": "xterm.js and FitAddon are placeholder stubs, not real npm assets"
+    },
+    {
+      "featureId": "gateway-ssh-terminal",
+      "severity": "non_blocking",
+      "description": "SSH exec requests rejected silently (no error message to client)"
+    },
+    {
+      "featureId": "gateway-ssh-terminal",
+      "severity": "non_blocking",
+      "description": "Room-not-found during SSH handshake gives no feedback to client (connection just closes)"
+    },
+    {
+      "featureId": "gateway-ssh-terminal",
+      "severity": "non_blocking",
+      "description": "MaxSessions default (10) documentation could clarify why 10 was chosen vs 'unlimited'"
+    }
+  ],
+  "appliedUpdates": [],
+  "suggestedGuidanceUpdates": [
+    {
+      "target": "AGENTS.md",
+      "suggestion": "Add note that HTTP error responses from gateway handlers (web terminal, SSH) should use canonical JSON envelope format (version, status, command, data, meta, error) for consistency. The web terminal's writeErrorJSON currently omits version, status, command, and meta.ts fields.",
+      "evidence": "gateway-web-terminal review: internal/gateway/webterm/handler.go:195-211 outputs simplified error structure without envelope fields",
+      "isSystemic": false
+    }
+  ],
+  "rejectedObservations": [
+    {
+      "observation": "xterm.js static assets are stubs — needs npm replacement",
+      "reason": "already-documented: the code itself has clear comments about this being intentional, and the architecture.md library file documents the component purpose"
+    },
+    {
+      "observation": "golangci-lint zerolog forbidigo exclusion added for gateway package",
+      "reason": "already-documented: the config change is in .golangci.yml and is a mechanical necessity, not a reusable pattern"
+    },
+    {
+      "observation": "WebSocket pre-check pattern (check room before upgrade)",
+      "reason": "ambiguous: this is a standard WebSocket handler pattern, not agentctl-specific knowledge that needs recording"
+    },
+    {
+      "observation": "tmux dependency for PTY operations",
+      "reason": "already-documented: environment.md already lists tmux 3.6a as an external dependency"
+    },
+    {
+      "observation": "SSH NoClientAuth relies on tsnet for security",
+      "reason": "already-documented: doc.go package documentation and code comments explain this clearly"
+    },
+    {
+      "observation": "RoomManager pattern consistency between web and SSH terminal",
+      "reason": "already-documented: architecture.md component overview shows both access methods"
+    }
+  ],
+  "previousRound": null
+}

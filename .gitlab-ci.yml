@@ -93,7 +93,7 @@ unit-tests:
   variables:
     CGO_ENABLED: "0"
   script:
-    - go test -short -v -count=1 ./... 2>&1 | tee test-output.txt
+    - go test -short -v -count=1 -timeout 20m ./... 2>&1 | tee test-output.txt
     - grep -E '(^--- |ok\s+|FAIL\s+|panic)' test-output.txt | head -100 || true
 
 race-tests:

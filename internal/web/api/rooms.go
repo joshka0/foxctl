@@ -2,9 +2,13 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -17,6 +21,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/platform/config"
 	"github.com/jkatigb/agentctl/internal/storage/agents"
 	"github.com/jkatigb/agentctl/internal/storage/blackboard"
+	"github.com/jkatigb/agentctl/internal/storage/coordination"
 )
 
 // RoomResponse is the room-centric read model exposed over HTTP.
@@ -43,13 +48,15 @@ type RoomResponse struct {
 }
 
 type RoomMemberResponse struct {
-	ActorID  string `json:"actor_id"`
-	Role     string `json:"role,omitempty"`
-	Backend  string `json:"backend,omitempty"`
-	Session  string `json:"session,omitempty"`
-	PaneID   string `json:"pane_id,omitempty"`
-	Unbound  bool   `json:"unbound,omitempty"`
-	JoinedAt string `json:"joined_at,omitempty"`
+	ActorID           string `json:"actor_id"`
+	Role              string `json:"role,omitempty"`
+	Backend           string `json:"backend,omitempty"`
+	Session           string `json:"session,omitempty"`
+	PaneID            string `json:"pane_id,omitempty"`
+	Unbound           bool   `json:"unbound,omitempty"`
+	JoinedAt          string `json:"joined_at,omitempty"`
+	TransportEndpoint string `json:"transport_endpoint,omitempty"`
+	TransportKind     string `json:"transport_kind,omitempty"`
 }
 
 type RoomCreateRequest struct {
@@ -70,12 +77,14 @@ type RoomPatchRequest struct {
 }
 
 type RoomMemberRequest struct {
-	ActorID string `json:"actor_id"`
-	Role    string `json:"role,omitempty"`
-	Backend string `json:"backend,omitempty"`
-	Session string `json:"session,omitempty"`
-	PaneID  string `json:"pane_id,omitempty"`
-	Unbound bool   `json:"unbound,omitempty"`
+	ActorID           string `json:"actor_id"`
+	Role              string `json:"role,omitempty"`
+	Backend           string `json:"backend,omitempty"`
+	Session           string `json:"session,omitempty"`
+	PaneID            string `json:"pane_id,omitempty"`
+	Unbound           bool   `json:"unbound,omitempty"`
+	TransportEndpoint string `json:"transport_endpoint,omitempty"`
+	TransportKind     string `json:"transport_kind,omitempty"`
 }
 
 // RoomMessageSendRequest sends one message into a room-scoped stream.
@@ -99,13 +108,59 @@ type RoomMessageSendRequest struct {
 
 // RoomMessageSendResponse reports the created room message.
 type RoomMessageSendResponse struct {
-	ID         string `json:"id"`
-	RoomID     string `json:"room_id"`
-	Stream     string `json:"stream"`
-	Status     string `json:"status"`
-	Message    string `json:"message,omitempty"`
-	Dispatched int    `json:"dispatched,omitempty"`
-	Skipped    int    `json:"skipped,omitempty"`
+	ID         string                `json:"id"`
+	RoomID     string                `json:"room_id"`
+	Stream     string                `json:"stream"`
+	Status     string                `json:"status"`
+	Message    string                `json:"message,omitempty"`
+	Dispatched int                   `json:"dispatched,omitempty"`
+	Skipped    int                   `json:"skipped,omitempty"`
+	LiveRelay  []RoomLiveRelayResult `json:"live_relay,omitempty"`
+}
+
+type RoomReminderRequest struct {
+	WorkspaceID   string `json:"workspace_id"`
+	Sender        string `json:"sender"`
+	Recipient     string `json:"recipient"`
+	Subject       string `json:"subject,omitempty"`
+	Body          string `json:"body"`
+	Every         string `json:"every"`
+	MaxIterations int    `json:"max_iterations,omitempty"`
+	AckRequired   bool   `json:"ack_required,omitempty"`
+	ReplyExpected bool   `json:"reply_expected,omitempty"`
+	Interrupt     bool   `json:"interrupt,omitempty"`
+	AllowPassive  bool   `json:"allow_passive,omitempty"`
+}
+
+type RoomReminderResponse struct {
+	ID            string `json:"id"`
+	WorkspaceID   string `json:"workspace_id"`
+	RoomID        string `json:"room_id"`
+	RootMessageID string `json:"root_message_id"`
+	Sender        string `json:"sender"`
+	Recipient     string `json:"recipient"`
+	Subject       string `json:"subject"`
+	Body          string `json:"body"`
+	AckRequired   bool   `json:"ack_required"`
+	ReplyExpected bool   `json:"reply_expected"`
+	Interrupt     bool   `json:"interrupt"`
+	Interval      string `json:"interval"`
+	MaxIterations int    `json:"max_iterations"`
+	SentCount     int    `json:"sent_count"`
+	Active        bool   `json:"active"`
+	LastSentAt    string `json:"last_sent_at,omitempty"`
+	CreatedAt     string `json:"created_at,omitempty"`
+	UpdatedAt     string `json:"updated_at,omitempty"`
+}
+
+type RoomLiveRelayResult struct {
+	Backend        string   `json:"backend"`
+	DeliveredCount int      `json:"delivered_count,omitempty"`
+	FailedCount    int      `json:"failed_count,omitempty"`
+	DeliveredTo    []string `json:"delivered_to,omitempty"`
+	FailedMembers  []string `json:"failed_members,omitempty"`
+	SkippedMembers []string `json:"skipped_members,omitempty"`
+	Error          string   `json:"error,omitempty"`
 }
 
 type roomEventPublisher interface {
@@ -150,7 +205,23 @@ type roomBoardAction struct {
 	Action  string
 }
 
+var roomSendLiveRelayHook = relayRoomMessageViaCLI
+
+func RoomSendLiveRelayHookForTests() func(context.Context, string, string, string) ([]RoomLiveRelayResult, error) {
+	return roomSendLiveRelayHook
+}
+
+func SetRoomSendLiveRelayHookForTests(hook func(context.Context, string, string, string) ([]RoomLiveRelayResult, error)) {
+	if hook == nil {
+		roomSendLiveRelayHook = relayRoomMessageViaCLI
+		return
+	}
+	roomSendLiveRelayHook = hook
+}
+
 var runRoomAgentReply = defaultRoomAgentReply
+
+const apiRoomLoopHeartbeatGrace = 15 * time.Second
 
 func normalizeRoomDispatchPolicy(raw string) string {
 	switch strings.TrimSpace(raw) {
@@ -466,12 +537,23 @@ func handleRoomSubresourceRoute(w http.ResponseWriter, r *http.Request, cfg conf
 		handleRoomPostOnly(w, r, func() { handleRoomCoordinatorSet(w, r, cfg, log, roomID) })
 	case "messages":
 		handleRoomMessagesRoute(w, r, cfg, log, events, roomID, parts)
+	case "reminders":
+		handleRoomRemindersRoute(w, r, cfg, log, roomID, parts)
 	case "archive":
 		handleRoomPostOnly(w, r, func() { handleRoomArchive(w, r, cfg, log, roomID) })
 	case "restore":
 		handleRoomPostOnly(w, r, func() { handleRoomRestore(w, r, cfg, log, roomID) })
 	case "members":
-		handleRoomMembersRoute(w, r, cfg, log, roomID)
+		// /members/{actor_id}/transport or /members/{actor_id}/binding
+		if len(parts) >= 3 && strings.TrimSpace(parts[2]) == "transport" {
+			actorID := strings.TrimSpace(parts[1])
+			handleRoomPutOnly(w, r, func() { handleRoomMemberTransportPut(w, r, cfg, log, roomID, actorID) })
+		} else if len(parts) >= 3 && strings.TrimSpace(parts[2]) == "binding" {
+			actorID := strings.TrimSpace(parts[1])
+			handleRoomPutOnly(w, r, func() { handleRoomMemberBindingPut(w, r, cfg, log, roomID, actorID) })
+		} else {
+			handleRoomMembersRoute(w, r, cfg, log, roomID)
+		}
 	default:
 		return false
 	}
@@ -531,6 +613,23 @@ func handleRoomMembersRoute(w http.ResponseWriter, r *http.Request, cfg config.C
 	}
 }
 
+func handleRoomRemindersRoute(w http.ResponseWriter, r *http.Request, cfg config.Config, log zerolog.Logger, roomID string, parts []string) {
+	if len(parts) >= 3 && strings.TrimSpace(parts[2]) == "cancel" {
+		handleRoomPostOnly(w, r, func() {
+			handleRoomReminderCancel(w, r, cfg, log, roomID, strings.TrimSpace(parts[1]))
+		})
+		return
+	}
+	switch r.Method {
+	case http.MethodGet:
+		handleRoomRemindersGet(w, r, cfg, log, roomID)
+	case http.MethodPost:
+		handleRoomReminderAdd(w, r, cfg, log, roomID)
+	default:
+		httpError(w, http.StatusMethodNotAllowed, "method not allowed")
+	}
+}
+
 func handleRoomRootRoute(w http.ResponseWriter, r *http.Request, cfg config.Config, log zerolog.Logger, roomID string) {
 	switch r.Method {
 	case http.MethodGet:
@@ -558,6 +657,394 @@ func handleRoomPostOnly(w http.ResponseWriter, r *http.Request, next func()) {
 		return
 	}
 	next()
+}
+
+func handleRoomPutOnly(w http.ResponseWriter, r *http.Request, next func()) {
+	if r.Method != http.MethodPut {
+		httpError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	next()
+}
+
+// handleRoomMemberTransportPut handles PUT /api/rooms/{id}/members/{actor_id}/transport.
+// It updates transport_endpoint and transport_kind for a single existing room member
+// without disturbing other members. Returns 404 if the actor is not a current member.
+func handleRoomMemberTransportPut(w http.ResponseWriter, r *http.Request, cfg config.Config, log zerolog.Logger, roomID, actorID string) {
+	roomID = strings.TrimSpace(roomID)
+	actorID = strings.TrimSpace(actorID)
+	if roomID == "" || actorID == "" {
+		httpError(w, http.StatusBadRequest, "room_id and actor_id required")
+		return
+	}
+
+	var req struct {
+		TransportEndpoint string `json:"transport_endpoint"`
+		TransportKind     string `json:"transport_kind"`
+	}
+	if err := readJSON(w, r, &req); err != nil {
+		httpError(w, http.StatusBadRequest, "invalid request body: "+err.Error())
+		return
+	}
+
+	workspaceID := roomWorkspaceID(r)
+	if workspaceID == "" {
+		httpError(w, http.StatusBadRequest, "workspace_id required")
+		return
+	}
+
+	store, err := blackboard.OpenBoardStore(r.Context(), cfg.Storage.Root)
+	if err != nil {
+		log.Error().Err(err).Msg("failed to open board store")
+		httpError(w, http.StatusInternalServerError, "failed to open board store")
+		return
+	}
+	defer store.Close()
+
+	if err := store.UpdateRoomMemberTransport(r.Context(), workspaceID, roomID, actorID, req.TransportEndpoint, req.TransportKind); err != nil {
+		if errors.Is(err, blackboard.ErrRoomMemberNotFound) {
+			httpError(w, http.StatusNotFound, fmt.Sprintf("actor %q is not a member of room %q", actorID, roomID))
+			return
+		}
+		log.Error().Err(err).Str("room_id", roomID).Str("actor_id", actorID).Msg("failed to update member transport")
+		httpError(w, http.StatusInternalServerError, "failed to update member transport")
+		return
+	}
+
+	updated, err := store.GetRoom(r.Context(), workspaceID, roomID, "")
+	if err != nil {
+		log.Error().Err(err).Str("room_id", roomID).Msg("failed to reload room after transport update")
+		httpError(w, http.StatusInternalServerError, "failed to reload room")
+		return
+	}
+
+	// Return the updated member record.
+	var member *RoomMemberResponse
+	for _, m := range convertRoomMembers(updated.Members) {
+		m := m
+		if m.ActorID == actorID {
+			member = &m
+			break
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"member": member,
+	})
+}
+
+func handleRoomMemberBindingPut(w http.ResponseWriter, r *http.Request, cfg config.Config, log zerolog.Logger, roomID, actorID string) {
+	roomID = strings.TrimSpace(roomID)
+	actorID = strings.TrimSpace(actorID)
+	if roomID == "" || actorID == "" {
+		httpError(w, http.StatusBadRequest, "room_id and actor_id required")
+		return
+	}
+
+	var req struct {
+		Backend           string `json:"backend"`
+		Session           string `json:"session"`
+		PaneID            string `json:"pane_id"`
+		Unbound           bool   `json:"unbound"`
+		TransportEndpoint string `json:"transport_endpoint"`
+		TransportKind     string `json:"transport_kind"`
+	}
+	if err := readJSON(w, r, &req); err != nil {
+		httpError(w, http.StatusBadRequest, "invalid request body: "+err.Error())
+		return
+	}
+
+	workspaceID := roomWorkspaceID(r)
+	if workspaceID == "" {
+		httpError(w, http.StatusBadRequest, "workspace_id required")
+		return
+	}
+
+	store, err := blackboard.OpenBoardStore(r.Context(), cfg.Storage.Root)
+	if err != nil {
+		log.Error().Err(err).Msg("failed to open board store")
+		httpError(w, http.StatusInternalServerError, "failed to open board store")
+		return
+	}
+	defer store.Close()
+
+	member := agent.RoomMember{
+		ActorID:           actorID,
+		Backend:           req.Backend,
+		Session:           req.Session,
+		PaneID:            req.PaneID,
+		Unbound:           req.Unbound,
+		TransportEndpoint: req.TransportEndpoint,
+		TransportKind:     req.TransportKind,
+	}
+	if err := store.UpdateRoomMemberBinding(r.Context(), workspaceID, roomID, member); err != nil {
+		if errors.Is(err, blackboard.ErrRoomMemberNotFound) {
+			httpError(w, http.StatusNotFound, fmt.Sprintf("actor %q is not a member of room %q", actorID, roomID))
+			return
+		}
+		log.Error().Err(err).Str("room_id", roomID).Str("actor_id", actorID).Msg("failed to update member binding")
+		httpError(w, http.StatusInternalServerError, "failed to update member binding")
+		return
+	}
+
+	updated, err := store.GetRoom(r.Context(), workspaceID, roomID, "")
+	if err != nil {
+		log.Error().Err(err).Str("room_id", roomID).Msg("failed to reload room after binding update")
+		httpError(w, http.StatusInternalServerError, "failed to reload room")
+		return
+	}
+
+	var memberResp *RoomMemberResponse
+	for _, m := range convertRoomMembers(updated.Members) {
+		m := m
+		if m.ActorID == actorID {
+			memberResp = &m
+			break
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"member": memberResp,
+	})
+}
+
+func handleRoomRemindersGet(w http.ResponseWriter, r *http.Request, cfg config.Config, log zerolog.Logger, roomID string) {
+	workspaceID := roomWorkspaceID(r)
+	if workspaceID == "" {
+		httpError(w, http.StatusBadRequest, "workspace_id required")
+		return
+	}
+	includeInactive := parseBool(r.URL.Query().Get("all"))
+
+	store, err := coordination.Open(r.Context(), cfg.Storage.Root)
+	if err != nil {
+		log.Error().Err(err).Msg("failed to open coordination store")
+		httpError(w, http.StatusInternalServerError, "failed to open coordination store")
+		return
+	}
+	defer store.Close()
+
+	reminders, err := store.ListRoomReminders(r.Context(), workspaceID, strings.TrimSpace(roomID), includeInactive)
+	if err != nil {
+		log.Error().Err(err).Str("room_id", roomID).Msg("failed to list room reminders")
+		httpError(w, http.StatusInternalServerError, "failed to list room reminders")
+		return
+	}
+	resp := make([]RoomReminderResponse, 0, len(reminders))
+	for _, reminder := range reminders {
+		resp = append(resp, convertRoomReminder(reminder))
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"room_id":   roomID,
+		"count":     len(resp),
+		"reminders": resp,
+	})
+}
+
+func handleRoomReminderAdd(w http.ResponseWriter, r *http.Request, cfg config.Config, log zerolog.Logger, roomID string) {
+	var req RoomReminderRequest
+	if err := readJSON(w, r, &req); err != nil {
+		httpError(w, http.StatusBadRequest, "invalid request body: "+err.Error())
+		return
+	}
+	req.WorkspaceID = strings.TrimSpace(req.WorkspaceID)
+	req.Sender = strings.TrimSpace(req.Sender)
+	req.Recipient = strings.TrimSpace(req.Recipient)
+	req.Subject = strings.TrimSpace(req.Subject)
+	req.Body = strings.TrimSpace(req.Body)
+	req.Every = strings.TrimSpace(req.Every)
+	if req.WorkspaceID == "" {
+		httpError(w, http.StatusBadRequest, "workspace_id required")
+		return
+	}
+	if req.Sender == "" {
+		httpError(w, http.StatusBadRequest, "sender required")
+		return
+	}
+	if req.Recipient == "" {
+		httpError(w, http.StatusBadRequest, "recipient required")
+		return
+	}
+	if req.Body == "" {
+		httpError(w, http.StatusBadRequest, "body required")
+		return
+	}
+	if !req.AckRequired && !req.ReplyExpected {
+		httpError(w, http.StatusBadRequest, "reminders require ack_required or reply_expected")
+		return
+	}
+	every, err := time.ParseDuration(req.Every)
+	if err != nil || every <= 0 {
+		httpError(w, http.StatusBadRequest, "every must be a positive duration")
+		return
+	}
+	if req.MaxIterations <= 0 {
+		req.MaxIterations = 3
+	}
+
+	boardStore, err := blackboard.OpenBoardStore(r.Context(), cfg.Storage.Root)
+	if err != nil {
+		log.Error().Err(err).Msg("failed to open board store")
+		httpError(w, http.StatusInternalServerError, "failed to open board store")
+		return
+	}
+	defer boardStore.Close()
+
+	room, err := boardStore.GetRoom(r.Context(), req.WorkspaceID, strings.TrimSpace(roomID), "")
+	if err != nil {
+		if errors.Is(err, blackboard.ErrRoomNotFound) {
+			httpError(w, http.StatusNotFound, "room not found")
+			return
+		}
+		log.Error().Err(err).Str("room_id", roomID).Msg("failed to load room before reminder add")
+		httpError(w, http.StatusInternalServerError, "failed to load room")
+		return
+	}
+
+	recipient, err := apiResolveReminderRecipient(room, req.Recipient)
+	if err != nil {
+		httpError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if req.Subject == "" {
+		req.Subject = deriveAPIRoomSubject(req.Body)
+	}
+
+	root := &agent.BoardMessage{
+		WorkspaceID:   req.WorkspaceID,
+		Stream:        agent.RoomStreamName(strings.TrimSpace(roomID)),
+		Sender:        req.Sender,
+		Recipient:     recipient,
+		Kind:          agent.BoardMessageKindInstruction,
+		Priority:      agent.DefaultPriority,
+		AckRequired:   req.AckRequired,
+		ReplyExpected: req.ReplyExpected,
+		Interrupt:     req.Interrupt,
+		Subject:       req.Subject,
+		Body:          req.Body,
+	}
+	if err := boardStore.SendMessage(r.Context(), root); err != nil {
+		log.Error().Err(err).Str("room_id", roomID).Msg("failed to persist reminder root message")
+		httpError(w, http.StatusInternalServerError, "failed to persist reminder root message")
+		return
+	}
+
+	coordStore, err := coordination.Open(r.Context(), cfg.Storage.Root)
+	if err != nil {
+		log.Error().Err(err).Msg("failed to open coordination store")
+		httpError(w, http.StatusInternalServerError, "failed to open coordination store")
+		return
+	}
+	defer coordStore.Close()
+	if !req.AllowPassive {
+		if err := requireActiveRoomLoopAPI(r.Context(), coordStore, req.WorkspaceID, strings.TrimSpace(roomID), time.Now().UTC()); err != nil {
+			httpError(w, http.StatusConflict, err.Error())
+			return
+		}
+	}
+
+	reminder, err := coordStore.UpsertRoomReminder(r.Context(), coordination.RoomReminder{
+		ID:            root.ID,
+		WorkspaceID:   req.WorkspaceID,
+		RoomID:        strings.TrimSpace(roomID),
+		RootMessageID: root.ID,
+		Sender:        req.Sender,
+		Recipient:     recipient,
+		Subject:       req.Subject,
+		Body:          req.Body,
+		AckRequired:   req.AckRequired,
+		ReplyExpected: req.ReplyExpected,
+		Interrupt:     req.Interrupt,
+		Interval:      every,
+		MaxIterations: req.MaxIterations,
+		LastSentAt:    &root.CreatedAt,
+		Active:        true,
+	})
+	if err != nil {
+		log.Error().Err(err).Str("room_id", roomID).Msg("failed to upsert reminder")
+		httpError(w, http.StatusInternalServerError, "failed to persist reminder")
+		return
+	}
+
+	liveRelay, relayErr := roomSendLiveRelayHook(r.Context(), req.WorkspaceID, strings.TrimSpace(roomID), root.ID)
+	if relayErr != nil {
+		log.Warn().Err(relayErr).Str("room_id", roomID).Str("message_id", root.ID).Msg("live relay after reminder add failed")
+	}
+
+	writeJSON(w, http.StatusCreated, map[string]any{
+		"room_id":    roomID,
+		"message":    root,
+		"reminder":   convertRoomReminder(reminder),
+		"live_relay": liveRelay,
+	})
+}
+
+func handleRoomReminderCancel(w http.ResponseWriter, r *http.Request, cfg config.Config, log zerolog.Logger, roomID, reminderID string) {
+	workspaceID := roomWorkspaceID(r)
+	if workspaceID == "" {
+		httpError(w, http.StatusBadRequest, "workspace_id required")
+		return
+	}
+	var req struct {
+		Actor string `json:"actor,omitempty"`
+	}
+	if r.Body != nil {
+		if err := readJSON(w, r, &req); err != nil {
+			httpError(w, http.StatusBadRequest, "invalid request body: "+err.Error())
+			return
+		}
+	}
+	req.Actor = strings.TrimSpace(req.Actor)
+
+	boardStore, err := blackboard.OpenBoardStore(r.Context(), cfg.Storage.Root)
+	if err != nil {
+		log.Error().Err(err).Msg("failed to open board store")
+		httpError(w, http.StatusInternalServerError, "failed to open board store")
+		return
+	}
+	defer boardStore.Close()
+	room, err := boardStore.GetRoom(r.Context(), workspaceID, strings.TrimSpace(roomID), "")
+	if err != nil {
+		if errors.Is(err, blackboard.ErrRoomNotFound) {
+			httpError(w, http.StatusNotFound, "room not found")
+			return
+		}
+		log.Error().Err(err).Str("room_id", roomID).Msg("failed to load room before reminder cancel")
+		httpError(w, http.StatusInternalServerError, "failed to load room")
+		return
+	}
+
+	coordStore, err := coordination.Open(r.Context(), cfg.Storage.Root)
+	if err != nil {
+		log.Error().Err(err).Msg("failed to open coordination store")
+		httpError(w, http.StatusInternalServerError, "failed to open coordination store")
+		return
+	}
+	defer coordStore.Close()
+	reminder, err := coordStore.GetRoomReminder(r.Context(), workspaceID, strings.TrimSpace(reminderID))
+	if err != nil {
+		log.Error().Err(err).Str("reminder_id", reminderID).Msg("failed to load reminder")
+		httpError(w, http.StatusInternalServerError, "failed to load reminder")
+		return
+	}
+	if reminder == nil || strings.TrimSpace(reminder.RoomID) != strings.TrimSpace(roomID) {
+		httpError(w, http.StatusNotFound, fmt.Sprintf("reminder %q not found", reminderID))
+		return
+	}
+	if req.Actor != "" && req.Actor != reminder.Sender && !apiRoomMemberHasRole(room.Members, req.Actor, "coordinator") {
+		httpError(w, http.StatusForbidden, "only the reminder sender or room coordinator can cancel this reminder")
+		return
+	}
+	reminder.Active = false
+	updated, err := coordStore.UpsertRoomReminder(r.Context(), *reminder)
+	if err != nil {
+		log.Error().Err(err).Str("reminder_id", reminderID).Msg("failed to cancel reminder")
+		httpError(w, http.StatusInternalServerError, "failed to cancel reminder")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"room_id":   roomID,
+		"cancelled": true,
+		"reminder":  convertRoomReminder(updated),
+	})
 }
 
 func handleRoomGet(w http.ResponseWriter, r *http.Request, cfg config.Config, log zerolog.Logger, roomID string) {
@@ -840,6 +1327,15 @@ func handleRoomMessagesPost(w http.ResponseWriter, r *http.Request, cfg config.C
 		boardUpdated = applied
 	}
 
+	liveRelay, relayErr := roomSendLiveRelayHook(r.Context(), req.WorkspaceID, roomID, msg.ID)
+	if relayErr != nil {
+		log.Warn().Err(relayErr).Str("room_id", roomID).Str("message_id", msg.ID).Msg("failed to live-relay room message")
+		liveRelay = []RoomLiveRelayResult{{
+			Backend: "auto",
+			Error:   relayErr.Error(),
+		}}
+	}
+
 	dispatched := 0
 	skipped := 0
 	if req.DispatchAgents {
@@ -863,6 +1359,7 @@ func handleRoomMessagesPost(w http.ResponseWriter, r *http.Request, cfg config.C
 					Message:    "Room message sent successfully",
 					Dispatched: 0,
 					Skipped:    0,
+					LiveRelay:  liveRelay,
 				})
 				return
 			}
@@ -887,6 +1384,7 @@ func handleRoomMessagesPost(w http.ResponseWriter, r *http.Request, cfg config.C
 		Message:    roomSendStatusMessage(boardUpdated),
 		Dispatched: dispatched,
 		Skipped:    skipped,
+		LiveRelay:  liveRelay,
 	})
 }
 
@@ -941,6 +1439,46 @@ func queueRoomAgentReplies(cfg config.Config, log zerolog.Logger, events roomEve
 		}(target)
 	}
 	return dispatched, skipped
+}
+
+func relayRoomMessageViaCLI(ctx context.Context, workspaceID, roomID, messageID string) ([]RoomLiveRelayResult, error) {
+	exePath, err := os.Executable()
+	if err != nil {
+		return nil, fmt.Errorf("resolve current executable: %w", err)
+	}
+	if strings.HasSuffix(filepath.Base(exePath), ".test") {
+		return nil, errors.New("room live relay unavailable from test binary; stub roomSendLiveRelayHook in tests")
+	}
+	cmd := exec.CommandContext(ctx, exePath, "room", "relay-once", roomID, messageID, "--workspace", workspaceID)
+	out, err := cmd.Output()
+	if err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			stderr := strings.TrimSpace(string(exitErr.Stderr))
+			if stderr != "" {
+				return nil, fmt.Errorf("room relay-once: %s", stderr)
+			}
+		}
+		return nil, fmt.Errorf("room relay-once: %w", err)
+	}
+	var envelope struct {
+		Status string `json:"status"`
+		Data   struct {
+			LiveRelay []RoomLiveRelayResult `json:"live_relay"`
+		} `json:"data"`
+		Error struct {
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(out, &envelope); err != nil {
+		return nil, fmt.Errorf("parse room relay-once response: %w", err)
+	}
+	if strings.TrimSpace(envelope.Status) != "ok" {
+		if msg := strings.TrimSpace(envelope.Error.Message); msg != "" {
+			return nil, errors.New(msg)
+		}
+		return nil, errors.New("room relay-once failed")
+	}
+	return envelope.Data.LiveRelay, nil
 }
 
 func uniqueRoomAgentIDs(room agent.RoomSummary, requestedIDs []string) []string {
@@ -1413,12 +1951,14 @@ func convertRoomMembers(members []agent.RoomMember) []RoomMemberResponse {
 	out := make([]RoomMemberResponse, 0, len(members))
 	for _, member := range members {
 		resp := RoomMemberResponse{
-			ActorID: member.ActorID,
-			Role:    member.Role,
-			Backend: member.Backend,
-			Session: member.Session,
-			PaneID:  member.PaneID,
-			Unbound: member.Unbound,
+			ActorID:           member.ActorID,
+			Role:              member.Role,
+			Backend:           member.Backend,
+			Session:           member.Session,
+			PaneID:            member.PaneID,
+			Unbound:           member.Unbound,
+			TransportEndpoint: member.TransportEndpoint,
+			TransportKind:     member.TransportKind,
 		}
 		if !member.JoinedAt.IsZero() {
 			resp.JoinedAt = member.JoinedAt.Format(time.RFC3339)
@@ -1436,15 +1976,104 @@ func toRoomMembers(members []RoomMemberRequest) []agent.RoomMember {
 			continue
 		}
 		out = append(out, agent.RoomMember{
-			ActorID: actorID,
-			Role:    strings.TrimSpace(member.Role),
-			Backend: strings.ToLower(strings.TrimSpace(member.Backend)),
-			Session: strings.TrimSpace(member.Session),
-			PaneID:  strings.TrimSpace(member.PaneID),
-			Unbound: member.Unbound,
+			ActorID:           actorID,
+			Role:              strings.TrimSpace(member.Role),
+			Backend:           strings.ToLower(strings.TrimSpace(member.Backend)),
+			Session:           strings.TrimSpace(member.Session),
+			PaneID:            strings.TrimSpace(member.PaneID),
+			Unbound:           member.Unbound,
+			TransportEndpoint: strings.TrimSpace(member.TransportEndpoint),
+			TransportKind:     strings.ToLower(strings.TrimSpace(member.TransportKind)),
 		})
 	}
 	return out
+}
+
+func convertRoomReminder(reminder coordination.RoomReminder) RoomReminderResponse {
+	resp := RoomReminderResponse{
+		ID:            strings.TrimSpace(reminder.ID),
+		WorkspaceID:   strings.TrimSpace(reminder.WorkspaceID),
+		RoomID:        strings.TrimSpace(reminder.RoomID),
+		RootMessageID: strings.TrimSpace(reminder.RootMessageID),
+		Sender:        strings.TrimSpace(reminder.Sender),
+		Recipient:     strings.TrimSpace(reminder.Recipient),
+		Subject:       strings.TrimSpace(reminder.Subject),
+		Body:          strings.TrimSpace(reminder.Body),
+		AckRequired:   reminder.AckRequired,
+		ReplyExpected: reminder.ReplyExpected,
+		Interrupt:     reminder.Interrupt,
+		Interval:      reminder.Interval.String(),
+		MaxIterations: reminder.MaxIterations,
+		SentCount:     reminder.SentCount,
+		Active:        reminder.Active,
+	}
+	if reminder.LastSentAt != nil && !reminder.LastSentAt.IsZero() {
+		resp.LastSentAt = reminder.LastSentAt.UTC().Format(time.RFC3339)
+	}
+	if !reminder.CreatedAt.IsZero() {
+		resp.CreatedAt = reminder.CreatedAt.UTC().Format(time.RFC3339)
+	}
+	if !reminder.UpdatedAt.IsZero() {
+		resp.UpdatedAt = reminder.UpdatedAt.UTC().Format(time.RFC3339)
+	}
+	return resp
+}
+
+func apiResolveReminderRecipient(room agent.RoomSummary, recipient string) (string, error) {
+	recipient = strings.TrimSpace(recipient)
+	switch recipient {
+	case "":
+		return "", fmt.Errorf("recipient required")
+	case agent.BroadcastRecipient:
+		return "", fmt.Errorf("broadcast reminders are not supported")
+	case "@coordinator":
+		for _, member := range room.Members {
+			if strings.EqualFold(strings.TrimSpace(member.Role), "coordinator") {
+				return strings.TrimSpace(member.ActorID), nil
+			}
+		}
+		return "", fmt.Errorf("room has no coordinator to target")
+	default:
+		for _, member := range room.Members {
+			if strings.TrimSpace(member.ActorID) == recipient {
+				return recipient, nil
+			}
+		}
+		return "", fmt.Errorf("recipient %q is not a room member", recipient)
+	}
+}
+
+func requireActiveRoomLoopAPI(ctx context.Context, coordStore *coordination.Store, workspaceID, roomID string, now time.Time) error {
+	loop, err := coordStore.GetRoomLoop(ctx, workspaceID, roomID)
+	if err != nil {
+		return err
+	}
+	if loop == nil || !loop.Enabled {
+		return fmt.Errorf("room loop is not active for %q", roomID)
+	}
+	if loop.LastTickAt == nil || loop.LastTickAt.IsZero() {
+		return fmt.Errorf("room loop for %q has no recorded heartbeat", roomID)
+	}
+	if now.Sub(loop.LastTickAt.UTC()) > apiRoomLoopHeartbeatGrace {
+		return fmt.Errorf("room loop heartbeat for %q is stale (last tick %s)", roomID, loop.LastTickAt.UTC().Format(time.RFC3339))
+	}
+	return nil
+}
+
+func deriveAPIRoomSubject(body string) string {
+	body = strings.TrimSpace(body)
+	if body == "" {
+		return "room message"
+	}
+	first := body
+	if idx := strings.IndexByte(first, '\n'); idx >= 0 {
+		first = first[:idx]
+	}
+	first = strings.Join(strings.Fields(first), " ")
+	if len(first) > 80 {
+		first = first[:77] + "..."
+	}
+	return first
 }
 
 func roomWorkspaceID(r *http.Request) string {

@@ -3,7 +3,9 @@ package zellijbridge
 import (
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 )
 
@@ -70,6 +72,19 @@ type SubmitResult struct {
 	PaneID  string `json:"pane_id,omitempty"`
 }
 
+// InterruptResult describes an interrupt action for a zellij session/pane.
+type InterruptResult struct {
+	Session string `json:"session"`
+	PaneID  string `json:"pane_id,omitempty"`
+}
+
+// TTYRegistryFile returns the zellij pane tty registry file for one session/participant pair.
+func TTYRegistryFile(session, participantID string) string {
+	session = strings.TrimSpace(session)
+	participantID = strings.TrimSpace(participantID)
+	return filepath.Join(os.TempDir(), "agentctl-zellij-tty", sanitizeTTYRegistryComponent(session), sanitizeTTYRegistryComponent(participantID)+".tty")
+}
+
 // Client exposes minimal zellij pane creation for agent tenancy.
 type Client struct {
 	runner Runner
@@ -109,17 +124,17 @@ func (c *Client) CreatePane(ctx context.Context, opts CreatePaneOptions) (Create
 	if participantID == "" {
 		participantID = name
 	}
-	args := []string{"--session", session, "run"}
+	args := []string{"--session", session, "action", "new-pane"}
 	if cwd := strings.TrimSpace(opts.CWD); cwd != "" {
 		args = append(args, "--cwd", cwd)
 	}
 	args = append(args, "--name", name, "--")
-	args = append(args, buildEnvCommand(command, participantID, opts.ParentParticipant, opts.ParentAgentID, opts.RoomID, opts.RoomRole, opts.RoomAccess)...)
+	args = append(args, buildEnvCommand(session, name, command, participantID, opts.ParentParticipant, opts.ParentAgentID, opts.RoomID, opts.RoomRole, opts.RoomAccess)...)
 	if _, stderr, err := c.runner.Run(ctx, "zellij", args...); err != nil {
 		if strings.TrimSpace(stderr) == "" {
 			return CreatePaneResult{}, err
 		}
-		return CreatePaneResult{}, fmt.Errorf("zellij run: %s", strings.TrimSpace(stderr))
+		return CreatePaneResult{}, fmt.Errorf("zellij new-pane: %s", strings.TrimSpace(stderr))
 	}
 	return CreatePaneResult{
 		Session:       session,
@@ -156,6 +171,19 @@ func (c *Client) Submit(ctx context.Context, session string, opts SubmitOptions)
 	return SubmitResult{Session: session, Mode: mode, PaneID: paneID}, nil
 }
 
+// Interrupt injects a single Escape byte into the target zellij pane/session.
+func (c *Client) Interrupt(ctx context.Context, session, paneID string) (InterruptResult, error) {
+	session = strings.TrimSpace(session)
+	if session == "" {
+		return InterruptResult{}, fmt.Errorf("session is required")
+	}
+	paneID = strings.TrimSpace(paneID)
+	if err := c.sessionWriteByte(ctx, session, paneID, "27"); err != nil {
+		return InterruptResult{}, err
+	}
+	return InterruptResult{Session: session, PaneID: paneID}, nil
+}
+
 func (c *Client) sessionWriteByte(ctx context.Context, session, paneID, byteToken string) error {
 	args := []string{"--session", session, "action", "write"}
 	if pid := strings.TrimSpace(paneID); pid != "" {
@@ -181,6 +209,9 @@ func (c *Client) ensureSession(ctx context.Context, session string) error {
 	if session == "" {
 		return fmt.Errorf("session is required")
 	}
+	if current := strings.TrimSpace(os.Getenv("ZELLIJ_SESSION_NAME")); current != "" && current == session {
+		return nil
+	}
 	if _, stderr, err := c.runner.Run(ctx, "zellij", "attach", "--create-background", session); err != nil {
 		msg := strings.TrimSpace(stderr)
 		lower := strings.ToLower(msg)
@@ -195,12 +226,16 @@ func (c *Client) ensureSession(ctx context.Context, session string) error {
 	return nil
 }
 
-func buildEnvCommand(command, participantID, parentParticipant, parentAgentID, roomID, roomRole, roomAccess string) []string {
+func buildEnvCommand(session, paneName, command, participantID, parentParticipant, parentAgentID, roomID, roomRole, roomAccess string) []string {
+	ttyFile := TTYRegistryFile(session, participantID)
 	args := []string{
 		"env",
 		"AGENTCTL_PARTICIPANT_ID=" + strings.TrimSpace(participantID),
 		"AGENTCTL_ZELLIJ_PARTICIPANT=" + strings.TrimSpace(participantID),
 		"AGENTCTL_MUX_BACKEND=zellij",
+		"AGENTCTL_MUX_SESSION=" + strings.TrimSpace(session),
+		"AGENTCTL_MUX_PANE_ID=" + strings.TrimSpace(paneName),
+		"AGENTCTL_MUX_TTY_FILE=" + ttyFile,
 	}
 	if value := strings.TrimSpace(parentParticipant); value != "" {
 		args = append(args, "AGENTCTL_PARENT_PARTICIPANT_ID="+value)
@@ -216,6 +251,31 @@ func buildEnvCommand(command, participantID, parentParticipant, parentAgentID, r
 			args = append(args, "AGENTCTL_ROOM_ROLE="+value)
 		}
 	}
-	args = append(args, "sh", "-lc", command)
+	args = append(args, "sh", "-lc", buildPaneBootstrapCommand(command))
 	return args
+}
+
+func buildPaneBootstrapCommand(command string) string {
+	ttyFileVar := "${AGENTCTL_MUX_TTY_FILE:-}"
+	return "if [ -n \"" + ttyFileVar + "\" ]; then mkdir -p \"$(dirname \"" + ttyFileVar + "\")\" && tty > \"" + ttyFileVar + "\"; fi; exec " + command
+}
+
+func sanitizeTTYRegistryComponent(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "unknown"
+	}
+	var b strings.Builder
+	b.Grow(len(value))
+	for _, r := range value {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
+			b.WriteRune(r)
+		case r == '-', r == '_', r == '.':
+			b.WriteRune(r)
+		default:
+			b.WriteByte('_')
+		}
+	}
+	return b.String()
 }

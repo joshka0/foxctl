@@ -53,8 +53,8 @@ func TestCreateWatchPaneTmux(t *testing.T) {
 		{key: "tmux set-option -p -t %71 @name child-a"},
 		{key: "tmux select-layout -t collab tiled"},
 		{key: "tmux respawn-pane -k -t %71 -c /repo env AGENTCTL_PARTICIPANT_ID=tmux:collab:%71 AGENTCTL_MUX_BACKEND=tmux AGENTCTL_MUX_SESSION=collab AGENTCTL_MUX_PANE_ID=%71 AGENTCTL_PARENT_PARTICIPANT_ID=parent-a AGENTCTL_PARENT_AGENT_ID=agent:parent-1 agentctl agent watch agent-123"},
-		{key: "tmux display-message -t %71 -p " + tmuxListFormat, stdout: "%71" + tmuxFieldSep + "collab" + tmuxFieldSep + "0" + tmuxFieldSep + "0" + tmuxFieldSep + "main" + tmuxFieldSep + "111" + tmuxFieldSep + "80" + tmuxFieldSep + "24" + tmuxFieldSep + "child-a" + tmuxFieldSep + "/repo" + tmuxFieldSep + "agentctl" + tmuxFieldSep + "1\n"},
-		{key: "tmux display-message -t %71 -p " + tmuxListFormat, stdout: "%71" + tmuxFieldSep + "collab" + tmuxFieldSep + "0" + tmuxFieldSep + "0" + tmuxFieldSep + "main" + tmuxFieldSep + "111" + tmuxFieldSep + "80" + tmuxFieldSep + "24" + tmuxFieldSep + "child-a" + tmuxFieldSep + "/repo" + tmuxFieldSep + "agentctl" + tmuxFieldSep + "1\n"},
+		{key: "tmux display-message -t %71 -p " + tmuxListFormat, stdout: "%71" + tmuxFieldSep + "collab" + tmuxFieldSep + "0" + tmuxFieldSep + "0" + tmuxFieldSep + "main" + tmuxFieldSep + "111" + tmuxFieldSep + "80" + tmuxFieldSep + "24" + tmuxFieldSep + "child-a" + tmuxFieldSep + "/repo" + tmuxFieldSep + "agentctl" + tmuxFieldSep + "1" + tmuxFieldSep + "" + tmuxFieldSep + "" + tmuxFieldSep + "" + tmuxFieldSep + "" + "\n"},
+		{key: "tmux display-message -t %71 -p " + tmuxListFormat, stdout: "%71" + tmuxFieldSep + "collab" + tmuxFieldSep + "0" + tmuxFieldSep + "0" + tmuxFieldSep + "main" + tmuxFieldSep + "111" + tmuxFieldSep + "80" + tmuxFieldSep + "24" + tmuxFieldSep + "child-a" + tmuxFieldSep + "/repo" + tmuxFieldSep + "agentctl" + tmuxFieldSep + "1" + tmuxFieldSep + "" + tmuxFieldSep + "" + tmuxFieldSep + "" + tmuxFieldSep + "" + "\n"},
 	}}
 	newTmuxClient = func() *tmuxbridge.Client { return tmuxbridge.NewWithRunner(runner, map[string]string{}) }
 
@@ -108,7 +108,7 @@ func TestCreateWatchPaneZellij(t *testing.T) {
 
 const (
 	tmuxFieldSep   = "\x1f"
-	tmuxListFormat = "#{pane_id}" + tmuxFieldSep + "#{session_name}" + tmuxFieldSep + "#{window_index}" + tmuxFieldSep + "#{pane_index}" + tmuxFieldSep + "#{window_name}" + tmuxFieldSep + "#{pane_pid}" + tmuxFieldSep + "#{pane_width}" + tmuxFieldSep + "#{pane_height}" + tmuxFieldSep + "#{@name}" + tmuxFieldSep + "#{pane_current_path}" + tmuxFieldSep + "#{pane_current_command}" + tmuxFieldSep + "#{pane_active}"
+	tmuxListFormat = "#{pane_id}" + tmuxFieldSep + "#{session_name}" + tmuxFieldSep + "#{window_index}" + tmuxFieldSep + "#{pane_index}" + tmuxFieldSep + "#{window_name}" + tmuxFieldSep + "#{pane_pid}" + tmuxFieldSep + "#{pane_width}" + tmuxFieldSep + "#{pane_height}" + tmuxFieldSep + "#{@name}" + tmuxFieldSep + "#{pane_current_path}" + tmuxFieldSep + "#{pane_current_command}" + tmuxFieldSep + "#{pane_active}" + tmuxFieldSep + "#{@agentctl_participant}" + tmuxFieldSep + "#{@agentctl_provider}" + tmuxFieldSep + "#{@agentctl_room_id}" + tmuxFieldSep + "#{@agentctl_wrapped}"
 )
 
 type tmuxSequenceStep struct {

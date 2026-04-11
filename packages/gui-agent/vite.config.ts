@@ -15,6 +15,8 @@ export default defineConfig({
     port: 5174,
     proxy: {
       '/api': 'http://localhost:8090',
+      '/terminal': 'http://localhost:8090',
+      '/static': 'http://localhost:8090',
       '/ws': {
         target: 'http://localhost:8090',
         ws: true,

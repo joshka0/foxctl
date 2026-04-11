@@ -898,7 +898,7 @@ func (s orchestrationRuntimeSpawner) Spawn(ctx context.Context, req corespawn.Re
 	if strings.TrimSpace(req.ParentAgentID) == "" {
 		return corespawn.Response{}, &v2errors.V2Error{
 			Kind:    v2errors.ErrDependency,
-			Message: "jido orchestration dispatch parent_agent_id is not configured",
+			Message: "orchestration dispatch parent_agent_id is not configured",
 			Fatal:   true,
 		}
 	}
@@ -1679,10 +1679,16 @@ func loadOrchestrationRuntimeTreeNode(
 }
 
 func resolveOrchestrationDispatchParentAgentID() string {
+	if value := strings.TrimSpace(os.Getenv(EnvOrchestrationDispatchParentAgentID)); value != "" {
+		return value
+	}
 	if value := strings.TrimSpace(os.Getenv(v2jido.EnvJidoOrchestrationDispatchParentAgentID)); value != "" {
 		return value
 	}
-	raw := strings.TrimSpace(os.Getenv(v2jido.EnvJidoOrchestrationParentAgentIDs))
+	raw := strings.TrimSpace(os.Getenv(EnvOrchestrationParentAgentIDs))
+	if raw == "" {
+		raw = strings.TrimSpace(os.Getenv(v2jido.EnvJidoOrchestrationParentAgentIDs))
+	}
 	if raw == "" {
 		return ""
 	}
