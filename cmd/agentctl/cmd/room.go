@@ -2121,7 +2121,6 @@ func provisionSandbox(ctx context.Context, workspace string, room *agent.Room, p
 	}
 	if runtime == "opensandbox" {
 		fmt.Fprintf(os.Stderr, "warn: %s\n", openSandboxDisabledMessage)
-		runtime = "worktree"
 		provision.SandboxRuntime = "worktree"
 	}
 
