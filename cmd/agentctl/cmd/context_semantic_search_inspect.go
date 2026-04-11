@@ -12,6 +12,8 @@ import (
 	"github.com/spf13/cobra"
 )
 
+var buildSemanticSearchInspectionReportHook = buildSemanticSearchInspectionReport
+
 func newContextSemanticSearchInspectSuiteCommand() *cobra.Command {
 	var workspacePath string
 	var vaultPath string
@@ -42,24 +44,9 @@ func newContextSemanticSearchInspectSuiteCommand() *cobra.Command {
 
 			inspections := make([]graphInspection, 0, len(suite.Queries))
 			for _, item := range suite.Queries {
-				paths, err := runSemanticSearchEvalMode(ctx, target, vaultPath, item.Query, limit, []string{"symbols", "sessions", "memories", "tasks", "codemaps"})
-				inspection := graphInspection{
-					Query:         item.Query,
-					ExpectedPaths: append([]string(nil), item.ExpectedAnyOf...),
-					Anchors:       paths,
-				}
+				inspection, err := buildSemanticSearchInspectionReportHook(ctx, target, vaultPath, item.Query, item.ExpectedAnyOf, limit)
 				if err != nil {
-					inspection.Classification = "engine_error"
-					inspection.RecommendedFix = "stabilize code/semantic_search execution or scope defaults"
-				} else if len(paths) == 0 {
-					inspection.Classification = "no_anchors"
-					inspection.RecommendedFix = "improve semantic search query shaping or fallback scopes"
-				} else if graphPathsMatchExpected(paths, item.ExpectedAnyOf) {
-					inspection.Matched = true
-					inspection.Classification = "matched"
-				} else {
-					inspection.Classification = "anchor_mismatch"
-					inspection.RecommendedFix = "improve semantic search ranking, fallback ordering, or scope defaults"
+					return err
 				}
 				inspections = append(inspections, inspection)
 			}

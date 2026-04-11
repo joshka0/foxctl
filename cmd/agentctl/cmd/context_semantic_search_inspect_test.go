@@ -15,6 +15,18 @@ import (
 )
 
 func TestContextSemanticSearchInspectSuite_PersistsRun(t *testing.T) {
+	orig := buildSemanticSearchInspectionReportHook
+	buildSemanticSearchInspectionReportHook = func(_ context.Context, workspacePath, _ string, query string, expectedAnyOf []string, _ int) (graphInspection, error) {
+		return graphInspection{
+			Query:          query,
+			ExpectedPaths:  append([]string(nil), expectedAnyOf...),
+			Anchors:        []string{"internal/storage/memory/store.go"},
+			Matched:        true,
+			Classification: "matched",
+		}, nil
+	}
+	t.Cleanup(func() { buildSemanticSearchInspectionReportHook = orig })
+
 	tmp := t.TempDir()
 	origHome := os.Getenv("HOME")
 	t.Setenv("HOME", tmp)

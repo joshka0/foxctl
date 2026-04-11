@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
-	"runtime"
 	"testing"
 
 	"github.com/jkatigb/agentctl/internal/domain/envelope"
@@ -16,30 +15,10 @@ import (
 	"github.com/jkatigb/agentctl/internal/storage/trajectory"
 )
 
-func installTrajectoryExportSkill(t *testing.T, cfg config.Config) {
-	t.Helper()
-	dest := filepath.Join(cfg.Paths.Skills, filepath.FromSlash("trajectory/export"))
-	if err := os.MkdirAll(dest, 0o755); err != nil {
-		t.Fatalf("trajectory/export skill dir: %v", err)
-	}
-	copySkillFile(t, filepath.Join(repoRoot(t), "skills", "trajectory_export", "skill.yaml"), filepath.Join(dest, "skill.yaml"))
-	binaryPath := filepath.Join(dest, "bin")
-	if runtime.GOOS == "windows" {
-		binaryPath += ".exe"
-	}
-	installSkillBinary(t, binaryPath, "./skills/trajectory_export")
-}
-
 func TestTrajectoryExport_ToCAS_EmitsArtifact(t *testing.T) {
 	ctx := context.Background()
-	tmp := t.TempDir()
-	t.Setenv("HOME", tmp)
-
-	cfg, err := config.Load(ctx)
-	if err != nil {
-		t.Fatalf("config load: %v", err)
-	}
-	installTrajectoryExportSkill(t, cfg)
+	cfg := newSkillTestConfig(t)
+	tmp := filepath.Dir(cfg.Home)
 
 	store, err := trajectory.Open(ctx, cfg.Storage.Root)
 	if err != nil {
@@ -125,13 +104,8 @@ func TestTrajectoryExport_ToCAS_EmitsArtifact(t *testing.T) {
 
 func TestTrajectoryExport_Inline_EmitsEpisodesAndFinalSummary(t *testing.T) {
 	ctx := context.Background()
-	tmp := t.TempDir()
-	t.Setenv("HOME", tmp)
-
-	cfg, err := config.Load(ctx)
-	if err != nil {
-		t.Fatalf("config load: %v", err)
-	}
+	cfg := newSkillTestConfig(t)
+	tmp := filepath.Dir(cfg.Home)
 
 	store, err := trajectory.Open(ctx, cfg.Storage.Root)
 	if err != nil {

@@ -34,28 +34,96 @@ jobs:
       CGO_ENABLED: "0"
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Unit tests
-        run: go test -short -v -count=1 ./...
+        run: |
+          base_ref=""
+          if git rev-parse --verify origin/main >/dev/null 2>&1; then
+            head_ref="$(git rev-parse HEAD)"
+            main_ref="$(git rev-parse origin/main)"
+            if [ "$head_ref" != "$main_ref" ]; then
+              base_ref="$(git merge-base HEAD origin/main)"
+            fi
+          fi
+          if [ -n "$base_ref" ]; then
+            make test-short-impacted BASE_REF="$base_ref" HEAD_REF=HEAD
+          else
+            go test -short -v -count=1 ./...
+          fi
 
   race-tests:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Race tests
-        run: make test-race
+        run: |
+          base_ref=""
+          if git rev-parse --verify origin/main >/dev/null 2>&1; then
+            head_ref="$(git rev-parse HEAD)"
+            main_ref="$(git rev-parse origin/main)"
+            if [ "$head_ref" != "$main_ref" ]; then
+              base_ref="$(git merge-base HEAD origin/main)"
+            fi
+          fi
+          if [ -n "$base_ref" ]; then
+            make test-race-impacted BASE_REF="$base_ref" HEAD_REF=HEAD
+          else
+            make test-race
+          fi
 
   build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Build CLI
         run: make build
 
       - name: Build skills pack
-        run: make skills-build
+        run: |
+          base_ref=""
+          if git rev-parse --verify origin/main >/dev/null 2>&1; then
+            head_ref="$(git rev-parse HEAD)"
+            main_ref="$(git rev-parse origin/main)"
+            if [ "$head_ref" != "$main_ref" ]; then
+              base_ref="$(git merge-base HEAD origin/main)"
+            fi
+          fi
+          if [ -n "$base_ref" ]; then
+            make skills-build-impacted BASE_REF="$base_ref" HEAD_REF=HEAD
+          else
+            make skills-build
+          fi
 
       - name: Check skill manifests (policy)
         run: go run ./scripts/checkmanifests
+
+  integration-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Run integration tests
+        run: |
+          base_ref=""
+          if git rev-parse --verify origin/main >/dev/null 2>&1; then
+            head_ref="$(git rev-parse HEAD)"
+            main_ref="$(git rev-parse origin/main)"
+            if [ "$head_ref" != "$main_ref" ]; then
+              base_ref="$(git merge-base HEAD origin/main)"
+            fi
+          fi
+          if [ -n "$base_ref" ]; then
+            make test-integration-impacted BASE_REF="$base_ref" HEAD_REF=HEAD
+          else
+            make test-integration
+          fi

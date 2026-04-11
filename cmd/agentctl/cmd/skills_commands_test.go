@@ -52,8 +52,12 @@ func TestSkillsInstallCommandInstallsExecSkill(t *testing.T) {
 }
 
 func TestSkillsListCommandListsInstalledSkills(t *testing.T) {
-	cfg := installTextGrepSkill(t)
-	installHTTPOpenAPISkill(t, cfg)
+	cfg := installTextGrepManifestOnly(t)
+	dest := filepath.Join(cfg.Paths.Skills, "http_openapi")
+	if err := os.MkdirAll(dest, 0o755); err != nil {
+		t.Fatalf("skill dir: %v", err)
+	}
+	copySkillFile(t, filepath.Join(repoRoot(t), "skills", "http_openapi", "skill.yaml"), filepath.Join(dest, "skill.yaml"))
 
 	cmd := newSkillsListCommand()
 	cmd.SetContext(config.WithContext(context.Background(), cfg))
@@ -80,7 +84,7 @@ func TestSkillsListCommandListsInstalledSkills(t *testing.T) {
 }
 
 func TestSkillsDescribeCommandProvidesDetails(t *testing.T) {
-	cfg := installTextGrepSkill(t)
+	cfg := installTextGrepManifestOnly(t)
 
 	cmd := newSkillsDescribeCommand()
 	cmd.SetContext(config.WithContext(context.Background(), cfg))
@@ -108,7 +112,7 @@ func TestSkillsDescribeCommandProvidesDetails(t *testing.T) {
 }
 
 func TestSkillsHelpCommandProvidesHelp(t *testing.T) {
-	cfg := installTextGrepSkill(t)
+	cfg := installTextGrepManifestOnly(t)
 
 	cmd := newSkillsHelpCommand()
 	cmd.SetContext(config.WithContext(context.Background(), cfg))
@@ -151,8 +155,12 @@ func TestSkillsHelpCommandProvidesHelp(t *testing.T) {
 }
 
 func TestSkillsSearchCommandMatchesByName(t *testing.T) {
-	cfg := installTextGrepSkill(t)
-	installHTTPOpenAPISkill(t, cfg)
+	cfg := installTextGrepManifestOnly(t)
+	dest := filepath.Join(cfg.Paths.Skills, "http_openapi")
+	if err := os.MkdirAll(dest, 0o755); err != nil {
+		t.Fatalf("skill dir: %v", err)
+	}
+	copySkillFile(t, filepath.Join(repoRoot(t), "skills", "http_openapi", "skill.yaml"), filepath.Join(dest, "skill.yaml"))
 
 	cmd := newSkillsSearchCommand()
 	cmd.SetContext(config.WithContext(context.Background(), cfg))
@@ -184,7 +192,7 @@ func TestSkillsSearchCommandMatchesByName(t *testing.T) {
 }
 
 func TestSkillsUninstallCommandRemovesSkill(t *testing.T) {
-	cfg := installTextGrepSkill(t)
+	cfg := installTextGrepManifestOnly(t)
 
 	cmd := newSkillsUninstallCommand()
 	cmd.SetContext(config.WithContext(context.Background(), cfg))

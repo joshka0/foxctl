@@ -54,13 +54,13 @@ func writeRunCommandExamples(cmd *cobra.Command) error {
 
 func writeRunSkillExamples(cmd *cobra.Command, skillName string) error {
 	cfg := config.MustFromContext(cmd.Context())
-	handle, err := findSkill(cfg, skillName)
+	manifest, err := findSkillManifest(cfg, skillName)
 	if err != nil {
 		return err
 	}
-	examples := buildSkillRunExamples(handle.Manifest.Metadata.Name, handle.Manifest.Signature.Help)
+	examples := buildSkillRunExamples(manifest.Metadata.Name, manifest.Signature.Help)
 	payload := runExamplesPayload{
-		Skill:    handle.Manifest.Metadata.Name,
+		Skill:    manifest.Metadata.Name,
 		Examples: examples,
 	}
 	if len(examples) == 0 {

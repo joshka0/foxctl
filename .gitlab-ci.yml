@@ -93,25 +93,69 @@ unit-tests:
   variables:
     CGO_ENABLED: "0"
   script:
-    - go test -short -v -count=1 -timeout 20m ./... 2>&1 | tee test-output.txt
+    - |
+      base_ref=""
+      if [ -n "$CI_MERGE_REQUEST_DIFF_BASE_SHA" ] && git cat-file -e "$CI_MERGE_REQUEST_DIFF_BASE_SHA^{commit}" >/dev/null 2>&1; then
+        base_ref="$CI_MERGE_REQUEST_DIFF_BASE_SHA"
+      elif [ -n "$CI_MERGE_REQUEST_TARGET_BRANCH_NAME" ] && git rev-parse --verify "origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME" >/dev/null 2>&1; then
+        base_ref="$(git merge-base HEAD "origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME")"
+      fi
+      if [ -n "$base_ref" ] && [ "$CI_COMMIT_BRANCH" != "main" ]; then
+        make test-short-impacted BASE_REF="$base_ref" HEAD_REF=HEAD 2>&1 | tee test-output.txt
+      else
+        go test -short -v -count=1 -timeout 20m ./... 2>&1 | tee test-output.txt
+      fi
     - grep -E '(^--- |ok\s+|FAIL\s+|panic)' test-output.txt | head -100 || true
 
 race-tests:
   stage: check
   script:
-    - make test-race
+    - |
+      base_ref=""
+      if [ -n "$CI_MERGE_REQUEST_DIFF_BASE_SHA" ] && git cat-file -e "$CI_MERGE_REQUEST_DIFF_BASE_SHA^{commit}" >/dev/null 2>&1; then
+        base_ref="$CI_MERGE_REQUEST_DIFF_BASE_SHA"
+      elif [ -n "$CI_MERGE_REQUEST_TARGET_BRANCH_NAME" ] && git rev-parse --verify "origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME" >/dev/null 2>&1; then
+        base_ref="$(git merge-base HEAD "origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME")"
+      fi
+      if [ -n "$base_ref" ] && [ "$CI_COMMIT_BRANCH" != "main" ]; then
+        make test-race-impacted BASE_REF="$base_ref" HEAD_REF=HEAD
+      else
+        make test-race
+      fi
 
 cgo-build-and-tests:
   stage: check
   script:
     - make build-cgo
-    - make test-cgo-short
+    - |
+      base_ref=""
+      if [ -n "$CI_MERGE_REQUEST_DIFF_BASE_SHA" ] && git cat-file -e "$CI_MERGE_REQUEST_DIFF_BASE_SHA^{commit}" >/dev/null 2>&1; then
+        base_ref="$CI_MERGE_REQUEST_DIFF_BASE_SHA"
+      elif [ -n "$CI_MERGE_REQUEST_TARGET_BRANCH_NAME" ] && git rev-parse --verify "origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME" >/dev/null 2>&1; then
+        base_ref="$(git merge-base HEAD "origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME")"
+      fi
+      if [ -n "$base_ref" ] && [ "$CI_COMMIT_BRANCH" != "main" ]; then
+        make test-cgo-short-impacted BASE_REF="$base_ref" HEAD_REF=HEAD
+      else
+        make test-cgo-short
+      fi
     - CGO_ENABLED=1 AGENTCTL_V2_REQUIRE_NATIVE_VECTOR_SQL=1 go test -tags=libsqlite3 ./internal/v2/adapters/libsql/turns -run TestTurnStore_SearchArtifactsByEmbedding_VectorPathLibSQL -count=1 -v
 
 integration-tests:
   stage: check
   script:
-    - make test-integration
+    - |
+      base_ref=""
+      if [ -n "$CI_MERGE_REQUEST_DIFF_BASE_SHA" ] && git cat-file -e "$CI_MERGE_REQUEST_DIFF_BASE_SHA^{commit}" >/dev/null 2>&1; then
+        base_ref="$CI_MERGE_REQUEST_DIFF_BASE_SHA"
+      elif [ -n "$CI_MERGE_REQUEST_TARGET_BRANCH_NAME" ] && git rev-parse --verify "origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME" >/dev/null 2>&1; then
+        base_ref="$(git merge-base HEAD "origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME")"
+      fi
+      if [ -n "$base_ref" ] && [ "$CI_COMMIT_BRANCH" != "main" ]; then
+        make test-integration-impacted BASE_REF="$base_ref" HEAD_REF=HEAD
+      else
+        make test-integration
+      fi
 
 llm-planner-integration:
   stage: check
@@ -133,7 +177,18 @@ build:
     - job: unit-tests
   script:
     - make build
-    - make skills-build
+    - |
+      base_ref=""
+      if [ -n "$CI_MERGE_REQUEST_DIFF_BASE_SHA" ] && git cat-file -e "$CI_MERGE_REQUEST_DIFF_BASE_SHA^{commit}" >/dev/null 2>&1; then
+        base_ref="$CI_MERGE_REQUEST_DIFF_BASE_SHA"
+      elif [ -n "$CI_MERGE_REQUEST_TARGET_BRANCH_NAME" ] && git rev-parse --verify "origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME" >/dev/null 2>&1; then
+        base_ref="$(git merge-base HEAD "origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME")"
+      fi
+      if [ -n "$base_ref" ] && [ "$CI_COMMIT_BRANCH" != "main" ]; then
+        make skills-build-impacted BASE_REF="$base_ref" HEAD_REF=HEAD
+      else
+        make skills-build
+      fi
     - go run ./scripts/checkmanifests
   artifacts:
     paths:

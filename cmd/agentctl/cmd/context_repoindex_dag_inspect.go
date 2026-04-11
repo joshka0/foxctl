@@ -31,6 +31,8 @@ type graphInspectionSuiteReport struct {
 	Inspections   []graphInspection `json:"inspections"`
 }
 
+var buildRepoIndexDAGInspectionReportHook = buildRepoIndexDAGInspectionReport
+
 func newContextRepoIndexDAGInspectSuiteCommand() *cobra.Command {
 	var workspacePath string
 	var suiteRef string
@@ -57,7 +59,7 @@ func newContextRepoIndexDAGInspectSuiteCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			report, err := buildRepoIndexDAGInspectionReport(ctx, cfg.Storage.Root, target, suite, limit)
+			report, err := buildRepoIndexDAGInspectionReportHook(ctx, cfg.Storage.Root, target, suite, limit)
 			if err != nil {
 				return err
 			}
