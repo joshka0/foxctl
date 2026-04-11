@@ -315,9 +315,6 @@ func (r *Runner) Run(ctx context.Context) error {
 }
 
 func (r *Runner) process(ctx context.Context, job Job) {
-	if r.queue != nil {
-		defer r.queue.Release(job)
-	}
 	r.active.Add(1)
 	defer r.active.Add(-1)
 
@@ -372,6 +369,9 @@ func (r *Runner) process(ctx context.Context, job Job) {
 	}
 	if result.Err != nil {
 		r.onError(result.Err)
+	}
+	if r.queue != nil {
+		r.queue.Release(job)
 	}
 	r.onResult(result)
 }
