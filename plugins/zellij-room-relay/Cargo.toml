@@ -4,10 +4,9 @@ version = "0.1.0"
 edition = "2021"
 autobins = false
 
-[lib]
+[[bin]]
 name = "zellij_room_relay"
 path = "src/main.rs"
-crate-type = ["cdylib"]
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }

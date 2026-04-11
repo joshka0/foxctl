@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -286,29 +288,39 @@ func TestRoomSandboxTasks_ScopePathResolvedToWorktree(t *testing.T) {
 
 	// Test resolveSandboxScopePath
 	tests := []struct {
-		name     string
+		name      string
 		scopePath string
-		want     string
+		want      string
 	}{
 		{
-			name:     "empty scope path resolves to worktree",
+			name:      "empty scope path resolves to worktree",
 			scopePath: "",
-			want:     wtPath,
+			want:      wtPath,
 		},
 		{
-			name:     "relative path resolves under worktree",
+			name:      "relative path resolves under worktree",
 			scopePath: "src/main.go",
-			want:     filepath.Join(wtPath, "src/main.go"),
+			want:      filepath.Join(wtPath, "src/main.go"),
 		},
 		{
-			name:     "absolute path under worktree stays as-is",
+			name:      "absolute path under worktree stays as-is",
 			scopePath: filepath.Join(wtPath, "pkg/handler.go"),
-			want:     filepath.Join(wtPath, "pkg/handler.go"),
+			want:      filepath.Join(wtPath, "pkg/handler.go"),
 		},
 		{
-			name:     "relative nested path resolves under worktree",
+			name:      "relative nested path resolves under worktree",
 			scopePath: "a/b/c/file.txt",
-			want:     filepath.Join(wtPath, "a/b/c/file.txt"),
+			want:      filepath.Join(wtPath, "a/b/c/file.txt"),
+		},
+		{
+			name:      "path traversal via .. is rejected, returns worktree root",
+			scopePath: "../../etc/passwd",
+			want:      wtPath,
+		},
+		{
+			name:      "deep traversal escaping worktree returns worktree root",
+			scopePath: "sub/../../../outside",
+			want:      wtPath,
 		},
 	}
 
@@ -509,7 +521,7 @@ func TestRoomSandboxRelay_NoopForNonSandboxRoom(t *testing.T) {
 	tc := tmuxbridge.New()
 
 	room := agent.RoomSummary{
-		ID:     "non-sandbox",
+		ID:      "non-sandbox",
 		Members: []agent.RoomMember{},
 	}
 	// No SandboxConfig
@@ -540,9 +552,9 @@ func TestRoomSandboxRelay_NoopForMissingSession(t *testing.T) {
 	room := agent.RoomSummary{
 		ID: "sandbox-no-session",
 		SandboxConfig: &agent.SandboxConfig{
-			WorktreePath:   "/tmp/fake-worktree",
-			TmuxSession:    "nonexistent-session-xyz",
-			Runtime:        "worktree",
+			WorktreePath: "/tmp/fake-worktree",
+			TmuxSession:  "nonexistent-session-xyz",
+			Runtime:      "worktree",
 		},
 	}
 	msg := agent.BoardMessage{
@@ -589,18 +601,18 @@ func TestRoomSandboxLoop_RelayIncludesSandboxDelivery(t *testing.T) {
 	room := agent.RoomSummary{
 		ID: "loop-test-room",
 		SandboxConfig: &agent.SandboxConfig{
-			WorktreePath:   tmpDir,
-			TmuxSession:    sessionName,
-			Runtime:        "worktree",
+			WorktreePath: tmpDir,
+			TmuxSession:  sessionName,
+			Runtime:      "worktree",
 		},
 	}
 	msg := agent.BoardMessage{
-		ID:       "msg-loop-1",
-		Stream:   "room:loop-test-room",
-		Sender:   "human-a",
+		ID:        "msg-loop-1",
+		Stream:    "room:loop-test-room",
+		Sender:    "human-a",
 		Recipient: "*",
-		Kind:     agent.BoardMessageKindInfo,
-		Body:     "Loop relay test",
+		Kind:      agent.BoardMessageKindInfo,
+		Body:      "Loop relay test",
 	}
 
 	result := relayRoomMessage(ctx, tc, room, msg, roomRelayOptions{Backend: "auto"})
@@ -1142,5 +1154,84 @@ func TestResolveRoomSandboxWorktree_NonSandboxRoom(t *testing.T) {
 	got := resolveRoomSandboxWorktree(ctx, store, workspace, "plain-resolve-room")
 	if got != "" {
 		t.Errorf("resolveRoomSandboxWorktree() = %q, want empty for non-sandbox room", got)
+	}
+}
+
+func TestBuildTerminalURL_NoGatewayURL(t *testing.T) {
+	t.Setenv("AGENTCTL_GATEWAY_URL", "")
+	got := buildTerminalURL("my-room")
+	if got != "/terminal/my-room" {
+		t.Errorf("buildTerminalURL() = %q, want /terminal/my-room", got)
+	}
+}
+
+func TestBuildTerminalURL_WithGatewayURL(t *testing.T) {
+	t.Setenv("AGENTCTL_GATEWAY_URL", "http://localhost:8765")
+	got := buildTerminalURL("my-room")
+	if got != "http://localhost:8765/terminal/my-room" {
+		t.Errorf("buildTerminalURL() = %q, want http://localhost:8765/terminal/my-room", got)
+	}
+}
+
+func TestBuildTerminalURL_WithGatewayURL_TrailingSlash(t *testing.T) {
+	t.Setenv("AGENTCTL_GATEWAY_URL", "http://localhost:8765/")
+	got := buildTerminalURL("my-room")
+	if got != "http://localhost:8765/terminal/my-room" {
+		t.Errorf("buildTerminalURL() = %q, want http://localhost:8765/terminal/my-room", got)
+	}
+}
+
+func TestGatewayDeregisterRoom_NoGatewayURL(t *testing.T) {
+	t.Setenv("AGENTCTL_GATEWAY_URL", "")
+	// When no gateway URL is set, returns false without error.
+	got := gatewayDeregisterRoom(context.Background(), "room-id")
+	if got {
+		t.Error("gatewayDeregisterRoom() = true, want false when AGENTCTL_GATEWAY_URL unset")
+	}
+}
+
+func TestGatewayDeregisterRoom_GatewayResponds(t *testing.T) {
+	// Stand up a minimal HTTP server that mimics the gateway DELETE endpoint.
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/rooms/", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodDelete {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"status":"unregistered"}`))
+	})
+	ts := httptest.NewServer(mux)
+	defer ts.Close()
+
+	t.Setenv("AGENTCTL_GATEWAY_URL", ts.URL)
+	got := gatewayDeregisterRoom(context.Background(), "some-room")
+	if !got {
+		t.Error("gatewayDeregisterRoom() = false, want true when gateway responds 200")
+	}
+}
+
+func TestGatewayRegisterRoom_GatewayResponds(t *testing.T) {
+	var gotBody map[string]any
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/rooms", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		_ = json.NewDecoder(r.Body).Decode(&gotBody)
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte(`{"status":"registered"}`))
+	})
+	ts := httptest.NewServer(mux)
+	defer ts.Close()
+
+	t.Setenv("AGENTCTL_GATEWAY_URL", ts.URL)
+	ok := gatewayRegisterRoom(context.Background(), "my-room", "agentctl-sandbox-my-room")
+	if !ok {
+		t.Error("gatewayRegisterRoom() = false, want true when gateway responds 201")
+	}
+	if gotBody["room_id"] != "my-room" {
+		t.Errorf("request body room_id = %q, want my-room", gotBody["room_id"])
 	}
 }

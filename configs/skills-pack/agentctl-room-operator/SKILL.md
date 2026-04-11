@@ -25,6 +25,8 @@ If the room is explicitly running the agile epic/milestone/story workflow, also 
 ## Core rules
 
 - The room timeline is canonical. Pane scrollback is not.
+- Participant transport and mux presentation are different things. A pane label or mux session is not proof of live delivery.
+- Room context and room membership are different things. `AGENTCTL_ROOM_ID`, a tmux/zellij session name, or a startup prompt only mean the pane knows about the room. They do **not** prove the participant is joined and routable.
 - When invoking **`room send`**, **prefer explicit `--to <participant>`** for anything meant for one person (so relay + inbox stay aligned), and **`--sender <you>`** whenever your pane context might not identify you (scripts, MCP, or outside tmux/zellij). Omit `--to` only for deliberate **broadcasts** to the rest of the room.
 - Start with `room status`, then `room inbox --actor <you>`.
 - Direct obligations beat casual browsing of the timeline.
@@ -36,6 +38,7 @@ If the room is explicitly running the agile epic/milestone/story workflow, also 
 - Do not work a task that another participant already owns unless the coordinator reassigns or reclaims it.
 - If the room is using the interview protocol, use `room interview next --actor <you>` before browsing the full transcript.
 - If the room is using the agile layer, orient from `room epic show`, `room milestone show`, or `room story show` instead of reconstructing the tranche from raw chat.
+- Read the participant state shown by `room status` as four separate dimensions: membership, transport availability, runtime availability, and presentation attachment.
 
 ## Room entry flow
 
@@ -83,10 +86,10 @@ agentctl room rebind <room-id> <actor-id> --backend tmux --session <session> --p
 Practical rule:
 
 - `tmux` or `zellij` session membership is not the same thing as room membership
-- each pane that should receive room traffic must be joined explicitly unless it
-  was launched by `agentctl` with room metadata already exported
-- do not assume a session-wide broadcast will reach unmanaged zellij panes
-- task assign/claim/complete **live-relay** to mux panes by default (same delivery as `room relay`). If a long-running `room loop` or `room relay` is already running, pass `room task --no-live-relay ...` on those commands to avoid double delivery to panes.
+- if `room status` does not show your participant, you are **not joined yet** even if the pane has room env vars or a room startup note
+- each pane that should receive room traffic must either join explicitly or auto-register transport when launched by `agentctl`
+- do not assume a session-wide broadcast will reach unmanaged panes
+- task assign/claim/complete use the same transport-first relay path as `room relay`; pane delivery is a viewer effect, not the room’s source of truth
 
 Then decide:
 
@@ -152,6 +155,8 @@ Use:
 agentctl room send <room-id> "Need coordinator input on <issue>" --to @coordinator --reply-expected
 ```
 
+Prefer `--sender <you>` whenever you are not obviously in the correct room-bound pane.
+
 ### I need a durable scheduled follow-up
 
 Use:
@@ -164,6 +169,11 @@ agentctl room remind add <room-id> <participant> "Check MR !26 and report status
 ```
 
 This writes the original direct request now, then lets the room loop send bounded reminder follow-ups until the recipient replies or the retry budget is exhausted.
+
+Operator rule:
+
+- if you set or expect reminders, confirm `room loop` is running for that room
+- `room relay` alone is only pane fanout; it will not drive reminder follow-ups or stale-reply nudges
 
 ### I need to understand the current milestone
 
@@ -219,6 +229,7 @@ Coordinator responsibility:
 - keep stale work moving
 - close reminder noise when it has already been handled
 - make the final call on routing and review closure
+- distinguish transport failures from viewer-only problems before escalating relay bugs
 
 ### I am the reviewer
 

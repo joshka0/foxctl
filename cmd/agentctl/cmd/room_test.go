@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jkatigb/agentctl/internal/agentpane"
 	"github.com/jkatigb/agentctl/internal/contextplane"
 	"github.com/jkatigb/agentctl/internal/domain/agent"
 	"github.com/jkatigb/agentctl/internal/domain/envelope"
@@ -210,7 +211,7 @@ func TestRoomCommandFlow_CreateJoinSendShow(t *testing.T) {
 	}
 
 	cmd, _ = newRoomTestCommand(ctx)
-	if err := runRoomJoin(cmd, workspace, "alpha", "agent-b", "reviewer", "", "", "", false, true, false); err != nil {
+	if err := runRoomJoin(cmd, workspace, "alpha", "agent-b", "reviewer", "", "", "", "", "", false, true, false); err != nil {
 		t.Fatalf("runRoomJoin: %v", err)
 	}
 
@@ -1087,6 +1088,176 @@ func TestParseRoomTaskListSelection(t *testing.T) {
 	}
 }
 
+func TestDeriveParticipantTransportState_PaneSocketReady(t *testing.T) {
+	// Create a real socket file to simulate a live pane wrapper.
+	socketPath := filepath.Join(t.TempDir(), "claude-a.sock")
+	f, err := os.Create(socketPath)
+	if err != nil {
+		t.Fatalf("create socket file: %v", err)
+	}
+	f.Close()
+
+	m := agent.RoomMember{
+		ActorID:           "claude-a",
+		Backend:           "zellij",
+		Session:           "test-session",
+		PaneID:            "terminal_0",
+		TransportEndpoint: socketPath,
+		TransportKind:     agent.PaneSocketTransportKind,
+	}
+	s := deriveParticipantTransportState(m)
+
+	if s.Membership != agent.MembershipActive {
+		t.Errorf("Membership=%q want active", s.Membership)
+	}
+	if s.Transport != agent.TransportAvailable {
+		t.Errorf("Transport=%q want available", s.Transport)
+	}
+	if s.Runtime != agent.RuntimeLive {
+		t.Errorf("Runtime=%q want live", s.Runtime)
+	}
+	if s.TransportEndpoint != socketPath {
+		t.Errorf("TransportEndpoint=%q want %q", s.TransportEndpoint, socketPath)
+	}
+	if s.MuxBackend != "zellij" {
+		t.Errorf("MuxBackend=%q want zellij", s.MuxBackend)
+	}
+	if !s.CanTriggerTurn {
+		t.Errorf("CanTriggerTurn=false want true")
+	}
+}
+
+func TestDeriveParticipantTransportState_PaneSocketUnavailable(t *testing.T) {
+	m := agent.RoomMember{
+		ActorID:           "claude-a",
+		TransportEndpoint: "/tmp/nonexistent-agentctl-sock/claude-a.sock",
+		TransportKind:     agent.PaneSocketTransportKind,
+	}
+	s := deriveParticipantTransportState(m)
+
+	if s.Transport != agent.TransportUnavailable {
+		t.Errorf("Transport=%q want unavailable", s.Transport)
+	}
+	if s.Runtime != agent.RuntimeStopped {
+		t.Errorf("Runtime=%q want stopped", s.Runtime)
+	}
+	if s.CanTriggerTurn {
+		t.Errorf("CanTriggerTurn=true want false")
+	}
+}
+
+func TestDeriveParticipantTransportState_MuxPane(t *testing.T) {
+	m := agent.RoomMember{
+		ActorID: "droid-a",
+		Backend: "tmux",
+		Session: "test-session",
+		PaneID:  "%5",
+	}
+	s := deriveParticipantTransportState(m)
+
+	// Legacy mux-pane: transport endpoint is derived from backend/session/pane,
+	// state is unknown (no live probe), presentation is detached.
+	if s.Membership != agent.MembershipActive {
+		t.Errorf("Membership=%q want active", s.Membership)
+	}
+	if s.Transport != agent.TransportUnknown {
+		t.Errorf("Transport=%q want unknown", s.Transport)
+	}
+	if s.Presentation != agent.PresentationDetached {
+		t.Errorf("Presentation=%q want detached", s.Presentation)
+	}
+	if s.MuxBackend != "tmux" {
+		t.Errorf("MuxBackend=%q want tmux", s.MuxBackend)
+	}
+	if s.TransportEndpoint == "" {
+		t.Errorf("TransportEndpoint empty, want mux address")
+	}
+}
+
+func TestDeriveParticipantTransportState_UnboundMember(t *testing.T) {
+	m := agent.RoomMember{ActorID: "gemini-a", Unbound: true}
+	s := deriveParticipantTransportState(m)
+
+	if s.Membership != agent.MembershipUnbound {
+		t.Errorf("Membership=%q want unbound", s.Membership)
+	}
+	if s.Transport != agent.TransportNone {
+		t.Errorf("Transport=%q want none", s.Transport)
+	}
+	if s.CanTriggerTurn {
+		t.Errorf("CanTriggerTurn=true want false for unbound member")
+	}
+}
+
+func TestBuildRoomStatusParticipantsIncludesTransport(t *testing.T) {
+	// Create a socket file so claude-a shows transport_state=ready.
+	socketPath := filepath.Join(t.TempDir(), "claude-a.sock")
+	f, err := os.Create(socketPath)
+	if err != nil {
+		t.Fatalf("create socket file: %v", err)
+	}
+	f.Close()
+
+	room := agent.RoomSummary{
+		ID:    "transport-alpha",
+		Title: "Transport Alpha",
+		Members: []agent.RoomMember{
+			{
+				ActorID:           "claude-a",
+				Role:              "worker",
+				Backend:           "zellij",
+				Session:           "test-session",
+				PaneID:            "terminal_0",
+				TransportEndpoint: socketPath,
+				TransportKind:     "pane_socket",
+			},
+			{
+				ActorID: "gemini-a",
+				Role:    "reviewer",
+				Backend: "tmux",
+				Session: "test-session",
+				PaneID:  "%5",
+			},
+		},
+		Participants: []string{"claude-a", "gemini-a"},
+	}
+
+	participants := buildRoomStatusParticipants(room, nil, nil, 5*time.Minute, nil)
+
+	byActor := make(map[string]roomStatusParticipant)
+	for _, p := range participants {
+		byActor[p.ActorID] = p
+	}
+
+	claudeA := byActor["claude-a"]
+	if claudeA.Transport.Membership != agent.MembershipActive {
+		t.Errorf("claude-a Membership=%q want active", claudeA.Transport.Membership)
+	}
+	if claudeA.Transport.Transport != agent.TransportAvailable {
+		t.Errorf("claude-a Transport=%q want available", claudeA.Transport.Transport)
+	}
+	if claudeA.Transport.Runtime != agent.RuntimeLive {
+		t.Errorf("claude-a Runtime=%q want live", claudeA.Transport.Runtime)
+	}
+	if claudeA.Transport.MuxBackend != "zellij" {
+		t.Errorf("claude-a MuxBackend=%q want zellij", claudeA.Transport.MuxBackend)
+	}
+	if !claudeA.Transport.CanTriggerTurn {
+		t.Errorf("claude-a CanTriggerTurn=false want true")
+	}
+
+	geminiA := byActor["gemini-a"]
+	if geminiA.Transport.Membership != agent.MembershipActive {
+		t.Errorf("gemini-a Membership=%q want active", geminiA.Transport.Membership)
+	}
+	if geminiA.Transport.Transport != agent.TransportUnknown {
+		t.Errorf("gemini-a Transport=%q want unknown", geminiA.Transport.Transport)
+	}
+	if geminiA.Transport.Presentation != agent.PresentationDetached {
+		t.Errorf("gemini-a Presentation=%q want detached", geminiA.Transport.Presentation)
+	}
+}
+
 func TestBuildRoomStatusEntriesCollapsesHistoricalBacklogByChain(t *testing.T) {
 	now := time.Date(2026, 4, 4, 20, 0, 0, 0, time.UTC)
 	entries := buildRoomStatusEntries("gemini-a", []agent.BoardMessage{
@@ -1668,6 +1839,9 @@ func TestRunRoomRemindLifecycle(t *testing.T) {
 	reminderID := reminder["id"].(string)
 	if reminder["reply_expected"] != true {
 		t.Fatalf("reply_expected=%v want true", reminder["reply_expected"])
+	}
+	if _, ok := data["live_relay"]; !ok {
+		t.Fatalf("live_relay missing from remind add payload: %v", data)
 	}
 
 	cmd, out = newRoomTestCommand(ctx)
@@ -6194,6 +6368,42 @@ func TestFormatRoomRelayContentIncludesRecipientAndFlags(t *testing.T) {
 	}
 }
 
+func TestFormatRoomRelayContentForTargetAddsDroidExecuteHint(t *testing.T) {
+	room := agent.RoomSummary{ID: "alpha"}
+	msg := agent.BoardMessage{
+		Sender:        "human-a",
+		Recipient:     "droid-a",
+		Subject:       "Reply needed",
+		Body:          "Please send a short status update.",
+		ReplyExpected: true,
+	}
+	got := formatRoomRelayContentForTarget(room, msg, "droid-a")
+	if !strings.Contains(got, `Execute directly if you are ready to answer: agentctl room send alpha --to human-a --sender droid-a "<response>"`) {
+		t.Fatalf("formatRoomRelayContentForTarget() missing droid execute hint: %q", got)
+	}
+}
+
+func TestTargetUsesComposerSubmitIncludesAgent(t *testing.T) {
+	if !targetUsesComposerSubmit("agent-a") {
+		t.Fatal("targetUsesComposerSubmit(agent-a) = false, want true")
+	}
+	if targetUsesComposerSubmit("claude-a") {
+		t.Fatal("targetUsesComposerSubmit(claude-a) = true, want false")
+	}
+}
+
+func TestTargetSubmitModeUsesEnterForClaude(t *testing.T) {
+	if got := targetSubmitMode("claude-a"); got != agentpane.SubmitModeEnter {
+		t.Fatalf("targetSubmitMode(claude-a) = %q, want %q", got, agentpane.SubmitModeEnter)
+	}
+}
+
+func TestTargetSubmitModeUsesEnterSplitForGemini(t *testing.T) {
+	if got := targetSubmitMode("gemini-a"); got != agentpane.SubmitModeEnterSplit {
+		t.Fatalf("targetSubmitMode(gemini-a) = %q, want %q", got, agentpane.SubmitModeEnterSplit)
+	}
+}
+
 func TestCollectRoomRelayTargetsDirectRecipient(t *testing.T) {
 	targets, skipped := collectRoomRelayTargets(agent.RoomSummary{
 		Members: []agent.RoomMember{
@@ -6305,6 +6515,79 @@ func TestCollectRoomRelayTargetsByBackendRoutesZellijByPaneID(t *testing.T) {
 	}
 }
 
+func TestCollectRoomRelayTargetsByBackendRoutesZellijNamedPaneByTitle(t *testing.T) {
+	_, zellijTargets, failed, skipped := collectRoomRelayTargetsByBackend(agent.RoomSummary{
+		Members: []agent.RoomMember{
+			{ActorID: "human-a"},
+			{ActorID: "claude-a", Backend: "zellij", Session: "sparkling-apricot", PaneID: "claude-a"},
+		},
+	}, agent.BoardMessage{
+		Sender:    "human-a",
+		Recipient: "claude-a",
+	})
+	if len(failed) != 0 {
+		t.Fatalf("failed=%v want none", failed)
+	}
+	if len(skipped) != 1 {
+		t.Fatalf("skipped=%v want 1 entry", skipped)
+	}
+	targets := zellijTargets["sparkling-apricot"]
+	if len(targets) != 1 || targets[0] != "claude-a" {
+		t.Fatalf("zellijTargets=%v want title target", zellijTargets)
+	}
+}
+
+func TestRelayRoomMessageZellijTargetsPrefersPaneSocketForNamedTargets(t *testing.T) {
+	origDeliver := deliverAgentPane
+	defer func() { deliverAgentPane = origDeliver }()
+
+	calls := 0
+	deliverAgentPane = func(ctx context.Context, socketPath string, msg agentpane.ControlMessage) (agentpane.ControlResponse, error) {
+		calls++
+		if !strings.Contains(socketPath, "sparkling-apricot") || !strings.Contains(socketPath, "claude-a") {
+			t.Fatalf("socketPath=%q", socketPath)
+		}
+		if msg.SubmitMode != agentpane.SubmitModeEnter {
+			t.Fatalf("submitMode=%q want %q", msg.SubmitMode, agentpane.SubmitModeEnter)
+		}
+		return agentpane.ControlResponse{OK: true, BytesWritten: len(msg.Content)}, nil
+	}
+
+	result := relayRoomMessageZellijTargets(context.Background(), agent.RoomSummary{
+		ID: "room-1",
+	}, agent.BoardMessage{
+		ID:        "msg-1",
+		Sender:    "human-a",
+		Recipient: "claude-a",
+		Body:      "hello",
+	}, "sparkling-apricot", []string{"claude-a"}, roomRelayOptions{})
+
+	if calls != 1 {
+		t.Fatalf("deliverAgentPane calls=%d want 1", calls)
+	}
+	if result.DeliveredCount != 1 || len(result.DeliveredTo) != 1 || result.DeliveredTo[0] != "claude-a" {
+		t.Fatalf("result=%+v want socket delivery", result)
+	}
+	if result.FailedCount != 0 || result.Error != "" {
+		t.Fatalf("result=%+v want no failures", result)
+	}
+}
+
+func TestResolveRoomMemberZellijTargetPrefersTitleForNamedPane(t *testing.T) {
+	session, target, ok := resolveRoomMemberZellijTarget(agent.RoomMember{
+		ActorID: "claude-a",
+		Backend: "zellij",
+		Session: "sparkling-apricot",
+		PaneID:  "claude-a",
+	})
+	if !ok {
+		t.Fatal("expected target")
+	}
+	if session != "sparkling-apricot" || target != "claude-a" {
+		t.Fatalf("got session=%q target=%q", session, target)
+	}
+}
+
 func TestRunRoomSendRejectsReplyExpectedBroadcast(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	ctx := context.Background()
@@ -6358,6 +6641,94 @@ func TestRunRoomSendDerivesSenderFromCurrentTmuxPane(t *testing.T) {
 	warnings, ok := data["warnings"].([]any)
 	if !ok || len(warnings) == 0 {
 		t.Fatalf("warnings=%T/%v want inferred sender warning", data["warnings"], data["warnings"])
+	}
+}
+
+func TestRunRoomSendExplicitSenderSkipsMuxSubmitHook(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	calls := 0
+	restoreSubmit := swapRoomSendMuxSubmitHook(func(context.Context, string) (map[string]any, string) {
+		calls++
+		return map[string]any{"backend": "tmux"}, ""
+	})
+	defer restoreSubmit()
+
+	ctx := context.Background()
+	workspace := t.TempDir()
+
+	cmd, _ := newRoomTestCommand(ctx)
+	if err := runRoomCreate(cmd, workspace, "alpha", "Alpha", "", []string{"human-a=coordinator", "gemini-a=reviewer"}); err != nil {
+		t.Fatalf("runRoomCreate: %v", err)
+	}
+
+	cmd, out := newRoomTestCommand(ctx)
+	if err := runRoomSend(cmd, workspace, "alpha", "human-a", "gemini-a", "", "hello room", "info", "", 0, false, false, false, true); err != nil {
+		t.Fatalf("runRoomSend: %v", err)
+	}
+	if calls != 0 {
+		t.Fatalf("mux submit hook calls=%d want 0", calls)
+	}
+	data := decodeRoomEnvelope(t, out)
+	warnings, ok := data["warnings"].([]any)
+	if !ok {
+		t.Fatalf("warnings type=%T", data["warnings"])
+	}
+	found := false
+	for _, raw := range warnings {
+		if s, _ := raw.(string); strings.Contains(s, "mux submit skipped because --sender was provided explicitly") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("warnings=%v want explicit sender mux-submit warning", warnings)
+	}
+	if _, ok := data["mux_submit"]; ok {
+		t.Fatalf("mux_submit present=%v want absent", data["mux_submit"])
+	}
+}
+
+func TestRunRoomSendInferredSenderStillAllowsMuxSubmitHook(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("TMUX", "/tmp/tmux.sock,1,0")
+	t.Setenv("TMUX_PANE", "%7")
+	calls := 0
+	restoreSubmit := swapRoomSendMuxSubmitHook(func(context.Context, string) (map[string]any, string) {
+		calls++
+		return map[string]any{"backend": "tmux"}, ""
+	})
+	defer restoreSubmit()
+	restore := swapRoomTmuxClientForTest(func() *tmuxbridge.Client {
+		return tmuxbridge.NewWithRunner(roomFakeRunner{responses: map[string]roomFakeResponse{
+			"tmux list-sessions": {stdout: "ok\n"},
+			"tmux display-message -t %7 -p " + roomListFormat(): {
+				stdout: "%7" + roomFieldSep() + "collab" + roomFieldSep() + "0" + roomFieldSep() + "0" + roomFieldSep() + "main" + roomFieldSep() + "111" + roomFieldSep() + "120" + roomFieldSep() + "30" + roomFieldSep() + "codex-a" + roomFieldSep() + "/repo" + roomFieldSep() + "zsh" + roomFieldSep() + "1\n",
+			},
+		}}, map[string]string{
+			"TMUX":      "/tmp/tmux.sock,1,0",
+			"TMUX_PANE": "%7",
+		})
+	})
+	defer restore()
+
+	ctx := context.Background()
+	workspace := t.TempDir()
+
+	cmd, _ := newRoomTestCommand(ctx)
+	if err := runRoomCreate(cmd, workspace, "alpha", "Alpha", "", []string{"codex-a=lead"}); err != nil {
+		t.Fatalf("runRoomCreate: %v", err)
+	}
+
+	cmd, out := newRoomTestCommand(ctx)
+	if err := runRoomSend(cmd, workspace, "alpha", "", "", "", "hello room", "info", "", 0, false, false, false, true); err != nil {
+		t.Fatalf("runRoomSend: %v", err)
+	}
+	if calls != 1 {
+		t.Fatalf("mux submit hook calls=%d want 1", calls)
+	}
+	data := decodeRoomEnvelope(t, out)
+	if _, ok := data["mux_submit"].(map[string]any); !ok {
+		t.Fatalf("mux_submit type=%T want map", data["mux_submit"])
 	}
 }
 
@@ -6547,7 +6918,7 @@ func TestRunRoomJoinCurrentDerivesCanonicalTmuxParticipant(t *testing.T) {
 	}
 
 	cmd, out := newRoomTestCommand(ctx)
-	if err := runRoomJoin(cmd, workspace, "alpha", "", "worker", "", "", "", false, true, true); err != nil {
+	if err := runRoomJoin(cmd, workspace, "alpha", "", "worker", "", "", "", "", "", false, true, true); err != nil {
 		t.Fatalf("runRoomJoin: %v", err)
 	}
 	data := decodeRoomEnvelope(t, out)
@@ -6591,7 +6962,7 @@ func TestRunRoomJoinPersistsTransportBinding(t *testing.T) {
 	}
 
 	cmd, out := newRoomTestCommand(ctx)
-	if err := runRoomJoin(cmd, workspace, "alpha", "cursor-a", "reviewer", "zellij", "fascinating-salamander", "", false, true, false); err != nil {
+	if err := runRoomJoin(cmd, workspace, "alpha", "cursor-a", "reviewer", "zellij", "fascinating-salamander", "", "", "", false, true, false); err != nil {
 		t.Fatalf("runRoomJoin: %v", err)
 	}
 	data := decodeRoomEnvelope(t, out)
@@ -6632,12 +7003,12 @@ func TestRunRoomRebindUpdatesTransportBindingWithoutChangingRole(t *testing.T) {
 	}
 
 	cmd, _ = newRoomTestCommand(ctx)
-	if err := runRoomJoin(cmd, workspace, "alpha", "claude-a", "reviewer", "tmux", "13", "%25", false, true, false); err != nil {
+	if err := runRoomJoin(cmd, workspace, "alpha", "claude-a", "reviewer", "tmux", "13", "%25", "", "", false, true, false); err != nil {
 		t.Fatalf("runRoomJoin: %v", err)
 	}
 
 	cmd, out := newRoomTestCommand(ctx)
-	if err := runRoomRebind(cmd, workspace, "alpha", "claude-a", "", "tmux", "13", "%27", false, false); err != nil {
+	if err := runRoomRebind(cmd, workspace, "alpha", "claude-a", "", "tmux", "13", "%27", "", "", false, false); err != nil {
 		t.Fatalf("runRoomRebind: %v", err)
 	}
 
@@ -6682,7 +7053,7 @@ func TestRunRoomRebindRequiresExistingMember(t *testing.T) {
 	}
 
 	cmd, out := newRoomTestCommand(ctx)
-	err := runRoomRebind(cmd, workspace, "alpha", "missing-a", "", "tmux", "13", "%27", false, false)
+	err := runRoomRebind(cmd, workspace, "alpha", "missing-a", "", "tmux", "13", "%27", "", "", false, false)
 	if err == nil {
 		t.Fatal("runRoomRebind error = nil want written error envelope")
 	}
@@ -6715,7 +7086,7 @@ func TestRunRoomJoinCurrentPersistsZellijPaneBinding(t *testing.T) {
 	}
 
 	cmd, out := newRoomTestCommand(ctx)
-	if err := runRoomJoin(cmd, workspace, "alpha", "", "reviewer", "", "", "", false, true, true); err != nil {
+	if err := runRoomJoin(cmd, workspace, "alpha", "", "reviewer", "", "", "", "", "", false, true, true); err != nil {
 		t.Fatalf("runRoomJoin: %v", err)
 	}
 	data := decodeRoomEnvelope(t, out)
@@ -6742,6 +7113,113 @@ func TestRunRoomJoinCurrentPersistsZellijPaneBinding(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("cursor-a not found in members=%v", members)
+	}
+}
+
+func TestRunRoomJoinPersistsTransportEndpoint(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("TMUX", "")
+	t.Setenv("TMUX_PANE", "")
+	t.Setenv("ZELLIJ", "")
+	ctx := context.Background()
+	workspace := t.TempDir()
+
+	cmd, _ := newRoomTestCommand(ctx)
+	if err := runRoomCreate(cmd, workspace, "ep-room", "EP Room", "", nil); err != nil {
+		t.Fatalf("runRoomCreate: %v", err)
+	}
+
+	endpoint := "/tmp/agentctl-pane/s1/claude-a.sock"
+	cmd, out := newRoomTestCommand(ctx)
+	if err := runRoomJoin(cmd, workspace, "ep-room", "claude-a", "worker", "zellij", "s1", "terminal_0", endpoint, "pane_socket", false, false, false); err != nil {
+		t.Fatalf("runRoomJoin: %v", err)
+	}
+
+	data := decodeRoomEnvelope(t, out)
+	roomRaw, ok := data["room"].(map[string]any)
+	if !ok {
+		t.Fatalf("room type=%T", data["room"])
+	}
+	members, ok := roomRaw["members"].([]any)
+	if !ok {
+		t.Fatalf("members=%T", roomRaw["members"])
+	}
+	var found bool
+	for _, raw := range members {
+		m, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		if m["actor_id"] == "claude-a" {
+			found = true
+			if m["transport_endpoint"] != endpoint {
+				t.Errorf("transport_endpoint=%q want %q", m["transport_endpoint"], endpoint)
+			}
+			if m["transport_kind"] != "pane_socket" {
+				t.Errorf("transport_kind=%q want pane_socket", m["transport_kind"])
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("claude-a not found in members=%v", members)
+	}
+}
+
+func TestRunRoomRebindPersistsTransportEndpoint(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("TMUX", "")
+	t.Setenv("TMUX_PANE", "")
+	t.Setenv("ZELLIJ", "")
+	ctx := context.Background()
+	workspace := t.TempDir()
+
+	cmd, _ := newRoomTestCommand(ctx)
+	if err := runRoomCreate(cmd, workspace, "rb-room", "Rebind Room", "", []string{"claude-a=worker"}); err != nil {
+		t.Fatalf("runRoomCreate: %v", err)
+	}
+	// Join claude-a with no transport initially.
+	cmd, _ = newRoomTestCommand(ctx)
+	if err := runRoomJoin(cmd, workspace, "rb-room", "claude-a", "worker", "tmux", "s1", "%1", "", "", false, false, false); err != nil {
+		t.Fatalf("runRoomJoin: %v", err)
+	}
+
+	endpoint := "/tmp/agentctl-pane/s1/claude-a.sock"
+	cmd, out := newRoomTestCommand(ctx)
+	if err := runRoomRebind(cmd, workspace, "rb-room", "claude-a", "", "", "", "", endpoint, "pane_socket", false, false); err != nil {
+		t.Fatalf("runRoomRebind: %v", err)
+	}
+
+	data := decodeRoomEnvelope(t, out)
+	roomRaw, ok := data["room"].(map[string]any)
+	if !ok {
+		t.Fatalf("room type=%T", data["room"])
+	}
+	members, ok := roomRaw["members"].([]any)
+	if !ok {
+		t.Fatalf("members=%T", roomRaw["members"])
+	}
+	var found bool
+	for _, raw := range members {
+		m, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		if m["actor_id"] == "claude-a" {
+			found = true
+			if m["transport_endpoint"] != endpoint {
+				t.Errorf("transport_endpoint=%q want %q", m["transport_endpoint"], endpoint)
+			}
+			if m["transport_kind"] != "pane_socket" {
+				t.Errorf("transport_kind=%q want pane_socket", m["transport_kind"])
+			}
+			// Existing backend preserved.
+			if m["backend"] != "tmux" {
+				t.Errorf("backend=%q want tmux (must be preserved after rebind)", m["backend"])
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("claude-a not found in members=%v", members)
 	}
 }
 
@@ -6834,7 +7312,11 @@ func roomListFormat() string {
 		"#{@name}" + roomFieldSep() +
 		"#{pane_current_path}" + roomFieldSep() +
 		"#{pane_current_command}" + roomFieldSep() +
-		"#{pane_active}"
+		"#{pane_active}" + roomFieldSep() +
+		"#{@agentctl_participant}" + roomFieldSep() +
+		"#{@agentctl_provider}" + roomFieldSep() +
+		"#{@agentctl_room_id}" + roomFieldSep() +
+		"#{@agentctl_wrapped}"
 }
 
 func mustWriteRoomTestFile(t *testing.T, path, contents string) {
@@ -8165,7 +8647,7 @@ func TestRoomJoinSandbox_TerminalBinding(t *testing.T) {
 	joinCmd.SetOut(buf)
 	joinCmd.SetContext(ctx)
 
-	err = runRoomJoin(joinCmd, workspace, "sandbox-join-room", "agent-a", "worker", "", "", "", false, false, false)
+	err = runRoomJoin(joinCmd, workspace, "sandbox-join-room", "agent-a", "worker", "", "", "", "", "", false, false, false)
 	if err != nil {
 		t.Fatalf("runRoomJoin: %v", err)
 	}

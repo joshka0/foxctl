@@ -157,6 +157,11 @@ func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", s.handleHealthz)
 
+	// Room registration API — used by the CLI to register/unregister sandbox rooms
+	// without requiring in-process access to the gateway server.
+	mux.HandleFunc("/api/rooms/", s.handleRoomByID) // DELETE /api/rooms/{room-id}
+	mux.HandleFunc("/api/rooms", s.handleRooms)     // POST /api/rooms
+
 	// Web terminal routes
 	termHandler := webterm.NewHandler(s.termHub, s.log)
 	termHandler.RegisterRoutes(mux)
@@ -258,6 +263,83 @@ func (s *Server) handleHealthz(w http.ResponseWriter, r *http.Request) {
 	_ = enc.Encode(health)
 }
 
+// roomRegisterRequest is the request body for POST /api/rooms.
+type roomRegisterRequest struct {
+	RoomID         string `json:"room_id"`
+	TmuxSession    string `json:"tmux_session"`
+	MaxConnections int    `json:"max_connections,omitempty"`
+}
+
+// handleRooms handles POST /api/rooms (room registration).
+func (s *Server) handleRooms(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeGatewayError(w, http.StatusMethodNotAllowed, "EARG", "method not allowed")
+		return
+	}
+
+	var req roomRegisterRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeGatewayError(w, http.StatusBadRequest, "EARG", "invalid JSON body: "+err.Error())
+		return
+	}
+	req.RoomID = strings.TrimSpace(req.RoomID)
+	req.TmuxSession = strings.TrimSpace(req.TmuxSession)
+	if req.RoomID == "" {
+		writeGatewayError(w, http.StatusBadRequest, "EARG", "room_id is required")
+		return
+	}
+	if req.TmuxSession == "" {
+		writeGatewayError(w, http.StatusBadRequest, "EARG", "tmux_session is required")
+		return
+	}
+
+	s.RegisterTerminalRoom(req.RoomID, req.TmuxSession, req.MaxConnections)
+
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.WriteHeader(http.StatusCreated)
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"status":       "registered",
+		"room_id":      req.RoomID,
+		"tmux_session": req.TmuxSession,
+	})
+}
+
+// handleRoomByID handles DELETE /api/rooms/{room-id} (room deregistration).
+func (s *Server) handleRoomByID(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodDelete {
+		writeGatewayError(w, http.StatusMethodNotAllowed, "EARG", "method not allowed")
+		return
+	}
+
+	roomID := strings.TrimPrefix(r.URL.Path, "/api/rooms/")
+	roomID = strings.TrimSpace(roomID)
+	if roomID == "" {
+		writeGatewayError(w, http.StatusBadRequest, "EARG", "room_id is required in URL path")
+		return
+	}
+
+	s.UnregisterTerminalRoom(roomID)
+
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"status":  "unregistered",
+		"room_id": roomID,
+	})
+}
+
+// writeGatewayError writes a JSON error response.
+func writeGatewayError(w http.ResponseWriter, status int, code, message string) {
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"error": map[string]string{
+			"code":    code,
+			"message": message,
+		},
+	})
+}
+
 // Start starts the gateway server. It blocks until the server is stopped
 // or an error occurs.
 func (s *Server) Start(ctx context.Context) error {
@@ -297,19 +379,24 @@ func (s *Server) startDev(ctx context.Context) error {
 		Tmux:  "ok",
 	})
 
+	ln, err := net.Listen("tcp", addr)
+	if err != nil {
+		return fmt.Errorf("listen http: %w", err)
+	}
+
 	errCh := make(chan error, 2) // may get errors from HTTP and SSH
 
 	go func() {
 		s.log.Info().Str("addr", addr).Msg("Gateway HTTP server listening")
-		if err := s.http.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			errCh <- err
+		if err := s.http.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			errCh <- fmt.Errorf("http server: %w", err)
 		}
 	}()
 
 	// Start SSH server in dev mode (on next port)
 	sshAddr := fmt.Sprintf("127.0.0.1:%d", s.opts.Port+1)
-	if err := s.startSSHDev(ctx, sshAddr); err != nil {
-		s.log.Warn().Err(err).Str("addr", sshAddr).Msg("SSH server failed to start in dev mode")
+	if err := s.startSSHDev(ctx, sshAddr, errCh); err != nil {
+		errCh <- fmt.Errorf("ssh server: %w", err)
 	}
 
 	// Wait for context cancellation or server error
@@ -317,6 +404,9 @@ func (s *Server) startDev(ctx context.Context) error {
 	case <-ctx.Done():
 		return s.shutdown()
 	case err := <-errCh:
+		s.log.Error().Err(err).Msg("Gateway sub-server failed")
+		// Best effort shutdown of other servers
+		_ = s.shutdown()
 		return err
 	}
 }
@@ -421,17 +511,17 @@ func (s *Server) startTsnet(ctx context.Context) error {
 	go func() {
 		s.log.Info().Msg("Gateway HTTPS server listening on tsnet")
 		if err := s.http.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			errCh <- err
+			errCh <- fmt.Errorf("https server: %w", err)
 		}
 	}()
 
 	// Start SSH server on tsnet
 	sshLn, err := ts.Listen("tcp", ":22")
 	if err != nil {
-		s.log.Warn().Err(err).Msg("Failed to get SSH listener from tsnet")
+		errCh <- fmt.Errorf("ssh listen on tsnet: %w", err)
 	} else {
-		if err := s.startSSHTsnet(ctx, sshLn); err != nil {
-			s.log.Warn().Err(err).Msg("SSH server failed to start on tsnet")
+		if err := s.startSSHTsnet(ctx, sshLn, errCh); err != nil {
+			errCh <- fmt.Errorf("ssh server: %w", err)
 		}
 	}
 
@@ -440,6 +530,9 @@ func (s *Server) startTsnet(ctx context.Context) error {
 	case <-ctx.Done():
 		return s.shutdown()
 	case err := <-errCh:
+		s.log.Error().Err(err).Msg("Gateway sub-server failed")
+		// Best effort shutdown of other servers
+		_ = s.shutdown()
 		return err
 	}
 }
@@ -494,7 +587,7 @@ func (s *Server) shutdown() error {
 
 // startSSHDev starts the SSH server in dev mode (localhost, no Tailscale).
 // Uses a permissive WhoIs that accepts all connections.
-func (s *Server) startSSHDev(ctx context.Context, addr string) error {
+func (s *Server) startSSHDev(ctx context.Context, addr string, errCh chan<- error) error {
 	// In dev mode, accept all connections (no Tailscale verification)
 	devWhoIs := func(_ context.Context, _ string) (*sshterm.IdentityInfo, error) {
 		return &sshterm.IdentityInfo{
@@ -516,7 +609,7 @@ func (s *Server) startSSHDev(ctx context.Context, addr string) error {
 
 	go func() {
 		if err := s.sshSrv.Serve(ctx, ln); err != nil && ctx.Err() == nil {
-			s.log.Error().Err(err).Msg("SSH server error")
+			errCh <- fmt.Errorf("ssh serve: %w", err)
 		}
 	}()
 
@@ -525,7 +618,7 @@ func (s *Server) startSSHDev(ctx context.Context, addr string) error {
 }
 
 // startSSHTsnet starts the SSH server on a tsnet listener with WhoIs verification.
-func (s *Server) startSSHTsnet(ctx context.Context, ln net.Listener) error {
+func (s *Server) startSSHTsnet(ctx context.Context, ln net.Listener, errCh chan<- error) error {
 	ts := s.tsnet
 
 	// WhoIs function that uses the tsnet local client for identity verification
@@ -558,7 +651,7 @@ func (s *Server) startSSHTsnet(ctx context.Context, ln net.Listener) error {
 
 	go func() {
 		if err := s.sshSrv.Serve(ctx, ln); err != nil && ctx.Err() == nil {
-			s.log.Error().Err(err).Msg("SSH server error")
+			errCh <- fmt.Errorf("ssh serve: %w", err)
 		}
 	}()
 

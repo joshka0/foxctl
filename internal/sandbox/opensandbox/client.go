@@ -411,39 +411,53 @@ func (c *Client) doJSON(ctx context.Context, method, reqPath string, body any, o
 	}
 	base.Path = path.Join(base.Path, reqPath)
 	base.RawQuery = query.Encode()
-	var bodyReader io.Reader
+	var payload []byte
 	if body != nil {
-		payload, err := json.Marshal(body)
+		payload, err = json.Marshal(body)
 		if err != nil {
 			return fmt.Errorf("opensandbox: marshal request: %w", err)
 		}
-		bodyReader = bytes.NewReader(payload)
 	}
-	httpReq, err := http.NewRequestWithContext(ctx, method, base.String(), bodyReader)
-	if err != nil {
-		return fmt.Errorf("opensandbox: build request: %w", err)
-	}
-	httpReq.Header.Set("Accept", "application/json")
-	if body != nil {
-		httpReq.Header.Set("Content-Type", "application/json")
-	}
-	if c.apiKey != "" {
-		httpReq.Header.Set("OPEN-SANDBOX-API-KEY", c.apiKey)
-	}
-	resp, err := c.httpClient.Do(httpReq)
-	if err != nil {
-		return fmt.Errorf("opensandbox: request failed: %w", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode >= 300 {
-		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 8192))
-		return fmt.Errorf("opensandbox: %s %s failed with status %d: %s", method, reqPath, resp.StatusCode, strings.TrimSpace(string(raw)))
-	}
-	if out == nil {
+	for attempt := 0; attempt < 10; attempt++ {
+		var bodyReader io.Reader
+		if payload != nil {
+			bodyReader = bytes.NewReader(payload)
+		}
+		httpReq, err := http.NewRequestWithContext(ctx, method, base.String(), bodyReader)
+		if err != nil {
+			return fmt.Errorf("opensandbox: build request: %w", err)
+		}
+		httpReq.Header.Set("Accept", "application/json")
+		if payload != nil {
+			httpReq.Header.Set("Content-Type", "application/json")
+		}
+		if c.apiKey != "" {
+			httpReq.Header.Set("OPEN-SANDBOX-API-KEY", c.apiKey)
+		}
+		resp, err := c.httpClient.Do(httpReq)
+		if err != nil {
+			if attempt == 9 {
+				return fmt.Errorf("opensandbox: request failed: %w", err)
+			}
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(time.Duration(attempt+1) * 100 * time.Millisecond):
+			}
+			continue
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode >= 300 {
+			raw, _ := io.ReadAll(io.LimitReader(resp.Body, 8192))
+			return fmt.Errorf("opensandbox: %s %s failed with status %d: %s", method, reqPath, resp.StatusCode, strings.TrimSpace(string(raw)))
+		}
+		if out == nil {
+			return nil
+		}
+		if err := json.NewDecoder(resp.Body).Decode(out); err != nil {
+			return fmt.Errorf("opensandbox: decode response: %w", err)
+		}
 		return nil
-	}
-	if err := json.NewDecoder(resp.Body).Decode(out); err != nil {
-		return fmt.Errorf("opensandbox: decode response: %w", err)
 	}
 	return nil
 }

@@ -1,9 +1,14 @@
 package cmd
 
 import (
+	"encoding/json"
+	"net"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
+	"github.com/jkatigb/agentctl/internal/agentpane"
 	domainagent "github.com/jkatigb/agentctl/internal/domain/agent"
 )
 
@@ -91,6 +96,106 @@ func TestListZellijBoundPanesFiltersAndDedupesByLatestPane(t *testing.T) {
 	}
 }
 
+func TestListZellijBoundPanesIncludesSocketOnlyWrappedPanes(t *testing.T) {
+	shortTmp, err := os.MkdirTemp("/tmp", "agt-zellij-cmd-")
+	if err != nil {
+		t.Fatalf("MkdirTemp: %v", err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(shortTmp) })
+	t.Setenv("TMPDIR", shortTmp)
+
+	session := "socket-only-zellij"
+	participantID := "claude-participant-with-a-long-suffix"
+	socketPath := agentpane.DefaultSocketPath(session, participantID)
+	readyPath := agentpane.DefaultReadyPath(session, participantID)
+	metaPath := agentpane.MetadataPathForSocket(socketPath)
+	if err := os.MkdirAll(filepath.Dir(socketPath), 0o755); err != nil {
+		t.Fatalf("MkdirAll(socket dir): %v", err)
+	}
+	ln, err := net.Listen("unix", socketPath)
+	if err != nil {
+		t.Fatalf("Listen(unix): %v", err)
+	}
+	defer ln.Close()
+	if err := os.WriteFile(readyPath, []byte("ready\n"), 0o600); err != nil {
+		t.Fatalf("WriteFile(ready): %v", err)
+	}
+	meta, err := json.Marshal(agentpane.PaneMetadata{
+		ParticipantID: participantID,
+		RoomID:        "room-delta",
+		SocketPath:    socketPath,
+		ReadyPath:     readyPath,
+	})
+	if err != nil {
+		t.Fatalf("Marshal(metadata): %v", err)
+	}
+	if err := os.WriteFile(metaPath, meta, 0o600); err != nil {
+		t.Fatalf("WriteFile(metadata): %v", err)
+	}
+	t.Cleanup(func() {
+		_ = os.Remove(socketPath)
+		_ = os.Remove(readyPath)
+		_ = os.Remove(metaPath)
+	})
+
+	panes := listZellijBoundPanes(nil, session)
+	if len(panes) != 1 {
+		t.Fatalf("len(panes) = %d, want 1", len(panes))
+	}
+	if panes[0].ParticipantID != participantID {
+		t.Fatalf("ParticipantID = %q, want %q", panes[0].ParticipantID, participantID)
+	}
+	if panes[0].PaneName != participantID {
+		t.Fatalf("PaneName = %q, want %q", panes[0].PaneName, participantID)
+	}
+	if panes[0].Source != "pane_socket" {
+		t.Fatalf("Source = %q, want pane_socket", panes[0].Source)
+	}
+	if panes[0].State != domainagent.StateRunning {
+		t.Fatalf("State = %q, want running", panes[0].State)
+	}
+	if panes[0].SocketPath != socketPath {
+		t.Fatalf("SocketPath = %q, want %q", panes[0].SocketPath, socketPath)
+	}
+	if panes[0].RoomID != "room-delta" {
+		t.Fatalf("RoomID = %q, want room-delta", panes[0].RoomID)
+	}
+}
+
+func TestListZellijBoundPanesMarksStaleSocketAsStopped(t *testing.T) {
+	shortTmp, err := os.MkdirTemp("/tmp", "agt-zellij-cmd-")
+	if err != nil {
+		t.Fatalf("MkdirTemp: %v", err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(shortTmp) })
+	t.Setenv("TMPDIR", shortTmp)
+
+	session := "socket-stale-zellij"
+	socketPath := agentpane.DefaultSocketPath(session, "stale-a")
+	readyPath := agentpane.DefaultReadyPath(session, "stale-a")
+	if err := os.MkdirAll(filepath.Dir(socketPath), 0o755); err != nil {
+		t.Fatalf("MkdirAll(socket dir): %v", err)
+	}
+	if err := os.WriteFile(socketPath, []byte{}, 0o600); err != nil {
+		t.Fatalf("WriteFile(socket placeholder): %v", err)
+	}
+	if err := os.WriteFile(readyPath, []byte("ready\n"), 0o600); err != nil {
+		t.Fatalf("WriteFile(ready): %v", err)
+	}
+	t.Cleanup(func() {
+		_ = os.Remove(socketPath)
+		_ = os.Remove(readyPath)
+	})
+
+	panes := listZellijBoundPanes(nil, session)
+	if len(panes) != 1 {
+		t.Fatalf("len(panes) = %d, want 1", len(panes))
+	}
+	if panes[0].State != domainagent.StateStopped {
+		t.Fatalf("State = %q, want stopped for unreachable socket", panes[0].State)
+	}
+}
+
 func TestZellijSingletonSubmitKind(t *testing.T) {
 	t.Parallel()
 	room := domainagent.RoomSummary{
@@ -103,8 +208,8 @@ func TestZellijSingletonSubmitKind(t *testing.T) {
 	if got := zellijSingletonSubmitKind(room, "droid-a"); got != "composer" {
 		t.Fatalf("droid-a: %q want composer", got)
 	}
-	if got := zellijSingletonSubmitKind(room, "gemini-a"); got != "gemini" {
-		t.Fatalf("gemini-a: %q want gemini", got)
+	if got := zellijSingletonSubmitKind(room, "gemini-a"); got != "enter" {
+		t.Fatalf("gemini-a: %q want enter", got)
 	}
 	if got := zellijSingletonSubmitKind(room, "claude-a"); got != "enter" {
 		t.Fatalf("claude-a: %q want enter", got)

@@ -26,7 +26,6 @@ import (
 	"github.com/jkatigb/agentctl/internal/protocol"
 	llmproviders "github.com/jkatigb/agentctl/internal/providers/llm"
 	"github.com/jkatigb/agentctl/internal/storage/agents"
-	"github.com/jkatigb/agentctl/internal/storage/blackboard"
 	"github.com/jkatigb/agentctl/internal/storage/mailbox"
 	"github.com/jkatigb/agentctl/internal/storage/sessions"
 	"github.com/jkatigb/agentctl/internal/tmuxbridge"
@@ -360,11 +359,7 @@ func currentSpawnWorkspaceRoot() string {
 // or the worktree doesn't exist.
 func resolveSpawnRoomSandboxCWD(workspaceRoot string) string {
 	ctx := context.Background()
-	cfg, err := loadConfig(ctx)
-	if err != nil {
-		return ""
-	}
-	boardStore, err := blackboard.OpenBoardStore(ctx, cfg.Storage.Root)
+	boardStore, err := openRoomBoardStore(ctx)
 	if err != nil {
 		return ""
 	}

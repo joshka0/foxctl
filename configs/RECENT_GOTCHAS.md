@@ -522,3 +522,117 @@
 - 2026-04-08 [gotcha]: Need to explicitly use room commands rather than relying on implicit integration
 - 2026-04-08 [gotcha]: Initial replies only appeared locally in pane, not in room log - fixed by using proper room send command
 - 2026-04-08 [gotcha]: Need to explicitly use room commands rather than relying on implicit integration
+- 2026-04-10 [gotcha]: Initial replies only appeared locally in pane, not in room log - fixed by using proper room send command
+- 2026-04-10 [gotcha]: Need to explicitly use room commands rather than relying on implicit integration
+- 2026-04-10 [gotcha]: Initial replies only appeared locally in pane, not in room log - fixed by using proper room send command
+- 2026-04-10 [gotcha]: Need to explicitly use room commands rather than relying on implicit integration
+- 2026-04-10 [gotcha]: LSP became stale when adding gateway HTTP endpoints but build passed
+- 2026-04-10 [gotcha]: Verified tmuxbridge import still needed in room.go after DI cleanup
+- 2026-04-10 [gotcha]: Removed blackboard import from agent.go after DI cleanup as it was no longer used
+- 2026-04-10 [gotcha]: LSP became stale when adding gateway HTTP endpoints but build passed
+- 2026-04-10 [gotcha]: Verified tmuxbridge import still needed in room.go after DI cleanup
+- 2026-04-10 [gotcha]: Removed blackboard import from agent.go after DI cleanup as it was no longer used
+- 2026-04-10 [gotcha]: LSP became stale when adding gateway HTTP endpoints but build passed
+- 2026-04-10 [gotcha]: Verified tmuxbridge import still needed in room.go after DI cleanup
+- 2026-04-10 [gotcha]: Removed blackboard import from agent.go after DI cleanup as it was no longer used
+- 2026-04-10 [gotcha]: LSP became stale when adding gateway HTTP endpoints but build passed
+- 2026-04-10 [gotcha]: Verified tmuxbridge import still needed in room.go after DI cleanup
+- 2026-04-10 [gotcha]: Removed blackboard import from agent.go after DI cleanup as it was no longer used
+- 2026-04-10 [gotcha]: LSP became stale when adding gateway HTTP endpoints but build passed
+- 2026-04-10 [gotcha]: Verified tmuxbridge import still needed in room.go after DI cleanup
+- 2026-04-10 [gotcha]: Removed blackboard import from agent.go after DI cleanup as it was no longer used
+- 2026-04-10 [gotcha]: Pre-existing build error in domain package (participant.go) needed quick fixing per error-handling rules
+- 2026-04-10 [gotcha]: participant.go was a new file added in the epic - required integration instead of duplication
+- 2026-04-10 [gotcha]: SQLite symbol duplicate issue requiring -tags=libsqlite3 build tag for compilation
+- 2026-04-10 [gotcha]: Initial test implementation with store interaction was overly complex, simplified to direct function testing
+- 2026-04-10 [time]: Multiple TypeScript type updates across types.ts and three React components to fix contract mismatch
+- 2026-04-10 [time]: Tracing prop types through component hierarchy to update RoomMember[] to RoomStatusParticipant[]
+- 2026-04-10 [time]: Initial test complexity with openRoomBoardStore integration required simplification
+- 2026-04-10 [gotcha]: Pre-existing build error in domain package (participant.go) needed quick fixing per error-handling rules
+- 2026-04-10 [gotcha]: participant.go was a new file added in the epic - required integration instead of duplication
+- 2026-04-10 [gotcha]: SQLite symbol duplicate issue requiring -tags=libsqlite3 build tag for compilation
+- 2026-04-10 [gotcha]: Initial test implementation with store interaction was overly complex, simplified to direct function testing
+- 2026-04-10 [gotcha]: Pre-existing build error in domain package (participant.go) needed quick fixing per error-handling rules
+- 2026-04-10 [gotcha]: participant.go was a new file added in the epic - required integration instead of duplication
+- 2026-04-10 [gotcha]: SQLite symbol duplicate issue requiring -tags=libsqlite3 build tag for compilation
+- 2026-04-10 [gotcha]: Initial test implementation with store interaction was overly complex, simplified to direct function testing
+- 2026-04-10 [gotcha]: Pre-existing build error in domain package (participant.go) needed quick fixing per error-handling rules
+- 2026-04-10 [gotcha]: participant.go was a new file added in the epic - required integration instead of duplication
+- 2026-04-10 [gotcha]: SQLite symbol duplicate issue requiring -tags=libsqlite3 build tag for compilation
+- 2026-04-10 [gotcha]: Initial test implementation with store interaction was overly complex, simplified to direct function testing
+- 2026-04-10 [gotcha]: Pre-existing build error in domain package (participant.go) needed quick fixing per error-handling rules
+- 2026-04-10 [gotcha]: participant.go was a new file added in the epic - required integration instead of duplication
+- 2026-04-10 [gotcha]: SQLite symbol duplicate issue requiring -tags=libsqlite3 build tag for compilation
+- 2026-04-10 [gotcha]: Initial test implementation with store interaction was overly complex, simplified to direct function testing
+- 2026-04-10 [gotcha]: Pre-existing build error in domain package (participant.go) needed quick fixing per error-handling rules
+- 2026-04-10 [gotcha]: participant.go was a new file added in the epic - required integration instead of duplication
+- 2026-04-10 [gotcha]: SQLite symbol duplicate issue requiring -tags=libsqlite3 build tag for compilation
+- 2026-04-10 [gotcha]: Initial test implementation with store interaction was overly complex, simplified to direct function testing
+- 2026-04-10 [gotcha]: Pre-existing build error in domain package (participant.go) needed quick fixing per error-handling rules
+- 2026-04-10 [gotcha]: participant.go was a new file added in the epic - required integration instead of duplication
+- 2026-04-10 [gotcha]: SQLite symbol duplicate issue requiring -tags=libsqlite3 build tag for compilation
+- 2026-04-10 [gotcha]: Initial test implementation with store interaction was overly complex, simplified to direct function testing
+- 2026-04-10 [gotcha]: Pre-existing build error in domain package (participant.go) needed quick fixing per error-handling rules
+- 2026-04-10 [gotcha]: participant.go was a new file added in the epic - required integration instead of duplication
+- 2026-04-10 [gotcha]: SQLite symbol duplicate issue requiring -tags=libsqlite3 build tag for compilation
+- 2026-04-10 [gotcha]: Initial test implementation with store interaction was overly complex, simplified to direct function testing
+- 2026-04-10 [gotcha]: Pre-existing build error in domain package (participant.go) needed quick fixing per error-handling rules
+- 2026-04-10 [gotcha]: participant.go was a new file added in the epic - required integration instead of duplication
+- 2026-04-10 [gotcha]: SQLite symbol duplicate issue requiring -tags=libsqlite3 build tag for compilation
+- 2026-04-10 [gotcha]: Initial test implementation with store interaction was overly complex, simplified to direct function testing
+- 2026-04-10 [gotcha]: Pre-existing build error in domain package (participant.go) needed quick fixing per error-handling rules
+- 2026-04-10 [gotcha]: participant.go was a new file added in the epic - required integration instead of duplication
+- 2026-04-10 [gotcha]: SQLite symbol duplicate issue requiring -tags=libsqlite3 build tag for compilation
+- 2026-04-10 [gotcha]: Initial test implementation with store interaction was overly complex, simplified to direct function testing
+- 2026-04-10 [gotcha]: Pre-existing build error in domain package (participant.go) needed quick fixing per error-handling rules
+- 2026-04-10 [gotcha]: participant.go was a new file added in the epic - required integration instead of duplication
+- 2026-04-10 [gotcha]: SQLite symbol duplicate issue requiring -tags=libsqlite3 build tag for compilation
+- 2026-04-10 [gotcha]: Initial test implementation with store interaction was overly complex, simplified to direct function testing
+- 2026-04-10 [gotcha]: Pre-existing build error in domain package (participant.go) needed quick fixing per error-handling rules
+- 2026-04-10 [gotcha]: participant.go was a new file added in the epic - required integration instead of duplication
+- 2026-04-10 [gotcha]: SQLite symbol duplicate issue requiring -tags=libsqlite3 build tag for compilation
+- 2026-04-10 [gotcha]: Initial test implementation with store interaction was overly complex, simplified to direct function testing
+- 2026-04-10 [gotcha]: Pre-existing build error in domain package (participant.go) needed quick fixing per error-handling rules
+- 2026-04-10 [gotcha]: participant.go was a new file added in the epic - required integration instead of duplication
+- 2026-04-10 [gotcha]: SQLite symbol duplicate issue requiring -tags=libsqlite3 build tag for compilation
+- 2026-04-10 [gotcha]: Initial test implementation with store interaction was overly complex, simplified to direct function testing
+- 2026-04-10 [gotcha]: Pre-existing build error in domain package (participant.go) needed quick fixing per error-handling rules
+- 2026-04-10 [gotcha]: participant.go was a new file added in the epic - required integration instead of duplication
+- 2026-04-10 [gotcha]: SQLite symbol duplicate issue requiring -tags=libsqlite3 build tag for compilation
+- 2026-04-10 [gotcha]: Initial test implementation with store interaction was overly complex, simplified to direct function testing
+- 2026-04-10 [gotcha]: Pre-existing build error in domain package (participant.go) needed quick fixing per error-handling rules
+- 2026-04-10 [gotcha]: participant.go was a new file added in the epic - required integration instead of duplication
+- 2026-04-10 [gotcha]: SQLite symbol duplicate issue requiring -tags=libsqlite3 build tag for compilation
+- 2026-04-10 [gotcha]: Initial test implementation with store interaction was overly complex, simplified to direct function testing
+- 2026-04-10 [gotcha]: Pre-existing build error in domain package (participant.go) needed quick fixing per error-handling rules
+- 2026-04-10 [gotcha]: participant.go was a new file added in the epic - required integration instead of duplication
+- 2026-04-10 [gotcha]: SQLite symbol duplicate issue requiring -tags=libsqlite3 build tag for compilation
+- 2026-04-10 [gotcha]: Initial test implementation with store interaction was overly complex, simplified to direct function testing
+- 2026-04-10 [gotcha]: Pre-existing build error in domain package (participant.go) needed quick fixing per error-handling rules
+- 2026-04-10 [gotcha]: participant.go was a new file added in the epic - required integration instead of duplication
+- 2026-04-10 [gotcha]: SQLite symbol duplicate issue requiring -tags=libsqlite3 build tag for compilation
+- 2026-04-10 [gotcha]: Initial test implementation with store interaction was overly complex, simplified to direct function testing
+- 2026-04-10 [gotcha]: Pre-existing build error in domain package (participant.go) needed quick fixing per error-handling rules
+- 2026-04-10 [gotcha]: participant.go was a new file added in the epic - required integration instead of duplication
+- 2026-04-10 [gotcha]: SQLite symbol duplicate issue requiring -tags=libsqlite3 build tag for compilation
+- 2026-04-10 [gotcha]: Initial test implementation with store interaction was overly complex, simplified to direct function testing
+- 2026-04-10 [gotcha]: Pre-existing build error in domain package (participant.go) needed quick fixing per error-handling rules
+- 2026-04-10 [gotcha]: participant.go was a new file added in the epic - required integration instead of duplication
+- 2026-04-10 [gotcha]: SQLite symbol duplicate issue requiring -tags=libsqlite3 build tag for compilation
+- 2026-04-10 [gotcha]: Initial test implementation with store interaction was overly complex, simplified to direct function testing
+- 2026-04-11 [gotcha]: Pre-existing build error in domain package (participant.go) needed quick fixing per error-handling rules
+- 2026-04-11 [gotcha]: participant.go was a new file added in the epic - required integration instead of duplication
+- 2026-04-11 [gotcha]: SQLite symbol duplicate issue requiring -tags=libsqlite3 build tag for compilation
+- 2026-04-11 [gotcha]: Initial test implementation with store interaction was overly complex, simplified to direct function testing
+- 2026-04-11 [gotcha]: Pre-existing build error in domain package (participant.go) needed quick fixing per error-handling rules
+- 2026-04-11 [gotcha]: participant.go was a new file added in the epic - required integration instead of duplication
+- 2026-04-11 [gotcha]: SQLite symbol duplicate issue requiring -tags=libsqlite3 build tag for compilation
+- 2026-04-11 [gotcha]: Initial test implementation with store interaction was overly complex, simplified to direct function testing
+- 2026-04-11 [gotcha]: Pre-existing build error in domain package (participant.go) needed quick fixing per error-handling rules
+- 2026-04-11 [gotcha]: participant.go was a new file added in the epic - required integration instead of duplication
+- 2026-04-11 [gotcha]: SQLite symbol duplicate issue requiring -tags=libsqlite3 build tag for compilation
+- 2026-04-11 [gotcha]: Initial test implementation with store interaction was overly complex, simplified to direct function testing
+- 2026-04-11 [gotcha]: Pre-existing build error in domain package (participant.go) needed quick fixing per error-handling rules
+- 2026-04-11 [gotcha]: participant.go was a new file added in the epic - required integration instead of duplication
+- 2026-04-11 [gotcha]: SQLite symbol duplicate issue requiring -tags=libsqlite3 build tag for compilation
+- 2026-04-11 [gotcha]: Initial test implementation with store interaction was overly complex, simplified to direct function testing

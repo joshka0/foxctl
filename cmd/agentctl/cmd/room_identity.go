@@ -24,7 +24,7 @@ func resolveRoomSender(ctx context.Context, explicit string) (roomIdentity, erro
 	if sender := strings.TrimSpace(explicit); sender != "" {
 		return classifyExplicitRoomSender(sender), nil
 	}
-	if sender := strings.TrimSpace(os.Getenv("AGENTCTL_PARTICIPANT_ID")); sender != "" {
+	if sender := firstNonEmpty(os.Getenv("AGENTCTL_PARTICIPANT_ID"), os.Getenv("AGENTCTL_PARTICIPANT")); strings.TrimSpace(sender) != "" {
 		return classifyExplicitRoomSender(sender), nil
 	}
 	if strings.TrimSpace(os.Getenv("TMUX")) != "" || strings.TrimSpace(os.Getenv("TMUX_PANE")) != "" {
@@ -116,13 +116,23 @@ func normalizeZellijPaneID(value string) string {
 	if value == "" {
 		return ""
 	}
-	if strings.HasPrefix(value, "terminal_") || strings.HasPrefix(value, "plugin_") {
+	if isZellijPaneID(value) {
 		return value
 	}
 	if digitsOnly(value) {
 		return "terminal_" + value
 	}
 	return value
+}
+
+func isZellijPaneID(value string) bool {
+	value = strings.TrimSpace(value)
+	return strings.HasPrefix(value, "terminal_") || strings.HasPrefix(value, "plugin_")
+}
+
+func isResolvableZellijPaneID(value string) bool {
+	value = strings.TrimSpace(value)
+	return isZellijPaneID(value) || digitsOnly(value)
 }
 
 func digitsOnly(value string) bool {

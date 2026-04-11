@@ -19,11 +19,32 @@ struct PendingDelivery {
 
 #[derive(Debug, Clone, Deserialize)]
 struct RelayRequest {
+    #[serde(default)]
+    action: String,
     room_id: String,
     sender: String,
     content: String,
     interrupt: bool,
     targets: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct PaneDebugEntry {
+    pane_id: String,
+    title: String,
+    is_plugin: bool,
+    is_focused: bool,
+    is_suppressed: bool,
+}
+
+#[derive(Debug, Serialize)]
+struct DebugResponse {
+    backend: &'static str,
+    action: &'static str,
+    permission_granted: bool,
+    pane_count: usize,
+    panes: Vec<PaneDebugEntry>,
+    error: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -83,6 +104,15 @@ impl ZellijPlugin for State {
         };
         match serde_json::from_str::<RelayRequest>(&payload) {
             Ok(request) => {
+                if request.action == "debug_panes" {
+                    let response =
+                        debug_panes_response(self.permission_granted, self.pane_manifest.as_ref());
+                    cli_pipe_output(
+                        &pipe_message.name,
+                        &serde_json::to_string(&response).unwrap(),
+                    );
+                    return false;
+                }
                 self.pending.push(PendingDelivery {
                     pipe_name: pipe_message.name,
                     request,
@@ -109,6 +139,35 @@ impl ZellijPlugin for State {
             }
         }
         false
+    }
+}
+
+fn debug_panes_response(
+    permission_granted: bool,
+    pane_manifest: Option<&PaneManifest>,
+) -> DebugResponse {
+    let mut panes = vec![];
+    if let Some(manifest) = pane_manifest {
+        for pane_group in manifest.panes.values() {
+            for pane in pane_group {
+                panes.push(PaneDebugEntry {
+                    pane_id: format!("terminal_{}", pane.id),
+                    title: pane.title.clone(),
+                    is_plugin: pane.is_plugin,
+                    is_focused: pane.is_focused,
+                    is_suppressed: pane.is_suppressed,
+                });
+            }
+        }
+    }
+    panes.sort_by(|a, b| a.pane_id.cmp(&b.pane_id));
+    DebugResponse {
+        backend: "zellij",
+        action: "debug_panes",
+        permission_granted,
+        pane_count: panes.len(),
+        panes,
+        error: String::new(),
     }
 }
 
@@ -151,16 +210,9 @@ impl State {
 }
 
 /// When true, send a leading Escape before paste for `interrupt` deliveries (tmux parity).
-/// Skip for Droid/Codex/Cursor titles — Escape often clears the composer there.
+/// Skip for composer-style panes — Escape often clears the composer there.
 fn interrupt_escape_before_paste(target: &str) -> bool {
-    let t = target.trim().to_lowercase();
-    if t.starts_with("gemini") {
-        return true;
-    }
-    if t.starts_with("droid") || t.starts_with("codex") || t.starts_with("cursor") {
-        return false;
-    }
-    true
+    !target_uses_composer_submit(target)
 }
 
 fn deliver_to_panes(pane_manifest: &PaneManifest, request: RelayRequest) -> RelayResponse {
@@ -173,6 +225,7 @@ fn deliver_to_panes(pane_manifest: &PaneManifest, request: RelayRequest) -> Rela
         skipped_members: vec![],
         error: String::new(),
     };
+    let original_focus = current_focus(pane_manifest);
 
     for target in request.targets {
         if target == request.sender {
@@ -180,25 +233,34 @@ fn deliver_to_panes(pane_manifest: &PaneManifest, request: RelayRequest) -> Rela
             continue;
         }
         match find_terminal_pane_by_title(pane_manifest, &target) {
-            Some(pane_id) => {
-                if request.interrupt && interrupt_escape_before_paste(&target) {
-                    write_chars_to_pane_id("\u{1b}", pane_id);
+            Some(PaneId::Terminal(pane_id)) => {
+                let target_pane = PaneId::Terminal(pane_id);
+                if original_focus.as_ref() != Some(&target_pane) {
+                    focus_pane_with_id(target_pane, false);
                 }
-                write_chars_to_pane_id(&request.content, pane_id);
-                // Match tmuxbridge relay: Gemini uses Escape+newline; composer TUIs (Droid/Codex/Cursor)
-                // need Ctrl+Enter. Kitty keyboard CSI works when the outer terminal/session supports it
-                // (Zellij enables this by default for capable terminals).
-                let t = target.trim().to_lowercase();
-                if t.starts_with("gemini") {
-                    write_chars_to_pane_id("\u{1b}", pane_id);
-                    write_chars_to_pane_id("\n", pane_id);
-                } else if t.starts_with("droid") || t.starts_with("codex") || t.starts_with("cursor") {
-                    write_chars_to_pane_id("\x1b[13;5u", pane_id);
+                if request.interrupt && interrupt_escape_before_paste(&target) {
+                    write_chars("\u{1b}");
+                }
+                write_chars(&request.content);
+                // Match tmuxbridge relay: composer-style TUIs need Ctrl+Enter. Kitty keyboard CSI
+                // works when the outer terminal/session supports it (Zellij enables this by default
+                // for capable terminals).
+                if target_uses_composer_submit(&target) {
+                    write_chars("\x1b[13;5u");
                 } else {
-                    write_chars_to_pane_id("\n", pane_id);
+                    write_chars("\n");
+                }
+                if let Some(original_focus) = original_focus {
+                    if original_focus != target_pane {
+                        focus_pane_with_id(original_focus, false);
+                    }
                 }
                 response.delivered_count += 1;
                 response.delivered_to.push(target);
+            }
+            Some(_) => {
+                response.failed_count += 1;
+                response.failed_members.push(target);
             }
             None => {
                 response.failed_count += 1;
@@ -217,6 +279,21 @@ fn deliver_to_panes(pane_manifest: &PaneManifest, request: RelayRequest) -> Rela
     response
 }
 
+fn current_focus(pane_manifest: &PaneManifest) -> Option<PaneId> {
+    for panes in pane_manifest.panes.values() {
+        for pane in panes {
+            if pane.is_focused {
+                return Some(if pane.is_plugin {
+                    PaneId::Plugin(pane.id)
+                } else {
+                    PaneId::Terminal(pane.id)
+                });
+            }
+        }
+    }
+    None
+}
+
 fn find_terminal_pane_by_title(pane_manifest: &PaneManifest, title: &str) -> Option<PaneId> {
     if title.trim() == "__singleton__" {
         return find_single_terminal_pane(pane_manifest);
@@ -229,7 +306,7 @@ fn find_terminal_pane_by_title(pane_manifest: &PaneManifest, title: &str) -> Opt
             if pane_target_matches(&target_key(title), pane.id) {
                 return Some(PaneId::Terminal(pane.id));
             }
-            if pane.title == title {
+            if pane_title_matches(&target_key(title), &pane.title) {
                 return Some(PaneId::Terminal(pane.id));
             }
         }
@@ -268,4 +345,29 @@ fn pane_target_matches(target: &str, pane_id: u32) -> bool {
         }
     }
     false
+}
+
+fn pane_title_matches(target: &str, title: &str) -> bool {
+    let title = title.trim();
+    if title.is_empty() {
+        return false;
+    }
+    if target == title {
+        return true;
+    }
+    if let Some(rest) = target.strip_prefix("zellij:") {
+        if let Some((_, pane_part)) = rest.split_once(':') {
+            return pane_part == title;
+        }
+    }
+    false
+}
+
+fn target_uses_composer_submit(target: &str) -> bool {
+    let t = target.trim().to_lowercase();
+    t.starts_with("droid")
+        || t.starts_with("codex")
+        || t.starts_with("cursor")
+        || t.starts_with("claude")
+        || t.starts_with("gemini")
 }

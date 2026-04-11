@@ -10,6 +10,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jkatigb/agentctl/internal/agent/prompts"
+	"github.com/jkatigb/agentctl/internal/agentpane"
 	"github.com/jkatigb/agentctl/internal/contextplane"
 	"github.com/jkatigb/agentctl/internal/domain/agent"
 	"github.com/jkatigb/agentctl/internal/protocol"
@@ -19,7 +21,10 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var muxLabelSanitizer = regexp.MustCompile(`[^a-z0-9._-]+`)
+var (
+	muxLabelSanitizer        = regexp.MustCompile(`[^a-z0-9._-]+`)
+	muxGroupDeliverAgentPane = agentpane.Deliver
+)
 
 type muxCreateError struct {
 	code protocol.ErrorCode
@@ -44,6 +49,8 @@ func newTmuxCommand() *cobra.Command {
 		newTmuxSendCommand(),
 		newTmuxRemindCommand(),
 		newTmuxSubmitCommand(),
+		newTmuxSubmitAllCommand(),
+		newTmuxInterruptAllCommand(),
 		newTmuxSendParentCommand(),
 		newTmuxObserveCommand(),
 		newTmuxDoctorCommand(),
@@ -304,20 +311,25 @@ func newTmuxCreateCommand() *cobra.Command {
 				}, protocol.WithSource("cli"))
 			}
 			client := tmuxbridge.New()
+			paneServeExecutable, execErr := os.Executable()
+			if execErr != nil || strings.TrimSpace(paneServeExecutable) == "" {
+				paneServeExecutable = "agentctl"
+			}
 			result, err := client.PrepareSession(cmd.Context(), tmuxbridge.PrepareOptions{
-				Session:           resolvedSession,
-				Panes:             panes,
-				PaneCommand:       paneCommand,
-				Agent:             agent,
-				AgentMode:         agentMode,
-				AgentArgs:         append([]string(nil), agentArgs...),
-				AgentSessionID:    agentSessionID,
-				CWD:               cwd,
-				LabelPrefix:       labelPrefix,
-				ParentParticipant: parentParticipant,
-				ParentAgentID:     parentAgentID,
-				RoomID:            roomID,
-				RoomAccess:        roomAccess,
+				Session:             resolvedSession,
+				Panes:               panes,
+				PaneCommand:         paneCommand,
+				Agent:               agent,
+				AgentMode:           agentMode,
+				AgentArgs:           append([]string(nil), agentArgs...),
+				AgentSessionID:      agentSessionID,
+				CWD:                 cwd,
+				LabelPrefix:         labelPrefix,
+				ParentParticipant:   parentParticipant,
+				ParentAgentID:       parentAgentID,
+				RoomID:              roomID,
+				RoomAccess:          roomAccess,
+				PaneServeExecutable: paneServeExecutable,
 			})
 			if err != nil {
 				return protocol.WriteError(cmd.OutOrStdout(), "agentctl.tmux.create", protocol.ErrorCodeERuntime, err.Error(), map[string]any{
@@ -399,7 +411,18 @@ func runMuxCreateZellij(cmd *cobra.Command, session string, panes int, paneComma
 			hint: "Pass --session or run inside zellij so ZELLIJ_SESSION_NAME can be detected.",
 		}
 	}
-	command, err := resolveMuxCreateCommand(strings.TrimSpace(paneCommand), strings.TrimSpace(agent), strings.TrimSpace(agentMode), append([]string(nil), agentArgs...), strings.TrimSpace(agentSessionID))
+	prefix := strings.TrimSpace(labelPrefix)
+	if prefix == "" {
+		prefix = deriveMuxCreateLabelPrefix(session, roomID, strings.TrimSpace(agent))
+	}
+	previewCommand, err := resolveMuxCreateCommandWithPrompt(
+		strings.TrimSpace(paneCommand),
+		strings.TrimSpace(agent),
+		strings.TrimSpace(agentMode),
+		append([]string(nil), agentArgs...),
+		strings.TrimSpace(agentSessionID),
+		buildMuxCreateRoomAgentPrompt(cwd, roomID, roomAccess, "<participant>"),
+	)
 	if err != nil {
 		return nil, &muxCreateError{
 			code: protocol.ErrorCodeEARG,
@@ -407,19 +430,31 @@ func runMuxCreateZellij(cmd *cobra.Command, session string, panes int, paneComma
 			hint: "Use --pane-command directly, or pass --agent with optional repeated --agent-arg values.",
 		}
 	}
-	prefix := strings.TrimSpace(labelPrefix)
-	if prefix == "" {
-		prefix = deriveMuxCreateLabelPrefix(strings.TrimSpace(agent))
-	}
 	client := zellijbridge.New()
 	created := make([]map[string]any, 0, panes)
 	for i := 0; i < panes; i++ {
 		name := zellijPaneNameForIndex(prefix, i)
+		command, err := resolveMuxCreateCommandWithPrompt(
+			strings.TrimSpace(paneCommand),
+			strings.TrimSpace(agent),
+			strings.TrimSpace(agentMode),
+			append([]string(nil), agentArgs...),
+			strings.TrimSpace(agentSessionID),
+			buildMuxCreateRoomAgentPrompt(cwd, roomID, roomAccess, name),
+		)
+		if err != nil {
+			return nil, &muxCreateError{
+				code: protocol.ErrorCodeEARG,
+				msg:  err.Error(),
+				hint: "Use --pane-command directly, or pass --agent with optional repeated --agent-arg values.",
+			}
+		}
+		paneCommand := wrapZellijPaneCommand(session, name, roomID, command, zellijPaneStartupProfile(agent, agentMode))
 		result, createErr := client.CreatePane(cmd.Context(), zellijbridge.CreatePaneOptions{
 			Session:           session,
 			CWD:               cwd,
 			Name:              name,
-			Command:           command,
+			Command:           paneCommand,
 			ParticipantID:     name,
 			ParentParticipant: parentParticipant,
 			ParentAgentID:     parentAgentID,
@@ -438,6 +473,8 @@ func runMuxCreateZellij(cmd *cobra.Command, session string, panes int, paneComma
 			"session":        result.Session,
 			"pane_name":      result.PaneName,
 			"participant_id": result.ParticipantID,
+			"socket_path":    agentpane.DefaultSocketPath(session, name),
+			"ready_path":     agentpane.DefaultReadyPath(session, name),
 		})
 	}
 	attachCommand := "zellij attach " + shellQuoteZshSafe(session)
@@ -466,7 +503,8 @@ func runMuxCreateZellij(cmd *cobra.Command, session string, panes int, paneComma
 		"session":            session,
 		"created":            true,
 		"panes_requested":    panes,
-		"pane_command":       command,
+		"pane_command":       previewCommand,
+		"wrapped_command":    wrapZellijPaneCommand(session, "<participant>", roomID, previewCommand, zellijPaneStartupProfile(agent, agentMode)),
 		"agent":              agent,
 		"agent_mode":         agentMode,
 		"agent_args":         append([]string(nil), agentArgs...),
@@ -483,6 +521,10 @@ func runMuxCreateZellij(cmd *cobra.Command, session string, panes int, paneComma
 }
 
 func resolveMuxCreateCommand(paneCommand, agent, agentMode string, agentArgs []string, agentSessionID string) (string, error) {
+	return resolveMuxCreateCommandWithPrompt(paneCommand, agent, agentMode, agentArgs, agentSessionID, "")
+}
+
+func resolveMuxCreateCommandWithPrompt(paneCommand, agent, agentMode string, agentArgs []string, agentSessionID, initialPrompt string) (string, error) {
 	if paneCommand != "" {
 		return paneCommand, nil
 	}
@@ -512,9 +554,13 @@ func resolveMuxCreateCommand(paneCommand, agent, agentMode string, agentArgs []s
 		case "codex":
 			args = append(args, "--full-auto")
 		case "claude":
-			args = append(args, "--dangerously-skip-permissions")
+			args = append(args, "--permission-mode", "bypassPermissions")
 		case "gemini", "agent":
-			args = append(args, "--yolo")
+			args = append(args, "--approval-mode", "yolo")
+		case "droid":
+			// Keep Droid's interactive launch clean. The pane wrapper startup profile
+			// upgrades autonomy to High after the UI reaches its stable "Auto (Off)"
+			// state, which is more reliable than passing extra root flags here.
 		default:
 			return "", fmt.Errorf("auto mode is unsupported for agent %q", agent)
 		}
@@ -522,10 +568,41 @@ func resolveMuxCreateCommand(paneCommand, agent, agentMode string, agentArgs []s
 		return "", fmt.Errorf("unsupported mode %q", agentMode)
 	}
 	args = append(args, agentArgs...)
+	args = append(args, muxCreateInteractivePromptArgs(strings.TrimSpace(agent), initialPrompt)...)
 	return joinShellCommand(args), nil
 }
 
-func deriveMuxCreateLabelPrefix(agent string) string {
+func buildMuxCreateRoomAgentPrompt(workspaceID, roomID, roomAccess, participantID string) string {
+	if strings.TrimSpace(roomID) == "" || strings.TrimSpace(roomAccess) != "direct" {
+		return ""
+	}
+	block := prompts.RoomOnboardingBlock(prompts.RoomOnboardingOptions{
+		RoomID:      strings.TrimSpace(roomID),
+		WorkspaceID: strings.TrimSpace(workspaceID),
+		Role:        "participant",
+	})
+	if strings.TrimSpace(block) == "" {
+		return ""
+	}
+	return block + "\n- Your participant id is \"" + strings.TrimSpace(participantID) + "\". When replying from this room-bound pane, prefer `agentctl room send " + strings.TrimSpace(roomID) + " --to <recipient> \"<response>\"`; agentctl will derive your sender automatically here. Use `--sender " + strings.TrimSpace(participantID) + "` only when replying from outside this pane."
+}
+
+func muxCreateInteractivePromptArgs(agentName, initialPrompt string) []string {
+	initialPrompt = strings.TrimSpace(initialPrompt)
+	if initialPrompt == "" {
+		return nil
+	}
+	switch strings.ToLower(strings.TrimSpace(agentName)) {
+	case "claude", "codex", "droid":
+		return []string{initialPrompt}
+	case "gemini":
+		return []string{"--prompt-interactive", initialPrompt}
+	default:
+		return nil
+	}
+}
+
+func deriveMuxCreateLabelPrefix(session, roomID, agent string) string {
 	base := strings.ToLower(strings.TrimSpace(agent))
 	if base == "" {
 		return "agent"
@@ -534,6 +611,18 @@ func deriveMuxCreateLabelPrefix(agent string) string {
 	base = strings.Trim(base, "-")
 	if base == "" {
 		return "agent"
+	}
+	scope := strings.ToLower(strings.TrimSpace(roomID))
+	if scope == "" {
+		scope = strings.ToLower(strings.TrimSpace(session))
+		if scope == "" || scope == "agentctl-collab" {
+			scope = ""
+		}
+	}
+	scope = muxLabelSanitizer.ReplaceAllString(scope, "-")
+	scope = strings.Trim(scope, "-")
+	if scope != "" {
+		return scope + "-" + base
 	}
 	return base
 }
@@ -551,6 +640,39 @@ func joinShellCommand(parts []string) string {
 		quoted = append(quoted, shellQuoteZshSafe(part))
 	}
 	return strings.Join(quoted, " ")
+}
+
+func wrapZellijPaneCommand(session, participantID, roomID, childCommand, startupProfile string) string {
+	agentctlPath, err := os.Executable()
+	if err != nil || strings.TrimSpace(agentctlPath) == "" {
+		agentctlPath = "agentctl"
+	}
+	args := []string{
+		agentctlPath,
+		"pane",
+		"serve",
+		"--participant", strings.TrimSpace(participantID),
+		"--socket-path", agentpane.DefaultSocketPath(session, participantID),
+	}
+	if strings.TrimSpace(roomID) != "" {
+		args = append(args, "--room-id", strings.TrimSpace(roomID))
+	}
+	if strings.TrimSpace(startupProfile) != "" {
+		args = append(args, "--startup-profile", strings.TrimSpace(startupProfile))
+	}
+	args = append(args,
+		"--default-submit-mode", agentpane.SubmitModeNewline,
+		"--",
+		"sh", "-lc", childCommand,
+	)
+	return joinShellCommand(args)
+}
+
+func zellijPaneStartupProfile(agent, agentMode string) string {
+	if strings.EqualFold(strings.TrimSpace(agent), "droid") && strings.EqualFold(strings.TrimSpace(agentMode), "auto") {
+		return agentpane.StartupProfileDroidAutoHigh
+	}
+	return ""
 }
 
 func shellQuoteZshSafe(value string) string {
@@ -994,12 +1116,249 @@ func newTmuxSendParentCommand() *cobra.Command {
 	return cmd
 }
 
+func newTmuxSubmitAllCommand() *cobra.Command {
+	var (
+		roomID    string
+		workspace string
+	)
+	cmd := &cobra.Command{
+		Use:   "submit-all",
+		Short: "Submit drafted input for every resolvable participant in a room",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			if strings.TrimSpace(roomID) == "" {
+				return protocol.WriteError(cmd.OutOrStdout(), "agentctl.tmux.submit-all", protocol.ErrorCodeEARG, "--room is required", map[string]any{
+					"hint": "Example: agentctl mux submit-all --room tmux-transport-first-20260410",
+				}, protocol.WithSource("cli"))
+			}
+			return runMuxGroupControl(cmd, workspace, roomID, "submit")
+		},
+	}
+	cmd.Flags().StringVar(&roomID, "room", "", "Agentctl room id to resolve canonical participant panes")
+	cmd.Flags().StringVar(&workspace, "workspace", ".", "Workspace root for --room lookup")
+	return cmd
+}
+
+func newTmuxInterruptAllCommand() *cobra.Command {
+	var (
+		roomID    string
+		workspace string
+	)
+	cmd := &cobra.Command{
+		Use:   "interrupt-all",
+		Short: "Send group interrupt (Escape) to every resolvable participant in a room",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			if strings.TrimSpace(roomID) == "" {
+				return protocol.WriteError(cmd.OutOrStdout(), "agentctl.tmux.interrupt-all", protocol.ErrorCodeEARG, "--room is required", map[string]any{
+					"hint": "Example: agentctl mux interrupt-all --room tmux-transport-first-20260410",
+				}, protocol.WithSource("cli"))
+			}
+			return runMuxGroupControl(cmd, workspace, roomID, "interrupt")
+		},
+	}
+	cmd.Flags().StringVar(&roomID, "room", "", "Agentctl room id to resolve canonical participant panes")
+	cmd.Flags().StringVar(&workspace, "workspace", ".", "Workspace root for --room lookup")
+	return cmd
+}
+
 func resolveParentParticipantID() (string, error) {
 	parent := strings.TrimSpace(os.Getenv("AGENTCTL_PARENT_PARTICIPANT_ID"))
 	if parent == "" {
 		return "", fmt.Errorf("AGENTCTL_PARENT_PARTICIPANT_ID is not set")
 	}
 	return parent, nil
+}
+
+type muxGroupControlItem struct {
+	Participant string `json:"participant"`
+	Action      string `json:"action"`
+	Backend     string `json:"backend,omitempty"`
+	Via         string `json:"via,omitempty"`
+	Target      string `json:"target,omitempty"`
+	Status      string `json:"status"`
+	Error       string `json:"error,omitempty"`
+}
+
+func runMuxGroupControl(cmd *cobra.Command, workspace, roomID, action string) error {
+	absWorkspace, err := resolveRoomWorkspace(workspace)
+	if err != nil {
+		return err
+	}
+	store, err := openRoomBoardStore(cmd.Context())
+	if err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.tmux."+action+"-all", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	defer store.Close()
+	summary, err := store.GetRoom(cmd.Context(), absWorkspace, strings.TrimSpace(roomID), "")
+	if err != nil {
+		code := protocol.ErrorCodeERuntime
+		if errors.Is(err, blackboard.ErrRoomNotFound) {
+			code = protocol.ErrorCodeENotFound
+		}
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.tmux."+action+"-all", code, err.Error(), map[string]any{
+			"hint": "Create the room first or pass the correct --workspace.",
+		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+
+	items := make([]muxGroupControlItem, 0, len(summary.Members))
+	for _, member := range summary.Members {
+		member = normalizeRoomMember(member)
+		if item := muxGroupControlForMember(cmd.Context(), member, action); strings.TrimSpace(item.Participant) != "" {
+			items = append(items, item)
+		}
+	}
+	completed := 0
+	skipped := 0
+	failed := 0
+	for _, item := range items {
+		switch item.Status {
+		case "ok":
+			completed++
+		case "skipped":
+			skipped++
+		default:
+			failed++
+		}
+	}
+	return protocol.WriteOK(cmd.OutOrStdout(), "agentctl.tmux."+action+"-all", map[string]any{
+		"room_id":      strings.TrimSpace(roomID),
+		"action":       action,
+		"completed":    completed,
+		"skipped":      skipped,
+		"failed":       failed,
+		"participants": items,
+	}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+}
+
+func muxGroupControlForMember(ctx context.Context, member agent.RoomMember, action string) muxGroupControlItem {
+	member = normalizeRoomMember(member)
+	item := muxGroupControlItem{
+		Participant: member.ActorID,
+		Action:      action,
+	}
+	if item.Participant == "" || strings.HasPrefix(item.Participant, "actor:system:") {
+		item.Status = "skipped"
+		item.Error = "not a controllable participant"
+		return item
+	}
+	if strings.HasPrefix(item.Participant, "tmux:") || strings.HasPrefix(item.Participant, "zellij:") {
+		item.Status = "skipped"
+		item.Error = "raw mux identity is not a canonical agent participant"
+		return item
+	}
+
+	if endpoint := strings.TrimSpace(member.TransportEndpoint); endpoint != "" && (strings.EqualFold(member.TransportKind, agent.PaneSocketTransportKind) || strings.HasPrefix(endpoint, "/")) {
+		item.Backend = roomMemberRelayBackend(member)
+		item.Via = "participant_transport"
+		item.Target = endpoint
+		if err := muxGroupControlViaSocket(ctx, endpoint, strings.TrimSpace(member.ActorID), action); err != nil {
+			item.Status = "failed"
+			item.Error = err.Error()
+			return item
+		}
+		item.Status = "ok"
+		return item
+	}
+
+	switch roomMemberRelayBackend(member) {
+	case "zellij":
+		item.Backend = "zellij"
+		item.Via = "mux"
+		session, _, ok := resolveRoomMemberZellijTarget(member)
+		if !ok || strings.TrimSpace(session) == "" {
+			item.Status = "skipped"
+			item.Error = "member has no resolvable zellij session"
+			return item
+		}
+		pane := strings.TrimSpace(member.PaneID)
+		if pane != "" && !isResolvableZellijPaneID(pane) {
+			item.Status = "skipped"
+			item.Error = "member stores zellij pane binding by title only"
+			return item
+		}
+		pane = normalizeZellijPaneID(pane)
+		item.Target = session
+		if pane != "" {
+			item.Target = formatZellijParticipantID(session, pane)
+		}
+		client := zellijbridge.New()
+		if action == "interrupt" {
+			_, err := client.Interrupt(ctx, session, pane)
+			if err != nil {
+				item.Status = "failed"
+				item.Error = err.Error()
+				return item
+			}
+		} else {
+			mode := zellijSubmitModeForParticipant(item.Participant)
+			_, err := client.Submit(ctx, session, zellijbridge.SubmitOptions{Mode: mode, PaneID: pane})
+			if err != nil {
+				item.Status = "failed"
+				item.Error = err.Error()
+				return item
+			}
+		}
+		item.Status = "ok"
+		return item
+	default:
+		item.Backend = "tmux"
+		item.Via = "mux"
+		target := roomMemberTmuxTarget(member)
+		if strings.TrimSpace(target) == "" {
+			item.Status = "skipped"
+			item.Error = "member has no tmux pane target"
+			return item
+		}
+		item.Target = target
+		client := tmuxbridge.New()
+		if action == "interrupt" {
+			_, err := client.Interrupt(ctx, target)
+			if err != nil {
+				item.Status = "failed"
+				item.Error = err.Error()
+				return item
+			}
+		} else {
+			mode := tmuxSubmitModeForParticipant(item.Participant)
+			_, err := client.Submit(ctx, target, tmuxbridge.SubmitOptions{Mode: mode})
+			if err != nil {
+				item.Status = "failed"
+				item.Error = err.Error()
+				return item
+			}
+		}
+		item.Status = "ok"
+		return item
+	}
+}
+
+func muxGroupControlViaSocket(ctx context.Context, socketPath, participantID, action string) error {
+	msg := agentpane.ControlMessage{
+		Kind:      action,
+		Recipient: participantID,
+	}
+	if action == "submit" {
+		msg.SubmitMode = targetSubmitMode(participantID)
+	}
+	_, err := muxGroupDeliverAgentPane(ctx, socketPath, msg)
+	return err
+}
+
+func tmuxSubmitModeForParticipant(participantID string) string {
+	switch targetSubmitMode(participantID) {
+	case agentpane.SubmitModeEnter:
+		return tmuxbridge.SubmitModeEnterOnly
+	default:
+		return tmuxbridge.SubmitModeEscapeEnter
+	}
+}
+
+func zellijSubmitModeForParticipant(participantID string) string {
+	switch targetSubmitMode(participantID) {
+	case agentpane.SubmitModeEnter, agentpane.SubmitModeEnterSplit:
+		return zellijbridge.SubmitModeEnterOnly
+	default:
+		return zellijbridge.SubmitModeEscapeEnter
+	}
 }
 
 func tmuxbridgeLabelExample(panes []tmuxbridge.Pane) string {

@@ -1,3 +1,6 @@
+//go:build opensandbox
+// +build opensandbox
+
 package cmd
 
 import (

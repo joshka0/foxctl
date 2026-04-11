@@ -263,6 +263,14 @@ type RoomMember struct {
 	PaneID   string    `json:"pane_id,omitempty"`
 	Unbound  bool      `json:"unbound,omitempty"`
 	JoinedAt time.Time `json:"joined_at"`
+	// TransportEndpoint is the unix socket path of an agentctl pane serve
+	// wrapper that owns this participant's child PTY. Empty means no pane
+	// wrapper is registered; use the legacy mux-pane path instead.
+	TransportEndpoint string `json:"transport_endpoint,omitempty"`
+	// TransportKind identifies the registered transport type:
+	// "pane_socket" when a pane wrapper is registered,
+	// "mux_pane" for legacy direct mux injection, or "" (unknown/none).
+	TransportKind string `json:"transport_kind,omitempty"`
 }
 
 // SandboxConfig holds sandbox-related metadata for a room that was created

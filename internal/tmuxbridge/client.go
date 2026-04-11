@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"hash/fnv"
 	"io"
 	"os"
 	"os/exec"
@@ -20,8 +21,14 @@ const (
 	defaultSessionName            = "agentctl-collab"
 	defaultLabelPrefix            = "agent"
 	muxCreateRoomOnboardingHeader = "Started via agentctl mux create."
+	paneSubmitModeNewline         = "newline"
+	startupProfileDroidAutoHigh   = "droid_auto_high"
 	fieldSep                      = "\x1f"
-	listFormat                    = "#{pane_id}" + fieldSep + "#{session_name}" + fieldSep + "#{window_index}" + fieldSep + "#{pane_index}" + fieldSep + "#{window_name}" + fieldSep + "#{pane_pid}" + fieldSep + "#{pane_width}" + fieldSep + "#{pane_height}" + fieldSep + "#{@name}" + fieldSep + "#{pane_current_path}" + fieldSep + "#{pane_current_command}" + fieldSep + "#{pane_active}"
+	tmuxOptParticipant            = "@agentctl_participant"
+	tmuxOptProvider               = "@agentctl_provider"
+	tmuxOptRoomID                 = "@agentctl_room_id"
+	tmuxOptWrapped                = "@agentctl_wrapped"
+	listFormat                    = "#{pane_id}" + fieldSep + "#{session_name}" + fieldSep + "#{window_index}" + fieldSep + "#{pane_index}" + fieldSep + "#{window_name}" + fieldSep + "#{pane_pid}" + fieldSep + "#{pane_width}" + fieldSep + "#{pane_height}" + fieldSep + "#{@name}" + fieldSep + "#{pane_current_path}" + fieldSep + "#{pane_current_command}" + fieldSep + "#{pane_active}" + fieldSep + "#{" + tmuxOptParticipant + "}" + fieldSep + "#{" + tmuxOptProvider + "}" + fieldSep + "#{" + tmuxOptRoomID + "}" + fieldSep + "#{" + tmuxOptWrapped + "}"
 	labelFormat                   = "#{pane_id}" + fieldSep + "#{@name}"
 )
 
@@ -66,6 +73,11 @@ type Pane struct {
 	Label          string `json:"label,omitempty"`
 	CurrentPath    string `json:"current_path,omitempty"`
 	CurrentCommand string `json:"current_command,omitempty"`
+	DisplayCommand string `json:"display_command,omitempty"`
+	ParticipantID  string `json:"participant_id,omitempty"`
+	Provider       string `json:"provider,omitempty"`
+	RoomID         string `json:"room_id,omitempty"`
+	Wrapped        bool   `json:"wrapped,omitempty"`
 	Active         bool   `json:"active"`
 }
 
@@ -95,40 +107,42 @@ type DoctorReport struct {
 
 // PrepareOptions describes a tmux session preparation request.
 type PrepareOptions struct {
-	Session           string   `json:"session"`
-	Panes             int      `json:"panes"`
-	PaneCommand       string   `json:"pane_command,omitempty"`
-	Agent             string   `json:"agent,omitempty"`
-	AgentMode         string   `json:"agent_mode,omitempty"`
-	AgentArgs         []string `json:"agent_args,omitempty"`
-	AgentSessionID    string   `json:"agent_session_id,omitempty"`
-	CWD               string   `json:"cwd,omitempty"`
-	LabelPrefix       string   `json:"label_prefix,omitempty"`
-	ParentParticipant string   `json:"parent_participant,omitempty"`
-	ParentAgentID     string   `json:"parent_agent_id,omitempty"`
-	RoomID            string   `json:"room_id,omitempty"`
-	RoomAccess        string   `json:"room_access,omitempty"`
+	Session             string   `json:"session"`
+	Panes               int      `json:"panes"`
+	PaneCommand         string   `json:"pane_command,omitempty"`
+	Agent               string   `json:"agent,omitempty"`
+	AgentMode           string   `json:"agent_mode,omitempty"`
+	AgentArgs           []string `json:"agent_args,omitempty"`
+	AgentSessionID      string   `json:"agent_session_id,omitempty"`
+	CWD                 string   `json:"cwd,omitempty"`
+	LabelPrefix         string   `json:"label_prefix,omitempty"`
+	ParentParticipant   string   `json:"parent_participant,omitempty"`
+	ParentAgentID       string   `json:"parent_agent_id,omitempty"`
+	RoomID              string   `json:"room_id,omitempty"`
+	RoomAccess          string   `json:"room_access,omitempty"`
+	PaneServeExecutable string   `json:"pane_serve_executable,omitempty"`
 }
 
 // PrepareResult describes one prepared tmux collaboration session.
 type PrepareResult struct {
-	Session           string   `json:"session"`
-	Created           bool     `json:"created"`
-	PanesRequested    int      `json:"panes_requested"`
-	PaneCommand       string   `json:"pane_command,omitempty"`
-	Agent             string   `json:"agent,omitempty"`
-	AgentMode         string   `json:"agent_mode,omitempty"`
-	AgentArgs         []string `json:"agent_args,omitempty"`
-	AgentSessionID    string   `json:"agent_session_id,omitempty"`
-	CWD               string   `json:"cwd,omitempty"`
-	LabelPrefix       string   `json:"label_prefix,omitempty"`
-	ParentParticipant string   `json:"parent_participant,omitempty"`
-	ParentAgentID     string   `json:"parent_agent_id,omitempty"`
-	RoomID            string   `json:"room_id,omitempty"`
-	RoomAccess        string   `json:"room_access,omitempty"`
-	AttachCommand     string   `json:"attach_command"`
-	SocketMode        string   `json:"socket_mode"`
-	Panes             []Pane   `json:"panes"`
+	Session             string   `json:"session"`
+	Created             bool     `json:"created"`
+	PanesRequested      int      `json:"panes_requested"`
+	PaneCommand         string   `json:"pane_command,omitempty"`
+	Agent               string   `json:"agent,omitempty"`
+	AgentMode           string   `json:"agent_mode,omitempty"`
+	AgentArgs           []string `json:"agent_args,omitempty"`
+	AgentSessionID      string   `json:"agent_session_id,omitempty"`
+	CWD                 string   `json:"cwd,omitempty"`
+	LabelPrefix         string   `json:"label_prefix,omitempty"`
+	ParentParticipant   string   `json:"parent_participant,omitempty"`
+	ParentAgentID       string   `json:"parent_agent_id,omitempty"`
+	RoomID              string   `json:"room_id,omitempty"`
+	RoomAccess          string   `json:"room_access,omitempty"`
+	PaneServeExecutable string   `json:"pane_serve_executable,omitempty"`
+	AttachCommand       string   `json:"attach_command"`
+	SocketMode          string   `json:"socket_mode"`
+	Panes               []Pane   `json:"panes"`
 }
 
 // CreatePaneOptions describes an exact single-pane allocation request.
@@ -137,6 +151,7 @@ type CreatePaneOptions struct {
 	CWD               string `json:"cwd,omitempty"`
 	Label             string `json:"label,omitempty"`
 	Command           string `json:"command,omitempty"`
+	Provider          string `json:"provider,omitempty"`
 	ParticipantID     string `json:"participant_id,omitempty"`
 	ParentParticipant string `json:"parent_participant,omitempty"`
 	ParentAgentID     string `json:"parent_agent_id,omitempty"`
@@ -213,6 +228,13 @@ type SubmitResult struct {
 	Mode           string `json:"mode"`
 }
 
+// InterruptResult describes an interrupt action for a target pane.
+type InterruptResult struct {
+	Target         string `json:"target"`
+	ResolvedTarget string `json:"resolved_target"`
+	Pane           Pane   `json:"pane"`
+}
+
 // DeliverResult describes one plain-text delivery into a pane.
 type DeliverResult struct {
 	Target         string `json:"target"`
@@ -238,20 +260,21 @@ type ParticipantRef struct {
 }
 
 type preparePlan struct {
-	session           string
-	panes             int
-	paneCommand       string
-	explicitPane      bool
-	agent             string
-	agentMode         string
-	agentArgs         []string
-	agentSessionID    string
-	cwd               string
-	labelPrefix       string
-	parentParticipant string
-	parentAgentID     string
-	roomID            string
-	roomAccess        string
+	session             string
+	panes               int
+	paneCommand         string
+	explicitPane        bool
+	agent               string
+	agentMode           string
+	agentArgs           []string
+	agentSessionID      string
+	cwd                 string
+	labelPrefix         string
+	parentParticipant   string
+	parentAgentID       string
+	roomID              string
+	roomAccess          string
+	paneServeExecutable string
 }
 
 // New returns a client using the process environment and OS runner.
@@ -356,14 +379,38 @@ func labelForIndex(prefix string, idx int) string {
 	return fmt.Sprintf("%s-%d", prefix, idx+1)
 }
 
-func agentLabelPrefix(agent string) string {
-	base := strings.TrimSpace(filepath.Base(agent))
+func sanitizeLabelComponent(raw string) string {
+	base := strings.TrimSpace(filepath.Base(raw))
 	base = strings.TrimSuffix(base, filepath.Ext(base))
 	base = strings.ToLower(base)
 	base = regexp.MustCompile(`[^a-z0-9._-]+`).ReplaceAllString(base, "-")
 	base = strings.Trim(base, "-")
+	return base
+}
+
+func agentLabelPrefix(agent string) string {
+	base := sanitizeLabelComponent(agent)
 	if base == "" {
 		return "agent"
+	}
+	return base
+}
+
+func scopedAgentLabelPrefix(session, roomID, agent string) string {
+	scope := sanitizeLabelComponent(roomID)
+	if scope == "" {
+		scope = sanitizeLabelComponent(session)
+		if scope == defaultSessionName {
+			scope = ""
+		}
+	}
+	base := strings.TrimSpace(filepath.Base(agent))
+	base = sanitizeLabelComponent(base)
+	if base == "" {
+		return "agent"
+	}
+	if scope != "" {
+		return scope + "-" + base
 	}
 	return base
 }
@@ -535,6 +582,26 @@ func (c *Client) Submit(ctx context.Context, target string, opts SubmitOptions) 
 	}, nil
 }
 
+// Interrupt injects a single Escape key into the target pane.
+func (c *Client) Interrupt(ctx context.Context, target string) (InterruptResult, error) {
+	resolvedTarget, err := c.ResolveTarget(ctx, target)
+	if err != nil {
+		return InterruptResult{}, err
+	}
+	targetPane, err := c.describePane(ctx, resolvedTarget)
+	if err != nil {
+		return InterruptResult{}, err
+	}
+	if _, err := c.runTmux(ctx, "send-keys", "-t", resolvedTarget, "Escape"); err != nil {
+		return InterruptResult{}, err
+	}
+	return InterruptResult{
+		Target:         target,
+		ResolvedTarget: resolvedTarget,
+		Pane:           targetPane,
+	}, nil
+}
+
 // DeliverText injects plain text into a target pane. Shell-like panes receive a
 // shell-safe printf payload; non-shell panes receive the raw text.
 func (c *Client) DeliverText(ctx context.Context, target string, text string) (DeliverResult, error) {
@@ -616,7 +683,7 @@ func (c *Client) PrepareSession(ctx context.Context, opts PrepareOptions) (Prepa
 	}
 
 	socket := c.socketForCreate()
-	created, err := c.createSessionIfNeeded(ctx, socket, plan.session, plan.cwd, plan.paneCommand)
+	created, err := c.createSessionIfNeeded(ctx, socket, plan.session, plan.cwd, sessionBootstrapCommand(plan))
 	if err != nil {
 		return PrepareResult{}, err
 	}
@@ -635,10 +702,18 @@ func (c *Client) PrepareSession(ctx context.Context, opts PrepareOptions) (Prepa
 	if err := c.labelSessionPanes(ctx, socket, panes, plan.labelPrefix); err != nil {
 		return PrepareResult{}, err
 	}
-	if !created || plan.hasInjectedEnv() {
+	if !created || plan.hasInjectedEnv() || plan.agent != "" {
 		if err := c.ensurePaneCommands(ctx, socket, panes, plan); err != nil {
 			return PrepareResult{}, err
 		}
+		panes, err = c.listPanesForSession(ctx, socket, plan.session)
+		if err != nil {
+			return PrepareResult{}, err
+		}
+	}
+	if updated, err := c.setViewerMetadataForPlan(ctx, socket, panes, plan); err != nil {
+		return PrepareResult{}, err
+	} else if updated {
 		panes, err = c.listPanesForSession(ctx, socket, plan.session)
 		if err != nil {
 			return PrepareResult{}, err
@@ -649,23 +724,24 @@ func (c *Client) PrepareSession(ctx context.Context, opts PrepareOptions) (Prepa
 	}
 
 	return PrepareResult{
-		Session:           plan.session,
-		Created:           created,
-		PanesRequested:    plan.panes,
-		PaneCommand:       plan.paneCommand,
-		Agent:             plan.agent,
-		AgentMode:         plan.agentMode,
-		AgentArgs:         append([]string(nil), plan.agentArgs...),
-		AgentSessionID:    plan.agentSessionID,
-		CWD:               plan.cwd,
-		LabelPrefix:       plan.labelPrefix,
-		ParentParticipant: plan.parentParticipant,
-		ParentAgentID:     plan.parentAgentID,
-		RoomID:            plan.roomID,
-		RoomAccess:        plan.roomAccess,
-		AttachCommand:     c.attachCommand(plan.session, socket),
-		SocketMode:        socketMode(socket),
-		Panes:             panes,
+		Session:             plan.session,
+		Created:             created,
+		PanesRequested:      plan.panes,
+		PaneCommand:         plan.paneCommand,
+		Agent:               plan.agent,
+		AgentMode:           plan.agentMode,
+		AgentArgs:           append([]string(nil), plan.agentArgs...),
+		AgentSessionID:      plan.agentSessionID,
+		CWD:                 plan.cwd,
+		LabelPrefix:         plan.labelPrefix,
+		ParentParticipant:   plan.parentParticipant,
+		ParentAgentID:       plan.parentAgentID,
+		RoomID:              plan.roomID,
+		RoomAccess:          plan.roomAccess,
+		PaneServeExecutable: plan.paneServeExecutable,
+		AttachCommand:       c.attachCommand(plan.session, socket),
+		SocketMode:          socketMode(socket),
+		Panes:               panes,
 	}, nil
 }
 
@@ -739,6 +815,9 @@ func (c *Client) CreatePane(ctx context.Context, opts CreatePaneOptions) (Create
 		if _, err := c.respawnPaneWithSocket(ctx, socket, paneID, session, cwd, command, participantID, opts.ParentParticipant, opts.ParentAgentID, opts.RoomID, opts.RoomRole, opts.RoomAccess); err != nil {
 			return CreatePaneResult{}, err
 		}
+	}
+	if _, err := c.setPaneViewerMetadataWithSocket(ctx, socket, paneID, participantID, strings.TrimSpace(opts.Provider), strings.TrimSpace(opts.RoomID), tmuxCommandIsWrapped(command)); err != nil {
+		return CreatePaneResult{}, err
 	}
 	pane, err := c.describePaneWithSocket(ctx, socket, paneID)
 	if err != nil {
@@ -842,12 +921,15 @@ func (c *Client) CurrentPane(ctx context.Context) (Pane, error) {
 }
 
 // CurrentParticipantID returns a stable tmux participant identifier for the current pane.
-// If the pane has a label, the label is preferred for human-friendly routing.
-// Otherwise a canonical tmux:<session>:<pane> identifier is returned.
+// Explicit participant metadata wins, then human-facing labels, then a canonical
+// tmux:<session>:<pane> fallback.
 func (c *Client) CurrentParticipantID(ctx context.Context) (string, Pane, error) {
 	pane, err := c.CurrentPane(ctx)
 	if err != nil {
 		return "", Pane{}, err
+	}
+	if participantID := strings.TrimSpace(pane.ParticipantID); participantID != "" {
+		return participantID, pane, nil
 	}
 	if label := strings.TrimSpace(pane.Label); label != "" {
 		return label, pane, nil
@@ -958,13 +1040,9 @@ func relayPayloadForPane(pane Pane, content string) (string, string) {
 // relayPostPasteKeys are tmux send-keys tokens sent after `send-keys -l -- <payload>` so the target
 // actually accepts the message. VS Code / Cursor Composer (tmux often reports current_command "node")
 // uses Enter for newlines in multi-line input; submission is Ctrl+Enter (C-Enter). Codex CLI often
-// shows as current_command "codex" or "node"; Factory Droid is usually "droid". All need C-Enter for
-// the same composer-style submit. Gemini CLIs use Escape then Enter.
+// shows as current_command "codex" or "node"; Factory Droid is usually "droid". Claude/Gemini panes
+// can also report misleading current_command values, so pane labels remain part of the heuristic.
 func relayPostPasteKeys(pane Pane) []string {
-	label := strings.ToLower(strings.TrimSpace(pane.Label))
-	if strings.HasPrefix(label, "gemini") {
-		return []string{"Escape", "Enter"}
-	}
 	if paneUsesComposerStyleSubmit(pane) {
 		return []string{"C-Enter"}
 	}
@@ -973,10 +1051,6 @@ func relayPostPasteKeys(pane Pane) []string {
 
 // submitKeysForPane is the default mux submit sequence (no pasted payload) for Escape+Enter mode.
 func submitKeysForPane(pane Pane) []string {
-	label := strings.ToLower(strings.TrimSpace(pane.Label))
-	if strings.HasPrefix(label, "gemini") {
-		return []string{"Escape", "Enter"}
-	}
 	if paneUsesComposerStyleSubmit(pane) {
 		return []string{"C-Enter"}
 	}
@@ -985,25 +1059,26 @@ func submitKeysForPane(pane Pane) []string {
 
 // paneUsesComposerStyleSubmit is true when the pane should get Ctrl+Enter after paste (composer-style TUIs).
 func paneUsesComposerStyleSubmit(pane Pane) bool {
+	label := strings.ToLower(strings.TrimSpace(pane.Label))
+	if strings.HasPrefix(label, "claude") || strings.HasPrefix(label, "gemini") {
+		return false
+	}
 	if relayUsesComposerStyleSubmit(pane.CurrentCommand) {
 		return true
 	}
-	label := strings.ToLower(strings.TrimSpace(pane.Label))
 	// Pane labels from mux create use agent basename (droid-1, codex-a, …); current_command can stay zsh/bash
 	// while the Ink/node composer owns the TTY — avoid shell TTY/printf paths for those panes.
 	return strings.HasPrefix(label, "droid") ||
 		strings.HasPrefix(label, "codex") ||
-		strings.HasPrefix(label, "cursor")
+		strings.HasPrefix(label, "cursor") ||
+		strings.HasPrefix(label, "agent")
 }
 
 // relaySkipsLeadingInterruptEscape is true when a leading Escape should not be sent before paste for
-// Interrupt deliveries. Composer TUIs (Droid/Codex/Cursor) often treat Escape as leaving or clearing
-// the input; Gemini and shells still use the Escape poke to exit nested modes.
+// Interrupt deliveries. Composer TUIs (Droid/Codex/Cursor) often treat Escape as
+// leaving or clearing the input; Claude/Gemini and shells still use the Escape poke
+// to exit nested modes.
 func relaySkipsLeadingInterruptEscape(pane Pane) bool {
-	label := strings.ToLower(strings.TrimSpace(pane.Label))
-	if strings.HasPrefix(label, "gemini") {
-		return false
-	}
 	return paneUsesComposerStyleSubmit(pane)
 }
 
@@ -1285,7 +1360,7 @@ func (c *Client) splitSessionPane(ctx context.Context, socket string, plan prepa
 	if plan.cwd != "" {
 		args = append(args, "-c", plan.cwd)
 	}
-	args = append(args, plan.paneCommand)
+	args = append(args, sessionBootstrapCommand(plan))
 	_, err := c.runTmuxWithSocket(ctx, socket, args...)
 	return err
 }
@@ -1336,8 +1411,20 @@ func (p preparePlan) hasInjectedEnv() bool {
 }
 
 func paneCommandForPane(plan preparePlan, pane Pane) string {
+	command := plan.paneCommand
+	if plan.agent != "" {
+		command = wrapTmuxPaneCommand(
+			plan.paneServeExecutable,
+			plan.session,
+			strings.TrimSpace(pane.Label),
+			plan.roomID,
+			plan.cwd,
+			plan.paneCommand,
+			tmuxPaneStartupProfile(plan.agent, plan.agentMode),
+		)
+	}
 	return paneCommandForIdentity(
-		plan.paneCommand,
+		command,
 		strings.TrimSpace(pane.Label),
 		plan.parentParticipant,
 		plan.parentAgentID,
@@ -1374,6 +1461,61 @@ func paneCommandForIdentity(command, participantID, parentParticipant, parentAge
 		command = defaultPaneCommand()
 	}
 	return "env " + strings.Join(env, " ") + " " + command
+}
+
+func tmuxCommandIsWrapped(command string) bool {
+	command = strings.TrimSpace(command)
+	return strings.Contains(command, " pane serve ") || strings.Contains(command, " pane serve --participant ")
+}
+
+func (c *Client) setViewerMetadataForPlan(ctx context.Context, socket string, panes []Pane, plan preparePlan) (bool, error) {
+	provider := strings.TrimSpace(plan.agent)
+	wrapped := provider != ""
+	roomID := strings.TrimSpace(plan.roomID)
+	if !wrapped && roomID == "" {
+		return false, nil
+	}
+	updated := false
+	for _, pane := range panes {
+		participantID := strings.TrimSpace(pane.Label)
+		if participantID == "" {
+			participantID = formatTmuxParticipantID(plan.session, pane.ID)
+		}
+		didUpdate, err := c.setPaneViewerMetadataWithSocket(ctx, socket, pane.ID, participantID, provider, roomID, wrapped)
+		if err != nil {
+			return false, err
+		}
+		updated = updated || didUpdate
+	}
+	return updated, nil
+}
+
+func (c *Client) setPaneViewerMetadataWithSocket(ctx context.Context, socket, target, participantID, provider, roomID string, wrapped bool) (bool, error) {
+	if strings.TrimSpace(provider) == "" && strings.TrimSpace(roomID) == "" && !wrapped {
+		return false, nil
+	}
+	updates := []struct {
+		key   string
+		value string
+	}{
+		{key: tmuxOptParticipant, value: strings.TrimSpace(participantID)},
+		{key: tmuxOptProvider, value: strings.TrimSpace(provider)},
+		{key: tmuxOptRoomID, value: strings.TrimSpace(roomID)},
+		{key: tmuxOptWrapped, value: boolToOptionValue(wrapped)},
+	}
+	for _, item := range updates {
+		if _, err := c.runTmuxWithSocket(ctx, socket, "set-option", "-p", "-t", target, item.key, item.value); err != nil {
+			return false, err
+		}
+	}
+	return true, nil
+}
+
+func boolToOptionValue(value bool) string {
+	if value {
+		return "1"
+	}
+	return "0"
 }
 
 func (c *Client) labelSessionPanes(ctx context.Context, socket string, panes []Pane, labelPrefix string) error {
@@ -1420,7 +1562,7 @@ func parsePaneList(raw string) ([]Pane, error) {
 
 func parsePaneLine(line string) (Pane, error) {
 	fields := strings.Split(line, fieldSep)
-	if len(fields) != 12 {
+	if len(fields) != 12 && len(fields) != 16 {
 		return Pane{}, fmt.Errorf("unexpected pane metadata field count: got %d", len(fields))
 	}
 
@@ -1445,7 +1587,7 @@ func parsePaneLine(line string) (Pane, error) {
 		return Pane{}, fmt.Errorf("parse pane height: %w", err)
 	}
 
-	return Pane{
+	pane := Pane{
 		ID:             fields[0],
 		Session:        fields[1],
 		WindowIndex:    windowIndex,
@@ -1460,7 +1602,25 @@ func parsePaneLine(line string) (Pane, error) {
 		CurrentPath:    fields[9],
 		CurrentCommand: fields[10],
 		Active:         fields[11] == "1",
-	}, nil
+	}
+	if len(fields) >= 16 {
+		pane.ParticipantID = strings.TrimSpace(fields[12])
+		pane.Provider = strings.TrimSpace(fields[13])
+		pane.RoomID = strings.TrimSpace(fields[14])
+		pane.Wrapped = strings.TrimSpace(fields[15]) == "1" || strings.EqualFold(strings.TrimSpace(fields[15]), "true")
+	}
+	pane.DisplayCommand = paneDisplayCommand(pane)
+	return pane, nil
+}
+
+func paneDisplayCommand(pane Pane) string {
+	if provider := strings.TrimSpace(pane.Provider); provider != "" {
+		return provider
+	}
+	if command := strings.TrimSpace(pane.CurrentCommand); command != "" {
+		return command
+	}
+	return ""
 }
 
 func splitNonEmptyLines(raw string) []string {
@@ -1509,26 +1669,41 @@ func defaultPaneCommand() string {
 	return "/bin/sh"
 }
 
+func defaultPaneServeExecutable() string {
+	return "agentctl"
+}
+
+func sessionBootstrapCommand(plan preparePlan) string {
+	if plan.agent != "" {
+		return defaultPaneCommand()
+	}
+	return plan.paneCommand
+}
+
 func normalizePrepareOptions(opts PrepareOptions) (preparePlan, error) {
 	if opts.Panes <= 0 {
 		return preparePlan{}, fmt.Errorf("panes must be positive")
 	}
 
 	plan := preparePlan{
-		session:           strings.TrimSpace(opts.Session),
-		panes:             opts.Panes,
-		paneCommand:       strings.TrimSpace(opts.PaneCommand),
-		explicitPane:      strings.TrimSpace(opts.PaneCommand) != "",
-		agent:             strings.TrimSpace(opts.Agent),
-		agentMode:         normalizeAgentMode(opts.AgentMode),
-		agentArgs:         append([]string(nil), opts.AgentArgs...),
-		agentSessionID:    strings.TrimSpace(opts.AgentSessionID),
-		cwd:               strings.TrimSpace(opts.CWD),
-		labelPrefix:       strings.TrimSpace(opts.LabelPrefix),
-		parentParticipant: strings.TrimSpace(opts.ParentParticipant),
-		parentAgentID:     strings.TrimSpace(opts.ParentAgentID),
-		roomID:            strings.TrimSpace(opts.RoomID),
-		roomAccess:        normalizeRoomAccess(opts.RoomAccess, strings.TrimSpace(opts.ParentParticipant)),
+		session:             strings.TrimSpace(opts.Session),
+		panes:               opts.Panes,
+		paneCommand:         strings.TrimSpace(opts.PaneCommand),
+		explicitPane:        strings.TrimSpace(opts.PaneCommand) != "",
+		agent:               strings.TrimSpace(opts.Agent),
+		agentMode:           normalizeAgentMode(opts.AgentMode),
+		agentArgs:           append([]string(nil), opts.AgentArgs...),
+		agentSessionID:      strings.TrimSpace(opts.AgentSessionID),
+		cwd:                 strings.TrimSpace(opts.CWD),
+		labelPrefix:         strings.TrimSpace(opts.LabelPrefix),
+		parentParticipant:   strings.TrimSpace(opts.ParentParticipant),
+		parentAgentID:       strings.TrimSpace(opts.ParentAgentID),
+		roomID:              strings.TrimSpace(opts.RoomID),
+		roomAccess:          normalizeRoomAccess(opts.RoomAccess, strings.TrimSpace(opts.ParentParticipant)),
+		paneServeExecutable: strings.TrimSpace(opts.PaneServeExecutable),
+	}
+	if plan.paneServeExecutable == "" {
+		plan.paneServeExecutable = defaultPaneServeExecutable()
 	}
 	if plan.session == "" {
 		plan.session = defaultSessionName
@@ -1556,7 +1731,7 @@ func normalizePrepareOptions(opts PrepareOptions) (preparePlan, error) {
 
 	if plan.labelPrefix == "" {
 		if plan.agent != "" {
-			plan.labelPrefix = agentLabelPrefix(plan.agent)
+			plan.labelPrefix = scopedAgentLabelPrefix(plan.session, plan.roomID, plan.agent)
 		} else {
 			plan.labelPrefix = defaultLabelPrefix
 		}
@@ -1648,9 +1823,109 @@ func agentAutoModeArgs(label, mode string) ([]string, error) {
 		return []string{"--yolo"}, nil
 	case "agent":
 		return []string{"--yolo"}, nil
+	case "droid":
+		// Keep Droid's interactive launch clean. In transport-first flows,
+		// pane-side startup sequencing upgrades autonomy after the UI reaches
+		// its stable state, which is more reliable than extra root flags here.
+		return nil, nil
 	default:
 		return nil, fmt.Errorf("agent mode auto is not mapped for %s yet", label)
 	}
+}
+
+func wrapTmuxPaneCommand(executable, session, participantID, roomID, cwd, childCommand, startupProfile string) string {
+	executable = strings.TrimSpace(executable)
+	if executable == "" {
+		executable = defaultPaneServeExecutable()
+	}
+	participantID = strings.TrimSpace(participantID)
+	args := []string{
+		executable,
+		"pane",
+		"serve",
+		"--participant", participantID,
+		"--socket-path", tmuxPaneSocketPath(session, participantID),
+		"--ready-path", tmuxPaneReadyPath(session, participantID),
+		"--default-submit-mode", paneSubmitModeNewline,
+	}
+	if strings.TrimSpace(cwd) != "" {
+		args = append(args, "--cwd", strings.TrimSpace(cwd), "--workspace", strings.TrimSpace(cwd))
+	}
+	if strings.TrimSpace(roomID) != "" {
+		args = append(args, "--room-id", strings.TrimSpace(roomID))
+	}
+	if strings.TrimSpace(startupProfile) != "" {
+		args = append(args, "--startup-profile", strings.TrimSpace(startupProfile))
+	}
+	args = append(args, "--", "sh", "-lc", childCommand)
+	return shellQuoteArgs(args)
+}
+
+func tmuxPaneStartupProfile(agent, agentMode string) string {
+	if strings.EqualFold(strings.TrimSpace(agent), "droid") && strings.EqualFold(strings.TrimSpace(agentMode), "auto") {
+		return startupProfileDroidAutoHigh
+	}
+	return ""
+}
+
+func tmuxPaneSocketPath(scopeID, participantID string) string {
+	scope := tmuxBoundedSocketComponent(scopeID, 24)
+	if scope == "" {
+		scope = "detached"
+	}
+	participant := tmuxBoundedSocketComponent(participantID, 24)
+	if participant == "" {
+		participant = "pane"
+	}
+	return filepath.Join(os.TempDir(), "agentctl-pane", scope, participant+".sock")
+}
+
+func tmuxPaneReadyPath(scopeID, participantID string) string {
+	scope := tmuxBoundedSocketComponent(scopeID, 24)
+	if scope == "" {
+		scope = "detached"
+	}
+	participant := tmuxBoundedSocketComponent(participantID, 24)
+	if participant == "" {
+		participant = "pane"
+	}
+	return filepath.Join(os.TempDir(), "agentctl-pane", scope, participant+".ready")
+}
+
+func tmuxSanitizeSocketComponent(value string) string {
+	value = strings.TrimSpace(strings.ToLower(value))
+	if value == "" {
+		return ""
+	}
+	var b strings.Builder
+	for _, r := range value {
+		switch {
+		case r >= 'a' && r <= 'z':
+			b.WriteRune(r)
+		case r >= '0' && r <= '9':
+			b.WriteRune(r)
+		case r == '.', r == '-', r == '_':
+			b.WriteRune(r)
+		default:
+			b.WriteByte('_')
+		}
+	}
+	return strings.Trim(b.String(), "._-")
+}
+
+func tmuxBoundedSocketComponent(value string, maxLen int) string {
+	sanitized := tmuxSanitizeSocketComponent(value)
+	if maxLen <= 0 || len(sanitized) <= maxLen {
+		return sanitized
+	}
+	sum := fnv.New32a()
+	_, _ = sum.Write([]byte(sanitized))
+	suffix := fmt.Sprintf("-%08x", sum.Sum32())
+	if maxLen <= len(suffix) {
+		return sanitized[:maxLen]
+	}
+	prefixLen := maxLen - len(suffix)
+	return sanitized[:prefixLen] + suffix
 }
 
 func resolveAgentCommand(agent string) (string, error) {

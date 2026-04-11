@@ -2,9 +2,12 @@ package cmd
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/jkatigb/agentctl/internal/agentpane"
+	"github.com/jkatigb/agentctl/internal/domain/agent"
 	"github.com/jkatigb/agentctl/internal/tmuxbridge"
 )
 
@@ -33,6 +36,25 @@ func TestNewTmuxCommandHasRemindSubcommand(t *testing.T) {
 	}
 	if !found {
 		t.Fatal("expected tmux remind subcommand")
+	}
+}
+
+func TestNewTmuxCommandHasSubmitAllAndInterruptAllSubcommands(t *testing.T) {
+	cmd := newTmuxCommand()
+	var foundSubmitAll, foundInterruptAll bool
+	for _, sub := range cmd.Commands() {
+		switch sub.Name() {
+		case "submit-all":
+			foundSubmitAll = true
+		case "interrupt-all":
+			foundInterruptAll = true
+		}
+	}
+	if !foundSubmitAll {
+		t.Fatal("expected tmux submit-all subcommand")
+	}
+	if !foundInterruptAll {
+		t.Fatal("expected tmux interrupt-all subcommand")
 	}
 }
 
@@ -80,14 +102,118 @@ func TestResolveMuxCreateCommandAutoModeMappings(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resolveMuxCreateCommand() error = %v", err)
 	}
-	if got != "gemini --yolo" {
-		t.Fatalf("resolveMuxCreateCommand() = %q, want %q", got, "gemini --yolo")
+	if got != "gemini --approval-mode yolo" {
+		t.Fatalf("resolveMuxCreateCommand() = %q, want %q", got, "gemini --approval-mode yolo")
+	}
+}
+
+func TestResolveMuxCreateCommandAutoModeAllowsDroid(t *testing.T) {
+	got, err := resolveMuxCreateCommand("", "droid", "auto", nil, "")
+	if err != nil {
+		t.Fatalf("resolveMuxCreateCommand() error = %v", err)
+	}
+	if got != "droid" {
+		t.Fatalf("resolveMuxCreateCommand() = %q, want %q", got, "droid")
+	}
+}
+
+func TestResolveMuxCreateCommandAutoModeUsesClaudeBypassPermissions(t *testing.T) {
+	got, err := resolveMuxCreateCommand("", "claude", "auto", nil, "")
+	if err != nil {
+		t.Fatalf("resolveMuxCreateCommand() error = %v", err)
+	}
+	if got != "claude --permission-mode bypassPermissions" {
+		t.Fatalf("resolveMuxCreateCommand() = %q, want %q", got, "claude --permission-mode bypassPermissions")
 	}
 }
 
 func TestDeriveMuxCreateLabelPrefixSanitizesAgentName(t *testing.T) {
-	if got := deriveMuxCreateLabelPrefix("Cursor Agent"); got != "cursor-agent" {
+	if got := deriveMuxCreateLabelPrefix("", "", "Cursor Agent"); got != "cursor-agent" {
 		t.Fatalf("deriveMuxCreateLabelPrefix() = %q, want cursor-agent", got)
+	}
+}
+
+func TestDeriveMuxCreateLabelPrefixUsesRoomScope(t *testing.T) {
+	if got := deriveMuxCreateLabelPrefix("agentctl-collab", "transport-first", "claude"); got != "transport-first-claude" {
+		t.Fatalf("deriveMuxCreateLabelPrefix() = %q, want transport-first-claude", got)
+	}
+}
+
+func TestDeriveMuxCreateLabelPrefixUsesSessionScopeWhenNoRoom(t *testing.T) {
+	if got := deriveMuxCreateLabelPrefix("feature-auth", "", "codex"); got != "feature-auth-codex" {
+		t.Fatalf("deriveMuxCreateLabelPrefix() = %q, want feature-auth-codex", got)
+	}
+}
+
+func TestWrapZellijPaneCommandIncludesPaneServe(t *testing.T) {
+	got := wrapZellijPaneCommand("sparkling-apricot", "claude-a", "room-1", "claude --resume abc", "")
+	if !strings.Contains(got, " pane serve ") {
+		t.Fatalf("wrapZellijPaneCommand() = %q, want pane serve wrapper", got)
+	}
+	if !strings.Contains(got, "--participant claude-a") {
+		t.Fatalf("wrapZellijPaneCommand() = %q, missing participant", got)
+	}
+	if !strings.Contains(got, "sparkling-apricot") {
+		t.Fatalf("wrapZellijPaneCommand() = %q, missing session-scoped socket path", got)
+	}
+	if !strings.Contains(got, ".sock") {
+		t.Fatalf("wrapZellijPaneCommand() = %q, missing socket path", got)
+	}
+	if !strings.Contains(got, "--room-id room-1") {
+		t.Fatalf("wrapZellijPaneCommand() = %q, missing room id", got)
+	}
+	if !strings.Contains(got, "sh -lc") {
+		t.Fatalf("wrapZellijPaneCommand() = %q, missing shell wrapper", got)
+	}
+}
+
+func TestWrapZellijPaneCommandIncludesStartupProfileWhenSet(t *testing.T) {
+	got := wrapZellijPaneCommand("sparkling-apricot", "droid-a", "room-1", "droid", "droid_auto_high")
+	if !strings.Contains(got, "--startup-profile droid_auto_high") {
+		t.Fatalf("wrapZellijPaneCommand() = %q, missing startup profile", got)
+	}
+}
+
+func TestZellijPaneStartupProfileUsesDroidAutoHigh(t *testing.T) {
+	if got := zellijPaneStartupProfile("droid", "auto"); got != "droid_auto_high" {
+		t.Fatalf("zellijPaneStartupProfile() = %q, want droid_auto_high", got)
+	}
+	if got := zellijPaneStartupProfile("droid", "interactive"); got != "" {
+		t.Fatalf("zellijPaneStartupProfile() interactive = %q, want empty", got)
+	}
+	if got := zellijPaneStartupProfile("claude", "auto"); got != "" {
+		t.Fatalf("zellijPaneStartupProfile() claude = %q, want empty", got)
+	}
+}
+
+func TestBuildMuxCreateRoomAgentPromptIncludesParticipantAndRoom(t *testing.T) {
+	got := buildMuxCreateRoomAgentPrompt("/repo", "room-1", "direct", "claude-a")
+	if !strings.Contains(got, `room "room-1"`) {
+		t.Fatalf("buildMuxCreateRoomAgentPrompt() = %q, missing room", got)
+	}
+	if !strings.Contains(got, `participant id is "claude-a"`) {
+		t.Fatalf("buildMuxCreateRoomAgentPrompt() = %q, missing participant id", got)
+	}
+	if !strings.Contains(got, `agentctl room send room-1 --to <recipient> "<response>"`) {
+		t.Fatalf("buildMuxCreateRoomAgentPrompt() = %q, missing sender-auto reply example", got)
+	}
+	if !strings.Contains(got, "`--sender claude-a` only when replying from outside this pane") {
+		t.Fatalf("buildMuxCreateRoomAgentPrompt() = %q, missing outside-pane fallback", got)
+	}
+}
+
+func TestMuxCreateInteractivePromptArgsForKnownAgents(t *testing.T) {
+	if got := muxCreateInteractivePromptArgs("claude", "hello"); len(got) != 1 || got[0] != "hello" {
+		t.Fatalf("claude prompt args = %v", got)
+	}
+	if got := muxCreateInteractivePromptArgs("codex", "hello"); len(got) != 1 || got[0] != "hello" {
+		t.Fatalf("codex prompt args = %v", got)
+	}
+	if got := muxCreateInteractivePromptArgs("gemini", "hello"); len(got) != 2 || got[0] != "--prompt-interactive" || got[1] != "hello" {
+		t.Fatalf("gemini prompt args = %v", got)
+	}
+	if got := muxCreateInteractivePromptArgs("droid", "hello"); len(got) != 1 || got[0] != "hello" {
+		t.Fatalf("droid prompt args = %v", got)
 	}
 }
 
@@ -227,5 +353,57 @@ func TestParseMuxSubmitMode(t *testing.T) {
 	}
 	if _, err := parseMuxSubmitModeString("bogus"); err == nil {
 		t.Fatal("expected error for bogus mode")
+	}
+}
+
+func TestTmuxSubmitModeForParticipant(t *testing.T) {
+	if got := tmuxSubmitModeForParticipant("claude-a"); got != tmuxbridge.SubmitModeEnterOnly {
+		t.Fatalf("claude submit mode = %q want %q", got, tmuxbridge.SubmitModeEnterOnly)
+	}
+	if got := tmuxSubmitModeForParticipant("droid-a"); got != tmuxbridge.SubmitModeEscapeEnter {
+		t.Fatalf("droid submit mode = %q want %q", got, tmuxbridge.SubmitModeEscapeEnter)
+	}
+}
+
+func TestZellijSubmitModeForParticipant(t *testing.T) {
+	if got := zellijSubmitModeForParticipant("gemini-a"); got != tmuxbridge.SubmitModeEnterOnly {
+		t.Fatalf("gemini submit mode = %q want enter_only", got)
+	}
+	if got := zellijSubmitModeForParticipant("codex-a"); got != tmuxbridge.SubmitModeEscapeEnter {
+		t.Fatalf("codex submit mode = %q want escape_enter", got)
+	}
+}
+
+func TestMuxGroupControlViaSocketUsesSubmitKind(t *testing.T) {
+	prev := muxGroupDeliverAgentPane
+	t.Cleanup(func() { muxGroupDeliverAgentPane = prev })
+
+	var got agentpane.ControlMessage
+	muxGroupDeliverAgentPane = func(ctx context.Context, socketPath string, msg agentpane.ControlMessage) (agentpane.ControlResponse, error) {
+		got = msg
+		return agentpane.ControlResponse{OK: true}, nil
+	}
+	if err := muxGroupControlViaSocket(context.Background(), "/tmp/test.sock", "claude-a", "submit"); err != nil {
+		t.Fatalf("muxGroupControlViaSocket() error = %v", err)
+	}
+	if got.Kind != "submit" {
+		t.Fatalf("kind=%q want submit", got.Kind)
+	}
+	if got.SubmitMode != agentpane.SubmitModeEnter {
+		t.Fatalf("submit mode=%q want %q", got.SubmitMode, agentpane.SubmitModeEnter)
+	}
+}
+
+func TestMuxGroupControlForMemberSkipsSystemParticipant(t *testing.T) {
+	item := muxGroupControlForMember(context.Background(), agent.RoomMember{ActorID: "actor:system:room:alpha"}, "interrupt")
+	if item.Status != "skipped" {
+		t.Fatalf("status=%q want skipped", item.Status)
+	}
+}
+
+func TestMuxGroupControlForMemberSkipsRawMuxIdentity(t *testing.T) {
+	item := muxGroupControlForMember(context.Background(), agent.RoomMember{ActorID: "tmux:146:%156"}, "interrupt")
+	if item.Status != "skipped" {
+		t.Fatalf("status=%q want skipped", item.Status)
 	}
 }

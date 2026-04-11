@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -41,7 +42,7 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 // Path pattern: GET /terminal/{room-id}
 func (h *Handler) handleTerminal(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		writeErrorJSON(w, http.StatusMethodNotAllowed, "EARG", "method not allowed", "URL path must be GET /terminal/{room-id}")
 		return
 	}
 
@@ -168,14 +169,16 @@ func parseSizeQuery(r *http.Request) (uint16, uint16) {
 
 // getAllowedOrigins returns the list of allowed WebSocket origins.
 func getAllowedOrigins() []string {
+	if origins := os.Getenv("AGENTCTL_GATEWAY_WS_ALLOWED_ORIGINS"); origins != "" {
+		return strings.Split(origins, ",")
+	}
 	return []string{
 		"http://localhost:*",
 		"http://127.0.0.1:*",
 		"https://localhost:*",
 		"https://127.0.0.1:*",
-		// Allow tsnet origins (Tailscale MagicDNS)
-		"https://*.ts.net",
-		"https://*.tail*", // tailnet patterns
+		"*.ts.net",
+		"*.tail*", // tailnet patterns
 	}
 }
 

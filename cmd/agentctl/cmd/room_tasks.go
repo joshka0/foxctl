@@ -2265,6 +2265,7 @@ func provisionAssigneePane(ctx context.Context, absWorkspace, roomID string, sum
 			CWD:           absWorkspace,
 			Label:         recipient,
 			Command:       command,
+			Provider:      agentCLI,
 			ParticipantID: recipient,
 			RoomID:        roomID,
 			RoomAccess:    "direct",

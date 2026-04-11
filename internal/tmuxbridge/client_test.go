@@ -38,6 +38,32 @@ func TestParsePaneList(t *testing.T) {
 	}
 }
 
+func TestParsePaneListIncludesViewerMetadata(t *testing.T) {
+	raw := "%7" + fieldSep + "work" + fieldSep + "1" + fieldSep + "0" + fieldSep + "main" + fieldSep + "1234" + fieldSep + "180" + fieldSep + "42" + fieldSep + "claude-a" + fieldSep + "/repo" + fieldSep + "agentctl" + fieldSep + "1" + fieldSep + "claude-a" + fieldSep + "claude" + fieldSep + "room-alpha" + fieldSep + "1\n"
+	panes, err := parsePaneList(raw)
+	if err != nil {
+		t.Fatalf("parsePaneList() error = %v", err)
+	}
+	if len(panes) != 1 {
+		t.Fatalf("len(panes) = %d, want 1", len(panes))
+	}
+	if panes[0].ParticipantID != "claude-a" {
+		t.Fatalf("ParticipantID = %q, want claude-a", panes[0].ParticipantID)
+	}
+	if panes[0].Provider != "claude" {
+		t.Fatalf("Provider = %q, want claude", panes[0].Provider)
+	}
+	if panes[0].RoomID != "room-alpha" {
+		t.Fatalf("RoomID = %q, want room-alpha", panes[0].RoomID)
+	}
+	if !panes[0].Wrapped {
+		t.Fatal("Wrapped = false, want true")
+	}
+	if panes[0].DisplayCommand != "claude" {
+		t.Fatalf("DisplayCommand = %q, want claude", panes[0].DisplayCommand)
+	}
+}
+
 func TestResolveTargetByLabel(t *testing.T) {
 	client := NewWithRunner(fakeRunner{
 		responses: map[string]fakeResponse{
@@ -236,11 +262,22 @@ func TestPrepareSessionRespawnsExistingShellPanesForAgent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("buildAgentPaneCommand() error = %v", err)
 	}
+	wrapped := paneCommandForIdentity(
+		wrapTmuxPaneCommand("/tmp/agentctl", "agentctl-agent-smoke", "agentctl-agent-smoke-codex-a", "", "", cmd, ""),
+		"agentctl-agent-smoke-codex-a",
+		"",
+		"",
+		"",
+		"",
+		"direct",
+		"agentctl-agent-smoke",
+		"%21",
+	)
 	runner := &sequenceRunner{
 		steps: []sequenceStep{
-			{key: "tmux new-session -d -s agentctl-agent-smoke " + cmd, stderr: "duplicate session", err: fmt.Errorf("exit status 1")},
+			{key: "tmux new-session -d -s agentctl-agent-smoke " + defaultPaneCommand(), stderr: "duplicate session", err: fmt.Errorf("exit status 1")},
 			{key: "tmux list-panes -t agentctl-agent-smoke -F " + listFormat, stdout: "%21" + fieldSep + "agentctl-agent-smoke" + fieldSep + "0" + fieldSep + "0" + fieldSep + "main" + fieldSep + "111" + fieldSep + "80" + fieldSep + "24" + fieldSep + "" + fieldSep + "/repo" + fieldSep + "zsh" + fieldSep + "1\n"},
-			{key: "tmux split-window -d -t agentctl-agent-smoke " + cmd},
+			{key: "tmux split-window -d -t agentctl-agent-smoke " + defaultPaneCommand()},
 			{key: "tmux list-panes -t agentctl-agent-smoke -F " + listFormat, stdout: strings.Join([]string{
 				"%21" + fieldSep + "agentctl-agent-smoke" + fieldSep + "0" + fieldSep + "0" + fieldSep + "main" + fieldSep + "111" + fieldSep + "80" + fieldSep + "12" + fieldSep + "" + fieldSep + "/repo" + fieldSep + "zsh" + fieldSep + "1",
 				"%22" + fieldSep + "agentctl-agent-smoke" + fieldSep + "0" + fieldSep + "1" + fieldSep + "main" + fieldSep + "222" + fieldSep + "80" + fieldSep + "12" + fieldSep + "" + fieldSep + "/repo" + fieldSep + "node" + fieldSep + "0",
@@ -250,22 +287,35 @@ func TestPrepareSessionRespawnsExistingShellPanesForAgent(t *testing.T) {
 				"%21" + fieldSep + "agentctl-agent-smoke" + fieldSep + "0" + fieldSep + "0" + fieldSep + "main" + fieldSep + "111" + fieldSep + "80" + fieldSep + "12" + fieldSep + "" + fieldSep + "/repo" + fieldSep + "zsh" + fieldSep + "1",
 				"%22" + fieldSep + "agentctl-agent-smoke" + fieldSep + "0" + fieldSep + "1" + fieldSep + "main" + fieldSep + "222" + fieldSep + "80" + fieldSep + "12" + fieldSep + "" + fieldSep + "/repo" + fieldSep + "node" + fieldSep + "0",
 			}, "\n") + "\n"},
-			{key: "tmux set-option -p -t %21 @name codex-a"},
-			{key: "tmux set-option -p -t %22 @name codex-b"},
-			{key: "tmux respawn-pane -k -t %21 env AGENTCTL_PARTICIPANT_ID=codex-a AGENTCTL_MUX_BACKEND=tmux AGENTCTL_MUX_SESSION=agentctl-agent-smoke AGENTCTL_MUX_PANE_ID=%21 " + cmd},
+			{key: "tmux set-option -p -t %21 @name agentctl-agent-smoke-codex-a"},
+			{key: "tmux set-option -p -t %22 @name agentctl-agent-smoke-codex-b"},
+			{key: "tmux respawn-pane -k -t %21 " + wrapped},
 			{key: "tmux list-panes -t agentctl-agent-smoke -F " + listFormat, stdout: strings.Join([]string{
 				"%21" + fieldSep + "agentctl-agent-smoke" + fieldSep + "0" + fieldSep + "0" + fieldSep + "main" + fieldSep + "111" + fieldSep + "39" + fieldSep + "11" + fieldSep + "codex-a" + fieldSep + "/repo" + fieldSep + "node" + fieldSep + "1",
 				"%22" + fieldSep + "agentctl-agent-smoke" + fieldSep + "0" + fieldSep + "1" + fieldSep + "main" + fieldSep + "222" + fieldSep + "40" + fieldSep + "11" + fieldSep + "codex-b" + fieldSep + "/repo" + fieldSep + "node" + fieldSep + "0",
+			}, "\n") + "\n"},
+			{key: "tmux set-option -p -t %21 @agentctl_participant codex-a"},
+			{key: "tmux set-option -p -t %21 @agentctl_provider codex"},
+			{key: "tmux set-option -p -t %21 @agentctl_room_id"},
+			{key: "tmux set-option -p -t %21 @agentctl_wrapped 1"},
+			{key: "tmux set-option -p -t %22 @agentctl_participant codex-b"},
+			{key: "tmux set-option -p -t %22 @agentctl_provider codex"},
+			{key: "tmux set-option -p -t %22 @agentctl_room_id"},
+			{key: "tmux set-option -p -t %22 @agentctl_wrapped 1"},
+			{key: "tmux list-panes -t agentctl-agent-smoke -F " + listFormat, stdout: strings.Join([]string{
+				"%21" + fieldSep + "agentctl-agent-smoke" + fieldSep + "0" + fieldSep + "0" + fieldSep + "main" + fieldSep + "111" + fieldSep + "39" + fieldSep + "11" + fieldSep + "codex-a" + fieldSep + "/repo" + fieldSep + "node" + fieldSep + "1" + fieldSep + "codex-a" + fieldSep + "codex" + fieldSep + "" + fieldSep + "1",
+				"%22" + fieldSep + "agentctl-agent-smoke" + fieldSep + "0" + fieldSep + "1" + fieldSep + "main" + fieldSep + "222" + fieldSep + "40" + fieldSep + "11" + fieldSep + "codex-b" + fieldSep + "/repo" + fieldSep + "node" + fieldSep + "0" + fieldSep + "codex-b" + fieldSep + "codex" + fieldSep + "" + fieldSep + "1",
 			}, "\n") + "\n"},
 		},
 	}
 	client := NewWithRunner(runner, map[string]string{})
 
 	got, err := client.PrepareSession(context.Background(), PrepareOptions{
-		Session:   "agentctl-agent-smoke",
-		Panes:     2,
-		Agent:     "codex",
-		AgentMode: "auto",
+		Session:             "agentctl-agent-smoke",
+		Panes:               2,
+		Agent:               "codex",
+		AgentMode:           "auto",
+		PaneServeExecutable: "/tmp/agentctl",
 	})
 	if err != nil {
 		t.Fatalf("PrepareSession() error = %v", err)
@@ -283,26 +333,43 @@ func TestPrepareSessionInjectsHierarchyEnvForRespawnedPanes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("buildAgentPaneCommand() error = %v", err)
 	}
+	wrapped := paneCommandForIdentity(
+		wrapTmuxPaneCommand("/tmp/agentctl", "hierarchy-smoke", "hierarchy-smoke-codex-a", "", "", cmd, ""),
+		"hierarchy-smoke-codex-a",
+		"parent-a",
+		"agent:parent-1",
+		"",
+		"",
+		"none",
+		"hierarchy-smoke",
+		"%31",
+	)
 	runner := &sequenceRunner{
 		steps: []sequenceStep{
-			{key: "tmux new-session -d -s hierarchy-smoke " + cmd, stderr: "duplicate session", err: fmt.Errorf("exit status 1")},
+			{key: "tmux new-session -d -s hierarchy-smoke " + defaultPaneCommand(), stderr: "duplicate session", err: fmt.Errorf("exit status 1")},
 			{key: "tmux list-panes -t hierarchy-smoke -F " + listFormat, stdout: "%31" + fieldSep + "hierarchy-smoke" + fieldSep + "0" + fieldSep + "0" + fieldSep + "main" + fieldSep + "111" + fieldSep + "80" + fieldSep + "24" + fieldSep + "" + fieldSep + "/repo" + fieldSep + "zsh" + fieldSep + "1\n"},
 			{key: "tmux select-layout -t hierarchy-smoke tiled"},
 			{key: "tmux list-panes -t hierarchy-smoke -F " + listFormat, stdout: "%31" + fieldSep + "hierarchy-smoke" + fieldSep + "0" + fieldSep + "0" + fieldSep + "main" + fieldSep + "111" + fieldSep + "80" + fieldSep + "24" + fieldSep + "" + fieldSep + "/repo" + fieldSep + "zsh" + fieldSep + "1\n"},
-			{key: "tmux set-option -p -t %31 @name codex-a"},
-			{key: "tmux respawn-pane -k -t %31 env AGENTCTL_PARTICIPANT_ID=codex-a AGENTCTL_MUX_BACKEND=tmux AGENTCTL_MUX_SESSION=hierarchy-smoke AGENTCTL_MUX_PANE_ID=%31 AGENTCTL_PARENT_PARTICIPANT_ID=parent-a AGENTCTL_PARENT_AGENT_ID=agent:parent-1 " + cmd},
+			{key: "tmux set-option -p -t %31 @name hierarchy-smoke-codex-a"},
+			{key: "tmux respawn-pane -k -t %31 " + wrapped},
 			{key: "tmux list-panes -t hierarchy-smoke -F " + listFormat, stdout: "%31" + fieldSep + "hierarchy-smoke" + fieldSep + "0" + fieldSep + "0" + fieldSep + "main" + fieldSep + "111" + fieldSep + "80" + fieldSep + "24" + fieldSep + "codex-a" + fieldSep + "/repo" + fieldSep + "node" + fieldSep + "1\n"},
+			{key: "tmux set-option -p -t %31 @agentctl_participant codex-a"},
+			{key: "tmux set-option -p -t %31 @agentctl_provider codex"},
+			{key: "tmux set-option -p -t %31 @agentctl_room_id"},
+			{key: "tmux set-option -p -t %31 @agentctl_wrapped 1"},
+			{key: "tmux list-panes -t hierarchy-smoke -F " + listFormat, stdout: "%31" + fieldSep + "hierarchy-smoke" + fieldSep + "0" + fieldSep + "0" + fieldSep + "main" + fieldSep + "111" + fieldSep + "80" + fieldSep + "24" + fieldSep + "codex-a" + fieldSep + "/repo" + fieldSep + "node" + fieldSep + "1" + fieldSep + "codex-a" + fieldSep + "codex" + fieldSep + "" + fieldSep + "1\n"},
 		},
 	}
 	client := NewWithRunner(runner, map[string]string{})
 
 	_, err = client.PrepareSession(context.Background(), PrepareOptions{
-		Session:           "hierarchy-smoke",
-		Panes:             1,
-		Agent:             "codex",
-		AgentMode:         "auto",
-		ParentParticipant: "parent-a",
-		ParentAgentID:     "agent:parent-1",
+		Session:             "hierarchy-smoke",
+		Panes:               1,
+		Agent:               "codex",
+		AgentMode:           "auto",
+		ParentParticipant:   "parent-a",
+		ParentAgentID:       "agent:parent-1",
+		PaneServeExecutable: "/tmp/agentctl",
 	})
 	if err != nil {
 		t.Fatalf("PrepareSession() error = %v", err)
@@ -315,15 +382,31 @@ func TestPrepareSessionInjectsDirectRoomEnvForTopLevelPanes(t *testing.T) {
 		t.Fatalf("buildAgentPaneCommand() error = %v", err)
 	}
 	onboarding := buildMuxCreateRoomOnboarding("room-alpha", "codex-a")
+	wrapped := paneCommandForIdentity(
+		wrapTmuxPaneCommand("/tmp/agentctl", "room-smoke", "room-alpha-codex-a", "room-alpha", "", cmd, ""),
+		"room-alpha-codex-a",
+		"",
+		"",
+		"room-alpha",
+		"",
+		"direct",
+		"room-smoke",
+		"%41",
+	)
 	runner := &sequenceRunner{
 		steps: []sequenceStep{
-			{key: "tmux new-session -d -s room-smoke " + cmd, stderr: "duplicate session", err: fmt.Errorf("exit status 1")},
+			{key: "tmux new-session -d -s room-smoke " + defaultPaneCommand(), stderr: "duplicate session", err: fmt.Errorf("exit status 1")},
 			{key: "tmux list-panes -t room-smoke -F " + listFormat, stdout: "%41" + fieldSep + "room-smoke" + fieldSep + "0" + fieldSep + "0" + fieldSep + "main" + fieldSep + "111" + fieldSep + "80" + fieldSep + "24" + fieldSep + "" + fieldSep + "/repo" + fieldSep + "zsh" + fieldSep + "1\n"},
 			{key: "tmux select-layout -t room-smoke tiled"},
 			{key: "tmux list-panes -t room-smoke -F " + listFormat, stdout: "%41" + fieldSep + "room-smoke" + fieldSep + "0" + fieldSep + "0" + fieldSep + "main" + fieldSep + "111" + fieldSep + "80" + fieldSep + "24" + fieldSep + "" + fieldSep + "/repo" + fieldSep + "zsh" + fieldSep + "1\n"},
-			{key: "tmux set-option -p -t %41 @name codex-a"},
-			{key: "tmux respawn-pane -k -t %41 env AGENTCTL_PARTICIPANT_ID=codex-a AGENTCTL_MUX_BACKEND=tmux AGENTCTL_MUX_SESSION=room-smoke AGENTCTL_MUX_PANE_ID=%41 AGENTCTL_ROOM_ID=room-alpha " + cmd},
+			{key: "tmux set-option -p -t %41 @name room-alpha-codex-a"},
+			{key: "tmux respawn-pane -k -t %41 " + wrapped},
 			{key: "tmux list-panes -t room-smoke -F " + listFormat, stdout: "%41" + fieldSep + "room-smoke" + fieldSep + "0" + fieldSep + "0" + fieldSep + "main" + fieldSep + "111" + fieldSep + "80" + fieldSep + "24" + fieldSep + "codex-a" + fieldSep + "/repo" + fieldSep + "node" + fieldSep + "1\n"},
+			{key: "tmux set-option -p -t %41 @agentctl_participant codex-a"},
+			{key: "tmux set-option -p -t %41 @agentctl_provider codex"},
+			{key: "tmux set-option -p -t %41 @agentctl_room_id room-alpha"},
+			{key: "tmux set-option -p -t %41 @agentctl_wrapped 1"},
+			{key: "tmux list-panes -t room-smoke -F " + listFormat, stdout: "%41" + fieldSep + "room-smoke" + fieldSep + "0" + fieldSep + "0" + fieldSep + "main" + fieldSep + "111" + fieldSep + "80" + fieldSep + "24" + fieldSep + "codex-a" + fieldSep + "/repo" + fieldSep + "node" + fieldSep + "1" + fieldSep + "codex-a" + fieldSep + "codex" + fieldSep + "room-alpha" + fieldSep + "1\n"},
 			{key: "tmux send-keys -t %41 -l -- " + onboarding},
 			{key: "tmux send-keys -t %41 C-Enter"},
 		},
@@ -331,11 +414,12 @@ func TestPrepareSessionInjectsDirectRoomEnvForTopLevelPanes(t *testing.T) {
 	client := NewWithRunner(runner, map[string]string{})
 
 	_, err = client.PrepareSession(context.Background(), PrepareOptions{
-		Session:   "room-smoke",
-		Panes:     1,
-		Agent:     "codex",
-		AgentMode: "auto",
-		RoomID:    "room-alpha",
+		Session:             "room-smoke",
+		Panes:               1,
+		Agent:               "codex",
+		AgentMode:           "auto",
+		RoomID:              "room-alpha",
+		PaneServeExecutable: "/tmp/agentctl",
 	})
 	if err != nil {
 		t.Fatalf("PrepareSession() error = %v", err)
@@ -376,6 +460,52 @@ func TestCreatePaneAllocatesAndRespawnsExactPane(t *testing.T) {
 	}
 	if got.Pane.Label != "worker-a" {
 		t.Fatalf("Pane.Label = %q, want worker-a", got.Pane.Label)
+	}
+}
+
+func TestCreatePaneSetsViewerMetadataForWrappedProviderPane(t *testing.T) {
+	shell := defaultPaneCommand()
+	command := "/tmp/agentctl pane serve --participant claude-a -- sh -lc 'claude --permission-mode bypassPermissions'"
+	runner := &sequenceRunner{
+		steps: []sequenceStep{
+			{key: "tmux new-session -d -P -F #{pane_id} -s pane-meta -c /repo " + shell, stdout: "%71\n"},
+			{key: "tmux set-option -p -t %71 @name claude-a"},
+			{key: "tmux select-layout -t pane-meta tiled"},
+			{key: "tmux respawn-pane -k -t %71 -c /repo env AGENTCTL_PARTICIPANT_ID=claude-a AGENTCTL_MUX_BACKEND=tmux AGENTCTL_MUX_SESSION=pane-meta AGENTCTL_MUX_PANE_ID=%71 AGENTCTL_ROOM_ID=room-alpha " + command},
+			{key: "tmux display-message -t %71 -p " + listFormat, stdout: "%71" + fieldSep + "pane-meta" + fieldSep + "0" + fieldSep + "0" + fieldSep + "main" + fieldSep + "111" + fieldSep + "80" + fieldSep + "24" + fieldSep + "claude-a" + fieldSep + "/repo" + fieldSep + "agentctl" + fieldSep + "1\n"},
+			{key: "tmux set-option -p -t %71 @agentctl_participant claude-a"},
+			{key: "tmux set-option -p -t %71 @agentctl_provider claude"},
+			{key: "tmux set-option -p -t %71 @agentctl_room_id room-alpha"},
+			{key: "tmux set-option -p -t %71 @agentctl_wrapped 1"},
+			{key: "tmux display-message -t %71 -p " + listFormat, stdout: "%71" + fieldSep + "pane-meta" + fieldSep + "0" + fieldSep + "0" + fieldSep + "main" + fieldSep + "111" + fieldSep + "80" + fieldSep + "24" + fieldSep + "claude-a" + fieldSep + "/repo" + fieldSep + "agentctl" + fieldSep + "1" + fieldSep + "claude-a" + fieldSep + "claude" + fieldSep + "room-alpha" + fieldSep + "1\n"},
+		},
+	}
+	client := NewWithRunner(runner, map[string]string{})
+
+	got, err := client.CreatePane(context.Background(), CreatePaneOptions{
+		Session:       "pane-meta",
+		CWD:           "/repo",
+		Label:         "claude-a",
+		Command:       command,
+		Provider:      "claude",
+		ParticipantID: "claude-a",
+		RoomID:        "room-alpha",
+		RoomAccess:    "direct",
+	})
+	if err != nil {
+		t.Fatalf("CreatePane() error = %v", err)
+	}
+	if got.Pane.Provider != "claude" {
+		t.Fatalf("Pane.Provider = %q, want claude", got.Pane.Provider)
+	}
+	if got.Pane.RoomID != "room-alpha" {
+		t.Fatalf("Pane.RoomID = %q, want room-alpha", got.Pane.RoomID)
+	}
+	if !got.Pane.Wrapped {
+		t.Fatal("Pane.Wrapped = false, want true")
+	}
+	if got.Pane.DisplayCommand != "claude" {
+		t.Fatalf("Pane.DisplayCommand = %q, want claude", got.Pane.DisplayCommand)
 	}
 }
 
@@ -424,6 +554,9 @@ func TestNormalizePrepareOptionsDefaults(t *testing.T) {
 	}
 	if got.paneCommand == "" {
 		t.Fatal("paneCommand should default to a shell")
+	}
+	if got.paneServeExecutable != "agentctl" {
+		t.Fatalf("paneServeExecutable = %q, want agentctl", got.paneServeExecutable)
 	}
 }
 
@@ -474,6 +607,7 @@ func TestBuildAgentPaneCommandAutoMappings(t *testing.T) {
 		{name: "claude", agent: "claude", mode: "auto", wantFrag: "--dangerously-skip-permissions"},
 		{name: "gemini", agent: "gemini", mode: "auto", wantFrag: "--yolo"},
 		{name: "cursor-agent", agent: "agent", mode: "auto", wantFrag: "--yolo"},
+		{name: "droid", agent: "droid", mode: "auto", wantFrag: "droid"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -481,7 +615,7 @@ func TestBuildAgentPaneCommandAutoMappings(t *testing.T) {
 			if err != nil {
 				t.Fatalf("buildAgentPaneCommand() error = %v", err)
 			}
-			if !strings.Contains(got, tt.wantFrag) {
+			if tt.wantFrag != "" && !strings.Contains(got, tt.wantFrag) {
 				t.Fatalf("buildAgentPaneCommand() = %q, want fragment %q", got, tt.wantFrag)
 			}
 		})
@@ -489,7 +623,7 @@ func TestBuildAgentPaneCommandAutoMappings(t *testing.T) {
 }
 
 func TestBuildAgentPaneCommandAutoRejectsUnknownAgent(t *testing.T) {
-	_, err := buildAgentPaneCommand("droid", "auto", nil, "")
+	_, err := buildAgentPaneCommand("unknown-agent", "auto", nil, "")
 	if err == nil {
 		t.Fatal("buildAgentPaneCommand() error = nil, want error")
 	}
@@ -627,7 +761,7 @@ func TestSendWithExplicitSenderLabel(t *testing.T) {
 				stdout: "%1" + fieldSep + "agentctl-collab" + fieldSep + "0" + fieldSep + "0" + fieldSep + "zsh" + fieldSep + "111" + fieldSep + "80" + fieldSep + "24" + fieldSep + "praze-a" + fieldSep + "/repo" + fieldSep + "zsh" + fieldSep + "1\n",
 			},
 			"tmux send-keys -t %2 -l -- [tmux-bridge from=praze-a pane=%1 reply_to=praze-a] review mailbox": {},
-			"tmux send-keys -t %2 Enter": {},
+			"tmux send-keys -t %2 C-Enter": {},
 		},
 	}, map[string]string{})
 
@@ -704,18 +838,18 @@ func TestSendRequiresSenderOutsideTmux(t *testing.T) {
 func TestSubmitUsesEscapeThenEnter(t *testing.T) {
 	client := NewWithRunner(fakeRunner{
 		responses: map[string]fakeResponse{
-			"tmux list-panes -a -F " + labelFormat:     {stdout: "%2" + fieldSep + "agent-b\n"},
+			"tmux list-panes -a -F " + labelFormat:     {stdout: "%2" + fieldSep + "reviewer-b\n"},
 			"tmux list-sessions":                       {stdout: "ok\n"},
 			"tmux display-message -t %2 -p #{pane_id}": {stdout: "%2\n"},
 			"tmux display-message -t %2 -p " + listFormat: {
-				stdout: "%2" + fieldSep + "agentctl-collab" + fieldSep + "0" + fieldSep + "1" + fieldSep + "zsh" + fieldSep + "222" + fieldSep + "80" + fieldSep + "24" + fieldSep + "agent-b" + fieldSep + "/repo" + fieldSep + "zsh" + fieldSep + "0\n",
+				stdout: "%2" + fieldSep + "agentctl-collab" + fieldSep + "0" + fieldSep + "1" + fieldSep + "zsh" + fieldSep + "222" + fieldSep + "80" + fieldSep + "24" + fieldSep + "reviewer-b" + fieldSep + "/repo" + fieldSep + "zsh" + fieldSep + "0\n",
 			},
 			"tmux send-keys -t %2 Escape": {},
 			"tmux send-keys -t %2 Enter":  {},
 		},
 	}, map[string]string{})
 
-	got, err := client.Submit(context.Background(), "agent-b", SubmitOptions{})
+	got, err := client.Submit(context.Background(), "reviewer-b", SubmitOptions{})
 	if err != nil {
 		t.Fatalf("Submit() error = %v", err)
 	}
@@ -796,6 +930,28 @@ func TestSubmitUsesCtrlEnterForDroidCommandPane(t *testing.T) {
 	}
 }
 
+func TestSubmitUsesCtrlEnterForAgentLabeledPaneWhenCurrentCommandIsWrapper(t *testing.T) {
+	client := NewWithRunner(fakeRunner{
+		responses: map[string]fakeResponse{
+			"tmux list-panes -a -F " + labelFormat:      {stdout: "%22" + fieldSep + "agent-a\n"},
+			"tmux list-sessions":                        {stdout: "ok\n"},
+			"tmux display-message -t %22 -p #{pane_id}": {stdout: "%22\n"},
+			"tmux display-message -t %22 -p " + listFormat: {
+				stdout: "%22" + fieldSep + "collab" + fieldSep + "0" + fieldSep + "0" + fieldSep + "main" + fieldSep + "222" + fieldSep + "80" + fieldSep + "24" + fieldSep + "agent-a" + fieldSep + "/repo" + fieldSep + "agentctl" + fieldSep + "1\n",
+			},
+			"tmux send-keys -t %22 C-Enter": {},
+		},
+	}, map[string]string{})
+
+	got, err := client.Submit(context.Background(), "agent-a", SubmitOptions{})
+	if err != nil {
+		t.Fatalf("Submit() error = %v", err)
+	}
+	if got.ResolvedTarget != "%22" {
+		t.Fatalf("ResolvedTarget = %q, want %%22", got.ResolvedTarget)
+	}
+}
+
 func TestSendUsesCtrlEnterForDroidPane(t *testing.T) {
 	client := NewWithRunner(fakeRunner{
 		responses: map[string]fakeResponse{
@@ -867,6 +1023,28 @@ func TestSubmitEnterOnlySendsEnterWithoutEscape(t *testing.T) {
 	}
 	if got.Mode != SubmitModeEnterOnly {
 		t.Fatalf("Mode = %q, want %s", got.Mode, SubmitModeEnterOnly)
+	}
+}
+
+func TestInterruptSendsEscape(t *testing.T) {
+	client := NewWithRunner(fakeRunner{
+		responses: map[string]fakeResponse{
+			"tmux list-panes -a -F " + labelFormat:     {stdout: "%2" + fieldSep + "agent-b\n"},
+			"tmux list-sessions":                       {stdout: "ok\n"},
+			"tmux display-message -t %2 -p #{pane_id}": {stdout: "%2\n"},
+			"tmux display-message -t %2 -p " + listFormat: {
+				stdout: "%2" + fieldSep + "agentctl-collab" + fieldSep + "0" + fieldSep + "1" + fieldSep + "zsh" + fieldSep + "222" + fieldSep + "80" + fieldSep + "24" + fieldSep + "agent-b" + fieldSep + "/repo" + fieldSep + "zsh" + fieldSep + "0\n",
+			},
+			"tmux send-keys -t %2 Escape": {},
+		},
+	}, map[string]string{})
+
+	got, err := client.Interrupt(context.Background(), "agent-b")
+	if err != nil {
+		t.Fatalf("Interrupt() error = %v", err)
+	}
+	if got.ResolvedTarget != "%2" {
+		t.Fatalf("ResolvedTarget = %q, want %%2", got.ResolvedTarget)
 	}
 }
 
@@ -991,7 +1169,7 @@ func TestDeliverTextUsesRawForAgentPane(t *testing.T) {
 	}
 }
 
-func TestDeliverTextUsesRawAndEnterForNodeAgentPane(t *testing.T) {
+func TestDeliverTextUsesRawAndEnterForGeminiPane(t *testing.T) {
 	client := NewWithRunner(fakeRunner{
 		responses: map[string]fakeResponse{
 			"tmux list-sessions":                        {stdout: "ok\n"},
@@ -1000,12 +1178,33 @@ func TestDeliverTextUsesRawAndEnterForNodeAgentPane(t *testing.T) {
 				stdout: "%31" + fieldSep + "collab" + fieldSep + "0" + fieldSep + "2" + fieldSep + "main" + fieldSep + "333" + fieldSep + "80" + fieldSep + "24" + fieldSep + "gemini-a" + fieldSep + "/repo" + fieldSep + "node" + fieldSep + "0\n",
 			},
 			"tmux send-keys -t %31 -l -- [room alpha] hello gemini": {},
-			"tmux send-keys -t %31 Escape":                          {},
 			"tmux send-keys -t %31 Enter":                           {},
 		},
 	}, map[string]string{})
 
 	got, err := client.DeliverText(context.Background(), "%31", "[room alpha] hello gemini")
+	if err != nil {
+		t.Fatalf("DeliverText() error = %v", err)
+	}
+	if got.Mode != "raw" {
+		t.Fatalf("DeliverText() mode = %q, want raw", got.Mode)
+	}
+}
+
+func TestDeliverTextUsesRawAndEnterForClaudeLabeledPane(t *testing.T) {
+	client := NewWithRunner(fakeRunner{
+		responses: map[string]fakeResponse{
+			"tmux list-sessions":                        {stdout: "ok\n"},
+			"tmux display-message -t %41 -p #{pane_id}": {stdout: "%41\n"},
+			"tmux display-message -t %41 -p " + listFormat: {
+				stdout: "%41" + fieldSep + "collab" + fieldSep + "0" + fieldSep + "3" + fieldSep + "main" + fieldSep + "444" + fieldSep + "80" + fieldSep + "24" + fieldSep + "claude-a" + fieldSep + "/repo" + fieldSep + "2.1.100" + fieldSep + "0\n",
+			},
+			"tmux send-keys -t %41 -l -- [room alpha] hello claude": {},
+			"tmux send-keys -t %41 Enter":                           {},
+		},
+	}, map[string]string{})
+
+	got, err := client.DeliverText(context.Background(), "%41", "[room alpha] hello claude")
 	if err != nil {
 		t.Fatalf("DeliverText() error = %v", err)
 	}
@@ -1036,7 +1235,7 @@ func TestDeliverTextUsesCtrlEnterForNodeNonGeminiPane(t *testing.T) {
 	}
 }
 
-func TestDeliverTextInterruptingGeminiPaneUsesEscapeBeforeAndAfterPayload(t *testing.T) {
+func TestDeliverTextInterruptingGeminiPaneUsesLeadingEscapeAndEnter(t *testing.T) {
 	client := NewWithRunner(fakeRunner{
 		responses: map[string]fakeResponse{
 			"tmux list-sessions":                        {stdout: "ok\n"},
@@ -1103,7 +1302,31 @@ func TestDeliverTextUsesRawWithoutEscapeForNonGeminiAgentPane(t *testing.T) {
 	}
 }
 
-func TestCurrentParticipantIDPrefersLabel(t *testing.T) {
+func TestCurrentParticipantIDPrefersParticipantMetadataOverLabel(t *testing.T) {
+	client := NewWithRunner(fakeRunner{
+		responses: map[string]fakeResponse{
+			"tmux list-sessions": {stdout: "ok\n"},
+			"tmux display-message -t %7 -p " + listFormat: {
+				stdout: "%7" + fieldSep + "collab" + fieldSep + "0" + fieldSep + "0" + fieldSep + "main" + fieldSep + "111" + fieldSep + "120" + fieldSep + "30" + fieldSep + "legacy-label" + fieldSep + "/repo" + fieldSep + "zsh" + fieldSep + "1" + fieldSep + "codex-a" + fieldSep + "codex" + fieldSep + "room-alpha" + fieldSep + "1\n",
+			},
+		},
+	}, map[string]string{
+		"TMUX":      "/tmp/tmux.sock,1,0",
+		"TMUX_PANE": "%7",
+	})
+	got, pane, err := client.CurrentParticipantID(context.Background())
+	if err != nil {
+		t.Fatalf("CurrentParticipantID() error = %v", err)
+	}
+	if got != "codex-a" {
+		t.Fatalf("CurrentParticipantID() = %q, want codex-a", got)
+	}
+	if pane.ID != "%7" {
+		t.Fatalf("pane.ID = %q, want %%7", pane.ID)
+	}
+}
+
+func TestCurrentParticipantIDFallsBackToLabel(t *testing.T) {
 	client := NewWithRunner(fakeRunner{
 		responses: map[string]fakeResponse{
 			"tmux list-sessions": {stdout: "ok\n"},

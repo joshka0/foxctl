@@ -197,6 +197,109 @@ CREATE INDEX IF NOT EXISTS idx_board_msg_priority_created ON board_messages(prio
 	}
 }
 
+// TestOpenBoardStore_MigratesLegacyRoomMetadataSandboxConfig verifies that
+// existing databases created before the sandbox_config column was added to
+// room_metadata are successfully migrated when opened. This guards against
+// the CREATE TABLE IF NOT EXISTS limitation where new columns are not added
+// to pre-existing tables. (VAL-CROSS-009)
+func TestOpenBoardStore_MigratesLegacyRoomMetadataSandboxConfig(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	path := filepath.Join(root, "board.db")
+
+	// Simulate a pre-sandbox_config database by creating the room_metadata table
+	// without the sandbox_config column.
+	db, err := sqliteutil.OpenDB(ctx, path, nil)
+	if err != nil {
+		t.Fatalf("sqliteutil.OpenDB legacy schema: %v", err)
+	}
+	defer db.Close()
+	if _, err := db.ExecContext(ctx, `
+CREATE TABLE IF NOT EXISTS room_metadata (
+	workspace_id TEXT NOT NULL,
+	room_id      TEXT NOT NULL,
+	stream       TEXT NOT NULL,
+	title        TEXT NOT NULL,
+	description  TEXT NOT NULL DEFAULT '',
+	dispatch_policy TEXT NOT NULL DEFAULT 'all_subtree',
+	dispatch_agent_ids TEXT NOT NULL DEFAULT '[]',
+	created_at   INTEGER NOT NULL,
+	updated_at   INTEGER NOT NULL,
+	archived_at  TEXT NOT NULL DEFAULT '',
+	PRIMARY KEY (workspace_id, room_id)
+);
+CREATE TABLE IF NOT EXISTS board_messages (
+	id           TEXT PRIMARY KEY,
+	workspace_id TEXT NOT NULL,
+	task_id      TEXT,
+	related_message_id TEXT,
+	stream       TEXT NOT NULL DEFAULT 'coordination',
+	sender       TEXT NOT NULL,
+	recipient    TEXT NOT NULL,
+	kind         TEXT NOT NULL DEFAULT 'info',
+	priority     INTEGER NOT NULL DEFAULT 3,
+	ack_required INTEGER NOT NULL DEFAULT 0,
+	reply_expected INTEGER NOT NULL DEFAULT 0,
+	interrupt    INTEGER NOT NULL DEFAULT 0,
+	status       TEXT NOT NULL DEFAULT 'unread',
+	subject      TEXT NOT NULL,
+	body         TEXT NOT NULL,
+	created_at   INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS room_members (
+	workspace_id TEXT NOT NULL,
+	room_id      TEXT NOT NULL,
+	actor_id     TEXT NOT NULL,
+	role         TEXT NOT NULL DEFAULT '',
+	backend      TEXT NOT NULL DEFAULT '',
+	session      TEXT NOT NULL DEFAULT '',
+	pane_id      TEXT NOT NULL DEFAULT '',
+	unbound      INTEGER NOT NULL DEFAULT 0,
+	joined_at    INTEGER NOT NULL,
+	PRIMARY KEY (workspace_id, room_id, actor_id)
+);
+`); err != nil {
+		t.Fatalf("legacy schema exec: %v", err)
+	}
+	_ = db.Close()
+
+	// OpenBoardStore should migrate without error.
+	store, err := OpenBoardStore(ctx, root)
+	if err != nil {
+		t.Fatalf("OpenBoardStore failed to migrate legacy schema: %v", err)
+	}
+	defer store.Close()
+
+	// Upsert a room with a SandboxConfig — this writes sandbox_config column.
+	room := agent.Room{
+		ID:          "migrate-test-room",
+		WorkspaceID: "ws-migrate",
+		Title:       "Migration Test Room",
+		Members:     []agent.RoomMember{{ActorID: "human-a", Role: "coordinator"}},
+		SandboxConfig: &agent.SandboxConfig{
+			WorktreePath:   "/tmp/wt/migrate-test",
+			WorktreeBranch: "sandbox/room-migrate-test-room",
+			TmuxSession:    "agentctl-sandbox-migrate-test-room",
+			Runtime:        "worktree",
+		},
+	}
+	if _, err := store.UpsertRoom(ctx, room); err != nil {
+		t.Fatalf("UpsertRoom after migration: %v", err)
+	}
+
+	// Read back and confirm sandbox_config is persisted.
+	summary, err := store.GetRoom(ctx, "ws-migrate", "migrate-test-room", "")
+	if err != nil {
+		t.Fatalf("GetRoom after migration: %v", err)
+	}
+	if summary.SandboxConfig == nil {
+		t.Fatal("SandboxConfig is nil after migration round-trip")
+	}
+	if summary.SandboxConfig.WorktreePath != "/tmp/wt/migrate-test" {
+		t.Errorf("WorktreePath = %q, want /tmp/wt/migrate-test", summary.SandboxConfig.WorktreePath)
+	}
+}
+
 func TestBoardStore_InboxFiltersByStreamAndTask(t *testing.T) {
 	ctx := context.Background()
 	dir := t.TempDir()
@@ -1075,6 +1178,246 @@ func TestRetryBoardBusyDoesNotRetryNonBusyErrors(t *testing.T) {
 	}
 	if got := atomic.LoadInt32(&calls); got != 1 {
 		t.Fatalf("calls=%d want 1", got)
+	}
+}
+
+func TestBoardStore_RoomMemberTransportEndpointRoundtrip(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+
+	store, err := OpenBoardStore(ctx, dir)
+	if err != nil {
+		t.Fatalf("OpenBoardStore: %v", err)
+	}
+	defer store.Close()
+
+	_, err = store.UpsertRoom(ctx, agent.Room{
+		ID:          "transport-room",
+		WorkspaceID: "ws1",
+		Title:       "Transport Test Room",
+	})
+	if err != nil {
+		t.Fatalf("UpsertRoom: %v", err)
+	}
+
+	members := []agent.RoomMember{
+		{
+			ActorID:           "claude-a",
+			Role:              "worker",
+			Backend:           "zellij",
+			Session:           "test-session",
+			PaneID:            "terminal_0",
+			TransportEndpoint: "/tmp/agentctl-pane/test-session/claude-a.sock",
+			TransportKind:     "pane_socket",
+		},
+		{
+			ActorID: "droid-a",
+			Role:    "worker",
+			Backend: "tmux",
+			Session: "test-session",
+			PaneID:  "%5",
+			// TransportEndpoint and TransportKind intentionally empty (legacy mux_pane)
+		},
+	}
+
+	replaced, err := store.ReplaceRoomMembers(ctx, "ws1", "transport-room", members)
+	if err != nil {
+		t.Fatalf("ReplaceRoomMembers: %v", err)
+	}
+	if len(replaced) != 2 {
+		t.Fatalf("replaced members count=%d want 2", len(replaced))
+	}
+
+	room, err := store.GetRoom(ctx, "ws1", "transport-room", "")
+	if err != nil {
+		t.Fatalf("GetRoom: %v", err)
+	}
+	if len(room.Members) != 2 {
+		t.Fatalf("members count=%d want 2", len(room.Members))
+	}
+
+	byActor := make(map[string]agent.RoomMember)
+	for _, m := range room.Members {
+		byActor[m.ActorID] = m
+	}
+
+	claudeA := byActor["claude-a"]
+	if claudeA.TransportEndpoint != "/tmp/agentctl-pane/test-session/claude-a.sock" {
+		t.Errorf("claude-a TransportEndpoint=%q want /tmp/agentctl-pane/test-session/claude-a.sock", claudeA.TransportEndpoint)
+	}
+	if claudeA.TransportKind != "pane_socket" {
+		t.Errorf("claude-a TransportKind=%q want pane_socket", claudeA.TransportKind)
+	}
+
+	droidA := byActor["droid-a"]
+	if droidA.TransportEndpoint != "" {
+		t.Errorf("droid-a TransportEndpoint=%q want empty", droidA.TransportEndpoint)
+	}
+	if droidA.TransportKind != "" {
+		t.Errorf("droid-a TransportKind=%q want empty", droidA.TransportKind)
+	}
+}
+
+func TestBoardStore_UpdateRoomMemberTransport(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+
+	store, err := OpenBoardStore(ctx, dir)
+	if err != nil {
+		t.Fatalf("OpenBoardStore: %v", err)
+	}
+	defer store.Close()
+
+	_, err = store.UpsertRoom(ctx, agent.Room{ID: "tr-room", WorkspaceID: "ws1", Title: "Transport Register Room"})
+	if err != nil {
+		t.Fatalf("UpsertRoom: %v", err)
+	}
+	_, err = store.ReplaceRoomMembers(ctx, "ws1", "tr-room", []agent.RoomMember{
+		{ActorID: "claude-a", Role: "worker", Backend: "tmux", Session: "s1", PaneID: "%1"},
+		{ActorID: "droid-a", Role: "worker"},
+	})
+	if err != nil {
+		t.Fatalf("ReplaceRoomMembers: %v", err)
+	}
+
+	// Update transport for claude-a.
+	endpoint := "/tmp/agentctl-pane/s1/claude-a.sock"
+	if err := store.UpdateRoomMemberTransport(ctx, "ws1", "tr-room", "claude-a", endpoint, "pane_socket"); err != nil {
+		t.Fatalf("UpdateRoomMemberTransport: %v", err)
+	}
+
+	room, err := store.GetRoom(ctx, "ws1", "tr-room", "")
+	if err != nil {
+		t.Fatalf("GetRoom: %v", err)
+	}
+	byActor := make(map[string]agent.RoomMember)
+	for _, m := range room.Members {
+		byActor[m.ActorID] = m
+	}
+
+	// claude-a has the updated transport.
+	if got := byActor["claude-a"].TransportEndpoint; got != endpoint {
+		t.Errorf("claude-a TransportEndpoint=%q want %q", got, endpoint)
+	}
+	if got := byActor["claude-a"].TransportKind; got != "pane_socket" {
+		t.Errorf("claude-a TransportKind=%q want pane_socket", got)
+	}
+	// droid-a is untouched.
+	if got := byActor["droid-a"].TransportEndpoint; got != "" {
+		t.Errorf("droid-a TransportEndpoint=%q want empty", got)
+	}
+	// Existing fields on claude-a are preserved.
+	if got := byActor["claude-a"].Backend; got != "tmux" {
+		t.Errorf("claude-a Backend=%q want tmux (must be preserved)", got)
+	}
+}
+
+func TestBoardStore_UpdateRoomMemberTransport_NotFound(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+
+	store, err := OpenBoardStore(ctx, dir)
+	if err != nil {
+		t.Fatalf("OpenBoardStore: %v", err)
+	}
+	defer store.Close()
+
+	_, err = store.UpsertRoom(ctx, agent.Room{ID: "tr-room2", WorkspaceID: "ws1", Title: "Test"})
+	if err != nil {
+		t.Fatalf("UpsertRoom: %v", err)
+	}
+	_, err = store.ReplaceRoomMembers(ctx, "ws1", "tr-room2", []agent.RoomMember{
+		{ActorID: "claude-a", Role: "worker"},
+	})
+	if err != nil {
+		t.Fatalf("ReplaceRoomMembers: %v", err)
+	}
+
+	// Actor not in room → ErrRoomMemberNotFound.
+	err = store.UpdateRoomMemberTransport(ctx, "ws1", "tr-room2", "nobody", "/tmp/nobody.sock", "pane_socket")
+	if !errors.Is(err, ErrRoomMemberNotFound) {
+		t.Errorf("UpdateRoomMemberTransport for non-member: got %v, want ErrRoomMemberNotFound", err)
+	}
+}
+
+func TestBoardStore_UpdateRoomMemberBinding(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+
+	store, err := OpenBoardStore(ctx, dir)
+	if err != nil {
+		t.Fatalf("OpenBoardStore: %v", err)
+	}
+	defer store.Close()
+
+	_, err = store.UpsertRoom(ctx, agent.Room{ID: "bind-room", WorkspaceID: "ws1", Title: "Binding Room"})
+	if err != nil {
+		t.Fatalf("UpsertRoom: %v", err)
+	}
+	_, err = store.ReplaceRoomMembers(ctx, "ws1", "bind-room", []agent.RoomMember{
+		{ActorID: "droid-a", Role: "worker", Backend: "tmux", Session: "old", PaneID: "%1"},
+		{ActorID: "claude-a", Role: "worker"},
+	})
+	if err != nil {
+		t.Fatalf("ReplaceRoomMembers: %v", err)
+	}
+
+	err = store.UpdateRoomMemberBinding(ctx, "ws1", "bind-room", agent.RoomMember{
+		ActorID:           "droid-a",
+		Backend:           "tmux",
+		Session:           "new-session",
+		PaneID:            "%42",
+		TransportEndpoint: "/tmp/droid-rebind.sock",
+		TransportKind:     "pane_socket",
+	})
+	if err != nil {
+		t.Fatalf("UpdateRoomMemberBinding: %v", err)
+	}
+
+	room, err := store.GetRoom(ctx, "ws1", "bind-room", "")
+	if err != nil {
+		t.Fatalf("GetRoom: %v", err)
+	}
+	byActor := make(map[string]agent.RoomMember)
+	for _, m := range room.Members {
+		byActor[m.ActorID] = m
+	}
+	got := byActor["droid-a"]
+	if got.Session != "new-session" || got.PaneID != "%42" {
+		t.Fatalf("droid-a binding=(%q,%q) want (new-session,%%42)", got.Session, got.PaneID)
+	}
+	if got.TransportEndpoint != "/tmp/droid-rebind.sock" || got.TransportKind != "pane_socket" {
+		t.Fatalf("droid-a transport=(%q,%q) want updated pane_socket", got.TransportEndpoint, got.TransportKind)
+	}
+	if byActor["claude-a"].Session != "" || byActor["claude-a"].TransportEndpoint != "" {
+		t.Fatalf("claude-a was unexpectedly modified: %+v", byActor["claude-a"])
+	}
+}
+
+func TestBoardStore_UpdateRoomMemberBinding_NotFound(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+
+	store, err := OpenBoardStore(ctx, dir)
+	if err != nil {
+		t.Fatalf("OpenBoardStore: %v", err)
+	}
+	defer store.Close()
+
+	_, err = store.UpsertRoom(ctx, agent.Room{ID: "bind-room2", WorkspaceID: "ws1", Title: "Binding Room 2"})
+	if err != nil {
+		t.Fatalf("UpsertRoom: %v", err)
+	}
+	_, err = store.ReplaceRoomMembers(ctx, "ws1", "bind-room2", []agent.RoomMember{
+		{ActorID: "claude-a", Role: "worker"},
+	})
+	if err != nil {
+		t.Fatalf("ReplaceRoomMembers: %v", err)
+	}
+
+	err = store.UpdateRoomMemberBinding(ctx, "ws1", "bind-room2", agent.RoomMember{ActorID: "missing-a", Backend: "tmux"})
+	if !errors.Is(err, ErrRoomMemberNotFound) {
+		t.Fatalf("UpdateRoomMemberBinding got %v want ErrRoomMemberNotFound", err)
 	}
 }
 

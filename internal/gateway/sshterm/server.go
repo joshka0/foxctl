@@ -222,6 +222,8 @@ func (s *Server) handleConn(ctx context.Context, conn net.Conn) {
 }
 
 // handleSession handles a single SSH session channel.
+//
+//nolint:gocyclo // SSH session handling is an imperative boundary that multiplexes PTY, shell, exec, resize, and teardown paths.
 func (s *Server) handleSession(ctx context.Context, sess *SSHSession, channel ssh.Channel, requests <-chan *ssh.Request) {
 	defer channel.Close()
 

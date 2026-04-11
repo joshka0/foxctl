@@ -2,9 +2,9 @@
 
 | Field | Value |
 |-------|--------|
-| Status | Draft |
+| Status | Updated |
 | Scope | `agentctl room` epic/milestone/story backend, work-pack model, and mission-style coordinator surfaces |
-| Related | [room-agile-workpacks-and-validation.md](./room-agile-workpacks-and-validation.md), [room-epic-resume-and-next.md](./room-epic-resume-and-next.md), [room-epic-health-pulse.md](./room-epic-health-pulse.md), [room-milestone-contract.md](./room-milestone-contract.md), [room-story-lifecycle.md](./room-story-lifecycle.md), [room-milestone-synthesis.md](./room-milestone-synthesis.md), [room-retro-guidance.md](./room-retro-guidance.md), [room-evidence-lanes.md](./room-evidence-lanes.md), [room-workpack-templates.md](./room-workpack-templates.md), [room-agile-provenance-backlinks.md](./room-agile-provenance-backlinks.md), [room-agile-aca-promotion.md](./room-agile-aca-promotion.md), [room-epic-checkpoint.md](./room-epic-checkpoint.md) |
+| Related | [room-agile-workpacks-and-validation.md](./room-agile-workpacks-and-validation.md), [room-epic-resume-and-next.md](./room-epic-resume-and-next.md), [room-epic-health-pulse.md](./room-epic-health-pulse.md), [room-milestone-contract.md](./room-milestone-contract.md), [room-story-lifecycle.md](./room-story-lifecycle.md), [room-milestone-synthesis.md](./room-milestone-synthesis.md), [room-retro-guidance.md](./room-retro-guidance.md), [room-evidence-lanes.md](./room-evidence-lanes.md), [room-workpack-templates.md](./room-workpack-templates.md), [room-agile-provenance-backlinks.md](./room-agile-provenance-backlinks.md), [room-agile-aca-promotion.md](./room-agile-aca-promotion.md), [room-epic-checkpoint.md](./room-epic-checkpoint.md), [go-native-runtime-and-optional-jido.md](../../architecture/go-native-runtime-and-optional-jido.md) |
 
 ## Why this note exists
 
@@ -60,9 +60,11 @@ The room agile backend already has these mission-quality primitives in tree:
 10. provenance and backlinks between room state, work-pack artifacts, and ACA drafts
 11. ACA draft promotion for high-signal agile artifacts
 12. deterministic delivery improvements for mux send confirmation
+13. room-wide coordinator pulse (`room pulse`) with epic health aggregation, stale detection, interview nudge, and task heartbeat monitoring
+14. Go-native runtime parity for CLI runtime tree reads (`coreworker.StateReader` seam, goruntime/libsql backend)
 
 So the parity question is no longer “how do we get resume, contracts, synthesis,
-or work-packs?” Those are already implemented.
+work-packs, or mission pulse?” Those are all implemented.
 
 ## What Factory missions still do better
 
@@ -78,23 +80,13 @@ The best remaining Factory-style ideas are:
 
 ## Remaining gaps
 
-### 1. Room-wide coordinator pulse
+### 1. Room-wide coordinator pulse (SHIPPED)
 
-Today the room has strong per-epic continuity:
+Implemented as `room pulse` with `detectRoomCoordinatorPulseMessages()`.
 
-- `epic resume`
-- `epic next`
-- `epic health`
+Surfaces: epics in intake, blocked milestones, missing reviews/summaries, stale checkpoints/logs, safe-to-handoff signals, interview nudge, task heartbeat monitoring.
 
-But it still lacks one room-wide mission-control surface that answers:
-
-- which epics are still in intake
-- which epics are blocked
-- which milestones are missing review or summary
-- which epics have stale checkpoints or logs
-- which epics are safe to hand off or close
-
-This is the highest-leverage remaining Factory-style backend gap.
+This gap is now closed.
 
 ### 2. Multi-epic scoping cleanup
 
@@ -144,24 +136,22 @@ This is valuable, but it is less urgent than the room-wide coordinator pulse.
 
 From the current shipped baseline, the highest-leverage next slices are:
 
-1. room-wide coordinator pulse
-2. multi-epic scoping cleanup
-3. richer evidence semantics
-4. deeper ACA / Obsidian follow-through
+1. multi-epic scoping cleanup
+2. richer evidence semantics
+3. deeper ACA / Obsidian follow-through
 
 ## Proposed immediate next slice
 
 The next backend slice should be:
 
-1. refresh this parity note
-2. add a room-wide coordinator pulse across all epics
+1. multi-epic scoping cleanup (correctness)
+2. then richer evidence semantics if retrieval needs it
 
 Why this next:
 
-- it uses the already-shipped per-epic health/next/checkpoint primitives
-- it gives the coordinator a true mission-control surface
-- it avoids reworking already-implemented slices
-- it sets up the right place to surface multi-epic correctness later
+- coordinator pulse is already shipped
+- single-epic-per-room workflow is the current default
+- multi-epic correctness matters before adding more semantic depth
 
 ## Non-goals
 

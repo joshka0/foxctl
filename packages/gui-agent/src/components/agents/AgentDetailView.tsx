@@ -1669,7 +1669,7 @@ export function AgentDetailView({ agent, onBack }: AgentDetailViewProps) {
                     label="Sandbox"
                     value={
                       sandboxBacked
-                        ? activeAgent.sandbox_provider || "opensandbox"
+                        ? activeAgent.sandbox_provider || "disabled"
                         : "-"
                     }
                   />

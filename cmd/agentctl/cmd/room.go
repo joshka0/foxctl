@@ -1,11 +1,13 @@
 package cmd
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -18,7 +20,6 @@ import (
 	"github.com/jkatigb/agentctl/internal/domain/envelope"
 	ws "github.com/jkatigb/agentctl/internal/platform/workspace"
 	"github.com/jkatigb/agentctl/internal/protocol"
-	"github.com/jkatigb/agentctl/internal/sandbox/opensandbox"
 	"github.com/jkatigb/agentctl/internal/storage/agents"
 	"github.com/jkatigb/agentctl/internal/storage/blackboard"
 	"github.com/jkatigb/agentctl/internal/storage/coordination"
@@ -28,6 +29,8 @@ import (
 	"github.com/jkatigb/agentctl/internal/zellijbridge"
 	"github.com/spf13/cobra"
 )
+
+const openSandboxDisabledMessage = "opensandbox integration temporarily disabled; use worktree sandboxing"
 
 func init() {
 	rootCmd.AddCommand(newRoomCommand())
@@ -67,6 +70,7 @@ func newRoomCommand() *cobra.Command {
 		newRoomTaskCommand(),
 		newRoomSubscribeCommand(),
 		newRoomRelayCommand(),
+		newRoomRelayOnceCommand(),
 		newRoomLoopCommand(),
 		newRoomDestroyCommand(),
 	)
@@ -378,10 +382,10 @@ func newRoomCreateCommand() *cobra.Command {
 	cmd.Flags().BoolVar(&sandbox, "sandbox", false, "Provision git worktree + tmux session + gateway terminal route for sandbox isolation")
 	cmd.Flags().StringVar(&sandboxWTRoot, "sandbox-worktree-root", "", "Parent directory for sandbox worktree (defaults to <repo>-worktrees sibling)")
 	cmd.Flags().StringVar(&sandboxBaseRef, "sandbox-base-ref", "HEAD", "Git ref to branch sandbox worktree from")
-	cmd.Flags().StringVar(&sandboxRuntime, "sandbox-runtime", "worktree", "Sandbox runtime type: worktree or opensandbox")
-	cmd.Flags().DurationVar(&sandboxTTL, "sandbox-ttl", 60*time.Minute, "Container TTL when using --sandbox-runtime opensandbox (default 60m)")
-	cmd.Flags().StringVar(&sandboxCPU, "sandbox-cpu", "", "CPU limit for container when using --sandbox-runtime opensandbox (e.g. 500m)")
-	cmd.Flags().StringVar(&sandboxMemory, "sandbox-memory", "", "Memory limit for container when using --sandbox-runtime opensandbox (e.g. 512Mi)")
+	cmd.Flags().StringVar(&sandboxRuntime, "sandbox-runtime", "worktree", "Sandbox runtime type (currently only: worktree)")
+	cmd.Flags().DurationVar(&sandboxTTL, "sandbox-ttl", 60*time.Minute, "Deprecated OpenSandbox TTL flag; currently ignored")
+	cmd.Flags().StringVar(&sandboxCPU, "sandbox-cpu", "", "Deprecated OpenSandbox CPU flag; currently ignored")
+	cmd.Flags().StringVar(&sandboxMemory, "sandbox-memory", "", "Deprecated OpenSandbox memory flag; currently ignored")
 	return cmd
 }
 
@@ -1752,14 +1756,16 @@ func newRoomInterviewShowCommand() *cobra.Command {
 
 func newRoomJoinCommand() *cobra.Command {
 	var (
-		workspace string
-		role      string
-		backend   string
-		session   string
-		paneID    string
-		unbound   bool
-		create    bool
-		current   bool
+		workspace         string
+		role              string
+		backend           string
+		session           string
+		paneID            string
+		unbound           bool
+		create            bool
+		current           bool
+		transportEndpoint string
+		transportKind     string
 	)
 	cmd := &cobra.Command{
 		Use:   "join <room-id> [actor-id]",
@@ -1770,7 +1776,7 @@ func newRoomJoinCommand() *cobra.Command {
 			if len(args) > 1 {
 				actorID = args[1]
 			}
-			return runRoomJoin(cmd, workspace, args[0], actorID, role, backend, session, paneID, unbound, create, current)
+			return runRoomJoin(cmd, workspace, args[0], actorID, role, backend, session, paneID, transportEndpoint, transportKind, unbound, create, current)
 		},
 	}
 	cmd.Flags().StringVar(&workspace, "workspace", ".", "Workspace root override")
@@ -1778,6 +1784,8 @@ func newRoomJoinCommand() *cobra.Command {
 	cmd.Flags().StringVar(&backend, "backend", "", "Optional transport backend binding (tmux|zellij)")
 	cmd.Flags().StringVar(&session, "session", "", "Optional transport session binding")
 	cmd.Flags().StringVar(&paneID, "pane-id", "", "Optional transport pane binding")
+	cmd.Flags().StringVar(&transportEndpoint, "transport-endpoint", "", "Transport endpoint (e.g. unix socket path for pane wrapper)")
+	cmd.Flags().StringVar(&transportKind, "transport-kind", "", "Transport type (pane_socket|mux_pane)")
 	cmd.Flags().BoolVar(&unbound, "unbound", false, "Mark the member transport as unbound/misaligned")
 	cmd.Flags().BoolVar(&create, "create", true, "Create the room if it does not exist")
 	cmd.Flags().BoolVar(&current, "current", false, "Join the current tmux/zellij participant when actor-id is omitted")
@@ -1800,20 +1808,22 @@ func newRoomLeaveCommand() *cobra.Command {
 
 func newRoomRebindCommand() *cobra.Command {
 	var (
-		workspace string
-		role      string
-		backend   string
-		session   string
-		paneID    string
-		unbound   bool
-		current   bool
+		workspace         string
+		role              string
+		backend           string
+		session           string
+		paneID            string
+		unbound           bool
+		current           bool
+		transportEndpoint string
+		transportKind     string
 	)
 	cmd := &cobra.Command{
 		Use:   "rebind <room-id> <actor-id>",
 		Short: "Update the transport binding for an existing room member",
 		Args:  cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runRoomRebind(cmd, workspace, args[0], args[1], role, backend, session, paneID, unbound, current)
+			return runRoomRebind(cmd, workspace, args[0], args[1], role, backend, session, paneID, transportEndpoint, transportKind, unbound, current)
 		},
 	}
 	cmd.Flags().StringVar(&workspace, "workspace", ".", "Workspace root override")
@@ -1821,6 +1831,8 @@ func newRoomRebindCommand() *cobra.Command {
 	cmd.Flags().StringVar(&backend, "backend", "", "Optional transport backend binding (tmux|zellij)")
 	cmd.Flags().StringVar(&session, "session", "", "Optional transport session binding")
 	cmd.Flags().StringVar(&paneID, "pane-id", "", "Optional transport pane binding")
+	cmd.Flags().StringVar(&transportEndpoint, "transport-endpoint", "", "Transport endpoint (e.g. unix socket path for pane wrapper)")
+	cmd.Flags().StringVar(&transportKind, "transport-kind", "", "Transport type (pane_socket|mux_pane)")
 	cmd.Flags().BoolVar(&unbound, "unbound", false, "Mark the member transport as unbound/misaligned")
 	cmd.Flags().BoolVar(&current, "current", false, "Use the current tmux/zellij pane binding for the transport fields")
 	return cmd
@@ -1879,6 +1891,33 @@ func newRoomRelayCommand() *cobra.Command {
 	cmd.Flags().StringVar(&plugin, "plugin-path", "", "Path to the zellij room relay plugin wasm")
 	cmd.Flags().DurationVar(&poll, "poll", 2*time.Second, "Polling interval")
 	cmd.Flags().IntVar(&history, "history", 0, "Number of most recent messages to replay into members before following")
+	return cmd
+}
+
+func newRoomRelayOnceCommand() *cobra.Command {
+	var (
+		workspace string
+		backend   string
+		session   string
+		plugin    string
+	)
+	cmd := &cobra.Command{
+		Use:    "relay-once <room-id> <message-id>",
+		Short:  "Relay one persisted room message through the live participant transport path",
+		Args:   cobra.ExactArgs(2),
+		Hidden: true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runRoomRelayOnce(cmd, workspace, args[0], args[1], roomRelayOptions{
+				Backend:          backend,
+				ZellijSession:    session,
+				ZellijPluginPath: plugin,
+			})
+		},
+	}
+	cmd.Flags().StringVar(&workspace, "workspace", ".", "Workspace root override")
+	cmd.Flags().StringVar(&backend, "backend", "auto", "Terminal backend (auto|tmux|zellij)")
+	cmd.Flags().StringVar(&session, "session", "", "Zellij session name")
+	cmd.Flags().StringVar(&plugin, "plugin-path", "", "Path to the zellij room relay plugin wasm")
 	return cmd
 }
 
@@ -2069,8 +2108,8 @@ func ensureRoomCoordinatorMember(existing []agent.RoomMember, member agent.RoomM
 
 // provisionSandbox provisions a sandbox environment for a room: creates a git
 // worktree, creates a tmux session, and sets the room's SandboxConfig.
-// When provision.SandboxRuntime is "opensandbox", it creates an OpenSandbox
-// container instead of (or in addition to) a worktree.
+// OpenSandbox integration is currently disabled; any requested non-worktree
+// runtime is coerced to worktree with a warning.
 // It is idempotent — if the room already has a valid sandbox config with an
 // existing worktree and tmux session, it returns the existing info.
 // On failure, it rolls back any partially-created resources.
@@ -2080,193 +2119,40 @@ func provisionSandbox(ctx context.Context, workspace string, room *agent.Room, p
 	if runtime == "" {
 		runtime = "worktree"
 	}
+	if runtime == "opensandbox" {
+		fmt.Fprintf(os.Stderr, "warn: %s\n", openSandboxDisabledMessage)
+		runtime = "worktree"
+		provision.SandboxRuntime = "worktree"
+	}
 
 	// Idempotency: if room already has sandbox config with a valid sandbox, return existing.
 	if room.SandboxConfig != nil && room.SandboxConfig.IsSandbox() {
 		existing := room.SandboxConfig.EffectiveRuntime()
-		// For opensandbox: check container ID still valid
-		if existing == "opensandbox" && room.SandboxConfig.ContainerID != "" {
-			return map[string]any{
-				"worktree_path":      room.SandboxConfig.WorktreePath,
-				"worktree_branch":    room.SandboxConfig.WorktreeBranch,
-				"tmux_session":       room.SandboxConfig.TmuxSession,
-				"terminal_url":       room.SandboxConfig.TerminalURL,
-				"runtime":            room.SandboxConfig.EffectiveRuntime(),
-				"container_id":       room.SandboxConfig.ContainerID,
-				"container_endpoint": room.SandboxConfig.ContainerEndpoint,
-				"status":             "existing",
-			}, nil
-		}
-		// For worktree: check worktree dir + tmux session still exist
-		if _, err := os.Stat(room.SandboxConfig.WorktreePath); err == nil {
-			if tmuxSessionExists(room.SandboxConfig.TmuxSession) {
-				return map[string]any{
-					"worktree_path":   room.SandboxConfig.WorktreePath,
-					"worktree_branch": room.SandboxConfig.WorktreeBranch,
-					"tmux_session":    room.SandboxConfig.TmuxSession,
-					"terminal_url":    room.SandboxConfig.TerminalURL,
-					"runtime":         room.SandboxConfig.EffectiveRuntime(),
-					"status":          "existing",
-				}, nil
+		if existing != "opensandbox" {
+			// For worktree: check worktree dir + tmux session still exist
+			if _, err := os.Stat(room.SandboxConfig.WorktreePath); err == nil {
+				if tmuxSessionExists(room.SandboxConfig.TmuxSession) {
+					return map[string]any{
+						"worktree_path":   room.SandboxConfig.WorktreePath,
+						"worktree_branch": room.SandboxConfig.WorktreeBranch,
+						"tmux_session":    room.SandboxConfig.TmuxSession,
+						"terminal_url":    room.SandboxConfig.TerminalURL,
+						"runtime":         room.SandboxConfig.EffectiveRuntime(),
+						"status":          "existing",
+					}, nil
+				}
 			}
 		}
-		// Existing sandbox is stale; fall through to re-provision
+		// Existing sandbox is stale — clean up orphaned resources before re-provisioning.
+		// cleanupSandbox is idempotent: it tolerates missing worktrees, sessions, and containers.
+		if _, cleanErr := cleanupSandbox(ctx, workspace, room.ID, room.SandboxConfig); cleanErr != nil {
+			// Log but don't block — partial cleanup is acceptable; re-provision will overwrite config.
+			fmt.Fprintf(os.Stderr, "warn: stale sandbox cleanup before reprovision: %v\n", cleanErr)
+		}
+		room.SandboxConfig = nil
 	}
 
-	if runtime == "opensandbox" {
-		return provisionOpenSandbox(ctx, workspace, room, provision)
-	}
 	return provisionWorktreeSandbox(ctx, workspace, room, provision)
-}
-
-// provisionOpenSandbox provisions an OpenSandbox container for a room.
-// It first attempts to create the container via the OpenSandbox client.
-// If OpenSandbox is unavailable, it falls back to worktree mode with a warning.
-func provisionOpenSandbox(ctx context.Context, workspace string, room *agent.Room, provision roomCreateProvisionOptions) (map[string]any, error) {
-	cfg := opensandbox.ConfigFromEnv()
-	osClient := opensandbox.New(cfg)
-
-	// Determine workspace as the git repo root
-	repoPath := workspace
-	gitDir := filepath.Join(repoPath, ".git")
-	if info, err := os.Stat(gitDir); err != nil || (!info.IsDir() && info.Mode()&os.ModeSymlink == 0) {
-		return nil, fmt.Errorf("sandbox: workspace %q is not a git repository", repoPath)
-	}
-
-	// Build resource limits
-	resourceLimits := map[string]string{
-		"cpu":    "1000m",
-		"memory": "1Gi",
-	}
-	if provision.SandboxCPU != "" {
-		resourceLimits["cpu"] = provision.SandboxCPU
-	}
-	if provision.SandboxMemory != "" {
-		resourceLimits["memory"] = provision.SandboxMemory
-	}
-
-	// Build TTL
-	ttl := provision.SandboxTTL
-	if ttl <= 0 {
-		ttl = 60 * time.Minute
-	}
-	timeoutSeconds := int(ttl / time.Second)
-
-	// Create the container
-	req := opensandbox.CreateSandboxRequest{
-		Image: opensandbox.ImageSpec{
-			URI: opensandbox.DefaultSandboxImage,
-		},
-		ResourceLimits: resourceLimits,
-		Entrypoint:     []string{"/bin/sh", "-lc", "while true; do sleep 3600; done"},
-		TimeoutSeconds: &timeoutSeconds,
-		Metadata: map[string]string{
-			"name":    "agentctl-room-" + strings.TrimSpace(room.ID),
-			"room_id": strings.TrimSpace(room.ID),
-		},
-	}
-
-	sandbox, err := osClient.CreateSandbox(ctx, req)
-	if err != nil {
-		// OpenSandbox unavailable — fall back to worktree mode
-		fmt.Fprintf(os.Stderr, "warn: OpenSandbox unavailable, falling back to worktree: %v\n", err)
-		result, wtErr := provisionWorktreeSandbox(ctx, workspace, room, provision)
-		if wtErr != nil {
-			return nil, wtErr
-		}
-		// Mark as fallback in config
-		room.SandboxConfig.Fallback = true
-		room.SandboxConfig.Runtime = "worktree"
-		result["fallback"] = true
-		result["fallback_reason"] = err.Error()
-		result["runtime"] = "worktree"
-		return result, nil
-	}
-
-	// Get the execd endpoint for the container
-	endpoint, err := osClient.GetEndpoint(ctx, sandbox.ID, opensandbox.DefaultExecdPort)
-	if err != nil {
-		// Container created but endpoint not available yet — still record it
-		endpoint = &opensandbox.Endpoint{Endpoint: ""}
-	}
-
-	// Calculate expires-at timestamp
-	expiresAt := time.Now().UTC().Add(ttl).Format(time.RFC3339)
-
-	// Build terminal URL
-	terminalURL := "/terminal/" + strings.TrimSpace(room.ID)
-
-	// Also create a worktree for local git operations (optional, mirrors repo)
-	branchName := "sandbox/room-" + strings.TrimSpace(room.ID)
-	sanitized, sanitizeErr := worktree.SanitizeBranchName(branchName)
-	if sanitizeErr != nil {
-		sanitized = "sandbox/room-" + strings.TrimSpace(room.ID)
-	}
-
-	var wtPath string
-	mgr := worktree.NewManager()
-	var wtOpts []worktree.Option
-	wtOpts = append(wtOpts, worktree.WithNewBranch(true))
-	if provision.SandboxBaseRef != "" && provision.SandboxBaseRef != "HEAD" {
-		wtOpts = append(wtOpts, worktree.WithRef(provision.SandboxBaseRef))
-	}
-	if provision.SandboxWorktreeRoot != "" {
-		wtOpts = append(wtOpts, worktree.WithBaseDir(provision.SandboxWorktreeRoot))
-	}
-	wtResult, wtErr := mgr.Create(ctx, repoPath, sanitized, wtOpts...)
-	if wtErr == nil {
-		wtPath = wtResult.Path
-	}
-
-	// Create tmux session pointing at worktree (for gateway terminal routing)
-	tmuxSessionName := "agentctl-sandbox-" + strings.TrimSpace(room.ID)
-	if wtPath != "" {
-		tc := tmuxbridge.New()
-		if tmuxErr := createTmuxSessionForSandbox(ctx, tc, tmuxSessionName, wtPath); tmuxErr != nil {
-			// Clean up worktree if tmux fails
-			if wtPath != "" {
-				_ = mgr.Remove(ctx, repoPath, wtPath, worktree.WithForce(true), worktree.WithDeleteBranch(true))
-			}
-			// Non-fatal: container is up, but tmux isn't available
-			fmt.Fprintf(os.Stderr, "warn: tmux session creation failed: %v\n", tmuxErr)
-			tmuxSessionName = ""
-			wtPath = ""
-		}
-	}
-
-	// Update the room's SandboxConfig
-	room.SandboxConfig = &agent.SandboxConfig{
-		WorktreePath:       wtPath,
-		WorktreeBranch:     sanitized,
-		TmuxSession:        tmuxSessionName,
-		TerminalURL:        terminalURL,
-		Runtime:            "opensandbox",
-		BaseRef:            provision.SandboxBaseRef,
-		ContainerID:        sandbox.ID,
-		ContainerEndpoint:  endpoint.Endpoint,
-		ContainerExpiresAt: expiresAt,
-		ContainerCPU:       resourceLimits["cpu"],
-		ContainerMemory:    resourceLimits["memory"],
-	}
-
-	result := map[string]any{
-		"container_id":         sandbox.ID,
-		"container_endpoint":   endpoint.Endpoint,
-		"container_expires_at": expiresAt,
-		"container_cpu":        resourceLimits["cpu"],
-		"container_memory":     resourceLimits["memory"],
-		"terminal_url":         terminalURL,
-		"runtime":              "opensandbox",
-		"status":               "created",
-	}
-	if wtPath != "" {
-		result["worktree_path"] = wtPath
-		result["worktree_branch"] = sanitized
-	}
-	if tmuxSessionName != "" {
-		result["tmux_session"] = tmuxSessionName
-	}
-	return result, nil
 }
 
 // provisionWorktreeSandbox provisions a worktree-based sandbox for a room.
@@ -2303,7 +2189,7 @@ func provisionWorktreeSandbox(ctx context.Context, workspace string, room *agent
 
 	// Step 2: Create tmux session
 	tmuxSessionName := "agentctl-sandbox-" + strings.TrimSpace(room.ID)
-	tc := tmuxbridge.New()
+	tc := newRoomTmuxClient()
 	err = createTmuxSessionForSandbox(ctx, tc, tmuxSessionName, wtResult.Path)
 	if err != nil {
 		// Rollback: remove the worktree we just created
@@ -2311,8 +2197,7 @@ func provisionWorktreeSandbox(ctx context.Context, workspace string, room *agent
 		return nil, fmt.Errorf("sandbox: create tmux session: %w", err)
 	}
 
-	// Build terminal URL (placeholder — gateway URL construction depends on deployment)
-	terminalURL := "/terminal/" + strings.TrimSpace(room.ID)
+	terminalURL := buildTerminalURL(room.ID)
 
 	// Update the room's SandboxConfig
 	room.SandboxConfig = &agent.SandboxConfig{
@@ -2324,7 +2209,10 @@ func provisionWorktreeSandbox(ctx context.Context, workspace string, room *agent
 		BaseRef:        provision.SandboxBaseRef,
 	}
 
-	return map[string]any{
+	// Register room with gateway (best-effort; no-op when AGENTCTL_GATEWAY_URL unset).
+	gatewayRegistered := gatewayRegisterRoom(ctx, room.ID, tmuxSessionName)
+
+	result := map[string]any{
 		"worktree_path":   wtResult.Path,
 		"worktree_branch": wtResult.Branch,
 		"worktree_commit": wtResult.Commit,
@@ -2332,7 +2220,11 @@ func provisionWorktreeSandbox(ctx context.Context, workspace string, room *agent
 		"terminal_url":    terminalURL,
 		"runtime":         "worktree",
 		"status":          "created",
-	}, nil
+	}
+	if gatewayRegistered {
+		result["gateway_registered"] = true
+	}
+	return result, nil
 }
 
 // createTmuxSessionForSandbox creates a tmux session for a sandbox room.
@@ -2493,10 +2385,94 @@ func resolveRoomSandboxWorktree(ctx context.Context, boardStore blackboard.Board
 	return summary.SandboxConfig.WorktreePath
 }
 
+// buildTerminalURL returns the web terminal URL for a sandbox room.
+// When AGENTCTL_GATEWAY_URL is set it returns a full URL (e.g.
+// "http://localhost:8765/terminal/<roomID>"). Otherwise it returns the
+// path-only placeholder ("/terminal/<roomID>") so existing behaviour is
+// preserved for callers that don't run a gateway.
+func buildTerminalURL(roomID string) string {
+	path := "/terminal/" + strings.TrimSpace(roomID)
+	if base := strings.TrimRight(strings.TrimSpace(os.Getenv("AGENTCTL_GATEWAY_URL")), "/"); base != "" {
+		return base + path
+	}
+	return path
+}
+
+func gatewayHTTPClient() *http.Client {
+	transport, _ := http.DefaultTransport.(*http.Transport)
+	if transport == nil {
+		return &http.Client{Timeout: 3 * time.Second}
+	}
+	cloned := transport.Clone()
+	cloned.DisableKeepAlives = true
+	return &http.Client{Timeout: 3 * time.Second, Transport: cloned}
+}
+
+func gatewayDo(req *http.Request) (*http.Response, error) {
+	client := gatewayHTTPClient()
+	var lastErr error
+	for range 3 {
+		resp, err := client.Do(req)
+		if err == nil {
+			return resp, nil
+		}
+		lastErr = err
+		time.Sleep(100 * time.Millisecond)
+	}
+	return nil, lastErr
+}
+
+// gatewayRegisterRoom registers a sandbox room with the gateway via HTTP POST
+// /api/rooms. Best-effort: silently skips when AGENTCTL_GATEWAY_URL is unset.
+func gatewayRegisterRoom(ctx context.Context, roomID, tmuxSession string) bool {
+	base := strings.TrimRight(strings.TrimSpace(os.Getenv("AGENTCTL_GATEWAY_URL")), "/")
+	if base == "" {
+		return false
+	}
+	body, _ := json.Marshal(map[string]any{
+		"room_id":      roomID,
+		"tmux_session": tmuxSession,
+	})
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, base+"/api/rooms", bytes.NewReader(body))
+	if err != nil {
+		return false
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := gatewayDo(req)
+	if err != nil {
+		return false
+	}
+	defer func() { _ = resp.Body.Close() }()
+	return resp.StatusCode == http.StatusCreated
+}
+
+// gatewayDeregisterRoom unregisters a sandbox room from the gateway via HTTP
+// DELETE /api/rooms/{room-id}. Best-effort: silently skips when
+// AGENTCTL_GATEWAY_URL is unset or the gateway is unavailable.
+func gatewayDeregisterRoom(ctx context.Context, roomID string) bool {
+	base := strings.TrimRight(strings.TrimSpace(os.Getenv("AGENTCTL_GATEWAY_URL")), "/")
+	if base == "" {
+		return false
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, base+"/api/rooms/"+strings.TrimSpace(roomID), nil)
+	if err != nil {
+		return false
+	}
+	resp, err := gatewayDo(req)
+	if err != nil {
+		return false
+	}
+	defer func() { _ = resp.Body.Close() }()
+	return resp.StatusCode == http.StatusOK
+}
+
 // resolveSandboxScopePath resolves a task scope path relative to the sandbox
 // worktree. If the room is a sandbox room and a scopePath is provided, the
 // path is made relative to the worktree root. If no scopePath is given, the
 // worktree root itself is used as the scope.
+//
+// Path traversal is guarded: any resolved path that escapes the worktree root
+// (e.g. via ".." segments) is rejected and the worktree root is returned instead.
 func resolveSandboxScopePath(ctx context.Context, boardStore blackboard.BoardStore, absWorkspace, roomID, scopePath string) string {
 	wtPath := resolveRoomSandboxWorktree(ctx, boardStore, absWorkspace, roomID)
 	if wtPath == "" {
@@ -2506,11 +2482,16 @@ func resolveSandboxScopePath(ctx context.Context, boardStore blackboard.BoardSto
 		return wtPath
 	}
 	// If scopePath is already absolute and under the worktree, return as-is.
-	if filepath.IsAbs(scopePath) && strings.HasPrefix(scopePath, wtPath) {
-		return scopePath
+	if filepath.IsAbs(scopePath) && strings.HasPrefix(filepath.Clean(scopePath)+string(filepath.Separator), filepath.Clean(wtPath)+string(filepath.Separator)) {
+		return filepath.Clean(scopePath)
 	}
-	// Make the scope path relative to the worktree root.
-	return filepath.Join(wtPath, scopePath)
+	// Resolve relative to worktree root and guard against path traversal via "..".
+	resolved := filepath.Clean(filepath.Join(wtPath, scopePath))
+	if !strings.HasPrefix(resolved+string(filepath.Separator), filepath.Clean(wtPath)+string(filepath.Separator)) {
+		// Escaped the worktree — fall back to worktree root.
+		return wtPath
+	}
+	return resolved
 }
 
 // relayRoomMessageToSandbox delivers a relay message to the sandbox tmux
@@ -2544,10 +2525,12 @@ func relayRoomMessageToSandbox(ctx context.Context, client *tmuxbridge.Client, r
 }
 
 // cleanupSandbox cleans up all sandbox resources associated with a room:
-// 1. Deletes the OpenSandbox container (if runtime is opensandbox)
-// 2. Removes the git worktree
-// 3. Kills the tmux session
-// 4. Deregisters from gateway (future: HTTP call to gateway API)
+// 1. Removes the git worktree
+// 2. Kills the tmux session
+// 3. Deregisters from gateway
+//
+// OpenSandbox container deletion is intentionally disabled with the rest of the
+// integration and is no longer attempted here.
 //
 // On error, partial cleanup results are still returned.
 func cleanupSandbox(ctx context.Context, workspace, roomID string, sc *agent.SandboxConfig) (map[string]any, error) {
@@ -2559,26 +2542,7 @@ func cleanupSandbox(ctx context.Context, workspace, roomID string, sc *agent.San
 	}
 	var firstErr error
 
-	// Step 1: Delete OpenSandbox container (if applicable)
-	if sc.ContainerID != "" && sc.EffectiveRuntime() == "opensandbox" {
-		cfg := opensandbox.ConfigFromEnv()
-		osClient := opensandbox.New(cfg)
-		if err := osClient.DeleteSandbox(ctx, sc.ContainerID); err != nil {
-			// If the container was already deleted (404 or similar), treat as success
-			errMsg := err.Error()
-			if strings.Contains(errMsg, "404") || strings.Contains(errMsg, "not found") || strings.Contains(errMsg, "already") {
-				result["container_deleted"] = true
-			} else {
-				if firstErr == nil {
-					firstErr = fmt.Errorf("delete container %q: %w", sc.ContainerID, err)
-				}
-			}
-		} else {
-			result["container_deleted"] = true
-		}
-	}
-
-	// Step 2: Kill tmux session
+	// Step 1: Kill tmux session
 	if sc.TmuxSession != "" {
 		if tmuxSessionExists(sc.TmuxSession) {
 			cmd := exec.Command("tmux", "kill-session", "-t", sc.TmuxSession)
@@ -2595,7 +2559,7 @@ func cleanupSandbox(ctx context.Context, workspace, roomID string, sc *agent.San
 		}
 	}
 
-	// Step 3: Remove worktree
+	// Step 2: Remove worktree
 	if sc.WorktreePath != "" {
 		mgr := worktree.NewManager()
 		if _, err := os.Stat(sc.WorktreePath); err == nil {
@@ -2614,9 +2578,9 @@ func cleanupSandbox(ctx context.Context, workspace, roomID string, sc *agent.San
 		}
 	}
 
-	// Step 4: Deregister from gateway (best-effort — gateway may not be running)
-	// Future: HTTP DELETE to gateway /api/rooms/{room-id}
-	result["gateway_dereg"] = true
+	// Step 3: Deregister from gateway (best-effort — gateway may not be running).
+	// Uses AGENTCTL_GATEWAY_URL when set; skips silently if unset.
+	result["gateway_dereg"] = gatewayDeregisterRoom(ctx, roomID)
 
 	result["status"] = "cleaned"
 	if firstErr != nil {
@@ -2705,14 +2669,15 @@ func runRoomShow(cmd *cobra.Command, workspace, roomID, actorID string, limit in
 }
 
 type roomStatusParticipant struct {
-	ActorID              string           `json:"actor_id"`
-	Role                 string           `json:"role,omitempty"`
-	LastActiveAt         *time.Time       `json:"last_active_at,omitempty"`
-	Status               string           `json:"status"`
-	AssignedTaskCount    int              `json:"assigned_task_count"`
-	OwnedTaskCount       int              `json:"owned_task_count"`
-	ActionableInboxCount int              `json:"actionable_inbox_count"`
-	LatestActionable     *roomStatusEntry `json:"latest_actionable,omitempty"`
+	ActorID              string                 `json:"actor_id"`
+	Role                 string                 `json:"role,omitempty"`
+	LastActiveAt         *time.Time             `json:"last_active_at,omitempty"`
+	Status               string                 `json:"status"`
+	AssignedTaskCount    int                    `json:"assigned_task_count"`
+	OwnedTaskCount       int                    `json:"owned_task_count"`
+	ActionableInboxCount int                    `json:"actionable_inbox_count"`
+	LatestActionable     *roomStatusEntry       `json:"latest_actionable,omitempty"`
+	Transport            agent.ParticipantState `json:"transport"`
 }
 
 type roomTaskPulseSummary struct {
@@ -3026,8 +2991,9 @@ func runRoomSendWithHint(cmd *cobra.Command, workspace, roomID, sender, recipien
 	if msg.Recipient == agent.BroadcastRecipient {
 		warnings = append(warnings, "broadcast: live relay (unless --no-live-relay) notifies every other participant; pass --to <participant-id> to deliver only to that target")
 	}
+	autoSkipMuxSubmit := senderProvided
 	var muxSubmit map[string]any
-	if !mux.NoMuxSubmit {
+	if !mux.NoMuxSubmit && !autoSkipMuxSubmit {
 		mode := strings.TrimSpace(mux.MuxSubmitMode)
 		if mode == "" {
 			mode = "enter-only"
@@ -3040,6 +3006,8 @@ func runRoomSendWithHint(cmd *cobra.Command, workspace, roomID, sender, recipien
 		} else if warn != "" {
 			warnings = append(warnings, warn)
 		}
+	} else if autoSkipMuxSubmit && !mux.NoMuxSubmit {
+		warnings = append(warnings, "mux submit skipped because --sender was provided explicitly; send/interrupt should not depend on current mux pane state")
 	}
 	data := map[string]any{
 		"room_id":         roomID,
@@ -3194,13 +3162,19 @@ func runRoomRemindAdd(cmd *cobra.Command, workspace, sender, roomID, recipient, 
 	if err != nil {
 		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.remind.add", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
 	}
-	return protocol.WriteOK(cmd.OutOrStdout(), "agentctl.room.remind.add", map[string]any{
+	data := map[string]any{
 		"room_id":   roomID,
 		"message":   root,
 		"reminder":  reminder,
 		"actor_id":  identity.Sender,
 		"recipient": recipient,
-	}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	if !roomTaskNoLiveRelay(cmd) {
+		data["live_relay"] = roomSendRelayHook(cmd.Context(), boardStore, absWorkspace, roomID, []*agent.BoardMessage{root})
+	} else {
+		data["live_relay_skipped"] = true
+	}
+	return protocol.WriteOK(cmd.OutOrStdout(), "agentctl.room.remind.add", data, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
 }
 
 func requireActiveRoomLoop(ctx context.Context, coordStore *coordination.Store, workspaceID, roomID string, now time.Time) error {
@@ -11602,7 +11576,7 @@ func runRoomCoordinatorSet(cmd *cobra.Command, workspace, roomID, actorID, targe
 	}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
 }
 
-func runRoomJoin(cmd *cobra.Command, workspace, roomID, actorID, role, backend, session, paneID string, unbound, create, current bool) error {
+func runRoomJoin(cmd *cobra.Command, workspace, roomID, actorID, role, backend, session, paneID, transportEndpoint, transportKind string, unbound, create, current bool) error {
 	absWorkspace, err := resolveRoomWorkspace(workspace)
 	if err != nil {
 		return err
@@ -11635,6 +11609,12 @@ func runRoomJoin(cmd *cobra.Command, workspace, roomID, actorID, role, backend, 
 	}
 	if value := strings.TrimSpace(paneID); value != "" {
 		member.PaneID = value
+	}
+	if value := strings.TrimSpace(transportEndpoint); value != "" {
+		member.TransportEndpoint = value
+	}
+	if value := strings.TrimSpace(transportKind); value != "" {
+		member.TransportKind = strings.ToLower(value)
 	}
 	member.Unbound = unbound
 	member = normalizeRoomMember(member)
@@ -11673,7 +11653,7 @@ func runRoomJoin(cmd *cobra.Command, workspace, roomID, actorID, role, backend, 
 	}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
 }
 
-func runRoomRebind(cmd *cobra.Command, workspace, roomID, actorID, role, backend, session, paneID string, unbound, current bool) error {
+func runRoomRebind(cmd *cobra.Command, workspace, roomID, actorID, role, backend, session, paneID, transportEndpoint, transportKind string, unbound, current bool) error {
 	absWorkspace, err := resolveRoomWorkspace(workspace)
 	if err != nil {
 		return err
@@ -11734,6 +11714,12 @@ func runRoomRebind(cmd *cobra.Command, workspace, roomID, actorID, role, backend
 	}
 	if value := strings.TrimSpace(paneID); value != "" {
 		member.PaneID = value
+	}
+	if value := strings.TrimSpace(transportEndpoint); value != "" {
+		member.TransportEndpoint = value
+	}
+	if value := strings.TrimSpace(transportKind); value != "" {
+		member.TransportKind = strings.ToLower(value)
 	}
 	member.Unbound = unbound
 	member = normalizeRoomMember(member)
@@ -11947,6 +11933,50 @@ func runRoomRelay(cmd *cobra.Command, workspace, roomID string, relay roomRelayO
 	}
 }
 
+func runRoomRelayOnce(cmd *cobra.Command, workspace, roomID, messageID string, relay roomRelayOptions) error {
+	absWorkspace, err := resolveRoomWorkspace(workspace)
+	if err != nil {
+		return err
+	}
+	store, err := openRoomBoardStore(cmd.Context())
+	if err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.relay-once", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	defer store.Close()
+
+	summary, err := store.GetRoom(cmd.Context(), absWorkspace, roomID, "")
+	if err != nil {
+		code := protocol.ErrorCodeERuntime
+		if errors.Is(err, blackboard.ErrRoomNotFound) {
+			code = protocol.ErrorCodeENotFound
+		}
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.relay-once", code, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	messages, err := store.ListRoomMessages(cmd.Context(), absWorkspace, roomID, roomMaxInt(roomTaskScanLimit, 500))
+	if err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.relay-once", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	var selected *agent.BoardMessage
+	for i := range messages {
+		if strings.TrimSpace(messages[i].ID) == strings.TrimSpace(messageID) {
+			msg := messages[i]
+			selected = &msg
+			break
+		}
+	}
+	if selected == nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.relay-once", protocol.ErrorCodeENotFound, fmt.Sprintf("message %s not found in room %s", messageID, roomID), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+
+	client := tmuxbridge.New()
+	result := relayRoomMessage(cmd.Context(), client, summary, *selected, relay)
+	return protocol.WriteOK(cmd.OutOrStdout(), "agentctl.room.relay-once", map[string]any{
+		"room_id":    roomID,
+		"message_id": selected.ID,
+		"live_relay": []roomRelayResult{result},
+	}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+}
+
 func resolveRoomWorkspace(workspace string) (string, error) {
 	if strings.TrimSpace(workspace) == "" {
 		workspace = "."
@@ -12099,6 +12129,12 @@ func mergeRoomMembers(existing []agent.RoomMember, additions ...agent.RoomMember
 			if member.PaneID != "" {
 				out[pos].PaneID = member.PaneID
 			}
+			if member.TransportEndpoint != "" {
+				out[pos].TransportEndpoint = member.TransportEndpoint
+			}
+			if member.TransportKind != "" {
+				out[pos].TransportKind = member.TransportKind
+			}
 			out[pos].Unbound = member.Unbound
 			continue
 		}
@@ -12114,6 +12150,8 @@ func normalizeRoomMember(member agent.RoomMember) agent.RoomMember {
 	member.Backend = strings.ToLower(strings.TrimSpace(member.Backend))
 	member.Session = strings.TrimSpace(member.Session)
 	member.PaneID = strings.TrimSpace(member.PaneID)
+	member.TransportEndpoint = strings.TrimSpace(member.TransportEndpoint)
+	member.TransportKind = strings.ToLower(strings.TrimSpace(member.TransportKind))
 	return member
 }
 
@@ -12163,6 +12201,7 @@ func provisionRoomMembers(ctx context.Context, workspace string, room agent.Room
 				CWD:           workspace,
 				Label:         member.ActorID,
 				Command:       command,
+				Provider:      firstNonEmpty(memberAgent, strings.TrimSpace(opts.AgentCLI)),
 				ParticipantID: member.ActorID,
 				RoomID:        room.ID,
 				RoomRole:      member.Role,
@@ -13275,6 +13314,12 @@ type roomRelayOptions struct {
 	TaskEventMode    string
 }
 
+// relayRoomMessage fans out a board message to participant mux panes.
+// Sandbox relay (extra delivery to the room's sandbox tmux session) is only
+// performed in "auto"/"mixed" mode. Explicit "tmux" or "zellij" backends
+// target named participant panes and do not additionally deliver to the sandbox
+// session — this is intentional: explicit-backend callers have a specific
+// target in mind and the sandbox session is a separate infrastructure concern.
 func relayRoomMessage(ctx context.Context, client *tmuxbridge.Client, room agent.RoomSummary, msg agent.BoardMessage, relay roomRelayOptions) roomRelayResult {
 	switch strings.TrimSpace(strings.ToLower(relay.Backend)) {
 	case "auto", "mixed":
@@ -13301,6 +13346,25 @@ func relayRoomMessage(ctx context.Context, client *tmuxbridge.Client, room agent
 }
 
 func relayRoomMessageAuto(ctx context.Context, client *tmuxbridge.Client, room agent.RoomSummary, msg agent.BoardMessage, relay roomRelayOptions) roomRelayResult {
+	// Transport-first relay: use explicit participant state to decide delivery
+	// targets. When participants have explicit transport state (CanTriggerTurn=true
+	// with a transport endpoint), delivery goes through the participant transport
+	// path independent of mux presentation attachment. Participants without explicit
+	// transport state fall through to the legacy mux relay path for backward compat.
+	participantResult := relayViaParticipants(ctx, client, room, msg)
+	if participantResult.DeliveredCount > 0 || participantResult.FailedCount > 0 {
+		// Some participants were resolved via explicit transport state.
+		// Merge participant result with legacy mux relay for any remaining members.
+		legacyResult := relayRoomMessageAutoLegacy(ctx, client, room, msg, relay)
+		return mergeRelayResults(participantResult, legacyResult, room.Members)
+	}
+	// No participants had explicit transport state; fall through to legacy path.
+	return relayRoomMessageAutoLegacy(ctx, client, room, msg, relay)
+}
+
+// relayRoomMessageAutoLegacy is the original auto relay path using raw mux heuristics.
+// It is preserved for backward compatibility when participants lack explicit transport state.
+func relayRoomMessageAutoLegacy(ctx context.Context, client *tmuxbridge.Client, room agent.RoomSummary, msg agent.BoardMessage, relay roomRelayOptions) roomRelayResult {
 	result := roomRelayResult{Backend: "auto"}
 	tmuxTargets, zellijTargets, failed, skipped := collectRoomRelayTargetsByBackend(room, msg)
 	result.SkippedMembers = append(result.SkippedMembers, skipped...)
@@ -13340,6 +13404,88 @@ func relayRoomMessageAuto(ctx context.Context, client *tmuxbridge.Client, room a
 		}
 	}
 	return result
+}
+
+// mergeRelayResults deduplicates and merges two relay results. The primary result
+// (participant transport) takes precedence; the legacy result contributes only
+// deliveries for actors not already covered.
+//
+// Because the participant path records actor IDs (e.g. "claude-a") while the
+// legacy path records pane targets (e.g. "%42"), we normalize legacy targets
+// to actor IDs using the room member list before deduplication.
+func mergeRelayResults(primary, legacy roomRelayResult, members []agent.RoomMember) roomRelayResult {
+	// Build pane-target → actor-ID map for legacy deduplication.
+	paneToActor := make(map[string]string, len(members))
+	for _, m := range members {
+		m = normalizeRoomMember(m)
+		actorID := strings.TrimSpace(m.ActorID)
+		if actorID == "" {
+			continue
+		}
+		if pane := strings.TrimSpace(m.PaneID); pane != "" {
+			paneToActor[pane] = actorID
+		}
+		// Also map the full tmux participant ID.
+		if m.Backend == "tmux" && m.Session != "" && m.PaneID != "" {
+			full := "tmux:" + m.Session + ":" + m.PaneID
+			paneToActor[full] = actorID
+		}
+	}
+
+	// Record primary deliveries by actor ID.
+	seenActor := make(map[string]struct{}, len(primary.DeliveredTo)+len(primary.FailedMembers))
+	for _, id := range primary.DeliveredTo {
+		seenActor[id] = struct{}{}
+	}
+	for _, id := range primary.FailedMembers {
+		seenActor[id] = struct{}{}
+	}
+	for _, id := range primary.SkippedMembers {
+		seenActor[id] = struct{}{}
+	}
+
+	// Merge legacy deliveries, normalizing pane targets to actor IDs.
+	for _, id := range legacy.DeliveredTo {
+		actorID := resolveActorIDForLegacyTarget(id, paneToActor)
+		if _, dup := seenActor[actorID]; dup {
+			continue
+		}
+		seenActor[actorID] = struct{}{}
+		primary.DeliveredCount++
+		primary.DeliveredTo = append(primary.DeliveredTo, actorID)
+	}
+	for _, id := range legacy.FailedMembers {
+		actorID := resolveActorIDForLegacyTarget(id, paneToActor)
+		if _, dup := seenActor[actorID]; dup {
+			continue
+		}
+		seenActor[actorID] = struct{}{}
+		primary.FailedCount++
+		primary.FailedMembers = append(primary.FailedMembers, actorID)
+	}
+	primary.SkippedMembers = append(primary.SkippedMembers, legacy.SkippedMembers...)
+	primary.DeliveryFailures = append(primary.DeliveryFailures, legacy.DeliveryFailures...)
+	if primary.Error == "" && legacy.Error != "" {
+		primary.Error = legacy.Error
+	}
+	return primary
+}
+
+// resolveActorIDForLegacyTarget maps a legacy relay target (pane ID like "%42"
+// or a mux address) back to the actor ID. Returns the target itself if no
+// mapping is found (preserving the legacy value as a fallback).
+func resolveActorIDForLegacyTarget(target string, paneToActor map[string]string) string {
+	target = strings.TrimSpace(target)
+	if actorID, ok := paneToActor[target]; ok {
+		return actorID
+	}
+	// Try parsing as tmux participant ID.
+	if ref, ok := tmuxbridge.ParseParticipantID(target); ok {
+		if actorID, ok := paneToActor[ref.Target]; ok {
+			return actorID
+		}
+	}
+	return target
 }
 
 func relayRoomMessageTmux(ctx context.Context, client *tmuxbridge.Client, room agent.RoomSummary, msg agent.BoardMessage) roomRelayResult {
@@ -13559,11 +13705,15 @@ func summarizeRoomPreview(body string) string {
 
 func buildRoomStatusParticipants(room agent.RoomSummary, messages []agent.BoardMessage, tasks []taskstore.Task, staleAfter time.Duration, reminderRoots map[string]struct{}) []roomStatusParticipant {
 	latestBySender := latestRoomSenderActivity(messages)
-	participantSet := map[string]struct{}{}
+	memberByID := make(map[string]agent.RoomMember, len(room.Members))
 	for _, member := range room.Members {
 		if id := strings.TrimSpace(member.ActorID); id != "" {
-			participantSet[id] = struct{}{}
+			memberByID[id] = member
 		}
+	}
+	participantSet := map[string]struct{}{}
+	for id := range memberByID {
+		participantSet[id] = struct{}{}
 	}
 	for _, participant := range room.Participants {
 		if id := strings.TrimSpace(participant); id != "" && !strings.HasPrefix(id, "actor:system:room:") {
@@ -13577,6 +13727,11 @@ func buildRoomStatusParticipants(room agent.RoomSummary, messages []agent.BoardM
 			ActorID: actorID,
 			Role:    roomMemberRole(room.Members, actorID),
 			Status:  "idle",
+		}
+		if member, ok := memberByID[actorID]; ok {
+			p.Transport = deriveParticipantTransportState(member)
+		} else {
+			p.Transport = agent.ParticipantStateForActorID(nil, actorID)
 		}
 		if activity, ok := latestBySender[actorID]; ok {
 			tsCopy := activity.CreatedAt
@@ -13608,6 +13763,19 @@ func buildRoomStatusParticipants(room agent.RoomSummary, messages []agent.BoardM
 		return participants[i].ActorID < participants[j].ActorID
 	})
 	return participants
+}
+
+// deriveParticipantTransportState computes a ParticipantState from a RoomMember record.
+// For pane_socket members it probes the socket file existence to determine Transport
+// and Runtime availability. All other state dimensions are derived from member fields.
+func deriveParticipantTransportState(m agent.RoomMember) agent.ParticipantState {
+	state := agent.ParticipantStateFromRoomMember(m)
+	// Probe pane socket: the socket path is a real filesystem path, not a mux address.
+	if m.TransportEndpoint != "" && m.TransportKind == agent.PaneSocketTransportKind {
+		_, statErr := os.Stat(m.TransportEndpoint)
+		state = agent.ApplySocketProbe(state, statErr == nil, statErr)
+	}
+	return state
 }
 
 func buildRoomTaskPulseSummary(tasks []taskstore.Task, now time.Time, staleAfter time.Duration) roomTaskPulseSummary {
@@ -14114,6 +14282,9 @@ func muxSubmitForRoomMember(ctx context.Context, member agent.RoomMember, submit
 				pane = p
 			}
 		}
+		if pane != "" && !isResolvableZellijPaneID(pane) {
+			return nil, "", fmt.Errorf("member %q stores zellij pane binding %q by title only; rebind from the live pane with --current or pass a terminal_N pane id for exact submit targeting", member.ActorID, pane)
+		}
 		pane = normalizeZellijPaneID(pane)
 		res, err := zellijbridge.New().Submit(ctx, session, zellijbridge.SubmitOptions{Mode: submitMode, PaneID: pane})
 		if err != nil {
@@ -14282,8 +14453,11 @@ func resolveRoomMemberZellijTarget(member agent.RoomMember) (string, string, boo
 	if session == "" || member.Unbound {
 		return "", "", false
 	}
-	if paneID := normalizeZellijPaneID(member.PaneID); paneID != "" {
-		return session, formatZellijParticipantID(session, paneID), true
+	if paneID := strings.TrimSpace(member.PaneID); paneID != "" {
+		if isResolvableZellijPaneID(paneID) {
+			return session, formatZellijParticipantID(session, paneID), true
+		}
+		return session, paneID, true
 	}
 	if actorID := strings.TrimSpace(member.ActorID); actorID != "" {
 		return session, actorID, true

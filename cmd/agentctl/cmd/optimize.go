@@ -2522,10 +2522,27 @@ func runPromptVariantComparisonChat(ctx context.Context, provider, baseURL, apiK
 	if err != nil {
 		return "", err
 	}
-	return client.Chat(ctx, systemPrompt, userPrompt, verification.LLMCallOptions{
+	opts := verification.LLMCallOptions{
 		MaxTokens:   maxTokens,
 		Temperature: temperature,
-	})
+	}
+	var lastErr error
+	for attempt := 0; attempt < 3; attempt++ {
+		output, callErr := client.Chat(ctx, systemPrompt, userPrompt, opts)
+		if callErr == nil {
+			return output, nil
+		}
+		lastErr = callErr
+		if attempt == 2 {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			return "", ctx.Err()
+		case <-time.After(100 * time.Millisecond):
+		}
+	}
+	return "", lastErr
 }
 
 func summarizePromptComparisonExecution(primary promptComparisonTargetConfig, fallback *promptComparisonTargetConfig, results []promptVariantComparison) (string, string, []string, bool) {

@@ -29,6 +29,10 @@ const (
 	envOverseerOrchestrationRuntimeBackend  = "AGENTCTL_V2_ORCHESTRATION_RUNTIME_BACKEND"
 	orchestrationRuntimeBackendJido         = "jido"
 	orchestrationRuntimeBackendGoSubprocess = "goruntime"
+
+	envCLIDispatchParentAgentID = "AGENTCTL_ORCHESTRATION_DISPATCH_PARENT_AGENT_ID"
+	envCLIParentAgentIDs        = "AGENTCTL_ORCHESTRATION_PARENT_AGENT_IDS"
+	envCLISuccessTrackerState   = "AGENTCTL_ORCHESTRATION_SUCCESS_TRACKER_STATE"
 )
 
 func orchestrationComponentEnabled() bool {
@@ -198,7 +202,7 @@ func newOverseerGoOrchestrationComponent(
 		Reader:              orchestrationStore,
 		Workers:             workerStore,
 		ParentAgentIDs:      []string{dispatchParentID},
-		SuccessTrackerState: strings.TrimSpace(os.Getenv(v2jido.EnvJidoOrchestrationSuccessTrackerState)),
+		SuccessTrackerState: resolveOverseerSuccessTrackerState(),
 	})
 	if err != nil {
 		_ = closeWorkers()
@@ -272,10 +276,16 @@ func resolveOverseerOrchestrationRuntimeBackend() string {
 }
 
 func resolveOverseerDispatchParentAgentID() string {
+	if value := strings.TrimSpace(os.Getenv(envCLIDispatchParentAgentID)); value != "" {
+		return value
+	}
 	if value := strings.TrimSpace(os.Getenv(v2jido.EnvJidoOrchestrationDispatchParentAgentID)); value != "" {
 		return value
 	}
-	raw := strings.TrimSpace(os.Getenv(v2jido.EnvJidoOrchestrationParentAgentIDs))
+	raw := strings.TrimSpace(os.Getenv(envCLIParentAgentIDs))
+	if raw == "" {
+		raw = strings.TrimSpace(os.Getenv(v2jido.EnvJidoOrchestrationParentAgentIDs))
+	}
 	if raw == "" {
 		return ""
 	}
@@ -288,6 +298,13 @@ func resolveOverseerDispatchParentAgentID() string {
 		}
 	}
 	return ""
+}
+
+func resolveOverseerSuccessTrackerState() string {
+	if value := strings.TrimSpace(os.Getenv(envCLISuccessTrackerState)); value != "" {
+		return value
+	}
+	return strings.TrimSpace(os.Getenv(v2jido.EnvJidoOrchestrationSuccessTrackerState))
 }
 
 func openOverseerOrchestrationStore(ctx context.Context, cfg config.Config) (*libsqlorchestration.Store, func() error, error) {
