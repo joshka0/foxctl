@@ -365,7 +365,7 @@ func newTmuxCreateCommand() *cobra.Command {
 	cmd.Flags().StringVar(&agent, "agent", "", "Agent CLI to launch in each pane (for example: claude, codex, gemini, agent, droid)")
 	cmd.Flags().StringVar(&agentMode, "mode", "interactive", "Agent launch mode: interactive or auto")
 	cmd.Flags().StringArrayVar(&agentArgs, "agent-arg", nil, "Agent CLI argument (repeatable, preserves order)")
-	cmd.Flags().StringVar(&agentSessionID, "agent-session-id", "", "Resume the given agent session id (supported for codex and claude; currently requires --panes 1)")
+	cmd.Flags().StringVar(&agentSessionID, "agent-session-id", "", "Resume the given agent session id (supported for codex, claude, gemini, droid, and agent; currently requires --panes 1)")
 	cmd.Flags().StringVar(&cwd, "cwd", "", "Working directory for new panes (default: current directory)")
 	cmd.Flags().StringVar(&labelPrefix, "label-prefix", "", "Pane label prefix (default: derived from --agent, otherwise agent)")
 	cmd.Flags().StringVar(&parentParticipant, "parent-participant", "", "Parent participant id for child panes; implies room access none by default")
@@ -538,14 +538,11 @@ func resolveMuxCreateCommandWithPrompt(paneCommand, agent, agentMode string, age
 	args := make([]string, 0, 8)
 	args = append(args, agent)
 	if strings.TrimSpace(agentSessionID) != "" {
-		switch strings.TrimSpace(agent) {
-		case "codex":
-			args = append(args, "resume", agentSessionID)
-		case "claude":
-			args = append(args, "--resume", agentSessionID)
-		default:
-			return "", fmt.Errorf("--agent-session-id is currently supported only for codex and claude")
+		resumeArgs, err := tmuxbridge.AgentResumeArgs(strings.TrimSpace(agent), agentSessionID)
+		if err != nil {
+			return "", fmt.Errorf("--agent-session-id %w", err)
 		}
+		args = append(args, resumeArgs...)
 	}
 	switch strings.TrimSpace(agentMode) {
 	case "", "interactive":

@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jkatigb/agentctl/internal/agentpane"
 	"github.com/jkatigb/agentctl/internal/contextplane"
 	"github.com/jkatigb/agentctl/internal/domain/agent"
 	"github.com/jkatigb/agentctl/internal/domain/envelope"
@@ -66,6 +67,7 @@ func newRoomCommand() *cobra.Command {
 		newRoomRemindCommand(),
 		newRoomJoinCommand(),
 		newRoomRebindCommand(),
+		newRoomRestoreCommand(),
 		newRoomLeaveCommand(),
 		newRoomTaskCommand(),
 		newRoomSubscribeCommand(),
@@ -1835,6 +1837,40 @@ func newRoomRebindCommand() *cobra.Command {
 	cmd.Flags().StringVar(&transportKind, "transport-kind", "", "Transport type (pane_socket|mux_pane)")
 	cmd.Flags().BoolVar(&unbound, "unbound", false, "Mark the member transport as unbound/misaligned")
 	cmd.Flags().BoolVar(&current, "current", false, "Use the current tmux/zellij pane binding for the transport fields")
+	return cmd
+}
+
+func newRoomRestoreCommand() *cobra.Command {
+	var (
+		workspace      string
+		backend        string
+		session        string
+		agentName      string
+		agentMode      string
+		agentArgs      []string
+		agentSessionID string
+		cwd            string
+		roomAccess     string
+		attach         bool
+	)
+	cmd := &cobra.Command{
+		Use:   "restore <room-id> <actor-id>",
+		Short: "Launch or resume a live participant runtime and rebind it to the room member",
+		Args:  cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runRoomRestore(cmd, workspace, args[0], args[1], backend, session, agentName, agentMode, agentArgs, agentSessionID, cwd, roomAccess, attach)
+		},
+	}
+	cmd.Flags().StringVar(&workspace, "workspace", ".", "Workspace root override")
+	cmd.Flags().StringVar(&backend, "backend", "auto", "Runtime host backend (auto|tmux|zellij)")
+	cmd.Flags().StringVar(&session, "session", "", "Mux session name (defaults to current zellij session when inside zellij, otherwise agentctl-collab)")
+	cmd.Flags().StringVar(&agentName, "agent", "", "Agent CLI to launch or resume (for example: claude, codex, gemini, agent, droid)")
+	cmd.Flags().StringVar(&agentMode, "mode", "interactive", "Agent launch mode: interactive or auto")
+	cmd.Flags().StringArrayVar(&agentArgs, "agent-arg", nil, "Agent CLI argument (repeatable, preserves order)")
+	cmd.Flags().StringVar(&agentSessionID, "agent-session-id", "", "Resume the given provider session id")
+	cmd.Flags().StringVar(&cwd, "cwd", "", "Working directory for the restored runtime (default: room workspace)")
+	cmd.Flags().StringVar(&roomAccess, "room-access", "direct", "Room access policy for the restored runtime: direct|none")
+	cmd.Flags().BoolVar(&attach, "attach", false, "Attach or switch to the prepared session after setup")
 	return cmd
 }
 
@@ -11734,6 +11770,258 @@ func runRoomRebind(cmd *cobra.Command, workspace, roomID, actorID, role, backend
 	return protocol.WriteOK(cmd.OutOrStdout(), "agentctl.room.rebind", map[string]any{
 		"room": updated,
 	}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+}
+
+type roomRestoreLaunchOptions struct {
+	Backend        string
+	Session        string
+	ActorID        string
+	Agent          string
+	AgentMode      string
+	AgentArgs      []string
+	AgentSessionID string
+	CWD            string
+	WorkspaceID    string
+	RoomID         string
+	RoomAccess     string
+	Attach         bool
+}
+
+type roomRestoreLaunchResult struct {
+	Backend           string
+	Session           string
+	PaneID            string
+	ParticipantID     string
+	TransportEndpoint string
+	TransportKind     string
+	AttachCommand     string
+	SocketMode        string
+	Command           string
+}
+
+var roomRestoreLaunchHook = launchRoomParticipantRuntime
+
+func runRoomRestore(cmd *cobra.Command, workspace, roomID, actorID, backend, session, agentName, agentMode string, agentArgs []string, agentSessionID, cwd, roomAccess string, attach bool) error {
+	absWorkspace, err := resolveRoomWorkspace(workspace)
+	if err != nil {
+		return err
+	}
+	roomID = strings.TrimSpace(roomID)
+	actorID = strings.TrimSpace(actorID)
+	agentName = strings.TrimSpace(agentName)
+	if roomID == "" || actorID == "" {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.restore", protocol.ErrorCodeEARG, "room id and actor id are required", nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	if agentName == "" {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.restore", protocol.ErrorCodeEARG, "agent is required", map[string]any{
+			"hint": "Pass --agent with a supported provider such as codex, claude, gemini, droid, or agent.",
+		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	store, err := openRoomBoardStore(cmd.Context())
+	if err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.restore", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	defer store.Close()
+	summary, err := store.GetRoom(cmd.Context(), absWorkspace, roomID, "")
+	if err != nil {
+		code := protocol.ErrorCodeERuntime
+		if errors.Is(err, blackboard.ErrRoomNotFound) {
+			code = protocol.ErrorCodeENotFound
+		}
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.restore", code, err.Error(), map[string]any{
+			"hint": "Check the room id before restoring a participant runtime.",
+		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	memberExists := false
+	for _, member := range summary.Members {
+		if strings.TrimSpace(member.ActorID) == actorID {
+			memberExists = true
+			break
+		}
+	}
+	if !memberExists {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.restore", protocol.ErrorCodeENotFound, fmt.Sprintf("room member %q not found", actorID), map[string]any{
+			"hint": "Add the participant first with `agentctl room join`, then restore its runtime.",
+		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	if strings.TrimSpace(cwd) == "" {
+		cwd = absWorkspace
+	}
+	result, err := roomRestoreLaunchHook(cmd.Context(), roomRestoreLaunchOptions{
+		Backend:        backend,
+		Session:        session,
+		ActorID:        actorID,
+		Agent:          agentName,
+		AgentMode:      agentMode,
+		AgentArgs:      append([]string(nil), agentArgs...),
+		AgentSessionID: agentSessionID,
+		CWD:            cwd,
+		WorkspaceID:    absWorkspace,
+		RoomID:         roomID,
+		RoomAccess:     roomAccess,
+		Attach:         attach,
+	})
+	if err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.restore", protocol.ErrorCodeERuntime, err.Error(), map[string]any{
+			"hint": "Ensure the target provider CLI is installed and the selected mux backend is available.",
+		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+
+	member := agent.RoomMember{
+		ActorID:           actorID,
+		Backend:           result.Backend,
+		Session:           result.Session,
+		PaneID:            result.PaneID,
+		TransportEndpoint: result.TransportEndpoint,
+		TransportKind:     result.TransportKind,
+		Unbound:           false,
+	}
+	updatedMembers := mergeRoomMembers(summary.Members, member)
+	if _, err := store.ReplaceRoomMembers(cmd.Context(), absWorkspace, roomID, updatedMembers); err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.restore", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	updated, err := store.GetRoom(cmd.Context(), absWorkspace, roomID, "")
+	if err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.restore", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	return protocol.WriteOK(cmd.OutOrStdout(), "agentctl.room.restore", map[string]any{
+		"room": updated,
+		"runtime": map[string]any{
+			"backend":            result.Backend,
+			"session":            result.Session,
+			"pane_id":            result.PaneID,
+			"participant_id":     result.ParticipantID,
+			"transport_endpoint": result.TransportEndpoint,
+			"transport_kind":     result.TransportKind,
+			"attach_command":     result.AttachCommand,
+			"socket_mode":        result.SocketMode,
+			"command":            result.Command,
+		},
+	}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+}
+
+func launchRoomParticipantRuntime(ctx context.Context, opts roomRestoreLaunchOptions) (roomRestoreLaunchResult, error) {
+	backend := resolveMuxCreateBackend(strings.TrimSpace(opts.Backend))
+	if backend == "" {
+		return roomRestoreLaunchResult{}, fmt.Errorf("unsupported backend %q", opts.Backend)
+	}
+	session := resolveMuxCreateSession(nil, backend, strings.TrimSpace(opts.Session))
+	actorID := strings.TrimSpace(opts.ActorID)
+	roomID := strings.TrimSpace(opts.RoomID)
+	roomAccess := normalizeRoomRestoreAccess(opts.RoomAccess)
+	workspaceID := strings.TrimSpace(opts.WorkspaceID)
+	cwd := strings.TrimSpace(opts.CWD)
+	command, err := resolveMuxCreateCommandWithPrompt(
+		"",
+		strings.TrimSpace(opts.Agent),
+		strings.TrimSpace(opts.AgentMode),
+		append([]string(nil), opts.AgentArgs...),
+		strings.TrimSpace(opts.AgentSessionID),
+		buildMuxCreateRoomAgentPrompt(workspaceID, roomID, roomAccess, actorID),
+	)
+	if err != nil {
+		return roomRestoreLaunchResult{}, err
+	}
+	switch backend {
+	case "tmux":
+		client := tmuxbridge.New()
+		paneServeExecutable, execErr := os.Executable()
+		if execErr != nil || strings.TrimSpace(paneServeExecutable) == "" {
+			paneServeExecutable = "agentctl"
+		}
+		wrappedCommand := tmuxbridge.WrapTmuxPaneCommand(paneServeExecutable, session, actorID, roomID, cwd, command, roomRestoreTmuxStartupProfile(opts.Agent, opts.AgentMode))
+		result, err := client.CreatePane(ctx, tmuxbridge.CreatePaneOptions{
+			Session:       session,
+			CWD:           cwd,
+			Label:         actorID,
+			Command:       wrappedCommand,
+			Provider:      strings.TrimSpace(opts.Agent),
+			ParticipantID: actorID,
+			RoomID:        roomID,
+			RoomAccess:    roomAccess,
+		})
+		if err != nil {
+			return roomRestoreLaunchResult{}, err
+		}
+		if opts.Attach && strings.TrimSpace(os.Getenv("TMUX")) == "" {
+			if err := execTmuxAttach(ctx, session); err != nil {
+				return roomRestoreLaunchResult{}, err
+			}
+		}
+		return roomRestoreLaunchResult{
+			Backend:           "tmux",
+			Session:           result.Session,
+			PaneID:            result.Pane.ID,
+			ParticipantID:     actorID,
+			TransportEndpoint: agentpane.DefaultSocketPath(session, actorID),
+			TransportKind:     "pane_socket",
+			AttachCommand:     result.AttachCommand,
+			SocketMode:        result.SocketMode,
+			Command:           command,
+		}, nil
+	case "zellij":
+		client := zellijbridge.New()
+		wrappedCommand := wrapZellijPaneCommand(session, actorID, roomID, command, zellijPaneStartupProfile(opts.Agent, opts.AgentMode))
+		result, err := client.CreatePane(ctx, zellijbridge.CreatePaneOptions{
+			Session:       session,
+			CWD:           cwd,
+			Name:          actorID,
+			Command:       wrappedCommand,
+			ParticipantID: actorID,
+			RoomID:        roomID,
+			RoomAccess:    roomAccess,
+		})
+		if err != nil {
+			return roomRestoreLaunchResult{}, err
+		}
+		if opts.Attach && strings.TrimSpace(os.Getenv("ZELLIJ_SESSION_NAME")) == "" {
+			attachCmd := exec.CommandContext(ctx, "zellij", "attach", session)
+			attachCmd.Stdin = os.Stdin
+			attachCmd.Stdout = os.Stdout
+			attachCmd.Stderr = os.Stdout
+			if err := attachCmd.Run(); err != nil {
+				return roomRestoreLaunchResult{}, err
+			}
+		}
+		return roomRestoreLaunchResult{
+			Backend:           "zellij",
+			Session:           result.Session,
+			PaneID:            result.PaneName,
+			ParticipantID:     actorID,
+			TransportEndpoint: agentpane.DefaultSocketPath(session, actorID),
+			TransportKind:     "pane_socket",
+			AttachCommand:     "zellij attach " + shellQuoteZshSafe(session),
+			Command:           command,
+		}, nil
+	default:
+		return roomRestoreLaunchResult{}, fmt.Errorf("unsupported backend %q", backend)
+	}
+}
+
+func execTmuxAttach(ctx context.Context, session string) error {
+	attachCmd := exec.CommandContext(ctx, "tmux", "attach-session", "-t", session)
+	attachCmd.Stdin = os.Stdin
+	attachCmd.Stdout = os.Stdout
+	attachCmd.Stderr = os.Stdout
+	return attachCmd.Run()
+}
+
+func normalizeRoomRestoreAccess(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "", "default", "direct":
+		return "direct"
+	case "none":
+		return "none"
+	default:
+		return strings.ToLower(strings.TrimSpace(value))
+	}
+}
+
+func roomRestoreTmuxStartupProfile(agentName, agentMode string) string {
+	if strings.EqualFold(strings.TrimSpace(agentName), "droid") && strings.EqualFold(strings.TrimSpace(agentMode), "auto") {
+		return "droid_auto_high"
+	}
+	return ""
 }
 
 func runRoomLeave(cmd *cobra.Command, workspace, roomID, actorID string) error {

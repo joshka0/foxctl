@@ -192,7 +192,7 @@ func TestBuildAgentPaneCommandResume(t *testing.T) {
 	if err != nil {
 		t.Fatalf("buildAgentPaneCommand(codex) error = %v", err)
 	}
-	if !strings.Contains(codexCmd, "resume --model gpt-5 session-123") {
+	if !strings.Contains(codexCmd, "resume session-123 --model gpt-5") {
 		t.Fatalf("codex resume command = %q", codexCmd)
 	}
 
@@ -202,6 +202,30 @@ func TestBuildAgentPaneCommandResume(t *testing.T) {
 	}
 	if !strings.Contains(claudeCmd, "--resume session-abc --model sonnet") {
 		t.Fatalf("claude resume command = %q", claudeCmd)
+	}
+
+	geminiCmd, err := buildAgentPaneCommand("gemini", "interactive", []string{"--model", "2.5-pro"}, "session-42")
+	if err != nil {
+		t.Fatalf("buildAgentPaneCommand(gemini) error = %v", err)
+	}
+	if !strings.Contains(geminiCmd, "--resume session-42 --model 2.5-pro") {
+		t.Fatalf("gemini resume command = %q", geminiCmd)
+	}
+
+	droidCmd, err := buildAgentPaneCommand("droid", "interactive", []string{"--model", "m1"}, "session-d")
+	if err != nil {
+		t.Fatalf("buildAgentPaneCommand(droid) error = %v", err)
+	}
+	if !strings.Contains(droidCmd, "--resume session-d --model m1") {
+		t.Fatalf("droid resume command = %q", droidCmd)
+	}
+
+	agentCmd, err := buildAgentPaneCommand("agent", "interactive", []string{"--model", "auto"}, "chat-7")
+	if err != nil {
+		t.Fatalf("buildAgentPaneCommand(agent) error = %v", err)
+	}
+	if !strings.Contains(agentCmd, "--resume chat-7 --model auto") {
+		t.Fatalf("agent resume command = %q", agentCmd)
 	}
 }
 

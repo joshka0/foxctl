@@ -64,6 +64,7 @@ Membership rule:
 - room-aware startup context is not enough by itself
 - a pane is only a room participant if `room status` shows it
 - if a pane has room env vars or a startup note but is missing from `room status`, explicitly `room join` it or repair the binding with `room rebind`
+- if an existing participant runtime needs to be launched or resumed after a restart, prefer `agentctl room restore` over manually chaining `mux create` plus `room rebind`
 
 Execution-mode rule:
 
@@ -124,6 +125,7 @@ Two valid operating modes:
   - live participant runtime required
   - pane is optional presentation, but often the practical host for Claude/Codex/Droid terminals
   - use when agents need to actively receive room messages and work tasks
+  - prefer `agentctl room restore <room-id> <actor-id> --agent <provider> [--agent-session-id <provider-session>]` when reviving an existing participant
 - `room loop` is not required just to preserve the room; it is required when you need reminders, stale-work nudges, coordinator pulses, or automatic rebroadcast behavior
 
 Interview protocol:
@@ -153,7 +155,7 @@ Startup injection:
 - when a tmux pane is created with `agentctl mux create --agent ... --room-id <room-id>` and direct room access, agentctl injects a lightweight startup prompt into that pane
 - those panes are wrapped by `agentctl pane serve`, auto-register participant transport, and expose viewer metadata separately from room membership
 - the prompt tells the agent to read `agentctl-room` and `agentctl-room-agent`, then start with `room status`, `room inbox`, and `room task list` for the attached room
-- if that startup check still shows only the coordinator or omits the expected participant, stop and fix membership first with `room join` / `room rebind` before assuming relay will work
+- if that startup check still shows only the coordinator or omits the expected participant, stop and fix membership first with `room join`, `room restore`, or `room rebind` before assuming relay will work
 
 Source-panel agent creation:
 
@@ -407,8 +409,9 @@ agentctl room join alpha --current --role <room-role>
   launched with room metadata and must be joined explicitly
 - session-only assumptions are unsafe for multi-pane zellij rooms; pane binding
   is the correct unit of room membership
-- if an existing participant moves to a new pane, prefer `agentctl room rebind`
-  to update the stored transport binding without pretending it is a new member
+- if an existing participant moves to a new pane and the runtime is already live, prefer `agentctl room rebind`
+  to update only the stored transport binding
+- if the runtime itself needs to be launched or resumed, prefer `agentctl room restore`
 
 ## Conventions
 
@@ -424,6 +427,8 @@ agentctl room join alpha --current --role <room-role>
 - `room join <room-id> --current` registers the current pane without hand-writing the id.
 - `room rebind <room-id> <actor-id> --backend <tmux|zellij> --session <session> --pane-id <pane>`
   repairs a moved pane binding for an existing participant.
+- `room restore <room-id> <actor-id> --agent <provider> --backend <tmux|zellij> [--agent-session-id <provider-session>]`
+  launches or resumes the participant runtime and then rebinds the room member to that exact transport.
 - In `tmux`, room member ids can be pane labels or canonical ids like `tmux:<session>:%7`.
 - In `zellij`, room member ids can be pane titles or canonical ids like `zellij:<session>:terminal_3`.
 - The sender should also be a room member if you want them excluded from fanout.
