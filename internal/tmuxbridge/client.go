@@ -1019,7 +1019,7 @@ func buildMuxCreateRoomOnboarding(roomID, participantID string) string {
 		participantID = "<you>"
 	}
 	return fmt.Sprintf(
-		"%s Read skills agentctl-tmux and agentctl-room. Room %s. Participant %s. Start with: agentctl room status %s ; agentctl room inbox %s --actor %s ; agentctl room task list %s. Room relay and room task commands deliver to panes with an implicit submit; after `room send`, the CLI also submits the current pane unless you pass --no-mux-submit.",
+		"%s Read skills agentctl-room and agentctl-room-agent. Use agentctl-room-view only if you need pane/viewer operations. Room %s. Participant %s. Start with: agentctl room status %s ; agentctl room inbox %s --actor %s ; agentctl room task list %s. Room relay and room task commands deliver to panes with an implicit submit; after `room send`, the CLI also submits the current pane unless you pass --no-mux-submit.",
 		muxCreateRoomOnboardingHeader,
 		roomID,
 		participantID,

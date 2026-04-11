@@ -128,7 +128,7 @@ Startup injection:
 
 - when a tmux pane is created with `agentctl mux create --agent ... --room-id <room-id>` and direct room access, agentctl injects a lightweight startup prompt into that pane
 - those panes are wrapped by `agentctl pane serve`, auto-register participant transport, and expose viewer metadata separately from room membership
-- the prompt tells the agent to read `agentctl-tmux` and `agentctl-room`, then start with `room status`, `room inbox`, and `room task list` for the attached room
+- the prompt tells the agent to read `agentctl-room` and `agentctl-room-agent`, then start with `room status`, `room inbox`, and `room task list` for the attached room
 - if that startup check still shows only the coordinator or omits the expected participant, stop and fix membership first with `room join` / `room rebind` before assuming relay will work
 
 Source-panel agent creation:
@@ -439,7 +439,8 @@ agentctl room send review "Please check the 401 fallback branch."
 ## Related
 
 - `configs/skills-pack/agentctl-room-operator/SKILL.md`
+- `configs/skills-pack/agentctl-room-agent/SKILL.md`
 - `configs/skills-pack/agentctl-room-agile/SKILL.md`
 - `configs/skills-pack/agentctl-orchestrate/SKILL.md`
-- `configs/skills-pack/agentctl-tmux/SKILL.md`
+- `configs/skills-pack/agentctl-room-view/SKILL.md`
 - `docs/general/tmux-collaboration.md`

@@ -1,6 +1,6 @@
 ---
 name: tmux-bridge
-description: Cross-pane communication and viewer management for Codex, Claude, and other terminal agents. Use `agentctl mux create/read/send/observe` for backend-neutral mux operations, but prefer `agentctl room` for durable transport-first coordination.
+description: "Compatibility alias for the room presentation layer. Prefer `agentctl-room-view` for current tmux/zellij/gui viewer guidance."
 metadata:
   openclaw:
     emoji: "🌉"
@@ -15,208 +15,20 @@ metadata:
 
 # tmux-bridge
 
-Use this skill when multiple terminal agents are running in tmux and need to:
+`tmux-bridge` is now a compatibility name.
 
-- open or switch into a prepared collaboration session
-- inspect another pane with structured `agentctl` output
-- send a direct message into another pane without depending on a repo-local shell script
-- promote a bridge exchange into ACA as an observation
-- share a durable room timeline or room-scoped tasks across panes
+Use [`agentctl-room-view`](../agentctl-room-view/SKILL.md) for current guidance.
 
-If a room exists, prefer the room for durable state and use the bridge only for live terminal delivery.
+The architecture split is:
 
-Transport-first rule:
+- `agentctl-room`: canonical room model and delivery
+- `agentctl-room-agent`: participant-agent protocol
+- `agentctl-room-operator`: coordinator/reviewer operating protocol
+- `agentctl-room-view`: tmux/zellij/gui presentation layer
 
-- `agentctl room` is the canonical coordination and delivery plane
-- `tmux` / `zellij` are viewer surfaces and optional live consoles
-- use `mux` commands when you explicitly need pane inspection, viewer setup, or a manual poke
-
-## Default Flow
-
-Prepare a neutral multi-agent session:
-
-```bash
-agentctl mux create --session agentctl-collab --panes 3 --attach
-```
-
-If you do not pass `--agent`, this creates panes labeled `agent-a`, `agent-b`, `agent-c`.
-If you pass `--agent`, the default label prefix is scoped when possible:
-- room-bound panes default to `<room-id>-<agent>` (for example `transport-first-claude-a`)
-- otherwise, named non-default sessions default to `<session>-<agent>` (for example `feature-auth-codex-a`)
-- only plain ad hoc sessions fall back to generic labels like `claude-a`
-Use `--label-prefix` only when you intentionally want to override that scoped default.
-
-Launch a specific agent CLI in every pane:
-
-```bash
-agentctl mux create --session codex-collab \
-  --panes 3 \
-  --agent codex \
-  --agent-arg=--model \
-  --agent-arg=gpt-5 \
-  --agent-arg=--full-auto \
-  --attach
-
-agentctl mux create --session claude-collab \
-  --panes 3 \
-  --agent claude \
-  --agent-arg=--model \
-  --agent-arg=sonnet \
-  --agent-arg=--permission-mode \
-  --agent-arg=default \
-  --attach
-
-agentctl mux create --session gemini-collab \
-  --panes 3 \
-  --agent gemini \
-  --agent-arg=--model \
-  --agent-arg=gemini-2.5-pro \
-  --agent-arg=--approval-mode \
-  --agent-arg=auto_edit \
-  --attach
-
-agentctl mux create --session cursor-collab \
-  --panes 3 \
-  --agent agent \
-  --agent-arg=--model \
-  --agent-arg=claude-sonnet-4 \
-  --attach
-
-agentctl mux create --session droid-collab \
-  --panes 3 \
-  --agent droid \
-  --attach
-```
-
-For known autonomous mappings, use `--mode auto` instead of hand-writing the
-provider flag:
-
-```bash
-agentctl mux create --session codex-auto --panes 2 --agent codex --mode auto --attach
-agentctl mux create --session claude-auto --panes 2 --agent claude --mode auto --attach
-agentctl mux create --session gemini-auto --panes 2 --agent gemini --mode auto --attach
-agentctl mux create --session cursor-auto --panes 2 --agent agent --mode auto --attach
-```
-
-This changes autonomy/approval flags only. It does not inject `--model`; the
-provider CLI keeps its current configured default model unless you explicitly
-override it with repeated `--agent-arg` values.
-
-`--agent-arg` is repeatable and preserves order, so it works with each CLI’s own flags instead of forcing one shared option schema.
-For Cursor CLI (`agent`) and Droid (`droid`), you can also switch models from inside the session using their own slash commands such as `/model`.
-
-Resume an existing Codex or Claude session in tmux:
-
-```bash
-agentctl mux create --session codex-resume \
-  --panes 1 \
-  --agent codex \
-  --agent-session-id 123e4567-e89b-12d3-a456-426614174000 \
-  --attach
-
-agentctl mux create --session claude-resume \
-  --panes 1 \
-  --agent claude \
-  --agent-session-id 123e4567-e89b-12d3-a456-426614174000 \
-  --attach
-```
-
-`--agent-session-id` currently supports `codex` and `claude` only, and requires `--panes 1` so one resumed session is not duplicated across multiple panes.
-
-For child agents, launch panes with parent metadata instead of adding them to a
-shared room directly:
-
-```bash
-agentctl mux create --session codex-tree \
-  --panes 1 \
-  --agent codex \
-  --mode auto \
-  --label-prefix child \
-  --parent-participant codex-a \
-  --parent-agent-id agent:parent-1
-```
-
-That exports stable mux identity into the pane environment:
-
-- `AGENTCTL_PARTICIPANT_ID`
-- `AGENTCTL_PARENT_PARTICIPANT_ID`
-- `AGENTCTL_PARENT_AGENT_ID`
-- `AGENTCTL_MUX_BACKEND`
-- `AGENTCTL_MUX_SESSION`
-- `AGENTCTL_MUX_PANE_ID`
-
-If `--room-access direct` is used, the pane also gets `AGENTCTL_ROOM_ID`.
-
-## Structured Access
-
-Prefer `agentctl` when you want machine-friendly envelopes:
-
-```bash
-agentctl mux list
-agentctl mux list --backend zellij --session alpha-room
-agentctl mux read agent-b --lines 80
-agentctl mux send agent-b "Please review internal/storage/mailbox/store.go for lease races."
-agentctl mux observe agent-b --lines 80
-agentctl mux doctor
-```
-
-When sending from outside tmux, specify your sender pane label:
-
-```bash
-agentctl mux send agent-b "Please review internal/storage/mailbox/store.go for lease races." --sender agent-a
-```
-
-Use `agentctl mux observe` when a live pane exchange should become a durable ACA observation.
-
-When a child pane needs to talk upward, prefer the private parent path:
-
-```bash
-agentctl mux send-parent "Need a decision on the retry backoff helper."
-```
-
-That uses `AGENTCTL_PARENT_PARTICIPANT_ID` instead of guessing who the parent is.
-
-## Durable Rooms
-
-Use rooms when the shared state should outlive pane scrollback:
-
-```bash
-agentctl room create alpha --title "Alpha Room"
-agentctl room join alpha agent-a --role lead
-agentctl room join alpha agent-b --role reviewer
-agentctl room send alpha "Review mailbox retries."
-agentctl room task add alpha --title "Refactor mailbox retries"
-agentctl room subscribe alpha --follow
-```
-
-Relay room messages back into panes with:
-
-```bash
-agentctl room relay alpha --backend tmux
-agentctl room relay alpha --backend zellij --session alpha-room
-agentctl room loop alpha --backend tmux
-```
-
-`room loop` extends relay with a central task/status loop, so room-associated
-task completion gets broadcast to the whole room.
-
-Default behavior for agents in a room-backed tmux session:
-
-- read the room first: `room status`, then `room inbox --actor <you>`
-- claim and complete shared work through `room task ...`
-- use `mux send` only when the target needs a live terminal poke outside the normal room transport path
-- do not close a review gate or task only in tmux chat; write the result back into the room timeline
-- if a pane looks healthy but room delivery is failing, inspect room participant transport state before assuming a tmux/zellij problem
-
-## Direct Messaging
-
-The bundled script is optional for lower-level pane control:
-
-```bash
-./scripts/tmux-bridge read agent-b 40
-./scripts/tmux-bridge type agent-b "Please review internal/storage/mailbox/store.go for lease races."
-./scripts/tmux-bridge keys agent-b Enter
-```
+Keep using the existing `agentctl mux ...` commands and the `./scripts/tmux-bridge`
+helper when you need them. The rename is about responsibility, not command
+removal.
 
 `agentctl mux send` is the default for agent-to-agent messaging:
 

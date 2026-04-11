@@ -544,7 +544,7 @@ func TestResolveAgentSpawnPrompt_UsesRoomRoleDefaultAndOnboarding(t *testing.T) 
 	for _, want := range []string{
 		"You are a frontend engineering agent.",
 		"ROOM ONBOARDING:",
-		"`agentctl-room-operator` and `agentctl-room`",
+		"`agentctl-room` and `agentctl-room-agent`",
 		"`agentctl room status triad-123`",
 	} {
 		if !strings.Contains(got, want) {

@@ -125,6 +125,13 @@ func configFromEnv() ProviderConfig {
 	}
 }
 
+func hasLivePlannerProviderConfig(cfg ProviderConfig) bool {
+	return cfg.CerebrasAPIKey != "" ||
+		cfg.OpenRouterAPIKey != "" ||
+		cfg.GroqAPIKey != "" ||
+		cfg.OpenAIAPIKey != ""
+}
+
 func TestAutoPlanner_NoAPIKey(t *testing.T) {
 	// With empty config, planner defaults to local LM Studio.
 	cfg := ProviderConfig{}
@@ -142,8 +149,10 @@ func TestAutoPlanner_NoAPIKey(t *testing.T) {
 	}
 }
 
-// TestOpenAIPlanner_Integration is an integration test that requires an API key.
-// Set AGENTCTL_ENABLE_LIVE_LLM_TESTS=1 and one of OPENROUTER_API_KEY, GROQ_API_KEY, or OPENAI_API_KEY to run this test.
+// TestOpenAIPlanner_Integration is an integration test that requires a live
+// remote provider. The local LM Studio fallback is not sufficient in CI.
+// Set AGENTCTL_ENABLE_LIVE_LLM_TESTS=1 and one of CEREBRAS_API_KEY,
+// OPENROUTER_API_KEY, GROQ_API_KEY, or OPENAI_API_KEY to run this test.
 func TestOpenAIPlanner_Integration(t *testing.T) {
 	if testing.Short() {
 		t.Skip("Skipping LLM integration test in -short mode")
@@ -153,8 +162,8 @@ func TestOpenAIPlanner_Integration(t *testing.T) {
 	}
 
 	cfg := configFromEnv()
-	if !IsLLMPlanningAvailableFromConfig(cfg) {
-		t.Skip("Skipping LLM integration test: no API key configured (set OPENROUTER_API_KEY, GROQ_API_KEY, or OPENAI_API_KEY)")
+	if !hasLivePlannerProviderConfig(cfg) {
+		t.Skip("Skipping LLM integration test: no live provider key configured (set CEREBRAS_API_KEY, OPENROUTER_API_KEY, GROQ_API_KEY, or OPENAI_API_KEY)")
 	}
 
 	planner := AutoPlannerFromConfig(context.Background(), cfg)

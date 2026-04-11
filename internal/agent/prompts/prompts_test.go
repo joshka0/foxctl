@@ -68,7 +68,7 @@ func TestComposeRoomAwarePrompt_AppendsOnboardingOnce(t *testing.T) {
 	}
 	for _, want := range []string{
 		"ROOM ONBOARDING:",
-		"`agentctl-room-operator` and `agentctl-room`",
+		"`agentctl-room` and `agentctl-room-agent`",
 		"`agentctl room status triad-123`",
 		"Prioritize user-facing correctness",
 	} {

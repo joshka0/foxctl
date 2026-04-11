@@ -65,7 +65,9 @@ List: `agentctl skills list`
 | Skill | Purpose |
 |-------|---------|
 | `configs/skills-pack/agentctl-room/SKILL.md` | Durable shared room chat, room relay, room loop, room tasks |
+| `configs/skills-pack/agentctl-room-agent/SKILL.md` | Participant-agent startup and day-to-day room behavior: membership checks, inbox, tasks, durable replies, reminders |
 | `configs/skills-pack/agentctl-room-operator/SKILL.md` | How to operate inside an active room: status, inbox, task claim/touch/block/complete, coordinator escalation, review notes |
+| `configs/skills-pack/agentctl-room-view/SKILL.md` | Viewer/presentation layer for room participants: tmux/zellij/gui PTY setup, pane reads, manual pokes |
 
 ### Context Architecture & History
 For the bundled ACA/context-history workflow pack, see:

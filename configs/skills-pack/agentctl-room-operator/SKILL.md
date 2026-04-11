@@ -284,6 +284,6 @@ Do not:
 ## Related
 
 - `configs/skills-pack/agentctl-room/SKILL.md`
-- `configs/skills-pack/agentctl-tmux/SKILL.md`
-- `configs/skills-pack/tmux-bridge/SKILL.md`
+- `configs/skills-pack/agentctl-room-agent/SKILL.md`
+- `configs/skills-pack/agentctl-room-view/SKILL.md`
 - `docs/general/tmux-collaboration.md`
